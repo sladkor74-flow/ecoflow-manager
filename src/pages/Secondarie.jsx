@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Route } from 'lucide-react';
+import AlertBadge from '@/components/alerts/AlertBadge';
 import SecondarieUpload from '@/components/secondarie/SecondarieUpload';
 import SecondarieKpi from '@/components/secondarie/SecondarieKpi';
 import TrattaMatrix from '@/components/secondarie/TrattaMatrix';
@@ -13,6 +14,7 @@ export default function Secondarie() {
   const [loading, setLoading] = useState(true);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [alertCount, setAlertCount] = useState(0);
   const [filters, setFilters] = useState({ stoccaggio: '', destinazione: '', mese: '', settimana: '', classe: '', trasportatore: '', anno: '' });
   const [viewMode, setViewMode] = useState('matrix');
 
@@ -53,6 +55,15 @@ export default function Secondarie() {
   useEffect(() => { if (viewMode === 'detail') loadRecords(); }, [loadRecords, viewMode]);
 
   useEffect(() => {
+    (async () => {
+      try {
+        const res = await base44.functions.invoke('getAlerts', { modulo: 'secondarie', solo_aperti: true });
+        setAlertCount(res.data?.total || 0);
+      } catch (e) { /* ignore */ }
+    })();
+  }, [loadData]);
+
+  useEffect(() => {
     const unsub = base44.entities.UploadLog.subscribe((event) => {
       if (event.type === 'create' && event.data?.tipo_file === 'secondarie') loadData();
     });
@@ -86,6 +97,7 @@ export default function Secondarie() {
           <p className="text-muted-foreground mt-1">Tracciamento, aggregazione e controllo dei trasporti secondari PFU per tratta operativa.</p>
         </div>
         <div className="flex items-center gap-2">
+          {alertCount > 0 && <AlertBadge count={alertCount} modulo="secondarie" />}
           <button onClick={() => handleExport('matrix')} disabled={exporting} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent disabled:opacity-50">
             {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <LayoutGrid className="w-4 h-4" />} Excel Sintesi
           </button>

@@ -1,0 +1,65 @@
+{
+  "name": "RegolaAlert",
+  "type": "object",
+  "properties": {
+    "nome": {
+      "type": "string",
+      "description": "Nome identificativo della regola"
+    },
+    "descrizione": {
+      "type": "string",
+      "description": "Descrizione della regola di validazione"
+    },
+    "modulo": {
+      "type": "string",
+      "enum": [
+        "secondarie",
+        "primarie_rete",
+        "primarie_aci",
+        "terziarie",
+        "assegnati"
+      ],
+      "description": "Modolo su cui si applica la regola"
+    },
+    "tipo_regola": {
+      "type": "string",
+      "enum": [
+        "tratta_autorizzata",
+        "campo_obbligatorio",
+        "range_valori",
+        "sla_tempi",
+        "peso_congruenza",
+        "custom"
+      ],
+      "description": "Tipologia di regola"
+    },
+    "severita": {
+      "type": "string",
+      "enum": [
+        "info",
+        "warning",
+        "critico"
+      ],
+      "default": "warning"
+    },
+    "config": {
+      "type": "object",
+      "description": "Configurazione regola (JSON): es. {origine: 'NAPPI SUD SRL', destinazioni_ammesse: ['TECNOGUM','IRIGOM S.R.L.']}"
+    },
+    "attiva": {
+      "type": "boolean",
+      "default": true,
+      "description": "Se la regola \u00e8 attiva"
+    },
+    "messaggio_alert": {
+      "type": "string",
+      "description": "Messaggio mostrato nell'alert quando la regola \u00e8 violata"
+    }
+  },
+  "required": [
+    "nome",
+    "modulo",
+    "tipo_regola",
+    "severita"
+  ]
+}

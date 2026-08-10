@@ -1,0 +1,70 @@
+{
+  "name": "Alert",
+  "type": "object",
+  "properties": {
+    "titolo": {
+      "type": "string",
+      "description": "Titolo sintetico dell'anomalia"
+    },
+    "descrizione": {
+      "type": "string",
+      "description": "Dettaglio dell'anomalia riscontrata"
+    },
+    "severita": {
+      "type": "string",
+      "enum": [
+        "info",
+        "warning",
+        "critico"
+      ],
+      "default": "warning",
+      "description": "Livello di gravit\u00e0 dell'alert"
+    },
+    "modulo": {
+      "type": "string",
+      "enum": [
+        "secondarie",
+        "primarie_rete",
+        "primarie_aci",
+        "terziarie",
+        "assegnati"
+      ],
+      "description": "Modulo in cui \u00e8 stata rilevata l'anomalia"
+    },
+    "entity_type": {
+      "type": "string",
+      "description": "Tipo entit\u00e0 (Secondaria, PrimariaRete, ecc.)"
+    },
+    "record_id": {
+      "type": "string",
+      "description": "ID ordine del record anomalo"
+    },
+    "regola_id": {
+      "type": "string",
+      "description": "ID della regola violata"
+    },
+    "regola_nome": {
+      "type": "string",
+      "description": "Nome della regola violata"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "aperto",
+        "risolto",
+        "ignorato"
+      ],
+      "default": "aperto",
+      "description": "Stato di gestione dell'alert"
+    },
+    "risolto_note": {
+      "type": "string",
+      "description": "Note di risoluzione se risolto/ignorato"
+    }
+  },
+  "required": [
+    "titolo",
+    "modulo",
+    "severita"
+  ]
+}

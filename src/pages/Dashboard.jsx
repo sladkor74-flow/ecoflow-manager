@@ -2,20 +2,23 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { ClipboardList, Truck, Factory, Ship, Upload, TrendingUp, AlertTriangle } from 'lucide-react';
+import AlertBadge from '@/components/alerts/AlertBadge';
 
 export default function Dashboard() {
   const [counts, setCounts] = useState({});
+  const [alertCount, setAlertCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       try {
-        const [assegnati, rete, aci, sec, terz] = await Promise.all([
+        const [assegnati, rete, aci, sec, terz, alerts] = await Promise.all([
           base44.entities.Assegnato.list('-created_date', 1),
           base44.entities.PrimariaRete.list('-created_date', 1),
           base44.entities.PrimariaAci.list('-created_date', 1),
           base44.entities.Secondaria.list('-created_date', 1),
           base44.entities.Terziaria.list('-created_date', 1),
+          base44.functions.invoke('getAlerts', { solo_aperti: true }),
         ]);
         setCounts({
           assegnati: assegnati.length,
@@ -24,6 +27,7 @@ export default function Dashboard() {
           secondarie: sec.length,
           terziarie: terz.length,
         });
+        setAlertCount(alerts?.data?.total || 0);
       } catch (e) {
         // ignore
       }
@@ -41,9 +45,12 @@ export default function Dashboard() {
 
   return (
     <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl lg:text-3xl font-heading font-bold">Dashboard</h1>
-        <p className="text-muted-foreground mt-1">Panoramica della commessa PFU Ecotyre — Smoco gestore.</p>
+      <div className="flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl lg:text-3xl font-heading font-bold">Dashboard</h1>
+          <p className="text-muted-foreground mt-1">Panoramica della commessa PFU Ecotyre — Smoco gestore.</p>
+        </div>
+        {alertCount > 0 && <AlertBadge count={alertCount} />}
       </div>
 
       {loading ? (
@@ -84,7 +91,7 @@ export default function Dashboard() {
           <h2 className="font-heading font-semibold text-amber-900">Moduli in costruzione</h2>
         </div>
         <p className="text-sm text-amber-800">
-          I moduli Target & Status, Fatturazione e To-Do List verranno attivati nei prossimi step. Il modulo di caricamento dati è operativo.
+          I moduli Fatturazione e To-Do List verranno attivati nei prossimi step. Il modulo di caricamento dati è operativo.
         </p>
       </div>
     </div>

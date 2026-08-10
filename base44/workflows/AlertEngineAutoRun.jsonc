@@ -1,0 +1,40 @@
+{
+  "name": "Alert Engine Auto-Run",
+  "description": "Esegue automaticamente il motore di alert dopo ogni caricamento dati nei moduli Secondarie, Primarie Rete/ACI, Terziarie e Assegnati",
+  "trigger": {
+    "config": {
+      "trigger_type": "entity",
+      "entity_name": "UploadLog",
+      "events": [
+        "create"
+      ]
+    },
+    "condition": "${ (.trigger.data.tipo_file // \"\") | IN(\"secondarie\",\"primarie_rete\",\"primarie_aci\",\"terziarie\",\"assegnati\") }"
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "alert_engine_auto_run",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "run_engine": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runAlertEngine",
+            "args": {
+              "modulo": "${ .trigger.data.tipo_file }"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Esegui motore alert",
+            "description": "Scansiona il modulo caricato"
+          }
+        }
+      }
+    ]
+  }
+}

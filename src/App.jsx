@@ -15,6 +15,7 @@ import ReportMensile from '@/pages/ReportMensile';
 import Terziarie from '@/pages/Terziarie';
 import Assegnati from '@/pages/Assegnati';
 import Secondarie from '@/pages/Secondarie';
+import AlertEngine from '@/pages/AlertEngine';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -52,6 +53,7 @@ const AuthenticatedApp = () => {
           <Route path="/terziarie" element={<Terziarie />} />
           <Route path="/assegnati" element={<Assegnati />} />
           <Route path="/secondarie" element={<Secondarie />} />
+          <Route path="/alert-engine" element={<AlertEngine />} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />
