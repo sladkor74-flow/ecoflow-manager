@@ -11,6 +11,7 @@ import Layout from '@/components/Layout';
 import Dashboard from '@/pages/Dashboard';
 import CaricamentoDati from '@/pages/CaricamentoDati';
 import TargetStatus from '@/pages/TargetStatus';
+import ReportMensile from '@/pages/ReportMensile';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -44,6 +45,7 @@ const AuthenticatedApp = () => {
           <Route path="/" element={<Dashboard />} />
           <Route path="/caricamento-dati" element={<CaricamentoDati />} />
           <Route path="/target-status" element={<TargetStatus />} />
+          <Route path="/report-mensile" element={<ReportMensile />} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />
