@@ -29,11 +29,9 @@ export default async function(req) {
     const ab = await fileRes.arrayBuffer();
     const wb = XLSX.read(ab, { type: 'array', cellDates: true });
 
-    // Trova il foglio (match case-insensitive e trim)
-    const sheetName = wb.SheetNames.find(n => n.trim().toLowerCase() === config.sheetName.trim().toLowerCase());
-    if (!sheetName) {
-      return Response.json({ error: `Foglio "${config.sheetName}" non trovato. Fogli disponibili: ${wb.SheetNames.join(', ')}` }, { status: 422 });
-    }
+    // Trova il foglio (match case-insensitive e trim; fallback al primo foglio)
+    const sheetName = wb.SheetNames.find(n => n.trim().toLowerCase() === config.sheetName.trim().toLowerCase())
+      || wb.SheetNames[0];
     const ws = wb.Sheets[sheetName];
     const rawRows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: true });
 
@@ -56,25 +54,38 @@ export default async function(req) {
       return obj;
     }).filter(r => r.id_ordine);
 
-    // 3. Sostituzione: elimina record esistenti
-    if (replace_existing !== false) {
+    // 3. Sostituzione o incremento
+    let toImport = mapped;
+    if (replace_existing === false) {
+      // Modalità incrementale: salta record con id_ordine già presente
+      const existing = await base44.asServiceRole.entities[config.entity].list('-created_date', 10000);
+      const existingIds = new Set(existing.map(r => r.id_ordine).filter(Boolean));
+      toImport = mapped.filter(r => !existingIds.has(r.id_ordine));
+    } else {
       await base44.asServiceRole.entities[config.entity].deleteMany({});
     }
 
-    // 4. bulkCreate a chunk di 250
-    const CHUNK = 250;
+    // 4. bulkCreate a chunk di 100 con pausa e retry per limiti di traffico
+    const CHUNK = 100;
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     let imported = 0;
     let failed = 0;
     let lastError = null;
-    for (let i = 0; i < mapped.length; i += CHUNK) {
-      const chunk = mapped.slice(i, i + CHUNK);
-      try {
-        await base44.asServiceRole.entities[config.entity].bulkCreate(chunk);
-        imported += chunk.length;
-      } catch (e) {
-        failed += chunk.length;
-        lastError = e.message || String(e);
+    for (let i = 0; i < toImport.length; i += CHUNK) {
+      const chunk = toImport.slice(i, i + CHUNK);
+      let success = false;
+      for (let attempt = 0; attempt < 3 && !success; attempt++) {
+        try {
+          await base44.asServiceRole.entities[config.entity].bulkCreate(chunk);
+          imported += chunk.length;
+          success = true;
+        } catch (e) {
+          lastError = e.message || String(e);
+          if (attempt < 2) await sleep(3000 * (attempt + 1));
+        }
       }
+      if (!success) failed += chunk.length;
+      await sleep(1000);
     }
 
     // 5. Log
@@ -82,13 +93,13 @@ export default async function(req) {
     await base44.asServiceRole.entities.UploadLog.create({
       tipo_file, nome_file: nome_file || 'N/D', file_url,
       righe_importate: imported, righe_fallite: failed, esito,
-      messaggio: `${imported} righe importate su ${mapped.length} totali (foglio: ${sheetName})`,
+      messaggio: `${imported} righe importate su ${toImport.length} da importare (foglio: ${sheetName})`,
       periodo_riferimento: periodo_riferimento || ''
     });
 
     return Response.json({
       tipo_file, entity: config.entity, foglio: sheetName,
-      righe_lette: rawRows.length, righe_mappate: mapped.length,
+      righe_lette: rawRows.length, righe_mappate: mapped.length, righe_da_importare: toImport.length,
       righe_importate: imported, righe_fallite: failed, esito, lastError
     });
   } catch (error) {
