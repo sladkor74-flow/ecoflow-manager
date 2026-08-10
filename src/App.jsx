@@ -14,6 +14,7 @@ import TargetStatus from '@/pages/TargetStatus';
 import ReportMensile from '@/pages/ReportMensile';
 import Terziarie from '@/pages/Terziarie';
 import Assegnati from '@/pages/Assegnati';
+import Secondarie from '@/pages/Secondarie';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -50,6 +51,7 @@ const AuthenticatedApp = () => {
           <Route path="/report-mensile" element={<ReportMensile />} />
           <Route path="/terziarie" element={<Terziarie />} />
           <Route path="/assegnati" element={<Assegnati />} />
+          <Route path="/secondarie" element={<Secondarie />} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />
