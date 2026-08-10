@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { PROV_TO_REGION, MESI } from "../../shared/raccoltoCalculator.ts";
+import { getMeseFromDate, getSettimanaFromDate, getAnnoFromDate, getRegioneFromProvincia, getClasseFromProdotto } from "../../shared/dataEnrichment.ts";
 
 // Restituisce i record di dettaglio (drill-down) per una cella di pivot.
 // Payload: { source, filters: { raccoglitore?, regione?, classe?, mese?, settimana?, anno?, impianto?, provincia?, ragione_sociale? }, limit?, skip? }
@@ -9,19 +10,6 @@ const REGION_TO_PROVS = {};
 for (const [prov, region] of Object.entries(PROV_TO_REGION)) {
   if (!REGION_TO_PROVS[region]) REGION_TO_PROVS[region] = [];
   REGION_TO_PROVS[region].push(prov);
-}
-
-function getSettimana(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  const target = new Date(d.valueOf());
-  const dayNr = (d.getDay() + 6) % 7;
-  target.setDate(target.getDate() - dayNr + 3);
-  const firstThursday = target.valueOf();
-  target.setMonth(0, 1);
-  if (target.getDay() !== 4) target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
-  return 1 + Math.ceil((firstThursday - target) / 604800000);
 }
 
 export default async function(req) {
@@ -50,26 +38,23 @@ export default async function(req) {
     const filtered = records.filter((row) => {
       const data = source === 'assegnato' ? row.ordine_immesso_il : (row.ordine_chiuso_il || row.trasporto_finito_il || row.ordine_immesso_il);
       if (filters.classe) {
-        let cls = (row.classe || '').trim();
-        if (!cls && row.prodotto) { const m = String(row.prodotto).match(/^([A-Z0-9]{1,3})\s*-/); if (m) cls = m[1]; }
-        if ((cls || 'N/D') !== filters.classe) return false;
+        const cls = (row.classe || '').trim() || getClasseFromProdotto(row.prodotto) || 'N/D';
+        if (cls !== filters.classe) return false;
       }
       if (filters.regione) {
-        const r = PROV_TO_REGION[(row.provincia || '').toUpperCase().trim()] || 'Altro';
+        const r = (row.regione || '').trim() || getRegioneFromProvincia(row.provincia) || 'Altro';
         if (r !== filters.regione) return false;
       }
       if (filters.mese) {
-        const d = data ? new Date(data) : null;
-        const m = d && !isNaN(d.getTime()) ? MESI[d.getMonth()] : null;
+        const m = (row.mese || '').trim() || getMeseFromDate(data);
         if (m !== filters.mese) return false;
       }
       if (filters.anno) {
-        const d = data ? new Date(data) : null;
-        const a = d && !isNaN(d.getTime()) ? d.getFullYear() : null;
+        const a = row.anno != null ? row.anno : getAnnoFromDate(data);
         if (a !== parseInt(filters.anno)) return false;
       }
       if (filters.settimana) {
-        const w = getSettimana(data);
+        const w = row.settimane != null ? row.settimane : getSettimanaFromDate(data);
         if (w !== parseInt(filters.settimana)) return false;
       }
       return true;

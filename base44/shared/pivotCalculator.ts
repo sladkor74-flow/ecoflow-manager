@@ -1,44 +1,62 @@
 // Modulo condiviso per il calcolo delle pivot analitiche PFU.
+// Le pivot attingono dai campi arricchiti memorizzati (mese, settimane, anno, classe, regione)
+// calcolati al momento dell'importazione. Fallback on-the-fly per record non arricchiti.
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
+import { getMeseFromDate, getSettimanaFromDate, getAnnoFromDate, getRegioneFromProvincia, getClasseFromProdotto } from "./dataEnrichment.ts";
 
 function getMese(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  return MESI[d.getMonth()];
+  return getMeseFromDate(dateStr);
 }
 
 function getSettimana(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  const target = new Date(d.valueOf());
-  const dayNr = (d.getDay() + 6) % 7;
-  target.setDate(target.getDate() - dayNr + 3);
-  const firstThursday = target.valueOf();
-  target.setMonth(0, 1);
-  if (target.getDay() !== 4) target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
-  return 1 + Math.ceil((firstThursday - target) / 604800000);
+  return getSettimanaFromDate(dateStr);
 }
 
 function getAnno(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  return d.getFullYear();
+  return getAnnoFromDate(dateStr);
 }
 
-function getRegione(provincia) {
-  return PROV_TO_REGION[(provincia || '').toUpperCase().trim()] || 'Altro';
+// Usa il campo arricchito memorizzato; fallback al calcolo on-the-fly dalla provincia.
+function getRegione(r) {
+  if (r.regione && String(r.regione).trim()) return String(r.regione).trim();
+  return getRegioneFromProvincia(r.provincia) || 'Altro';
 }
 
+// Usa il campo arricchito memorizzato; fallback al calcolo on-the-fly dal prodotto.
 function getClasse(r) {
   if (r.classe && String(r.classe).trim()) return String(r.classe).trim();
-  if (r.prodotto) {
-    const m = String(r.prodotto).match(/^([A-Z0-9]{1,3})\s*-/);
-    if (m) return m[1];
-  }
-  return 'N/D';
+  return getClasseFromProdotto(r.prodotto) || 'N/D';
+}
+
+// Usa il campo arricchito memorizzato; fallback al calcolo on-the-fly dalla data.
+function getRecordMese(r) {
+  if (r.mese && String(r.mese).trim()) return r.mese;
+  return getMeseFromDate(getDataChiusura(r));
+}
+
+function getRecordSettimana(r) {
+  if (r.settimane != null) return r.settimane;
+  return getSettimanaFromDate(getDataChiusura(r));
+}
+
+function getRecordAnno(r) {
+  if (r.anno != null) return r.anno;
+  return getAnnoFromDate(getDataChiusura(r));
+}
+
+function getRecordMeseImmissione(r) {
+  if (r.mese_immissione && String(r.mese_immissione).trim()) return r.mese_immissione;
+  return getMeseFromDate(getDataImmissione(r));
+}
+
+function getRecordAnnoImmissione(r) {
+  if (r.anno != null) return r.anno;
+  return getAnnoFromDate(getDataImmissione(r));
+}
+
+function getRecordSettimanaImmissione(r) {
+  if (r.settimane != null) return r.settimane;
+  return getSettimanaFromDate(getDataImmissione(r));
 }
 
 function getDataChiusura(r) {
@@ -49,13 +67,15 @@ function getDataImmissione(r) {
   return r.ordine_immesso_il;
 }
 
-function applyFilters(rows, filters, getDateFn) {
+function applyFilters(rows, filters, useImmissione) {
   if (!filters || (!filters.mese && !filters.raccoglitore && !filters.anno && !filters.settimana)) return rows;
   return rows.filter((row) => {
-    const data = getDateFn(row);
-    if (filters.mese && getMese(data) !== filters.mese) return false;
-    if (filters.anno && getAnno(data) !== parseInt(filters.anno)) return false;
-    if (filters.settimana && getSettimana(data) !== parseInt(filters.settimana)) return false;
+    const mese = useImmissione ? getRecordMeseImmissione(row) : getRecordMese(row);
+    const anno = useImmissione ? getRecordAnnoImmissione(row) : getRecordAnno(row);
+    const sett = useImmissione ? getRecordSettimanaImmissione(row) : getRecordSettimana(row);
+    if (filters.mese && mese !== filters.mese) return false;
+    if (filters.anno && anno !== parseInt(filters.anno)) return false;
+    if (filters.settimana && sett !== parseInt(filters.settimana)) return false;
     if (filters.raccoglitore) {
       const r = (row.trasportatore || '').trim();
       const p = (row.partner_operativo || '').trim();
@@ -143,24 +163,24 @@ export async function computeAllPivots(base44, filters) {
     base44.asServiceRole.entities.Assegnato.list('-created_date', 10000),
   ]);
 
-  const reteF = applyFilters(rete, filters, getDataChiusura);
-  const aciF = applyFilters(aci, filters, getDataChiusura);
-  const secF = applyFilters(sec, filters, getDataChiusura);
-  const assF = applyFilters(assegnati, filters, getDataImmissione);
+  const reteF = applyFilters(rete, filters, false);
+  const aciF = applyFilters(aci, filters, false);
+  const secF = applyFilters(sec, filters, false);
+  const assF = applyFilters(assegnati, filters, true);
 
-  const pivotA = buildPivotTree(reteF, [(r) => (r.trasportatore || 'N/D').trim(), (r) => getRegione(r.provincia), getClasse], (r) => getMese(getDataChiusura(r)), { peso: PESO_FN, count: COUNT_FN });
+  const pivotA = buildPivotTree(reteF, [(r) => (r.trasportatore || 'N/D').trim(), (r) => getRegione(r), getClasse], (r) => getRecordMese(r), { peso: PESO_FN, count: COUNT_FN });
   pivotA.valueKeys = ['peso', 'count']; pivotA.valueLabels = ['Peso [t]', 'Conteggio']; pivotA.rowLabels = ['Raccoglitore', 'Regione', 'Classe'];
 
-  const pivotB = buildPivotTree(reteF, [(r) => (r.destinazione || 'N/D').trim(), getClasse], (r) => getMese(getDataChiusura(r)), { peso: PESO_FN });
+  const pivotB = buildPivotTree(reteF, [(r) => (r.destinazione || 'N/D').trim(), getClasse], (r) => getRecordMese(r), { peso: PESO_FN });
   pivotB.valueKeys = ['peso']; pivotB.valueLabels = ['Peso [t]']; pivotB.rowLabels = ['Impianto', 'Classe'];
 
-  const pivotC = buildPivotTree(aciF, [(r) => (r.trasportatore || 'N/D').trim(), (r) => getRegione(r.provincia), getClasse], (r) => getMese(getDataChiusura(r)), { peso: PESO_FN, count: COUNT_FN });
+  const pivotC = buildPivotTree(aciF, [(r) => (r.trasportatore || 'N/D').trim(), (r) => getRegione(r), getClasse], (r) => getRecordMese(r), { peso: PESO_FN, count: COUNT_FN });
   pivotC.valueKeys = ['peso', 'count']; pivotC.valueLabels = ['Peso [t]', 'Conteggio']; pivotC.rowLabels = ['Raccoglitore', 'Regione', 'Classe'];
 
-  const pivotD = buildPivotTree(secF, [(r) => (r.destinazione || 'N/D').trim(), getClasse], (r) => getMese(getDataChiusura(r)), { peso: PESO_FN });
+  const pivotD = buildPivotTree(secF, [(r) => (r.destinazione || 'N/D').trim(), getClasse], (r) => getRecordMese(r), { peso: PESO_FN });
   pivotD.valueKeys = ['peso']; pivotD.valueLabels = ['Peso [t]']; pivotD.rowLabels = ['Impianto', 'Classe'];
 
-  const detailRowKeys = [getClasse, (r) => getMese(getDataChiusura(r)) || 'N/D', (r) => { const s = getSettimana(getDataChiusura(r)); return s != null ? String(s) : 'N/D'; }];
+  const detailRowKeys = [getClasse, (r) => getRecordMese(r) || 'N/D', (r) => { const s = getRecordSettimana(r); return s != null ? String(s) : 'N/D'; }];
   const detailCollectors = { peso: sumCol('peso_effettivo'), count: countCol(), firCount: uniqueCol('numero_fir') };
 
   const pivotE = buildDetailTable(reteF, detailRowKeys, detailCollectors);
@@ -175,14 +195,14 @@ export async function computeAllPivots(base44, filters) {
   pivotG.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(2); });
   pivotG.valueKeys = pivotE.valueKeys; pivotG.valueLabels = pivotE.valueLabels; pivotG.rowLabels = pivotE.rowLabels;
 
-  const pivotH = buildPivotTree(assF, [(r) => { const a = getAnno(getDataImmissione(r)); return a != null ? String(a) : 'N/D'; }, (r) => getRegione(r.provincia), (r) => (r.provincia || 'N/D').trim(), (r) => (r.ragione_sociale || 'N/D').trim()], (r) => getMese(getDataImmissione(r)), { count: COUNT_FN, pesoStimato: PESO_STIM_FN });
+  const pivotH = buildPivotTree(assF, [(r) => { const a = getRecordAnnoImmissione(r); return a != null ? String(a) : 'N/D'; }, (r) => getRegione(r), (r) => (r.provincia || 'N/D').trim(), (r) => (r.ragione_sociale || 'N/D').trim()], (r) => getRecordMeseImmissione(r), { count: COUNT_FN, pesoStimato: PESO_STIM_FN });
   pivotH.valueKeys = ['count', 'pesoStimato']; pivotH.valueLabels = ['Richieste', 'Peso Stimato [t]']; pivotH.rowLabels = ['Anno', 'Regione', 'Provincia', 'Ragione Sociale'];
 
   // Filter options
   const allSourceRows = [...rete, ...aci, ...sec, ...assegnati];
   const raccoglitori = [...new Set(allSourceRows.map((r) => (r.trasportatore || '').trim()).filter(Boolean))].sort();
-  const anni = [...new Set([...rete, ...aci, ...sec].map((r) => getAnno(getDataChiusura(r))).filter(Boolean), ...assegnati.map((r) => getAnno(getDataImmissione(r))).filter(Boolean))].sort();
-  const settimane = [...new Set([...rete, ...aci, ...sec].map((r) => getSettimana(getDataChiusura(r))).filter(Boolean), ...assegnati.map((r) => getSettimana(getDataImmissione(r))).filter(Boolean))].sort((a, b) => a - b);
+  const anni = [...new Set([...rete, ...aci, ...sec].map((r) => getRecordAnno(r)).filter(Boolean), ...assegnati.map((r) => getRecordAnnoImmissione(r)).filter(Boolean))].sort();
+  const settimane = [...new Set([...rete, ...aci, ...sec].map((r) => getRecordSettimana(r)).filter(Boolean), ...assegnati.map((r) => getRecordSettimanaImmissione(r)).filter(Boolean))].sort((a, b) => a - b);
 
   return { pivotA, pivotB, pivotC, pivotD, pivotE, pivotF, pivotG, pivotH, filterOptions: { raccoglitori, anni, settimane } };
 }

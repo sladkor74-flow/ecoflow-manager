@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
+import { enrichRecords } from "../../shared/dataEnrichment.ts";
 
 // Importa un file Excel scaricato dal portale Ecotyre: legge il foglio corretto,
 // mappa le colonne sui campi entità e salva in bulk.
@@ -54,13 +55,16 @@ export default async function(req) {
       return obj;
     }).filter(r => r.id_ordine);
 
+    // 2b. Enrichment: calcola colonne derivate (mese, settimana, anno, classe, regione, nr_giorni, scadenza, esito tempi)
+    const enriched = enrichRecords(mapped, config.entity);
+
     // 3. Sostituzione o incremento
-    let toImport = mapped;
+    let toImport = enriched;
     if (replace_existing === false) {
       // Modalità incrementale: salta record con id_ordine già presente
       const existing = await base44.asServiceRole.entities[config.entity].list('-created_date', 10000);
       const existingIds = new Set(existing.map(r => r.id_ordine).filter(Boolean));
-      toImport = mapped.filter(r => !existingIds.has(r.id_ordine));
+      toImport = enriched.filter(r => !existingIds.has(r.id_ordine));
     } else {
       await base44.asServiceRole.entities[config.entity].deleteMany({});
     }

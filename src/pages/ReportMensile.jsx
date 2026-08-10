@@ -44,6 +44,14 @@ export default function ReportMensile() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Auto-refresh: ricalcola le pivot quando un nuovo caricamento dati viene registrato
+  useEffect(() => {
+    const unsubscribe = base44.entities.UploadLog.subscribe((event) => {
+      if (event.type === 'create') loadData();
+    });
+    return unsubscribe;
+  }, [loadData]);
+
   const handleCellClick = async (pivotKey, path, columnKey, valueKey) => {
     const def = PIVOT_DEFS[pivotKey];
     const drillFilters = { ...filters };
