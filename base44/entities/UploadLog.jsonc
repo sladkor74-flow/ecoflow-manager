@@ -1,0 +1,51 @@
+{
+  "name": "UploadLog",
+  "type": "object",
+  "properties": {
+    "tipo_file": {
+      "type": "string",
+      "enum": [
+        "assegnati",
+        "primarie_rete",
+        "primarie_aci",
+        "secondarie",
+        "terziarie",
+        "gommisti",
+        "dichiarazioni",
+        "fatturazione"
+      ],
+      "description": "Tipologia di file caricato"
+    },
+    "nome_file": {
+      "type": "string"
+    },
+    "file_url": {
+      "type": "string"
+    },
+    "righe_importate": {
+      "type": "number"
+    },
+    "righe_fallite": {
+      "type": "number"
+    },
+    "esito": {
+      "type": "string",
+      "enum": [
+        "successo",
+        "parziale",
+        "errore"
+      ]
+    },
+    "messaggio": {
+      "type": "string"
+    },
+    "periodo_riferimento": {
+      "type": "string",
+      "description": "Mese/periodo coperto dal file"
+    }
+  },
+  "required": [
+    "tipo_file",
+    "nome_file"
+  ]
+}

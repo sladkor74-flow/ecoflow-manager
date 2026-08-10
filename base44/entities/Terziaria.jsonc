@@ -1,0 +1,118 @@
+{
+  "name": "Terziaria",
+  "type": "object",
+  "properties": {
+    "id_ordine": {
+      "type": "string"
+    },
+    "stato": {
+      "type": "string"
+    },
+    "ordine_immesso_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "id_impianto": {
+      "type": "number"
+    },
+    "ragione_sociale": {
+      "type": "string"
+    },
+    "id_unita_locale_origine": {
+      "type": "number"
+    },
+    "unita_locale_origine": {
+      "type": "string"
+    },
+    "indirizzo": {
+      "type": "string"
+    },
+    "cap": {
+      "type": "string"
+    },
+    "comune": {
+      "type": "string"
+    },
+    "provincia": {
+      "type": "string"
+    },
+    "codice_regione": {
+      "type": "number"
+    },
+    "macroarea": {
+      "type": "string"
+    },
+    "cer": {
+      "type": "string"
+    },
+    "quantita_ritirata": {
+      "type": "number"
+    },
+    "peso_stimato": {
+      "type": "number"
+    },
+    "peso_effettivo": {
+      "type": "number"
+    },
+    "key_account": {
+      "type": "string"
+    },
+    "partner_operativo": {
+      "type": "string"
+    },
+    "id_trasportatore": {
+      "type": "number"
+    },
+    "trasportatore": {
+      "type": "string"
+    },
+    "id_destinazione": {
+      "type": "number"
+    },
+    "tipo_destinazione": {
+      "type": "string"
+    },
+    "destinazione": {
+      "type": "string"
+    },
+    "automezzo": {
+      "type": "string"
+    },
+    "rimorchio": {
+      "type": "string"
+    },
+    "distanza": {
+      "type": "number"
+    },
+    "trasporto_iniziato_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "trasporto_finito_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ordine_chiuso_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "numero_fir": {
+      "type": "string"
+    },
+    "numero_ordine_interno": {
+      "type": "string"
+    },
+    "mese": {
+      "type": "string"
+    },
+    "peso_ciab_cipp": {
+      "type": "number"
+    },
+    "ferro": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "id_ordine"
+  ]
+}

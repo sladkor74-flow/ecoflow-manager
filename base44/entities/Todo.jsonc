@@ -1,0 +1,58 @@
+{
+  "name": "Todo",
+  "type": "object",
+  "properties": {
+    "titolo": {
+      "type": "string"
+    },
+    "descrizione": {
+      "type": "string"
+    },
+    "categoria": {
+      "type": "string",
+      "description": "es. Comunicazione consorzio, Sollecito, Pratica"
+    },
+    "priorita": {
+      "type": "string",
+      "enum": [
+        "bassa",
+        "media",
+        "alta",
+        "urgente"
+      ],
+      "default": "media"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "aperto",
+        "in_corso",
+        "completato"
+      ],
+      "default": "aperto"
+    },
+    "data_ricezione": {
+      "type": "string",
+      "format": "date"
+    },
+    "data_scadenza": {
+      "type": "string",
+      "format": "date"
+    },
+    "data_sollecito": {
+      "type": "string",
+      "format": "date",
+      "description": "Data alert sollecito"
+    },
+    "mittente": {
+      "type": "string"
+    },
+    "riferimento_ordine": {
+      "type": "string",
+      "description": "ID ordine Ecotyre correlato, se presente"
+    }
+  },
+  "required": [
+    "titolo"
+  ]
+}

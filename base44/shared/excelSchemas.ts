@@ -1,0 +1,147 @@
+// Mappatura fogli Excel Ecotyre -> entità e colonne.
+// Ogni tipo_file definisce: nome del foglio Excel e mappa colonne Excel -> campi entità.
+
+export const SHEET_MAP = {
+  assegnati: {
+    sheetName: "ASSEGNATI",
+    entity: "Assegnato",
+    columns: {
+      "ID": "id_ordine", "Stato": "stato", "Ordine_immesso_il": "ordine_immesso_il",
+      "ID_Cliente": "id_cliente", "Ragione_Sociale": "ragione_sociale",
+      "ID_PDR": "id_pdr", "Punto_di_Raccolta": "punto_di_raccolta",
+      "Indirizzo": "indirizzo", "CAP": "cap", "Comune": "comune", "Provincia": "provincia",
+      "Codice_Regione": "codice_regione", "Macroarea": "macroarea",
+      "Codice_Prodotto": "codice_prodotto", "Prodotto": "prodotto", "Classe": "classe",
+      "CER": "cer", "Tipo_contenitori": "tipo_contenitori",
+      "Quantita_richiesta": "quantita_richiesta", "Quantita_ritirata": "quantita_ritirata",
+      "Peso_stimato": "peso_stimato", "Peso_effettivo": "peso_effettivo",
+      "KeyAccount": "key_account", "Partner_Operativo": "partner_operativo",
+      "ID_Trasportatore": "id_trasportatore", "Trasportatore": "trasportatore",
+      "Regioni": "regioni", "Mese": "mese", "Anno": "anno",
+      "Sigla": "sigla", "Regione": "regione"
+    }
+  },
+  primarie_rete: {
+    sheetName: "TERMINATI RETE",
+    entity: "PrimariaRete",
+    columns: {
+      "ID": "id_ordine", "Stato": "stato", "Ordine_immesso_il": "ordine_immesso_il",
+      "ID_Cliente": "id_cliente", "Ragione_Sociale": "ragione_sociale",
+      "ID_PDR": "id_pdr", "Punto_di_Raccolta": "punto_di_raccolta",
+      "Indirizzo": "indirizzo", "CAP": "cap", "Comune": "comune", "Provincia": "provincia",
+      "Codice_Regione": "codice_regione", "Macroarea": "macroarea",
+      "Codice_Prodotto": "codice_prodotto", "Prodotto": "prodotto", "Classe": "classe",
+      "CER": "cer", "Tipo_contenitori": "tipo_contenitori",
+      "Quantita_richiesta": "quantita_richiesta", "Quantita_ritirata": "quantita_ritirata",
+      "Peso_stimato": "peso_stimato", "Peso_effettivo": "peso_effettivo",
+      "KeyAccount": "key_account", "Partner_Operativo": "partner_operativo",
+      "ID_Trasportatore": "id_trasportatore", "Trasportatore": "trasportatore",
+      "ID_Destinazione": "id_destinazione", "Tipo_Destinazione": "tipo_destinazione",
+      "Destinazione": "destinazione", "Automezzo": "automezzo", "Rimorchio": "rimorchio",
+      "Distanza": "distanza", "Trasporto_iniziato_il": "trasporto_iniziato_il",
+      "Trasporto_finito_il": "trasporto_finito_il", "Ordine_chiuso_il": "ordine_chiuso_il",
+      "Numero_FIR": "numero_fir", "Numero_Ordine_Interno": "numero_ordine_interno",
+      "Motivo_cancellazione": "motivo_cancellazione",
+      "Fatturato_Trasporto": "fatturato_trasporto", "Fatturato_Riciclo": "fatturato_riciclo",
+      "Regioni": "regioni", "Mese": "mese", "Settimane": "settimane",
+      "Scadenza Ordine": "scadenza_ordine", "Raccolta nei tempi": "raccolta_nei_tempi",
+      "Nr di Giorni": "nr_giorni", "Mese di immissione": "mese_immissione",
+      "Sigla": "sigla", "Regione": "regione"
+    }
+  },
+  primarie_aci: {
+    sheetName: "TERMINATI ACI",
+    entity: "PrimariaAci",
+    columns: {
+      "ID": "id_ordine", "Stato": "stato", "Ordine_immesso_il": "ordine_immesso_il",
+      "Codice_Import": "codice_import", "ID_Cliente": "id_cliente",
+      "Ragione_Sociale": "ragione_sociale", "ID_PDR": "id_pdr",
+      "Punto_di_Raccolta": "punto_di_raccolta", "Indirizzo": "indirizzo",
+      "CAP": "cap", "Comune": "comune", "Provincia": "provincia",
+      "Codice_Regione": "codice_regione", "Macroarea": "macroarea",
+      "Codice_Prodotto": "codice_prodotto", "Prodotto": "prodotto", "Classe": "classe",
+      "CER": "cer", "Tipo_contenitori": "tipo_contenitori",
+      "Quantita_richiesta": "quantita_richiesta", "Quantita_ritirata": "quantita_ritirata",
+      "Peso_stimato": "peso_stimato", "Peso_effettivo": "peso_effettivo",
+      "KeyAccount": "key_account", "Partner_Operativo": "partner_operativo",
+      "ID_Trasportatore": "id_trasportatore", "Trasportatore": "trasportatore",
+      "ID_Destinazione": "id_destinazione", "Tipo_Destinazione": "tipo_destinazione",
+      "Destinazione": "destinazione", "Automezzo": "automezzo", "Rimorchio": "rimorchio",
+      "Distanza": "distanza", "Trasporto_iniziato_il": "trasporto_iniziato_il",
+      "Trasporto_finito_il": "trasporto_finito_il", "Ordine_chiuso_il": "ordine_chiuso_il",
+      "Numero_FIR": "numero_fir", "Numero_Ordine_Interno": "numero_ordine_interno",
+      "Regioni": "regioni", "Mese": "mese", "Settimane": "settimane",
+      "Sigla": "sigla", "Regione": "regione",
+      "Costi tot. Mese": "costi_tot_mese", "Kg tot. Mese": "kg_tot_mese",
+      "Costo ACI Gatim PRI - trattamento": "costo_aci_gatim_pri_trattamento",
+      "Kg ACI Gatim SEC": "kg_aci_gatim_sec", "Costo ACI Gatim SEC": "costo_aci_gatim_sec",
+      "Costo ACI Gatim PRI - raccolta": "costo_aci_gatim_pri_raccolta",
+      "Costo TOT ACI Gatim": "costo_tot_aci_gatim", "Imp ACI Gatim": "imp_aci_gatim",
+      "Costo ACI Nappi Sud PRI - raccolta BASILICATA": "costo_aci_nappi_sud_pri_raccolta_basilicata",
+      "Costo ACI Nappi Sud PRI - raccolta CAMPANIA": "costo_aci_nappi_sud_pri_raccolta_campania",
+      "Stock ACI Nappi Sud": "stock_aci_nappi_sud", "Costo ACI STK Nappi Sud": "costo_aci_stk_nappi_sud",
+      "Costo ACI STK Irigom": "costo_aci_stk_irigom", "Stock ACI Irigom": "stock_aci_irigom",
+      "Costo ACI G.T.P.": "costo_aci_gtp", "Imp ACI G.T.P.": "imp_aci_gtp",
+      "Costo ACI TECNOGUM": "costo_aci_tecnogum", "Imp ACI TECNOGUM - SEC": "imp_aci_tecnogum_sec"
+    }
+  },
+  secondarie: {
+    sheetName: "SECONDARIE",
+    entity: "Secondaria",
+    columns: {
+      "ID": "id_ordine", "Stato": "stato", "Ordine_immesso_il": "ordine_immesso_il",
+      "ID_Proprietario_Stoccaggio": "id_proprietario_stoccaggio",
+      "Ragione_Sociale": "ragione_sociale", "ID_Stoccaggio": "id_stoccaggio",
+      "Stoccaggio": "stoccaggio", "Indirizzo": "indirizzo", "CAP": "cap",
+      "Comune": "comune", "Provincia": "provincia", "Codice_Regione": "codice_regione",
+      "Macroarea": "macroarea", "Codice_Prodotto": "codice_prodotto", "Prodotto": "prodotto",
+      "CLASSE": "classe", "CER": "cer", "Quantita_ritirata": "quantita_ritirata",
+      "Peso_stimato": "peso_stimato", "Peso_effettivo": "peso_effettivo",
+      "KeyAccount": "key_account", "Partner_Operativo": "partner_operativo",
+      "ID_Trasportatore": "id_trasportatore", "Trasportatore": "trasportatore",
+      "ID_Destinazione": "id_destinazione", "Tipo_Destinazione": "tipo_destinazione",
+      "Destinazione": "destinazione", "Automezzo": "automezzo", "Rimorchio": "rimorchio",
+      "Distanza": "distanza", "Trasporto_iniziato_il": "trasporto_iniziato_il",
+      "Trasporto_finito_il": "trasporto_finito_il", "Ordine_chiuso_il": "ordine_chiuso_il",
+      "Numero_FIR": "numero_fir", "Numero_Ordine_Interno": "numero_ordine_interno",
+      "Fatturato_Trasporto": "fatturato_trasporto", "Fatturato_Riciclo": "fatturato_riciclo",
+      "REGIONI": "regioni", "MESE": "mese", "SETTIMANE": "settimane"
+    }
+  },
+  terziarie: {
+    sheetName: "TERZIARIE",
+    entity: "Terziaria",
+    columns: {
+      "ID": "id_ordine", "Stato": "stato", "Ordine_immesso_il": "ordine_immesso_il",
+      "ID_Impianto": "id_impianto", "Ragione_Sociale": "ragione_sociale",
+      "ID_Unita_Locale_Origine": "id_unita_locale_origine",
+      "Unita_Locale_Origine": "unita_locale_origine", "Indirizzo": "indirizzo",
+      "CAP": "cap", "Comune": "comune", "Provincia": "provincia",
+      "Codice_Regione": "codice_regione", "Macroarea": "macroarea", "CER": "cer",
+      "Quantita_ritirata": "quantita_ritirata", "Peso_stimato": "peso_stimato",
+      "Peso_effettivo": "peso_effettivo", "KeyAccount": "key_account",
+      "Partner_Operativo": "partner_operativo", "ID_Trasportatore": "id_trasportatore",
+      "Trasportatore": "trasportatore", "ID_Destinazione": "id_destinazione",
+      "Tipo_Destinazione": "tipo_destinazione", "Destinazione": "destinazione",
+      "Automezzo": "automezzo", "Rimorchio": "rimorchio", "Distanza": "distanza",
+      "Trasporto_iniziato_il": "trasporto_iniziato_il", "Trasporto_finito_il": "trasporto_finito_il",
+      "Ordine_chiuso_il": "ordine_chiuso_il", "Numero_FIR": "numero_fir",
+      "Numero_Ordine_Interno": "numero_ordine_interno", "MESE": "mese",
+      "PESO CIAB/CIPP": "peso_ciab_cipp", "FERRO": "ferro"
+    }
+  }
+};
+
+// Campi numerici per entità (per conversione sicura da stringa Excel)
+export const NUMERIC_FIELDS = new Set([
+  "id_cliente", "id_pdr", "id_trasportatore", "id_destinazione", "id_stoccaggio",
+  "id_proprietario_stoccaggio", "id_impianto", "id_unita_locale_origine",
+  "codice_regione", "quantita_richiesta", "quantita_ritirata",
+  "peso_stimato", "peso_effettivo", "distanza", "settimane", "nr_giorni", "anno",
+  "peso_ciab_cipp", "ferro", "costi_tot_mese", "kg_tot_mese",
+  "costo_aci_gatim_pri_trattamento", "kg_aci_gatim_sec", "costo_aci_gatim_sec",
+  "costo_aci_gatim_pri_raccolta", "costo_tot_aci_gatim", "imp_aci_gatim",
+  "costo_aci_nappi_sud_pri_raccolta_basilicata", "costo_aci_nappi_sud_pri_raccolta_campania",
+  "stock_aci_nappi_sud", "costo_aci_stk_nappi_sud", "costo_aci_stk_irigom",
+  "stock_aci_irigom", "costo_aci_gtp", "imp_aci_gtp", "costo_aci_tecnogum", "imp_aci_tecnogum_sec"
+]);

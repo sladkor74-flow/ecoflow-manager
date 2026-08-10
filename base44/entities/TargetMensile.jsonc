@@ -1,0 +1,47 @@
+{
+  "name": "TargetMensile",
+  "type": "object",
+  "properties": {
+    "regione": {
+      "type": "string"
+    },
+    "raccoglitore": {
+      "type": "string",
+      "description": "Trasportatore / raccoglitore"
+    },
+    "mese": {
+      "type": "string"
+    },
+    "anno": {
+      "type": "number"
+    },
+    "target": {
+      "type": "number",
+      "description": "Target assegnato (ton)"
+    },
+    "raccolto": {
+      "type": "number",
+      "description": "Picked up reale (ton)"
+    },
+    "delta": {
+      "type": "number",
+      "description": "Raccolto - Target (ton)"
+    },
+    "target_upD": {
+      "type": "number",
+      "description": "Target aggiornato con leftover"
+    },
+    "leftover": {
+      "type": "number",
+      "description": "Residuo / arretrato (ton)"
+    },
+    "total_picked_up": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "regione",
+    "raccoglitore",
+    "mese"
+  ]
+}
