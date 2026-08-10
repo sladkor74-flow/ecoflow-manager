@@ -5,6 +5,7 @@ export const SHEET_MAP = {
   assegnati: {
     sheetName: "ASSEGNATI",
     entity: "Assegnato",
+    statoFilter: "assegnato",
     columns: {
       "ID": "id_ordine", "Stato": "stato", "Ordine_immesso_il": "ordine_immesso_il",
       "ID_Cliente": "id_cliente", "Ragione_Sociale": "ragione_sociale",

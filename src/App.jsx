@@ -13,6 +13,7 @@ import CaricamentoDati from '@/pages/CaricamentoDati';
 import TargetStatus from '@/pages/TargetStatus';
 import ReportMensile from '@/pages/ReportMensile';
 import Terziarie from '@/pages/Terziarie';
+import Assegnati from '@/pages/Assegnati';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -48,6 +49,7 @@ const AuthenticatedApp = () => {
           <Route path="/target-status" element={<TargetStatus />} />
           <Route path="/report-mensile" element={<ReportMensile />} />
           <Route path="/terziarie" element={<Terziarie />} />
+          <Route path="/assegnati" element={<Assegnati />} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />

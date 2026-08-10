@@ -53,7 +53,7 @@ export default async function(req) {
         }
       }
       return obj;
-    }).filter(r => r.id_ordine);
+    }).filter(r => r.id_ordine && (!config.statoFilter || (r.stato || '').toLowerCase().trim() === config.statoFilter));
 
     // 2b. Enrichment: calcola colonne derivate (mese, settimana, anno, classe, regione, nr_giorni, scadenza, esito tempi)
     const enriched = enrichRecords(mapped, config.entity);
