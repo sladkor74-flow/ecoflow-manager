@@ -10,6 +10,7 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import Layout from '@/components/Layout';
 import Dashboard from '@/pages/Dashboard';
 import CaricamentoDati from '@/pages/CaricamentoDati';
+import TargetStatus from '@/pages/TargetStatus';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -42,6 +43,7 @@ const AuthenticatedApp = () => {
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/caricamento-dati" element={<CaricamentoDati />} />
+          <Route path="/target-status" element={<TargetStatus />} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />

@@ -17,26 +17,30 @@
     },
     "target": {
       "type": "number",
-      "description": "Target assegnato (ton)"
+      "description": "Target mensile assegnato (ton)"
+    },
+    "target_annuo": {
+      "type": "number",
+      "description": "Target annuo assegnato (ton)"
     },
     "raccolto": {
       "type": "number",
-      "description": "Picked up reale (ton)"
+      "description": "Raccolto effettivo del mese (ton) - calcolato"
     },
     "delta": {
       "type": "number",
-      "description": "Raccolto - Target (ton)"
+      "description": "Target mensile - Raccolto (ton)"
+    },
+    "leftover": {
+      "type": "number",
+      "description": "Target annuo - Raccolto totale (ton)"
+    },
+    "total_picked_up": {
+      "type": "number"
     },
     "target_upD": {
       "type": "number",
       "description": "Target aggiornato con leftover"
-    },
-    "leftover": {
-      "type": "number",
-      "description": "Residuo / arretrato (ton)"
-    },
-    "total_picked_up": {
-      "type": "number"
     }
   },
   "required": [

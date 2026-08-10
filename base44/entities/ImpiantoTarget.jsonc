@@ -1,0 +1,24 @@
+{
+  "name": "ImpiantoTarget",
+  "type": "object",
+  "properties": {
+    "impianto": {
+      "type": "string",
+      "description": "Nome impianto di destinazione"
+    },
+    "mese": {
+      "type": "string"
+    },
+    "anno": {
+      "type": "number"
+    },
+    "target": {
+      "type": "number",
+      "description": "Capacit\u00e0 / target assegnato per il mese (ton)"
+    }
+  },
+  "required": [
+    "impianto",
+    "mese"
+  ]
+}
