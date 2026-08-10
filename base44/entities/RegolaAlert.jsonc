@@ -29,6 +29,8 @@
         "range_valori",
         "sla_tempi",
         "peso_congruenza",
+        "province_inattive",
+        "mix_classi_deviazione",
         "custom"
       ],
       "description": "Tipologia di regola"

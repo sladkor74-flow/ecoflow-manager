@@ -39,8 +39,16 @@ export function getRegioneFromProvincia(provincia) {
 
 export function getClasseFromProdotto(prodotto) {
   if (!prodotto) return null;
-  const m = String(prodotto).match(/^([A-Z0-9]{1,3})\s*-/);
-  return m ? m[1] : null;
+  const s = String(prodotto).trim();
+  // Estrai caratteri a sinistra di " -" (es. "P - fino a 35 kg" -> "P")
+  const idx = s.indexOf(' -');
+  if (idx > 0) {
+    const classe = s.substring(0, idx).trim();
+    if (classe) return classe;
+  }
+  // Fallback regex
+  const m = s.match(/^([A-Z0-9]{1,3})\s*-/i);
+  return m ? m[1].toUpperCase() : null;
 }
 
 // --- Enrichment ---

@@ -16,6 +16,7 @@ import Terziarie from '@/pages/Terziarie';
 import Assegnati from '@/pages/Assegnati';
 import Secondarie from '@/pages/Secondarie';
 import AlertEngine from '@/pages/AlertEngine';
+import PrimarieRete from '@/pages/PrimarieRete';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -50,6 +51,7 @@ const AuthenticatedApp = () => {
           <Route path="/caricamento-dati" element={<CaricamentoDati />} />
           <Route path="/target-status" element={<TargetStatus />} />
           <Route path="/report-mensile" element={<ReportMensile />} />
+          <Route path="/primarie-rete" element={<PrimarieRete />} />
           <Route path="/terziarie" element={<Terziarie />} />
           <Route path="/assegnati" element={<Assegnati />} />
           <Route path="/secondarie" element={<Secondarie />} />

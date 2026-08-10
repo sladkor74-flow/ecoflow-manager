@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { computeProvinceMatrixData, computeRaccoglitoriMixData } from "../../shared/primarieReteAnalytics.ts";
 
 // Motore di controllo: scansiona i record di un modulo e genera Alert per le regole violate.
 // Payload: { modulo, record_ids?, solo_aperti?: boolean }
@@ -61,6 +62,12 @@ export default async function(req) {
           });
         }
       }
+    }
+
+    // --- Controlli aggregati per primarie_rete (province inattive + mix classi) ---
+    if (modulo === 'primarie_rete') {
+      const aggregateAlerts = checkAggregateRules(records, regole, existingKeys);
+      newAlerts.push(...aggregateAlerts);
     }
 
     // Bulk create alerts (chunk di 100)
@@ -134,4 +141,63 @@ function checkRegola(record, regola, entityName) {
   }
 
   return null;
+}
+
+// --- Controlli aggregati per primarie_rete ---
+function checkAggregateRules(records, regole, existingKeys) {
+  const alerts = [];
+
+  // Regole province inattive (2 mesi consecutivi a zero)
+  const regoleProvince = regole.filter(r => r.tipo_regola === 'province_inattive');
+  if (regoleProvince.length > 0) {
+    const matrix = computeProvinceMatrixData(records);
+    for (const prov of matrix.province_with_zeros) {
+      for (const regola of regoleProvince) {
+        const key = `${prov.provincia}|||${regola.id}`;
+        if (existingKeys.has(key)) continue;
+        const zeroPair = prov.last_zero_pair;
+        alerts.push({
+          titolo: regola.messaggio_alert || `Provincia inattiva: ${prov.provincia}`,
+          descrizione: `Provincia ${prov.provincia} (${prov.regione}): 2 mesi consecutivi con 0 raccolte (${zeroPair?.start} - ${zeroPair?.end}). Pianificare raccolte nel terzo mese per rispettare i requisiti consorziali.`,
+          severita: regola.severita || 'warning',
+          modulo: 'primarie_rete',
+          entity_type: 'PrimariaRete',
+          record_id: prov.provincia,
+          regola_id: regola.id,
+          regola_nome: regola.nome,
+          stato: 'aperto',
+        });
+        existingKeys.add(key);
+      }
+    }
+  }
+
+  // Regole mix classi deviazione
+  const regoleMix = regole.filter(r => r.tipo_regola === 'mix_classi_deviazione');
+  if (regoleMix.length > 0) {
+    const mix = computeRaccoglitoriMixData(records);
+    for (const racc of mix.raccoglitori_con_deviazione) {
+      for (const regola of regoleMix) {
+        const key = `${racc.raccoglitore}|||${regola.id}`;
+        if (existingKeys.has(key)) continue;
+        const devDetails = racc.deviazioni_significative.map(d =>
+          `${d.classe}: ${d.attuale.toFixed(1)}% vs target ${d.target}% (Δ${d.deviazione > 0 ? '+' : ''}${d.deviazione.toFixed(1)}%)`
+        ).join('; ');
+        alerts.push({
+          titolo: regola.messaggio_alert || `Mix classi non conforme: ${racc.raccoglitore}`,
+          descrizione: `Raccoglitore "${racc.raccoglitore}": deviazione significativa dal mix classi consorziale. ${devDetails}. Totale raccolto: ${racc.totale_peso.toFixed(1)} ton.`,
+          severita: regola.severita || 'warning',
+          modulo: 'primarie_rete',
+          entity_type: 'PrimariaRete',
+          record_id: racc.raccoglitore,
+          regola_id: regola.id,
+          regola_nome: regola.nome,
+          stato: 'aperto',
+        });
+        existingKeys.add(key);
+      }
+    }
+  }
+
+  return alerts;
 }

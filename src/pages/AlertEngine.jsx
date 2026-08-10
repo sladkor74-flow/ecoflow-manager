@@ -19,6 +19,8 @@ const TIPI_REGOLA = [
   { value: 'range_valori', label: 'Range Valori' },
   { value: 'sla_tempi', label: 'SLA Tempi' },
   { value: 'peso_congruenza', label: 'Congruenza Peso' },
+  { value: 'province_inattive', label: 'Province Inattive (2 mesi consecutivi a zero)' },
+  { value: 'mix_classi_deviazione', label: 'Deviazione Mix Classi Consorziale' },
   { value: 'custom', label: 'Custom' },
 ];
 
