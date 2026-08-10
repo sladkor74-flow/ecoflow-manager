@@ -31,6 +31,9 @@
         "peso_congruenza",
         "province_inattive",
         "mix_classi_deviazione",
+        "scostamento_target",
+        "ritardo_sla",
+        "anomalia_peso",
         "custom"
       ],
       "description": "Tipologia di regola"

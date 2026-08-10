@@ -21,6 +21,9 @@ const TIPI_REGOLA = [
   { value: 'peso_congruenza', label: 'Congruenza Peso' },
   { value: 'province_inattive', label: 'Province Inattive (2 mesi consecutivi a zero)' },
   { value: 'mix_classi_deviazione', label: 'Deviazione Mix Classi Consorziale' },
+  { value: 'scostamento_target', label: 'Scostamento Target Grave (Δ < -15%)' },
+  { value: 'ritardo_sla', label: 'Ritardo SLA Critico (>12 gg o >20% fuori tempo)' },
+  { value: 'anomalia_peso', label: 'Anomalia Peso/Destinazione (peso=0 o incongruente)' },
   { value: 'custom', label: 'Custom' },
 ];
 

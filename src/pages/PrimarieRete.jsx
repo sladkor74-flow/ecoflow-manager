@@ -1,28 +1,32 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Loader2, Upload, MapPin, BarChart3 } from 'lucide-react';
+import { Loader2, Upload, MapPin, BarChart3, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import AlertBadge from '@/components/alerts/AlertBadge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ProvinceMatrix from '@/components/primarie-rete/ProvinceMatrix';
 import RaccoglitoriMix from '@/components/primarie-rete/RaccoglitoriMix';
+import SlaMetrics from '@/components/primarie-rete/SlaMetrics';
 
 export default function PrimarieRete() {
   const [provinceData, setProvinceData] = useState(null);
   const [mixData, setMixData] = useState(null);
+  const [slaData, setSlaData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [alertCount, setAlertCount] = useState(0);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [provRes, mixRes, alertRes] = await Promise.all([
+      const [provRes, mixRes, slaRes, alertRes] = await Promise.all([
         base44.functions.invoke('computeProvinceMatrix', {}),
         base44.functions.invoke('computeRaccoglitoriMix', {}),
+        base44.functions.invoke('computeSlaMetrics', {}),
         base44.functions.invoke('getAlerts', { modulo: 'primarie_rete', solo_aperti: true }),
       ]);
       setProvinceData(provRes.data);
       setMixData(mixRes.data);
+      setSlaData(slaRes.data);
       setAlertCount(alertRes.data?.total || 0);
     } catch (e) {
       console.error(e);
@@ -57,7 +61,8 @@ export default function PrimarieRete() {
         <Tabs defaultValue="province">
           <TabsList>
             <TabsTrigger value="province"><MapPin className="w-4 h-4 mr-1.5" /> Province & FIR</TabsTrigger>
-            <TabsTrigger value="mix"><BarChart3 className="w-4 h-4 mr-1.5" /> Mix Classi Raccoglitori</TabsTrigger>
+            <TabsTrigger value="mix"><BarChart3 className="w-4 h-4 mr-1.5" /> Mix Classi</TabsTrigger>
+            <TabsTrigger value="sla"><Clock className="w-4 h-4 mr-1.5" /> SLA & Tempi</TabsTrigger>
           </TabsList>
 
           <TabsContent value="province" className="mt-4">
@@ -74,6 +79,13 @@ export default function PrimarieRete() {
               Target consorziali: P=75%, M=20%, G1=4%, G2=1%. Deviazioni significative ({'>'}±5%) evidenziate come warning.
             </div>
             <RaccoglitoriMix data={mixData} />
+          </TabsContent>
+
+          <TabsContent value="sla" className="mt-4">
+            <div className="mb-3 text-sm text-muted-foreground">
+              Tempi di evasione e puntualità delle raccolte per trasportatore. Alert critico se Nr Giorni medio {'>'} 12 o % fuori tempo {'>'} 20%.
+            </div>
+            <SlaMetrics data={slaData} />
           </TabsContent>
         </Tabs>
       )}

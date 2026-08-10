@@ -1,5 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { computeProvinceMatrixData, computeRaccoglitoriMixData } from "../../shared/primarieReteAnalytics.ts";
+import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetrics } from "../../shared/primarieReteAnalytics.ts";
 
 // Motore di controllo: scansiona i record di un modulo e genera Alert per le regole violate.
 // Payload: { modulo, record_ids?, solo_aperti?: boolean }
@@ -66,7 +66,8 @@ export default async function(req) {
 
     // --- Controlli aggregati per primarie_rete (province inattive + mix classi) ---
     if (modulo === 'primarie_rete') {
-      const aggregateAlerts = checkAggregateRules(records, regole, existingKeys);
+      const targets = await base44.asServiceRole.entities.TargetMensile.list('-created_date', 5000);
+      const aggregateAlerts = checkAggregateRules(records, regole, existingKeys, targets);
       newAlerts.push(...aggregateAlerts);
     }
 
@@ -140,11 +141,35 @@ function checkRegola(record, regola, entityName) {
     }
   }
 
+  if (tipo === 'anomalia_peso') {
+    // config: { soglia_zero: true, soglia_deviazione: 0.5 }
+    const pesoEff = record.peso_effettivo;
+    const pesoStim = record.peso_stimato;
+    const quantitaRit = record.quantita_ritirata;
+    const sogliaDev = (config.soglia_deviazione != null ? config.soglia_deviazione : 0.5);
+
+    if (config.soglia_zero !== false && quantitaRit > 0 && (!pesoEff || pesoEff === 0)) {
+      return {
+        titolo: regola.messaggio_alert || `Peso effettivo mancante per ${record.id_ordine}`,
+        descrizione: `Record ${record.id_ordine}: quantità ritirata ${quantitaRit} ma peso effettivo = 0 o mancante.`,
+      };
+    }
+    if (pesoEff && pesoStim && pesoStim > 0) {
+      const deviazione = Math.abs(pesoEff - pesoStim) / pesoStim;
+      if (deviazione > sogliaDev) {
+        return {
+          titolo: regola.messaggio_alert || `Anomalia peso per ${record.id_ordine}`,
+          descrizione: `Record ${record.id_ordine}: peso effettivo ${pesoEff} kg vs stimato ${pesoStim} kg (deviazione ${(deviazione * 100).toFixed(1)}%, soglia ${(sogliaDev * 100).toFixed(0)}%).`,
+        };
+      }
+    }
+  }
+
   return null;
 }
 
 // --- Controlli aggregati per primarie_rete ---
-function checkAggregateRules(records, regole, existingKeys) {
+function checkAggregateRules(records, regole, existingKeys, targets = []) {
   const alerts = [];
 
   // Regole province inattive (2 mesi consecutivi a zero)
@@ -195,6 +220,76 @@ function checkAggregateRules(records, regole, existingKeys) {
           stato: 'aperto',
         });
         existingKeys.add(key);
+      }
+    }
+  }
+
+  // Regole scostamento target grave (Delta < soglia_pct, default -15%)
+  const regoleScostamento = regole.filter(r => r.tipo_regola === 'scostamento_target');
+  if (regoleScostamento.length > 0 && targets && targets.length > 0) {
+    const raccoltoByKey = {};
+    for (const r of records) {
+      const racc = (r.trasportatore || 'N/D').trim();
+      const regione = r.regione || 'Altro';
+      const mese = r.mese || 'N/D';
+      const peso = (r.peso_effettivo || 0) / 1000;
+      const key = `${racc}|||${regione}|||${mese}`;
+      raccoltoByKey[key] = (raccoltoByKey[key] || 0) + peso;
+    }
+    for (const target of targets) {
+      const racc = (target.raccoglitore || '').trim();
+      const regione = (target.regione || '').trim();
+      const mese = (target.mese || '').trim();
+      const targetVal = target.target || 0;
+      if (targetVal <= 0) continue;
+      const key = `${racc}|||${regione}|||${mese}`;
+      const raccolto = raccoltoByKey[key] || 0;
+      const delta = raccolto - targetVal;
+      const pctDelta = (delta / targetVal) * 100;
+      const soglia = regoleScostamento[0]?.config?.soglia_pct || -15;
+      if (pctDelta < soglia) {
+        for (const regola of regoleScostamento) {
+          const alertKey = `${racc}|||${regione}|||${mese}|||${regola.id}`;
+          if (existingKeys.has(alertKey)) continue;
+          alerts.push({
+            titolo: regola.messaggio_alert || `Scostamento target grave: ${racc} - ${regione} - ${mese}`,
+            descrizione: `Raccoglitore "${racc}" (${regione}, ${mese}): target ${targetVal} ton, raccolto ${raccolto.toFixed(1)} ton, Δ ${delta.toFixed(1)} ton (${pctDelta.toFixed(1)}%). Soglia: ${soglia}%.`,
+            severita: regola.severita || 'critico',
+            modulo: 'primarie_rete',
+            entity_type: 'PrimariaRete',
+            record_id: `${racc}|${regione}|${mese}`,
+            regola_id: regola.id,
+            regola_nome: regola.nome,
+            stato: 'aperto',
+          });
+          existingKeys.add(alertKey);
+        }
+      }
+    }
+  }
+
+  // Regole ritardo SLA critico (Nr Giorni medio > 12 o % fuori tempo > 20%)
+  const regoleSla = regole.filter(r => r.tipo_regola === 'ritardo_sla');
+  if (regoleSla.length > 0) {
+    const sla = computeSlaMetrics(records);
+    for (const t of sla.trasportatori) {
+      if (t.has_sla_critical) {
+        for (const regola of regoleSla) {
+          const key = `${t.trasportatore}|||${regola.id}`;
+          if (existingKeys.has(key)) continue;
+          alerts.push({
+            titolo: regola.messaggio_alert || `Ritardo SLA critico: ${t.trasportatore}`,
+            descrizione: `Trasportatore "${t.trasportatore}": Nr Giorni medio ${t.nr_giorni_medio.toFixed(1)} gg, % fuori tempo ${t.pct_dopo_scadenza.toFixed(1)}%. Soglie: > 12 gg medio o > 20% fuori tempo.`,
+            severita: regola.severita || 'warning',
+            modulo: 'primarie_rete',
+            entity_type: 'PrimariaRete',
+            record_id: t.trasportatore,
+            regola_id: regola.id,
+            regola_nome: regola.nome,
+            stato: 'aperto',
+          });
+          existingKeys.add(key);
+        }
       }
     }
   }

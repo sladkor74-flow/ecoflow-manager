@@ -179,3 +179,66 @@ export function computeRaccoglitoriMixData(records, targetAnnuo = TARGET_ANNUO_T
     raccoglitori_con_deviazione: raccoglitoriArray.filter(r => r.has_deviazione),
   };
 }
+
+// --- 3. SLA Metrics per Trasportatore ---
+
+export function computeSlaMetrics(records) {
+  const byTrasportatore: Record<string, any> = {};
+
+  for (const r of records) {
+    const trasportatore = (r.trasportatore || 'N/D').trim();
+
+    if (!byTrasportatore[trasportatore]) {
+      byTrasportatore[trasportatore] = {
+        trasportatore,
+        totale: 0,
+        nei_tempi: 0,
+        dopo_scadenza: 0,
+        nr_giorni_sum: 0,
+        nr_giorni_count: 0,
+        oltre_10gg: 0,
+        oltre_12gg: 0,
+      };
+    }
+
+    const t = byTrasportatore[trasportatore];
+    t.totale += 1;
+
+    if (r.raccolta_nei_tempi === 'OK') t.nei_tempi += 1;
+    else if (r.raccolta_nei_tempi === 'DOPO SCADENZA') t.dopo_scadenza += 1;
+
+    if (r.nr_giorni != null && !isNaN(r.nr_giorni)) {
+      t.nr_giorni_sum += r.nr_giorni;
+      t.nr_giorni_count += 1;
+      if (r.nr_giorni > 10) t.oltre_10gg += 1;
+      if (r.nr_giorni > 12) t.oltre_12gg += 1;
+    }
+  }
+
+  const trasportatori = Object.values(byTrasportatore).map((t: any) => {
+    const nr_giorni_medio = t.nr_giorni_count > 0 ? t.nr_giorni_sum / t.nr_giorni_count : 0;
+    const pct_nei_tempi = t.totale > 0 ? (t.nei_tempi / t.totale) * 100 : 0;
+    const pct_dopo_scadenza = t.totale > 0 ? (t.dopo_scadenza / t.totale) * 100 : 0;
+    return {
+      ...t,
+      nr_giorni_medio,
+      pct_nei_tempi,
+      pct_dopo_scadenza,
+      has_sla_critical: nr_giorni_medio > 12 || pct_dopo_scadenza > 20,
+    };
+  });
+
+  trasportatori.sort((a, b) => b.totale - a.totale);
+
+  const totale_ordini = trasportatori.reduce((s, t) => s + t.totale, 0);
+  const totale_nei_tempi = trasportatori.reduce((s, t) => s + t.nei_tempi, 0);
+  const totale_giorni = trasportatori.reduce((s, t) => s + t.nr_giorni_sum, 0);
+  const totale_giorni_count = trasportatori.reduce((s, t) => s + t.nr_giorni_count, 0);
+
+  return {
+    trasportatori,
+    totale_ordini,
+    avg_giorni: totale_giorni_count > 0 ? totale_giorni / totale_giorni_count : 0,
+    pct_nei_tempi_globale: totale_ordini > 0 ? (totale_nei_tempi / totale_ordini) * 100 : 0,
+  };
+}
