@@ -30,7 +30,7 @@ export default function ImpiantiTable({ data, onSaveTarget }) {
         </thead>
         <tbody>
           {data.map((r, i) => (
-            <tr key={i} className="border-t hover:bg-muted/30">
+            <tr key={r.impianto} className="border-t hover:bg-muted/30">
               <td className="sticky left-0 bg-card px-3 py-1.5 font-medium max-w-[200px] truncate">{r.impianto}</td>
               <td className="px-2 py-1.5 text-right tabular-nums">{r.totale.toFixed(1)}</td>
               {r.mesi.map((m, j) => (

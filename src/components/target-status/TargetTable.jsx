@@ -30,7 +30,7 @@ export default function TargetTable({ data, onSaveTargetAnnuo, onSaveTargetMensi
         </thead>
         <tbody>
           {data.map((row, i) => (
-            <tr key={i} className="border-t hover:bg-muted/30">
+            <tr key={`${row.regione}|||${row.raccoglitore}`} className="border-t hover:bg-muted/30">
               <td className="sticky left-0 bg-card px-3 py-1.5">{row.regione}</td>
               <td className="sticky left-[100px] bg-card px-3 py-1.5 font-medium max-w-[180px] truncate">{row.raccoglitore}</td>
               <td className="px-2 py-1.5 text-right">
