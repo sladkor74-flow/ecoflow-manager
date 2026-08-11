@@ -76,9 +76,11 @@ export default async function(req) {
       'id_trasportatore', 'trasportatore', 'regioni', 'mese', 'anno', 'sigla', 'regione'
     ];
 
-    const isAciClasse = (classe) => {
+    const isAciClasse = (classe, prodotto) => {
       const c = (classe || '').trim().toLowerCase();
-      return c.includes('autodemolizione') || c.includes('aci');
+      const p = (prodotto || '').trim().toLowerCase();
+      return c.includes('autodemolizione') || c.includes('aci')
+          || p.includes('autodemolizione') || p.includes('aci');
     };
     const isAssegnatoStato = (stato) => (stato || '').toLowerCase().trim() === 'assegnato';
 
@@ -125,7 +127,7 @@ export default async function(req) {
       const bucketRete = [], bucketAci = [], bucketAssRete = [], bucketAssAci = [];
       for (const r of enriched) {
         if (!r.id_ordine) continue;
-        const aci = isAciClasse(r.classe);
+        const aci = isAciClasse(r.classe, r.prodotto);
         const ass = isAssegnatoStato(r.stato);
         if (ass && !aci) bucketAssRete.push(r);
         else if (ass && aci) bucketAssAci.push(r);

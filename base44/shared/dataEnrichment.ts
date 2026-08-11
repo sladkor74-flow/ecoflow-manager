@@ -40,6 +40,8 @@ export function getRegioneFromProvincia(provincia) {
 export function getClasseFromProdotto(prodotto) {
   if (!prodotto) return null;
   const s = String(prodotto).trim();
+  // PFU Autodemolizione -> classe speciale ACI
+  if (s.toLowerCase().includes('autodemolizione')) return 'PFU Autodemolizione';
   // Estrai caratteri a sinistra di " -" (es. "P - fino a 35 kg" -> "P")
   const idx = s.indexOf(' -');
   if (idx > 0) {
