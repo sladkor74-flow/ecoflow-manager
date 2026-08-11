@@ -73,7 +73,7 @@ export default function PrimarieRete() {
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-heading font-bold">Primarie Rete — Terminati Rete</h1>
+          <h1 className="text-2xl lg:text-3xl font-heading font-bold">Terminati Rete — Terminati Rete</h1>
           <p className="text-muted-foreground mt-1">
             Monitoraggio raccolte PFU per provincia e mix classi consorziali per raccoglitore.
           </p>

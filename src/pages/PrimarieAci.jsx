@@ -92,14 +92,14 @@ export default function PrimarieAci() {
   const meseRows = MESI.filter(m => byMese[m]).map(m => [m, byMese[m]]);
 
   if (loading) {
-    return <div className="flex items-center justify-center py-20 text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin mr-2" /> Caricamento Primarie ACI...</div>;
+    return <div className="flex items-center justify-center py-20 text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin mr-2" /> Caricamento Terminati ACI...</div>;
   }
 
   return (
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-heading font-bold flex items-center gap-2"><Factory className="w-7 h-7 text-primary" /> Primarie ACI</h1>
+          <h1 className="text-2xl lg:text-3xl font-heading font-bold flex items-center gap-2"><Factory className="w-7 h-7 text-primary" /> Terminati ACI</h1>
           <p className="text-muted-foreground mt-1">Monitoraggio ordini ACI (Auto Club Italia) con analisi per destinazione e mese.</p>
         </div>
         <button onClick={load} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent">
