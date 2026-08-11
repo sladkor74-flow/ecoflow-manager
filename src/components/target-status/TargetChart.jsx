@@ -34,7 +34,7 @@ export default function TargetChart({ data, mese, onMeseChange }) {
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="name" tick={{ fontSize: 11 }} />
           <YAxis tick={{ fontSize: 11 }} unit=" t" />
-          <Tooltip formatter={(v) => v.toFixed(1) + ' t'} />
+          <Tooltip formatter={(v) => (v != null ? v.toFixed(1) + ' t' : '—')} />
           <Legend />
           <Bar dataKey="target" fill="#f59e0b" name="Target [t]" radius={[4, 4, 0, 0]} />
           <Bar dataKey="raccolto" fill="#22c55e" name="Raccolto [t]" radius={[4, 4, 0, 0]} />

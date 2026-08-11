@@ -170,11 +170,18 @@ const COUNT_FN = () => 1;
 
 export async function computeAllPivots(base44, filters, pivotKeys = null) {
   const shouldCompute = (key) => !pivotKeys || pivotKeys.includes(key);
+  const keys = pivotKeys || ['A','B','C','D','E','F','G','H'];
+  const needRete = keys.some(k => ['A','B','E'].includes(k));
+  const needAci = keys.some(k => ['C','G'].includes(k));
+  const needSec = keys.some(k => ['D','F'].includes(k));
+  const needAss = keys.some(k => ['H'].includes(k));
+  const needFilterOptions = !pivotKeys; // only on full load
+
   const [rete, aci, sec, assegnati] = await Promise.all([
-    base44.asServiceRole.entities.PrimariaRete.list('-created_date', 10000),
-    base44.asServiceRole.entities.PrimariaAci.list('-created_date', 10000),
-    base44.asServiceRole.entities.Secondaria.list('-created_date', 10000),
-    base44.asServiceRole.entities.Assegnato.list('-created_date', 10000),
+    needRete ? base44.asServiceRole.entities.PrimariaRete.list('-created_date', 10000) : Promise.resolve([]),
+    needAci ? base44.asServiceRole.entities.PrimariaAci.list('-created_date', 10000) : Promise.resolve([]),
+    needSec ? base44.asServiceRole.entities.Secondaria.list('-created_date', 10000) : Promise.resolve([]),
+    needAss ? base44.asServiceRole.entities.Assegnato.list('-created_date', 10000) : Promise.resolve([]),
   ]);
 
   const reteF = applyFilters(rete, filters, false);
@@ -230,11 +237,14 @@ export async function computeAllPivots(base44, filters, pivotKeys = null) {
     result.pivotH = pivotH;
   }
 
+  // Filter options from whatever entities are already loaded
   const allSourceRows = [...rete, ...aci, ...sec, ...assegnati];
-  const raccoglitori = [...new Set(allSourceRows.map((r) => (r.trasportatore || '').trim()).filter(Boolean))].sort();
-  const anni = [...new Set([...rete, ...aci, ...sec].map((r) => getRecordAnno(r)).filter(Boolean), ...assegnati.map((r) => getRecordAnnoImmissione(r)).filter(Boolean))].sort();
-  const settimane = [...new Set([...rete, ...aci, ...sec].map((r) => getRecordSettimana(r)).filter(Boolean), ...assegnati.map((r) => getRecordSettimanaImmissione(r)).filter(Boolean))].sort((a, b) => a - b);
-  result.filterOptions = { raccoglitori, anni, settimane };
+  if (allSourceRows.length > 0) {
+    const raccoglitori = [...new Set(allSourceRows.map((r) => (r.trasportatore || '').trim()).filter(Boolean))].sort();
+    const anni = [...new Set([...rete, ...aci, ...sec].map((r) => getRecordAnno(r)).filter(Boolean), ...assegnati.map((r) => getRecordAnnoImmissione(r)).filter(Boolean))].sort();
+    const settimane = [...new Set([...rete, ...aci, ...sec].map((r) => getRecordSettimana(r)).filter(Boolean), ...assegnati.map((r) => getRecordSettimanaImmissione(r)).filter(Boolean))].sort((a, b) => a - b);
+    result.filterOptions = { raccoglitori, anni, settimane };
+  }
   return result;
 }
 

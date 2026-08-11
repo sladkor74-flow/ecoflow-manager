@@ -21,6 +21,7 @@ import PredittivitaSecondarie from '@/pages/PredittivitaSecondarie';
 import PrimarieRete from '@/pages/PrimarieRete';
 import PrimarieAci from '@/pages/PrimarieAci';
 import TodoPage from '@/pages/TodoPage';
+import PageErrorBoundary from '@/components/PageErrorBoundary';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -53,8 +54,8 @@ const AuthenticatedApp = () => {
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/caricamento-dati" element={<CaricamentoDati />} />
-          <Route path="/target-status" element={<TargetStatus />} />
-          <Route path="/report-mensile" element={<ReportMensile />} />
+          <Route path="/target-status" element={<PageErrorBoundary><TargetStatus /></PageErrorBoundary>} />
+          <Route path="/report-mensile" element={<PageErrorBoundary><ReportMensile /></PageErrorBoundary>} />
           <Route path="/primarie-rete" element={<PrimarieRete />} />
           <Route path="/terziarie" element={<Terziarie />} />
           <Route path="/assegnati" element={<Assegnati />} />
