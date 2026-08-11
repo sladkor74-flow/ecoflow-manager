@@ -7,6 +7,7 @@ import SecondarieKpi from '@/components/secondarie/SecondarieKpi';
 import TrattaMatrix from '@/components/secondarie/TrattaMatrix';
 import SecondarieTable from '@/components/secondarie/SecondarieTable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { getRegioneFromProvincia } from '@/lib/regioneMap';
 
 export default function Secondarie() {
   const [data, setData] = useState(null);
@@ -15,7 +16,7 @@ export default function Secondarie() {
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
-  const [filters, setFilters] = useState({ stoccaggio: '', destinazione: '', mese: '', settimana: '', classe: '', trasportatore: '', anno: '', provincia: '' });
+  const [filters, setFilters] = useState({ stoccaggio: '', destinazione: '', mese: '', settimana: '', classe: '', trasportatore: '', anno: '', provincia: '', regione: '', stato: '', data: '' });
   const [viewMode, setViewMode] = useState('matrix');
 
   const loadData = useCallback(async () => {
@@ -39,6 +40,15 @@ export default function Secondarie() {
         if (filters.classe && r.classe !== filters.classe) return false;
         if (filters.trasportatore && (r.trasportatore || '').trim() !== filters.trasportatore) return false;
         if (filters.provincia && (r.provincia || '').trim() !== filters.provincia) return false;
+        if (filters.regione) {
+          const reg = r.regione || getRegioneFromProvincia(r.provincia);
+          if ((reg || '').trim() !== filters.regione) return false;
+        }
+        if (filters.stato && (r.stato || '').trim() !== filters.stato) return false;
+        if (filters.data) {
+          const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+          if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
+        }
         if (filters.anno) {
           const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
           const dt = d ? new Date(d) : null;
@@ -87,7 +97,7 @@ export default function Secondarie() {
   };
 
   const hasFilters = Object.values(filters).some(v => v);
-  const resetFilters = () => setFilters({ stoccaggio: '', destinazione: '', mese: '', settimana: '', classe: '', trasportatore: '', anno: '', provincia: '' });
+  const resetFilters = () => setFilters({ stoccaggio: '', destinazione: '', mese: '', settimana: '', classe: '', trasportatore: '', anno: '', provincia: '', regione: '', stato: '', data: '' });
   const opts = data?.filterOptions || {};
 
   return (
@@ -128,7 +138,16 @@ export default function Secondarie() {
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-11 gap-3">
+              <select value={filters.regione} onChange={e => setFilters(p => ({ ...p, regione: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
+                <option value="">Tutte le regioni</option>
+                {opts.regioni?.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <select value={filters.stato} onChange={e => setFilters(p => ({ ...p, stato: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
+                <option value="">Tutti gli stati</option>
+                {opts.stati?.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" />
               <select value={filters.stoccaggio} onChange={e => setFilters(p => ({ ...p, stoccaggio: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
                 <option value="">Tutte le origini</option>
                 {opts.stoccaggi?.map(s => <option key={s} value={s}>{s}</option>)}

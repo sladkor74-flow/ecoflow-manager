@@ -22,6 +22,11 @@ export default async function(req) {
       if (filters.provincia && (r.provincia || '').toUpperCase().trim() !== filters.provincia) return false;
       if (filters.partner_operativo && (r.partner_operativo || '').trim() !== filters.partner_operativo) return false;
       if (filters.classe && r.classe !== filters.classe) return false;
+      if (filters.stato && (r.stato || '').trim() !== filters.stato) return false;
+      if (filters.data) {
+        const d = r.ordine_immesso_il;
+        if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
+      }
       return true;
     });
 

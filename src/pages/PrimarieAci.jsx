@@ -30,6 +30,8 @@ export default function PrimarieAci() {
   const [filterProvincia, setFilterProvincia] = useState(null);
   const [filterTrasportatore, setFilterTrasportatore] = useState(null);
   const [filterData, setFilterData] = useState('');
+  const [filterRegione, setFilterRegione] = useState(null);
+  const [filterStato, setFilterStato] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -45,12 +47,16 @@ export default function PrimarieAci() {
   const destinazioni = [...new Set(records.map(r => r.destinazione).filter(Boolean))].sort();
   const province = [...new Set(records.map(r => (r.provincia || '').trim()).filter(Boolean))].sort();
   const trasportatori = [...new Set(records.map(r => (r.trasportatore || '').trim()).filter(Boolean))].sort();
+  const regioni = [...new Set(records.map(r => (r.regione || '').trim()).filter(Boolean))].sort();
+  const stati = [...new Set(records.map(r => (r.stato || '').trim()).filter(Boolean))].sort();
 
   const filtered = records.filter(r => {
     if (filterMese && r.mese !== filterMese) return false;
     if (filterDestinazione && r.destinazione !== filterDestinazione) return false;
     if (filterProvincia && (r.provincia || '').trim() !== filterProvincia) return false;
     if (filterTrasportatore && (r.trasportatore || '').trim() !== filterTrasportatore) return false;
+    if (filterRegione && (r.regione || '').trim() !== filterRegione) return false;
+    if (filterStato && (r.stato || '').trim() !== filterStato) return false;
     if (filterData) {
       const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
       if (!d || new Date(d).toISOString().slice(0, 10) !== filterData) return false;
@@ -125,13 +131,21 @@ export default function PrimarieAci() {
       <div className="border rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri rapidi</span>
-          {(filterMese || filterDestinazione || filterProvincia || filterTrasportatore || filterData) && (
-            <button onClick={() => { setFilterMese(null); setFilterDestinazione(null); setFilterProvincia(null); setFilterTrasportatore(null); setFilterData(''); }} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+          {(filterMese || filterDestinazione || filterProvincia || filterTrasportatore || filterData || filterRegione || filterStato) && (
+            <button onClick={() => { setFilterMese(null); setFilterDestinazione(null); setFilterProvincia(null); setFilterTrasportatore(null); setFilterData(''); setFilterRegione(null); setFilterStato(null); }} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
               <X className="w-3 h-3" /> Reset
             </button>
           )}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-3">
+          <select value={filterRegione || ''} onChange={e => setFilterRegione(e.target.value || null)} className="border rounded-md px-3 py-2 text-sm">
+            <option value="">Tutte le regioni</option>
+            {regioni.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <select value={filterStato || ''} onChange={e => setFilterStato(e.target.value || null)} className="border rounded-md px-3 py-2 text-sm">
+            <option value="">Tutti gli stati</option>
+            {stati.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
           <select value={filterMese || ''} onChange={e => setFilterMese(e.target.value || null)} className="border rounded-md px-3 py-2 text-sm">
             <option value="">Tutti i mesi</option>
             {MESI.map(m => <option key={m} value={m}>{m}</option>)}

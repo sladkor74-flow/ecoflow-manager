@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { MESI } from "../../shared/raccoltoCalculator.ts";
+import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
 
 // Calcola le matrici di aggregazione dei trasporti secondari per tratta.
 // Payload: { filters: { stoccaggio?, destinazione?, mese?, settimana?, classe?, trasportatore?, anno? } }
@@ -23,6 +24,15 @@ export default async function(req) {
       if (filters.classe && r.classe !== filters.classe) return false;
       if (filters.trasportatore && (r.trasportatore || '').trim() !== filters.trasportatore) return false;
       if (filters.provincia && (r.provincia || '').trim() !== filters.provincia) return false;
+      if (filters.regione) {
+        const reg = r.regione || getRegioneFromProvincia(r.provincia);
+        if ((reg || '').trim() !== filters.regione) return false;
+      }
+      if (filters.stato && (r.stato || '').trim() !== filters.stato) return false;
+      if (filters.data) {
+        const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+        if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
+      }
       if (filters.anno) {
         const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
         const dt = d ? new Date(d) : null;
@@ -107,6 +117,8 @@ export default async function(req) {
       classi: [...new Set(all.map(r => r.classe).filter(Boolean))].sort(),
       trasportatori: [...new Set(all.map(r => (r.trasportatore || '').trim()).filter(Boolean))].sort(),
       province: [...new Set(all.map(r => (r.provincia || '').trim()).filter(Boolean))].sort(),
+      regioni: [...new Set(all.map(r => (r.regione || getRegioneFromProvincia(r.provincia) || '').trim()).filter(Boolean))].sort(),
+      stati: [...new Set(all.map(r => (r.stato || '').trim()).filter(Boolean))].sort(),
       anni: [...new Set(all.map(r => {
         const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
         if (!d) return null;

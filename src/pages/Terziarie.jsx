@@ -4,6 +4,7 @@ import { Loader2, FileSpreadsheet, Filter, X } from 'lucide-react';
 import TerziarieKpi from '@/components/terziarie/TerziarieKpi';
 import GiacenzeTable from '@/components/terziarie/GiacenzeTable';
 import TerziarieTable from '@/components/terziarie/TerziarieTable';
+import { getRegioneFromProvincia } from '@/lib/regioneMap';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const MATERIALI = ['PFU SFUSO', 'CIAB/CIPP', 'FERRO'];
@@ -27,7 +28,7 @@ export default function Terziarie() {
   const [loading, setLoading] = useState(true);
   const [loadingGiac, setLoadingGiac] = useState(true);
   const [exporting, setExporting] = useState(false);
-  const [filters, setFilters] = useState({ impianto: '', destinazione: '', mese: '', trasportatore: '', materiale: '', anno: '', provincia: '' });
+  const [filters, setFilters] = useState({ impianto: '', destinazione: '', mese: '', trasportatore: '', materiale: '', anno: '', provincia: '', regione: '', stato: '', data: '' });
   const [filterOptions, setFilterOptions] = useState({ impianti: [], destinazioni: [], trasportatori: [], anni: [], province: [] });
 
   const loadGiacenze = useCallback(async () => {
@@ -49,6 +50,8 @@ export default function Terziarie() {
         destinazioni: [...new Set(all.map(r => (r.destinazione || '').trim()).filter(Boolean))].sort(),
         trasportatori: [...new Set(all.map(r => (r.trasportatore || '').trim()).filter(Boolean))].sort(),
         province: [...new Set(all.map(r => (r.provincia || '').trim()).filter(Boolean))].sort(),
+        regioni: [...new Set(all.map(r => (getRegioneFromProvincia(r.provincia) || '').trim()).filter(Boolean))].sort(),
+        stati: [...new Set(all.map(r => (r.stato || '').trim()).filter(Boolean))].sort(),
         anni: [...new Set(all.map(r => {
           const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
           if (!d) return null;
@@ -61,6 +64,12 @@ export default function Terziarie() {
         if (filters.impianto && (r.unita_locale_origine || '').trim() !== filters.impianto) return false;
         if (filters.destinazione && (r.destinazione || '').trim() !== filters.destinazione) return false;
         if (filters.provincia && (r.provincia || '').trim() !== filters.provincia) return false;
+        if (filters.regione && (getRegioneFromProvincia(r.provincia) || '').trim() !== filters.regione) return false;
+        if (filters.stato && (r.stato || '').trim() !== filters.stato) return false;
+        if (filters.data) {
+          const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+          if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
+        }
         if (filters.mese && getMeseFromRecord(r) !== filters.mese) return false;
         if (filters.trasportatore && (r.trasportatore || '').trim() !== filters.trasportatore) return false;
         if (filters.materiale && getMateriale(r) !== filters.materiale) return false;
@@ -111,7 +120,7 @@ export default function Terziarie() {
   };
 
   const hasFilters = Object.values(filters).some(v => v);
-  const resetFilters = () => setFilters({ impianto: '', destinazione: '', mese: '', trasportatore: '', materiale: '', anno: '', provincia: '' });
+  const resetFilters = () => setFilters({ impianto: '', destinazione: '', mese: '', trasportatore: '', materiale: '', anno: '', provincia: '', regione: '', stato: '', data: '' });
 
   return (
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
@@ -137,7 +146,16 @@ export default function Terziarie() {
             </button>
           )}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-10 gap-3">
+          <select value={filters.regione} onChange={e => setFilters(p => ({ ...p, regione: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
+            <option value="">Tutte le regioni</option>
+            {filterOptions.regioni.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <select value={filters.stato} onChange={e => setFilters(p => ({ ...p, stato: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
+            <option value="">Tutti gli stati</option>
+            {filterOptions.stati.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" />
           <select value={filters.impianto} onChange={e => setFilters(p => ({ ...p, impianto: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
             <option value="">Tutti gli impianti</option>
             {filterOptions.impianti.map(i => <option key={i} value={i}>{i}</option>)}
