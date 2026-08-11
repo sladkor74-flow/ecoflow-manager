@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import GlobalFilters from '@/components/report-pivot/GlobalFilters';
 import PivotTreeTable from '@/components/report-pivot/PivotTreeTable';
@@ -18,6 +18,15 @@ const PIVOT_DEFS = {
   H: { title: 'Pivot H — Richieste Aperte (Assegnati)', type: 'tree', source: 'assegnato', rowLabels: ['Anno', 'Regione', 'Provincia', 'Ragione Sociale'] },
 };
 
+const TAB_PIVOTS = {
+  A: ['A'],
+  B: ['B'],
+  C: ['C'],
+  D: ['D'],
+  EFG: ['E', 'F', 'G'],
+  H: ['H'],
+};
+
 const ROW_LABEL_TO_FILTER = {
   'Raccoglitore': 'raccoglitore', 'Regione': 'regione', 'Classe': 'classe',
   'Mese': 'mese', 'Settimana': 'settimana', 'Anno': 'anno',
@@ -25,32 +34,57 @@ const ROW_LABEL_TO_FILTER = {
 };
 
 export default function ReportMensile() {
-  const [pivotData, setPivotData] = useState(null);
+  const [pivots, setPivots] = useState({});
+  const [filterOptions, setFilterOptions] = useState(null);
   const [filters, setFilters] = useState({ mese: null, raccoglitore: null, anno: null, settimana: null });
+  const [activeTab, setActiveTab] = useState('A');
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [drillDown, setDrillDown] = useState({ open: false, loading: false, title: '', records: [], total: 0 });
+  const loadedKeysRef = useRef(new Set());
 
-  const loadData = useCallback(async () => {
+  // Reset cache when filters change
+  const handleFiltersChange = (newFilters) => {
+    setFilters(newFilters);
+    loadedKeysRef.current = new Set();
+    setPivots({});
+    setFilterOptions(null);
+  };
+
+  // Load pivots for the active tab
+  useEffect(() => {
+    const needed = TAB_PIVOTS[activeTab] || [];
+    const toLoad = needed.filter(k => !loadedKeysRef.current.has(k));
+    if (toLoad.length === 0) { setLoading(false); return; }
+
+    let cancelled = false;
     setLoading(true);
-    try {
-      const res = await base44.functions.invoke('computePivotData', { filters });
-      setPivotData(res.data);
-    } catch (e) {
-      console.error(e);
-    }
-    setLoading(false);
-  }, [filters]);
+    (async () => {
+      try {
+        const res = await base44.functions.invoke('computePivotData', { filters, pivotKey: toLoad });
+        if (cancelled) return;
+        setPivots(prev => ({ ...prev, ...res.data }));
+        if (res.data.filterOptions) setFilterOptions(res.data.filterOptions);
+        toLoad.forEach(k => loadedKeysRef.current.add(k));
+      } catch (e) {
+        console.error(e);
+      }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [activeTab, filters]);
 
-  useEffect(() => { loadData(); }, [loadData]);
-
-  // Auto-refresh: ricalcola le pivot quando un nuovo caricamento dati viene registrato
+  // Auto-refresh on new uploads
   useEffect(() => {
     const unsubscribe = base44.entities.UploadLog.subscribe((event) => {
-      if (event.type === 'create') loadData();
+      if (event.type === 'create') {
+        loadedKeysRef.current = new Set();
+        setPivots({});
+        setFilterOptions(null);
+      }
     });
     return unsubscribe;
-  }, [loadData]);
+  }, []);
 
   const handleCellClick = async (pivotKey, path, columnKey, valueKey) => {
     const def = PIVOT_DEFS[pivotKey];
@@ -90,17 +124,10 @@ export default function ReportMensile() {
     setExporting(false);
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20 text-muted-foreground">
-        <Loader2 className="w-6 h-6 animate-spin mr-2" /> Calcolo pivot in corso...
-      </div>
-    );
-  }
-
   const renderPivot = (key) => {
     const def = PIVOT_DEFS[key];
-    const data = pivotData?.[`pivot${key}`];
+    const data = pivots[`pivot${key}`];
+    if (!data) return <div className="text-sm text-muted-foreground py-4">Caricamento {def.title}...</div>;
     const onCell = (path, col, vk) => handleCellClick(key, path, col, vk);
     return (
       <div className="space-y-2">
@@ -120,7 +147,10 @@ export default function ReportMensile() {
           <p className="text-muted-foreground mt-1">Tabelle dinamiche su Primarie, Secondarie e Assegnati con drill-down e filtri globali.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent">
+          <button
+            onClick={() => { loadedKeysRef.current = new Set(); setPivots({}); setFilterOptions(null); }}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent"
+          >
             <RefreshCw className="w-4 h-4" /> Aggiorna
           </button>
           <button onClick={handleExportExcel} disabled={exporting} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent disabled:opacity-50">
@@ -129,9 +159,9 @@ export default function ReportMensile() {
         </div>
       </div>
 
-      <GlobalFilters filters={filters} onChange={setFilters} filterOptions={pivotData?.filterOptions || {}} />
+      <GlobalFilters filters={filters} onChange={handleFiltersChange} filterOptions={filterOptions || {}} />
 
-      <Tabs defaultValue="A">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="A">Raccolta</TabsTrigger>
           <TabsTrigger value="B">Impianti</TabsTrigger>
@@ -140,16 +170,26 @@ export default function ReportMensile() {
           <TabsTrigger value="EFG">Dettaglio FIR</TabsTrigger>
           <TabsTrigger value="H">Richieste Aperte</TabsTrigger>
         </TabsList>
-        <TabsContent value="A" className="space-y-2">{renderPivot('A')}</TabsContent>
-        <TabsContent value="B" className="space-y-2">{renderPivot('B')}</TabsContent>
-        <TabsContent value="C" className="space-y-2">{renderPivot('C')}</TabsContent>
-        <TabsContent value="D" className="space-y-2">{renderPivot('D')}</TabsContent>
-        <TabsContent value="EFG" className="space-y-4">
-          {renderPivot('E')}
-          {renderPivot('F')}
-          {renderPivot('G')}
+        <TabsContent value="A" className="space-y-2">
+          {loading && !pivots.pivotA ? <div className="flex items-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo pivot...</div> : renderPivot('A')}
         </TabsContent>
-        <TabsContent value="H" className="space-y-2">{renderPivot('H')}</TabsContent>
+        <TabsContent value="B" className="space-y-2">
+          {loading && !pivots.pivotB ? <div className="flex items-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo pivot...</div> : renderPivot('B')}
+        </TabsContent>
+        <TabsContent value="C" className="space-y-2">
+          {loading && !pivots.pivotC ? <div className="flex items-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo pivot...</div> : renderPivot('C')}
+        </TabsContent>
+        <TabsContent value="D" className="space-y-2">
+          {loading && !pivots.pivotD ? <div className="flex items-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo pivot...</div> : renderPivot('D')}
+        </TabsContent>
+        <TabsContent value="EFG" className="space-y-4">
+          {loading && !pivots.pivotE ? <div className="flex items-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo pivot...</div> : (
+            <>{renderPivot('E')}{renderPivot('F')}{renderPivot('G')}</>
+          )}
+        </TabsContent>
+        <TabsContent value="H" className="space-y-2">
+          {loading && !pivots.pivotH ? <div className="flex items-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo pivot...</div> : renderPivot('H')}
+        </TabsContent>
       </Tabs>
 
       <DrillDownModal

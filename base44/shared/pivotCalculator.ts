@@ -125,8 +125,21 @@ function buildPivotTree(rows, rowKeyFns, colKeyFn, valueFns) {
   }
 
   const root = buildNode(rows, 0);
+  roundTree(root);
   const columns = Object.keys(root.values).sort((a, b) => MESI.indexOf(a) - MESI.indexOf(b));
   return { tree: root, columns };
+}
+
+function roundTree(node) {
+  for (const col of Object.keys(node.values || {})) {
+    for (const vk of Object.keys(node.values[col] || {})) {
+      node.values[col][vk] = +node.values[col][vk].toFixed(2);
+    }
+  }
+  for (const vk of Object.keys(node.totals || {})) {
+    node.totals[vk] = +node.totals[vk].toFixed(2);
+  }
+  if (node.children) for (const child of node.children) roundTree(child);
 }
 
 function buildDetailTable(rows, rowKeyFns, collectors) {
@@ -138,7 +151,7 @@ function buildDetailTable(rows, rowKeyFns, collectors) {
       groups[key] = { keys: keyParts, values: {} };
       for (const name of Object.keys(collectors)) groups[key].values[name] = collectors[name].init();
     }
-    for (const [name, collector] of Object.entries(collectors)) collector.add(groups[key].values[name], row);
+    for (const [name, collector] of Object.entries(collectors)) groups[key].values[name] = collector.add(groups[key].values[name], row);
   }
   return Object.values(groups).map((g) => {
     const values = {};
@@ -149,13 +162,14 @@ function buildDetailTable(rows, rowKeyFns, collectors) {
 
 const sumCol = (f) => ({ init: () => 0, add: (a, r) => a + (r[f] || 0), finalize: (a) => a });
 const countCol = () => ({ init: () => 0, add: (a) => a + 1, finalize: (a) => a });
-const uniqueCol = (f) => ({ init: () => new Set(), add: (a, r) => { if (r[f]) a.add(r[f]); }, finalize: (a) => a.size });
+const uniqueCol = (f) => ({ init: () => new Set(), add: (a, r) => { if (r[f]) a.add(r[f]); return a; }, finalize: (a) => a.size });
 
 const PESO_FN = (r) => (r.peso_effettivo || 0) / 1000;
 const PESO_STIM_FN = (r) => (r.peso_stimato || 0) / 1000;
 const COUNT_FN = () => 1;
 
-export async function computeAllPivots(base44, filters) {
+export async function computeAllPivots(base44, filters, pivotKeys = null) {
+  const shouldCompute = (key) => !pivotKeys || pivotKeys.includes(key);
   const [rete, aci, sec, assegnati] = await Promise.all([
     base44.asServiceRole.entities.PrimariaRete.list('-created_date', 10000),
     base44.asServiceRole.entities.PrimariaAci.list('-created_date', 10000),
@@ -168,43 +182,60 @@ export async function computeAllPivots(base44, filters) {
   const secF = applyFilters(sec, filters, false);
   const assF = applyFilters(assegnati, filters, true);
 
-  const pivotA = buildPivotTree(reteF, [(r) => (r.trasportatore || 'N/D').trim(), (r) => getRegione(r), getClasse], (r) => getRecordMese(r), { peso: PESO_FN, count: COUNT_FN });
-  pivotA.valueKeys = ['peso', 'count']; pivotA.valueLabels = ['Peso [t]', 'Conteggio']; pivotA.rowLabels = ['Raccoglitore', 'Regione', 'Classe'];
+  const result = {};
 
-  const pivotB = buildPivotTree(reteF, [(r) => (r.destinazione || 'N/D').trim(), getClasse], (r) => getRecordMese(r), { peso: PESO_FN });
-  pivotB.valueKeys = ['peso']; pivotB.valueLabels = ['Peso [t]']; pivotB.rowLabels = ['Impianto', 'Classe'];
+  if (shouldCompute('A')) {
+    const pivotA = buildPivotTree(reteF, [(r) => (r.trasportatore || 'N/D').trim(), (r) => getRegione(r), getClasse], (r) => getRecordMese(r), { peso: PESO_FN, count: COUNT_FN });
+    pivotA.valueKeys = ['peso', 'count']; pivotA.valueLabels = ['Peso [t]', 'Conteggio']; pivotA.rowLabels = ['Raccoglitore', 'Regione', 'Classe'];
+    result.pivotA = pivotA;
+  }
+  if (shouldCompute('B')) {
+    const pivotB = buildPivotTree(reteF, [(r) => (r.destinazione || 'N/D').trim(), getClasse], (r) => getRecordMese(r), { peso: PESO_FN });
+    pivotB.valueKeys = ['peso']; pivotB.valueLabels = ['Peso [t]']; pivotB.rowLabels = ['Impianto', 'Classe'];
+    result.pivotB = pivotB;
+  }
+  if (shouldCompute('C')) {
+    const pivotC = buildPivotTree(aciF, [(r) => (r.trasportatore || 'N/D').trim(), (r) => getRegione(r), getClasse], (r) => getRecordMese(r), { peso: PESO_FN, count: COUNT_FN });
+    pivotC.valueKeys = ['peso', 'count']; pivotC.valueLabels = ['Peso [t]', 'Conteggio']; pivotC.rowLabels = ['Raccoglitore', 'Regione', 'Classe'];
+    result.pivotC = pivotC;
+  }
+  if (shouldCompute('D')) {
+    const pivotD = buildPivotTree(secF, [(r) => (r.destinazione || 'N/D').trim(), getClasse], (r) => getRecordMese(r), { peso: PESO_FN });
+    pivotD.valueKeys = ['peso']; pivotD.valueLabels = ['Peso [t]']; pivotD.rowLabels = ['Impianto', 'Classe'];
+    result.pivotD = pivotD;
+  }
+  if (shouldCompute('E') || shouldCompute('F') || shouldCompute('G')) {
+    const detailRowKeys = [getClasse, (r) => getRecordMese(r) || 'N/D', (r) => { const s = getRecordSettimana(r); return s != null ? String(s) : 'N/D'; }];
+    const detailCollectors = { peso: sumCol('peso_effettivo'), count: countCol(), firCount: uniqueCol('numero_fir') };
+    const detailMeta = { valueKeys: ['peso', 'count', 'firCount'], valueLabels: ['Peso [t]', 'Conteggio', 'FIR Univoci'], rowLabels: ['Classe', 'Mese', 'Settimana'] };
+    if (shouldCompute('E')) {
+      const rows = buildDetailTable(reteF, detailRowKeys, detailCollectors);
+      rows.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(2); });
+      result.pivotE = { rows, ...detailMeta };
+    }
+    if (shouldCompute('F')) {
+      const rows = buildDetailTable(secF, detailRowKeys, detailCollectors);
+      rows.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(2); });
+      result.pivotF = { rows, ...detailMeta };
+    }
+    if (shouldCompute('G')) {
+      const rows = buildDetailTable(aciF, detailRowKeys, detailCollectors);
+      rows.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(2); });
+      result.pivotG = { rows, ...detailMeta };
+    }
+  }
+  if (shouldCompute('H')) {
+    const pivotH = buildPivotTree(assF, [(r) => { const a = getRecordAnnoImmissione(r); return a != null ? String(a) : 'N/D'; }, (r) => getRegione(r), (r) => (r.provincia || 'N/D').trim(), (r) => (r.ragione_sociale || 'N/D').trim()], (r) => getRecordMeseImmissione(r), { count: COUNT_FN, pesoStimato: PESO_STIM_FN });
+    pivotH.valueKeys = ['count', 'pesoStimato']; pivotH.valueLabels = ['Richieste', 'Peso Stimato [t]']; pivotH.rowLabels = ['Anno', 'Regione', 'Provincia', 'Ragione Sociale'];
+    result.pivotH = pivotH;
+  }
 
-  const pivotC = buildPivotTree(aciF, [(r) => (r.trasportatore || 'N/D').trim(), (r) => getRegione(r), getClasse], (r) => getRecordMese(r), { peso: PESO_FN, count: COUNT_FN });
-  pivotC.valueKeys = ['peso', 'count']; pivotC.valueLabels = ['Peso [t]', 'Conteggio']; pivotC.rowLabels = ['Raccoglitore', 'Regione', 'Classe'];
-
-  const pivotD = buildPivotTree(secF, [(r) => (r.destinazione || 'N/D').trim(), getClasse], (r) => getRecordMese(r), { peso: PESO_FN });
-  pivotD.valueKeys = ['peso']; pivotD.valueLabels = ['Peso [t]']; pivotD.rowLabels = ['Impianto', 'Classe'];
-
-  const detailRowKeys = [getClasse, (r) => getRecordMese(r) || 'N/D', (r) => { const s = getRecordSettimana(r); return s != null ? String(s) : 'N/D'; }];
-  const detailCollectors = { peso: sumCol('peso_effettivo'), count: countCol(), firCount: uniqueCol('numero_fir') };
-
-  const pivotE = buildDetailTable(reteF, detailRowKeys, detailCollectors);
-  pivotE.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(2); });
-  pivotE.valueKeys = ['peso', 'count', 'firCount']; pivotE.valueLabels = ['Peso [t]', 'Conteggio', 'FIR Univoci']; pivotE.rowLabels = ['Classe', 'Mese', 'Settimana'];
-
-  const pivotF = buildDetailTable(secF, detailRowKeys, detailCollectors);
-  pivotF.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(2); });
-  pivotF.valueKeys = pivotE.valueKeys; pivotF.valueLabels = pivotE.valueLabels; pivotF.rowLabels = pivotE.rowLabels;
-
-  const pivotG = buildDetailTable(aciF, detailRowKeys, detailCollectors);
-  pivotG.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(2); });
-  pivotG.valueKeys = pivotE.valueKeys; pivotG.valueLabels = pivotE.valueLabels; pivotG.rowLabels = pivotE.rowLabels;
-
-  const pivotH = buildPivotTree(assF, [(r) => { const a = getRecordAnnoImmissione(r); return a != null ? String(a) : 'N/D'; }, (r) => getRegione(r), (r) => (r.provincia || 'N/D').trim(), (r) => (r.ragione_sociale || 'N/D').trim()], (r) => getRecordMeseImmissione(r), { count: COUNT_FN, pesoStimato: PESO_STIM_FN });
-  pivotH.valueKeys = ['count', 'pesoStimato']; pivotH.valueLabels = ['Richieste', 'Peso Stimato [t]']; pivotH.rowLabels = ['Anno', 'Regione', 'Provincia', 'Ragione Sociale'];
-
-  // Filter options
   const allSourceRows = [...rete, ...aci, ...sec, ...assegnati];
   const raccoglitori = [...new Set(allSourceRows.map((r) => (r.trasportatore || '').trim()).filter(Boolean))].sort();
   const anni = [...new Set([...rete, ...aci, ...sec].map((r) => getRecordAnno(r)).filter(Boolean), ...assegnati.map((r) => getRecordAnnoImmissione(r)).filter(Boolean))].sort();
   const settimane = [...new Set([...rete, ...aci, ...sec].map((r) => getRecordSettimana(r)).filter(Boolean), ...assegnati.map((r) => getRecordSettimanaImmissione(r)).filter(Boolean))].sort((a, b) => a - b);
-
-  return { pivotA, pivotB, pivotC, pivotD, pivotE, pivotF, pivotG, pivotH, filterOptions: { raccoglitori, anni, settimane } };
+  result.filterOptions = { raccoglitori, anni, settimane };
+  return result;
 }
 
 // Flattening per export Excel

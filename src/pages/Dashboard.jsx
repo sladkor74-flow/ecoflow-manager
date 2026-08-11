@@ -12,22 +12,9 @@ export default function Dashboard() {
   useEffect(() => {
     (async () => {
       try {
-        const [assegnati, rete, aci, sec, terz, alerts] = await Promise.all([
-          base44.entities.Assegnato.list('-created_date', 1),
-          base44.entities.PrimariaRete.list('-created_date', 1),
-          base44.entities.PrimariaAci.list('-created_date', 1),
-          base44.entities.Secondaria.list('-created_date', 1),
-          base44.entities.Terziaria.list('-created_date', 1),
-          base44.functions.invoke('getAlerts', { solo_aperti: true }),
-        ]);
-        setCounts({
-          assegnati: assegnati.length,
-          primarie_rete: rete.length,
-          primarie_aci: aci.length,
-          secondarie: sec.length,
-          terziarie: terz.length,
-        });
-        setAlertCount(alerts?.data?.total || 0);
+        const res = await base44.functions.invoke('getDashboardStats', {});
+        setCounts(res.data.counts);
+        setAlertCount(res.data.alert_count || 0);
       } catch (e) {
         // ignore
       }

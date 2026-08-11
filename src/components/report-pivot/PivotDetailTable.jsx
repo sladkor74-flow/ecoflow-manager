@@ -7,7 +7,7 @@ function fmt(v) {
 }
 
 export default function PivotDetailTable({ pivot, onCellClick }) {
-  if (!pivot || pivot.length === 0) return <div className="text-muted-foreground text-sm py-4">Nessun dato</div>;
+  if (!pivot || !pivot.rows || pivot.rows.length === 0) return <div className="text-muted-foreground text-sm py-4">Nessun dato</div>;
 
   return (
     <div className="border rounded-lg overflow-x-auto">
@@ -19,7 +19,7 @@ export default function PivotDetailTable({ pivot, onCellClick }) {
           </tr>
         </thead>
         <tbody>
-          {pivot.map((row, i) => (
+          {pivot.rows.map((row, i) => (
             <tr key={i} className="border-t hover:bg-muted/30">
               {row.keys.map((k, j) => <td key={j} className="px-3 py-1.5">{k}</td>)}
               {pivot.valueKeys.map((vk) => (

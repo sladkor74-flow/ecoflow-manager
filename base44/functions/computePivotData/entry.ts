@@ -11,8 +11,9 @@ export default async function(req) {
 
     const body = await req.json().catch(() => ({}));
     const filters = body.filters || {};
+    const pivotKeys = body.pivotKey || body.pivotKeys || null;
 
-    const data = await computeAllPivots(base44, filters);
+    const data = await computeAllPivots(base44, filters, pivotKeys);
     return Response.json(data);
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

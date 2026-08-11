@@ -43,7 +43,7 @@ export default async function(req) {
 
     for (const dp of detailPivots) {
       const header = [...dp.p.rowLabels, ...dp.p.valueLabels];
-      const rows = dp.p.map((r) => [...r.keys, ...dp.p.valueKeys.map((vk) => r.values[vk])]);
+      const rows = dp.p.rows.map((r) => [...r.keys, ...dp.p.valueKeys.map((vk) => r.values[vk])]);
       const sheetData = [header, ...rows];
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), dp.name.substring(0, 31));
     }
