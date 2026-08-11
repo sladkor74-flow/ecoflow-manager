@@ -1,0 +1,60 @@
+{
+  "name": "Fornitore",
+  "type": "object",
+  "properties": {
+    "ragione_sociale": {
+      "type": "string"
+    },
+    "tipo": {
+      "type": "string",
+      "enum": [
+        "trasportatore",
+        "impianto",
+        "stoccaggio",
+        "altro"
+      ],
+      "default": "altro"
+    },
+    "piva": {
+      "type": "string"
+    },
+    "codice_fiscale": {
+      "type": "string"
+    },
+    "indirizzo": {
+      "type": "string"
+    },
+    "cap": {
+      "type": "string"
+    },
+    "comune": {
+      "type": "string"
+    },
+    "provincia": {
+      "type": "string"
+    },
+    "regione": {
+      "type": "string"
+    },
+    "email": {
+      "type": "string"
+    },
+    "telefono": {
+      "type": "string"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "attivo",
+        "non_attivo"
+      ],
+      "default": "attivo"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "ragione_sociale"
+  ]
+}

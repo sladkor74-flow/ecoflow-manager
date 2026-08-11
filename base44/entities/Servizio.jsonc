@@ -1,0 +1,23 @@
+{
+  "name": "Servizio",
+  "type": "object",
+  "properties": {
+    "nome": {
+      "type": "string"
+    },
+    "descrizione": {
+      "type": "string"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "attivo",
+        "non_attivo"
+      ],
+      "default": "attivo"
+    }
+  },
+  "required": [
+    "nome"
+  ]
+}

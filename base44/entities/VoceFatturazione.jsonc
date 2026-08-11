@@ -1,0 +1,94 @@
+{
+  "name": "VoceFatturazione",
+  "type": "object",
+  "properties": {
+    "documento_id": {
+      "type": "string"
+    },
+    "tipo": {
+      "type": "string",
+      "enum": [
+        "PASSIVA",
+        "ATTIVA"
+      ],
+      "default": "PASSIVA"
+    },
+    "fornitore_id": {
+      "type": "string"
+    },
+    "fornitore_nome": {
+      "type": "string"
+    },
+    "servizio_id": {
+      "type": "string"
+    },
+    "servizio_nome": {
+      "type": "string"
+    },
+    "eer_codice": {
+      "type": "string"
+    },
+    "classe": {
+      "type": "string"
+    },
+    "descrizione": {
+      "type": "string"
+    },
+    "quantita": {
+      "type": "number"
+    },
+    "unita_misura": {
+      "type": "string"
+    },
+    "tariffa_id": {
+      "type": "string"
+    },
+    "tariffa_valore": {
+      "type": "number"
+    },
+    "totale": {
+      "type": "number"
+    },
+    "origine_dato": {
+      "type": "string",
+      "enum": [
+        "PICKERS",
+        "PLANTS",
+        "SECONDARIE",
+        "TERMINATI_RETE",
+        "ACI",
+        "MANUALE"
+      ]
+    },
+    "record_ids": {
+      "type": "object",
+      "description": "Array di ID record sorgente (max 50)"
+    },
+    "record_count": {
+      "type": "number"
+    },
+    "anno": {
+      "type": "number"
+    },
+    "mese": {
+      "type": "string"
+    },
+    "stato_validazione": {
+      "type": "string",
+      "enum": [
+        "verificato",
+        "da_controllare",
+        "errore"
+      ],
+      "default": "da_controllare"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "documento_id",
+    "quantita",
+    "totale"
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "name": "DocumentoFatturazione",
+  "type": "object",
+  "properties": {
+    "tipo": {
+      "type": "string",
+      "enum": [
+        "PASSIVA",
+        "ATTIVA"
+      ],
+      "default": "PASSIVA"
+    },
+    "anno": {
+      "type": "number"
+    },
+    "mese": {
+      "type": "string"
+    },
+    "data_inizio": {
+      "type": "string",
+      "format": "date"
+    },
+    "data_fine": {
+      "type": "string",
+      "format": "date"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "bozza",
+        "elaborata",
+        "verificata",
+        "approvata",
+        "chiusa"
+      ],
+      "default": "bozza"
+    },
+    "totale": {
+      "type": "number"
+    },
+    "numero_fornitori": {
+      "type": "number"
+    },
+    "numero_voci": {
+      "type": "number"
+    },
+    "voci_errore": {
+      "type": "number"
+    },
+    "data_elaborazione": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data_verifica": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data_approvazione": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data_chiusura": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tipo",
+    "anno",
+    "mese"
+  ]
+}

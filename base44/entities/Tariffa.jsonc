@@ -1,0 +1,63 @@
+{
+  "name": "Tariffa",
+  "type": "object",
+  "properties": {
+    "fornitore_id": {
+      "type": "string"
+    },
+    "fornitore_nome": {
+      "type": "string"
+    },
+    "servizio_id": {
+      "type": "string"
+    },
+    "servizio_nome": {
+      "type": "string"
+    },
+    "classe_materiale": {
+      "type": "string",
+      "description": "P, M, G1, G2 o vuoto per tutte le classi"
+    },
+    "eer_codice": {
+      "type": "string",
+      "description": "Codice EER specifico o vuoto per tutti"
+    },
+    "unita_misura": {
+      "type": "string",
+      "enum": [
+        "\u20ac/t",
+        "\u20ac/viaggio",
+        "\u20ac/vg",
+        "\u20ac/mese"
+      ]
+    },
+    "valore": {
+      "type": "number"
+    },
+    "data_inizio_validita": {
+      "type": "string",
+      "format": "date"
+    },
+    "data_fine_validita": {
+      "type": "string",
+      "format": "date"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "attivo",
+        "non_attivo"
+      ],
+      "default": "attivo"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "fornitore_id",
+    "servizio_id",
+    "unita_misura",
+    "valore"
+  ]
+}

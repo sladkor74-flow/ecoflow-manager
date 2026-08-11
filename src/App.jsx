@@ -16,6 +16,7 @@ import Terziarie from '@/pages/Terziarie';
 import Assegnati from '@/pages/Assegnati';
 import Secondarie from '@/pages/Secondarie';
 import AlertEngine from '@/pages/AlertEngine';
+import Fatturazione from '@/pages/Fatturazione';
 import PrimarieRete from '@/pages/PrimarieRete';
 // Add page imports here
 
@@ -56,6 +57,7 @@ const AuthenticatedApp = () => {
           <Route path="/assegnati" element={<Assegnati />} />
           <Route path="/secondarie" element={<Secondarie />} />
           <Route path="/alert-engine" element={<AlertEngine />} />
+          <Route path="/fatturazione" element={<Fatturazione />} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />

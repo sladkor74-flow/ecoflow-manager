@@ -1,0 +1,26 @@
+{
+  "name": "CodiceEer",
+  "type": "object",
+  "properties": {
+    "codice": {
+      "type": "string"
+    },
+    "descrizione": {
+      "type": "string"
+    },
+    "categoria": {
+      "type": "string"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "attivo",
+        "non_attivo"
+      ],
+      "default": "attivo"
+    }
+  },
+  "required": [
+    "codice"
+  ]
+}
