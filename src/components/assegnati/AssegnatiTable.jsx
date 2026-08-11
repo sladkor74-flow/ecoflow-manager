@@ -18,11 +18,14 @@ const COLUMNS = [
   { key: 'trasportatore', label: 'Trasportatore' },
 ];
 
-export default function AssegnatiTable({ records, loading }) {
+export default function AssegnatiTable({ records, loading, ragioneSocialeFilter }) {
   if (loading) {
     return <div className="flex items-center justify-center py-8 text-muted-foreground">Caricamento ordini assegnati...</div>;
   }
   if (!records || records.length === 0) {
+    if (ragioneSocialeFilter && ragioneSocialeFilter.trim()) {
+      return <div className="text-center py-8 text-muted-foreground border rounded-lg">Non sono presenti ordini aperti per questo produttore</div>;
+    }
     return <div className="text-center py-8 text-muted-foreground border rounded-lg">Nessun ordine assegnato trovato.</div>;
   }
 

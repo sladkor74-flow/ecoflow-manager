@@ -14,7 +14,7 @@ export default function Assegnati() {
   const [loading, setLoading] = useState(true);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [filters, setFilters] = useState({ anno: '', mese: '', regione: '', provincia: '', partner_operativo: '', classe: '', stato: '', data: '' });
+  const [filters, setFilters] = useState({ anno: '', mese: '', regione: '', provincia: '', partner_operativo: '', classe: '', stato: '', data: '', ragione_sociale: '' });
   const [viewMode, setViewMode] = useState('matrix');
 
   const loadData = useCallback(async () => {
@@ -38,6 +38,10 @@ export default function Assegnati() {
         if (filters.partner_operativo && (r.partner_operativo || '').trim() !== filters.partner_operativo) return false;
         if (filters.classe && r.classe !== filters.classe) return false;
         if (filters.stato && (r.stato || '').trim() !== filters.stato) return false;
+        if (filters.ragione_sociale) {
+          const search = filters.ragione_sociale.toLowerCase().trim();
+          if (!(r.ragione_sociale || '').toLowerCase().includes(search)) return false;
+        }
         if (filters.data) {
           const d = r.ordine_immesso_il;
           if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
@@ -76,7 +80,7 @@ export default function Assegnati() {
   };
 
   const hasFilters = Object.values(filters).some(v => v);
-  const resetFilters = () => setFilters({ anno: '', mese: '', regione: '', provincia: '', partner_operativo: '', classe: '' });
+  const resetFilters = () => setFilters({ anno: '', mese: '', regione: '', provincia: '', partner_operativo: '', classe: '', stato: '', data: '', ragione_sociale: '' });
   const opts = data?.filterOptions || {};
 
   return (
@@ -117,6 +121,13 @@ export default function Assegnati() {
               )}
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+              <input
+                type="text"
+                placeholder="Cerca per ragione sociale produttore..."
+                value={filters.ragione_sociale}
+                onChange={e => setFilters(p => ({ ...p, ragione_sociale: e.target.value }))}
+                className="border rounded-md px-3 py-2 text-sm col-span-full"
+              />
               <select value={filters.anno} onChange={e => setFilters(p => ({ ...p, anno: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
                 <option value="">Tutti gli anni</option>
                 {opts.anni?.map(a => <option key={a} value={a}>{a}</option>)}
@@ -157,7 +168,7 @@ export default function Assegnati() {
                 </TabsContent>
                 <TabsContent value="detail" className="space-y-3 mt-3">
                   <h2 className="text-lg font-heading font-semibold">Dettaglio Ordini Assegnati ({records.length})</h2>
-                  <AssegnatiTable records={records} loading={loadingRecords} />
+                  <AssegnatiTable records={records} loading={loadingRecords} ragioneSocialeFilter={filters.ragione_sociale} />
                 </TabsContent>
               </Tabs>
             </div>
