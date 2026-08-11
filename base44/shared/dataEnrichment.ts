@@ -88,9 +88,11 @@ export function enrichRecord(record, entityType) {
     if (meseImm) r.mese_immissione = meseImm;
   }
 
-  // Classe PFU dal prodotto
-  const classe = getClasseFromProdotto(r.prodotto);
-  if (classe) r.classe = classe;
+  // Classe PFU dal prodotto (solo se non già presente dal Excel)
+  if (!r.classe) {
+    const classe = getClasseFromProdotto(r.prodotto);
+    if (classe) r.classe = classe;
+  }
 
   // Regione dalla provincia
   const regione = getRegioneFromProvincia(r.provincia);

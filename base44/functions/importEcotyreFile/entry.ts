@@ -76,8 +76,11 @@ export default async function(req) {
       'id_trasportatore', 'trasportatore', 'regioni', 'mese', 'anno', 'sigla', 'regione'
     ];
 
-    const isAciClasse = (classe) => (classe || '').trim().toLowerCase() === 'pfu autodemolizione';
-    const isAssegnatoStato = (stato) => (stato || '').toLowerCase().includes('assegnato');
+    const isAciClasse = (classe) => {
+      const c = (classe || '').trim().toLowerCase();
+      return c.includes('autodemolizione') || c.includes('aci');
+    };
+    const isAssegnatoStato = (stato) => (stato || '').toLowerCase().trim() === 'assegnato';
 
     let imported = 0, failed = 0, lastError = null;
     let assegnati_importati = 0, assegnati_falliti = 0;
