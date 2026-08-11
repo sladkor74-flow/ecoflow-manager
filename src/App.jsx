@@ -19,6 +19,8 @@ import AlertEngine from '@/pages/AlertEngine';
 import Fatturazione from '@/pages/Fatturazione';
 import PredittivitaSecondarie from '@/pages/PredittivitaSecondarie';
 import PrimarieRete from '@/pages/PrimarieRete';
+import PrimarieAci from '@/pages/PrimarieAci';
+import TodoPage from '@/pages/TodoPage';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -60,6 +62,8 @@ const AuthenticatedApp = () => {
           <Route path="/alert-engine" element={<AlertEngine />} />
           <Route path="/fatturazione" element={<Fatturazione />} />
           <Route path="/predittivita-secondarie" element={<PredittivitaSecondarie />} />
+          <Route path="/primarie-aci" element={<PrimarieAci />} />
+          <Route path="/todo" element={<TodoPage />} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />

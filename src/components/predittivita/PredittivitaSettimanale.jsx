@@ -57,7 +57,7 @@ export default function PredittivitaSettimanale({ data }) {
                                 {imp.piano_settimanale?.[i]?.fornitori.map(f => (
                                   <div key={f.fornitore_id} className="flex justify-between text-xs">
                                     <span className="font-medium">{f.fornitore_nome}</span>
-                                    <span className="text-muted-foreground">{f.kg_previsti.toLocaleString()} kg · {f.viaggi_previsti} viaggi {f.capacita_settimanale > 0 && f.viaggi_previsti > f.capacita_settimanale / (f.capita_settimanale || 1) ? '🔴' : ''}</span>
+                                    <span className="text-muted-foreground">{f.kg_previsti.toLocaleString()} kg · {f.viaggi_previsti} viaggi {f.capacita_settimanale > 0 && f.viaggi_previsti > f.capacita_settimanale ? '🔴' : ''}</span>
                                   </div>
                                 ))}
                                 {(!imp.piano_settimanale?.[i]?.fornitori || imp.piano_settimanale[i].fornitori.length === 0) && <p className="text-xs text-muted-foreground">Nessun fornitore.</p>}
