@@ -9,6 +9,7 @@ export default function Pdr() {
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ provincia: '', trasportatore_principale: '', codice_import: '', id_cliente: '' });
   const [search, setSearch] = useState({ ragione_sociale: '', comune: '', provincia: '', codice_fiscale: '', partita_iva: '', codice_import: '', id_cliente: '' });
+  const [soloAutodemolitori, setSoloAutodemolitori] = useState(false);
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -45,6 +46,7 @@ export default function Pdr() {
       if (filters.trasportatore_principale && r.trasportatore_principale !== filters.trasportatore_principale) return false;
       if (filters.codice_import && r.codice_import !== filters.codice_import) return false;
       if (filters.id_cliente && String(r.id_cliente) !== String(filters.id_cliente)) return false;
+      if (soloAutodemolitori && !String(r.codice_import || '').toLowerCase().startsWith('d')) return false;
       if (!matchSearch(r.ragione_sociale, search.ragione_sociale)) return false;
       if (!matchSearch(r.comune, search.comune)) return false;
       if (!matchSearch(r.provincia, search.provincia)) return false;
@@ -54,13 +56,14 @@ export default function Pdr() {
       if (!matchSearch(r.id_cliente, search.id_cliente)) return false;
       return true;
     });
-  }, [records, filters, search]);
+  }, [records, filters, search, soloAutodemolitori]);
 
   const hasFilters = filters.provincia || filters.trasportatore_principale || filters.codice_import || filters.id_cliente ||
-    Object.values(search).some(v => v);
+    Object.values(search).some(v => v) || soloAutodemolitori;
   const resetFilters = () => {
     setFilters({ provincia: '', trasportatore_principale: '', codice_import: '', id_cliente: '' });
     setSearch({ ragione_sociale: '', comune: '', provincia: '', codice_fiscale: '', partita_iva: '', codice_import: '', id_cliente: '' });
+    setSoloAutodemolitori(false);
   };
 
   return (
@@ -83,11 +86,22 @@ export default function Pdr() {
       <div className="border rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri e ricerca</span>
-          {hasFilters && (
-            <button onClick={resetFilters} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-              <X className="w-3 h-3" /> Reset
-            </button>
-          )}
+          <div className="flex items-center gap-4">
+            <label className="inline-flex items-center gap-2 text-sm font-medium cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={soloAutodemolitori}
+                onChange={e => setSoloAutodemolitori(e.target.checked)}
+                className="w-4 h-4 rounded border-border accent-primary"
+              />
+              Solo Autodemolitori
+            </label>
+            {hasFilters && (
+              <button onClick={resetFilters} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                <X className="w-3 h-3" /> Reset
+              </button>
+            )}
+          </div>
         </div>
         {/* Filtri a tendina */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
