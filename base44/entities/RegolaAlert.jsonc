@@ -34,6 +34,7 @@
         "scostamento_target",
         "ritardo_sla",
         "anomalia_peso",
+        "tratte_autorizzate_classe",
         "custom"
       ],
       "description": "Tipologia di regola"

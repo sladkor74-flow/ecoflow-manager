@@ -141,6 +141,32 @@ function checkRegola(record, regola, entityName) {
     }
   }
 
+  if (tipo === 'tratte_autorizzate_classe') {
+    // config: { classe, campo_origine, campo_destinazione, combinazioni_ammesse: [{origine, destinazione}] }
+    // Per i record della classe specificata, la coppia (origine, destinazione) deve essere una delle combinazioni ammesse.
+    const valClasse = String(record[config.campo_classe || 'classe'] || '').trim().toUpperCase();
+    const expectedClasse = String(config.classe || '').trim().toUpperCase();
+    if (!expectedClasse || valClasse !== expectedClasse) return null; // regola non applicabile
+
+    const valOrigine = String(record[config.campo_origine || 'stoccaggio'] || '').trim().toLowerCase();
+    const valDest = String(record[config.campo_destinazione || 'destinazione'] || '').trim().toLowerCase();
+
+    const ammesse = (config.combinazioni_ammesse || []).map(c => ({
+      origine: String(c.origine || '').trim().toLowerCase(),
+      destinazione: String(c.destinazione || '').trim().toLowerCase(),
+    }));
+
+    const matchOk = ammesse.some(c => valOrigine === c.origine && valDest === c.destinazione);
+
+    if (!matchOk) {
+      const combinazioniTxt = ammesse.map(c => `${c.origine} → ${c.destinazione}`).join('; ');
+      return {
+        titolo: regola.messaggio_alert || `Tratta non autorizzata per classe ${expectedClasse}`,
+        descrizione: `Record ${record.id_ordine || ''}: classe ${valClasse} con origine "${valOrigine}" e destinazione "${valDest}". Combinazioni ammesse: ${combinazioniTxt}.`,
+      };
+    }
+  }
+
   if (tipo === 'anomalia_peso') {
     // config: { soglia_zero: true, soglia_deviazione: 0.5 }
     const pesoEff = record.peso_effettivo;
