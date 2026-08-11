@@ -80,7 +80,7 @@ export default async function(req) {
       const c = (classe || '').trim().toLowerCase();
       const p = (prodotto || '').trim().toLowerCase();
       return c.includes('autodemolizione') || c.includes('aci')
-          || p.includes('autodemolizione') || p.includes('aci');
+          || p.includes('pfu autodemolizione') || p.includes('autodemolizione') || p.includes('aci');
     };
     const isAssegnatoStato = (stato) => (stato || '').toLowerCase().trim() === 'assegnato';
 
