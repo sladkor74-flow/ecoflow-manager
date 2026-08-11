@@ -144,8 +144,12 @@ function checkRegola(record, regola, entityName) {
     // config: { classe, campo_origine, campo_destinazione, combinazioni_ammesse: [{origine, destinazione}] }
     // Per i record della classe specificata, la coppia (origine, destinazione) deve essere una delle combinazioni ammesse.
     const valClasse = String(record[config.campo_classe || 'classe'] || '').trim().toUpperCase();
-    const expectedClasse = String(config.classe || '').trim().toUpperCase();
-    if (!expectedClasse || valClasse !== expectedClasse) return null; // regola non applicabile
+    // Supporta classe singola (config.classe) o multipla (config.classi array); se nessuna specificata, applica a tutti
+    const classiAmmesse = Array.isArray(config.classi) && config.classi.length > 0
+      ? config.classi.map(c => String(c).trim().toUpperCase())
+      : (config.classe ? [String(config.classe).trim().toUpperCase()] : []);
+    if (classiAmmesse.length > 0 && !classiAmmesse.includes(valClasse)) return null;
+    const expectedClasse = classiAmmesse.length > 0 ? classiAmmesse.join('/') : 'qualsiasi';
 
     const rawOrigine = String(record[config.campo_origine || 'stoccaggio'] || '').trim();
     const rawDest = String(record[config.campo_destinazione || 'destinazione'] || '').trim();
@@ -161,9 +165,10 @@ function checkRegola(record, regola, entityName) {
 
     if (!matchOk) {
       const combinazioniTxt = (config.combinazioni_ammesse || []).map(c => `${c.origine} → ${c.destinazione}`).join('; ');
+      const labelOrigine = config.campo_origine || 'stoccaggio';
       return {
         titolo: regola.messaggio_alert || `Tratta non autorizzata per classe ${expectedClasse}`,
-        descrizione: `Record ${record.id_ordine || ''}: classe ${valClasse} con origine "${rawOrigine}" e destinazione "${rawDest}". Combinazioni ammesse: ${combinazioniTxt}.`,
+        descrizione: `Record ${record.id_ordine || ''}: classe ${valClasse} con ${labelOrigine} "${rawOrigine}" e destinazione "${rawDest}". Combinazioni ammesse: ${combinazioniTxt}.`,
       };
     }
   }
