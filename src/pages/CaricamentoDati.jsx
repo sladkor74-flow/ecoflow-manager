@@ -8,6 +8,7 @@ const TIPI_FILE = [
   { key: 'primarie_aci', label: 'Primarie ACI', desc: 'Ritiri da autodemolizioni (foglio TERMINATI ACI)', colore: 'bg-amber-50 border-amber-200' },
   { key: 'secondarie', label: 'Secondarie', desc: 'Viaggi stoccaggio → impianto (foglio SECONDARIE)', colore: 'bg-purple-50 border-purple-200' },
   { key: 'terziarie', label: 'Terziarie', desc: 'Viaggi impianto → cementeria/impianto (foglio TERZIARIE)', colore: 'bg-pink-50 border-pink-200' },
+  { key: 'status', label: 'Status & Target', desc: 'Target mensili per raccoglitore (foglio STATUS) — alimenta la pagina Target Status', colore: 'bg-indigo-50 border-indigo-200' },
 ];
 
 export default function CaricamentoDati() {
@@ -36,13 +37,9 @@ export default function CaricamentoDati() {
     try {
       // 1. Upload del file
       const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      // 2. Import nel backend
-      const res = await base44.functions.invoke('importEcotyreFile', {
-        file_url,
-        tipo_file: tipoKey,
-        nome_file: file.name,
-        replace_existing: true
-      });
+      // 2. Import nel backend (funzione dedicata per status, importEcotyreFile per gli altri)
+      const fnName = tipoKey === 'status' ? 'seedTargetMensile' : 'importEcotyreFile';
+      const res = await base44.functions.invoke(fnName, { file_url, tipo_file: tipoKey, nome_file: file.name, replace_existing: true });
       setRisultato(prev => ({ ...prev, [tipoKey]: { ok: true, data: res.data } }));
       caricaLogs();
     } catch (e) {
@@ -99,7 +96,9 @@ export default function CaricamentoDati() {
                   {res.ok ? <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />}
                   <span>
                     {res.ok
-                      ? `${res.data.righe_importate} righe importate${res.data.righe_fallite > 0 ? ` (${res.data.righe_fallite} fallite)` : ''}`
+                      ? (res.data.records_creati != null
+                        ? `${res.data.records_creati} target caricati (${res.data.raccoglitori} raccoglitori)`
+                        : `${res.data.righe_importate} righe importate${res.data.righe_fallite > 0 ? ` (${res.data.righe_fallite} fallite)` : ''}`)
                       : `Errore: ${res.error}`}
                   </span>
                 </div>

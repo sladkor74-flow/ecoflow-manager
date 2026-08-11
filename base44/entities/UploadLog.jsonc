@@ -12,7 +12,8 @@
         "terziarie",
         "gommisti",
         "dichiarazioni",
-        "fatturazione"
+        "fatturazione",
+        "status"
       ],
       "description": "Tipologia di file caricato"
     },
