@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid } from 'lucide-react';
+import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Search } from 'lucide-react';
 import AssegnatiUpload from '@/components/assegnati/AssegnatiUpload';
 import AssegnatiKpi from '@/components/assegnati/AssegnatiKpi';
 import AssegnatiMatrix from '@/components/assegnati/AssegnatiMatrix';
@@ -15,7 +15,10 @@ export default function Assegnati() {
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [filters, setFilters] = useState({ anno: '', mese: '', regione: '', provincia: '', partner_operativo: '', classe: '', stato: '', data: '', ragione_sociale: '' });
+  const [ragioneSocialeInput, setRagioneSocialeInput] = useState('');
   const [viewMode, setViewMode] = useState('matrix');
+
+  const applyRagioneSociale = () => setFilters(p => ({ ...p, ragione_sociale: ragioneSocialeInput }));
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -80,7 +83,7 @@ export default function Assegnati() {
   };
 
   const hasFilters = Object.values(filters).some(v => v);
-  const resetFilters = () => setFilters({ anno: '', mese: '', regione: '', provincia: '', partner_operativo: '', classe: '', stato: '', data: '', ragione_sociale: '' });
+  const resetFilters = () => { setFilters({ anno: '', mese: '', regione: '', provincia: '', partner_operativo: '', classe: '', stato: '', data: '', ragione_sociale: '' }); setRagioneSocialeInput(''); };
   const opts = data?.filterOptions || {};
 
   return (
@@ -121,13 +124,19 @@ export default function Assegnati() {
               )}
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              <input
-                type="text"
-                placeholder="Cerca per ragione sociale produttore..."
-                value={filters.ragione_sociale}
-                onChange={e => setFilters(p => ({ ...p, ragione_sociale: e.target.value }))}
-                className="border rounded-md px-3 py-2 text-sm col-span-full"
-              />
+              <div className="col-span-full flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Cerca per ragione sociale produttore..."
+                  value={ragioneSocialeInput}
+                  onChange={e => setRagioneSocialeInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') applyRagioneSociale(); }}
+                  className="border rounded-md px-3 py-2 text-sm flex-1"
+                />
+                <button onClick={applyRagioneSociale} className="inline-flex items-center gap-1.5 px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 whitespace-nowrap">
+                  <Search className="w-4 h-4" /> Cerca
+                </button>
+              </div>
               <select value={filters.anno} onChange={e => setFilters(p => ({ ...p, anno: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
                 <option value="">Tutti gli anni</option>
                 {opts.anni?.map(a => <option key={a} value={a}>{a}</option>)}
