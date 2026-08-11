@@ -175,7 +175,6 @@ export async function computeAllPivots(base44, filters, pivotKeys = null) {
   const needAci = keys.some(k => ['C','G'].includes(k));
   const needSec = keys.some(k => ['D','F'].includes(k));
   const needAss = keys.some(k => ['H'].includes(k));
-  const needFilterOptions = !pivotKeys; // only on full load
 
   const [rete, aci, sec, assegnati] = await Promise.all([
     needRete ? base44.asServiceRole.entities.PrimariaRete.list('-created_date', 10000) : Promise.resolve([]),
