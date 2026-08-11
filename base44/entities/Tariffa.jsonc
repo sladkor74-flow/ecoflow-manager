@@ -26,6 +26,8 @@
       "type": "string",
       "enum": [
         "\u20ac/t",
+        "\u20ac/ton",
+        "\u20ac/kg",
         "\u20ac/viaggio",
         "\u20ac/vg",
         "\u20ac/mese"
@@ -52,11 +54,34 @@
     },
     "note": {
       "type": "string"
+    },
+    "direzione": {
+      "type": "string",
+      "enum": [
+        "PASSIVA",
+        "ATTIVA"
+      ],
+      "default": "PASSIVA"
+    },
+    "tipologia": {
+      "type": "string",
+      "enum": [
+        "RETE",
+        "ACI",
+        "EXTRA_RACCOLTA"
+      ],
+      "description": "Tipologia fatturazione attiva"
+    },
+    "cliente": {
+      "type": "string",
+      "description": "Cliente/fatturante per fatturazione attiva"
+    },
+    "regione": {
+      "type": "string",
+      "description": "Regione per tariffe specifiche (attiva)"
     }
   },
   "required": [
-    "fornitore_id",
-    "servizio_id",
     "unita_misura",
     "valore"
   ]

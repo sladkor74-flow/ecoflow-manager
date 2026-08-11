@@ -1,0 +1,37 @@
+{
+  "name": "ImpiantoTargetSecondaria",
+  "type": "object",
+  "properties": {
+    "nome_impianto": {
+      "type": "string"
+    },
+    "target": {
+      "type": "number",
+      "description": "Target quantitativo (kg)"
+    },
+    "data_inizio": {
+      "type": "string",
+      "format": "date"
+    },
+    "data_fine": {
+      "type": "string",
+      "format": "date",
+      "description": "Data obiettivo (default 18 dicembre)"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "attivo",
+        "non_attivo"
+      ],
+      "default": "attivo"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "nome_impianto",
+    "target"
+  ]
+}

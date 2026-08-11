@@ -1,0 +1,66 @@
+{
+  "name": "PianificazioneSettimanale",
+  "type": "object",
+  "properties": {
+    "impianto_id": {
+      "type": "string"
+    },
+    "impianto_nome": {
+      "type": "string"
+    },
+    "fornitore_id": {
+      "type": "string"
+    },
+    "fornitore_nome": {
+      "type": "string"
+    },
+    "settimana_numero": {
+      "type": "number"
+    },
+    "data_inizio": {
+      "type": "string",
+      "format": "date"
+    },
+    "data_fine": {
+      "type": "string",
+      "format": "date"
+    },
+    "kg_previsti": {
+      "type": "number"
+    },
+    "kg_effettivi": {
+      "type": "number"
+    },
+    "viaggi_previsti": {
+      "type": "number"
+    },
+    "viaggi_effettivi": {
+      "type": "number"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "da_programmare",
+        "programmatato",
+        "completato",
+        "annullato"
+      ],
+      "default": "da_programmare"
+    },
+    "anno": {
+      "type": "number"
+    },
+    "modificato_manuale": {
+      "type": "boolean",
+      "default": false
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "impianto_id",
+    "settimana_numero",
+    "data_inizio"
+  ]
+}

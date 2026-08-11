@@ -10,6 +10,15 @@
       ],
       "default": "PASSIVA"
     },
+    "tipologia": {
+      "type": "string",
+      "enum": [
+        "RETE",
+        "ACI",
+        "EXTRA_RACCOLTA"
+      ],
+      "description": "Tipologia fatturazione attiva"
+    },
     "anno": {
       "type": "number"
     },
@@ -31,9 +40,14 @@
         "elaborata",
         "verificata",
         "approvata",
+        "esportata",
         "chiusa"
       ],
       "default": "bozza"
+    },
+    "cliente": {
+      "type": "string",
+      "description": "Cliente/fatturante (fatturazione attiva)"
     },
     "totale": {
       "type": "number"
@@ -47,6 +61,9 @@
     "voci_errore": {
       "type": "number"
     },
+    "voci_sospese": {
+      "type": "number"
+    },
     "data_elaborazione": {
       "type": "string",
       "format": "date-time"
@@ -56,6 +73,10 @@
       "format": "date-time"
     },
     "data_approvazione": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data_esportazione": {
       "type": "string",
       "format": "date-time"
     },

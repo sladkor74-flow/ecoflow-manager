@@ -3,7 +3,7 @@ import { Link, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import {
   LayoutDashboard, Upload, ClipboardList, Truck, Factory,
-  Ship, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield
+  Ship, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { label: 'Report Mensile', path: '/report-mensile', icon: BarChart3 },
   { label: 'Alert & Controllo', path: '/alert-engine', icon: Shield },
   { label: 'Fatturazione', path: '/fatturazione', icon: FileText },
+  { label: 'Predittività Secondarie', path: '/predittivita-secondarie', icon: LineChart },
   { label: 'To-Do List', path: '/todo', icon: CheckSquare },
 ];
 

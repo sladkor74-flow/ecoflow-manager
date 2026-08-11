@@ -1,0 +1,35 @@
+{
+  "name": "FornitoreSecondaria",
+  "type": "object",
+  "properties": {
+    "nome": {
+      "type": "string"
+    },
+    "impianto_id": {
+      "type": "string",
+      "description": "ID impianto target"
+    },
+    "impianto_nome": {
+      "type": "string"
+    },
+    "quota_target": {
+      "type": "number",
+      "description": "Quota target del fornitore (kg)"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "attivo",
+        "non_attivo"
+      ],
+      "default": "attivo"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "nome",
+    "impianto_id"
+  ]
+}

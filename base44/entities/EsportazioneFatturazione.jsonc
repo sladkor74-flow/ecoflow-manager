@@ -1,0 +1,67 @@
+{
+  "name": "EsportazioneFatturazione",
+  "type": "object",
+  "properties": {
+    "tipologia": {
+      "type": "string",
+      "enum": [
+        "RETE",
+        "ACI",
+        "EXTRA_RACCOLTA",
+        "TUTTO"
+      ]
+    },
+    "direzione": {
+      "type": "string",
+      "enum": [
+        "PASSIVA",
+        "ATTIVA"
+      ],
+      "default": "ATTIVA"
+    },
+    "anno": {
+      "type": "number"
+    },
+    "mese": {
+      "type": "string"
+    },
+    "documento_ids": {
+      "type": "object",
+      "description": "Array di ID documenti esportati"
+    },
+    "file_url": {
+      "type": "string"
+    },
+    "data_esportazione": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "utente": {
+      "type": "string"
+    },
+    "nome_file": {
+      "type": "string"
+    },
+    "versione": {
+      "type": "string",
+      "default": "1.0"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "completata",
+        "fallita"
+      ],
+      "default": "completata"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tipologia",
+    "anno",
+    "mese",
+    "nome_file"
+  ]
+}
