@@ -43,6 +43,7 @@ export default function TargetDashboard() {
           onChange={(e) => setMese(e.target.value)}
           className="text-sm border rounded-md px-3 py-1.5 bg-background"
         >
+          <option value="">Tutto l'anno</option>
           {MESI.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
       </div>
