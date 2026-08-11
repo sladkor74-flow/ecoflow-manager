@@ -4,6 +4,7 @@ import { base44 } from '@/api/base44Client';
 import { ClipboardList, Truck, Factory, Ship, Upload, TrendingUp, AlertTriangle } from 'lucide-react';
 import AlertBadge from '@/components/alerts/AlertBadge';
 import TargetDashboard from '@/components/dashboard/TargetDashboard';
+import TargetAlertsPanel from '@/components/dashboard/TargetAlertsPanel';
 
 export default function Dashboard() {
   const [counts, setCounts] = useState({});
@@ -66,6 +67,14 @@ export default function Dashboard() {
           <h2 className="font-heading font-semibold text-lg">Target Mensili per Regione</h2>
         </div>
         <TargetDashboard />
+      </div>
+
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <AlertTriangle className="w-5 h-5 text-amber-500" />
+          <h2 className="font-heading font-semibold text-lg">Avvisi Target Trasportatori</h2>
+        </div>
+        <TargetAlertsPanel />
       </div>
 
       <div className="border rounded-lg p-5 bg-muted/30">

@@ -1,0 +1,47 @@
+{
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "target_alerts_check",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "check_targets": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkTargetAlerts",
+            "args": {
+              "crea_alerts": true
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Controlla target mensili",
+            "description": "Genera alert per target non raggiunti o a rischio"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Controllo Target Mensili",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 9 * * *",
+      "one_time_date": null,
+      "timezone": "Europe/Rome",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "description": "Esegue giornalmente il controllo dei target mensili di raccolta e genera alert per trasportatori che non hanno raggiunto o sono a rischio di non raggiungere la soglia"
+}
