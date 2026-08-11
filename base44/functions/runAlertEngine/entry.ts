@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetrics } from "../../shared/primarieReteAnalytics.ts";
+import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 
 // Motore di controllo: scansiona i record di un modulo e genera Alert per le regole violate.
 // Payload: { modulo, record_ids?, solo_aperti?: boolean }
@@ -105,14 +106,12 @@ function checkRegola(record, regola, entityName) {
     const valDest = String(record[config.campo_destinazione || 'destinazione'] || '').trim();
     const expectedOrigine = String(config.valore_origine || '').trim();
 
-    const matchOrigine = config.case_sensitive
-      ? valOrigine === expectedOrigine
-      : valOrigine.toLowerCase() === expectedOrigine.toLowerCase();
+    const matchOrigine = normalizzaRagioneSociale(valOrigine) === normalizzaRagioneSociale(expectedOrigine);
 
     if (!matchOrigine) return null; // regola non applicabile a questo record
 
-    const ammesse = (config.destinazioni_ammesse || []).map(d => String(d).trim().toLowerCase());
-    const destOk = ammesse.some(d => valDest.toLowerCase() === d);
+    const ammesse = (config.destinazioni_ammesse || []).map(d => normalizzaRagioneSociale(d));
+    const destOk = ammesse.some(d => normalizzaRagioneSociale(valDest) === d);
 
     if (!destOk) {
       return {
@@ -128,10 +127,10 @@ function checkRegola(record, regola, entityName) {
     const expectedClasse = String(config.valore_classe || '').trim().toUpperCase();
     if (valClasse !== expectedClasse) return null;
 
-    const valOrigine = String(record[config.campo_origine || 'stoccaggio'] || '').trim().toLowerCase();
-    const valDest = String(record[config.campo_destinazione || 'destinazione'] || '').trim().toLowerCase();
-    const origOk = String(config.origine_ammessa || '').trim().toLowerCase();
-    const destOk = String(config.destinazione_ammessa || '').trim().toLowerCase();
+    const valOrigine = normalizzaRagioneSociale(record[config.campo_origine || 'stoccaggio']);
+    const valDest = normalizzaRagioneSociale(record[config.campo_destinazione || 'destinazione']);
+    const origOk = normalizzaRagioneSociale(config.origine_ammessa);
+    const destOk = normalizzaRagioneSociale(config.destinazione_ammessa);
 
     if (valOrigine !== origOk || valDest !== destOk) {
       return {
@@ -148,21 +147,23 @@ function checkRegola(record, regola, entityName) {
     const expectedClasse = String(config.classe || '').trim().toUpperCase();
     if (!expectedClasse || valClasse !== expectedClasse) return null; // regola non applicabile
 
-    const valOrigine = String(record[config.campo_origine || 'stoccaggio'] || '').trim().toLowerCase();
-    const valDest = String(record[config.campo_destinazione || 'destinazione'] || '').trim().toLowerCase();
+    const rawOrigine = String(record[config.campo_origine || 'stoccaggio'] || '').trim();
+    const rawDest = String(record[config.campo_destinazione || 'destinazione'] || '').trim();
+    const valOrigine = normalizzaRagioneSociale(rawOrigine);
+    const valDest = normalizzaRagioneSociale(rawDest);
 
     const ammesse = (config.combinazioni_ammesse || []).map(c => ({
-      origine: String(c.origine || '').trim().toLowerCase(),
-      destinazione: String(c.destinazione || '').trim().toLowerCase(),
+      origine: normalizzaRagioneSociale(c.origine),
+      destinazione: normalizzaRagioneSociale(c.destinazione),
     }));
 
     const matchOk = ammesse.some(c => valOrigine === c.origine && valDest === c.destinazione);
 
     if (!matchOk) {
-      const combinazioniTxt = ammesse.map(c => `${c.origine} → ${c.destinazione}`).join('; ');
+      const combinazioniTxt = (config.combinazioni_ammesse || []).map(c => `${c.origine} → ${c.destinazione}`).join('; ');
       return {
         titolo: regola.messaggio_alert || `Tratta non autorizzata per classe ${expectedClasse}`,
-        descrizione: `Record ${record.id_ordine || ''}: classe ${valClasse} con origine "${valOrigine}" e destinazione "${valDest}". Combinazioni ammesse: ${combinazioniTxt}.`,
+        descrizione: `Record ${record.id_ordine || ''}: classe ${valClasse} con origine "${rawOrigine}" e destinazione "${rawDest}". Combinazioni ammesse: ${combinazioniTxt}.`,
       };
     }
   }
