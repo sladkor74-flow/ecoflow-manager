@@ -44,7 +44,7 @@ export default function Secondarie() {
           const reg = r.regione || getRegioneFromProvincia(r.provincia);
           if ((reg || '').trim() !== filters.regione) return false;
         }
-        if (filters.stato && (r.stato || '').trim() !== filters.stato) return false;
+        if (filters.stato && (r.stato || '').trim().toLowerCase() !== filters.stato.toLowerCase()) return false;
         if (filters.data) {
           const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
           if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
@@ -100,14 +100,19 @@ export default function Secondarie() {
   const resetFilters = () => setFilters({ stoccaggio: '', destinazione: '', mese: '', settimana: '', classe: '', trasportatore: '', anno: '', provincia: '', regione: '', stato: '', data: '' });
   const opts = data?.filterOptions || {};
 
-  // Stati garantiti sempre presenti nel filtro, anche senza record
-  const GUARANTEED_STATI = ['Assegnato', 'Eseguito'];
-  const statiOptions = [...new Set([...(opts.stati || []), ...GUARANTEED_STATI])].sort();
+  // Stati garantiti sempre presenti nel filtro, anche senza record (valori normalizzati in minuscolo)
+  const GUARANTEED_STATI = ['assegnato', 'eseguito'];
+  const statiOptions = [...new Set([
+    ...(opts.stati || []).map(s => (s || '').trim().toLowerCase()),
+    ...GUARANTEED_STATI
+  ])].sort();
+  const prettyStato = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 
   // Messaggio vuoto personalizzato in base allo stato selezionato
   const getEmptyMessage = () => {
-    if (filters.stato === 'Eseguito') return 'Non sono presenti secondarie in stato di eseguito';
-    if (filters.stato === 'Assegnato') return 'Non sono presenti secondarie in stato di assegnato';
+    const s = (filters.stato || '').toLowerCase();
+    if (s === 'eseguito') return 'Non sono presenti secondarie in stato di eseguito';
+    if (s === 'assegnato') return 'Non sono presenti secondarie in stato di assegnato';
     return 'Nessun trasporto secondario trovato.';
   };
 
@@ -156,7 +161,7 @@ export default function Secondarie() {
               </select>
               <select value={filters.stato} onChange={e => setFilters(p => ({ ...p, stato: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
                 <option value="">Tutti gli stati</option>
-                {statiOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                {statiOptions.map(s => <option key={s} value={s}>{prettyStato(s)}</option>)}
               </select>
               <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" />
               <select value={filters.stoccaggio} onChange={e => setFilters(p => ({ ...p, stoccaggio: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">

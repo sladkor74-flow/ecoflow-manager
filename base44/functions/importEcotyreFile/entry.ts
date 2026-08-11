@@ -49,7 +49,11 @@ export default async function(req) {
         } else if (val instanceof Date) {
           obj[entityField] = val.toISOString();
         } else {
-          obj[entityField] = String(val).trim();
+          if (entityField === 'stato') {
+            obj[entityField] = String(val).trim().toLowerCase();
+          } else {
+            obj[entityField] = String(val).trim();
+          }
         }
       }
       return obj;

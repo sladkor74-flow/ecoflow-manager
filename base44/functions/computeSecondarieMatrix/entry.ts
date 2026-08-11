@@ -28,7 +28,7 @@ export default async function(req) {
         const reg = r.regione || getRegioneFromProvincia(r.provincia);
         if ((reg || '').trim() !== filters.regione) return false;
       }
-      if (filters.stato && (r.stato || '').trim() !== filters.stato) return false;
+      if (filters.stato && (r.stato || '').trim().toLowerCase() !== filters.stato.toLowerCase()) return false;
       if (filters.data) {
         const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
         if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
