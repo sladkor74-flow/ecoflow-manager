@@ -13,8 +13,9 @@ export default async function(req) {
     const body = await req.json();
     const filters = body.filters || {};
     const mode = body.mode || 'detail';
+    const entityName = body.entity || 'Assegnato';
 
-    const all = await base44.asServiceRole.entities.Assegnato.list('-created_date', 10000);
+    const all = await base44.asServiceRole.entities[entityName].list('-created_date', 10000);
 
     const filtered = all.filter(r => {
       if (filters.anno && String(r.anno) !== String(filters.anno)) return false;
@@ -71,7 +72,7 @@ export default async function(req) {
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
     return Response.json({
       file_base64: buf,
-      filename: `assegnati_${mode}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      filename: `${entityName.toLowerCase()}_${mode}_${new Date().toISOString().slice(0, 10)}.xlsx`,
       count: filtered.length,
     });
   } catch (error) {

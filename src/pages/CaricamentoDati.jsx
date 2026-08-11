@@ -3,8 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, Clock, Trash2 } from 'lucide-react';
 
 const TIPI_FILE = [
-  { key: 'primarie_rete', label: 'Primarie Rete', desc: 'Ritiri completati dai gommisti (foglio TERMINATI RETE) — estrae automaticamente gli ordini in stato Assegnato', colore: 'bg-green-50 border-green-200' },
-  { key: 'primarie_aci', label: 'Primarie ACI', desc: 'Ritiri da autodemolizioni (foglio TERMINATI ACI)', colore: 'bg-amber-50 border-amber-200' },
+  { key: 'primarie', label: 'Primarie', desc: 'File unico delle primarie (un solo foglio con tutto). Suddivide automaticamente le righe in Primarie Rete, Primarie ACI, Assegnati Rete e Assegnati ACI in base a stato e classe.', colore: 'bg-green-50 border-green-200' },
   { key: 'secondarie', label: 'Secondarie', desc: 'Viaggi stoccaggio → impianto (foglio SECONDARIE)', colore: 'bg-purple-50 border-purple-200' },
   { key: 'terziarie', label: 'Terziarie', desc: 'Viaggi impianto → cementeria/impianto (foglio TERZIARIE)', colore: 'bg-pink-50 border-pink-200' },
   { key: 'extra_raccolta', label: 'Extra Raccolta', desc: 'Raccolte extra fuori rete Ecotyre (foglio EXTRA RACCOLTA)', colore: 'bg-teal-50 border-teal-200' },
@@ -98,7 +97,9 @@ export default function CaricamentoDati() {
                     {res.ok
                       ? (res.data.records_creati != null
                         ? `${res.data.records_creati} target caricati (${res.data.raccoglitori} raccoglitori)`
-                        : `${res.data.righe_importate} righe importate${res.data.righe_fallite > 0 ? ` (${res.data.righe_fallite} fallite)` : ''}${res.data.assegnati_importati != null && res.data.assegnati_importati > 0 ? ` · ${res.data.assegnati_importati} assegnati estratti` : ''}`)
+                        : (res.data.primarie_rete_importati != null
+                          ? `Rete: ${res.data.primarie_rete_importati} · ACI: ${res.data.primarie_aci_importati} · Ass. Rete: ${res.data.assegnati_importati} · Ass. ACI: ${res.data.assegnati_aci_importati}`
+                          : `${res.data.righe_importate} righe importate${res.data.righe_fallite > 0 ? ` (${res.data.righe_fallite} fallite)` : ''}`))
                       : `Errore: ${res.error}`}
                   </span>
                 </div>

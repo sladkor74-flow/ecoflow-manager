@@ -14,6 +14,7 @@ import TargetStatus from '@/pages/TargetStatus';
 import ReportMensile from '@/pages/ReportMensile';
 import Terziarie from '@/pages/Terziarie';
 import Assegnati from '@/pages/Assegnati';
+import AssegnatiAci from '@/pages/AssegnatiAci';
 import Secondarie from '@/pages/Secondarie';
 import AlertEngine from '@/pages/AlertEngine';
 import Fatturazione from '@/pages/Fatturazione';
@@ -59,6 +60,7 @@ const AuthenticatedApp = () => {
           <Route path="/primarie-rete" element={<PrimarieRete />} />
           <Route path="/terziarie" element={<Terziarie />} />
           <Route path="/assegnati" element={<Assegnati />} />
+          <Route path="/assegnati-aci" element={<AssegnatiAci />} />
           <Route path="/secondarie" element={<Secondarie />} />
           <Route path="/alert-engine" element={<AlertEngine />} />
           <Route path="/fatturazione" element={<Fatturazione />} />

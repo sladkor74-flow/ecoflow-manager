@@ -62,103 +62,134 @@ export default async function(req) {
     // 2b. Enrichment: calcola colonne derivate (mese, settimana, anno, classe, regione, nr_giorni, scadenza, esito tempi)
     const enriched = enrichRecords(mapped, config.entity);
 
-    // 3. Sostituzione o incremento
-    let toImport = enriched;
-    if (replace_existing === false) {
-      // Modalità incrementale: salta record con id_ordine già presente
-      const existing = await base44.asServiceRole.entities[config.entity].list('-created_date', 10000);
-      const existingIds = new Set(existing.map(r => r.id_ordine).filter(Boolean));
-      toImport = enriched.filter(r => !existingIds.has(r.id_ordine));
-    } else {
-      await base44.asServiceRole.entities[config.entity].deleteMany({});
-    }
-
-    // 4. bulkCreate a chunk di 100 con pausa e retry per limiti di traffico
+    // 3. Split e importazione
     const CHUNK = 100;
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-    let imported = 0;
-    let failed = 0;
-    let lastError = null;
-    for (let i = 0; i < toImport.length; i += CHUNK) {
-      const chunk = toImport.slice(i, i + CHUNK);
-      let success = false;
-      for (let attempt = 0; attempt < 3 && !success; attempt++) {
-        try {
-          await base44.asServiceRole.entities[config.entity].bulkCreate(chunk);
-          imported += chunk.length;
-          success = true;
-        } catch (e) {
-          lastError = e.message || String(e);
-          if (attempt < 2) await sleep(3000 * (attempt + 1));
-        }
+
+    // Campi per entità Assegnato/AssegnatoAci (sottoinsieme dei campi Primaria)
+    const CAMPI_ASSEGNATO = [
+      'id_ordine', 'stato', 'ordine_immesso_il', 'id_cliente', 'ragione_sociale',
+      'id_pdr', 'punto_di_raccolta', 'indirizzo', 'cap', 'comune', 'provincia',
+      'codice_regione', 'macroarea', 'codice_prodotto', 'prodotto', 'classe',
+      'cer', 'tipo_contenitori', 'quantita_richiesta', 'quantita_ritirata',
+      'peso_stimato', 'peso_effettivo', 'key_account', 'partner_operativo',
+      'id_trasportatore', 'trasportatore', 'regioni', 'mese', 'anno', 'sigla', 'regione'
+    ];
+
+    const isAciClasse = (classe) => (classe || '').trim().toLowerCase() === 'pfu autodemolizione';
+    const isAssegnatoStato = (stato) => (stato || '').toLowerCase().includes('assegnato');
+
+    let imported = 0, failed = 0, lastError = null;
+    let assegnati_importati = 0, assegnati_falliti = 0;
+    let assegnati_aci_importati = 0, assegnati_aci_falliti = 0;
+    let primarie_rete_importati = 0, primarie_rete_falliti = 0;
+    let primarie_aci_importati = 0, primarie_aci_falliti = 0;
+
+    const importBucket = async (rows, entityName, campi = null) => {
+      let toImport = rows;
+      if (replace_existing === false) {
+        const existing = await base44.asServiceRole.entities[entityName].list('-created_date', 10000);
+        const existingIds = new Set(existing.map(r => r.id_ordine).filter(Boolean));
+        toImport = rows.filter(r => !existingIds.has(r.id_ordine));
+      } else {
+        await base44.asServiceRole.entities[entityName].deleteMany({});
       }
-      if (!success) failed += chunk.length;
-      await sleep(1000);
-    }
-
-    // 4b. Estrazione automatica Assegnati da Primarie Rete (righe con stato "assegnato")
-    let assegnati_importati = 0;
-    let assegnati_falliti = 0;
-    if (tipo_file === 'primarie_rete') {
-      const CAMPI_ASSEGNATO = [
-        'id_ordine', 'stato', 'ordine_immesso_il', 'id_cliente', 'ragione_sociale',
-        'id_pdr', 'punto_di_raccolta', 'indirizzo', 'cap', 'comune', 'provincia',
-        'codice_regione', 'macroarea', 'codice_prodotto', 'prodotto', 'classe',
-        'cer', 'tipo_contenitori', 'quantita_richiesta', 'quantita_ritirata',
-        'peso_stimato', 'peso_effettivo', 'key_account', 'partner_operativo',
-        'id_trasportatore', 'trasportatore', 'regioni', 'mese', 'anno', 'sigla', 'regione'
-      ];
-      const assegnatiRows = enriched
-        .filter(r => (r.stato || '').toLowerCase().includes('assegnato'))
-        .map(r => {
-          const obj = {};
-          for (const f of CAMPI_ASSEGNATO) obj[f] = r[f] ?? null;
-          return obj;
-        })
-        .filter(r => r.id_ordine);
-
-      if (assegnatiRows.length > 0) {
-        let assegnatiToImport = assegnatiRows;
-        if (replace_existing === false) {
-          const existingAss = await base44.asServiceRole.entities.Assegnato.list('-created_date', 10000);
-          const existingAssIds = new Set(existingAss.map(r => r.id_ordine).filter(Boolean));
-          assegnatiToImport = assegnatiRows.filter(r => !existingAssIds.has(r.id_ordine));
-        } else {
-          await base44.asServiceRole.entities.Assegnato.deleteMany({});
-        }
-
-        for (let i = 0; i < assegnatiToImport.length; i += CHUNK) {
-          const chunk = assegnatiToImport.slice(i, i + CHUNK);
-          let success = false;
-          for (let attempt = 0; attempt < 3 && !success; attempt++) {
-            try {
-              await base44.asServiceRole.entities.Assegnato.bulkCreate(chunk);
-              assegnati_importati += chunk.length;
-              success = true;
-            } catch (e) {
-              if (attempt < 2) await sleep(3000 * (attempt + 1));
-            }
+      const records = campi
+        ? toImport.map(r => { const o = {}; for (const f of campi) o[f] = r[f] ?? null; return o; }).filter(r => r.id_ordine)
+        : toImport.filter(r => r.id_ordine);
+      let imp = 0, fail = 0;
+      for (let i = 0; i < records.length; i += CHUNK) {
+        const chunk = records.slice(i, i + CHUNK);
+        let success = false;
+        for (let attempt = 0; attempt < 3 && !success; attempt++) {
+          try {
+            await base44.asServiceRole.entities[entityName].bulkCreate(chunk);
+            imp += chunk.length;
+            success = true;
+          } catch (e) {
+            lastError = e.message || String(e);
+            if (attempt < 2) await sleep(3000 * (attempt + 1));
           }
-          if (!success) assegnati_falliti += chunk.length;
-          await sleep(1000);
         }
+        if (!success) fail += chunk.length;
+        await sleep(1000);
+      }
+      return { imp, fail };
+    };
+
+    if (config.splitByStatoClasse) {
+      // File primarie unico: split in 4 entità basato su stato (col B) + classe (col P)
+      const bucketRete = [], bucketAci = [], bucketAssRete = [], bucketAssAci = [];
+      for (const r of enriched) {
+        if (!r.id_ordine) continue;
+        const aci = isAciClasse(r.classe);
+        const ass = isAssegnatoStato(r.stato);
+        if (ass && !aci) bucketAssRete.push(r);
+        else if (ass && aci) bucketAssAci.push(r);
+        else if (!aci) bucketRete.push(r);
+        else bucketAci.push(r);
+      }
+
+      const r1 = await importBucket(bucketRete, 'PrimariaRete');
+      primarie_rete_importati = r1.imp; primarie_rete_falliti = r1.fail;
+      const r2 = await importBucket(bucketAci, 'PrimariaAci');
+      primarie_aci_importati = r2.imp; primarie_aci_falliti = r2.fail;
+      const r3 = await importBucket(bucketAssRete, 'Assegnato', CAMPI_ASSEGNATO);
+      assegnati_importati = r3.imp; assegnati_falliti = r3.fail;
+      const r4 = await importBucket(bucketAssAci, 'AssegnatoAci', CAMPI_ASSEGNATO);
+      assegnati_aci_importati = r4.imp; assegnati_aci_falliti = r4.fail;
+      imported = primarie_rete_importati + primarie_aci_importati;
+      failed = primarie_rete_falliti + primarie_aci_falliti;
+    } else {
+      // Logica standard (singola entità)
+      let toImport = enriched;
+      if (replace_existing === false) {
+        const existing = await base44.asServiceRole.entities[config.entity].list('-created_date', 10000);
+        const existingIds = new Set(existing.map(r => r.id_ordine).filter(Boolean));
+        toImport = enriched.filter(r => !existingIds.has(r.id_ordine));
+      } else {
+        await base44.asServiceRole.entities[config.entity].deleteMany({});
+      }
+      for (let i = 0; i < toImport.length; i += CHUNK) {
+        const chunk = toImport.slice(i, i + CHUNK);
+        let success = false;
+        for (let attempt = 0; attempt < 3 && !success; attempt++) {
+          try {
+            await base44.asServiceRole.entities[config.entity].bulkCreate(chunk);
+            imported += chunk.length;
+            success = true;
+          } catch (e) {
+            lastError = e.message || String(e);
+            if (attempt < 2) await sleep(3000 * (attempt + 1));
+          }
+        }
+        if (!success) failed += chunk.length;
+        await sleep(1000);
       }
     }
 
     // 5. Log
     const esito = failed === 0 ? 'successo' : (imported > 0 ? 'parziale' : 'errore');
+    const totaleDaImportare = config.splitByStatoClasse
+      ? primarie_rete_importati + primarie_aci_importati + assegnati_importati + assegnati_aci_importati
+      : enriched.length;
+    const messaggio = config.splitByStatoClasse
+      ? `Rete: ${primarie_rete_importati} | ACI: ${primarie_aci_importati} | Ass. Rete: ${assegnati_importati} | Ass. ACI: ${assegnati_aci_importati} (foglio: ${sheetName})`
+      : `${imported} righe importate su ${enriched.length} da importare (foglio: ${sheetName})`;
     await base44.asServiceRole.entities.UploadLog.create({
       tipo_file, nome_file: nome_file || 'N/D', file_url,
       righe_importate: imported, righe_fallite: failed, esito,
-      messaggio: `${imported} righe importate su ${toImport.length} da importare (foglio: ${sheetName})`,
-      periodo_riferimento: periodo_riferimento || ''
+      messaggio, periodo_riferimento: periodo_riferimento || ''
     });
 
     return Response.json({
       tipo_file, entity: config.entity, foglio: sheetName,
-      righe_lette: rawRows.length, righe_mappate: mapped.length, righe_da_importare: toImport.length,
+      righe_lette: rawRows.length, righe_mappate: mapped.length, righe_da_importare: totaleDaImportare,
       righe_importate: imported, righe_fallite: failed, esito, lastError,
-      assegnati_importati, assegnati_falliti
+      assegnati_importati, assegnati_falliti,
+      assegnati_aci_importati, assegnati_aci_falliti,
+      primarie_rete_importati, primarie_rete_falliti,
+      primarie_aci_importati, primarie_aci_falliti
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

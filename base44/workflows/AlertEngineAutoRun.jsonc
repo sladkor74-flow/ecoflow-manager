@@ -1,6 +1,6 @@
 {
   "name": "Alert Engine Auto-Run",
-  "description": "Esegue automaticamente il motore di alert dopo ogni caricamento dati nei moduli Secondarie, Primarie Rete/ACI, Terziarie e Assegnati",
+  "description": "Esegue automaticamente il motore di alert dopo ogni caricamento dati nei moduli Secondarie, Primarie (Rete/ACI), Terziarie e Assegnati",
   "trigger": {
     "config": {
       "trigger_type": "entity",
@@ -9,7 +9,7 @@
         "create"
       ]
     },
-    "condition": "${ (.trigger.data.tipo_file // \"\") | IN(\"secondarie\",\"primarie_rete\",\"primarie_aci\",\"terziarie\",\"assegnati\") }"
+    "condition": "${ (.trigger.data.tipo_file // \"\") | IN(\"secondarie\",\"primarie_rete\",\"primarie_aci\",\"terziarie\",\"assegnati\",\"primarie\") }"
   },
   "definition": {
     "document": {
@@ -20,7 +20,54 @@
     },
     "do": [
       {
-        "run_engine": {
+        "check_tipo": {
+          "switch": [
+            {
+              "when": "${ .trigger.data.tipo_file == \"primarie\" }",
+              "then": "run_rete"
+            },
+            {
+              "when": "${ true }",
+              "then": "run_single"
+            }
+          ],
+          "x-base44": {
+            "title": "Verifica tipo file"
+          }
+        }
+      },
+      {
+        "run_rete": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runAlertEngine",
+            "args": {
+              "modulo": "primarie_rete"
+            }
+          },
+          "then": "run_aci",
+          "x-base44": {
+            "title": "Alert su Primarie Rete"
+          }
+        }
+      },
+      {
+        "run_aci": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runAlertEngine",
+            "args": {
+              "modulo": "primarie_aci"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Alert su Primarie ACI"
+          }
+        }
+      },
+      {
+        "run_single": {
           "call": "invoke_backend_function",
           "with": {
             "function_name": "runAlertEngine",
@@ -30,8 +77,7 @@
           },
           "then": "end",
           "x-base44": {
-            "title": "Esegui motore alert",
-            "description": "Scansiona il modulo caricato"
+            "title": "Esegui motore alert"
           }
         }
       }

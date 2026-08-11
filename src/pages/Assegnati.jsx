@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Search } from 'lucide-react';
-import AssegnatiUpload from '@/components/assegnati/AssegnatiUpload';
 import AssegnatiKpi from '@/components/assegnati/AssegnatiKpi';
 import AssegnatiMatrix from '@/components/assegnati/AssegnatiMatrix';
 import AssegnatiTable from '@/components/assegnati/AssegnatiTable';
 import ProvinceRanking from '@/components/assegnati/ProvinceRanking';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-export default function Assegnati() {
+export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Rete — Backlog Richieste', description = 'Ordini in stato "assegnato" di classe diversa da PFU Autodemolizione, derivati automaticamente dal caricamento delle Primarie.' }) {
   const [data, setData] = useState(null);
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -23,7 +22,7 @@ export default function Assegnati() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await base44.functions.invoke('computeAssegnatiMatrix', { filters });
+      const res = await base44.functions.invoke('computeAssegnatiMatrix', { filters, entity });
       setData(res.data);
     } catch (e) { console.error(e); }
     setLoading(false);
@@ -32,7 +31,7 @@ export default function Assegnati() {
   const loadRecords = useCallback(async () => {
     setLoadingRecords(true);
     try {
-      const all = await base44.entities.Assegnato.list('-ordine_immesso_il', 10000);
+      const all = await base44.entities[entity].list('-ordine_immesso_il', 10000);
       const filtered = all.filter(r => {
         if (filters.anno && String(r.anno) !== String(filters.anno)) return false;
         if (filters.mese && r.mese !== filters.mese) return false;
@@ -62,7 +61,7 @@ export default function Assegnati() {
   // Auto-refresh on new uploads
   useEffect(() => {
     const unsub = base44.entities.UploadLog.subscribe((event) => {
-      if (event.type === 'create' && event.data?.tipo_file === 'assegnati') loadData();
+      if (event.type === 'create' && event.data?.tipo_file === 'primarie') loadData();
     });
     return unsub;
   }, [loadData]);
@@ -70,7 +69,7 @@ export default function Assegnati() {
   const handleExport = async (mode) => {
     setExporting(true);
     try {
-      const res = await base44.functions.invoke('exportAssegnati', { filters, mode });
+      const res = await base44.functions.invoke('exportAssegnati', { filters, mode, entity });
       const blob = await (await fetch(`data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${res.data.file_base64}`)).blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -90,8 +89,8 @@ export default function Assegnati() {
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-heading font-bold">Assegnati — Backlog Richieste</h1>
-          <p className="text-muted-foreground mt-1">Gestione e analisi delle richieste di ritiro aperte/in lavorazione dal portale Ecotyre.</p>
+          <h1 className="text-2xl lg:text-3xl font-heading font-bold">{title}</h1>
+          <p className="text-muted-foreground mt-1">{description}</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => handleExport('matrix')} disabled={exporting} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent disabled:opacity-50">
@@ -102,8 +101,6 @@ export default function Assegnati() {
           </button>
         </div>
       </div>
-
-      <AssegnatiUpload onImported={loadData} />
 
       {loading ? (
         <div className="flex items-center justify-center py-12 text-muted-foreground">

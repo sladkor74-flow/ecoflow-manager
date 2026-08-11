@@ -3,13 +3,14 @@ import { Link, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import {
   LayoutDashboard, Upload, ClipboardList, Truck, Factory,
-  Ship, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart } from
+  Ship, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart, Car } from
 'lucide-react';
 
 const NAV_ITEMS = [
 { label: 'Dashboard', path: '/', icon: LayoutDashboard },
 { label: 'Caricamento Dati', path: '/caricamento-dati', icon: Upload },
-{ label: 'Assegnati', path: '/assegnati', icon: ClipboardList },
+{ label: 'Assegnati Rete', path: '/assegnati', icon: ClipboardList },
+{ label: 'Assegnati ACI', path: '/assegnati-aci', icon: Car },
 { label: 'Primarie Rete', path: '/primarie-rete', icon: Truck },
 { label: 'Primarie ACI', path: '/primarie-aci', icon: Factory },
 { label: 'Secondarie', path: '/secondarie', icon: Truck },

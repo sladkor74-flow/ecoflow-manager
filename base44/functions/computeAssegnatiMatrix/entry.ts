@@ -11,8 +11,9 @@ export default async function(req) {
 
     const body = await req.json();
     const filters = body.filters || {};
+    const entityName = body.entity || 'Assegnato';
 
-    const all = await base44.asServiceRole.entities.Assegnato.list('-created_date', 10000);
+    const all = await base44.asServiceRole.entities[entityName].list('-created_date', 10000);
 
     // Applica filtri
     const filtered = all.filter(r => {
