@@ -15,7 +15,7 @@ export default function Secondarie() {
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
-  const [filters, setFilters] = useState({ stoccaggio: '', destinazione: '', mese: '', settimana: '', classe: '', trasportatore: '', anno: '' });
+  const [filters, setFilters] = useState({ stoccaggio: '', destinazione: '', mese: '', settimana: '', classe: '', trasportatore: '', anno: '', provincia: '' });
   const [viewMode, setViewMode] = useState('matrix');
 
   const loadData = useCallback(async () => {
@@ -38,6 +38,7 @@ export default function Secondarie() {
         if (filters.settimana && String(r.settimane) !== String(filters.settimana)) return false;
         if (filters.classe && r.classe !== filters.classe) return false;
         if (filters.trasportatore && (r.trasportatore || '').trim() !== filters.trasportatore) return false;
+        if (filters.provincia && (r.provincia || '').trim() !== filters.provincia) return false;
         if (filters.anno) {
           const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
           const dt = d ? new Date(d) : null;
@@ -86,7 +87,7 @@ export default function Secondarie() {
   };
 
   const hasFilters = Object.values(filters).some(v => v);
-  const resetFilters = () => setFilters({ stoccaggio: '', destinazione: '', mese: '', settimana: '', classe: '', trasportatore: '', anno: '' });
+  const resetFilters = () => setFilters({ stoccaggio: '', destinazione: '', mese: '', settimana: '', classe: '', trasportatore: '', anno: '', provincia: '' });
   const opts = data?.filterOptions || {};
 
   return (
@@ -127,7 +128,7 @@ export default function Secondarie() {
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
               <select value={filters.stoccaggio} onChange={e => setFilters(p => ({ ...p, stoccaggio: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
                 <option value="">Tutte le origini</option>
                 {opts.stoccaggi?.map(s => <option key={s} value={s}>{s}</option>)}
@@ -135,6 +136,10 @@ export default function Secondarie() {
               <select value={filters.destinazione} onChange={e => setFilters(p => ({ ...p, destinazione: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
                 <option value="">Tutte le destinazioni</option>
                 {opts.destinazioni?.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <select value={filters.provincia} onChange={e => setFilters(p => ({ ...p, provincia: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
+                <option value="">Tutte le province</option>
+                {opts.province?.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
               <select value={filters.mese} onChange={e => setFilters(p => ({ ...p, mese: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
                 <option value="">Tutti i mesi</option>

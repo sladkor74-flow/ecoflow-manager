@@ -1,15 +1,35 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Loader2, RefreshCw, Truck, Factory, Package } from 'lucide-react';
+import { Loader2, RefreshCw, Truck, Factory, Package, Filter, X } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useTableSort } from '@/hooks/useTableSort';
+import SortHeader from '@/components/shared/SortHeader';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+
+const DETAIL_COLUMNS = [
+  { key: 'id_ordine', label: 'ID Ordine' },
+  { key: 'ragione_sociale', label: 'Ragione Sociale' },
+  { key: 'provincia', label: 'Provincia' },
+  { key: 'destinazione', label: 'Destinazione' },
+  { key: 'classe', label: 'Classe' },
+  { key: 'quantita_richiesta', label: 'Q.Rich', format: 'number' },
+  { key: 'quantita_ritirata', label: 'Q.Ritir', format: 'number' },
+  { key: 'peso_effettivo', label: 'Kg', format: 'number' },
+  { key: 'mese', label: 'Mese' },
+  { key: 'trasportatore', label: 'Trasportatore' },
+  { key: 'ordine_chiuso_il', label: 'Chiuso il', format: 'date' },
+  { key: 'stato', label: 'Stato' },
+];
 
 export default function PrimarieAci() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterMese, setFilterMese] = useState(null);
   const [filterDestinazione, setFilterDestinazione] = useState(null);
+  const [filterProvincia, setFilterProvincia] = useState(null);
+  const [filterTrasportatore, setFilterTrasportatore] = useState(null);
+  const [filterData, setFilterData] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -23,12 +43,23 @@ export default function PrimarieAci() {
   useEffect(() => { load(); }, [load]);
 
   const destinazioni = [...new Set(records.map(r => r.destinazione).filter(Boolean))].sort();
+  const province = [...new Set(records.map(r => (r.provincia || '').trim()).filter(Boolean))].sort();
+  const trasportatori = [...new Set(records.map(r => (r.trasportatore || '').trim()).filter(Boolean))].sort();
 
   const filtered = records.filter(r => {
     if (filterMese && r.mese !== filterMese) return false;
     if (filterDestinazione && r.destinazione !== filterDestinazione) return false;
+    if (filterProvincia && (r.provincia || '').trim() !== filterProvincia) return false;
+    if (filterTrasportatore && (r.trasportatore || '').trim() !== filterTrasportatore) return false;
+    if (filterData) {
+      const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+      if (!d || new Date(d).toISOString().slice(0, 10) !== filterData) return false;
+    }
     return true;
   });
+
+  // Aggiorna i record ordinati per il dettaglio
+  const sortedDetail = useTableSort(filtered, 'ordine_chiuso_il', 'desc');
 
   const totalKg = filtered.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
   const totalRichiesti = filtered.reduce((s, r) => s + (r.quantita_richiesta || 0), 0);
@@ -91,19 +122,34 @@ export default function PrimarieAci() {
       </div>
 
       {/* Filtri */}
-      <div className="flex flex-wrap gap-3 items-center">
-        <span className="text-sm font-medium">Filtri:</span>
-        <select value={filterMese || ''} onChange={e => setFilterMese(e.target.value || null)} className="border rounded-md px-3 py-1.5 text-sm">
-          <option value="">Tutti i mesi</option>
-          {MESI.map(m => <option key={m} value={m}>{m}</option>)}
-        </select>
-        <select value={filterDestinazione || ''} onChange={e => setFilterDestinazione(e.target.value || null)} className="border rounded-md px-3 py-1.5 text-sm">
-          <option value="">Tutte le destinazioni</option>
-          {destinazioni.map(d => <option key={d} value={d}>{d}</option>)}
-        </select>
-        {(filterMese || filterDestinazione) && (
-          <button onClick={() => { setFilterMese(null); setFilterDestinazione(null); }} className="text-xs text-red-600 hover:underline">Reset filtri</button>
-        )}
+      <div className="border rounded-lg p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri rapidi</span>
+          {(filterMese || filterDestinazione || filterProvincia || filterTrasportatore || filterData) && (
+            <button onClick={() => { setFilterMese(null); setFilterDestinazione(null); setFilterProvincia(null); setFilterTrasportatore(null); setFilterData(''); }} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+              <X className="w-3 h-3" /> Reset
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          <select value={filterMese || ''} onChange={e => setFilterMese(e.target.value || null)} className="border rounded-md px-3 py-2 text-sm">
+            <option value="">Tutti i mesi</option>
+            {MESI.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+          <select value={filterDestinazione || ''} onChange={e => setFilterDestinazione(e.target.value || null)} className="border rounded-md px-3 py-2 text-sm">
+            <option value="">Tutte le destinazioni</option>
+            {destinazioni.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+          <select value={filterProvincia || ''} onChange={e => setFilterProvincia(e.target.value || null)} className="border rounded-md px-3 py-2 text-sm">
+            <option value="">Tutte le province</option>
+            {province.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select value={filterTrasportatore || ''} onChange={e => setFilterTrasportatore(e.target.value || null)} className="border rounded-md px-3 py-2 text-sm">
+            <option value="">Tutti i trasportatori</option>
+            {trasportatori.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <input type="date" value={filterData} onChange={e => setFilterData(e.target.value)} className="border rounded-md px-3 py-2 text-sm" placeholder="Data chiusura" />
+        </div>
       </div>
 
       <Tabs defaultValue="destinazioni">
@@ -169,36 +215,25 @@ export default function PrimarieAci() {
           <div className="border rounded-lg overflow-x-auto max-h-[600px]">
             <table className="w-full text-xs">
               <thead className="bg-muted sticky top-0"><tr>
-                <th className="text-left px-2 py-2 font-semibold">ID Ordine</th>
-                <th className="text-left px-2 py-2 font-semibold">Ragione Sociale</th>
-                <th className="text-left px-2 py-2 font-semibold">Provincia</th>
-                <th className="text-left px-2 py-2 font-semibold">Destinazione</th>
-                <th className="text-left px-2 py-2 font-semibold">Classe</th>
-                <th className="text-right px-2 py-2 font-semibold">Q.Rich</th>
-                <th className="text-right px-2 py-2 font-semibold">Q.Ritir</th>
-                <th className="text-right px-2 py-2 font-semibold">Kg</th>
-                <th className="text-left px-2 py-2 font-semibold">Mese</th>
-                <th className="text-left px-2 py-2 font-semibold">Stato</th>
+                {DETAIL_COLUMNS.map((col) => (
+                  <SortHeader key={col.key} col={col} sortKey={sortedDetail.sortKey} sortDir={sortedDetail.sortDir} onSort={sortedDetail.toggleSort} className="px-2 py-2 text-xs" />
+                ))}
               </tr></thead>
               <tbody>
-                {filtered.slice(0, 500).map((r, i) => (
+                {sortedDetail.sorted.slice(0, 500).map((r, i) => (
                   <tr key={r.id} className={`border-t hover:bg-muted/30 ${i % 2 ? 'bg-muted/10' : ''}`}>
-                    <td className="px-2 py-1.5 font-mono">{r.id_ordine}</td>
-                    <td className="px-2 py-1.5 truncate max-w-[200px]">{r.ragione_sociale}</td>
-                    <td className="px-2 py-1.5">{r.provincia}</td>
-                    <td className="px-2 py-1.5 truncate max-w-[150px]">{r.destinazione}</td>
-                    <td className="px-2 py-1.5">{r.classe}</td>
-                    <td className="px-2 py-1.5 text-right">{r.quantita_richiesta}</td>
-                    <td className="px-2 py-1.5 text-right">{r.quantita_ritirata}</td>
-                    <td className="px-2 py-1.5 text-right font-medium">{(r.peso_effettivo || 0).toLocaleString()}</td>
-                    <td className="px-2 py-1.5">{r.mese}</td>
-                    <td className="px-2 py-1.5">{r.stato}</td>
+                    {DETAIL_COLUMNS.map((col) => {
+                      let val = r[col.key];
+                      if (col.format === 'number') val = val != null ? val.toLocaleString('it-IT') : '';
+                      else if (col.format === 'date') val = val ? new Date(val).toLocaleDateString('it-IT') : '';
+                      return <td key={col.key} className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''}`}>{val ?? ''}</td>;
+                    })}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {filtered.length > 500 && <p className="text-xs text-muted-foreground mt-2">Mostrati primi 500 di {filtered.length.toLocaleString()} record.</p>}
+          {sortedDetail.sorted.length > 500 && <p className="text-xs text-muted-foreground mt-2">Mostrati primi 500 di {sortedDetail.sorted.length.toLocaleString()} record.</p>}
         </TabsContent>
       </Tabs>
     </div>

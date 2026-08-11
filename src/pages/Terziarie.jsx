@@ -27,8 +27,8 @@ export default function Terziarie() {
   const [loading, setLoading] = useState(true);
   const [loadingGiac, setLoadingGiac] = useState(true);
   const [exporting, setExporting] = useState(false);
-  const [filters, setFilters] = useState({ impianto: '', destinazione: '', mese: '', trasportatore: '', materiale: '', anno: '' });
-  const [filterOptions, setFilterOptions] = useState({ impianti: [], destinazioni: [], trasportatori: [], anni: [] });
+  const [filters, setFilters] = useState({ impianto: '', destinazione: '', mese: '', trasportatore: '', materiale: '', anno: '', provincia: '' });
+  const [filterOptions, setFilterOptions] = useState({ impianti: [], destinazioni: [], trasportatori: [], anni: [], province: [] });
 
   const loadGiacenze = useCallback(async () => {
     setLoadingGiac(true);
@@ -48,6 +48,7 @@ export default function Terziarie() {
         impianti: [...new Set(all.map(r => (r.unita_locale_origine || '').trim()).filter(Boolean))].sort(),
         destinazioni: [...new Set(all.map(r => (r.destinazione || '').trim()).filter(Boolean))].sort(),
         trasportatori: [...new Set(all.map(r => (r.trasportatore || '').trim()).filter(Boolean))].sort(),
+        province: [...new Set(all.map(r => (r.provincia || '').trim()).filter(Boolean))].sort(),
         anni: [...new Set(all.map(r => {
           const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
           if (!d) return null;
@@ -59,6 +60,7 @@ export default function Terziarie() {
       const filtered = all.filter((r) => {
         if (filters.impianto && (r.unita_locale_origine || '').trim() !== filters.impianto) return false;
         if (filters.destinazione && (r.destinazione || '').trim() !== filters.destinazione) return false;
+        if (filters.provincia && (r.provincia || '').trim() !== filters.provincia) return false;
         if (filters.mese && getMeseFromRecord(r) !== filters.mese) return false;
         if (filters.trasportatore && (r.trasportatore || '').trim() !== filters.trasportatore) return false;
         if (filters.materiale && getMateriale(r) !== filters.materiale) return false;
@@ -109,7 +111,7 @@ export default function Terziarie() {
   };
 
   const hasFilters = Object.values(filters).some(v => v);
-  const resetFilters = () => setFilters({ impianto: '', destinazione: '', mese: '', trasportatore: '', materiale: '', anno: '' });
+  const resetFilters = () => setFilters({ impianto: '', destinazione: '', mese: '', trasportatore: '', materiale: '', anno: '', provincia: '' });
 
   return (
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
@@ -135,7 +137,7 @@ export default function Terziarie() {
             </button>
           )}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-3">
           <select value={filters.impianto} onChange={e => setFilters(p => ({ ...p, impianto: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
             <option value="">Tutti gli impianti</option>
             {filterOptions.impianti.map(i => <option key={i} value={i}>{i}</option>)}
@@ -143,6 +145,10 @@ export default function Terziarie() {
           <select value={filters.destinazione} onChange={e => setFilters(p => ({ ...p, destinazione: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
             <option value="">Tutte le destinazioni</option>
             {filterOptions.destinazioni.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+          <select value={filters.provincia} onChange={e => setFilters(p => ({ ...p, provincia: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
+            <option value="">Tutte le province</option>
+            {filterOptions.province.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
           <select value={filters.mese} onChange={e => setFilters(p => ({ ...p, mese: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
             <option value="">Tutti i mesi</option>

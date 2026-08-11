@@ -1,4 +1,6 @@
 import React from 'react';
+import { useTableSort } from '@/hooks/useTableSort';
+import SortHeader from '@/components/shared/SortHeader';
 
 const COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
@@ -23,6 +25,8 @@ const COLUMNS = [
 ];
 
 export default function SecondarieTable({ records, loading }) {
+  const { sorted, sortKey, sortDir, toggleSort } = useTableSort(records || [], 'ordine_chiuso_il', 'desc');
+
   if (loading) {
     return <div className="flex items-center justify-center py-8 text-muted-foreground">Caricamento trasporti secondari...</div>;
   }
@@ -36,12 +40,12 @@ export default function SecondarieTable({ records, loading }) {
         <thead className="bg-muted">
           <tr>
             {COLUMNS.map((col) => (
-              <th key={col.key} className="text-left px-3 py-2.5 font-medium whitespace-nowrap">{col.label}</th>
+              <SortHeader key={col.key} col={col} sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
             ))}
           </tr>
         </thead>
         <tbody>
-          {records.map((r) => (
+          {sorted.map((r) => (
             <tr key={r.id} className="border-t hover:bg-muted/50">
               {COLUMNS.map((col) => {
                 let val = r[col.key];

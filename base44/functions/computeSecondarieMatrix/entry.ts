@@ -22,6 +22,7 @@ export default async function(req) {
       if (filters.settimana && String(r.settimane) !== String(filters.settimana)) return false;
       if (filters.classe && r.classe !== filters.classe) return false;
       if (filters.trasportatore && (r.trasportatore || '').trim() !== filters.trasportatore) return false;
+      if (filters.provincia && (r.provincia || '').trim() !== filters.provincia) return false;
       if (filters.anno) {
         const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
         const dt = d ? new Date(d) : null;
@@ -105,6 +106,7 @@ export default async function(req) {
       settimane: [...new Set(all.map(r => r.settimane).filter(Boolean))].sort((a: any, b: any) => a - b),
       classi: [...new Set(all.map(r => r.classe).filter(Boolean))].sort(),
       trasportatori: [...new Set(all.map(r => (r.trasportatore || '').trim()).filter(Boolean))].sort(),
+      province: [...new Set(all.map(r => (r.provincia || '').trim()).filter(Boolean))].sort(),
       anni: [...new Set(all.map(r => {
         const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
         if (!d) return null;
