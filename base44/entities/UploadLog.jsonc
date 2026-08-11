@@ -8,10 +8,12 @@
         "assegnati",
         "primarie_rete",
         "primarie_aci",
+        "primarie",
         "secondarie",
         "terziarie",
         "extra_raccolta",
         "gommisti",
+        "pdr",
         "dichiarazioni",
         "fatturazione",
         "status"

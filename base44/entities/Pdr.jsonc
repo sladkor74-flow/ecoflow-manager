@@ -1,0 +1,93 @@
+{
+  "name": "Pdr",
+  "type": "object",
+  "properties": {
+    "id_cliente": {
+      "type": "number",
+      "description": "ID Cliente Ecotyre"
+    },
+    "codice_esterno": {
+      "type": "string"
+    },
+    "ragione_sociale": {
+      "type": "string",
+      "description": "Ragione sociale gommista/autodemolitore"
+    },
+    "sede_legale": {
+      "type": "string"
+    },
+    "cap": {
+      "type": "string"
+    },
+    "comune": {
+      "type": "string"
+    },
+    "provincia": {
+      "type": "string",
+      "description": "Provincia sede legale"
+    },
+    "nazione": {
+      "type": "string"
+    },
+    "riferimento": {
+      "type": "string"
+    },
+    "tel": {
+      "type": "string"
+    },
+    "fax": {
+      "type": "string"
+    },
+    "email": {
+      "type": "string"
+    },
+    "codice_fiscale": {
+      "type": "string"
+    },
+    "partita_iva": {
+      "type": "string"
+    },
+    "codice_import": {
+      "type": "string",
+      "description": "Codice import (colonna P)"
+    },
+    "id_pdr": {
+      "type": "number",
+      "description": "ID Punto di Raccolta"
+    },
+    "codice_esterno_pdr": {
+      "type": "string"
+    },
+    "descrizione_pdr": {
+      "type": "string"
+    },
+    "indirizzo_pdr": {
+      "type": "string"
+    },
+    "cap_pdr": {
+      "type": "string"
+    },
+    "comune_pdr": {
+      "type": "string"
+    },
+    "provincia_pdr": {
+      "type": "string"
+    },
+    "sospeso": {
+      "type": "string"
+    },
+    "key_account": {
+      "type": "string"
+    },
+    "partner_operativo": {
+      "type": "string"
+    },
+    "trasportatore_principale": {
+      "type": "string",
+      "description": "Trasportatore principale assegnato"
+    }
+  },
+  "required": [
+    "id_cliente"
+  ]
+}
