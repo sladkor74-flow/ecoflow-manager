@@ -7,8 +7,8 @@ import PdrTable from '@/components/pdr/PdrTable';
 export default function Pdr() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ provincia: '', trasportatore_principale: '', codice_import: '' });
-  const [search, setSearch] = useState({ ragione_sociale: '', comune: '', provincia: '', codice_fiscale: '', partita_iva: '', codice_import: '' });
+  const [filters, setFilters] = useState({ provincia: '', trasportatore_principale: '', codice_import: '', id_cliente: '' });
+  const [search, setSearch] = useState({ ragione_sociale: '', comune: '', provincia: '', codice_fiscale: '', partita_iva: '', codice_import: '', id_cliente: '' });
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -33,7 +33,8 @@ export default function Pdr() {
     const province = [...new Set(records.map(r => r.provincia).filter(Boolean))].sort();
     const trasportatori = [...new Set(records.map(r => r.trasportatore_principale).filter(Boolean))].sort();
     const codiciImport = [...new Set(records.map(r => r.codice_import).filter(Boolean))].sort();
-    return { province, trasportatori, codiciImport };
+    const idClienti = [...new Set(records.map(r => r.id_cliente).filter(v => v !== null && v !== undefined && v !== ''))].sort((a, b) => a - b);
+    return { province, trasportatori, codiciImport, idClienti };
   }, [records]);
 
   // Filtri + ricerca applicati
@@ -43,21 +44,23 @@ export default function Pdr() {
       if (filters.provincia && r.provincia !== filters.provincia) return false;
       if (filters.trasportatore_principale && r.trasportatore_principale !== filters.trasportatore_principale) return false;
       if (filters.codice_import && r.codice_import !== filters.codice_import) return false;
+      if (filters.id_cliente && String(r.id_cliente) !== String(filters.id_cliente)) return false;
       if (!matchSearch(r.ragione_sociale, search.ragione_sociale)) return false;
       if (!matchSearch(r.comune, search.comune)) return false;
       if (!matchSearch(r.provincia, search.provincia)) return false;
       if (!matchSearch(r.codice_fiscale, search.codice_fiscale)) return false;
       if (!matchSearch(r.partita_iva, search.partita_iva)) return false;
       if (!matchSearch(r.codice_import, search.codice_import)) return false;
+      if (!matchSearch(r.id_cliente, search.id_cliente)) return false;
       return true;
     });
   }, [records, filters, search]);
 
-  const hasFilters = filters.provincia || filters.trasportatore_principale || filters.codice_import ||
+  const hasFilters = filters.provincia || filters.trasportatore_principale || filters.codice_import || filters.id_cliente ||
     Object.values(search).some(v => v);
   const resetFilters = () => {
-    setFilters({ provincia: '', trasportatore_principale: '', codice_import: '' });
-    setSearch({ ragione_sociale: '', comune: '', provincia: '', codice_fiscale: '', partita_iva: '', codice_import: '' });
+    setFilters({ provincia: '', trasportatore_principale: '', codice_import: '', id_cliente: '' });
+    setSearch({ ragione_sociale: '', comune: '', provincia: '', codice_fiscale: '', partita_iva: '', codice_import: '', id_cliente: '' });
   };
 
   return (
@@ -87,7 +90,11 @@ export default function Pdr() {
           )}
         </div>
         {/* Filtri a tendina */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <select value={filters.id_cliente} onChange={e => setFilters(p => ({ ...p, id_cliente: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
+            <option value="">Tutti gli ID Cliente (filtro)</option>
+            {filterOptions.idClienti.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
           <select value={filters.provincia} onChange={e => setFilters(p => ({ ...p, provincia: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
             <option value="">Tutte le province (filtro)</option>
             {filterOptions.province.map(p => <option key={p} value={p}>{p}</option>)}
@@ -103,7 +110,11 @@ export default function Pdr() {
         </div>
 
         {/* Ricerca per campi separati */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">ID Cliente</label>
+            <input type="text" value={search.id_cliente} onChange={e => setSearch(p => ({ ...p, id_cliente: e.target.value }))} placeholder="Cerca..." className="w-full border rounded-md px-3 py-2 text-sm" />
+          </div>
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Ragione Sociale</label>
             <input type="text" value={search.ragione_sociale} onChange={e => setSearch(p => ({ ...p, ragione_sociale: e.target.value }))} placeholder="Cerca..." className="w-full border rounded-md px-3 py-2 text-sm" />
