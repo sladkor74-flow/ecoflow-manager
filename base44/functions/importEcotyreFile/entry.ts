@@ -96,6 +96,55 @@ export default async function(req) {
       await sleep(1000);
     }
 
+    // 4b. Estrazione automatica Assegnati da Primarie Rete (righe con stato "assegnato")
+    let assegnati_importati = 0;
+    let assegnati_falliti = 0;
+    if (tipo_file === 'primarie_rete') {
+      const CAMPI_ASSEGNATO = [
+        'id_ordine', 'stato', 'ordine_immesso_il', 'id_cliente', 'ragione_sociale',
+        'id_pdr', 'punto_di_raccolta', 'indirizzo', 'cap', 'comune', 'provincia',
+        'codice_regione', 'macroarea', 'codice_prodotto', 'prodotto', 'classe',
+        'cer', 'tipo_contenitori', 'quantita_richiesta', 'quantita_ritirata',
+        'peso_stimato', 'peso_effettivo', 'key_account', 'partner_operativo',
+        'id_trasportatore', 'trasportatore', 'regioni', 'mese', 'anno', 'sigla', 'regione'
+      ];
+      const assegnatiRows = enriched
+        .filter(r => (r.stato || '').toLowerCase().includes('assegnato'))
+        .map(r => {
+          const obj = {};
+          for (const f of CAMPI_ASSEGNATO) obj[f] = r[f] ?? null;
+          return obj;
+        })
+        .filter(r => r.id_ordine);
+
+      if (assegnatiRows.length > 0) {
+        let assegnatiToImport = assegnatiRows;
+        if (replace_existing === false) {
+          const existingAss = await base44.asServiceRole.entities.Assegnato.list('-created_date', 10000);
+          const existingAssIds = new Set(existingAss.map(r => r.id_ordine).filter(Boolean));
+          assegnatiToImport = assegnatiRows.filter(r => !existingAssIds.has(r.id_ordine));
+        } else {
+          await base44.asServiceRole.entities.Assegnato.deleteMany({});
+        }
+
+        for (let i = 0; i < assegnatiToImport.length; i += CHUNK) {
+          const chunk = assegnatiToImport.slice(i, i + CHUNK);
+          let success = false;
+          for (let attempt = 0; attempt < 3 && !success; attempt++) {
+            try {
+              await base44.asServiceRole.entities.Assegnato.bulkCreate(chunk);
+              assegnati_importati += chunk.length;
+              success = true;
+            } catch (e) {
+              if (attempt < 2) await sleep(3000 * (attempt + 1));
+            }
+          }
+          if (!success) assegnati_falliti += chunk.length;
+          await sleep(1000);
+        }
+      }
+    }
+
     // 5. Log
     const esito = failed === 0 ? 'successo' : (imported > 0 ? 'parziale' : 'errore');
     await base44.asServiceRole.entities.UploadLog.create({
@@ -108,7 +157,8 @@ export default async function(req) {
     return Response.json({
       tipo_file, entity: config.entity, foglio: sheetName,
       righe_lette: rawRows.length, righe_mappate: mapped.length, righe_da_importare: toImport.length,
-      righe_importate: imported, righe_fallite: failed, esito, lastError
+      righe_importate: imported, righe_fallite: failed, esito, lastError,
+      assegnati_importati, assegnati_falliti
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

@@ -3,8 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, Clock, Trash2 } from 'lucide-react';
 
 const TIPI_FILE = [
-  { key: 'assegnati', label: 'Assegnati', desc: 'Richieste di ritiro aperte sul portale (foglio ASSEGNATI)', colore: 'bg-blue-50 border-blue-200' },
-  { key: 'primarie_rete', label: 'Primarie Rete', desc: 'Ritiri completati dai gommisti (foglio TERMINATI RETE)', colore: 'bg-green-50 border-green-200' },
+  { key: 'primarie_rete', label: 'Primarie Rete', desc: 'Ritiri completati dai gommisti (foglio TERMINATI RETE) — estrae automaticamente gli ordini in stato Assegnato', colore: 'bg-green-50 border-green-200' },
   { key: 'primarie_aci', label: 'Primarie ACI', desc: 'Ritiri da autodemolizioni (foglio TERMINATI ACI)', colore: 'bg-amber-50 border-amber-200' },
   { key: 'secondarie', label: 'Secondarie', desc: 'Viaggi stoccaggio → impianto (foglio SECONDARIE)', colore: 'bg-purple-50 border-purple-200' },
   { key: 'terziarie', label: 'Terziarie', desc: 'Viaggi impianto → cementeria/impianto (foglio TERZIARIE)', colore: 'bg-pink-50 border-pink-200' },
@@ -99,7 +98,7 @@ export default function CaricamentoDati() {
                     {res.ok
                       ? (res.data.records_creati != null
                         ? `${res.data.records_creati} target caricati (${res.data.raccoglitori} raccoglitori)`
-                        : `${res.data.righe_importate} righe importate${res.data.righe_fallite > 0 ? ` (${res.data.righe_fallite} fallite)` : ''}`)
+                        : `${res.data.righe_importate} righe importate${res.data.righe_fallite > 0 ? ` (${res.data.righe_fallite} fallite)` : ''}${res.data.assegnati_importati != null && res.data.assegnati_importati > 0 ? ` · ${res.data.assegnati_importati} assegnati estratti` : ''}`)
                       : `Errore: ${res.error}`}
                   </span>
                 </div>
