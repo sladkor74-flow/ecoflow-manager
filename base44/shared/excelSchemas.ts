@@ -109,6 +109,30 @@ export const SHEET_MAP = {
       "REGIONI": "regioni", "MESE": "mese", "SETTIMANE": "settimane"
     }
   },
+  extra_raccolta: {
+    sheetName: "EXTRA RACCOLTA",
+    entity: "ExtraRaccolta",
+    columns: {
+      "ID": "id_ordine", "Stato": "stato", "Ordine_immesso_il": "ordine_immesso_il",
+      "ID_Cliente": "id_cliente", "Ragione_Sociale": "ragione_sociale",
+      "ID_PDR": "id_pdr", "Punto_di_Raccolta": "punto_di_raccolta",
+      "Indirizzo": "indirizzo", "CAP": "cap", "Comune": "comune", "Provincia": "provincia",
+      "Codice_Regione": "codice_regione", "Macroarea": "macroarea",
+      "Codice_Prodotto": "codice_prodotto", "Prodotto": "prodotto", "Classe": "classe",
+      "CER": "cer", "Tipo_contenitori": "tipo_contenitori",
+      "Quantita_richiesta": "quantita_richiesta", "Quantita_ritirata": "quantita_ritirata",
+      "Peso_stimato": "peso_stimato", "Peso_effettivo": "peso_effettivo",
+      "KeyAccount": "key_account", "Partner_Operativo": "partner_operativo",
+      "ID_Trasportatore": "id_trasportatore", "Trasportatore": "trasportatore",
+      "ID_Destinazione": "id_destinazione", "Tipo_Destinazione": "tipo_destinazione",
+      "Destinazione": "destinazione", "Automezzo": "automezzo", "Rimorchio": "rimorchio",
+      "Distanza": "distanza", "Trasporto_iniziato_il": "trasporto_iniziato_il",
+      "Trasporto_finito_il": "trasporto_finito_il", "Ordine_chiuso_il": "ordine_chiuso_il",
+      "Numero_FIR": "numero_fir", "Numero_Ordine_Interno": "numero_ordine_interno",
+      "Regioni": "regioni", "Mese": "mese", "Settimane": "settimane",
+      "Sigla": "sigla", "Regione": "regione"
+    }
+  },
   terziarie: {
     sheetName: "TERZIARIE",
     entity: "Terziaria",
