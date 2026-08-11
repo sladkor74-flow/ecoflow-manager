@@ -8,6 +8,7 @@ const TIPI_FILE = [
   { key: 'primarie_aci', label: 'Primarie ACI', desc: 'Ritiri da autodemolizioni (foglio TERMINATI ACI)', colore: 'bg-amber-50 border-amber-200' },
   { key: 'secondarie', label: 'Secondarie', desc: 'Viaggi stoccaggio → impianto (foglio SECONDARIE)', colore: 'bg-purple-50 border-purple-200' },
   { key: 'terziarie', label: 'Terziarie', desc: 'Viaggi impianto → cementeria/impianto (foglio TERZIARIE)', colore: 'bg-pink-50 border-pink-200' },
+  { key: 'extra_raccolta', label: 'Extra Raccolta', desc: 'Raccolte extra fuori rete Ecotyre (foglio EXTRA RACCOLTA)', colore: 'bg-teal-50 border-teal-200' },
   { key: 'status', label: 'Status & Target', desc: 'Target mensili per raccoglitore (foglio STATUS) — alimenta la pagina Target Status', colore: 'bg-indigo-50 border-indigo-200' },
 ];
 

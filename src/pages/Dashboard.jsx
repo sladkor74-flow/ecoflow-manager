@@ -81,15 +81,7 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      <div className="border rounded-lg p-5 bg-amber-50 border-amber-200">
-        <div className="flex items-center gap-2 mb-1">
-          <AlertTriangle className="w-5 h-5 text-amber-600" />
-          <h2 className="font-heading font-semibold text-amber-900">Moduli in costruzione</h2>
-        </div>
-        <p className="text-sm text-amber-800">
-          I moduli Fatturazione e To-Do List verranno attivati nei prossimi step. Il modulo di caricamento dati è operativo.
-        </p>
-      </div>
+
     </div>
   );
 }
