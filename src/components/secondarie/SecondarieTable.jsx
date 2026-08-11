@@ -24,14 +24,14 @@ const COLUMNS = [
   { key: 'ordine_chiuso_il', label: 'Chiuso il', format: 'date' },
 ];
 
-export default function SecondarieTable({ records, loading }) {
+export default function SecondarieTable({ records, loading, emptyMessage }) {
   const { sorted, sortKey, sortDir, toggleSort } = useTableSort(records || [], 'ordine_chiuso_il', 'desc');
 
   if (loading) {
     return <div className="flex items-center justify-center py-8 text-muted-foreground">Caricamento trasporti secondari...</div>;
   }
   if (!records || records.length === 0) {
-    return <div className="text-center py-8 text-muted-foreground border rounded-lg">Nessun trasporto secondario trovato.</div>;
+    return <div className="text-center py-8 text-muted-foreground border rounded-lg">{emptyMessage || 'Nessun trasporto secondario trovato.'}</div>;
   }
 
   return (

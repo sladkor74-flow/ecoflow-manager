@@ -100,6 +100,17 @@ export default function Secondarie() {
   const resetFilters = () => setFilters({ stoccaggio: '', destinazione: '', mese: '', settimana: '', classe: '', trasportatore: '', anno: '', provincia: '', regione: '', stato: '', data: '' });
   const opts = data?.filterOptions || {};
 
+  // Stati garantiti sempre presenti nel filtro, anche senza record
+  const GUARANTEED_STATI = ['Assegnato', 'Eseguito'];
+  const statiOptions = [...new Set([...(opts.stati || []), ...GUARANTEED_STATI])].sort();
+
+  // Messaggio vuoto personalizzato in base allo stato selezionato
+  const getEmptyMessage = () => {
+    if (filters.stato === 'Eseguito') return 'Non sono presenti secondarie in stato di eseguito';
+    if (filters.stato === 'Assegnato') return 'Non sono presenti secondarie in stato di assegnato';
+    return 'Nessun trasporto secondario trovato.';
+  };
+
   return (
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
@@ -145,7 +156,7 @@ export default function Secondarie() {
               </select>
               <select value={filters.stato} onChange={e => setFilters(p => ({ ...p, stato: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
                 <option value="">Tutti gli stati</option>
-                {opts.stati?.map(s => <option key={s} value={s}>{s}</option>)}
+                {statiOptions.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
               <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" />
               <select value={filters.stoccaggio} onChange={e => setFilters(p => ({ ...p, stoccaggio: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
@@ -196,7 +207,7 @@ export default function Secondarie() {
                 </TabsContent>
                 <TabsContent value="detail" className="space-y-3 mt-3">
                   <h2 className="text-lg font-heading font-semibold">Dettaglio Trasporti Secondari ({records.length})</h2>
-                  <SecondarieTable records={records} loading={loadingRecords} />
+                  <SecondarieTable records={records} loading={loadingRecords} emptyMessage={getEmptyMessage()} />
                 </TabsContent>
               </Tabs>
             </div>
