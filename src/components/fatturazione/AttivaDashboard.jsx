@@ -3,6 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Play, CheckCircle, AlertTriangle, Lock } from 'lucide-react';
+import RiepilogoEcotyre from './RiepilogoEcotyre';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const ANNI = [2024, 2025, 2026];
@@ -62,6 +63,9 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
           Elabora Mese
         </Button>
       </div>
+
+      {/* Riepilogo automatico dovuto da Ecotyre */}
+      <RiepilogoEcotyre periodo={periodo} />
 
       {loading ? (
         <div className="text-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin inline mr-2" /> Caricamento...</div>
