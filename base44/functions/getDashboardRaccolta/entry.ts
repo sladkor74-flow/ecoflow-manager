@@ -10,7 +10,8 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const mese = body.mese || '';
+    const meseRaw = body.mese || '';
+    const mese = meseRaw === 'Tutti i mesi' ? '' : meseRaw;
     const anno = Number(body.anno) || new Date().getFullYear();
 
     const [rete, aci] = await Promise.all([

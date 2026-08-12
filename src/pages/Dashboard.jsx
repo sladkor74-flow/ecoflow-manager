@@ -17,7 +17,7 @@ export default function Dashboard() {
   const [alertCount, setAlertCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const [mese, setMese] = useState(MESI[new Date().getMonth()]);
+  const [mese, setMese] = useState('Tutti i mesi');
   const [anno, setAnno] = useState(new Date().getFullYear());
   const [raccoltaData, setRaccoltaData] = useState(null);
   const [raccoltaLoading, setRaccoltaLoading] = useState(true);

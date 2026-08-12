@@ -14,6 +14,7 @@ export default function DashboardFilters({ mese, anno, onMeseChange, onAnnoChang
           onChange={e => onMeseChange(e.target.value)}
           className="border rounded-md px-3 py-2 text-sm bg-background min-w-[140px]"
         >
+          <option value="Tutti i mesi">Tutti i mesi</option>
           {MESI.map(m => <option key={m} value={m}>{m}</option>)}
         </select>
       </div>

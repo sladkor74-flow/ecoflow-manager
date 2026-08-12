@@ -2,10 +2,10 @@ import React from 'react';
 import { Truck, Factory, Package, Target } from 'lucide-react';
 
 function fmtTon(v) {
-  return (v || 0).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' t';
+  return (v || 0).toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' t';
 }
 function fmtPct(v) {
-  return (v || 0).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+  return (v || 0).toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + '%';
 }
 
 export default function DashboardKpi({ kpi, loading }) {
