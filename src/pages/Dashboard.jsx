@@ -1,15 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
-import { ClipboardList, Truck, Factory, Ship, Upload, TrendingUp, AlertTriangle } from 'lucide-react';
+import { ClipboardList, Truck, Factory, Ship, Upload, TrendingUp, AlertTriangle, BarChart3 } from 'lucide-react';
 import AlertBadge from '@/components/alerts/AlertBadge';
-import TargetDashboard from '@/components/dashboard/TargetDashboard';
 import TargetAlertsPanel from '@/components/dashboard/TargetAlertsPanel';
+import DashboardFilters from '@/components/dashboard/DashboardFilters';
+import DashboardKpi from '@/components/dashboard/DashboardKpi';
+import ReteVsAciChart from '@/components/dashboard/ReteVsAciChart';
+import TargetVsRaccoltoChart from '@/components/dashboard/TargetVsRaccoltoChart';
+
+const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
+  'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
 export default function Dashboard() {
   const [counts, setCounts] = useState({});
   const [alertCount, setAlertCount] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  const [mese, setMese] = useState(MESI[new Date().getMonth()]);
+  const [anno, setAnno] = useState(new Date().getFullYear());
+  const [raccoltaData, setRaccoltaData] = useState(null);
+  const [raccoltaLoading, setRaccoltaLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -17,17 +28,26 @@ export default function Dashboard() {
         const res = await base44.functions.invoke('getDashboardStats', {});
         setCounts(res.data.counts);
         setAlertCount(res.data.alert_count || 0);
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) { /* ignore */ }
       setLoading(false);
     })();
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      setRaccoltaLoading(true);
+      try {
+        const res = await base44.functions.invoke('getDashboardRaccolta', { mese, anno });
+        setRaccoltaData(res.data);
+      } catch (e) { /* ignore */ }
+      setRaccoltaLoading(false);
+    })();
+  }, [mese, anno]);
+
   const cards = [
     { key: 'assegnati', label: 'Assegnati', icon: ClipboardList, path: '/assegnati', color: 'text-blue-600 bg-blue-50' },
-    { key: 'primarie_rete', label: 'Primarie Rete', icon: Truck, path: '/primarie-rete', color: 'text-green-600 bg-green-50' },
-    { key: 'primarie_aci', label: 'Primarie ACI', icon: Factory, path: '/primarie-aci', color: 'text-amber-600 bg-amber-50' },
+    { key: 'primarie_rete', label: 'Terminati Rete', icon: Truck, path: '/primarie-rete', color: 'text-green-600 bg-green-50' },
+    { key: 'primarie_aci', label: 'Terminati ACI', icon: Factory, path: '/primarie-aci', color: 'text-amber-600 bg-amber-50' },
     { key: 'secondarie', label: 'Secondarie', icon: Truck, path: '/secondarie', color: 'text-purple-600 bg-purple-50' },
     { key: 'terziarie', label: 'Terziarie', icon: Ship, path: '/terziarie', color: 'text-pink-600 bg-pink-50' },
   ];
@@ -61,12 +81,28 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div>
+      {/* Filtri Mese + Anno */}
+      <DashboardFilters mese={mese} anno={anno} onMeseChange={setMese} onAnnoChange={setAnno} />
+
+      {/* KPI Raccolta */}
+      <DashboardKpi kpi={raccoltaData?.kpi} loading={raccoltaLoading} />
+
+      {/* Raccolta RETE vs ACI per Regione */}
+      <div className="border rounded-lg p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <BarChart3 className="w-5 h-5 text-primary" />
+          <h2 className="font-heading font-semibold text-lg">Raccolta RETE vs ACI per Regione — {mese} {anno}</h2>
+        </div>
+        <ReteVsAciChart data={raccoltaData?.per_regione} />
+      </div>
+
+      {/* Target vs Raccolto per Regione */}
+      <div className="border rounded-lg p-5">
         <div className="flex items-center gap-2 mb-4">
           <TrendingUp className="w-5 h-5 text-primary" />
-          <h2 className="font-heading font-semibold text-lg">Target Mensili per Regione</h2>
+          <h2 className="font-heading font-semibold text-lg">Target vs Raccolto per Regione — {anno} (solo Rete)</h2>
         </div>
-        <TargetDashboard />
+        <TargetVsRaccoltoChart data={raccoltaData?.target_vs_raccolto} />
       </div>
 
       <div>
@@ -89,8 +125,6 @@ export default function Dashboard() {
           <Upload className="w-4 h-4" /> Vai al caricamento dati
         </Link>
       </div>
-
-
     </div>
   );
 }
