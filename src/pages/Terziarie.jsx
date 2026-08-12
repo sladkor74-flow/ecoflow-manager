@@ -29,7 +29,7 @@ export default function Terziarie() {
   const [loadingGiac, setLoadingGiac] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [filters, setFilters] = useState({ impianto: '', destinazione: '', mese: '', trasportatore: '', materiale: '', anno: '', provincia: '', regione: '', stato: '', data: '' });
-  const [filterOptions, setFilterOptions] = useState({ impianti: [], destinazioni: [], trasportatori: [], anni: [], province: [] });
+  const [filterOptions, setFilterOptions] = useState({ impianti: [], destinazioni: [], trasportatori: [], anni: [], province: [], regioni: [], stati: [] });
 
   const loadGiacenze = useCallback(async () => {
     setLoadingGiac(true);
