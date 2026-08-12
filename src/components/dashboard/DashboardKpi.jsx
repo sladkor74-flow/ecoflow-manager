@@ -1,8 +1,7 @@
 import React from 'react';
 import { Truck, Factory, Package, Target } from 'lucide-react';
-import { formatNumber } from '@/lib/utils';
+import { formatNumber, fmtTon, fmtEuro } from '@/lib/utils';
 
-const fmtTon = (v) => formatNumber(v) + ' t';
 const fmtPct = (v) => formatNumber(v) + '%';
 
 export default function DashboardKpi({ kpi, loading }) {

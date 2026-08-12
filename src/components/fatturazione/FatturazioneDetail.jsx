@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { formatNumber, fmtEuro } from '@/lib/utils';
 
 export default function FatturazioneDetail({ fornitori, totale, onVoceClick }) {
   const [expanded, setExpanded] = useState(new Set());
@@ -34,14 +35,14 @@ export default function FatturazioneDetail({ fornitori, totale, onVoceClick }) {
                   {f.fornitore_nome}
                 </td>
                 <td colSpan={2} className="px-3 py-2 text-right text-muted-foreground text-xs">{f.voci.length} voci</td>
-                <td className="px-3 py-2 text-right font-bold">€ {f.totale.toFixed(2)}</td>
+                <td className="px-3 py-2 text-right font-bold">{fmtEuro(f.totale)}</td>
               </tr>
               {expanded.has(f.fornitore_nome) && f.voci.map((v) => (
                 <tr key={v.id} className="cursor-pointer hover:bg-muted/30" onClick={() => onVoceClick(v)}>
                   <td className="px-3 py-1.5 pl-10">{v.descrizione || `${v.servizio_nome} ${v.classe || ''}`.trim()}</td>
-                  <td className="px-3 py-1.5 text-right">{v.quantita.toFixed(2)} {v.unita_misura?.replace('€/', '')}</td>
-                  <td className="px-3 py-1.5 text-right">€ {v.tariffa_valore.toFixed(2)}</td>
-                  <td className="px-3 py-1.5 text-right">€ {v.totale.toFixed(2)}</td>
+                  <td className="px-3 py-1.5 text-right">{formatNumber(v.quantita)} {v.unita_misura?.replace('€/', '')}</td>
+                  <td className="px-3 py-1.5 text-right">{fmtEuro(v.tariffa_valore)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmtEuro(v.totale)}</td>
                 </tr>
               ))}
             </React.Fragment>
@@ -50,7 +51,7 @@ export default function FatturazioneDetail({ fornitori, totale, onVoceClick }) {
         <tfoot>
           <tr className="bg-primary text-primary-foreground font-bold">
             <td className="px-3 py-3" colSpan={3}>TOTALE GENERALE</td>
-            <td className="px-3 py-3 text-right">€ {totale.toFixed(2)}</td>
+            <td className="px-3 py-3 text-right">{fmtEuro(totale)}</td>
           </tr>
         </tfoot>
       </table>

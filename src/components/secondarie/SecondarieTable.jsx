@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTableSort } from '@/hooks/useTableSort';
 import SortHeader from '@/components/shared/SortHeader';
+import { formatNumber, fmtTon } from '@/lib/utils';
 
 const COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
@@ -49,8 +50,8 @@ export default function SecondarieTable({ records, loading, emptyMessage }) {
             <tr key={r.id} className="border-t hover:bg-muted/50">
               {COLUMNS.map((col) => {
                 let val = r[col.key];
-                if (col.format === 'number') val = val != null ? val.toLocaleString('it-IT') : '';
-                else if (col.format === 'ton') val = val != null ? val.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : '';
+                if (col.format === 'number') val = val != null ? formatNumber(val) : '';
+                else if (col.format === 'ton') val = val != null ? fmtTon(val) : '';
                 else if (col.format === 'date') val = val ? new Date(val).toLocaleDateString('it-IT') : '';
                 return <td key={col.key} className="px-3 py-2 whitespace-nowrap">{val ?? ''}</td>;
               })}

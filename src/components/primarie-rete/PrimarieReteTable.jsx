@@ -2,6 +2,7 @@ import React from 'react';
 import { Loader2 } from 'lucide-react';
 import { useTableSort } from '@/hooks/useTableSort';
 import SortHeader from '@/components/shared/SortHeader';
+import { formatNumber } from '@/lib/utils';
 
 const COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
@@ -47,7 +48,7 @@ export default function PrimarieReteTable({ records, loading }) {
             <tr key={r.id} className={`border-t hover:bg-muted/30 ${i % 2 ? 'bg-muted/10' : ''}`}>
               {COLUMNS.map((col) => {
                 let val = r[col.key];
-                if (col.format === 'number') val = val != null ? val.toLocaleString('it-IT') : '';
+                if (col.format === 'number') val = val != null ? formatNumber(val) : '';
                 else if (col.format === 'date') val = val ? new Date(val).toLocaleDateString('it-IT') : '';
                 const isTempi = col.key === 'raccolta_nei_tempi';
                 return (
@@ -63,7 +64,7 @@ export default function PrimarieReteTable({ records, loading }) {
           ))}
         </tbody>
       </table>
-      {sorted.sorted.length > 500 && <p className="text-xs text-muted-foreground p-2">Mostrati primi 500 di {sorted.sorted.length.toLocaleString()} record.</p>}
+      {sorted.sorted.length > 500 && <p className="text-xs text-muted-foreground p-2">Mostrati primi 500 di {formatNumber(sorted.sorted.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} record.</p>}
     </div>
   );
 }

@@ -1,8 +1,6 @@
 import React from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from 'recharts';
-import { formatTon } from '@/lib/utils';
-
-const fmtTon = formatTon;
+import { fmtTon } from '@/lib/utils';
 
 export default function TargetVsRaccoltoChart({ data }) {
   if (!data || data.length === 0) {
