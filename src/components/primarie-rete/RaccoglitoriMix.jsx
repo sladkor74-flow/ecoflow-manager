@@ -37,19 +37,22 @@ export default function RaccoglitoriMix({ data }) {
       )}
 
       {/* View toggle */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3 flex-wrap">
         <button
           onClick={() => setView('raccolto')}
-          className={`px-3 py-1.5 text-sm rounded-md transition-colors ${view === 'raccolto' ? 'bg-primary text-primary-foreground' : 'border hover:bg-accent'}`}
+          className={`px-4 py-2 text-sm font-semibold rounded-md transition-all border-2 ${view === 'raccolto' ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background text-foreground border-border hover:bg-accent hover:border-primary/40'}`}
         >
-          % sul raccolto effettivo
+          % SUL RACCOLTO PER CLASSI
         </button>
         <button
           onClick={() => setView('target')}
-          className={`px-3 py-1.5 text-sm rounded-md transition-colors ${view === 'target' ? 'bg-primary text-primary-foreground' : 'border hover:bg-accent'}`}
+          className={`px-4 py-2 text-sm font-semibold rounded-md transition-all border-2 ${view === 'target' ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background text-foreground border-border hover:bg-accent hover:border-primary/40'}`}
         >
-          % rispetto al target annuo ({formatNumber(target_annuo)} ton)
+          % SUL TARGET PER CLASSI
         </button>
+        <span className="text-xs text-muted-foreground ml-1">
+          Target annuo di riferimento: {formatNumber(target_annuo)} ton
+        </span>
       </div>
 
       {/* Table */}
@@ -87,12 +90,12 @@ export default function RaccoglitoriMix({ data }) {
                   return (
                     <td
                       key={c}
-                      className={`text-center px-3 py-2 ${isDev && view === 'raccolto' ? 'bg-amber-100 text-amber-800 font-medium' : ''}`}
+                      className={`text-center px-3 py-2 ${isDev && view === 'raccolto' ? 'bg-amber-100 text-amber-800 font-medium border-2 border-amber-300' : ''}`}
                     >
-                      {val.toFixed(1)}%
+                      {formatNumber(val)}%
                       {isDev && view === 'raccolto' && (
-                        <div className="text-xs text-amber-600">
-                          Δ{dev > 0 ? '+' : ''}{dev.toFixed(1)}%
+                        <div className="text-xs text-amber-600 mt-0.5">
+                          Δ{dev > 0 ? '+' : ''}{formatNumber(dev)}%
                         </div>
                       )}
                     </td>

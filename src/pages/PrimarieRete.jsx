@@ -130,7 +130,7 @@ export default function PrimarieRete() {
           <TabsList>
             <TabsTrigger value="dettaglio"><Table2 className="w-4 h-4 mr-1.5" /> Dettaglio Ordini ({records.length})</TabsTrigger>
             <TabsTrigger value="province"><MapPin className="w-4 h-4 mr-1.5" /> Province & FIR</TabsTrigger>
-            <TabsTrigger value="mix"><BarChart3 className="w-4 h-4 mr-1.5" /> Mix Classi</TabsTrigger>
+            <TabsTrigger value="mix"><BarChart3 className="w-4 h-4 mr-1.5" /> % di scostamento per classi</TabsTrigger>
             <TabsTrigger value="sla"><Clock className="w-4 h-4 mr-1.5" /> SLA & Tempi</TabsTrigger>
           </TabsList>
 
@@ -148,8 +148,8 @@ export default function PrimarieRete() {
 
           <TabsContent value="mix" className="mt-4">
             <div className="mb-3 text-sm text-muted-foreground">
-              Distribuzione percentuale del peso raccolto per classe PFU per ciascun raccoglitore.
-              Target consorziali: P=75%, M=20%, G1=4%, G2=1%. Deviazioni significative ({'>'}±5%) evidenziate come warning.
+              Scostamento del mix classi PFU per ciascun raccoglitore rispetto ai target consorziali.
+              Target: P=75%, M=20%, G1=4%, G2=1%. Soglia deviazione: ±5%.
             </div>
             <RaccoglitoriMix data={mixData} />
           </TabsContent>
