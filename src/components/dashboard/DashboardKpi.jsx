@@ -1,12 +1,9 @@
 import React from 'react';
 import { Truck, Factory, Package, Target } from 'lucide-react';
+import { formatNumber } from '@/lib/utils';
 
-function fmtTon(v) {
-  return (v || 0).toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' t';
-}
-function fmtPct(v) {
-  return (v || 0).toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + '%';
-}
+const fmtTon = (v) => formatNumber(v) + ' t';
+const fmtPct = (v) => formatNumber(v) + '%';
 
 export default function DashboardKpi({ kpi, loading }) {
   if (loading || !kpi) {

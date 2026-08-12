@@ -1,7 +1,8 @@
 import React from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from 'recharts';
+import { formatTon } from '@/lib/utils';
 
-const fmtTon = (v) => (Number(v) || 0).toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' t';
+const fmtTon = formatTon;
 
 export default function TargetVsRaccoltoChart({ data }) {
   if (!data || data.length === 0) {
