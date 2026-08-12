@@ -34,6 +34,7 @@ export default function PrimarieAci() {
   const [filterData, setFilterData] = useState('');
   const [filterRegione, setFilterRegione] = useState([]);
   const [filterStato, setFilterStato] = useState([]);
+  const [filterAnno, setFilterAnno] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,6 +52,12 @@ export default function PrimarieAci() {
   const trasportatori = [...new Set(records.map(r => (r.trasportatore || '').trim()).filter(Boolean))].sort();
   const regioni = [...new Set(records.map(r => (r.regione || '').trim()).filter(Boolean))].sort();
   const stati = [...new Set(records.map(r => (r.stato || '').trim()).filter(Boolean))].sort();
+  const anni = [...new Set(records.map(r => {
+    const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+    if (!d) return null;
+    const dt = new Date(d);
+    return isNaN(dt.getTime()) ? null : dt.getFullYear();
+  }).filter(Boolean))].sort((a, b) => b - a);
 
   const filtered = records.filter(r => {
     if (filterMese.length > 0 && !filterMese.includes(r.mese)) return false;
@@ -59,6 +66,12 @@ export default function PrimarieAci() {
     if (filterTrasportatore.length > 0 && !filterTrasportatore.includes((r.trasportatore || '').trim())) return false;
     if (filterRegione.length > 0 && !filterRegione.includes((r.regione || '').trim())) return false;
     if (filterStato.length > 0 && !filterStato.includes((r.stato || '').trim())) return false;
+    if (filterAnno.length > 0) {
+      const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+      const dt = d ? new Date(d) : null;
+      const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
+      if (!filterAnno.map(String).includes(String(anno))) return false;
+    }
     if (filterData) {
       const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
       if (!d || new Date(d).toISOString().slice(0, 10) !== filterData) return false;
@@ -133,16 +146,17 @@ export default function PrimarieAci() {
       <div className="border rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri rapidi</span>
-          {(filterMese.length > 0 || filterDestinazione.length > 0 || filterProvincia.length > 0 || filterTrasportatore.length > 0 || filterData || filterRegione.length > 0 || filterStato.length > 0) && (
-            <button onClick={() => { setFilterMese([]); setFilterDestinazione([]); setFilterProvincia([]); setFilterTrasportatore([]); setFilterData(''); setFilterRegione([]); setFilterStato([]); }} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+          {(filterMese.length > 0 || filterDestinazione.length > 0 || filterProvincia.length > 0 || filterTrasportatore.length > 0 || filterData || filterRegione.length > 0 || filterStato.length > 0 || filterAnno.length > 0) && (
+            <button onClick={() => { setFilterMese([]); setFilterDestinazione([]); setFilterProvincia([]); setFilterTrasportatore([]); setFilterData(''); setFilterRegione([]); setFilterStato([]); setFilterAnno([]); }} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
               <X className="w-3 h-3" /> Reset
             </button>
           )}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <MultiSelect allLabel="Tutte le regioni" options={regioni} selected={filterRegione} onChange={setFilterRegione} />
           <MultiSelect allLabel="Tutti gli stati" options={stati} selected={filterStato} onChange={setFilterStato} />
           <MultiSelect allLabel="Tutti i mesi" options={MESI} selected={filterMese} onChange={setFilterMese} />
+          <MultiSelect allLabel="Tutti gli anni" options={anni.map(String)} selected={filterAnno.map(String)} onChange={v => setFilterAnno(v.map(Number))} />
           <MultiSelect allLabel="Tutte le destinazioni" options={destinazioni} selected={filterDestinazione} onChange={setFilterDestinazione} />
           <MultiSelect allLabel="Tutte le province" options={province} selected={filterProvincia} onChange={setFilterProvincia} />
           <MultiSelect allLabel="Tutti i trasportatori" options={trasportatori} selected={filterTrasportatore} onChange={setFilterTrasportatore} />

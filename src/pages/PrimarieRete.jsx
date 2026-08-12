@@ -22,14 +22,15 @@ export default function PrimarieRete() {
   const [records, setRecords] = useState([]);
   const [allRecords, setAllRecords] = useState([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
-  const [filters, setFilters] = useState({ regione: [], stato: [], data: '', mese: [] });
+  const [filters, setFilters] = useState({ regione: [], stato: [], data: '', mese: [], anno: [] });
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      const mixFilters = { regione: filters.regione, stato: filters.stato, mese: filters.mese, anno: filters.anno };
       const [provRes, mixRes, slaRes, alertRes] = await Promise.all([
         base44.functions.invoke('computeProvinceMatrix', {}),
-        base44.functions.invoke('computeRaccoglitoriMix', {}),
+        base44.functions.invoke('computeRaccoglitoriMix', { filters: mixFilters }),
         base44.functions.invoke('computeSlaMetrics', {}),
         base44.functions.invoke('getAlerts', { modulo: 'primarie_rete', solo_aperti: true }),
       ]);
@@ -41,7 +42,7 @@ export default function PrimarieRete() {
       console.error(e);
     }
     setLoading(false);
-  }, []);
+  }, [filters]);
 
   const loadRecords = useCallback(async () => {
     setLoadingRecords(true);
@@ -52,6 +53,12 @@ export default function PrimarieRete() {
         if (filters.regione.length > 0 && !filters.regione.includes((r.regione || '').trim())) return false;
         if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
         if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;
+        if (filters.anno.length > 0) {
+          const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+          const dt = d ? new Date(d) : null;
+          const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
+          if (!filters.anno.map(String).includes(String(anno))) return false;
+        }
         if (filters.data) {
           const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
           if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
@@ -68,9 +75,15 @@ export default function PrimarieRete() {
 
   const regioni = [...new Set(allRecords.map(r => (r.regione || '').trim()).filter(Boolean))].sort();
   const stati = [...new Set(allRecords.map(r => (r.stato || '').trim()).filter(Boolean))].sort();
+  const anni = [...new Set(allRecords.map(r => {
+    const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+    if (!d) return null;
+    const dt = new Date(d);
+    return isNaN(dt.getTime()) ? null : dt.getFullYear();
+  }).filter(Boolean))].sort((a, b) => b - a);
 
   const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
-  const resetFilters = () => setFilters({ regione: [], stato: [], data: '', mese: [] });
+  const resetFilters = () => setFilters({ regione: [], stato: [], data: '', mese: [], anno: [] });
 
   return (
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
@@ -99,10 +112,11 @@ export default function PrimarieRete() {
             </button>
           )}
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <MultiSelect allLabel="Tutte le regioni" options={regioni} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
           <MultiSelect allLabel="Tutti gli stati" options={stati} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
           <MultiSelect allLabel="Tutti i mesi" options={MESI} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
+          <MultiSelect allLabel="Tutti gli anni" options={anni.map(String)} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v.map(Number) }))} />
           <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" />
         </div>
       </div>

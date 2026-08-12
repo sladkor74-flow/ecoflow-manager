@@ -52,7 +52,7 @@ export const PROV_TO_REGION: Record<string, string> = {
 export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
   'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
-export async function computeRaccoltoData(base44) {
+export async function computeRaccoltoData(base44, filters: any = {}) {
   const [rete, aci] = await Promise.all([
     base44.asServiceRole.entities.PrimariaRete.list('-created_date', 10000),
     base44.asServiceRole.entities.PrimariaAci.list('-created_date', 10000)
@@ -60,12 +60,52 @@ export async function computeRaccoltoData(base44) {
 
   const all = [...rete, ...aci];
 
+  // Normalize filters to arrays
+  const toArray = (v: any) => Array.isArray(v) ? v : (v != null ? [v] : []);
+  const fAnno = toArray(filters.anno).map(Number);
+  const fMese = toArray(filters.mese);
+  const fRegione = toArray(filters.regione);
+  const fRaccoglitore = toArray(filters.raccoglitore);
+  const fImpianto = toArray(filters.impianto);
+
+  // Filter options from ALL records
+  const filterOptions = {
+    anni: [...new Set(all.map((p: any) => {
+      const d = p.ordine_chiuso_il ? new Date(p.ordine_chiuso_il)
+        : p.trasporto_finito_il ? new Date(p.trasporto_finito_il) : null;
+      return d && !isNaN(d.getTime()) ? d.getFullYear() : null;
+    }).filter(Boolean))].sort((a: any, b: any) => b - a),
+    mesi: MESI,
+    regioni: [...new Set(all.map((p: any) => PROV_TO_REGION[(p.provincia || '').toUpperCase().trim()] || 'Altro').filter(Boolean))].sort(),
+    raccoglitori: [...new Set(all.map((p: any) => (p.trasportatore || '').trim()).filter(Boolean))].sort(),
+    impianti: [...new Set(all.map((p: any) => (p.destinazione || '').trim()).filter(Boolean))].sort(),
+  };
+
+  // Filter records
+  const filtered = all.filter((p: any) => {
+    const raccoglitore = (p.trasportatore || 'N/D').trim();
+    const regione = PROV_TO_REGION[(p.provincia || '').toUpperCase().trim()] || 'Altro';
+    const dataChiusura = p.ordine_chiuso_il ? new Date(p.ordine_chiuso_il)
+      : p.trasporto_finito_il ? new Date(p.trasporto_finito_il) : null;
+    const meseIdx = dataChiusura ? dataChiusura.getMonth() : -1;
+    const mese = meseIdx >= 0 ? MESI[meseIdx] : 'N/D';
+    const anno = dataChiusura ? dataChiusura.getFullYear() : null;
+    const impianto = (p.destinazione || 'N/D').trim();
+
+    if (fAnno.length > 0 && !fAnno.includes(anno)) return false;
+    if (fMese.length > 0 && !fMese.includes(mese)) return false;
+    if (fRegione.length > 0 && !fRegione.includes(regione)) return false;
+    if (fRaccoglitore.length > 0 && !fRaccoglitore.includes(raccoglitore)) return false;
+    if (fImpianto.length > 0 && !fImpianto.includes(impianto)) return false;
+    return true;
+  });
+
   const byRaccoglitore: Record<string, any> = {};
   const byRegione: Record<string, any> = {};
   const byImpianto: Record<string, any> = {};
   let totale = 0;
 
-  for (const p of all) {
+  for (const p of filtered) {
     const raccoglitore = (p.trasportatore || 'N/D').trim();
     const regione = PROV_TO_REGION[(p.provincia || '').toUpperCase().trim()] || 'Altro';
     const dataChiusura = p.ordine_chiuso_il ? new Date(p.ordine_chiuso_il)
@@ -104,6 +144,7 @@ export async function computeRaccoltoData(base44) {
     totale_raccolto: totale,
     by_raccoglitore: Object.values(byRaccoglitore),
     by_regione: Object.values(byRegione),
-    by_impianto: Object.values(byImpianto)
+    by_impianto: Object.values(byImpianto),
+    filterOptions,
   };
 }

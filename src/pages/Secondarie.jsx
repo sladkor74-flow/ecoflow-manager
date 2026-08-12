@@ -20,6 +20,7 @@ export default function Secondarie() {
   const [alertCount, setAlertCount] = useState(0);
   const [filters, setFilters] = useState({ stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
   const [viewMode, setViewMode] = useState('matrix');
+  const [searchIdOrdine, setSearchIdOrdine] = useState('');
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -35,6 +36,7 @@ export default function Secondarie() {
     try {
       const all = await base44.entities.Secondaria.list('-created_date', 10000);
       const filtered = all.filter(r => {
+        if (searchIdOrdine && !(r.id_ordine || '').toLowerCase().includes(searchIdOrdine.toLowerCase().trim())) return false;
         if (filters.stoccaggio.length > 0 && !filters.stoccaggio.includes((r.stoccaggio || '').trim())) return false;
         if (filters.destinazione.length > 0 && !filters.destinazione.includes((r.destinazione || '').trim())) return false;
         if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;
@@ -62,7 +64,7 @@ export default function Secondarie() {
       setRecords(filtered);
     } catch (e) { console.error(e); }
     setLoadingRecords(false);
-  }, [filters]);
+  }, [filters, searchIdOrdine]);
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { if (viewMode === 'detail') loadRecords(); }, [loadRecords, viewMode]);
@@ -98,7 +100,7 @@ export default function Secondarie() {
     setExporting(false);
   };
 
-  const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
+  const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v) || searchIdOrdine;
   const resetFilters = () => setFilters({ stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
   const opts = data?.filterOptions || {};
 
@@ -158,7 +160,8 @@ export default function Secondarie() {
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-11 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+              <input type="text" value={searchIdOrdine} onChange={e => setSearchIdOrdine(e.target.value)} placeholder="Cerca ID ordine..." className="w-full border rounded-md px-3 py-2 text-sm" />
               <MultiSelect allLabel="Tutte le regioni" options={opts.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
               <MultiSelect allLabel="Tutti gli stati" options={statiOptions.map(s => ({ value: s, label: prettyStato(s) }))} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
               <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" />

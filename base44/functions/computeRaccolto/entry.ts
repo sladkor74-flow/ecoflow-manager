@@ -9,7 +9,8 @@ export default async function(req) {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const data = await computeRaccoltoData(base44);
+    const body = await req.json().catch(() => ({}));
+    const data = await computeRaccoltoData(base44, body.filters || {});
     return Response.json(data);
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

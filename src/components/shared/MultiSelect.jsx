@@ -32,9 +32,9 @@ export default function MultiSelect({ label, allLabel, options, selected, onChan
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="w-full border rounded-md px-3 py-2 text-sm text-left flex items-center justify-between bg-background hover:bg-muted/30"
+        className={`w-full border-2 rounded-md px-3 py-2 text-sm text-left flex items-center justify-between bg-background hover:bg-muted/30 transition-colors ${selected.length > 0 ? 'border-primary' : 'border-input'}`}
       >
-        <span className="truncate">{displayLabel}</span>
+        <span className={`truncate ${selected.length > 0 ? 'text-primary font-medium' : ''}`}>{displayLabel}</span>
         <div className="flex items-center gap-1 ml-2 flex-shrink-0">
           {selected.length > 0 && (
             <span
@@ -71,10 +71,10 @@ export default function MultiSelect({ label, allLabel, options, selected, onChan
                   key={val}
                   type="button"
                   onClick={() => toggle(val)}
-                  className="w-full text-left px-3 py-1.5 text-sm rounded hover:bg-muted flex items-center gap-2"
+                  className={`w-full text-left px-3 py-1.5 text-sm rounded flex items-center gap-2 transition-colors ${isSel ? 'bg-primary/15 font-medium' : 'hover:bg-muted'}`}
                 >
-                  <span className={`w-4 h-4 border rounded flex items-center justify-center flex-shrink-0 ${isSel ? 'bg-primary border-primary' : 'border-input'}`}>
-                    {isSel && <Check className="w-3 h-3 text-primary-foreground" />}
+                  <span className={`w-4 h-4 border-2 rounded flex items-center justify-center flex-shrink-0 transition-colors ${isSel ? 'bg-primary border-primary shadow-sm' : 'border-input bg-background'}`}>
+                    {isSel && <Check className="w-3 h-3 text-primary-foreground" strokeWidth={3} />}
                   </span>
                   <span className="truncate">{lbl}</span>
                 </button>

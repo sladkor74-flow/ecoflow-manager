@@ -108,10 +108,32 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
 
 // --- 2. Mix Classi Raccoglitori ---
 
-export function computeRaccoglitoriMixData(records, targetAnnuo = TARGET_ANNUO_TON) {
+export function computeRaccoglitoriMixData(records, targetAnnuo = TARGET_ANNUO_TON, filters: any = {}) {
+  const toArray = (v: any) => Array.isArray(v) ? v : (v != null ? [v] : []);
+  const fAnno = toArray(filters.anno).map(Number);
+  const fMese = toArray(filters.mese);
+  const fRegione = toArray(filters.regione);
+  const fStato = toArray(filters.stato);
+
+  const filtered = records.filter((r: any) => {
+    const regione = r.regione || PROV_TO_REGION[(r.provincia || '').toUpperCase().trim()] || 'Altro';
+    const stato = (r.stato || '').trim();
+    const dataChiusura = r.ordine_chiuso_il ? new Date(r.ordine_chiuso_il)
+      : r.trasporto_finito_il ? new Date(r.trasporto_finito_il) : null;
+    const meseIdx = dataChiusura ? dataChiusura.getMonth() : -1;
+    const mese = meseIdx >= 0 ? MESI[meseIdx] : 'N/D';
+    const anno = dataChiusura ? dataChiusura.getFullYear() : null;
+
+    if (fAnno.length > 0 && !fAnno.includes(anno)) return false;
+    if (fMese.length > 0 && !fMese.includes(mese)) return false;
+    if (fRegione.length > 0 && !fRegione.includes(regione)) return false;
+    if (fStato.length > 0 && !fStato.includes(stato)) return false;
+    return true;
+  });
+
   const byRaccoglitore: Record<string, any> = {};
 
-  for (const r of records) {
+  for (const r of filtered) {
     const raccoglitore = (r.trasportatore || 'N/D').trim();
     const classe = (r.classe || '').toUpperCase().trim();
     const peso = (r.peso_effettivo || 0) / 1000; // kg -> ton

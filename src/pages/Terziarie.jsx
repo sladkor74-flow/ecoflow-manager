@@ -31,6 +31,7 @@ export default function Terziarie() {
   const [exporting, setExporting] = useState(false);
   const [filters, setFilters] = useState({ impianto: [], destinazione: [], mese: [], trasportatore: [], materiale: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
   const [filterOptions, setFilterOptions] = useState({ impianti: [], destinazioni: [], trasportatori: [], anni: [], province: [], regioni: [], stati: [] });
+  const [searchIdOrdine, setSearchIdOrdine] = useState('');
 
   const loadGiacenze = useCallback(async () => {
     setLoadingGiac(true);
@@ -62,6 +63,7 @@ export default function Terziarie() {
       });
       // Apply filters
       const filtered = all.filter((r) => {
+        if (searchIdOrdine && !(r.id_ordine || '').toLowerCase().includes(searchIdOrdine.toLowerCase().trim())) return false;
         if (filters.impianto.length > 0 && !filters.impianto.includes((r.unita_locale_origine || '').trim())) return false;
         if (filters.destinazione.length > 0 && !filters.destinazione.includes((r.destinazione || '').trim())) return false;
         if (filters.provincia.length > 0 && !filters.provincia.includes((r.provincia || '').trim())) return false;
@@ -85,7 +87,7 @@ export default function Terziarie() {
       setRecords(filtered);
     } catch (e) { console.error(e); }
     setLoading(false);
-  }, [filters]);
+  }, [filters, searchIdOrdine]);
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadGiacenze(); }, [loadGiacenze]);
@@ -120,7 +122,7 @@ export default function Terziarie() {
     setExporting(false);
   };
 
-  const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
+  const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v) || searchIdOrdine;
   const resetFilters = () => setFilters({ impianto: [], destinazione: [], mese: [], trasportatore: [], materiale: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
 
   return (
@@ -147,7 +149,8 @@ export default function Terziarie() {
             </button>
           )}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-10 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <input type="text" value={searchIdOrdine} onChange={e => setSearchIdOrdine(e.target.value)} placeholder="Cerca ID ordine..." className="w-full border rounded-md px-3 py-2 text-sm" />
           <MultiSelect allLabel="Tutte le regioni" options={filterOptions.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
           <MultiSelect allLabel="Tutti gli stati" options={filterOptions.stati || []} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
           <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" />
