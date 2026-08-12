@@ -4,6 +4,8 @@ import { Loader2, RefreshCw, Truck, Factory, Package, Filter, X } from 'lucide-r
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useTableSort } from '@/hooks/useTableSort';
 import SortHeader from '@/components/shared/SortHeader';
+import MultiSelect from '@/components/shared/MultiSelect';
+import { formatNumber, fmtTon } from '@/lib/utils';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -25,13 +27,13 @@ const DETAIL_COLUMNS = [
 export default function PrimarieAci() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filterMese, setFilterMese] = useState(null);
-  const [filterDestinazione, setFilterDestinazione] = useState(null);
-  const [filterProvincia, setFilterProvincia] = useState(null);
-  const [filterTrasportatore, setFilterTrasportatore] = useState(null);
+  const [filterMese, setFilterMese] = useState([]);
+  const [filterDestinazione, setFilterDestinazione] = useState([]);
+  const [filterProvincia, setFilterProvincia] = useState([]);
+  const [filterTrasportatore, setFilterTrasportatore] = useState([]);
   const [filterData, setFilterData] = useState('');
-  const [filterRegione, setFilterRegione] = useState(null);
-  const [filterStato, setFilterStato] = useState(null);
+  const [filterRegione, setFilterRegione] = useState([]);
+  const [filterStato, setFilterStato] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,12 +53,12 @@ export default function PrimarieAci() {
   const stati = [...new Set(records.map(r => (r.stato || '').trim()).filter(Boolean))].sort();
 
   const filtered = records.filter(r => {
-    if (filterMese && r.mese !== filterMese) return false;
-    if (filterDestinazione && r.destinazione !== filterDestinazione) return false;
-    if (filterProvincia && (r.provincia || '').trim() !== filterProvincia) return false;
-    if (filterTrasportatore && (r.trasportatore || '').trim() !== filterTrasportatore) return false;
-    if (filterRegione && (r.regione || '').trim() !== filterRegione) return false;
-    if (filterStato && (r.stato || '').trim() !== filterStato) return false;
+    if (filterMese.length > 0 && !filterMese.includes(r.mese)) return false;
+    if (filterDestinazione.length > 0 && !filterDestinazione.includes(r.destinazione)) return false;
+    if (filterProvincia.length > 0 && !filterProvincia.includes((r.provincia || '').trim())) return false;
+    if (filterTrasportatore.length > 0 && !filterTrasportatore.includes((r.trasportatore || '').trim())) return false;
+    if (filterRegione.length > 0 && !filterRegione.includes((r.regione || '').trim())) return false;
+    if (filterStato.length > 0 && !filterStato.includes((r.stato || '').trim())) return false;
     if (filterData) {
       const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
       if (!d || new Date(d).toISOString().slice(0, 10) !== filterData) return false;
@@ -111,19 +113,19 @@ export default function PrimarieAci() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="border rounded-lg p-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1"><Package className="w-3.5 h-3.5" /> Record</div>
-          <p className="text-xl font-bold">{filtered.length.toLocaleString()}</p>
+          <p className="text-xl font-bold">{formatNumber(filtered.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
         </div>
         <div className="border rounded-lg p-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1"><Truck className="w-3.5 h-3.5" /> Kg Totali</div>
-          <p className="text-xl font-bold">{(totalKg / 1000).toFixed(1)} t</p>
+          <p className="text-xl font-bold">{fmtTon(totalKg / 1000)}</p>
         </div>
         <div className="border rounded-lg p-3">
           <div className="text-xs text-muted-foreground mb-1">Quantità Richiesta</div>
-          <p className="text-xl font-bold">{totalRichiesti.toLocaleString()}</p>
+          <p className="text-xl font-bold">{formatNumber(totalRichiesti, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
         </div>
         <div className="border rounded-lg p-3">
           <div className="text-xs text-muted-foreground mb-1">Quantità Ritirata</div>
-          <p className="text-xl font-bold">{totalRitirati.toLocaleString()}</p>
+          <p className="text-xl font-bold">{formatNumber(totalRitirati, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
         </div>
       </div>
 
@@ -131,37 +133,19 @@ export default function PrimarieAci() {
       <div className="border rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri rapidi</span>
-          {(filterMese || filterDestinazione || filterProvincia || filterTrasportatore || filterData || filterRegione || filterStato) && (
-            <button onClick={() => { setFilterMese(null); setFilterDestinazione(null); setFilterProvincia(null); setFilterTrasportatore(null); setFilterData(''); setFilterRegione(null); setFilterStato(null); }} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+          {(filterMese.length > 0 || filterDestinazione.length > 0 || filterProvincia.length > 0 || filterTrasportatore.length > 0 || filterData || filterRegione.length > 0 || filterStato.length > 0) && (
+            <button onClick={() => { setFilterMese([]); setFilterDestinazione([]); setFilterProvincia([]); setFilterTrasportatore([]); setFilterData(''); setFilterRegione([]); setFilterStato([]); }} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
               <X className="w-3 h-3" /> Reset
             </button>
           )}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-3">
-          <select value={filterRegione || ''} onChange={e => setFilterRegione(e.target.value || null)} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutte le regioni</option>
-            {regioni.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
-          <select value={filterStato || ''} onChange={e => setFilterStato(e.target.value || null)} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutti gli stati</option>
-            {stati.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select value={filterMese || ''} onChange={e => setFilterMese(e.target.value || null)} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutti i mesi</option>
-            {MESI.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-          <select value={filterDestinazione || ''} onChange={e => setFilterDestinazione(e.target.value || null)} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutte le destinazioni</option>
-            {destinazioni.map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
-          <select value={filterProvincia || ''} onChange={e => setFilterProvincia(e.target.value || null)} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutte le province</option>
-            {province.map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
-          <select value={filterTrasportatore || ''} onChange={e => setFilterTrasportatore(e.target.value || null)} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutti i trasportatori</option>
-            {trasportatori.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
+          <MultiSelect allLabel="Tutte le regioni" options={regioni} selected={filterRegione} onChange={setFilterRegione} />
+          <MultiSelect allLabel="Tutti gli stati" options={stati} selected={filterStato} onChange={setFilterStato} />
+          <MultiSelect allLabel="Tutti i mesi" options={MESI} selected={filterMese} onChange={setFilterMese} />
+          <MultiSelect allLabel="Tutte le destinazioni" options={destinazioni} selected={filterDestinazione} onChange={setFilterDestinazione} />
+          <MultiSelect allLabel="Tutte le province" options={province} selected={filterProvincia} onChange={setFilterProvincia} />
+          <MultiSelect allLabel="Tutti i trasportatori" options={trasportatori} selected={filterTrasportatore} onChange={setFilterTrasportatore} />
           <input type="date" value={filterData} onChange={e => setFilterData(e.target.value)} className="border rounded-md px-3 py-2 text-sm" placeholder="Data chiusura" />
         </div>
       </div>
@@ -186,17 +170,17 @@ export default function PrimarieAci() {
                 {destRows.map(([dest, v], i) => (
                   <tr key={dest} className={`border-t ${i % 2 ? 'bg-muted/20' : ''}`}>
                     <td className="px-3 py-2 font-medium">{dest}</td>
-                    <td className="px-3 py-2 text-right">{v.count.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right">{v.kg.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right font-bold">{(v.kg / 1000).toFixed(1)}</td>
+                    <td className="px-3 py-2 text-right">{formatNumber(v.count, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                    <td className="px-3 py-2 text-right">{formatNumber(v.kg, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                    <td className="px-3 py-2 text-right font-bold">{fmtTon(v.kg / 1000)}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot><tr className="bg-primary text-primary-foreground font-bold">
                 <td className="px-3 py-3">TOTALE</td>
-                <td className="px-3 py-3 text-right">{filtered.length.toLocaleString()}</td>
-                <td className="px-3 py-3 text-right">{totalKg.toLocaleString()}</td>
-                <td className="px-3 py-3 text-right">{(totalKg / 1000).toFixed(1)}</td>
+                <td className="px-3 py-3 text-right">{formatNumber(filtered.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                <td className="px-3 py-3 text-right">{formatNumber(totalKg, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                <td className="px-3 py-3 text-right">{fmtTon(totalKg / 1000)}</td>
               </tr></tfoot>
             </table>
           </div>
@@ -215,9 +199,9 @@ export default function PrimarieAci() {
                 {meseRows.map(([m, v], i) => (
                   <tr key={m} className={`border-t ${i % 2 ? 'bg-muted/20' : ''}`}>
                     <td className="px-3 py-2 font-medium">{m}</td>
-                    <td className="px-3 py-2 text-right">{v.count.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right">{v.kg.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right font-bold">{(v.kg / 1000).toFixed(1)}</td>
+                    <td className="px-3 py-2 text-right">{formatNumber(v.count, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                    <td className="px-3 py-2 text-right">{formatNumber(v.kg, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                    <td className="px-3 py-2 text-right font-bold">{fmtTon(v.kg / 1000)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -238,7 +222,7 @@ export default function PrimarieAci() {
                   <tr key={r.id} className={`border-t hover:bg-muted/30 ${i % 2 ? 'bg-muted/10' : ''}`}>
                     {DETAIL_COLUMNS.map((col) => {
                       let val = r[col.key];
-                      if (col.format === 'number') val = val != null ? val.toLocaleString('it-IT') : '';
+                      if (col.format === 'number') val = val != null ? formatNumber(val) : '';
                       else if (col.format === 'date') val = val ? new Date(val).toLocaleDateString('it-IT') : '';
                       return <td key={col.key} className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''}`}>{val ?? ''}</td>;
                     })}
@@ -247,7 +231,7 @@ export default function PrimarieAci() {
               </tbody>
             </table>
           </div>
-          {sortedDetail.sorted.length > 500 && <p className="text-xs text-muted-foreground mt-2">Mostrati primi 500 di {sortedDetail.sorted.length.toLocaleString()} record.</p>}
+          {sortedDetail.sorted.length > 500 && <p className="text-xs text-muted-foreground mt-2">Mostrati primi 500 di {formatNumber(sortedDetail.sorted.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} record.</p>}
         </TabsContent>
       </Tabs>
     </div>

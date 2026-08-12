@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { matchesFilter } from "../../shared/multiFilter.ts";
 
 // Calcola le giacenze di impianto in tempo reale:
 //   Ingressi = PrimariaRete + PrimariaAci + Secondaria (dove l'impianto è Destinazione)
@@ -43,9 +44,12 @@ export default async function(req) {
       if (!impianto) return;
       const imp = impianto.trim();
       if (!imp) return;
-      if (filters.impianto && imp !== filters.impianto) return;
-      if (filters.mese && getMese(r) !== filters.mese) return;
-      if (filters.anno && getAnno(r) !== parseInt(filters.anno)) return;
+      if (!matchesFilter(imp, filters.impianto)) return;
+      if (!matchesFilter(getMese(r), filters.mese)) return;
+      if (filters.anno != null && (!Array.isArray(filters.anno) ? filters.anno : filters.anno.length > 0)) {
+        const anni = Array.isArray(filters.anno) ? filters.anno.map(Number) : [parseInt(filters.anno)];
+        if (!anni.includes(getAnno(r))) return;
+      }
       if (!inputs[imp]) inputs[imp] = { impianto: imp, totale: 0, spedizioni: 0 };
       const ton = (pesoKg || 0) / 1000;
       inputs[imp].totale += ton;
@@ -61,9 +65,12 @@ export default async function(req) {
       if (!impianto) return;
       const imp = impianto.trim();
       if (!imp) return;
-      if (filters.impianto && imp !== filters.impianto) return;
-      if (filters.mese && getMese(r) !== filters.mese) return;
-      if (filters.anno && getAnno(r) !== parseInt(filters.anno)) return;
+      if (!matchesFilter(imp, filters.impianto)) return;
+      if (!matchesFilter(getMese(r), filters.mese)) return;
+      if (filters.anno != null && (!Array.isArray(filters.anno) ? filters.anno : filters.anno.length > 0)) {
+        const anni = Array.isArray(filters.anno) ? filters.anno.map(Number) : [parseInt(filters.anno)];
+        if (!anni.includes(getAnno(r))) return;
+      }
       if (!outputs[imp]) outputs[imp] = { impianto: imp, totale: 0, spedizioni: 0 };
       const ton = (pesoKg || 0) / 1000;
       outputs[imp].totale += ton;

@@ -8,6 +8,8 @@ import TrattaMatrix from '@/components/secondarie/TrattaMatrix';
 import SecondarieTable from '@/components/secondarie/SecondarieTable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
+import { fmtTon, formatNumber } from '@/lib/utils';
+import MultiSelect from '@/components/shared/MultiSelect';
 
 export default function Secondarie() {
   const [data, setData] = useState(null);
@@ -16,7 +18,7 @@ export default function Secondarie() {
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
-  const [filters, setFilters] = useState({ stoccaggio: '', destinazione: '', mese: '', settimana: '', classe: '', trasportatore: '', anno: '', provincia: '', regione: '', stato: '', data: '' });
+  const [filters, setFilters] = useState({ stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
   const [viewMode, setViewMode] = useState('matrix');
 
   const loadData = useCallback(async () => {
@@ -33,30 +35,30 @@ export default function Secondarie() {
     try {
       const all = await base44.entities.Secondaria.list('-created_date', 10000);
       const filtered = all.filter(r => {
-        if (filters.stoccaggio && (r.stoccaggio || '').trim() !== filters.stoccaggio) return false;
-        if (filters.destinazione && (r.destinazione || '').trim() !== filters.destinazione) return false;
-        if (filters.mese && r.mese !== filters.mese) return false;
-        if (filters.settimana && String(r.settimane) !== String(filters.settimana)) return false;
-        if (filters.classe && r.classe !== filters.classe) return false;
-        if (filters.trasportatore && (r.trasportatore || '').trim() !== filters.trasportatore) return false;
-        if (filters.provincia && (r.provincia || '').trim() !== filters.provincia) return false;
-        if (filters.regione) {
+        if (filters.stoccaggio.length > 0 && !filters.stoccaggio.includes((r.stoccaggio || '').trim())) return false;
+        if (filters.destinazione.length > 0 && !filters.destinazione.includes((r.destinazione || '').trim())) return false;
+        if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;
+        if (filters.settimana.length > 0 && !filters.settimana.map(String).includes(String(r.settimane))) return false;
+        if (filters.classe.length > 0 && !filters.classe.includes(r.classe)) return false;
+        if (filters.trasportatore.length > 0 && !filters.trasportatore.includes((r.trasportatore || '').trim())) return false;
+        if (filters.provincia.length > 0 && !filters.provincia.includes((r.provincia || '').trim())) return false;
+        if (filters.regione.length > 0) {
           const reg = r.regione || getRegioneFromProvincia(r.provincia);
-          if ((reg || '').trim() !== filters.regione) return false;
+          if (!filters.regione.includes((reg || '').trim())) return false;
         }
-        if (filters.stato && (r.stato || '').trim().toLowerCase() !== filters.stato.toLowerCase()) return false;
+        if (filters.stato.length > 0 && !filters.stato.map(s => s.toLowerCase()).includes((r.stato || '').trim().toLowerCase())) return false;
         if (filters.data) {
           const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
           if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
         }
-        if (filters.anno) {
+        if (filters.anno.length > 0) {
           const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
           const dt = d ? new Date(d) : null;
           const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
-          if (String(anno) !== String(filters.anno)) return false;
+          if (!filters.anno.map(String).includes(String(anno))) return false;
         }
         return true;
-      }).map(r => ({ ...r, peso_t: +((r.peso_effettivo || r.peso_stimato || 0) / 1000).toFixed(2) }));
+      }).map(r => ({ ...r, peso_t: +((r.peso_effettivo || r.peso_stimato || 0) / 1000).toFixed(3) }));
       setRecords(filtered);
     } catch (e) { console.error(e); }
     setLoadingRecords(false);
@@ -96,8 +98,8 @@ export default function Secondarie() {
     setExporting(false);
   };
 
-  const hasFilters = Object.values(filters).some(v => v);
-  const resetFilters = () => setFilters({ stoccaggio: '', destinazione: '', mese: '', settimana: '', classe: '', trasportatore: '', anno: '', provincia: '', regione: '', stato: '', data: '' });
+  const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
+  const resetFilters = () => setFilters({ stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
   const opts = data?.filterOptions || {};
 
   // Stati garantiti sempre presenti nel filtro, anche senza record (valori normalizzati in minuscolo)
@@ -110,9 +112,11 @@ export default function Secondarie() {
 
   // Messaggio vuoto personalizzato in base allo stato selezionato
   const getEmptyMessage = () => {
-    const s = (filters.stato || '').toLowerCase();
-    if (s === 'eseguito') return 'Non sono presenti secondarie in stato di eseguito';
-    if (s === 'assegnato') return 'Non sono presenti secondarie in stato di assegnato';
+    if (filters.stato.length === 1) {
+      const s = filters.stato[0].toLowerCase();
+      if (s === 'eseguito') return 'Non sono presenti secondarie in stato di eseguito';
+      if (s === 'assegnato') return 'Non sono presenti secondarie in stato di assegnato';
+    }
     return 'Nessun trasporto secondario trovato.';
   };
 
@@ -155,47 +159,17 @@ export default function Secondarie() {
               )}
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-11 gap-3">
-              <select value={filters.regione} onChange={e => setFilters(p => ({ ...p, regione: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutte le regioni</option>
-                {opts.regioni?.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-              <select value={filters.stato} onChange={e => setFilters(p => ({ ...p, stato: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutti gli stati</option>
-                {statiOptions.map(s => <option key={s} value={s}>{prettyStato(s)}</option>)}
-              </select>
+              <MultiSelect allLabel="Tutte le regioni" options={opts.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
+              <MultiSelect allLabel="Tutti gli stati" options={statiOptions.map(s => ({ value: s, label: prettyStato(s) }))} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
               <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" />
-              <select value={filters.stoccaggio} onChange={e => setFilters(p => ({ ...p, stoccaggio: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutte le origini</option>
-                {opts.stoccaggi?.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <select value={filters.destinazione} onChange={e => setFilters(p => ({ ...p, destinazione: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutte le destinazioni</option>
-                {opts.destinazioni?.map(d => <option key={d} value={d}>{d}</option>)}
-              </select>
-              <select value={filters.provincia} onChange={e => setFilters(p => ({ ...p, provincia: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutte le province</option>
-                {opts.province?.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-              <select value={filters.mese} onChange={e => setFilters(p => ({ ...p, mese: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutti i mesi</option>
-                {opts.mesi?.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <select value={filters.settimana} onChange={e => setFilters(p => ({ ...p, settimana: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutte le settimane</option>
-                {opts.settimane?.map(s => <option key={s} value={s}>Sett. {s}</option>)}
-              </select>
-              <select value={filters.classe} onChange={e => setFilters(p => ({ ...p, classe: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutte le classi</option>
-                {opts.classi?.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <select value={filters.trasportatore} onChange={e => setFilters(p => ({ ...p, trasportatore: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutti i trasportatori</option>
-                {opts.trasportatori?.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-              <select value={filters.anno} onChange={e => setFilters(p => ({ ...p, anno: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutti gli anni</option>
-                {opts.anni?.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
+              <MultiSelect allLabel="Tutte le origini" options={opts.stoccaggi || []} selected={filters.stoccaggio} onChange={v => setFilters(p => ({ ...p, stoccaggio: v }))} />
+              <MultiSelect allLabel="Tutte le destinazioni" options={opts.destinazioni || []} selected={filters.destinazione} onChange={v => setFilters(p => ({ ...p, destinazione: v }))} />
+              <MultiSelect allLabel="Tutte le province" options={opts.province || []} selected={filters.provincia} onChange={v => setFilters(p => ({ ...p, provincia: v }))} />
+              <MultiSelect allLabel="Tutti i mesi" options={opts.mesi || []} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
+              <MultiSelect allLabel="Tutte le settimane" options={(opts.settimane || []).map(s => ({ value: String(s), label: `Sett. ${s}` }))} selected={filters.settimana} onChange={v => setFilters(p => ({ ...p, settimana: v }))} />
+              <MultiSelect allLabel="Tutte le classi" options={opts.classi || []} selected={filters.classe} onChange={v => setFilters(p => ({ ...p, classe: v }))} />
+              <MultiSelect allLabel="Tutti i trasportatori" options={opts.trasportatori || []} selected={filters.trasportatore} onChange={v => setFilters(p => ({ ...p, trasportatore: v }))} />
+              <MultiSelect allLabel="Tutti gli anni" options={(opts.anni || []).map(a => String(a))} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v }))} />
             </div>
           </div>
 
@@ -231,8 +205,8 @@ export default function Secondarie() {
                     {(data?.byClasse || []).map((c) => (
                       <tr key={c.classe} className="border-t hover:bg-muted/50">
                         <td className="px-3 py-2 font-medium">{c.classe}</td>
-                        <td className="px-3 py-2 text-right">{c.ordini.toLocaleString('it-IT')}</td>
-                        <td className="px-3 py-2 text-right">{(c.peso_kg / 1000).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
+                        <td className="px-3 py-2 text-right">{formatNumber(c.ordini, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                        <td className="px-3 py-2 text-right">{fmtTon(c.peso_kg / 1000)}</td>
                       </tr>
                     ))}
                   </tbody>

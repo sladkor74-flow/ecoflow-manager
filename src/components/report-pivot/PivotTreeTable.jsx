@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { formatNumber } from '@/lib/utils';
 
 function flatten(node, expanded, parentKey = '', level = 0, parentPath = []) {
   const result = [];
@@ -16,7 +17,7 @@ function flatten(node, expanded, parentKey = '', level = 0, parentPath = []) {
 
 function fmt(v) {
   if (v == null) return '—';
-  if (typeof v === 'number' && !Number.isInteger(v)) return v.toFixed(1);
+  if (typeof v === 'number' && !Number.isInteger(v)) return formatNumber(v);
   return String(v);
 }
 

@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import * as XLSX from 'npm:xlsx@0.18.5';
+import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
 
 // Esporta i dati Secondarie (dettaglio o matrice per tratta) in Excel.
 // Payload: { filters: {...}, mode: 'detail' | 'matrix' }
@@ -16,17 +17,17 @@ export default async function(req) {
     const all = await base44.asServiceRole.entities.Secondaria.list('-created_date', 10000);
 
     const filtered = all.filter(r => {
-      if (filters.stoccaggio && (r.stoccaggio || '').trim() !== filters.stoccaggio) return false;
-      if (filters.destinazione && (r.destinazione || '').trim() !== filters.destinazione) return false;
-      if (filters.mese && r.mese !== filters.mese) return false;
-      if (filters.settimana && String(r.settimane) !== String(filters.settimana)) return false;
-      if (filters.classe && r.classe !== filters.classe) return false;
-      if (filters.trasportatore && (r.trasportatore || '').trim() !== filters.trasportatore) return false;
-      if (filters.anno) {
+      if (!matchesFilter((r.stoccaggio || '').trim(), filters.stoccaggio)) return false;
+      if (!matchesFilter((r.destinazione || '').trim(), filters.destinazione)) return false;
+      if (!matchesFilter(r.mese, filters.mese)) return false;
+      if (!matchesFilterString(r.settimane, filters.settimana)) return false;
+      if (!matchesFilter(r.classe, filters.classe)) return false;
+      if (!matchesFilter((r.trasportatore || '').trim(), filters.trasportatore)) return false;
+      if (filters.anno != null && (!Array.isArray(filters.anno) ? filters.anno : filters.anno.length > 0)) {
         const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
         const dt = d ? new Date(d) : null;
         const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
-        if (String(anno) !== String(filters.anno)) return false;
+        if (!matchesFilterString(anno, filters.anno)) return false;
       }
       return true;
     });

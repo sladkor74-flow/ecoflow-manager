@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { AlertTriangle, TrendingDown, Loader2, ChevronRight } from 'lucide-react';
+import { formatNumber } from '@/lib/utils';
 
 // Pannello dashboard: mostra trasportatori a rischio o sotto target per il mese corrente.
 export default function TargetAlertsPanel() {
@@ -74,7 +75,7 @@ export default function TargetAlertsPanel() {
                   Proiezione: {item.pct_proiezione}% del target
                 </span>
                 <span className="text-muted-foreground">
-                  {item.raccolto} / {item.target} ton
+                  {formatNumber(item.raccolto)} / {formatNumber(item.target)} ton
                 </span>
               </div>
               {/* Barra progresso */}
@@ -104,7 +105,7 @@ export default function TargetAlertsPanel() {
                   Raggiunto: {item.pct_raggiungimento}% del target
                 </span>
                 <span className="text-muted-foreground">
-                  {item.raccolto} / {item.target} ton (Δ {item.delta})
+                  {formatNumber(item.raccolto)} / {formatNumber(item.target)} ton (Δ {formatNumber(item.delta)})
                 </span>
               </div>
               <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">

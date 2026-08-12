@@ -5,6 +5,7 @@ import TerziarieKpi from '@/components/terziarie/TerziarieKpi';
 import GiacenzeTable from '@/components/terziarie/GiacenzeTable';
 import TerziarieTable from '@/components/terziarie/TerziarieTable';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
+import MultiSelect from '@/components/shared/MultiSelect';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const MATERIALI = ['PFU SFUSO', 'CIAB/CIPP', 'FERRO'];
@@ -28,7 +29,7 @@ export default function Terziarie() {
   const [loading, setLoading] = useState(true);
   const [loadingGiac, setLoadingGiac] = useState(true);
   const [exporting, setExporting] = useState(false);
-  const [filters, setFilters] = useState({ impianto: '', destinazione: '', mese: '', trasportatore: '', materiale: '', anno: '', provincia: '', regione: '', stato: '', data: '' });
+  const [filters, setFilters] = useState({ impianto: [], destinazione: [], mese: [], trasportatore: [], materiale: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
   const [filterOptions, setFilterOptions] = useState({ impianti: [], destinazioni: [], trasportatori: [], anni: [], province: [], regioni: [], stati: [] });
 
   const loadGiacenze = useCallback(async () => {
@@ -61,26 +62,26 @@ export default function Terziarie() {
       });
       // Apply filters
       const filtered = all.filter((r) => {
-        if (filters.impianto && (r.unita_locale_origine || '').trim() !== filters.impianto) return false;
-        if (filters.destinazione && (r.destinazione || '').trim() !== filters.destinazione) return false;
-        if (filters.provincia && (r.provincia || '').trim() !== filters.provincia) return false;
-        if (filters.regione && (getRegioneFromProvincia(r.provincia) || '').trim() !== filters.regione) return false;
-        if (filters.stato && (r.stato || '').trim() !== filters.stato) return false;
+        if (filters.impianto.length > 0 && !filters.impianto.includes((r.unita_locale_origine || '').trim())) return false;
+        if (filters.destinazione.length > 0 && !filters.destinazione.includes((r.destinazione || '').trim())) return false;
+        if (filters.provincia.length > 0 && !filters.provincia.includes((r.provincia || '').trim())) return false;
+        if (filters.regione.length > 0 && !filters.regione.includes((getRegioneFromProvincia(r.provincia) || '').trim())) return false;
+        if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
         if (filters.data) {
           const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
           if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
         }
-        if (filters.mese && getMeseFromRecord(r) !== filters.mese) return false;
-        if (filters.trasportatore && (r.trasportatore || '').trim() !== filters.trasportatore) return false;
-        if (filters.materiale && getMateriale(r) !== filters.materiale) return false;
-        if (filters.anno) {
+        if (filters.mese.length > 0 && !filters.mese.includes(getMeseFromRecord(r))) return false;
+        if (filters.trasportatore.length > 0 && !filters.trasportatore.includes((r.trasportatore || '').trim())) return false;
+        if (filters.materiale.length > 0 && !filters.materiale.includes(getMateriale(r))) return false;
+        if (filters.anno.length > 0) {
           const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
           const dt = d ? new Date(d) : null;
           const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
-          if (String(anno) !== filters.anno) return false;
+          if (!filters.anno.map(String).includes(String(anno))) return false;
         }
         return true;
-      }).map(r => ({ ...r, mese: getMeseFromRecord(r), materiale: getMateriale(r), peso_t: +((r.peso_effettivo || 0) / 1000).toFixed(2) }));
+      }).map(r => ({ ...r, mese: getMeseFromRecord(r), materiale: getMateriale(r), peso_t: +((r.peso_effettivo || 0) / 1000).toFixed(3) }));
       setRecords(filtered);
     } catch (e) { console.error(e); }
     setLoading(false);
@@ -119,8 +120,8 @@ export default function Terziarie() {
     setExporting(false);
   };
 
-  const hasFilters = Object.values(filters).some(v => v);
-  const resetFilters = () => setFilters({ impianto: '', destinazione: '', mese: '', trasportatore: '', materiale: '', anno: '', provincia: '', regione: '', stato: '', data: '' });
+  const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
+  const resetFilters = () => setFilters({ impianto: [], destinazione: [], mese: [], trasportatore: [], materiale: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
 
   return (
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
@@ -147,43 +148,16 @@ export default function Terziarie() {
           )}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-10 gap-3">
-          <select value={filters.regione} onChange={e => setFilters(p => ({ ...p, regione: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutte le regioni</option>
-            {filterOptions.regioni.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
-          <select value={filters.stato} onChange={e => setFilters(p => ({ ...p, stato: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutti gli stati</option>
-            {filterOptions.stati.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
+          <MultiSelect allLabel="Tutte le regioni" options={filterOptions.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
+          <MultiSelect allLabel="Tutti gli stati" options={filterOptions.stati || []} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
           <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" />
-          <select value={filters.impianto} onChange={e => setFilters(p => ({ ...p, impianto: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutti gli impianti</option>
-            {filterOptions.impianti.map(i => <option key={i} value={i}>{i}</option>)}
-          </select>
-          <select value={filters.destinazione} onChange={e => setFilters(p => ({ ...p, destinazione: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutte le destinazioni</option>
-            {filterOptions.destinazioni.map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
-          <select value={filters.provincia} onChange={e => setFilters(p => ({ ...p, provincia: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutte le province</option>
-            {filterOptions.province.map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
-          <select value={filters.mese} onChange={e => setFilters(p => ({ ...p, mese: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutti i mesi</option>
-            {MESI.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-          <select value={filters.trasportatore} onChange={e => setFilters(p => ({ ...p, trasportatore: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutti i trasportatori</option>
-            {filterOptions.trasportatori.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-          <select value={filters.materiale} onChange={e => setFilters(p => ({ ...p, materiale: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutti i materiali</option>
-            {MATERIALI.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-          <select value={filters.anno} onChange={e => setFilters(p => ({ ...p, anno: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutti gli anni</option>
-            {filterOptions.anni.map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
+          <MultiSelect allLabel="Tutti gli impianti" options={filterOptions.impianti || []} selected={filters.impianto} onChange={v => setFilters(p => ({ ...p, impianto: v }))} />
+          <MultiSelect allLabel="Tutte le destinazioni" options={filterOptions.destinazioni || []} selected={filters.destinazione} onChange={v => setFilters(p => ({ ...p, destinazione: v }))} />
+          <MultiSelect allLabel="Tutte le province" options={filterOptions.province || []} selected={filters.provincia} onChange={v => setFilters(p => ({ ...p, provincia: v }))} />
+          <MultiSelect allLabel="Tutti i mesi" options={MESI} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
+          <MultiSelect allLabel="Tutti i trasportatori" options={filterOptions.trasportatori || []} selected={filters.trasportatore} onChange={v => setFilters(p => ({ ...p, trasportatore: v }))} />
+          <MultiSelect allLabel="Tutti i materiali" options={MATERIALI} selected={filters.materiale} onChange={v => setFilters(p => ({ ...p, materiale: v }))} />
+          <MultiSelect allLabel="Tutti gli anni" options={(filterOptions.anni || []).map(a => String(a))} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v }))} />
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Warehouse, ArrowDownToLine, ArrowUpFromLine, Scale } from 'lucide-react';
+import { formatNumber } from '@/lib/utils';
 
 export default function GiacenzeTable({ giacenze, loading }) {
   if (loading) {
@@ -34,10 +35,10 @@ export default function GiacenzeTable({ giacenze, loading }) {
           {giacenze.map((g) => (
             <tr key={g.impianto} className="border-t hover:bg-muted/50">
               <td className="px-4 py-3 font-medium">{g.impianto}</td>
-              <td className="px-4 py-3 text-right text-green-700">{g.ingressi_t.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</td>
-              <td className="px-4 py-3 text-right text-red-700">{g.uscite_t.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</td>
+              <td className="px-4 py-3 text-right text-green-700">{formatNumber(g.ingressi_t)}</td>
+              <td className="px-4 py-3 text-right text-red-700">{formatNumber(g.uscite_t)}</td>
               <td className={`px-4 py-3 text-right font-bold ${g.giacenza_t < 0 ? 'text-red-600' : 'text-foreground'}`}>
-                {g.giacenza_t.toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                {formatNumber(g.giacenza_t)}
               </td>
               <td className="px-4 py-3 text-right text-muted-foreground">{g.spedizioni_ingresso}</td>
               <td className="px-4 py-3 text-right text-muted-foreground">{g.spedizioni_uscita}</td>

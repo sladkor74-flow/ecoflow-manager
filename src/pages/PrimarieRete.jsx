@@ -8,6 +8,7 @@ import ProvinceMatrix from '@/components/primarie-rete/ProvinceMatrix';
 import RaccoglitoriMix from '@/components/primarie-rete/RaccoglitoriMix';
 import SlaMetrics from '@/components/primarie-rete/SlaMetrics';
 import PrimarieReteTable from '@/components/primarie-rete/PrimarieReteTable';
+import MultiSelect from '@/components/shared/MultiSelect';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -19,8 +20,9 @@ export default function PrimarieRete() {
   const [alertCount, setAlertCount] = useState(0);
 
   const [records, setRecords] = useState([]);
+  const [allRecords, setAllRecords] = useState([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
-  const [filters, setFilters] = useState({ regione: '', stato: '', data: '', mese: '' });
+  const [filters, setFilters] = useState({ regione: [], stato: [], data: '', mese: [] });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -45,10 +47,11 @@ export default function PrimarieRete() {
     setLoadingRecords(true);
     try {
       const all = await base44.entities.PrimariaRete.list('-created_date', 10000);
+      setAllRecords(all);
       const filtered = all.filter(r => {
-        if (filters.regione && (r.regione || '').trim() !== filters.regione) return false;
-        if (filters.stato && (r.stato || '').trim() !== filters.stato) return false;
-        if (filters.mese && r.mese !== filters.mese) return false;
+        if (filters.regione.length > 0 && !filters.regione.includes((r.regione || '').trim())) return false;
+        if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
+        if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;
         if (filters.data) {
           const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
           if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
@@ -63,11 +66,11 @@ export default function PrimarieRete() {
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadRecords(); }, [loadRecords]);
 
-  const regioni = [...new Set(records.map(r => (r.regione || '').trim()).filter(Boolean))].sort();
-  const stati = [...new Set(records.map(r => (r.stato || '').trim()).filter(Boolean))].sort();
+  const regioni = [...new Set(allRecords.map(r => (r.regione || '').trim()).filter(Boolean))].sort();
+  const stati = [...new Set(allRecords.map(r => (r.stato || '').trim()).filter(Boolean))].sort();
 
-  const hasFilters = Object.values(filters).some(v => v);
-  const resetFilters = () => setFilters({ regione: '', stato: '', data: '', mese: '' });
+  const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
+  const resetFilters = () => setFilters({ regione: [], stato: [], data: '', mese: [] });
 
   return (
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
@@ -97,18 +100,9 @@ export default function PrimarieRete() {
           )}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <select value={filters.regione} onChange={e => setFilters(p => ({ ...p, regione: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutte le regioni</option>
-            {regioni.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
-          <select value={filters.stato} onChange={e => setFilters(p => ({ ...p, stato: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutti gli stati</option>
-            {stati.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select value={filters.mese} onChange={e => setFilters(p => ({ ...p, mese: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-            <option value="">Tutti i mesi</option>
-            {MESI.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
+          <MultiSelect allLabel="Tutte le regioni" options={regioni} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
+          <MultiSelect allLabel="Tutti gli stati" options={stati} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
+          <MultiSelect allLabel="Tutti i mesi" options={MESI} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
           <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" />
         </div>
       </div>

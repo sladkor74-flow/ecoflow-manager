@@ -1,13 +1,15 @@
 import React from 'react';
 import { Truck, Weight, Package, Route } from 'lucide-react';
+import { formatNumber, fmtTon } from '@/lib/utils';
 
 export default function SecondarieKpi({ kpi, byClasse }) {
   if (!kpi) return null;
 
+  const intFmt = (v) => formatNumber(v, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   const cards = [
-    { label: 'Trasporti Secondari', value: (kpi.total_orders || 0).toLocaleString('it-IT'), icon: Truck, color: 'text-purple-600 bg-purple-50' },
-    { label: 'Tonnellate Totali', value: (kpi.total_ton || 0).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' t', icon: Weight, color: 'text-amber-600 bg-amber-50' },
-    { label: 'Quantità (Pezzi)', value: (kpi.total_quantita || 0).toLocaleString('it-IT'), icon: Package, color: 'text-blue-600 bg-blue-50' },
+    { label: 'Trasporti Secondari', value: intFmt(kpi.total_orders || 0), icon: Truck, color: 'text-purple-600 bg-purple-50' },
+    { label: 'Tonnellate Totali', value: fmtTon(kpi.total_ton || 0), icon: Weight, color: 'text-amber-600 bg-amber-50' },
+    { label: 'Quantità (Pezzi)', value: intFmt(kpi.total_quantita || 0), icon: Package, color: 'text-blue-600 bg-blue-50' },
     { label: 'Tratte Attive', value: (byClasse?.length || 0), icon: Route, color: 'text-green-600 bg-green-50' },
   ];
 

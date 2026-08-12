@@ -1,14 +1,16 @@
 import React from 'react';
 import { ClipboardList, Weight, CalendarRange, MapPin } from 'lucide-react';
+import { formatNumber, fmtTon } from '@/lib/utils';
 
 export default function AssegnatiKpi({ kpi }) {
   if (!kpi) return null;
 
+  const intFmt = (v) => formatNumber(v, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   const cards = [
-    { label: 'Ordini Assegnati / Arretrati', value: (kpi.total_orders || 0).toLocaleString('it-IT'), icon: ClipboardList, color: 'text-blue-600 bg-blue-50' },
-    { label: 'Tonnellaggio Stimato in Attesa', value: (kpi.total_ton || 0).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' t', icon: Weight, color: 'text-amber-600 bg-amber-50' },
-    { label: '1° Semestre', value: (kpi.sem1_ton || 0).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' t', icon: CalendarRange, color: 'text-green-600 bg-green-50' },
-    { label: '2° Semestre', value: (kpi.sem2_ton || 0).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' t', icon: CalendarRange, color: 'text-purple-600 bg-purple-50' },
+    { label: 'Ordini Assegnati / Arretrati', value: intFmt(kpi.total_orders || 0), icon: ClipboardList, color: 'text-blue-600 bg-blue-50' },
+    { label: 'Tonnellaggio Stimato in Attesa', value: fmtTon(kpi.total_ton || 0), icon: Weight, color: 'text-amber-600 bg-amber-50' },
+    { label: '1° Semestre', value: fmtTon(kpi.sem1_ton || 0), icon: CalendarRange, color: 'text-green-600 bg-green-50' },
+    { label: '2° Semestre', value: fmtTon(kpi.sem2_ton || 0), icon: CalendarRange, color: 'text-purple-600 bg-purple-50' },
   ];
 
   return (

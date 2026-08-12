@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { MESI } from "../../shared/raccoltoCalculator.ts";
+import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
 
 // Esporta i dati Assegnati (dettaglio o matrice aggregata) in Excel.
 // Payload: { filters: {...}, mode: 'detail' | 'matrix' }
@@ -18,12 +19,12 @@ export default async function(req) {
     const all = await base44.asServiceRole.entities[entityName].list('-created_date', 10000);
 
     const filtered = all.filter(r => {
-      if (filters.anno && String(r.anno) !== String(filters.anno)) return false;
-      if (filters.mese && r.mese !== filters.mese) return false;
-      if (filters.regione && r.regione !== filters.regione) return false;
-      if (filters.provincia && (r.provincia || '').toUpperCase().trim() !== filters.provincia) return false;
-      if (filters.partner_operativo && (r.partner_operativo || '').trim() !== filters.partner_operativo) return false;
-      if (filters.classe && r.classe !== filters.classe) return false;
+      if (!matchesFilterString(r.anno, filters.anno)) return false;
+      if (!matchesFilter(r.mese, filters.mese)) return false;
+      if (!matchesFilter(r.regione, filters.regione)) return false;
+      if (!matchesFilter((r.provincia || '').toUpperCase().trim(), filters.provincia)) return false;
+      if (!matchesFilter((r.partner_operativo || '').trim(), filters.partner_operativo)) return false;
+      if (!matchesFilter(r.classe, filters.classe)) return false;
       return true;
     });
 

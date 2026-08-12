@@ -17,8 +17,8 @@ export default function Dashboard() {
   const [alertCount, setAlertCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const [mese, setMese] = useState('Tutti i mesi');
-  const [anno, setAnno] = useState(new Date().getFullYear());
+  const [mese, setMese] = useState([]);
+  const [anno, setAnno] = useState([new Date().getFullYear()]);
   const [raccoltaData, setRaccoltaData] = useState(null);
   const [raccoltaLoading, setRaccoltaLoading] = useState(true);
 
@@ -91,7 +91,7 @@ export default function Dashboard() {
       <div className="border rounded-lg p-5">
         <div className="flex items-center gap-2 mb-4">
           <BarChart3 className="w-5 h-5 text-primary" />
-          <h2 className="font-heading font-semibold text-lg">Raccolta RETE vs ACI per Regione — {mese} {anno}</h2>
+          <h2 className="font-heading font-semibold text-lg">Raccolta RETE vs ACI per Regione — {mese.length ? mese.join(', ') : 'Tutti i mesi'} {anno.length ? anno.join(', ') : 'Tutti gli anni'}</h2>
         </div>
         <ReteVsAciChart data={raccoltaData?.per_regione} />
       </div>
@@ -100,7 +100,7 @@ export default function Dashboard() {
       <div className="border rounded-lg p-5">
         <div className="flex items-center gap-2 mb-4">
           <TrendingUp className="w-5 h-5 text-primary" />
-          <h2 className="font-heading font-semibold text-lg">Target vs Raccolto per Regione — {anno} (solo Rete)</h2>
+          <h2 className="font-heading font-semibold text-lg">Target vs Raccolto per Regione — {anno.length ? anno.join(', ') : 'Tutti gli anni'} (solo Rete)</h2>
         </div>
         <TargetVsRaccoltoChart data={raccoltaData?.target_vs_raccolto} />
       </div>

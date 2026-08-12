@@ -1,12 +1,13 @@
 import React from 'react';
 import { Ship, Scale, TrendingDown, Warehouse } from 'lucide-react';
+import { formatNumber } from '@/lib/utils';
 
 export default function TerziarieKpi({ kpi }) {
   const cards = [
-    { label: 'Totale Terziarie', value: kpi.totale_t.toFixed(1), unit: 't', icon: Ship, color: 'text-pink-600 bg-pink-50' },
+    { label: 'Totale Terziarie', value: formatNumber(kpi.totale_t), unit: 't', icon: Ship, color: 'text-pink-600 bg-pink-50' },
     { label: 'Spedizioni / Navi', value: kpi.spedizioni, unit: '', icon: TrendingDown, color: 'text-blue-600 bg-blue-50' },
     { label: 'Impianti Attivi', value: kpi.impianti_attivi, unit: '', icon: Warehouse, color: 'text-amber-600 bg-amber-50' },
-    { label: 'Giacenza Residua', value: kpi.giacenza_totale.toFixed(1), unit: 't', icon: Scale, color: 'text-green-600 bg-green-50' },
+    { label: 'Giacenza Residua', value: formatNumber(kpi.giacenza_totale), unit: 't', icon: Scale, color: 'text-green-600 bg-green-50' },
   ];
 
   return (

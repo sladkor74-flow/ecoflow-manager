@@ -1,5 +1,6 @@
 import React from 'react';
 import { MESI_BREVI } from '@/lib/pfuConstants';
+import { formatNumber } from '@/lib/utils';
 
 export default function RegionTable({ data }) {
   return (
@@ -31,13 +32,13 @@ export default function RegionTable({ data }) {
           {data.map((r, i) => (
             <tr key={r.regione} className="border-t hover:bg-muted/30">
               <td className="sticky left-0 bg-card px-3 py-1.5 font-medium">{r.regione}</td>
-              <td className="px-2 py-1.5 text-right tabular-nums">{r.totale.toFixed(1)}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums">{formatNumber(r.totale)}</td>
               {r.mesi.map((m, j) => (
                 <React.Fragment key={j}>
-                  <td className="px-1 py-1.5 text-right tabular-nums">{m.target.toFixed(1)}</td>
-                  <td className="px-1 py-1.5 text-right tabular-nums">{m.raccolto.toFixed(1)}</td>
+                  <td className="px-1 py-1.5 text-right tabular-nums">{formatNumber(m.target)}</td>
+                  <td className="px-1 py-1.5 text-right tabular-nums">{formatNumber(m.raccolto)}</td>
                   <td className={`px-1 py-1.5 text-right tabular-nums ${m.delta > 0 ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50'}`}>
-                    {m.delta.toFixed(1)}
+                    {formatNumber(m.delta)}
                   </td>
                 </React.Fragment>
               ))}

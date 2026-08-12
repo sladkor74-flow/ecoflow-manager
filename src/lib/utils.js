@@ -24,3 +24,9 @@ export const formatNumber = (num, options = {}) => {
 
 export const fmtTon = (num) => `${formatNumber(num)} t`;
 export const fmtEuro = (num) => `${formatNumber(num)} €`;
+
+// Helper per filtri multi-selezione: ritorna true se il filtro è vuoto o include il valore.
+export const matchesMulti = (recordValue, filterArray) => {
+  if (!filterArray || filterArray.length === 0) return true;
+  return filterArray.includes(recordValue);
+};

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Loader2, TrendingUp, TrendingDown } from 'lucide-react';
 import { MESI, meseCorrente } from '@/lib/pfuConstants';
+import { formatNumber } from '@/lib/utils';
 
 export default function TargetDashboard() {
   const currentMonth = useMemo(() => meseCorrente(), []);
@@ -58,12 +59,12 @@ export default function TargetDashboard() {
         <>
           {/* KPI riepilogo */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <KpiCard label="Raccolta RETE" value={`${(totals.rete_kg / 1000).toFixed(1)} t`} color="text-green-600 bg-green-50" />
-            <KpiCard label="Raccolta ACI" value={`${(totals.aci_kg / 1000).toFixed(1)} t`} color="text-amber-600 bg-amber-50" />
-            <KpiCard label="Totale Raccolto" value={`${(totals.totale_kg / 1000).toFixed(1)} t`} color="text-blue-600 bg-blue-50" />
+            <KpiCard label="Raccolta RETE" value={`${formatNumber(totals.rete_kg / 1000)} t`} color="text-green-600 bg-green-50" />
+            <KpiCard label="Raccolta ACI" value={`${formatNumber(totals.aci_kg / 1000)} t`} color="text-amber-600 bg-amber-50" />
+            <KpiCard label="Totale Raccolto" value={`${formatNumber(totals.totale_kg / 1000)} t`} color="text-blue-600 bg-blue-50" />
             <KpiCard
               label="Raggiungimento Target"
-              value={`${totals.raggiungimento.toFixed(0)}%`}
+              value={`${formatNumber(totals.raggiungimento, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}%`}
               color={totals.raggiungimento >= 100 ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50'}
               icon={totals.raggiungimento >= 100 ? TrendingUp : TrendingDown}
             />
@@ -85,7 +86,7 @@ export default function TargetDashboard() {
                         style={{ width: `${(r.rete_kg / maxKg) * 100}%` }}
                       />
                       <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold tabular-nums text-green-900">
-                        {(r.rete_kg / 1000).toFixed(1)} t
+                        {formatNumber(r.rete_kg / 1000)} t
                       </span>
                     </div>
                     {/* Barra ACI */}
@@ -95,7 +96,7 @@ export default function TargetDashboard() {
                         style={{ width: `${(r.aci_kg / maxKg) * 100}%` }}
                       />
                       <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold tabular-nums text-amber-900">
-                        {(r.aci_kg / 1000).toFixed(1)} t
+                        {formatNumber(r.aci_kg / 1000)} t
                       </span>
                     </div>
                   </div>
@@ -123,7 +124,7 @@ export default function TargetDashboard() {
                         style={{ width: `${(r.target_t / maxTarget) * 100}%` }}
                       />
                       <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold tabular-nums text-blue-900">
-                        {r.target_t.toFixed(1)} t
+                        {formatNumber(r.target_t)} t
                       </span>
                     </div>
                     <div className="relative h-5 bg-muted rounded-sm overflow-hidden">
@@ -132,7 +133,7 @@ export default function TargetDashboard() {
                         style={{ width: `${(r.totale_kg / 1000 / maxTarget) * 100}%` }}
                       />
                       <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold tabular-nums">
-                        {(r.totale_kg / 1000).toFixed(1)} t ({r.raggiungimento.toFixed(0)}%)
+                        {formatNumber(r.totale_kg / 1000)} t ({formatNumber(r.raggiungimento, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}%)
                       </span>
                     </div>
                   </div>

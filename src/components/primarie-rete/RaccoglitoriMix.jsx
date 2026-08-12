@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { formatNumber } from '@/lib/utils';
 
 const CLASSI = ['P', 'M', 'G1', 'G2'];
 
@@ -47,7 +48,7 @@ export default function RaccoglitoriMix({ data }) {
           onClick={() => setView('target')}
           className={`px-3 py-1.5 text-sm rounded-md transition-colors ${view === 'target' ? 'bg-primary text-primary-foreground' : 'border hover:bg-accent'}`}
         >
-          % rispetto al target annuo ({target_annuo?.toLocaleString()} ton)
+          % rispetto al target annuo ({formatNumber(target_annuo)} ton)
         </button>
       </div>
 
@@ -78,7 +79,7 @@ export default function RaccoglitoriMix({ data }) {
             {raccoglitori.map((r, idx) => (
               <tr key={r.raccoglitore} className={idx % 2 === 0 ? 'bg-background' : 'bg-muted/30'}>
                 <td className="px-3 py-2 font-medium">{r.raccoglitore}</td>
-                <td className="px-3 py-2 text-right font-semibold">{r.totale_peso.toFixed(1)}</td>
+                <td className="px-3 py-2 text-right font-semibold">{formatNumber(r.totale_peso)}</td>
                 {CLASSI.map(c => {
                   const val = view === 'raccolto' ? r.percentuali[c] : r.percentuali_target[c];
                   const dev = r.deviazioni[c];

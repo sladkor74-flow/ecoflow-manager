@@ -1,5 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import * as XLSX from 'npm:xlsx@0.18.5';
+import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
+import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
 
 // Esporta i dati terziarie filtrati in Excel.
 // Payload: { filters: { impianto?, destinazione?, mese?, trasportatore?, materiale?, anno? } }
@@ -29,11 +31,27 @@ export default async function(req) {
     }
 
     const filtered = records.filter((r) => {
-      if (filters.impianto && (r.unita_locale_origine || '').trim() !== filters.impianto) return false;
-      if (filters.destinazione && (r.destinazione || '').trim() !== filters.destinazione) return false;
-      if (filters.mese && getMese(r) !== filters.mese) return false;
-      if (filters.trasportatore && (r.trasportatore || '').trim() !== filters.trasportatore) return false;
-      if (filters.materiale && getMateriale(r) !== filters.materiale) return false;
+      if (!matchesFilter((r.unita_locale_origine || '').trim(), filters.impianto)) return false;
+      if (!matchesFilter((r.destinazione || '').trim(), filters.destinazione)) return false;
+      if (!matchesFilter(getMese(r), filters.mese)) return false;
+      if (!matchesFilter((r.trasportatore || '').trim(), filters.trasportatore)) return false;
+      if (!matchesFilter(getMateriale(r), filters.materiale)) return false;
+      if (filters.anno != null && (!Array.isArray(filters.anno) ? filters.anno : filters.anno.length > 0)) {
+        const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+        const dt = d ? new Date(d) : null;
+        const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
+        if (!matchesFilterString(anno, filters.anno)) return false;
+      }
+      if (filters.provincia != null && (!Array.isArray(filters.provincia) ? filters.provincia : filters.provincia.length > 0)) {
+        if (!matchesFilter((r.provincia || '').trim(), filters.provincia)) return false;
+      }
+      if (filters.regione != null && (!Array.isArray(filters.regione) ? filters.regione : filters.regione.length > 0)) {
+        const reg = r.regione || getRegioneFromProvincia(r.provincia);
+        if (!matchesFilter((reg || '').trim(), filters.regione)) return false;
+      }
+      if (filters.stato != null && (!Array.isArray(filters.stato) ? filters.stato : filters.stato.length > 0)) {
+        if (!matchesFilter((r.stato || '').trim(), filters.stato)) return false;
+      }
       return true;
     });
 

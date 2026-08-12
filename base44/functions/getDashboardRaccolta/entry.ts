@@ -10,9 +10,17 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const meseRaw = body.mese || '';
-    const mese = meseRaw === 'Tutti i mesi' ? '' : meseRaw;
-    const anno = Number(body.anno) || new Date().getFullYear();
+
+    // Supporto filtri multi-selezione: mese e anno possono essere array o singoli valori
+    const meseRaw = body.mese || [];
+    const mesi = Array.isArray(meseRaw)
+      ? meseRaw.filter(m => m && m !== 'Tutti i mesi')
+      : (meseRaw && meseRaw !== 'Tutti i mesi' ? [meseRaw] : []);
+
+    const annoRaw = body.anno || [];
+    const anni = Array.isArray(annoRaw)
+      ? annoRaw.map(Number).filter(a => !isNaN(a))
+      : (annoRaw ? [Number(annoRaw)] : [new Date().getFullYear()]);
 
     const [rete, aci] = await Promise.all([
       base44.asServiceRole.entities.PrimariaRete.filter({ stato: 'terminato' }, '-created_date', 10000),
@@ -31,17 +39,17 @@ export default async function(req) {
       return isNaN(d.getTime()) ? 0 : d.getFullYear();
     };
 
-    const reteAnno = rete.filter(r => getAnno(r) === anno);
-    const aciAnno = aci.filter(r => getAnno(r) === anno);
-    const reteMese = mese ? reteAnno.filter(r => r.mese === mese) : reteAnno;
-    const aciMese = mese ? aciAnno.filter(r => r.mese === mese) : aciAnno;
+    const reteAnno = anni.length > 0 ? rete.filter(r => anni.includes(getAnno(r))) : rete;
+    const aciAnno = anni.length > 0 ? aci.filter(r => anni.includes(getAnno(r))) : aci;
+    const reteMese = mesi.length > 0 ? reteAnno.filter(r => mesi.includes(r.mese)) : reteAnno;
+    const aciMese = mesi.length > 0 ? aciAnno.filter(r => mesi.includes(r.mese)) : aciAnno;
 
     const raccolta_rete = sumTon(reteMese);
     const raccolta_aci = sumTon(aciMese);
     const totale_raccolto = sumTon([...reteAnno, ...aciAnno]);
 
     const TARGET_ANNUO = { 2025: 11200, 2026: 11550 };
-    const target = TARGET_ANNUO[anno] || 0;
+    const target = anni.reduce((s, a) => s + (TARGET_ANNUO[a] || 0), 0);
     const raggiungimento_pct = target > 0 ? (totale_raccolto / target) * 100 : 0;
 
     // Raccolta RETE vs ACI per regione (mese+anno selezionati)

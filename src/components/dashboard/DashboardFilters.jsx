@@ -1,4 +1,5 @@
 import React from 'react';
+import MultiSelect from '@/components/shared/MultiSelect';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
   'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -7,26 +8,23 @@ export default function DashboardFilters({ mese, anno, onMeseChange, onAnnoChang
   const anni = [2025, 2026, 2027];
   return (
     <div className="flex items-end gap-3 flex-wrap">
-      <div>
+      <div className="min-w-[180px] flex-1 max-w-[300px]">
         <label className="text-xs text-muted-foreground mb-1 block">Mese</label>
-        <select
-          value={mese}
-          onChange={e => onMeseChange(e.target.value)}
-          className="border rounded-md px-3 py-2 text-sm bg-background min-w-[140px]"
-        >
-          <option value="Tutti i mesi">Tutti i mesi</option>
-          {MESI.map(m => <option key={m} value={m}>{m}</option>)}
-        </select>
+        <MultiSelect
+          allLabel="Tutti i mesi"
+          options={MESI}
+          selected={mese || []}
+          onChange={onMeseChange}
+        />
       </div>
-      <div>
+      <div className="min-w-[140px] flex-1 max-w-[220px]">
         <label className="text-xs text-muted-foreground mb-1 block">Anno</label>
-        <select
-          value={anno}
-          onChange={e => onAnnoChange(Number(e.target.value))}
-          className="border rounded-md px-3 py-2 text-sm bg-background min-w-[100px]"
-        >
-          {anni.map(a => <option key={a} value={a}>{a}</option>)}
-        </select>
+        <MultiSelect
+          allLabel="Tutti gli anni"
+          options={anni.map(String)}
+          selected={(anno || []).map(String)}
+          onChange={(v) => onAnnoChange(v.map(Number))}
+        />
       </div>
     </div>
   );

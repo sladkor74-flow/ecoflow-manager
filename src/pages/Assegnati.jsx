@@ -6,6 +6,7 @@ import AssegnatiMatrix from '@/components/assegnati/AssegnatiMatrix';
 import AssegnatiTable from '@/components/assegnati/AssegnatiTable';
 import ProvinceRanking from '@/components/assegnati/ProvinceRanking';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import MultiSelect from '@/components/shared/MultiSelect';
 
 export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Rete — Backlog Richieste', description = 'Ordini in stato "assegnato" di classe diversa da PFU Autodemolizione, derivati automaticamente dal caricamento delle Primarie.' }) {
   const [data, setData] = useState(null);
@@ -13,7 +14,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
   const [loading, setLoading] = useState(true);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [filters, setFilters] = useState({ anno: '', mese: '', regione: '', provincia: '', partner_operativo: '', classe: '', stato: '', data: '', ragione_sociale: '' });
+  const [filters, setFilters] = useState({ anno: [], mese: [], regione: [], provincia: [], partner_operativo: [], classe: [], stato: [], data: '', ragione_sociale: '' });
   const [ragioneSocialeInput, setRagioneSocialeInput] = useState('');
   const [viewMode, setViewMode] = useState('matrix');
 
@@ -33,13 +34,13 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
     try {
       const all = await base44.entities[entity].list('-ordine_immesso_il', 10000);
       const filtered = all.filter(r => {
-        if (filters.anno && String(r.anno) !== String(filters.anno)) return false;
-        if (filters.mese && r.mese !== filters.mese) return false;
-        if (filters.regione && r.regione !== filters.regione) return false;
-        if (filters.provincia && (r.provincia || '').toUpperCase().trim() !== filters.provincia) return false;
-        if (filters.partner_operativo && (r.partner_operativo || '').trim() !== filters.partner_operativo) return false;
-        if (filters.classe && r.classe !== filters.classe) return false;
-        if (filters.stato && (r.stato || '').trim() !== filters.stato) return false;
+        if (filters.anno.length > 0 && !filters.anno.map(String).includes(String(r.anno))) return false;
+        if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;
+        if (filters.regione.length > 0 && !filters.regione.includes(r.regione)) return false;
+        if (filters.provincia.length > 0 && !filters.provincia.includes((r.provincia || '').toUpperCase().trim())) return false;
+        if (filters.partner_operativo.length > 0 && !filters.partner_operativo.includes((r.partner_operativo || '').trim())) return false;
+        if (filters.classe.length > 0 && !filters.classe.includes(r.classe)) return false;
+        if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
         if (filters.ragione_sociale) {
           const search = filters.ragione_sociale.toLowerCase().trim();
           if (!(r.ragione_sociale || '').toLowerCase().includes(search)) return false;
@@ -49,7 +50,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
           if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
         }
         return true;
-      }).map(r => ({ ...r, peso_t: +((r.peso_stimato || 0) / 1000).toFixed(2) }));
+      }).map(r => ({ ...r, peso_t: +((r.peso_stimato || 0) / 1000).toFixed(3) }));
       setRecords(filtered);
     } catch (e) { console.error(e); }
     setLoadingRecords(false);
@@ -81,8 +82,8 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
     setExporting(false);
   };
 
-  const hasFilters = Object.values(filters).some(v => v);
-  const resetFilters = () => { setFilters({ anno: '', mese: '', regione: '', provincia: '', partner_operativo: '', classe: '', stato: '', data: '', ragione_sociale: '' }); setRagioneSocialeInput(''); };
+  const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
+  const resetFilters = () => { setFilters({ anno: [], mese: [], regione: [], provincia: [], partner_operativo: [], classe: [], stato: [], data: '', ragione_sociale: '' }); setRagioneSocialeInput(''); };
   const opts = data?.filterOptions || {};
 
   return (
@@ -134,30 +135,12 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
                   <Search className="w-4 h-4" /> Cerca
                 </button>
               </div>
-              <select value={filters.anno} onChange={e => setFilters(p => ({ ...p, anno: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutti gli anni</option>
-                {opts.anni?.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
-              <select value={filters.mese} onChange={e => setFilters(p => ({ ...p, mese: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutti i mesi</option>
-                {opts.mesi?.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <select value={filters.regione} onChange={e => setFilters(p => ({ ...p, regione: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutte le regioni</option>
-                {opts.regioni?.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-              <select value={filters.provincia} onChange={e => setFilters(p => ({ ...p, provincia: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutte le province</option>
-                {opts.province?.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-              <select value={filters.partner_operativo} onChange={e => setFilters(p => ({ ...p, partner_operativo: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutti i partner</option>
-                {opts.partner?.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-              <select value={filters.classe} onChange={e => setFilters(p => ({ ...p, classe: e.target.value }))} className="border rounded-md px-3 py-2 text-sm">
-                <option value="">Tutte le classi</option>
-                {opts.classi?.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <MultiSelect allLabel="Tutti gli anni" options={(opts.anni || []).map(a => String(a))} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v }))} />
+              <MultiSelect allLabel="Tutti i mesi" options={opts.mesi || []} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
+              <MultiSelect allLabel="Tutte le regioni" options={opts.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
+              <MultiSelect allLabel="Tutte le province" options={opts.province || []} selected={filters.provincia} onChange={v => setFilters(p => ({ ...p, provincia: v }))} />
+              <MultiSelect allLabel="Tutti i partner" options={opts.partner || []} selected={filters.partner_operativo} onChange={v => setFilters(p => ({ ...p, partner_operativo: v }))} />
+              <MultiSelect allLabel="Tutte le classi" options={opts.classi || []} selected={filters.classe} onChange={v => setFilters(p => ({ ...p, classe: v }))} />
             </div>
           </div>
 

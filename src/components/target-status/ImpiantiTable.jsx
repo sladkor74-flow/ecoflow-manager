@@ -1,6 +1,7 @@
 import React from 'react';
 import { MESI_BREVI } from '@/lib/pfuConstants';
 import EditableCell from './EditableCell';
+import { formatNumber } from '@/lib/utils';
 
 export default function ImpiantiTable({ data, onSaveTarget }) {
   return (
@@ -32,15 +33,15 @@ export default function ImpiantiTable({ data, onSaveTarget }) {
           {data.map((r, i) => (
             <tr key={r.impianto} className="border-t hover:bg-muted/30">
               <td className="sticky left-0 bg-card px-3 py-1.5 font-medium max-w-[200px] truncate">{r.impianto}</td>
-              <td className="px-2 py-1.5 text-right tabular-nums">{r.totale.toFixed(1)}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums">{formatNumber(r.totale)}</td>
               {r.mesi.map((m, j) => (
                 <React.Fragment key={j}>
                   <td className="px-1 py-1.5 text-right">
                     <EditableCell value={m.target} onSave={(v) => onSaveTarget(r.impianto, m.mese, v)} />
                   </td>
-                  <td className="px-1 py-1.5 text-right tabular-nums">{m.raccolto.toFixed(1)}</td>
+                  <td className="px-1 py-1.5 text-right tabular-nums">{formatNumber(m.raccolto)}</td>
                   <td className={`px-1 py-1.5 text-right tabular-nums ${m.delta > 0 ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50'}`}>
-                    {m.delta.toFixed(1)}
+                    {formatNumber(m.delta)}
                   </td>
                 </React.Fragment>
               ))}

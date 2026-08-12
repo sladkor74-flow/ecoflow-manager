@@ -36,7 +36,7 @@ const ROW_LABEL_TO_FILTER = {
 export default function ReportMensile() {
   const [pivots, setPivots] = useState({});
   const [filterOptions, setFilterOptions] = useState(null);
-  const [filters, setFilters] = useState({ mese: null, raccoglitore: null, anno: null, settimana: null });
+  const [filters, setFilters] = useState({ mese: [], raccoglitore: [], anno: [], settimana: [] });
   const [activeTab, setActiveTab] = useState('A');
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);

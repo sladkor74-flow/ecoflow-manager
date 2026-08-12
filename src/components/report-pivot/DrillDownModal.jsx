@@ -1,6 +1,7 @@
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Loader2 } from 'lucide-react';
+import { formatNumber } from '@/lib/utils';
 
 export default function DrillDownModal({ open, onClose, title, loading, records, total }) {
   return (
@@ -44,7 +45,7 @@ export default function DrillDownModal({ open, onClose, title, loading, records,
                       <td className="px-2 py-1.5">{r.comune}</td>
                       <td className="px-2 py-1.5">{r.provincia}</td>
                       <td className="px-2 py-1.5">{r.classe}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">{r.peso_effettivo != null ? r.peso_effettivo.toFixed(0) : '—'}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{r.peso_effettivo != null ? formatNumber(r.peso_effettivo, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—'}</td>
                       <td className="px-2 py-1.5 font-mono">{r.numero_fir}</td>
                       <td className="px-2 py-1.5">{r.ordine_chiuso_il ? new Date(r.ordine_chiuso_il).toLocaleDateString('it-IT') : '—'}</td>
                     </tr>

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronRight, ChevronDown } from 'lucide-react';
+import { formatNumber } from '@/lib/utils';
 
 // Matrice gerarchica per tratta: Tratta -> Mese -> Classe
 export default function TrattaMatrix({ matrix }) {
@@ -7,8 +8,8 @@ export default function TrattaMatrix({ matrix }) {
 
   const toggle = (key) => setExpanded((p) => ({ ...p, [key]: !p[key] }));
 
-  const fmt = (n) => (n || 0).toLocaleString('it-IT', { maximumFractionDigits: 1 });
-  const fmtTon = (kg) => ((kg || 0) / 1000).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const fmt = (n) => formatNumber(n || 0, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const fmtTon = (kg) => formatNumber((kg || 0) / 1000);
 
   if (!matrix || matrix.length === 0) {
     return <div className="text-center py-8 text-muted-foreground border rounded-lg">Nessun dato tratta disponibile.</div>;

@@ -3,6 +3,7 @@
 // calcolati al momento dell'importazione. Fallback on-the-fly per record non arricchiti.
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
 import { getMeseFromDate, getSettimanaFromDate, getAnnoFromDate, getRegioneFromProvincia, getClasseFromProdotto } from "./dataEnrichment.ts";
+import { matchesFilter } from "./multiFilter.ts";
 
 function getMese(dateStr) {
   return getMeseFromDate(dateStr);
@@ -68,18 +69,26 @@ function getDataImmissione(r) {
 }
 
 function applyFilters(rows, filters, useImmissione) {
-  if (!filters || (!filters.mese && !filters.raccoglitore && !filters.anno && !filters.settimana)) return rows;
+  const hasFilter = (v) => v != null && v !== '' && (!Array.isArray(v) || v.length > 0);
+  if (!filters || (!hasFilter(filters.mese) && !hasFilter(filters.raccoglitore) && !hasFilter(filters.anno) && !hasFilter(filters.settimana))) return rows;
   return rows.filter((row) => {
     const mese = useImmissione ? getRecordMeseImmissione(row) : getRecordMese(row);
     const anno = useImmissione ? getRecordAnnoImmissione(row) : getRecordAnno(row);
     const sett = useImmissione ? getRecordSettimanaImmissione(row) : getRecordSettimana(row);
-    if (filters.mese && mese !== filters.mese) return false;
-    if (filters.anno && anno !== parseInt(filters.anno)) return false;
-    if (filters.settimana && sett !== parseInt(filters.settimana)) return false;
-    if (filters.raccoglitore) {
+    if (hasFilter(filters.mese) && !matchesFilter(mese, filters.mese)) return false;
+    if (hasFilter(filters.anno)) {
+      const anni = Array.isArray(filters.anno) ? filters.anno.map(Number) : [parseInt(filters.anno)];
+      if (!anni.includes(parseInt(anno))) return false;
+    }
+    if (hasFilter(filters.settimana)) {
+      const setts = Array.isArray(filters.settimana) ? filters.settimana.map(Number) : [parseInt(filters.settimana)];
+      if (!setts.includes(sett)) return false;
+    }
+    if (hasFilter(filters.raccoglitore)) {
       const r = (row.trasportatore || '').trim();
       const p = (row.partner_operativo || '').trim();
-      if (r !== filters.raccoglitore && p !== filters.raccoglitore) return false;
+      const raccoglitori = Array.isArray(filters.raccoglitore) ? filters.raccoglitore : [filters.raccoglitore];
+      if (!raccoglitori.includes(r) && !raccoglitori.includes(p)) return false;
     }
     return true;
   });

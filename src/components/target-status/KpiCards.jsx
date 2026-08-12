@@ -1,5 +1,6 @@
 import React from 'react';
 import { Target, TrendingUp, AlertTriangle, CalendarClock } from 'lucide-react';
+import { formatNumber } from '@/lib/utils';
 
 export default function KpiCards({ kpis }) {
   const cards = [
@@ -19,7 +20,7 @@ export default function KpiCards({ kpis }) {
               <Icon className="w-5 h-5" />
             </div>
             <p className="text-2xl font-heading font-bold tabular-nums">
-              {c.value.toFixed(1)} <span className="text-sm font-normal text-muted-foreground">t</span>
+              {formatNumber(c.value)} <span className="text-sm font-normal text-muted-foreground">t</span>
             </p>
             <p className="text-sm text-muted-foreground">{c.label}</p>
           </div>

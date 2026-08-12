@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { MESI } from '@/lib/pfuConstants';
+import { formatNumber } from '@/lib/utils';
 
 export default function TargetChart({ data, mese, onMeseChange }) {
   const chartData = useMemo(() => {
@@ -48,7 +49,7 @@ export default function TargetChart({ data, mese, onMeseChange }) {
                   style={{ width: `${(d.target / maxVal) * 100}%` }}
                 />
                 <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] font-medium tabular-nums">
-                  {d.target.toFixed(1)} t
+                  {formatNumber(d.target)} t
                 </span>
               </div>
               <div className="relative h-4 bg-green-50 rounded-sm overflow-hidden">
@@ -57,7 +58,7 @@ export default function TargetChart({ data, mese, onMeseChange }) {
                   style={{ width: `${(d.raccolto / maxVal) * 100}%` }}
                 />
                 <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] font-medium tabular-nums">
-                  {d.raccolto.toFixed(1)} t
+                  {formatNumber(d.raccolto)} t
                 </span>
               </div>
             </div>

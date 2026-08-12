@@ -1,6 +1,7 @@
 import React from 'react';
 import { MESI_BREVI } from '@/lib/pfuConstants';
 import EditableCell from './EditableCell';
+import { formatNumber } from '@/lib/utils';
 
 export default function TargetTable({ data, onSaveTargetAnnuo, onSaveTargetMensile }) {
   return (
@@ -36,18 +37,18 @@ export default function TargetTable({ data, onSaveTargetAnnuo, onSaveTargetMensi
               <td className="px-2 py-1.5 text-right">
                 <EditableCell value={row.targetAnnuo} onSave={(v) => onSaveTargetAnnuo(row.raccoglitore, row.regione, v)} />
               </td>
-              <td className="px-2 py-1.5 text-right tabular-nums">{row.raccoltoTotale.toFixed(1)}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums">{formatNumber(row.raccoltoTotale)}</td>
               <td className={`px-2 py-1.5 text-right tabular-nums font-medium ${row.leftover < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                {row.leftover.toFixed(1)}
+                {formatNumber(row.leftover)}
               </td>
               {row.mesi.map((m, j) => (
                 <React.Fragment key={j}>
                   <td className="px-1 py-1.5 text-right">
                     <EditableCell value={m.target} onSave={(v) => onSaveTargetMensile(row.raccoglitore, row.regione, m.mese, v)} />
                   </td>
-                  <td className="px-1 py-1.5 text-right tabular-nums">{m.raccolto.toFixed(1)}</td>
+                  <td className="px-1 py-1.5 text-right tabular-nums">{formatNumber(m.raccolto)}</td>
                   <td className={`px-1 py-1.5 text-right tabular-nums ${m.delta > 0 ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50'}`}>
-                    {m.delta.toFixed(1)}
+                    {formatNumber(m.delta)}
                   </td>
                 </React.Fragment>
               ))}
