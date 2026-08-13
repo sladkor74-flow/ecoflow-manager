@@ -20,7 +20,6 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
   const currMonth = currentMonthIdx != null ? currentMonthIdx : now.getMonth();
   const currYear = now.getFullYear();
 
-  // Build province -> { regione, mesi: { Mese: count }, totale, fir_total }
   const byProvince: Record<string, any> = {};
 
   for (const r of records) {
@@ -32,7 +31,6 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
       : r.trasporto_finito_il ? new Date(r.trasporto_finito_il) : null;
     if (!dataChiusura) continue;
 
-    // Only count current year
     if (dataChiusura.getFullYear() !== currYear) continue;
 
     const meseIdx = dataChiusura.getMonth();
@@ -49,7 +47,6 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
     byProvince[provincia].mesi[mese] += 1;
   }
 
-  // Convert to array and compute 2-consecutive-zero flags
   const provinceArray = Object.values(byProvince).map((p: any) => {
     const mesiValues = MESI.map((m, idx) => ({
       mese: m,
@@ -58,7 +55,6 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
       passed: idx <= currMonth,
     }));
 
-    // Check for 2 consecutive passed months with 0
     let consecutiveZeros = 0;
     let has2Consecutive = false;
     let lastZeroPair = null;
@@ -85,10 +81,8 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
     };
   });
 
-  // Sort by regione then provincia
   provinceArray.sort((a, b) => a.regione.localeCompare(b.regione) || a.provincia.localeCompare(b.provincia));
 
-  // Group by regione
   const byRegione: Record<string, any[]> = {};
   for (const p of provinceArray) {
     if (!byRegione[p.regione]) byRegione[p.regione] = [];
@@ -107,13 +101,19 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
 }
 
 // --- 2. Mix Classi Raccoglitori ---
+// Vista A (% SUL RACCOLTO): (peso_classe / totale_pesi_raccoglitore) * 100
+// Vista B (% SUL TARGET):    (peso_classe / target_annuo_raccoglitore) * 100
+// Deviazione calcolata sulla Vista A rispetto ai target consorziali (P=75, M=20, G1=4, G2=1).
 
-export function computeRaccoglitoriMixData(records, targetAnnuo = TARGET_ANNUO_TON, filters: any = {}) {
+export function computeRaccoglitoriMixData(records, targetsMap: Record<string, number> = {}, filters: any = {}) {
   const toArray = (v: any) => Array.isArray(v) ? v : (v != null ? [v] : []);
   const fAnno = toArray(filters.anno).map(Number);
   const fMese = toArray(filters.mese);
   const fRegione = toArray(filters.regione);
   const fStato = toArray(filters.stato);
+
+  // Default: anno in corso se nessun filtro anno specificato
+  const effectiveAnni = fAnno.length > 0 ? fAnno : [new Date().getFullYear()];
 
   const filtered = records.filter((r: any) => {
     const regione = r.regione || PROV_TO_REGION[(r.provincia || '').toUpperCase().trim()] || 'Altro';
@@ -124,7 +124,7 @@ export function computeRaccoglitoriMixData(records, targetAnnuo = TARGET_ANNUO_T
     const mese = meseIdx >= 0 ? MESI[meseIdx] : 'N/D';
     const anno = dataChiusura ? dataChiusura.getFullYear() : null;
 
-    if (fAnno.length > 0 && !fAnno.includes(anno)) return false;
+    if (!effectiveAnni.includes(anno)) return false;
     if (fMese.length > 0 && !fMese.includes(mese)) return false;
     if (fRegione.length > 0 && !fRegione.includes(regione)) return false;
     if (fStato.length > 0 && !fStato.includes(stato)) return false;
@@ -158,14 +158,18 @@ export function computeRaccoglitoriMixData(records, targetAnnuo = TARGET_ANNUO_T
 
   const raccoglitoriArray = Object.values(byRaccoglitore).map((r: any) => {
     const totale = r.totale_peso;
+    const targetRaccoglitore = targetsMap[r.raccoglitore] || 0;
     const percentuali: Record<string, number> = {};
     const percentuali_target: Record<string, number> = {};
     const deviazioni: Record<string, number> = {};
 
     for (const [classe, targetPct] of Object.entries(TARGET_MIX_CLASSI)) {
       const pesoClasse = r.classi[classe] || 0;
+      // Vista A: % sul raccolto del raccoglitore
       const pct = totale > 0 ? (pesoClasse / totale) * 100 : 0;
-      const pctTarget = (pesoClasse / targetAnnuo) * 100;
+      // Vista B: % sul target annuo assegnato al raccoglitore
+      const pctTarget = targetRaccoglitore > 0 ? (pesoClasse / targetRaccoglitore) * 100 : 0;
+      // Deviazione calcolata sulla Vista A rispetto al target consorziale
       const deviazione = pct - targetPct;
 
       percentuali[classe] = pct;
@@ -184,6 +188,7 @@ export function computeRaccoglitoriMixData(records, targetAnnuo = TARGET_ANNUO_T
 
     return {
       ...r,
+      target_raccoglitore: targetRaccoglitore,
       percentuali,
       percentuali_target,
       deviazioni,
@@ -194,10 +199,12 @@ export function computeRaccoglitoriMixData(records, targetAnnuo = TARGET_ANNUO_T
 
   raccoglitoriArray.sort((a, b) => b.totale_peso - a.totale_peso);
 
+  const targetTotale = Object.values(targetsMap).reduce((s, v) => s + (v || 0), 0);
+
   return {
     raccoglitori: raccoglitoriArray,
     target_mix: TARGET_MIX_CLASSI,
-    target_annuo: targetAnnuo,
+    target_totale: targetTotale,
     raccoglitori_con_deviazione: raccoglitoriArray.filter(r => r.has_deviazione),
   };
 }

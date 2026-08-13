@@ -9,7 +9,7 @@ export default function RaccoglitoriMix({ data }) {
 
   if (!data) return null;
 
-  const { raccoglitori, target_mix, target_annuo, raccoglitori_con_deviazione } = data;
+  const { raccoglitori, target_mix, target_totale, raccoglitori_con_deviazione } = data;
 
   return (
     <div className="space-y-4">
@@ -51,7 +51,7 @@ export default function RaccoglitoriMix({ data }) {
           % SUL TARGET PER CLASSI
         </button>
         <span className="text-xs text-muted-foreground ml-1">
-          Target annuo di riferimento: {formatNumber(target_annuo)} ton
+          Totale target assegnati: {formatNumber(target_totale || 0)} ton
         </span>
       </div>
 
@@ -62,6 +62,7 @@ export default function RaccoglitoriMix({ data }) {
             <tr>
               <th className="text-left px-3 py-2 font-heading font-semibold">Raccoglitore</th>
               <th className="text-right px-3 py-2 font-heading font-semibold">Totale (ton)</th>
+              <th className="text-right px-3 py-2 font-heading font-semibold">Target (ton)</th>
               {CLASSI.map(c => (
                 <th key={c} className="text-center px-3 py-2 font-heading font-semibold">
                   {c}
@@ -74,7 +75,7 @@ export default function RaccoglitoriMix({ data }) {
           <tbody>
             {raccoglitori.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center py-8 text-muted-foreground">
+                <td colSpan={8} className="text-center py-8 text-muted-foreground">
                   Nessun dato disponibile. Carica i file delle Primarie Rete per popolare la matrice.
                 </td>
               </tr>
@@ -83,6 +84,7 @@ export default function RaccoglitoriMix({ data }) {
               <tr key={r.raccoglitore} className={idx % 2 === 0 ? 'bg-background' : 'bg-muted/30'}>
                 <td className="px-3 py-2 font-medium">{r.raccoglitore}</td>
                 <td className="px-3 py-2 text-right font-semibold">{formatNumber(r.totale_peso)}</td>
+                <td className="px-3 py-2 text-right text-muted-foreground">{formatNumber(r.target_raccoglitore || 0)}</td>
                 {CLASSI.map(c => {
                   const val = view === 'raccolto' ? r.percentuali[c] : r.percentuali_target[c];
                   const dev = r.deviazioni[c];

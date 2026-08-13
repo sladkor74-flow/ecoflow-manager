@@ -1,0 +1,23 @@
+{
+  "name": "TargetRaccoglitore",
+  "type": "object",
+  "properties": {
+    "raccoglitore": {
+      "type": "string",
+      "description": "Nome del raccoglitore/trasportatore"
+    },
+    "anno": {
+      "type": "number",
+      "description": "Anno di riferimento"
+    },
+    "target_tonnellate": {
+      "type": "number",
+      "description": "Target annuo assegnato (ton)"
+    }
+  },
+  "required": [
+    "raccoglitore",
+    "anno",
+    "target_tonnellate"
+  ]
+}

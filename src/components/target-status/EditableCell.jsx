@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formatNumber } from '@/lib/utils';
 
 export default function EditableCell({ value, onSave, disabled, suffix = '' }) {
   const [editing, setEditing] = useState(false);
@@ -37,7 +38,7 @@ export default function EditableCell({ value, onSave, disabled, suffix = '' }) {
         disabled ? 'opacity-60 cursor-default' : 'cursor-pointer hover:bg-accent hover:ring-1 hover:ring-primary/30'
       }`}
     >
-      {value != null ? value.toFixed(1) : '—'}{suffix}
+      {value != null ? formatNumber(value) : '—'}{suffix}
     </span>
   );
 }

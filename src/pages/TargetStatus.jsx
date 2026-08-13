@@ -9,15 +9,22 @@ import ImpiantiTable from '@/components/target-status/ImpiantiTable';
 import TargetChart from '@/components/target-status/TargetChart';
 import ExportButtons from '@/components/target-status/ExportButtons';
 import MultiSelect from '@/components/shared/MultiSelect';
-import { Loader2, RefreshCw, Filter, X } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import TargetRaccoglitoriTable from '@/components/target-status/TargetRaccoglitoriTable';
+import { useAuth } from '@/lib/AuthContext';
+import { Loader2, RefreshCw, Filter, X, Plus } from 'lucide-react';
 
 const TARGET_BY_YEAR = { 2025: 11200, 2026: 11550 };
 const getTargetForYear = (year) => TARGET_BY_YEAR[year] || (year >= 2026 ? 11550 : 11200);
 
 export default function TargetStatus() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [raccolto, setRaccolto] = useState(null);
   const [targets, setTargets] = useState([]);
   const [impiantoTargets, setImpiantoTargets] = useState([]);
+  const [raccoglitoreTargets, setRaccoglitoreTargets] = useState([]);
+  const [annoTargetRacc, setAnnoTargetRacc] = useState(new Date().getFullYear());
   const [loading, setLoading] = useState(true);
   const [meseSelezionato, setMeseSelezionato] = useState(getMeseCorrente());
   const [filters, setFilters] = useState({ anno: [], mese: [], regione: [], raccoglitore: [], impianto: [] });
@@ -40,6 +47,32 @@ export default function TargetStatus() {
   }, [filters]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const loadRaccoglitoreTargets = useCallback(async (anno) => {
+    try {
+      const res = await base44.entities.TargetRaccoglitore.filter({ anno }, '-created_date', 1000);
+      setRaccoglitoreTargets(res);
+    } catch (e) { console.error(e); }
+  }, []);
+
+  useEffect(() => { loadRaccoglitoreTargets(annoTargetRacc); }, [loadRaccoglitoreTargets, annoTargetRacc]);
+
+  const saveRaccoglitoreTarget = async (record, value) => {
+    if (record.id) {
+      await base44.entities.TargetRaccoglitore.update(record.id, { target_tonnellate: value });
+      setRaccoglitoreTargets((prev) => prev.map((t) => (t.id === record.id ? { ...t, target_tonnellate: value } : t)));
+    } else {
+      const created = await base44.entities.TargetRaccoglitore.create({ raccoglitore: record.raccoglitore, anno: annoTargetRacc, target_tonnellate: value });
+      setRaccoglitoreTargets((prev) => [...prev, created]);
+    }
+  };
+
+  const handleAddRaccoglitore = async () => {
+    const nome = window.prompt('Nome del raccoglitore:');
+    if (!nome || !nome.trim()) return;
+    const created = await base44.entities.TargetRaccoglitore.create({ raccoglitore: nome.trim(), anno: annoTargetRacc, target_tonnellate: 0 });
+    setRaccoglitoreTargets((prev) => [...prev, created]);
+  };
 
   const filterOptions = raccolto?.filterOptions || { anni: [], mesi: MESI, regioni: [], raccoglitori: [], impianti: [] };
 
@@ -241,24 +274,63 @@ export default function TargetStatus() {
         </div>
       </div>
 
-      <KpiCards kpis={kpis} />
+      <Tabs defaultValue="dashboard">
+        <TabsList>
+          <TabsTrigger value="dashboard">Dashboard Target</TabsTrigger>
+          <TabsTrigger value="gestione">Gestione Target Raccoglitori</TabsTrigger>
+        </TabsList>
 
-      <div>
-        <h2 className="text-lg font-heading font-semibold mb-3">Target & Performance Raccoglitori</h2>
-        <TargetTable data={mergedData} onSaveTargetAnnuo={saveTargetAnnuo} onSaveTargetMensile={saveTargetMensile} />
-      </div>
+        <TabsContent value="dashboard" className="mt-4 space-y-6">
+          <KpiCards kpis={kpis} />
 
-      <TargetChart data={mergedData} mese={meseSelezionato} onMeseChange={setMeseSelezionato} />
+          <div>
+            <h2 className="text-lg font-heading font-semibold mb-3">Target & Performance Raccoglitori</h2>
+            <TargetTable data={mergedData} onSaveTargetAnnuo={saveTargetAnnuo} onSaveTargetMensile={saveTargetMensile} />
+          </div>
 
-      <div>
-        <h2 className="text-lg font-heading font-semibold mb-3">Target e Scostamento per Regione</h2>
-        <RegionTable data={regioneData} />
-      </div>
+          <TargetChart data={mergedData} mese={meseSelezionato} onMeseChange={setMeseSelezionato} />
 
-      <div>
-        <h2 className="text-lg font-heading font-semibold mb-3">Progressivo e Avanzamento Impianti</h2>
-        <ImpiantiTable data={impiantiData} onSaveTarget={saveImpiantoTarget} />
-      </div>
+          <div>
+            <h2 className="text-lg font-heading font-semibold mb-3">Target e Scostamento per Regione</h2>
+            <RegionTable data={regioneData} />
+          </div>
+
+          <div>
+            <h2 className="text-lg font-heading font-semibold mb-3">Progressivo e Avanzamento Impianti</h2>
+            <ImpiantiTable data={impiantiData} onSaveTarget={saveImpiantoTarget} />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="gestione" className="mt-4 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <p className="text-sm text-muted-foreground">
+              Aggiorna i target annuali assegnati a ciascun raccoglitore. Questi valori sono usati per il calcolo dello scostamento per classi nel modulo Terminati Rete.
+            </p>
+            <div className="flex items-center gap-2">
+              <select
+                value={annoTargetRacc}
+                onChange={e => setAnnoTargetRacc(Number(e.target.value))}
+                className="border rounded-md px-3 py-2 text-sm"
+              >
+                <option value={2025}>2025</option>
+                <option value={2026}>2026</option>
+                <option value={2027}>2027</option>
+              </select>
+              {isAdmin && (
+                <button onClick={handleAddRaccoglitore} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent">
+                  <Plus className="w-4 h-4" /> Aggiungi raccoglitore
+                </button>
+              )}
+            </div>
+          </div>
+          <TargetRaccoglitoriTable
+            data={raccoglitoreTargets}
+            anno={annoTargetRacc}
+            onSave={saveRaccoglitoreTarget}
+            isAdmin={isAdmin}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
