@@ -16,20 +16,35 @@ export default async function(req) {
 
     const annoNum = Number(anno);
 
+    // Mappa nomi mesi italiani -> numero mese (0-11)
+    const MESI_MAP = {
+      'gennaio': 0, 'febbraio': 1, 'marzo': 2, 'aprile': 3, 'maggio': 4, 'giugno': 5,
+      'luglio': 6, 'agosto': 7, 'settembre': 8, 'ottobre': 9, 'novembre': 10, 'dicembre': 11
+    };
+    const meseNorm = String(mese).toLowerCase().trim();
+    const meseNum = MESI_MAP[meseNorm] !== undefined
+      ? MESI_MAP[meseNorm]
+      : (!isNaN(Number(meseNorm)) ? Number(meseNorm) - 1 : -1);
+
     // Recupera tariffe PASSIVA RETE attive
     const tariffe = await base44.asServiceRole.entities.Tariffa.filter({
       direzione: 'PASSIVA', tipologia: 'RETE', stato: 'attivo',
     });
 
-    // Recupera record PrimariaRete per il mese
-    const rete = await base44.asServiceRole.entities.PrimariaRete.filter({ mese });
+    // Recupera tutti i record PrimariaRete (nessun filtro su mese: si deriva dalla data)
+    const rete = await base44.asServiceRole.entities.PrimariaRete.list();
 
-    // Filtra per anno (derivato dalla data di chiusura/trasporto)
+    // Filtro rigoroso: stato 'terminato' (case-insensitive) + trasporto_finito_il in anno/mese target
     const reteAnno = rete.filter(r => {
-      const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+      const stato = String(r.stato || '').toLowerCase().trim();
+      if (stato !== 'terminato') return false;
+      const d = r.trasporto_finito_il;
       if (!d) return false;
       const dt = new Date(d);
-      return !isNaN(dt.getTime()) && dt.getFullYear() === annoNum;
+      if (isNaN(dt.getTime())) return false;
+      if (dt.getFullYear() !== annoNum) return false;
+      if (meseNum !== -1 && dt.getMonth() !== meseNum) return false;
+      return true;
     });
 
     // Se specificato un fornitore, recupera il suo nome e filtra
