@@ -31,8 +31,16 @@ export default async function(req) {
       direzione: 'PASSIVA', tipologia: 'RETE', stato: 'attivo',
     });
 
-    // Recupera tutti i record PrimariaRete (nessun filtro su mese: si deriva dalla data)
-    const rete = await base44.asServiceRole.entities.PrimariaRete.list();
+    // Recupera TUTTI i record PrimariaRete paginando (list() default si ferma a 5000)
+    const rete = [];
+    let offset = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const batch = await base44.asServiceRole.entities.PrimariaRete.list('-created_date', 1000, offset);
+      rete.push(...batch);
+      hasMore = batch.length === 1000;
+      offset += 1000;
+    }
 
     // Filtro rigoroso: stato 'terminato' (case-insensitive) + trasporto_finito_il in anno/mese target
     const reteAnno = rete.filter(r => {
