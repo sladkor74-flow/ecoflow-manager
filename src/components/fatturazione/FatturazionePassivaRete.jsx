@@ -160,7 +160,7 @@ export default function FatturazionePassivaRete() {
         {risultato && (
           <>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="grid grid-cols-3 gap-3 flex-1">
+              <div className="grid grid-cols-4 gap-3 flex-1">
                 <div className="border rounded-lg p-3">
                   <p className="text-xs text-muted-foreground">Raccoglitori</p>
                   <p className="text-xl font-bold">{risultato.dettaglio.length}</p>
@@ -168,6 +168,10 @@ export default function FatturazionePassivaRete() {
                 <div className="border rounded-lg p-3">
                   <p className="text-xs text-muted-foreground">Totale [t]</p>
                   <p className="text-xl font-bold">{formatNumber(risultato.dettaglio.reduce((s, r) => s + r.totale_t, 0))}</p>
+                </div>
+                <div className="border rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground">Totale FIR (Viaggi)</p>
+                  <p className="text-xl font-bold">{formatNumber(risultato.dettaglio.reduce((s, r) => s + r.num_viaggi, 0))}</p>
                 </div>
                 <div className="border rounded-lg p-3 bg-primary/5">
                   <p className="text-xs text-muted-foreground">Totale [€]</p>
