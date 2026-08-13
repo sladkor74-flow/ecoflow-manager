@@ -26,10 +26,27 @@ export default async function(req) {
       ? MESI_MAP[meseNorm]
       : (!isNaN(Number(meseNorm)) ? Number(meseNorm) - 1 : -1);
 
-    // Recupera tariffe PASSIVA RETE attive
+    // Recupera tariffe PASSIVA RETE attive (tutte le date di validità, il match è per record)
     const tariffe = await base44.asServiceRole.entities.Tariffa.filter({
       direzione: 'PASSIVA', tipologia: 'RETE', stato: 'attivo',
     });
+
+    // Helper: verifica se una tariffa è valida per una data di fine trasporto
+    function tariffaValidaPerData(tariffa, dataIso) {
+      if (!dataIso) return false;
+      const dt = new Date(dataIso);
+      if (isNaN(dt.getTime())) return false;
+      const dtOnly = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime();
+      if (tariffa.data_inizio_validita) {
+        const di = new Date(tariffa.data_inizio_validita);
+        if (!isNaN(di.getTime()) && new Date(di.getFullYear(), di.getMonth(), di.getDate()).getTime() > dtOnly) return false;
+      }
+      if (tariffa.data_fine_validita) {
+        const df = new Date(tariffa.data_fine_validita);
+        if (!isNaN(df.getTime()) && new Date(df.getFullYear(), df.getMonth(), df.getDate()).getTime() < dtOnly) return false;
+      }
+      return true;
+    }
 
     // Recupera TUTTI i record PrimariaRete paginando (list() default si ferma a 5000)
     const rete = [];
@@ -63,7 +80,7 @@ export default async function(req) {
       if (f) fornitoreNomeFilter = normalizzaRagioneSociale(f.ragione_sociale);
     }
 
-    // Raggruppa per {trasportatore normalizzato, regione}
+    // Raggruppa per {trasportatore normalizzato, regione} — ogni record tiene traccia della propria data
     const gruppi = new Map();
     for (const r of reteAnno) {
       const trasportatore = (r.trasportatore || '').trim();
@@ -84,6 +101,8 @@ export default async function(req) {
           eer_set: new Set(),
           classi_set: new Set(),
           record_ids: [],
+          // Per il calcolo con tariffe variabili nel tempo: accumula per (tariffa, data)
+          perTariffa: new Map(), // key tariffa -> {peso_kg, viaggiSet}
         });
       }
       const g = gruppi.get(key);
@@ -98,22 +117,32 @@ export default async function(req) {
       if (r.cer) g.eer_set.add(r.cer);
       if (r.classe) g.classi_set.add(r.classe);
       if (g.record_ids.length < 50) g.record_ids.push(r.id_ordine || r.id);
+
+      // Trova la tariffa valida per la data di questo specifico record
+      const tariffaRecord = findTariffaPerData(g.trasKey, g.regione, r.trasporto_finito_il);
+      const tk = tariffaRecord ? tariffaRecord.id : '__NESSUNA__';
+      if (!g.perTariffa.has(tk)) {
+        g.perTariffa.set(tk, { peso_kg: 0, viaggiSet: new Set(), tariffa: tariffaRecord });
+      }
+      const pt = g.perTariffa.get(tk);
+      pt.peso_kg += Number(r.peso_effettivo || 0);
+      pt.viaggiSet.add(viaggioKey);
     }
 
-    // Trova tariffa matching per gruppo
-    function findTariffa(trasKey, regione) {
-      // Match esatto su regione
+    // Trova tariffa matching per (trasportatore, regione, data) applicando validità temporale
+    function findTariffaPerData(trasKey, regione, dataIso) {
+      // Match esatto su regione con validità temporale
       for (const t of tariffe) {
         const tKey = normalizzaRagioneSociale(t.fornitore_nome);
         if (tKey !== trasKey) continue;
         const tReg = (t.regione || '').trim().toUpperCase();
-        if (tReg && tReg === regione.toUpperCase()) return t;
+        if (tReg && tReg === regione.toUpperCase() && tariffaValidaPerData(t, dataIso)) return t;
       }
-      // Match senza regione (tariffa generica per fornitore)
+      // Match senza regione (tariffa generica per fornitore) con validità temporale
       for (const t of tariffe) {
         const tKey = normalizzaRagioneSociale(t.fornitore_nome);
         if (tKey !== trasKey) continue;
-        if (!t.regione || !t.regione.trim()) return t;
+        if (!t.regione || !t.regione.trim()) if (tariffaValidaPerData(t, dataIso)) return t;
       }
       return null;
     }
@@ -122,7 +151,6 @@ export default async function(req) {
     let totale_complessivo = 0;
 
     for (const g of gruppi.values()) {
-      const tariffa = findTariffa(g.trasKey, g.regione);
       const totale_t = g.totale_peso_kg / 1000;
       const num_viaggi = g.viaggiSet.size;
       const eer = Array.from(g.eer_set).join(', ');
@@ -132,17 +160,28 @@ export default async function(req) {
       let tariffa_valore = 0;
       let unita_misura = '';
       let has_tariffa = false;
+      let tariffe_multiple = g.perTariffa.size > 1;
 
-      if (tariffa) {
+      // Se tutte le tariffe coincidono (o una sola), usa quella per il riepilogo
+      const tariffeUsate = Array.from(g.perTariffa.values()).filter(pt => pt.tariffa);
+      if (tariffeUsate.length > 0) {
         has_tariffa = true;
-        tariffa_valore = tariffa.valore;
-        unita_misura = tariffa.unita_misura;
-        const um = (tariffa.unita_misura || '').toLowerCase();
-        if (um.includes('viaggio') || um.includes('vg')) {
-          totale_euro = num_viaggi * tariffa.valore;
-        } else {
-          // €/t o €/ton o €/kg
-          totale_euro = um.includes('kg') ? g.totale_peso_kg * tariffa.valore : totale_t * tariffa.valore;
+        // Per il riepilogo mostriamo la prima tariffa (o unica) usata
+        const prima = tariffeUsate[0].tariffa;
+        tariffa_valore = prima.valore;
+        unita_misura = prima.unita_misura;
+
+        // Calcola il totale sommando per ogni tariffa valida trovata
+        for (const pt of g.perTariffa.values()) {
+          if (!pt.tariffa) continue; // record senza tariffa -> 0
+          const um = (pt.tariffa.unita_misura || '').toLowerCase();
+          const pt_t = pt.peso_kg / 1000;
+          const pt_viaggi = pt.viaggiSet.size;
+          if (um.includes('viaggio') || um.includes('vg')) {
+            totale_euro += pt_viaggi * pt.tariffa.valore;
+          } else {
+            totale_euro += um.includes('kg') ? pt.peso_kg * pt.tariffa.valore : pt_t * pt.tariffa.valore;
+          }
         }
       }
 
@@ -160,6 +199,7 @@ export default async function(req) {
         classi,
         totale_euro,
         has_tariffa,
+        tariffe_multiple,
         record_ids: g.record_ids,
       });
     }

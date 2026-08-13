@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Plus, Trash2, Save, X } from 'lucide-react';
+import { Loader2, Plus, Trash2, Save, X, AlertTriangle } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
 
 const REGIONI = ['Campania', 'Puglia', 'Basilicata', 'Calabria', 'Lazio', 'Molise', 'Abruzzo', 'Sicilia', 'Sardegna', 'Toscana', 'Lombardia', 'Piemonte', 'Veneto', 'Emilia-Romagna', 'Marche', 'Umbria', 'Liguria', 'Friuli-Venezia Giulia', 'Trentino-Alto Adige', 'Valle d\'Aosta'];
@@ -15,8 +15,9 @@ export default function TariffePassivaManager() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
     fornitore_id: '', fornitore_nome: '',
-    unita_misura: '€/t', valore: 0, regione: '', data_inizio_validita: '', note: '',
+    unita_misura: '€/t', valore: 0, regione: '', data_inizio_validita: '', data_fine_validita: '', note: '',
   });
+  const [erroreSalvataggio, setErroreSalvataggio] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -34,8 +35,43 @@ export default function TariffePassivaManager() {
 
   useEffect(() => { load(); }, []);
 
+  // Verifica sovrapposizione date con tariffe esistenti per stesso fornitore+regione
+  const verificaSovrapposizione = () => {
+    if (!form.fornitore_id) return null;
+    const f = fornitori.find(x => x.id === form.fornitore_id);
+    const fNome = f?.ragione_sociale;
+    const fNorm = (fNome || '').toLowerCase().trim();
+    const inizio = form.data_inizio_validita ? new Date(form.data_inizio_validita) : null;
+    const fine = form.data_fine_validita ? new Date(form.data_fine_validita) : null;
+    const regioneForm = (form.regione || '').trim().toUpperCase();
+
+    for (const t of tariffe) {
+      if ((t.fornitore_nome || '').toLowerCase().trim() !== fNorm) continue;
+      const tReg = (t.regione || '').trim().toUpperCase();
+      // Confronta solo se stessa regione (entrambe vuote = generica)
+      if (tReg !== regioneForm) continue;
+      const tInizio = t.data_inizio_validita ? new Date(t.data_inizio_validita) : null;
+      const tFine = t.data_fine_validita ? new Date(t.data_fine_validita) : null;
+      // Controllo sovrapposizione: due intervalli si sovrappongono se inizioA <= fineB E fineA >= inizioB
+      const inizioMax = inizio && tInizio ? new Date(Math.max(inizio.getTime(), tInizio.getTime())) : (inizio || tInizio);
+      const fineMin = fine && tFine ? new Date(Math.min(fine.getTime(), tFine.getTime())) : (fine || tFine);
+      if (!inizioMax && !fineMin) return t; // entrambe aperte -> sovrapposizione totale
+      if (inizioMax && fineMin && inizioMax <= fineMin) return t;
+      // Se una delle due ha solo inizio senza fine, e l'altra solo inizio senza fine -> sovrapposizione
+      if (inizioMax && !fineMin) return t;
+    }
+    return null;
+  };
+
   const add = async () => {
     if (!form.fornitore_id || !form.valore) return;
+    const sovrapposta = verificaSovrapposizione();
+    if (sovrapposta) {
+      const periodoEsistente = `${sovrapposta.data_inizio_validita ? new Date(sovrapposta.data_inizio_validita).toLocaleDateString('it-IT') : 'n.d.'} → ${sovrapposta.data_fine_validita ? new Date(sovrapposta.data_fine_validita).toLocaleDateString('it-IT') : 'aperto'}`;
+      setErroreSalvataggio(`Sovrapposizione rilevata con tariffa esistente per ${sovrapposta.fornitore_nome} (${sovrapposta.regione || 'tutte le zone'}, periodo: ${periodoEsistente}). Modifica le date di validità prima di salvare.`);
+      return;
+    }
+    setErroreSalvataggio('');
     const f = fornitori.find(x => x.id === form.fornitore_id);
     await base44.entities.Tariffa.create({
       fornitore_id: form.fornitore_id,
@@ -45,12 +81,13 @@ export default function TariffePassivaManager() {
       valore: Number(form.valore),
       regione: form.regione,
       data_inizio_validita: form.data_inizio_validita || undefined,
+      data_fine_validita: form.data_fine_validita || undefined,
       direzione: 'PASSIVA',
       tipologia: 'RETE',
       stato: 'attivo',
       note: form.note,
     });
-    setForm({ fornitore_id: '', fornitore_nome: '', unita_misura: '€/t', valore: 0, regione: '', data_inizio_validita: '', note: '' });
+    setForm({ fornitore_id: '', fornitore_nome: '', unita_misura: '€/t', valore: 0, regione: '', data_inizio_validita: '', data_fine_validita: '', note: '' });
     setShowForm(false); load();
   };
 
@@ -117,10 +154,20 @@ export default function TariffePassivaManager() {
               <Input type="date" value={form.data_inizio_validita} onChange={e => setForm({ ...form, data_inizio_validita: e.target.value })} />
             </div>
             <div>
+              <label className="text-xs text-muted-foreground block mb-1">Data Fine Validità (opz.)</label>
+              <Input type="date" value={form.data_fine_validita} onChange={e => setForm({ ...form, data_fine_validita: e.target.value })} />
+            </div>
+            <div>
               <label className="text-xs text-muted-foreground block mb-1">Note</label>
               <Input placeholder="Note opzionali" value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} />
             </div>
           </div>
+          {erroreSalvataggio && (
+            <div className="bg-destructive/10 border border-destructive/30 rounded-md p-3 text-sm text-destructive flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>{erroreSalvataggio}</span>
+            </div>
+          )}
           <Button size="sm" onClick={add} disabled={!form.fornitore_id || !form.valore}>
             <Save className="w-4 h-4 mr-1" /> Salva Tariffa
           </Button>
@@ -136,6 +183,7 @@ export default function TariffePassivaManager() {
               <th className="text-left px-3 py-2 font-heading font-semibold">Zona/Regione</th>
               <th className="text-right px-3 py-2 font-heading font-semibold">Valore</th>
               <th className="text-left px-3 py-2 font-heading font-semibold">Validità dal</th>
+              <th className="text-left px-3 py-2 font-heading font-semibold">Validità al</th>
               <th className="text-left px-3 py-2 font-heading font-semibold">Note</th>
               <th className="text-right px-3 py-2"></th>
             </tr>
@@ -143,7 +191,7 @@ export default function TariffePassivaManager() {
           <tbody>
             {tariffe.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center py-8 text-muted-foreground">
+                <td colSpan={8} className="text-center py-8 text-muted-foreground">
                   Nessuna tariffa configurata. Clicca "Aggiungi Tariffa" per iniziare.
                 </td>
               </tr>
@@ -157,6 +205,7 @@ export default function TariffePassivaManager() {
                 <td className="px-3 py-2">{t.regione || <span className="text-muted-foreground italic">Tutte</span>}</td>
                 <td className="px-3 py-2 text-right font-semibold">{formatNumber(t.valore, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 <td className="px-3 py-2 text-muted-foreground">{t.data_inizio_validita ? new Date(t.data_inizio_validita).toLocaleDateString('it-IT') : '-'}</td>
+                <td className="px-3 py-2 text-muted-foreground">{t.data_fine_validita ? new Date(t.data_fine_validita).toLocaleDateString('it-IT') : <span className="italic">aperto</span>}</td>
                 <td className="px-3 py-2 text-muted-foreground text-xs">{t.note || '-'}</td>
                 <td className="text-right px-3 py-2">
                   <button onClick={() => remove(t)} className="p-1 hover:bg-red-50 rounded">
