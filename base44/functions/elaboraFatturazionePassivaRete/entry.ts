@@ -98,6 +98,7 @@ export default async function(req) {
           regione,
           totale_peso_kg: 0,
           viaggiSet: new Set(),
+          firCount: 0,
           eer_set: new Set(),
           classi_set: new Set(),
           record_ids: [],
@@ -107,6 +108,7 @@ export default async function(req) {
       }
       const g = gruppi.get(key);
       g.totale_peso_kg += Number(r.peso_effettivo || 0);
+      g.firCount += 1;
 
       // Conta viaggi univoci: gruppi {data_trasporto_finito (giorno), automezzo}
       const dataFine = r.trasporto_finito_il ? r.trasporto_finito_il.slice(0, 10) : '';
@@ -193,6 +195,7 @@ export default async function(req) {
         regione: g.regione,
         totale_t: Math.round(totale_t * 1000) / 1000,
         num_viaggi,
+        firCount: g.firCount,
         tariffa_valore,
         unita_misura,
         eer,

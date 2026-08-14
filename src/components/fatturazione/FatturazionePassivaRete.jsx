@@ -160,7 +160,7 @@ export default function FatturazionePassivaRete() {
         {risultato && (
           <>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="grid grid-cols-4 gap-3 flex-1">
+              <div className="grid grid-cols-5 gap-3 flex-1">
                 <div className="border rounded-lg p-3">
                   <p className="text-xs text-muted-foreground">Raccoglitori</p>
                   <p className="text-xl font-bold">{risultato.dettaglio.length}</p>
@@ -170,8 +170,12 @@ export default function FatturazionePassivaRete() {
                   <p className="text-xl font-bold">{formatNumber(risultato.dettaglio.reduce((s, r) => s + r.totale_t, 0))}</p>
                 </div>
                 <div className="border rounded-lg p-3">
-                  <p className="text-xs text-muted-foreground">Totale FIR (Viaggi)</p>
+                  <p className="text-xs text-muted-foreground">Totale Viaggi</p>
                   <p className="text-xl font-bold">{formatNumber(risultato.dettaglio.reduce((s, r) => s + r.num_viaggi, 0))}</p>
+                </div>
+                <div className="border rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground">Totale FIR</p>
+                  <p className="text-xl font-bold">{formatNumber(risultato.dettaglio.reduce((s, r) => s + (r.firCount || 0), 0))}</p>
                 </div>
                 <div className="border rounded-lg p-3 bg-primary/5">
                   <p className="text-xs text-muted-foreground">Totale [€]</p>
@@ -198,6 +202,7 @@ export default function FatturazionePassivaRete() {
                     <th className="text-left px-3 py-2 font-heading font-semibold">Regione</th>
                     <th className="text-right px-3 py-2 font-heading font-semibold">Totale [t]</th>
                     <th className="text-right px-3 py-2 font-heading font-semibold">N° Viaggi</th>
+                    <th className="text-right px-3 py-2 font-heading font-semibold">N° FIR</th>
                     <th className="text-left px-3 py-2 font-heading font-semibold">Metodo</th>
                     <th className="text-right px-3 py-2 font-heading font-semibold">Costo</th>
                     <th className="text-right px-3 py-2 font-heading font-semibold">Totale [€]</th>
@@ -206,7 +211,7 @@ export default function FatturazionePassivaRete() {
                 </thead>
                 <tbody>
                   {risultato.dettaglio.length === 0 && (
-                    <tr><td colSpan={8} className="text-center py-8 text-muted-foreground">Nessun dato per il periodo selezionato.</td></tr>
+                    <tr><td colSpan={9} className="text-center py-8 text-muted-foreground">Nessun dato per il periodo selezionato.</td></tr>
                   )}
                   {risultato.dettaglio.map((r, i) => (
                     <tr key={i} className={i % 2 ? 'bg-muted/30' : ''}>
@@ -214,6 +219,7 @@ export default function FatturazionePassivaRete() {
                       <td className="px-3 py-2">{r.regione}</td>
                       <td className="px-3 py-2 text-right">{formatNumber(r.totale_t)}</td>
                       <td className="px-3 py-2 text-right">{r.num_viaggi}</td>
+                      <td className="px-3 py-2 text-right">{r.firCount || 0}</td>
                       <td className="px-3 py-2">
                         {r.unita_misura ? <span className="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary">{r.unita_misura}</span> : <span className="text-red-500 text-xs">N/D</span>}
                       </td>

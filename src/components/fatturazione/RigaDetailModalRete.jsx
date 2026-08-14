@@ -33,6 +33,10 @@ export default function RigaDetailModalRete({ riga, mese, anno, onClose }) {
               <p className="font-semibold">{riga.num_viaggi}</p>
             </div>
             <div className="border rounded-lg p-3">
+              <p className="text-xs text-muted-foreground">N° FIR</p>
+              <p className="font-semibold">{riga.firCount || 0}</p>
+            </div>
+            <div className="border rounded-lg p-3">
               <p className="text-xs text-muted-foreground">Classi</p>
               <p className="font-semibold">{riga.classi || '-'}</p>
             </div>
