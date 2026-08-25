@@ -5,7 +5,7 @@ const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','
 const KG_PER_VIAGGIO = 14000;
 const DATA_FINE_DEFAULT = '2026-12-18';
 const PLAFOND_DEFAULT = 2227500;
-const ESCLUSI_FORNITORI = ['t-cycle industries', 'emmesse'];
+const ESCLUSI_FORNITORI = ['emmesse'];
 
 // Restituisce il lunedì della settimana ISO di una data
 function getMonday(date) {
