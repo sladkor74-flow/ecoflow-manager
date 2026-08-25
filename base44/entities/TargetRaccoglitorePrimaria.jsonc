@@ -1,0 +1,50 @@
+{
+  "name": "TargetRaccoglitorePrimaria",
+  "type": "object",
+  "properties": {
+    "raccoglitore": {
+      "type": "string",
+      "description": "Nome del raccoglitore fase primaria (gommista -> stoccaggio)"
+    },
+    "mese": {
+      "type": "string",
+      "description": "Mese di riferimento"
+    },
+    "anno": {
+      "type": "number"
+    },
+    "target_kg": {
+      "type": "number",
+      "description": "Target mensile assegnato (kg)"
+    },
+    "raccolto_kg": {
+      "type": "number",
+      "description": "Raccolto effettivo calcolato dal backend (kg)"
+    },
+    "delta_kg": {
+      "type": "number",
+      "description": "Raccolto - Target (kg)"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "conforme",
+        "in_ritardo",
+        "in_anticipo",
+        "senza_dati"
+      ],
+      "description": "Stato confronto target vs raccolto"
+    },
+    "consuntivato": {
+      "type": "boolean",
+      "default": false,
+      "description": "Se true il mese e' consuntivato e il target diventa storico"
+    }
+  },
+  "required": [
+    "raccoglitore",
+    "mese",
+    "anno",
+    "target_kg"
+  ]
+}

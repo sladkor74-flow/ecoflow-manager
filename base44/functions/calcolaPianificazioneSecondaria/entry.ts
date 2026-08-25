@@ -1,169 +1,177 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+const KG_PER_VIAGGIO = 14000;
+const DATA_FINE_DEFAULT = '2026-12-18';
+const PLAFOND_DEFAULT = 2227500;
+const ESCLUSI_FORNITORI = ['t-cycle industries', 'emmesse'];
 
-// Calcola la pianificazione predittiva per le secondarie:
-// 1. Carica impianti target e fornitori
-// 2. Recupera consuntivo dai record Secondaria (destinazione = impianto)
-// 3. Calcola residuo = target - consuntivo
-// 4. Genera settimane da oggi al 18 dicembre
-// 5. Analizza capacità storica (kg/viaggio, viaggi/settimana per fornitore)
-// 6. Distribuisce residuo across settimane e fornitori
-// 7. Calcola delta, viaggi necessari, scenari, target raggiungibile
+// Restituisce il lunedì della settimana ISO di una data
+function getMonday(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay(); // 0=dom
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+
+function dateStr(d) { return d.toISOString().split('T')[0]; }
+
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    const b = base44.asServiceRole;
 
-    const impianti = await base44.asServiceRole.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
-    const fornitori = await base44.asServiceRole.entities.FornitoreSecondaria.filter({ stato: 'attivo' });
-    const secondarie = await base44.asServiceRole.entities.Secondaria.list('-created_date', 10000);
+    const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
+    const fornitori = await b.entities.FornitoreSecondaria.filter({ stato: 'attivo' });
+    const secondarie = await b.entities.Secondaria.list('-created_date', 10000);
+    const existingPlans = await b.entities.PianificazioneSettimanale.list('-created_date', 5000);
 
-    // Generate weeks from next Monday to Dec 18
+    // Plafond Nappi Sud (config record)
+    const plafondRec = existingPlans.find(p => p.impianto_id === '__PLAFOND_NAPPI__');
+    const plafond = plafondRec && plafondRec.kg_previsti != null ? plafondRec.kg_previsti : PLAFOND_DEFAULT;
+
+    // Genera settimane dal prossimo lunedì al 18 dicembre
     const oggi = new Date();
-    const anno = oggi.getFullYear();
-    const dataFineDefault = new Date(anno, 11, 18);
-    const giornoSett = oggi.getDay();
-    const giorniAlLun = giornoSett === 0 ? 1 : giornoSett === 1 ? 0 : 8 - giornoSett;
-    const dataInizio = new Date(oggi);
-    dataInizio.setDate(oggi.getDate() + giorniAlLun);
-
+    const dataFine = new Date(DATA_FINE_DEFAULT + 'T00:00:00');
+    let nextMonday = getMonday(oggi);
+    if (nextMonday <= oggi) { nextMonday = new Date(nextMonday); nextMonday.setDate(nextMonday.getDate() + 7); }
     const settimane = [];
-    let currentDate = new Date(dataInizio);
-    let weekNum = 1;
-    while (currentDate <= dataFineDefault) {
-      const ws = new Date(currentDate);
-      const we = new Date(currentDate);
-      we.setDate(we.getDate() + 4);
-      if (we > dataFineDefault) we.setTime(dataFineDefault.getTime());
-      settimane.push({
-        numero: weekNum,
-        data_inizio: ws.toISOString().split('T')[0],
-        data_fine: we.toISOString().split('T')[0],
-        mese: MESI[ws.getMonth()],
-      });
-      currentDate.setDate(currentDate.getDate() + 7);
-      weekNum++;
+    let cur = new Date(nextMonday);
+    let wn = 1;
+    while (cur <= dataFine) {
+      const ws = new Date(cur);
+      const we = new Date(cur); we.setDate(we.getDate() + 6);
+      if (we > dataFine) we.setTime(dataFine.getTime());
+      settimane.push({ numero: wn, data_inizio: dateStr(ws), data_fine: dateStr(we), mese: MESI[ws.getMonth()] });
+      cur = new Date(cur); cur.setDate(cur.getDate() + 7);
+      wn++;
     }
-    const numSettimane = settimane.length;
+
+    // Aggrega secondarie "terminato" con destinazione Tecnogum/Irigom
+    const impNormMap = {};
+    for (const imp of impianti) impNormMap[normalizzaRagioneSociale(imp.nome_impianto)] = imp;
+
+    const terminati = secondarie.filter(r => {
+      const stato = String(r.stato || '').toLowerCase().trim();
+      if (stato !== 'terminato') return false;
+      if (!r.trasporto_finito_il) return false;
+      const dest = normalizzaRagioneSociale(r.destinazione);
+      return !!impNormMap[dest];
+    });
+
+    // Plafond: kg partiti da stoccaggio Nappi Sud verso entrambi gli impianti
+    const kgPartitiNappi = secondarie.filter(r => {
+      const stato = String(r.stato || '').toLowerCase().trim();
+      if (stato !== 'terminato') return false;
+      const stocc = normalizzaRagioneSociale(r.stoccaggio || r.ragione_sociale);
+      return stocc === 'nappi sud';
+    }).reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+    const residuoPlafond = plafond - kgPartitiNappi;
 
     const result = [];
+    const creates = [];
+    const updates = [];
+
     for (const imp of impianti) {
-      const impName = imp.nome_impianto.trim().toUpperCase();
-      const dataFine = imp.data_fine ? new Date(imp.data_fine) : dataFineDefault;
+      const impNorm = normalizzaRagioneSociale(imp.nome_impianto);
+      const impRecords = terminati.filter(r => normalizzaRagioneSociale(r.destinazione) === impNorm);
 
-      // Consuntivo: sum peso_effettivo from Secondaria where destinazione matches
-      const matchingRecords = secondarie.filter(r =>
-        (r.destinazione || '').toUpperCase().includes(impName)
-      );
-      const consuntivo = matchingRecords.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
-      const residuo = imp.target - consuntivo;
-
-      // Fornitori for this impianto
-      const impFornitori = fornitori.filter(f => f.impianto_id === imp.id);
-      const fornitoreStats = [];
-
-      for (const f of impFornitori) {
-        const fName = f.nome.trim().toUpperCase();
-        const fRecords = matchingRecords.filter(r =>
-          (r.ragione_sociale || '').toUpperCase().includes(fName) ||
-          (r.stoccaggio || '').toUpperCase().includes(fName) ||
-          (r.trasportatore || '').toUpperCase().includes(fName)
-        );
-        const fConsuntivo = fRecords.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
-        const fViaggi = fRecords.length;
-        const avgKgPerViaggio = fViaggi > 0 ? fConsuntivo / fViaggi : 28000;
-
-        // Recent records (last 3 months) for capacity
-        const treMesiFa = new Date();
-        treMesiFa.setMonth(treMesiFa.getMonth() - 3);
-        const recentRecords = fRecords.filter(r =>
-          r.trasporto_finito_il && new Date(r.trasporto_finito_il) >= treMesiFa
-        );
-        const viaggiPerSett = recentRecords.length / 13;
-        const capacitaSett = Math.round(avgKgPerViaggio * viaggiPerSett);
-
-        fornitoreStats.push({
-          id: f.id, nome: f.nome,
-          quota_target: f.quota_target || 0,
-          consuntivo: fConsuntivo,
-          residuo: (f.quota_target || 0) - fConsuntivo,
-          viaggi_totali: fViaggi,
-          avg_kg_per_viaggio: Math.round(avgKgPerViaggio),
-          viaggi_per_settimana: Math.round(viaggiPerSett * 10) / 10,
-          capacita_settimanale: capacitaSett,
-        });
+      // EXEC aggregato per settimana (lunedì)
+      const execByWeek = {};
+      for (const r of impRecords) {
+        const monday = getMonday(new Date(r.trasporto_finito_il));
+        const key = dateStr(monday);
+        execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
       }
+      const consuntivoStorico = impRecords.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+      const target = imp.target || 0;
+      const residuoAggiornato = Math.max(0, target - consuntivoStorico);
 
-      const totalCapacita = fornitoreStats.reduce((s, f) => s + f.capacita_settimanale, 0);
-      const totalAvgKg = fornitoreStats.reduce((s, f) => s + f.avg_kg_per_viaggio, 0);
-      const viaggiNecessari = totalAvgKg > 0 ? Math.ceil(residuo / totalAvgKg) : 0;
+      // Settimane future senza EXEC -> distribuzione costante
+      const futureWeeks = settimane.filter(s => !execByWeek[s.data_inizio]);
+      const kgPerSett = futureWeeks.length > 0 ? Math.round(residuoAggiornato / futureWeeks.length) : 0;
+      const viaggiPerSett = Math.ceil(kgPerSett / KG_PER_VIAGGIO);
 
-      // Weekly plan: distribute residuo uniformly across weeks and fornitori
-      const numFornitori = fornitoreStats.length || 1;
-      const kgPerFornitorePerSett = numSettimane > 0 ? Math.round(residuo / numSettimane / numFornitori) : 0;
+      const piano = settimane.map(s => {
+        const aggregatedExec = execByWeek[s.data_inizio] || 0;
+        const override = existingPlans.find(p => p.impianto_id === imp.id && p.data_inizio === s.data_inizio && p.modificato_manuale);
+        const exec = override && override.kg_effettivi != null ? override.kg_effettivi : aggregatedExec;
+        const congelata = exec > 0;
+        let prev;
+        if (override && override.kg_previsti != null) {
+          prev = override.kg_previsti;
+        } else if (congelata) {
+          prev = exec;
+        } else {
+          prev = kgPerSett;
+        }
+        const delta = prev - exec;
+        const viaggiPrev = Math.ceil(prev / KG_PER_VIAGGIO);
+        const viaggiEff = exec > 0 ? Math.ceil(exec / KG_PER_VIAGGIO) : 0;
 
-      const pianoSettimanale = settimane.map(sett => {
-        const fPiano = fornitoreStats.map(f => {
-          const kg = kgPerFornitorePerSett;
-          const viaggi = f.avg_kg_per_viaggio > 0 ? Math.ceil(kg / f.avg_kg_per_viaggio) : 0;
-          return { fornitore_id: f.id, fornitore_nome: f.nome, kg_previsti: kg, viaggi_previsti: viaggi, capacita_settimanale: f.capacita_settimanale };
-        });
-        return {
-          ...sett,
-          fornitori: fPiano,
-          totale_kg: fPiano.reduce((s, f) => s + f.kg_previsti, 0),
-          totale_viaggi: fPiano.reduce((s, f) => s + f.viaggi_previsti, 0),
-        };
+        // Upsert persist
+        const existing = existingPlans.find(p => p.impianto_id === imp.id && p.data_inizio === s.data_inizio);
+        if (!existing) {
+          creates.push({
+            impianto_id: imp.id, impianto_nome: imp.nome_impianto,
+            settimana_numero: s.numero, data_inizio: s.data_inizio, data_fine: s.data_fine,
+            kg_previsti: prev, kg_effettivi: exec, viaggi_previsti: viaggiPrev, viaggi_effettivi: viaggiEff,
+            stato: congelata ? 'completato' : 'da_programmare', anno: 2026, modificato_manuale: false,
+          });
+        } else if (!existing.modificato_manuale) {
+          if (existing.kg_previsti !== prev || existing.kg_effettivi !== exec || existing.viaggi_previsti !== viaggiPrev) {
+            updates.push({ id: existing.id, kg_previsti: prev, kg_effettivi: exec, viaggi_previsti: viaggiPrev, viaggi_effettivi: viaggiEff, stato: congelata ? 'completato' : 'da_programmare' });
+          }
+        } else if (existing.kg_effettivi !== exec && override == null) {
+          // override su PREV ma EXEC aggregato cambiato: aggiorna solo EXEC
+          updates.push({ id: existing.id, kg_effettivi: exec, viaggi_effettivi: viaggiEff });
+        }
+
+        return { ...s, prev, exec, delta, viaggi_prev: viaggiPrev, viaggi_eff: viaggiEff, congelata, override: !!override };
       });
 
-      const totalePianificato = pianoSettimanale.reduce((s, sett) => s + sett.totale_kg, 0);
-      const delta = residuo - totalePianificato;
-
-      // Scenarios
-      const capacitaPrevista = totalCapacita * numSettimane;
-      const capacitaConserv = capacitaPrevista * 0.8;
-      const capacitaOttim = capacitaPrevista * 1.2;
-      const targetRaggiungibile = capacitaPrevista >= residuo;
-      const gap = Math.max(0, residuo - capacitaPrevista);
-
-      // Data prevista raggiungimento
-      let dataPrevista = null;
-      if (residuo <= 0) {
-        dataPrevista = 'TARGET RAGGIUNTO';
-      } else if (totalCapacita > 0) {
-        const settNecessarie = Math.ceil(residuo / totalCapacita);
-        const dataRagg = new Date(dataInizio);
-        dataRagg.setDate(dataRagg.getDate() + (settNecessarie - 1) * 7);
-        dataPrevista = dataRagg <= dataFine ? dataRagg.toISOString().split('T')[0] : 'NON RAGGIUNGIBILE';
-      }
-
-      // Stato
-      let stato = 'verde';
-      if (residuo <= 0) stato = 'blu';
-      else if (!targetRaggiungibile) stato = 'rosso';
-      else if (gap < totalCapacita * 0.1) stato = 'arancio';
+      // Fornitori attivi per questo impianto (esclusi T-Cycle/Emmesse)
+      const impFornitori = fornitori.filter(f => f.impianto_id === imp.id && !ESCLUSI_FORNITORI.includes(normalizzaRagioneSociale(f.nome)));
 
       result.push({
-        impianto: { id: imp.id, nome: imp.nome_impianto, target: imp.target, data_fine: dataFine.toISOString().split('T')[0] },
-        consuntivo, residuo, totale_pianificato: totalePianificato, delta,
-        viaggi_necessari: viaggiNecessari, viaggi_programmati: 0,
-        kg_per_settimana: numSettimane > 0 ? Math.round(residuo / numSettimane) : 0,
-        capacita_prevista: Math.round(capacitaPrevista),
-        capacita_conservativa: Math.round(capacitaConserv),
-        capacita_ottimistica: Math.round(capacitaOttim),
-        target_raggiungibile: targetRaggiungibile, gap,
-        data_prevista_raggiungimento: dataPrevista, stato,
-        fornitori: fornitoreStats, piano_settimanale: pianoSettimanale,
+        impianto: { id: imp.id, nome: imp.nome_impianto, target, data_fine: imp.data_fine || DATA_FINE_DEFAULT },
+        consuntivo: consuntivoStorico,
+        residuo: residuoAggiornato,
+        kg_per_settimana: kgPerSett,
+        viaggi_per_settimana: viaggiPerSett,
+        settimane_rimanenti: futureWeeks.length,
+        totale_pianificato: piano.reduce((s, w) => s + w.prev, 0),
+        piano_settimanale: piano,
+        fornitori: impFornitori.map(f => ({ id: f.id, nome: f.nome, quota_target: f.quota_target || 0 })),
       });
+    }
+
+    // Persistenza a chunk
+    for (let i = 0; i < creates.length; i += 100) {
+      await b.entities.PianificazioneSettimanale.bulkCreate(creates.slice(i, i + 100));
+      await new Promise(r => setTimeout(r, 200));
+    }
+    if (updates.length > 0) {
+      for (let i = 0; i < updates.length; i += 100) {
+        await b.entities.PianificazioneSettimanale.bulkUpdate(updates.slice(i, i + 100));
+        await new Promise(r => setTimeout(r, 200));
+      }
     }
 
     return Response.json({
-      impianti: result, settimane,
-      data_inizio: dataInizio.toISOString().split('T')[0],
-      data_fine: dataFineDefault.toISOString().split('T')[0],
-      num_settimane: numSettimane,
+      impianti: result,
+      settimane,
+      data_inizio: settimane[0] ? settimane[0].data_inizio : null,
+      data_fine: DATA_FINE_DEFAULT,
+      num_settimane: settimane.length,
+      plafond_nappi_sud: plafond,
+      kg_partiti_nappi: kgPartitiNappi,
+      residuo_plafond: residuoPlafond,
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
