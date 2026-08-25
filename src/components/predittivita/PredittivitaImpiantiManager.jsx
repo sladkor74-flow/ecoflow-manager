@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Loader2, Plus, Trash2 } from 'lucide-react';
+import { Loader2, Plus, Trash2, Edit3 } from 'lucide-react';
 
 export default function PredittivitaImpiantiManager({ onReload }) {
   const [impianti, setImpianti] = useState([]);
