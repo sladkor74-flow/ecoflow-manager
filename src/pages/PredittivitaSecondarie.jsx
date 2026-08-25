@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Loader2, BarChart3, Table, Settings } from 'lucide-react';
+import { Loader2, BarChart3, Table, Settings, Bot } from 'lucide-react';
 import PredittivitaDashboard from '@/components/predittivita/PredittivitaDashboard';
 import PredittivitaSettimanale from '@/components/predittivita/PredittivitaSettimanale';
 import PredittivitaImpiantiManager from '@/components/predittivita/PredittivitaImpiantiManager';
+import PredittivitaAgent from '@/components/predittivita/PredittivitaAgent';
 
 export default function PredittivitaSecondarie() {
   const [tab, setTab] = useState('dashboard');
@@ -36,10 +37,12 @@ export default function PredittivitaSecondarie() {
             <TabsTrigger value="dashboard"><BarChart3 className="w-4 h-4 mr-1.5" /> Dashboard</TabsTrigger>
             <TabsTrigger value="settimanale"><Table className="w-4 h-4 mr-1.5" /> Settimanale</TabsTrigger>
             <TabsTrigger value="config"><Settings className="w-4 h-4 mr-1.5" /> Configurazione</TabsTrigger>
+            <TabsTrigger value="agente"><Bot className="w-4 h-4 mr-1.5" /> Assistente</TabsTrigger>
           </TabsList>
           <TabsContent value="dashboard" className="mt-4"><PredittivitaDashboard data={data} onReload={load} /></TabsContent>
           <TabsContent value="settimanale" className="mt-4"><PredittivitaSettimanale data={data} onReload={load} /></TabsContent>
           <TabsContent value="config" className="mt-4"><PredittivitaImpiantiManager onReload={load} /></TabsContent>
+          <TabsContent value="agente" className="mt-4"><PredittivitaAgent /></TabsContent>
         </Tabs>
       )}
     </div>

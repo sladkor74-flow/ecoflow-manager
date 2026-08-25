@@ -11,6 +11,7 @@ import ExportButtons from '@/components/target-status/ExportButtons';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import TargetRaccoglitoriTable from '@/components/target-status/TargetRaccoglitoriTable';
+import TargetRaccoglitoriPrimariaTable from '@/components/target-status/TargetRaccoglitoriPrimariaTable';
 import { useAuth } from '@/lib/AuthContext';
 import { Loader2, RefreshCw, Filter, X, Plus } from 'lucide-react';
 
@@ -25,6 +26,9 @@ export default function TargetStatus() {
   const [impiantoTargets, setImpiantoTargets] = useState([]);
   const [raccoglitoreTargets, setRaccoglitoreTargets] = useState([]);
   const [annoTargetRacc, setAnnoTargetRacc] = useState(new Date().getFullYear());
+  const [raccPrimaria, setRaccPrimaria] = useState({ righe: [], totale_target: 0, totale_raccolto: 0 });
+  const [annoPrimaria, setAnnoPrimaria] = useState(new Date().getFullYear());
+  const [loadingPrimaria, setLoadingPrimaria] = useState(false);
   const [loading, setLoading] = useState(true);
   const [meseSelezionato, setMeseSelezionato] = useState(getMeseCorrente());
   const [filters, setFilters] = useState({ anno: [], mese: [], regione: [], raccoglitore: [], impianto: [] });
@@ -56,6 +60,36 @@ export default function TargetStatus() {
   }, []);
 
   useEffect(() => { loadRaccoglitoreTargets(annoTargetRacc); }, [loadRaccoglitoreTargets, annoTargetRacc]);
+
+  const loadRaccPrimaria = useCallback(async (anno) => {
+    setLoadingPrimaria(true);
+    try {
+      const res = await base44.functions.invoke('calcolaConsuntivoRaccoglitoriPrimaria', { anno });
+      setRaccPrimaria(res.data);
+    } catch (e) { console.error(e); }
+    setLoadingPrimaria(false);
+  }, []);
+
+  useEffect(() => { loadRaccPrimaria(annoPrimaria); }, [loadRaccPrimaria, annoPrimaria]);
+
+  const saveRaccPrimariaTarget = async (row, raccoglitore, mese, value) => {
+    if (row && row.id) {
+      await base44.entities.TargetRaccoglitorePrimaria.update(row.id, { target_kg: value });
+    } else {
+      await base44.entities.TargetRaccoglitorePrimaria.create({ raccoglitore, mese, anno: annoPrimaria, target_kg: value });
+    }
+    loadRaccPrimaria(annoPrimaria);
+  };
+
+  const handleAddRaccPrimaria = async () => {
+    const nome = window.prompt('Nome del raccoglitore primaria (es. Pneuservice, Smoco, Ecorecuperi):');
+    if (!nome || !nome.trim()) return;
+    const { MESI } = await import('@/lib/pfuConstants');
+    await base44.entities.TargetRaccoglitorePrimaria.bulkCreate(
+      MESI.map(m => ({ raccoglitore: nome.trim(), mese: m, anno: annoPrimaria, target_kg: 0 }))
+    );
+    loadRaccPrimaria(annoPrimaria);
+  };
 
   const saveRaccoglitoreTarget = async (record, value) => {
     if (record.id) {
@@ -278,6 +312,7 @@ export default function TargetStatus() {
         <TabsList>
           <TabsTrigger value="dashboard">Dashboard Target</TabsTrigger>
           <TabsTrigger value="gestione">Gestione Target Raccoglitori</TabsTrigger>
+          <TabsTrigger value="primaria">Raccoglitori Primaria</TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard" className="mt-4 space-y-6">
@@ -329,6 +364,36 @@ export default function TargetStatus() {
             onSave={saveRaccoglitoreTarget}
             isAdmin={isAdmin}
           />
+        </TabsContent>
+
+        <TabsContent value="primaria" className="mt-4 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <p className="text-sm text-muted-foreground">
+              Target mensili dei raccoglitori di fase primaria (Ecorecuperi, Pneuservice, Smoco…). Il raccolto è aggregato automaticamente da Primaria Rete + ACI.
+            </p>
+            <div className="flex items-center gap-2">
+              <select value={annoPrimaria} onChange={e => setAnnoPrimaria(Number(e.target.value))} className="border rounded-md px-3 py-2 text-sm">
+                <option value={2025}>2025</option>
+                <option value={2026}>2026</option>
+                <option value={2027}>2027</option>
+              </select>
+              {isAdmin && (
+                <button onClick={handleAddRaccPrimaria} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent">
+                  <Plus className="w-4 h-4" /> Aggiungi raccoglitore primaria
+                </button>
+              )}
+            </div>
+          </div>
+          {loadingPrimaria ? (
+            <div className="text-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin inline mr-2" /> Calcolo consuntivo…</div>
+          ) : (
+            <TargetRaccoglitoriPrimariaTable
+              righe={raccPrimaria.righe || []}
+              anno={annoPrimaria}
+              onSave={saveRaccPrimariaTarget}
+              isAdmin={isAdmin}
+            />
+          )}
         </TabsContent>
       </Tabs>
     </div>

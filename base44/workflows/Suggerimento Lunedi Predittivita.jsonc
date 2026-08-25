@@ -1,0 +1,44 @@
+{
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "suggerimento_lunedi_predittivita",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "analisi_settimanale": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "analisiSettimanalePredittiva"
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Analisi settimanale predittiva",
+            "description": "Genera suggerimento del luned\u00ec"
+          }
+        }
+      }
+    ]
+  },
+  "description": "Ogni luned\u00ec alle 08:00 ricalcola la pianificazione predittiva delle secondarie e genera un suggerimento proattivo salvato come Alert consultabile dall'agente in-app.",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 8 * * 1",
+      "one_time_date": null,
+      "timezone": "Europe/Rome",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "name": "Suggerimento Luned\u00ec Predittivit\u00e0"
+}
