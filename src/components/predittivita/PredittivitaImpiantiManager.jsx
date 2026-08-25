@@ -4,6 +4,44 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2, Plus, Trash2, Edit3 } from 'lucide-react';
 
+function InlineEditTarget({ value, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(String(value || 0));
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setVal(String(value || 0)); }, [value]);
+
+  const commit = async () => {
+    setEditing(false);
+    const num = Number(String(val).replace(/\./g, '').replace(',', '.'));
+    if (Number.isNaN(num) || num === value) return;
+    setSaving(true);
+    try { await onSave(num); } catch (e) { setVal(String(value || 0)); }
+    setSaving(false);
+  };
+
+  if (saving) return <Loader2 className="w-3 h-3 animate-spin inline" />;
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="text"
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setEditing(false); setVal(String(value || 0)); } }}
+        className="w-28 text-sm border border-primary rounded px-1 py-0.5 focus:outline-none"
+      />
+    );
+  }
+  return (
+    <span className="font-medium text-foreground cursor-text hover:bg-primary/10 rounded px-1 inline-flex items-center" onClick={() => setEditing(true)}>
+      {(value || 0).toLocaleString('it-IT')}
+      <Edit3 className="w-3 h-3 ml-1 opacity-40" />
+    </span>
+  );
+}
+
 export default function PredittivitaImpiantiManager({ onReload }) {
   const [impianti, setImpianti] = useState([]);
   const [fornitori, setFornitori] = useState([]);
@@ -44,6 +82,11 @@ export default function PredittivitaImpiantiManager({ onReload }) {
     setFornitoreForm({ nome: '', quota_target: 0 }); setFornitoreFormFor(null); load(); onReload();
   };
 
+  const updateImpianto = async (imp, patch) => {
+    await base44.entities.ImpiantoTargetSecondaria.update(imp.id, patch);
+    load(); onReload();
+  };
+
   const removeImpianto = async (imp) => {
     if (!confirm(`Eliminare ${imp.nome_impianto}?`)) return;
     await base44.entities.ImpiantoTargetSecondaria.delete(imp.id); load(); onReload();
@@ -79,7 +122,11 @@ export default function PredittivitaImpiantiManager({ onReload }) {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="font-heading font-semibold">{imp.nome_impianto}</h3>
-              <p className="text-sm text-muted-foreground">Target: {imp.target?.toLocaleString()} kg · Scadenza: {imp.data_fine || '18/12'}</p>
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                Target:
+                <InlineEditTarget value={imp.target || 0} onSave={(v) => updateImpianto(imp, { target: v })} />
+                <span>kg · Scadenza: {imp.data_fine || '18/12'}</span>
+              </p>
             </div>
             <div className="flex gap-1">
               <Button size="sm" variant="outline" onClick={() => setFornitoreFormFor(fornitoreFormFor === imp.id ? null : imp.id)}><Plus className="w-4 h-4 mr-1" /> Fornitore</Button>
