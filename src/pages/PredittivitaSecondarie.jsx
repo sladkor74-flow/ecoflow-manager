@@ -38,7 +38,7 @@ export default function PredittivitaSecondarie() {
             <TabsTrigger value="config"><Settings className="w-4 h-4 mr-1.5" /> Configurazione</TabsTrigger>
           </TabsList>
           <TabsContent value="dashboard" className="mt-4"><PredittivitaDashboard data={data} onReload={load} /></TabsContent>
-          <TabsContent value="settimanale" className="mt-4"><PredittivitaSettimanale data={data} /></TabsContent>
+          <TabsContent value="settimanale" className="mt-4"><PredittivitaSettimanale data={data} onReload={load} /></TabsContent>
           <TabsContent value="config" className="mt-4"><PredittivitaImpiantiManager onReload={load} /></TabsContent>
         </Tabs>
       )}

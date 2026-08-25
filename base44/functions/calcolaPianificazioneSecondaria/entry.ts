@@ -132,7 +132,7 @@ export default async function(req) {
           updates.push({ id: existing.id, kg_effettivi: exec, viaggi_effettivi: viaggiEff });
         }
 
-        return { ...s, prev, exec, delta, viaggi_prev: viaggiPrev, viaggi_eff: viaggiEff, congelata, override: !!override };
+        return { ...s, prev, exec, delta, viaggi_prev: viaggiPrev, viaggi_eff: viaggiEff, congelata, override: !!override, record_id: existing ? existing.id : null };
       });
 
       // Fornitori attivi per questo impianto (esclusi T-Cycle/Emmesse)
