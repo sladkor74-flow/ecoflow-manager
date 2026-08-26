@@ -49,7 +49,7 @@ export default function PredittivitaImpiantiManager({ onReload }) {
   const [showImpiantoForm, setShowImpiantoForm] = useState(false);
   const [fornitoreFormFor, setFornitoreFormFor] = useState(null);
   const [impiantoForm, setImpiantoForm] = useState({ nome_impianto: '', target: 0, data_fine: '2026-12-18' });
-  const [fornitoreForm, setFornitoreForm] = useState({ nome: '', quota_target: 0 });
+  const [fornitoreForm, setFornitoreForm] = useState({ nome: '', quota_target: 0, tipo: 'primaria_diretta' });
 
   const load = async () => {
     setLoading(true);
@@ -77,9 +77,9 @@ export default function PredittivitaImpiantiManager({ onReload }) {
     const imp = impianti.find(i => i.id === impiantoId);
     await base44.entities.FornitoreSecondaria.create({
       nome: fornitoreForm.nome, impianto_id: impiantoId, impianto_nome: imp?.nome_impianto,
-      quota_target: Number(fornitoreForm.quota_target), stato: 'attivo',
+      quota_target: Number(fornitoreForm.quota_target), tipo: fornitoreForm.tipo, stato: 'attivo',
     });
-    setFornitoreForm({ nome: '', quota_target: 0 }); setFornitoreFormFor(null); load(); onReload();
+    setFornitoreForm({ nome: '', quota_target: 0, tipo: 'primaria_diretta' }); setFornitoreFormFor(null); load(); onReload();
   };
 
   const updateImpianto = async (imp, patch) => {
@@ -139,9 +139,13 @@ export default function PredittivitaImpiantiManager({ onReload }) {
             </div>
           </div>
           {fornitoreFormFor === imp.id && (
-            <div className="border rounded p-2 bg-muted/30 flex gap-2">
-              <Input placeholder="Nome fornitore" value={fornitoreForm.nome} onChange={e => setFornitoreForm({ ...fornitoreForm, nome: e.target.value })} className="flex-1" />
+            <div className="border rounded p-2 bg-muted/30 flex flex-wrap gap-2">
+              <Input placeholder="Nome fornitore" value={fornitoreForm.nome} onChange={e => setFornitoreForm({ ...fornitoreForm, nome: e.target.value })} className="flex-1 min-w-[180px]" />
               <Input type="number" placeholder="Quota target (kg)" value={fornitoreForm.quota_target} onChange={e => setFornitoreForm({ ...fornitoreForm, quota_target: e.target.value })} className="w-48" />
+              <select value={fornitoreForm.tipo} onChange={e => setFornitoreForm({ ...fornitoreForm, tipo: e.target.value })} className="border rounded px-2 text-sm bg-background">
+                <option value="primaria_diretta">Primaria diretta</option>
+                <option value="stoccaggio">Stoccaggio (Nappi Sud)</option>
+              </select>
               <Button size="sm" onClick={() => addFornitore(imp.id)}>Salva</Button>
             </div>
           )}
@@ -149,7 +153,17 @@ export default function PredittivitaImpiantiManager({ onReload }) {
             {fornitori.filter(f => f.impianto_id === imp.id).map(f => (
               <div key={f.id} className="border rounded px-2 py-1.5 space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-sm">{f.nome}</span>
+                  <span className="font-medium text-sm flex items-center gap-1.5">
+                    {f.nome}
+                    <select
+                      value={f.tipo || 'primaria_diretta'}
+                      onChange={e => updateFornitore(f, { tipo: e.target.value })}
+                      className="text-[10px] border rounded px-1 py-0.5 bg-background"
+                    >
+                      <option value="primaria_diretta">Primaria diretta</option>
+                      <option value="stoccaggio">Stoccaggio</option>
+                    </select>
+                  </span>
                   <button onClick={() => removeFornitore(f)} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-3 h-3 text-red-500" /></button>
                 </div>
                 <div className="flex items-center justify-between text-xs text-muted-foreground">

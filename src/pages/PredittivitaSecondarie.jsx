@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Loader2, BarChart3, Table, Settings, Bot } from 'lucide-react';
@@ -22,7 +22,18 @@ export default function PredittivitaSecondarie() {
     setLoading(false);
   };
 
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
   useEffect(() => { load(); }, []);
+
+  // Ricalcolo automatico a ogni nuovo caricamento Excel
+  useEffect(() => {
+    const unsubscribe = base44.entities.UploadLog.subscribe((event) => {
+      if (event.type === 'create') loadRef.current();
+    });
+    return unsubscribe;
+  }, []);
 
   return (
     <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-6">
