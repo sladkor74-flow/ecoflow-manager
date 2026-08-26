@@ -1,11 +1,10 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const KG_PER_VIAGGIO = 14000;
 const DATA_FINE_DEFAULT = '2026-12-18';
 const ANNO_RIFERIMENTO = 2026;
-const NAPPI_SUD_KEY = 'nappi sud';
 
 function getMonday(date) {
   const d = new Date(date);
@@ -19,6 +18,7 @@ function getMonday(date) {
 function dateStr(d) { return d.toISOString().split('T')[0]; }
 function yearOf(dt) { if (!dt) return null; const d = new Date(dt); return d.getFullYear(); }
 function statoNorm(s) { return String(s || '').toLowerCase().trim(); }
+function tipoNorm(s) { return String(s || '').toLowerCase().trim(); }
 
 export default async function(req) {
   try {
@@ -35,26 +35,19 @@ export default async function(req) {
 
     // === FONTE UNICA TARGET: TargetRaccoglitore (anno di riferimento) ===
     const targetRaccogli = await b.entities.TargetRaccoglitore.filter({ anno: ANNO_RIFERIMENTO });
-    const targetByNome = {}; // nomeNormalizzato -> target_kg
+    const targetByNome = {};
     for (const t of targetRaccogli) {
       const key = normalizzaRagioneSociale(t.raccoglitore);
       if (key) targetByNome[key] = (t.target_tonnellate || 0) * 1000;
     }
 
-    // Plafond stoccaggio: letto da FornitoreSecondaria.plafond_stoccaggio_kg (tipo stoccaggio).
-    // Fallback: target TargetRaccoglitore del raccoglitore stoccaggio (Nappi Sud).
-    const stoccaggi = fornitori.filter(f => statoNorm(f.tipo) === 'stoccaggio' || normalizzaRagioneSociale(f.nome) === NAPPI_SUD_KEY);
-    let plafond = 0;
-    for (const s of stoccaggi) {
-      if (s.plafond_stoccaggio_kg && s.plafond_stoccaggio_kg > 0) {
-        plafond = Math.max(plafond, s.plafond_stoccaggio_kg);
-      } else {
-        // fallback al target del raccoglitore
-        const key = normalizzaRagioneSociale(s.nome);
-        const t = targetByNome[key] || 0;
-        plafond = Math.max(plafond, t);
-      }
-    }
+    // === STOCCAGGI GENERALIZZATI: tutti i fornitori con tipo=stoccaggio (no hardcoded key) ===
+    const stoccaggiFornitori = fornitori.filter(f => tipoNorm(f.tipo) === 'stoccaggio');
+    const stoccaggioNames = new Set(stoccaggiFornitori.map(f => normalizzaRagioneSociale(f.nome)));
+
+    // Map impianti normalizzati
+    const impNormMap = {};
+    for (const imp of impianti) impNormMap[normalizzaRagioneSociale(imp.nome_impianto)] = imp;
 
     // Settimane: dal lunedì della settimana corrente fino al 18/12
     const oggi = new Date();
@@ -71,10 +64,6 @@ export default async function(req) {
       wn++;
     }
 
-    // Mappa impianti normalizzati
-    const impNormMap = {};
-    for (const imp of impianti) impNormMap[normalizzaRagioneSociale(imp.nome_impianto)] = imp;
-
     // Filtra record 2026 terminati con trasporto_finito_il presente
     const prim2026 = primarie.filter(r => {
       if (statoNorm(r.stato) !== 'terminato') return false;
@@ -89,55 +78,127 @@ export default async function(req) {
       return true;
     });
 
-    // === NAPPI SUD (stoccaggio) - dati globali condivisi tra impianti ===
-    const isNappi = (f) => statoNorm(f.tipo) === 'stoccaggio' || normalizzaRagioneSociale(f.nome) === NAPPI_SUD_KEY;
-    const nappiFornitori = fornitori.filter(isNappi);
-    const nappiImpiantiIds = new Set(nappiFornitori.map(f => f.impianto_id));
+    // Helper: is primaria stoc (con fallback per record storici senza tipo_destinazione)
+    const isStoc = (r) => {
+      if (r.tipo_destinazione) return statoNorm(r.tipo_destinazione) === 'stoc';
+      return stoccaggioNames.has(normalizzaRagioneSociale(r.destinazione));
+    };
+    const isImp = (r) => !isStoc(r);
 
-    // Kg entrati in stoccaggio Nappi Sud (primarie: trasportatore=Nappi Sud, destinazione=Nappi Sud stoccaggio)
-    const kgEntratiStoccaggio = prim2026
-      .filter(r => normalizzaRagioneSociale(r.trasportatore) === NAPPI_SUD_KEY && normalizzaRagioneSociale(r.destinazione) === NAPPI_SUD_KEY)
-      .reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+    // === METRICHE STOCCAGGI GENERALIZZATE ===
+    const stoccaggiMetriche = {}; // stocNorm -> metriche
+    for (const s of stoccaggiFornitori) {
+      const sNorm = normalizzaRagioneSociale(s.nome);
+      if (!stoccaggiMetriche[sNorm]) {
+        const plafond = s.plafond_stoccaggio_kg && s.plafond_stoccaggio_kg > 0 ? s.plafond_stoccaggio_kg : (targetByNome[sNorm] || 0);
+        const kgEntrati = prim2026
+          .filter(r => normalizzaRagioneSociale(r.destinazione) === sNorm && isStoc(r))
+          .reduce((sum, r) => sum + (r.peso_effettivo || 0), 0);
+        const kgPartiti = sec2026
+          .filter(r => normalizzaRagioneSociale(r.stoccaggio) === sNorm && impNormMap[normalizzaRagioneSociale(r.destinazione)])
+          .reduce((sum, r) => sum + (r.peso_effettivo || 0), 0);
+        stoccaggiMetriche[sNorm] = {
+          nome: s.nome, plafond, kg_entrati: kgEntrati, kg_partiti: kgPartiti,
+          residuo_plafond: plafond - kgPartiti,
+        };
+      }
+    }
 
-    // Kg partiti dallo stoccaggio Nappi Sud verso impianti (secondarie)
-    const kgPartitiNappi = sec2026
-      .filter(r => normalizzaRagioneSociale(r.stoccaggio) === NAPPI_SUD_KEY && impNormMap[normalizzaRagioneSociale(r.destinazione)])
-      .reduce((s, r) => s + (r.peso_effettivo || 0), 0);
-
-    const residuoPlafond = plafond - kgPartitiNappi;
-
-    // Consuntivo secondarie uscite verso ciascun impianto Nappi Sud + residuo target
-    const nappiConsuntivoPerImpianto = {};
-    const nappiResiduoTargetPerImpianto = {};
-    let sumResiduoTargetNappi = 0;
+    // === RILEVAMENTO DOPPIO RUOLO ===
+    // Un impianto è doppio ruolo se il suo nome normalizzato coincide con un nome stoccaggio attivo
+    const doubleRoleImpianti = new Set();
     for (const imp of impianti) {
-      if (!nappiImpiantiIds.has(imp.id)) continue;
       const impNorm = normalizzaRagioneSociale(imp.nome_impianto);
-      const cons = sec2026
-        .filter(r => normalizzaRagioneSociale(r.stoccaggio) === NAPPI_SUD_KEY && normalizzaRagioneSociale(r.destinazione) === impNorm)
-        .reduce((s, r) => s + (r.peso_effettivo || 0), 0);
-      nappiConsuntivoPerImpianto[imp.id] = cons;
-      const res = (imp.target || 0) - cons;
-      nappiResiduoTargetPerImpianto[imp.id] = res;
-      if (res > 0) sumResiduoTargetNappi += res;
+      if (stoccaggioNames.has(impNorm)) doubleRoleImpianti.add(imp.id);
     }
 
     const result = [];
     const creates = [];
     const updates = [];
+    const stoccaggiResult = [];
+
+    // Build stoccaggi result array
+    for (const sNorm of Object.keys(stoccaggiMetriche)) {
+      const m = stoccaggiMetriche[sNorm];
+      stoccaggiResult.push({
+        nome: m.nome, nome_normalizzato: sNorm,
+        plafond: m.plafond, kg_entrati: m.kg_entrati, kg_partiti: m.kg_partiti,
+        residuo_plafond: m.residuo_plafond,
+        impianti_collegati: stoccaggiFornitori.filter(f => normalizzaRagioneSociale(f.nome) === sNorm).map(f => f.impianto_nome),
+      });
+    }
 
     for (const imp of impianti) {
       const impNorm = normalizzaRagioneSociale(imp.nome_impianto);
       const impFornitori = fornitori.filter(f => f.impianto_id === imp.id);
+      const isDoubleRole = doubleRoleImpianti.has(imp.id);
 
       let impConsuntivo = 0, impConsuntivoPrim = 0, impConsuntivoSec = 0, impTotalePianificato = 0;
       const fornitoriResult = [];
+      let conferitoriResult = [];
 
+      // === DOPPIO RUOLO: scoperta conferitori dinamica ===
+      if (isDoubleRole) {
+        // Consuntivo impianto: primarie imp + secondarie ricevute (escluso self-stoccaggio)
+        const primImp = prim2026.filter(r => normalizzaRagioneSociale(r.destinazione) === impNorm && isImp(r));
+        const secRicevute = sec2026.filter(r => normalizzaRagioneSociale(r.destinazione) === impNorm && normalizzaRagioneSociale(r.stoccaggio) !== impNorm);
+        impConsuntivoPrim = primImp.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+        impConsuntivoSec = secRicevute.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+        impConsuntivo = impConsuntivoPrim + impConsuntivoSec;
+
+        // Scoperta conferitori non configurati
+        const configuredNorms = new Set(impFornitori.map(f => normalizzaRagioneSociale(f.nome)));
+        const conferitoriMap = {};
+        for (const r of primImp) {
+          const cNorm = normalizzaRagioneSociale(r.trasportatore);
+          if (!cNorm || configuredNorms.has(cNorm)) continue;
+          if (!conferitoriMap[cNorm]) conferitoriMap[cNorm] = { nome: r.trasportatore, consuntivo: 0, record: [] };
+          conferitoriMap[cNorm].consuntivo += (r.peso_effettivo || 0);
+          conferitoriMap[cNorm].record.push(r);
+        }
+
+        const nSett = settimane.length;
+        for (const cNorm of Object.keys(conferitoriMap)) {
+          const c = conferitoriMap[cNorm];
+          const targetConf = targetByNome[cNorm] || 0;
+          const residuoConf = targetConf - c.consuntivo;
+          const PREV = residuoConf > 0 && nSett > 0 ? Math.round(residuoConf / nSett) : 0;
+          const viaggiPerSett = Math.ceil(PREV / KG_PER_VIAGGIO);
+
+          const execByWeek = {};
+          for (const r of c.record) {
+            const monday = getMonday(new Date(r.trasporto_finito_il));
+            const key = dateStr(monday);
+            execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
+          }
+
+          const piano = [];
+          for (const s of settimane) {
+            const exec = execByWeek[s.data_inizio] || 0;
+            const congelata = exec > 0;
+            const prev = congelata ? exec : PREV;
+            const delta = prev - exec;
+            const viaggiPrev = Math.ceil(prev / KG_PER_VIAGGIO);
+            const viaggiEff = exec > 0 ? Math.ceil(exec / KG_PER_VIAGGIO) : 0;
+            piano.push({ ...s, prev, exec, delta, viaggi_prev: viaggiPrev, viaggi_eff: viaggiEff, congelata });
+          }
+          const totalePianificato = piano.reduce((s, w) => s + w.prev, 0);
+          impTotalePianificato += totalePianificato;
+
+          conferitoriResult.push({
+            id: 'auto_' + cNorm, nome: c.nome, tipo: 'primaria_diretta',
+            target_raccoglitore_kg: targetConf, consuntivo: c.consuntivo,
+            residuo: residuoConf, kg_per_settimana: PREV, viaggi_per_settimana: viaggiPerSett,
+            totale_pianificato: totalePianificato, piano_settimanale: piano,
+            scoperto_automaticamente: true,
+          });
+        }
+      }
+
+      // === FORNITORI CONFIGURATI (logica generalizzata) ===
       for (const f of impFornitori) {
         const fNorm = normalizzaRagioneSociale(f.nome);
-        const isStoccaggio = isNappi(f);
-
-        // Target annuo del raccoglitore da TargetRaccoglitore (fonte unica)
+        const isStoccaggio = tipoNorm(f.tipo) === 'stoccaggio';
         const targetRaccoglitoreKg = targetByNome[fNorm] || 0;
 
         let consuntivo = 0, consuntivoPrim = 0, consuntivoSec = 0;
@@ -148,11 +209,9 @@ export default async function(req) {
         let plafondUsato = 0;
 
         if (isStoccaggio) {
-          // Plafond stoccaggio da FornitoreSecondaria.plafond_stoccaggio_kg (o fallback target raccoglitore)
-          plafondUsato = f.plafond_stoccaggio_kg && f.plafond_stoccaggio_kg > 0 ? f.plafond_stoccaggio_kg : targetRaccoglitoreKg;
-          // Primarie non rilevanti per-impianto (globali allo stoccaggio); secondarie = uscita verso questo impianto
-          consuntivoPrim = 0;
-          const fSec = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) === NAPPI_SUD_KEY && normalizzaRagioneSociale(r.destinazione) === impNorm);
+          const m = stoccaggiMetriche[fNorm] || {};
+          plafondUsato = m.plafond || (f.plafond_stoccaggio_kg && f.plafond_stoccaggio_kg > 0 ? f.plafond_stoccaggio_kg : targetRaccoglitoreKg);
+          const fSec = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm);
           consuntivoSec = fSec.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
           consuntivo = consuntivoSec;
           for (const r of fSec) {
@@ -161,15 +220,22 @@ export default async function(req) {
             execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
           }
           // Riparto plafond residuo proporzionale al residuo target di questo impianto
-          const resTargetImp = nappiResiduoTargetPerImpianto[imp.id] || 0;
-          quotaPlafondImpianto = sumResiduoTargetNappi > 0 && resTargetImp > 0
-            ? residuoPlafond * (resTargetImp / sumResiduoTargetNappi)
-            : 0;
+          const resTargetImp = (imp.target || 0) - consuntivoSec;
+          const stocImpiantiIds = stoccaggiFornitori.filter(sf => normalizzaRagioneSociale(sf.nome) === fNorm).map(sf => sf.impianto_id);
+          let sumResiduoTargetStoc = 0;
+          for (const sImpId of stocImpiantiIds) {
+            const sImp = impianti.find(i => i.id === sImpId);
+            if (!sImp) continue;
+            const sImpNorm = normalizzaRagioneSociale(sImp.nome_impianto);
+            const sCons = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm && normalizzaRagioneSociale(r.destinazione) === sImpNorm).reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+            const sRes = (sImp.target || 0) - sCons;
+            if (sRes > 0) sumResiduoTargetStoc += sRes;
+          }
+          quotaPlafondImpianto = sumResiduoTargetStoc > 0 && resTargetImp > 0 ? (m.residuo_plafond || 0) * (resTargetImp / sumResiduoTargetStoc) : 0;
           residuo = resTargetImp;
           baseCascata = quotaPlafondImpianto;
         } else {
-          // Primaria diretta: trasportatore=fornitore, destinazione=impianto
-          const fPrim = prim2026.filter(r => normalizzaRagioneSociale(r.trasportatore) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm);
+          const fPrim = prim2026.filter(r => normalizzaRagioneSociale(r.trasportatore) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm && isImp(r));
           consuntivoPrim = fPrim.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
           consuntivo = consuntivoPrim;
           for (const r of fPrim) {
@@ -178,7 +244,6 @@ export default async function(req) {
             execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
           }
           const ipotesi = f.ipotesi_mese_corrente || 0;
-          // Target da TargetRaccoglitore (fonte unica)
           residuo = targetRaccoglitoreKg - consuntivo - ipotesi;
           baseCascata = residuo;
         }
@@ -228,14 +293,15 @@ export default async function(req) {
               updates.push({ id: existing.id, kg_effettivi: exec, viaggi_effettivi: viaggiEff });
             }
           }
-
           piano.push({ ...s, prev, exec, delta, viaggi_prev: viaggiPrev, viaggi_eff: viaggiEff, congelata, override: !!override, record_id: recordId, residuo_cascata: residuoCascata });
         }
 
         const totalePianificato = piano.reduce((s, w) => s + w.prev, 0);
-        impConsuntivo += consuntivo;
-        impConsuntivoSec += consuntivoSec;
-        impConsuntivoPrim += consuntivoPrim;
+        if (!isDoubleRole) {
+          impConsuntivo += consuntivo;
+          impConsuntivoSec += consuntivoSec;
+          impConsuntivoPrim += consuntivoPrim;
+        }
         impTotalePianificato += totalePianificato;
 
         const fr = {
@@ -250,19 +316,25 @@ export default async function(req) {
         };
         if (isStoccaggio) {
           fr.plafond = plafondUsato;
-          fr.kg_entrati_stoccaggio = kgEntratiStoccaggio;
-          fr.residuo_plafond = residuoPlafond;
+          fr.kg_entrati_stoccaggio = stoccaggiMetriche[fNorm]?.kg_entrati || 0;
+          fr.residuo_plafond = stoccaggiMetriche[fNorm]?.residuo_plafond || 0;
           fr.quota_plafond_impianto = Math.round(quotaPlafondImpianto);
         }
         fornitoriResult.push(fr);
       }
 
       result.push({
-        impianto: { id: imp.id, nome: imp.nome_impianto, target: imp.target || 0, data_fine: imp.data_fine || DATA_FINE_DEFAULT },
-        consuntivo: impConsuntivo, consuntivo_primarie: impConsuntivoPrim, consuntivo_secondarie: impConsuntivoSec,
+        impianto: {
+          id: imp.id, nome: imp.nome_impianto, target: imp.target || 0,
+          totale_capacity: imp.totale_capacity_kg || 0, data_fine: imp.data_fine || DATA_FINE_DEFAULT,
+          is_double_role: isDoubleRole,
+        },
+        consuntivo: impConsuntivo,
+        consuntivo_primarie: impConsuntivoPrim, consuntivo_secondarie: impConsuntivoSec,
         residuo: (imp.target || 0) - impConsuntivo,
         totale_pianificato: impTotalePianificato,
         fornitori: fornitoriResult,
+        conferitori: conferitoriResult,
       });
     }
 
@@ -280,14 +352,11 @@ export default async function(req) {
 
     return Response.json({
       impianti: result,
+      stoccaggi: stoccaggiResult,
       settimane,
       data_inizio: settimane[0] ? settimane[0].data_inizio : null,
       data_fine: DATA_FINE_DEFAULT,
       num_settimane: settimane.length,
-      plafond_nappi_sud: plafond,
-      kg_partiti_nappi: kgPartitiNappi,
-      kg_entrati_stoccaggio: kgEntratiStoccaggio,
-      residuo_plafond: residuoPlafond,
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

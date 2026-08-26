@@ -7,7 +7,11 @@
     },
     "target": {
       "type": "number",
-      "description": "Target quantitativo (kg)"
+      "description": "Target quantitativo (kg) - per impianti doppio ruolo rappresenta la quota impianto (primarie imp)"
+    },
+    "totale_capacity_kg": {
+      "type": "number",
+      "description": "Capacita' totale annua (kg) per impianti doppio ruolo (es. T-CYCLE: 1.300.000 = 1.050.000 impianto + 250.000 stoccaggio)"
     },
     "data_inizio": {
       "type": "string",

@@ -134,6 +134,10 @@ export default function TargetAnnuali() {
   // Stoccaggi (tipo stoccaggio)
   const stoccaggi = useMemo(() => fornitori.filter(f => (f.tipo || 'primaria_diretta') === 'stoccaggio'), [fornitori]);
 
+  // Impianti doppio ruolo: nome impianto normalizzato coincide con un nome stoccaggio
+  const stoccaggioNames = useMemo(() => new Set(stoccaggi.map(s => normalizzaRagioneSociale(s.nome))), [stoccaggi]);
+  const doubleRoleImpianti = useMemo(() => impianti.filter(imp => stoccaggioNames.has(normalizzaRagioneSociale(imp.nome_impianto))), [impianti, stoccaggioNames]);
+
   const totaleRacc = useMemo(() => raccoglitori.reduce((s, r) => s + (r.target_tonnellate || 0), 0), [raccoglitori]);
 
   const saveRacc = async (r, value) => {
@@ -190,6 +194,13 @@ export default function TargetAnnuali() {
     setSaving(true);
     await base44.entities.FornitoreSecondaria.update(f.id, { plafond_stoccaggio_kg: value });
     setFornitori(prev => prev.map(x => x.id === f.id ? { ...x, plafond_stoccaggio_kg: value } : x));
+    setSaving(false);
+  };
+
+  const saveTotale = async (imp, value) => {
+    setSaving(true);
+    await base44.entities.ImpiantoTargetSecondaria.update(imp.id, { totale_capacity_kg: value });
+    setImpianti(prev => prev.map(x => x.id === imp.id ? { ...x, totale_capacity_kg: value } : x));
     setSaving(false);
   };
 
@@ -306,6 +317,49 @@ export default function TargetAnnuali() {
           </table>
         </div>
       </SectionCard>
+
+      {/* Sezione Impianti Doppio Ruolo */}
+      {doubleRoleImpianti.length > 0 && (
+        <SectionCard icon={Factory} title="Impianti Doppio Ruolo" subtitle="Impianti che operano anche come stoccaggio (es. T-CYCLE)" count={doubleRoleImpianti.length}>
+          <div className="space-y-3">
+            {doubleRoleImpianti.map(imp => {
+              const stocMatch = stoccaggi.find(s => normalizzaRagioneSociale(s.nome) === normalizzaRagioneSociale(imp.nome_impianto));
+              const targetImp = imp.target || 0;
+              const plafondStoc = stocMatch?.plafond_stoccaggio_kg || 0;
+              const totale = imp.totale_capacity_kg || 0;
+              const somma = targetImp + plafondStoc;
+              const incongruente = totale > 0 && somma !== totale;
+              return (
+                <div key={imp.id} className={`border rounded-lg p-4 ${incongruente ? 'border-amber-400 bg-amber-50' : 'bg-card'}`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-heading font-bold uppercase">{imp.nome_impianto}</h3>
+                    {incongruente && (
+                      <span className="text-xs font-semibold text-amber-700 bg-amber-100 px-2 py-1 rounded">
+                        ⚠ Split ({fmtInt(somma)} kg) ≠ Totale ({fmtInt(totale)} kg)
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                    <div className="border rounded p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Totale capacità (editabile)</p>
+                      <EditableCell value={totale} onSave={(v) => saveTotale(imp, v)} unit="kg" />
+                    </div>
+                    <div className="border rounded p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Target impianto (primarie imp)</p>
+                      <p className="font-bold">{fmtInt(targetImp)} kg</p>
+                    </div>
+                    <div className="border rounded p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Plafond stoccaggio (primarie stoc)</p>
+                      <p className="font-bold">{fmtInt(plafondStoc)} kg</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">Split: {fmtInt(targetImp)} + {fmtInt(plafondStoc)} = {fmtInt(somma)} kg {incongruente ? '⚠' : '✓'}</p>
+                </div>
+              );
+            })}
+          </div>
+        </SectionCard>
+      )}
 
       {/* Sezione Plafond Stoccaggi */}
       <SectionCard icon={Warehouse} title="Plafond Stoccaggi" subtitle="Capacità totale conferibile (kg) - include tutti i conferitori, non solo il raccoglitore" count={stoccaggi.length}>
