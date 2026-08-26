@@ -6,25 +6,19 @@ const KG_PER_VIAGGIO = 14000;
 const DATA_FINE_DEFAULT = '2026-12-18';
 const PLAFOND_DEFAULT = 2227500;
 const ANNO_RIFERIMENTO = 2026;
+const NAPPI_SUD_KEY = 'nappi sud';
 
-// Restituisce il lunedì della settimana ISO di una data
 function getMonday(date) {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
-  const day = d.getDay(); // 0=dom
+  const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
   return d;
 }
 
 function dateStr(d) { return d.toISOString().split('T')[0]; }
-
-function yearOf(dt) {
-  if (!dt) return null;
-  const d = new Date(dt);
-  return d.getFullYear();
-}
-
+function yearOf(dt) { if (!dt) return null; const d = new Date(dt); return d.getFullYear(); }
 function statoNorm(s) { return String(s || '').toLowerCase().trim(); }
 
 export default async function(req) {
@@ -36,26 +30,19 @@ export default async function(req) {
 
     const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
     const fornitori = await b.entities.FornitoreSecondaria.filter({ stato: 'attivo' });
-    // Carica solo i record "terminato" (molto meno payload che caricare tutto)
     const primarie = await b.entities.PrimariaRete.filter({ stato: 'terminato' }, '-created_date', 5000);
     const secondarie = await b.entities.Secondaria.filter({ stato: 'terminato' }, '-created_date', 5000);
     const existingPlans = await b.entities.PianificazioneSettimanale.list('-created_date', 5000);
 
-    // Plafond Nappi Sud (config record)
+    // Plafond Nappi Sud (record speciale)
     const plafondRec = existingPlans.find(p => p.impianto_id === '__PLAFOND_NAPPI__');
     const plafond = plafondRec && plafondRec.kg_previsti != null ? plafondRec.kg_previsti : PLAFOND_DEFAULT;
 
-    // Genera settimane dal primo lunedì del mese successivo al 18 dicembre
+    // Settimane: dal lunedì della settimana corrente fino al 18/12
     const oggi = new Date();
     const dataFine = new Date(DATA_FINE_DEFAULT + 'T00:00:00');
-    const nextMonth = new Date(oggi.getFullYear(), oggi.getMonth() + 1, 1);
-    let firstMonday = getMonday(nextMonth);
-    if (firstMonday.getTime() < nextMonth.getTime()) {
-      firstMonday = new Date(firstMonday);
-      firstMonday.setDate(firstMonday.getDate() + 7);
-    }
+    let cur = getMonday(oggi);
     const settimane = [];
-    let cur = new Date(firstMonday);
     let wn = 1;
     while (cur <= dataFine) {
       const ws = new Date(cur);
@@ -65,34 +52,57 @@ export default async function(req) {
       cur = new Date(cur); cur.setDate(cur.getDate() + 7);
       wn++;
     }
-    const firstPlanDate = settimane.length > 0 ? new Date(settimane[0].data_inizio + 'T00:00:00') : new Date(0);
 
     // Mappa impianti normalizzati
     const impNormMap = {};
     for (const imp of impianti) impNormMap[normalizzaRagioneSociale(imp.nome_impianto)] = imp;
 
-    // Primarie terminati 2026 con destinazione = uno degli impianti
-    // "Terminati" PrimariaRete: stato='terminato' (col B) E data fine trasporto presente (col AI), anno 2026
-    const primTerminati = primarie.filter(r => {
+    // Filtra record 2026 terminati con trasporto_finito_il presente
+    const prim2026 = primarie.filter(r => {
       if (statoNorm(r.stato) !== 'terminato') return false;
       if (!r.trasporto_finito_il) return false;
       if (yearOf(r.trasporto_finito_il) !== ANNO_RIFERIMENTO) return false;
-      return !!impNormMap[normalizzaRagioneSociale(r.destinazione)];
+      return true;
     });
-
-    // Secondarie terminate 2026 con destinazione = uno degli impianti
-    // "Terminati" Secondaria: stato='terminato' (col B) E data fine trasporto presente (col AF), anno 2026
-    const secTerminati = secondarie.filter(r => {
+    const sec2026 = secondarie.filter(r => {
       if (statoNorm(r.stato) !== 'terminato') return false;
       if (!r.trasporto_finito_il) return false;
       if (yearOf(r.trasporto_finito_il) !== ANNO_RIFERIMENTO) return false;
-      return !!impNormMap[normalizzaRagioneSociale(r.destinazione)];
+      return true;
     });
 
-    // Plafond Nappi Sud: kg partiti da stoccaggio Nappi Sud (secondarie 2026)
-    const kgPartitiNappi = secTerminati.filter(r => normalizzaRagioneSociale(r.stoccaggio) === 'nappi sud')
+    // === NAPPI SUD (stoccaggio) - dati globali condivisi tra impianti ===
+    const isNappi = (f) => statoNorm(f.tipo) === 'stoccaggio' || normalizzaRagioneSociale(f.nome) === NAPPI_SUD_KEY;
+    const nappiFornitori = fornitori.filter(isNappi);
+    const nappiImpiantiIds = new Set(nappiFornitori.map(f => f.impianto_id));
+
+    // Kg entrati in stoccaggio Nappi Sud (primarie: trasportatore=Nappi Sud, destinazione=Nappi Sud stoccaggio)
+    const kgEntratiStoccaggio = prim2026
+      .filter(r => normalizzaRagioneSociale(r.trasportatore) === NAPPI_SUD_KEY && normalizzaRagioneSociale(r.destinazione) === NAPPI_SUD_KEY)
       .reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+
+    // Kg partiti dallo stoccaggio Nappi Sud verso impianti (secondarie)
+    const kgPartitiNappi = sec2026
+      .filter(r => normalizzaRagioneSociale(r.stoccaggio) === NAPPI_SUD_KEY && impNormMap[normalizzaRagioneSociale(r.destinazione)])
+      .reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+
     const residuoPlafond = plafond - kgPartitiNappi;
+
+    // Consuntivo secondarie uscite verso ciascun impianto Nappi Sud + residuo target
+    const nappiConsuntivoPerImpianto = {};
+    const nappiResiduoTargetPerImpianto = {};
+    let sumResiduoTargetNappi = 0;
+    for (const imp of impianti) {
+      if (!nappiImpiantiIds.has(imp.id)) continue;
+      const impNorm = normalizzaRagioneSociale(imp.nome_impianto);
+      const cons = sec2026
+        .filter(r => normalizzaRagioneSociale(r.stoccaggio) === NAPPI_SUD_KEY && normalizzaRagioneSociale(r.destinazione) === impNorm)
+        .reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+      nappiConsuntivoPerImpianto[imp.id] = cons;
+      const res = (imp.target || 0) - cons;
+      nappiResiduoTargetPerImpianto[imp.id] = res;
+      if (res > 0) sumResiduoTargetNappi += res;
+    }
 
     const result = [];
     const creates = [];
@@ -102,40 +112,60 @@ export default async function(req) {
       const impNorm = normalizzaRagioneSociale(imp.nome_impianto);
       const impFornitori = fornitori.filter(f => f.impianto_id === imp.id);
 
-      const impPrim = primTerminati.filter(r => normalizzaRagioneSociale(r.destinazione) === impNorm);
-    const impSec = secTerminati.filter(r => normalizzaRagioneSociale(r.destinazione) === impNorm);
-
       let impConsuntivo = 0, impConsuntivoPrim = 0, impConsuntivoSec = 0, impTotalePianificato = 0;
       const fornitoriResult = [];
 
       for (const f of impFornitori) {
         const fNorm = normalizzaRagioneSociale(f.nome);
+        const isStoccaggio = isNappi(f);
 
-        // Consuntivo primarie: trasportatore = fornitore, destinazione = impianto
-        const fPrim = impPrim.filter(r => normalizzaRagioneSociale(r.trasportatore) === fNorm);
-        const consuntivoPrim = fPrim.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
-        // Consuntivo secondarie: stoccaggio = fornitore, destinazione = impianto
-        const fSec = impSec.filter(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm);
-        const consuntivoSec = fSec.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
-        const consuntivo = consuntivoPrim + consuntivoSec;
-
-        // EXEC aggregato per settimana (lunedì) da entrambe le sorgenti (2026)
-        const allF = [...fPrim, ...fSec];
+        let consuntivo = 0, consuntivoPrim = 0, consuntivoSec = 0;
+        let residuo = 0, PREV = 0, viaggiPerSett = 0;
         const execByWeek = {};
-        for (const r of allF) {
-          const monday = getMonday(new Date(r.trasporto_finito_il));
-          const key = dateStr(monday);
-          execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
+        let quotaPlafondImpianto = 0;
+        let baseCascata = 0;
+
+        if (isStoccaggio) {
+          // Primarie non rilevanti per-impianto (globali allo stoccaggio); secondarie = uscita verso questo impianto
+          consuntivoPrim = 0;
+          const fSec = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) === NAPPI_SUD_KEY && normalizzaRagioneSociale(r.destinazione) === impNorm);
+          consuntivoSec = fSec.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+          consuntivo = consuntivoSec;
+          for (const r of fSec) {
+            const monday = getMonday(new Date(r.trasporto_finito_il));
+            const key = dateStr(monday);
+            execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
+          }
+          // Riparto plafond residuo proporzionale al residuo target di questo impianto
+          const resTargetImp = nappiResiduoTargetPerImpianto[imp.id] || 0;
+          quotaPlafondImpianto = sumResiduoTargetNappi > 0 && resTargetImp > 0
+            ? residuoPlafond * (resTargetImp / sumResiduoTargetNappi)
+            : 0;
+          residuo = resTargetImp;
+          baseCascata = quotaPlafondImpianto;
+        } else {
+          // Primaria diretta: trasportatore=fornitore, destinazione=impianto
+          const fPrim = prim2026.filter(r => normalizzaRagioneSociale(r.trasportatore) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm);
+          consuntivoPrim = fPrim.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+          consuntivo = consuntivoPrim;
+          for (const r of fPrim) {
+            const monday = getMonday(new Date(r.trasporto_finito_il));
+            const key = dateStr(monday);
+            execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
+          }
+          const ipotesi = f.ipotesi_mese_corrente || 0;
+          residuo = (f.quota_target || 0) - consuntivo - ipotesi;
+          baseCascata = residuo;
         }
 
-        const quota = f.quota_target || 0;
-        const ipotesi = f.ipotesi_mese_corrente || 0;
-        const residuo = quota - consuntivo;
-        const residuoDaPianificare = residuo - ipotesi;
         const nSett = settimane.length;
         const settimaneRimanenti = settimane.filter(s => !(execByWeek[s.data_inizio] > 0)).length;
-        const PREV = residuoDaPianificare > 0 && nSett > 0 ? Math.round(residuoDaPianificare / nSett) : 0;
-        const viaggiPerSett = Math.ceil(PREV / KG_PER_VIAGGIO);
+        if (isStoccaggio) {
+          PREV = quotaPlafondImpianto > 0 && settimaneRimanenti > 0 ? Math.round(quotaPlafondImpianto / settimaneRimanenti) : 0;
+        } else {
+          PREV = residuo > 0 && nSett > 0 ? Math.round(residuo / nSett) : 0;
+        }
+        viaggiPerSett = Math.ceil(PREV / KG_PER_VIAGGIO);
 
         const piano = [];
         let cumulative = 0;
@@ -151,7 +181,7 @@ export default async function(req) {
           const viaggiPrev = Math.ceil(prev / KG_PER_VIAGGIO);
           const viaggiEff = exec > 0 ? Math.ceil(exec / KG_PER_VIAGGIO) : 0;
           cumulative += congelata ? exec : prev;
-          const residuoCascata = residuoDaPianificare - cumulative;
+          const residuoCascata = baseCascata - cumulative;
 
           const existing = existingPlans.find(p => p.fornitore_id === f.id && p.data_inizio === s.data_inizio);
           let recordId = null;
@@ -179,17 +209,25 @@ export default async function(req) {
 
         const totalePianificato = piano.reduce((s, w) => s + w.prev, 0);
         impConsuntivo += consuntivo;
-        impConsuntivoPrim += consuntivoPrim;
         impConsuntivoSec += consuntivoSec;
+        impConsuntivoPrim += consuntivoPrim;
         impTotalePianificato += totalePianificato;
 
-        fornitoriResult.push({
-          id: f.id, nome: f.nome, quota_target: quota, ipotesi_mese_corrente: ipotesi,
+        const fr = {
+          id: f.id, nome: f.nome, tipo: isStoccaggio ? 'stoccaggio' : 'primaria_diretta',
+          quota_target: f.quota_target || 0, ipotesi_mese_corrente: f.ipotesi_mese_corrente || 0,
           consuntivo, consuntivo_primarie: consuntivoPrim, consuntivo_secondarie: consuntivoSec,
           residuo, kg_per_settimana: PREV, viaggi_per_settimana: viaggiPerSett,
           settimane_rimanenti: settimaneRimanenti, totale_pianificato: totalePianificato,
           piano_settimanale: piano,
-        });
+        };
+        if (isStoccaggio) {
+          fr.plafond = plafond;
+          fr.kg_entrati_stoccaggio = kgEntratiStoccaggio;
+          fr.residuo_plafond = residuoPlafond;
+          fr.quota_plafond_impianto = Math.round(quotaPlafondImpianto);
+        }
+        fornitoriResult.push(fr);
       }
 
       result.push({
@@ -221,6 +259,7 @@ export default async function(req) {
       num_settimane: settimane.length,
       plafond_nappi_sud: plafond,
       kg_partiti_nappi: kgPartitiNappi,
+      kg_entrati_stoccaggio: kgEntratiStoccaggio,
       residuo_plafond: residuoPlafond,
     });
   } catch (error) {

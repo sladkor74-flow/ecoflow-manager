@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Loader2, Edit3 } from 'lucide-react';
+import { Loader2, Edit3, Warehouse, Truck } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 
 function fmt(n) { return (n || 0).toLocaleString('it-IT'); }
@@ -98,11 +98,15 @@ export default function PredittivitaSettimanale({ data, onReload }) {
                   </td>
                 </tr>
                 {(imp.fornitori || []).map(f => {
+                  const isStocc = f.tipo === 'stoccaggio';
                   const lastCascata = f.piano_settimanale?.length > 0 ? f.piano_settimanale[f.piano_settimanale.length - 1].residuo_cascata : 0;
                   const cascataColor = Math.abs(lastCascata) < 1000 ? 'text-green-700' : lastCascata > 0 ? 'text-amber-600' : 'text-red-600';
                   return (
-                    <tr key={f.id} className="border-t hover:bg-muted/20">
-                      <td className="px-3 py-1.5 text-xs font-medium sticky left-0 bg-background">{f.nome}</td>
+                    <tr key={f.id} className={`border-t hover:bg-muted/20 ${isStocc ? 'bg-primary/5' : ''}`}>
+                      <td className="px-3 py-1.5 text-xs font-medium sticky left-0 bg-background flex items-center gap-1.5">
+                        {isStocc ? <Warehouse className="w-3 h-3 text-primary" /> : <Truck className="w-3 h-3 text-accent" />}
+                        {f.nome}
+                      </td>
                       {settimane.map((s, i) => {
                         const w = f.piano_settimanale?.[i];
                         if (!w) return <React.Fragment key={i}><td /><td /><td /></React.Fragment>;

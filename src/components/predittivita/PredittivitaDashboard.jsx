@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Calendar, Layers, Edit3, Loader2 } from 'lucide-react';
+import { Calendar, Layers, Edit3, Loader2, Warehouse, Truck } from 'lucide-react';
 
 function fmt(n) { return (n || 0).toLocaleString('it-IT'); }
 
@@ -40,6 +40,13 @@ function EditableIpotesi({ value, onSave }) {
   );
 }
 
+function TipoBadge({ tipo }) {
+  if (tipo === 'stoccaggio') {
+    return <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-primary text-primary-foreground"><Warehouse className="w-2.5 h-2.5" />Stoccaggio</span>;
+  }
+  return <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-accent text-accent-foreground"><Truck className="w-2.5 h-2.5" />Primaria diretta</span>;
+}
+
 export default function PredittivitaDashboard({ data, onReload }) {
   if (!data || !data.impianti || data.impianti.length === 0) {
     return <div className="text-center py-8 text-muted-foreground border rounded-lg">Nessun impianto configurato. Vai in "Configurazione" per aggiungerne.</div>;
@@ -61,12 +68,19 @@ export default function PredittivitaDashboard({ data, onReload }) {
       <div className="border rounded-lg p-4 bg-gradient-to-r from-primary/10 to-accent/10">
         <div className="flex items-center gap-2 mb-2">
           <Layers className="w-4 h-4 text-primary" />
-          <h3 className="font-heading font-semibold">Plafond Nappi Sud</h3>
+          <h3 className="font-heading font-semibold">Plafond Nappi Sud (stoccaggio)</h3>
         </div>
-        <div className="grid grid-cols-3 gap-3 text-sm">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
           <div><p className="text-xs text-muted-foreground">Plafond</p><p className="font-bold">{fmt(data.plafond_nappi_sud)} kg</p></div>
-          <div><p className="text-xs text-muted-foreground">Kg partiti</p><p className="font-bold text-amber-600">{fmt(data.kg_partiti_nappi)} kg</p></div>
-          <div><p className="text-xs text-muted-foreground">Residuo</p><p className="font-bold text-green-700">{fmt(data.residuo_plafond)} kg</p></div>
+          <div><p className="text-xs text-muted-foreground">Kg entrati in stoccaggio</p><p className="font-bold text-primary">{fmt(data.kg_entrati_stoccaggio)} kg</p></div>
+          <div><p className="text-xs text-muted-foreground">Kg partiti (secondarie)</p><p className="font-bold text-amber-600">{fmt(data.kg_partiti_nappi)} kg</p></div>
+          <div><p className="text-xs text-muted-foreground">Residuo plafond</p><p className="font-bold text-green-700">{fmt(data.residuo_plafond)} kg</p></div>
+        </div>
+        <div className="mt-3">
+          <div className="flex justify-between text-xs mb-1"><span className="text-muted-foreground">Utilizzo plafond</span><span className="font-medium">{data.plafond_nappi_sud > 0 ? ((data.kg_partiti_nappi / data.plafond_nappi_sud) * 100).toFixed(1) : 0}%</span></div>
+          <div className="h-2 bg-muted rounded-full overflow-hidden">
+            <div className="h-full bg-amber-500" style={{ width: `${data.plafond_nappi_sud > 0 ? Math.min(100, (data.kg_partiti_nappi / data.plafond_nappi_sud) * 100) : 0}%` }} />
+          </div>
         </div>
       </div>
 
@@ -98,28 +112,43 @@ export default function PredittivitaDashboard({ data, onReload }) {
                 <div className="border-t pt-2 space-y-2">
                   <h3 className="text-sm font-semibold">Fornitori ({imp.fornitori.length})</h3>
                   {imp.fornitori.map(f => {
-                    const fPct = f.quota_target > 0 ? Math.min(100, (f.consuntivo / f.quota_target) * 100) : 0;
+                    const isStocc = f.tipo === 'stoccaggio';
+                    const refTarget = isStocc ? target : (f.quota_target || 0);
+                    const refConsuntivo = isStocc ? f.consuntivo_secondarie : f.consuntivo;
+                    const fPct = refTarget > 0 ? Math.min(100, (refConsuntivo / refTarget) * 100) : 0;
                     const resColor = f.residuo <= 0 ? 'text-green-700' : 'text-amber-600';
                     return (
-                      <div key={f.id} className="border rounded-lg p-2.5 space-y-1.5 bg-muted/20">
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium text-sm">{f.nome}</span>
+                      <div key={f.id} className={`border rounded-lg p-2.5 space-y-1.5 ${isStocc ? 'bg-primary/5' : 'bg-muted/20'}`}>
+                        <div className="flex items-center justify-between flex-wrap gap-1">
+                          <span className="font-medium text-sm flex items-center gap-1.5">{f.nome} <TipoBadge tipo={f.tipo} /></span>
                           <span className={`text-xs font-bold ${resColor}`}>Residuo: {fmt(f.residuo)} kg</span>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 text-xs">
-                          <div><span className="text-muted-foreground">Quota: </span><span className="font-medium">{fmt(f.quota_target)}</span></div>
-                          <div><span className="text-muted-foreground">Consuntivo: </span><span className="font-medium">{fmt(f.consuntivo)}</span>
-                            <span className="text-[10px] text-muted-foreground block">Prim {fmt(f.consuntivo_primarie)} · Sec {fmt(f.consuntivo_secondarie)}</span></div>
-                          <div className="flex items-center gap-1"><span className="text-muted-foreground">Ipotesi mese corr.: </span>
-                            <EditableIpotesi value={f.ipotesi_mese_corrente || 0} onSave={(v) => saveIpotesi(f.id, v)} /></div>
-                          <div><span className="text-muted-foreground">Kg/sett: </span><span className="font-medium">{fmt(f.kg_per_settimana)} · {f.viaggi_per_settimana} viaggi</span></div>
-                        </div>
+                        {isStocc ? (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 text-xs">
+                            <div><span className="text-muted-foreground">Plafond: </span><span className="font-medium">{fmt(f.plafond)}</span></div>
+                            <div><span className="text-muted-foreground">Entrati stocc.: </span><span className="font-medium text-primary">{fmt(f.kg_entrati_stoccaggio)}</span></div>
+                            <div><span className="text-muted-foreground">Usciti imp.: </span><span className="font-medium">{fmt(f.consuntivo_secondarie)}</span></div>
+                            <div><span className="text-muted-foreground">Residuo plafond: </span><span className="font-medium text-green-700">{fmt(f.residuo_plafond)}</span></div>
+                            <div><span className="text-muted-foreground">Quota plafond imp.: </span><span className="font-medium">{fmt(f.quota_plafond_impianto)}</span></div>
+                            <div className="flex items-center gap-1"><span className="text-muted-foreground">Ipotesi mese corr.: </span>
+                              <EditableIpotesi value={f.ipotesi_mese_corrente || 0} onSave={(v) => saveIpotesi(f.id, v)} /></div>
+                            <div><span className="text-muted-foreground">Kg/sett: </span><span className="font-medium">{fmt(f.kg_per_settimana)} · {f.viaggi_per_settimana} viaggi</span></div>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 text-xs">
+                            <div><span className="text-muted-foreground">Quota: </span><span className="font-medium">{fmt(f.quota_target)}</span></div>
+                            <div><span className="text-muted-foreground">Consuntivo: </span><span className="font-medium">{fmt(f.consuntivo)}</span></div>
+                            <div className="flex items-center gap-1"><span className="text-muted-foreground">Ipotesi mese corr.: </span>
+                              <EditableIpotesi value={f.ipotesi_mese_corrente || 0} onSave={(v) => saveIpotesi(f.id, v)} /></div>
+                            <div><span className="text-muted-foreground">Kg/sett: </span><span className="font-medium">{fmt(f.kg_per_settimana)} · {f.viaggi_per_settimana} viaggi</span></div>
+                          </div>
+                        )}
                         <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div className="h-full bg-accent" style={{ width: `${fPct}%` }} />
+                          <div className={`h-full ${isStocc ? 'bg-primary' : 'bg-accent'}`} style={{ width: `${fPct}%` }} />
                         </div>
                         <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                           <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />Sett. rimaste: {f.settimane_rimanenti}</span>
-                          <span>Avanz. quota: {fPct.toFixed(1)}%</span>
+                          <span>Avanz.: {fPct.toFixed(1)}%</span>
                         </div>
                       </div>
                     );
@@ -138,6 +167,7 @@ export default function PredittivitaDashboard({ data, onReload }) {
             <thead className="bg-muted"><tr>
               <th className="text-left px-3 py-2 font-semibold">Impianto</th>
               <th className="text-left px-3 py-2 font-semibold">Fornitore</th>
+              <th className="text-left px-3 py-2 font-semibold">Tipo</th>
               <th className="text-right px-3 py-2 font-semibold">Quota</th>
               <th className="text-right px-3 py-2 font-semibold">Consuntivo</th>
               <th className="text-right px-3 py-2 font-semibold">Ipotesi</th>
@@ -151,6 +181,7 @@ export default function PredittivitaDashboard({ data, onReload }) {
                 <tr key={f.id} className="border-t">
                   <td className="px-3 py-2 uppercase text-xs">{imp.impianto.nome}</td>
                   <td className="px-3 py-2 font-medium">{f.nome}</td>
+                  <td className="px-3 py-2"><TipoBadge tipo={f.tipo} /></td>
                   <td className="px-3 py-2 text-right">{fmt(f.quota_target)}</td>
                   <td className="px-3 py-2 text-right">{fmt(f.consuntivo)}</td>
                   <td className="px-3 py-2 text-right">{fmt(f.ipotesi_mese_corrente)}</td>

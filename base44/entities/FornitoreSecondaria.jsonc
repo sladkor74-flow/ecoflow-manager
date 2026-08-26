@@ -12,6 +12,15 @@
     "impianto_nome": {
       "type": "string"
     },
+    "tipo": {
+      "type": "string",
+      "enum": [
+        "stoccaggio",
+        "primaria_diretta"
+      ],
+      "default": "primaria_diretta",
+      "description": "stoccaggio = raccoglie allo stoccaggio proprio poi invia secondarie (es. Nappi Sud); primaria_diretta = consegna direttamente in primaria all'impianto"
+    },
     "quota_target": {
       "type": "number",
       "description": "Quota target del fornitore (kg)"
