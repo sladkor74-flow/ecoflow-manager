@@ -4,7 +4,6 @@ import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const KG_PER_VIAGGIO = 14000;
 const DATA_FINE_DEFAULT = '2026-12-18';
-const PLAFOND_DEFAULT = 2227500;
 const ANNO_RIFERIMENTO = 2026;
 const NAPPI_SUD_KEY = 'nappi sud';
 
@@ -34,9 +33,28 @@ export default async function(req) {
     const secondarie = await b.entities.Secondaria.filter({ stato: 'terminato' }, '-created_date', 5000);
     const existingPlans = await b.entities.PianificazioneSettimanale.list('-created_date', 5000);
 
-    // Plafond Nappi Sud (record speciale)
-    const plafondRec = existingPlans.find(p => p.impianto_id === '__PLAFOND_NAPPI__');
-    const plafond = plafondRec && plafondRec.kg_previsti != null ? plafondRec.kg_previsti : PLAFOND_DEFAULT;
+    // === FONTE UNICA TARGET: TargetRaccoglitore (anno di riferimento) ===
+    const targetRaccogli = await b.entities.TargetRaccoglitore.filter({ anno: ANNO_RIFERIMENTO });
+    const targetByNome = {}; // nomeNormalizzato -> target_kg
+    for (const t of targetRaccogli) {
+      const key = normalizzaRagioneSociale(t.raccoglitore);
+      if (key) targetByNome[key] = (t.target_tonnellate || 0) * 1000;
+    }
+
+    // Plafond stoccaggio: letto da FornitoreSecondaria.plafond_stoccaggio_kg (tipo stoccaggio).
+    // Fallback: target TargetRaccoglitore del raccoglitore stoccaggio (Nappi Sud).
+    const stoccaggi = fornitori.filter(f => statoNorm(f.tipo) === 'stoccaggio' || normalizzaRagioneSociale(f.nome) === NAPPI_SUD_KEY);
+    let plafond = 0;
+    for (const s of stoccaggi) {
+      if (s.plafond_stoccaggio_kg && s.plafond_stoccaggio_kg > 0) {
+        plafond = Math.max(plafond, s.plafond_stoccaggio_kg);
+      } else {
+        // fallback al target del raccoglitore
+        const key = normalizzaRagioneSociale(s.nome);
+        const t = targetByNome[key] || 0;
+        plafond = Math.max(plafond, t);
+      }
+    }
 
     // Settimane: dal lunedì della settimana corrente fino al 18/12
     const oggi = new Date();
@@ -119,13 +137,19 @@ export default async function(req) {
         const fNorm = normalizzaRagioneSociale(f.nome);
         const isStoccaggio = isNappi(f);
 
+        // Target annuo del raccoglitore da TargetRaccoglitore (fonte unica)
+        const targetRaccoglitoreKg = targetByNome[fNorm] || 0;
+
         let consuntivo = 0, consuntivoPrim = 0, consuntivoSec = 0;
         let residuo = 0, PREV = 0, viaggiPerSett = 0;
         const execByWeek = {};
         let quotaPlafondImpianto = 0;
         let baseCascata = 0;
+        let plafondUsato = 0;
 
         if (isStoccaggio) {
+          // Plafond stoccaggio da FornitoreSecondaria.plafond_stoccaggio_kg (o fallback target raccoglitore)
+          plafondUsato = f.plafond_stoccaggio_kg && f.plafond_stoccaggio_kg > 0 ? f.plafond_stoccaggio_kg : targetRaccoglitoreKg;
           // Primarie non rilevanti per-impianto (globali allo stoccaggio); secondarie = uscita verso questo impianto
           consuntivoPrim = 0;
           const fSec = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) === NAPPI_SUD_KEY && normalizzaRagioneSociale(r.destinazione) === impNorm);
@@ -154,7 +178,8 @@ export default async function(req) {
             execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
           }
           const ipotesi = f.ipotesi_mese_corrente || 0;
-          residuo = (f.quota_target || 0) - consuntivo - ipotesi;
+          // Target da TargetRaccoglitore (fonte unica)
+          residuo = targetRaccoglitoreKg - consuntivo - ipotesi;
           baseCascata = residuo;
         }
 
@@ -215,14 +240,16 @@ export default async function(req) {
 
         const fr = {
           id: f.id, nome: f.nome, tipo: isStoccaggio ? 'stoccaggio' : 'primaria_diretta',
-          quota_target: f.quota_target || 0, ipotesi_mese_corrente: f.ipotesi_mese_corrente || 0,
+          target_raccoglitore_kg: targetRaccoglitoreKg,
+          quota_target_deprecato: f.quota_target || 0,
+          ipotesi_mese_corrente: f.ipotesi_mese_corrente || 0,
           consuntivo, consuntivo_primarie: consuntivoPrim, consuntivo_secondarie: consuntivoSec,
           residuo, kg_per_settimana: PREV, viaggi_per_settimana: viaggiPerSett,
           settimane_rimanenti: settimaneRimanenti, totale_pianificato: totalePianificato,
           piano_settimanale: piano,
         };
         if (isStoccaggio) {
-          fr.plafond = plafond;
+          fr.plafond = plafondUsato;
           fr.kg_entrati_stoccaggio = kgEntratiStoccaggio;
           fr.residuo_plafond = residuoPlafond;
           fr.quota_plafond_impianto = Math.round(quotaPlafondImpianto);

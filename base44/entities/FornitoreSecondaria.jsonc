@@ -23,7 +23,11 @@
     },
     "quota_target": {
       "type": "number",
-      "description": "Quota target del fornitore (kg)"
+      "description": "DEPRECATO - non piu usato dalla predittivita. Il target annuo del raccoglitore e' letto da TargetRaccoglitore."
+    },
+    "plafond_stoccaggio_kg": {
+      "type": "number",
+      "description": "Plafond totale conferibile allo stoccaggio (kg) - significativo solo per tipo=stoccaggio. Include contributi di tutti i conferitori, non solo il raccoglitore stesso."
     },
     "ipotesi_mese_corrente": {
       "type": "number",

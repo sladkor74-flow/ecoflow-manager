@@ -24,6 +24,7 @@ import PrimarieAci from '@/pages/PrimarieAci';
 import TodoPage from '@/pages/TodoPage';
 import PageErrorBoundary from '@/components/PageErrorBoundary';
 import Pdr from '@/pages/Pdr';
+import TargetAnnuali from '@/pages/TargetAnnuali';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -56,6 +57,7 @@ const AuthenticatedApp = () => {
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/caricamento-dati" element={<CaricamentoDati />} />
+          <Route path="/target-annuali" element={<TargetAnnuali />} />
           <Route path="/target-status" element={<PageErrorBoundary><TargetStatus /></PageErrorBoundary>} />
           <Route path="/report-mensile" element={<PageErrorBoundary><ReportMensile /></PageErrorBoundary>} />
           <Route path="/primarie-rete" element={<PrimarieRete />} />

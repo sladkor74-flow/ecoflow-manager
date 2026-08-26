@@ -113,7 +113,7 @@ export default function PredittivitaDashboard({ data, onReload }) {
                   <h3 className="text-sm font-semibold">Fornitori ({imp.fornitori.length})</h3>
                   {imp.fornitori.map(f => {
                     const isStocc = f.tipo === 'stoccaggio';
-                    const refTarget = isStocc ? target : (f.quota_target || 0);
+                    const refTarget = isStocc ? target : (f.target_raccoglitore_kg || 0);
                     const refConsuntivo = isStocc ? f.consuntivo_secondarie : f.consuntivo;
                     const fPct = refTarget > 0 ? Math.min(100, (refConsuntivo / refTarget) * 100) : 0;
                     const resColor = f.residuo <= 0 ? 'text-green-700' : 'text-amber-600';
@@ -136,7 +136,7 @@ export default function PredittivitaDashboard({ data, onReload }) {
                           </div>
                         ) : (
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 text-xs">
-                            <div><span className="text-muted-foreground">Quota: </span><span className="font-medium">{fmt(f.quota_target)}</span></div>
+                            <div><span className="text-muted-foreground">Target annuo: </span><span className="font-medium">{fmt(f.target_raccoglitore_kg)}</span></div>
                             <div><span className="text-muted-foreground">Consuntivo: </span><span className="font-medium">{fmt(f.consuntivo)}</span></div>
                             <div className="flex items-center gap-1"><span className="text-muted-foreground">Ipotesi mese corr.: </span>
                               <EditableIpotesi value={f.ipotesi_mese_corrente || 0} onSave={(v) => saveIpotesi(f.id, v)} /></div>
@@ -168,7 +168,7 @@ export default function PredittivitaDashboard({ data, onReload }) {
               <th className="text-left px-3 py-2 font-semibold">Impianto</th>
               <th className="text-left px-3 py-2 font-semibold">Fornitore</th>
               <th className="text-left px-3 py-2 font-semibold">Tipo</th>
-              <th className="text-right px-3 py-2 font-semibold">Quota</th>
+              <th className="text-right px-3 py-2 font-semibold">Target annuo</th>
               <th className="text-right px-3 py-2 font-semibold">Consuntivo</th>
               <th className="text-right px-3 py-2 font-semibold">Ipotesi</th>
               <th className="text-right px-3 py-2 font-semibold">Residuo</th>
@@ -182,7 +182,7 @@ export default function PredittivitaDashboard({ data, onReload }) {
                   <td className="px-3 py-2 uppercase text-xs">{imp.impianto.nome}</td>
                   <td className="px-3 py-2 font-medium">{f.nome}</td>
                   <td className="px-3 py-2"><TipoBadge tipo={f.tipo} /></td>
-                  <td className="px-3 py-2 text-right">{fmt(f.quota_target)}</td>
+                  <td className="px-3 py-2 text-right">{fmt(f.target_raccoglitore_kg)}</td>
                   <td className="px-3 py-2 text-right">{fmt(f.consuntivo)}</td>
                   <td className="px-3 py-2 text-right">{fmt(f.ipotesi_mese_corrente)}</td>
                   <td className={`px-3 py-2 text-right font-bold ${f.residuo <= 0 ? 'text-green-700' : 'text-amber-600'}`}>{fmt(f.residuo)}</td>

@@ -3,6 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2, Plus, Trash2, Edit3 } from 'lucide-react';
+import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 
 function InlineEditTarget({ value, onSave }) {
   const [editing, setEditing] = useState(false);
@@ -45,20 +46,28 @@ function InlineEditTarget({ value, onSave }) {
 export default function PredittivitaImpiantiManager({ onReload }) {
   const [impianti, setImpianti] = useState([]);
   const [fornitori, setFornitori] = useState([]);
+  const [targetMap, setTargetMap] = useState({}); // nomeNormalizzato -> target_kg
   const [loading, setLoading] = useState(true);
   const [showImpiantoForm, setShowImpiantoForm] = useState(false);
   const [fornitoreFormFor, setFornitoreFormFor] = useState(null);
   const [impiantoForm, setImpiantoForm] = useState({ nome_impianto: '', target: 0, data_fine: '2026-12-18' });
-  const [fornitoreForm, setFornitoreForm] = useState({ nome: '', quota_target: 0, tipo: 'primaria_diretta' });
+  const [fornitoreForm, setFornitoreForm] = useState({ nome: '', tipo: 'primaria_diretta', plafond_stoccaggio_kg: 0 });
 
   const load = async () => {
     setLoading(true);
     try {
-      const [imps, forns] = await Promise.all([
+      const [imps, forns, targets] = await Promise.all([
         base44.entities.ImpiantoTargetSecondaria.list('-created_date', 50),
         base44.entities.FornitoreSecondaria.list('-created_date', 200),
+        base44.entities.TargetRaccoglitore.filter({ anno: 2026 }),
       ]);
       setImpianti(imps); setFornitori(forns);
+      const tm = {};
+      for (const t of targets) {
+        const key = normalizzaRagioneSociale(t.raccoglitore);
+        if (key) tm[key] = (t.target_tonnellate || 0) * 1000;
+      }
+      setTargetMap(tm);
     } catch (e) {}
     setLoading(false);
   };
@@ -77,9 +86,10 @@ export default function PredittivitaImpiantiManager({ onReload }) {
     const imp = impianti.find(i => i.id === impiantoId);
     await base44.entities.FornitoreSecondaria.create({
       nome: fornitoreForm.nome, impianto_id: impiantoId, impianto_nome: imp?.nome_impianto,
-      quota_target: Number(fornitoreForm.quota_target), tipo: fornitoreForm.tipo, stato: 'attivo',
+      tipo: fornitoreForm.tipo, stato: 'attivo',
+      plafond_stoccaggio_kg: fornitoreForm.tipo === 'stoccaggio' ? Number(fornitoreForm.plafond_stoccaggio_kg) : 0,
     });
-    setFornitoreForm({ nome: '', quota_target: 0, tipo: 'primaria_diretta' }); setFornitoreFormFor(null); load(); onReload();
+    setFornitoreForm({ nome: '', tipo: 'primaria_diretta', plafond_stoccaggio_kg: 0 }); setFornitoreFormFor(null); load(); onReload();
   };
 
   const updateImpianto = async (imp, patch) => {
@@ -141,11 +151,13 @@ export default function PredittivitaImpiantiManager({ onReload }) {
           {fornitoreFormFor === imp.id && (
             <div className="border rounded p-2 bg-muted/30 flex flex-wrap gap-2">
               <Input placeholder="Nome fornitore" value={fornitoreForm.nome} onChange={e => setFornitoreForm({ ...fornitoreForm, nome: e.target.value })} className="flex-1 min-w-[180px]" />
-              <Input type="number" placeholder="Quota target (kg)" value={fornitoreForm.quota_target} onChange={e => setFornitoreForm({ ...fornitoreForm, quota_target: e.target.value })} className="w-48" />
               <select value={fornitoreForm.tipo} onChange={e => setFornitoreForm({ ...fornitoreForm, tipo: e.target.value })} className="border rounded px-2 text-sm bg-background">
                 <option value="primaria_diretta">Primaria diretta</option>
                 <option value="stoccaggio">Stoccaggio (Nappi Sud)</option>
               </select>
+              {fornitoreForm.tipo === 'stoccaggio' && (
+                <Input type="number" placeholder="Plafond stoccaggio (kg)" value={fornitoreForm.plafond_stoccaggio_kg} onChange={e => setFornitoreForm({ ...fornitoreForm, plafond_stoccaggio_kg: e.target.value })} className="w-48" />
+              )}
               <Button size="sm" onClick={() => addFornitore(imp.id)}>Salva</Button>
             </div>
           )}
@@ -167,7 +179,11 @@ export default function PredittivitaImpiantiManager({ onReload }) {
                   <button onClick={() => removeFornitore(f)} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-3 h-3 text-red-500" /></button>
                 </div>
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Quota: <span className="font-medium text-foreground">{(f.quota_target || 0).toLocaleString()} kg</span></span>
+                  <span>Target annuo (da Target Annuali): <span className="font-medium text-foreground">{((targetMap[normalizzaRagioneSociale(f.nome)] || 0)).toLocaleString('it-IT')} kg</span>
+                    {(f.tipo || 'primaria_diretta') === 'stoccaggio' && f.plafond_stoccaggio_kg != null && (
+                      <span className="ml-2">· Plafond: <span className="font-medium text-foreground">{(f.plafond_stoccaggio_kg || 0).toLocaleString('it-IT')} kg</span></span>
+                    )}
+                  </span>
                   <span className="flex items-center gap-1">Ipotesi mese corr.:
                     <InlineEditTarget value={f.ipotesi_mese_corrente || 0} onSave={(v) => updateFornitore(f, { ipotesi_mese_corrente: v })} />
                   </span>
