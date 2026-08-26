@@ -11,13 +11,14 @@ export default function PredittivitaSecondarie() {
   const [tab, setTab] = useState('dashboard');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const load = async () => {
-    setLoading(true);
+    setLoading(true); setError(null);
     try {
       const res = await base44.functions.invoke('calcolaPianificazioneSecondaria', {});
       setData(res.data);
-    } catch (e) { /* ignore */ }
+    } catch (e) { setError(e?.message || 'Errore di caricamento'); }
     setLoading(false);
   };
 
@@ -31,6 +32,11 @@ export default function PredittivitaSecondarie() {
       </div>
       {loading ? (
         <div className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin inline" /></div>
+      ) : error ? (
+        <div className="text-center py-12 space-y-2">
+          <p className="text-destructive font-medium">Errore: {error}</p>
+          <button onClick={load} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm">Riprova</button>
+        </div>
       ) : (
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList>

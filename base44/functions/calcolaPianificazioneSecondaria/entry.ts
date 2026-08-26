@@ -36,8 +36,9 @@ export default async function(req) {
 
     const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
     const fornitori = await b.entities.FornitoreSecondaria.filter({ stato: 'attivo' });
-    const primarie = await b.entities.PrimariaRete.list('-created_date', 20000);
-    const secondarie = await b.entities.Secondaria.list('-created_date', 20000);
+    // Carica solo i record "terminato" (molto meno payload che caricare tutto)
+    const primarie = await b.entities.PrimariaRete.filter({ stato: 'terminato' }, '-created_date', 5000);
+    const secondarie = await b.entities.Secondaria.filter({ stato: 'terminato' }, '-created_date', 5000);
     const existingPlans = await b.entities.PianificazioneSettimanale.list('-created_date', 5000);
 
     // Plafond Nappi Sud (config record)
