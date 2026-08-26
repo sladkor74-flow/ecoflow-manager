@@ -71,15 +71,19 @@ export default async function(req) {
     for (const imp of impianti) impNormMap[normalizzaRagioneSociale(imp.nome_impianto)] = imp;
 
     // Primarie terminati 2026 con destinazione = uno degli impianti
+    // "Terminati" PrimariaRete: stato='terminato' (col B) E data fine trasporto presente (col AI), anno 2026
     const primTerminati = primarie.filter(r => {
       if (statoNorm(r.stato) !== 'terminato') return false;
+      if (!r.trasporto_finito_il) return false;
       if (yearOf(r.trasporto_finito_il) !== ANNO_RIFERIMENTO) return false;
       return !!impNormMap[normalizzaRagioneSociale(r.destinazione)];
     });
 
     // Secondarie terminate 2026 con destinazione = uno degli impianti
+    // "Terminati" Secondaria: stato='terminato' (col B) E data fine trasporto presente (col AF), anno 2026
     const secTerminati = secondarie.filter(r => {
       if (statoNorm(r.stato) !== 'terminato') return false;
+      if (!r.trasporto_finito_il) return false;
       if (yearOf(r.trasporto_finito_il) !== ANNO_RIFERIMENTO) return false;
       return !!impNormMap[normalizzaRagioneSociale(r.destinazione)];
     });
