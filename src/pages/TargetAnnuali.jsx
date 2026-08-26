@@ -396,7 +396,7 @@ export default function TargetAnnuali() {
                     </div>
                     <div className="border rounded p-3">
                       <p className="text-xs text-muted-foreground mb-1">Target impianto (primarie imp)</p>
-                      <p className="font-bold">{fmtInt(targetImp)} kg</p>
+                      <EditableCell value={targetImp} onSave={(v) => saveImp(imp, { target: v })} unit="kg" />
                     </div>
                     <div className="border rounded p-3">
                       <p className="text-xs text-muted-foreground mb-1">Plafond stoccaggio (primarie stoc)</p>
