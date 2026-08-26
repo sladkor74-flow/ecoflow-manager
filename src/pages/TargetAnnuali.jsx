@@ -131,6 +131,19 @@ export default function TargetAnnuali() {
         } catch (e) {}
       }
 
+      // Auto-crea il record T-CYCLE impianto (quota impianto 1.050.000 kg) se mancante
+      const tCycleExists = imp.some(i => normalizzaRagioneSociale(i.nome_impianto) === 't-cycle');
+      if (!tCycleExists) {
+        try {
+          const res = await base44.functions.invoke('migraTCycleImpianto', {});
+          const data = res.data || res;
+          if (data && data.id) {
+            const newImp = await base44.entities.ImpiantoTargetSecondaria.get(data.id);
+            imp.push(newImp);
+          }
+        } catch (e) {}
+      }
+
       setRaccoglitori(merged);
       setImpianti(imp);
       setFornitori(forn);
@@ -143,10 +156,9 @@ export default function TargetAnnuali() {
   // Stoccaggi: ruolo stoccaggio o doppio_ruolo (fallback su tipo per record non migrati)
   const stoccaggi = useMemo(() => fornitori.filter(f => f.ruolo === 'stoccaggio' || f.ruolo === 'doppio_ruolo' || (!f.ruolo && (f.tipo || 'primaria_diretta') === 'stoccaggio')), [fornitori]);
 
-  // Impianti doppio ruolo: hanno un FornitoreSecondaria con ruolo=doppio_ruolo collegato, oppure fallback match nome
-  const doubleRoleImpiantiIds = useMemo(() => new Set(fornitori.filter(f => f.ruolo === 'doppio_ruolo' && f.impianto_id).map(f => f.impianto_id)), [fornitori]);
-  const stoccaggioNames = useMemo(() => new Set(stoccaggi.map(s => normalizzaRagioneSociale(s.nome))), [stoccaggi]);
-  const doubleRoleImpianti = useMemo(() => impianti.filter(imp => doubleRoleImpiantiIds.has(imp.id) || stoccaggioNames.has(normalizzaRagioneSociale(imp.nome_impianto))), [impianti, doubleRoleImpiantiIds, stoccaggioNames]);
+  // Impianti doppio ruolo: match per nome normalizzato (coerente col backend calcolaPianificazioneSecondaria)
+  const doubleRoleNames = useMemo(() => new Set(fornitori.filter(f => f.ruolo === 'doppio_ruolo' || f.ruolo === 'stoccaggio').map(f => normalizzaRagioneSociale(f.nome))), [fornitori]);
+  const doubleRoleImpianti = useMemo(() => impianti.filter(imp => doubleRoleNames.has(normalizzaRagioneSociale(imp.nome_impianto))), [impianti, doubleRoleNames]);
 
   // Esclude dai raccoglitori i nomi che sono impianti doppio ruolo (quote impianto)
   const excludedRaccoglitoriNorms = useMemo(() => new Set(fornitori.filter(f => f.ruolo === 'doppio_ruolo' || f.ruolo === 'impianto').map(f => normalizzaRagioneSociale(f.nome))), [fornitori]);
@@ -400,7 +412,11 @@ export default function TargetAnnuali() {
                     </div>
                     <div className="border rounded p-3">
                       <p className="text-xs text-muted-foreground mb-1">Plafond stoccaggio (primarie stoc)</p>
-                      <p className="font-bold">{fmtInt(plafondStoc)} kg</p>
+                      {stocMatch ? (
+                        <EditableCell value={plafondStoc} onSave={(v) => savePlafond(stocMatch, v)} unit="kg" />
+                      ) : (
+                        <p className="font-bold">{fmtInt(plafondStoc)} kg</p>
+                      )}
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground mt-2">Split: {fmtInt(targetImp)} + {fmtInt(plafondStoc)} = {fmtInt(somma)} kg {incongruente ? '⚠' : '✓'}</p>
