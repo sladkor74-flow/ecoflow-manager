@@ -85,6 +85,7 @@ export default function TargetAnnuali() {
   const [showRaccForm, setShowRaccForm] = useState(false);
   const [showImpForm, setShowImpForm] = useState(false);
   const [migrating, setMigrating] = useState(false);
+  const [migratingRegionali, setMigratingRegionali] = useState(false);
   const [raccForm, setRaccForm] = useState({ raccoglitore: '', target_tonnellate: 0 });
   const [impForm, setImpForm] = useState({ nome_impianto: '', target: 0, data_fine: '2026-12-18' });
 
@@ -97,22 +98,29 @@ export default function TargetAnnuali() {
         base44.entities.FornitoreSecondaria.list('-created_date', 500),
       ]);
 
-      // Unione: tutti i nomi raccoglitore da FornitoreSecondaria + TargetRaccoglitore(anno)
+      // Nomi normalizzati degli impianti doppio ruolo / impianto (da escludere dai raccoglitori)
+      const excludedNorms = new Set(
+        forn.filter(f => f.ruolo === 'doppio_ruolo' || f.ruolo === 'impianto').map(f => normalizzaRagioneSociale(f.nome))
+      );
+      // Unione: nomi raccoglitore da FornitoreSecondaria (esclusi impianti/doppio_ruolo)
       const nomiDaFornitori = new Set();
       for (const f of forn) {
-        if (f.nome) nomiDaFornitori.add(f.nome);
+        if (!f.nome) continue;
+        if (excludedNorms.has(normalizzaRagioneSociale(f.nome))) continue;
+        nomiDaFornitori.add(f.nome);
       }
-      const raccByNome = {};
+      // Set dei raccoglitori che hanno gia' almeno un record (anche come split regionale)
+      const raccNorms = new Set();
       for (const r of racc) {
         const key = normalizzaRagioneSociale(r.raccoglitore);
-        if (key) raccByNome[key] = r;
+        if (key) raccNorms.add(key);
       }
-      // Auto-crea record mancanti per conservare storico e renderli editabili
+      // Auto-crea record mancanti solo se non esiste gia' nessun record per quel raccoglitore
       const toCreate = [];
       const merged = [...racc];
       for (const nome of nomiDaFornitori) {
         const key = normalizzaRagioneSociale(nome);
-        if (!raccByNome[key]) {
+        if (!raccNorms.has(key)) {
           toCreate.push({ raccoglitore: nome, anno, target_tonnellate: 0 });
         }
       }
@@ -140,7 +148,11 @@ export default function TargetAnnuali() {
   const stoccaggioNames = useMemo(() => new Set(stoccaggi.map(s => normalizzaRagioneSociale(s.nome))), [stoccaggi]);
   const doubleRoleImpianti = useMemo(() => impianti.filter(imp => doubleRoleImpiantiIds.has(imp.id) || stoccaggioNames.has(normalizzaRagioneSociale(imp.nome_impianto))), [impianti, doubleRoleImpiantiIds, stoccaggioNames]);
 
-  const totaleRacc = useMemo(() => raccoglitori.reduce((s, r) => s + (r.target_tonnellate || 0), 0), [raccoglitori]);
+  // Esclude dai raccoglitori i nomi che sono impianti doppio ruolo (quote impianto)
+  const excludedRaccoglitoriNorms = useMemo(() => new Set(fornitori.filter(f => f.ruolo === 'doppio_ruolo' || f.ruolo === 'impianto').map(f => normalizzaRagioneSociale(f.nome))), [fornitori]);
+  const raccoglitoriVisibili = useMemo(() => raccoglitori.filter(r => !excludedRaccoglitoriNorms.has(normalizzaRagioneSociale(r.raccoglitore))), [raccoglitori, excludedRaccoglitoriNorms]);
+  const hasRegionale = useMemo(() => raccoglitoriVisibili.some(r => r.regione), [raccoglitoriVisibili]);
+  const totaleRacc = useMemo(() => raccoglitoriVisibili.reduce((s, r) => s + (r.target_tonnellate || 0), 0), [raccoglitoriVisibili]);
 
   const saveRacc = async (r, value) => {
     setSaving(true);
@@ -219,6 +231,19 @@ export default function TargetAnnuali() {
     setMigrating(false);
   };
 
+  const runMigrazioneRegionali = async () => {
+    setMigratingRegionali(true);
+    try {
+      const res = await base44.functions.invoke('migraTargetRaccoglitoriRegionali', {});
+      const data = res.data || res;
+      alert(`Migrazione target regionali completata:\n• ${data.eliminati_quote_impianto || 0} quote impianto eliminate dai raccoglitori\n• ${data.smoco_regionali_creati || 0} record Smoco regionali creati\n• Record Smoco singolo: ${data.smoco_singolo_eliminato ? 'eliminato' : 'non presente'}`);
+      load();
+    } catch (e) {
+      alert('Errore migrazione target regionali: ' + (e.message || 'errore sconosciuto'));
+    }
+    setMigratingRegionali(false);
+  };
+
   if (loading) {
     return <div className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin inline" /></div>;
   }
@@ -240,6 +265,10 @@ export default function TargetAnnuali() {
             {migrating ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <RefreshCw className="w-4 h-4 mr-1" />}
             Migra ruoli
           </Button>
+          <Button size="sm" variant="outline" onClick={runMigrazioneRegionali} disabled={migratingRegionali}>
+            {migratingRegionali ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <RefreshCw className="w-4 h-4 mr-1" />}
+            Migra target regionali
+          </Button>
         </div>
       </div>
 
@@ -257,15 +286,17 @@ export default function TargetAnnuali() {
             <thead className="bg-muted/50">
               <tr>
                 <th className="text-left px-3 py-2 font-semibold">Raccoglitore</th>
+                {hasRegionale && <th className="text-left px-3 py-2 font-semibold">Regione</th>}
                 <th className="text-left px-3 py-2 font-semibold">Anno</th>
                 <th className="text-right px-3 py-2 font-semibold">Target (ton)</th>
                 <th className="px-3 py-2 w-10"></th>
               </tr>
             </thead>
             <tbody>
-              {raccoglitori.map(r => (
+              {raccoglitoriVisibili.map(r => (
                 <tr key={r.id} className="border-t hover:bg-muted/20">
                   <td className="px-3 py-2 font-medium">{r.raccoglitore}</td>
+                  {hasRegionale && <td className="px-3 py-2 text-muted-foreground">{r.regione || '—'}</td>}
                   <td className="px-3 py-2 text-muted-foreground">{r.anno}</td>
                   <td className="px-3 py-2 text-right">
                     <EditableCell value={r.target_tonnellate || 0} onSave={(v) => saveRacc(r, v)} unit="ton" />
@@ -275,14 +306,14 @@ export default function TargetAnnuali() {
                   </td>
                 </tr>
               ))}
-              {raccoglitori.length === 0 && (
-                <tr><td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">Nessun raccoglitore per l'anno {anno}.</td></tr>
+              {raccoglitoriVisibili.length === 0 && (
+                <tr><td colSpan={hasRegionale ? 5 : 4} className="px-3 py-6 text-center text-muted-foreground">Nessun raccoglitore per l'anno {anno}.</td></tr>
               )}
             </tbody>
-            {raccoglitori.length > 0 && (
+            {raccoglitoriVisibili.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 bg-muted/30 font-semibold">
-                  <td className="px-3 py-2" colSpan={2}>Totale</td>
+                  <td className="px-3 py-2" colSpan={hasRegionale ? 3 : 2}>Totale Raccoglitori</td>
                   <td className="px-3 py-2 text-right">{fmt(totaleRacc)} ton</td>
                   <td></td>
                 </tr>
@@ -337,9 +368,9 @@ export default function TargetAnnuali() {
         </div>
       </SectionCard>
 
-      {/* Sezione Impianti Doppio Ruolo */}
+      {/* Sezione Quote Target Impianto */}
       {doubleRoleImpianti.length > 0 && (
-        <SectionCard icon={Factory} title="Impianti Doppio Ruolo" subtitle="Impianti che operano anche come stoccaggio (es. T-CYCLE)" count={doubleRoleImpianti.length}>
+        <SectionCard icon={Factory} title="Quote Target Impianto" subtitle="Quote impianto di destinazione (es. T-CYCLE) - non comprese nel totale raccoglitori" count={doubleRoleImpianti.length}>
           <div className="space-y-3">
             {doubleRoleImpianti.map(imp => {
               const stocMatch = stoccaggi.find(s => normalizzaRagioneSociale(s.nome) === normalizzaRagioneSociale(imp.nome_impianto));

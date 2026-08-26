@@ -34,11 +34,14 @@ export default async function(req) {
     const existingPlans = await b.entities.PianificazioneSettimanale.list('-created_date', 5000);
 
     // === FONTE UNICA TARGET: TargetRaccoglitore (anno di riferimento) ===
+    // Aggrega (somma) i record con stesso raccoglitore normalizzato indipendentemente
+    // dalla regione, cosi' uno split regionale (es. Smoco Puglia/Calabria/Basilicata)
+    // contribuisce con un unico totale al target del fornitore.
     const targetRaccogli = await b.entities.TargetRaccoglitore.filter({ anno: ANNO_RIFERIMENTO });
     const targetByNome = {};
     for (const t of targetRaccogli) {
       const key = normalizzaRagioneSociale(t.raccoglitore);
-      if (key) targetByNome[key] = (t.target_tonnellate || 0) * 1000;
+      if (key) targetByNome[key] = (targetByNome[key] || 0) + (t.target_tonnellate || 0) * 1000;
     }
 
     // === RUOLO-BASE: stoccaggi = ruolo stoccaggio o doppio_ruolo ===

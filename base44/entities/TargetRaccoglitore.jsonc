@@ -6,6 +6,10 @@
       "type": "string",
       "description": "Nome del raccoglitore/trasportatore"
     },
+    "regione": {
+      "type": "string",
+      "description": "Regione per split regionali di raccoglitori multi-regione (es. Smoco in Puglia/Calabria/Basilicata). Null = raccoglitore puro."
+    },
     "anno": {
       "type": "number",
       "description": "Anno di riferimento"

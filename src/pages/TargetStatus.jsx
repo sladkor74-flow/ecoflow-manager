@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import TargetRaccoglitoriTable from '@/components/target-status/TargetRaccoglitoriTable';
 import TargetRaccoglitoriPrimariaTable from '@/components/target-status/TargetRaccoglitoriPrimariaTable';
 import { useAuth } from '@/lib/AuthContext';
+import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { Loader2, RefreshCw, Filter, X, Plus } from 'lucide-react';
 
 const TARGET_BY_YEAR = { 2025: 11200, 2026: 11550 };
@@ -25,6 +26,7 @@ export default function TargetStatus() {
   const [targets, setTargets] = useState([]);
   const [impiantoTargets, setImpiantoTargets] = useState([]);
   const [raccoglitoreTargets, setRaccoglitoreTargets] = useState([]);
+  const [fornitoriSec, setFornitoriSec] = useState([]);
   const [annoTargetRacc, setAnnoTargetRacc] = useState(new Date().getFullYear());
   const [raccPrimaria, setRaccPrimaria] = useState({ righe: [], totale_target: 0, totale_raccolto: 0 });
   const [annoPrimaria, setAnnoPrimaria] = useState(new Date().getFullYear());
@@ -54,8 +56,12 @@ export default function TargetStatus() {
 
   const loadRaccoglitoreTargets = useCallback(async (anno) => {
     try {
-      const res = await base44.entities.TargetRaccoglitore.filter({ anno }, '-created_date', 1000);
+      const [res, forn] = await Promise.all([
+        base44.entities.TargetRaccoglitore.filter({ anno }, '-created_date', 1000),
+        base44.entities.FornitoreSecondaria.list('-created_date', 1000),
+      ]);
       setRaccoglitoreTargets(res);
+      setFornitoriSec(forn);
     } catch (e) { console.error(e); }
   }, []);
 
@@ -251,6 +257,11 @@ export default function TargetStatus() {
   const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
   const resetFilters = () => setFilters({ anno: [], mese: [], regione: [], raccoglitore: [], impianto: [] });
 
+  // Nomi normalizzati degli impianti doppio ruolo / impianto (da escludere dai raccoglitori)
+  const excludedRaccNorms = useMemo(() => new Set(
+    fornitoriSec.filter(f => f.ruolo === 'doppio_ruolo' || f.ruolo === 'impianto').map(f => normalizzaRagioneSociale(f.nome))
+  ), [fornitoriSec]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20 text-muted-foreground">
@@ -363,6 +374,7 @@ export default function TargetStatus() {
             anno={annoTargetRacc}
             onSave={saveRaccoglitoreTarget}
             isAdmin={isAdmin}
+            excludedNorms={excludedRaccNorms}
           />
         </TabsContent>
 
