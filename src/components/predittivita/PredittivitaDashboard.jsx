@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Calendar, Layers, Edit3, Loader2, Warehouse, Truck, Factory } from 'lucide-react';
+import { Calendar, Layers, Edit3, Loader2, Warehouse, Truck, Factory, Building2 } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 
 function fmt(n) { return (n || 0).toLocaleString('it-IT'); }
@@ -46,6 +46,71 @@ function TipoBadge({ tipo }) {
     return <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-primary text-primary-foreground"><Warehouse className="w-2.5 h-2.5" />Stoccaggio</span>;
   }
   return <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-accent text-accent-foreground"><Truck className="w-2.5 h-2.5" />Primaria diretta</span>;
+}
+
+function RuoloBadge({ ruolo }) {
+  const map = {
+    raccoglitore: { cls: 'bg-sky-100 text-sky-700', icon: Truck, label: 'Raccoglitore' },
+    impianto: { cls: 'bg-blue-100 text-blue-700', icon: Factory, label: 'Impianto' },
+    stoccaggio: { cls: 'bg-amber-100 text-amber-700', icon: Warehouse, label: 'Stoccaggio' },
+    doppio_ruolo: { cls: 'bg-violet-100 text-violet-700', icon: Building2, label: 'Doppio ruolo' },
+  };
+  const m = map[ruolo] || map.raccoglitore;
+  const Icon = m.icon;
+  return <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded ${m.cls}`}><Icon className="w-2.5 h-2.5" />{m.label}</span>;
+}
+
+function DoubleRoleProgress({ imp, stocMetric }) {
+  const targetImp = imp.impianto.target || 0;
+  const consImp = imp.consuntivo_primarie || 0;
+  const pctImp = targetImp > 0 ? Math.min(100, (consImp / targetImp) * 100) : 0;
+
+  const plafondStoc = stocMetric?.plafond || 0;
+  const partitiStoc = stocMetric?.kg_partiti || 0;
+  const pctStoc = plafondStoc > 0 ? Math.min(100, (partitiStoc / plafondStoc) * 100) : 0;
+
+  const totaleCap = imp.impianto.totale_capacity || 0;
+  const consTotale = consImp + partitiStoc;
+  const pctTotale = totaleCap > 0 ? Math.min(100, (consTotale / totaleCap) * 100) : 0;
+
+  return (
+    <div className="border rounded-lg p-3 space-y-3 bg-violet-50/50">
+      <div className="flex items-center gap-2">
+        <Building2 className="w-4 h-4 text-violet-600" />
+        <span className="text-sm font-semibold text-violet-700">Avanzamento Doppio Ruolo</span>
+      </div>
+      {/* Quota impianto (Contabile) */}
+      <div>
+        <div className="flex justify-between text-xs mb-1">
+          <span className="text-muted-foreground font-medium">Quota impianto <span className="inline-flex items-center gap-0.5 ml-1 text-[9px] bg-blue-100 text-blue-700 px-1 rounded">Contabile</span></span>
+          <span className="font-medium">{fmt(consImp)} / {fmt(targetImp)} kg ({pctImp.toFixed(1)}%)</span>
+        </div>
+        <div className="h-2 bg-muted rounded-full overflow-hidden">
+          <div className="h-full bg-blue-500" style={{ width: `${pctImp}%` }} />
+        </div>
+      </div>
+      {/* Quota stoccaggio (Operativa) */}
+      <div>
+        <div className="flex justify-between text-xs mb-1">
+          <span className="text-muted-foreground font-medium">Quota stoccaggio <span className="inline-flex items-center gap-0.5 ml-1 text-[9px] bg-amber-100 text-amber-700 px-1 rounded">Operativa</span></span>
+          <span className="font-medium">{fmt(partitiStoc)} / {fmt(plafondStoc)} kg ({pctStoc.toFixed(1)}%)</span>
+        </div>
+        <div className="h-2 bg-muted rounded-full overflow-hidden">
+          <div className="h-full bg-amber-500" style={{ width: `${pctStoc}%` }} />
+        </div>
+      </div>
+      {/* Totale cumulativo */}
+      <div className="pt-2 border-t">
+        <div className="flex justify-between text-xs mb-1">
+          <span className="font-semibold text-violet-700">Totale cumulativo</span>
+          <span className="font-bold">{fmt(consTotale)} / {fmt(totaleCap)} kg ({pctTotale.toFixed(1)}%)</span>
+        </div>
+        <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+          <div className="h-full bg-violet-500" style={{ width: `${pctTotale}%` }} />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function PredittivitaDashboard({ data, onReload }) {
@@ -99,10 +164,14 @@ export default function PredittivitaDashboard({ data, onReload }) {
         {data.impianti.map(imp => {
           const target = imp.impianto.target || 0;
           const pct = target > 0 ? Math.min(100, (imp.consuntivo / target) * 100) : 0;
+          const stocMetric = (data.stoccaggi || []).find(s => s.nome_normalizzato === normalizzaRagioneSociale(imp.impianto.nome));
           return (
             <div key={imp.impianto.id} className="border rounded-lg p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="font-heading font-bold text-lg uppercase">{imp.impianto.nome}</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="font-heading font-bold text-lg uppercase">{imp.impianto.nome}</h2>
+                  {imp.impianto.is_double_role && <RuoloBadge ruolo="doppio_ruolo" />}
+                </div>
                 <span className="text-xs text-muted-foreground">Scadenza: {imp.impianto.data_fine}</span>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
@@ -119,6 +188,8 @@ export default function PredittivitaDashboard({ data, onReload }) {
                 </div>
               </div>
 
+              {imp.impianto.is_double_role && <DoubleRoleProgress imp={imp} stocMetric={stocMetric} />}
+
               {imp.fornitori && imp.fornitori.length > 0 && (
                 <div className="border-t pt-2 space-y-2">
                   <h3 className="text-sm font-semibold">Fornitori ({imp.fornitori.length})</h3>
@@ -131,7 +202,7 @@ export default function PredittivitaDashboard({ data, onReload }) {
                     return (
                       <div key={f.id} className={`border rounded-lg p-2.5 space-y-1.5 ${isStocc ? 'bg-primary/5' : 'bg-muted/20'}`}>
                         <div className="flex items-center justify-between flex-wrap gap-1">
-                          <span className="font-medium text-sm flex items-center gap-1.5">{f.nome} <TipoBadge tipo={f.tipo} /></span>
+                          <span className="font-medium text-sm flex items-center gap-1.5">{f.nome} <RuoloBadge ruolo={f.ruolo || (f.tipo === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore')} /></span>
                           <span className={`text-xs font-bold ${resColor}`}>Residuo: {fmt(f.residuo)} kg</span>
                         </div>
                         {isStocc ? (
@@ -238,7 +309,7 @@ export default function PredittivitaDashboard({ data, onReload }) {
                   <tr key={f.id} className="border-t">
                     <td className="px-3 py-2 uppercase text-xs">{imp.impianto.nome}</td>
                     <td className="px-3 py-2 font-medium">{f.nome}</td>
-                    <td className="px-3 py-2"><TipoBadge tipo={f.tipo} /></td>
+                    <td className="px-3 py-2"><RuoloBadge ruolo={f.ruolo || (f.tipo === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore')} /></td>
                     <td className="px-3 py-2 text-right">{fmt(f.target_raccoglitore_kg)}</td>
                     <td className="px-3 py-2 text-right">{fmt(f.consuntivo)}</td>
                     <td className="px-3 py-2 text-right">{fmt(f.ipotesi_mese_corrente)}</td>

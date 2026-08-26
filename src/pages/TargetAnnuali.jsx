@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Loader2, Plus, Trash2, Edit3, Target, Factory, Warehouse, Calendar } from 'lucide-react';
+import { Loader2, Plus, Trash2, Edit3, Target, Factory, Warehouse, Calendar, RefreshCw } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 
 const ANNO_DEFAULT = 2026;
@@ -84,6 +84,7 @@ export default function TargetAnnuali() {
 
   const [showRaccForm, setShowRaccForm] = useState(false);
   const [showImpForm, setShowImpForm] = useState(false);
+  const [migrating, setMigrating] = useState(false);
   const [raccForm, setRaccForm] = useState({ raccoglitore: '', target_tonnellate: 0 });
   const [impForm, setImpForm] = useState({ nome_impianto: '', target: 0, data_fine: '2026-12-18' });
 
@@ -131,12 +132,13 @@ export default function TargetAnnuali() {
 
   useEffect(() => { load(); }, [anno]);
 
-  // Stoccaggi (tipo stoccaggio)
-  const stoccaggi = useMemo(() => fornitori.filter(f => (f.tipo || 'primaria_diretta') === 'stoccaggio'), [fornitori]);
+  // Stoccaggi: ruolo stoccaggio o doppio_ruolo (fallback su tipo per record non migrati)
+  const stoccaggi = useMemo(() => fornitori.filter(f => f.ruolo === 'stoccaggio' || f.ruolo === 'doppio_ruolo' || (!f.ruolo && (f.tipo || 'primaria_diretta') === 'stoccaggio')), [fornitori]);
 
-  // Impianti doppio ruolo: nome impianto normalizzato coincide con un nome stoccaggio
+  // Impianti doppio ruolo: hanno un FornitoreSecondaria con ruolo=doppio_ruolo collegato, oppure fallback match nome
+  const doubleRoleImpiantiIds = useMemo(() => new Set(fornitori.filter(f => f.ruolo === 'doppio_ruolo' && f.impianto_id).map(f => f.impianto_id)), [fornitori]);
   const stoccaggioNames = useMemo(() => new Set(stoccaggi.map(s => normalizzaRagioneSociale(s.nome))), [stoccaggi]);
-  const doubleRoleImpianti = useMemo(() => impianti.filter(imp => stoccaggioNames.has(normalizzaRagioneSociale(imp.nome_impianto))), [impianti, stoccaggioNames]);
+  const doubleRoleImpianti = useMemo(() => impianti.filter(imp => doubleRoleImpiantiIds.has(imp.id) || stoccaggioNames.has(normalizzaRagioneSociale(imp.nome_impianto))), [impianti, doubleRoleImpiantiIds, stoccaggioNames]);
 
   const totaleRacc = useMemo(() => raccoglitori.reduce((s, r) => s + (r.target_tonnellate || 0), 0), [raccoglitori]);
 
@@ -204,6 +206,19 @@ export default function TargetAnnuali() {
     setSaving(false);
   };
 
+  const runMigrazione = async () => {
+    setMigrating(true);
+    try {
+      const res = await base44.functions.invoke('migraFornitoriRuolo', {});
+      const data = res.data || res;
+      alert(`Migrazione completata: ${data.migrati || 0} record migrati, ${data.gia_migrati || 0} già migrati.`);
+      load();
+    } catch (e) {
+      alert('Errore migrazione: ' + (e.message || 'errore sconosciuto'));
+    }
+    setMigrating(false);
+  };
+
   if (loading) {
     return <div className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin inline" /></div>;
   }
@@ -221,6 +236,10 @@ export default function TargetAnnuali() {
             {ANNI.map(a => <option key={a} value={a}>{a}</option>)}
           </select>
           {saving && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
+          <Button size="sm" variant="outline" onClick={runMigrazione} disabled={migrating}>
+            {migrating ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <RefreshCw className="w-4 h-4 mr-1" />}
+            Migra ruoli
+          </Button>
         </div>
       </div>
 

@@ -126,6 +126,25 @@ export default async function(req) {
     const svcTrasporto = servizioByNome.get('TRASPORTO');
     const svcTrattamento = servizioByNome.get('TRATTAMENTO');
 
+    // Servizi separati per quota impianto/stoccaggio (T-CYCLE doppio ruolo)
+    // Cerca servizi con "IMPIANTO" o "STOCCAGGIO" nel nome per la fatturazione trattamento primarie
+    const svcImpiantoQuota = Array.from(servizi.values()).find(s =>
+      s.nome.toUpperCase().includes('IMPIANTO') && s.nome.toUpperCase().includes('CONFERIMENTO')
+    );
+    const svcStoccaggioQuota = Array.from(servizi.values()).find(s =>
+      s.nome.toUpperCase().includes('STOCCAGGIO') && s.nome.toUpperCase().includes('CONFERIMENTO')
+    );
+
+    // Carica FornitoreSecondaria per identificare impianti/doppio_ruolo come destinazioni fatturabili
+    const fornitoriSecondaria = await base44.asServiceRole.entities.FornitoreSecondaria.filter({ stato: 'attivo' });
+    const destImpiantoNorms = new Set();
+    for (const fs of fornitoriSecondaria) {
+      const ruolo = fs.ruolo || '';
+      if (ruolo === 'impianto' || ruolo === 'doppio_ruolo') {
+        destImpiantoNorms.add(fs.nome.trim().toUpperCase());
+      }
+    }
+
     const includeTrasporti = tipo_fatturazione === 'completa' || tipo_fatturazione === 'trasporti';
     const includeTrattamenti = tipo_fatturazione === 'completa' || tipo_fatturazione === 'trattamenti';
 
@@ -141,6 +160,23 @@ export default async function(req) {
         const f = await getOrCreateFornitore(r.trasportatore, 'trasportatore');
         addVoce(f, svcTrasporto, r.classe, r.cer, (r.peso_effettivo || 0) / 1000, 'SECONDARIE', r.id,
           `Trasporto secondaria ${r.classe || ''} - ${r.stoccaggio || ''} → ${r.destinazione || ''}`.trim());
+      }
+    }
+
+    // Process PRIMARIE destinate a impianti/doppio_ruolo (trattamento split imp/stoc)
+    // Per T-CYCLE doppio ruolo: primarie con destinazione=T-CYCLE generano trattamento
+    // con servizio "Conferimento impianto" (tipo_destinazione=imp) o "Conferimento stoccaggio" (stoc)
+    if (includeTrattamenti) {
+      for (const r of rete) {
+        const destKey = (r.destinazione || '').trim().toUpperCase();
+        if (!destKey || !destImpiantoNorms.has(destKey)) continue;
+        const tipoDest = String(r.tipo_destinazione || '').toLowerCase().trim();
+        const isStoc = tipoDest === 'stoc';
+        const svcQuota = isStoc ? svcStoccaggioQuota : svcImpiantoQuota;
+        if (!svcQuota) continue; // salta se servizio non configurato
+        const f = await getOrCreateFornitore(r.destinazione, 'impianto');
+        addVoce(f, svcQuota, r.classe, r.cer, (r.peso_effettivo || 0) / 1000, 'TERMINATI_RETE', r.id,
+          `Conferimento ${isStoc ? 'stoccaggio' : 'impianto'} ${r.classe || ''} - ${r.destinazione || ''}`.trim());
       }
     }
 

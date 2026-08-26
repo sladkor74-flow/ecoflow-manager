@@ -5,6 +5,16 @@ import { Input } from '@/components/ui/input';
 import { Loader2, Plus, Trash2, Edit3 } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 
+function ruoloBadgeClass(ruolo) {
+  switch (ruolo) {
+    case 'raccoglitore': return 'bg-sky-100 text-sky-700 border-sky-300';
+    case 'impianto': return 'bg-blue-100 text-blue-700 border-blue-300';
+    case 'stoccaggio': return 'bg-amber-100 text-amber-700 border-amber-300';
+    case 'doppio_ruolo': return 'bg-violet-100 text-violet-700 border-violet-300';
+    default: return 'bg-muted text-muted-foreground border-border';
+  }
+}
+
 function InlineEditTarget({ value, onSave }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(String(value || 0));
@@ -51,7 +61,7 @@ export default function PredittivitaImpiantiManager({ onReload }) {
   const [showImpiantoForm, setShowImpiantoForm] = useState(false);
   const [fornitoreFormFor, setFornitoreFormFor] = useState(null);
   const [impiantoForm, setImpiantoForm] = useState({ nome_impianto: '', target: 0, data_fine: '2026-12-18' });
-  const [fornitoreForm, setFornitoreForm] = useState({ nome: '', tipo: 'primaria_diretta', plafond_stoccaggio_kg: 0 });
+  const [fornitoreForm, setFornitoreForm] = useState({ nome: '', ruolo: 'raccoglitore', plafond_stoccaggio_kg: 0 });
 
   const load = async () => {
     setLoading(true);
@@ -84,12 +94,13 @@ export default function PredittivitaImpiantiManager({ onReload }) {
   const addFornitore = async (impiantoId) => {
     if (!fornitoreForm.nome) return;
     const imp = impianti.find(i => i.id === impiantoId);
+    const isStocRole = fornitoreForm.ruolo === 'stoccaggio' || fornitoreForm.ruolo === 'doppio_ruolo';
     await base44.entities.FornitoreSecondaria.create({
       nome: fornitoreForm.nome, impianto_id: impiantoId, impianto_nome: imp?.nome_impianto,
-      tipo: fornitoreForm.tipo, stato: 'attivo',
-      plafond_stoccaggio_kg: fornitoreForm.tipo === 'stoccaggio' ? Number(fornitoreForm.plafond_stoccaggio_kg) : 0,
+      ruolo: fornitoreForm.ruolo, tipo: isStocRole ? 'stoccaggio' : 'primaria_diretta', stato: 'attivo',
+      plafond_stoccaggio_kg: isStocRole ? Number(fornitoreForm.plafond_stoccaggio_kg) : 0,
     });
-    setFornitoreForm({ nome: '', tipo: 'primaria_diretta', plafond_stoccaggio_kg: 0 }); setFornitoreFormFor(null); load(); onReload();
+    setFornitoreForm({ nome: '', ruolo: 'raccoglitore', plafond_stoccaggio_kg: 0 }); setFornitoreFormFor(null); load(); onReload();
   };
 
   const updateImpianto = async (imp, patch) => {
@@ -151,11 +162,13 @@ export default function PredittivitaImpiantiManager({ onReload }) {
           {fornitoreFormFor === imp.id && (
             <div className="border rounded p-2 bg-muted/30 flex flex-wrap gap-2">
               <Input placeholder="Nome fornitore" value={fornitoreForm.nome} onChange={e => setFornitoreForm({ ...fornitoreForm, nome: e.target.value })} className="flex-1 min-w-[180px]" />
-              <select value={fornitoreForm.tipo} onChange={e => setFornitoreForm({ ...fornitoreForm, tipo: e.target.value })} className="border rounded px-2 text-sm bg-background">
-                <option value="primaria_diretta">Primaria diretta</option>
-                <option value="stoccaggio">Stoccaggio (Nappi Sud)</option>
+              <select value={fornitoreForm.ruolo} onChange={e => setFornitoreForm({ ...fornitoreForm, ruolo: e.target.value })} className="border rounded px-2 text-sm bg-background">
+                <option value="raccoglitore">Raccoglitore</option>
+                <option value="impianto">Impianto</option>
+                <option value="stoccaggio">Stoccaggio</option>
+                <option value="doppio_ruolo">Doppio ruolo (impianto+stoccaggio)</option>
               </select>
-              {fornitoreForm.tipo === 'stoccaggio' && (
+              {(fornitoreForm.ruolo === 'stoccaggio' || fornitoreForm.ruolo === 'doppio_ruolo') && (
                 <Input type="number" placeholder="Plafond stoccaggio (kg)" value={fornitoreForm.plafond_stoccaggio_kg} onChange={e => setFornitoreForm({ ...fornitoreForm, plafond_stoccaggio_kg: e.target.value })} className="w-48" />
               )}
               <Button size="sm" onClick={() => addFornitore(imp.id)}>Salva</Button>
@@ -168,19 +181,25 @@ export default function PredittivitaImpiantiManager({ onReload }) {
                   <span className="font-medium text-sm flex items-center gap-1.5">
                     {f.nome}
                     <select
-                      value={f.tipo || 'primaria_diretta'}
-                      onChange={e => updateFornitore(f, { tipo: e.target.value })}
-                      className="text-[10px] border rounded px-1 py-0.5 bg-background"
+                      value={f.ruolo || (f.tipo === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore')}
+                      onChange={e => {
+                        const newRuolo = e.target.value;
+                        const isStoc = newRuolo === 'stoccaggio' || newRuolo === 'doppio_ruolo';
+                        updateFornitore(f, { ruolo: newRuolo, tipo: isStoc ? 'stoccaggio' : 'primaria_diretta' });
+                      }}
+                      className={`text-[10px] border rounded px-1 py-0.5 bg-background font-semibold ${ruoloBadgeClass(f.ruolo || (f.tipo === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore'))}`}
                     >
-                      <option value="primaria_diretta">Primaria diretta</option>
+                      <option value="raccoglitore">Raccoglitore</option>
+                      <option value="impianto">Impianto</option>
                       <option value="stoccaggio">Stoccaggio</option>
+                      <option value="doppio_ruolo">Doppio ruolo</option>
                     </select>
                   </span>
                   <button onClick={() => removeFornitore(f)} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-3 h-3 text-red-500" /></button>
                 </div>
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>Target annuo (da Target Annuali): <span className="font-medium text-foreground">{((targetMap[normalizzaRagioneSociale(f.nome)] || 0)).toLocaleString('it-IT')} kg</span>
-                    {(f.tipo || 'primaria_diretta') === 'stoccaggio' && f.plafond_stoccaggio_kg != null && (
+                    {(f.ruolo === 'stoccaggio' || f.ruolo === 'doppio_ruolo' || (!f.ruolo && f.tipo === 'stoccaggio')) && f.plafond_stoccaggio_kg != null && (
                       <span className="ml-2">· Plafond: <span className="font-medium text-foreground">{(f.plafond_stoccaggio_kg || 0).toLocaleString('it-IT')} kg</span></span>
                     )}
                   </span>

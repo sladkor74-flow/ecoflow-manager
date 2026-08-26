@@ -41,8 +41,8 @@ export default async function(req) {
       if (key) targetByNome[key] = (t.target_tonnellate || 0) * 1000;
     }
 
-    // === STOCCAGGI GENERALIZZATI: tutti i fornitori con tipo=stoccaggio (no hardcoded key) ===
-    const stoccaggiFornitori = fornitori.filter(f => tipoNorm(f.tipo) === 'stoccaggio');
+    // === RUOLO-BASE: stoccaggi = ruolo stoccaggio o doppio_ruolo ===
+    const stoccaggiFornitori = fornitori.filter(f => f.ruolo === 'stoccaggio' || f.ruolo === 'doppio_ruolo' || (!f.ruolo && tipoNorm(f.tipo) === 'stoccaggio'));
     const stoccaggioNames = new Set(stoccaggiFornitori.map(f => normalizzaRagioneSociale(f.nome)));
 
     // Map impianti normalizzati
@@ -104,12 +104,16 @@ export default async function(req) {
       }
     }
 
-    // === RILEVAMENTO DOPPIO RUOLO ===
-    // Un impianto è doppio ruolo se il suo nome normalizzato coincide con un nome stoccaggio attivo
+    // === RILEVAMENTO DOPPIO RUOLO (basato su ruolo + match nome) ===
+    // Un impianto e' doppio ruolo se il suo nome normalizzato coincide con un
+    // FornitoreSecondaria con ruolo=doppio_ruolo (es. T-CYCLE impianto = T-CYCLE fornitore)
+    const doubleRoleNames = new Set(
+      fornitori.filter(f => f.ruolo === 'doppio_ruolo').map(f => normalizzaRagioneSociale(f.nome))
+    );
     const doubleRoleImpianti = new Set();
     for (const imp of impianti) {
       const impNorm = normalizzaRagioneSociale(imp.nome_impianto);
-      if (stoccaggioNames.has(impNorm)) doubleRoleImpianti.add(imp.id);
+      if (doubleRoleNames.has(impNorm) || stoccaggioNames.has(impNorm)) doubleRoleImpianti.add(imp.id);
     }
 
     const result = [];
@@ -198,7 +202,8 @@ export default async function(req) {
       // === FORNITORI CONFIGURATI (logica generalizzata) ===
       for (const f of impFornitori) {
         const fNorm = normalizzaRagioneSociale(f.nome);
-        const isStoccaggio = tipoNorm(f.tipo) === 'stoccaggio';
+        const fRuolo = f.ruolo || (tipoNorm(f.tipo) === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore');
+        const isStoccaggio = fRuolo === 'stoccaggio' || fRuolo === 'doppio_ruolo';
         const targetRaccoglitoreKg = targetByNome[fNorm] || 0;
 
         let consuntivo = 0, consuntivoPrim = 0, consuntivoSec = 0;
@@ -305,7 +310,7 @@ export default async function(req) {
         impTotalePianificato += totalePianificato;
 
         const fr = {
-          id: f.id, nome: f.nome, tipo: isStoccaggio ? 'stoccaggio' : 'primaria_diretta',
+          id: f.id, nome: f.nome, ruolo: fRuolo, tipo: isStoccaggio ? 'stoccaggio' : 'primaria_diretta',
           target_raccoglitore_kg: targetRaccoglitoreKg,
           quota_target_deprecato: f.quota_target || 0,
           ipotesi_mese_corrente: f.ipotesi_mese_corrente || 0,

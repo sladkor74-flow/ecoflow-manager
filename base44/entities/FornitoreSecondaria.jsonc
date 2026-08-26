@@ -12,6 +12,17 @@
     "impianto_nome": {
       "type": "string"
     },
+    "ruolo": {
+      "type": "string",
+      "enum": [
+        "raccoglitore",
+        "impianto",
+        "stoccaggio",
+        "doppio_ruolo"
+      ],
+      "default": "raccoglitore",
+      "description": "Ruolo esplicito del soggetto nella filiera: raccoglitore (gommista->primaria), impianto (destinazione finale), stoccaggio (accumulo intermedio), doppio_ruolo (impianto+stoccaggio, es. T-CYCLE)"
+    },
     "tipo": {
       "type": "string",
       "enum": [
@@ -19,7 +30,7 @@
         "primaria_diretta"
       ],
       "default": "primaria_diretta",
-      "description": "stoccaggio = raccoglie allo stoccaggio proprio poi invia secondarie (es. Nappi Sud); primaria_diretta = consegna direttamente in primaria all'impianto"
+      "description": "DEPRECATO - sostituito da 'ruolo'. Mantenuto per retrocompatibilita'."
     },
     "quota_target": {
       "type": "number",
@@ -27,7 +38,7 @@
     },
     "plafond_stoccaggio_kg": {
       "type": "number",
-      "description": "Plafond totale conferibile allo stoccaggio (kg) - significativo solo per tipo=stoccaggio. Include contributi di tutti i conferitori, non solo il raccoglitore stesso."
+      "description": "Plafond totale conferibile allo stoccaggio (kg) - significativo solo per ruolo=stoccaggio o doppio_ruolo. Include contributi di tutti i conferitori, non solo il raccoglitore stesso."
     },
     "ipotesi_mese_corrente": {
       "type": "number",
