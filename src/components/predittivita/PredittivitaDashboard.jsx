@@ -1,12 +1,54 @@
-import React from 'react';
-import { TrendingDown, AlertCircle, CheckCircle, Calendar, Layers } from 'lucide-react';
+import React, { useState } from 'react';
+import { base44 } from '@/api/base44Client';
+import { Calendar, Layers, Edit3, Loader2 } from 'lucide-react';
 
 function fmt(n) { return (n || 0).toLocaleString('it-IT'); }
 
-export default function PredittivitaDashboard({ data }) {
+function EditableIpotesi({ value, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(String(value || 0));
+  const [saving, setSaving] = useState(false);
+
+  const commit = async () => {
+    setEditing(false);
+    const num = Number(String(val).replace(/\./g, '').replace(',', '.'));
+    if (Number.isNaN(num) || num === value) return;
+    setSaving(true);
+    try { await onSave(num); } catch (e) { setVal(String(value || 0)); }
+    setSaving(false);
+  };
+
+  if (saving) return <Loader2 className="w-3 h-3 animate-spin inline" />;
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="text"
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setEditing(false); setVal(String(value || 0)); } }}
+        className="w-24 text-xs border border-primary rounded px-1 py-0.5 focus:outline-none"
+      />
+    );
+  }
+  return (
+    <span className="font-medium text-foreground cursor-text hover:bg-primary/10 rounded px-1 inline-flex items-center" onClick={() => setEditing(true)}>
+      {fmt(value)}
+      <Edit3 className="w-3 h-3 ml-1 opacity-40" />
+    </span>
+  );
+}
+
+export default function PredittivitaDashboard({ data, onReload }) {
   if (!data || !data.impianti || data.impianti.length === 0) {
     return <div className="text-center py-8 text-muted-foreground border rounded-lg">Nessun impianto configurato. Vai in "Configurazione" per aggiungerne.</div>;
   }
+
+  const saveIpotesi = async (fornitoreId, value) => {
+    await base44.entities.FornitoreSecondaria.update(fornitoreId, { ipotesi_mese_corrente: value });
+    if (onReload) onReload();
+  };
 
   return (
     <div className="space-y-4">
@@ -32,20 +74,18 @@ export default function PredittivitaDashboard({ data }) {
         {data.impianti.map(imp => {
           const target = imp.impianto.target || 0;
           const pct = target > 0 ? Math.min(100, (imp.consuntivo / target) * 100) : 0;
-          const residuoPct = target > 0 ? (imp.residuo / target) * 100 : 0;
           return (
             <div key={imp.impianto.id} className="border rounded-lg p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="font-heading font-bold text-lg uppercase">{imp.impianto.nome}</h2>
                 <span className="text-xs text-muted-foreground">Scadenza: {imp.impianto.data_fine}</span>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
                 <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Target</p><p className="font-bold">{fmt(target)} kg</p></div>
-                <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Consuntivo</p><p className="font-bold">{fmt(imp.consuntivo)} kg</p></div>
+                <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Consuntivo</p><p className="font-bold">{fmt(imp.consuntivo)} kg</p>
+                  <p className="text-[10px] text-muted-foreground">Prim {fmt(imp.consuntivo_primarie)} · Sec {fmt(imp.consuntivo_secondarie)}</p></div>
                 <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Residuo</p><p className="font-bold text-amber-600">{fmt(imp.residuo)} kg</p></div>
                 <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Pianificato</p><p className="font-bold">{fmt(imp.totale_pianificato)} kg</p></div>
-                <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Kg/sett. costanti</p><p className="font-bold">{fmt(imp.kg_per_settimana)} kg</p></div>
-                <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Viaggi/sett.</p><p className="font-bold">{imp.viaggi_per_settimana}</p></div>
               </div>
               <div>
                 <div className="flex justify-between text-xs mb-1"><span className="text-muted-foreground">Avanzamento</span><span className="font-medium">{pct.toFixed(1)}%</span></div>
@@ -53,21 +93,37 @@ export default function PredittivitaDashboard({ data }) {
                   <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
                 </div>
               </div>
-              <div className="flex items-center justify-between border-t pt-2 text-sm">
-                <div className="flex items-center gap-1"><Calendar className="w-3 h-3 text-muted-foreground" /><span className="text-muted-foreground">Settimane rimanenti: </span><span className="font-medium">{imp.settimane_rimanenti}</span></div>
-                <div><span className="text-muted-foreground">Residuo: </span><span className="font-bold">{residuoPct.toFixed(1)}%</span></div>
-              </div>
+
               {imp.fornitori && imp.fornitori.length > 0 && (
-                <div className="border-t pt-2">
-                  <h3 className="text-sm font-semibold mb-1">Fornitori</h3>
-                  <div className="space-y-1">
-                    {imp.fornitori.map(f => (
-                      <div key={f.id} className="flex items-center justify-between text-xs border rounded px-2 py-1">
-                        <span className="font-medium">{f.nome}</span>
-                        <span className="text-muted-foreground">Quota: {fmt(f.quota_target)} kg</span>
+                <div className="border-t pt-2 space-y-2">
+                  <h3 className="text-sm font-semibold">Fornitori ({imp.fornitori.length})</h3>
+                  {imp.fornitori.map(f => {
+                    const fPct = f.quota_target > 0 ? Math.min(100, (f.consuntivo / f.quota_target) * 100) : 0;
+                    const resColor = f.residuo <= 0 ? 'text-green-700' : 'text-amber-600';
+                    return (
+                      <div key={f.id} className="border rounded-lg p-2.5 space-y-1.5 bg-muted/20">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-sm">{f.nome}</span>
+                          <span className={`text-xs font-bold ${resColor}`}>Residuo: {fmt(f.residuo)} kg</span>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 text-xs">
+                          <div><span className="text-muted-foreground">Quota: </span><span className="font-medium">{fmt(f.quota_target)}</span></div>
+                          <div><span className="text-muted-foreground">Consuntivo: </span><span className="font-medium">{fmt(f.consuntivo)}</span>
+                            <span className="text-[10px] text-muted-foreground block">Prim {fmt(f.consuntivo_primarie)} · Sec {fmt(f.consuntivo_secondarie)}</span></div>
+                          <div className="flex items-center gap-1"><span className="text-muted-foreground">Ipotesi mese corr.: </span>
+                            <EditableIpotesi value={f.ipotesi_mese_corrente || 0} onSave={(v) => saveIpotesi(f.id, v)} /></div>
+                          <div><span className="text-muted-foreground">Kg/sett: </span><span className="font-medium">{fmt(f.kg_per_settimana)} · {f.viaggi_per_settimana} viaggi</span></div>
+                        </div>
+                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div className="h-full bg-accent" style={{ width: `${fPct}%` }} />
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                          <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />Sett. rimaste: {f.settimane_rimanenti}</span>
+                          <span>Avanz. quota: {fPct.toFixed(1)}%</span>
+                        </div>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -76,30 +132,34 @@ export default function PredittivitaDashboard({ data }) {
       </div>
 
       <div className="border rounded-lg p-4">
-        <h3 className="font-heading font-semibold mb-3">Sintesi Costanza Settimanale</h3>
+        <h3 className="font-heading font-semibold mb-3">Sintesi per Fornitore</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted"><tr>
               <th className="text-left px-3 py-2 font-semibold">Impianto</th>
-              <th className="text-right px-3 py-2 font-semibold">Target</th>
+              <th className="text-left px-3 py-2 font-semibold">Fornitore</th>
+              <th className="text-right px-3 py-2 font-semibold">Quota</th>
               <th className="text-right px-3 py-2 font-semibold">Consuntivo</th>
+              <th className="text-right px-3 py-2 font-semibold">Ipotesi</th>
               <th className="text-right px-3 py-2 font-semibold">Residuo</th>
               <th className="text-right px-3 py-2 font-semibold">Kg/sett.</th>
               <th className="text-right px-3 py-2 font-semibold">Viaggi/sett.</th>
               <th className="text-right px-3 py-2 font-semibold">Sett. rimaste</th>
             </tr></thead>
             <tbody>
-              {data.impianti.map(imp => (
-                <tr key={imp.impianto.id}>
-                  <td className="px-3 py-2 font-medium uppercase">{imp.impianto.nome}</td>
-                  <td className="px-3 py-2 text-right">{fmt(imp.impianto.target)} kg</td>
-                  <td className="px-3 py-2 text-right">{fmt(imp.consuntivo)} kg</td>
-                  <td className="px-3 py-2 text-right font-bold text-amber-600">{fmt(imp.residuo)} kg</td>
-                  <td className="px-3 py-2 text-right">{fmt(imp.kg_per_settimana)} kg</td>
-                  <td className="px-3 py-2 text-right">{imp.viaggi_per_settimana}</td>
-                  <td className="px-3 py-2 text-right">{imp.settimane_rimanenti}</td>
+              {data.impianti.flatMap(imp => (imp.fornitori || []).map(f => (
+                <tr key={f.id} className="border-t">
+                  <td className="px-3 py-2 uppercase text-xs">{imp.impianto.nome}</td>
+                  <td className="px-3 py-2 font-medium">{f.nome}</td>
+                  <td className="px-3 py-2 text-right">{fmt(f.quota_target)}</td>
+                  <td className="px-3 py-2 text-right">{fmt(f.consuntivo)}</td>
+                  <td className="px-3 py-2 text-right">{fmt(f.ipotesi_mese_corrente)}</td>
+                  <td className={`px-3 py-2 text-right font-bold ${f.residuo <= 0 ? 'text-green-700' : 'text-amber-600'}`}>{fmt(f.residuo)}</td>
+                  <td className="px-3 py-2 text-right">{fmt(f.kg_per_settimana)}</td>
+                  <td className="px-3 py-2 text-right">{f.viaggi_per_settimana}</td>
+                  <td className="px-3 py-2 text-right">{f.settimane_rimanenti}</td>
                 </tr>
-              ))}
+              )))}
             </tbody>
           </table>
         </div>

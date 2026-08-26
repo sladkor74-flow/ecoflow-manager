@@ -16,6 +16,11 @@
       "type": "number",
       "description": "Quota target del fornitore (kg)"
     },
+    "ipotesi_mese_corrente": {
+      "type": "number",
+      "default": 0,
+      "description": "Ipotesi di raccolta del mese in corso non ancora consuntivata (kg)"
+    },
     "stato": {
       "type": "string",
       "enum": [

@@ -5,7 +5,7 @@ const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','
 const KG_PER_VIAGGIO = 14000;
 const DATA_FINE_DEFAULT = '2026-12-18';
 const PLAFOND_DEFAULT = 2227500;
-const ESCLUSI_FORNITORI = ['emmesse'];
+const ANNO_RIFERIMENTO = 2026;
 
 // Restituisce il lunedì della settimana ISO di una data
 function getMonday(date) {
@@ -19,6 +19,14 @@ function getMonday(date) {
 
 function dateStr(d) { return d.toISOString().split('T')[0]; }
 
+function yearOf(dt) {
+  if (!dt) return null;
+  const d = new Date(dt);
+  return d.getFullYear();
+}
+
+function statoNorm(s) { return String(s || '').toLowerCase().trim(); }
+
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -28,20 +36,25 @@ export default async function(req) {
 
     const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
     const fornitori = await b.entities.FornitoreSecondaria.filter({ stato: 'attivo' });
-    const secondarie = await b.entities.Secondaria.list('-created_date', 10000);
+    const primarie = await b.entities.PrimariaRete.list('-created_date', 20000);
+    const secondarie = await b.entities.Secondaria.list('-created_date', 20000);
     const existingPlans = await b.entities.PianificazioneSettimanale.list('-created_date', 5000);
 
     // Plafond Nappi Sud (config record)
     const plafondRec = existingPlans.find(p => p.impianto_id === '__PLAFOND_NAPPI__');
     const plafond = plafondRec && plafondRec.kg_previsti != null ? plafondRec.kg_previsti : PLAFOND_DEFAULT;
 
-    // Genera settimane dal prossimo lunedì al 18 dicembre
+    // Genera settimane dal primo lunedì del mese successivo al 18 dicembre
     const oggi = new Date();
     const dataFine = new Date(DATA_FINE_DEFAULT + 'T00:00:00');
-    let nextMonday = getMonday(oggi);
-    if (nextMonday <= oggi) { nextMonday = new Date(nextMonday); nextMonday.setDate(nextMonday.getDate() + 7); }
+    const nextMonth = new Date(oggi.getFullYear(), oggi.getMonth() + 1, 1);
+    let firstMonday = getMonday(nextMonth);
+    if (firstMonday.getTime() < nextMonth.getTime()) {
+      firstMonday = new Date(firstMonday);
+      firstMonday.setDate(firstMonday.getDate() + 7);
+    }
     const settimane = [];
-    let cur = new Date(nextMonday);
+    let cur = new Date(firstMonday);
     let wn = 1;
     while (cur <= dataFine) {
       const ws = new Date(cur);
@@ -51,26 +64,29 @@ export default async function(req) {
       cur = new Date(cur); cur.setDate(cur.getDate() + 7);
       wn++;
     }
+    const firstPlanDate = settimane.length > 0 ? new Date(settimane[0].data_inizio + 'T00:00:00') : new Date(0);
 
-    // Aggrega secondarie "terminato" con destinazione Tecnogum/Irigom
+    // Mappa impianti normalizzati
     const impNormMap = {};
     for (const imp of impianti) impNormMap[normalizzaRagioneSociale(imp.nome_impianto)] = imp;
 
-    const terminati = secondarie.filter(r => {
-      const stato = String(r.stato || '').toLowerCase().trim();
-      if (stato !== 'terminato') return false;
-      if (!r.trasporto_finito_il) return false;
-      const dest = normalizzaRagioneSociale(r.destinazione);
-      return !!impNormMap[dest];
+    // Primarie terminati 2026 con destinazione = uno degli impianti
+    const primTerminati = primarie.filter(r => {
+      if (statoNorm(r.stato) !== 'terminato') return false;
+      if (yearOf(r.trasporto_finito_il) !== ANNO_RIFERIMENTO) return false;
+      return !!impNormMap[normalizzaRagioneSociale(r.destinazione)];
     });
 
-    // Plafond: kg partiti da stoccaggio Nappi Sud verso entrambi gli impianti
-    const kgPartitiNappi = secondarie.filter(r => {
-      const stato = String(r.stato || '').toLowerCase().trim();
-      if (stato !== 'terminato') return false;
-      const stocc = normalizzaRagioneSociale(r.stoccaggio || r.ragione_sociale);
-      return stocc === 'nappi sud';
-    }).reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+    // Secondarie terminate 2026 con destinazione = uno degli impianti
+    const secTerminati = secondarie.filter(r => {
+      if (statoNorm(r.stato) !== 'terminato') return false;
+      if (yearOf(r.trasporto_finito_il) !== ANNO_RIFERIMENTO) return false;
+      return !!impNormMap[normalizzaRagioneSociale(r.destinazione)];
+    });
+
+    // Plafond Nappi Sud: kg partiti da stoccaggio Nappi Sud (secondarie 2026)
+    const kgPartitiNappi = secTerminati.filter(r => normalizzaRagioneSociale(r.stoccaggio) === 'nappi sud')
+      .reduce((s, r) => s + (r.peso_effettivo || 0), 0);
     const residuoPlafond = plafond - kgPartitiNappi;
 
     const result = [];
@@ -79,79 +95,108 @@ export default async function(req) {
 
     for (const imp of impianti) {
       const impNorm = normalizzaRagioneSociale(imp.nome_impianto);
-      const impRecords = terminati.filter(r => normalizzaRagioneSociale(r.destinazione) === impNorm);
+      const impFornitori = fornitori.filter(f => f.impianto_id === imp.id);
 
-      // EXEC aggregato per settimana (lunedì)
-      const execByWeek = {};
-      for (const r of impRecords) {
-        const monday = getMonday(new Date(r.trasporto_finito_il));
-        const key = dateStr(monday);
-        execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
-      }
-      const consuntivoStorico = impRecords.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
-      const target = imp.target || 0;
-      const residuoAggiornato = Math.max(0, target - consuntivoStorico);
+      const impPrim = primTerminati.filter(r => normalizzaRagioneSociale(r.destinazione) === impNorm);
+    const impSec = secTerminati.filter(r => normalizzaRagioneSociale(r.destinazione) === impNorm);
 
-      // Settimane future senza EXEC -> distribuzione costante
-      const futureWeeks = settimane.filter(s => !execByWeek[s.data_inizio]);
-      const kgPerSett = futureWeeks.length > 0 ? Math.round(residuoAggiornato / futureWeeks.length) : 0;
-      const viaggiPerSett = Math.ceil(kgPerSett / KG_PER_VIAGGIO);
+      let impConsuntivo = 0, impConsuntivoPrim = 0, impConsuntivoSec = 0, impTotalePianificato = 0;
+      const fornitoriResult = [];
 
-      const piano = settimane.map(s => {
-        const aggregatedExec = execByWeek[s.data_inizio] || 0;
-        const override = existingPlans.find(p => p.impianto_id === imp.id && p.data_inizio === s.data_inizio && p.modificato_manuale);
-        const exec = override && override.kg_effettivi != null ? override.kg_effettivi : aggregatedExec;
-        const congelata = exec > 0;
-        let prev;
-        if (override && override.kg_previsti != null) {
-          prev = override.kg_previsti;
-        } else if (congelata) {
-          prev = exec;
-        } else {
-          prev = kgPerSett;
+      for (const f of impFornitori) {
+        const fNorm = normalizzaRagioneSociale(f.nome);
+
+        // Consuntivo primarie: trasportatore = fornitore, destinazione = impianto
+        const fPrim = impPrim.filter(r => normalizzaRagioneSociale(r.trasportatore) === fNorm);
+        const consuntivoPrim = fPrim.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+        // Consuntivo secondarie: stoccaggio = fornitore, destinazione = impianto
+        const fSec = impSec.filter(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm);
+        const consuntivoSec = fSec.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+        const consuntivo = consuntivoPrim + consuntivoSec;
+
+        // EXEC aggregato per settimana (lunedì) da entrambe le sorgenti (2026)
+        const allF = [...fPrim, ...fSec];
+        const execByWeek = {};
+        for (const r of allF) {
+          const monday = getMonday(new Date(r.trasporto_finito_il));
+          const key = dateStr(monday);
+          execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
         }
-        const delta = prev - exec;
-        const viaggiPrev = Math.ceil(prev / KG_PER_VIAGGIO);
-        const viaggiEff = exec > 0 ? Math.ceil(exec / KG_PER_VIAGGIO) : 0;
 
-        // Upsert persist
-        const existing = existingPlans.find(p => p.impianto_id === imp.id && p.data_inizio === s.data_inizio);
-        if (!existing) {
-          creates.push({
-            impianto_id: imp.id, impianto_nome: imp.nome_impianto,
-            settimana_numero: s.numero, data_inizio: s.data_inizio, data_fine: s.data_fine,
-            kg_previsti: prev, kg_effettivi: exec, viaggi_previsti: viaggiPrev, viaggi_effettivi: viaggiEff,
-            stato: congelata ? 'completato' : 'da_programmare', anno: 2026, modificato_manuale: false,
-          });
-        } else if (!existing.modificato_manuale) {
-          if (existing.kg_previsti !== prev || existing.kg_effettivi !== exec || existing.viaggi_previsti !== viaggiPrev) {
-            updates.push({ id: existing.id, kg_previsti: prev, kg_effettivi: exec, viaggi_previsti: viaggiPrev, viaggi_effettivi: viaggiEff, stato: congelata ? 'completato' : 'da_programmare' });
+        const quota = f.quota_target || 0;
+        const ipotesi = f.ipotesi_mese_corrente || 0;
+        const residuo = quota - consuntivo;
+        const residuoDaPianificare = residuo - ipotesi;
+        const nSett = settimane.length;
+        const settimaneRimanenti = settimane.filter(s => !(execByWeek[s.data_inizio] > 0)).length;
+        const PREV = residuoDaPianificare > 0 && nSett > 0 ? Math.round(residuoDaPianificare / nSett) : 0;
+        const viaggiPerSett = Math.ceil(PREV / KG_PER_VIAGGIO);
+
+        const piano = [];
+        let cumulative = 0;
+        for (const s of settimane) {
+          const exec = execByWeek[s.data_inizio] || 0;
+          const congelata = exec > 0;
+          const override = existingPlans.find(p => p.fornitore_id === f.id && p.data_inizio === s.data_inizio && p.modificato_manuale);
+          let prev;
+          if (override && override.kg_previsti != null) prev = override.kg_previsti;
+          else if (congelata) prev = exec;
+          else prev = PREV;
+          const delta = prev - exec;
+          const viaggiPrev = Math.ceil(prev / KG_PER_VIAGGIO);
+          const viaggiEff = exec > 0 ? Math.ceil(exec / KG_PER_VIAGGIO) : 0;
+          cumulative += congelata ? exec : prev;
+          const residuoCascata = residuoDaPianificare - cumulative;
+
+          const existing = existingPlans.find(p => p.fornitore_id === f.id && p.data_inizio === s.data_inizio);
+          let recordId = null;
+          if (!existing) {
+            creates.push({
+              impianto_id: imp.id, impianto_nome: imp.nome_impianto,
+              fornitore_id: f.id, fornitore_nome: f.nome,
+              settimana_numero: s.numero, data_inizio: s.data_inizio, data_fine: s.data_fine,
+              kg_previsti: prev, kg_effettivi: exec, viaggi_previsti: viaggiPrev, viaggi_effettivi: viaggiEff,
+              stato: congelata ? 'completato' : 'da_programmare', anno: ANNO_RIFERIMENTO, modificato_manuale: false,
+            });
+          } else {
+            recordId = existing.id;
+            if (!existing.modificato_manuale) {
+              if (existing.kg_previsti !== prev || existing.kg_effettivi !== exec || existing.viaggi_previsti !== viaggiPrev) {
+                updates.push({ id: existing.id, kg_previsti: prev, kg_effettivi: exec, viaggi_previsti: viaggiPrev, viaggi_effettivi: viaggiEff, stato: congelata ? 'completato' : 'da_programmare' });
+              }
+            } else if (existing.kg_effettivi !== exec) {
+              updates.push({ id: existing.id, kg_effettivi: exec, viaggi_effettivi: viaggiEff });
+            }
           }
-        } else if (existing.kg_effettivi !== exec && override == null) {
-          // override su PREV ma EXEC aggregato cambiato: aggiorna solo EXEC
-          updates.push({ id: existing.id, kg_effettivi: exec, viaggi_effettivi: viaggiEff });
+
+          piano.push({ ...s, prev, exec, delta, viaggi_prev: viaggiPrev, viaggi_eff: viaggiEff, congelata, override: !!override, record_id: recordId, residuo_cascata: residuoCascata });
         }
 
-        return { ...s, prev, exec, delta, viaggi_prev: viaggiPrev, viaggi_eff: viaggiEff, congelata, override: !!override, record_id: existing ? existing.id : null };
-      });
+        const totalePianificato = piano.reduce((s, w) => s + w.prev, 0);
+        impConsuntivo += consuntivo;
+        impConsuntivoPrim += consuntivoPrim;
+        impConsuntivoSec += consuntivoSec;
+        impTotalePianificato += totalePianificato;
 
-      // Fornitori attivi per questo impianto (esclusi T-Cycle/Emmesse)
-      const impFornitori = fornitori.filter(f => f.impianto_id === imp.id && !ESCLUSI_FORNITORI.includes(normalizzaRagioneSociale(f.nome)));
+        fornitoriResult.push({
+          id: f.id, nome: f.nome, quota_target: quota, ipotesi_mese_corrente: ipotesi,
+          consuntivo, consuntivo_primarie: consuntivoPrim, consuntivo_secondarie: consuntivoSec,
+          residuo, kg_per_settimana: PREV, viaggi_per_settimana: viaggiPerSett,
+          settimane_rimanenti: settimaneRimanenti, totale_pianificato: totalePianificato,
+          piano_settimanale: piano,
+        });
+      }
 
       result.push({
-        impianto: { id: imp.id, nome: imp.nome_impianto, target, data_fine: imp.data_fine || DATA_FINE_DEFAULT },
-        consuntivo: consuntivoStorico,
-        residuo: residuoAggiornato,
-        kg_per_settimana: kgPerSett,
-        viaggi_per_settimana: viaggiPerSett,
-        settimane_rimanenti: futureWeeks.length,
-        totale_pianificato: piano.reduce((s, w) => s + w.prev, 0),
-        piano_settimanale: piano,
-        fornitori: impFornitori.map(f => ({ id: f.id, nome: f.nome, quota_target: f.quota_target || 0 })),
+        impianto: { id: imp.id, nome: imp.nome_impianto, target: imp.target || 0, data_fine: imp.data_fine || DATA_FINE_DEFAULT },
+        consuntivo: impConsuntivo, consuntivo_primarie: impConsuntivoPrim, consuntivo_secondarie: impConsuntivoSec,
+        residuo: (imp.target || 0) - impConsuntivo,
+        totale_pianificato: impTotalePianificato,
+        fornitori: fornitoriResult,
       });
     }
 
-    // Persistenza a chunk
+    // Persistenza chunked
     for (let i = 0; i < creates.length; i += 100) {
       await b.entities.PianificazioneSettimanale.bulkCreate(creates.slice(i, i + 100));
       await new Promise(r => setTimeout(r, 200));

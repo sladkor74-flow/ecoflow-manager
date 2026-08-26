@@ -97,6 +97,11 @@ export default function PredittivitaImpiantiManager({ onReload }) {
     await base44.entities.FornitoreSecondaria.delete(f.id); load(); onReload();
   };
 
+  const updateFornitore = async (f, patch) => {
+    await base44.entities.FornitoreSecondaria.update(f.id, patch);
+    load(); onReload();
+  };
+
   if (loading) return <div className="text-center py-8"><Loader2 className="w-5 h-5 animate-spin inline" /></div>;
 
   return (
@@ -142,10 +147,17 @@ export default function PredittivitaImpiantiManager({ onReload }) {
           )}
           <div className="space-y-1">
             {fornitori.filter(f => f.impianto_id === imp.id).map(f => (
-              <div key={f.id} className="flex items-center justify-between text-sm border rounded px-2 py-1">
-                <span className="font-medium">{f.nome}</span>
-                <span className="text-muted-foreground text-xs">Quota: {(f.quota_target || 0).toLocaleString()} kg</span>
-                <button onClick={() => removeFornitore(f)} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-3 h-3 text-red-500" /></button>
+              <div key={f.id} className="border rounded px-2 py-1.5 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-sm">{f.nome}</span>
+                  <button onClick={() => removeFornitore(f)} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-3 h-3 text-red-500" /></button>
+                </div>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Quota: <span className="font-medium text-foreground">{(f.quota_target || 0).toLocaleString()} kg</span></span>
+                  <span className="flex items-center gap-1">Ipotesi mese corr.:
+                    <InlineEditTarget value={f.ipotesi_mese_corrente || 0} onSave={(v) => updateFornitore(f, { ipotesi_mese_corrente: v })} />
+                  </span>
+                </div>
               </div>
             ))}
             {fornitori.filter(f => f.impianto_id === imp.id).length === 0 && <p className="text-xs text-muted-foreground">Nessun fornitore configurato.</p>}
