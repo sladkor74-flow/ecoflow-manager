@@ -8,7 +8,7 @@ import AttivaTariffe from './AttivaTariffe';
 import AttivaEsportazioni from './AttivaEsportazioni';
 import ExtraRaccoltaManager from './ExtraRaccoltaManager';
 
-export default function FatturazioneAttiva() {
+export default function FatturazioneAttiva({ isAdmin }) {
   const [tab, setTab] = useState('dashboard');
   const [periodo, setPeriodo] = useState({ anno: 2026, mese: 'Luglio' });
   const [data, setData] = useState({});
@@ -45,7 +45,7 @@ export default function FatturazioneAttiva() {
         <TabsTrigger value="esportazioni"><Download className="w-4 h-4 mr-1.5" /> Esportazioni</TabsTrigger>
       </TabsList>
       <TabsContent value="dashboard" className="mt-4">
-        <AttivaDashboard periodo={periodo} setPeriodo={setPeriodo} data={data} loading={loading} elaborating={elaborating} onElabora={elabora} onReload={loadData} />
+        <AttivaDashboard periodo={periodo} setPeriodo={setPeriodo} data={data} loading={loading} elaborating={elaborating} onElabora={elabora} onReload={loadData} isAdmin={isAdmin} />
       </TabsContent>
       <TabsContent value="dettaglio" className="mt-4">
         <AttivaDetail data={data} loading={loading} />

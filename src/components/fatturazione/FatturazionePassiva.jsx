@@ -16,7 +16,7 @@ const STATI = {
   chiusa: { label: 'Chiusa', color: 'bg-emerald-100 text-emerald-700' },
 };
 
-export default function FatturazionePassiva({ periodo, setPeriodo }) {
+export default function FatturazionePassiva({ periodo, setPeriodo, isAdmin }) {
   const [doc, setDoc] = useState(null);
   const [fornitori, setFornitori] = useState([]);
   const [totale, setTotale] = useState(0);
@@ -78,7 +78,7 @@ export default function FatturazionePassiva({ periodo, setPeriodo }) {
             <SelectContent>{MESI.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        <Button onClick={elabora} disabled={elaborating || stato === 'chiusa'}>
+        <Button onClick={elabora} disabled={elaborating || stato === 'chiusa' || !isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''}>
           {elaborating ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Play className="w-4 h-4 mr-1.5" />}
           {doc ? 'Rielabora' : 'Elabora Fatturazione'}
         </Button>
@@ -105,10 +105,10 @@ export default function FatturazionePassiva({ periodo, setPeriodo }) {
           <FatturazioneDetail fornitori={fornitori} totale={totale} onVoceClick={setSelectedVoce} />
 
           <div className="flex flex-wrap gap-2">
-            {stato === 'elaborata' && <Button variant="outline" onClick={() => cambiaStato('verifica')}><CheckCircle className="w-4 h-4 mr-1.5" /> Verifica</Button>}
-            {stato === 'verificata' && <Button variant="outline" onClick={() => cambiaStato('approva')}><CheckCircle className="w-4 h-4 mr-1.5" /> Approva</Button>}
-            {stato === 'approvata' && <Button onClick={() => cambiaStato('chiudi')}><Lock className="w-4 h-4 mr-1.5" /> Chiudi Periodo</Button>}
-            {stato === 'chiusa' && <Button variant="outline" onClick={() => cambiaStato('riapri')}><RotateCcw className="w-4 h-4 mr-1.5" /> Riapri</Button>}
+            {stato === 'elaborata' && <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('verifica')}><CheckCircle className="w-4 h-4 mr-1.5" /> Verifica</Button>}
+            {stato === 'verificata' && <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('approva')}><CheckCircle className="w-4 h-4 mr-1.5" /> Approva</Button>}
+            {stato === 'approvata' && <Button disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('chiudi')}><Lock className="w-4 h-4 mr-1.5" /> Chiudi Periodo</Button>}
+            {stato === 'chiusa' && <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('riapri')}><RotateCcw className="w-4 h-4 mr-1.5" /> Riapri</Button>}
           </div>
         </>
       )}

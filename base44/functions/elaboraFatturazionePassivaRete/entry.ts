@@ -10,6 +10,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
 
     const { anno, mese, fornitoreId } = await req.json();
     if (!anno || !mese) return Response.json({ error: 'Anno e mese obbligatori' }, { status: 400 });

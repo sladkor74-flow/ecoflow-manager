@@ -49,9 +49,12 @@ function TariffeList() {
     if (!form.fornitore_id || !form.servizio_id || !form.valore) return;
     const f = fornitori.find(x => x.id === form.fornitore_id);
     const s = servizi.find(x => x.id === form.servizio_id);
-    await base44.entities.Tariffa.create({
-      ...form, valore: Number(form.valore),
-      fornitore_nome: f?.ragione_sociale, servizio_nome: s?.nome, stato: 'attivo',
+    await base44.functions.invoke('gestisciAnagrafiche', {
+      entita: 'Tariffa', operazione: 'create',
+      dati: {
+        ...form, valore: Number(form.valore),
+        fornitore_nome: f?.ragione_sociale, servizio_nome: s?.nome, stato: 'attivo',
+      },
     });
     setForm({ fornitore_id: '', servizio_id: '', classe_materiale: '', eer_codice: '', unita_misura: '€/t', valore: 0 });
     setShowForm(false); load();
@@ -59,7 +62,7 @@ function TariffeList() {
 
   const remove = async (t) => {
     if (!confirm('Eliminare questa tariffa?')) return;
-    await base44.entities.Tariffa.delete(t.id); load();
+    await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'delete', id: t.id }); load();
   };
 
   if (loading) return <Loader2 className="w-5 h-5 animate-spin" />;
@@ -189,7 +192,7 @@ function ServiziList() {
 
   const add = async () => {
     if (!nome) return;
-    await base44.entities.Servizio.create({ nome, stato: 'attivo' });
+    await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Servizio', operazione: 'create', dati: { nome, stato: 'attivo' } });
     setNome(''); load();
   };
 

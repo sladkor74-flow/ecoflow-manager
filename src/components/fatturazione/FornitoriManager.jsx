@@ -21,19 +21,19 @@ export default function FornitoriManager() {
 
   const add = async () => {
     if (!form.ragione_sociale) return;
-    await base44.entities.Fornitore.create({ ...form, stato: 'attivo' });
+    await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Fornitore', operazione: 'create', dati: { ...form, stato: 'attivo' } });
     setForm({ ragione_sociale: '', tipo: 'trasportatore', piva: '', regione: '' });
     setShowForm(false); load();
   };
 
   const toggle = async (f) => {
-    await base44.entities.Fornitore.update(f.id, { stato: f.stato === 'attivo' ? 'non_attivo' : 'attivo' });
+    await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Fornitore', operazione: 'update', id: f.id, dati: { stato: f.stato === 'attivo' ? 'non_attivo' : 'attivo' } });
     load();
   };
 
   const remove = async (f) => {
     if (!confirm(`Eliminare ${f.ragione_sociale}?`)) return;
-    await base44.entities.Fornitore.delete(f.id); load();
+    await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Fornitore', operazione: 'delete', id: f.id }); load();
   };
 
   if (loading) return <div className="text-center py-8"><Loader2 className="w-5 h-5 animate-spin inline" /></div>;

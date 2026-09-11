@@ -119,9 +119,12 @@ export default function TariffePassivaManager() {
       // Chiudi automaticamente la tariffa aperta: data_fine = inizioNuova - 1 giorno
       const fineChiusura = new Date(inizioNuova);
       fineChiusura.setDate(fineChiusura.getDate() - 1);
-      await base44.entities.Tariffa.update(attivaAperta.id, {
-        data_fine_validita: fineChiusura.toISOString().slice(0, 10),
-        stato: 'non_attivo',
+      await base44.functions.invoke('gestisciAnagrafiche', {
+        entita: 'Tariffa', operazione: 'update', id: attivaAperta.id,
+        dati: {
+          data_fine_validita: fineChiusura.toISOString().slice(0, 10),
+          stato: 'non_attivo',
+        },
       });
     } else {
       // Nessuna tariffa aperta: verifica sovrapposizioni con tariffe a date definite
@@ -134,20 +137,23 @@ export default function TariffePassivaManager() {
       }
     }
 
-    await base44.entities.Tariffa.create({
-      fornitore_id: form.fornitore_id,
-      fornitore_nome: f?.ragione_sociale,
-      servizio_id: '', servizio_nome: 'TRASPORTO RETE',
-      unita_misura: form.unita_misura,
-      valore: Number(form.valore),
-      regione: form.regione,
-      provincia: form.provincia || undefined,
-      data_inizio_validita: form.data_inizio_validita || undefined,
-      data_fine_validita: form.data_fine_validita || undefined,
-      direzione: 'PASSIVA',
-      tipologia: 'RETE',
-      stato: 'attivo',
-      note: form.note,
+    await base44.functions.invoke('gestisciAnagrafiche', {
+      entita: 'Tariffa', operazione: 'create',
+      dati: {
+        fornitore_id: form.fornitore_id,
+        fornitore_nome: f?.ragione_sociale,
+        servizio_id: '', servizio_nome: 'TRASPORTO RETE',
+        unita_misura: form.unita_misura,
+        valore: Number(form.valore),
+        regione: form.regione,
+        provincia: form.provincia || undefined,
+        data_inizio_validita: form.data_inizio_validita || undefined,
+        data_fine_validita: form.data_fine_validita || undefined,
+        direzione: 'PASSIVA',
+        tipologia: 'RETE',
+        stato: 'attivo',
+        note: form.note,
+      },
     });
     setForm({ fornitore_id: '', fornitore_nome: '', unita_misura: '€/t', valore: 0, regione: '', provincia: '', data_inizio_validita: '', data_fine_validita: '', note: '' });
     setShowForm(false); load();
@@ -202,7 +208,7 @@ export default function TariffePassivaManager() {
       }
     }
 
-    await base44.entities.Tariffa.update(t.id, updateData);
+    await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: updateData });
     setEditingId(null);
     load();
   };
@@ -216,9 +222,9 @@ export default function TariffePassivaManager() {
       alert('Data non valida');
       return;
     }
-    await base44.entities.Tariffa.update(t.id, {
-      data_fine_validita: dataFine,
-      stato: 'non_attivo',
+    await base44.functions.invoke('gestisciAnagrafiche', {
+      entita: 'Tariffa', operazione: 'update', id: t.id,
+      dati: { data_fine_validita: dataFine, stato: 'non_attivo' },
     });
     load();
   };
@@ -226,9 +232,9 @@ export default function TariffePassivaManager() {
   // Riapri una tariffa archiviata (rimuovi data fine, riattiva)
   const reopenPeriod = async (t) => {
     if (!confirm('Riaprire questa tariffa? Verrà impostata come attiva senza data di fine. Verifica che non ci siano sovrapposizioni.')) return;
-    await base44.entities.Tariffa.update(t.id, {
-      data_fine_validita: undefined,
-      stato: 'attivo',
+    await base44.functions.invoke('gestisciAnagrafiche', {
+      entita: 'Tariffa', operazione: 'update', id: t.id,
+      dati: { data_fine_validita: undefined, stato: 'attivo' },
     });
     load();
   };

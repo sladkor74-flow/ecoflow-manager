@@ -11,7 +11,7 @@ import RigaDetailModalRete from './RigaDetailModalRete';
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 const ANNI = [2024, 2025, 2026];
 
-export default function FatturazionePassivaRete() {
+export default function FatturazionePassivaRete({ isAdmin }) {
   const [tab, setTab] = useState('elaborazione');
   const [anno, setAnno] = useState(2026);
   const [mese, setMese] = useState('Luglio');
@@ -123,7 +123,7 @@ export default function FatturazionePassivaRete() {
     <Tabs value={tab} onValueChange={setTab}>
       <TabsList>
         <TabsTrigger value="elaborazione"><Play className="w-4 h-4 mr-1.5" /> Elaborazione Mensile</TabsTrigger>
-        <TabsTrigger value="tariffe"><FileText className="w-4 h-4 mr-1.5" /> Gestione Tariffe</TabsTrigger>
+        {isAdmin && <TabsTrigger value="tariffe"><FileText className="w-4 h-4 mr-1.5" /> Gestione Tariffe</TabsTrigger>}
       </TabsList>
 
       <TabsContent value="elaborazione" className="mt-4 space-y-4">
@@ -152,7 +152,7 @@ export default function FatturazionePassivaRete() {
               </SelectContent>
             </Select>
           </div>
-          <Button onClick={calcola} disabled={loading}>
+          <Button onClick={calcola} disabled={loading || !isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''}>
             {loading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Play className="w-4 h-4 mr-1.5" />}
             Calcola Fatturato
           </Button>
@@ -252,9 +252,9 @@ export default function FatturazionePassivaRete() {
         )}
       </TabsContent>
 
-      <TabsContent value="tariffe" className="mt-4">
+      {isAdmin && <TabsContent value="tariffe" className="mt-4">
         <TariffePassivaManager />
-      </TabsContent>
+      </TabsContent>}
 
       <RigaDetailModalRete riga={selectedRiga} mese={mese} anno={anno} onClose={() => setSelectedRiga(null)} />
     </Tabs>

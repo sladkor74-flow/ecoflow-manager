@@ -18,7 +18,7 @@ const TIPS = [
   { key: 'EXTRA_RACCOLTA', label: 'Extra Raccolta' },
 ];
 
-export default function AttivaDashboard({ periodo, setPeriodo, data, loading, elaborating, onElabora, onReload }) {
+export default function AttivaDashboard({ periodo, setPeriodo, data, loading, elaborating, onElabora, onReload, isAdmin }) {
   const { anno, mese } = periodo;
 
   const cambiaStato = async (azione) => {
@@ -58,7 +58,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
             <SelectContent>{MESI.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        <Button onClick={onElabora} disabled={elaborating}>
+        <Button onClick={onElabora} disabled={elaborating || !isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''}>
           {elaborating ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Play className="w-4 h-4 mr-1.5" />}
           Elabora Mese
         </Button>
@@ -114,9 +114,9 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
           )}
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => cambiaStato('verifica')}><CheckCircle className="w-4 h-4 mr-1.5" /> Verifica</Button>
-            {tuttiVerificati && <Button variant="outline" onClick={() => cambiaStato('approva')}><CheckCircle className="w-4 h-4 mr-1.5" /> Approva</Button>}
-            {tuttiApprovati && <Button onClick={() => cambiaStato('chiudi')}><Lock className="w-4 h-4 mr-1.5" /> Chiudi Periodo</Button>}
+            <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('verifica')}><CheckCircle className="w-4 h-4 mr-1.5" /> Verifica</Button>
+            {tuttiVerificati && <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('approva')}><CheckCircle className="w-4 h-4 mr-1.5" /> Approva</Button>}
+            {tuttiApprovati && <Button disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('chiudi')}><Lock className="w-4 h-4 mr-1.5" /> Chiudi Periodo</Button>}
           </div>
         </>
       )}

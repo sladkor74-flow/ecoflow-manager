@@ -24,9 +24,12 @@ export default function AttivaTariffe() {
 
   const add = async () => {
     if (!form.tipologia || !form.valore) return;
-    await base44.entities.Tariffa.create({
-      ...form, valore: Number(form.valore), direzione: 'ATTIVA', stato: 'attivo',
-      fornitore_id: form.cliente || 'ATTIVA',
+    await base44.functions.invoke('gestisciAnagrafiche', {
+      entita: 'Tariffa', operazione: 'create',
+      dati: {
+        ...form, valore: Number(form.valore), direzione: 'ATTIVA', stato: 'attivo',
+        fornitore_id: form.cliente || 'ATTIVA',
+      },
     });
     setForm({ tipologia: 'RETE', cliente: '', classe_materiale: '', regione: '', unita_misura: '€/kg', valore: 0, data_inizio_validita: '', data_fine_validita: '' });
     setShowForm(false); load();
@@ -34,7 +37,7 @@ export default function AttivaTariffe() {
 
   const remove = async (t) => {
     if (!confirm('Eliminare questa tariffa?')) return;
-    await base44.entities.Tariffa.delete(t.id); load();
+    await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'delete', id: t.id }); load();
   };
 
   if (loading) return <div className="text-center py-8"><Loader2 className="w-5 h-5 animate-spin inline" /></div>;
