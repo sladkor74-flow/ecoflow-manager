@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
-import { Loader2, Upload, Plus, Trash2, FileSpreadsheet, Pencil } from 'lucide-react';
+import { Loader2, Upload, Plus, Trash2, FileSpreadsheet, Pencil, CheckCircle2 } from 'lucide-react';
 import ExtraRaccoltaForm from './ExtraRaccoltaForm';
+import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
 
 export default function ExtraRaccoltaManager({ periodo }) {
   const [records, setRecords] = useState([]);
@@ -10,6 +11,10 @@ export default function ExtraRaccoltaManager({ periodo }) {
   const [uploading, setUploading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editRecord, setEditRecord] = useState(null);
+  const [dialogState, setDialogState] = useState(null);
+  const [successMsg, setSuccessMsg] = useState(null);
+  const pendingFileRef = useRef(null);
+  const pendingFileUrlRef = useRef(null);
 
   const load = async () => {
     setLoading(true);
@@ -23,24 +28,38 @@ export default function ExtraRaccoltaManager({ periodo }) {
 
   useEffect(() => { load(); }, [periodo?.mese]);
 
-  const handleUpload = async (e) => {
-    const file = e.target.files[0];
+  const handleUpload = async (e, conferma_forzatura = false) => {
+    const file = e?.target?.files?.[0] || pendingFileRef.current;
     if (!file) return;
     setUploading(true);
+    setSuccessMsg(null);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      const res = await base44.functions.invoke('importEcotyreFile', {
-        file_url, tipo_file: 'extra_raccolta', nome_file: file.name,
+      let fileUrl;
+      if (conferma_forzatura && pendingFileUrlRef.current) {
+        fileUrl = pendingFileUrlRef.current;
+      } else {
+        const { file_url } = await base44.integrations.Core.UploadFile({ file });
+        fileUrl = file_url;
+        pendingFileUrlRef.current = file_url;
+      }
+      pendingFileRef.current = file;
+      const params = {
+        file_url: fileUrl, tipo_file: 'extra_raccolta', nome_file: file.name,
         periodo_riferimento: periodo?.mese || '', replace_existing: false,
-      });
+      };
+      if (conferma_forzatura) params.conferma_forzatura = true;
+      const res = await base44.functions.invoke('importEcotyreFile', params);
       const data = res.data || res;
-      alert(`Importazione completata: ${data.righe_importate || 0} righe importate su ${data.righe_da_importare || 0}.`);
+      setSuccessMsg(`Importazione completata: ${data.righe_importate || 0} righe importate su ${data.righe_da_importare || 0}.`);
+      const warnings = extractUploadWarnings(data);
+      if (warnings) setDialogState(warnings);
       await load();
     } catch (err) {
-      alert('Errore importazione: ' + (err.message || 'errore sconosciuto'));
+      const errInfo = extractUploadError(err);
+      setDialogState({ ...errInfo, onForza: () => handleUpload(null, true) });
     }
     setUploading(false);
-    e.target.value = '';
+    if (e?.target) e.target.value = '';
   };
 
   const save = async (payload) => {
@@ -151,6 +170,15 @@ export default function ExtraRaccoltaManager({ periodo }) {
           </table>
         </div>
       )}
+
+      {successMsg && (
+        <div className="flex items-start gap-2 p-3 rounded-md bg-green-50 border border-green-200 text-sm">
+          <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+          <p className="text-green-800">{successMsg}</p>
+        </div>
+      )}
+
+      <UploadResultDialog state={dialogState} onClose={() => setDialogState(null)} />
     </div>
   );
 }

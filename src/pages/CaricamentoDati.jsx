@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, Clock, Trash2 } from 'lucide-react';
+import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
 
 const TIPI_FILE = [
   { key: 'primarie', label: 'Primarie', desc: 'File unico delle primarie (un solo foglio con tutto). Suddivide automaticamente le righe in Primarie Rete, Primarie ACI, Assegnati Rete e Assegnati ACI in base a stato e classe.', colore: 'bg-green-50 border-green-200' },
@@ -15,6 +16,8 @@ export default function CaricamentoDati() {
   const [loadingLogs, setLoadingLogs] = useState(true);
   const [uploading, setUploading] = useState(null);
   const [risultato, setRisultato] = useState({});
+  const [dialogState, setDialogState] = useState(null);
+  const pendingFileUrlRef = useRef({});
 
   const caricaLogs = async () => {
     setLoadingLogs(true);
@@ -29,20 +32,31 @@ export default function CaricamentoDati() {
 
   useEffect(() => { caricaLogs(); }, []);
 
-  const handleUpload = async (tipoKey, file) => {
+  const handleUpload = async (tipoKey, file, conferma_forzatura = false) => {
     if (!file) return;
     setUploading(tipoKey);
     setRisultato(prev => ({ ...prev, [tipoKey]: null }));
     try {
-      // 1. Upload del file
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      // 2. Import nel backend (funzione dedicata per status, importEcotyreFile per gli altri)
+      let fileUrl;
+      if (conferma_forzatura && pendingFileUrlRef.current[tipoKey]) {
+        fileUrl = pendingFileUrlRef.current[tipoKey];
+      } else {
+        const { file_url } = await base44.integrations.Core.UploadFile({ file });
+        fileUrl = file_url;
+        pendingFileUrlRef.current[tipoKey] = fileUrl;
+      }
       const fnName = tipoKey === 'status' ? 'seedTargetMensile' : 'importEcotyreFile';
-      const res = await base44.functions.invoke(fnName, { file_url, tipo_file: tipoKey, nome_file: file.name, replace_existing: true });
+      const params = { file_url: fileUrl, tipo_file: tipoKey, nome_file: file.name, replace_existing: true };
+      if (conferma_forzatura) params.conferma_forzatura = true;
+      const res = await base44.functions.invoke(fnName, params);
       setRisultato(prev => ({ ...prev, [tipoKey]: { ok: true, data: res.data } }));
+      const warnings = extractUploadWarnings(res.data);
+      if (warnings) setDialogState(warnings);
       caricaLogs();
     } catch (e) {
-      setRisultato(prev => ({ ...prev, [tipoKey]: { ok: false, error: e.response?.data?.error || e.message } }));
+      const errInfo = extractUploadError(e);
+      setRisultato(prev => ({ ...prev, [tipoKey]: { ok: false, error: errInfo.error } }));
+      setDialogState({ ...errInfo, onForza: () => handleUpload(tipoKey, file, true) });
     }
     setUploading(null);
   };
@@ -90,17 +104,15 @@ export default function CaricamentoDati() {
                 </div>
               </label>
 
-              {res && (
-                <div className={`mt-3 flex items-start gap-2 text-sm ${res.ok ? 'text-green-700' : 'text-red-700'}`}>
-                  {res.ok ? <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />}
+              {res && res.ok && (
+                <div className="mt-3 flex items-start gap-2 text-sm text-green-700">
+                  <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
                   <span>
-                    {res.ok
-                      ? (res.data.records_creati != null
-                        ? `${res.data.records_creati} target caricati (${res.data.raccoglitori} raccoglitori)`
-                        : (res.data.primarie_rete_importati != null
-                          ? `Rete: ${res.data.primarie_rete_importati} · ACI: ${res.data.primarie_aci_importati} · Ass. Rete: ${res.data.assegnati_importati} · Ass. ACI: ${res.data.assegnati_aci_importati}`
-                          : `${res.data.righe_importate} righe importate${res.data.righe_fallite > 0 ? ` (${res.data.righe_fallite} fallite)` : ''}`))
-                      : `Errore: ${res.error}`}
+                    {res.data.records_creati != null
+                      ? `${res.data.records_creati} target caricati (${res.data.raccoglitori} raccoglitori)`
+                      : (res.data.primarie_rete_importati != null
+                        ? `Rete: ${res.data.primarie_rete_importati} · ACI: ${res.data.primarie_aci_importati} · Ass. Rete: ${res.data.assegnati_importati} · Ass. ACI: ${res.data.assegnati_aci_importati}`
+                        : `${res.data.righe_importate} righe importate${res.data.righe_fallite > 0 ? ` (${res.data.righe_fallite} fallite)` : ''}`)}
                   </span>
                 </div>
               )}
@@ -156,6 +168,8 @@ export default function CaricamentoDati() {
           </div>
         )}
       </div>
+
+      <UploadResultDialog state={dialogState} onClose={() => setDialogState(null)} />
     </div>
   );
 }

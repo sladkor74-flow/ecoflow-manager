@@ -1,22 +1,37 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Upload, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Upload, Loader2, CheckCircle2 } from 'lucide-react';
+import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
 
 export default function PdrUpload({ onImported }) {
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
+  const [dialogState, setDialogState] = useState(null);
+  const pendingFileUrlRef = useRef(null);
 
-  const handleUpload = async (file) => {
+  const handleUpload = async (file, conferma_forzatura = false) => {
     if (!file) return;
     setUploading(true);
     setResult(null);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      const res = await base44.functions.invoke('importPdrFile', { file_url, nome_file: file.name, replace_existing: true });
+      let fileUrl;
+      if (conferma_forzatura && pendingFileUrlRef.current) {
+        fileUrl = pendingFileUrlRef.current;
+      } else {
+        const { file_url } = await base44.integrations.Core.UploadFile({ file });
+        fileUrl = file_url;
+        pendingFileUrlRef.current = fileUrl;
+      }
+      const params = { file_url: fileUrl, nome_file: file.name, replace_existing: true };
+      if (conferma_forzatura) params.conferma_forzatura = true;
+      const res = await base44.functions.invoke('importPdrFile', params);
       setResult({ ok: true, data: res.data });
+      const warnings = extractUploadWarnings(res.data);
+      if (warnings) setDialogState(warnings);
       if (onImported) onImported();
     } catch (e) {
-      setResult({ ok: false, error: e.response?.data?.error || e.message });
+      const errInfo = extractUploadError(e);
+      setDialogState({ ...errInfo, onForza: () => handleUpload(file, true) });
     }
     setUploading(false);
   };
@@ -48,16 +63,15 @@ export default function PdrUpload({ onImported }) {
           )}
         </div>
       </label>
-      {result && (
-        <div className={`mt-3 flex items-start gap-2 text-sm ${result.ok ? 'text-green-700' : 'text-red-700'}`}>
-          {result.ok ? <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />}
+      {result && result.ok && (
+        <div className="mt-3 flex items-start gap-2 text-sm text-green-700">
+          <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
           <span>
-            {result.ok
-              ? `${result.data.righe_importate} PDR importati${result.data.righe_fallite > 0 ? ` (${result.data.righe_fallite} fallite)` : ''}`
-              : `Errore: ${result.error}`}
+            {result.data.righe_importate} PDR importati{result.data.righe_fallite > 0 ? ` (${result.data.righe_fallite} fallite)` : ''}
           </span>
         </div>
       )}
+      <UploadResultDialog state={dialogState} onClose={() => setDialogState(null)} />
     </div>
   );
 }

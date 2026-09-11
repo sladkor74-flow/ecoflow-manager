@@ -1,30 +1,43 @@
 import React, { useState, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Upload, Loader2, FileSpreadsheet, AlertCircle, CheckCircle } from 'lucide-react';
+import { Upload, Loader2, FileSpreadsheet, CheckCircle } from 'lucide-react';
+import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
 
 export default function SecondarieUpload({ onImported }) {
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
+  const [dialogState, setDialogState] = useState(null);
   const inputRef = useRef(null);
+  const pendingFileUrlRef = useRef(null);
 
-  const handleFile = async (file) => {
+  const handleFile = async (file, conferma_forzatura = false) => {
     if (!file) return;
     setUploading(true);
-    setError(null);
     setResult(null);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      const res = await base44.functions.invoke('importEcotyreFile', {
-        file_url,
+      let fileUrl;
+      if (conferma_forzatura && pendingFileUrlRef.current) {
+        fileUrl = pendingFileUrlRef.current;
+      } else {
+        const { file_url } = await base44.integrations.Core.UploadFile({ file });
+        fileUrl = file_url;
+        pendingFileUrlRef.current = fileUrl;
+      }
+      const params = {
+        file_url: fileUrl,
         tipo_file: 'secondarie',
         nome_file: file.name,
         replace_existing: true,
-      });
+      };
+      if (conferma_forzatura) params.conferma_forzatura = true;
+      const res = await base44.functions.invoke('importEcotyreFile', params);
       setResult(res.data);
+      const warnings = extractUploadWarnings(res.data);
+      if (warnings) setDialogState(warnings);
       if (onImported) onImported();
     } catch (e) {
-      setError(e.message || 'Errore durante il caricamento');
+      const errInfo = extractUploadError(e);
+      setDialogState({ ...errInfo, onForza: () => handleFile(file, true) });
     }
     setUploading(false);
   };
@@ -67,15 +80,7 @@ export default function SecondarieUpload({ onImported }) {
           </div>
         </div>
       )}
-      {error && (
-        <div className="flex items-start gap-2 p-3 rounded-md bg-red-50 border border-red-200 text-sm">
-          <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
-          <div>
-            <p className="font-medium text-red-900">Errore</p>
-            <p className="text-red-800">{error}</p>
-          </div>
-        </div>
-      )}
+      <UploadResultDialog state={dialogState} onClose={() => setDialogState(null)} />
     </div>
   );
 }
