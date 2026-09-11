@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { getRegioneFromProvincia } from '../../shared/regioneMap.ts';
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Migrazione one-shot: deriva la regione di pertinenza per raccoglitori, stoccaggi e impianti.
 // 1. Elimina i record TargetRaccoglitore ridondanti con regione tra parentesi nel nome (es. "SMOCO S.R.L. (PUGLIA)").
@@ -38,7 +39,7 @@ export default async function(req) {
     }
 
     // === 2. Deriva regione raccoglitori da PrimariaRete (solo dove regione e' null) ===
-    const primarie = await b.entities.PrimariaRete.list('-created_date', 5000);
+    const primarie = await fetchAll(b.entities.PrimariaRete);
     const regioneCountsByTrasport: Record<string, Record<string, number>> = {};
     for (const p of primarie) {
       if (!p.trasportatore || !p.regione) continue;
@@ -60,7 +61,7 @@ export default async function(req) {
     }
 
     // === 3. Deriva regione stoccaggi da Secondaria (provincia -> regione) ===
-    const secondarie = await b.entities.Secondaria.list('-created_date', 5000);
+    const secondarie = await fetchAll(b.entities.Secondaria);
     const provCountsByStoc: Record<string, Record<string, number>> = {};
     for (const s of secondarie) {
       if (!s.stoccaggio || !s.provincia) continue;

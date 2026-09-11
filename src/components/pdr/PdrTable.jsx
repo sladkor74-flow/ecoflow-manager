@@ -32,6 +32,8 @@ export default function PdrTable({ records, loading }) {
             <th className="text-left px-3 py-2.5 font-medium">Trasportatore</th>
             <th className="text-left px-3 py-2.5 font-medium">Key Account</th>
             <th className="text-left px-3 py-2.5 font-medium">Partner</th>
+            <th className="text-left px-3 py-2.5 font-medium">Tel PDR</th>
+            <th className="text-left px-3 py-2.5 font-medium">Email PDR</th>
           </tr>
         </thead>
         <tbody>
@@ -47,6 +49,12 @@ export default function PdrTable({ records, loading }) {
               <td className="px-3 py-2">{r.trasportatore_principale || '—'}</td>
               <td className="px-3 py-2">{r.key_account || '—'}</td>
               <td className="px-3 py-2">{r.partner_operativo || '—'}</td>
+              <td className="px-3 py-2">
+                {r.tel_pdr ? <a href={`tel:${r.tel_pdr}`} className="text-primary underline">{r.tel_pdr}</a> : '—'}
+              </td>
+              <td className="px-3 py-2">
+                {r.email_pdr ? <a href={`mailto:${r.email_pdr}`} className="text-primary underline">{r.email_pdr}</a> : '—'}
+              </td>
             </tr>
           ))}
         </tbody>

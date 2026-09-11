@@ -73,6 +73,30 @@
     "provincia_pdr": {
       "type": "string"
     },
+    "riferimento_pdr": {
+      "type": "string",
+      "description": "Persona di riferimento del punto di raccolta"
+    },
+    "tel_pdr": {
+      "type": "string",
+      "description": "Telefono del punto di raccolta"
+    },
+    "fax_pdr": {
+      "type": "string"
+    },
+    "email_pdr": {
+      "type": "string",
+      "description": "Email del punto di raccolta"
+    },
+    "rentri_iscrizione": {
+      "type": "string"
+    },
+    "rentri_id_ul": {
+      "type": "string"
+    },
+    "tipo_formulario": {
+      "type": "string"
+    },
     "latitudine": {
       "type": "number",
       "description": "Latitudine del punto di raccolta (WGS84)"
@@ -80,6 +104,12 @@
     "longitudine": {
       "type": "number",
       "description": "Longitudine del punto di raccolta (WGS84)"
+    },
+    "geo_approssimazione": {
+      "type": "string"
+    },
+    "place_id": {
+      "type": "string"
     },
     "sospeso": {
       "type": "string"

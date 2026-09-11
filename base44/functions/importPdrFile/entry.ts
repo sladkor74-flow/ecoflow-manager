@@ -27,9 +27,12 @@ export default async function(req) {
       10: 'tel', 11: 'fax', 12: 'email', 13: 'codice_fiscale', 14: 'partita_iva',
       15: 'codice_import', 16: 'id_pdr', 17: 'codice_esterno_pdr', 18: 'descrizione_pdr',
       19: 'indirizzo_pdr', 20: 'cap_pdr', 21: 'comune_pdr', 22: 'provincia_pdr',
-      31: 'sospeso', 32: 'key_account', 33: 'partner_operativo', 34: 'trasportatore_principale'
+      24: 'riferimento_pdr', 25: 'tel_pdr', 26: 'fax_pdr', 27: 'email_pdr',
+      28: 'rentri_iscrizione', 29: 'rentri_id_ul', 30: 'tipo_formulario',
+      31: 'sospeso', 32: 'key_account', 33: 'partner_operativo', 34: 'trasportatore_principale',
+      35: 'latitudine', 36: 'longitudine', 37: 'geo_approssimazione', 38: 'place_id'
     };
-    const NUMERIC = new Set(['id_cliente', 'id_pdr']);
+    const NUMERIC = new Set(['id_cliente', 'id_pdr', 'latitudine', 'longitudine']);
 
     // Mappa di controllo: indice colonna (0-based) -> testo atteso dell'intestazione
     const HEADER_MAP = {
@@ -38,7 +41,10 @@ export default async function(req) {
       9: "Riferimento", 10: "Tel", 11: "Fax", 12: "Email", 13: "Cod. Fiscale",
       14: "Partita IVA", 15: "Codice Import", 16: "ID PDR", 17: "Cod. Esterno PDR",
       18: "Descrizione", 19: "Indirizzo", 20: "CAP", 21: "Comune", 22: "Prov.",
-      31: "Sospeso", 32: "KeyAccount", 33: "Partner Operativo", 34: "Trasportatore Principale"
+      23: "Nazione", 24: "Riferimento", 25: "Tel", 26: "Fax", 27: "Email",
+      28: "Iscrizione al R.E.N.T.Ri.", 29: "ID U/L RENTRi", 30: "Tipo di formulario",
+      31: "Sospeso", 32: "KeyAccount", 33: "Partner Operativo", 34: "Trasportatore Principale",
+      35: "Latitudine", 36: "Longitudine", 37: "Approsimazione", 38: "PlaceID"
     };
 
     const norm = (s) => String(s || '').trim().toLowerCase();

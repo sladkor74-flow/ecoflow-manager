@@ -71,7 +71,7 @@ export default function Pdr() {
       // Contatto: tel, email, riferimento
       if (search.contatto) {
         const t = search.contatto.toLowerCase().trim();
-        const hay = [r.tel, r.email, r.riferimento].map(v => (v || '').toLowerCase());
+        const hay = [r.tel, r.email, r.riferimento, r.tel_pdr, r.email_pdr, r.riferimento_pdr].map(v => (v || '').toLowerCase());
         if (!hay.some(v => v.includes(t))) return false;
       }
       // Indirizzo PDR: indirizzo_pdr, descrizione_pdr
@@ -131,6 +131,17 @@ export default function Pdr() {
           'KeyAccount': r.key_account || '',
           'Partner Operativo': r.partner_operativo || '',
           'Trasportatore Principale': r.trasportatore_principale || '',
+          'Riferimento PDR': r.riferimento_pdr || '',
+          'Tel PDR': r.tel_pdr || '',
+          'Fax PDR': r.fax_pdr || '',
+          'Email PDR': r.email_pdr || '',
+          'Iscrizione RENTRi': r.rentri_iscrizione || '',
+          'ID U/L RENTRi': r.rentri_id_ul || '',
+          'Tipo Formulario': r.tipo_formulario || '',
+          'Latitudine': r.latitudine || '',
+          'Longitudine': r.longitudine || '',
+          'Approsimazione': r.geo_approssimazione || '',
+          'PlaceID': r.place_id || '',
         }));
         const ws = XLSX.utils.json_to_sheet(rows);
         XLSX.utils.book_append_sheet(wb, ws, 'Punti di Raccolta');
