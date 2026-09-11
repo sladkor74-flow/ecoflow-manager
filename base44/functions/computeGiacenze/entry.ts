@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { matchesFilter } from "../../shared/multiFilter.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Calcola le giacenze di impianto in tempo reale:
 //   Ingressi = PrimariaRete + PrimariaAci + Secondaria (dove l'impianto è Destinazione)
@@ -16,10 +17,10 @@ export default async function(req) {
     const filters = body.filters || {};
 
     const [rete, aci, sec, terz] = await Promise.all([
-      base44.asServiceRole.entities.PrimariaRete.list('-created_date', 10000),
-      base44.asServiceRole.entities.PrimariaAci.list('-created_date', 10000),
-      base44.asServiceRole.entities.Secondaria.list('-created_date', 10000),
-      base44.asServiceRole.entities.Terziaria.list('-created_date', 10000),
+      fetchAll(base44.asServiceRole.entities.PrimariaRete),
+      fetchAll(base44.asServiceRole.entities.PrimariaAci),
+      fetchAll(base44.asServiceRole.entities.Secondaria),
+      fetchAll(base44.asServiceRole.entities.Terziaria),
     ]);
 
     const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];

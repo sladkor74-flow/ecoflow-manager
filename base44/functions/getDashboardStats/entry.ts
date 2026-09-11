@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Restituisce conteggi rapidi per la Dashboard: numero record per entità + alert aperti.
 // Nessun payload richiesto.
@@ -9,11 +10,11 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const [assegnati, rete, aci, sec, terz, alerts] = await Promise.all([
-      base44.asServiceRole.entities.Assegnato.list('-created_date', 10000),
-      base44.asServiceRole.entities.PrimariaRete.list('-created_date', 10000),
-      base44.asServiceRole.entities.PrimariaAci.list('-created_date', 10000),
-      base44.asServiceRole.entities.Secondaria.list('-created_date', 10000),
-      base44.asServiceRole.entities.Terziaria.list('-created_date', 10000),
+      fetchAll(base44.asServiceRole.entities.Assegnato),
+      fetchAll(base44.asServiceRole.entities.PrimariaRete),
+      fetchAll(base44.asServiceRole.entities.PrimariaAci),
+      fetchAll(base44.asServiceRole.entities.Secondaria),
+      fetchAll(base44.asServiceRole.entities.Terziaria),
       base44.asServiceRole.entities.Alert.filter({ stato: 'aperto' }, '-created_date', 10000),
     ]);
 

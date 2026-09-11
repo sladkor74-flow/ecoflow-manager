@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { computeRaccoglitoriMixData } from "../../shared/primarieReteAnalytics.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Calcola il mix classi PFU per Raccoglitore e confronta con i target consorziali.
 // Vista A (% SUL RACCOLTO): peso_classe / totale_raccoglitore
@@ -28,7 +29,7 @@ export default async function(req) {
       targetsMap[t.raccoglitore] = t.target_tonnellate || 0;
     }
 
-    const records = await base44.asServiceRole.entities.PrimariaRete.list('-created_date', 10000);
+    const records = await fetchAll(base44.asServiceRole.entities.PrimariaRete);
     const result = computeRaccoglitoriMixData(records, targetsMap, filters);
 
     return Response.json(result);

@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
@@ -52,9 +53,9 @@ export default async function(req) {
 
     // Load operational data: RETE + ACI from Primarie, EXTRA from ExtraRaccolta (manuale)
     const [rete, aci, extraRaccolta] = await Promise.all([
-      base44.asServiceRole.entities.PrimariaRete.filter({ mese }),
-      base44.asServiceRole.entities.PrimariaAci.filter({ mese }),
-      base44.asServiceRole.entities.ExtraRaccolta.filter({ mese }),
+      fetchAll(base44.asServiceRole.entities.PrimariaRete, { mese }),
+      fetchAll(base44.asServiceRole.entities.PrimariaAci, { mese }),
+      fetchAll(base44.asServiceRole.entities.ExtraRaccolta, { mese }),
     ]);
 
     // Load attiva tariffe (per eventuali override custom)

@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
@@ -31,9 +32,9 @@ export default async function(req) {
 
     // Load operational data
     const [rete, secondarie, terziarie] = await Promise.all([
-      base44.asServiceRole.entities.PrimariaRete.filter({ mese }),
-      base44.asServiceRole.entities.Secondaria.filter({ mese }),
-      base44.asServiceRole.entities.Terziaria.filter({ mese }),
+      fetchAll(base44.asServiceRole.entities.PrimariaRete, { mese }),
+      fetchAll(base44.asServiceRole.entities.Secondaria, { mese }),
+      fetchAll(base44.asServiceRole.entities.Terziaria, { mese }),
     ]);
 
     // Load configuration

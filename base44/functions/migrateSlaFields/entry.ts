@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Migrazione one-shot: calcola nr_giorni, scadenza_ordine, raccolta_nei_tempi
 // sui record PrimariaRete esistenti che non hanno questi campi popolati.
@@ -8,7 +9,7 @@ export default async function(req) {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const records = await base44.asServiceRole.entities.PrimariaRete.list('-created_date', 10000);
+    const records = await fetchAll(base44.asServiceRole.entities.PrimariaRete);
 
     const toUpdate = [];
     for (const r of records) {

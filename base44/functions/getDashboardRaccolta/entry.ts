@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { PROV_TO_REGION } from "../../shared/raccoltoCalculator.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Restituisce aggregati raccolta per la Dashboard filtrati per mese/anno.
 // Payload: { mese?, anno? } — mese è il nome del mese (es. "Agosto"), anno è numerico.
@@ -23,8 +24,8 @@ export default async function(req) {
       : (annoRaw ? [Number(annoRaw)] : [new Date().getFullYear()]);
 
     const [rete, aci] = await Promise.all([
-      base44.asServiceRole.entities.PrimariaRete.filter({ stato: 'terminato' }, '-created_date', 10000),
-      base44.asServiceRole.entities.PrimariaAci.filter({ stato: 'terminato' }, '-created_date', 10000)
+      fetchAll(base44.asServiceRole.entities.PrimariaRete, { stato: 'terminato' }),
+      fetchAll(base44.asServiceRole.entities.PrimariaAci, { stato: 'terminato' })
     ]);
 
     const getRegione = (r) => r.regione || PROV_TO_REGION[(r.provincia || '').toUpperCase().trim()] || 'Altro';

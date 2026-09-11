@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const SOGLIA_CONFORME = 0.05; // 5% di tolleranza
@@ -19,8 +20,8 @@ export default async function(req) {
 
     const [targets, primarieRete, primarieAci] = await Promise.all([
       b.entities.TargetRaccoglitorePrimaria.filter({ anno }, '-created_date', 5000),
-      b.entities.PrimariaRete.list('-created_date', 10000),
-      b.entities.PrimariaAci.list('-created_date', 10000),
+      fetchAll(b.entities.PrimariaRete),
+      fetchAll(b.entities.PrimariaAci),
     ]);
 
     // Aggrega raccolto per raccoglitore normalizzato + mese

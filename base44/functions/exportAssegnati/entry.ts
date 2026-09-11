@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { MESI } from "../../shared/raccoltoCalculator.ts";
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Esporta i dati Assegnati (dettaglio o matrice aggregata) in Excel.
 // Payload: { filters: {...}, mode: 'detail' | 'matrix' }
@@ -16,7 +17,7 @@ export default async function(req) {
     const mode = body.mode || 'detail';
     const entityName = body.entity || 'Assegnato';
 
-    const all = await base44.asServiceRole.entities[entityName].list('-created_date', 10000);
+    const all = await fetchAll(base44.asServiceRole.entities[entityName]);
 
     const filtered = all.filter(r => {
       if (!matchesFilterString(r.anno, filters.anno)) return false;

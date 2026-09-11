@@ -1,4 +1,5 @@
 // Modulo condiviso per il calcolo del raccolto PFU aggregato dalle primarie.
+import { fetchAll } from "./fetchAll.ts";
 
 export const PROV_TO_REGION: Record<string, string> = {
   // Valle d'Aosta
@@ -54,8 +55,8 @@ export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno
 
 export async function computeRaccoltoData(base44, filters: any = {}) {
   const [rete, aci] = await Promise.all([
-    base44.asServiceRole.entities.PrimariaRete.list('-created_date', 10000),
-    base44.asServiceRole.entities.PrimariaAci.list('-created_date', 10000)
+    fetchAll(base44.asServiceRole.entities.PrimariaRete),
+    fetchAll(base44.asServiceRole.entities.PrimariaAci)
   ]);
 
   const all = [...rete, ...aci];

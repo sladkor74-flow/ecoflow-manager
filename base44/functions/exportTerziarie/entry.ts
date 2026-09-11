@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
 import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Esporta i dati terziarie filtrati in Excel.
 // Payload: { filters: { impianto?, destinazione?, mese?, trasportatore?, materiale?, anno? } }
@@ -14,7 +15,7 @@ export default async function(req) {
     const body = await req.json().catch(() => ({}));
     const filters = body.filters || {};
 
-    const records = await base44.asServiceRole.entities.Terziaria.list('-created_date', 10000);
+    const records = await fetchAll(base44.asServiceRole.entities.Terziaria);
 
     const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
     function getMese(r) {

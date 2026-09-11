@@ -4,6 +4,7 @@
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
 import { getMeseFromDate, getSettimanaFromDate, getAnnoFromDate, getRegioneFromProvincia, getClasseFromProdotto } from "./dataEnrichment.ts";
 import { matchesFilter } from "./multiFilter.ts";
+import { fetchAll } from "./fetchAll.ts";
 
 function getMese(dateStr) {
   return getMeseFromDate(dateStr);
@@ -186,10 +187,10 @@ export async function computeAllPivots(base44, filters, pivotKeys = null) {
   const needAss = keys.some(k => ['H'].includes(k));
 
   const [rete, aci, sec, assegnati] = await Promise.all([
-    needRete ? base44.asServiceRole.entities.PrimariaRete.list('-created_date', 10000) : Promise.resolve([]),
-    needAci ? base44.asServiceRole.entities.PrimariaAci.list('-created_date', 10000) : Promise.resolve([]),
-    needSec ? base44.asServiceRole.entities.Secondaria.list('-created_date', 10000) : Promise.resolve([]),
-    needAss ? base44.asServiceRole.entities.Assegnato.list('-created_date', 10000) : Promise.resolve([]),
+    needRete ? fetchAll(base44.asServiceRole.entities.PrimariaRete) : Promise.resolve([]),
+    needAci ? fetchAll(base44.asServiceRole.entities.PrimariaAci) : Promise.resolve([]),
+    needSec ? fetchAll(base44.asServiceRole.entities.Secondaria) : Promise.resolve([]),
+    needAss ? fetchAll(base44.asServiceRole.entities.Assegnato) : Promise.resolve([]),
   ]);
 
   const reteF = applyFilters(rete, filters, false);

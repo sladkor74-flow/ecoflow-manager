@@ -6,6 +6,7 @@ import GiacenzeTable from '@/components/terziarie/GiacenzeTable';
 import TerziarieTable from '@/components/terziarie/TerziarieTable';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
 import MultiSelect from '@/components/shared/MultiSelect';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const MATERIALI = ['PFU SFUSO', 'CIAB/CIPP', 'FERRO'];
@@ -45,7 +46,7 @@ export default function Terziarie() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const all = await base44.entities.Terziaria.list('-created_date', 10000);
+      const all = await fetchAllClient(base44.entities.Terziaria);
       // Build filter options
       setFilterOptions({
         impianti: [...new Set(all.map(r => (r.unita_locale_origine || '').trim()).filter(Boolean))].sort(),

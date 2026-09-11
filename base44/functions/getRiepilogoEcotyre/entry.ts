@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { sortTariffe, resolveTariffa, calcolaTotale } from "../../shared/ecotyreTariffe.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Calcola il riepilogo del totale dovuto da Ecotyre per un dato anno/mese,
 // basandosi sulle tariffe impostate (Tariffa direzione=ATTIVA) e sul volume
@@ -16,9 +17,9 @@ export default async function(req) {
 
     // Load operational data
     const [rete, aci, extraRaccolta] = await Promise.all([
-      base44.asServiceRole.entities.PrimariaRete.filter({ mese }),
-      base44.asServiceRole.entities.PrimariaAci.filter({ mese }),
-      base44.asServiceRole.entities.ExtraRaccolta.filter({ mese }),
+      fetchAll(base44.asServiceRole.entities.PrimariaRete, { mese }),
+      fetchAll(base44.asServiceRole.entities.PrimariaAci, { mese }),
+      fetchAll(base44.asServiceRole.entities.ExtraRaccolta, { mese }),
     ]);
 
     // Load attiva tariffe

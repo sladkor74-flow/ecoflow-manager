@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetrics } from "../../shared/primarieReteAnalytics.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Motore di controllo: scansiona i record di un modulo e genera Alert per le regole violate.
 // Payload: { modulo, record_ids?, solo_aperti?: boolean }
@@ -34,7 +35,7 @@ export default async function(req) {
     }
 
     // Carica record da validare
-    const records = await base44.asServiceRole.entities[entityName].list('-created_date', 10000);
+    const records = await fetchAll(base44.asServiceRole.entities[entityName]);
 
     // Carica alert aperti esistenti per evitare duplicati
     const existingAlerts = await base44.asServiceRole.entities.Alert.filter({

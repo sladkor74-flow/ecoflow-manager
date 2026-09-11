@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Aggrega raccolte RETE e ACI per regione + target mensili.
 // Payload: { mese, anno } — default mese corrente.
@@ -16,8 +17,8 @@ export default async function(req) {
     if (mese) filter.mese = mese;
 
     const [rete, aci, targets] = await Promise.all([
-      base44.asServiceRole.entities.PrimariaRete.filter(filter, '-created_date', 10000),
-      base44.asServiceRole.entities.PrimariaAci.filter(filter, '-created_date', 10000),
+      fetchAll(base44.asServiceRole.entities.PrimariaRete, filter),
+      fetchAll(base44.asServiceRole.entities.PrimariaAci, filter),
       base44.asServiceRole.entities.TargetMensile.filter(mese ? { mese } : {}, '-created_date', 10000),
     ]);
 

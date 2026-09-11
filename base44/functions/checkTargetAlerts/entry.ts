@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { PROV_TO_REGION, MESI } from "../../shared/raccoltoCalculator.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Controlla i target mensili di raccolta e genera alert per target non raggiunti o a rischio.
 // Payload: { mese?, anno?, crea_alerts?: boolean }
@@ -35,8 +36,8 @@ export default async function(req) {
 
     // Carica primarie e aggrega raccolto per raccoglitore+regione
     const [rete, aci] = await Promise.all([
-      base44.asServiceRole.entities.PrimariaRete.filter({ mese }, '-created_date', 10000),
-      base44.asServiceRole.entities.PrimariaAci.filter({ mese }, '-created_date', 10000),
+      fetchAll(base44.asServiceRole.entities.PrimariaRete, { mese }),
+      fetchAll(base44.asServiceRole.entities.PrimariaAci, { mese }),
     ]);
 
     const raccoltoByKey = {};

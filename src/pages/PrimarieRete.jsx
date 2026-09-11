@@ -9,6 +9,7 @@ import RaccoglitoriMix from '@/components/primarie-rete/RaccoglitoriMix';
 import SlaMetrics from '@/components/primarie-rete/SlaMetrics';
 import PrimarieReteTable from '@/components/primarie-rete/PrimarieReteTable';
 import MultiSelect from '@/components/shared/MultiSelect';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -47,7 +48,7 @@ export default function PrimarieRete() {
   const loadRecords = useCallback(async () => {
     setLoadingRecords(true);
     try {
-      const all = await base44.entities.PrimariaRete.list('-created_date', 10000);
+      const all = await fetchAllClient(base44.entities.PrimariaRete);
       setAllRecords(all);
       const filtered = all.filter(r => {
         if (filters.regione.length > 0 && !filters.regione.includes((r.regione || '').trim())) return false;

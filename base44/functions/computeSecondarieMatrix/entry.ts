@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { MESI } from "../../shared/raccoltoCalculator.ts";
 import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
 import { matchesFilter, matchesFilterString, matchesFilterLower } from "../../shared/multiFilter.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Calcola le matrici di aggregazione dei trasporti secondari per tratta.
 // Payload: { filters: { stoccaggio?, destinazione?, mese?, settimana?, classe?, trasportatore?, anno? } }
@@ -14,7 +15,7 @@ export default async function(req) {
     const body = await req.json();
     const filters = body.filters || {};
 
-    const all = await base44.asServiceRole.entities.Secondaria.list('-created_date', 10000);
+    const all = await fetchAll(base44.asServiceRole.entities.Secondaria);
 
     // Applica filtri (supporto multi-selezione via array)
     const filtered = all.filter(r => {

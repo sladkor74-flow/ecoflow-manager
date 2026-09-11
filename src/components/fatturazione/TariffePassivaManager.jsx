@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Plus, Save, X, AlertTriangle, Pencil, Lock, CalendarX, RotateCcw } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 
 const REGIONI = ['Campania', 'Puglia', 'Basilicata', 'Calabria', 'Lazio', 'Molise', 'Abruzzo', 'Sicilia', 'Sardegna', 'Toscana', 'Lombardia', 'Piemonte', 'Veneto', 'Emilia-Romagna', 'Marche', 'Umbria', 'Liguria', 'Friuli-Venezia Giulia', 'Trentino-Alto Adige', 'Valle d\'Aosta'];
 
@@ -45,7 +46,7 @@ export default function TariffePassivaManager() {
       const [t, f, primarie] = await Promise.all([
         base44.entities.Tariffa.filter({ direzione: 'PASSIVA', tipologia: 'RETE' }),
         base44.entities.Fornitore.filter({ stato: 'attivo' }),
-        base44.entities.PrimariaRete.list('-created_date', 5000),
+        fetchAllClient(base44.entities.PrimariaRete),
       ]);
       // Estrai province distinte dai record PrimariaRete (sigle di 2 lettere)
       const provSet = new Set();

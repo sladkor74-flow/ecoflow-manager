@@ -15,6 +15,7 @@ import TargetRaccoglitoriPrimariaTable from '@/components/target-status/TargetRa
 import { useAuth } from '@/lib/AuthContext';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { Loader2, RefreshCw, Filter, X, Plus } from 'lucide-react';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 
 const TARGET_BY_YEAR = { 2025: 11200, 2026: 11550 };
 const getTargetForYear = (year) => TARGET_BY_YEAR[year] || (year >= 2026 ? 11550 : 11200);
@@ -40,8 +41,8 @@ export default function TargetStatus() {
     try {
       const [raccoltoRes, targetRes, impTargetRes] = await Promise.all([
         base44.functions.invoke('computeRaccolto', { filters }),
-        base44.entities.TargetMensile.list('-created_date', 10000),
-        base44.entities.ImpiantoTarget.list('-created_date', 10000),
+        fetchAllClient(base44.entities.TargetMensile),
+        fetchAllClient(base44.entities.ImpiantoTarget),
       ]);
       setRaccolto(raccoltoRes.data);
       setTargets(targetRes);

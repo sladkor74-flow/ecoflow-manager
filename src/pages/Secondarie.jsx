@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
 import { fmtTon, formatNumber } from '@/lib/utils';
 import MultiSelect from '@/components/shared/MultiSelect';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 
 export default function Secondarie() {
   const [data, setData] = useState(null);
@@ -34,7 +35,7 @@ export default function Secondarie() {
   const loadRecords = useCallback(async () => {
     setLoadingRecords(true);
     try {
-      const all = await base44.entities.Secondaria.list('-created_date', 10000);
+      const all = await fetchAllClient(base44.entities.Secondaria);
       const filtered = all.filter(r => {
         if (searchIdOrdine && !(r.id_ordine || '').toLowerCase().includes(searchIdOrdine.toLowerCase().trim())) return false;
         if (filters.stoccaggio.length > 0 && !filters.stoccaggio.includes((r.stoccaggio || '').trim())) return false;

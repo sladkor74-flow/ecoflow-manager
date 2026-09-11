@@ -7,6 +7,7 @@ import AssegnatiTable from '@/components/assegnati/AssegnatiTable';
 import ProvinceRanking from '@/components/assegnati/ProvinceRanking';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import MultiSelect from '@/components/shared/MultiSelect';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 
 export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Rete — Backlog Richieste', description = 'Ordini in stato "assegnato" di classe diversa da PFU Autodemolizione, derivati automaticamente dal caricamento delle Primarie.' }) {
   const [data, setData] = useState(null);
@@ -32,7 +33,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
   const loadRecords = useCallback(async () => {
     setLoadingRecords(true);
     try {
-      const all = await base44.entities[entity].list('-ordine_immesso_il', 10000);
+      const all = await fetchAllClient(base44.entities[entity], null, '-ordine_immesso_il');
       const filtered = all.filter(r => {
         if (filters.anno.length > 0 && !filters.anno.map(String).includes(String(r.anno))) return false;
         if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;

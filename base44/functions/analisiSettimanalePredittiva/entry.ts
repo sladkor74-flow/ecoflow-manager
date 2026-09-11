@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const KG_PER_VIAGGIO = 14000;
@@ -24,7 +25,7 @@ export default async function(req) {
     const b = base44.asServiceRole;
 
     const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
-    const secondarie = await b.entities.Secondaria.list('-created_date', 10000);
+    const secondarie = await fetchAll(b.entities.Secondaria);
 
     const oggi = new Date();
     // Settimana appena conclusa = lunedì-domenica della settimana scorsa

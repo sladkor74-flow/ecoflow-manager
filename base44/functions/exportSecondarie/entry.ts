@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Esporta i dati Secondarie (dettaglio o matrice per tratta) in Excel.
 // Payload: { filters: {...}, mode: 'detail' | 'matrix' }
@@ -14,7 +15,7 @@ export default async function(req) {
     const filters = body.filters || {};
     const mode = body.mode || 'detail';
 
-    const all = await base44.asServiceRole.entities.Secondaria.list('-created_date', 10000);
+    const all = await fetchAll(base44.asServiceRole.entities.Secondaria);
 
     const filtered = all.filter(r => {
       if (!matchesFilter((r.stoccaggio || '').trim(), filters.stoccaggio)) return false;

@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { MESI } from "../../shared/raccoltoCalculator.ts";
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Calcola la matrice analitica aggregata del backlog degli ordini Assegnati.
 // Payload: { filters: { anno?, mese?, regione?, provincia?, partner_operativo?, classe? } }
@@ -14,7 +15,7 @@ export default async function(req) {
     const filters = body.filters || {};
     const entityName = body.entity || 'Assegnato';
 
-    const all = await base44.asServiceRole.entities[entityName].list('-created_date', 10000);
+    const all = await fetchAll(base44.asServiceRole.entities[entityName]);
 
     // Applica filtri (supporto multi-selezione via array)
     const filtered = all.filter(r => {
