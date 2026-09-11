@@ -1,22 +1,36 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Filter, X, MapPin, Users } from 'lucide-react';
+import { Filter, X, MapPin, Users, Download, Loader2 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import PdrUpload from '@/components/pdr/PdrUpload';
 import PdrTable from '@/components/pdr/PdrTable';
+import PdrClientiTable from '@/components/pdr/PdrClientiTable';
 import MultiSelect from '@/components/shared/MultiSelect';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
 
 export default function Pdr() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [activeTab, setActiveTab] = useState('pdr');
   const [filters, setFilters] = useState({ regione: [], provincia: [], trasportatore_principale: [], codice_import: [] });
-  const [search, setSearch] = useState({ ragione_sociale: '', comune: '', codice_fiscale: '', partita_iva: '' });
+  const [search, setSearch] = useState({ ragione_sociale: '', comune: '', codice_fiscale: '', partita_iva: '', contatto: '', indirizzo_pdr: '' });
+  const [statoPdr, setStatoPdr] = useState('tutti');
   const [soloAutodemolitori, setSoloAutodemolitori] = useState(false);
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
     try {
-      const all = await base44.entities.Pdr.list('-created_date', 10000);
+      const all = [];
+      let skip = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const batch = await base44.entities.Pdr.list('-created_date', 1000, skip);
+        all.push(...batch);
+        hasMore = batch.length === 1000;
+        skip += 1000;
+      }
       setRecords(all);
     } catch (e) { console.error(e); }
     setLoading(false);
@@ -41,26 +55,112 @@ export default function Pdr() {
 
   const filtered = useMemo(() => {
     const matchSearch = (val, term) => !term || (val || '').toLowerCase().includes(term.toLowerCase().trim());
+    const matchMulti = (val, arr) => arr.length === 0 || arr.includes(val);
     return records.filter(r => {
-      if (filters.regione.length > 0 && !filters.regione.includes(getRegioneFromProvincia(r.provincia))) return false;
-      if (filters.provincia.length > 0 && !filters.provincia.includes(r.provincia)) return false;
-      if (filters.trasportatore_principale.length > 0 && !filters.trasportatore_principale.includes(r.trasportatore_principale)) return false;
-      if (filters.codice_import.length > 0 && !filters.codice_import.includes(r.codice_import)) return false;
+      if (!matchMulti(getRegioneFromProvincia(r.provincia), filters.regione)) return false;
+      if (!matchMulti(r.provincia, filters.provincia)) return false;
+      if (!matchMulti(r.trasportatore_principale, filters.trasportatore_principale)) return false;
+      if (!matchMulti(r.codice_import, filters.codice_import)) return false;
       if (soloAutodemolitori && !String(r.codice_import || '').toLowerCase().startsWith('d')) return false;
       if (!matchSearch(r.ragione_sociale, search.ragione_sociale)) return false;
-      if (!matchSearch(r.comune, search.comune)) return false;
+      // Comune: sede legale OPPURE comune PDR
+      if (search.comune && !matchSearch(r.comune, search.comune) && !matchSearch(r.comune_pdr, search.comune)) return false;
       if (!matchSearch(r.codice_fiscale, search.codice_fiscale)) return false;
       if (!matchSearch(r.partita_iva, search.partita_iva)) return false;
+      // Contatto: tel, email, riferimento
+      if (search.contatto) {
+        const t = search.contatto.toLowerCase().trim();
+        const hay = [r.tel, r.email, r.riferimento].map(v => (v || '').toLowerCase());
+        if (!hay.some(v => v.includes(t))) return false;
+      }
+      // Indirizzo PDR: indirizzo_pdr, descrizione_pdr
+      if (search.indirizzo_pdr) {
+        const t = search.indirizzo_pdr.toLowerCase().trim();
+        const hay = [r.indirizzo_pdr, r.descrizione_pdr].map(v => (v || '').toLowerCase());
+        if (!hay.some(v => v.includes(t))) return false;
+      }
+      // Stato PDR
+      const isSospeso = !!(r.sospeso && String(r.sospeso).trim() !== '');
+      if (statoPdr === 'attivi' && isSospeso) return false;
+      if (statoPdr === 'sospesi' && !isSospeso) return false;
       return true;
     });
-  }, [records, filters, search, soloAutodemolitori]);
+  }, [records, filters, search, soloAutodemolitori, statoPdr]);
 
   const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v) ||
-    Object.values(search).some(v => v) || soloAutodemolitori;
+    Object.values(search).some(v => v) || soloAutodemolitori || statoPdr !== 'tutti';
   const resetFilters = () => {
     setFilters({ regione: [], provincia: [], trasportatore_principale: [], codice_import: [] });
-    setSearch({ ragione_sociale: '', comune: '', codice_fiscale: '', partita_iva: '' });
+    setSearch({ ragione_sociale: '', comune: '', codice_fiscale: '', partita_iva: '', contatto: '', indirizzo_pdr: '' });
+    setStatoPdr('tutti');
     setSoloAutodemolitori(false);
+  };
+
+  const exportExcel = async () => {
+    setExporting(true);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const wb = XLSX.utils.book_new();
+
+      if (activeTab === 'pdr') {
+        const rows = filtered.map(r => ({
+          'Cod. Esterno': r.codice_esterno || '',
+          'ID Cliente': r.id_cliente || '',
+          'Ragione Sociale': r.ragione_sociale || '',
+          'Sede Legale': r.sede_legale || '',
+          'Comune': r.comune || '',
+          'Prov.': r.provincia || '',
+          'CAP': r.cap || '',
+          'Nazione': r.nazione || '',
+          'Riferimento': r.riferimento || '',
+          'Tel': r.tel || '',
+          'Fax': r.fax || '',
+          'Email': r.email || '',
+          'Cod. Fiscale': r.codice_fiscale || '',
+          'Partita IVA': r.partita_iva || '',
+          'Cod. Import': r.codice_import || '',
+          'ID PDR': r.id_pdr || '',
+          'Cod. Esterno PDR': r.codice_esterno_pdr || '',
+          'Descrizione PDR': r.descrizione_pdr || '',
+          'Indirizzo PDR': r.indirizzo_pdr || '',
+          'CAP PDR': r.cap_pdr || '',
+          'Comune PDR': r.comune_pdr || '',
+          'Prov. PDR': r.provincia_pdr || '',
+          'Sospeso': r.sospeso || '',
+          'KeyAccount': r.key_account || '',
+          'Partner Operativo': r.partner_operativo || '',
+          'Trasportatore Principale': r.trasportatore_principale || '',
+        }));
+        const ws = XLSX.utils.json_to_sheet(rows);
+        XLSX.utils.book_append_sheet(wb, ws, 'Punti di Raccolta');
+      } else {
+        // Raggruppa per id_cliente
+        const gruppi = {};
+        for (const r of filtered) {
+          const key = r.id_cliente;
+          if (!gruppi[key]) {
+            gruppi[key] = {
+              'Ragione Sociale': r.ragione_sociale || '',
+              'Partita IVA': r.partita_iva || '',
+              'Comune sede': r.comune || '',
+              'Provincia': r.provincia || '',
+              'Numero di PDR': 0,
+              'Trasportatore principale': r.trasportatore_principale || '',
+            };
+          }
+          gruppi[key]['Numero di PDR']++;
+        }
+        const rows = Object.values(gruppi);
+        const ws = XLSX.utils.json_to_sheet(rows);
+        XLSX.utils.book_append_sheet(wb, ws, 'Clienti');
+      }
+
+      XLSX.writeFile(wb, `PDR_Ecotyre_${today}.xlsx`);
+    } catch (e) {
+      console.error(e);
+      alert('Errore export: ' + (e.message || 'errore sconosciuto'));
+    }
+    setExporting(false);
   };
 
   return (
@@ -72,8 +172,18 @@ export default function Pdr() {
           </h1>
           <p className="text-muted-foreground mt-1">Gommisti e autodemolitori con relativi punti di raccolta.</p>
         </div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Users className="w-4 h-4" /> {filtered.length} di {records.length} record
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Users className="w-4 h-4" /> {filtered.length} di {records.length} record
+          </div>
+          <button
+            onClick={exportExcel}
+            disabled={exporting || filtered.length === 0}
+            className="inline-flex items-center gap-1.5 text-sm font-medium border rounded-md px-3 py-1.5 hover:bg-accent disabled:opacity-50"
+          >
+            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            Esporta Excel
+          </button>
         </div>
       </div>
 
@@ -100,8 +210,8 @@ export default function Pdr() {
             )}
           </div>
         </div>
-        {/* Filtri MultiSelect e ricerca testuale */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {/* Riga 1: filtri MultiSelect + Stato PDR */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Regione</label>
             <MultiSelect allLabel="Tutte le regioni" options={filterOptions.regioni} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
@@ -119,11 +229,26 @@ export default function Pdr() {
             <MultiSelect allLabel="Tutti i cod. import" options={filterOptions.codiciImport} selected={filters.codice_import} onChange={v => setFilters(p => ({ ...p, codice_import: v }))} />
           </div>
           <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Stato PDR</label>
+            <select
+              value={statoPdr}
+              onChange={e => setStatoPdr(e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+            >
+              <option value="tutti">Tutti</option>
+              <option value="attivi">Solo attivi</option>
+              <option value="sospesi">Solo sospesi</option>
+            </select>
+          </div>
+        </div>
+        {/* Riga 2: ricerca testuale */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div>
             <label className="text-xs text-muted-foreground mb-1 block">Ragione Sociale</label>
             <input type="text" value={search.ragione_sociale} onChange={e => setSearch(p => ({ ...p, ragione_sociale: e.target.value }))} placeholder="Cerca..." className="w-full border rounded-md px-3 py-2 text-sm" />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Comune</label>
+            <label className="text-xs text-muted-foreground mb-1 block">Comune (sede o PDR)</label>
             <input type="text" value={search.comune} onChange={e => setSearch(p => ({ ...p, comune: e.target.value }))} placeholder="Cerca..." className="w-full border rounded-md px-3 py-2 text-sm" />
           </div>
           <div>
@@ -134,10 +259,29 @@ export default function Pdr() {
             <label className="text-xs text-muted-foreground mb-1 block">Partita IVA</label>
             <input type="text" value={search.partita_iva} onChange={e => setSearch(p => ({ ...p, partita_iva: e.target.value }))} placeholder="Cerca..." className="w-full border rounded-md px-3 py-2 text-sm" />
           </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Contatto</label>
+            <input type="text" value={search.contatto} onChange={e => setSearch(p => ({ ...p, contatto: e.target.value }))} placeholder="Tel, email, riferimento..." className="w-full border rounded-md px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Indirizzo PDR</label>
+            <input type="text" value={search.indirizzo_pdr} onChange={e => setSearch(p => ({ ...p, indirizzo_pdr: e.target.value }))} placeholder="Indirizzo o descrizione..." className="w-full border rounded-md px-3 py-2 text-sm" />
+          </div>
         </div>
       </div>
 
-      <PdrTable records={filtered} loading={loading} />
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="pdr">Punti di raccolta</TabsTrigger>
+          <TabsTrigger value="clienti">Clienti</TabsTrigger>
+        </TabsList>
+        <TabsContent value="pdr">
+          <PdrTable records={filtered} loading={loading} />
+        </TabsContent>
+        <TabsContent value="clienti">
+          <PdrClientiTable records={filtered} loading={loading} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
