@@ -2,11 +2,24 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
 import { enrichRecords } from "../../shared/dataEnrichment.ts";
+import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSignatures.ts";
 
-// Importa un file Excel scaricato dal portale Ecotyre: legge il foglio corretto,
-// mappa le colonne sui campi entità e salva in bulk.
-// Payload: { file_url, tipo_file, nome_file, periodo_riferimento?, replace_existing? }
+// Importa un file Excel scaricato dal portale Ecotyre con validazione anti-perdita-dati.
+// Flusso tassativo:
+// 1. scarica e leggi il file
+// 2. riconosci il foglio tramite firma intestazioni (no fallback al primo foglio)
+// 3. mappa le righe ed esegui l'enrichment
+// 4. controllo contenuto (primarie: almeno un terminato)
+// 5. se zero righe valide -> 400
+// 6. controllo anti-regressione (id mancanti -> 409, a meno di conferma_forzatura)
+// 7. SOLO ORA: deleteMany + bulkCreate
+// Payload: { file_url, tipo_file, nome_file, periodo_riferimento?, replace_existing?, conferma_forzatura? }
+
+const CHUNK = 100;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
 export default async function(req) {
+  let tipo_file = null, nome_file = 'N/D', file_url = null;
   try {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
@@ -14,29 +27,109 @@ export default async function(req) {
     if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
 
     const body = await req.json();
-    const { file_url, tipo_file, nome_file, periodo_riferimento, replace_existing } = body;
+    tipo_file = body.tipo_file;
+    nome_file = body.nome_file || 'N/D';
+    file_url = body.file_url;
+    const { periodo_riferimento, conferma_forzatura } = body;
 
     if (!file_url || !tipo_file) {
       return Response.json({ error: 'file_url e tipo_file sono obbligatori' }, { status: 400 });
     }
+
+    // === Punto 6: rifiuta "assegnati" ===
+    if (tipo_file === 'assegnati') {
+      return Response.json({
+        error: "Lo slot Assegnati e' stato rimosso. Gli assegnati vengono popolati automaticamente dal caricamento del file Primarie."
+      }, { status: 400 });
+    }
+
     const config = SHEET_MAP[tipo_file];
     if (!config) {
       return Response.json({ error: 'tipo_file non valido. Valori ammessi: ' + Object.keys(SHEET_MAP).join(', ') }, { status: 400 });
     }
 
-    // 1. Scarica e parse il file Excel
+    // === 1. Scarica e parse il file Excel ===
     const fileRes = await fetch(file_url);
     if (!fileRes.ok) return Response.json({ error: 'Impossibile scaricare il file' }, { status: 502 });
     const ab = await fileRes.arrayBuffer();
     const wb = XLSX.read(ab, { type: 'array', cellDates: true });
 
-    // Trova il foglio (match case-insensitive e trim; fallback al primo foglio)
-    const sheetName = wb.SheetNames.find(n => n.trim().toLowerCase() === config.sheetName.trim().toLowerCase())
-      || wb.SheetNames[0];
+    // === 2. Riconosci il foglio tramite firma intestazioni ===
+    const sig = FILE_SIGNATURES[tipo_file];
+    let sheetName = null;
+    let avviso_colonne = [];
+
+    if (sig) {
+      // Tipi con firma: primarie, secondarie, terziarie
+      for (const sn of wb.SheetNames) {
+        const wsTmp = wb.Sheets[sn];
+        const rowsTmp = XLSX.utils.sheet_to_json(wsTmp, { defval: null, raw: true, header: 1 });
+        if (rowsTmp.length === 0) continue;
+        const headers = rowsTmp[0].map(h => String(h || ''));
+        const check = checkSignature(headers, sig);
+        if (check.match) {
+          sheetName = sn;
+          avviso_colonne = check.attese_mancanti;
+          break;
+        }
+      }
+      if (!sheetName) {
+        // Nessun foglio valido: controlla se corrisponde a un altro tipo
+        let tipo_rilevato = null;
+        for (const sn of wb.SheetNames) {
+          const wsTmp = wb.Sheets[sn];
+          const rowsTmp = XLSX.utils.sheet_to_json(wsTmp, { defval: null, raw: true, header: 1 });
+          if (rowsTmp.length === 0) continue;
+          const headers = rowsTmp[0].map(h => String(h || ''));
+          const detected = detectType(headers);
+          if (detected && detected !== tipo_file) { tipo_rilevato = detected; break; }
+        }
+        // Dettaglio dal primo foglio
+        const firstWs = wb.Sheets[wb.SheetNames[0]];
+        const firstRows = XLSX.utils.sheet_to_json(firstWs, { defval: null, raw: true, header: 1 });
+        const firstHeaders = firstRows.length > 0 ? firstRows[0].map(h => String(h || '')) : [];
+        const check = checkSignature(firstHeaders, sig);
+        const dettaglioParts = [];
+        if (check.chiave_mancanti.length > 0) dettaglioParts.push('Colonne chiave mancanti: ' + check.chiave_mancanti.join(', '));
+        if (check.vietate_trovate.length > 0) dettaglioParts.push('Colonne vietate presenti: ' + check.vietate_trovate.join(', '));
+
+        const errResp = {
+          error: 'Formato file non valido',
+          dettaglio: dettaglioParts.join('. ') || 'Le intestazioni non corrispondono al tipo file richiesto',
+          fogli_trovati: wb.SheetNames,
+        };
+        if (tipo_rilevato) {
+          errResp.tipo_rilevato = `Il file caricato sembra di tipo ${tipo_rilevato.toUpperCase()} ma e' stato caricato nello slot ${tipo_file.toUpperCase()}`;
+        }
+        await base44.asServiceRole.entities.UploadLog.create({
+          tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          esito: 'errore', messaggio: errResp.error + (tipo_rilevato ? ' - ' + errResp.tipo_rilevato : ''),
+          periodo_riferimento: periodo_riferimento || ''
+        });
+        return Response.json(errResp, { status: 400 });
+      }
+    } else {
+      // Tipi senza firma: match nome foglio (SENZA fallback al primo)
+      sheetName = wb.SheetNames.find(n => n.trim().toLowerCase() === config.sheetName.trim().toLowerCase());
+      if (!sheetName) {
+        const errResp = {
+          error: 'Formato file non valido',
+          dettaglio: `Nessun foglio denominato "${config.sheetName}" trovato nel file`,
+          fogli_trovati: wb.SheetNames
+        };
+        await base44.asServiceRole.entities.UploadLog.create({
+          tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          esito: 'errore', messaggio: errResp.dettaglio,
+          periodo_riferimento: periodo_riferimento || ''
+        });
+        return Response.json(errResp, { status: 400 });
+      }
+    }
+
     const ws = wb.Sheets[sheetName];
     const rawRows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: true });
 
-    // 2. Mappa colonne Excel -> campi entità
+    // === 3. Mappa colonne Excel -> campi entita' ===
     const colMap = config.columns;
     const mapped = rawRows.map(row => {
       const obj = {};
@@ -59,21 +152,115 @@ export default async function(req) {
       return obj;
     }).filter(r => r.id_ordine && (!config.statoFilter || (r.stato || '').toLowerCase().trim() === config.statoFilter));
 
-    // 2b. Enrichment: calcola colonne derivate (mese, settimana, anno, classe, regione, nr_giorni, scadenza, esito tempi)
+    // 3b. Enrichment
     const enriched = enrichRecords(mapped, config.entity);
 
-    // 3. Split e importazione
-    const CHUNK = 100;
-    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    // === 4. Controllo sul contenuto (primarie: almeno un terminato) ===
+    if (tipo_file === 'primarie') {
+      const hasTerminato = enriched.some(r => (r.stato || '').toLowerCase().trim() === 'terminato');
+      if (!hasTerminato) {
+        const errResp = { error: "Il file non contiene alcun ordine terminato: sembra una selezione filtrata (es. soli assegnati), non l'export completo delle primarie." };
+        await base44.asServiceRole.entities.UploadLog.create({
+          tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          esito: 'errore', messaggio: errResp.error,
+          periodo_riferimento: periodo_riferimento || '', foglio_usato: sheetName
+        });
+        return Response.json(errResp, { status: 400 });
+      }
+    }
 
-    // Campi per entità Assegnato/AssegnatoAci (sottoinsieme dei campi Primaria)
+    // === 5. Se zero righe valide, interrompi ===
+    if (enriched.filter(r => r.id_ordine).length === 0) {
+      const errResp = { error: 'Nessuna riga valida trovata nel file' };
+      await base44.asServiceRole.entities.UploadLog.create({
+        tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+        esito: 'errore', messaggio: errResp.error,
+        periodo_riferimento: periodo_riferimento || '', foglio_usato: sheetName
+      });
+      return Response.json(errResp, { status: 400 });
+    }
+
+    // === 6. Controllo anti-regressione ===
+    const loadAllIds = async (entityName) => {
+      const ids = new Set();
+      let skip = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const batch = await base44.asServiceRole.entities[entityName].list('-created_date', 1000, skip, 'id_ordine');
+        for (const r of batch) { if (r.id_ordine) ids.add(r.id_ordine); }
+        hasMore = batch.length === 1000;
+        skip += 1000;
+        if (hasMore) await sleep(100);
+      }
+      return ids;
+    };
+
+    let righe_archivio_prima = 0;
+    let avviso_date = null;
+
+    const antiRegressionTypes = ['primarie', 'secondarie', 'terziarie'];
+    if (antiRegressionTypes.includes(tipo_file)) {
+      let existingIds;
+      if (tipo_file === 'primarie') {
+        existingIds = new Set();
+        for (const ent of ['PrimariaRete', 'PrimariaAci', 'Assegnato', 'AssegnatoAci']) {
+          const ids = await loadAllIds(ent);
+          for (const id of ids) existingIds.add(id);
+        }
+      } else {
+        existingIds = await loadAllIds(config.entity);
+      }
+      righe_archivio_prima = existingIds.size;
+
+      const fileIds = new Set(enriched.filter(r => r.id_ordine).map(r => r.id_ordine));
+      const mancanti = [];
+      for (const id of existingIds) { if (!fileIds.has(id)) mancanti.push(id); }
+
+      if (mancanti.length > 0 && !conferma_forzatura) {
+        const errResp = {
+          error: "Il file contiene meno dati di quelli gia' presenti in archivio",
+          righe_file: fileIds.size, righe_archivio: existingIds.size,
+          mancanti: mancanti.length, esempi_mancanti: mancanti.slice(0, 10),
+          richiede_conferma: true
+        };
+        await base44.asServiceRole.entities.UploadLog.create({
+          tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          esito: 'errore', messaggio: `${errResp.error} (${mancanti.length} ordini mancanti su ${existingIds.size} in archivio)`,
+          periodo_riferimento: periodo_riferimento || '', foglio_usato: sheetName,
+          righe_archivio_prima: existingIds.size, forzato: false
+        });
+        return Response.json(errResp, { status: 409 });
+      }
+
+      // e) Confronto date massime Trasporto_finito_il
+      const maxDateFile = enriched
+        .filter(r => r.trasporto_finito_il)
+        .map(r => new Date(r.trasporto_finito_il).getTime())
+        .reduce((max, t) => Math.max(max, t), 0);
+      if (maxDateFile > 0) {
+        let maxDateArchivio = 0;
+        const dateEntities = tipo_file === 'primarie' ? ['PrimariaRete', 'PrimariaAci'] : [config.entity];
+        for (const ent of dateEntities) {
+          const recs = await base44.asServiceRole.entities[ent].list('-trasporto_finito_il', 1, 0, 'trasporto_finito_il');
+          if (recs.length > 0 && recs[0].trasporto_finito_il) {
+            const t = new Date(recs[0].trasporto_finito_il).getTime();
+            if (t > maxDateArchivio) maxDateArchivio = t;
+          }
+        }
+        if (maxDateArchivio > 0 && maxDateFile < maxDateArchivio) {
+          avviso_date = { data_file: new Date(maxDateFile).toISOString(), data_archivio: new Date(maxDateArchivio).toISOString() };
+        }
+      }
+    }
+
+    // === 7. SOLO ORA: cancellazione e import ===
     const CAMPI_ASSEGNATO = [
       'id_ordine', 'stato', 'ordine_immesso_il', 'id_cliente', 'ragione_sociale',
       'id_pdr', 'punto_di_raccolta', 'indirizzo', 'cap', 'comune', 'provincia',
       'codice_regione', 'macroarea', 'codice_prodotto', 'prodotto', 'classe',
       'cer', 'tipo_contenitori', 'quantita_richiesta', 'quantita_ritirata',
       'peso_stimato', 'peso_effettivo', 'key_account', 'partner_operativo',
-      'id_trasportatore', 'trasportatore', 'regioni', 'mese', 'anno', 'sigla', 'regione'
+      'id_partner_operativo', 'id_trasportatore', 'trasportatore', 'regioni', 'mese', 'anno', 'sigla', 'regione'
     ];
 
     const isAciClasse = (classe, prodotto) => {
@@ -84,24 +271,12 @@ export default async function(req) {
     };
     const isAssegnatoStato = (stato) => (stato || '').toLowerCase().trim() === 'assegnato';
 
-    let imported = 0, failed = 0, lastError = null;
-    let assegnati_importati = 0, assegnati_falliti = 0;
-    let assegnati_aci_importati = 0, assegnati_aci_falliti = 0;
-    let primarie_rete_importati = 0, primarie_rete_falliti = 0;
-    let primarie_aci_importati = 0, primarie_aci_falliti = 0;
-
     const importBucket = async (rows, entityName, campi = null) => {
-      let toImport = rows;
-      if (replace_existing === false) {
-        const existing = await base44.asServiceRole.entities[entityName].list('-created_date', 10000);
-        const existingIds = new Set(existing.map(r => r.id_ordine).filter(Boolean));
-        toImport = rows.filter(r => !existingIds.has(r.id_ordine));
-      } else {
-        await base44.asServiceRole.entities[entityName].deleteMany({});
-      }
+      // SEMPRE deleteMany: la protezione anti-regressione e' gia' passata
+      await base44.asServiceRole.entities[entityName].deleteMany({});
       const records = campi
-        ? toImport.map(r => { const o = {}; for (const f of campi) o[f] = r[f] ?? null; return o; }).filter(r => r.id_ordine)
-        : toImport.filter(r => r.id_ordine);
+        ? rows.map(r => { const o = {}; for (const f of campi) o[f] = r[f] ?? null; return o; }).filter(r => r.id_ordine)
+        : rows.filter(r => r.id_ordine);
       let imp = 0, fail = 0;
       for (let i = 0; i < records.length; i += CHUNK) {
         const chunk = records.slice(i, i + CHUNK);
@@ -112,7 +287,6 @@ export default async function(req) {
             imp += chunk.length;
             success = true;
           } catch (e) {
-            lastError = e.message || String(e);
             if (attempt < 2) await sleep(3000 * (attempt + 1));
           }
         }
@@ -122,8 +296,13 @@ export default async function(req) {
       return { imp, fail };
     };
 
+    let imported = 0, failed = 0, lastError = null;
+    let assegnati_importati = 0, assegnati_falliti = 0;
+    let assegnati_aci_importati = 0, assegnati_aci_falliti = 0;
+    let primarie_rete_importati = 0, primarie_rete_falliti = 0;
+    let primarie_aci_importati = 0, primarie_aci_falliti = 0;
+
     if (config.splitByStatoClasse) {
-      // File primarie unico: split in 4 entità basato su stato (col B) + classe (col P)
       const bucketRete = [], bucketAci = [], bucketAssRete = [], bucketAssAci = [];
       for (const r of enriched) {
         if (!r.id_ordine) continue;
@@ -134,7 +313,6 @@ export default async function(req) {
         else if (!aci) bucketRete.push(r);
         else bucketAci.push(r);
       }
-
       const r1 = await importBucket(bucketRete, 'PrimariaRete');
       primarie_rete_importati = r1.imp; primarie_rete_falliti = r1.fail;
       const r2 = await importBucket(bucketAci, 'PrimariaAci');
@@ -146,34 +324,11 @@ export default async function(req) {
       imported = primarie_rete_importati + primarie_aci_importati;
       failed = primarie_rete_falliti + primarie_aci_falliti;
     } else {
-      // Logica standard (singola entità)
-      let toImport = enriched;
-      if (replace_existing === false) {
-        const existing = await base44.asServiceRole.entities[config.entity].list('-created_date', 10000);
-        const existingIds = new Set(existing.map(r => r.id_ordine).filter(Boolean));
-        toImport = enriched.filter(r => !existingIds.has(r.id_ordine));
-      } else {
-        await base44.asServiceRole.entities[config.entity].deleteMany({});
-      }
-      for (let i = 0; i < toImport.length; i += CHUNK) {
-        const chunk = toImport.slice(i, i + CHUNK);
-        let success = false;
-        for (let attempt = 0; attempt < 3 && !success; attempt++) {
-          try {
-            await base44.asServiceRole.entities[config.entity].bulkCreate(chunk);
-            imported += chunk.length;
-            success = true;
-          } catch (e) {
-            lastError = e.message || String(e);
-            if (attempt < 2) await sleep(3000 * (attempt + 1));
-          }
-        }
-        if (!success) failed += chunk.length;
-        await sleep(1000);
-      }
+      const r = await importBucket(enriched, config.entity);
+      imported = r.imp; failed = r.fail;
     }
 
-    // 5. Log
+    // === 8. Log ===
     const esito = failed === 0 ? 'successo' : (imported > 0 ? 'parziale' : 'errore');
     const totaleDaImportare = config.splitByStatoClasse
       ? primarie_rete_importati + primarie_aci_importati + assegnati_importati + assegnati_aci_importati
@@ -182,9 +337,10 @@ export default async function(req) {
       ? `Rete: ${primarie_rete_importati} | ACI: ${primarie_aci_importati} | Ass. Rete: ${assegnati_importati} | Ass. ACI: ${assegnati_aci_importati} (foglio: ${sheetName})`
       : `${imported} righe importate su ${enriched.length} da importare (foglio: ${sheetName})`;
     await base44.asServiceRole.entities.UploadLog.create({
-      tipo_file, nome_file: nome_file || 'N/D', file_url,
+      tipo_file, nome_file, file_url,
       righe_importate: imported, righe_fallite: failed, esito,
-      messaggio, periodo_riferimento: periodo_riferimento || ''
+      messaggio, periodo_riferimento: periodo_riferimento || '',
+      foglio_usato: sheetName, righe_archivio_prima, forzato: !!conferma_forzatura
     });
 
     return Response.json({
@@ -194,9 +350,20 @@ export default async function(req) {
       assegnati_importati, assegnati_falliti,
       assegnati_aci_importati, assegnati_aci_falliti,
       primarie_rete_importati, primarie_rete_falliti,
-      primarie_aci_importati, primarie_aci_falliti
+      primarie_aci_importati, primarie_aci_falliti,
+      avviso_colonne: avviso_colonne.length > 0 ? avviso_colonne : undefined,
+      avviso_date,
+      forzato: !!conferma_forzatura
     });
   } catch (error) {
+    try {
+      const base44 = createClientFromRequest(req);
+      await base44.asServiceRole.entities.UploadLog.create({
+        tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+        esito: 'errore', messaggio: error.message || 'Errore imprevisto',
+        periodo_riferimento: ''
+      });
+    } catch (_) {}
     return Response.json({ error: error.message }, { status: 500 });
   }
 }

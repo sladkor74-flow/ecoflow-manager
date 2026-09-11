@@ -19,6 +19,7 @@ export default function SecondarieUpload({ onImported }) {
         file_url,
         tipo_file: 'secondarie',
         nome_file: file.name,
+        replace_existing: true,
       });
       setResult(res.data);
       if (onImported) onImported();

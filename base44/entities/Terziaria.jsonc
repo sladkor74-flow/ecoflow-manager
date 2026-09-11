@@ -60,6 +60,9 @@
     "partner_operativo": {
       "type": "string"
     },
+    "id_partner_operativo": {
+      "type": "number"
+    },
     "id_trasportatore": {
       "type": "number"
     },

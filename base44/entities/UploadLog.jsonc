@@ -46,6 +46,18 @@
     "periodo_riferimento": {
       "type": "string",
       "description": "Mese/periodo coperto dal file"
+    },
+    "foglio_usato": {
+      "type": "string",
+      "description": "Nome del foglio Excel riconosciuto tramite firma intestazioni"
+    },
+    "righe_archivio_prima": {
+      "type": "number",
+      "description": "Numero di record gia' presenti in archivio prima dell'import (controllo anti-regressione)"
+    },
+    "forzato": {
+      "type": "boolean",
+      "description": "Se true l'import e' stato forzato nonostante il controllo anti-regressione"
     }
   },
   "required": [
