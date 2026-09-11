@@ -62,7 +62,7 @@ export const FILE_SIGNATURES: Record<string, {
 
 // Normalizza un nome colonna per confronto case-insensitive con trim.
 export function normalizeColName(s: string): string {
-  return String(s || '').trim().toLowerCase();
+  return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 // Verifica se un set di intestazioni soddisfa la firma di un tipo_file.

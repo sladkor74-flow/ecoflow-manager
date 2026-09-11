@@ -47,7 +47,7 @@ export default async function(req) {
       35: "Latitudine", 36: "Longitudine", 37: "Approsimazione", 38: "PlaceID"
     };
 
-    const norm = (s) => String(s || '').trim().toLowerCase();
+    const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
     // Verifica la riga 1 di un foglio contro la mappa di controllo
     const checkHeaders = (headerRow) => {
