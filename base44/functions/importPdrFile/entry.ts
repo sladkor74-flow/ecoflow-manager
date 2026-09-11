@@ -137,7 +137,7 @@ export default async function(req) {
       let hasMore = true;
       const sleep = (ms) => new Promise(r => setTimeout(r, ms));
       while (hasMore) {
-        const batch = await base44.asServiceRole.entities.Pdr.list('-created_date', 1000, skip, 'id_pdr');
+        const batch = await base44.asServiceRole.entities.Pdr.list('-created_date', 1000, skip);
         for (const r of batch) { if (r.id_pdr != null) existingIds.add(r.id_pdr); }
         hasMore = batch.length === 1000;
         skip += 1000;

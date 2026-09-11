@@ -58,6 +58,14 @@
     "forzato": {
       "type": "boolean",
       "description": "Se true l'import e' stato forzato nonostante il controllo anti-regressione"
+    },
+    "modalita": {
+      "type": "string",
+      "enum": [
+        "sostituzione",
+        "aggiunta"
+      ],
+      "description": "Modalita' di import: sostituzione integrale o aggiunta additiva"
     }
   },
   "required": [

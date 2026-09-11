@@ -30,7 +30,13 @@ export default async function(req) {
     tipo_file = body.tipo_file;
     nome_file = body.nome_file || 'N/D';
     file_url = body.file_url;
-    const { periodo_riferimento, conferma_forzatura } = body;
+    const { periodo_riferimento, conferma_forzatura, replace_existing } = body;
+
+    // Calcola modalita': sostituzione integrale o aggiunta additiva.
+    // Per primarie/secondarie/terziarie la sostituzione e' sempre obbligatoria
+    // (l'anti-regressione garantisce che il file sia completo).
+    const sostituisci = ['primarie', 'secondarie', 'terziarie'].includes(tipo_file) ? true : replace_existing !== false;
+    const modalita = sostituisci ? 'sostituzione' : 'aggiunta';
 
     if (!file_url || !tipo_file) {
       return Response.json({ error: 'file_url e tipo_file sono obbligatori' }, { status: 400 });
@@ -186,7 +192,7 @@ export default async function(req) {
       let skip = 0;
       let hasMore = true;
       while (hasMore) {
-        const batch = await base44.asServiceRole.entities[entityName].list('-created_date', 1000, skip, 'id_ordine');
+        const batch = await base44.asServiceRole.entities[entityName].list('-created_date', 1000, skip);
         for (const r of batch) { if (r.id_ordine) ids.add(r.id_ordine); }
         hasMore = batch.length === 1000;
         skip += 1000;
@@ -211,6 +217,22 @@ export default async function(req) {
         existingIds = await loadAllIds(config.entity);
       }
       righe_archivio_prima = existingIds.size;
+
+      // Verifica di sicurezza: se existingIds e' vuoto ma le entita' contengono record,
+      // il controllo anti-regressione non e' attendibile - annullare per sicurezza.
+      if (existingIds.size === 0) {
+        const entitiesToCheck = tipo_file === 'primarie'
+          ? ['PrimariaRete', 'PrimariaAci', 'Assegnato', 'AssegnatoAci']
+          : [config.entity];
+        for (const ent of entitiesToCheck) {
+          const probe = await base44.asServiceRole.entities[ent].list('-created_date', 1);
+          if (probe.length > 0) {
+            return Response.json({
+              error: "Controllo anti-regressione non attendibile: impossibile leggere gli identificativi in archivio. Caricamento annullato per sicurezza."
+            }, { status: 500 });
+          }
+        }
+      }
 
       const fileIds = new Set(enriched.filter(r => r.id_ordine).map(r => r.id_ordine));
       const mancanti = [];
@@ -241,7 +263,7 @@ export default async function(req) {
         let maxDateArchivio = 0;
         const dateEntities = tipo_file === 'primarie' ? ['PrimariaRete', 'PrimariaAci'] : [config.entity];
         for (const ent of dateEntities) {
-          const recs = await base44.asServiceRole.entities[ent].list('-trasporto_finito_il', 1, 0, 'trasporto_finito_il');
+          const recs = await base44.asServiceRole.entities[ent].list('-trasporto_finito_il', 1, 0);
           if (recs.length > 0 && recs[0].trasporto_finito_il) {
             const t = new Date(recs[0].trasporto_finito_il).getTime();
             if (t > maxDateArchivio) maxDateArchivio = t;
@@ -271,15 +293,33 @@ export default async function(req) {
     };
     const isAssegnatoStato = (stato) => (stato || '').toLowerCase().trim() === 'assegnato';
 
-    const importBucket = async (rows, entityName, campi = null) => {
-      // SEMPRE deleteMany: la protezione anti-regressione e' gia' passata
-      await base44.asServiceRole.entities[entityName].deleteMany({});
+    const importBucket = async (rows, entityName, campi = null, sostituisci = true) => {
       const records = campi
         ? rows.map(r => { const o = {}; for (const f of campi) o[f] = r[f] ?? null; return o; }).filter(r => r.id_ordine)
         : rows.filter(r => r.id_ordine);
-      let imp = 0, fail = 0;
-      for (let i = 0; i < records.length; i += CHUNK) {
-        const chunk = records.slice(i, i + CHUNK);
+
+      let toImport = records;
+      if (sostituisci) {
+        // Sostituzione integrale: cancella tutto e ricarica
+        await base44.asServiceRole.entities[entityName].deleteMany({});
+      } else {
+        // Modalita' additiva: filtra i record il cui id_ordine e' gia' presente
+        const existingIds = new Set();
+        let skip = 0;
+        let hasMore = true;
+        while (hasMore) {
+          const batch = await base44.asServiceRole.entities[entityName].list('-created_date', 1000, skip);
+          for (const r of batch) { if (r.id_ordine) existingIds.add(r.id_ordine); }
+          hasMore = batch.length === 1000;
+          skip += 1000;
+          if (hasMore) await sleep(100);
+        }
+        toImport = records.filter(r => r.id_ordine && !existingIds.has(r.id_ordine));
+      }
+
+      let imp = 0, fail = 0, lastError = null;
+      for (let i = 0; i < toImport.length; i += CHUNK) {
+        const chunk = toImport.slice(i, i + CHUNK);
         let success = false;
         for (let attempt = 0; attempt < 3 && !success; attempt++) {
           try {
@@ -287,13 +327,14 @@ export default async function(req) {
             imp += chunk.length;
             success = true;
           } catch (e) {
+            lastError = e.message || String(e);
             if (attempt < 2) await sleep(3000 * (attempt + 1));
           }
         }
         if (!success) fail += chunk.length;
         await sleep(1000);
       }
-      return { imp, fail };
+      return { imp, fail, lastError };
     };
 
     let imported = 0, failed = 0, lastError = null;
@@ -313,19 +354,20 @@ export default async function(req) {
         else if (!aci) bucketRete.push(r);
         else bucketAci.push(r);
       }
-      const r1 = await importBucket(bucketRete, 'PrimariaRete');
+      const r1 = await importBucket(bucketRete, 'PrimariaRete', null, sostituisci);
       primarie_rete_importati = r1.imp; primarie_rete_falliti = r1.fail;
-      const r2 = await importBucket(bucketAci, 'PrimariaAci');
+      const r2 = await importBucket(bucketAci, 'PrimariaAci', null, sostituisci);
       primarie_aci_importati = r2.imp; primarie_aci_falliti = r2.fail;
-      const r3 = await importBucket(bucketAssRete, 'Assegnato', CAMPI_ASSEGNATO);
+      const r3 = await importBucket(bucketAssRete, 'Assegnato', CAMPI_ASSEGNATO, sostituisci);
       assegnati_importati = r3.imp; assegnati_falliti = r3.fail;
-      const r4 = await importBucket(bucketAssAci, 'AssegnatoAci', CAMPI_ASSEGNATO);
+      const r4 = await importBucket(bucketAssAci, 'AssegnatoAci', CAMPI_ASSEGNATO, sostituisci);
       assegnati_aci_importati = r4.imp; assegnati_aci_falliti = r4.fail;
       imported = primarie_rete_importati + primarie_aci_importati;
       failed = primarie_rete_falliti + primarie_aci_falliti;
+      lastError = r1.lastError || r2.lastError || r3.lastError || r4.lastError;
     } else {
-      const r = await importBucket(enriched, config.entity);
-      imported = r.imp; failed = r.fail;
+      const r = await importBucket(enriched, config.entity, null, sostituisci);
+      imported = r.imp; failed = r.fail; lastError = r.lastError;
     }
 
     // === 8. Log ===
@@ -340,7 +382,8 @@ export default async function(req) {
       tipo_file, nome_file, file_url,
       righe_importate: imported, righe_fallite: failed, esito,
       messaggio, periodo_riferimento: periodo_riferimento || '',
-      foglio_usato: sheetName, righe_archivio_prima, forzato: !!conferma_forzatura
+      foglio_usato: sheetName, righe_archivio_prima, forzato: !!conferma_forzatura,
+      modalita
     });
 
     return Response.json({
@@ -353,7 +396,8 @@ export default async function(req) {
       primarie_aci_importati, primarie_aci_falliti,
       avviso_colonne: avviso_colonne.length > 0 ? avviso_colonne : undefined,
       avviso_date,
-      forzato: !!conferma_forzatura
+      forzato: !!conferma_forzatura,
+      modalita
     });
   } catch (error) {
     try {
