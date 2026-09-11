@@ -1,7 +1,7 @@
 import React from 'react';
 import { Loader2, MapPin } from 'lucide-react';
 
-export default function PdrTable({ records, loading }) {
+export default function PdrTable({ records, loading, onSelectPdr }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
@@ -22,6 +22,7 @@ export default function PdrTable({ records, loading }) {
       <table className="w-full text-sm">
         <thead className="bg-muted">
           <tr>
+            <th className="px-2 py-2.5 w-10"></th>
             <th className="text-left px-3 py-2.5 font-medium">Cod. Esterno</th>
             <th className="text-left px-3 py-2.5 font-medium">Ragione Sociale</th>
             <th className="text-left px-3 py-2.5 font-medium">Comune</th>
@@ -39,6 +40,24 @@ export default function PdrTable({ records, loading }) {
         <tbody>
           {records.map((r) => (
             <tr key={r.id} className="border-t hover:bg-muted/50">
+              <td className="px-2 py-2 text-center">
+                {(() => {
+                  const lat = parseFloat(r.latitudine);
+                  const lng = parseFloat(r.longitudine);
+                  const hasCoords = !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
+                  return (
+                    <button
+                      type="button"
+                      disabled={!hasCoords}
+                      onClick={() => hasCoords && onSelectPdr?.(r.id)}
+                      title={hasCoords ? 'Vedi sulla mappa' : 'Coordinate non disponibili'}
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      <MapPin className="w-4 h-4 text-primary" />
+                    </button>
+                  );
+                })()}
+              </td>
               <td className="px-3 py-2 font-mono text-xs">{r.codice_esterno || '—'}</td>
               <td className="px-3 py-2 font-medium">{r.ragione_sociale || '—'}</td>
               <td className="px-3 py-2">{r.comune || '—'}</td>

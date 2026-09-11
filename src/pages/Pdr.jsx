@@ -19,6 +19,12 @@ export default function Pdr() {
   const [search, setSearch] = useState({ ragione_sociale: '', comune: '', codice_fiscale: '', partita_iva: '', contatto: '', indirizzo_pdr: '' });
   const [statoPdr, setStatoPdr] = useState('tutti');
   const [soloAutodemolitori, setSoloAutodemolitori] = useState(false);
+  const [selectedPdrId, setSelectedPdrId] = useState(null);
+
+  const handleSelectPdr = useCallback((id) => {
+    setSelectedPdrId(id);
+    if (id !== null) setActiveTab('mappa');
+  }, []);
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -289,14 +295,14 @@ export default function Pdr() {
           <TabsTrigger value="mappa"><MapPin className="w-4 h-4 mr-1.5" /> Mappa</TabsTrigger>
         </TabsList>
         <TabsContent value="pdr">
-          <PdrTable records={filtered} loading={loading} />
+          <PdrTable records={filtered} loading={loading} onSelectPdr={handleSelectPdr} />
         </TabsContent>
         <TabsContent value="clienti">
           <PdrClientiTable records={filtered} loading={loading} />
         </TabsContent>
         <TabsContent value="mappa">
           <React.Suspense fallback={<div className="flex items-center justify-center h-[400px]"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-            <PdrMap records={filtered} />
+            <PdrMap records={filtered} selectedPdrId={selectedPdrId} onSelect={handleSelectPdr} />
           </React.Suspense>
         </TabsContent>
       </Tabs>
