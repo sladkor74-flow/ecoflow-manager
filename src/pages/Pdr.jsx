@@ -8,6 +8,7 @@ import PdrClientiTable from '@/components/pdr/PdrClientiTable';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
+const PdrMap = React.lazy(() => import('@/components/pdr/PdrMap'));
 
 export default function Pdr() {
   const [records, setRecords] = useState([]);
@@ -274,12 +275,18 @@ export default function Pdr() {
         <TabsList>
           <TabsTrigger value="pdr">Punti di raccolta</TabsTrigger>
           <TabsTrigger value="clienti">Clienti</TabsTrigger>
+          <TabsTrigger value="mappa"><MapPin className="w-4 h-4 mr-1.5" /> Mappa</TabsTrigger>
         </TabsList>
         <TabsContent value="pdr">
           <PdrTable records={filtered} loading={loading} />
         </TabsContent>
         <TabsContent value="clienti">
           <PdrClientiTable records={filtered} loading={loading} />
+        </TabsContent>
+        <TabsContent value="mappa">
+          <React.Suspense fallback={<div className="flex items-center justify-center h-[400px]"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+            <PdrMap records={filtered} />
+          </React.Suspense>
         </TabsContent>
       </Tabs>
     </div>

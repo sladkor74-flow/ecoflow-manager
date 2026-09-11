@@ -73,6 +73,14 @@
     "provincia_pdr": {
       "type": "string"
     },
+    "latitudine": {
+      "type": "number",
+      "description": "Latitudine del punto di raccolta (WGS84)"
+    },
+    "longitudine": {
+      "type": "number",
+      "description": "Longitudine del punto di raccolta (WGS84)"
+    },
     "sospeso": {
       "type": "string"
     },
