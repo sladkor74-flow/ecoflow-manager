@@ -368,6 +368,7 @@ export default function TargetAnnuali() {
             <thead className="bg-muted/50">
               <tr>
                 <th className="text-left px-3 py-2 font-semibold">Impianto</th>
+                <th className="text-left px-3 py-2 font-semibold">Regione</th>
                 <th className="text-right px-3 py-2 font-semibold">Target (kg)</th>
                 <th className="text-left px-3 py-2 font-semibold">Scadenza</th>
                 <th className="text-left px-3 py-2 font-semibold">Stato</th>
@@ -378,6 +379,7 @@ export default function TargetAnnuali() {
               {impianti.map(imp => (
                 <tr key={imp.id} className="border-t hover:bg-muted/20">
                   <td className="px-3 py-2 font-medium uppercase">{imp.nome_impianto}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{imp.regione || '—'}</td>
                   <td className="px-3 py-2 text-right">
                     <EditableCell value={imp.target || 0} onSave={(v) => saveImp(imp, { target: v })} unit="kg" />
                   </td>
@@ -391,7 +393,7 @@ export default function TargetAnnuali() {
                 </tr>
               ))}
               {impianti.length === 0 && (
-                <tr><td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">Nessun impianto configurato.</td></tr>
+                <tr><td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">Nessun impianto configurato.</td></tr>
               )}
             </tbody>
           </table>
@@ -456,6 +458,7 @@ export default function TargetAnnuali() {
                 <tr>
                   <th className="text-left px-3 py-2 font-semibold">Stoccaggio</th>
                   <th className="text-left px-3 py-2 font-semibold">Impianto collegato</th>
+                  <th className="text-left px-3 py-2 font-semibold">Regione</th>
                   <th className="text-right px-3 py-2 font-semibold">Plafond (kg)</th>
                 </tr>
               </thead>
@@ -464,6 +467,7 @@ export default function TargetAnnuali() {
                   <tr key={f.id} className="border-t hover:bg-muted/20">
                     <td className="px-3 py-2 font-medium">{f.nome}</td>
                     <td className="px-3 py-2 text-muted-foreground">{f.impianto_nome || '—'}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{f.regione || '—'}</td>
                     <td className="px-3 py-2 text-right">
                       <EditableCell value={f.plafond_stoccaggio_kg || 0} onSave={(v) => savePlafond(f, v)} unit="kg" />
                     </td>
