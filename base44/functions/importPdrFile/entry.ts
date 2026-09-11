@@ -4,8 +4,10 @@ import * as XLSX from 'npm:xlsx@0.18.5';
 // Importa il file Excel PDR (elenco clienti Ecotyre: gommisti e autodemolitori).
 // Il file ha colonne con nomi duplicati (CAP, Comune, Prov., ecc. compaiono due volte),
 // quindi si usa sheet_to_json con header:1 (array di array) e mappatura per indice colonna.
-// Payload: { file_url, nome_file, replace_existing? }
+// Flusso: scarica -> valida intestazioni -> mappa -> controllo zero righe -> anti-regressione -> delete+import.
+// Payload: { file_url, nome_file, replace_existing?, conferma_forzatura? }
 export default async function(req) {
+  let nome_file = 'N/D', file_url = null;
   try {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
@@ -13,7 +15,9 @@ export default async function(req) {
     if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
 
     const body = await req.json();
-    const { file_url, nome_file, replace_existing } = body;
+    const { file_url: fu, nome_file: nf, replace_existing, conferma_forzatura } = body;
+    file_url = fu;
+    nome_file = nf || 'N/D';
     if (!file_url) return Response.json({ error: 'file_url obbligatorio' }, { status: 400 });
 
     // Mappatura indice colonna (0-based) -> campo entità
@@ -27,15 +31,70 @@ export default async function(req) {
     };
     const NUMERIC = new Set(['id_cliente', 'id_pdr']);
 
-    // Scarica e parse il file
+    // Mappa di controllo: indice colonna (0-based) -> testo atteso dell'intestazione
+    const HEADER_MAP = {
+      0: "Soft deleted", 1: "ID Cliente", 2: "Codice Esterno", 3: "Ragione Sociale",
+      4: "Sede Legale", 5: "CAP", 6: "Comune", 7: "Prov.", 8: "Nazione",
+      9: "Riferimento", 10: "Tel", 11: "Fax", 12: "Email", 13: "Cod. Fiscale",
+      14: "Partita IVA", 15: "Codice Import", 16: "ID PDR", 17: "Cod. Esterno PDR",
+      18: "Descrizione", 19: "Indirizzo", 20: "CAP", 21: "Comune", 22: "Prov.",
+      31: "Sospeso", 32: "KeyAccount", 33: "Partner Operativo", 34: "Trasportatore Principale"
+    };
+
+    const norm = (s) => String(s || '').trim().toLowerCase();
+
+    // Verifica la riga 1 di un foglio contro la mappa di controllo
+    const checkHeaders = (headerRow) => {
+      const mismatches = [];
+      for (const [idx, expected] of Object.entries(HEADER_MAP)) {
+        const actual = headerRow[parseInt(idx)];
+        if (norm(actual) !== norm(expected)) {
+          mismatches.push({
+            colonna: parseInt(idx),
+            attesa: expected,
+            trovata: actual != null ? String(actual) : '(vuoto)'
+          });
+        }
+      }
+      return { match: mismatches.length === 0, mismatches };
+    };
+
+    // === 1. Scarica e parse il file ===
     const fileRes = await fetch(file_url);
     if (!fileRes.ok) return Response.json({ error: 'Impossibile scaricare il file' }, { status: 502 });
     const ab = await fileRes.arrayBuffer();
     const wb = XLSX.read(ab, { type: 'array', cellDates: true });
-    const ws = wb.Sheets[wb.SheetNames[0]];
+
+    // === 2. Individua il foglio valido tramite la mappa di intestazioni ===
+    let ws = null;
+    let sheetName = null;
+    let lastMismatches = [];
+    for (const sn of wb.SheetNames) {
+      const wsTmp = wb.Sheets[sn];
+      const rowsTmp = XLSX.utils.sheet_to_json(wsTmp, { header: 1, defval: null, raw: true });
+      if (rowsTmp.length === 0) continue;
+      const { match, mismatches } = checkHeaders(rowsTmp[0]);
+      if (match) { ws = wsTmp; sheetName = sn; break; }
+      lastMismatches = mismatches;
+    }
+
+    if (!ws) {
+      const dettaglio = lastMismatches.map(m => `colonna ${m.colonna}: attesa '${m.attesa}', trovata '${m.trovata}'`).join('; ');
+      const errResp = {
+        error: 'Formato file PDR non valido',
+        dettaglio: dettaglio || 'Le intestazioni non corrispondono al formato atteso',
+        fogli_trovati: wb.SheetNames
+      };
+      await base44.asServiceRole.entities.UploadLog.create({
+        tipo_file: 'pdr', nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+        esito: 'errore', messaggio: errResp.error + ' - ' + errResp.dettaglio
+      });
+      return Response.json(errResp, { status: 400 });
+    }
+
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
 
-    // La prima riga è l'header; i dati iniziano dalla riga 1
+    // === 3. Mappa le righe (la prima riga è l'header; i dati iniziano dalla riga 1) ===
     const records = [];
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
@@ -60,14 +119,59 @@ export default async function(req) {
       records.push(obj);
     }
 
-    // Sostituzione completa o incrementale
-    if (replace_existing !== false) {
-      await base44.asServiceRole.entities.Pdr.deleteMany({});
+    // === 4. Se zero righe valide, interrompi senza toccare il database ===
+    if (records.length === 0) {
+      const errResp = { error: 'Nessuna riga valida trovata nel file' };
+      await base44.asServiceRole.entities.UploadLog.create({
+        tipo_file: 'pdr', nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+        esito: 'errore', messaggio: errResp.error, foglio_usato: sheetName
+      });
+      return Response.json(errResp, { status: 400 });
     }
 
+    // === 5. Controllo anti-regressione ===
+    if (replace_existing !== false && !conferma_forzatura) {
+      // Carica tutti gli id_pdr presenti in archivio paginando a blocchi di 1000
+      const existingIds = new Set();
+      let skip = 0;
+      let hasMore = true;
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+      while (hasMore) {
+        const batch = await base44.asServiceRole.entities.Pdr.list('-created_date', 1000, skip, 'id_pdr');
+        for (const r of batch) { if (r.id_pdr != null) existingIds.add(r.id_pdr); }
+        hasMore = batch.length === 1000;
+        skip += 1000;
+        if (hasMore) await sleep(100);
+      }
+
+      const fileIds = new Set(records.filter(r => r.id_pdr != null).map(r => r.id_pdr));
+      const mancanti = [];
+      for (const id of existingIds) { if (!fileIds.has(id)) mancanti.push(id); }
+
+      if (mancanti.length > 0) {
+        const errResp = {
+          error: 'Il file contiene meno punti di raccolta di quelli gia\' in archivio',
+          righe_file: fileIds.size, righe_archivio: existingIds.size,
+          mancanti: mancanti.length, esempi_mancanti: mancanti.slice(0, 10),
+          richiede_conferma: true
+        };
+        await base44.asServiceRole.entities.UploadLog.create({
+          tipo_file: 'pdr', nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          esito: 'errore', messaggio: `${errResp.error} (${mancanti.length} PDR mancanti su ${existingIds.size} in archivio)`,
+          foglio_usato: sheetName, righe_archivio_prima: existingIds.size, forzato: false
+        });
+        return Response.json(errResp, { status: 409 });
+      }
+    }
+
+    // === 6. SOLO ORA: deleteMany + import ===
     const CHUNK = 100;
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     let imported = 0, failed = 0, lastError = null;
+
+    if (replace_existing !== false) {
+      await base44.asServiceRole.entities.Pdr.deleteMany({});
+    }
 
     for (let i = 0; i < records.length; i += CHUNK) {
       const chunk = records.slice(i, i + CHUNK);
@@ -88,16 +192,26 @@ export default async function(req) {
 
     const esito = failed === 0 ? 'successo' : (imported > 0 ? 'parziale' : 'errore');
     await base44.asServiceRole.entities.UploadLog.create({
-      tipo_file: 'pdr', nome_file: nome_file || 'N/D', file_url,
+      tipo_file: 'pdr', nome_file, file_url,
       righe_importate: imported, righe_fallite: failed, esito,
-      messaggio: `${imported} PDR importati su ${records.length} totali`
+      messaggio: `${imported} PDR importati su ${records.length} totali (foglio: ${sheetName})`,
+      foglio_usato: sheetName, forzato: !!conferma_forzatura
     });
 
     return Response.json({
-      tipo_file: 'pdr', righe_lette: rows.length - 1, righe_mappate: records.length,
-      righe_importate: imported, righe_fallite: failed, esito, lastError
+      tipo_file: 'pdr', foglio: sheetName,
+      righe_lette: rows.length - 1, righe_mappate: records.length,
+      righe_importate: imported, righe_fallite: failed, esito, lastError,
+      forzato: !!conferma_forzatura
     });
   } catch (error) {
+    try {
+      const base44 = createClientFromRequest(req);
+      await base44.asServiceRole.entities.UploadLog.create({
+        tipo_file: 'pdr', nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+        esito: 'errore', messaggio: error.message || 'Errore imprevisto'
+      });
+    } catch (_) {}
     return Response.json({ error: error.message }, { status: 500 });
   }
 }
