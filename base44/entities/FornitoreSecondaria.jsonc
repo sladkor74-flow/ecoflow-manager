@@ -40,6 +40,10 @@
       "type": "number",
       "description": "Plafond totale conferibile allo stoccaggio (kg) - significativo solo per ruolo=stoccaggio o doppio_ruolo. Include contributi di tutti i conferitori, non solo il raccoglitore stesso."
     },
+    "regione": {
+      "type": "string",
+      "description": "Regione di pertinenza dello stoccaggio (auto-derivata dalle secondarie, sola lettura)"
+    },
     "ipotesi_mese_corrente": {
       "type": "number",
       "default": 0,

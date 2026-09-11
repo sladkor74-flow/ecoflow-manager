@@ -86,6 +86,7 @@ export default function TargetAnnuali() {
   const [showImpForm, setShowImpForm] = useState(false);
   const [migrating, setMigrating] = useState(false);
   const [migratingRegionali, setMigratingRegionali] = useState(false);
+  const [migratingRegioni, setMigratingRegioni] = useState(false);
   const [raccForm, setRaccForm] = useState({ raccoglitore: '', target_tonnellate: 0 });
   const [impForm, setImpForm] = useState({ nome_impianto: '', target: 0, data_fine: '2026-12-18' });
 
@@ -256,6 +257,19 @@ export default function TargetAnnuali() {
     setMigratingRegionali(false);
   };
 
+  const runMigraRegioni = async () => {
+    setMigratingRegioni(true);
+    try {
+      const res = await base44.functions.invoke('migraRegioni', {});
+      const data = res.data || res;
+      alert(`Migrazione regioni completata:\n• ${data.eliminati || 0} record Smoco ridondanti eliminati\n• ${data.raccoglitori_aggiornati || 0} raccoglitori aggiornati\n• ${data.stoccaggi_aggiornati || 0} stoccaggi aggiornati\n• ${data.impianti_aggiornati || 0} impianti aggiornati`);
+      load();
+    } catch (e) {
+      alert('Errore migrazione regioni: ' + (e.message || 'errore sconosciuto'));
+    }
+    setMigratingRegioni(false);
+  };
+
   if (loading) {
     return <div className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin inline" /></div>;
   }
@@ -280,6 +294,10 @@ export default function TargetAnnuali() {
           <Button size="sm" variant="outline" onClick={runMigrazioneRegionali} disabled={migratingRegionali}>
             {migratingRegionali ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <RefreshCw className="w-4 h-4 mr-1" />}
             Migra target regionali
+          </Button>
+          <Button size="sm" variant="outline" onClick={runMigraRegioni} disabled={migratingRegioni}>
+            {migratingRegioni ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <RefreshCw className="w-4 h-4 mr-1" />}
+            Ri-deriva regioni
           </Button>
         </div>
       </div>

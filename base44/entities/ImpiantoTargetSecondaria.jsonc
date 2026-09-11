@@ -13,6 +13,10 @@
       "type": "number",
       "description": "Capacita' totale annua (kg) per impianti doppio ruolo (es. T-CYCLE: 1.300.000 = 1.050.000 impianto + 250.000 stoccaggio)"
     },
+    "regione": {
+      "type": "string",
+      "description": "Regione di pertinenza dell'impianto (auto-derivata da mappatura manuale nota, sola lettura)"
+    },
     "data_inizio": {
       "type": "string",
       "format": "date"
