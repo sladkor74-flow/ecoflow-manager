@@ -48,7 +48,8 @@ export default function FatturazionePassivaRete() {
       const XLSX = await import('xlsx');
       const data = risultato.dettaglio.map(r => ({
         'TRASPORTATORE': r.trasportatore,
-        'ZONA DI RACCOLTA': r.regione,
+        'PROVINCIA': r.provincia || '',
+        'REGIONE': r.regione,
         'METODO': r.unita_misura || '',
         'TOTALE [t]': r.totale_t,
         'N° VIAGGI': r.num_viaggi,
@@ -58,7 +59,8 @@ export default function FatturazionePassivaRete() {
       }));
       data.push({
         'TRASPORTATORE': 'TOTALE',
-        'ZONA DI RACCOLTA': '',
+        'PROVINCIA': '',
+        'REGIONE': '',
         'METODO': '',
         'TOTALE [t]': risultato.dettaglio.reduce((s, r) => s + r.totale_t, 0),
         'N° VIAGGI': risultato.dettaglio.reduce((s, r) => s + r.num_viaggi, 0),
@@ -85,8 +87,8 @@ export default function FatturazionePassivaRete() {
       doc.setFontSize(10);
       doc.text(`Totale complessivo: € ${formatNumber(risultato.totale_complessivo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 14, 22);
 
-      const headers = ['Trasportatore', 'Regione', 'Metodo', 'Totale [t]', 'Viaggi', 'Costo', 'EER', 'Totale [€]'];
-      const colWidths = [45, 30, 18, 20, 15, 18, 18, 22];
+      const headers = ['Trasportatore', 'Prov.', 'Regione', 'Metodo', 'Totale [t]', 'Viaggi', 'Costo', 'EER', 'Totale [€]'];
+      const colWidths = [40, 16, 25, 18, 20, 15, 18, 18, 22];
       let x = 14;
       let y = 30;
       doc.setFillColor(200, 200, 200);
@@ -101,13 +103,14 @@ export default function FatturazionePassivaRete() {
       risultato.dettaglio.forEach(r => {
         if (y > 195) { doc.addPage(); y = 15; }
         x = 14;
-        doc.text(String(r.trasportatore || '').substring(0, 28), x + 1, y); x += colWidths[0];
-        doc.text(String(r.regione || '').substring(0, 18), x + 1, y); x += colWidths[1];
-        doc.text(String(r.unita_misura || ''), x + 1, y); x += colWidths[2];
-        doc.text(formatNumber(r.totale_t), x + 1, y); x += colWidths[3];
-        doc.text(String(r.num_viaggi), x + 1, y); x += colWidths[4];
-        doc.text(formatNumber(r.tariffa_valore, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), x + 1, y); x += colWidths[5];
-        doc.text(String(r.eer || '').substring(0, 16), x + 1, y); x += colWidths[6];
+        doc.text(String(r.trasportatore || '').substring(0, 25), x + 1, y); x += colWidths[0];
+        doc.text(String(r.provincia || '').substring(0, 5), x + 1, y); x += colWidths[1];
+        doc.text(String(r.regione || '').substring(0, 15), x + 1, y); x += colWidths[2];
+        doc.text(String(r.unita_misura || ''), x + 1, y); x += colWidths[3];
+        doc.text(formatNumber(r.totale_t), x + 1, y); x += colWidths[4];
+        doc.text(String(r.num_viaggi), x + 1, y); x += colWidths[5];
+        doc.text(formatNumber(r.tariffa_valore, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), x + 1, y); x += colWidths[6];
+        doc.text(String(r.eer || '').substring(0, 16), x + 1, y); x += colWidths[7];
         doc.text(formatNumber(r.totale_euro, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), x + 1, y);
         y += 5;
       });
@@ -199,6 +202,7 @@ export default function FatturazionePassivaRete() {
                 <thead className="bg-muted">
                   <tr>
                     <th className="text-left px-3 py-2 font-heading font-semibold">Trasportatore</th>
+                    <th className="text-left px-3 py-2 font-heading font-semibold">Provincia</th>
                     <th className="text-left px-3 py-2 font-heading font-semibold">Regione</th>
                     <th className="text-right px-3 py-2 font-heading font-semibold">Totale [t]</th>
                     <th className="text-right px-3 py-2 font-heading font-semibold">N° Viaggi</th>
@@ -211,11 +215,12 @@ export default function FatturazionePassivaRete() {
                 </thead>
                 <tbody>
                   {risultato.dettaglio.length === 0 && (
-                    <tr><td colSpan={9} className="text-center py-8 text-muted-foreground">Nessun dato per il periodo selezionato.</td></tr>
+                    <tr><td colSpan={10} className="text-center py-8 text-muted-foreground">Nessun dato per il periodo selezionato.</td></tr>
                   )}
                   {risultato.dettaglio.map((r, i) => (
                     <tr key={i} className={i % 2 ? 'bg-muted/30' : ''}>
                       <td className="px-3 py-2 font-medium">{r.trasportatore}</td>
+                      <td className="px-3 py-2">{r.provincia || '-'}</td>
                       <td className="px-3 py-2">{r.regione}</td>
                       <td className="px-3 py-2 text-right">{formatNumber(r.totale_t)}</td>
                       <td className="px-3 py-2 text-right">{r.num_viaggi}</td>

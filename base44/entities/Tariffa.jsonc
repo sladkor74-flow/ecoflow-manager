@@ -79,6 +79,10 @@
     "regione": {
       "type": "string",
       "description": "Regione per tariffe specifiche (attiva)"
+    },
+    "provincia": {
+      "type": "string",
+      "description": "Sigla provincia specifica; vuoto = vale per tutta la regione"
     }
   },
   "required": [

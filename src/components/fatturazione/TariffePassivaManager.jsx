@@ -31,23 +31,33 @@ export default function TariffePassivaManager() {
   const [showOnlyActive, setShowOnlyActive] = useState(true);
   const [erroreSalvataggio, setErroreSalvataggio] = useState('');
   const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({ valore: 0, unita_misura: '€/t', note: '', regione: '', data_inizio_validita: '', data_fine_validita: '' });
+  const [editForm, setEditForm] = useState({ valore: 0, unita_misura: '€/t', note: '', regione: '', provincia: '', data_inizio_validita: '', data_fine_validita: '' });
   const [editErrore, setEditErrore] = useState('');
+  const [province, setProvince] = useState([]);
   const [form, setForm] = useState({
     fornitore_id: '', fornitore_nome: '',
-    unita_misura: '€/t', valore: 0, regione: '', data_inizio_validita: '', data_fine_validita: '', note: '',
+    unita_misura: '€/t', valore: 0, regione: '', provincia: '', data_inizio_validita: '', data_fine_validita: '', note: '',
   });
 
   const load = async () => {
     setLoading(true);
     try {
-      const [t, f] = await Promise.all([
+      const [t, f, primarie] = await Promise.all([
         base44.entities.Tariffa.filter({ direzione: 'PASSIVA', tipologia: 'RETE' }),
         base44.entities.Fornitore.filter({ stato: 'attivo' }),
+        base44.entities.PrimariaRete.list('-created_date', 5000),
       ]);
-      // Ordina per fornitore poi regione poi data inizio desc
+      // Estrai province distinte dai record PrimariaRete (sigle di 2 lettere)
+      const provSet = new Set();
+      for (const r of primarie) {
+        const p = (r.provincia || '').trim().toUpperCase();
+        if (p && p.length >= 2) provSet.add(p);
+      }
+      setProvince(Array.from(provSet).sort());
+      // Ordina per fornitore poi provincia poi regione poi data inizio desc
       t.sort((a, b) =>
         (a.fornitore_nome || '').localeCompare(b.fornitore_nome || '') ||
+        (a.provincia || '').localeCompare(b.provincia || '') ||
         (a.regione || '').localeCompare(b.regione || '') ||
         new Date(b.data_inizio_validita || 0).getTime() - new Date(a.data_inizio_validita || 0).getTime()
       );
@@ -59,12 +69,14 @@ export default function TariffePassivaManager() {
   useEffect(() => { load(); }, []);
 
   // Verifica sovrapposizione date con tariffe esistenti (esclude eventuali tariffe aperte che verranno chiuse automaticamente)
-  const verificaSovrapposizione = (fNorm, regioneForm, inizio, fine, excludeId = null) => {
+  const verificaSovrapposizione = (fNorm, regioneForm, provinciaForm, inizio, fine, excludeId = null) => {
     for (const t of tariffe) {
       if (excludeId && t.id === excludeId) continue;
       if ((t.fornitore_nome || '').toLowerCase().trim() !== fNorm) continue;
       const tReg = (t.regione || '').trim().toUpperCase();
       if (tReg !== regioneForm) continue;
+      const tProv = (t.provincia || '').trim().toUpperCase();
+      if (tProv !== provinciaForm) continue;
       const tInizio = t.data_inizio_validita ? new Date(t.data_inizio_validita) : null;
       const tFine = t.data_fine_validita ? new Date(t.data_fine_validita) : null;
       const inizioMax = inizio && tInizio ? new Date(Math.max(inizio.getTime(), tInizio.getTime())) : (inizio || tInizio);
@@ -83,14 +95,17 @@ export default function TariffePassivaManager() {
     const fNome = f?.ragione_sociale;
     const fNorm = (fNome || '').toLowerCase().trim();
     const regioneForm = (form.regione || '').trim().toUpperCase();
+    const provinciaForm = (form.provincia || '').trim().toUpperCase();
     const inizioNuova = form.data_inizio_validita ? new Date(form.data_inizio_validita) : new Date();
     inizioNuova.setHours(0, 0, 0, 0);
 
-    // Cerca tariffa attiva aperta (senza data fine) per stesso fornitore+regione
+    // Cerca tariffa attiva aperta (senza data fine) per stesso fornitore+regione+provincia
     const attivaAperta = tariffe.find(t => {
       if ((t.fornitore_nome || '').toLowerCase().trim() !== fNorm) return false;
       const tReg = (t.regione || '').trim().toUpperCase();
       if (tReg !== regioneForm) return false;
+      const tProv = (t.provincia || '').trim().toUpperCase();
+      if (tProv !== provinciaForm) return false;
       return isAperta(t);
     });
 
@@ -111,7 +126,7 @@ export default function TariffePassivaManager() {
     } else {
       // Nessuna tariffa aperta: verifica sovrapposizioni con tariffe a date definite
       const fineNuova = form.data_fine_validita ? new Date(form.data_fine_validita) : null;
-      const sovrapposta = verificaSovrapposizione(fNorm, regioneForm, inizioNuova, fineNuova);
+      const sovrapposta = verificaSovrapposizione(fNorm, regioneForm, provinciaForm, inizioNuova, fineNuova);
       if (sovrapposta) {
         const periodoEsistente = `${sovrapposta.data_inizio_validita ? new Date(sovrapposta.data_inizio_validita).toLocaleDateString('it-IT') : 'n.d.'} → ${sovrapposta.data_fine_validita ? new Date(sovrapposta.data_fine_validita).toLocaleDateString('it-IT') : 'aperto'}`;
         setErroreSalvataggio(`Sovrapposizione rilevata con tariffa esistente per ${sovrapposta.fornitore_nome} (${sovrapposta.regione || 'tutte le zone'}, periodo: ${periodoEsistente}). Modifica le date di validità prima di salvare.`);
@@ -126,6 +141,7 @@ export default function TariffePassivaManager() {
       unita_misura: form.unita_misura,
       valore: Number(form.valore),
       regione: form.regione,
+      provincia: form.provincia || undefined,
       data_inizio_validita: form.data_inizio_validita || undefined,
       data_fine_validita: form.data_fine_validita || undefined,
       direzione: 'PASSIVA',
@@ -133,7 +149,7 @@ export default function TariffePassivaManager() {
       stato: 'attivo',
       note: form.note,
     });
-    setForm({ fornitore_id: '', fornitore_nome: '', unita_misura: '€/t', valore: 0, regione: '', data_inizio_validita: '', data_fine_validita: '', note: '' });
+    setForm({ fornitore_id: '', fornitore_nome: '', unita_misura: '€/t', valore: 0, regione: '', provincia: '', data_inizio_validita: '', data_fine_validita: '', note: '' });
     setShowForm(false); load();
   };
 
@@ -146,6 +162,7 @@ export default function TariffePassivaManager() {
       unita_misura: t.unita_misura || '€/t',
       note: t.note || '',
       regione: t.regione || '',
+      provincia: t.provincia || '',
       data_inizio_validita: t.data_inizio_validita ? t.data_inizio_validita.slice(0, 10) : '',
       data_fine_validita: t.data_fine_validita ? t.data_fine_validita.slice(0, 10) : '',
     });
@@ -168,6 +185,7 @@ export default function TariffePassivaManager() {
     // Per tariffe non archiviate, permetti modifica anche di regione e date (con verifica sovrapposizione)
     if (!archiviata) {
       updateData.regione = editForm.regione;
+      updateData.provincia = editForm.provincia || undefined;
       const nuovaInizio = editForm.data_inizio_validita ? new Date(editForm.data_inizio_validita) : null;
       const nuovaFine = editForm.data_fine_validita ? new Date(editForm.data_fine_validita) : null;
       updateData.data_inizio_validita = editForm.data_inizio_validita || undefined;
@@ -176,7 +194,8 @@ export default function TariffePassivaManager() {
       // Verifica sovrapposizione escludendo se stesso
       const fNorm = (t.fornitore_nome || '').toLowerCase().trim();
       const regioneForm = (editForm.regione || '').trim().toUpperCase();
-      const sovrapposta = verificaSovrapposizione(fNorm, regioneForm, nuovaInizio, nuovaFine, t.id);
+      const provinciaForm = (editForm.provincia || '').trim().toUpperCase();
+      const sovrapposta = verificaSovrapposizione(fNorm, regioneForm, provinciaForm, nuovaInizio, nuovaFine, t.id);
       if (sovrapposta) {
         setEditErrore(`Sovrapposizione con tariffa esistente (${sovrapposta.data_inizio_validita || 'n.d.'} → ${sovrapposta.data_fine_validita || 'aperto'}).`);
         return;
@@ -277,6 +296,16 @@ export default function TariffePassivaManager() {
               </Select>
             </div>
             <div>
+              <label className="text-xs text-muted-foreground block mb-1">Provincia (opzionale - vuoto = tutta la regione)</label>
+              <Select value={form.provincia} onValueChange={v => setForm({ ...form, provincia: v })}>
+                <SelectTrigger><SelectValue placeholder="Tutte le province" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={null}>Tutte le province</SelectItem>
+                  {province.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <label className="text-xs text-muted-foreground block mb-1">Valore Tariffa *</label>
               <Input type="number" step="0.01" placeholder="es. 71" value={form.valore} onChange={e => setForm({ ...form, valore: e.target.value })} />
             </div>
@@ -312,6 +341,7 @@ export default function TariffePassivaManager() {
               <th className="text-left px-3 py-2 font-heading font-semibold">Fornitore (Raccoglitore)</th>
               <th className="text-left px-3 py-2 font-heading font-semibold">Metodo</th>
               <th className="text-left px-3 py-2 font-heading font-semibold">Zona/Regione</th>
+              <th className="text-left px-3 py-2 font-heading font-semibold">Provincia</th>
               <th className="text-right px-3 py-2 font-heading font-semibold">Valore</th>
               <th className="text-left px-3 py-2 font-heading font-semibold">Validità dal</th>
               <th className="text-left px-3 py-2 font-heading font-semibold">Validità al</th>
@@ -323,7 +353,7 @@ export default function TariffePassivaManager() {
           <tbody>
             {tariffeVisibili.length === 0 && (
               <tr>
-                <td colSpan={9} className="text-center py-8 text-muted-foreground">
+                <td colSpan={10} className="text-center py-8 text-muted-foreground">
                   Nessuna tariffa {showOnlyActive ? 'attiva' : 'configurata'}. Clicca "Aggiungi Tariffa" per iniziare.
                 </td>
               </tr>
@@ -359,6 +389,19 @@ export default function TariffePassivaManager() {
                       </Select>
                     ) : (
                       t.regione || <span className="text-muted-foreground italic">Tutte</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {isEditing && !archiviata ? (
+                      <Select value={editForm.provincia} onValueChange={v => setEditForm({ ...editForm, provincia: v })}>
+                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={null}>Tutte</SelectItem>
+                          {province.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      t.provincia || <span className="text-muted-foreground italic">Tutte</span>
                     )}
                   </td>
                   <td className="px-3 py-2 text-right">

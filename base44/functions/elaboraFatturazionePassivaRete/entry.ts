@@ -89,13 +89,15 @@ export default async function(req) {
       if (fornitoreNomeFilter && trasKey !== fornitoreNomeFilter) continue;
 
       const regione = (r.regione || r.regioni || '').trim() || 'NON SPECIFICATA';
-      const key = `${trasKey}|${regione.toUpperCase()}`;
+      const provincia = (r.provincia || '').trim() || 'NON SPECIFICATA';
+      const key = `${trasKey}|${provincia.toUpperCase()}`;
 
       if (!gruppi.has(key)) {
         gruppi.set(key, {
           trasportatore,
           trasKey,
           regione,
+          provincia,
           totale_peso_kg: 0,
           viaggiSet: new Set(),
           firCount: 0,
@@ -121,7 +123,7 @@ export default async function(req) {
       if (g.record_ids.length < 50) g.record_ids.push(r.id_ordine || r.id);
 
       // Trova la tariffa valida per la data di questo specifico record
-      const tariffaRecord = findTariffaPerData(g.trasKey, g.regione, r.trasporto_finito_il);
+      const tariffaRecord = findTariffaPerData(g.trasKey, g.regione, g.provincia, r.trasporto_finito_il);
       const tk = tariffaRecord ? tariffaRecord.id : '__NESSUNA__';
       if (!g.perTariffa.has(tk)) {
         g.perTariffa.set(tk, { peso_kg: 0, viaggiSet: new Set(), tariffa: tariffaRecord });
@@ -131,20 +133,33 @@ export default async function(req) {
       pt.viaggiSet.add(viaggioKey);
     }
 
-    // Trova tariffa matching per (trasportatore, regione, data) applicando validità temporale
-    function findTariffaPerData(trasKey, regione, dataIso) {
-      // Match esatto su regione con validità temporale
-      for (const t of tariffe) {
-        const tKey = normalizzaRagioneSociale(t.fornitore_nome);
-        if (tKey !== trasKey) continue;
-        const tReg = (t.regione || '').trim().toUpperCase();
-        if (tReg && tReg === regione.toUpperCase() && tariffaValidaPerData(t, dataIso)) return t;
+    // Trova tariffa matching con gerarchia: provincia → regione → generica, sempre con validità temporale
+    function findTariffaPerData(trasKey, regione, provincia, dataIso) {
+      const provU = (provincia || '').trim().toUpperCase();
+      const regU = (regione || '').trim().toUpperCase();
+      // a) Match su provincia specifica
+      if (provU && provU !== 'NON SPECIFICATA') {
+        for (const t of tariffe) {
+          const tKey = normalizzaRagioneSociale(t.fornitore_nome);
+          if (tKey !== trasKey) continue;
+          const tProv = (t.provincia || '').trim().toUpperCase();
+          if (tProv && tProv === provU && tariffaValidaPerData(t, dataIso)) return t;
+        }
       }
-      // Match senza regione (tariffa generica per fornitore) con validità temporale
+      // b) Match su regione (tariffa senza provincia ma con regione)
       for (const t of tariffe) {
         const tKey = normalizzaRagioneSociale(t.fornitore_nome);
         if (tKey !== trasKey) continue;
-        if (!t.regione || !t.regione.trim()) if (tariffaValidaPerData(t, dataIso)) return t;
+        const tProv = (t.provincia || '').trim();
+        const tReg = (t.regione || '').trim().toUpperCase();
+        if (!tProv && tReg && tReg === regU && tariffaValidaPerData(t, dataIso)) return t;
+      }
+      // c) Match generico (tariffa senza provincia e senza regione)
+      for (const t of tariffe) {
+        const tKey = normalizzaRagioneSociale(t.fornitore_nome);
+        if (tKey !== trasKey) continue;
+        const tProv = (t.provincia || '').trim();
+        if (!tProv && (!t.regione || !t.regione.trim()) && tariffaValidaPerData(t, dataIso)) return t;
       }
       return null;
     }
@@ -193,6 +208,7 @@ export default async function(req) {
       dettaglio.push({
         trasportatore: g.trasportatore,
         regione: g.regione,
+        provincia: g.provincia,
         totale_t: Math.round(totale_t * 1000) / 1000,
         num_viaggi,
         firCount: g.firCount,
