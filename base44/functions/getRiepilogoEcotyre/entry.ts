@@ -56,7 +56,7 @@ export default async function(req) {
         const regione = useRegione ? (r.regione || 'N/D') : 'N/D';
         const dataRiferimento = r.trasporto_finito_il;
         const tariffa = resolveTariffa(tariffeSorted, tipologia, r.classe, useRegione ? (r.regione || '') : '', r.cer, dataRiferimento);
-        const tot = calcolaTotale(peso, tariffa);
+        const tot = Math.round(calcolaTotale(peso, tariffa) * 100) / 100;
         kg += peso;
         totale += tot;
         ordini++;
