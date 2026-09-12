@@ -5,6 +5,7 @@ const TIPO_LABEL = {
   coerenza_derivati: 'Incoerenza derivati',
   sito_senza_target: 'Sito senza target',
   giacenza_sopra_target: 'Giacenza sopra target',
+  ordine_senza_riscontro: 'Ordine senza riscontro',
 };
 
 export default function AnomalieAlert({ anomalie }) {
@@ -30,7 +31,8 @@ export default function AnomalieAlert({ anomalie }) {
             <div key={i} className="text-sm text-amber-900 flex items-start gap-2 border-t border-amber-200 pt-1.5">
               <span className="font-medium">{TIPO_LABEL[a.tipo] || a.tipo}:</span>
               <span className="text-amber-800">
-                {a.sito}
+                {a.tipo === 'ordine_senza_riscontro' && `ordine ${a.ordine} non trovato in PrimariaRete/Aci — ruolo attribuito come Impianto`}
+                {a.sito && a.sito}
                 {a.tipo === 'coerenza_derivati' && ` — dichiarato ${a.dichiarato_t} t, derivati ${a.somma_derivati_t} t (diff. ${a.differenza_t} t)`}
                 {a.tipo === 'giacenza_sopra_target' && ` — giacenza ${a.giacenza_portale_t} t contro target ${a.target_totale_t} t`}
                 {a.tipo === 'sito_senza_target' && ` — nessun record GiacenzaSito per l'anno ${a.anno}`}

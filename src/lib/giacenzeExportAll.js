@@ -17,18 +17,20 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
   const wb = XLSX.utils.book_new();
 
   // --- Foglio 1: Situazione ---
-  const sitHeaders = ['Sito', 'Ruolo', 'Giacenza a portale (t)', 'Ordini da dichiarare', 'Dichiarato (t)', 'Tipologia trattamento'];
+  const sitHeaders = ['Sito', 'Ruolo', 'Giacenza a portale (t)', 'Giacenza fisica (t)', 'Divergenza (t)', 'Ordini da dichiarare', 'Dichiarato (t)', 'Tipologia trattamento'];
   const sitRows = data.righe.map(r => [
     r.sito,
     r.tipo_destinazione === 'imp' ? 'Impianto' : 'Stoccaggio',
     r.giacenza_portale_t,
+    r.giacenza_fisica_t,
+    r.divergenza_t,
     r.ordini_da_dichiarare || 0,
     r.dichiarato_t,
     r.tipologia_trattamento || '',
   ]);
-  sitRows.push(['TOTALE', '', data.totali.giacenza_portale_t, data.totali.ordini_da_dichiarare, data.totali.dichiarato_t, '']);
+  sitRows.push(['TOTALE', '', data.totali.giacenza_portale_t, data.totali.giacenza_fisica_t, data.totali.divergenza_t, data.totali.ordini_da_dichiarare, data.totali.dichiarato_t, '']);
   const ws1 = XLSX.utils.aoa_to_sheet([sitHeaders, ...sitRows]);
-  ws1['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 20 }, { wch: 18 }, { wch: 16 }, { wch: 20 }];
+  ws1['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 20 }];
   XLSX.utils.book_append_sheet(wb, ws1, 'Situazione');
 
   // --- Foglio 2: Da dichiarare ---

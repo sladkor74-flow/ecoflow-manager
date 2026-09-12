@@ -18,6 +18,8 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
               <th className="px-3 py-2 font-semibold">Sito</th>
               <th className="px-3 py-2 font-semibold">Ruolo</th>
               <th className="px-3 py-2 font-semibold text-right">Giacenza a portale</th>
+              <th className="px-3 py-2 font-semibold text-right">Giacenza fisica</th>
+              <th className="px-3 py-2 font-semibold text-right">Divergenza</th>
               <th className="px-3 py-2 font-semibold text-right">Ordini da dichiarare</th>
               <th className="px-3 py-2 font-semibold text-right">Dichiarato nell'anno</th>
               <th className="px-3 py-2 font-semibold">Tipologia trattamento</th>
@@ -44,6 +46,8 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                       <div className="h-full bg-primary rounded-full" style={{ width: `${barWidth}%` }} />
                     </div>
                   </td>
+                  <td className="px-3 py-2 text-right">{fmt(r.giacenza_fisica_t)} t</td>
+                  <td className={`px-3 py-2 text-right ${Math.abs(r.divergenza_t) > 0.01 ? 'text-amber-600 font-medium' : ''}`}>{fmt(r.divergenza_t)} t</td>
                   <td className="px-3 py-2 text-right">
                     <Button
                       variant="outline"
@@ -65,6 +69,8 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
               <td className="px-3 py-2">TOTALE</td>
               <td className="px-3 py-2"></td>
               <td className="px-3 py-2 text-right">{fmt(totali.giacenza_portale_t)} t</td>
+              <td className="px-3 py-2 text-right">{fmt(totali.giacenza_fisica_t)} t</td>
+              <td className="px-3 py-2 text-right">{fmt(totali.divergenza_t)} t</td>
               <td className="px-3 py-2 text-right">{totali.ordini_da_dichiarare || 0}</td>
               <td className="px-3 py-2 text-right">{fmt(totali.dichiarato_t)} t</td>
               <td className="px-3 py-2"></td>
