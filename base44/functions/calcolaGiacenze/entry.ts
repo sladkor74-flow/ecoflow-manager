@@ -2,11 +2,20 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 
-// Calcola le giacenze di impianti e stoccaggi per l'anno richiesto.
-// Perimetro: solo canale RETE (comprende extra raccolta). ACI escluso dalla giacenza rete.
-// Riconoscimento riga ACI: campo classe (o prodotto se classe assente) contiene "autodemolizione".
-// Solo record con stato "terminato" e trasporto_finito_il nell'anno.
-// Tutti i confronti nomi tramite normalizzaRagioneSociale.
+// Calcola la situazione delle giacenze di impianti e stoccaggi per l'anno richiesto.
+//
+// DUE ASSI TEMPORALI:
+// - GIACENZA (stock): calcolata su tutto lo storico, senza filtro d'anno
+// - CONFERITO e TARGET (flusso): calcolati sull'anno richiesto
+//
+// Fonti dati:
+//   OrdineNonDichiarato  -> giacenza a portale, ordini da dichiarare, arretrato per anno
+//   DichiarazioneTrattamento -> dichiarato e derivati (filtrato per anno di data_dichiarazione)
+//   PrimariaRete/Aci, ExtraRaccolta, Secondaria, Terziaria -> movimentazione (stato terminato, trasporto_finito_il nell'anno)
+//   GiacenzaSito -> target e tipologia trattamento
+//
+// ATTRIBUZIONE AL SITO: destinazione_secondaria se valorizzata, altrimenti destinazione.
+//   Mai destinazione_finale (cementeria estera, non il soggetto trattante).
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -17,196 +26,294 @@ export default async function(req) {
     if (!anno) return Response.json({ error: 'Anno obbligatorio' }, { status: 400 });
     const annoNum = Number(anno);
 
-    const [reteAll, aciAll, extraAll, secAll, terzAll, giacenzeSito, dichiarazioni] = await Promise.all([
+    const norm = normalizzaRagioneSociale;
+    const r2 = (v) => Math.round(v * 100) / 100;
+    const tdNorm = (v) => String(v || '').toLowerCase().trim();
+
+    // Carica tutte le sorgenti dati in parallelo
+    const [nonDichiarati, dichiarazioni, reteAll, aciAll, extraAll, secAll, terzAll, giacenzeSito] = await Promise.all([
+      fetchAll(base44.asServiceRole.entities.OrdineNonDichiarato),
+      fetchAll(base44.asServiceRole.entities.DichiarazioneTrattamento),
       fetchAll(base44.asServiceRole.entities.PrimariaRete),
       fetchAll(base44.asServiceRole.entities.PrimariaAci),
       fetchAll(base44.asServiceRole.entities.ExtraRaccolta),
       fetchAll(base44.asServiceRole.entities.Secondaria),
       fetchAll(base44.asServiceRole.entities.Terziaria),
       fetchAll(base44.asServiceRole.entities.GiacenzaSito, { anno: annoNum }),
-      fetchAll(base44.asServiceRole.entities.DichiarazioneSito, { anno: annoNum }),
     ]);
 
-    const norm = normalizzaRagioneSociale;
-    const r2 = (v) => Math.round(v * 100) / 100;
-    const tdNorm = (v) => String(v || '').toLowerCase().trim();
+    // --- Funzione attribuzione sito: destinazione_secondaria se valorizzata, else destinazione ---
+    function sitoDiRiga(r) {
+      const sec = String(r.destinazione_secondaria || '').trim();
+      if (sec) return sec;
+      return String(r.destinazione || '').trim();
+    }
 
+    // --- Filtri temporali per movimentazione ---
     function isTerminato(r) { return String(r.stato || '').trim().toLowerCase() === 'terminato'; }
-    function inYear(r) {
-      if (!r.trasporto_finito_il) return false;
-      const d = new Date(r.trasporto_finito_il);
+    function inYear(dateField) {
+      if (!dateField) return false;
+      const d = new Date(dateField);
       return !isNaN(d.getTime()) && d.getFullYear() === annoNum;
     }
-    function isAciRow(r) {
-      const cl = String(r.classe || '').toLowerCase().trim();
-      if (cl) return cl.includes('autodemolizione');
-      return String(r.prodotto || '').toLowerCase().trim().includes('autodemolizione');
+
+    // === 1. GIACENZA A PORTALE (OrdineNonDichiarato, senza filtro d'anno) ===
+    const giacPortaleMap = new Map();   // normSito -> t
+    const ordiniMap = new Map();        // normSito -> count
+    const arretratoAnniMap = new Map(); // normSito -> { anno: t }
+
+    for (const r of nonDichiarati) {
+      const sito = sitoDiRiga(r);
+      const ns = norm(sito);
+      if (!ns) continue;
+      const kg = Number(r.peso_non_dichiarato_kg) || 0;
+      const t = kg / 1000;
+      giacPortaleMap.set(ns, (giacPortaleMap.get(ns) || 0) + t);
+      ordiniMap.set(ns, (ordiniMap.get(ns) || 0) + 1);
+
+      // Arretrato per anno di data_chiusura
+      let annoChiusura = null;
+      if (r.data_chiusura) {
+        const d = new Date(r.data_chiusura);
+        if (!isNaN(d.getTime())) annoChiusura = d.getFullYear();
+      }
+      if (annoChiusura !== null) {
+        if (!arretratoAnniMap.has(ns)) arretratoAnniMap.set(ns, {});
+        const perAnno = arretratoAnniMap.get(ns);
+        perAnno[annoChiusura] = (perAnno[annoChiusura] || 0) + t;
+      }
     }
 
-    const rete = reteAll.filter(r => isTerminato(r) && inYear(r));
-    const aci = aciAll.filter(r => isTerminato(r) && inYear(r));
-    const extra = extraAll.filter(r => isTerminato(r) && inYear(r));
-    const sec = secAll.filter(r => isTerminato(r) && inYear(r));
-    const terz = terzAll.filter(r => isTerminato(r) && inYear(r));
+    // === 2. DICHIARATO (DichiarazioneTrattamento, filtrato per anno di data_dichiarazione) ===
+    const dichiaratoMap = new Map();   // normSito -> t
+    const derivatiMap = new Map();     // normSito -> { granulo, fibre, metallo, cippato, ciabattato }
 
-    const reteNonAci = rete.filter(r => !isAciRow(r));
-    const secNonAci = sec.filter(r => !isAciRow(r));
-    const secAci = sec.filter(r => isAciRow(r));
+    for (const d of dichiarazioni) {
+      // Filtro: anno di data_dichiarazione
+      if (!inYear(d.data_dichiarazione)) continue;
+      const sito = sitoDiRiga(d);
+      const ns = norm(sito);
+      if (!ns) continue;
+      const kg = Number(d.peso_associato_kg) || 0;
+      const t = kg / 1000;
+      dichiaratoMap.set(ns, (dichiaratoMap.get(ns) || 0) + t);
 
-    // --- RETE aggregation maps ---
-    const confPrimMap = new Map(); // normDest|td -> t
-    for (const r of [...reteNonAci, ...extra]) {
-      const nd = norm(r.destinazione); const td = tdNorm(r.tipo_destinazione);
+      if (!derivatiMap.has(ns)) derivatiMap.set(ns, { granulo: 0, fibre: 0, metallo: 0, cippato: 0, ciabattato: 0 });
+      const der = derivatiMap.get(ns);
+      der.granulo += (Number(d.granulo_kg) || 0) / 1000;
+      der.fibre += (Number(d.fibre_kg) || 0) / 1000;
+      der.metallo += (Number(d.metallo_kg) || 0) / 1000;
+      der.cippato += (Number(d.cippato_kg) || 0) / 1000;
+      der.ciabattato += (Number(d.ciabattato_kg) || 0) / 1000;
+    }
+
+    // === 3. MOVIMENTAZIONE (filtrata per stato terminato e trasporto_finito_il nell'anno) ===
+    // conferito_primarie_t: PrimariaRete + PrimariaAci + ExtraRaccolta, per destinazione|tipo_destinazione
+    const confPrimMap = new Map(); // normSito|td -> t
+    for (const r of [...reteAll, ...aciAll, ...extraAll]) {
+      if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
+      const nd = norm(r.destinazione);
+      const td = tdNorm(r.tipo_destinazione);
       if (!nd || !td) continue;
       const k = nd + '|' + td;
-      confPrimMap.set(k, (confPrimMap.get(k) || 0) + (r.peso_effettivo || 0) / 1000);
+      confPrimMap.set(k, (confPrimMap.get(k) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
     }
-    const secInMap = new Map(); // normDest|td -> t
-    for (const r of secNonAci) {
-      const nd = norm(r.destinazione); const td = tdNorm(r.tipo_destinazione);
-      if (!nd || !td) continue;
-      const k = nd + '|' + td;
-      secInMap.set(k, (secInMap.get(k) || 0) + (r.peso_effettivo || 0) / 1000);
+
+    // secondarie_in_t: Secondaria con destinazione corrispondente al sito
+    const secInMap = new Map(); // normSito -> t
+    for (const r of secAll) {
+      if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
+      const nd = norm(r.destinazione);
+      if (!nd) continue;
+      secInMap.set(nd, (secInMap.get(nd) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
     }
-    const secOutMap = new Map(); // normStoc -> t
-    for (const r of secNonAci) {
+
+    // secondarie_out_t: Secondaria con stoccaggio corrispondente al sito
+    const secOutMap = new Map(); // normSito -> t
+    for (const r of secAll) {
+      if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
       const ns = norm(r.stoccaggio);
       if (!ns) continue;
-      secOutMap.set(ns, (secOutMap.get(ns) || 0) + (r.peso_effettivo || 0) / 1000);
+      secOutMap.set(ns, (secOutMap.get(ns) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
     }
-    const terzMap = new Map(); // normOrigine -> t
-    for (const r of terz) {
+
+    // terziarie_t: Terziaria con unita_locale_origine, o ragione_sociale, corrispondente al sito
+    const terzMap = new Map(); // normSito -> t
+    for (const r of terzAll) {
+      if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
       const no = norm(r.unita_locale_origine || r.ragione_sociale);
       if (!no) continue;
-      terzMap.set(no, (terzMap.get(no) || 0) + (r.peso_effettivo || 0) / 1000);
+      terzMap.set(no, (terzMap.get(no) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
     }
 
-    // --- ACI aggregation maps ---
-    const aciInPrimMap = new Map(); // normDest|td -> t
-    for (const r of aci) {
-      const nd = norm(r.destinazione); const td = tdNorm(r.tipo_destinazione);
-      if (!nd || !td) continue;
-      const k = nd + '|' + td;
-      aciInPrimMap.set(k, (aciInPrimMap.get(k) || 0) + (r.peso_effettivo || 0) / 1000);
-    }
-    const aciInSecMap = new Map(); // normDest|td -> t
-    for (const r of secAci) {
-      const nd = norm(r.destinazione); const td = tdNorm(r.tipo_destinazione);
-      if (!nd || !td) continue;
-      const k = nd + '|' + td;
-      aciInSecMap.set(k, (aciInSecMap.get(k) || 0) + (r.peso_effettivo || 0) / 1000);
-    }
-    const aciOutSecMap = new Map(); // normStoc -> t
-    for (const r of secAci) {
-      const ns = norm(r.stoccaggio);
-      if (!ns) continue;
-      aciOutSecMap.set(ns, (aciOutSecMap.get(ns) || 0) + (r.peso_effettivo || 0) / 1000);
-    }
-
-    // --- Dichiarazioni map ---
-    const dichMap = new Map(); // normSito -> [records]
-    for (const d of dichiarazioni) {
-      const ns = norm(d.sito);
-      if (!ns) continue;
-      if (!dichMap.has(ns)) dichMap.set(ns, []);
-      dichMap.get(ns).push(d);
-    }
-
-    // --- GiacenzaSito map ---
+    // === 4. GIACENZASITO: target e tipologia per sito|ruolo|anno ===
     const giacMap = new Map(); // normSito|td -> record
     for (const g of giacenzeSito) {
       giacMap.set(norm(g.sito) + '|' + tdNorm(g.tipo_destinazione), g);
     }
 
-    // --- Build row set ---
-    const rowMap = new Map();
-    function addRow(sito, td) {
-      const ns = norm(sito); const key = ns + '|' + td;
-      if (!rowMap.has(key)) rowMap.set(key, { sito, td, normSito: ns });
-    }
-    for (const g of giacenzeSito) addRow(g.sito, tdNorm(g.tipo_destinazione));
-    for (const r of reteNonAci) { const td = tdNorm(r.tipo_destinazione); if (r.destinazione && td) addRow(r.destinazione, td); }
-    for (const r of extra) { const td = tdNorm(r.tipo_destinazione); if (r.destinazione && td) addRow(r.destinazione, td); }
-    for (const r of secNonAci) { const td = tdNorm(r.tipo_destinazione); if (r.destinazione && td) addRow(r.destinazione, td); }
-    for (const r of terz) { const orig = r.unita_locale_origine || r.ragione_sociale; if (orig) addRow(orig, 'imp'); }
-    for (const r of aci) { const td = tdNorm(r.tipo_destinazione); if (r.destinazione && td) addRow(r.destinazione, td); }
-    for (const r of secAci) { const td = tdNorm(r.tipo_destinazione); if (r.destinazione && td) addRow(r.destinazione, td); }
+    // === 5. UNIONE DEI SITI ===
+    const rowKeys = new Set(); // Set di "normSito|td"
 
-    // --- Calculate rows ---
+    // Da GiacenzaSito
+    for (const g of giacenzeSito) {
+      rowKeys.add(norm(g.sito) + '|' + tdNorm(g.tipo_destinazione));
+    }
+    // Da OrdineNonDichiarato (senza td noto -> attribuisci a 'imp' come default)
+    for (const ns of giacPortaleMap.keys()) {
+      // Cerca il td dai record GiacenzaSito per questo sito
+      const tdFromGiac = [...giacMap.keys()].filter(k => k.startsWith(ns + '|')).map(k => k.split('|')[1]);
+      if (tdFromGiac.length > 0) {
+        for (const td of tdFromGiac) rowKeys.add(ns + '|' + td);
+      } else {
+        rowKeys.add(ns + '|imp'); // default
+      }
+    }
+    // Da DichiarazioneTrattamento
+    for (const ns of dichiaratoMap.keys()) {
+      const tdFromGiac = [...giacMap.keys()].filter(k => k.startsWith(ns + '|')).map(k => k.split('|')[1]);
+      if (tdFromGiac.length > 0) {
+        for (const td of tdFromGiac) rowKeys.add(ns + '|' + td);
+      } else {
+        rowKeys.add(ns + '|imp');
+      }
+    }
+    // Da movimentazione (conferito_primarie ha td, le altre no)
+    for (const k of confPrimMap.keys()) {
+      rowKeys.add(k);
+    }
+    for (const ns of secInMap.keys()) {
+      const tdFromGiac = [...giacMap.keys()].filter(k => k.startsWith(ns + '|')).map(k => k.split('|')[1]);
+      if (tdFromGiac.length > 0) {
+        for (const td of tdFromGiac) rowKeys.add(ns + '|' + td);
+      } else {
+        rowKeys.add(ns + '|imp');
+      }
+    }
+    for (const ns of secOutMap.keys()) {
+      const tdFromGiac = [...giacMap.keys()].filter(k => k.startsWith(ns + '|')).map(k => k.split('|')[1]);
+      if (tdFromGiac.length > 0) {
+        for (const td of tdFromGiac) rowKeys.add(ns + '|' + td);
+      } else {
+        rowKeys.add(ns + '|stoc'); // secondarie_out riguarda lo stoccaggio
+      }
+    }
+    for (const ns of terzMap.keys()) {
+      const tdFromGiac = [...giacMap.keys()].filter(k => k.startsWith(ns + '|')).map(k => k.split('|')[1]);
+      if (tdFromGiac.length > 0) {
+        for (const td of tdFromGiac) rowKeys.add(ns + '|' + td);
+      } else {
+        rowKeys.add(ns + '|imp');
+      }
+    }
+
+    // === 6. COSTRUZIONE RIGHE ===
     const righe = [];
-    for (const [key, info] of rowMap) {
-      const { sito, td, normSito } = info;
+    const anomalie = [];
+    const sitiSenzaTarget = new Set();
+
+    for (const key of rowKeys) {
+      const [ns, td] = key.split('|');
       const g = giacMap.get(key);
 
+      // Recupera il nome sito originale (preferisci dal record GiacenzaSito)
+      let sitoNome = g?.sito || ns;
+
+      const giacenza_portale_t = giacPortaleMap.get(ns) || 0;
+      const ordini_da_dichiarare = ordiniMap.get(ns) || 0;
+      const arretrato_per_anno = arretratoAnniMap.get(ns) || {};
+
+      const dichiarato_t = dichiaratoMap.get(ns) || 0;
+      const der = derivatiMap.get(ns) || { granulo: 0, fibre: 0, metallo: 0, cippato: 0, ciabattato: 0 };
+
       const conferito_primarie_t = confPrimMap.get(key) || 0;
-      const secondarie_in_t = secInMap.get(key) || 0;
-      const secondarie_out_t = (td === 'stoc') ? (secOutMap.get(normSito) || 0) : 0;
+      const secondarie_in_t = secInMap.get(ns) || 0;
+      const secondarie_out_t = secOutMap.get(ns) || 0;
       const secondarie_nette_t = secondarie_in_t - secondarie_out_t;
-      const terziarie_t = (td === 'imp') ? (terzMap.get(normSito) || 0) : 0;
+      const terziarie_t = terzMap.get(ns) || 0;
 
-      const dichs = dichMap.get(normSito) || [];
-      const dichInv = dichs.filter(d => d.caricata_inviata === true);
-      const dichiarato_r3_t = dichInv.filter(d => d.operazione === 'R3' && (d.canale === 'RETE' || d.canale === 'EXTRA_RACCOLTA')).reduce((s, d) => s + (d.quantita_kg || 0) / 1000, 0);
-      const dichiarato_r1_t = dichInv.filter(d => d.operazione === 'R1' && (d.canale === 'RETE' || d.canale === 'EXTRA_RACCOLTA')).reduce((s, d) => s + (d.quantita_kg || 0) / 1000, 0);
+      const conferito_t = conferito_primarie_t + secondarie_in_t + secondarie_out_t;
 
-      let uscite_css_t = dichiarato_r1_t - terziarie_t;
-      if (uscite_css_t < 0) uscite_css_t = 0;
-      const css_override = g?.css_override_t || 0;
-      const css_override_active = css_override > 0;
-      if (css_override_active) uscite_css_t = css_override;
-
-      const uscite_ferro_t = g?.uscite_ferro_t || 0;
-      const giacenza_iniziale_t = g?.giacenza_iniziale_t || 0;
       const target_primarie_t = g?.target_primarie_t || 0;
       const target_totale_t = g?.target_totale_t || 0;
+      const giacenza_riferimento_t = g?.giacenza_riferimento_t || 0;
+      const tipologia_trattamento = g?.tipologia_trattamento || '';
 
-      const giacenza_attuale_t = giacenza_iniziale_t + conferito_primarie_t + secondarie_nette_t - terziarie_t - uscite_css_t - uscite_ferro_t - dichiarato_r3_t;
-      const conferito_t = conferito_primarie_t + secondarie_in_t + secondarie_out_t;
       const residuo_t = target_totale_t > 0 ? target_totale_t - conferito_t : null;
-
-      const aci_in_primarie_t = aciInPrimMap.get(key) || 0;
-      const aci_in_sec_t = aciInSecMap.get(key) || 0;
-      const aci_out_sec_t = (td === 'stoc') ? (aciOutSecMap.get(normSito) || 0) : 0;
-      const dichAci = dichs.filter(d => d.canale === 'ACI');
-      const aci_dichiarato_t = dichAci.filter(d => d.caricata_inviata === true).reduce((s, d) => s + (d.quantita_kg || 0) / 1000, 0);
-      const aci_predisposto_t = dichAci.filter(d => d.caricata_inviata === false).reduce((s, d) => s + (d.quantita_kg || 0) / 1000, 0);
-      const giacenza_aci_t = aci_in_primarie_t + aci_in_sec_t - aci_out_sec_t - aci_dichiarato_t;
-      const divergenza_portale_t = aci_dichiarato_t + aci_predisposto_t;
-      const giacenza_portale_t = giacenza_attuale_t + divergenza_portale_t;
+      const percentuale_target = target_totale_t > 0 ? (conferito_t / target_totale_t) * 100 : null;
 
       righe.push({
-        sito, tipo_destinazione: td,
-        target_primarie_t: r2(target_primarie_t), target_totale_t: r2(target_totale_t),
-        giacenza_iniziale_t: r2(giacenza_iniziale_t),
+        sito: sitoNome,
+        tipo_destinazione: td,
+        giacenza_portale_t: r2(giacenza_portale_t),
+        ordini_da_dichiarare,
+        arretrato_per_anno,
+        dichiarato_t: r2(dichiarato_t),
+        granulo_t: r2(der.granulo),
+        fibre_t: r2(der.fibre),
+        metallo_t: r2(der.metallo),
+        cippato_t: r2(der.cippato),
+        ciabattato_t: r2(der.ciabattato),
         conferito_primarie_t: r2(conferito_primarie_t),
-        secondarie_in_t: r2(secondarie_in_t), secondarie_out_t: r2(secondarie_out_t), secondarie_nette_t: r2(secondarie_nette_t),
-        terziarie_t: r2(terziarie_t), uscite_css_t: r2(uscite_css_t), uscite_ferro_t: r2(uscite_ferro_t),
-        dichiarato_r3_t: r2(dichiarato_r3_t), dichiarato_r1_t: r2(dichiarato_r1_t),
-        giacenza_attuale_t: r2(giacenza_attuale_t), conferito_t: r2(conferito_t),
+        secondarie_in_t: r2(secondarie_in_t),
+        secondarie_out_t: r2(secondarie_out_t),
+        secondarie_nette_t: r2(secondarie_nette_t),
+        terziarie_t: r2(terziarie_t),
+        conferito_t: r2(conferito_t),
+        target_primarie_t: r2(target_primarie_t),
+        target_totale_t: r2(target_totale_t),
+        giacenza_riferimento_t: r2(giacenza_riferimento_t),
+        tipologia_trattamento,
         residuo_t: residuo_t !== null ? r2(residuo_t) : null,
-        aci_in_primarie_t: r2(aci_in_primarie_t), aci_in_sec_t: r2(aci_in_sec_t), aci_out_sec_t: r2(aci_out_sec_t),
-        aci_dichiarato_t: r2(aci_dichiarato_t), aci_predisposto_t: r2(aci_predisposto_t),
-        giacenza_aci_t: r2(giacenza_aci_t), divergenza_portale_t: r2(divergenza_portale_t), giacenza_portale_t: r2(giacenza_portale_t),
-        tipologia_trattamento: g?.tipologia_trattamento || '', css_override_active,
+        percentuale_target: percentuale_target !== null ? r2(percentuale_target) : null,
       });
+
+      // --- Anomalie ---
+      // Sito senza target configurato
+      if (!g) {
+        sitiSenzaTarget.add(sitoNome);
+      }
+      // Coerenza derivati vs dichiarato
+      const sommaDerivati = der.granulo + der.fibre + der.metallo + der.cippato + der.ciabattato;
+      if (dichiarato_t > 0 && Math.abs(sommaDerivati - dichiarato_t) > 0.001) {
+        anomalie.push({
+          tipo: 'coerenza_derivati',
+          sito: sitoNome,
+          dichiarato_t: r2(dichiarato_t),
+          somma_derivati_t: r2(sommaDerivati),
+          differenza_t: r2(dichiarato_t - sommaDerivati)
+        });
+      }
+      // Giacenza a portale superiore al target totale
+      if (g && target_totale_t > 0 && giacenza_portale_t > target_totale_t) {
+        anomalie.push({
+          tipo: 'giacenza_sopra_target',
+          sito: sitoNome,
+          giacenza_portale_t: r2(giacenza_portale_t),
+          target_totale_t: r2(target_totale_t)
+        });
+      }
     }
 
-    righe.sort((a, b) => {
-      const c = a.sito.localeCompare(b.sito);
-      return c !== 0 ? c : (a.tipo_destinazione === 'imp' ? -1 : 1);
-    });
+    // Anomalie: siti senza target
+    for (const s of sitiSenzaTarget) {
+      anomalie.push({ tipo: 'sito_senza_target', sito: s, anno: annoNum });
+    }
 
-    // --- Totali ---
-    const numCols = ['target_primarie_t','target_totale_t','giacenza_iniziale_t','conferito_primarie_t','secondarie_in_t','secondarie_out_t','secondarie_nette_t','terziarie_t','uscite_css_t','uscite_ferro_t','dichiarato_r3_t','dichiarato_r1_t','giacenza_attuale_t','conferito_t','aci_in_primarie_t','aci_in_sec_t','aci_out_sec_t','aci_dichiarato_t','aci_predisposto_t','giacenza_aci_t','divergenza_portale_t','giacenza_portale_t'];
+    // Ordina per giacenza_portale_t decrescente
+    righe.sort((a, b) => b.giacenza_portale_t - a.giacenza_portale_t);
+
+    // === 7. TOTALI ===
+    const numCols = [
+      'giacenza_portale_t', 'dichiarato_t', 'granulo_t', 'fibre_t', 'metallo_t', 'cippato_t', 'ciabattato_t',
+      'conferito_primarie_t', 'secondarie_in_t', 'secondarie_out_t', 'secondarie_nette_t', 'terziarie_t',
+      'conferito_t', 'target_primarie_t', 'target_totale_t', 'giacenza_riferimento_t'
+    ];
     const totali = {};
     for (const c of numCols) totali[c] = r2(righe.reduce((s, r) => s + (r[c] || 0), 0));
+    totali.ordini_da_dichiarare = righe.reduce((s, r) => s + (r.ordini_da_dichiarare || 0), 0);
 
-    // --- Dichiarazioni mancanti ---
-    const dichiarazioni_mancanti = dichiarazioni
-      .filter(d => (d.quantita_kg || 0) > 0 && d.caricata_inviata === false && d.canale !== 'ACI')
-      .map(d => ({ sito: d.sito, operazione: d.operazione, canale: d.canale, provenienza: d.provenienza || '', mese: d.mese, tonnellate: r2((d.quantita_kg || 0) / 1000) }));
-
-    return Response.json({ anno: annoNum, righe, totali, dichiarazioni_mancanti });
+    return Response.json({ anno: annoNum, righe, totali, anomalie });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }
