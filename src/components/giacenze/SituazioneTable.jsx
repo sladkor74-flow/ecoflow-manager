@@ -8,7 +8,6 @@ function fmt(n, dec = 2) {
   return Number(n).toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 }
 
-const DIVERGENZA_TOOLTIP = "Materiale gia' trasferito ad altro sito ma ancora attribuito qui dal portale, in attesa di dichiarazione da parte di chi lo ha ricevuto.";
 const IN_ATTESA_TOOLTIP = "Materiale gia' partito da questo stoccaggio verso un impianto: il portale lo attribuisce ancora qui finche' il destinatario non presenta la dichiarazione. Non e' giacenza.";
 const RILEVAZ_OBSOLETA_TOOLTIP = "Rilevazione di oltre trenta giorni fa: aggiornala dalla pagina Unita' Locali di Stoccaggio del portale.";
 function fmtDate(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('it-IT'); }
@@ -25,8 +24,6 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
               <th className="px-3 py-2 font-semibold">Sito</th>
               <th className="px-3 py-2 font-semibold">Ruolo</th>
               <th className="px-3 py-2 font-semibold text-right">Giacenza a portale</th>
-              <th className="px-3 py-2 font-semibold text-right">Giacenza fisica</th>
-              <th className="px-3 py-2 font-semibold text-right">Divergenza</th>
               <th className="px-3 py-2 font-semibold text-right">In attesa di dichiarazione</th>
               <th className="px-3 py-2 font-semibold text-right">Ordini da dichiarare</th>
               <th className="px-3 py-2 font-semibold text-right">Dichiarato nell'anno</th>
@@ -67,19 +64,6 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                       </div>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-right">{fmt(r.giacenza_fisica_t)} t</td>
-                  <td className={`px-3 py-2 text-right font-medium ${
-                    r.divergenza_t > 0.01 ? 'text-amber-600' : (Math.abs(r.divergenza_t) <= 0.01 ? 'text-success' : '')
-                  }`}>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="cursor-help underline decoration-dotted underline-offset-2">{fmt(r.divergenza_t)} t</span>
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs text-xs">{DIVERGENZA_TOOLTIP}</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </td>
                   <td className={`px-3 py-2 text-right ${r.in_attesa_dichiarazione_t > 0.01 ? 'text-amber-600' : ''}`}>
                     {r.in_attesa_dichiarazione_t > 0.01 ? (
                       <TooltipProvider>
@@ -113,8 +97,6 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
               <td className="px-3 py-2">TOTALE</td>
               <td className="px-3 py-2"></td>
               <td className="px-3 py-2 text-right">{fmt(totali.giacenza_portale_t)} t</td>
-              <td className="px-3 py-2 text-right">{fmt(totali.giacenza_fisica_t)} t</td>
-              <td className="px-3 py-2 text-right">{fmt(totali.divergenza_t)} t</td>
               <td className="px-3 py-2 text-right">{fmt(totali.in_attesa_dichiarazione_t)} t</td>
               <td className="px-3 py-2 text-right">{totali.ordini_da_dichiarare || 0}</td>
               <td className="px-3 py-2 text-right">{fmt(totali.dichiarato_t)} t</td>
@@ -124,7 +106,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
         </table>
       </div>
       <p className="px-3 py-2 text-xs text-muted-foreground italic">
-        La giacenza a portale attribuisce il materiale alla destinazione primaria dell'ordine; la giacenza fisica segue gli spostamenti effettivi. Uno stoccaggio che ha trasferito il materiale in secondaria mostra una giacenza fisica pari a zero ma una giacenza a portale ancora valorizzata, finche' l'impianto ricevente non presenta la dichiarazione.
+        La giacenza a portale e' il dato ufficiale del portale Ecotyre: per gli impianti e' il peso degli ordini ricevuti e non ancora dichiarati come recuperati, per gli stoccaggi e' il saldo rilevato dalla pagina Unita' Locali di Stoccaggio. La colonna In attesa di dichiarazione indica invece materiale gia' partito da uno stoccaggio verso un impianto, che il portale continua ad attribuire allo stoccaggio finche' il destinatario non presenta la dichiarazione: non e' giacenza.
       </p>
     </div>
   );

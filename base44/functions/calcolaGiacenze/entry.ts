@@ -25,16 +25,13 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 //   - altrimenti attribuisci a destinazione, con ruolo dalla mappa ordini
 //   - se l'ordine non ha riscontro nella mappa: ruolo "imp" + anomalia
 //
-// GIACENZA FISICA E DIVERGENZA:
-//   giacenza_fisica_t = primarie (dest=sito, td=ruolo) + secondarie in arrivo - secondarie in partenza - terziarie in uscita - dichiarato (tutto lo storico, stato terminato)
-//   divergenza_t = giacenza_portale_t - giacenza_fisica_t
-//
-//   La giacenza a portale attribuisce il materiale alla destinazione primaria dell'ordine,
-//   mentre la giacenza fisica segue gli spostamenti effettivi. Quando un materiale viene
-//   consegnato a uno stoccaggio e poi trasferito in secondaria a un impianto, il portale
-//   continua ad attribuirlo allo stoccaggio finche' l'impianto ricevente non presenta la
-//   dichiarazione. La divergenza misura quindi il materiale gia' spostato ma ancora in
-//   attesa di dichiarazione da parte di chi lo ha ricevuto.
+// NOTA: i campi giacenza_fisica_t e divergenza_t sono stati rimossi perche' non attendibili.
+// La giacenza fisica veniva calcolata come bilancio dei movimenti meno il dichiarato, ma i
+// due insiemi coprono periodi diversi: PrimariaRete e PrimariaAci contengono ordini terminati
+// a partire da gennaio 2024, mentre DichiarazioneTrattamento comprende dichiarazioni riferite
+// a ordini chiusi gia' dal 2023. Il bilancio sottraeva dichiarazioni relative a materiale mai
+// conteggiato in ingresso, con uno squilibrio complessivo di circa settemila tonnellate.
+// La giacenza attendibile e' quella a portale, che il portale stesso calcola ordine per ordine.
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -145,7 +142,6 @@ export default async function(req) {
     // === 2. DICHIARATO (DichiarazioneTrattamento, per ns|td) ===
     const dichiaratoMap = new Map();   // ns|td -> t (anno corrente)
     const derivatiMap = new Map();     // ns|td -> { granulo, fibre, metallo, cippato, ciabattato } (anno corrente)
-    const fisicaDichiaratoMap = new Map(); // ns|td -> t (TUTTO lo storico)
 
     for (const d of dichiarazioni) {
       const { sito, td } = attribuisci(d);
@@ -154,9 +150,6 @@ export default async function(req) {
       const key = ns + '|' + td;
       const kg = Number(d.peso_associato_kg) || 0;
       const t = kg / 1000;
-
-      // TUTTO lo storico per la giacenza fisica
-      fisicaDichiaratoMap.set(key, (fisicaDichiaratoMap.get(key) || 0) + t);
 
       // Anno corrente per dichiarato e derivati
       if (inYear(d.data_dichiarazione)) {
@@ -213,48 +206,6 @@ export default async function(req) {
     }
     const giacMapKeys = new Set(giacMap.keys());
 
-    // === 3c. MOVIMENTAZIONE TUTTO STORICO (per giacenza fisica, stato terminato, senza filtro anno) ===
-    const fisicaPrimMap = new Map(); // ns|td -> t
-    for (const r of [...reteAll, ...aciAll, ...extraAll]) {
-      if (!isTerminato(r)) continue;
-      const nd = norm(r.destinazione);
-      const td = tdNorm(r.tipo_destinazione);
-      if (!nd || !td) continue;
-      const k = nd + '|' + td;
-      fisicaPrimMap.set(k, (fisicaPrimMap.get(k) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
-    }
-
-    const fisicaSecInMap = new Map(); // ns|td -> t
-    for (const r of secAll) {
-      if (!isTerminato(r)) continue;
-      const nd = norm(r.destinazione);
-      const td = tdNorm(r.tipo_destinazione);
-      if (!nd || !td) continue;
-      const k = nd + '|' + td;
-      fisicaSecInMap.set(k, (fisicaSecInMap.get(k) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
-    }
-
-    const fisicaSecOutMap = new Map(); // ns|stoc -> t
-    for (const r of secAll) {
-      if (!isTerminato(r)) continue;
-      const ns = norm(r.stoccaggio);
-      if (!ns) continue;
-      const k = ns + '|stoc';
-      fisicaSecOutMap.set(k, (fisicaSecOutMap.get(k) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
-    }
-
-    const fisicaTerzMap = new Map(); // ns|td -> t
-    for (const r of terzAll) {
-      if (!isTerminato(r)) continue;
-      const no = norm(r.unita_locale_origine || r.ragione_sociale);
-      if (!no) continue;
-      // Determina il td: preferisci 'imp' se presente in giacMap, altrimenti il primo, altrimenti 'imp'
-      const tds = [...giacMapKeys].filter(k => k.startsWith(no + '|')).map(k => k.split('|')[1]);
-      const td = tds.includes('imp') ? 'imp' : (tds[0] || 'imp');
-      const k = no + '|' + td;
-      fisicaTerzMap.set(k, (fisicaTerzMap.get(k) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
-    }
-
     // === 5. UNIONE DEI SITI (tutte le chiavi sono ns|td) ===
     const rowKeys = new Set();
 
@@ -263,12 +214,6 @@ export default async function(req) {
     for (const ns of stocRilevMap.keys()) rowKeys.add(ns + '|stoc');
     for (const k of dichiaratoMap.keys()) rowKeys.add(k);
     for (const k of confPrimMap.keys()) rowKeys.add(k);
-    for (const k of fisicaPrimMap.keys()) rowKeys.add(k);
-    for (const k of fisicaSecInMap.keys()) rowKeys.add(k);
-    for (const k of fisicaSecOutMap.keys()) rowKeys.add(k);
-    for (const k of fisicaTerzMap.keys()) rowKeys.add(k);
-    for (const k of fisicaDichiaratoMap.keys()) rowKeys.add(k);
-
     // Per le mappe per-ns dell'anno corrente (secInMap, secOutMap, terzMap): risolvi il td
     function resolveTds(ns) {
       const tds = [...giacMapKeys].filter(k => k.startsWith(ns + '|')).map(k => k.split('|')[1]);
@@ -361,21 +306,10 @@ export default async function(req) {
       const residuo_t = target_totale_t > 0 ? target_totale_t - conferito_t : null;
       const percentuale_target = target_totale_t > 0 ? (conferito_t / target_totale_t) * 100 : null;
 
-      // Giacenza fisica (tutto lo storico, stato terminato)
-      const giacenza_fisica_t =
-        (fisicaPrimMap.get(key) || 0) +
-        (fisicaSecInMap.get(key) || 0) -
-        (fisicaSecOutMap.get(key) || 0) -
-        (fisicaTerzMap.get(key) || 0) -
-        (fisicaDichiaratoMap.get(key) || 0);
-      const divergenza_t = giacenza_portale_t - giacenza_fisica_t;
-
       righe.push({
         sito: sitoNome,
         tipo_destinazione: td,
         giacenza_portale_t: r2(giacenza_portale_t),
-        giacenza_fisica_t: r2(giacenza_fisica_t),
-        divergenza_t: r2(divergenza_t),
         giacenza_rete_t: giacenza_rete_t !== null ? r2(giacenza_rete_t) : null,
         giacenza_aci_t: giacenza_aci_t !== null ? r2(giacenza_aci_t) : null,
         data_rilevazione,
@@ -435,7 +369,7 @@ export default async function(req) {
 
     // === 7. TOTALI ===
     const numCols = [
-      'giacenza_portale_t', 'giacenza_fisica_t', 'divergenza_t', 'in_attesa_dichiarazione_t',
+      'giacenza_portale_t', 'in_attesa_dichiarazione_t',
       'dichiarato_t', 'granulo_t', 'fibre_t', 'metallo_t', 'cippato_t', 'ciabattato_t',
       'conferito_primarie_t', 'secondarie_in_t', 'secondarie_out_t', 'secondarie_nette_t', 'terziarie_t',
       'conferito_t', 'target_primarie_t', 'target_totale_t', 'giacenza_riferimento_t'

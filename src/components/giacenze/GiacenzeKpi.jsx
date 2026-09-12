@@ -1,5 +1,5 @@
 import React from 'react';
-import { Warehouse, ClipboardList, FileCheck, PackageOpen, Target, ArrowLeftRight } from 'lucide-react';
+import { Warehouse, ClipboardList, FileCheck, PackageOpen, Target } from 'lucide-react';
 
 function fmt(n, dec = 2) {
   if (n == null || n === '' || isNaN(n)) return '—';
@@ -17,7 +17,6 @@ export default function GiacenzeKpi({ totali }) {
     { label: 'Dichiarato nell\'anno', value: fmt(totali.dichiarato_t), unit: 't', icon: FileCheck, color: 'text-success' },
     { label: 'Conferito nell\'anno', value: fmt(totali.conferito_t), unit: 't', icon: PackageOpen, color: 'text-accent' },
     { label: 'Copertura target', value: copertura != null ? fmt(copertura, 1) : '—', unit: '%', icon: Target, color: copertura != null && copertura >= 100 ? 'text-success' : 'text-amber-600' },
-    { label: 'Divergenza totale', value: fmt(totali.divergenza_t), unit: 't', icon: ArrowLeftRight, color: 'text-amber-600', subtitle: 'materiale trasferito in attesa di dichiarazione' },
   ];
 
   return (
