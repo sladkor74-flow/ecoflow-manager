@@ -56,6 +56,7 @@ function leggiIntestazioni(ws) {
 
 export default async function(req) {
   let tipo_file = null, nome_file = 'N/D', file_url = null;
+  let fase = 'avvio';
   try {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
@@ -99,12 +100,19 @@ export default async function(req) {
     }
 
     // === 1. Scarica e parse il file Excel ===
+    fase = 'download del file';
     const fileRes = await fetch(file_url);
     if (!fileRes.ok) return Response.json({ error: 'Impossibile scaricare il file' }, { status: 502 });
     const ab = await fileRes.arrayBuffer();
-    const wb = XLSX.read(ab, { type: 'array', cellDates: true });
+    // I due report del portale portano le date come seriali Excel e vengono convertite
+    // da DATE_FIELDS: disattivare cellDates evita di creare un oggetto Date per ogni
+    // cella data, su oltre un milione di celle.
+    const usaCellDates = !(tipo_file === 'dichiarazioni_trattamento' || tipo_file === 'ordini_non_dichiarati');
+    fase = 'lettura del foglio';
+    const wb = XLSX.read(ab, { type: 'array', cellDates: usaCellDates });
 
     // === 2. Riconosci il foglio tramite firma intestazioni ===
+    fase = 'validazione intestazioni';
     const sig = FILE_SIGNATURES[tipo_file];
     let sheetName = null;
     let avviso_colonne = [];
@@ -173,7 +181,10 @@ export default async function(req) {
     }
 
     const ws = wb.Sheets[sheetName];
-    const rawRows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: true });
+    // Senza defval ogni riga produce solo le celle effettivamente presenti anziche'
+    // tutte le colonne: la mappatura gestisce gia' i valori assenti.
+    fase = 'mappatura righe';
+    const rawRows = XLSX.utils.sheet_to_json(ws, { raw: true });
 
     // === 3. Mappa colonne Excel -> campi entita' ===
     const colMap = config.columns;
@@ -265,6 +276,7 @@ export default async function(req) {
     let avviso_date = null;
 
     const antiRegressionTypes = ['primarie', 'secondarie', 'terziarie'];
+    fase = 'controllo anti-regressione';
     if (antiRegressionTypes.includes(tipo_file)) {
       let existingIds;
       if (tipo_file === 'primarie') {
@@ -387,6 +399,7 @@ export default async function(req) {
     };
     const isAssegnatoStato = (stato) => (stato || '').toLowerCase().trim() === 'assegnato';
 
+    fase = 'scrittura dei record';
     const importBucket = async (rows, entityName, campi = null, sostituisci = true, kf = 'id_ordine') => {
       const records = campi
         ? rows.map(r => { const o = {}; for (const f of campi) o[f] = r[f] ?? null; return o; }).filter(r => r[kf])
@@ -506,6 +519,6 @@ export default async function(req) {
         periodo_riferimento: ''
       });
     } catch (_) {}
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: error.message, fase, dettaglio: 'Interruzione durante: ' + fase }, { status: 500 });
   }
 }
