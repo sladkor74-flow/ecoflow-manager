@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, Clock, Trash2 } from 'lucide-react';
 import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
+import { importaGrandeFile, TIPI_LETTURA_BROWSER } from '@/lib/importGrandeFile';
 
 const TIPI_FILE = [
   { key: 'primarie', label: 'Primarie', desc: 'File unico delle primarie (un solo foglio con tutto). Suddivide automaticamente le righe in Primarie Rete, Primarie ACI, Assegnati Rete e Assegnati ACI in base a stato e classe.', colore: 'bg-green-50 border-green-200' },
@@ -17,6 +18,7 @@ export default function CaricamentoDati() {
   const [uploading, setUploading] = useState(null);
   const [risultato, setRisultato] = useState({});
   const [dialogState, setDialogState] = useState(null);
+  const [progresso, setProgresso] = useState({});
   const pendingFileUrlRef = useRef({});
 
   const caricaLogs = async () => {
@@ -37,6 +39,25 @@ export default function CaricamentoDati() {
     setUploading(tipoKey);
     setRisultato(prev => ({ ...prev, [tipoKey]: null }));
     try {
+      // I due report del portale sono troppo grandi per essere letti dentro una
+      // function: la lettura avviene nel browser e al backend arrivano blocchi di
+      // poche centinaia di righe gia' estratte.
+      if (TIPI_LETTURA_BROWSER.includes(tipoKey)) {
+        const data = await importaGrandeFile({
+          file,
+          tipoFile: tipoKey,
+          confermaForzatura: conferma_forzatura,
+          onProgress: (p) => setProgresso(prev => ({ ...prev, [tipoKey]: p })),
+        });
+        setProgresso(prev => ({ ...prev, [tipoKey]: null }));
+        setRisultato(prev => ({ ...prev, [tipoKey]: { ok: true, data } }));
+        const warnings = extractUploadWarnings(data);
+        if (warnings) setDialogState(warnings);
+        caricaLogs();
+        setUploading(null);
+        return;
+      }
+
       let fileUrl;
       if (conferma_forzatura && pendingFileUrlRef.current[tipoKey]) {
         fileUrl = pendingFileUrlRef.current[tipoKey];
@@ -54,6 +75,7 @@ export default function CaricamentoDati() {
       if (warnings) setDialogState(warnings);
       caricaLogs();
     } catch (e) {
+      setProgresso(prev => ({ ...prev, [tipoKey]: null }));
       const errInfo = extractUploadError(e);
       setRisultato(prev => ({ ...prev, [tipoKey]: { ok: false, error: errInfo.error } }));
       setDialogState({ ...errInfo, onForza: () => handleUpload(tipoKey, file, true) });
@@ -103,6 +125,29 @@ export default function CaricamentoDati() {
                   )}
                 </div>
               </label>
+
+              {progresso[tipo.key] && (
+                <div className="mt-3 text-xs text-muted-foreground">
+                  {progresso[tipo.key].fase === 'scrittura' ? (
+                    <>
+                      <div className="flex justify-between mb-1">
+                        <span>Blocco {progresso[tipo.key].blocco} di {progresso[tipo.key].totaleBlocchi}</span>
+                        <span className="tabular-nums">
+                          {(progresso[tipo.key].righeScritte || 0).toLocaleString('it-IT')} / {(progresso[tipo.key].totaleRighe || 0).toLocaleString('it-IT')} righe
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full bg-primary transition-all"
+                          style={{ width: `${Math.round((progresso[tipo.key].blocco / progresso[tipo.key].totaleBlocchi) * 100)}%` }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <span>{progresso[tipo.key].fase}…</span>
+                  )}
+                </div>
+              )}
 
               {res && res.ok && (
                 <div className="mt-3 flex items-start gap-2 text-sm text-green-700">
