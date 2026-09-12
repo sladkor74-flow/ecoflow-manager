@@ -7,8 +7,6 @@ const TIPI_FILE = [
   { key: 'primarie', label: 'Primarie', desc: 'File unico delle primarie (un solo foglio con tutto). Suddivide automaticamente le righe in Primarie Rete, Primarie ACI, Assegnati Rete e Assegnati ACI in base a stato e classe.', colore: 'bg-green-50 border-green-200' },
   { key: 'secondarie', label: 'Secondarie', desc: 'Viaggi stoccaggio → impianto (foglio SECONDARIE)', colore: 'bg-purple-50 border-purple-200' },
   { key: 'terziarie', label: 'Terziarie', desc: 'Viaggi impianto → cementeria/impianto (foglio TERZIARIE)', colore: 'bg-pink-50 border-pink-200' },
-  { key: 'extra_raccolta', label: 'Extra Raccolta', desc: 'Raccolte extra fuori rete Ecotyre (foglio EXTRA RACCOLTA)', colore: 'bg-teal-50 border-teal-200' },
-  { key: 'status', label: 'Status & Target', desc: 'Target mensili per raccoglitore (foglio STATUS) — alimenta la pagina Target Status', colore: 'bg-indigo-50 border-indigo-200' },
 ];
 
 export default function CaricamentoDati() {
@@ -45,7 +43,7 @@ export default function CaricamentoDati() {
         fileUrl = file_url;
         pendingFileUrlRef.current[tipoKey] = fileUrl;
       }
-      const fnName = tipoKey === 'status' ? 'seedTargetMensile' : 'importEcotyreFile';
+      const fnName = 'importEcotyreFile';
       const params = { file_url: fileUrl, tipo_file: tipoKey, nome_file: file.name, replace_existing: true };
       if (conferma_forzatura) params.conferma_forzatura = true;
       const res = await base44.functions.invoke(fnName, params);

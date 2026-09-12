@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Calculator, CheckCircle2, XCircle } from 'lucide-react';
+import { Loader2, Calculator, CheckCircle2, XCircle, ExternalLink } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
 import PassivaRaccoglitoriTable from './PassivaRaccoglitoriTable';
 import PassivaImpiantiTable from './PassivaImpiantiTable';
@@ -56,6 +57,11 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
           {loading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Calculator className="w-4 h-4 mr-1.5" />}
           Calcola
         </Button>
+        {tipologia === 'EXTRA_RACCOLTA' && (
+          <Link to="/extra-raccolta" className="ml-auto text-sm text-primary hover:underline inline-flex items-center gap-1">
+            <ExternalLink className="w-3.5 h-3.5" /> Inserisci o modifica gli interventi
+          </Link>
+        )}
       </div>
 
       {error && <div className="text-sm text-destructive bg-destructive/10 px-4 py-2 rounded">{error}</div>}

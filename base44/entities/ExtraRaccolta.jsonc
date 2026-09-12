@@ -138,6 +138,66 @@
     },
     "regione": {
       "type": "string"
+    },
+    "tipologia_trasporto": {
+      "type": "string",
+      "description": "Progetto o campagna di riferimento, es. PFU ZERO - MAREVIVO"
+    },
+    "produttore": {
+      "type": "string",
+      "description": "Soggetto da cui si raccoglie; enti esterni non in anagrafica PDR"
+    },
+    "prezzo_attivo_t": {
+      "type": "number",
+      "default": 0,
+      "description": "Prezzo in euro per tonnellata fatturato al cliente"
+    },
+    "sovracosto_raccolta": {
+      "type": "number",
+      "default": 0,
+      "description": "Importo fisso in euro da aggiungere in fattura"
+    },
+    "sovracosto_trasporto": {
+      "type": "number",
+      "default": 0,
+      "description": "Importo fisso in euro"
+    },
+    "sovracosto_trattamento": {
+      "type": "number",
+      "default": 0,
+      "description": "Importo fisso in euro"
+    },
+    "costo_raccolta_t": {
+      "type": "number",
+      "default": 0,
+      "description": "Costo in euro per tonnellata da pagare al raccoglitore"
+    },
+    "costo_stoccaggio_t": {
+      "type": "number",
+      "default": 0,
+      "description": "Costo in euro per tonnellata da pagare allo stoccaggio"
+    },
+    "costo_trattamento_t": {
+      "type": "number",
+      "default": 0,
+      "description": "Costo in euro per tonnellata da pagare all'impianto"
+    },
+    "costo_pulizia": {
+      "type": "number",
+      "default": 0,
+      "description": "Importo fisso in euro"
+    },
+    "costi_aggiuntivi": {
+      "type": "number",
+      "default": 0,
+      "description": "Importo fisso in euro per oneri non riconducibili alle voci precedenti"
+    },
+    "note_costi": {
+      "type": "string",
+      "description": "Spiegazione obbligatoria quando costi_aggiuntivi o costo_pulizia > 0"
+    },
+    "note": {
+      "type": "string"
     }
   },
   "required": [

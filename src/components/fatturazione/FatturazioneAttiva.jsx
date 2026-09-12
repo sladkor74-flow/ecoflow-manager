@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { LayoutDashboard, Table, Download, Upload } from 'lucide-react';
+import { LayoutDashboard, Table, Download } from 'lucide-react';
 import AttivaDashboard from './AttivaDashboard';
 import AttivaDetail from './AttivaDetail';
 import AttivaEsportazioni from './AttivaEsportazioni';
-import ExtraRaccoltaManager from './ExtraRaccoltaManager';
 
 export default function FatturazioneAttiva({ isAdmin }) {
   const [tab, setTab] = useState('dashboard');
@@ -39,7 +38,6 @@ export default function FatturazioneAttiva({ isAdmin }) {
       <TabsList>
         <TabsTrigger value="dashboard"><LayoutDashboard className="w-4 h-4 mr-1.5" /> Dashboard</TabsTrigger>
         <TabsTrigger value="dettaglio"><Table className="w-4 h-4 mr-1.5" /> Dettaglio</TabsTrigger>
-        <TabsTrigger value="extra"><Upload className="w-4 h-4 mr-1.5" /> Extra Raccolta</TabsTrigger>
         <TabsTrigger value="esportazioni"><Download className="w-4 h-4 mr-1.5" /> Esportazioni</TabsTrigger>
       </TabsList>
       <TabsContent value="dashboard" className="mt-4">
@@ -48,7 +46,6 @@ export default function FatturazioneAttiva({ isAdmin }) {
       <TabsContent value="dettaglio" className="mt-4">
         <AttivaDetail data={data} loading={loading} />
       </TabsContent>
-      <TabsContent value="extra" className="mt-4"><ExtraRaccoltaManager periodo={periodo} /></TabsContent>
       <TabsContent value="esportazioni" className="mt-4">
         <AttivaEsportazioni periodo={periodo} data={data} onReload={loadData} />
       </TabsContent>

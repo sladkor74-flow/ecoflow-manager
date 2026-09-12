@@ -49,6 +49,13 @@ export default async function(req) {
       }, { status: 400 });
     }
 
+    // === Rifiuta "extra_raccolta": inserimento solo dal modulo dedicato ===
+    if (tipo_file === 'extra_raccolta') {
+      return Response.json({
+        error: "L'extra raccolta si inserisce dal modulo dedicato Extra Raccolta, non dal caricamento file."
+      }, { status: 400 });
+    }
+
     const config = SHEET_MAP[tipo_file];
     if (!config) {
       return Response.json({ error: 'tipo_file non valido. Valori ammessi: ' + Object.keys(SHEET_MAP).join(', ') }, { status: 400 });
