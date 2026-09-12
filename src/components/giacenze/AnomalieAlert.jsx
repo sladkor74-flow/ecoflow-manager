@@ -6,6 +6,7 @@ const TIPO_LABEL = {
   sito_senza_target: 'Sito senza target',
   giacenza_sopra_target: 'Giacenza sopra target',
   ordine_senza_riscontro: 'Ordine senza riscontro',
+  stoccaggio_senza_rilevazione: 'Stoccaggio senza rilevazione',
 };
 
 export default function AnomalieAlert({ anomalie }) {
@@ -36,6 +37,7 @@ export default function AnomalieAlert({ anomalie }) {
                 {a.tipo === 'coerenza_derivati' && ` — dichiarato ${a.dichiarato_t} t, derivati ${a.somma_derivati_t} t (diff. ${a.differenza_t} t)`}
                 {a.tipo === 'giacenza_sopra_target' && ` — giacenza ${a.giacenza_portale_t} t contro target ${a.target_totale_t} t`}
                 {a.tipo === 'sito_senza_target' && ` — nessun record GiacenzaSito per l'anno ${a.anno}`}
+                {a.tipo === 'stoccaggio_senza_rilevazione' && ` — il dato va letto dalla pagina Unita' Locali di Stoccaggio del portale`}
               </span>
             </div>
           ))}

@@ -1,0 +1,61 @@
+{
+  "name": "GiacenzaStoccaggio",
+  "type": "object",
+  "properties": {
+    "sito": {
+      "type": "string",
+      "description": "Ragione sociale dello stoccaggio come compare nel campo destinazione dei file del portale"
+    },
+    "id_unita_stoccaggio": {
+      "type": "number",
+      "description": "Identificativo dell'unita' locale assegnato dal portale"
+    },
+    "descrizione_unita": {
+      "type": "string",
+      "description": "Descrizione dell'unita' come riportata dal portale, ad esempio Stoc/NAPPI SUD SRL"
+    },
+    "comune": {
+      "type": "string"
+    },
+    "provincia": {
+      "type": "string"
+    },
+    "data_rilevazione": {
+      "type": "string",
+      "format": "date",
+      "description": "Giorno in cui il dato e' stato letto dal portale"
+    },
+    "class1_kg": {
+      "type": "number",
+      "default": 0,
+      "description": "P, fino a 35 kg, auto e moto"
+    },
+    "class2_kg": {
+      "type": "number",
+      "default": 0,
+      "description": "M, fino a 155 kg, camion e bus"
+    },
+    "class3_kg": {
+      "type": "number",
+      "default": 0,
+      "description": "G1, superiori a 155 kg, agricoltura"
+    },
+    "class4_kg": {
+      "type": "number",
+      "default": 0,
+      "description": "G2, superiori a 155 kg, industriali"
+    },
+    "class9_kg": {
+      "type": "number",
+      "default": 0,
+      "description": "PFU Autodemolizione, canale ACI"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sito",
+    "data_rilevazione"
+  ]
+}

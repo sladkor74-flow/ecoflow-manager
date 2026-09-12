@@ -9,7 +9,8 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 // - CONFERITO e TARGET (flusso): calcolati sull'anno richiesto
 //
 // Fonti dati:
-//   OrdineNonDichiarato  -> giacenza a portale, ordini da dichiarare, arretrato per anno
+//   OrdineNonDichiarato  -> giacenza a portale (impianti), ordini da dichiarare, arretrato per anno, in_attesa_dichiarazione (stoccaggi)
+//   GiacenzaStoccaggio   -> giacenza a portale degli stoccaggi (rilevazione manuale del saldo reale portale)
 //   DichiarazioneTrattamento -> dichiarato e derivati (filtrato per anno di data_dichiarazione)
 //   PrimariaRete/Aci, ExtraRaccolta, Secondaria, Terziaria -> movimentazione (stato terminato, trasporto_finito_il nell'anno)
 //   GiacenzaSito -> target e tipologia trattamento
@@ -49,7 +50,7 @@ export default async function(req) {
     const tdNorm = (v) => String(v || '').toLowerCase().trim();
 
     // Carica tutte le sorgenti dati in parallelo
-    const [nonDichiarati, dichiarazioni, reteAll, aciAll, extraAll, secAll, terzAll, giacenzeSito] = await Promise.all([
+    const [nonDichiarati, dichiarazioni, reteAll, aciAll, extraAll, secAll, terzAll, giacenzeSito, giacenzeStoccaggio] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.OrdineNonDichiarato),
       fetchAll(base44.asServiceRole.entities.DichiarazioneTrattamento),
       fetchAll(base44.asServiceRole.entities.PrimariaRete),
@@ -58,6 +59,7 @@ export default async function(req) {
       fetchAll(base44.asServiceRole.entities.Secondaria),
       fetchAll(base44.asServiceRole.entities.Terziaria),
       fetchAll(base44.asServiceRole.entities.GiacenzaSito, { anno: annoNum }),
+      fetchAll(base44.asServiceRole.entities.GiacenzaStoccaggio),
     ]);
 
     // --- Filtri temporali per movimentazione ---
@@ -88,9 +90,14 @@ export default async function(req) {
     }
 
     // === 1. GIACENZA A PORTALE (OrdineNonDichiarato, tutto lo storico, per ns|td) ===
-    const giacPortaleMap = new Map();   // ns|td -> t
+    // Per IMP: il peso non dichiarato e' la giacenza a portale dell'impianto.
+    // Per STOC: il peso non dichiarato NON e' giacenza dello stoccaggio (e' materiale partito verso
+    //   un impianto, in attesa che l'impianto ricevente presenti la dichiarazione). Viene raccolto
+    //   in inAttesaMap; la giacenza reale dello stoccaggio viene dalla rilevazione manuale (sezione 1b).
+    const giacPortaleMap = new Map();   // ns|imp -> t
     const ordiniMap = new Map();        // ns|td -> count
     const arretratoAnniMap = new Map(); // ns|td -> { anno: t }
+    const inAttesaMap = new Map();      // ns -> t (peso non dichiarato attribuito a stoccaggi)
     const ordiniSenzaRiscontro = new Set();
 
     for (const r of nonDichiarati) {
@@ -101,7 +108,11 @@ export default async function(req) {
       if (anomalia) ordiniSenzaRiscontro.add(r.ordine_primaria);
       const kg = Number(r.peso_non_dichiarato_kg) || 0;
       const t = kg / 1000;
-      giacPortaleMap.set(key, (giacPortaleMap.get(key) || 0) + t);
+      if (td === 'stoc') {
+        inAttesaMap.set(ns, (inAttesaMap.get(ns) || 0) + t);
+      } else {
+        giacPortaleMap.set(key, (giacPortaleMap.get(key) || 0) + t);
+      }
       ordiniMap.set(key, (ordiniMap.get(key) || 0) + 1);
 
       // Arretrato per anno di data_chiusura
@@ -114,6 +125,20 @@ export default async function(req) {
         if (!arretratoAnniMap.has(key)) arretratoAnniMap.set(key, {});
         const perAnno = arretratoAnniMap.get(key);
         perAnno[annoChiusura] = (perAnno[annoChiusura] || 0) + t;
+      }
+    }
+
+    // === 1b. RILEVAZIONI GIACENZA STOCCAGGIO (saldo reale portale, per stoccaggi) ===
+    // Per ogni stoccaggio, tiene il record con data_rilevazione piu' recente.
+    const stocRilevMap = new Map(); // ns -> { record, dataStr, dataMs }
+    for (const r of giacenzeStoccaggio) {
+      const ns = norm(r.sito);
+      if (!ns) continue;
+      const dataStr = r.data_rilevazione ? String(r.data_rilevazione).slice(0, 10) : null;
+      const dataMs = dataStr ? new Date(dataStr).getTime() : 0;
+      const existing = stocRilevMap.get(ns);
+      if (!existing || dataMs > existing.dataMs) {
+        stocRilevMap.set(ns, { record: r, dataStr, dataMs });
       }
     }
 
@@ -235,6 +260,7 @@ export default async function(req) {
 
     for (const k of giacMapKeys) rowKeys.add(k);
     for (const k of giacPortaleMap.keys()) rowKeys.add(k);
+    for (const ns of stocRilevMap.keys()) rowKeys.add(ns + '|stoc');
     for (const k of dichiaratoMap.keys()) rowKeys.add(k);
     for (const k of confPrimMap.keys()) rowKeys.add(k);
     for (const k of fisicaPrimMap.keys()) rowKeys.add(k);
@@ -277,9 +303,44 @@ export default async function(req) {
 
       let sitoNome = g?.sito || ns;
 
-      const giacenza_portale_t = giacPortaleMap.get(key) || 0;
       const ordini_da_dichiarare = ordiniMap.get(key) || 0;
       const arretrato_per_anno = arretratoAnniMap.get(key) || {};
+
+      // Giacenza a portale: per impianti dagli ordini non dichiarati, per stoccaggi dalla rilevazione manuale
+      let giacenza_portale_t;
+      let giacenza_rete_t = null;
+      let giacenza_aci_t = null;
+      let data_rilevazione = null;
+      let rilevazione_obsoleta = null;
+      let in_attesa_dichiarazione_t = 0;
+
+      if (td === 'stoc') {
+        // in_attesa_dichiarazione_t: materiale gia' partito dallo stoccaggio verso un impianto,
+        // che il portale continua ad attribuire allo stoccaggio finche' l'impianto ricevente non
+        // presenta la dichiarazione. Non e' giacenza dello stoccaggio, ma arretrato di dichiarazione
+        // a carico del destinatario.
+        in_attesa_dichiarazione_t = inAttesaMap.get(ns) || 0;
+
+        const rilev = stocRilevMap.get(ns);
+        if (rilev) {
+          const c1 = Number(rilev.record.class1_kg) || 0;
+          const c2 = Number(rilev.record.class2_kg) || 0;
+          const c3 = Number(rilev.record.class3_kg) || 0;
+          const c4 = Number(rilev.record.class4_kg) || 0;
+          const c9 = Number(rilev.record.class9_kg) || 0;
+          giacenza_portale_t = (c1 + c2 + c3 + c4 + c9) / 1000;
+          giacenza_rete_t = (c1 + c2 + c3 + c4) / 1000;
+          giacenza_aci_t = c9 / 1000;
+          data_rilevazione = rilev.dataStr;
+          const trentaGiorniFa = Date.now() - 30 * 24 * 60 * 60 * 1000;
+          rilevazione_obsoleta = rilev.dataMs < trentaGiorniFa;
+        } else {
+          giacenza_portale_t = 0;
+          anomalie.push({ tipo: 'stoccaggio_senza_rilevazione', sito: sitoNome });
+        }
+      } else {
+        giacenza_portale_t = giacPortaleMap.get(key) || 0;
+      }
 
       const dichiarato_t = dichiaratoMap.get(key) || 0;
       const der = derivatiMap.get(key) || { granulo: 0, fibre: 0, metallo: 0, cippato: 0, ciabattato: 0 };
@@ -315,6 +376,11 @@ export default async function(req) {
         giacenza_portale_t: r2(giacenza_portale_t),
         giacenza_fisica_t: r2(giacenza_fisica_t),
         divergenza_t: r2(divergenza_t),
+        giacenza_rete_t: giacenza_rete_t !== null ? r2(giacenza_rete_t) : null,
+        giacenza_aci_t: giacenza_aci_t !== null ? r2(giacenza_aci_t) : null,
+        data_rilevazione,
+        rilevazione_obsoleta,
+        in_attesa_dichiarazione_t: r2(in_attesa_dichiarazione_t),
         ordini_da_dichiarare,
         arretrato_per_anno,
         dichiarato_t: r2(dichiarato_t),
@@ -369,7 +435,7 @@ export default async function(req) {
 
     // === 7. TOTALI ===
     const numCols = [
-      'giacenza_portale_t', 'giacenza_fisica_t', 'divergenza_t',
+      'giacenza_portale_t', 'giacenza_fisica_t', 'divergenza_t', 'in_attesa_dichiarazione_t',
       'dichiarato_t', 'granulo_t', 'fibre_t', 'metallo_t', 'cippato_t', 'ciabattato_t',
       'conferito_primarie_t', 'secondarie_in_t', 'secondarie_out_t', 'secondarie_nette_t', 'terziarie_t',
       'conferito_t', 'target_primarie_t', 'target_totale_t', 'giacenza_riferimento_t'
