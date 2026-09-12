@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { Loader2, Play, CheckCircle, AlertTriangle, Lock } from 'lucide-react';
 import RiepilogoEcotyre from './RiepilogoEcotyre';
 import AttivaAnomalie from './AttivaAnomalie';
@@ -19,8 +20,10 @@ const TIPS = [
   { key: 'EXTRA_RACCOLTA', label: 'Extra Raccolta' },
 ];
 
-export default function AttivaDashboard({ periodo, setPeriodo, data, loading, elaborating, onElabora, onReload, isAdmin, anomalie }) {
+export default function AttivaDashboard({ periodo, setPeriodo, data, loading, elaborating, onElabora, onReload, isAdmin, anomalie, onVaiTariffe }) {
   const { anno, mese } = periodo;
+  const [anomalieAnteprima, setAnomalieAnteprima] = useState([]);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const cambiaStato = async (azione) => {
     for (const t of TIPS) {
@@ -30,6 +33,16 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
       }
     }
     await onReload();
+  };
+
+  const handleElabora = () => {
+    if (anomalieAnteprima.length > 0) setShowConfirm(true);
+    else onElabora();
+  };
+
+  const confermaElabora = () => {
+    setShowConfirm(false);
+    onElabora();
   };
 
   const totaleRete = data.RETE?.documento?.totale || 0;
@@ -59,15 +72,16 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
             <SelectContent>{MESI.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        <Button onClick={onElabora} disabled={elaborating || !isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''}>
+        <Button onClick={handleElabora} disabled={elaborating || !isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''}>
           {elaborating ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Play className="w-4 h-4 mr-1.5" />}
           Elabora Mese
         </Button>
       </div>
 
-      {/* Riepilogo automatico dovuto da Ecotyre */}
-      <RiepilogoEcotyre periodo={periodo} />
+      {/* Riepilogo automatico dovuto da Ecotyre (anteprima) */}
+      <RiepilogoEcotyre periodo={periodo} onAnomalieChange={setAnomalieAnteprima} onVaiTariffe={onVaiTariffe} />
 
+      {/* Anomalie rilevate dopo elaborazione (documenta) */}
       <AttivaAnomalie anomalie={anomalie} />
 
       {loading ? (
@@ -123,6 +137,21 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
           </div>
         </>
       )}
+
+      <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confermi l'elaborazione?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Alcune tonnellate non hanno una tariffa applicabile e verranno conteggiate a zero euro: il documento risulterà incompleto. Confermi di voler elaborare comunque?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction onClick={confermaElabora}>Elabora comunque</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -45,7 +45,7 @@ export default function Fatturazione() {
             <TabsContent value="EXTRA_RACCOLTA" className="mt-4"><PassivaModulo tipologia="EXTRA_RACCOLTA" periodo={periodo} setPeriodo={setPeriodo} /></TabsContent>
           </Tabs>
         </TabsContent>
-        <TabsContent value="attiva" className="mt-4"><FatturazioneAttiva isAdmin={isAdmin} /></TabsContent>
+        <TabsContent value="attiva" className="mt-4"><FatturazioneAttiva isAdmin={isAdmin} onVaiTariffe={() => setTab('tariffe')} /></TabsContent>
         {isAdmin && <TabsContent value="fornitori" className="mt-4"><FornitoriManager /></TabsContent>}
         {isAdmin && <TabsContent value="tariffe" className="mt-4"><TariffeUnificate /></TabsContent>}
         <TabsContent value="storico" className="mt-4"><StoricoFatturazione onOpen={openPeriod} /></TabsContent>
