@@ -1,10 +1,13 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 function fmt(n, dec = 2) {
   if (n == null || n === '' || isNaN(n)) return '—';
   return Number(n).toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 }
+
+const DIVERGENZA_TOOLTIP = "Materiale gia' trasferito ad altro sito ma ancora attribuito qui dal portale, in attesa di dichiarazione da parte di chi lo ha ricevuto.";
 
 export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
   const maxGiacenza = Math.max(...righe.map(r => r.giacenza_portale_t || 0), 0.01);
@@ -47,7 +50,18 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                     </div>
                   </td>
                   <td className="px-3 py-2 text-right">{fmt(r.giacenza_fisica_t)} t</td>
-                  <td className={`px-3 py-2 text-right ${Math.abs(r.divergenza_t) > 0.01 ? 'text-amber-600 font-medium' : ''}`}>{fmt(r.divergenza_t)} t</td>
+                  <td className={`px-3 py-2 text-right font-medium ${
+                    r.divergenza_t > 0.01 ? 'text-amber-600' : (Math.abs(r.divergenza_t) <= 0.01 ? 'text-success' : '')
+                  }`}>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help underline decoration-dotted underline-offset-2">{fmt(r.divergenza_t)} t</span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs text-xs">{DIVERGENZA_TOOLTIP}</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </td>
                   <td className="px-3 py-2 text-right">
                     <Button
                       variant="outline"
@@ -78,6 +92,9 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
           </tfoot>
         </table>
       </div>
+      <p className="px-3 py-2 text-xs text-muted-foreground italic">
+        La giacenza a portale attribuisce il materiale alla destinazione primaria dell'ordine; la giacenza fisica segue gli spostamenti effettivi. Uno stoccaggio che ha trasferito il materiale in secondaria mostra una giacenza fisica pari a zero ma una giacenza a portale ancora valorizzata, finche' l'impianto ricevente non presenta la dichiarazione.
+      </p>
     </div>
   );
 }
