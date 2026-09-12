@@ -1,5 +1,6 @@
 import React from 'react';
-import { Loader2, MapPin } from 'lucide-react';
+import { Loader2, MapPin, Eye } from 'lucide-react';
+import { streetViewUrl } from '@/lib/geoLinks';
 
 export default function PdrTable({ records, loading, onSelectPdr }) {
   if (loading) {
@@ -22,7 +23,7 @@ export default function PdrTable({ records, loading, onSelectPdr }) {
       <table className="w-full text-sm">
         <thead className="bg-muted">
           <tr>
-            <th className="px-2 py-2.5 w-10"></th>
+            <th className="px-2 py-2.5 w-20"></th>
             <th className="text-left px-3 py-2.5 font-medium">Cod. Esterno</th>
             <th className="text-left px-3 py-2.5 font-medium">Ragione Sociale</th>
             <th className="text-left px-3 py-2.5 font-medium">Comune</th>
@@ -46,15 +47,37 @@ export default function PdrTable({ records, loading, onSelectPdr }) {
                   const lng = parseFloat(r.longitudine);
                   const hasCoords = !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
                   return (
-                    <button
-                      type="button"
-                      disabled={!hasCoords}
-                      onClick={() => hasCoords && onSelectPdr?.(r.id)}
-                      title={hasCoords ? 'Vedi sulla mappa' : 'Coordinate non disponibili'}
-                      className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      <MapPin className="w-4 h-4 text-primary" />
-                    </button>
+                    <div className="flex items-center justify-center gap-0.5">
+                      <button
+                        type="button"
+                        disabled={!hasCoords}
+                        onClick={() => hasCoords && onSelectPdr?.(r.id)}
+                        title={hasCoords ? 'Vedi sulla mappa' : 'Coordinate non disponibili'}
+                        className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <MapPin className="w-4 h-4 text-primary" />
+                      </button>
+                      {hasCoords ? (
+                        <a
+                          href={streetViewUrl(lat, lng)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Apri Street View"
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-muted"
+                        >
+                          <Eye className="w-4 h-4 text-primary" />
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled
+                          title="Coordinate non disponibili"
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-md disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <Eye className="w-4 h-4 text-primary" />
+                        </button>
+                      )}
+                    </div>
                   );
                 })()}
               </td>

@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaf
 import { AlertTriangle, X, Search } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import PdrDetailCard from '@/components/pdr/PdrDetailCard';
+import { streetViewUrl, satelliteUrl, precisioneCoordinata } from '@/lib/geoLinks';
 
 function getThemeColor(varName, fallback) {
   if (typeof window === 'undefined') return fallback;
@@ -258,6 +259,15 @@ export default function PdrMap({ records, selectedPdrId, onSelect }) {
                       <div className="text-muted-foreground">Trasportatore: {r.trasportatore_principale}</div>
                     )}
                     {isSospeso && <div className="text-destructive font-bold">SOSPESO</div>}
+                    <div className="flex gap-3 pt-1 border-t">
+                      <a href={streetViewUrl(r._lat, r._lng)} target="_blank" rel="noopener noreferrer" className="text-primary underline text-xs">Street View</a>
+                      <a href={satelliteUrl(r._lat, r._lng)} target="_blank" rel="noopener noreferrer" className="text-primary underline text-xs">Satellite</a>
+                    </div>
+                    {(() => {
+                      const prec = precisioneCoordinata(r.geo_approssimazione);
+                      if (prec.livello === 'ok') return null;
+                      return <div className="text-xs text-muted-foreground italic">{prec.etichetta}</div>;
+                    })()}
                   </div>
                 </Popup>
               </CircleMarker>

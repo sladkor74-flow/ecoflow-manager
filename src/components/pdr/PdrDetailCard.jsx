@@ -1,5 +1,6 @@
 import React from 'react';
-import { ExternalLink } from 'lucide-react';
+import { Eye, Globe, MapPin } from 'lucide-react';
+import { streetViewUrl, satelliteUrl, addressSearchUrl, precisioneCoordinata } from '@/lib/geoLinks';
 
 function DetailField({ label, value }) {
   return (
@@ -16,7 +17,6 @@ export default function PdrDetailCard({ r }) {
   const email = r.email_pdr || r.email || null;
   const indirizzo = [r.indirizzo_pdr, r.cap_pdr, r.comune_pdr, r.provincia_pdr].filter(Boolean).join(', ');
   const hasCoords = r._lat != null && r._lng != null;
-  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${r._lat},${r._lng}`;
 
   return (
     <div className="border rounded-lg p-4 bg-card space-y-3">
@@ -53,16 +53,38 @@ export default function PdrDetailCard({ r }) {
         <DetailField label="ID U/L RENTRi" value={r.rentri_id_ul} />
         <DetailField label="Coordinate" value={hasCoords ? `${r._lat}, ${r._lng}` : null} />
       </dl>
-      {hasCoords && (
-        <a
-          href={mapsUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 text-sm text-primary underline"
-        >
-          <ExternalLink className="w-4 h-4" /> Apri in Google Maps
-        </a>
-      )}
+      {hasCoords && (() => {
+        const prec = precisioneCoordinata(r.geo_approssimazione);
+        const badgeClass = {
+          ok: 'bg-success/10 text-success',
+          medio: 'bg-chart-4/10 text-chart-4',
+          basso: 'bg-destructive/10 text-destructive',
+          ignoto: 'bg-muted text-muted-foreground',
+        }[prec.livello];
+        return (
+          <div className="space-y-2">
+            <span className={`inline-flex items-center text-xs font-medium px-2 py-1 rounded-full ${badgeClass}`}>
+              {prec.etichetta}
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <a href={streetViewUrl(r._lat, r._lng)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm border rounded-md px-3 py-1.5 hover:bg-muted">
+                <Eye className="w-4 h-4" /> Street View
+              </a>
+              <a href={satelliteUrl(r._lat, r._lng)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm border rounded-md px-3 py-1.5 hover:bg-muted">
+                <Globe className="w-4 h-4" /> Vista satellitare
+              </a>
+              <a href={addressSearchUrl(r)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm border rounded-md px-3 py-1.5 hover:bg-muted">
+                <MapPin className="w-4 h-4" /> Cerca indirizzo
+              </a>
+            </div>
+            {prec.livello !== 'ok' && (
+              <p className="text-xs text-muted-foreground">
+                La coordinata non individua con certezza il punto di raccolta: Street View potrebbe inquadrare una via diversa. Verifica con Cerca indirizzo.
+              </p>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
