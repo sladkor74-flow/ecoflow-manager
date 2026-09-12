@@ -12,6 +12,10 @@ export function extractUploadError(e) {
     status,
     error: data.error || e.message || 'Errore sconosciuto',
     dettaglio: data.dettaglio,
+    fase: data.fase,
+    // Solo il backend sa se l'errore e' arrivato prima o dopo lo svuotamento
+    // dell'archivio: senza una conferma esplicita non si rassicura l'utente.
+    dati_intatti: data.dati_intatti === true,
     tipo_rilevato: data.tipo_rilevato,
     fogli_trovati: data.fogli_trovati,
     esempi_mancanti: data.esempi_mancanti,
@@ -28,12 +32,15 @@ export function extractUploadWarnings(data) {
   const hasColonne = data.avviso_colonne && data.avviso_colonne.length > 0;
   const hasDate = !!data.avviso_date;
   const hasCalo = !!data.avviso_calo;
-  if (!hasColonne && !hasDate && !hasCalo) return null;
+  const hasDisallineamento = !!data.avviso_disallineamento;
+  if (!hasColonne && !hasDate && !hasCalo && !hasDisallineamento) return null;
   return {
     type: 'warning',
     avviso_colonne: data.avviso_colonne,
     avviso_date: data.avviso_date,
     avviso_calo: data.avviso_calo,
+    avviso_disallineamento: data.avviso_disallineamento,
+    ultimo_errore: data.ultimo_errore,
   };
 }
 
@@ -138,11 +145,36 @@ export default function UploadResultDialog({ state, onClose }) {
             </div>
           )}
 
+          {state.avviso_disallineamento && (
+            <div className="p-2.5 rounded-md bg-amber-50 border border-amber-300 text-amber-900 text-sm">
+              <strong>Archivio non allineato al file:</strong> il file contiene {state.avviso_disallineamento.file} righe
+              ma in archivio ne risultano {state.avviso_disallineamento.archivio}. Ricarica il file per riallinearlo.
+            </div>
+          )}
+
+          {state.ultimo_errore && (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1">Ultimo errore riportato dal database</p>
+              <p className="font-mono text-xs text-foreground break-all">{state.ultimo_errore}</p>
+            </div>
+          )}
+
+          {isError && state.fase && (
+            <p className="text-xs text-muted-foreground">Fase: {state.fase}</p>
+          )}
+
           {isError && (
-            <p className="flex items-center gap-1.5 text-green-700 font-medium pt-2 border-t">
-              <ShieldCheck className="w-4 h-4" />
-              Nessun dato è stato modificato o cancellato.
-            </p>
+            state.dati_intatti ? (
+              <p className="flex items-center gap-1.5 text-green-700 font-medium pt-2 border-t">
+                <ShieldCheck className="w-4 h-4" />
+                Nessun dato è stato modificato o cancellato.
+              </p>
+            ) : (
+              <p className="flex items-start gap-1.5 text-amber-800 font-medium pt-2 border-t">
+                <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                L'interruzione è avvenuta dopo l'inizio della scrittura: l'archivio potrebbe essere incompleto. Ricarica il file prima di consultare i dati.
+              </p>
+            )
           )}
         </div>
 

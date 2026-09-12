@@ -128,10 +128,15 @@ export default function CaricamentoDati() {
 
               {progresso[tipo.key] && (
                 <div className="mt-3 text-xs text-muted-foreground">
-                  {progresso[tipo.key].fase === 'scrittura' ? (
+                  {progresso[tipo.key].blocco ? (
                     <>
                       <div className="flex justify-between mb-1">
-                        <span>Blocco {progresso[tipo.key].blocco} di {progresso[tipo.key].totaleBlocchi}</span>
+                        <span>
+                          Blocco {progresso[tipo.key].blocco} di {progresso[tipo.key].totaleBlocchi}
+                          {progresso[tipo.key].fase === 'ritentativo' && (
+                            <span className="text-amber-700"> · ritentativo {progresso[tipo.key].tentativo}</span>
+                          )}
+                        </span>
                         <span className="tabular-nums">
                           {(progresso[tipo.key].righeScritte || 0).toLocaleString('it-IT')} / {(progresso[tipo.key].totaleRighe || 0).toLocaleString('it-IT')} righe
                         </span>
@@ -157,7 +162,7 @@ export default function CaricamentoDati() {
                       ? `${res.data.records_creati} target caricati (${res.data.raccoglitori} raccoglitori)`
                       : (res.data.primarie_rete_importati != null
                         ? `Rete: ${res.data.primarie_rete_importati} · ACI: ${res.data.primarie_aci_importati} · Ass. Rete: ${res.data.assegnati_importati} · Ass. ACI: ${res.data.assegnati_aci_importati}`
-                        : `${res.data.righe_importate} righe importate${res.data.righe_fallite > 0 ? ` (${res.data.righe_fallite} fallite)` : ''}`)}
+                        : `${res.data.righe_importate} righe importate${res.data.righe_fallite > 0 ? ` (${res.data.righe_fallite} fallite)` : ''}${res.data.blocchi_ritentati > 0 ? ` · ${res.data.blocchi_ritentati} blocchi ritentati` : ''}`)}
                   </span>
                 </div>
               )}

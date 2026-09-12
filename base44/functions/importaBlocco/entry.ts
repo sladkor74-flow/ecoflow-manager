@@ -6,17 +6,23 @@ import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSi
 //
 // Perche' esiste: il report delle dichiarazioni di trattamento pesa oltre 4 MB e
 // contiene piu' di un milione di celle. Leggerlo dentro una function esaurisce la
-// memoria disponibile e il processo viene terminato dalla piattaforma prima ancora
-// che un blocco catch possa segnalare l'errore. La lettura del file avviene quindi
-// nel browser, che di memoria ne ha in abbondanza, e qui arrivano solo blocchi di
-// poche centinaia di righe gia' estratte.
+// memoria disponibile e il processo viene terminato dalla piattaforma. La lettura
+// avviene quindi nel browser e qui arrivano blocchi di poche centinaia di righe.
 //
-// Payload: { tipo_file, nome_file, intestazioni, righe, blocco, totale_blocchi,
-//            totale_righe, conferma_forzatura? }
-// Il primo blocco porta le intestazioni e attiva validazione, controlli e
-// cancellazione; l'ultimo scrive il registro dei caricamenti.
+// Ogni invocazione fa una cosa sola e deve restare ampiamente sotto il timeout di
+// venti secondi della connessione al database. Le azioni sono:
+//   prepara  - verifica la firma del file, il controllo anti-regressione e svuota
+//              l'archivio precedente
+//   scrivi   - scrive un blocco con una sola chiamata a bulkCreate
+//   conta    - restituisce quanti record contiene l'archivio
+//   registra - scrive il registro dei caricamenti a fine importazione
+//
+// Un blocco corrisponde a una sola scrittura: o la riga vanno tutte a buon fine o
+// non ne va nessuna. Il browser puo' quindi ritentare un blocco fallito senza
+// rischiare duplicati, e verificare con l'azione conta se la scrittura era invece
+// arrivata a destinazione nonostante l'errore di rete.
 
-const SOTTO_BLOCCO = 100;
+const LIMITE_INVOCAZIONE_MS = 12000;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // Campi che rappresentano una data: accettano seriale Excel o testo AAAA-MM-GG.
@@ -58,32 +64,102 @@ function mappaRiga(row, colMap) {
   return obj;
 }
 
+// Riconosce gli errori di rete o di attesa: non vanno ritentati qui dentro perche'
+// ogni tentativo puo' bruciare venti secondi e far superare all'invocazione il
+// tempo massimo concesso dalla piattaforma. Il ritentativo spetta al browser.
+function eInterruzione(e) {
+  const m = String(e && e.message ? e.message : e).toLowerCase();
+  return m.indexOf('timed out') >= 0 || m.indexOf('timeout') >= 0
+    || m.indexOf('econnreset') >= 0 || m.indexOf('socket hang up') >= 0
+    || m.indexOf('connection') >= 0 || m.indexOf('network') >= 0;
+}
+
+// Conta i record dell'archivio. Il client non espone un conteggio e rileggere
+// l'intero archivio costerebbe quanto l'importazione stessa: si interroga quindi
+// la sola presenza di un record a una data posizione.
+//
+// Il browser conosce i due soli esiti possibili di un blocco: o e' entrato tutto
+// o non e' entrato niente. Verificare le due ipotesi costa due interrogazioni
+// ciascuna; solo se nessuna regge si procede per raddoppi e bisezione.
+async function contaRecord(base44, entita, ipotesi) {
+  const ent = base44.asServiceRole.entities[entita];
+  const esiste = async (i) => (await ent.list('created_date', 1, i)).length > 0;
+
+  for (const n of ipotesi) {
+    if (typeof n !== 'number' || n <= 0) continue;
+    if ((await esiste(n - 1)) && !(await esiste(n))) return n;
+  }
+
+  if (!(await esiste(0))) return 0;
+  let basso = 0, alto = 1;
+  while (await esiste(alto)) {
+    basso = alto;
+    alto *= 2;
+    if (alto > 2000000) return alto;
+  }
+  while (alto - basso > 1) {
+    const medio = Math.floor((basso + alto) / 2);
+    if (await esiste(medio)) basso = medio; else alto = medio;
+  }
+  return basso + 1;
+}
+
 export default async function(req) {
+  const t0 = Date.now();
+  let fase = 'avvio';
+  let archivioSvuotato = false;
+
   try {
+    fase = 'autenticazione';
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
-    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
+    if (!user) return Response.json({ error: 'Unauthorized', dati_intatti: true }, { status: 401 });
+    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin', dati_intatti: true }, { status: 403 });
 
+    fase = 'lettura della richiesta';
     const body = await req.json();
     const {
-      tipo_file, nome_file, intestazioni, righe, blocco,
-      totale_blocchi, totale_righe, conferma_forzatura,
+      azione, tipo_file, nome_file, intestazioni, righe, blocco,
+      totale_righe, conferma_forzatura, atteso, minimo,
     } = body;
-
-    if (!tipo_file || !Array.isArray(righe)) {
-      return Response.json({ error: 'tipo_file e righe sono obbligatori' }, { status: 400 });
-    }
 
     const config = SHEET_MAP[tipo_file];
     if (!config) {
-      return Response.json({ error: 'tipo_file non valido: ' + tipo_file }, { status: 400 });
+      return Response.json({ error: 'tipo_file non valido: ' + tipo_file, dati_intatti: true }, { status: 400 });
     }
-
     const entita = config.entity;
 
-    // === PRIMO BLOCCO: validazione, controlli, cancellazione ===
-    if (blocco === 0) {
+    // === CONTEGGIO: quante righe contiene ora l'archivio ===
+    if (azione === 'conta') {
+      fase = 'conteggio archivio';
+      const conteggio = await contaRecord(base44, entita, [atteso, minimo]);
+      return Response.json({ conteggio, dati_intatti: true });
+    }
+
+    // === REGISTRAZIONE: registro dei caricamenti a fine importazione ===
+    if (azione === 'registra') {
+      fase = 'scrittura registro caricamenti';
+      const scritte = Number(body.righe_importate) || 0;
+      const fallite = Number(body.righe_fallite) || 0;
+      const esito = fallite === 0 && scritte > 0 ? 'successo' : (scritte > 0 ? 'parziale' : 'errore');
+      const parti = [scritte + ' righe importate (lettura nel browser)'];
+      if (fallite > 0) parti.push(fallite + ' righe non scritte');
+      if (body.ultimo_errore) parti.push('ultimo errore: ' + body.ultimo_errore);
+      if (typeof body.conteggio_finale === 'number') parti.push('archivio verificato: ' + body.conteggio_finale + ' record');
+      await base44.asServiceRole.entities.UploadLog.create({
+        tipo_file, nome_file: nome_file || 'N/D',
+        righe_importate: scritte, righe_fallite: fallite, esito,
+        messaggio: parti.join(' — '),
+        righe_archivio_prima: typeof body.righe_archivio_prima === 'number' ? body.righe_archivio_prima : undefined,
+        forzato: conferma_forzatura === true ? true : undefined,
+        modalita: 'sostituzione',
+      });
+      return Response.json({ registrato: true, esito });
+    }
+
+    // === PREPARAZIONE: validazione, anti-regressione, svuotamento ===
+    if (azione === 'prepara') {
+      fase = 'verifica della firma delle intestazioni';
       const sig = FILE_SIGNATURES[tipo_file];
       if (sig) {
         const headers = Array.isArray(intestazioni) ? intestazioni.map(h => String(h || '')) : [];
@@ -96,6 +172,7 @@ export default async function(req) {
           const risposta: any = {
             error: 'Formato file non valido',
             dettaglio: parti.join('. ') || 'Le intestazioni non corrispondono al tipo file richiesto',
+            dati_intatti: true,
           };
           if (rilevato && rilevato !== tipo_file) {
             risposta.tipo_rilevato = `Il file caricato sembra di tipo ${rilevato.toUpperCase()} ma e' stato caricato nello slot ${tipo_file.toUpperCase()}`;
@@ -109,7 +186,7 @@ export default async function(req) {
       }
 
       if (!totale_righe || totale_righe === 0) {
-        return Response.json({ error: 'Nessuna riga valida trovata nel file' }, { status: 400 });
+        return Response.json({ error: 'Nessuna riga valida trovata nel file', dati_intatti: true }, { status: 400 });
       }
 
       // Controllo anti-regressione basato sul conteggio delle righe.
@@ -117,6 +194,7 @@ export default async function(req) {
       // necessario rileggere l'intero archivio, cioe' proprio il costo che questo
       // percorso vuole evitare. Il conteggio intercetta comunque il caso concreto
       // da cui proteggersi, ossia un export troncato o parziale.
+      fase = 'controllo anti-regressione';
       const logs = await base44.asServiceRole.entities.UploadLog.filter(
         { tipo_file, esito: 'successo' }, '-created_date', 1
       );
@@ -128,84 +206,60 @@ export default async function(req) {
           righe_file: totale_righe, righe_archivio: precedenti,
           mancanti: precedenti - totale_righe,
           richiede_conferma: true,
+          dati_intatti: true,
         }, { status: 409 });
       }
 
       let avviso_calo = null;
       if (tipo_file === 'ordini_non_dichiarati' && precedenti > 0 && totale_righe < precedenti / 2) {
-        avviso_calo = { precedente: precedenti, attuale: totale_righe };
+        avviso_calo = { righe_precedenti: precedenti, righe_attuali: totale_righe };
       }
 
+      fase = "svuotamento dell'archivio precedente";
       await base44.asServiceRole.entities[entita].deleteMany({});
+      archivioSvuotato = true;
 
-      const scritte = await scriviRighe(base44, entita, righe, config.columns);
-      return Response.json({ blocco, scritte: scritte.ok, fallite: scritte.ko, avviso_calo, iniziato: true, ultimo_errore: scritte.ultimo_errore });
+      return Response.json({ preparato: true, avviso_calo, righe_archivio_prima: precedenti });
     }
 
-    // === BLOCCHI SUCCESSIVI: sola scrittura ===
-    const scritte = await scriviRighe(base44, entita, righe, config.columns);
-
-    // === ULTIMO BLOCCO: registro dei caricamenti ===
-    if (typeof totale_blocchi === 'number' && blocco === totale_blocchi - 1) {
-      const totScritte = typeof body.totale_scritte === 'number' ? body.totale_scritte + scritte.ok : scritte.ok;
-      const totFallite = typeof body.totale_fallite === 'number' ? body.totale_fallite + scritte.ko : scritte.ko;
-      const esito = totFallite === 0 ? 'successo' : (totScritte > 0 ? 'parziale' : 'errore');
-      await base44.asServiceRole.entities.UploadLog.create({
-        tipo_file, nome_file: nome_file || 'N/D',
-        righe_importate: totScritte, righe_fallite: totFallite, esito,
-        messaggio: `${totScritte} righe importate in ${totale_blocchi} blocchi (lettura nel browser)` + (totFallite > 0 && scritte.ultimo_errore ? ` — ${totFallite} fallite, ultimo errore: ${scritte.ultimo_errore}` : ''),
-      });
-      return Response.json({ blocco, scritte: scritte.ok, fallite: scritte.ko, completato: true, totale_scritte: totScritte, esito, ultimo_errore: scritte.ultimo_errore });
+    // === SCRITTURA DI UN BLOCCO ===
+    if (!Array.isArray(righe) || righe.length === 0) {
+      return Response.json({ error: 'Nessuna riga da scrivere in questo blocco', dati_intatti: true }, { status: 400 });
     }
 
-    return Response.json({ blocco, scritte: scritte.ok, fallite: scritte.ko, ultimo_errore: scritte.ultimo_errore });
-  } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
-  }
-}
+    fase = 'scrittura del blocco ' + ((blocco || 0) + 1);
+    const records = righe.map(r => mappaRiga(r, config.columns));
+    let ultimoErrore = null;
 
-// Scrive un gruppo di record, con tentativi ripetuti e attesa crescente.
-// Restituisce true se riuscito, altrimenti false registrando l'ultimo errore.
-async function provaScrittura(base44, entita, gruppo, stato) {
-  for (let tentativo = 0; tentativo < 3; tentativo++) {
-    try {
-      await base44.asServiceRole.entities[entita].bulkCreate(gruppo);
-      return true;
-    } catch (e) {
-      stato.ultimo_errore = e && e.message ? e.message : String(e);
-      if (tentativo < 2) await sleep(1000 * (tentativo + 1));
-    }
-  }
-  return false;
-}
-
-// Mappa e scrive un blocco di righe, suddividendolo in sotto-blocchi.
-//
-// Quando un sotto-blocco non riesce nemmeno dopo tre tentativi, si riprova in
-// gruppi di dieci righe invece di scartarne cento: in questo modo un singolo
-// record problematico non trascina con se' i novantanove che lo accompagnano.
-async function scriviRighe(base44, entita, righe, colMap) {
-  const records = righe.map(r => mappaRiga(r, colMap));
-  const stato = { ultimo_errore: null };
-  let ok = 0, ko = 0;
-
-  for (let i = 0; i < records.length; i += SOTTO_BLOCCO) {
-    const chunk = records.slice(i, i + SOTTO_BLOCCO);
-
-    if (await provaScrittura(base44, entita, chunk, stato)) {
-      ok += chunk.length;
-    } else {
-      // Ripiego: gruppi piu' piccoli per isolare le righe che non passano.
-      for (let j = 0; j < chunk.length; j += 10) {
-        const piccolo = chunk.slice(j, j + 10);
-        if (await provaScrittura(base44, entita, piccolo, stato)) ok += piccolo.length;
-        else ko += piccolo.length;
-        await sleep(150);
+    for (let tentativo = 0; tentativo < 2; tentativo++) {
+      try {
+        await base44.asServiceRole.entities[entita].bulkCreate(records);
+        return Response.json({ blocco, scritte: records.length, fallite: 0 });
+      } catch (e) {
+        ultimoErrore = e && e.message ? e.message : String(e);
+        // Un errore di rete o di attesa non si ritenta qui: ritentarlo costerebbe
+        // altri venti secondi e farebbe terminare l'invocazione dalla piattaforma
+        // prima che possa rispondere. Se ne occupa il browser, che non ha limiti.
+        if (eInterruzione(e)) break;
+        if (Date.now() - t0 > LIMITE_INVOCAZIONE_MS) break;
+        await sleep(1000);
       }
     }
-    // Pausa fra sotto-blocchi: un ritmo troppo serrato provoca rifiuti.
-    await sleep(150);
-  }
 
-  return { ok, ko, ultimo_errore: stato.ultimo_errore };
+    // Il blocco non e' passato, ma la risposta resta un successo HTTP: il browser
+    // deve poter decidere se ritentare, non ricevere un'eccezione che interrompe
+    // l'intera importazione.
+    return Response.json({
+      blocco, scritte: 0, fallite: records.length,
+      ritentabile: true, ultimo_errore: ultimoErrore,
+    });
+
+  } catch (error) {
+    return Response.json({
+      error: error && error.message ? error.message : String(error),
+      fase,
+      dati_intatti: !archivioSvuotato,
+      ritentabile: eInterruzione(error),
+    }, { status: 500 });
+  }
 }
