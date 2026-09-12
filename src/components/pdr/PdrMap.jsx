@@ -170,7 +170,7 @@ export default function PdrMap({ records, selectedPdrId, onSelect }) {
         <div
           ref={searchContainerRef}
           onMouseDown={stopProp}
-          onDblClick={stopProp}
+          onDoubleClick={stopProp}
           onWheel={stopProp}
           className="absolute top-3 left-3 z-[1100] w-64 max-w-[70%]"
         >
