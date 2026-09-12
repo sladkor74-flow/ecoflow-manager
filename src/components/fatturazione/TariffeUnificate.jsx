@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Plus, Pencil, Copy, History, CalendarX, RotateCcw, Download } from 'lucide-react';
+import { Loader2, Plus, Pencil, Copy, History, CalendarX, RotateCcw, Download, Trash2 } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -26,6 +26,33 @@ function getAmbito(t) {
   if (t.prestazione === 'TRASPORTO_SECONDARIA') return `${t.produttore || '?'} → ${t.destinatario || '?'}`;
   return '—';
 }
+function normVal(v) { return String(v || '').trim().toUpperCase(); }
+function chiaviTariffaCoincidenti(a, b) {
+  const campi = ['fornitore_id', 'direzione', 'tipologia', 'prestazione', 'classe_materiale', 'provincia', 'regione', 'destinazione', 'produttore', 'destinatario'];
+  for (const c of campi) { if (normVal(a[c]) !== normVal(b[c])) return false; }
+  return true;
+}
+function periodiSovrappostiClient(inizio1, fine1, inizio2, fine2) {
+  const i1 = inizio1 ? new Date(inizio1).getTime() : 0;
+  const f1 = fine1 ? new Date(fine1).getTime() : Infinity;
+  const i2 = inizio2 ? new Date(inizio2).getTime() : 0;
+  const f2 = fine2 ? new Date(fine2).getTime() : Infinity;
+  return i1 <= f2 && i2 <= f1;
+}
+function calcolaDuplicate(tariffe) {
+  const attive = tariffe.filter(t => normVal(t.stato) === 'ATTIVO');
+  const dupIds = new Set();
+  for (let i = 0; i < attive.length; i++) {
+    for (let j = i + 1; j < attive.length; j++) {
+      if (chiaviTariffaCoincidenti(attive[i], attive[j]) &&
+          periodiSovrappostiClient(attive[i].data_inizio_validita, attive[i].data_fine_validita, attive[j].data_inizio_validita, attive[j].data_fine_validita)) {
+        dupIds.add(attive[i].id);
+        dupIds.add(attive[j].id);
+      }
+    }
+  }
+  return dupIds;
+}
 
 export default function TariffeUnificate() {
   const [tab, setTab] = useState('tariffe');
@@ -41,6 +68,10 @@ export default function TariffeUnificate() {
   const [storico, setStorico] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [import2026, setImport2026] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [showOnlyDup, setShowOnlyDup] = useState(false);
+  const [showOnlyNoPrest, setShowOnlyNoPrest] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -98,6 +129,9 @@ export default function TariffeUnificate() {
     }
   };
 
+  const duplicateIds = useMemo(() => calcolaDuplicate(tariffe), [tariffe]);
+  const noPrestCount = useMemo(() => tariffe.filter(t => !t.prestazione).length, [tariffe]);
+
   const filtered = useMemo(() => {
     let result = tariffe.filter(t => {
       if (filters.direzione && t.direzione !== filters.direzione) return false;
@@ -105,6 +139,8 @@ export default function TariffeUnificate() {
       if (filters.prestazione && t.prestazione !== filters.prestazione) return false;
       if (filters.fornitore_id && t.fornitore_id !== filters.fornitore_id) return false;
       if (!filters.showArchived && isArchiviata(t)) return false;
+      if (showOnlyDup && !duplicateIds.has(t.id)) return false;
+      if (showOnlyNoPrest && t.prestazione) return false;
       return true;
     });
     result.sort((a, b) => {
@@ -114,7 +150,7 @@ export default function TariffeUnificate() {
       return new Date(b.data_inizio_validita || 0) - new Date(a.data_inizio_validita || 0);
     });
     return result;
-  }, [tariffe, filters]);
+  }, [tariffe, filters, showOnlyDup, showOnlyNoPrest, duplicateIds]);
 
   const closePeriod = async (t) => {
     const dataFine = prompt('Inserisci la data di fine validità (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
@@ -130,6 +166,16 @@ export default function TariffeUnificate() {
       await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: { data_fine_validita: undefined, stato: 'attivo' } });
       load();
     } catch (e) { alert(e?.response?.data?.error || e?.message); }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'delete', id: deleteTarget.id });
+      setDeleteTarget(null);
+      load();
+    } catch (e) { alert(e?.response?.data?.error || e?.message); }
+    setDeleting(false);
   };
 
   const openCreate = () => setFormState({ open: true, editing: null, duplicating: null, excludePrestazione: '' });
@@ -181,6 +227,35 @@ export default function TariffeUnificate() {
               <span className="text-muted-foreground text-xs">Mostra archiviate</span>
             </label>
           </div>
+          {/* Avvisi duplicati e senza prestazione */}
+          {(duplicateIds.size > 0 || noPrestCount > 0) && (
+            <div className="space-y-2">
+              {duplicateIds.size > 0 && (
+                <div className="border-2 border-amber-300 bg-amber-50 rounded-lg p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="text-sm text-amber-800">
+                      <span className="font-semibold">⚠ {duplicateIds.size} tariffe duplicate.</span> Più tariffe attive coprono lo stesso periodo per la stessa combinazione: il calcolo ne applica una sola, in modo non prevedibile. Elimina o chiudi quelle superflue.
+                    </div>
+                    <Button size="sm" variant="outline" className="shrink-0" onClick={() => { setShowOnlyDup(!showOnlyDup); if (showOnlyNoPrest) setShowOnlyNoPrest(false); }}>
+                      {showOnlyDup ? 'Mostra tutte' : 'Mostra solo le duplicate'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {noPrestCount > 0 && (
+                <div className="border-2 border-orange-300 bg-orange-50 rounded-lg p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="text-sm text-orange-800">
+                      <span className="font-semibold">⚠ {noPrestCount} tariffe senza prestazione.</span> Queste tariffe non vengono mai applicate dal calcolo. Assegna la prestazione corretta oppure eliminale se sostituite da quelle importate.
+                    </div>
+                    <Button size="sm" variant="outline" className="shrink-0" onClick={() => { setShowOnlyNoPrest(!showOnlyNoPrest); if (showOnlyDup) setShowOnlyDup(false); }}>
+                      {showOnlyNoPrest ? 'Mostra tutte' : 'Mostra solo senza prestazione'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {/* Tabella */}
           <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
@@ -208,8 +283,9 @@ export default function TariffeUnificate() {
                   const zeroVal = Number(t.valore) === 0;
                   const f = fornitori.find(x => x.id === t.fornitore_id);
                   const multiRuolo = f ? countRuoli(f) > 1 : false;
+                  const isDup = duplicateIds.has(t.id);
                   return (
-                    <tr key={t.id} className={`${i % 2 ? 'bg-muted/30' : ''} ${arch ? 'opacity-50' : ''} ${noPrest ? 'bg-amber-50' : ''}`}>
+                    <tr key={t.id} className={`${i % 2 ? 'bg-muted/30' : ''} ${arch ? 'opacity-50' : ''} ${noPrest ? 'bg-amber-50' : ''} ${isDup ? 'bg-red-50' : ''}`}>
                       <td className="px-3 py-2 font-medium">{t.fornitore_nome || '—'}</td>
                       <td className="px-2 py-2 text-xs">{t.direzione || '—'}</td>
                       <td className="px-2 py-2 text-xs">{TIPOLOGIA_LABEL[t.tipologia] || t.tipologia || '—'}</td>
@@ -220,7 +296,12 @@ export default function TariffeUnificate() {
                       <td className="px-3 py-2 text-right font-medium">{formatNumber(t.valore, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{zeroVal && <div className="text-xs text-muted-foreground">Nessun compenso</div>}</td>
                       <td className="px-2 py-2 text-xs text-muted-foreground">{t.data_inizio_validita ? new Date(t.data_inizio_validita).toLocaleDateString('it-IT') : '—'}</td>
                       <td className="px-2 py-2 text-xs text-muted-foreground">{t.data_fine_validita ? new Date(t.data_fine_validita).toLocaleDateString('it-IT') : <span className="italic">aperto</span>}</td>
-                      <td className="px-2 py-2">{t.stato === 'attivo' ? <span className="text-xs px-1.5 py-0.5 rounded bg-success/10 text-success">Attivo</span> : <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Archivata</span>}</td>
+                      <td className="px-2 py-2">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {t.stato === 'attivo' ? <span className="text-xs px-1.5 py-0.5 rounded bg-success/10 text-success">Attivo</span> : <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Archivata</span>}
+                          {isDup && <span className="text-xs px-1.5 py-0.5 rounded bg-red-200 text-red-800 font-medium">Duplicata</span>}
+                        </div>
+                      </td>
                       <td className="text-right px-2 py-2 whitespace-nowrap">
                         <div className="flex items-center gap-0.5 justify-end">
                           <button onClick={() => openEdit(t)} className="p-1 hover:bg-muted rounded" title="Modifica"><Pencil className="w-3.5 h-3.5 text-primary" /></button>
@@ -228,6 +309,7 @@ export default function TariffeUnificate() {
                           <button onClick={() => setStorico(t)} className="p-1 hover:bg-muted rounded" title="Storico"><History className="w-3.5 h-3.5 text-muted-foreground" /></button>
                           {aperta && <button onClick={() => closePeriod(t)} className="p-1 hover:bg-muted rounded" title="Chiudi periodo"><CalendarX className="w-3.5 h-3.5 text-amber-500" /></button>}
                           {arch && <button onClick={() => reopenPeriod(t)} className="p-1 hover:bg-muted rounded" title="Riapri"><RotateCcw className="w-3.5 h-3.5 text-success" /></button>}
+                          <button onClick={() => setDeleteTarget(t)} className="p-1 hover:bg-destructive/10 rounded" title="Elimina tariffa"><Trash2 className="w-3.5 h-3.5 text-destructive" /></button>
                         </div>
                       </td>
                     </tr>
@@ -320,6 +402,37 @@ export default function TariffeUnificate() {
                 Conferma inserimento
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Elimina tariffa</DialogTitle>
+          </DialogHeader>
+          {deleteTarget && (
+            <div className="space-y-3 text-sm">
+              <div className="border rounded-lg p-3 space-y-1 bg-muted/30">
+                <div><span className="text-muted-foreground">Fornitore:</span> <span className="font-medium">{deleteTarget.fornitore_nome || '—'}</span></div>
+                <div><span className="text-muted-foreground">Prestazione:</span> <span className="font-medium">{PRESTAZIONI_LABEL[deleteTarget.prestazione] || deleteTarget.prestazione || '—'}</span></div>
+                <div><span className="text-muted-foreground">Tipologia:</span> <span className="font-medium">{TIPOLOGIA_LABEL[deleteTarget.tipologia] || deleteTarget.tipologia || '—'}</span></div>
+                <div><span className="text-muted-foreground">Classe:</span> <span className="font-medium">{deleteTarget.classe_materiale || 'Tutte'}</span></div>
+                <div><span className="text-muted-foreground">Ambito:</span> <span className="font-medium">{getAmbito(deleteTarget)}</span></div>
+                <div><span className="text-muted-foreground">Valore:</span> <span className="font-medium">{formatNumber(deleteTarget.valore, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {deleteTarget.unita_misura}</span></div>
+                <div><span className="text-muted-foreground">Periodo:</span> <span className="font-medium">{deleteTarget.data_inizio_validita || 'n.d.'} → {deleteTarget.data_fine_validita || 'aperto'}</span></div>
+              </div>
+              <div className="bg-amber-50 border border-amber-300 rounded p-3 text-amber-800 text-xs">
+                L'eliminazione è definitiva. Se il prezzo è stato applicato a fatturazioni già emesse, usa "Chiudi periodo" invece di eliminare, così lo storico resta consultabile.
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>Annulla</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Trash2 className="w-4 h-4 mr-1" />}
+              Elimina definitivamente
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

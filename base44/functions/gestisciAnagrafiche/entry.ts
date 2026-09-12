@@ -100,6 +100,7 @@ export default async function(req) {
       const chiudibili = [];
       for (const t of esistenti) {
         if (operazione === 'update' && t.id === id) continue;
+        if (norm(t.stato) !== 'ATTIVO') continue;
         if (!chiaveMatch(effettivi, t)) continue;
         if (!periodiSovrapposti(inizio, fine, t.data_inizio_validita, t.data_fine_validita)) continue;
         // Caso d: chiudibile se attivo, senza data fine, nuova inizio > esistente inizio
