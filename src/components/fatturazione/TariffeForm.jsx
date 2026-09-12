@@ -8,7 +8,7 @@ import { Save, AlertTriangle, X } from 'lucide-react';
 
 const REGIONI = ['Campania', 'Puglia', 'Basilicata', 'Calabria', 'Lazio', 'Molise', 'Abruzzo', 'Sicilia', 'Sardegna', 'Toscana', 'Lombardia', 'Piemonte', 'Veneto', 'Emilia-Romagna', 'Marche', 'Umbria', 'Liguria', 'Friuli-Venezia Giulia', 'Trentino-Alto Adige', "Valle d'Aosta"];
 const CLASSI = ['P', 'M', 'G1', 'G2'];
-const UNITA = ['€/t', '€/kg', '€/viaggio', '€/mese'];
+const UNITA = ['€/t', '€/kg', '€/viaggio'];
 const PRESTAZIONI_LABEL = { RACCOLTA: 'Raccolta', TRASPORTO_SECONDARIA: 'Trasporto secondaria', TRATTAMENTO: 'Trattamento', CONFERIMENTO_STOCCAGGIO: 'Conferimento stoccaggio' };
 const RUOLO_TO_PREST = { ruolo_raccolta: 'RACCOLTA', ruolo_trasporto_secondaria: 'TRASPORTO_SECONDARIA', ruolo_trattamento: 'TRATTAMENTO', ruolo_stoccaggio: 'CONFERIMENTO_STOCCAGGIO' };
 

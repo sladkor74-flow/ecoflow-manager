@@ -3,9 +3,10 @@ import { base44 } from '@/api/base44Client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Plus, Pencil, Copy, History, CalendarX, RotateCcw } from 'lucide-react';
+import { Loader2, Plus, Pencil, Copy, History, CalendarX, RotateCcw, Download } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
 import { fetchAllClient } from '@/lib/fetchAllClient';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import TariffeRuoliFornitori from './TariffeRuoliFornitori';
 import TariffeForm from './TariffeForm';
 import TariffeStorico from './TariffeStorico';
@@ -38,6 +39,8 @@ export default function TariffeUnificate() {
   const [filters, setFilters] = useState({ direzione: '', tipologia: '', prestazione: '', fornitore_id: '', showArchived: false });
   const [formState, setFormState] = useState({ open: false, editing: null, duplicating: null, excludePrestazione: '' });
   const [storico, setStorico] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [import2026, setImport2026] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -69,7 +72,31 @@ export default function TariffeUnificate() {
     } catch (e) {}
     setLoading(false);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    base44.auth.me().then(u => setIsAdmin(u?.role === 'admin')).catch(() => {});
+  }, []);
+
+  const handleImport2026 = async () => {
+    setImport2026({ summary: null, loading: true, inserting: false, error: null });
+    try {
+      const res = await base44.functions.invoke('seedTariffe2026', { simula: true });
+      setImport2026({ summary: res.data, loading: false, inserting: false, error: null });
+    } catch (e) {
+      setImport2026({ summary: null, loading: false, inserting: false, error: e?.message || 'Errore' });
+    }
+  };
+
+  const confirmImport2026 = async () => {
+    setImport2026(prev => ({ ...prev, inserting: true, error: null }));
+    try {
+      await base44.functions.invoke('seedTariffe2026', {});
+      setImport2026(null);
+      load();
+    } catch (e) {
+      setImport2026(prev => ({ ...prev, inserting: false, error: e?.message || 'Errore' }));
+    }
+  };
 
   const filtered = useMemo(() => {
     let result = tariffe.filter(t => {
@@ -122,7 +149,14 @@ export default function TariffeUnificate() {
         <TabsContent value="tariffe" className="mt-4 space-y-3">
           <div className="flex justify-between items-center">
             <p className="text-sm text-muted-foreground">Gestione unificata di tutte le tariffe per prestazione e fornitore.</p>
-            <Button size="sm" onClick={openCreate}><Plus className="w-4 h-4 mr-1" /> Aggiungi tariffa</Button>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={openCreate}><Plus className="w-4 h-4 mr-1" /> Aggiungi tariffa</Button>
+              {isAdmin && (
+                <Button size="sm" variant="outline" onClick={handleImport2026}>
+                  <Download className="w-4 h-4 mr-1" /> Importa tariffe 2026
+                </Button>
+              )}
+            </div>
           </div>
           {/* Filtri */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
@@ -221,6 +255,74 @@ export default function TariffeUnificate() {
         switchToRuoliTab={() => { closeForm(); setTab('ruoli'); }}
       />
       <TariffeStorico tariffa={storico} tariffe={tariffe} onClose={() => setStorico(null)} />
+
+      <Dialog open={import2026 !== null} onOpenChange={(o) => !o && setImport2026(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Importa tariffe 2026</DialogTitle>
+          </DialogHeader>
+          {import2026?.loading ? (
+            <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+          ) : import2026?.summary ? (
+            <div className="space-y-4 text-sm">
+              {import2026.summary.totali && (
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="border rounded p-2 text-center"><div className="text-xs text-muted-foreground">Fornitori creati</div><div className="text-lg font-bold">{import2026.summary.totali.fornitori_creati}</div></div>
+                  <div className="border rounded p-2 text-center"><div className="text-xs text-muted-foreground">Fornitori aggiornati</div><div className="text-lg font-bold">{import2026.summary.totali.fornitori_aggiornati}</div></div>
+                  <div className="border rounded p-2 text-center"><div className="text-xs text-muted-foreground">Fornitori interni</div><div className="text-lg font-bold">{import2026.summary.totali.fornitori_interni}</div></div>
+                  <div className="border rounded p-2 text-center bg-success/10"><div className="text-xs text-muted-foreground">Tariffe da creare</div><div className="text-lg font-bold text-success">{import2026.summary.totali.tariffe_create}</div></div>
+                  <div className="border rounded p-2 text-center bg-amber-50"><div className="text-xs text-muted-foreground">Già esistenti</div><div className="text-lg font-bold text-amber-600">{import2026.summary.totali.tariffe_ignorate}</div></div>
+                  <div className="border rounded p-2 text-center bg-destructive/10"><div className="text-xs text-muted-foreground">Errori</div><div className="text-lg font-bold text-destructive">{import2026.summary.totali.errori}</div></div>
+                </div>
+              )}
+              {import2026.summary.tariffe_create_summary && Object.keys(import2026.summary.tariffe_create_summary).length > 0 && (
+                <div>
+                  <div className="font-semibold mb-1">Tariffe da creare per prestazione/tipologia:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(import2026.summary.tariffe_create_summary).map(([k, v]) => (
+                      <span key={k} className="text-xs px-2 py-1 rounded bg-muted">{k}: {v}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {import2026.summary.fornitori_creati?.length > 0 && (
+                <div><div className="font-semibold mb-1">Nuovi fornitori:</div><div className="text-xs text-muted-foreground">{import2026.summary.fornitori_creati.join(', ')}</div></div>
+              )}
+              {import2026.summary.fornitori_aggiornati?.length > 0 && (
+                <div><div className="font-semibold mb-1">Fornitori aggiornati:</div><div className="text-xs text-muted-foreground">{import2026.summary.fornitori_aggiornati.join('; ')}</div></div>
+              )}
+              {import2026.summary.fornitori_interni?.length > 0 && (
+                <div><div className="font-semibold mb-1">Fornitori interni:</div><div className="text-xs text-muted-foreground">{import2026.summary.fornitori_interni.join(', ')}</div></div>
+              )}
+              {import2026.summary.tariffe_ignorate?.length > 0 && (
+                <div>
+                  <div className="font-semibold mb-1">Tariffe già esistenti (saranno ignorate):</div>
+                  <div className="max-h-40 overflow-y-auto border rounded">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted sticky top-0"><tr><th className="text-left px-2 py-1">Fornitore</th><th className="text-left px-2 py-1">Prest.</th><th className="text-left px-2 py-1">Tip.</th><th className="text-left px-2 py-1">Classe</th><th className="text-left px-2 py-1">Ambito</th></tr></thead>
+                      <tbody>
+                        {import2026.summary.tariffe_ignorate.map((t, i) => (
+                          <tr key={i} className="border-t"><td className="px-2 py-1">{t.fornitore}</td><td className="px-2 py-1">{t.prestazione}</td><td className="px-2 py-1">{t.tipologia}</td><td className="px-2 py-1">{t.classe || '—'}</td><td className="px-2 py-1">{t.ambito}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+          {import2026?.error && <div className="bg-destructive/10 border border-destructive/30 rounded p-3 text-sm text-destructive">{import2026.error}</div>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImport2026(null)}>Annulla</Button>
+            {import2026?.summary && (
+              <Button onClick={confirmImport2026} disabled={import2026.inserting}>
+                {import2026.inserting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+                Conferma inserimento
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

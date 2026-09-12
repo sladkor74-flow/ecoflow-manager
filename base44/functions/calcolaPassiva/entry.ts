@@ -120,7 +120,6 @@ function calcImporto(um, valore, peso_kg, viaggi) {
   if (um === '€/t') return (peso_kg / 1000) * valore;
   if (um === '€/kg') return peso_kg * valore;
   if (um === '€/viaggio') return viaggi * valore;
-  if (um === '€/mese') return valore;
   return 0;
 }
 
@@ -230,7 +229,7 @@ export default async function(req) {
     const tonnellateTotali = raccoglitoriSource.reduce((s, r) => s + Number(r.peso_effettivo || 0), 0) / 1000;
 
     const raccPerGroup = new Map();   // €/t, €/kg: (trasKey|provincia|destinazione|tariffa)
-    const raccPerTras = new Map();     // €/viaggio, €/mese: trasKey
+    const raccPerTras = new Map();     // €/viaggio: trasKey
 
     for (const r of raccoglitoriSource) {
       const trasportatore = String(r.trasportatore || '').trim();
@@ -262,7 +261,7 @@ export default async function(req) {
         });
       }
 
-      if (um === '€/viaggio' || um === '€/mese') {
+      if (um === '€/viaggio') {
         if (!raccPerTras.has(trasKey)) {
           raccPerTras.set(trasKey, {
             trasportatore, trasKey, interno,
@@ -312,7 +311,7 @@ export default async function(req) {
         },
       });
     }
-    // €/viaggio, €/mese
+    // €/viaggio
     for (const g of raccPerTras.values()) {
       const tonnellate = g.peso_kg / 1000;
       const viaggi = g.viaggiSet.size;
@@ -356,7 +355,7 @@ export default async function(req) {
 
     // ─── BLOCCO 2: IMPIANTI E STOCCAGGI (TRATTAMENTO, CONFERIMENTO_STOCCAGGIO) ───
     const impPerGroup = new Map();  // €/t, €/kg: (destKey|prestazione|classe|provenienza|tariffa)
-    const impPerDest = new Map();   // €/viaggio, €/mese: (destKey|tariffa)
+    const impPerDest = new Map();   // €/viaggio: (destKey|tariffa)
 
     for (const { r, provenienza } of impiantiRecords) {
       const tipoDest = String(r.tipo_destinazione || '').toLowerCase().trim();
@@ -399,7 +398,7 @@ export default async function(req) {
         });
       }
 
-      if (um === '€/viaggio' || um === '€/mese') {
+      if (um === '€/viaggio') {
         const dkey = `${destKey}|${tk}`;
         if (!impPerDest.has(dkey)) {
           impPerDest.set(dkey, {
@@ -562,8 +561,6 @@ export default async function(req) {
           // Per canale: RETE usa tonnellate non-ACI, ACI usa tonnellate ACI
           const pesoCanale = tipologia === 'RETE' ? tonnellateRete * 1000 : tonnellateAci * 1000;
           importo = calcImporto(um, valore, pesoCanale, viaggi);
-        } else if (um === '€/mese') {
-          if (pt.records.length > 0) importo = valore;
         }
 
         trasportiRows.push({

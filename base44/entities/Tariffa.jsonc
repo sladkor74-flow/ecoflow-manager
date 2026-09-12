@@ -49,8 +49,7 @@
       "enum": [
         "\u20ac/t",
         "\u20ac/kg",
-        "\u20ac/viaggio",
-        "\u20ac/mese"
+        "\u20ac/viaggio"
       ]
     },
     "valore": {
