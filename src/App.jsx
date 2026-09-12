@@ -26,6 +26,7 @@ import TodoPage from '@/pages/TodoPage';
 import PageErrorBoundary from '@/components/PageErrorBoundary';
 import Pdr from '@/pages/Pdr';
 import TargetAnnuali from '@/pages/TargetAnnuali';
+import Giacenze from '@/pages/Giacenze';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -73,6 +74,7 @@ const AuthenticatedApp = () => {
           <Route path="/primarie-aci" element={<PrimarieAci />} />
           <Route path="/todo" element={<TodoPage />} />
           <Route path="/pdr" element={<Pdr />} />
+          <Route path="/giacenze" element={<Giacenze />} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />

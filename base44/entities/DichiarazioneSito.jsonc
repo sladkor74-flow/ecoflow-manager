@@ -1,0 +1,58 @@
+{
+  "name": "DichiarazioneSito",
+  "type": "object",
+  "properties": {
+    "sito": {
+      "type": "string"
+    },
+    "operazione": {
+      "type": "string",
+      "enum": [
+        "R3",
+        "R1"
+      ],
+      "description": "R3 = riciclaggio che produce granulo o materia prima secondaria (end of waste) che esce come prodotto con documento di trasporto; R1 = utilizzo come combustibile, tipico degli impianti di frantumazione"
+    },
+    "canale": {
+      "type": "string",
+      "enum": [
+        "RETE",
+        "ACI",
+        "EXTRA_RACCOLTA"
+      ]
+    },
+    "provenienza": {
+      "type": "string",
+      "enum": [
+        "primaria",
+        "secondaria",
+        ""
+      ],
+      "description": "Si specifica solo per il canale ACI, dove le dichiarazioni sono distinte per provenienza"
+    },
+    "anno": {
+      "type": "number"
+    },
+    "mese": {
+      "type": "string",
+      "description": "Nome italiano del mese"
+    },
+    "quantita_kg": {
+      "type": "number",
+      "default": 0
+    },
+    "caricata_inviata": {
+      "type": "boolean",
+      "default": false,
+      "description": "Vero quando la dichiarazione e' stata effettivamente caricata e inviata a portale. Solo i mesi con questo flag true concorrono a decurtare la giacenza."
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sito",
+    "anno",
+    "mese"
+  ]
+}

@@ -3,7 +3,7 @@ import { Link, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import {
   LayoutDashboard, Upload, ClipboardList, Truck, Factory,
-  Ship, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, CalendarClock } from
+  Ship, Warehouse, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, CalendarClock } from
 'lucide-react';
 
 const NAV_ITEMS = [
@@ -17,7 +17,8 @@ const NAV_ITEMS = [
   { label: 'Terminati ACI', path: '/primarie-aci', icon: Factory },
 { label: 'Secondarie', path: '/secondarie', icon: Truck },
 { label: 'Terziarie', path: '/terziarie', icon: Ship },
-  { label: 'Extra Raccolta', path: '/extra-raccolta', icon: Recycle },
+  { label: 'Giacenze', path: '/giacenze', icon: Warehouse },
+   { label: 'Extra Raccolta', path: '/extra-raccolta', icon: Recycle },
   { label: 'Target & Status', path: '/target-status', icon: Target },
 { label: 'Report Mensile', path: '/report-mensile', icon: BarChart3 },
 { label: 'Alert & Controllo', path: '/alert-engine', icon: Shield },

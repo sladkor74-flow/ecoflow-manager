@@ -1,0 +1,60 @@
+{
+  "name": "GiacenzaSito",
+  "type": "object",
+  "properties": {
+    "sito": {
+      "type": "string",
+      "description": "Ragione sociale come compare nel campo destinazione dei file del portale"
+    },
+    "tipo_destinazione": {
+      "type": "string",
+      "enum": [
+        "imp",
+        "stoc"
+      ],
+      "description": "Stesso valore del campo Tipo_Destinazione dei formulari: imp = impianto di trattamento, stoc = stoccaggio. Un soggetto con entrambi i ruoli ha due righe."
+    },
+    "anno": {
+      "type": "number"
+    },
+    "giacenza_iniziale_t": {
+      "type": "number",
+      "default": 0,
+      "description": "Residuo a portale al 31 dicembre dell'anno precedente, inserito a mano"
+    },
+    "target_primarie_t": {
+      "type": "number",
+      "default": 0
+    },
+    "target_totale_t": {
+      "type": "number",
+      "default": 0,
+      "description": "Comprensivo delle secondarie ricevute; vale zero per gli stoccaggi"
+    },
+    "tipologia_trattamento": {
+      "type": "string",
+      "enum": [
+        "EoW",
+        "Frantumazione/R1",
+        "n.a."
+      ]
+    },
+    "uscite_ferro_t": {
+      "type": "number",
+      "default": 0,
+      "description": "Metalli ferrosi separati dal cippato, EER 19.12.02, inseriti a mano"
+    },
+    "css_override_t": {
+      "type": "number",
+      "default": 0,
+      "description": "Da usare solo per correggere il valore calcolato delle uscite CSS-C; zero significa nessuna correzione"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sito",
+    "anno"
+  ]
+}
