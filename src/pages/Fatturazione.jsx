@@ -4,7 +4,7 @@ import { FileText, Users, DollarSign, History, TrendingUp } from 'lucide-react';
 import FatturazionePassiva from '@/components/fatturazione/FatturazionePassiva';
 import FatturazionePassivaRete from '@/components/fatturazione/FatturazionePassivaRete';
 import FornitoriManager from '@/components/fatturazione/FornitoriManager';
-import TariffeManager from '@/components/fatturazione/TariffeManager';
+import TariffeUnificate from '@/components/fatturazione/TariffeUnificate';
 import StoricoFatturazione from '@/components/fatturazione/StoricoFatturazione';
 import FatturazioneAttiva from '@/components/fatturazione/FatturazioneAttiva';
 import { useAuth } from '@/lib/AuthContext';
@@ -39,7 +39,7 @@ export default function Fatturazione() {
         <TabsContent value="passiva-rete" className="mt-4"><FatturazionePassivaRete isAdmin={isAdmin} /></TabsContent>
         <TabsContent value="attiva" className="mt-4"><FatturazioneAttiva isAdmin={isAdmin} /></TabsContent>
         {isAdmin && <TabsContent value="fornitori" className="mt-4"><FornitoriManager /></TabsContent>}
-        {isAdmin && <TabsContent value="tariffe" className="mt-4"><TariffeManager /></TabsContent>}
+        {isAdmin && <TabsContent value="tariffe" className="mt-4"><TariffeUnificate /></TabsContent>}
         <TabsContent value="storico" className="mt-4"><StoricoFatturazione onOpen={openPeriod} /></TabsContent>
       </Tabs>
     </div>

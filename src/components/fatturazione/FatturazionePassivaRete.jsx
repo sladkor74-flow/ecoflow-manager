@@ -2,10 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Loader2, Play, FileSpreadsheet, FileText, AlertTriangle, Eye } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
-import TariffePassivaManager from './TariffePassivaManager';
 import RigaDetailModalRete from './RigaDetailModalRete';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -120,14 +118,8 @@ export default function FatturazionePassivaRete({ isAdmin }) {
   };
 
   return (
-    <Tabs value={tab} onValueChange={setTab}>
-      <TabsList>
-        <TabsTrigger value="elaborazione"><Play className="w-4 h-4 mr-1.5" /> Elaborazione Mensile</TabsTrigger>
-        {isAdmin && <TabsTrigger value="tariffe"><FileText className="w-4 h-4 mr-1.5" /> Gestione Tariffe</TabsTrigger>}
-      </TabsList>
-
-      <TabsContent value="elaborazione" className="mt-4 space-y-4">
-        <div className="flex flex-wrap items-end gap-3 p-4 border rounded-lg bg-muted/30">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3 p-4 border rounded-lg bg-muted/30">
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Anno</label>
             <Select value={String(anno)} onValueChange={v => setAnno(Number(v))}>
@@ -250,13 +242,7 @@ export default function FatturazionePassivaRete({ isAdmin }) {
             Seleziona il periodo e clicca "Calcola Fatturato" per elaborare i compensi ai raccoglitori.
           </div>
         )}
-      </TabsContent>
-
-      {isAdmin && <TabsContent value="tariffe" className="mt-4">
-        <TariffePassivaManager />
-      </TabsContent>}
-
       <RigaDetailModalRete riga={selectedRiga} mese={mese} anno={anno} onClose={() => setSelectedRiga(null)} />
-    </Tabs>
+    </div>
   );
 }
