@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { FileText, Users, DollarSign, History, TrendingUp } from 'lucide-react';
-import FatturazionePassiva from '@/components/fatturazione/FatturazionePassiva';
-import FatturazionePassivaRete from '@/components/fatturazione/FatturazionePassivaRete';
+import PassivaModulo from '@/components/fatturazione/PassivaModulo';
 import FornitoriManager from '@/components/fatturazione/FornitoriManager';
 import TariffeUnificate from '@/components/fatturazione/TariffeUnificate';
 import StoricoFatturazione from '@/components/fatturazione/StoricoFatturazione';
@@ -29,14 +28,23 @@ export default function Fatturazione() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="passiva"><FileText className="w-4 h-4 mr-1.5" /> Passiva</TabsTrigger>
-          <TabsTrigger value="passiva-rete"><FileText className="w-4 h-4 mr-1.5" /> Passiva Rete (a)</TabsTrigger>
           <TabsTrigger value="attiva"><TrendingUp className="w-4 h-4 mr-1.5" /> Attiva</TabsTrigger>
           {isAdmin && <TabsTrigger value="fornitori"><Users className="w-4 h-4 mr-1.5" /> Fornitori</TabsTrigger>}
           {isAdmin && <TabsTrigger value="tariffe"><DollarSign className="w-4 h-4 mr-1.5" /> Tariffe & Anagrafiche</TabsTrigger>}
           <TabsTrigger value="storico"><History className="w-4 h-4 mr-1.5" /> Storico</TabsTrigger>
         </TabsList>
-        <TabsContent value="passiva" className="mt-4"><FatturazionePassiva periodo={periodo} setPeriodo={setPeriodo} isAdmin={isAdmin} /></TabsContent>
-        <TabsContent value="passiva-rete" className="mt-4"><FatturazionePassivaRete isAdmin={isAdmin} /></TabsContent>
+        <TabsContent value="passiva" className="mt-4">
+          <Tabs defaultValue="RETE">
+            <TabsList>
+              <TabsTrigger value="RETE">Rete</TabsTrigger>
+              <TabsTrigger value="ACI">ACI</TabsTrigger>
+              <TabsTrigger value="EXTRA_RACCOLTA">Extra Raccolta</TabsTrigger>
+            </TabsList>
+            <TabsContent value="RETE" className="mt-4"><PassivaModulo tipologia="RETE" periodo={periodo} setPeriodo={setPeriodo} /></TabsContent>
+            <TabsContent value="ACI" className="mt-4"><PassivaModulo tipologia="ACI" periodo={periodo} setPeriodo={setPeriodo} /></TabsContent>
+            <TabsContent value="EXTRA_RACCOLTA" className="mt-4"><PassivaModulo tipologia="EXTRA_RACCOLTA" periodo={periodo} setPeriodo={setPeriodo} /></TabsContent>
+          </Tabs>
+        </TabsContent>
         <TabsContent value="attiva" className="mt-4"><FatturazioneAttiva isAdmin={isAdmin} /></TabsContent>
         {isAdmin && <TabsContent value="fornitori" className="mt-4"><FornitoriManager /></TabsContent>}
         {isAdmin && <TabsContent value="tariffe" className="mt-4"><TariffeUnificate /></TabsContent>}
