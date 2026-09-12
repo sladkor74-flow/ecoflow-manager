@@ -49,33 +49,39 @@ function sortPerClasse(arr) {
 // ─── Ricerca tariffe ───
 
 // RACCOLTA: gerarchia destinazione > provincia > regione > generica
-function findTariffaRaccolta(tariffe, trasKey, provincia, regione, destinazione, classe, dataIso) {
+function findTariffaRaccolta(tariffe, trasKey, provincia, regione, destinazione, classe, tipologia, dataIso) {
   const cls = norm(classe);
-  const candidates = tariffe.filter(t =>
-    t.prestazione === 'RACCOLTA' &&
-    normalizzaRagioneSociale(t.fornitore_nome) === trasKey &&
-    tariffaValidaPerData(t, dataIso) &&
-    (isEmpty(t.classe_materiale) || norm(t.classe_materiale) === cls)
-  );
-  sortPerClasse(candidates);
-  // a) destinazione
-  if (!isEmpty(destinazione)) {
-    const m = candidates.find(t => norm(t.destinazione) === destinazione);
+  // Per EXTRA_RACCOLTA: prima EXTRA_RACCOLTA, poi ricaduta su RETE; per RETE/ACI: corrispondenza esatta
+  const tipologie = tipologia === 'EXTRA_RACCOLTA' ? ['EXTRA_RACCOLTA', 'RETE'] : [tipologia];
+  for (const tip of tipologie) {
+    const candidates = tariffe.filter(t =>
+      t.prestazione === 'RACCOLTA' &&
+      normalizzaRagioneSociale(t.fornitore_nome) === trasKey &&
+      t.tipologia === tip &&
+      tariffaValidaPerData(t, dataIso) &&
+      (isEmpty(t.classe_materiale) || norm(t.classe_materiale) === cls)
+    );
+    sortPerClasse(candidates);
+    // a) destinazione
+    if (!isEmpty(destinazione)) {
+      const m = candidates.find(t => norm(t.destinazione) === destinazione);
+      if (m) return m;
+    }
+    // b) provincia (senza destinazione)
+    if (!isEmpty(provincia)) {
+      const m = candidates.find(t => norm(t.provincia) === provincia && isEmpty(t.destinazione));
+      if (m) return m;
+    }
+    // c) regione (senza provincia e destinazione)
+    if (!isEmpty(regione)) {
+      const m = candidates.find(t => norm(t.regione) === regione && isEmpty(t.provincia) && isEmpty(t.destinazione));
+      if (m) return m;
+    }
+    // d) generica
+    const m = candidates.find(t => isEmpty(t.destinazione) && isEmpty(t.provincia) && isEmpty(t.regione));
     if (m) return m;
   }
-  // b) provincia (senza destinazione)
-  if (!isEmpty(provincia)) {
-    const m = candidates.find(t => norm(t.provincia) === provincia && isEmpty(t.destinazione));
-    if (m) return m;
-  }
-  // c) regione (senza provincia e destinazione)
-  if (!isEmpty(regione)) {
-    const m = candidates.find(t => norm(t.regione) === regione && isEmpty(t.provincia) && isEmpty(t.destinazione));
-    if (m) return m;
-  }
-  // d) generica
-  const m = candidates.find(t => isEmpty(t.destinazione) && isEmpty(t.provincia) && isEmpty(t.regione));
-  return m || null;
+  return null;
 }
 
 // IMPIANTI: fornitore=destinazione, prestazione, classe; per "extra" prova EXTRA_RACCOLTA poi RETE
@@ -246,7 +252,7 @@ export default async function(req) {
       const viaggioKey = `${dataFine}|${automezzo}`;
       const interno = isInterno(trasportatore);
 
-      const tariffa = findTariffaRaccolta(tariffe, trasKey, provincia, regione, destinazione, classe, dataIso);
+      const tariffa = findTariffaRaccolta(tariffe, trasKey, provincia, regione, destinazione, classe, tipologia, dataIso);
       const tk = tariffa ? tariffa.id : '__NESSUNA__';
       const um = tariffa ? tariffa.unita_misura : '';
 

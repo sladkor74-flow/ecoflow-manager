@@ -85,13 +85,14 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
             <div className="border-2 rounded-lg p-3 bg-card">
               <div className="text-xs text-muted-foreground">Totale complessivo</div>
               <div className="text-lg font-bold tabular-nums">€ {formatNumber(result.totali.totale_complessivo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              {/* Quadratura */}
-              <div className={`flex items-center gap-1 mt-1.5 text-xs font-medium ${result.quadratura.coincidente ? 'text-success' : 'text-destructive'}`}>
-                {result.quadratura.coincidente
-                  ? <><CheckCircle2 className="w-3.5 h-3.5" /> Quadratura OK</>
-                  : <><XCircle className="w-3.5 h-3.5" /> Quadratura: {formatNumber(result.quadratura.tonnellate_totali)} vs {formatNumber(result.quadratura.tonnellate_raccoglitori)} t</>}
-              </div>
             </div>
+          </div>
+
+          {/* Quadratura tonnellate */}
+          <div className={`flex items-center gap-1.5 text-sm font-medium px-4 py-2.5 rounded-lg border-2 ${result.quadratura.coincidente ? 'text-success border-success/30 bg-success/5' : 'text-destructive border-destructive/30 bg-destructive/5'}`}>
+            {result.quadratura.coincidente
+              ? <><CheckCircle2 className="w-4 h-4" /> Quadratura OK: {formatNumber(result.quadratura.tonnellate_totali)} t</>
+              : <><XCircle className="w-4 h-4" /> Quadratura: {formatNumber(result.quadratura.tonnellate_totali)} t contro {formatNumber(result.quadratura.tonnellate_raccoglitori)} t</>}
           </div>
 
           {/* Anomalie */}
