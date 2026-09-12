@@ -17,11 +17,6 @@
     "anno": {
       "type": "number"
     },
-    "giacenza_iniziale_t": {
-      "type": "number",
-      "default": 0,
-      "description": "Residuo a portale al 31 dicembre dell'anno precedente, inserito a mano"
-    },
     "target_primarie_t": {
       "type": "number",
       "default": 0
@@ -29,7 +24,12 @@
     "target_totale_t": {
       "type": "number",
       "default": 0,
-      "description": "Comprensivo delle secondarie ricevute; vale zero per gli stoccaggi"
+      "description": "Comprensivo delle secondarie ricevute; vale zero per gli stoccaggi, che non ne hanno uno"
+    },
+    "giacenza_riferimento_t": {
+      "type": "number",
+      "default": 0,
+      "description": "Residuo a portale al 31 dicembre dell'anno precedente, a titolo di riferimento storico"
     },
     "tipologia_trattamento": {
       "type": "string",
@@ -39,22 +39,13 @@
         "n.a."
       ]
     },
-    "uscite_ferro_t": {
-      "type": "number",
-      "default": 0,
-      "description": "Metalli ferrosi separati dal cippato, EER 19.12.02, inseriti a mano"
-    },
-    "css_override_t": {
-      "type": "number",
-      "default": 0,
-      "description": "Da usare solo per correggere il valore calcolato delle uscite CSS-C; zero significa nessuna correzione"
-    },
     "note": {
       "type": "string"
     }
   },
   "required": [
     "sito",
+    "tipo_destinazione",
     "anno"
   ]
 }
