@@ -14,6 +14,28 @@
     "servizio_nome": {
       "type": "string"
     },
+    "prestazione": {
+      "type": "string",
+      "enum": [
+        "RACCOLTA",
+        "TRASPORTO_SECONDARIA",
+        "TRATTAMENTO",
+        "CONFERIMENTO_STOCCAGGIO"
+      ],
+      "description": "Prestazione fatturata: RACCOLTA (raccoglitore), TRASPORTO_SECONDARIA (trasportatore secondarie), TRATTAMENTO (impianto triturazione), CONFERIMENTO_STOCCAGGIO (stoccaggio)"
+    },
+    "destinazione": {
+      "type": "string",
+      "description": "Solo RACCOLTA: la tariffa vale unicamente per i conferimenti con questa destinazione"
+    },
+    "produttore": {
+      "type": "string",
+      "description": "Solo TRASPORTO_SECONDARIA: produttore della tratta"
+    },
+    "destinatario": {
+      "type": "string",
+      "description": "Solo TRASPORTO_SECONDARIA: destinatario della tratta"
+    },
     "classe_materiale": {
       "type": "string",
       "description": "P, M, G1, G2 o vuoto per tutte le classi"
@@ -26,10 +48,8 @@
       "type": "string",
       "enum": [
         "\u20ac/t",
-        "\u20ac/ton",
         "\u20ac/kg",
         "\u20ac/viaggio",
-        "\u20ac/vg",
         "\u20ac/mese"
       ]
     },
@@ -68,9 +88,10 @@
       "enum": [
         "RETE",
         "ACI",
-        "EXTRA_RACCOLTA"
+        "EXTRA_RACCOLTA",
+        "TUTTE"
       ],
-      "description": "Tipologia fatturazione attiva"
+      "description": "Tipologia fatturazione. TUTTE vale per entrambi i canali RETE+ACI, ammessa solo per TRASPORTO_SECONDARIA"
     },
     "cliente": {
       "type": "string",
@@ -87,6 +108,7 @@
   },
   "required": [
     "unita_misura",
-    "valore"
+    "valore",
+    "prestazione"
   ]
 }

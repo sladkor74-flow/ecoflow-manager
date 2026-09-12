@@ -69,95 +69,37 @@ export default function TariffePassivaManager() {
 
   useEffect(() => { load(); }, []);
 
-  // Verifica sovrapposizione date con tariffe esistenti (esclude eventuali tariffe aperte che verranno chiuse automaticamente)
-  const verificaSovrapposizione = (fNorm, regioneForm, provinciaForm, inizio, fine, excludeId = null) => {
-    for (const t of tariffe) {
-      if (excludeId && t.id === excludeId) continue;
-      if ((t.fornitore_nome || '').toLowerCase().trim() !== fNorm) continue;
-      const tReg = (t.regione || '').trim().toUpperCase();
-      if (tReg !== regioneForm) continue;
-      const tProv = (t.provincia || '').trim().toUpperCase();
-      if (tProv !== provinciaForm) continue;
-      const tInizio = t.data_inizio_validita ? new Date(t.data_inizio_validita) : null;
-      const tFine = t.data_fine_validita ? new Date(t.data_fine_validita) : null;
-      const inizioMax = inizio && tInizio ? new Date(Math.max(inizio.getTime(), tInizio.getTime())) : (inizio || tInizio);
-      const fineMin = fine && tFine ? new Date(Math.min(fine.getTime(), tFine.getTime())) : (fine || tFine);
-      if (!inizioMax && !fineMin) return t;
-      if (inizioMax && fineMin && inizioMax <= fineMin) return t;
-      if (inizioMax && !fineMin) return t;
-    }
-    return null;
-  };
-
   const add = async () => {
-    if (!form.fornitore_id || !form.valore) return;
+    if (!form.fornitore_id) return;
     setErroreSalvataggio('');
     const f = fornitori.find(x => x.id === form.fornitore_id);
-    const fNome = f?.ragione_sociale;
-    const fNorm = (fNome || '').toLowerCase().trim();
-    const regioneForm = (form.regione || '').trim().toUpperCase();
-    const provinciaForm = (form.provincia || '').trim().toUpperCase();
-    const inizioNuova = form.data_inizio_validita ? new Date(form.data_inizio_validita) : new Date();
-    inizioNuova.setHours(0, 0, 0, 0);
-
-    // Cerca tariffa attiva aperta (senza data fine) per stesso fornitore+regione+provincia
-    const attivaAperta = tariffe.find(t => {
-      if ((t.fornitore_nome || '').toLowerCase().trim() !== fNorm) return false;
-      const tReg = (t.regione || '').trim().toUpperCase();
-      if (tReg !== regioneForm) return false;
-      const tProv = (t.provincia || '').trim().toUpperCase();
-      if (tProv !== provinciaForm) return false;
-      return isAperta(t);
-    });
-
-    if (attivaAperta) {
-      // Verifica coerenza: la nuova data inizio deve essere successiva alla data inizio della tariffa aperta
-      const tInizioAperta = attivaAperta.data_inizio_validita ? new Date(attivaAperta.data_inizio_validita) : null;
-      if (tInizioAperta && inizioNuova <= tInizioAperta) {
-        setErroreSalvataggio(`La nuova tariffa ha data inizio (${inizioNuova.toLocaleDateString('it-IT')}) precedente o uguale alla tariffa attiva aperta (${tInizioAperta.toLocaleDateString('it-IT')}). Imposta una data inizio successiva.`);
-        return;
-      }
-      // Chiudi automaticamente la tariffa aperta: data_fine = inizioNuova - 1 giorno
-      const fineChiusura = new Date(inizioNuova);
-      fineChiusura.setDate(fineChiusura.getDate() - 1);
+    try {
       await base44.functions.invoke('gestisciAnagrafiche', {
-        entita: 'Tariffa', operazione: 'update', id: attivaAperta.id,
+        entita: 'Tariffa', operazione: 'create',
         dati: {
-          data_fine_validita: fineChiusura.toISOString().slice(0, 10),
-          stato: 'non_attivo',
+          fornitore_id: form.fornitore_id,
+          fornitore_nome: f?.ragione_sociale,
+          servizio_id: '', servizio_nome: 'TRASPORTO RETE',
+          prestazione: 'RACCOLTA',
+          unita_misura: form.unita_misura,
+          valore: Number(form.valore),
+          regione: form.regione,
+          provincia: form.provincia || undefined,
+          data_inizio_validita: form.data_inizio_validita || undefined,
+          data_fine_validita: form.data_fine_validita || undefined,
+          direzione: 'PASSIVA',
+          tipologia: 'RETE',
+          stato: 'attivo',
+          note: form.note,
         },
       });
-    } else {
-      // Nessuna tariffa aperta: verifica sovrapposizioni con tariffe a date definite
-      const fineNuova = form.data_fine_validita ? new Date(form.data_fine_validita) : null;
-      const sovrapposta = verificaSovrapposizione(fNorm, regioneForm, provinciaForm, inizioNuova, fineNuova);
-      if (sovrapposta) {
-        const periodoEsistente = `${sovrapposta.data_inizio_validita ? new Date(sovrapposta.data_inizio_validita).toLocaleDateString('it-IT') : 'n.d.'} → ${sovrapposta.data_fine_validita ? new Date(sovrapposta.data_fine_validita).toLocaleDateString('it-IT') : 'aperto'}`;
-        setErroreSalvataggio(`Sovrapposizione rilevata con tariffa esistente per ${sovrapposta.fornitore_nome} (${sovrapposta.regione || 'tutte le zone'}, periodo: ${periodoEsistente}). Modifica le date di validità prima di salvare.`);
-        return;
-      }
+      setForm({ fornitore_id: '', fornitore_nome: '', unita_misura: '€/t', valore: 0, regione: '', provincia: '', data_inizio_validita: '', data_fine_validita: '', note: '' });
+      setShowForm(false); load();
+    } catch (e) {
+      const msg = e?.response?.data?.error || e?.message || 'Errore durante il salvataggio';
+      setErroreSalvataggio(msg);
+      load();
     }
-
-    await base44.functions.invoke('gestisciAnagrafiche', {
-      entita: 'Tariffa', operazione: 'create',
-      dati: {
-        fornitore_id: form.fornitore_id,
-        fornitore_nome: f?.ragione_sociale,
-        servizio_id: '', servizio_nome: 'TRASPORTO RETE',
-        unita_misura: form.unita_misura,
-        valore: Number(form.valore),
-        regione: form.regione,
-        provincia: form.provincia || undefined,
-        data_inizio_validita: form.data_inizio_validita || undefined,
-        data_fine_validita: form.data_fine_validita || undefined,
-        direzione: 'PASSIVA',
-        tipologia: 'RETE',
-        stato: 'attivo',
-        note: form.note,
-      },
-    });
-    setForm({ fornitore_id: '', fornitore_nome: '', unita_misura: '€/t', valore: 0, regione: '', provincia: '', data_inizio_validita: '', data_fine_validita: '', note: '' });
-    setShowForm(false); load();
   };
 
   // Avvia modifica di una tariffa
@@ -189,29 +131,22 @@ export default function TariffePassivaManager() {
       note: editForm.note,
     };
 
-    // Per tariffe non archiviate, permetti modifica anche di regione e date (con verifica sovrapposizione)
+    // Per tariffe non archiviate, permetti modifica anche di regione e date
     if (!archiviata) {
       updateData.regione = editForm.regione;
       updateData.provincia = editForm.provincia || undefined;
-      const nuovaInizio = editForm.data_inizio_validita ? new Date(editForm.data_inizio_validita) : null;
-      const nuovaFine = editForm.data_fine_validita ? new Date(editForm.data_fine_validita) : null;
       updateData.data_inizio_validita = editForm.data_inizio_validita || undefined;
       updateData.data_fine_validita = editForm.data_fine_validita || undefined;
-
-      // Verifica sovrapposizione escludendo se stesso
-      const fNorm = (t.fornitore_nome || '').toLowerCase().trim();
-      const regioneForm = (editForm.regione || '').trim().toUpperCase();
-      const provinciaForm = (editForm.provincia || '').trim().toUpperCase();
-      const sovrapposta = verificaSovrapposizione(fNorm, regioneForm, provinciaForm, nuovaInizio, nuovaFine, t.id);
-      if (sovrapposta) {
-        setEditErrore(`Sovrapposizione con tariffa esistente (${sovrapposta.data_inizio_validita || 'n.d.'} → ${sovrapposta.data_fine_validita || 'aperto'}).`);
-        return;
-      }
     }
 
-    await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: updateData });
-    setEditingId(null);
-    load();
+    try {
+      await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: updateData });
+      setEditingId(null);
+      load();
+    } catch (e) {
+      const msg = e?.response?.data?.error || e?.message || 'Errore durante il salvataggio';
+      setEditErrore(msg);
+    }
   };
 
   // Chiudi il periodo di validità di una tariffa aperta
@@ -335,7 +270,7 @@ export default function TariffePassivaManager() {
               <span>{erroreSalvataggio}</span>
             </div>
           )}
-          <Button size="sm" onClick={add} disabled={!form.fornitore_id || !form.valore}>
+          <Button size="sm" onClick={add} disabled={!form.fornitore_id}>
             <Save className="w-4 h-4 mr-1" /> Salva Tariffa
           </Button>
         </div>

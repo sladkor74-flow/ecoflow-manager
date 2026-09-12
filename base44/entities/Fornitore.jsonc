@@ -13,7 +13,29 @@
         "stoccaggio",
         "altro"
       ],
-      "default": "altro"
+      "default": "altro",
+      "description": "DEPRECATO - sostituito dai campi ruolo_*. Mantenuto per retrocompatibilita'."
+    },
+    "ruolo_raccolta": {
+      "type": "boolean",
+      "default": false
+    },
+    "ruolo_trasporto_secondaria": {
+      "type": "boolean",
+      "default": false
+    },
+    "ruolo_trattamento": {
+      "type": "boolean",
+      "default": false
+    },
+    "ruolo_stoccaggio": {
+      "type": "boolean",
+      "default": false
+    },
+    "interno": {
+      "type": "boolean",
+      "default": false,
+      "description": "Societa' del gruppo: compare nei riepiloghi con le tonnellate ma non viene fatturata, perche' non si puo' fatturare a se stessi."
     },
     "piva": {
       "type": "string"
