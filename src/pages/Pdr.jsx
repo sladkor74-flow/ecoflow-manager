@@ -8,6 +8,7 @@ import PdrClientiTable from '@/components/pdr/PdrClientiTable';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
+import { precisioneCoordinata } from '@/lib/geoLinks';
 const PdrMap = React.lazy(() => import('@/components/pdr/PdrMap'));
 
 export default function Pdr() {
@@ -18,6 +19,7 @@ export default function Pdr() {
   const [filters, setFilters] = useState({ regione: [], provincia: [], trasportatore_principale: [], codice_import: [] });
   const [search, setSearch] = useState({ ragione_sociale: '', comune: '', codice_fiscale: '', partita_iva: '', contatto: '', indirizzo_pdr: '' });
   const [statoPdr, setStatoPdr] = useState('tutti');
+  const [precisionePdr, setPrecisionePdr] = useState('tutti');
   const [soloAutodemolitori, setSoloAutodemolitori] = useState(false);
   const [selectedPdrId, setSelectedPdrId] = useState(null);
 
@@ -90,16 +92,42 @@ export default function Pdr() {
       const isSospeso = !!(r.sospeso && String(r.sospeso).trim() !== '');
       if (statoPdr === 'attivi' && isSospeso) return false;
       if (statoPdr === 'sospesi' && !isSospeso) return false;
+      // Precisione coordinate
+      if (precisionePdr !== 'tutti') {
+        const lat = parseFloat(r.latitudine);
+        const lng = parseFloat(r.longitudine);
+        const hasCoords = !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
+        const prec = precisioneCoordinata(r.geo_approssimazione);
+        if (precisionePdr === 'ignoto') {
+          if (hasCoords && prec.livello !== 'ignoto') return false;
+        } else {
+          if (!hasCoords || prec.livello !== precisionePdr) return false;
+        }
+      }
       return true;
     });
-  }, [records, filters, search, soloAutodemolitori, statoPdr]);
+  }, [records, filters, search, soloAutodemolitori, statoPdr, precisionePdr]);
+
+  const precisionCounts = useMemo(() => {
+    const counts = { ok: 0, medio: 0, basso: 0, ignoto: 0 };
+    for (const r of filtered) {
+      const lat = parseFloat(r.latitudine);
+      const lng = parseFloat(r.longitudine);
+      const hasCoords = !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
+      if (!hasCoords) { counts.ignoto++; continue; }
+      const prec = precisioneCoordinata(r.geo_approssimazione);
+      counts[prec.livello] = (counts[prec.livello] || 0) + 1;
+    }
+    return counts;
+  }, [filtered]);
 
   const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v) ||
-    Object.values(search).some(v => v) || soloAutodemolitori || statoPdr !== 'tutti';
+    Object.values(search).some(v => v) || soloAutodemolitori || statoPdr !== 'tutti' || precisionePdr !== 'tutti';
   const resetFilters = () => {
     setFilters({ regione: [], provincia: [], trasportatore_principale: [], codice_import: [] });
     setSearch({ ragione_sociale: '', comune: '', codice_fiscale: '', partita_iva: '', contatto: '', indirizzo_pdr: '' });
     setStatoPdr('tutti');
+    setPrecisionePdr('tutti');
     setSoloAutodemolitori(false);
   };
 
@@ -146,7 +174,8 @@ export default function Pdr() {
           'Tipo Formulario': r.tipo_formulario || '',
           'Latitudine': r.latitudine || '',
           'Longitudine': r.longitudine || '',
-          'Approsimazione': r.geo_approssimazione || '',
+          'Geo Approssimazione': r.geo_approssimazione || '',
+          'Precisione': precisioneCoordinata(r.geo_approssimazione).etichetta,
           'PlaceID': r.place_id || '',
         }));
         const ws = XLSX.utils.json_to_sheet(rows);
@@ -229,7 +258,7 @@ export default function Pdr() {
           </div>
         </div>
         {/* Riga 1: filtri MultiSelect + Stato PDR */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Regione</label>
             <MultiSelect allLabel="Tutte le regioni" options={filterOptions.regioni} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
@@ -257,6 +286,23 @@ export default function Pdr() {
               <option value="attivi">Solo attivi</option>
               <option value="sospesi">Solo sospesi</option>
             </select>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Precisione coordinate</label>
+            <select
+              value={precisionePdr}
+              onChange={e => setPrecisionePdr(e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+            >
+              <option value="tutti">Tutte</option>
+              <option value="ok">Precisa (edificio)</option>
+              <option value="medio">Da verificare</option>
+              <option value="basso">Approssimativa</option>
+              <option value="ignoto">Senza coordinate o non nota</option>
+            </select>
+            <p className="text-xs text-muted-foreground mt-1">
+              Precise {precisionCounts.ok.toLocaleString('it-IT')} · Da verificare {precisionCounts.medio.toLocaleString('it-IT')} · Approssimative {precisionCounts.basso.toLocaleString('it-IT')} · Non note {precisionCounts.ignoto.toLocaleString('it-IT')}
+            </p>
           </div>
         </div>
         {/* Riga 2: ricerca testuale */}

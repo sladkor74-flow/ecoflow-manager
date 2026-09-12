@@ -1,6 +1,6 @@
 import React from 'react';
 import { Loader2, MapPin, Eye } from 'lucide-react';
-import { streetViewUrl } from '@/lib/geoLinks';
+import { streetViewUrl, precisioneCoordinata } from '@/lib/geoLinks';
 
 export default function PdrTable({ records, loading, onSelectPdr }) {
   if (loading) {
@@ -36,6 +36,7 @@ export default function PdrTable({ records, loading, onSelectPdr }) {
             <th className="text-left px-3 py-2.5 font-medium">Partner</th>
             <th className="text-left px-3 py-2.5 font-medium">Tel PDR</th>
             <th className="text-left px-3 py-2.5 font-medium">Email PDR</th>
+            <th className="text-left px-3 py-2.5 font-medium">Precisione</th>
           </tr>
         </thead>
         <tbody>
@@ -96,6 +97,33 @@ export default function PdrTable({ records, loading, onSelectPdr }) {
               </td>
               <td className="px-3 py-2">
                 {r.email_pdr ? <a href={`mailto:${r.email_pdr}`} className="text-primary underline">{r.email_pdr}</a> : '—'}
+              </td>
+              <td className="px-3 py-2">
+                {(() => {
+                  const lat = parseFloat(r.latitudine);
+                  const lng = parseFloat(r.longitudine);
+                  const hasCoords = !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
+                  const prec = precisioneCoordinata(r.geo_approssimazione);
+                  const livello = hasCoords ? prec.livello : 'ignoto';
+                  const badgeClass = {
+                    ok: 'bg-success/10 text-success',
+                    medio: 'bg-chart-4/10 text-chart-4',
+                    basso: 'bg-destructive/10 text-destructive',
+                    ignoto: 'bg-muted text-muted-foreground',
+                  }[livello];
+                  const abbrev = {
+                    ok: 'Precisa',
+                    medio: 'Da verificare',
+                    basso: 'Approssimativa',
+                    ignoto: 'Non nota',
+                  }[livello];
+                  const tooltip = hasCoords ? prec.etichetta : 'Coordinate non disponibili';
+                  return (
+                    <span title={tooltip} className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${badgeClass}`}>
+                      {abbrev}
+                    </span>
+                  );
+                })()}
               </td>
             </tr>
           ))}
