@@ -29,6 +29,15 @@ function chiaveMatch(t1, t2) {
   return tipologiaMatch(t1.tipologia, t2.tipologia);
 }
 
+// Chiave per tariffe attive: cliente, tipologia, classe_materiale, regione, eer_codice
+function chiaveMatchAttiva(t1, t2) {
+  const campi = ['cliente', 'tipologia', 'classe_materiale', 'regione', 'eer_codice'];
+  for (const c of campi) {
+    if (norm(t1[c]) !== norm(t2[c])) return false;
+  }
+  return true;
+}
+
 // Due periodi si sovrappongono (fine assente = periodo aperto = infinito)
 function periodiSovrapposti(inizio1, fine1, inizio2, fine2) {
   const i1 = inizio1 ? new Date(inizio1).getTime() : 0;
@@ -71,8 +80,11 @@ export default async function(req) {
         effettivi = { ...esistente, ...dati };
       }
 
-      // a) Campi obbligatori (valore zero ammesso)
-      const campiObbligatori = ['fornitore_id', 'direzione', 'tipologia', 'prestazione', 'unita_misura', 'valore'];
+      // a) Campi obbligatori (valore zero ammesso) - distinti per direzione
+      const isAttiva = norm(effettivi.direzione) === 'ATTIVA';
+      const campiObbligatori = isAttiva
+        ? ['cliente', 'direzione', 'tipologia', 'unita_misura', 'valore']
+        : ['fornitore_id', 'direzione', 'tipologia', 'prestazione', 'unita_misura', 'valore'];
       const mancanti = campiObbligatori.filter(c => {
         const v = effettivi[c];
         if (c === 'valore') return v === undefined || v === null;
@@ -80,6 +92,11 @@ export default async function(req) {
       });
       if (mancanti.length > 0) {
         return Response.json({ error: 'Campi obbligatori mancanti', mancanti }, { status: 400 });
+      }
+
+      // ATTIVA non ammette prestazione
+      if (isAttiva && effettivi.prestazione && String(effettivi.prestazione).trim() !== '') {
+        return Response.json({ error: 'Il campo prestazione non si applica alla fatturazione attiva.' }, { status: 400 });
       }
 
       // f) Data fine precedente a data inizio
@@ -94,20 +111,22 @@ export default async function(req) {
         return Response.json({ error: 'La tipologia TUTTE è ammessa solo per il trasporto delle secondarie.' }, { status: 400 });
       }
 
-      // b-e) Verifica conflitti
-      const esistenti = await fetchAll(base44.asServiceRole.entities.Tariffa, { fornitore_id: effettivi.fornitore_id });
+      // b-e) Verifica conflitti (chiave distinta per direzione)
+      const esistenti = isAttiva
+        ? await fetchAll(base44.asServiceRole.entities.Tariffa, { direzione: 'ATTIVA' })
+        : await fetchAll(base44.asServiceRole.entities.Tariffa, { fornitore_id: effettivi.fornitore_id });
       const conflitti = [];
       const chiudibili = [];
       for (const t of esistenti) {
         if (operazione === 'update' && t.id === id) continue;
         if (norm(t.stato) !== 'ATTIVO') continue;
-        if (!chiaveMatch(effettivi, t)) continue;
+        const chiaveOk = isAttiva ? chiaveMatchAttiva(effettivi, t) : chiaveMatch(effettivi, t);
+        if (!chiaveOk) continue;
         if (!periodiSovrapposti(inizio, fine, t.data_inizio_validita, t.data_fine_validita)) continue;
-        // Caso d: chiudibile se attivo, senza data fine, nuova inizio > esistente inizio
-        const tStato = norm(t.stato);
+        // Caso d: chiudibile se senza data fine, nuova inizio > esistente inizio
         const tFine = t.data_fine_validita;
         const tInizio = t.data_inizio_validita;
-        if (tStato === 'ATTIVO' && !tFine && inizio && new Date(inizio) > new Date(tInizio || 0)) {
+        if (!tFine && inizio && new Date(inizio) > new Date(tInizio || 0)) {
           chiudibili.push(t);
         } else {
           conflitti.push(t);
@@ -117,9 +136,12 @@ export default async function(req) {
       if (conflitti.length > 0) {
         const c = conflitti[0];
         const periodo = `${c.data_inizio_validita || 'n.d.'} → ${c.data_fine_validita || 'aperto'}`;
+        const desc = isAttiva
+          ? `cliente: ${c.cliente}, tipologia: ${c.tipologia}, regione: ${c.regione || 'tutte'}`
+          : `${c.fornitore_nome} (prestazione: ${c.prestazione})`;
         return Response.json({
-          error: `Conflitto con tariffa esistente per ${c.fornitore_nome} (prestazione: ${c.prestazione}, periodo: ${periodo}). Modifica la chiave o le date di validità.`,
-          conflitto: { id: c.id, fornitore_nome: c.fornitore_nome, prestazione: c.prestazione, periodo }
+          error: `Conflitto con tariffa esistente per ${desc}, periodo: ${periodo}. Modifica la chiave o le date di validità.`,
+          conflitto: { id: c.id, fornitore_nome: c.fornitore_nome, prestazione: c.prestazione, cliente: c.cliente, tipologia: c.tipologia, regione: c.regione, periodo }
         }, { status: 409 });
       }
 

@@ -66,10 +66,11 @@ export default async function(req) {
       specificity: (t.classe_materiale ? 1 : 0) + (t.eer_codice ? 1 : 0) + (t.regione ? 1 : 0),
     })).sort((a, b) => b.specificity - a.specificity);
 
+    function normText(v) { return String(v || '').trim().toUpperCase(); }
     function findTariffa(tipologia, cliente, classe, regione, eer) {
       for (const t of tariffeSorted) {
         if (t.tipologia !== tipologia) continue;
-        if (t.cliente && t.cliente !== cliente) continue;
+        if (t.cliente && normText(t.cliente) !== normText(cliente)) continue;
         if (t.classe_materiale && t.classe_materiale !== classe) continue;
         if (t.regione && t.regione !== regione) continue;
         if (t.eer_codice && t.eer_codice !== eer) continue;

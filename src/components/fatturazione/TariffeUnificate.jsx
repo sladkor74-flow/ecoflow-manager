@@ -22,12 +22,21 @@ function isArchiviata(t) {
 function isAperta(t) { return t.stato === 'attivo' && !t.data_fine_validita; }
 function countRuoli(f) { return ['ruolo_raccolta','ruolo_trasporto_secondaria','ruolo_trattamento','ruolo_stoccaggio'].filter(r => f[r]).length; }
 function getAmbito(t) {
+  if (t.direzione === 'ATTIVA') return t.regione || 'Tutte le regioni';
   if (t.prestazione === 'RACCOLTA') { let a = t.provincia || t.regione || 'Tutte le zone'; if (t.destinazione) a += ` → ${t.destinazione}`; return a; }
   if (t.prestazione === 'TRASPORTO_SECONDARIA') return `${t.produttore || '?'} → ${t.destinatario || '?'}`;
   return '—';
 }
 function normVal(v) { return String(v || '').trim().toUpperCase(); }
 function chiaviTariffaCoincidenti(a, b) {
+  const aAttiva = normVal(a.direzione) === 'ATTIVA';
+  const bAttiva = normVal(b.direzione) === 'ATTIVA';
+  if (aAttiva || bAttiva) {
+    if (aAttiva !== bAttiva) return false;
+    const campi = ['cliente', 'tipologia', 'classe_materiale', 'regione', 'eer_codice'];
+    for (const c of campi) { if (normVal(a[c]) !== normVal(b[c])) return false; }
+    return true;
+  }
   const campi = ['fornitore_id', 'direzione', 'tipologia', 'prestazione', 'classe_materiale', 'provincia', 'regione', 'destinazione', 'produttore', 'destinatario'];
   for (const c of campi) { if (normVal(a[c]) !== normVal(b[c])) return false; }
   return true;
@@ -68,6 +77,7 @@ export default function TariffeUnificate() {
   const [storico, setStorico] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [import2026, setImport2026] = useState(null);
+  const [importAttive2026, setImportAttive2026] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [showOnlyDup, setShowOnlyDup] = useState(false);
@@ -129,8 +139,29 @@ export default function TariffeUnificate() {
     }
   };
 
+  const handleImportAttive2026 = async () => {
+    setImportAttive2026({ summary: null, loading: true, inserting: false, error: null });
+    try {
+      const res = await base44.functions.invoke('seedTariffeAttive2026', { simula: true });
+      setImportAttive2026({ summary: res.data, loading: false, inserting: false, error: null });
+    } catch (e) {
+      setImportAttive2026({ summary: null, loading: false, inserting: false, error: e?.message || 'Errore' });
+    }
+  };
+
+  const confirmImportAttive2026 = async () => {
+    setImportAttive2026(prev => ({ ...prev, inserting: true, error: null }));
+    try {
+      await base44.functions.invoke('seedTariffeAttive2026', {});
+      setImportAttive2026(null);
+      load();
+    } catch (e) {
+      setImportAttive2026(prev => ({ ...prev, inserting: false, error: e?.message || 'Errore' }));
+    }
+  };
+
   const duplicateIds = useMemo(() => calcolaDuplicate(tariffe), [tariffe]);
-  const noPrestCount = useMemo(() => tariffe.filter(t => !t.prestazione).length, [tariffe]);
+  const noPrestCount = useMemo(() => tariffe.filter(t => !t.prestazione && t.direzione !== 'ATTIVA').length, [tariffe]);
 
   const filtered = useMemo(() => {
     let result = tariffe.filter(t => {
@@ -140,7 +171,7 @@ export default function TariffeUnificate() {
       if (filters.fornitore_id && t.fornitore_id !== filters.fornitore_id) return false;
       if (!filters.showArchived && isArchiviata(t)) return false;
       if (showOnlyDup && !duplicateIds.has(t.id)) return false;
-      if (showOnlyNoPrest && t.prestazione) return false;
+      if (showOnlyNoPrest && (t.prestazione || t.direzione === 'ATTIVA')) return false;
       return true;
     });
     result.sort((a, b) => {
@@ -200,6 +231,11 @@ export default function TariffeUnificate() {
               {isAdmin && (
                 <Button size="sm" variant="outline" onClick={handleImport2026}>
                   <Download className="w-4 h-4 mr-1" /> Importa tariffe 2026
+                </Button>
+              )}
+              {isAdmin && (
+                <Button size="sm" variant="outline" onClick={handleImportAttive2026}>
+                  <Download className="w-4 h-4 mr-1" /> Importa tariffe attive 2026
                 </Button>
               )}
             </div>
@@ -279,14 +315,14 @@ export default function TariffeUnificate() {
                 {filtered.map((t, i) => {
                   const arch = isArchiviata(t);
                   const aperta = isAperta(t);
-                  const noPrest = !t.prestazione;
+                  const noPrest = !t.prestazione && t.direzione !== 'ATTIVA';
                   const zeroVal = Number(t.valore) === 0;
                   const f = fornitori.find(x => x.id === t.fornitore_id);
                   const multiRuolo = f ? countRuoli(f) > 1 : false;
                   const isDup = duplicateIds.has(t.id);
                   return (
                     <tr key={t.id} className={`${i % 2 ? 'bg-muted/30' : ''} ${arch ? 'opacity-50' : ''} ${noPrest ? 'bg-amber-50' : ''} ${isDup ? 'bg-red-50' : ''}`}>
-                      <td className="px-3 py-2 font-medium">{t.fornitore_nome || '—'}</td>
+                      <td className="px-3 py-2 font-medium">{t.direzione === 'ATTIVA' ? (t.cliente || '—') : (t.fornitore_nome || '—')}</td>
                       <td className="px-2 py-2 text-xs">{t.direzione || '—'}</td>
                       <td className="px-2 py-2 text-xs">{TIPOLOGIA_LABEL[t.tipologia] || t.tipologia || '—'}</td>
                       <td className="px-3 py-2">{noPrest ? <span className="text-xs px-1.5 py-0.5 rounded bg-amber-200 text-amber-800 font-medium">Prestazione da assegnare</span> : (PRESTAZIONI_LABEL[t.prestazione] || '—')}</td>
@@ -433,6 +469,67 @@ export default function TariffeUnificate() {
               {deleting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Trash2 className="w-4 h-4 mr-1" />}
               Elimina definitivamente
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={importAttive2026 !== null} onOpenChange={(o) => !o && setImportAttive2026(null)}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Importa tariffe attive 2026</DialogTitle>
+          </DialogHeader>
+          {importAttive2026?.loading ? (
+            <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+          ) : importAttive2026?.summary ? (
+            <div className="space-y-4 text-sm">
+              {importAttive2026.summary.totali && (
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="border rounded p-2 text-center bg-success/10"><div className="text-xs text-muted-foreground">Da creare</div><div className="text-lg font-bold text-success">{importAttive2026.summary.totali.tariffe_create}</div></div>
+                  <div className="border rounded p-2 text-center bg-amber-50"><div className="text-xs text-muted-foreground">Già esistenti</div><div className="text-lg font-bold text-amber-600">{importAttive2026.summary.totali.tariffe_ignorate}</div></div>
+                  <div className="border rounded p-2 text-center bg-destructive/10"><div className="text-xs text-muted-foreground">Errori</div><div className="text-lg font-bold text-destructive">{importAttive2026.summary.totali.errori}</div></div>
+                </div>
+              )}
+              {importAttive2026.summary.tariffe_create?.length > 0 && (
+                <div>
+                  <div className="font-semibold mb-1">Tariffe da creare:</div>
+                  <div className="max-h-40 overflow-y-auto border rounded">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted sticky top-0"><tr><th className="text-left px-2 py-1">Tipologia</th><th className="text-left px-2 py-1">Regione</th><th className="text-right px-2 py-1">Valore</th></tr></thead>
+                      <tbody>
+                        {importAttive2026.summary.tariffe_create.map((t, i) => (
+                          <tr key={i} className="border-t"><td className="px-2 py-1">{t.tipologia}</td><td className="px-2 py-1">{t.regione || 'Tutte'}</td><td className="px-2 py-1 text-right">{t.valore} {t.unita_misura}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              {importAttive2026.summary.tariffe_ignorate?.length > 0 && (
+                <div>
+                  <div className="font-semibold mb-1">Tariffe già esistenti (saranno ignorate):</div>
+                  <div className="max-h-40 overflow-y-auto border rounded">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted sticky top-0"><tr><th className="text-left px-2 py-1">Tipologia</th><th className="text-left px-2 py-1">Regione</th><th className="text-right px-2 py-1">Valore</th></tr></thead>
+                      <tbody>
+                        {importAttive2026.summary.tariffe_ignorate.map((t, i) => (
+                          <tr key={i} className="border-t"><td className="px-2 py-1">{t.tipologia}</td><td className="px-2 py-1">{t.regione || 'Tutte'}</td><td className="px-2 py-1 text-right">{t.valore} {t.unita_misura}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+          {importAttive2026?.error && <div className="bg-destructive/10 border border-destructive/30 rounded p-3 text-sm text-destructive">{importAttive2026.error}</div>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportAttive2026(null)}>Annulla</Button>
+            {importAttive2026?.summary && (
+              <Button onClick={confirmImportAttive2026} disabled={importAttive2026.inserting}>
+                {importAttive2026.inserting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+                Conferma inserimento
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
