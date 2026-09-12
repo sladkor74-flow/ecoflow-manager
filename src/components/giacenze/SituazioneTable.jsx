@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { AlertTriangle } from 'lucide-react';
 
 function fmt(n, dec = 2) {
   if (n == null || n === '' || isNaN(n)) return '—';
@@ -8,6 +9,9 @@ function fmt(n, dec = 2) {
 }
 
 const DIVERGENZA_TOOLTIP = "Materiale gia' trasferito ad altro sito ma ancora attribuito qui dal portale, in attesa di dichiarazione da parte di chi lo ha ricevuto.";
+const IN_ATTESA_TOOLTIP = "Materiale gia' partito da questo stoccaggio verso un impianto: il portale lo attribuisce ancora qui finche' il destinatario non presenta la dichiarazione. Non e' giacenza.";
+const RILEVAZ_OBSOLETA_TOOLTIP = "Rilevazione di oltre trenta giorni fa: aggiornala dalla pagina Unita' Locali di Stoccaggio del portale.";
+function fmtDate(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('it-IT'); }
 
 export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
   const maxGiacenza = Math.max(...righe.map(r => r.giacenza_portale_t || 0), 0.01);
@@ -23,6 +27,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
               <th className="px-3 py-2 font-semibold text-right">Giacenza a portale</th>
               <th className="px-3 py-2 font-semibold text-right">Giacenza fisica</th>
               <th className="px-3 py-2 font-semibold text-right">Divergenza</th>
+              <th className="px-3 py-2 font-semibold text-right">In attesa di dichiarazione</th>
               <th className="px-3 py-2 font-semibold text-right">Ordini da dichiarare</th>
               <th className="px-3 py-2 font-semibold text-right">Dichiarato nell'anno</th>
               <th className="px-3 py-2 font-semibold">Tipologia trattamento</th>
@@ -48,6 +53,19 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                     <div className="mt-1 h-1 bg-muted rounded-full overflow-hidden">
                       <div className="h-full bg-primary rounded-full" style={{ width: `${barWidth}%` }} />
                     </div>
+                    {r.tipo_destinazione === 'stoc' && r.data_rilevazione && (
+                      <div className={`mt-1 text-xs flex items-center justify-end gap-1 ${r.rilevazione_obsoleta ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                        {r.rilevazione_obsoleta && (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild><AlertTriangle className="w-3 h-3" /></TooltipTrigger>
+                              <TooltipContent className="max-w-xs text-xs">{RILEVAZ_OBSOLETA_TOOLTIP}</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
+                        <span>rilevato il {fmtDate(r.data_rilevazione)}</span>
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right">{fmt(r.giacenza_fisica_t)} t</td>
                   <td className={`px-3 py-2 text-right font-medium ${
@@ -61,6 +79,18 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                         <TooltipContent className="max-w-xs text-xs">{DIVERGENZA_TOOLTIP}</TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
+                  </td>
+                  <td className={`px-3 py-2 text-right ${r.in_attesa_dichiarazione_t > 0.01 ? 'text-amber-600' : ''}`}>
+                    {r.in_attesa_dichiarazione_t > 0.01 ? (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-help underline decoration-dotted underline-offset-2">{fmt(r.in_attesa_dichiarazione_t)} t</span>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs text-xs">{IN_ATTESA_TOOLTIP}</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : <span className="text-muted-foreground">—</span>}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <Button
@@ -85,6 +115,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
               <td className="px-3 py-2 text-right">{fmt(totali.giacenza_portale_t)} t</td>
               <td className="px-3 py-2 text-right">{fmt(totali.giacenza_fisica_t)} t</td>
               <td className="px-3 py-2 text-right">{fmt(totali.divergenza_t)} t</td>
+              <td className="px-3 py-2 text-right">{fmt(totali.in_attesa_dichiarazione_t)} t</td>
               <td className="px-3 py-2 text-right">{totali.ordini_da_dichiarare || 0}</td>
               <td className="px-3 py-2 text-right">{fmt(totali.dichiarato_t)} t</td>
               <td className="px-3 py-2"></td>

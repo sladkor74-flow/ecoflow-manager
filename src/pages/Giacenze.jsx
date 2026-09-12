@@ -13,6 +13,7 @@ import DaDichiarareTable from '@/components/giacenze/DaDichiarareTable';
 import DerivatiTable from '@/components/giacenze/DerivatiTable';
 import TargetTable from '@/components/giacenze/TargetTable';
 import TargetManager from '@/components/giacenze/TargetManager';
+import StoccaggiManager from '@/components/giacenze/StoccaggiManager';
 import { exportGiacenzeAllExcel } from '@/lib/giacenzeExportAll';
 
 export default function Giacenze() {
@@ -112,6 +113,7 @@ export default function Giacenze() {
               <TabsTrigger value="dichiarare">Da dichiarare</TabsTrigger>
               <TabsTrigger value="derivati">Derivati</TabsTrigger>
               <TabsTrigger value="target">Target</TabsTrigger>
+              <TabsTrigger value="stoccaggi">Stoccaggi</TabsTrigger>
             </TabsList>
 
             <TabsContent value="situazione">
@@ -140,6 +142,14 @@ export default function Giacenze() {
                 )}
                 <TargetTable righe={data.righe} totali={data.totali} />
               </div>
+            </TabsContent>
+
+            <TabsContent value="stoccaggi">
+              <StoccaggiManager
+                stoccaggiFromCalcolo={data.righe.filter(r => r.tipo_destinazione === 'stoc').map(r => ({ sito: r.sito }))}
+                isAdmin={isAdmin}
+                onSaved={loadData}
+              />
             </TabsContent>
           </Tabs>
         </>
