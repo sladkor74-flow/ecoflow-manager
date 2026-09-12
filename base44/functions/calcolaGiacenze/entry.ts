@@ -11,7 +11,7 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 // Fonti dati:
 //   OrdineNonDichiarato  -> giacenza a portale (impianti), ordini da dichiarare, arretrato per anno, in_attesa_dichiarazione (stoccaggi)
 //   GiacenzaStoccaggio   -> giacenza a portale degli stoccaggi (rilevazione manuale del saldo reale portale)
-//   DichiarazioneTrattamento -> dichiarato e derivati (filtrato per anno di data_dichiarazione)
+//   DichiarazioneTrattamento -> dichiarato e derivati (filtrato per anno di data_chiusura dell'ordine)
 //   PrimariaRete/Aci, ExtraRaccolta, Secondaria, Terziaria -> movimentazione (stato terminato, trasporto_finito_il nell'anno)
 //   GiacenzaSito -> target e tipologia trattamento
 //
@@ -151,8 +151,8 @@ export default async function(req) {
       const kg = Number(d.peso_associato_kg) || 0;
       const t = kg / 1000;
 
-      // Anno corrente per dichiarato e derivati
-      if (inYear(d.data_dichiarazione)) {
+      // Anno di competenza = anno di chiusura dell'ordine, non di presentazione della dichiarazione
+      if (inYear(d.data_chiusura)) {
         dichiaratoMap.set(key, (dichiaratoMap.get(key) || 0) + t);
         if (!derivatiMap.has(key)) derivatiMap.set(key, { granulo: 0, fibre: 0, metallo: 0, cippato: 0, ciabattato: 0 });
         const der = derivatiMap.get(key);

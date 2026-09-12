@@ -15,7 +15,7 @@ import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSi
 // 7. SOLO ORA: deleteMany + bulkCreate
 // Payload: { file_url, tipo_file, nome_file, periodo_riferimento?, replace_existing?, conferma_forzatura? }
 
-const CHUNK = 100;
+const CHUNK = 250;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // Campi data per le nuove entita' (dichiarazioni/ordini): accettano sia seriale Excel che testo AAAA-MM-GG
@@ -46,6 +46,7 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
 
+    const startTime = Date.now();
     const body = await req.json();
     tipo_file = body.tipo_file;
     nome_file = body.nome_file || 'N/D';
@@ -405,11 +406,11 @@ export default async function(req) {
             success = true;
           } catch (e) {
             lastError = e.message || String(e);
-            if (attempt < 2) await sleep(3000 * (attempt + 1));
+            if (attempt < 2) await sleep(1000 * (attempt + 1));
           }
         }
         if (!success) fail += chunk.length;
-        await sleep(1000);
+        await sleep(200);
       }
       return { imp, fail, lastError };
     };
@@ -452,9 +453,11 @@ export default async function(req) {
     const totaleDaImportare = config.splitByStatoClasse
       ? primarie_rete_importati + primarie_aci_importati + assegnati_importati + assegnati_aci_importati
       : enriched.length;
+    const durata_secondi = Math.round((Date.now() - startTime) / 1000);
+    const suffissoDurata = ` [durata: ${durata_secondi}s]`;
     const messaggio = config.splitByStatoClasse
-      ? `Rete: ${primarie_rete_importati} | ACI: ${primarie_aci_importati} | Ass. Rete: ${assegnati_importati} | Ass. ACI: ${assegnati_aci_importati} (foglio: ${sheetName})`
-      : `${imported} righe importate su ${enriched.length} da importare (foglio: ${sheetName})`;
+      ? `Rete: ${primarie_rete_importati} | ACI: ${primarie_aci_importati} | Ass. Rete: ${assegnati_importati} | Ass. ACI: ${assegnati_aci_importati} (foglio: ${sheetName})${suffissoDurata}`
+      : `${imported} righe importate su ${enriched.length} da importare (foglio: ${sheetName})${suffissoDurata}`;
     await base44.asServiceRole.entities.UploadLog.create({
       tipo_file, nome_file, file_url,
       righe_importate: imported, righe_fallite: failed, esito,
@@ -475,7 +478,8 @@ export default async function(req) {
       avviso_date,
       avviso_calo,
       forzato: !!conferma_forzatura,
-      modalita
+      modalita,
+      durata_secondi
     });
   } catch (error) {
     try {
