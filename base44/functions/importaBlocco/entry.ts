@@ -139,7 +139,7 @@ export default async function(req) {
       await base44.asServiceRole.entities[entita].deleteMany({});
 
       const scritte = await scriviRighe(base44, entita, righe, config.columns);
-      return Response.json({ blocco, scritte: scritte.ok, fallite: scritte.ko, avviso_calo, iniziato: true });
+      return Response.json({ blocco, scritte: scritte.ok, fallite: scritte.ko, avviso_calo, iniziato: true, ultimo_errore: scritte.ultimo_errore });
     }
 
     // === BLOCCHI SUCCESSIVI: sola scrittura ===
@@ -153,34 +153,59 @@ export default async function(req) {
       await base44.asServiceRole.entities.UploadLog.create({
         tipo_file, nome_file: nome_file || 'N/D',
         righe_importate: totScritte, righe_fallite: totFallite, esito,
-        messaggio: `${totScritte} righe importate in ${totale_blocchi} blocchi (lettura nel browser)`,
+        messaggio: `${totScritte} righe importate in ${totale_blocchi} blocchi (lettura nel browser)` + (totFallite > 0 && scritte.ultimo_errore ? ` — ${totFallite} fallite, ultimo errore: ${scritte.ultimo_errore}` : ''),
       });
-      return Response.json({ blocco, scritte: scritte.ok, fallite: scritte.ko, completato: true, totale_scritte: totScritte, esito });
+      return Response.json({ blocco, scritte: scritte.ok, fallite: scritte.ko, completato: true, totale_scritte: totScritte, esito, ultimo_errore: scritte.ultimo_errore });
     }
 
-    return Response.json({ blocco, scritte: scritte.ok, fallite: scritte.ko });
+    return Response.json({ blocco, scritte: scritte.ok, fallite: scritte.ko, ultimo_errore: scritte.ultimo_errore });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }
 }
 
+// Scrive un gruppo di record, con tentativi ripetuti e attesa crescente.
+// Restituisce true se riuscito, altrimenti false registrando l'ultimo errore.
+async function provaScrittura(base44, entita, gruppo, stato) {
+  for (let tentativo = 0; tentativo < 3; tentativo++) {
+    try {
+      await base44.asServiceRole.entities[entita].bulkCreate(gruppo);
+      return true;
+    } catch (e) {
+      stato.ultimo_errore = e && e.message ? e.message : String(e);
+      if (tentativo < 2) await sleep(1000 * (tentativo + 1));
+    }
+  }
+  return false;
+}
+
 // Mappa e scrive un blocco di righe, suddividendolo in sotto-blocchi.
+//
+// Quando un sotto-blocco non riesce nemmeno dopo tre tentativi, si riprova in
+// gruppi di dieci righe invece di scartarne cento: in questo modo un singolo
+// record problematico non trascina con se' i novantanove che lo accompagnano.
 async function scriviRighe(base44, entita, righe, colMap) {
   const records = righe.map(r => mappaRiga(r, colMap));
+  const stato = { ultimo_errore: null };
   let ok = 0, ko = 0;
+
   for (let i = 0; i < records.length; i += SOTTO_BLOCCO) {
     const chunk = records.slice(i, i + SOTTO_BLOCCO);
-    let riuscito = false;
-    for (let tentativo = 0; tentativo < 3 && !riuscito; tentativo++) {
-      try {
-        await base44.asServiceRole.entities[entita].bulkCreate(chunk);
-        ok += chunk.length;
-        riuscito = true;
-      } catch (e) {
-        if (tentativo < 2) await sleep(500 * (tentativo + 1));
+
+    if (await provaScrittura(base44, entita, chunk, stato)) {
+      ok += chunk.length;
+    } else {
+      // Ripiego: gruppi piu' piccoli per isolare le righe che non passano.
+      for (let j = 0; j < chunk.length; j += 10) {
+        const piccolo = chunk.slice(j, j + 10);
+        if (await provaScrittura(base44, entita, piccolo, stato)) ok += piccolo.length;
+        else ko += piccolo.length;
+        await sleep(150);
       }
     }
-    if (!riuscito) ko += chunk.length;
+    // Pausa fra sotto-blocchi: un ritmo troppo serrato provoca rifiuti.
+    await sleep(150);
   }
-  return { ok, ko };
+
+  return { ok, ko, ultimo_errore: stato.ultimo_errore };
 }

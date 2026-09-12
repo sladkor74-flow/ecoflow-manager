@@ -64,6 +64,7 @@ export async function importaGrandeFile({ file, tipoFile, onProgress, confermaFo
   let totaleScritte = 0;
   let totaleFallite = 0;
   let avvisoCalo = null;
+  let ultimoErrore = null;
   let esitoFinale = null;
 
   for (let blocco = 0; blocco < totaleBlocchi; blocco++) {
@@ -94,6 +95,7 @@ export async function importaGrandeFile({ file, tipoFile, onProgress, confermaFo
     totaleFallite += dati.fallite || 0;
     if (dati.avviso_calo) avvisoCalo = dati.avviso_calo;
     if (dati.esito) esitoFinale = dati.esito;
+    if (dati.ultimo_errore) ultimoErrore = dati.ultimo_errore;
 
     avvisa({
       fase: 'scrittura',
@@ -112,6 +114,7 @@ export async function importaGrandeFile({ file, tipoFile, onProgress, confermaFo
     righe_fallite: totaleFallite,
     blocchi: totaleBlocchi,
     avviso_calo: avvisoCalo,
+    ultimo_errore: ultimoErrore,
     esito: esitoFinale || (totaleFallite === 0 ? 'successo' : 'parziale'),
   };
 }
