@@ -172,6 +172,25 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
                 </tr>
               ))}
             </tbody>
+            {data.ripartizione_servizio && (
+              <tbody>
+                <tr className="border-t-2 bg-muted/40">
+                  <td className="py-2 pr-4 font-medium" colSpan={4}><span className="text-xs text-muted-foreground uppercase tracking-wide">Ripartizione per tipo di servizio</span></td>
+                </tr>
+                <tr className="border-b">
+                  <td className="py-2 pr-4 font-medium">Trasp (pri)</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{data.ripartizione_servizio.TRASP.ordini}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{data.ripartizione_servizio.TRASP.kg.toLocaleString('it-IT')}</td>
+                  <td className="py-2 text-right tabular-nums">{data.ripartizione_servizio.TRASP.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+                <tr className="border-b">
+                  <td className="py-2 pr-4 font-medium">Trasp+Tratt (pri)</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{data.ripartizione_servizio.TRASP_TRATT.ordini}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{data.ripartizione_servizio.TRASP_TRATT.kg.toLocaleString('it-IT')}</td>
+                  <td className="py-2 text-right tabular-nums">{data.ripartizione_servizio.TRASP_TRATT.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+              </tbody>
+            )}
             <tfoot>
               <tr className="border-t-2 font-semibold">
                 <td className="py-2 pr-4">Totale</td>

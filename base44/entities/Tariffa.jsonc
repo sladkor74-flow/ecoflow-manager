@@ -96,6 +96,15 @@
       "type": "string",
       "description": "Cliente/fatturante per fatturazione attiva"
     },
+    "servizio_ecotyre": {
+      "type": "string",
+      "enum": [
+        "TRASP",
+        "TRASP_TRATT",
+        ""
+      ],
+      "description": "Solo direzione ATTIVA. Distingue il corrispettivo per il solo trasporto (TRASP) da quello per trasporto e trattamento (TRASP_TRATT). Vuoto significa che la tariffa vale per entrambi i casi."
+    },
     "regione": {
       "type": "string",
       "description": "Regione per tariffe specifiche (attiva)"

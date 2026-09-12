@@ -22,6 +22,15 @@
       ],
       "description": "Tipologia fatturazione attiva"
     },
+    "servizio_ecotyre": {
+      "type": "string",
+      "enum": [
+        "TRASP",
+        "TRASP_TRATT",
+        ""
+      ],
+      "description": "Solo righe ATTIVA. TRASP = solo trasporto (impianto pagato da Ecotyre), TRASP_TRATT = trasporto + trattamento."
+    },
     "fornitore_id": {
       "type": "string"
     },

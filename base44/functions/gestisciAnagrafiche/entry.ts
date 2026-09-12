@@ -31,7 +31,7 @@ function chiaveMatch(t1, t2) {
 
 // Chiave per tariffe attive: cliente, tipologia, classe_materiale, regione, eer_codice
 function chiaveMatchAttiva(t1, t2) {
-  const campi = ['cliente', 'tipologia', 'classe_materiale', 'regione', 'eer_codice'];
+  const campi = ['cliente', 'tipologia', 'classe_materiale', 'regione', 'eer_codice', 'servizio_ecotyre'];
   for (const c of campi) {
     if (norm(t1[c]) !== norm(t2[c])) return false;
   }
@@ -97,6 +97,11 @@ export default async function(req) {
       // ATTIVA non ammette prestazione
       if (isAttiva && effettivi.prestazione && String(effettivi.prestazione).trim() !== '') {
         return Response.json({ error: 'Il campo prestazione non si applica alla fatturazione attiva.' }, { status: 400 });
+      }
+
+      // servizio_ecotyre si applica solo alla fatturazione attiva
+      if (!isAttiva && effettivi.servizio_ecotyre && String(effettivi.servizio_ecotyre).trim() !== '') {
+        return Response.json({ error: 'Il campo servizio_ecotyre si applica solo alla fatturazione attiva.' }, { status: 400 });
       }
 
       // f) Data fine precedente a data inizio

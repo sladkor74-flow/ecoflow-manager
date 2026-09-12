@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { filtraPeriodo } from "../../shared/filtroPeriodo.ts";
 import { sortTariffe, resolveTariffa, calcolaTotale, fattoreConv } from "../../shared/ecotyreTariffe.ts";
+import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
@@ -9,6 +10,8 @@ const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','
 // Genera 3 documenti (RETE, ACI, EXTRA_RACCOLTA) con righe automatiche
 // dai dati operativi del gestionale. Cliente/committente: sempre ECOTYRE.
 // Periodo determinato da filtraPeriodo (stato terminato + trasporto_finito_il in anno/mese).
+// Per ogni record determina il tipo di servizio (TRASP / TRASP_TRATT) in base
+// alla destinazione: se l'impianto ha trattamento_fatturato_da_ecotyre = true -> TRASP.
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -31,22 +34,40 @@ export default async function(req) {
     }
 
     // Load operational data WITHOUT month filter, then apply filtraPeriodo
-    const [reteAll, aciAll, extraAll] = await Promise.all([
+    const [reteAll, aciAll, extraAll, fornitoriAll] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.PrimariaRete),
       fetchAll(base44.asServiceRole.entities.PrimariaAci),
       fetchAll(base44.asServiceRole.entities.ExtraRaccolta),
+      fetchAll(base44.asServiceRole.entities.Fornitore),
     ]);
     const rete = filtraPeriodo(reteAll, annoNum, mese);
     const aci = filtraPeriodo(aciAll, annoNum, mese);
     const extraRaccolta = filtraPeriodo(extraAll, annoNum, mese);
+
+    // Build fornitore map: normalizzaRagioneSociale(destinazione) -> fornitore
+    const fornitoreMap = new Map();
+    for (const f of fornitoriAll) {
+      const key = normalizzaRagioneSociale(f.ragione_sociale);
+      if (key) fornitoreMap.set(key, f);
+    }
+
+    // Determine tipo servizio from destinazione: TRASP if impianto has trattamento_fatturato_da_ecotyre
+    function getTipoServizio(r) {
+      const dest = r.destinazione;
+      if (!dest) return 'TRASP_TRATT';
+      const key = normalizzaRagioneSociale(dest);
+      const f = fornitoreMap.get(key);
+      if (f && f.trattamento_fatturato_da_ecotyre === true) return 'TRASP';
+      return 'TRASP_TRATT';
+    }
 
     // Load attiva tariffe
     const tariffe = await base44.asServiceRole.entities.Tariffa.filter({ direzione: 'ATTIVA', stato: 'attivo' });
     const tariffeSorted = sortTariffe(tariffe);
 
     const anomalieMap = new Map();
-    function addAnomalia(tipologia, regione, classe, eer, quantitaKg) {
-      const key = `${tipologia}|${regione || ''}|${classe || ''}|${eer || ''}`;
+    function addAnomalia(tipologia, regione, classe, eer, servizioEcotyre, quantitaKg) {
+      const key = `${tipologia}|${regione || ''}|${classe || ''}|${eer || ''}|${servizioEcotyre || ''}`;
       const tonn = quantitaKg / 1000;
       if (anomalieMap.has(key)) {
         anomalieMap.get(key).tonnellate += tonn;
@@ -55,8 +76,22 @@ export default async function(req) {
         if (regione) desc += `, regione ${regione}`;
         if (classe) desc += `, classe ${classe}`;
         if (eer) desc += `, EER ${eer}`;
-        anomalieMap.set(key, { tipologia, regione: regione || '', classe: classe || '', eer_codice: eer || '', tonnellate: tonn, descrizione: desc });
+        desc += `, servizio ${servizioEcotyre}`;
+        anomalieMap.set(key, { tipologia, regione: regione || '', classe: classe || '', eer_codice: eer || '', servizio_ecotyre: servizioEcotyre || '', tonnellate: tonn, descrizione: desc });
       }
+    }
+
+    // Ripartizione per tipo di servizio
+    const ripartizione = {
+      TRASP: { ordini: 0, kg: 0, totale: 0 },
+      TRASP_TRATT: { ordini: 0, kg: 0, totale: 0 },
+    };
+    function addRipartizione(tipoServ, kg, totale) {
+      const r = ripartizione[tipoServ];
+      if (!r) return;
+      r.ordini++;
+      r.kg += kg;
+      r.totale += totale;
     }
 
     // --- ELABORAZIONE RETE ---
@@ -64,12 +99,15 @@ export default async function(req) {
     for (const r of rete) {
       const quantitaKg = r.peso_effettivo || 0;
       if (quantitaKg === 0) continue;
+      const tipoServizio = getTipoServizio(r);
       const dataRiferimento = r.trasporto_finito_il;
-      const tariffa = resolveTariffa(tariffeSorted, 'RETE', r.classe, '', r.cer, dataRiferimento);
-      if (!tariffa) addAnomalia('RETE', r.regione, r.classe, r.cer, quantitaKg);
-      const totale = calcolaTotale(quantitaKg, tariffa);
+      const tariffa = resolveTariffa(tariffeSorted, 'RETE', r.classe, '', r.cer, dataRiferimento, tipoServizio);
+      if (!tariffa) addAnomalia('RETE', r.regione, r.classe, r.cer, tipoServizio, quantitaKg);
+      const totale = Math.round(calcolaTotale(quantitaKg, tariffa) * 100) / 100;
+      addRipartizione(tipoServizio, quantitaKg, totale);
       righeRete.push({
         tipologia: 'RETE', tipo: 'ATTIVA',
+        servizio_ecotyre: tipoServizio,
         regione: r.regione || '', fatturante: 'ECOTYRE',
         ordine: r.id_ordine || '',
         data_fine_trasporto: r.trasporto_finito_il || null,
@@ -80,7 +118,7 @@ export default async function(req) {
         unita_misura: tariffa?.unita_misura || '€/t',
         unita_prezzo: tariffa?.unita_misura || '€/t',
         fattore_conversione: fattoreConv(tariffa),
-        totale: Math.round(totale * 100) / 100,
+        totale,
         origine_dato: 'TERMINATI_RETE', origine_record_id: r.id,
         sospesa: false, motivo_sospensione: '',
         stato_validazione: 'verificato',
@@ -94,12 +132,15 @@ export default async function(req) {
       const quantitaKg = r.peso_effettivo || 0;
       if (quantitaKg === 0) continue;
       const regione = r.regione || '';
+      const tipoServizio = getTipoServizio(r);
       const dataRiferimento = r.trasporto_finito_il;
-      const tariffa = resolveTariffa(tariffeSorted, 'ACI', r.classe, regione, r.cer, dataRiferimento);
-      if (!tariffa) addAnomalia('ACI', regione, r.classe, r.cer, quantitaKg);
-      const totale = calcolaTotale(quantitaKg, tariffa);
+      const tariffa = resolveTariffa(tariffeSorted, 'ACI', r.classe, regione, r.cer, dataRiferimento, tipoServizio);
+      if (!tariffa) addAnomalia('ACI', regione, r.classe, r.cer, tipoServizio, quantitaKg);
+      const totale = Math.round(calcolaTotale(quantitaKg, tariffa) * 100) / 100;
+      addRipartizione(tipoServizio, quantitaKg, totale);
       righeAci.push({
         tipologia: 'ACI', tipo: 'ATTIVA',
+        servizio_ecotyre: tipoServizio,
         regione, fatturante: 'ECOTYRE',
         ticket_n: r.numero_ordine_interno || '',
         ordine: r.id_ordine || '',
@@ -111,7 +152,7 @@ export default async function(req) {
         unita_misura: tariffa?.unita_misura || '€/t',
         unita_prezzo: tariffa?.unita_misura || '€/t',
         fattore_conversione: fattoreConv(tariffa),
-        totale: Math.round(totale * 100) / 100,
+        totale,
         origine_dato: 'ACI', origine_record_id: r.id,
         sospesa: false, motivo_sospensione: '',
         stato_validazione: 'verificato',
@@ -124,12 +165,15 @@ export default async function(req) {
     for (const r of extraRaccolta) {
       const quantitaKg = r.peso_effettivo || 0;
       if (quantitaKg === 0) continue;
+      const tipoServizio = getTipoServizio(r);
       const dataRiferimento = r.trasporto_finito_il;
-      const tariffa = resolveTariffa(tariffeSorted, 'EXTRA_RACCOLTA', r.classe, r.regione || '', r.cer, dataRiferimento);
-      if (!tariffa) addAnomalia('EXTRA_RACCOLTA', r.regione, r.classe, r.cer, quantitaKg);
-      const totale = calcolaTotale(quantitaKg, tariffa);
+      const tariffa = resolveTariffa(tariffeSorted, 'EXTRA_RACCOLTA', r.classe, r.regione || '', r.cer, dataRiferimento, tipoServizio);
+      if (!tariffa) addAnomalia('EXTRA_RACCOLTA', r.regione, r.classe, r.cer, tipoServizio, quantitaKg);
+      const totale = Math.round(calcolaTotale(quantitaKg, tariffa) * 100) / 100;
+      addRipartizione(tipoServizio, quantitaKg, totale);
       righeExtra.push({
         tipologia: 'EXTRA_RACCOLTA', tipo: 'ATTIVA',
+        servizio_ecotyre: tipoServizio,
         regione: r.regione || '', fatturante: 'ECOTYRE',
         ordine: r.id_ordine || '',
         data_fine_trasporto: r.trasporto_finito_il || null,
@@ -140,7 +184,7 @@ export default async function(req) {
         unita_misura: tariffa?.unita_misura || '€/t',
         unita_prezzo: tariffa?.unita_misura || '€/t',
         fattore_conversione: fattoreConv(tariffa),
-        totale: Math.round(totale * 100) / 100,
+        totale,
         origine_dato: 'EXTRA_RACCOLTA', origine_record_id: r.id,
         sospesa: false, motivo_sospensione: '',
         stato_validazione: 'verificato',
@@ -192,7 +236,23 @@ export default async function(req) {
       ...a,
       tonnellate: Math.round(a.tonnellate * 100) / 100,
     }));
-    return Response.json({ documenti: docs, anomalie });
+
+    const ripartizione_servizio = {
+      TRASP: {
+        ordini: ripartizione.TRASP.ordini,
+        kg: Math.round(ripartizione.TRASP.kg),
+        ton: Math.round((ripartizione.TRASP.kg / 1000) * 100) / 100,
+        totale: Math.round(ripartizione.TRASP.totale * 100) / 100,
+      },
+      TRASP_TRATT: {
+        ordini: ripartizione.TRASP_TRATT.ordini,
+        kg: Math.round(ripartizione.TRASP_TRATT.kg),
+        ton: Math.round((ripartizione.TRASP_TRATT.kg / 1000) * 100) / 100,
+        totale: Math.round(ripartizione.TRASP_TRATT.totale * 100) / 100,
+      },
+    };
+
+    return Response.json({ documenti: docs, anomalie, ripartizione_servizio });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

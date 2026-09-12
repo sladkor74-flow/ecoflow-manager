@@ -32,6 +32,11 @@
       "type": "boolean",
       "default": false
     },
+    "trattamento_fatturato_da_ecotyre": {
+      "type": "boolean",
+      "default": false,
+      "description": "Impianto il cui trattamento viene pagato da Ecotyre direttamente: sulle consegne a questo impianto SMOCO percepisce il solo trasporto. Corrisponde alla voce Trasp della prefattura."
+    },
     "interno": {
       "type": "boolean",
       "default": false,

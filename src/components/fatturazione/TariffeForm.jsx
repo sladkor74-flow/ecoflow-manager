@@ -42,7 +42,7 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
       setForm({ ...duplicating, id: undefined, prestazione: '', data_inizio_validita: duplicating.data_inizio_validita ? duplicating.data_inizio_validita.slice(0,10) : '', data_fine_validita: duplicating.data_fine_validita ? duplicating.data_fine_validita.slice(0,10) : '' });
       setMultiClasse(false);
     } else {
-      setForm({ direzione: 'PASSIVA', tipologia: '', unita_misura: '€/t', valore: 0, data_inizio_validita: '', data_fine_validita: '', note: '', classe_materiale: '', fornitore_id: '', prestazione: '', provincia: '', regione: '', destinazione: '', produttore: '', destinatario: '', cliente: 'ECOTYRE', eer_codice: '' });
+      setForm({ direzione: 'PASSIVA', tipologia: '', unita_misura: '€/t', valore: 0, data_inizio_validita: '', data_fine_validita: '', note: '', classe_materiale: '', fornitore_id: '', prestazione: '', provincia: '', regione: '', destinazione: '', produttore: '', destinatario: '', cliente: 'ECOTYRE', eer_codice: '', servizio_ecotyre: '' });
       setMultiClasse(false);
     }
   }, [open, editing, duplicating]);
@@ -73,6 +73,7 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
         classe_materiale: form.classe_materiale || undefined,
         regione: form.regione || undefined,
         eer_codice: form.eer_codice || undefined,
+        servizio_ecotyre: form.servizio_ecotyre || undefined,
         data_inizio_validita: form.data_inizio_validita || new Date().toISOString().slice(0,10),
         data_fine_validita: form.data_fine_validita || undefined,
         stato: 'attivo', note: form.note,
@@ -113,6 +114,7 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
           if (isAttiva) {
             updateData.regione = form.regione || undefined;
             updateData.eer_codice = form.eer_codice || undefined;
+            updateData.servizio_ecotyre = form.servizio_ecotyre || undefined;
           } else {
             if (form.prestazione === 'RACCOLTA') {
               updateData.provincia = form.provincia || undefined;
@@ -202,6 +204,21 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
                   </Select>
                 )}
               </div>
+              {/* Servizio Ecotyre */}
+              {!archiviata && (
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Servizio Ecotyre</label>
+                  <Select value={form.servizio_ecotyre || ''} onValueChange={v => setForm({ ...form, servizio_ecotyre: v })}>
+                    <SelectTrigger><SelectValue placeholder="Entrambi" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={null}>Entrambi</SelectItem>
+                      <SelectItem value="TRASP">Solo trasporto</SelectItem>
+                      <SelectItem value="TRASP_TRATT">Trasporto e trattamento</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">Lascia Entrambi se Ecotyre riconosce lo stesso prezzo nei due casi, come avviene oggi.</p>
+                </div>
+              )}
               {/* Regione */}
               {!archiviata && (
                 <div>

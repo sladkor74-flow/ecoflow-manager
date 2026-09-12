@@ -65,6 +65,7 @@ export default function TariffeRuoliFornitori() {
               <th className="text-left px-3 py-2 font-semibold">Prov.</th>
               {RUOLI.map(r => <th key={r.key} className="text-center px-2 py-2 font-semibold whitespace-nowrap">{r.label}</th>)}
               <th className="text-center px-2 py-2 font-semibold">Interno</th>
+              <th className="text-center px-2 py-2 font-semibold whitespace-nowrap">Tratt. Ecotyre</th>
             </tr>
           </thead>
           <tbody>
@@ -81,13 +82,20 @@ export default function TariffeRuoliFornitori() {
                 <td className="text-center px-2 py-2">
                   <input type="checkbox" checked={!!f.interno} onChange={() => toggle(f, 'interno')} className="w-4 h-4 rounded border-input accent-primary cursor-pointer" />
                 </td>
+                <td className="text-center px-2 py-2">
+                  {(f.ruolo_trattamento || f.ruolo_stoccaggio) ? (
+                    <input type="checkbox" checked={!!f.trattamento_fatturato_da_ecotyre} onChange={() => toggle(f, 'trattamento_fatturato_da_ecotyre')} className="w-4 h-4 rounded border-input accent-primary cursor-pointer" />
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={8} className="text-center py-6 text-muted-foreground">Nessun fornitore.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={9} className="text-center py-6 text-muted-foreground">Nessun fornitore.</td></tr>}
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-muted-foreground">Un fornitore può svolgere più ruoli. Contrassegna come Interno le società del gruppo: compariranno nei riepiloghi con le tonnellate ma senza importo.</p>
+      <p className="text-xs text-muted-foreground">Un fornitore può svolgere più ruoli. Contrassegna come Interno le società del gruppo: compariranno nei riepiloghi con le tonnellate ma senza importo. «Tratt. Ecotyre» si attiva solo per impianti (ruolo Trattamento o Stoccaggio): indica che Ecotyre paga il trattamento direttamente, quindi SMOCO percepisce il solo trasporto (voce Trasp della prefattura).</p>
     </div>
   );
 }
