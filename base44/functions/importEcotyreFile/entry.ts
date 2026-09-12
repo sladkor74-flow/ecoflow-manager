@@ -38,6 +38,22 @@ function toDateISO(val) {
   return null;
 }
 
+// Legge SOLO la prima riga di un foglio, senza materializzare tutte le righe.
+// sheet_to_json con header:1 caricherebbe l'intero foglio in memoria solo per
+// leggere le intestazioni: su file di grandi dimensioni, come il report delle
+// dichiarazioni di trattamento con oltre 18.000 righe per 58 colonne, questo
+// esaurisce le risorse della function prima ancora della validazione.
+function leggiIntestazioni(ws) {
+  if (!ws || !ws['!ref']) return [];
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const headers = [];
+  for (let c = range.s.c; c <= range.e.c; c++) {
+    const cell = ws[XLSX.utils.encode_cell({ r: range.s.r, c })];
+    headers.push(cell && cell.v != null ? String(cell.v) : '');
+  }
+  return headers;
+}
+
 export default async function(req) {
   let tipo_file = null, nome_file = 'N/D', file_url = null;
   try {
@@ -96,10 +112,8 @@ export default async function(req) {
     if (sig) {
       // Tipi con firma: primarie, secondarie, terziarie
       for (const sn of wb.SheetNames) {
-        const wsTmp = wb.Sheets[sn];
-        const rowsTmp = XLSX.utils.sheet_to_json(wsTmp, { defval: null, raw: true, header: 1 });
-        if (rowsTmp.length === 0) continue;
-        const headers = rowsTmp[0].map(h => String(h || ''));
+        const headers = leggiIntestazioni(wb.Sheets[sn]);
+        if (headers.length === 0) continue;
         const check = checkSignature(headers, sig);
         if (check.match) {
           sheetName = sn;
@@ -111,10 +125,8 @@ export default async function(req) {
         // Nessun foglio valido: controlla se corrisponde a un altro tipo
         let tipo_rilevato = null;
         for (const sn of wb.SheetNames) {
-          const wsTmp = wb.Sheets[sn];
-          const rowsTmp = XLSX.utils.sheet_to_json(wsTmp, { defval: null, raw: true, header: 1 });
-          if (rowsTmp.length === 0) continue;
-          const headers = rowsTmp[0].map(h => String(h || ''));
+          const headers = leggiIntestazioni(wb.Sheets[sn]);
+          if (headers.length === 0) continue;
           const detected = detectType(headers);
           if (detected && detected !== tipo_file) { tipo_rilevato = detected; break; }
         }
@@ -190,7 +202,11 @@ export default async function(req) {
     }).filter(r => r[keyField] && (!config.statoFilter || (r.stato || '').toLowerCase().trim() === config.statoFilter));
 
     // 3b. Enrichment
-    const enriched = enrichRecords(mapped, config.entity);
+    // I due report del portale non necessitano di enrichment: i campi calcolati (mese,
+    // classe, regione, settimana) derivano da date e prodotti che queste entita' non hanno,
+    // e su oltre 18.000 righe la passata sarebbe solo un costo.
+    const senzaEnrichment = tipo_file === 'dichiarazioni_trattamento' || tipo_file === 'ordini_non_dichiarati';
+    const enriched = senzaEnrichment ? mapped : enrichRecords(mapped, config.entity);
 
     // === 4. Controllo sul contenuto (primarie: almeno un terminato) ===
     if (tipo_file === 'primarie') {
