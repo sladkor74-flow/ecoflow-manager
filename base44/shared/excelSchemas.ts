@@ -159,6 +159,67 @@ export const SHEET_MAP = {
       "Sigla": "sigla", "Regione": "regione"
     }
   },
+  dichiarazioni_trattamento: {
+    sheetName: "Sheet1",
+    entity: "DichiarazioneTrattamento",
+    keyField: "ordine_primaria",
+    columns: {
+      "KeyAccount": "key_account", "Ordine_primaria": "ordine_primaria",
+      "Data_chiusura": "data_chiusura", "ID_Cliente": "id_cliente",
+      "ID_PDR": "id_pdr", "Punto_di_Raccolta": "punto_di_raccolta",
+      "Indirizzo": "indirizzo", "CAP": "cap", "Comune": "comune",
+      "Provincia": "provincia", "Codice_Regione": "codice_regione",
+      "Macroarea": "macroarea", "Prodotto": "prodotto", "Status": "status",
+      "Tipo_contenitori": "tipo_contenitori", "Nr_pezzi_ritirati": "nr_pezzi_ritirati",
+      "CER": "cer", "Mod_trattamento": "mod_trattamento",
+      "Peso_effettivo_Kg": "peso_effettivo_kg", "Partner_Operativo": "partner_operativo",
+      "Trasportatore": "trasportatore", "ID_destinazione": "id_destinazione",
+      "Destinazione": "destinazione", "Automezzo": "automezzo", "Rimorchio": "rimorchio",
+      "Distanza": "distanza", "Data_immissione": "data_immissione",
+      "Inizio_trasporto": "inizio_trasporto", "Fine_trasporto": "fine_trasporto",
+      "Data_esecuzione": "data_esecuzione", "Numero_FIR": "numero_fir",
+      "Ordine_secondaria": "ordine_secondaria", "Trasportatore_secondaria": "trasportatore_secondaria",
+      "Mod_trattamento_sec": "mod_trattamento_sec", "Peso_effettivo_sec_Kg": "peso_effettivo_sec_kg",
+      "FIR_All_VII_secondaria": "fir_all_vii_secondaria", "ID_destinazione_secondaria": "id_destinazione_secondaria",
+      "Destinazione_secondaria": "destinazione_secondaria",
+      "Ordine_terziaria": "ordine_terziaria", "FIR_All_VII_terziaria": "fir_all_vii_terziaria",
+      "Mod_trattamento_ter": "mod_trattamento_ter", "Peso_effettivo_ter_Kg": "peso_effettivo_ter_kg",
+      "ID_destinazione_finale": "id_destinazione_finale", "Destinazione_finale": "destinazione_finale",
+      "Peso_associato_Kg": "peso_associato_kg", "Risultato_trattamento": "risultato_trattamento",
+      "Data_dichiarazione": "data_dichiarazione", "ID_Dichiarazione": "id_dichiarazione",
+      "Granulo_Kg": "granulo_kg", "Fibre_Kg": "fibre_kg", "Metallo_Kg": "metallo_kg",
+      "Cippato_Kg": "cippato_kg", "Ciabattato_Kg": "ciabattato_kg",
+      "Riutilizzo_Kg": "riutilizzo_kg", "Gomme_intere_Kg": "gomme_intere_kg",
+      "Prelavorazione_Kg": "prelavorazione_kg", "Dim_min_granulato_mm": "dim_min_granulato_mm",
+      "Dim_max_granulato_mm": "dim_max_granulato_mm"
+    }
+  },
+  ordini_non_dichiarati: {
+    sheetName: "Sheet1",
+    entity: "OrdineNonDichiarato",
+    keyField: "ordine_primaria",
+    columns: {
+      "KeyAccount": "key_account", "Ordine_primaria": "ordine_primaria",
+      "Data_chiusura": "data_chiusura", "ID_Cliente": "id_cliente",
+      "ID_PDR": "id_pdr", "Punto_di_Raccolta": "punto_di_raccolta",
+      "Indirizzo": "indirizzo", "CAP": "cap", "Comune": "comune",
+      "Provincia": "provincia", "Codice_Regione": "codice_regione",
+      "Macroarea": "macroarea", "Prodotto": "prodotto", "Status": "status",
+      "Tipo_contenitori": "tipo_contenitori", "Nr_pezzi_ritirati": "nr_pezzi_ritirati",
+      "CER": "cer", "Mod_trattamento": "mod_trattamento",
+      "Peso_effettivo_Kg": "peso_effettivo_kg", "Partner_Operativo": "partner_operativo",
+      "Trasportatore": "trasportatore", "ID_destinazione": "id_destinazione",
+      "Destinazione": "destinazione", "Automezzo": "automezzo", "Rimorchio": "rimorchio",
+      "Distanza": "distanza", "Data_immissione": "data_immissione",
+      "Inizio_trasporto": "inizio_trasporto", "Fine_trasporto": "fine_trasporto",
+      "Data_esecuzione": "data_esecuzione", "Numero_FIR": "numero_fir",
+      "Ordine_secondaria": "ordine_secondaria", "Trasportatore_secondaria": "trasportatore_secondaria",
+      "Mod_trattamento_sec": "mod_trattamento_sec", "Peso_effettivo_sec_Kg": "peso_effettivo_sec_kg",
+      "FIR_All_VII_secondaria": "fir_all_vii_secondaria", "ID_destinazione_secondaria": "id_destinazione_secondaria",
+      "Destinazione_secondaria": "destinazione_secondaria",
+      "Peso_non_dichiarato_Kg": "peso_non_dichiarato_kg"
+    }
+  },
   terziarie: {
     sheetName: "TERZIARIE",
     entity: "Terziaria",
@@ -195,5 +256,10 @@ export const NUMERIC_FIELDS = new Set([
   "costo_aci_gatim_pri_raccolta", "costo_tot_aci_gatim", "imp_aci_gatim",
   "costo_aci_nappi_sud_pri_raccolta_basilicata", "costo_aci_nappi_sud_pri_raccolta_campania",
   "stock_aci_nappi_sud", "costo_aci_stk_nappi_sud", "costo_aci_stk_irigom",
-  "stock_aci_irigom", "costo_aci_gtp", "imp_aci_gtp", "costo_aci_tecnogum", "imp_aci_tecnogum_sec"
+  "stock_aci_irigom", "costo_aci_gtp", "imp_aci_gtp", "costo_aci_tecnogum", "imp_aci_tecnogum_sec",
+  "nr_pezzi_ritirati", "peso_effettivo_kg", "peso_effettivo_sec_kg", "id_destinazione_secondaria",
+  "peso_effettivo_ter_kg", "id_destinazione_finale", "peso_associato_kg", "granulo_kg",
+  "fibre_kg", "metallo_kg", "cippato_kg", "ciabattato_kg", "riutilizzo_kg",
+  "gomme_intere_kg", "prelavorazione_kg", "dim_min_granulato_mm", "dim_max_granulato_mm",
+  "peso_non_dichiarato_kg"
 ]);

@@ -27,11 +27,13 @@ export function extractUploadWarnings(data) {
   if (!data) return null;
   const hasColonne = data.avviso_colonne && data.avviso_colonne.length > 0;
   const hasDate = !!data.avviso_date;
-  if (!hasColonne && !hasDate) return null;
+  const hasCalo = !!data.avviso_calo;
+  if (!hasColonne && !hasDate && !hasCalo) return null;
   return {
     type: 'warning',
     avviso_colonne: data.avviso_colonne,
     avviso_date: data.avviso_date,
+    avviso_calo: data.avviso_calo,
   };
 }
 
@@ -127,6 +129,12 @@ export default function UploadResultDialog({ state, onClose }) {
             <div className="p-2.5 rounded-md bg-amber-50 border border-amber-300 text-amber-900 text-sm">
               <strong>Avviso date:</strong> ultima data nel file ({new Date(state.avviso_date.data_file).toLocaleDateString('it-IT')})
               {' '}precedente all'archivio ({new Date(state.avviso_date.data_archivio).toLocaleDateString('it-IT')}).
+            </div>
+          )}
+
+          {state.avviso_calo && (
+            <div className="p-2.5 rounded-md bg-amber-50 border border-amber-300 text-amber-900 text-sm">
+              <strong>Avviso calo:</strong> il file contiene {state.avviso_calo.righe_attuali} righe, meno della metà del caricamento precedente ({state.avviso_calo.righe_precedenti} righe). Verifica che il file sia completo.
             </div>
           )}
 

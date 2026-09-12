@@ -7,6 +7,8 @@ const TIPI_FILE = [
   { key: 'primarie', label: 'Primarie', desc: 'File unico delle primarie (un solo foglio con tutto). Suddivide automaticamente le righe in Primarie Rete, Primarie ACI, Assegnati Rete e Assegnati ACI in base a stato e classe.', colore: 'bg-green-50 border-green-200' },
   { key: 'secondarie', label: 'Secondarie', desc: 'Viaggi stoccaggio → impianto (foglio SECONDARIE)', colore: 'bg-purple-50 border-purple-200' },
   { key: 'terziarie', label: 'Terziarie', desc: 'Viaggi impianto → cementeria/impianto (foglio TERZIARIE)', colore: 'bg-pink-50 border-pink-200' },
+  { key: 'dichiarazioni_trattamento', label: 'Dichiarazioni Trattamento', desc: 'Report delle dichiarazioni di recupero con la ripartizione dei derivati: granulo, fibre, metallo, cippato, ciabattato', colore: 'bg-cyan-50 border-cyan-200' },
+  { key: 'ordini_non_dichiarati', label: 'Ordini Non Dichiarati', desc: 'Ordini in attesa di dichiarazione di trattamento: determina la giacenza a portale di ciascun impianto', colore: 'bg-amber-50 border-amber-200' },
 ];
 
 export default function CaricamentoDati() {

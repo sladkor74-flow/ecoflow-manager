@@ -57,6 +57,46 @@ export const FILE_SIGNATURES: Record<string, {
       'Distanza', 'Trasporto_iniziato_il', 'Numero_Ordine_Interno'
     ],
     vietate: ['ID_PDR', 'ID_Stoccaggio']
+  },
+  dichiarazioni_trattamento: {
+    chiave: [
+      'KeyAccount', 'Ordine_primaria', 'Data_chiusura', 'ID_Cliente', 'ID_PDR',
+      'Punto_di_Raccolta', 'Provincia', 'Prodotto', 'Status', 'CER',
+      'Mod_trattamento', 'Peso_effettivo_Kg', 'Trasportatore', 'Destinazione',
+      'Fine_trasporto', 'Numero_FIR', 'Peso_associato_Kg', 'Risultato_trattamento',
+      'Data_dichiarazione', 'ID_Dichiarazione', 'Granulo_Kg', 'Fibre_Kg',
+      'Metallo_Kg', 'Cippato_Kg', 'Ciabattato_Kg'
+    ],
+    attese: [
+      'Indirizzo', 'CAP', 'Comune', 'Codice_Regione', 'Macroarea',
+      'Tipo_contenitori', 'Nr_pezzi_ritirati', 'Partner_Operativo',
+      'ID_destinazione', 'Automezzo', 'Rimorchio', 'Distanza', 'Data_immissione',
+      'Inizio_trasporto', 'Data_esecuzione', 'Ordine_secondaria',
+      'Trasportatore_secondaria', 'Mod_trattamento_sec', 'Peso_effettivo_sec_Kg',
+      'FIR_All_VII_secondaria', 'ID_destinazione_secondaria', 'Destinazione_secondaria',
+      'Ordine_terziaria', 'FIR_All_VII_terziaria', 'Mod_trattamento_ter',
+      'Peso_effettivo_ter_Kg', 'ID_destinazione_finale', 'Destinazione_finale',
+      'Riutilizzo_Kg', 'Gomme_intere_Kg', 'Prelavorazione_Kg',
+      'Dim_min_granulato_mm', 'Dim_max_granulato_mm'
+    ],
+    vietate: ['Peso_non_dichiarato_Kg']
+  },
+  ordini_non_dichiarati: {
+    chiave: [
+      'KeyAccount', 'Ordine_primaria', 'Data_chiusura', 'ID_Cliente', 'ID_PDR',
+      'Punto_di_Raccolta', 'Provincia', 'Prodotto', 'Status', 'CER',
+      'Mod_trattamento', 'Peso_effettivo_Kg', 'Trasportatore', 'Destinazione',
+      'Fine_trasporto', 'Numero_FIR', 'Peso_non_dichiarato_Kg'
+    ],
+    attese: [
+      'Indirizzo', 'CAP', 'Comune', 'Codice_Regione', 'Macroarea',
+      'Tipo_contenitori', 'Nr_pezzi_ritirati', 'Partner_Operativo',
+      'ID_destinazione', 'Automezzo', 'Rimorchio', 'Distanza', 'Data_immissione',
+      'Inizio_trasporto', 'Data_esecuzione', 'Ordine_secondaria',
+      'Trasportatore_secondaria', 'Mod_trattamento_sec', 'Peso_effettivo_sec_Kg',
+      'FIR_All_VII_secondaria', 'ID_destinazione_secondaria', 'Destinazione_secondaria'
+    ],
+    vietate: ['ID_Dichiarazione', 'Peso_associato_Kg', 'Granulo_Kg']
   }
 };
 

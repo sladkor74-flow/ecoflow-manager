@@ -18,6 +18,26 @@ import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSi
 const CHUNK = 100;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+// Campi data per le nuove entita' (dichiarazioni/ordini): accettano sia seriale Excel che testo AAAA-MM-GG
+const DATE_FIELDS = new Set([
+  'data_chiusura', 'data_immissione', 'inizio_trasporto', 'fine_trasporto',
+  'data_esecuzione', 'data_dichiarazione'
+]);
+
+function excelSerialToDate(serial) {
+  const d = new Date(Date.UTC(1899, 11, 30) + Math.round(serial * 86400000));
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function toDateISO(val) {
+  if (val === null || val === undefined || val === '') return null;
+  if (val instanceof Date) return val.toISOString();
+  if (typeof val === 'number') { const d = excelSerialToDate(val); return d ? d.toISOString() : null; }
+  const s = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) { const d = new Date(s); return isNaN(d.getTime()) ? null : d.toISOString(); }
+  return null;
+}
+
 export default async function(req) {
   let tipo_file = null, nome_file = 'N/D', file_url = null;
   try {
@@ -35,7 +55,7 @@ export default async function(req) {
     // Calcola modalita': sostituzione integrale o aggiunta additiva.
     // Per primarie/secondarie/terziarie la sostituzione e' sempre obbligatoria
     // (l'anti-regressione garantisce che il file sia completo).
-    const sostituisci = ['primarie', 'secondarie', 'terziarie'].includes(tipo_file) ? true : replace_existing !== false;
+    const sostituisci = ['primarie', 'secondarie', 'terziarie', 'dichiarazioni_trattamento', 'ordini_non_dichiarati'].includes(tipo_file) ? true : replace_existing !== false;
     const modalita = sostituisci ? 'sostituzione' : 'aggiunta';
 
     if (!file_url || !tipo_file) {
@@ -144,6 +164,7 @@ export default async function(req) {
 
     // === 3. Mappa colonne Excel -> campi entita' ===
     const colMap = config.columns;
+    const keyField = config.keyField || 'id_ordine';
     const mapped = rawRows.map(row => {
       const obj = {};
       for (const [excelCol, entityField] of Object.entries(colMap)) {
@@ -152,6 +173,8 @@ export default async function(req) {
         if (NUMERIC_FIELDS.has(entityField)) {
           const n = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.'));
           obj[entityField] = isNaN(n) ? null : n;
+        } else if (DATE_FIELDS.has(entityField)) {
+          obj[entityField] = toDateISO(val);
         } else if (val instanceof Date) {
           obj[entityField] = val.toISOString();
         } else {
@@ -163,7 +186,7 @@ export default async function(req) {
         }
       }
       return obj;
-    }).filter(r => r.id_ordine && (!config.statoFilter || (r.stato || '').toLowerCase().trim() === config.statoFilter));
+    }).filter(r => r[keyField] && (!config.statoFilter || (r.stato || '').toLowerCase().trim() === config.statoFilter));
 
     // 3b. Enrichment
     const enriched = enrichRecords(mapped, config.entity);
@@ -183,7 +206,7 @@ export default async function(req) {
     }
 
     // === 5. Se zero righe valide, interrompi ===
-    if (enriched.filter(r => r.id_ordine).length === 0) {
+    if (enriched.filter(r => r[keyField]).length === 0) {
       const errResp = { error: 'Nessuna riga valida trovata nel file' };
       await base44.asServiceRole.entities.UploadLog.create({
         tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
@@ -191,6 +214,19 @@ export default async function(req) {
         periodo_riferimento: periodo_riferimento || '', foglio_usato: sheetName
       });
       return Response.json(errResp, { status: 400 });
+    }
+
+    // === 5b. Avviso calo per ordini_non_dichiarati ===
+    let avviso_calo = null;
+    if (tipo_file === 'ordini_non_dichiarati') {
+      const recentLogs = await base44.asServiceRole.entities.UploadLog.filter({ tipo_file: 'ordini_non_dichiarati' }, '-created_date', 5);
+      const lastSuccess = recentLogs.find(l => l.esito === 'successo' || l.esito === 'parziale');
+      if (lastSuccess && lastSuccess.righe_importate > 0) {
+        const newCount = enriched.filter(r => r[keyField]).length;
+        if (newCount < lastSuccess.righe_importate / 2) {
+          avviso_calo = { righe_precedenti: lastSuccess.righe_importate, righe_attuali: newCount };
+        }
+      }
     }
 
     // === 6. Controllo anti-regressione ===
@@ -241,7 +277,7 @@ export default async function(req) {
         }
       }
 
-      const fileIds = new Set(enriched.filter(r => r.id_ordine).map(r => r.id_ordine));
+      const fileIds = new Set(enriched.filter(r => r[keyField]).map(r => r[keyField]));
       const mancanti = [];
       for (const id of existingIds) { if (!fileIds.has(id)) mancanti.push(id); }
 
@@ -280,6 +316,40 @@ export default async function(req) {
           avviso_date = { data_file: new Date(maxDateFile).toISOString(), data_archivio: new Date(maxDateArchivio).toISOString() };
         }
       }
+    } else if (tipo_file === 'dichiarazioni_trattamento') {
+      // Anti-regressione con chiave composta: ordine_primaria + id_dichiarazione
+      const existingKeys = new Set();
+      let skipD = 0, hasMoreD = true;
+      while (hasMoreD) {
+        const batch = await base44.asServiceRole.entities.DichiarazioneTrattamento.list('-created_date', 1000, skipD);
+        for (const r of batch) {
+          if (r.ordine_primaria) existingKeys.add(`${r.ordine_primaria}|${r.id_dichiarazione || ''}`);
+        }
+        hasMoreD = batch.length === 1000;
+        skipD += 1000;
+        if (hasMoreD) await sleep(100);
+      }
+      righe_archivio_prima = existingKeys.size;
+
+      const fileKeys = new Set(enriched.filter(r => r.ordine_primaria).map(r => `${r.ordine_primaria}|${r.id_dichiarazione || ''}`));
+      const mancanti = [];
+      for (const k of existingKeys) { if (!fileKeys.has(k)) mancanti.push(k); }
+
+      if (mancanti.length > 0 && !conferma_forzatura) {
+        const errResp = {
+          error: "Il file contiene meno dichiarazioni di quelle gia' presenti in archivio",
+          righe_file: fileKeys.size, righe_archivio: existingKeys.size,
+          mancanti: mancanti.length, esempi_mancanti: mancanti.slice(0, 10),
+          richiede_conferma: true
+        };
+        await base44.asServiceRole.entities.UploadLog.create({
+          tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          esito: 'errore', messaggio: `${errResp.error} (${mancanti.length} dichiarazioni mancanti su ${existingKeys.size} in archivio)`,
+          periodo_riferimento: periodo_riferimento || '', foglio_usato: sheetName,
+          righe_archivio_prima: existingKeys.size, forzato: false
+        });
+        return Response.json(errResp, { status: 409 });
+      }
     }
 
     // === 7. SOLO ORA: cancellazione e import ===
@@ -300,10 +370,10 @@ export default async function(req) {
     };
     const isAssegnatoStato = (stato) => (stato || '').toLowerCase().trim() === 'assegnato';
 
-    const importBucket = async (rows, entityName, campi = null, sostituisci = true) => {
+    const importBucket = async (rows, entityName, campi = null, sostituisci = true, kf = 'id_ordine') => {
       const records = campi
-        ? rows.map(r => { const o = {}; for (const f of campi) o[f] = r[f] ?? null; return o; }).filter(r => r.id_ordine)
-        : rows.filter(r => r.id_ordine);
+        ? rows.map(r => { const o = {}; for (const f of campi) o[f] = r[f] ?? null; return o; }).filter(r => r[kf])
+        : rows.filter(r => r[kf]);
 
       let toImport = records;
       if (sostituisci) {
@@ -373,7 +443,7 @@ export default async function(req) {
       failed = primarie_rete_falliti + primarie_aci_falliti;
       lastError = r1.lastError || r2.lastError || r3.lastError || r4.lastError;
     } else {
-      const r = await importBucket(enriched, config.entity, null, sostituisci);
+      const r = await importBucket(enriched, config.entity, null, sostituisci, keyField);
       imported = r.imp; failed = r.fail; lastError = r.lastError;
     }
 
@@ -403,6 +473,7 @@ export default async function(req) {
       primarie_aci_importati, primarie_aci_falliti,
       avviso_colonne: avviso_colonne.length > 0 ? avviso_colonne : undefined,
       avviso_date,
+      avviso_calo,
       forzato: !!conferma_forzatura,
       modalita
     });
