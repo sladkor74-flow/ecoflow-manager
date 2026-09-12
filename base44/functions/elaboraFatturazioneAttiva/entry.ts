@@ -3,30 +3,6 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
-// Tariffe fisse cliente ECOTYRE (€/ton)
-const ECOTYRE_TARIFFE = {
-  RETE: 202,
-  EXTRA_RACCOLTA: 202,
-  ACI: {
-    'Puglia': 240,
-    'Campania': 240,
-    'Basilicata': 230,
-    'Sicilia': 230,
-    'Calabria': 230,
-  },
-};
-
-// Tariffa di default per ECOTYRE (se non c'è override nella tabella Tariffa)
-function getDefaultTariffa(tipologia, regione) {
-  if (tipologia === 'RETE') return { valore: ECOTYRE_TARIFFE.RETE, unita_misura: '€/t' };
-  if (tipologia === 'EXTRA_RACCOLTA') return { valore: ECOTYRE_TARIFFE.EXTRA_RACCOLTA, unita_misura: '€/t' };
-  if (tipologia === 'ACI') {
-    const val = ECOTYRE_TARIFFE.ACI[regione] || 230;
-    return { valore: val, unita_misura: '€/t' };
-  }
-  return null;
-}
-
 // Elabora la fatturazione attiva per un dato anno/mese:
 // Genera 3 documenti (RETE, ACI, EXTRA_RACCOLTA) con righe automatiche
 // dai dati operativi del gestionale. Cliente/committente: sempre ECOTYRE.
@@ -67,23 +43,26 @@ export default async function(req) {
     })).sort((a, b) => b.specificity - a.specificity);
 
     function normText(v) { return String(v || '').trim().toUpperCase(); }
-    function findTariffa(tipologia, cliente, classe, regione, eer) {
+    function findTariffa(tipologia, cliente, classe, regione, eer, dataRiferimento) {
+      const dt = dataRiferimento ? new Date(dataRiferimento).getTime() : null;
       for (const t of tariffeSorted) {
         if (t.tipologia !== tipologia) continue;
         if (t.cliente && normText(t.cliente) !== normText(cliente)) continue;
         if (t.classe_materiale && t.classe_materiale !== classe) continue;
         if (t.regione && t.regione !== regione) continue;
         if (t.eer_codice && t.eer_codice !== eer) continue;
+        if (dt !== null) {
+          if (t.data_inizio_validita && new Date(t.data_inizio_validita).getTime() > dt) continue;
+          if (t.data_fine_validita && new Date(t.data_fine_validita).getTime() < dt) continue;
+        }
         return t;
       }
       return null;
     }
 
-    // Cerca tariffa custom; se non trovata usa il default ECOTYRE
-    function resolveTariffa(tipologia, classe, regione, eer) {
-      const custom = findTariffa(tipologia, 'ECOTYRE', classe, regione, eer);
-      if (custom) return custom;
-      return getDefaultTariffa(tipologia, regione);
+    // Cerca tariffa nella tabella Tariffa (nessun valore predefinito)
+    function resolveTariffa(tipologia, classe, regione, eer, dataRiferimento) {
+      return findTariffa(tipologia, 'ECOTYRE', classe, regione, eer, dataRiferimento);
     }
 
     function calcolaTotale(quantitaKg, tariffa) {
@@ -101,13 +80,30 @@ export default async function(req) {
       return (u === '€/ton' || u === '€/t') ? 1000 : 1;
     }
 
+    const anomalieMap = new Map();
+    function addAnomalia(tipologia, regione, classe, eer, quantitaKg) {
+      const key = `${tipologia}|${regione || ''}|${classe || ''}|${eer || ''}`;
+      const tonn = quantitaKg / 1000;
+      if (anomalieMap.has(key)) {
+        anomalieMap.get(key).tonnellate += tonn;
+      } else {
+        let desc = `Nessuna tariffa attiva ECOTYRE per tipologia ${tipologia}`;
+        if (regione) desc += `, regione ${regione}`;
+        if (classe) desc += `, classe ${classe}`;
+        if (eer) desc += `, EER ${eer}`;
+        anomalieMap.set(key, { tipologia, regione: regione || '', classe: classe || '', eer_codice: eer || '', tonnellate: tonn, descrizione: desc });
+      }
+    }
+
     // --- ELABORAZIONE RETE ---
     const righeRete = [];
     for (const r of rete) {
       const quantitaKg = r.peso_effettivo || 0;
       if (quantitaKg === 0) continue;
       const cliente = 'ECOTYRE';
-      const tariffa = resolveTariffa('RETE', r.classe, '', r.cer);
+      const dataRiferimento = r.trasporto_finito_il || r.ordine_chiuso_il || null;
+      const tariffa = resolveTariffa('RETE', r.classe, '', r.cer, dataRiferimento);
+      if (!tariffa) addAnomalia('RETE', r.regione, r.classe, r.cer, quantitaKg);
       const totale = calcolaTotale(quantitaKg, tariffa);
       righeRete.push({
         tipologia: 'RETE', tipo: 'ATTIVA',
@@ -136,7 +132,9 @@ export default async function(req) {
       if (quantitaKg === 0) continue;
       const regione = r.regione || '';
       const cliente = 'ECOTYRE';
-      const tariffa = resolveTariffa('ACI', r.classe, regione, r.cer);
+      const dataRiferimento = r.trasporto_finito_il || r.ordine_chiuso_il || null;
+      const tariffa = resolveTariffa('ACI', r.classe, regione, r.cer, dataRiferimento);
+      if (!tariffa) addAnomalia('ACI', regione, r.classe, r.cer, quantitaKg);
       const totale = calcolaTotale(quantitaKg, tariffa);
       righeAci.push({
         tipologia: 'ACI', tipo: 'ATTIVA',
@@ -165,7 +163,9 @@ export default async function(req) {
       const quantitaKg = r.peso_effettivo || 0;
       if (quantitaKg === 0) continue;
       const cliente = 'ECOTYRE';
-      const tariffa = resolveTariffa('EXTRA_RACCOLTA', r.classe, r.regione || '', r.cer);
+      const dataRiferimento = r.trasporto_finito_il || r.ordine_chiuso_il || null;
+      const tariffa = resolveTariffa('EXTRA_RACCOLTA', r.classe, r.regione || '', r.cer, dataRiferimento);
+      if (!tariffa) addAnomalia('EXTRA_RACCOLTA', r.regione, r.classe, r.cer, quantitaKg);
       const totale = calcolaTotale(quantitaKg, tariffa);
       righeExtra.push({
         tipologia: 'EXTRA_RACCOLTA', tipo: 'ATTIVA',
@@ -227,7 +227,8 @@ export default async function(req) {
       docs.push({ tipologia: tipo, documento_id: doc.id, totale: doc.totale, voci: righe.length, errori: 0, sospese: 0 });
     }
 
-    return Response.json({ documenti: docs });
+    const anomalie = Array.from(anomalieMap.values());
+    return Response.json({ documenti: docs, anomalie });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

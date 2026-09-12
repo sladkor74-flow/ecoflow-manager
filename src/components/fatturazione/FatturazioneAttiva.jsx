@@ -5,6 +5,7 @@ import { LayoutDashboard, Table, Download } from 'lucide-react';
 import AttivaDashboard from './AttivaDashboard';
 import AttivaDetail from './AttivaDetail';
 import AttivaEsportazioni from './AttivaEsportazioni';
+import AttivaAnomalie from './AttivaAnomalie';
 
 export default function FatturazioneAttiva({ isAdmin }) {
   const [tab, setTab] = useState('dashboard');
@@ -12,6 +13,7 @@ export default function FatturazioneAttiva({ isAdmin }) {
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
   const [elaborating, setElaborating] = useState(false);
+  const [anomalie, setAnomalie] = useState([]);
 
   const loadData = async () => {
     setLoading(true);
@@ -27,7 +29,8 @@ export default function FatturazioneAttiva({ isAdmin }) {
   const elabora = async () => {
     setElaborating(true);
     try {
-      await base44.functions.invoke('elaboraFatturazioneAttiva', { anno: periodo.anno, mese: periodo.mese });
+      const res = await base44.functions.invoke('elaboraFatturazioneAttiva', { anno: periodo.anno, mese: periodo.mese });
+      setAnomalie(res.data?.anomalie || []);
       await loadData();
     } catch (e) { alert(e.message); }
     setElaborating(false);
@@ -41,7 +44,7 @@ export default function FatturazioneAttiva({ isAdmin }) {
         <TabsTrigger value="esportazioni"><Download className="w-4 h-4 mr-1.5" /> Esportazioni</TabsTrigger>
       </TabsList>
       <TabsContent value="dashboard" className="mt-4">
-        <AttivaDashboard periodo={periodo} setPeriodo={setPeriodo} data={data} loading={loading} elaborating={elaborating} onElabora={elabora} onReload={loadData} isAdmin={isAdmin} />
+        <AttivaDashboard periodo={periodo} setPeriodo={setPeriodo} data={data} loading={loading} elaborating={elaborating} onElabora={elabora} onReload={loadData} isAdmin={isAdmin} anomalie={anomalie} />
       </TabsContent>
       <TabsContent value="dettaglio" className="mt-4">
         <AttivaDetail data={data} loading={loading} />
