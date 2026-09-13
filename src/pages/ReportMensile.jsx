@@ -1,205 +1,212 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
-import GlobalFilters from '@/components/report-pivot/GlobalFilters';
-import PivotTreeTable from '@/components/report-pivot/PivotTreeTable';
-import PivotDetailTable from '@/components/report-pivot/PivotDetailTable';
-import DrillDownModal from '@/components/report-pivot/DrillDownModal';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, RefreshCw, FileSpreadsheet } from 'lucide-react';
+import { Loader2, RefreshCw, Download, AlertCircle } from 'lucide-react';
+import ReportPivotTable from '@/components/report-mensile/ReportPivotTable';
 
-const PIVOT_DEFS = {
-  A: { title: 'Pivot A — Raccolta (Terminati Rete)', type: 'tree', source: 'primaria_rete', rowLabels: ['Raccoglitore', 'Regione', 'Classe'] },
-  B: { title: 'Pivot B — Impianti (Terminati Rete)', type: 'tree', source: 'primaria_rete', rowLabels: ['Impianto', 'Classe'] },
-  C: { title: 'Pivot C — ACI (Terminati ACI)', type: 'tree', source: 'primaria_aci', rowLabels: ['Raccoglitore', 'Regione', 'Classe'] },
-  D: { title: 'Pivot D — Secondarie', type: 'tree', source: 'secondaria', rowLabels: ['Impianto', 'Classe'] },
-  E: { title: 'Pivot E — Dettaglio FIR (Rete)', type: 'detail', source: 'primaria_rete', rowLabels: ['Classe', 'Mese', 'Settimana'] },
-  F: { title: 'Pivot F — Dettaglio FIR (Secondarie)', type: 'detail', source: 'secondaria', rowLabels: ['Classe', 'Mese', 'Settimana'] },
-  G: { title: 'Pivot G — Dettaglio FIR (ACI)', type: 'detail', source: 'primaria_aci', rowLabels: ['Classe', 'Mese', 'Settimana'] },
-  H: { title: 'Pivot H — Richieste Aperte (Assegnati)', type: 'tree', source: 'assegnato', rowLabels: ['Anno', 'Regione', 'Provincia', 'Ragione Sociale'] },
-};
+// Riproduce le otto pivot del foglio REPORT MENSILE del gestionale Excel.
+// Le definizioni vivono nel backend, in shared/reportMensile.ts: qui restano solo
+// il raggruppamento in schede e la scelta del periodo.
 
-const TAB_PIVOTS = {
-  A: ['A'],
-  B: ['B'],
-  C: ['C'],
-  D: ['D'],
-  EFG: ['E', 'F', 'G'],
-  H: ['H'],
-};
+const MESI = [
+  'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
+  'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre',
+];
 
-const ROW_LABEL_TO_FILTER = {
-  'Raccoglitore': 'raccoglitore', 'Regione': 'regione', 'Classe': 'classe',
-  'Mese': 'mese', 'Settimana': 'settimana', 'Anno': 'anno',
-  'Provincia': 'provincia', 'Ragione Sociale': 'ragione_sociale', 'Impianto': 'impianto',
-};
+const GRUPPI = [
+  { chiave: 'rete', titolo: 'Rete', pivot: ['raccolta', 'impianti', 'viaggiRete'] },
+  { chiave: 'aci', titolo: 'ACI', pivot: ['aci'] },
+  { chiave: 'secondarie', titolo: 'Secondarie', pivot: ['secondarie', 'viaggiSecondarie'] },
+  { chiave: 'terziarie', titolo: 'Terziarie ed extra', pivot: ['terziarie', 'extra'] },
+];
+
+function anniDisponibili() {
+  const corrente = new Date().getFullYear();
+  return [corrente + 1, corrente, corrente - 1, corrente - 2];
+}
+
+// Appiattisce le pivot di una scheda in un CSV leggibile da Excel:
+// punto e virgola come separatore, virgola come segno decimale.
+function componiCsv(pivots, gruppo, etichettaPeriodo) {
+  const righe = [];
+  const num = (v) => String(v == null ? 0 : v).replace('.', ',');
+
+  for (const k of gruppo.pivot) {
+    const p = pivots[k];
+    if (!p) continue;
+    const colonne = p.senzaColonne ? [] : p.colonne;
+    const unaMisura = p.misure.length === 1;
+
+    righe.push([p.titolo, etichettaPeriodo]);
+    righe.push([
+      p.etichetteRiga.join(' > '),
+      ...colonne.flatMap(c => p.misure.map((m, i) => (unaMisura ? c : c + ' ' + p.etichetteMisure[i]))),
+      ...p.misure.map((m, i) => (p.senzaColonne ? p.etichetteMisure[i] : 'Totale ' + p.etichetteMisure[i])),
+    ]);
+
+    const visita = (nodo, prefisso) => {
+      if (!nodo.figli) return;
+      for (const f of nodo.figli) {
+        const etichetta = prefisso ? prefisso + ' > ' + f.etichetta : f.etichetta;
+        righe.push([
+          etichetta,
+          ...colonne.flatMap(c => p.misure.map(m => num(f.valori[c] ? f.valori[c][m] : 0))),
+          ...p.misure.map(m => num(f.totali[m])),
+        ]);
+        visita(f, etichetta);
+      }
+    };
+    visita(p.radice, '');
+
+    righe.push([
+      'Totale complessivo',
+      ...colonne.flatMap(c => p.misure.map(m => num(p.radice.valori[c] ? p.radice.valori[c][m] : 0))),
+      ...p.misure.map(m => num(p.radice.totali[m])),
+    ]);
+    righe.push([]);
+  }
+
+  return righe
+    .map(r => r.map(c => {
+      const s = String(c ?? '');
+      return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }).join(';'))
+    .join('\n');
+}
 
 export default function ReportMensile() {
+  const oggi = new Date();
+  const [anno, setAnno] = useState(oggi.getFullYear());
+  const [mese, setMese] = useState(MESI[oggi.getMonth()]);
+  const [scheda, setScheda] = useState('rete');
   const [pivots, setPivots] = useState({});
-  const [filterOptions, setFilterOptions] = useState(null);
-  const [filters, setFilters] = useState({ mese: [], raccoglitore: [], anno: [], settimana: [] });
-  const [activeTab, setActiveTab] = useState('A');
-  const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
-  const [drillDown, setDrillDown] = useState({ open: false, loading: false, title: '', records: [], total: 0 });
-  const loadedKeysRef = useRef(new Set());
+  const [caricando, setCaricando] = useState(true);
+  const [errore, setErrore] = useState(null);
+  const caricatiRef = useRef(new Set());
 
-  // Reset cache when filters change
-  const handleFiltersChange = (newFilters) => {
-    setFilters(newFilters);
-    loadedKeysRef.current = new Set();
-    setPivots({});
-    setFilterOptions(null);
-  };
+  const azzera = () => { caricatiRef.current = new Set(); setPivots({}); };
 
-  // Load pivots for the active tab
+  useEffect(() => { azzera(); }, [anno, mese]);
+
   useEffect(() => {
-    const needed = TAB_PIVOTS[activeTab] || [];
-    const toLoad = needed.filter(k => !loadedKeysRef.current.has(k));
-    if (toLoad.length === 0) { setLoading(false); return; }
+    const gruppo = GRUPPI.find(g => g.chiave === scheda);
+    if (!gruppo) return;
+    const daCaricare = gruppo.pivot.filter(k => !caricatiRef.current.has(k));
+    if (daCaricare.length === 0) { setCaricando(false); return; }
 
-    let cancelled = false;
-    setLoading(true);
+    let annullato = false;
+    setCaricando(true);
+    setErrore(null);
     (async () => {
       try {
-        const res = await base44.functions.invoke('computePivotData', { filters, pivotKey: toLoad });
-        if (cancelled) return;
-        setPivots(prev => ({ ...prev, ...res.data }));
-        if (res.data.filterOptions) setFilterOptions(res.data.filterOptions);
-        toLoad.forEach(k => loadedKeysRef.current.add(k));
+        const res = await base44.functions.invoke('reportMensile', { anno, mese, pivot: daCaricare });
+        if (annullato) return;
+        const dati = res.data || res;
+        setPivots(prev => ({ ...prev, ...dati.pivots }));
+        daCaricare.forEach(k => caricatiRef.current.add(k));
       } catch (e) {
-        console.error(e);
+        if (annullato) return;
+        const dati = e && e.response && e.response.data;
+        setErrore(dati && dati.error ? dati.error : (e.message || 'Errore nel calcolo delle pivot'));
       }
-      if (!cancelled) setLoading(false);
+      if (!annullato) setCaricando(false);
     })();
-    return () => { cancelled = true; };
-  }, [activeTab, filters]);
+    return () => { annullato = true; };
+  }, [scheda, anno, mese]);
 
-  // Auto-refresh on new uploads
-  useEffect(() => {
-    const unsubscribe = base44.entities.UploadLog.subscribe((event) => {
-      if (event.type === 'create') {
-        loadedKeysRef.current = new Set();
-        setPivots({});
-        setFilterOptions(null);
-      }
-    });
-    return unsubscribe;
-  }, []);
+  const gruppoAttivo = GRUPPI.find(g => g.chiave === scheda);
+  const etichettaMese = `${mese} ${anno}`;
+  const etichettaAnno = `Anno ${anno}`;
 
-  const handleCellClick = async (pivotKey, path, columnKey, valueKey) => {
-    const def = PIVOT_DEFS[pivotKey];
-    const drillFilters = { ...filters };
-    for (let i = 0; i < path.length; i++) {
-      const filterField = ROW_LABEL_TO_FILTER[def.rowLabels[i]];
-      if (filterField) drillFilters[filterField] = path[i];
-    }
-    if (def.type === 'tree' && columnKey) {
-      drillFilters.mese = columnKey;
-    }
-    const title = `${def.title} > ${path.join(' > ')}${columnKey ? ' > ' + columnKey : ''}`;
-    setDrillDown({ open: true, loading: true, title, records: [], total: 0 });
-    try {
-      const res = await base44.functions.invoke('getDrillDownRecords', { source: def.source, filters: drillFilters });
-      setDrillDown({ open: true, loading: false, title, records: res.data.records, total: res.data.total });
-    } catch (e) {
-      console.error(e);
-      setDrillDown({ open: true, loading: false, title, records: [], total: 0 });
-    }
+  const scarica = () => {
+    const csv = componiCsv(pivots, gruppoAttivo, etichettaMese);
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `report-mensile-${gruppoAttivo.chiave}-${anno}-${mese.toLowerCase()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
-  const handleExportExcel = async () => {
-    setExporting(true);
-    try {
-      const res = await base44.functions.invoke('exportPivotExcel', { filters });
-      const blob = await (await fetch(`data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${res.data.file_base64}`)).blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = res.data.filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error(e);
-    }
-    setExporting(false);
-  };
-
-  const renderPivot = (key) => {
-    const def = PIVOT_DEFS[key];
-    const data = pivots[`pivot${key}`];
-    if (!data) return <div className="text-sm text-muted-foreground py-4">Caricamento {def.title}...</div>;
-    const onCell = (path, col, vk) => handleCellClick(key, path, col, vk);
-    return (
-      <div className="space-y-2">
-        <h2 className="text-base font-heading font-semibold">{def.title}</h2>
-        {def.type === 'tree'
-          ? <PivotTreeTable pivot={data} onCellClick={onCell} />
-          : <PivotDetailTable pivot={data} onCellClick={onCell} />}
-      </div>
-    );
-  };
+  const prontoPerScarico = gruppoAttivo.pivot.every(k => pivots[k]);
 
   return (
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
-      <div className="flex items-start justify-between flex-wrap gap-4">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-heading font-bold">Report Mensile & Analisi Pivot</h1>
-          <p className="text-muted-foreground mt-1">Tabelle dinamiche su Primarie, Secondarie e Assegnati con drill-down e filtri globali.</p>
+          <h1 className="text-2xl lg:text-3xl font-heading font-bold">Report Mensile</h1>
+          <p className="text-muted-foreground mt-1">
+            Le stesse pivot del foglio Excel. Quattro guardano il mese scelto, quattro l'anno intero:
+            l'etichetta accanto a ogni titolo dice quale periodo sta leggendo.
+          </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-end gap-2 flex-wrap">
+          <label className="text-xs text-muted-foreground">
+            Anno
+            <select
+              value={anno}
+              onChange={(e) => setAnno(Number(e.target.value))}
+              className="block mt-1 px-2 py-1.5 rounded-md border bg-card text-sm text-foreground"
+            >
+              {anniDisponibili().map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </label>
+          <label className="text-xs text-muted-foreground">
+            Mese
+            <select
+              value={mese}
+              onChange={(e) => setMese(e.target.value)}
+              className="block mt-1 px-2 py-1.5 rounded-md border bg-card text-sm text-foreground"
+            >
+              {MESI.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </label>
           <button
-            onClick={() => { loadedKeysRef.current = new Set(); setPivots({}); setFilterOptions(null); }}
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent"
+            onClick={azzera}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm hover:bg-muted"
           >
-            <RefreshCw className="w-4 h-4" /> Aggiorna
+            <RefreshCw className="w-3.5 h-3.5" /> Ricalcola
           </button>
-          <button onClick={handleExportExcel} disabled={exporting} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent disabled:opacity-50">
-            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />} Excel multi-foglio
+          <button
+            onClick={scarica}
+            disabled={!prontoPerScarico}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm hover:bg-muted disabled:opacity-40"
+          >
+            <Download className="w-3.5 h-3.5" /> Esporta scheda
           </button>
         </div>
       </div>
 
-      <GlobalFilters filters={filters} onChange={handleFiltersChange} filterOptions={filterOptions || {}} />
-
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="flex-wrap h-auto">
-          <TabsTrigger value="A">Raccolta</TabsTrigger>
-          <TabsTrigger value="B">Impianti</TabsTrigger>
-          <TabsTrigger value="C">ACI</TabsTrigger>
-          <TabsTrigger value="D">Secondarie</TabsTrigger>
-          <TabsTrigger value="EFG">Dettaglio FIR</TabsTrigger>
-          <TabsTrigger value="H">Richieste Aperte</TabsTrigger>
+      <Tabs value={scheda} onValueChange={setScheda}>
+        <TabsList>
+          {GRUPPI.map(g => <TabsTrigger key={g.chiave} value={g.chiave}>{g.titolo}</TabsTrigger>)}
         </TabsList>
-        <TabsContent value="A" className="space-y-2">
-          {loading && !pivots.pivotA ? <div className="flex items-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo pivot...</div> : renderPivot('A')}
-        </TabsContent>
-        <TabsContent value="B" className="space-y-2">
-          {loading && !pivots.pivotB ? <div className="flex items-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo pivot...</div> : renderPivot('B')}
-        </TabsContent>
-        <TabsContent value="C" className="space-y-2">
-          {loading && !pivots.pivotC ? <div className="flex items-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo pivot...</div> : renderPivot('C')}
-        </TabsContent>
-        <TabsContent value="D" className="space-y-2">
-          {loading && !pivots.pivotD ? <div className="flex items-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo pivot...</div> : renderPivot('D')}
-        </TabsContent>
-        <TabsContent value="EFG" className="space-y-4">
-          {loading && !pivots.pivotE ? <div className="flex items-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo pivot...</div> : (
-            <>{renderPivot('E')}{renderPivot('F')}{renderPivot('G')}</>
-          )}
-        </TabsContent>
-        <TabsContent value="H" className="space-y-2">
-          {loading && !pivots.pivotH ? <div className="flex items-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo pivot...</div> : renderPivot('H')}
-        </TabsContent>
-      </Tabs>
 
-      <DrillDownModal
-        open={drillDown.open}
-        onClose={() => setDrillDown((d) => ({ ...d, open: false }))}
-        title={drillDown.title}
-        loading={drillDown.loading}
-        records={drillDown.records}
-        total={drillDown.total}
-      />
+        {GRUPPI.map(g => (
+          <TabsContent key={g.chiave} value={g.chiave} className="space-y-8 pt-4">
+            {errore && (
+              <div className="flex items-start gap-2 border border-red-300 bg-red-50 text-red-800 rounded-lg px-4 py-3 text-sm">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>{errore}</span>
+              </div>
+            )}
+            {caricando && !g.pivot.every(k => pivots[k]) ? (
+              <div className="flex items-center justify-center py-12 text-muted-foreground">
+                <Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo in corso...
+              </div>
+            ) : (
+              g.pivot.map(k => pivots[k] && (
+                <ReportPivotTable
+                  key={k}
+                  pivot={pivots[k]}
+                  periodo={pivots[k].periodo === 'mese' ? etichettaMese : etichettaAnno}
+                />
+              ))
+            )}
+          </TabsContent>
+        ))}
+      </Tabs>
     </div>
   );
 }
