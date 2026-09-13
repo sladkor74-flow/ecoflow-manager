@@ -67,6 +67,34 @@ export default async function(req) {
       return !isNaN(d.getTime()) && d.getFullYear() === annoNum;
     }
 
+    // === 0a. NOMI DEI SITI DA MOSTRARE ===
+    // La chiave di aggregazione e' la ragione sociale normalizzata: tutta
+    // minuscola, senza punteggiatura e senza forma societaria. Va benissimo per
+    // riconoscere lo stesso sito scritto in modi diversi, ma a video e' illeggibile
+    // e finora compariva ogni volta che il sito non aveva un target da cui pescare
+    // il nome. Si raccoglie quindi, per ogni chiave, la forma piu' completa fra
+    // quelle presenti nelle sorgenti, che e' di norma quella del portale.
+    const nomiSito = new Map();
+    const nomiVisti = new Set();
+    function registraNome(raw) {
+      const s = String(raw || '').replace(/\s+/g, ' ').trim();
+      if (!s || nomiVisti.has(s)) return;
+      nomiVisti.add(s);
+      const ns = norm(s);
+      if (!ns) return;
+      const attuale = nomiSito.get(ns);
+      if (!attuale || s.length > attuale.length) nomiSito.set(ns, s);
+    }
+    for (const r of nonDichiarati) { registraNome(r.destinazione); registraNome(r.destinazione_secondaria); }
+    for (const r of dichiarazioni) { registraNome(r.destinazione); registraNome(r.destinazione_secondaria); }
+    for (const r of reteAll) registraNome(r.destinazione);
+    for (const r of aciAll) registraNome(r.destinazione);
+    for (const r of extraAll) registraNome(r.destinazione);
+    for (const r of secAll) { registraNome(r.destinazione); registraNome(r.stoccaggio); }
+    for (const r of terzAll) { registraNome(r.unita_locale_origine); registraNome(r.ragione_sociale); }
+    for (const g of giacenzeSito) registraNome(g.sito);
+    for (const r of giacenzeStoccaggio) registraNome(r.sito);
+
     // === 0. MAPPA ORDINE -> TIPO_DESTINAZIONE (da PrimariaRete + PrimariaAci) ===
     const ordineTipoMap = new Map(); // id_ordine -> tipo_destinazione normalizzato
     for (const r of [...reteAll, ...aciAll]) {
@@ -246,7 +274,10 @@ export default async function(req) {
       const [ns, td] = key.split('|');
       const g = giacMap.get(key);
 
-      let sitoNome = g?.sito || ns;
+      // Il nome scelto nel target ha la precedenza: e' una decisione esplicita.
+      // Solo in sua assenza si usa la forma del portale, e la chiave normalizzata
+      // resta l'ultima spiaggia.
+      let sitoNome = g?.sito || nomiSito.get(ns) || ns;
 
       const ordini_da_dichiarare = ordiniMap.get(key) || 0;
       const arretrato_per_anno = arretratoAnniMap.get(key) || {};
