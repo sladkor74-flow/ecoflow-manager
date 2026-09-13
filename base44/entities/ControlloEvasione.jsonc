@@ -1,0 +1,96 @@
+{
+  "name": "ControlloEvasione",
+  "type": "object",
+  "properties": {
+    "lista_id": {
+      "type": "string"
+    },
+    "raccoglitore_chiave": {
+      "type": "string"
+    },
+    "raccoglitore_nome": {
+      "type": "string"
+    },
+    "anno": {
+      "type": "number"
+    },
+    "mese": {
+      "type": "number"
+    },
+    "eseguito_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "primarie_caricate_il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Caricamento delle primarie su cui e' stato fatto il controllo"
+    },
+    "dati_al": {
+      "type": "string",
+      "format": "date",
+      "description": "Ultima data di fine trasporto presente nelle primarie caricate"
+    },
+    "richieste": {
+      "type": "number"
+    },
+    "evase": {
+      "type": "number"
+    },
+    "evase_da_altri": {
+      "type": "number"
+    },
+    "aperte": {
+      "type": "number"
+    },
+    "prioritarie_aperte": {
+      "type": "number"
+    },
+    "fuori_ordine": {
+      "type": "number"
+    },
+    "fuori_lista": {
+      "type": "number"
+    },
+    "non_piu_presenti": {
+      "type": "number"
+    },
+    "riassegnate": {
+      "type": "number"
+    },
+    "raccolto_kg": {
+      "type": "number"
+    },
+    "target_kg": {
+      "type": "number"
+    },
+    "proiezione_kg": {
+      "type": "number"
+    },
+    "evadibili_ritmo": {
+      "type": "number"
+    },
+    "evadibili_target": {
+      "type": "number"
+    },
+    "alert_alti": {
+      "type": "number"
+    },
+    "alert_totali": {
+      "type": "number"
+    },
+    "alert_json": {
+      "type": "string"
+    },
+    "esito_json": {
+      "type": "string",
+      "description": "Stato di ogni richiesta, ordini evasi fuori lista, previsione e storia del raccoglitore"
+    }
+  },
+  "required": [
+    "lista_id",
+    "raccoglitore_chiave",
+    "anno",
+    "mese"
+  ]
+}

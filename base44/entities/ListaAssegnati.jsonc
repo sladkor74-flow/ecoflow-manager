@@ -1,0 +1,47 @@
+{
+  "name": "ListaAssegnati",
+  "type": "object",
+  "properties": {
+    "raccoglitore_chiave": {
+      "type": "string",
+      "description": "Ragione sociale normalizzata del raccoglitore, la stessa chiave usata nelle primarie"
+    },
+    "raccoglitore_nome": {
+      "type": "string"
+    },
+    "anno": {
+      "type": "number"
+    },
+    "mese": {
+      "type": "number",
+      "description": "Mese di riferimento, da 1 a 12"
+    },
+    "file_nomi": {
+      "type": "string",
+      "description": "Nomi dei file che compongono la lista, separati da virgola"
+    },
+    "caricata_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "righe_json": {
+      "type": "string",
+      "description": "Richieste della lista nell'ordine di evasione, completate con i dati del gestionale al momento del caricamento"
+    },
+    "avvisi_json": {
+      "type": "string",
+      "description": "Avvisi emersi nella lettura dei file"
+    },
+    "richieste": {
+      "type": "number"
+    },
+    "prioritarie": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "raccoglitore_chiave",
+    "anno",
+    "mese"
+  ]
+}

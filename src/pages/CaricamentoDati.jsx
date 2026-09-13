@@ -71,6 +71,9 @@ export default function CaricamentoDati() {
       if (conferma_forzatura) params.conferma_forzatura = true;
       const res = await base44.functions.invoke(fnName, params);
       setRisultato(prev => ({ ...prev, [tipoKey]: { ok: true, data: res.data } }));
+      // Nuove primarie: si aggiorna il controllo delle liste di assegnati del
+      // modulo Verifiche. Gira in background e non blocca il caricamento.
+      if (tipoKey === 'primarie') base44.functions.invoke('controllaEvasioneAssegnati', {}).catch(() => {});
       const warnings = extractUploadWarnings(res.data);
       if (warnings) setDialogState(warnings);
       caricaLogs();

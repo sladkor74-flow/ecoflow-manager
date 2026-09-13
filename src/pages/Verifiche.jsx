@@ -3,6 +3,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ClipboardCheck } from 'lucide-react';
 import ReportSettimanali from '@/components/verifiche/ReportSettimanali';
+import EvasioneAssegnati from '@/components/verifiche/EvasioneAssegnati';
 
 // Modulo Verifiche: controlli periodici sui dati che arrivano dai fornitori.
 // Ogni controllo e' una sezione; il lavoro che producono e' temporaneo e si
@@ -19,17 +20,21 @@ export default function Verifiche() {
           <ClipboardCheck className="w-7 h-7 text-primary" /> Verifiche
         </h1>
         <p className="text-muted-foreground mt-1 max-w-3xl">
-          Controlli periodici sui dati inviati dai fornitori, confrontati con il gestionale.
-          Ogni verifica produce un Excel con i controlli fatti e le discrepanze da comunicare.
+          Controlli periodici sui dati inviati dai fornitori e sull'andamento della commessa, confrontati con il gestionale.
+          Il lavoro prodotto qui è temporaneo e si cancella da solo quando non serve più.
         </p>
       </div>
 
       <Tabs defaultValue="report-settimanali">
         <TabsList>
           <TabsTrigger value="report-settimanali">Report settimanali</TabsTrigger>
+          <TabsTrigger value="evasione-assegnati">Evasione assegnati</TabsTrigger>
         </TabsList>
         <TabsContent value="report-settimanali" className="pt-4">
           <ReportSettimanali isAdmin={isAdmin} />
+        </TabsContent>
+        <TabsContent value="evasione-assegnati" className="pt-4">
+          <EvasioneAssegnati isAdmin={isAdmin} />
         </TabsContent>
       </Tabs>
     </div>
