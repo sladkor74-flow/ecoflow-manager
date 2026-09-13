@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel, AlertDialogFooter } from '@/components/ui/alert-dialog';
-import { Plus, Upload, History, ClipboardEdit } from 'lucide-react';
+import { Plus, Upload, History, ClipboardEdit, Trash2 } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import RilevazioneForm from './RilevazioneForm';
 import StoricoRilevazioni from './StoricoRilevazioni';
@@ -32,6 +32,8 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
   const [seedSimula, setSeedSimula] = useState(null);
   const [seedConfirm, setSeedConfirm] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  const [daEliminare, setDaEliminare] = useState(null);
+  const [eliminando, setEliminando] = useState(false);
 
   const loadRilevazioni = useCallback(async () => {
     setLoading(true);
@@ -52,13 +54,32 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
     grouped.get(ns).all.push(r);
   }
   const righe = [...grouped.values()]
-    .map(g => g.record)
+    // Ogni riga si porta dietro l'intero storico del sito: serve per eliminarlo
+    // per intero, visto che a video compare solo la rilevazione piu' recente.
+    .map(g => ({ ...g.record, tutteLeRilevazioni: g.all }))
     .sort((a, b) => new Date(b.data_rilevazione).getTime() - new Date(a.data_rilevazione).getTime());
 
   const sitiSuggeriti = [...new Set([
     ...stoccaggiFromCalcolo.map(s => s.sito).filter(Boolean),
     ...rilevazioni.map(r => r.sito).filter(Boolean),
   ])].sort();
+
+  // Rimuove un'unita' locale dall'elenco cancellando tutte le sue rilevazioni.
+  // Cancellare solo l'ultima farebbe riaffiorare la precedente, e il sito
+  // resterebbe in tabella con numeri piu' vecchi.
+  const handleElimina = async () => {
+    if (!daEliminare) return;
+    setEliminando(true);
+    try {
+      for (const rec of (daEliminare.tutteLeRilevazioni || [daEliminare])) {
+        await base44.entities.GiacenzaStoccaggio.delete(rec.id);
+      }
+      setDaEliminare(null);
+      await loadRilevazioni();
+      if (onSaved) onSaved();
+    } catch (e) { console.error(e); }
+    setEliminando(false);
+  };
 
   const handleNuova = (record) => { setPrecompilato(record); setShowForm(true); };
   const handleAggiungi = () => { setPrecompilato(null); setShowForm(true); };
@@ -151,6 +172,9 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
                             <Button variant="ghost" size="sm" className="h-7" onClick={() => handleStorico(r)}>
                               <History className="w-3 h-3" />
                             </Button>
+                            <Button variant="ghost" size="sm" className="h-7 text-red-600 hover:text-red-700" onClick={() => setDaEliminare(r)}>
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
                           </div>
                         )}
                       </td>
@@ -180,6 +204,30 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
         sito={storicoSito}
         rilevazioni={storicoRecords}
       />
+
+      <AlertDialog open={!!daEliminare} onOpenChange={(open) => { if (!open) setDaEliminare(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Elimina unità locale di stoccaggio</AlertDialogTitle>
+            <AlertDialogDescription>
+              {daEliminare && (
+                <span>
+                  Verranno cancellate tutte le rilevazioni di <strong>{daEliminare.sito}</strong>,
+                  {' '}{(daEliminare.tutteLeRilevazioni || []).length} in totale, e il sito sparirà dalla situazione giacenze.
+                  {' '}L'operazione non si può annullare e non tocca gli ordini né le dichiarazioni.
+                  {' '}Usala per le unità che non sono più contrattualizzate come stoccaggio.
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={eliminando}>Annulla</AlertDialogCancel>
+            <AlertDialogAction onClick={handleElimina} disabled={eliminando} className="bg-red-600 hover:bg-red-700">
+              {eliminando ? 'Eliminazione...' : 'Elimina'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={seedConfirm} onOpenChange={setSeedConfirm}>
         <AlertDialogContent>

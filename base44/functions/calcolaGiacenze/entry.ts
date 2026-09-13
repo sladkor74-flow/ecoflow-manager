@@ -289,6 +289,7 @@ export default async function(req) {
       let data_rilevazione = null;
       let rilevazione_obsoleta = null;
       let in_attesa_dichiarazione_t = 0;
+      let senzaRilevazione = false;
 
       if (td === 'stoc') {
         // in_attesa_dichiarazione_t: materiale gia' partito dallo stoccaggio verso un impianto,
@@ -312,7 +313,10 @@ export default async function(req) {
           rilevazione_obsoleta = rilev.dataMs < trentaGiorniFa;
         } else {
           giacenza_portale_t = 0;
-          anomalie.push({ tipo: 'stoccaggio_senza_rilevazione', sito: sitoNome });
+          // L'anomalia si segnala solo se la riga sopravvive al filtro di
+          // attivita' piu' sotto: non ha senso lamentare una rilevazione mancante
+          // per un sito che nell'anno non e' nemmeno operativo.
+          senzaRilevazione = true;
         }
       } else {
         giacenza_portale_t = giacPortaleMap.get(key) || 0;
@@ -336,6 +340,23 @@ export default async function(req) {
 
       const residuo_t = target_totale_t > 0 ? target_totale_t - conferito_t : null;
       const percentuale_target = target_totale_t > 0 ? (conferito_t / target_totale_t) * 100 : null;
+
+      // Un impianto senza target compare solo se nell'anno ha davvero qualcosa:
+      // giacenza, arretrato di dichiarazione o movimentazione. Un impianto non
+      // piu' contrattualizzato esce cosi' da solo dall'anno in corso, senza
+      // bisogno di elenchi di esclusione da tenere aggiornati, e rientra da solo
+      // se torna operativo.
+      //
+      // Gli stoccaggi seguono un'altra regola e non vengono mai nascosti: per loro
+      // una rilevazione a zero non e' assenza di dati ma un'informazione, vuol dire
+      // piazzale verificato e vuoto. Uno stoccaggio che non deve comparire va tolto
+      // dall'elenco delle unita' locali, non dedotto dai numeri.
+      const haAttivita = giacenza_portale_t > 0 || in_attesa_dichiarazione_t > 0
+        || ordini_da_dichiarare > 0 || dichiarato_t > 0 || conferito_t > 0
+        || terziarie_t > 0;
+      if (!g && td === 'imp' && !haAttivita) continue;
+
+      if (senzaRilevazione) anomalie.push({ tipo: 'stoccaggio_senza_rilevazione', sito: sitoNome });
 
       righe.push({
         sito: sitoNome,
@@ -369,8 +390,11 @@ export default async function(req) {
       });
 
       // --- Anomalie ---
-      if (!g) {
-        sitiSenzaTarget.add(sitoNome + ' (' + (td === 'imp' ? 'Impianto' : 'Stoccaggio') + ')');
+      // Il target riguarda i soli impianti. Uno stoccaggio puo' legittimamente
+      // esserne privo: quello di Irigom, per esempio, serve unicamente per gli
+      // ACI, che un target non ce l'hanno.
+      if (!g && td === 'imp') {
+        sitiSenzaTarget.add(sitoNome + ' (Impianto)');
       }
       const sommaDerivati = der.granulo + der.fibre + der.metallo + der.cippato + der.ciabattato;
       if (dichiarato_t > 0 && Math.abs(sommaDerivati - dichiarato_t) > 0.001) {
