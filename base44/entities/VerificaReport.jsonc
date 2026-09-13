@@ -64,7 +64,7 @@
     },
     "esito_json": {
       "type": "string",
-      "description": "Esito riga per riga e movimenti del gestionale assenti nel report"
+      "description": "Esito riga per riga, con il tipo ingresso o uscita, e movimenti del gestionale assenti nel report"
     },
     "righe_report": {
       "type": "number"
@@ -84,13 +84,25 @@
     "assenti_nel_report": {
       "type": "number"
     },
-    "viaggi_gestionale": {
+    "ingressi_gestionale": {
+      "type": "number",
+      "description": "Primarie arrivate al sito nella settimana"
+    },
+    "peso_ingressi_kg": {
       "type": "number"
+    },
+    "uscite_gestionale": {
+      "type": "number",
+      "description": "Secondarie partite dal sito nella settimana"
+    },
+    "peso_uscite_kg": {
+      "type": "number"
+    },
+    "uscite_verificate": {
+      "type": "boolean",
+      "description": "Il report contiene uscite e quelle della settimana sono state controllate. Se falso, il report riporta i soli ingressi"
     },
     "peso_report_kg": {
-      "type": "number"
-    },
-    "peso_gestionale_kg": {
       "type": "number"
     },
     "verificata_il": {

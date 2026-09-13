@@ -4,7 +4,7 @@ import {
 } from "../../shared/reportSettimanali.ts";
 
 // Legge il report settimanale di un impianto o di uno stoccaggio e lo confronta
-// con i movimenti del gestionale.
+// con il gestionale: gli ingressi con le primarie, le uscite con le secondarie.
 //
 // Payload, uno dei tre:
 //   { verifica_id, tabelle: [{ nome, riga_iniziale, righe: [[...], ...] }] }  file Excel o CSV
@@ -75,8 +75,9 @@ async function leggiTabelle(base44, tabelle, verifica) {
   const mappa = await base44.asServiceRole.integrations.Core.InvokeLLM({
     prompt: [
       `Ti mostro l'inizio di un file inviato da ${verifica.soggetto_nome}, impianto o stoccaggio di pneumatici fuori uso.`,
-      'Il file e\' il report settimanale degli ingressi: una riga per ogni carico ricevuto.',
-      'Individua il foglio che contiene gli ingressi, la prima riga di dati, cioe\' la prima riga dopo le intestazioni, e il numero di colonna di ciascun campo.',
+      'Il file e\' il report settimanale dei carichi ricevuti ed eventualmente di quelli spediti: una riga per ogni carico.',
+      'Individua il foglio che contiene i carichi, la prima riga di dati, cioe\' la prima riga dopo le intestazioni, e il numero di colonna di ciascun campo.',
+      'Se ingressi e uscite stanno in fogli diversi, scegli il foglio degli ingressi.',
       'I numeri di riga e di colonna sono quelli tra parentesi e partono da zero.',
       'Se un campo non c\'e\', indica -1. Non inventare colonne: se hai dubbi, -1.',
       '',
@@ -84,7 +85,7 @@ async function leggiTabelle(base44, tabelle, verifica) {
       ...GUIDA_CAMPI.map(g => '- ' + g),
       '',
       'unita_peso: kg o t, deducendola dall\'intestazione o dai valori; non_determinabile se non si capisce.',
-      'riconosciuto: false se il file non contiene un elenco di ingressi con almeno il formulario o il peso.',
+      'riconosciuto: false se il file non contiene un elenco di carichi con almeno il formulario o il peso.',
       'note: una frase su come e\' fatto il file, in italiano.',
       '',
       anteprima(tabelle),
@@ -96,7 +97,7 @@ async function leggiTabelle(base44, tabelle, verifica) {
   const tabella = tabelle.find(t => t.nome === m.foglio) || tabelle[0];
   const col = m.colonne || {};
   if (!m.riconosciuto || !tabella || ((col.fir ?? -1) < 0 && (col.peso ?? -1) < 0)) {
-    throw new Error('Nel file non ho trovato un elenco di ingressi con formulario o peso' + (m.note ? ': ' + m.note : '.'));
+    throw new Error('Nel file non ho trovato un elenco di carichi con formulario o peso' + (m.note ? ': ' + m.note : '.'));
   }
 
   const grezze = [];
@@ -138,10 +139,10 @@ async function leggiFile(base44, file, verifica) {
   }
 
   const prompt = [
-    `Il documento allegato e' il report settimanale degli ingressi di ${verifica.soggetto_nome}, impianto o stoccaggio di pneumatici fuori uso.`,
-    'Trascrivi ogni carico ricevuto come una riga. Non riassumere, non accorpare, non saltare righe.',
+    `Il documento allegato e' il report settimanale di ${verifica.soggetto_nome}, impianto o stoccaggio di pneumatici fuori uso, con i carichi ricevuti ed eventualmente quelli spediti.`,
+    'Trascrivi ogni carico, ricevuto o spedito, come una riga. Non riassumere, non accorpare, non saltare righe.',
     'Il numero di formulario va copiato carattere per carattere esattamente come e\' scritto, anche se ti sembra sbagliato: la verifica serve proprio a trovare gli errori.',
-    'Date nel formato AAAA-MM-GG. Pesi come numeri, con il punto come separatore decimale.',
+    'Date nel formato AAAA-MM-GG. Pesi come numeri esattamente come scritti, con il punto come separatore decimale.',
     'Lascia vuoto un campo che nel documento non c\'e\'.',
     '',
     'Campi di ogni riga:',
@@ -175,7 +176,7 @@ async function leggiFile(base44, file, verifica) {
     for (const c of CAMPI_REPORT) g[c] = r[c] ?? null;
     return g;
   });
-  if (grezze.length === 0) throw new Error('Nel documento non ho trovato righe di ingresso' + (letto.note ? ': ' + letto.note : '.'));
+  if (grezze.length === 0) throw new Error('Nel documento non ho trovato righe di carico' + (letto.note ? ': ' + letto.note : '.'));
   const { righe, unita } = normalizzaRigheReport(grezze, letto.unita_peso);
   return { righe, lettura: { modo: file.mime === 'application/pdf' ? 'pdf' : 'immagine', unita, note: letto.note || '', trascritto_da_agente: true } };
 }
@@ -221,9 +222,10 @@ export default async function(req) {
     const { movimenti } = await caricaMovimenti(base44);
     const esito = verificaReport(righe, movimenti, {
       chiave: verifica.soggetto_chiave,
+      nome: verifica.soggetto_nome,
       inizio: String(verifica.data_inizio).slice(0, 10),
       fine: String(verifica.data_fine).slice(0, 10),
-    }, lettura.unita);
+    });
 
     await svc.VerificaReport.update(verificaId, {
       stato: 'completata',

@@ -1,9 +1,10 @@
 // Verifica dei report settimanali inviati da impianti e stoccaggi.
 //
-// Ogni settimana un impianto o uno stoccaggio invia l'elenco dei propri ingressi.
-// Qui l'elenco viene confrontato riga per riga con i movimenti del gestionale che
-// hanno quel soggetto come destinatario: primarie rete e ACI, secondarie ed extra
-// raccolta.
+// Ogni settimana un impianto o uno stoccaggio invia l'elenco dei carichi ricevuti
+// e spediti. Qui l'elenco viene confrontato riga per riga con il gestionale:
+// gli ingressi con le primarie, rete, ACI ed extra raccolta, che arrivano al sito;
+// le uscite con le secondarie, dal portale o inserite in Extra Raccolta, che ne
+// partono.
 //
 // Il confronto e' deterministico. L'agente interviene solo per capire come e'
 // fatto il file che arriva, cioe' quale colonna contiene il formulario, il peso,
@@ -11,7 +12,8 @@
 // modello a trascrivere i formulari potrebbe introdurre proprio gli errori di una
 // lettera che la verifica deve scovare.
 //
-// Il perimetro di una settimana e' dato dalla data di fine trasporto, lunedi'-
+// La data di verifica di un formulario e' sempre quella di fine trasporto, e il
+// perimetro di una settimana si stabilisce su quella, lunedi'-
 // domenica secondo la numerazione ISO, la stessa del gestionale e del foglio
 // Excel di SMOCO. La prima e l'ultima settimana si fermano ai confini dell'anno:
 // nel 2026 la settimana 1 va dall'1 al 4 gennaio. Per abbinare le
@@ -215,28 +217,35 @@ const FONTI = {
   PrimariaRete: 'Primaria rete',
   PrimariaAci: 'Primaria ACI',
   Secondaria: 'Secondaria',
-  ExtraRaccolta: 'Extra raccolta',
 };
 
+// Le schede di Extra Raccolta sono compilate a mano e possono essere primarie o
+// secondarie; quelle inserite prima che esistesse la distinzione sono primarie.
+export function eSecondariaExtra(r) {
+  return String(r.tipo_movimento || '').toLowerCase().trim() === 'secondaria';
+}
+
 function movimento(r, entita) {
-  const secondaria = entita === 'Secondaria';
+  const secondaria = entita === 'Secondaria' || (entita === 'ExtraRaccolta' && eSecondariaExtra(r));
+  const fonte = entita === 'ExtraRaccolta' ? (secondaria ? 'Extra raccolta secondaria' : 'Extra raccolta primaria') : FONTI[entita];
   return {
     id: entita + ':' + r.id,
-    fonte: FONTI[entita],
+    fonte,
     ordine: String(r.id_ordine || ''),
     fir: String(r.numero_fir || ''),
     firN: normalizzaFir(r.numero_fir),
-    kg: Number(r.peso_effettivo) || 0,
+    kg: Math.round(Number(r.peso_effettivo) || 0),
     inizio: ymd(r.trasporto_iniziato_il),
     fine: ymd(r.trasporto_finito_il),
     produttore: String((secondaria ? (r.stoccaggio || r.ragione_sociale) : (r.produttore || r.ragione_sociale)) || ''),
     punto_raccolta: secondaria ? '' : String(r.punto_di_raccolta || ''),
-    codice_pdr: String((secondaria ? r.id_stoccaggio : r.id_pdr) ?? ''),
+    codice_pdr: String((entita === 'Secondaria' ? r.id_stoccaggio : (secondaria ? '' : r.id_pdr)) ?? ''),
     destinatario: String(r.destinazione || ''),
     tipo_destinazione: String(r.tipo_destinazione || '').toLowerCase().trim(),
     trasportatore: String(r.trasportatore || ''),
     classe: classeNormalizzata(r.classe) || classeNormalizzata(r.prodotto),
     chiaveDest: normalizzaRagioneSociale(r.destinazione || ''),
+    chiaveOrig: secondaria ? normalizzaRagioneSociale(r.stoccaggio || '') : '',
     secondaria,
   };
 }
@@ -267,8 +276,16 @@ export async function caricaMovimenti(base44) {
   return { movimenti, interni, anagrafica };
 }
 
+// Che cosa rappresenta un movimento per il sito verificato: un ingresso e' una
+// primaria che vi arriva, un'uscita una secondaria che ne parte.
+export function relazioneConSito(m, chiave) {
+  if (!m.secondaria && m.chiaveDest === chiave) return 'ingresso';
+  if (m.secondaria && m.chiaveOrig === chiave) return 'uscita';
+  return null;
+}
+
 /**
- * Impianti e stoccaggi attivi nell'anno, con gli ingressi attesi nella settimana.
+ * Impianti e stoccaggi attivi nell'anno, con ingressi e uscite della settimana.
  */
 export function soggettiDellaSettimana({ movimenti, interni, anagrafica }, anno, settimana) {
   const { inizio, fine } = intervalloSettimana(anno, settimana);
@@ -278,13 +295,13 @@ export function soggettiDellaSettimana({ movimenti, interni, anagrafica }, anno,
     if (!soggetti.has(chiave)) soggetti.set(chiave, { chiave, nomi: new Map(), ruoli: new Set() });
     const s = soggetti.get(chiave);
     s.ruoli.add(ruolo);
-    s.nomi.set(nome, (s.nomi.get(nome) || 0) + 1);
+    if (nome) s.nomi.set(nome, (s.nomi.get(nome) || 0) + 1);
   };
 
   for (const m of movimenti) {
     if (m.fine.slice(0, 4) !== String(anno)) continue;
-    const ruolo = !m.secondaria && m.tipo_destinazione === 'stoc' ? 'stoccaggio' : 'trattamento';
-    tocca(m.destinatario.trim(), m.chiaveDest, ruolo);
+    if (m.secondaria) tocca(m.produttore.trim(), m.chiaveOrig, 'stoccaggio');
+    else tocca(m.destinatario.trim(), m.chiaveDest, m.tipo_destinazione === 'stoc' ? 'stoccaggio' : 'trattamento');
   }
 
   const righe = [];
@@ -292,9 +309,18 @@ export function soggettiDellaSettimana({ movimenti, interni, anagrafica }, anno,
     const f = anagrafica.get(s.chiave);
     let nome = f && f.ragione_sociale ? f.ragione_sociale : '';
     if (!nome) for (const n of s.nomi.keys()) if (n.length > nome.length) nome = n;
-    const ruoli = ['trattamento', 'stoccaggio'].filter(r => s.ruoli.has(r));
-    const ingressi = movimenti.filter(m => m.fine >= inizio && m.fine <= fine && m.chiaveDest === s.chiave);
-    righe.push({ chiave: s.chiave, nome, ruoli, viaggi: ingressi.length, kg: ingressi.reduce((t, m) => t + m.kg, 0) });
+    const settimanali = movimenti.filter(m => m.fine >= inizio && m.fine <= fine);
+    const ingressi = settimanali.filter(m => relazioneConSito(m, s.chiave) === 'ingresso');
+    const uscite = settimanali.filter(m => relazioneConSito(m, s.chiave) === 'uscita');
+    righe.push({
+      chiave: s.chiave,
+      nome,
+      ruoli: ['trattamento', 'stoccaggio'].filter(r => s.ruoli.has(r)),
+      ingressi: ingressi.length,
+      kg_ingressi: ingressi.reduce((t, m) => t + m.kg, 0),
+      uscite: uscite.length,
+      kg_uscite: uscite.reduce((t, m) => t + m.kg, 0),
+    });
   }
   righe.sort((a, b) => a.nome.localeCompare(b.nome, 'it'));
   return { inizio, fine, righe };
@@ -306,9 +332,9 @@ export const CAMPI_REPORT = ['fir', 'peso', 'data_inizio', 'data_fine', 'data', 
 
 /**
  * Porta le righe lette dal file in una forma confrontabile.
- * Il peso viene sempre espresso in chilogrammi: se l'unita' non e' nota si
- * deduce dall'ordine di grandezza, perche' un viaggio di PFU pesa tonnellate
- * ma mai decine di migliaia di tonnellate.
+ * Il peso viene sempre espresso in chilogrammi interi, come nei formulari e nel
+ * portale Ecotyre. Se l'unita' non e' nota si deduce dall'ordine di grandezza:
+ * un carico di PFU pesa tonnellate, mai decine di migliaia di tonnellate.
  */
 export function normalizzaRigheReport(grezze, unitaIndicata) {
   let unita = unitaIndicata === 'kg' || unitaIndicata === 't' ? unitaIndicata : null;
@@ -349,18 +375,25 @@ export function normalizzaRigheReport(grezze, unitaIndicata) {
 /**
  * Confronta le righe del report con i movimenti del gestionale.
  *
+ * Il report di un sito puo' contenere ingressi, cioe' primarie che arrivano, e
+ * uscite, cioe' secondarie che partono. Il tipo di ogni riga si ricava dal
+ * movimento a cui viene abbinata.
+ *
  * Abbinamento di ogni riga, in ordine di affidabilita':
  *   1. stesso formulario;
  *   2. formulario che differisce di uno o due caratteri, segnalato come errato;
- *   3. formulario assente o irriconoscibile: stesso peso e stessa data per lo
- *      stesso soggetto.
- * Una volta abbinata una riga, ogni campo presente nel report viene confrontato.
- * Alla fine, i movimenti della settimana che nessuna riga ha reclamato sono
- * assenti nel report.
+ *   3. formulario assente o irriconoscibile: stesso peso al chilogrammo e stessa
+ *      data di fine trasporto, con un giorno di margine per ritrovare la riga.
+ * Una volta abbinata una riga, ogni campo presente nel report viene confrontato:
+ * il peso al chilogrammo, la data di verifica e' quella di fine trasporto.
+ *
+ * Alla fine, gli ingressi della settimana che nessuna riga ha reclamato sono
+ * assenti nel report. Le uscite si controllano allo stesso modo, ma solo se il
+ * report ne contiene: un sito che invia i soli ingressi non va segnalato per
+ * tutte le secondarie della settimana.
  */
-export function verificaReport(righeReport, movimenti, { chiave, inizio, fine }, unita) {
-  const relativo = (m) => m.chiaveDest === chiave;
-  const tolleranzaKg = unita === 't' ? 10 : 5;
+export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, fine }) {
+  const relazione = (m) => relazioneConSito(m, chiave);
   const da = aggiungiGiorni(inizio, -FINESTRA_ABBINAMENTO_GIORNI);
   const a = aggiungiGiorni(fine, FINESTRA_ABBINAMENTO_GIORNI);
   const bacino = movimenti.filter(m => m.fine >= da && m.fine <= a);
@@ -370,17 +403,18 @@ export function verificaReport(righeReport, movimenti, { chiave, inizio, fine },
     if (!perFir.has(m.firN)) perFir.set(m.firN, []);
     perFir.get(m.firN).push(m);
   }
-  const perimetro = bacino.filter(m => m.fine >= inizio && m.fine <= fine && relativo(m));
-  const nelPerimetro = new Set(perimetro.map(m => m.id));
+  const nellaSettimana = (m) => m.fine >= inizio && m.fine <= fine;
+  const ingressi = bacino.filter(m => nellaSettimana(m) && relazione(m) === 'ingresso');
+  const uscite = bacino.filter(m => nellaSettimana(m) && relazione(m) === 'uscita');
   const usati = new Map();
 
-  const dataRiga = (r) => r.fine || r.data || r.inizio;
+  const dataRiga = (r) => r.fine || r.data;
   const punteggio = (r, m) => {
     let p = 0;
     if (r.kg !== null) p += Math.min(Math.abs(r.kg - m.kg), 5000) / 10;
     const d = dataRiga(r);
     if (d) p += Math.min(Math.abs(giorniTra(d, m.fine)), 30) * 5;
-    if (!relativo(m)) p += 200;
+    if (!relazione(m)) p += 200;
     if (usati.has(m.id)) p += 1000;
     return p;
   };
@@ -405,8 +439,7 @@ export function verificaReport(righeReport, movimenti, { chiave, inizio, fine },
         const punti = punteggio(r, c);
         if (dist < sceltoDist || (dist === sceltoDist && punti < sceltoPunti)) { scelto = c; sceltoDist = dist; sceltoPunti = punti; }
       }
-      const pesoOk = scelto && r.kg !== null && Math.abs(r.kg - scelto.kg) <= tolleranzaKg;
-      if (scelto && (sceltoDist === 1 || (pesoOk && relativo(scelto)))) {
+      if (scelto && (sceltoDist === 1 || (r.kg === scelto.kg && relazione(scelto)))) {
         m = scelto;
         modo = 'fir_simile';
       }
@@ -414,10 +447,11 @@ export function verificaReport(righeReport, movimenti, { chiave, inizio, fine },
 
     if (!m && r.kg !== null) {
       const d = dataRiga(r);
-      const candidati = bacino.filter(c => relativo(c) && !usati.has(c.id)
-        && Math.abs(r.kg - c.kg) <= tolleranzaKg
-        && (!d || Math.abs(giorniTra(d, c.fine)) <= 1 || (c.inizio && Math.abs(giorniTra(d, c.inizio)) <= 1)));
-      if (candidati.length > 0) {
+      const candidati = bacino.filter(c => relazione(c) && !usati.has(c.id) && c.kg === r.kg
+        && (!d || Math.abs(giorniTra(d, c.fine)) <= 1));
+      // Senza data, un peso da solo non basta a riconoscere un carico se ce n'e'
+      // piu' d'uno uguale.
+      if (candidati.length > 0 && (d || candidati.length === 1)) {
         m = migliore(r, candidati);
         modo = 'attributi';
       }
@@ -429,10 +463,11 @@ export function verificaReport(righeReport, movimenti, { chiave, inizio, fine },
     };
 
     if (!m) {
-      esiti.push({ n: r.n, esito: 'non_trovata', report, gestionale: null, discrepanze: [{ campo: 'fir', messaggio: r.firN ? 'Formulario non presente nel gestionale' : 'Riga senza formulario, non abbinabile a nessun movimento' }] });
+      esiti.push({ n: r.n, tipo: null, esito: 'non_trovata', report, gestionale: null, discrepanze: [{ campo: 'fir', messaggio: r.firN ? 'Formulario non presente nel gestionale' : 'Riga senza formulario, non abbinabile a nessun movimento' }] });
       continue;
     }
 
+    const tipo = relazione(m);
     const discrepanze = [];
     const aggiungi = (campo, messaggio) => discrepanze.push({ campo, messaggio });
 
@@ -440,16 +475,14 @@ export function verificaReport(righeReport, movimenti, { chiave, inizio, fine },
     if (modo === 'attributi') aggiungi('fir', r.firN ? `Formulario non corrispondente: nel gestionale e' ${m.fir}` : `Formulario assente nel report: nel gestionale e' ${m.fir}`);
 
     if (r.kg === null) aggiungi('kg', 'Peso assente nel report');
-    else if (Math.abs(r.kg - m.kg) > tolleranzaKg) aggiungi('kg', `Peso diverso: report ${kgIt(r.kg)}, gestionale ${kgIt(m.kg)}, differenza ${kgIt(r.kg - m.kg)}`);
+    else if (r.kg !== m.kg) aggiungi('kg', `Peso diverso: report ${kgIt(r.kg)}, gestionale ${kgIt(m.kg)}, differenza ${kgIt(r.kg - m.kg)}`);
 
+    if (r.fine && r.fine !== m.fine) aggiungi('fine', `Data fine trasporto diversa: report ${it(r.fine)}, gestionale ${it(m.fine)}`);
+    else if (!r.fine && r.data && r.data !== m.fine) aggiungi('fine', `Data diversa dalla fine trasporto: report ${it(r.data)}, gestionale ${it(m.fine)}`);
+    else if (!r.fine && !r.data) aggiungi('fine', 'Data di fine trasporto assente nel report');
     if (r.inizio && m.inizio && r.inizio !== m.inizio) aggiungi('inizio', `Data inizio trasporto diversa: report ${it(r.inizio)}, gestionale ${it(m.inizio)}`);
-    if (r.fine && m.fine && r.fine !== m.fine) aggiungi('fine', `Data fine trasporto diversa: report ${it(r.fine)}, gestionale ${it(m.fine)}`);
-    if (r.data && !r.inizio && !r.fine && r.data !== m.fine && r.data !== m.inizio) {
-      aggiungi('data', `Data diversa: report ${it(r.data)}, gestionale dal ${it(m.inizio)} al ${it(m.fine)}`);
-    }
-    if (!nelPerimetro.has(m.id) && relativo(m)) {
-      const s = settimanaIso(m.fine);
-      aggiungi('fine', `Nel gestionale il trasporto si conclude il ${it(m.fine)}, nella settimana ${s.settimana} e non in quella verificata`);
+    if (tipo && !nellaSettimana(m)) {
+      aggiungi('fine', `Nel gestionale il trasporto si conclude il ${it(m.fine)}, nella settimana ${settimanaIso(m.fine).settimana} e non in quella verificata`);
     }
 
     if (r.codice_pdr && cifre(r.codice_pdr) && m.codice_pdr && cifre(r.codice_pdr) !== cifre(m.codice_pdr)) {
@@ -462,8 +495,9 @@ export function verificaReport(righeReport, movimenti, { chiave, inizio, fine },
 
     if (r.destinatario && nomiCoincidono(r.destinatario, m.destinatario) === false) {
       aggiungi('destinatario', `Destinatario diverso: report "${r.destinatario}", gestionale "${m.destinatario}"`);
-    } else if (m.chiaveDest !== chiave) {
-      aggiungi('destinatario', `Nel gestionale questo formulario e' destinato a ${m.destinatario}`);
+    }
+    if (!tipo) {
+      aggiungi('destinatario', `Nel gestionale questo formulario non riguarda ${nome}: va da ${m.produttore || 'produttore non indicato'} a ${m.destinatario}`);
     }
 
     if (r.trasportatore && nomiCoincidono(r.trasportatore, m.trasportatore) === false) {
@@ -478,17 +512,22 @@ export function verificaReport(righeReport, movimenti, { chiave, inizio, fine },
     };
 
     if (usati.has(m.id)) {
-      esiti.push({ n: r.n, esito: 'duplicata', report, gestionale, discrepanze: [{ campo: 'fir', messaggio: `Riga duplicata: lo stesso movimento e' gia' riportato alla riga ${usati.get(m.id)}` }, ...discrepanze] });
+      esiti.push({ n: r.n, tipo, esito: 'duplicata', report, gestionale, discrepanze: [{ campo: 'fir', messaggio: `Riga duplicata: lo stesso movimento e' gia' riportato alla riga ${usati.get(m.id)}` }, ...discrepanze] });
       continue;
     }
     usati.set(m.id, r.n);
-    esiti.push({ n: r.n, esito: discrepanze.length ? 'discrepanze' : 'conforme', report, gestionale, discrepanze });
+    esiti.push({ n: r.n, tipo, esito: discrepanze.length ? 'discrepanze' : 'conforme', report, gestionale, discrepanze });
   }
 
-  const assenti = perimetro.filter(m => !usati.has(m.id)).map(m => ({
-    fonte: m.fonte, ordine: m.ordine, fir: m.fir, kg: m.kg, inizio: m.inizio, fine: m.fine, produttore: m.produttore,
+  const usciteVerificate = esiti.some(e => e.tipo === 'uscita');
+  const assente = (tipo) => (m) => ({
+    tipo, fonte: m.fonte, ordine: m.ordine, fir: m.fir, kg: m.kg, inizio: m.inizio, fine: m.fine, produttore: m.produttore,
     destinatario: m.destinatario, trasportatore: m.trasportatore, classe: m.classe,
-  })).sort((x, y) => String(x.fine).localeCompare(String(y.fine)) || x.fir.localeCompare(y.fir));
+  });
+  const assenti = [
+    ...ingressi.filter(m => !usati.has(m.id)).map(assente('ingresso')),
+    ...(usciteVerificate ? uscite.filter(m => !usati.has(m.id)).map(assente('uscita')) : []),
+  ].sort((x, y) => x.tipo.localeCompare(y.tipo) || String(x.fine).localeCompare(String(y.fine)) || x.fir.localeCompare(y.fir));
 
   const conta = (e) => esiti.filter(x => x.esito === e).length;
   return {
@@ -501,9 +540,12 @@ export function verificaReport(righeReport, movimenti, { chiave, inizio, fine },
       non_trovate: conta('non_trovata'),
       duplicate: conta('duplicata'),
       assenti_nel_report: assenti.length,
-      viaggi_gestionale: perimetro.length,
+      ingressi_gestionale: ingressi.length,
+      peso_ingressi_kg: ingressi.reduce((t, m) => t + m.kg, 0),
+      uscite_gestionale: uscite.length,
+      peso_uscite_kg: uscite.reduce((t, m) => t + m.kg, 0),
+      uscite_verificate: usciteVerificate,
       peso_report_kg: righeReport.reduce((t, r) => t + (r.kg || 0), 0),
-      peso_gestionale_kg: perimetro.reduce((t, m) => t + m.kg, 0),
     },
   };
 }

@@ -14,7 +14,7 @@ import { formatNumber } from '@/lib/utils';
 const CLASSI = ['P', 'M', 'G1', 'G2'];
 
 const EMPTY = {
-  numero_fir: '', tipologia_trasporto: '',
+  numero_fir: '', tipologia_trasporto: '', tipo_movimento: 'primaria', stoccaggio: '',
   trasporto_iniziato_il: '', trasporto_finito_il: '',
   produttore: '', trasportatore: '', destinazione: '', tipo_destinazione: 'imp',
   provincia: '', automezzo: '',
@@ -129,9 +129,15 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
     () => fornitori.filter(f => f.ruolo_trattamento || f.ruolo_stoccaggio).map(f => ({ value: f.ragione_sociale, label: f.ragione_sociale })),
     [fornitori]
   );
+  const stoccaggi = useMemo(
+    () => fornitori.filter(f => f.ruolo_stoccaggio).map(f => ({ value: f.ragione_sociale, label: f.ragione_sociale })),
+    [fornitori]
+  );
+  const secondaria = form.tipo_movimento === 'secondaria';
 
   const precompila = (nome, prestazione, dataRif) => {
     if (!nome) return;
+    if (prestazione === 'RACCOLTA' && form.tipo_movimento === 'secondaria') return;
     const forn = fornitori.find(f => normalizzaRagioneSociale(f.ragione_sociale) === normalizzaRagioneSociale(nome));
     if (!forn) return;
     const data = dataRif || form.trasporto_finito_il || new Date().toISOString().split('T')[0];
@@ -198,7 +204,12 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
     const e = {};
     if (!form.numero_fir) e.numero_fir = 'Obbligatorio';
     if (!form.trasporto_finito_il) e.trasporto_finito_il = 'Obbligatorio';
-    if (!form.produttore) e.produttore = 'Obbligatorio';
+    if (form.tipo_movimento === 'secondaria') {
+      if (!form.stoccaggio) e.stoccaggio = 'Obbligatorio';
+      if (!form.destinazione) e.destinazione = 'Obbligatorio';
+    } else if (!form.produttore) {
+      e.produttore = 'Obbligatorio';
+    }
     if (!form.classe) e.classe = 'Obbligatorio';
     if (!form.peso_effettivo || Number(form.peso_effettivo) <= 0) e.peso_effettivo = 'Maggiore di zero';
     if ((Number(form.costo_pulizia) > 0 || Number(form.costi_aggiuntivi) > 0) && !form.note_costi)
@@ -222,6 +233,9 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
       p.anno = d.getFullYear();
     }
     if (!p.id_ordine) p.id_ordine = p.numero_fir || `ER-${Date.now()}`;
+    // In una secondaria il soggetto da cui parte il carico e' lo stoccaggio.
+    if (p.tipo_movimento === 'secondaria') p.produttore = p.stoccaggio;
+    else p.stoccaggio = '';
     onSave(p);
   };
 
@@ -251,7 +265,17 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
                 <Input className="h-9 text-sm" value={form.numero_fir} onChange={e => set('numero_fir', e.target.value)} />
                 {errors.numero_fir && <p className="text-xs text-destructive">{errors.numero_fir}</p>}
               </div>
-              <div className="space-y-1 md:col-span-2">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Movimento *</Label>
+                <Select value={form.tipo_movimento || 'primaria'} onValueChange={v => { set('tipo_movimento', v); if (v === 'secondaria') { set('tipo_destinazione', 'imp'); setDaContrattoR(false); } }}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="primaria">Primaria: raccolta</SelectItem>
+                    <SelectItem value="secondaria">Secondaria: da stoccaggio</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Tipologia trasporto</Label>
                 <Input className="h-9 text-sm" list="tipologie-list" value={form.tipologia_trasporto} onChange={e => set('tipologia_trasporto', e.target.value)} placeholder="es. PFU ZERO - MAREVIVO" />
                 <datalist id="tipologie-list">{tipologie.map(t => <option key={t} value={t} />)}</datalist>
@@ -273,18 +297,27 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
           <fieldset className="border rounded-lg p-3">
             <legend className="text-sm font-semibold px-1">Soggetti</legend>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-2">
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Produttore *</Label>
-                <Input className="h-9 text-sm" value={form.produttore} onChange={e => set('produttore', e.target.value)} placeholder="Ente esterno" />
-                {errors.produttore && <p className="text-xs text-destructive">{errors.produttore}</p>}
-              </div>
+              {secondaria ? (
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Stoccaggio di partenza *</Label>
+                  <ComboSelect value={form.stoccaggio} onChange={v => set('stoccaggio', v)} options={stoccaggi} placeholder="Seleziona..." />
+                  {errors.stoccaggio && <p className="text-xs text-destructive">{errors.stoccaggio}</p>}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Produttore *</Label>
+                  <Input className="h-9 text-sm" value={form.produttore} onChange={e => set('produttore', e.target.value)} placeholder="Ente esterno" />
+                  {errors.produttore && <p className="text-xs text-destructive">{errors.produttore}</p>}
+                </div>
+              )}
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Trasportatore</Label>
                 <ComboSelect value={form.trasportatore} onChange={onTrasportatoreChange} options={trasportatori} placeholder="Seleziona..." />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Destinatario</Label>
+                <Label className="text-xs text-muted-foreground">Destinatario{secondaria ? ' *' : ''}</Label>
                 <ComboSelect value={form.destinazione} onChange={onDestinatarioChange} options={destinatari} placeholder="Seleziona..." />
+                {errors.destinazione && <p className="text-xs text-destructive">{errors.destinazione}</p>}
               </div>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Tipo destinazione</Label>

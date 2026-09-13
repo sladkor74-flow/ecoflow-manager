@@ -156,15 +156,16 @@ function coloreEsito(esito) {
 }
 
 /**
- * Genera l'Excel della verifica: riepilogo, verifica riga per riga con i campi
- * discordanti evidenziati e spiegati, ingressi assenti nel report ed elenco
- * pronto da comunicare al fornitore.
+ * Genera l'Excel della verifica: riepilogo, verifica riga per riga con il tipo
+ * ingresso o uscita e i campi discordanti evidenziati e spiegati, movimenti
+ * assenti nel report ed elenco pronto da comunicare al fornitore.
  */
 export async function scaricaExcelVerifica(v) {
   const modulo = await import('exceljs');
   const ExcelJS = modulo.default || modulo;
   const esito = v.esito_json ? JSON.parse(v.esito_json) : { esiti: [], assenti: [] };
   const lettura = v.lettura_json ? JSON.parse(v.lettura_json) : {};
+  const nomeTipo = (t) => (t === 'uscita' ? 'Uscita' : t === 'ingresso' ? 'Ingresso' : 'Non pertinente');
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Gestionale PFU';
   wb.created = new Date();
@@ -177,12 +178,13 @@ export async function scaricaExcelVerifica(v) {
   r.addRow([]);
   const info = [
     ['Impianto o stoccaggio', v.soggetto_nome],
-    ['Settimana', `${v.settimana} del ${v.anno}, dal ${dataIt(v.data_inizio)} al ${dataIt(v.data_fine)}`],
+    ['Settimana', `${v.settimana} del ${v.anno}, dal ${dataIt(v.data_inizio)} al ${dataIt(v.data_fine)}, secondo la data di fine trasporto`],
     ['File verificato', v.file_nome],
     ['Lettura del file', lettura.modo === 'excel'
       ? `foglio "${lettura.foglio}", dati dalla riga ${lettura.prima_riga_dati}, pesi in ${lettura.unita === 't' ? 'tonnellate' : 'chilogrammi'}`
       : `${lettura.modo === 'pdf' ? 'PDF' : 'immagine'} trascritto dall'agente, pesi in ${lettura.unita === 't' ? 'tonnellate' : 'chilogrammi'}`],
     ['Colonne riconosciute', lettura.colonne ? Object.entries(lettura.colonne).map(([k, c]) => `${k}: ${c}`).join('; ') : ''],
+    ['Criteri', 'Ingressi confrontati con le primarie, uscite con le secondarie; peso al chilogrammo; data di verifica: fine trasporto'],
     ['Verifica eseguita il', v.verificata_il ? new Date(v.verificata_il).toLocaleString('it-IT') : ''],
     ['Cancellazione dal gestionale', dataIt(v.scade_il)],
   ];
@@ -192,25 +194,42 @@ export async function scaricaExcelVerifica(v) {
     r.mergeCells(riga.number, 2, riga.number, 4);
     riga.getCell(2).alignment = { wrapText: true, vertical: 'top' };
   }
-  if (lettura.trascritto_da_agente) {
+  const avviso = (testo, sfondo, colore) => {
     r.addRow([]);
-    const nota = r.addRow(['Attenzione: il report non era un Excel e i formulari sono stati trascritti dall\'agente. Prima di contestare un formulario errato, confrontalo con il documento originale.']);
+    const nota = r.addRow([testo]);
     r.mergeCells(nota.number, 1, nota.number, 4);
-    nota.getCell(1).fill = riempi(COLORI.ambra);
-    nota.getCell(1).font = { color: { argb: COLORI.ambraTesto }, bold: true };
+    nota.getCell(1).fill = riempi(sfondo);
+    nota.getCell(1).font = { color: { argb: colore }, bold: true };
     nota.getCell(1).alignment = { wrapText: true };
     nota.height = 34;
+  };
+  if (lettura.trascritto_da_agente) {
+    avviso('Attenzione: il report non era un Excel e i formulari sono stati trascritti dall\'agente. Prima di contestare un formulario errato, confrontalo con il documento originale.', COLORI.ambra, COLORI.ambraTesto);
+  }
+  if (v.uscite_gestionale && !v.uscite_verificate) {
+    avviso(`Il report non contiene uscite: le ${v.uscite_gestionale} secondarie partite nella settimana non sono state verificate.`, COLORI.grigio, 'FF374151');
   }
   r.addRow([]);
   intestazione(r, ['Confronto', 'Report', 'Gestionale', 'Differenza']);
+  const usciteContate = v.uscite_verificate ? (v.uscite_gestionale || 0) : 0;
+  const pesoUsciteContato = v.uscite_verificate ? (v.peso_uscite_kg || 0) : 0;
   const confronti = [
-    ['Righe e ingressi', v.righe_report || 0, v.viaggi_gestionale || 0],
-    ['Peso totale (kg)', v.peso_report_kg || 0, v.peso_gestionale_kg || 0],
+    ['Carichi', v.righe_report || 0, (v.ingressi_gestionale || 0) + usciteContate],
+    ['Peso totale (kg)', v.peso_report_kg || 0, (v.peso_ingressi_kg || 0) + pesoUsciteContato],
   ];
   for (const [k, a, b] of confronti) {
     const riga = r.addRow([k, a, b, a - b]);
     riga.eachCell((c, i) => { c.border = bordi; if (i > 1) c.numFmt = '#,##0'; });
     if (a !== b) riga.getCell(4).fill = riempi(COLORI.rosso);
+  }
+  const dettaglio = [
+    ['di cui ingressi nel gestionale', v.ingressi_gestionale || 0, v.peso_ingressi_kg || 0],
+    [`di cui uscite nel gestionale${v.uscite_verificate ? '' : ', non verificate'}`, v.uscite_gestionale || 0, v.peso_uscite_kg || 0],
+  ];
+  for (const [k, n, kg] of dettaglio) {
+    const riga = r.addRow([k, '', `${n} carichi, ${Number(kg).toLocaleString('it-IT')} kg`]);
+    riga.getCell(1).font = { italic: true, color: { argb: 'FF6B7280' } };
+    r.mergeCells(riga.number, 3, riga.number, 4);
   }
   r.addRow([]);
   intestazione(r, ['Esito delle righe', 'Numero']);
@@ -219,7 +238,7 @@ export async function scaricaExcelVerifica(v) {
     ['Con discrepanze', v.con_discrepanze || 0, 'discrepanze'],
     ['Non trovate nel gestionale', v.non_trovate || 0, 'non_trovata'],
     ['Duplicate nel report', v.duplicate || 0, 'duplicata'],
-    ['Ingressi del gestionale assenti nel report', v.assenti_nel_report || 0, 'assente'],
+    ['Movimenti del gestionale assenti nel report', v.assenti_nel_report || 0, 'assente'],
   ];
   for (const [k, n, e] of conteggi) {
     const riga = r.addRow([k, n]);
@@ -233,23 +252,23 @@ export async function scaricaExcelVerifica(v) {
   }
 
   // --- Verifica righe ---
-  const f = wb.addWorksheet('Verifica righe', { views: [{ state: 'frozen', xSplit: 3, ySplit: 1 }] });
+  const f = wb.addWorksheet('Verifica righe', { views: [{ state: 'frozen', xSplit: 4, ySplit: 1 }] });
   const colonne = [
-    ['Riga report', 8], ['Esito', 16], ['Annotazioni', 60],
+    ['Riga report', 8], ['Tipo', 11], ['Esito', 16], ['Annotazioni', 60],
     ['FIR report', 18], ['FIR gestionale', 18],
     ['Peso report (kg)', 12], ['Peso gestionale (kg)', 12], ['Differenza (kg)', 11],
-    ['Inizio trasporto report', 12], ['Inizio trasporto gestionale', 12],
     ['Fine trasporto report', 12], ['Fine trasporto gestionale', 12],
+    ['Inizio trasporto report', 12], ['Inizio trasporto gestionale', 12],
     ['Produttore report', 26], ['Produttore gestionale', 26],
     ['Destinatario report', 24], ['Destinatario gestionale', 24],
     ['Trasportatore report', 24], ['Trasportatore gestionale', 24],
     ['Classe report', 9], ['Classe gestionale', 9],
-    ['Fonte', 14], ['Ordine', 14],
+    ['Fonte', 18], ['Ordine', 14],
   ];
   f.columns = colonne.map(([, w]) => ({ width: w }));
   intestazione(f, colonne.map(([t]) => t));
   // Colonne da evidenziare per ciascun campo discordante.
-  const CELLE_CAMPO = { fir: [4, 5], kg: [6, 7, 8], inizio: [9, 10], fine: [11, 12], data: [9, 11], produttore: [13, 14], destinatario: [15, 16], trasportatore: [17, 18], classe: [19, 20] };
+  const CELLE_CAMPO = { fir: [5, 6], kg: [7, 8, 9], fine: [10, 11], inizio: [12, 13], produttore: [14, 15], destinatario: [16, 17], trasportatore: [18, 19], classe: [20, 21] };
 
   for (const e of esito.esiti) {
     const rep = e.report || {};
@@ -257,11 +276,11 @@ export async function scaricaExcelVerifica(v) {
     const differenza = rep.kg != null && ges.kg != null ? rep.kg - ges.kg : null;
     const annotazioni = e.discrepanze && e.discrepanze.length ? e.discrepanze.map(d => '• ' + d.messaggio).join('\n') : 'Nessuna discrepanza';
     const riga = f.addRow([
-      e.n, ETICHETTE_ESITO[e.esito] || e.esito, annotazioni,
+      e.n, e.gestionale ? nomeTipo(e.tipo) : '', ETICHETTE_ESITO[e.esito] || e.esito, annotazioni,
       rep.fir || '', ges.fir || '',
       rep.kg ?? '', ges.kg ?? '', differenza ?? '',
-      dataIt(rep.inizio), dataIt(ges.inizio),
       dataIt(rep.fine || rep.data), dataIt(ges.fine),
+      dataIt(rep.inizio), dataIt(ges.inizio),
       rep.produttore || rep.codice_pdr || '', ges.produttore || '',
       rep.destinatario || '', ges.destinatario || '',
       rep.trasportatore || '', ges.trasportatore || '',
@@ -270,13 +289,13 @@ export async function scaricaExcelVerifica(v) {
     ]);
     riga.eachCell({ includeEmpty: true }, (c, i) => {
       c.border = bordi;
-      c.alignment = { vertical: 'top', wrapText: i === 3 };
-      if (i >= 6 && i <= 8) c.numFmt = '#,##0';
+      c.alignment = { vertical: 'top', wrapText: i === 4 };
+      if (i >= 7 && i <= 9) c.numFmt = '#,##0';
     });
     const [sfondo, testo] = coloreEsito(e.esito);
-    riga.getCell(2).fill = riempi(sfondo);
-    riga.getCell(2).font = { bold: true, color: { argb: testo } };
-    if (e.esito !== 'conforme') riga.getCell(3).font = { color: { argb: testo } };
+    riga.getCell(3).fill = riempi(sfondo);
+    riga.getCell(3).font = { bold: true, color: { argb: testo } };
+    if (e.esito !== 'conforme') riga.getCell(4).font = { color: { argb: testo } };
     for (const d of (e.discrepanze || [])) {
       for (const i of (CELLE_CAMPO[d.campo] || [])) riga.getCell(i).fill = riempi(COLORI.rosso);
     }
@@ -285,16 +304,16 @@ export async function scaricaExcelVerifica(v) {
 
   // --- Assenti nel report ---
   const a = wb.addWorksheet('Assenti nel report', { views: [{ state: 'frozen', ySplit: 1 }] });
-  const colAssenti = [['FIR', 18], ['Peso (kg)', 12], ['Inizio trasporto', 12], ['Fine trasporto', 12], ['Produttore', 28], ['Trasportatore', 26], ['Classe', 9], ['Fonte', 14], ['Ordine', 14], ['Annotazioni', 50]];
+  const colAssenti = [['Tipo', 11], ['FIR', 18], ['Peso (kg)', 12], ['Fine trasporto', 12], ['Inizio trasporto', 12], ['Produttore', 28], ['Destinatario', 26], ['Trasportatore', 26], ['Classe', 9], ['Fonte', 18], ['Ordine', 14], ['Annotazioni', 50]];
   a.columns = colAssenti.map(([, w]) => ({ width: w }));
   intestazione(a, colAssenti.map(([t]) => t));
   if (esito.assenti.length === 0) {
-    a.addRow(['Tutti gli ingressi registrati nel gestionale per la settimana compaiono nel report.']);
+    a.addRow(['', 'Tutti i movimenti della settimana verificati compaiono nel report.']);
   }
   for (const m of esito.assenti) {
-    const riga = a.addRow([m.fir, m.kg, dataIt(m.inizio), dataIt(m.fine), m.produttore, m.trasportatore, m.classe || '', m.fonte, m.ordine,
-      'Ingresso registrato nel gestionale ma non riportato nel report del fornitore']);
-    riga.eachCell({ includeEmpty: true }, (c, i) => { c.border = bordi; c.fill = riempi(COLORI.rosso); if (i === 2) c.numFmt = '#,##0'; });
+    const riga = a.addRow([nomeTipo(m.tipo), m.fir, m.kg, dataIt(m.fine), dataIt(m.inizio), m.produttore, m.destinatario, m.trasportatore, m.classe || '', m.fonte, m.ordine,
+      m.tipo === 'uscita' ? 'Uscita registrata nel gestionale ma non riportata nel report del fornitore' : 'Ingresso registrato nel gestionale ma non riportato nel report del fornitore']);
+    riga.eachCell({ includeEmpty: true }, (c, i) => { c.border = bordi; c.fill = riempi(COLORI.rosso); if (i === 3) c.numFmt = '#,##0'; });
   }
 
   // --- Da comunicare al fornitore ---
@@ -311,7 +330,8 @@ export async function scaricaExcelVerifica(v) {
     }
   }
   for (const m of esito.assenti) {
-    const riga = c.addRow([m.fir, `Ingresso del ${dataIt(m.fine)} di ${Number(m.kg).toLocaleString('it-IT')} kg, trasportato da ${m.trasportatore}, non riportato nel report`]);
+    const cosa = m.tipo === 'uscita' ? `Uscita del ${dataIt(m.fine)} verso ${m.destinatario}` : `Ingresso del ${dataIt(m.fine)}`;
+    const riga = c.addRow([m.fir, `${cosa} di ${Number(m.kg).toLocaleString('it-IT')} kg, trasportato da ${m.trasportatore}, non riportato nel report`]);
     riga.eachCell(x => { x.border = bordi; x.alignment = { wrapText: true, vertical: 'top' }; });
     righeComunicazione++;
   }

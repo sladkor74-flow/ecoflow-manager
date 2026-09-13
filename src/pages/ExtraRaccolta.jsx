@@ -213,7 +213,7 @@ export default function ExtraRaccolta() {
               <tr>
                 <th className="text-left px-3 py-2 font-semibold">Nr. FIR</th>
                 <th className="text-left px-3 py-2 font-semibold">Data fine trasporto</th>
-                <th className="text-left px-3 py-2 font-semibold">Produttore</th>
+                <th className="text-left px-3 py-2 font-semibold">Produttore o stoccaggio</th>
                 <th className="text-left px-3 py-2 font-semibold">Trasportatore</th>
                 <th className="text-left px-3 py-2 font-semibold">Destinatario</th>
                 <th className="text-left px-3 py-2 font-semibold">Tipologia</th>
@@ -232,7 +232,10 @@ export default function ExtraRaccolta() {
                   <tr key={r.id} className="border-t hover:bg-muted/20">
                     <td className="px-3 py-2 font-mono text-xs">{r.numero_fir || '-'}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{r.trasporto_finito_il ? new Date(r.trasporto_finito_il).toLocaleDateString('it-IT') : '-'}</td>
-                    <td className="px-3 py-2 text-xs">{r.produttore || '-'}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {r.tipo_movimento === 'secondaria' && <span className="inline-block mr-1 px-1.5 py-0.5 rounded bg-accent/15 text-[10px] font-medium uppercase tracking-wide">Secondaria</span>}
+                      {(r.tipo_movimento === 'secondaria' ? r.stoccaggio : r.produttore) || '-'}
+                    </td>
                     <td className="px-3 py-2 text-xs">{r.trasportatore || '-'}</td>
                     <td className="px-3 py-2 text-xs">{r.destinazione || '-'}</td>
                     <td className="px-3 py-2 text-xs">{r.tipologia_trasporto || '-'}</td>

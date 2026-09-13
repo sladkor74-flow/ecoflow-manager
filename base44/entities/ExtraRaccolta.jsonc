@@ -143,6 +143,19 @@
       "type": "string",
       "description": "Progetto o campagna di riferimento, es. PFU ZERO - MAREVIVO"
     },
+    "tipo_movimento": {
+      "type": "string",
+      "enum": [
+        "primaria",
+        "secondaria"
+      ],
+      "default": "primaria",
+      "description": "Primaria: raccolta dal produttore verso un impianto o uno stoccaggio. Secondaria: trasferimento da uno stoccaggio a un impianto. Gli interventi inseriti prima di questo campo sono primarie"
+    },
+    "stoccaggio": {
+      "type": "string",
+      "description": "Stoccaggio di partenza, solo per le secondarie"
+    },
     "produttore": {
       "type": "string",
       "description": "Soggetto da cui si raccoglie; enti esterni non in anagrafica PDR"

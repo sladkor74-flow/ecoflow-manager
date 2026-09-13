@@ -5,9 +5,9 @@ import { caricaMovimenti, soggettiDellaSettimana, oggiRoma } from "../../shared/
 // Situazione dei report settimanali per una settimana.
 //
 // Payload: { anno, settimana }
-// Restituisce gli impianti e gli stoccaggi attivi nell'anno, gli ingressi che il
-// gestionale registra per ciascuno nella settimana e l'eventuale verifica gia'
-// fatta sul loro report.
+// Restituisce gli impianti e gli stoccaggi attivi nell'anno, gli ingressi e le
+// uscite che il gestionale registra per ciascuno nella settimana e l'eventuale
+// verifica gia' fatta sul loro report.
 //
 // Prima di tutto elimina le verifiche arrivate al quarantesimo giorno: il
 // controllo giornaliero lo fa gia', ma ripeterlo qui garantisce che una verifica
@@ -16,7 +16,8 @@ import { caricaMovimenti, soggettiDellaSettimana, oggiRoma } from "../../shared/
 const CAMPI_RIEPILOGO = [
   'id', 'soggetto_chiave', 'soggetto_nome', 'anno', 'settimana', 'data_inizio', 'data_fine', 'file_nome', 'file_tipo',
   'stato', 'avviata_il', 'errore', 'righe_report', 'conformi', 'con_discrepanze', 'non_trovate', 'duplicate',
-  'assenti_nel_report', 'viaggi_gestionale', 'peso_report_kg', 'peso_gestionale_kg', 'verificata_il', 'scade_il', 'created_date',
+  'assenti_nel_report', 'ingressi_gestionale', 'peso_ingressi_kg', 'uscite_gestionale', 'peso_uscite_kg', 'uscite_verificate',
+  'peso_report_kg', 'verificata_il', 'scade_il', 'created_date',
 ];
 
 export default async function(req) {
@@ -50,7 +51,7 @@ export default async function(req) {
       .sort((a, b) => String(b.created_date || '').localeCompare(String(a.created_date || '')));
 
     // Un report puo' arrivare anche da un soggetto che nella settimana non ha
-    // ingressi: la verifica resta visibile e va comunque letta.
+    // movimenti: la verifica resta visibile e va comunque letta.
     const perChiave = new Map();
     for (const v of dellaSettimana) if (!perChiave.has(v.soggetto_chiave)) perChiave.set(v.soggetto_chiave, v);
 
@@ -60,7 +61,7 @@ export default async function(req) {
       return { ...r, verifica: v ? Object.fromEntries(CAMPI_RIEPILOGO.map(k => [k, v[k]])) : null };
     });
     for (const v of perChiave.values()) {
-      elenco.push({ chiave: v.soggetto_chiave, nome: v.soggetto_nome, ruoli: [], viaggi: 0, kg: 0, verifica: Object.fromEntries(CAMPI_RIEPILOGO.map(k => [k, v[k]])) });
+      elenco.push({ chiave: v.soggetto_chiave, nome: v.soggetto_nome, ruoli: [], ingressi: 0, kg_ingressi: 0, uscite: 0, kg_uscite: 0, verifica: Object.fromEntries(CAMPI_RIEPILOGO.map(k => [k, v[k]])) });
     }
 
     return Response.json({ anno, settimana, inizio, fine, oggi, soggetti: elenco, cancellate });

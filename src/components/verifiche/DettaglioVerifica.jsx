@@ -151,9 +151,11 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
                   <Tessera etichetta="Righe nel report" valore={v.righe_report || 0} dettaglio={`${tonnellate(v.peso_report_kg)} t`} />
-                  <Tessera etichetta="Ingressi nel gestionale" valore={v.viaggi_gestionale || 0} dettaglio={`${tonnellate(v.peso_gestionale_kg)} t`} />
+                  <Tessera etichetta="Ingressi nel gestionale" valore={v.ingressi_gestionale || 0} dettaglio={`${tonnellate(v.peso_ingressi_kg)} t`} />
+                  <Tessera etichetta="Uscite nel gestionale" valore={v.uscite_gestionale || 0}
+                    dettaglio={`${tonnellate(v.peso_uscite_kg)} t${v.uscite_gestionale && !v.uscite_verificate ? ' · non nel report' : ''}`} />
                   <Tessera etichetta="Conformi" valore={v.conformi || 0} tono="text-emerald-600" />
                   <Tessera etichetta="Da sistemare" valore={segnalazioni(v)} tono={segnalazioni(v) ? 'text-red-600' : 'text-emerald-600'}
                     dettaglio={segnalazioni(v) ? [
@@ -163,6 +165,13 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                       v.assenti_nel_report ? `${v.assenti_nel_report} assenti` : '',
                     ].filter(Boolean).join(', ') : 'nessuna'} />
                 </div>
+
+                {!!v.uscite_gestionale && !v.uscite_verificate && (
+                  <div className="flex items-start gap-2 text-sm text-sky-900 border border-sky-200 bg-sky-50 rounded-lg px-3 py-2">
+                    <FileSpreadsheet className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>Il report non contiene uscite: le {v.uscite_gestionale} secondarie partite nella settimana non sono state verificate.</span>
+                  </div>
+                )}
 
                 {lettura.modo === 'excel' && (
                   <div className="text-xs text-muted-foreground flex items-start gap-1.5">
@@ -187,7 +196,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                       <div key={e.n + '-' + (e.report && e.report.fir)} className="border rounded-lg p-3 bg-card space-y-1.5">
                         <div className="flex items-center justify-between gap-3 flex-wrap">
                           <div className="text-sm">
-                            <span className="text-muted-foreground">Riga {e.n}</span>
+                            <span className="text-muted-foreground">Riga {e.n}{e.tipo ? ` · ${e.tipo === 'uscita' ? 'uscita' : 'ingresso'}` : ''}</span>
                             <span className="font-mono ml-2">{(e.report && e.report.fir) || 'senza formulario'}</span>
                             {e.report && e.report.kg != null && <span className="text-muted-foreground"> · {Number(e.report.kg).toLocaleString('it-IT')} kg</span>}
                           </div>
@@ -203,11 +212,11 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
 
                 {esito.assenti.length > 0 && (
                   <section className="space-y-2">
-                    <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Ingressi del gestionale assenti nel report</h4>
+                    <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Movimenti del gestionale assenti nel report</h4>
                     <div className="border rounded-lg divide-y bg-card">
                       {esito.assenti.map((m, i) => (
                         <div key={i} className="px-3 py-2 text-sm flex items-center justify-between gap-3 flex-wrap">
-                          <span><span className="font-mono">{m.fir}</span> <span className="text-muted-foreground">· {dataIt(m.fine)} · {m.trasportatore}</span></span>
+                          <span><span className="font-mono">{m.fir}</span> <span className="text-muted-foreground">· {m.tipo === 'uscita' ? 'uscita verso ' + m.destinatario : 'ingresso'} · {dataIt(m.fine)} · {m.trasportatore}</span></span>
                           <span className="tabular-nums">{Number(m.kg).toLocaleString('it-IT')} kg</span>
                         </div>
                       ))}
