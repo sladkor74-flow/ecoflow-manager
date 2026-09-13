@@ -22,7 +22,7 @@
         "altro"
       ],
       "default": "altro",
-      "description": "Famiglia del documento: guida i controlli automatici, per esempio la verifica del codice EER 16 01 03 sulle autorizzazioni o delle targhe sull'iscrizione all'Albo"
+      "description": "Famiglia del documento, per raggruppare e filtrare il catalogo"
     },
     "si_applica_a": {
       "type": "string",

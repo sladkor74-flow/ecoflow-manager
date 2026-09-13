@@ -16,7 +16,7 @@ import {
 
 // Campi del soggetto che si rimandano al backend per rivalutare i soli documenti,
 // senza rileggere tutte le movimentazioni.
-const CAMPI_BASE = ['chiave', 'nome', 'ruoli', 'movimenti', 'tonnellate', 'targhe', 'origine', 'inclusione_id', 'motivo_inclusione', 'fornitore_id', 'piva', 'codice_fiscale', 'email'];
+const CAMPI_BASE = ['chiave', 'nome', 'ruoli', 'origine', 'inclusione_id', 'motivo_inclusione', 'fornitore_id', 'piva', 'codice_fiscale', 'email'];
 
 const FILTRI = [
   { chiave: 'alert', etichetta: 'Con alert' },
@@ -235,8 +235,8 @@ export default function QualificaFornitori() {
             <ShieldCheck className="w-7 h-7 text-primary" /> Qualifica Fornitori
           </h1>
           <p className="text-muted-foreground mt-1 max-w-3xl">
-            Fornitori e cliente che movimentano PFU nel {anno}. Un agente legge ogni documento caricato, ne verifica
-            validità e scadenza secondo la normativa e segnala cosa chiedere, e a chi.
+            Presenza e validità dei documenti richiesti ai fornitori e al cliente contrattualizzati nel {anno}.
+            Un agente legge ogni documento caricato, ne verifica validità e scadenza e segnala cosa chiedere, e a chi.
           </p>
         </div>
         <div className="flex items-end gap-2 flex-wrap">
@@ -350,7 +350,7 @@ export default function QualificaFornitori() {
                   })}
                   {soggettiFiltrati.length === 0 && (
                     <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                      {dati.soggetti.length === 0 ? `Nessun fornitore ha movimentato PFU nel ${anno}.` : 'Nessun soggetto corrisponde al filtro.'}
+                      {dati.soggetti.length === 0 ? `Nessun fornitore attivo nel ${anno}.` : 'Nessun soggetto corrisponde al filtro.'}
                     </td></tr>
                   )}
                 </tbody>
@@ -439,8 +439,8 @@ function IncludiSoggetto({ open, anno, onClose, onFatto }) {
         <DialogHeader>
           <DialogTitle>Includi un soggetto nella qualifica {anno}</DialogTitle>
           <DialogDescription>
-            Serve per chi non ha ancora movimentazioni nell'anno, come un fornitore appena contrattualizzato.
-            I soggetti che movimentano PFU compaiono da soli.
+            Serve per un fornitore appena contrattualizzato che non ha ancora lavorato nell'anno.
+            Gli altri compaiono da soli.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">

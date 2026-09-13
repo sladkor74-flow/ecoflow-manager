@@ -1,8 +1,12 @@
-// Qualifica fornitori: chi va qualificato in un anno e in che stato sono i suoi
-// documenti.
+// Qualifica fornitori: presenza e validita' dei documenti richiesti ai fornitori
+// e al cliente contrattualizzati nell'anno.
 //
-// I soggetti di un anno sono gli attori delle movimentazioni di PFU di quello
-// stesso anno, ordini terminati con trasporto concluso nell'anno:
+// Il modulo e' puramente documentale. Non valuta cosa fanno i fornitori: controlla
+// soltanto che i documenti richiesti ci siano, siano quelli giusti e siano validi.
+//
+// I soggetti di un anno si ricavano dalle movimentazioni di PFU di quello stesso
+// anno, ordini terminati con trasporto concluso nell'anno. Dalle movimentazioni
+// viene anche il ruolo, che serve solo a stabilire quali documenti chiedere:
 //   raccolta              trasportatore delle primarie rete, ACI ed extra raccolta
 //   trattamento           destinazione "Imp" delle primarie, destinazione delle
 //                         secondarie
@@ -11,12 +15,10 @@
 //   trasporto_secondaria  trasportatore delle secondarie
 //   cliente               key account delle primarie, cioe' Ecotyre
 //
-// Le terziarie restano fuori del tutto. Sono spedizioni di materiale gia'
-// trattato dall'impianto verso cementerie e impianti finali, contrattate
-// dall'impianto e non da SMOCO: un impianto uscito dal contratto continua per
-// mesi a spedire cio' che aveva in piazzale, e contarle lo farebbe comparire fra
-// i soggetti da qualificare. E' il caso di INNOREC nel 2026. Restano fuori anche le societa' del gruppo,
-// segnate come interne in anagrafica, perche' non si qualifica se stessi.
+// Le terziarie restano fuori: sono spedizioni dell'impianto verso le cementerie,
+// e un impianto uscito dal contratto continua per mesi a spedire cio' che aveva
+// in piazzale. Contarle faceva comparire INNOREC nel 2026. Restano fuori anche le
+// societa' del gruppo, segnate come interne in anagrafica.
 //
 // Le inclusioni manuali coprono i due casi che le movimentazioni non vedono: un
 // contratto firmato prima del primo viaggio e un soggetto da non qualificare pur
@@ -84,10 +86,6 @@ function pulisci(v) {
   return String(v ?? '').replace(/\s+/g, ' ').trim();
 }
 
-function normalizzaTarga(v) {
-  return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-}
-
 function nelAnno(r, anno) {
   if (String(r.stato || '').toLowerCase().trim() !== 'terminato') return false;
   if (!r.trasporto_finito_il) return false;
@@ -122,53 +120,29 @@ export async function individuaSoggetti(base44, anno) {
   }
 
   const mappa = new Map();
-  // Restituisce la chiave del soggetto, o null se il nome e' vuoto o interno.
-  const aggiungi = (nome, ruolo, r) => {
+  const aggiungi = (nome, ruolo) => {
     const n = pulisci(nome);
-    if (!n) return null;
+    if (!n) return;
     const k = normalizzaRagioneSociale(n);
-    if (!k || interni.has(k)) return null;
-    if (!mappa.has(k)) {
-      mappa.set(k, { chiave: k, nomi: new Map(), ruoli: new Set(), movimenti: 0, tonnellate: 0, targhe: new Set(), origine: 'movimenti' });
-    }
+    if (!k || interni.has(k)) return;
+    if (!mappa.has(k)) mappa.set(k, { chiave: k, nomi: new Map(), ruoli: new Set(), origine: 'movimenti' });
     const s = mappa.get(k);
     s.ruoli.add(ruolo);
     s.nomi.set(n, (s.nomi.get(n) || 0) + 1);
-    if (r && (ruolo === 'raccolta' || ruolo === 'trasporto_secondaria')) {
-      for (const t of [r.automezzo, r.rimorchio]) {
-        const tn = normalizzaTarga(t);
-        if (tn.length >= 5) s.targhe.add(tn);
-      }
-    }
-    return k;
-  };
-
-  // Un viaggio conta una volta sola per soggetto, anche quando lo stesso soggetto
-  // e' insieme vettore e destinazione, come chi raccoglie e conferisce a se stesso.
-  const conta = (r, chiavi) => {
-    for (const k of new Set(chiavi.filter(Boolean))) {
-      const s = mappa.get(k);
-      s.movimenti += 1;
-      s.tonnellate += (Number(r.peso_effettivo) || 0) / 1000;
-    }
   };
 
   for (const r of [...rete, ...aci, ...extra]) {
     if (!nelAnno(r, annoNum)) continue;
     const td = String(r.tipo_destinazione || '').toLowerCase().trim();
-    conta(r, [
-      aggiungi(r.trasportatore, 'raccolta', r),
-      aggiungi(r.destinazione, td === 'stoc' ? 'stoccaggio' : 'trattamento', r),
-      aggiungi(r.key_account, 'cliente', r),
-    ]);
+    aggiungi(r.trasportatore, 'raccolta');
+    aggiungi(r.destinazione, td === 'stoc' ? 'stoccaggio' : 'trattamento');
+    aggiungi(r.key_account, 'cliente');
   }
   for (const r of sec) {
     if (!nelAnno(r, annoNum)) continue;
-    conta(r, [
-      aggiungi(r.stoccaggio, 'stoccaggio', r),
-      aggiungi(r.trasportatore, 'trasporto_secondaria', r),
-      aggiungi(r.destinazione, 'trattamento', r),
-    ]);
+    aggiungi(r.stoccaggio, 'stoccaggio');
+    aggiungi(r.trasportatore, 'trasporto_secondaria');
+    aggiungi(r.destinazione, 'trattamento');
   }
 
   // Inclusioni ed esclusioni manuali.
@@ -186,11 +160,10 @@ export async function individuaSoggetti(base44, anno) {
       });
       mappa.delete(k);
     } else if (inc.azione === 'includi') {
-      if (!mappa.has(k)) {
-        mappa.set(k, { chiave: k, nomi: new Map(), ruoli: new Set(), movimenti: 0, tonnellate: 0, targhe: new Set(), origine: 'manuale' });
-      }
+      if (!mappa.has(k)) mappa.set(k, { chiave: k, nomi: new Map(), ruoli: new Set(), origine: 'manuale' });
       const s = mappa.get(k);
-      if (inc.soggetto_nome) s.nomi.set(pulisci(inc.soggetto_nome), (s.nomi.get(pulisci(inc.soggetto_nome)) || 0) + 1);
+      const n = pulisci(inc.soggetto_nome);
+      if (n) s.nomi.set(n, (s.nomi.get(n) || 0) + 1);
       for (const ruolo of ruoliDaTesto(inc.ruoli)) s.ruoli.add(ruolo);
       s.inclusione_id = inc.id;
       s.motivo_inclusione = inc.motivo || '';
@@ -203,9 +176,6 @@ export async function individuaSoggetti(base44, anno) {
       chiave: s.chiave,
       nome: nomePreferito(s, f),
       ruoli: RUOLI.filter(r => s.ruoli.has(r)),
-      movimenti: s.movimenti,
-      tonnellate: Math.round(s.tonnellate * 100) / 100,
-      targhe: [...s.targhe].sort(),
       origine: s.origine,
       inclusione_id: s.inclusione_id || null,
       motivo_inclusione: s.motivo_inclusione || '',

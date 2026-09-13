@@ -4,7 +4,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import {
-  Upload, ExternalLink, RefreshCw, PencilLine, Loader2, AlertOctagon, AlertTriangle, Info, Copy, UserX, Truck,
+  Upload, ExternalLink, RefreshCw, PencilLine, Loader2, AlertOctagon, AlertTriangle, Info, Copy, UserX,
 } from 'lucide-react';
 import { RUOLI, STATI_REQUISITO, STATI_SOGGETTO, dataIt, quandoScade, problemiDi } from '@/lib/qualifica';
 
@@ -187,8 +187,6 @@ export default function SoggettoDettaglio({ soggetto, anno, isAdmin, open, onClo
     nome: soggetto.nome,
     piva: soggetto.piva,
     codice_fiscale: soggetto.codice_fiscale,
-    ruoli: soggetto.ruoli,
-    targhe: soggetto.targhe,
   };
 
   // L'analisi puo' durare anche un minuto. Se la richiesta scade lato browser
@@ -283,16 +281,11 @@ export default function SoggettoDettaglio({ soggetto, anno, isAdmin, open, onClo
                   <span className="px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-xs">Incluso manualmente</span>
                 )}
               </div>
-              <div className="text-sm text-muted-foreground">
-                {soggetto.piva ? 'P.IVA ' + soggetto.piva + ' · ' : ''}
-                {soggetto.movimenti > 0
-                  ? `${soggetto.movimenti.toLocaleString('it-IT')} movimentazioni nel ${anno}, ${soggetto.tonnellate.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} t`
-                  : `Nessuna movimentazione nel ${anno}`}
-              </div>
-              {soggetto.targhe.length > 0 && (
-                <div className="text-xs text-muted-foreground flex items-start gap-1">
-                  <Truck className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                  <span>Mezzi usati: {soggetto.targhe.join(', ')}</span>
+              {(soggetto.piva || soggetto.codice_fiscale) && (
+                <div className="text-sm text-muted-foreground">
+                  {soggetto.piva ? 'P.IVA ' + soggetto.piva : ''}
+                  {soggetto.piva && soggetto.codice_fiscale && soggetto.codice_fiscale !== soggetto.piva ? ' · ' : ''}
+                  {soggetto.codice_fiscale && soggetto.codice_fiscale !== soggetto.piva ? 'C.F. ' + soggetto.codice_fiscale : ''}
                 </div>
               )}
             </div>

@@ -4,26 +4,22 @@ import { aggiungiPeriodo, oggiRoma } from "../../shared/qualificaFornitori.ts";
 
 // Agente di analisi dei documenti di qualifica.
 //
+// Il controllo e' documentale: stabilisce se il documento e' quello richiesto,
+// se e' intestato al soggetto, se e' formalmente valido e quando scade. Non
+// valuta l'attivita' del fornitore.
+//
 // Lavora in due passaggi perche' la piattaforma non consente, nella stessa
 // chiamata, di leggere un file e di cercare sul web:
 //   1. lettura: il modello legge il documento e ne estrae i dati cosi' come sono
 //      scritti, senza dedurre nulla;
-//   2. valutazione: il modello riceve i soli dati estratti, consulta il web per
-//      la normativa applicabile e stabilisce validita', scadenza e problemi.
+//   2. valutazione: il modello riceve i soli dati estratti, verifica online le
+//      regole di validita' di quel tipo di documento e ne ricava scadenza e
+//      problemi.
 //
-// Ai due passaggi si affiancano controlli deterministici, che non dipendono dal
-// giudizio del modello: intestatario, codice EER 16 01 03, targhe dei mezzi usati
-// nell'anno. Su questi punti un errore del modello non deve poter passare.
+// Intestatario e partita IVA si controllano anche in modo deterministico, perche'
+// un errore del modello su questo punto non deve poter passare.
 //
-// Payload: { documento_id, contesto: { nome, piva, codice_fiscale, ruoli, targhe } }
-
-const DESCRIZIONE_RUOLI = {
-  raccolta: 'raccoglie e trasporta PFU dai punti di raccolta',
-  trasporto_secondaria: 'trasporta PFU dagli stoccaggi agli impianti',
-  trattamento: 'impianto che riceve e tratta PFU',
-  stoccaggio: 'stoccaggio che riceve PFU in messa in riserva',
-  cliente: 'cliente: sistema di gestione PFU per conto del quale SMOCO opera',
-};
+// Payload: { documento_id, contesto: { nome, piva, codice_fiscale } }
 
 const SCHEMA_LETTURA = {
   type: 'object',
@@ -37,10 +33,6 @@ const SCHEMA_LETTURA = {
     numero_documento: { type: 'string' },
     data_emissione: { type: 'string' },
     data_scadenza: { type: 'string' },
-    codici_eer: { type: 'array', items: { type: 'string' } },
-    operazioni: { type: 'array', items: { type: 'string' } },
-    categorie_albo: { type: 'array', items: { type: 'string' } },
-    targhe: { type: 'array', items: { type: 'string' } },
     firmato: { type: 'string', enum: ['si', 'no', 'non_determinabile'] },
     sintesi: { type: 'string' },
     note_lettura: { type: 'string' },
@@ -86,7 +78,6 @@ function data(v) {
 }
 
 const cifre = (v) => String(v || '').replace(/[^0-9]/g, '');
-const targa = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 function formatoIt(d) {
   return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) : '';
@@ -103,15 +94,15 @@ function regolaCatalogo(tipo) {
   return 'la scadenza e\' scritta sul documento';
 }
 
-// Controlli che non dipendono dal giudizio del modello.
-function controlliDeterministici(tipo, lettura, contesto) {
+// Controlli formali che non dipendono dal giudizio del modello.
+function controlliFormali(lettura, contesto) {
   const problemi = [];
 
   if (lettura.leggibile === false) {
     problemi.push({ gravita: 'bloccante', messaggio: 'Il documento non e\' leggibile o e\' incompleto' + (lettura.note_lettura ? ': ' + lettura.note_lettura : '.') });
   }
 
-  // Intestatario: la ragione sociale deve corrispondere, oppure la partita IVA.
+  // Intestatario: deve corrispondere la ragione sociale oppure la partita IVA.
   const atteso = normalizzaRagioneSociale(contesto.nome || '');
   const letto = normalizzaRagioneSociale(lettura.intestatario || '');
   const pivaAttesa = cifre(contesto.piva).slice(-11);
@@ -120,37 +111,13 @@ function controlliDeterministici(tipo, lettura, contesto) {
   const pivaDiversa = pivaAttesa.length === 11 && pivaLetta.length === 11 && pivaAttesa !== pivaLetta;
   const nomeCoincide = atteso && letto && (atteso === letto || (Math.min(atteso.length, letto.length) >= 4 && (atteso.includes(letto) || letto.includes(atteso))));
   if (pivaDiversa) {
-    problemi.push({ gravita: 'bloccante', messaggio: `La partita IVA del documento, ${pivaLetta}, non corrisponde a quella del fornitore, ${pivaAttesa}.` });
+    problemi.push({ gravita: 'bloccante', messaggio: `La partita IVA del documento, ${pivaLetta}, non corrisponde a quella del soggetto, ${pivaAttesa}.` });
   } else if (letto && atteso && !nomeCoincide && !pivaCoincide) {
     problemi.push({ gravita: 'bloccante', messaggio: `Il documento e' intestato a "${lettura.intestatario}", non a ${contesto.nome}.` });
   }
 
-  const eer = (lettura.codici_eer || []).map(cifre).filter(Boolean);
-  if ((tipo.categoria === 'albo_gestori' || tipo.categoria === 'autorizzazione_impianto') && eer.length > 0 && !eer.includes('160103')) {
-    problemi.push({ gravita: 'bloccante', messaggio: 'Il codice EER 16 01 03, pneumatici fuori uso, non compare fra i codici autorizzati.' });
-  }
-
-  if (tipo.categoria === 'albo_gestori' && Array.isArray(contesto.targhe) && contesto.targhe.length > 0) {
-    const iscritte = new Set((lettura.targhe || []).map(targa).filter(Boolean));
-    if (iscritte.size === 0) {
-      problemi.push({ gravita: 'attenzione', messaggio: `Il documento non riporta l'elenco dei mezzi: verifica che siano iscritte le targhe usate quest'anno, ${contesto.targhe.join(', ')}.` });
-    } else {
-      const mancanti = contesto.targhe.map(targa).filter(t => t && !iscritte.has(t));
-      if (mancanti.length > 0) {
-        problemi.push({ gravita: 'attenzione', messaggio: `Targhe usate quest'anno che non compaiono nell'iscrizione: ${mancanti.slice(0, 15).join(', ')}${mancanti.length > 15 ? ' e altre ' + (mancanti.length - 15) : ''}.` });
-      }
-    }
-  }
-
-  const operazioni = (lettura.operazioni || []).map(o => String(o).toUpperCase().replace(/\s+/g, ''));
-  if (tipo.categoria === 'autorizzazione_impianto' && operazioni.length > 0) {
-    const ruoli = contesto.ruoli || [];
-    if (ruoli.includes('stoccaggio') && !operazioni.includes('R13')) {
-      problemi.push({ gravita: 'attenzione', messaggio: 'Il soggetto opera come stoccaggio ma l\'autorizzazione non riporta l\'operazione R13.' });
-    }
-    if (ruoli.includes('trattamento') && !operazioni.some(o => ['R1', 'R3', 'R12', 'R13'].includes(o))) {
-      problemi.push({ gravita: 'attenzione', messaggio: 'Il soggetto opera come impianto ma l\'autorizzazione non riporta operazioni di recupero R1, R3, R12 o R13.' });
-    }
+  if (lettura.firmato === 'no') {
+    problemi.push({ gravita: 'attenzione', messaggio: 'Il documento non risulta firmato.' });
   }
 
   return problemi;
@@ -183,45 +150,42 @@ export default async function(req) {
 
     const oggi = oggiRoma();
     const nome = contesto.nome || doc.soggetto_nome || '';
-    const { signed_url } = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: doc.file_uri, expires_in: 900 });
+    const piva = contesto.piva || '';
+    const core = base44.asServiceRole.integrations.Core;
+    const { signed_url } = await core.CreateFileSignedUrl({ file_uri: doc.file_uri, expires_in: 900 });
 
     // === 1. Lettura del documento ===
-    const lettura = comeOggetto(await base44.asServiceRole.integrations.Core.InvokeLLM({
+    const lettura = comeOggetto(await core.InvokeLLM({
       prompt: [
-        'Sei l\'addetto alla qualifica fornitori di SMOCO Srl, operatore della raccolta di pneumatici fuori uso (PFU, codice EER 16 01 03) per il sistema Ecotyre.',
+        'Sei l\'addetto alla qualifica documentale dei fornitori di un\'azienda italiana.',
         'Leggi con attenzione il documento allegato ed estrai i dati richiesti esattamente come compaiono.',
         '',
         `Documento atteso: ${tipo.nome}${tipo.descrizione ? ' — ' + tipo.descrizione : ''}`,
-        `Soggetto atteso: ${nome}${contesto.piva ? ', partita IVA ' + contesto.piva : ''}`,
+        `Soggetto atteso: ${nome}${piva ? ', partita IVA ' + piva : ''}`,
         '',
         'Regole:',
         '- Riporta solo cio\' che e\' scritto nel documento. Non dedurre e non inventare nulla.',
         '- Tutte le date nel formato AAAA-MM-GG. Se una data manca o non e\' leggibile lascia il campo vuoto.',
         '- data_scadenza: solo una scadenza scritta in modo esplicito, come "valido fino al" o "data di scadenza". Mai una data calcolata.',
         '- data_emissione: data di rilascio, di estrazione, di protocollo o di sottoscrizione.',
-        '- codici_eer: tutti i codici EER o CER elencati, a sei cifre.',
-        '- operazioni: le operazioni di recupero o smaltimento autorizzate, come R1, R3, R12, R13, D15.',
-        '- categorie_albo: categorie e classi di iscrizione all\'Albo Nazionale Gestori Ambientali, se presenti.',
-        '- targhe: tutte le targhe dei veicoli elencate, compresi gli allegati.',
+        '- firmato: si se il documento reca firma o sottoscrizione, anche digitale; no se dovrebbe averla e manca.',
         '- Se il file e\' illeggibile, tagliato o non e\' un documento, imposta leggibile a false e spiega in note_lettura.',
-        '- sintesi: due o tre frasi in italiano su cosa e\' il documento e cosa attesta.',
+        '- sintesi: una o due frasi in italiano su che documento e\' e cosa attesta.',
       ].join('\n'),
       file_urls: [signed_url],
       response_json_schema: SCHEMA_LETTURA,
     }));
 
-    // === 2. Valutazione con la normativa ===
-    const ruoli = Array.isArray(contesto.ruoli) ? contesto.ruoli : [];
-    const valutazione = comeOggetto(await base44.asServiceRole.integrations.Core.InvokeLLM({
+    // === 2. Valutazione della validita' ===
+    const valutazione = comeOggetto(await core.InvokeLLM({
       prompt: [
-        'Sei un esperto di normativa ambientale italiana e di qualifica dei fornitori nella gestione dei rifiuti, in particolare dei pneumatici fuori uso (PFU, EER 16 01 03).',
-        'Valuta la validita\' di un documento presentato da un fornitore o da un cliente di SMOCO Srl.',
+        'Sei un esperto di adempimenti documentali e di qualifica dei fornitori secondo la normativa italiana.',
+        'Valuta se un documento presentato da un fornitore o da un cliente e\' quello richiesto, se e\' valido e quando scade.',
+        'Il controllo e\' solo documentale: non valutare l\'attivita\' del soggetto ne\' i contenuti tecnici del documento.',
         '',
         `Data di oggi: ${oggi}`,
-        `Soggetto: ${nome}${contesto.piva ? ', partita IVA ' + contesto.piva : ''}`,
-        `Ruoli del soggetto: ${ruoli.map(r => DESCRIZIONE_RUOLI[r] || r).join('; ') || 'non indicati'}`,
-        `Targhe dei mezzi usati quest'anno: ${(contesto.targhe || []).join(', ') || 'nessuna'}`,
-        `Documento atteso: ${tipo.nome}`,
+        `Soggetto: ${nome}${piva ? ', partita IVA ' + piva : ''}`,
+        `Documento richiesto: ${tipo.nome}`,
         `Regola del catalogo interno: ${regolaCatalogo(tipo)}`,
         `Riferimento normativo del catalogo: ${tipo.riferimento_normativo || 'non indicato'}`,
         '',
@@ -229,14 +193,13 @@ export default async function(req) {
         JSON.stringify(lettura, null, 2),
         '',
         'Compiti:',
-        '1. Stabilisci se il documento corrisponde davvero al tipo atteso.',
-        '2. Determina la regola di validita\' secondo la normativa vigente e la prassi consolidata, verificandola online. Per esempio una visura camerale vale sei mesi dal rilascio, il DURC 120 giorni, l\'iscrizione all\'Albo Gestori Ambientali cinque anni, l\'autorizzazione unica dell\'art. 208 del D.Lgs 152/2006 dieci anni con rinnovo da chiedere 180 giorni prima.',
-        '3. Calcola data_scadenza_effettiva, formato AAAA-MM-GG, dai dati estratti. Se i dati non bastano per calcolarla con certezza lasciala vuota: non stimare.',
+        '1. Stabilisci se il documento corrisponde al tipo richiesto.',
+        '2. Determina la regola di validita\' di questo tipo di documento secondo la normativa vigente e la prassi consolidata, verificandola online. Per esempio una visura camerale vale sei mesi dal rilascio e il DURC 120 giorni.',
+        '3. Calcola data_scadenza_effettiva, formato AAAA-MM-GG. Se i dati non bastano per calcolarla con certezza lasciala vuota: non stimare.',
         '4. Elenca ogni problema con la sua gravita\':',
-        '   bloccante: il documento non si puo\' accettare. Tipo sbagliato, intestato ad altri, scaduto, codice 16 01 03 non autorizzato, operazioni incoerenti con il ruolo, documento incompleto.',
-        '   attenzione: accettabile ma da sistemare. Mezzi non iscritti, garanzie in scadenza, dati da confermare.',
+        '   bloccante: il documento non si puo\' accettare. Tipo sbagliato, intestato ad altri, scaduto, incompleto o illeggibile.',
+        '   attenzione: accettabile ma da sistemare. Prossimo alla scadenza, privo di firma, dati da confermare.',
         '   informativo: nota utile che non richiede azioni.',
-        '   Verifica la coerenza con i ruoli: chi raccoglie o trasporta PFU deve essere iscritto all\'Albo per il codice 16 01 03 con i mezzi che usa; chi tratta o stocca deve essere autorizzato per il codice 16 01 03 con operazioni coerenti, R13 per la messa in riserva, R3 o R12 per il trattamento.',
         '5. Se c\'e\' almeno un problema bloccante o di attenzione, scrivi in richiesta_al_fornitore un testo breve e cortese, in italiano, per chiedere al soggetto il documento corretto o aggiornato.',
         '6. confidenza da 0 a 1: quanto sei sicuro della valutazione.',
         '',
@@ -246,8 +209,8 @@ export default async function(req) {
       response_json_schema: SCHEMA_VALUTAZIONE,
     }));
 
-    // === Problemi: controlli deterministici piu' valutazione del modello ===
-    const problemi = controlliDeterministici(tipo, lettura, { ...contesto, nome });
+    // === Problemi: controlli formali piu' valutazione del modello ===
+    const problemi = controlliFormali(lettura, { nome, piva });
     if (valutazione.corrisponde_al_tipo_atteso === false) {
       problemi.unshift({ gravita: 'bloccante', messaggio: `Il documento non sembra essere "${tipo.nome}": e' stato riconosciuto come ${lettura.tipo_documento || 'un altro documento'}.` });
     }

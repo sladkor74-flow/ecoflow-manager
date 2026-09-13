@@ -125,7 +125,7 @@ export const CATALOGO_PROPOSTO = [
     tipo_scadenza: 'da_documento',
     preavviso_giorni: 90,
     riferimento_normativo: 'Art. 212 D.Lgs 152/2006 e DM 120/2014: categorie 4 o 5, iscrizione quinquennale',
-    descrizione: 'Provvedimento in vigore con codice EER 16 01 03 ed elenco dei mezzi iscritti.',
+    descrizione: 'Provvedimento di iscrizione in vigore.',
     ordine: 50,
   },
   {
@@ -146,7 +146,7 @@ export const CATALOGO_PROPOSTO = [
     tipo_scadenza: 'da_documento',
     preavviso_giorni: 180,
     riferimento_normativo: 'Art. 208 D.Lgs 152/2006 dieci anni con rinnovo 180 giorni prima; AUA DPR 59/2013 quindici anni; procedura semplificata artt. 214-216 cinque anni; AIA',
-    descrizione: 'Provvedimento in vigore con codice EER 16 01 03, operazioni autorizzate e quantità.',
+    descrizione: 'Provvedimento di autorizzazione in vigore.',
     ordine: 60,
   },
   {
@@ -178,7 +178,7 @@ export const CATALOGO_PROPOSTO = [
     tipo_scadenza: 'nessuna',
     preavviso_giorni: 30,
     riferimento_normativo: 'DM 31 marzo 2020 n. 78: gomma vulcanizzata granulare da PFU',
-    descrizione: 'Solo per gli impianti che producono granulo e polverino in R3.',
+    descrizione: 'Documento che attesta la conformità al regolamento End of Waste.',
     ordine: 80,
   },
   {
@@ -188,7 +188,7 @@ export const CATALOGO_PROPOSTO = [
     obbligatorio: false,
     tipo_scadenza: 'da_documento',
     preavviso_giorni: 30,
-    descrizione: 'RC verso terzi e, per gli impianti, rischio inquinamento.',
+    descrizione: 'Polizza in corso di validità con quietanza di pagamento.',
     ordine: 90,
   },
   {
