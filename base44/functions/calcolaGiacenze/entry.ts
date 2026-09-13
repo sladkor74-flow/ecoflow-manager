@@ -326,12 +326,21 @@ export default async function(req) {
       const der = derivatiMap.get(key) || { granulo: 0, fibre: 0, metallo: 0, cippato: 0, ciabattato: 0 };
 
       const conferito_primarie_t = confPrimMap.get(key) || 0;
-      const secondarie_in_t = secInMap.get(ns) || 0;
-      const secondarie_out_t = secOutMap.get(ns) || 0;
-      const secondarie_nette_t = secondarie_in_t - secondarie_out_t;
-      const terziarie_t = terzMap.get(ns) || 0;
 
-      const conferito_t = conferito_primarie_t + secondarie_in_t + secondarie_out_t;
+      // Una secondaria va da uno stoccaggio a un impianto: l'ingresso riguarda
+      // l'impianto che riceve, l'uscita lo stoccaggio che spedisce. I flussi sono
+      // indicizzati per sito e non per ruolo, quindi attribuirli senza distinguere
+      // faceva contare lo stesso viaggio due volte su chi, come Irigom, e' insieme
+      // impianto e stoccaggio. Le terziarie, uscite verso le cementerie, partono
+      // sempre da un impianto.
+      const secondarie_in_t = td === 'imp' ? (secInMap.get(ns) || 0) : 0;
+      const secondarie_out_t = td === 'stoc' ? (secOutMap.get(ns) || 0) : 0;
+      const secondarie_nette_t = secondarie_in_t - secondarie_out_t;
+      const terziarie_t = td === 'imp' ? (terzMap.get(ns) || 0) : 0;
+
+      // Conferito e' cio' che il sito ha ricevuto. Le uscite non sono
+      // conferimenti: sommarle agli ingressi contava ogni secondaria due volte.
+      const conferito_t = conferito_primarie_t + secondarie_in_t;
 
       const target_primarie_t = g?.target_primarie_t || 0;
       const target_totale_t = g?.target_totale_t || 0;
