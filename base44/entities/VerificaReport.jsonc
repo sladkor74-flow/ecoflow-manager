@@ -1,0 +1,111 @@
+{
+  "name": "VerificaReport",
+  "type": "object",
+  "properties": {
+    "soggetto_chiave": {
+      "type": "string",
+      "description": "Ragione sociale normalizzata dell'impianto o dello stoccaggio che ha inviato il report"
+    },
+    "soggetto_nome": {
+      "type": "string"
+    },
+    "anno": {
+      "type": "number",
+      "description": "Anno della settimana secondo la numerazione ISO"
+    },
+    "settimana": {
+      "type": "number"
+    },
+    "data_inizio": {
+      "type": "string",
+      "format": "date"
+    },
+    "data_fine": {
+      "type": "string",
+      "format": "date"
+    },
+    "file_nome": {
+      "type": "string"
+    },
+    "file_tipo": {
+      "type": "string",
+      "enum": [
+        "excel",
+        "csv",
+        "pdf",
+        "immagine"
+      ],
+      "description": "Il file non viene conservato: se ne salvano solo i dati letti, cosi' alla cancellazione non resta nulla in archivio"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "in_lettura",
+        "in_verifica",
+        "completata",
+        "errore"
+      ],
+      "default": "in_lettura"
+    },
+    "avviata_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "errore": {
+      "type": "string"
+    },
+    "lettura_json": {
+      "type": "string",
+      "description": "Come e' stato letto il file: foglio, colonne riconosciute, unita' di misura, note dell'agente"
+    },
+    "righe_report_json": {
+      "type": "string",
+      "description": "Righe del report gia' normalizzate: servono a ripetere la verifica senza rileggere il file"
+    },
+    "esito_json": {
+      "type": "string",
+      "description": "Esito riga per riga e movimenti del gestionale assenti nel report"
+    },
+    "righe_report": {
+      "type": "number"
+    },
+    "conformi": {
+      "type": "number"
+    },
+    "con_discrepanze": {
+      "type": "number"
+    },
+    "non_trovate": {
+      "type": "number"
+    },
+    "duplicate": {
+      "type": "number"
+    },
+    "assenti_nel_report": {
+      "type": "number"
+    },
+    "viaggi_gestionale": {
+      "type": "number"
+    },
+    "peso_report_kg": {
+      "type": "number"
+    },
+    "peso_gestionale_kg": {
+      "type": "number"
+    },
+    "verificata_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "scade_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Giorno in cui la verifica viene cancellata: quaranta giorni dopo il caricamento"
+    }
+  },
+  "required": [
+    "soggetto_chiave",
+    "anno",
+    "settimana"
+  ]
+}

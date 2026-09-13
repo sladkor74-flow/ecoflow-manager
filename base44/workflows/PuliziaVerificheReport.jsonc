@@ -1,0 +1,45 @@
+{
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "pulizia_verifiche_report",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "cancella_verifiche_scadute": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "pulisciVerificheReport",
+            "args": {}
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Cancella le verifiche scadute",
+            "description": "Elimina le verifiche dei report settimanali arrivate al quarantesimo giorno dal caricamento"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Pulizia Verifiche Report",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "15 3 * * *",
+      "one_time_date": null,
+      "timezone": "Europe/Rome",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "description": "Ogni notte alle 3:15 cancella le verifiche dei report settimanali caricate da quaranta giorni"
+}

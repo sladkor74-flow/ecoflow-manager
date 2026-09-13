@@ -28,6 +28,7 @@ import Pdr from '@/pages/Pdr';
 import TargetAnnuali from '@/pages/TargetAnnuali';
 import Giacenze from '@/pages/Giacenze';
 import QualificaFornitori from '@/pages/QualificaFornitori';
+import Verifiche from '@/pages/Verifiche';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -72,6 +73,7 @@ const AuthenticatedApp = () => {
           <Route path="/alert-engine" element={<AlertEngine />} />
           <Route path="/fatturazione" element={<Fatturazione />} />
           <Route path="/qualifica-fornitori" element={<PageErrorBoundary><QualificaFornitori /></PageErrorBoundary>} />
+          <Route path="/verifiche" element={<PageErrorBoundary><Verifiche /></PageErrorBoundary>} />
           <Route path="/predittivita-secondarie" element={<PredittivitaSecondarie />} />
           <Route path="/primarie-aci" element={<PrimarieAci />} />
           <Route path="/todo" element={<TodoPage />} />

@@ -5,7 +5,7 @@ import { base44 } from '@/api/base44Client';
 import { EVENTO_AGGIORNAMENTO } from '@/lib/qualifica';
 import {
   LayoutDashboard, Upload, ClipboardList, Truck, Factory,
-  Ship, Warehouse, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, CalendarClock, ShieldCheck } from
+  Ship, Warehouse, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, CalendarClock, ShieldCheck, ClipboardCheck } from
 'lucide-react';
 
 const NAV_ITEMS = [
@@ -26,6 +26,7 @@ const NAV_ITEMS = [
 { label: 'Alert & Controllo', path: '/alert-engine', icon: Shield },
 { label: 'Fatturazione', path: '/fatturazione', icon: FileText },
 { label: 'Qualifica Fornitori', path: '/qualifica-fornitori', icon: ShieldCheck, contatore: 'qualifica' },
+{ label: 'Verifiche', path: '/verifiche', icon: ClipboardCheck },
 { label: 'Predittività Secondarie', path: '/predittivita-secondarie', icon: LineChart },
 { label: 'To-Do List', path: '/todo', icon: CheckSquare }];
 
