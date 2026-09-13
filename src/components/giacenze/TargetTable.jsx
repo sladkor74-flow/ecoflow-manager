@@ -96,8 +96,8 @@ export default function TargetTable({ righe, totali }) {
               <td className="px-2 py-2 text-right">{fmt(totali.secondarie_nette_t)} t</td>
               <td className="px-2 py-2 text-right">{fmt(totali.terziarie_t)} t</td>
               <td className="px-2 py-2 text-right">{fmt(totali.conferito_t)} t</td>
-              <td className="px-2 py-2 text-right">{dashIfZero(totali.target_totale_t > 0 ? totali.target_totale_t - totali.conferito_t : null)}</td>
-              <td className="px-2 py-2 text-right">{fmtPct(totali.target_totale_t > 0 ? (totali.conferito_t / totali.target_totale_t * 100) : null)}</td>
+              <td className="px-2 py-2 text-right">{dashIfZero(totali.target_totale_t > 0 ? totali.target_totale_t - totali.conferito_primarie_t : null)}</td>
+              <td className="px-2 py-2 text-right">{fmtPct(totali.target_totale_t > 0 ? (totali.conferito_primarie_t / totali.target_totale_t * 100) : null)}</td>
             </tr>
           </tfoot>
         </table>

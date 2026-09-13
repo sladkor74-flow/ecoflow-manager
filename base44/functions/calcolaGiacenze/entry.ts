@@ -347,8 +347,12 @@ export default async function(req) {
       const giacenza_riferimento_t = g?.giacenza_riferimento_t || 0;
       const tipologia_trattamento = g?.tipologia_trattamento || '';
 
-      const residuo_t = target_totale_t > 0 ? target_totale_t - conferito_t : null;
-      const percentuale_target = target_totale_t > 0 ? (conferito_t / target_totale_t) * 100 : null;
+      // Il target Ecotyre e' un target di raccolta, quindi si misura sulle
+      // primarie. Le secondarie sono materiale gia' raccolto che si sposta da uno
+      // stoccaggio a un impianto: metterle al numeratore farebbe contare due volte
+      // lo stesso pneumatico, una all'atto della raccolta e una al trasferimento.
+      const residuo_t = target_totale_t > 0 ? target_totale_t - conferito_primarie_t : null;
+      const percentuale_target = target_totale_t > 0 ? (conferito_primarie_t / target_totale_t) * 100 : null;
 
       // Un impianto senza target compare solo se nell'anno ha davvero qualcosa:
       // giacenza, arretrato di dichiarazione o movimentazione. Un impianto non
