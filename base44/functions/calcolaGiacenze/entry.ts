@@ -351,9 +351,13 @@ export default async function(req) {
       // una rilevazione a zero non e' assenza di dati ma un'informazione, vuol dire
       // piazzale verificato e vuoto. Uno stoccaggio che non deve comparire va tolto
       // dall'elenco delle unita' locali, non dedotto dai numeri.
+      // Le terziarie non contano: sono uscite di materiale gia' trasformato verso
+      // le cementerie e non dicono nulla sulla giacenza di PFU. Un impianto uscito
+      // dal contratto continua per qualche mese a spedire cio' che aveva in
+      // piazzale, e quelle spedizioni lo tenevano in tabella con tutte le colonne
+      // a zero.
       const haAttivita = giacenza_portale_t > 0 || in_attesa_dichiarazione_t > 0
-        || ordini_da_dichiarare > 0 || dichiarato_t > 0 || conferito_t > 0
-        || terziarie_t > 0;
+        || ordini_da_dichiarare > 0 || dichiarato_t > 0 || conferito_t > 0;
       if (!g && td === 'imp' && !haAttivita) continue;
 
       if (senzaRilevazione) anomalie.push({ tipo: 'stoccaggio_senza_rilevazione', sito: sitoNome });
