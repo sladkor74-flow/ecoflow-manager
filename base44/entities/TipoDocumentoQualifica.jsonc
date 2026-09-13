@@ -1,0 +1,78 @@
+{
+  "name": "TipoDocumentoQualifica",
+  "type": "object",
+  "properties": {
+    "nome": {
+      "type": "string",
+      "description": "Nome del documento richiesto, es. Visura camerale"
+    },
+    "categoria": {
+      "type": "string",
+      "enum": [
+        "anagrafica",
+        "regolarita_contributiva",
+        "antimafia",
+        "albo_gestori",
+        "autorizzazione_impianto",
+        "garanzia_finanziaria",
+        "assicurazione",
+        "contratto",
+        "certificazione",
+        "end_of_waste",
+        "altro"
+      ],
+      "default": "altro",
+      "description": "Famiglia del documento: guida i controlli automatici, per esempio la verifica del codice EER 16 01 03 sulle autorizzazioni o delle targhe sull'iscrizione all'Albo"
+    },
+    "si_applica_a": {
+      "type": "string",
+      "description": "Ruoli a cui il documento e' richiesto, separati da virgola: raccolta, trasporto_secondaria, trattamento, stoccaggio, cliente"
+    },
+    "obbligatorio": {
+      "type": "boolean",
+      "default": true
+    },
+    "tipo_scadenza": {
+      "type": "string",
+      "enum": [
+        "da_documento",
+        "da_emissione",
+        "nessuna"
+      ],
+      "default": "da_documento",
+      "description": "da_documento: la scadenza e' scritta sul documento. da_emissione: vale per un periodo fisso dalla data di rilascio. nessuna: non scade"
+    },
+    "validita_mesi": {
+      "type": "number",
+      "description": "Validita' in mesi dalla data di emissione, per i documenti da_emissione"
+    },
+    "validita_giorni": {
+      "type": "number",
+      "description": "Validita' in giorni dalla data di emissione, per i documenti da_emissione"
+    },
+    "preavviso_giorni": {
+      "type": "number",
+      "default": 60,
+      "description": "Quanti giorni prima della scadenza il documento diventa in scadenza e parte il promemoria"
+    },
+    "riferimento_normativo": {
+      "type": "string"
+    },
+    "descrizione": {
+      "type": "string",
+      "description": "Cosa deve contenere il documento perche' sia accettabile"
+    },
+    "ordine": {
+      "type": "number",
+      "default": 100
+    },
+    "attivo": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "required": [
+    "nome",
+    "si_applica_a"
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "name": "QualificaInclusione",
+  "type": "object",
+  "properties": {
+    "anno": {
+      "type": "number"
+    },
+    "soggetto_chiave": {
+      "type": "string"
+    },
+    "soggetto_nome": {
+      "type": "string"
+    },
+    "azione": {
+      "type": "string",
+      "enum": [
+        "includi",
+        "escludi"
+      ],
+      "description": "includi: soggetto da qualificare anche senza movimentazioni, per esempio un contratto appena firmato. escludi: soggetto da non qualificare pur comparendo nelle movimentazioni"
+    },
+    "ruoli": {
+      "type": "string",
+      "description": "Ruoli del soggetto incluso manualmente, separati da virgola"
+    },
+    "motivo": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "anno",
+    "soggetto_chiave",
+    "azione"
+  ]
+}

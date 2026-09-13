@@ -1,0 +1,38 @@
+{
+  "name": "RiepilogoQualifica",
+  "type": "object",
+  "properties": {
+    "anno": {
+      "type": "number"
+    },
+    "alert_aperti": {
+      "type": "number",
+      "description": "Requisiti che richiedono un intervento: scaduti, non conformi, mancanti, in scadenza o da verificare. E' il numero mostrato accanto alla voce del menu"
+    },
+    "soggetti_con_alert": {
+      "type": "number"
+    },
+    "scaduti": {
+      "type": "number"
+    },
+    "non_conformi": {
+      "type": "number"
+    },
+    "mancanti": {
+      "type": "number"
+    },
+    "in_scadenza": {
+      "type": "number"
+    },
+    "da_verificare": {
+      "type": "number"
+    },
+    "aggiornato_il": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "anno"
+  ]
+}

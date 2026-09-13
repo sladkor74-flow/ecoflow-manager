@@ -1,0 +1,96 @@
+{
+  "name": "DocumentoQualifica",
+  "type": "object",
+  "properties": {
+    "soggetto_chiave": {
+      "type": "string",
+      "description": "Ragione sociale normalizzata del fornitore o del cliente: la stessa chiave usata per riconoscerlo nelle movimentazioni"
+    },
+    "soggetto_nome": {
+      "type": "string"
+    },
+    "tipo_documento_id": {
+      "type": "string"
+    },
+    "tipo_documento_nome": {
+      "type": "string"
+    },
+    "file_uri": {
+      "type": "string",
+      "description": "Riferimento al file nell'archivio privato: si apre solo tramite un link temporaneo"
+    },
+    "file_nome": {
+      "type": "string"
+    },
+    "data_emissione": {
+      "type": "string",
+      "format": "date"
+    },
+    "data_scadenza": {
+      "type": "string",
+      "format": "date",
+      "description": "Scadenza determinata dall'analisi: la piu' vicina fra quella scritta sul documento, quella della regola del catalogo e quella ricavata dalla normativa"
+    },
+    "data_scadenza_manuale": {
+      "type": "string",
+      "format": "date",
+      "description": "Correzione manuale della scadenza: ha sempre la precedenza e una nuova analisi non la sovrascrive"
+    },
+    "verificato_manualmente": {
+      "type": "boolean",
+      "default": false,
+      "description": "Un amministratore ha controllato il documento e ne conferma la validita' nonostante eventuali segnalazioni"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "attivo",
+        "sostituito"
+      ],
+      "default": "attivo",
+      "description": "Un documento diventa sostituito quando ne viene caricato uno piu' recente dello stesso tipo"
+    },
+    "analisi_stato": {
+      "type": "string",
+      "enum": [
+        "in_attesa",
+        "in_corso",
+        "completata",
+        "errore"
+      ],
+      "default": "in_attesa"
+    },
+    "analisi_avviata_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "analisi_json": {
+      "type": "string",
+      "description": "Esito completo dell'agente in formato JSON: dati estratti, regola di validita', riferimenti normativi"
+    },
+    "problemi_json": {
+      "type": "string",
+      "description": "Elenco dei problemi riscontrati in formato JSON: [{ gravita, messaggio }]"
+    },
+    "sintesi": {
+      "type": "string"
+    },
+    "richiesta_al_fornitore": {
+      "type": "string",
+      "description": "Testo proposto dall'agente per chiedere al fornitore di sanare il problema"
+    },
+    "confidenza": {
+      "type": "number"
+    },
+    "errore_analisi": {
+      "type": "string"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "soggetto_chiave",
+    "tipo_documento_id"
+  ]
+}

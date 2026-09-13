@@ -1,0 +1,47 @@
+{
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "controllo_qualifica_fornitori",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "controlla_qualifiche": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "controlloQualifiche",
+            "args": {
+              "invia_email": true
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Controlla la qualifica dei fornitori",
+            "description": "Ricalcola lo stato dei documenti e invia agli amministratori il promemoria di scadenze, documenti mancanti e non conformita'"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Controllo Qualifica Fornitori",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "30 7 * * 1-5",
+      "one_time_date": null,
+      "timezone": "Europe/Rome",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "description": "Ogni giorno lavorativo alle 7:30 controlla i documenti di qualifica dei fornitori attivi nell'anno e invia un'unica email riepilogativa agli amministratori: scadenze in arrivo, documenti mancanti, scaduti o non conformi"
+}

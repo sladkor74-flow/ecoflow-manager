@@ -27,6 +27,7 @@ import PageErrorBoundary from '@/components/PageErrorBoundary';
 import Pdr from '@/pages/Pdr';
 import TargetAnnuali from '@/pages/TargetAnnuali';
 import Giacenze from '@/pages/Giacenze';
+import QualificaFornitori from '@/pages/QualificaFornitori';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -70,6 +71,7 @@ const AuthenticatedApp = () => {
           <Route path="/secondarie" element={<Secondarie />} />
           <Route path="/alert-engine" element={<AlertEngine />} />
           <Route path="/fatturazione" element={<Fatturazione />} />
+          <Route path="/qualifica-fornitori" element={<PageErrorBoundary><QualificaFornitori /></PageErrorBoundary>} />
           <Route path="/predittivita-secondarie" element={<PredittivitaSecondarie />} />
           <Route path="/primarie-aci" element={<PrimarieAci />} />
           <Route path="/todo" element={<TodoPage />} />

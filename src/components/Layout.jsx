@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
+import { base44 } from '@/api/base44Client';
+import { EVENTO_AGGIORNAMENTO } from '@/lib/qualifica';
 import {
   LayoutDashboard, Upload, ClipboardList, Truck, Factory,
-  Ship, Warehouse, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, CalendarClock } from
+  Ship, Warehouse, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, CalendarClock, ShieldCheck } from
 'lucide-react';
 
 const NAV_ITEMS = [
@@ -23,6 +25,7 @@ const NAV_ITEMS = [
 { label: 'Report Mensile', path: '/report-mensile', icon: BarChart3 },
 { label: 'Alert & Controllo', path: '/alert-engine', icon: Shield },
 { label: 'Fatturazione', path: '/fatturazione', icon: FileText },
+{ label: 'Qualifica Fornitori', path: '/qualifica-fornitori', icon: ShieldCheck, contatore: 'qualifica' },
 { label: 'Predittività Secondarie', path: '/predittivita-secondarie', icon: LineChart },
 { label: 'To-Do List', path: '/todo', icon: CheckSquare }];
 
@@ -31,6 +34,28 @@ export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const { user, logout } = useAuth();
+  const [alertQualifica, setAlertQualifica] = useState(0);
+
+  // Contatore degli alert della qualifica fornitori. Legge solo il riepilogo gia'
+  // salvato, che si aggiorna a ogni calcolo del modulo e al controllo giornaliero:
+  // ricalcolarlo qui vorrebbe dire rileggere le movimentazioni a ogni pagina.
+  useEffect(() => {
+    let attivo = true;
+    const anno = new Date().getFullYear();
+    const leggi = async () => {
+      try {
+        const r = await base44.entities.RiepilogoQualifica.filter({ anno }, '-updated_date', 1);
+        if (attivo) setAlertQualifica(r.length ? (r[0].alert_aperti || 0) : 0);
+      } catch (_e) { /* il contatore e' accessorio: in caso di errore resta nascosto */ }
+    };
+    const suAggiornamento = (e) => {
+      if (e.detail && e.detail.anno === anno) setAlertQualifica(e.detail.alert_aperti || 0);
+    };
+    leggi();
+    const intervallo = setInterval(leggi, 5 * 60 * 1000);
+    window.addEventListener(EVENTO_AGGIORNAMENTO, suAggiornamento);
+    return () => { attivo = false; clearInterval(intervallo); window.removeEventListener(EVENTO_AGGIORNAMENTO, suAggiornamento); };
+  }, []);
 
   const handleLogout = async () => {
     await logout();
@@ -69,7 +94,14 @@ export default function Layout() {
                 }>
                 
                 <Icon className="w-4 h-4 flex-shrink-0" />
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {item.contatore === 'qualifica' && alertQualifica > 0 && (
+                  <span
+                    title={`${alertQualifica} alert da gestire`}
+                    className="min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-red-600 text-white text-[11px] font-semibold leading-none text-center tabular-nums">
+                    {alertQualifica > 99 ? '99+' : alertQualifica}
+                  </span>
+                )}
               </Link>);
 
           })}

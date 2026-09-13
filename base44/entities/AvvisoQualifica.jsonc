@@ -1,0 +1,27 @@
+{
+  "name": "AvvisoQualifica",
+  "type": "object",
+  "properties": {
+    "anno": {
+      "type": "number"
+    },
+    "chiave_evento": {
+      "type": "string",
+      "description": "Identifica l'evento segnalato, per non ripetere lo stesso promemoria ogni giorno"
+    },
+    "descrizione": {
+      "type": "string"
+    },
+    "ultimo_invio": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "invii": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "chiave_evento"
+  ]
+}
