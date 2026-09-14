@@ -6,6 +6,7 @@ import { oggiRoma } from "../../shared/qualificaFornitori.ts";
 // pianificato, cosi' il lavoro e il consumo sono distribuiti nel tempo.
 //
 // Payload: { quante?: number } (massimo 5 per giro; di norma 3).
+// Dopo l'elaborazione nel gestionale resta solo la scheda, non il testo originale.
 
 const SCHEMA = {
   type: 'object',
@@ -76,6 +77,9 @@ export default async function(req) {
           elaborato_il: new Date().toISOString(),
           tentativi: (p.tentativi || 0) + 1,
           errore: '',
+          // Il testo serve solo per preparare la scheda: poi si toglie per non occupare
+          // spazio. L'originale resta sul PC e la chiave impedisce di ricaricarlo due volte.
+          testo: '',
         });
         esiti.push({ chiave: p.chiave, esito: 'elaborato' });
       } catch (e) {

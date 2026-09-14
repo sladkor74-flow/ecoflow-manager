@@ -38,7 +38,8 @@
       "description": "Ordine di elaborazione: prima il modulo obbligatorio"
     },
     "testo": {
-      "type": "string"
+      "type": "string",
+      "description": "Testo da elaborare: svuotato dopo la scheda per non occupare spazio"
     },
     "stato": {
       "type": "string",
@@ -80,5 +81,5 @@
       "type": "string"
     }
   },
-  "required": ["chiave", "fonte_file", "parte", "testo"]
+  "required": ["chiave", "fonte_file", "parte"]
 }
