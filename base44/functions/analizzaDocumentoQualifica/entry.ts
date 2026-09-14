@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { aggiungiPeriodo, oggiRoma } from "../../shared/qualificaFornitori.ts";
+import { testoBaseConoscenza, FONTI_UFFICIALI, VERIFICATO_IL } from "../../shared/baseConoscenza.ts";
 
 // Agente di analisi dei documenti di qualifica.
 //
@@ -12,9 +13,9 @@ import { aggiungiPeriodo, oggiRoma } from "../../shared/qualificaFornitori.ts";
 // chiamata, di leggere un file e di cercare sul web:
 //   1. lettura: il modello legge il documento e ne estrae i dati cosi' come sono
 //      scritti, senza dedurre nulla;
-//   2. valutazione: il modello riceve i soli dati estratti, verifica online le
-//      regole di validita' di quel tipo di documento e ne ricava scadenza e
-//      problemi.
+//   2. valutazione: il modello riceve i soli dati estratti e la base di
+//      conoscenza normativa della commessa, verifica online che le regole non
+//      siano cambiate e ne ricava scadenza e problemi.
 //
 // Intestatario e partita IVA si controllano anche in modo deterministico, perche'
 // un errore del modello su questo punto non deve poter passare.
@@ -34,6 +35,10 @@ const SCHEMA_LETTURA = {
     data_emissione: { type: 'string' },
     data_scadenza: { type: 'string' },
     firmato: { type: 'string', enum: ['si', 'no', 'non_determinabile'] },
+    codici_eer: { type: 'array', items: { type: 'string' } },
+    operazioni: { type: 'array', items: { type: 'string' } },
+    categorie_albo: { type: 'array', items: { type: 'string' } },
+    veicoli: { type: 'array', items: { type: 'string' } },
     sintesi: { type: 'string' },
     note_lettura: { type: 'string' },
   },
@@ -169,6 +174,7 @@ export default async function(req) {
         '- data_scadenza: solo una scadenza scritta in modo esplicito, come "valido fino al" o "data di scadenza". Mai una data calcolata.',
         '- data_emissione: data di rilascio, di estrazione, di protocollo o di sottoscrizione.',
         '- firmato: si se il documento reca firma o sottoscrizione, anche digitale; no se dovrebbe averla e manca.',
+        '- Per iscrizioni all\'Albo gestori ambientali, autorizzazioni e comunicazioni di impianti: riporta i codici EER autorizzati (codici_eer, per esempio 16 01 03), le operazioni di recupero o smaltimento (operazioni, per esempio R13, R3), le categorie e classi dell\'Albo (categorie_albo) e le targhe dei veicoli (veicoli). Per gli altri documenti lascia questi campi vuoti.',
         '- Se il file e\' illeggibile, tagliato o non e\' un documento, imposta leggibile a false e spiega in note_lettura.',
         '- sintesi: una o due frasi in italiano su che documento e\' e cosa attesta.',
       ].join('\n'),
@@ -189,11 +195,14 @@ export default async function(req) {
         `Regola del catalogo interno: ${regolaCatalogo(tipo)}`,
         `Riferimento normativo del catalogo: ${tipo.riferimento_normativo || 'non indicato'}`,
         '',
+        `Base di conoscenza della commessa, verificata il ${VERIFICATO_IL}. Il fornitore lavora nella filiera dei pneumatici fuori uso (EER 16 01 03, rifiuti speciali non pericolosi) per il sistema collettivo Ecotyre. Usala come riferimento, ma controlla online sulle fonti ufficiali (${FONTI_UFFICIALI.join('; ')}) che nel frattempo non sia cambiato nulla: se trovi una norma o una data piu' recente, applicala e segnalalo con un problema informativo.`,
+        testoBaseConoscenza(),
+        '',
         'Dati estratti dal documento:',
         JSON.stringify(lettura, null, 2),
         '',
         'Compiti:',
-        '1. Stabilisci se il documento corrisponde al tipo richiesto.',
+        '1. Stabilisci se il documento corrisponde al tipo richiesto. Per un\'iscrizione all\'Albo di chi trasporta PFU verifica categoria 4 (o 5) e codice EER 16 01 03; per un\'autorizzazione d\'impianto o di stoccaggio verifica il codice EER 16 01 03 e le operazioni coerenti con il ruolo del soggetto. Se il codice manca e\' un problema bloccante.',
         '2. Determina la regola di validita\' di questo tipo di documento secondo la normativa vigente e la prassi consolidata, verificandola online. Per esempio una visura camerale vale sei mesi dal rilascio e il DURC 120 giorni.',
         '3. Calcola data_scadenza_effettiva, formato AAAA-MM-GG. Se i dati non bastano per calcolarla con certezza lasciala vuota: non stimare.',
         '4. Elenca ogni problema con la sua gravita\':',
