@@ -296,7 +296,8 @@ export default function EvasioneAssegnati({ isAdmin }) {
           con in giallo le prime o le prioritarie. Il controllo si ripete da solo a ogni caricamento delle primarie, sulla data di fine trasporto.
           Il target è quello di Target & Status. Caricando la lista del mese successivo, quella precedente e i suoi controlli si cancellano.
           Lista, target e previsione riguardano la sola rete. ACI ed extra raccolta sono mostrati a parte: una richiesta ACI aperta o una richiesta
-          di extra raccolta inserita come assegnata nel modulo Extra Raccolta genera un alert. Nel dettaglio trovi quante richieste vale il target
+          di extra raccolta inserita come assegnata nel modulo Extra Raccolta genera un alert. Una richiesta resta assegnata finché non viene chiusa
+          o cancellata sul portale: gli ultimi giorni prima dell'estrazione del file, con ritiri ancora da chiudere, non generano alert sulle richieste aperte. Nel dettaglio trovi quante richieste vale il target
           al peso tipico di un ritiro e quante ne servono in più quando, tra annullate ed evase da altri, quelle aperte non bastano.
         </span>
       </div>

@@ -18,6 +18,13 @@
 // del portale: risulta annullata con il suo motivo e non pesa sul raccoglitore,
 // ma quando le aperte non bastano piu' al target servono nuove richieste.
 //
+// Una richiesta resta assegnata sul portale finche' non viene cancellata o chiusa
+// come terminata, e il raccoglitore chiude i ritiri qualche giorno dopo il
+// trasporto. Le primarie sono complete solo fino a qualche giorno prima
+// dell'estrazione del file: cronologia, trascurate, prioritarie e ritmo del mese
+// si valutano fino a quella data, perche' dopo una richiesta aperta puo' essere
+// gia' ritirata ma non ancora chiusa.
+//
 // La data di evasione e' quella di fine trasporto, come in tutto il gestionale.
 //
 // Rete, ACI ed extra raccolta restano sempre separati. Le liste e il target
@@ -42,6 +49,9 @@ const MINIMO_ORDINI_CLASSE = 8;
 // Peso indicativo di un ritiro, il cassone di una motrice con ragno, quando il
 // raccoglitore non ha ancora formulari nell'anno.
 const KG_RITIRO_INDICATIVO = 4000;
+// Limiti dei giorni entro cui un raccoglitore chiude i ritiri sul portale.
+const RITARDO_CHIUSURA_MINIMO = 2;
+const RITARDO_CHIUSURA_MASSIMO = 7;
 
 // === calendario ===
 
@@ -120,6 +130,7 @@ export function normalizzaPrimaria(r, canale) {
     chiaveTrasp: normalizzaRagioneSociale(r.trasportatore || ''),
     immesso: ymd(r.ordine_immesso_il),
     fine: ymd(r.trasporto_finito_il),
+    chiuso: ymd(r.ordine_chiuso_il),
     kg: Math.round(Number(r.peso_effettivo) || 0),
     pdr: chiavePdr(r),
     classe: classeNormalizzata(r.classe) || classeNormalizzata(r.prodotto),
@@ -382,6 +393,20 @@ function statistiche(movimenti) {
   };
 }
 
+// Giorni entro cui il raccoglitore chiude sul portale nove ritiri su dieci, dai
+// suoi formulari dell'anno o, se ne ha pochi, da quelli di tutti. Zero se le
+// primarie non portano la data di chiusura: in quel caso non si puo' misurare.
+function ritardoChiusura(propri, tutti, anno) {
+  const ritardi = (mov) => mov.filter(t => t.canale !== 'extra' && t.chiuso && t.fine && t.fine.slice(0, 4) === String(anno) && t.chiuso >= t.fine)
+    .map(t => giorniTra(t.fine, t.chiuso));
+  let v = ritardi(propri);
+  if (v.length < MINIMO_ORDINI_CLASSE) v = ritardi(tutti);
+  if (!v.length) return 0;
+  v.sort((a, b) => a - b);
+  const p90 = v[Math.min(v.length - 1, Math.floor(v.length * 0.9))];
+  return Math.min(RITARDO_CHIUSURA_MASSIMO, Math.max(RITARDO_CHIUSURA_MINIMO, Math.ceil(p90)));
+}
+
 // === controllo ===
 
 /**
@@ -408,6 +433,15 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   let datiAl = null;
   for (const t of terminati) if (t.canale !== 'extra' && t.fine && t.fine <= oggi && (!datiAl || t.fine > datiAl)) datiAl = t.fine;
   const finestraA = datiAl && datiAl < fineMese ? datiAl : fineMese;
+
+  // Dati completi: fino alla data di estrazione del file, cioe' l'ultima chiusura
+  // sul portale, meno i giorni entro cui il raccoglitore chiude i suoi ritiri.
+  let dataFile = null;
+  for (const t of terminati) if (t.canale !== 'extra' && t.chiuso && t.chiuso <= oggi && (!dataFile || t.chiuso > dataFile)) dataFile = t.chiuso;
+  const ritardo = dataFile ? ritardoChiusura(terminati.filter(t => t.chiaveTrasp === chiave), terminati, anno) : 0;
+  let consolidatoAl = datiAl ? aggiungiGiorni(dataFile || datiAl, -ritardo) : aggiungiGiorni(inizioMese, -1);
+  if (consolidatoAl > finestraA) consolidatoAl = finestraA;
+  const consolidata = (d) => !!d && d <= consolidatoAl;
 
   const perId = new Map();
   for (const t of terminati) if (t.fine) perId.set(t.id_ordine, t);
@@ -481,11 +515,13 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   // giornata D erano ancora da evadere. Le chiusure dello stesso giorno non si
   // saltano a vicenda: un giro di raccolta ne chiude diverse insieme. Il
   // confronto si fa nella stessa regione, perche' un raccoglitore che lavora in
-  // piu' regioni organizza i giri per zona.
+  // piu' regioni organizza i giri per zona. Una richiesta ancora aperta risulta
+  // saltata solo da chiusure con dati completi: potrebbe essere gia' ritirata e
+  // non ancora chiusa sul portale.
   const saltateDa = (o) => ordinate.filter(e => rango.get(e.id_ordine) < rango.get(o.id_ordine)
     && !['non_piu_presente', 'evasa_prima', 'annullata'].includes(e.stato)
     && (!o.regione || !e.regione || e.regione === o.regione)
-    && (!e.chiusa_il || e.chiusa_il > o.chiusa_il));
+    && (e.chiusa_il ? e.chiusa_il > o.chiusa_il : consolidata(o.chiusa_il)));
   for (const o of righe) {
     if (!evasaDalRaccoglitore(o)) continue;
     const saltate = saltateDa(o);
@@ -498,16 +534,17 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   // raccoglitore ha evaso richieste che la seguono nella stessa regione. Un
   // ordine evaso fuori lista scavalca invece la prima richiesta ancora aperta
   // della sua regione, quella che andava evasa per prima. Non serve che sia
-  // prioritaria o evidenziata: scavalcarla va sollecitato.
+  // prioritaria o evidenziata: scavalcarla va sollecitato. Contano solo le
+  // chiusure con dati completi.
   const stessaRegione = (a, b) => !a || !b || a === b;
   for (const e of righe) {
     e.scavalcata_successive = 0;
     e.scavalcata_fuori = 0;
     if (e.stato !== 'aperta') continue;
-    e.scavalcata_successive = righe.filter(o => evasaDalRaccoglitore(o) && o.chiusa_il >= caricataIl && rango.get(o.id_ordine) > rango.get(e.id_ordine) && stessaRegione(o.regione, e.regione)).length;
+    e.scavalcata_successive = righe.filter(o => evasaDalRaccoglitore(o) && o.chiusa_il >= caricataIl && consolidata(o.chiusa_il) && rango.get(o.id_ordine) > rango.get(e.id_ordine) && stessaRegione(o.regione, e.regione)).length;
   }
   for (const x of fuoriListaEffettivi) {
-    if (x.chiusa_il < caricataIl) continue;
+    if (x.chiusa_il < caricataIl || !consolidata(x.chiusa_il)) continue;
     const prima = ordinate.find(e => e.stato === 'aperta' && stessaRegione(e.regione, x.regione));
     if (prima) prima.scavalcata_fuori++;
   }
@@ -561,14 +598,18 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   // --- previsione ---
   const giorniTotali = giorniLavorativi(inizioMese, fineMese, sabato);
   const giorniTrascorsi = datiAl && datiAl >= inizioMese ? giorniLavorativi(inizioMese, finestraA, sabato) : 0;
-  const meseConcluso = !!datiAl && datiAl >= fineMese;
+  // Il ritmo del mese si misura sui giorni con dati completi; quelli successivi,
+  // ancora in parte da chiudere sul portale, si stimano con il ritmo.
+  const giorniConsolidati = consolidatoAl >= inizioMese ? giorniLavorativi(inizioMese, consolidatoAl, sabato) : 0;
+  const kgConsolidati = delMese.filter(t => t.fine <= consolidatoAl).reduce((s, t) => s + t.kg, 0);
+  const meseConcluso = !!datiAl && consolidatoAl >= fineMese;
   const giorniResidui = meseConcluso ? 0 : Math.max(0, giorniTotali - giorniTrascorsi);
-  const ritmoMese = giorniTrascorsi > 0 ? Math.round(raccoltoKg / giorniTrascorsi) : null;
+  const ritmoMese = giorniConsolidati > 0 ? Math.round(kgConsolidati / giorniConsolidati) : null;
   let ritmo;
-  if (giorniTrascorsi >= 5 && ritmoMese !== null && storico.kg_per_giorno) ritmo = Math.round((ritmoMese + storico.kg_per_giorno) / 2);
+  if (giorniConsolidati >= 5 && ritmoMese !== null && storico.kg_per_giorno) ritmo = Math.round((ritmoMese + storico.kg_per_giorno) / 2);
   else ritmo = storico.kg_per_giorno ?? ritmoMese ?? 0;
-  const capacitaResidua = ritmo * giorniResidui;
-  const proiezioneKg = raccoltoKg + capacitaResidua;
+  const proiezioneKg = meseConcluso ? raccoltoKg : Math.max(raccoltoKg, kgConsolidati + ritmo * Math.max(0, giorniTotali - giorniConsolidati));
+  const capacitaResidua = proiezioneKg - raccoltoKg;
 
   const target = targetKg || null;
   const targetResiduo = target ? Math.max(0, target - raccoltoKg) : null;
@@ -597,6 +638,11 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
 
   const previsione = {
     dati_al: datiAl,
+    data_file: dataFile,
+    consolidato_al: consolidatoAl,
+    ritardo_chiusura_giorni: ritardo,
+    giorni_consolidati: giorniConsolidati,
+    kg_consolidati: kgConsolidati,
     giorni_totali: giorniTotali,
     lavora_sabato: sabato,
     giorni_trascorsi: giorniTrascorsi,
@@ -635,7 +681,7 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
 
   // --- conteggi ---
   const fuoriOrdine = righe.filter(r => evasaDalRaccoglitore(r) && r.saltate > 0);
-  const giorniDallInvio = giorniLavorativi(aggiungiGiorni(caricataIl, 1), finestraA, sabato);
+  const giorniDallInvio = giorniLavorativi(aggiungiGiorni(caricataIl, 1), consolidatoAl, sabato);
   const prioritarieAperte = righe.filter(r => r.prioritaria && r.stato === 'aperta');
 
   // --- alert ---
@@ -650,12 +696,12 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     if (prima.scavalcata_successive) cosa.push(`${prima.scavalcata_successive} ${prima.scavalcata_successive === 1 ? 'richiesta successiva' : 'richieste successive'}`);
     if (prima.scavalcata_fuori) cosa.push(`${prima.scavalcata_fuori} ${prima.scavalcata_fuori === 1 ? 'ordine fuori lista' : 'ordini fuori lista'}`);
     const altre = trascurate.length > 1 ? ` Trascurate anche: ${elenco(trascurate.slice(1).map(r => `n. ${r.posizione} ${r.id_ordine}`), 4)}.` : '';
-    aggiungi('alta', 'trascurate', `${trascurate.length === 1 ? 'Una richiesta trascurata' : `${trascurate.length} richieste trascurate`}: la n. ${prima.posizione}, ${prima.id_ordine}${prima.produttore ? ' di ' + prima.produttore : ''}, immessa il ${itData(prima.data_immissione)}, e' ancora aperta, ma il raccoglitore ha gia' evaso ${cosa.join(' e ')}.${altre}`);
+    aggiungi('alta', 'trascurate', `${trascurate.length === 1 ? 'Una richiesta trascurata' : `${trascurate.length} richieste trascurate`}: la n. ${prima.posizione}, ${prima.id_ordine}${prima.produttore ? ' di ' + prima.produttore : ''}, immessa il ${itData(prima.data_immissione)}, e' ancora aperta sul portale, ma il raccoglitore ha gia' evaso ${cosa.join(' e ')}.${altre}`);
   }
   if (prioritarieAperte.length && giorniDallInvio >= GIORNI_TOLLERANZA_PRIORITARIE) {
-    aggiungi('alta', 'prioritarie', `${prioritarieAperte.length} ${prioritarieAperte.length === 1 ? 'richiesta prioritaria ancora aperta' : 'richieste prioritarie ancora aperte'} dopo ${giorniDallInvio} giorni lavorativi dall'invio: ${elenco(prioritarieAperte.map(r => r.id_ordine))}.`);
+    aggiungi('alta', 'prioritarie', `${prioritarieAperte.length} ${prioritarieAperte.length === 1 ? 'richiesta prioritaria ancora aperta' : 'richieste prioritarie ancora aperte'} sul portale dopo ${giorniDallInvio} giorni lavorativi dall'invio, con dati completi fino al ${itData(consolidatoAl)}: ${elenco(prioritarieAperte.map(r => r.id_ordine))}.`);
   }
-  if (target && giorniTrascorsi >= 5 && !meseConcluso && proiezioneKg < target * SOGLIA_PROIEZIONE) {
+  if (target && giorniConsolidati >= 5 && !meseConcluso && proiezioneKg < target * SOGLIA_PROIEZIONE) {
     aggiungi('alta', 'proiezione', `A questo ritmo chiude il mese a ${kgT(proiezioneKg)}, il ${previsione.percentuale_proiezione}% del target di ${kgT(target)}.`);
   }
   if (meseConcluso && target && raccoltoKg < target) {
@@ -778,10 +824,10 @@ export function situazioneCanali({ chiave, anno, mese, oggi, terminati, assegnat
   const alert = [];
   const descrivi = (lista) => lista.slice(0, 4).map(a => `${a.id_ordine}${a.giorni !== null ? ` da ${a.giorni} ${a.giorni === 1 ? 'giorno' : 'giorni'}` : ''}`).join(', ') + (lista.length > 4 ? ` e altre ${lista.length - 4}` : '');
   if (canali.aci.aperte.length) {
-    alert.push({ gravita: 'alta', tipo: 'aci_aperte', messaggio: `${canali.aci.aperte.length === 1 ? 'Una richiesta ACI aperta' : `${canali.aci.aperte.length} richieste ACI aperte`} da far evadere il prima possibile: ${descrivi(canali.aci.aperte)}.` });
+    alert.push({ gravita: 'alta', tipo: 'aci_aperte', messaggio: `${canali.aci.aperte.length === 1 ? 'Una richiesta ACI aperta' : `${canali.aci.aperte.length} richieste ACI aperte`} da evadere il prima possibile, o da chiudere sul portale se gia' ritirat${canali.aci.aperte.length === 1 ? 'a' : 'e'}: ${descrivi(canali.aci.aperte)}.` });
   }
   if (canali.extra.aperte.length) {
-    alert.push({ gravita: 'media', tipo: 'extra_aperte', messaggio: `${canali.extra.aperte.length === 1 ? 'Una richiesta di extra raccolta aperta' : `${canali.extra.aperte.length} richieste di extra raccolta aperte`}: ${descrivi(canali.extra.aperte)}.` });
+    alert.push({ gravita: 'media', tipo: 'extra_aperte', messaggio: `${canali.extra.aperte.length === 1 ? 'Una richiesta di extra raccolta aperta' : `${canali.extra.aperte.length} richieste di extra raccolta aperte`}, da evadere o da segnare terminate nel modulo Extra Raccolta: ${descrivi(canali.extra.aperte)}.` });
   }
   return { canali, alert };
 }
