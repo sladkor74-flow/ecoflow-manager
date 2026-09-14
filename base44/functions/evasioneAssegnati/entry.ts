@@ -1,18 +1,20 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { raccoglitoriAttivi, trovaTarget, primoGiorno, ultimoGiorno, MESI } from "../../shared/evasioneAssegnati.ts";
+import { raccoglitoriAttivi, trovaTarget, situazioneCanali, MESI } from "../../shared/evasioneAssegnati.ts";
+import { oggiRoma } from "../../shared/reportSettimanali.ts";
 import { caricaDati, cancellaVecchi, eseguiControlli, indiceSicurezza, ultimoCaricamentoPrimarie } from "../../shared/evasioneAssegnatiDati.ts";
 
 // Situazione dell'evasione degli assegnati per un mese.
 //
 // Payload: { anno, mese }
-// Per ogni raccoglitore: target del mese, raccolto, lista caricata e ultimo
+// Per ogni raccoglitore: target del mese, raccolto per canale (rete, ACI, extra
+// raccolta), richieste ACI ed extra ancora aperte, lista caricata e ultimo
 // controllo con i suoi alert. Se nel frattempo sono state caricate primarie piu'
 // recenti e il controllo non e' ancora partito, lo esegue prima di rispondere.
 
 const CAMPI_CONTROLLO = [
   'id', 'eseguito_il', 'primarie_caricate_il', 'dati_al', 'richieste', 'evase', 'evase_da_altri', 'aperte', 'prioritarie_aperte',
-  'fuori_ordine', 'fuori_lista', 'non_piu_presenti', 'riassegnate', 'raccolto_kg', 'target_kg', 'proiezione_kg',
+  'fuori_ordine', 'trascurate', 'fuori_lista', 'non_piu_presenti', 'riassegnate', 'raccolto_kg', 'target_kg', 'proiezione_kg',
   'evadibili_ritmo', 'evadibili_target', 'alert_alti', 'alert_totali',
 ];
 
@@ -40,7 +42,7 @@ export default async function(req) {
     // Controlli rimasti indietro rispetto all'ultimo caricamento delle primarie.
     await eseguiControlli(base44, { liste: listeMese, dati, forza: false });
 
-    const inizio = primoGiorno(anno, mese), fine = ultimoGiorno(anno, mese);
+    const oggi = oggiRoma();
     const targetsMese = targetAnno.filter(t => t.mese === MESI[mese - 1]);
     const raccoglitori = raccoglitoriAttivi(dati.terminati, dati.assegnati, dati.anagrafica, anno);
     for (const l of listeMese) {
@@ -53,8 +55,9 @@ export default async function(req) {
       // Il nome con cui il raccoglitore compare nei target degli altri mesi: un
       // nuovo target va salvato con quello, per non creare un doppione.
       const altroMese = trovaTarget(targetAnno, r.nome);
-      const raccolto = dati.terminati.filter(t => t.chiaveTrasp === r.chiave && t.fine >= inizio && t.fine <= fine).reduce((s, t) => s + t.kg, 0);
-      const assegnatiOra = dati.assegnati.filter(a => a.chiaveTrasp === r.chiave).length;
+      // Canali sempre separati: target e lista riguardano la sola rete.
+      const { canali, alert: alertCanali } = situazioneCanali({ chiave: r.chiave, anno, mese, oggi, terminati: dati.terminati, assegnati: dati.assegnati });
+      const assegnatiOra = dati.assegnati.filter(a => a.canale === 'rete' && a.chiaveTrasp === r.chiave).length;
       const lista = listeMese.find(l => l.raccoglitore_chiave === r.chiave) || null;
       let controllo = null;
       if (lista) {
@@ -70,8 +73,10 @@ export default async function(req) {
         target_kg: target ? Number(target.target_kg) || 0 : null,
         target_id: target ? target.id : null,
         target_nome: target ? target.raccoglitore : (altroMese ? altroMese.raccoglitore : r.nome),
-        raccolto_kg: raccolto,
+        raccolto_kg: canali.rete.kg,
         assegnati_ora: assegnatiOra,
+        canali,
+        alert_canali: alertCanali,
         lista: lista ? {
           id: lista.id, file_nomi: lista.file_nomi, caricata_il: lista.caricata_il, richieste: lista.richieste, prioritarie: lista.prioritarie,
           avvisi: JSON.parse(lista.avvisi_json || '[]'),
@@ -79,8 +84,9 @@ export default async function(req) {
         controllo,
       });
     }
-    // Prima chi ha una lista, poi chi ha ordini assegnati, poi gli altri.
-    righe.sort((a, b) => (Number(!!b.lista) - Number(!!a.lista)) || (Number(b.assegnati_ora > 0) - Number(a.assegnati_ora > 0)) || a.nome.localeCompare(b.nome, 'it'));
+    // Prima chi ha una lista, poi chi ha richieste aperte in qualche canale, poi gli altri.
+    const haAperte = (x) => Number(x.assegnati_ora > 0 || x.canali.aci.aperte.length > 0 || x.canali.extra.aperte.length > 0);
+    righe.sort((a, b) => (Number(!!b.lista) - Number(!!a.lista)) || (haAperte(b) - haAperte(a)) || a.nome.localeCompare(b.nome, 'it'));
 
     return Response.json({ anno, mese, primarie_caricate_il: primarieIl, raccoglitori: righe });
   } catch (error) {

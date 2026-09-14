@@ -7,10 +7,13 @@ import { MESI, STATI_RICHIESTA, GRAVITA, tonnellate, dataIt, dataOraIt } from '@
 // Dettaglio dell'evasione di una lista: alert, previsione, stato di ogni
 // richiesta e ordini fuori lista. Ogni caricamento delle primarie del mese ha il
 // suo controllo, consultabile dallo storico finche' la lista resta in archivio.
+// In testa i tre canali del raccoglitore, rete, ACI ed extra raccolta, sempre
+// separati, con le richieste ACI ed extra ancora aperte.
 
 const FILTRI = [
   { chiave: 'tutte', etichetta: 'Tutte' },
   { chiave: 'aperta', etichetta: 'Aperte' },
+  { chiave: 'trascurate', etichetta: 'Trascurate' },
   { chiave: 'evasa', etichetta: 'Evase' },
   { chiave: 'fuori_ordine', etichetta: 'Fuori ordine' },
   { chiave: 'altro', etichetta: 'Da altri o non più presenti' },
@@ -23,6 +26,76 @@ function Tessera({ etichetta, valore, dettaglio, tono = '' }) {
       <div className={`text-xl font-bold tabular-nums ${tono}`}>{valore}</div>
       {dettaglio && <div className="text-xs text-muted-foreground">{dettaglio}</div>}
     </div>
+  );
+}
+
+const CANALI = [
+  { chiave: 'rete', etichetta: 'Rete' },
+  { chiave: 'aci', etichetta: 'ACI' },
+  { chiave: 'extra', etichetta: 'Extra raccolta' },
+];
+
+const scavalcata = (r) => (r.scavalcata_successive || 0) + (r.scavalcata_fuori || 0) > 0;
+
+function SezioneCanali({ riga, anno, mese }) {
+  const canali = riga.canali;
+  if (!canali) return null;
+  const alertCanali = riga.alert_canali || [];
+  const aperte = [
+    ...canali.aci.aperte.map(a => ({ ...a, canale: 'ACI' })),
+    ...canali.extra.aperte.map(a => ({ ...a, canale: 'Extra raccolta' })),
+  ];
+  return (
+    <section className="mt-5 space-y-3">
+      <h4 className="font-semibold">Canali di raccolta a {MESI[mese - 1]} {anno}</h4>
+      {alertCanali.map((a, i) => (
+        <div key={i} className="flex items-start gap-2 text-sm">
+          <span className={`mt-0.5 px-2 py-0.5 rounded-full border text-xs font-medium shrink-0 ${GRAVITA[a.gravita].classe}`}>{GRAVITA[a.gravita].etichetta}</span>
+          <span>{a.messaggio}</span>
+        </div>
+      ))}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        {CANALI.map(k => {
+          const x = canali[k.chiave];
+          const aperteN = k.chiave === 'rete' ? riga.assegnati_ora : x.aperte.length;
+          const evidenzia = k.chiave !== 'rete' && aperteN > 0;
+          return (
+            <div key={k.chiave} className="border rounded-lg p-3 bg-card">
+              <div className="text-xs text-muted-foreground">{k.etichetta}</div>
+              <div className="text-xl font-bold tabular-nums">{tonnellate(x.kg)} t</div>
+              <div className="text-xs text-muted-foreground tabular-nums">
+                {x.evasi} {x.evasi === 1 ? 'formulario' : 'formulari'} nel mese ·{' '}
+                <span className={evidenzia ? 'text-red-600 font-medium' : ''}>{aperteN} {aperteN === 1 ? 'richiesta aperta' : 'richieste aperte'} oggi</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {aperte.length > 0 && (
+        <div className="border rounded-lg overflow-x-auto bg-card">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/50 text-left">
+              <tr>
+                <th className="px-2 py-2">Canale</th><th className="px-2 py-2">ID</th><th className="px-2 py-2">Immessa</th>
+                <th className="px-2 py-2 text-right">Aperta da</th><th className="px-2 py-2">Produttore</th><th className="px-2 py-2">Classe</th>
+              </tr>
+            </thead>
+            <tbody>
+              {aperte.map(a => (
+                <tr key={a.canale + a.id_ordine} className="border-t">
+                  <td className="px-2 py-1.5">{a.canale}</td>
+                  <td className="px-2 py-1.5 font-mono">{a.id_ordine}</td>
+                  <td className="px-2 py-1.5 tabular-nums">{dataIt(a.immesso)}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums">{a.giorni !== null && a.giorni !== undefined ? `${a.giorni} ${a.giorni === 1 ? 'giorno' : 'giorni'}` : '—'}</td>
+                  <td className="px-2 py-1.5">{a.produttore}<div className="text-muted-foreground">{a.comune}{a.provincia ? ` (${a.provincia})` : ''}</div></td>
+                  <td className="px-2 py-1.5">{a.classe || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -42,7 +115,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
   const [filtro, setFiltro] = useState('tutte');
 
   useEffect(() => {
-    if (!open || !riga || !riga.lista) return;
+    if (!open || !riga || !riga.lista) { setControlli([]); return; }
     let annullato = false;
     setCaricando(true);
     setIndice(0);
@@ -65,6 +138,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
   const righe = esito ? esito.righe.filter(r => {
     if (filtro === 'tutte') return true;
     if (filtro === 'fuori_ordine') return r.saltate > 0;
+    if (filtro === 'trascurate') return r.stato === 'aperta' && scavalcata(r);
     if (filtro === 'altro') return ['evasa_da_altri', 'riassegnata', 'non_piu_presente', 'evasa_prima'].includes(r.stato);
     return r.stato === filtro;
   }) : [];
@@ -75,16 +149,21 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
         <SheetHeader className="text-left space-y-1">
           <SheetTitle className="text-xl pr-6">{riga.nome}</SheetTitle>
           <SheetDescription>
-            Lista di {MESI[mese - 1]} {anno} · {riga.lista.file_nomi} · caricata il {dataIt(riga.lista.caricata_il)}
+            {riga.lista
+              ? <>Lista di {MESI[mese - 1]} {anno} · {riga.lista.file_nomi} · caricata il {dataIt(riga.lista.caricata_il)}</>
+              : <>Nessuna lista di rete caricata per {MESI[mese - 1]} {anno}</>}
           </SheetDescription>
         </SheetHeader>
 
-        {caricando ? (
+        <SezioneCanali riga={riga} anno={anno} mese={mese} />
+
+        {!riga.lista ? null : caricando ? (
           <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" />Caricamento…</div>
         ) : !c ? (
           <p className="mt-6 text-sm text-muted-foreground">Nessun controllo ancora eseguito su questa lista.</p>
         ) : (
-          <div className="mt-5 space-y-6">
+          <div className="mt-6 space-y-6">
+            <h4 className="font-semibold border-t pt-5">Lista della rete</h4>
             {controlli.length > 1 && (
               <div className="flex items-center gap-2 flex-wrap text-xs">
                 <History className="w-3.5 h-3.5 text-muted-foreground" />
@@ -112,10 +191,11 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
               </section>
             )}
 
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
               <Tessera etichetta="Richieste" valore={c.richieste} />
               <Tessera etichetta="Evase" valore={c.evase} tono="text-emerald-600" />
               <Tessera etichetta="Aperte" valore={c.aperte} dettaglio={c.prioritarie_aperte ? `${c.prioritarie_aperte} prioritarie` : ''} tono={c.prioritarie_aperte ? 'text-red-600' : ''} />
+              <Tessera etichetta="Trascurate" valore={c.trascurate ?? '—'} dettaglio="aperte ma scavalcate" tono={c.trascurate ? 'text-red-600' : ''} />
               <Tessera etichetta="Fuori ordine" valore={c.fuori_ordine} tono={c.fuori_ordine ? 'text-amber-600' : ''} />
               <Tessera etichetta="Fuori lista" valore={c.fuori_lista} />
               <Tessera etichetta="Da altri" valore={c.evase_da_altri} dettaglio={c.riassegnate || c.non_piu_presenti ? `${c.riassegnate} riassegnate, ${c.non_piu_presenti} sparite` : ''} />
@@ -124,10 +204,10 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
             {p && (
               <div className="grid md:grid-cols-2 gap-4">
                 <section className="border rounded-lg p-4 bg-card text-sm">
-                  <h4 className="font-semibold mb-2">Target e previsione</h4>
+                  <h4 className="font-semibold mb-2">Target e previsione della rete</h4>
                   <Riga etichetta="Target del mese" valore={p.target_kg ? `${tonnellate(p.target_kg)} t` : 'non impostato'} />
                   <Riga etichetta="Raccolto finora" valore={`${tonnellate(c.raccolto_kg)} t${p.target_kg ? ` · ${Math.round((c.raccolto_kg / p.target_kg) * 100)}%` : ''}`} />
-                  <Riga etichetta="Giorni lavorativi" valore={`${p.giorni_trascorsi} trascorsi su ${p.giorni_totali}, ${p.giorni_residui} residui`} />
+                  <Riga etichetta="Giorni lavorativi" valore={`${p.giorni_trascorsi} trascorsi su ${p.giorni_totali}, ${p.giorni_residui} residui${p.lavora_sabato ? ', sabato compreso' : ''}`} />
                   <Riga etichetta="Ritmo del mese" valore={p.ritmo_mese_kg_giorno !== null ? `${tonnellate(p.ritmo_mese_kg_giorno)} t al giorno` : '—'} />
                   <Riga etichetta="Ritmo dell'anno" valore={p.ritmo_storico_kg_giorno ? `${tonnellate(p.ritmo_storico_kg_giorno)} t al giorno` : '—'} />
                   <Riga etichetta="Proiezione a fine mese" valore={`${tonnellate(p.proiezione_kg)} t${p.percentuale_proiezione !== null ? ` · ${p.percentuale_proiezione}%` : ''}`} />
@@ -142,7 +222,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                 </section>
 
                 <section className="border rounded-lg p-4 bg-card text-sm">
-                  <h4 className="font-semibold mb-2">Storia dell'anno</h4>
+                  <h4 className="font-semibold mb-2">Storia dell'anno in rete</h4>
                   <Riga etichetta="Formulari" valore={`${s.ordini}, ${tonnellate(s.kg)} t`} />
                   <Riga etichetta="Viaggi" valore={`${s.viaggi}, ${s.ordini_per_viaggio ?? '—'} formulari per viaggio`} />
                   <Riga etichetta="Peso medio per viaggio" valore={s.kg_per_viaggio ? `${tonnellate(s.kg_per_viaggio)} t` : '—'} />
@@ -208,7 +288,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                     </thead>
                     <tbody>
                       {righe.map(r => (
-                        <tr key={r.id_ordine} className={`border-t ${r.prioritaria ? 'bg-yellow-50' : ''}`}>
+                        <tr key={r.id_ordine} className={`border-t ${r.stato === 'aperta' && scavalcata(r) ? 'bg-red-50' : r.prioritaria ? 'bg-yellow-50' : ''}`}>
                           <td className="px-2 py-1.5 tabular-nums">{r.posizione}{r.prioritaria && <Star className="inline w-3 h-3 ml-0.5 text-amber-500 fill-amber-400" />}</td>
                           <td className="px-2 py-1.5 font-mono">{r.id_ordine}</td>
                           <td className="px-2 py-1.5 tabular-nums">{dataIt(r.data_immissione)}</td>
@@ -221,6 +301,11 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                           </td>
                           <td className="px-2 py-1.5 text-muted-foreground">
                             {r.saltate > 0 && <span className="text-amber-700">saltate {r.saltate} precedenti</span>}
+                            {r.stato === 'aperta' && scavalcata(r) && (
+                              <div className="text-red-700 font-medium">
+                                trascurata: evase dopo di lei {[r.scavalcata_successive ? `${r.scavalcata_successive} successive` : '', r.scavalcata_fuori ? `${r.scavalcata_fuori} fuori lista` : ''].filter(Boolean).join(' e ')}
+                              </div>
+                            )}
                             {r.stato === 'aperta' && r.entro_capacita === false && <span>oltre la capacità stimata del mese</span>}
                           </td>
                         </tr>

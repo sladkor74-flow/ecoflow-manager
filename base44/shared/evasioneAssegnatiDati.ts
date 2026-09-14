@@ -7,24 +7,33 @@ import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { oggiRoma } from "./reportSettimanali.ts";
 import { normalizzaPrimaria, normalizzaAssegnato, trovaTarget, controllaLista, indiceMese, MESI } from "./evasioneAssegnati.ts";
 
-const terminato = (r) => String(r.stato || '').toLowerCase().trim() === 'terminato';
+const stato = (r) => String(r.stato || '').toLowerCase().trim();
+const terminato = (r) => stato(r) === 'terminato';
+// Extra raccolta: solo le primarie, cioe' le raccolte presso un produttore. Le
+// richieste si inseriscono a mano come assegnate e diventano terminate con FIR,
+// fine trasporto e peso effettivo.
+const primariaExtra = (r) => String(r.tipo_movimento || 'primaria').toLowerCase() !== 'secondaria';
 
 export async function caricaDati(base44) {
   const svc = base44.asServiceRole.entities;
-  const [rete, aci, assRete, assAci, fornitori] = await Promise.all([
+  const [rete, aci, assRete, assAci, extra, fornitori] = await Promise.all([
     fetchAll(svc.PrimariaRete),
     fetchAll(svc.PrimariaAci),
     fetchAll(svc.Assegnato),
     fetchAll(svc.AssegnatoAci),
+    fetchAll(svc.ExtraRaccolta),
     fetchAll(svc.Fornitore),
   ]);
+  const extraPrimarie = extra.filter(primariaExtra);
   const terminati = [
     ...rete.filter(terminato).map(r => normalizzaPrimaria(r, 'rete')),
     ...aci.filter(terminato).map(r => normalizzaPrimaria(r, 'aci')),
+    ...extraPrimarie.filter(terminato).map(r => normalizzaPrimaria(r, 'extra')),
   ].filter(t => t.id_ordine && t.fine);
   const assegnati = [
     ...assRete.map(r => normalizzaAssegnato(r, 'rete')),
     ...assAci.map(r => normalizzaAssegnato(r, 'aci')),
+    ...extraPrimarie.filter(r => stato(r) === 'assegnato').map(r => normalizzaAssegnato(r, 'extra')),
   ].filter(a => a.id_ordine);
   const anagrafica = new Map();
   for (const f of fornitori) {

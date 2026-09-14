@@ -49,6 +49,10 @@
     "fuori_ordine": {
       "type": "number"
     },
+    "trascurate": {
+      "type": "number",
+      "description": "Richieste aperte scavalcate da richieste successive o da ordini fuori lista"
+    },
     "fuori_lista": {
       "type": "number"
     },

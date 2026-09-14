@@ -11,6 +11,9 @@ import { MESI, GRAVITA, tonnellate, dataIt, dataOraIt, leggiFogliLista } from '@
 // controlla cronologia, priorita', ordini fuori lista e fattibilita' rispetto al
 // target. Liste e controlli di un raccoglitore si cancellano quando si carica la
 // sua lista del mese successivo.
+//
+// Rete, ACI ed extra raccolta restano separati: lista, target e previsione
+// riguardano la rete; di ACI ed extra si vedono raccolto e richieste aperte.
 
 function Barra({ valore, massimo }) {
   const perc = massimo ? Math.min(100, Math.round((valore / massimo) * 100)) : 0;
@@ -42,15 +45,29 @@ function CampoTarget({ riga, isAdmin, onSalva }) {
   );
 }
 
-function AlertBadge({ controllo }) {
-  if (!controllo) return <span className="text-muted-foreground">—</span>;
-  const alte = controllo.alert.filter(a => a.gravita === 'alta').length;
-  const medie = controllo.alert.filter(a => a.gravita === 'media').length;
+const alertDellaRiga = (riga) => [...(riga.controllo ? riga.controllo.alert : []), ...(riga.alert_canali || [])];
+const attivitaCanali = (riga) => ['aci', 'extra'].some(k => riga.canali && (riga.canali[k].evasi > 0 || riga.canali[k].aperte.length > 0));
+
+function AlertBadge({ riga }) {
+  const alert = alertDellaRiga(riga);
+  if (!riga.controllo && !alert.length) return <span className="text-muted-foreground">—</span>;
+  const alte = alert.filter(a => a.gravita === 'alta').length;
+  const medie = alert.filter(a => a.gravita === 'media').length;
   if (!alte && !medie) return <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="w-3.5 h-3.5" />In linea</span>;
   return (
     <div className="flex gap-1">
       {alte > 0 && <span className="px-1.5 py-0.5 rounded-full bg-red-600 text-white text-xs font-semibold tabular-nums">{alte}</span>}
       {medie > 0 && <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-xs font-semibold tabular-nums">{medie}</span>}
+    </div>
+  );
+}
+
+function CanaleBreve({ etichetta, canale, tono }) {
+  if (!canale || (!canale.evasi && !canale.aperte.length)) return <div className="text-xs text-muted-foreground">{etichetta} —</div>;
+  return (
+    <div className="text-xs tabular-nums">
+      <span className="text-muted-foreground">{etichetta}</span> {tonnellate(canale.kg)} t · {canale.evasi} evasi
+      {canale.aperte.length > 0 && <span className={`ml-1 font-semibold ${tono}`}>· {canale.aperte.length} {canale.aperte.length === 1 ? 'aperta' : 'aperte'}</span>}
     </div>
   );
 }
@@ -63,12 +80,16 @@ function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina
     <tr className="border-t hover:bg-muted/30 align-top">
       <td className="px-4 py-3">
         <div className="font-medium">{riga.nome}</div>
-        <div className="text-xs text-muted-foreground">{riga.assegnati_ora} {riga.assegnati_ora === 1 ? 'ordine assegnato' : 'ordini assegnati'} ora</div>
+        <div className="text-xs text-muted-foreground">rete: {riga.assegnati_ora} {riga.assegnati_ora === 1 ? 'ordine assegnato' : 'ordini assegnati'} ora</div>
       </td>
       <td className="px-4 py-3"><CampoTarget riga={riga} isAdmin={isAdmin} onSalva={onSalvaTarget} /></td>
       <td className="px-4 py-3 min-w-[130px]">
         <div className="tabular-nums text-sm">{tonnellate(riga.raccolto_kg)} t{riga.target_kg ? <span className="text-muted-foreground"> · {Math.round((riga.raccolto_kg / riga.target_kg) * 100)}%</span> : ''}</div>
         <Barra valore={riga.raccolto_kg} massimo={riga.target_kg} />
+      </td>
+      <td className="px-4 py-3 whitespace-nowrap">
+        <CanaleBreve etichetta="ACI" canale={riga.canali && riga.canali.aci} tono="text-red-600" />
+        <CanaleBreve etichetta="Extra" canale={riga.canali && riga.canali.extra} tono="text-amber-700" />
       </td>
       <td className="px-4 py-3 max-w-[200px]">
         {l ? (
@@ -94,7 +115,7 @@ function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina
           </>
         ) : <span className="text-muted-foreground">—</span>}
       </td>
-      <td className="px-4 py-3"><AlertBadge controllo={c} /></td>
+      <td className="px-4 py-3"><AlertBadge riga={riga} /></td>
       <td className="px-4 py-3">
         <div className="flex items-center justify-end gap-1">
           {isAdmin && (
@@ -107,7 +128,7 @@ function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina
               </Button>
             </>
           )}
-          {l && <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Dettaglio" onClick={() => onApri(riga)}><Eye className="w-4 h-4" /></Button>}
+          {(l || attivitaCanali(riga)) && <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Dettaglio" onClick={() => onApri(riga)}><Eye className="w-4 h-4" /></Button>}
           {l && isAdmin && <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-600 hover:text-red-700" title="Elimina lista" onClick={() => onElimina(riga)}><Trash2 className="w-4 h-4" /></Button>}
         </div>
       </td>
@@ -213,11 +234,12 @@ export default function EvasioneAssegnati({ isAdmin }) {
   };
 
   const righe = dati ? dati.raccoglitori : [];
-  const principali = righe.filter(r => r.lista || r.assegnati_ora > 0);
-  const altri = righe.filter(r => !r.lista && !r.assegnati_ora);
+  const inEvidenza = (r) => r.lista || r.assegnati_ora > 0 || r.raccolto_kg > 0 || attivitaCanali(r);
+  const principali = righe.filter(inEvidenza);
+  const altri = righe.filter(r => !inEvidenza(r));
   const alert = useMemo(() => {
     const PESO = { alta: 0, media: 1, info: 2 };
-    return righe.flatMap(r => (r.controllo ? r.controllo.alert.map(a => ({ ...a, riga: r })) : []))
+    return righe.flatMap(r => alertDellaRiga(r).map(a => ({ ...a, riga: r })))
       .sort((a, b) => PESO[a.gravita] - PESO[b.gravita] || a.riga.nome.localeCompare(b.riga.nome, 'it'));
   }, [righe]);
   const alertVisibili = tuttiAlert ? alert : alert.filter(a => a.gravita !== 'info').slice(0, 10);
@@ -229,7 +251,8 @@ export default function EvasioneAssegnati({ isAdmin }) {
       <tr>
         <th className="px-4 py-2.5 font-semibold">Raccoglitore</th>
         <th className="px-4 py-2.5 font-semibold">Target mese</th>
-        <th className="px-4 py-2.5 font-semibold">Raccolto</th>
+        <th className="px-4 py-2.5 font-semibold">Raccolto rete</th>
+        <th className="px-4 py-2.5 font-semibold">ACI · Extra raccolta</th>
         <th className="px-4 py-2.5 font-semibold">Lista</th>
         <th className="px-4 py-2.5 font-semibold">Evasione</th>
         <th className="px-4 py-2.5 font-semibold">Previsione fine mese</th>
@@ -271,6 +294,8 @@ export default function EvasioneAssegnati({ isAdmin }) {
           Carica per ogni raccoglitore la lista inviata a inizio mese: una o più file Excel con la colonna ID degli assegnati, nell'ordine di evasione,
           con in giallo le prime o le prioritarie. Il controllo si ripete da solo a ogni caricamento delle primarie, sulla data di fine trasporto.
           Il target è quello di Target & Status. Caricando la lista del mese successivo, quella precedente e i suoi controlli si cancellano.
+          Lista, target e previsione riguardano la sola rete. ACI ed extra raccolta sono mostrati a parte: una richiesta ACI aperta o una richiesta
+          di extra raccolta inserita come assegnata nel modulo Extra Raccolta genera un alert.
         </span>
       </div>
 
@@ -318,13 +343,13 @@ export default function EvasioneAssegnati({ isAdmin }) {
                     onCarica={caricaLista} onApri={setAperto} onElimina={eliminaLista} onSalvaTarget={salvaTarget} />
                 ))}
                 {principali.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Nessun raccoglitore con ordini assegnati o liste in questo mese.</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">Nessun raccoglitore con liste, raccolte o richieste aperte in questo mese.</td></tr>
                 )}
                 {altri.length > 0 && (
                   <tr className="border-t bg-muted/20">
-                    <td colSpan={8} className="px-4 py-2">
+                    <td colSpan={9} className="px-4 py-2">
                       <button onClick={() => setMostraAltri(v => !v)} className="text-xs text-muted-foreground uppercase tracking-wide hover:underline">
-                        {mostraAltri ? 'Nascondi' : 'Mostra'} {altri.length} raccoglitori senza ordini assegnati
+                        {mostraAltri ? 'Nascondi' : 'Mostra'} {altri.length} raccoglitori senza attività nel mese
                       </button>
                     </td>
                   </tr>
@@ -339,7 +364,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
         </>
       )}
 
-      <DettaglioEvasione riga={aperto} anno={anno} mese={mese} open={!!aperto && !!aperto.lista} onClose={() => setAperto(null)} />
+      <DettaglioEvasione riga={aperto} anno={anno} mese={mese} open={!!aperto} onClose={() => setAperto(null)} />
     </div>
   );
 }

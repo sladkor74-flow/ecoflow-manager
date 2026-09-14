@@ -8,12 +8,13 @@ import { Label } from '@/components/ui/label';
 import { Save, ChevronLeft } from 'lucide-react';
 import { calcExtraRaccolta } from '@/lib/extraRaccoltaCalc';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
-import { MESI } from '@/lib/pfuConstants';
 import { formatNumber } from '@/lib/utils';
+import { giornoDaData, dataDaGiorno, competenza, datiChiusuraCompleti } from '@/lib/extraRaccoltaStato';
 
 const CLASSI = ['P', 'M', 'G1', 'G2'];
 
 const EMPTY = {
+  stato: 'assegnato', ordine_immesso_il: '',
   numero_fir: '', tipologia_trasporto: '', tipo_movimento: 'primaria', stoccaggio: '',
   trasporto_iniziato_il: '', trasporto_finito_il: '',
   produttore: '', trasportatore: '', destinazione: '', tipo_destinazione: 'imp',
@@ -24,15 +25,6 @@ const EMPTY = {
   costo_pulizia: 0, costi_aggiuntivi: 0, note_costi: '', note: '',
 };
 
-function toInputDate(v) {
-  if (!v) return '';
-  try { return new Date(v).toISOString().split('T')[0]; } catch { return ''; }
-}
-
-function toISODate(v) {
-  if (!v) return null;
-  try { return new Date(v + 'T00:00:00').toISOString(); } catch { return null; }
-}
 
 // Select con opzioni + "Altro..." che rivela un input di testo libero
 function ComboSelect({ value, onChange, options, placeholder }) {
@@ -110,8 +102,11 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
   useEffect(() => {
     if (open) {
       const d = { ...EMPTY, ...(initial || {}) };
-      d.trasporto_iniziato_il = toInputDate(initial?.trasporto_iniziato_il);
-      d.trasporto_finito_il = toInputDate(initial?.trasporto_finito_il);
+      // Una scheda gia' salvata senza stato resta senza: lo stato va scelto.
+      if (initial?.id) d.stato = String(initial.stato || '').toLowerCase().trim();
+      d.ordine_immesso_il = giornoDaData(initial?.ordine_immesso_il);
+      d.trasporto_iniziato_il = giornoDaData(initial?.trasporto_iniziato_il);
+      d.trasporto_finito_il = giornoDaData(initial?.trasporto_finito_il);
       setForm(d);
       setDaContrattoR(false);
       setDaContrattoD(false);
@@ -134,6 +129,7 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
     [fornitori]
   );
   const secondaria = form.tipo_movimento === 'secondaria';
+  const terminato = form.stato === 'terminato';
 
   const precompila = (nome, prestazione, dataRif) => {
     if (!nome) return;
@@ -200,18 +196,29 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
     }
   };
 
+  // Assegnato: la richiesta, con chi la deve evadere e da quando. Terminato: in
+  // piu' FIR, fine trasporto e peso effettivo, perche' va in fatturazione.
   const validate = () => {
     const e = {};
-    if (!form.numero_fir) e.numero_fir = 'Obbligatorio';
-    if (!form.trasporto_finito_il) e.trasporto_finito_il = 'Obbligatorio';
+    if (!form.stato) e.stato = 'Scegli lo stato';
     if (form.tipo_movimento === 'secondaria') {
       if (!form.stoccaggio) e.stoccaggio = 'Obbligatorio';
-      if (!form.destinazione) e.destinazione = 'Obbligatorio';
+      if (terminato && !form.destinazione) e.destinazione = 'Obbligatorio';
     } else if (!form.produttore) {
       e.produttore = 'Obbligatorio';
     }
     if (!form.classe) e.classe = 'Obbligatorio';
-    if (!form.peso_effettivo || Number(form.peso_effettivo) <= 0) e.peso_effettivo = 'Maggiore di zero';
+    if (form.stato === 'assegnato') {
+      if (!form.ordine_immesso_il) e.ordine_immesso_il = 'Obbligatoria';
+      if (!form.trasportatore) e.trasportatore = 'Obbligatorio';
+    }
+    if (terminato) {
+      if (!form.numero_fir) e.numero_fir = 'Obbligatorio';
+      if (!form.trasporto_finito_il) e.trasporto_finito_il = 'Obbligatorio';
+      if (!form.peso_effettivo || Number(form.peso_effettivo) <= 0) e.peso_effettivo = 'Maggiore di zero';
+    } else if (form.peso_effettivo !== '' && form.peso_effettivo !== null && Number(form.peso_effettivo) < 0) {
+      e.peso_effettivo = 'Non negativo';
+    }
     if ((Number(form.costo_pulizia) > 0 || Number(form.costi_aggiuntivi) > 0) && !form.note_costi)
       e.note_costi = 'Obbligatorio quando costo pulizia o costi aggiuntivi > 0';
     setErrors(e);
@@ -221,17 +228,19 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
   const save = () => {
     if (!validate()) return;
     const p = { ...form };
+    if (p.stato === 'assegnato' && datiChiusuraCompleti(p)
+      && window.confirm('Hai inserito FIR, data di fine trasporto e peso effettivo. Segnare l\'intervento come terminato? Solo i terminati vanno in fatturazione.')) {
+      p.stato = 'terminato';
+    }
     ['peso_effettivo', 'prezzo_attivo_t', 'sovracosto_raccolta', 'sovracosto_trasporto', 'sovracosto_trattamento',
      'costo_raccolta_t', 'costo_stoccaggio_t', 'costo_trattamento_t', 'costo_pulizia', 'costi_aggiuntivi'].forEach(k => {
       p[k] = Number(p[k]) || 0;
     });
-    p.trasporto_iniziato_il = toISODate(form.trasporto_iniziato_il);
-    p.trasporto_finito_il = toISODate(form.trasporto_finito_il);
-    if (p.trasporto_finito_il) {
-      const d = new Date(p.trasporto_finito_il);
-      p.mese = MESI[d.getMonth()];
-      p.anno = d.getFullYear();
-    }
+    p.ordine_immesso_il = dataDaGiorno(form.ordine_immesso_il);
+    p.trasporto_iniziato_il = dataDaGiorno(form.trasporto_iniziato_il);
+    p.trasporto_finito_il = dataDaGiorno(form.trasporto_finito_il);
+    // Competenza dalla fine trasporto; per una richiesta ancora aperta dalla data della richiesta.
+    Object.assign(p, competenza(form.trasporto_finito_il || form.ordine_immesso_il));
     if (!p.id_ordine) p.id_ordine = p.numero_fir || `ER-${Date.now()}`;
     // In una secondaria il soggetto da cui parte il carico e' lo stoccaggio.
     if (p.tipo_movimento === 'secondaria') p.produttore = p.stoccaggio;
@@ -261,7 +270,24 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
             <legend className="text-sm font-semibold px-1">Intervento</legend>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Nr. FIR *</Label>
+                <Label className="text-xs text-muted-foreground">Stato *</Label>
+                <Select value={form.stato || undefined} onValueChange={v => set('stato', v)}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Scegli..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="assegnato">Assegnato: da evadere</SelectItem>
+                    <SelectItem value="terminato">Terminato: evaso</SelectItem>
+                  </SelectContent>
+                </Select>
+                {errors.stato && <p className="text-xs text-destructive">{errors.stato}</p>}
+                <p className="text-xs text-muted-foreground">Solo i terminati vanno in fatturazione</p>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Data richiesta{form.stato === 'assegnato' ? ' *' : ''}</Label>
+                <Input type="date" className="h-9 text-sm" value={form.ordine_immesso_il} onChange={e => set('ordine_immesso_il', e.target.value)} />
+                {errors.ordine_immesso_il && <p className="text-xs text-destructive">{errors.ordine_immesso_il}</p>}
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Nr. FIR{terminato ? ' *' : ''}</Label>
                 <Input className="h-9 text-sm" value={form.numero_fir} onChange={e => set('numero_fir', e.target.value)} />
                 {errors.numero_fir && <p className="text-xs text-destructive">{errors.numero_fir}</p>}
               </div>
@@ -285,7 +311,7 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
                 <Input type="date" className="h-9 text-sm" value={form.trasporto_iniziato_il} onChange={e => set('trasporto_iniziato_il', e.target.value)} />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Data fine trasporto *</Label>
+                <Label className="text-xs text-muted-foreground">Data fine trasporto{terminato ? ' *' : ''}</Label>
                 <Input type="date" className="h-9 text-sm" value={form.trasporto_finito_il} onChange={e => onDataFineChange(e.target.value)} />
                 {errors.trasporto_finito_il && <p className="text-xs text-destructive">{errors.trasporto_finito_il}</p>}
                 <p className="text-xs text-muted-foreground">Determina il mese di competenza</p>
@@ -311,11 +337,12 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
                 </div>
               )}
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Trasportatore</Label>
+                <Label className="text-xs text-muted-foreground">Trasportatore{form.stato === 'assegnato' ? ' *' : ''}</Label>
                 <ComboSelect value={form.trasportatore} onChange={onTrasportatoreChange} options={trasportatori} placeholder="Seleziona..." />
+                {errors.trasportatore && <p className="text-xs text-destructive">{errors.trasportatore}</p>}
               </div>
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Destinatario{secondaria ? ' *' : ''}</Label>
+                <Label className="text-xs text-muted-foreground">Destinatario{secondaria && terminato ? ' *' : ''}</Label>
                 <ComboSelect value={form.destinazione} onChange={onDestinatarioChange} options={destinatari} placeholder="Seleziona..." />
                 {errors.destinazione && <p className="text-xs text-destructive">{errors.destinazione}</p>}
               </div>
@@ -366,7 +393,7 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
                 <p className="text-xs text-muted-foreground">Solo RETE: PFU Autodemolizione non ammessa</p>
               </div>
               <div className="space-y-1 md:col-span-2">
-                <Label className="text-xs text-muted-foreground">Quantita' in kg *</Label>
+                <Label className="text-xs text-muted-foreground">Peso effettivo in kg{terminato ? ' *' : ''}</Label>
                 <Input type="number" className="h-9 text-sm" value={form.peso_effettivo} onChange={e => set('peso_effettivo', e.target.value)} />
                 {errors.peso_effettivo && <p className="text-xs text-destructive">{errors.peso_effettivo}</p>}
               </div>

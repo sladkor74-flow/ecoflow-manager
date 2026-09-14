@@ -2,19 +2,21 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Plus, Pencil, Trash2, Copy, FileSpreadsheet, FileText } from 'lucide-react';
+import { Loader2, Plus, Pencil, Trash2, Copy, FileSpreadsheet, FileText, AlertTriangle } from 'lucide-react';
 import { MESI } from '@/lib/pfuConstants';
 import { calcExtraRaccolta } from '@/lib/extraRaccoltaCalc';
 import { formatNumber } from '@/lib/utils';
 import { exportExtraRaccoltaExcel, exportExtraRaccoltaPDF } from '@/lib/extraRaccoltaExport';
 import ExtraRaccoltaForm from '@/components/fatturazione/ExtraRaccoltaForm';
+import { STATI_EXTRA, statoExtra, eTerminato, datiChiusuraCompleti, dateDaCorreggere, giornoDaData, competenza } from '@/lib/extraRaccoltaStato';
 
 const ANNI = [2024, 2025, 2026];
 
 export default function ExtraRaccolta() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ anno: '', mese: '', trasportatore: '', destinazione: '', tipologia_trasporto: '' });
+  const [filters, setFilters] = useState({ anno: '', mese: '', stato: '', trasportatore: '', destinazione: '', tipologia_trasporto: '' });
+  const [sistemando, setSistemando] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [formInitial, setFormInitial] = useState(null);
 
@@ -33,20 +35,27 @@ export default function ExtraRaccolta() {
     return records.filter(r => {
       if (filters.anno && String(r.anno) !== String(filters.anno)) return false;
       if (filters.mese && r.mese !== filters.mese) return false;
+      if (filters.stato && statoExtra(r) !== (filters.stato === 'senza' ? '' : filters.stato)) return false;
       if (filters.trasportatore && r.trasportatore !== filters.trasportatore) return false;
       if (filters.destinazione && r.destinazione !== filters.destinazione) return false;
       if (filters.tipologia_trasporto && r.tipologia_trasporto !== filters.tipologia_trasporto) return false;
       return true;
     }).sort((a, b) => {
-      const da = a.trasporto_finito_il ? new Date(a.trasporto_finito_il).getTime() : 0;
-      const db = b.trasporto_finito_il ? new Date(b.trasporto_finito_il).getTime() : 0;
-      return db - da;
+      // Prima le richieste da evadere, poi le altre dalla piu' recente.
+      const aperta = (r) => Number(statoExtra(r) === 'assegnato');
+      const giorno = (r) => giornoDaData(r.trasporto_finito_il || r.ordine_immesso_il);
+      return (aperta(b) - aperta(a)) || giorno(b).localeCompare(giorno(a));
     });
   }, [records, filters]);
 
+  // Solo i terminati entrano nei totali e nelle esportazioni, come in fatturazione.
+  const terminati = useMemo(() => filtered.filter(eTerminato), [filtered]);
+  const senzaStato = useMemo(() => records.filter(r => !statoExtra(r)), [records]);
+  const daSegnare = senzaStato.filter(datiChiusuraCompleti);
+
   const kpi = useMemo(() => {
     let tonnellate = 0, ricavi = 0, costi = 0, margine = 0;
-    for (const r of filtered) {
+    for (const r of terminati) {
       const c = calcExtraRaccolta(r);
       tonnellate += c.tonnellate;
       ricavi += c.ricavo;
@@ -55,7 +64,7 @@ export default function ExtraRaccolta() {
     }
     const margine_perc = ricavi !== 0 ? (margine / ricavi * 100) : 0;
     return { tonnellate, ricavi, costi, margine, margine_perc };
-  }, [filtered]);
+  }, [terminati]);
 
   const trasportatori = useMemo(() => [...new Set(records.map(r => r.trasportatore).filter(Boolean))].sort(), [records]);
   const destinatari = useMemo(() => [...new Set(records.map(r => r.destinazione).filter(Boolean))].sort(), [records]);
@@ -83,21 +92,39 @@ export default function ExtraRaccolta() {
   };
 
   const duplicate = (r) => {
-    const { id, numero_fir, trasporto_iniziato_il, trasporto_finito_il, created_date, updated_date, created_by_id, ...rest } = r;
-    setFormInitial({ ...rest, numero_fir: '', trasporto_iniziato_il: null, trasporto_finito_il: null });
+    const { id, id_ordine, numero_fir, trasporto_iniziato_il, trasporto_finito_il, created_date, updated_date, created_by_id, ...rest } = r;
+    setFormInitial({ ...rest, stato: 'assegnato', numero_fir: '', trasporto_iniziato_il: null, trasporto_finito_il: null });
     setFormOpen(true);
+  };
+
+  // Le schede inserite prima dello stato: quelle con FIR, fine trasporto e peso
+  // si segnano terminate, riportando le date al giorno di calendario giusto.
+  const segnaTerminati = async () => {
+    if (!confirm(`Segnare come terminati ${daSegnare.length} interventi con FIR, data di fine trasporto e peso? Da quel momento entrano in fatturazione, giacenze, report e verifiche nel mese della loro fine trasporto.`)) return;
+    setSistemando(true);
+    try {
+      for (const r of daSegnare) {
+        const date = dateDaCorreggere(r);
+        const fine = giornoDaData(date.trasporto_finito_il || r.trasporto_finito_il);
+        await base44.entities.ExtraRaccolta.update(r.id, { stato: 'terminato', ...date, ...competenza(fine) });
+      }
+    } catch (e) {
+      alert(e.message);
+    }
+    setSistemando(false);
+    load();
   };
 
   const exportExcel = () => {
     const mese = filters.mese || 'Tutti';
     const anno = filters.anno || new Date().getFullYear();
-    exportExtraRaccoltaExcel(filtered, mese, anno);
+    exportExtraRaccoltaExcel(terminati, mese, anno);
   };
 
   const exportPDF = () => {
     const mese = filters.mese || 'Tutti';
     const anno = filters.anno || new Date().getFullYear();
-    exportExtraRaccoltaPDF(filtered, mese, anno);
+    exportExtraRaccoltaPDF(terminati, mese, anno);
   };
 
   return (
@@ -105,15 +132,34 @@ export default function ExtraRaccolta() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl lg:text-3xl font-heading font-bold">Extra Raccolta</h1>
-          <p className="text-muted-foreground mt-1">Inserimento e gestione interventi extra raccolta (canale RETE).</p>
+          <p className="text-muted-foreground mt-1">Richieste e interventi di extra raccolta: si inseriscono come assegnati e si chiudono come terminati con FIR, fine trasporto e peso. Solo i terminati vanno in fatturazione.</p>
         </div>
         <Button onClick={() => { setFormInitial(null); setFormOpen(true); }}>
           <Plus className="w-4 h-4 mr-1.5" /> Aggiungi intervento
         </Button>
       </div>
 
+      {senzaStato.length > 0 && (
+        <div className="flex items-start gap-3 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div className="flex-1 space-y-1">
+            <p>
+              <strong>{senzaStato.length} {senzaStato.length === 1 ? 'intervento è stato salvato' : 'interventi sono stati salvati'} senza stato</strong> e
+              {senzaStato.length === 1 ? ' non viene conteggiato' : ' non vengono conteggiati'} in fatturazione, giacenze, report e verifiche.
+            </p>
+            {daSegnare.length > 0 && <p>{daSegnare.length} {daSegnare.length === 1 ? 'ha' : 'hanno'} FIR, data di fine trasporto e peso: si possono segnare come terminati.</p>}
+            {senzaStato.length > daSegnare.length && <p>{senzaStato.length - daSegnare.length} {senzaStato.length - daSegnare.length === 1 ? 'è incompleto' : 'sono incompleti'}: aprili con il filtro Stato «Senza stato» e scegli lo stato.</p>}
+          </div>
+          {daSegnare.length > 0 && (
+            <Button size="sm" onClick={segnaTerminati} disabled={sistemando}>
+              {sistemando && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}Segna {daSegnare.length} come terminati
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Filtri */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 p-4 border rounded-lg bg-muted/30">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 p-4 border rounded-lg bg-muted/30">
         <div>
           <label className="text-xs text-muted-foreground block mb-1">Anno</label>
           <Select value={filters.anno ? String(filters.anno) : 'all'} onValueChange={v => setFilters({ ...filters, anno: v === 'all' ? '' : Number(v) })}>
@@ -131,6 +177,18 @@ export default function ExtraRaccolta() {
             <SelectContent>
               <SelectItem value="all">Tutti</SelectItem>
               {MESI.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">Stato</label>
+          <Select value={filters.stato || 'all'} onValueChange={v => setFilters({ ...filters, stato: v === 'all' ? '' : v })}>
+            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tutti</SelectItem>
+              <SelectItem value="assegnato">Assegnati</SelectItem>
+              <SelectItem value="terminato">Terminati</SelectItem>
+              <SelectItem value="senza">Senza stato</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -169,7 +227,7 @@ export default function ExtraRaccolta() {
       {/* KPI */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="border rounded-lg p-3 bg-card">
-          <div className="text-xs text-muted-foreground">Tonnellate</div>
+          <div className="text-xs text-muted-foreground">Tonnellate terminate</div>
           <div className="text-lg font-bold tabular-nums">{formatNumber(kpi.tonnellate)} t</div>
         </div>
         <div className="border rounded-lg p-3 bg-card">
@@ -191,12 +249,13 @@ export default function ExtraRaccolta() {
 
       {/* Export */}
       <div className="flex gap-2">
-        <Button variant="outline" size="sm" onClick={exportExcel} disabled={filtered.length === 0}>
+        <Button variant="outline" size="sm" onClick={exportExcel} disabled={terminati.length === 0}>
           <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Esporta Excel
         </Button>
-        <Button variant="outline" size="sm" onClick={exportPDF} disabled={filtered.length === 0}>
+        <Button variant="outline" size="sm" onClick={exportPDF} disabled={terminati.length === 0}>
           <FileText className="w-4 h-4 mr-1.5" /> Esporta PDF
         </Button>
+        <span className="self-center text-xs text-muted-foreground">Totali ed esportazioni comprendono solo i terminati.</span>
       </div>
 
       {/* Tabella */}
@@ -204,13 +263,14 @@ export default function ExtraRaccolta() {
         <div className="text-center py-8"><Loader2 className="w-5 h-5 animate-spin inline" /></div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground border rounded-lg">
-          Nessun intervento trovato. Clicca "Aggiungi intervento" per inserirne uno nuovo.
+          Nessun intervento trovato. Clicca "Aggiungi intervento" per inserire una richiesta o un intervento.
         </div>
       ) : (
         <div className="border rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted">
               <tr>
+                <th className="text-left px-3 py-2 font-semibold">Stato</th>
                 <th className="text-left px-3 py-2 font-semibold">Nr. FIR</th>
                 <th className="text-left px-3 py-2 font-semibold">Data fine trasporto</th>
                 <th className="text-left px-3 py-2 font-semibold">Produttore o stoccaggio</th>
@@ -228,10 +288,17 @@ export default function ExtraRaccolta() {
             <tbody>
               {filtered.map(r => {
                 const c = calcExtraRaccolta(r);
+                const stato = statoExtra(r);
+                const conta = stato === 'terminato';
+                const giornoIt = (v) => { const g = giornoDaData(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
+                const euro = (v) => (conta ? `€ ${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—');
                 return (
                   <tr key={r.id} className="border-t hover:bg-muted/20">
+                    <td className="px-3 py-2"><span className={`inline-block px-1.5 py-0.5 rounded border text-[11px] font-medium whitespace-nowrap ${STATI_EXTRA[stato].classe}`}>{STATI_EXTRA[stato].etichetta}</span></td>
                     <td className="px-3 py-2 font-mono text-xs">{r.numero_fir || '-'}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{r.trasporto_finito_il ? new Date(r.trasporto_finito_il).toLocaleDateString('it-IT') : '-'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {r.trasporto_finito_il ? giornoIt(r.trasporto_finito_il) : r.ordine_immesso_il ? <span className="text-muted-foreground">richiesta il {giornoIt(r.ordine_immesso_il)}</span> : '-'}
+                    </td>
                     <td className="px-3 py-2 text-xs">
                       {r.tipo_movimento === 'secondaria' && <span className="inline-block mr-1 px-1.5 py-0.5 rounded bg-accent/15 text-[10px] font-medium uppercase tracking-wide">Secondaria</span>}
                       {(r.tipo_movimento === 'secondaria' ? r.stoccaggio : r.produttore) || '-'}
@@ -240,11 +307,11 @@ export default function ExtraRaccolta() {
                     <td className="px-3 py-2 text-xs">{r.destinazione || '-'}</td>
                     <td className="px-3 py-2 text-xs">{r.tipologia_trasporto || '-'}</td>
                     <td className="px-3 py-2">{r.classe || '-'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatNumber(r.peso_effettivo || 0)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">€ {formatNumber(c.ricavo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">€ {formatNumber(c.costo_totale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td className={`px-3 py-2 text-right tabular-nums font-medium ${c.margine >= 0 ? 'text-success' : 'text-destructive'}`}>
-                      € {formatNumber(c.margine, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <td className="px-3 py-2 text-right tabular-nums">{r.peso_effettivo ? formatNumber(r.peso_effettivo) : '-'}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{euro(c.ricavo)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{euro(c.costo_totale)}</td>
+                    <td className={`px-3 py-2 text-right tabular-nums font-medium ${!conta ? 'text-muted-foreground' : c.margine >= 0 ? 'text-success' : 'text-destructive'}`}>
+                      {euro(c.margine)}
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex gap-1 justify-center">
