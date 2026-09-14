@@ -85,9 +85,9 @@ function Tabella({ colonne, righe, onChange, isAdmin, nuovaRiga, totale }) {
   );
 }
 
-function Riquadro({ titolo, children, nota }) {
+function Riquadro({ titolo, children, nota, classe = '' }) {
   return (
-    <section className="border rounded-lg p-4 bg-card space-y-2">
+    <section className={`border rounded-lg p-4 bg-card space-y-2 ${classe}`}>
       <h3 className="font-heading font-semibold">{titolo}</h3>
       {children}
       {nota && <p className="text-xs text-muted-foreground">{nota}</p>}
@@ -121,6 +121,42 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
   }, [anno, toast]);
 
   useEffect(() => { carica(); }, [carica]);
+
+  // Consuntivo mese per mese, letto dai formulari terminati per data di fine
+  // trasporto. RETE e ACI restano separati: il target del contratto riguarda la
+  // RETE, l'ACI si confronta solo con il suo budget.
+  const [consuntivo, setConsuntivo] = useState({ rete: null, aci: null });
+  useEffect(() => {
+    let attivo = true;
+    const perMese = (res) => {
+      const d = res && (res.data || res);
+      if (!d || !Array.isArray(d.by_regione)) return null;
+      return MESI.map(m => d.by_regione.reduce((s, r) => s + ((r.mesi && r.mesi[m]) || 0), 0));
+    };
+    setConsuntivo({ rete: null, aci: null });
+    Promise.all([
+      base44.functions.invoke('computeRaccolto', { filters: { anno: [anno], canale: 'rete' } }).catch(() => null),
+      base44.functions.invoke('computeRaccolto', { filters: { anno: [anno], canale: 'aci' } }).catch(() => null),
+    ]).then(([rete, aci]) => { if (attivo) setConsuntivo({ rete: perMese(rete), aci: perMese(aci) }); });
+    return () => { attivo = false; };
+  }, [anno]);
+  const oggi = new Date();
+  // Indice dell'ultimo mese con consuntivo: -1 per un anno futuro, 11 per uno passato.
+  const ultimoMese = anno < oggi.getFullYear() ? 11 : anno > oggi.getFullYear() ? -1 : oggi.getMonth();
+  const valoreConsuntivo = (canale, i) => (consuntivo[canale] && i <= ultimoMese ? consuntivo[canale][i] : null);
+  const scarto = (fatto, atteso) => {
+    const a = numero(atteso);
+    if (fatto === null || fatto === undefined || a === null || !Number.isFinite(a)) return <span className="text-muted-foreground">—</span>;
+    const d = fatto - a;
+    return <span className={d < 0 ? 'text-red-600' : 'text-emerald-700'}>{d > 0 ? '+' : ''}{tonnellate(d)}</span>;
+  };
+  const cellaConsuntivo = (v, i) => (
+    <td className={`py-0.5 px-2 text-right tabular-nums ${i === ultimoMese && anno === oggi.getFullYear() ? 'italic' : ''}`}>
+      {v === null ? <span className="text-muted-foreground">—</span> : tonnellate(v)}
+    </td>
+  );
+  const totaleConsuntivo = (canale) => (consuntivo[canale] ? consuntivo[canale].slice(0, ultimoMese + 1).reduce((s, v) => s + v, 0) : null);
+  const totaleAtteso = (chiave) => dati[chiave].slice(0, ultimoMese + 1).reduce((s, v) => s + (numero(v) || 0), 0);
 
   const imposta = (chiave, valore) => { setDati(prev => ({ ...prev, [chiave]: valore })); setModificato(true); };
 
@@ -209,32 +245,70 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
             colonne={[{ chiave: 'regione', etichetta: 'Regione' }, { chiave: 'province', etichetta: 'Province' }, { chiave: 'target', etichetta: 't', numero: true, classe: 'w-28' }]} />
         </Riquadro>
 
-        <Riquadro titolo="Target e budget mensili" nota={<>Target rivisto {tonnellate(somma(dati.mensile))} t: {confronto(somma(dati.mensile))}. Budget RETE {tonnellate(somma(dati.rete))} t; budget ACI {tonnellate(somma(dati.aci))} t, canale separato.</>}>
+        <Riquadro
+          classe="lg:col-span-2"
+          titolo="Target, budget e consuntivo mensili"
+          nota={<>
+            Target rivisto {tonnellate(somma(dati.mensile))} t{confronto(somma(dati.mensile)) ? <>: {confronto(somma(dati.mensile))}</> : ''}. Budget RETE {tonnellate(somma(dati.rete))} t; budget ACI {tonnellate(somma(dati.aci))} t, canale separato.
+            {' '}Il consuntivo è il raccolto dei formulari terminati, per data di fine trasporto; il mese in corso, in corsivo, è parziale. Lo scarto è consuntivo meno atteso, in rosso quando manca raccolta. Nei totali consuntivo e scarti arrivano fino al mese in corso.
+          </>}
+        >
           <div className="overflow-x-auto">
             <table className="text-xs w-full">
               <thead>
                 <tr className="text-muted-foreground">
+                  <th />
+                  <th colSpan={6} className="text-center py-1 px-1 border-b">Canale RETE</th>
+                  <th colSpan={3} className="text-center py-1 px-1 border-b border-l">Canale ACI</th>
+                </tr>
+                <tr className="text-muted-foreground">
                   <th className="text-left py-1 pr-2" />
                   <th className="text-right py-1 px-1">Target iniziale</th>
                   <th className="text-right py-1 px-1">Target rivisto</th>
-                  <th className="text-right py-1 px-1">Budget rete</th>
-                  <th className="text-right py-1 px-1">Budget ACI</th>
+                  <th className="text-right py-1 px-1">Budget</th>
+                  <th className="text-right py-1 px-2">Consuntivo</th>
+                  <th className="text-right py-1 px-2">Scarto sul rivisto</th>
+                  <th className="text-right py-1 px-2">Scarto sul budget</th>
+                  <th className="text-right py-1 px-1 border-l">Budget</th>
+                  <th className="text-right py-1 px-2">Consuntivo</th>
+                  <th className="text-right py-1 px-2">Scarto sul budget</th>
                 </tr>
               </thead>
               <tbody>
-                {MESI.map((m, i) => (
-                  <tr key={m}>
-                    <td className="py-0.5 pr-2 font-medium">{m}</td>
-                    {['mensile_iniziale', 'mensile', 'rete', 'aci'].map(k => (
-                      <td key={k} className="py-0.5 px-1">
-                        <Input value={dati[k][i]} onChange={e => cambiaMese(k, i, e.target.value)} disabled={!isAdmin} inputMode="decimal" className="h-8 text-right tabular-nums" />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
+                {MESI.map((m, i) => {
+                  const rete = valoreConsuntivo('rete', i);
+                  const aci = valoreConsuntivo('aci', i);
+                  const campo = (k) => (
+                    <td key={k} className={`py-0.5 px-1 ${k === 'aci' ? 'border-l' : ''}`}>
+                      <Input value={dati[k][i]} onChange={e => cambiaMese(k, i, e.target.value)} disabled={!isAdmin} inputMode="decimal" className="h-8 text-right tabular-nums min-w-[80px]" />
+                    </td>
+                  );
+                  return (
+                    <tr key={m}>
+                      <td className="py-0.5 pr-2 font-medium">{m}</td>
+                      {campo('mensile_iniziale')}
+                      {campo('mensile')}
+                      {campo('rete')}
+                      {cellaConsuntivo(rete, i)}
+                      <td className="py-0.5 px-2 text-right tabular-nums">{scarto(rete, dati.mensile[i])}</td>
+                      <td className="py-0.5 px-2 text-right tabular-nums">{scarto(rete, dati.rete[i])}</td>
+                      {campo('aci')}
+                      {cellaConsuntivo(aci, i)}
+                      <td className="py-0.5 px-2 text-right tabular-nums">{scarto(aci, dati.aci[i])}</td>
+                    </tr>
+                  );
+                })}
                 <tr className="border-t font-semibold">
                   <td className="py-1 pr-2">Totale</td>
-                  {['mensile_iniziale', 'mensile', 'rete', 'aci'].map(k => <td key={k} className="py-1 px-1 text-right tabular-nums">{tonnellate(somma(dati[k]))}</td>)}
+                  <td className="py-1 px-1 text-right tabular-nums">{tonnellate(somma(dati.mensile_iniziale))}</td>
+                  <td className="py-1 px-1 text-right tabular-nums">{tonnellate(somma(dati.mensile))}</td>
+                  <td className="py-1 px-1 text-right tabular-nums">{tonnellate(somma(dati.rete))}</td>
+                  <td className="py-1 px-2 text-right tabular-nums">{totaleConsuntivo('rete') === null ? '—' : tonnellate(totaleConsuntivo('rete'))}</td>
+                  <td className="py-1 px-2 text-right tabular-nums">{ultimoMese >= 0 ? scarto(totaleConsuntivo('rete'), totaleAtteso('mensile')) : '—'}</td>
+                  <td className="py-1 px-2 text-right tabular-nums">{ultimoMese >= 0 ? scarto(totaleConsuntivo('rete'), totaleAtteso('rete')) : '—'}</td>
+                  <td className="py-1 px-1 text-right tabular-nums border-l">{tonnellate(somma(dati.aci))}</td>
+                  <td className="py-1 px-2 text-right tabular-nums">{totaleConsuntivo('aci') === null ? '—' : tonnellate(totaleConsuntivo('aci'))}</td>
+                  <td className="py-1 px-2 text-right tabular-nums">{ultimoMese >= 0 ? scarto(totaleConsuntivo('aci'), totaleAtteso('aci')) : '—'}</td>
                 </tr>
               </tbody>
             </table>
