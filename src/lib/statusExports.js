@@ -3,6 +3,7 @@ import { jsPDF } from 'jspdf';
 import pptxgen from 'pptxgenjs';
 import { base44 } from '@/api/base44Client';
 import { MESI } from './pfuConstants';
+import { formatTonnellate } from '@/lib/utils';
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -38,10 +39,10 @@ export function exportPDF(kpis, mergedData, regioneData, impiantiData) {
   doc.text('KPI Riepilogativi', 14, 32);
   doc.setFontSize(9);
   const kpiLines = [
-    `Target Annuo Complessivo: ${kpis.targetAnnuoTotale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t`,
-    `Totale Progressivo Raccolto: ${kpis.raccoltoTotale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t`,
-    `Leftover Complessivo Annuo: ${kpis.leftoverTotale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t`,
-    `Delta Mese In Corso: ${kpis.deltaMeseCorrente.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t`,
+    `Target Annuo Complessivo: ${formatTonnellate(kpis.targetAnnuoTotale)} t`,
+    `Totale Progressivo Raccolto: ${formatTonnellate(kpis.raccoltoTotale)} t`,
+    `Leftover Complessivo Annuo: ${formatTonnellate(kpis.leftoverTotale)} t`,
+    `Delta Mese In Corso: ${formatTonnellate(kpis.deltaMeseCorrente)} t`,
   ];
   kpiLines.forEach((line, i) => doc.text(line, 14, 39 + i * 5));
 
@@ -59,9 +60,9 @@ export function exportPDF(kpis, mergedData, regioneData, impiantiData) {
     if (y > 200) { doc.addPage(); y = 15; }
     doc.text(String(r.regione).substring(0, 22), 14, y);
     doc.text(String(r.raccoglitore).substring(0, 28), 50, y);
-    doc.text(r.targetAnnuo.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 }), 115, y);
-    doc.text(r.raccoltoTotale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 }), 140, y);
-    doc.text(r.leftover.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 }), 165, y);
+    doc.text(formatTonnellate(r.targetAnnuo), 115, y);
+    doc.text(formatTonnellate(r.raccoltoTotale), 140, y);
+    doc.text(formatTonnellate(r.leftover), 165, y);
     y += 5;
   }
 
@@ -75,7 +76,7 @@ export function exportPDF(kpis, mergedData, regioneData, impiantiData) {
   y = 26;
   for (const r of regioneData) {
     doc.text(String(r.regione).substring(0, 22), 14, y);
-    doc.text(r.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 }), 60, y);
+    doc.text(formatTonnellate(r.totale), 60, y);
     y += 5;
   }
 
@@ -89,7 +90,7 @@ export function exportPDF(kpis, mergedData, regioneData, impiantiData) {
   for (const i of impiantiData) {
     if (y > 200) break;
     doc.text(String(i.impianto).substring(0, 30), 14, y);
-    doc.text(i.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 }), 80, y);
+    doc.text(formatTonnellate(i.totale), 80, y);
     y += 5;
   }
 
@@ -108,10 +109,10 @@ export async function exportPPT(kpis, mergedData, regioneData, impiantiData) {
   s1.addText(`Data: ${dateStr}`, { x: 0.5, y: 1, fontSize: 14, color: '666666' });
   const kpiRows = [
     [{ text: 'KPI', options: { bold: true, fill: '36C5F0', color: 'FFFFFF' } }, { text: 'Valore [t]', options: { bold: true, fill: '36C5F0', color: 'FFFFFF' } }],
-    ['Target Annuo Complessivo', kpis.targetAnnuoTotale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })],
-    ['Totale Progressivo Raccolto', kpis.raccoltoTotale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })],
-    ['Leftover Complessivo Annuo', kpis.leftoverTotale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })],
-    ['Delta Mese In Corso', kpis.deltaMeseCorrente.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })],
+    ['Target Annuo Complessivo', formatTonnellate(kpis.targetAnnuoTotale)],
+    ['Totale Progressivo Raccolto', formatTonnellate(kpis.raccoltoTotale)],
+    ['Leftover Complessivo Annuo', formatTonnellate(kpis.leftoverTotale)],
+    ['Delta Mese In Corso', formatTonnellate(kpis.deltaMeseCorrente)],
   ];
   s1.addTable(kpiRows, { x: 0.5, y: 1.8, w: 6, fontSize: 12, border: { type: 'solid', pt: 1 } });
 
@@ -120,7 +121,7 @@ export async function exportPPT(kpis, mergedData, regioneData, impiantiData) {
   s2.addText('Target & Performance Raccoglitori', { x: 0.5, y: 0.3, fontSize: 24, bold: true, color: '1A1A2E' });
   const raccRows = [['Regione', 'Raccoglitore', 'T.Annuo', 'Raccolto', 'Leftover']];
   for (const r of mergedData) {
-    raccRows.push([String(r.regione).substring(0, 15), String(r.raccoglitore).substring(0, 20), r.targetAnnuo.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 }), r.raccoltoTotale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 }), r.leftover.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })]);
+    raccRows.push([String(r.regione).substring(0, 15), String(r.raccoglitore).substring(0, 20), formatTonnellate(r.targetAnnuo), formatTonnellate(r.raccoltoTotale), formatTonnellate(r.leftover)]);
   }
   s2.addTable(raccRows, { x: 0.5, y: 1, w: 12, fontSize: 9, border: { type: 'solid', pt: 1 }, colW: [2, 4, 2, 2, 2] });
 
@@ -128,14 +129,14 @@ export async function exportPPT(kpis, mergedData, regioneData, impiantiData) {
   const s3 = pptx.addSlide();
   s3.addText('Target e Scostamento per Regione', { x: 0.5, y: 0.3, fontSize: 24, bold: true, color: '1A1A2E' });
   const regRows = [['Regione', 'Raccolto Totale [t]']];
-  for (const r of regioneData) regRows.push([r.regione, r.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })]);
+  for (const r of regioneData) regRows.push([r.regione, formatTonnellate(r.totale)]);
   s3.addTable(regRows, { x: 0.5, y: 1, w: 6, fontSize: 11, border: { type: 'solid', pt: 1 } });
 
   // Slide 4: Impianti
   const s4 = pptx.addSlide();
   s4.addText('Progressivo e Avanzamento Impianti', { x: 0.5, y: 0.3, fontSize: 24, bold: true, color: '1A1A2E' });
   const impRows = [['Impianto', 'Totale Conferito [t]']];
-  for (const i of impiantiData) impRows.push([String(i.impianto).substring(0, 30), i.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })]);
+  for (const i of impiantiData) impRows.push([String(i.impianto).substring(0, 30), formatTonnellate(i.totale)]);
   s4.addTable(impRows, { x: 0.5, y: 1, w: 8, fontSize: 11, border: { type: 'solid', pt: 1 } });
 
   await pptx.writeFile({ fileName: `Status_Target_${new Date().toISOString().slice(0, 10)}.pptx` });

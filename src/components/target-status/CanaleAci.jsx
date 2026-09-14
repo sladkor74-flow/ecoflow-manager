@@ -1,5 +1,6 @@
 import React from 'react';
 import { tonnellate, percentuale } from '@/lib/target';
+import { formatNumber } from '@/lib/utils';
 
 // Canale ACI, indipendente dalla RETE: raccolto dai centri di demolizione per
 // regione confrontato con la previsione del contratto ACI Ecotyre, che e'
@@ -7,7 +8,7 @@ import { tonnellate, percentuale } from '@/lib/target';
 // capienza del fondo ACI. Il prezzo e' il corrispettivo per tonnellata.
 
 const leggiLista = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
-const euro = (v) => (Number(v) || 0).toLocaleString('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+const euro = (v) => `${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 
 export default function CanaleAci({ raccoltoAci, commessa, anno }) {
   const previsione = leggiLista(commessa?.target_prezzo_regioni_json);

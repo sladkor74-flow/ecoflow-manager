@@ -6,11 +6,12 @@ import { Plus, Upload, History, ClipboardEdit, Trash2 } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import RilevazioneForm from './RilevazioneForm';
 import StoricoRilevazioni from './StoricoRilevazioni';
+import { formatNumber, formatTonnellate } from '@/lib/utils';
 
 function fmt(n, dec = 2) {
   if (n == null || isNaN(n)) return '—';
   // Conteggi interi; tonnellate con due decimali, tre se i kg non sono tondi.
-  return Number(n).toLocaleString('it-IT', dec === 0 ? { minimumFractionDigits: 0, maximumFractionDigits: 0 } : { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  return dec === 0 ? formatNumber(n, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : dec === 2 ? formatTonnellate(n) : formatNumber(n, { minimumFractionDigits: dec, maximumFractionDigits: dec });
 }
 function fmtDate(d) {
   if (!d) return '—';

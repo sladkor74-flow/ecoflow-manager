@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronDown, AlertTriangle } from 'lucide-react';
+import { formatTonnellate } from '@/lib/utils';
 
 export default function AttivaAnomalie({ anomalie }) {
   const [expanded, setExpanded] = useState(false);
@@ -23,7 +24,7 @@ export default function AttivaAnomalie({ anomalie }) {
             <div key={i} className="text-sm bg-background/60 rounded px-3 py-1.5 border border-destructive/20">
               <span className="text-muted-foreground">[{a.tipologia}]</span>{' '}
               <span className="font-medium">{a.descrizione}</span>{' '}
-              {a.tonnellate > 0 && <span className="text-muted-foreground">({a.tonnellate.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t)</span>}
+              {a.tonnellate > 0 && <span className="text-muted-foreground">({formatTonnellate(a.tonnellate)} t)</span>}
             </div>
           ))}
         </div>

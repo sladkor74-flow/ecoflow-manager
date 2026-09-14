@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Calendar, Layers, Edit3, Loader2, Warehouse, Truck, Factory, Building2 } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
+import { formatKg } from '@/lib/utils';
 
-function fmt(n) { return Math.round(n || 0).toLocaleString('it-IT'); }
+function fmt(n) { return formatKg(n || 0); }
 
 function EditableIpotesi({ value, onSave }) {
   const [editing, setEditing] = useState(false);

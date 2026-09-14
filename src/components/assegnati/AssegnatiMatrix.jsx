@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { ChevronRight, ChevronDown } from 'lucide-react';
+import { formatTonnellate, formatKg } from '@/lib/utils';
 
 // Matrice analitica aggregata con raggruppamento gerarchico:
 // Anno -> Semestre -> Regione -> Provincia
@@ -23,8 +24,8 @@ export default function AssegnatiMatrix({ matrix }) {
 
   const toggle = (key) => setExpanded((p) => ({ ...p, [key]: !p[key] }));
 
-  const fmt = (n) => Math.round(n || 0).toLocaleString('it-IT');
-  const fmtTon = (kg) => ((kg || 0) / 1000).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  const fmt = (n) => formatKg(n || 0);
+  const fmtTon = (kg) => formatTonnellate(((kg || 0) / 1000));
 
   const rows = [];
   for (const [anno, semestri] of Object.entries(tree)) {

@@ -1,8 +1,9 @@
 import React from 'react';
+import { formatTonnellate } from '@/lib/utils';
 
 function fmt(n) {
   if (n == null || n === '' || isNaN(n)) return '—';
-  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  return formatTonnellate(Number(n));
 }
 
 function pct(val, tot) {

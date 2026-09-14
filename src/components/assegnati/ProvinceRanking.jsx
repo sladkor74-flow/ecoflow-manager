@@ -1,5 +1,6 @@
 import React from 'react';
 import { MapPin } from 'lucide-react';
+import { formatTonnellate } from '@/lib/utils';
 
 // Classifica della concentrazione per provincia
 export default function ProvinceRanking({ ranking }) {
@@ -26,7 +27,7 @@ export default function ProvinceRanking({ ranking }) {
               style={{ width: `${(p.ordini / maxOrdini) * 100}%` }}
             />
             <span className="absolute inset-0 flex items-center px-2 text-xs font-medium">
-              {p.ordini} ord · {(p.peso_kg / 1000).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t
+              {p.ordini} ord · {formatTonnellate((p.peso_kg / 1000))} t
             </span>
           </div>
         </div>

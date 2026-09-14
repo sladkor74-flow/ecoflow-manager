@@ -5,12 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Trash2, X, Pencil } from 'lucide-react';
+import { formatTonnellate } from '@/lib/utils';
 
 const TIPOLOGIE = ['EoW', 'Frantumazione/R1', 'n.a.'];
 
 function fmt(n) {
   if (n == null || n === '' || isNaN(n)) return '—';
-  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  return formatTonnellate(Number(n));
 }
 
 export default function TargetManager({ open, onClose, anno, destinazioni, onSaved }) {

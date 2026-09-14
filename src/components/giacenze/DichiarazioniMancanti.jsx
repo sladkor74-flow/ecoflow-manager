@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { formatTonnellate } from '@/lib/utils';
 
-function fmt(n) { return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 }); }
+function fmt(n) { return formatTonnellate(Number(n)); }
 
 export default function DichiarazioniMancanti({ mancanti }) {
   const [open, setOpen] = useState(false);

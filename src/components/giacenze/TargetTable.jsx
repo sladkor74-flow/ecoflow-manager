@@ -1,9 +1,10 @@
 import React from 'react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { formatTonnellate } from '@/lib/utils';
 
 function fmt(n) {
   if (n == null || n === '' || isNaN(n)) return '—';
-  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  return formatTonnellate(Number(n));
 }
 
 function fmtPct(n) {

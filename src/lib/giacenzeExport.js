@@ -1,10 +1,11 @@
 import * as XLSX from 'xlsx';
 import { formattaPesi } from '@/lib/formatoExcel';
 import { jsPDF } from 'jspdf';
+import { formatTonnellate } from '@/lib/utils';
 
 function fmt(n) {
   if (n === null || n === undefined || n === '') return '—';
-  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  return formatTonnellate(Number(n));
 }
 
 export function exportGiacenzeExcel(righe, totali, aciRighe, anno) {
