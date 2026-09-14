@@ -66,7 +66,7 @@ function CanaleBreve({ etichetta, canale, tono }) {
   if (!canale || (!canale.evasi && !canale.aperte.length)) return <div className="text-xs text-muted-foreground">{etichetta} —</div>;
   return (
     <div className="text-xs tabular-nums">
-      <span className="text-muted-foreground">{etichetta}</span> {tonnellate(canale.kg)} t · {canale.evasi} evasi
+      <span className="text-muted-foreground">{etichetta}</span> {tonnellate(canale.kg)} t · {canale.evasi} {canale.evasi === 1 ? 'evaso' : 'evasi'}
       {canale.aperte.length > 0 && <span className={`ml-1 font-semibold ${tono}`}>· {canale.aperte.length} {canale.aperte.length === 1 ? 'aperta' : 'aperte'}</span>}
     </div>
   );
@@ -128,7 +128,7 @@ function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina
               </Button>
             </>
           )}
-          {(l || attivitaCanali(riga)) && <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Dettaglio" onClick={() => onApri(riga)}><Eye className="w-4 h-4" /></Button>}
+          {(l || riga.raccolto_kg > 0 || attivitaCanali(riga)) && <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Dettaglio" onClick={() => onApri(riga)}><Eye className="w-4 h-4" /></Button>}
           {l && isAdmin && <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-600 hover:text-red-700" title="Elimina lista" onClick={() => onElimina(riga)}><Trash2 className="w-4 h-4" /></Button>}
         </div>
       </td>
@@ -319,9 +319,11 @@ export default function EvasioneAssegnati({ isAdmin }) {
                   <Bell className="w-4 h-4" /> Alert del mese
                   <span className="px-2 py-0.5 rounded-full bg-amber-600 text-white text-xs tabular-nums">{alert.filter(a => a.gravita !== 'info').length}</span>
                 </h3>
-                <button onClick={() => setTuttiAlert(v => !v)} className="text-xs text-amber-900 hover:underline">
-                  {tuttiAlert ? 'Solo i più importanti' : `Mostra tutti, comprese le ${alert.filter(a => a.gravita === 'info').length} informazioni`}
-                </button>
+                {alertVisibili.length < alert.length || tuttiAlert ? (
+                  <button onClick={() => setTuttiAlert(v => !v)} className="text-xs text-amber-900 hover:underline">
+                    {tuttiAlert ? 'Solo i più importanti' : `Mostra tutti, comprese le ${alert.filter(a => a.gravita === 'info').length} informazioni`}
+                  </button>
+                ) : null}
               </div>
               <ul className="divide-y bg-card">
                 {alertVisibili.map((a, i) => (
