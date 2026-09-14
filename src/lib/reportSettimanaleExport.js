@@ -1,7 +1,8 @@
 // Esportazione in PDF del report settimanale della raccolta primaria RETE.
 // A4 orizzontale: fascia di intestazione, riquadri di sintesi, tabella per regione
 // e raccoglitore con le settimane del mese e l'avanzamento sul target, totali,
-// legenda e numero di pagina.
+// legenda e numero di pagina. Con l'opzione impianti, sotto ogni raccoglitore gli
+// impianti di destinazione del mese e in coda il riepilogo per impianto.
 
 import { jsPDF } from 'jspdf';
 import { formatTonnellate, formatPercentuale } from '@/lib/utils';
@@ -27,7 +28,7 @@ const t = (v) => formatTonnellate(v);
 const dataIt = (iso) => (iso ? iso.split('-').reverse().join('/') : '');
 const coloreAvanzamento = (p) => (p >= 100 ? C.verde : p >= 70 ? C.blu : p >= 40 ? C.ambra : C.rosso);
 
-export function esportaReportSettimanalePdf(report, gruppi, totale) {
+export function esportaReportSettimanalePdf(report, gruppi, totale, { impianti = false } = {}) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
@@ -158,12 +159,14 @@ export function esportaReportSettimanalePdf(report, gruppi, totale) {
     y += h;
   };
 
+  // Intestazione da ripetere a ogni cambio pagina: la tabella principale o il riepilogo.
+  let intestazioneRipetuta = () => intestazioneTabella();
   const spazio = (h) => {
     if (y + h <= H - 12) return;
     piede();
     doc.addPage();
     intestazionePagina();
-    intestazioneTabella();
+    intestazioneRipetuta();
   };
 
   // celle: { nome, target, w: [], residue, raccolte, perc, residuoAnno, totaleAnno } come oggetti { testo, colore, grassetto }
@@ -214,6 +217,40 @@ export function esportaReportSettimanalePdf(report, gruppi, totale) {
     y += h;
   };
 
+  // Impianti di destinazione del mese sotto la riga del raccoglitore.
+  const FONT_IMPIANTI = 6.6;
+  const ETICHETTA_IMPIANTI = 'Impianti di destinazione:';
+  const lineeImpianti = (elenco) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(FONT_IMPIANTI);
+    const le = doc.getTextWidth(ETICHETTA_IMPIANTI) + 2;
+    doc.setFont('helvetica', 'normal');
+    const testo = elenco.map(i => `${i.impianto}  ${t(i.t)} t`).join('    ·    ');
+    return { le, linee: doc.splitTextToSize(testo, W - 2 * M - 10 - le) };
+  };
+  const altezzaImpianti = (elenco) => (elenco.length ? 1.6 + lineeImpianti(elenco).linee.length * 3.1 : 0);
+  const rigaImpianti = (elenco, sfondo) => {
+    const { le, linee } = lineeImpianti(elenco);
+    const h = altezzaImpianti(elenco);
+    if (sfondo) {
+      doc.setFillColor(...sfondo);
+      doc.rect(M, y, W - 2 * M, h, 'F');
+    }
+    doc.setFillColor(...C.medio);
+    doc.rect(M + 5, y + 0.4, 0.6, h - 1.8, 'F');
+    doc.setFontSize(FONT_IMPIANTI);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...C.medio);
+    doc.text(ETICHETTA_IMPIANTI, M + 7, y + 2.6);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...C.grigio);
+    linee.forEach((l, i) => doc.text(l, M + 7 + le, y + 2.6 + i * 3.1));
+    doc.setDrawColor(...C.bordo);
+    doc.setLineWidth(0.1);
+    doc.line(M, y + h, W - M, y + h);
+    y += h;
+  };
+
   const numero = (v, opz = {}) => ({ testo: t(v), colore: v === 0 && !opz.sempre ? C.tenue : opz.colore });
   const perc = (fatto, atteso) => ({ barra: atteso > 0 ? (fatto / atteso) * 100 : null });
 
@@ -234,6 +271,10 @@ export function esportaReportSettimanalePdf(report, gruppi, totale) {
     }, { sfondo: C.chiaro, accento: C.medio, grassetto: true, colore: C.scuro, h: 6.5, senzaBordo: true });
     g.righe.forEach((r, i) => {
       const etichetta = `${r.raccoglitore}${r.non_raccoglie ? '  · non raccoglie' : ''}${r.senza_target ? '  · senza target' : ''}`;
+      const conImpianti = impianti && r.impianti.length > 0;
+      const sfondo = i % 2 ? C.zebra : null;
+      // Riga e impianti restano sulla stessa pagina.
+      if (conImpianti) spazio(6 + altezzaImpianti(r.impianti));
       riga({
         nome: { testo: etichetta },
         target: r.non_raccoglie ? { testo: 'NR', colore: C.grigio } : numero(r.target_mese),
@@ -243,7 +284,8 @@ export function esportaReportSettimanalePdf(report, gruppi, totale) {
         perc: perc(r.raccolto_mese, r.target_mese),
         residuoAnno: { testo: t(r.residuo_anno), colore: r.residuo_anno < 0 ? C.verde : C.testo },
         totaleAnno: numero(r.totale_anno),
-      }, { sfondo: i % 2 ? C.zebra : null, rientro: true });
+      }, { sfondo, rientro: true, senzaBordo: conImpianti });
+      if (conImpianti) rigaImpianti(r.impianti, sfondo);
     });
   });
   y += 1.5;
@@ -257,7 +299,99 @@ export function esportaReportSettimanalePdf(report, gruppi, totale) {
     residuoAnno: { testo: t(totale.residuo_anno) },
     totaleAnno: { testo: t(totale.totale_anno) },
   }, { sfondo: C.scuro, grassetto: true, colore: C.bianco, h: 7.5, senzaBordo: true });
+
+  if (impianti) riepilogoImpianti();
   piede();
 
-  doc.save(`Report settimanale ${report.nome_mese} ${report.anno}.pdf`);
+  doc.save(`Report settimanale ${report.nome_mese} ${report.anno}${impianti ? ' con impianti' : ''}.pdf`);
+
+  // Riepilogo per impianto di destinazione: tonnellate del mese, quota sul raccolto
+  // e raccoglitori che vi hanno conferito.
+  function riepilogoImpianti() {
+    const perImpianto = new Map();
+    for (const r of report.righe) {
+      for (const i of r.impianti) {
+        if (!perImpianto.has(i.impianto)) perImpianto.set(i.impianto, { impianto: i.impianto, t: 0, raccoglitori: [] });
+        const voce = perImpianto.get(i.impianto);
+        voce.t += i.t;
+        voce.raccoglitori.push({ nome: r.raccoglitore, regione: r.regione, t: i.t });
+      }
+    }
+    const elenco = [...perImpianto.values()].sort((a, b) => b.t - a.t);
+    const somma = elenco.reduce((s, v) => s + v.t, 0);
+    const col = { impianto: 62, raccoglitori: W - 2 * M - 62 - 26 - 44, t: 26, quota: 44 };
+
+    const titolo = () => {
+      doc.setFillColor(...C.scuro);
+      doc.roundedRect(M, y, W - 2 * M, 8, 1.2, 1.2, 'F');
+      doc.setTextColor(...C.bianco);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.3);
+      doc.text('Impianto di destinazione', M + 3, y + 5.2);
+      doc.text('Raccoglitori che hanno conferito', M + col.impianto + 3, y + 5.2);
+      doc.text(`Tonnellate ${mm}`, M + col.impianto + col.raccoglitori + col.t - 2.5, y + 5.2, { align: 'right' });
+      doc.text('Quota sul raccolto', W - M - 2.5, y + 5.2, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      y += 8;
+    };
+
+    const hTitoloSezione = 9;
+    spazio(hTitoloSezione + 8 + 7);
+    y += 5;
+    doc.setTextColor(...C.scuro);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text(`Impianti di destinazione — ${meseTesto}`, M, y + 4);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.grigio);
+    doc.text(elenco.length
+      ? `${elenco.length} ${elenco.length === 1 ? 'impianto' : 'impianti'} · ${t(somma)} t conferite nel mese`
+      : 'Nessun conferimento nel mese', W - M, y + 4, { align: 'right' });
+    y += hTitoloSezione - 3;
+    if (!elenco.length) return;
+
+    intestazioneRipetuta = titolo;
+    titolo();
+    elenco.forEach((v, i) => {
+      doc.setFontSize(7);
+      // Lo stesso raccoglitore in piu' regioni si distingue con la regione.
+      const ripetuti = new Set(v.raccoglitori.map(x => x.nome).filter((n, k, arr) => arr.indexOf(n) !== k));
+      const nomi = v.raccoglitori.sort((a, b) => b.t - a.t).map(x => `${x.nome}${ripetuti.has(x.nome) ? ` (${x.regione})` : ''} ${t(x.t)} t`).join('  ·  ');
+      const linee = doc.splitTextToSize(nomi, col.raccoglitori - 5);
+      const h = Math.max(6.5, 2.6 + linee.length * 3.1);
+      spazio(h);
+      if (i % 2) {
+        doc.setFillColor(...C.zebra);
+        doc.rect(M, y, W - 2 * M, h, 'F');
+      }
+      doc.setDrawColor(...C.bordo);
+      doc.setLineWidth(0.1);
+      doc.line(M, y + h, W - M, y + h);
+      doc.setTextColor(...C.testo);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.6);
+      doc.text(doc.splitTextToSize(v.impianto, col.impianto - 5)[0], M + 3, y + 4.3);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(...C.grigio);
+      linee.forEach((l, k) => doc.text(l, M + col.impianto + 3, y + 4.3 + k * 3.1));
+      doc.setTextColor(...C.testo);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.6);
+      doc.text(t(v.t), M + col.impianto + col.raccoglitori + col.t - 2.5, y + 4.3, { align: 'right' });
+      const quota = somma > 0 ? (v.t / somma) * 100 : 0;
+      const bx = W - M - col.quota + 3, bw = col.quota - 17, by = y + 3.1;
+      doc.setFillColor(...C.chiaro);
+      doc.roundedRect(bx, by, bw, 1.8, 0.9, 0.9, 'F');
+      if (quota > 0) {
+        doc.setFillColor(...C.medio);
+        doc.roundedRect(bx, by, Math.max(1.8, bw * quota / 100), 1.8, 0.9, 0.9, 'F');
+      }
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.text(`${formatPercentuale(quota)}%`, W - M - 2.5, y + 4.3, { align: 'right' });
+      y += h;
+    });
+  }
 }

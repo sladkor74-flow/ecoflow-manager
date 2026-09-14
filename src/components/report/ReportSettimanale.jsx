@@ -97,7 +97,7 @@ export default function ReportSettimanale() {
 
   const esporta = () => {
     try {
-      esportaReportSettimanalePdf(report, gruppi, totale);
+      esportaReportSettimanalePdf(report, gruppi, totale, { impianti });
     } catch (e) {
       toast({ title: 'Esportazione non riuscita', description: e.message, variant: 'destructive' });
     }
@@ -153,7 +153,7 @@ export default function ReportSettimanale() {
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <p className="text-sm font-medium flex items-center gap-2"><TrendingUp className="w-4 h-4 text-primary" /> Raccolto per settimana, regione e raccoglitore</p>
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <input type="checkbox" checked={impianti} onChange={e => setImpianti(e.target.checked)} /> Mostra gli impianti di destinazione del mese
+              <input type="checkbox" checked={impianti} onChange={e => setImpianti(e.target.checked)} /> Mostra gli impianti di destinazione del mese (anche nel PDF)
             </label>
           </div>
 
