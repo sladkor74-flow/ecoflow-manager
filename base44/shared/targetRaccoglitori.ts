@@ -35,6 +35,21 @@ export function recordDelRaccoglitore(records, nome) {
 }
 
 /**
+ * Stesso raccoglitore fra il nome scritto nel target e quello del portale: nome
+ * normalizzato uguale ("SMOCO S.r.l." e "SMOCO SRL"), oppure nome del target
+ * abbreviato le cui parole stanno tutte nel nome del portale. Mai il contrario.
+ */
+export function stessoRaccoglitore(nomeTarget, nomePortale) {
+  const a = normalizzaRagioneSociale(nomeTarget || '');
+  const b = normalizzaRagioneSociale(nomePortale || '');
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const paroleB = new Set(b.split(' '));
+  const paroleA = a.split(' ').filter(p => p.length > 2);
+  return paroleA.length > 0 && paroleA.every(p => paroleB.has(p));
+}
+
+/**
  * Target di un raccoglitore in un mese, sommando le regioni.
  * null se per quel mese non e' stato scritto nulla.
  */

@@ -72,10 +72,10 @@ export default function TargetAlertsPanel() {
               <p className="text-xs text-muted-foreground">{item.regione}</p>
               <div className="flex items-center gap-3 mt-1 text-xs">
                 <span className="text-amber-700 font-medium">
-                  Proiezione: {item.pct_proiezione}% del target
+                  Proiezione: {formatNumber(item.pct_proiezione, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% del target
                 </span>
                 <span className="text-muted-foreground">
-                  {formatNumber(item.raccolto)} / {formatNumber(item.target)} ton
+                  {formatNumber(item.raccolto)} / {formatNumber(item.target)} t
                 </span>
               </div>
               {/* Barra progresso */}
@@ -102,10 +102,10 @@ export default function TargetAlertsPanel() {
               <p className="text-xs text-muted-foreground">{item.regione}</p>
               <div className="flex items-center gap-3 mt-1 text-xs">
                 <span className={`font-medium ${item.pct_raggiungimento < 50 ? 'text-red-700' : 'text-red-600'}`}>
-                  Raggiunto: {item.pct_raggiungimento}% del target
+                  Raggiunto: {formatNumber(item.pct_raggiungimento, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% del target
                 </span>
                 <span className="text-muted-foreground">
-                  {formatNumber(item.raccolto)} / {formatNumber(item.target)} ton (Δ {formatNumber(item.delta)})
+                  {formatNumber(item.raccolto)} / {formatNumber(item.target)} t (Δ {formatNumber(item.delta)} t)
                 </span>
               </div>
               <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">
