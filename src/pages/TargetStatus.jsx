@@ -102,7 +102,7 @@ function AndamentoRegioni({ raccolto, commessa, anno }) {
         </tbody>
       </table>
       <p className="px-3 py-2 text-xs text-muted-foreground border-t">
-        Raccolto rete e ACI dei formulari terminati, per data di fine trasporto. L'atteso a oggi ripartisce il contratto di ogni regione secondo il target mensile
+        Raccolto del solo canale RETE dai formulari terminati, per data di fine trasporto: l'ACI è nella sezione Canale ACI. L'atteso a oggi ripartisce il contratto di ogni regione secondo il target mensile
         {totaleProfilo > 0 ? ' rivisto' : ''} del contratto{totaleProfilo > 0 ? '' : ', che non è ancora inserito: per ora in dodicesimi'}.
       </p>
     </div>
