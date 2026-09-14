@@ -2,7 +2,7 @@
 // Il file non viene caricato da nessuna parte: al backend arrivano le celle e,
 // per ogni riga, l'indicazione se e' evidenziata.
 
-import { formatTonnellate } from '@/lib/utils';
+import { formatTonnellate, dataServer } from '@/lib/utils';
 
 export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -35,7 +35,7 @@ export function dataIt(d) {
 }
 
 export function dataOraIt(d) {
-  return d ? new Date(d).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  return d ? dataServer(d).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
 }
 
 // Giallo o arancio, anche chiari; esclusi grigi, azzurri e bianco.

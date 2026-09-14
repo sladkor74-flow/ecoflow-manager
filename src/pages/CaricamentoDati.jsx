@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2, Clock } from 'lucide-react';
 import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
 import { importaGrandeFile, importaPrimarie, TIPI_LETTURA_BROWSER } from '@/lib/importGrandeFile';
-import { formatIntero } from '@/lib/utils';
+import { formatIntero, dataServer } from '@/lib/utils';
 
 const TIPI_FILE = [
   { key: 'primarie', label: 'Primarie', desc: 'File unico delle primarie (un solo foglio con tutto). Suddivide automaticamente le righe in Primarie Rete, Primarie ACI, Assegnati Rete e Assegnati ACI in base a stato e classe.', colore: 'bg-green-50 border-green-200' },
@@ -215,7 +215,7 @@ export default function CaricamentoDati() {
               <tbody>
                 {logs.map((log) => (
                   <tr key={log.id} className="border-t hover:bg-muted/50">
-                    <td className="px-4 py-3 text-muted-foreground">{new Date(log.created_date).toLocaleString('it-IT')}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{dataServer(log.created_date).toLocaleString('it-IT')}</td>
                     <td className="px-4 py-3 font-medium">{log.tipo_file}</td>
                     <td className="px-4 py-3">{log.nome_file}</td>
                     <td className="px-4 py-3 text-right">{formatIntero(log.righe_importate)}</td>

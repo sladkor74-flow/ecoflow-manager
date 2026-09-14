@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
 import ReactMarkdown from 'react-markdown';
 import { Loader2, Send, MessageSquare, Plus, ChevronLeft } from 'lucide-react';
+import { dataServer } from '@/lib/utils';
 
 const AGENT_NAME = 'predittivita_agent';
 
@@ -122,7 +123,7 @@ export default function PredittivitaAgent() {
               <MessageSquare className="w-4 h-4 text-muted-foreground" />
               <div>
                 <p className="font-medium text-sm">{c.metadata?.name || 'Conversazione'}</p>
-                <p className="text-xs text-muted-foreground">{new Date(c.created_date || c.updated_date || Date.now()).toLocaleString('it-IT')}</p>
+                <p className="text-xs text-muted-foreground">{(dataServer(c.created_date || c.updated_date) || new Date()).toLocaleString('it-IT')}</p>
               </div>
             </button>
           ))}

@@ -1,7 +1,7 @@
 // Strumenti del modulo Verifiche: settimane, lettura dei file caricati ed
 // esportazione in Excel dell'esito.
 
-import { formatTonnellate, formatKg } from '@/lib/utils';
+import { formatTonnellate, formatKg, dataServer } from '@/lib/utils';
 
 export const GIORNI_CONSERVAZIONE = 40;
 
@@ -110,7 +110,7 @@ export function segnalazioni(v) {
 
 export function analisiInCorso(v) {
   if (!v || (v.stato !== 'in_lettura' && v.stato !== 'in_verifica')) return false;
-  const avvio = new Date(v.avviata_il || v.created_date || 0).getTime();
+  const avvio = (dataServer(v.avviata_il || v.created_date) || new Date(0)).getTime();
   return Date.now() - avvio < 10 * 60 * 1000;
 }
 

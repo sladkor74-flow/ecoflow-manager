@@ -43,3 +43,12 @@ export const matchesMulti = (recordValue, filterArray) => {
   if (!filterArray || filterArray.length === 0) return true;
   return filterArray.includes(recordValue);
 };
+
+// Date di sistema dei record (created_date, updated_date): arrivano in UTC ma senza
+// indicazione del fuso e il browser le leggerebbe come ora locale.
+export const dataServer = (v) => {
+  if (!v) return null;
+  if (v instanceof Date) return v;
+  const s = String(v);
+  return new Date(s.includes('T') && !/(Z|[+-]\d{2}:?\d{2})$/i.test(s) ? s + 'Z' : s);
+};

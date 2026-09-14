@@ -1,7 +1,7 @@
 // Utilita' per i target di Target & Status, fonte unica per tutti i moduli.
 
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
-import { formatTonnellate, formatPercentuale } from '@/lib/utils';
+import { formatTonnellate, formatPercentuale, dataServer } from '@/lib/utils';
 
 export const REGIONI_COMMESSA = ['Campania', 'Puglia', 'Basilicata', 'Calabria', 'Sicilia'];
 
@@ -48,5 +48,5 @@ export function nomeUtente(user) {
 export const chiaveNome = (nome) => normalizzaRagioneSociale(nome || '');
 
 export function dataOra(iso) {
-  return iso ? new Date(iso).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  return iso ? dataServer(iso).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 }

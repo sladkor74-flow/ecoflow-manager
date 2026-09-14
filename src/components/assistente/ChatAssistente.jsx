@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { dataOra, nomeUtente } from '@/lib/target';
 import { Send, Loader2, Plus, Search, ThumbsUp, ThumbsDown, Globe, Database, BookOpen, MessageSquare, AlertTriangle, RefreshCw } from 'lucide-react';
+import { dataServer } from '@/lib/utils';
 
 // Spazio domande: conversazioni con l'Assistente, archiviate nel gestionale.
 // Una risposta confermata diventa una FAQ della base di conoscenza; una risposta
@@ -241,7 +242,7 @@ export default function ChatAssistente() {
 
   // Se la connessione cade mentre l'Assistente lavora, la risposta arriva comunque:
   // si ricontrolla finche' ci sono domande in corso da meno di cinque minuti.
-  const inCorso = messaggi.some(d => d.stato === 'in_corso' && Date.now() - new Date(d.created_date).getTime() < 5 * 60 * 1000);
+  const inCorso = messaggi.some(d => d.stato === 'in_corso' && Date.now() - dataServer(d.created_date).getTime() < 5 * 60 * 1000);
   useEffect(() => {
     if (!inCorso || invio) return;
     const t = setInterval(carica, 5000);
