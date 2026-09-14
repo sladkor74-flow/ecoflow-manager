@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { PROV_TO_REGION, MESI } from "../../shared/raccoltoCalculator.ts";
-import { aggregaTargetMensili, stessoRaccoglitore } from "../../shared/targetRaccoglitori.ts";
+import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Controlla i target mensili di raccolta e genera alert per target non raggiunti o a rischio.
@@ -73,9 +73,11 @@ export default async function(req) {
       const targetVal = Number(t.target || 0);
       if (targetVal <= 0) continue;
 
-      // Il nome del target e quello del portale possono essere scritti diversamente.
+      // Il nome del target e quello del portale possono essere scritti diversamente:
+      // ogni riga di raccolto va a un solo target, prima per nome uguale.
+      const nomiRegione = targets.filter(x => (x.regione || '').trim() === regione).map(x => (x.raccoglitore || 'N/D').trim());
       const raccolto = Object.values(raccoltoByKey)
-        .filter(x => x.regione === regione && stessoRaccoglitore(racc, x.raccoglitore))
+        .filter(x => x.regione === regione && targetDelPortale(nomiRegione, x.raccoglitore) === racc)
         .reduce((s, x) => s + x.raccolto, 0);
       const pctRaggiungimento = (raccolto / targetVal) * 100;
       const delta = raccolto - targetVal;

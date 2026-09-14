@@ -55,6 +55,12 @@ function stessoRaccoglitore(nomeTarget, nomePortale) {
   return paroleA.length > 0 && paroleA.every(p => paroleB.has(p));
 }
 
+// Un nome del portale va a un solo raccoglitore dei target: prima per nome uguale.
+function targetDelPortaleLocale(nomiTarget, nomePortale) {
+  const b = normalizzaRagioneSociale(nomePortale || '');
+  return nomiTarget.find(n => normalizzaRagioneSociale(n) === b) ?? nomiTarget.find(n => stessoRaccoglitore(n, nomePortale)) ?? null;
+}
+
 async function provaA(fn, ripiego) {
   try { return await fn(); } catch (_e) { return ripiego; }
 }
@@ -139,7 +145,8 @@ export async function situazioneGestionale(base44, oggi) {
       const delMese = mensili.filter(r => normalizzaRagioneSociale(r.raccoglitore) === k && r.mese === mese);
       const targetMese = delMese.filter(r => !r.non_raccoglie).reduce((s, r) => s + (Number(r.target) || 0), 0);
       const nonRaccoglie = delMese.length > 0 && delMese.every(r => r.non_raccoglie);
-      const suoi = (raccolto?.by_raccoglitore || []).filter(r => stessoRaccoglitore(nome, r.raccoglitore));
+      const tuttiNomi = [...nomi.values()];
+      const suoi = (raccolto?.by_raccoglitore || []).filter(r => stessoRaccoglitore(nome, r.raccoglitore) && targetDelPortaleLocale(tuttiNomi, r.raccoglitore) === nome);
       const ytd = suoi.reduce((s, r) => s + r.totale, 0);
       const meseFatto = suoi.reduce((s, r) => s + (r.mesi?.[mese] || 0), 0);
       const regioni = [...new Set(annui.filter(r => normalizzaRagioneSociale(r.raccoglitore) === k).map(r => r.regione).filter(Boolean))];

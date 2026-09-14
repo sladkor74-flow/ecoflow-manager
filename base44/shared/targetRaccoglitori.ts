@@ -39,6 +39,18 @@ export function recordDelRaccoglitore(records, nome) {
  * normalizzato uguale ("SMOCO S.r.l." e "SMOCO SRL"), oppure nome del target
  * abbreviato le cui parole stanno tutte nel nome del portale. Mai il contrario.
  */
+/**
+ * Target a cui va il raccolto di un nome del portale: quello con lo stesso nome
+ * normalizzato; se non c'e', il primo il cui nome e' un'abbreviazione del portale.
+ * candidati: elenco di nomi di target gia' filtrati (per esempio per regione).
+ */
+export function targetDelPortale(candidati, nomePortale) {
+  const b = normalizzaRagioneSociale(nomePortale || '');
+  return candidati.find(n => normalizzaRagioneSociale(n || '') === b)
+    ?? candidati.find(n => stessoRaccoglitore(n, nomePortale))
+    ?? null;
+}
+
 export function stessoRaccoglitore(nomeTarget, nomePortale) {
   const a = normalizzaRagioneSociale(nomeTarget || '');
   const b = normalizzaRagioneSociale(nomePortale || '');

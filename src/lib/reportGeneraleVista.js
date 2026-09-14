@@ -61,7 +61,11 @@ export function calcolaReportGenerale({ mensili = [], annui = [], raccolto = [],
   const conTarget = [...righe.values()];
   for (const x of raccolto) {
     const kRac = chiave(x.raccoglitore);
-    const dest = conTarget.find(r => r.regione === x.regione && stessoNome(r.kRaccoglitore, kRac)) || riga(x.regione, x.raccoglitore);
+    // Prima il target con lo stesso nome; l'abbreviazione solo se non c'e': cosi'
+    // "Logistica Srl" non prende il raccolto di "Logistica & Pneumatici".
+    const dest = conTarget.find(r => r.regione === x.regione && r.kRaccoglitore === kRac)
+      || conTarget.find(r => r.regione === x.regione && stessoNome(r.kRaccoglitore, kRac))
+      || riga(x.regione, x.raccoglitore);
     const kImp = chiave(x.impianto) || 'nd';
     if (!dest.impianti.has(kImp)) dest.impianti.set(kImp, { impianto: x.impianto || 'N/D', mesi: MESI.map(() => 0) });
     const imp = dest.impianti.get(kImp);

@@ -2,7 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetrics } from "../../shared/primarieReteAnalytics.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { aggregaTargetMensili, stessoRaccoglitore } from "../../shared/targetRaccoglitori.ts";
+import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { formatoTonnellate } from "../../shared/formato.ts";
 
 // Motore di controllo: scansiona i record di un modulo e genera Alert per le regole violate.
@@ -284,8 +284,9 @@ function checkAggregateRules(records, regole, existingKeys, targets = []) {
       const mese = (target.mese || '').trim();
       const targetVal = target.target || 0;
       if (targetVal <= 0) continue;
+      const nomiRegione = targets.filter(x => (x.regione || '').trim() === regione && (x.mese || '').trim() === mese).map(x => (x.raccoglitore || '').trim());
       const raccolto = Object.entries(raccoltoByKey)
-        .filter(([k]) => { const [r, reg, m] = k.split('|||'); return reg === regione && m === mese && stessoRaccoglitore(racc, r); })
+        .filter(([k]) => { const [r, reg, m] = k.split('|||'); return reg === regione && m === mese && targetDelPortale(nomiRegione, r) === racc; })
         .reduce((s, [, v]) => s + v, 0);
       const delta = raccolto - targetVal;
       const pctDelta = (delta / targetVal) * 100;
