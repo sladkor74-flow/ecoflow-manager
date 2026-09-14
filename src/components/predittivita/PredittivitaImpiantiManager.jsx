@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2, Plus, Trash2, Edit3 } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
+import { formatKg } from '@/lib/utils';
 
 function ruoloBadgeClass(ruolo) {
   switch (ruolo) {
@@ -47,7 +48,7 @@ function InlineEditTarget({ value, onSave }) {
   }
   return (
     <span className="font-medium text-foreground cursor-text hover:bg-primary/10 rounded px-1 inline-flex items-center" onClick={() => setEditing(true)}>
-      {(value || 0).toLocaleString('it-IT')}
+      {formatKg(value || 0)}
       <Edit3 className="w-3 h-3 ml-1 opacity-40" />
     </span>
   );
@@ -198,9 +199,9 @@ export default function PredittivitaImpiantiManager({ onReload }) {
                   <button onClick={() => removeFornitore(f)} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-3 h-3 text-red-500" /></button>
                 </div>
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Target annuo (da Target Annuali): <span className="font-medium text-foreground">{((targetMap[normalizzaRagioneSociale(f.nome)] || 0)).toLocaleString('it-IT')} kg</span>
+                  <span>Target annuo (da Target Annuali): <span className="font-medium text-foreground">{formatKg(targetMap[normalizzaRagioneSociale(f.nome)] || 0)} kg</span>
                     {(f.ruolo === 'stoccaggio' || f.ruolo === 'doppio_ruolo' || (!f.ruolo && f.tipo === 'stoccaggio')) && f.plafond_stoccaggio_kg != null && (
-                      <span className="ml-2">· Plafond: <span className="font-medium text-foreground">{(f.plafond_stoccaggio_kg || 0).toLocaleString('it-IT')} kg</span></span>
+                      <span className="ml-2">· Plafond: <span className="font-medium text-foreground">{formatKg(f.plafond_stoccaggio_kg || 0)} kg</span></span>
                     )}
                   </span>
                   <span className="flex items-center gap-1">Ipotesi mese corr.:

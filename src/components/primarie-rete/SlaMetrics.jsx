@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { formatIntero } from '@/lib/utils';
 
 export default function SlaMetrics({ data }) {
   if (!data) return null;
@@ -12,7 +13,7 @@ export default function SlaMetrics({ data }) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="border rounded-lg p-3">
           <p className="text-xs text-muted-foreground">Ordini totali</p>
-          <p className="text-xl font-heading font-bold">{totale_ordini}</p>
+          <p className="text-xl font-heading font-bold">{formatIntero(totale_ordini)}</p>
         </div>
         <div className="border rounded-lg p-3">
           <p className="text-xs text-muted-foreground">Nr Giorni medio</p>

@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Loader2, Star, Truck, History } from 'lucide-react';
 import { MESI, STATI_RICHIESTA, GRAVITA, tonnellate, dataIt, dataOraIt } from '@/lib/evasioneAssegnati';
-import { formatKg } from '@/lib/utils';
+import { formatKg, formatIntero } from '@/lib/utils';
 
 // Dettaglio dell'evasione di una lista: alert, previsione, stato di ogni
 // richiesta e ordini fuori lista. Ogni caricamento delle primarie del mese ha il
@@ -249,7 +249,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                     </div>
                     {Object.entries(s.classi).sort((a, b) => b[1].ordini - a[1].ordini).map(([cl, v]) => (
                       <div key={cl} className="grid grid-cols-3 gap-2 py-0.5 tabular-nums">
-                        <span>{cl}</span><span className="text-right">{v.ordini}</span>
+                        <span>{cl}</span><span className="text-right">{formatIntero(v.ordini)}</span>
                         <span className="text-right">{v.kg_medio_ordine ? `${formatKg(v.kg_medio_ordine)} kg` : '—'}</span>
                       </div>
                     ))}

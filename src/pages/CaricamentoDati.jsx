@@ -3,6 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, Clock, Trash2 } from 'lucide-react';
 import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
 import { importaGrandeFile, TIPI_LETTURA_BROWSER } from '@/lib/importGrandeFile';
+import { formatIntero } from '@/lib/utils';
 
 const TIPI_FILE = [
   { key: 'primarie', label: 'Primarie', desc: 'File unico delle primarie (un solo foglio con tutto). Suddivide automaticamente le righe in Primarie Rete, Primarie ACI, Assegnati Rete e Assegnati ACI in base a stato e classe.', colore: 'bg-green-50 border-green-200' },
@@ -141,7 +142,7 @@ export default function CaricamentoDati() {
                           )}
                         </span>
                         <span className="tabular-nums">
-                          {(progresso[tipo.key].righeScritte || 0).toLocaleString('it-IT')} / {(progresso[tipo.key].totaleRighe || 0).toLocaleString('it-IT')} righe
+                          {formatIntero(progresso[tipo.key].righeScritte || 0)} / {formatIntero(progresso[tipo.key].totaleRighe || 0)} righe
                         </span>
                       </div>
                       <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
@@ -204,7 +205,7 @@ export default function CaricamentoDati() {
                     <td className="px-4 py-3 text-muted-foreground">{new Date(log.created_date).toLocaleString('it-IT')}</td>
                     <td className="px-4 py-3 font-medium">{log.tipo_file}</td>
                     <td className="px-4 py-3">{log.nome_file}</td>
-                    <td className="px-4 py-3 text-right">{log.righe_importate}</td>
+                    <td className="px-4 py-3 text-right">{formatIntero(log.righe_importate)}</td>
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
                         log.esito === 'successo' ? 'bg-green-100 text-green-700' :

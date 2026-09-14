@@ -28,6 +28,8 @@ export const formatNumber = (num, options = {}) => {
 
 // Tonnellate: due decimali, tre se i kg non sono tondi.
 export const formatTonnellate = (num) => formatNumber(num, { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+// Numeri interi e conteggi: punto delle migliaia, nessun decimale.
+export const formatIntero = (num) => formatNumber(Math.round(Number(num) || 0), { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 // Chilogrammi: sempre interi.
 export const formatKg = (num) => formatNumber(Math.round(Number(num) || 0), { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 // Percentuali: una cifra decimale.

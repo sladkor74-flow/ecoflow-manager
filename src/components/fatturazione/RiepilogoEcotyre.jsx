@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Loader2, TrendingUp, FileText, AlertTriangle, ArrowRight } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
-import { formatTonnellate, formatKg } from '@/lib/utils';
+import { formatTonnellate, formatKg, formatIntero } from '@/lib/utils';
 
 export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTariffe }) {
   const [data, setData] = useState(null);
@@ -82,7 +82,7 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Ordini</p>
-            <p className="text-xl font-semibold">{data.totale_ordini}</p>
+            <p className="text-xl font-semibold">{formatIntero(data.totale_ordini)}</p>
           </div>
         </div>
       </div>
@@ -125,7 +125,7 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
             <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
               <span>{formatTonnellate(t.volume_ton)} t</span>
               <span>•</span>
-              <span>{t.ordini} ordini</span>
+              <span>{formatIntero(t.ordini)} ordini</span>
             </div>
             {t.by_regione && t.by_regione.length > 0 && (
               <div className="mt-3 pt-3 border-t space-y-1.5">
@@ -167,7 +167,7 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
               {tipologie.map(t => (
                 <tr key={t.tipologia} className="border-b last:border-0">
                   <td className="py-2 pr-4 font-medium">{t.label}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{t.ordini}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{formatIntero(t.ordini)}</td>
                   <td className="py-2 pr-4 text-right tabular-nums">{formatKg(t.volume_kg)}</td>
                   <td className="py-2 text-right tabular-nums">{t.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 </tr>
@@ -180,13 +180,13 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
                 </tr>
                 <tr className="border-b">
                   <td className="py-2 pr-4 font-medium">Trasp (pri)</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{data.ripartizione_servizio.TRASP.ordini}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{formatIntero(data.ripartizione_servizio.TRASP.ordini)}</td>
                   <td className="py-2 pr-4 text-right tabular-nums">{formatKg(data.ripartizione_servizio.TRASP.kg)}</td>
                   <td className="py-2 text-right tabular-nums">{data.ripartizione_servizio.TRASP.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 </tr>
                 <tr className="border-b">
                   <td className="py-2 pr-4 font-medium">Trasp+Tratt (pri)</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{data.ripartizione_servizio.TRASP_TRATT.ordini}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{formatIntero(data.ripartizione_servizio.TRASP_TRATT.ordini)}</td>
                   <td className="py-2 pr-4 text-right tabular-nums">{formatKg(data.ripartizione_servizio.TRASP_TRATT.kg)}</td>
                   <td className="py-2 text-right tabular-nums">{data.ripartizione_servizio.TRASP_TRATT.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 </tr>
@@ -195,7 +195,7 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
             <tfoot>
               <tr className="border-t-2 font-semibold">
                 <td className="py-2 pr-4">Totale</td>
-                <td className="py-2 pr-4 text-right tabular-nums">{data.totale_ordini}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{formatIntero(data.totale_ordini)}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{formatKg(data.totale_kg)}</td>
                 <td className="py-2 text-right tabular-nums">{data.totale_generale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
               </tr>

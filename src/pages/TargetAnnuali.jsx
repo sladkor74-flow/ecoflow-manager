@@ -4,13 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2, Plus, Trash2, Edit3, Target, Factory, Warehouse, Calendar, RefreshCw } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
-import { formatTonnellate } from '@/lib/utils';
+import { formatTonnellate, formatIntero } from '@/lib/utils';
 
 const ANNO_DEFAULT = 2026;
 const ANNI = [2024, 2025, 2026, 2027];
 
 function fmt(n) { return formatTonnellate((Number(n) || 0)); }
-function fmtInt(n) { return (Number(n) || 0).toLocaleString('it-IT'); }
+function fmtInt(n) { return formatIntero(n); }
 
 function EditableCell({ value, onSave, unit, decimals = 3 }) {
   const [editing, setEditing] = useState(false);

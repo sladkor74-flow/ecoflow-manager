@@ -4,6 +4,7 @@ import { AlertTriangle, X, Search } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import PdrDetailCard from '@/components/pdr/PdrDetailCard';
 import { streetViewUrl, satelliteUrl, precisioneCoordinata } from '@/lib/geoLinks';
+import { formatIntero } from '@/lib/utils';
 
 function getThemeColor(varName, fallback) {
   if (typeof window === 'undefined') return fallback;
@@ -148,7 +149,7 @@ export default function PdrMap({ records, selectedPdrId, onSelect }) {
         <div className="text-sm text-muted-foreground bg-muted/50 border rounded-md px-3 py-2 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span>
-            {withoutCoordsCount.toLocaleString('it-IT')} punti su {records.length.toLocaleString('it-IT')} non hanno coordinate e non sono mostrati sulla mappa
+            {formatIntero(withoutCoordsCount)} punti su {formatIntero(records.length)} non hanno coordinate e non sono mostrati sulla mappa
           </span>
         </div>
       )}

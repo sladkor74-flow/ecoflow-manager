@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, AlertCircle, ShieldCheck } from 'lucide-react';
+import { formatIntero } from '@/lib/utils';
 
 // Estrae le informazioni di errore dalla risposta SDK (per HTTP 400/409/500)
 export function extractUploadError(e) {
@@ -95,7 +96,7 @@ export default function UploadResultDialog({ state, onClose }) {
 
           {state.righe_archivio != null && state.mancanti != null && (
             <p className="text-foreground">
-              Righe nel file: <strong>{state.righe_file ?? '—'}</strong> · In archivio: <strong>{state.righe_archivio}</strong> · Mancanti: <strong>{state.mancanti}</strong>
+              Righe nel file: <strong>{state.righe_file != null ? formatIntero(state.righe_file) : '—'}</strong> · In archivio: <strong>{formatIntero(state.righe_archivio)}</strong> · Mancanti: <strong>{formatIntero(state.mancanti)}</strong>
             </p>
           )}
 

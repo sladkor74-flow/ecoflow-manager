@@ -4,7 +4,7 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Play, FileSpreadsheet, FileText, AlertTriangle, Eye } from 'lucide-react';
-import { formatNumber } from '@/lib/utils';
+import { formatNumber, formatIntero } from '@/lib/utils';
 import RigaDetailModalRete from './RigaDetailModalRete';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -159,7 +159,7 @@ export default function FatturazionePassivaRete({ isAdmin }) {
               <div className="grid grid-cols-5 gap-3 flex-1">
                 <div className="border rounded-lg p-3">
                   <p className="text-xs text-muted-foreground">Raccoglitori</p>
-                  <p className="text-xl font-bold">{risultato.dettaglio.length}</p>
+                  <p className="text-xl font-bold">{formatIntero(risultato.dettaglio.length)}</p>
                 </div>
                 <div className="border rounded-lg p-3">
                   <p className="text-xs text-muted-foreground">Totale [t]</p>
@@ -216,8 +216,8 @@ export default function FatturazionePassivaRete({ isAdmin }) {
                       <td className="px-3 py-2">{r.provincia || '-'}</td>
                       <td className="px-3 py-2">{r.regione}</td>
                       <td className="px-3 py-2 text-right">{formatNumber(r.totale_t)}</td>
-                      <td className="px-3 py-2 text-right">{r.num_viaggi}</td>
-                      <td className="px-3 py-2 text-right">{r.firCount || 0}</td>
+                      <td className="px-3 py-2 text-right">{formatIntero(r.num_viaggi)}</td>
+                      <td className="px-3 py-2 text-right">{formatIntero(r.firCount || 0)}</td>
                       <td className="px-3 py-2">
                         {r.unita_misura ? <span className="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary">{r.unita_misura}</span> : <span className="text-red-500 text-xs">N/D</span>}
                       </td>

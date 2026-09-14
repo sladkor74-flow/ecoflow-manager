@@ -9,6 +9,7 @@ import MultiSelect from '@/components/shared/MultiSelect';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
 import { precisioneCoordinata } from '@/lib/geoLinks';
+import { formatIntero } from '@/lib/utils';
 const PdrMap = React.lazy(() => import('@/components/pdr/PdrMap'));
 
 export default function Pdr() {
@@ -301,7 +302,7 @@ export default function Pdr() {
               <option value="ignoto">Senza coordinate o non nota</option>
             </select>
             <p className="text-xs text-muted-foreground mt-1">
-              Precise {precisionCounts.ok.toLocaleString('it-IT')} · Da verificare {precisionCounts.medio.toLocaleString('it-IT')} · Approssimative {precisionCounts.basso.toLocaleString('it-IT')} · Non note {precisionCounts.ignoto.toLocaleString('it-IT')}
+              Precise {formatIntero(precisionCounts.ok)} · Da verificare {formatIntero(precisionCounts.medio)} · Approssimative {formatIntero(precisionCounts.basso)} · Non note {formatIntero(precisionCounts.ignoto)}
             </p>
           </div>
         </div>

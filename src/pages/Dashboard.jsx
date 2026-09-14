@@ -8,6 +8,7 @@ import DashboardFilters from '@/components/dashboard/DashboardFilters';
 import DashboardKpi from '@/components/dashboard/DashboardKpi';
 import ReteVsAciChart from '@/components/dashboard/ReteVsAciChart';
 import TargetVsRaccoltoChart from '@/components/dashboard/TargetVsRaccoltoChart';
+import { formatIntero } from '@/lib/utils';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
   'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -73,7 +74,7 @@ export default function Dashboard() {
                 <div className={`inline-flex p-2 rounded-md mb-3 ${c.color}`}>
                   <Icon className="w-5 h-5" />
                 </div>
-                <p className="text-2xl font-heading font-bold">{counts[c.key] ?? 0}</p>
+                <p className="text-2xl font-heading font-bold">{formatIntero(counts[c.key] ?? 0)}</p>
                 <p className="text-sm text-muted-foreground">{c.label}</p>
               </Link>
             );

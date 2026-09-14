@@ -1,3 +1,4 @@
+import { formatTonnellate } from '@/lib/utils';
 // Lettura del foglio "Report Generale" del file di gestione Ecotyre: i target
 // assegnati dell'anno, organizzati per impianto di destinazione, regione e
 // raccoglitore, con il target annuo e quelli assegnati mese per mese.
@@ -65,7 +66,7 @@ export function leggiReportGenerale(righe) {
     righeRegione++;
   }
   const sommaVoci = voci.reduce((s, v) => s + (v.annuo || 0), 0);
-  if (totale !== null && Math.abs(totale - sommaVoci) > 0.5) avvisi.push(`La somma dei target annui letti (${sommaVoci.toLocaleString('it-IT')} t) non coincide con il totale del foglio (${totale.toLocaleString('it-IT')} t).`);
+  if (totale !== null && Math.abs(totale - sommaVoci) > 0.5) avvisi.push(`La somma dei target annui letti (${formatTonnellate(sommaVoci)} t) non coincide con il totale del foglio (${formatTonnellate(totale)} t).`);
   return { anno: annoTitolo ? Number(annoTitolo[0]) : null, voci, totale, somma: sommaVoci, mesiPresenti: Object.keys(colMese), avvisi };
 }
 

@@ -2,7 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { AlertTriangle } from 'lucide-react';
-import { formatNumber, formatTonnellate } from '@/lib/utils';
+import { formatNumber, formatTonnellate, formatIntero } from '@/lib/utils';
 
 function fmt(n, dec = 2) {
   if (n == null || n === '' || isNaN(n)) return '—';
@@ -85,7 +85,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                       className="h-7"
                       onClick={() => onVaiDaDichiarare(r.sito)}
                     >
-                      {r.ordini_da_dichiarare || 0}
+                      {formatIntero(r.ordini_da_dichiarare || 0)}
                     </Button>
                   </td>
                   <td className="px-3 py-2 text-right">{fmt(r.dichiarato_t)} t</td>
@@ -100,7 +100,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
               <td className="px-3 py-2"></td>
               <td className="px-3 py-2 text-right">{fmt(totali.giacenza_portale_t)} t</td>
               <td className="px-3 py-2 text-right">{fmt(totali.in_attesa_dichiarazione_t)} t</td>
-              <td className="px-3 py-2 text-right">{totali.ordini_da_dichiarare || 0}</td>
+              <td className="px-3 py-2 text-right">{formatIntero(totali.ordini_da_dichiarare || 0)}</td>
               <td className="px-3 py-2 text-right">{fmt(totali.dichiarato_t)} t</td>
               <td className="px-3 py-2"></td>
             </tr>
