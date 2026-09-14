@@ -14,6 +14,7 @@ const FILTRI = [
   { chiave: 'tutte', etichetta: 'Tutte' },
   { chiave: 'aperta', etichetta: 'Aperte' },
   { chiave: 'trascurate', etichetta: 'Trascurate' },
+  { chiave: 'arretrate', etichetta: 'Anni precedenti' },
   { chiave: 'evasa', etichetta: 'Evase' },
   { chiave: 'fuori_ordine', etichetta: 'Fuori ordine' },
   { chiave: 'altro', etichetta: 'Da altri, annullate o non più presenti' },
@@ -139,6 +140,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
     if (filtro === 'tutte') return true;
     if (filtro === 'fuori_ordine') return r.saltate > 0;
     if (filtro === 'trascurate') return r.stato === 'aperta' && scavalcata(r);
+    if (filtro === 'arretrate') return !!r.data_immissione && r.data_immissione.slice(0, 4) < String(anno);
     if (filtro === 'altro') return ['evasa_da_altri', 'riassegnata', 'annullata', 'non_piu_presente', 'evasa_prima'].includes(r.stato);
     if (filtro === 'evasa') return r.stato === 'evasa' || r.stato === 'evasa_altro_ordine';
     return r.stato === filtro;
@@ -199,7 +201,9 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
               <Tessera etichetta="Richieste" valore={c.richieste} />
               <Tessera etichetta="Evase" valore={c.evase} tono="text-emerald-600" />
-              <Tessera etichetta="Aperte" valore={c.aperte} dettaglio={c.prioritarie_aperte ? `${c.prioritarie_aperte} prioritarie` : ''} tono={c.prioritarie_aperte ? 'text-red-600' : ''} />
+              <Tessera etichetta="Aperte" valore={c.aperte}
+                dettaglio={[c.arretrate_aperte ? `${c.arretrate_aperte} di anni precedenti` : '', c.prioritarie_aperte ? `${c.prioritarie_aperte} prioritarie` : ''].filter(Boolean).join(', ')}
+                tono={c.arretrate_aperte || c.prioritarie_aperte ? 'text-red-600' : ''} />
               <Tessera etichetta="Trascurate" valore={c.trascurate ?? '—'} dettaglio="aperte ma scavalcate" tono={c.trascurate ? 'text-red-600' : ''} />
               <Tessera etichetta="Fuori ordine" valore={c.fuori_ordine} tono={c.fuori_ordine ? 'text-amber-600' : ''} />
               <Tessera etichetta="Fuori lista" valore={c.fuori_lista} />
@@ -303,7 +307,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                         <tr key={r.id_ordine} className={`border-t ${r.stato === 'aperta' && scavalcata(r) ? 'bg-red-50' : r.prioritaria ? 'bg-yellow-50' : ''}`}>
                           <td className="px-2 py-1.5 tabular-nums">{r.posizione}{r.prioritaria && <Star className="inline w-3 h-3 ml-0.5 text-amber-500 fill-amber-400" />}</td>
                           <td className="px-2 py-1.5 font-mono">{r.id_ordine}</td>
-                          <td className="px-2 py-1.5 tabular-nums">{dataIt(r.data_immissione)}</td>
+                          <td className={`px-2 py-1.5 tabular-nums ${r.data_immissione && r.data_immissione.slice(0, 4) < String(anno) ? 'text-red-700 font-semibold' : ''}`}>{dataIt(r.data_immissione)}</td>
                           <td className="px-2 py-1.5">{r.produttore}<div className="text-muted-foreground">{r.comune}{r.provincia ? ` (${r.provincia})` : ''}</div></td>
                           <td className="px-2 py-1.5">{r.classe || '—'}</td>
                           <td className="px-2 py-1.5"><span className={`px-1.5 py-0.5 rounded-full border ${(STATI_RICHIESTA[r.stato] || STATI_RICHIESTA.aperta).classe}`}>{(STATI_RICHIESTA[r.stato] || {}).etichetta || r.stato}</span></td>

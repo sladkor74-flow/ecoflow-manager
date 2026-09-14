@@ -21,8 +21,9 @@
 // Chi deve evadere una richiesta lo stabilisce la lista, anche se sul portale
 // l'ordine e' assegnato a un altro trasportatore: puo' capitare che un altro
 // raccoglitore la evada, ma una richiesta si evade una sola volta. L'ordine di
-// evasione si valuta per provincia: prima le prioritarie, poi dalla richiesta
-// immessa per prima.
+// evasione si valuta per provincia: prima, con priorita' assoluta, le richieste
+// immesse negli anni precedenti, poi le prioritarie indicate nella lista, poi le
+// altre dalla richiesta immessa per prima.
 //
 // Una richiesta resta assegnata sul portale finche' non viene cancellata o chiusa
 // come terminata, e il raccoglitore chiude i ritiri qualche giorno dopo il
@@ -536,7 +537,7 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   const fuoriListaEffettivi = fuoriLista.filter(x => x.tipo !== 'stesso_pdr');
   const evasaDalRaccoglitore = (r) => r.stato === 'evasa' || r.stato === 'evasa_altro_ordine';
 
-  // --- cronologia: per provincia, prima le prioritarie, poi la richiesta immessa per prima ---
+  // --- cronologia: per provincia, prima gli anni precedenti, poi le prioritarie, poi per data di immissione ---
   // Le richieste si confrontano nella stessa provincia, o in mancanza nella stessa
   // regione, perche' un raccoglitore organizza i giri per zona.
   const provinciaDi = (x) => String(x.provincia || '').trim().toUpperCase();
@@ -545,7 +546,10 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     if (pa && pb) return pa === pb;
     return !a.regione || !b.regione || a.regione === b.regione;
   };
-  const ordinate = [...righe].sort((x, y) => (Number(y.prioritaria) - Number(x.prioritaria))
+  // Le richieste immesse negli anni precedenti hanno priorita' assoluta.
+  const arretrata = (r) => !!r.data_immissione && r.data_immissione.slice(0, 4) < String(anno);
+  const livello = (r) => (arretrata(r) ? 0 : r.prioritaria ? 1 : 2);
+  const ordinate = [...righe].sort((x, y) => (livello(x) - livello(y))
     || String(x.data_immissione || '9999').localeCompare(String(y.data_immissione || '9999'))
     || (x.posizione - y.posizione));
   const rango = new Map(ordinate.map((r, i) => [r.id_ordine, i]));
@@ -720,6 +724,8 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   const fuoriOrdine = righe.filter(r => evasaDalRaccoglitore(r) && r.saltate > 0);
   const giorniDallInvio = giorniLavorativi(aggiungiGiorni(caricataIl, 1), consolidatoAl, sabato);
   const prioritarieAperte = righe.filter(r => r.prioritaria && r.stato === 'aperta');
+  const arretrateAperte = ordinate.filter(r => arretrata(r) && r.stato === 'aperta');
+  const prioritarieNuove = prioritarieAperte.filter(r => !arretrata(r));
 
   // --- alert ---
   const alert = [];
@@ -735,8 +741,12 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     const altre = trascurate.length > 1 ? ` Trascurate anche: ${elenco(trascurate.slice(1).map(r => `n. ${r.posizione} ${r.id_ordine}`), 4)}.` : '';
     aggiungi('alta', 'trascurate', `${trascurate.length === 1 ? 'Una richiesta trascurata' : `${trascurate.length} richieste trascurate`}: la n. ${prima.posizione}, ${prima.id_ordine}${prima.produttore ? ' di ' + prima.produttore : ''}, immessa il ${itData(prima.data_immissione)}, e' ancora aperta sul portale, ma il raccoglitore ha gia' evaso ${cosa.join(' e ')}.${altre}`);
   }
-  if (prioritarieAperte.length && giorniDallInvio >= GIORNI_TOLLERANZA_PRIORITARIE) {
-    aggiungi('alta', 'prioritarie', `${prioritarieAperte.length} ${prioritarieAperte.length === 1 ? 'richiesta prioritaria ancora aperta' : 'richieste prioritarie ancora aperte'} sul portale dopo ${giorniDallInvio} giorni lavorativi dall'invio, con dati completi fino al ${itData(consolidatoAl)}: ${elenco(prioritarieAperte.map(r => r.id_ordine))}.`);
+  if (arretrateAperte.length && giorniDallInvio >= GIORNI_TOLLERANZA_PRIORITARIE) {
+    const n = arretrateAperte.length;
+    aggiungi('alta', 'arretrate', `${n === 1 ? 'Una richiesta immessa' : `${n} richieste immesse`} prima del ${anno}, con priorita' assoluta, ${n === 1 ? "e' ancora aperta" : 'sono ancora aperte'} sul portale dopo ${giorniDallInvio} giorni lavorativi dall'invio: ${elenco(arretrateAperte.map(r => `${r.id_ordine} del ${itData(r.data_immissione)}`), 4)}.`);
+  }
+  if (prioritarieNuove.length && giorniDallInvio >= GIORNI_TOLLERANZA_PRIORITARIE) {
+    aggiungi('alta', 'prioritarie', `${prioritarieNuove.length} ${prioritarieNuove.length === 1 ? 'richiesta prioritaria ancora aperta' : 'richieste prioritarie ancora aperte'} sul portale dopo ${giorniDallInvio} giorni lavorativi dall'invio, con dati completi fino al ${itData(consolidatoAl)}: ${elenco(prioritarieNuove.map(r => r.id_ordine))}.`);
   }
   if (target && giorniConsolidati >= 5 && !meseConcluso && proiezioneKg < target * SOGLIA_PROIEZIONE) {
     aggiungi('alta', 'proiezione', `A questo ritmo chiude il mese a ${kgT(proiezioneKg)}, il ${previsione.percentuale_proiezione}% del target di ${kgT(target)}.`);
@@ -805,6 +815,7 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
       evase_da_altri: daAltri.length,
       aperte: aperte.length,
       prioritarie_aperte: prioritarieAperte.length,
+      arretrate_aperte: arretrateAperte.length,
       fuori_ordine: fuoriOrdine.length,
       trascurate: trascurate.length,
       fuori_lista: fuoriListaEffettivi.length,

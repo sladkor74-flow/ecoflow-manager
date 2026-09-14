@@ -13,7 +13,7 @@ import { caricaDati, cancellaVecchi, eseguiControlli, indiceSicurezza, ultimoCar
 // recenti e il controllo non e' ancora partito, lo esegue prima di rispondere.
 
 const CAMPI_CONTROLLO = [
-  'id', 'eseguito_il', 'primarie_caricate_il', 'dati_al', 'richieste', 'evase', 'evase_da_altri', 'aperte', 'prioritarie_aperte',
+  'id', 'eseguito_il', 'primarie_caricate_il', 'dati_al', 'richieste', 'evase', 'evase_da_altri', 'aperte', 'prioritarie_aperte', 'arretrate_aperte',
   'fuori_ordine', 'trascurate', 'fuori_lista', 'non_piu_presenti', 'annullate', 'riassegnate', 'raccolto_kg', 'target_kg', 'proiezione_kg',
   'evadibili_ritmo', 'evadibili_target', 'alert_alti', 'alert_totali',
 ];
@@ -74,6 +74,17 @@ export default async function(req) {
       const altroMese = trovaTarget(targetAnno, r.nome);
       // Canali sempre separati: target e lista riguardano la sola rete.
       const { canali, alert: alertCanali } = situazioneCanali({ chiave: r.chiave, anno, mese, oggi, terminati: dati.terminati, assegnati: dati.assegnati });
+      // Gli ordini degli anni precedenti hanno priorita' assoluta: se sul portale
+      // sono assegnati a questo raccoglitore ma non stanno in nessuna lista del
+      // mese, nessuno ha avuto l'indicazione di evaderli.
+      if (listeMese.length) {
+        const arretrati = dati.assegnati.filter(a => a.canale === 'rete' && a.chiaveTrasp === r.chiave && a.immesso && a.immesso < `${anno}-01-01` && !idsInListe.has(a.id_ordine));
+        if (arretrati.length) {
+          const n = arretrati.length;
+          const elenco = arretrati.slice(0, 4).map(a => `${a.id_ordine} del ${a.immesso.split('-').reverse().join('/')}${a.provincia ? ` (${a.provincia})` : ''}`).join(', ') + (n > 4 ? ` e altri ${n - 4}` : '');
+          alertCanali.push({ gravita: 'media', tipo: 'arretrati_senza_lista', messaggio: `${n === 1 ? 'Un ordine immesso' : `${n} ordini immessi`} prima del ${anno} e assegnat${n === 1 ? 'o' : 'i'} sul portale a questo raccoglitore non ${n === 1 ? "e'" : 'sono'} in nessuna lista caricata, pur avendo priorita' assoluta: ${elenco}.` });
+        }
+      }
       const assegnatiOra = dati.assegnati.filter(a => a.canale === 'rete' && a.chiaveTrasp === r.chiave).length;
       const lista = listeMese.find(l => l.raccoglitore_chiave === r.chiave) || null;
       let controllo = null;

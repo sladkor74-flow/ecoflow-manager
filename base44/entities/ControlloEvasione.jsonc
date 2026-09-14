@@ -46,6 +46,10 @@
     "prioritarie_aperte": {
       "type": "number"
     },
+    "arretrate_aperte": {
+      "type": "number",
+      "description": "Richieste aperte immesse negli anni precedenti, con priorita' assoluta"
+    },
     "fuori_ordine": {
       "type": "number"
     },
