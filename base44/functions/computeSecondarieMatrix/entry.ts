@@ -53,7 +53,7 @@ export default async function(req) {
     const byTratta: Record<string, any> = {};
 
     for (const r of filtered) {
-      const peso = r.peso_effettivo || r.peso_stimato || 0;
+      const peso = r.peso_effettivo || 0;
       const quant = r.quantita_ritirata || 0;
       total_peso_kg += peso;
       total_quantita += quant;
@@ -95,18 +95,18 @@ export default async function(req) {
       const m = matrix[trattaKey];
       if (!m.mesi[mese]) m.mesi[mese] = { ordini: 0, peso_kg: 0, quantita: 0 };
       m.mesi[mese].ordini++;
-      m.mesi[mese].peso_kg += (r.peso_effettivo || r.peso_stimato || 0);
+      m.mesi[mese].peso_kg += (r.peso_effettivo || 0);
       m.mesi[mese].quantita += (r.quantita_ritirata || 0);
 
       if (!m.classi[classe]) m.classi[classe] = { ordini: 0, peso_kg: 0, quantita: 0 };
       m.classi[classe].ordini++;
-      m.classi[classe].peso_kg += (r.peso_effettivo || r.peso_stimato || 0);
+      m.classi[classe].peso_kg += (r.peso_effettivo || 0);
       m.classi[classe].quantita += (r.quantita_ritirata || 0);
 
       const settKey = String(settimana);
       if (!m.settimane[settKey]) m.settimane[settKey] = { ordini: 0, peso_kg: 0, quantita: 0 };
       m.settimane[settKey].ordini++;
-      m.settimane[settKey].peso_kg += (r.peso_effettivo || r.peso_stimato || 0);
+      m.settimane[settKey].peso_kg += (r.peso_effettivo || 0);
       m.settimane[settKey].quantita += (r.quantita_ritirata || 0);
     }
 

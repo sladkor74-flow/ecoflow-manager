@@ -45,8 +45,8 @@ export default async function(req) {
         const key = `${origine}|${dest}`;
         if (!trattaMap[key]) trattaMap[key] = { 'Stoccaggio Origine': origine, 'Impianto Destinazione': dest, 'N. Ordini': 0, 'Peso (kg)': 0, 'Peso (t)': 0, 'Quantità': 0, 'Trasportatore': r.trasportatore || '', 'Partner Operativo': r.partner_operativo || '' };
         trattaMap[key]['N. Ordini']++;
-        trattaMap[key]['Peso (kg)'] += (r.peso_effettivo || r.peso_stimato || 0);
-        trattaMap[key]['Peso (t)'] += (r.peso_effettivo || r.peso_stimato || 0) / 1000;
+        trattaMap[key]['Peso (kg)'] += (r.peso_effettivo || 0);
+        trattaMap[key]['Peso (t)'] += (r.peso_effettivo || 0) / 1000;
         trattaMap[key]['Quantità'] += (r.quantita_ritirata || 0);
       }
       const wsTratte = XLSX.utils.json_to_sheet(Object.values(trattaMap));
@@ -58,8 +58,8 @@ export default async function(req) {
         const c = r.classe || 'N/D';
         if (!classeMap[c]) classeMap[c] = { 'Classe PFU': c, 'N. Ordini': 0, 'Peso (kg)': 0, 'Peso (t)': 0, 'Quantità': 0 };
         classeMap[c]['N. Ordini']++;
-        classeMap[c]['Peso (kg)'] += (r.peso_effettivo || r.peso_stimato || 0);
-        classeMap[c]['Peso (t)'] += (r.peso_effettivo || r.peso_stimato || 0) / 1000;
+        classeMap[c]['Peso (kg)'] += (r.peso_effettivo || 0);
+        classeMap[c]['Peso (t)'] += (r.peso_effettivo || 0) / 1000;
         classeMap[c]['Quantità'] += (r.quantita_ritirata || 0);
       }
       const wsClassi = XLSX.utils.json_to_sheet(Object.values(classeMap));
@@ -79,7 +79,7 @@ export default async function(req) {
         'Quantità Ritirata': r.quantita_ritirata,
         'Peso Stimato (kg)': r.peso_stimato,
         'Peso Effettivo (kg)': r.peso_effettivo,
-        'Peso (t)': (r.peso_effettivo || r.peso_stimato || 0) / 1000,
+        'Peso (t)': (r.peso_effettivo || 0) / 1000,
         'Mese': r.mese,
         'Settimana': r.settimane,
         'Trasportatore': r.trasportatore,

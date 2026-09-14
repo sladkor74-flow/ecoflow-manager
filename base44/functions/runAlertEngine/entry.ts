@@ -244,26 +244,17 @@ function checkRegola(record, regola, entityName) {
   }
 
   if (tipo === 'anomalia_peso') {
-    // config: { soglia_zero: true, soglia_deviazione: 0.5 }
+    // config: { soglia_zero: true }
+    // Conta solo il peso effettivo: il peso stimato del portale non e' un riferimento
+    // attendibile e non si usa in nessuna valutazione (soglia_deviazione ignorata).
     const pesoEff = record.peso_effettivo;
-    const pesoStim = record.peso_stimato;
     const quantitaRit = record.quantita_ritirata;
-    const sogliaDev = (config.soglia_deviazione != null ? config.soglia_deviazione : 0.5);
 
     if (config.soglia_zero !== false && quantitaRit > 0 && (!pesoEff || pesoEff === 0)) {
       return {
         titolo: regola.messaggio_alert || `Peso effettivo mancante per ${record.id_ordine}`,
         descrizione: `Record ${record.id_ordine}: quantità ritirata ${quantitaRit} ma peso effettivo = 0 o mancante.`,
       };
-    }
-    if (pesoEff && pesoStim && pesoStim > 0) {
-      const deviazione = Math.abs(pesoEff - pesoStim) / pesoStim;
-      if (deviazione > sogliaDev) {
-        return {
-          titolo: regola.messaggio_alert || `Anomalia peso per ${record.id_ordine}`,
-          descrizione: `Record ${record.id_ordine}: peso effettivo ${pesoEff} kg vs stimato ${pesoStim} kg (deviazione ${(deviazione * 100).toFixed(1)}%, soglia ${(sogliaDev * 100).toFixed(0)}%).`,
-        };
-      }
     }
   }
 

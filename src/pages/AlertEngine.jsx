@@ -23,7 +23,7 @@ const TIPI_REGOLA = [
   { value: 'mix_classi_deviazione', label: 'Deviazione Mix Classi Consorziale' },
   { value: 'scostamento_target', label: 'Scostamento Target Grave (Δ < -15%)' },
   { value: 'ritardo_sla', label: 'Ritardo SLA Critico (>12 gg o >20% fuori tempo)' },
-  { value: 'anomalia_peso', label: 'Anomalia Peso/Destinazione (peso=0 o incongruente)' },
+  { value: 'anomalia_peso', label: 'Anomalia peso (ritirato ma peso effettivo mancante)' },
   { value: 'custom', label: 'Custom' },
 ];
 

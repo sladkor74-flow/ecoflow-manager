@@ -11,7 +11,7 @@ const COLUMNS = [
   { key: 'classe', label: 'Classe' },
   { key: 'prodotto', label: 'Prodotto' },
   { key: 'quantita_richiesta', label: 'Q.tà Rich.', format: 'number' },
-  { key: 'peso_stimato', label: 'Peso (kg)', format: 'number' },
+  { key: 'peso_stimato', label: 'Peso stimato (kg)', format: 'number' },
   { key: 'peso_t', label: 'Peso (t)', format: 'ton' },
   { key: 'mese', label: 'Mese' },
   { key: 'anno', label: 'Anno' },

@@ -61,7 +61,7 @@ export default function Secondarie() {
           if (!filters.anno.map(String).includes(String(anno))) return false;
         }
         return true;
-      }).map(r => ({ ...r, peso_t: +((r.peso_effettivo || r.peso_stimato || 0) / 1000).toFixed(3) }));
+      }).map(r => ({ ...r, peso_t: +((r.peso_effettivo || 0) / 1000).toFixed(3) }));
       setRecords(filtered);
     } catch (e) { console.error(e); }
     setLoadingRecords(false);
