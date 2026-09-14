@@ -72,7 +72,14 @@ function CanaleBreve({ etichetta, canale, tono }) {
   );
 }
 
-function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina, onSalvaTarget }) {
+// Primo giorno feriale del mese: la data proposta per l'invio delle liste.
+function primoFeriale(anno, mese) {
+  const d = new Date(Date.UTC(anno, mese - 1, 1));
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina, onSalvaTarget, onNonRaccoglie }) {
   const input = useRef(null);
   const c = riga.controllo;
   const l = riga.lista;
@@ -95,9 +102,19 @@ function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina
         {l ? (
           <>
             <div className="text-sm truncate" title={l.file_nomi}>{l.file_nomi}</div>
-            <div className="text-xs text-muted-foreground">{l.richieste} richieste{l.prioritarie ? ` · ${l.prioritarie} prioritarie` : ''} · {dataIt(l.caricata_il)}</div>
+            <div className="text-xs text-muted-foreground">{l.richieste} richieste{l.prioritarie ? ` · ${l.prioritarie} prioritarie` : ''} · inviata il {dataIt(l.inviata_il || l.caricata_il)}</div>
           </>
-        ) : <span className="text-sm text-muted-foreground">{riga.assegnati_ora ? 'Da caricare' : '—'}</span>}
+        ) : riga.non_raccoglie ? (
+          <div className="text-xs text-muted-foreground">
+            Non raccoglie questo mese
+            {isAdmin && <button onClick={() => onNonRaccoglie(riga, false)} className="block text-primary hover:underline">annulla</button>}
+          </div>
+        ) : (
+          <div>
+            <span className="text-sm text-muted-foreground">{riga.assegnati_ora ? 'Da caricare' : '—'}</span>
+            {isAdmin && <button onClick={() => onNonRaccoglie(riga, true)} className="block text-xs text-muted-foreground hover:underline">non raccoglie questo mese</button>}
+          </div>
+        )}
       </td>
       <td className="px-4 py-3 text-sm tabular-nums whitespace-nowrap">
         {c ? (
@@ -149,6 +166,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
   const [inControllo, setInControllo] = useState(false);
   const [tuttiAlert, setTuttiAlert] = useState(false);
   const [mostraAltri, setMostraAltri] = useState(false);
+  const [inviataIl, setInviataIl] = useState(primoFeriale(oggi.getFullYear(), oggi.getMonth() + 1));
 
   const carica = useCallback(async (silenzioso = false) => {
     if (!silenzioso) setCaricando(true);
@@ -164,6 +182,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
   }, [anno, mese]);
 
   useEffect(() => { setDati(null); carica(); }, [carica]);
+  useEffect(() => { setInviataIl(primoFeriale(anno, mese)); }, [anno, mese]);
 
   const sposta = (passo) => {
     let m = mese + passo, a = anno;
@@ -174,12 +193,16 @@ export default function EvasioneAssegnati({ isAdmin }) {
   };
 
   const caricaLista = async (riga, files) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(inviataIl)) {
+      toast({ title: 'Indica quando sono state inviate le liste', description: 'Serve la data in "Liste inviate il", in alto.', variant: 'destructive' });
+      return;
+    }
     if (riga.lista && !window.confirm(`Sostituire la lista di ${riga.nome} per ${MESI[mese - 1]} ${anno}? I controlli fatti finora su quella lista verranno cancellati.`)) return;
     setOccupato(riga.chiave);
     try {
       const { fogli, senzaColori } = await leggiFogliLista(files);
       const res = await base44.functions.invoke('caricaListaAssegnati', {
-        anno, mese, raccoglitore_chiave: riga.chiave, raccoglitore_nome: riga.nome, file_nomi: files.map(f => f.name).join(', '), fogli,
+        anno, mese, raccoglitore_chiave: riga.chiave, raccoglitore_nome: riga.nome, file_nomi: files.map(f => f.name).join(', '), fogli, inviata_il: inviataIl,
       });
       const d = res.data || res;
       const dettagli = [`${d.richieste} richieste, ${d.prioritarie} prioritarie.`];
@@ -188,7 +211,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
       if (d.non_riconosciute) dettagli.push(`${d.non_riconosciute} ID non corrispondono a nessun ordine.`);
       if (senzaColori) dettagli.push('Il file non è in formato xlsx: le righe evidenziate non si possono riconoscere.');
       dettagli.push(...(d.avvisi || []));
-      toast({ title: `Lista di ${riga.nome} caricata`, description: dettagli.join(' ') });
+      toast({ title: `Lista di ${riga.nome} caricata, inviata il ${dataIt(d.inviata_il || inviataIl)}`, description: dettagli.join(' ') });
       await carica(true);
     } catch (e) {
       const msg = e && e.response && e.response.data && e.response.data.error;
@@ -221,6 +244,17 @@ export default function EvasioneAssegnati({ isAdmin }) {
     }
   };
 
+  // "Non raccoglie questo mese" si registra sul target del mese, in Target & Status.
+  const segnaNonRaccoglie = async (riga, valore) => {
+    try {
+      if (riga.target_id) await base44.entities.TargetRaccoglitorePrimaria.update(riga.target_id, { non_raccoglie: valore });
+      else await base44.entities.TargetRaccoglitorePrimaria.create({ raccoglitore: riga.target_nome || riga.nome, mese: MESI[mese - 1], anno, target_kg: 0, non_raccoglie: valore });
+      await carica(true);
+    } catch (e) {
+      toast({ title: 'Modifica non salvata', description: e.message || String(e), variant: 'destructive' });
+    }
+  };
+
   const controllaOra = async () => {
     setInControllo(true);
     try {
@@ -235,7 +269,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
   };
 
   const righe = dati ? dati.raccoglitori : [];
-  const inEvidenza = (r) => r.lista || r.assegnati_ora > 0 || r.raccolto_kg > 0 || attivitaCanali(r);
+  const inEvidenza = (r) => r.lista || (!r.non_raccoglie && (r.assegnati_ora > 0 || r.raccolto_kg > 0)) || attivitaCanali(r);
   const principali = righe.filter(inEvidenza);
   const altri = righe.filter(r => !inEvidenza(r));
   const alert = useMemo(() => {
@@ -245,7 +279,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
   }, [righe]);
   const alertVisibili = tuttiAlert ? alert : alert.filter(a => a.gravita !== 'info').slice(0, 10);
   const conLista = righe.filter(r => r.lista).length;
-  const daCaricare = righe.filter(r => !r.lista && r.assegnati_ora > 0).length;
+  const daCaricare = righe.filter(r => !r.lista && !r.non_raccoglie && r.assegnati_ora > 0).length;
 
   const intestazioneTabella = (
     <thead className="bg-muted/50 text-left">
@@ -282,6 +316,12 @@ export default function EvasioneAssegnati({ isAdmin }) {
             </>
           )}
           {isAdmin && (
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground" title="Giorno in cui le liste del mese sono state mandate ai raccoglitori: da qui partono cronologia, priorità e trascurate. Vale per le liste che carichi.">
+              Liste inviate il
+              <input type="date" value={inviataIl} onChange={(e) => setInviataIl(e.target.value)} className="h-8 px-2 rounded border bg-card text-sm" />
+            </label>
+          )}
+          {isAdmin && (
             <Button size="sm" variant="outline" onClick={controllaOra} disabled={inControllo || caricando}>
               {inControllo ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}Controlla ora
             </Button>
@@ -292,8 +332,9 @@ export default function EvasioneAssegnati({ isAdmin }) {
       <div className="flex items-start gap-2 text-xs text-muted-foreground">
         <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
         <span>
-          Carica per ogni raccoglitore la lista inviata a inizio mese: una o più file Excel con la colonna ID degli assegnati, nell'ordine di evasione,
-          con in giallo le prime o le prioritarie. Il controllo si ripete da solo a ogni caricamento delle primarie, sulla data di fine trasporto.
+          Carica per ogni raccoglitore la lista inviata a inizio mese: uno o più file Excel insieme, con la colonna ID degli assegnati, con in giallo
+          le prioritarie oppure in un file con PRIORITA' nel nome. Chi deve evadere lo decide la lista, anche se sul portale l'ordine è assegnato a un
+          altro trasportatore. L'ordine si valuta per provincia: prima le prioritarie, poi la richiesta immessa per prima. Il controllo si ripete da solo a ogni caricamento delle primarie, sulla data di fine trasporto.
           Il target è quello di Target & Status. Caricando la lista del mese successivo, quella precedente e i suoi controlli si cancellano.
           Lista, target e previsione riguardano la sola rete. ACI ed extra raccolta sono mostrati a parte: una richiesta ACI aperta o una richiesta
           di extra raccolta inserita come assegnata nel modulo Extra Raccolta genera un alert. Una richiesta resta assegnata finché non viene chiusa
@@ -345,7 +386,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
               <tbody>
                 {principali.map(r => (
                   <RigaRaccoglitore key={r.chiave} riga={r} isAdmin={isAdmin} occupato={occupato === r.chiave}
-                    onCarica={caricaLista} onApri={setAperto} onElimina={eliminaLista} onSalvaTarget={salvaTarget} />
+                    onCarica={caricaLista} onApri={setAperto} onElimina={eliminaLista} onSalvaTarget={salvaTarget} onNonRaccoglie={segnaNonRaccoglie} />
                 ))}
                 {principali.length === 0 && (
                   <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">Nessun raccoglitore con liste, raccolte o richieste aperte in questo mese.</td></tr>
@@ -354,18 +395,29 @@ export default function EvasioneAssegnati({ isAdmin }) {
                   <tr className="border-t bg-muted/20">
                     <td colSpan={9} className="px-4 py-2">
                       <button onClick={() => setMostraAltri(v => !v)} className="text-xs text-muted-foreground uppercase tracking-wide hover:underline">
-                        {mostraAltri ? 'Nascondi' : 'Mostra'} {altri.length} raccoglitori senza attività nel mese
+                        {mostraAltri ? 'Nascondi' : 'Mostra'} {altri.length} raccoglitori senza attività nel mese o che non raccolgono
                       </button>
                     </td>
                   </tr>
                 )}
                 {mostraAltri && altri.map(r => (
                   <RigaRaccoglitore key={r.chiave} riga={r} isAdmin={isAdmin} occupato={occupato === r.chiave}
-                    onCarica={caricaLista} onApri={setAperto} onElimina={eliminaLista} onSalvaTarget={salvaTarget} />
+                    onCarica={caricaLista} onApri={setAperto} onElimina={eliminaLista} onSalvaTarget={salvaTarget} onNonRaccoglie={segnaNonRaccoglie} />
                 ))}
               </tbody>
             </table>
           </div>
+
+          {dati.senza_raccolta && dati.senza_raccolta.length > 0 && (
+            <div className="flex items-start gap-2 text-xs text-muted-foreground border rounded-lg px-4 py-3 bg-muted/20">
+              <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>
+                Ordini assegnati sul portale a soggetti che nel {anno} non hanno raccolte:{' '}
+                {dati.senza_raccolta.map(s => `${s.nome} ${s.assegnati} di rete${s.aci ? ` e ${s.aci} ACI` : ''}${s.in_liste ? `, di cui ${s.in_liste} nelle liste caricate` : ''}`).join('; ')}.
+                Non compaiono tra i raccoglitori: le richieste contano per chi le ha in lista.
+              </span>
+            </div>
+          )}
         </>
       )}
 

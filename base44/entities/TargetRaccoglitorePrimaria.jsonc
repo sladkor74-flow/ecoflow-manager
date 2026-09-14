@@ -17,6 +17,11 @@
       "type": "number",
       "description": "Target mensile assegnato (kg)"
     },
+    "non_raccoglie": {
+      "type": "boolean",
+      "default": false,
+      "description": "Il raccoglitore non raccoglie in questo mese: nessuna lista attesa"
+    },
     "raccolto_kg": {
       "type": "number",
       "description": "Raccolto effettivo calcolato dal backend (kg)"

@@ -8,7 +8,7 @@ export const STATI_RICHIESTA = {
   evasa: { etichetta: 'Evasa', classe: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   evasa_da_altri: { etichetta: 'Evasa da altri', classe: 'bg-sky-100 text-sky-800 border-sky-200' },
   aperta: { etichetta: 'Aperta', classe: 'bg-muted text-foreground border-border' },
-  riassegnata: { etichetta: 'Riassegnata', classe: 'bg-violet-100 text-violet-800 border-violet-200' },
+  riassegnata: { etichetta: 'In lista di altri', classe: 'bg-violet-100 text-violet-800 border-violet-200' },
   evasa_altro_ordine: { etichetta: 'Evasa con altro ordine', classe: 'bg-emerald-50 text-emerald-800 border-emerald-300' },
   annullata: { etichetta: 'Annullata', classe: 'bg-zinc-100 text-zinc-700 border-zinc-300' },
   non_piu_presente: { etichetta: 'Non più presente', classe: 'bg-orange-100 text-orange-800 border-orange-200' },

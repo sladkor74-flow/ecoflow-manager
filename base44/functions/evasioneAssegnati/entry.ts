@@ -44,7 +44,24 @@ export default async function(req) {
 
     const oggi = oggiRoma();
     const targetsMese = targetAnno.filter(t => t.mese === MESI[mese - 1]);
-    const raccoglitori = raccoglitoriAttivi(dati.terminati, dati.assegnati, dati.anagrafica, anno);
+    // Chi non ha formulari terminati nell'anno non raccoglie: i suoi ordini
+    // assegnati sul portale finiscono nelle liste di altri e si segnalano a parte.
+    const attiviAnno = new Set(dati.terminati.filter(t => t.fine && t.fine.slice(0, 4) === String(anno)).map(t => t.chiaveTrasp));
+    const idsInListe = new Set(listeMese.flatMap(l => JSON.parse(l.righe_json || '[]').map(r => r.id_ordine)));
+    const senzaRaccolta = [];
+    const raccoglitori = raccoglitoriAttivi(dati.terminati, dati.assegnati, dati.anagrafica, anno).filter(r => {
+      if (attiviAnno.has(r.chiave) || listeMese.some(l => l.raccoglitore_chiave === r.chiave)) return true;
+      const suoi = dati.assegnati.filter(a => a.chiaveTrasp === r.chiave);
+      if (suoi.length) {
+        senzaRaccolta.push({
+          nome: r.nome,
+          assegnati: suoi.filter(a => a.canale === 'rete').length,
+          aci: suoi.filter(a => a.canale === 'aci').length,
+          in_liste: suoi.filter(a => idsInListe.has(a.id_ordine)).length,
+        });
+      }
+      return false;
+    });
     for (const l of listeMese) {
       if (!raccoglitori.some(r => r.chiave === l.raccoglitore_chiave)) raccoglitori.push({ chiave: l.raccoglitore_chiave, nome: l.raccoglitore_nome });
     }
@@ -71,6 +88,7 @@ export default async function(req) {
         chiave: r.chiave,
         nome: r.nome,
         target_kg: target ? Number(target.target_kg) || 0 : null,
+        non_raccoglie: !!(target && target.non_raccoglie),
         target_id: target ? target.id : null,
         target_nome: target ? target.raccoglitore : (altroMese ? altroMese.raccoglitore : r.nome),
         raccolto_kg: canali.rete.kg,
@@ -78,17 +96,17 @@ export default async function(req) {
         canali,
         alert_canali: alertCanali,
         lista: lista ? {
-          id: lista.id, file_nomi: lista.file_nomi, caricata_il: lista.caricata_il, richieste: lista.richieste, prioritarie: lista.prioritarie,
+          id: lista.id, file_nomi: lista.file_nomi, caricata_il: lista.caricata_il, inviata_il: lista.inviata_il, richieste: lista.richieste, prioritarie: lista.prioritarie,
           avvisi: JSON.parse(lista.avvisi_json || '[]'),
         } : null,
         controllo,
       });
     }
     // Prima chi ha una lista, poi chi ha richieste aperte in qualche canale, poi gli altri.
-    const haAperte = (x) => Number(x.assegnati_ora > 0 || x.canali.aci.aperte.length > 0 || x.canali.extra.aperte.length > 0);
+    const haAperte = (x) => Number(!x.non_raccoglie && (x.assegnati_ora > 0 || x.canali.aci.aperte.length > 0 || x.canali.extra.aperte.length > 0));
     righe.sort((a, b) => (Number(!!b.lista) - Number(!!a.lista)) || (haAperte(b) - haAperte(a)) || a.nome.localeCompare(b.nome, 'it'));
 
-    return Response.json({ anno, mese, primarie_caricate_il: primarieIl, raccoglitori: righe });
+    return Response.json({ anno, mese, primarie_caricate_il: primarieIl, raccoglitori: righe, senza_raccolta: senzaRaccolta });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });
   }

@@ -4,7 +4,9 @@ import { caricaDati, cancellaVecchi, eseguiControlli } from "../../shared/evasio
 
 // Carica la lista degli assegnati inviata a un raccoglitore per un mese.
 //
-// Payload: { anno, mese, raccoglitore_chiave, raccoglitore_nome, file_nomi, fogli }
+// Payload: { anno, mese, raccoglitore_chiave, raccoglitore_nome, file_nomi, fogli, inviata_il }
+// inviata_il e' il giorno in cui la lista e' stata mandata al raccoglitore: da
+// li' partono cronologia, priorita' e trascurate. Senza, vale la data di oggi.
 // I file vengono aperti nel browser e qui arrivano solo le celle, con
 // l'indicazione delle righe evidenziate: nessun file viene salvato.
 //
@@ -24,6 +26,7 @@ export default async function(req) {
     const { raccoglitore_chiave, raccoglitore_nome } = body;
     if (!anno || !mese || !raccoglitore_chiave) return Response.json({ error: 'anno, mese e raccoglitore sono obbligatori' }, { status: 400 });
     if (!Array.isArray(body.fogli) || body.fogli.length === 0) return Response.json({ error: 'Nessun foglio da leggere' }, { status: 400 });
+    const inviataIl = /^\d{4}-\d{2}-\d{2}$/.test(String(body.inviata_il || '')) ? String(body.inviata_il) : new Date().toISOString().slice(0, 10);
 
     const lettura = leggiListaDaFogli(body.fogli);
     if (lettura.righe.length === 0) {
@@ -41,6 +44,7 @@ export default async function(req) {
       anno, mese,
       file_nomi: String(body.file_nomi || ''),
       caricata_il: new Date().toISOString(),
+      inviata_il: inviataIl,
       righe_json: JSON.stringify(righe),
       avvisi_json: JSON.stringify(lettura.avvisi),
       richieste: righe.length,
@@ -51,6 +55,7 @@ export default async function(req) {
 
     return Response.json({
       lista_id: lista.id,
+      inviata_il: inviataIl,
       richieste: righe.length,
       prioritarie: lista.prioritarie,
       non_riconosciute: righe.filter(r => r.stato_al_caricamento === 'non_riconosciuta').length,

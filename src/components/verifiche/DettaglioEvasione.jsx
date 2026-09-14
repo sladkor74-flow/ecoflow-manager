@@ -151,7 +151,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
           <SheetTitle className="text-xl pr-6">{riga.nome}</SheetTitle>
           <SheetDescription>
             {riga.lista
-              ? <>Lista di {MESI[mese - 1]} {anno} · {riga.lista.file_nomi} · caricata il {dataIt(riga.lista.caricata_il)}</>
+              ? <>Lista di {MESI[mese - 1]} {anno} · {riga.lista.file_nomi} · inviata il {dataIt(riga.lista.inviata_il || riga.lista.caricata_il)}</>
               : <>Nessuna lista di rete caricata per {MESI[mese - 1]} {anno}</>}
           </SheetDescription>
         </SheetHeader>
@@ -264,14 +264,14 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
               </div>
             )}
 
-            {esito && esito.per_regione.length > 0 && (
+            {esito && (esito.per_provincia || esito.per_regione || []).length > 0 && (
               <section className="text-sm">
-                <h4 className="font-semibold mb-2">Per regione</h4>
+                <h4 className="font-semibold mb-2">{esito.per_provincia ? 'Per provincia' : 'Per regione'}</h4>
                 <div className="flex flex-wrap gap-2">
-                  {esito.per_regione.map(r => (
-                    <div key={r.regione} className="border rounded-lg px-3 py-2 bg-card">
-                      <div className="font-medium">{r.regione}</div>
-                      <div className="text-xs text-muted-foreground tabular-nums">{r.evase} evase su {r.richieste} · {r.aperte} aperte · raccolto {tonnellate(r.raccolto_kg)} t</div>
+                  {(esito.per_provincia || esito.per_regione).map(r => (
+                    <div key={r.provincia || r.regione} className="border rounded-lg px-3 py-2 bg-card">
+                      <div className="font-medium">{r.provincia || r.regione}</div>
+                      <div className="text-xs text-muted-foreground tabular-nums">{r.evase} evase su {r.richieste} · {r.aperte} aperte{r.trascurate ? ` · ${r.trascurate} trascurate` : ''} · raccolto {tonnellate(r.raccolto_kg)} t</div>
                     </div>
                   ))}
                 </div>
@@ -312,6 +312,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                             {r.kg !== null && r.kg !== undefined ? `${r.kg.toLocaleString('it-IT')} kg` : r.stima_kg ? <span className="text-muted-foreground" title={r.metodo_stima}>~{r.stima_kg.toLocaleString('it-IT')} kg</span> : ''}
                           </td>
                           <td className="px-2 py-1.5 text-muted-foreground">
+                            {r.assegnata_sul_portale_a && <div>sul portale: {r.assegnata_sul_portale_a}</div>}
                             {r.saltate > 0 && <span className="text-amber-700">saltate {r.saltate} precedenti</span>}
                             {r.stato === 'aperta' && scavalcata(r) && (
                               <div className="text-red-700 font-medium">

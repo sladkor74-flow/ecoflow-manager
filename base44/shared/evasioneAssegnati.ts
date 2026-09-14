@@ -18,6 +18,12 @@
 // del portale: risulta annullata con il suo motivo e non pesa sul raccoglitore,
 // ma quando le aperte non bastano piu' al target servono nuove richieste.
 //
+// Chi deve evadere una richiesta lo stabilisce la lista, anche se sul portale
+// l'ordine e' assegnato a un altro trasportatore: puo' capitare che un altro
+// raccoglitore la evada, ma una richiesta si evade una sola volta. L'ordine di
+// evasione si valuta per provincia: prima le prioritarie, poi dalla richiesta
+// immessa per prima.
+//
 // Una richiesta resta assegnata sul portale finche' non viene cancellata o chiusa
 // come terminata, e il raccoglitore chiude i ritiri qualche giorno dopo il
 // trasporto. Le primarie sono complete solo fino a qualche giorno prima
@@ -209,7 +215,7 @@ const intestazione = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g,
 export function leggiListaDaFogli(fogli) {
   const righe = [];
   const avvisi = [];
-  const visti = new Set();
+  const visti = new Map();
   let duplicati = 0;
   const fogliLetti = [];
 
@@ -233,8 +239,10 @@ export function leggiListaDaFogli(fogli) {
         break;
       }
     }
+    // Prima i nomi esatti, poi quelli che li contengono, esclusi codici e ID.
     const colonna = (...nomi) => {
-      for (const n of nomi) for (const [t, j] of Object.entries(indiciColonne)) if (t === n || t.includes(n)) return j;
+      for (const n of nomi) if (indiciColonne[n] !== undefined) return indiciColonne[n];
+      for (const n of nomi) for (const [t, j] of Object.entries(indiciColonne)) if (t.includes(n) && !/^(id|codice)_/.test(t)) return j;
       return -1;
     };
     const c = {
@@ -247,32 +255,44 @@ export function leggiListaDaFogli(fogli) {
       priorita: colonna('priorit'),
     };
     const val = (riga, j) => (j >= 0 ? (riga.c || [])[j] : null);
+    // Un file o un foglio con priorita' o urgente nel nome contiene solo prioritarie.
+    const prioritarioPerNome = /priorit|urgent/i.test(`${foglio.file || ''} ${foglio.nome || ''}`);
 
     let righeFoglio = 0;
     for (const riga of foglio.righe) {
       const id = String((riga.c || [])[colonnaId] ?? '').trim().toUpperCase();
       if (!RE_ID_ORDINE.test(id)) continue;
-      if (visti.has(id)) { duplicati++; continue; }
-      visti.add(id);
-      righeFoglio++;
       const testoRiga = (riga.c || []).map(v => String(v ?? '')).join(' ');
       const testoPriorita = String(val(riga, c.priorita) ?? '').trim();
-      const perTesto = /priorit|urgent/i.test(testoRiga) || (!!testoPriorita && !/^(no|0|false)$/i.test(testoPriorita));
-      righe.push({
+      const perTesto = prioritarioPerNome || /priorit|urgent/i.test(testoRiga) || (!!testoPriorita && !/^(no|0|false)$/i.test(testoPriorita));
+      const motivoTesto = prioritarioPerNome ? `file ${foglio.file}` : (testoPriorita || 'indicata nel file');
+      // Un ordine ripetuto resta dove compare la prima volta, ma se altrove e'
+      // indicato come prioritario lo diventa.
+      if (visti.has(id)) {
+        duplicati++;
+        const prima = visti.get(id);
+        if (perTesto && !prima.priorita_testo) { prima.priorita_testo = true; prima.motivo_priorita = motivoTesto; }
+        if (riga.giallo) prima.giallo = true;
+        continue;
+      }
+      righeFoglio++;
+      const nuova = {
         id_ordine: id,
         file: foglio.file,
         foglio: foglio.nome,
         riga_excel: riga.r,
         giallo: !!riga.giallo,
         priorita_testo: perTesto,
-        motivo_priorita: perTesto ? (testoPriorita || 'indicata nel file') : (riga.giallo ? 'evidenziata' : ''),
+        motivo_priorita: perTesto ? motivoTesto : (riga.giallo ? 'evidenziata' : ''),
         file_immesso: dataDaValore(val(riga, c.immesso)),
         file_produttore: String(val(riga, c.produttore) ?? '').trim(),
         file_punto: String(val(riga, c.punto) ?? '').trim(),
         file_comune: String(val(riga, c.comune) ?? '').trim(),
         file_provincia: String(val(riga, c.provincia) ?? '').trim(),
         file_classe: classeNormalizzata(val(riga, c.prodotto)),
-      });
+      };
+      visti.set(id, nuova);
+      righe.push(nuova);
     }
     if (righeFoglio > 0) fogliLetti.push({ file: foglio.file, foglio: foglio.nome, righe: righeFoglio });
   }
@@ -287,6 +307,7 @@ export function leggiListaDaFogli(fogli) {
     r.posizione = i + 1;
     r.prioritaria = r.priorita_testo || (evidenziazioneValida && r.giallo);
     if (!r.prioritaria) r.motivo_priorita = '';
+    else if (!r.motivo_priorita) r.motivo_priorita = 'evidenziata';
   });
 
   return { righe, avvisi, fogli: fogliLetti };
@@ -416,14 +437,16 @@ function ritardoChiusura(propri, tutti, anno) {
  * @param raccoglitore { chiave, nome }
  * @param terminati    primarie terminate normalizzate, rete e ACI
  * @param assegnati    ordini assegnati attuali normalizzati, rete e ACI
- * @param altreListe   [{ chiave, nome, ids: Set }] liste degli altri raccoglitori nello stesso mese
+ * @param altreListe   [{ chiave, nome, ids: Set, caricata_il }] liste degli altri raccoglitori nello stesso mese
  * @param targetKg     target del gestionale, oppure null
  * @param cancellati   ordini cancellati sul portale normalizzati, con il motivo
  */
 export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminati, assegnati, altreListe, targetKg, cancellati = [] }) {
   const inizioMese = primoGiorno(anno, mese);
   const fineMese = ultimoGiorno(anno, mese);
-  const caricataIl = ymd(lista.caricata_il) || inizioMese;
+  // Data in cui la lista e' stata inviata al raccoglitore; per le liste caricate
+  // senza, quella di caricamento.
+  const caricataIl = ymd(lista.inviata_il) || ymd(lista.caricata_il) || inizioMese;
   const chiave = raccoglitore.chiave;
   // Liste, target e previsione riguardano la sola rete.
   const rete = terminati.filter(t => t.canale === 'rete');
@@ -461,8 +484,13 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
       if (t.fine < inizioMese) base.stato = 'evasa_prima';
       else base.stato = t.chiaveTrasp === chiave ? 'evasa' : 'evasa_da_altri';
     } else if (a) {
-      base.stato = a.chiaveTrasp && a.chiaveTrasp !== chiave ? 'riassegnata' : 'aperta';
-      if (base.stato === 'riassegnata') base.chiusa_da = a.trasportatore;
+      // Chi deve evadere lo stabilisce la lista, non il trasportatore indicato sul
+      // portale: la richiesta passa a un altro solo se compare nella lista di un
+      // altro raccoglitore caricata dopo questa.
+      const spostata = altreListe.find(l => l.chiave !== chiave && l.ids.has(r.id_ordine) && String(l.caricata_il || '') > String(lista.caricata_il || ''));
+      base.stato = spostata ? 'riassegnata' : 'aperta';
+      if (spostata) base.chiusa_da = spostata.nome;
+      else if (a.chiaveTrasp && a.chiaveTrasp !== chiave) base.assegnata_sul_portale_a = a.trasportatore;
     } else if (cancellatiPerId.has(r.id_ordine)) {
       base.stato = 'annullata';
       base.motivo_annullamento = cancellatiPerId.get(r.id_ordine).motivo || 'motivo non indicato';
@@ -508,19 +536,27 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   const fuoriListaEffettivi = fuoriLista.filter(x => x.tipo !== 'stesso_pdr');
   const evasaDalRaccoglitore = (r) => r.stato === 'evasa' || r.stato === 'evasa_altro_ordine';
 
-  // --- cronologia: prima le prioritarie, poi l'ordine della lista ---
-  const ordinate = [...righe].sort((x, y) => (Number(y.prioritaria) - Number(x.prioritaria)) || (x.posizione - y.posizione));
+  // --- cronologia: per provincia, prima le prioritarie, poi la richiesta immessa per prima ---
+  // Le richieste si confrontano nella stessa provincia, o in mancanza nella stessa
+  // regione, perche' un raccoglitore organizza i giri per zona.
+  const provinciaDi = (x) => String(x.provincia || '').trim().toUpperCase();
+  const stessaZona = (a, b) => {
+    const pa = provinciaDi(a), pb = provinciaDi(b);
+    if (pa && pb) return pa === pb;
+    return !a.regione || !b.regione || a.regione === b.regione;
+  };
+  const ordinate = [...righe].sort((x, y) => (Number(y.prioritaria) - Number(x.prioritaria))
+    || String(x.data_immissione || '9999').localeCompare(String(y.data_immissione || '9999'))
+    || (x.posizione - y.posizione));
   const rango = new Map(ordinate.map((r, i) => [r.id_ordine, i]));
-  // Una richiesta chiusa il giorno D salta quelle che la precedono e che a fine
-  // giornata D erano ancora da evadere. Le chiusure dello stesso giorno non si
-  // saltano a vicenda: un giro di raccolta ne chiude diverse insieme. Il
-  // confronto si fa nella stessa regione, perche' un raccoglitore che lavora in
-  // piu' regioni organizza i giri per zona. Una richiesta ancora aperta risulta
-  // saltata solo da chiusure con dati completi: potrebbe essere gia' ritirata e
-  // non ancora chiusa sul portale.
+  // Una richiesta chiusa il giorno D salta quelle che la precedono nella stessa
+  // zona e che a fine giornata D erano ancora da evadere. Le chiusure dello stesso
+  // giorno non si saltano a vicenda: un giro di raccolta ne chiude diverse
+  // insieme. Una richiesta ancora aperta risulta saltata solo da chiusure con dati
+  // completi: potrebbe essere gia' ritirata e non ancora chiusa sul portale.
   const saltateDa = (o) => ordinate.filter(e => rango.get(e.id_ordine) < rango.get(o.id_ordine)
     && !['non_piu_presente', 'evasa_prima', 'annullata'].includes(e.stato)
-    && (!o.regione || !e.regione || e.regione === o.regione)
+    && stessaZona(e, o)
     && (e.chiusa_il ? e.chiusa_il > o.chiusa_il : consolidata(o.chiusa_il)));
   for (const o of righe) {
     if (!evasaDalRaccoglitore(o)) continue;
@@ -531,21 +567,20 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
 
   // --- richieste trascurate ---
   // Una richiesta aperta e' trascurata quando, dopo l'invio della lista, il
-  // raccoglitore ha evaso richieste che la seguono nella stessa regione. Un
+  // raccoglitore ha evaso richieste che la seguono nella stessa provincia. Un
   // ordine evaso fuori lista scavalca invece la prima richiesta ancora aperta
-  // della sua regione, quella che andava evasa per prima. Non serve che sia
+  // della sua provincia, quella che andava evasa per prima. Non serve che sia
   // prioritaria o evidenziata: scavalcarla va sollecitato. Contano solo le
   // chiusure con dati completi.
-  const stessaRegione = (a, b) => !a || !b || a === b;
   for (const e of righe) {
     e.scavalcata_successive = 0;
     e.scavalcata_fuori = 0;
     if (e.stato !== 'aperta') continue;
-    e.scavalcata_successive = righe.filter(o => evasaDalRaccoglitore(o) && o.chiusa_il >= caricataIl && consolidata(o.chiusa_il) && rango.get(o.id_ordine) > rango.get(e.id_ordine) && stessaRegione(o.regione, e.regione)).length;
+    e.scavalcata_successive = righe.filter(o => evasaDalRaccoglitore(o) && o.chiusa_il >= caricataIl && consolidata(o.chiusa_il) && rango.get(o.id_ordine) > rango.get(e.id_ordine) && stessaZona(o, e)).length;
   }
   for (const x of fuoriListaEffettivi) {
     if (x.chiusa_il < caricataIl || !consolidata(x.chiusa_il)) continue;
-    const prima = ordinate.find(e => e.stato === 'aperta' && stessaRegione(e.regione, x.regione));
+    const prima = ordinate.find(e => e.stato === 'aperta' && stessaZona(e, x));
     if (prima) prima.scavalcata_fuori++;
   }
   const trascurate = ordinate.filter(r => r.stato === 'aperta' && (r.scavalcata_successive + r.scavalcata_fuori) > 0);
@@ -669,14 +704,16 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     viaggi_possibili: storico.viaggi_per_giorno ? Math.floor(storico.viaggi_per_giorno * giorniResidui) : null,
   };
 
-  // --- per regione, quando la lista ne tocca piu' d'una ---
-  const regioni = [...new Set(righe.map(r => r.regione).filter(Boolean))];
-  const perRegione = regioni.length > 1 ? regioni.map(reg => ({
-    regione: reg,
-    richieste: righe.filter(r => r.regione === reg).length,
-    evase: righe.filter(r => r.regione === reg && evasaDalRaccoglitore(r)).length,
-    aperte: righe.filter(r => r.regione === reg && r.stato === 'aperta').length,
-    raccolto_kg: delMese.filter(t => t.regione === reg).reduce((s, t) => s + t.kg, 0),
+  // --- per provincia, quando la lista ne tocca piu' d'una ---
+  const province = [...new Set(righe.map(provinciaDi).filter(Boolean))];
+  const nella = (p) => righe.filter(r => provinciaDi(r) === p);
+  const perProvincia = province.length > 1 ? province.map(p => ({
+    provincia: p,
+    richieste: nella(p).length,
+    evase: nella(p).filter(evasaDalRaccoglitore).length,
+    aperte: nella(p).filter(r => r.stato === 'aperta').length,
+    trascurate: nella(p).filter(r => r.stato === 'aperta' && (r.scavalcata_successive + r.scavalcata_fuori) > 0).length,
+    raccolto_kg: delMese.filter(t => provinciaDi(t) === p).reduce((s, t) => s + t.kg, 0),
   })).sort((a, b) => b.richieste - a.richieste) : [];
 
   // --- conteggi ---
@@ -731,8 +768,14 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     for (const r of daAltri) chi.set(r.chiusa_da, (chi.get(r.chiusa_da) || 0) + 1);
     aggiungi('info', 'da_altri', `${daAltri.length} ${daAltri.length === 1 ? 'richiesta della lista chiusa' : 'richieste della lista chiuse'} da altri raccoglitori: ${[...chi.entries()].map(([n, c]) => `${n} (${c})`).join(', ')}.`);
   }
+  const altroSulPortale = righe.filter(r => r.stato === 'aperta' && r.assegnata_sul_portale_a);
+  if (altroSulPortale.length) {
+    const chi = new Map();
+    for (const r of altroSulPortale) chi.set(r.assegnata_sul_portale_a, (chi.get(r.assegnata_sul_portale_a) || 0) + 1);
+    aggiungi('info', 'portale', `${altroSulPortale.length === 1 ? 'Una richiesta aperta risulta' : `${altroSulPortale.length} richieste aperte risultano`} sul portale assegnat${altroSulPortale.length === 1 ? 'a' : 'e'} a un altro trasportatore: ${[...chi.entries()].map(([n, c]) => `${n} (${c})`).join(', ')}. Restano richieste di questa lista.`);
+  }
   const riassegnate = righe.filter(r => r.stato === 'riassegnata');
-  if (riassegnate.length) aggiungi('info', 'riassegnate', `${riassegnate.length} ${riassegnate.length === 1 ? 'richiesta della lista risulta ora assegnata' : 'richieste della lista risultano ora assegnate'} ad altri: ${elenco(riassegnate.map(r => `${r.id_ordine} a ${r.chiusa_da}`), 3)}.`);
+  if (riassegnate.length) aggiungi('info', 'riassegnate', `${riassegnate.length} ${riassegnate.length === 1 ? 'richiesta e\' passata' : 'richieste sono passate'} nella lista di un altro raccoglitore caricata dopo: ${elenco(riassegnate.map(r => `${r.id_ordine} a ${r.chiusa_da}`), 3)}.`);
   const sparite = righe.filter(r => r.stato === 'non_piu_presente');
   if (sparite.length) aggiungi('info', 'non_presenti', `${sparite.length} ${sparite.length === 1 ? 'richiesta non e\' piu\'' : 'richieste non sono piu\''} ne' tra gli assegnati ne' tra i terminati ne' tra i cancellati del file caricato: ${elenco(sparite.map(r => r.id_ordine))}.`);
   const annullate = righe.filter(r => r.stato === 'annullata');
@@ -785,7 +828,7 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
         classe: r.classe, canale: r.canale, stato: r.stato, chiusa_il: r.chiusa_il, chiusa_da: r.chiusa_da,
         kg: r.kg, automezzo: r.automezzo, saltate: r.saltate, saltate_ids: r.saltate_ids,
         scavalcata_successive: r.scavalcata_successive || 0, scavalcata_fuori: r.scavalcata_fuori || 0,
-        motivo_annullamento: r.motivo_annullamento || '', evasa_con: r.evasa_con || '',
+        motivo_annullamento: r.motivo_annullamento || '', evasa_con: r.evasa_con || '', assegnata_sul_portale_a: r.assegnata_sul_portale_a || '',
         stima_kg: r.stima_kg, metodo_stima: r.metodo_stima || '', entro_capacita: r.entro_capacita ?? null, entro_target: r.entro_target ?? null,
       })),
       fuori_lista: fuoriLista,
@@ -796,7 +839,7 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
         kg_per_giorno: storico.kg_per_giorno, viaggi_per_giorno: storico.viaggi_per_giorno,
         classi: storico.classi, mezzi: storico.mezzi.slice(0, 12),
       },
-      per_regione: perRegione,
+      per_provincia: perProvincia,
       data_riferimento: itData(datiAl),
     },
   };

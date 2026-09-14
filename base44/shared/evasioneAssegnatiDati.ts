@@ -100,10 +100,10 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
 
     const altreListe = tutteLeListe
       .filter(l => Number(l.anno) === anno && Number(l.mese) === mese)
-      .map(l => ({ chiave: l.raccoglitore_chiave, nome: l.raccoglitore_nome, ids: new Set(JSON.parse(l.righe_json || '[]').map(r => r.id_ordine)) }));
+      .map(l => ({ chiave: l.raccoglitore_chiave, nome: l.raccoglitore_nome, caricata_il: l.caricata_il, ids: new Set(JSON.parse(l.righe_json || '[]').map(r => r.id_ordine)) }));
 
     const { riepilogo, alert, esito } = controllaLista({
-      lista: { righe: JSON.parse(lista.righe_json || '[]'), caricata_il: lista.caricata_il },
+      lista: { righe: JSON.parse(lista.righe_json || '[]'), caricata_il: lista.caricata_il, inviata_il: lista.inviata_il },
       raccoglitore: { chiave: lista.raccoglitore_chiave, nome: lista.raccoglitore_nome },
       anno, mese, oggi,
       terminati: dati.terminati,

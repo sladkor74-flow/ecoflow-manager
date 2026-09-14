@@ -24,6 +24,10 @@
       "type": "string",
       "format": "date-time"
     },
+    "inviata_il": {
+      "type": "string",
+      "description": "Giorno di invio della lista al raccoglitore (aaaa-mm-gg): da qui partono cronologia, priorita' e trascurate"
+    },
     "righe_json": {
       "type": "string",
       "description": "Richieste della lista nell'ordine di evasione, completate con i dati del gestionale al momento del caricamento"
