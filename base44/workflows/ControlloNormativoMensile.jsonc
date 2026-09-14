@@ -1,0 +1,45 @@
+{
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "controllo_normativo_mensile",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "controlla_normativa": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "controlloNormativo",
+            "args": {}
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Controlla le novita' normative",
+            "description": "Cerca sulle fonti ufficiali le novita' sulle voci della base di conoscenza dell'Assistente e le propone per l'approvazione"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Controllo Normativo Mensile",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 7 1 * *",
+      "one_time_date": null,
+      "timezone": "Europe/Rome",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "description": "Il primo giorno di ogni mese alle 7:00 controlla se ci sono novita' su PFU, D.Lgs. 152/2006, Albo e RENTRI rispetto alla base di conoscenza dell'Assistente: le novita' diventano proposte da approvare e gli amministratori ricevono un'email"
+}

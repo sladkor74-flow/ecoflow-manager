@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { individuaSoggetti, valutaSoggetto, oggiRoma, salvaRiepilogo } from "../../shared/qualificaFornitori.ts";
+import { applicaControlloClasse } from "../../shared/classeAlbo.ts";
 
 // Situazione della qualifica fornitori per un anno.
 //
@@ -28,10 +29,14 @@ export default async function(req) {
       esclusi = esito.esclusi;
     }
 
-    const [catalogo, documenti] = await Promise.all([
+    const [catalogo, documentiSalvati, targetAnnui, targetMensili] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.TipoDocumentoQualifica),
       fetchAll(base44.asServiceRole.entities.DocumentoQualifica, { stato: 'attivo' }),
+      fetchAll(base44.asServiceRole.entities.TargetRaccoglitore, { anno }),
+      fetchAll(base44.asServiceRole.entities.TargetMensile, { anno }),
     ]);
+    // La classe dell'iscrizione all'Albo si confronta con i target in vigore.
+    const documenti = applicaControlloClasse(documentiSalvati, soggetti, targetAnnui, targetMensili, anno);
 
     const valutati = soggetti.map(s => valutaSoggetto(s, catalogo, documenti, oggi));
     const alert = await salvaRiepilogo(base44, anno, valutati);

@@ -1,0 +1,73 @@
+{
+  "name": "ConoscenzaAssistente",
+  "type": "object",
+  "properties": {
+    "tipo": {
+      "type": "string",
+      "enum": ["faq", "regola_interna", "aggiornamento_normativo"],
+      "description": "FAQ confermata, regola interna o aggiornamento di una norma"
+    },
+    "stato": {
+      "type": "string",
+      "enum": ["proposta", "approvata", "scartata"],
+      "default": "proposta",
+      "description": "Solo le voci approvate entrano nelle risposte dell'Assistente"
+    },
+    "attiva": {
+      "type": "boolean",
+      "default": true
+    },
+    "area": {
+      "type": "string",
+      "enum": ["pfu", "tua", "albo", "rentri", "documenti", "gestionale"],
+      "default": "gestionale"
+    },
+    "titolo": {
+      "type": "string"
+    },
+    "testo": {
+      "type": "string"
+    },
+    "voce_id": {
+      "type": "string",
+      "description": "Voce della base di conoscenza del codice che questo aggiornamento sostituisce"
+    },
+    "testo_precedente": {
+      "type": "string"
+    },
+    "fonti_json": {
+      "type": "string",
+      "description": "Elenco delle fonti, JSON"
+    },
+    "verificato_il": {
+      "type": "string",
+      "format": "date"
+    },
+    "origine": {
+      "type": "string",
+      "enum": ["domanda", "controllo_mensile", "manuale"],
+      "default": "manuale"
+    },
+    "domanda_id": {
+      "type": "string"
+    },
+    "controllo_id": {
+      "type": "string"
+    },
+    "motivazione": {
+      "type": "string",
+      "description": "Perche' l'aggiornamento e' stato proposto"
+    },
+    "deciso_da": {
+      "type": "string"
+    },
+    "deciso_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "storico_json": {
+      "type": "string"
+    }
+  },
+  "required": ["tipo", "testo"]
+}

@@ -19,7 +19,7 @@ export const FONTI_UFFICIALI = [
 
 export type VoceConoscenza = {
   id: string;
-  area: 'pfu' | 'tua' | 'albo' | 'rentri' | 'documenti';
+  area: 'pfu' | 'tua' | 'albo' | 'rentri' | 'documenti' | 'gestionale';
   titolo: string;
   testo: string;
   fonti: string[];
@@ -148,10 +148,91 @@ export const BASE_CONOSCENZA: VoceConoscenza[] = [
     testo: 'Visura camerale: sei mesi dal rilascio (art. 41 DPR 445/2000). DURC: 120 giorni (DM 30 gennaio 2015). Iscrizione all\'Albo: fino alla scadenza del provvedimento, rinnovo quinquennale. Autorizzazioni d\'impianto: fino alla scadenza indicata nel provvedimento, con le durate tipiche della voce sulle autorizzazioni. White list antimafia della Prefettura: dodici mesi, con domanda di rinnovo presentata nei termini. Iscrizione RENTRI: nessuna scadenza, ma va verificato il pagamento del contributo annuale.',
     fonti: ['DPR 445/2000 art. 41', 'DM 30 gennaio 2015', 'L. 190/2012 art. 1 c. 52-53'],
   },
+
+  // === Regole operative del gestionale, confermate dalla direzione SMOCO ===
+  {
+    id: 'gest-periodo-fatturazione', area: 'gestionale', verificato_il: VERIFICATO_IL,
+    titolo: 'Periodo di competenza, fatturazione e anno dei dati',
+    testo: 'Il raccolto di un periodo si calcola solo sui formulari con stato terminato, per data di fine trasporto: mai con i campi mese e anno del record ne\' con la data di chiusura dell\'ordine. In fatturazione vanno solo i terminati, mai ordini con altro stato, e i tre canali RETE, ACI ed EXTRA RACCOLTA restano separati. Si lavora sui dati dell\'anno in corso: quelli degli anni precedenti non si usano, salvo le richieste arretrate ancora da evadere.',
+    fonti: ['Regole della direzione SMOCO'],
+  },
+  {
+    id: 'gest-target', area: 'gestionale', verificato_il: VERIFICATO_IL,
+    titolo: 'Target dei raccoglitori e del contratto',
+    testo: 'I target si scrivono una sola volta, in Target & Status, e tutti i moduli li leggono da li\'. Il target annuo di un raccoglitore si fissa a inizio anno o quando comincia a lavorare e si ripartisce mese per mese a inizio mese: i ragionamenti usano il mensile e la somma dei mesi coincide, a meno di arrotondamenti, con l\'annuo. Le righe sono per impianto di destinazione, regione e raccoglitore; SMOCO ha un target per regione. Il contratto Ecotyre fissa il target per regione, per classe di pneumatico e per destinazione.',
+    fonti: ['Regole della direzione SMOCO'],
+  },
+  {
+    id: 'gest-liste-assegnati', area: 'gestionale', verificato_il: VERIFICATO_IL,
+    titolo: 'Liste degli assegnati e priorita\' di evasione',
+    testo: 'Ogni mese il consorzio assegna a ciascun raccoglitore una lista di richieste proporzionata al suo target, circa 4 t per ritiro: e\' la lista a stabilire chi deve evadere, e una richiesta si evade una sola volta. Sul portale la richiesta resta assegnata finche\' non viene terminata o cancellata; le cancellazioni hanno un motivo (per esempio ritirata da altro operatore, livelli minimi non raggiunti, rifiuto, ordine doppio o inesistente, sostituzione per aggiornamento dati). Ordine di evasione nella stessa provincia: prima le richieste indicate come prioritarie nei file, che sono forzature chieste dal consorzio via email e prevalgono sempre; poi quelle immesse negli anni precedenti; poi le altre per data di immissione. Scavalcare richieste piu\' vecchie della stessa zona le rende trascurate.',
+    fonti: ['Regole della direzione SMOCO', 'DM 182/2019 art. 3 c. 6'],
+  },
+  {
+    id: 'gest-raccoglitori-2026', area: 'gestionale', verificato_il: VERIFICATO_IL,
+    titolo: 'Situazione dei raccoglitori nel 2026',
+    testo: 'In Puglia raccolgono sia SMOCO sia Pneuservice, quindi le loro zone si sovrappongono normalmente. Gli ordini che il portale assegna a Logistica Srl finiscono nella lista di Nappi Sud: nel 2026 Logistica Srl fa solo trasporti di secondarie. Royal Green non e\' contrattualizzata. C.L. Service non raccoglie a settembre 2026.',
+    fonti: ['Indicazioni della direzione SMOCO, settembre 2026'],
+  },
+  {
+    id: 'gest-uso-gestionale', area: 'gestionale', verificato_il: VERIFICATO_IL,
+    titolo: 'Il gestionale sostituisce il file Excel',
+    testo: 'Il gestionale nasce per lavorare senza il file Excel "Gestione Ecotyre": le importazioni da Excel servono solo al passaggio iniziale, e il file resta in uso solo per prudenza finche\' il gestionale non e\' completo e collaudato. Per i dati fa fede il gestionale.',
+    fonti: ['Regole della direzione SMOCO'],
+  },
 ];
+
+/** Aree normative, senza le regole interne del gestionale. */
+export const AREE_NORMATIVE = ['pfu', 'tua', 'albo', 'rentri', 'documenti'];
 
 /** Testo compatto delle voci scelte, da passare a un modello come riferimento. */
 export function testoBaseConoscenza(aree?: string[]) {
-  const voci = aree && aree.length ? BASE_CONOSCENZA.filter(v => aree.includes(v.area)) : BASE_CONOSCENZA;
-  return voci.map(v => `- ${v.titolo} (verificato il ${v.verificato_il}; fonti: ${v.fonti.join('; ')}): ${v.testo}`).join('\n');
+  return testoConoscenza([], aree);
+}
+
+// Voci aggiunte dal gestionale (entita' ConoscenzaAssistente): FAQ confermate,
+// regole interne e aggiornamenti normativi approvati. Un aggiornamento con
+// voce_id sostituisce il testo della voce del codice finche' non la si riscrive qui.
+export type VoceApprovata = {
+  tipo: string;
+  area?: string;
+  titolo?: string;
+  testo?: string;
+  fonti_json?: string;
+  voce_id?: string;
+  verificato_il?: string;
+};
+
+const fontiDi = (v: VoceApprovata) => {
+  try { const f = JSON.parse(v.fonti_json || '[]'); return Array.isArray(f) ? f.map(String) : []; } catch { return []; }
+};
+
+/** Voci approvate e attive salvate nel gestionale; lista vuota se l'entita' non e' leggibile. */
+export async function vociApprovate(base44) {
+  try {
+    const voci = await base44.asServiceRole.entities.ConoscenzaAssistente.filter({ stato: 'approvata' }, '-created_date', 500);
+    return voci.filter(v => v.attiva !== false);
+  } catch (_e) {
+    return [];
+  }
+}
+
+export function testoConoscenza(approvate: VoceApprovata[] = [], aree?: string[]) {
+  const ammessa = (area?: string) => !aree || !aree.length || aree.includes(area || 'gestionale');
+  const sostituzioni = new Map(approvate.filter(v => v.tipo === 'aggiornamento_normativo' && v.voce_id).map(v => [v.voce_id, v]));
+  const righe = BASE_CONOSCENZA.filter(v => ammessa(v.area)).map(v => {
+    const s = sostituzioni.get(v.id);
+    if (s && s.testo) {
+      const fonti = fontiDi(s);
+      return `- ${v.titolo} (aggiornata il ${s.verificato_il || ''}; fonti: ${(fonti.length ? fonti : v.fonti).join('; ')}): ${s.testo}`;
+    }
+    return `- ${v.titolo} (verificato il ${v.verificato_il}; fonti: ${v.fonti.join('; ')}): ${v.testo}`;
+  });
+  for (const v of approvate) {
+    if ((v.tipo === 'aggiornamento_normativo' && v.voce_id && BASE_CONOSCENZA.some(b => b.id === v.voce_id)) || !v.testo || !ammessa(v.area)) continue;
+    const etichetta = v.tipo === 'faq' ? 'FAQ confermata' : v.tipo === 'regola_interna' ? 'Regola interna' : 'Aggiornamento approvato';
+    const fonti = fontiDi(v);
+    righe.push(`- ${etichetta}: ${v.titolo || ''} (${v.verificato_il ? 'del ' + v.verificato_il : ''}${fonti.length ? '; fonti: ' + fonti.join('; ') : ''}): ${v.testo}`);
+  }
+  return righe.join('\n');
 }

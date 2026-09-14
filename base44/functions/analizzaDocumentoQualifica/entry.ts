@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { aggiungiPeriodo, oggiRoma } from "../../shared/qualificaFornitori.ts";
-import { testoBaseConoscenza, FONTI_UFFICIALI, VERIFICATO_IL } from "../../shared/baseConoscenza.ts";
+import { testoConoscenza, vociApprovate, AREE_NORMATIVE, FONTI_UFFICIALI, VERIFICATO_IL } from "../../shared/baseConoscenza.ts";
 
 // Agente di analisi dei documenti di qualifica.
 //
@@ -158,6 +158,7 @@ export default async function(req) {
     const nome = contesto.nome || doc.soggetto_nome || '';
     const piva = contesto.piva || '';
     const core = base44.asServiceRole.integrations.Core;
+    const approvate = await vociApprovate(base44);
     const { signed_url } = await core.CreateFileSignedUrl({ file_uri: doc.file_uri, expires_in: 900 });
 
     // === 1. Lettura del documento ===
@@ -197,7 +198,7 @@ export default async function(req) {
         `Riferimento normativo del catalogo: ${tipo.riferimento_normativo || 'non indicato'}`,
         '',
         `Base di conoscenza della commessa, verificata il ${VERIFICATO_IL}. Il fornitore lavora nella filiera dei pneumatici fuori uso (EER 16 01 03, rifiuti speciali non pericolosi) per il sistema collettivo Ecotyre. Usala come riferimento, ma controlla online sulle fonti ufficiali (${FONTI_UFFICIALI.join('; ')}) che nel frattempo non sia cambiato nulla: se trovi una norma o una data piu' recente, applicala e segnalalo con un problema informativo.`,
-        testoBaseConoscenza(),
+        testoConoscenza(approvate, AREE_NORMATIVE),
         '',
         'Dati estratti dal documento:',
         JSON.stringify(lettura, null, 2),

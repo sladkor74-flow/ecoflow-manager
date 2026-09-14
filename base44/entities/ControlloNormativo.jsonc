@@ -1,0 +1,34 @@
+{
+  "name": "ControlloNormativo",
+  "type": "object",
+  "properties": {
+    "eseguito_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "avviato_da": {
+      "type": "string",
+      "enum": ["pianificato", "manuale"],
+      "default": "pianificato"
+    },
+    "esito": {
+      "type": "string",
+      "enum": ["in_corso", "nessuna_novita", "novita", "errore"],
+      "default": "in_corso"
+    },
+    "sintesi": {
+      "type": "string"
+    },
+    "proposte": {
+      "type": "number",
+      "default": 0
+    },
+    "dettagli_json": {
+      "type": "string",
+      "description": "Esito per area: novita' trovate e fonti consultate"
+    },
+    "errore": {
+      "type": "string"
+    }
+  }
+}

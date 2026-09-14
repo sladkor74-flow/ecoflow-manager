@@ -11,6 +11,7 @@ import Layout from '@/components/Layout';
 import Dashboard from '@/pages/Dashboard';
 import CaricamentoDati from '@/pages/CaricamentoDati';
 import TargetStatus from '@/pages/TargetStatus';
+import Assistente from '@/pages/Assistente';
 import ReportMensile from '@/pages/ReportMensile';
 import Terziarie from '@/pages/Terziarie';
 import ExtraRaccolta from '@/pages/ExtraRaccolta';
@@ -73,6 +74,7 @@ const AuthenticatedApp = () => {
           <Route path="/alert-engine" element={<AlertEngine />} />
           <Route path="/fatturazione" element={<Fatturazione />} />
           <Route path="/qualifica-fornitori" element={<PageErrorBoundary><QualificaFornitori /></PageErrorBoundary>} />
+          <Route path="/assistente" element={<PageErrorBoundary><Assistente /></PageErrorBoundary>} />
           <Route path="/verifiche" element={<PageErrorBoundary><Verifiche /></PageErrorBoundary>} />
           <Route path="/predittivita-secondarie" element={<PredittivitaSecondarie />} />
           <Route path="/primarie-aci" element={<PrimarieAci />} />

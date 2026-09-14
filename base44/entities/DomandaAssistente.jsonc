@@ -1,0 +1,67 @@
+{
+  "name": "DomandaAssistente",
+  "type": "object",
+  "properties": {
+    "conversazione_id": {
+      "type": "string",
+      "description": "Raggruppa domande e risposte della stessa conversazione"
+    },
+    "titolo_conversazione": {
+      "type": "string"
+    },
+    "domanda": {
+      "type": "string"
+    },
+    "risposta": {
+      "type": "string",
+      "description": "Testo della risposta in markdown"
+    },
+    "fonti_json": {
+      "type": "string",
+      "description": "Fonti citate: [{ titolo, riferimento, url, verificato_il }]"
+    },
+    "ambito": {
+      "type": "string",
+      "enum": ["normativa", "operativa", "mista", "esercitazione", "altro"],
+      "default": "altro"
+    },
+    "certezza": {
+      "type": "string",
+      "enum": ["alta", "media", "bassa"]
+    },
+    "dati_gestionale": {
+      "type": "boolean",
+      "default": false,
+      "description": "La risposta ha usato i dati del gestionale"
+    },
+    "ricerca_online": {
+      "type": "boolean",
+      "default": false
+    },
+    "contesto_json": {
+      "type": "string",
+      "description": "Contesto aggiuntivo, per esempio il quiz da spiegare"
+    },
+    "stato": {
+      "type": "string",
+      "enum": ["in_corso", "completata", "errore"],
+      "default": "in_corso"
+    },
+    "errore": {
+      "type": "string"
+    },
+    "valutazione": {
+      "type": "string",
+      "enum": ["nessuna", "corretta", "da_correggere"],
+      "default": "nessuna"
+    },
+    "nota_valutazione": {
+      "type": "string"
+    },
+    "conoscenza_id": {
+      "type": "string",
+      "description": "Voce della base di conoscenza nata da questa risposta"
+    }
+  },
+  "required": ["domanda"]
+}

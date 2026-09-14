@@ -1,0 +1,66 @@
+{
+  "name": "EsercitazioneRT",
+  "type": "object",
+  "properties": {
+    "tipo": {
+      "type": "string",
+      "enum": ["simulazione", "allenamento", "ripasso"],
+      "default": "simulazione"
+    },
+    "verifica": {
+      "type": "string",
+      "enum": ["iniziale", "aggiornamento"]
+    },
+    "modulo": {
+      "type": "string",
+      "description": "generale, cat145, cat8, cat9 o cat10"
+    },
+    "banca": {
+      "type": "string",
+      "description": "Banca dati dei quiz, per esempio iniziale-cat145"
+    },
+    "versione_banca": {
+      "type": "string"
+    },
+    "materia": {
+      "type": "string"
+    },
+    "domande": {
+      "type": "number"
+    },
+    "esatte": {
+      "type": "number"
+    },
+    "errate": {
+      "type": "number"
+    },
+    "omesse": {
+      "type": "number"
+    },
+    "punteggio": {
+      "type": "number",
+      "description": "+1 per risposta esatta, -0,5 per errata, 0 per omessa"
+    },
+    "soglia": {
+      "type": "number"
+    },
+    "superata": {
+      "type": "boolean"
+    },
+    "durata_secondi": {
+      "type": "number"
+    },
+    "iniziata_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "terminata_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "risposte_json": {
+      "type": "string",
+      "description": "[{ id, scelta, esatta }]: scelta e' il testo scelto, vuoto se omessa"
+    }
+  }
+}

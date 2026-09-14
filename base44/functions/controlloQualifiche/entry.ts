@@ -3,6 +3,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import {
   individuaSoggetti, valutaSoggetto, eventiDaSegnalare, oggiRoma, giorniTra, RIPETIZIONE_GIORNI, salvaRiepilogo,
 } from "../../shared/qualificaFornitori.ts";
+import { applicaControlloClasse } from "../../shared/classeAlbo.ts";
 
 // Controllo giornaliero della qualifica fornitori e promemoria via email.
 //
@@ -100,13 +101,17 @@ export default async function(req) {
     const oggi = oggiRoma();
     const svc = base44.asServiceRole.entities;
 
-    const [{ soggetti }, catalogo, documenti, avvisi] = await Promise.all([
+    const [{ soggetti }, catalogo, documentiSalvati, avvisi, targetAnnui, targetMensili] = await Promise.all([
       individuaSoggetti(base44, anno),
       fetchAll(svc.TipoDocumentoQualifica),
       fetchAll(svc.DocumentoQualifica, { stato: 'attivo' }),
       fetchAll(svc.AvvisoQualifica, { anno }),
+      fetchAll(svc.TargetRaccoglitore, { anno }),
+      fetchAll(svc.TargetMensile, { anno }),
     ]);
 
+    // La classe dell'iscrizione all'Albo si confronta con i target in vigore.
+    const documenti = applicaControlloClasse(documentiSalvati, soggetti, targetAnnui, targetMensili, anno);
     const valutati = soggetti.map(s => valutaSoggetto(s, catalogo, documenti, oggi));
     // Il riepilogo alimenta il contatore del menu: si aggiorna sempre, anche
     // quando non c'e' nulla da inviare.
