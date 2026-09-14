@@ -334,7 +334,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
         <span>
           Carica per ogni raccoglitore la lista inviata a inizio mese: uno o più file Excel insieme, con la colonna ID degli assegnati, con in giallo
           le prioritarie oppure in un file con PRIORITA' nel nome. Chi deve evadere lo decide la lista, anche se sul portale l'ordine è assegnato a un
-          altro trasportatore. L'ordine si valuta per provincia: prima, con priorità assoluta, le richieste immesse negli anni precedenti, poi le prioritarie, poi per data di immissione. Il controllo si ripete da solo a ogni caricamento delle primarie, sulla data di fine trasporto.
+          altro trasportatore. L'ordine si valuta per provincia: prima le prioritarie della lista, anche quando sono forzature chieste dal consorzio, poi con priorità assoluta le richieste immesse negli anni precedenti, poi per data di immissione. Il controllo si ripete da solo a ogni caricamento delle primarie, sulla data di fine trasporto.
           Il target è quello di Target & Status. Caricando la lista del mese successivo, quella precedente e i suoi controlli si cancellano.
           Lista, target e previsione riguardano la sola rete. ACI ed extra raccolta sono mostrati a parte: una richiesta ACI aperta o una richiesta
           di extra raccolta inserita come assegnata nel modulo Extra Raccolta genera un alert. Una richiesta resta assegnata finché non viene chiusa
