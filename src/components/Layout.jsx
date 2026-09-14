@@ -5,7 +5,7 @@ import { base44 } from '@/api/base44Client';
 import { EVENTO_AGGIORNAMENTO } from '@/lib/qualifica';
 import {
   LayoutDashboard, Upload, ClipboardList, Truck, Factory,
-  Ship, Warehouse, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, ShieldCheck, ClipboardCheck, Sparkles } from
+  Ship, Warehouse, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, ShieldCheck, ClipboardCheck, Sparkles, FileBarChart } from
 'lucide-react';
 
 const NAV_ITEMS = [
@@ -21,6 +21,7 @@ const NAV_ITEMS = [
   { label: 'Giacenze', path: '/giacenze', icon: Warehouse },
    { label: 'Extra Raccolta', path: '/extra-raccolta', icon: Recycle },
   { label: 'Target & Status', path: '/target-status', icon: Target },
+{ label: 'Report', path: '/report', icon: FileBarChart },
 { label: 'Report Mensile', path: '/report-mensile', icon: BarChart3 },
 { label: 'Alert & Controllo', path: '/alert-engine', icon: Shield },
 { label: 'Fatturazione', path: '/fatturazione', icon: FileText },
