@@ -4,6 +4,7 @@ import { raccoglitoriAttivi, situazioneCanali, MESI } from "../../shared/evasion
 import { targetMensiliAnno, targetRaccoglitoreMese } from "../../shared/targetRaccoglitori.ts";
 import { oggiRoma } from "../../shared/reportSettimanali.ts";
 import { caricaDati, cancellaVecchi, eseguiControlli, indiceSicurezza, ultimoCaricamentoPrimarie } from "../../shared/evasioneAssegnatiDati.ts";
+import { leggiJson } from "../../shared/testoLungo.ts";
 
 // Situazione dell'evasione degli assegnati per un mese.
 //
@@ -49,7 +50,8 @@ export default async function(req) {
     // Chi non ha formulari terminati nell'anno non raccoglie: i suoi ordini
     // assegnati sul portale finiscono nelle liste di altri e si segnalano a parte.
     const attiviAnno = new Set(dati.terminati.filter(t => t.fine && t.fine.slice(0, 4) === String(anno)).map(t => t.chiaveTrasp));
-    const idsInListe = new Set(listeMese.flatMap(l => JSON.parse(l.righe_json || '[]').map(r => r.id_ordine)));
+    const idsInListe = new Set();
+    for (const l of listeMese) for (const r of await leggiJson(base44, 'ListaAssegnati', l, 'righe_json')) idsInListe.add(r.id_ordine);
     const senzaRaccolta = [];
     const raccoglitori = raccoglitoriAttivi(dati.terminati, dati.assegnati, dati.anagrafica, anno).filter(r => {
       if (attiviAnno.has(r.chiave) || listeMese.some(l => l.raccoglitore_chiave === r.chiave)) return true;
@@ -92,7 +94,7 @@ export default async function(req) {
         const ultimi = await svc.ControlloEvasione.filter({ lista_id: lista.id }, '-eseguito_il', 1);
         if (ultimi.length) {
           controllo = Object.fromEntries(CAMPI_CONTROLLO.map(k => [k, ultimi[0][k]]));
-          controllo.alert = JSON.parse(ultimi[0].alert_json || '[]');
+          controllo.alert = await leggiJson(base44, 'ControlloEvasione', ultimi[0], 'alert_json');
         }
       }
       righe.push({
@@ -107,7 +109,7 @@ export default async function(req) {
         alert_canali: alertCanali,
         lista: lista ? {
           id: lista.id, file_nomi: lista.file_nomi, caricata_il: lista.caricata_il, inviata_il: lista.inviata_il, richieste: lista.richieste, prioritarie: lista.prioritarie,
-          avvisi: JSON.parse(lista.avvisi_json || '[]'),
+          avvisi: await leggiJson(base44, 'ListaAssegnati', lista, 'avvisi_json'),
         } : null,
         controllo,
       });

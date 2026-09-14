@@ -7,6 +7,7 @@ import { ChevronLeft, ChevronRight, Upload, Loader2, Eye, Trash2, AlertTriangle,
 import DettaglioEvasione from '@/components/verifiche/DettaglioEvasione';
 import { MESI, GRAVITA, tonnellate, dataIt, dataOraIt, leggiFogliLista } from '@/lib/evasioneAssegnati';
 import { formatTonnellate } from '@/lib/utils';
+import { eliminaParti } from '@/lib/testoLungo';
 
 // Sezione 2 del modulo Verifiche: evasione delle liste di assegnati inviate ai
 // raccoglitori a inizio mese. A ogni caricamento delle primarie il gestionale
@@ -207,7 +208,8 @@ export default function EvasioneAssegnati({ isAdmin }) {
     if (!window.confirm(`Eliminare la lista di ${riga.nome} per ${MESI[mese - 1]} ${anno} con tutti i suoi controlli?`)) return;
     try {
       const controlli = await base44.entities.ControlloEvasione.filter({ lista_id: riga.lista.id }, '-eseguito_il', 500);
-      for (const c of controlli) await base44.entities.ControlloEvasione.delete(c.id);
+      for (const c of controlli) { await eliminaParti('ControlloEvasione', c.id); await base44.entities.ControlloEvasione.delete(c.id); }
+      await eliminaParti('ListaAssegnati', riga.lista.id);
       await base44.entities.ListaAssegnati.delete(riga.lista.id);
       await carica(true);
     } catch (e) {

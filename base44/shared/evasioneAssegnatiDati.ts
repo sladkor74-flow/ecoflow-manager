@@ -7,6 +7,7 @@ import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { oggiRoma } from "./reportSettimanali.ts";
 import { normalizzaPrimaria, normalizzaAssegnato, normalizzaCancellato, controllaLista, indiceMese, MESI } from "./evasioneAssegnati.ts";
 import { targetMensiliAnno, targetRaccoglitoreMese } from "./targetRaccoglitori.ts";
+import { valoreCampo, leggiJson, eliminaCampo } from "./testoLungo.ts";
 
 const stato = (r) => String(r.stato || '').toLowerCase().trim();
 const terminato = (r) => stato(r) === 'terminato';
@@ -66,8 +67,8 @@ export async function cancellaVecchi(base44, { finoAIndice, raccoglitoreChiave =
   const daCancellare = (x) => indiceMese(Number(x.anno), Number(x.mese)) <= finoAIndice
     && (!raccoglitoreChiave || x.raccoglitore_chiave === raccoglitoreChiave);
   let n = 0;
-  for (const c of controlli) if (daCancellare(c)) { await svc.ControlloEvasione.delete(c.id); n++; }
-  for (const l of liste) if (daCancellare(l)) { await svc.ListaAssegnati.delete(l.id); n++; }
+  for (const c of controlli) if (daCancellare(c)) { await eliminaCampo(base44, 'ControlloEvasione', c.id); await svc.ControlloEvasione.delete(c.id); n++; }
+  for (const l of liste) if (daCancellare(l)) { await eliminaCampo(base44, 'ListaAssegnati', l.id); await svc.ListaAssegnati.delete(l.id); n++; }
   return n;
 }
 
@@ -87,6 +88,12 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
   const oggi = oggiRoma();
   const primarieIl = await ultimoCaricamentoPrimarie(base44);
   const tutteLeListe = await fetchAll(svc.ListaAssegnati);
+  // Righe delle liste, ricomposte una volta sola anche se divise in parti.
+  const righeListe = new Map();
+  const righeDi = async (l) => {
+    if (!righeListe.has(l.id)) righeListe.set(l.id, await leggiJson(base44, 'ListaAssegnati', l, 'righe_json'));
+    return righeListe.get(l.id);
+  };
   const targetPerAnno = new Map();
   const eseguiti = [];
 
@@ -101,12 +108,13 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
       if (ultimo.length && stessoTarget && ultimo[0].primarie_caricate_il === primarieIl && String(ultimo[0].eseguito_il) >= String(lista.caricata_il)) continue;
     }
 
-    const altreListe = tutteLeListe
-      .filter(l => Number(l.anno) === anno && Number(l.mese) === mese)
-      .map(l => ({ chiave: l.raccoglitore_chiave, nome: l.raccoglitore_nome, caricata_il: l.caricata_il, ids: new Set(JSON.parse(l.righe_json || '[]').map(r => r.id_ordine)) }));
+    const altreListe = [];
+    for (const l of tutteLeListe.filter(x => Number(x.anno) === anno && Number(x.mese) === mese)) {
+      altreListe.push({ chiave: l.raccoglitore_chiave, nome: l.raccoglitore_nome, caricata_il: l.caricata_il, ids: new Set((await righeDi(l)).map(r => r.id_ordine)) });
+    }
 
     const { riepilogo, alert, esito } = controllaLista({
-      lista: { righe: JSON.parse(lista.righe_json || '[]'), caricata_il: lista.caricata_il, inviata_il: lista.inviata_il },
+      lista: { righe: await righeDi(lista), caricata_il: lista.caricata_il, inviata_il: lista.inviata_il },
       raccoglitore: { chiave: lista.raccoglitore_chiave, nome: lista.raccoglitore_nome },
       anno, mese, oggi,
       terminati: dati.terminati,
@@ -116,7 +124,7 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
       targetKg,
     });
 
-    const record = await svc.ControlloEvasione.create({
+    const creato = await svc.ControlloEvasione.create({
       lista_id: lista.id,
       raccoglitore_chiave: lista.raccoglitore_chiave,
       raccoglitore_nome: lista.raccoglitore_nome,
@@ -124,10 +132,22 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
       eseguito_il: new Date().toISOString(),
       primarie_caricate_il: primarieIl,
       ...riepilogo,
-      alert_json: JSON.stringify(alert),
-      esito_json: JSON.stringify(esito),
+      alert_json: '',
+      esito_json: '',
     });
-    eseguiti.push(record);
+    // L'esito di una lista lunga supera la dimensione di un campo: diviso in parti.
+    try {
+      const campi = {
+        alert_json: await valoreCampo(base44, 'ControlloEvasione', creato.id, 'alert_json', JSON.stringify(alert)),
+        esito_json: await valoreCampo(base44, 'ControlloEvasione', creato.id, 'esito_json', JSON.stringify(esito)),
+      };
+      await svc.ControlloEvasione.update(creato.id, campi);
+      eseguiti.push({ ...creato, ...campi });
+    } catch (e) {
+      await eliminaCampo(base44, 'ControlloEvasione', creato.id).catch(() => {});
+      await svc.ControlloEvasione.delete(creato.id).catch(() => {});
+      throw e;
+    }
   }
   return eseguiti;
 }

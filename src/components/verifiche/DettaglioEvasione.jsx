@@ -4,6 +4,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Loader2, Star, Truck, History } from 'lucide-react';
 import { MESI, STATI_RICHIESTA, GRAVITA, tonnellate, dataIt, dataOraIt } from '@/lib/evasioneAssegnati';
 import { formatKg, formatIntero } from '@/lib/utils';
+import { leggiCampo } from '@/lib/testoLungo';
 
 // Dettaglio dell'evasione di una lista: alert, previsione, stato di ogni
 // richiesta e ordini fuori lista. Ogni caricamento delle primarie del mese ha il
@@ -130,8 +131,18 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
   }, [open, riga]);
 
   const c = controlli[indice] || null;
-  const esito = useMemo(() => (c && c.esito_json ? JSON.parse(c.esito_json) : null), [c]);
-  const alert = useMemo(() => (c && c.alert_json ? JSON.parse(c.alert_json) : []), [c]);
+  // Esito e alert delle liste lunghe sono divisi in parti: si ricompongono qui.
+  const [contenuto, setContenuto] = useState({ id: null, esito: null, alert: [] });
+  useEffect(() => {
+    if (!c) { setContenuto({ id: null, esito: null, alert: [] }); return undefined; }
+    let annullato = false;
+    Promise.all([leggiCampo('ControlloEvasione', c, 'esito_json'), leggiCampo('ControlloEvasione', c, 'alert_json')])
+      .then(([e, a]) => { if (!annullato) setContenuto({ id: c.id, esito: e ? JSON.parse(e) : null, alert: a ? JSON.parse(a) : [] }); })
+      .catch(() => { if (!annullato) setContenuto({ id: c.id, esito: null, alert: [] }); });
+    return () => { annullato = true; };
+  }, [c]);
+  const esito = contenuto.id === c?.id ? contenuto.esito : null;
+  const alert = useMemo(() => (contenuto.id === c?.id ? contenuto.alert : []), [contenuto, c]);
 
   if (!open || !riga) return null;
 

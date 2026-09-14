@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { leggiListaDaFogli, arricchisciLista, indiceMese } from "../../shared/evasioneAssegnati.ts";
 import { caricaDati, cancellaVecchi, eseguiControlli } from "../../shared/evasioneAssegnatiDati.ts";
+import { valoreCampo, eliminaCampo } from "../../shared/testoLungo.ts";
 
 // Carica la lista degli assegnati inviata a un raccoglitore per un mese.
 //
@@ -38,18 +39,32 @@ export default async function(req) {
 
     const cancellati = await cancellaVecchi(base44, { finoAIndice: indiceMese(anno, mese), raccoglitoreChiave: raccoglitore_chiave });
 
-    const lista = await base44.asServiceRole.entities.ListaAssegnati.create({
+    const listaCreata = await base44.asServiceRole.entities.ListaAssegnati.create({
       raccoglitore_chiave,
       raccoglitore_nome,
       anno, mese,
       file_nomi: String(body.file_nomi || ''),
       caricata_il: new Date().toISOString(),
       inviata_il: inviataIl,
-      righe_json: JSON.stringify(righe),
-      avvisi_json: JSON.stringify(lettura.avvisi),
+      righe_json: '',
+      avvisi_json: '',
       richieste: righe.length,
       prioritarie: righe.filter(r => r.prioritaria).length,
     });
+    // Le liste lunghe superano la dimensione di un campo: si salvano divise in parti.
+    let lista;
+    try {
+      const campi = {
+        righe_json: await valoreCampo(base44, 'ListaAssegnati', listaCreata.id, 'righe_json', JSON.stringify(righe)),
+        avvisi_json: await valoreCampo(base44, 'ListaAssegnati', listaCreata.id, 'avvisi_json', JSON.stringify(lettura.avvisi)),
+      };
+      await base44.asServiceRole.entities.ListaAssegnati.update(listaCreata.id, campi);
+      lista = { ...listaCreata, ...campi };
+    } catch (e) {
+      await eliminaCampo(base44, 'ListaAssegnati', listaCreata.id).catch(() => {});
+      await base44.asServiceRole.entities.ListaAssegnati.delete(listaCreata.id).catch(() => {});
+      throw e;
+    }
 
     await eseguiControlli(base44, { liste: [lista], dati, forza: true });
 

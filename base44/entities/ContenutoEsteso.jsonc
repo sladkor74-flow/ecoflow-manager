@@ -1,0 +1,27 @@
+{
+  "name": "ContenutoEsteso",
+  "type": "object",
+  "properties": {
+    "entita": {
+      "type": "string",
+      "description": "Entita' del record a cui appartiene il testo (es. ControlloEvasione)"
+    },
+    "record_id": {
+      "type": "string"
+    },
+    "campo": {
+      "type": "string",
+      "description": "Campo del record sostituito da questo testo (es. esito_json)"
+    },
+    "parte": {
+      "type": "number"
+    },
+    "totale": {
+      "type": "number"
+    },
+    "testo": {
+      "type": "string"
+    }
+  },
+  "required": ["entita", "record_id", "campo", "parte", "testo"]
+}
