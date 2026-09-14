@@ -3,13 +3,14 @@ import { AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { formatIntero } from '@/lib/utils';
 
-// Badge compatto per dashboard e moduli: mostra conteggio alert aperti
-export default function AlertBadge({ count, modulo, compact }) {
+// Badge compatto per dashboard e moduli: mostra conteggio alert aperti e, se noto,
+// quanti sono critici.
+export default function AlertBadge({ count, critici, modulo, compact }) {
   if (!count || count === 0) return null;
 
   const label = compact
     ? formatIntero(count)
-    : `${formatIntero(count)} alert${count > 1 ? ' (critici)' : ''}`;
+    : `${formatIntero(count)} alert ${count === 1 ? 'aperto' : 'aperti'}${critici ? ` · ${formatIntero(critici)} ${critici === 1 ? 'critico' : 'critici'}` : ''}`;
 
   return (
     <Link

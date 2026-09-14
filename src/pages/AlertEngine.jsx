@@ -85,7 +85,8 @@ export default function AlertEngine() {
     setRunning(modulo);
     try {
       const res = await base44.functions.invoke('runAlertEngine', { modulo });
-      alert(`${res.data.alerts_creati} alert creati su ${res.data.record_scansionati} record scansionati`);
+      const d = res.data;
+      alert(`${d.alerts_creati} alert creati e ${d.alerts_chiusi || 0} chiusi perché superati o doppi, su ${d.record_scansionati} record ${d.anno ? `del ${d.anno} ` : ''}controllati${d.alerts_da_chiudere ? `. Restano ${d.alerts_da_chiudere} alert da chiudere: esegui di nuovo il controllo` : ''}.`);
       load();
     } catch (e) { alert(e.message); }
     setRunning(null);

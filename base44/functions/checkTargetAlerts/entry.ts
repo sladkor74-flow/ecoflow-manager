@@ -126,7 +126,8 @@ export default async function(req) {
     const alertsToCreate = [...missed, ...atRisk.filter(a => a.pct_proiezione < 70)];
 
     if (creaAlerts && alertsToCreate.length > 0) {
-      const existingAlerts = await base44.asServiceRole.entities.Alert.filter({
+      // Tutti gli alert aperti, non solo la prima pagina: altrimenti si ricreano.
+      const existingAlerts = await fetchAll(base44.asServiceRole.entities.Alert, {
         modulo: 'primarie_rete', stato: 'aperto'
       });
       const existingKeys = new Set(existingAlerts.map(a => a.record_id));

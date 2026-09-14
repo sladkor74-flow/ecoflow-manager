@@ -6,9 +6,42 @@ import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRacco
 import { formatoTonnellate } from "../../shared/formato.ts";
 
 // Motore di controllo: scansiona i record di un modulo e genera Alert per le regole violate.
-// Payload: { modulo, record_ids?, solo_aperti?: boolean }
-// Se record_ids non fornito, scansiona tutti i record del modulo.
+// Payload: { modulo }
+//
+// - Si controllano solo i dati dell'anno in corso e, per le primarie, i soli
+//   formulari terminati: un ordine cancellato non ha pesi ne' destinazione.
+// - Un alert gia' aperto per lo stesso record e la stessa regola non si ricrea.
+// - Gli alert aperti delle regole del modulo la cui condizione non c'e' piu' (o
+//   doppioni dello stesso alert) vengono chiusi come risolti, con una nota: non si
+//   cancella nulla. Le chiusure si fermano a un tempo massimo e riprendono al giro
+//   successivo.
+
+const TEMPO_MASSIMO_MS = 40000;
+const MESI_ANNO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+
+// Giorno della data del portale: quelle salvate a mezzanotte italiana (22 o 23 UTC)
+// si riportano al giorno giusto.
+function giorno(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return null;
+  const italiana = (d.getUTCHours() === 22 || d.getUTCHours() === 23) && !d.getUTCMinutes() && !d.getUTCSeconds();
+  return italiana ? new Date(d.getTime() + 3 * 3600000) : d;
+}
+
+function daControllare(record, modulo, anno) {
+  if (modulo === 'assegnati') return true;
+  if (modulo === 'primarie_rete' || modulo === 'primarie_aci') {
+    if (String(record.stato || '').toLowerCase().trim() !== 'terminato') return false;
+    const d = giorno(record.trasporto_finito_il);
+    return !!d && d.getUTCFullYear() === anno;
+  }
+  const d = giorno(record.trasporto_finito_il) || giorno(record.ordine_immesso_il);
+  return !!d && d.getUTCFullYear() === anno;
+}
+
 export default async function(req) {
+  const inizio = Date.now();
   try {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
@@ -36,14 +69,17 @@ export default async function(req) {
       return Response.json({ modulo, alerts_creati: 0, messaggio: 'Nessuna regola attiva per questo modulo' });
     }
 
-    // Carica record da validare
-    const records = await fetchAll(base44.asServiceRole.entities[entityName]);
+    // Record da validare: anno in corso, per le primarie solo i terminati.
+    const anno = new Date().getUTCFullYear();
+    const tutti = await fetchAll(base44.asServiceRole.entities[entityName]);
+    const records = tutti.filter(r => daControllare(r, modulo, anno));
 
-    // Carica alert aperti esistenti per evitare duplicati
-    const existingAlerts = await base44.asServiceRole.entities.Alert.filter({
-      modulo, stato: 'aperto'
-    });
+    // Tutti gli alert aperti del modulo, pagina per pagina: senza, il controllo dei
+    // doppioni vedeva solo i primi e a ogni caricamento li ricreava.
+    const existingAlerts = await fetchAll(base44.asServiceRole.entities.Alert, { modulo, stato: 'aperto' }, 'created_date');
     const existingKeys = new Set(existingAlerts.map(a => `${a.record_id}|||${a.regola_id}`));
+    // Condizioni presenti oggi nei dati: gli alert aperti fuori da questo insieme si chiudono.
+    const attuali = new Set();
 
     const newAlerts = [];
 
@@ -52,7 +88,9 @@ export default async function(req) {
         const violazione = checkRegola(record, regola, entityName);
         if (violazione) {
           const key = `${record.id_ordine}|||${regola.id}`;
+          attuali.add(key);
           if (existingKeys.has(key)) continue; // skip duplicati
+          existingKeys.add(key);
           newAlerts.push({
             titolo: violazione.titolo,
             descrizione: violazione.descrizione,
@@ -72,7 +110,7 @@ export default async function(req) {
     if (modulo === 'primarie_rete') {
       // Target dell'anno in corso, sommati per raccoglitore, regione e mese.
       const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter({ anno: new Date().getFullYear() }, '-created_date', 5000));
-      const aggregateAlerts = checkAggregateRules(records, regole, existingKeys, targets);
+      const aggregateAlerts = checkAggregateRules(records, regole, existingKeys, targets, attuali);
       newAlerts.push(...aggregateAlerts);
     }
 
@@ -87,12 +125,40 @@ export default async function(req) {
       } catch (e) { /* skip */ }
     }
 
+    // Chiusura degli alert superati e dei doppioni, solo per le regole di questo
+    // motore: gli alert creati da altri controlli restano come sono.
+    const idRegole = new Set(regole.map(r => r.id));
+    const visti = new Set();
+    const daChiudere = [];
+    for (const a of existingAlerts) {
+      if (!idRegole.has(a.regola_id)) continue;
+      const key = `${a.record_id}|||${a.regola_id}`;
+      if (!attuali.has(key)) {
+        daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: `Chiuso automaticamente il ${new Date().toISOString().slice(0, 10)}: condizione non presente nei dati ${anno}` });
+      } else if (visti.has(key)) {
+        daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: `Chiuso automaticamente il ${new Date().toISOString().slice(0, 10)}: doppione di un alert ancora aperto` });
+      } else {
+        visti.add(key);
+      }
+    }
+    let chiusi = 0;
+    for (let i = 0; i < daChiudere.length && Date.now() - inizio < TEMPO_MASSIMO_MS; i += CHUNK) {
+      const blocco = daChiudere.slice(i, i + CHUNK);
+      try {
+        await base44.asServiceRole.entities.Alert.bulkUpdate(blocco);
+        chiusi += blocco.length;
+      } catch (e) { /* ripreso al giro successivo */ }
+    }
+
     return Response.json({
       modulo,
+      anno,
       record_scansionati: records.length,
       regole_valutate: regole.length,
       alerts_creati: creati,
-      alerts_totali_aperti: existingAlerts.length + creati,
+      alerts_chiusi: chiusi,
+      alerts_da_chiudere: daChiudere.length - chiusi,
+      alerts_totali_aperti: existingAlerts.length + creati - chiusi,
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
@@ -205,7 +271,7 @@ function checkRegola(record, regola, entityName) {
 }
 
 // --- Controlli aggregati per primarie_rete ---
-function checkAggregateRules(records, regole, existingKeys, targets = []) {
+function checkAggregateRules(records, regole, existingKeys, targets = [], attuali = new Set()) {
   const alerts = [];
 
   // Regole province inattive (2 mesi consecutivi a zero)
@@ -215,6 +281,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = []) {
     for (const prov of matrix.province_with_zeros) {
       for (const regola of regoleProvince) {
         const key = `${prov.provincia}|||${regola.id}`;
+        attuali.add(key);
         if (existingKeys.has(key)) continue;
         const zeroPair = prov.last_zero_pair;
         alerts.push({
@@ -240,6 +307,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = []) {
     for (const racc of mix.raccoglitori_con_deviazione) {
       for (const regola of regoleMix) {
         const key = `${racc.raccoglitore}|||${regola.id}`;
+        attuali.add(key);
         if (existingKeys.has(key)) continue;
         const devDetails = racc.deviazioni_significative.map(d =>
           `${d.classe}: ${d.attuale.toFixed(1)}% vs target ${d.target}% (Δ${d.deviazione > 0 ? '+' : ''}${d.deviazione.toFixed(1)}%)`
@@ -264,8 +332,8 @@ function checkAggregateRules(records, regole, existingKeys, targets = []) {
   const regoleScostamento = regole.filter(r => r.tipo_regola === 'scostamento_target');
   if (regoleScostamento.length > 0 && targets && targets.length > 0) {
     // Solo RETE terminati dell'anno dei target, nel mese della fine trasporto.
-    const MESI_ANNO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
     const annoTarget = Number(targets[0]?.anno) || new Date().getFullYear();
+    const oggi = new Date();
     const raccoltoByKey = {};
     for (const r of records) {
       if (String(r.stato || '').toLowerCase().trim() !== 'terminato' || !r.trasporto_finito_il) continue;
@@ -284,6 +352,9 @@ function checkAggregateRules(records, regole, existingKeys, targets = []) {
       const mese = (target.mese || '').trim();
       const targetVal = target.target || 0;
       if (targetVal <= 0) continue;
+      // Solo mesi conclusi: il mese in corso lo segue il controllo dei target con la proiezione.
+      const indiceMese = MESI_ANNO.indexOf(mese);
+      if (indiceMese < 0 || (annoTarget === oggi.getUTCFullYear() && indiceMese >= oggi.getUTCMonth()) || annoTarget > oggi.getUTCFullYear()) continue;
       const nomiRegione = targets.filter(x => (x.regione || '').trim() === regione && (x.mese || '').trim() === mese).map(x => (x.raccoglitore || '').trim());
       const raccolto = Object.entries(raccoltoByKey)
         .filter(([k]) => { const [r, reg, m] = k.split('|||'); return reg === regione && m === mese && targetDelPortale(nomiRegione, r) === racc; })
@@ -293,7 +364,10 @@ function checkAggregateRules(records, regole, existingKeys, targets = []) {
       const soglia = regoleScostamento[0]?.config?.soglia_pct || -15;
       if (pctDelta < soglia) {
         for (const regola of regoleScostamento) {
-          const alertKey = `${racc}|||${regione}|||${mese}|||${regola.id}`;
+          // Stessa chiave degli alert salvati (record_id|||regola): prima non coincideva
+          // e l'alert si ricreava a ogni giro.
+          const alertKey = `${racc}|${regione}|${mese}|||${regola.id}`;
+          attuali.add(alertKey);
           if (existingKeys.has(alertKey)) continue;
           alerts.push({
             titolo: regola.messaggio_alert || `Scostamento target grave: ${racc} - ${regione} - ${mese}`,
@@ -320,6 +394,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = []) {
       if (t.has_sla_critical) {
         for (const regola of regoleSla) {
           const key = `${t.trasportatore}|||${regola.id}`;
+          attuali.add(key);
           if (existingKeys.has(key)) continue;
           alerts.push({
             titolo: regola.messaggio_alert || `Ritardo SLA critico: ${t.trasportatore}`,

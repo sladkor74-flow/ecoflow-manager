@@ -16,6 +16,7 @@ const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
 export default function Dashboard() {
   const [counts, setCounts] = useState({});
   const [alertCount, setAlertCount] = useState(0);
+  const [alertCritici, setAlertCritici] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const [mese, setMese] = useState([]);
@@ -23,16 +24,19 @@ export default function Dashboard() {
   const [raccoltaData, setRaccoltaData] = useState(null);
   const [raccoltaLoading, setRaccoltaLoading] = useState(true);
 
+  // I conteggi seguono gli stessi filtri dei grafici.
   useEffect(() => {
     (async () => {
+      setLoading(true);
       try {
-        const res = await base44.functions.invoke('getDashboardStats', {});
+        const res = await base44.functions.invoke('getDashboardStats', { mese, anno });
         setCounts(res.data.counts);
         setAlertCount(res.data.alert_count || 0);
+        setAlertCritici(res.data.alert_critici || 0);
       } catch (e) { /* ignore */ }
       setLoading(false);
     })();
-  }, []);
+  }, [mese, anno]);
 
   useEffect(() => {
     (async () => {
@@ -45,12 +49,13 @@ export default function Dashboard() {
     })();
   }, [mese, anno]);
 
+  const periodo = `${mese.length ? `${mese.join(', ')} ` : ''}${anno.length ? anno.join(', ') : new Date().getFullYear()}`;
   const cards = [
-    { key: 'assegnati', label: 'Assegnati', icon: ClipboardList, path: '/assegnati', color: 'text-blue-600 bg-blue-50' },
-    { key: 'primarie_rete', label: 'Terminati Rete', icon: Truck, path: '/primarie-rete', color: 'text-green-600 bg-green-50' },
-    { key: 'primarie_aci', label: 'Terminati ACI', icon: Factory, path: '/primarie-aci', color: 'text-amber-600 bg-amber-50' },
-    { key: 'secondarie', label: 'Secondarie', icon: Truck, path: '/secondarie', color: 'text-purple-600 bg-purple-50' },
-    { key: 'terziarie', label: 'Terziarie', icon: Ship, path: '/terziarie', color: 'text-pink-600 bg-pink-50' },
+    { key: 'assegnati', label: 'Assegnati Rete', sotto: counts.assegnati_aci ? `da evadere · ACI ${formatIntero(counts.assegnati_aci)}` : 'da evadere', icon: ClipboardList, path: '/assegnati', color: 'text-blue-600 bg-blue-50' },
+    { key: 'primarie_rete', label: 'Terminati Rete', sotto: periodo, icon: Truck, path: '/primarie-rete', color: 'text-green-600 bg-green-50' },
+    { key: 'primarie_aci', label: 'Terminati ACI', sotto: periodo, icon: Factory, path: '/primarie-aci', color: 'text-amber-600 bg-amber-50' },
+    { key: 'secondarie', label: 'Secondarie terminate', sotto: periodo, icon: Truck, path: '/secondarie', color: 'text-purple-600 bg-purple-50' },
+    { key: 'terziarie', label: 'Terziarie terminate', sotto: periodo, icon: Ship, path: '/terziarie', color: 'text-pink-600 bg-pink-50' },
   ];
 
   return (
@@ -60,7 +65,7 @@ export default function Dashboard() {
           <h1 className="text-2xl lg:text-3xl font-heading font-bold">Dashboard</h1>
           <p className="text-muted-foreground mt-1">Panoramica della commessa PFU Ecotyre — Smoco gestore.</p>
         </div>
-        {alertCount > 0 && <AlertBadge count={alertCount} />}
+        {alertCount > 0 && <AlertBadge count={alertCount} critici={alertCritici} />}
       </div>
 
       {loading ? (
@@ -76,6 +81,7 @@ export default function Dashboard() {
                 </div>
                 <p className="text-2xl font-heading font-bold">{formatIntero(counts[c.key] ?? 0)}</p>
                 <p className="text-sm text-muted-foreground">{c.label}</p>
+                <p className="text-xs text-muted-foreground/80">{c.sotto}</p>
               </Link>
             );
           })}
