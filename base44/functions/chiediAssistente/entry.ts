@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { BASE_CONOSCENZA, FONTI_UFFICIALI, VERIFICATO_IL, testoConoscenza, vociApprovate } from "../../shared/baseConoscenza.ts";
 import { analizzaDomanda, situazioneGestionale } from "../../shared/assistente.ts";
+import { materialePertinente } from "../../shared/materialeCorso.ts";
 import { oggiRoma } from "../../shared/qualificaFornitori.ts";
 
 // Assistente del gestionale: risponde a dubbi normativi, a domande sui dati della
@@ -90,9 +91,11 @@ export default async function(req) {
     recordId = record.id;
 
     const oggi = oggiRoma();
-    const [approvate, dati] = await Promise.all([
+    const [approvate, dati, corso] = await Promise.all([
       vociApprovate(base44),
       analisi.dati ? situazioneGestionale(base44, oggi).catch(e => `Dati del gestionale non disponibili: ${e.message || e}`) : Promise.resolve(''),
+      // Schede del corso RT pertinenti: solo per le domande sulle norme e per i quiz.
+      analisi.norma ? materialePertinente(base44, quiz ? `${quiz.domanda} ${(quiz.risposte || []).join(' ')}` : domanda).catch(() => ({ testo: '', fonti: [] })) : Promise.resolve({ testo: '', fonti: [] }),
     ]);
 
     const storia = precedenti
@@ -115,6 +118,7 @@ export default async function(req) {
       '5. Scrivi in italiano semplice e pratico, in markdown. Prima la risposta in una o due frasi, poi i dettagli utili; elenchi solo se aiutano; niente formule di cortesia ne\' ripetizioni della domanda.',
       '6. certezza: alta se la risposta poggia su norme verificate o su dati presenti; media se richiede interpretazione; bassa se mancano elementi, e in quel caso consiglia di confermare con il consulente ambientale o con l\'ente competente.',
       '7. Per decisioni con conseguenze legali importanti ricorda di verificare il testo vigente su Normattiva.',
+      '8. Le schede del CORSO RT sono materiale didattico di qualche anno fa: usale per spiegare concetti e contesto, ma prevalgono sempre la base di conoscenza verificata e le norme vigenti. Se una scheda contrasta con la norma attuale segui la norma attuale e fai notare la differenza; se la usi citala in fonti come "Corso RT" con modulo e anno del materiale.',
       ...(quiz ? [
         '',
         'ESERCITAZIONE',
@@ -129,6 +133,7 @@ export default async function(req) {
       'BASE DI CONOSCENZA',
       `Voci del codice (id: titolo): ${BASE_CONOSCENZA.map(v => `${v.id}: ${v.titolo}`).join('; ')}.`,
       testoConoscenza(approvate),
+      ...(corso.testo ? ['', 'CORSO RT (schede di studio dal materiale del corso per responsabile tecnico)', corso.testo] : []),
       ...(storia ? ['', 'CONVERSAZIONE PRECEDENTE', storia] : []),
       ...(dati ? ['', dati] : []),
       '',

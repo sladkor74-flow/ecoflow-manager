@@ -1,0 +1,47 @@
+{
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "elaborazione_materiale_corso",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "elabora_parti": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "elaboraMaterialeCorso",
+            "args": {
+              "quante": 3
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Elabora il materiale del corso",
+            "description": "Trasforma poche parti del materiale del corso RT in schede di studio per l'Assistente"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Elaborazione Materiale Corso RT",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "25 * * * *",
+      "one_time_date": null,
+      "timezone": "Europe/Rome",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "description": "Ogni ora trasforma tre parti del materiale del corso per responsabile tecnico (dispense e trascrizioni delle videolezioni) in schede di studio che l'Assistente usa nelle risposte; quando non ci sono parti da elaborare non fa nulla"
+}

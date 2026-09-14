@@ -1,0 +1,84 @@
+{
+  "name": "MaterialeCorso",
+  "type": "object",
+  "properties": {
+    "chiave": {
+      "type": "string",
+      "description": "Fonte e numero della parte: impedisce di caricare due volte lo stesso testo"
+    },
+    "tipo": {
+      "type": "string",
+      "enum": ["dispensa", "videolezione"],
+      "default": "dispensa"
+    },
+    "categoria": {
+      "type": "string",
+      "description": "Modulo obbligatorio o categoria dell'Albo del corso (es. Categorie 1-4-5)"
+    },
+    "modulo": {
+      "type": "string",
+      "description": "Titolo del modulo o della lezione"
+    },
+    "fonte_file": {
+      "type": "string",
+      "description": "Nome del file di origine"
+    },
+    "anno_materiale": {
+      "type": "number",
+      "description": "Anno del materiale, se noto: le norme citate vanno verificate"
+    },
+    "parte": {
+      "type": "number"
+    },
+    "parti_totali": {
+      "type": "number"
+    },
+    "ordine": {
+      "type": "number",
+      "description": "Ordine di elaborazione: prima il modulo obbligatorio"
+    },
+    "testo": {
+      "type": "string"
+    },
+    "stato": {
+      "type": "string",
+      "enum": ["da_elaborare", "elaborato", "errore"],
+      "default": "da_elaborare"
+    },
+    "sintesi": {
+      "type": "string"
+    },
+    "concetti_json": {
+      "type": "string",
+      "description": "Concetti chiave e adempimenti (elenco)"
+    },
+    "riferimenti_json": {
+      "type": "string",
+      "description": "Norme citate: norma, articolo, tema"
+    },
+    "da_verificare_json": {
+      "type": "string",
+      "description": "Punti probabilmente superati da norme successive al materiale"
+    },
+    "domande_json": {
+      "type": "string",
+      "description": "Domande di ripasso con risposta"
+    },
+    "parole_chiave": {
+      "type": "string",
+      "description": "Parole chiave separate da virgola, per trovare le parti pertinenti a una domanda"
+    },
+    "elaborato_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tentativi": {
+      "type": "number",
+      "default": 0
+    },
+    "errore": {
+      "type": "string"
+    }
+  },
+  "required": ["chiave", "fonte_file", "parte", "testo"]
+}
