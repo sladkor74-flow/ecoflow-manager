@@ -5,7 +5,7 @@
 import { fetchAll } from "./fetchAll.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { oggiRoma } from "./reportSettimanali.ts";
-import { normalizzaPrimaria, normalizzaAssegnato, trovaTarget, controllaLista, indiceMese, MESI } from "./evasioneAssegnati.ts";
+import { normalizzaPrimaria, normalizzaAssegnato, normalizzaCancellato, trovaTarget, controllaLista, indiceMese, MESI } from "./evasioneAssegnati.ts";
 
 const stato = (r) => String(r.stato || '').toLowerCase().trim();
 const terminato = (r) => stato(r) === 'terminato';
@@ -35,12 +35,17 @@ export async function caricaDati(base44) {
     ...assAci.map(r => normalizzaAssegnato(r, 'aci')),
     ...extraPrimarie.filter(r => stato(r) === 'assegnato').map(r => normalizzaAssegnato(r, 'extra')),
   ].filter(a => a.id_ordine);
+  // Gli ordini cancellati restano nell'archivio delle primarie con il motivo.
+  const cancellati = [
+    ...rete.filter(r => stato(r) === 'cancellato').map(r => normalizzaCancellato(r, 'rete')),
+    ...aci.filter(r => stato(r) === 'cancellato').map(r => normalizzaCancellato(r, 'aci')),
+  ].filter(c => c.id_ordine);
   const anagrafica = new Map();
   for (const f of fornitori) {
     const k = normalizzaRagioneSociale(f.ragione_sociale);
     if (k) anagrafica.set(k, f);
   }
-  return { terminati, assegnati, anagrafica };
+  return { terminati, assegnati, cancellati, anagrafica };
 }
 
 export async function ultimoCaricamentoPrimarie(base44) {
@@ -103,6 +108,7 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
       anno, mese, oggi,
       terminati: dati.terminati,
       assegnati: dati.assegnati,
+      cancellati: dati.cancellati || [],
       altreListe,
       targetKg: target && Number(target.target_kg) > 0 ? Number(target.target_kg) : null,
     });

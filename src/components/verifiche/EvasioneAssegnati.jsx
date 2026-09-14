@@ -103,7 +103,7 @@ function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina
         {c ? (
           <>
             <div>{c.evase} evase su {c.richieste}</div>
-            <div className="text-xs text-muted-foreground">{c.aperte} aperte{c.fuori_ordine ? ` · ${c.fuori_ordine} fuori ordine` : ''}{c.fuori_lista ? ` · ${c.fuori_lista} fuori lista` : ''}</div>
+            <div className="text-xs text-muted-foreground">{c.aperte} aperte{c.fuori_ordine ? ` · ${c.fuori_ordine} fuori ordine` : ''}{c.fuori_lista ? ` · ${c.fuori_lista} fuori lista` : ''}{c.annullate ? ` · ${c.annullate} annullate` : ''}</div>
           </>
         ) : <span className="text-muted-foreground">—</span>}
       </td>
@@ -184,6 +184,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
       const d = res.data || res;
       const dettagli = [`${d.richieste} richieste, ${d.prioritarie} prioritarie.`];
       if (d.gia_evase) dettagli.push(`${d.gia_evase} risultavano già evase.`);
+      if (d.gia_annullate) dettagli.push(`${d.gia_annullate} risultano già annullate sul portale.`);
       if (d.non_riconosciute) dettagli.push(`${d.non_riconosciute} ID non corrispondono a nessun ordine.`);
       if (senzaColori) dettagli.push('Il file non è in formato xlsx: le righe evidenziate non si possono riconoscere.');
       dettagli.push(...(d.avvisi || []));
@@ -295,7 +296,8 @@ export default function EvasioneAssegnati({ isAdmin }) {
           con in giallo le prime o le prioritarie. Il controllo si ripete da solo a ogni caricamento delle primarie, sulla data di fine trasporto.
           Il target è quello di Target & Status. Caricando la lista del mese successivo, quella precedente e i suoi controlli si cancellano.
           Lista, target e previsione riguardano la sola rete. ACI ed extra raccolta sono mostrati a parte: una richiesta ACI aperta o una richiesta
-          di extra raccolta inserita come assegnata nel modulo Extra Raccolta genera un alert.
+          di extra raccolta inserita come assegnata nel modulo Extra Raccolta genera un alert. Nel dettaglio trovi quante richieste vale il target
+          al peso tipico di un ritiro e quante ne servono in più quando, tra annullate ed evase da altri, quelle aperte non bastano.
         </span>
       </div>
 

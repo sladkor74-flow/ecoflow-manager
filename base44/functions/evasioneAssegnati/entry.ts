@@ -14,7 +14,7 @@ import { caricaDati, cancellaVecchi, eseguiControlli, indiceSicurezza, ultimoCar
 
 const CAMPI_CONTROLLO = [
   'id', 'eseguito_il', 'primarie_caricate_il', 'dati_al', 'richieste', 'evase', 'evase_da_altri', 'aperte', 'prioritarie_aperte',
-  'fuori_ordine', 'trascurate', 'fuori_lista', 'non_piu_presenti', 'riassegnate', 'raccolto_kg', 'target_kg', 'proiezione_kg',
+  'fuori_ordine', 'trascurate', 'fuori_lista', 'non_piu_presenti', 'annullate', 'riassegnate', 'raccolto_kg', 'target_kg', 'proiezione_kg',
   'evadibili_ritmo', 'evadibili_target', 'alert_alti', 'alert_totali',
 ];
 

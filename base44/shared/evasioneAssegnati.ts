@@ -11,6 +11,13 @@
 // Il controllo e' interamente calcolato: le liste portano l'ID dell'ordine, per
 // cui non serve un modello per interpretarle, e ogni numero resta riproducibile.
 //
+// La lista e' dimensionata sul target: tante richieste quante ne servono al peso
+// tipico di un ritiro, anche se il raccoglitore ha molti piu' ordini assegnati.
+// Una richiesta puo' essere cancellata sul portale per ordine doppio, PDR
+// inesistente, raccolta rifiutata, ritiro gia' eseguito da altri o aggiornamento
+// del portale: risulta annullata con il suo motivo e non pesa sul raccoglitore,
+// ma quando le aperte non bastano piu' al target servono nuove richieste.
+//
 // La data di evasione e' quella di fine trasporto, come in tutto il gestionale.
 //
 // Rete, ACI ed extra raccolta restano sempre separati. Le liste e il target
@@ -32,6 +39,9 @@ const GIORNI_TOLLERANZA_PRIORITARIE = 5;
 const SOGLIA_PROIEZIONE = 0.9;
 // Ordini minimi di una classe perche' la statistica del raccoglitore sia usata.
 const MINIMO_ORDINI_CLASSE = 8;
+// Peso indicativo di un ritiro, il cassone di una motrice con ragno, quando il
+// raccoglitore non ha ancora formulari nell'anno.
+const KG_RITIRO_INDICATIVO = 4000;
 
 // === calendario ===
 
@@ -136,6 +146,12 @@ export function normalizzaAssegnato(r, canale) {
     classe: classeNormalizzata(r.classe) || classeNormalizzata(r.prodotto),
     pdr: chiavePdr(r),
   };
+}
+
+// Ordine cancellato sul portale, con il motivo della cancellazione.
+export function normalizzaCancellato(r, canale) {
+  const motivo = String(r.motivo_cancellazione || '').replace(/^altro\s*:\s*/i, '').trim();
+  return { ...normalizzaAssegnato(r, canale), motivo: motivo ? motivo[0].toUpperCase() + motivo.slice(1) : '' };
 }
 
 /**
@@ -270,13 +286,15 @@ export function leggiListaDaFogli(fogli) {
  * caricamento. Gli assegnati si svuotano man mano che gli ordini vengono chiusi,
  * quindi data di immissione, produttore, classe e quantita' si fissano ora.
  */
-export function arricchisciLista(righe, assegnati, terminati) {
+export function arricchisciLista(righe, assegnati, terminati, cancellati = []) {
   const perIdAss = new Map(assegnati.map(a => [a.id_ordine, a]));
   const perIdTer = new Map(terminati.map(t => [t.id_ordine, t]));
+  const perIdCanc = new Map(cancellati.map(c => [c.id_ordine, c]));
   return righe.map(r => {
     const a = perIdAss.get(r.id_ordine);
     const t = perIdTer.get(r.id_ordine);
-    const fonte = a || t || {};
+    const c = perIdCanc.get(r.id_ordine);
+    const fonte = a || t || c || {};
     const provincia = fonte.provincia || r.file_provincia || '';
     return {
       posizione: r.posizione,
@@ -295,7 +313,7 @@ export function arricchisciLista(righe, assegnati, terminati) {
       classe: fonte.classe || r.file_classe || null,
       pdr: fonte.pdr || '',
       trasportatore_assegnato: a ? a.trasportatore : '',
-      stato_al_caricamento: a ? 'assegnata' : t ? 'gia_evasa' : 'non_riconosciuta',
+      stato_al_caricamento: a ? 'assegnata' : t ? 'gia_evasa' : c ? 'annullata' : 'non_riconosciuta',
     };
   });
 }
@@ -350,9 +368,11 @@ function statistiche(movimenti) {
       kg_medio_ordine: pesoTipico !== null ? Math.round(pesoTipico) : null,
     };
   }
+  const pesoMediano = mediana(movimenti.map(m => m.kg).filter(k => k > 0));
   return {
     ordini: movimenti.length,
     kg,
+    kg_mediano_ordine: pesoMediano !== null ? Math.round(pesoMediano) : null,
     viaggi: viaggi.size,
     kg_per_viaggio: viaggi.size ? Math.round(kg / viaggi.size) : null,
     ordini_per_viaggio: viaggi.size ? Math.round((movimenti.length / viaggi.size) * 10) / 10 : null,
@@ -373,8 +393,9 @@ function statistiche(movimenti) {
  * @param assegnati    ordini assegnati attuali normalizzati, rete e ACI
  * @param altreListe   [{ chiave, nome, ids: Set }] liste degli altri raccoglitori nello stesso mese
  * @param targetKg     target del gestionale, oppure null
+ * @param cancellati   ordini cancellati sul portale normalizzati, con il motivo
  */
-export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminati, assegnati, altreListe, targetKg }) {
+export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminati, assegnati, altreListe, targetKg, cancellati = [] }) {
   const inizioMese = primoGiorno(anno, mese);
   const fineMese = ultimoGiorno(anno, mese);
   const caricataIl = ymd(lista.caricata_il) || inizioMese;
@@ -391,6 +412,7 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   const perId = new Map();
   for (const t of terminati) if (t.fine) perId.set(t.id_ordine, t);
   const assegnatiPerId = new Map(assegnati.map(a => [a.id_ordine, a]));
+  const cancellatiPerId = new Map(cancellati.map(c => [c.id_ordine, c]));
 
   // --- stato di ogni richiesta ---
   const righe = lista.righe.map(r => {
@@ -407,11 +429,50 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     } else if (a) {
       base.stato = a.chiaveTrasp && a.chiaveTrasp !== chiave ? 'riassegnata' : 'aperta';
       if (base.stato === 'riassegnata') base.chiusa_da = a.trasportatore;
+    } else if (cancellatiPerId.has(r.id_ordine)) {
+      base.stato = 'annullata';
+      base.motivo_annullamento = cancellatiPerId.get(r.id_ordine).motivo || 'motivo non indicato';
     } else {
       base.stato = 'non_piu_presente';
     }
     return base;
   });
+
+  // --- raccolto del mese e fuori lista ---
+  const idsLista = new Set(righe.map(r => r.id_ordine));
+  const delMese = rete.filter(t => t.chiaveTrasp === chiave && t.fine && t.fine >= inizioMese && t.fine <= fineMese);
+  const raccoltoKg = delMese.reduce((s, t) => s + t.kg, 0);
+  const fuoriLista = delMese.filter(t => !idsLista.has(t.id_ordine)).map(t => {
+    const altra = altreListe.find(l => l.chiave !== chiave && l.ids.has(t.id_ordine));
+    return {
+      id_ordine: t.id_ordine, chiusa_il: t.fine, kg: t.kg, produttore: t.produttore, comune: t.comune, provincia: t.provincia, classe: t.classe,
+      immesso: t.immesso, regione: t.regione, pdr: t.pdr,
+      tipo: altra ? 'lista_altrui' : (t.immesso && t.immesso > caricataIl ? 'nuova' : 'precedente'),
+      lista_di: altra ? altra.nome : '',
+    };
+  }).sort((x, y) => String(x.chiusa_il).localeCompare(String(y.chiusa_il)));
+
+  // Un ordine evaso fuori lista presso lo stesso punto di raccolta e per la
+  // stessa classe di una richiesta annullata o ancora aperta ne e' il doppione o
+  // il sostituto: la richiesta risulta evasa con quell'ordine, che non conta come
+  // fuori lista.
+  const stessoRitiro = (e, x) => !!e.pdr && e.pdr === x.pdr && (e.classe || '') === (x.classe || '') && !e.evasa_con;
+  for (const x of fuoriLista) {
+    if (!x.pdr) continue;
+    const r = righe.find(e => e.stato === 'annullata' && stessoRitiro(e, x)) || righe.find(e => e.stato === 'aperta' && stessoRitiro(e, x));
+    if (!r) continue;
+    x.tipo = 'stesso_pdr';
+    x.richiesta = r.id_ordine;
+    r.evasa_con = x.id_ordine;
+    r.chiusa_il = x.chiusa_il;
+    if (r.stato === 'aperta') {
+      r.stato = 'evasa_altro_ordine';
+      r.chiusa_da = raccoglitore.nome;
+      r.kg = x.kg;
+    }
+  }
+  const fuoriListaEffettivi = fuoriLista.filter(x => x.tipo !== 'stesso_pdr');
+  const evasaDalRaccoglitore = (r) => r.stato === 'evasa' || r.stato === 'evasa_altro_ordine';
 
   // --- cronologia: prima le prioritarie, poi l'ordine della lista ---
   const ordinate = [...righe].sort((x, y) => (Number(y.prioritaria) - Number(x.prioritaria)) || (x.posizione - y.posizione));
@@ -422,29 +483,15 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   // confronto si fa nella stessa regione, perche' un raccoglitore che lavora in
   // piu' regioni organizza i giri per zona.
   const saltateDa = (o) => ordinate.filter(e => rango.get(e.id_ordine) < rango.get(o.id_ordine)
-    && e.stato !== 'non_piu_presente' && e.stato !== 'evasa_prima'
+    && !['non_piu_presente', 'evasa_prima', 'annullata'].includes(e.stato)
     && (!o.regione || !e.regione || e.regione === o.regione)
     && (!e.chiusa_il || e.chiusa_il > o.chiusa_il));
   for (const o of righe) {
-    if (o.stato !== 'evasa') continue;
+    if (!evasaDalRaccoglitore(o)) continue;
     const saltate = saltateDa(o);
     o.saltate = saltate.length;
     o.saltate_ids = saltate.slice(0, 5).map(e => e.id_ordine);
   }
-
-  // --- raccolto del mese e fuori lista ---
-  const idsLista = new Set(righe.map(r => r.id_ordine));
-  const delMese = rete.filter(t => t.chiaveTrasp === chiave && t.fine && t.fine >= inizioMese && t.fine <= fineMese);
-  const raccoltoKg = delMese.reduce((s, t) => s + t.kg, 0);
-  const fuoriLista = delMese.filter(t => !idsLista.has(t.id_ordine)).map(t => {
-    const altra = altreListe.find(l => l.chiave !== chiave && l.ids.has(t.id_ordine));
-    return {
-      id_ordine: t.id_ordine, chiusa_il: t.fine, kg: t.kg, produttore: t.produttore, comune: t.comune, provincia: t.provincia, classe: t.classe,
-      immesso: t.immesso, regione: t.regione,
-      tipo: altra ? 'lista_altrui' : (t.immesso && t.immesso > caricataIl ? 'nuova' : 'precedente'),
-      lista_di: altra ? altra.nome : '',
-    };
-  }).sort((x, y) => String(x.chiusa_il).localeCompare(String(y.chiusa_il)));
 
   // --- richieste trascurate ---
   // Una richiesta aperta e' trascurata quando, dopo l'invio della lista, il
@@ -457,9 +504,9 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     e.scavalcata_successive = 0;
     e.scavalcata_fuori = 0;
     if (e.stato !== 'aperta') continue;
-    e.scavalcata_successive = righe.filter(o => o.stato === 'evasa' && o.chiusa_il >= caricataIl && rango.get(o.id_ordine) > rango.get(e.id_ordine) && stessaRegione(o.regione, e.regione)).length;
+    e.scavalcata_successive = righe.filter(o => evasaDalRaccoglitore(o) && o.chiusa_il >= caricataIl && rango.get(o.id_ordine) > rango.get(e.id_ordine) && stessaRegione(o.regione, e.regione)).length;
   }
-  for (const x of fuoriLista) {
+  for (const x of fuoriListaEffettivi) {
     if (x.chiusa_il < caricataIl) continue;
     const prima = ordinate.find(e => e.stato === 'aperta' && stessaRegione(e.regione, x.regione));
     if (prima) prima.scavalcata_fuori++;
@@ -540,6 +587,13 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   }
   const kgAperte = cumulato;
   const kgViaggio = storico.kg_per_viaggio || null;
+  // Peso tipico di un ritiro per dimensionare la lista sul target: la mediana dei
+  // formulari del raccoglitore se ne ha abbastanza, altrimenti il cassone di una
+  // motrice con ragno.
+  const ritiroDaStorico = storico.ordini >= MINIMO_ORDINI_CLASSE && !!storico.kg_mediano_ordine;
+  const kgRitiro = ritiroDaStorico ? storico.kg_mediano_ordine : KG_RITIRO_INDICATIVO;
+  const valoreListaKg = righe.reduce((s, r) => s + (evasaDalRaccoglitore(r) ? r.kg || 0 : r.stato === 'aperta' ? r.stima_kg || 0 : 0), 0);
+  const richiesteMancanti = targetResiduo !== null && kgAperte < targetResiduo ? Math.ceil((targetResiduo - kgAperte) / kgRitiro) : 0;
 
   const previsione = {
     dati_al: datiAl,
@@ -557,6 +611,11 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     percentuale_proiezione: target ? Math.round((proiezioneKg / target) * 1000) / 10 : null,
     kg_richieste_aperte: kgAperte,
     portafoglio_sufficiente: targetResiduo !== null ? kgAperte >= targetResiduo : null,
+    kg_ritiro_tipico: kgRitiro,
+    ritiro_da_storico: ritiroDaStorico,
+    valore_lista_kg: valoreListaKg,
+    richieste_per_target: target ? Math.round(target / kgRitiro) : null,
+    richieste_mancanti: richiesteMancanti,
     evadibili_ritmo: evadibiliRitmo,
     evadibili_target: evadibiliTarget,
     kg_per_viaggio: kgViaggio,
@@ -569,14 +628,13 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   const perRegione = regioni.length > 1 ? regioni.map(reg => ({
     regione: reg,
     richieste: righe.filter(r => r.regione === reg).length,
-    evase: righe.filter(r => r.regione === reg && r.stato === 'evasa').length,
+    evase: righe.filter(r => r.regione === reg && evasaDalRaccoglitore(r)).length,
     aperte: righe.filter(r => r.regione === reg && r.stato === 'aperta').length,
     raccolto_kg: delMese.filter(t => t.regione === reg).reduce((s, t) => s + t.kg, 0),
   })).sort((a, b) => b.richieste - a.richieste) : [];
 
   // --- conteggi ---
-  const conta = (stato) => righe.filter(r => r.stato === stato).length;
-  const fuoriOrdine = righe.filter(r => r.stato === 'evasa' && r.saltate > 0);
+  const fuoriOrdine = righe.filter(r => evasaDalRaccoglitore(r) && r.saltate > 0);
   const giorniDallInvio = giorniLavorativi(aggiungiGiorni(caricataIl, 1), finestraA, sabato);
   const prioritarieAperte = righe.filter(r => r.prioritaria && r.stato === 'aperta');
 
@@ -607,12 +665,16 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     const totaleSaltate = new Set(fuoriOrdine.flatMap(r => saltateDa(r).map(e => e.id_ordine))).size;
     aggiungi('media', 'cronologia', `${fuoriOrdine.length} ${fuoriOrdine.length === 1 ? 'richiesta evasa' : 'richieste evase'} fuori ordine, saltando ${totaleSaltate} ${totaleSaltate === 1 ? 'richiesta precedente ancora aperta' : 'richieste precedenti ancora aperte'} in quel momento.`);
   }
-  const precedenti = fuoriLista.filter(f => f.tipo === 'precedente');
+  const precedenti = fuoriListaEffettivi.filter(f => f.tipo === 'precedente');
   if (precedenti.length) aggiungi('media', 'fuori_lista', `${precedenti.length} ${precedenti.length === 1 ? 'ordine evaso' : 'ordini evasi'} fuori lista, gia' esistenti all'invio della lista: ${elenco(precedenti.map(f => f.id_ordine))}.`);
-  const altrui = fuoriLista.filter(f => f.tipo === 'lista_altrui');
+  const altrui = fuoriListaEffettivi.filter(f => f.tipo === 'lista_altrui');
   if (altrui.length) aggiungi('media', 'fuori_lista', `${altrui.length} ${altrui.length === 1 ? 'ordine evaso proveniva' : 'ordini evasi provenivano'} dalla lista di altri raccoglitori: ${elenco(altrui.map(f => `${f.id_ordine} di ${f.lista_di}`), 3)}.`);
-  if (target && targetResiduo > 0 && previsione.portafoglio_sufficiente === false && !meseConcluso) {
-    aggiungi('media', 'portafoglio', `Le richieste ancora aperte valgono circa ${kgT(kgAperte)}, meno dei ${kgT(targetResiduo)} che mancano al target.`);
+  // Annullate, evase da altri e riassegnate svuotano la lista: quando le aperte
+  // non bastano piu' al target servono nuove richieste.
+  if (target && targetResiduo > 0 && kgAperte < targetResiduo * SOGLIA_PROIEZIONE && !meseConcluso) {
+    const uscite = righe.filter(r => ['annullata', 'evasa_da_altri', 'riassegnata', 'non_piu_presente'].includes(r.stato) && !r.evasa_con).length;
+    const causa = uscite ? ` Dalla lista ${uscite === 1 ? "e' uscita una richiesta" : `sono uscite ${uscite} richieste`} tra annullate, evase da altri e riassegnate.` : '';
+    aggiungi('media', 'portafoglio', `Le richieste ancora aperte valgono circa ${kgT(kgAperte)}, meno dei ${kgT(targetResiduo)} che mancano al target: servono circa ${richiesteMancanti} ${richiesteMancanti === 1 ? 'richiesta' : 'richieste'} in piu', a ${kgT(kgRitiro)} per ritiro.${causa}`);
   }
   if (aperte.length && !meseConcluso && evadibiliRitmo < aperte.length && giorniTrascorsi > 0) {
     aggiungi('media', 'capacita', `Al ritmo stimato di ${kgT(ritmo)} al giorno potra' evadere circa ${evadibiliRitmo} delle ${aperte.length} richieste aperte entro fine mese.`);
@@ -626,8 +688,20 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   const riassegnate = righe.filter(r => r.stato === 'riassegnata');
   if (riassegnate.length) aggiungi('info', 'riassegnate', `${riassegnate.length} ${riassegnate.length === 1 ? 'richiesta della lista risulta ora assegnata' : 'richieste della lista risultano ora assegnate'} ad altri: ${elenco(riassegnate.map(r => `${r.id_ordine} a ${r.chiusa_da}`), 3)}.`);
   const sparite = righe.filter(r => r.stato === 'non_piu_presente');
-  if (sparite.length) aggiungi('info', 'non_presenti', `${sparite.length} ${sparite.length === 1 ? 'richiesta non e\' piu\'' : 'richieste non sono piu\''} ne' tra gli assegnati ne' tra i terminati, probabilmente annullate: ${elenco(sparite.map(r => r.id_ordine))}.`);
-  const nuove = fuoriLista.filter(f => f.tipo === 'nuova');
+  if (sparite.length) aggiungi('info', 'non_presenti', `${sparite.length} ${sparite.length === 1 ? 'richiesta non e\' piu\'' : 'richieste non sono piu\''} ne' tra gli assegnati ne' tra i terminati ne' tra i cancellati del file caricato: ${elenco(sparite.map(r => r.id_ordine))}.`);
+  const annullate = righe.filter(r => r.stato === 'annullata');
+  if (annullate.length) {
+    const motivi = new Map();
+    for (const r of annullate) motivi.set(r.motivo_annullamento, (motivi.get(r.motivo_annullamento) || 0) + 1);
+    const sostituite = annullate.filter(r => r.evasa_con).length;
+    const conSostituto = sostituite ? ` ${sostituite === 1 ? "Una e' stata evasa" : `${sostituite} sono state evase`} con un altro ordine allo stesso punto di raccolta.` : '';
+    aggiungi('info', 'annullate', `${annullate.length === 1 ? "Una richiesta della lista e' stata annullata" : `${annullate.length} richieste della lista sono state annullate`} sul portale: ${[...motivi.entries()].sort((a, b) => b[1] - a[1]).map(([m, n]) => `${m} (${n})`).join(', ')}.${conSostituto}`);
+  }
+  const conAltroOrdine = righe.filter(r => r.stato === 'evasa_altro_ordine');
+  if (conAltroOrdine.length) {
+    aggiungi('media', 'altro_ordine', `${conAltroOrdine.length === 1 ? "Una richiesta risulta ancora assegnata ma e' stata evasa" : `${conAltroOrdine.length} richieste risultano ancora assegnate ma sono state evase`} con un altro ordine allo stesso punto di raccolta, probabilmente un doppione da annullare sul portale: ${elenco(conAltroOrdine.map(r => `${r.id_ordine} con ${r.evasa_con}`), 3)}.`);
+  }
+  const nuove = fuoriListaEffettivi.filter(f => f.tipo === 'nuova');
   if (nuove.length) aggiungi('info', 'nuove', `${nuove.length} ${nuove.length === 1 ? 'ordine evaso e\' stato immesso' : 'ordini evasi sono stati immessi'} dopo l'invio della lista.`);
   const nonRiconosciute = righe.filter(r => r.stato_al_caricamento === 'non_riconosciuta');
   if (nonRiconosciute.length) aggiungi('info', 'non_riconosciute', `${nonRiconosciute.length} ${nonRiconosciute.length === 1 ? 'ID della lista non corrispondeva' : 'ID della lista non corrispondevano'} a nessun ordine al momento del caricamento: ${elenco(nonRiconosciute.map(r => r.id_ordine))}.`);
@@ -638,14 +712,15 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   return {
     riepilogo: {
       richieste: righe.length,
-      evase: conta('evasa'),
+      evase: righe.filter(evasaDalRaccoglitore).length,
       evase_da_altri: daAltri.length,
       aperte: aperte.length,
       prioritarie_aperte: prioritarieAperte.length,
       fuori_ordine: fuoriOrdine.length,
       trascurate: trascurate.length,
-      fuori_lista: fuoriLista.length,
+      fuori_lista: fuoriListaEffettivi.length,
       non_piu_presenti: sparite.length,
+      annullate: annullate.length,
       riassegnate: riassegnate.length,
       raccolto_kg: raccoltoKg,
       target_kg: target,
@@ -664,6 +739,7 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
         classe: r.classe, canale: r.canale, stato: r.stato, chiusa_il: r.chiusa_il, chiusa_da: r.chiusa_da,
         kg: r.kg, automezzo: r.automezzo, saltate: r.saltate, saltate_ids: r.saltate_ids,
         scavalcata_successive: r.scavalcata_successive || 0, scavalcata_fuori: r.scavalcata_fuori || 0,
+        motivo_annullamento: r.motivo_annullamento || '', evasa_con: r.evasa_con || '',
         stima_kg: r.stima_kg, metodo_stima: r.metodo_stima || '', entro_capacita: r.entro_capacita ?? null, entro_target: r.entro_target ?? null,
       })),
       fuori_lista: fuoriLista,

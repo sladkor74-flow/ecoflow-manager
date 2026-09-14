@@ -59,6 +59,10 @@
     "non_piu_presenti": {
       "type": "number"
     },
+    "annullate": {
+      "type": "number",
+      "description": "Richieste della lista cancellate sul portale"
+    },
     "riassegnate": {
       "type": "number"
     },

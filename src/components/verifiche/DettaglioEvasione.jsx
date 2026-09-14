@@ -16,7 +16,7 @@ const FILTRI = [
   { chiave: 'trascurate', etichetta: 'Trascurate' },
   { chiave: 'evasa', etichetta: 'Evase' },
   { chiave: 'fuori_ordine', etichetta: 'Fuori ordine' },
-  { chiave: 'altro', etichetta: 'Da altri o non più presenti' },
+  { chiave: 'altro', etichetta: 'Da altri, annullate o non più presenti' },
 ];
 
 function Tessera({ etichetta, valore, dettaglio, tono = '' }) {
@@ -139,7 +139,8 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
     if (filtro === 'tutte') return true;
     if (filtro === 'fuori_ordine') return r.saltate > 0;
     if (filtro === 'trascurate') return r.stato === 'aperta' && scavalcata(r);
-    if (filtro === 'altro') return ['evasa_da_altri', 'riassegnata', 'non_piu_presente', 'evasa_prima'].includes(r.stato);
+    if (filtro === 'altro') return ['evasa_da_altri', 'riassegnata', 'annullata', 'non_piu_presente', 'evasa_prima'].includes(r.stato);
+    if (filtro === 'evasa') return r.stato === 'evasa' || r.stato === 'evasa_altro_ordine';
     return r.stato === filtro;
   }) : [];
 
@@ -191,13 +192,14 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
               </section>
             )}
 
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
               <Tessera etichetta="Richieste" valore={c.richieste} />
               <Tessera etichetta="Evase" valore={c.evase} tono="text-emerald-600" />
               <Tessera etichetta="Aperte" valore={c.aperte} dettaglio={c.prioritarie_aperte ? `${c.prioritarie_aperte} prioritarie` : ''} tono={c.prioritarie_aperte ? 'text-red-600' : ''} />
               <Tessera etichetta="Trascurate" valore={c.trascurate ?? '—'} dettaglio="aperte ma scavalcate" tono={c.trascurate ? 'text-red-600' : ''} />
               <Tessera etichetta="Fuori ordine" valore={c.fuori_ordine} tono={c.fuori_ordine ? 'text-amber-600' : ''} />
               <Tessera etichetta="Fuori lista" valore={c.fuori_lista} />
+              <Tessera etichetta="Annullate" valore={c.annullate ?? '—'} dettaglio="sul portale" />
               <Tessera etichetta="Da altri" valore={c.evase_da_altri} dettaglio={c.riassegnate || c.non_piu_presenti ? `${c.riassegnate} riassegnate, ${c.non_piu_presenti} sparite` : ''} />
             </div>
 
@@ -206,12 +208,18 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                 <section className="border rounded-lg p-4 bg-card text-sm">
                   <h4 className="font-semibold mb-2">Target e previsione della rete</h4>
                   <Riga etichetta="Target del mese" valore={p.target_kg ? `${tonnellate(p.target_kg)} t` : 'non impostato'} />
+                  {p.kg_ritiro_tipico ? (
+                    <Riga etichetta="Peso tipico di un ritiro"
+                      valore={`${tonnellate(p.kg_ritiro_tipico)} t${p.ritiro_da_storico ? '' : ', indicativo'}${p.richieste_per_target ? ` · il target vale circa ${p.richieste_per_target} richieste` : ''}`} />
+                  ) : null}
+                  {p.valore_lista_kg !== undefined ? <Riga etichetta="Valore della lista" valore={`circa ${tonnellate(p.valore_lista_kg)} t tra evase e aperte`} /> : null}
                   <Riga etichetta="Raccolto finora" valore={`${tonnellate(c.raccolto_kg)} t${p.target_kg ? ` · ${Math.round((c.raccolto_kg / p.target_kg) * 100)}%` : ''}`} />
                   <Riga etichetta="Giorni lavorativi" valore={`${p.giorni_trascorsi} trascorsi su ${p.giorni_totali}, ${p.giorni_residui} residui${p.lavora_sabato ? ', sabato compreso' : ''}`} />
                   <Riga etichetta="Ritmo del mese" valore={p.ritmo_mese_kg_giorno !== null ? `${tonnellate(p.ritmo_mese_kg_giorno)} t al giorno` : '—'} />
                   <Riga etichetta="Ritmo dell'anno" valore={p.ritmo_storico_kg_giorno ? `${tonnellate(p.ritmo_storico_kg_giorno)} t al giorno` : '—'} />
                   <Riga etichetta="Proiezione a fine mese" valore={`${tonnellate(p.proiezione_kg)} t${p.percentuale_proiezione !== null ? ` · ${p.percentuale_proiezione}%` : ''}`} />
                   <Riga etichetta="Richieste aperte" valore={`${c.aperte}, circa ${tonnellate(p.kg_richieste_aperte)} t`} />
+                  {p.richieste_mancanti > 0 ? <Riga etichetta="Richieste da aggiungere" valore={<span className="text-orange-700 font-medium">circa {p.richieste_mancanti}</span>} /> : null}
                   <Riga etichetta="Evadibili al ritmo stimato" valore={`circa ${p.evadibili_ritmo} su ${c.aperte}`} />
                   {p.target_kg ? <Riga etichetta="Evadibili entro il target" valore={`${p.evadibili_target} su ${c.aperte}`} /> : null}
                   {p.viaggi_necessari !== null && <Riga etichetta="Viaggi per il target residuo" valore={`${p.viaggi_necessari} necessari, circa ${p.viaggi_possibili ?? '—'} possibili`} />}
@@ -306,6 +314,8 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                                 trascurata: evase dopo di lei {[r.scavalcata_successive ? `${r.scavalcata_successive} successive` : '', r.scavalcata_fuori ? `${r.scavalcata_fuori} fuori lista` : ''].filter(Boolean).join(' e ')}
                               </div>
                             )}
+                            {r.stato === 'annullata' && <div>{r.motivo_annullamento}{r.evasa_con ? `, evasa con ${r.evasa_con}` : ''}</div>}
+                            {r.stato === 'evasa_altro_ordine' && <div className="text-amber-700">evasa con l'ordine {r.evasa_con}: doppione da annullare?</div>}
                             {r.stato === 'aperta' && r.entro_capacita === false && <span>oltre la capacità stimata del mese</span>}
                           </td>
                         </tr>
@@ -329,7 +339,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                       </span>
                       <span className="flex items-center gap-3">
                         <span className="text-muted-foreground">
-                          {f.tipo === 'nuova' ? 'immesso dopo l\'invio della lista' : f.tipo === 'lista_altrui' ? `dalla lista di ${f.lista_di}` : 'già esistente all\'invio'}
+                          {f.tipo === 'stesso_pdr' ? `stesso punto di raccolta della richiesta ${f.richiesta}` : f.tipo === 'nuova' ? 'immesso dopo l\'invio della lista' : f.tipo === 'lista_altrui' ? `dalla lista di ${f.lista_di}` : 'già esistente all\'invio'}
                         </span>
                         <span className="tabular-nums">{f.kg.toLocaleString('it-IT')} kg</span>
                       </span>

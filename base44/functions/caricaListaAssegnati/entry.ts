@@ -31,7 +31,7 @@ export default async function(req) {
     }
 
     const dati = await caricaDati(base44);
-    const righe = arricchisciLista(lettura.righe, dati.assegnati, dati.terminati);
+    const righe = arricchisciLista(lettura.righe, dati.assegnati, dati.terminati, dati.cancellati);
 
     const cancellati = await cancellaVecchi(base44, { finoAIndice: indiceMese(anno, mese), raccoglitoreChiave: raccoglitore_chiave });
 
@@ -55,6 +55,7 @@ export default async function(req) {
       prioritarie: lista.prioritarie,
       non_riconosciute: righe.filter(r => r.stato_al_caricamento === 'non_riconosciuta').length,
       gia_evase: righe.filter(r => r.stato_al_caricamento === 'gia_evasa').length,
+      gia_annullate: righe.filter(r => r.stato_al_caricamento === 'annullata').length,
       avvisi: lettura.avvisi,
       fogli: lettura.fogli,
       cancellati,
