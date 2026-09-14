@@ -3,6 +3,7 @@ import * as XLSX from 'npm:xlsx@0.18.5';
 import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
 import { enrichRecords } from "../../shared/dataEnrichment.ts";
 import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSignatures.ts";
+import { CAMPI_ASSEGNATO, archivioPrimaria } from "../../shared/primarie.ts";
 
 // Importa un file Excel scaricato dal portale Ecotyre con validazione anti-perdita-dati.
 // Flusso tassativo:
@@ -382,23 +383,6 @@ export default async function(req) {
     }
 
     // === 7. SOLO ORA: cancellazione e import ===
-    const CAMPI_ASSEGNATO = [
-      'id_ordine', 'stato', 'ordine_immesso_il', 'id_cliente', 'ragione_sociale',
-      'id_pdr', 'punto_di_raccolta', 'indirizzo', 'cap', 'comune', 'provincia',
-      'codice_regione', 'macroarea', 'codice_prodotto', 'prodotto', 'classe',
-      'cer', 'tipo_contenitori', 'quantita_richiesta', 'quantita_ritirata',
-      'peso_stimato', 'peso_effettivo', 'key_account', 'partner_operativo',
-      'id_partner_operativo', 'id_trasportatore', 'trasportatore', 'regioni', 'mese', 'anno', 'sigla', 'regione'
-    ];
-
-    const isAciClasse = (classe, prodotto) => {
-      const c = (classe || '').trim().toLowerCase();
-      const p = (prodotto || '').trim().toLowerCase();
-      return c.includes('autodemolizione') || c.includes('aci')
-          || p.includes('pfu autodemolizione') || p.includes('autodemolizione') || p.includes('aci');
-    };
-    const isAssegnatoStato = (stato) => (stato || '').toLowerCase().trim() === 'assegnato';
-
     fase = 'scrittura dei record';
     const importBucket = async (rows, entityName, campi = null, sostituisci = true, kf = 'id_ordine') => {
       const records = campi
@@ -451,16 +435,12 @@ export default async function(req) {
     let primarie_aci_importati = 0, primarie_aci_falliti = 0;
 
     if (config.splitByStatoClasse) {
-      const bucketRete = [], bucketAci = [], bucketAssRete = [], bucketAssAci = [];
+      const bucket = { PrimariaRete: [], PrimariaAci: [], Assegnato: [], AssegnatoAci: [] };
       for (const r of enriched) {
-        if (!r.id_ordine) continue;
-        const aci = isAciClasse(r.classe, r.prodotto);
-        const ass = isAssegnatoStato(r.stato);
-        if (ass && !aci) bucketAssRete.push(r);
-        else if (ass && aci) bucketAssAci.push(r);
-        else if (!aci) bucketRete.push(r);
-        else bucketAci.push(r);
+        if (r.id_ordine) bucket[archivioPrimaria(r)].push(r);
       }
+      const bucketRete = bucket.PrimariaRete, bucketAci = bucket.PrimariaAci;
+      const bucketAssRete = bucket.Assegnato, bucketAssAci = bucket.AssegnatoAci;
       const r1 = await importBucket(bucketRete, 'PrimariaRete', null, sostituisci);
       primarie_rete_importati = r1.imp; primarie_rete_falliti = r1.fail;
       const r2 = await importBucket(bucketAci, 'PrimariaAci', null, sostituisci);

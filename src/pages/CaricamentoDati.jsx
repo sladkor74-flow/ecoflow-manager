@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, Clock, Trash2 } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle2, Clock } from 'lucide-react';
 import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
-import { importaGrandeFile, TIPI_LETTURA_BROWSER } from '@/lib/importGrandeFile';
+import { importaGrandeFile, importaPrimarie, TIPI_LETTURA_BROWSER } from '@/lib/importGrandeFile';
 import { formatIntero } from '@/lib/utils';
 
 const TIPI_FILE = [
@@ -35,23 +35,33 @@ export default function CaricamentoDati() {
 
   useEffect(() => { caricaLogs(); }, []);
 
+  // Durante un caricamento l'archivio viene riscritto: chiudere la pagina lo
+  // lascerebbe a meta'.
+  useEffect(() => {
+    if (!uploading) return undefined;
+    const avviso = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', avviso);
+    return () => window.removeEventListener('beforeunload', avviso);
+  }, [uploading]);
+
   const handleUpload = async (tipoKey, file, conferma_forzatura = false) => {
     if (!file) return;
     setUploading(tipoKey);
     setRisultato(prev => ({ ...prev, [tipoKey]: null }));
     try {
-      // I due report del portale sono troppo grandi per essere letti dentro una
-      // function: la lettura avviene nel browser e al backend arrivano blocchi di
-      // poche centinaia di righe gia' estratte.
-      if (TIPI_LETTURA_BROWSER.includes(tipoKey)) {
-        const data = await importaGrandeFile({
-          file,
-          tipoFile: tipoKey,
-          confermaForzatura: conferma_forzatura,
-          onProgress: (p) => setProgresso(prev => ({ ...prev, [tipoKey]: p })),
-        });
+      // Le primarie e i due report del portale sono troppo grandi per essere
+      // importati dentro una sola function: la lettura avviene nel browser e al
+      // backend arrivano blocchi di poche centinaia di righe gia' estratte.
+      if (tipoKey === 'primarie' || TIPI_LETTURA_BROWSER.includes(tipoKey)) {
+        const onProgress = (p) => setProgresso(prev => ({ ...prev, [tipoKey]: p }));
+        const data = tipoKey === 'primarie'
+          ? await importaPrimarie({ file, confermaForzatura: conferma_forzatura, onProgress })
+          : await importaGrandeFile({ file, tipoFile: tipoKey, confermaForzatura: conferma_forzatura, onProgress });
         setProgresso(prev => ({ ...prev, [tipoKey]: null }));
         setRisultato(prev => ({ ...prev, [tipoKey]: { ok: true, data } }));
+        // Nuove primarie: si aggiorna il controllo delle liste di assegnati del
+        // modulo Verifiche. Gira in background e non blocca il caricamento.
+        if (tipoKey === 'primarie') base44.functions.invoke('controllaEvasioneAssegnati', {}).catch(() => {});
         const warnings = extractUploadWarnings(data);
         if (warnings) setDialogState(warnings);
         caricaLogs();
@@ -136,6 +146,7 @@ export default function CaricamentoDati() {
                     <>
                       <div className="flex justify-between mb-1">
                         <span>
+                          {progresso[tipo.key].archivio ? `${progresso[tipo.key].archivio} · ` : ''}
                           Blocco {progresso[tipo.key].blocco} di {progresso[tipo.key].totaleBlocchi}
                           {progresso[tipo.key].fase === 'ritentativo' && (
                             <span className="text-amber-700"> · ritentativo {progresso[tipo.key].tentativo}</span>
@@ -155,6 +166,7 @@ export default function CaricamentoDati() {
                   ) : (
                     <span>{progresso[tipo.key].fase}…</span>
                   )}
+                  <p className="mt-1 text-amber-700">Non chiudere e non ricaricare la pagina fino al termine.</p>
                 </div>
               )}
 
@@ -163,10 +175,11 @@ export default function CaricamentoDati() {
                   <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
                   <span>
                     {res.data.records_creati != null
-                      ? `${res.data.records_creati} target caricati (${res.data.raccoglitori} raccoglitori)`
-                      : (res.data.primarie_rete_importati != null
-                        ? `Rete: ${res.data.primarie_rete_importati} · ACI: ${res.data.primarie_aci_importati} · Ass. Rete: ${res.data.assegnati_importati} · Ass. ACI: ${res.data.assegnati_aci_importati}`
-                        : `${res.data.righe_importate} righe importate${res.data.righe_fallite > 0 ? ` (${res.data.righe_fallite} fallite)` : ''}${res.data.blocchi_ritentati > 0 ? ` · ${res.data.blocchi_ritentati} blocchi ritentati` : ''}`)}
+                      ? `${formatIntero(res.data.records_creati)} target caricati (${formatIntero(res.data.raccoglitori)} raccoglitori)`
+                      : (tipo.key === 'primarie' && res.data.primarie_rete_importati != null
+                        ? `Rete: ${formatIntero(res.data.primarie_rete_importati)} · ACI: ${formatIntero(res.data.primarie_aci_importati)} · Ass. Rete: ${formatIntero(res.data.assegnati_importati)} · Ass. ACI: ${formatIntero(res.data.assegnati_aci_importati)}`
+                        : `${formatIntero(res.data.righe_importate)} righe importate${res.data.righe_fallite > 0 ? ` (${formatIntero(res.data.righe_fallite)} fallite)` : ''}`)}
+                    {res.data.blocchi_ritentati > 0 ? ` · ${formatIntero(res.data.blocchi_ritentati)} blocchi ritentati` : ''}
                   </span>
                 </div>
               )}

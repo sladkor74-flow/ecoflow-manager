@@ -1,6 +1,8 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
 import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSignatures.ts";
+import { enrichRecords } from "../../shared/dataEnrichment.ts";
+import { ARCHIVI_PRIMARIE, DATE_PRIMARIE, archivioPrimaria, recordAssegnato } from "../../shared/primarie.ts";
 
 // Importazione a blocchi per i report di grandi dimensioni del portale Ecotyre.
 //
@@ -16,6 +18,13 @@ import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSi
 //   scrivi   - scrive un blocco con una sola chiamata a bulkCreate
 //   conta    - restituisce quanti record contiene l'archivio
 //   registra - scrive il registro dei caricamenti a fine importazione
+//
+// Le primarie arrivano da un solo file ma vanno in quattro archivi (rete, ACI,
+// assegnati rete, assegnati ACI): il browser indica l'archivio di ogni blocco e
+// ogni archivio si svuota subito prima di essere riscritto, con l'azione
+//   svuota   - svuota l'archivio indicato
+// La preparazione delle primarie non cancella nulla: confronta gli ordini del
+// file con quelli in archivio e blocca il caricamento se ne mancano.
 //
 // Un blocco corrisponde a una sola scrittura: o la riga vanno tutte a buon fine o
 // non ne va nessuna. Il browser puo' quindi ritentare un blocco fallito senza
@@ -35,6 +44,14 @@ function serialeExcelInData(seriale) {
   return new Date(Date.UTC(1899, 11, 30) + Math.round(seriale * 86400000));
 }
 
+// Date delle primarie: il portale le registra al secondo.
+function dataPrimaria(val) {
+  if (typeof val === 'number' && val > 20000) {
+    return new Date(Date.UTC(1899, 11, 30) + Math.round(val * 86400) * 1000).toISOString();
+  }
+  return convertiData(val);
+}
+
 function convertiData(val) {
   if (val === undefined || val === null || val === '') return null;
   if (val instanceof Date) return isNaN(val.getTime()) ? null : val.toISOString();
@@ -48,20 +65,37 @@ function convertiData(val) {
 }
 
 // Trasforma una riga grezza del foglio nell'oggetto dell'entita'.
-function mappaRiga(row, colMap) {
+function mappaRiga(row, colMap, primarie = false) {
   const obj = {};
   for (const [colonnaExcel, campo] of Object.entries(colMap)) {
     const val = row[colonnaExcel];
     if (DATE_FIELDS.has(campo)) { obj[campo] = convertiData(val); continue; }
+    if (primarie && DATE_PRIMARIE.has(campo)) { obj[campo] = dataPrimaria(val); continue; }
     if (val === undefined || val === null || val === '') { obj[campo] = null; continue; }
     if (NUMERIC_FIELDS.has(campo)) {
       const n = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.'));
       obj[campo] = isNaN(n) ? null : n;
+    } else if (primarie && campo === 'stato') {
+      obj[campo] = String(val).trim().toLowerCase();
     } else {
       obj[campo] = String(val).trim();
     }
   }
   return obj;
+}
+
+// Identificativi degli ordini di un archivio, letti a pagine ordinate per ordine:
+// l'ordinamento per data di creazione non e' stabile fra pagine, perche' i record
+// scritti insieme hanno la stessa data.
+async function idArchivio(base44, entita) {
+  const ids = new Set();
+  for (let skip = 0; ; skip += 1000) {
+    const pagina = await base44.asServiceRole.entities[entita].list('id_ordine', 1000, skip, ['id_ordine']);
+    for (const r of pagina) if (r.id_ordine) ids.add(String(r.id_ordine));
+    if (pagina.length < 1000) break;
+    await sleep(100);
+  }
+  return ids;
 }
 
 // Riconosce gli errori di rete o di attesa: non vanno ritentati qui dentro perche'
@@ -127,13 +161,50 @@ export default async function(req) {
     if (!config) {
       return Response.json({ error: 'tipo_file non valido: ' + tipo_file, dati_intatti: true }, { status: 400 });
     }
-    const entita = config.entity;
+    const primarie = tipo_file === 'primarie';
+    if (primarie && azione !== 'prepara' && azione !== 'registra' && !ARCHIVI_PRIMARIE.includes(body.entita)) {
+      return Response.json({ error: 'Archivio delle primarie non valido: ' + body.entita, dati_intatti: true }, { status: 400 });
+    }
+    const entita = primarie ? body.entita : config.entity;
 
     // === CONTEGGIO: quante righe contiene ora l'archivio ===
     if (azione === 'conta') {
       fase = 'conteggio archivio';
       const conteggio = await contaRecord(base44, entita, [atteso, minimo]);
       return Response.json({ conteggio, dati_intatti: true });
+    }
+
+    // === SVUOTAMENTO di un archivio delle primarie, subito prima di riscriverlo ===
+    if (azione === 'svuota') {
+      if (!primarie) return Response.json({ error: 'Azione non prevista per ' + tipo_file, dati_intatti: true }, { status: 400 });
+      fase = "svuotamento dell'archivio " + entita;
+      archivioSvuotato = true;
+      await base44.asServiceRole.entities[entita].deleteMany({});
+      return Response.json({ svuotato: true, entita });
+    }
+
+    // === REGISTRAZIONE delle primarie: un riepilogo per archivio ===
+    if (azione === 'registra' && primarie) {
+      fase = 'scrittura registro caricamenti';
+      const archivi = body.archivi || {};
+      const n = (a, k) => Number(archivi[a] && archivi[a][k]) || 0;
+      const fallite = ARCHIVI_PRIMARIE.reduce((s, a) => s + n(a, 'fallite'), 0);
+      const disallineati = ARCHIVI_PRIMARIE.filter(a => archivi[a] && typeof archivi[a].archivio === 'number' && archivi[a].archivio !== n(a, 'attese'));
+      const scritte = n('PrimariaRete', 'scritte') + n('PrimariaAci', 'scritte');
+      const esito = fallite === 0 && disallineati.length === 0 && scritte > 0 ? 'successo' : (scritte > 0 ? 'parziale' : 'errore');
+      let messaggio = `Rete: ${n('PrimariaRete', 'scritte')} | ACI: ${n('PrimariaAci', 'scritte')} | Ass. Rete: ${n('Assegnato', 'scritte')} | Ass. ACI: ${n('AssegnatoAci', 'scritte')} (lettura nel browser)`;
+      if (fallite > 0) messaggio += ` — ${fallite} righe non scritte`;
+      if (disallineati.length) messaggio += ' — archivio non allineato: ' + disallineati.map(a => `${a} ${n(a, 'archivio')} su ${n(a, 'attese')}`).join(', ');
+      if (body.ultimo_errore) messaggio += ' — ultimo errore: ' + body.ultimo_errore;
+      if (body.durata_secondi) messaggio += ` [durata: ${body.durata_secondi}s]`;
+      await base44.asServiceRole.entities.UploadLog.create({
+        tipo_file, nome_file: nome_file || 'N/D',
+        righe_importate: scritte, righe_fallite: fallite, esito, messaggio,
+        righe_archivio_prima: typeof body.righe_archivio_prima === 'number' ? body.righe_archivio_prima : undefined,
+        forzato: conferma_forzatura === true ? true : undefined,
+        modalita: 'sostituzione',
+      });
+      return Response.json({ registrato: true, esito });
     }
 
     // === REGISTRAZIONE: registro dei caricamenti a fine importazione ===
@@ -189,6 +260,53 @@ export default async function(req) {
         return Response.json({ error: 'Nessuna riga valida trovata nel file', dati_intatti: true }, { status: 400 });
       }
 
+      if (primarie) {
+        const erroreRegistrato = async (risposta, stato, messaggio, prima) => {
+          await base44.asServiceRole.entities.UploadLog.create({
+            tipo_file, nome_file: nome_file || 'N/D', righe_importate: 0, righe_fallite: 0,
+            esito: 'errore', messaggio, righe_archivio_prima: prima, forzato: false,
+          });
+          return Response.json({ ...risposta, dati_intatti: true }, { status: stato });
+        };
+
+        if (!(Number(body.terminati) > 0)) {
+          const error = "Il file non contiene alcun ordine terminato: sembra una selezione filtrata (es. soli assegnati), non l'export completo delle primarie.";
+          return await erroreRegistrato({ error }, 400, error, undefined);
+        }
+
+        // Ogni ordine in archivio deve essere anche nel file: un export filtrato per
+        // data o per stato cancellerebbe gli ordini che non contiene.
+        fase = 'controllo anti-regressione';
+        const idFile = new Set((Array.isArray(body.ids) ? body.ids : []).map(String));
+        const inArchivio = new Set();
+        for (const a of ARCHIVI_PRIMARIE) for (const id of await idArchivio(base44, a)) inArchivio.add(id);
+        const mancanti = [...inArchivio].filter(id => !idFile.has(id));
+        if (mancanti.length > 0 && !conferma_forzatura) {
+          const error = "Il file contiene meno dati di quelli gia' presenti in archivio";
+          return await erroreRegistrato({
+            error, righe_file: idFile.size, righe_archivio: inArchivio.size,
+            mancanti: mancanti.length, esempi_mancanti: mancanti.slice(0, 10), richiede_conferma: true,
+          }, 409, `${error} (${mancanti.length} ordini mancanti su ${inArchivio.size} in archivio)`, inArchivio.size);
+        }
+
+        // Ultima fine trasporto del file precedente a quella in archivio: file vecchio?
+        fase = 'confronto delle date';
+        let avviso_date = null;
+        const fineFile = body.ultima_fine_trasporto != null ? dataPrimaria(body.ultima_fine_trasporto) : null;
+        if (fineFile) {
+          let fineArchivio = null;
+          for (const a of ['PrimariaRete', 'PrimariaAci']) {
+            const [ultimo] = await base44.asServiceRole.entities[a].list('-trasporto_finito_il', 1, 0, ['trasporto_finito_il']);
+            if (ultimo && ultimo.trasporto_finito_il && (!fineArchivio || ultimo.trasporto_finito_il > fineArchivio)) fineArchivio = ultimo.trasporto_finito_il;
+          }
+          if (fineArchivio && new Date(fineFile).getTime() < new Date(fineArchivio).getTime()) {
+            avviso_date = { data_file: fineFile, data_archivio: new Date(fineArchivio).toISOString() };
+          }
+        }
+
+        return Response.json({ preparato: true, righe_archivio_prima: inArchivio.size, avviso_date, dati_intatti: true });
+      }
+
       // Controllo anti-regressione basato sul conteggio delle righe.
       // Per questi report non si confrontano gli identificativi uno a uno: sarebbe
       // necessario rileggere l'intero archivio, cioe' proprio il costo che questo
@@ -228,7 +346,19 @@ export default async function(req) {
     }
 
     fase = 'scrittura del blocco ' + ((blocco || 0) + 1);
-    const records = righe.map(r => mappaRiga(r, config.columns));
+    let records = righe.map(r => mappaRiga(r, config.columns, primarie));
+    if (primarie) {
+      // Stesso arricchimento e stessa suddivisione dell'importazione lato server.
+      records = enrichRecords(records.filter(r => r.id_ordine), 'PrimariaRete');
+      const fuori = records.filter(r => archivioPrimaria(r) !== entita);
+      if (fuori.length > 0 || records.length !== righe.length) {
+        return Response.json({
+          error: `Blocco non coerente con l'archivio ${entita}: ${fuori.length} ordini appartengono a un altro archivio (es. ${fuori.slice(0, 3).map(r => r.id_ordine).join(', ')})`,
+          dati_intatti: false,
+        }, { status: 400 });
+      }
+      if (entita === 'Assegnato' || entita === 'AssegnatoAci') records = records.map(recordAssegnato);
+    }
     let ultimoErrore = null;
 
     for (let tentativo = 0; tentativo < 2; tentativo++) {

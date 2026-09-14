@@ -4,19 +4,23 @@ import { Button } from '@/components/ui/button';
 import { AlertTriangle, AlertCircle, ShieldCheck } from 'lucide-react';
 import { formatIntero } from '@/lib/utils';
 
-// Estrae le informazioni di errore dalla risposta SDK (per HTTP 400/409/500)
+// Estrae le informazioni di errore dalla risposta SDK (per HTTP 400/409/500).
+// Il client mette stato e dati della risposta sull'errore; le versioni precedenti
+// li tenevano in response.
 export function extractUploadError(e) {
-  const status = e.response?.status;
-  const data = e.response?.data || {};
+  const status = e?.status ?? e?.response?.status;
+  const data = e?.data || e?.response?.data || {};
   return {
     type: 'error',
     status,
-    error: data.error || e.message || 'Errore sconosciuto',
+    error: data.error || e?.message || 'Errore sconosciuto',
     dettaglio: data.dettaglio,
     fase: data.fase,
     // Solo il backend sa se l'errore e' arrivato prima o dopo lo svuotamento
     // dell'archivio: senza una conferma esplicita non si rassicura l'utente.
-    dati_intatti: data.dati_intatti === true,
+    // I rifiuti del file (400) e i blocchi anti-regressione (409) arrivano sempre
+    // prima di qualsiasi scrittura, salvo diversa indicazione del backend.
+    dati_intatti: data.dati_intatti === true || (data.dati_intatti === undefined && (status === 400 || status === 409)),
     tipo_rilevato: data.tipo_rilevato,
     fogli_trovati: data.fogli_trovati,
     esempi_mancanti: data.esempi_mancanti,
@@ -54,7 +58,9 @@ export default function UploadResultDialog({ state, onClose }) {
 
   const isError = state.type === 'error';
   const title = isError
-    ? (state.status === 409 ? 'Caricamento bloccato: rischio perdita dati' : 'Formato file non valido')
+    ? (state.status === 409
+      ? 'Caricamento bloccato: rischio perdita dati'
+      : (state.error === 'Formato file non valido' ? 'Formato file non valido' : 'Caricamento non riuscito'))
     : 'Caricamento completato con avvisi';
   const titleColor = isError ? 'text-red-700' : 'text-amber-700';
   const Icon = isError ? AlertTriangle : AlertCircle;
