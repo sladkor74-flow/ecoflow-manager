@@ -19,7 +19,7 @@ export default async function(req) {
     const [rete, aci, targets] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.PrimariaRete, filter),
       fetchAll(base44.asServiceRole.entities.PrimariaAci, filter),
-      base44.asServiceRole.entities.TargetMensile.filter(mese ? { mese } : {}, '-created_date', 10000),
+      base44.asServiceRole.entities.TargetMensile.filter(mese ? { mese, anno: Number(anno) } : { anno: Number(anno) }, '-created_date', 10000),
     ]);
 
     // Aggrega per regione
@@ -42,7 +42,7 @@ export default async function(req) {
     for (const t of targets) {
       const reg = addRegion(t.regione);
       if (reg) {
-        reg.target += Number(t.target || 0);
+        reg.target += t.non_raccoglie ? 0 : Number(t.target || 0);
         reg.raccolto_target += Number(t.raccolto || 0);
       }
     }

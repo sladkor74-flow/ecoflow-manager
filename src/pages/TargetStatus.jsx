@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { MESI, meseCorrente as getMeseCorrente } from '@/lib/pfuConstants';
 import { exportExcel, exportPDF, exportPPT } from '@/lib/statusExports';
@@ -8,405 +9,336 @@ import RegionTable from '@/components/target-status/RegionTable';
 import ImpiantiTable from '@/components/target-status/ImpiantiTable';
 import TargetChart from '@/components/target-status/TargetChart';
 import ExportButtons from '@/components/target-status/ExportButtons';
+import TargetRaccoglitoriGrid from '@/components/target-status/TargetRaccoglitoriGrid';
+import CommessaEcotyreForm from '@/components/target-status/CommessaEcotyreForm';
+import TargetAnnuali from '@/pages/TargetAnnuali';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import TargetRaccoglitoriTable from '@/components/target-status/TargetRaccoglitoriTable';
-import TargetRaccoglitoriPrimariaTable from '@/components/target-status/TargetRaccoglitoriPrimariaTable';
 import { useAuth } from '@/lib/AuthContext';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
-import { Loader2, RefreshCw, Filter, X, Plus } from 'lucide-react';
 import { fetchAllClient } from '@/lib/fetchAllClient';
+import { tonnellate, ANNI_TARGET } from '@/lib/target';
+import { Loader2, RefreshCw, Filter, X } from 'lucide-react';
+
+// Target & Status: unico punto in cui si scrivono i target.
+// - Andamento: target contro raccolto per raccoglitore, regione e impianto, e il
+//   raccolto per regione confrontato con il contratto. Solo lettura.
+// - Target raccoglitori: annuo e mensile per raccoglitore, regione e impianto.
+// - Commessa Ecotyre: quanto richiede il contratto.
+// - Impianti e stoccaggi: target annuali degli impianti e plafond degli stoccaggi.
+// Tutti gli altri moduli leggono questi dati.
 
 const TARGET_BY_YEAR = { 2025: 11200, 2026: 11550 };
-const getTargetForYear = (year) => TARGET_BY_YEAR[year] || (year >= 2026 ? 11550 : 11200);
+const SCHEDE = ['andamento', 'raccoglitori', 'commessa', 'impianti'];
+const leggiLista = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+
+// Raccolto per regione confrontato con il contratto: quanto ci si attende fino a
+// oggi segue il profilo del target mensile del contratto (o, in mancanza, i mesi
+// in parti uguali), con il mese in corso contato per i giorni trascorsi.
+function AndamentoRegioni({ raccolto, commessa, anno }) {
+  const regioni = commessa ? leggiLista(commessa.regioni_json) : [];
+  if (!regioni.length) {
+    return <p className="text-sm text-muted-foreground border rounded-lg px-4 py-3">Inserisci o importa il contratto nella scheda Commessa Ecotyre per confrontare il raccolto di ogni regione con quanto richiesto.</p>;
+  }
+  const profilo = leggiLista(commessa.target_mensile_json).map(v => Number(v) || 0);
+  const totaleProfilo = profilo.reduce((s, v) => s + v, 0);
+  const pesi = totaleProfilo > 0 ? profilo.map(v => v / totaleProfilo) : MESI.map(() => 1 / 12);
+  const oggi = new Date();
+  let quota;
+  if (anno < oggi.getFullYear()) quota = 1;
+  else if (anno > oggi.getFullYear()) quota = 0;
+  else {
+    const m = oggi.getMonth();
+    const giorniMese = new Date(anno, m + 1, 0).getDate();
+    quota = pesi.slice(0, m).reduce((s, v) => s + v, 0) + pesi[m] * (oggi.getDate() / giorniMese);
+  }
+  const perRegione = new Map((raccolto?.by_regione || []).map(r => [String(r.regione).toLowerCase(), r]));
+  const righe = regioni.map(r => {
+    const racc = perRegione.get(String(r.regione).toLowerCase());
+    const contratto = Number(r.target_t) || 0;
+    const raccoltoT = racc ? racc.totale : 0;
+    const atteso = contratto * quota;
+    return { ...r, contratto, raccolto: raccoltoT, atteso, percentuale: contratto ? (raccoltoT / contratto) * 100 : null, scarto: raccoltoT - atteso };
+  });
+  const tot = righe.reduce((s, r) => ({ contratto: s.contratto + r.contratto, raccolto: s.raccolto + r.raccolto, atteso: s.atteso + r.atteso }), { contratto: 0, raccolto: 0, atteso: 0 });
+  return (
+    <div className="border rounded-lg overflow-x-auto bg-card">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/60 text-left">
+          <tr>
+            <th className="px-3 py-2">Regione</th>
+            <th className="px-3 py-2">Province</th>
+            <th className="px-3 py-2 text-right">Contratto (t)</th>
+            <th className="px-3 py-2 text-right">Raccolto {anno} (t)</th>
+            <th className="px-3 py-2 text-right">% del contratto</th>
+            <th className="px-3 py-2 text-right">Atteso a oggi (t)</th>
+            <th className="px-3 py-2 text-right">Scarto sull'atteso (t)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {righe.map(r => (
+            <tr key={r.regione} className="border-t">
+              <td className="px-3 py-2 font-medium">{r.regione}</td>
+              <td className="px-3 py-2 text-xs text-muted-foreground">{r.province || '—'}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{tonnellate(r.contratto)}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{tonnellate(r.raccolto)}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{r.percentuale !== null ? `${tonnellate(r.percentuale)}%` : '—'}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{tonnellate(r.atteso)}</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-medium ${r.scarto >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{r.scarto >= 0 ? '+' : ''}{tonnellate(r.scarto)}</td>
+            </tr>
+          ))}
+          <tr className="border-t-2 font-semibold bg-muted/30">
+            <td className="px-3 py-2" colSpan={2}>Totale</td>
+            <td className="px-3 py-2 text-right tabular-nums">{tonnellate(tot.contratto)}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{tonnellate(tot.raccolto)}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{tot.contratto ? `${tonnellate((tot.raccolto / tot.contratto) * 100)}%` : '—'}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{tonnellate(tot.atteso)}</td>
+            <td className={`px-3 py-2 text-right tabular-nums ${tot.raccolto - tot.atteso >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{tot.raccolto - tot.atteso >= 0 ? '+' : ''}{tonnellate(tot.raccolto - tot.atteso)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p className="px-3 py-2 text-xs text-muted-foreground border-t">
+        Raccolto rete e ACI dei formulari terminati, per data di fine trasporto. L'atteso a oggi ripartisce il contratto di ogni regione secondo il target mensile
+        {totaleProfilo > 0 ? ' rivisto' : ''} del contratto{totaleProfilo > 0 ? '' : ', che non è ancora inserito: per ora in dodicesimi'}.
+      </p>
+    </div>
+  );
+}
 
 export default function TargetStatus() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const [params, setParams] = useSearchParams();
+  const scheda = SCHEDE.includes(params.get('tab')) ? params.get('tab') : 'andamento';
+  const [anno, setAnno] = useState(new Date().getFullYear());
   const [raccolto, setRaccolto] = useState(null);
   const [targets, setTargets] = useState([]);
+  const [annui, setAnnui] = useState([]);
+  const [commessa, setCommessa] = useState(null);
   const [impiantoTargets, setImpiantoTargets] = useState([]);
-  const [raccoglitoreTargets, setRaccoglitoreTargets] = useState([]);
-  const [fornitoriSec, setFornitoriSec] = useState([]);
-  const [annoTargetRacc, setAnnoTargetRacc] = useState(new Date().getFullYear());
-  const [raccPrimaria, setRaccPrimaria] = useState({ righe: [], totale_target: 0, totale_raccolto: 0 });
-  const [annoPrimaria, setAnnoPrimaria] = useState(new Date().getFullYear());
-  const [loadingPrimaria, setLoadingPrimaria] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [meseSelezionato, setMeseSelezionato] = useState(getMeseCorrente());
-  const [filters, setFilters] = useState({ anno: [], mese: [], regione: [], raccoglitore: [], impianto: [] });
+  const [filters, setFilters] = useState({ mese: [], regione: [], raccoglitore: [], impianto: [] });
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [raccoltoRes, targetRes, impTargetRes] = await Promise.all([
-        base44.functions.invoke('computeRaccolto', { filters }),
-        fetchAllClient(base44.entities.TargetMensile),
+      const [raccoltoRes, targetRes, annuiRes, commessaRes, impTargetRes] = await Promise.all([
+        base44.functions.invoke('computeRaccolto', { filters: { ...filters, anno: [anno] } }),
+        fetchAllClient(base44.entities.TargetMensile, { anno }),
+        fetchAllClient(base44.entities.TargetRaccoglitore, { anno }),
+        base44.entities.CommessaEcotyre.filter({ anno }).catch(() => []),
         fetchAllClient(base44.entities.ImpiantoTarget),
       ]);
       setRaccolto(raccoltoRes.data);
       setTargets(targetRes);
-      setImpiantoTargets(impTargetRes);
+      setAnnui(annuiRes);
+      setCommessa(commessaRes[0] || null);
+      setImpiantoTargets(impTargetRes.filter(t => !t.anno || Number(t.anno) === anno));
     } catch (e) {
       console.error(e);
     }
     setLoading(false);
-  }, [filters]);
+  }, [filters, anno]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { if (scheda === 'andamento') loadData(); }, [scheda, loadData]);
 
-  const loadRaccoglitoreTargets = useCallback(async (anno) => {
-    try {
-      const [res, forn] = await Promise.all([
-        base44.entities.TargetRaccoglitore.filter({ anno }, '-created_date', 1000),
-        base44.entities.FornitoreSecondaria.list('-created_date', 1000),
-      ]);
-      setRaccoglitoreTargets(res);
-      setFornitoriSec(forn);
-    } catch (e) { console.error(e); }
-  }, []);
+  const filterOptions = raccolto?.filterOptions || { mesi: MESI, regioni: [], raccoglitori: [], impianti: [] };
 
-  useEffect(() => { loadRaccoglitoreTargets(annoTargetRacc); }, [loadRaccoglitoreTargets, annoTargetRacc]);
-
-  const loadRaccPrimaria = useCallback(async (anno) => {
-    setLoadingPrimaria(true);
-    try {
-      const res = await base44.functions.invoke('calcolaConsuntivoRaccoglitoriPrimaria', { anno });
-      setRaccPrimaria(res.data);
-    } catch (e) { console.error(e); }
-    setLoadingPrimaria(false);
-  }, []);
-
-  useEffect(() => { loadRaccPrimaria(annoPrimaria); }, [loadRaccPrimaria, annoPrimaria]);
-
-  const saveRaccPrimariaTarget = async (row, raccoglitore, mese, value) => {
-    if (row && row.id) {
-      await base44.entities.TargetRaccoglitorePrimaria.update(row.id, { target_kg: value });
-    } else {
-      await base44.entities.TargetRaccoglitorePrimaria.create({ raccoglitore, mese, anno: annoPrimaria, target_kg: value });
-    }
-    loadRaccPrimaria(annoPrimaria);
-  };
-
-  const handleAddRaccPrimaria = async () => {
-    const nome = window.prompt('Nome del raccoglitore primaria (es. Pneuservice, Smoco, Ecorecuperi):');
-    if (!nome || !nome.trim()) return;
-    const { MESI } = await import('@/lib/pfuConstants');
-    await base44.entities.TargetRaccoglitorePrimaria.bulkCreate(
-      MESI.map(m => ({ raccoglitore: nome.trim(), mese: m, anno: annoPrimaria, target_kg: 0 }))
-    );
-    loadRaccPrimaria(annoPrimaria);
-  };
-
-  const saveRaccoglitoreTarget = async (record, value) => {
-    if (record.id) {
-      await base44.entities.TargetRaccoglitore.update(record.id, { target_tonnellate: value });
-      setRaccoglitoreTargets((prev) => prev.map((t) => (t.id === record.id ? { ...t, target_tonnellate: value } : t)));
-    } else {
-      const created = await base44.entities.TargetRaccoglitore.create({ raccoglitore: record.raccoglitore, anno: annoTargetRacc, target_tonnellate: value });
-      setRaccoglitoreTargets((prev) => [...prev, created]);
-    }
-  };
-
-  const handleAddRaccoglitore = async () => {
-    const nome = window.prompt('Nome del raccoglitore:');
-    if (!nome || !nome.trim()) return;
-    const created = await base44.entities.TargetRaccoglitore.create({ raccoglitore: nome.trim(), anno: annoTargetRacc, target_tonnellate: 0 });
-    setRaccoglitoreTargets((prev) => [...prev, created]);
-  };
-
-  const filterOptions = raccolto?.filterOptions || { anni: [], mesi: MESI, regioni: [], raccoglitori: [], impianti: [] };
-
-  // Merged data: raccoglitori with targets + raccolto
+  // Target e raccolto per raccoglitore e regione. I target sono per impianto e si
+  // sommano; i nomi si confrontano normalizzati.
   const mergedData = useMemo(() => {
     if (!raccolto) return [];
-    const targetMap = {};
-    const targetAnnuoMap = {};
-    const allKeys = new Set();
+    const righe = new Map();
+    const riga = (nome, regione) => {
+      const k = `${normalizzaRagioneSociale(nome || '')}|||${regione || ''}`;
+      if (!righe.has(k)) righe.set(k, { raccoglitore: nome, regione: regione || '', target: {}, racc: null, annuo: 0, nomi: new Set() });
+      const r = righe.get(k);
+      r.nomi.add(nome);
+      return r;
+    };
     for (const t of targets) {
-      const key = `${t.raccoglitore}|||${t.regione}`;
-      allKeys.add(key);
-      targetMap[`${key}|${t.mese}`] = t.target || 0;
-      if (t.target_annuo != null) targetAnnuoMap[key] = t.target_annuo;
+      const r = riga(t.raccoglitore, t.regione);
+      r.target[t.mese] = (r.target[t.mese] || 0) + (t.non_raccoglie ? 0 : Number(t.target) || 0);
     }
-    const raccMap = {};
-    for (const r of raccolto.by_raccoglitore) {
-      const key = `${r.raccoglitore}|||${r.regione}`;
-      allKeys.add(key);
-      raccMap[key] = r;
+    for (const x of raccolto.by_raccoglitore) riga(x.raccoglitore, x.regione).racc = x;
+    for (const a of annui) {
+      const nome = normalizzaRagioneSociale(a.raccoglitore || '');
+      let candidati = [...righe.values()].filter(r => normalizzaRagioneSociale(r.raccoglitore) === nome && (!a.regione || r.regione === a.regione));
+      if (!a.regione && candidati.length > 1) candidati = [candidati.sort((x, y) => ((y.racc && y.racc.totale) || 0) - ((x.racc && x.racc.totale) || 0))[0]];
+      (candidati[0] || riga(a.raccoglitore, a.regione)).annuo += Number(a.target_tonnellate) || 0;
     }
-    return Array.from(allKeys).map((key) => {
-      const [raccoglitore, regione] = key.split('|||');
-      const r = raccMap[key];
-      const targetAnnuo = targetAnnuoMap[key] || 0;
-      const raccoltoTotale = r?.totale || 0;
-      const leftover = targetAnnuo - raccoltoTotale;
-      const mesi = MESI.map((m) => ({
-        mese: m,
-        target: targetMap[`${key}|${m}`] || 0,
-        raccolto: r?.mesi[m] || 0,
-        delta: (targetMap[`${key}|${m}`] || 0) - (r?.mesi[m] || 0),
-      }));
-      return { raccoglitore, regione, targetAnnuo, raccoltoTotale, leftover, mesi };
+    return [...righe.values()].map(r => {
+      const raccoltoTotale = r.racc ? r.racc.totale : 0;
+      const mesi = MESI.map(m => {
+        const target = r.target[m] || 0;
+        const racc = r.racc ? r.racc.mesi[m] || 0 : 0;
+        return { mese: m, target, raccolto: racc, delta: target - racc };
+      });
+      return { raccoglitore: r.raccoglitore, regione: r.regione, targetAnnuo: r.annuo, raccoltoTotale, leftover: r.annuo - raccoltoTotale, mesi, nomi: [...r.nomi] };
     }).filter(row => {
       if (filters.regione.length > 0 && !filters.regione.includes(row.regione)) return false;
-      if (filters.raccoglitore.length > 0 && !filters.raccoglitore.includes(row.raccoglitore)) return false;
-      return true;
+      if (filters.raccoglitore.length > 0 && !row.nomi.some(n => filters.raccoglitore.includes(n))) return false;
+      return row.targetAnnuo || row.raccoltoTotale || row.mesi.some(m => m.target);
     }).sort((a, b) => a.regione.localeCompare(b.regione) || a.raccoglitore.localeCompare(b.raccoglitore));
-  }, [raccolto, targets, filters]);
+  }, [raccolto, targets, annui, filters]);
 
-  // Region table data
   const regioneData = useMemo(() => {
     if (!raccolto) return [];
     const map = {};
+    const ensure = (reg) => {
+      if (!map[reg]) { map[reg] = { regione: reg, totale: 0, mesi: {} }; for (const m of MESI) map[reg].mesi[m] = { target: 0, raccolto: 0 }; }
+      return map[reg];
+    };
     for (const t of targets) {
-      if (filters.regione.length > 0 && !filters.regione.includes(t.regione)) continue;
-      if (!map[t.regione]) { map[t.regione] = { regione: t.regione, totale: 0, mesi: {} }; for (const m of MESI) map[t.regione].mesi[m] = { target: 0, raccolto: 0 }; }
-      if (t.target) map[t.regione].mesi[t.mese].target += t.target;
+      if (!t.regione || (filters.regione.length > 0 && !filters.regione.includes(t.regione))) continue;
+      if (MESI.includes(t.mese) && !t.non_raccoglie) ensure(t.regione).mesi[t.mese].target += Number(t.target) || 0;
     }
     for (const r of raccolto.by_regione) {
       if (filters.regione.length > 0 && !filters.regione.includes(r.regione)) continue;
-      if (!map[r.regione]) { map[r.regione] = { regione: r.regione, totale: 0, mesi: {} }; for (const m of MESI) map[r.regione].mesi[m] = { target: 0, raccolto: 0 }; }
-      map[r.regione].totale += r.totale;
-      for (const m of MESI) map[r.regione].mesi[m].raccolto += r.mesi[m] || 0;
+      const x = ensure(r.regione);
+      x.totale += r.totale;
+      for (const m of MESI) x.mesi[m].raccolto += r.mesi[m] || 0;
     }
-    return Object.values(map).map((r) => ({
+    return Object.values(map).map(r => ({
       regione: r.regione,
       totale: r.totale,
-      mesi: MESI.map((m) => ({ mese: m, target: r.mesi[m].target, raccolto: r.mesi[m].raccolto, delta: r.mesi[m].target - r.mesi[m].raccolto })),
+      mesi: MESI.map(m => ({ mese: m, target: r.mesi[m].target, raccolto: r.mesi[m].raccolto, delta: r.mesi[m].target - r.mesi[m].raccolto })),
     }));
   }, [raccolto, targets, filters]);
 
-  // Impianti data
   const impiantiData = useMemo(() => {
     if (!raccolto) return [];
     const impTargetMap = {};
     for (const t of impiantoTargets) impTargetMap[`${t.impianto}|${t.mese}`] = t.target || 0;
     return raccolto.by_impianto
       .filter(i => filters.impianto.length === 0 || filters.impianto.includes(i.impianto))
-      .map((i) => ({
+      .map(i => ({
         impianto: i.impianto,
         totale: i.totale,
-        mesi: MESI.map((m) => ({
-          mese: m,
-          target: impTargetMap[`${i.impianto}|${m}`] || 0,
-          raccolto: i.mesi[m] || 0,
-          delta: (impTargetMap[`${i.impianto}|${m}`] || 0) - (i.mesi[m] || 0),
-        })),
+        mesi: MESI.map(m => ({ mese: m, target: impTargetMap[`${i.impianto}|${m}`] || 0, raccolto: i.mesi[m] || 0, delta: (impTargetMap[`${i.impianto}|${m}`] || 0) - (i.mesi[m] || 0) })),
       }));
   }, [raccolto, impiantoTargets, filters]);
 
-  // KPIs
   const kpis = useMemo(() => {
-    const selectedAnni = filters.anno || [];
-    const targetAnnuoTotale = selectedAnni.length === 1
-      ? getTargetForYear(Number(selectedAnni[0]))
-      : selectedAnni.length > 1
-        ? selectedAnni.reduce((s, a) => s + getTargetForYear(Number(a)), 0)
-        : getTargetForYear(new Date().getFullYear());
-
+    const targetAnnuoTotale = commessa && Number(commessa.target_annuo_t) > 0 ? Number(commessa.target_annuo_t) : (TARGET_BY_YEAR[anno] || 0);
     const raccoltoTotale = raccolto?.totale_raccolto || 0;
-    const leftoverTotale = targetAnnuoTotale - raccoltoTotale;
     const selectedMesi = filters.mese || [];
     const deltaMeseCorrente = mergedData.reduce((s, r) => {
-      if (selectedMesi.length > 0) {
-        return s + r.mesi.filter(m => selectedMesi.includes(m.mese)).reduce((ds, m) => ds + m.delta, 0);
-      }
-      const mc = getMeseCorrente();
-      const m = r.mesi.find((x) => x.mese === mc);
+      if (selectedMesi.length > 0) return s + r.mesi.filter(m => selectedMesi.includes(m.mese)).reduce((ds, m) => ds + m.delta, 0);
+      const m = r.mesi.find(x => x.mese === getMeseCorrente());
       return s + (m ? m.delta : 0);
     }, 0);
-    return { targetAnnuoTotale, raccoltoTotale, leftoverTotale, deltaMeseCorrente };
-  }, [mergedData, raccolto, filters]);
-
-  // Save handlers
-  const saveTargetAnnuo = async (raccoglitore, regione, value) => {
-    const existing = targets.filter((t) => t.raccoglitore === raccoglitore && t.regione === regione);
-    if (existing.length === 0) {
-      const created = await base44.entities.TargetMensile.bulkCreate(
-        MESI.map((m) => ({ raccoglitore, regione, mese: m, anno: new Date().getFullYear(), target: 0, target_annuo: value }))
-      );
-      setTargets((prev) => [...prev, ...created]);
-    } else {
-      await base44.entities.TargetMensile.updateMany({ raccoglitore, regione }, { $set: { target_annuo: value } });
-      setTargets((prev) => prev.map((t) => (t.raccoglitore === raccoglitore && t.regione === regione ? { ...t, target_annuo: value } : t)));
-    }
-  };
-
-  const saveTargetMensile = async (raccoglitore, regione, mese, value) => {
-    const existing = targets.find((t) => t.raccoglitore === raccoglitore && t.regione === regione && t.mese === mese);
-    if (existing) {
-      await base44.entities.TargetMensile.update(existing.id, { target: value });
-      setTargets((prev) => prev.map((t) => (t.id === existing.id ? { ...t, target: value } : t)));
-    } else {
-      const created = await base44.entities.TargetMensile.create({ raccoglitore, regione, mese, anno: new Date().getFullYear(), target: value, target_annuo: 0 });
-      setTargets((prev) => [...prev, created]);
-    }
-  };
+    return { targetAnnuoTotale, raccoltoTotale, leftoverTotale: targetAnnuoTotale - raccoltoTotale, deltaMeseCorrente };
+  }, [mergedData, raccolto, filters, commessa, anno]);
 
   const saveImpiantoTarget = async (impianto, mese, value) => {
-    const existing = impiantoTargets.find((t) => t.impianto === impianto && t.mese === mese);
+    const existing = impiantoTargets.find(t => t.impianto === impianto && t.mese === mese);
     if (existing) {
       await base44.entities.ImpiantoTarget.update(existing.id, { target: value });
-      setImpiantoTargets((prev) => prev.map((t) => (t.id === existing.id ? { ...t, target: value } : t)));
+      setImpiantoTargets(prev => prev.map(t => (t.id === existing.id ? { ...t, target: value } : t)));
     } else {
-      const created = await base44.entities.ImpiantoTarget.create({ impianto, mese, anno: new Date().getFullYear(), target: value });
-      setImpiantoTargets((prev) => [...prev, created]);
+      const created = await base44.entities.ImpiantoTarget.create({ impianto, mese, anno, target: value });
+      setImpiantoTargets(prev => [...prev, created]);
     }
   };
 
-  const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
-  const resetFilters = () => setFilters({ anno: [], mese: [], regione: [], raccoglitore: [], impianto: [] });
-
-  // Nomi normalizzati degli impianti doppio ruolo / impianto (da escludere dai raccoglitori)
-  const excludedRaccNorms = useMemo(() => new Set(
-    fornitoriSec.filter(f => f.ruolo === 'doppio_ruolo' || f.ruolo === 'impianto').map(f => normalizzaRagioneSociale(f.nome))
-  ), [fornitoriSec]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20 text-muted-foreground">
-        <Loader2 className="w-6 h-6 animate-spin mr-2" /> Caricamento dati...
-      </div>
-    );
-  }
+  const hasFilters = Object.values(filters).some(v => (Array.isArray(v) ? v.length > 0 : v));
+  const resetFilters = () => setFilters({ mese: [], regione: [], raccoglitore: [], impianto: [] });
 
   return (
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-heading font-bold">Status & Target Management</h1>
-          <p className="text-muted-foreground mt-1">Monitoraggio avanzamento commessa PFU Ecotyre — Target, raccolto e scostamenti in tempo reale.</p>
+          <h1 className="text-2xl lg:text-3xl font-heading font-bold">Target & Status</h1>
+          <p className="text-muted-foreground mt-1">L'unico punto in cui si scrivono i target: contratto Ecotyre, raccoglitori, impianti e stoccaggi. Tutti i moduli leggono da qui.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent">
-            <RefreshCw className="w-4 h-4" /> Aggiorna
-          </button>
-          <ExportButtons onExcel={exportExcel} onPDF={() => exportPDF(kpis, mergedData, regioneData, impiantiData)} onPPT={() => exportPPT(kpis, mergedData, regioneData, impiantiData)} />
-        </div>
-      </div>
-
-      {/* Filtri */}
-      <div className="border rounded-lg p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri</span>
-          {hasFilters && (
-            <button onClick={resetFilters} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-              <X className="w-3 h-3" /> Reset
-            </button>
+          <select value={anno} onChange={e => setAnno(Number(e.target.value))} className="border rounded-md px-3 py-2 text-sm bg-background" title="Anno">
+            {ANNI_TARGET.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+          {scheda === 'andamento' && (
+            <>
+              <button onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent">
+                <RefreshCw className="w-4 h-4" /> Aggiorna
+              </button>
+              <ExportButtons onExcel={exportExcel} onPDF={() => exportPDF(kpis, mergedData, regioneData, impiantiData)} onPPT={() => exportPPT(kpis, mergedData, regioneData, impiantiData)} />
+            </>
           )}
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Anno</label>
-            <MultiSelect allLabel="Tutti gli anni" options={(filterOptions.anni || []).map(String)} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v.map(Number) }))} />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Mese</label>
-            <MultiSelect allLabel="Tutti i mesi" options={MESI} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Regione</label>
-            <MultiSelect allLabel="Tutte le regioni" options={filterOptions.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Raccoglitore</label>
-            <MultiSelect allLabel="Tutti i raccoglitori" options={filterOptions.raccoglitori || []} selected={filters.raccoglitore} onChange={v => setFilters(p => ({ ...p, raccoglitore: v }))} />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Impianto</label>
-            <MultiSelect allLabel="Tutti gli impianti" options={filterOptions.impianti || []} selected={filters.impianto} onChange={v => setFilters(p => ({ ...p, impianto: v }))} />
-          </div>
-        </div>
       </div>
 
-      <Tabs defaultValue="dashboard">
+      <Tabs value={scheda} onValueChange={v => setParams({ tab: v }, { replace: true })}>
         <TabsList>
-          <TabsTrigger value="dashboard">Dashboard Target</TabsTrigger>
-          <TabsTrigger value="gestione">Gestione Target Raccoglitori</TabsTrigger>
-          <TabsTrigger value="primaria">Raccoglitori Primaria</TabsTrigger>
+          <TabsTrigger value="andamento">Andamento</TabsTrigger>
+          <TabsTrigger value="raccoglitori">Target raccoglitori</TabsTrigger>
+          <TabsTrigger value="commessa">Commessa Ecotyre</TabsTrigger>
+          <TabsTrigger value="impianti">Impianti e stoccaggi</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="dashboard" className="mt-4 space-y-6">
-          <KpiCards kpis={kpis} />
-
-          <div>
-            <h2 className="text-lg font-heading font-semibold mb-3">Target & Performance Raccoglitori</h2>
-            <TargetTable data={mergedData} onSaveTargetAnnuo={saveTargetAnnuo} onSaveTargetMensile={saveTargetMensile} />
-          </div>
-
-          <TargetChart data={mergedData} mese={meseSelezionato} onMeseChange={setMeseSelezionato} />
-
-          <div>
-            <h2 className="text-lg font-heading font-semibold mb-3">Target e Scostamento per Regione</h2>
-            <RegionTable data={regioneData} />
-          </div>
-
-          <div>
-            <h2 className="text-lg font-heading font-semibold mb-3">Progressivo e Avanzamento Impianti</h2>
-            <ImpiantiTable data={impiantiData} onSaveTarget={saveImpiantoTarget} />
-          </div>
-        </TabsContent>
-
-        <TabsContent value="gestione" className="mt-4 space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <p className="text-sm text-muted-foreground">
-              Aggiorna i target annuali assegnati a ciascun raccoglitore. Questi valori sono usati per il calcolo dello scostamento per classi nel modulo Terminati Rete.
-            </p>
-            <div className="flex items-center gap-2">
-              <select
-                value={annoTargetRacc}
-                onChange={e => setAnnoTargetRacc(Number(e.target.value))}
-                className="border rounded-md px-3 py-2 text-sm"
-              >
-                <option value={2025}>2025</option>
-                <option value={2026}>2026</option>
-                <option value={2027}>2027</option>
-              </select>
-              {isAdmin && (
-                <button onClick={handleAddRaccoglitore} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent">
-                  <Plus className="w-4 h-4" /> Aggiungi raccoglitore
-                </button>
-              )}
+        <TabsContent value="andamento" className="mt-4 space-y-6">
+          <div className="border rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri {anno}</span>
+              {hasFilters && <button onClick={resetFilters} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"><X className="w-3 h-3" /> Reset</button>}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Mese</label>
+                <MultiSelect allLabel="Tutti i mesi" options={MESI} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Regione</label>
+                <MultiSelect allLabel="Tutte le regioni" options={filterOptions.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Raccoglitore</label>
+                <MultiSelect allLabel="Tutti i raccoglitori" options={filterOptions.raccoglitori || []} selected={filters.raccoglitore} onChange={v => setFilters(p => ({ ...p, raccoglitore: v }))} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Impianto</label>
+                <MultiSelect allLabel="Tutti gli impianti" options={filterOptions.impianti || []} selected={filters.impianto} onChange={v => setFilters(p => ({ ...p, impianto: v }))} />
+              </div>
             </div>
           </div>
-          <TargetRaccoglitoriTable
-            data={raccoglitoreTargets}
-            anno={annoTargetRacc}
-            onSave={saveRaccoglitoreTarget}
-            isAdmin={isAdmin}
-            excludedNorms={excludedRaccNorms}
-          />
-        </TabsContent>
 
-        <TabsContent value="primaria" className="mt-4 space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <p className="text-sm text-muted-foreground">
-              Target mensili dei raccoglitori di fase primaria (Ecorecuperi, Pneuservice, Smoco…). Il raccolto è aggregato automaticamente da Primaria Rete + ACI.
-            </p>
-            <div className="flex items-center gap-2">
-              <select value={annoPrimaria} onChange={e => setAnnoPrimaria(Number(e.target.value))} className="border rounded-md px-3 py-2 text-sm">
-                <option value={2025}>2025</option>
-                <option value={2026}>2026</option>
-                <option value={2027}>2027</option>
-              </select>
-              {isAdmin && (
-                <button onClick={handleAddRaccPrimaria} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent">
-                  <Plus className="w-4 h-4" /> Aggiungi raccoglitore primaria
-                </button>
-              )}
-            </div>
-          </div>
-          {loadingPrimaria ? (
-            <div className="text-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin inline mr-2" /> Calcolo consuntivo…</div>
+          {loading || !raccolto ? (
+            <div className="flex items-center justify-center py-20 text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin mr-2" /> Caricamento dati…</div>
           ) : (
-            <TargetRaccoglitoriPrimariaTable
-              righe={raccPrimaria.righe || []}
-              anno={annoPrimaria}
-              onSave={saveRaccPrimariaTarget}
-              isAdmin={isAdmin}
-            />
+            <>
+              <KpiCards kpis={kpis} />
+              <div>
+                <h2 className="text-lg font-heading font-semibold mb-3">Raccolta per regione e contratto</h2>
+                <AndamentoRegioni raccolto={raccolto} commessa={commessa} anno={anno} />
+              </div>
+              <div>
+                <h2 className="text-lg font-heading font-semibold mb-1">Target e raccolto per raccoglitore</h2>
+                <p className="text-xs text-muted-foreground mb-3">Solo lettura: i target si modificano nella scheda Target raccoglitori.</p>
+                <TargetTable data={mergedData} />
+              </div>
+              <TargetChart data={mergedData} mese={meseSelezionato} onMeseChange={setMeseSelezionato} />
+              <div>
+                <h2 className="text-lg font-heading font-semibold mb-3">Target e scostamento per regione, mese per mese</h2>
+                <RegionTable data={regioneData} />
+              </div>
+              <div>
+                <h2 className="text-lg font-heading font-semibold mb-3">Progressivo e avanzamento impianti</h2>
+                <ImpiantiTable data={impiantiData} onSaveTarget={saveImpiantoTarget} />
+              </div>
+            </>
           )}
+        </TabsContent>
+
+        <TabsContent value="raccoglitori" className="mt-4">
+          {scheda === 'raccoglitori' && <TargetRaccoglitoriGrid anno={anno} isAdmin={isAdmin} user={user} />}
+        </TabsContent>
+
+        <TabsContent value="commessa" className="mt-4">
+          {scheda === 'commessa' && <CommessaEcotyreForm anno={anno} isAdmin={isAdmin} user={user} />}
+        </TabsContent>
+
+        <TabsContent value="impianti" className="mt-4">
+          {scheda === 'impianti' && <TargetAnnuali incorporato anno={anno} />}
         </TabsContent>
       </Tabs>
     </div>

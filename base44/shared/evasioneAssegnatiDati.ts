@@ -5,7 +5,8 @@
 import { fetchAll } from "./fetchAll.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { oggiRoma } from "./reportSettimanali.ts";
-import { normalizzaPrimaria, normalizzaAssegnato, normalizzaCancellato, trovaTarget, controllaLista, indiceMese, MESI } from "./evasioneAssegnati.ts";
+import { normalizzaPrimaria, normalizzaAssegnato, normalizzaCancellato, controllaLista, indiceMese, MESI } from "./evasioneAssegnati.ts";
+import { targetMensiliAnno, targetRaccoglitoreMese } from "./targetRaccoglitori.ts";
 
 const stato = (r) => String(r.stato || '').toLowerCase().trim();
 const terminato = (r) => stato(r) === 'terminato';
@@ -78,7 +79,8 @@ export function indiceSicurezza() {
 /**
  * Esegue il controllo sulle liste indicate.
  * Senza "forza" una lista gia' controllata sull'ultimo caricamento delle
- * primarie viene saltata: il controllo resta uno per caricamento.
+ * primarie viene saltata: il controllo resta uno per caricamento. Si ripete
+ * invece se nel frattempo e' cambiato il target del mese in Target & Status.
  */
 export async function eseguiControlli(base44, { liste, dati, forza = false }) {
   const svc = base44.asServiceRole.entities;
@@ -90,13 +92,14 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
 
   for (const lista of liste) {
     const anno = Number(lista.anno), mese = Number(lista.mese);
+    if (!targetPerAnno.has(anno)) targetPerAnno.set(anno, await targetMensiliAnno(base44, anno));
+    const target = targetRaccoglitoreMese(targetPerAnno.get(anno), lista.raccoglitore_nome, MESI[mese - 1]);
+    const targetKg = target && target.target_kg > 0 ? target.target_kg : null;
     if (!forza) {
       const ultimo = await svc.ControlloEvasione.filter({ lista_id: lista.id }, '-eseguito_il', 1);
-      if (ultimo.length && ultimo[0].primarie_caricate_il === primarieIl && String(ultimo[0].eseguito_il) >= String(lista.caricata_il)) continue;
+      const stessoTarget = ultimo.length && (Number(ultimo[0].target_kg) || null) === targetKg;
+      if (ultimo.length && stessoTarget && ultimo[0].primarie_caricate_il === primarieIl && String(ultimo[0].eseguito_il) >= String(lista.caricata_il)) continue;
     }
-    if (!targetPerAnno.has(anno)) targetPerAnno.set(anno, await fetchAll(svc.TargetRaccoglitorePrimaria, { anno }));
-    const targets = targetPerAnno.get(anno).filter(t => t.mese === MESI[mese - 1]);
-    const target = trovaTarget(targets, lista.raccoglitore_nome);
 
     const altreListe = tutteLeListe
       .filter(l => Number(l.anno) === anno && Number(l.mese) === mese)
@@ -110,7 +113,7 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
       assegnati: dati.assegnati,
       cancellati: dati.cancellati || [],
       altreListe,
-      targetKg: target && Number(target.target_kg) > 0 ? Number(target.target_kg) : null,
+      targetKg,
     });
 
     const record = await svc.ControlloEvasione.create({

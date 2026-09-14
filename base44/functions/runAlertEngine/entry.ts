@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetrics } from "../../shared/primarieReteAnalytics.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { aggregaTargetMensili } from "../../shared/targetRaccoglitori.ts";
 
 // Motore di controllo: scansiona i record di un modulo e genera Alert per le regole violate.
 // Payload: { modulo, record_ids?, solo_aperti?: boolean }
@@ -68,7 +69,8 @@ export default async function(req) {
 
     // --- Controlli aggregati per primarie_rete (province inattive + mix classi) ---
     if (modulo === 'primarie_rete') {
-      const targets = await base44.asServiceRole.entities.TargetMensile.list('-created_date', 5000);
+      // Target dell'anno in corso, sommati per raccoglitore, regione e mese.
+      const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter({ anno: new Date().getFullYear() }, '-created_date', 5000));
       const aggregateAlerts = checkAggregateRules(records, regole, existingKeys, targets);
       newAlerts.push(...aggregateAlerts);
     }

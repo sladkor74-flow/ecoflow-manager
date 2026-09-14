@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { raccoglitoriAttivi, trovaTarget, situazioneCanali, MESI } from "../../shared/evasioneAssegnati.ts";
+import { raccoglitoriAttivi, situazioneCanali, MESI } from "../../shared/evasioneAssegnati.ts";
+import { targetMensiliAnno, targetRaccoglitoreMese } from "../../shared/targetRaccoglitori.ts";
 import { oggiRoma } from "../../shared/reportSettimanali.ts";
 import { caricaDati, cancellaVecchi, eseguiControlli, indiceSicurezza, ultimoCaricamentoPrimarie } from "../../shared/evasioneAssegnatiDati.ts";
 
@@ -34,16 +35,17 @@ export default async function(req) {
     const [dati, liste, targetAnno, primarieIl] = await Promise.all([
       caricaDati(base44),
       fetchAll(svc.ListaAssegnati, { anno }),
-      fetchAll(svc.TargetRaccoglitorePrimaria, { anno }),
+      targetMensiliAnno(base44, anno),
       ultimoCaricamentoPrimarie(base44),
     ]);
     const listeMese = liste.filter(l => Number(l.mese) === mese);
 
-    // Controlli rimasti indietro rispetto all'ultimo caricamento delle primarie.
+    // Controlli rimasti indietro rispetto all'ultimo caricamento delle primarie
+    // o a un target cambiato in Target & Status.
     await eseguiControlli(base44, { liste: listeMese, dati, forza: false });
 
     const oggi = oggiRoma();
-    const targetsMese = targetAnno.filter(t => t.mese === MESI[mese - 1]);
+
     // Chi non ha formulari terminati nell'anno non raccoglie: i suoi ordini
     // assegnati sul portale finiscono nelle liste di altri e si segnalano a parte.
     const attiviAnno = new Set(dati.terminati.filter(t => t.fine && t.fine.slice(0, 4) === String(anno)).map(t => t.chiaveTrasp));
@@ -68,10 +70,8 @@ export default async function(req) {
 
     const righe = [];
     for (const r of raccoglitori) {
-      const target = trovaTarget(targetsMese, r.nome);
-      // Il nome con cui il raccoglitore compare nei target degli altri mesi: un
-      // nuovo target va salvato con quello, per non creare un doppione.
-      const altroMese = trovaTarget(targetAnno, r.nome);
+      // Target del mese da Target & Status, sommando le regioni.
+      const target = targetRaccoglitoreMese(targetAnno, r.nome, MESI[mese - 1]);
       // Canali sempre separati: target e lista riguardano la sola rete.
       const { canali, alert: alertCanali } = situazioneCanali({ chiave: r.chiave, anno, mese, oggi, terminati: dati.terminati, assegnati: dati.assegnati });
       // Gli ordini degli anni precedenti hanno priorita' assoluta: se sul portale
@@ -98,10 +98,9 @@ export default async function(req) {
       righe.push({
         chiave: r.chiave,
         nome: r.nome,
-        target_kg: target ? Number(target.target_kg) || 0 : null,
+        target_kg: target && target.target_kg > 0 ? target.target_kg : null,
+        target_regioni: target ? target.regioni : [],
         non_raccoglie: !!(target && target.non_raccoglie),
-        target_id: target ? target.id : null,
-        target_nome: target ? target.raccoglitore : (altroMese ? altroMese.raccoglitore : r.nome),
         raccolto_kg: canali.rete.kg,
         assegnati_ora: assegnatiOra,
         canali,

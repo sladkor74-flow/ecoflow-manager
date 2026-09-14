@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -21,27 +22,14 @@ function Barra({ valore, massimo }) {
   return <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden"><div className={`h-full rounded-full ${colore}`} style={{ width: `${perc}%` }} /></div>;
 }
 
-function CampoTarget({ riga, isAdmin, onSalva }) {
-  const [valore, setValore] = useState(riga.target_kg ? String(riga.target_kg / 1000) : '');
-  const [salvando, setSalvando] = useState(false);
-  useEffect(() => { setValore(riga.target_kg ? String(riga.target_kg / 1000) : ''); }, [riga.target_kg]);
-  if (!isAdmin) return <span className="tabular-nums">{riga.target_kg ? tonnellate(riga.target_kg) + ' t' : '—'}</span>;
-  const salva = async () => {
-    const t = Number(String(valore).replace(',', '.'));
-    const kg = valore === '' ? 0 : Math.round(t * 1000);
-    if (isNaN(t) || kg === (riga.target_kg || 0)) return;
-    setSalvando(true);
-    await onSalva(riga, kg);
-    setSalvando(false);
-  };
+// Il target si legge da Target & Status, dove si scrive: qui e' solo mostrato.
+function CampoTarget({ riga }) {
+  const dettaglio = (riga.target_regioni || []).filter(r => r.target_t || r.non_raccoglie)
+    .map(r => `${[r.regione, r.impianto].filter(Boolean).join(' verso ')}: ${r.non_raccoglie ? 'non raccoglie' : `${r.target_t.toLocaleString('it-IT')} t`}`).join('\n');
   return (
-    <div className="flex items-center gap-1">
-      <input value={valore} onChange={(e) => setValore(e.target.value)} onBlur={salva} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-        placeholder="—" inputMode="decimal"
-        className={`w-20 px-2 py-1 rounded border bg-card text-sm text-right tabular-nums ${riga.target_kg ? '' : 'border-dashed'}`} />
-      <span className="text-xs text-muted-foreground">t</span>
-      {salvando && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
-    </div>
+    <Link to="/target-status?tab=raccoglitori" className="tabular-nums hover:underline" title={`${dettaglio ? dettaglio + '\n' : ''}Si modifica in Target & Status`}>
+      {riga.target_kg ? `${tonnellate(riga.target_kg)} t` : <span className="text-muted-foreground">—</span>}
+    </Link>
   );
 }
 
@@ -79,7 +67,7 @@ function primoFeriale(anno, mese) {
   return d.toISOString().slice(0, 10);
 }
 
-function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina, onSalvaTarget, onNonRaccoglie }) {
+function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina }) {
   const input = useRef(null);
   const c = riga.controllo;
   const l = riga.lista;
@@ -89,7 +77,7 @@ function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina
         <div className="font-medium">{riga.nome}</div>
         <div className="text-xs text-muted-foreground">rete: {riga.assegnati_ora} {riga.assegnati_ora === 1 ? 'ordine assegnato' : 'ordini assegnati'} ora</div>
       </td>
-      <td className="px-4 py-3"><CampoTarget riga={riga} isAdmin={isAdmin} onSalva={onSalvaTarget} /></td>
+      <td className="px-4 py-3"><CampoTarget riga={riga} /></td>
       <td className="px-4 py-3 min-w-[130px]">
         <div className="tabular-nums text-sm">{tonnellate(riga.raccolto_kg)} t{riga.target_kg ? <span className="text-muted-foreground"> · {Math.round((riga.raccolto_kg / riga.target_kg) * 100)}%</span> : ''}</div>
         <Barra valore={riga.raccolto_kg} massimo={riga.target_kg} />
@@ -105,15 +93,9 @@ function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina
             <div className="text-xs text-muted-foreground">{l.richieste} richieste{l.prioritarie ? ` · ${l.prioritarie} prioritarie` : ''} · inviata il {dataIt(l.inviata_il || l.caricata_il)}</div>
           </>
         ) : riga.non_raccoglie ? (
-          <div className="text-xs text-muted-foreground">
-            Non raccoglie questo mese
-            {isAdmin && <button onClick={() => onNonRaccoglie(riga, false)} className="block text-primary hover:underline">annulla</button>}
-          </div>
+          <span className="text-xs text-muted-foreground" title="Indicato in Target & Status">Non raccoglie questo mese</span>
         ) : (
-          <div>
-            <span className="text-sm text-muted-foreground">{riga.assegnati_ora ? 'Da caricare' : '—'}</span>
-            {isAdmin && <button onClick={() => onNonRaccoglie(riga, true)} className="block text-xs text-muted-foreground hover:underline">non raccoglie questo mese</button>}
-          </div>
+          <span className="text-sm text-muted-foreground">{riga.assegnati_ora ? 'Da caricare' : '—'}</span>
         )}
       </td>
       <td className="px-4 py-3 text-sm tabular-nums whitespace-nowrap">
@@ -232,28 +214,6 @@ export default function EvasioneAssegnati({ isAdmin }) {
     }
   };
 
-  // Il target e' lo stesso di Target & Status, scheda Raccoglitori Primaria.
-  const salvaTarget = async (riga, kg) => {
-    try {
-      if (riga.target_id) await base44.entities.TargetRaccoglitorePrimaria.update(riga.target_id, { target_kg: kg });
-      else await base44.entities.TargetRaccoglitorePrimaria.create({ raccoglitore: riga.target_nome || riga.nome, mese: MESI[mese - 1], anno, target_kg: kg });
-      if (riga.lista) await base44.functions.invoke('controllaEvasioneAssegnati', { forza: true, raccoglitore_chiave: riga.chiave });
-      await carica(true);
-    } catch (e) {
-      toast({ title: 'Target non salvato', description: e.message || String(e), variant: 'destructive' });
-    }
-  };
-
-  // "Non raccoglie questo mese" si registra sul target del mese, in Target & Status.
-  const segnaNonRaccoglie = async (riga, valore) => {
-    try {
-      if (riga.target_id) await base44.entities.TargetRaccoglitorePrimaria.update(riga.target_id, { non_raccoglie: valore });
-      else await base44.entities.TargetRaccoglitorePrimaria.create({ raccoglitore: riga.target_nome || riga.nome, mese: MESI[mese - 1], anno, target_kg: 0, non_raccoglie: valore });
-      await carica(true);
-    } catch (e) {
-      toast({ title: 'Modifica non salvata', description: e.message || String(e), variant: 'destructive' });
-    }
-  };
 
   const controllaOra = async () => {
     setInControllo(true);
@@ -335,7 +295,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
           Carica per ogni raccoglitore la lista inviata a inizio mese: uno o più file Excel insieme, con la colonna ID degli assegnati, con in giallo
           le prioritarie oppure in un file con PRIORITA' nel nome. Chi deve evadere lo decide la lista, anche se sul portale l'ordine è assegnato a un
           altro trasportatore. L'ordine si valuta per provincia: prima le prioritarie della lista, anche quando sono forzature chieste dal consorzio, poi con priorità assoluta le richieste immesse negli anni precedenti, poi per data di immissione. Il controllo si ripete da solo a ogni caricamento delle primarie, sulla data di fine trasporto.
-          Il target è quello di Target & Status. Caricando la lista del mese successivo, quella precedente e i suoi controlli si cancellano.
+          Target e "non raccoglie questo mese" si scrivono in Target & Status, scheda Target raccoglitori: se cambiano, il controllo si aggiorna da solo. Caricando la lista del mese successivo, quella precedente e i suoi controlli si cancellano.
           Lista, target e previsione riguardano la sola rete. ACI ed extra raccolta sono mostrati a parte: una richiesta ACI aperta o una richiesta
           di extra raccolta inserita come assegnata nel modulo Extra Raccolta genera un alert. Una richiesta resta assegnata finché non viene chiusa
           o cancellata sul portale: gli ultimi giorni prima dell'estrazione del file, con ritiri ancora da chiudere, non generano alert sulle richieste aperte. Nel dettaglio trovi quante richieste vale il target
@@ -386,7 +346,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
               <tbody>
                 {principali.map(r => (
                   <RigaRaccoglitore key={r.chiave} riga={r} isAdmin={isAdmin} occupato={occupato === r.chiave}
-                    onCarica={caricaLista} onApri={setAperto} onElimina={eliminaLista} onSalvaTarget={salvaTarget} onNonRaccoglie={segnaNonRaccoglie} />
+                    onCarica={caricaLista} onApri={setAperto} onElimina={eliminaLista} />
                 ))}
                 {principali.length === 0 && (
                   <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">Nessun raccoglitore con liste, raccolte o richieste aperte in questo mese.</td></tr>
@@ -402,7 +362,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
                 )}
                 {mostraAltri && altri.map(r => (
                   <RigaRaccoglitore key={r.chiave} riga={r} isAdmin={isAdmin} occupato={occupato === r.chiave}
-                    onCarica={caricaLista} onApri={setAperto} onElimina={eliminaLista} onSalvaTarget={salvaTarget} onNonRaccoglie={segnaNonRaccoglie} />
+                    onCarica={caricaLista} onApri={setAperto} onElimina={eliminaLista} />
                 ))}
               </tbody>
             </table>

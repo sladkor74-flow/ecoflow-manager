@@ -59,7 +59,8 @@ export async function computeRaccoltoData(base44, filters: any = {}) {
     fetchAll(base44.asServiceRole.entities.PrimariaAci)
   ]);
 
-  const all = [...rete, ...aci];
+  // Come in tutto il gestionale: solo i terminati, nel mese della fine trasporto.
+  const all = [...rete, ...aci].filter((p: any) => String(p.stato || '').toLowerCase().trim() === 'terminato' && p.trasporto_finito_il);
 
   // Normalize filters to arrays
   const toArray = (v: any) => Array.isArray(v) ? v : (v != null ? [v] : []);
@@ -72,8 +73,7 @@ export async function computeRaccoltoData(base44, filters: any = {}) {
   // Filter options from ALL records
   const filterOptions = {
     anni: [...new Set(all.map((p: any) => {
-      const d = p.ordine_chiuso_il ? new Date(p.ordine_chiuso_il)
-        : p.trasporto_finito_il ? new Date(p.trasporto_finito_il) : null;
+      const d = new Date(p.trasporto_finito_il);
       return d && !isNaN(d.getTime()) ? d.getFullYear() : null;
     }).filter(Boolean))].sort((a: any, b: any) => b - a),
     mesi: MESI,
@@ -86,8 +86,7 @@ export async function computeRaccoltoData(base44, filters: any = {}) {
   const filtered = all.filter((p: any) => {
     const raccoglitore = (p.trasportatore || 'N/D').trim();
     const regione = PROV_TO_REGION[(p.provincia || '').toUpperCase().trim()] || 'Altro';
-    const dataChiusura = p.ordine_chiuso_il ? new Date(p.ordine_chiuso_il)
-      : p.trasporto_finito_il ? new Date(p.trasporto_finito_il) : null;
+    const dataChiusura = new Date(p.trasporto_finito_il);
     const meseIdx = dataChiusura ? dataChiusura.getMonth() : -1;
     const mese = meseIdx >= 0 ? MESI[meseIdx] : 'N/D';
     const anno = dataChiusura ? dataChiusura.getFullYear() : null;
@@ -109,8 +108,7 @@ export async function computeRaccoltoData(base44, filters: any = {}) {
   for (const p of filtered) {
     const raccoglitore = (p.trasportatore || 'N/D').trim();
     const regione = PROV_TO_REGION[(p.provincia || '').toUpperCase().trim()] || 'Altro';
-    const dataChiusura = p.ordine_chiuso_il ? new Date(p.ordine_chiuso_il)
-      : p.trasporto_finito_il ? new Date(p.trasporto_finito_il) : null;
+    const dataChiusura = new Date(p.trasporto_finito_il);
     const meseIdx = dataChiusura ? dataChiusura.getMonth() : -1;
     const mese = meseIdx >= 0 ? MESI[meseIdx] : 'N/D';
     const peso = (p.peso_effettivo || 0) / 1000; // kg -> ton

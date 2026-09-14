@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { PROV_TO_REGION, MESI } from "../../shared/raccoltoCalculator.ts";
+import { aggregaTargetMensili } from "../../shared/targetRaccoglitori.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Controlla i target mensili di raccolta e genera alert per target non raggiunti o a rischio.
@@ -22,9 +23,10 @@ export default async function(req) {
     const creaAlerts = body.crea_alerts !== false;
 
     // Carica target mensili per il periodo
-    const targets = await base44.asServiceRole.entities.TargetMensile.filter(
+    // Un raccoglitore puo' avere piu' righe, una per impianto: si sommano.
+    const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter(
       { mese, anno }, '-created_date', 5000
-    );
+    ));
 
     if (!targets || targets.length === 0) {
       return Response.json({

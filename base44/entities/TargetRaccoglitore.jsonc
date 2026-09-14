@@ -10,13 +10,25 @@
       "type": "string",
       "description": "Regione per split regionali di raccoglitori multi-regione (es. Smoco in Puglia/Calabria/Basilicata). Null = raccoglitore puro."
     },
+    "impianto": {
+      "type": "string",
+      "description": "Impianto di destinazione a cui e' legato il target (come nel Report Generale): un raccoglitore puo' avere piu' righe, una per impianto"
+    },
     "anno": {
       "type": "number",
       "description": "Anno di riferimento"
     },
     "target_tonnellate": {
       "type": "number",
-      "description": "Target annuo assegnato (ton)"
+      "description": "Target annuo assegnato (t), definito a inizio anno o alla contrattualizzazione"
+    },
+    "attivo_dal": {
+      "type": "string",
+      "description": "Giorno di inizio del contratto (aaaa-mm-gg), se non da inizio anno"
+    },
+    "storico_json": {
+      "type": "string",
+      "description": "Modifiche nel tempo: [{ il, da, nota, prima: { target_tonnellate, attivo_dal } }]"
     }
   },
   "required": [

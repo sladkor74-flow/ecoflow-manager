@@ -1,6 +1,8 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { computeRaccoltoData, MESI } from "../../shared/raccoltoCalculator.ts";
+import { aggregaTargetMensili, aggregaTargetAnnui } from "../../shared/targetRaccoglitori.ts";
+import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 
 // Esporta i dati di Status & Target in un file Excel (3 fogli: Raccoglitori, Regioni, Impianti).
 // Payload: { anno? }
@@ -12,23 +14,24 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const anno = body.anno || new Date().getFullYear();
+    const anno = Number(body.anno) || new Date().getFullYear();
 
-    // 1. Calcola raccolto
-    const raccolto = await computeRaccoltoData(base44);
+    // 1. Calcola raccolto dell'anno
+    const raccolto = await computeRaccoltoData(base44, { anno: [anno] });
 
-    // 2. Leggi target
-    const targets = await base44.asServiceRole.entities.TargetMensile.list('-created_date', 10000);
+    // 2. Leggi target dell'anno da Target & Status
+    const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter({ anno }, '-created_date', 10000));
+    const annui = aggregaTargetAnnui(await base44.asServiceRole.entities.TargetRaccoglitore.filter({ anno }, '-created_date', 5000));
     const impiantoTargets = await base44.asServiceRole.entities.ImpiantoTarget.list('-created_date', 10000);
 
-    // 3. Mappe target
+    // 3. Mappe target, per nome normalizzato e regione
     const targetMap = {};
     const targetAnnuoMap = {};
     for (const t of targets) {
-      const key = `${t.raccoglitore}|||${t.regione}`;
+      const key = `${normalizzaRagioneSociale(t.raccoglitore)}|||${t.regione}`;
       targetMap[`${key}|${t.mese}`] = t.target || 0;
-      if (t.target_annuo != null) targetAnnuoMap[key] = t.target_annuo;
     }
+    for (const a of annui) targetAnnuoMap[`${normalizzaRagioneSociale(a.raccoglitore)}|||${a.regione}`] = a.target_tonnellate;
     const impiantoTargetMap = {};
     for (const t of impiantoTargets) {
       impiantoTargetMap[`${t.impianto}|${t.mese}`] = t.target || 0;
@@ -39,7 +42,7 @@ export default async function(req) {
       ...MESI.flatMap(m => [`${m} T`, `${m} R`, `${m} Δ`])]];
 
     for (const r of raccolto.by_raccoglitore) {
-      const key = `${r.raccoglitore}|||${r.regione}`;
+      const key = `${normalizzaRagioneSociale(r.raccoglitore)}|||${r.regione}`;
       const targetAnnuo = targetAnnuoMap[key] || 0;
       const leftover = targetAnnuo - r.totale;
       const row = [r.regione, r.raccoglitore, targetAnnuo, +r.totale.toFixed(2), +leftover.toFixed(2)];

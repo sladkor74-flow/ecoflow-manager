@@ -73,8 +73,12 @@ function SectionCard({ icon: Icon, title, subtitle, count, onAdd, showAdd, child
   );
 }
 
-export default function TargetAnnuali() {
-  const [anno, setAnno] = useState(ANNO_DEFAULT);
+// In Target & Status la pagina e' incorporata nella scheda Impianti e stoccaggi:
+// l'anno arriva dalla pagina e i raccoglitori si gestiscono nella scheda Target
+// raccoglitori.
+export default function TargetAnnuali({ incorporato = false, anno: annoEsterno }) {
+  const [annoInterno, setAnno] = useState(ANNO_DEFAULT);
+  const anno = annoEsterno || annoInterno;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -125,7 +129,9 @@ export default function TargetAnnuali() {
           toCreate.push({ raccoglitore: nome, anno, target_tonnellate: 0 });
         }
       }
-      if (toCreate.length > 0) {
+      // Incorporata in Target & Status non crea target dei raccoglitori: li gestisce la
+      // scheda Target raccoglitori.
+      if (toCreate.length > 0 && !incorporato) {
         try {
           const created = await base44.entities.TargetRaccoglitore.bulkCreate(toCreate);
           for (const c of created) merged.push(c);
@@ -275,17 +281,25 @@ export default function TargetAnnuali() {
   }
 
   return (
-    <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-6">
+    <div className={incorporato ? "space-y-6" : "p-4 lg:p-8 max-w-7xl mx-auto space-y-6"}>
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl lg:text-3xl font-heading font-bold">Target Annuali</h1>
-          <p className="text-muted-foreground mt-1">Fonte unica per target raccoglitori, impianti e plafond stoccaggi.</p>
-        </div>
+        {incorporato ? (
+          <p className="text-sm text-muted-foreground">Target annuali degli impianti e plafond degli stoccaggi per il {anno}.</p>
+        ) : (
+          <div>
+            <h1 className="text-2xl lg:text-3xl font-heading font-bold">Target Annuali</h1>
+            <p className="text-muted-foreground mt-1">Fonte unica per target raccoglitori, impianti e plafond stoccaggi.</p>
+          </div>
+        )}
         <div className="flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-muted-foreground" />
-          <select value={anno} onChange={e => setAnno(Number(e.target.value))} className="border rounded px-3 py-1.5 text-sm bg-background">
-            {ANNI.map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
+          {!incorporato && (
+            <>
+              <Calendar className="w-4 h-4 text-muted-foreground" />
+              <select value={anno} onChange={e => setAnno(Number(e.target.value))} className="border rounded px-3 py-1.5 text-sm bg-background">
+                {ANNI.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </>
+          )}
           {saving && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
           <Button size="sm" variant="outline" onClick={runMigrazione} disabled={migrating}>
             {migrating ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <RefreshCw className="w-4 h-4 mr-1" />}
@@ -302,7 +316,8 @@ export default function TargetAnnuali() {
         </div>
       </div>
 
-      {/* Sezione Raccoglitori */}
+      {/* Sezione Raccoglitori: in Target & Status si scrivono nella scheda Target raccoglitori */}
+      {!incorporato && (
       <SectionCard icon={Target} title="Target Raccoglitori" subtitle="Target annuo di raccolta (tonnellate)" count={raccoglitori.length} onAdd={() => setShowRaccForm(!showRaccForm)} showAdd={showRaccForm}>
         {showRaccForm && (
           <div className="border rounded-lg p-3 mb-3 bg-muted/30 flex flex-wrap gap-2 items-end">
@@ -352,6 +367,7 @@ export default function TargetAnnuali() {
           </table>
         </div>
       </SectionCard>
+      )}
 
       {/* Sezione Impianti */}
       <SectionCard icon={Factory} title="Target Impianti" subtitle="Target di destinazione (kg) per le secondarie" count={impianti.length} onAdd={() => setShowImpForm(!showImpForm)} showAdd={showImpForm}>

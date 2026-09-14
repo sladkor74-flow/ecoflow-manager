@@ -5,13 +5,12 @@ import { base44 } from '@/api/base44Client';
 import { EVENTO_AGGIORNAMENTO } from '@/lib/qualifica';
 import {
   LayoutDashboard, Upload, ClipboardList, Truck, Factory,
-  Ship, Warehouse, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, CalendarClock, ShieldCheck, ClipboardCheck } from
+  Ship, Warehouse, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, ShieldCheck, ClipboardCheck } from
 'lucide-react';
 
 const NAV_ITEMS = [
 { label: 'Dashboard', path: '/', icon: LayoutDashboard },
 { label: 'Caricamento Dati', path: '/caricamento-dati', icon: Upload },
-  { label: 'Target Annuali', path: '/target-annuali', icon: CalendarClock },
   { label: 'Assegnati Rete', path: '/assegnati', icon: ClipboardList },
 { label: 'Assegnati ACI', path: '/assegnati-aci', icon: Car },
   { label: 'PDR', path: '/pdr', icon: MapPin },

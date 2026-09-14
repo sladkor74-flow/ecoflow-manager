@@ -1,5 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { PROV_TO_REGION } from "../../shared/raccoltoCalculator.ts";
+import { PROV_TO_REGION, MESI } from "../../shared/raccoltoCalculator.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Restituisce aggregati raccolta per la Dashboard filtrati per mese/anno.
@@ -31,26 +31,26 @@ export default async function(req) {
     const getRegione = (r) => r.regione || PROV_TO_REGION[(r.provincia || '').toUpperCase().trim()] || 'Altro';
     const sumTon = (arr) => arr.reduce((s, r) => s + (r.peso_effettivo || 0), 0) / 1000;
 
-    // Anno derivato dalla data di chiusura (colonna AI del file Primarie) se non già memorizzato
-    const getAnno = (r) => {
-      if (r.anno != null && !isNaN(Number(r.anno))) return Number(r.anno);
-      const dataRif = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
-      if (!dataRif) return 0;
-      const d = new Date(dataRif);
-      return isNaN(d.getTime()) ? 0 : d.getFullYear();
-    };
+    // Come in tutto il gestionale il periodo e' quello della fine trasporto, non i
+    // campi mese e anno del record.
+    const fine = (r) => { const d = r.trasporto_finito_il ? new Date(r.trasporto_finito_il) : null; return d && !isNaN(d.getTime()) ? d : null; };
+    const getAnno = (r) => { const d = fine(r); return d ? d.getUTCFullYear() : 0; };
+    const getMese = (r) => { const d = fine(r); return d ? MESI[d.getUTCMonth()] : ''; };
 
     const reteAnno = anni.length > 0 ? rete.filter(r => anni.includes(getAnno(r))) : rete;
     const aciAnno = anni.length > 0 ? aci.filter(r => anni.includes(getAnno(r))) : aci;
-    const reteMese = mesi.length > 0 ? reteAnno.filter(r => mesi.includes(r.mese)) : reteAnno;
-    const aciMese = mesi.length > 0 ? aciAnno.filter(r => mesi.includes(r.mese)) : aciAnno;
+    const reteMese = mesi.length > 0 ? reteAnno.filter(r => mesi.includes(getMese(r))) : reteAnno;
+    const aciMese = mesi.length > 0 ? aciAnno.filter(r => mesi.includes(getMese(r))) : aciAnno;
 
     const raccolta_rete = sumTon(reteMese);
     const raccolta_aci = sumTon(aciMese);
     const totale_raccolto = sumTon([...reteAnno, ...aciAnno]);
 
+    // Target annuo della commessa da Target & Status; i valori fissi solo se manca.
     const TARGET_ANNUO = { 2025: 11200, 2026: 11550 };
-    const target = anni.reduce((s, a) => s + (TARGET_ANNUO[a] || 0), 0);
+    const commesse = await base44.asServiceRole.entities.CommessaEcotyre.list('-created_date', 50).catch(() => []);
+    const targetDi = (a) => { const c = commesse.find(x => Number(x.anno) === a); return c && Number(c.target_annuo_t) > 0 ? Number(c.target_annuo_t) : (TARGET_ANNUO[a] || 0); };
+    const target = anni.reduce((s, a) => s + targetDi(a), 0);
     const raggiungimento_pct = target > 0 ? (totale_raccolto / target) * 100 : 0;
 
     // Raccolta RETE vs ACI per regione (mese+anno selezionati)
@@ -67,9 +67,19 @@ export default async function(req) {
     }
 
     // Target vs Raccolto per regione (solo Rete, anno selezionato, tutti i mesi)
-    const TARGET_REGIONI = {
+    // Contratto per regione da Target & Status, sommato sugli anni scelti; i valori
+    // fissi solo per un anno senza commessa inserita.
+    const RISERVA_REGIONI = {
       'Campania': 4400, 'Puglia': 2500, 'Basilicata': 500, 'Calabria': 1650, 'Sicilia': 2500
     };
+    const TARGET_REGIONI = {};
+    for (const a of anni) {
+      const c = commesse.find(x => Number(x.anno) === a);
+      let regioni = [];
+      try { regioni = c ? JSON.parse(c.regioni_json || '[]') : []; } catch { regioni = []; }
+      const fonte = regioni.length ? Object.fromEntries(regioni.map(r => [r.regione, Number(r.target_t) || 0])) : RISERVA_REGIONI;
+      for (const [reg, t] of Object.entries(fonte)) TARGET_REGIONI[reg] = (TARGET_REGIONI[reg] || 0) + t;
+    }
     const raccoltoRegRete = {};
     for (const r of reteAnno) {
       const reg = getRegione(r);

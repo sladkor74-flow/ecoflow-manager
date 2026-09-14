@@ -5,6 +5,10 @@
     "regione": {
       "type": "string"
     },
+    "impianto": {
+      "type": "string",
+      "description": "Impianto di destinazione a cui e' legato il target (come nel Report Generale): un raccoglitore puo' avere piu' righe, una per impianto"
+    },
     "raccoglitore": {
       "type": "string",
       "description": "Trasportatore / raccoglitore"
@@ -17,11 +21,20 @@
     },
     "target": {
       "type": "number",
-      "description": "Target mensile assegnato (ton)"
+      "description": "Target mensile assegnato al raccoglitore (t). Fonte unica: Target & Status, scheda Target raccoglitori"
+    },
+    "non_raccoglie": {
+      "type": "boolean",
+      "default": false,
+      "description": "Il raccoglitore non raccoglie in questo mese"
+    },
+    "storico_json": {
+      "type": "string",
+      "description": "Modifiche nel tempo: [{ il, da, nota, prima: { target, non_raccoglie } }]"
     },
     "target_annuo": {
       "type": "number",
-      "description": "Target annuo assegnato (ton)"
+      "description": "Non piu' usato: il target annuo sta in TargetRaccoglitore"
     },
     "raccolto": {
       "type": "number",

@@ -1,0 +1,56 @@
+{
+  "name": "CommessaEcotyre",
+  "type": "object",
+  "properties": {
+    "anno": {
+      "type": "number",
+      "description": "Anno della commessa: un record per anno"
+    },
+    "target_annuo_t": {
+      "type": "number",
+      "description": "Target annuo di raccolta assegnato da Ecotyre (t)"
+    },
+    "regioni_json": {
+      "type": "string",
+      "description": "Target del contratto per regione: [{ regione, province, target_t }]"
+    },
+    "classi_json": {
+      "type": "string",
+      "description": "Ripartizione del target per classe: [{ classe, descrizione, peso, percentuale }]"
+    },
+    "target_mensile_iniziale_json": {
+      "type": "string",
+      "description": "Target mensile iniziale della commessa (t), dodici valori"
+    },
+    "target_mensile_json": {
+      "type": "string",
+      "description": "Target mensile rivisto della commessa (t), dodici valori"
+    },
+    "budget_rete_json": {
+      "type": "string",
+      "description": "Budget mensile rete in tonnellate, dodici valori da gennaio a dicembre"
+    },
+    "budget_aci_json": {
+      "type": "string",
+      "description": "Budget mensile ACI in tonnellate, dodici valori da gennaio a dicembre"
+    },
+    "destinazioni_json": {
+      "type": "string",
+      "description": "Quantita' del contratto per destinazione: [{ destinazione, target_t, trattamento }]"
+    },
+    "target_prezzo_regioni_json": {
+      "type": "string",
+      "description": "Tabella \"Target Ecotyre\" per regione con prezzo: [{ regione, target_t, prezzo }]"
+    },
+    "note": {
+      "type": "string"
+    },
+    "storico_json": {
+      "type": "string",
+      "description": "Modifiche nel tempo: [{ il, da, nota, prima }]"
+    }
+  },
+  "required": [
+    "anno"
+  ]
+}
