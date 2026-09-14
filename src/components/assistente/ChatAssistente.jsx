@@ -326,7 +326,7 @@ export default function ChatAssistente() {
                   <button key={e} type="button" onClick={() => invia(e)} className="text-left text-sm border rounded-lg px-3 py-2 hover:bg-muted">{e}</button>
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground">Ogni domanda usa i crediti AI di Base44; quelle sulle norme anche la ricerca online. Per decisioni con conseguenze legali verifica sempre il testo vigente.</p>
+              <p className="text-xs text-muted-foreground">Le risposte sulle norme controllano anche le fonti online. Per decisioni con conseguenze legali verifica sempre il testo vigente.</p>
             </div>
           ) : (
             visibili.map(d => <Messaggio key={d.id} d={d} onValuta={(dd, modo) => setValuta({ d: dd, modo })} />)

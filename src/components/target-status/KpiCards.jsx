@@ -5,7 +5,7 @@ import { formatNumber } from '@/lib/utils';
 export default function KpiCards({ kpis }) {
   const cards = [
     { label: 'Target Annuo Complessivo', value: kpis.targetAnnuoTotale, icon: Target, color: 'text-blue-600 bg-blue-50' },
-    { label: 'Totale Progressivo Raccolto', value: kpis.raccoltoTotale, icon: TrendingUp, color: 'text-green-600 bg-green-50' },
+    { label: 'Progressivo raccolto RETE', value: kpis.raccoltoTotale, icon: TrendingUp, color: 'text-green-600 bg-green-50' },
     { label: 'Leftover Complessivo Annuo', value: kpis.leftoverTotale, icon: AlertTriangle, color: kpis.leftoverTotale < 0 ? 'text-red-600 bg-red-50' : 'text-amber-600 bg-amber-50' },
     { label: 'Delta Mese In Corso', value: kpis.deltaMeseCorrente, icon: CalendarClock, color: kpis.deltaMeseCorrente > 0 ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50' },
   ];

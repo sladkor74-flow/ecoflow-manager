@@ -42,16 +42,37 @@ export default async function(req) {
     const reteMese = mesi.length > 0 ? reteAnno.filter(r => mesi.includes(getMese(r))) : reteAnno;
     const aciMese = mesi.length > 0 ? aciAnno.filter(r => mesi.includes(getMese(r))) : aciAnno;
 
+    // RETE, ACI ed EXTRA RACCOLTA sono canali indipendenti: nessun totale che li
+    // sommi e il target del contratto si confronta solo con la RETE.
     const raccolta_rete = sumTon(reteMese);
     const raccolta_aci = sumTon(aciMese);
-    const totale_raccolto = sumTon([...reteAnno, ...aciAnno]);
+    const raccolto_rete_anno = sumTon(reteAnno);
+    const raccolto_aci_anno = sumTon(aciAnno);
 
     // Target annuo della commessa da Target & Status; i valori fissi solo se manca.
     const TARGET_ANNUO = { 2025: 11200, 2026: 11550 };
     const commesse = await base44.asServiceRole.entities.CommessaEcotyre.list('-created_date', 50).catch(() => []);
     const targetDi = (a) => { const c = commesse.find(x => Number(x.anno) === a); return c && Number(c.target_annuo_t) > 0 ? Number(c.target_annuo_t) : (TARGET_ANNUO[a] || 0); };
     const target = anni.reduce((s, a) => s + targetDi(a), 0);
-    const raggiungimento_pct = target > 0 ? (totale_raccolto / target) * 100 : 0;
+    const raggiungimento_pct = target > 0 ? (raccolto_rete_anno / target) * 100 : 0;
+
+    // Previsione ACI del contratto ACI Ecotyre (indicativa) e canale Extra Raccolta.
+    const previsioneAciDi = (a) => {
+      const c = commesse.find(x => Number(x.anno) === a);
+      try { return (c ? JSON.parse(c.target_prezzo_regioni_json || '[]') : []).reduce((s, r) => s + (Number(r.target_t) || 0), 0); } catch { return 0; }
+    };
+    const previsione_aci = anni.reduce((s, a) => s + previsioneAciDi(a), 0);
+    const giornoExtra = (v) => {
+      const d = v ? new Date(v) : null;
+      if (!d || isNaN(d.getTime())) return null;
+      const italiana = (d.getUTCHours() === 22 || d.getUTCHours() === 23) && !d.getUTCMinutes() && !d.getUTCSeconds();
+      return italiana ? new Date(d.getTime() + 3 * 3600000) : d;
+    };
+    const extra = (await fetchAll(base44.asServiceRole.entities.ExtraRaccolta, { stato: 'terminato' }))
+      .map(r => ({ r, d: giornoExtra(r.trasporto_finito_il) }))
+      .filter(({ d }) => d && (anni.length === 0 || anni.includes(d.getUTCFullYear())));
+    const raccolta_extra = extra.filter(({ d }) => mesi.length === 0 || mesi.includes(MESI[d.getUTCMonth()])).reduce((s, { r }) => s + (Number(r.peso_effettivo) || 0), 0) / 1000;
+    const raccolto_extra_anno = extra.reduce((s, { r }) => s + (Number(r.peso_effettivo) || 0), 0) / 1000;
 
     // Raccolta RETE vs ACI per regione (mese+anno selezionati)
     const regioniMap = {};
@@ -92,7 +113,7 @@ export default async function(req) {
     }));
 
     return Response.json({
-      kpi: { raccolta_rete, raccolta_aci, totale_raccolto, target, raggiungimento_pct },
+      kpi: { raccolta_rete, raccolta_aci, raccolta_extra, raccolto_rete_anno, raccolto_aci_anno, raccolto_extra_anno, previsione_aci, target, raggiungimento_pct },
       per_regione: Object.values(regioniMap).sort((a, b) => (b.rete + b.aci) - (a.rete + a.aci)),
       target_vs_raccolto
     });

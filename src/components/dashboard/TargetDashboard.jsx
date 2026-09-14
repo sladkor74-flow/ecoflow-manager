@@ -26,12 +26,12 @@ export default function TargetDashboard() {
 
   const maxKg = useMemo(() => {
     if (regioni.length === 0) return 1;
-    return Math.max(...regioni.flatMap((r) => [r.rete_kg, r.aci_kg, r.totale_kg]), 1);
+    return Math.max(...regioni.flatMap((r) => [r.rete_kg, r.aci_kg]), 1);
   }, [regioni]);
 
   const maxTarget = useMemo(() => {
     if (regioni.length === 0) return 1;
-    return Math.max(...regioni.map((r) => Math.max(r.target_t, r.raccolto_t / 1000)), 1);
+    return Math.max(...regioni.map((r) => Math.max(r.target_t, r.rete_kg / 1000)), 1);
   }, [regioni]);
 
   return (
@@ -61,9 +61,9 @@ export default function TargetDashboard() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <KpiCard label="Raccolta RETE" value={`${formatNumber(totals.rete_kg / 1000)} t`} color="text-green-600 bg-green-50" />
             <KpiCard label="Raccolta ACI" value={`${formatNumber(totals.aci_kg / 1000)} t`} color="text-amber-600 bg-amber-50" />
-            <KpiCard label="Totale Raccolto" value={`${formatNumber(totals.totale_kg / 1000)} t`} color="text-blue-600 bg-blue-50" />
+            <KpiCard label="Target RETE" value={`${formatNumber(totals.target_t)} t`} color="text-blue-600 bg-blue-50" />
             <KpiCard
-              label="Raggiungimento Target"
+              label="Raggiungimento target RETE"
               value={`${formatNumber(totals.raggiungimento, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}%`}
               color={totals.raggiungimento >= 100 ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50'}
               icon={totals.raggiungimento >= 100 ? TrendingUp : TrendingDown}
@@ -112,7 +112,7 @@ export default function TargetDashboard() {
           {/* Grafico Target vs Raccolto per regione */}
           <div className="border rounded-lg p-4">
             <h3 className="font-heading font-semibold mb-1">Target vs Raccolto per Regione</h3>
-            <p className="text-xs text-muted-foreground mb-4">Raggiungimento target mensile (ton) — {mese}</p>
+            <p className="text-xs text-muted-foreground mb-4">Raggiungimento target mensile del solo canale RETE (ton) — {mese || 'tutto l\'anno'}. ACI ed Extra Raccolta non entrano nel target.</p>
             <div className="space-y-2.5">
               {regioni.map((r) => (
                 <div key={r.regione} className="grid grid-cols-[100px_1fr] items-center gap-2">
@@ -130,10 +130,10 @@ export default function TargetDashboard() {
                     <div className="relative h-5 bg-muted rounded-sm overflow-hidden">
                       <div
                         className={`absolute top-0 left-0 h-full rounded-sm transition-all ${r.raggiungimento >= 100 ? 'bg-green-500' : 'bg-orange-400'}`}
-                        style={{ width: `${(r.totale_kg / 1000 / maxTarget) * 100}%` }}
+                        style={{ width: `${(r.rete_kg / 1000 / maxTarget) * 100}%` }}
                       />
                       <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold tabular-nums">
-                        {formatNumber(r.totale_kg / 1000)} t ({formatNumber(r.raggiungimento, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}%)
+                        {formatNumber(r.rete_kg / 1000)} t ({formatNumber(r.raggiungimento, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}%)
                       </span>
                     </div>
                   </div>

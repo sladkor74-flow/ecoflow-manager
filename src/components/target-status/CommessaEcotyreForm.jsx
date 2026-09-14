@@ -209,7 +209,7 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
             colonne={[{ chiave: 'regione', etichetta: 'Regione' }, { chiave: 'province', etichetta: 'Province' }, { chiave: 'target', etichetta: 't', numero: true, classe: 'w-28' }]} />
         </Riquadro>
 
-        <Riquadro titolo="Target e budget mensili" nota={<>Target rivisto {tonnellate(somma(dati.mensile))} t: {confronto(somma(dati.mensile))}. Budget rete più ACI {tonnellate(somma(dati.rete) + somma(dati.aci))} t.</>}>
+        <Riquadro titolo="Target e budget mensili" nota={<>Target rivisto {tonnellate(somma(dati.mensile))} t: {confronto(somma(dati.mensile))}. Budget RETE {tonnellate(somma(dati.rete))} t; budget ACI {tonnellate(somma(dati.aci))} t, canale separato.</>}>
           <div className="overflow-x-auto">
             <table className="text-xs w-full">
               <thead>
@@ -251,7 +251,7 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
             colonne={[{ chiave: 'destinazione', etichetta: 'Destinazione' }, { chiave: 'target', etichetta: 't', numero: true, classe: 'w-28' }, { chiave: 'trattamento', etichetta: 'Trattamento' }]} />
         </Riquadro>
 
-        <Riquadro titolo="Target Ecotyre per regione con prezzo" nota={dati.prezzo_regioni.length ? <>Totale {tonnellate(somma(dati.prezzo_regioni.map(p => p.target)))} t</> : null}>
+        <Riquadro titolo="Previsione ACI per regione (contratto ACI Ecotyre)" nota={<>{dati.prezzo_regioni.length ? <>Totale {tonnellate(somma(dati.prezzo_regioni.map(p => p.target)))} t, indicativo: il canale ACI è indipendente e non entra nel target RETE. </> : null}Il prezzo è il corrispettivo per tonnellata della regione.</>}>
           <Tabella isAdmin={isAdmin} righe={dati.prezzo_regioni} onChange={v => imposta('prezzo_regioni', v)} nuovaRiga={{ regione: '', target: '', prezzo: '' }}
             colonne={[{ chiave: 'regione', etichetta: 'Regione' }, { chiave: 'target', etichetta: 't', numero: true, classe: 'w-28' }, { chiave: 'prezzo', etichetta: '€/t', numero: true, classe: 'w-24' }]} />
         </Riquadro>

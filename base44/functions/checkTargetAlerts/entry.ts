@@ -36,11 +36,15 @@ export default async function(req) {
       });
     }
 
-    // Carica primarie e aggrega raccolto per raccoglitore+regione
-    const [rete, aci] = await Promise.all([
-      fetchAll(base44.asServiceRole.entities.PrimariaRete, { mese }),
-      fetchAll(base44.asServiceRole.entities.PrimariaAci, { mese }),
-    ]);
+    // Raccolto del solo canale RETE: i target dei raccoglitori non riguardano ACI
+    // ed Extra Raccolta. Solo i terminati, nel mese della fine trasporto.
+    const meseIdx = MESI.indexOf(mese);
+    const nelPeriodo = (r) => {
+      if (String(r.stato || '').toLowerCase().trim() !== 'terminato' || !r.trasporto_finito_il) return false;
+      const d = new Date(r.trasporto_finito_il);
+      return !isNaN(d.getTime()) && d.getUTCFullYear() === anno && d.getUTCMonth() === meseIdx;
+    };
+    const rete = (await fetchAll(base44.asServiceRole.entities.PrimariaRete, { stato: 'terminato' })).filter(nelPeriodo);
 
     const raccoltoByKey = {};
     const addRaccolto = (r) => {
@@ -52,7 +56,6 @@ export default async function(req) {
       raccoltoByKey[key].raccolto += peso;
     };
     rete.forEach(addRaccolto);
-    aci.forEach(addRaccolto);
 
     // Determina se stiamo valutando il mese corrente o un mese passato
     const isMeseCorrente = (mese === meseCorrente && anno === annoCorrente);

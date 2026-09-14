@@ -17,7 +17,8 @@ export default async function(req) {
     const anno = Number(body.anno) || new Date().getFullYear();
 
     // 1. Calcola raccolto dell'anno
-    const raccolto = await computeRaccoltoData(base44, { anno: [anno] });
+    // Target contro il solo canale RETE.
+    const raccolto = await computeRaccoltoData(base44, { anno: [anno], canale: 'rete' });
 
     // 2. Leggi target dell'anno da Target & Status
     const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter({ anno }, '-created_date', 10000));

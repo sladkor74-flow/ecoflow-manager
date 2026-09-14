@@ -53,10 +53,14 @@ export const PROV_TO_REGION: Record<string, string> = {
 export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
   'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
+// RETE, ACI ed EXTRA RACCOLTA sono canali indipendenti: non si sommano mai e i
+// target (raccoglitori, regioni, contratto, impianti) si confrontano solo con la
+// RETE. filters.canale sceglie il canale: 'rete' (predefinito) oppure 'aci'.
 export async function computeRaccoltoData(base44, filters: any = {}) {
+  const canale = String(filters.canale || 'rete').toLowerCase() === 'aci' ? 'aci' : 'rete';
   const [rete, aci] = await Promise.all([
-    fetchAll(base44.asServiceRole.entities.PrimariaRete),
-    fetchAll(base44.asServiceRole.entities.PrimariaAci)
+    canale === 'rete' ? fetchAll(base44.asServiceRole.entities.PrimariaRete) : Promise.resolve([]),
+    canale === 'aci' ? fetchAll(base44.asServiceRole.entities.PrimariaAci) : Promise.resolve([]),
   ]);
 
   // Come in tutto il gestionale: solo i terminati, nel mese della fine trasporto.
@@ -101,6 +105,7 @@ export async function computeRaccoltoData(base44, filters: any = {}) {
   });
 
   const byRaccoglitore: Record<string, any> = {};
+  const byRaccoglitoreImpianto: Record<string, any> = {};
   const byRegione: Record<string, any> = {};
   const byImpianto: Record<string, any> = {};
   let totale = 0;
@@ -121,6 +126,16 @@ export async function computeRaccoltoData(base44, filters: any = {}) {
     byRaccoglitore[rKey].totale += peso;
     if (mese !== 'N/D') byRaccoglitore[rKey].mesi[mese] += peso;
 
+    // Raccoglitore, regione e impianto di destinazione: la vista Report Generale.
+    const destinazione = (p.destinazione || 'N/D').trim();
+    const riKey = `${rKey}|||${destinazione}`;
+    if (!byRaccoglitoreImpianto[riKey]) {
+      byRaccoglitoreImpianto[riKey] = { raccoglitore, regione, impianto: destinazione, totale: 0, mesi: {} };
+      for (const m of MESI) byRaccoglitoreImpianto[riKey].mesi[m] = 0;
+    }
+    byRaccoglitoreImpianto[riKey].totale += peso;
+    if (mese !== 'N/D') byRaccoglitoreImpianto[riKey].mesi[mese] += peso;
+
     if (!byRegione[regione]) {
       byRegione[regione] = { regione, totale: 0, mesi: {} };
       for (const m of MESI) byRegione[regione].mesi[m] = 0;
@@ -140,8 +155,10 @@ export async function computeRaccoltoData(base44, filters: any = {}) {
   }
 
   return {
+    canale,
     totale_raccolto: totale,
     by_raccoglitore: Object.values(byRaccoglitore),
+    by_raccoglitore_impianto: Object.values(byRaccoglitoreImpianto),
     by_regione: Object.values(byRegione),
     by_impianto: Object.values(byImpianto),
     filterOptions,

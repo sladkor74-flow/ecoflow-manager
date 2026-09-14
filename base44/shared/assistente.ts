@@ -66,8 +66,10 @@ export async function situazioneGestionale(base44, oggi) {
   const mese = MESI[meseIdx];
   const svc = base44.asServiceRole.entities;
 
-  const [raccolto, mensili, annui, commesse, controlli, alert, riepilogoQualifica, giacenze] = await Promise.all([
-    provaA(() => computeRaccoltoData(base44, { anno: [anno] }), null),
+  const [raccolto, raccoltoAci, extra, mensili, annui, commesse, controlli, alert, riepilogoQualifica, giacenze] = await Promise.all([
+    provaA(() => computeRaccoltoData(base44, { anno: [anno], canale: 'rete' }), null),
+    provaA(() => computeRaccoltoData(base44, { anno: [anno], canale: 'aci' }), null),
+    provaA(() => fetchAll(svc.ExtraRaccolta, { stato: 'terminato' }), []),
     provaA(() => fetchAll(svc.TargetMensile, { anno }), []),
     provaA(() => fetchAll(svc.TargetRaccoglitore, { anno }), []),
     provaA(() => svc.CommessaEcotyre.filter({ anno }), []),
@@ -77,7 +79,10 @@ export async function situazioneGestionale(base44, oggi) {
     provaA(async () => (await base44.functions.invoke('calcolaGiacenze', { anno })).data, null),
   ]);
 
-  const righe = [`DATI DEL GESTIONALE al ${oggi} (anno ${anno}, mese in corso ${mese}). Raccolto = formulari terminati, per data di fine trasporto, in tonnellate.`];
+  const righe = [
+    `DATI DEL GESTIONALE al ${oggi} (anno ${anno}, mese in corso ${mese}). Raccolto = formulari terminati, per data di fine trasporto, in tonnellate.`,
+    'RETE, ACI ed EXTRA RACCOLTA sono canali indipendenti: non vanno mai sommati e tutti i target (contratto, regioni, raccoglitori, impianti) riguardano solo la RETE. L\'ACI ha solo una previsione indicativa del suo contratto.',
+  ];
 
   // --- Contratto e regioni ---
   const commessa = commesse[0] || null;
@@ -88,7 +93,7 @@ export async function situazioneGestionale(base44, oggi) {
     const pesi = totProfilo > 0 ? profilo.map(v => v / totProfilo) : MESI.map(() => 1 / 12);
     const giorniMese = new Date(Date.UTC(anno, meseIdx + 1, 0)).getUTCDate();
     const quota = pesi.slice(0, meseIdx).reduce((s, v) => s + v, 0) + (pesi[meseIdx] || 0) * (Number(oggi.slice(8, 10)) / giorniMese);
-    righe.push(`Contratto Ecotyre ${anno}: target annuo ${t1(commessa.target_annuo_t)} t; quota attesa a oggi ${t1(quota * 100)}% secondo il profilo mensile del contratto.`);
+    righe.push(`Contratto Ecotyre ${anno}, canale RETE: target annuo ${t1(commessa.target_annuo_t)} t; quota attesa a oggi ${t1(quota * 100)}% secondo il profilo mensile del contratto.`);
     for (const r of leggiLista(commessa.regioni_json)) {
       const racc = perRegione.get(String(r.regione).toLowerCase());
       const contratto = Number(r.target_t) || 0;
@@ -99,7 +104,21 @@ export async function situazioneGestionale(base44, oggi) {
     righe.push('Contratto Ecotyre dell\'anno non inserito in Target & Status.');
   }
   if (raccolto) {
-    righe.push(`Raccolto totale ${anno}: ${t1(raccolto.totale_raccolto)} t. Per mese: ${MESI.slice(0, meseIdx + 1).map(m => `${m} ${t1((raccolto.by_regione || []).reduce((s, r) => s + (r.mesi?.[m] || 0), 0))}`).join(', ')}.`);
+    righe.push(`Raccolto RETE ${anno}: ${t1(raccolto.totale_raccolto)} t. Per mese: ${MESI.slice(0, meseIdx + 1).map(m => `${m} ${t1((raccolto.by_regione || []).reduce((s, r) => s + (r.mesi?.[m] || 0), 0))}`).join(', ')}.`);
+  }
+  if (raccoltoAci) {
+    const previsione = commessa ? leggiLista(commessa.target_prezzo_regioni_json) : [];
+    const perRegAci = new Map((raccoltoAci.by_regione || []).map(r => [String(r.regione).toLowerCase(), r]));
+    const dettaglio = previsione.length
+      ? previsione.map(p => `${p.regione} ${t1(perRegAci.get(String(p.regione).toLowerCase())?.totale)} su ${t1(p.target_t)} t a ${t1(p.prezzo)} euro/t`).join('; ')
+      : (raccoltoAci.by_regione || []).map(r => `${r.regione} ${t1(r.totale)} t`).join('; ');
+    righe.push(`Canale ACI ${anno} (indipendente, previsione indicativa del contratto ACI Ecotyre): raccolto ${t1(raccoltoAci.totale_raccolto)} t. Per regione, raccolto su previsione: ${dettaglio || 'nessun dato'}.`);
+  }
+  if (extra.length) {
+    const giorno = (v) => { const d = v ? new Date(v) : null; if (!d || isNaN(d.getTime())) return null; return (d.getUTCHours() >= 22 && !d.getUTCMinutes()) ? new Date(d.getTime() + 3 * 3600000) : d; };
+    const delAnno = extra.map(r => ({ r, d: giorno(r.trasporto_finito_il) })).filter(x => x.d && x.d.getUTCFullYear() === anno);
+    const peso = (xs) => xs.reduce((s, x) => s + (Number(x.r.peso_effettivo) || 0), 0) / 1000;
+    righe.push(`Canale EXTRA RACCOLTA ${anno} (indipendente, senza target): terminati ${delAnno.length} interventi, ${t1(peso(delAnno))} t; nel mese in corso ${t1(peso(delAnno.filter(x => x.d.getUTCMonth() === meseIdx)))} t.`);
   }
 
   // --- Raccoglitori: target contro raccolto ---
@@ -111,7 +130,7 @@ export async function situazioneGestionale(base44, oggi) {
     if (k && !nomi.has(k)) nomi.set(k, r.raccoglitore);
   }
   if (nomi.size) {
-    righe.push(`Raccoglitori (target annuo | raccolto da inizio anno | target ${mese} | raccolto ${mese}):`);
+    righe.push(`Raccoglitori, solo RETE (target annuo | raccolto da inizio anno | target ${mese} | raccolto ${mese}):`);
     for (const [k, nome] of [...nomi.entries()].sort((a, b) => a[1].localeCompare(b[1], 'it'))) {
       const annuo = annuiAgg.filter(r => normalizzaRagioneSociale(r.raccoglitore) === k).reduce((s, r) => s + r.target_tonnellate, 0);
       const delMese = mensili.filter(r => normalizzaRagioneSociale(r.raccoglitore) === k && r.mese === mese);
@@ -142,9 +161,9 @@ export async function situazioneGestionale(base44, oggi) {
 
   // --- Giacenze ---
   if (giacenze && Array.isArray(giacenze.righe) && giacenze.righe.length) {
-    righe.push('Impianti e stoccaggi (giacenza a portale | target totale | conferito nell\'anno | % del target | residuo):');
+    righe.push('Impianti e stoccaggi (giacenza a portale | target totale | primarie RETE nell\'anno | % del target RETE | residuo | ACI a parte | Extra a parte):');
     for (const g of giacenze.righe.slice(0, 25)) {
-      righe.push(`- ${g.sito} (${g.tipo_destinazione === 'stoc' ? 'stoccaggio' : 'impianto'}): ${t1(g.giacenza_portale_t)} | ${g.target_totale_t ? t1(g.target_totale_t) : '-'} | ${t1(g.conferito_t)} | ${g.percentuale_target !== null && g.percentuale_target !== undefined ? t1(g.percentuale_target) + '%' : '-'} | ${g.residuo_t !== null && g.residuo_t !== undefined ? t1(g.residuo_t) : '-'}`);
+      righe.push(`- ${g.sito} (${g.tipo_destinazione === 'stoc' ? 'stoccaggio' : 'impianto'}): ${t1(g.giacenza_portale_t)} | ${g.target_totale_t ? t1(g.target_totale_t) : '-'} | ${t1(g.conferito_primarie_t)} | ${g.percentuale_target !== null && g.percentuale_target !== undefined ? t1(g.percentuale_target) + '%' : '-'} | ${g.residuo_t !== null && g.residuo_t !== undefined ? t1(g.residuo_t) : '-'} | ${t1(g.conferito_aci_t)} | ${t1(g.conferito_extra_t)}`);
     }
     const sopra = (giacenze.anomalie || []).filter(a => a.tipo === 'giacenza_sopra_target');
     if (sopra.length) righe.push(`Siti con giacenza sopra il target: ${sopra.map(a => a.sito).join(', ')}.`);

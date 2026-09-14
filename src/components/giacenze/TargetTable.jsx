@@ -27,12 +27,14 @@ export default function TargetTable({ righe, totali }) {
               <th className="px-2 py-2 font-semibold">Ruolo</th>
               <th className="px-2 py-2 font-semibold text-right">Target primarie</th>
               <th className="px-2 py-2 font-semibold text-right">Target totale</th>
-              <th className="px-2 py-2 font-semibold text-right">Conferito primarie</th>
+              <th className="px-2 py-2 font-semibold text-right">Primarie RETE</th>
               <th className="px-2 py-2 font-semibold text-right">Secondarie</th>
               <th className="px-2 py-2 font-semibold text-right">Terziarie</th>
-              <th className="px-2 py-2 font-semibold text-right">Conferito</th>
+              <th className="px-2 py-2 font-semibold text-right">Conferito RETE</th>
               <th className="px-2 py-2 font-semibold text-right">Residuo</th>
-              <th className="px-2 py-2 font-semibold">Copertura</th>
+              <th className="px-2 py-2 font-semibold">Copertura RETE</th>
+              <th className="px-2 py-2 font-semibold text-right border-l">ACI</th>
+              <th className="px-2 py-2 font-semibold text-right">Extra Raccolta</th>
             </tr>
           </thead>
           <tbody>
@@ -82,6 +84,8 @@ export default function TargetTable({ righe, totali }) {
                       </div>
                     </div>
                   </td>
+                  <td className="px-2 py-2 text-right border-l text-muted-foreground">{dashIfZero(r.conferito_aci_t)}</td>
+                  <td className="px-2 py-2 text-right text-muted-foreground">{dashIfZero(r.conferito_extra_t)}</td>
                 </tr>
               );
             })}
@@ -98,10 +102,15 @@ export default function TargetTable({ righe, totali }) {
               <td className="px-2 py-2 text-right">{fmt(totali.conferito_t)} t</td>
               <td className="px-2 py-2 text-right">{dashIfZero(totali.target_totale_t > 0 ? totali.target_totale_t - totali.conferito_primarie_t : null)}</td>
               <td className="px-2 py-2 text-right">{fmtPct(totali.target_totale_t > 0 ? (totali.conferito_primarie_t / totali.target_totale_t * 100) : null)}</td>
+              <td className="px-2 py-2 text-right border-l">{dashIfZero(totali.conferito_aci_t)}</td>
+              <td className="px-2 py-2 text-right">{dashIfZero(totali.conferito_extra_t)}</td>
             </tr>
           </tfoot>
         </table>
       </div>
+      <p className="px-3 py-2 text-xs text-muted-foreground border-t">
+        Target, residuo e copertura si misurano solo sul canale RETE. ACI ed Extra Raccolta sono canali indipendenti: il loro conferito è indicato a parte e non entra nel target.
+      </p>
     </div>
   );
 }

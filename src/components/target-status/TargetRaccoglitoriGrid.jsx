@@ -268,7 +268,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
         fetchAllClient(base44.entities.TargetMensile, { anno }),
         base44.entities.FornitoreSecondaria.list('-created_date', 500).catch(() => []),
         base44.entities.CommessaEcotyre.filter({ anno }).catch(() => []),
-        base44.functions.invoke('computeRaccolto', { filters: { anno: [anno] } }).then(r => (r.data || r).by_raccoglitore || []).catch(() => []),
+        base44.functions.invoke('computeRaccolto', { filters: { anno: [anno], canale: 'rete' } }).then(r => (r.data || r).by_raccoglitore || []).catch(() => []),
       ]);
       setAnnui(a);
       setMensili(m);

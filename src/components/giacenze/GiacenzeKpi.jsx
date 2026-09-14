@@ -10,6 +10,8 @@ export default function GiacenzeKpi({ totali }) {
   // Il target Ecotyre e' di raccolta, quindi la copertura si misura sulle sole
   // primarie. Sommarci le secondarie conterebbe due volte lo stesso pneumatico:
   // una quando viene raccolto e una quando passa dallo stoccaggio all'impianto.
+  // Solo canale RETE: ACI ed Extra Raccolta sono canali indipendenti e non
+  // entrano nel target.
   const copertura = totali.target_totale_t > 0
     ? (totali.conferito_primarie_t / totali.target_totale_t * 100)
     : null;
@@ -18,8 +20,8 @@ export default function GiacenzeKpi({ totali }) {
     { label: 'Giacenza a portale', value: fmt(totali.giacenza_portale_t), unit: 't', icon: Warehouse, color: 'text-primary' },
     { label: 'Ordini da dichiarare', value: fmt(totali.ordini_da_dichiarare, 0), unit: '', icon: ClipboardList, color: 'text-amber-600' },
     { label: 'Dichiarato nell\'anno', value: fmt(totali.dichiarato_t), unit: 't', icon: FileCheck, color: 'text-success' },
-    { label: 'Raccolto nell\'anno', value: fmt(totali.conferito_primarie_t), unit: 't', icon: PackageOpen, color: 'text-accent' },
-    { label: 'Copertura target', value: copertura != null ? fmt(copertura, 1) : '—', unit: '%', icon: Target, color: copertura != null && copertura >= 100 ? 'text-success' : 'text-amber-600' },
+    { label: 'Raccolto RETE nell\'anno', value: fmt(totali.conferito_primarie_t), unit: 't', icon: PackageOpen, color: 'text-accent', subtitle: `ACI ${fmt(totali.conferito_aci_t)} t · Extra ${fmt(totali.conferito_extra_t)} t, fuori target` },
+    { label: 'Copertura target RETE', value: copertura != null ? fmt(copertura, 1) : '—', unit: '%', icon: Target, color: copertura != null && copertura >= 100 ? 'text-success' : 'text-amber-600' },
   ];
 
   return (

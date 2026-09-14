@@ -262,11 +262,17 @@ function checkAggregateRules(records, regole, existingKeys, targets = []) {
   // Regole scostamento target grave (Delta < soglia_pct, default -15%)
   const regoleScostamento = regole.filter(r => r.tipo_regola === 'scostamento_target');
   if (regoleScostamento.length > 0 && targets && targets.length > 0) {
+    // Solo RETE terminati dell'anno dei target, nel mese della fine trasporto.
+    const MESI_ANNO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+    const annoTarget = Number(targets[0]?.anno) || new Date().getFullYear();
     const raccoltoByKey = {};
     for (const r of records) {
+      if (String(r.stato || '').toLowerCase().trim() !== 'terminato' || !r.trasporto_finito_il) continue;
+      const fine = new Date(r.trasporto_finito_il);
+      if (isNaN(fine.getTime()) || fine.getUTCFullYear() !== annoTarget) continue;
       const racc = (r.trasportatore || 'N/D').trim();
       const regione = r.regione || 'Altro';
-      const mese = r.mese || 'N/D';
+      const mese = MESI_ANNO[fine.getUTCMonth()];
       const peso = (r.peso_effettivo || 0) / 1000;
       const key = `${racc}|||${regione}|||${mese}`;
       raccoltoByKey[key] = (raccoltoByKey[key] || 0) + peso;

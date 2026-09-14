@@ -60,9 +60,9 @@ export const BASE_CONOSCENZA: VoceConoscenza[] = [
   },
   {
     id: 'pfu-autodemolizione', area: 'pfu', verificato_il: VERIFICATO_IL,
-    titolo: 'PFU da veicoli fuori uso (canale ACI)',
-    testo: 'I PFU dei veicoli a fine vita sono raccolti e gestiti dietro corrispettivo pagato dal fondo costituito presso l\'Automobile Club d\'Italia, alimentato dal contributo riscosso alla vendita dei veicoli nuovi e vigilato da un comitato di cinque membri presieduto da ACI. Le attivita\' di ritiro e i costi si concordano con i demolitori. Non contano nel target dell\'art. 3: rientrano negli obiettivi della filiera dei veicoli fuori uso (D.Lgs. 209/2003).',
-    fonti: ['DM 182/2019 art. 9'],
+    titolo: 'PFU da veicoli fuori uso: il sistema ACI',
+    testo: 'I PFU dei veicoli a fine vita hanno un sistema separato (art. 9): produttori e importatori di pneumatici, direttamente o tramite forme associate e soggetti abilitati, li ritirano gratis dai centri di raccolta dei veicoli fuori uso (demolitori) e sono pagati con un corrispettivo per tonnellata dal fondo presso l\'ACI, alimentato dal contributo riscosso alla vendita dei veicoli nuovi e fissato ogni anno dal Comitato entro il 31 ottobre (Allegato IX). Il Comitato, cinque membri presieduto da ACI, pubblica ogni anno l\'elenco dei soggetti abilitati (domande entro il 30 novembre) e il Disciplinare operativo. Regole del Disciplinare (versione 2024, impostazione confermata dalla modulistica 2026): il demolitore censito al PRA prenota sul portale un ritiro di almeno 1.500 kg, compatibile con i veicoli radiati, e sceglie l\'operatore; il fondo autorizza solo se ha capienza; l\'operatore ritira entro 15 giorni di calendario senza chiedere nulla al demolitore, con tolleranza del 10% in piu\' sul peso; i PFU vanno solo a recupero di materia e il peso avviato a recupero non puo\' superare di oltre il 10% quello ritirato; le pratiche si dichiarano entro il 15 del mese successivo, si fattura sul riepilogo del 16 e il fondo paga entro 45 giorni; l\'operatore garantisce almeno 100 t l\'anno; il corrispettivo puo\' variare per regione. Questi PFU non contano nel target dell\'art. 3 (art. 9 c. 9): e\' un canale del tutto separato dalla rete dei gommisti. Per questo la previsione di raccolta ACI e\' solo indicativa: i ritiri partono solo su richiesta dei demolitori, sopra 1,5 t, possono bloccarsi per incompatibilita\' con i veicoli radiati o per incapienza del fondo, il demolitore puo\' scegliere un altro operatore e il pagamento richiede formulari e certificazioni di riciclo caricati sul portale. I centri di demolizione sono impianti autorizzati iscritti al RENTRI, quindi dal 16 settembre 2026 i loro ritiri vanno con FIR digitale: verificarlo con il singolo demolitore.',
+    fonti: ['DM 182/2019 art. 9', 'Disciplinare per la gestione operativa degli PFU, anno 2024', 'https://www.pneumaticifuoriuso.it'],
   },
   {
     id: 'pfu-revisione', area: 'pfu', verificato_il: VERIFICATO_IL,
@@ -179,6 +179,12 @@ export const BASE_CONOSCENZA: VoceConoscenza[] = [
     titolo: 'Il gestionale sostituisce il file Excel',
     testo: 'Il gestionale nasce per lavorare senza il file Excel "Gestione Ecotyre": le importazioni da Excel servono solo al passaggio iniziale, e il file resta in uso solo per prudenza finche\' il gestionale non e\' completo e collaudato. Per i dati fa fede il gestionale.',
     fonti: ['Regole della direzione SMOCO'],
+  },
+  {
+    id: 'gest-canali-indipendenti', area: 'gestionale', verificato_il: VERIFICATO_IL,
+    titolo: 'RETE, ACI ed Extra Raccolta sono canali indipendenti',
+    testo: 'RETE (richieste dei punti di raccolta dal portale Ecotyre), ACI (ritiri dai demolitori pagati dal fondo ACI) ed EXTRA RACCOLTA (interventi extra inseriti a mano) sono canali indipendenti: si osservano, analizzano, controllano e fatturano separatamente e non si sommano mai. Tutti i target, cioe\' contratto Ecotyre per regione, raccoglitori e impianti, si confrontano solo con la RETE. L\'ACI ha una previsione indicativa nel contratto ACI Ecotyre (per il 2026 650 t su tutte le regioni, con corrispettivo di 230-240 euro/t secondo la regione) che di solito non si raggiunge per le criticita\' del circuito ACI. L\'Extra Raccolta non ha target.',
+    fonti: ['Regole della direzione SMOCO, settembre 2026'],
   },
 ];
 

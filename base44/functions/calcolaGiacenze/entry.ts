@@ -193,15 +193,23 @@ export default async function(req) {
     }
 
     // === 3. MOVIMENTAZIONE ANNO CORRENTE (per conferito, stato terminato + trasporto_finito_il nell'anno) ===
-    const confPrimMap = new Map(); // ns|td -> t
-    for (const r of [...reteAll, ...aciAll, ...extraAll]) {
-      if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
-      const nd = norm(r.destinazione);
-      const td = tdNorm(r.tipo_destinazione);
-      if (!nd || !td) continue;
-      const k = nd + '|' + td;
-      confPrimMap.set(k, (confPrimMap.get(k) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
-    }
+    // RETE, ACI ed EXTRA RACCOLTA sono canali indipendenti: il conferito di ciascuno
+    // resta separato e il target Ecotyre del sito si misura solo sulla RETE.
+    const conferitoPer = (records) => {
+      const mappa = new Map(); // ns|td -> t
+      for (const r of records) {
+        if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
+        const nd = norm(r.destinazione);
+        const td = tdNorm(r.tipo_destinazione);
+        if (!nd || !td) continue;
+        const k = nd + '|' + td;
+        mappa.set(k, (mappa.get(k) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
+      }
+      return mappa;
+    };
+    const confPrimMap = conferitoPer(reteAll);
+    const confAciMap = conferitoPer(aciAll);
+    const confExtraMap = conferitoPer(extraAll);
 
     const secInMap = new Map(); // ns -> t
     for (const r of secAll) {
@@ -326,6 +334,8 @@ export default async function(req) {
       const der = derivatiMap.get(key) || { granulo: 0, fibre: 0, metallo: 0, cippato: 0, ciabattato: 0 };
 
       const conferito_primarie_t = confPrimMap.get(key) || 0;
+      const conferito_aci_t = confAciMap.get(key) || 0;
+      const conferito_extra_t = confExtraMap.get(key) || 0;
 
       // Una secondaria va da uno stoccaggio a un impianto: l'ingresso riguarda
       // l'impianto che riceve, l'uscita lo stoccaggio che spedisce. I flussi sono
@@ -370,7 +380,7 @@ export default async function(req) {
       // piazzale, e quelle spedizioni lo tenevano in tabella con tutte le colonne
       // a zero.
       const haAttivita = giacenza_portale_t > 0 || in_attesa_dichiarazione_t > 0
-        || ordini_da_dichiarare > 0 || dichiarato_t > 0 || conferito_t > 0;
+        || ordini_da_dichiarare > 0 || dichiarato_t > 0 || conferito_t > 0 || conferito_aci_t > 0 || conferito_extra_t > 0;
       if (!g && td === 'imp' && !haAttivita) continue;
 
       if (senzaRilevazione) anomalie.push({ tipo: 'stoccaggio_senza_rilevazione', sito: sitoNome });
@@ -393,6 +403,8 @@ export default async function(req) {
         cippato_t: r2(der.cippato),
         ciabattato_t: r2(der.ciabattato),
         conferito_primarie_t: r2(conferito_primarie_t),
+        conferito_aci_t: r2(conferito_aci_t),
+        conferito_extra_t: r2(conferito_extra_t),
         secondarie_in_t: r2(secondarie_in_t),
         secondarie_out_t: r2(secondarie_out_t),
         secondarie_nette_t: r2(secondarie_nette_t),
@@ -443,7 +455,7 @@ export default async function(req) {
     const numCols = [
       'giacenza_portale_t', 'in_attesa_dichiarazione_t',
       'dichiarato_t', 'granulo_t', 'fibre_t', 'metallo_t', 'cippato_t', 'ciabattato_t',
-      'conferito_primarie_t', 'secondarie_in_t', 'secondarie_out_t', 'secondarie_nette_t', 'terziarie_t',
+      'conferito_primarie_t', 'conferito_aci_t', 'conferito_extra_t', 'secondarie_in_t', 'secondarie_out_t', 'secondarie_nette_t', 'terziarie_t',
       'conferito_t', 'target_primarie_t', 'target_totale_t', 'giacenza_riferimento_t'
     ];
     const totali = {};

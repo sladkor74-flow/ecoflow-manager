@@ -12,6 +12,8 @@ import ExportButtons from '@/components/target-status/ExportButtons';
 import TargetRaccoglitoriGrid from '@/components/target-status/TargetRaccoglitoriGrid';
 import CommessaEcotyreForm from '@/components/target-status/CommessaEcotyreForm';
 import TargetAnnuali from '@/pages/TargetAnnuali';
+import ReportGenerale from '@/components/target-status/ReportGenerale';
+import CanaleAci from '@/components/target-status/CanaleAci';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/lib/AuthContext';
@@ -21,6 +23,8 @@ import { tonnellate, ANNI_TARGET } from '@/lib/target';
 import { Loader2, RefreshCw, Filter, X } from 'lucide-react';
 
 // Target & Status: unico punto in cui si scrivono i target.
+// RETE, ACI ed Extra Raccolta sono canali indipendenti: i target si confrontano
+// solo con la RETE e l'ACI si guarda a parte, contro la previsione del suo contratto.
 // - Andamento: target contro raccolto per raccoglitore, regione e impianto, e il
 //   raccolto per regione confrontato con il contratto. Solo lettura.
 // - Target raccoglitori: annuo e mensile per raccoglitore, regione e impianto.
@@ -112,6 +116,7 @@ export default function TargetStatus() {
   const scheda = SCHEDE.includes(params.get('tab')) ? params.get('tab') : 'andamento';
   const [anno, setAnno] = useState(new Date().getFullYear());
   const [raccolto, setRaccolto] = useState(null);
+  const [raccoltoAci, setRaccoltoAci] = useState(null);
   const [targets, setTargets] = useState([]);
   const [annui, setAnnui] = useState([]);
   const [commessa, setCommessa] = useState(null);
@@ -123,14 +128,16 @@ export default function TargetStatus() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [raccoltoRes, targetRes, annuiRes, commessaRes, impTargetRes] = await Promise.all([
-        base44.functions.invoke('computeRaccolto', { filters: { ...filters, anno: [anno] } }),
+      const [raccoltoRes, aciRes, targetRes, annuiRes, commessaRes, impTargetRes] = await Promise.all([
+        base44.functions.invoke('computeRaccolto', { filters: { ...filters, anno: [anno], canale: 'rete' } }),
+        base44.functions.invoke('computeRaccolto', { filters: { anno: [anno], canale: 'aci' } }).catch(() => null),
         fetchAllClient(base44.entities.TargetMensile, { anno }),
         fetchAllClient(base44.entities.TargetRaccoglitore, { anno }),
         base44.entities.CommessaEcotyre.filter({ anno }).catch(() => []),
         fetchAllClient(base44.entities.ImpiantoTarget),
       ]);
       setRaccolto(raccoltoRes.data);
+      setRaccoltoAci(aciRes ? aciRes.data : null);
       setTargets(targetRes);
       setAnnui(annuiRes);
       setCommessa(commessaRes[0] || null);
@@ -308,8 +315,13 @@ export default function TargetStatus() {
             <>
               <KpiCards kpis={kpis} />
               <div>
-                <h2 className="text-lg font-heading font-semibold mb-3">Raccolta per regione e contratto</h2>
+                <h2 className="text-lg font-heading font-semibold mb-3">Raccolta RETE per regione e contratto</h2>
                 <AndamentoRegioni raccolto={raccolto} commessa={commessa} anno={anno} />
+              </div>
+              <div>
+                <h2 className="text-lg font-heading font-semibold mb-1">Report generale</h2>
+                <p className="text-xs text-muted-foreground mb-3">Target assegnati e raccolto RETE per impianto, regione e raccoglitore, come nel foglio del file di gestione.</p>
+                <ReportGenerale anno={anno} mensili={targets} annui={annui} raccolto={raccolto} commessa={commessa} />
               </div>
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-1">Target e raccolto per raccoglitore</h2>
@@ -324,6 +336,11 @@ export default function TargetStatus() {
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-3">Progressivo e avanzamento impianti</h2>
                 <ImpiantiTable data={impiantiData} onSaveTarget={saveImpiantoTarget} />
+              </div>
+              <div>
+                <h2 className="text-lg font-heading font-semibold mb-1">Canale ACI</h2>
+                <p className="text-xs text-muted-foreground mb-3">Ritiri dai centri di demolizione, separati dalla RETE.</p>
+                <CanaleAci raccoltoAci={raccoltoAci} commessa={commessa} anno={anno} />
               </div>
             </>
           )}
