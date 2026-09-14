@@ -19,7 +19,7 @@ export const FONTI_UFFICIALI = [
 
 export type VoceConoscenza = {
   id: string;
-  area: 'pfu' | 'tua' | 'rentri' | 'documenti';
+  area: 'pfu' | 'tua' | 'albo' | 'rentri' | 'documenti';
   titolo: string;
   testo: string;
   fonti: string[];
@@ -85,10 +85,28 @@ export const BASE_CONOSCENZA: VoceConoscenza[] = [
     fonti: ['D.Lgs. 152/2006 art. 193'],
   },
   {
-    id: 'tua-albo', area: 'tua', verificato_il: VERIFICATO_IL,
+    id: 'tua-albo', area: 'albo', verificato_il: VERIFICATO_IL,
     titolo: 'Iscrizione all\'Albo Nazionale Gestori Ambientali',
-    testo: 'Chi raccoglie e trasporta PFU per conto di terzi deve essere iscritto all\'Albo nella categoria 4, raccolta e trasporto di rifiuti speciali non pericolosi (la 5 riguarda i pericolosi). L\'iscrizione si rinnova ogni cinque anni e richiede garanzie finanziarie. Nel provvedimento vanno verificati il codice EER 16 01 03 (pneumatici fuori uso) e i veicoli utilizzati: un automezzo non elencato non puo\' trasportare quei rifiuti.',
-    fonti: ['D.Lgs. 152/2006 art. 212', 'DM 3 giugno 2014 n. 120'],
+    testo: 'Chi raccoglie e trasporta PFU per conto di terzi deve essere iscritto all\'Albo nella categoria 4, raccolta e trasporto di rifiuti speciali non pericolosi (la 5 riguarda i pericolosi). L\'iscrizione dura cinque anni e si rinnova con autocertificazione della permanenza dei requisiti. Nel provvedimento vanno verificati il codice EER 16 01 03 (pneumatici fuori uso), i veicoli utilizzati (un automezzo non elencato non puo\' trasportare quei rifiuti), la classe e il responsabile tecnico.',
+    fonti: ['D.Lgs. 152/2006 art. 212', 'DM 3 giugno 2014 n. 120 artt. 8, 9, 22'],
+  },
+  {
+    id: 'albo-categorie-classi', area: 'albo', verificato_il: VERIFICATO_IL,
+    titolo: 'Categorie, classi e requisiti finanziari dell\'Albo',
+    testo: 'Categorie principali: 1 rifiuti urbani; 2-bis produttori che trasportano i propri rifiuti; 4 speciali non pericolosi; 5 speciali pericolosi; 8 intermediazione e commercio senza detenzione; 9 bonifica dei siti; 10 bonifica dei beni contenenti amianto. Per le categorie 4, 5 e 8 la classe dipende dalle tonnellate annue complessivamente gestite dall\'impresa (tutti i rifiuti, non solo i PFU): A almeno 200.000; B da 60.000 a 200.000; C da 15.000 a 60.000; D da 6.000 a 15.000; E da 3.000 a 6.000; F meno di 3.000. Un fornitore che gestisce piu\' tonnellate di quelle consentite dalla sua classe va segnalato. In categoria 4 la capacita\' finanziaria e\' di 9.000 euro per il primo veicolo e, per ogni veicolo in piu\', 5.000 euro se supera 3,5 t o 900 euro se non le supera; le garanzie finanziarie a favore dello Stato servono invece per i rifiuti pericolosi e per l\'intermediazione. E\' intermediario, e va iscritto in categoria 8, chi dispone il recupero o lo smaltimento di rifiuti per conto di terzi senza averne la materiale disponibilita\'. Diritto annuale per le categorie 1, 4, 5 e 8: da 150 euro (classe F) a 1.800 euro (classe A).',
+    fonti: ['DM 3 giugno 2014 n. 120 artt. 8, 9, 11, 24', 'D.Lgs. 152/2006 artt. 183 c. 1 lett. l, 212 c. 10'],
+  },
+  {
+    id: 'albo-responsabile-tecnico', area: 'albo', verificato_il: VERIFICATO_IL,
+    titolo: 'Il responsabile tecnico (RT) e i suoi compiti',
+    testo: 'Le imprese iscritte nelle categorie 1, 4, 5, 8, 9 e 10 nominano un responsabile tecnico, anche esterno, che opera in modo effettivo e continuativo. Requisiti: diploma di scuola secondaria di secondo grado, esperienza nel settore secondo categoria e classe (Allegato A della Delibera 6/2025) e idoneita\' accertata con verifica. Compiti (Delibera 1/2019): coordina il personale; definisce le procedure per emergenze, incidenti e imprevisti; vigila sul rispetto delle prescrizioni dell\'iscrizione; verifica la validita\' delle iscrizioni e delle autorizzazioni dei soggetti a cui affida i rifiuti; nelle categorie 1, 4 e 5 redige e firma l\'attestazione di idoneita\' dei veicoli e ne controlla il mantenimento. Chi e\' RT di piu\' imprese deve comunicare a ciascuna gli altri incarichi.',
+    fonti: ['DM 3 giugno 2014 n. 120 artt. 12-13', 'Delibera Albo n. 1 del 23 gennaio 2019', 'Delibera Albo n. 6 del 26 novembre 2025'],
+  },
+  {
+    id: 'albo-rt-verifiche', area: 'albo', verificato_il: VERIFICATO_IL,
+    titolo: 'Verifiche di idoneita\' del responsabile tecnico',
+    testo: 'Dal 2 gennaio 2026 vale la Delibera Albo n. 6 del 26 novembre 2025, che ha riunito la disciplina e abrogato le precedenti (tra cui la n. 6 del 30 maggio 2017). Verifica iniziale: modulo generale piu\' almeno un modulo specialistico (trasporto per le categorie 1, 4 e 5; intermediazione per la 8; bonifica siti per la 9; amianto per la 10), al massimo tre moduli per sessione; 40 quiz a risposta multipla per modulo in 60 minuti; +1 per risposta esatta, -0,5 per errata, 0 per non data; si supera con almeno 32 punti nel generale e 34 nello specialistico. L\'idoneita\' vale cinque anni. Verifica di aggiornamento: solo il modulo specialistico, che contiene anche quiz generali, soglia 28 punti; si puo\' sostenere dall\'anno prima della scadenza fino a 12 mesi dopo, ma dalla scadenza al superamento il RT non puo\' operare; oltre i 12 mesi si ripete la verifica iniziale. Il legale rappresentante con tre anni continuativi di esperienza nel settore puo\' essere dispensato dalle verifiche solo per la propria impresa; restano titolo di studio ed esperienza e la dispensa decade se cessa la rappresentanza. I 3.600 quiz ufficiali aggiornati, attenti alla tracciabilita\' digitale, sono pubblicati sul sito dell\'Albo dal 19 dicembre 2025; il SISTRI e\' abolito dal 2019 e sostituito dal RENTRI.',
+    fonti: ['Delibera Albo n. 6 del 26 novembre 2025', 'https://www.albonazionalegestoriambientali.it'],
   },
   {
     id: 'tua-autorizzazioni', area: 'tua', verificato_il: VERIFICATO_IL,
