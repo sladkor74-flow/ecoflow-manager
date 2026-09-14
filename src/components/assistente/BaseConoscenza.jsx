@@ -12,7 +12,6 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { useToast } from '@/components/ui/use-toast';
 import { conModifica, dataOra, nomeUtente } from '@/lib/target';
 import { AREE } from '@/components/assistente/ChatAssistente';
-import { BASE_CONOSCENZA, VERIFICATO_IL } from '../../../base44/shared/baseConoscenza.ts';
 import { Loader2, ShieldCheck, Plus, Pencil, Check, X, RefreshCw, Sparkles } from 'lucide-react';
 
 // Base di conoscenza dell'Assistente: voci verificate nel codice, voci aggiunte
@@ -172,6 +171,7 @@ export default function BaseConoscenza() {
   const admin = user?.role === 'admin';
   const { toast } = useToast();
   const [voci, setVoci] = useState([]);
+  const [codice, setCodice] = useState({ voci: [], verificato_il: '' });
   const [controlli, setControlli] = useState([]);
   const [caricamento, setCaricamento] = useState(true);
   const [controllo, setControllo] = useState(false);
@@ -180,12 +180,14 @@ export default function BaseConoscenza() {
 
   const carica = useCallback(async () => {
     try {
-      const [v, c] = await Promise.all([
+      const [v, c, k] = await Promise.all([
         base44.entities.ConoscenzaAssistente.list('-created_date', 500),
         base44.entities.ControlloNormativo.list('-created_date', 5),
+        base44.functions.invoke('baseConoscenzaAssistente', {}).then(r => r.data).catch(() => null),
       ]);
       setVoci(v);
       setControlli(c);
+      if (k && Array.isArray(k.voci)) setCodice(k);
     } catch (e) {
       console.error(e);
     } finally {
@@ -197,6 +199,7 @@ export default function BaseConoscenza() {
   const proposte = voci.filter(v => v.stato === 'proposta');
   const approvate = voci.filter(v => v.stato === 'approvata' && (mostraDisattive || v.attiva !== false));
   const sostituzioni = useMemo(() => new Map(voci.filter(v => v.stato === 'approvata' && v.attiva !== false && v.tipo === 'aggiornamento_normativo' && v.voce_id).map(v => [v.voce_id, v])), [voci]);
+  const BASE_CONOSCENZA = codice.voci;
   const aggiunte = approvate.filter(v => !(v.tipo === 'aggiornamento_normativo' && v.voce_id && BASE_CONOSCENZA.some(b => b.id === v.voce_id)));
 
   const decidi = async (p, stato, testo) => {
@@ -307,7 +310,7 @@ export default function BaseConoscenza() {
 
       <div className="space-y-2">
         <p className="font-semibold flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-600" /> Voci verificate</p>
-        <p className="text-sm text-muted-foreground">Studiate e verificate sulle fonti ufficiali (ultima verifica complessiva {VERIFICATO_IL}). Un aggiornamento approvato ne prende il posto finché non viene riscritto nel codice.</p>
+        <p className="text-sm text-muted-foreground">Studiate e verificate sulle fonti ufficiali (ultima verifica complessiva {codice.verificato_il || '—'}). Un aggiornamento approvato ne prende il posto finché non viene riscritto nel codice.</p>
         <Accordion type="multiple" className="border rounded-xl bg-card px-4">
           {AREE.map(a => {
             const delArea = BASE_CONOSCENZA.filter(v => v.area === a.valore);
