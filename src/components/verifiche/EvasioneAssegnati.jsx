@@ -25,7 +25,7 @@ function Barra({ valore, massimo }) {
 // Il target si legge da Target & Status, dove si scrive: qui e' solo mostrato.
 function CampoTarget({ riga }) {
   const dettaglio = (riga.target_regioni || []).filter(r => r.target_t || r.non_raccoglie)
-    .map(r => `${[r.regione, r.impianto].filter(Boolean).join(' verso ')}: ${r.non_raccoglie ? 'non raccoglie' : `${r.target_t.toLocaleString('it-IT')} t`}`).join('\n');
+    .map(r => `${[r.regione, r.impianto].filter(Boolean).join(' verso ')}: ${r.non_raccoglie ? 'non raccoglie' : `${r.target_t.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t`}`).join('\n');
   return (
     <Link to="/target-status?tab=raccoglitori" className="tabular-nums hover:underline" title={`${dettaglio ? dettaglio + '\n' : ''}Si modifica in Target & Status`}>
       {riga.target_kg ? `${tonnellate(riga.target_kg)} t` : <span className="text-muted-foreground">—</span>}

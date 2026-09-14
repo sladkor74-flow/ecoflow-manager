@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { computeRaccoltoData, MESI } from "../../shared/raccoltoCalculator.ts";
 import { aggregaTargetMensili, aggregaTargetAnnui } from "../../shared/targetRaccoglitori.ts";
@@ -77,9 +78,9 @@ export default async function(req) {
 
     // 7. Genera workbook
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(raccoglitoriRows), "Raccoglitori");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(regioniRows), "Regioni");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(impiantiRows), "Impianti");
+    XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, XLSX.utils.aoa_to_sheet(raccoglitoriRows)), "Raccoglitori");
+    XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, XLSX.utils.aoa_to_sheet(regioniRows)), "Regioni");
+    XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, XLSX.utils.aoa_to_sheet(impiantiRows)), "Impianti");
 
     const xlsxBase64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
 

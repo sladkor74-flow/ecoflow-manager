@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { formatoKg } from "../../shared/formato.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
 
@@ -76,15 +77,15 @@ export default async function(req) {
 
       let frase;
       if (viaggiSett === 0) {
-        frase = `${imp.nome_impianto}: nessun trasporto registrato nella settimana ${dateStr(lastMonday)}→${dateStr(lastSunday)}. Recupero previsto: ${kgPerSett.toLocaleString('it-IT')} kg/settimana (${viaggiPerSett} viaggi) per le ${settRim} settimane rimanenti. Residuo: ${residuo.toLocaleString('it-IT')} kg.`;
+        frase = `${imp.nome_impianto}: nessun trasporto registrato nella settimana ${dateStr(lastMonday)}→${dateStr(lastSunday)}. Recupero previsto: ${formatoKg(kgPerSett)} kg/settimana (${viaggiPerSett} viaggi) per le ${settRim} settimane rimanenti. Residuo: ${formatoKg(residuo)} kg.`;
       } else if (Math.abs(deltaSett) <= KG_PER_VIAGGIO) {
-        frase = `${imp.nome_impianto}: settimana in linea — ${execSett.toLocaleString('it-IT')} kg trasportati (${viaggiSett} viaggi) vs ${prevSett.toLocaleString('it-IT')} kg previsti. Mantieni ${kgPerSett.toLocaleString('it-IT')} kg/settimana (${viaggiPerSett} viaggi) per le ${settRim} settimane rimanenti. Residuo: ${residuo.toLocaleString('it-IT')} kg.`;
+        frase = `${imp.nome_impianto}: settimana in linea — ${formatoKg(execSett)} kg trasportati (${viaggiSett} viaggi) vs ${formatoKg(prevSett)} kg previsti. Mantieni ${formatoKg(kgPerSett)} kg/settimana (${viaggiPerSett} viaggi) per le ${settRim} settimane rimanenti. Residuo: ${formatoKg(residuo)} kg.`;
       } else if (deltaSett > 0) {
         const nuovaPrev = Math.max(0, kgPerSett - Math.round(deltaSett / settRim));
-        frase = `${imp.nome_impianto}: anticipo di ${deltaSett.toLocaleString('it-IT')} kg (${deltaViaggi} viaggi) — ${execSett.toLocaleString('it-IT')} kg vs ${prevSett.toLocaleString('it-IT')} kg previsti. Suggerisco di ridurre le settimane rimanenti a ~${nuovaPrev.toLocaleString('it-IT')} kg/settimana per mantenere la costanza. Residuo: ${residuo.toLocaleString('it-IT')} kg.`;
+        frase = `${imp.nome_impianto}: anticipo di ${formatoKg(deltaSett)} kg (${deltaViaggi} viaggi) — ${formatoKg(execSett)} kg vs ${formatoKg(prevSett)} kg previsti. Suggerisco di ridurre le settimane rimanenti a ~${formatoKg(nuovaPrev)} kg/settimana per mantenere la costanza. Residuo: ${formatoKg(residuo)} kg.`;
       } else {
         const nuovaPrev = kgPerSett + Math.round(Math.abs(deltaSett) / Math.max(1, settRim));
-        frase = `${imp.nome_impianto}: ritardo di ${Math.abs(deltaSett).toLocaleString('it-IT')} kg (${Math.abs(deltaViaggi)} viaggi) — ${execSett.toLocaleString('it-IT')} kg vs ${prevSett.toLocaleString('it-IT')} kg previsti. Suggerisco di aumentare le settimane rimanenti a ~${nuovaPrev.toLocaleString('it-IT')} kg/settimana. Residuo: ${residuo.toLocaleString('it-IT')} kg.`;
+        frase = `${imp.nome_impianto}: ritardo di ${formatoKg(Math.abs(deltaSett))} kg (${Math.abs(deltaViaggi)} viaggi) — ${formatoKg(execSett)} kg vs ${formatoKg(prevSett)} kg previsti. Suggerisco di aumentare le settimane rimanenti a ~${formatoKg(nuovaPrev)} kg/settimana. Residuo: ${formatoKg(residuo)} kg.`;
       }
       parti.push(frase);
     }

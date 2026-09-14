@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { MESI } from "../../shared/raccoltoCalculator.ts";
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
@@ -47,7 +48,7 @@ export default async function(req) {
         matrix[key]['Quantità Richiesta'] += (r.quantita_richiesta || 0);
       }
       const ws = XLSX.utils.json_to_sheet(Object.values(matrix));
-      XLSX.utils.book_append_sheet(wb, ws, 'Matrice Aggregata');
+      XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), 'Matrice Aggregata');
     } else {
       const rows = filtered.map(r => ({
         'ID Ordine': r.id_ordine,
@@ -68,7 +69,7 @@ export default async function(req) {
         'Trasportatore': r.trasportatore,
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
-      XLSX.utils.book_append_sheet(wb, ws, 'Dettaglio Assegnati');
+      XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), 'Dettaglio Assegnati');
     }
 
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });

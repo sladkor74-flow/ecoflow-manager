@@ -1,5 +1,6 @@
 // Esportazione Excel e PDF per Extra Raccolta — formato amministrazione.
 import * as XLSX from 'xlsx';
+import { formattaPesi } from '@/lib/formatoExcel';
 import { jsPDF } from 'jspdf';
 import { calcExtraRaccolta, totaleRiga, aggregaPerProduttore } from './extraRaccoltaCalc';
 
@@ -104,7 +105,7 @@ export function exportExtraRaccoltaExcel(records, mese, anno) {
   }
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), sheetName);
   XLSX.writeFile(wb, `SMOCO-Fatturazione EXTRA RACCOLTA ${mese} ${anno}.xlsx`);
 }
 

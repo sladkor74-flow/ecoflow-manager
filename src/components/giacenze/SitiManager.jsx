@@ -8,7 +8,7 @@ import { Plus, Trash2, X } from 'lucide-react';
 
 const TIPOLOGIE = ['EoW', 'Frantumazione/R1', 'n.a.'];
 
-function fmt(n) { return Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmt(n) { return Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 }); }
 
 export default function SitiManager({ open, onClose, anno, destinazioni }) {
   const [siti, setSiti] = useState([]);

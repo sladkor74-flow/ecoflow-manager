@@ -198,7 +198,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                           <div className="text-sm">
                             <span className="text-muted-foreground">Riga {e.n}{e.tipo ? ` · ${e.tipo === 'uscita' ? 'uscita' : 'ingresso'}` : ''}</span>
                             <span className="font-mono ml-2">{(e.report && e.report.fir) || 'senza formulario'}</span>
-                            {e.report && e.report.kg != null && <span className="text-muted-foreground"> · {Number(e.report.kg).toLocaleString('it-IT')} kg</span>}
+                            {e.report && e.report.kg != null && <span className="text-muted-foreground"> · {Math.round(Number(e.report.kg)).toLocaleString('it-IT')} kg</span>}
                           </div>
                           <span className={`px-2 py-0.5 rounded-full border text-xs font-medium ${STILE_ESITO[e.esito]}`}>{ETICHETTE_ESITO[e.esito]}</span>
                         </div>
@@ -217,7 +217,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                       {esito.assenti.map((m, i) => (
                         <div key={i} className="px-3 py-2 text-sm flex items-center justify-between gap-3 flex-wrap">
                           <span><span className="font-mono">{m.fir}</span> <span className="text-muted-foreground">· {m.tipo === 'uscita' ? 'uscita verso ' + m.destinatario : 'ingresso'} · {dataIt(m.fine)} · {m.trasportatore}</span></span>
-                          <span className="tabular-nums">{Number(m.kg).toLocaleString('it-IT')} kg</span>
+                          <span className="tabular-nums">{Math.round(Number(m.kg)).toLocaleString('it-IT')} kg</span>
                         </div>
                       ))}
                     </div>
@@ -234,7 +234,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                         {conformi.map((e, i) => (
                           <div key={i} className="px-3 py-1.5 text-sm flex items-center justify-between gap-3">
                             <span><span className="text-muted-foreground">Riga {e.n}</span> <span className="font-mono ml-2">{e.report.fir}</span></span>
-                            <span className="tabular-nums text-muted-foreground">{Number(e.report.kg).toLocaleString('it-IT')} kg</span>
+                            <span className="tabular-nums text-muted-foreground">{Math.round(Number(e.report.kg)).toLocaleString('it-IT')} kg</span>
                           </div>
                         ))}
                       </div>

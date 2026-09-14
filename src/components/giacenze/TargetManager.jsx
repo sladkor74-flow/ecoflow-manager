@@ -10,7 +10,7 @@ const TIPOLOGIE = ['EoW', 'Frantumazione/R1', 'n.a.'];
 
 function fmt(n) {
   if (n == null || n === '' || isNaN(n)) return '—';
-  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
 }
 
 export default function TargetManager({ open, onClose, anno, destinazioni, onSaved }) {

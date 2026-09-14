@@ -226,17 +226,17 @@ export async function computeAllPivots(base44, filters, pivotKeys = null) {
     const detailMeta = { valueKeys: ['peso', 'count', 'firCount'], valueLabels: ['Peso [t]', 'Conteggio', 'FIR Univoci'], rowLabels: ['Classe', 'Mese', 'Settimana'] };
     if (shouldCompute('E')) {
       const rows = buildDetailTable(reteF, detailRowKeys, detailCollectors);
-      rows.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(2); });
+      rows.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(3); });
       result.pivotE = { rows, ...detailMeta };
     }
     if (shouldCompute('F')) {
       const rows = buildDetailTable(secF, detailRowKeys, detailCollectors);
-      rows.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(2); });
+      rows.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(3); });
       result.pivotF = { rows, ...detailMeta };
     }
     if (shouldCompute('G')) {
       const rows = buildDetailTable(aciF, detailRowKeys, detailCollectors);
-      rows.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(2); });
+      rows.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(3); });
       result.pivotG = { rows, ...detailMeta };
     }
   }

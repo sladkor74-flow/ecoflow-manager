@@ -49,7 +49,7 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
       );
     }
     if (badge.tipo === 'mancante') {
-      const tip = `${badge.tonnellate_mancanti.toFixed(2).replace('.', ',')} t senza prezzo (${badge.count_mancanti} righe)`;
+      const tip = `${badge.tonnellate_mancanti.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t senza prezzo (${badge.count_mancanti} righe)`;
       return (
         <TooltipProvider>
           <Tooltip>
@@ -77,7 +77,7 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Volume raccolto</p>
-            <p className="text-xl font-semibold">{data.totale_ton.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t</p>
+            <p className="text-xl font-semibold">{data.totale_ton.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Ordini</p>
@@ -91,7 +91,7 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
         <div className="border-2 border-destructive/40 bg-destructive/5 rounded-lg p-4">
           <div className="flex items-center gap-2 text-destructive font-semibold mb-2">
             <AlertTriangle className="w-5 h-5" />
-            <span>{anomalie.length} combinazioni senza tariffa — {tonnSenzaPrezzo.toFixed(2).replace('.', ',')} t senza prezzo</span>
+            <span>{anomalie.length} combinazioni senza tariffa — {tonnSenzaPrezzo.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t senza prezzo</span>
           </div>
           <div className="space-y-1 max-h-48 overflow-y-auto">
             {anomalie.map((a, i) => (
@@ -100,7 +100,7 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
                 {a.regione && <span> — {a.regione}</span>}
                 {a.classe && <span> — classe {a.classe}</span>}
                 {a.eer_codice && <span> — EER {a.eer_codice}</span>}
-                <span className="text-muted-foreground">: {a.tonnellate.toFixed(2).replace('.', ',')} t senza tariffa</span>
+                <span className="text-muted-foreground">: {a.tonnellate.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t senza tariffa</span>
               </div>
             ))}
           </div>
@@ -122,7 +122,7 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
             </div>
             <p className="text-2xl font-bold">€ {t.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
             <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-              <span>{t.volume_ton.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t</span>
+              <span>{t.volume_ton.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t</span>
               <span>•</span>
               <span>{t.ordini} ordini</span>
             </div>
@@ -132,7 +132,7 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
                   <div key={r.regione} className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground truncate">{r.regione}</span>
                     <div className="flex items-center gap-2">
-                      <span className="tabular-nums">{(r.kg / 1000).toLocaleString('it-IT', { maximumFractionDigits: 1 })} t</span>
+                      <span className="tabular-nums">{(r.kg / 1000).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t</span>
                       <span className="font-medium tabular-nums">€ {r.totale.toLocaleString('it-IT', { maximumFractionDigits: 0 })}</span>
                     </div>
                   </div>
@@ -180,13 +180,13 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
                 <tr className="border-b">
                   <td className="py-2 pr-4 font-medium">Trasp (pri)</td>
                   <td className="py-2 pr-4 text-right tabular-nums">{data.ripartizione_servizio.TRASP.ordini}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{data.ripartizione_servizio.TRASP.kg.toLocaleString('it-IT')}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{Math.round(data.ripartizione_servizio.TRASP.kg).toLocaleString('it-IT')}</td>
                   <td className="py-2 text-right tabular-nums">{data.ripartizione_servizio.TRASP.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 </tr>
                 <tr className="border-b">
                   <td className="py-2 pr-4 font-medium">Trasp+Tratt (pri)</td>
                   <td className="py-2 pr-4 text-right tabular-nums">{data.ripartizione_servizio.TRASP_TRATT.ordini}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{data.ripartizione_servizio.TRASP_TRATT.kg.toLocaleString('it-IT')}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{Math.round(data.ripartizione_servizio.TRASP_TRATT.kg).toLocaleString('it-IT')}</td>
                   <td className="py-2 text-right tabular-nums">{data.ripartizione_servizio.TRASP_TRATT.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 </tr>
               </tbody>

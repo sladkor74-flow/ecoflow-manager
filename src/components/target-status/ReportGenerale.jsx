@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { MESI } from '@/lib/pfuConstants';
-import { tonnellate, chiaveNome } from '@/lib/target';
+import { tonnellate, percentuale, chiaveNome } from '@/lib/target';
 import { calcolaReportGenerale, raggruppa, sommaRighe, valoriMese, impiantiMese, totaliPerImpianto } from '@/lib/reportGeneraleVista';
 
 // Report Generale: target assegnati contro raccolto RETE per regione e
@@ -22,7 +22,7 @@ function Celle({ v, forte }) {
       <td className={`px-2 py-1.5 text-right tabular-nums ${segno(v.delta)} ${c}`}>{v.target || v.raccolto ? num(v.delta) : '—'}</td>
       <td className={`px-2 py-1.5 text-right tabular-nums border-l ${c}`}>{num(v.progressivo)}</td>
       <td className={`px-2 py-1.5 text-right tabular-nums ${v.residuo < 0 ? 'text-emerald-700' : ''} ${c}`}>{v.annuo ? num(v.residuo) : '—'}</td>
-      <td className={`px-2 py-1.5 text-right tabular-nums ${c}`}>{v.percentualeAnnuo !== null ? `${tonnellate(v.percentualeAnnuo)}%` : '—'}</td>
+      <td className={`px-2 py-1.5 text-right tabular-nums ${c}`}>{v.percentualeAnnuo !== null ? `${percentuale(v.percentualeAnnuo)}%` : '—'}</td>
     </>
   );
 }
@@ -157,7 +157,7 @@ export default function ReportGenerale({ anno, mensili, annui, raccolto, commess
                 <tr key={i.impianto} className="border-t">
                   <td className="px-3 py-1.5">{i.impianto}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{num(i.raccolto)}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{vTot.raccolto > 0 ? `${tonnellate(i.raccolto / vTot.raccolto * 100)}%` : '—'}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{vTot.raccolto > 0 ? `${percentuale(i.raccolto / vTot.raccolto * 100)}%` : '—'}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{num(i.progressivo)}</td>
                 </tr>
               ))}

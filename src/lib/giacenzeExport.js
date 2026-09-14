@@ -1,9 +1,10 @@
 import * as XLSX from 'xlsx';
+import { formattaPesi } from '@/lib/formatoExcel';
 import { jsPDF } from 'jspdf';
 
 function fmt(n) {
   if (n === null || n === undefined || n === '') return '—';
-  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
 }
 
 export function exportGiacenzeExcel(righe, totali, aciRighe, anno) {
@@ -22,7 +23,7 @@ export function exportGiacenzeExcel(righe, totali, aciRighe, anno) {
     totali.uscite_css_t, totali.uscite_ferro_t, totali.dichiarato_r3_t,
     totali.giacenza_attuale_t, totali.conferito_t, '']);
   const ws1 = XLSX.utils.aoa_to_sheet([mainHeaders, ...mainRows]);
-  XLSX.utils.book_append_sheet(wb, ws1, 'Giacenze');
+  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws1), 'Giacenze');
 
   const aciHeaders = ['Sito', 'Ruolo', 'ACI in da primarie (t)', 'ACI in da secondarie (t)', 'ACI in uscita (t)', 'Dichiarato inviato (t)', 'Dichiarato da inviare (t)', 'Giacenza ACI reale (t)', 'Divergenza a portale (t)'];
   const aciRows = aciRighe.map(r => [
@@ -31,7 +32,7 @@ export function exportGiacenzeExcel(righe, totali, aciRighe, anno) {
     r.aci_dichiarato_t, r.aci_predisposto_t, r.giacenza_aci_t, r.divergenza_portale_t,
   ]);
   const ws2 = XLSX.utils.aoa_to_sheet([aciHeaders, ...aciRows]);
-  XLSX.utils.book_append_sheet(wb, ws2, 'Posizione ACI');
+  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws2), 'Posizione ACI');
 
   XLSX.writeFile(wb, `Giacenze_${anno}.xlsx`);
 }

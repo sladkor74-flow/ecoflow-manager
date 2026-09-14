@@ -1,5 +1,5 @@
 import React from 'react';
-import { tonnellate } from '@/lib/target';
+import { tonnellate, percentuale } from '@/lib/target';
 
 // Canale ACI, indipendente dalla RETE: raccolto dai centri di demolizione per
 // regione confrontato con la previsione del contratto ACI Ecotyre, che e'
@@ -44,7 +44,7 @@ export default function CanaleAci({ raccoltoAci, commessa, anno }) {
               <td className="px-3 py-2 font-medium">{r.regione}</td>
               <td className="px-3 py-2 text-right tabular-nums">{r.prev ? tonnellate(r.prev) : '—'}</td>
               <td className="px-3 py-2 text-right tabular-nums">{tonnellate(r.fatto)}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{r.perc !== null ? `${tonnellate(r.perc)}%` : '—'}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{r.perc !== null ? `${percentuale(r.perc)}%` : '—'}</td>
               <td className="px-3 py-2 text-right tabular-nums">{r.prezzo ? euro(r.prezzo) : '—'}</td>
               <td className="px-3 py-2 text-right tabular-nums">{r.prezzo ? euro(r.valore) : '—'}</td>
             </tr>
@@ -53,7 +53,7 @@ export default function CanaleAci({ raccoltoAci, commessa, anno }) {
             <td className="px-3 py-2">Totale</td>
             <td className="px-3 py-2 text-right tabular-nums">{tonnellate(tot.prev)}</td>
             <td className="px-3 py-2 text-right tabular-nums">{tonnellate(tot.fatto)}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{tot.prev ? `${tonnellate((tot.fatto / tot.prev) * 100)}%` : '—'}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{tot.prev ? `${percentuale((tot.fatto / tot.prev) * 100)}%` : '—'}</td>
             <td />
             <td className="px-3 py-2 text-right tabular-nums">{euro(tot.valore)}</td>
           </tr>

@@ -249,7 +249,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                     {Object.entries(s.classi).sort((a, b) => b[1].ordini - a[1].ordini).map(([cl, v]) => (
                       <div key={cl} className="grid grid-cols-3 gap-2 py-0.5 tabular-nums">
                         <span>{cl}</span><span className="text-right">{v.ordini}</span>
-                        <span className="text-right">{v.kg_medio_ordine ? `${v.kg_medio_ordine.toLocaleString('it-IT')} kg` : '—'}</span>
+                        <span className="text-right">{v.kg_medio_ordine ? `${Math.round(v.kg_medio_ordine).toLocaleString('it-IT')} kg` : '—'}</span>
                       </div>
                     ))}
                   </div>
@@ -313,7 +313,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                           <td className="px-2 py-1.5"><span className={`px-1.5 py-0.5 rounded-full border ${(STATI_RICHIESTA[r.stato] || STATI_RICHIESTA.aperta).classe}`}>{(STATI_RICHIESTA[r.stato] || {}).etichetta || r.stato}</span></td>
                           <td className="px-2 py-1.5 tabular-nums">{r.chiusa_il ? dataIt(r.chiusa_il) : ''}{r.chiusa_da && r.stato !== 'evasa' ? <div className="text-muted-foreground">{r.stato === 'riassegnata' ? 'a ' : 'da '}{r.chiusa_da}</div> : null}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums">
-                            {r.kg !== null && r.kg !== undefined ? `${r.kg.toLocaleString('it-IT')} kg` : r.stima_kg ? <span className="text-muted-foreground" title={r.metodo_stima}>~{r.stima_kg.toLocaleString('it-IT')} kg</span> : ''}
+                            {r.kg !== null && r.kg !== undefined ? `${Math.round(r.kg).toLocaleString('it-IT')} kg` : r.stima_kg ? <span className="text-muted-foreground" title={r.metodo_stima}>~{r.stima_kg.toLocaleString('it-IT')} kg</span> : ''}
                           </td>
                           <td className="px-2 py-1.5 text-muted-foreground">
                             {r.assegnata_sul_portale_a && <div>sul portale: {r.assegnata_sul_portale_a}</div>}
@@ -350,7 +350,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                         <span className="text-muted-foreground">
                           {f.tipo === 'stesso_pdr' ? `stesso punto di raccolta della richiesta ${f.richiesta}` : f.tipo === 'nuova' ? 'immesso dopo l\'invio della lista' : f.tipo === 'lista_altrui' ? `dalla lista di ${f.lista_di}` : 'già esistente all\'invio'}
                         </span>
-                        <span className="tabular-nums">{f.kg.toLocaleString('it-IT')} kg</span>
+                        <span className="tabular-nums">{Math.round(f.kg).toLocaleString('it-IT')} kg</span>
                       </span>
                     </div>
                   ))}

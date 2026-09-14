@@ -91,9 +91,9 @@ export default async function(req) {
       const outSped = outputs[imp]?.spedizioni || 0;
       return {
         impianto: imp,
-        ingressi_t: +ing.toFixed(2),
-        uscite_t: +out.toFixed(2),
-        giacenza_t: +(ing - out).toFixed(2),
+        ingressi_t: +ing.toFixed(3),
+        uscite_t: +out.toFixed(3),
+        giacenza_t: +(ing - out).toFixed(3),
         spedizioni_ingresso: ingSped,
         spedizioni_uscita: outSped,
       };

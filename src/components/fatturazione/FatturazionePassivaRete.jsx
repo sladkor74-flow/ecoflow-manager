@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formattaPesi } from '@/lib/formatoExcel';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -68,7 +69,7 @@ export default function FatturazionePassivaRete({ isAdmin }) {
       });
       const ws = XLSX.utils.json_to_sheet(data);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, `Fatturazione ${mese} ${anno}`);
+      XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), `Fatturazione ${mese} ${anno}`);
       XLSX.writeFile(wb, `Fatturazione_Passiva_Rete_${mese}_${anno}.xlsx`);
     } catch (e) { setError('Export Excel fallito: ' + e.message); }
     setExporting(false);
@@ -166,11 +167,11 @@ export default function FatturazionePassivaRete({ isAdmin }) {
                 </div>
                 <div className="border rounded-lg p-3">
                   <p className="text-xs text-muted-foreground">Totale Viaggi</p>
-                  <p className="text-xl font-bold">{formatNumber(risultato.dettaglio.reduce((s, r) => s + r.num_viaggi, 0))}</p>
+                  <p className="text-xl font-bold">{formatNumber(risultato.dettaglio.reduce((s, r) => s + r.num_viaggi, 0), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                 </div>
                 <div className="border rounded-lg p-3">
                   <p className="text-xs text-muted-foreground">Totale FIR</p>
-                  <p className="text-xl font-bold">{formatNumber(risultato.dettaglio.reduce((s, r) => s + (r.firCount || 0), 0))}</p>
+                  <p className="text-xl font-bold">{formatNumber(risultato.dettaglio.reduce((s, r) => s + (r.firCount || 0), 0), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                 </div>
                 <div className="border rounded-lg p-3 bg-primary/5">
                   <p className="text-xs text-muted-foreground">Totale [€]</p>

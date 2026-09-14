@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
@@ -49,7 +50,7 @@ export default async function(req) {
         trattaMap[key]['Quantità'] += (r.quantita_ritirata || 0);
       }
       const wsTratte = XLSX.utils.json_to_sheet(Object.values(trattaMap));
-      XLSX.utils.book_append_sheet(wb, wsTratte, 'Sintesi per Tratta');
+      XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, wsTratte), 'Sintesi per Tratta');
 
       // Foglio: sintesi per classe
       const classeMap: Record<string, any> = {};
@@ -62,7 +63,7 @@ export default async function(req) {
         classeMap[c]['Quantità'] += (r.quantita_ritirata || 0);
       }
       const wsClassi = XLSX.utils.json_to_sheet(Object.values(classeMap));
-      XLSX.utils.book_append_sheet(wb, wsClassi, 'Sintesi per Classe');
+      XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, wsClassi), 'Sintesi per Classe');
     } else {
       const rows = filtered.map(r => ({
         'ID Ordine': r.id_ordine,
@@ -89,7 +90,7 @@ export default async function(req) {
         'Ordine Chiuso': r.ordine_chiuso_il ? new Date(r.ordine_chiuso_il).toLocaleDateString('it-IT') : '',
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
-      XLSX.utils.book_append_sheet(wb, ws, 'Dettaglio Secondarie');
+      XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), 'Dettaglio Secondarie');
     }
 
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });

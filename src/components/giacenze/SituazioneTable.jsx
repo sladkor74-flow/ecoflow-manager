@@ -5,7 +5,8 @@ import { AlertTriangle } from 'lucide-react';
 
 function fmt(n, dec = 2) {
   if (n == null || n === '' || isNaN(n)) return '—';
-  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  // Conteggi interi; tonnellate con due decimali, tre se i kg non sono tondi.
+  return Number(n).toLocaleString('it-IT', dec === 0 ? { minimumFractionDigits: 0, maximumFractionDigits: 0 } : { minimumFractionDigits: 2, maximumFractionDigits: 3 });
 }
 
 const IN_ATTESA_TOOLTIP = "Materiale gia' partito da questo stoccaggio verso un impianto: il portale lo attribuisce ancora qui finche' il destinatario non presenta la dichiarazione. Non e' giacenza.";

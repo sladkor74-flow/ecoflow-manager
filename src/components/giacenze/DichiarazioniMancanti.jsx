@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 
-function fmt(n) { return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmt(n) { return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 }); }
 
 export default function DichiarazioniMancanti({ mancanti }) {
   const [open, setOpen] = useState(false);

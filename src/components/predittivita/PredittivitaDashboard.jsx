@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Calendar, Layers, Edit3, Loader2, Warehouse, Truck, Factory, Building2 } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 
-function fmt(n) { return (n || 0).toLocaleString('it-IT'); }
+function fmt(n) { return Math.round(n || 0).toLocaleString('it-IT'); }
 
 function EditableIpotesi({ value, onSave }) {
   const [editing, setEditing] = useState(false);

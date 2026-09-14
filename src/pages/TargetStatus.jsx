@@ -19,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/lib/AuthContext';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { fetchAllClient } from '@/lib/fetchAllClient';
-import { tonnellate, ANNI_TARGET } from '@/lib/target';
+import { tonnellate, percentuale, ANNI_TARGET } from '@/lib/target';
 import { Loader2, RefreshCw, Filter, X } from 'lucide-react';
 
 // Target & Status: unico punto in cui si scrivono i target.
@@ -86,7 +86,7 @@ function AndamentoRegioni({ raccolto, commessa, anno }) {
               <td className="px-3 py-2 text-xs text-muted-foreground">{r.province || '—'}</td>
               <td className="px-3 py-2 text-right tabular-nums">{tonnellate(r.contratto)}</td>
               <td className="px-3 py-2 text-right tabular-nums">{tonnellate(r.raccolto)}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{r.percentuale !== null ? `${tonnellate(r.percentuale)}%` : '—'}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{r.percentuale !== null ? `${percentuale(r.percentuale)}%` : '—'}</td>
               <td className="px-3 py-2 text-right tabular-nums">{tonnellate(r.atteso)}</td>
               <td className={`px-3 py-2 text-right tabular-nums font-medium ${r.scarto >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{r.scarto >= 0 ? '+' : ''}{tonnellate(r.scarto)}</td>
             </tr>
@@ -95,7 +95,7 @@ function AndamentoRegioni({ raccolto, commessa, anno }) {
             <td className="px-3 py-2" colSpan={2}>Totale</td>
             <td className="px-3 py-2 text-right tabular-nums">{tonnellate(tot.contratto)}</td>
             <td className="px-3 py-2 text-right tabular-nums">{tonnellate(tot.raccolto)}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{tot.contratto ? `${tonnellate((tot.raccolto / tot.contratto) * 100)}%` : '—'}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{tot.contratto ? `${percentuale((tot.raccolto / tot.contratto) * 100)}%` : '—'}</td>
             <td className="px-3 py-2 text-right tabular-nums">{tonnellate(tot.atteso)}</td>
             <td className={`px-3 py-2 text-right tabular-nums ${tot.raccolto - tot.atteso >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{tot.raccolto - tot.atteso >= 0 ? '+' : ''}{tonnellate(tot.raccolto - tot.atteso)}</td>
           </tr>

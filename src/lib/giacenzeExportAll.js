@@ -1,8 +1,9 @@
 import * as XLSX from 'xlsx';
+import { formattaPesi } from '@/lib/formatoExcel';
 
 function fmt(n) {
   if (n == null || n === '' || isNaN(n)) return '';
-  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
 }
 
 function fmtData(iso) {
@@ -31,7 +32,7 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
   sitRows.push(['TOTALE', '', data.totali.giacenza_portale_t, data.totali.giacenza_fisica_t, data.totali.divergenza_t, data.totali.ordini_da_dichiarare, data.totali.dichiarato_t, '']);
   const ws1 = XLSX.utils.aoa_to_sheet([sitHeaders, ...sitRows]);
   ws1['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(wb, ws1, 'Situazione');
+  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws1), 'Situazione');
 
   // --- Foglio 2: Da dichiarare ---
   const ddHeaders = ['Ordine', 'FIR', 'Data chiusura', 'Punto di raccolta', 'Comune', 'Prov.', 'Prodotto', 'CER', 'Peso da dichiarare (kg)', 'Destinazione', 'Trasferito a', 'Trasportatore'];
@@ -44,7 +45,7 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
   ddRows.push(['TOTALE', '', '', '', '', '', '', '', ordiniData.totale_kg, '', '', '']);
   const ws2 = XLSX.utils.aoa_to_sheet([ddHeaders, ...ddRows]);
   ws2['!cols'] = [{ wch: 16 }, { wch: 16 }, { wch: 12 }, { wch: 28 }, { wch: 18 }, { wch: 6 }, { wch: 18 }, { wch: 10 }, { wch: 18 }, { wch: 24 }, { wch: 24 }, { wch: 24 }];
-  XLSX.utils.book_append_sheet(wb, ws2, 'Da dichiarare');
+  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws2), 'Da dichiarare');
 
   // --- Foglio 3: Derivati ---
   const derHeaders = ['Sito', 'Dichiarato (t)', 'Granulo (t)', 'Fibre (t)', 'Metallo (t)', 'Cippato (t)', 'Ciabattato (t)'];
@@ -54,7 +55,7 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
   derRows.push(['TOTALE', data.totali.dichiarato_t, data.totali.granulo_t, data.totali.fibre_t, data.totali.metallo_t, data.totali.cippato_t, data.totali.ciabattato_t]);
   const ws3 = XLSX.utils.aoa_to_sheet([derHeaders, ...derRows]);
   ws3['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
-  XLSX.utils.book_append_sheet(wb, ws3, 'Derivati');
+  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws3), 'Derivati');
 
   // --- Foglio 4: Target ---
   // Target, residuo e copertura solo sul canale RETE; ACI ed Extra a parte.
@@ -80,7 +81,7 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
   tarRows.push(['TOTALE', '', data.totali.target_primarie_t, data.totali.target_totale_t || '', data.totali.conferito_primarie_t, data.totali.secondarie_nette_t, data.totali.secondarie_in_t, data.totali.secondarie_out_t, data.totali.terziarie_t, data.totali.conferito_t, residuoTot, copTot, data.totali.conferito_aci_t || 0, data.totali.conferito_extra_t || 0]);
   const ws4 = XLSX.utils.aoa_to_sheet([tarHeaders, ...tarRows]);
   ws4['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }];
-  XLSX.utils.book_append_sheet(wb, ws4, 'Target');
+  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws4), 'Target');
 
   XLSX.writeFile(wb, `giacenze_${anno}.xlsx`);
 }

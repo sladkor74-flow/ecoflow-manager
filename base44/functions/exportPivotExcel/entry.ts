@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { computeAllPivots, flattenTree } from "../../shared/pivotCalculator.ts";
 
@@ -31,7 +32,7 @@ export default async function(req) {
       for (const vl of tp.p.valueLabels) header.push(`Totale ${vl}`);
       const rows = flattenTree(tp.p.tree, tp.p.columns, tp.p.valueKeys, tp.maxDepth);
       const sheetData = [header, ...rows];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), tp.name.substring(0, 31));
+      XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, XLSX.utils.aoa_to_sheet(sheetData)), tp.name.substring(0, 31));
     }
 
     // Detail pivots
@@ -45,7 +46,7 @@ export default async function(req) {
       const header = [...dp.p.rowLabels, ...dp.p.valueLabels];
       const rows = dp.p.rows.map((r) => [...r.keys, ...dp.p.valueKeys.map((vk) => r.values[vk])]);
       const sheetData = [header, ...rows];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), dp.name.substring(0, 31));
+      XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, XLSX.utils.aoa_to_sheet(sheetData)), dp.name.substring(0, 31));
     }
 
     const xlsxBase64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });

@@ -23,8 +23,8 @@ export default function AssegnatiMatrix({ matrix }) {
 
   const toggle = (key) => setExpanded((p) => ({ ...p, [key]: !p[key] }));
 
-  const fmt = (n) => (n || 0).toLocaleString('it-IT', { maximumFractionDigits: 1 });
-  const fmtTon = (kg) => ((kg || 0) / 1000).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const fmt = (n) => Math.round(n || 0).toLocaleString('it-IT');
+  const fmtTon = (kg) => ((kg || 0) / 1000).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
 
   const rows = [];
   for (const [anno, semestri] of Object.entries(tree)) {

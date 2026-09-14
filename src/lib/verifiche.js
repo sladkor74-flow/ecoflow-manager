@@ -1,6 +1,8 @@
 // Strumenti del modulo Verifiche: settimane, lettura dei file caricati ed
 // esportazione in Excel dell'esito.
 
+import { formatTonnellate, formatKg } from '@/lib/utils';
+
 export const GIORNI_CONSERVAZIONE = 40;
 
 const MESI_BREVI = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
@@ -56,7 +58,7 @@ export function dataIt(d) {
 }
 
 export function tonnellate(kg) {
-  return ((Number(kg) || 0) / 1000).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatTonnellate((Number(kg) || 0) / 1000);
 }
 
 // === file caricati ===
@@ -227,7 +229,7 @@ export async function scaricaExcelVerifica(v) {
     [`di cui uscite nel gestionale${v.uscite_verificate ? '' : ', non verificate'}`, v.uscite_gestionale || 0, v.peso_uscite_kg || 0],
   ];
   for (const [k, n, kg] of dettaglio) {
-    const riga = r.addRow([k, '', `${n} carichi, ${Number(kg).toLocaleString('it-IT')} kg`]);
+    const riga = r.addRow([k, '', `${n} carichi, ${formatKg(kg)} kg`]);
     riga.getCell(1).font = { italic: true, color: { argb: 'FF6B7280' } };
     r.mergeCells(riga.number, 3, riga.number, 4);
   }
@@ -331,7 +333,7 @@ export async function scaricaExcelVerifica(v) {
   }
   for (const m of esito.assenti) {
     const cosa = m.tipo === 'uscita' ? `Uscita del ${dataIt(m.fine)} verso ${m.destinatario}` : `Ingresso del ${dataIt(m.fine)}`;
-    const riga = c.addRow([m.fir, `${cosa} di ${Number(m.kg).toLocaleString('it-IT')} kg, trasportato da ${m.trasportatore}, non riportato nel report`]);
+    const riga = c.addRow([m.fir, `${cosa} di ${formatKg(m.kg)} kg, trasportato da ${m.trasportatore}, non riportato nel report`]);
     riga.eachCell(x => { x.border = bordi; x.alignment = { wrapText: true, vertical: 'top' }; });
     righeComunicazione++;
   }

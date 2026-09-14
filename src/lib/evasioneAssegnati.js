@@ -2,6 +2,8 @@
 // Il file non viene caricato da nessuna parte: al backend arrivano le celle e,
 // per ogni riga, l'indicazione se e' evidenziata.
 
+import { formatTonnellate } from '@/lib/utils';
+
 export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
 export const STATI_RICHIESTA = {
@@ -23,7 +25,7 @@ export const GRAVITA = {
 
 export function tonnellate(kg) {
   if (kg === null || kg === undefined) return '—';
-  return ((Number(kg) || 0) / 1000).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return formatTonnellate((Number(kg) || 0) / 1000);
 }
 
 export function dataIt(d) {

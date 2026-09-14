@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
 import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
@@ -70,7 +71,7 @@ export default async function(req) {
       'Quantita ritirata': r.quantita_ritirata,
       'Peso stimato (kg)': r.peso_stimato,
       'Peso effettivo (kg)': r.peso_effettivo,
-      'Peso (t)': +((r.peso_effettivo || 0) / 1000).toFixed(2),
+      'Peso (t)': +((r.peso_effettivo || 0) / 1000).toFixed(3),
       'Materiale': getMateriale(r),
       'Mese': getMese(r),
       'Trasportatore': r.trasportatore,
@@ -83,7 +84,7 @@ export default async function(req) {
 
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Terziarie');
+    XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), 'Terziarie');
 
     const buf = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
     return Response.json({ file_base64: buf, filename: 'terziarie_export.xlsx', righe: rows.length });

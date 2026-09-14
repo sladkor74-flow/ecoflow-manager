@@ -8,7 +8,8 @@ import { exportDaDichiarareExcel } from '@/lib/giacenzeDaDichiarareExport';
 
 function fmt(n, dec = 2) {
   if (n == null || n === '' || isNaN(n)) return '—';
-  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  // Conteggi interi; tonnellate con due decimali, tre se i kg non sono tondi.
+  return Number(n).toLocaleString('it-IT', dec === 0 ? { minimumFractionDigits: 0, maximumFractionDigits: 0 } : { minimumFractionDigits: 2, maximumFractionDigits: 3 });
 }
 
 function fmtData(iso) {

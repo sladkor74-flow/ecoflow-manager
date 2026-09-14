@@ -23,7 +23,7 @@ export default function AttivaAnomalie({ anomalie }) {
             <div key={i} className="text-sm bg-background/60 rounded px-3 py-1.5 border border-destructive/20">
               <span className="text-muted-foreground">[{a.tipologia}]</span>{' '}
               <span className="font-medium">{a.descrizione}</span>{' '}
-              {a.tonnellate > 0 && <span className="text-muted-foreground">({a.tonnellate.toFixed(2)} t)</span>}
+              {a.tonnellate > 0 && <span className="text-muted-foreground">({a.tonnellate.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t)</span>}
             </div>
           ))}
         </div>

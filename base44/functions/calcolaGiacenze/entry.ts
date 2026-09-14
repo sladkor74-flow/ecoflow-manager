@@ -43,7 +43,8 @@ export default async function(req) {
     const annoNum = Number(anno);
 
     const norm = normalizzaRagioneSociale;
-    const r2 = (v) => Math.round(v * 100) / 100;
+    // Tonnellate arrotondate ai kg: la terza cifra decimale non si perde.
+    const r2 = (v) => Math.round(v * 1000) / 1000;
     const tdNorm = (v) => String(v || '').toLowerCase().trim();
 
     // Carica tutte le sorgenti dati in parallelo

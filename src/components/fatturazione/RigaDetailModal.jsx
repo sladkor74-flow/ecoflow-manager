@@ -28,7 +28,7 @@ export default function RigaDetailModal({ riga, onClose }) {
             </div>
             <div className="border-t pt-3">
               <div className="grid grid-cols-3 gap-3 text-sm">
-                <div><span className="text-muted-foreground block text-xs">Quantità</span><span className="font-bold">{riga.quantita?.toFixed(2)} {riga.unita_quantita || 'kg'}</span></div>
+                <div><span className="text-muted-foreground block text-xs">Quantità</span><span className="font-bold">{riga.unita_quantita === 'kg' || !riga.unita_quantita ? Math.round(riga.quantita || 0).toLocaleString('it-IT') : riga.quantita?.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} {riga.unita_quantita || 'kg'}</span></div>
                 <div><span className="text-muted-foreground block text-xs">Prezzo unitario</span><span className="font-bold">€ {riga.tariffa_valore?.toFixed(4)} {riga.unita_misura}</span></div>
                 <div><span className="text-muted-foreground block text-xs">Totale</span><span className="font-bold text-lg">€ {riga.totale?.toFixed(2)}</span></div>
               </div>
@@ -37,8 +37,8 @@ export default function RigaDetailModal({ riga, onClose }) {
               <div className="text-sm text-muted-foreground mb-1">Formula applicata:</div>
               <div className="text-sm font-mono bg-muted p-2 rounded">
                 {riga.unita_misura === '€/kg'
-                  ? `${riga.quantita?.toFixed(2)} kg × € ${riga.tariffa_valore?.toFixed(4)}/kg = € ${riga.totale?.toFixed(2)}`
-                  : `${riga.quantita?.toFixed(2)} kg ÷ 1000 × € ${riga.tariffa_valore?.toFixed(4)}/ton = € ${riga.totale?.toFixed(2)}`}
+                  ? `${Math.round(riga.quantita || 0).toLocaleString('it-IT')} kg × € ${riga.tariffa_valore?.toFixed(4)}/kg = € ${riga.totale?.toFixed(2)}`
+                  : `${Math.round(riga.quantita || 0).toLocaleString('it-IT')} kg ÷ 1000 × € ${riga.tariffa_valore?.toFixed(4)}/ton = € ${riga.totale?.toFixed(2)}`}
               </div>
             </div>
             <div className="text-xs text-muted-foreground">

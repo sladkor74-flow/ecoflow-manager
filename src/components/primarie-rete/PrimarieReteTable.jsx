@@ -48,7 +48,7 @@ export default function PrimarieReteTable({ records, loading }) {
             <tr key={r.id} className={`border-t hover:bg-muted/30 ${i % 2 ? 'bg-muted/10' : ''}`}>
               {COLUMNS.map((col) => {
                 let val = r[col.key];
-                if (col.format === 'number') val = val != null ? formatNumber(val) : '';
+                if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
                 else if (col.format === 'date') val = val ? new Date(val).toLocaleDateString('it-IT') : '';
                 const isTempi = col.key === 'raccolta_nei_tempi';
                 return (

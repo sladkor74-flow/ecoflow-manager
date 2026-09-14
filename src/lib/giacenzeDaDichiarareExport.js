@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { formattaPesi } from '@/lib/formatoExcel';
 
 // Export dell'elenco ordini da dichiarare in Excel.
 // È la lista di lavoro da passare agli impianti.
@@ -33,6 +34,6 @@ export function exportDaDichiarareExcel(righe, totaleRighe, totaleKg) {
     { wch: 18 }, { wch: 10 }, { wch: 16 }, { wch: 24 }, { wch: 24 }, { wch: 24 }
   ];
 
-  XLSX.utils.book_append_sheet(wb, ws, 'Ordini da dichiarare');
+  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), 'Ordini da dichiarare');
   XLSX.writeFile(wb, `ordini_da_dichiarare_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }

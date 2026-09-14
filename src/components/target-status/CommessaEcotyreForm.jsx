@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Plus, Trash2, History, FileSpreadsheet } from 'lucide-react';
 import { MESI } from '@/lib/pfuConstants';
-import { tonnellate, leggiNumero, leggiStorico, conModifica, nomeUtente, dataOra, REGIONI_COMMESSA } from '@/lib/target';
+import { tonnellate, percentuale, leggiNumero, leggiStorico, conModifica, nomeUtente, dataOra, REGIONI_COMMESSA } from '@/lib/target';
 import { leggiFileTargetContratto } from '@/lib/targetContratto';
 
 // Commessa Ecotyre dell'anno, cioe' quanto richiede il contratto: target annuo e
@@ -329,7 +329,7 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
           </div>
         </Riquadro>
 
-        <Riquadro titolo="Ripartizione per classe" nota={dati.classi.length ? <>Somma {tonnellate(sommaClassi, 2)}%{Math.abs(sommaClassi - 100) > 0.01 ? <span className="text-amber-700"> (dovrebbe fare 100%)</span> : ''}</> : null}>
+        <Riquadro titolo="Ripartizione per classe" nota={dati.classi.length ? <>Somma {percentuale(sommaClassi, 2)}%{Math.abs(sommaClassi - 100) > 0.01 ? <span className="text-amber-700"> (dovrebbe fare 100%)</span> : ''}</> : null}>
           <Tabella isAdmin={isAdmin} righe={dati.classi} onChange={v => imposta('classi', v)} nuovaRiga={{ classe: '', descrizione: '', peso: '', percentuale: '' }}
             colonne={[{ chiave: 'classe', etichetta: 'Classe', classe: 'w-16' }, { chiave: 'descrizione', etichetta: 'Veicoli' }, { chiave: 'peso', etichetta: 'Peso', classe: 'w-24' }, { chiave: 'percentuale', etichetta: '%', numero: true, classe: 'w-20' }]} />
         </Riquadro>

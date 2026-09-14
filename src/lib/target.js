@@ -1,6 +1,7 @@
 // Utilita' per i target di Target & Status, fonte unica per tutti i moduli.
 
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
+import { formatTonnellate, formatPercentuale } from '@/lib/utils';
 
 export const REGIONI_COMMESSA = ['Campania', 'Puglia', 'Basilicata', 'Calabria', 'Sicilia'];
 
@@ -9,10 +10,16 @@ export const ANNI_TARGET = (() => {
   return [oggi - 1, oggi, oggi + 1];
 })();
 
-// Tonnellate in italiano, senza decimali inutili.
-export function tonnellate(v, decimali = 1) {
+// Tonnellate in italiano: due decimali, tre se i kg non sono tondi.
+export function tonnellate(v) {
   if (v === null || v === undefined || v === '') return '—';
-  return (Number(v) || 0).toLocaleString('it-IT', { maximumFractionDigits: decimali });
+  return formatTonnellate(v);
+}
+
+// Percentuali con una cifra decimale.
+export function percentuale(v, decimali = 1) {
+  if (v === null || v === undefined || v === '' || !Number.isFinite(Number(v))) return '—';
+  return formatPercentuale(v, decimali);
 }
 
 // Numero scritto dall'utente, con la virgola o il punto come separatore decimale.

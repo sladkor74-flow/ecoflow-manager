@@ -42,6 +42,7 @@
 // come assegnate e si seguono allo stesso modo.
 
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
+import { formatoKgInTonnellate } from "./formato.ts";
 import { getRegioneFromProvincia } from "./dataEnrichment.ts";
 import { classeNormalizzata, nomiCoincidono, aggiungiGiorni, giorniTra, dataDaValore } from "./reportSettimanali.ts";
 
@@ -116,7 +117,7 @@ const ymd = (v) => {
   return /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(s) ? s : null;
 };
 const targa = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-const kgT = (kg) => (Math.round((Number(kg) || 0) / 10) / 100).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' t';
+const kgT = (kg) => formatoKgInTonnellate(kg) + ' t';
 const itData = (d) => (d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) : '');
 
 // === movimenti ===

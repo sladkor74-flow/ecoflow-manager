@@ -2,7 +2,7 @@ import React from 'react';
 import { Truck, Factory, Recycle, Target } from 'lucide-react';
 import { formatNumber, fmtTon } from '@/lib/utils';
 
-const fmtPct = (v) => formatNumber(v) + '%';
+const fmtPct = (v) => formatNumber(v, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
 
 export default function DashboardKpi({ kpi, loading }) {
   if (loading || !kpi) {

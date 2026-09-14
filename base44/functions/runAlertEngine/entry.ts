@@ -3,6 +3,7 @@ import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetric
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { aggregaTargetMensili } from "../../shared/targetRaccoglitori.ts";
+import { formatoTonnellate } from "../../shared/formato.ts";
 
 // Motore di controllo: scansiona i record di un modulo e genera Alert per le regole violate.
 // Payload: { modulo, record_ids?, solo_aperti?: boolean }
@@ -245,7 +246,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = []) {
         ).join('; ');
         alerts.push({
           titolo: regola.messaggio_alert || `Mix classi non conforme: ${racc.raccoglitore}`,
-          descrizione: `Raccoglitore "${racc.raccoglitore}": deviazione significativa dal mix classi consorziale. ${devDetails}. Totale raccolto: ${racc.totale_peso.toFixed(1)} ton.`,
+          descrizione: `Raccoglitore "${racc.raccoglitore}": deviazione significativa dal mix classi consorziale. ${devDetails}. Totale raccolto: ${formatoTonnellate(racc.totale_peso)} t.`,
           severita: regola.severita || 'warning',
           modulo: 'primarie_rete',
           entity_type: 'PrimariaRete',
@@ -294,7 +295,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = []) {
           if (existingKeys.has(alertKey)) continue;
           alerts.push({
             titolo: regola.messaggio_alert || `Scostamento target grave: ${racc} - ${regione} - ${mese}`,
-            descrizione: `Raccoglitore "${racc}" (${regione}, ${mese}): target ${targetVal} ton, raccolto ${raccolto.toFixed(1)} ton, Δ ${delta.toFixed(1)} ton (${pctDelta.toFixed(1)}%). Soglia: ${soglia}%.`,
+            descrizione: `Raccoglitore "${racc}" (${regione}, ${mese}): target ${formatoTonnellate(targetVal)} t, raccolto ${formatoTonnellate(raccolto)} t, Δ ${formatoTonnellate(delta)} ton (${pctDelta.toFixed(1)}%). Soglia: ${soglia}%.`,
             severita: regola.severita || 'critico',
             modulo: 'primarie_rete',
             entity_type: 'PrimariaRete',

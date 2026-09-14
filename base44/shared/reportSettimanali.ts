@@ -21,6 +21,7 @@
 // una data sbagliata viene trovato e segnalato invece di risultare inesistente.
 
 import { fetchAll } from "./fetchAll.ts";
+import { formatoKg } from "./formato.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 
 export const GIORNI_CONSERVAZIONE = 40;
@@ -209,7 +210,7 @@ export function nomiCoincidono(a, b) {
 
 const cifre = (v) => String(v ?? '').replace(/[^0-9]/g, '');
 const it = (d) => (d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) : '');
-const kgIt = (n) => Math.round(n).toLocaleString('it-IT') + ' kg';
+const kgIt = (n) => formatoKg(n) + ' kg';
 
 // === movimenti del gestionale ===
 

@@ -307,7 +307,7 @@ export default function ExtraRaccolta() {
                     <td className="px-3 py-2 text-xs">{r.destinazione || '-'}</td>
                     <td className="px-3 py-2 text-xs">{r.tipologia_trasporto || '-'}</td>
                     <td className="px-3 py-2">{r.classe || '-'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{r.peso_effettivo ? formatNumber(r.peso_effettivo) : '-'}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{r.peso_effettivo ? formatNumber(r.peso_effettivo, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '-'}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{euro(c.ricavo)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{euro(c.costo_totale)}</td>
                     <td className={`px-3 py-2 text-right tabular-nums font-medium ${!conta ? 'text-muted-foreground' : c.margine >= 0 ? 'text-success' : 'text-destructive'}`}>

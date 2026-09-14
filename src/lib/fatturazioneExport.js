@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { formattaPesi } from '@/lib/formatoExcel';
 
 // Esporta le righe di fatturazione attiva in Excel nel formato del modello corrispondente
 export function exportFatturazioneAttiva(tipologia, righe, anno, mese) {
@@ -60,6 +61,6 @@ export function exportFatturazioneAttiva(tipologia, righe, anno, mese) {
 
   const ws = XLSX.utils.aoa_to_sheet(wsData);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), sheetName);
   XLSX.writeFile(wb, `Fatturazione_${tipologia}_${mese}_${anno}.xlsx`);
 }

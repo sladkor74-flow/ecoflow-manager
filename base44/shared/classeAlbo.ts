@@ -11,6 +11,7 @@
 
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { leggiProblemi } from "./qualificaFornitori.ts";
+import { formatoTonnellate } from "./formato.ts";
 
 // Limite superiore escluso, in tonnellate annue; la classe A non ha limite.
 export const LIMITI_CLASSE = { A: null, B: 200000, C: 60000, D: 15000, E: 6000, F: 3000 };
@@ -19,7 +20,7 @@ export const LIMITI_CLASSE = { A: null, B: 200000, C: 60000, D: 15000, E: 6000, 
 // anche i rifiuti gestiti fuori dalla commessa.
 export const QUOTA_ATTENZIONE = 0.85;
 
-const numero = (v) => (Math.round(v * 10) / 10).toLocaleString('it-IT');
+const numero = (v) => formatoTonnellate(v);
 
 /** Classe della categoria 4 letta dai dati estratti dal documento, o null. */
 export function classeCategoria4(categorie) {

@@ -8,7 +8,7 @@ import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 const ANNO_DEFAULT = 2026;
 const ANNI = [2024, 2025, 2026, 2027];
 
-function fmt(n) { return (Number(n) || 0).toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }); }
+function fmt(n) { return (Number(n) || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 }); }
 function fmtInt(n) { return (Number(n) || 0).toLocaleString('it-IT'); }
 
 function EditableCell({ value, onSave, unit, decimals = 3 }) {

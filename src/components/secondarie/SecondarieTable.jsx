@@ -50,7 +50,7 @@ export default function SecondarieTable({ records, loading, emptyMessage }) {
             <tr key={r.id} className="border-t hover:bg-muted/50">
               {COLUMNS.map((col) => {
                 let val = r[col.key];
-                if (col.format === 'number') val = val != null ? formatNumber(val) : '';
+                if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
                 else if (col.format === 'ton') val = val != null ? fmtTon(val) : '';
                 else if (col.format === 'date') val = val ? new Date(val).toLocaleDateString('it-IT') : '';
                 return <td key={col.key} className="px-3 py-2 whitespace-nowrap">{val ?? ''}</td>;

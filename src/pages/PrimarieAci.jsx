@@ -236,7 +236,7 @@ export default function PrimarieAci() {
                   <tr key={r.id} className={`border-t hover:bg-muted/30 ${i % 2 ? 'bg-muted/10' : ''}`}>
                     {DETAIL_COLUMNS.map((col) => {
                       let val = r[col.key];
-                      if (col.format === 'number') val = val != null ? formatNumber(val) : '';
+                      if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
                       else if (col.format === 'date') val = val ? new Date(val).toLocaleDateString('it-IT') : '';
                       return <td key={col.key} className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''}`}>{val ?? ''}</td>;
                     })}
