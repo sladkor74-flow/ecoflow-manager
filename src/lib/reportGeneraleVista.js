@@ -72,7 +72,8 @@ export function calcolaReportGenerale({ mensili = [], annui = [], raccolto = [],
     });
   }
 
-  return [...righe.values()].filter(r => r.conTarget || r.mesi.some(m => m.raccolto > 0));
+  // Fuori le righe senza nessun target e senza raccolto: non dicono nulla.
+  return [...righe.values()].filter(r => r.annuo > 0 || r.mesi.some(m => m.target > 0 || m.raccolto > 0));
 }
 
 /** Valori di una riga (o di un gruppo sommato) per il mese scelto, indice 0-11. */

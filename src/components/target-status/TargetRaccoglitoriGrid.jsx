@@ -260,6 +260,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
   const [raccolto, setRaccolto] = useState([]);
   const [nuovo, setNuovo] = useState(false);
   const [importa, setImporta] = useState(false);
+  const [mostraVuote, setMostraVuote] = useState(false);
 
   const carica = useCallback(async () => {
     setCaricando(true);
@@ -328,15 +329,24 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     return { elenco, doppioni };
   }, [annui, mensili, quoteImpianto, trasportatori, regionePrevalente]);
 
+  // Righe vuote: nessun target annuo o mensile, nessun "non raccoglie" e nessun
+  // raccolto dell'anno in quella regione. Si nascondono, i dati restano.
+  const raccoglieInRegione = useMemo(() => new Set(raccolto.filter(r => r.totale > 0).map(r => `${chiaveNome(r.raccoglitore)}|${r.regione}`)), [raccolto]);
+  const vuota = useCallback((r) => valoreAnnuo(r) === 0 && sommaMesi(r) === 0
+    && !Object.values(r.mesi).some(m => m && m.non_raccoglie)
+    && !raccoglieInRegione.has(`${r.chiave}|${r.regione}`), [raccoglieInRegione]);
+  const righeVuote = useMemo(() => righe.elenco.filter(vuota), [righe, vuota]);
+
   const gruppi = useMemo(() => {
     const g = [];
     for (const r of righe.elenco) {
+      if (!mostraVuote && vuota(r)) continue;
       const ultimo = g[g.length - 1];
       if (ultimo && ultimo.chiave === r.impiantoChiave) ultimo.righe.push(r);
       else g.push({ chiave: r.impiantoChiave, impianto: r.impianto, righe: [r] });
     }
     return g;
-  }, [righe]);
+  }, [righe, mostraVuote, vuota]);
 
   const salvaMese = async (riga, mese, { target, non_raccoglie, nota }) => {
     const r = riga.mesi[mese];
@@ -420,6 +430,13 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
           </div>
         )}
       </div>
+
+      {righeVuote.length > 0 && (
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input type="checkbox" checked={mostraVuote} onChange={e => setMostraVuote(e.target.checked)} />
+          Mostra le righe senza target e senza raccolto ({righeVuote.map(r => `${r.nome}${r.regione ? `, ${r.regione}` : ''}`).join('; ')})
+        </label>
+      )}
 
       {righe.doppioni.length > 0 && (
         <div className="flex items-start gap-2 text-xs text-amber-800"><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />Target mensili doppi sulla stessa riga, vale l'ultimo modificato: {righe.doppioni.slice(0, 5).join(', ')}{righe.doppioni.length > 5 ? '…' : ''}</div>

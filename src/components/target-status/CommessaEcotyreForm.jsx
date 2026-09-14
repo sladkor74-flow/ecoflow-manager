@@ -122,6 +122,14 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
 
   useEffect(() => { carica(); }, [carica]);
 
+  // Chi chiude o ricarica la pagina con modifiche non salvate riceve un avviso.
+  useEffect(() => {
+    if (!modificato) return undefined;
+    const avvisa = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', avvisa);
+    return () => window.removeEventListener('beforeunload', avvisa);
+  }, [modificato]);
+
   // Consuntivo mese per mese, letto dai formulari terminati per data di fine
   // trasporto. RETE e ACI restano separati: il target del contratto riguarda la
   // RETE, l'ACI si confronta solo con il suo budget.
@@ -234,6 +242,12 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
       </div>
 
       {!record && !modificato && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">La commessa {anno} non è ancora stata inserita.</p>}
+      {isAdmin && modificato && (
+        <div className="flex items-center justify-between gap-3 flex-wrap text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
+          <span>I dati non sono ancora salvati: se esci o ricarichi la pagina senza salvare, si perdono.</span>
+          <Button size="sm" onClick={salva} disabled={salvando}>{salvando && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}Salva ora</Button>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-5">
         <Riquadro titolo="Target annuo e per regione" nota={<>Somma regioni {tonnellate(somma(dati.regioni.map(r => r.target)))} t: {confronto(somma(dati.regioni.map(r => r.target)))}</>}>
