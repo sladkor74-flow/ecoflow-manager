@@ -136,7 +136,9 @@ export function calcolaReportSettimanale({ rete = [], mensili = [], annui = [], 
   }
 
   const elenco = [...righe.values()]
-    .filter(r => r.annuo > 0 || r.target_mese > 0 || r.non_raccoglie || r.totale_anno > 0)
+    // Fuori le righe senza nessun target e senza raccolto nell'anno, anche se segnate
+    // "non raccoglie" (come Logistica Srl, che nel 2026 fa solo secondarie).
+    .filter(r => r.annuo > 0 || r.target_mese > 0 || r.totale_anno > 0)
     .map(r => ({
       regione: r.regione,
       raccoglitore: r.raccoglitore,
