@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { MESI } from '@/lib/pfuConstants';
 import { tonnellate, chiaveNome } from '@/lib/target';
-import { calcolaReportGenerale, raggruppa, sommaRighe, valoriMese } from '@/lib/reportGeneraleVista';
+import { calcolaReportGenerale, raggruppa, sommaRighe, valoriMese, impiantiMese, totaliPerImpianto } from '@/lib/reportGeneraleVista';
 
-// Report Generale: target assegnati contro raccolto RETE per impianto, regione e
-// raccoglitore, come nel foglio del file di gestione. Solo lettura.
+// Report Generale: target assegnati contro raccolto RETE per regione e
+// raccoglitore. L'impianto di destinazione si legge a consuntivo: sotto ogni
+// raccoglitore il raccolto e' ripartito per impianto effettivo. Solo lettura.
 
 const leggiLista = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
 const num = (v) => (v === null || v === undefined ? '—' : tonnellate(v));
@@ -26,9 +27,24 @@ function Celle({ v, forte }) {
   );
 }
 
+function RigheImpianti({ elenco, totaleMese }) {
+  return elenco.map(i => (
+    <tr key={i.impianto} className="text-xs text-muted-foreground">
+      <td className="px-2 py-0.5 pl-14">→ {i.impianto}</td>
+      <td /><td />
+      <td className="border-l" />
+      <td className="px-2 py-0.5 text-right tabular-nums">{num(i.raccolto)}{totaleMese > 0 && i.raccolto > 0 ? ` (${Math.round(i.raccolto / totaleMese * 100)}%)` : ''}</td>
+      <td />
+      <td className="px-2 py-0.5 text-right tabular-nums border-l">{num(i.progressivo)}</td>
+      <td /><td />
+    </tr>
+  ));
+}
+
 export default function ReportGenerale({ anno, mensili, annui, raccolto, commessa }) {
   const oggi = new Date();
   const [meseIdx, setMeseIdx] = useState(anno === oggi.getFullYear() ? oggi.getMonth() : 11);
+  const [dettaglio, setDettaglio] = useState(true);
 
   const righe = useMemo(
     () => calcolaReportGenerale({ mensili, annui, raccolto: raccolto?.by_raccoglitore_impianto || [], chiave: chiaveNome }),
@@ -46,21 +62,25 @@ export default function ReportGenerale({ anno, mensili, annui, raccolto, commess
   const contrattoMese = contratto[meseIdx] || 0;
   const contrattoProgressivo = contratto.slice(0, meseIdx + 1).reduce((s, v) => s + v, 0);
   const senzaTarget = righe.filter(r => !r.conTarget);
+  const perImpianto = totaliPerImpianto(righe, meseIdx);
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
         <label className="text-sm text-muted-foreground">Mese</label>
         <select value={meseIdx} onChange={e => setMeseIdx(Number(e.target.value))} className="border rounded-md px-2 py-1.5 text-sm bg-background">
           {MESI.map((m, i) => <option key={m} value={i}>{m} {anno}</option>)}
         </select>
-        <span className="text-xs text-muted-foreground">Raccolto RETE: formulari terminati per data di fine trasporto. Delta = target meno raccolto (rosso se manca raccolta).</span>
+        <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <input type="checkbox" checked={dettaglio} onChange={e => setDettaglio(e.target.checked)} /> Mostra il raccolto per impianto
+        </label>
+        <span className="text-xs text-muted-foreground">Raccolto RETE: formulari terminati per data di fine trasporto. Delta = target meno raccolto, rosso se manca raccolta.</span>
       </div>
       <div className="border rounded-lg overflow-x-auto bg-card">
         <table className="w-full text-sm">
           <thead className="bg-muted/60 text-left">
             <tr>
-              <th className="px-2 py-2">Impianto / regione / raccoglitore</th>
+              <th className="px-2 py-2">Regione / raccoglitore / impianto a consuntivo</th>
               <th className="px-2 py-2 text-right">Target annuo</th>
               <th className="px-2 py-2 text-right">Media mensile residua</th>
               <th className="px-2 py-2 text-right border-l">Target {MESI[meseIdx]}</th>
@@ -72,34 +92,29 @@ export default function ReportGenerale({ anno, mensili, annui, raccolto, commess
             </tr>
           </thead>
           <tbody>
-            {gruppi.map(g => {
-              const vImp = valoriMese(sommaRighe(g.regioni.flatMap(x => x.righe)), meseIdx);
-              return (
-                <React.Fragment key={g.impianto}>
-                  <tr className="border-t-2 bg-primary/5">
-                    <td className="px-2 py-1.5 font-semibold">{g.impianto}</td>
-                    <Celle v={vImp} forte />
-                  </tr>
-                  {g.regioni.map(reg => (
-                    <React.Fragment key={g.impianto + reg.regione}>
-                      <tr className="border-t bg-muted/30">
-                        <td className="px-2 py-1.5 pl-5 font-medium">{reg.regione || 'Regione non indicata'}</td>
-                        <Celle v={valoriMese(sommaRighe(reg.righe), meseIdx)} />
+            {gruppi.map(g => (
+              <React.Fragment key={g.regione}>
+                <tr className="border-t-2 bg-primary/5">
+                  <td className="px-2 py-1.5 font-semibold">{g.regione || 'Regione non indicata'}</td>
+                  <Celle v={valoriMese(sommaRighe(g.righe), meseIdx)} forte />
+                </tr>
+                {g.righe.map(r => {
+                  const v = valoriMese(r, meseIdx);
+                  return (
+                    <React.Fragment key={`${r.regione}|${r.kRaccoglitore}`}>
+                      <tr className="border-t">
+                        <td className="px-2 py-1.5 pl-6">
+                          {r.raccoglitore}
+                          {!r.conTarget && <span className="ml-2 text-xs rounded bg-amber-100 text-amber-800 px-1.5 py-0.5">senza target</span>}
+                        </td>
+                        <Celle v={v} />
                       </tr>
-                      {reg.righe.map(r => (
-                        <tr key={`${r.kImpianto}|${r.regione}|${r.kRaccoglitore}`} className="border-t">
-                          <td className="px-2 py-1.5 pl-9">
-                            {r.raccoglitore}
-                            {!r.conTarget && <span className="ml-2 text-xs rounded bg-amber-100 text-amber-800 px-1.5 py-0.5">senza target</span>}
-                          </td>
-                          <Celle v={valoriMese(r, meseIdx)} />
-                        </tr>
-                      ))}
+                      {dettaglio && <RigheImpianti elenco={impiantiMese(r, meseIdx)} totaleMese={v.raccolto} />}
                     </React.Fragment>
-                  ))}
-                </React.Fragment>
-              );
-            })}
+                  );
+                })}
+              </React.Fragment>
+            ))}
             <tr className="border-t-2 bg-muted/60">
               <td className="px-2 py-2 font-semibold">Totale complessivo</td>
               <Celle v={vTot} forte />
@@ -123,8 +138,32 @@ export default function ReportGenerale({ anno, mensili, annui, raccolto, commess
       </div>
       {senzaTarget.length > 0 && (
         <p className="text-xs text-amber-800">
-          {senzaTarget.length} {senzaTarget.length === 1 ? 'riga ha' : 'righe hanno'} raccolto RETE verso un impianto o in una regione senza target assegnato: controlla nella scheda Target raccoglitori se manca un target.
+          {senzaTarget.length} {senzaTarget.length === 1 ? 'riga ha' : 'righe hanno'} raccolto RETE in una regione dove il raccoglitore non ha target: controlla nella scheda Target raccoglitori se manca un target.
         </p>
+      )}
+      {perImpianto.length > 0 && (
+        <div className="border rounded-lg overflow-x-auto bg-card">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/60 text-left">
+              <tr>
+                <th className="px-3 py-2">Impianto di destinazione a consuntivo</th>
+                <th className="px-3 py-2 text-right">Raccolto RETE {MESI[meseIdx]}</th>
+                <th className="px-3 py-2 text-right">Quota del mese</th>
+                <th className="px-3 py-2 text-right">Progressivo al {new Date(anno, meseIdx + 1, 0).getDate()} {MESI[meseIdx]}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {perImpianto.map(i => (
+                <tr key={i.impianto} className="border-t">
+                  <td className="px-3 py-1.5">{i.impianto}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{num(i.raccolto)}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{vTot.raccolto > 0 ? `${tonnellate(i.raccolto / vTot.raccolto * 100)}%` : '—'}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{num(i.progressivo)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

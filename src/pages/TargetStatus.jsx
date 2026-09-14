@@ -320,7 +320,7 @@ export default function TargetStatus() {
               </div>
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-1">Report generale</h2>
-                <p className="text-xs text-muted-foreground mb-3">Target assegnati e raccolto RETE per impianto, regione e raccoglitore, come nel foglio del file di gestione.</p>
+                <p className="text-xs text-muted-foreground mb-3">Target assegnati e raccolto RETE per regione e raccoglitore; l'impianto di destinazione si legge a consuntivo, mese per mese.</p>
                 <ReportGenerale anno={anno} mensili={targets} annui={annui} raccolto={raccolto} commessa={commessa} />
               </div>
               <div>

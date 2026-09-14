@@ -6,12 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Plus, History, Info, FileSpreadsheet, Factory } from 'lucide-react';
+import { Loader2, Plus, History, Info, FileSpreadsheet } from 'lucide-react';
 import { MESI, MESI_BREVI } from '@/lib/pfuConstants';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { tonnellate, leggiNumero, leggiStorico, conModifica, nomeUtente, chiaveNome, dataOra, REGIONI_COMMESSA } from '@/lib/target';
 import ImportaReportGenerale from '@/components/target-status/ImportaReportGenerale';
-import AssegnaImpianti from '@/components/target-status/AssegnaImpianti';
+
 
 // Target dei raccoglitori: l'unico punto in cui si scrivono.
 // Per ogni raccoglitore, regione e impianto di destinazione, come nel Report
@@ -258,10 +258,8 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
   const [quoteImpianto, setQuoteImpianto] = useState(new Set());
   const [commessa, setCommessa] = useState(null);
   const [raccolto, setRaccolto] = useState([]);
-  const [raccoltoImpianto, setRaccoltoImpianto] = useState([]);
   const [nuovo, setNuovo] = useState(false);
   const [importa, setImporta] = useState(false);
-  const [assegna, setAssegna] = useState(false);
 
   const carica = useCallback(async () => {
     setCaricando(true);
@@ -278,7 +276,6 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
       setQuoteImpianto(new Set(forn.filter(f => f.ruolo === 'doppio_ruolo' || f.ruolo === 'impianto').map(f => chiaveNome(f.nome))));
       setCommessa(comm[0] || null);
       setRaccolto(racc.by_raccoglitore || []);
-      setRaccoltoImpianto(racc.by_raccoglitore_impianto || []);
     } catch (e) {
       toast({ title: 'Caricamento non riuscito', description: e.message || String(e), variant: 'destructive' });
     }
@@ -410,15 +407,14 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <p className="text-sm text-muted-foreground max-w-3xl">
-          L'unico punto in cui si scrivono i target dei raccoglitori, in tonnellate, per impianto di destinazione e regione come nel Report Generale. Il target
+          L'unico punto in cui si scrivono i target dei raccoglitori, in tonnellate, per regione. L'impianto di destinazione è facoltativo: un raccoglitore può
+          conferire a impianti diversi e l'impianto effettivo si legge a consuntivo nell'Andamento. Il target
           annuo si definisce a inizio anno o alla contrattualizzazione; a inizio mese si scrive quanto si affida. Clicca su una cella per modificarla: vale subito
           in dashboard, alert, Verifiche e negli altri moduli, e la modifica resta nello storico <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 align-middle" />.
         </p>
         {isAdmin && (
           <div className="flex gap-2">
-            {righe.elenco.some(r => !r.impianto && r.regione) && (
-              <Button size="sm" variant="outline" onClick={() => setAssegna(true)}><Factory className="w-4 h-4 mr-1" />Assegna impianti</Button>
-            )}
+
             <Button size="sm" variant="outline" onClick={() => setImporta(true)}><FileSpreadsheet className="w-4 h-4 mr-1" />Importa dal Report Generale</Button>
             <Button size="sm" variant="outline" onClick={() => setNuovo(true)}><Plus className="w-4 h-4 mr-1" />Aggiungi riga</Button>
           </div>
@@ -443,13 +439,13 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
           </thead>
           {gruppi.map(g => (
             <tbody key={g.chiave || 'senza'}>
-              <tr className="bg-primary/5 border-t font-semibold">
+              {(gruppi.length > 1 || g.impianto) && <tr className="bg-primary/5 border-t font-semibold">
                 <td className="sticky left-0 z-10 bg-muted px-3 py-1.5" colSpan={2}>{g.impianto || 'Senza impianto indicato'}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{tonnellate(g.righe.reduce((s, r) => s + valoreAnnuo(r), 0))}</td>
                 {colonneMesi(MESI.map(m => { const v = g.righe.reduce((s, r) => s + valoreMese(r.mesi[m]), 0); return v || null; }))}
                 <td className="px-2 py-1.5 text-right tabular-nums">{tonnellate(g.righe.reduce((s, r) => s + sommaMesi(r), 0))}</td>
                 <td />
-              </tr>
+              </tr>}
               {g.righe.map(r => {
                 const somma = sommaMesi(r);
                 const annuo = r.annuo ? valoreAnnuo(r) : null;
@@ -541,18 +537,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
       )}
 
       <NuovoRaccoglitore open={nuovo} onClose={() => setNuovo(false)} anno={anno} nomiSuggeriti={nomiSuggeriti} impiantiSuggeriti={impiantiSuggeriti} onCrea={creaRiga} />
-      {assegna && (
-        <AssegnaImpianti
-          open={assegna}
-          onClose={() => setAssegna(false)}
-          righe={righe.elenco}
-          raccoltoImpianto={raccoltoImpianto}
-          impiantiNoti={[...new Set([...impiantiSuggeriti, ...raccoltoImpianto.map(x => x.impianto).filter(x => x && x !== 'N/D')])].sort((a, b) => a.localeCompare(b, 'it'))}
-          anno={anno}
-          user={user}
-          onFatto={async () => { setAssegna(false); await carica(); }}
-        />
-      )}
+
       <ImportaReportGenerale open={importa} onClose={() => setImporta(false)} anno={anno} annui={annui} mensili={mensili} user={user}
         onImportato={async () => { setImporta(false); await carica(); }} />
     </div>
