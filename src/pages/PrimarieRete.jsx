@@ -10,6 +10,7 @@ import SlaMetrics from '@/components/primarie-rete/SlaMetrics';
 import PrimarieReteTable from '@/components/primarie-rete/PrimarieReteTable';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { fetchAllClient } from '@/lib/fetchAllClient';
+import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdOrdine';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -24,6 +25,8 @@ export default function PrimarieRete() {
   const [allRecords, setAllRecords] = useState([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [filters, setFilters] = useState({ regione: [], stato: [], data: '', mese: [], anno: [] });
+  const [cercaId, setCercaId] = useState('');
+  const [scheda, setScheda] = useState('dettaglio');
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -73,6 +76,9 @@ export default function PrimarieRete() {
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadRecords(); }, [loadRecords]);
+  // Cercando un ID si passa al dettaglio degli ordini, in tutto l'archivio.
+  useEffect(() => { if (cercaId.trim()) setScheda('dettaglio'); }, [cercaId]);
+  const ordiniMostrati = cercaId.trim() ? allRecords.filter(r => corrispondeIdOrdine(r, cercaId)) : records;
 
   const regioni = [...new Set(allRecords.map(r => (r.regione || '').trim()).filter(Boolean))].sort();
   const stati = [...new Set(allRecords.map(r => (r.stato || '').trim()).filter(Boolean))].sort();
@@ -97,11 +103,13 @@ export default function PrimarieRete() {
         </div>
         <div className="flex items-center gap-2">
           {alertCount > 0 && <AlertBadge count={alertCount} modulo="primarie_rete" />}
-          <Link to="/caricamento-dati" className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent">
+          <Link to="/caricamento-dati" className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
             <Upload className="w-4 h-4" /> Carica dati
           </Link>
         </div>
       </div>
+
+      <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loadingRecords ? null : ordiniMostrati.length} />
 
       {/* Filtri rapidi per dettaglio ordini */}
       <div className="border rounded-lg p-4 space-y-3">
@@ -127,16 +135,16 @@ export default function PrimarieRete() {
           <Loader2 className="w-6 h-6 animate-spin mr-2" /> Calcolo analytics in corso...
         </div>
       ) : (
-        <Tabs defaultValue="dettaglio">
+        <Tabs value={scheda} onValueChange={setScheda}>
           <TabsList>
-            <TabsTrigger value="dettaglio"><Table2 className="w-4 h-4 mr-1.5" /> Dettaglio Ordini ({records.length})</TabsTrigger>
+            <TabsTrigger value="dettaglio"><Table2 className="w-4 h-4 mr-1.5" /> Dettaglio Ordini ({ordiniMostrati.length})</TabsTrigger>
             <TabsTrigger value="province"><MapPin className="w-4 h-4 mr-1.5" /> Province & FIR</TabsTrigger>
             <TabsTrigger value="mix"><BarChart3 className="w-4 h-4 mr-1.5" /> % di scostamento per classi</TabsTrigger>
             <TabsTrigger value="sla"><Clock className="w-4 h-4 mr-1.5" /> SLA & Tempi</TabsTrigger>
           </TabsList>
 
           <TabsContent value="dettaglio" className="mt-4">
-            <PrimarieReteTable records={records} loading={loadingRecords} />
+            <PrimarieReteTable records={ordiniMostrati} loading={loadingRecords} />
           </TabsContent>
 
           <TabsContent value="province" className="mt-4">

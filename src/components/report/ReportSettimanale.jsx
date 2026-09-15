@@ -125,10 +125,10 @@ export default function ReportSettimanale() {
             <select value={anno} onChange={e => setAnno(Number(e.target.value))} className="rounded-md bg-white/15 border border-white/30 px-2 py-1.5 text-sm text-white [&>option]:text-slate-900">
               {anni.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
-            <Button size="sm" onClick={carica} disabled={caricamento} className="gap-1 bg-white/15 text-white border border-white/30 hover:bg-white/25">
+            <Button size="sm" onClick={carica} disabled={caricamento} className="gap-1 bg-[#0b3b48] text-white border border-[#6fb3c2] shadow-sm hover:bg-[#08303b]">
               {caricamento ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Aggiorna
             </Button>
-            <Button size="sm" onClick={esporta} disabled={!report || caricamento} className="gap-1 bg-white text-[#0f4c5c] hover:bg-white/90">
+            <Button size="sm" onClick={esporta} disabled={!report || caricamento} className="gap-1 bg-white text-[#0f4c5c] shadow-sm hover:bg-slate-100">
               <FileDown className="w-4 h-4" /> Esporta PDF
             </Button>
           </div>

@@ -128,7 +128,7 @@ export default function AlertEngine() {
                     key={m.value}
                     onClick={() => handleRun(m.value)}
                     disabled={running === m.value}
-                    className="w-full flex items-center justify-between px-4 py-2.5 border rounded-md hover:bg-accent disabled:opacity-50 text-sm"
+                    className="w-full flex items-center justify-between px-4 py-2.5 text-sm btn-secondario"
                   >
                     <span>{m.label}</span>
                     {running === m.value ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
@@ -193,7 +193,7 @@ export default function AlertEngine() {
                 <button onClick={handleSave} disabled={saving || !form.nome} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50">
                   {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Salva regola
                 </button>
-                <button onClick={() => setShowForm(false)} className="px-4 py-2 rounded-md border text-sm hover:bg-accent">Annulla</button>
+                <button onClick={() => setShowForm(false)} className="px-4 py-2 text-sm btn-secondario">Annulla</button>
               </div>
             </div>
           )}

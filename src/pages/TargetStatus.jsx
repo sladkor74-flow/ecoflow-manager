@@ -266,7 +266,7 @@ export default function TargetStatus() {
           </select>
           {scheda === 'andamento' && (
             <>
-              <button onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent">
+              <button onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
                 <RefreshCw className="w-4 h-4" /> Aggiorna
               </button>
               <ExportButtons onExcel={exportExcel} onPDF={() => exportPDF(kpis, mergedData, regioneData, impiantiData)} onPPT={() => exportPPT(kpis, mergedData, regioneData, impiantiData)} />

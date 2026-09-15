@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { oggiRoma } from "../../shared/reportSettimanali.ts";
+import { eliminaCampo } from "../../shared/testoLungo.ts";
 
 // Cancella le verifiche dei report settimanali arrivate al quarantesimo giorno
 // dal caricamento. Dopo la fatturazione quel lavoro non serve piu' e non va
@@ -19,6 +20,7 @@ export default async function(req) {
     let cancellate = 0;
     for (const v of tutte) {
       if (v.scade_il && String(v.scade_il).slice(0, 10) <= oggi) {
+        await eliminaCampo(base44, 'VerificaReport', v.id);
         await svc.VerificaReport.delete(v.id);
         cancellate++;
       }

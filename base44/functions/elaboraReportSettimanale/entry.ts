@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import {
   caricaMovimenti, verificaReport, normalizzaRigheReport, CAMPI_REPORT,
 } from "../../shared/reportSettimanali.ts";
+import { valoreCampo, leggiCampo } from "../../shared/testoLungo.ts";
 
 // Legge il report settimanale di un impianto o di uno stoccaggio e lo confronta
 // con il gestionale: gli ingressi con le primarie, le uscite con le secondarie.
@@ -201,8 +202,9 @@ export default async function(req) {
     let righe, lettura;
     if (body.solo_verifica) {
       if (!verifica.righe_report_json) return Response.json({ error: 'Il report non e\' ancora stato letto: caricalo di nuovo.' }, { status: 400 });
-      righe = JSON.parse(verifica.righe_report_json);
-      lettura = verifica.lettura_json ? JSON.parse(verifica.lettura_json) : {};
+      righe = JSON.parse(await leggiCampo(base44, 'VerificaReport', verifica, 'righe_report_json'));
+      const testoLettura = await leggiCampo(base44, 'VerificaReport', verifica, 'lettura_json');
+      lettura = testoLettura ? JSON.parse(testoLettura) : {};
       await svc.VerificaReport.update(verificaId, { stato: 'in_verifica', avviata_il: new Date().toISOString(), errore: '' });
     } else {
       await svc.VerificaReport.update(verificaId, { stato: 'in_lettura', avviata_il: new Date().toISOString(), errore: '' });
@@ -212,10 +214,11 @@ export default async function(req) {
       righe = esito.righe;
       lettura = esito.lettura;
       if (righe.length === 0) throw new Error('Il report non contiene righe con formulario o peso.');
+      // Un report lungo supera la dimensione di un campo: si salva diviso in parti.
       await svc.VerificaReport.update(verificaId, {
         stato: 'in_verifica',
-        righe_report_json: JSON.stringify(righe),
-        lettura_json: JSON.stringify(lettura),
+        righe_report_json: await valoreCampo(base44, 'VerificaReport', verificaId, 'righe_report_json', JSON.stringify(righe)),
+        lettura_json: await valoreCampo(base44, 'VerificaReport', verificaId, 'lettura_json', JSON.stringify(lettura)),
       });
     }
 
@@ -229,7 +232,7 @@ export default async function(req) {
 
     await svc.VerificaReport.update(verificaId, {
       stato: 'completata',
-      esito_json: JSON.stringify({ esiti: esito.esiti, assenti: esito.assenti }),
+      esito_json: await valoreCampo(base44, 'VerificaReport', verificaId, 'esito_json', JSON.stringify({ esiti: esito.esiti, assenti: esito.assenti })),
       ...esito.riepilogo,
       verificata_il: new Date().toISOString(),
       errore: '',

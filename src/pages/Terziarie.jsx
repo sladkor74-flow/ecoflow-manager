@@ -133,7 +133,7 @@ export default function Terziarie() {
           <h1 className="text-2xl lg:text-3xl font-heading font-bold">Terziarie</h1>
           <p className="text-muted-foreground mt-1">Trasporti terziari, uscite PFU e giacenze impianto in tempo reale.</p>
         </div>
-        <button onClick={handleExport} disabled={exporting} className="inline-flex items-center gap-2 px-4 py-2 text-sm border rounded-md hover:bg-accent disabled:opacity-50">
+        <button onClick={handleExport} disabled={exporting} className="inline-flex items-center gap-2 px-4 py-2 text-sm btn-secondario">
           {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />} Esporta Excel
         </button>
       </div>

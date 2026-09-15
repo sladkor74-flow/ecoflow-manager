@@ -8,6 +8,7 @@ import ProvinceRanking from '@/components/assegnati/ProvinceRanking';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { fetchAllClient } from '@/lib/fetchAllClient';
+import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdOrdine';
 
 export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Rete — Backlog Richieste', description = 'Ordini in stato "assegnato" di classe diversa da PFU Autodemolizione, derivati automaticamente dal caricamento delle Primarie.' }) {
   const [data, setData] = useState(null);
@@ -18,6 +19,8 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
   const [filters, setFilters] = useState({ anno: [], mese: [], regione: [], provincia: [], partner_operativo: [], classe: [], stato: [], data: '', ragione_sociale: '' });
   const [ragioneSocialeInput, setRagioneSocialeInput] = useState('');
   const [viewMode, setViewMode] = useState('matrix');
+  const [cercaId, setCercaId] = useState('');
+  const [tuttiRecords, setTuttiRecords] = useState([]);
 
   const applyRagioneSociale = () => setFilters(p => ({ ...p, ragione_sociale: ragioneSocialeInput }));
 
@@ -34,6 +37,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
     setLoadingRecords(true);
     try {
       const all = await fetchAllClient(base44.entities[entity], null, '-ordine_immesso_il');
+      setTuttiRecords(all.map(r => ({ ...r, peso_t: +((r.peso_stimato || 0) / 1000).toFixed(3) })));
       const filtered = all.filter(r => {
         if (filters.anno.length > 0 && !filters.anno.map(String).includes(String(r.anno))) return false;
         if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;
@@ -59,6 +63,9 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { if (viewMode === 'detail') loadRecords(); }, [loadRecords, viewMode]);
+  // Cercando un ID si passa al dettaglio degli ordini.
+  useEffect(() => { if (cercaId.trim()) setViewMode('detail'); }, [cercaId]);
+  const ordiniMostrati = cercaId.trim() ? tuttiRecords.filter(r => corrispondeIdOrdine(r, cercaId)) : records;
 
   // Auto-refresh on new uploads
   useEffect(() => {
@@ -95,10 +102,10 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
           <p className="text-muted-foreground mt-1">{description}</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => handleExport('matrix')} disabled={exporting} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent disabled:opacity-50">
+          <button onClick={() => handleExport('matrix')} disabled={exporting} className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
             {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <LayoutGrid className="w-4 h-4" />} Excel Matrice
           </button>
-          <button onClick={() => handleExport('detail')} disabled={exporting} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent disabled:opacity-50">
+          <button onClick={() => handleExport('detail')} disabled={exporting} className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
             {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />} Excel Dettaglio
           </button>
         </div>
@@ -111,6 +118,8 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
       ) : (
         <>
           <AssegnatiKpi kpi={data?.kpi} />
+
+          <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loadingRecords ? null : ordiniMostrati.length} />
 
           {/* Filtri rapidi */}
           <div className="border rounded-lg p-4 space-y-3">
@@ -157,8 +166,8 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
                   <AssegnatiMatrix matrix={data?.matrix} />
                 </TabsContent>
                 <TabsContent value="detail" className="space-y-3 mt-3">
-                  <h2 className="text-lg font-heading font-semibold">Dettaglio Ordini Assegnati ({records.length})</h2>
-                  <AssegnatiTable records={records} loading={loadingRecords} ragioneSocialeFilter={filters.ragione_sociale} />
+                  <h2 className="text-lg font-heading font-semibold">Dettaglio Ordini Assegnati ({ordiniMostrati.length})</h2>
+                  <AssegnatiTable records={ordiniMostrati} loading={loadingRecords} ragioneSocialeFilter={cercaId.trim() ? '' : filters.ragione_sociale} />
                 </TabsContent>
               </Tabs>
             </div>

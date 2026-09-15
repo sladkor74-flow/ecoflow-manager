@@ -4,83 +4,85 @@
 @tailwind utilities;
 
 @layer base {
+  /* Le variabili del tema hanno il prefisso --eco-: nomi generici come --primary
+   vengono a volte ridefiniti da estensioni del browser, rendendo trasparenti i pulsanti. */
   :root {
-    --background: 210 40% 98%;
-    --foreground: 217 33% 17%;
-    --card: 0 0% 100%;
-    --card-foreground: 217 33% 17%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 217 33% 17%;
-    --primary: 197 82% 22%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 214 32% 91%;
-    --secondary-foreground: 217 33% 17%;
-    --muted: 214 32% 91%;
-    --muted-foreground: 217 25% 40%;
-    --accent: 198 93% 60%;
-    --accent-foreground: 197 82% 22%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
-    --success: 142 71% 45%;
-    --success-foreground: 0 0% 100%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 197 82% 22%;
-    --chart-1: 197 82% 22%;
-    --chart-2: 198 93% 60%;
-    --chart-3: 217 33% 17%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
-    --radius: 0.5rem;
+    --eco-background: 210 40% 98%;
+    --eco-foreground: 217 33% 17%;
+    --eco-card: 0 0% 100%;
+    --eco-card-foreground: 217 33% 17%;
+    --eco-popover: 0 0% 100%;
+    --eco-popover-foreground: 217 33% 17%;
+    --eco-primary: 197 82% 22%;
+    --eco-primary-foreground: 210 40% 98%;
+    --eco-secondary: 214 32% 91%;
+    --eco-secondary-foreground: 217 33% 17%;
+    --eco-muted: 214 32% 91%;
+    --eco-muted-foreground: 217 25% 40%;
+    --eco-accent: 198 93% 60%;
+    --eco-accent-foreground: 197 82% 22%;
+    --eco-destructive: 0 84% 60%;
+    --eco-destructive-foreground: 210 40% 98%;
+    --eco-success: 142 71% 45%;
+    --eco-success-foreground: 0 0% 100%;
+    --eco-border: 214 32% 91%;
+    --eco-input: 214 32% 91%;
+    --eco-ring: 197 82% 22%;
+    --eco-chart-1: 197 82% 22%;
+    --eco-chart-2: 198 93% 60%;
+    --eco-chart-3: 217 33% 17%;
+    --eco-chart-4: 43 74% 66%;
+    --eco-chart-5: 27 87% 67%;
+    --eco-radius: 0.5rem;
     --font-heading: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
     --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
     --font-display: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    --sidebar-background: 217 33% 17%;
-    --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 198 93% 60%;
-    --sidebar-primary-foreground: 197 82% 22%;
-    --sidebar-accent: 217 28% 25%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 217 28% 25%;
-    --sidebar-ring: 198 93% 60%;
+    --eco-sidebar-background: 217 33% 17%;
+    --eco-sidebar-foreground: 210 40% 98%;
+    --eco-sidebar-primary: 198 93% 60%;
+    --eco-sidebar-primary-foreground: 197 82% 22%;
+    --eco-sidebar-accent: 217 28% 25%;
+    --eco-sidebar-accent-foreground: 210 40% 98%;
+    --eco-sidebar-border: 217 28% 25%;
+    --eco-sidebar-ring: 198 93% 60%;
   }
 
   .dark {
-    --background: 217 33% 17%;
-    --foreground: 210 40% 98%;
-    --card: 217 33% 20%;
-    --card-foreground: 210 40% 98%;
-    --popover: 217 33% 20%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 198 93% 60%;
-    --primary-foreground: 217 33% 17%;
-    --secondary: 217 28% 25%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 28% 25%;
-    --muted-foreground: 214 20% 65%;
-    --accent: 197 82% 30%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 63% 31%;
-    --destructive-foreground: 210 40% 98%;
-    --success: 142 71% 45%;
-    --success-foreground: 0 0% 100%;
-    --border: 217 28% 25%;
-    --input: 217 28% 25%;
-    --ring: 198 93% 60%;
-    --chart-1: 198 93% 60%;
-    --chart-2: 197 82% 30%;
-    --chart-3: 210 40% 98%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
-    --sidebar-background: 217 33% 14%;
-    --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 198 93% 60%;
-    --sidebar-primary-foreground: 217 33% 17%;
-    --sidebar-accent: 217 28% 22%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 217 28% 22%;
-    --sidebar-ring: 198 93% 60%;
+    --eco-background: 217 33% 17%;
+    --eco-foreground: 210 40% 98%;
+    --eco-card: 217 33% 20%;
+    --eco-card-foreground: 210 40% 98%;
+    --eco-popover: 217 33% 20%;
+    --eco-popover-foreground: 210 40% 98%;
+    --eco-primary: 198 93% 60%;
+    --eco-primary-foreground: 217 33% 17%;
+    --eco-secondary: 217 28% 25%;
+    --eco-secondary-foreground: 210 40% 98%;
+    --eco-muted: 217 28% 25%;
+    --eco-muted-foreground: 214 20% 65%;
+    --eco-accent: 197 82% 30%;
+    --eco-accent-foreground: 210 40% 98%;
+    --eco-destructive: 0 63% 31%;
+    --eco-destructive-foreground: 210 40% 98%;
+    --eco-success: 142 71% 45%;
+    --eco-success-foreground: 0 0% 100%;
+    --eco-border: 217 28% 25%;
+    --eco-input: 217 28% 25%;
+    --eco-ring: 198 93% 60%;
+    --eco-chart-1: 198 93% 60%;
+    --eco-chart-2: 197 82% 30%;
+    --eco-chart-3: 210 40% 98%;
+    --eco-chart-4: 43 74% 66%;
+    --eco-chart-5: 27 87% 67%;
+    --eco-sidebar-background: 217 33% 14%;
+    --eco-sidebar-foreground: 210 40% 98%;
+    --eco-sidebar-primary: 198 93% 60%;
+    --eco-sidebar-primary-foreground: 217 33% 17%;
+    --eco-sidebar-accent: 217 28% 22%;
+    --eco-sidebar-accent-foreground: 210 40% 98%;
+    --eco-sidebar-border: 217 28% 22%;
+    --eco-sidebar-ring: 198 93% 60%;
   }
 }
 
@@ -97,5 +99,13 @@
 
   h1, h2, h3, h4, h5, h6 {
     @apply font-heading;
+  }
+}
+
+@layer components {
+  /* Pulsanti secondari (esportazioni, caricamenti, aggiornamenti): bordo e fondo
+     pieni, cosi' restano ben leggibili su qualsiasi sfondo. */
+  .btn-secondario {
+    @apply rounded-md border border-slate-300 bg-white font-medium text-slate-800 shadow-sm transition-colors hover:border-slate-400 hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-700/30 disabled:cursor-not-allowed disabled:opacity-50;
   }
 }

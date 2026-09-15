@@ -128,7 +128,7 @@ export default function TodoPage() {
           </div>
           <div className="flex gap-2">
             <button onClick={handleAdd} disabled={!form.titolo} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"><Plus className="w-4 h-4" /> Aggiungi</button>
-            <button onClick={() => setShowForm(false)} className="px-4 py-2 rounded-md border text-sm hover:bg-accent">Annulla</button>
+            <button onClick={() => setShowForm(false)} className="px-4 py-2 text-sm btn-secondario">Annulla</button>
           </div>
         </div>
       )}

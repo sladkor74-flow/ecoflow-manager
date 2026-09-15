@@ -6,6 +6,7 @@ import { useTableSort } from '@/hooks/useTableSort';
 import SortHeader from '@/components/shared/SortHeader';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { formatNumber, fmtTon } from '@/lib/utils';
+import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdOrdine';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -35,6 +36,10 @@ export default function PrimarieAci() {
   const [filterRegione, setFilterRegione] = useState([]);
   const [filterStato, setFilterStato] = useState([]);
   const [filterAnno, setFilterAnno] = useState([]);
+  const [cercaId, setCercaId] = useState('');
+  const [scheda, setScheda] = useState('destinazioni');
+  // Cercando un ID si passa al dettaglio dei record, in tutto l'archivio.
+  useEffect(() => { if (cercaId.trim()) setScheda('dettaglio'); }, [cercaId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,7 +85,8 @@ export default function PrimarieAci() {
   });
 
   // Aggiorna i record ordinati per il dettaglio
-  const sortedDetail = useTableSort(filtered, 'ordine_chiuso_il', 'desc');
+  const dettaglio = cercaId.trim() ? records.filter(r => corrispondeIdOrdine(r, cercaId)) : filtered;
+  const sortedDetail = useTableSort(dettaglio, 'ordine_chiuso_il', 'desc');
 
   const totalKg = filtered.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
   const totalRichiesti = filtered.reduce((s, r) => s + (r.quantita_richiesta || 0), 0);
@@ -117,7 +123,7 @@ export default function PrimarieAci() {
           <h1 className="text-2xl lg:text-3xl font-heading font-bold flex items-center gap-2"><Factory className="w-7 h-7 text-primary" /> Terminati ACI</h1>
           <p className="text-muted-foreground mt-1">Monitoraggio ordini ACI (Auto Club Italia) con analisi per destinazione e mese.</p>
         </div>
-        <button onClick={load} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent">
+        <button onClick={load} className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
           <RefreshCw className="w-4 h-4" /> Aggiorna
         </button>
       </div>
@@ -142,6 +148,8 @@ export default function PrimarieAci() {
         </div>
       </div>
 
+      <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loading ? null : dettaglio.length} />
+
       {/* Filtri */}
       <div className="border rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
@@ -164,11 +172,11 @@ export default function PrimarieAci() {
         </div>
       </div>
 
-      <Tabs defaultValue="destinazioni">
+      <Tabs value={scheda} onValueChange={setScheda}>
         <TabsList>
           <TabsTrigger value="destinazioni">Per Destinazione</TabsTrigger>
           <TabsTrigger value="mese">Per Mese</TabsTrigger>
-          <TabsTrigger value="dettaglio">Dettaglio Record</TabsTrigger>
+          <TabsTrigger value="dettaglio">Dettaglio Record ({formatNumber(dettaglio.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="destinazioni" className="mt-4">

@@ -106,7 +106,7 @@ export default function PredittivitaAgent() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-heading font-semibold">Assistente Predittività</h2>
-          <button onClick={newConversation} className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent">
+          <button onClick={newConversation} className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
             <Plus className="w-4 h-4" /> Nuova conversazione
           </button>
         </div>

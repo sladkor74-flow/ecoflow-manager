@@ -50,7 +50,7 @@ export default function GlobalFilters({ filters, onChange, filterOptions }) {
         />
       </div>
       {hasFilters && (
-        <button onClick={() => onChange({ mese: [], raccoglitore: [], anno: [], settimana: [] })} className="inline-flex items-center gap-1 px-3 py-1.5 text-sm border rounded-md hover:bg-accent">
+        <button onClick={() => onChange({ mese: [], raccoglitore: [], anno: [], settimana: [] })} className="inline-flex items-center gap-1 px-3 py-1.5 text-sm btn-secondario">
           <X className="w-3 h-3" /> Reset
         </button>
       )}

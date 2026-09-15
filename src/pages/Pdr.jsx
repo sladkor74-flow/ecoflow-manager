@@ -227,7 +227,7 @@ export default function Pdr() {
           <button
             onClick={exportExcel}
             disabled={exporting || filtered.length === 0}
-            className="inline-flex items-center gap-1.5 text-sm font-medium border rounded-md px-3 py-1.5 hover:bg-accent disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 btn-secondario"
           >
             {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
             Esporta Excel

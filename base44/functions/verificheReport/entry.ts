@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { caricaMovimenti, soggettiDellaSettimana, oggiRoma } from "../../shared/reportSettimanali.ts";
+import { eliminaCampo } from "../../shared/testoLungo.ts";
 
 // Situazione dei report settimanali per una settimana.
 //
@@ -38,6 +39,7 @@ export default async function(req) {
     let cancellate = 0;
     for (const v of tutte) {
       if (v.scade_il && String(v.scade_il).slice(0, 10) <= oggi) {
+        await eliminaCampo(base44, 'VerificaReport', v.id);
         await svc.VerificaReport.delete(v.id);
         cancellate++;
       }

@@ -14,7 +14,7 @@ export default function ExportButtons({ onExcel, onPDF, onPPT }) {
     <button
       onClick={() => handle(type, fn)}
       disabled={loading === type}
-      className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:bg-accent disabled:opacity-50"
+      className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario"
     >
       {loading === type ? <Loader2 className="w-4 h-4 animate-spin" /> : icon}
       {label}

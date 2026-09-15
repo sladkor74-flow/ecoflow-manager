@@ -6,6 +6,7 @@ import {
   ChevronLeft, ChevronRight, Upload, Loader2, Download, Eye, Trash2, AlertTriangle, CheckCircle2, Clock, Info,
 } from 'lucide-react';
 import DettaglioVerifica from '@/components/verifiche/DettaglioVerifica';
+import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
 import {
   GIORNI_CONSERVAZIONE, oggiRoma, aggiungiGiorni, settimanaIso, intervalloSettimana, settimaneNellAnno, descriviIntervallo,
   dataIt, tonnellate, tipoDiFile, leggiTabelleDaFile, fileInBase64, segnalazioni, analisiInCorso, analisiInterrotta, scaricaExcelVerifica,
@@ -17,6 +18,16 @@ import {
 
 const RUOLI = { trattamento: 'Impianto', stoccaggio: 'Stoccaggio' };
 const LIMITE_EXCEL = 15 * 1024 * 1024;
+// Excel (.xlsx, .xls, .xlsm), LibreOffice/OpenOffice (.ods), CSV, PDF e immagini:
+// estensioni e tipi MIME, cosi' la finestra di scelta non nasconde nessun formato.
+const FORMATI_REPORT = [
+  '.xlsx', '.xls', '.xlsm', '.ods', '.csv', '.pdf', '.png', '.jpg', '.jpeg', '.webp',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'application/vnd.ms-excel.sheet.macroEnabled.12',
+  'application/vnd.oasis.opendocument.spreadsheet',
+  'text/csv', 'application/pdf', 'image/png', 'image/jpeg', 'image/webp',
+].join(',');
 const LIMITE_PDF = 5 * 1024 * 1024;
 
 function Esito({ riga }) {
@@ -76,7 +87,7 @@ function RigaSoggetto({ riga, isAdmin, occupato, onCarica, onApri, onElimina, on
         <div className="flex items-center justify-end gap-1">
           {isAdmin && (
             <>
-              <input ref={input} type="file" className="hidden" accept=".xlsx,.xls,.xlsm,.ods,.csv,.pdf,.png,.jpg,.jpeg,.webp"
+              <input ref={input} type="file" className="hidden" accept={FORMATI_REPORT}
                 onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) onCarica(riga, f); }} />
               <Button size="sm" variant={v ? 'ghost' : 'outline'} className="h-8" disabled={occupato || analisiInCorso(v)} onClick={() => input.current && input.current.click()}>
                 {occupato ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Upload className="w-3.5 h-3.5 mr-1" />}
@@ -142,7 +153,7 @@ export default function ReportSettimanali({ isAdmin }) {
 
   const carica_report = async (riga, file) => {
     const tipo = tipoDiFile(file);
-    if (!tipo) { toast({ title: 'Formato non supportato', description: 'Carica un file Excel, CSV, PDF o un\'immagine.', variant: 'destructive' }); return; }
+    if (!tipo) { toast({ title: 'Formato non supportato', description: 'Carica un file Excel (.xlsx, .xls), LibreOffice (.ods), CSV, PDF o un\'immagine.', variant: 'destructive' }); return; }
     if ((tipo === 'excel' || tipo === 'csv') && file.size > LIMITE_EXCEL) { toast({ title: 'File troppo grande', variant: 'destructive' }); return; }
     if ((tipo === 'pdf' || tipo === 'immagine') && file.size > LIMITE_PDF) {
       toast({ title: 'File troppo grande', description: 'Per i PDF e le immagini il limite è 5 MB: se possibile carica la versione Excel.', variant: 'destructive' });
@@ -176,7 +187,10 @@ export default function ReportSettimanali({ isAdmin }) {
         avviata_il: new Date().toISOString(),
         scade_il: aggiungiGiorni(oggiRoma(), GIORNI_CONSERVAZIONE),
       });
-      if (precedenteVerifica) await base44.entities.VerificaReport.delete(precedenteVerifica.id);
+      if (precedenteVerifica) {
+        await eliminaParti('VerificaReport', precedenteVerifica.id);
+        await base44.entities.VerificaReport.delete(precedenteVerifica.id);
+      }
       setOccupato(null);
       await carica(true);
 
@@ -195,6 +209,7 @@ export default function ReportSettimanali({ isAdmin }) {
   const elimina = async (riga) => {
     if (!window.confirm(`Eliminare la verifica del report di ${riga.nome} per la settimana ${settimana}? L'operazione non si può annullare.`)) return;
     try {
+      await eliminaParti('VerificaReport', riga.verifica.id);
       await base44.entities.VerificaReport.delete(riga.verifica.id);
       await carica(true);
     } catch (e) {
@@ -204,7 +219,7 @@ export default function ReportSettimanali({ isAdmin }) {
 
   const scarica = async (id) => {
     try {
-      const v = await base44.entities.VerificaReport.get(id);
+      const v = await conCampiCompleti('VerificaReport', await base44.entities.VerificaReport.get(id), ['esito_json', 'lettura_json']);
       await scaricaExcelVerifica(v);
     } catch (e) {
       toast({ title: 'Esportazione non riuscita', description: e.message || String(e), variant: 'destructive' });

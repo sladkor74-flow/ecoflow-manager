@@ -5,7 +5,6 @@ import { LayoutDashboard, Table, Download } from 'lucide-react';
 import AttivaDashboard from './AttivaDashboard';
 import AttivaDetail from './AttivaDetail';
 import AttivaEsportazioni from './AttivaEsportazioni';
-import AttivaAnomalie from './AttivaAnomalie';
 
 export default function FatturazioneAttiva({ isAdmin, onVaiTariffe }) {
   const [tab, setTab] = useState('dashboard');
@@ -47,7 +46,7 @@ export default function FatturazioneAttiva({ isAdmin, onVaiTariffe }) {
         <AttivaDashboard periodo={periodo} setPeriodo={setPeriodo} data={data} loading={loading} elaborating={elaborating} onElabora={elabora} onReload={loadData} isAdmin={isAdmin} anomalie={anomalie} onVaiTariffe={onVaiTariffe} />
       </TabsContent>
       <TabsContent value="dettaglio" className="mt-4">
-        <AttivaDetail data={data} loading={loading} />
+        <AttivaDetail data={data} loading={loading} periodo={periodo} />
       </TabsContent>
       <TabsContent value="esportazioni" className="mt-4">
         <AttivaEsportazioni periodo={periodo} data={data} onReload={loadData} />

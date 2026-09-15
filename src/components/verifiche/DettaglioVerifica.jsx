@@ -6,6 +6,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Download, RefreshCw, Trash2, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet } from 'lucide-react';
 import { dataIt, tonnellate, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_ESITO } from '@/lib/verifiche';
 import { formatKg } from '@/lib/utils';
+import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
 
 const STILE_ESITO = {
   conforme: 'bg-emerald-100 text-emerald-800 border-emerald-200',
@@ -35,7 +36,8 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
     if (!verificaId) return;
     setCaricando(true);
     try {
-      setV(await base44.entities.VerificaReport.get(verificaId));
+      // Esito e lettura di un report lungo sono divisi in parti: si ricompongono qui.
+      setV(await conCampiCompleti('VerificaReport', await base44.entities.VerificaReport.get(verificaId), ['esito_json', 'lettura_json']));
     } catch (e) {
       toast({ title: 'Verifica non disponibile', description: e.message || String(e), variant: 'destructive' });
     }
@@ -76,6 +78,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
     if (!window.confirm(`Eliminare la verifica del report di ${v.soggetto_nome} per la settimana ${v.settimana}? L'operazione non si può annullare.`)) return;
     setLavorando('elimina');
     try {
+      await eliminaParti('VerificaReport', v.id);
       await base44.entities.VerificaReport.delete(v.id);
       onModificata();
       onClose();
