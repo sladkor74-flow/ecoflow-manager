@@ -60,6 +60,27 @@ export default async function(req) {
       fetchAll(base44.asServiceRole.entities.GiacenzaStoccaggio),
     ]);
 
+    // --- Classi dei PFU, come nel portale: P, M, G1, G2 e ACI (autodemolizione) ---
+    // Il prodotto arriva come "P - fino a 35 kg", ".class1" o "PFU Autodemolizione".
+    const CLASSI = ['P', 'M', 'G1', 'G2', 'ACI'];
+    function classeDa(...valori) {
+      const t = valori.map(v => String(v || '')).join(' ').toUpperCase();
+      if (/AUTODEMOL|\bACI\b|CLASS ?9/.test(t)) return 'ACI';
+      if (/CLASS ?3|\bG ?1\b/.test(t)) return 'G1';
+      if (/CLASS ?4|\bG ?2\b/.test(t)) return 'G2';
+      if (/CLASS ?2|(^|[^A-Z0-9])M([^A-Z0-9]|$)/.test(t)) return 'M';
+      if (/CLASS ?1|(^|[^A-Z0-9])P([^A-Z0-9]|$)/.test(t)) return 'P';
+      return 'ND';
+    }
+    const classiVuote = () => ({ P: 0, M: 0, G1: 0, G2: 0, ACI: 0, ND: 0 });
+    // Istante di un movimento per il portale: la chiusura dell'ordine, altrimenti la fine trasporto.
+    const istante = (v) => {
+      if (!v) return null;
+      const s = String(v);
+      const d = new Date(/Z$|[+-]\d\d:\d\d$/.test(s) || s.length <= 10 ? s : s + 'Z');
+      return isNaN(d.getTime()) ? null : d.getTime();
+    };
+
     // --- Filtri temporali per movimentazione ---
     function isTerminato(r) { return String(r.stato || '').trim().toLowerCase() === 'terminato'; }
     function inYear(dateField) {
@@ -126,7 +147,11 @@ export default async function(req) {
     const inAttesaMap = new Map();      // ns -> t (peso non dichiarato attribuito a stoccaggi)
     const ordiniSenzaRiscontro = new Set();
 
+    const classiImpiantoMap = new Map(); // ns|imp -> kg per classe degli ordini non dichiarati
+    let nonDichiaratiAggiornatiAl = 0;
     for (const r of nonDichiarati) {
+      const creato = istante(r.created_date);
+      if (creato && creato > nonDichiaratiAggiornatiAl) nonDichiaratiAggiornatiAl = creato;
       const { sito, td, anomalia } = attribuisci(r);
       const ns = norm(sito);
       if (!ns) continue;
@@ -138,6 +163,8 @@ export default async function(req) {
         inAttesaMap.set(ns, (inAttesaMap.get(ns) || 0) + t);
       } else {
         giacPortaleMap.set(key, (giacPortaleMap.get(key) || 0) + t);
+        if (!classiImpiantoMap.has(key)) classiImpiantoMap.set(key, classiVuote());
+        classiImpiantoMap.get(key)[classeDa(r.prodotto)] += kg;
       }
       ordiniMap.set(key, (ordiniMap.get(key) || 0) + 1);
 
@@ -166,6 +193,53 @@ export default async function(req) {
       if (!existing || dataMs > existing.dataMs) {
         stocRilevMap.set(ns, { record: r, dataStr, dataMs });
       }
+    }
+
+    // === 1c. MOVIMENTI DEGLI STOCCAGGI DOPO LA RILEVAZIONE ===
+    // La rilevazione fotografa il saldo del portale in un istante; da allora il
+    // portale lo aggiorna a ogni ordine chiuso. Per avere la giacenza di oggi, per
+    // classe, si aggiungono gli ingressi chiusi dopo la rilevazione e si tolgono
+    // le uscite (secondarie) partite dallo stoccaggio. Verificato su Nappi Sud il
+    // 16/09/2026: rilevazione del 13/09 piu' 10 ingressi meno 2 uscite coincide con
+    // il portale al chilogrammo, classe per classe.
+    const momentoRilevazione = (rec) => {
+      const creato = istante(rec.created_date);
+      const giorno = rec.data_rilevazione ? new Date(String(rec.data_rilevazione).slice(0, 10) + 'T23:00:00Z').getTime() : null;
+      if (creato && giorno) return Math.min(creato, giorno);
+      return creato || giorno || 0;
+    };
+    const tipoStoc = (r) => tdNorm(r.tipo_destinazione) === 'stoc';
+    const eSecondariaExtra = (r) => String(r.tipo_movimento || '').toLowerCase().trim() === 'secondaria';
+    let datiAggiornatiAl = 0;
+    const movStoc = new Map(); // ns -> { dopo, ingressi, uscite }
+    for (const [ns, rilev] of stocRilevMap) {
+      const dopo = momentoRilevazione(rilev.record);
+      const m = { dopo, ingressi: classiVuote(), uscite: classiVuote(), nIngressi: 0, nUscite: 0 };
+      movStoc.set(ns, m);
+    }
+    const contaMovimento = (r, ns, verso) => {
+      const m = movStoc.get(ns);
+      if (!m) return;
+      const t = istante(r.ordine_chiuso_il || r.trasporto_finito_il);
+      if (!t || t <= m.dopo) return;
+      const kg = Number(r.peso_effettivo) || 0;
+      m[verso][classeDa(r.classe, r.prodotto)] += kg;
+      if (verso === 'ingressi') m.nIngressi++; else m.nUscite++;
+    };
+    for (const r of [...reteAll, ...aciAll, ...extraAll, ...secAll]) {
+      const t = istante(r.ordine_chiuso_il || r.trasporto_finito_il);
+      if (isTerminato(r) && t && t > datiAggiornatiAl && t <= Date.now()) datiAggiornatiAl = t;
+    }
+    for (const r of [...reteAll, ...aciAll, ...extraAll.filter(x => !eSecondariaExtra(x))]) {
+      if (isTerminato(r) && tipoStoc(r)) contaMovimento(r, norm(r.destinazione), 'ingressi');
+    }
+    for (const r of secAll) {
+      if (!isTerminato(r)) continue;
+      if (tipoStoc(r)) contaMovimento(r, norm(r.destinazione), 'ingressi');
+      contaMovimento(r, norm(r.stoccaggio), 'uscite');
+    }
+    for (const r of extraAll.filter(eSecondariaExtra)) {
+      if (isTerminato(r)) contaMovimento(r, norm(r.stoccaggio), 'uscite');
     }
 
     // === 2. DICHIARATO (DichiarazioneTrattamento, per ns|td) ===
@@ -299,6 +373,10 @@ export default async function(req) {
       let rilevazione_obsoleta = null;
       let in_attesa_dichiarazione_t = 0;
       let senzaRilevazione = false;
+      let giacenza_classi_kg = null;
+      let rilevazione_classi_kg = null;
+      let dopo_rilevazione = null;
+      let aggiornata_al = null;
 
       if (td === 'stoc') {
         // in_attesa_dichiarazione_t: materiale gia' partito dallo stoccaggio verso un impianto,
@@ -309,15 +387,26 @@ export default async function(req) {
 
         const rilev = stocRilevMap.get(ns);
         if (rilev) {
-          const c1 = Number(rilev.record.class1_kg) || 0;
-          const c2 = Number(rilev.record.class2_kg) || 0;
-          const c3 = Number(rilev.record.class3_kg) || 0;
-          const c4 = Number(rilev.record.class4_kg) || 0;
-          const c9 = Number(rilev.record.class9_kg) || 0;
-          giacenza_portale_t = (c1 + c2 + c3 + c4 + c9) / 1000;
-          giacenza_rete_t = (c1 + c2 + c3 + c4) / 1000;
-          giacenza_aci_t = c9 / 1000;
+          rilevazione_classi_kg = {
+            P: Number(rilev.record.class1_kg) || 0, M: Number(rilev.record.class2_kg) || 0, G1: Number(rilev.record.class3_kg) || 0,
+            G2: Number(rilev.record.class4_kg) || 0, ACI: Number(rilev.record.class9_kg) || 0, ND: 0,
+          };
+          const mov = movStoc.get(ns);
+          giacenza_classi_kg = Object.fromEntries(Object.keys(rilevazione_classi_kg).map(c => [c, rilevazione_classi_kg[c] + mov.ingressi[c] - mov.uscite[c]]));
+          dopo_rilevazione = {
+            dal: new Date(mov.dopo).toISOString(),
+            ingressi: mov.nIngressi, ingressi_kg: CLASSI.concat('ND').reduce((s, c) => s + mov.ingressi[c], 0), ingressi_classi_kg: mov.ingressi,
+            uscite: mov.nUscite, uscite_kg: CLASSI.concat('ND').reduce((s, c) => s + mov.uscite[c], 0), uscite_classi_kg: mov.uscite,
+          };
+          aggiornata_al = datiAggiornatiAl ? new Date(datiAggiornatiAl).toISOString() : null;
+          const kgTot = Object.values(giacenza_classi_kg).reduce((s, v) => s + v, 0);
+          giacenza_portale_t = kgTot / 1000;
+          giacenza_rete_t = (kgTot - giacenza_classi_kg.ACI) / 1000;
+          giacenza_aci_t = giacenza_classi_kg.ACI / 1000;
           data_rilevazione = rilev.dataStr;
+          for (const c of CLASSI) {
+            if (giacenza_classi_kg[c] < 0) anomalie.push({ tipo: 'giacenza_negativa', sito: nomiSito.get(ns) || ns, classe: c, kg: giacenza_classi_kg[c] });
+          }
           const trentaGiorniFa = Date.now() - 30 * 24 * 60 * 60 * 1000;
           rilevazione_obsoleta = rilev.dataMs < trentaGiorniFa;
         } else {
@@ -329,6 +418,8 @@ export default async function(req) {
         }
       } else {
         giacenza_portale_t = giacPortaleMap.get(key) || 0;
+        giacenza_classi_kg = classiImpiantoMap.get(key) || classiVuote();
+        aggiornata_al = nonDichiaratiAggiornatiAl ? new Date(nonDichiaratiAggiornatiAl).toISOString() : null;
       }
 
       const dichiarato_t = dichiaratoMap.get(key) || 0;
@@ -392,6 +483,10 @@ export default async function(req) {
         giacenza_portale_t: r2(giacenza_portale_t),
         giacenza_rete_t: giacenza_rete_t !== null ? r2(giacenza_rete_t) : null,
         giacenza_aci_t: giacenza_aci_t !== null ? r2(giacenza_aci_t) : null,
+        giacenza_classi_kg: giacenza_classi_kg ? Object.fromEntries(Object.entries(giacenza_classi_kg).map(([c, v]) => [c, Math.round(v)])) : null,
+        rilevazione_classi_kg,
+        dopo_rilevazione,
+        aggiornata_al,
         data_rilevazione,
         rilevazione_obsoleta,
         in_attesa_dichiarazione_t: r2(in_attesa_dichiarazione_t),
@@ -461,6 +556,8 @@ export default async function(req) {
     ];
     const totali = {};
     for (const c of numCols) totali[c] = r2(righe.reduce((s, r) => s + (r[c] || 0), 0));
+    totali.giacenza_classi_kg = classiVuote();
+    for (const r of righe) for (const [c, v] of Object.entries(r.giacenza_classi_kg || {})) totali.giacenza_classi_kg[c] += v;
     totali.ordini_da_dichiarare = righe.reduce((s, r) => s + (r.ordini_da_dichiarare || 0), 0);
 
     return Response.json({ anno: annoNum, righe, totali, anomalie });

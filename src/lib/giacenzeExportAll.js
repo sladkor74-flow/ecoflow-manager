@@ -19,20 +19,25 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
   const wb = XLSX.utils.book_new();
 
   // --- Foglio 1: Situazione ---
-  const sitHeaders = ['Sito', 'Ruolo', 'Giacenza a portale (t)', 'Giacenza fisica (t)', 'Divergenza (t)', 'Ordini da dichiarare', 'Dichiarato (t)', 'Tipologia trattamento'];
+  // Giacenza per classe in kg, come nel portale Ecotyre.
+  const CLASSI = ['P', 'M', 'G1', 'G2', 'ACI'];
+  const sitHeaders = ['Sito', 'Ruolo', 'Giacenza a portale (t)', ...CLASSI.map(c => `${c} (kg)`), 'Rilevazione stoccaggio', 'Dati aggiornati al', 'In attesa di dichiarazione (t)', 'Ordini da dichiarare', 'Dichiarato (t)', 'Tipologia trattamento'];
+  const classi = (r) => CLASSI.map(c => (r.giacenza_classi_kg ? r.giacenza_classi_kg[c] || 0 : null));
   const sitRows = data.righe.map(r => [
     r.sito,
     r.tipo_destinazione === 'imp' ? 'Impianto' : 'Stoccaggio',
     r.giacenza_portale_t,
-    r.giacenza_fisica_t,
-    r.divergenza_t,
+    ...classi(r),
+    r.tipo_destinazione === 'stoc' ? fmtData(r.data_rilevazione) : '',
+    fmtData(r.aggiornata_al),
+    r.in_attesa_dichiarazione_t,
     r.ordini_da_dichiarare || 0,
     r.dichiarato_t,
     r.tipologia_trattamento || '',
   ]);
-  sitRows.push(['TOTALE', '', data.totali.giacenza_portale_t, data.totali.giacenza_fisica_t, data.totali.divergenza_t, data.totali.ordini_da_dichiarare, data.totali.dichiarato_t, '']);
+  sitRows.push(['TOTALE', '', data.totali.giacenza_portale_t, ...classi(data.totali), '', '', data.totali.in_attesa_dichiarazione_t, data.totali.ordini_da_dichiarare, data.totali.dichiarato_t, '']);
   const ws1 = XLSX.utils.aoa_to_sheet([sitHeaders, ...sitRows]);
-  ws1['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 20 }];
+  ws1['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 20 }, ...CLASSI.map(() => ({ wch: 11 })), { wch: 20 }, { wch: 18 }, { wch: 24 }, { wch: 18 }, { wch: 16 }, { wch: 20 }];
   XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws1), 'Situazione');
 
   // --- Foglio 2: Da dichiarare ---
