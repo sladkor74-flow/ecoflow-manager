@@ -20,7 +20,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
   const [ragioneSocialeInput, setRagioneSocialeInput] = useState('');
   const [viewMode, setViewMode] = useState('matrix');
   const [cercaId, setCercaId] = useState('');
-  const [tuttiRecords, setTuttiRecords] = useState([]);
+  const [tuttiRecords, setTuttiRecords] = useState(null);
 
   const applyRagioneSociale = () => setFilters(p => ({ ...p, ragione_sociale: ragioneSocialeInput }));
 
@@ -65,7 +65,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
   useEffect(() => { if (viewMode === 'detail') loadRecords(); }, [loadRecords, viewMode]);
   // Cercando un ID si passa al dettaglio degli ordini.
   useEffect(() => { if (cercaId.trim()) setViewMode('detail'); }, [cercaId]);
-  const ordiniMostrati = cercaId.trim() ? tuttiRecords.filter(r => corrispondeIdOrdine(r, cercaId)) : records;
+  const ordiniMostrati = cercaId.trim() ? (tuttiRecords || []).filter(r => corrispondeIdOrdine(r, cercaId)) : records;
 
   // Auto-refresh on new uploads
   useEffect(() => {
@@ -119,7 +119,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
         <>
           <AssegnatiKpi kpi={data?.kpi} />
 
-          <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loadingRecords ? null : ordiniMostrati.length} />
+          <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loadingRecords || !tuttiRecords ? null : ordiniMostrati.length} />
 
           {/* Filtri rapidi */}
           <div className="border rounded-lg p-4 space-y-3">

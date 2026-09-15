@@ -109,7 +109,7 @@ export default function PrimarieRete() {
         </div>
       </div>
 
-      <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loadingRecords ? null : ordiniMostrati.length} />
+      <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loadingRecords || !allRecords.length ? null : ordiniMostrati.length} />
 
       {/* Filtri rapidi per dettaglio ordini */}
       <div className="border rounded-lg p-4 space-y-3">

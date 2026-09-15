@@ -148,7 +148,7 @@ export default function PrimarieAci() {
         </div>
       </div>
 
-      <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loading ? null : dettaglio.length} />
+      <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loading || !records.length ? null : dettaglio.length} />
 
       {/* Filtri */}
       <div className="border rounded-lg p-4 space-y-3">
