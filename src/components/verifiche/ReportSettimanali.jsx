@@ -3,10 +3,25 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import {
-  ChevronLeft, ChevronRight, Upload, Loader2, Download, Eye, Trash2, AlertTriangle, CheckCircle2, Clock, Info,
+  ChevronLeft, ChevronRight, Upload, Loader2, Download, Eye, Trash2, AlertTriangle, CheckCircle2, Clock, Info, FileText,
 } from 'lucide-react';
 import DettaglioVerifica from '@/components/verifiche/DettaglioVerifica';
 import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
+import { esportaEsitoVerificaPdf } from '@/lib/esitoVerificaPdf';
+
+// Caricamenti ravvicinati possono incontrare il limite di richieste della piattaforma: si riprova dopo una pausa.
+async function conRitentativi(fn) {
+  const attese = [3000, 8000, 15000];
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const messaggio = String((e && e.data && e.data.error) || (e && e.message) || e);
+      if (!/rate limit|too many requests|429/i.test(messaggio) || i >= attese.length) throw e;
+      await new Promise(r => setTimeout(r, attese[i]));
+    }
+  }
+}
 import {
   GIORNI_CONSERVAZIONE, oggiRoma, aggiungiGiorni, settimanaIso, intervalloSettimana, settimaneNellAnno, descriviIntervallo,
   dataIt, tonnellate, tipoDiFile, leggiTabelleDaFile, fileInBase64, segnalazioni, analisiInCorso, analisiInterrotta, scaricaExcelVerifica,
@@ -44,11 +59,13 @@ function Esito({ riga }) {
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-800 text-xs"><AlertTriangle className="w-3 h-3" />{v.stato === 'errore' ? 'Errore' : 'Interrotta'}</span>;
   }
   const n = segnalazioni(v);
-  if (n === 0) return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs"><CheckCircle2 className="w-3 h-3" />Conforme</span>;
+  if (v.conformita ? v.conformita === 'piena' : n === 0) {
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs"><CheckCircle2 className="w-3 h-3" />Conformità piena</span>;
+  }
   const gravi = (v.non_trovate || 0) + (v.assenti_nel_report || 0) + (v.duplicate || 0) > 0;
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-medium ${gravi ? 'border-red-200 bg-red-50 text-red-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
-      <AlertTriangle className="w-3 h-3" />{n} {n === 1 ? 'segnalazione' : 'segnalazioni'}
+      <AlertTriangle className="w-3 h-3" />Parziale · {n} {n === 1 ? 'anomalia' : 'anomalie'}
     </span>
   );
 }
@@ -98,6 +115,7 @@ function RigaSoggetto({ riga, isAdmin, occupato, onCarica, onApri, onElimina, on
           {v && (
             <>
               <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Dettaglio" onClick={() => onApri(v.id)}><Eye className="w-4 h-4" /></Button>
+              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="PDF per l'impianto" disabled={v.stato !== 'completata'} onClick={() => onScarica(v.id, 'pdf')}><FileText className="w-4 h-4" /></Button>
               <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Scarica Excel" disabled={v.stato !== 'completata'} onClick={() => onScarica(v.id)}><Download className="w-4 h-4" /></Button>
               {isAdmin && <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-600 hover:text-red-700" title="Elimina" onClick={() => onElimina(riga)}><Trash2 className="w-4 h-4" /></Button>}
             </>
@@ -174,7 +192,7 @@ export default function ReportSettimanali({ isAdmin }) {
         payload.file = { nome: file.name, mime: file.type || (tipo === 'pdf' ? 'application/pdf' : 'image/png'), base64: await fileInBase64(file) };
       }
 
-      const nuova = await base44.entities.VerificaReport.create({
+      const nuova = await conRitentativi(() => base44.entities.VerificaReport.create({
         soggetto_chiave: riga.chiave,
         soggetto_nome: riga.nome,
         anno,
@@ -186,20 +204,26 @@ export default function ReportSettimanali({ isAdmin }) {
         stato: 'in_lettura',
         avviata_il: new Date().toISOString(),
         scade_il: aggiungiGiorni(oggiRoma(), GIORNI_CONSERVAZIONE),
-      });
-      if (precedenteVerifica) {
-        await eliminaParti('VerificaReport', precedenteVerifica.id);
-        await base44.entities.VerificaReport.delete(precedenteVerifica.id);
-      }
-      setOccupato(null);
-      await carica(true);
+      }));
 
+      // La verifica parte subito: se poi la vecchia non si cancella, la nuova non resta ferma.
       base44.functions.invoke('elaboraReportSettimanale', { verifica_id: nuova.id, ...payload })
         .catch((e) => {
           const msg = (e && e.data && e.data.error) || (e && e.response && e.response.data && e.response.data.error);
           if (msg) toast({ title: `Report di ${riga.nome} non verificato`, description: msg, variant: 'destructive' });
         })
         .finally(() => carica(true));
+
+      if (precedenteVerifica) {
+        try {
+          await conRitentativi(() => eliminaParti('VerificaReport', precedenteVerifica.id));
+          await conRitentativi(() => base44.entities.VerificaReport.delete(precedenteVerifica.id));
+        } catch (e) {
+          toast({ title: 'La verifica precedente non è stata cancellata', description: 'Si cancellerà da sola alla scadenza. ' + (e.message || ''), variant: 'destructive' });
+        }
+      }
+      setOccupato(null);
+      await carica(true);
     } catch (e) {
       setOccupato(null);
       toast({ title: 'Caricamento non riuscito', description: e.message || String(e), variant: 'destructive' });
@@ -217,10 +241,11 @@ export default function ReportSettimanali({ isAdmin }) {
     }
   };
 
-  const scarica = async (id) => {
+  const scarica = async (id, formato = 'excel') => {
     try {
       const v = await conCampiCompleti('VerificaReport', await base44.entities.VerificaReport.get(id), ['esito_json', 'lettura_json']);
-      await scaricaExcelVerifica(v);
+      if (formato === 'pdf') await esportaEsitoVerificaPdf(v);
+      else await scaricaExcelVerifica(v);
     } catch (e) {
       toast({ title: 'Esportazione non riuscita', description: e.message || String(e), variant: 'destructive' });
     }
@@ -232,7 +257,7 @@ export default function ReportSettimanali({ isAdmin }) {
   const senzaMovimenti = soggetti.filter(r => !movimentato(r) && !r.verifica);
   const caricati = soggetti.filter(r => r.verifica && r.verifica.stato === 'completata');
   const daCaricare = soggetti.filter(r => movimentato(r) && !r.verifica).length;
-  const conSegnalazioni = caricati.filter(r => segnalazioni(r.verifica) > 0).length;
+  const conSegnalazioni = caricati.filter(r => (r.verifica.conformita ? r.verifica.conformita !== 'piena' : segnalazioni(r.verifica) > 0)).length;
 
   return (
     <div className="space-y-5">
@@ -253,7 +278,7 @@ export default function ReportSettimanali({ isAdmin }) {
           <div className="flex gap-4 text-sm">
             <span><strong className="tabular-nums">{daCaricare}</strong> <span className="text-muted-foreground">da caricare</span></span>
             <span><strong className="tabular-nums">{caricati.length}</strong> <span className="text-muted-foreground">verificati</span></span>
-            <span><strong className={`tabular-nums ${conSegnalazioni ? 'text-red-600' : ''}`}>{conSegnalazioni}</strong> <span className="text-muted-foreground">con segnalazioni</span></span>
+            <span><strong className={`tabular-nums ${conSegnalazioni ? 'text-red-600' : ''}`}>{conSegnalazioni}</strong> <span className="text-muted-foreground">con conformità parziale</span></span>
           </div>
         )}
       </div>

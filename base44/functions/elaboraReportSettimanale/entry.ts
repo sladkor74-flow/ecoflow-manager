@@ -71,7 +71,7 @@ const SCHEMA_MAPPATURA = {
 const GUIDA_CAMPI = [
   'fir: numero del formulario di identificazione rifiuto, detto anche FIR, formulario, n. formulario, numerazione fiscale, n. documento di trasporto.',
   'peso: peso netto o peso effettivo o quantita\' in chilogrammi o tonnellate.',
-  'data_inizio: data di inizio trasporto, di partenza, di ritiro o di carico, oppure data del documento o di emissione del formulario.',
+  'data_inizio: data di inizio trasporto, di partenza, di ritiro o di carico. Non la data del documento o di emissione del formulario.',
   'data_fine: data di fine trasporto, di arrivo, di ingresso, di scarico o di registrazione del carico nel registro.',
   'data: una sola data generica, solo se il file non distingue inizio e fine.',
   'produttore: ragione sociale del produttore o detentore del rifiuto, punto di raccolta, gommista, cliente.',
@@ -136,6 +136,12 @@ async function leggiTabelle(base44, tabelle, verifica) {
     if (!tabella || scelti.some(s => s.tabella === tabella) || ((col.fir ?? -1) < 0 && (col.peso ?? -1) < 0)) continue;
     const intestazioni = (tabella.righe || [])[Math.max(0, (f.prima_riga_dati || 1) - 1)] || [];
     for (const c of CAMPI_NOME) if ((col[c] ?? -1) >= 0 && NON_NOMI.test(testoCella(intestazioni[col[c]]))) col[c] = -1;
+    // Una sola colonna di data indicata come inizio e fine: e' una data generica.
+    if ((col.data_inizio ?? -1) >= 0 && col.data_inizio === col.data_fine) {
+      col.data = col.data_inizio;
+      col.data_inizio = -1;
+      col.data_fine = -1;
+    }
     scelti.push({ tabella, f, col, intestazioni });
   }
   if (!m.riconosciuto || scelti.length === 0) {
@@ -249,7 +255,9 @@ export default async function(req) {
     verificaId = body.verifica_id;
     if (!verificaId) return Response.json({ error: 'verifica_id obbligatorio' }, { status: 400 });
 
-    const svc = base44.asServiceRole.entities;
+    // Anche letture e scritture dell'entita' possono incontrare il limite di richieste.
+    const ent = base44.asServiceRole.entities.VerificaReport;
+    const svc = { VerificaReport: { get: (id) => conRitentativi(() => ent.get(id)), update: (id, dati) => conRitentativi(() => ent.update(id, dati)) } };
     const verifica = await svc.VerificaReport.get(verificaId);
     if (!verifica) return Response.json({ error: 'Verifica non trovata' }, { status: 404 });
 
@@ -271,8 +279,8 @@ export default async function(req) {
       // Un report lungo supera la dimensione di un campo: si salva diviso in parti.
       await svc.VerificaReport.update(verificaId, {
         stato: 'in_verifica',
-        righe_report_json: await valoreCampo(base44, 'VerificaReport', verificaId, 'righe_report_json', JSON.stringify(righe)),
-        lettura_json: await valoreCampo(base44, 'VerificaReport', verificaId, 'lettura_json', JSON.stringify(lettura)),
+        righe_report_json: await conRitentativi(() => valoreCampo(base44, 'VerificaReport', verificaId, 'righe_report_json', JSON.stringify(righe))),
+        lettura_json: await conRitentativi(() => valoreCampo(base44, 'VerificaReport', verificaId, 'lettura_json', JSON.stringify(lettura))),
       });
     }
 
@@ -286,7 +294,9 @@ export default async function(req) {
 
     await svc.VerificaReport.update(verificaId, {
       stato: 'completata',
-      esito_json: await valoreCampo(base44, 'VerificaReport', verificaId, 'esito_json', JSON.stringify({ esiti: esito.esiti, assenti: esito.assenti, escluse: esito.escluse })),
+      esito_json: await conRitentativi(() => valoreCampo(base44, 'VerificaReport', verificaId, 'esito_json', JSON.stringify({
+        esiti: esito.esiti, assenti: esito.assenti, escluse: esito.escluse, uscite_non_riportate: esito.uscite_non_riportate, quadratura: esito.quadratura,
+      }))),
       ...esito.riepilogo,
       verificata_il: new Date().toISOString(),
       errore: '',

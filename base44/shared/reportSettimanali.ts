@@ -415,9 +415,19 @@ const altroCircuito = (intermediario) => !!intermediario && !/ecotyre/i.test(int
  * settimana (molti report sono cumulativi del mese) quando anche il gestionale
  * le colloca fuori dalla settimana o non le conosce, e le righe non trovate che
  * il report attribuisce a un altro consorzio.
+ *
+ * Ogni discrepanza ha una gravita':
+ *   - anomalia: errore, svista o mancanza dell'impianto (formulario, peso, date,
+ *     classe, righe mancanti, in piu' o duplicate);
+ *   - osservazione: nome scritto in modo diverso, a parita' di formulario e peso;
+ *   - rettifica: l'errore e' nei dati del portale, non nel report.
+ * La conformita' e' piena solo senza anomalie e con formulari e pesi che
+ * quadrano, per gli ingressi e per le uscite.
  */
 export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, fine }) {
   const relazione = (m) => relazioneConSito(m, chiave);
+  // Una riga che il gestionale non collega al sito e' un'uscita se parte dal sito stesso.
+  const tipoPresunto = (r) => (nomiCoincidono(r.produttore, nome) === true || (r.produttore && normalizzaRagioneSociale(r.produttore) === chiave) ? 'uscita' : 'ingresso');
   const da = aggiungiGiorni(inizio, -FINESTRA_ABBINAMENTO_GIORNI);
   const a = aggiungiGiorni(fine, FINESTRA_ABBINAMENTO_GIORNI);
   const bacino = movimenti.filter(m => m.fine >= da && m.fine <= a);
@@ -498,7 +508,7 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     if (!m) {
       if (altroCircuito(r.intermediario)) { escludi(r, `Carico di un altro circuito: intermediario ${r.intermediario}`); continue; }
       if (fuoriSettimana) { escludi(r, `Data ${it(dataReport)}, fuori dalla settimana verificata`); continue; }
-      esiti.push({ n: r.n, ...foglio, tipo: null, esito: 'non_trovata', report, gestionale: null, discrepanze: [{ campo: 'fir', messaggio: r.firN ? 'Formulario non presente nel gestionale' : 'Riga senza formulario, non abbinabile a nessun movimento' }] });
+      esiti.push({ n: r.n, ...foglio, tipo: null, tipo_presunto: tipoPresunto(r), esito: 'non_trovata', anomalia: true, report, gestionale: null, discrepanze: [{ campo: 'fir', gravita: 'anomalia', messaggio: r.firN ? 'Formulario non presente nel gestionale' : 'Riga senza formulario, non abbinabile a nessun movimento' }] });
       continue;
     }
     // Report e gestionale concordano su un'altra settimana: la riga sara' verificata con quella.
@@ -509,11 +519,11 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
 
     const tipo = relazione(m);
     const discrepanze = [];
-    const aggiungi = (campo, messaggio) => discrepanze.push({ campo, messaggio });
+    const aggiungi = (campo, messaggio, gravita = 'anomalia') => discrepanze.push({ campo, gravita, messaggio });
 
     if (modo === 'fir_simile') {
       // Se solo il numero del report ha il formato dei formulari, l'errore e' nel gestionale.
-      if (FORMATO_FIR.test(r.firN) && !FORMATO_FIR.test(m.firN)) aggiungi('fir', `Formulario errato nel gestionale: ${descriviDifferenzaFir(m.fir, r.fir)}. Nel report e' ${r.fir}, con il formato regolare di 5 lettere, 6 cifre e 2 lettere: da correggere sul portale`);
+      if (FORMATO_FIR.test(r.firN) && !FORMATO_FIR.test(m.firN)) aggiungi('fir', `Formulario errato nel gestionale: ${descriviDifferenzaFir(m.fir, r.fir)}. Nel report e' ${r.fir}, con il formato regolare di 5 lettere, 6 cifre e 2 lettere: da correggere sul portale`, 'rettifica');
       else aggiungi('fir', `Formulario errato: ${descriviDifferenzaFir(r.fir, m.fir)}. Nel gestionale e' ${m.fir}`);
     }
     if (modo === 'attributi') aggiungi('fir', r.firN ? `Formulario non corrispondente: nel gestionale e' ${m.fir}` : `Formulario assente nel report: nel gestionale e' ${m.fir}`);
@@ -534,18 +544,18 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     } else if (r.produttore) {
       const esito = nomiCoincidono(r.produttore, m.produttore);
       const esitoPunto = nomiCoincidono(r.produttore, m.punto_raccolta);
-      if (esito === false && esitoPunto !== true) aggiungi('produttore', `Produttore diverso: report "${r.produttore}", gestionale "${m.produttore}"`);
+      if (esito === false && esitoPunto !== true) aggiungi('produttore', `Produttore diverso: report "${r.produttore}", gestionale "${m.produttore}"`, 'osservazione');
     }
 
     if (r.destinatario && nomiCoincidono(r.destinatario, m.destinatario) === false) {
-      aggiungi('destinatario', `Destinatario diverso: report "${r.destinatario}", gestionale "${m.destinatario}"`);
+      aggiungi('destinatario', `Destinatario diverso: report "${r.destinatario}", gestionale "${m.destinatario}"`, 'osservazione');
     }
     if (!tipo) {
       aggiungi('destinatario', `Nel gestionale questo formulario non riguarda ${nome}: va da ${m.produttore || 'produttore non indicato'} a ${m.destinatario}`);
     }
 
     if (r.trasportatore && nomiCoincidono(r.trasportatore, m.trasportatore) === false) {
-      aggiungi('trasportatore', `Trasportatore diverso: report "${r.trasportatore}", gestionale "${m.trasportatore}"`);
+      aggiungi('trasportatore', `Trasportatore diverso: report "${r.trasportatore}", gestionale "${m.trasportatore}"`, 'osservazione');
     }
 
     if (r.classe && m.classe && r.classe !== m.classe) aggiungi('classe', `Classe diversa: report ${r.classe}, gestionale ${m.classe}`);
@@ -555,12 +565,13 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       punto_raccolta: m.punto_raccolta, codice_pdr: m.codice_pdr, destinatario: m.destinatario, trasportatore: m.trasportatore, classe: m.classe,
     };
 
+    const presunto = tipo ? {} : { tipo_presunto: tipoPresunto(r) };
     if (usati.has(m.id)) {
-      esiti.push({ n: r.n, ...foglio, tipo, esito: 'duplicata', report, gestionale, discrepanze: [{ campo: 'fir', messaggio: `Riga duplicata: lo stesso movimento e' gia' riportato alla ${usati.get(m.id)}` }, ...discrepanze] });
+      esiti.push({ n: r.n, ...foglio, tipo, ...presunto, esito: 'duplicata', anomalia: true, report, gestionale, discrepanze: [{ campo: 'fir', gravita: 'anomalia', messaggio: `Riga duplicata: lo stesso movimento e' gia' riportato (${usati.get(m.id)})` }, ...discrepanze] });
       continue;
     }
     usati.set(m.id, rif(r));
-    esiti.push({ n: r.n, ...foglio, tipo, esito: discrepanze.length ? 'discrepanze' : 'conforme', report, gestionale, discrepanze });
+    esiti.push({ n: r.n, ...foglio, tipo, ...presunto, esito: discrepanze.length ? 'discrepanze' : 'conforme', anomalia: discrepanze.some(d => d.gravita === 'anomalia'), report, gestionale, discrepanze });
   }
 
   const usciteVerificate = esiti.some(e => e.tipo === 'uscita');
@@ -572,13 +583,39 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     ...ingressi.filter(m => !usati.has(m.id)).map(assente('ingresso')),
     ...(usciteVerificate ? uscite.filter(m => !usati.has(m.id)).map(assente('uscita')) : []),
   ].sort((x, y) => x.tipo.localeCompare(y.tipo) || String(x.fine).localeCompare(String(y.fine)) || x.fir.localeCompare(y.fir));
+  // Uno stoccaggio che non riporta le uscite manda un report parziale: le secondarie
+  // partite nella settimana si elencano come mancanti, senza confrontarle riga per riga.
+  const usciteNonRiportate = usciteVerificate ? [] : uscite.map(assente('uscita'))
+    .sort((x, y) => String(x.fine).localeCompare(String(y.fine)) || x.fir.localeCompare(y.fir));
+
+  // Quadratura: formulari e pesi del report contro quelli registrati, per tipo.
+  const tipoRiga = (e) => e.tipo || e.tipo_presunto || 'ingresso';
+  const somma = (lista, kg) => lista.reduce((t, x) => t + (kg(x) || 0), 0);
+  const quadratura = [['ingresso', ingressi], ['uscita', uscite]].map(([t, registrati]) => {
+    const righe = esiti.filter(e => tipoRiga(e) === t);
+    return {
+      tipo: t,
+      formulari_report: righe.length,
+      kg_report: somma(righe, e => e.report.kg),
+      formulari_gestionale: registrati.length,
+      kg_gestionale: somma(registrati, m => m.kg),
+    };
+  });
+  const quadra = quadratura.every(q => q.formulari_report === q.formulari_gestionale && q.kg_report === q.kg_gestionale);
+  const anomalie = esiti.filter(e => e.anomalia).length + assenti.length + usciteNonRiportate.length;
 
   const conta = (e) => esiti.filter(x => x.esito === e).length;
   return {
     esiti,
     assenti,
     escluse,
+    uscite_non_riportate: usciteNonRiportate,
+    quadratura,
     riepilogo: {
+      conformita: anomalie === 0 && quadra ? 'piena' : 'parziale',
+      anomalie,
+      osservazioni: esiti.filter(e => (e.discrepanze || []).some(d => d.gravita === 'osservazione')).length,
+      rettifiche: esiti.filter(e => (e.discrepanze || []).some(d => d.gravita === 'rettifica')).length,
       righe_report: esiti.length,
       conformi: conta('conforme'),
       con_discrepanze: conta('discrepanze'),

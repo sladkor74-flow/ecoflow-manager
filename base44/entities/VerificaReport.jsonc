@@ -106,6 +106,23 @@
       "type": "number",
       "description": "Peso delle righe verificate, escluse quelle non considerate"
     },
+    "conformita": {
+      "type": "string",
+      "enum": ["piena", "parziale"],
+      "description": "piena: nessuna anomalia e formulari e pesi che quadrano con il gestionale; parziale: errori, sviste o mancanze"
+    },
+    "anomalie": {
+      "type": "number",
+      "description": "Righe con errori o sviste dell'impianto, piu' i formulari mancanti nel report"
+    },
+    "osservazioni": {
+      "type": "number",
+      "description": "Righe con soli nomi scritti in modo diverso: non incidono sulla conformita'"
+    },
+    "rettifiche": {
+      "type": "number",
+      "description": "Righe in cui l'errore e' nei dati del portale e non nel report"
+    },
     "righe_escluse": {
       "type": "number",
       "description": "Righe del report non considerate: carichi di altre settimane o di altri consorzi"

@@ -3,10 +3,16 @@ import { base44 } from '@/api/base44Client';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { Download, RefreshCw, Trash2, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet } from 'lucide-react';
-import { dataIt, tonnellate, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_ESITO, rigaReport, descriviLettura } from '@/lib/verifiche';
-import { formatKg } from '@/lib/utils';
+import { Download, RefreshCw, Trash2, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, FileText } from 'lucide-react';
+import { dataIt, tonnellate, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_ESITO, rigaReport, descriviLettura, sintesiVerifica, gravita } from '@/lib/verifiche';
+import { esportaEsitoVerificaPdf } from '@/lib/esitoVerificaPdf';
+import { formatKg, formatIntero } from '@/lib/utils';
 import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
+
+const NOME_TIPO = { ingresso: 'Ingressi', uscita: 'Uscite', totale: 'Totale' };
+const STILE_GRAVITA = { osservazione: 'text-sky-700', rettifica: 'text-slate-500' };
+const ETICHETTA_GRAVITA = { osservazione: 'osservazione', rettifica: 'rettifica a nostra cura' };
+const differenza = (n, kg) => (n === 0 ? '0' : `${n > 0 ? '+' : '-'}${kg ? formatKg(Math.abs(n)) : formatIntero(Math.abs(n))}`);
 
 const STILE_ESITO = {
   conforme: 'bg-emerald-100 text-emerald-800 border-emerald-200',
@@ -58,6 +64,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
 
   const esito = v && v.esito_json ? JSON.parse(v.esito_json) : { esiti: [], assenti: [] };
   const escluse = esito.escluse || [];
+  const sintesi = v && v.stato === 'completata' ? sintesiVerifica(v, esito) : null;
   const lettura = v && v.lettura_json ? JSON.parse(v.lettura_json) : {};
   const daSistemare = esito.esiti.filter(e => e.esito !== 'conforme');
   const conformi = esito.esiti.filter(e => e.esito === 'conforme');
@@ -90,6 +97,16 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
     setLavorando(null);
   };
 
+  const scaricaPdf = async () => {
+    setLavorando('pdf');
+    try {
+      await esportaEsitoVerificaPdf(v);
+    } catch (e) {
+      toast({ title: 'Esportazione non riuscita', description: e.message || String(e), variant: 'destructive' });
+    }
+    setLavorando(null);
+  };
+
   const scarica = async () => {
     setLavorando('excel');
     try {
@@ -118,9 +135,13 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
             </SheetHeader>
 
             <div className="flex flex-wrap gap-2 mt-4">
-              <Button size="sm" onClick={scarica} disabled={v.stato !== 'completata' || lavorando === 'excel'}>
+              <Button size="sm" onClick={scaricaPdf} disabled={v.stato !== 'completata' || lavorando === 'pdf'}>
+                {lavorando === 'pdf' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileText className="w-4 h-4 mr-1" />}
+                PDF per l'impianto
+              </Button>
+              <Button size="sm" variant="outline" onClick={scarica} disabled={v.stato !== 'completata' || lavorando === 'excel'}>
                 {lavorando === 'excel' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
-                Scarica Excel
+                Excel
               </Button>
               {isAdmin && (
                 <>
@@ -157,6 +178,62 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                   </div>
                 )}
 
+                {sintesi && (
+                  <div className={`rounded-lg border px-4 py-3 ${sintesi.conformita === 'piena' ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                    <div className={`flex items-center gap-2 font-semibold ${sintesi.conformita === 'piena' ? 'text-emerald-800' : 'text-amber-800'}`}>
+                      {sintesi.conformita === 'piena' ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+                      {sintesi.conformita === 'piena' ? 'Conformità piena' : 'Conformità parziale'}
+                    </div>
+                    <div className="text-sm mt-1 text-slate-700">
+                      {sintesi.conformita === 'piena'
+                        ? 'Stessi formulari, stessi pesi effettivi e stesse date di fine trasporto dei formulari registrati.'
+                        : `${sintesi.numeroAnomalie} ${sintesi.numeroAnomalie === 1 ? 'anomalia' : 'anomalie'}: ${[
+                          sintesi.anomalie.length ? `${new Set(sintesi.anomalie.map(a => a.esito)).size} righe con errori o sviste` : '',
+                          sintesi.mancanti.length ? `${sintesi.mancanti.length} formulari mancanti nel report` : '',
+                          sintesi.inPiu.length ? `${sintesi.inPiu.length} formulari non registrati` : '',
+                        ].filter(Boolean).join(', ')}.`}
+                    </div>
+                  </div>
+                )}
+
+                {sintesi && (
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Quadratura di formulari e pesi</h4>
+                    <div className="border rounded-lg overflow-x-auto bg-card">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/50 text-xs text-muted-foreground">
+                          <tr>
+                            <th className="text-left px-3 py-2 font-medium"></th>
+                            <th className="text-right px-3 py-2 font-medium">Formulari report</th>
+                            <th className="text-right px-3 py-2 font-medium">Registrati</th>
+                            <th className="text-right px-3 py-2 font-medium">Diff.</th>
+                            <th className="text-right px-3 py-2 font-medium">Kg report</th>
+                            <th className="text-right px-3 py-2 font-medium">Kg registrati</th>
+                            <th className="text-right px-3 py-2 font-medium">Diff. kg</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...sintesi.quadratura, ...(sintesi.quadratura.length > 1 ? [sintesi.totale] : [])].map(q => {
+                            const dF = q.formulari_report - q.formulari_gestionale;
+                            const dK = q.kg_report - q.kg_gestionale;
+                            return (
+                              <tr key={q.tipo} className={`border-t tabular-nums ${q.tipo === 'totale' ? 'font-semibold bg-muted/30' : ''}`}>
+                                <td className="px-3 py-2">{NOME_TIPO[q.tipo]}</td>
+                                <td className="px-3 py-2 text-right">{formatIntero(q.formulari_report)}</td>
+                                <td className="px-3 py-2 text-right">{formatIntero(q.formulari_gestionale)}</td>
+                                <td className={`px-3 py-2 text-right font-medium ${dF ? 'text-red-600' : 'text-emerald-600'}`}>{differenza(dF)}</td>
+                                <td className="px-3 py-2 text-right">{formatKg(q.kg_report)}</td>
+                                <td className="px-3 py-2 text-right">{formatKg(q.kg_gestionale)}</td>
+                                <td className={`px-3 py-2 text-right font-medium ${dK ? 'text-red-600' : 'text-emerald-600'}`}>{differenza(dK, true)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                )}
+
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
                   <Tessera etichetta="Righe verificate" valore={v.righe_report || 0}
                     dettaglio={`${tonnellate(v.peso_report_kg)} t${v.righe_escluse ? ` · altre ${v.righe_escluse} non considerate` : ''}`} />
@@ -174,9 +251,9 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                 </div>
 
                 {!!v.uscite_gestionale && !v.uscite_verificate && (
-                  <div className="flex items-start gap-2 text-sm text-sky-900 border border-sky-200 bg-sky-50 rounded-lg px-3 py-2">
-                    <FileSpreadsheet className="w-4 h-4 mt-0.5 shrink-0" />
-                    <span>Il report non contiene uscite: le {v.uscite_gestionale} secondarie partite nella settimana non sono state verificate.</span>
+                  <div className="flex items-start gap-2 text-sm text-red-900 border border-red-200 bg-red-50 rounded-lg px-3 py-2">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>Il report non contiene uscite: le {v.uscite_gestionale} secondarie partite nella settimana ({tonnellate(v.peso_uscite_kg)} t) mancano nel report.</span>
                   </div>
                 )}
 
@@ -209,18 +286,26 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                           <span className={`px-2 py-0.5 rounded-full border text-xs font-medium ${STILE_ESITO[e.esito]}`}>{ETICHETTE_ESITO[e.esito]}</span>
                         </div>
                         <ul className="text-sm space-y-0.5">
-                          {e.discrepanze.map((d, i) => <li key={i} className="flex gap-1.5"><span className="text-red-600">•</span><span>{d.messaggio}</span></li>)}
+                          {e.discrepanze.map((d, i) => {
+                            const g = gravita(d);
+                            return (
+                              <li key={i} className="flex gap-1.5">
+                                <span className={STILE_GRAVITA[g] || 'text-red-600'}>•</span>
+                                <span>{d.messaggio}{ETICHETTA_GRAVITA[g] && <span className={`ml-1 text-xs ${STILE_GRAVITA[g]}`}>({ETICHETTA_GRAVITA[g]})</span>}</span>
+                              </li>
+                            );
+                          })}
                         </ul>
                       </div>
                     ))}
                   </section>
                 )}
 
-                {esito.assenti.length > 0 && (
+                {sintesi && sintesi.mancanti.length > 0 && (
                   <section className="space-y-2">
                     <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Movimenti del gestionale assenti nel report</h4>
                     <div className="border rounded-lg divide-y bg-card">
-                      {esito.assenti.map((m, i) => (
+                      {sintesi.mancanti.map((m, i) => (
                         <div key={i} className="px-3 py-2 text-sm flex items-center justify-between gap-3 flex-wrap">
                           <span><span className="font-mono">{m.fir}</span> <span className="text-muted-foreground">· {m.tipo === 'uscita' ? 'uscita verso ' + m.destinatario : 'ingresso'} · {dataIt(m.fine)} · {m.trasportatore}</span></span>
                           <span className="tabular-nums">{formatKg(Number(m.kg))} kg</span>

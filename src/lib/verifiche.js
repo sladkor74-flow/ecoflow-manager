@@ -1,7 +1,7 @@
 // Strumenti del modulo Verifiche: settimane, lettura dei file caricati ed
 // esportazione in Excel dell'esito.
 
-import { formatTonnellate, formatKg, dataServer } from '@/lib/utils';
+import { formatTonnellate, formatKg, formatIntero, dataServer } from '@/lib/utils';
 
 export const GIORNI_CONSERVAZIONE = 40;
 
@@ -148,7 +148,8 @@ export async function leggiTabelleDaFile(file, periodo = null) {
   const XLSX = await import('xlsx');
   const buffer = await file.arrayBuffer();
   const csv = tipoDiFile(file) === 'csv';
-  const wb = XLSX.read(buffer, { type: 'array', cellDates: false, raw: csv });
+  // Solo i valori: senza testo formattato, HTML e formule un file grande si apre molto prima.
+  const wb = XLSX.read(buffer, { type: 'array', cellDates: false, raw: csv, cellText: false, cellHTML: false, cellFormula: false });
   const registro = csv ? null : reportDaRegistro(XLSX, wb, periodo);
   if (registro) {
     if (registro.righe.length < 2) throw new Error(`Il file è un registro di carico e scarico, ma non contiene carichi Ecotyre o ACI${periodo ? ` tra il ${periodo.inizio} e il ${periodo.fine}` : ''}.`);
@@ -220,7 +221,119 @@ export function descriviLettura(lettura) {
 
 export function segnalazioni(v) {
   if (!v) return 0;
+  if (v.anomalie != null) return v.anomalie;
   return (v.con_discrepanze || 0) + (v.non_trovate || 0) + (v.duplicate || 0) + (v.assenti_nel_report || 0);
+}
+
+// === sintesi per l'impianto ===
+// Specchio delle regole di base44/shared/reportSettimanali.ts: le verifiche salvate
+// prima delle gravita' e della quadratura si ricostruiscono dai messaggi.
+
+const GRAVITA_CAMPO = { produttore: 'osservazione', destinatario: 'osservazione', trasportatore: 'osservazione' };
+
+export function gravita(d) {
+  if (d.gravita) return d.gravita;
+  if (/errato nel gestionale/i.test(d.messaggio)) return 'rettifica';
+  if (/non riguarda|codice produttore/i.test(d.messaggio)) return 'anomalia';
+  return GRAVITA_CAMPO[d.campo] || 'anomalia';
+}
+
+const ACCENTI = { a: 'à', e: 'è', i: 'ì', o: 'ò', u: 'ù' };
+
+/** Messaggio della verifica in forma adatta all'impianto: "registrato" invece di "gestionale", accenti veri. */
+export function testoPerImpianto(messaggio) {
+  return String(messaggio || '')
+    .replace(/Nel gestionale e' /g, 'Registrato: ')
+    .replace(/nel gestionale e' /g, 'registrato: ')
+    .replace(/Nel gestionale il trasporto/g, 'Il trasporto registrato')
+    .replace(/Nel gestionale questo formulario non riguarda/g, 'Il formulario registrato non riguarda')
+    .replace(/Formulario errato nel gestionale/g, 'Formulario errato nei dati registrati')
+    .replace(/nel gestionale il trasporto/g, 'il trasporto registrato')
+    .replace(/nel gestionale/g, 'nei dati registrati')
+    .replace(/non presente nel gestionale/g, 'non registrato')
+    .replace(/, gestionale /g, ', registrato ')
+    .replace(/gestionale/g, 'dati registrati')
+    .replace(/\b([a-z]*?)([aeiou])'(?=[\s.,;:)]|$)/g, (_m, radice, v) => radice + ACCENTI[v]);
+}
+
+// 'ingressi 10 nel report, 9 registrati; uscite 1 nel report, 2 registrati'
+function dettaglioPerTipo(quadratura, report, registrati, formato) {
+  const parti = quadratura.filter(q => q.tipo === 'ingresso' || q[report] || q[registrati]);
+  return parti.map(q => `${parti.length > 1 ? (q.tipo === 'uscita' ? 'uscite ' : 'ingressi ') : ''}${formato(q[report])} nel report, ${formato(q[registrati])} registrati`).join('; ');
+}
+
+const ETICHETTA_CAMPO = {
+  fir: 'Numero di formulario', kg: 'Peso effettivo', fine: 'Data di fine trasporto', inizio: 'Data di inizio trasporto',
+  classe: 'Classe PFU', produttore: 'Produttore', destinatario: 'Destinatario', trasportatore: 'Trasportatore',
+};
+
+/**
+ * Tutto quello che serve per comunicare l'esito all'impianto: quadratura di
+ * formulari e pesi, controlli eseguiti, anomalie, osservazioni, rettifiche,
+ * formulari mancanti e in piu', conformita' piena o parziale.
+ */
+export function sintesiVerifica(v, esito) {
+  const esiti = esito.esiti || [];
+  const assenti = esito.assenti || [];
+  const usciteNonRiportate = esito.uscite_non_riportate || [];
+  const escluse = esito.escluse || [];
+  const tipoRiga = (e) => e.tipo || e.tipo_presunto || 'ingresso';
+  const somma = (lista, kg) => lista.reduce((t, x) => t + (Number(kg(x)) || 0), 0);
+
+  const quadratura = (esito.quadratura || [
+    { tipo: 'ingresso', formulari_gestionale: v.ingressi_gestionale || 0, kg_gestionale: v.peso_ingressi_kg || 0 },
+    { tipo: 'uscita', formulari_gestionale: v.uscite_gestionale || 0, kg_gestionale: v.peso_uscite_kg || 0 },
+  ].map(q => {
+    const righe = esiti.filter(e => tipoRiga(e) === q.tipo);
+    return { ...q, formulari_report: righe.length, kg_report: somma(righe, e => e.report.kg) };
+  })).map(q => ({ ...q, quadra: q.formulari_report === q.formulari_gestionale && q.kg_report === q.kg_gestionale }));
+  const righeQuadratura = quadratura.filter(q => q.tipo === 'ingresso' || q.formulari_report || q.formulari_gestionale);
+  const totale = righeQuadratura.reduce((t, q) => ({
+    tipo: 'totale', formulari_report: t.formulari_report + q.formulari_report, formulari_gestionale: t.formulari_gestionale + q.formulari_gestionale,
+    kg_report: t.kg_report + q.kg_report, kg_gestionale: t.kg_gestionale + q.kg_gestionale,
+  }), { tipo: 'totale', formulari_report: 0, formulari_gestionale: 0, kg_report: 0, kg_gestionale: 0 });
+  totale.quadra = totale.formulari_report === totale.formulari_gestionale && totale.kg_report === totale.kg_gestionale;
+
+  // Voci riga per riga, divise per gravita'.
+  const voci = { anomalia: [], osservazione: [], rettifica: [] };
+  for (const e of esiti) {
+    if (e.esito === 'non_trovata') continue;
+    for (const d of (e.discrepanze || [])) {
+      const g = e.esito === 'duplicata' && d.campo === 'fir' && /duplicata/i.test(d.messaggio) ? 'anomalia' : gravita(d);
+      const etichetta = /duplicata/i.test(d.messaggio) ? 'Riga duplicata'
+        : /non riguarda/i.test(d.messaggio) ? 'Formulario di un altro impianto'
+          : /settimana \d+ e non in quella verificata/i.test(d.messaggio) ? 'Settimana di competenza'
+            : ETICHETTA_CAMPO[d.campo] || d.campo;
+      voci[g].push({ esito: e, campo: d.campo, etichetta, testo: testoPerImpianto(d.messaggio) });
+    }
+  }
+  const inPiu = esiti.filter(e => e.esito === 'non_trovata');
+  const mancanti = [...assenti, ...usciteNonRiportate];
+
+  const conta = (campi) => voci.anomalia.filter(x => campi.includes(x.campo) && x.etichetta !== 'Riga duplicata' && x.etichetta !== 'Formulario di un altro impianto').length;
+  const controlli = [
+    { nome: 'Numero dei formulari', ok: righeQuadratura.every(q => q.formulari_report === q.formulari_gestionale),
+      dettaglio: dettaglioPerTipo(righeQuadratura, 'formulari_report', 'formulari_gestionale', formatIntero) },
+    { nome: 'Peso effettivo totale', ok: righeQuadratura.every(q => q.kg_report === q.kg_gestionale),
+      dettaglio: dettaglioPerTipo(righeQuadratura, 'kg_report', 'kg_gestionale', (n) => formatKg(n) + ' kg') },
+    { nome: 'Numeri di formulario', n: conta(['fir']) },
+    { nome: 'Peso effettivo di ciascun formulario', n: conta(['kg']) },
+    { nome: 'Date di trasporto', n: conta(['fine', 'inizio']) },
+    { nome: 'Classe dei PFU', n: conta(['classe']) },
+    { nome: 'Formulari registrati assenti nel report', n: mancanti.length },
+    { nome: 'Formulari del report non registrati', n: inPiu.length },
+    { nome: 'Righe duplicate o di altri impianti', n: voci.anomalia.filter(x => x.etichetta === 'Riga duplicata' || x.etichetta === 'Formulario di un altro impianto').length },
+  ].map(c => (c.ok === undefined ? { ...c, ok: c.n === 0, dettaglio: c.n ? `${c.n} ${c.n === 1 ? 'anomalia' : 'anomalie'}` : 'nessuna anomalia' } : c));
+
+  const righeConAnomalie = new Set(voci.anomalia.map(x => x.esito)).size;
+  const numeroAnomalie = righeConAnomalie + inPiu.length + mancanti.length;
+  const conformita = v.conformita || (numeroAnomalie === 0 && totale.quadra && righeQuadratura.every(q => q.quadra) ? 'piena' : 'parziale');
+
+  return {
+    conformita, numeroAnomalie, quadratura: righeQuadratura, totale, controlli,
+    anomalie: voci.anomalia, osservazioni: voci.osservazione, rettifiche: voci.rettifica,
+    mancanti, inPiu, escluse, esiti,
+  };
 }
 
 export function analisiInCorso(v) {
@@ -295,6 +408,7 @@ export async function scaricaExcelVerifica(v) {
   r.addRow([]);
   const info = [
     ['Impianto o stoccaggio', v.soggetto_nome],
+    ['Esito', sintesiVerifica(v, esito).conformita === 'piena' ? 'Conformità piena' : 'Conformità parziale'],
     ['Settimana', `${v.settimana} del ${v.anno}, dal ${dataIt(v.data_inizio)} al ${dataIt(v.data_fine)}, secondo la data di fine trasporto`],
     ['File verificato', v.file_nome],
     ['Lettura del file', lettura.modo === 'excel'
@@ -424,10 +538,11 @@ export async function scaricaExcelVerifica(v) {
   const colAssenti = [['Tipo', 11], ['FIR', 18], ['Peso (kg)', 12], ['Fine trasporto', 12], ['Inizio trasporto', 12], ['Produttore', 28], ['Destinatario', 26], ['Trasportatore', 26], ['Classe', 9], ['Fonte', 18], ['Ordine', 14], ['Annotazioni', 50]];
   a.columns = colAssenti.map(([, w]) => ({ width: w }));
   intestazione(a, colAssenti.map(([t]) => t));
-  if (esito.assenti.length === 0) {
+  const mancanti = [...esito.assenti, ...(esito.uscite_non_riportate || [])];
+  if (mancanti.length === 0) {
     a.addRow(['', 'Tutti i movimenti della settimana verificati compaiono nel report.']);
   }
-  for (const m of esito.assenti) {
+  for (const m of mancanti) {
     const riga = a.addRow([nomeTipo(m.tipo), m.fir, m.kg, dataIt(m.fine), dataIt(m.inizio), m.produttore, m.destinatario, m.trasportatore, m.classe || '', m.fonte, m.ordine,
       m.tipo === 'uscita' ? 'Uscita registrata nel gestionale ma non riportata nel report del fornitore' : 'Ingresso registrato nel gestionale ma non riportato nel report del fornitore']);
     riga.eachCell({ includeEmpty: true }, (c, i) => { c.border = bordi; c.fill = riempi(COLORI.rosso); if (i === 3) c.numFmt = '#,##0'; });
@@ -459,7 +574,7 @@ export async function scaricaExcelVerifica(v) {
       righeComunicazione++;
     }
   }
-  for (const m of esito.assenti) {
+  for (const m of mancanti) {
     const cosa = m.tipo === 'uscita' ? `Uscita del ${dataIt(m.fine)} verso ${m.destinatario}` : `Ingresso del ${dataIt(m.fine)}`;
     const riga = c.addRow([m.fir, `${cosa} di ${formatKg(m.kg)} kg, trasportato da ${m.trasportatore}, non riportato nel report`]);
     riga.eachCell(x => { x.border = bordi; x.alignment = { wrapText: true, vertical: 'top' }; });

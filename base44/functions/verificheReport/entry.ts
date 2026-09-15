@@ -18,7 +18,7 @@ const CAMPI_RIEPILOGO = [
   'id', 'soggetto_chiave', 'soggetto_nome', 'anno', 'settimana', 'data_inizio', 'data_fine', 'file_nome', 'file_tipo',
   'stato', 'avviata_il', 'errore', 'righe_report', 'conformi', 'con_discrepanze', 'non_trovate', 'duplicate',
   'assenti_nel_report', 'ingressi_gestionale', 'peso_ingressi_kg', 'uscite_gestionale', 'peso_uscite_kg', 'uscite_verificate',
-  'peso_report_kg', 'verificata_il', 'scade_il', 'created_date',
+  'peso_report_kg', 'righe_escluse', 'conformita', 'anomalie', 'osservazioni', 'rettifiche', 'verificata_il', 'scade_il', 'created_date',
 ];
 
 export default async function(req) {
@@ -55,7 +55,15 @@ export default async function(req) {
     // Un report puo' arrivare anche da un soggetto che nella settimana non ha
     // movimenti: la verifica resta visibile e va comunque letta.
     const perChiave = new Map();
-    for (const v of dellaSettimana) if (!perChiave.has(v.soggetto_chiave)) perChiave.set(v.soggetto_chiave, v);
+    for (const v of dellaSettimana) {
+      if (!perChiave.has(v.soggetto_chiave)) { perChiave.set(v.soggetto_chiave, v); continue; }
+      // Verifica sostituita che il browser non e' riuscito a cancellare: non serve piu'.
+      try {
+        await eliminaCampo(base44, 'VerificaReport', v.id);
+        await svc.VerificaReport.delete(v.id);
+        cancellate++;
+      } catch (_e) { /* si riprova alla prossima apertura */ }
+    }
 
     const elenco = righe.map(r => {
       const v = perChiave.get(r.chiave);
