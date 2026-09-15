@@ -3,6 +3,11 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { filtraPeriodo } from "../../shared/filtroPeriodo.ts";
 import { sortTariffe, resolveTariffa, calcolaTotale, fattoreConv } from "../../shared/ecotyreTariffe.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
+import { PROV_TO_REGION } from "../../shared/raccoltoCalculator.ts";
+
+// Regione del ritiro mostrata nel dettaglio: se il record non la riporta si ricava
+// dalla provincia. La tariffa continua a usare la regione del record come prima.
+const regioneRitiro = (r) => r.regione || PROV_TO_REGION[String(r.provincia || '').toUpperCase().trim()] || '';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
@@ -108,7 +113,7 @@ export default async function(req) {
       righeRete.push({
         tipologia: 'RETE', tipo: 'ATTIVA',
         servizio_ecotyre: tipoServizio,
-        regione: r.regione || '', fatturante: 'ECOTYRE',
+        regione: regioneRitiro(r), fatturante: 'ECOTYRE',
         ordine: r.id_ordine || '',
         data_fine_trasporto: r.trasporto_finito_il || null,
         numero_fir: r.numero_fir || '',
@@ -174,7 +179,7 @@ export default async function(req) {
       righeExtra.push({
         tipologia: 'EXTRA_RACCOLTA', tipo: 'ATTIVA',
         servizio_ecotyre: tipoServizio,
-        regione: r.regione || '', fatturante: 'ECOTYRE',
+        regione: regioneRitiro(r), fatturante: 'ECOTYRE',
         ordine: r.id_ordine || '',
         data_fine_trasporto: r.trasporto_finito_il || null,
         numero_fir: r.numero_fir || '',
