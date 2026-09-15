@@ -24,6 +24,22 @@ import { valoreCampo, leggiCampo } from "../../shared/testoLungo.ts";
 
 const LIMITE_BASE64 = 7 * 1024 * 1024;
 
+// Con piu' report caricati uno dopo l'altro la piattaforma puo' rifiutare le
+// richieste troppo ravvicinate ("Rate limit exceeded"): si riprova dopo una pausa
+// crescente invece di chiudere la verifica in errore.
+const ATTESE_RITENTATIVO = [5000, 12000, 25000];
+async function conRitentativi(fn) {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const messaggio = String(e && e.message ? e.message : e);
+      if (!/rate limit|too many requests|429/i.test(messaggio) || i >= ATTESE_RITENTATIVO.length) throw e;
+      await new Promise(r => setTimeout(r, ATTESE_RITENTATIVO[i]));
+    }
+  }
+}
+
 const SCHEMA_COLONNE = {
   type: 'object',
   properties: Object.fromEntries(CAMPI_REPORT.map(c => [c, { type: 'integer' }])),
@@ -208,9 +224,9 @@ export default async function(req) {
       await svc.VerificaReport.update(verificaId, { stato: 'in_verifica', avviata_il: new Date().toISOString(), errore: '' });
     } else {
       await svc.VerificaReport.update(verificaId, { stato: 'in_lettura', avviata_il: new Date().toISOString(), errore: '' });
-      const esito = Array.isArray(body.tabelle) && body.tabelle.length > 0
-        ? await leggiTabelle(base44, body.tabelle, verifica)
-        : await leggiFile(base44, body.file, verifica);
+      const esito = await conRitentativi(() => (Array.isArray(body.tabelle) && body.tabelle.length > 0
+        ? leggiTabelle(base44, body.tabelle, verifica)
+        : leggiFile(base44, body.file, verifica)));
       righe = esito.righe;
       lettura = esito.lettura;
       if (righe.length === 0) throw new Error('Il report non contiene righe con formulario o peso.');
@@ -222,7 +238,7 @@ export default async function(req) {
       });
     }
 
-    const { movimenti } = await caricaMovimenti(base44);
+    const { movimenti } = await conRitentativi(() => caricaMovimenti(base44));
     const esito = verificaReport(righe, movimenti, {
       chiave: verifica.soggetto_chiave,
       nome: verifica.soggetto_nome,

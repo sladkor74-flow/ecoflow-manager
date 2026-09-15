@@ -119,10 +119,10 @@ export default function ReportSettimanale() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <select value={mese} onChange={e => setMese(Number(e.target.value))} className="rounded-md bg-white/15 border border-white/30 px-2 py-1.5 text-sm text-white [&>option]:text-slate-900">
+            <select value={mese} onChange={e => setMese(Number(e.target.value))} className="rounded-md bg-[#0b3b48] border border-[#6fb3c2] px-2 py-1.5 text-sm text-white shadow-sm [&>option]:bg-white [&>option]:text-slate-900">
               {MESI.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
             </select>
-            <select value={anno} onChange={e => setAnno(Number(e.target.value))} className="rounded-md bg-white/15 border border-white/30 px-2 py-1.5 text-sm text-white [&>option]:text-slate-900">
+            <select value={anno} onChange={e => setAnno(Number(e.target.value))} className="rounded-md bg-[#0b3b48] border border-[#6fb3c2] px-2 py-1.5 text-sm text-white shadow-sm [&>option]:bg-white [&>option]:text-slate-900">
               {anni.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
             <Button size="sm" onClick={carica} disabled={caricamento} className="gap-1 bg-[#0b3b48] text-white border border-[#6fb3c2] shadow-sm hover:bg-[#08303b]">
