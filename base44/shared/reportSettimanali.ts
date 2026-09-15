@@ -148,6 +148,9 @@ function distanza(a, b, limite) {
   return d[a.length][b.length];
 }
 
+// Numero dei formulari vidimati: 5 lettere, 6 cifre, 2 lettere (es. RGYTR027030CR).
+const FORMATO_FIR = /^[A-Z]{5}\d{6}[A-Z]{2}$/;
+
 const SOMIGLIANTI = { O: '0', '0': 'O', I: '1', '1': 'I', S: '5', '5': 'S', B: '8', '8': 'B', Z: '2', '2': 'Z' };
 
 // Spiega in italiano in cosa differisce il formulario del report da quello del
@@ -508,7 +511,11 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     const discrepanze = [];
     const aggiungi = (campo, messaggio) => discrepanze.push({ campo, messaggio });
 
-    if (modo === 'fir_simile') aggiungi('fir', `Formulario errato: ${descriviDifferenzaFir(r.fir, m.fir)}. Nel gestionale e' ${m.fir}`);
+    if (modo === 'fir_simile') {
+      // Se solo il numero del report ha il formato dei formulari, l'errore e' nel gestionale.
+      if (FORMATO_FIR.test(r.firN) && !FORMATO_FIR.test(m.firN)) aggiungi('fir', `Formulario errato nel gestionale: ${descriviDifferenzaFir(m.fir, r.fir)}. Nel report e' ${r.fir}, con il formato regolare di 5 lettere, 6 cifre e 2 lettere: da correggere sul portale`);
+      else aggiungi('fir', `Formulario errato: ${descriviDifferenzaFir(r.fir, m.fir)}. Nel gestionale e' ${m.fir}`);
+    }
     if (modo === 'attributi') aggiungi('fir', r.firN ? `Formulario non corrispondente: nel gestionale e' ${m.fir}` : `Formulario assente nel report: nel gestionale e' ${m.fir}`);
 
     if (r.kg === null) aggiungi('kg', 'Peso assente nel report');
