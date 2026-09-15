@@ -62,6 +62,8 @@ export default function CaricamentoDati() {
         // Nuove primarie: si aggiorna il controllo delle liste di assegnati del
         // modulo Verifiche. Gira in background e non blocca il caricamento.
         if (tipoKey === 'primarie') base44.functions.invoke('controllaEvasioneAssegnati', {}).catch(() => {});
+        // Nuovi movimenti: si riconfrontano le dichiarazioni di nessuna movimentazione.
+        if (tipoKey === 'primarie' || tipoKey === 'secondarie') base44.functions.invoke('ricontrollaDichiarazioni', {}).catch(() => {});
         const warnings = extractUploadWarnings(data);
         if (warnings) setDialogState(warnings);
         caricaLogs();
@@ -85,6 +87,8 @@ export default function CaricamentoDati() {
       // Nuove primarie: si aggiorna il controllo delle liste di assegnati del
       // modulo Verifiche. Gira in background e non blocca il caricamento.
       if (tipoKey === 'primarie') base44.functions.invoke('controllaEvasioneAssegnati', {}).catch(() => {});
+      // Nuovi movimenti: si riconfrontano le dichiarazioni di nessuna movimentazione.
+      if (tipoKey === 'primarie' || tipoKey === 'secondarie') base44.functions.invoke('ricontrollaDichiarazioni', {}).catch(() => {});
       const warnings = extractUploadWarnings(res.data);
       if (warnings) setDialogState(warnings);
       caricaLogs();

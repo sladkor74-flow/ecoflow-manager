@@ -229,12 +229,35 @@ export function eSecondariaExtra(r) {
   return String(r.tipo_movimento || '').toLowerCase().trim() === 'secondaria';
 }
 
+// Canale di un movimento: rete, ACI (anche le secondarie di PFU da autodemolizione)
+// o extra raccolta. I canali restano distinti anche nella verifica dei report.
+function canale(r, entita) {
+  if (entita === 'ExtraRaccolta') return 'extra';
+  if (entita === 'PrimariaAci') return 'aci';
+  if (entita === 'Secondaria' && /autodemolizione|\baci\b/i.test(`${r.classe || ''} ${r.prodotto || ''}`)) return 'aci';
+  return 'rete';
+}
+
+// Le movimentazioni che un report settimanale deve contenere, ciascuna con la sua quadratura.
+export const CATEGORIE_MOVIMENTO = [
+  { chiave: 'primaria-ingresso-rete', tipo: 'ingresso', nome: 'Ingressi primaria · rete' },
+  { chiave: 'primaria-ingresso-aci', tipo: 'ingresso', nome: 'Ingressi primaria · ACI' },
+  { chiave: 'primaria-ingresso-extra', tipo: 'ingresso', nome: 'Ingressi primaria · extra raccolta' },
+  { chiave: 'secondaria-ingresso-rete', tipo: 'ingresso', nome: 'Ingressi secondaria · rete' },
+  { chiave: 'secondaria-ingresso-aci', tipo: 'ingresso', nome: 'Ingressi secondaria · ACI' },
+  { chiave: 'secondaria-ingresso-extra', tipo: 'ingresso', nome: 'Ingressi secondaria · extra raccolta' },
+  { chiave: 'secondaria-uscita-rete', tipo: 'uscita', nome: 'Uscite secondaria · rete' },
+  { chiave: 'secondaria-uscita-aci', tipo: 'uscita', nome: 'Uscite secondaria · ACI' },
+  { chiave: 'secondaria-uscita-extra', tipo: 'uscita', nome: 'Uscite secondaria · extra raccolta' },
+];
+
 function movimento(r, entita) {
   const secondaria = entita === 'Secondaria' || (entita === 'ExtraRaccolta' && eSecondariaExtra(r));
   const fonte = entita === 'ExtraRaccolta' ? (secondaria ? 'Extra raccolta secondaria' : 'Extra raccolta primaria') : FONTI[entita];
   return {
     id: entita + ':' + r.id,
     fonte,
+    canale: canale(r, entita),
     ordine: String(r.id_ordine || ''),
     fir: String(r.numero_fir || ''),
     firN: normalizzaFir(r.numero_fir),
@@ -426,6 +449,7 @@ const altroCircuito = (intermediario) => !!intermediario && !/ecotyre/i.test(int
  */
 export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, fine }) {
   const relazione = (m) => relazioneConSito(m, chiave);
+  const categoria = (m) => `${m.secondaria ? 'secondaria' : 'primaria'}-${relazione(m)}-${m.canale}`;
   // Una riga che il gestionale non collega al sito e' un'uscita se parte dal sito stesso.
   const tipoPresunto = (r) => (nomiCoincidono(r.produttore, nome) === true || (r.produttore && normalizzaRagioneSociale(r.produttore) === chiave) ? 'uscita' : 'ingresso');
   const da = aggiungiGiorni(inizio, -FINESTRA_ABBINAMENTO_GIORNI);
@@ -508,7 +532,7 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     if (!m) {
       if (altroCircuito(r.intermediario)) { escludi(r, `Carico di un altro circuito: intermediario ${r.intermediario}`); continue; }
       if (fuoriSettimana) { escludi(r, `Data ${it(dataReport)}, fuori dalla settimana verificata`); continue; }
-      esiti.push({ n: r.n, ...foglio, tipo: null, tipo_presunto: tipoPresunto(r), esito: 'non_trovata', anomalia: true, report, gestionale: null, discrepanze: [{ campo: 'fir', gravita: 'anomalia', messaggio: r.firN ? 'Formulario non presente nel gestionale' : 'Riga senza formulario, non abbinabile a nessun movimento' }] });
+      esiti.push({ n: r.n, ...foglio, tipo: null, tipo_presunto: tipoPresunto(r), categoria: 'non_registrati', esito: 'non_trovata', anomalia: true, report, gestionale: null, discrepanze: [{ campo: 'fir', gravita: 'anomalia', messaggio: r.firN ? 'Formulario non presente nel gestionale' : 'Riga senza formulario, non abbinabile a nessun movimento' }] });
       continue;
     }
     // Report e gestionale concordano su un'altra settimana: la riga sara' verificata con quella.
@@ -561,11 +585,11 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     if (r.classe && m.classe && r.classe !== m.classe) aggiungi('classe', `Classe diversa: report ${r.classe}, gestionale ${m.classe}`);
 
     const gestionale = {
-      fonte: m.fonte, ordine: m.ordine, fir: m.fir, kg: m.kg, inizio: m.inizio, fine: m.fine, produttore: m.produttore,
+      fonte: m.fonte, canale: m.canale, ordine: m.ordine, fir: m.fir, kg: m.kg, inizio: m.inizio, fine: m.fine, produttore: m.produttore,
       punto_raccolta: m.punto_raccolta, codice_pdr: m.codice_pdr, destinatario: m.destinatario, trasportatore: m.trasportatore, classe: m.classe,
     };
 
-    const presunto = tipo ? {} : { tipo_presunto: tipoPresunto(r) };
+    const presunto = tipo ? { categoria: categoria(m) } : { tipo_presunto: tipoPresunto(r), categoria: 'non_registrati' };
     if (usati.has(m.id)) {
       esiti.push({ n: r.n, ...foglio, tipo, ...presunto, esito: 'duplicata', anomalia: true, report, gestionale, discrepanze: [{ campo: 'fir', gravita: 'anomalia', messaggio: `Riga duplicata: lo stesso movimento e' gia' riportato (${usati.get(m.id)})` }, ...discrepanze] });
       continue;
@@ -574,42 +598,40 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     esiti.push({ n: r.n, ...foglio, tipo, ...presunto, esito: discrepanze.length ? 'discrepanze' : 'conforme', anomalia: discrepanze.some(d => d.gravita === 'anomalia'), report, gestionale, discrepanze });
   }
 
+  // Il report deve contenere tutte le movimentazioni: ingressi e uscite, di ogni canale.
+  // Quelle registrate e non abbinate a nessuna riga mancano nel report.
   const usciteVerificate = esiti.some(e => e.tipo === 'uscita');
   const assente = (tipo) => (m) => ({
-    tipo, fonte: m.fonte, ordine: m.ordine, fir: m.fir, kg: m.kg, inizio: m.inizio, fine: m.fine, produttore: m.produttore,
-    destinatario: m.destinatario, trasportatore: m.trasportatore, classe: m.classe,
+    tipo, categoria: categoria(m), fonte: m.fonte, canale: m.canale, ordine: m.ordine, fir: m.fir, kg: m.kg, inizio: m.inizio, fine: m.fine,
+    produttore: m.produttore, destinatario: m.destinatario, trasportatore: m.trasportatore, classe: m.classe,
   });
   const assenti = [
     ...ingressi.filter(m => !usati.has(m.id)).map(assente('ingresso')),
-    ...(usciteVerificate ? uscite.filter(m => !usati.has(m.id)).map(assente('uscita')) : []),
+    ...uscite.filter(m => !usati.has(m.id)).map(assente('uscita')),
   ].sort((x, y) => x.tipo.localeCompare(y.tipo) || String(x.fine).localeCompare(String(y.fine)) || x.fir.localeCompare(y.fir));
-  // Uno stoccaggio che non riporta le uscite manda un report parziale: le secondarie
-  // partite nella settimana si elencano come mancanti, senza confrontarle riga per riga.
-  const usciteNonRiportate = usciteVerificate ? [] : uscite.map(assente('uscita'))
-    .sort((x, y) => String(x.fine).localeCompare(String(y.fine)) || x.fir.localeCompare(y.fir));
 
-  // Quadratura: formulari e pesi del report contro quelli registrati, per tipo.
-  const tipoRiga = (e) => e.tipo || e.tipo_presunto || 'ingresso';
+  // Quadratura per movimentazione e canale: formulari e pesi del report contro quelli registrati.
   const somma = (lista, kg) => lista.reduce((t, x) => t + (kg(x) || 0), 0);
-  const quadratura = [['ingresso', ingressi], ['uscita', uscite]].map(([t, registrati]) => {
-    const righe = esiti.filter(e => tipoRiga(e) === t);
-    return {
-      tipo: t,
-      formulari_report: righe.length,
-      kg_report: somma(righe, e => e.report.kg),
-      formulari_gestionale: registrati.length,
-      kg_gestionale: somma(registrati, m => m.kg),
-    };
-  });
+  const registrati = [...ingressi, ...uscite];
+  const quadratura = [
+    ...CATEGORIE_MOVIMENTO.map(c => {
+      const righe = esiti.filter(e => e.categoria === c.chiave);
+      const mov = registrati.filter(m => categoria(m) === c.chiave);
+      return { ...c, formulari_report: righe.length, kg_report: somma(righe, e => e.report.kg), formulari_gestionale: mov.length, kg_gestionale: somma(mov, m => m.kg) };
+    }),
+    (() => {
+      const righe = esiti.filter(e => e.categoria === 'non_registrati');
+      return { chiave: 'non_registrati', tipo: null, nome: 'Formulari del report non registrati per l\'impianto', formulari_report: righe.length, kg_report: somma(righe, e => e.report.kg), formulari_gestionale: 0, kg_gestionale: 0 };
+    })(),
+  ];
   const quadra = quadratura.every(q => q.formulari_report === q.formulari_gestionale && q.kg_report === q.kg_gestionale);
-  const anomalie = esiti.filter(e => e.anomalia).length + assenti.length + usciteNonRiportate.length;
+  const anomalie = esiti.filter(e => e.anomalia).length + assenti.length;
 
   const conta = (e) => esiti.filter(x => x.esito === e).length;
   return {
     esiti,
     assenti,
     escluse,
-    uscite_non_riportate: usciteNonRiportate,
     quadratura,
     riepilogo: {
       conformita: anomalie === 0 && quadra ? 'piena' : 'parziale',

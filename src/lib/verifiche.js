@@ -256,10 +256,12 @@ export function testoPerImpianto(messaggio) {
     .replace(/\b([a-z]*?)([aeiou])'(?=[\s.,;:)]|$)/g, (_m, radice, v) => radice + ACCENTI[v]);
 }
 
-// 'ingressi 10 nel report, 9 registrati; uscite 1 nel report, 2 registrati'
+// '11 nel report, 11 registrati; differenze: Ingressi primaria · rete +1, Uscite secondaria · rete -1'
 function dettaglioPerTipo(quadratura, report, registrati, formato) {
-  const parti = quadratura.filter(q => q.tipo === 'ingresso' || q[report] || q[registrati]);
-  return parti.map(q => `${parti.length > 1 ? (q.tipo === 'uscita' ? 'uscite ' : 'ingressi ') : ''}${formato(q[report])} nel report, ${formato(q[registrati])} registrati`).join('; ');
+  const tot = (k) => quadratura.reduce((t, q) => t + (q[k] || 0), 0);
+  const diverse = quadratura.filter(q => q[report] !== q[registrati])
+    .map(q => `${q.nome} ${q[report] > q[registrati] ? '+' : '-'}${formato(Math.abs(q[report] - q[registrati]))}`);
+  return `${formato(tot(report))} nel report, ${formato(tot(registrati))} registrati${diverse.length ? '; differenze: ' + diverse.join(', ') : ''}`;
 }
 
 const ETICHETTA_CAMPO = {
@@ -281,17 +283,19 @@ export function sintesiVerifica(v, esito) {
   const somma = (lista, kg) => lista.reduce((t, x) => t + (Number(kg(x)) || 0), 0);
 
   const quadratura = (esito.quadratura || [
-    { tipo: 'ingresso', formulari_gestionale: v.ingressi_gestionale || 0, kg_gestionale: v.peso_ingressi_kg || 0 },
-    { tipo: 'uscita', formulari_gestionale: v.uscite_gestionale || 0, kg_gestionale: v.peso_uscite_kg || 0 },
+    { tipo: 'ingresso', nome: 'Ingressi', formulari_gestionale: v.ingressi_gestionale || 0, kg_gestionale: v.peso_ingressi_kg || 0 },
+    { tipo: 'uscita', nome: 'Uscite', formulari_gestionale: v.uscite_gestionale || 0, kg_gestionale: v.peso_uscite_kg || 0 },
   ].map(q => {
     const righe = esiti.filter(e => tipoRiga(e) === q.tipo);
     return { ...q, formulari_report: righe.length, kg_report: somma(righe, e => e.report.kg) };
   })).map(q => ({ ...q, quadra: q.formulari_report === q.formulari_gestionale && q.kg_report === q.kg_gestionale }));
-  const righeQuadratura = quadratura.filter(q => q.tipo === 'ingresso' || q.formulari_report || q.formulari_gestionale);
+  // Tutte le movimentazioni previste (per il PDF) e quelle con almeno un formulario (per la pagina).
+  const categorie = quadratura;
+  const righeQuadratura = quadratura.filter(q => q.formulari_report || q.formulari_gestionale);
   const totale = righeQuadratura.reduce((t, q) => ({
-    tipo: 'totale', formulari_report: t.formulari_report + q.formulari_report, formulari_gestionale: t.formulari_gestionale + q.formulari_gestionale,
+    tipo: 'totale', nome: 'Totale', formulari_report: t.formulari_report + q.formulari_report, formulari_gestionale: t.formulari_gestionale + q.formulari_gestionale,
     kg_report: t.kg_report + q.kg_report, kg_gestionale: t.kg_gestionale + q.kg_gestionale,
-  }), { tipo: 'totale', formulari_report: 0, formulari_gestionale: 0, kg_report: 0, kg_gestionale: 0 });
+  }), { tipo: 'totale', nome: 'Totale', formulari_report: 0, formulari_gestionale: 0, kg_report: 0, kg_gestionale: 0 });
   totale.quadra = totale.formulari_report === totale.formulari_gestionale && totale.kg_report === totale.kg_gestionale;
 
   // Voci riga per riga, divise per gravita'.
@@ -330,7 +334,7 @@ export function sintesiVerifica(v, esito) {
   const conformita = v.conformita || (numeroAnomalie === 0 && totale.quadra && righeQuadratura.every(q => q.quadra) ? 'piena' : 'parziale');
 
   return {
-    conformita, numeroAnomalie, quadratura: righeQuadratura, totale, controlli,
+    conformita, numeroAnomalie, quadratura: righeQuadratura, categorie, totale, controlli, dichiarazione: v.file_tipo === 'dichiarazione',
     anomalie: voci.anomalia, osservazioni: voci.osservazione, rettifiche: voci.rettifica,
     mancanti, inPiu, escluse, esiti,
   };
@@ -411,7 +415,9 @@ export async function scaricaExcelVerifica(v) {
     ['Esito', sintesiVerifica(v, esito).conformita === 'piena' ? 'Conformità piena' : 'Conformità parziale'],
     ['Settimana', `${v.settimana} del ${v.anno}, dal ${dataIt(v.data_inizio)} al ${dataIt(v.data_fine)}, secondo la data di fine trasporto`],
     ['File verificato', v.file_nome],
-    ['Lettura del file', lettura.modo === 'excel'
+    ['Lettura del file', lettura.modo === 'dichiarazione'
+      ? `nessun file: l'impianto ha comunicato che non ci sono state movimentazioni${v.nota ? ` (${v.nota})` : ''}`
+      : lettura.modo === 'excel'
       ? descriviLettura(lettura).join('\n')
       : `${lettura.modo === 'pdf' ? 'PDF' : 'immagine'} trascritto dall'agente, pesi in ${lettura.unita === 't' ? 'tonnellate' : 'chilogrammi'}`],
     ['Righe non considerate', v.righe_escluse ? `${v.righe_escluse} (${formatKg(v.peso_escluse_kg || 0)} kg): carichi di altre settimane o di altri consorzi, elencati nel foglio "Non considerate"` : 'nessuna'],

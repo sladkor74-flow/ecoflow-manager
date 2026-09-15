@@ -3,11 +3,13 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import {
-  ChevronLeft, ChevronRight, Upload, Loader2, Download, Eye, Trash2, AlertTriangle, CheckCircle2, Clock, Info, FileText,
+  ChevronLeft, ChevronRight, Upload, Loader2, Download, Eye, Trash2, AlertTriangle, CheckCircle2, Clock, Info, FileText, MailX,
 } from 'lucide-react';
 import DettaglioVerifica from '@/components/verifiche/DettaglioVerifica';
 import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
 import { esportaEsitoVerificaPdf } from '@/lib/esitoVerificaPdf';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 
 // Caricamenti ravvicinati possono incontrare il limite di richieste della piattaforma: si riprova dopo una pausa.
 async function conRitentativi(fn) {
@@ -59,6 +61,11 @@ function Esito({ riga }) {
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-800 text-xs"><AlertTriangle className="w-3 h-3" />{v.stato === 'errore' ? 'Errore' : 'Interrotta'}</span>;
   }
   const n = segnalazioni(v);
+  if (v.file_tipo === 'dichiarazione') {
+    return v.conformita === 'piena'
+      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs"><CheckCircle2 className="w-3 h-3" />Confermata</span>
+      : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-800 text-xs font-medium"><AlertTriangle className="w-3 h-3" />Smentita · {n} {n === 1 ? 'formulario' : 'formulari'}</span>;
+  }
   if (v.conformita ? v.conformita === 'piena' : n === 0) {
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs"><CheckCircle2 className="w-3 h-3" />Conformità piena</span>;
   }
@@ -70,7 +77,7 @@ function Esito({ riga }) {
   );
 }
 
-function RigaSoggetto({ riga, isAdmin, occupato, onCarica, onApri, onElimina, onScarica }) {
+function RigaSoggetto({ riga, isAdmin, occupato, onCarica, onDichiara, onApri, onElimina, onScarica }) {
   const input = useRef(null);
   const v = riga.verifica;
   return (
@@ -92,8 +99,9 @@ function RigaSoggetto({ riga, isAdmin, occupato, onCarica, onApri, onElimina, on
         {v ? (
           <>
             <div className="text-sm truncate" title={v.file_nome}>{v.file_nome}</div>
-            <div className="text-xs text-muted-foreground">
-              {v.stato === 'completata' ? `${v.righe_report} righe · ${tonnellate(v.peso_report_kg)} t` : ''}
+            <div className="text-xs text-muted-foreground truncate" title={v.nota || ''}>
+              {v.file_tipo === 'dichiarazione' ? (v.nota || 'comunicata dall\'impianto')
+                : v.stato === 'completata' ? `${v.righe_report} righe · ${tonnellate(v.peso_report_kg)} t` : ''}
             </div>
           </>
         ) : <span className="text-muted-foreground text-sm">—</span>}
@@ -109,6 +117,9 @@ function RigaSoggetto({ riga, isAdmin, occupato, onCarica, onApri, onElimina, on
               <Button size="sm" variant={v ? 'ghost' : 'outline'} className="h-8" disabled={occupato || analisiInCorso(v)} onClick={() => input.current && input.current.click()}>
                 {occupato ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Upload className="w-3.5 h-3.5 mr-1" />}
                 {v ? 'Sostituisci' : 'Carica report'}
+              </Button>
+              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="L'impianto comunica nessuna movimentazione" disabled={occupato || analisiInCorso(v)} onClick={() => onDichiara(riga)}>
+                <MailX className="w-4 h-4" />
               </Button>
             </>
           )}
@@ -169,6 +180,61 @@ export default function ReportSettimanali({ isAdmin }) {
     setSettimana(s);
   };
 
+  // Sostituisce la verifica di un soggetto: crea la nuova, avvia il confronto e poi
+  // cancella la precedente. Se la cancellazione non riesce, la nuova non resta ferma.
+  const avviaVerifica = async (riga, campi, payload) => {
+    const precedenteVerifica = riga.verifica;
+    const nuova = await conRitentativi(() => base44.entities.VerificaReport.create({
+      soggetto_chiave: riga.chiave,
+      soggetto_nome: riga.nome,
+      anno,
+      settimana,
+      data_inizio: intervallo.inizio,
+      data_fine: intervallo.fine,
+      avviata_il: new Date().toISOString(),
+      scade_il: aggiungiGiorni(oggiRoma(), GIORNI_CONSERVAZIONE),
+      ...campi,
+    }));
+
+    base44.functions.invoke('elaboraReportSettimanale', { verifica_id: nuova.id, ...payload })
+      .catch((e) => {
+        const msg = (e && e.data && e.data.error) || (e && e.response && e.response.data && e.response.data.error);
+        if (msg) toast({ title: `Verifica di ${riga.nome} non riuscita`, description: msg, variant: 'destructive' });
+      })
+      .finally(() => carica(true));
+
+    if (precedenteVerifica) {
+      try {
+        await conRitentativi(() => eliminaParti('VerificaReport', precedenteVerifica.id));
+        await conRitentativi(() => base44.entities.VerificaReport.delete(precedenteVerifica.id));
+      } catch (e) {
+        toast({ title: 'La verifica precedente non è stata cancellata', description: 'Si cancellerà da sola alla scadenza. ' + (e.message || ''), variant: 'destructive' });
+      }
+    }
+  };
+
+  const [dichiara, setDichiara] = useState(null);
+  const [notaDichiarazione, setNotaDichiarazione] = useState('');
+
+  const registraDichiarazione = async () => {
+    const riga = dichiara;
+    setDichiara(null);
+    setOccupato(riga.chiave);
+    try {
+      await avviaVerifica(riga, {
+        file_nome: 'Nessuna movimentazione dichiarata',
+        file_tipo: 'dichiarazione',
+        nota: notaDichiarazione.trim(),
+        stato: 'in_verifica',
+      }, { nessuna_movimentazione: true });
+      setOccupato(null);
+      await carica(true);
+    } catch (e) {
+      setOccupato(null);
+      toast({ title: 'Registrazione non riuscita', description: e.message || String(e), variant: 'destructive' });
+    }
+  };
+
   const carica_report = async (riga, file) => {
     const tipo = tipoDiFile(file);
     if (!tipo) { toast({ title: 'Formato non supportato', description: 'Carica un file Excel (.xlsx, .xls), LibreOffice (.ods), CSV, PDF o un\'immagine.', variant: 'destructive' }); return; }
@@ -192,36 +258,7 @@ export default function ReportSettimanali({ isAdmin }) {
         payload.file = { nome: file.name, mime: file.type || (tipo === 'pdf' ? 'application/pdf' : 'image/png'), base64: await fileInBase64(file) };
       }
 
-      const nuova = await conRitentativi(() => base44.entities.VerificaReport.create({
-        soggetto_chiave: riga.chiave,
-        soggetto_nome: riga.nome,
-        anno,
-        settimana,
-        data_inizio: intervallo.inizio,
-        data_fine: intervallo.fine,
-        file_nome: file.name,
-        file_tipo: tipo,
-        stato: 'in_lettura',
-        avviata_il: new Date().toISOString(),
-        scade_il: aggiungiGiorni(oggiRoma(), GIORNI_CONSERVAZIONE),
-      }));
-
-      // La verifica parte subito: se poi la vecchia non si cancella, la nuova non resta ferma.
-      base44.functions.invoke('elaboraReportSettimanale', { verifica_id: nuova.id, ...payload })
-        .catch((e) => {
-          const msg = (e && e.data && e.data.error) || (e && e.response && e.response.data && e.response.data.error);
-          if (msg) toast({ title: `Report di ${riga.nome} non verificato`, description: msg, variant: 'destructive' });
-        })
-        .finally(() => carica(true));
-
-      if (precedenteVerifica) {
-        try {
-          await conRitentativi(() => eliminaParti('VerificaReport', precedenteVerifica.id));
-          await conRitentativi(() => base44.entities.VerificaReport.delete(precedenteVerifica.id));
-        } catch (e) {
-          toast({ title: 'La verifica precedente non è stata cancellata', description: 'Si cancellerà da sola alla scadenza. ' + (e.message || ''), variant: 'destructive' });
-        }
-      }
+      await avviaVerifica(riga, { file_nome: file.name, file_tipo: tipo, stato: 'in_lettura' }, payload);
       setOccupato(null);
       await carica(true);
     } catch (e) {
@@ -286,6 +323,8 @@ export default function ReportSettimanali({ isAdmin }) {
       <div className="flex items-start gap-2 text-xs text-muted-foreground">
         <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
         <span>
+          Il report deve riportare tutte le movimentazioni: ingressi in primaria e ingressi e uscite in secondaria, di rete, ACI ed extra raccolta.
+          Se l'impianto comunica che non ce ne sono state, registralo con l'icona della busta: la comunicazione viene verificata e, se i dati la smentiscono, si apre un alert.
           Carica il report inviato da ciascun impianto o stoccaggio: Excel, CSV, PDF o immagine. Gli ingressi si confrontano con le primarie,
           le uscite con le secondarie; il peso al chilogrammo, la data su quella di fine trasporto. Il file non viene conservato:
           restano solo i dati letti e l'esito, che si cancellano da soli {GIORNI_CONSERVAZIONE} giorni dopo il caricamento.
@@ -317,7 +356,7 @@ export default function ReportSettimanali({ isAdmin }) {
             <tbody>
               {conMovimenti.map(r => (
                 <RigaSoggetto key={r.chiave} riga={r} isAdmin={isAdmin} occupato={occupato === r.chiave}
-                  onCarica={carica_report} onApri={setAperta} onElimina={elimina} onScarica={scarica} />
+                  onCarica={carica_report} onDichiara={(r) => { setNotaDichiarazione(""); setDichiara(r); }} onApri={setAperta} onElimina={elimina} onScarica={scarica} />
               ))}
               {senzaMovimenti.length > 0 && (
                 <tr className="border-t bg-muted/20">
@@ -326,7 +365,7 @@ export default function ReportSettimanali({ isAdmin }) {
               )}
               {senzaMovimenti.map(r => (
                 <RigaSoggetto key={r.chiave} riga={r} isAdmin={isAdmin} occupato={occupato === r.chiave}
-                  onCarica={carica_report} onApri={setAperta} onElimina={elimina} onScarica={scarica} />
+                  onCarica={carica_report} onDichiara={(r) => { setNotaDichiarazione(""); setDichiara(r); }} onApri={setAperta} onElimina={elimina} onScarica={scarica} />
               ))}
               {soggetti.length === 0 && (
                 <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Nessun impianto o stoccaggio attivo nel {anno}.</td></tr>
@@ -337,6 +376,36 @@ export default function ReportSettimanali({ isAdmin }) {
       )}
 
       <DettaglioVerifica verificaId={aperta} isAdmin={isAdmin} open={!!aperta} onClose={() => setAperta(null)} onModificata={() => carica(true)} />
+
+      <Dialog open={!!dichiara} onOpenChange={(x) => { if (!x) setDichiara(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nessuna movimentazione comunicata</DialogTitle>
+            <DialogDescription>
+              {dichiara ? `${dichiara.nome} comunica che nella settimana ${settimana} (${descriviIntervallo(intervallo)}) non ci sono state movimentazioni.` : ''}
+              {' '}La comunicazione viene confrontata con i formulari registrati: se ne risultano, si apre un alert. Il controllo si ripete a ogni nuovo caricamento di primarie e secondarie.
+            </DialogDescription>
+          </DialogHeader>
+          {dichiara && dichiara.ingressi + dichiara.uscite > 0 && (
+            <div className="flex items-start gap-2 text-sm text-red-800 border border-red-200 bg-red-50 rounded-lg px-3 py-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>Nel gestionale risultano già {dichiara.ingressi} ingressi e {dichiara.uscite} uscite in questa settimana: la comunicazione sarà smentita.</span>
+            </div>
+          )}
+          {dichiara && dichiara.verifica && (
+            <div className="text-sm text-amber-800">La verifica già presente ({dichiara.verifica.file_nome}) sarà sostituita.</div>
+          )}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium" htmlFor="nota-dichiarazione">Riferimento della comunicazione</label>
+            <Textarea id="nota-dichiarazione" rows={2} value={notaDichiarazione} onChange={(e) => setNotaDichiarazione(e.target.value)}
+              placeholder="Es. email del 15/09/2026 di Mario Rossi" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDichiara(null)}>Annulla</Button>
+            <Button onClick={registraDichiarazione}>Registra e verifica</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -213,12 +213,12 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                           </tr>
                         </thead>
                         <tbody>
-                          {[...sintesi.quadratura, ...(sintesi.quadratura.length > 1 ? [sintesi.totale] : [])].map(q => {
+                          {[...sintesi.quadratura, sintesi.totale].map(q => {
                             const dF = q.formulari_report - q.formulari_gestionale;
                             const dK = q.kg_report - q.kg_gestionale;
                             return (
-                              <tr key={q.tipo} className={`border-t tabular-nums ${q.tipo === 'totale' ? 'font-semibold bg-muted/30' : ''}`}>
-                                <td className="px-3 py-2">{NOME_TIPO[q.tipo]}</td>
+                              <tr key={q.chiave || q.tipo} className={`border-t tabular-nums ${q.tipo === 'totale' ? 'font-semibold bg-muted/30' : ''}`}>
+                                <td className="px-3 py-2">{q.nome || NOME_TIPO[q.tipo]}</td>
                                 <td className="px-3 py-2 text-right">{formatIntero(q.formulari_report)}</td>
                                 <td className="px-3 py-2 text-right">{formatIntero(q.formulari_gestionale)}</td>
                                 <td className={`px-3 py-2 text-right font-medium ${dF ? 'text-red-600' : 'text-emerald-600'}`}>{differenza(dF)}</td>
@@ -250,7 +250,19 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                     ].filter(Boolean).join(', ') : 'nessuna'} />
                 </div>
 
-                {!!v.uscite_gestionale && !v.uscite_verificate && (
+                {lettura.modo === 'dichiarazione' && (
+                  <div className={`flex items-start gap-2 text-sm rounded-lg px-3 py-2 border ${v.conformita === 'piena' ? 'text-emerald-900 border-emerald-200 bg-emerald-50' : 'text-red-900 border-red-200 bg-red-50'}`}>
+                    <FileText className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>
+                      L'impianto ha comunicato che nella settimana non ci sono state movimentazioni{v.nota ? ` (${v.nota})` : ''}.{' '}
+                      {v.conformita === 'piena'
+                        ? 'Nel gestionale non risultano formulari: la comunicazione è confermata.'
+                        : `Nel gestionale risultano ${sintesi ? sintesi.totale.formulari_gestionale : ''} formulari: la comunicazione è smentita ed è stato aperto un alert.`}
+                    </span>
+                  </div>
+                )}
+
+                {!!v.uscite_gestionale && !v.uscite_verificate && lettura.modo !== 'dichiarazione' && (
                   <div className="flex items-start gap-2 text-sm text-red-900 border border-red-200 bg-red-50 rounded-lg px-3 py-2">
                     <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                     <span>Il report non contiene uscite: le {v.uscite_gestionale} secondarie partite nella settimana ({tonnellate(v.peso_uscite_kg)} t) mancano nel report.</span>
@@ -266,7 +278,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                   </div>
                 )}
 
-                {segnalazioni(v) === 0 && (
+                {segnalazioni(v) === 0 && lettura.modo !== 'dichiarazione' && (
                   <div className="flex items-center gap-2 text-sm text-emerald-800 border border-emerald-200 bg-emerald-50 rounded-lg px-3 py-2">
                     <CheckCircle2 className="w-4 h-4" /> Il report corrisponde al gestionale riga per riga.
                   </div>

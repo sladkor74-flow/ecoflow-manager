@@ -27,7 +27,8 @@
         "primarie_rete",
         "primarie_aci",
         "terziarie",
-        "assegnati"
+        "assegnati",
+        "verifiche"
       ],
       "description": "Modulo in cui \u00e8 stata rilevata l'anomalia"
     },

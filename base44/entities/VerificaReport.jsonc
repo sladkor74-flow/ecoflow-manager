@@ -27,13 +27,18 @@
     "file_nome": {
       "type": "string"
     },
+    "nota": {
+      "type": "string",
+      "description": "Per una dichiarazione di nessuna movimentazione: riferimento della comunicazione dell'impianto (email, data, mittente)"
+    },
     "file_tipo": {
       "type": "string",
       "enum": [
         "excel",
         "csv",
         "pdf",
-        "immagine"
+        "immagine",
+        "dichiarazione"
       ],
       "description": "Il file non viene conservato: se ne salvano solo i dati letti, cosi' alla cancellazione non resta nulla in archivio"
     },

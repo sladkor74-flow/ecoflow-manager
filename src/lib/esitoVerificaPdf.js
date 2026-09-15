@@ -17,6 +17,13 @@ const nomeSicuro = (s) => String(s).replace(/[\\/:*?"<>|]+/g, '-').trim();
 const segno = (n) => (n > 0 ? '+' : '') + formatIntero(n);
 const segnoKg = (n) => (n > 0 ? '+' : n < 0 ? '-' : '') + formatKg(Math.abs(n));
 const NOME_TIPO = { ingresso: 'Ingressi', uscita: 'Uscite', totale: 'Totale' };
+const CANALE = { rete: 'rete', aci: 'ACI', extra: 'extra raccolta' };
+// 'Ingresso primaria · rete' dal movimento registrato.
+const nomeCategoria = (m) => {
+  const [mov, tipo, canale] = String(m.categoria || '').split('-');
+  if (!mov) return m.tipo === 'uscita' ? 'Uscita' : 'Ingresso';
+  return `${tipo === 'uscita' ? 'Uscita' : 'Ingresso'} ${mov} · ${CANALE[canale] || canale}`;
+};
 
 export async function esportaEsitoVerificaPdf(v) {
   const { jsPDF } = await import('jspdf');
@@ -132,7 +139,7 @@ export async function esportaEsitoVerificaPdf(v) {
   const verificata = v.verificata_il ? new Date(/Z$|[+-]\d\d:\d\d$/.test(v.verificata_il) ? v.verificata_il : v.verificata_il + 'Z') : new Date();
   const dati = [
     ['Riferimento', riferimento],
-    ['Report ricevuto', v.file_nome || ''],
+    [s.dichiarazione ? 'Comunicazione' : 'Report ricevuto', s.dichiarazione ? (v.nota || 'Nessuna movimentazione dichiarata') : (v.file_nome || '')],
     ['Verifica eseguita il', `${verificata.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })} alle ${verificata.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`],
   ];
   dati.forEach(([k, val], i) => {
@@ -142,7 +149,12 @@ export async function esportaEsitoVerificaPdf(v) {
   y += 17;
 
   const [fondo, scritta] = piena ? [C.verdeChiaro, C.verde] : [C.ambraChiaro, C.ambra];
-  const sottotitolo = piena
+  const totaleRegistrato = `${formatIntero(s.totale.formulari_gestionale)} ${s.totale.formulari_gestionale === 1 ? 'formulario registrato' : 'formulari registrati'} per ${formatKg(s.totale.kg_gestionale)} kg`;
+  const sottotitolo = s.dichiarazione
+    ? (piena
+      ? 'L\'impianto ha comunicato che nella settimana non ci sono state movimentazioni: nessun formulario risulta registrato. La comunicazione è confermata.'
+      : `L'impianto ha comunicato che nella settimana non ci sono state movimentazioni, ma risultano ${totaleRegistrato}. Vi chiediamo di inviarci il report della settimana.`)
+    : piena
     ? 'Il report corrisponde ai formulari registrati per la settimana: stesso numero di formulari, stessi numeri, stessi pesi effettivi e stesse date di fine trasporto.'
     : `Il report non corrisponde pienamente ai formulari registrati: ${s.numeroAnomalie} ${s.numeroAnomalie === 1 ? 'anomalia da verificare' : 'anomalie da verificare'}${s.mancanti.length ? `, di cui ${s.mancanti.length} ${s.mancanti.length === 1 ? 'formulario mancante' : 'formulari mancanti'}` : ''}${s.inPiu.length ? `${s.mancanti.length ? ' e' : ', di cui'} ${s.inPiu.length} ${s.inPiu.length === 1 ? 'formulario non registrato' : 'formulari non registrati'}` : ''}. Il dettaglio è riportato di seguito.`;
   doc.setFontSize(8.5);
@@ -159,23 +171,27 @@ export async function esportaEsitoVerificaPdf(v) {
 
   // --- Quadratura ---
   sezione('Quadratura di formulari e pesi',
-    `Formulari del report confrontati con quelli registrati con fine trasporto ${periodo}. Ingressi: carichi arrivati all'impianto; uscite: carichi partiti dall'impianto.`);
+    `${s.dichiarazione ? 'Movimentazioni dichiarate confrontate' : 'Formulari del report confrontati'} con quelli registrati con fine trasporto ${periodo}, per ciascuna movimentazione e canale: ingressi in primaria e ingressi e uscite in secondaria, di rete, ACI ed extra raccolta.`);
   const rigaQ = (q, grassetto) => {
     const dF = q.formulari_report - q.formulari_gestionale;
     const dK = q.kg_report - q.kg_gestionale;
+    const vuota = !grassetto && !q.formulari_report && !q.formulari_gestionale;
+    const grigio = vuota ? C.grigio : null;
     return {
-      celle: [NOME_TIPO[q.tipo], formatIntero(q.formulari_report), formatIntero(q.formulari_gestionale), dF ? segno(dF) : '0',
-        formatKg(q.kg_report), formatKg(q.kg_gestionale), dK ? segnoKg(dK) : '0', q.quadra ? 'Quadra' : 'Non quadra'],
-      colori: [null, null, null, dF ? C.rosso : C.verde, null, null, dK ? C.rosso : C.verde, q.quadra ? C.verde : C.rosso],
-      grassetti: [grassetto, grassetto, grassetto, true, grassetto, grassetto, true, true],
+      celle: [q.nome || NOME_TIPO[q.tipo] || '', formatIntero(q.formulari_report), formatIntero(q.formulari_gestionale), dF ? segno(dF) : '0',
+        formatKg(q.kg_report), formatKg(q.kg_gestionale), dK ? segnoKg(dK) : '0', vuota ? 'Nessuna' : q.quadra ? 'Quadra' : 'Non quadra'],
+      colori: [grigio, grigio, grigio, vuota ? C.grigio : dF ? C.rosso : C.verde, grigio, grigio, vuota ? C.grigio : dK ? C.rosso : C.verde, vuota ? C.grigio : q.quadra ? C.verde : C.rosso],
+      grassetti: [grassetto, grassetto, grassetto, !vuota, grassetto, grassetto, !vuota, !vuota],
       sfondo: grassetto ? C.chiaro : null,
     };
   };
+  // Tutte le movimentazioni previste; i formulari non registrati solo se ce ne sono.
+  const righeQ = s.categorie.filter(q => q.chiave !== 'non_registrati' || q.formulari_report);
   tabella([
-    { titolo: '', peso: 1.1 }, { titolo: 'Formulari nel report', peso: 1.1, allinea: 'right' }, { titolo: 'Formulari registrati', peso: 1.1, allinea: 'right' },
-    { titolo: 'Differenza', peso: 0.9, allinea: 'right' }, { titolo: 'Peso nel report (kg)', peso: 1.2, allinea: 'right' },
-    { titolo: 'Peso registrato (kg)', peso: 1.2, allinea: 'right' }, { titolo: 'Differenza (kg)', peso: 1, allinea: 'right' }, { titolo: 'Esito', peso: 0.9, allinea: 'center' },
-  ], [...s.quadratura.map(q => rigaQ(q, false)), ...(s.quadratura.length > 1 ? [rigaQ(s.totale, true)] : [])]);
+    { titolo: 'Movimentazione', peso: 1.85 }, { titolo: 'Formulari nel report', peso: 0.95, allinea: 'right' }, { titolo: 'Formulari registrati', peso: 0.95, allinea: 'right' },
+    { titolo: 'Differenza', peso: 0.8, allinea: 'right' }, { titolo: 'Peso nel report (kg)', peso: 1.05, allinea: 'right' },
+    { titolo: 'Peso registrato (kg)', peso: 1.05, allinea: 'right' }, { titolo: 'Differenza (kg)', peso: 0.95, allinea: 'right' }, { titolo: 'Esito', peso: 1.05, allinea: 'center' },
+  ], [...righeQ.map(q => rigaQ(q, false)), rigaQ(s.totale, true)]);
 
   // --- Controlli ---
   sezione('Controlli eseguiti');
@@ -190,10 +206,12 @@ export async function esportaEsitoVerificaPdf(v) {
   }
 
   if (s.mancanti.length) {
-    sezione('Formulari registrati ma assenti nel report', 'Report parziale: questi formulari risultano registrati per la settimana ma non compaiono nel report. Vi chiediamo di integrarli.');
-    tabella([{ titolo: 'Formulario', peso: 1.3 }, { titolo: 'Tipo', peso: 0.7 }, { titolo: 'Fine trasporto', peso: 0.9 }, { titolo: 'Produttore / destinatario', peso: 2 }, { titolo: 'Trasportatore', peso: 1.6 }, { titolo: 'Peso (kg)', peso: 0.8, allinea: 'right' }],
+    sezione(s.dichiarazione ? 'Formulari registrati nella settimana' : 'Formulari registrati ma assenti nel report', s.dichiarazione
+      ? 'La comunicazione di nessuna movimentazione non trova riscontro: risultano registrati questi formulari. Vi chiediamo di inviarci il report della settimana.'
+      : 'Report parziale: questi formulari risultano registrati per la settimana ma non compaiono nel report. Vi chiediamo di integrarli.');
+    tabella([{ titolo: 'Formulario', peso: 1.3 }, { titolo: 'Movimentazione', peso: 1.35 }, { titolo: 'Fine trasporto', peso: 0.9 }, { titolo: 'Produttore / destinatario', peso: 1.75 }, { titolo: 'Trasportatore', peso: 1.3 }, { titolo: 'Peso (kg)', peso: 0.8, allinea: 'right' }],
       s.mancanti.map(m => ({
-        celle: [m.fir, m.tipo === 'uscita' ? 'Uscita' : 'Ingresso', dataIt(m.fine), m.tipo === 'uscita' ? `verso ${m.destinatario || ''}` : (m.produttore || ''), m.trasportatore || '', formatKg(m.kg)],
+        celle: [m.fir, nomeCategoria(m), dataIt(m.fine), m.tipo === 'uscita' ? `verso ${m.destinatario || ''}` : (m.produttore || ''), m.trasportatore || '', formatKg(m.kg)],
         grassetti: [true, false, false, false, false, true], colori: [C.rosso],
       })));
   }
@@ -220,36 +238,38 @@ export async function esportaEsitoVerificaPdf(v) {
   }
 
   // --- Dettaglio completo ---
-  sezione('Dettaglio dei formulari verificati', `${formatIntero(s.esiti.length)} ${s.esiti.length === 1 ? 'riga' : 'righe'} del report con fine trasporto nella settimana, in ordine di data.`);
-  const ordinati = [...s.esiti].sort((a, b) => String(a.report.fine || a.report.data || '').localeCompare(String(b.report.fine || b.report.data || '')) || (a.n - b.n));
-  const esitoRiga = (e) => {
-    if (e.esito === 'non_trovata') return ['Non registrato', C.rosso];
-    if (e.esito === 'duplicata') return ['Duplicata', C.rosso];
-    const gr = (e.discrepanze || []).map(d => d.gravita || (/errato nel gestionale/i.test(d.messaggio) ? 'rettifica' : ['produttore', 'destinatario', 'trasportatore'].includes(d.campo) && !/non riguarda|codice/i.test(d.messaggio) ? 'osservazione' : 'anomalia'));
-    if (gr.includes('anomalia')) return ['Anomalia', C.rosso];
-    if (gr.length) return ['Conforme*', C.verde];
-    return ['Conforme', C.verde];
-  };
-  tabella([
-    { titolo: 'Fine trasporto', peso: 0.95 }, { titolo: 'Formulario', peso: 1.3 }, { titolo: 'Tipo', peso: 0.7 }, { titolo: 'Produttore / destinatario', peso: 2.2 },
-    { titolo: 'Classe', peso: 0.55, allinea: 'center' }, { titolo: 'Peso report (kg)', peso: 0.95, allinea: 'right' }, { titolo: 'Peso registrato (kg)', peso: 1, allinea: 'right' }, { titolo: 'Esito', peso: 0.95, allinea: 'center' },
-  ], ordinati.map(e => {
-    const [etichetta, colore] = esitoRiga(e);
-    const g = e.gestionale || {};
-    const uscita = (e.tipo || e.tipo_presunto) === 'uscita';
-    const pesoDiverso = e.gestionale && e.report.kg !== g.kg;
-    return {
-      celle: [dataIt(e.report.fine || e.report.data || g.fine), e.report.fir || 'senza formulario', uscita ? 'Uscita' : 'Ingresso',
-        uscita ? `verso ${e.report.destinatario || g.destinatario || ''}` : (e.report.produttore || g.produttore || ''), e.report.classe || g.classe || '',
-        e.report.kg != null ? formatKg(e.report.kg) : '', e.gestionale ? formatKg(g.kg) : '—', etichetta],
-      colori: [null, null, C.grigio, null, null, pesoDiverso ? C.rosso : null, pesoDiverso ? C.rosso : null, colore],
-      grassetti: [false, true, false, false, false, false, false, true],
+  if (s.esiti.length) {
+    sezione('Dettaglio dei formulari verificati', `${formatIntero(s.esiti.length)} ${s.esiti.length === 1 ? 'riga' : 'righe'} del report con fine trasporto nella settimana, in ordine di data.`);
+    const ordinati = [...s.esiti].sort((a, b) => String(a.report.fine || a.report.data || '').localeCompare(String(b.report.fine || b.report.data || '')) || (a.n - b.n));
+    const esitoRiga = (e) => {
+      if (e.esito === 'non_trovata') return ['Non registrato', C.rosso];
+      if (e.esito === 'duplicata') return ['Duplicata', C.rosso];
+      const gr = (e.discrepanze || []).map(d => d.gravita || (/errato nel gestionale/i.test(d.messaggio) ? 'rettifica' : ['produttore', 'destinatario', 'trasportatore'].includes(d.campo) && !/non riguarda|codice/i.test(d.messaggio) ? 'osservazione' : 'anomalia'));
+      if (gr.includes('anomalia')) return ['Anomalia', C.rosso];
+      if (gr.length) return ['Conforme*', C.verde];
+      return ['Conforme', C.verde];
     };
-  }));
-  if (s.esiti.some(e => esitoRiga(e)[0] === 'Conforme*')) {
-    spazio(6);
-    testo('* Conforme con osservazioni o rettifiche a nostra cura.', M, y, { dim: 7, colore: C.grigio });
-    y += 5;
+    tabella([
+      { titolo: 'Fine trasporto', peso: 0.95 }, { titolo: 'Formulario', peso: 1.3 }, { titolo: 'Movimentazione', peso: 1.25 }, { titolo: 'Produttore / destinatario', peso: 1.65 },
+      { titolo: 'Classe', peso: 0.55, allinea: 'center' }, { titolo: 'Peso report (kg)', peso: 0.95, allinea: 'right' }, { titolo: 'Peso registrato (kg)', peso: 1, allinea: 'right' }, { titolo: 'Esito', peso: 0.95, allinea: 'center' },
+    ], ordinati.map(e => {
+      const [etichetta, colore] = esitoRiga(e);
+      const g = e.gestionale || {};
+      const uscita = (e.tipo || e.tipo_presunto) === 'uscita';
+      const pesoDiverso = e.gestionale && e.report.kg !== g.kg;
+      return {
+        celle: [dataIt(e.report.fine || e.report.data || g.fine), e.report.fir || 'senza formulario', e.gestionale && e.categoria && e.categoria !== 'non_registrati' ? nomeCategoria(e) : (uscita ? 'Uscita' : 'Ingresso'),
+          uscita ? `verso ${e.report.destinatario || g.destinatario || ''}` : (e.report.produttore || g.produttore || ''), e.report.classe || g.classe || '',
+          e.report.kg != null ? formatKg(e.report.kg) : '', e.gestionale ? formatKg(g.kg) : '—', etichetta],
+        colori: [null, null, C.grigio, null, null, pesoDiverso ? C.rosso : null, pesoDiverso ? C.rosso : null, colore],
+        grassetti: [false, true, false, false, false, false, false, true],
+      };
+    }));
+    if (s.esiti.some(e => esitoRiga(e)[0] === 'Conforme*')) {
+      spazio(6);
+      testo('* Conforme con osservazioni o rettifiche a nostra cura.', M, y, { dim: 7, colore: C.grigio });
+      y += 5;
+    }
   }
 
   if (s.escluse.length) {
@@ -261,10 +281,11 @@ export async function esportaEsitoVerificaPdf(v) {
   // --- Criteri e richiesta ---
   sezione('Criteri della verifica');
   const criteri = [
+    'Il report settimanale deve riportare tutte le movimentazioni: ingressi in primaria e ingressi e uscite in secondaria, di rete, ACI ed extra raccolta. Se non ce ne sono, l\'impianto lo comunica e la comunicazione viene verificata sui formulari registrati.',
     `Ogni riga del report è confrontata con i formulari registrati con fine trasporto ${periodo}: numero di formulario, peso effettivo al chilogrammo, date di trasporto e classe dei PFU.`,
     'La quadratura richiede lo stesso numero di formulari e lo stesso peso complessivo, distinti fra ingressi e uscite.',
     piena
-      ? 'Il report risulta pienamente conforme: non è richiesta alcuna azione. Grazie per la collaborazione.'
+      ? `${s.dichiarazione ? 'La comunicazione risulta confermata' : 'Il report risulta pienamente conforme'}: non è richiesta alcuna azione. Grazie per la collaborazione.`
       : 'Vi chiediamo di verificare le anomalie indicate e di inviarci il report corretto o le vostre osservazioni. Per ogni chiarimento potete rispondere a questa comunicazione.',
   ];
   for (const p of criteri) {

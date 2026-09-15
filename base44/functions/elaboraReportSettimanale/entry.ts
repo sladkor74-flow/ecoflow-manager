@@ -1,8 +1,9 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import {
-  caricaMovimenti, verificaReport, normalizzaRigheReport, CAMPI_REPORT,
+  caricaMovimenti, normalizzaRigheReport, CAMPI_REPORT,
 } from "../../shared/reportSettimanali.ts";
 import { valoreCampo, leggiCampo } from "../../shared/testoLungo.ts";
+import { calcolaEsito, salvaEsito } from "../../shared/esitoVerifica.ts";
 
 // Legge il report settimanale di un impianto o di uno stoccaggio e lo confronta
 // con il gestionale: gli ingressi con le primarie, le uscite con le secondarie.
@@ -11,6 +12,7 @@ import { valoreCampo, leggiCampo } from "../../shared/testoLungo.ts";
 //   { verifica_id, tabelle: [{ nome, riga_iniziale, righe: [[...], ...] }] }  file Excel o CSV
 //   { verifica_id, file: { nome, mime, base64 } }                              PDF o immagine
 //   { verifica_id, solo_verifica: true }        ripete il confronto sulle righe gia' lette
+//   { verifica_id, nessuna_movimentazione: true } l'impianto dichiara che non ci sono state movimentazioni
 //
 // Il file non viene mai salvato. Un Excel arriva gia' aperto dal browser; un PDF
 // o un'immagine passano direttamente all'agente e vengono scartati. Nella
@@ -262,7 +264,15 @@ export default async function(req) {
     if (!verifica) return Response.json({ error: 'Verifica non trovata' }, { status: 404 });
 
     let righe, lettura;
-    if (body.solo_verifica) {
+    if (body.nessuna_movimentazione) {
+      // Nessun file: la dichiarazione si verifica come un report senza righe.
+      righe = [];
+      lettura = { modo: 'dichiarazione', nota: verifica.nota || '' };
+      await svc.VerificaReport.update(verificaId, {
+        stato: 'in_verifica', avviata_il: new Date().toISOString(), errore: '',
+        righe_report_json: '[]', lettura_json: JSON.stringify(lettura),
+      });
+    } else if (body.solo_verifica) {
       if (!verifica.righe_report_json) return Response.json({ error: 'Il report non e\' ancora stato letto: caricalo di nuovo.' }, { status: 400 });
       righe = JSON.parse(await leggiCampo(base44, 'VerificaReport', verifica, 'righe_report_json'));
       const testoLettura = await leggiCampo(base44, 'VerificaReport', verifica, 'lettura_json');
@@ -285,22 +295,8 @@ export default async function(req) {
     }
 
     const { movimenti } = await conRitentativi(() => caricaMovimenti(base44));
-    const esito = verificaReport(righe, movimenti, {
-      chiave: verifica.soggetto_chiave,
-      nome: verifica.soggetto_nome,
-      inizio: String(verifica.data_inizio).slice(0, 10),
-      fine: String(verifica.data_fine).slice(0, 10),
-    });
-
-    await svc.VerificaReport.update(verificaId, {
-      stato: 'completata',
-      esito_json: await conRitentativi(() => valoreCampo(base44, 'VerificaReport', verificaId, 'esito_json', JSON.stringify({
-        esiti: esito.esiti, assenti: esito.assenti, escluse: esito.escluse, uscite_non_riportate: esito.uscite_non_riportate, quadratura: esito.quadratura,
-      }))),
-      ...esito.riepilogo,
-      verificata_il: new Date().toISOString(),
-      errore: '',
-    });
+    const esito = calcolaEsito(verifica, righe, movimenti);
+    await salvaEsito(base44, verifica, esito, conRitentativi);
 
     return Response.json({ ok: true, ...esito.riepilogo });
   } catch (error) {
