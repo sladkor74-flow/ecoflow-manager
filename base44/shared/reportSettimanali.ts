@@ -2,9 +2,9 @@
 //
 // Ogni settimana un impianto o uno stoccaggio invia l'elenco dei carichi ricevuti
 // e spediti. Qui l'elenco viene confrontato riga per riga con il gestionale:
-// gli ingressi con le primarie, rete, ACI ed extra raccolta, che arrivano al sito;
-// le uscite con le secondarie, dal portale o inserite in Extra Raccolta, che ne
-// partono.
+// gli ingressi con le primarie, rete, ACI ed extra raccolta, e con le secondarie
+// che arrivano al sito; le uscite con le secondarie, dal portale o inserite in
+// Extra Raccolta, che ne partono.
 //
 // Il confronto e' deterministico. L'agente interviene solo per capire come e'
 // fatto il file che arriva, cioe' quale colonna contiene il formulario, il peso,
@@ -278,9 +278,10 @@ export async function caricaMovimenti(base44) {
 }
 
 // Che cosa rappresenta un movimento per il sito verificato: un ingresso e' una
-// primaria che vi arriva, un'uscita una secondaria che ne parte.
+// primaria o una secondaria che vi arriva (un impianto riceve anche i carichi
+// degli stoccaggi), un'uscita una secondaria che ne parte.
 export function relazioneConSito(m, chiave) {
-  if (!m.secondaria && m.chiaveDest === chiave) return 'ingresso';
+  if (m.chiaveDest === chiave) return 'ingresso';
   if (m.secondaria && m.chiaveOrig === chiave) return 'uscita';
   return null;
 }
@@ -301,8 +302,10 @@ export function soggettiDellaSettimana({ movimenti, interni, anagrafica }, anno,
 
   for (const m of movimenti) {
     if (m.fine.slice(0, 4) !== String(anno)) continue;
-    if (m.secondaria) tocca(m.produttore.trim(), m.chiaveOrig, 'stoccaggio');
-    else tocca(m.destinatario.trim(), m.chiaveDest, m.tipo_destinazione === 'stoc' ? 'stoccaggio' : 'trattamento');
+    if (m.secondaria) {
+      tocca(m.produttore.trim(), m.chiaveOrig, 'stoccaggio');
+      tocca(m.destinatario.trim(), m.chiaveDest, 'trattamento');
+    } else tocca(m.destinatario.trim(), m.chiaveDest, m.tipo_destinazione === 'stoc' ? 'stoccaggio' : 'trattamento');
   }
 
   const righe = [];
@@ -329,7 +332,7 @@ export function soggettiDellaSettimana({ movimenti, interni, anagrafica }, anno,
 
 // === righe del report ===
 
-export const CAMPI_REPORT = ['fir', 'peso', 'data_inizio', 'data_fine', 'data', 'produttore', 'codice_pdr', 'destinatario', 'trasportatore', 'classe', 'targa'];
+export const CAMPI_REPORT = ['fir', 'peso', 'data_inizio', 'data_fine', 'data', 'produttore', 'codice_pdr', 'destinatario', 'trasportatore', 'intermediario', 'classe', 'targa'];
 
 /**
  * Porta le righe lette dal file in una forma confrontabile.
@@ -350,12 +353,16 @@ export function normalizzaRigheReport(grezze, unitaIndicata) {
     const firN = normalizzaFir(fir);
     const peso = numeroDaValore(g.peso, unita);
     if (!firN && peso === null) continue;
-    if (!firN && /TOTAL/i.test(Object.values(g).join(' '))) continue;
+    // Righe dei totali o dei subtotali: "TOT.", "TOTALE", "TOT. 32.780".
+    if (!firN && /(^|[^A-Z])TOT(ALE|ALI)?([^A-Z]|$)/i.test(CAMPI_REPORT.map(c => g[c] ?? '').join(' '))) continue;
+    // Intestazione ripetuta a meta' foglio (per esempio prima delle uscite): il formulario non ha cifre.
+    if (peso === null && !/\d/.test(fir)) continue;
     // Una riga con il solo peso, senza formulario, date e soggetti, e' la riga dei totali.
     const testo = (v) => String(v ?? '').trim();
     if (!firN && !testo(g.data_inizio) && !testo(g.data_fine) && !testo(g.data) && !testo(g.produttore) && !testo(g.trasportatore) && !testo(g.destinatario)) continue;
     righe.push({
       n: g.n,
+      ...(g.foglio ? { foglio: String(g.foglio) } : {}),
       fir,
       firN,
       kg: peso === null ? null : Math.round(unita === 't' ? peso * 1000 : peso),
@@ -366,6 +373,7 @@ export function normalizzaRigheReport(grezze, unitaIndicata) {
       codice_pdr: String(g.codice_pdr ?? '').trim(),
       destinatario: String(g.destinatario ?? '').trim(),
       trasportatore: String(g.trasportatore ?? '').trim(),
+      intermediario: String(g.intermediario ?? '').trim(),
       classe_testo: String(g.classe ?? '').trim(),
       classe: classeNormalizzata(g.classe),
       targa: String(g.targa ?? '').trim(),
@@ -375,6 +383,10 @@ export function normalizzaRigheReport(grezze, unitaIndicata) {
 }
 
 // === verifica ===
+
+// Un carico che il report attribuisce a un altro consorzio (SMOCO lavora anche per
+// Ecopneus) non e' nel gestionale per scelta, non per errore.
+const altroCircuito = (intermediario) => !!intermediario && !/ecotyre/i.test(intermediario) && /ecopneus|cobat|green ?tire/i.test(intermediario);
 
 /**
  * Confronta le righe del report con i movimenti del gestionale.
@@ -395,6 +407,11 @@ export function normalizzaRigheReport(grezze, unitaIndicata) {
  * assenti nel report. Le uscite si controllano allo stesso modo, ma solo se il
  * report ne contiene: un sito che invia i soli ingressi non va segnalato per
  * tutte le secondarie della settimana.
+ *
+ * Non si considerano, e si elencano a parte, le righe con una data di un'altra
+ * settimana (molti report sono cumulativi del mese) quando anche il gestionale
+ * le colloca fuori dalla settimana o non le conosce, e le righe non trovate che
+ * il report attribuisce a un altro consorzio.
  */
 export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, fine }) {
   const relazione = (m) => relazioneConSito(m, chiave);
@@ -425,6 +442,11 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   const migliore = (r, lista) => lista.reduce((best, m) => (best === null || punteggio(r, m) < punteggio(r, best) ? m : best), null);
 
   const esiti = [];
+  // Righe che non riguardano la verifica: carichi di altre settimane nei report
+  // cumulativi del mese e carichi di altri circuiti (per esempio Ecopneus).
+  const escluse = [];
+  const rif = (r) => (r.foglio ? `${String(r.foglio).trim()}, riga ${r.n}` : `riga ${r.n}`);
+  const escludi = (r, motivo) => escluse.push({ n: r.n, foglio: r.foglio || '', fir: r.fir, kg: r.kg, data: dataRiga(r), produttore: r.produttore, destinatario: r.destinatario, motivo });
   for (const r of righeReport) {
     let m = null;
     let modo = null;
@@ -466,8 +488,19 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       codice_pdr: r.codice_pdr, destinatario: r.destinatario, trasportatore: r.trasportatore, classe: r.classe || r.classe_testo,
     };
 
+    const dataReport = dataRiga(r);
+    const fuoriSettimana = !!dataReport && (dataReport < inizio || dataReport > fine);
+    const foglio = r.foglio ? { foglio: String(r.foglio).trim() } : {};
+
     if (!m) {
-      esiti.push({ n: r.n, tipo: null, esito: 'non_trovata', report, gestionale: null, discrepanze: [{ campo: 'fir', messaggio: r.firN ? 'Formulario non presente nel gestionale' : 'Riga senza formulario, non abbinabile a nessun movimento' }] });
+      if (altroCircuito(r.intermediario)) { escludi(r, `Carico di un altro circuito: intermediario ${r.intermediario}`); continue; }
+      if (fuoriSettimana) { escludi(r, `Data ${it(dataReport)}, fuori dalla settimana verificata`); continue; }
+      esiti.push({ n: r.n, ...foglio, tipo: null, esito: 'non_trovata', report, gestionale: null, discrepanze: [{ campo: 'fir', messaggio: r.firN ? 'Formulario non presente nel gestionale' : 'Riga senza formulario, non abbinabile a nessun movimento' }] });
+      continue;
+    }
+    // Report e gestionale concordano su un'altra settimana: la riga sara' verificata con quella.
+    if (fuoriSettimana && !nellaSettimana(m)) {
+      escludi(r, `Carico della settimana ${settimanaIso(m.fine).settimana}: nel gestionale il trasporto si conclude il ${it(m.fine)}`);
       continue;
     }
 
@@ -516,11 +549,11 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     };
 
     if (usati.has(m.id)) {
-      esiti.push({ n: r.n, tipo, esito: 'duplicata', report, gestionale, discrepanze: [{ campo: 'fir', messaggio: `Riga duplicata: lo stesso movimento e' gia' riportato alla riga ${usati.get(m.id)}` }, ...discrepanze] });
+      esiti.push({ n: r.n, ...foglio, tipo, esito: 'duplicata', report, gestionale, discrepanze: [{ campo: 'fir', messaggio: `Riga duplicata: lo stesso movimento e' gia' riportato alla ${usati.get(m.id)}` }, ...discrepanze] });
       continue;
     }
-    usati.set(m.id, r.n);
-    esiti.push({ n: r.n, tipo, esito: discrepanze.length ? 'discrepanze' : 'conforme', report, gestionale, discrepanze });
+    usati.set(m.id, rif(r));
+    esiti.push({ n: r.n, ...foglio, tipo, esito: discrepanze.length ? 'discrepanze' : 'conforme', report, gestionale, discrepanze });
   }
 
   const usciteVerificate = esiti.some(e => e.tipo === 'uscita');
@@ -537,8 +570,9 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   return {
     esiti,
     assenti,
+    escluse,
     riepilogo: {
-      righe_report: righeReport.length,
+      righe_report: esiti.length,
       conformi: conta('conforme'),
       con_discrepanze: conta('discrepanze'),
       non_trovate: conta('non_trovata'),
@@ -549,7 +583,9 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       uscite_gestionale: uscite.length,
       peso_uscite_kg: uscite.reduce((t, m) => t + m.kg, 0),
       uscite_verificate: usciteVerificate,
-      peso_report_kg: righeReport.reduce((t, r) => t + (r.kg || 0), 0),
+      peso_report_kg: esiti.reduce((t, e) => t + (e.report.kg || 0), 0),
+      righe_escluse: escluse.length,
+      peso_escluse_kg: escluse.reduce((t, e) => t + (e.kg || 0), 0),
     },
   };
 }

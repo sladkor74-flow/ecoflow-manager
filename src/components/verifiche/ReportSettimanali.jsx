@@ -127,7 +127,7 @@ export default function ReportSettimanali({ isAdmin }) {
       const res = await base44.functions.invoke('verificheReport', { anno, settimana });
       setDati(res.data || res);
     } catch (e) {
-      const msg = e && e.response && e.response.data && e.response.data.error;
+      const msg = (e && e.data && e.data.error) || (e && e.response && e.response.data && e.response.data.error);
       setErrore(msg || e.message || 'Errore nel caricamento');
     }
     if (!silenzioso) setCaricando(false);
@@ -196,7 +196,7 @@ export default function ReportSettimanali({ isAdmin }) {
 
       base44.functions.invoke('elaboraReportSettimanale', { verifica_id: nuova.id, ...payload })
         .catch((e) => {
-          const msg = e && e.response && e.response.data && e.response.data.error;
+          const msg = (e && e.data && e.data.error) || (e && e.response && e.response.data && e.response.data.error);
           if (msg) toast({ title: `Report di ${riga.nome} non verificato`, description: msg, variant: 'destructive' });
         })
         .finally(() => carica(true));

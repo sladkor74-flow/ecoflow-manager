@@ -163,9 +163,33 @@ export async function leggiTabelleDaFile(file, periodo = null) {
     const righe = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, blankrows: true, defval: '' });
     while (righe.length && !righe[righe.length - 1].some(c => c !== '')) righe.pop();
     if (righe.length === 0) continue;
-    tabelle.push({ nome, riga_iniziale: range.s.r, righe: righe.slice(0, 5000) });
+    const inizi = inizioTabelle(righe);
+    inizi.forEach((da, k) => {
+      const a = k + 1 < inizi.length ? inizi[k + 1] : righe.length;
+      tabelle.push({ nome: k === 0 ? nome : `${nome} (tabella ${k + 1})`, riga_iniziale: range.s.r + da, righe: righe.slice(da, Math.min(a, da + 5000)) });
+    });
   }
   return tabelle;
+}
+
+// Un foglio puo' contenere piu' tabelle una sotto l'altra, per esempio gli ingressi
+// e poi le uscite con altre colonne: dove le intestazioni si ripetono comincia una
+// nuova tabella, con l'eventuale titolo della riga sopra.
+function inizioTabelle(righe) {
+  const testi = (r) => (r || []).map(c => (typeof c === 'string' ? c.replace(/\s+/g, ' ').trim().toLowerCase() : '')).filter(t => t && !/^[\d.,\s]+$/.test(t));
+  // L'intestazione e' la riga con piu' testi tra le prime quindici.
+  let h = -1;
+  for (let i = 0; i < Math.min(righe.length, 15); i++) if (testi(righe[i]).length >= 3 && (h < 0 || testi(righe[i]).length > testi(righe[h]).length)) h = i;
+  if (h < 0) return [0];
+  const intestazione = new Set(testi(righe[h]));
+  const inizi = [0];
+  for (let i = h + 1; i < righe.length && inizi.length < 10; i++) {
+    const uguali = [...new Set(testi(righe[i]))].filter(t => intestazione.has(t)).length;
+    if (uguali < Math.max(3, Math.ceil(intestazione.size / 2))) continue;
+    const titolo = i - 1 > inizi[inizi.length - 1] && (righe[i - 1] || []).filter(c => c !== '').length === 1;
+    inizi.push(titolo ? i - 1 : i);
+  }
+  return inizi;
 }
 
 export function fileInBase64(file) {
@@ -178,6 +202,21 @@ export function fileInBase64(file) {
 }
 
 // === esiti ===
+
+/** "riga 12" o, se il report ha piu' fogli, "SECONDARIE, riga 12". */
+export function rigaReport(e) {
+  return e && e.foglio ? `${String(e.foglio).trim()}, riga ${e.n}` : `riga ${e && e.n}`;
+}
+
+/** Come e' stato letto un Excel: uno o piu' fogli con le rispettive colonne. */
+export function descriviLettura(lettura) {
+  const unita = (u) => (u === 't' ? 'tonnellate' : 'chilogrammi');
+  const colonne = (c) => (c ? Object.entries(c).map(([k, x]) => `${k} = ${x}`).join(', ') : '');
+  const fogli = Array.isArray(lettura.fogli) && lettura.fogli.length
+    ? lettura.fogli
+    : [{ foglio: lettura.foglio, prima_riga_dati: lettura.prima_riga_dati, unita: lettura.unita, colonne: lettura.colonne }];
+  return fogli.map(f => `Foglio "${f.foglio}"${f.contenuto ? ` (${f.contenuto.replace(/_/g, ' ')})` : ''}, dati dalla riga ${f.prima_riga_dati}, pesi in ${unita(f.unita)}${f.colonne ? '. Colonne: ' + colonne(f.colonne) : ''}.`);
+}
 
 export function segnalazioni(v) {
   if (!v) return 0;
@@ -259,9 +298,9 @@ export async function scaricaExcelVerifica(v) {
     ['Settimana', `${v.settimana} del ${v.anno}, dal ${dataIt(v.data_inizio)} al ${dataIt(v.data_fine)}, secondo la data di fine trasporto`],
     ['File verificato', v.file_nome],
     ['Lettura del file', lettura.modo === 'excel'
-      ? `foglio "${lettura.foglio}", dati dalla riga ${lettura.prima_riga_dati}, pesi in ${lettura.unita === 't' ? 'tonnellate' : 'chilogrammi'}`
+      ? descriviLettura(lettura).join('\n')
       : `${lettura.modo === 'pdf' ? 'PDF' : 'immagine'} trascritto dall'agente, pesi in ${lettura.unita === 't' ? 'tonnellate' : 'chilogrammi'}`],
-    ['Colonne riconosciute', lettura.colonne ? Object.entries(lettura.colonne).map(([k, c]) => `${k}: ${c}`).join('; ') : ''],
+    ['Righe non considerate', v.righe_escluse ? `${v.righe_escluse} (${formatKg(v.peso_escluse_kg || 0)} kg): carichi di altre settimane o di altri consorzi, elencati nel foglio "Non considerate"` : 'nessuna'],
     ['Criteri', 'Ingressi confrontati con le primarie, uscite con le secondarie; peso al chilogrammo; data di verifica: fine trasporto'],
     ['Verifica eseguita il', v.verificata_il ? new Date(v.verificata_il).toLocaleString('it-IT') : ''],
     ['Cancellazione dal gestionale', dataIt(v.scade_il)],
@@ -332,7 +371,7 @@ export async function scaricaExcelVerifica(v) {
   // --- Verifica righe ---
   const f = wb.addWorksheet('Verifica righe', { views: [{ state: 'frozen', xSplit: 4, ySplit: 1 }] });
   const colonne = [
-    ['Riga report', 8], ['Tipo', 11], ['Esito', 16], ['Annotazioni', 60],
+    ['Riga report', 14], ['Tipo', 11], ['Esito', 16], ['Annotazioni', 60],
     ['FIR report', 18], ['FIR gestionale', 18],
     ['Peso report (kg)', 12], ['Peso gestionale (kg)', 12], ['Differenza (kg)', 11],
     ['Fine trasporto report', 12], ['Fine trasporto gestionale', 12],
@@ -354,7 +393,7 @@ export async function scaricaExcelVerifica(v) {
     const differenza = rep.kg != null && ges.kg != null ? rep.kg - ges.kg : null;
     const annotazioni = e.discrepanze && e.discrepanze.length ? e.discrepanze.map(d => '• ' + d.messaggio).join('\n') : 'Nessuna discrepanza';
     const riga = f.addRow([
-      e.n, e.gestionale ? nomeTipo(e.tipo) : '', ETICHETTE_ESITO[e.esito] || e.esito, annotazioni,
+      e.foglio ? rigaReport(e) : e.n, e.gestionale ? nomeTipo(e.tipo) : '', ETICHETTE_ESITO[e.esito] || e.esito, annotazioni,
       rep.fir || '', ges.fir || '',
       rep.kg ?? '', ges.kg ?? '', differenza ?? '',
       dataIt(rep.fine || rep.data), dataIt(ges.fine),
@@ -394,6 +433,18 @@ export async function scaricaExcelVerifica(v) {
     riga.eachCell({ includeEmpty: true }, (c, i) => { c.border = bordi; c.fill = riempi(COLORI.rosso); if (i === 3) c.numFmt = '#,##0'; });
   }
 
+  // --- Righe non considerate ---
+  if ((esito.escluse || []).length) {
+    const x = wb.addWorksheet('Non considerate', { views: [{ state: 'frozen', ySplit: 1 }] });
+    const colEscluse = [['Riga report', 14], ['FIR', 18], ['Peso (kg)', 12], ['Data report', 12], ['Produttore', 28], ['Destinatario', 26], ['Motivo', 70]];
+    x.columns = colEscluse.map(([, w]) => ({ width: w }));
+    intestazione(x, colEscluse.map(([t]) => t));
+    for (const e of esito.escluse) {
+      const riga = x.addRow([e.foglio ? rigaReport(e) : e.n, e.fir || '', e.kg ?? '', dataIt(e.data), e.produttore || '', e.destinatario || '', e.motivo]);
+      riga.eachCell({ includeEmpty: true }, (c, i) => { c.border = bordi; c.fill = riempi(COLORI.grigio); if (i === 3) c.numFmt = '#,##0'; });
+    }
+  }
+
   // --- Da comunicare al fornitore ---
   const c = wb.addWorksheet('Da comunicare');
   c.columns = [{ width: 20 }, { width: 100 }];
@@ -402,7 +453,8 @@ export async function scaricaExcelVerifica(v) {
   for (const e of esito.esiti) {
     if (e.esito === 'conforme') continue;
     for (const d of (e.discrepanze || [])) {
-      const riga = c.addRow([(e.gestionale && e.gestionale.fir) || (e.report && e.report.fir) || `riga ${e.n}`, `Riga ${e.n} del report: ${d.messaggio}`]);
+      const riferimento = rigaReport(e);
+      const riga = c.addRow([(e.gestionale && e.gestionale.fir) || (e.report && e.report.fir) || riferimento, `${riferimento.charAt(0).toUpperCase() + riferimento.slice(1)} del report: ${d.messaggio}`]);
       riga.eachCell(x => { x.border = bordi; x.alignment = { wrapText: true, vertical: 'top' }; });
       righeComunicazione++;
     }

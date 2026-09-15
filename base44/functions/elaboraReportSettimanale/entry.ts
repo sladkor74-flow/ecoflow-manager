@@ -46,32 +46,46 @@ const SCHEMA_COLONNE = {
   required: CAMPI_REPORT,
 };
 
+const SCHEMA_FOGLIO = {
+  type: 'object',
+  properties: {
+    foglio: { type: 'string' },
+    contenuto: { type: 'string', enum: ['ingressi', 'uscite', 'ingressi_e_uscite'] },
+    prima_riga_dati: { type: 'integer' },
+    unita_peso: { type: 'string', enum: ['kg', 't', 'non_determinabile'] },
+    colonne: SCHEMA_COLONNE,
+  },
+  required: ['foglio', 'contenuto', 'prima_riga_dati', 'unita_peso', 'colonne'],
+};
+
 const SCHEMA_MAPPATURA = {
   type: 'object',
   properties: {
     riconosciuto: { type: 'boolean' },
-    foglio: { type: 'string' },
-    prima_riga_dati: { type: 'integer' },
-    unita_peso: { type: 'string', enum: ['kg', 't', 'non_determinabile'] },
-    colonne: SCHEMA_COLONNE,
+    fogli: { type: 'array', items: SCHEMA_FOGLIO },
     note: { type: 'string' },
   },
-  required: ['riconosciuto', 'foglio', 'prima_riga_dati', 'unita_peso', 'colonne'],
+  required: ['riconosciuto', 'fogli'],
 };
 
 const GUIDA_CAMPI = [
-  'fir: numero del formulario di identificazione rifiuto, detto anche FIR, formulario, n. formulario, n. documento di trasporto.',
+  'fir: numero del formulario di identificazione rifiuto, detto anche FIR, formulario, n. formulario, numerazione fiscale, n. documento di trasporto.',
   'peso: peso netto o peso effettivo o quantita\' in chilogrammi o tonnellate.',
-  'data_inizio: data di inizio trasporto, di partenza, di ritiro o di carico.',
-  'data_fine: data di fine trasporto, di arrivo, di ingresso o di scarico.',
+  'data_inizio: data di inizio trasporto, di partenza, di ritiro o di carico, oppure data del documento o di emissione del formulario.',
+  'data_fine: data di fine trasporto, di arrivo, di ingresso, di scarico o di registrazione del carico nel registro.',
   'data: una sola data generica, solo se il file non distingue inizio e fine.',
-  'produttore: produttore o detentore del rifiuto, punto di raccolta, gommista, cliente.',
+  'produttore: ragione sociale del produttore o detentore del rifiuto, punto di raccolta, gommista, cliente.',
   'codice_pdr: codice numerico del punto di raccolta o del produttore.',
-  'destinatario: impianto o stoccaggio di destinazione.',
-  'trasportatore: trasportatore o vettore.',
+  'destinatario: ragione sociale dell\'impianto o stoccaggio di destinazione, detto anche smaltitore o recuperatore.',
+  'trasportatore: ragione sociale del trasportatore o vettore.',
+  'intermediario: ragione sociale dell\'intermediario o del consorzio, come Ecotyre, Ecopneus, SMOCO.',
   'classe: classe o tipologia di PFU, come P, M, G1, G2, autodemolizione.',
   'targa: targa del mezzo.',
 ];
+
+// Colonne che l'agente potrebbe scambiare per un nome: provincia, indirizzo, autista...
+const NON_NOMI = /provinc|^pr\b|indirizz|^via\b|citt|comune|\bcap\b|partita|p\.? ?iva|codice fiscale|autista|nominativo|targa|telefono/i;
+const CAMPI_NOME = ['produttore', 'destinatario', 'trasportatore', 'intermediario'];
 
 function testoCella(v) {
   const s = String(v ?? '').replace(/\s+/g, ' ').trim();
@@ -93,10 +107,12 @@ async function leggiTabelle(base44, tabelle, verifica) {
     prompt: [
       `Ti mostro l'inizio di un file inviato da ${verifica.soggetto_nome}, impianto o stoccaggio di pneumatici fuori uso.`,
       'Il file e\' il report settimanale dei carichi ricevuti ed eventualmente di quelli spediti: una riga per ogni carico.',
-      'Individua il foglio che contiene i carichi, la prima riga di dati, cioe\' la prima riga dopo le intestazioni, e il numero di colonna di ciascun campo.',
-      'Se ingressi e uscite stanno in fogli diversi, scegli il foglio degli ingressi.',
+      'Elenca in fogli ogni foglio che contiene un elenco di carichi, ricevuti (ingressi) o spediti (uscite): se ingressi e uscite stanno in fogli diversi, indicali tutti.',
+      'Ignora i fogli di riepilogo, giacenza, target o vuoti.',
+      'Per ogni foglio indica la prima riga di dati, cioe\' la prima riga dopo le intestazioni, e il numero di colonna di ciascun campo.',
+      'Un foglio con piu\' tabelle, per esempio ingressi e poi uscite, ti arriva gia\' diviso in fogli distinti ("tabella 2" e cosi\' via): le colonne possono cambiare da una tabella all\'altra.',
       'I numeri di riga e di colonna sono quelli tra parentesi e partono da zero.',
-      'Se un campo non c\'e\', indica -1. Non inventare colonne: se hai dubbi, -1.',
+      'Se un campo non c\'e\', indica -1. Non inventare colonne: se hai dubbi, -1. Produttore, destinatario, trasportatore e intermediario sono ragioni sociali: mai una provincia, un comune, un indirizzo o un autista.',
       '',
       'Campi:',
       ...GUIDA_CAMPI.map(g => '- ' + g),
@@ -111,28 +127,50 @@ async function leggiTabelle(base44, tabelle, verifica) {
   });
   const m = typeof mappa === 'string' ? JSON.parse(mappa) : mappa;
 
-  const tabella = tabelle.find(t => t.nome === m.foglio) || tabelle[0];
-  const col = m.colonne || {};
-  if (!m.riconosciuto || !tabella || ((col.fir ?? -1) < 0 && (col.peso ?? -1) < 0)) {
+  // Ogni foglio indicato dall'agente si legge con le sue colonne, ciascuno una volta sola.
+  const scelti = [];
+  for (const f of (Array.isArray(m.fogli) ? m.fogli : [])) {
+    const nome = String(f.foglio || '').trim();
+    const tabella = tabelle.find(t => t.nome === f.foglio) || tabelle.find(t => String(t.nome).trim() === nome);
+    const col = { ...(f.colonne || {}) };
+    if (!tabella || scelti.some(s => s.tabella === tabella) || ((col.fir ?? -1) < 0 && (col.peso ?? -1) < 0)) continue;
+    const intestazioni = (tabella.righe || [])[Math.max(0, (f.prima_riga_dati || 1) - 1)] || [];
+    for (const c of CAMPI_NOME) if ((col[c] ?? -1) >= 0 && NON_NOMI.test(testoCella(intestazioni[col[c]]))) col[c] = -1;
+    scelti.push({ tabella, f, col, intestazioni });
+  }
+  if (!m.riconosciuto || scelti.length === 0) {
     throw new Error('Nel file non ho trovato un elenco di carichi con formulario o peso' + (m.note ? ': ' + m.note : '.'));
   }
 
-  const grezze = [];
-  const righe = tabella.righe || [];
-  for (let i = Math.max(0, m.prima_riga_dati || 0); i < righe.length; i++) {
-    const r = righe[i] || [];
-    const g = { n: (tabella.riga_iniziale || 0) + i + 1 };
-    for (const c of CAMPI_REPORT) g[c] = (col[c] ?? -1) >= 0 ? r[col[c]] : null;
-    grezze.push(g);
+  const normalizzate = [];
+  const fogli = [];
+  for (const { tabella, f, col, intestazioni } of scelti) {
+    const grezze = [];
+    const righe = tabella.righe || [];
+    for (let i = Math.max(0, f.prima_riga_dati || 0); i < righe.length; i++) {
+      const r = righe[i] || [];
+      const g = { n: (tabella.riga_iniziale || 0) + i + 1, ...(scelti.length > 1 ? { foglio: tabella.nome } : {}) };
+      for (const c of CAMPI_REPORT) g[c] = (col[c] ?? -1) >= 0 ? r[col[c]] : null;
+      grezze.push(g);
+    }
+    const unita = f.unita_peso === 'kg' || f.unita_peso === 't' ? f.unita_peso : null;
+    const { righe: lette, unita: unitaUsata } = normalizzaRigheReport(grezze, unita);
+    normalizzate.push(...lette);
+    fogli.push({
+      foglio: tabella.nome,
+      contenuto: f.contenuto || '',
+      prima_riga_dati: (tabella.riga_iniziale || 0) + (f.prima_riga_dati || 0) + 1,
+      unita: unitaUsata,
+      righe: lette.length,
+      colonne: Object.fromEntries(CAMPI_REPORT.filter(c => (col[c] ?? -1) >= 0).map(c => [c, testoCella(intestazioni[col[c]]) || `colonna ${col[c] + 1}`])),
+    });
   }
-  const unita = m.unita_peso === 'kg' || m.unita_peso === 't' ? m.unita_peso : null;
-  const { righe: normalizzate, unita: unitaUsata } = normalizzaRigheReport(grezze, unita);
-  const intestazioni = righe[Math.max(0, (m.prima_riga_dati || 1) - 1)] || [];
-  const colonneLette = Object.fromEntries(CAMPI_REPORT.filter(c => (col[c] ?? -1) >= 0).map(c => [c, testoCella(intestazioni[col[c]]) || `colonna ${col[c] + 1}`]));
 
+  // foglio, prima_riga_dati, unita e colonne del primo foglio restano per le verifiche gia' salvate.
+  const primo = fogli[0];
   return {
     righe: normalizzate,
-    lettura: { modo: 'excel', foglio: tabella.nome, prima_riga_dati: (tabella.riga_iniziale || 0) + (m.prima_riga_dati || 0) + 1, unita: unitaUsata, colonne: colonneLette, note: m.note || '' },
+    lettura: { modo: 'excel', foglio: primo.foglio, prima_riga_dati: primo.prima_riga_dati, unita: primo.unita, colonne: primo.colonne, fogli, note: m.note || '' },
   };
 }
 
@@ -248,7 +286,7 @@ export default async function(req) {
 
     await svc.VerificaReport.update(verificaId, {
       stato: 'completata',
-      esito_json: await valoreCampo(base44, 'VerificaReport', verificaId, 'esito_json', JSON.stringify({ esiti: esito.esiti, assenti: esito.assenti })),
+      esito_json: await valoreCampo(base44, 'VerificaReport', verificaId, 'esito_json', JSON.stringify({ esiti: esito.esiti, assenti: esito.assenti, escluse: esito.escluse })),
       ...esito.riepilogo,
       verificata_il: new Date().toISOString(),
       errore: '',

@@ -4,7 +4,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Download, RefreshCw, Trash2, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet } from 'lucide-react';
-import { dataIt, tonnellate, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_ESITO } from '@/lib/verifiche';
+import { dataIt, tonnellate, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_ESITO, rigaReport, descriviLettura } from '@/lib/verifiche';
 import { formatKg } from '@/lib/utils';
 import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
 
@@ -30,6 +30,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
   const [caricando, setCaricando] = useState(false);
   const [lavorando, setLavorando] = useState(null);
   const [mostraConformi, setMostraConformi] = useState(false);
+  const [mostraEscluse, setMostraEscluse] = useState(false);
   const { toast } = useToast();
 
   const carica = async () => {
@@ -44,7 +45,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
     setCaricando(false);
   };
 
-  useEffect(() => { if (open) { setV(null); setMostraConformi(false); carica(); } }, [open, verificaId]);
+  useEffect(() => { if (open) { setV(null); setMostraConformi(false); setMostraEscluse(false); carica(); } }, [open, verificaId]);
 
   // Mentre la verifica e' in corso il pannello si aggiorna da solo.
   useEffect(() => {
@@ -56,6 +57,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
   if (!open) return null;
 
   const esito = v && v.esito_json ? JSON.parse(v.esito_json) : { esiti: [], assenti: [] };
+  const escluse = esito.escluse || [];
   const lettura = v && v.lettura_json ? JSON.parse(v.lettura_json) : {};
   const daSistemare = esito.esiti.filter(e => e.esito !== 'conforme');
   const conformi = esito.esiti.filter(e => e.esito === 'conforme');
@@ -66,7 +68,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
       await base44.functions.invoke('elaboraReportSettimanale', { verifica_id: v.id, solo_verifica: true });
       toast({ title: 'Verifica ripetuta sui dati aggiornati del gestionale' });
     } catch (e) {
-      const msg = e && e.response && e.response.data && e.response.data.error;
+      const msg = (e && e.data && e.data.error) || (e && e.response && e.response.data && e.response.data.error);
       toast({ title: 'Verifica non riuscita', description: msg || e.message || String(e), variant: 'destructive' });
     }
     await carica();
@@ -156,7 +158,8 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                 )}
 
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                  <Tessera etichetta="Righe nel report" valore={v.righe_report || 0} dettaglio={`${tonnellate(v.peso_report_kg)} t`} />
+                  <Tessera etichetta="Righe verificate" valore={v.righe_report || 0}
+                    dettaglio={`${tonnellate(v.peso_report_kg)} t${v.righe_escluse ? ` · altre ${v.righe_escluse} non considerate` : ''}`} />
                   <Tessera etichetta="Ingressi nel gestionale" valore={v.ingressi_gestionale || 0} dettaglio={`${tonnellate(v.peso_ingressi_kg)} t`} />
                   <Tessera etichetta="Uscite nel gestionale" valore={v.uscite_gestionale || 0}
                     dettaglio={`${tonnellate(v.peso_uscite_kg)} t${v.uscite_gestionale && !v.uscite_verificate ? ' · non nel report' : ''}`} />
@@ -180,9 +183,8 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                 {lettura.modo === 'excel' && (
                   <div className="text-xs text-muted-foreground flex items-start gap-1.5">
                     <FileSpreadsheet className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                    <span>
-                      Letto dal foglio "{lettura.foglio}", dati dalla riga {lettura.prima_riga_dati}, pesi in {lettura.unita === 't' ? 'tonnellate' : 'chilogrammi'}.
-                      {lettura.colonne ? ' Colonne: ' + Object.entries(lettura.colonne).map(([k, c]) => `${k} = ${c}`).join(', ') + '.' : ''}
+                    <span className="space-y-0.5">
+                      {descriviLettura(lettura).map((testo, i) => <span key={i} className="block">{testo}</span>)}
                     </span>
                   </div>
                 )}
@@ -200,7 +202,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                       <div key={e.n + '-' + (e.report && e.report.fir)} className="border rounded-lg p-3 bg-card space-y-1.5">
                         <div className="flex items-center justify-between gap-3 flex-wrap">
                           <div className="text-sm">
-                            <span className="text-muted-foreground">Riga {e.n}{e.tipo ? ` · ${e.tipo === 'uscita' ? 'uscita' : 'ingresso'}` : ''}</span>
+                            <span className="text-muted-foreground first-letter:uppercase inline-block">{rigaReport(e)}{e.tipo ? ` · ${e.tipo === 'uscita' ? 'uscita' : 'ingresso'}` : ''}</span>
                             <span className="font-mono ml-2">{(e.report && e.report.fir) || 'senza formulario'}</span>
                             {e.report && e.report.kg != null && <span className="text-muted-foreground"> · {formatKg(Number(e.report.kg))} kg</span>}
                           </div>
@@ -228,6 +230,28 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                   </section>
                 )}
 
+                {escluse.length > 0 && (
+                  <section>
+                    <button onClick={() => setMostraEscluse(x => !x)} className="text-sm text-primary hover:underline">
+                      {mostraEscluse ? 'Nascondi' : 'Mostra'} le {escluse.length} righe non considerate: altre settimane o altri consorzi
+                    </button>
+                    {mostraEscluse && (
+                      <div className="border rounded-lg divide-y bg-card mt-2">
+                        {escluse.map((e, i) => (
+                          <div key={i} className="px-3 py-1.5 text-sm flex items-start justify-between gap-3">
+                            <span>
+                              <span className="text-muted-foreground first-letter:uppercase inline-block">{rigaReport(e)}</span>
+                              <span className="font-mono ml-2">{e.fir || 'senza formulario'}</span>
+                              <span className="block text-xs text-muted-foreground">{e.motivo}</span>
+                            </span>
+                            <span className="tabular-nums text-muted-foreground">{e.kg != null ? `${formatKg(Number(e.kg))} kg` : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                )}
+
                 {conformi.length > 0 && (
                   <section>
                     <button onClick={() => setMostraConformi(x => !x)} className="text-sm text-primary hover:underline">
@@ -237,7 +261,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                       <div className="border rounded-lg divide-y bg-card mt-2">
                         {conformi.map((e, i) => (
                           <div key={i} className="px-3 py-1.5 text-sm flex items-center justify-between gap-3">
-                            <span><span className="text-muted-foreground">Riga {e.n}</span> <span className="font-mono ml-2">{e.report.fir}</span></span>
+                            <span><span className="text-muted-foreground first-letter:uppercase inline-block">{rigaReport(e)}</span> <span className="font-mono ml-2">{e.report.fir}</span></span>
                             <span className="tabular-nums text-muted-foreground">{formatKg(Number(e.report.kg))} kg</span>
                           </div>
                         ))}
