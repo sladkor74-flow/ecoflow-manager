@@ -204,6 +204,19 @@ export function fileInBase64(file) {
 
 // === esiti ===
 
+/** Numero d'ordine della riga: quello registrato, o quello scritto nel report. */
+export function ordineRiga(e) {
+  if (!e) return '';
+  return (e.gestionale && e.gestionale.ordine) || (e.report && e.report.ordine) || e.ordine || '';
+}
+
+/** Formulario e ordine su due righe, per le tabelle del PDF. */
+export function firConOrdine(e, fir) {
+  const o = ordineRiga(e);
+  const f = fir || (e.report && e.report.fir) || (e.gestionale && e.gestionale.fir) || e.fir || '';
+  return (f || 'senza formulario') + (o ? `\nordine ${o}` : '');
+}
+
 /** "riga 12" o, se il report ha piu' fogli, "SECONDARIE, riga 12". */
 export function rigaReport(e) {
   return e && e.foglio ? `${String(e.foglio).trim()}, riga ${e.n}` : `riga ${e && e.n}`;
@@ -266,7 +279,7 @@ function dettaglioPerTipo(quadratura, report, registrati, formato) {
 
 const ETICHETTA_CAMPO = {
   fir: 'Numero di formulario', kg: 'Peso effettivo', fine: 'Data di fine trasporto', inizio: 'Data di inizio trasporto',
-  classe: 'Classe PFU', produttore: 'Produttore', destinatario: 'Destinatario', trasportatore: 'Trasportatore',
+  classe: 'Classe PFU', produttore: 'Produttore', destinatario: 'Destinatario', trasportatore: 'Trasportatore', ordine: 'Numero di ordine',
 };
 
 /**
@@ -492,7 +505,7 @@ export async function scaricaExcelVerifica(v) {
   const f = wb.addWorksheet('Verifica righe', { views: [{ state: 'frozen', xSplit: 4, ySplit: 1 }] });
   const colonne = [
     ['Riga report', 14], ['Tipo', 11], ['Esito', 16], ['Annotazioni', 60],
-    ['FIR report', 18], ['FIR gestionale', 18],
+    ['FIR report', 18], ['FIR gestionale', 18], ['Ordine report', 16],
     ['Peso report (kg)', 12], ['Peso gestionale (kg)', 12], ['Differenza (kg)', 11],
     ['Fine trasporto report', 12], ['Fine trasporto gestionale', 12],
     ['Inizio trasporto report', 12], ['Inizio trasporto gestionale', 12],
@@ -505,7 +518,7 @@ export async function scaricaExcelVerifica(v) {
   f.columns = colonne.map(([, w]) => ({ width: w }));
   intestazione(f, colonne.map(([t]) => t));
   // Colonne da evidenziare per ciascun campo discordante.
-  const CELLE_CAMPO = { fir: [5, 6], kg: [7, 8, 9], fine: [10, 11], inizio: [12, 13], produttore: [14, 15], destinatario: [16, 17], trasportatore: [18, 19], classe: [20, 21] };
+  const CELLE_CAMPO = { fir: [5, 6], ordine: [7, 23], kg: [8, 9, 10], fine: [11, 12], inizio: [13, 14], produttore: [15, 16], destinatario: [17, 18], trasportatore: [19, 20], classe: [21, 22] };
 
   for (const e of esito.esiti) {
     const rep = e.report || {};
@@ -514,7 +527,7 @@ export async function scaricaExcelVerifica(v) {
     const annotazioni = e.discrepanze && e.discrepanze.length ? e.discrepanze.map(d => '• ' + d.messaggio).join('\n') : 'Nessuna discrepanza';
     const riga = f.addRow([
       e.foglio ? rigaReport(e) : e.n, e.gestionale ? nomeTipo(e.tipo) : '', ETICHETTE_ESITO[e.esito] || e.esito, annotazioni,
-      rep.fir || '', ges.fir || '',
+      rep.fir || '', ges.fir || '', rep.ordine || '',
       rep.kg ?? '', ges.kg ?? '', differenza ?? '',
       dataIt(rep.fine || rep.data), dataIt(ges.fine),
       dataIt(rep.inizio), dataIt(ges.inizio),
@@ -527,7 +540,7 @@ export async function scaricaExcelVerifica(v) {
     riga.eachCell({ includeEmpty: true }, (c, i) => {
       c.border = bordi;
       c.alignment = { vertical: 'top', wrapText: i === 4 };
-      if (i >= 7 && i <= 9) c.numFmt = '#,##0';
+      if (i >= 8 && i <= 10) c.numFmt = '#,##0';
     });
     const [sfondo, testo] = coloreEsito(e.esito);
     riga.getCell(3).fill = riempi(sfondo);

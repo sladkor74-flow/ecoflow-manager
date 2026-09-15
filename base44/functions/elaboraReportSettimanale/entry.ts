@@ -72,6 +72,7 @@ const SCHEMA_MAPPATURA = {
 
 const GUIDA_CAMPI = [
   'fir: numero del formulario di identificazione rifiuto, detto anche FIR, formulario, n. formulario, numerazione fiscale, n. documento di trasporto.',
+  'ordine: numero dell\'ordine o della richiesta di ritiro, come ET26149928 o SEC 26141285, detto anche n. ordine, ordine ET, ticket, n. bolla.',
   'peso: peso netto o peso effettivo o quantita\' in chilogrammi o tonnellate.',
   'data_inizio: data di inizio trasporto, di partenza, di ritiro o di carico. Non la data del documento o di emissione del formulario.',
   'data_fine: data di fine trasporto, di arrivo, di ingresso, di scarico o di registrazione del carico nel registro.',

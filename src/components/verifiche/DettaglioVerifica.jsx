@@ -4,7 +4,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Download, RefreshCw, Trash2, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, FileText } from 'lucide-react';
-import { dataIt, tonnellate, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_ESITO, rigaReport, descriviLettura, sintesiVerifica, gravita } from '@/lib/verifiche';
+import { dataIt, tonnellate, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_ESITO, rigaReport, descriviLettura, sintesiVerifica, gravita, ordineRiga } from '@/lib/verifiche';
 import { esportaEsitoVerificaPdf } from '@/lib/esitoVerificaPdf';
 import { formatKg, formatIntero } from '@/lib/utils';
 import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
@@ -293,6 +293,8 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                           <div className="text-sm">
                             <span className="text-muted-foreground first-letter:uppercase inline-block">{rigaReport(e)}{e.tipo ? ` · ${e.tipo === 'uscita' ? 'uscita' : 'ingresso'}` : ''}</span>
                             <span className="font-mono ml-2">{(e.report && e.report.fir) || 'senza formulario'}</span>
+                            {ordineRiga(e) ? <span className="text-muted-foreground"> · ordine <span className="font-mono">{ordineRiga(e)}</span></span> : null}
+                            {ordineRiga(e) && <span className="text-muted-foreground"> · ordine <span className="font-mono">{ordineRiga(e)}</span></span>}
                             {e.report && e.report.kg != null && <span className="text-muted-foreground"> · {formatKg(Number(e.report.kg))} kg</span>}
                           </div>
                           <span className={`px-2 py-0.5 rounded-full border text-xs font-medium ${STILE_ESITO[e.esito]}`}>{ETICHETTE_ESITO[e.esito]}</span>
@@ -319,7 +321,11 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                     <div className="border rounded-lg divide-y bg-card">
                       {sintesi.mancanti.map((m, i) => (
                         <div key={i} className="px-3 py-2 text-sm flex items-center justify-between gap-3 flex-wrap">
-                          <span><span className="font-mono">{m.fir}</span> <span className="text-muted-foreground">· {m.tipo === 'uscita' ? 'uscita verso ' + m.destinatario : 'ingresso'} · {dataIt(m.fine)} · {m.trasportatore}</span></span>
+                          <span>
+                            <span className="font-mono">{m.fir}</span>
+                            {m.ordine ? <span className="text-muted-foreground"> · ordine <span className="font-mono">{m.ordine}</span></span> : null}
+                            <span className="text-muted-foreground"> · {m.tipo === 'uscita' ? 'uscita verso ' + m.destinatario : 'ingresso'} · {dataIt(m.fine)} · {m.trasportatore}</span>
+                          </span>
                           <span className="tabular-nums">{formatKg(Number(m.kg))} kg</span>
                         </div>
                       ))}
@@ -339,6 +345,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                             <span>
                               <span className="text-muted-foreground first-letter:uppercase inline-block">{rigaReport(e)}</span>
                               <span className="font-mono ml-2">{e.fir || 'senza formulario'}</span>
+                              {e.ordine ? <span className="text-muted-foreground"> · ordine <span className="font-mono">{e.ordine}</span></span> : null}
                               <span className="block text-xs text-muted-foreground">{e.motivo}</span>
                             </span>
                             <span className="tabular-nums text-muted-foreground">{e.kg != null ? `${formatKg(Number(e.kg))} kg` : ''}</span>
@@ -358,7 +365,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                       <div className="border rounded-lg divide-y bg-card mt-2">
                         {conformi.map((e, i) => (
                           <div key={i} className="px-3 py-1.5 text-sm flex items-center justify-between gap-3">
-                            <span><span className="text-muted-foreground first-letter:uppercase inline-block">{rigaReport(e)}</span> <span className="font-mono ml-2">{e.report.fir}</span></span>
+                            <span><span className="text-muted-foreground first-letter:uppercase inline-block">{rigaReport(e)}</span> <span className="font-mono ml-2">{e.report.fir}</span>{ordineRiga(e) ? <span className="text-muted-foreground"> · ordine <span className="font-mono">{ordineRiga(e)}</span></span> : null}</span>
                             <span className="tabular-nums text-muted-foreground">{formatKg(Number(e.report.kg))} kg</span>
                           </div>
                         ))}

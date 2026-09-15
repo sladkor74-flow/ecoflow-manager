@@ -358,7 +358,10 @@ export function soggettiDellaSettimana({ movimenti, interni, anagrafica }, anno,
 
 // === righe del report ===
 
-export const CAMPI_REPORT = ['fir', 'peso', 'data_inizio', 'data_fine', 'data', 'produttore', 'codice_pdr', 'destinatario', 'trasportatore', 'intermediario', 'classe', 'targa'];
+export const CAMPI_REPORT = ['fir', 'ordine', 'peso', 'data_inizio', 'data_fine', 'data', 'produttore', 'codice_pdr', 'destinatario', 'trasportatore', 'intermediario', 'classe', 'targa'];
+
+/** Numero d'ordine confrontabile: "SEC 26141285" e "SEC26141285" sono lo stesso ordine. */
+export const normalizzaOrdine = (v) => String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 /**
  * Porta le righe lette dal file in una forma confrontabile.
@@ -391,6 +394,7 @@ export function normalizzaRigheReport(grezze, unitaIndicata) {
       ...(g.foglio ? { foglio: String(g.foglio) } : {}),
       fir,
       firN,
+      ordine: String(g.ordine ?? '').trim(),
       kg: peso === null ? null : Math.round(unita === 't' ? peso * 1000 : peso),
       inizio: dataDaValore(g.data_inizio),
       fine: dataDaValore(g.data_fine),
@@ -483,7 +487,7 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   // cumulativi del mese e carichi di altri circuiti (per esempio Ecopneus).
   const escluse = [];
   const rif = (r) => (r.foglio ? `${String(r.foglio).trim()}, riga ${r.n}` : `riga ${r.n}`);
-  const escludi = (r, motivo) => escluse.push({ n: r.n, foglio: r.foglio || '', fir: r.fir, kg: r.kg, data: dataRiga(r), produttore: r.produttore, destinatario: r.destinatario, motivo });
+  const escludi = (r, motivo) => escluse.push({ n: r.n, foglio: r.foglio || '', fir: r.fir, ordine: r.ordine, kg: r.kg, data: dataRiga(r), produttore: r.produttore, destinatario: r.destinatario, motivo });
   for (const r of righeReport) {
     let m = null;
     let modo = null;
@@ -521,7 +525,7 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     }
 
     const report = {
-      fir: r.fir, kg: r.kg, inizio: r.inizio, fine: r.fine, data: r.data, produttore: r.produttore,
+      fir: r.fir, ordine: r.ordine, kg: r.kg, inizio: r.inizio, fine: r.fine, data: r.data, produttore: r.produttore,
       codice_pdr: r.codice_pdr, destinatario: r.destinatario, trasportatore: r.trasportatore, classe: r.classe || r.classe_testo,
     };
 
@@ -532,6 +536,7 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     if (!m) {
       if (altroCircuito(r.intermediario)) { escludi(r, `Carico di un altro circuito: intermediario ${r.intermediario}`); continue; }
       if (fuoriSettimana) { escludi(r, `Data ${it(dataReport)}, fuori dalla settimana verificata`); continue; }
+      // Senza formulario nel gestionale resta il numero d'ordine del report, l'unico riferimento.
       esiti.push({ n: r.n, ...foglio, tipo: null, tipo_presunto: tipoPresunto(r), categoria: 'non_registrati', esito: 'non_trovata', anomalia: true, report, gestionale: null, discrepanze: [{ campo: 'fir', gravita: 'anomalia', messaggio: r.firN ? 'Formulario non presente nel gestionale' : 'Riga senza formulario, non abbinabile a nessun movimento' }] });
       continue;
     }
@@ -583,6 +588,10 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     }
 
     if (r.classe && m.classe && r.classe !== m.classe) aggiungi('classe', `Classe diversa: report ${r.classe}, gestionale ${m.classe}`);
+
+    if (r.ordine && m.ordine && normalizzaOrdine(r.ordine) !== normalizzaOrdine(m.ordine)) {
+      aggiungi('ordine', `Ordine diverso: report ${r.ordine}, gestionale ${m.ordine}`);
+    }
 
     const gestionale = {
       fonte: m.fonte, canale: m.canale, ordine: m.ordine, fir: m.fir, kg: m.kg, inizio: m.inizio, fine: m.fine, produttore: m.produttore,

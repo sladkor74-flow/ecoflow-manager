@@ -62,6 +62,9 @@ async function aggiornaAlertDichiarazione(base44, verifica, esito) {
   const righe = esito.quadratura
     .filter(q => q.formulari_gestionale > 0)
     .map(q => `${q.nome}: ${q.formulari_gestionale} ${q.formulari_gestionale === 1 ? 'formulario' : 'formulari'}, ${formatoKg(q.kg_gestionale)} kg`);
+  const tutti = esito.assenti || [];
+  const elenco = tutti.slice(0, 30).map(a => `- ${a.fir}${a.ordine ? ` (ordine ${a.ordine})` : ''}, ${formatoKg(a.kg)} kg del ${it(String(a.fine))}`);
+  if (tutti.length > elenco.length) elenco.push(`- e altri ${tutti.length - elenco.length}`);
   const totale = esito.quadratura.reduce((t, q) => ({ n: t.n + q.formulari_gestionale, kg: t.kg + q.kg_gestionale }), { n: 0, kg: 0 });
   const dati = {
     titolo: `${verifica.soggetto_nome}: dichiarata nessuna movimentazione nella settimana ${verifica.settimana}, ma risultano ${totale.n} formulari`,
@@ -69,6 +72,7 @@ async function aggiornaAlertDichiarazione(base44, verifica, esito) {
       `L'impianto ha comunicato che dal ${it(String(verifica.data_inizio))} al ${it(String(verifica.data_fine))} non ci sono state movimentazioni${verifica.nota ? ` (${verifica.nota})` : ''}.`,
       `Nel gestionale risultano ${totale.n} formulari per ${formatoKg(totale.kg)} kg:`,
       ...righe.map(r => `- ${r}`),
+      ...(elenco.length ? ['Formulari registrati:', ...elenco] : []),
       'Chiedere all\'impianto il report della settimana o una rettifica della comunicazione.',
     ].join('\n'),
     severita: 'critico',

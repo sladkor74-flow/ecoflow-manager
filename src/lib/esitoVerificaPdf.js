@@ -4,7 +4,7 @@
 // completo delle righe verificate.
 
 import { formatKg, formatIntero } from '@/lib/utils';
-import { dataIt, sintesiVerifica, rigaReport, testoPerImpianto } from '@/lib/verifiche';
+import { dataIt, sintesiVerifica, rigaReport, testoPerImpianto, firConOrdine, ordineRiga } from '@/lib/verifiche';
 
 const C = {
   scuro: [15, 76, 92], medio: [26, 127, 142], chiaro: [226, 238, 241], zebra: [247, 250, 251],
@@ -201,40 +201,40 @@ export async function esportaEsitoVerificaPdf(v) {
   // --- Anomalie riga per riga ---
   if (s.anomalie.length) {
     sezione('Anomalie da correggere', 'Errori o sviste nelle righe del report rispetto ai formulari registrati.');
-    tabella([{ titolo: 'Riga del report', peso: 1.1 }, { titolo: 'Formulario', peso: 1.35 }, { titolo: 'Controllo', peso: 1.25 }, { titolo: 'Dettaglio', peso: 3.6 }],
-      s.anomalie.map(a => ({ celle: [cap(rigaReport(a.esito)), a.esito.report.fir || 'senza formulario', a.etichetta, a.testo], colori: [C.grigio, null, C.rosso, null], grassetti: [false, true, true, false] })));
+    tabella([{ titolo: 'Riga del report', peso: 1.1 }, { titolo: 'Formulario e ordine', peso: 1.5 }, { titolo: 'Controllo', peso: 1.2 }, { titolo: 'Dettaglio', peso: 3.3 }],
+      s.anomalie.map(a => ({ celle: [cap(rigaReport(a.esito)), firConOrdine(a.esito), a.etichetta, a.testo], colori: [C.grigio, null, C.rosso, null], grassetti: [false, true, true, false] })));
   }
 
   if (s.mancanti.length) {
     sezione(s.dichiarazione ? 'Formulari registrati nella settimana' : 'Formulari registrati ma assenti nel report', s.dichiarazione
       ? 'La comunicazione di nessuna movimentazione non trova riscontro: risultano registrati questi formulari. Vi chiediamo di inviarci il report della settimana.'
       : 'Report parziale: questi formulari risultano registrati per la settimana ma non compaiono nel report. Vi chiediamo di integrarli.');
-    tabella([{ titolo: 'Formulario', peso: 1.3 }, { titolo: 'Movimentazione', peso: 1.35 }, { titolo: 'Fine trasporto', peso: 0.9 }, { titolo: 'Produttore / destinatario', peso: 1.75 }, { titolo: 'Trasportatore', peso: 1.3 }, { titolo: 'Peso (kg)', peso: 0.8, allinea: 'right' }],
+    tabella([{ titolo: 'Formulario e ordine', peso: 1.5 }, { titolo: 'Movimentazione', peso: 1.25 }, { titolo: 'Fine trasporto', peso: 0.9 }, { titolo: 'Produttore / destinatario', peso: 1.75 }, { titolo: 'Trasportatore', peso: 1.3 }, { titolo: 'Peso (kg)', peso: 0.8, allinea: 'right' }],
       s.mancanti.map(m => ({
-        celle: [m.fir, nomeCategoria(m), dataIt(m.fine), m.tipo === 'uscita' ? `verso ${m.destinatario || ''}` : (m.produttore || ''), m.trasportatore || '', formatKg(m.kg)],
+        celle: [firConOrdine(m, m.fir), nomeCategoria(m), dataIt(m.fine), m.tipo === 'uscita' ? `verso ${m.destinatario || ''}` : (m.produttore || ''), m.trasportatore || '', formatKg(m.kg)],
         grassetti: [true, false, false, false, false, true], colori: [C.rosso],
       })));
   }
 
   if (s.inPiu.length) {
     sezione('Formulari del report non registrati', 'Questi formulari compaiono nel report ma non risultano registrati per la settimana: vi chiediamo di confermarne i dati e l\'appartenenza alla commessa Ecotyre.');
-    tabella([{ titolo: 'Riga del report', peso: 1.35 }, { titolo: 'Formulario', peso: 1.35 }, { titolo: 'Data', peso: 0.9 }, { titolo: 'Produttore', peso: 2.0 }, { titolo: 'Destinatario', peso: 1.6 }, { titolo: 'Peso (kg)', peso: 0.9, allinea: 'right' }],
+    tabella([{ titolo: 'Riga del report', peso: 1.35 }, { titolo: 'Formulario e ordine', peso: 1.5 }, { titolo: 'Data', peso: 0.85 }, { titolo: 'Produttore', peso: 2.0 }, { titolo: 'Destinatario', peso: 1.6 }, { titolo: 'Peso (kg)', peso: 0.9, allinea: 'right' }],
       s.inPiu.map(e => ({
-        celle: [cap(rigaReport(e)), e.report.fir || 'senza formulario', dataIt(e.report.fine || e.report.data), e.report.produttore || '', e.report.destinatario || '', e.report.kg != null ? formatKg(e.report.kg) : ''],
+        celle: [cap(rigaReport(e)), firConOrdine(e), dataIt(e.report.fine || e.report.data), e.report.produttore || '', e.report.destinatario || '', e.report.kg != null ? formatKg(e.report.kg) : ''],
         grassetti: [false, true, false, false, false, true], colori: [C.grigio, C.rosso],
       })));
   }
 
   if (s.osservazioni.length) {
     sezione('Osservazioni', 'Nomi scritti in modo diverso a parità di formulario e peso: non incidono sulla conformità.');
-    tabella([{ titolo: 'Riga del report', peso: 1.1 }, { titolo: 'Formulario', peso: 1.35 }, { titolo: 'Dato', peso: 1.1 }, { titolo: 'Dettaglio', peso: 3.75 }],
-      s.osservazioni.map(a => ({ celle: [cap(rigaReport(a.esito)), a.esito.report.fir, a.etichetta, a.testo], colori: [C.grigio, null, C.blu], grassetti: [false, true, true, false] })));
+    tabella([{ titolo: 'Riga del report', peso: 1.1 }, { titolo: 'Formulario e ordine', peso: 1.5 }, { titolo: 'Dato', peso: 1.05 }, { titolo: 'Dettaglio', peso: 3.45 }],
+      s.osservazioni.map(a => ({ celle: [cap(rigaReport(a.esito)), firConOrdine(a.esito), a.etichetta, a.testo], colori: [C.grigio, null, C.blu], grassetti: [false, true, true, false] })));
   }
 
   if (s.rettifiche.length) {
     sezione('Rettifiche a nostra cura', 'Differenze dovute ai dati registrati e non al report: nessuna azione richiesta all\'impianto.');
-    tabella([{ titolo: 'Riga del report', peso: 1.1 }, { titolo: 'Formulario', peso: 1.35 }, { titolo: 'Dettaglio', peso: 4.85 }],
-      s.rettifiche.map(a => ({ celle: [cap(rigaReport(a.esito)), a.esito.report.fir, a.testo], colori: [C.grigio], grassetti: [false, true, false] })));
+    tabella([{ titolo: 'Riga del report', peso: 1.1 }, { titolo: 'Formulario e ordine', peso: 1.5 }, { titolo: 'Dettaglio', peso: 4.7 }],
+      s.rettifiche.map(a => ({ celle: [cap(rigaReport(a.esito)), firConOrdine(a.esito), a.testo], colori: [C.grigio], grassetti: [false, true, false] })));
   }
 
   // --- Dettaglio completo ---
@@ -250,7 +250,7 @@ export async function esportaEsitoVerificaPdf(v) {
       return ['Conforme', C.verde];
     };
     tabella([
-      { titolo: 'Fine trasporto', peso: 0.95 }, { titolo: 'Formulario', peso: 1.3 }, { titolo: 'Movimentazione', peso: 1.25 }, { titolo: 'Produttore / destinatario', peso: 1.65 },
+      { titolo: 'Fine trasporto', peso: 0.9 }, { titolo: 'Formulario e ordine', peso: 1.4 }, { titolo: 'Movimentazione', peso: 1.25 }, { titolo: 'Produttore / destinatario', peso: 1.65 },
       { titolo: 'Classe', peso: 0.55, allinea: 'center' }, { titolo: 'Peso report (kg)', peso: 0.95, allinea: 'right' }, { titolo: 'Peso registrato (kg)', peso: 1, allinea: 'right' }, { titolo: 'Esito', peso: 0.95, allinea: 'center' },
     ], ordinati.map(e => {
       const [etichetta, colore] = esitoRiga(e);
@@ -258,7 +258,7 @@ export async function esportaEsitoVerificaPdf(v) {
       const uscita = (e.tipo || e.tipo_presunto) === 'uscita';
       const pesoDiverso = e.gestionale && e.report.kg !== g.kg;
       return {
-        celle: [dataIt(e.report.fine || e.report.data || g.fine), e.report.fir || 'senza formulario', e.gestionale && e.categoria && e.categoria !== 'non_registrati' ? nomeCategoria(e) : (uscita ? 'Uscita' : 'Ingresso'),
+        celle: [dataIt(e.report.fine || e.report.data || g.fine), firConOrdine(e), e.gestionale && e.categoria && e.categoria !== 'non_registrati' ? nomeCategoria(e) : (uscita ? 'Uscita' : 'Ingresso'),
           uscita ? `verso ${e.report.destinatario || g.destinatario || ''}` : (e.report.produttore || g.produttore || ''), e.report.classe || g.classe || '',
           e.report.kg != null ? formatKg(e.report.kg) : '', e.gestionale ? formatKg(g.kg) : '—', etichetta],
         colori: [null, null, C.grigio, null, null, pesoDiverso ? C.rosso : null, pesoDiverso ? C.rosso : null, colore],
@@ -274,8 +274,8 @@ export async function esportaEsitoVerificaPdf(v) {
 
   if (s.escluse.length) {
     sezione('Righe del report non considerate', 'Carichi di altre settimane, presenti nei report cumulativi, o di altri circuiti: saranno verificati con la loro settimana o non riguardano la commessa.');
-    tabella([{ titolo: 'Riga del report', peso: 1.1 }, { titolo: 'Formulario', peso: 1.3 }, { titolo: 'Data', peso: 0.85 }, { titolo: 'Peso (kg)', peso: 0.85, allinea: 'right' }, { titolo: 'Motivo', peso: 3.2 }],
-      s.escluse.map(e => ({ celle: [cap(rigaReport(e)), e.fir || '', dataIt(e.data), e.kg != null ? formatKg(e.kg) : '', testoPerImpianto(e.motivo)], colori: [C.grigio, C.grigio, C.grigio, C.grigio, C.grigio] })));
+    tabella([{ titolo: 'Riga del report', peso: 1.1 }, { titolo: 'Formulario e ordine', peso: 1.4 }, { titolo: 'Data', peso: 0.8 }, { titolo: 'Peso (kg)', peso: 0.85, allinea: 'right' }, { titolo: 'Motivo', peso: 3.2 }],
+      s.escluse.map(e => ({ celle: [cap(rigaReport(e)), firConOrdine(e, e.fir), dataIt(e.data), e.kg != null ? formatKg(e.kg) : '', testoPerImpianto(e.motivo)], colori: [C.grigio, C.grigio, C.grigio, C.grigio, C.grigio] })));
   }
 
   // --- Criteri e richiesta ---
