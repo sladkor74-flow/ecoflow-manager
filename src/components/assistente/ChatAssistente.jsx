@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import EcoTyna from '@/components/assistente/EcoTyna';
+import { useVoce, useAscolto } from '@/lib/voce';
 import ReactMarkdown from 'react-markdown';
 import { base44 } from '@/api/base44Client';
 import { useAuth } from '@/lib/AuthContext';
@@ -10,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { dataOra, nomeUtente } from '@/lib/target';
-import { Send, Loader2, Plus, Search, ThumbsUp, ThumbsDown, Globe, Database, BookOpen, MessageSquare, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Send, Loader2, Plus, Search, ThumbsUp, ThumbsDown, Globe, Database, BookOpen, MessageSquare, AlertTriangle, RefreshCw, Volume2, VolumeX, Mic, MicOff, Square } from 'lucide-react';
 import { dataServer } from '@/lib/utils';
 
 // Spazio domande: conversazioni con l'Assistente, archiviate nel gestionale.
@@ -208,6 +210,9 @@ export default function ChatAssistente() {
   const [cerca, setCerca] = useState('');
   const [valuta, setValuta] = useState(null);
   const fine = useRef(null);
+  const voce = useVoce();
+  const ascolto = useAscolto((t, definitivo) => { setTesto(t); if (definitivo) setTesto(t.trim()); });
+  const lette = useRef(new Set());
 
   const carica = useCallback(async () => {
     try {
@@ -239,6 +244,15 @@ export default function ChatAssistente() {
   );
 
   useEffect(() => { fine.current?.scrollIntoView({ behavior: 'smooth' }); }, [messaggi.length, invio]);
+
+  // Con la voce accesa EcoTyna legge la risposta appena arriva, una volta sola.
+  const ultima = messaggi[messaggi.length - 1];
+  useEffect(() => {
+    if (!voce.attiva || !ultima || ultima.stato === 'in_corso' || !ultima.risposta) return;
+    if (lette.current.has(ultima.id)) return;
+    lette.current.add(ultima.id);
+    voce.parla(ultima.risposta);
+  }, [voce, ultima]);
 
   // Se la connessione cade mentre l'Assistente lavora, la risposta arriva comunque:
   // si ricontrolla finche' ci sono domande in corso da meno di cinque minuti.
@@ -312,6 +326,37 @@ export default function ChatAssistente() {
       </aside>
 
       <section className="border rounded-xl bg-card flex flex-col lg:h-[calc(100vh-220px)]">
+        <div className="border-b px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+          <EcoTyna
+            dimensione={voce.attiva ? 64 : 44}
+            stato={invio || inCorso ? 'pensa' : ascolto.inAscolto ? 'ascolta' : voce.stato}
+          />
+          <div className="flex items-center gap-2">
+            {voce.attiva && voce.voci.length > 1 && (
+              <select
+                value={voce.voce ? voce.voce.name : ''}
+                onChange={(e) => voce.scegliVoce(e.target.value)}
+                className="px-2 py-1.5 rounded-md border bg-card text-xs max-w-[180px]"
+                title="Voce di EcoTyna"
+              >
+                {voce.voci.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+              </select>
+            )}
+            {voce.attiva && voce.stato === 'parla' && (
+              <Button size="sm" variant="outline" className="gap-1" onClick={voce.ferma}><Square className="w-3.5 h-3.5" /> Ferma</Button>
+            )}
+            <Button
+              size="sm"
+              variant={voce.attiva ? 'default' : 'outline'}
+              className="gap-1"
+              disabled={!voce.disponibile}
+              title={voce.disponibile ? 'Accendi o spegni la voce di EcoTyna' : 'Questo browser non legge ad alta voce'}
+              onClick={() => { const acceso = !voce.attiva; voce.accendi(acceso); if (acceso) voce.parla(`Ciao, sono EcoTyna. Chiedimi quello che ti serve: ti rispondo a voce.`); }}
+            >
+              {voce.attiva ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />} Voce
+            </Button>
+          </div>
+        </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
           {!attiva ? (
             <div className="max-w-2xl mx-auto py-6 space-y-4">
@@ -350,6 +395,17 @@ export default function ChatAssistente() {
             className="resize-none"
             maxLength={4000}
           />
+          {ascolto.disponibile && (
+            <Button
+              type="button"
+              variant={ascolto.inAscolto ? 'default' : 'outline'}
+              className="gap-1"
+              onClick={() => (ascolto.inAscolto ? ascolto.interrompi() : (voce.ferma(), ascolto.avvia()))}
+              title="Detta la domanda"
+            >
+              {ascolto.inAscolto ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </Button>
+          )}
           <Button type="submit" disabled={invio || !testo.trim()} className="gap-1">
             {invio ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Invia
           </Button>

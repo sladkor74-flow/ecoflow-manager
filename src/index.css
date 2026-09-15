@@ -109,3 +109,19 @@
     @apply rounded-md border border-slate-300 bg-white font-medium text-slate-800 shadow-sm transition-colors hover:border-slate-400 hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-700/30 disabled:cursor-not-allowed disabled:opacity-50;
   }
 }
+
+/* Animazioni di EcoTyna, l'avatar dell'Assistente: respiro, battito di ciglia,
+   puntini mentre pensa e onda mentre ascolta. */
+@keyframes eco-respiro { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-0.6px) scale(1.006); } }
+@keyframes eco-ciglia { 0%, 92%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
+@keyframes eco-punto { 0%, 100% { opacity: 0.25; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-2px); } }
+@keyframes eco-onda { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(1.25); opacity: 0; } }
+
+.eco-respiro { animation: eco-respiro 4s ease-in-out infinite; }
+.eco-occhi { animation: eco-ciglia 5.5s ease-in-out infinite; }
+.eco-punto { animation: eco-punto 1.2s ease-in-out infinite; }
+.eco-onda { animation: eco-onda 1.6s ease-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .eco-respiro, .eco-occhi, .eco-punto, .eco-onda { animation: none; }
+}
