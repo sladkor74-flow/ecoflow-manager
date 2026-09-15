@@ -264,7 +264,7 @@ export default async function(req) {
       let skip = 0;
       let hasMore = true;
       while (hasMore) {
-        const batch = await base44.asServiceRole.entities[entityName].list('-created_date', 1000, skip);
+        const batch = await base44.asServiceRole.entities[entityName].list('id', 1000, skip);
         for (const r of batch) { if (r.id_ordine) ids.add(r.id_ordine); }
         hasMore = batch.length === 1000;
         skip += 1000;
@@ -351,7 +351,7 @@ export default async function(req) {
       const existingKeys = new Set();
       let skipD = 0, hasMoreD = true;
       while (hasMoreD) {
-        const batch = await base44.asServiceRole.entities.DichiarazioneTrattamento.list('-created_date', 1000, skipD);
+        const batch = await base44.asServiceRole.entities.DichiarazioneTrattamento.list('id', 1000, skipD);
         for (const r of batch) {
           if (r.ordine_primaria) existingKeys.add(`${r.ordine_primaria}|${r.id_dichiarazione || ''}`);
         }
@@ -399,7 +399,7 @@ export default async function(req) {
         let skip = 0;
         let hasMore = true;
         while (hasMore) {
-          const batch = await base44.asServiceRole.entities[entityName].list('-created_date', 1000, skip);
+          const batch = await base44.asServiceRole.entities[entityName].list('id', 1000, skip);
           for (const r of batch) { if (r.id_ordine) existingIds.add(r.id_ordine); }
           hasMore = batch.length === 1000;
           skip += 1000;

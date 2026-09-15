@@ -10,6 +10,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
 import { precisioneCoordinata } from '@/lib/geoLinks';
 import { formatIntero } from '@/lib/utils';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 const PdrMap = React.lazy(() => import('@/components/pdr/PdrMap'));
 
 export default function Pdr() {
@@ -32,16 +33,7 @@ export default function Pdr() {
   const loadRecords = useCallback(async () => {
     setLoading(true);
     try {
-      const all = [];
-      let skip = 0;
-      let hasMore = true;
-      while (hasMore) {
-        const batch = await base44.entities.Pdr.list('-created_date', 1000, skip);
-        all.push(...batch);
-        hasMore = batch.length === 1000;
-        skip += 1000;
-      }
-      setRecords(all);
+      setRecords(await fetchAllClient(base44.entities.Pdr));
     } catch (e) { console.error(e); }
     setLoading(false);
   }, []);
