@@ -351,6 +351,9 @@ export function normalizzaRigheReport(grezze, unitaIndicata) {
     const peso = numeroDaValore(g.peso, unita);
     if (!firN && peso === null) continue;
     if (!firN && /TOTAL/i.test(Object.values(g).join(' '))) continue;
+    // Una riga con il solo peso, senza formulario, date e soggetti, e' la riga dei totali.
+    const testo = (v) => String(v ?? '').trim();
+    if (!firN && !testo(g.data_inizio) && !testo(g.data_fine) && !testo(g.data) && !testo(g.produttore) && !testo(g.trasportatore) && !testo(g.destinatario)) continue;
     righe.push({
       n: g.n,
       fir,

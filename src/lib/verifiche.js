@@ -72,13 +72,89 @@ export function tipoDiFile(file) {
   return null;
 }
 
+// === registro di carico e scarico ===
+// Alcuni impianti (es. Irigom) non mandano un report ma il loro registro di carico
+// e scarico di tutto l'anno: un foglio con una riga per movimento, i pesi divisi in
+// colonne per canale (libero mercato, Ecopneus, Ecotyre, ACI...) e classe, e una
+// riga di gruppi sopra le intestazioni. Se ne ricava un report della sola settimana
+// con i carichi Ecotyre e ACI, gli unici che il gestionale conosce.
+
+const testoIntestazione = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+
+function dataRegistro(XLSX, v) {
+  if (typeof v === 'number' && v > 20000) {
+    const d = XLSX.SSF.parse_date_code(v);
+    return d ? `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}` : null;
+  }
+  const s = String(v ?? '').trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
+  if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return null;
+}
+
+/** Report della settimana ricavato da un registro di carico e scarico, o null se il file non lo e'. */
+function reportDaRegistro(XLSX, wb, periodo) {
+  for (const nome of wb.SheetNames) {
+    const ws = wb.Sheets[nome];
+    if (!ws || !ws['!ref']) continue;
+    const righe = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, blankrows: true, defval: '' });
+    for (let h = 1; h < Math.min(righe.length, 6); h++) {
+      const intest = (righe[h] || []).map(testoIntestazione);
+      const trova = (re) => intest.findIndex(x => re.test(x));
+      const col = {
+        data: trova(/^data$/i), ticket: trova(/bolla|ticket/i), produttore: trova(/^produttore$/i), trasportatore: trova(/^trasportatore$/i),
+        destinatario: trova(/^destinatario$/i), intermediario: trova(/^intermediario$/i), fir: trova(/^n(r|um)?\.?\s*fir$/i),
+      };
+      if (col.fir < 0 || col.produttore < 0 || col.destinatario < 0 || col.data < 0) continue;
+      // Gruppi della riga sopra: ogni gruppo va fino al successivo.
+      const gruppi = (righe[h - 1] || []).map(testoIntestazione);
+      const inizioGruppi = gruppi.map((g, i) => (g && !/^\d+$/.test(g) ? i : -1)).filter(i => i >= 0);
+      const campata = (i) => { const prossimo = inizioGruppi.find(x => x > i); return [i, (prossimo ?? intest.length) - 1]; };
+      const iEcotyre = gruppi.findIndex(g => /ecotyre/i.test(g));
+      if (iEcotyre < 0) continue;
+      const classi = [];
+      const [e0, e1] = campata(iEcotyre);
+      for (let c = e0; c <= e1; c++) if (/^(P|M|G ?1|G ?2|G)$/i.test(intest[c])) classi.push({ c, classe: intest[c].replace(/\s+/g, '').toUpperCase() });
+      const iAci = gruppi.findIndex(g => /^aci$/i.test(g));
+      if (iAci >= 0) {
+        const [a0, a1] = campata(iAci);
+        for (let c = a0; c <= a1; c++) if (/ingress/i.test(intest[c])) { classi.push({ c, classe: 'ACI' }); break; }
+      }
+      if (!classi.length) continue;
+
+      const uscita = [['Data (ingresso in impianto)', 'Nr. ordine o ticket', 'Produttore', 'Trasportatore', 'Destinatario', 'Intermediario', 'Nr. FIR', 'Classe', 'Peso netto (kg)']];
+      for (let i = h + 1; i < righe.length; i++) {
+        const r = righe[i] || [];
+        const data = dataRegistro(XLSX, r[col.data]);
+        if (!data || (periodo && (data < periodo.inizio || data > periodo.fine))) continue;
+        const pesi = classi.map(k => ({ ...k, kg: Number(r[k.c]) || 0 })).filter(k => k.kg > 0);
+        if (!pesi.length) continue;
+        const principale = pesi.reduce((a, b) => (b.kg > a.kg ? b : a));
+        const valore = (k) => (col[k] >= 0 ? testoIntestazione(r[col[k]]) : '');
+        uscita.push([data, valore('ticket'), valore('produttore'), valore('trasportatore'), valore('destinatario'), valore('intermediario'), valore('fir'), principale.classe, pesi.reduce((s, k) => s + k.kg, 0)]);
+      }
+      return { nome: `${nome} (registro: carichi Ecotyre e ACI${periodo ? ` dal ${periodo.inizio} al ${periodo.fine}` : ''})`, riga_iniziale: 0, righe: uscita, registro: true };
+    }
+  }
+  return null;
+}
+
 // Apre un Excel o un CSV nel browser. Il file non viene caricato da nessuna
-// parte: al backend arrivano solo le celle.
-export async function leggiTabelleDaFile(file) {
+// parte: al backend arrivano solo le celle. periodo { inizio, fine } serve per i
+// registri di carico e scarico, da cui si prende la sola settimana verificata.
+export async function leggiTabelleDaFile(file, periodo = null) {
   const XLSX = await import('xlsx');
   const buffer = await file.arrayBuffer();
   const csv = tipoDiFile(file) === 'csv';
   const wb = XLSX.read(buffer, { type: 'array', cellDates: false, raw: csv });
+  const registro = csv ? null : reportDaRegistro(XLSX, wb, periodo);
+  if (registro) {
+    if (registro.righe.length < 2) throw new Error(`Il file è un registro di carico e scarico, ma non contiene carichi Ecotyre o ACI${periodo ? ` tra il ${periodo.inizio} e il ${periodo.fine}` : ''}.`);
+    const { registro: _registro, ...tabella } = registro;
+    return [tabella];
+  }
   const tabelle = [];
   for (const nome of wb.SheetNames) {
     const ws = wb.Sheets[nome];

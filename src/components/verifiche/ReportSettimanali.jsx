@@ -168,7 +168,7 @@ export default function ReportSettimanali({ isAdmin }) {
       // resta traccia di un tentativo fallito.
       const payload = {};
       if (tipo === 'excel' || tipo === 'csv') {
-        payload.tabelle = await leggiTabelleDaFile(file);
+        payload.tabelle = await leggiTabelleDaFile(file, { inizio: intervallo.inizio, fine: intervallo.fine });
         if (payload.tabelle.length === 0) throw new Error('Il file è vuoto.');
       } else {
         payload.file = { nome: file.name, mime: file.type || (tipo === 'pdf' ? 'application/pdf' : 'image/png'), base64: await fileInBase64(file) };
