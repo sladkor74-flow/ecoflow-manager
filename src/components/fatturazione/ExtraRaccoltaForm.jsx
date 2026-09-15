@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Save, ChevronLeft } from 'lucide-react';
 import { calcExtraRaccolta } from '@/lib/extraRaccoltaCalc';
+import { PROV_TO_REGION } from '@/lib/regioneMap';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { formatNumber } from '@/lib/utils';
 import { giornoDaData, dataDaGiorno, competenza, datiChiusuraCompleti } from '@/lib/extraRaccoltaStato';
@@ -88,10 +89,8 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
         const t = await base44.entities.Tariffa.filter({ direzione: 'PASSIVA', stato: 'attivo' }, '-created_date', 2000);
         setTariffe(t);
       } catch {}
-      try {
-        const p = await base44.entities.PrimariaRete.list('-created_date', 5000);
-        setProvince([...new Set(p.map(r => r.sigla).filter(Boolean))].sort());
-      } catch {}
+      // Tutte le province italiane: leggerle dalle primarie ne caricava solo una parte.
+      setProvince(Object.keys(PROV_TO_REGION).sort());
       try {
         const r = await base44.entities.ExtraRaccolta.list('-created_date', 5000);
         setTipologie([...new Set(r.map(r => r.tipologia_trasporto).filter(Boolean))].sort());

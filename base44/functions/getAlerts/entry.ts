@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Restituisce conteggi alert per dashboard e moduli.
 // Payload: { modulo?, solo_aperti?: boolean }
@@ -15,7 +16,8 @@ export default async function(req) {
     const query = soloAperti ? { stato: 'aperto' } : {};
     if (modulo) query.modulo = modulo;
 
-    const alerts = await base44.asServiceRole.entities.Alert.filter(query, '-created_date', 5000);
+    // Gli alert chiusi sono migliaia: una sola lettura ne restituirebbe una parte.
+    const alerts = await fetchAll(base44.asServiceRole.entities.Alert, query, '-created_date');
 
     // Conteggi per modulo
     const byModulo = {};
