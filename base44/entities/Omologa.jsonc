@@ -1,0 +1,160 @@
+{
+  "name": "Omologa",
+  "type": "object",
+  "properties": {
+    "produttore": {
+      "type": "string",
+      "description": "Ragione sociale del produttore come compare nell'elenco delle omologhe"
+    },
+    "produttore_chiave": {
+      "type": "string",
+      "description": "Nome ridotto all'osso, per riconoscere lo stesso produttore scritto in modi diversi"
+    },
+    "canale": {
+      "type": "string",
+      "enum": [
+        "RETE",
+        "ACI"
+      ],
+      "default": "RETE",
+      "description": "Canale di provenienza: restano separati come in tutto il gestionale"
+    },
+    "tipologia_materiale": {
+      "type": "string",
+      "description": "Tipologia dichiarata nell'omologa, di norma Pneumatici fuori uso"
+    },
+    "omologa_da": {
+      "type": "string",
+      "format": "date",
+      "description": "Inizio validita' della scheda di omologa"
+    },
+    "omologa_a": {
+      "type": "string",
+      "format": "date",
+      "description": "Fine validita': un anno dopo l'inizio"
+    },
+    "esito": {
+      "type": "boolean",
+      "default": true,
+      "description": "Esito dell'omologa come risulta nell'elenco"
+    },
+    "n_autorizzazione": {
+      "type": "string",
+      "description": "Solo ACI: numero dell'autorizzazione dell'impianto"
+    },
+    "autorizzazione_da": {
+      "type": "string",
+      "format": "date",
+      "description": "Solo ACI: inizio validita' dell'autorizzazione"
+    },
+    "autorizzazione_a": {
+      "type": "string",
+      "format": "date",
+      "description": "Solo ACI: fine validita' dell'autorizzazione"
+    },
+    "rdp_da": {
+      "type": "string",
+      "format": "date",
+      "description": "Solo ACI: inizio validita' del rapporto di prova"
+    },
+    "rdp_a": {
+      "type": "string",
+      "format": "date",
+      "description": "Solo ACI: fine validita' del rapporto di prova"
+    },
+    "quantitativo_max_annuo": {
+      "type": "string",
+      "description": "Limite annuo dichiarato per alcuni siti"
+    },
+    "nell_elenco": {
+      "type": "boolean",
+      "default": false,
+      "description": "Il produttore compare nel foglio delle omologhe"
+    },
+    "nel_registro": {
+      "type": "boolean",
+      "default": false,
+      "description": "Nel registro di carico e scarico c'e' una riga segnata OMOLOGA OK per questo produttore"
+    },
+    "registro_nome": {
+      "type": "string",
+      "description": "Come il produttore e' scritto nel registro"
+    },
+    "registro_data": {
+      "type": "string",
+      "format": "date",
+      "description": "Data della prima riga segnata OMOLOGA OK"
+    },
+    "registro_riga": {
+      "type": "number",
+      "description": "Riga del foglio Dettaglio da cui viene la segnalazione"
+    },
+    "registro_volte": {
+      "type": "number",
+      "description": "Quante righe del registro riportano l'annotazione"
+    },
+    "tipo_divergenza": {
+      "type": "string",
+      "enum": [
+        "nessuna",
+        "solo_registro",
+        "solo_elenco",
+        "data_diversa",
+        "nome_diverso"
+      ],
+      "default": "nessuna",
+      "description": "In che cosa i due file non vanno d'accordo"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "da_verificare",
+        "recepita",
+        "in_sospeso",
+        "annullata"
+      ],
+      "default": "da_verificare",
+      "description": "Decisione dell'operatore dopo il controllo in ufficio: la verifica non si puo' automatizzare"
+    },
+    "nota": {
+      "type": "string",
+      "description": "Nota dell'operatore sulla verifica"
+    },
+    "deciso_da": {
+      "type": "string",
+      "description": "Chi ha deciso lo stato"
+    },
+    "deciso_il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Quando e' stato deciso"
+    },
+    "aggiornata_il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Ultimo allineamento con i due file"
+    }
+  },
+  "required": [
+    "produttore",
+    "produttore_chiave"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
