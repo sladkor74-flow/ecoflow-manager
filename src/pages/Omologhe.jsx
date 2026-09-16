@@ -59,6 +59,10 @@ export default function Omologhe() {
   const [note, setNote] = useState({});
   const [aggiornando, setAggiornando] = useState(null);
   const [esito, setEsito] = useState(null);
+  const [tipoDiv, setTipoDiv] = useState('tutte');
+  const [statoDiv, setStatoDiv] = useState('aperte');
+  const [selezionate, setSelezionate] = useState(new Set());
+  const [inBlocco, setInBlocco] = useState(null);
   const fileElenco = useRef(null);
   const fileRegistro = useRef(null);
 
@@ -76,7 +80,7 @@ export default function Omologhe() {
 
   const oggi = new Date().toISOString().slice(0, 10);
   const conGiorni = useMemo(() => righe.map(r => {
-    const giorni = giorniAllaScadenza(r.omologa_a, oggi);
+    const giorni = giorniAllaScadenza(r.scadenza_effettiva || r.omologa_a, oggi);
     return { ...r, giorni, fascia: fasciaScadenza(giorni) };
   }), [righe, oggi]);
 
@@ -103,11 +107,17 @@ export default function Omologhe() {
     return conGiorni
       .filter(r => (r.tipo_divergenza || 'nessuna') !== 'nessuna')
       .filter(r => !q || `${r.produttore} ${r.registro_nome || ''}`.toLowerCase().includes(q))
+      .filter(r => tipoDiv === 'tutte' || r.tipo_divergenza === tipoDiv)
+      .filter(r => {
+        const s = r.stato || 'da_verificare';
+        if (statoDiv === 'aperte') return s === 'da_verificare' || s === 'in_sospeso';
+        return statoDiv === 'tutte' || s === statoDiv;
+      })
       .sort((a, b) => (PESO_DIVERGENZA[a.tipo_divergenza] || 9) - (PESO_DIVERGENZA[b.tipo_divergenza] || 9)
         || String(a.produttore).localeCompare(String(b.produttore), 'it'));
-  }, [conGiorni, cerca]);
+  }, [conGiorni, cerca, tipoDiv, statoDiv]);
 
-  const daVerificare = divergenti.filter(r => (r.stato || 'da_verificare') === 'da_verificare');
+  const daVerificare = conGiorni.filter(r => (r.tipo_divergenza || 'nessuna') !== 'nessuna' && (r.stato || 'da_verificare') === 'da_verificare');
   const conta = (f) => conGiorni.filter(f).length;
 
   const decidi = async (r, stato) => {
@@ -126,6 +136,39 @@ export default function Omologhe() {
     setInCorso(null);
   };
 
+  // La stessa decisione su piu' divergenze, dopo averle controllate in ufficio.
+  // Una alla volta e con una pausa, per non sovraccaricare il gestionale.
+  const decidiSelezionate = async (stato) => {
+    const lista = divergenti.filter(r => selezionate.has(r.id));
+    if (!lista.length) return;
+    const quante = lista.length === 1 ? 'divergenza' : 'divergenze';
+    if (!window.confirm(`Segnare ${lista.length} ${quante} come «${STATI[stato].nome}»? Fallo solo dopo averle controllate.`)) return;
+    const chi = (user && (user.full_name || user.email)) || '';
+    let fatte = 0, errori = 0;
+    for (const r of lista) {
+      setInBlocco(`${fatte + errori + 1} di ${lista.length}`);
+      try {
+        await base44.entities.Omologa.update(r.id, { stato, deciso_da: chi, deciso_il: new Date().toISOString() });
+        fatte++;
+      } catch (_e) { errori++; }
+      await new Promise(fine => setTimeout(fine, 150));
+    }
+    setInBlocco(null);
+    setSelezionate(new Set());
+    toast({
+      title: `${fatte} ${fatte === 1 ? 'divergenza segnata' : 'divergenze segnate'}: ${STATI[stato].nome.toLowerCase()}`,
+      description: errori ? `${errori} non salvate: riprova su quelle.` : undefined,
+      variant: errori ? 'destructive' : undefined,
+    });
+    await carica();
+  };
+
+  const scegli = (id) => setSelezionate(prev => {
+    const n = new Set(prev);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
+
   const aggiorna = async () => {
     const f1 = fileElenco.current && fileElenco.current.files[0];
     const f2 = fileRegistro.current && fileRegistro.current.files[0];
@@ -138,9 +181,9 @@ export default function Omologhe() {
       setAggiornando("leggo l'elenco delle omologhe…");
       const elenco = await leggiElencoOmologhe(f1);
       setAggiornando('leggo il registro di carico e scarico…');
-      const registro = await leggiRegistroOmologhe(f2);
-      setAggiornando(`confronto ${formatIntero(elenco.length)} omologhe con ${formatIntero(registro.length)} annotazioni…`);
-      const res = await base44.functions.invoke('importaOmologhe', { elenco, registro });
+      const { annotati, conferitori } = await leggiRegistroOmologhe(f2);
+      setAggiornando(`confronto ${formatIntero(elenco.length)} omologhe con ${formatIntero(annotati.length)} annotazioni…`);
+      const res = await base44.functions.invoke('importaOmologhe', { elenco, registro: annotati, conferitori });
       setEsito(res.data);
       toast({ title: 'Elenco aggiornato', description: `${formatIntero(res.data.totale)} produttori, ${formatIntero(res.data.nuovi)} nuovi.` });
       await carica();
@@ -158,6 +201,9 @@ export default function Omologhe() {
       Canale: r.canale || 'RETE',
       'Omologa dal': dataIt(r.omologa_da),
       'Omologa al': dataIt(r.omologa_a),
+      'Scadenza contata': dataIt(r.scadenza_effettiva || r.omologa_a),
+      'Validità da': r.validita_da_registro ? 'prima annotazione nel registro' : 'elenco',
+      'Carichi nel registro': r.registro_carichi || 0,
       'Giorni alla scadenza': r.giorni === null ? '' : r.giorni,
       Scadenza: FASCE[r.fascia].etichetta,
       'Nel registro': r.nel_registro ? dataIt(r.registro_data) : 'no',
@@ -202,8 +248,9 @@ export default function Omologhe() {
         </h1>
         <p className="text-muted-foreground mt-1 max-w-4xl">
           Le schede di omologa dei produttori: valgono un anno e si chiedono al punto di raccolta quando si programma il ritiro.
-          Il colore si scalda man mano che la scadenza si avvicina. Le divergenze fra il nostro elenco e il registro dell'impianto
-          restano in attesa finché non le verifica una persona.
+          Basta recepirle una volta, al primo ritiro: da lì parte l'anno di validità, e i ritiri successivi dallo stesso punto
+          non devono riportare l'annotazione. Il colore si scalda man mano che la scadenza si avvicina. Le divergenze fra il
+          nostro elenco e il registro dell'impianto restano in attesa finché non le verifica una persona.
         </p>
       </div>
 
@@ -294,17 +341,30 @@ export default function Omologhe() {
                             <span className={`w-2 h-2 rounded-full shrink-0 ${f.punto}`} title={f.etichetta} />
                             <span className={f.testo}>{r.produttore}</span>
                           </div>
+                          {r.canale === 'ACI' && r.esito === false && (
+                            <div className="text-xs text-red-700">
+                              esito dell'omologa negativo nell'elenco{r.registro_carichi ? ` · ${formatIntero(r.registro_carichi)} carichi all'impianto` : ''}
+                            </div>
+                          )}
                           {r.nell_elenco === false && r.nel_registro === false && (
                             <div className="text-xs text-muted-foreground">non compare più nei due fogli</div>
                           )}
                         </td>
                         <td className="px-2 py-2">{r.canale || 'RETE'}</td>
-                        <td className="px-2 py-2 tabular-nums whitespace-nowrap">{dataIt(r.omologa_da)} → {dataIt(r.omologa_a)}</td>
+                        <td className="px-2 py-2 tabular-nums whitespace-nowrap">
+                          {dataIt(r.omologa_da)} → {dataIt(r.omologa_a)}
+                          {r.validita_da_registro && <div className="text-xs text-muted-foreground">dalla prima annotazione nel registro</div>}
+                          {!r.validita_da_registro && r.scadenza_effettiva && r.omologa_a && r.scadenza_effettiva < r.omologa_a && (
+                            <div className="text-xs text-amber-700">contata fino al {dataIt(r.scadenza_effettiva)}</div>
+                          )}
+                        </td>
                         <td className={`px-2 py-2 whitespace-nowrap ${f.testo}`}>{scadenzaTesto(r.giorni)}</td>
                         <td className="px-2 py-2 text-xs">
                           {r.nel_registro
-                            ? <>confermata il {dataIt(r.registro_data)}{r.registro_volte > 1 ? ` · ${r.registro_volte} righe` : ''}</>
-                            : <span className="text-muted-foreground">non confermata</span>}
+                            ? <>recepita il {dataIt(r.registro_data)}{r.registro_carichi > 1 ? ` · ${formatIntero(r.registro_carichi)} carichi` : ''}</>
+                            : r.registro_carichi > 0
+                              ? <span className="text-amber-700">{formatIntero(r.registro_carichi)} {r.registro_carichi === 1 ? 'carico' : 'carichi'} senza annotazione</span>
+                              : <span className="text-muted-foreground">nessun carico all'impianto</span>}
                         </td>
                         <td className="px-2 py-2">
                           <span className={`inline-block px-2 py-0.5 rounded-full border text-xs ${st.classe}`}>{st.nome}</span>
@@ -326,9 +386,30 @@ export default function Omologhe() {
         </TabsContent>
 
         <TabsContent value="divergenze" className="mt-4 space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <Select value={tipoDiv} onValueChange={(v) => { setTipoDiv(v); setSelezionate(new Set()); }}>
+              <SelectTrigger className="w-72"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="tutte">Tutte le divergenze</SelectItem>
+                {['solo_registro', 'solo_elenco', 'data_diversa', 'nome_diverso'].map(t => (
+                  <SelectItem key={t} value={t}>{NOME_DIVERGENZA[t]} ({formatIntero(conGiorni.filter(r => r.tipo_divergenza === t).length)})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={statoDiv} onValueChange={(v) => { setStatoDiv(v); setSelezionate(new Set()); }}>
+              <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="aperte">Da verificare e in sospeso</SelectItem>
+                {Object.entries(STATI).map(([k, s]) => <SelectItem key={k} value={k}>{s.nome}</SelectItem>)}
+                <SelectItem value="tutte">Tutti gli stati</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           {!divergenti.length ? (
             <div className="border rounded-lg bg-card px-4 py-10 text-center text-muted-foreground text-sm">
-              I due fogli dicono la stessa cosa su tutti i produttori.
+              {conGiorni.some(r => (r.tipo_divergenza || 'nessuna') !== 'nessuna')
+                ? 'Nessuna divergenza con questi filtri.'
+                : 'I due fogli dicono la stessa cosa su tutti i produttori.'}
             </div>
           ) : (
             <>
@@ -341,12 +422,38 @@ export default function Omologhe() {
                   <strong> Annulla</strong> se il produttore non va più seguito.
                 </div>
               </div>
+              {isAdmin && (
+                <div className="flex flex-wrap items-center gap-2 border rounded-lg bg-card px-3 py-2 sticky top-0 z-10">
+                  <label className="inline-flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={divergenti.length > 0 && divergenti.every(r => selezionate.has(r.id))}
+                      onChange={(e) => setSelezionate(e.target.checked ? new Set(divergenti.map(r => r.id)) : new Set())}
+                    />
+                    Seleziona le {formatIntero(divergenti.length)} mostrate
+                  </label>
+                  <span className="text-sm text-muted-foreground">· {formatIntero(selezionate.size)} selezionate</span>
+                  <div className="flex-1" />
+                  {inBlocco ? (
+                    <span className="inline-flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> salvo {inBlocco}…</span>
+                  ) : (
+                    <>
+                      <Button size="sm" variant="outline" className="h-8" disabled={!selezionate.size || !!inCorso} onClick={() => decidiSelezionate('recepita')}><Check className="w-3.5 h-3.5 mr-1" /> Recepite</Button>
+                      <Button size="sm" variant="outline" className="h-8" disabled={!selezionate.size || !!inCorso} onClick={() => decidiSelezionate('in_sospeso')}><PauseCircle className="w-3.5 h-3.5 mr-1" /> In sospeso</Button>
+                      <Button size="sm" variant="ghost" className="h-8 text-red-600" disabled={!selezionate.size || !!inCorso} onClick={() => decidiSelezionate('annullata')}><XCircle className="w-3.5 h-3.5 mr-1" /> Annulla</Button>
+                    </>
+                  )}
+                </div>
+              )}
               {divergenti.map(r => {
                 const st = STATI[r.stato || 'da_verificare'];
                 return (
-                  <div key={r.id} className="border rounded-lg bg-card p-4 space-y-2">
+                  <div key={r.id} className={`border rounded-lg bg-card p-4 space-y-2 ${selezionate.has(r.id) ? 'ring-2 ring-primary/40' : ''}`}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="font-semibold">{r.produttore}</div>
+                      <div className="font-semibold flex items-center gap-2">
+                        {isAdmin && <input type="checkbox" checked={selezionate.has(r.id)} onChange={() => scegli(r.id)} aria-label={`Seleziona ${r.produttore}`} />}
+                        {r.produttore}
+                      </div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs px-2 py-0.5 rounded-full border bg-muted">{NOME_DIVERGENZA[r.tipo_divergenza]}</span>
                         <span className={`text-xs px-2 py-0.5 rounded-full border ${st.classe}`}>{st.nome}</span>
@@ -363,8 +470,13 @@ export default function Omologhe() {
                       <div className="border rounded p-2">
                         <div className="text-xs text-muted-foreground">Nel registro dell'impianto</div>
                         {r.nel_registro
-                          ? <div>{r.registro_nome} · annotata il {dataIt(r.registro_data)}{r.registro_riga ? ` · riga ${formatIntero(r.registro_riga)}` : ''}</div>
+                          ? <div>{r.registro_nome} · recepita il {dataIt(r.registro_data)}{r.registro_riga ? ` · riga ${formatIntero(r.registro_riga)}` : ''}</div>
                           : <div className="text-muted-foreground">nessuna annotazione</div>}
+                        {r.registro_carichi > 0 && (
+                          <div className="text-xs text-muted-foreground">
+                            {formatIntero(r.registro_carichi)} {r.registro_carichi === 1 ? 'carico' : 'carichi'} in tutto, il primo il {dataIt(r.registro_primo_carico)}
+                          </div>
+                        )}
                       </div>
                     </div>
                     {r.nota && (
@@ -420,8 +532,8 @@ export default function Omologhe() {
                 <div>{formatIntero(esito.righe_elenco)} produttori nell'elenco, {formatIntero(esito.righe_registro)} annotati nel registro.</div>
                 <div>{formatIntero(esito.nuovi)} nuovi, {formatIntero(esito.aggiornati)} aggiornati{esito.scomparsi ? `, ${formatIntero(esito.scomparsi)} non più presenti nei file` : ''}.</div>
                 <div className="pt-1">
-                  Divergenze: {formatIntero(esito.divergenze.solo_registro)} solo nel registro, {formatIntero(esito.divergenze.nome_diverso)} con nome diverso,
-                  {' '}{formatIntero(esito.divergenze.data_diversa)} con data diversa, {formatIntero(esito.divergenze.solo_elenco)} solo nell'elenco.
+                  Divergenze: {formatIntero(esito.divergenze.solo_registro)} non in elenco, {formatIntero(esito.divergenze.solo_elenco)} conferiti senza annotazione,
+                  {' '}{formatIntero(esito.divergenze.data_diversa)} con date lontane, {formatIntero(esito.divergenze.nome_diverso)} con nome diverso.
                 </div>
               </div>
             )}

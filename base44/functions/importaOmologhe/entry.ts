@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
-import { chiaveProduttore, abbina, divergenza } from "../../shared/omologhe.ts";
+import { chiaveProduttore, abbina, divergenza, scadenzaEffettiva, unAnnoDopo } from "../../shared/omologhe.ts";
 
 // Allinea l'elenco delle omologhe con i due fogli.
 //
@@ -11,7 +11,13 @@ import { chiaveProduttore, abbina, divergenza } from "../../shared/omologhe.ts";
 // annullata, con la sua nota -- non si toccano mai: il gestionale aggiorna i
 // dati, non il giudizio di chi ha verificato.
 //
-// Payload: { elenco: [...], registro: [...] }
+// Il documento si recepisce una volta, al primo ritiro, e da li' parte l'anno di
+// validita': i ritiri successivi dallo stesso produttore non riportano piu'
+// l'annotazione e va bene cosi'. Percio' dal registro contano la prima riga
+// annotata e l'elenco di tutti i carichi, che distingue chi ha conferito senza
+// che l'omologa risulti mai annotata da chi all'impianto non ha portato ancora nulla.
+//
+// Payload: { elenco: [...], registro: [annotati], conferitori: [...] }
 // Risposta: { totale, nuovi, aggiornati, divergenze: { ... }, scomparsi }
 
 const giorno = (v) => {
@@ -23,7 +29,8 @@ const DATI = [
   'produttore', 'produttore_chiave', 'canale', 'tipologia_materiale', 'omologa_da', 'omologa_a', 'esito',
   'n_autorizzazione', 'autorizzazione_da', 'autorizzazione_a', 'rdp_da', 'rdp_a', 'quantitativo_max_annuo',
   'nell_elenco', 'nel_registro', 'registro_nome', 'registro_data', 'registro_riga', 'registro_volte',
-  'tipo_divergenza', 'aggiornata_il',
+  'registro_carichi', 'registro_primo_carico', 'scadenza_effettiva', 'validita_da_registro',
+  'tipo_divergenza',
 ];
 
 const uguali = (a, b) => DATI.every(k => {
@@ -46,18 +53,55 @@ export default async function(req) {
       return Response.json({ error: 'Non e\' arrivata nessuna riga dai due fogli.' }, { status: 400 });
     }
 
+    // Un produttore scritto due volte nel nostro elenco resta uno: vale la prima riga.
+    const chiaviElenco = new Set();
+    let doppiElenco = 0;
     const elenco = elencoGrezzo
       .map(r => ({ ...r, nome: String(r.nome || '').trim(), chiave: chiaveProduttore(r.nome) }))
-      .filter(r => r.nome && r.chiave);
-    const registro = registroGrezzo
-      .map(r => ({ ...r, nome: String(r.nome || '').trim(), chiave: chiaveProduttore(r.nome) }))
-      .filter(r => r.nome && r.chiave);
+      .filter(r => r.nome && r.chiave)
+      .filter(r => { if (chiaviElenco.has(r.chiave)) { doppiElenco++; return false; } chiaviElenco.add(r.chiave); return true; });
+    // Nel registro lo stesso produttore puo' comparire scritto in due modi
+    // ("ELGOMEC" e "ELGOMEC SNC"): si tratta come uno solo, con la prima data e
+    // tutti i carichi. Altrimenti due righe finirebbero sullo stesso produttore.
+    const unisci = (righe, fondi) => {
+      const per = new Map();
+      for (const r of righe) {
+        const nome = String(r.nome || '').trim();
+        const chiave = chiaveProduttore(nome);
+        if (!nome || !chiave) continue;
+        const gia = per.get(chiave);
+        per.set(chiave, gia ? fondi(gia, r) : { ...r, nome, chiave });
+      }
+      return [...per.values()];
+    };
+    const prima = (a, b) => (a && b ? (a < b ? a : b) : a || b || null);
+    const dopo = (a, b) => (a && b ? (a > b ? a : b) : a || b || null);
+    const registro = unisci(registroGrezzo, (a, b) => {
+      const primaB = b.data && (!a.data || b.data < a.data);
+      return { ...a, data: prima(a.data, b.data), riga: primaB ? b.riga : a.riga, volte: (Number(a.volte) || 0) + (Number(b.volte) || 0) };
+    });
+    const conferitori = unisci(Array.isArray(body.conferitori) ? body.conferitori : [], (a, b) => ({
+      ...a, carichi: (Number(a.carichi) || 0) + (Number(b.carichi) || 0), primo: prima(a.primo, b.primo), ultimo: dopo(a.ultimo, b.ultimo),
+    }));
 
     const { abbinati, soloElenco, soloRegistro } = abbina(elenco, registro);
     const adesso = new Date().toISOString();
 
+    // Carichi di ciascun produttore. Chi ha l'annotazione si ritrova con il nome
+    // esatto, perche' viene dalla stessa colonna; per gli altri si cerca il nome
+    // piu' somigliante con la stessa prudenza dell'abbinamento.
+    const caricoPerChiave = new Map(conferitori.map(c => [c.chiave, c]));
+    const caricoPerElenco = new Map(abbina(soloElenco, conferitori).abbinati.map(a => [a.elenco, a.registro]));
+    const carichiDi = (c) => ({
+      registro_carichi: c ? Number(c.carichi) || 0 : 0,
+      registro_primo_carico: c ? giorno(c.primo) : null,
+    });
+
     const desiderati = [];
-    const daElenco = (e, x, punteggio) => ({
+    const daElenco = (e, x, punteggio) => {
+      const carico = x ? caricoPerChiave.get(x.chiave) : caricoPerElenco.get(e);
+      const carichi = carichiDi(carico);
+      return {
       produttore: e.nome,
       produttore_chiave: e.chiave,
       canale: e.canale === 'ACI' ? 'ACI' : 'RETE',
@@ -77,23 +121,32 @@ export default async function(req) {
       registro_data: x ? giorno(x.data) : null,
       registro_riga: x ? Number(x.riga) || null : null,
       registro_volte: x ? Number(x.volte) || null : null,
+      ...carichi,
+      scadenza_effettiva: scadenzaEffettiva(giorno(e.om_a), x ? giorno(x.data) : null),
+      validita_da_registro: false,
       tipo_divergenza: divergenza({
-        nellElenco: true, nelRegistro: !!x, punteggio: x ? punteggio : undefined,
+        canale: e.canale === 'ACI' ? 'ACI' : 'RETE',
+        nellElenco: true, annotato: !!x, carichi: carichi.registro_carichi, ultimoCarico: carico ? giorno(carico.ultimo) : null,
+        punteggio: x ? punteggio : undefined,
         dataElenco: giorno(e.om_da), dataRegistro: x ? giorno(x.data) : null,
       }),
       aggiornata_il: adesso,
-    });
+      };
+    };
 
     for (const a of abbinati) desiderati.push(daElenco(a.elenco, a.registro, a.punteggio));
     for (const e of soloElenco) desiderati.push(daElenco(e, null));
+    // Chi e' annotato nel registro ma manca nell'elenco: la validita' parte dalla
+    // prima annotazione, che e' il giorno in cui il documento risulta recepito.
     for (const x of soloRegistro) {
+      const inizio = giorno(x.data);
       desiderati.push({
         produttore: x.nome,
         produttore_chiave: x.chiave,
         canale: 'RETE',
         tipologia_materiale: '',
-        omologa_da: null,
-        omologa_a: null,
+        omologa_da: inizio,
+        omologa_a: inizio ? unAnnoDopo(inizio) : null,
         esito: true,
         n_autorizzazione: '', autorizzazione_da: null, autorizzazione_a: null, rdp_da: null, rdp_a: null,
         quantitativo_max_annuo: '',
@@ -103,6 +156,9 @@ export default async function(req) {
         registro_data: giorno(x.data),
         registro_riga: Number(x.riga) || null,
         registro_volte: Number(x.volte) || null,
+        ...carichiDi(caricoPerChiave.get(x.chiave)),
+        scadenza_effettiva: inizio ? unAnnoDopo(inizio) : null,
+        validita_da_registro: !!inizio,
         tipo_divergenza: 'solo_registro',
         aggiornata_il: adesso,
       });
@@ -152,6 +208,8 @@ export default async function(req) {
       scomparsi,
       righe_elenco: elenco.length,
       righe_registro: registro.length,
+      conferitori: conferitori.length,
+      doppi_elenco: doppiElenco,
       divergenze: {
         solo_registro: conta('solo_registro'),
         solo_elenco: conta('solo_elenco'),

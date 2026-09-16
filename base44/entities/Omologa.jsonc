@@ -93,6 +93,25 @@
       "type": "number",
       "description": "Quante righe del registro riportano l'annotazione"
     },
+    "registro_carichi": {
+      "type": "number",
+      "description": "Quanti carichi del produttore ci sono nel registro, annotati o no"
+    },
+    "registro_primo_carico": {
+      "type": "string",
+      "format": "date",
+      "description": "Data del primo carico del produttore nel registro"
+    },
+    "scadenza_effettiva": {
+      "type": "string",
+      "format": "date",
+      "description": "Scadenza da cui si conta il tempo che resta: un anno dalla prima data in cui il documento risulta recepito"
+    },
+    "validita_da_registro": {
+      "type": "boolean",
+      "default": false,
+      "description": "La validita' non viene dall'elenco ma dalla prima annotazione nel registro"
+    },
     "tipo_divergenza": {
       "type": "string",
       "enum": [

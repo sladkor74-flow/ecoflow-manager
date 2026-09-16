@@ -7,23 +7,25 @@
 //
 // Specchio di base44/shared/omologhe.ts per le parti che servono anche qui.
 
+// Il documento si recepisce una volta, al primo ritiro, e da lì parte l'anno di
+// validità: i ritiri successivi non riportano l'annotazione e va bene così.
 export const SPIEGA_DIVERGENZA = {
-  solo_registro: "L'impianto ha annotato l'omologa nel registro, ma il produttore non è nel nostro elenco: il documento va chiesto e messo in elenco.",
+  solo_registro: "L'impianto ha annotato l'omologa nel registro, ma il produttore non è nel nostro elenco: il documento va messo in elenco. La scadenza è contata dalla prima annotazione.",
+  solo_elenco: "Il produttore è nel nostro elenco e ha già conferito all'impianto, ma nel registro l'omologa non risulta mai annotata: va controllato che il documento sia stato recepito al primo ritiro.",
+  data_diversa: "L'elenco e il registro fissano l'inizio dell'omologa a più di una settimana di distanza. L'anno di validità si conta dalla data più vecchia, quindi la scadenza mostrata è la più prudente.",
   nome_diverso: 'Lo stesso produttore risulta scritto in due modi diversi nei due fogli: va confermato che sia la stessa azienda.',
-  data_diversa: "La data dell'omologa nell'elenco non coincide con quella della riga del registro.",
-  solo_elenco: "L'omologa è nel nostro elenco ma il registro non la conferma: spesso è normale, perché il produttore non ha conferito all'impianto.",
   nessuna: 'I due fogli dicono la stessa cosa.',
 };
 
 export const NOME_DIVERGENZA = {
-  solo_registro: 'Solo nel registro',
+  solo_registro: 'Non in elenco',
+  solo_elenco: 'Conferito senza annotazione',
+  data_diversa: 'Date lontane',
   nome_diverso: 'Nome diverso',
-  data_diversa: 'Data diversa',
-  solo_elenco: 'Solo nell’elenco',
   nessuna: 'Nessuna',
 };
 
-export const PESO_DIVERGENZA = { solo_registro: 1, nome_diverso: 2, data_diversa: 3, solo_elenco: 4, nessuna: 9 };
+export const PESO_DIVERGENZA = { solo_registro: 1, solo_elenco: 2, data_diversa: 3, nome_diverso: 4, nessuna: 9 };
 
 export const STATI = {
   da_verificare: { nome: 'Da verificare', classe: 'bg-amber-50 text-amber-800 border-amber-200' },
@@ -173,9 +175,16 @@ export async function leggiElencoOmologhe(file) {
 }
 
 /**
- * Registro di carico e scarico: le righe in cui l'operatore dell'impianto ha
- * annotato l'omologa nella colonna della tipologia. Di ogni produttore si tiene
- * la prima annotazione e quante volte compare.
+ * Registro di carico e scarico.
+ *
+ * Il documento si recepisce una volta sola, al primo ritiro: da li' parte l'anno
+ * di validita', e i ritiri successivi dallo stesso produttore non riportano piu'
+ * l'annotazione senza che questo sia un problema. Percio' di ogni produttore
+ * contano la prima riga segnata "OMOLOGA OK" e, a parte, tutti i suoi carichi:
+ * servono a distinguere chi ha conferito senza che l'omologa sia mai stata
+ * annotata da chi all'impianto non ha ancora portato nulla.
+ *
+ * Restituisce { annotati, conferitori }.
  */
 export async function leggiRegistroOmologhe(file) {
   const { XLSX, ws, nome } = await apri(file, /dettagli/i);
@@ -198,13 +207,23 @@ export async function leggiRegistroOmologhe(file) {
   if (capo < 0) throw new Error(`Nel foglio «${nome}» non trovo le colonne "PRODUTTORE" e "TIPOLOGIA DI RIFIUTO".`);
 
   const perProduttore = new Map();
+  const carichi = new Map();
   for (let r = capo + 1; r < g.length; r++) {
-    const tipo = testo(cella(r, colTipo));
-    if (!/omologa/i.test(tipo)) continue;
     const prod = testo(cella(r, colProd));
     if (!prod) continue;
     const data = colData >= 0 ? ymd(cella(r, colData)) : null;
     const chiave = prod.toLowerCase();
+
+    const c = carichi.get(chiave);
+    if (!c) carichi.set(chiave, { nome: prod, carichi: 1, primo: data, ultimo: data });
+    else {
+      c.carichi++;
+      if (data && (!c.primo || data < c.primo)) c.primo = data;
+      if (data && (!c.ultimo || data > c.ultimo)) c.ultimo = data;
+    }
+
+    const tipo = testo(cella(r, colTipo));
+    if (!/omologa/i.test(tipo)) continue;
     const gia = perProduttore.get(chiave);
     if (!gia) {
       perProduttore.set(chiave, { nome: prod, data, riga: r + 1, volte: 1, nota: tipo, fir: colFir >= 0 ? testo(cella(r, colFir)) : '' });
@@ -214,7 +233,7 @@ export async function leggiRegistroOmologhe(file) {
     }
   }
 
-  const righe = [...perProduttore.values()];
-  if (!righe.length) throw new Error(`Nel foglio «${nome}» non ho trovato righe con l'annotazione dell'omologa.`);
-  return righe;
+  const annotati = [...perProduttore.values()];
+  if (!annotati.length) throw new Error(`Nel foglio «${nome}» non ho trovato righe con l'annotazione dell'omologa.`);
+  return { annotati, conferitori: [...carichi.values()] };
 }

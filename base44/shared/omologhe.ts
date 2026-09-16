@@ -110,12 +110,54 @@ export function abbina(elenco, registro) {
   };
 }
 
-/** Che cosa non torna fra i due fogli per questo produttore. */
-export function divergenza({ nellElenco, nelRegistro, punteggio, dataElenco, dataRegistro }) {
-  if (nellElenco && !nelRegistro) return 'solo_elenco';
-  if (!nellElenco && nelRegistro) return 'solo_registro';
+// Fra la data del documento e il primo ritiro in cui l'impianto lo annota passano
+// di solito pochi giorni: sotto questa soglia non e' una divergenza.
+export const TOLLERANZA_GIORNI = 7;
+
+const giorniFra = (a, b) => Math.round(
+  Math.abs(new Date(a + 'T00:00:00Z').getTime() - new Date(b + 'T00:00:00Z').getTime()) / 86400000,
+);
+
+/** La stessa data un anno dopo; il 29 febbraio diventa 28. */
+export function unAnnoDopo(ymd) {
+  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const giorno = m[2] === '02' && m[3] === '29' ? '28' : m[3];
+  return `${Number(m[1]) + 1}-${m[2]}-${giorno}`;
+}
+
+/**
+ * Scadenza da cui si conta il tempo che resta.
+ *
+ * Il documento si recepisce una volta, al primo ritiro, e da li' parte l'anno di
+ * validita': i ritiri successivi non devono riportare l'annotazione. Se l'elenco
+ * e il registro fissano l'inizio in giorni diversi vale il piu' vecchio, perche'
+ * e' da quel giorno che il documento era in mano: la scadenza e' la piu' prudente.
+ */
+export function scadenzaEffettiva(omologaA, dataRegistro) {
+  const daRegistro = dataRegistro ? unAnnoDopo(dataRegistro) : null;
+  if (omologaA && daRegistro) return omologaA < daRegistro ? omologaA : daRegistro;
+  return omologaA || daRegistro || null;
+}
+
+/**
+ * Che cosa non torna fra i due fogli per questo produttore.
+ *
+ * Chi e' nell'elenco e all'impianto non ha ancora portato nulla -- o ha portato
+ * solo prima che l'omologa iniziasse -- non e' una divergenza: l'annotazione
+ * arrivera' con il primo ritiro. Per l'ACI il controllo non si fa: il registro
+ * dell'impianto le omologhe ACI non le annota mai (verificato il 17/09/2026 su
+ * tutte e dieci), e segnalarle sarebbe solo rumore.
+ */
+export function divergenza({ canale, nellElenco, annotato, carichi, ultimoCarico, punteggio, dataElenco, dataRegistro }) {
+  if (nellElenco && !annotato) {
+    if (canale === 'ACI') return 'nessuna';
+    const dopoInizio = !dataElenco || !ultimoCarico || ultimoCarico >= dataElenco;
+    return carichi > 0 && dopoInizio ? 'solo_elenco' : 'nessuna';
+  }
+  if (!nellElenco && annotato) return 'solo_registro';
   if (punteggio !== undefined && punteggio < 1) return 'nome_diverso';
-  if (dataElenco && dataRegistro && dataElenco !== dataRegistro) return 'data_diversa';
+  if (dataElenco && dataRegistro && giorniFra(dataElenco, dataRegistro) > TOLLERANZA_GIORNI) return 'data_diversa';
   return 'nessuna';
 }
 
@@ -123,18 +165,10 @@ export function divergenza({ nellElenco, nelRegistro, punteggio, dataElenco, dat
 // documento, poi quelle di forma.
 export const PESO_DIVERGENZA = {
   solo_registro: 1,
-  nome_diverso: 2,
+  solo_elenco: 2,
   data_diversa: 3,
-  solo_elenco: 4,
+  nome_diverso: 4,
   nessuna: 9,
-};
-
-export const SPIEGA_DIVERGENZA = {
-  solo_registro: "L'impianto ha annotato l'omologa nel registro, ma il produttore non e' nel nostro elenco: il documento va chiesto e messo in elenco.",
-  nome_diverso: 'Lo stesso produttore risulta scritto in due modi diversi nei due fogli: va confermato che sia la stessa azienda.',
-  data_diversa: "La data dell'omologa nell'elenco non coincide con quella della riga del registro.",
-  solo_elenco: "L'omologa e' nel nostro elenco ma il registro non la conferma: spesso e' normale, perche' il produttore non ha conferito all'impianto.",
-  nessuna: 'I due fogli dicono la stessa cosa.',
 };
 
 /** Giorni che mancano alla scadenza; negativo se e' gia' passata. */
