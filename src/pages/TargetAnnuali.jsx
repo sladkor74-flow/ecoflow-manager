@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Loader2, Plus, Trash2, Edit3, Target, Factory, Warehouse, Calendar, RefreshCw } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { formatTonnellate, formatIntero } from '@/lib/utils';
+import { usePermessi } from '@/lib/permessi';
 
 const ANNO_DEFAULT = 2026;
 const ANNI = [2024, 2025, 2026, 2027];
@@ -13,6 +14,7 @@ function fmt(n) { return formatTonnellate((Number(n) || 0)); }
 function fmtInt(n) { return formatIntero(n); }
 
 function EditableCell({ value, onSave, unit, decimals = 3 }) {
+  const { isAdmin } = usePermessi();
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(String(value || 0));
   const [saving, setSaving] = useState(false);
@@ -30,6 +32,14 @@ function EditableCell({ value, onSave, unit, decimals = 3 }) {
   };
 
   if (saving) return <Loader2 className="w-3 h-3 animate-spin inline" />;
+  if (!isAdmin) {
+    return (
+      <span className="font-medium text-foreground px-1 inline-flex items-center">
+        {decimals === 0 ? fmtInt(value) : fmt(value)}
+        {unit && <span className="text-xs text-muted-foreground ml-1">{unit}</span>}
+      </span>
+    );
+  }
   if (editing) {
     return (
       <input
@@ -54,6 +64,7 @@ function EditableCell({ value, onSave, unit, decimals = 3 }) {
 }
 
 function SectionCard({ icon: Icon, title, subtitle, count, onAdd, showAdd, children }) {
+  const { isAdmin: modificabile } = usePermessi();
   return (
     <div className="border rounded-lg bg-card">
       <div className="flex items-center justify-between p-4 border-b">
@@ -65,7 +76,7 @@ function SectionCard({ icon: Icon, title, subtitle, count, onAdd, showAdd, child
           </div>
           {count != null && <span className="ml-2 text-xs bg-muted px-2 py-0.5 rounded-full font-medium">{count}</span>}
         </div>
-        {onAdd && (
+        {onAdd && modificabile && (
           <Button size="sm" variant="outline" onClick={onAdd}><Plus className="w-4 h-4 mr-1" /> Aggiungi</Button>
         )}
       </div>
@@ -78,6 +89,7 @@ function SectionCard({ icon: Icon, title, subtitle, count, onAdd, showAdd, child
 // l'anno arriva dalla pagina e i raccoglitori si gestiscono nella scheda Target
 // raccoglitori.
 export default function TargetAnnuali({ incorporato = false, anno: annoEsterno }) {
+  const { isAdmin } = usePermessi();
   const [annoInterno, setAnno] = useState(ANNO_DEFAULT);
   const anno = annoEsterno || annoInterno;
   const [loading, setLoading] = useState(true);

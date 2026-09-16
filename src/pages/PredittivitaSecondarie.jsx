@@ -6,8 +6,10 @@ import PredittivitaDashboard from '@/components/predittivita/PredittivitaDashboa
 import PredittivitaSettimanale from '@/components/predittivita/PredittivitaSettimanale';
 import PredittivitaImpiantiManager from '@/components/predittivita/PredittivitaImpiantiManager';
 import PredittivitaAgent from '@/components/predittivita/PredittivitaAgent';
+import { usePermessi } from '@/lib/permessi';
 
 export default function PredittivitaSecondarie() {
+  const { isAdmin } = usePermessi();
   const [tab, setTab] = useState('dashboard');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -53,12 +55,12 @@ export default function PredittivitaSecondarie() {
           <TabsList>
             <TabsTrigger value="dashboard"><BarChart3 className="w-4 h-4 mr-1.5" /> Dashboard</TabsTrigger>
             <TabsTrigger value="settimanale"><Table className="w-4 h-4 mr-1.5" /> Settimanale</TabsTrigger>
-            <TabsTrigger value="config"><Settings className="w-4 h-4 mr-1.5" /> Configurazione</TabsTrigger>
+            {isAdmin && <TabsTrigger value="config"><Settings className="w-4 h-4 mr-1.5" /> Configurazione</TabsTrigger>}
             <TabsTrigger value="agente"><Bot className="w-4 h-4 mr-1.5" /> Assistente</TabsTrigger>
           </TabsList>
           <TabsContent value="dashboard" className="mt-4"><PredittivitaDashboard data={data} onReload={load} /></TabsContent>
           <TabsContent value="settimanale" className="mt-4"><PredittivitaSettimanale data={data} onReload={load} /></TabsContent>
-          <TabsContent value="config" className="mt-4"><PredittivitaImpiantiManager onReload={load} /></TabsContent>
+          {isAdmin && <TabsContent value="config" className="mt-4"><PredittivitaImpiantiManager onReload={load} /></TabsContent>}
           <TabsContent value="agente" className="mt-4"><PredittivitaAgent /></TabsContent>
         </Tabs>
       )}

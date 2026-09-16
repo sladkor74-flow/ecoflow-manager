@@ -3,6 +3,8 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Plus, Pencil, Trash2, Copy, FileSpreadsheet, FileText, AlertTriangle } from 'lucide-react';
+import { usePermessi } from '@/lib/permessi';
+import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import { MESI } from '@/lib/pfuConstants';
 import { calcExtraRaccolta } from '@/lib/extraRaccoltaCalc';
 import { formatNumber } from '@/lib/utils';
@@ -13,6 +15,7 @@ import { STATI_EXTRA, statoExtra, eTerminato, datiChiusuraCompleti, dateDaCorreg
 const ANNI = [2024, 2025, 2026];
 
 export default function ExtraRaccolta() {
+  const { isAdmin } = usePermessi();
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ anno: '', mese: '', stato: '', trasportatore: '', destinazione: '', tipologia_trasporto: '' });
@@ -134,10 +137,14 @@ export default function ExtraRaccolta() {
           <h1 className="text-2xl lg:text-3xl font-heading font-bold">Extra Raccolta</h1>
           <p className="text-muted-foreground mt-1">Richieste e interventi di extra raccolta: si inseriscono come assegnati e si chiudono come terminati con FIR, fine trasporto e peso. Solo i terminati vanno in fatturazione.</p>
         </div>
-        <Button onClick={() => { setFormInitial(null); setFormOpen(true); }}>
-          <Plus className="w-4 h-4 mr-1.5" /> Aggiungi intervento
-        </Button>
+        {isAdmin && (
+          <Button onClick={() => { setFormInitial(null); setFormOpen(true); }}>
+            <Plus className="w-4 h-4 mr-1.5" /> Aggiungi intervento
+          </Button>
+        )}
       </div>
+
+      <BannerSolaLettura cosa="gli interventi di extra raccolta" />
 
       {senzaStato.length > 0 && (
         <div className="flex items-start gap-3 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
@@ -150,7 +157,7 @@ export default function ExtraRaccolta() {
             {daSegnare.length > 0 && <p>{daSegnare.length} {daSegnare.length === 1 ? 'ha' : 'hanno'} FIR, data di fine trasporto e peso: si possono segnare come terminati.</p>}
             {senzaStato.length > daSegnare.length && <p>{senzaStato.length - daSegnare.length} {senzaStato.length - daSegnare.length === 1 ? 'è incompleto' : 'sono incompleti'}: aprili con il filtro Stato «Senza stato» e scegli lo stato.</p>}
           </div>
-          {daSegnare.length > 0 && (
+          {isAdmin && daSegnare.length > 0 && (
             <Button size="sm" onClick={segnaTerminati} disabled={sistemando}>
               {sistemando && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}Segna {daSegnare.length} come terminati
             </Button>
@@ -315,9 +322,11 @@ export default function ExtraRaccolta() {
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex gap-1 justify-center">
-                        <button onClick={() => { setFormInitial(r); setFormOpen(true); }} className="p-1 hover:bg-muted rounded" title="Modifica"><Pencil className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => duplicate(r)} className="p-1 hover:bg-muted rounded" title="Duplica"><Copy className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => remove(r)} className="p-1 hover:bg-red-50 rounded" title="Elimina"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>
+                        {isAdmin ? (<>
+                          <button onClick={() => { setFormInitial(r); setFormOpen(true); }} className="p-1 hover:bg-muted rounded" title="Modifica"><Pencil className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => duplicate(r)} className="p-1 hover:bg-muted rounded" title="Duplica"><Copy className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => remove(r)} className="p-1 hover:bg-red-50 rounded" title="Elimina"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>
+                        </>) : <span className="text-muted-foreground">—</span>}
                       </div>
                     </td>
                   </tr>

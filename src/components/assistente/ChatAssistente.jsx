@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { dataOra, nomeUtente } from '@/lib/target';
 import { Send, Loader2, Plus, Search, ThumbsUp, ThumbsDown, Globe, Database, BookOpen, MessageSquare, AlertTriangle, RefreshCw, Volume2, VolumeX, Mic, MicOff, Square } from 'lucide-react';
+import { usePermessi } from '@/lib/permessi';
 import { dataServer } from '@/lib/utils';
 
 // Spazio domande: conversazioni con l'Assistente, archiviate nel gestionale.
@@ -146,7 +147,7 @@ function DialogValutazione({ domanda, modo, onClose, onSalvato }) {
   );
 }
 
-function Messaggio({ d, onValuta }) {
+function Messaggio({ d, onValuta, isAdmin }) {
   const fonti = leggiFonti(d.fonti_json);
   const certezza = CERTEZZA[d.certezza];
   return (
@@ -187,7 +188,7 @@ function Messaggio({ d, onValuta }) {
               </div>
             )}
             {d.nota_valutazione && <p className="text-xs text-red-700 bg-red-50 rounded px-2 py-1">Nota: {d.nota_valutazione}</p>}
-            {d.valutazione === 'nessuna' || !d.valutazione ? (
+            {isAdmin && (d.valutazione === 'nessuna' || !d.valutazione) ? (
               <div className="flex gap-1">
                 <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => onValuta(d, 'corretta')}><ThumbsUp className="w-3.5 h-3.5" /> Corretta, salva come FAQ</Button>
                 <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => onValuta(d, 'da_correggere')}><ThumbsDown className="w-3.5 h-3.5" /> Da correggere</Button>
@@ -201,6 +202,7 @@ function Messaggio({ d, onValuta }) {
 }
 
 export default function ChatAssistente() {
+  const { isAdmin } = usePermessi();
   const { toast } = useToast();
   const [domande, setDomande] = useState([]);
   const [caricamento, setCaricamento] = useState(true);
@@ -375,7 +377,7 @@ export default function ChatAssistente() {
               <p className="text-xs text-muted-foreground">Le risposte sulle norme controllano anche le fonti online. Per decisioni con conseguenze legali verifica sempre il testo vigente.</p>
             </div>
           ) : (
-            visibili.map(d => <Messaggio key={d.id} d={d} onValuta={(dd, modo) => setValuta({ d: dd, modo })} />)
+            visibili.map(d => <Messaggio key={d.id} d={d} isAdmin={isAdmin} onValuta={(dd, modo) => setValuta({ d: dd, modo })} />)
           )}
           {inCorso && !invio && (
             <p className="text-xs text-muted-foreground flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" /> Aggiorno appena la risposta è pronta…</p>

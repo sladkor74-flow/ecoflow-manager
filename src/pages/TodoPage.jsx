@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Loader2, Plus, Trash2, CheckSquare, Square, AlertCircle } from 'lucide-react';
+import { usePermessi } from '@/lib/permessi';
+import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 
 const PRIORITA = {
   urgente: { label: 'Urgente', color: 'bg-red-100 text-red-700 border-red-200' },
@@ -16,6 +18,7 @@ const STATO = {
 };
 
 export default function TodoPage() {
+  const { isAdmin } = usePermessi();
   const [todos, setTodos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -86,10 +89,14 @@ export default function TodoPage() {
           <h1 className="text-2xl lg:text-3xl font-heading font-bold flex items-center gap-2"><CheckSquare className="w-7 h-7 text-primary" /> To-Do List</h1>
           <p className="text-muted-foreground mt-1">Gestione attività, solleciti e pratiche con scadenze.</p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90">
-          <Plus className="w-4 h-4" /> Nuovo To-Do
-        </button>
+        {isAdmin && (
+          <button onClick={() => setShowForm(!showForm)} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90">
+            <Plus className="w-4 h-4" /> Nuovo To-Do
+          </button>
+        )}
       </div>
+
+      <BannerSolaLettura cosa="le attività" />
 
       {/* KPI filtri */}
       <div className="flex flex-wrap gap-2">
@@ -143,14 +150,16 @@ export default function TodoPage() {
             const isOverdue = todo.data_scadenza && new Date(todo.data_scadenza) < new Date() && todo.stato !== 'completato';
             return (
               <div key={todo.id} className={`border rounded-lg p-3 flex items-start gap-3 ${todo.stato === 'completato' ? 'opacity-60' : ''}`}>
-                <button onClick={() => toggleStato(todo)} className="mt-0.5 flex-shrink-0">
+                <button onClick={() => toggleStato(todo)} className="mt-0.5 flex-shrink-0" disabled={!isAdmin}>
                   {todo.stato === 'completato' ? <CheckSquare className="w-5 h-5 text-green-600" /> : <Square className="w-5 h-5 text-muted-foreground" />}
                 </button>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap mb-1">
                     <h3 className={`font-heading font-semibold text-sm ${todo.stato === 'completato' ? 'line-through' : ''}`}>{todo.titolo}</h3>
                     <span className={`text-xs px-2 py-0.5 rounded border ${pr.color}`}>{pr.label}</span>
-                    <button onClick={() => cycleStato(todo)} className={`text-xs px-2 py-0.5 rounded ${st.color} hover:opacity-80`}>{st.label}</button>
+                    {isAdmin
+                      ? <button onClick={() => cycleStato(todo)} className={`text-xs px-2 py-0.5 rounded ${st.color} hover:opacity-80`}>{st.label}</button>
+                      : <span className={`text-xs px-2 py-0.5 rounded ${st.color}`}>{st.label}</span>}
                     {isOverdue && <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Scaduto</span>}
                   </div>
                   {todo.descrizione && <p className="text-sm text-muted-foreground">{todo.descrizione}</p>}
@@ -160,7 +169,7 @@ export default function TodoPage() {
                     {todo.riferimento_ordine && <span>Ordine: {todo.riferimento_ordine}</span>}
                   </div>
                 </div>
-                <button onClick={() => handleDelete(todo)} className="p-2 rounded-md hover:bg-red-50 flex-shrink-0"><Trash2 className="w-4 h-4 text-red-500" /></button>
+                {isAdmin && <button onClick={() => handleDelete(todo)} className="p-2 rounded-md hover:bg-red-50 flex-shrink-0"><Trash2 className="w-4 h-4 text-red-500" /></button>}
               </div>
             );
           })}

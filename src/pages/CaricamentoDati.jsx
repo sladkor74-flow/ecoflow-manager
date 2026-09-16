@@ -4,6 +4,8 @@ import { Upload, FileSpreadsheet, Loader2, CheckCircle2, Clock } from 'lucide-re
 import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
 import { importaGrandeFile, importaPrimarie, TIPI_LETTURA_BROWSER } from '@/lib/importGrandeFile';
 import { formatIntero, dataServer } from '@/lib/utils';
+import { usePermessi } from '@/lib/permessi';
+import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 
 const TIPI_FILE = [
   { key: 'primarie', label: 'Primarie', desc: 'File unico delle primarie (un solo foglio con tutto). Suddivide automaticamente le righe in Primarie Rete, Primarie ACI, Assegnati Rete e Assegnati ACI in base a stato e classe.', colore: 'bg-green-50 border-green-200' },
@@ -14,6 +16,7 @@ const TIPI_FILE = [
 ];
 
 export default function CaricamentoDati() {
+  const { isAdmin } = usePermessi();
   const [logs, setLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(true);
   const [uploading, setUploading] = useState(null);
@@ -110,6 +113,8 @@ export default function CaricamentoDati() {
         </p>
       </div>
 
+      <BannerSolaLettura cosa="i caricamenti" />
+
       {/* Card di upload */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {TIPI_FILE.map((tipo) => {
@@ -127,22 +132,28 @@ export default function CaricamentoDati() {
                 </div>
               </div>
 
-              <label className="block">
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  className="hidden"
-                  onChange={(e) => handleUpload(tipo.key, e.target.files[0])}
-                  disabled={isUploading}
-                />
-                <div className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-md cursor-pointer transition-colors ${isUploading ? 'bg-muted cursor-wait' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}>
-                  {isUploading ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> Caricamento...</>
-                  ) : (
-                    <><Upload className="w-4 h-4" /> Seleziona file Excel</>
-                  )}
+              {isAdmin ? (
+                <label className="block">
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls"
+                    className="hidden"
+                    onChange={(e) => handleUpload(tipo.key, e.target.files[0])}
+                    disabled={isUploading}
+                  />
+                  <div className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-md cursor-pointer transition-colors ${isUploading ? 'bg-muted cursor-wait' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}>
+                    {isUploading ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" /> Caricamento...</>
+                    ) : (
+                      <><Upload className="w-4 h-4" /> Seleziona file Excel</>
+                    )}
+                  </div>
+                </label>
+              ) : (
+                <div className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-muted text-muted-foreground text-sm">
+                  <Upload className="w-4 h-4" /> Caricamento riservato all'amministratore
                 </div>
-              </label>
+              )}
 
               {progresso[tipo.key] && (
                 <div className="mt-3 text-xs text-muted-foreground">

@@ -3,10 +3,12 @@ import { base44 } from '@/api/base44Client';
 import { Calendar, Layers, Edit3, Loader2, Warehouse, Truck, Factory, Building2 } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { formatKg } from '@/lib/utils';
+import { usePermessi } from '@/lib/permessi';
 
 function fmt(n) { return formatKg(n || 0); }
 
 function EditableIpotesi({ value, onSave }) {
+  const { isAdmin } = usePermessi();
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(String(value || 0));
   const [saving, setSaving] = useState(false);
@@ -21,6 +23,7 @@ function EditableIpotesi({ value, onSave }) {
   };
 
   if (saving) return <Loader2 className="w-3 h-3 animate-spin inline" />;
+  if (!isAdmin) return <span className="font-medium text-foreground px-1">{fmt(value)}</span>;
   if (editing) {
     return (
       <input

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
-import { AlertTriangle, X, Loader2, CheckCircle, Eye, EyeOff } from 'lucide-react';
+import { AlertTriangle, Loader2, CheckCircle, EyeOff } from 'lucide-react';
+import { usePermessi } from '@/lib/permessi';
 
 // Pannello laterale con lista alert e gestione stato
 export default function AlertsPanel({ modulo, maxHeight }) {
+  const { isAdmin } = usePermessi();
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('aperto');
@@ -81,12 +83,12 @@ export default function AlertsPanel({ modulo, maxHeight }) {
                 </div>
                 {a.stato === 'aperto' && (
                   <div className="flex flex-col gap-1 flex-shrink-0">
-                    <button onClick={() => handleAction(a, 'risolto')} title="Risolto" className="p-1 rounded hover:bg-green-200">
+                    {isAdmin && <><button onClick={() => handleAction(a, 'risolto')} title="Risolto" className="p-1 rounded hover:bg-green-200">
                       <CheckCircle className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => handleAction(a, 'ignorato')} title="Ignora" className="p-1 rounded hover:bg-muted">
                       <EyeOff className="w-3.5 h-3.5" />
-                    </button>
+                    </button></>}
                   </div>
                 )}
               </div>

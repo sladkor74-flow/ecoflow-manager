@@ -5,6 +5,7 @@ import ChatAssistente from '@/components/assistente/ChatAssistente';
 import EsercitazioneRT from '@/components/assistente/EsercitazioneRT';
 import BaseConoscenza from '@/components/assistente/BaseConoscenza';
 import CorsoRT from '@/components/assistente/CorsoRT';
+import { usePermessi } from '@/lib/permessi';
 import { Sparkles } from 'lucide-react';
 
 // Assistente: domande su norme e dati della commessa, esercitazione per l'esame
@@ -13,6 +14,7 @@ import { Sparkles } from 'lucide-react';
 const SCHEDE = ['domande', 'esercitazione', 'corso', 'conoscenza'];
 
 export default function Assistente() {
+  const { isAdmin } = usePermessi();
   const [params, setParams] = useSearchParams();
   const scheda = SCHEDE.includes(params.get('tab')) ? params.get('tab') : 'domande';
   return (
@@ -26,12 +28,12 @@ export default function Assistente() {
           <TabsTrigger value="domande">Domande</TabsTrigger>
           <TabsTrigger value="esercitazione">Esercitazione RT</TabsTrigger>
           <TabsTrigger value="corso">Corso RT</TabsTrigger>
-          <TabsTrigger value="conoscenza">Base di conoscenza</TabsTrigger>
+          {isAdmin && <TabsTrigger value="conoscenza">Base di conoscenza</TabsTrigger>}
         </TabsList>
         <TabsContent value="domande" className="mt-4"><ChatAssistente /></TabsContent>
         <TabsContent value="esercitazione" className="mt-4"><EsercitazioneRT /></TabsContent>
         <TabsContent value="corso" className="mt-4"><CorsoRT /></TabsContent>
-        <TabsContent value="conoscenza" className="mt-4"><BaseConoscenza /></TabsContent>
+        {isAdmin && <TabsContent value="conoscenza" className="mt-4"><BaseConoscenza /></TabsContent>}
       </Tabs>
     </div>
   );

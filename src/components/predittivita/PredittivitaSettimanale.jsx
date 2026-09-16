@@ -2,10 +2,13 @@ import React, { useState } from 'react';
 import { Loader2, Edit3, Warehouse, Truck } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { formatKg } from '@/lib/utils';
+import { usePermessi } from '@/lib/permessi';
 
 function fmt(n) { return formatKg(n || 0); }
 
-function EditableCell({ value, onSave, disabled }) {
+function EditableCell({ value, onSave, disabled: nonModificabile }) {
+  const { isAdmin } = usePermessi();
+  const disabled = nonModificabile || !isAdmin;
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(String(value || 0));
   const [saving, setSaving] = useState(false);

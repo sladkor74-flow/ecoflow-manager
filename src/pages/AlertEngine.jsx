@@ -3,6 +3,8 @@ import { base44 } from '@/api/base44Client';
 import { Loader2, Plus, Trash2, Power, PowerOff, Shield, AlertTriangle, RefreshCw } from 'lucide-react';
 import AlertsPanel from '@/components/alerts/AlertsPanel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { usePermessi } from '@/lib/permessi';
+import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 
 const MODULI = [
   { value: 'secondarie', label: 'Secondarie' },
@@ -28,6 +30,7 @@ const TIPI_REGOLA = [
 ];
 
 export default function AlertEngine() {
+  const { isAdmin } = usePermessi();
   const [regole, setRegole] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -107,6 +110,8 @@ export default function AlertEngine() {
         <p className="text-muted-foreground mt-1">Motore di validazione automatica per rilevare anomalie, discrepanze ed eccezioni operative.</p>
       </div>
 
+      <BannerSolaLettura cosa="gli alert" />
+
       <Tabs defaultValue="alerts">
         <TabsList>
           <TabsTrigger value="alerts"><AlertTriangle className="w-4 h-4 mr-1.5" /> Alert Attivi</TabsTrigger>
@@ -121,6 +126,8 @@ export default function AlertEngine() {
             </div>
             <div className="space-y-3">
               <h2 className="text-lg font-heading font-semibold">Esecuzione Manuale</h2>
+              {!isAdmin && <p className="text-sm text-muted-foreground">Il motore lo lancia l'amministratore; gli alert qui accanto si leggono comunque.</p>}
+              {isAdmin && <>
               <p className="text-sm text-muted-foreground">Lancia il motore di validazione su un modulo specifico:</p>
               <div className="space-y-2">
                 {MODULI.map((m) => (
@@ -135,6 +142,7 @@ export default function AlertEngine() {
                   </button>
                 ))}
               </div>
+              </>}
             </div>
           </div>
         </TabsContent>
@@ -142,9 +150,11 @@ export default function AlertEngine() {
         <TabsContent value="regole" className="mt-4 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-heading font-semibold">Regole di Validazione ({regole.length})</h2>
-            <button onClick={() => setShowForm(!showForm)} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90">
-              <Plus className="w-4 h-4" /> Nuova Regola
-            </button>
+            {isAdmin && (
+              <button onClick={() => setShowForm(!showForm)} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90">
+                <Plus className="w-4 h-4" /> Nuova Regola
+              </button>
+            )}
           </div>
 
           {showForm && (
@@ -220,7 +230,7 @@ export default function AlertEngine() {
                         <pre className="text-xs mt-1 p-2 bg-muted rounded overflow-x-auto">{JSON.stringify(r.config, null, 2)}</pre>
                       </details>
                     </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
+                    <div className={`flex items-center gap-1 flex-shrink-0 ${isAdmin ? '' : 'hidden'}`}>
                       <button onClick={() => handleToggle(r)} title={r.attiva ? 'Disattiva' : 'Attiva'} className="p-2 rounded-md hover:bg-accent">
                         {r.attiva ? <Power className="w-4 h-4 text-green-600" /> : <PowerOff className="w-4 h-4 text-muted-foreground" />}
                       </button>
