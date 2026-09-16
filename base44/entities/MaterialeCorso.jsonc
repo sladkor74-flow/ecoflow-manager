@@ -81,5 +81,23 @@
       "type": "string"
     }
   },
-  "required": ["chiave", "fonte_file", "parte"]
+  "required": ["chiave", "fonte_file", "parte"],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
 }

@@ -62,5 +62,15 @@
       "type": "string",
       "description": "[{ id, scelta, esatta }]: scelta e' il testo scelto, vuoto se omessa"
     }
+  },
+  "rls": {
+    "read": true,
+    "create": true,
+    "update": true,
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
   }
 }

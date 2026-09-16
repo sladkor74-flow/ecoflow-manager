@@ -23,5 +23,23 @@
       "type": "string"
     }
   },
-  "required": ["entita", "record_id", "campo", "parte", "testo"]
+  "required": ["entita", "record_id", "campo", "parte", "testo"],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
 }
