@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { formatoKg } from "../../shared/formato.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const KG_PER_VIAGGIO = 14000;
@@ -23,6 +24,10 @@ function dateStr(d) { return d.toISOString().split('T')[0]; }
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
+    // L'automazione del lunedi' gira senza utente; se invece la chiama una persona,
+    // solo l'amministratore puo' scrivere il suggerimento.
+    const chiamante = await base44.auth.me().catch(() => null);
+    if (chiamante && !eAmministratore(chiamante)) return rispostaSolaLettura();
     const b = base44.asServiceRole;
 
     const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });

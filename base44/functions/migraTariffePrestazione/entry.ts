@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from '../../shared/fetchAll.ts';
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Migrazione tariffe e fornitori al modello a prestazione uniforme.
 // - Fornitori: imposta i booleani ruolo_* in base al campo tipo e ai doppio_ruolo di FornitoreSecondaria.
@@ -11,7 +12,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden' }, { status: 403 });
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const b = base44.asServiceRole;
 
     const body = await req.json().catch(() => ({}));

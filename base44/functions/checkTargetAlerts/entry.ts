@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { PROV_TO_REGION, MESI } from "../../shared/raccoltoCalculator.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { eAmministratore } from "../../shared/permessi.ts";
 
 // Controlla i target mensili di raccolta e genera alert per target non raggiunti o a rischio.
 // Payload: { mese?, anno?, crea_alerts?: boolean }
@@ -20,7 +21,8 @@ export default async function(req) {
     const annoCorrente = now.getFullYear();
     const mese = body.mese || meseCorrente;
     const anno = Number(body.anno || annoCorrente);
-    const creaAlerts = body.crea_alerts !== false;
+    // Gli alert li scrive solo l'amministratore: agli altri la funzione risponde con i soli numeri.
+    const creaAlerts = body.crea_alerts !== false && eAmministratore(user);
 
     // Carica target mensili per il periodo
     // Un raccoglitore puo' avere piu' righe, una per impianto: si sommano.

@@ -4,6 +4,7 @@ import {
 } from "../../shared/reportSettimanali.ts";
 import { valoreCampo, leggiCampo } from "../../shared/testoLungo.ts";
 import { calcolaEsito, salvaEsito } from "../../shared/esitoVerifica.ts";
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Legge il report settimanale di un impianto o di uno stoccaggio e lo confronta
 // con il gestionale: gli ingressi con le primarie, le uscite con le secondarie.
@@ -252,8 +253,7 @@ export default async function(req) {
     base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
-
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const body = await req.json();
     verificaId = body.verifica_id;
     if (!verificaId) return Response.json({ error: 'verifica_id obbligatorio' }, { status: 400 });

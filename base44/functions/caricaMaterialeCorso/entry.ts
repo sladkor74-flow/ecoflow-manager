@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Materiale del corso RT: caricamento delle parti di testo e stato dell'elaborazione.
 //
@@ -29,7 +30,7 @@ export default async function(req) {
     };
 
     if (body.azione === 'carica') {
-      if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
+      if (user.role !== 'admin') return rispostaSolaLettura();
       const parti = (Array.isArray(body.parti) ? body.parti : []).filter(p => p && p.chiave && p.fonte_file && p.testo);
       if (!parti.length || parti.length > 50) return Response.json({ error: 'Invia da 1 a 50 parti per volta' }, { status: 400 });
       const presenti = new Set((await tutte(['chiave'])).map(p => p.chiave));

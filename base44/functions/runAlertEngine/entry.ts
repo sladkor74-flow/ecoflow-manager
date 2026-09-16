@@ -4,6 +4,7 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { formatoTonnellate } from "../../shared/formato.ts";
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Motore di controllo: scansiona i record di un modulo e genera Alert per le regole violate.
 // Payload: { modulo }
@@ -46,6 +47,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    if (user.role !== 'admin') return rispostaSolaLettura();
 
     const body = await req.json();
     const { modulo } = body;

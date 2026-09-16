@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Registra un'esportazione di fatturazione e aggiorna lo stato dei documenti
 export default async function(req) {
@@ -6,8 +7,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
-
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const { tipologia, anno, mese, documento_ids, nome_file, direzione = 'ATTIVA' } = await req.json();
 
     await base44.asServiceRole.entities.EsportazioneFatturazione.create({

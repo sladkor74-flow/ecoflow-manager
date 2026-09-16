@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Migrazione one-shot: crea il record T-CYCLE in ImpiantoTargetSecondaria
 // (quota impianto 1.050.000 kg, totale capacita' 1.300.000 kg) se non esiste gia'.
@@ -10,7 +11,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden' }, { status: 403 });
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const b = base44.asServiceRole;
 
     const impianti = await b.entities.ImpiantoTargetSecondaria.list('-created_date', 500);

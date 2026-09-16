@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { getRegioneFromProvincia } from '../../shared/regioneMap.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Migrazione one-shot: deriva la regione di pertinenza per raccoglitori, stoccaggi e impianti.
 // 1. Elimina i record TargetRaccoglitore ridondanti con regione tra parentesi nel nome (es. "SMOCO S.R.L. (PUGLIA)").
@@ -28,7 +29,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden' }, { status: 403 });
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const b = base44.asServiceRole;
 
     // === 1. Elimina raccoglitori ridondanti con regione tra parentesi nel nome ===

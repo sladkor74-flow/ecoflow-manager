@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from '../../shared/fetchAll.ts';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { getRegioneFromProvincia } from '../../shared/regioneMap.ts';
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 const MESI_MAP = {
   'gennaio': 0, 'febbraio': 1, 'marzo': 2, 'aprile': 3, 'maggio': 4, 'giugno': 5,
@@ -135,8 +136,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
-
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const { anno, mese, tipologia } = await req.json();
     if (!anno || !mese || !tipologia) return Response.json({ error: 'Anno, mese e tipologia obbligatori' }, { status: 400 });
     if (!['RETE', 'ACI', 'EXTRA_RACCOLTA'].includes(tipologia)) return Response.json({ error: 'Tipologia non valida (RETE, ACI, EXTRA_RACCOLTA)' }, { status: 400 });

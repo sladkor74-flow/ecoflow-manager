@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
 import { fetchAll } from '../../shared/fetchAll.ts';
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Gestisce le operazioni di scrittura su entità anagrafiche (Tariffa, Fornitore, FornitoreSecondaria, Servizio).
 // Solo l'amministratore può eseguire creazione/modifica/cancellazione.
@@ -52,8 +53,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: "Forbidden: solo l'amministratore può modificare tariffe e anagrafiche" }, { status: 403 });
-
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const { entita, operazione, id, dati } = await req.json();
 
     const ENTITA_AMMESSE = ['Tariffa', 'Fornitore', 'FornitoreSecondaria', 'Servizio'];

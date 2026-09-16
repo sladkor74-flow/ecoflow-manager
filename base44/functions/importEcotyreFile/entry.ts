@@ -4,6 +4,7 @@ import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
 import { enrichRecords } from "../../shared/dataEnrichment.ts";
 import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSignatures.ts";
 import { CAMPI_ASSEGNATO, archivioPrimaria } from "../../shared/primarie.ts";
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Importa un file Excel scaricato dal portale Ecotyre con validazione anti-perdita-dati.
 // Flusso tassativo:
@@ -62,8 +63,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
-
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const startTime = Date.now();
     const body = await req.json();
     tipo_file = body.tipo_file;

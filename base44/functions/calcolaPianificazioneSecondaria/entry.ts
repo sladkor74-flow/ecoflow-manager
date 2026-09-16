@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { eAmministratore } from "../../shared/permessi.ts";
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const KG_PER_VIAGGIO = 14000;
@@ -26,6 +27,9 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    // La pianificazione si ricalcola a ogni apertura della pagina: tutti la
+    // vedono, ma solo l'amministratore la salva.
+    const puoScrivere = eAmministratore(user);
     const b = base44.asServiceRole;
 
     const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
@@ -347,12 +351,12 @@ export default async function(req) {
       });
     }
 
-    // Persistenza chunked
-    for (let i = 0; i < creates.length; i += 100) {
-      await b.entities.PianificazioneSettimanale.bulkCreate(creates.slice(i, i + 100));
-      await new Promise(r => setTimeout(r, 200));
-    }
-    if (updates.length > 0) {
+    // Persistenza chunked, riservata all'amministratore
+    if (puoScrivere) {
+      for (let i = 0; i < creates.length; i += 100) {
+        await b.entities.PianificazioneSettimanale.bulkCreate(creates.slice(i, i + 100));
+        await new Promise(r => setTimeout(r, 200));
+      }
       for (let i = 0; i < updates.length; i += 100) {
         await b.entities.PianificazioneSettimanale.bulkUpdate(updates.slice(i, i + 100));
         await new Promise(r => setTimeout(r, 200));

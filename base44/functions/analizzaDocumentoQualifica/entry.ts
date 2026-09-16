@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { aggiungiPeriodo, oggiRoma } from "../../shared/qualificaFornitori.ts";
 import { testoConoscenza, vociApprovate, AREE_NORMATIVE, FONTI_UFFICIALI, VERIFICATO_IL } from "../../shared/baseConoscenza.ts";
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Agente di analisi dei documenti di qualifica.
 //
@@ -136,8 +137,7 @@ export default async function(req) {
     base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
-
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const body = await req.json();
     documentoId = body.documento_id;
     const contesto = body.contesto || {};

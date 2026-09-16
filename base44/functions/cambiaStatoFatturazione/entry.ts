@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Cambia lo stato di un documento di fatturazione:
 // azione: 'verifica' | 'approva' | 'chiudi' | 'riapri'
@@ -8,8 +9,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
-
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const { documento_id, azione } = await req.json();
     if (!documento_id || !azione) return Response.json({ error: 'documento_id e azione obbligatori' }, { status: 400 });
 

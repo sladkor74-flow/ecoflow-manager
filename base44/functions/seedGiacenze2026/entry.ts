@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Seed idempotente di GiacenzaSito e DichiarazioneSito per l'anno 2026.
 // Payload { simula: true } (default): restituisce il riepilogo senza scrivere.
@@ -73,8 +74,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
-
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const { simula = true } = await req.json();
     const norm = normalizzaRagioneSociale;
     const tdNorm = (v) => String(v || '').toLowerCase().trim();

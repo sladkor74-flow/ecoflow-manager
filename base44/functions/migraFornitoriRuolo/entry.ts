@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Migrazione automatica: mappa il campo deprecato `tipo` al nuovo `ruolo`.
 // - tipo=stoccaggio -> ruolo=stoccaggio
@@ -12,7 +13,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden' }, { status: 403 });
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const b = base44.asServiceRole;
 
     const fornitori = await b.entities.FornitoreSecondaria.list('-created_date', 1000);

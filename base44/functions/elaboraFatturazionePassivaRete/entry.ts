@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Elabora la fatturazione passiva PUNTO A) - compensi ai raccoglitori per raccolta RETE.
 // Logica esclusiva per fornitore: €/t (su peso) oppure €/Viaggio (su viaggi univoci).
@@ -10,8 +11,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
-
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const { anno, mese, fornitoreId } = await req.json();
     if (!anno || !mese) return Response.json({ error: 'Anno e mese obbligatori' }, { status: 400 });
 

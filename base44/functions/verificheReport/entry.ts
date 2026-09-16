@@ -3,6 +3,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { caricaMovimenti, soggettiDellaSettimana, oggiRoma } from "../../shared/reportSettimanali.ts";
 import { eliminaCampo } from "../../shared/testoLungo.ts";
 import { eDichiarazione, ricontrollaDichiarazioni } from "../../shared/esitoVerifica.ts";
+import { eAmministratore } from "../../shared/permessi.ts";
 
 // Situazione dei report settimanali per una settimana.
 //
@@ -27,6 +28,10 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    // Tutti leggono l'elenco delle verifiche; la manutenzione (cancellare le
+    // scadute e le sostituite, riconfrontare le dichiarazioni) la fa solo
+    // l'amministratore, perche' scrive.
+    const puoScrivere = eAmministratore(user);
 
     const body = await req.json().catch(() => ({}));
     const anno = Number(body.anno);
@@ -39,7 +44,7 @@ export default async function(req) {
     const tutte = await fetchAll(svc.VerificaReport);
     let cancellate = 0;
     for (const v of tutte) {
-      if (v.scade_il && String(v.scade_il).slice(0, 10) <= oggi) {
+      if (puoScrivere && v.scade_il && String(v.scade_il).slice(0, 10) <= oggi) {
         await eliminaCampo(base44, 'VerificaReport', v.id);
         await svc.VerificaReport.delete(v.id);
         cancellate++;
@@ -58,6 +63,7 @@ export default async function(req) {
     const perChiave = new Map();
     for (const v of dellaSettimana) {
       if (!perChiave.has(v.soggetto_chiave)) { perChiave.set(v.soggetto_chiave, v); continue; }
+      if (!puoScrivere) continue;
       // Verifica sostituita che il browser non e' riuscito a cancellare: non serve piu'.
       try {
         await eliminaCampo(base44, 'VerificaReport', v.id);
@@ -69,7 +75,7 @@ export default async function(req) {
     // Le dichiarazioni di nessuna movimentazione si riconfrontano con i dati di adesso:
     // un caricamento successivo puo' averle smentite (o confermate).
     const dichiarazioni = [...perChiave.values()].filter(eDichiarazione);
-    if (dichiarazioni.length && await ricontrollaDichiarazioni(base44, dichiarazioni, dati.movimenti)) {
+    if (puoScrivere && dichiarazioni.length && await ricontrollaDichiarazioni(base44, dichiarazioni, dati.movimenti)) {
       for (const v of dichiarazioni) perChiave.set(v.soggetto_chiave, await svc.VerificaReport.get(v.id));
     }
 

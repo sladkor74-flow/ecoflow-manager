@@ -4,6 +4,7 @@ import { filtraPeriodo } from "../../shared/filtroPeriodo.ts";
 import { sortTariffe, resolveTariffa, calcolaTotale, fattoreConv } from "../../shared/ecotyreTariffe.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { PROV_TO_REGION } from "../../shared/raccoltoCalculator.ts";
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Regione del ritiro mostrata nel dettaglio: se il record non la riporta si ricava
 // dalla provincia. La tariffa continua a usare la regione del record come prima.
@@ -22,8 +23,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
-
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const { anno, mese } = await req.json();
     if (!anno || !mese) return Response.json({ error: 'Anno e mese obbligatori' }, { status: 400 });
 

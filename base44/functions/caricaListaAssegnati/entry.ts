@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { leggiListaDaFogli, arricchisciLista, indiceMese } from "../../shared/evasioneAssegnati.ts";
 import { caricaDati, cancellaVecchi, eseguiControlli } from "../../shared/evasioneAssegnatiDati.ts";
 import { valoreCampo, eliminaCampo } from "../../shared/testoLungo.ts";
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Carica la lista degli assegnati inviata a un raccoglitore per un mese.
 //
@@ -20,8 +21,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
-
+    if (user.role !== 'admin') return rispostaSolaLettura();
     const body = await req.json();
     const anno = Number(body.anno), mese = Number(body.mese);
     const { raccoglitore_chiave, raccoglitore_nome } = body;
