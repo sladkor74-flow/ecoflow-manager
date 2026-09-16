@@ -151,7 +151,7 @@ export default function MatriceProvince({ tipo = 'peso' }) {
             <div className="space-y-1">
               <div className="font-semibold">
                 {gravi.length > 0
-                  ? `${gravi.length} ${gravi.length === 1 ? 'provincia è' : 'province sono'} ferma da tre mesi o più`
+                  ? `${gravi.length === 1 ? '1 provincia è ferma' : gravi.length + ' province sono ferme'} da tre mesi o più`
                   : `${vuoti.size} ${vuoti.size === 1 ? 'provincia ha' : 'province hanno'} due mesi di fila senza ritiri`}
               </div>
               <ul className="space-y-0.5">

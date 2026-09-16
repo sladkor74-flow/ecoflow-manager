@@ -360,8 +360,16 @@ export function soggettiDellaSettimana({ movimenti, interni, anagrafica }, anno,
 
 export const CAMPI_REPORT = ['fir', 'ordine', 'peso', 'data_inizio', 'data_fine', 'data', 'produttore', 'codice_pdr', 'destinatario', 'trasportatore', 'intermediario', 'classe', 'targa'];
 
-/** Numero d'ordine confrontabile: "SEC 26141285" e "SEC26141285" sono lo stesso ordine. */
-export const normalizzaOrdine = (v) => String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+/**
+ * Numero d'ordine confrontabile. "SEC 26141285" e "SEC26141285" sono lo stesso ordine,
+ * e alcuni impianti scrivono nella stessa casella anche la classe ("ET26074218 P"):
+ * si tiene il codice, cioe' il prefisso con il numero lungo.
+ */
+export const normalizzaOrdine = (v) => {
+  const t = String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const m = t.match(/(?:ET|SEC|TER|EXT)?[0-9]{5,}/);
+  return m ? m[0] : t;
+};
 
 /**
  * Porta le righe lette dal file in una forma confrontabile.
