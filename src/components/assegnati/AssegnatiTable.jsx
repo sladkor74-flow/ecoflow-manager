@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatNumber, fmtTon } from '@/lib/utils';
+import { formatNumber, fmtTon, formatIntero } from '@/lib/utils';
 
 const COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
@@ -19,7 +19,7 @@ const COLUMNS = [
   { key: 'trasportatore', label: 'Trasportatore' },
 ];
 
-export default function AssegnatiTable({ records, loading, ragioneSocialeFilter }) {
+export default function AssegnatiTable({ records, loading, ragioneSocialeFilter, posizioni = null, totaleCoda = 0 }) {
   if (loading) {
     return <div className="flex items-center justify-center py-8 text-muted-foreground">Caricamento ordini assegnati...</div>;
   }
@@ -35,6 +35,11 @@ export default function AssegnatiTable({ records, loading, ragioneSocialeFilter 
       <table className="w-full text-sm">
         <thead className="bg-muted">
           <tr>
+            {posizioni && (
+              <th className="text-left px-3 py-2.5 font-medium whitespace-nowrap" title="Posizione in coda e richieste piu' vecchie che la precedono, con i filtri attivi">
+                In coda
+              </th>
+            )}
             {COLUMNS.map((col) => (
               <th key={col.key} className="text-left px-3 py-2.5 font-medium whitespace-nowrap">{col.label}</th>
             ))}
@@ -43,6 +48,17 @@ export default function AssegnatiTable({ records, loading, ragioneSocialeFilter 
         <tbody>
           {records.map((r) => (
             <tr key={r.id} className="border-t hover:bg-muted/50">
+              {posizioni && (
+                <td className="px-3 py-2 whitespace-nowrap tabular-nums">
+                  {posizioni.get(r.id) ? (
+                    <>
+                      <span className="font-semibold">{formatIntero(posizioni.get(r.id))}ª</span>
+                      <span className="text-muted-foreground"> su {formatIntero(totaleCoda)}</span>
+                      <span className="block text-xs text-muted-foreground">{formatIntero(posizioni.get(r.id) - 1)} prima</span>
+                    </>
+                  ) : <span className="text-muted-foreground" title="Fuori dai filtri attivi">—</span>}
+                </td>
+              )}
               {COLUMNS.map((col) => {
                 let val = r[col.key];
                 if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';

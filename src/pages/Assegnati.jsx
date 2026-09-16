@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Search } from 'lucide-react';
+import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Search, ListOrdered } from 'lucide-react';
+import { formatIntero } from '@/lib/utils';
 import AssegnatiKpi from '@/components/assegnati/AssegnatiKpi';
 import AssegnatiMatrix from '@/components/assegnati/AssegnatiMatrix';
 import AssegnatiTable from '@/components/assegnati/AssegnatiTable';
@@ -12,7 +13,6 @@ import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdO
 
 export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Rete — Backlog Richieste', description = 'Ordini in stato "assegnato" di classe diversa da PFU Autodemolizione, derivati automaticamente dal caricamento delle Primarie.' }) {
   const [data, setData] = useState(null);
-  const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -33,39 +33,65 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
     setLoading(false);
   }, [filters]);
 
+  // Gli ordini si leggono una volta sola: i filtri si applicano qui, cosi' la
+  // posizione in coda si puo' ricalcolare senza rileggere l'archivio.
   const loadRecords = useCallback(async () => {
     setLoadingRecords(true);
     try {
       const all = await fetchAllClient(base44.entities[entity], null, '-ordine_immesso_il');
       setTuttiRecords(all.map(r => ({ ...r, peso_t: +((r.peso_stimato || 0) / 1000).toFixed(3) })));
-      const filtered = all.filter(r => {
-        if (filters.anno.length > 0 && !filters.anno.map(String).includes(String(r.anno))) return false;
-        if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;
-        if (filters.regione.length > 0 && !filters.regione.includes(r.regione)) return false;
-        if (filters.provincia.length > 0 && !filters.provincia.includes((r.provincia || '').toUpperCase().trim())) return false;
-        if (filters.partner_operativo.length > 0 && !filters.partner_operativo.includes((r.partner_operativo || '').trim())) return false;
-        if (filters.classe.length > 0 && !filters.classe.includes(r.classe)) return false;
-        if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
-        if (filters.ragione_sociale) {
-          const search = filters.ragione_sociale.toLowerCase().trim();
-          if (!(r.ragione_sociale || '').toLowerCase().includes(search)) return false;
-        }
-        if (filters.data) {
-          const d = r.ordine_immesso_il;
-          if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
-        }
-        return true;
-      }).map(r => ({ ...r, peso_t: +((r.peso_stimato || 0) / 1000).toFixed(3) }));
-      setRecords(filtered);
     } catch (e) { console.error(e); }
     setLoadingRecords(false);
-  }, [filters]);
+  }, [entity]);
 
   useEffect(() => { loadData(); }, [loadData]);
-  useEffect(() => { if (viewMode === 'detail') loadRecords(); }, [loadRecords, viewMode]);
+  useEffect(() => { if (viewMode === 'detail' && !tuttiRecords && !loadingRecords) loadRecords(); }, [loadRecords, viewMode, tuttiRecords, loadingRecords]);
   // Cercando un ID si passa al dettaglio degli ordini.
   useEffect(() => { if (cercaId.trim()) setViewMode('detail'); }, [cercaId]);
+
+  // Filtri diversi dalla ricerca del punto di raccolta: sono questi a definire la coda.
+  const inFiltri = useCallback((r) => {
+    if (filters.anno.length > 0 && !filters.anno.map(String).includes(String(r.anno))) return false;
+    if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;
+    if (filters.regione.length > 0 && !filters.regione.includes(r.regione)) return false;
+    if (filters.provincia.length > 0 && !filters.provincia.includes((r.provincia || '').toUpperCase().trim())) return false;
+    if (filters.partner_operativo.length > 0 && !filters.partner_operativo.includes((r.partner_operativo || '').trim())) return false;
+    if (filters.classe.length > 0 && !filters.classe.includes(r.classe)) return false;
+    if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
+    if (filters.data) {
+      const d = r.ordine_immesso_il;
+      if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
+    }
+    return true;
+  }, [filters]);
+
+  // La coda di evasione: prima le richieste piu' vecchie, come si lavora davvero.
+  // La posizione tiene conto dei filtri attivi (province, classi, mesi...) ma non
+  // della ricerca, altrimenti cercando un punto di raccolta risulterebbe sempre primo.
+  const coda = useMemo(() => {
+    const lista = (tuttiRecords || []).filter(inFiltri)
+      .sort((a, b) => String(a.ordine_immesso_il || '').localeCompare(String(b.ordine_immesso_il || '')) || String(a.id_ordine || '').localeCompare(String(b.id_ordine || '')));
+    const posizioni = new Map();
+    lista.forEach((r, i) => posizioni.set(r.id, i + 1));
+    return { posizioni, totale: lista.length };
+  }, [tuttiRecords, inFiltri]);
+
+  const cercaPdr = (filters.ragione_sociale || '').toLowerCase().trim();
+  const records = useMemo(() => (tuttiRecords || []).filter(r => inFiltri(r) && (!cercaPdr
+    || `${r.ragione_sociale || ''} ${r.punto_di_raccolta || ''} ${r.id_pdr ?? ''}`.toLowerCase().includes(cercaPdr))),
+  [tuttiRecords, inFiltri, cercaPdr]);
+
   const ordiniMostrati = cercaId.trim() ? (tuttiRecords || []).filter(r => corrispondeIdOrdine(r, cercaId)) : records;
+  // Del punto di raccolta cercato interessa la richiesta piu' avanti in coda.
+  const primoInCoda = useMemo(() => {
+    if (!cercaPdr && !cercaId.trim()) return null;
+    let migliore = null;
+    for (const r of ordiniMostrati) {
+      const p = coda.posizioni.get(r.id);
+      if (p && (!migliore || p < migliore.posizione)) migliore = { posizione: p, record: r };
+    }
+    return migliore;
+  }, [ordiniMostrati, coda, cercaPdr, cercaId]);
 
   // Auto-refresh on new uploads
   useEffect(() => {
@@ -91,6 +117,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
   };
 
   const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
+  const hasFiltriCoda = Object.entries(filters).some(([k, v]) => k !== 'ragione_sociale' && (Array.isArray(v) ? v.length > 0 : v));
   const resetFilters = () => { setFilters({ anno: [], mese: [], regione: [], provincia: [], partner_operativo: [], classe: [], stato: [], data: '', ragione_sociale: '' }); setRagioneSocialeInput(''); };
   const opts = data?.filterOptions || {};
 
@@ -135,7 +162,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
               <div className="col-span-full flex gap-2">
                 <input
                   type="text"
-                  placeholder="Cerca per ragione sociale produttore..."
+                  placeholder="Cerca punto di raccolta: ragione sociale, nome o codice PDR..."
                   value={ragioneSocialeInput}
                   onChange={e => setRagioneSocialeInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') applyRagioneSociale(); }}
@@ -167,7 +194,23 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
                 </TabsContent>
                 <TabsContent value="detail" className="space-y-3 mt-3">
                   <h2 className="text-lg font-heading font-semibold">Dettaglio Ordini Assegnati ({ordiniMostrati.length})</h2>
-                  <AssegnatiTable records={ordiniMostrati} loading={loadingRecords} ragioneSocialeFilter={cercaId.trim() ? '' : filters.ragione_sociale} />
+                  {primoInCoda && (
+                    <div className="border rounded-lg px-3 py-2 text-sm bg-sky-50 border-sky-200 text-sky-900 flex items-start gap-2">
+                      <ListOrdered className="w-4 h-4 mt-0.5 shrink-0" />
+                      <span>
+                        <strong>{primoInCoda.record.ragione_sociale || primoInCoda.record.punto_di_raccolta}</strong>: la richiesta più avanti è la{' '}
+                        <strong>{formatIntero(primoInCoda.posizione)}ª</strong> su {formatIntero(coda.totale)} in coda{hasFiltriCoda ? ' con i filtri attivi' : ''}.
+                        Prima di lei ci sono <strong>{formatIntero(primoInCoda.posizione - 1)}</strong> richieste più vecchie.
+                      </span>
+                    </div>
+                  )}
+                  <AssegnatiTable
+                    records={ordiniMostrati}
+                    loading={loadingRecords}
+                    ragioneSocialeFilter={cercaId.trim() ? '' : filters.ragione_sociale}
+                    posizioni={coda.posizioni}
+                    totaleCoda={coda.totale}
+                  />
                 </TabsContent>
               </Tabs>
             </div>
