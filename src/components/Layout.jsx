@@ -5,7 +5,7 @@ import { base44 } from '@/api/base44Client';
 import { EVENTO_AGGIORNAMENTO } from '@/lib/qualifica';
 import {
   LayoutDashboard, Upload, ClipboardList, Truck, Factory,
-  Ship, Warehouse, Target, FileText, CheckSquare, Menu, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, ShieldCheck, ClipboardCheck, Sparkles, FileBarChart, Inbox } from
+  Ship, Warehouse, Target, FileText, CheckSquare, Menu, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, ShieldCheck, ClipboardCheck, Sparkles, FileBarChart, Inbox, Users } from
 'lucide-react';
 import { ricordaRuolo, proteggiScritture } from '@/lib/permessi';
 
@@ -31,7 +31,8 @@ const NAV_ITEMS = [
 { label: 'Assistente', path: '/assistente', icon: Sparkles },
 { label: 'Predittività Secondarie', path: '/predittivita-secondarie', icon: LineChart },
 { label: 'To-Do List', path: '/todo', icon: CheckSquare },
-{ label: 'Richieste', path: '/richieste', icon: Inbox, contatore: 'richieste' }];
+{ label: 'Richieste', path: '/richieste', icon: Inbox, contatore: 'richieste' },
+{ label: 'Utenti', path: '/utenti', icon: Users, soloAdmin: true }];
 
 
 export default function Layout() {
@@ -108,7 +109,7 @@ export default function Layout() {
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.filter((item) => !item.soloAdmin || isAdmin).map((item) => {
             const Icon = item.icon;
             const active = location.pathname === item.path;
             return (

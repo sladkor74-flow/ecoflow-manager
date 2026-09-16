@@ -31,6 +31,7 @@ import Giacenze from '@/pages/Giacenze';
 import QualificaFornitori from '@/pages/QualificaFornitori';
 import Verifiche from '@/pages/Verifiche';
 import Richieste from '@/pages/Richieste';
+import Utenti from '@/pages/Utenti';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -85,6 +86,7 @@ const AuthenticatedApp = () => {
           <Route path="/pdr" element={<Pdr />} />
           <Route path="/giacenze" element={<Giacenze />} />
           <Route path="/richieste" element={<PageErrorBoundary><Richieste /></PageErrorBoundary>} />
+          <Route path="/utenti" element={<PageErrorBoundary><Utenti /></PageErrorBoundary>} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />
