@@ -80,7 +80,7 @@ export default function AssegnatiTable({ records, loading, ragioneSocialeFilter,
                   <React.Fragment key={col.key}>
                     <td className="px-3 py-2 whitespace-nowrap">{val ?? ''}</td>
                     {col.key === DOPO_COLONNA_OMOLOGA && (
-                      <td className="px-3 py-2"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} /></td>
+                      <td className="px-3 py-2"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} nome={r.ragione_sociale} /></td>
                     )}
                   </React.Fragment>
                 );

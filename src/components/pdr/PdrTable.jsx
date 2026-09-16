@@ -88,7 +88,7 @@ export default function PdrTable({ records, loading, onSelectPdr }) {
               </td>
               <td className="px-3 py-2 font-mono text-xs">{r.codice_esterno || '—'}</td>
               <td className="px-3 py-2 font-medium">{r.ragione_sociale || '—'}</td>
-              <td className="px-3 py-2"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} /></td>
+              <td className="px-3 py-2"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} nome={r.ragione_sociale} /></td>
               <td className="px-3 py-2">{r.comune || '—'}</td>
               <td className="px-3 py-2">{r.provincia || '—'}</td>
               <td className="px-3 py-2 font-mono text-xs">{r.codice_fiscale || '—'}</td>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { omologaDelPunto } from '@/lib/omologheIndice';
 
 // Segno dell'omologa accanto a un punto di raccolta, per quando si programma il
@@ -17,16 +18,23 @@ const COLORE = {
   senza_data: 'bg-slate-100 text-slate-700 border-slate-300',
 };
 
-export default function BadgeOmologa({ indice, idPdr, idCliente }) {
+export default function BadgeOmologa({ indice, idPdr, idCliente, nome }) {
   if (!indice) return <span className="text-muted-foreground text-xs">…</span>;
   if (indice.errore) return <span className="text-muted-foreground text-xs" title="Omologhe non disponibili">?</span>;
 
   const s = omologaDelPunto(indice, idPdr, idCliente);
+  // Un PDR si collega all'omologa con i formulari dei carichi gia' fatti, oppure a
+  // mano. Chi non ha ancora conferito all'impianto -- tipicamente una richiesta
+  // assegnata di un punto nuovo -- non ha formulari: l'omologa puo' esserci nel
+  // nostro elenco senza essere collegata. Percio' non si dice "nessuna", si
+  // rimanda a cercarla per nome, e la decisione resta a chi guarda.
   if (!s || !s.livello) {
+    const spiega = "Nessuna omologa collegata a questo punto. Può mancare il documento, oppure solo il collegamento: succede ai punti che non hanno ancora conferito all'impianto. Clicca per cercarla per nome nel modulo Omologhe.";
+    if (!nome) return <span className="text-muted-foreground text-xs" title={spiega}>non collegata</span>;
     return (
-      <span className="text-muted-foreground text-xs" title="Nessuna omologa registrata per questo punto di raccolta: se il ritiro va all'impianto, chiedi il documento.">
-        nessuna
-      </span>
+      <Link to={`/omologhe?cerca=${encodeURIComponent(nome)}`} className="text-xs text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-primary" title={spiega}>
+        non collegata
+      </Link>
     );
   }
 

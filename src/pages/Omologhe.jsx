@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { usePermessi } from '@/lib/permessi';
 import { fetchAllClient } from '@/lib/fetchAllClient';
@@ -27,6 +28,21 @@ import { Loader2, FileCheck2, Search, Upload, FileSpreadsheet, Check, PauseCircl
 // Le divergenze non si risolvono da sole: la verifica la fa l'operatore in
 // ufficio, con i documenti davanti, e qui registra la sua decisione.
 
+// La ricerca confronta le parole, non la scrittura: "PIUGOMME DISTRIBUZIONI S.R.L."
+// arrivato da un ordine trova "Piugomme Distribuzioni srl" nell'elenco. Basta che
+// ogni parola significativa cercata compaia nel nome.
+const FORME = new Set(['srl', 'srls', 'spa', 'sas', 'snc', 'sc', 'ss', 'soc', 'societa', 'unipersonale', 'ditta', 'di', 'del', 'della', 'dei', 'e', 'c']);
+const parole = (v) => String(v || '').toLowerCase()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, ' ').trim()
+  .replace(/\b(?:[a-z] )+[a-z]\b/g, (m) => m.replace(/ /g, ''))
+  .split(' ').filter(p => p && !FORME.has(p));
+const corrisponde = (r, cercate) => {
+  if (!cercate.length) return true;
+  const nome = parole(`${r.produttore} ${r.registro_nome || ''}`).join(' ');
+  return cercate.every(p => nome.includes(p));
+};
+
 const dataIt = (v) => (v ? String(v).slice(0, 10).split('-').reverse().join('/') : '—');
 
 const scadenzaTesto = (giorni) => {
@@ -52,7 +68,8 @@ export default function Omologhe() {
   const [righe, setRighe] = useState([]);
   const [caricamento, setCaricamento] = useState(true);
   const [errore, setErrore] = useState(null);
-  const [cerca, setCerca] = useState('');
+  const [params] = useSearchParams();
+  const [cerca, setCerca] = useState(() => params.get('cerca') || '');
   const [canale, setCanale] = useState('tutti');
   const [scadenza, setScadenza] = useState('tutte');
   const [statoFiltro, setStatoFiltro] = useState('tutti');
@@ -86,9 +103,9 @@ export default function Omologhe() {
   }), [righe, oggi]);
 
   const filtrate = useMemo(() => {
-    const q = cerca.trim().toLowerCase();
+    const cercate = parole(cerca);
     return conGiorni.filter(r => {
-      if (q && !`${r.produttore} ${r.registro_nome || ''}`.toLowerCase().includes(q)) return false;
+      if (!corrisponde(r, cercate)) return false;
       if (canale !== 'tutti' && (r.canale || 'RETE') !== canale) return false;
       if (statoFiltro !== 'tutti' && (r.stato || 'da_verificare') !== statoFiltro) return false;
       if (scadenza === 'scadute' && r.fascia !== 'scaduta') return false;
@@ -105,10 +122,10 @@ export default function Omologhe() {
   }, [conGiorni, cerca, canale, scadenza, statoFiltro]);
 
   const divergenti = useMemo(() => {
-    const q = cerca.trim().toLowerCase();
+    const cercate = parole(cerca);
     return conGiorni
       .filter(r => (r.tipo_divergenza || 'nessuna') !== 'nessuna')
-      .filter(r => !q || `${r.produttore} ${r.registro_nome || ''}`.toLowerCase().includes(q))
+      .filter(r => corrisponde(r, cercate))
       .filter(r => tipoDiv === 'tutte' || r.tipo_divergenza === tipoDiv)
       .filter(r => {
         const s = r.stato || 'da_verificare';

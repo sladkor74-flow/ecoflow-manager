@@ -55,7 +55,7 @@ export default function PdrDetailCard({ r }) {
         <DetailField label="ID PDR" value={r.id_pdr} />
         <div>
           <dt className="text-xs text-muted-foreground">Omologa</dt>
-          <dd className="text-sm"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} /></dd>
+          <dd className="text-sm"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} nome={r.ragione_sociale || r.descrizione_pdr} /></dd>
         </div>
         <DetailField label="ID U/L RENTRi" value={r.rentri_id_ul} />
         <DetailField label="Coordinate" value={hasCoords ? `${r._lat}, ${r._lng}` : null} />
