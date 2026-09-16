@@ -4,7 +4,7 @@ import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
 import { enrichRecords } from "../../shared/dataEnrichment.ts";
 import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSignatures.ts";
 import { CAMPI_ASSEGNATO, archivioPrimaria } from "../../shared/primarie.ts";
-import { rispostaSolaLettura } from "../../shared/permessi.ts";
+import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 
 // Importa un file Excel scaricato dal portale Ecotyre con validazione anti-perdita-dati.
 // Flusso tassativo:
@@ -63,10 +63,13 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return rispostaSolaLettura();
     const startTime = Date.now();
     const body = await req.json();
     tipo_file = body.tipo_file;
+    // Il permesso dipende dal file: l'operatore base carica primarie, secondarie
+    // e terziarie, l'amministratore tutto.
+    const livello = await livelloDi(base44, user);
+    if (!puoCaricare(livello, tipo_file)) return rispostaCaricamentoNegato(livello, tipo_file);
     nome_file = body.nome_file || 'N/D';
     file_url = body.file_url;
     const { periodo_riferimento, conferma_forzatura, replace_existing } = body;

@@ -3,6 +3,7 @@ import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
 import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSignatures.ts";
 import { enrichRecords } from "../../shared/dataEnrichment.ts";
 import { ARCHIVI_PRIMARIE, DATE_PRIMARIE, archivioPrimaria, recordAssegnato } from "../../shared/primarie.ts";
+import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 
 // Importazione a blocchi per i report di grandi dimensioni del portale Ecotyre.
 //
@@ -148,7 +149,6 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized', dati_intatti: true }, { status: 401 });
-    if (user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin', dati_intatti: true }, { status: 403 });
 
     fase = 'lettura della richiesta';
     const body = await req.json();
@@ -156,6 +156,11 @@ export default async function(req) {
       azione, tipo_file, nome_file, intestazioni, righe, blocco,
       totale_righe, conferma_forzatura, atteso, minimo,
     } = body;
+
+    // Il permesso dipende dal file: l'operatore base carica primarie, secondarie
+    // e terziarie, l'amministratore tutto.
+    const livello = await livelloDi(base44, user);
+    if (!puoCaricare(livello, tipo_file)) return rispostaCaricamentoNegato(livello, tipo_file);
 
     const config = SHEET_MAP[tipo_file];
     if (!config) {

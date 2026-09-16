@@ -16,7 +16,7 @@ const TIPI_FILE = [
 ];
 
 export default function CaricamentoDati() {
-  const { isAdmin } = usePermessi();
+  const { isAdmin, puoCaricare } = usePermessi();
   const [logs, setLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(true);
   const [uploading, setUploading] = useState(null);
@@ -113,7 +113,7 @@ export default function CaricamentoDati() {
         </p>
       </div>
 
-      <BannerSolaLettura cosa="i caricamenti" />
+      {!isAdmin && !TIPI_FILE.some(t => puoCaricare(t.key)) && <BannerSolaLettura cosa="i caricamenti" />}
 
       {/* Card di upload */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -132,7 +132,7 @@ export default function CaricamentoDati() {
                 </div>
               </div>
 
-              {isAdmin ? (
+              {puoCaricare(tipo.key) ? (
                 <label className="block">
                   <input
                     type="file"
@@ -151,7 +151,7 @@ export default function CaricamentoDati() {
                 </label>
               ) : (
                 <div className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-muted text-muted-foreground text-sm">
-                  <Upload className="w-4 h-4" /> Caricamento riservato all'amministratore
+                  <Upload className="w-4 h-4" /> Questo caricamento non è nel tuo livello
                 </div>
               )}
 

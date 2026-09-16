@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Upload, ClipboardList, Truck, Factory,
   Ship, Warehouse, Target, FileText, CheckSquare, Menu, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, ShieldCheck, ClipboardCheck, Sparkles, FileBarChart, Inbox, Users } from
 'lucide-react';
-import { ricordaRuolo, proteggiScritture } from '@/lib/permessi';
+import { caricaLivello, proteggiScritture } from '@/lib/permessi';
 
 const NAV_ITEMS = [
 { label: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -46,8 +46,8 @@ export default function Layout() {
   // Il ruolo serve anche fuori dai componenti, per fermare le scritture di chi
   // consulta soltanto. La rete di sicurezza si installa una volta sola.
   useEffect(() => {
-    ricordaRuolo(user);
     proteggiScritture();
+    caricaLivello(user);
   }, [user]);
 
   // Contatore delle richieste: all'amministratore quelle da valutare, agli altri

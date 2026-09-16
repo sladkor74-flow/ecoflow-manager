@@ -1,5 +1,7 @@
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import { base44 } from '@/api/base44Client';
+import { LIVELLO_PREDEFINITO, chiaveEmail, livelloValido, puoCaricare as livelloPuoCaricare } from '@/lib/livelli';
 
 // Chi puo' fare che cosa, lato browser.
 //
@@ -39,11 +41,53 @@ async function ruolo() {
   return promessaRuolo;
 }
 
-/** Permessi della pagina: chi guarda e se puo' cambiare qualcosa. */
+// Il livello di chi sta lavorando si legge una volta sola e si tiene qui: le
+// pagine lo chiedono spesso e non ha senso interrogare il gestionale ogni volta.
+let livelloCorrente = null;
+const EVENTO_LIVELLO = 'eco-livello-utente';
+
+/** Legge il livello della persona collegata e lo comunica alle pagine aperte. */
+export async function caricaLivello(user) {
+  ricordaRuolo(user);
+  if (!user) {
+    livelloCorrente = null;
+  } else if (user.role === 'admin') {
+    livelloCorrente = 'admin';
+  } else {
+    try {
+      const righe = await base44.entities.LivelloUtente.filter({ email: chiaveEmail(user.email) }, '-updated_date', 1);
+      livelloCorrente = livelloValido(righe && righe[0] ? righe[0].livello : null);
+    } catch (_e) {
+      // Nel dubbio si concede il meno possibile.
+      livelloCorrente = LIVELLO_PREDEFINITO;
+    }
+  }
+  window.dispatchEvent(new CustomEvent(EVENTO_LIVELLO));
+  return livelloCorrente;
+}
+
+/** Permessi della pagina: chi guarda, il suo livello e cosa puo' fare. */
 export function usePermessi() {
   const { user, isLoadingAuth } = useAuth();
   const isAdmin = !!user && user.role === 'admin';
-  return { user, isAdmin, soloLettura: !isAdmin, caricamento: isLoadingAuth };
+  const [livelloLetto, setLivelloLetto] = useState(livelloCorrente);
+
+  useEffect(() => {
+    const aggiorna = () => setLivelloLetto(livelloCorrente);
+    window.addEventListener(EVENTO_LIVELLO, aggiorna);
+    aggiorna();
+    return () => window.removeEventListener(EVENTO_LIVELLO, aggiorna);
+  }, []);
+
+  const livello = isAdmin ? 'admin' : livelloLetto;
+  return {
+    user,
+    isAdmin,
+    soloLettura: !isAdmin,
+    caricamento: isLoadingAuth,
+    livello,
+    puoCaricare: (tipoFile) => livelloPuoCaricare(livello, tipoFile),
+  };
 }
 
 /**

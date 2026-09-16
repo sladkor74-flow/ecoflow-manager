@@ -1,0 +1,58 @@
+{
+  "name": "LivelloUtente",
+  "type": "object",
+  "properties": {
+    "email": {
+      "type": "string",
+      "description": "Email della persona, tutta in minuscolo: e' la chiave con cui si riconosce chi sta lavorando"
+    },
+    "nome": {
+      "type": "string",
+      "description": "Nome della persona, solo per leggere meglio l'elenco"
+    },
+    "livello": {
+      "type": "string",
+      "enum": [
+        "operatore_base",
+        "consultazione"
+      ],
+      "default": "consultazione",
+      "description": "Livello assegnato. L'amministratore non si registra qui: lo dice gia' il suo ruolo sulla piattaforma"
+    },
+    "assegnato_da": {
+      "type": "string",
+      "description": "Chi ha deciso il livello"
+    },
+    "assegnato_il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Quando e' stato deciso"
+    },
+    "nota": {
+      "type": "string",
+      "description": "Perche' e' stato dato questo livello"
+    }
+  },
+  "required": [
+    "email",
+    "livello"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

@@ -1,40 +1,48 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
 import { usePermessi } from '@/lib/permessi';
+import { LIVELLI, LIVELLO_PREDEFINITO, chiaveEmail, livelloValido } from '@/lib/livelli';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Users, ShieldCheck, Eye, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Loader2, Users, ShieldCheck, Eye, Upload, CheckCircle2, AlertTriangle, Check, X } from 'lucide-react';
 
-// Modulo Utenti: chi entra nel gestionale e con quale livello.
+// Modulo Utenti: chi entra nel gestionale e che cosa puo' farci.
 //
-// I livelli sono due. L'amministratore carica i file e modifica tutto; chi e' in
-// consultazione guarda ed esporta, e per un caricamento o una correzione apre una
-// richiesta. Il livello si cambia da qui e vale dal primo accesso successivo.
+// I livelli stanno in un posto solo, src/lib/livelli.js, con l'elenco di quello
+// che ciascuno puo' e non puo' fare. Quell'elenco si vede qui e ricompare nella
+// domanda di conferma: chi assegna un livello deve sapere cosa sta concedendo,
+// senza andarselo a ricordare.
 //
-// La pagina la vede solo l'amministratore, e non puo' cambiare il proprio livello:
-// togliersi i permessi da soli lascerebbe il gestionale senza nessuno che lo governa.
+// L'amministratore e' tale per la piattaforma; gli altri livelli li tiene il
+// gestionale nell'entita' LivelloUtente, una riga per persona.
 
-const LIVELLI = {
-  admin: {
-    nome: 'Amministratore',
-    Icona: ShieldCheck,
-    classe: 'text-primary',
-    spiegazione: 'Carica i file, importa i dati e modifica ogni modulo.',
-  },
-  user: {
-    nome: 'Consultazione',
-    Icona: Eye,
-    classe: 'text-slate-600',
-    spiegazione: 'Consulta ed esporta tutto; per modifiche apre una richiesta.',
-  },
-};
+const ICONE = { admin: ShieldCheck, operatore_base: Upload, consultazione: Eye };
+const COLORI = { admin: 'text-primary', operatore_base: 'text-amber-700', consultazione: 'text-slate-600' };
+const ORDINE = ['admin', 'operatore_base', 'consultazione'];
 
 const data = (v) => (v ? new Date(v).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—');
+
+function SchedaLivello({ chiave, quante }) {
+  const l = LIVELLI[chiave];
+  const Icona = ICONE[chiave];
+  return (
+    <div className="border rounded-lg bg-card p-4 space-y-2">
+      <div className={`flex items-center gap-2 font-semibold ${COLORI[chiave]}`}><Icona className="w-4 h-4" /> {l.nome}</div>
+      <p className="text-sm text-muted-foreground">{l.sommario}</p>
+      <ul className="text-xs space-y-0.5">
+        {l.puo.map(p => <li key={p} className="flex gap-1.5"><Check className="w-3 h-3 mt-0.5 shrink-0 text-green-600" /><span>{p}</span></li>)}
+        {l.nonPuo.map(p => <li key={p} className="flex gap-1.5 text-muted-foreground"><X className="w-3 h-3 mt-0.5 shrink-0 text-red-500" /><span>{p}</span></li>)}
+      </ul>
+      <p className="text-xs text-muted-foreground pt-1 border-t">{quante} {quante === 1 ? 'persona' : 'persone'}</p>
+    </div>
+  );
+}
 
 export default function Utenti() {
   const { user, isAdmin } = usePermessi();
   const { toast } = useToast();
   const [utenti, setUtenti] = useState([]);
+  const [livelli, setLivelli] = useState({});
   const [caricamento, setCaricamento] = useState(true);
   const [inCorso, setInCorso] = useState(null);
   const [errore, setErrore] = useState(null);
@@ -43,7 +51,16 @@ export default function Utenti() {
     setCaricamento(true);
     setErrore(null);
     try {
-      const elenco = await base44.entities.User.list('-created_date', 200);
+      const [elenco, righe] = await Promise.all([
+        base44.entities.User.list('-created_date', 200),
+        base44.entities.LivelloUtente.list('-updated_date', 500),
+      ]);
+      const perEmail = {};
+      for (const r of righe || []) {
+        const k = chiaveEmail(r.email);
+        if (k && !perEmail[k]) perEmail[k] = r;
+      }
+      setLivelli(perEmail);
       setUtenti((elenco || []).filter(u => !u.is_service));
     } catch (e) {
       setErrore(e.message || 'Non riesco a leggere gli utenti.');
@@ -53,17 +70,44 @@ export default function Utenti() {
 
   useEffect(() => { if (isAdmin) carica(); else setCaricamento(false); }, [isAdmin, carica]);
 
-  const cambiaLivello = async (u, livello) => {
-    if (livello === u.role) return;
+  const livelloDi = (u) => (u.role === 'admin' ? 'admin' : livelloValido(livelli[chiaveEmail(u.email)] ? livelli[chiaveEmail(u.email)].livello : null));
+
+  const cambiaLivello = async (u, nuovo) => {
+    const attuale = livelloDi(u);
+    if (nuovo === attuale) return;
+    const l = LIVELLI[nuovo];
     const nome = u.full_name || u.email;
-    const avviso = livello === 'admin'
-      ? `Vuoi dare a ${nome} i permessi di amministratore? Potrà caricare file e modificare ogni modulo, fatturazione compresa.`
-      : `Vuoi mettere ${nome} in sola consultazione? Potrà guardare ed esportare, ma non modificare più nulla.`;
-    if (!window.confirm(avviso)) return;
+    const testo = [
+      `Vuoi dare a ${nome} il livello «${l.nome}»?`,
+      '',
+      'Potrà:',
+      ...l.puo.map(p => '  • ' + p),
+      ...(l.nonPuo.length ? ['', 'Non potrà:', ...l.nonPuo.map(p => '  • ' + p)] : []),
+      '',
+      'Vale dal suo prossimo accesso.',
+    ].join('\n');
+    if (!window.confirm(testo)) return;
+
     setInCorso(u.id);
     try {
-      await base44.entities.User.update(u.id, { role: livello });
-      toast({ title: 'Livello aggiornato', description: `${nome}: ${LIVELLI[livello].nome}. Vale dal suo prossimo accesso.` });
+      // Il ruolo della piattaforma distingue solo l'amministratore; il resto lo
+      // dice la riga del gestionale.
+      const ruolo = nuovo === 'admin' ? 'admin' : 'user';
+      if ((u.role || 'user') !== ruolo) await base44.entities.User.update(u.id, { role: ruolo });
+
+      const email = chiaveEmail(u.email);
+      const riga = livelli[email];
+      const dati = {
+        email,
+        nome: u.full_name || '',
+        livello: nuovo === 'admin' ? LIVELLO_PREDEFINITO : nuovo,
+        assegnato_da: (user && (user.full_name || user.email)) || '',
+        assegnato_il: new Date().toISOString(),
+      };
+      if (riga) await base44.entities.LivelloUtente.update(riga.id, dati);
+      else await base44.entities.LivelloUtente.create(dati);
+
+      toast({ title: 'Livello aggiornato', description: `${nome}: ${l.nome}. Vale dal suo prossimo accesso.` });
       await carica();
     } catch (e) {
       toast({ title: 'Non riesco a cambiare il livello', description: e.message, variant: 'destructive' });
@@ -82,6 +126,8 @@ export default function Utenti() {
     );
   }
 
+  const quante = (chiave) => utenti.filter(u => livelloDi(u) === chiave).length;
+
   return (
     <div className="p-4 lg:p-8 max-w-5xl mx-auto space-y-6">
       <div>
@@ -89,23 +135,13 @@ export default function Utenti() {
           <Users className="w-7 h-7 text-primary" /> Utenti
         </h1>
         <p className="text-muted-foreground mt-1 max-w-3xl">
-          Chi entra nel gestionale e che cosa può farci. Il livello si cambia da qui e vale dal primo accesso successivo.
+          Chi entra nel gestionale e che cosa può farci. Il livello si cambia da qui e vale dal primo accesso successivo;
+          prima di applicarlo ti viene ricordato per esteso che cosa stai concedendo.
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        {Object.entries(LIVELLI).map(([chiave, l]) => {
-          const { Icona } = l;
-          return (
-            <div key={chiave} className="border rounded-lg bg-card p-4">
-              <div className={`flex items-center gap-2 font-semibold ${l.classe}`}><Icona className="w-4 h-4" /> {l.nome}</div>
-              <p className="text-sm text-muted-foreground mt-1">{l.spiegazione}</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {utenti.filter(u => (u.role || 'user') === chiave).length} {utenti.filter(u => (u.role || 'user') === chiave).length === 1 ? 'persona' : 'persone'}
-              </p>
-            </div>
-          );
-        })}
+      <div className="grid gap-3 md:grid-cols-3">
+        {ORDINE.map(k => <SchedaLivello key={k} chiave={k} quante={quante(k)} />)}
       </div>
 
       {errore && <div className="border border-red-300 bg-red-50 text-red-800 rounded-lg px-4 py-3 text-sm">{errore}</div>}
@@ -125,10 +161,11 @@ export default function Utenti() {
             </thead>
             <tbody>
               {utenti.map(u => {
-                const livello = u.role || 'user';
+                const livello = livelloDi(u);
                 const sonoIo = user && u.id === user.id;
+                const riga = livelli[chiaveEmail(u.email)];
                 return (
-                  <tr key={u.id} className="border-t">
+                  <tr key={u.id} className="border-t align-top">
                     <td className="px-3 py-2">
                       <div className="font-medium">{u.full_name || '(senza nome)'}{sonoIo ? ' · tu' : ''}</div>
                       <div className="text-xs text-muted-foreground">{u.email}</div>
@@ -146,12 +183,18 @@ export default function Utenti() {
                       ) : inCorso === u.id ? (
                         <span className="inline-flex items-center gap-2 text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> salvo…</span>
                       ) : (
-                        <Select value={livello} onValueChange={(v) => cambiaLivello(u, v)}>
-                          <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {Object.entries(LIVELLI).map(([k, l]) => <SelectItem key={k} value={k}>{l.nome}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
+                        <>
+                          <Select value={livello} onValueChange={(v) => cambiaLivello(u, v)}>
+                            <SelectTrigger className="w-52"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {ORDINE.map(k => <SelectItem key={k} value={k}>{LIVELLI[k].nome}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                          <div className="text-xs text-muted-foreground mt-1 max-w-xs">{LIVELLI[livello].sommario}</div>
+                          {riga && riga.assegnato_da && livello !== 'admin' && (
+                            <div className="text-xs text-muted-foreground">assegnato da {riga.assegnato_da} il {data(riga.assegnato_il)}</div>
+                          )}
+                        </>
                       )}
                     </td>
                   </tr>
@@ -167,7 +210,7 @@ export default function Utenti() {
 
       <p className="text-xs text-muted-foreground max-w-3xl">
         Chi entra per la prima volta parte sempre in consultazione. Per sospendere un accesso o togliere del tutto una persona
-        si passa dagli inviti dell'app: qui si decide solo che cosa può fare chi è già dentro.
+        si passa dagli inviti dell'app: qui si decide che cosa può fare chi è già dentro.
       </p>
     </div>
   );
