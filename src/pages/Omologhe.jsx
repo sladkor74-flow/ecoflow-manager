@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { usePermessi } from '@/lib/permessi';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import {
-  leggiElencoOmologhe, leggiRegistroOmologhe, giorniAllaScadenza, fasciaScadenza,
+  giorniAllaScadenza, fasciaScadenza,
   FASCE, STATI, NOME_DIVERGENZA, SPIEGA_DIVERGENZA, PESO_DIVERGENZA,
 } from '@/lib/omologhe';
 import { Button } from '@/components/ui/button';
@@ -13,10 +13,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
+import AggiornaGestione from '@/components/shared/AggiornaGestione';
 import { dimenticaIndiceOmologhe } from '@/lib/omologheIndice';
 import { parole, corrispondeA } from '@/lib/ricercaNomi';
 import { formatIntero } from '@/lib/utils';
-import { Loader2, FileCheck2, Search, Upload, FileSpreadsheet, Check, PauseCircle, XCircle, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Loader2, FileCheck2, Search, FileSpreadsheet, Check, PauseCircle, XCircle, RotateCcw, AlertTriangle } from 'lucide-react';
 
 // Modulo Omologhe.
 //
@@ -65,14 +66,10 @@ export default function Omologhe() {
   const [statoFiltro, setStatoFiltro] = useState('tutti');
   const [inCorso, setInCorso] = useState(null);
   const [note, setNote] = useState({});
-  const [aggiornando, setAggiornando] = useState(null);
-  const [esito, setEsito] = useState(null);
   const [tipoDiv, setTipoDiv] = useState('tutte');
   const [statoDiv, setStatoDiv] = useState('aperte');
   const [selezionate, setSelezionate] = useState(new Set());
   const [inBlocco, setInBlocco] = useState(null);
-  const fileElenco = useRef(null);
-  const fileRegistro = useRef(null);
 
   const carica = useCallback(async () => {
     setCaricamento(true); setErrore(null);
@@ -177,32 +174,6 @@ export default function Omologhe() {
     if (n.has(id)) n.delete(id); else n.add(id);
     return n;
   });
-
-  const aggiorna = async () => {
-    const f1 = fileElenco.current && fileElenco.current.files[0];
-    const f2 = fileRegistro.current && fileRegistro.current.files[0];
-    if (!f1 || !f2) {
-      toast({ title: 'Servono tutti e due i file', description: "Senza il registro non si può dire dove i due fogli non vanno d'accordo.", variant: 'destructive' });
-      return;
-    }
-    setEsito(null);
-    try {
-      setAggiornando("leggo l'elenco delle omologhe…");
-      const elenco = await leggiElencoOmologhe(f1);
-      setAggiornando('leggo il registro di carico e scarico…');
-      const { annotati, conferitori } = await leggiRegistroOmologhe(f2);
-      setAggiornando(`confronto ${formatIntero(elenco.length)} omologhe con ${formatIntero(annotati.length)} annotazioni…`);
-      const res = await base44.functions.invoke('importaOmologhe', { elenco, registro: annotati, conferitori });
-      setEsito(res.data);
-      dimenticaIndiceOmologhe();
-      toast({ title: 'Elenco aggiornato', description: `${formatIntero(res.data.totale)} produttori, ${formatIntero(res.data.nuovi)} nuovi.` });
-      await carica();
-    } catch (e) {
-      const msg = (e && e.data && e.data.error) || e.message || String(e);
-      toast({ title: 'Aggiornamento non riuscito', description: msg, variant: 'destructive' });
-    }
-    setAggiornando(null);
-  };
 
   // Collegare a mano un'omologa a uno o piu' PDR, quando i formulari non bastano.
   // Si decide caso per caso: il nome da solo non e' una prova.
@@ -554,42 +525,8 @@ export default function Omologhe() {
         </TabsContent>
 
         {isAdmin && (
-          <TabsContent value="aggiorna" className="mt-4 space-y-4">
-            <div className="border rounded-lg bg-card p-4 space-y-3 max-w-3xl">
-              <p className="text-sm text-muted-foreground">
-                Servono tutti e due i file, perché le divergenze nascono dal confronto: l'elenco delle omologhe e il registro
-                di carico e scarico dell'impianto. Restano sul tuo computer: al gestionale arrivano solo i produttori e le date.
-                Le decisioni già prese qui non si perdono.
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="text-xs text-muted-foreground">Elenco delle omologhe (foglio «Omologhe Irigom»)</label>
-                  <input ref={fileElenco} type="file" accept=".xlsx,.xls" className="block w-full text-sm mt-1" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">Registro di carico e scarico (foglio «Dettaglio»)</label>
-                  <input ref={fileRegistro} type="file" accept=".xlsx,.xls" className="block w-full text-sm mt-1" />
-                </div>
-              </div>
-              <Button onClick={aggiorna} disabled={!!aggiornando}>
-                {aggiornando ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
-                {aggiornando || "Aggiorna l'elenco"}
-              </Button>
-              {aggiornando && <p className="text-xs text-amber-700">Il registro è grande: la lettura può richiedere qualche secondo. Non chiudere la pagina.</p>}
-            </div>
-
-            {esito && (
-              <div className="border rounded-lg bg-card p-4 space-y-1 text-sm max-w-3xl">
-                <div className="font-semibold">Aggiornamento eseguito</div>
-                <div>{formatIntero(esito.righe_elenco)} produttori nell'elenco, {formatIntero(esito.righe_registro)} annotati nel registro.</div>
-                <div>{formatIntero(esito.nuovi)} nuovi, {formatIntero(esito.aggiornati)} aggiornati{esito.scomparsi ? `, ${formatIntero(esito.scomparsi)} non più presenti nei file` : ''}.</div>
-                {esito.collegati_pdr !== undefined && <div>{formatIntero(esito.collegati_pdr)} produttori collegati ai loro PDR tramite i formulari.</div>}
-                <div className="pt-1">
-                  Divergenze: {formatIntero(esito.divergenze.solo_registro)} non in elenco, {formatIntero(esito.divergenze.solo_elenco)} conferiti senza annotazione,
-                  {' '}{formatIntero(esito.divergenze.data_diversa)} con date lontane, {formatIntero(esito.divergenze.nome_diverso)} con nome diverso.
-                </div>
-              </div>
-            )}
+          <TabsContent value="aggiorna" className="mt-4">
+            <AggiornaGestione onAggiornato={carica} />
           </TabsContent>
         )}
       </Tabs>

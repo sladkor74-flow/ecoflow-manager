@@ -8,10 +8,22 @@ import { testo, daData, siNo, apriFoglio, griglia } from '@/lib/foglioExcel';
 // con cio' che risulta nel portale, e si segnala dove la dichiarazione va
 // aggiornata o verificata. Nessun controllo cambia i dati da solo.
 
-// Dal 16 settembre 2026 chi e' iscritto al RENTRI usa il FIR digitale (DL 200/2025
-// art. 13, convertito dalla L. 26/2026). Regola verificata il 14/09/2026 sulle
-// fonti ufficiali: va ricontrollata se cambia la normativa.
+// FIR digitale obbligatorio dal 16 settembre 2026 (DL 200/2025 art. 13, convertito
+// dalla L. 26/2026) per chi e' obbligato all'iscrizione al RENTRI. Precisazione
+// dell'utente del 17/09/2026: i produttori di rifiuti speciali non pericolosi (i PFU
+// lo sono) con meno di 10 dipendenti non hanno l'obbligo e possono ancora scegliere
+// il cartaceo, anche se iscritti. Quindi "iscritto con FIR cartaceo" non e' di per
+// se' un problema: lo diventa solo se risulta l'obbligo, che nel foglio si legge
+// dalla nota ("iscrizione obbligatoria +10 dipendenti").
 export const FIR_DIGITALE_OBBLIGATORIO_DAL = '2026-09-16';
+
+const OBBLIGO_DA_NOTA = /(\+|pi[uù] di|oltre)\s*10\s*dipendent|iscrizione\s+obbligatori/i;
+export const obbligoIndicatoNellaNota = (nota) => OBBLIGO_DA_NOTA.test(String(nota || ''));
+
+// Nel portale il campo ID U/L RENTRi porta un codice d'esempio finche' il
+// produttore non inserisce quello della sua unita' locale: non e' un codice vero.
+export const CODICE_ESEMPIO = 'OP1234567890123-XX0000';
+export const eCodiceEsempio = (v) => String(v || '').trim().toUpperCase() === CODICE_ESEMPIO;
 
 export const COLLEGAMENTI = {
   codice: { nome: 'codice RENTRI', spiega: "Il codice RENTRI scritto nella nota è quello dell'unità locale del PDR: collegamento certo." },
@@ -113,13 +125,16 @@ export function controlliDichiarazione(d, pdr, oggi = new Date().toISOString().s
     }
   }
 
-  const codiciPortale = new Set(pdr.map(p => testo(p.rentri_id_ul).toUpperCase()).filter(Boolean));
+  const codiciPortale = new Set(pdr.map(p => testo(p.rentri_id_ul).toUpperCase()).filter(c => c && !eCodiceEsempio(c)));
   if (d.codice_rentri && codiciPortale.size && !codiciPortale.has(d.codice_rentri)) {
     esiti.push({ tipo: 'codice_diverso', livello: 'aggiornare', testo: `Il codice RENTRI della nota (${d.codice_rentri}) non è quello del portale (${[...codiciPortale].join(', ')}).` });
   }
 
-  if (d.iscritto_rentri && d.fir_cartaceo && !d.fir_digitale && oggi >= FIR_DIGITALE_OBBLIGATORIO_DAL) {
-    esiti.push({ tipo: 'iscritto_cartaceo', livello: 'verificare', testo: 'Iscritto al RENTRI con FIR cartaceo: dal 16/09/2026 per gli iscritti il FIR è digitale.' });
+  if (d.fir_cartaceo && !d.fir_digitale && obbligoIndicatoNellaNota(d.nota) && oggi >= FIR_DIGITALE_OBBLIGATORIO_DAL) {
+    esiti.push({ tipo: 'obbligato_cartaceo', livello: 'verificare', testo: "La nota indica l'iscrizione obbligatoria (più di 10 dipendenti) ma la dichiarazione è con FIR cartaceo: per chi è obbligato il FIR è digitale dal 16/09/2026." });
+  }
+  if (pdr.some(p => eCodiceEsempio(p.rentri_id_ul))) {
+    esiti.push({ tipo: 'codice_esempio', livello: 'info', testo: "Nel portale l'ID dell'unità locale è ancora il codice d'esempio: il produttore non ha inserito il suo." });
   }
   if (!d.fir_digitale && !d.fir_cartaceo) {
     esiti.push({ tipo: 'formulario_mancante', livello: 'verificare', testo: 'La dichiarazione non indica né FIR digitale né cartaceo.' });
@@ -139,3 +154,9 @@ export const LIVELLI_CONTROLLO = {
 
 /** Le segnalazioni vere, senza le sole informazioni. */
 export const segnalazioni = (controlli) => controlli.filter(c => c.livello !== 'info');
+
+/** Impronta delle segnalazioni: la verifica vale finche' resta la stessa. */
+export const impronta = (controlli) => [...new Set(segnalazioni(controlli).map(c => c.tipo))].sort().join('|');
+
+/** true se la dichiarazione e' stata verificata con le segnalazioni di adesso. */
+export const verificaValida = (d, controlli) => !!d.verificata_il && (d.verifica_impronta || '') === impronta(controlli);

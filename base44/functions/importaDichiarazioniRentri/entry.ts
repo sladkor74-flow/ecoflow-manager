@@ -116,6 +116,8 @@ export default async function(req) {
           fir_cartaceo: gia.fir_cartaceo === true,
         });
         modifica.storico_json = JSON.stringify(storico);
+        // Nuove condizioni, nuova verifica.
+        Object.assign(modifica, { verificata_il: null, verificata_da: '', verifica_nota: '', verifica_impronta: '' });
       }
       modifiche.push(modifica);
     }

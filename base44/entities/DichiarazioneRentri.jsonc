@@ -93,6 +93,23 @@
       },
       "description": "PDR scelti a mano o confermati dall'operatore: valgono anche dopo gli aggiornamenti"
     },
+    "verificata_il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Quando la dichiarazione e' stata controllata"
+    },
+    "verificata_da": {
+      "type": "string",
+      "description": "Chi l'ha controllata"
+    },
+    "verifica_nota": {
+      "type": "string",
+      "description": "Esito del controllo, in parole"
+    },
+    "verifica_impronta": {
+      "type": "string",
+      "description": "Le segnalazioni presenti al momento del controllo: se cambiano, la verifica non vale piu'"
+    },
     "storico_json": {
       "type": "string",
       "description": "Condizioni precedenti quando cambiano (iscrizione, formulario, data): solo valori, pochi byte"

@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { usePermessi } from '@/lib/permessi';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { parole, corrispondeA } from '@/lib/ricercaNomi';
 import {
-  leggiDichiarazioniRentri, controlliDichiarazione, segnalazioni, COLLEGAMENTI, LIVELLI_CONTROLLO,
+  controlliDichiarazione, segnalazioni, eCodiceEsempio, impronta, verificaValida, COLLEGAMENTI, LIVELLI_CONTROLLO,
 } from '@/lib/dichiarazioniRentri';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,8 +13,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
+import AggiornaGestione from '@/components/shared/AggiornaGestione';
 import { formatIntero } from '@/lib/utils';
-import { Loader2, FileBadge, Search, Upload, FileSpreadsheet, Check } from 'lucide-react';
+import { Loader2, FileBadge, Search, FileSpreadsheet, Check } from 'lucide-react';
 
 // Modulo Dichiarazioni RENTRI.
 //
@@ -47,21 +49,19 @@ function ValorePortale({ valore, diverso }) {
 }
 
 export default function DichiarazioniRentri() {
-  const { isAdmin } = usePermessi();
+  const { user, isAdmin } = usePermessi();
   const { toast } = useToast();
   const [dichiarazioni, setDichiarazioni] = useState([]);
   const [pdrPerId, setPdrPerId] = useState(new Map());
   const [caricamento, setCaricamento] = useState(true);
   const [errore, setErrore] = useState(null);
-  const [cerca, setCerca] = useState('');
+  const [params] = useSearchParams();
+  const [cerca, setCerca] = useState(() => params.get('cerca') || '');
   const [filtroIscritto, setFiltroIscritto] = useState('tutti');
   const [filtroFormulario, setFiltroFormulario] = useState('tutti');
   const [filtroControllo, setFiltroControllo] = useState('tutti');
   const [apertaScelta, setApertaScelta] = useState(null);
   const [inCorso, setInCorso] = useState(null);
-  const [aggiornando, setAggiornando] = useState(null);
-  const [esito, setEsito] = useState(null);
-  const file = useRef(null);
 
   const carica = useCallback(async () => {
     setCaricamento(true); setErrore(null);
@@ -87,7 +87,10 @@ export default function DichiarazioniRentri() {
     try { candidati = JSON.parse(d.candidati_json || '[]'); } catch (_e) { candidati = []; }
     let storico = [];
     try { storico = JSON.parse(d.storico_json || '[]'); } catch (_e) { storico = []; }
-    return { ...d, pdr, controlli, candidati, storico };
+    const verificata = verificaValida(d, controlli);
+    // Da guardare: segnalazioni vere non ancora verificate cosi' come sono adesso.
+    const daGuardare = segnalazioni(controlli).length > 0 && !verificata;
+    return { ...d, pdr, controlli, candidati, storico, verificata, daGuardare };
   }), [dichiarazioni, pdrPerId]);
 
   const filtrate = useMemo(() => {
@@ -100,14 +103,15 @@ export default function DichiarazioniRentri() {
       if (filtroFormulario === 'cartaceo' && !d.fir_cartaceo) return false;
       if (filtroControllo === 'nessuno' && segnalazioni(d.controlli).length) return false;
       if (filtroControllo === 'info' && !d.controlli.some(c => c.livello === 'info')) return false;
-      if (['aggiornare', 'verificare', 'collegare'].includes(filtroControllo) && !d.controlli.some(c => c.livello === filtroControllo)) return false;
-      if (filtroControllo === 'iscritto_cartaceo' && !d.controlli.some(c => c.tipo === 'iscritto_cartaceo')) return false;
+      if (['aggiornare', 'verificare', 'collegare'].includes(filtroControllo) && !(d.daGuardare && d.controlli.some(c => c.livello === filtroControllo))) return false;
+      if (filtroControllo === 'verificate' && !d.verificata) return false;
+      if (filtroControllo === 'iscritto_cartaceo' && !(d.iscritto_rentri && d.fir_cartaceo && !d.fir_digitale)) return false;
       return true;
     });
   }, [conControlli, cerca, filtroIscritto, filtroFormulario, filtroControllo]);
 
   const conta = (f) => conControlli.filter(f).length;
-  const conLivello = (l) => conta(d => d.controlli.some(c => c.livello === l));
+  const conLivello = (l) => conta(d => d.daGuardare && d.controlli.some(c => c.livello === l));
 
   const collega = async (d, ids) => {
     const puliti = [...new Set(ids.map(String).filter(s => /^\d+$/.test(s)))];
@@ -125,6 +129,24 @@ export default function DichiarazioniRentri() {
     setInCorso(null);
   };
 
+  const segnaVerificata = async (d, annulla = false) => {
+    let nota = '';
+    if (!annulla) {
+      nota = window.prompt(`Esito del controllo su ${d.produttore} (facoltativo).\nLa verifica vale finché le segnalazioni restano queste; se cambiano, la dichiarazione torna da guardare.`, d.verifica_nota || '');
+      if (nota === null) return;
+    }
+    setInCorso(d.id);
+    try {
+      await base44.entities.DichiarazioneRentri.update(d.id, annulla
+        ? { verificata_il: null, verificata_da: '', verifica_nota: '', verifica_impronta: '' }
+        : { verificata_il: new Date().toISOString(), verificata_da: (user && (user.full_name || user.email)) || '', verifica_nota: nota.trim(), verifica_impronta: impronta(d.controlli) });
+      await carica();
+    } catch (e) {
+      toast({ title: 'Non riesco a salvare la verifica', description: e.message, variant: 'destructive' });
+    }
+    setInCorso(null);
+  };
+
   const collegaAMano = (d) => {
     const testo = window.prompt(
       `ID PDR di ${d.produttore}, separati da virgola.\nLascia vuoto per togliere il collegamento a mano: al prossimo aggiornamento il gestionale lo cercherà di nuovo.`,
@@ -132,25 +154,6 @@ export default function DichiarazioniRentri() {
     );
     if (testo === null) return;
     collega(d, testo.split(/[\s,;]+/).filter(Boolean));
-  };
-
-  const aggiorna = async () => {
-    const f = file.current && file.current.files[0];
-    if (!f) { toast({ title: 'Scegli il file', description: 'Serve il file di gestione con il foglio «Dichiarazioni Rentri».', variant: 'destructive' }); return; }
-    setEsito(null);
-    try {
-      setAggiornando('leggo il foglio delle dichiarazioni…');
-      const righe = await leggiDichiarazioniRentri(f);
-      setAggiornando(`collego ${formatIntero(righe.length)} dichiarazioni ai PDR…`);
-      const res = await base44.functions.invoke('importaDichiarazioniRentri', { righe });
-      setEsito(res.data);
-      toast({ title: 'Dichiarazioni aggiornate', description: `${formatIntero(res.data.totale)} produttori, ${formatIntero(res.data.nuove)} nuovi.` });
-      await carica();
-    } catch (e) {
-      const msg = (e && e.data && e.data.error) || e.message || String(e);
-      toast({ title: 'Aggiornamento non riuscito', description: msg, variant: 'destructive' });
-    }
-    setAggiornando(null);
   };
 
   const esporta = async () => {
@@ -235,8 +238,9 @@ export default function DichiarazioniRentri() {
                 <SelectItem value="tutti">Tutti i controlli</SelectItem>
                 <SelectItem value="aggiornare">Da aggiornare</SelectItem>
                 <SelectItem value="verificare">Da verificare</SelectItem>
-                <SelectItem value="iscritto_cartaceo">Iscritti con FIR cartaceo</SelectItem>
+                <SelectItem value="iscritto_cartaceo">Iscritti che usano il FIR cartaceo</SelectItem>
                 <SelectItem value="collegare">Da collegare o confermare</SelectItem>
+                <SelectItem value="verificate">Già verificate</SelectItem>
                 <SelectItem value="info">Senza dato nel portale</SelectItem>
                 <SelectItem value="nessuno">Senza segnalazioni</SelectItem>
               </SelectContent>
@@ -287,7 +291,7 @@ export default function DichiarazioniRentri() {
                         <td className="px-2 py-2 tabular-nums whitespace-nowrap">{dataIt(d.data_dichiarazione)}</td>
                         <td className={`px-2 py-2 ${tipi.has('iscritto_nel_portale') || tipi.has('non_iscritto_nel_portale') ? 'text-red-700 font-semibold' : ''}`}>{siNo(d.iscritto_rentri)}</td>
                         <td className="px-2 py-2">{siNo(d.fir_digitale)}</td>
-                        <td className={`px-2 py-2 ${tipi.has('iscritto_cartaceo') ? 'text-amber-700 font-semibold' : ''}`}>{siNo(d.fir_cartaceo)}</td>
+                        <td className={`px-2 py-2 ${tipi.has('obbligato_cartaceo') ? 'text-amber-700 font-semibold' : ''}`}>{siNo(d.fir_cartaceo)}</td>
                         <td className="px-2 py-2 text-xs max-w-[220px] break-words">{d.nota || ''}</td>
                         <td className="px-2 py-2 text-xs min-w-[170px]">
                           {d.pdr.map(p => (
@@ -334,7 +338,11 @@ export default function DichiarazioniRentri() {
                         </td>
                         <td className="px-2 py-2 bg-sky-50/40 text-xs tabular-nums">
                           {d.pdr.length ? d.pdr.map(p => (
-                            <div key={p.id_pdr}><ValorePortale valore={p.rentri_id_ul} diverso={tipi.has('codice_diverso')} /></div>
+                            <div key={p.id_pdr}>
+                              {eCodiceEsempio(p.rentri_id_ul)
+                                ? <span className="text-muted-foreground" title="Codice d'esempio del portale: il produttore non ha ancora inserito quello della sua unità locale">esempio</span>
+                                : <ValorePortale valore={p.rentri_id_ul} diverso={tipi.has('codice_diverso')} />}
+                            </div>
                           )) : <span className="text-muted-foreground">—</span>}
                         </td>
                         <td className="px-2 py-2 bg-sky-50/40 text-xs">
@@ -355,6 +363,21 @@ export default function DichiarazioniRentri() {
                               {d.controlli.map((c, i) => <div key={i} className="text-muted-foreground">{c.testo}</div>)}
                             </div>
                           )}
+                          {d.verificata && (
+                            <div className="mt-1 text-green-800">
+                              <Check className="w-3.5 h-3.5 inline -mt-0.5" /> verificata il {dataIt(d.verificata_il)}{d.verificata_da ? ` da ${d.verificata_da}` : ''}
+                              {d.verifica_nota && <div className="text-muted-foreground">{d.verifica_nota}</div>}
+                            </div>
+                          )}
+                          {!d.verificata && d.verificata_il && (
+                            <div className="mt-1 text-amber-700">verificata il {dataIt(d.verificata_il)}, ma da allora le segnalazioni sono cambiate</div>
+                          )}
+                          {isAdmin && segnalazioni(d.controlli).length > 0 && (
+                            <button type="button" className="mt-1 text-primary hover:underline" disabled={inCorso === d.id}
+                              onClick={() => segnaVerificata(d, d.verificata)}>
+                              {inCorso === d.id ? 'salvo…' : d.verificata ? 'togli la verifica' : 'segna verificata'}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -369,31 +392,8 @@ export default function DichiarazioniRentri() {
         </TabsContent>
 
         {isAdmin && (
-          <TabsContent value="aggiorna" className="mt-4 space-y-4">
-            <div className="border rounded-lg bg-card p-4 space-y-3 max-w-3xl">
-              <p className="text-sm text-muted-foreground">
-                Carica il file di gestione con il foglio «Dichiarazioni Rentri». Resta sul tuo computer: al gestionale arrivano solo
-                le dichiarazioni. I collegamenti scelti a mano restano, e quando le condizioni di un produttore cambiano quelle di
-                prima vanno nello storico. Le tre colonne del portale non passano da qui: si aggiornano ricaricando il file PDR
-                nel modulo PDR.
-              </p>
-              <input ref={file} type="file" accept=".xlsx,.xls" className="block w-full text-sm" />
-              <Button onClick={aggiorna} disabled={!!aggiornando}>
-                {aggiornando ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
-                {aggiornando || 'Aggiorna le dichiarazioni'}
-              </Button>
-            </div>
-
-            {esito && (
-              <div className="border rounded-lg bg-card p-4 space-y-1 text-sm max-w-3xl">
-                <div className="font-semibold">Aggiornamento eseguito</div>
-                <div>{formatIntero(esito.totale)} produttori: {formatIntero(esito.nuove)} nuovi, {formatIntero(esito.aggiornate)} aggiornati{esito.scomparse ? `, ${formatIntero(esito.scomparse)} non più nel foglio` : ''}{esito.doppie ? `, ${formatIntero(esito.doppie)} righe doppie` : ''}.</div>
-                <div>
-                  Collegati ai PDR: {formatIntero(esito.collegamenti.codice)} con il codice RENTRI, {formatIntero(esito.collegamenti.nome)} per nome,
-                  {' '}{formatIntero(esito.collegamenti.manuale)} a mano; {formatIntero(esito.collegamenti.simile)} da confermare e {formatIntero(esito.collegamenti.nessuno)} da collegare.
-                </div>
-              </div>
-            )}
+          <TabsContent value="aggiorna" className="mt-4">
+            <AggiornaGestione onAggiornato={carica} />
           </TabsContent>
         )}
       </Tabs>

@@ -48,7 +48,8 @@ export function indicePdr(pdr) {
     const voce = { p, chiavi };
     tutti.push(voce);
     const codice = String(p.rentri_id_ul || '').trim().toUpperCase();
-    if (codice) {
+    // Il codice d'esempio del portale non identifica nessuno.
+    if (codice && codice !== 'OP1234567890123-XX0000') {
       if (!perCodice.has(codice)) perCodice.set(codice, []);
       perCodice.get(codice).push(p);
     }

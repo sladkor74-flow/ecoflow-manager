@@ -2,6 +2,8 @@ import React from 'react';
 import { formatNumber, fmtTon, formatIntero } from '@/lib/utils';
 import { useIndiceOmologhe } from '@/lib/omologheIndice';
 import BadgeOmologa from '@/components/shared/BadgeOmologa';
+import { useIndiceRentri } from '@/lib/rentriIndice';
+import BadgeRentri from '@/components/shared/BadgeRentri';
 
 const COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
@@ -27,6 +29,7 @@ const DOPO_COLONNA_OMOLOGA = 'ragione_sociale';
 
 export default function AssegnatiTable({ records, loading, ragioneSocialeFilter, posizioni = null, totaleCoda = 0 }) {
   const indiceOmologhe = useIndiceOmologhe();
+  const indiceRentri = useIndiceRentri();
   if (loading) {
     return <div className="flex items-center justify-center py-8 text-muted-foreground">Caricamento ordini assegnati...</div>;
   }
@@ -51,7 +54,10 @@ export default function AssegnatiTable({ records, loading, ragioneSocialeFilter,
               <React.Fragment key={col.key}>
                 <th className="text-left px-3 py-2.5 font-medium whitespace-nowrap">{col.label}</th>
                 {col.key === DOPO_COLONNA_OMOLOGA && (
-                  <th className="text-left px-3 py-2.5 font-medium whitespace-nowrap" title="Omologa registrata per il punto di raccolta, con la sua scadenza">Omologa</th>
+                  <>
+                    <th className="text-left px-3 py-2.5 font-medium whitespace-nowrap" title="Omologa registrata per il punto di raccolta, con la sua scadenza">Omologa</th>
+                    <th className="text-left px-3 py-2.5 font-medium whitespace-nowrap" title="Iscrizione al RENTRI e tipo di formulario del punto di raccolta, dal portale e dalla dichiarazione">RENTRI</th>
+                  </>
                 )}
               </React.Fragment>
             ))}
@@ -80,7 +86,10 @@ export default function AssegnatiTable({ records, loading, ragioneSocialeFilter,
                   <React.Fragment key={col.key}>
                     <td className="px-3 py-2 whitespace-nowrap">{val ?? ''}</td>
                     {col.key === DOPO_COLONNA_OMOLOGA && (
-                      <td className="px-3 py-2"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} nome={r.ragione_sociale} /></td>
+                      <>
+                        <td className="px-3 py-2"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} nome={r.ragione_sociale} /></td>
+                        <td className="px-3 py-2"><BadgeRentri indice={indiceRentri} idPdr={r.id_pdr} nome={r.ragione_sociale} /></td>
+                      </>
                     )}
                   </React.Fragment>
                 );
