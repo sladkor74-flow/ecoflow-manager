@@ -166,39 +166,50 @@ export default async function(req) {
 
     const svc = base44.asServiceRole.entities;
     const esistenti = await fetchAll(svc.Omologa);
+    // Per ogni produttore vale la riga piu' vecchia; se ce ne fossero altre con la
+    // stessa chiave (un produttore scritto in due modi prima che venissero unite)
+    // si trattano come non piu' presenti: si segnano, non si cancellano.
     const perChiave = new Map();
-    for (const r of esistenti) {
+    const doppioni = [];
+    for (const r of [...esistenti].sort((a, b) => String(a.created_date || '').localeCompare(String(b.created_date || '')))) {
       const k = String(r.produttore_chiave || chiaveProduttore(r.produttore));
       if (!perChiave.has(k)) perChiave.set(k, r);
+      else doppioni.push(r);
     }
 
     const nuovi = [];
-    let aggiornati = 0;
+    const modifiche = [];
     const visti = new Set();
     for (const d of desiderati) {
       visti.add(d.produttore_chiave);
       const gia = perChiave.get(d.produttore_chiave);
       if (!gia) { nuovi.push(d); continue; }
-      if (uguali(gia, d)) continue;
-      await svc.Omologa.update(gia.id, d);
-      aggiornati++;
-    }
-
-    for (let i = 0; i < nuovi.length; i += 100) {
-      await svc.Omologa.bulkCreate(nuovi.slice(i, i + 100));
-      await new Promise(r => setTimeout(r, 200));
+      if (!uguali(gia, d)) modifiche.push({ id: gia.id, ...d });
     }
 
     // Chi non compare piu' in nessuno dei due fogli non si cancella: si segna,
     // e resta all'operatore decidere se e' uscito davvero.
     let scomparsi = 0;
-    for (const r of esistenti) {
+    for (const r of [...perChiave.values(), ...doppioni]) {
       const k = String(r.produttore_chiave || chiaveProduttore(r.produttore));
-      if (visti.has(k)) continue;
-      if (r.nell_elenco === false && r.nel_registro === false) continue;
-      await svc.Omologa.update(r.id, { nell_elenco: false, nel_registro: false, aggiornata_il: adesso });
+      const doppione = doppioni.includes(r);
+      if (visti.has(k) && !doppione) continue;
+      if (r.nell_elenco === false && r.nel_registro === false && (r.tipo_divergenza || 'nessuna') === 'nessuna') continue;
+      modifiche.push({ id: r.id, nell_elenco: false, nel_registro: false, tipo_divergenza: 'nessuna', aggiornata_il: adesso });
       scomparsi++;
     }
+
+    // Le scritture vanno a blocchi: una alla volta, dopo un cambio di regole che
+    // tocca tutte le righe, la funzione durerebbe troppo e verrebbe interrotta.
+    for (let i = 0; i < nuovi.length; i += 100) {
+      await svc.Omologa.bulkCreate(nuovi.slice(i, i + 100));
+      await new Promise(r => setTimeout(r, 200));
+    }
+    for (let i = 0; i < modifiche.length; i += 100) {
+      await svc.Omologa.bulkUpdate(modifiche.slice(i, i + 100));
+      await new Promise(r => setTimeout(r, 200));
+    }
+    const aggiornati = modifiche.length - scomparsi;
 
     const conta = (t) => desiderati.filter(d => d.tipo_divergenza === t).length;
     return Response.json({
