@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, RefreshCw, FileSpreadsheet, FileText, Info } from 'lucide-react';
+import { Loader2, RefreshCw, FileSpreadsheet, FileText, Info, AlertTriangle } from 'lucide-react';
 import { formatKg, formatIntero, formatTonnellate } from '@/lib/utils';
 import { esportaTabellaExcel, esportaTabellaPdf } from '@/lib/esportaTabella';
 
@@ -11,6 +11,24 @@ import { esportaTabellaExcel, esportaTabellaPdf } from '@/lib/esportaTabella';
 // stavano nel file Excel, ora costruite sui dati del gestionale.
 //
 // tipo: 'peso' | 'ritiri'
+
+// Due mesi di fila senza ritiri in una provincia sono il primo segnale: al terzo
+// mese consecutivo il consorzio considera la provincia scoperta. I mesi non ancora
+// passati non contano, altrimenti da gennaio tutto l'anno sarebbe rosso.
+function mesiSenzaRitiri(riga, mesiTrascorsi) {
+  const serie = [];
+  let inizio = null;
+  for (let i = 0; i < mesiTrascorsi; i++) {
+    if (riga.ritiri[i] === 0) {
+      if (inizio === null) inizio = i;
+      if (i === mesiTrascorsi - 1) serie.push({ da: inizio, a: i });
+    } else if (inizio !== null) {
+      serie.push({ da: inizio, a: i - 1 });
+      inizio = null;
+    }
+  }
+  return serie.filter(s => s.a - s.da + 1 >= 2);
+}
 
 const DESCRIZIONE = {
   peso: 'Peso effettivo dei ritiri terminati della rete, provincia per provincia e mese per mese. Il mese e\' quello di fine trasporto. ACI ed extra raccolta restano fuori: sono canali a se\'.',
@@ -42,6 +60,20 @@ export default function MatriceProvince({ tipo = 'peso' }) {
   useEffect(() => { carica(); }, [carica]);
 
   const peso = tipo === 'peso';
+  // Nell'anno in corso valgono i mesi fino a quello corrente, come nel motore di alert.
+  const mesiTrascorsi = dati ? (dati.anno === new Date().getFullYear() ? new Date().getMonth() + 1 : 12) : 0;
+  const vuoti = new Map();
+  if (dati) for (const r of dati.righe) { const s = mesiSenzaRitiri(r, mesiTrascorsi); if (s.length) vuoti.set(r.provincia, s); }
+  const gravi = [...vuoti.entries()].filter(([, s]) => s.some(x => x.a - x.da + 1 >= 3));
+  const nomeMesi = (s) => (dati ? `${dati.mesi[s.da]}${s.a > s.da ? ` - ${dati.mesi[s.a]}` : ''}` : '');
+  // Rosso pieno dal terzo mese di fila, rosso chiaro dal secondo.
+  const stileVuoto = (provincia, i) => {
+    const serie = vuoti.get(provincia);
+    if (!serie) return '';
+    const s = serie.find(x => i >= x.da && i <= x.a);
+    if (!s) return '';
+    return s.a - s.da + 1 >= 3 ? 'bg-red-200 text-red-900 font-semibold' : 'bg-red-50 text-red-700';
+  };
   const valore = (riga, i) => (peso ? riga.kg[i] : riga.ritiri[i]);
   const totaleRiga = (riga) => (peso ? riga.kg_totale : riga.ritiri_totale);
   const mostra = (v) => (v ? (peso ? formatKg(v) : formatIntero(v)) : <span className="text-muted-foreground">—</span>);
@@ -112,6 +144,37 @@ export default function MatriceProvince({ tipo = 'peso' }) {
         <div className="border border-red-300 bg-red-50 text-red-800 rounded-lg px-4 py-3 text-sm">{errore}</div>
       )}
 
+      {dati && vuoti.size > 0 && (
+        <div className={`border rounded-lg px-4 py-3 text-sm ${gravi.length ? 'border-red-300 bg-red-50 text-red-900' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <div className="space-y-1">
+              <div className="font-semibold">
+                {gravi.length > 0
+                  ? `${gravi.length} ${gravi.length === 1 ? 'provincia è' : 'province sono'} ferma da tre mesi o più`
+                  : `${vuoti.size} ${vuoti.size === 1 ? 'provincia ha' : 'province hanno'} due mesi di fila senza ritiri`}
+              </div>
+              <ul className="space-y-0.5">
+                {[...vuoti.entries()].map(([provincia, serie]) => {
+                  const riga = dati.righe.find(r => r.provincia === provincia);
+                  const massimo = Math.max(...serie.map(s => s.a - s.da + 1));
+                  return (
+                    <li key={provincia}>
+                      <strong>{provincia}</strong> ({riga ? riga.regione : ''}): {serie.map(nomeMesi).join(', ')} — {massimo} mesi di fila senza ritiri
+                      {massimo >= 3 ? ', da recuperare subito' : ', da coprire entro il mese prossimo'}
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="text-xs">
+                Al terzo mese consecutivo senza ritiri la provincia risulta scoperta: pianificare una raccolta prima che accada.
+                Il motore di alert apre da solo una segnalazione al secondo mese a zero.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {caricando && !dati ? (
         <div className="flex items-center justify-center py-16 text-muted-foreground">
           <Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo la raccolta per provincia…
@@ -147,8 +210,20 @@ export default function MatriceProvince({ tipo = 'peso' }) {
                 {dati.righe.map(r => (
                   <tr key={r.provincia} className="border-t hover:bg-muted/30 tabular-nums">
                     <td className="px-3 py-1.5 sticky left-0 bg-card">{r.regione || '—'}</td>
-                    <td className="px-2 py-1.5 font-medium">{r.provincia}</td>
-                    {dati.mesi.map((m, i) => <td key={m} className="px-2 py-1.5 text-right">{mostra(valore(r, i))}</td>)}
+                    <td className="px-2 py-1.5 font-medium">
+                      {r.provincia}
+                      {vuoti.has(r.provincia) && (
+                        <AlertTriangle
+                          className={`w-3.5 h-3.5 inline-block ml-1 -mt-0.5 ${vuoti.get(r.provincia).some(s => s.a - s.da + 1 >= 3) ? 'text-red-700' : 'text-red-500'}`}
+                          aria-label="Mesi consecutivi senza ritiri"
+                        />
+                      )}
+                    </td>
+                    {dati.mesi.map((m, i) => (
+                      <td key={m} className={`px-2 py-1.5 text-right ${stileVuoto(r.provincia, i)}`}>
+                        {i < mesiTrascorsi && valore(r, i) === 0 ? '0' : mostra(valore(r, i))}
+                      </td>
+                    ))}
                     <td className="px-3 py-1.5 text-right font-semibold">{peso ? formatKg(r.kg_totale) : formatIntero(r.ritiri_totale)}</td>
                   </tr>
                 ))}
@@ -165,11 +240,11 @@ export default function MatriceProvince({ tipo = 'peso' }) {
               </tfoot>
             </table>
           </div>
-          {peso && (
-            <p className="text-xs text-muted-foreground">
-              Totale dell'anno: {formatTonnellate(dati.totali.kg_totale / 1000)} t in {formatIntero(dati.totali.ritiri_totale)} ritiri.
-            </p>
-          )}
+          <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-sm bg-red-50 border border-red-200" /> due mesi di fila senza ritiri</span>
+            <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-sm bg-red-200 border border-red-300" /> tre mesi o più: provincia scoperta</span>
+            {peso && <span>Totale dell'anno: {formatTonnellate(dati.totali.kg_totale / 1000)} t in {formatIntero(dati.totali.ritiri_totale)} ritiri.</span>}
+          </div>
         </>
       )}
     </div>
