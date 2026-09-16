@@ -428,9 +428,9 @@ export function normalizzaRigheReport(grezze, unitaIndicata) {
       classe_testo: String(g.classe ?? '').trim(),
       // La classe puo' stare nella sua colonna oppure accanto al numero d'ordine:
       // in entrambi i casi va verificata.
-      classe: classeNormalizzata(g.classe) || classeDaOrdine(g.ordine),
+      classe: classeNormalizzata(g.classe) || classeDaOrdine(g.classe) || classeDaOrdine(g.ordine),
       classe_ordine: classeDaOrdine(g.ordine),
-      classe_da_ordine: !classeNormalizzata(g.classe) && !!classeDaOrdine(g.ordine),
+      classe_da_ordine: !(classeNormalizzata(g.classe) || classeDaOrdine(g.classe)) && !!classeDaOrdine(g.ordine),
       targa: String(g.targa ?? '').trim(),
     });
   }
