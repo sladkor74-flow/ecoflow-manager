@@ -214,12 +214,16 @@ export async function leggiRegistroOmologhe(file) {
     const data = colData >= 0 ? ymd(cella(r, colData)) : null;
     const chiave = prod.toLowerCase();
 
+    // I numeri di formulario collegano il produttore al suo PDR in modo esatto,
+    // senza passare dal nome. Ne bastano alcuni per produttore.
+    const fir = colFir >= 0 ? testo(cella(r, colFir)).toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
     const c = carichi.get(chiave);
-    if (!c) carichi.set(chiave, { nome: prod, carichi: 1, primo: data, ultimo: data });
+    if (!c) carichi.set(chiave, { nome: prod, carichi: 1, primo: data, ultimo: data, fir: fir ? [fir] : [] });
     else {
       c.carichi++;
       if (data && (!c.primo || data < c.primo)) c.primo = data;
       if (data && (!c.ultimo || data > c.ultimo)) c.ultimo = data;
+      if (fir && c.fir.length < 30 && !c.fir.includes(fir)) c.fir.push(fir);
     }
 
     const tipo = testo(cella(r, colTipo));

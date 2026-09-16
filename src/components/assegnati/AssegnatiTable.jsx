@@ -1,5 +1,7 @@
 import React from 'react';
 import { formatNumber, fmtTon, formatIntero } from '@/lib/utils';
+import { useIndiceOmologhe } from '@/lib/omologheIndice';
+import BadgeOmologa from '@/components/shared/BadgeOmologa';
 
 const COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
@@ -19,7 +21,12 @@ const COLUMNS = [
   { key: 'trasportatore', label: 'Trasportatore' },
 ];
 
+// L'omologa si mostra subito dopo la ragione sociale: e' li' che si guarda quando
+// si programma il ritiro.
+const DOPO_COLONNA_OMOLOGA = 'ragione_sociale';
+
 export default function AssegnatiTable({ records, loading, ragioneSocialeFilter, posizioni = null, totaleCoda = 0 }) {
+  const indiceOmologhe = useIndiceOmologhe();
   if (loading) {
     return <div className="flex items-center justify-center py-8 text-muted-foreground">Caricamento ordini assegnati...</div>;
   }
@@ -41,7 +48,12 @@ export default function AssegnatiTable({ records, loading, ragioneSocialeFilter,
               </th>
             )}
             {COLUMNS.map((col) => (
-              <th key={col.key} className="text-left px-3 py-2.5 font-medium whitespace-nowrap">{col.label}</th>
+              <React.Fragment key={col.key}>
+                <th className="text-left px-3 py-2.5 font-medium whitespace-nowrap">{col.label}</th>
+                {col.key === DOPO_COLONNA_OMOLOGA && (
+                  <th className="text-left px-3 py-2.5 font-medium whitespace-nowrap" title="Omologa registrata per il punto di raccolta, con la sua scadenza">Omologa</th>
+                )}
+              </React.Fragment>
             ))}
           </tr>
         </thead>
@@ -64,7 +76,14 @@ export default function AssegnatiTable({ records, loading, ragioneSocialeFilter,
                 if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
                 else if (col.format === 'ton') val = val != null ? fmtTon(val) : '';
                 else if (col.format === 'date') val = val ? new Date(val).toLocaleDateString('it-IT') : '';
-                return <td key={col.key} className="px-3 py-2 whitespace-nowrap">{val ?? ''}</td>;
+                return (
+                  <React.Fragment key={col.key}>
+                    <td className="px-3 py-2 whitespace-nowrap">{val ?? ''}</td>
+                    {col.key === DOPO_COLONNA_OMOLOGA && (
+                      <td className="px-3 py-2"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} /></td>
+                    )}
+                  </React.Fragment>
+                );
               })}
             </tr>
           ))}

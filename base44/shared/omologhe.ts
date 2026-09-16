@@ -114,6 +114,9 @@ export function abbina(elenco, registro) {
 // di solito pochi giorni: sotto questa soglia non e' una divergenza.
 export const TOLLERANZA_GIORNI = 7;
 
+// Oltre questa distanza prima dell'inizio, l'annotazione e' del documento dell'anno prima.
+export const GIORNI_DOCUMENTO_PRECEDENTE = 330;
+
 const giorniFra = (a, b) => Math.round(
   Math.abs(new Date(a + 'T00:00:00Z').getTime() - new Date(b + 'T00:00:00Z').getTime()) / 86400000,
 );
@@ -134,8 +137,11 @@ export function unAnnoDopo(ymd) {
  * e il registro fissano l'inizio in giorni diversi vale il piu' vecchio, perche'
  * e' da quel giorno che il documento era in mano: la scadenza e' la piu' prudente.
  */
-export function scadenzaEffettiva(omologaA, dataRegistro) {
-  const daRegistro = dataRegistro ? unAnnoDopo(dataRegistro) : null;
+export function scadenzaEffettiva(omologaA, dataRegistro, omologaDa) {
+  // Un'annotazione di quasi un anno prima dell'inizio riguarda il documento
+  // precedente, non quello rinnovato: non accorcia la nuova validita'.
+  const vecchia = omologaDa && dataRegistro && giorniFra(dataRegistro, omologaDa) > GIORNI_DOCUMENTO_PRECEDENTE && dataRegistro < omologaDa;
+  const daRegistro = dataRegistro && !vecchia ? unAnnoDopo(dataRegistro) : null;
   if (omologaA && daRegistro) return omologaA < daRegistro ? omologaA : daRegistro;
   return omologaA || daRegistro || null;
 }

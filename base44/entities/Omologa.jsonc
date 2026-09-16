@@ -112,6 +112,31 @@
       "default": false,
       "description": "La validita' non viene dall'elenco ma dalla prima annotazione nel registro"
     },
+    "pdr_collegati": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "PDR del produttore, trovati con i numeri di formulario dei suoi carichi: collegamento esatto, mai per nome"
+    },
+    "clienti_collegati": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Clienti (produttori) a cui appartengono quei PDR"
+    },
+    "pdr_manuali": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "PDR collegati a mano dall'operatore, caso per caso: valgono anche dopo gli aggiornamenti"
+    },
+    "storico_json": {
+      "type": "string",
+      "description": "Periodi di validita' precedenti, uno per rinnovo: solo date, pochi byte"
+    },
     "tipo_divergenza": {
       "type": "string",
       "enum": [

@@ -1,6 +1,8 @@
 import React from 'react';
 import { Eye, Globe, MapPin } from 'lucide-react';
 import { streetViewUrl, satelliteUrl, addressSearchUrl, precisioneCoordinata } from '@/lib/geoLinks';
+import { useIndiceOmologhe } from '@/lib/omologheIndice';
+import BadgeOmologa from '@/components/shared/BadgeOmologa';
 
 function DetailField({ label, value }) {
   return (
@@ -12,6 +14,7 @@ function DetailField({ label, value }) {
 }
 
 export default function PdrDetailCard({ r }) {
+  const indiceOmologhe = useIndiceOmologhe();
   const isSospeso = !!(r.sospeso && String(r.sospeso).trim() !== '');
   const tel = r.tel_pdr || r.tel || null;
   const email = r.email_pdr || r.email || null;
@@ -50,6 +53,10 @@ export default function PdrDetailCard({ r }) {
         <DetailField label="Partner Operativo" value={r.partner_operativo} />
         <DetailField label="Cod. Esterno PDR" value={r.codice_esterno_pdr} />
         <DetailField label="ID PDR" value={r.id_pdr} />
+        <div>
+          <dt className="text-xs text-muted-foreground">Omologa</dt>
+          <dd className="text-sm"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} /></dd>
+        </div>
         <DetailField label="ID U/L RENTRi" value={r.rentri_id_ul} />
         <DetailField label="Coordinate" value={hasCoords ? `${r._lat}, ${r._lng}` : null} />
       </dl>

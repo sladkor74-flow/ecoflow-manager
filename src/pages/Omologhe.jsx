@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
+import { dimenticaIndiceOmologhe } from '@/lib/omologheIndice';
 import { formatIntero } from '@/lib/utils';
 import { Loader2, FileCheck2, Search, Upload, FileSpreadsheet, Check, PauseCircle, XCircle, RotateCcw, AlertTriangle } from 'lucide-react';
 
@@ -92,6 +93,7 @@ export default function Omologhe() {
       if (statoFiltro !== 'tutti' && (r.stato || 'da_verificare') !== statoFiltro) return false;
       if (scadenza === 'scadute' && r.fascia !== 'scaduta') return false;
       if (scadenza === 'entro30' && !['scaduta', 'critica', 'vicina'].includes(r.fascia)) return false;
+      if (scadenza === 'da_richiedere' && (r.giorni === null || r.giorni > 60 || r.stato === 'annullata')) return false;
       if (scadenza === 'entro90' && ['valida', 'senza_data'].includes(r.fascia)) return false;
       if (scadenza === 'senza_data' && r.fascia !== 'senza_data') return false;
       return true;
@@ -185,6 +187,7 @@ export default function Omologhe() {
       setAggiornando(`confronto ${formatIntero(elenco.length)} omologhe con ${formatIntero(annotati.length)} annotazioni…`);
       const res = await base44.functions.invoke('importaOmologhe', { elenco, registro: annotati, conferitori });
       setEsito(res.data);
+      dimenticaIndiceOmologhe();
       toast({ title: 'Elenco aggiornato', description: `${formatIntero(res.data.totale)} produttori, ${formatIntero(res.data.nuovi)} nuovi.` });
       await carica();
     } catch (e) {
@@ -192,6 +195,27 @@ export default function Omologhe() {
       toast({ title: 'Aggiornamento non riuscito', description: msg, variant: 'destructive' });
     }
     setAggiornando(null);
+  };
+
+  // Collegare a mano un'omologa a uno o piu' PDR, quando i formulari non bastano.
+  // Si decide caso per caso: il nome da solo non e' una prova.
+  const collegaPdr = async (r) => {
+    const attuali = (r.pdr_manuali || []).join(', ');
+    const testo = window.prompt(
+      `PDR da collegare a mano all'omologa di ${r.produttore}.\nScrivi gli ID PDR separati da virgola; lascia vuoto per togliere il collegamento a mano.`,
+      attuali,
+    );
+    if (testo === null) return;
+    const pdr = [...new Set(testo.split(/[\s,;]+/).map(s => s.trim()).filter(s => /^\d+$/.test(s)))];
+    setInCorso(r.id + 'pdr');
+    try {
+      await base44.entities.Omologa.update(r.id, { pdr_manuali: pdr });
+      dimenticaIndiceOmologhe();
+      await carica();
+    } catch (e) {
+      toast({ title: 'Non riesco a salvare il collegamento', description: e.message, variant: 'destructive' });
+    }
+    setInCorso(null);
   };
 
   const esporta = async () => {
@@ -204,6 +228,9 @@ export default function Omologhe() {
       'Scadenza contata': dataIt(r.scadenza_effettiva || r.omologa_a),
       'Validità da': r.validita_da_registro ? 'prima annotazione nel registro' : 'elenco',
       'Carichi nel registro': r.registro_carichi || 0,
+      'PDR collegati': (r.pdr_collegati || []).join(', '),
+      'PDR collegati a mano': (r.pdr_manuali || []).join(', '),
+      'Rinnovi precedenti': (() => { try { return JSON.parse(r.storico_json || '[]').map(s => `${dataIt(s.da)}–${dataIt(s.a)}`).join('; '); } catch (_e) { return ''; } })(),
       'Giorni alla scadenza': r.giorni === null ? '' : r.giorni,
       Scadenza: FASCE[r.fascia].etichetta,
       'Nel registro': r.nel_registro ? dataIt(r.registro_data) : 'no',
@@ -283,6 +310,7 @@ export default function Omologhe() {
           <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="tutte">Tutte le scadenze</SelectItem>
+            <SelectItem value="da_richiedere">Da richiedere: scadono entro 60 giorni</SelectItem>
             <SelectItem value="scadute">Solo scadute</SelectItem>
             <SelectItem value="entro30">Entro un mese</SelectItem>
             <SelectItem value="entro90">Entro tre mesi</SelectItem>
@@ -324,6 +352,7 @@ export default function Omologhe() {
                   <tr>
                     <th className="text-left px-3 py-2">Produttore</th>
                     <th className="text-left px-2 py-2">Canale</th>
+                    <th className="text-left px-2 py-2">PDR</th>
                     <th className="text-left px-2 py-2">Omologa</th>
                     <th className="text-left px-2 py-2">Scadenza</th>
                     <th className="text-left px-2 py-2">Registro</th>
@@ -341,6 +370,12 @@ export default function Omologhe() {
                             <span className={`w-2 h-2 rounded-full shrink-0 ${f.punto}`} title={f.etichetta} />
                             <span className={f.testo}>{r.produttore}</span>
                           </div>
+                          {(() => {
+                            try {
+                              const s = JSON.parse(r.storico_json || '[]');
+                              return s.length ? <div className="text-xs text-muted-foreground">rinnovata · prima: {s.map(x => `${dataIt(x.da)}–${dataIt(x.a)}`).join(', ')}</div> : null;
+                            } catch (_e) { return null; }
+                          })()}
                           {r.canale === 'ACI' && r.esito === false && (
                             <div className="text-xs text-red-700">
                               esito dell'omologa negativo nell'elenco{r.registro_carichi ? ` · ${formatIntero(r.registro_carichi)} carichi all'impianto` : ''}
@@ -351,6 +386,16 @@ export default function Omologhe() {
                           )}
                         </td>
                         <td className="px-2 py-2">{r.canale || 'RETE'}</td>
+                        <td className="px-2 py-2 text-xs tabular-nums">
+                          {(r.pdr_collegati || []).length > 0 && <div title="Trovati con i numeri di formulario dei carichi">{r.pdr_collegati.join(', ')}</div>}
+                          {(r.pdr_manuali || []).length > 0 && <div title="Collegati a mano">{r.pdr_manuali.join(', ')} <span className="text-muted-foreground">a mano</span></div>}
+                          {!(r.pdr_collegati || []).length && !(r.pdr_manuali || []).length && <span className="text-muted-foreground">—</span>}
+                          {isAdmin && (
+                            <button type="button" className="block text-primary underline-offset-2 hover:underline" disabled={!!inCorso} onClick={() => collegaPdr(r)}>
+                              {inCorso === r.id + 'pdr' ? 'salvo…' : (r.pdr_manuali || []).length ? 'modifica' : 'collega'}
+                            </button>
+                          )}
+                        </td>
                         <td className="px-2 py-2 tabular-nums whitespace-nowrap">
                           {dataIt(r.omologa_da)} → {dataIt(r.omologa_a)}
                           {r.validita_da_registro && <div className="text-xs text-muted-foreground">dalla prima annotazione nel registro</div>}
@@ -531,6 +576,7 @@ export default function Omologhe() {
                 <div className="font-semibold">Aggiornamento eseguito</div>
                 <div>{formatIntero(esito.righe_elenco)} produttori nell'elenco, {formatIntero(esito.righe_registro)} annotati nel registro.</div>
                 <div>{formatIntero(esito.nuovi)} nuovi, {formatIntero(esito.aggiornati)} aggiornati{esito.scomparsi ? `, ${formatIntero(esito.scomparsi)} non più presenti nei file` : ''}.</div>
+                {esito.collegati_pdr !== undefined && <div>{formatIntero(esito.collegati_pdr)} produttori collegati ai loro PDR tramite i formulari.</div>}
                 <div className="pt-1">
                   Divergenze: {formatIntero(esito.divergenze.solo_registro)} non in elenco, {formatIntero(esito.divergenze.solo_elenco)} conferiti senza annotazione,
                   {' '}{formatIntero(esito.divergenze.data_diversa)} con date lontane, {formatIntero(esito.divergenze.nome_diverso)} con nome diverso.

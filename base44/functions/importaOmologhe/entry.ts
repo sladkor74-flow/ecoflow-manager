@@ -20,6 +20,8 @@ import { chiaveProduttore, abbina, divergenza, scadenzaEffettiva, unAnnoDopo } f
 // Payload: { elenco: [...], registro: [annotati], conferitori: [...] }
 // Risposta: { totale, nuovi, aggiornati, divergenze: { ... }, scomparsi }
 
+const normFir = (v) => String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
 const giorno = (v) => {
   const s = String(v ?? '').slice(0, 10);
   return /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(s) ? s : null;
@@ -30,7 +32,7 @@ const DATI = [
   'n_autorizzazione', 'autorizzazione_da', 'autorizzazione_a', 'rdp_da', 'rdp_a', 'quantitativo_max_annuo',
   'nell_elenco', 'nel_registro', 'registro_nome', 'registro_data', 'registro_riga', 'registro_volte',
   'registro_carichi', 'registro_primo_carico', 'scadenza_effettiva', 'validita_da_registro',
-  'tipo_divergenza',
+  'pdr_collegati', 'clienti_collegati', 'tipo_divergenza',
 ];
 
 const uguali = (a, b) => DATI.every(k => {
@@ -82,6 +84,7 @@ export default async function(req) {
     });
     const conferitori = unisci(Array.isArray(body.conferitori) ? body.conferitori : [], (a, b) => ({
       ...a, carichi: (Number(a.carichi) || 0) + (Number(b.carichi) || 0), primo: prima(a.primo, b.primo), ultimo: dopo(a.ultimo, b.ultimo),
+      fir: [...(a.fir || []), ...(b.fir || [])],
     }));
 
     const { abbinati, soloElenco, soloRegistro } = abbina(elenco, registro);
@@ -122,8 +125,9 @@ export default async function(req) {
       registro_riga: x ? Number(x.riga) || null : null,
       registro_volte: x ? Number(x.volte) || null : null,
       ...carichi,
-      scadenza_effettiva: scadenzaEffettiva(giorno(e.om_a), x ? giorno(x.data) : null),
+      scadenza_effettiva: scadenzaEffettiva(giorno(e.om_a), x ? giorno(x.data) : null, giorno(e.om_da)),
       validita_da_registro: false,
+      _fir: [...(x && x.fir ? [x.fir] : []), ...(carico && carico.fir ? carico.fir : [])],
       tipo_divergenza: divergenza({
         canale: e.canale === 'ACI' ? 'ACI' : 'RETE',
         nellElenco: true, annotato: !!x, carichi: carichi.registro_carichi, ultimoCarico: carico ? giorno(carico.ultimo) : null,
@@ -157,6 +161,7 @@ export default async function(req) {
         registro_riga: Number(x.riga) || null,
         registro_volte: Number(x.volte) || null,
         ...carichiDi(caricoPerChiave.get(x.chiave)),
+        _fir: [...(x.fir ? [x.fir] : []), ...((caricoPerChiave.get(x.chiave) || {}).fir || [])],
         scadenza_effettiva: inizio ? unAnnoDopo(inizio) : null,
         validita_da_registro: !!inizio,
         tipo_divergenza: 'solo_registro',
@@ -165,7 +170,35 @@ export default async function(req) {
     }
 
     const svc = base44.asServiceRole.entities;
-    const esistenti = await fetchAll(svc.Omologa);
+
+    // Collegamento ai PDR del gestionale. Passa dai numeri di formulario dei
+    // carichi, che nelle primarie portano il PDR esatto: il nome non basta, perche'
+    // molti punti di raccolta si chiamano allo stesso modo ("il gommista").
+    // Ogni canale cerca nelle sue primarie; chi e' solo nel registro non ha un
+    // canale dichiarato e lo prende dai suoi formulari.
+    const [primarieRete, primarieAci, esistenti] = await Promise.all([
+      fetchAll(svc.PrimariaRete), fetchAll(svc.PrimariaAci), fetchAll(svc.Omologa),
+    ]);
+    const perFir = (righe) => {
+      const m = new Map();
+      for (const r of righe) { const f = normFir(r.numero_fir); if (f && r.id_pdr) m.set(f, r); }
+      return m;
+    };
+    const firRete = perFir(primarieRete), firAci = perFir(primarieAci);
+    let collegati = 0;
+    for (const d of desiderati) {
+      const firs = [...new Set((d._fir || []).map(normFir).filter(Boolean))];
+      const cerca = (m) => firs.map(f => m.get(f)).filter(Boolean);
+      let trovati = cerca(d.canale === 'ACI' ? firAci : firRete);
+      if (!d.nell_elenco && !trovati.length) {
+        const aci = cerca(firAci);
+        if (aci.length) { trovati = aci; d.canale = 'ACI'; }
+      }
+      d.pdr_collegati = [...new Set(trovati.map(r => String(r.id_pdr)))].sort();
+      d.clienti_collegati = [...new Set(trovati.map(r => String(r.id_cliente || '')).filter(Boolean))].sort();
+      if (d.pdr_collegati.length) collegati++;
+      delete d._fir;
+    }
     // Per ogni produttore vale la riga piu' vecchia; se ce ne fossero altre con la
     // stessa chiave (un produttore scritto in due modi prima che venissero unite)
     // si trattano come non piu' presenti: si segnano, non si cancellano.
@@ -184,7 +217,21 @@ export default async function(req) {
       visti.add(d.produttore_chiave);
       const gia = perChiave.get(d.produttore_chiave);
       if (!gia) { nuovi.push(d); continue; }
-      if (!uguali(gia, d)) modifiche.push({ id: gia.id, ...d });
+      if (uguali(gia, d)) continue;
+      const modifica = { id: gia.id, ...d };
+      // Rinnovo: la nuova omologa finisce dopo la vecchia. Il periodo precedente,
+      // con la decisione che l'operatore aveva preso, passa nello storico; la nuova
+      // omologa torna da verificare se i due fogli non sono d'accordo.
+      if (gia.omologa_a && d.omologa_a && d.omologa_a > gia.omologa_a) {
+        let storico = [];
+        try { storico = JSON.parse(gia.storico_json || '[]'); } catch (_e) { storico = []; }
+        if (!storico.some(s => s.a === gia.omologa_a)) {
+          storico.push({ da: gia.omologa_da || null, a: gia.omologa_a, stato: gia.stato || null, nota: gia.nota || null, chiuso_il: adesso.slice(0, 10) });
+        }
+        modifica.storico_json = JSON.stringify(storico);
+        if (d.tipo_divergenza !== 'nessuna') { modifica.stato = 'da_verificare'; modifica.nota = ''; }
+      }
+      modifiche.push(modifica);
     }
 
     // Chi non compare piu' in nessuno dei due fogli non si cancella: si segna,
@@ -221,6 +268,7 @@ export default async function(req) {
       righe_registro: registro.length,
       conferitori: conferitori.length,
       doppi_elenco: doppiElenco,
+      collegati_pdr: collegati,
       divergenze: {
         solo_registro: conta('solo_registro'),
         solo_elenco: conta('solo_elenco'),

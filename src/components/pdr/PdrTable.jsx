@@ -1,8 +1,11 @@
 import React from 'react';
 import { Loader2, MapPin, Eye } from 'lucide-react';
 import { streetViewUrl, precisioneCoordinata } from '@/lib/geoLinks';
+import { useIndiceOmologhe } from '@/lib/omologheIndice';
+import BadgeOmologa from '@/components/shared/BadgeOmologa';
 
 export default function PdrTable({ records, loading, onSelectPdr }) {
+  const indiceOmologhe = useIndiceOmologhe();
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
@@ -26,6 +29,7 @@ export default function PdrTable({ records, loading, onSelectPdr }) {
             <th className="px-2 py-2.5 w-20"></th>
             <th className="text-left px-3 py-2.5 font-medium">Cod. Esterno</th>
             <th className="text-left px-3 py-2.5 font-medium">Ragione Sociale</th>
+            <th className="text-left px-3 py-2.5 font-medium" title="Omologa registrata per il punto di raccolta, con la sua scadenza">Omologa</th>
             <th className="text-left px-3 py-2.5 font-medium">Comune</th>
             <th className="text-left px-3 py-2.5 font-medium">Prov.</th>
             <th className="text-left px-3 py-2.5 font-medium">Cod. Fiscale</th>
@@ -84,6 +88,7 @@ export default function PdrTable({ records, loading, onSelectPdr }) {
               </td>
               <td className="px-3 py-2 font-mono text-xs">{r.codice_esterno || '—'}</td>
               <td className="px-3 py-2 font-medium">{r.ragione_sociale || '—'}</td>
+              <td className="px-3 py-2"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} /></td>
               <td className="px-3 py-2">{r.comune || '—'}</td>
               <td className="px-3 py-2">{r.provincia || '—'}</td>
               <td className="px-3 py-2 font-mono text-xs">{r.codice_fiscale || '—'}</td>
