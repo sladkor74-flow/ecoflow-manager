@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ClipboardCheck } from 'lucide-react';
 import ReportSettimanali from '@/components/verifiche/ReportSettimanali';
 import EvasioneAssegnati from '@/components/verifiche/EvasioneAssegnati';
+import MatriceProvince from '@/components/verifiche/MatriceProvince';
 
 // Modulo Verifiche: controlli periodici sui dati che arrivano dai fornitori.
 // Ogni controllo e' una sezione; il lavoro che producono e' temporaneo e si
@@ -29,12 +30,20 @@ export default function Verifiche() {
         <TabsList>
           <TabsTrigger value="report-settimanali">Report settimanali</TabsTrigger>
           <TabsTrigger value="evasione-assegnati">Evasione assegnati</TabsTrigger>
+          <TabsTrigger value="raccolto-province">Raccolto per provincia</TabsTrigger>
+          <TabsTrigger value="ritiri-province">Ritiri per provincia</TabsTrigger>
         </TabsList>
         <TabsContent value="report-settimanali" className="pt-4">
           <ReportSettimanali isAdmin={isAdmin} />
         </TabsContent>
         <TabsContent value="evasione-assegnati" className="pt-4">
           <EvasioneAssegnati isAdmin={isAdmin} />
+        </TabsContent>
+        <TabsContent value="raccolto-province" className="pt-4">
+          <MatriceProvince tipo="peso" />
+        </TabsContent>
+        <TabsContent value="ritiri-province" className="pt-4">
+          <MatriceProvince tipo="ritiri" />
         </TabsContent>
       </Tabs>
     </div>
