@@ -8,6 +8,7 @@ import {
   Ship, Warehouse, Target, FileText, CheckSquare, Menu, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, ShieldCheck, ClipboardCheck, Sparkles, FileBarChart, Inbox, Users, FileCheck2 } from
 'lucide-react';
 import { caricaLivello, proteggiScritture } from '@/lib/permessi';
+import { osservaTabelle } from '@/lib/tabelleScorrevoli';
 
 const NAV_ITEMS = [
 { label: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -50,6 +51,9 @@ export default function Layout() {
     proteggiScritture();
     caricaLivello(user);
   }, [user]);
+
+  // Le tabelle larghe tengono ferma la prima colonna quando scorrono di lato.
+  useEffect(() => osservaTabelle(), []);
 
   // Contatore delle richieste: all'amministratore quelle da valutare, agli altri
   // le proprie ancora in attesa di risposta.

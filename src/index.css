@@ -125,3 +125,70 @@
 @media (prefers-reduced-motion: reduce) {
   .eco-respiro, .eco-occhi, .eco-punto, .eco-onda { animation: none; }
 }
+
+/* === Tabelle larghe e lunghe ===
+   Una tabella piu' larga dello schermo si scorre di lato, ma la sua barra sta in
+   fondo alla tabella: con molte righe bisognava scendere fino in fondo alla pagina
+   per raggiungerla. Il riquadro della tabella ora non supera l'altezza dello
+   schermo, cosi' la barra resta sempre a portata; le intestazioni stanno ferme
+   mentre si scende e, quando la tabella scorre di lato, sta ferma anche la prima
+   colonna, per non perdere di vista a chi si riferisce la riga.
+   Vale per ogni tabella in un contenitore scorrevole, salvo quelli che hanno gia'
+   un'altezza decisa. La prima colonna la blocca src/lib/tabelleScorrevoli.js,
+   solo dove la tabella scorre davvero di lato. */
+.overflow-x-auto:has(> table):not([class*="max-h-"]),
+.overflow-auto:has(> table):not([class*="max-h-"]) {
+  max-height: calc(100vh - 7rem);
+  max-height: calc(100dvh - 7rem);
+  overflow: auto;
+}
+
+.overflow-x-auto:has(> table) > table > thead,
+.overflow-auto:has(> table) > table > thead {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+/* L'intestazione ferma deve essere piena, altrimenti le righe le passano dietro in trasparenza. */
+.overflow-x-auto:has(> table) > table > thead:not([class*="bg-"]),
+.overflow-auto:has(> table) > table > thead:not([class*="bg-"]) {
+  background-color: hsl(var(--eco-card));
+}
+.overflow-x-auto:has(> table) > table > thead[class*="bg-muted/"],
+.overflow-auto:has(> table) > table > thead[class*="bg-muted/"] {
+  background-color: hsl(var(--eco-muted));
+}
+
+@media (min-width: 768px) {
+  [data-scorre-lato] > table > thead > tr > th:first-child,
+  [data-scorre-lato] > table > tbody > tr > td:first-child,
+  [data-scorre-lato] > table > tfoot > tr > td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    box-shadow: inset -1px 0 0 hsl(var(--eco-border));
+  }
+  [data-scorre-lato] > table > thead > tr > th:first-child {
+    z-index: 4;
+    background-color: hsl(var(--eco-muted));
+  }
+  [data-scorre-lato] > table > thead:not([class*="bg-muted"]) > tr > th:first-child {
+    background-color: hsl(var(--eco-card));
+  }
+  [data-scorre-lato] > table > tbody > tr > td:first-child,
+  [data-scorre-lato] > table > tfoot > tr > td:first-child {
+    background-color: hsl(var(--eco-card));
+  }
+  [data-scorre-lato] > table > tbody > tr:hover > td:first-child {
+    background-color: hsl(var(--eco-muted));
+  }
+}
+
+@media print {
+  .overflow-x-auto:has(> table),
+  .overflow-auto:has(> table) {
+    max-height: none;
+    overflow: visible;
+  }
+}
