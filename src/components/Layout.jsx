@@ -5,8 +5,9 @@ import { base44 } from '@/api/base44Client';
 import { EVENTO_AGGIORNAMENTO } from '@/lib/qualifica';
 import {
   LayoutDashboard, Upload, ClipboardList, Truck, Factory,
-  Ship, Warehouse, Target, FileText, CheckSquare, Menu, X, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, ShieldCheck, ClipboardCheck, Sparkles, FileBarChart } from
+  Ship, Warehouse, Target, FileText, CheckSquare, Menu, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, ShieldCheck, ClipboardCheck, Sparkles, FileBarChart, Inbox } from
 'lucide-react';
+import { ricordaRuolo, proteggiScritture } from '@/lib/permessi';
 
 const NAV_ITEMS = [
 { label: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -29,7 +30,8 @@ const NAV_ITEMS = [
 { label: 'Verifiche', path: '/verifiche', icon: ClipboardCheck },
 { label: 'Assistente', path: '/assistente', icon: Sparkles },
 { label: 'Predittività Secondarie', path: '/predittivita-secondarie', icon: LineChart },
-{ label: 'To-Do List', path: '/todo', icon: CheckSquare }];
+{ label: 'To-Do List', path: '/todo', icon: CheckSquare },
+{ label: 'Richieste', path: '/richieste', icon: Inbox, contatore: 'richieste' }];
 
 
 export default function Layout() {
@@ -37,6 +39,31 @@ export default function Layout() {
   const location = useLocation();
   const { user, logout } = useAuth();
   const [alertQualifica, setAlertQualifica] = useState(0);
+  const [richiesteAperte, setRichiesteAperte] = useState(0);
+  const isAdmin = !!user && user.role === 'admin';
+
+  // Il ruolo serve anche fuori dai componenti, per fermare le scritture di chi
+  // consulta soltanto. La rete di sicurezza si installa una volta sola.
+  useEffect(() => {
+    ricordaRuolo(user);
+    proteggiScritture();
+  }, [user]);
+
+  // Contatore delle richieste: all'amministratore quelle da valutare, agli altri
+  // le proprie ancora in attesa di risposta.
+  useEffect(() => {
+    let attivo = true;
+    const leggi = async () => {
+      try {
+        const aperte = await base44.entities.RichiestaUtente.filter({ stato: 'in_attesa' }, '-created_date', 200);
+        const mie = isAdmin ? aperte : aperte.filter(r => (r.richiedente_email || '') === ((user && user.email) || ''));
+        if (attivo) setRichiesteAperte(mie.length);
+      } catch (_e) { /* il contatore e' accessorio: in caso di errore resta nascosto */ }
+    };
+    leggi();
+    const intervallo = setInterval(leggi, 5 * 60 * 1000);
+    return () => { attivo = false; clearInterval(intervallo); };
+  }, [isAdmin, user]);
 
   // Contatore degli alert della qualifica fornitori. Legge solo il riepilogo gia'
   // salvato, che si aggiorna a ogni calcolo del modulo e al controllo giornaliero:
@@ -97,6 +124,13 @@ export default function Layout() {
                 
                 <Icon className="w-4 h-4 flex-shrink-0" />
                 <span className="flex-1">{item.label}</span>
+                {item.contatore === 'richieste' && richiesteAperte > 0 && (
+                  <span
+                    title={isAdmin ? `${richiesteAperte} richieste da valutare` : `${richiesteAperte} tue richieste in attesa`}
+                    className="min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[11px] font-semibold leading-none text-center tabular-nums">
+                    {richiesteAperte > 99 ? '99+' : richiesteAperte}
+                  </span>
+                )}
                 {item.contatore === 'qualifica' && alertQualifica > 0 && (
                   <span
                     title={`${alertQualifica} alert da gestire`}

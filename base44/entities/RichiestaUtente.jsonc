@@ -1,0 +1,81 @@
+{
+  "name": "RichiestaUtente",
+  "type": "object",
+  "properties": {
+    "titolo": {
+      "type": "string",
+      "description": "Che cosa si chiede, in poche parole"
+    },
+    "modulo": {
+      "type": "string",
+      "description": "Modulo del gestionale a cui si riferisce la richiesta"
+    },
+    "tipo": {
+      "type": "string",
+      "enum": [
+        "caricamento",
+        "correzione",
+        "modifica",
+        "nuova_funzione",
+        "altro"
+      ],
+      "default": "altro",
+      "description": "Genere di intervento chiesto all'amministratore"
+    },
+    "descrizione": {
+      "type": "string",
+      "description": "Che cosa serve e perche', con i riferimenti utili: formulario, ID ordine, impianto, periodo"
+    },
+    "urgenza": {
+      "type": "string",
+      "enum": [
+        "bassa",
+        "media",
+        "alta"
+      ],
+      "default": "media",
+      "description": "Quanto e' urgente secondo chi la invia"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "in_attesa",
+        "approvata",
+        "eseguita",
+        "respinta"
+      ],
+      "default": "in_attesa",
+      "description": "Stato della valutazione dell'amministratore"
+    },
+    "richiedente_nome": {
+      "type": "string",
+      "description": "Nome di chi ha inviato la richiesta"
+    },
+    "richiedente_email": {
+      "type": "string",
+      "description": "Email di chi ha inviato la richiesta, per rispondere"
+    },
+    "inviata_il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Momento dell'invio"
+    },
+    "risposta": {
+      "type": "string",
+      "description": "Nota dell'amministratore: cosa e' stato fatto o perche' no"
+    },
+    "decisa_da": {
+      "type": "string",
+      "description": "Chi ha valutato la richiesta"
+    },
+    "decisa_il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Momento della decisione"
+    }
+  },
+  "required": [
+    "titolo",
+    "descrizione"
+  ]
+}
