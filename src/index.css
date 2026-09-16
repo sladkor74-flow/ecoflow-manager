@@ -135,7 +135,8 @@
    colonna, per non perdere di vista a chi si riferisce la riga.
    Vale per ogni tabella in un contenitore scorrevole, salvo quelli che hanno gia'
    un'altezza decisa. La prima colonna la blocca src/lib/tabelleScorrevoli.js,
-   solo dove la tabella scorre davvero di lato. */
+   solo dove la tabella scorre davvero di lato, e sempre li' aggiunge una seconda
+   barra orizzontale sopra la tabella, per non doverla cercare in basso. */
 .overflow-x-auto:has(> table):not([class*="max-h-"]),
 .overflow-auto:has(> table):not([class*="max-h-"]) {
   max-height: calc(100vh - 7rem);
@@ -185,10 +186,32 @@
   }
 }
 
+/* Barra di scorrimento orizzontale anche sopra la tabella, collegata a quella in
+   basso: la aggiunge src/lib/tabelleScorrevoli.js solo alle tabelle che scorrono
+   davvero di lato. */
+.barra-scorrimento-alta {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  margin-bottom: 2px;
+}
+.barra-scorrimento-alta > div {
+  height: 1px;
+}
+/* La barra sta attaccata alla sua tabella: la spaziatura fra gli elementi della
+   pagina va prima della barra, non fra la barra e la tabella. */
+.barra-scorrimento-alta + .overflow-x-auto,
+.barra-scorrimento-alta + .overflow-auto {
+  margin-top: 0 !important;
+}
+
 @media print {
   .overflow-x-auto:has(> table),
   .overflow-auto:has(> table) {
     max-height: none;
     overflow: visible;
+  }
+  .barra-scorrimento-alta {
+    display: none;
   }
 }
