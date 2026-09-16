@@ -1,0 +1,128 @@
+{
+  "name": "DichiarazioneRentri",
+  "type": "object",
+  "properties": {
+    "produttore": {
+      "type": "string",
+      "description": "Produttore come compare nel foglio delle dichiarazioni"
+    },
+    "produttore_chiave": {
+      "type": "string",
+      "description": "Nome ridotto all'osso, per riconoscere lo stesso produttore scritto in modi diversi"
+    },
+    "tipologia_materiale": {
+      "type": "string",
+      "description": "Di norma Pneumatici fuori uso"
+    },
+    "data_dichiarazione": {
+      "type": "string",
+      "format": "date",
+      "description": "Data della dichiarazione RENTRI del produttore"
+    },
+    "iscritto_rentri": {
+      "type": "boolean",
+      "default": false,
+      "description": "Il produttore dichiara di essere iscritto al RENTRI"
+    },
+    "fir_digitale": {
+      "type": "boolean",
+      "default": false,
+      "description": "Il produttore dichiara di usare il FIR digitale"
+    },
+    "fir_cartaceo": {
+      "type": "boolean",
+      "default": false,
+      "description": "Il produttore dichiara di usare il FIR cartaceo"
+    },
+    "nota": {
+      "type": "string",
+      "description": "Annotazioni del foglio accanto alla dichiarazione"
+    },
+    "codice_rentri": {
+      "type": "string",
+      "description": "Codice dell'unita' locale RENTRI trovato nella nota (OP...), se c'e'"
+    },
+    "riga_foglio": {
+      "type": "number",
+      "description": "Riga del foglio da cui viene la dichiarazione"
+    },
+    "doppia": {
+      "type": "boolean",
+      "default": false,
+      "description": "Il produttore compare piu' di una volta nel foglio"
+    },
+    "nel_foglio": {
+      "type": "boolean",
+      "default": true,
+      "description": "Il produttore compare ancora nel foglio all'ultimo aggiornamento"
+    },
+    "pdr_collegati": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "PDR del produttore a cui si riferisce la dichiarazione"
+    },
+    "clienti_collegati": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Clienti a cui appartengono quei PDR"
+    },
+    "collegamento": {
+      "type": "string",
+      "enum": [
+        "codice",
+        "nome",
+        "simile",
+        "manuale",
+        "nessuno"
+      ],
+      "default": "nessuno",
+      "description": "Come si e' trovato il PDR: codice RENTRI uguale (certo), nome identico a un solo produttore, nome simile da confermare, scelta a mano, nessuno"
+    },
+    "candidati_json": {
+      "type": "string",
+      "description": "PDR possibili quando il nome non basta a sceglierne uno: si sceglie a mano"
+    },
+    "pdr_manuali": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "PDR scelti a mano o confermati dall'operatore: valgono anche dopo gli aggiornamenti"
+    },
+    "storico_json": {
+      "type": "string",
+      "description": "Condizioni precedenti quando cambiano (iscrizione, formulario, data): solo valori, pochi byte"
+    },
+    "aggiornata_il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Ultimo allineamento con il foglio"
+    }
+  },
+  "required": [
+    "produttore",
+    "produttore_chiave"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

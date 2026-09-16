@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { chiaveProduttore, abbina, divergenza, scadenzaEffettiva, unAnnoDopo } from "../../shared/omologhe.ts";
+import { oggiRoma } from "../../shared/reportSettimanali.ts";
 
 // Allinea l'elenco delle omologhe con i due fogli.
 //
@@ -226,7 +227,7 @@ export default async function(req) {
         let storico = [];
         try { storico = JSON.parse(gia.storico_json || '[]'); } catch (_e) { storico = []; }
         if (!storico.some(s => s.a === gia.omologa_a)) {
-          storico.push({ da: gia.omologa_da || null, a: gia.omologa_a, stato: gia.stato || null, nota: gia.nota || null, chiuso_il: adesso.slice(0, 10) });
+          storico.push({ da: gia.omologa_da || null, a: gia.omologa_a, stato: gia.stato || null, nota: gia.nota || null, chiuso_il: oggiRoma() });
         }
         modifica.storico_json = JSON.stringify(storico);
         if (d.tipo_divergenza !== 'nessuna') { modifica.stato = 'da_verificare'; modifica.nota = ''; }

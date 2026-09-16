@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import { dimenticaIndiceOmologhe } from '@/lib/omologheIndice';
+import { parole, corrispondeA } from '@/lib/ricercaNomi';
 import { formatIntero } from '@/lib/utils';
 import { Loader2, FileCheck2, Search, Upload, FileSpreadsheet, Check, PauseCircle, XCircle, RotateCcw, AlertTriangle } from 'lucide-react';
 
@@ -28,20 +29,9 @@ import { Loader2, FileCheck2, Search, Upload, FileSpreadsheet, Check, PauseCircl
 // Le divergenze non si risolvono da sole: la verifica la fa l'operatore in
 // ufficio, con i documenti davanti, e qui registra la sua decisione.
 
-// La ricerca confronta le parole, non la scrittura: "PIUGOMME DISTRIBUZIONI S.R.L."
-// arrivato da un ordine trova "Piugomme Distribuzioni srl" nell'elenco. Basta che
-// ogni parola significativa cercata compaia nel nome.
-const FORME = new Set(['srl', 'srls', 'spa', 'sas', 'snc', 'sc', 'ss', 'soc', 'societa', 'unipersonale', 'ditta', 'di', 'del', 'della', 'dei', 'e', 'c']);
-const parole = (v) => String(v || '').toLowerCase()
-  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  .replace(/[^a-z0-9]+/g, ' ').trim()
-  .replace(/\b(?:[a-z] )+[a-z]\b/g, (m) => m.replace(/ /g, ''))
-  .split(' ').filter(p => p && !FORME.has(p));
-const corrisponde = (r, cercate) => {
-  if (!cercate.length) return true;
-  const nome = parole(`${r.produttore} ${r.registro_nome || ''}`).join(' ');
-  return cercate.every(p => nome.includes(p));
-};
+// La ricerca confronta le parole, non la scrittura: un nome arrivato da un ordine
+// trova il produttore anche se l'elenco lo scrive in un altro modo.
+const corrisponde = (r, cercate) => corrispondeA(cercate, r.produttore, r.registro_nome);
 
 const dataIt = (v) => (v ? String(v).slice(0, 10).split('-').reverse().join('/') : '—');
 

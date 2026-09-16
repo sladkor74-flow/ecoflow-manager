@@ -7,6 +7,8 @@
 //
 // Specchio di base44/shared/omologhe.ts per le parti che servono anche qui.
 
+import { testo, daData, apriFoglio as apri, griglia } from '@/lib/foglioExcel';
+
 // Il documento si recepisce una volta, al primo ritiro, e da lì parte l'anno di
 // validità: i ritiri successivi non riportano l'annotazione e va bene così.
 export const SPIEGA_DIVERGENZA = {
@@ -66,40 +68,6 @@ export function fasciaScadenza(giorni) {
 }
 
 // === lettura dei file ===
-
-const testo = (v) => String(v ?? '').trim();
-
-const due = (n) => String(n).padStart(2, '0');
-
-// Le date si leggono dal numero seriale che Excel scrive davvero nel file, non
-// dall'oggetto Date: costruire una data porta con se' il fuso orario del
-// computer e fa slittare il giorno.
-const daData = (XLSX) => (v) => {
-  if (v === null || v === undefined || v === '') return null;
-  if (typeof v === 'number') {
-    const d = XLSX.SSF.parse_date_code(v);
-    return d && d.y ? `${d.y}-${due(d.m)}-${due(d.d)}` : null;
-  }
-  if (v instanceof Date) return `${v.getFullYear()}-${due(v.getMonth() + 1)}-${due(v.getDate())}`;
-  const s = String(v).trim();
-  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-  m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
-  if (m) return `${m[3]}-${due(m[2])}-${due(m[1])}`;
-  return null;
-};
-
-async function apri(file, cerca) {
-  const XLSX = await import('xlsx');
-  const buffer = await file.arrayBuffer();
-  const indice = XLSX.read(buffer, { type: 'array', bookSheets: true });
-  const nome = (indice.SheetNames || []).find(n => cerca.test(n));
-  if (!nome) throw new Error(`Nel file «${file.name}» non trovo il foglio cercato (${cerca}). Fogli presenti: ${(indice.SheetNames || []).join(', ')}.`);
-  const wb = XLSX.read(buffer, { type: 'array', cellDates: false, cellText: false, cellHTML: false, cellFormula: false, sheets: [nome] });
-  return { XLSX, ws: wb.Sheets[nome], nome };
-}
-
-const griglia = (XLSX, ws) => XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, blankrows: true, defval: null });
 
 /**
  * Elenco delle omologhe: due tabelle nello stesso foglio, i produttori ACI e

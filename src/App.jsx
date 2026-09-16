@@ -33,6 +33,7 @@ import Verifiche from '@/pages/Verifiche';
 import Richieste from '@/pages/Richieste';
 import Utenti from '@/pages/Utenti';
 import Omologhe from '@/pages/Omologhe';
+import DichiarazioniRentri from '@/pages/DichiarazioniRentri';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -89,6 +90,7 @@ const AuthenticatedApp = () => {
           <Route path="/richieste" element={<PageErrorBoundary><Richieste /></PageErrorBoundary>} />
           <Route path="/utenti" element={<PageErrorBoundary><Utenti /></PageErrorBoundary>} />
           <Route path="/omologhe" element={<PageErrorBoundary><Omologhe /></PageErrorBoundary>} />
+          <Route path="/dichiarazioni-rentri" element={<PageErrorBoundary><DichiarazioniRentri /></PageErrorBoundary>} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />
