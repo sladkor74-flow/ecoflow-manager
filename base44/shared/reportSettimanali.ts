@@ -372,6 +372,19 @@ export const normalizzaOrdine = (v) => {
 };
 
 /**
+ * Classe scritta insieme al numero d'ordine ("ET26074218 P", "SEC26149241 M").
+ * Si toglie il codice dell'ordine e si legge quel che resta: se e' una classe
+ * va confrontata con quella registrata, esattamente come la colonna classe.
+ */
+export const classeDaOrdine = (v) => {
+  const t = String(v ?? '').toUpperCase();
+  if (!t.trim()) return null;
+  const resto = t.replace(/(?:ET|SEC|TER|EXT)?\s*[0-9]{5,}/g, ' ').replace(/[^A-Z0-9]+/g, ' ').trim();
+  if (!resto) return null;
+  return classeNormalizzata(resto) || classeNormalizzata(resto.replace(/\s+/g, ''));
+};
+
+/**
  * Porta le righe lette dal file in una forma confrontabile.
  * Il peso viene sempre espresso in chilogrammi interi, come nei formulari e nel
  * portale Ecotyre. Se l'unita' non e' nota si deduce dall'ordine di grandezza:
@@ -413,7 +426,11 @@ export function normalizzaRigheReport(grezze, unitaIndicata) {
       trasportatore: String(g.trasportatore ?? '').trim(),
       intermediario: String(g.intermediario ?? '').trim(),
       classe_testo: String(g.classe ?? '').trim(),
-      classe: classeNormalizzata(g.classe),
+      // La classe puo' stare nella sua colonna oppure accanto al numero d'ordine:
+      // in entrambi i casi va verificata.
+      classe: classeNormalizzata(g.classe) || classeDaOrdine(g.ordine),
+      classe_ordine: classeDaOrdine(g.ordine),
+      classe_da_ordine: !classeNormalizzata(g.classe) && !!classeDaOrdine(g.ordine),
       targa: String(g.targa ?? '').trim(),
     });
   }
@@ -595,7 +612,13 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       aggiungi('trasportatore', `Trasportatore diverso: report "${r.trasportatore}", gestionale "${m.trasportatore}"`, 'osservazione');
     }
 
-    if (r.classe && m.classe && r.classe !== m.classe) aggiungi('classe', `Classe diversa: report ${r.classe}, gestionale ${m.classe}`);
+    if (r.classe && m.classe && r.classe !== m.classe) {
+      const dove = r.classe_da_ordine ? " (indicata accanto al numero d'ordine)" : '';
+      aggiungi('classe', `Classe diversa: report ${r.classe}${dove}, gestionale ${m.classe}`);
+    } else if (r.classe_ordine && !r.classe_da_ordine && r.classe && r.classe_ordine !== r.classe) {
+      // Nel report la classe compare due volte e le due indicazioni si contraddicono.
+      aggiungi('classe', `Nel report la classe accanto al numero d'ordine (${r.classe_ordine}) non coincide con la colonna classe (${r.classe})`, 'osservazione');
+    }
 
     if (r.ordine && m.ordine && normalizzaOrdine(r.ordine) !== normalizzaOrdine(m.ordine)) {
       aggiungi('ordine', `Ordine diverso: report ${r.ordine}, gestionale ${m.ordine}`);
