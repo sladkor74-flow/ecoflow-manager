@@ -408,9 +408,30 @@ export async function proponiNovita(base44, novita, { oggi, origine, approvate =
  * Precisazioni che l'utente da' parlando con EcoTyna ("non e' cosi', vale ..."):
  * diventano proposte da approvare, cosi' la volta dopo la risposta e' giusta.
  */
-export async function proponiPrecisazioni(base44, precisazioni, { oggi, utente, domandaId }) {
+// Frasi con cui l'utente corregge o afferma una regola; una semplice domanda non basta.
+const CORREZIONE = /non [eè]\S? (cos[iì]|vero|corrett|giust)|sbagli|errat|invece|in realt[aà]|ti correggo|precis|ricorda|tieni presente|nota bene|da noi|la regola [eè]|il decreto dice|la norma dice|la legge dice|devi sapere|attenzione:|non hanno l'obbligo|non [eè]\S? obbligatori/i;
+
+const paroleLunghe = (t) => new Set(String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/[^a-z0-9]+/).filter(w => w.length >= 5));
+
+/** true se il testo e' gia' detto da una voce della base di conoscenza (quasi tutte le sue parole in una voce). */
+export function giaNellaConoscenza(testo, approvate: VoceApprovata[] = []) {
+  const cercate = paroleLunghe(testo);
+  if (cercate.size < 4) return false;
+  return testoConoscenza(approvate).split('\n').some(riga => {
+    const voce = paroleLunghe(riga);
+    let presenti = 0;
+    for (const w of cercate) if (voce.has(w)) presenti++;
+    return presenti / cercate.size >= 0.75;
+  });
+}
+
+export async function proponiPrecisazioni(base44, precisazioni, { oggi, utente, domandaId, domanda = '', approvate = [] }: { oggi: string; utente?: string; domandaId?: string; domanda?: string; approvate?: VoceApprovata[] }) {
   const ent = base44.asServiceRole.entities.ConoscenzaAssistente;
-  const lista = (Array.isArray(precisazioni) ? precisazioni : []).filter(p => p && p.testo && String(p.testo).length >= 20).slice(0, 3);
+  // Solo quando l'utente corregge o afferma qualcosa, e solo se non e' gia' nella base di conoscenza.
+  if (!CORREZIONE.test(String(domanda))) return [];
+  const lista = (Array.isArray(precisazioni) ? precisazioni : [])
+    .filter(p => p && p.testo && String(p.testo).length >= 20 && !giaNellaConoscenza(p.testo, approvate))
+    .slice(0, 3);
   const create = [];
   for (const p of lista) {
     create.push(await ent.create({
