@@ -6,6 +6,9 @@ import {
 import { analizzaDomanda, situazioneGestionale } from "../../shared/assistente.ts";
 import { materialePertinente } from "../../shared/materialeCorso.ts";
 import { oggiRoma } from "../../shared/qualificaFornitori.ts";
+import {
+  SCHEMA_FILE_DA_CREARE, SCHEMA_LETTURA_FILE, REGOLE_FILE, allegatiRicevuti, istruzioniLettura, allegatiPerPrompt, fileDaCreare,
+} from "../../shared/fileEcoTyna.ts";
 
 // Assistente del gestionale: risponde a dubbi normativi, a domande sui dati della
 // commessa e spiega i quiz dell'esame da responsabile tecnico.
@@ -61,6 +64,7 @@ const SCHEMA_RISPOSTA = {
         },
       },
     },
+    file_da_creare: SCHEMA_FILE_DA_CREARE,
   },
   required: ['risposta'],
 };
@@ -85,6 +89,12 @@ export default async function(req) {
     if (domanda.length > 4000) return Response.json({ error: 'La domanda e\' troppo lunga: massimo 4.000 caratteri' }, { status: 400 });
     const contesto = body.contesto && typeof body.contesto === 'object' ? body.contesto : null;
     const quiz = contesto && contesto.tipo === 'quiz' ? contesto : null;
+    // Allegare file e' un caricamento: lo fa solo l'amministratore. Tutti possono
+    // invece scaricare i file che EcoTyna prepara.
+    const allegati = allegatiRicevuti(body.allegati);
+    if (allegati.length && user.role !== 'admin') {
+      return Response.json({ error: 'Solo l\'amministratore puo\' allegare file a EcoTyna. Puoi fare la domanda senza allegati, oppure aprire una richiesta.' }, { status: 403 });
+    }
 
     const svc = base44.asServiceRole.entities;
     const conversazioneId = String(body.conversazione_id || '') || crypto.randomUUID();
@@ -101,10 +111,25 @@ export default async function(req) {
       dati_gestionale: analisi.dati,
       ricerca_online: analisi.norma,
       contesto_json: contesto ? JSON.stringify(contesto) : '',
+      allegati_json: allegati.length ? JSON.stringify(allegati.map(a => ({ nome: a.nome, tipo: a.tipo, dimensione: a.dimensione, caricato: !!a.file_uri }))) : '',
       stato: 'in_corso',
       valutazione: 'nessuna',
     });
     recordId = record.id;
+
+    // PDF e immagini li legge il modello, in una chiamata a parte: nella stessa
+    // chiamata non si possono leggere file e cercare sul web.
+    const core = base44.asServiceRole.integrations.Core;
+    const caricati = allegati.filter(a => a.file_uri);
+    let letture = [];
+    if (caricati.length) {
+      const urls = await Promise.all(caricati.map(a => core.CreateFileSignedUrl({ file_uri: a.file_uri, expires_in: 900 }).then(r => r.signed_url)));
+      const lettura = comeOggetto(await core.InvokeLLM({ prompt: istruzioniLettura(domanda, caricati), file_urls: urls, response_json_schema: SCHEMA_LETTURA_FILE }));
+      letture = Array.isArray(lettura.file) ? lettura.file : [];
+    }
+    const { sezione: sezioneAllegati, daSalvare: allegatiSalvati } = allegatiPerPrompt(allegati, letture);
+    // Nelle domande successive della stessa conversazione EcoTyna ritrova l'estratto dell'ultimo file allegato.
+    const ultimiAllegati = [...precedenti].reverse().map(p => { try { return JSON.parse(p.allegati_json || '[]'); } catch { return []; } }).find(l => l.some(a => a.estratto));
 
     const oggi = oggiRoma();
     const [approvate, dati, corso] = await Promise.all([
@@ -150,11 +175,15 @@ export default async function(req) {
         'Spiega perche\' la risposta esatta e\' corretta e perche\' le altre sono sbagliate, con i riferimenti normativi, e dai un modo semplice per ricordarla. Se la norma e\' cambiata dopo la pubblicazione dei quiz, segnalalo, ricordando che all\'esame vale la risposta della banca dati.',
       ] : []),
       '',
+      REGOLE_FILE,
+      '',
       'BASE DI CONOSCENZA',
       `Voci del codice (id: titolo): ${BASE_CONOSCENZA.map(v => `${v.id}: ${v.titolo}`).join('; ')}.`,
       testoConoscenza(approvate),
       ...(corso.testo ? ['', 'CORSO RT (schede di studio dal materiale del corso per responsabile tecnico)', corso.testo] : []),
       ...(storia ? ['', 'CONVERSAZIONE PRECEDENTE', storia] : []),
+      ...(!allegati.length && ultimiAllegati ? ['', 'FILE ALLEGATI IN PRECEDENZA IN QUESTA CONVERSAZIONE (estratto)', ultimiAllegati.map(a => `[${a.rif || ''}] ${a.nome}\n${a.estratto || ''}`).join('\n\n')] : []),
+      ...(allegati.length ? ['', 'ALLEGATI (file inviati con questa domanda)', sezioneAllegati] : []),
       ...(dati ? ['', dati] : []),
       '',
       'DOMANDA',
@@ -173,10 +202,16 @@ export default async function(req) {
       .map(f => ({ titolo: taglia(f.titolo, 200), riferimento: taglia(f.riferimento, 300), url: /^https?:\/\//.test(String(f.url || '')) ? String(f.url) : '', verificato_il: taglia(f.verificato_il || VERIFICATO_IL, 20) }));
     const certezza = ['alta', 'media', 'bassa'].includes(esito.certezza) ? esito.certezza : 'media';
 
+    // File da preparare: se ne salva la descrizione (il file si genera nel browser).
+    // Una descrizione troppo grande si restituisce ma non si conserva.
+    const fileGenerati = fileDaCreare(esito.file_da_creare);
+    const fileJson = JSON.stringify(fileGenerati);
     const aggiornato = await svc.DomandaAssistente.update(recordId, {
       risposta: String(esito.risposta || 'Non sono riuscito a formulare una risposta: riprova riformulando la domanda.'),
       fonti_json: JSON.stringify(fonti),
       certezza,
+      allegati_json: allegati.length ? JSON.stringify(allegatiSalvati) : '',
+      file_generati_json: fileGenerati.length ? (fileJson.length <= 300000 ? fileJson : JSON.stringify(fileGenerati.map(f => ({ ...f, fogli: undefined, testo: undefined, non_conservato: true })))) : '',
       stato: 'completata',
       errore: '',
     });
@@ -192,7 +227,7 @@ export default async function(req) {
       if (proposte) await scartaSuperate(base44);
     } catch (_e) { /* la risposta resta valida anche se la proposta non si salva */ }
 
-    return Response.json({ ok: true, record: aggiornato || { ...record, risposta: esito.risposta, fonti_json: JSON.stringify(fonti), certezza, stato: 'completata' }, proposte });
+    return Response.json({ ok: true, record: aggiornato || { ...record, risposta: esito.risposta, fonti_json: JSON.stringify(fonti), certezza, stato: 'completata' }, proposte, file_generati: fileGenerati });
   } catch (error) {
     const messaggio = error && error.message ? error.message : String(error);
     if (base44 && recordId) {

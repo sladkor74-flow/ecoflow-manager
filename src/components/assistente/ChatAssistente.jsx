@@ -12,9 +12,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { dataOra, nomeUtente } from '@/lib/target';
-import { Send, Loader2, Plus, Search, ThumbsUp, ThumbsDown, Globe, Database, BookOpen, MessageSquare, AlertTriangle, RefreshCw, Volume2, VolumeX, Mic, MicOff, Square } from 'lucide-react';
+import { Send, Loader2, Plus, Search, ThumbsUp, ThumbsDown, Globe, Database, BookOpen, MessageSquare, AlertTriangle, RefreshCw, Volume2, VolumeX, Mic, MicOff, Square, Paperclip, X, Download, FileText } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
 import { dataServer } from '@/lib/utils';
+import { ACCETTATI, MAX_ALLEGATI, leggiAllegato, scaricaFileEcoTyna, nomeFile, ETICHETTE_FORMATO } from '@/lib/fileEcoTyna';
 
 // Spazio domande: conversazioni con l'Assistente, archiviate nel gestionale.
 // Una risposta confermata diventa una FAQ della base di conoscenza; una risposta
@@ -147,19 +148,27 @@ function DialogValutazione({ domanda, modo, onClose, onSalvato }) {
   );
 }
 
-function Messaggio({ d, onValuta, isAdmin }) {
+function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica }) {
   const fonti = leggiFonti(d.fonti_json);
   const certezza = CERTEZZA[d.certezza];
+  const allegati = leggiFonti(d.allegati_json);
+  const salvati = leggiFonti(d.file_generati_json);
+  const file = fileRecenti && fileRecenti.length ? fileRecenti : salvati;
   return (
     <div className="space-y-2">
-      <div className="flex justify-end">
+      <div className="flex flex-col items-end gap-1">
         <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-primary text-primary-foreground px-4 py-2 text-sm whitespace-pre-wrap">{d.domanda}</div>
+        {allegati.length > 0 && (
+          <div className="flex flex-wrap justify-end gap-1 max-w-[85%]">
+            {allegati.map((a, i) => <span key={i} className="inline-flex items-center gap-1 text-xs rounded-full border bg-card px-2 py-0.5"><Paperclip className="w-3 h-3" /> {a.nome}</span>)}
+          </div>
+        )}
       </div>
       <div className="max-w-[95%] rounded-2xl rounded-tl-sm border bg-card px-4 py-3 space-y-3">
         {d.stato === 'in_corso' && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="w-4 h-4 animate-spin" />
-            {d.ricerca_online ? 'Controllo la base di conoscenza e le fonti ufficiali…' : 'Leggo i dati del gestionale…'}
+            {allegati.length ? 'Leggo i file allegati…' : d.ricerca_online ? 'Controllo la base di conoscenza e le fonti ufficiali…' : 'Leggo i dati del gestionale…'}
           </p>
         )}
         {d.stato === 'errore' && (
@@ -168,6 +177,21 @@ function Messaggio({ d, onValuta, isAdmin }) {
         {d.stato === 'completata' && (
           <>
             <div className="prose prose-sm max-w-none prose-p:my-2 prose-ul:my-2"><ReactMarkdown>{d.risposta || ''}</ReactMarkdown></div>
+            {file.length > 0 && (
+              <div className="space-y-1.5">
+                {file.map((f, i) => (
+                  <div key={i} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium flex items-center gap-1.5"><FileText className="w-4 h-4 shrink-0" /> <span className="truncate">{nomeFile(f)}</span></p>
+                      <p className="text-xs text-muted-foreground">{ETICHETTE_FORMATO[f.formato] || f.formato}{f.descrizione ? ` · ${f.descrizione}` : ''}</p>
+                    </div>
+                    {f.non_conservato
+                      ? <span className="text-xs text-muted-foreground">File troppo grande per essere conservato: chiedilo di nuovo</span>
+                      : <Button size="sm" variant="outline" className="gap-1" onClick={() => onScarica(f)}><Download className="w-4 h-4" /> Scarica</Button>}
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="flex flex-wrap gap-1.5">
               {certezza && <span className={`text-xs rounded px-2 py-0.5 ${certezza.classe}`}>{certezza.etichetta}</span>}
               {d.ricerca_online && <Badge variant="outline" className="gap-1 font-normal"><Globe className="w-3 h-3" /> Verificata sulle fonti</Badge>}
@@ -215,6 +239,38 @@ export default function ChatAssistente() {
   const voce = useVoce();
   const ascolto = useAscolto((t, definitivo) => { setTesto(t); if (definitivo) setTesto(t.trim()); });
   const lette = useRef(new Set());
+  // Allegati: letti nel browser appena scelti; le tabelle restano qui finche' la
+  // pagina e' aperta, per preparare i file modificati senza caricarle sul dominio.
+  const [coda, setCoda] = useState([]);
+  const [leggendo, setLeggendo] = useState(false);
+  const sceltaFile = useRef(null);
+  const tabelle = useRef({});
+  const [fileRecenti, setFileRecenti] = useState({});
+
+  const aggiungiAllegati = async (lista) => {
+    const scelti = [...(lista || [])].slice(0, Math.max(0, MAX_ALLEGATI - coda.length));
+    if (!scelti.length) { toast({ title: `Al massimo ${MAX_ALLEGATI} file per domanda` }); return; }
+    setLeggendo(true);
+    for (const file of scelti) {
+      try {
+        const letto = await leggiAllegato(file);
+        if (letto.fogli) tabelle.current[letto.nome] = letto;
+        setCoda(c => [...c, { file, letto }]);
+      } catch (e) {
+        toast({ title: 'File non letto', description: e.message, variant: 'destructive' });
+      }
+    }
+    setLeggendo(false);
+    if (sceltaFile.current) sceltaFile.current.value = '';
+  };
+
+  const scaricaFile = async (spec) => {
+    try {
+      await scaricaFileEcoTyna(spec, tabelle.current);
+    } catch (e) {
+      toast({ title: 'File non preparato', description: e.message, variant: 'destructive' });
+    }
+  };
 
   const carica = useCallback(async () => {
     try {
@@ -266,18 +322,30 @@ export default function ChatAssistente() {
   }, [inCorso, invio, carica]);
 
   const invia = async (domanda) => {
-    const q = String(domanda || testo).trim();
+    const daAllegare = domanda ? [] : coda;
+    const q = String(domanda || testo).trim() || (daAllegare.length ? 'Analizza i file allegati: dimmi che cosa contengono e se c\'è qualcosa che non torna.' : '');
     if (!q || invio) return;
     setInvio(true);
     setTesto('');
+    setCoda([]);
     const conversazione = attiva && attiva !== 'nuova' ? attiva : null;
-    const provvisoria = { id: `tmp-${Date.now()}`, conversazione_id: conversazione || 'nuova', domanda: q, stato: 'in_corso', ricerca_online: true, created_date: new Date().toISOString() };
+    const provvisoria = {
+      id: `tmp-${Date.now()}`, conversazione_id: conversazione || 'nuova', domanda: q, stato: 'in_corso', ricerca_online: true, created_date: new Date().toISOString(),
+      allegati_json: daAllegare.length ? JSON.stringify(daAllegare.map(a => ({ nome: a.letto.nome }))) : '',
+    };
     if (!conversazione) setAttiva('nuova');
     setDomande(ds => [provvisoria, ...ds]);
     try {
-      const res = await base44.functions.invoke('chiediAssistente', { domanda: q, conversazione_id: conversazione || undefined });
+      // PDF e immagini si caricano in un'area privata; gli altri file arrivano gia' letti.
+      const allegati = [];
+      for (const { file, letto } of daAllegare) {
+        const file_uri = letto.daCaricare ? (await base44.integrations.Core.UploadPrivateFile({ file })).file_uri : undefined;
+        allegati.push({ nome: letto.nome, tipo: letto.tipo, dimensione: letto.dimensione, testo: letto.testo, tagliato: letto.tagliato, file_uri });
+      }
+      const res = await base44.functions.invoke('chiediAssistente', { domanda: q, conversazione_id: conversazione || undefined, allegati: allegati.length ? allegati : undefined });
       const record = res.data?.record;
       if (record) {
+        if (res.data.file_generati?.length) setFileRecenti(f => ({ ...f, [record.id]: res.data.file_generati }));
         setAttiva(record.conversazione_id);
         if (res.data.proposte) toast({ title: 'Possibile novità normativa', description: 'L\'Assistente ha proposto un aggiornamento della base di conoscenza: lo trovi nella scheda Base di conoscenza.' });
       }
@@ -368,6 +436,11 @@ export default function ChatAssistente() {
                   Norme su PFU, rifiuti, RENTRI, Albo e responsabile tecnico, oppure i dati della commessa: target, raccolto, liste, giacenze e qualifica dei fornitori.
                   Ogni risposta cita le fonti e, per le norme, controlla online che non ci siano novità.
                 </p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  {isAdmin
+                    ? 'Puoi allegare file (Excel, CSV, Word, PDF, immagini, testo) con la graffetta: EcoTyna li legge, li controlla e, se glielo chiedi, prepara file nuovi o modificati da scaricare in Excel, CSV, Word, PDF o testo.'
+                    : 'EcoTyna può preparare file da scaricare in Excel, CSV, Word, PDF o testo: chiediglielo. Allegare file è riservato all\'amministratore.'}
+                </p>
               </div>
               <div className="grid gap-2">
                 {ESEMPI.map(e => (
@@ -377,17 +450,36 @@ export default function ChatAssistente() {
               <p className="text-xs text-muted-foreground">Le risposte sulle norme controllano anche le fonti online. Per decisioni con conseguenze legali verifica sempre il testo vigente.</p>
             </div>
           ) : (
-            visibili.map(d => <Messaggio key={d.id} d={d} isAdmin={isAdmin} onValuta={(dd, modo) => setValuta({ d: dd, modo })} />)
+            visibili.map(d => <Messaggio key={d.id} d={d} isAdmin={isAdmin} fileRecenti={fileRecenti[d.id]} onScarica={scaricaFile} onValuta={(dd, modo) => setValuta({ d: dd, modo })} />)
           )}
           {inCorso && !invio && (
             <p className="text-xs text-muted-foreground flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" /> Aggiorno appena la risposta è pronta…</p>
           )}
           <div ref={fine} />
         </div>
+        {(coda.length > 0 || leggendo) && (
+          <div className="border-t px-3 pt-2 flex flex-wrap gap-1.5">
+            {coda.map((a, i) => (
+              <span key={i} className="inline-flex items-center gap-1 text-xs rounded-full border bg-muted px-2 py-1">
+                <Paperclip className="w-3 h-3" /> {a.letto.nome}{a.letto.tagliato ? ' (molto lungo: EcoTyna ne legge una parte e i totali)' : ''}
+                <button type="button" className="ml-0.5 hover:text-red-600" title="Togli" onClick={() => setCoda(c => c.filter((_, j) => j !== i))}><X className="w-3 h-3" /></button>
+              </span>
+            ))}
+            {leggendo && <span className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Leggo il file…</span>}
+          </div>
+        )}
         <form
           className="border-t p-3 flex gap-2 items-end"
           onSubmit={(e) => { e.preventDefault(); invia(); }}
         >
+          {isAdmin && (
+            <>
+              <input ref={sceltaFile} type="file" multiple accept={ACCETTATI} className="hidden" onChange={e => aggiungiAllegati(e.target.files)} />
+              <Button type="button" variant="outline" title="Allega file (Excel, CSV, Word, PDF, immagini, testo)" disabled={invio || leggendo || coda.length >= MAX_ALLEGATI} onClick={() => sceltaFile.current?.click()}>
+                <Paperclip className="w-4 h-4" />
+              </Button>
+            </>
+          )}
           <Textarea
             rows={2}
             value={testo}
@@ -408,7 +500,7 @@ export default function ChatAssistente() {
               {ascolto.inAscolto ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             </Button>
           )}
-          <Button type="submit" disabled={invio || !testo.trim()} className="gap-1">
+          <Button type="submit" disabled={invio || leggendo || (!testo.trim() && !coda.length)} className="gap-1">
             {invio ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Invia
           </Button>
         </form>

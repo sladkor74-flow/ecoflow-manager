@@ -61,6 +61,14 @@
     "conoscenza_id": {
       "type": "string",
       "description": "Voce della base di conoscenza nata da questa risposta"
+    },
+    "allegati_json": {
+      "type": "string",
+      "description": "File allegati alla domanda: nome, tipo, dimensione e un estratto del contenuto per le domande successive (i file non si conservano)"
+    },
+    "file_generati_json": {
+      "type": "string",
+      "description": "Descrizione dei file preparati da EcoTyna (formato, fogli o testo, operazioni): il file si genera nel browser quando lo si scarica"
     }
   },
   "required": ["domanda"],
