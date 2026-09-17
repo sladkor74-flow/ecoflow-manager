@@ -80,6 +80,10 @@
       "type": "string",
       "description": "Punti del materiale superati dalle norme vigenti, con che cosa vale oggi, la fonte e la data del controllo"
     },
+    "storico_aggiornamenti_json": {
+      "type": "string",
+      "description": "Note di aggiornamento messe da parte perche' superate da un controllo piu' recente, con il motivo (ultime 5)"
+    },
     "aggiornata_il": {
       "type": "string",
       "format": "date-time",

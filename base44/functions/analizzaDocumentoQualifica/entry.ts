@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { aggiungiPeriodo, oggiRoma } from "../../shared/qualificaFornitori.ts";
-import { testoConoscenza, vociApprovate, AREE_NORMATIVE, FONTI_UFFICIALI, VERIFICATO_IL } from "../../shared/baseConoscenza.ts";
+import { testoConoscenza, vociApprovate, proponiNovita, AREE_NORMATIVE, FONTI_UFFICIALI, REGOLE_FONTI } from "../../shared/baseConoscenza.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Agente di analisi dei documenti di qualifica.
@@ -68,6 +68,21 @@ const SCHEMA_VALUTAZIONE = {
     },
     richiesta_al_fornitore: { type: 'string' },
     confidenza: { type: 'number' },
+    novita_normative: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          voce_id: { type: 'string' },
+          titolo: { type: 'string' },
+          descrizione: { type: 'string' },
+          testo_proposto: { type: 'string' },
+          fonte: { type: 'string' },
+          url: { type: 'string' },
+          data_norma: { type: 'string' },
+        },
+      },
+    },
   },
   required: ['corrisponde_al_tipo_atteso', 'problemi', 'confidenza'],
 };
@@ -197,7 +212,9 @@ export default async function(req) {
         `Regola del catalogo interno: ${regolaCatalogo(tipo)}`,
         `Riferimento normativo del catalogo: ${tipo.riferimento_normativo || 'non indicato'}`,
         '',
-        `Base di conoscenza della commessa, verificata il ${VERIFICATO_IL}. Il fornitore lavora nella filiera dei pneumatici fuori uso (EER 16 01 03, rifiuti speciali non pericolosi) per il sistema collettivo Ecotyre. Usala come riferimento, ma controlla online sulle fonti ufficiali (${FONTI_UFFICIALI.join('; ')}) che nel frattempo non sia cambiato nulla: se trovi una norma o una data piu' recente, applicala e segnalalo con un problema informativo.`,
+        `Base di conoscenza della commessa, verificata voce per voce alla data indicata. Il fornitore lavora nella filiera dei pneumatici fuori uso (EER 16 01 03, rifiuti speciali non pericolosi) per il sistema collettivo Ecotyre. Usala come riferimento, ma controlla online sulle fonti ufficiali (${FONTI_UFFICIALI.join('; ')}) che dopo la data della voce non sia cambiato nulla: se trovi una norma nuova e certa, applicala, segnalala con un problema informativo e riportala in novita_normative con voce_id, data_norma (AAAA-MM-GG), fonte e il testo COMPLETO della voce aggiornata, cosi' la base di conoscenza di tutto il gestionale si aggiorna dopo l'approvazione.`,
+        REGOLE_FONTI,
+        '',
         testoConoscenza(approvate, AREE_NORMATIVE),
         '',
         'Dati estratti dal documento:',
@@ -205,7 +222,7 @@ export default async function(req) {
         '',
         'Compiti:',
         '1. Stabilisci se il documento corrisponde al tipo richiesto. Per un\'iscrizione all\'Albo di chi trasporta PFU verifica categoria 4 (o 5) e codice EER 16 01 03 e che siano indicati la classe e un responsabile tecnico; per un\'autorizzazione d\'impianto o di stoccaggio verifica il codice EER 16 01 03 e le operazioni coerenti con il ruolo del soggetto. Se il codice manca e\' un problema bloccante.',
-        '2. Determina la regola di validita\' di questo tipo di documento secondo la normativa vigente e la prassi consolidata, verificandola online. Per esempio una visura camerale vale sei mesi dal rilascio e il DURC 120 giorni.',
+        '2. Determina la regola di validita\' di questo tipo di documento secondo la base di conoscenza e la normativa vigente, verificando online solo le novita\' successive alla data della voce. In regola_validita cita la voce o la norma usata.',
         '3. Calcola data_scadenza_effettiva, formato AAAA-MM-GG. Se i dati non bastano per calcolarla con certezza lasciala vuota: non stimare.',
         '4. Elenca ogni problema con la sua gravita\':',
         '   bloccante: il documento non si puo\' accettare. Tipo sbagliato, intestato ad altri, scaduto, incompleto o illeggibile.',
@@ -249,6 +266,12 @@ export default async function(req) {
     if (scadenza && daNormativa && daNormativa < scadenza) {
       problemi.push({ gravita: 'attenzione', messaggio: `Secondo la normativa il documento potrebbe scadere prima, il ${formatoIt(daNormativa)}${valutazione.motivazione_scadenza ? ': ' + valutazione.motivazione_scadenza : '.'}` });
     }
+
+    // Le novita' trovate controllando un documento aggiornano, dopo l'approvazione,
+    // la conoscenza di tutto il gestionale (EcoTyna, corso RT, altri controlli).
+    try {
+      await proponiNovita(base44, valutazione.novita_normative, { oggi, origine: 'qualifica_documento', approvate, collegamenti: { documento_id: documentoId } });
+    } catch (_e) { /* l'analisi del documento resta valida anche se la proposta non si salva */ }
 
     const confidenza = typeof valutazione.confidenza === 'number' ? Math.max(0, Math.min(1, valutazione.confidenza)) : null;
     if (confidenza !== null && confidenza < 0.6) {

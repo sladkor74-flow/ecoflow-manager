@@ -45,11 +45,15 @@
     },
     "origine": {
       "type": "string",
-      "enum": ["domanda", "controllo_mensile", "manuale"],
+      "enum": ["domanda", "controllo_mensile", "manuale", "qualifica_documento"],
       "default": "manuale"
     },
     "domanda_id": {
       "type": "string"
+    },
+    "documento_id": {
+      "type": "string",
+      "description": "Documento di qualifica durante la cui analisi e' emersa la novita'"
     },
     "controllo_id": {
       "type": "string"
@@ -67,6 +71,14 @@
     },
     "storico_json": {
       "type": "string"
+    },
+    "motivo_scarto": {
+      "type": "string",
+      "description": "Perche' la voce e' stata scartata o messa da parte, per esempio perche' superata da una piu' recente"
+    },
+    "messa_da_parte_il": {
+      "type": "string",
+      "format": "date-time"
     }
   },
   "required": ["tipo", "testo"],

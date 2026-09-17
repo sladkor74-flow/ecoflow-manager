@@ -4,7 +4,7 @@ import { oggiRoma } from "../../shared/qualificaFornitori.ts";
 import { vociApprovate } from "../../shared/baseConoscenza.ts";
 import {
   areeDelTesto, testoDellaScheda, ultimeModifichePerArea, daRicontrollare,
-  conoscenzaPerAree, istruzioniAggiornamento, aggiornamentiPuliti, SCHEMA_AGGIORNAMENTI,
+  conoscenzaPerAree, istruzioniAggiornamento, aggiornamentiPuliti, storicoConNoteSuperate, SCHEMA_AGGIORNAMENTI,
 } from "../../shared/aggiornamentoCorso.ts";
 
 // Tiene aggiornato il corso RT alle norme vigenti, senza che nessuno debba
@@ -39,7 +39,7 @@ export default async function(req) {
     const ultime = ultimeModifichePerArea(approvate);
 
     const campi = ['modulo', 'categoria', 'tipo', 'anno_materiale', 'parte', 'parti_totali', 'ordine', 'sintesi', 'concetti_json',
-      'riferimenti_json', 'da_verificare_json', 'parole_chiave', 'aree', 'aggiornata_il'];
+      'riferimenti_json', 'da_verificare_json', 'parole_chiave', 'aree', 'aggiornata_il', 'aggiornamenti_json', 'storico_aggiornamenti_json'];
     const schede = [];
     for (let skip = 0; skip < 20000; skip += 1000) {
       const pagina = await ent.filter({ stato: 'elaborato' }, 'id', 1000, skip, campi);
@@ -71,7 +71,13 @@ export default async function(req) {
         ].join('\n');
         const esito = comeOggetto(await base44.asServiceRole.integrations.Core.InvokeLLM({ prompt, response_json_schema: SCHEMA_AGGIORNAMENTI }));
         const aggiornamenti = aggiornamentiPuliti(esito, oggi, conoscenza);
-        await ent.update(s.id, { aree, aggiornamenti_json: JSON.stringify(aggiornamenti), aggiornata_il: new Date().toISOString() });
+        await ent.update(s.id, {
+          aree,
+          aggiornamenti_json: JSON.stringify(aggiornamenti),
+          storico_aggiornamenti_json: storicoConNoteSuperate(s.storico_aggiornamenti_json, s.aggiornamenti_json, aggiornamenti,
+            `superate dal controllo del ${oggi} con la base di conoscenza aggiornata`),
+          aggiornata_il: new Date().toISOString(),
+        });
         esiti.push({ modulo: s.modulo, parte: s.parte, aggiornamenti: aggiornamenti.length });
       } catch (e) {
         // Una scheda che non si riesce a controllare non deve tornare in testa ogni ora

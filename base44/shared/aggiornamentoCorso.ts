@@ -120,6 +120,22 @@ export function aggiornamentiPuliti(esito, oggi, conoscenza?: string) {
     }));
 }
 
+/**
+ * Storico delle note: quando un controllo piu' recente cambia le note di una
+ * scheda, quelle vecchie non si perdono ma si mettono da parte con il motivo.
+ */
+export function storicoConNoteSuperate(storicoJson, vecchieJson, nuove, motivo: string) {
+  let vecchie = [];
+  try { vecchie = JSON.parse(vecchieJson || '[]'); } catch (_e) { vecchie = []; }
+  let storico = [];
+  try { storico = JSON.parse(storicoJson || '[]'); if (!Array.isArray(storico)) storico = []; } catch (_e) { storico = []; }
+  if (!Array.isArray(vecchie) || !vecchie.length) return storicoJson || '';
+  const firma = (l) => JSON.stringify((l || []).map(a => [a.punto, a.oggi]));
+  if (firma(vecchie) === firma(nuove)) return storicoJson || '';
+  storico.push({ il: new Date().toISOString(), motivo, note: vecchie });
+  return JSON.stringify(storico.slice(-5));
+}
+
 /** Testo della base di conoscenza per le aree di una scheda. */
 export function conoscenzaPerAree(approvate, aree) {
   return testoConoscenza(approvate, aree && aree.length ? aree : undefined);

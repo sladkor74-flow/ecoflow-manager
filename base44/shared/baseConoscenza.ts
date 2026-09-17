@@ -200,6 +200,7 @@ export function testoBaseConoscenza(aree?: string[]) {
 // regole interne e aggiornamenti normativi approvati. Un aggiornamento con
 // voce_id sostituisce il testo della voce del codice finche' non la si riscrive qui.
 export type VoceApprovata = {
+  id?: string;
   tipo: string;
   area?: string;
   titolo?: string;
@@ -207,7 +208,227 @@ export type VoceApprovata = {
   fonti_json?: string;
   voce_id?: string;
   verificato_il?: string;
+  deciso_il?: string;
+  created_date?: string;
+  storico_json?: string;
 };
+
+// === Vale il piu' recente: cio' che e' superato da qualcosa di nuovo si scarta ===
+//
+// Regola della direzione SMOCO (17/09/2026), per tutto il gestionale: EcoTyna, il
+// controllo dei documenti di qualifica, il controllo normativo e il corso RT.
+// La data che conta e' quella della conoscenza (verificato_il), non quella in cui
+// qualcuno ha premuto "approva": un aggiornamento proposto il 15 e approvato il 20
+// racconta le norme del 15.
+
+const giorno = (v) => String(v || '').slice(0, 10);
+const dataVoce = (v: VoceApprovata) => giorno(v.verificato_il) || giorno(v.deciso_il) || giorno(v.created_date);
+const piuRecente = (a: VoceApprovata, b: VoceApprovata) =>
+  dataVoce(a) !== dataVoce(b) ? dataVoce(a) > dataVoce(b) : String(a.created_date || '') > String(b.created_date || '');
+
+/**
+ * Aggiornamenti approvati che sostituiscono le voci del codice: per ogni voce il
+ * piu' recente, e solo se non e' piu' vecchio della verifica della voce stessa.
+ */
+export function sostituzioniValide(approvate: VoceApprovata[] = []) {
+  const mappa = new Map<string, VoceApprovata>();
+  for (const v of approvate) {
+    if (v.tipo !== 'aggiornamento_normativo' || !v.voce_id || !v.testo) continue;
+    const codice = BASE_CONOSCENZA.find(b => b.id === v.voce_id);
+    if (!codice || dataVoce(v) < codice.verificato_il) continue;
+    const attuale = mappa.get(v.voce_id);
+    if (!attuale || piuRecente(v, attuale)) mappa.set(v.voce_id, v);
+  }
+  return mappa;
+}
+
+/** Testo e data attuali di una voce del codice, tenendo conto degli aggiornamenti approvati validi. */
+export function voceAttuale(id: string, approvate: VoceApprovata[] = []) {
+  const codice = BASE_CONOSCENZA.find(b => b.id === id);
+  if (!codice) return null;
+  const s = sostituzioniValide(approvate).get(id);
+  return s
+    ? { ...codice, testo: String(s.testo), verificato_il: dataVoce(s) }
+    : codice;
+}
+
+const conNota = (json, nota) => {
+  let storico = [];
+  try { storico = JSON.parse(json || '[]'); if (!Array.isArray(storico)) storico = []; } catch (_e) { storico = []; }
+  storico.push({ il: new Date().toISOString(), da: 'gestionale', nota, prima: null });
+  return JSON.stringify(storico);
+};
+
+/**
+ * Mette da parte una voce superata: non si cancella, resta consultabile nello
+ * storico con il motivo. Una proposta diventa scartata, un'approvata non attiva.
+ */
+export async function mettiDaParte(ent, voce, motivo: string, da = 'gestionale') {
+  const approvata = voce.stato === 'approvata';
+  await ent.update(voce.id, {
+    ...(approvata ? { attiva: false } : { stato: 'scartata', deciso_da: da, deciso_il: new Date().toISOString() }),
+    motivo_scarto: motivo,
+    messa_da_parte_il: new Date().toISOString(),
+    storico_json: conNota(voce.storico_json, `${approvata ? 'messa da parte' : 'scartata'}: ${motivo}`),
+  });
+}
+
+/**
+ * Scarta cio' che e' superato, senza cancellare nulla (resta lo storico):
+ * - le proposte in attesa su una voce gia' verificata o aggiornata dopo di loro;
+ * - le proposte in attesa sulla stessa voce superate da una proposta piu' recente;
+ * - gli aggiornamenti approvati superati da uno piu' recente o dalla voce del codice verificata dopo.
+ */
+export async function scartaSuperate(base44) {
+  const ent = base44.asServiceRole.entities.ConoscenzaAssistente;
+  const [proposte, approvate] = await Promise.all([
+    ent.filter({ stato: 'proposta' }, '-created_date', 500).catch(() => []),
+    vociApprovate(base44),
+  ]);
+  const valide = sostituzioniValide(approvate);
+  const scarti = [];
+
+  const perVoce = new Map<string, VoceApprovata[]>();
+  for (const p of proposte) {
+    if (!p.voce_id) continue;
+    const attuale = voceAttuale(p.voce_id, approvate);
+    if (attuale && dataVoce(p) < attuale.verificato_il) {
+      scarti.push({ p, nota: `superata dalla voce "${attuale.titolo}" verificata il ${attuale.verificato_il}, piu' recente della proposta` });
+      continue;
+    }
+    perVoce.set(p.voce_id, [...(perVoce.get(p.voce_id) || []), p]);
+  }
+  for (const gruppo of perVoce.values()) {
+    const ultima = gruppo.reduce((a, b) => (piuRecente(b, a) ? b : a));
+    for (const p of gruppo) {
+      if (p !== ultima) scarti.push({ p, nota: `superata dalla proposta piu' recente del ${dataVoce(ultima)} sulla stessa voce ("${ultima.titolo || ''}")` });
+    }
+  }
+  for (const { p, nota } of scarti) {
+    await mettiDaParte(ent, p, nota);
+  }
+
+  let disattivate = 0;
+  for (const v of approvate) {
+    if (v.tipo !== 'aggiornamento_normativo' || !v.voce_id || !BASE_CONOSCENZA.some(b => b.id === v.voce_id)) continue;
+    if (valide.get(v.voce_id) === v) continue;
+    const attuale = voceAttuale(v.voce_id, approvate);
+    const nuova = valide.get(v.voce_id);
+    await mettiDaParte(ent, v, nuova
+      ? `superata dall'aggiornamento ${nuova.titolo ? `"${nuova.titolo}" ` : ''}verificato il ${dataVoce(nuova)}`
+      : `superata dalla voce "${attuale ? attuale.titolo : v.voce_id}" verificata il ${attuale ? attuale.verificato_il : ''}, piu' recente`);
+    disattivate++;
+  }
+  return { proposte_scartate: scarti.length, aggiornamenti_disattivati: disattivate };
+}
+
+/** Come vanno usate le fonti: la stessa regola per EcoTyna, la qualifica e ogni agente del gestionale. */
+export const REGOLE_FONTI = [
+  'GERARCHIA DELLE FONTI',
+  '- Ogni voce della base di conoscenza ha la sua data di verifica. Se due fonti dicono cose diverse vale la piu\' recente: cio\' che e\' superato si scarta, non si presenta come valido e, se serve, si dice che e\' cambiato e da quando.',
+  '- Le precisazioni e le regole della direzione SMOCO riportate nella base di conoscenza si applicano; cedono solo a una norma ufficiale successiva alla loro data, e in quel caso va detto chiaramente.',
+  '- Il materiale del corso RT e le conoscenze generali sono piu\' vecchi della base di conoscenza: servono a spiegare, mai a smentirla.',
+  '- Online si cercano solo novita\' successive alla data della voce, sulle fonti ufficiali. Una novita\' conta solo se ha data, estremi e fonte certi: altrimenti non la si usa.',
+  '- Date, importi, soglie, durate e numeri di articolo si riportano esattamente come nella fonte; se non si e\' sicuri si dice e si indica come verificare.',
+].join('\n');
+
+/**
+ * Filtra le novita' normative proposte da un modello: servono estremi e data della
+ * norma successivi alla verifica della voce e, per aggiornare una voce, il testo
+ * completo (non un riassunto che ne cancellerebbe una parte).
+ */
+export function novitaAccettabili(novita, approvate: VoceApprovata[] = [], area?: string) {
+  const lista = Array.isArray(novita) ? novita : [];
+  // Estremi di una norma: "200/2025", "n. 6 del 26 novembre 2025" diventa "6/2025".
+  const estremi = (t) => {
+    const s = String(t || '').toLowerCase();
+    const out = new Set(s.match(/\b\d{1,4}\/\d{4}\b/g) || []);
+    for (const m of s.matchAll(/n\.?\s*(\d{1,4})\s+del\s+\d{1,2}\s+[a-z]+\s+(\d{4})/g)) out.add(`${m[1]}/${m[2]}`);
+    return [...out];
+  };
+  return lista.filter(n => {
+    if (!n || !n.descrizione || !n.testo_proposto || !(n.fonte || n.url)) return false;
+    const dataNorma = giorno(n.data_norma);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dataNorma)) return false;
+    if (!n.voce_id) return true;
+    const attuale = voceAttuale(String(n.voce_id), approvate);
+    if (!attuale || (area && attuale.area !== area)) return false;
+    // Una norma gia' citata nella voce non e' una novita'.
+    const citate = `${attuale.testo} ${(attuale.fonti || []).join(' ')}`.toLowerCase();
+    const nuove = estremi(`${n.fonte || ''} ${n.descrizione}`);
+    if (nuove.length && nuove.every(e => estremi(citate).includes(e))) return false;
+    // Norme molto piu' vecchie della verifica della voce: gia' considerate.
+    const limite = new Date(`${attuale.verificato_il}T00:00:00Z`);
+    limite.setUTCDate(limite.getUTCDate() - 60);
+    if (dataNorma < limite.toISOString().slice(0, 10)) return false;
+    // Il testo proposto sostituisce la voce: non deve perderne pezzi.
+    if (String(n.testo_proposto).length < attuale.testo.length * 0.7) return false;
+    return true;
+  });
+}
+
+/**
+ * Salva le novita' accettabili come proposte da approvare. Una proposta nuova
+ * sulla stessa voce prende il posto di quella in attesa, che viene scartata.
+ */
+export async function proponiNovita(base44, novita, { oggi, origine, approvate = [], area, collegamenti = {} }: { oggi: string; origine: string; approvate?: VoceApprovata[]; area?: string; collegamenti?: Record<string, string> }) {
+  const ent = base44.asServiceRole.entities.ConoscenzaAssistente;
+  const buone = novitaAccettabili(novita, approvate, area).slice(0, 5);
+  if (!buone.length) return [];
+  const inAttesa = await ent.filter({ stato: 'proposta' }, '-created_date', 500).catch(() => []);
+  const create = [];
+  for (const n of buone) {
+    const voce = n.voce_id ? voceAttuale(String(n.voce_id), approvate) : null;
+    const nuova = await ent.create({
+      tipo: 'aggiornamento_normativo',
+      stato: 'proposta',
+      attiva: true,
+      area: voce ? voce.area : (area || n.area || 'tua'),
+      titolo: String(n.titolo || (voce ? voce.titolo : 'Novita\' normativa')).slice(0, 200),
+      testo: String(n.testo_proposto),
+      voce_id: voce ? voce.id : '',
+      testo_precedente: voce ? voce.testo : '',
+      motivazione: `${String(n.descrizione)} (norma del ${giorno(n.data_norma)})`,
+      fonti_json: JSON.stringify([n.fonte, n.url].filter(Boolean)),
+      verificato_il: oggi,
+      origine,
+      ...collegamenti,
+    });
+    if (voce) {
+      for (const vecchia of inAttesa.filter(p => p.voce_id === voce.id)) {
+        if (vecchia.id !== nuova.id) await mettiDaParte(ent, vecchia, `superata dalla proposta piu' recente del ${oggi} sulla stessa voce ("${nuova.titolo || ''}")`);
+      }
+    }
+    create.push(nuova);
+  }
+  return create;
+}
+
+/**
+ * Precisazioni che l'utente da' parlando con EcoTyna ("non e' cosi', vale ..."):
+ * diventano proposte da approvare, cosi' la volta dopo la risposta e' giusta.
+ */
+export async function proponiPrecisazioni(base44, precisazioni, { oggi, utente, domandaId }) {
+  const ent = base44.asServiceRole.entities.ConoscenzaAssistente;
+  const lista = (Array.isArray(precisazioni) ? precisazioni : []).filter(p => p && p.testo && String(p.testo).length >= 20).slice(0, 3);
+  const create = [];
+  for (const p of lista) {
+    create.push(await ent.create({
+      tipo: p.tipo === 'regola_interna' ? 'regola_interna' : 'faq',
+      stato: 'proposta',
+      attiva: true,
+      area: ['pfu', 'tua', 'albo', 'rentri', 'documenti', 'gestionale'].includes(p.area) ? p.area : 'gestionale',
+      titolo: String(p.titolo || 'Precisazione').slice(0, 200),
+      testo: String(p.testo),
+      motivazione: `Precisazione data da ${utente || 'un utente'} parlando con EcoTyna`,
+      fonti_json: JSON.stringify([`Precisazione di ${utente || 'un utente'} del ${oggi}`]),
+      verificato_il: oggi,
+      origine: 'domanda',
+      domanda_id: domandaId || '',
+    }));
+  }
+  return create;
+}
 
 const fontiDi = (v: VoceApprovata) => {
   try { const f = JSON.parse(v.fonti_json || '[]'); return Array.isArray(f) ? f.map(String) : []; } catch { return []; }
@@ -225,12 +446,12 @@ export async function vociApprovate(base44) {
 
 export function testoConoscenza(approvate: VoceApprovata[] = [], aree?: string[]) {
   const ammessa = (area?: string) => !aree || !aree.length || aree.includes(area || 'gestionale');
-  const sostituzioni = new Map(approvate.filter(v => v.tipo === 'aggiornamento_normativo' && v.voce_id).map(v => [v.voce_id, v]));
+  const sostituzioni = sostituzioniValide(approvate);
   const righe = BASE_CONOSCENZA.filter(v => ammessa(v.area)).map(v => {
     const s = sostituzioni.get(v.id);
     if (s && s.testo) {
       const fonti = fontiDi(s);
-      return `- ${v.titolo} (aggiornata il ${s.verificato_il || ''}; fonti: ${(fonti.length ? fonti : v.fonti).join('; ')}): ${s.testo}`;
+      return `- ${v.titolo} (aggiornata il ${dataVoce(s)}; fonti: ${(fonti.length ? fonti : v.fonti).join('; ')}): ${s.testo}`;
     }
     return `- ${v.titolo} (verificato il ${v.verificato_il}; fonti: ${v.fonti.join('; ')}): ${v.testo}`;
   });

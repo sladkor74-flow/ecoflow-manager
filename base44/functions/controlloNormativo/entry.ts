@@ -1,5 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { AREE_NORMATIVE, BASE_CONOSCENZA, FONTI_UFFICIALI, vociApprovate } from "../../shared/baseConoscenza.ts";
+import {
+  AREE_NORMATIVE, BASE_CONOSCENZA, FONTI_UFFICIALI, REGOLE_FONTI, vociApprovate, voceAttuale, proponiNovita, scartaSuperate,
+} from "../../shared/baseConoscenza.ts";
 import { oggiRoma } from "../../shared/qualificaFornitori.ts";
 
 // Controllo periodico delle novita' normative sulla base di conoscenza.
@@ -74,26 +76,26 @@ export default async function(req) {
     const controllo = await svc.ControlloNormativo.create({ eseguito_il: new Date().toISOString(), avviato_da: manuale ? 'manuale' : 'pianificato', esito: 'in_corso', proposte: 0 });
     controlloId = controllo.id;
 
+    // Prima si mette da parte cio' che e' gia' superato, con il motivo nello storico.
+    const messeDaParte = await scartaSuperate(base44).catch(() => null);
     const approvate = await vociApprovate(base44);
-    const sostituzioni = new Map(approvate.filter(v => v.tipo === 'aggiornamento_normativo' && v.voce_id).map(v => [v.voce_id, v]));
-    const inAttesa = await svc.ConoscenzaAssistente.filter({ stato: 'proposta' }, '-created_date', 300).catch(() => []);
     const core = base44.asServiceRole.integrations.Core;
 
     const dettagli = [];
     let proposte = 0;
     for (const area of AREE_NORMATIVE) {
-      const voci = BASE_CONOSCENZA.filter(v => v.area === area).map(v => {
-        const s = sostituzioni.get(v.id);
-        return { id: v.id, titolo: v.titolo, testo: s ? s.testo : v.testo, verificato_il: s ? (s.verificato_il || v.verificato_il) : v.verificato_il, fonti: v.fonti };
-      });
-      const extra = approvate.filter(v => v.area === area && !(v.tipo === 'aggiornamento_normativo' && v.voce_id));
+      const voci = BASE_CONOSCENZA.filter(v => v.area === area).map(v => voceAttuale(v.id, approvate));
+      // Le voci del gestionale che non sostituiscono una voce del codice (quelle sono gia' in "voci").
+      const extra = approvate.filter(v => v.area === area && !(v.tipo === 'aggiornamento_normativo' && v.voce_id && BASE_CONOSCENZA.some(b => b.id === v.voce_id)));
       try {
         const esito = comeOggetto(await core.InvokeLLM({
           prompt: [
             `Oggi e' il ${oggi}. Sei un esperto di normativa ambientale italiana sui rifiuti e fai l'aggiornamento periodico della base di conoscenza di un'azienda che raccoglie pneumatici fuori uso (EER 16 01 03) per il sistema collettivo Ecotyre.`,
             `Area: ${NOMI_AREE[area] || area}.`,
             `Cerca sulle fonti ufficiali (${FONTI_UFFICIALI.join('; ')}) e sulle principali riviste di settore se, dopo la data di verifica di ciascuna voce, sono intervenute novita': leggi, decreti, proroghe, conversioni in legge, decreti direttoriali, FAQ, delibere dell'Albo, circolari o sentenze rilevanti. Considera anche le date citate nelle voci che nel frattempo sono passate e hanno cambiato la situazione.`,
-            'Riporta solo novita\' certe e documentate con la fonte, non ipotesi o proposte non approvate (queste al massimo nelle note). Per ogni novita\' indica la voce da aggiornare (voce_id, oppure vuoto se serve una voce nuova), una descrizione breve della novita\' e il testo aggiornato completo della voce, nello stesso stile. Se non trovi nulla restituisci un elenco vuoto.',
+            'Riporta solo novita\' certe e documentate con la fonte, non ipotesi o proposte non approvate (queste al massimo nelle note). Per ogni novita\' indica la voce da aggiornare (voce_id, oppure vuoto se serve una voce nuova), una descrizione breve della novita\', data_norma (AAAA-MM-GG, data della norma o della pubblicazione) e il testo aggiornato COMPLETO della voce, nello stesso stile, conservando tutto cio\' che resta valido. Non riproporre norme gia\' citate nella voce. Se non trovi nulla restituisci un elenco vuoto.',
+            '',
+            REGOLE_FONTI,
             '',
             'Voci attuali:',
             ...voci.map(v => `- ${v.id} (verificata il ${v.verificato_il}; fonti: ${v.fonti.join('; ')}): ${v.titolo}. ${v.testo}`),
@@ -102,30 +104,11 @@ export default async function(req) {
           add_context_from_internet: true,
           response_json_schema: SCHEMA,
         }));
-        const novita = (Array.isArray(esito.novita) ? esito.novita : []).filter(n => n && n.descrizione && n.testo_proposto).slice(0, 5);
-        const create = [];
-        for (const n of novita) {
-          const voce = BASE_CONOSCENZA.find(v => v.id === n.voce_id && v.area === area);
-          if (voce && inAttesa.some(p => p.voce_id === voce.id)) continue;
-          const nuova = await svc.ConoscenzaAssistente.create({
-            tipo: 'aggiornamento_normativo',
-            stato: 'proposta',
-            attiva: true,
-            area,
-            titolo: String(n.titolo || (voce ? voce.titolo : 'Novita\' normativa')).slice(0, 200),
-            testo: String(n.testo_proposto),
-            voce_id: voce ? voce.id : '',
-            testo_precedente: voce ? (sostituzioni.get(voce.id)?.testo || voce.testo) : '',
-            motivazione: String(n.descrizione) + (n.data_norma ? ` (${n.data_norma})` : ''),
-            fonti_json: JSON.stringify([n.fonte, n.url].filter(Boolean)),
-            verificato_il: oggi,
-            origine: 'controllo_mensile',
-            controllo_id: controlloId,
-          });
-          inAttesa.push(nuova);
-          create.push(nuova.titolo);
-          proposte++;
-        }
+        // Filtro comune: norma nuova con data, testo completo; la proposta nuova
+        // mette da parte quella in attesa sulla stessa voce, con il motivo.
+        const create = (await proponiNovita(base44, esito.novita, { oggi, origine: 'controllo_mensile', approvate, area, collegamenti: { controllo_id: controlloId } }))
+          .map(n => n.titolo);
+        proposte += create.length;
         dettagli.push({ area, novita: create, fonti_consultate: (esito.fonti_consultate || []).slice(0, 10), note: String(esito.note || '').slice(0, 1000) });
       } catch (e) {
         dettagli.push({ area, errore: e && e.message ? e.message : String(e) });
@@ -140,7 +123,7 @@ export default async function(req) {
       esito: errori === dettagli.length ? 'errore' : proposte ? 'novita' : 'nessuna_novita',
       proposte,
       sintesi,
-      dettagli_json: JSON.stringify(dettagli),
+      dettagli_json: JSON.stringify({ aree: dettagli, messe_da_parte: messeDaParte }),
     });
 
     if (proposte > 0) {
