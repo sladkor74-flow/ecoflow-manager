@@ -56,11 +56,12 @@ export default async function(req) {
     const esiti = [];
     for (const { s, aree } of candidate.slice(0, quante)) {
       try {
+        const conoscenza = conoscenzaPerAree(approvate, aree);
         const prompt = [
           "Stai tenendo aggiornato il materiale di un corso per responsabile tecnico gestione rifiuti (Albo nazionale gestori ambientali).",
           `Scheda: ${s.categoria} — ${s.modulo}, parte ${s.parte} di ${s.parti_totali || '?'} (${s.tipo === 'videolezione' ? 'videolezione' : 'dispensa'}${s.anno_materiale ? ` del ${s.anno_materiale}` : ''}).`,
           '',
-          istruzioniAggiornamento(oggi, conoscenzaPerAree(approvate, aree)),
+          istruzioniAggiornamento(oggi, conoscenza),
           '',
           'MATERIALE DEL CORSO',
           `Sintesi: ${s.sintesi || ''}`,
@@ -69,7 +70,7 @@ export default async function(req) {
           `Punti gia' segnalati come forse superati: ${elenco(s.da_verificare_json).join('; ') || 'nessuno'}`,
         ].join('\n');
         const esito = comeOggetto(await base44.asServiceRole.integrations.Core.InvokeLLM({ prompt, response_json_schema: SCHEMA_AGGIORNAMENTI }));
-        const aggiornamenti = aggiornamentiPuliti(esito, oggi);
+        const aggiornamenti = aggiornamentiPuliti(esito, oggi, conoscenza);
         await ent.update(s.id, { aree, aggiornamenti_json: JSON.stringify(aggiornamenti), aggiornata_il: new Date().toISOString() });
         esiti.push({ modulo: s.modulo, parte: s.parte, aggiornamenti: aggiornamenti.length });
       } catch (e) {

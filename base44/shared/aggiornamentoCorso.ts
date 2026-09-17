@@ -68,6 +68,7 @@ export const SCHEMA_AGGIORNAMENTI = {
           punto: { type: 'string' },
           oggi: { type: 'string' },
           fonte: { type: 'string' },
+          voce: { type: 'string' },
         },
       },
     },
@@ -78,27 +79,43 @@ export const SCHEMA_AGGIORNAMENTI = {
 export function istruzioniAggiornamento(oggi, conoscenza) {
   return [
     `Oggi e' il ${oggi}. Qui sotto c'e' la BASE DI CONOSCENZA VERIFICATA sulle norme vigenti: e' l'unico riferimento valido per dire che cosa vale oggi.`,
-    'Confronta con essa il materiale del corso e compila "aggiornamenti": un elemento per ogni punto del materiale che la base di conoscenza dimostra superato, abrogato o cambiato.',
-    '- punto: che cosa dice il materiale, in breve;',
-    "- oggi: che cosa vale oggi secondo la base di conoscenza, in una o due frasi;",
-    '- fonte: la norma o la voce della base di conoscenza da cui lo ricavi.',
-    'Non segnalare punti che la base di conoscenza non tratta: in quel caso non puoi sapere se sono cambiati, lasciali stare. Non inventare norme. Lista vuota se non c\'e\' nulla di superato.',
+    'Confronta con essa il materiale del corso e compila "aggiornamenti": un elemento per ogni affermazione del materiale che una voce della base di conoscenza contraddice perche\' superata, abrogata o cambiata.',
+    '- punto: l\'affermazione del materiale, in breve;',
+    "- oggi: che cosa vale oggi secondo quella voce, in una o due frasi, con date, numeri e durate copiati esattamente dalla voce;",
+    '- fonte: la norma indicata nella voce;',
+    '- voce: il titolo della voce della base di conoscenza, copiato esattamente.',
+    'Regole: segnala solo affermazioni che il materiale fa davvero e che la voce contraddice. Non segnalare cio\' che il materiale non dice o dice in modo generico, e non aggiungere informazioni che il materiale non tratta. Non usare conoscenze diverse dalla base di conoscenza e non inventare norme. Una stessa voce al massimo una volta. Lista vuota se non c\'e\' nulla di superato: e\' il caso piu\' frequente.',
     '',
     'BASE DI CONOSCENZA VERIFICATA',
     conoscenza,
   ].join('\n');
 }
 
-/** Pulisce gli aggiornamenti restituiti dal modello. */
-export function aggiornamentiPuliti(esito, oggi) {
+const semplice = (v) => String(v || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+
+/**
+ * Pulisce gli aggiornamenti restituiti dal modello. Con il testo della base di
+ * conoscenza passato al modello tiene solo quelli che citano una voce presente,
+ * una volta ciascuna: cio' che non viene dalla base di conoscenza non entra nel corso.
+ */
+export function aggiornamentiPuliti(esito, oggi, conoscenza?: string) {
   const lista = esito && Array.isArray(esito.aggiornamenti) ? esito.aggiornamenti : [];
+  const base = conoscenza ? semplice(conoscenza) : '';
+  const viste = new Set();
   return lista
     .filter(a => a && a.punto && a.oggi)
+    .filter(a => {
+      if (!conoscenza) return true;
+      const voce = semplice(a.voce);
+      if (voce.length < 8 || !base.includes(voce) || viste.has(voce)) return false;
+      viste.add(voce);
+      return true;
+    })
     .slice(0, 8)
     .map(a => ({
       punto: String(a.punto).slice(0, 400),
       oggi: String(a.oggi).slice(0, 600),
-      fonte: String(a.fonte || '').slice(0, 200),
+      fonte: String(a.fonte || '').replace(/\s*\((verificat|aggiornat)[^)]*\)/gi, '').slice(0, 200),
       al: oggi,
     }));
 }

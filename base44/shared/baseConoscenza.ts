@@ -129,10 +129,10 @@ export const BASE_CONOSCENZA: VoceConoscenza[] = [
     fonti: ['DM 59/2023', 'L. 199/2025', 'https://www.rentri.gov.it'],
   },
   {
-    id: 'rentri-fir-digitale', area: 'rentri', verificato_il: VERIFICATO_IL,
+    id: 'rentri-fir-digitale', area: 'rentri', verificato_il: '2026-09-17',
     titolo: 'FIR digitale: date e sanzioni',
-    testo: 'Nuovi modelli di registro e FIR con vidimazione digitale dal 13 febbraio 2025. Per i soggetti iscritti il FIR digitale (xFIR) era obbligatorio dal 13 febbraio 2026, ma il periodo transitorio con il cartaceo e\' stato prorogato al 15 settembre 2026 (DL 31 dicembre 2025 n. 200, art. 13, convertito dalla L. 27 febbraio 2026 n. 26). Dal 16 settembre 2026 gli iscritti emettono il FIR solo in digitale; dal 15 settembre 2026 si applicano le sanzioni per omessa o incompleta trasmissione dei dati dei formulari al RENTRI (secondo fonti di settore da 500 a 2.000 euro per i non pericolosi, escluse le violazioni solo formali che non compromettono la tracciabilita\'). Il formato lo decide il produttore all\'emissione e vale per tutta la filiera; la stampa di un xFIR non lo rende cartaceo.',
-    fonti: ['DL 200/2025 art. 13 convertito dalla L. 26/2026', 'https://www.rentri.gov.it'],
+    testo: 'Nuovi modelli di registro e FIR con vidimazione digitale dal 13 febbraio 2025. Per i soggetti iscritti il FIR digitale (xFIR) era obbligatorio dal 13 febbraio 2026, ma il periodo transitorio con il cartaceo e\' stato prorogato al 15 settembre 2026 (DL 31 dicembre 2025 n. 200, art. 13, convertito dalla L. 27 febbraio 2026 n. 26). Dal 16 settembre 2026 il FIR digitale e\' obbligatorio per gli iscritti tenuti a usarlo. Precisazione della direzione SMOCO del 17 settembre 2026: i produttori di rifiuti speciali non pericolosi, come i PFU, con meno di dieci dipendenti non hanno ancora l\'obbligo del FIR digitale e possono scegliere il cartaceo finche\' il digitale non diventera\' obbligatorio per tutti, anche se sono iscritti; un produttore iscritto che usa il FIR cartaceo non e\' quindi di per se\' irregolare. Dal 15 settembre 2026 si applicano le sanzioni per omessa o incompleta trasmissione dei dati dei formulari al RENTRI (secondo fonti di settore da 500 a 2.000 euro per i non pericolosi, escluse le violazioni solo formali che non compromettono la tracciabilita\'). Il formato lo decide il produttore all\'emissione e vale per tutta la filiera; la stampa di un xFIR non lo rende cartaceo.',
+    fonti: ['DL 200/2025 art. 13 convertito dalla L. 26/2026', 'https://www.rentri.gov.it', 'Precisazione della direzione SMOCO del 17/09/2026'],
   },
   {
     id: 'rentri-produttori-non-iscritti', area: 'rentri', verificato_il: VERIFICATO_IL,
