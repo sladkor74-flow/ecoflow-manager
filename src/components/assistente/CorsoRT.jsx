@@ -23,6 +23,7 @@ function Scheda({ p }) {
   const riferimenti = elenco(p.riferimenti_json);
   const verificare = elenco(p.da_verificare_json);
   const aggiornamenti = elenco(p.aggiornamenti_json);
+  const messeDaParte = elenco(p.storico_aggiornamenti_json);
   const domande = elenco(p.domande_json);
   return (
     <div className="border rounded-lg p-3 space-y-2 bg-card">
@@ -49,6 +50,21 @@ function Scheda({ p }) {
           <p className="font-medium flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Da verificare con le norme vigenti</p>
           <ul className="list-disc pl-5">{verificare.map((v, i) => <li key={i}>{v}</li>)}</ul>
         </div>
+      )}
+      {messeDaParte.length > 0 && (
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer">Note precedenti messe da parte ({messeDaParte.length})</summary>
+          <div className="mt-1 space-y-2 pl-2 border-l">
+            {messeDaParte.map((m, i) => (
+              <div key={i}>
+                <p><span className="font-medium">{m.il ? new Date(m.il).toLocaleDateString('it-IT') : ''}</span>{m.motivo ? ` · ${m.motivo}` : ''}</p>
+                <ul className="list-disc pl-5">
+                  {(Array.isArray(m.note) ? m.note : []).map((a, j) => <li key={j} className="line-through decoration-muted-foreground/40">{a.punto} → {a.oggi}{a.fonte ? ` (${a.fonte})` : ''}</li>)}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
       {domande.length > 0 && (
         <div className="text-sm space-y-1">
