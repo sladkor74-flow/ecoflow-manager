@@ -1,0 +1,47 @@
+{
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "aggiornamento_corso_rt",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "ricontrolla_schede": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "aggiornaCorsoRT",
+            "args": {
+              "quante": 2
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Aggiorna il corso RT alle norme vigenti",
+            "description": "Confronta poche schede del corso RT con la base di conoscenza verificata e annota i punti superati"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Aggiornamento Corso RT",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "55 * * * *",
+      "one_time_date": null,
+      "timezone": "Europe/Rome",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "description": "Ogni ora ricontrolla due schede del corso per responsabile tecnico con la base di conoscenza verificata: quelle mai confrontate e quelle di un'area in cui la normativa e' cambiata dopo l'ultimo controllo. Annota che cosa vale oggi e con quale fonte; quando non c'e' nulla da ricontrollare non fa nulla"
+}

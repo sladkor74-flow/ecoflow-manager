@@ -1,6 +1,8 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { oggiRoma } from "../../shared/qualificaFornitori.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
+import { vociApprovate } from "../../shared/baseConoscenza.ts";
+import { areeDelTesto, conoscenzaPerAree, istruzioniAggiornamento, aggiornamentiPuliti } from "../../shared/aggiornamentoCorso.ts";
 
 // Elaborazione in background del materiale del corso RT: a ogni giro poche parti
 // diventano schede di studio per l'Assistente. Gira ogni ora dal workflow
@@ -18,6 +20,10 @@ const SCHEMA = {
     da_verificare: { type: 'array', items: { type: 'string' } },
     domande: { type: 'array', items: { type: 'object', properties: { domanda: { type: 'string' }, risposta: { type: 'string' } } } },
     parole_chiave: { type: 'array', items: { type: 'string' } },
+    aggiornamenti: {
+      type: 'array',
+      items: { type: 'object', properties: { punto: { type: 'string' }, oggi: { type: 'string' }, fonte: { type: 'string' } } },
+    },
   },
 };
 
@@ -39,9 +45,13 @@ export default async function(req) {
     const oggi = oggiRoma();
 
     const daFare = await ent.filter({ stato: 'da_elaborare' }, 'ordine', quante);
+    // La base di conoscenza verificata serve a dire subito che cosa del materiale e'
+    // superato: cosi' la scheda nasce gia' aggiornata alle norme vigenti.
+    const approvate = daFare.length ? await vociApprovate(base44) : [];
     const esiti = [];
     for (const p of daFare) {
       try {
+        const aree = areeDelTesto(`${p.modulo} ${p.testo}`);
         const prompt = [
           'Stai studiando il materiale di un corso di preparazione all\'esame di responsabile tecnico gestione rifiuti (Albo nazionale gestori ambientali).',
           `Oggi e' il ${oggi}. Il materiale e' ${p.anno_materiale ? `del ${p.anno_materiale}` : 'di alcuni anni fa'}: alcune norme citate potrebbero essere state modificate o abrogate (per esempio SISTRI, registri e formulari cartacei sostituiti dal RENTRI, requisiti dell'Albo aggiornati dalle delibere successive).`,
@@ -56,6 +66,7 @@ export default async function(req) {
           '- parole_chiave: 10-20 parole o sigle utili a ritrovare la scheda (es. formulario, FIR, deposito temporaneo, categoria 4, ADR).',
           'Se il testo e\' solo un indice, un frontespizio o non ha contenuti utili, scrivilo nella sintesi e lascia vuoti gli altri campi.',
           '',
+          ...(aree.length ? [istruzioniAggiornamento(oggi, conoscenzaPerAree(approvate, aree)), ''] : []),
           'TESTO',
           p.testo,
         ].join('\n');
@@ -76,6 +87,9 @@ export default async function(req) {
           da_verificare_json: JSON.stringify(testi(esito.da_verificare, 8, 400)),
           domande_json: JSON.stringify(domande),
           parole_chiave: testi(esito.parole_chiave, 20, 60).join(', '),
+          aree,
+          aggiornamenti_json: JSON.stringify(aree.length ? aggiornamentiPuliti(esito, oggi) : []),
+          aggiornata_il: aree.length ? new Date().toISOString() : null,
           elaborato_il: new Date().toISOString(),
           tentativi: (p.tentativi || 0) + 1,
           errore: '',

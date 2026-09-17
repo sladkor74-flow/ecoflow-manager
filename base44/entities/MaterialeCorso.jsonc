@@ -69,6 +69,22 @@
       "type": "string",
       "description": "Parole chiave separate da virgola, per trovare le parti pertinenti a una domanda"
     },
+    "aree": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Aree normative toccate dalla scheda (rentri, albo, pfu, tua): quando la base di conoscenza cambia in un'area, le sue schede si ricontrollano"
+    },
+    "aggiornamenti_json": {
+      "type": "string",
+      "description": "Punti del materiale superati dalle norme vigenti, con che cosa vale oggi, la fonte e la data del controllo"
+    },
+    "aggiornata_il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Ultimo confronto della scheda con la base di conoscenza verificata"
+    },
     "elaborato_il": {
       "type": "string",
       "format": "date-time"

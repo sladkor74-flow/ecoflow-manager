@@ -55,8 +55,17 @@ export default async function(req) {
     }
 
     // Stato: conteggi per categoria e modulo.
-    const parti = await tutte(['categoria', 'modulo', 'fonte_file', 'tipo', 'stato', 'elaborato_il', 'ordine']);
+    const parti = await tutte(['categoria', 'modulo', 'fonte_file', 'tipo', 'stato', 'elaborato_il', 'ordine', 'aggiornata_il', 'aggiornamenti_json']);
     const moduli = new Map();
+    let ultimoControllo = null;
+    let controllate = 0;
+    let conAggiornamenti = 0;
+    for (const p of parti) {
+      if (!p.aggiornata_il) continue;
+      controllate++;
+      if (!ultimoControllo || p.aggiornata_il > ultimoControllo) ultimoControllo = p.aggiornata_il;
+      try { if (JSON.parse(p.aggiornamenti_json || '[]').length) conAggiornamenti++; } catch (_e) { /* scheda senza aggiornamenti leggibili */ }
+    }
     let ultima = null;
     for (const p of parti) {
       const k = `${p.categoria}|${p.fonte_file}`;
@@ -73,6 +82,7 @@ export default async function(req) {
       elaborate: parti.filter(p => p.stato === 'elaborato').length,
       errori: parti.filter(p => p.stato === 'errore').length,
       ultima_elaborazione: ultima,
+      aggiornamento_normativo: { controllate, con_aggiornamenti: conAggiornamenti, ultimo_controllo: ultimoControllo },
       moduli: elenco,
     });
   } catch (error) {

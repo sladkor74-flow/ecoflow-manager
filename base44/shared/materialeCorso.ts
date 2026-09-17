@@ -35,7 +35,7 @@ export async function materialePertinente(base44, domanda, massimo = 4) {
   const schede = [];
   for (let skip = 0; skip < 20000; skip += 1000) {
     const pagina = await base44.asServiceRole.entities.MaterialeCorso.filter({ stato: 'elaborato' }, 'ordine', 1000, skip,
-      ['categoria', 'modulo', 'fonte_file', 'anno_materiale', 'parte', 'parti_totali', 'sintesi', 'concetti_json', 'riferimenti_json', 'da_verificare_json', 'parole_chiave', 'tipo']);
+      ['categoria', 'modulo', 'fonte_file', 'anno_materiale', 'parte', 'parti_totali', 'sintesi', 'concetti_json', 'riferimenti_json', 'da_verificare_json', 'parole_chiave', 'tipo', 'aggiornamenti_json', 'aggiornata_il']);
     schede.push(...pagina);
     if (pagina.length < 1000) break;
   }
@@ -63,6 +63,9 @@ export async function materialePertinente(base44, domanda, massimo = 4) {
     elenco(s.concetti_json).length ? `Concetti: ${elenco(s.concetti_json).join('; ')}` : '',
     elenco(s.riferimenti_json).length ? `Norme citate: ${elenco(s.riferimenti_json).map(r => [r.norma, r.articolo, r.tema].filter(Boolean).join(' ')).join('; ')}` : '',
     elenco(s.da_verificare_json).length ? `Da verificare perche' forse superato: ${elenco(s.da_verificare_json).join('; ')}` : '',
+    elenco(s.aggiornamenti_json).length
+      ? `Aggiornamenti alle norme vigenti (controllo del ${String(s.aggiornata_il || '').slice(0, 10)}): ${elenco(s.aggiornamenti_json).map(a => `${a.punto} -> oggi: ${a.oggi}${a.fonte ? ` (${a.fonte})` : ''}`).join('; ')}`
+      : '',
   ].filter(Boolean).join('\n'));
 
   return {

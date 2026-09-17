@@ -22,6 +22,7 @@ function Scheda({ p }) {
   const concetti = elenco(p.concetti_json);
   const riferimenti = elenco(p.riferimenti_json);
   const verificare = elenco(p.da_verificare_json);
+  const aggiornamenti = elenco(p.aggiornamenti_json);
   const domande = elenco(p.domande_json);
   return (
     <div className="border rounded-lg p-3 space-y-2 bg-card">
@@ -33,7 +34,17 @@ function Scheda({ p }) {
       {riferimenti.length > 0 && (
         <p className="text-xs text-muted-foreground"><span className="font-medium">Norme citate:</span> {riferimenti.map(r => [r.norma, r.articolo].filter(Boolean).join(' ')).join(' · ')}</p>
       )}
-      {verificare.length > 0 && (
+      {aggiornamenti.length > 0 && (
+        <div className="rounded-md bg-sky-50 border border-sky-200 p-2 text-xs text-sky-900 space-y-1">
+          <p className="font-medium">Aggiornato alle norme vigenti{p.aggiornata_il ? ` il ${new Date(p.aggiornata_il).toLocaleDateString('it-IT')}` : ''}</p>
+          <ul className="list-disc pl-5 space-y-0.5">
+            {aggiornamenti.map((a, i) => (
+              <li key={i}><span className="line-through decoration-sky-300">{a.punto}</span> → <span className="font-medium">{a.oggi}</span>{a.fonte ? <span className="text-sky-700"> ({a.fonte})</span> : null}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {verificare.length > 0 && aggiornamenti.length === 0 && (
         <div className="rounded-md bg-amber-50 border border-amber-200 p-2 text-xs text-amber-900">
           <p className="font-medium flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Da verificare con le norme vigenti</p>
           <ul className="list-disc pl-5">{verificare.map((v, i) => <li key={i}>{v}</li>)}</ul>
@@ -144,6 +155,9 @@ export default function CorsoRT() {
               {mancanti > 0 ? ` · circa ${giorni} ${giorni === 1 ? 'giorno' : 'giorni'} per completare` : ' · elaborazione completata'}
               {stato.errori ? ` · ${formatIntero(stato.errori)} parti non elaborabili` : ''}
               {stato.ultima_elaborazione ? ` · ultima scheda ${dataOra(stato.ultima_elaborazione)}` : ''}
+              {stato.aggiornamento_normativo && stato.aggiornamento_normativo.controllate > 0
+                ? ` · ${formatIntero(stato.aggiornamento_normativo.controllate)} schede confrontate con le norme vigenti, ${formatIntero(stato.aggiornamento_normativo.con_aggiornamenti)} con punti superati (ultimo controllo ${dataOra(stato.aggiornamento_normativo.ultimo_controllo)})`
+                : ''}
             </p>
           </div>
         ) : (
