@@ -46,6 +46,54 @@
       "default": false,
       "description": "Vero quando la dichiarazione e' stata effettivamente caricata e inviata a portale. Solo i mesi con questo flag true concorrono a decurtare la giacenza."
     },
+    "caricata_il": {
+      "type": "string",
+      "format": "date"
+    },
+    "ricevuta_email": {
+      "type": "boolean",
+      "default": false,
+      "description": "Vero quando la dichiarazione dell'impianto e' arrivata via email; per Irigom, quando l'abbiamo prodotta noi"
+    },
+    "ricevuta_il": {
+      "type": "string",
+      "format": "date"
+    },
+    "granulo_kg": {
+      "type": "number",
+      "default": 0,
+      "description": "R3: granulo di gomma ricavato (EER 19.12.04)"
+    },
+    "fibre_kg": {
+      "type": "number",
+      "default": 0,
+      "description": "R3: fibre tessili separate (EER 19.12.08)"
+    },
+    "metalli_kg": {
+      "type": "number",
+      "default": 0,
+      "description": "Metalli ferrosi separati (EER 19.12.02)"
+    },
+    "ciabattato_kg": {
+      "type": "number",
+      "default": 0,
+      "description": "R1: ciabattato prodotto (EER 19.12.04)"
+    },
+    "cippato_kg": {
+      "type": "number",
+      "default": 0,
+      "description": "R1: cippato prodotto (EER 19.12.04)"
+    },
+    "cssc_kg": {
+      "type": "number",
+      "default": 0,
+      "description": "R1: CSS-C prodotto con cessazione della qualifica di rifiuto"
+    },
+    "altro_kg": {
+      "type": "number",
+      "default": 0,
+      "description": "Quantita' ricavate che non rientrano nelle voci precedenti"
+    },
     "note": {
       "type": "string"
     }

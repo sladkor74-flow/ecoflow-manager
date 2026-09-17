@@ -34,6 +34,7 @@ import Richieste from '@/pages/Richieste';
 import Utenti from '@/pages/Utenti';
 import Omologhe from '@/pages/Omologhe';
 import DichiarazioniRentri from '@/pages/DichiarazioniRentri';
+import DichiarazioniImpianti from '@/pages/DichiarazioniImpianti';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -91,6 +92,7 @@ const AuthenticatedApp = () => {
           <Route path="/utenti" element={<PageErrorBoundary><Utenti /></PageErrorBoundary>} />
           <Route path="/omologhe" element={<PageErrorBoundary><Omologhe /></PageErrorBoundary>} />
           <Route path="/dichiarazioni-rentri" element={<PageErrorBoundary><DichiarazioniRentri /></PageErrorBoundary>} />
+          <Route path="/dichiarazioni-impianti" element={<PageErrorBoundary><DichiarazioniImpianti /></PageErrorBoundary>} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />

@@ -4,7 +4,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { base44 } from '@/api/base44Client';
 import { EVENTO_AGGIORNAMENTO } from '@/lib/qualifica';
 import {
-  LayoutDashboard, Upload, ClipboardList, Truck, Factory,
+  LayoutDashboard, Upload, ClipboardList, Truck, Factory, Boxes,
   Ship, Warehouse, Target, FileText, CheckSquare, Menu, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, ShieldCheck, ClipboardCheck, Sparkles, FileBarChart, Inbox, Users, FileCheck2, FileBadge } from
 'lucide-react';
 import { caricaLivello, proteggiScritture } from '@/lib/permessi';
@@ -30,6 +30,7 @@ const NAV_ITEMS = [
 { label: 'Qualifica Fornitori', path: '/qualifica-fornitori', icon: ShieldCheck, contatore: 'qualifica' },
 { label: 'Omologhe', path: '/omologhe', icon: FileCheck2 },
 { label: 'Dichiarazioni RENTRI', path: '/dichiarazioni-rentri', icon: FileBadge },
+{ label: 'Dichiarazioni Impianti', path: '/dichiarazioni-impianti', icon: Boxes },
 { label: 'Verifiche', path: '/verifiche', icon: ClipboardCheck },
 { label: 'Assistente', path: '/assistente', icon: Sparkles },
 { label: 'Predittività Secondarie', path: '/predittivita-secondarie', icon: LineChart },
