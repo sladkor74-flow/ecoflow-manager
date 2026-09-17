@@ -12,12 +12,13 @@ import { testo, daData, siNo, apriFoglio, griglia } from '@/lib/foglioExcel';
 // dalla L. 26/2026) per chi e' obbligato all'iscrizione al RENTRI. Precisazione
 // dell'utente del 17/09/2026: i produttori di rifiuti speciali non pericolosi (i PFU
 // lo sono) con meno di 10 dipendenti non hanno l'obbligo e possono ancora scegliere
-// il cartaceo, anche se iscritti. Quindi "iscritto con FIR cartaceo" non e' di per
-// se' un problema: lo diventa solo se risulta l'obbligo, che nel foglio si legge
-// dalla nota ("iscrizione obbligatoria +10 dipendenti").
+// il cartaceo, anche se iscritti; da 10 dipendenti in su il FIR deve essere digitale.
+// Quindi "iscritto con FIR cartaceo" non e' di per se' un problema: lo diventa solo
+// se risulta l'obbligo, che nel foglio si legge dalla nota ("iscrizione obbligatoria
+// +10 dipendenti", "10 dipendenti o piu'", "almeno 10 dipendenti"...).
 export const FIR_DIGITALE_OBBLIGATORIO_DAL = '2026-09-16';
 
-const OBBLIGO_DA_NOTA = /(\+|pi[uù] di|oltre)\s*10\s*dipendent|iscrizione\s+obbligatori/i;
+const OBBLIGO_DA_NOTA = /(\+|pi[uù] di|oltre|almeno|\bda|>=?|≥)\s*10\s*(o pi[uù]\s*)?dipendent|\b10\s*(\+|o pi[uù]|e oltre)\s*dipendent|\b10\s*dipendenti\s*(o pi[uù]|e oltre|in su)|iscrizione\s+obbligatori/i;
 export const obbligoIndicatoNellaNota = (nota) => OBBLIGO_DA_NOTA.test(String(nota || ''));
 
 // Nel portale il campo ID U/L RENTRi porta un codice d'esempio finche' il
@@ -131,7 +132,7 @@ export function controlliDichiarazione(d, pdr, oggi = new Date().toISOString().s
   }
 
   if (d.fir_cartaceo && !d.fir_digitale && obbligoIndicatoNellaNota(d.nota) && oggi >= FIR_DIGITALE_OBBLIGATORIO_DAL) {
-    esiti.push({ tipo: 'obbligato_cartaceo', livello: 'verificare', testo: "La nota indica l'iscrizione obbligatoria (più di 10 dipendenti) ma la dichiarazione è con FIR cartaceo: per chi è obbligato il FIR è digitale dal 16/09/2026." });
+    esiti.push({ tipo: 'obbligato_cartaceo', livello: 'verificare', testo: "La nota indica l'iscrizione obbligatoria (10 dipendenti o più) ma la dichiarazione è con FIR cartaceo: per chi è obbligato il FIR è digitale dal 16/09/2026." });
   }
   if (pdr.some(p => eCodiceEsempio(p.rentri_id_ul))) {
     esiti.push({ tipo: 'codice_esempio', livello: 'info', testo: "Nel portale l'ID dell'unità locale è ancora il codice d'esempio: il produttore non ha inserito il suo." });
