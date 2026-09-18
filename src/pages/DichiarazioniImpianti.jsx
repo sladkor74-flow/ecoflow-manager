@@ -127,7 +127,13 @@ export default function DichiarazioniImpianti() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Kpi titolo="Dichiarato e caricato a portale" valore={`${formatTonnellate(totali.dichiarato_caricato_t)} t`} nota={`su ${formatTonnellate(totali.dichiarato_totale_t)} t dichiarate`} />
             <Kpi titolo="Conferito rete nell'anno" valore={`${formatTonnellate(totali.conferito_t)} t`} />
-            <Kpi titolo="Giacenza che risulta" valore={`${formatTonnellate(totali.giacenza_calcolata_t)} t`} nota={`a portale ${formatTonnellate(totali.giacenza_portale_t)} t`} />
+            <Kpi
+              titolo="Giacenza che risulta"
+              valore={`${formatTonnellate(totali.giacenza_calcolata_t)} t`}
+              nota={totali.giacenza_calcolata_confrontabile_t === undefined || totali.giacenza_calcolata_confrontabile_t === totali.giacenza_calcolata_t
+                ? `a portale ${formatTonnellate(totali.giacenza_portale_t)} t`
+                : `di cui ${formatTonnellate(totali.giacenza_calcolata_confrontabile_t)} t confrontabili col portale, che ne segna ${formatTonnellate(totali.giacenza_portale_t)} t`}
+            />
             <Kpi
               titolo="Quadratura con il portale"
               valore={`${totali.siti_che_quadrano} su ${totali.siti_che_quadrano + totali.siti_da_quadrare}`}

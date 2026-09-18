@@ -315,6 +315,9 @@ export default async function(req) {
       dichiarato_totale_t: t3(siti.reduce((s, x) => s + x.dichiarato_totale_t, 0)),
       dichiarato_portale_t: t3(siti.reduce((s, x) => s + x.dichiarato_portale_t, 0)),
       giacenza_calcolata_t: t3(siti.reduce((s, x) => s + x.giacenza_calcolata_t, 0)),
+      // Solo i siti che a portale una giacenza ce l'hanno: sommare anche gli altri
+      // farebbe sembrare che il confronto non torni, quando il confronto non c'e'.
+      giacenza_calcolata_confrontabile_t: t3(siti.filter(x => x.giacenza_portale_t !== null && x.giacenza_portale_t !== undefined).reduce((s, x) => s + x.giacenza_calcolata_t, 0)),
       giacenza_portale_t: t3(siti.reduce((s, x) => s + (x.giacenza_portale_t || 0), 0)),
       siti_che_quadrano: siti.filter(x => x.quadra === true).length,
       siti_da_quadrare: siti.filter(x => x.quadra === false).length,
