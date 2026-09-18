@@ -1,0 +1,128 @@
+{
+  "name": "RichiestaEct",
+  "type": "object",
+  "properties": {
+    "anno": {
+      "type": "number"
+    },
+    "pdr_nome": {
+      "type": "string",
+      "description": "Nome del produttore come scritto nella richiesta del consorzio, senza la sigla della classe"
+    },
+    "classe": {
+      "type": "string",
+      "description": "Sigla della classe indicata in coda al nome nella richiesta: P, M, G1, G2"
+    },
+    "provincia": {
+      "type": "string"
+    },
+    "ordine_immesso_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Data di immissione dell ordine, usata insieme al nome del produttore per riconoscere l ID ordine"
+    },
+    "trasportatore": {
+      "type": "string"
+    },
+    "mail_inviata_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Giorno in cui il consorzio ci ha scritto: la richiesta arriva via email, fuori dal portale"
+    },
+    "scadenza": {
+      "type": "string",
+      "format": "date",
+      "description": "Entro quando il consorzio chiede il ritiro, ricavata dalla nota della richiesta"
+    },
+    "nota": {
+      "type": "string",
+      "description": "La nota della richiesta cosi come e scritta, per esempio entro settembre"
+    },
+    "id_ordine": {
+      "type": "string",
+      "description": "ID ordine Ecotyre riconosciuto fra gli assegnati per nome del produttore e data di immissione"
+    },
+    "id_ordine_stato": {
+      "type": "string",
+      "enum": [
+        "trovato",
+        "approssimato",
+        "ambiguo",
+        "non_trovato"
+      ],
+      "default": "non_trovato",
+      "description": "trovato quando la data di immissione coincide, approssimato quando balla di un giorno o due, ambiguo quando piu di un ordine corrisponde: i candidati restano elencati per scegliere a mano"
+    },
+    "id_ordine_candidati": {
+      "type": "string",
+      "description": "Gli ID ordine possibili quando il riconoscimento non e univoco, separati da virgola"
+    },
+    "id_ordine_manuale": {
+      "type": "string",
+      "description": "ID ordine indicato a mano: ha sempre la precedenza sul riconoscimento automatico"
+    },
+    "evaso_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Data di evasione presa dal foglio delle richieste, quando c e"
+    },
+    "evasione_rilevata_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Data di fine trasporto trovata fra i terminati: e la proposta di evasione da confermare"
+    },
+    "evasione_confermata": {
+      "type": "boolean",
+      "default": false,
+      "description": "Vero quando l evasione e stata controllata e spuntata: da quel momento si puo rispondere alla mail del consorzio"
+    },
+    "evasione_confermata_il": {
+      "type": "string",
+      "format": "date"
+    },
+    "esito": {
+      "type": "string",
+      "enum": [
+        "aperta",
+        "da_confermare",
+        "evasa",
+        "annullata"
+      ],
+      "default": "aperta",
+      "description": "da_confermare quando fra i terminati risulta il ritiro ma la spunta non c e ancora"
+    },
+    "motivo_annullamento": {
+      "type": "string",
+      "description": "Quando la richiesta non si evade: per esempio cancellato per mancanza di pfu, oppure sede di inserimento ordine errata"
+    },
+    "riga_excel": {
+      "type": "number",
+      "description": "Riga del foglio Richieste ECT da cui proviene: serve a ritrovarla ai caricamenti successivi"
+    },
+    "note_interne": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "anno",
+    "pdr_nome"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

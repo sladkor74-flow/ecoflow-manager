@@ -13,6 +13,7 @@ const TIPI_FILE = [
   { key: 'terziarie', label: 'Terziarie', desc: 'Viaggi impianto → cementeria/impianto (foglio TERZIARIE)', colore: 'bg-pink-50 border-pink-200' },
   { key: 'dichiarazioni_trattamento', label: 'Dichiarazioni Trattamento', desc: 'Report delle dichiarazioni di recupero con la ripartizione dei derivati: granulo, fibre, metallo, cippato, ciabattato', colore: 'bg-cyan-50 border-cyan-200' },
   { key: 'ordini_non_dichiarati', label: 'Ordini Non Dichiarati', desc: 'Ordini in attesa di dichiarazione di trattamento: determina la giacenza a portale di ciascun impianto', colore: 'bg-amber-50 border-amber-200' },
+  { key: 'richieste_ect', label: 'Richieste ECT', desc: 'Il file di gestione: dal foglio "Richieste ECT" aggiorna l\'elenco delle richieste di ritiro arrivate per email, con l\'ID ordine riconosciuto fra gli assegnati', colore: 'bg-indigo-50 border-indigo-200' },
 ];
 
 export default function CaricamentoDati() {
@@ -82,8 +83,13 @@ export default function CaricamentoDati() {
         fileUrl = file_url;
         pendingFileUrlRef.current[tipoKey] = fileUrl;
       }
-      const fnName = 'importEcotyreFile';
-      const params = { file_url: fileUrl, tipo_file: tipoKey, nome_file: file.name, replace_existing: true };
+      // Il file di gestione non e un export del portale: lo legge una funzione sua,
+      // che dal foglio Richieste ECT aggiorna l elenco senza toccare il resto.
+      const eRichieste = tipoKey === 'richieste_ect';
+      const fnName = eRichieste ? 'importaRichiesteEct' : 'importEcotyreFile';
+      const params = eRichieste
+        ? { file_url: fileUrl }
+        : { file_url: fileUrl, tipo_file: tipoKey, nome_file: file.name, replace_existing: true };
       if (conferma_forzatura) params.conferma_forzatura = true;
       const res = await base44.functions.invoke(fnName, params);
       setRisultato(prev => ({ ...prev, [tipoKey]: { ok: true, data: res.data } }));

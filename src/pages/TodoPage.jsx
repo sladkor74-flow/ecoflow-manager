@@ -3,6 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Loader2, Plus, Trash2, CheckSquare, Square, AlertCircle } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
+import RichiesteEct from '@/components/todo/RichiesteEct';
 
 const PRIORITA = {
   urgente: { label: 'Urgente', color: 'bg-red-100 text-red-700 border-red-200' },
@@ -24,6 +25,10 @@ export default function TodoPage() {
   const [showForm, setShowForm] = useState(false);
   const [filterStato, setFilterStato] = useState('aperto');
   const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: '', priorita: 'media', data_scadenza: '' });
+  // Due elenchi diversi: le nostre attivita' e le richieste che arrivano dal
+  // consorzio per email. Tenerle separate evita di mescolare cose che si
+  // chiudono in modo diverso.
+  const [sezione, setSezione] = useState('attivita');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -87,9 +92,9 @@ export default function TodoPage() {
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl lg:text-3xl font-heading font-bold flex items-center gap-2"><CheckSquare className="w-7 h-7 text-primary" /> To-Do List</h1>
-          <p className="text-muted-foreground mt-1">Gestione attività, solleciti e pratiche con scadenze.</p>
+          <p className="text-muted-foreground mt-1">Attività, solleciti e pratiche con scadenze, e le richieste di ritiro che il consorzio manda per email.</p>
         </div>
-        {isAdmin && (
+        {isAdmin && sezione === 'attivita' && (
           <button onClick={() => setShowForm(!showForm)} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90">
             <Plus className="w-4 h-4" /> Nuovo To-Do
           </button>
@@ -98,6 +103,21 @@ export default function TodoPage() {
 
       <BannerSolaLettura cosa="le attività" />
 
+      <div className="flex gap-2 border-b">
+        {[['attivita', 'Attività'], ['ect', 'Richieste ECT']].map(([k, nome]) => (
+          <button
+            key={k}
+            onClick={() => setSezione(k)}
+            className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${sezione === k ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+          >
+            {nome}
+          </button>
+        ))}
+      </div>
+
+      {sezione === 'ect' && <RichiesteEct isAdmin={isAdmin} />}
+
+      {sezione === 'attivita' && (<>
       {/* KPI filtri */}
       <div className="flex flex-wrap gap-2">
         <button onClick={() => setFilterStato('tutti')} className={`px-3 py-1.5 rounded-md text-sm border ${filterStato === 'tutti' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}>Tutti ({todos.length})</button>
@@ -178,6 +198,7 @@ export default function TodoPage() {
           )}
         </div>
       )}
+      </>)}
     </div>
   );
 }
