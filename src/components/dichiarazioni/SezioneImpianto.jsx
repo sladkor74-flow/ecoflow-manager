@@ -101,7 +101,11 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
         {sito.secondarie_in_t > 0 && <span>Secondarie in ingresso: <strong>{t(sito.secondarie_in_t)} t</strong></span>}
         {sito.secondarie_out_t > 0 && <span>Secondarie in uscita: <strong>{t(sito.secondarie_out_t)} t</strong></span>}
         {sito.terziarie_out_t > 0 && <span>Terziarie in uscita: <strong>{t(sito.terziarie_out_t)} t</strong></span>}
-        <span>Dichiarato e caricato: <strong>{t(sito.dichiarato_caricato_t)} t</strong></span>
+        {/* Della rete, perche' e' la rete che fa la giacenza a portale: gli altri canali hanno il loro giro. */}
+        <span>Dichiarato e caricato (rete): <strong>{t(sito.dichiarato_caricato_rete_t)} t</strong></span>
+        {sito.dichiarato_caricato_t > sito.dichiarato_caricato_rete_t && (
+          <span>Dichiarato sugli altri canali: <strong>{t(sito.dichiarato_caricato_t - sito.dichiarato_caricato_rete_t)} t</strong></span>
+        )}
         <span>Giacenza che ne risulta: <strong>{t(sito.giacenza_calcolata_t)} t</strong></span>
         <span>Giacenza a portale: <strong>{sito.giacenza_portale_t === null ? '—' : `${t(sito.giacenza_portale_t)} t`}</strong></span>
       </div>
