@@ -10,7 +10,7 @@
 // formulario che a portale cade nella settimana e nel gestionale no si spiega
 // quasi sempre con una fine trasporto a cavallo del lunedi' o della domenica.
 
-import { perPagina } from "./fetchAll.ts";
+import { fetchAll, perPagina } from "./fetchAll.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 
 export const GIORNI_FASCIA = 4;
@@ -40,6 +40,30 @@ const nome = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 
 function chiaveCella(r) {
   return normalizzaRagioneSociale(r.destinazione) + '|' + normalizzaRagioneSociale(r.trasportatore);
+}
+
+/**
+ * I movimenti con la fine trasporto dentro la fascia, chiesti direttamente
+ * all'archivio: sono una manciata, e rileggere per intero le primarie - oltre
+ * diecimila record - per guardare una settimana costa un minuto di attesa.
+ *
+ * Se il filtro per intervallo non restituisce niente si rilegge tutto e si
+ * filtra qui: meglio lento che dire che non ci sono movimenti quando ci sono.
+ */
+async function nellaFascia(svc, entita, primo, ultimo) {
+  const filtro = { trasporto_finito_il: { $gte: primo, $lte: ultimo + 'T23:59:59.999Z' } };
+  try {
+    const righe = await fetchAll(svc[entita], filtro, 'id');
+    if (righe.length) return righe;
+  } catch (e) {
+    // filtro non accettato: si passa alla lettura completa
+  }
+  const tutte = [];
+  await perPagina(svc[entita], null, (r) => {
+    const d = soloData(r.trasporto_finito_il);
+    if (d && d >= primo && d <= ultimo) tutte.push(r);
+  });
+  return tutte;
 }
 
 function formulario(r) {
@@ -74,39 +98,39 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null) {
     raccolta[f.chiave] = { celle: new Map(), vicini: [], annullati: [], senza_peso: [], totale: { n: 0, kg: 0 } };
   }
 
-  await Promise.all(entita.map(async (e) => {
-    const suoi = flussi.filter(f => f.entita === e);
-    await perPagina(svc[e], null, (r) => {
+  const perEntita = {};
+  await Promise.all(entita.map(async (e) => { perEntita[e] = await nellaFascia(svc, e, primoFascia, ultimoFascia); }));
+
+  for (const f of flussi) {
+    const dati = raccolta[f.chiave];
+    for (const r of (perEntita[f.entita] || [])) {
       const d = soloData(r.trasporto_finito_il);
-      if (!d || d < primoFascia || d > ultimoFascia) return;
+      if (!d || d < primoFascia || d > ultimoFascia) continue;
       const movimento = String(r.tipo_movimento || 'primaria').toLowerCase().trim();
-      for (const f of suoi) {
-        if (f.movimento && movimento !== f.movimento) continue;
-        const dati = raccolta[f.chiave];
-        const dentro = d >= inizio && d <= fine;
-        const fir = formulario(r);
-        if (!eTerminato(r)) {
-          if (dentro) dati.annullati.push({ ...fir, motivo: nome(r.motivo_cancellazione) || nome(r.stato) });
-          continue;
-        }
-        if (!dentro) {
-          dati.vicini.push({ ...fir, giorni: d < inizio ? -1 : 1 });
-          continue;
-        }
-        const k = chiaveCella(r);
-        if (!dati.celle.has(k)) {
-          dati.celle.set(k, { impianto: fir.impianto, trasportatore: fir.trasportatore, n: 0, kg: 0, formulari: [] });
-        }
-        const cella = dati.celle.get(k);
-        cella.n++;
-        cella.kg += fir.kg;
-        cella.formulari.push(fir);
-        dati.totale.n++;
-        dati.totale.kg += fir.kg;
-        if (!fir.kg) dati.senza_peso.push(fir);
+      if (f.movimento && movimento !== f.movimento) continue;
+      const dentro = d >= inizio && d <= fine;
+      const fir = formulario(r);
+      if (!eTerminato(r)) {
+        if (dentro) dati.annullati.push({ ...fir, motivo: nome(r.motivo_cancellazione) || nome(r.stato) });
+        continue;
       }
-    });
-  }));
+      if (!dentro) {
+        dati.vicini.push({ ...fir, giorni: d < inizio ? -1 : 1 });
+        continue;
+      }
+      const k = chiaveCella(r);
+      if (!dati.celle.has(k)) {
+        dati.celle.set(k, { impianto: fir.impianto, trasportatore: fir.trasportatore, n: 0, kg: 0, formulari: [] });
+      }
+      const cella = dati.celle.get(k);
+      cella.n++;
+      cella.kg += fir.kg;
+      cella.formulari.push(fir);
+      dati.totale.n++;
+      dati.totale.kg += fir.kg;
+      if (!fir.kg) dati.senza_peso.push(fir);
+    }
+  }
 
   // L'ultimo caricamento di ogni tipo di file: spiega un gestionale non aggiornato.
   const tipi = [...new Set(flussi.flatMap(f => f.caricamenti))];
