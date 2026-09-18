@@ -8,7 +8,7 @@ import {
 import { formatKg } from '@/lib/utils';
 import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
 import {
-  oggiRoma, aggiungiGiorni, settimanaIso, intervalloSettimana, settimaneNellAnno, descriviIntervallo, dataIt, fileInBase64,
+  oggiRoma, aggiungiGiorni, settimanaIso, intervalloSettimana, settimaneNellAnno, descriviIntervallo, dataIt,
 } from '@/lib/verifiche';
 import { NOME_VERDETTO, COLORE_VERDETTO, misura, tonnellate, FORMATI, tipoDiFile, leggiPivotDaExcel } from '@/lib/quadraturaFir';
 import { esportaQuadraturaFirPdf } from '@/lib/quadraturaFirPdf';
@@ -200,9 +200,12 @@ export default function QuadraturaFir({ isAdmin }) {
     setOccupato(true);
     setErrore(null);
     try {
+      // Un Excel si legge qui nel browser, senza agente e senza caricare niente.
+      // Un PDF o una foto vanno caricati: l'agente li legge da un link firmato
+      // e subito dopo si prova a cancellare il file.
       const payload = tipo === 'excel'
         ? { tabelle: await leggiPivotDaExcel(file) }
-        : { file: { nome: file.name, mime: file.type || (tipo === 'pdf' ? 'application/pdf' : 'image/png'), base64: await fileInBase64(file) } };
+        : { file_uri: (await base44.integrations.Core.UploadPrivateFile({ file })).file_uri };
       await elabora(payload, { file_nome: file.name, file_tipo: tipo });
       await carica(true);
     } catch (e) {
@@ -301,7 +304,8 @@ export default function QuadraturaFir({ isAdmin }) {
           Carica la stampa settimanale del conteggio e della somma dei FIR: le due pivot di WINSINFO e del portale Ecotyre si confrontano fra loro
           e con il gestionale, che conta i formulari terminati con la fine trasporto dentro la settimana. Va bene il PDF, una foto o il file Excel
           da cui hai stampato. Il numero di settimana si legge dal titolo della stampa; se non c&apos;è, vale quello scelto qui sopra.
-          Rete, ACI ed extra raccolta restano separati e non si sommano mai fra loro. Il file non viene conservato: restano soltanto i numeri letti e l&apos;esito.
+          Rete, ACI ed extra raccolta restano separati e non si sommano mai fra loro. Nella quadratura restano soltanto i numeri letti e l&apos;esito:
+          il PDF viene caricato solo per essere letto e poi rimosso, e un Excel si legge qui nel browser senza caricare niente.
         </span>
       </div>
 

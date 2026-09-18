@@ -8,18 +8,64 @@ import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 // con il gestionale.
 //
 // Payload, uno dei tre:
-//   { quadratura_id, file: { nome, mime, base64 } }  PDF o immagine: lo trascrive l'agente
-//   { quadratura_id, tabelle: [...] }                tabelle gia' lette dal browser da un Excel
-//   { quadratura_id, solo_confronto: true }          ripete il confronto sulle righe gia' lette
+//   { quadratura_id, file_uri, file_nome }  PDF o immagine caricata dal browser: la trascrive l'agente
+//   { quadratura_id, tabelle: [...] }       tabelle gia' lette dal browser da un Excel
+//   { quadratura_id, solo_confronto: true } ripete il confronto sulle righe gia' lette
 //
-// Il file non viene mai conservato: arriva, si legge e si scarta. Nella
-// quadratura restano solo i numeri letti e l'esito del confronto.
+// La stampa e' una scansione senza testo dentro, quindi la trascrive l'agente,
+// che la legge dall'archivio privato con un link firmato - la stessa strada dei
+// documenti della qualifica. Appena letta si prova a cancellare il file
+// caricato: nella quadratura restano soltanto i numeri e l'esito del confronto.
 //
-// La trascrizione di un PDF e' dell'agente, ma non le si crede sulla parola: la
-// stampa porta i propri totali, per gruppo e complessivi, e la somma delle righe
-// lette deve farli. Se non li fa, la quadratura lo dice e non nasconde il dubbio.
+// Alla trascrizione non si crede sulla parola: la stampa porta i propri totali,
+// per gruppo e complessivi, e la somma delle righe lette deve farli. Se non li
+// fa, la quadratura lo dice e non nasconde il dubbio.
 
-const LIMITE_BASE64 = 7 * 1024 * 1024;
+const SCHEMA_RIGA = {
+  type: 'object',
+  properties: {
+    impianto: { type: 'string' },
+    trasportatore: { type: 'string' },
+    conteggio: { type: 'integer' },
+    kg: { type: 'number' },
+  },
+  required: ['impianto', 'trasportatore', 'conteggio', 'kg'],
+};
+
+const SCHEMA_SUBTOTALE = {
+  type: 'object',
+  properties: {
+    impianto: { type: 'string' },
+    conteggio: { type: 'integer' },
+    kg: { type: 'number' },
+  },
+  required: ['impianto', 'conteggio', 'kg'],
+};
+
+const SCHEMA_LETTURA = {
+  type: 'object',
+  properties: {
+    settimana: { type: 'integer' },
+    anno: { type: 'integer' },
+    tabelle: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          titolo: { type: 'string' },
+          fonte: { type: 'string', enum: ['winsinfo', 'ecotyre'] },
+          righe: { type: 'array', items: SCHEMA_RIGA },
+          subtotali: { type: 'array', items: SCHEMA_SUBTOTALE },
+          totale_conteggio: { type: 'integer' },
+          totale_kg: { type: 'number' },
+        },
+        required: ['titolo', 'fonte', 'righe', 'totale_conteggio', 'totale_kg'],
+      },
+    },
+    note: { type: 'string' },
+  },
+  required: ['tabelle'],
+};
 
 const PROMPT = [
   'Il documento allegato e\' la stampa settimanale con cui una societa\' di raccolta di pneumatici fuori uso controlla i propri formulari di identificazione del rifiuto (FIR).',
@@ -44,44 +90,35 @@ const PROMPT = [
   '{"settimana": 37, "anno": null, "tabelle": [{"titolo": "RACCOLTA ECOTYRE SETT. 37", "fonte": "winsinfo", "righe": [{"impianto": "", "trasportatore": "", "conteggio": 0, "kg": 0}], "subtotali": [{"impianto": "", "conteggio": 0, "kg": 0}], "totale_conteggio": 0, "totale_kg": 0}], "note": ""}',
 ].join('\n');
 
-function estraiJson(testo) {
-  const s = String(testo || '');
+function comeOggetto(v) {
+  if (v && typeof v === 'object') return v;
+  const s = String(v || '');
   const inizio = s.indexOf('{');
   const fine = s.lastIndexOf('}');
   if (inizio < 0 || fine <= inizio) throw new Error('L\'agente non ha restituito un elenco leggibile.');
   return JSON.parse(s.slice(inizio, fine + 1));
 }
 
-// La stampa e' quasi sempre una scansione, senza testo dentro: la si fa leggere
-// all'agente come immagine. Il file passa in memoria e non viene salvato.
-async function leggiFile(base44, file) {
-  if (!file || !file.base64) throw new Error('File mancante');
-  if (file.base64.length > LIMITE_BASE64) throw new Error('Il file e\' troppo grande per essere letto: dividilo o caricane la versione Excel.');
+// Legge la stampa dall'archivio privato con un link firmato che vale un quarto
+// d'ora, poi prova a cancellare il file: quello che serve sono i numeri.
+async function leggiDocumento(base44, fileUri) {
+  const core = base44.asServiceRole.integrations.Core;
+  const { signed_url } = await core.CreateFileSignedUrl({ file_uri: fileUri, expires_in: 900 });
+  const risposta = await core.InvokeLLM({ prompt: PROMPT, file_urls: [signed_url], response_json_schema: SCHEMA_LETTURA });
+  const letto = comeOggetto(risposta);
 
-  const gateway = base44.aiGateway && typeof base44.aiGateway.connection === 'function'
-    ? await Promise.resolve(base44.aiGateway.connection())
-    : null;
-  if (!gateway || !gateway.baseURL) {
-    throw new Error('La lettura di PDF e immagini non e\' disponibile su questa app: carica il file Excel da cui hai stampato le pivot.');
+  let cancellato = 'non supportata';
+  for (const nome of ['DeleteFile', 'DeletePrivateFile', 'RemoveFile']) {
+    if (typeof core[nome] !== 'function') continue;
+    try {
+      await core[nome]({ file_uri: fileUri });
+      cancellato = nome;
+    } catch (e) {
+      cancellato = `${nome} non riuscita: ${e && e.message ? e.message : e}`;
+    }
+    break;
   }
-
-  const allegato = file.mime === 'application/pdf'
-    ? { type: 'file', file: { filename: file.nome || 'quadratura.pdf', file_data: `data:application/pdf;base64,${file.base64}` } }
-    : { type: 'image_url', image_url: { url: `data:${file.mime};base64,${file.base64}` } };
-
-  const risposta = await fetch(String(gateway.baseURL).replace(/\/+$/, '') + '/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${gateway.token}` },
-    body: JSON.stringify({ model: 'automatic', messages: [{ role: 'user', content: [{ type: 'text', text: PROMPT }, allegato] }] }),
-  });
-  if (!risposta.ok) {
-    const dettaglio = (await risposta.text()).slice(0, 300);
-    throw new Error(`L'agente non e' riuscito a leggere il file (${risposta.status}). ${dettaglio}`);
-  }
-  const dati = await risposta.json();
-  const contenuto = dati && dati.choices && dati.choices[0] && dati.choices[0].message ? dati.choices[0].message.content : '';
-  const testo = Array.isArray(contenuto) ? contenuto.map(p => p.text || '').join('') : contenuto;
-  return { letto: estraiJson(testo), modo: 'agente' };
+  return { letto, modo: 'agente', cancellazione_file: cancellato };
 }
 
 export default async function(req) {
@@ -92,7 +129,7 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (!eAmministratore(user)) return rispostaSolaLettura();
 
-    const { quadratura_id, file, tabelle, solo_confronto } = await req.json();
+    const { quadratura_id, file_uri, tabelle, solo_confronto } = await req.json();
     if (!quadratura_id) return Response.json({ error: 'quadratura_id obbligatorio' }, { status: 400 });
     quadraturaId = quadratura_id;
 
@@ -103,10 +140,12 @@ export default async function(req) {
     // 1. le righe: rilette dal file, arrivate dal browser o quelle gia' salvate
     let letto;
     let modo = 'salvate';
-    if (file) {
-      const esito = await leggiFile(base44, file);
+    let cancellazione = null;
+    if (file_uri) {
+      const esito = await leggiDocumento(base44, file_uri);
       letto = esito.letto;
       modo = esito.modo;
+      cancellazione = esito.cancellazione_file;
     } else if (Array.isArray(tabelle)) {
       letto = { settimana: null, anno: null, tabelle, note: '' };
       modo = 'excel';
@@ -114,7 +153,7 @@ export default async function(req) {
       letto = await leggiJson(base44, 'QuadraturaFir', q, 'righe_json', null);
       if (!letto) throw new Error('Non ci sono righe salvate: ricarica il file.');
     } else {
-      return Response.json({ error: 'Serve un file, delle tabelle o solo_confronto' }, { status: 400 });
+      return Response.json({ error: 'Serve un file caricato, delle tabelle o solo_confronto' }, { status: 400 });
     }
 
     const lettura = normalizzaLettura(letto);
@@ -153,7 +192,7 @@ export default async function(req) {
       errore: '',
       esito_json: await valoreCampo(base44, 'QuadraturaFir', quadratura_id, 'esito_json', JSON.stringify(esito)),
       lettura_json: await valoreCampo(base44, 'QuadraturaFir', quadratura_id, 'lettura_json', JSON.stringify({
-        modo, note: lettura.note, problemi: lettura.problemi,
+        modo, note: lettura.note, problemi: lettura.problemi, cancellazione_file: cancellazione,
         tabelle: lettura.tabelle.map(t => ({
           titolo: t.titolo, fonte: t.fonte, flusso: t.flusso, unita: t.unita,
           righe: t.righe.length, somma: t.somma, stampato: t.stampato,
