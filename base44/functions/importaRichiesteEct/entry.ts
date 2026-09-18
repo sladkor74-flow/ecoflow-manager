@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { leggiFoglio, riconosciOrdine, scadenzaDaNota, statoRichiesta, soloData } from "../../shared/richiesteEct.ts";
+import { leggiFoglio, riconosciOrdine, scadenzaDaNota, statoRichiesta, soloData, listaOrdini, evasioneOrdini } from "../../shared/richiesteEct.ts";
 
 // Carica il foglio "Richieste ECT" del file di gestione e ne tiene aggiornato
 // l'elenco: per ogni richiesta cerca l'ID ordine fra gli assegnati (nome del
@@ -71,8 +71,11 @@ export default async function(req) {
     for (const r of righe) {
       const ric = riconosciOrdine(r, ordini);
       const gia = perRiga.get(r.riga_excel) || null;
-      const idBuono = (gia && gia.id_ordine_manuale) || ric.id_ordine;
-      const rilevata = idBuono ? (terminati.get(idBuono) || null) : null;
+      // Gli ID scritti a mano restano e vincono: una richiesta puo' coprire piu'
+      // ordini, e l'evasione si propone solo quando sono tutti ritirati.
+      const ids = listaOrdini({ id_ordine_manuale: gia && gia.id_ordine_manuale, id_ordine: ric.id_ordine });
+      const ev = evasioneOrdini(ids, terminati);
+      const rilevata = ev.ultima;
 
       const campi = {
         anno: annoNum,
@@ -91,6 +94,8 @@ export default async function(req) {
         id_ordine_stato: ric.id_ordine_stato,
         id_ordine_candidati: ric.id_ordine_candidati,
         evasione_rilevata_il: rilevata || undefined,
+        ordini_totali: ev.totali,
+        ordini_evasi: ev.evasi,
       };
       const conStato = { ...campi, evasione_confermata: gia ? !!gia.evasione_confermata : false };
       campi.esito = statoRichiesta(conStato);
@@ -104,7 +109,7 @@ export default async function(req) {
       // riga sia nuova sia che fosse gia' in elenco: e' quello su cui l utente
       // deve mettere le mani per rispondere al consorzio.
       if (campi.esito === 'da_confermare' && !(gia && gia.evasione_confermata) && rilevata) {
-        daConfermare.push({ pdr: r.pdr_nome, id_ordine: idBuono, evasa_il: rilevata });
+        daConfermare.push({ pdr: r.pdr_nome, id_ordine: ids.join(', '), evasa_il: rilevata });
       }
     }
 

@@ -59,7 +59,17 @@
     },
     "id_ordine_manuale": {
       "type": "string",
-      "description": "ID ordine indicato a mano: ha sempre la precedenza sul riconoscimento automatico"
+      "description": "Uno o piu ID ordine scritti a mano, separati da virgola: hanno sempre la precedenza sul riconoscimento automatico e restano ai caricamenti successivi. Servono quando un produttore ha piu richieste aperte e una riga copre piu ordini, per esempio le classi P e M dello stesso giorno"
+    },
+    "ordini_totali": {
+      "type": "number",
+      "default": 0,
+      "description": "Quanti ordini copre questa richiesta"
+    },
+    "ordini_evasi": {
+      "type": "number",
+      "default": 0,
+      "description": "Quanti di quegli ordini risultano gia ritirati fra i terminati: la richiesta e evasa solo quando lo sono tutti"
     },
     "evaso_il": {
       "type": "string",

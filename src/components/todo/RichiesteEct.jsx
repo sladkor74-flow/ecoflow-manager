@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Loader2, CheckSquare, Square, AlertTriangle, Mail, Search, Upload } from 'lucide-react';
-import { giorniAllaScadenza, statoRichiesta } from '@/lib/richiesteEct';
+import { giorniAllaScadenza, statoRichiesta, listaOrdini } from '@/lib/richiesteEct';
 
 // Richieste del consorzio arrivate via email: ci chiedono di anticipare certi
 // ritiri. L'ID ordine non sta nella richiesta e lo riconosce il gestionale fra
@@ -35,6 +35,7 @@ export default function RichiesteEct({ isAdmin }) {
   const [cerca, setCerca] = useState('');
   const [occupato, setOccupato] = useState(null);
   const [caricando, setCaricando] = useState(false);
+  const [modifica, setModifica] = useState(null); // { id, testo }
   const [esitoImport, setEsitoImport] = useState(null);
 
   const carica = useCallback(async () => {
@@ -68,6 +69,24 @@ export default function RichiesteEct({ isAdmin }) {
       setErrore(e?.response?.data?.error || e?.message || String(e));
     } finally {
       setCaricando(false);
+    }
+  };
+
+  // Gli ID ordine si possono scrivere a mano, anche piu' di uno: un produttore
+  // con piu' richieste aperte ne ha spesso due lo stesso giorno (le classi P e M).
+  // Quello che si scrive qui resta anche ai caricamenti successivi.
+  const salvaOrdini = async (r, testo) => {
+    const pulito = String(testo || '').split(/[,;\s]+/).map(x => x.trim().toUpperCase()).filter(Boolean).join(', ');
+    setModifica(null);
+    if (pulito === String(r.id_ordine_manuale || '')) return;
+    setOccupato(r.id);
+    try {
+      await base44.entities.RichiestaEct.update(r.id, { id_ordine_manuale: pulito });
+      await carica();
+    } catch (e) {
+      setErrore(e?.message || String(e));
+    } finally {
+      setOccupato(null);
     }
   };
 
@@ -106,7 +125,7 @@ export default function RichiesteEct({ isAdmin }) {
     else if (filtro === 'chiuse') v = v.filter(r => r.esito === 'evasa' || r.esito === 'annullata');
     else if (filtro === 'senza_ordine') v = v.filter(r => !r.id_ordine && !r.id_ordine_manuale);
     const q = cerca.trim().toLowerCase();
-    if (q) v = v.filter(r => `${r.pdr_nome} ${r.provincia} ${r.id_ordine} ${r.id_ordine_manuale || ''} ${r.trasportatore}`.toLowerCase().includes(q));
+    if (q) v = v.filter(r => `${r.pdr_nome} ${r.provincia} ${r.id_ordine} ${r.id_ordine_manuale || ''} ${r.id_ordine_candidati || ''} ${r.trasportatore}`.toLowerCase().includes(q));
     const peso = { aperta: 0, da_confermare: 1, evasa: 2, annullata: 3 };
     return [...v].sort((a, b) => (peso[a.esito] ?? 9) - (peso[b.esito] ?? 9)
       || String(a.scadenza || '9999').localeCompare(String(b.scadenza || '9999'))
@@ -127,7 +146,8 @@ export default function RichiesteEct({ isAdmin }) {
         Le richieste che il consorzio ci manda per email, fuori dal portale, per anticipare certi ritiri. L&apos;ID ordine non c&apos;è
         nella richiesta: lo riconosce il gestionale fra gli assegnati, dal nome del produttore e dalla data di immissione.
         Quando quell&apos;ordine compare fra i terminati la riga passa a <strong>da spuntare</strong> con la data del ritiro:
-        la spunta la metti tu, e da lì puoi rispondere alla mail.
+        la spunta la metti tu, e da lì puoi rispondere alla mail. Sull&apos;ID ordine puoi scrivere, e correggere,
+        anche più di un ordine separati da virgola: resta così anche ai caricamenti successivi.
       </p>
 
       {isAdmin && (
@@ -228,7 +248,7 @@ export default function RichiesteEct({ isAdmin }) {
             <tbody>
               {viste.map(r => {
                 const e = ESITI[r.esito] || ESITI.aperta;
-                const id = r.id_ordine_manuale || r.id_ordine;
+                const ids = listaOrdini(r);
                 return (
                   <tr key={r.id} className="border-b last:border-b-0 align-top">
                     <td className="px-3 py-2 sticky left-0 bg-card">
@@ -238,9 +258,41 @@ export default function RichiesteEct({ isAdmin }) {
                     <td className="px-2 py-2">{r.provincia || '—'}</td>
                     <td className="px-2 py-2">{r.classe || '—'}</td>
                     <td className="px-2 py-2 whitespace-nowrap">
-                      {id ? <span className="font-mono text-xs">{id}</span> : <span className="text-amber-700 text-xs">da trovare</span>}
-                      {r.id_ordine_stato === 'ambiguo' && (
-                        <span className="block text-[11px] text-amber-700" title={`Possibili: ${r.id_ordine_candidati}`}>più ordini possibili</span>
+                      {modifica && modifica.id === r.id ? (
+                        <input
+                          autoFocus
+                          value={modifica.testo}
+                          onChange={e => setModifica({ id: r.id, testo: e.target.value })}
+                          onBlur={() => salvaOrdini(r, modifica.testo)}
+                          onKeyDown={e => { if (e.key === 'Enter') salvaOrdini(r, modifica.testo); if (e.key === 'Escape') setModifica(null); }}
+                          placeholder="ET26012345, ET26012346"
+                          className="border rounded px-2 py-1 text-xs font-mono w-56"
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={!isAdmin}
+                          onClick={() => setModifica({ id: r.id, testo: (r.id_ordine_manuale || ids.join(', ')) })}
+                          title={isAdmin ? 'Scrivi o correggi gli ID ordine: puoi metterne più di uno, separati da virgola' : ''}
+                          className={`text-left ${isAdmin ? 'hover:underline' : 'cursor-default'}`}
+                        >
+                          {ids.length ? <span className="font-mono text-xs">{ids.join(', ')}</span> : <span className="text-amber-700 text-xs">da trovare</span>}
+                        </button>
+                      )}
+                      {ids.length > 1 && (
+                        <span className="block text-[11px] text-muted-foreground">
+                          {ids.length} ordini{r.ordini_evasi ? `, ${r.ordini_evasi} ritirat${r.ordini_evasi === 1 ? 'o' : 'i'}` : ''}
+                        </span>
+                      )}
+                      {r.id_ordine_stato === 'ambiguo' && !r.id_ordine_manuale && (
+                        <span className="block text-[11px] text-amber-700">
+                          più ordini possibili:{' '}
+                          {isAdmin ? (
+                            <button type="button" className="underline" onClick={() => salvaOrdini(r, r.id_ordine_candidati)}>
+                              {r.id_ordine_candidati}
+                            </button>
+                          ) : r.id_ordine_candidati}
+                        </span>
                       )}
                       {r.id_ordine_stato === 'approssimato' && !r.id_ordine_manuale && (
                         <span className="block text-[11px] text-muted-foreground" title="La data della richiesta e quella dell ordine non coincidono al giorno: da confermare">data non esatta</span>
@@ -253,6 +305,9 @@ export default function RichiesteEct({ isAdmin }) {
                     <td className="px-2 py-2 whitespace-nowrap">
                       {gg(r.evaso_il || r.evasione_rilevata_il)}
                       {!r.evaso_il && r.evasione_rilevata_il && <span className="block text-[11px] text-muted-foreground">dai terminati</span>}
+                      {!r.evaso_il && !r.evasione_rilevata_il && r.ordini_totali > 1 && r.ordini_evasi > 0 && (
+                        <span className="block text-[11px] text-amber-700">{r.ordini_evasi} di {r.ordini_totali} ritirati</span>
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       <span className={`inline-block px-2 py-0.5 rounded border text-xs ${e.classe}`}>{e.nome}</span>

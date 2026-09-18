@@ -189,6 +189,33 @@ export function statoRichiesta(r) {
   return 'aperta';
 }
 
+/**
+ * Gli ID ordine di una richiesta. Un produttore con piu' richieste aperte puo'
+ * averne piu' di uno sulla stessa riga - le classi P e M dello stesso giorno, per
+ * esempio - e quelli scritti a mano vincono sempre sul riconoscimento automatico.
+ */
+export function listaOrdini(r) {
+  const scritti = String((r && r.id_ordine_manuale) || '').split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
+  if (scritti.length) return [...new Set(scritti)];
+  const auto = String((r && r.id_ordine) || '').trim();
+  return auto ? [auto] : [];
+}
+
+/**
+ * Quanti degli ordini di una richiesta risultano ritirati e quando si e' chiuso
+ * l'ultimo. La richiesta e' evasa solo quando lo sono tutti: se ne resta uno
+ * aperto il ritiro non e' finito, e dirlo evaso sarebbe sbagliato.
+ */
+export function evasioneOrdini(ids, terminati) {
+  const date = ids.map(id => terminati.get(id) || null);
+  const fatti = date.filter(Boolean);
+  return {
+    totali: ids.length,
+    evasi: fatti.length,
+    ultima: ids.length > 0 && fatti.length === ids.length ? fatti.sort().reverse()[0] : null,
+  };
+}
+
 export function giorniAllaScadenza(scadenza, oggi) {
   if (!scadenza) return null;
   const a = Date.UTC(+oggi.slice(0, 4), +oggi.slice(5, 7) - 1, +oggi.slice(8, 10));
