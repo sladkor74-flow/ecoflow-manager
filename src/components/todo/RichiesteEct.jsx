@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Loader2, CheckSquare, Square, AlertTriangle, Mail, Search } from 'lucide-react';
+import { Loader2, CheckSquare, Square, AlertTriangle, Mail, Search, Upload } from 'lucide-react';
 import { giorniAllaScadenza, statoRichiesta } from '@/lib/richiesteEct';
 
 // Richieste del consorzio arrivate via email: ci chiedono di anticipare certi
@@ -34,6 +34,8 @@ export default function RichiesteEct({ isAdmin }) {
   const [filtro, setFiltro] = useState('da_fare');
   const [cerca, setCerca] = useState('');
   const [occupato, setOccupato] = useState(null);
+  const [caricando, setCaricando] = useState(false);
+  const [esitoImport, setEsitoImport] = useState(null);
 
   const carica = useCallback(async () => {
     setCaricamento(true);
@@ -49,6 +51,25 @@ export default function RichiesteEct({ isAdmin }) {
     }
   }, []);
   useEffect(() => { carica(); }, [carica]);
+
+  // Il file di gestione si carica da qui: le richieste arrivano da un foglio suo
+  // e non c'entrano con gli export del portale.
+  const importa = async (file) => {
+    if (!file) return;
+    setCaricando(true);
+    setErrore('');
+    setEsitoImport(null);
+    try {
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      const res = await base44.functions.invoke('importaRichiesteEct', { file_url });
+      setEsitoImport(res.data);
+      await carica();
+    } catch (e) {
+      setErrore(e?.response?.data?.error || e?.message || String(e));
+    } finally {
+      setCaricando(false);
+    }
+  };
 
   const spunta = async (r) => {
     if (!isAdmin) return;
@@ -109,6 +130,43 @@ export default function RichiesteEct({ isAdmin }) {
         la spunta la metti tu, e da lì puoi rispondere alla mail.
       </p>
 
+      {isAdmin && (
+        <div className="flex flex-wrap items-center gap-3 border rounded-lg px-3 py-2 bg-muted/30">
+          <label className={`inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium ${caricando ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer'}`}>
+            {caricando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            {caricando ? 'Leggo il foglio…' : 'Carica il file di gestione'}
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              disabled={caricando}
+              onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; importa(file); }}
+            />
+          </label>
+          <span className="text-xs text-muted-foreground max-w-xl">
+            Il file «Gestione Ecotyre», foglio «Richieste ECT». Le richieste nuove si aggiungono, quelle già in elenco si
+            aggiornano e le tue spunte non vengono toccate.
+          </span>
+        </div>
+      )}
+
+      {esitoImport && (
+        <div className="text-sm border rounded-lg px-3 py-2 bg-muted/40 space-y-1">
+          <p>
+            Lette <strong>{esitoImport.righe_lette}</strong> richieste: {esitoImport.creati} nuove, {esitoImport.aggiornati} aggiornate,
+            {' '}{esitoImport.invariati} già in linea. ID ordine riconosciuto per <strong>{esitoImport.riconosciuti}</strong>.
+          </p>
+          {esitoImport.da_confermare?.length > 0 && (
+            <p className="text-emerald-800">
+              Risultano ritirate e aspettano la tua spunta: {esitoImport.da_confermare.map(x => `${x.pdr} (${String(x.evasa_il).split('-').reverse().join('/')})`).join(', ')}.
+            </p>
+          )}
+          {esitoImport.orfane > 0 && (
+            <p className="text-muted-foreground">{esitoImport.orfane} righe non sono più nel foglio: restano qui nello storico.</p>
+          )}
+        </div>
+      )}
+
       {conteggi.in_ritardo > 0 && (
         <div className="flex items-start gap-2 text-sm border border-red-200 bg-red-50 text-red-800 rounded-lg px-3 py-2">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
@@ -145,7 +203,7 @@ export default function RichiesteEct({ isAdmin }) {
 
       {!caricamento && righe.length === 0 && (
         <p className="text-sm text-muted-foreground border rounded-lg px-3 py-6 text-center">
-          Ancora nessuna richiesta. Si riempie caricando il file di gestione in Caricamento Dati, nel riquadro «Richieste ECT».
+          Ancora nessuna richiesta. Si riempie col pulsante qui sopra, caricando il file di gestione.
         </p>
       )}
 

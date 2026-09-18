@@ -95,10 +95,15 @@ export default async function(req) {
       const conStato = { ...campi, evasione_confermata: gia ? !!gia.evasione_confermata : false };
       campi.esito = statoRichiesta(conStato);
 
-      if (!gia) { await svc.RichiestaEct.create(campi); creati++; continue; }
-      const cambia = Object.keys(campi).some(k => String(gia[k] ?? '') !== String(campi[k] ?? ''));
-      if (cambia) { await svc.RichiestaEct.update(gia.id, campi); aggiornati++; } else invariati++;
-      if (campi.esito === 'da_confermare' && !gia.evasione_confermata && rilevata) {
+      if (!gia) { await svc.RichiestaEct.create(campi); creati++; }
+      else {
+        const cambia = Object.keys(campi).some(k => String(gia[k] ?? '') !== String(campi[k] ?? ''));
+        if (cambia) { await svc.RichiestaEct.update(gia.id, campi); aggiornati++; } else invariati++;
+      }
+      // Chi risulta ritirato e non ha ancora la spunta va detto subito, sia che la
+      // riga sia nuova sia che fosse gia' in elenco: e' quello su cui l utente
+      // deve mettere le mani per rispondere al consorzio.
+      if (campi.esito === 'da_confermare' && !(gia && gia.evasione_confermata) && rilevata) {
         daConfermare.push({ pdr: r.pdr_nome, id_ordine: idBuono, evasa_il: rilevata });
       }
     }
