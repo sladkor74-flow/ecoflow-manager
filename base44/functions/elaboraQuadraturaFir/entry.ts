@@ -14,8 +14,9 @@ import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 //
 // La stampa e' una scansione senza testo dentro, quindi la trascrive l'agente,
 // che la legge dall'archivio privato con un link firmato - la stessa strada dei
-// documenti della qualifica. Appena letta si prova a cancellare il file
-// caricato: nella quadratura restano soltanto i numeri e l'esito del confronto.
+// documenti della qualifica. Finita la lettura si prova a cancellare il file,
+// ma oggi la piattaforma non lo consente (405) e quindi resta nell'archivio
+// privato: nella quadratura restano comunque soltanto i numeri e l'esito.
 //
 // Alla trascrizione non si crede sulla parola: la stampa porta i propri totali,
 // per gruppo e complessivi, e la somma delle righe lette deve farli. Se non li
@@ -71,15 +72,17 @@ const PROMPT = [
   'Il documento allegato e\' la stampa settimanale con cui una societa\' di raccolta di pneumatici fuori uso controlla i propri formulari di identificazione del rifiuto (FIR).',
   'Contiene una o piu\' sezioni, ognuna con un titolo come "RACCOLTA ECOTYRE SETT. 37", "SECONDARIE ECOTYRE SETT. 37", "ACI SETT. 37" oppure "EXTRA RACCOLTA".',
   'In ogni sezione ci sono due tabelle pivot con la stessa forma, una etichettata WINSINFO e una etichettata ECOTYRE: sono le due fonti da confrontare.',
-  'Ogni tabella ha una colonna di etichette di riga su due livelli - prima l\'impianto di destinazione in grassetto, poi sotto, indentati, i trasportatori - e due colonne di numeri: il conteggio dei formulari e la somma dei chilogrammi.',
+  'Ogni tabella ha una sola colonna di etichette, con due livelli: la riga dell\'impianto di destinazione, in grassetto e non rientrata, e sotto di essa le righe dei suoi trasportatori, rientrate. La riga dell\'impianto porta gia\' il subtotale del gruppo, cioe\' la somma delle righe rientrate che la seguono. Poi ci sono due colonne di numeri: il conteggio dei formulari e la somma dei chilogrammi.',
   '',
   'Trascrivi ogni tabella. Per ogni tabella:',
-  '- righe: una voce per ogni riga di dettaglio, cioe\' per ogni coppia impianto + trasportatore. Copia i nomi esattamente come sono stampati, anche se sono tagliati a meta\' dalla larghezza della colonna.',
-  '- subtotali: una voce per ogni riga di totale di impianto, quella in grassetto senza trasportatore.',
+  '- righe: una voce per ogni riga rientrata, cioe\' per ogni coppia impianto + trasportatore, con l\'impianto del gruppo a cui appartiene. Copia i nomi esattamente come sono stampati, anche se sono tagliati a meta\' dalla larghezza della colonna.',
+  '- subtotali: una voce per ogni riga di impianto, quella in grassetto.',
   '- totale_conteggio e totale_kg: la riga "Totale complessivo".',
   '',
   'Regole:',
   '- I pesi sono chilogrammi e il punto separa le migliaia: "273.170" sono 273170 chilogrammi, "18.310" sono 18310. Scrivi i numeri senza separatori.',
+  '- Una riga di impianto non va mai messa anche fra le righe: ci sono impianti con un solo trasportatore, dove le due righe portano gli stessi numeri, e vanno trascritte una come subtotale e una come riga.',
+  '- Prima di rispondere controlla due conti, e se non tornano rileggi: le righe di ogni gruppo devono sommare il subtotale del suo impianto, e tutte le righe insieme devono fare il totale complessivo.',
   '- Non sommare, non arrotondare e non correggere niente: copia i numeri come sono stampati, anche se non tornano.',
   '- Non inventare righe e non saltarne nessuna. Se una tabella e\' illeggibile, mettila con righe vuote e spiegalo in note.',
   '- fonte: "winsinfo" oppure "ecotyre", secondo l\'etichetta sopra la tabella.',
@@ -99,26 +102,40 @@ function comeOggetto(v) {
   return JSON.parse(s.slice(inizio, fine + 1));
 }
 
-// Legge la stampa dall'archivio privato con un link firmato che vale un quarto
-// d'ora, poi prova a cancellare il file: quello che serve sono i numeri.
-async function leggiDocumento(base44, fileUri) {
+// Legge la stampa dall'archivio privato con un link firmato che vale un quarto d'ora.
+// Se la prima lettura non torna con i totali stampati si richiama la stessa
+// funzione dicendo che cosa non tornava: e' quello che farebbe una persona,
+// riguardare il foglio sapendo dove cercare l'errore.
+async function leggiDocumento(base44, fileUri, problemi = null) {
   const core = base44.asServiceRole.integrations.Core;
   const { signed_url } = await core.CreateFileSignedUrl({ file_uri: fileUri, expires_in: 900 });
-  const risposta = await core.InvokeLLM({ prompt: PROMPT, file_urls: [signed_url], response_json_schema: SCHEMA_LETTURA });
-  const letto = comeOggetto(risposta);
+  const prompt = problemi && problemi.length
+    ? [
+      PROMPT, '',
+      'ATTENZIONE: una prima lettura di questo stesso documento non torna con i numeri stampati sul file.',
+      ...problemi.map(p => '- ' + p),
+      '',
+      'Rileggi il documento con calma partendo da capo. Controlla soprattutto a quale impianto appartiene ogni riga rientrata: un impianto con un solo trasportatore ha due righe con gli stessi numeri, una di gruppo e una di dettaglio, e vanno tenute distinte. Le righe di ogni gruppo devono sommare il subtotale del suo impianto, e tutte le righe insieme il totale complessivo.',
+    ].join('\n')
+    : PROMPT;
+  const risposta = await core.InvokeLLM({ prompt, file_urls: [signed_url], response_json_schema: SCHEMA_LETTURA });
+  return comeOggetto(risposta);
+}
 
-  let cancellato = 'non supportata';
+// Il file era li' solo per essere letto: si prova a toglierlo. Se la piattaforma
+// non lo consente resta nell'archivio privato, e la lettura lo scrive.
+async function cancellaFile(base44, fileUri) {
+  const core = base44.asServiceRole.integrations.Core;
   for (const nome of ['DeleteFile', 'DeletePrivateFile', 'RemoveFile']) {
     if (typeof core[nome] !== 'function') continue;
     try {
       await core[nome]({ file_uri: fileUri });
-      cancellato = nome;
+      return nome;
     } catch (e) {
-      cancellato = `${nome} non riuscita: ${e && e.message ? e.message : e}`;
+      return `${nome} non riuscita: ${e && e.message ? e.message : e}`;
     }
-    break;
   }
-  return { letto, modo: 'agente', cancellazione_file: cancellato };
+  return 'non supportata';
 }
 
 export default async function(req) {
@@ -141,11 +158,11 @@ export default async function(req) {
     let letto;
     let modo = 'salvate';
     let cancellazione = null;
+    let letture = 0;
     if (file_uri) {
-      const esito = await leggiDocumento(base44, file_uri);
-      letto = esito.letto;
-      modo = esito.modo;
-      cancellazione = esito.cancellazione_file;
+      letto = await leggiDocumento(base44, file_uri);
+      modo = 'agente';
+      letture = 1;
     } else if (Array.isArray(tabelle)) {
       letto = { settimana: null, anno: null, tabelle, note: '' };
       modo = 'excel';
@@ -156,7 +173,26 @@ export default async function(req) {
       return Response.json({ error: 'Serve un file caricato, delle tabelle o solo_confronto' }, { status: 400 });
     }
 
-    const lettura = normalizzaLettura(letto);
+    let lettura = normalizzaLettura(letto);
+    // Una scansione fitta si legge male: se i conti del file non tornano si
+    // rilegge una volta sola, dicendo all'agente che cosa non tornava.
+    if (file_uri && !lettura.verificata) {
+      try {
+        const secondo = await leggiDocumento(base44, file_uri, lettura.problemi);
+        const altra = normalizzaLettura(secondo);
+        letture = 2;
+        if (altra.verificata) {
+          lettura = altra;
+          letto = secondo;
+          lettura.problemi.push('La prima lettura non tornava con i totali stampati: il documento è stato riletto e la seconda lettura quadra.');
+        } else {
+          lettura.problemi.push('Il documento è stato letto due volte e nessuna delle due torna con i totali stampati: controlla la trascrizione sull\'originale.');
+        }
+      } catch (e) {
+        lettura.problemi.push('La rilettura non è riuscita: ' + (e && e.message ? e.message : e));
+      }
+    }
+    if (file_uri) cancellazione = await cancellaFile(base44, file_uri);
     if (!lettura.tabelle.length) {
       throw new Error('Nel file non ho trovato nessuna tabella con il conteggio e la somma dei formulari.' + (lettura.note ? ' ' + lettura.note : ''));
     }
@@ -192,11 +228,11 @@ export default async function(req) {
       errore: '',
       esito_json: await valoreCampo(base44, 'QuadraturaFir', quadratura_id, 'esito_json', JSON.stringify(esito)),
       lettura_json: await valoreCampo(base44, 'QuadraturaFir', quadratura_id, 'lettura_json', JSON.stringify({
-        modo, note: lettura.note, problemi: lettura.problemi, cancellazione_file: cancellazione,
+        modo, letture, note: lettura.note, problemi: lettura.problemi, cancellazione_file: cancellazione,
         tabelle: lettura.tabelle.map(t => ({
           titolo: t.titolo, fonte: t.fonte, flusso: t.flusso, unita: t.unita,
           righe: t.righe.length, somma: t.somma, stampato: t.stampato,
-          quadra: t.quadra, quadra_totali: t.quadra_totali,
+          quadra: t.quadra, quadra_totali: t.quadra_totali, ricostruita: t.ricostruita,
         })),
       })),
     };

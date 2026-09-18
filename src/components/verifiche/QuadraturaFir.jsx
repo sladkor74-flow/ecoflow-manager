@@ -16,8 +16,8 @@ import { esportaQuadraturaFirPdf } from '@/lib/quadraturaFirPdf';
 // Sezione del modulo Verifiche: la quadratura settimanale dei formulari.
 //
 // Ogni settimana si carica la stampa con il conteggio e la somma dei FIR di
-// WINSINFO e del portale Ecotyre, e il gestionale fa da terza fonte. Il file non
-// viene conservato: restano i numeri letti e l'esito del confronto.
+// WINSINFO e del portale Ecotyre, e il gestionale fa da terza fonte. Nella
+// quadratura restano i numeri letti e l'esito del confronto.
 //
 // I canali non si mischiano: rete, ACI ed extra raccolta hanno ognuno la propria
 // tabella e il proprio totale.
@@ -304,8 +304,8 @@ export default function QuadraturaFir({ isAdmin }) {
           Carica la stampa settimanale del conteggio e della somma dei FIR: le due pivot di WINSINFO e del portale Ecotyre si confrontano fra loro
           e con il gestionale, che conta i formulari terminati con la fine trasporto dentro la settimana. Va bene il PDF, una foto o il file Excel
           da cui hai stampato. Il numero di settimana si legge dal titolo della stampa; se non c&apos;è, vale quello scelto qui sopra.
-          Rete, ACI ed extra raccolta restano separati e non si sommano mai fra loro. Nella quadratura restano soltanto i numeri letti e l&apos;esito:
-          il PDF viene caricato solo per essere letto e poi rimosso, e un Excel si legge qui nel browser senza caricare niente.
+          Rete, ACI ed extra raccolta restano separati e non si sommano mai fra loro. Nella quadratura restano soltanto i numeri letti e l&apos;esito;
+          un Excel si legge qui nel browser senza caricare niente, mentre un PDF o una foto vengono caricati nell&apos;archivio privato perché l&apos;agente li possa leggere.
         </span>
       </div>
 

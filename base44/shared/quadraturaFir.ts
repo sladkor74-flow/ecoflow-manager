@@ -149,6 +149,54 @@ const testo = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 const MEDIA_MINIMA_KG = 200;
 
 /**
+ * Rimette le righe sotto il gruppo giusto usando i subtotali stampati.
+ *
+ * In una pivot compatta l'impianto e il trasportatore stanno nella stessa
+ * colonna, e la riga dell'impianto porta gia' il proprio subtotale: leggendo una
+ * scansione e' facile attribuire un trasportatore all'impianto sbagliato, o
+ * scambiare per un trasportatore la riga di un impianto che ha un solo vettore.
+ *
+ * I subtotali pero' sono una traccia: le righe di un gruppo, in ordine, devono
+ * sommare esattamente il suo subtotale. Si ripercorre l'elenco cercando
+ * l'assegnazione che soddisfa tutti i gruppi, saltando le righe che coincidono
+ * con un subtotale - quelle sono righe di gruppo trascritte per errore. Se una
+ * soluzione non c'e', non si inventa niente e si restituisce null.
+ */
+export function ricostruisciGruppi(righe, subtotali) {
+  if (!subtotali || !subtotali.length || !righe || !righe.length) return null;
+  const eSubtotale = (f) => subtotali.some(s => s.n === f.n && Math.abs(s.kg - f.kg) <= 1);
+  let passi = 0;
+
+  const cerca = (i, k, acc, presi, out) => {
+    if (passi++ > 50000) return null;
+    const s = subtotali[k];
+    if (!s) {
+      // Tutti i gruppi chiusi: quello che resta puo' essere solo riga di gruppo.
+      for (let j = i; j < righe.length; j++) if (!eSubtotale(righe[j])) return null;
+      return out;
+    }
+    if (presi.length && acc.n === s.n && Math.abs(acc.kg - s.kg) <= 1) {
+      const r = cerca(i, k + 1, { n: 0, kg: 0 }, [], out.concat(presi.map(f => ({ ...f, impianto: s.impianto }))));
+      if (r) return r;
+    }
+    if (i >= righe.length) return null;
+    const f = righe[i];
+    if (acc.n + f.n <= s.n && acc.kg + f.kg <= s.kg + 1) {
+      const r = cerca(i + 1, k, { n: acc.n + f.n, kg: acc.kg + f.kg }, presi.concat([f]), out);
+      if (r) return r;
+    }
+    if (eSubtotale(f)) {
+      const r = cerca(i + 1, k, acc, presi, out);
+      if (r) return r;
+    }
+    return null;
+  };
+
+  const esito = cerca(0, 0, { n: 0, kg: 0 }, [], []);
+  return esito && esito.length ? esito : null;
+}
+
+/**
  * Normalizza quello che e' stato letto dal file e lo verifica con i totali che
  * il file stesso stampa: se la somma delle righe non fa il totale, la
  * trascrizione non e' affidabile e va guardata.
@@ -185,22 +233,41 @@ export function normalizzaLettura(letto) {
       if (stampato.kg) stampato.kg = Math.round(stampato.kg * 1000);
     }
 
-    const quadraConteggio = !stampato.n || stampato.n === somma.n;
-    const quadraPeso = !stampato.kg || Math.abs(stampato.kg - somma.kg) <= 1;
+    const subtotali = (Array.isArray(t.subtotali) ? t.subtotali : [])
+      .map(s => ({ impianto: testo(s.impianto), n: Math.round(numero(s.conteggio)), kg: unita === 't' ? Math.round(numero(s.kg) * 1000) : numero(s.kg) }))
+      .filter(s => s.impianto);
+
+    let quadraConteggio = !stampato.n || stampato.n === somma.n;
+    let quadraPeso = !stampato.kg || Math.abs(stampato.kg - somma.kg) <= 1;
+    let ricostruita = false;
+
+    // Se le righe non fanno il totale stampato si prova a rimetterle sotto il
+    // gruppo giusto con i subtotali: una scansione fitta si legge male, ma i
+    // numeri sulla pagina bastano a rimettere le cose a posto.
     if (!quadraConteggio || !quadraPeso) {
-      problemi.push(`${titolo || 'tabella senza titolo'} · ${NOME_FONTE[fonte] || 'fonte non indicata'}: le righe lette fanno ${somma.n} formulari e ${formatoKg(somma.kg)} kg, il totale stampato sul file ${stampato.n} e ${formatoKg(stampato.kg)} kg. La trascrizione va controllata sull'originale.`);
+      const rifatte = ricostruisciGruppi(righe, subtotali);
+      const nuovaSomma = rifatte ? rifatte.reduce((s, r) => ({ n: s.n + r.n, kg: s.kg + r.kg }), { n: 0, kg: 0 }) : null;
+      if (nuovaSomma && (!stampato.n || nuovaSomma.n === stampato.n) && (!stampato.kg || Math.abs(nuovaSomma.kg - stampato.kg) <= 1)) {
+        righe.length = 0;
+        righe.push(...rifatte);
+        somma.n = nuovaSomma.n;
+        somma.kg = nuovaSomma.kg;
+        quadraConteggio = true;
+        quadraPeso = true;
+        ricostruita = true;
+        problemi.push(`${titolo || 'tabella senza titolo'} · ${NOME_FONTE[fonte] || 'fonte non indicata'}: la prima trascrizione non tornava con i totali stampati, e le righe sono state riassegnate agli impianti usando i subtotali del file. Ora quadra, ma un'occhiata all'originale non guasta.`);
+      } else {
+        problemi.push(`${titolo || 'tabella senza titolo'} · ${NOME_FONTE[fonte] || 'fonte non indicata'}: le righe lette fanno ${somma.n} formulari e ${formatoKg(somma.kg)} kg, il totale stampato sul file ${stampato.n} e ${formatoKg(stampato.kg)} kg. La trascrizione va controllata sull'originale.`);
+      }
     }
     if (!fonte) problemi.push(`${titolo || 'tabella senza titolo'}: non si capisce se la tabella è di WINSINFO o del portale.`);
     if (!flusso) problemi.push(`"${titolo}": non si capisce a quale flusso si riferisce la tabella (raccolta rete, secondarie, ACI o extra raccolta).`);
 
     tabelle.push({
-      titolo, fonte, flusso, righe, somma, stampato, unita,
+      titolo, fonte, flusso, righe, somma, stampato, unita, ricostruita, subtotali,
       // quadra_totali riguarda il totale complessivo, quadra anche i subtotali di gruppo
       quadra_totali: quadraConteggio && quadraPeso,
       quadra: quadraConteggio && quadraPeso,
-      subtotali: (Array.isArray(t.subtotali) ? t.subtotali : [])
-        .map(s => ({ impianto: testo(s.impianto), n: Math.round(numero(s.conteggio)), kg: unita === 't' ? Math.round(numero(s.kg) * 1000) : numero(s.kg) }))
-        .filter(s => s.impianto),
     });
   }
 

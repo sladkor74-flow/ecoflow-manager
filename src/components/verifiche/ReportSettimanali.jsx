@@ -331,7 +331,7 @@ export default function ReportSettimanali({ isAdmin }) {
           Carica il report inviato da ciascun impianto o stoccaggio: Excel, CSV, PDF o immagine. Gli ingressi si confrontano con le primarie,
           le uscite con le secondarie; il peso al chilogrammo, la data su quella di fine trasporto. Nella verifica restano solo i dati letti
           e l'esito, che si cancellano da soli {GIORNI_CONSERVAZIONE} giorni dopo il caricamento: un Excel si legge qui nel browser senza
-          caricare niente, un PDF o un'immagine vengono caricati solo per essere letti e poi rimossi.
+          caricare niente, un PDF o un'immagine vengono caricati nell'archivio privato perché l'agente li possa leggere.
         </span>
       </div>
 

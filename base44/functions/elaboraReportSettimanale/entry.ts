@@ -17,8 +17,9 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 //
 // Un Excel arriva gia' aperto dal browser e non viene mai salvato. Un PDF o
 // un'immagine, che il codice non sa leggere, si caricano nell'archivio privato
-// perche' l'agente li legga da un link firmato, e subito dopo si prova a
-// cancellarli. Nella verifica restano solo i dati letti, che si cancellano con lei.
+// perche' l'agente li legga da un link firmato; poi si prova a cancellarli, ma
+// oggi la piattaforma non lo consente e restano li'. Nella verifica restano solo
+// i dati letti, che si cancellano con lei.
 //
 // Negli Excel l'agente individua soltanto quali colonne contengono formulario,
 // peso, date e soggetti: i valori li legge il codice, cosi' un formulario non
