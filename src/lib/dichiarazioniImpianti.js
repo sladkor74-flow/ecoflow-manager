@@ -64,6 +64,9 @@ export const STATI = {
 };
 
 const kg = (v) => Math.round(Number(v) || 0);
+// Il punto delle migliaia va messo a mano: toLocaleString qui non lo mette sui
+// numeri di quattro cifre.
+const mig = (v) => String(Math.round(Number(v) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 
 /**
  * Controlli di una dichiarazione mensile. `conferito` sono i kg conferiti in quel
@@ -82,20 +85,20 @@ export function controlliDichiarazione(d, conferito, operazione, dove = {}) {
     esiti.push({
       tipo: 'mancante',
       livello: canale === 'RETE' ? 'attenzione' : 'info',
-      testo: `Conferiti ${conferito.toLocaleString('it-IT')} kg in questo mese e nessuna dichiarazione.`,
+      testo: `Conferiti ${mig(conferito)} kg in questo mese e nessuna dichiarazione.`,
     });
   }
   if (q > 0 && materiali === 0) {
     esiti.push({ tipo: 'senza_dettaglio', livello: 'info', testo: 'Manca il dettaglio dei materiali ricavati.' });
   }
   if (q > 0 && materiali > 0 && Math.abs(materiali - q) > 20) {
-    esiti.push({ tipo: 'materiali_diversi', livello: 'attenzione', testo: `La somma dei materiali (${materiali.toLocaleString('it-IT')} kg) non corrisponde al totale dichiarato (${q.toLocaleString('it-IT')} kg).` });
+    esiti.push({ tipo: 'materiali_diversi', livello: 'attenzione', testo: `La somma dei materiali (${mig(materiali)} kg) non corrisponde al totale dichiarato (${mig(q)} kg).` });
   }
   if (q > 0 && !d.caricata_inviata) {
     esiti.push({ tipo: 'da_caricare', livello: 'attenzione', testo: 'Dichiarazione da caricare a portale: finche\' non la carichi non decurta la giacenza.' });
   }
   if (q > 0 && conferito > 0 && q > conferito * 1.2) {
-    esiti.push({ tipo: 'oltre_conferito', livello: 'info', testo: `Dichiarati ${q.toLocaleString('it-IT')} kg contro ${conferito.toLocaleString('it-IT')} kg conferiti nel mese: puo\' succedere lavorando la giacenza dei mesi prima.` });
+    esiti.push({ tipo: 'oltre_conferito', livello: 'info', testo: `Dichiarati ${mig(q)} kg contro ${mig(conferito)} kg conferiti nel mese: puo\' succedere lavorando la giacenza dei mesi prima.` });
   }
   if (q > 0 && operazione === 'R3' && kg(d.ciabattato_kg) + kg(d.cippato_kg) + kg(d.cssc_kg) > 0) {
     esiti.push({ tipo: 'materiali_fuori_operazione', livello: 'info', testo: 'Impianto a recupero di materia (R3) con quantita\' di ciabattato, cippato o CSS-C: controlla l\'operazione.' });

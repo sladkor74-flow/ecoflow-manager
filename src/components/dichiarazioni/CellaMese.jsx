@@ -1,18 +1,21 @@
 import React from 'react';
 import { statoDichiarazione, STATI } from '@/lib/dichiarazioniImpianti';
+import { formatKg } from '@/lib/utils';
 import { Check, Mail } from 'lucide-react';
 
 // Una casella del riepilogo: il colore dice se la dichiarazione c'è, il segno se
 // è caricata a portale. Stessa lettura del foglio di gestione, con le parole al
 // posto dei colori per chi lo vede la prima volta.
 
-const kg = (v) => Math.round(Number(v) || 0).toLocaleString('it-IT');
+const kg = (v) => formatKg(v);
 
-export default function CellaMese({ mese, onApri, soloLettura }) {
+export default function CellaMese({ mese, onApri, soloLettura, attesa = true }) {
   const d = mese.dichiarazione;
   const stato = statoDichiarazione(d);
   const conferito = mese.conferito_kg;
-  const manca = !d && conferito > 0;
+  // "Da chiedere" ha senso solo dove una dichiarazione ci si aspetta davvero:
+  // uno stoccaggio non dichiara, e sui canali diversi dalla rete non e' la regola.
+  const manca = !d && conferito > 0 && attesa;
   const fondo = stato === 'caricata' ? 'bg-emerald-600 text-white hover:bg-emerald-700'
     : stato === 'ricevuta' ? 'bg-emerald-100 hover:bg-emerald-200'
       : stato === 'inserita' ? 'bg-slate-100 hover:bg-slate-200'

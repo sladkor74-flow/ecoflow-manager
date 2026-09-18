@@ -44,7 +44,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                 </td>
                 {flusso.mesi.map(m => (
                   <td key={m.mese} className="px-0.5 py-1">
-                    <CellaMese mese={m} soloLettura={soloLettura} onApri={() => onApri(sito, flusso, m)} />
+                    <CellaMese mese={m} soloLettura={soloLettura} attesa={sito.tipo_destinazione !== 'stoc' && flusso.canale === 'RETE'} onApri={() => onApri(sito, flusso, m)} />
                   </td>
                 ))}
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatTonnellate(flusso.dichiarato_caricato_t)}</td>

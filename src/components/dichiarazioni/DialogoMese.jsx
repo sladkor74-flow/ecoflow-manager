@@ -7,11 +7,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, AlertTriangle, Info, Check } from 'lucide-react';
 import { materialiDi, sommaMateriali, controlliDichiarazione, CANALI } from '@/lib/dichiarazioniImpianti';
+import { formatKg } from '@/lib/utils';
 
 // La dichiarazione di un mese: quanto ha dichiarato l'impianto, che cosa ne è
 // uscito, se il documento è in mano e se è stato caricato a portale.
 
-const kg = (v) => Math.round(Number(v) || 0).toLocaleString('it-IT');
+const kg = (v) => formatKg(v);
 const numero = (v) => { const n = Number(String(v).replace(/\./g, '').replace(',', '.')); return Number.isFinite(n) ? n : 0; };
 const oggi = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
 

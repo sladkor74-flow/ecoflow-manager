@@ -1,14 +1,14 @@
 import React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { formatTonnellate } from '@/lib/utils';
+import { formatTonnellate, formatKg } from '@/lib/utils';
 import { materialiDi, OPERAZIONI, CANALI, controlliDichiarazione } from '@/lib/dichiarazioniImpianti';
 import { Pencil, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 // La sezione di un impianto: mese per mese quanto è stato conferito, quanto è
 // stato dichiarato e che cosa ne è uscito, con il conto della giacenza in fondo.
 
-const kg = (v) => (Number(v) ? Math.round(Number(v)).toLocaleString('it-IT') : '—');
+const kg = (v) => (Number(v) ? formatKg(v) : '—');
 const t = (v) => formatTonnellate(Number(v) || 0);
 
 export default function SezioneImpianto({ sito, onApri, soloLettura }) {
