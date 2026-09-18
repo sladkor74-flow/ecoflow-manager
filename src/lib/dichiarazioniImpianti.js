@@ -81,7 +81,11 @@ export function controlliDichiarazione(d, conferito, operazione, dove = {}) {
   // dichiarazione mensile non e' la regola: si segnala, ma senza allarme.
   const stoccaggio = dove.tipo_destinazione === 'stoc';
   const nonDichiaraRete = dove.dichiara_rete === false && (dove.canale || 'RETE') === 'RETE';
-  if (!q && conferito > 0 && !stoccaggio && !nonDichiaraRete) {
+  // Se il portale non aspetta piu' niente per quel mese, la dichiarazione c'e'
+  // stata: magari dentro quella del mese dopo, perche' il portale scala gli ordini
+  // dal piu' vecchio. Non manca nulla e non si segnala.
+  const attesoAPortale = dove.non_dichiarato_kg === undefined || dove.non_dichiarato_kg > 0;
+  if (!q && conferito > 0 && !stoccaggio && !nonDichiaraRete && attesoAPortale) {
     const canale = dove.canale || 'RETE';
     esiti.push({
       tipo: 'mancante',

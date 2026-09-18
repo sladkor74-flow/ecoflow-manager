@@ -14,7 +14,13 @@ const nomeCanale = (f) => {
 };
 
 export default function Riepilogo({ dati, onApri, soloLettura }) {
-  const righe = dati.siti.flatMap(s => s.flussi.map(f => ({ sito: s, flusso: f })));
+  // Un canale su cui l'impianto non ha mai dichiarato niente e su cui il portale
+  // non aspetta niente non e' una riga di questa tabella: sarebbe dodici caselle
+  // vuote. Gli ACI di Irigom, per esempio, ripartono come secondarie ed e' chi li
+  // lavora a dichiararli.
+  const tutte = dati.siti.flatMap(s => s.flussi.map(f => ({ sito: s, flusso: f })));
+  const righe = tutte.filter(({ flusso }) => flusso.dichiarato_totale_t > 0 || flusso.mesi.some(m => m.non_dichiarato_kg > 0));
+  const nascoste = tutte.length - righe.length;
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
@@ -22,6 +28,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
         <span className="flex items-center gap-1"><span className="w-4 h-4 rounded bg-emerald-100 inline-flex items-center justify-center"><Mail className="w-3 h-3" /></span> dichiarazione in mano</span>
         <span className="flex items-center gap-1"><span className="w-4 h-4 rounded bg-amber-50 border" /> conferimenti senza dichiarazione</span>
         <span>Le quantità sono in kg; i totali in tonnellate contano solo le dichiarazioni caricate.</span>
+        {nascoste > 0 && <span>Non compaiono {nascoste === 1 ? 'una riga' : `${nascoste} righe`} su cui non c'è mai stata una dichiarazione e su cui il portale non aspetta niente.</span>}
       </div>
 
       <div className="border rounded-xl bg-card" data-scorre-lato>
@@ -44,7 +51,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                 </td>
                 {flusso.mesi.map(m => (
                   <td key={m.mese} className="px-0.5 py-1">
-                    <CellaMese mese={m} soloLettura={soloLettura} attesa={sito.tipo_destinazione !== 'stoc' && flusso.canale === 'RETE' && sito.dichiara_rete !== false} onApri={() => onApri(sito, flusso, m)} />
+                    <CellaMese mese={m} soloLettura={soloLettura} attesa={sito.tipo_destinazione !== 'stoc' && flusso.canale === 'RETE' && sito.dichiara_rete !== false && m.non_dichiarato_kg > 0} onApri={() => onApri(sito, flusso, m)} />
                   </td>
                 ))}
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatTonnellate(flusso.dichiarato_caricato_t)}</td>

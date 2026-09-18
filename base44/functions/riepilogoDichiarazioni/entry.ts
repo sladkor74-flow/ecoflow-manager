@@ -157,6 +157,7 @@ export default async function(req) {
     const portale = new Map();   // ns|imp -> t
     const inAttesa = new Map();  // ns -> t
     const aPortale = new Set();  // chi compare nella fotografia del portale
+    const daDichiarare = new Map(); // ns|mese -> kg ancora in attesa di dichiarazione
     for (const r of nonDichiarati) {
       const sec = String(r.destinazione_secondaria || '').trim();
       const sito = sec || String(r.destinazione || '').trim();
@@ -166,7 +167,15 @@ export default async function(req) {
       aPortale.add(ns);
       const t = (Number(r.peso_non_dichiarato_kg) || 0) / 1000;
       if (ruolo === 'stoc') somma(inAttesa, ns, t);
-      else somma(portale, `${ns}|imp`, t);
+      else {
+        somma(portale, `${ns}|imp`, t);
+        // In che mese sono finiti i trasporti che il portale aspetta ancora: e'
+        // l'unico modo onesto di dire "questo mese e' da dichiarare". Un mese senza
+        // una nostra dichiarazione ma che il portale non aspetta piu' e' gia' stato
+        // dichiarato dentro un altro mese, e non manca niente.
+        const mese = meseDa(r.fine_trasporto || r.data_chiusura);
+        if (mese) somma(daDichiarare, `${ns}|${mese}`, t * 1000);
+      }
     }
     // Quello che risulta dichiarato al portale, per confrontarlo con quello che
     // abbiamo segnato come caricato. Conta solo le dichiarazioni collegate a ordini
@@ -203,6 +212,7 @@ export default async function(req) {
           return {
             mese,
             conferito_kg: Math.round(conferito.get(`${ns}|${canale}|${provenienza}|${mese}`) || 0),
+            non_dichiarato_kg: canale === 'RETE' ? Math.round(daDichiarare.get(`${ns}|${mese}`) || 0) : 0,
             dichiarazione: d && {
               id: d.id, quantita_kg: Number(d.quantita_kg) || 0, caricata_inviata: !!d.caricata_inviata, ricevuta_email: !!d.ricevuta_email,
               ricevuta_il: d.ricevuta_il || '', caricata_il: d.caricata_il || '', note: d.note || '',
