@@ -38,7 +38,7 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
     if (totaleMateriali > 0 && Number(dati.quantita_kg) === 0) imposta('quantita_kg', totaleMateriali);
   }, [totaleMateriali]);
 
-  const controlli = controlliDichiarazione({ ...dati }, mese.conferito_kg, flusso.operazione, { tipo_destinazione: sito.tipo_destinazione, canale: flusso.canale });
+  const controlli = controlliDichiarazione({ ...dati }, mese.conferito_kg, flusso.operazione, { tipo_destinazione: sito.tipo_destinazione, canale: flusso.canale, dichiara_rete: sito.dichiara_rete });
   const canale = CANALI.find(c => c.chiave === flusso.canale);
 
   const salva = async () => {

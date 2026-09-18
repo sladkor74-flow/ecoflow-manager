@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, RefreshCw, AlertTriangle, CheckCircle2, FileSpreadsheet } from 'lucide-react';
+import { Loader2, RefreshCw, AlertTriangle, CheckCircle2, FileSpreadsheet, Link2 } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import { formatTonnellate } from '@/lib/utils';
@@ -36,6 +36,8 @@ export default function DichiarazioniImpianti() {
   const [caricamento, setCaricamento] = useState(true);
   const [errore, setErrore] = useState('');
   const [apertura, setApertura] = useState(null);
+  const [allineo, setAllineo] = useState(false);
+  const [esitoAllineamento, setEsitoAllineamento] = useState(null);
 
   const carica = useCallback(async () => {
     setCaricamento(true);
@@ -52,6 +54,22 @@ export default function DichiarazioniImpianti() {
   useEffect(() => { carica(); }, [carica]);
 
   const apri = (sito, flusso, mese) => { if (!soloLettura) setApertura({ sito, flusso, mese }); };
+
+  // Le dichiarazioni caricate a portale si riconoscono dai pesi del report: questo
+  // lo rifa' a comando, ma succede gia' da solo a ogni caricamento del report.
+  const allinea = async () => {
+    setAllineo(true);
+    setEsitoAllineamento(null);
+    try {
+      const res = await base44.functions.invoke('allineaDichiarazioni', { anno });
+      setEsitoAllineamento(res.data);
+      await carica();
+    } catch (e) {
+      setErrore(e?.response?.data?.error || e.message);
+    } finally {
+      setAllineo(false);
+    }
+  };
   const totali = dati ? dati.totali : null;
 
   return (
@@ -73,6 +91,11 @@ export default function DichiarazioniImpianti() {
           <Button variant="outline" className="gap-1" onClick={carica} disabled={caricamento}>
             {caricamento ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Aggiorna
           </Button>
+          {isAdmin && (
+            <Button variant="outline" className="gap-1" onClick={allinea} disabled={allineo} title="Rilegge il report delle dichiarazioni di trattamento e segna quali mesi risultano caricati a portale, con la data e i materiali">
+              {allineo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />} Allinea dal portale
+            </Button>
+          )}
           <Button variant="outline" className="gap-1" disabled={!dati} onClick={() => esportaDichiarazioni(dati)}>
             <FileSpreadsheet className="w-4 h-4" /> Esporta
           </Button>
@@ -81,6 +104,19 @@ export default function DichiarazioniImpianti() {
 
       {soloLettura && <BannerSolaLettura cosa="le dichiarazioni degli impianti" />}
       {errore && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{errore}</p>}
+
+      {esitoAllineamento && (
+        <div className="text-sm border rounded-lg px-3 py-2 bg-muted/40">
+          {esitoAllineamento.aggiornate?.length
+            ? <p><strong>{esitoAllineamento.aggiornate.length}</strong> {esitoAllineamento.aggiornate.length === 1 ? 'dichiarazione riconosciuta' : 'dichiarazioni riconosciute'} fra quelle caricate a portale: {esitoAllineamento.aggiornate.map(a => `${a.sito} ${a.mese} (${a.caricata_il.split('-').reverse().join('/')})`).join(', ')}.</p>
+            : <p>Nessuna novita': quello che risulta caricato a portale era gia' segnato.</p>}
+          {esitoAllineamento.non_trovate?.filter(n => n.era_segnata).length > 0 && (
+            <p className="text-amber-700 mt-1">
+              Segnate come caricate ma non trovate nel report del portale: {esitoAllineamento.non_trovate.filter(n => n.era_segnata).map(n => `${n.sito} ${n.mese}`).join(', ')}.
+            </p>
+          )}
+        </div>
+      )}
 
       {caricamento && !dati && (
         <p className="text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Carico le dichiarazioni…</p>

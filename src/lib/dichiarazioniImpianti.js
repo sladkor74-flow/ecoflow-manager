@@ -80,7 +80,8 @@ export function controlliDichiarazione(d, conferito, operazione, dove = {}) {
   // l'impianto che lo lavora a dichiararlo. E sui canali diversi dalla rete la
   // dichiarazione mensile non e' la regola: si segnala, ma senza allarme.
   const stoccaggio = dove.tipo_destinazione === 'stoc';
-  if (!q && conferito > 0 && !stoccaggio) {
+  const nonDichiaraRete = dove.dichiara_rete === false && (dove.canale || 'RETE') === 'RETE';
+  if (!q && conferito > 0 && !stoccaggio && !nonDichiaraRete) {
     const canale = dove.canale || 'RETE';
     esiti.push({
       tipo: 'mancante',

@@ -24,6 +24,11 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
             {sito.operazione && <Badge variant="outline" className="font-normal">{sito.operazione}</Badge>}
           </p>
           {operazione && <p className="text-xs text-muted-foreground mt-0.5">{operazione.spiega}</p>}
+          {sito.dichiara_rete === false && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Della rete non manda dichiarazione, perche' quel trattamento non glielo paghiamo: qui si seguono le sue dichiarazioni ACI.
+            </p>
+          )}
         </div>
         <div className="text-right text-sm">
           {sito.quadra === true && <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 className="w-4 h-4" /> giacenza in linea con il portale</span>}
@@ -57,7 +62,7 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                 <tbody>
                   {mesiConDati.map(m => {
                     const d = m.dichiarazione;
-                    const avvisi = controlliDichiarazione(d, m.conferito_kg, sito.operazione, { tipo_destinazione: sito.tipo_destinazione, canale: flusso.canale }).filter(c => c.livello === 'attenzione');
+                    const avvisi = controlliDichiarazione(d, m.conferito_kg, sito.operazione, { tipo_destinazione: sito.tipo_destinazione, canale: flusso.canale, dichiara_rete: sito.dichiara_rete }).filter(c => c.livello === 'attenzione');
                     return (
                       <tr key={m.mese} className="border-b last:border-b-0">
                         <td className="px-3 py-1.5 font-medium">{m.mese}</td>

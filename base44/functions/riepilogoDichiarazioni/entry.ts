@@ -253,6 +253,9 @@ export default async function(req) {
         ruoli,
         tipo_destinazione: soloStoccaggio ? 'stoc' : 'imp',
         tipologia_trattamento: (g && g.tipologia_trattamento) || '',
+        // Chi non ci manda la dichiarazione di rete - perche' quel trattamento non
+        // glielo paghiamo - non deve comparire come inadempiente: e' un accordo.
+        dichiara_rete: !(g && g.dichiara_rete === false),
         operazione,
         giacenza_iniziale_t: t3(giacenzeSito.filter(x => norm(x.sito) === ns).reduce((s, x) => s + (Number(x.giacenza_riferimento_t) || 0), 0)),
         target_primarie_t: t3(giacenzeSito.filter(x => norm(x.sito) === ns).reduce((s, x) => s + (Number(x.target_primarie_t) || 0), 0)),

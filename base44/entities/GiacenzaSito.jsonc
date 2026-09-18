@@ -31,6 +31,11 @@
       "default": 0,
       "description": "Residuo a portale al 31 dicembre dell'anno precedente, a titolo di riferimento storico"
     },
+    "dichiara_rete": {
+      "type": "boolean",
+      "default": true,
+      "description": "Falso per gli impianti a cui non paghiamo il trattamento dei PFU di rete e che percio non ci mandano la dichiarazione: i loro conferimenti di rete non ne generano una, e il modulo non la chiede. Vale per Tecnogum, di cui paghiamo e seguiamo solo le dichiarazioni ACI."
+    },
     "tipologia_trattamento": {
       "type": "string",
       "enum": [

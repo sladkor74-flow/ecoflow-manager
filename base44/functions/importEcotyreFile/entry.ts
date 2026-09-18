@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
 import { enrichRecords } from "../../shared/dataEnrichment.ts";
@@ -460,6 +461,22 @@ export default async function(req) {
       imported = r.imp; failed = r.fail; lastError = r.lastError;
     }
 
+    // === 7b. Le dichiarazioni caricate a portale si riconoscono da sole ===
+    // Il report dice, per ogni caricamento, il giorno e i materiali usciti; i pesi
+    // coincidono al chilo con le nostre righe mensili. Cosi' non c'e' piu' bisogno
+    // di segnare a mano, impianto per impianto, che cosa e' stato dichiarato.
+    let allineamento = null;
+    if (tipo_file === 'dichiarazioni_trattamento' && imported > 0) {
+      fase = 'allineamento delle dichiarazioni mensili';
+      try {
+        const anni = [...new Set(enriched.map(r => String(r.data_dichiarazione || '').slice(0, 4)).filter(a => /^\d{4}$/.test(a)))].sort();
+        const anno = Number(anni[anni.length - 1]);
+        if (anno) allineamento = await allineaDalPortale(base44.asServiceRole.entities, anno, enriched);
+      } catch (e) {
+        allineamento = { errore: e && e.message ? e.message : String(e) };
+      }
+    }
+
     // === 8. Log ===
     const esito = failed === 0 ? 'successo' : (imported > 0 ? 'parziale' : 'errore');
     const totaleDaImportare = config.splitByStatoClasse
@@ -489,6 +506,7 @@ export default async function(req) {
       avviso_colonne: avviso_colonne.length > 0 ? avviso_colonne : undefined,
       avviso_date,
       avviso_calo,
+      allineamento,
       forzato: !!conferma_forzatura,
       modalita,
       durata_secondi
