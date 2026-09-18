@@ -44,3 +44,21 @@ function ordina(righe, ordinamento) {
     })
     .map(e => e.r);
 }
+
+// Come fetchAll, ma senza tenere in memoria i record: li passa pagina per pagina
+// a chi li deve solo sommare. Le entita' grandi (le primarie, le dichiarazioni di
+// trattamento del portale) sono decine di migliaia di righe, e caricarle tutte
+// insieme e' quello che fa arrancare una funzione che deve solo fare dei totali.
+export async function perPagina(entity, filtro, fn) {
+  const PAGE = 1000;
+  const MAX_PAGES = 100;
+  let skip = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const batch = filtro
+      ? await entity.filter(filtro, 'id', PAGE, skip)
+      : await entity.list('id', PAGE, skip);
+    for (const r of batch) fn(r);
+    if (batch.length < PAGE) break;
+    skip += PAGE;
+  }
+}

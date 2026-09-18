@@ -1,5 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { fetchAll } from "../../shared/fetchAll.ts";
+import { fetchAll, perPagina } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { MESI, meseDa, operazioneDa, quadratura } from "../../shared/dichiarazioniImpianti.ts";
 
@@ -34,28 +34,20 @@ export default async function(req) {
     const eAci = (r) => /aci|autodemoliz/i.test(`${r.prodotto || ''} ${r.classe || ''} ${r.codice_prodotto || ''}`);
 
     const svc = base44.asServiceRole.entities;
-    const [giacenzeSito, dichiarazioni, rete, aci, extra, secondarie, terziarie, nonDichiarati, rilevazioni, dichPortale] = await Promise.all([
+    // Le primarie della rete e le dichiarazioni di trattamento del portale sono
+    // decine di migliaia di righe e servono solo per farne dei totali: si leggono
+    // una pagina alla volta, senza tenerle in memoria. Tenerle tutte insieme e'
+    // quello che faceva restare la pagina sul "carico le dichiarazioni".
+    const [giacenzeSito, dichiarazioni, aci, extra, secondarie, terziarie, nonDichiarati, rilevazioni] = await Promise.all([
       fetchAll(svc.GiacenzaSito, { anno: annoNum }),
       fetchAll(svc.DichiarazioneSito, { anno: annoNum }),
-      fetchAll(svc.PrimariaRete),
       fetchAll(svc.PrimariaAci),
       fetchAll(svc.ExtraRaccolta),
       fetchAll(svc.Secondaria),
       fetchAll(svc.Terziaria),
       fetchAll(svc.OrdineNonDichiarato),
       fetchAll(svc.GiacenzaStoccaggio),
-      fetchAll(svc.DichiarazioneTrattamento),
     ]);
-
-    // Quello che risulta dichiarato al portale, per confrontarlo con quello che
-    // abbiamo segnato come caricato: se i due numeri divergono, un mese è sfuggito.
-    const dichiaratoPortale = new Map();
-    for (const r of dichPortale) {
-      if (!nellAnno(r.data_chiusura)) continue;
-      const ns = norm(String(r.destinazione_secondaria || '').trim() || r.destinazione);
-      if (!ns) continue;
-      dichiaratoPortale.set(ns, (dichiaratoPortale.get(ns) || 0) + (Number(r.peso_associato_kg) || 0));
-    }
 
     // --- Conferito per sito, canale e mese (kg) ---
     const conferito = new Map(); // ns|canale|provenienza|mese -> kg
@@ -80,25 +72,64 @@ export default async function(req) {
     const dopoLaFoto = (r) => !!fotoPortale && chiusoIl(r) > fotoPortale;
     const allaFoto = { rete: new Map(), secIn: new Map(), secOut: new Map(), dopo: new Map() };
 
-    for (const r of rete) {
-      if (!terminato(r) || !nellAnno(r.trasporto_finito_il)) continue;
-      const ns = norm(r.destinazione);
-      const chiave = `${ns}|${td(r.tipo_destinazione) || 'imp'}`;
-      aggiungi(ns, 'RETE', '', meseDa(r.trasporto_finito_il), peso(r));
-      somma(perAnno.rete, chiave, peso(r));
-      somma(dopoLaFoto(r) ? allaFoto.dopo : allaFoto.rete, chiave, peso(r));
+    // Per gli stoccaggi la giacenza del portale e' l'ultima rilevazione piu' i
+    // movimenti chiusi dopo: il portale, da quel giorno, continua ad aggiornarla.
+    const rilevazione = new Map(); // ns -> { totale_t, data }
+    for (const r of rilevazioni) {
+      const ns = norm(r.sito);
+      if (!ns) continue;
+      const data = r.data_rilevazione ? String(r.data_rilevazione).slice(0, 10) : '';
+      const totale = ['class1_kg', 'class2_kg', 'class3_kg', 'class4_kg', 'class9_kg'].reduce((s, c) => s + (Number(r[c]) || 0), 0) / 1000;
+      const prima = rilevazione.get(ns);
+      if (!prima || data > prima.data) rilevazione.set(ns, { totale_t: totale, data });
     }
-    for (const r of aci) {
-      if (!terminato(r) || !nellAnno(r.trasporto_finito_il)) continue;
+    const dopoRilevazione = new Map(); // ns -> t (ingressi meno uscite dopo la rilevazione)
+    const movimentoDopo = (ns, data, valore) => {
+      const r = rilevazione.get(ns);
+      if (!r || !r.data || !data || String(data).slice(0, 10) <= r.data) return;
+      somma(dopoRilevazione, ns, valore);
+    };
+
+    // Chi sono i siti e con che ruolo si scopre leggendo i formulari, una volta sola.
+    const nomi = new Map();    // ns -> nome leggibile
+    const ruoliDi = new Map(); // ns -> Set di ruoli
+    const segnaRuolo = (ns, ruolo) => {
+      if (!ruoliDi.has(ns)) ruoliDi.set(ns, new Set());
+      ruoliDi.get(ns).add(ruolo);
+    };
+    for (const g of giacenzeSito) { nomi.set(norm(g.sito), g.sito); segnaRuolo(norm(g.sito), td(g.tipo_destinazione) || 'imp'); }
+    const ordineTipo = new Map();
+    const conta = (r) => {
+      const ruolo = td(r.tipo_destinazione) || 'imp';
+      const id = String(r.id_ordine || '').trim();
+      if (id && td(r.tipo_destinazione)) ordineTipo.set(id, ruolo);
+      if (!terminato(r)) return null;
+      if (ruolo === 'stoc') movimentoDopo(norm(r.destinazione), r.trasporto_finito_il, peso(r) / 1000);
+      if (!nellAnno(r.trasporto_finito_il) || !r.destinazione) return null;
       const ns = norm(r.destinazione);
-      aggiungi(ns, 'ACI', 'primaria', meseDa(r.trasporto_finito_il), peso(r));
-      somma(perAnno.aci, `${ns}|${td(r.tipo_destinazione) || 'imp'}`, peso(r));
+      if (!nomi.has(ns)) nomi.set(ns, r.destinazione);
+      segnaRuolo(ns, ruolo);
+      return { ns, chiave: `${ns}|${ruolo}` };
+    };
+
+    await perPagina(svc.PrimariaRete, null, (r) => {
+      const c = conta(r);
+      if (!c) return;
+      aggiungi(c.ns, 'RETE', '', meseDa(r.trasporto_finito_il), peso(r));
+      somma(perAnno.rete, c.chiave, peso(r));
+      somma(dopoLaFoto(r) ? allaFoto.dopo : allaFoto.rete, c.chiave, peso(r));
+    });
+    for (const r of aci) {
+      const c = conta(r);
+      if (!c) continue;
+      aggiungi(c.ns, 'ACI', 'primaria', meseDa(r.trasporto_finito_il), peso(r));
+      somma(perAnno.aci, c.chiave, peso(r));
     }
     for (const r of extra) {
-      if (!terminato(r) || !nellAnno(r.trasporto_finito_il)) continue;
-      const ns = norm(r.destinazione);
-      aggiungi(ns, 'EXTRA_RACCOLTA', '', meseDa(r.trasporto_finito_il), peso(r));
-      somma(perAnno.extra, `${ns}|${td(r.tipo_destinazione) || 'imp'}`, peso(r));
+      const c = conta(r);
+      if (!c) continue;
+      aggiungi(c.ns, 'EXTRA_RACCOLTA', '', meseDa(r.trasporto_finito_il), peso(r));
+      somma(perAnno.extra, c.chiave, peso(r));
     }
     for (const r of secondarie) {
       if (!terminato(r) || !nellAnno(r.trasporto_finito_il)) continue;
@@ -113,6 +144,7 @@ export default async function(req) {
         somma(allaFoto.secIn, dest, peso(r));
         somma(allaFoto.secOut, stoc, peso(r));
       }
+      movimentoDopo(stoc, r.trasporto_finito_il, -peso(r) / 1000);
     }
     for (const r of terziarie) {
       if (!terminato(r) || !nellAnno(r.trasporto_finito_il)) continue;
@@ -122,11 +154,6 @@ export default async function(req) {
     // --- Giacenza del portale: conferito non ancora dichiarato ---
     // Per gli impianti e' la giacenza; per gli stoccaggi e' materiale gia' partito,
     // in attesa che l'impianto ricevente dichiari.
-    const ordineTipo = new Map();
-    for (const r of [...rete, ...aci]) {
-      const id = String(r.id_ordine || '').trim();
-      if (id && td(r.tipo_destinazione)) ordineTipo.set(id, td(r.tipo_destinazione));
-    }
     const portale = new Map();   // ns|imp -> t
     const inAttesa = new Map();  // ns -> t
     const aPortale = new Set();  // chi compare nella fotografia del portale
@@ -141,32 +168,17 @@ export default async function(req) {
       if (ruolo === 'stoc') somma(inAttesa, ns, t);
       else somma(portale, `${ns}|imp`, t);
     }
-    // Per gli stoccaggi la giacenza del portale e' l'ultima rilevazione piu' i
-    // movimenti chiusi dopo: il portale, da quel giorno, continua ad aggiornarla.
-    const rilevazione = new Map(); // ns -> { totale_t, data }
-    for (const r of rilevazioni) {
-      const ns = norm(r.sito);
-      if (!ns) continue;
-      const data = r.data_rilevazione ? String(r.data_rilevazione).slice(0, 10) : '';
-      const totale = ['class1_kg', 'class2_kg', 'class3_kg', 'class4_kg', 'class9_kg'].reduce((s, c) => s + (Number(r[c]) || 0), 0) / 1000;
-      const prima = rilevazione.get(ns);
-      if (!prima || data > prima.data) rilevazione.set(ns, { totale_t: totale, data });
-    }
-
-    const dopoRilevazione = new Map(); // ns -> t (ingressi meno uscite dopo la rilevazione)
-    const movimentoDopo = (ns, data, valore) => {
-      const r = rilevazione.get(ns);
-      if (!r || !r.data || !data || String(data).slice(0, 10) <= r.data) return;
-      somma(dopoRilevazione, ns, valore);
-    };
-    for (const r of [...rete, ...aci, ...extra]) {
-      if (!terminato(r) || td(r.tipo_destinazione) !== 'stoc') continue;
-      movimentoDopo(norm(r.destinazione), r.trasporto_finito_il, peso(r) / 1000);
-    }
-    for (const r of secondarie) {
-      if (!terminato(r)) continue;
-      movimentoDopo(norm(r.stoccaggio), r.trasporto_finito_il, -peso(r) / 1000);
-    }
+    // Quello che risulta dichiarato al portale, per confrontarlo con quello che
+    // abbiamo segnato come caricato. Conta solo le dichiarazioni collegate a ordini
+    // chiusi nell'anno: quelle che il portale ha agganciato a ordini dell'anno prima
+    // non compaiono qui, quindi una differenza non e' per forza un mese sfuggito.
+    const dichiaratoPortale = new Map();
+    await perPagina(svc.DichiarazioneTrattamento, null, (r) => {
+      if (!nellAnno(r.data_chiusura)) return;
+      const ns = norm(String(r.destinazione_secondaria || '').trim() || r.destinazione);
+      if (!ns) return;
+      dichiaratoPortale.set(ns, (dichiaratoPortale.get(ns) || 0) + (Number(r.peso_associato_kg) || 0));
+    });
 
     // --- Dichiarazioni per sito, canale, provenienza e mese ---
     const perDich = new Map();
@@ -211,19 +223,6 @@ export default async function(req) {
 
     // --- Siti: uno per soggetto, non per ruolo. Chi è insieme impianto e stoccaggio
     // ha una sola giacenza da quadrare, che il portale tiene divisa fra i due ruoli. ---
-    const nomi = new Map(); // ns -> nome leggibile
-    const ruoliDi = new Map(); // ns -> Set di ruoli
-    const segnaRuolo = (ns, ruolo) => {
-      if (!ruoliDi.has(ns)) ruoliDi.set(ns, new Set());
-      ruoliDi.get(ns).add(ruolo);
-    };
-    for (const g of giacenzeSito) { nomi.set(norm(g.sito), g.sito); segnaRuolo(norm(g.sito), td(g.tipo_destinazione) || 'imp'); }
-    for (const r of [...rete, ...aci, ...extra]) {
-      if (!terminato(r) || !nellAnno(r.trasporto_finito_il) || !r.destinazione) continue;
-      const ns = norm(r.destinazione);
-      if (!nomi.has(ns)) nomi.set(ns, r.destinazione);
-      segnaRuolo(ns, td(r.tipo_destinazione) || 'imp');
-    }
     for (const d of dichiarazioni) {
       const ns = norm(d.sito);
       if (!nomi.has(ns)) { nomi.set(ns, d.sito); segnaRuolo(ns, 'imp'); }
