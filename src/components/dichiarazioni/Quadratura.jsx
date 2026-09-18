@@ -60,7 +60,14 @@ export default function Quadratura({ dati }) {
                   {t(s.dichiarato_portale_t)}
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums font-medium">{t(s.giacenza_calcolata_t)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums font-medium">{t(s.giacenza_portale_t)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums font-medium">
+                  {t(s.giacenza_portale_t)}
+                  {s.rilevazione_stoccaggio_t > 0 && (
+                    <span className="block text-[10px] font-normal text-muted-foreground" title="Giacenza rilevata nel suo stoccaggio: sono PFU di altri canali, che non entrano nel conto della rete">
+                      + {t(s.rilevazione_stoccaggio_t)} allo stoccaggio
+                    </span>
+                  )}
+                </td>
                 <td className={`px-2 py-1.5 text-right tabular-nums font-medium ${s.quadra === false ? 'text-red-700' : ''}`}>{t(s.scarto_t)}</td>
                 <td className="px-3 py-1.5">
                   {s.quadra === true && <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 className="w-3.5 h-3.5" /> quadra</span>}

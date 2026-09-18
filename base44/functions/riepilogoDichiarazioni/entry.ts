@@ -263,9 +263,13 @@ export default async function(req) {
         secondarie_out_t: t3((perAnno.secOut.get(ns) || 0) / 1000),
         terziarie_out_t: t3((perAnno.terz.get(ns) || 0) / 1000),
         in_attesa_dichiarazione_t: t3(inAttesa.get(ns) || 0),
+        // Chi ha anche l'impianto: la giacenza a portale sono i suoi ordini non
+        // dichiarati, che e' roba di rete. La rilevazione del suo stoccaggio sta a
+        // parte - in Irigom sono PFU ACI - e sommarla qui mescolerebbe i canali.
         giacenza_portale_t: senzaPortale ? null
           : soloStoccaggio ? (portaleStoccaggio === null ? null : t3(portaleStoccaggio))
-          : t3(portaleImpianto + (portaleStoccaggio || 0)),
+          : t3(portaleImpianto),
+        rilevazione_stoccaggio_t: !soloStoccaggio && portaleStoccaggio ? t3(portaleStoccaggio) : 0,
         rilevazione_il: rilevazione.has(ns) ? rilevazione.get(ns).data : '',
         dichiarato_caricato_t: t3(flussi.reduce((s, f) => s + f.dichiarato_caricato_t, 0)),
         dichiarato_totale_t: t3(flussi.reduce((s, f) => s + f.dichiarato_totale_t, 0)),
