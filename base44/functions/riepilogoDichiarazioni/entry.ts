@@ -129,12 +129,14 @@ export default async function(req) {
     }
     const portale = new Map();   // ns|imp -> t
     const inAttesa = new Map();  // ns -> t
+    const aPortale = new Set();  // chi compare nella fotografia del portale
     for (const r of nonDichiarati) {
       const sec = String(r.destinazione_secondaria || '').trim();
       const sito = sec || String(r.destinazione || '').trim();
       const ruolo = sec ? 'imp' : (ordineTipo.get(String(r.ordine_primaria || '').trim()) || 'imp');
       const ns = norm(sito);
       if (!ns) continue;
+      aPortale.add(ns);
       const t = (Number(r.peso_non_dichiarato_kg) || 0) / 1000;
       if (ruolo === 'stoc') somma(inAttesa, ns, t);
       else somma(portale, `${ns}|imp`, t);
@@ -239,6 +241,11 @@ export default async function(req) {
       // La giacenza del portale: per l'impianto è il conferito non ancora dichiarato,
       // per lo stoccaggio l'ultima rilevazione aggiornata con i movimenti chiusi dopo.
       const portaleImpianto = ruoli.includes('imp') ? (portale.get(`${ns}|imp`) || 0) : 0;
+      // Chi non compare ne' fra gli ordini non dichiarati ne' fra le rilevazioni e non
+      // ha mai dichiarato nulla non ha una giacenza a portale da confrontare: dire zero
+      // sarebbe peggio che dire niente, perche' farebbe sembrare sbagliato un conto che
+      // semplicemente non si puo' fare.
+      const senzaPortale = !aPortale.has(ns) && !rilevazione.has(ns);
       const portaleStoccaggio = ruoli.includes('stoc') && rilevazione.has(ns)
         ? rilevazione.get(ns).totale_t + (dopoRilevazione.get(ns) || 0) : null;
       const sito = {
@@ -257,7 +264,9 @@ export default async function(req) {
         secondarie_out_t: t3((perAnno.secOut.get(ns) || 0) / 1000),
         terziarie_out_t: t3((perAnno.terz.get(ns) || 0) / 1000),
         in_attesa_dichiarazione_t: t3(inAttesa.get(ns) || 0),
-        giacenza_portale_t: soloStoccaggio ? (portaleStoccaggio === null ? null : t3(portaleStoccaggio)) : t3(portaleImpianto + (portaleStoccaggio || 0)),
+        giacenza_portale_t: senzaPortale ? null
+          : soloStoccaggio ? (portaleStoccaggio === null ? null : t3(portaleStoccaggio))
+          : t3(portaleImpianto + (portaleStoccaggio || 0)),
         rilevazione_il: rilevazione.has(ns) ? rilevazione.get(ns).data : '',
         dichiarato_caricato_t: t3(flussi.reduce((s, f) => s + f.dichiarato_caricato_t, 0)),
         dichiarato_totale_t: t3(flussi.reduce((s, f) => s + f.dichiarato_totale_t, 0)),
@@ -267,7 +276,14 @@ export default async function(req) {
         // Gli stoccaggi non stanno nella fotografia degli ordini non dichiarati: la
         // loro giacenza a portale è la rilevazione aggiornata a oggi, quindi per loro
         // il confronto si fa sui movimenti di oggi.
-        conferito_alla_foto_t: t3((soloStoccaggio ? perRuoli(perAnno.rete) : perRuoli(allaFoto.rete)) / 1000),
+        // Uno stoccaggio non sta nella fotografia degli ordini: la sua giacenza a
+        // portale e' la rilevazione fisica per classi, che tiene dentro i PFU di
+        // qualunque canale. Percio' li' il conto si fa su quello che c'e' davvero in
+        // piazzale - rete, ACI ed extra raccolta insieme - mentre i canali restano
+        // distinti dappertutto: nei target, nelle dichiarazioni e nella fatturazione.
+        conferito_alla_foto_t: t3((soloStoccaggio
+          ? perRuoli(perAnno.rete) + perRuoli(perAnno.aci) + perRuoli(perAnno.extra)
+          : perRuoli(allaFoto.rete)) / 1000),
         conferito_dopo_foto_t: t3((soloStoccaggio ? 0 : perRuoli(allaFoto.dopo)) / 1000),
         secondarie_in_alla_foto_t: t3(((soloStoccaggio ? perAnno.secIn.get(ns) : allaFoto.secIn.get(ns)) || 0) / 1000),
         secondarie_out_alla_foto_t: t3(((soloStoccaggio ? perAnno.secOut.get(ns) : allaFoto.secOut.get(ns)) || 0) / 1000),

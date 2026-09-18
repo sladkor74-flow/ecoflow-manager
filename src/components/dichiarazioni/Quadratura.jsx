@@ -19,6 +19,8 @@ export default function Quadratura({ dati }) {
         deve dare la giacenza del portale. Si considera in linea uno scarto fino a {formatTonnellate(TOLLERANZA_QUADRATURA_T)} t.
         {dati.foto_portale_il && <> Il confronto è alla data dell'ultimo file degli ordini non dichiarati, <strong>{dati.foto_portale_il.split('-').reverse().join('/')}</strong>: quello che si è chiuso dopo il portale non lo sa ancora, e lo trovi nella colonna «dopo».</>}
         {' '}ACI ed extra raccolta restano fuori: hanno un giro proprio e non entrano nella giacenza del portale.
+        {' '}Gli stoccaggi fanno eccezione, perche' la loro giacenza a portale e' la rilevazione fisica per classi: li' il conto si fa
+        su quello che c'e' davvero in piazzale, di qualunque canale.
       </p>
       <div className="border rounded-xl bg-card" data-scorre-lato>
         <table className="w-full text-xs">
@@ -53,7 +55,7 @@ export default function Quadratura({ dati }) {
                 <td className="px-2 py-1.5 text-right tabular-nums">{t(s.dichiarato_caricato_rete_t)}</td>
                 <td
                   className={`px-2 py-1.5 text-right tabular-nums ${Math.abs((s.dichiarato_portale_t || 0) - (s.dichiarato_caricato_rete_t || 0)) > 0.5 ? 'text-amber-700 font-medium' : 'text-muted-foreground'}`}
-                  title="Quello che risulta dichiarato nei report del portale: se è diverso da quanto abbiamo segnato come caricato, un mese è sfuggito"
+                  title="Quello che risulta dichiarato nei report del portale per gli ordini chiusi nell'anno. Una dichiarazione che il portale ha collegato a ordini dell'anno prima non compare qui: la differenza non e' per forza un mese sfuggito."
                 >
                   {t(s.dichiarato_portale_t)}
                 </td>
@@ -63,7 +65,7 @@ export default function Quadratura({ dati }) {
                 <td className="px-3 py-1.5">
                   {s.quadra === true && <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 className="w-3.5 h-3.5" /> quadra</span>}
                   {s.quadra === false && <span className="inline-flex items-center gap-1 text-red-700"><AlertTriangle className="w-3.5 h-3.5" /> da verificare</span>}
-                  {s.quadra === null && <span className="text-muted-foreground">nessun dato a portale</span>}
+                  {s.quadra === null && <span className="text-muted-foreground" title="Questo sito non compare fra gli ordini non dichiarati del portale e non ha una rilevazione di giacenza: non c'e' un valore da confrontare">nessun dato a portale</span>}
                   {s.in_attesa_dichiarazione_t > 0 && s.tipo_destinazione === 'stoc' && (
                     <span className="block text-[11px] text-muted-foreground">{t(s.in_attesa_dichiarazione_t)} t partite e non ancora dichiarate dall'impianto ricevente</span>
                   )}
