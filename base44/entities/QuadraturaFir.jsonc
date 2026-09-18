@@ -1,0 +1,126 @@
+{
+  "name": "QuadraturaFir",
+  "type": "object",
+  "properties": {
+    "anno": {
+      "type": "number",
+      "description": "Anno della settimana secondo la numerazione ISO"
+    },
+    "settimana": {
+      "type": "number"
+    },
+    "data_inizio": {
+      "type": "string",
+      "format": "date"
+    },
+    "data_fine": {
+      "type": "string",
+      "format": "date"
+    },
+    "settimana_indicata": {
+      "type": "number",
+      "description": "Numero di settimana scritto sul file, se c'e'. Se manca vale quella scelta a mano, cioe' di norma la settimana precedente"
+    },
+    "file_nome": {
+      "type": "string"
+    },
+    "file_tipo": {
+      "type": "string",
+      "enum": [
+        "pdf",
+        "immagine",
+        "excel",
+        "csv"
+      ],
+      "description": "Il file non viene conservato: restano solo i numeri letti, cosi' alla cancellazione non resta nulla in archivio"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "in_lettura",
+        "completata",
+        "errore"
+      ],
+      "default": "in_lettura"
+    },
+    "avviata_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "verificata_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "errore": {
+      "type": "string"
+    },
+    "lettura_json": {
+      "type": "string",
+      "description": "Come e' stato letto il file: tabelle riconosciute, fonte di ciascuna, totali stampati e controllo di somma"
+    },
+    "righe_json": {
+      "type": "string",
+      "description": "Righe lette dal file, normalizzate: bastano a ripetere il confronto senza rileggere il file"
+    },
+    "esito_json": {
+      "type": "string",
+      "description": "Esito del confronto flusso per flusso e cella per cella, con la motivazione di ogni scostamento"
+    },
+    "tabelle": {
+      "type": "number",
+      "description": "Tabelle riconosciute nel file"
+    },
+    "righe_lette": {
+      "type": "number"
+    },
+    "lettura_verificata": {
+      "type": "boolean",
+      "description": "Vero se in ogni tabella la somma delle righe lette coincide con il totale stampato sul file: la trascrizione e' confermata dal file stesso"
+    },
+    "congruenti": {
+      "type": "number",
+      "description": "Celle in cui WINSINFO, portale e gestionale danno lo stesso numero di formulari e lo stesso peso"
+    },
+    "incongruenti": {
+      "type": "number"
+    },
+    "osservazioni": {
+      "type": "number",
+      "description": "Celle che quadrano nei numeri e differiscono solo nella scrittura del nome"
+    },
+    "non_confrontabili": {
+      "type": "number",
+      "description": "Tabelle che il gestionale non puo' confrontare, per esempio le secondarie ACI che non registra"
+    },
+    "conformita": {
+      "type": "string",
+      "enum": [
+        "piena",
+        "parziale"
+      ],
+      "description": "piena: le tre fonti quadrano su tutti i flussi; parziale: c'e' almeno uno scostamento da sistemare"
+    }
+  },
+  "required": [
+    "anno",
+    "settimana"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

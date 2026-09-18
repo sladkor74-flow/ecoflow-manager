@@ -3,6 +3,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ClipboardCheck } from 'lucide-react';
 import ReportSettimanali from '@/components/verifiche/ReportSettimanali';
+import QuadraturaFir from '@/components/verifiche/QuadraturaFir';
 import EvasioneAssegnati from '@/components/verifiche/EvasioneAssegnati';
 import MatriceProvince from '@/components/verifiche/MatriceProvince';
 
@@ -29,12 +30,16 @@ export default function Verifiche() {
       <Tabs defaultValue="report-settimanali">
         <TabsList>
           <TabsTrigger value="report-settimanali">Report settimanali</TabsTrigger>
+          <TabsTrigger value="quadratura-fir">Quadratura FIR</TabsTrigger>
           <TabsTrigger value="evasione-assegnati">Evasione assegnati</TabsTrigger>
           <TabsTrigger value="raccolto-province">Raccolto per provincia</TabsTrigger>
           <TabsTrigger value="ritiri-province">Ritiri per provincia</TabsTrigger>
         </TabsList>
         <TabsContent value="report-settimanali" className="pt-4">
           <ReportSettimanali isAdmin={isAdmin} />
+        </TabsContent>
+        <TabsContent value="quadratura-fir" className="pt-4">
+          <QuadraturaFir isAdmin={isAdmin} />
         </TabsContent>
         <TabsContent value="evasione-assegnati" className="pt-4">
           <EvasioneAssegnati isAdmin={isAdmin} />
