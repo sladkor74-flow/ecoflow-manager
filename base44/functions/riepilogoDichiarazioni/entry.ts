@@ -34,7 +34,7 @@ export default async function(req) {
     const eAci = (r) => /aci|autodemoliz/i.test(`${r.prodotto || ''} ${r.classe || ''} ${r.codice_prodotto || ''}`);
 
     const svc = base44.asServiceRole.entities;
-    const [giacenzeSito, dichiarazioni, rete, aci, extra, secondarie, terziarie, nonDichiarati, rilevazioni] = await Promise.all([
+    const [giacenzeSito, dichiarazioni, rete, aci, extra, secondarie, terziarie, nonDichiarati, rilevazioni, dichPortale] = await Promise.all([
       fetchAll(svc.GiacenzaSito, { anno: annoNum }),
       fetchAll(svc.DichiarazioneSito, { anno: annoNum }),
       fetchAll(svc.PrimariaRete),
@@ -44,7 +44,18 @@ export default async function(req) {
       fetchAll(svc.Terziaria),
       fetchAll(svc.OrdineNonDichiarato),
       fetchAll(svc.GiacenzaStoccaggio),
+      fetchAll(svc.DichiarazioneTrattamento),
     ]);
+
+    // Quello che risulta dichiarato al portale, per confrontarlo con quello che
+    // abbiamo segnato come caricato: se i due numeri divergono, un mese è sfuggito.
+    const dichiaratoPortale = new Map();
+    for (const r of dichPortale) {
+      if (!nellAnno(r.data_chiusura)) continue;
+      const ns = norm(String(r.destinazione_secondaria || '').trim() || r.destinazione);
+      if (!ns) continue;
+      dichiaratoPortale.set(ns, (dichiaratoPortale.get(ns) || 0) + (Number(r.peso_associato_kg) || 0));
+    }
 
     // --- Conferito per sito, canale e mese (kg) ---
     const conferito = new Map(); // ns|canale|provenienza|mese -> kg
@@ -56,11 +67,26 @@ export default async function(req) {
     const perAnno = { rete: new Map(), aci: new Map(), extra: new Map(), secIn: new Map(), secOut: new Map(), terz: new Map() };
     const somma = (mappa, chiave, valore) => mappa.set(chiave, (mappa.get(chiave) || 0) + valore);
 
+    // La giacenza del portale è la fotografia dell'ultimo file degli ordini non
+    // dichiarati: per confrontarla si contano solo gli ordini chiusi entro quel giorno.
+    const fotoPortale = nonDichiarati.reduce((max, r) => {
+      const d = String(r.created_date || '').slice(0, 10);
+      return d > max ? d : max;
+    }, '');
+    // Un ordine entra nella giacenza del portale quando viene chiuso: quelli chiusi
+    // dopo la fotografia il portale non li ha ancora contati, anche se il trasporto
+    // era finito prima.
+    const chiusoIl = (r) => String(r.ordine_chiuso_il || r.trasporto_finito_il || '').slice(0, 10);
+    const dopoLaFoto = (r) => !!fotoPortale && chiusoIl(r) > fotoPortale;
+    const allaFoto = { rete: new Map(), secIn: new Map(), secOut: new Map(), dopo: new Map() };
+
     for (const r of rete) {
       if (!terminato(r) || !nellAnno(r.trasporto_finito_il)) continue;
       const ns = norm(r.destinazione);
+      const chiave = `${ns}|${td(r.tipo_destinazione) || 'imp'}`;
       aggiungi(ns, 'RETE', '', meseDa(r.trasporto_finito_il), peso(r));
-      somma(perAnno.rete, `${ns}|${td(r.tipo_destinazione) || 'imp'}`, peso(r));
+      somma(perAnno.rete, chiave, peso(r));
+      somma(dopoLaFoto(r) ? allaFoto.dopo : allaFoto.rete, chiave, peso(r));
     }
     for (const r of aci) {
       if (!terminato(r) || !nellAnno(r.trasporto_finito_il)) continue;
@@ -82,6 +108,11 @@ export default async function(req) {
       else aggiungi(dest, 'RETE_SECONDARIE', '', meseDa(r.trasporto_finito_il), peso(r));
       somma(perAnno.secIn, dest, peso(r));
       somma(perAnno.secOut, stoc, peso(r));
+      // Le secondarie ACI non entrano nella giacenza del portale: canale a parte.
+      if (!dopoLaFoto(r) && !eAci(r)) {
+        somma(allaFoto.secIn, dest, peso(r));
+        somma(allaFoto.secOut, stoc, peso(r));
+      }
     }
     for (const r of terziarie) {
       if (!terminato(r) || !nellAnno(r.trasporto_finito_il)) continue;
@@ -176,45 +207,70 @@ export default async function(req) {
       });
     };
 
-    // --- Siti: quelli di Giacenze piu' quelli che hanno movimenti o dichiarazioni ---
-    const nomi = new Map(); // ns|td -> nome leggibile
-    for (const g of giacenzeSito) nomi.set(`${norm(g.sito)}|${td(g.tipo_destinazione)}`, g.sito);
+    // --- Siti: uno per soggetto, non per ruolo. Chi è insieme impianto e stoccaggio
+    // ha una sola giacenza da quadrare, che il portale tiene divisa fra i due ruoli. ---
+    const nomi = new Map(); // ns -> nome leggibile
+    const ruoliDi = new Map(); // ns -> Set di ruoli
+    const segnaRuolo = (ns, ruolo) => {
+      if (!ruoliDi.has(ns)) ruoliDi.set(ns, new Set());
+      ruoliDi.get(ns).add(ruolo);
+    };
+    for (const g of giacenzeSito) { nomi.set(norm(g.sito), g.sito); segnaRuolo(norm(g.sito), td(g.tipo_destinazione) || 'imp'); }
     for (const r of [...rete, ...aci, ...extra]) {
-      if (!terminato(r) || !nellAnno(r.trasporto_finito_il)) continue;
-      const k = `${norm(r.destinazione)}|${td(r.tipo_destinazione) || 'imp'}`;
-      if (!nomi.has(k) && r.destinazione) nomi.set(k, r.destinazione);
+      if (!terminato(r) || !nellAnno(r.trasporto_finito_il) || !r.destinazione) continue;
+      const ns = norm(r.destinazione);
+      if (!nomi.has(ns)) nomi.set(ns, r.destinazione);
+      segnaRuolo(ns, td(r.tipo_destinazione) || 'imp');
     }
     for (const d of dichiarazioni) {
       const ns = norm(d.sito);
-      if (![...nomi.keys()].some(k => k.startsWith(ns + '|'))) nomi.set(`${ns}|imp`, d.sito);
+      if (!nomi.has(ns)) { nomi.set(ns, d.sito); segnaRuolo(ns, 'imp'); }
     }
 
-    const siti = [...nomi.entries()].map(([chiave, nome]) => {
-      const [ns, ruolo] = chiave.split('|');
-      const g = giacenzeSito.find(x => norm(x.sito) === ns && td(x.tipo_destinazione) === ruolo) || null;
+    const siti = [...nomi.entries()].map(([ns, nome]) => {
+      const chiave = ns;
+      const ruoli = [...(ruoliDi.get(ns) || new Set(['imp']))].sort();
+      const perRuoli = (mappa) => ruoli.reduce((s, ruolo) => s + (mappa.get(`${ns}|${ruolo}`) || 0), 0);
+      const g = giacenzeSito.find(x => norm(x.sito) === ns && td(x.tipo_destinazione) === 'imp')
+        || giacenzeSito.find(x => norm(x.sito) === ns) || null;
       const operazione = operazioneDa(g && g.tipologia_trattamento);
       const flussi = flussiDi(ns, operazione);
+      const soloStoccaggio = ruoli.length === 1 && ruoli[0] === 'stoc';
+      // La giacenza del portale: per l'impianto è il conferito non ancora dichiarato,
+      // per lo stoccaggio l'ultima rilevazione aggiornata con i movimenti chiusi dopo.
+      const portaleImpianto = ruoli.includes('imp') ? (portale.get(`${ns}|imp`) || 0) : 0;
+      const portaleStoccaggio = ruoli.includes('stoc') && rilevazione.has(ns)
+        ? rilevazione.get(ns).totale_t + (dopoRilevazione.get(ns) || 0) : null;
       const sito = {
         sito: nome,
         chiave,
-        tipo_destinazione: ruolo,
+        ruoli,
+        tipo_destinazione: soloStoccaggio ? 'stoc' : 'imp',
         tipologia_trattamento: (g && g.tipologia_trattamento) || '',
         operazione,
-        giacenza_iniziale_t: t3(Number(g && g.giacenza_riferimento_t) || 0),
-        target_primarie_t: t3(Number(g && g.target_primarie_t) || 0),
-        conferito_t: t3((perAnno.rete.get(chiave) || 0) / 1000),
-        conferito_aci_t: t3((perAnno.aci.get(chiave) || 0) / 1000),
-        conferito_extra_t: t3((perAnno.extra.get(chiave) || 0) / 1000),
-        secondarie_in_t: ruolo === 'imp' ? t3((perAnno.secIn.get(ns) || 0) / 1000) : 0,
-        secondarie_out_t: ruolo === 'stoc' ? t3((perAnno.secOut.get(ns) || 0) / 1000) : 0,
-        terziarie_out_t: ruolo === 'imp' ? t3((perAnno.terz.get(ns) || 0) / 1000) : 0,
+        giacenza_iniziale_t: t3(giacenzeSito.filter(x => norm(x.sito) === ns).reduce((s, x) => s + (Number(x.giacenza_riferimento_t) || 0), 0)),
+        target_primarie_t: t3(giacenzeSito.filter(x => norm(x.sito) === ns).reduce((s, x) => s + (Number(x.target_primarie_t) || 0), 0)),
+        conferito_t: t3(perRuoli(perAnno.rete) / 1000),
+        conferito_aci_t: t3(perRuoli(perAnno.aci) / 1000),
+        conferito_extra_t: t3(perRuoli(perAnno.extra) / 1000),
+        secondarie_in_t: t3((perAnno.secIn.get(ns) || 0) / 1000),
+        secondarie_out_t: t3((perAnno.secOut.get(ns) || 0) / 1000),
+        terziarie_out_t: t3((perAnno.terz.get(ns) || 0) / 1000),
         in_attesa_dichiarazione_t: t3(inAttesa.get(ns) || 0),
-        giacenza_portale_t: ruolo === 'imp'
-          ? t3(portale.get(`${ns}|imp`) || 0)
-          : (rilevazione.has(ns) ? t3(rilevazione.get(ns).totale_t + (dopoRilevazione.get(ns) || 0)) : null),
-        rilevazione_il: ruolo === 'stoc' && rilevazione.has(ns) ? rilevazione.get(ns).data : '',
+        giacenza_portale_t: soloStoccaggio ? (portaleStoccaggio === null ? null : t3(portaleStoccaggio)) : t3(portaleImpianto + (portaleStoccaggio || 0)),
+        rilevazione_il: rilevazione.has(ns) ? rilevazione.get(ns).data : '',
         dichiarato_caricato_t: t3(flussi.reduce((s, f) => s + f.dichiarato_caricato_t, 0)),
         dichiarato_totale_t: t3(flussi.reduce((s, f) => s + f.dichiarato_totale_t, 0)),
+        dichiarato_portale_t: t3((dichiaratoPortale.get(ns) || 0) / 1000),
+        // Per la quadratura contano solo la rete e la situazione alla data della fotografia.
+        dichiarato_caricato_rete_t: t3(flussi.filter(f => f.canale === 'RETE').reduce((s, f) => s + f.dichiarato_caricato_t, 0)),
+        // Gli stoccaggi non stanno nella fotografia degli ordini non dichiarati: la
+        // loro giacenza a portale è la rilevazione aggiornata a oggi, quindi per loro
+        // il confronto si fa sui movimenti di oggi.
+        conferito_alla_foto_t: t3((soloStoccaggio ? perRuoli(perAnno.rete) : perRuoli(allaFoto.rete)) / 1000),
+        conferito_dopo_foto_t: t3((soloStoccaggio ? 0 : perRuoli(allaFoto.dopo)) / 1000),
+        secondarie_in_alla_foto_t: t3(((soloStoccaggio ? perAnno.secIn.get(ns) : allaFoto.secIn.get(ns)) || 0) / 1000),
+        secondarie_out_alla_foto_t: t3(((soloStoccaggio ? perAnno.secOut.get(ns) : allaFoto.secOut.get(ns)) || 0) / 1000),
         flussi,
       };
       return { ...sito, ...quadratura(sito) };
@@ -225,13 +281,14 @@ export default async function(req) {
       conferito_t: t3(siti.reduce((s, x) => s + x.conferito_t, 0)),
       dichiarato_caricato_t: t3(siti.reduce((s, x) => s + x.dichiarato_caricato_t, 0)),
       dichiarato_totale_t: t3(siti.reduce((s, x) => s + x.dichiarato_totale_t, 0)),
+      dichiarato_portale_t: t3(siti.reduce((s, x) => s + x.dichiarato_portale_t, 0)),
       giacenza_calcolata_t: t3(siti.reduce((s, x) => s + x.giacenza_calcolata_t, 0)),
       giacenza_portale_t: t3(siti.reduce((s, x) => s + (x.giacenza_portale_t || 0), 0)),
       siti_che_quadrano: siti.filter(x => x.quadra === true).length,
       siti_da_quadrare: siti.filter(x => x.quadra === false).length,
     };
 
-    return Response.json({ anno: annoNum, mesi: MESI, siti, totali });
+    return Response.json({ anno: annoNum, mesi: MESI, siti, totali, foto_portale_il: fotoPortale });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });
   }

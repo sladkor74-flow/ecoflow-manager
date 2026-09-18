@@ -97,15 +97,19 @@ export const TOLLERANZA_QUADRATURA_T = 0.5;
  * Quadratura di un sito: la giacenza che risulta dalle dichiarazioni deve
  * coincidere con quella del portale, che è il conferito non ancora dichiarato.
  *
- * Si conta tutto quello che entra, canale per canale, e si toglie solo cio' che
- * esce davvero dal magazzino PFU: le secondarie verso altri siti e le
- * dichiarazioni caricate. Le terziarie non si tolgono: sono uscite di materiale
- * gia' trasformato, che il portale ha gia' scalato con la dichiarazione.
+ * Tre accortezze, senza le quali i numeri non tornano mai:
+ * - si confronta alla data della fotografia del portale (l'ultimo file degli
+ *   ordini non dichiarati), non a oggi: quello che si è chiuso dopo il portale
+ *   non lo sa ancora;
+ * - solo il canale rete: i conferimenti ACI e l'extra raccolta hanno un giro
+ *   proprio e non entrano nella giacenza del portale;
+ * - le terziarie non si tolgono: sono uscite di materiale già trasformato, che
+ *   il portale ha già scalato con la dichiarazione.
  */
 export function quadratura(sito) {
   const calcolata = (sito.giacenza_iniziale_t || 0)
-    + (sito.conferito_t || 0) + (sito.conferito_aci_t || 0) + (sito.conferito_extra_t || 0) + (sito.secondarie_in_t || 0)
-    - (sito.dichiarato_caricato_t || 0) - (sito.secondarie_out_t || 0);
+    + (sito.conferito_alla_foto_t || 0) + (sito.secondarie_in_alla_foto_t || 0)
+    - (sito.dichiarato_caricato_rete_t || 0) - (sito.secondarie_out_alla_foto_t || 0);
   const portale = sito.giacenza_portale_t;
   const scarto = portale === null || portale === undefined ? null : Math.round((calcolata - portale) * 1000) / 1000;
   return {

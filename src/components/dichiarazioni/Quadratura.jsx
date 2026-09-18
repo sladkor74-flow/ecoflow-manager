@@ -15,8 +15,10 @@ export default function Quadratura({ dati }) {
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        Giacenza al 31/12 dell'anno prima, più quello che è entrato, meno quello che è stato dichiarato e caricato:
+        Giacenza al 31/12 dell'anno prima, più quello che è entrato dalla rete, meno quello che è stato dichiarato e caricato:
         deve dare la giacenza del portale. Si considera in linea uno scarto fino a {formatTonnellate(TOLLERANZA_QUADRATURA_T)} t.
+        {dati.foto_portale_il && <> Il confronto è alla data dell'ultimo file degli ordini non dichiarati, <strong>{dati.foto_portale_il.split('-').reverse().join('/')}</strong>: quello che si è chiuso dopo il portale non lo sa ancora, e lo trovi nella colonna «dopo».</>}
+        {' '}ACI ed extra raccolta restano fuori: hanno un giro proprio e non entrano nella giacenza del portale.
       </p>
       <div className="border rounded-xl bg-card" data-scorre-lato>
         <table className="w-full text-xs">
@@ -25,12 +27,11 @@ export default function Quadratura({ dati }) {
               <th className="text-left px-3 py-2 font-semibold sticky left-0 bg-muted/50 min-w-[200px]">Impianto</th>
               <th className="text-right px-2 py-2 font-semibold">Giacenza iniziale</th>
               <th className="text-right px-2 py-2 font-semibold">Conferito rete</th>
-              <th className="text-right px-2 py-2 font-semibold">Conferito ACI</th>
-              <th className="text-right px-2 py-2 font-semibold">Extra raccolta</th>
+              <th className="text-right px-2 py-2 font-semibold">di cui dopo</th>
               <th className="text-right px-2 py-2 font-semibold">Secondarie in</th>
               <th className="text-right px-2 py-2 font-semibold">Secondarie out</th>
-              <th className="text-right px-2 py-2 font-semibold">Terziarie (info)</th>
-              <th className="text-right px-2 py-2 font-semibold">Dichiarato caricato</th>
+              <th className="text-right px-2 py-2 font-semibold">Dichiarato caricato (rete)</th>
+              <th className="text-right px-2 py-2 font-semibold">Dichiarato a portale</th>
               <th className="text-right px-2 py-2 font-semibold">Giacenza calcolata</th>
               <th className="text-right px-2 py-2 font-semibold">Giacenza a portale</th>
               <th className="text-right px-2 py-2 font-semibold">Scarto</th>
@@ -45,13 +46,17 @@ export default function Quadratura({ dati }) {
                   {s.tipo_destinazione === 'stoc' && <span className="text-[11px] text-muted-foreground block">stoccaggio</span>}
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{t(s.giacenza_iniziale_t)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{t(s.conferito_t)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{s.conferito_aci_t ? t(s.conferito_aci_t) : '—'}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{s.conferito_extra_t ? t(s.conferito_extra_t) : '—'}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{s.secondarie_in_t ? t(s.secondarie_in_t) : '—'}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{s.secondarie_out_t ? t(s.secondarie_out_t) : '—'}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{s.terziarie_out_t ? t(s.terziarie_out_t) : '—'}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{t(s.dichiarato_caricato_t)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{t(s.conferito_alla_foto_t)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{s.conferito_dopo_foto_t ? t(s.conferito_dopo_foto_t) : '—'}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{s.secondarie_in_alla_foto_t ? t(s.secondarie_in_alla_foto_t) : '—'}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{s.secondarie_out_alla_foto_t ? t(s.secondarie_out_alla_foto_t) : '—'}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{t(s.dichiarato_caricato_rete_t)}</td>
+                <td
+                  className={`px-2 py-1.5 text-right tabular-nums ${Math.abs((s.dichiarato_portale_t || 0) - (s.dichiarato_caricato_rete_t || 0)) > 0.5 ? 'text-amber-700 font-medium' : 'text-muted-foreground'}`}
+                  title="Quello che risulta dichiarato nei report del portale: se è diverso da quanto abbiamo segnato come caricato, un mese è sfuggito"
+                >
+                  {t(s.dichiarato_portale_t)}
+                </td>
                 <td className="px-2 py-1.5 text-right tabular-nums font-medium">{t(s.giacenza_calcolata_t)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums font-medium">{t(s.giacenza_portale_t)}</td>
                 <td className={`px-2 py-1.5 text-right tabular-nums font-medium ${s.quadra === false ? 'text-red-700' : ''}`}>{t(s.scarto_t)}</td>
