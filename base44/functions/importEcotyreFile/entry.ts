@@ -487,10 +487,13 @@ export default async function(req) {
     const messaggio = config.splitByStatoClasse
       ? `Rete: ${primarie_rete_importati} | ACI: ${primarie_aci_importati} | Ass. Rete: ${assegnati_importati} | Ass. ACI: ${assegnati_aci_importati} (foglio: ${sheetName})${suffissoDurata}`
       : `${imported} righe importate su ${enriched.length} da importare (foglio: ${sheetName})${suffissoDurata}`;
+    const notaAllineamento = allineamento && allineamento.aggiornate
+      ? ` | dichiarazioni riconosciute a portale: ${allineamento.aggiornate.length}`
+      : (allineamento && allineamento.errore ? ` | allineamento non riuscito: ${allineamento.errore}` : '');
     await base44.asServiceRole.entities.UploadLog.create({
       tipo_file, nome_file, file_url,
       righe_importate: imported, righe_fallite: failed, esito,
-      messaggio, periodo_riferimento: periodo_riferimento || '',
+      messaggio: messaggio + notaAllineamento, periodo_riferimento: periodo_riferimento || '',
       foglio_usato: sheetName, righe_archivio_prima, forzato: !!conferma_forzatura,
       modalita
     });
