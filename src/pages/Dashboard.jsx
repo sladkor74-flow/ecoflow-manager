@@ -54,7 +54,7 @@ export default function Dashboard() {
     { key: 'assegnati', label: 'Assegnati Rete', sotto: counts.assegnati_aci ? `da evadere · ACI ${formatIntero(counts.assegnati_aci)}` : 'da evadere', icon: ClipboardList, path: '/assegnati', color: 'text-blue-600 bg-blue-50' },
     { key: 'primarie_rete', label: 'Terminati Rete', sotto: periodo, icon: Truck, path: '/primarie-rete', color: 'text-green-600 bg-green-50' },
     { key: 'primarie_aci', label: 'Terminati ACI', sotto: periodo, icon: Factory, path: '/primarie-aci', color: 'text-amber-600 bg-amber-50' },
-    { key: 'secondarie', label: 'Secondarie terminate', sotto: periodo, icon: Truck, path: '/secondarie', color: 'text-purple-600 bg-purple-50' },
+    { key: 'secondarie', label: 'Secondarie di rete', sotto: counts.secondarie_aci ? `${periodo} · ACI ${formatIntero(counts.secondarie_aci)}` : periodo, icon: Truck, path: '/secondarie', color: 'text-purple-600 bg-purple-50' },
     { key: 'terziarie', label: 'Terziarie terminate', sotto: periodo, icon: Ship, path: '/terziarie', color: 'text-pink-600 bg-pink-50' },
   ];
 

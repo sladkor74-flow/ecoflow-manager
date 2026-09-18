@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { eAci } from "../../shared/canaleSecondaria.ts";
 import { MESI } from "../../shared/raccoltoCalculator.ts";
 
 // Conteggi per la Dashboard nel periodo scelto con i filtri (anno e mesi), come i
@@ -42,7 +43,10 @@ export default async function(req) {
         assegnati_aci: assegnatiAci.length,
         primarie_rete: rete.filter(nelPeriodo).length,
         primarie_aci: aci.filter(nelPeriodo).length,
-        secondarie: sec.filter(nelPeriodo).length,
+        // Le secondarie di rete e quelle dell'autodemolizione si contano a parte:
+        // stanno nello stesso archivio ma sono canali indipendenti.
+        secondarie: sec.filter(r => nelPeriodo(r) && !eAci(r)).length,
+        secondarie_aci: sec.filter(r => nelPeriodo(r) && eAci(r)).length,
         terziarie: terz.filter(nelPeriodo).length,
       },
       alert_count: alerts.length,

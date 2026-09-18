@@ -29,7 +29,7 @@ export default function TrattaMatrix({ matrix }) {
         </thead>
         <tbody>
           {matrix.map((tratta) => {
-            const trattaKey = `t:${tratta.origine}|${tratta.destinazione}`;
+            const trattaKey = `t:${tratta.canale || ''}|${tratta.origine}|${tratta.destinazione}`;
             const totalKg = Object.values(tratta.mesi || {}).reduce((s, m) => s + m.peso_kg, 0);
             const totalOrd = Object.values(tratta.mesi || {}).reduce((s, m) => s + m.ordini, 0);
             const totalQuant = Object.values(tratta.mesi || {}).reduce((s, m) => s + m.quantita, 0);
@@ -40,6 +40,7 @@ export default function TrattaMatrix({ matrix }) {
                     <span className="inline-flex items-center gap-1">
                       {expanded[trattaKey] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                       {tratta.origine} → {tratta.destinazione}
+                      {tratta.canale === 'ACI' && <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[11px] align-middle">ACI</span>}
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-right">{fmt(totalOrd)}</td>

@@ -3,9 +3,14 @@ import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { canaleDi } from "../../shared/canaleSecondaria.ts";
 
 // Esporta i dati Secondarie (dettaglio o matrice per tratta) in Excel.
 // Payload: { filters: {...}, mode: 'detail' | 'matrix' }
+//
+// Rete e ACI sono canali indipendenti: il filtro del modulo vale anche qui, e
+// nessuna riga di sintesi somma mai i due canali - la tratta e' per canale e la
+// colonna Canale c'e' sempre.
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -19,6 +24,7 @@ export default async function(req) {
     const all = await fetchAll(base44.asServiceRole.entities.Secondaria);
 
     const filtered = all.filter(r => {
+      if (!matchesFilter(canaleDi(r) === 'ACI' ? 'ACI' : 'Rete', filters.canale)) return false;
       if (!matchesFilter((r.stoccaggio || '').trim(), filters.stoccaggio)) return false;
       if (!matchesFilter((r.destinazione || '').trim(), filters.destinazione)) return false;
       if (!matchesFilter(r.mese, filters.mese)) return false;
@@ -42,8 +48,9 @@ export default async function(req) {
       for (const r of filtered) {
         const origine = (r.stoccaggio || 'N/D').trim();
         const dest = (r.destinazione || 'N/D').trim();
-        const key = `${origine}|${dest}`;
-        if (!trattaMap[key]) trattaMap[key] = { 'Stoccaggio Origine': origine, 'Impianto Destinazione': dest, 'N. Ordini': 0, 'Peso (kg)': 0, 'Peso (t)': 0, 'Quantità': 0, 'Trasportatore': r.trasportatore || '', 'Partner Operativo': r.partner_operativo || '' };
+        const canale = canaleDi(r) === 'ACI' ? 'ACI' : 'Rete';
+        const key = `${canale}|${origine}|${dest}`;
+        if (!trattaMap[key]) trattaMap[key] = { 'Canale': canale, 'Stoccaggio Origine': origine, 'Impianto Destinazione': dest, 'N. Ordini': 0, 'Peso (kg)': 0, 'Peso (t)': 0, 'Quantità': 0, 'Trasportatore': r.trasportatore || '', 'Partner Operativo': r.partner_operativo || '' };
         trattaMap[key]['N. Ordini']++;
         trattaMap[key]['Peso (kg)'] += (r.peso_effettivo || 0);
         trattaMap[key]['Peso (t)'] += (r.peso_effettivo || 0) / 1000;
@@ -56,7 +63,7 @@ export default async function(req) {
       const classeMap: Record<string, any> = {};
       for (const r of filtered) {
         const c = r.classe || 'N/D';
-        if (!classeMap[c]) classeMap[c] = { 'Classe PFU': c, 'N. Ordini': 0, 'Peso (kg)': 0, 'Peso (t)': 0, 'Quantità': 0 };
+        if (!classeMap[c]) classeMap[c] = { 'Canale': canaleDi(r) === 'ACI' ? 'ACI' : 'Rete', 'Classe PFU': c, 'N. Ordini': 0, 'Peso (kg)': 0, 'Peso (t)': 0, 'Quantità': 0 };
         classeMap[c]['N. Ordini']++;
         classeMap[c]['Peso (kg)'] += (r.peso_effettivo || 0);
         classeMap[c]['Peso (t)'] += (r.peso_effettivo || 0) / 1000;
@@ -74,6 +81,7 @@ export default async function(req) {
         'Tipo Destinazione': r.tipo_destinazione,
         'Comune': r.comune,
         'Provincia': r.provincia,
+        'Canale': canaleDi(r) === 'ACI' ? 'ACI' : 'Rete',
         'Classe PFU': r.classe,
         'CER': r.cer,
         'Quantità Ritirata': r.quantita_ritirata,

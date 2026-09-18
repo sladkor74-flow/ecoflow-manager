@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { formatoKg } from "../../shared/formato.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { eAci } from "../../shared/canaleSecondaria.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
@@ -31,7 +32,10 @@ export default async function(req) {
     const b = base44.asServiceRole;
 
     const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
-    const secondarie = await fetchAll(b.entities.Secondaria);
+    // Solo rete: il target di un impianto e' della rete e l'autodemolizione non
+    // lo consuma. Le secondarie ACI stanno nello stesso archivio e si
+    // riconoscono dalla classe.
+    const secondarie = (await fetchAll(b.entities.Secondaria)).filter(r => !eAci(r));
 
     const oggi = new Date();
     // Settimana appena conclusa = lunedì-domenica della settimana scorsa
@@ -95,11 +99,11 @@ export default async function(req) {
       parti.push(frase);
     }
 
-    const suggestion = `Suggerimento settimanale predittività (settimana ${dateStr(lastMonday)}→${dateStr(lastSunday)}):\n\n` + parti.join('\n\n');
+    const suggestion = `Suggerimento settimanale predittività delle secondarie di rete (settimana ${dateStr(lastMonday)}→${dateStr(lastSunday)}). L'autodemolizione è un canale a parte e non entra in questo conto:\n\n` + parti.join('\n\n');
 
     // Salva come Alert consultabile dall'agente
     await b.entities.Alert.create({
-      titolo: 'Suggerimento Predittività Settimanale',
+      titolo: 'Suggerimento Predittività Settimanale · secondarie di rete',
       descrizione: suggestion,
       severita: 'info',
       modulo: 'secondarie',

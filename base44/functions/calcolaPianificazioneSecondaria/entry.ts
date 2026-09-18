@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { eAci } from "../../shared/canaleSecondaria.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
@@ -35,7 +36,10 @@ export default async function(req) {
     const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
     const fornitori = await b.entities.FornitoreSecondaria.filter({ stato: 'attivo' });
     const primarie = await fetchAll(b.entities.PrimariaRete, { stato: 'terminato' });
-    const secondarie = await fetchAll(b.entities.Secondaria, { stato: 'terminato' });
+    // Solo rete: i target degli impianti e dei raccoglitori sono della rete, e
+    // l'autodemolizione non li consuma. Le secondarie ACI stanno nello stesso
+    // archivio e si riconoscono dalla classe.
+    const secondarie = (await fetchAll(b.entities.Secondaria, { stato: 'terminato' })).filter(r => !eAci(r));
     const existingPlans = await b.entities.PianificazioneSettimanale.list('-created_date', 5000);
 
     // === FONTE UNICA TARGET: TargetRaccoglitore (anno di riferimento) ===

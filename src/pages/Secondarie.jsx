@@ -151,7 +151,7 @@ export default function Secondarie() {
         </div>
       ) : (
         <>
-          <SecondarieKpi kpi={data?.kpi} byClasse={data?.byClasse} />
+          <SecondarieKpi kpi={data?.kpi} byClasse={data?.byClasse} canali={data?.canali} />
 
           {/* Filtri rapidi */}
           <div className="border rounded-lg p-4 space-y-3">

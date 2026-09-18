@@ -78,9 +78,11 @@ export default async function(req) {
 
       const origine = (r.stoccaggio || 'N/D').trim();
       const dest = (r.destinazione || 'N/D').trim();
-      const trattaKey = `${origine} -> ${dest}`;
+      // La tratta e' per canale: una riga non somma mai rete e autodemolizione.
+      const canale = canaleDi(r) === 'ACI' ? 'ACI' : 'Rete';
+      const trattaKey = `${canale} | ${origine} -> ${dest}`;
       if (!byTratta[trattaKey]) {
-        byTratta[trattaKey] = { origine, destinazione: dest, ordini: 0, peso_kg: 0, quantita: 0, trasportatore: r.trasportatore || '', partner: r.partner_operativo || '' };
+        byTratta[trattaKey] = { canale, origine, destinazione: dest, ordini: 0, peso_kg: 0, quantita: 0, trasportatore: r.trasportatore || '', partner: r.partner_operativo || '' };
       }
       byTratta[trattaKey].ordini++;
       byTratta[trattaKey].peso_kg += peso;
@@ -92,12 +94,13 @@ export default async function(req) {
     for (const r of filtered) {
       const origine = (r.stoccaggio || 'N/D').trim();
       const dest = (r.destinazione || 'N/D').trim();
-      const trattaKey = `${origine} -> ${dest}`;
+      const canale = canaleDi(r) === 'ACI' ? 'ACI' : 'Rete';
+      const trattaKey = `${canale} | ${origine} -> ${dest}`;
       const mese = r.mese || 'N/D';
       const classe = r.classe || 'N/D';
       const settimana = r.settimane || 'N/D';
 
-      if (!matrix[trattaKey]) matrix[trattaKey] = { origine, destinazione: dest, mesi: {}, classi: {}, settimane: {} };
+      if (!matrix[trattaKey]) matrix[trattaKey] = { canale, origine, destinazione: dest, mesi: {}, classi: {}, settimane: {} };
       const m = matrix[trattaKey];
       if (!m.mesi[mese]) m.mesi[mese] = { ordini: 0, peso_kg: 0, quantita: 0 };
       m.mesi[mese].ordini++;

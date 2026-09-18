@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetrics } from "../../shared/primarieReteAnalytics.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { canaleDi } from "../../shared/canaleSecondaria.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { formatoTonnellate } from "../../shared/formato.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
@@ -93,8 +94,12 @@ export default async function(req) {
           attuali.add(key);
           if (existingKeys.has(key)) continue; // skip duplicati
           existingKeys.add(key);
+          // Le regole si valutano su un formulario alla volta, quindi i canali non
+          // si sommano mai; ma su una secondaria va detto di quale canale e',
+          // perche' rete e autodemolizione si guardano separatamente.
+          const canale = entityName === 'Secondaria' ? canaleDi(record) : null;
           newAlerts.push({
-            titolo: violazione.titolo,
+            titolo: canale === 'ACI' ? `${violazione.titolo} · ACI` : violazione.titolo,
             descrizione: violazione.descrizione,
             severita: regola.severita || 'warning',
             modulo,
