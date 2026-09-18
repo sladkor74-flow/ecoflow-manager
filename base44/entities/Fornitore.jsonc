@@ -42,6 +42,14 @@
       "default": false,
       "description": "Societa' del gruppo: compare nei riepiloghi con le tonnellate ma non viene fatturata, perche' non si puo' fatturare a se stessi."
     },
+    "fattura_tramite_id": {
+      "type": "string",
+      "description": "Subfornitore: il fornitore principale sotto cui lavora. Vuoto per chi fattura in proprio."
+    },
+    "fattura_tramite_nome": {
+      "type": "string",
+      "description": "Ragione sociale del fornitore principale che fattura anche le prestazioni di questo soggetto. Nella fatturazione le sue tonnellate si accorpano al principale, con la tariffa del principale, e restano visibili come 'di cui'; nei formulari e nei target il soggetto resta se stesso."
+    },
     "piva": {
       "type": "string"
     },

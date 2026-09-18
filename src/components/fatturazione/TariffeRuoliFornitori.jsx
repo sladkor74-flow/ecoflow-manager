@@ -23,15 +23,24 @@ export default function TariffeRuoliFornitori() {
   };
   useEffect(() => { load(); }, []);
 
-  const toggle = async (f, key) => {
-    const val = !f[key];
+  const salva = async (f, dati) => {
     try {
       await base44.functions.invoke('gestisciAnagrafiche', {
-        entita: 'Fornitore', operazione: 'update', id: f.id,
-        dati: { [key]: val },
+        entita: 'Fornitore', operazione: 'update', id: f.id, dati,
       });
-      setFornitori(prev => prev.map(x => x.id === f.id ? { ...x, [key]: val } : x));
+      setFornitori(prev => prev.map(x => x.id === f.id ? { ...x, ...dati } : x));
     } catch (e) { alert(e?.response?.data?.error || e?.message); }
+  };
+
+  const toggle = (f, key) => salva(f, { [key]: !f[key] });
+
+  // Un subfornitore lavora sotto un altro fornitore: le sue prestazioni le
+  // fattura il principale, con la tariffa del principale, e nella fatturazione
+  // restano visibili come "di cui". Il soggetto resta se stesso nei formulari e
+  // nei target: qui si dice soltanto a chi si paga.
+  const cambiaTramite = (f, id) => {
+    const scelto = fornitori.find(x => x.id === id);
+    salva(f, { fattura_tramite_id: scelto ? scelto.id : '', fattura_tramite_nome: scelto ? scelto.ragione_sociale : '' });
   };
 
   const hasAnyRuolo = f => RUOLI.some(r => f[r.key]);
@@ -66,6 +75,7 @@ export default function TariffeRuoliFornitori() {
               {RUOLI.map(r => <th key={r.key} className="text-center px-2 py-2 font-semibold whitespace-nowrap">{r.label}</th>)}
               <th className="text-center px-2 py-2 font-semibold">Interno</th>
               <th className="text-center px-2 py-2 font-semibold whitespace-nowrap">Tratt. Ecotyre</th>
+              <th className="text-left px-2 py-2 font-semibold whitespace-nowrap">Fattura tramite</th>
             </tr>
           </thead>
           <tbody>
@@ -89,13 +99,27 @@ export default function TariffeRuoliFornitori() {
                     <span className="text-muted-foreground">—</span>
                   )}
                 </td>
+                <td className="px-2 py-2">
+                  <select
+                    value={f.fattura_tramite_id || ''}
+                    onChange={e => cambiaTramite(f, e.target.value)}
+                    className="w-full max-w-[210px] px-2 py-1 rounded-md border bg-card text-xs"
+                    title="Se questo soggetto è un subfornitore, scegli il fornitore che ne fattura le prestazioni"
+                  >
+                    <option value="">fattura in proprio</option>
+                    {fornitori.filter(x => x.id !== f.id && !x.fattura_tramite_id).map(x => (
+                      <option key={x.id} value={x.id}>{x.ragione_sociale}</option>
+                    ))}
+                  </select>
+                </td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={9} className="text-center py-6 text-muted-foreground">Nessun fornitore.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={10} className="text-center py-6 text-muted-foreground">Nessun fornitore.</td></tr>}
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-muted-foreground">Un fornitore può svolgere più ruoli. Contrassegna come Interno le società del gruppo: compariranno nei riepiloghi con le tonnellate ma senza importo. «Tratt. Ecotyre» si attiva solo per impianti (ruolo Trattamento o Stoccaggio): indica che Ecotyre paga il trattamento direttamente, quindi SMOCO percepisce il solo trasporto (voce Trasp della prefattura).</p>
+      <p className="text-xs text-muted-foreground">Un fornitore può svolgere più ruoli. Contrassegna come Interno le società del gruppo: compariranno nei riepiloghi con le tonnellate ma senza importo. «Tratt. Ecotyre» si attiva solo per impianti (ruolo Trattamento o Stoccaggio): indica che Ecotyre paga il trattamento direttamente, quindi SMOCO percepisce il solo trasporto (voce Trasp della prefattura).
+        «Fattura tramite» serve per i subfornitori: chi raccoglie con il proprio nome ma viene pagato attraverso un altro fornitore. Nella fatturazione le sue tonnellate si accorpano al principale, con la tariffa del principale, e restano visibili come «di cui»; nei formulari, nei target e nei report il soggetto resta se stesso.</p>
     </div>
   );
 }

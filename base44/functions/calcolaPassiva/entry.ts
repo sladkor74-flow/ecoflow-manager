@@ -3,6 +3,7 @@ import { fetchAll } from '../../shared/fetchAll.ts';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { getRegioneFromProvincia } from '../../shared/regioneMap.ts';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
+import { mappaFatturazione, fatturaA } from "../../shared/subfornitori.ts";
 
 const MESI_MAP = {
   'gennaio': 0, 'febbraio': 1, 'marzo': 2, 'aprile': 3, 'maggio': 4, 'giugno': 5,
@@ -121,6 +122,21 @@ function findTariffaSecondaria(tariffe, trasKey, produttore, destinatario, tipol
   return null;
 }
 
+// ─── Subraccoglitori: il "di cui" da mostrare accanto al fornitore che fattura ───
+function segnaDiCui(mappa, nome, peso, viaggioKey) {
+  if (!mappa.has(nome)) mappa.set(nome, { peso_kg: 0, viaggiSet: new Set() });
+  const d = mappa.get(nome);
+  d.peso_kg += peso;
+  d.viaggiSet.add(viaggioKey);
+}
+
+function elencoDiCui(mappa) {
+  if (!mappa || mappa.size === 0) return [];
+  return [...mappa.entries()].map(([fornitore, d]) => ({
+    fornitore, tonnellate: round3(d.peso_kg / 1000), viaggi: d.viaggiSet.size,
+  }));
+}
+
 // ─── Calcolo importo ───
 function calcImporto(um, valore, peso_kg, viaggi) {
   if (!um) return 0;
@@ -197,6 +213,10 @@ export default async function(req) {
       });
     }
 
+    // Chi fattura per chi: un subraccoglitore raccoglie col proprio nome ma le sue
+    // tonnellate le fattura il fornitore principale, con la tariffa del principale.
+    const perFattura = mappaFatturazione(fornitoriAll);
+
     const primarieReteF = filterRecords(primarieRete);
     const primarieAciF = filterRecords(primarieAci);
     const secondarieF = filterRecords(secondarieAll);
@@ -238,9 +258,11 @@ export default async function(req) {
     const raccPerTras = new Map();     // €/viaggio: trasKey
 
     for (const r of raccoglitoriSource) {
-      const trasportatore = String(r.trasportatore || '').trim();
-      if (!trasportatore) continue;
-      const trasKey = normalizzaRagioneSociale(trasportatore);
+      const raccoglitore = String(r.trasportatore || '').trim();
+      if (!raccoglitore) continue;
+      const fatt = fatturaA(perFattura, raccoglitore);
+      const trasportatore = fatt.nome;
+      const trasKey = fatt.chiave;
       const provincia = norm(r.provincia);
       const destinazione = norm(r.destinazione);
       const regione = getRegione(r);
@@ -271,12 +293,13 @@ export default async function(req) {
         if (!raccPerTras.has(trasKey)) {
           raccPerTras.set(trasKey, {
             trasportatore, trasKey, interno,
-            peso_kg: 0, viaggiSet: new Set(), perTariffa: new Map(),
+            peso_kg: 0, viaggiSet: new Set(), perTariffa: new Map(), diCui: new Map(),
           });
         }
         const g = raccPerTras.get(trasKey);
         g.peso_kg += peso;
         g.viaggiSet.add(viaggioKey);
+        if (fatt.subfornitore) segnaDiCui(g.diCui, fatt.subfornitore, peso, viaggioKey);
         if (!g.perTariffa.has(tk)) g.perTariffa.set(tk, { tariffa, viaggiSet: new Set(), peso_kg: 0 });
         const pt = g.perTariffa.get(tk);
         pt.viaggiSet.add(viaggioKey);
@@ -286,13 +309,14 @@ export default async function(req) {
         if (!raccPerGroup.has(key)) {
           raccPerGroup.set(key, {
             trasportatore, trasKey, provincia, destinazione, interno,
-            tariffa, peso_kg: 0, viaggiSet: new Set(), classi_set: new Set(),
+            tariffa, peso_kg: 0, viaggiSet: new Set(), classi_set: new Set(), diCui: new Map(),
           });
         }
         const g = raccPerGroup.get(key);
         g.peso_kg += peso;
         g.viaggiSet.add(viaggioKey);
         if (classe) g.classi_set.add(classe);
+        if (fatt.subfornitore) segnaDiCui(g.diCui, fatt.subfornitore, peso, viaggioKey);
       }
     }
 
@@ -306,7 +330,7 @@ export default async function(req) {
       let importo = 0;
       if (g.tariffa && !g.interno) importo = calcImporto(um, valore, g.peso_kg, g.viaggiSet.size);
       raccoglitoriRows.push({
-        fornitore: g.trasportatore, fornitore_norm: g.trasKey, interno: g.interno,
+        fornitore: g.trasportatore, fornitore_norm: g.trasKey, interno: g.interno, di_cui: elencoDiCui(g.diCui),
         riga: {
           provincia: g.provincia || '—', destinazione: g.destinazione || '—',
           classe: Array.from(g.classi_set).join(', ') || '—',
@@ -328,7 +352,7 @@ export default async function(req) {
         um = pt.tariffa.unita_misura; valore = pt.tariffa.valore;
       }
       raccoglitoriRows.push({
-        fornitore: g.trasportatore, fornitore_norm: g.trasKey, interno: g.interno,
+        fornitore: g.trasportatore, fornitore_norm: g.trasKey, interno: g.interno, di_cui: elencoDiCui(g.diCui),
         riga: {
           provincia: '—', destinazione: '—', classe: '—',
           tonnellate: round3(tonnellate), viaggi,
@@ -345,16 +369,25 @@ export default async function(req) {
       if (!raccByForn.has(row.fornitore_norm)) {
         raccByForn.set(row.fornitore_norm, {
           fornitore: row.fornitore, interno: row.interno,
-          righe: [], totale_tonnellate: 0, totale_euro: 0,
+          righe: [], totale_tonnellate: 0, totale_euro: 0, diCui: new Map(),
         });
       }
       const f = raccByForn.get(row.fornitore_norm);
       f.righe.push(row.riga);
       f.totale_tonnellate += row.riga.tonnellate;
       f.totale_euro += row.riga.importo;
+      for (const d of (row.di_cui || [])) {
+        const prima = f.diCui.get(d.fornitore) || { peso_kg: 0, viaggi: 0 };
+        f.diCui.set(d.fornitore, { peso_kg: prima.peso_kg + d.tonnellate * 1000, viaggi: prima.viaggi + d.viaggi });
+      }
     }
     const raccoglitori = Array.from(raccByForn.values()).map(f => ({
-      ...f, totale_tonnellate: round3(f.totale_tonnellate), totale_euro: round2(f.totale_euro),
+      fornitore: f.fornitore, interno: f.interno, righe: f.righe,
+      totale_tonnellate: round3(f.totale_tonnellate), totale_euro: round2(f.totale_euro),
+      // Le tonnellate dei subraccoglitori sono comprese nel totale: si mostrano
+      // per sapere quanto ha portato ciascuno, non per fatturarle a lui.
+      di_cui: [...f.diCui.entries()].map(([fornitore, v]) => ({ fornitore, tonnellate: round3(v.peso_kg / 1000), viaggi: v.viaggi }))
+        .sort((a, b) => b.tonnellate - a.tonnellate),
     })).sort((a, b) => b.totale_euro - a.totale_euro);
 
     const tonnellateRaccoglitori = raccoglitori.reduce((s, f) => s + f.totale_tonnellate, 0);

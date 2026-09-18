@@ -49,6 +49,17 @@ export default function PassivaRaccoglitoriTable({ data }) {
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(f.totale_euro, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   <td></td>
                 </tr>
+                {/* Le tonnellate di un subraccoglitore sono già dentro il totale
+                    del fornitore che le fattura: qui si dice solo quante sono. */}
+                {(f.di_cui || []).map((d, di) => (
+                  <tr key={`${fi}-dicui-${di}`} className="bg-muted/10 text-xs text-muted-foreground">
+                    <td className="px-3 py-1 pl-8">di cui {d.fornitore}</td>
+                    <td className="px-3 py-1 text-right tabular-nums">{formatNumber(d.tonnellate)}</td>
+                    <td className="px-3 py-1 text-right tabular-nums">{d.viaggi}</td>
+                    <td colSpan={2}></td>
+                    <td className="px-3 py-1">subraccoglitore, fatturato da {f.fornitore}</td>
+                  </tr>
+                ))}
               </React.Fragment>
             ))}
           </tbody>
