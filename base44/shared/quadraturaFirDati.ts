@@ -12,14 +12,20 @@
 
 import { fetchAll, perPagina } from "./fetchAll.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
+import { eAci } from "./canaleSecondaria.ts";
 
 export const GIORNI_FASCIA = 4;
 
 // I flussi che il gestionale sa contare, con l'entita' da cui si leggono.
+//
+// Le secondarie stanno tutte nello stesso archivio, come nel file del portale:
+// quelle dell'autodemolizione si riconoscono dalla classe e vanno contate a
+// parte, perche' ACI e rete sono canali indipendenti.
 export const FLUSSI_DATI = [
   { chiave: 'rete_primarie', entita: 'PrimariaRete', movimento: null, caricamenti: ['primarie_rete', 'primarie'] },
-  { chiave: 'rete_secondarie', entita: 'Secondaria', movimento: null, caricamenti: ['secondarie'] },
+  { chiave: 'rete_secondarie', entita: 'Secondaria', movimento: null, canale: 'RETE', caricamenti: ['secondarie'] },
   { chiave: 'aci_primarie', entita: 'PrimariaAci', movimento: null, caricamenti: ['primarie_aci', 'primarie'] },
+  { chiave: 'aci_secondarie', entita: 'Secondaria', movimento: null, canale: 'ACI', caricamenti: ['secondarie'] },
   { chiave: 'extra_primarie', entita: 'ExtraRaccolta', movimento: 'primaria', caricamenti: ['extra_raccolta'] },
   { chiave: 'extra_secondarie', entita: 'ExtraRaccolta', movimento: 'secondaria', caricamenti: ['extra_raccolta'] },
 ];
@@ -108,6 +114,7 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null) {
       if (!d || d < primoFascia || d > ultimoFascia) continue;
       const movimento = String(r.tipo_movimento || 'primaria').toLowerCase().trim();
       if (f.movimento && movimento !== f.movimento) continue;
+      if (f.canale && (f.canale === 'ACI') !== eAci(r)) continue;
       const dentro = d >= inizio && d <= fine;
       const fir = formulario(r);
       if (!eTerminato(r)) {

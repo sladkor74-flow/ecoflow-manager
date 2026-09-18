@@ -3,9 +3,14 @@ import { MESI } from "../../shared/raccoltoCalculator.ts";
 import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
 import { matchesFilter, matchesFilterString, matchesFilterLower } from "../../shared/multiFilter.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { canaleDi } from "../../shared/canaleSecondaria.ts";
 
 // Calcola le matrici di aggregazione dei trasporti secondari per tratta.
-// Payload: { filters: { stoccaggio?, destinazione?, mese?, settimana?, classe?, trasportatore?, anno? } }
+// Payload: { filters: { canale?, stoccaggio?, destinazione?, mese?, settimana?, classe?, trasportatore?, anno? } }
+//
+// Rete e ACI sono canali indipendenti e nello stesso archivio: il filtro canale
+// serve a guardarli separati, e i totali per canale tornano sempre nella
+// risposta, cosi' si vede subito quando una vista li comprende entrambi.
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -19,6 +24,7 @@ export default async function(req) {
 
     // Applica filtri (supporto multi-selezione via array)
     const filtered = all.filter(r => {
+      if (!matchesFilter(canaleDi(r) === 'ACI' ? 'ACI' : 'Rete', filters.canale)) return false;
       if (!matchesFilter((r.stoccaggio || '').trim(), filters.stoccaggio)) return false;
       if (!matchesFilter((r.destinazione || '').trim(), filters.destinazione)) return false;
       if (!matchesFilter(r.mese, filters.mese)) return false;
@@ -121,6 +127,7 @@ export default async function(req) {
       province: [...new Set(all.map(r => (r.provincia || '').trim()).filter(Boolean))].sort(),
       regioni: [...new Set(all.map(r => (r.regione || getRegioneFromProvincia(r.provincia) || '').trim()).filter(Boolean))].sort(),
       stati: [...new Set(all.map(r => (r.stato || '').trim()).filter(Boolean))].sort(),
+      canali: ['Rete', 'ACI'].filter(c => all.some(r => (canaleDi(r) === 'ACI' ? 'ACI' : 'Rete') === c)),
       anni: [...new Set(all.map(r => {
         const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
         if (!d) return null;
@@ -139,6 +146,10 @@ export default async function(req) {
       byClasse: Object.values(byClasse),
       byTratta: Object.values(byTratta).sort((a: any, b: any) => b.peso_kg - a.peso_kg),
       matrix: Object.values(matrix),
+      canali: ['Rete', 'ACI'].map(c => {
+        const righe = filtered.filter(r => (canaleDi(r) === 'ACI' ? 'ACI' : 'Rete') === c);
+        return { canale: c, ordini: righe.length, peso_kg: righe.reduce((s, r) => s + (r.peso_effettivo || 0), 0) };
+      }).filter(c => c.ordini > 0),
       filterOptions,
       filteredCount: filtered.length,
     });

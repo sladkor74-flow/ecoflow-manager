@@ -15,8 +15,8 @@ const MESI = [
 
 const GRUPPI = [
   { chiave: 'rete', titolo: 'Rete', pivot: ['raccolta', 'impianti', 'viaggiRete'] },
-  { chiave: 'aci', titolo: 'ACI', pivot: ['aci'] },
-  { chiave: 'secondarie', titolo: 'Secondarie', pivot: ['secondarie', 'viaggiSecondarie'] },
+  { chiave: 'aci', titolo: 'ACI', pivot: ['aci', 'secondarieAci', 'viaggiSecondarieAci'] },
+  { chiave: 'secondarie', titolo: 'Secondarie di rete', pivot: ['secondarie', 'viaggiSecondarie'] },
   { chiave: 'terziarie', titolo: 'Terziarie ed extra', pivot: ['terziarie', 'extra'] },
 ];
 

@@ -29,13 +29,14 @@ export const FONTI = [
 export const NOME_FONTE = { winsinfo: 'WINSINFO', ecotyre: 'portale Ecotyre', gestionale: 'gestionale' };
 
 // I flussi che il file puo' contenere, nell'ordine in cui vanno letti e mostrati.
-// "entita" e' il nome dell'entita' del gestionale da cui si prendono i movimenti:
-// le secondarie ACI non ne hanno una, perche' il gestionale non le registra.
+// "entita" e' il nome dell'entita' del gestionale da cui si prendono i movimenti.
+// Le secondarie di rete e quelle ACI stanno nello stesso archivio, come nel file
+// del portale, e si dividono per classe: vedi shared/canaleSecondaria.ts.
 export const FLUSSI = {
   rete_primarie: { titolo: 'Raccolta rete', canale: 'RETE', entita: 'PrimariaRete', nota_file: 'primarie rete' },
   rete_secondarie: { titolo: 'Secondarie rete', canale: 'RETE', entita: 'Secondaria', nota_file: 'secondarie' },
   aci_primarie: { titolo: 'Raccolta ACI', canale: 'ACI', entita: 'PrimariaAci', nota_file: 'primarie ACI' },
-  aci_secondarie: { titolo: 'Secondarie ACI', canale: 'ACI', entita: null, nota_file: null },
+  aci_secondarie: { titolo: 'Secondarie ACI', canale: 'ACI', entita: 'Secondaria', nota_file: 'secondarie' },
   extra_primarie: { titolo: 'Extra raccolta', canale: 'EXTRA RACCOLTA', entita: 'ExtraRaccolta', nota_file: 'extra raccolta' },
   extra_secondarie: { titolo: 'Secondarie di extra raccolta', canale: 'EXTRA RACCOLTA', entita: 'ExtraRaccolta', nota_file: 'extra raccolta' },
 };
@@ -466,7 +467,7 @@ export function confronta(lettura, gestionale, periodo) {
     } else if (!nelFile) {
       note.push(`Nel file non c'è nessuna tabella di questo flusso, mentre il gestionale ha ${fir(totali.gestionale.n)} per ${formatoKg(totali.gestionale.kg)} kg nella settimana.`);
     } else if (totali.gestionale.n === 0) {
-      note.push(`Nel gestionale non risulta nessun movimento in questa settimana: il file delle ${def.nota_file} non è ancora stato caricato.`);
+      note.push(`Nel gestionale non risulta nessun movimento di questo flusso nella settimana: o il file delle ${def.nota_file} non è ancora stato caricato, o a portale quei formulari cadono in un'altra settimana.`);
     }
     if (confrontabile && nelFile && dati.ultimo_caricamento && dati.ultimo_caricamento.data && dati.ultimo_caricamento.data < periodo.fine) {
       note.push(`L'ultimo caricamento delle ${def.nota_file} è del ${dataIt(dati.ultimo_caricamento.data)}, prima della fine della settimana (${dataIt(periodo.fine)}): nel gestionale i movimenti successivi non ci sono ancora.`);

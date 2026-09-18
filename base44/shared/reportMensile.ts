@@ -11,6 +11,7 @@
 // sommerebbero lo stesso mese di anni diversi.
 
 import { getClasseFromProdotto, getRegioneFromProvincia } from "./dataEnrichment.ts";
+import { eAci } from "./canaleSecondaria.ts";
 import { meseToIndice } from "./filtroPeriodo.ts";
 
 export const MESI = [
@@ -108,21 +109,45 @@ export const PIVOT_DEFS = {
     misure: ['peso'],
   },
   secondarie: {
-    titolo: 'Secondarie',
-    nota: 'Trasferimenti dagli stoccaggi agli impianti, per classe e vettore.',
+    titolo: 'Secondarie di rete',
+    nota: 'Trasferimenti dagli stoccaggi agli impianti, per classe e vettore. Solo rete: le secondarie dell\'autodemolizione stanno nella scheda ACI.',
     entita: 'Secondaria',
     gruppo: 'secondarie',
     periodo: 'anno',
+    canale: 'RETE',
     righe: ['Stoccaggio', 'Classe', 'Trasportatore'],
     colonna: 'Destinazione',
     misure: ['peso'],
   },
   viaggiSecondarie: {
-    titolo: 'Viaggi secondari per destinazione',
-    nota: 'Numero di viaggi e peso in arrivo a ciascun impianto dagli stoccaggi.',
+    titolo: 'Viaggi secondari di rete per destinazione',
+    nota: 'Numero di viaggi e peso in arrivo a ciascun impianto dagli stoccaggi, solo rete.',
     entita: 'Secondaria',
     gruppo: 'secondarie',
     periodo: 'mese',
+    canale: 'RETE',
+    righe: ['Destinazione', 'Trasportatore'],
+    colonna: null,
+    misure: ['conteggio', 'peso'],
+  },
+  secondarieAci: {
+    titolo: 'Secondarie ACI',
+    nota: 'Autodemolizione trasferita dagli stoccaggi agli impianti. Canale a se\': non si somma mai alle secondarie di rete.',
+    entita: 'Secondaria',
+    gruppo: 'aci',
+    periodo: 'anno',
+    canale: 'ACI',
+    righe: ['Stoccaggio', 'Trasportatore'],
+    colonna: 'Destinazione',
+    misure: ['peso'],
+  },
+  viaggiSecondarieAci: {
+    titolo: 'Viaggi secondari ACI per destinazione',
+    nota: 'Numero di viaggi e peso di autodemolizione in arrivo a ciascun impianto dagli stoccaggi.',
+    entita: 'Secondaria',
+    gruppo: 'aci',
+    periodo: 'anno',
+    canale: 'ACI',
     righe: ['Destinazione', 'Trasportatore'],
     colonna: null,
     misure: ['conteggio', 'peso'],
@@ -152,8 +177,8 @@ export const PIVOT_DEFS = {
 // Le schede del modulo e le pivot che ciascuna contiene, nell'ordine del foglio.
 export const GRUPPI = [
   { chiave: 'rete', titolo: 'Rete', pivot: ['raccolta', 'impianti', 'viaggiRete'] },
-  { chiave: 'aci', titolo: 'ACI', pivot: ['aci'] },
-  { chiave: 'secondarie', titolo: 'Secondarie', pivot: ['secondarie', 'viaggiSecondarie'] },
+  { chiave: 'aci', titolo: 'ACI', pivot: ['aci', 'secondarieAci', 'viaggiSecondarieAci'] },
+  { chiave: 'secondarie', titolo: 'Secondarie di rete', pivot: ['secondarie', 'viaggiSecondarie'] },
   { chiave: 'terziarie', titolo: 'Terziarie ed extra', pivot: ['terziarie', 'extra'] },
 ];
 
@@ -245,6 +270,9 @@ export function calcolaPivot(chiave, records, anno, mese) {
 
   const filtrati = (records || []).filter(r => {
     if (!eTerminato(r)) return false;
+    // Le secondarie di rete e quelle ACI stanno nello stesso archivio: una pivot
+    // di un canale non deve mai contenere le righe dell'altro.
+    if (def.canale && (def.canale === 'ACI') !== eAci(r)) return false;
     const d = dataFine(r);
     if (!d || d.getFullYear() !== annoNum) return false;
     if (def.periodo === 'mese' && d.getMonth() !== meseNum) return false;

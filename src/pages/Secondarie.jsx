@@ -11,6 +11,7 @@ import { getRegioneFromProvincia } from '@/lib/regioneMap';
 import { fmtTon, formatNumber } from '@/lib/utils';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { fetchAllClient } from '@/lib/fetchAllClient';
+import { canaleDi } from '@/lib/canaleSecondaria';
 
 export default function Secondarie() {
   const [data, setData] = useState(null);
@@ -19,7 +20,7 @@ export default function Secondarie() {
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
-  const [filters, setFilters] = useState({ stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
+  const [filters, setFilters] = useState({ canale: [], stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
   const [viewMode, setViewMode] = useState('matrix');
   const [searchIdOrdine, setSearchIdOrdine] = useState('');
 
@@ -38,6 +39,7 @@ export default function Secondarie() {
       const all = await fetchAllClient(base44.entities.Secondaria);
       const filtered = all.filter(r => {
         if (searchIdOrdine && !(r.id_ordine || '').toLowerCase().includes(searchIdOrdine.toLowerCase().trim())) return false;
+        if (filters.canale.length > 0 && !filters.canale.includes(canaleDi(r) === 'ACI' ? 'ACI' : 'Rete')) return false;
         if (filters.stoccaggio.length > 0 && !filters.stoccaggio.includes((r.stoccaggio || '').trim())) return false;
         if (filters.destinazione.length > 0 && !filters.destinazione.includes((r.destinazione || '').trim())) return false;
         if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;
@@ -102,7 +104,7 @@ export default function Secondarie() {
   };
 
   const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v) || searchIdOrdine;
-  const resetFilters = () => setFilters({ stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
+  const resetFilters = () => setFilters({ canale: [], stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
   const opts = data?.filterOptions || {};
 
   // Stati garantiti sempre presenti nel filtro, anche senza record (valori normalizzati in minuscolo)
@@ -163,6 +165,7 @@ export default function Secondarie() {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
               <input type="text" value={searchIdOrdine} onChange={e => setSearchIdOrdine(e.target.value)} placeholder="Cerca ID ordine..." className="w-full border rounded-md px-3 py-2 text-sm" />
+              <MultiSelect allLabel="Rete e ACI insieme" options={opts.canali || ['Rete', 'ACI']} selected={filters.canale} onChange={v => setFilters(p => ({ ...p, canale: v }))} />
               <MultiSelect allLabel="Tutte le regioni" options={opts.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
               <MultiSelect allLabel="Tutti gli stati" options={statiOptions.map(s => ({ value: s, label: prettyStato(s) }))} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
               <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" />
@@ -176,6 +179,18 @@ export default function Secondarie() {
               <MultiSelect allLabel="Tutti gli anni" options={(opts.anni || []).map(a => String(a))} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v }))} />
             </div>
           </div>
+
+          {(data?.canali || []).length > 1 && (
+            <div className="flex items-start gap-2 border border-amber-200 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
+              <Filter className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>
+                Questa vista comprende <strong>rete e ACI insieme</strong>:{' '}
+                {(data.canali || []).map(c => `${c.canale} ${fmtTon(c.peso_kg / 1000)} t in ${c.ordini} ${c.ordini === 1 ? 'viaggio' : 'viaggi'}`).join(', ')}.
+                Sono canali indipendenti e non vanno sommati: usa il filtro <em>Rete e ACI insieme</em> per guardarli separati.
+                Nel Report Mensile le secondarie di rete e quelle ACI hanno già pivot distinte.
+              </span>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-3">
