@@ -1,0 +1,51 @@
+{
+  "name": "IpotesiMensileSecondarie",
+  "type": "object",
+  "properties": {
+    "anno": {
+      "type": "number"
+    },
+    "impianto": {
+      "type": "string",
+      "description": "Impianto di destinazione a cui si riferisce l'ipotesi"
+    },
+    "mese": {
+      "type": "string",
+      "description": "Nome italiano del mese"
+    },
+    "primaria_attesa_kg": {
+      "type": "number",
+      "description": "Quanto si prevede che arrivi all'impianto direttamente in primaria in questo mese. Vuoto: lo stima il gestionale con la media degli ultimi tre mesi conclusi"
+    },
+    "viaggi_previsti": {
+      "type": "number",
+      "description": "Quanti viaggi di secondaria si vogliono programmare in questo mese. Vuoto: li calcola il gestionale spalmando il residuo sui mesi che restano"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "anno",
+    "impianto",
+    "mese"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

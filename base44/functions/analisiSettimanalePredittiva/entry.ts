@@ -6,7 +6,8 @@ import { eAci } from "../../shared/canaleSecondaria.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
-const KG_PER_VIAGGIO = 14000;
+// Media reale di un viaggio di secondaria: 13,5 tonnellate.
+const KG_PER_VIAGGIO = 13500;
 const DATA_FINE_DEFAULT = '2026-12-18';
 
 function getMonday(date) {
