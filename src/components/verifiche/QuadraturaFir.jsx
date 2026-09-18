@@ -8,9 +8,9 @@ import {
 import { formatKg } from '@/lib/utils';
 import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
 import {
-  oggiRoma, aggiungiGiorni, settimanaIso, intervalloSettimana, settimaneNellAnno, descriviIntervallo, dataIt,
+  oggiRoma, aggiungiGiorni, settimanaIso, intervalloSettimana, settimaneNellAnno, descriviIntervallo,
 } from '@/lib/verifiche';
-import { NOME_VERDETTO, COLORE_VERDETTO, misura, tonnellate, FORMATI, tipoDiFile, leggiPivotDaExcel } from '@/lib/quadraturaFir';
+import { NOME_VERDETTO, COLORE_VERDETTO, misura, tonnellate, giornoRoma, FORMATI, tipoDiFile, leggiPivotDaExcel } from '@/lib/quadraturaFir';
 import { esportaQuadraturaFirPdf } from '@/lib/quadraturaFirPdf';
 
 // Sezione del modulo Verifiche: la quadratura settimanale dei formulari.
@@ -334,7 +334,7 @@ export default function QuadraturaFir({ isAdmin }) {
                   : <><AlertTriangle className="w-5 h-5 text-amber-700" /><span className="font-semibold text-amber-900">{q.incongruenti} {q.incongruenti === 1 ? 'riga da sistemare' : 'righe da sistemare'} prima di riaggiornare il gestionale.</span></>}
                 <span className="text-sm text-muted-foreground ml-auto">
                   {q.congruenti} righe congruenti · {q.righe_lette} righe lette in {q.tabelle} tabelle · {q.file_nome}
-                  {q.verificata_il ? ` · confronto del ${dataIt(q.verificata_il)}` : ''}
+                  {q.verificata_il ? ` · confronto del ${giornoRoma(q.verificata_il)}` : ''}
                 </span>
               </div>
               {!q.lettura_verificata && (

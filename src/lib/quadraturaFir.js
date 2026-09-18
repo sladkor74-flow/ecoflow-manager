@@ -42,6 +42,19 @@ export function misura(v) {
 
 export const tonnellate = (kg) => formatTonnellate((Number(kg) || 0) / 1000);
 
+/**
+ * Il giorno di un istante, letto sull'orologio italiano.
+ *
+ * Gli istanti sono salvati in UTC: tagliare la stringa mostrerebbe il giorno
+ * prima per tutto quello che si fa dopo le due di notte d'estate.
+ */
+export function giornoRoma(istante) {
+  if (!istante) return '';
+  const d = new Date(/Z$|[+-]\d\d:?\d\d$/.test(String(istante)) ? istante : istante + 'Z');
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
 export const FORMATI = [
   '.pdf', '.png', '.jpg', '.jpeg', '.webp', '.xlsx', '.xls', '.xlsm', '.ods',
   'application/pdf', 'image/png', 'image/jpeg', 'image/webp',
