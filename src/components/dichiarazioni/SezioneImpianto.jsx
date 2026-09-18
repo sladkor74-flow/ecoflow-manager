@@ -57,7 +57,7 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                 <tbody>
                   {mesiConDati.map(m => {
                     const d = m.dichiarazione;
-                    const avvisi = controlliDichiarazione(d, m.conferito_kg, sito.operazione).filter(c => c.livello === 'attenzione');
+                    const avvisi = controlliDichiarazione(d, m.conferito_kg, sito.operazione, { tipo_destinazione: sito.tipo_destinazione, canale: flusso.canale }).filter(c => c.livello === 'attenzione');
                     return (
                       <tr key={m.mese} className="border-b last:border-b-0">
                         <td className="px-3 py-1.5 font-medium">{m.mese}</td>

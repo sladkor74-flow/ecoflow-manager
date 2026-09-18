@@ -69,12 +69,21 @@ const kg = (v) => Math.round(Number(v) || 0);
  * Controlli di una dichiarazione mensile. `conferito` sono i kg conferiti in quel
  * mese in quell'impianto sullo stesso canale.
  */
-export function controlliDichiarazione(d, conferito, operazione) {
+export function controlliDichiarazione(d, conferito, operazione, dove = {}) {
   const esiti = [];
   const q = kg(d && d.quantita_kg);
   const materiali = kg(sommaMateriali(d));
-  if (!q && conferito > 0) {
-    esiti.push({ tipo: 'mancante', livello: 'attenzione', testo: `Conferiti ${conferito.toLocaleString('it-IT')} kg in questo mese e nessuna dichiarazione.` });
+  // Uno stoccaggio non dichiara: quello che riceve riparte come secondaria ed e'
+  // l'impianto che lo lavora a dichiararlo. E sui canali diversi dalla rete la
+  // dichiarazione mensile non e' la regola: si segnala, ma senza allarme.
+  const stoccaggio = dove.tipo_destinazione === 'stoc';
+  if (!q && conferito > 0 && !stoccaggio) {
+    const canale = dove.canale || 'RETE';
+    esiti.push({
+      tipo: 'mancante',
+      livello: canale === 'RETE' ? 'attenzione' : 'info',
+      testo: `Conferiti ${conferito.toLocaleString('it-IT')} kg in questo mese e nessuna dichiarazione.`,
+    });
   }
   if (q > 0 && materiali === 0) {
     esiti.push({ tipo: 'senza_dettaglio', livello: 'info', testo: 'Manca il dettaglio dei materiali ricavati.' });
