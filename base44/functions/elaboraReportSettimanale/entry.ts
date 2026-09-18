@@ -11,13 +11,14 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 //
 // Payload, uno dei tre:
 //   { verifica_id, tabelle: [{ nome, riga_iniziale, righe: [[...], ...] }] }  file Excel o CSV
-//   { verifica_id, file: { nome, mime, base64 } }                              PDF o immagine
+//   { verifica_id, file: { file_uri, mime } }                                   PDF o immagine caricata dal browser
 //   { verifica_id, solo_verifica: true }        ripete il confronto sulle righe gia' lette
 //   { verifica_id, nessuna_movimentazione: true } l'impianto dichiara che non ci sono state movimentazioni
 //
-// Il file non viene mai salvato. Un Excel arriva gia' aperto dal browser; un PDF
-// o un'immagine passano direttamente all'agente e vengono scartati. Nella
-// verifica restano solo i dati letti, che si cancellano con lei.
+// Un Excel arriva gia' aperto dal browser e non viene mai salvato. Un PDF o
+// un'immagine, che il codice non sa leggere, si caricano nell'archivio privato
+// perche' l'agente li legga da un link firmato, e subito dopo si prova a
+// cancellarli. Nella verifica restano solo i dati letti, che si cancellano con lei.
 //
 // Negli Excel l'agente individua soltanto quali colonne contengono formulario,
 // peso, date e soggetti: i valori li legge il codice, cosi' un formulario non
@@ -25,7 +26,6 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 // dell'agente, e l'esito lo segnala perche' i formulari errati si confermino
 // sull'originale.
 
-const LIMITE_BASE64 = 7 * 1024 * 1024;
 
 // Con piu' report caricati uno dopo l'altro la piattaforma puo' rifiutare le
 // richieste troppo ravvicinate ("Rate limit exceeded"): si riprova dopo una pausa
@@ -42,6 +42,27 @@ async function conRitentativi(fn) {
     }
   }
 }
+
+// Schema della trascrizione di un PDF o di un'immagine: la risposta dell'agente
+// arriva strutturata invece di essere ritagliata da un testo.
+const SCHEMA_TRASCRIZIONE = {
+  type: 'object',
+  properties: {
+    unita_peso: { type: 'string', enum: ['kg', 't'] },
+    righe: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: Object.fromEntries([
+          ['riga', { type: 'integer' }],
+          ...CAMPI_REPORT.map(c => [c, { type: 'string' }]),
+        ]),
+      },
+    },
+    note: { type: 'string' },
+  },
+  required: ['righe'],
+};
 
 const SCHEMA_COLONNE = {
   type: 'object',
@@ -193,15 +214,7 @@ function estraiJson(testo) {
 }
 
 async function leggiFile(base44, file, verifica) {
-  if (!file || !file.base64) throw new Error('File mancante');
-  if (file.base64.length > LIMITE_BASE64) throw new Error('Il file e\' troppo grande per essere letto: carica la versione Excel del report.');
-
-  const gateway = base44.aiGateway && typeof base44.aiGateway.connection === 'function'
-    ? await Promise.resolve(base44.aiGateway.connection())
-    : null;
-  if (!gateway || !gateway.baseURL) {
-    throw new Error('La lettura di PDF e immagini non e\' disponibile su questa app: carica la versione Excel del report.');
-  }
+  if (!file || !file.file_uri) throw new Error('File mancante');
 
   const prompt = [
     `Il documento allegato e' il report settimanale di ${verifica.soggetto_nome}, impianto o stoccaggio di pneumatici fuori uso, con i carichi ricevuti ed eventualmente quelli spediti.`,
@@ -214,27 +227,22 @@ async function leggiFile(base44, file, verifica) {
     '- riga: numero progressivo della riga nel documento',
     ...GUIDA_CAMPI.map(g => '- ' + g),
     '',
-    'Rispondi solo con un oggetto JSON cosi\' fatto:',
-    '{"unita_peso": "kg" oppure "t", "righe": [{"riga": 1, "fir": "", "peso": 0, "data_inizio": "", "data_fine": "", "data": "", "produttore": "", "codice_pdr": "", "destinatario": "", "trasportatore": "", "classe": "", "targa": ""}], "note": ""}',
+    'unita_peso: kg oppure t.',
+    'note: una frase su com\'e\' fatto il documento, in italiano.',
   ].join('\n');
 
-  const allegato = file.mime === 'application/pdf'
-    ? { type: 'file', file: { filename: file.nome || 'report.pdf', file_data: `data:application/pdf;base64,${file.base64}` } }
-    : { type: 'image_url', image_url: { url: `data:${file.mime};base64,${file.base64}` } };
+  // L'agente legge il documento da un link firmato che vale un quarto d'ora.
+  const core = base44.asServiceRole.integrations.Core;
+  const { signed_url } = await core.CreateFileSignedUrl({ file_uri: file.file_uri, expires_in: 900 });
+  const risposta = await core.InvokeLLM({ prompt, file_urls: [signed_url], response_json_schema: SCHEMA_TRASCRIZIONE });
+  const letto = typeof risposta === 'object' && risposta ? risposta : estraiJson(risposta);
 
-  const risposta = await fetch(String(gateway.baseURL).replace(/\/+$/, '') + '/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${gateway.token}` },
-    body: JSON.stringify({ model: 'automatic', messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, allegato] }] }),
-  });
-  if (!risposta.ok) {
-    const dettaglio = (await risposta.text()).slice(0, 300);
-    throw new Error(`L'agente non e' riuscito a leggere il file (${risposta.status}). Carica la versione Excel del report. ${dettaglio}`);
+  // Il file era lì solo per essere letto: se la piattaforma lo consente, via.
+  for (const nome of ['DeleteFile', 'DeletePrivateFile', 'RemoveFile']) {
+    if (typeof core[nome] !== 'function') continue;
+    try { await core[nome]({ file_uri: file.file_uri }); } catch (_e) { /* resta in archivio */ }
+    break;
   }
-  const dati = await risposta.json();
-  const contenuto = dati && dati.choices && dati.choices[0] && dati.choices[0].message ? dati.choices[0].message.content : '';
-  const testo = Array.isArray(contenuto) ? contenuto.map(p => p.text || '').join('') : contenuto;
-  const letto = estraiJson(testo);
 
   const grezze = (letto.righe || []).map((r, i) => {
     const g = { n: Number(r.riga) || i + 1 };
@@ -243,7 +251,7 @@ async function leggiFile(base44, file, verifica) {
   });
   if (grezze.length === 0) throw new Error('Nel documento non ho trovato righe di carico' + (letto.note ? ': ' + letto.note : '.'));
   const { righe, unita } = normalizzaRigheReport(grezze, letto.unita_peso);
-  return { righe, lettura: { modo: file.mime === 'application/pdf' ? 'pdf' : 'immagine', unita, note: letto.note || '', trascritto_da_agente: true } };
+  return { righe, lettura: { modo: file.mime === 'immagine' ? 'immagine' : 'pdf', unita, note: letto.note || '', trascritto_da_agente: true } };
 }
 
 export default async function(req) {

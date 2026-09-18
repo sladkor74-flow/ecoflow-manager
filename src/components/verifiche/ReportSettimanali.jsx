@@ -26,7 +26,7 @@ async function conRitentativi(fn) {
 }
 import {
   GIORNI_CONSERVAZIONE, oggiRoma, aggiungiGiorni, settimanaIso, intervalloSettimana, settimaneNellAnno, descriviIntervallo,
-  dataIt, tonnellate, tipoDiFile, leggiTabelleDaFile, fileInBase64, segnalazioni, analisiInCorso, analisiInterrotta, scaricaExcelVerifica,
+  dataIt, tonnellate, tipoDiFile, leggiTabelleDaFile, segnalazioni, analisiInCorso, analisiInterrotta, scaricaExcelVerifica,
 } from '@/lib/verifiche';
 
 // Sezione 1 del modulo Verifiche: confronto fra i report settimanali inviati da
@@ -255,7 +255,10 @@ export default function ReportSettimanali({ isAdmin }) {
         payload.tabelle = await leggiTabelleDaFile(file, { inizio: intervallo.inizio, fine: intervallo.fine });
         if (payload.tabelle.length === 0) throw new Error('Il file è vuoto.');
       } else {
-        payload.file = { nome: file.name, mime: file.type || (tipo === 'pdf' ? 'application/pdf' : 'image/png'), base64: await fileInBase64(file) };
+        // Un PDF o un'immagine il codice non li sa leggere: si caricano perché
+        // l'agente li legga da un link firmato, e poi si prova a cancellarli.
+        const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
+        payload.file = { file_uri, mime: tipo };
       }
 
       await avviaVerifica(riga, { file_nome: file.name, file_tipo: tipo, stato: 'in_lettura' }, payload);
@@ -326,8 +329,9 @@ export default function ReportSettimanali({ isAdmin }) {
           Il report deve riportare tutte le movimentazioni: ingressi in primaria e ingressi e uscite in secondaria, di rete, ACI ed extra raccolta.
           Se l'impianto comunica che non ce ne sono state, registralo con l'icona della busta: la comunicazione viene verificata e, se i dati la smentiscono, si apre un alert.
           Carica il report inviato da ciascun impianto o stoccaggio: Excel, CSV, PDF o immagine. Gli ingressi si confrontano con le primarie,
-          le uscite con le secondarie; il peso al chilogrammo, la data su quella di fine trasporto. Il file non viene conservato:
-          restano solo i dati letti e l'esito, che si cancellano da soli {GIORNI_CONSERVAZIONE} giorni dopo il caricamento.
+          le uscite con le secondarie; il peso al chilogrammo, la data su quella di fine trasporto. Nella verifica restano solo i dati letti
+          e l'esito, che si cancellano da soli {GIORNI_CONSERVAZIONE} giorni dopo il caricamento: un Excel si legge qui nel browser senza
+          caricare niente, un PDF o un'immagine vengono caricati solo per essere letti e poi rimossi.
         </span>
       </div>
 
