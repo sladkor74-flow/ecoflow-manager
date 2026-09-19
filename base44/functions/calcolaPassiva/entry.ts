@@ -6,6 +6,7 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { mappaFatturazione, fatturaA } from "../../shared/subfornitori.ts";
 import { giornoRoma, annoRoma, meseRoma } from "../../shared/giornoItaliano.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
+import { chiaveFormulario, raggruppaPerFormulario, ordineDi, ticketDi } from "../../shared/formulari.ts";
 
 // Regole del portale sull'ACI, dette dalla direzione il 19/09/2026: una
 // richiesta non si stima sotto i 1.500 kg, e un formulario non si chiude a piu'
@@ -342,18 +343,21 @@ export default async function(req) {
     // ripetuto, quindi una ripetizione non e' la normalita' dell'archivio: e'
     // qualcosa da guardare prima di pagare. Il gestionale la segnala e basta -
     // quale delle due righe sia quella buona lo decide chi conosce il ritiro.
-    const perFir = new Map();
-    const firVisti = new Set();
-    const raccogliFir = (rec) => {
-      if (!rec || !rec.id || firVisti.has(rec.id)) return;
-      firVisti.add(rec.id);
-      const fir = String(rec.numero_fir || '').trim();
-      if (!fir) return;
-      if (!perFir.has(fir)) perFir.set(fir, []);
-      perFir.get(fir).push(rec);
+    // Lo stesso record puo' arrivare da due sorgenti (e' raccolta e insieme
+    // conferimento): si guarda una volta sola. Poi il raggruppamento per
+    // formulario e' quello condiviso, in base44/shared/formulari.ts, cosi' la
+    // regola non viene riscritta a modo suo in ogni modulo.
+    const vistiId = new Set();
+    const righeDelMese = [];
+    const raccogliRiga = (rec) => {
+      if (!rec || !rec.id || vistiId.has(rec.id)) return;
+      vistiId.add(rec.id);
+      if (!chiaveFormulario(rec)) return;
+      righeDelMese.push(rec);
     };
-    for (const rec of raccoglitoriSource) raccogliFir(rec);
-    for (const { r: rec } of impiantiRecords) raccogliFir(rec);
+    for (const rec of raccoglitoriSource) raccogliRiga(rec);
+    for (const { r: rec } of impiantiRecords) raccogliRiga(rec);
+    const perFir = raggruppaPerFormulario(righeDelMese);
     // Lo stesso formulario su piu' ordini non e' un errore: nell'ACI e' il modo
     // normale di stare dentro le regole del portale. Una richiesta ACI non puo'
     // essere stimata sotto i 1.500 kg, e un formulario non puo' chiudersi a piu'
@@ -374,7 +378,7 @@ export default async function(req) {
     for (const [fir, righe] of perFir) {
       if (righe.length < 2) continue;
       const kg = righe.reduce((s, x) => s + Number(x.peso_effettivo || 0), 0);
-      const ordini = [...new Set(righe.map(x => String(x.id_ordine || x.codice_import || '').trim()).filter(Boolean))];
+      const ordini = [...new Set(righe.map(ordineDi).filter(Boolean))];
 
       if (ordini.length > 1) {
         formulariRipartiti.push({
@@ -388,8 +392,8 @@ export default async function(req) {
             const effettivo = Math.round(Number(x.peso_effettivo || 0));
             const massimo = stimato ? Math.round(stimato * SOGLIA_ACI) : 0;
             return {
-              id_ordine: x.id_ordine || x.codice_import || '—',
-              ticket: x.numero_ordine_interno || '—',
+              id_ordine: ordineDi(x) || '—',
+              ticket: ticketDi(x) || '—',
               peso_stimato_kg: stimato,
               peso_effettivo_kg: effettivo,
               massimo_ammesso_kg: massimo,
@@ -419,7 +423,7 @@ export default async function(req) {
       for (const rec of raccoglitoriSource) {
         const stimato = Number(rec.peso_stimato || 0);
         const effettivo = Number(rec.peso_effettivo || 0);
-        const ticket = rec.numero_ordine_interno || '—';
+        const ticket = ticketDi(rec) || '—';
         if (stimato > 0 && effettivo > stimato * SOGLIA_ACI) {
           const eccesso = Math.round((effettivo / stimato - 1) * 1000) / 10;
           anomalie.push({
