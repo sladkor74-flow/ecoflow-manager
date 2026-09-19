@@ -250,10 +250,13 @@ export default async function(req) {
 
     if (tipologia === 'RETE') {
       raccoglitoriSource = primarieReteF;
+      // L'extra raccolta NON entra qui. Prima ci entrava, e cosi' lo stesso
+      // carico si pagava due volte: il trattamento compariva una volta nella
+      // scheda Rete e una seconda, identico, nella scheda Extra Raccolta.
+      // L'extra raccolta e' un canale a se', e si fattura solo nella sua scheda.
       impiantiRecords = [
         ...primarieReteF.map(r => ({ r, provenienza: 'primaria' })),
         ...secondarieNonAci.map(r => ({ r, provenienza: 'secondaria' })),
-        ...extraRaccoltaF.map(r => ({ r, provenienza: 'extra' })),
       ];
       secondarieForBlock = secondarieF;
     } else if (tipologia === 'ACI') {
