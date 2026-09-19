@@ -148,6 +148,58 @@ export function conferimentiSospetti(righe, archivio) {
 }
 
 /**
+ * Chi conferisce su piu' di una destinazione con una tariffa sola.
+ *
+ * Il contratto puo' prevedere un prezzo per destinazione: Emmesse prende 72
+ * euro la tonnellata se scarica a Gatim e 90 se scarica a Irigom. Con una sola
+ * tariffa generica il gestionale paga tutto allo stesso prezzo e nessuno se ne
+ * accorge - e' successo, 4 viaggi su Gatim pagati 90 invece di 72. Chi ha una
+ * destinazione sola non ha il problema; chi ne ha due e una tariffa sola va
+ * guardato, perche' o il contratto e' uniforme o manca un prezzo.
+ *
+ * @param {array} righe     i movimenti dell'anno di un archivio
+ * @param {string} archivio nome dell'archivio
+ * @param {array} tariffe   le tariffe attive della prestazione che interessa
+ * @param {string} tipologia RETE, ACI o EXTRA_RACCOLTA
+ */
+export function tariffeDaVerificare(righe, archivio, tariffe, tipologia) {
+  const k = (v) => normalizzaRagioneSociale(v);
+  const attive = (tariffe || []).filter(t => String(t.stato || 'attivo') === 'attivo'
+    && (!t.tipologia || t.tipologia === tipologia || t.tipologia === 'TUTTE'));
+  const fuori = [];
+  for (const o of rotte(righe, archivio)) {
+    if (o.destinazioni.length < 2) continue;
+    const sue = attive.filter(t => k(t.fornitore_nome) === k(o.origine));
+    if (!sue.length) continue; // senza nessuna tariffa se ne occupa gia' l'anomalia della fatturazione
+    const perDestinazione = sue.filter(t => t.destinazione);
+    const generica = sue.find(t => !t.destinazione);
+    const scoperte = o.destinazioni.filter(d => !perDestinazione.some(t => k(t.destinazione) === k(d.destinazione)));
+    if (!scoperte.length) continue;
+    fuori.push({
+      origine: o.origine,
+      tipologia,
+      destinazioni: o.destinazioni.map(d => ({
+        destinazione: d.destinazione,
+        viaggi: d.viaggi,
+        kg: d.kg,
+        tariffa: (perDestinazione.find(t => k(t.destinazione) === k(d.destinazione)) || {}).valore ?? null,
+      })),
+      tariffa_generica: generica ? generica.valore : null,
+      unita_misura: (generica || perDestinazione[0] || {}).unita_misura || '',
+      destinazioni_senza_tariffa_propria: scoperte.map(d => d.destinazione),
+      kg_in_gioco: scoperte.reduce((s, d) => s + d.kg, 0),
+      testo: `${o.origine} conferisce su ${o.destinazioni.length} destinazioni `
+        + `(${o.destinazioni.map(d => `${d.destinazione} ${d.viaggi} viaggi`).join(', ')}) `
+        + (perDestinazione.length
+          ? `ma per ${scoperte.map(d => d.destinazione).join(' e ')} non c'e' una tariffa propria: si paga la generica di ${generica ? generica.valore : '?'}.`
+          : `e si paga tutto alla stessa tariffa, ${generica ? generica.valore : '?'}. `)
+        + ` Controlla il contratto: se il prezzo cambia con la destinazione, la tariffa va inserita per ciascuna.`,
+    });
+  }
+  return fuori.sort((a, b) => b.kg_in_gioco - a.kg_in_gioco);
+}
+
+/**
  * Quanto ciascun impianto riceve in secondaria da un dato stoccaggio, in quota.
  * Serve a dividere fra gli impianti quello che allo stoccaggio appartiene una
  * volta sola: il suo target di raccolta.

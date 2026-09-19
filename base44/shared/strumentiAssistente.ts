@@ -397,6 +397,7 @@ export const STRUMENTI = [
           sospetti_per_flusso: flussi.map(f2 => ({ flusso: f2.flusso, quanti: f2.sospetti.length })),
           flussi: p.solo_sospetti ? flussi.map(f2 => ({ flusso: f2.flusso, sospetti: f2.sospetti })) : flussi,
           stoccaggi_condivisi: d.stoccaggi_condivisi,
+          tariffe_da_verificare: d.tariffe_da_verificare,
           nota: "Le rotte si leggono dalla storia dell'anno: quello che un'origine fa quasi sempre e' la sua rotta, quello che fa una volta sola contro centinaia di viaggi e' quasi sempre un formulario chiuso male. Chi ha due rotte vere, con numeri consistenti, non viene segnalato.",
         },
       };

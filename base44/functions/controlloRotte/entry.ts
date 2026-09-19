@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { rotte, conferimentiSospetti, quoteDaStoccaggio } from "../../shared/rotteConferimenti.ts";
+import { rotte, conferimentiSospetti, quoteDaStoccaggio, tariffeDaVerificare } from "../../shared/rotteConferimenti.ts";
 import { annoRoma } from "../../shared/giornoItaliano.ts";
 
 // Chi conferisce dove, e i formulari che sembrano chiusi sulla destinazione
@@ -26,7 +26,8 @@ export default async function(req) {
     const terminato = (r) => String(r.stato || '').toLowerCase().trim() === 'terminato';
     const dellAnno = (r) => terminato(r) && annoRoma(r.trasporto_finito_il) === anno;
 
-    const [rete, aciPrim, secondarie, extra, terziarie] = await Promise.all([
+    const [tariffe, rete, aciPrim, secondarie, extra, terziarie] = await Promise.all([
+      fetchAll(svc.Tariffa, { stato: 'attivo' }),
       fetchAll(svc.PrimariaRete, { stato: 'terminato' }),
       fetchAll(svc.PrimariaAci, { stato: 'terminato' }),
       fetchAll(svc.Secondaria, { stato: 'terminato' }),
@@ -65,8 +66,14 @@ export default async function(req) {
     return Response.json({
       anno,
       flussi: risultato,
-      sospetti_totali: risultato.reduce((s, f) => s + f.sospetti.length, 0),
+      sospetti_per_flusso: risultato.map(f => ({ flusso: f.nome, quanti: f.sospetti.length })),
       stoccaggi_condivisi: condivisi,
+      // Chi conferisce su piu' destinazioni senza un prezzo per ciascuna: il
+      // contratto potrebbe prevederlo, e allora si sta pagando male.
+      tariffe_da_verificare: [
+        ...tariffeDaVerificare(rete.filter(dellAnno), 'PrimariaRete', tariffe.filter(t => t.prestazione === 'RACCOLTA'), 'RETE'),
+        ...tariffeDaVerificare(aciPrim.filter(dellAnno), 'PrimariaAci', tariffe.filter(t => t.prestazione === 'RACCOLTA'), 'ACI'),
+      ],
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
