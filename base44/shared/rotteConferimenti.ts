@@ -14,10 +14,22 @@
 // rotte vere - C.L. Service, che stocca sia a Nappi Sud sia a T-Cycle - le ha
 // entrambe consistenti, e non viene segnalato.
 //
-// Il criterio, per ogni origine: una destinazione che raccoglie meno del 5% dei
-// suoi viaggi E meno di cinque viaggi in tutto e' sospetta. Servono tutte e due
-// le condizioni, altrimenti chi fa pochi viaggi in assoluto verrebbe segnalato
-// sempre.
+// Due criteri, e il primo e' piu' forte del secondo.
+//
+// Chi ha un sito proprio conferisce in primaria solo li'. Nappi Sud raccoglie
+// dai punti di raccolta e porta al piazzale di Nappi Sud, e a nessun altro:
+// verso Irigom e Tecnogum ci va con le secondarie, dove non e' piu' un
+// raccoglitore ma il produttore del rifiuto che parte dal suo piazzale. Una
+// primaria di Nappi Sud verso Tecnogum non esistera' mai, e va segnalata anche
+// se fossero cento viaggi: non e' una rotta rara, e' una rotta impossibile.
+// Lo stesso vale per Green Tyre Project e per Gatim.
+//
+// Chi invece non ha un sito proprio stocca presso terzi, e puo' avere piu' di
+// una rotta buona: C.L. Service stocca sia a Nappi Sud sia a T-Cycle. Per
+// costoro vale il secondo criterio, statistico: una destinazione che raccoglie
+// meno del 5% dei suoi viaggi E meno di cinque viaggi in tutto e' sospetta.
+// Servono tutte e due le condizioni, altrimenti chi fa pochi viaggi in assoluto
+// verrebbe segnalato sempre.
 //
 // Nelle primarie l'origine e' il raccoglitore (chi ritira e porta), nelle
 // secondarie e' lo stoccaggio, che per quel viaggio e' il produttore: Nappi Sud,
@@ -67,22 +79,34 @@ export function rotte(righe, archivio) {
     d.kg += Number(r.peso_effettivo) || 0;
     d.righe.push(r);
   }
-  return [...per.values()].map(o => ({
-    origine: o.origine,
-    ruolo: RUOLO_ORIGINE[archivio] || 'origine',
-    totale_viaggi: o.totale_viaggi,
-    totale_kg: Math.round(o.totale_kg),
-    destinazioni: [...o.destinazioni.values()]
-      .map(d => ({
-        destinazione: d.destinazione,
-        viaggi: d.viaggi,
-        kg: Math.round(d.kg),
-        quota: o.totale_viaggi ? d.viaggi / o.totale_viaggi : 0,
-        sospetta: o.destinazioni.size > 1 && d.viaggi < VIAGGI_SOSPETTI && (d.viaggi / o.totale_viaggi) < QUOTA_SOSPETTA,
-        righe: d.righe,
-      }))
-      .sort((a, b) => b.viaggi - a.viaggi),
-  })).sort((a, b) => b.totale_viaggi - a.totale_viaggi);
+  const primaria = archivio !== 'Secondaria' && archivio !== 'Terziaria';
+  return [...per.values()].map(o => {
+    const ko = normalizzaRagioneSociale(o.origine);
+    // Ha un sito proprio se fra le sue destinazioni c'e' se stessa.
+    const haSitoProprio = primaria && [...o.destinazioni.keys()].includes(ko);
+    return {
+      origine: o.origine,
+      ruolo: RUOLO_ORIGINE[archivio] || 'origine',
+      sito_proprio: haSitoProprio ? o.origine : '',
+      totale_viaggi: o.totale_viaggi,
+      totale_kg: Math.round(o.totale_kg),
+      destinazioni: [...o.destinazioni.entries()]
+        .map(([kd, d]) => ({
+          destinazione: d.destinazione,
+          viaggi: d.viaggi,
+          kg: Math.round(d.kg),
+          quota: o.totale_viaggi ? d.viaggi / o.totale_viaggi : 0,
+          // Con un sito proprio, qualunque altra destinazione e' un errore, a
+          // prescindere da quanti viaggi siano. Senza, vale la soglia.
+          sospetta: haSitoProprio
+            ? kd !== ko
+            : o.destinazioni.size > 1 && d.viaggi < VIAGGI_SOSPETTI && (d.viaggi / o.totale_viaggi) < QUOTA_SOSPETTA,
+          impossibile: haSitoProprio && kd !== ko,
+          righe: d.righe,
+        }))
+        .sort((a, b) => b.viaggi - a.viaggi),
+    };
+  }).sort((a, b) => b.totale_viaggi - a.totale_viaggi);
 }
 
 /**
@@ -95,6 +119,11 @@ export function conferimentiSospetti(righe, archivio) {
     const abituale = o.destinazioni.find(d => !d.sospetta);
     for (const d of o.destinazioni) {
       if (!d.sospetta) continue;
+      const testo = d.impossibile
+        ? `${o.origine} raccoglie in primaria e conferisce al proprio sito, ${o.sito_proprio}: una primaria verso ${d.destinazione} non esiste. Verso gli altri impianti ci va con le secondarie, dove e' il produttore e non il raccoglitore. Questo formulario e' chiuso sulla destinazione sbagliata.`
+        : `${o.origine} ha conferito a ${d.destinazione} ${d.viaggi === 1 ? 'una volta sola' : d.viaggi + ' volte'} su ${o.totale_viaggi} viaggi dell'anno`
+            + (abituale ? `, mentre di norma conferisce a ${abituale.destinazione}` : '')
+            + '. Controlla come e\' stato chiuso il formulario.';
       for (const r of d.righe) {
         fuori.push({
           archivio,
@@ -102,15 +131,15 @@ export function conferimentiSospetti(righe, archivio) {
           ruolo: o.ruolo,
           destinazione: d.destinazione,
           destinazione_abituale: abituale ? abituale.destinazione : '',
+          sito_proprio: o.sito_proprio || '',
+          impossibile: !!d.impossibile,
           numero_fir: r.numero_fir || '',
           id_ordine: r.id_ordine || '',
           giorno: giornoRoma(r.trasporto_finito_il),
           kg: Math.round(Number(r.peso_effettivo) || 0),
           viaggi_su_questa_destinazione: d.viaggi,
           viaggi_totali_origine: o.totale_viaggi,
-          testo: `${o.origine} ha conferito a ${d.destinazione} ${d.viaggi === 1 ? 'una volta sola' : d.viaggi + ' volte'} su ${o.totale_viaggi} viaggi dell'anno`
-            + (abituale ? `, mentre di norma conferisce a ${abituale.destinazione}` : '')
-            + '. Controlla come e\' stato chiuso il formulario.',
+          testo,
         });
       }
     }

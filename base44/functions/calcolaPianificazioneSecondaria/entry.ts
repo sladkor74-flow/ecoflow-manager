@@ -251,7 +251,7 @@ export default async function(req) {
             tipo: 'ruolo_discorde',
             fornitore: f.nome,
             impianto: imp.nome_impianto,
-            testo: f.nome + " e' registrato come solo raccoglitore per " + imp.nome_impianto + ", ma a questo impianto non porta primarie: gli manda " + secDiQuesto + " secondarie. E' un doppio ruolo - raccoglie con un target suo e spedisce dal proprio piazzale - e come tale lo conto, altrimenti il consuntivo resterebbe a zero. Correggilo nella configurazione.",
+            testo: f.nome + " e' registrato come solo raccoglitore per " + imp.nome_impianto + ", ma verso questo impianto non e' un raccoglitore: e' il produttore delle " + secDiQuesto + " secondarie che partono dal suo piazzale. Raccoglie in primaria per conto proprio, con un target suo, e conferisce al proprio sito; agli altri impianti ci arriva in secondaria. E' un doppio ruolo e come tale lo conto, altrimenti il suo consuntivo resterebbe a zero. Correggilo nella configurazione.",
           });
         }
         const isStoccaggio = fRuolo === 'stoccaggio' || fRuolo === 'doppio_ruolo';

@@ -79,15 +79,21 @@ ovunque, export compresi.
 
 ### Chi conferisce dove
 
-Un movimento non va da chiunque a chiunque. Nelle primarie il raccoglitore
-conferisce dove ha il proprio impianto o dove ha l'accordo di stoccare: Green
-Tyre Project conferisce a Green Tyre Project, Nappi Sud raccoglie e stocca a
-Nappi Sud, Ecorecuperi porta a Tecnogum. Qualcuno ha due rotte vere - C.L.
-Service stocca sia a Nappi Sud sia a T-Cycle - ma sono entrambe consistenti; un
-viaggio solo verso un impianto dove quell'origine non va mai e' quasi sempre un
-formulario chiuso male, e va segnalato. Il controllo sta in
-`base44/shared/rotteConferimenti.ts`, legge le rotte dalla storia dell'anno e
-non ha bisogno che nessuno le scriva a mano.
+Un movimento non va da chiunque a chiunque, e ci sono due livelli.
+
+**Chi ha un sito proprio conferisce in primaria solo li'.** Green Tyre Project a
+Green Tyre Project, Nappi Sud a Nappi Sud, Gatim a Gatim. Una primaria di Nappi
+Sud verso Tecnogum non esistera' mai: agli altri impianti ci arriva in
+secondaria, dove non e' piu' un raccoglitore ma il produttore. Una rotta del
+genere va segnalata anche se fossero cento viaggi - non e' rara, e' impossibile.
+
+**Chi non ha un sito proprio stocca presso terzi** e puo' avere piu' di una rotta
+buona: C.L. Service stocca sia a Nappi Sud (59 viaggi) sia a T-Cycle (33),
+Emmesse conferisce a Irigom (24) e a Gatim (6). Per costoro vale una soglia: una
+destinazione sotto il 5% dei loro viaggi e sotto i cinque viaggi e' sospetta.
+
+Il controllo sta in `base44/shared/rotteConferimenti.ts`, legge le rotte dalla
+storia dell'anno e non ha bisogno che nessuno le scriva a mano.
 
 **Nappi Sud e' raccoglitore e stoccaggio insieme**, ed e' la distinzione che fa
 sbagliare i moduli:
