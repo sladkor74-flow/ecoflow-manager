@@ -1,5 +1,5 @@
 import React from 'react';
-import { ClipboardList, Weight, CalendarRange, MapPin } from 'lucide-react';
+import { ClipboardList, Weight, CalendarRange } from 'lucide-react';
 import { formatNumber, fmtTon } from '@/lib/utils';
 
 export default function AssegnatiKpi({ kpi }) {

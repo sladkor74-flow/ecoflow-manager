@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Loader2, Users, ChevronDown, ChevronRight, MapPin } from 'lucide-react';
+import { Loader2, Users, ChevronDown, ChevronRight } from 'lucide-react';
 
 export default function PdrClientiTable({ records, loading }) {
   const [expanded, setExpanded] = useState(null);
