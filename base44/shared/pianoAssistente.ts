@@ -118,11 +118,19 @@ export function istruzioniPiano(catalogo, domanda, oggi, storia = []) {
  * periodo si travasa in ogni strumento che lo accetta e i canali diventano una
  * chiamata ciascuno, cosi' restano separati anche nei dati, non solo a parole.
  */
-export function strumentiDalPiano(piano, catalogo, oggi) {
+export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
   const annoOggi = Number(String(oggi).slice(0, 4));
   const accetta = new Map(catalogo.map(s => [s.nome, new Set(Object.keys(s.parametri || {}))]));
   const per = (piano && piano.periodo) || {};
-  const canali = Array.isArray(piano && piano.canali) ? [...new Set(piano.canali.filter(c => CANALI.includes(c)))] : [];
+  let canali = Array.isArray(piano && piano.canali) ? [...new Set(piano.canali.filter(c => CANALI.includes(c)))] : [];
+  // "Quanto abbiamo raccolto in tutto?" vuole tutti e tre i canali, ciascuno per
+  // conto suo. Il pianificatore ogni tanto ne mette uno solo e la risposta dice
+  // che gli altri due non ci sono: allora li si aggiunge qui, a meno che la
+  // domanda non nomini proprio un canale.
+  const t = ' ' + String(domanda || '').toLowerCase() + ' ';
+  const chiedeTutto = /(in tutto|complessiv|tutti e tre|tutti i canali|totale generale|tutte le commesse)/.test(t);
+  const nominaCanale = /(rete|aci|autodemoliz|extra raccolta)/.test(t);
+  if (chiedeTutto && !nominaCanale) canali = [...CANALI];
   const scelti = [];
   for (const x of (piano && Array.isArray(piano.strumenti) ? piano.strumenti : []).slice(0, 4)) {
     const nome = String((x && x.nome) || '').trim();

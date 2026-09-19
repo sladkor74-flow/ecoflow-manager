@@ -82,10 +82,19 @@ function elenco(righe, quanti = 60) {
   return esito;
 }
 
+// Il mese di un movimento e' quello della fine del trasporto, come in tutto il
+// resto del gestionale. Il campo "mese" che arriva dal portale ogni tanto dice
+// un'altra cosa - il FIR RGYTR025688FF, finito il 31 luglio 2026, li' e' segnato
+// ad agosto - e raggruppare su quello spacca il mese in due.
+const MESE_DA_DATA = (r) => {
+  const d = soloData(r.trasporto_finito_il);
+  return d ? MESI[Number(d.slice(5, 7)) - 1] || 'N/D' : 'N/D';
+};
+
 function perChiave(righe, campo) {
   const m = new Map();
   for (const r of righe) {
-    const k = String(r[campo] || 'N/D').trim();
+    const k = campo === 'mese' ? MESE_DA_DATA(r) : String(r[campo] || 'N/D').trim();
     if (!m.has(k)) m.set(k, { nome: k, formulari: 0, kg: 0 });
     const x = m.get(k);
     x.formulari++;
@@ -120,15 +129,19 @@ export const STRUMENTI = [
     async esegui(base44, p) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       const canale = String(p.canale || 'RETE').toUpperCase();
-      const righe = await movimenti(base44, { ...p, anno, canale });
+      // Un mese che non esiste non deve passare in silenzio per "tutto l'anno".
+      const meseValido = p.mese ? MESI.find(m => m.toLowerCase() === String(p.mese).toLowerCase()) : '';
+      const meseIgnorato = p.mese && !meseValido ? String(p.mese) : '';
+      const righe = await movimenti(base44, { ...p, mese: meseValido, anno, canale });
       const campo = { raccoglitore: 'trasportatore', provincia: 'provincia', regione: 'regioni', classe: 'classe', destinazione: 'destinazione', mese: 'mese' }[p.raggruppa] || 'trasportatore';
       const totale = righe.reduce((s, r) => s + peso(r), 0);
       return {
         fonte: `Formulari terminati, canale ${canale}`,
-        periodo: p.mese ? `${p.mese} ${anno}` : `anno ${anno}`,
+        periodo: meseValido ? `${meseValido} ${anno}` : `anno ${anno}`,
         dati_al: oggiRoma(),
         dati: {
           canale, formulari: righe.length, tonnellate: t3(totale),
+          ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso tutto l'anno ${anno}.` } : {}),
           per: p.raggruppa || 'raccoglitore',
           dettaglio: elenco(perChiave(righe, campo), 60),
         },
@@ -348,7 +361,10 @@ export const STRUMENTI = [
       const res = await base44.functions.invoke('calcolaGiacenze', { anno });
       const d = (res && res.data) || res || {};
       let righe = d.righe || [];
-      if (p.tipo) {
+      // Il tipo si applica solo quando non e' stato chiesto un sito preciso:
+      // chiedendo "la giacenza di Nappi Sud" con tipo "impianto" si finiva per
+      // non trovare niente, perche' Nappi Sud e' uno stoccaggio.
+      if (p.tipo && !p.sito) {
         const vuole = /stoc/i.test(String(p.tipo)) ? 'stoc' : 'imp';
         righe = righe.filter(r => (String(r.tipo_destinazione || '').toLowerCase() === 'stoc' ? 'stoc' : 'imp') === vuole);
       }
@@ -669,10 +685,18 @@ export function catalogoStrumenti() {
 export async function eseguiStrumento(base44, nome, parametri = {}) {
   const s = STRUMENTI.find(x => x.nome === nome);
   if (!s) return { strumento: nome, errore: `Strumento sconosciuto: ${nome}` };
-  try {
-    const esito = await s.esegui(base44, parametri || {});
-    return { strumento: nome, parametri, ...esito };
-  } catch (e) {
-    return { strumento: nome, parametri, errore: e && e.message ? e.message : String(e) };
+  let ultimo = null;
+  // Due tentativi: quando la piattaforma e' sotto sforzo risponde "rate limit"
+  // e la domanda resta senza dati per un motivo che non c'entra niente con la
+  // domanda. Al secondo colpo di solito passa.
+  for (let giro = 0; giro < 2; giro++) {
+    try {
+      const esito = await s.esegui(base44, parametri || {});
+      return { strumento: nome, parametri, ...esito };
+    } catch (e) {
+      ultimo = e && e.message ? e.message : String(e);
+      if (giro === 0) await new Promise(r => setTimeout(r, 1200));
+    }
   }
+  return { strumento: nome, parametri, errore: ultimo };
 }
