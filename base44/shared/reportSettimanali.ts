@@ -291,13 +291,30 @@ export async function caricaMovimenti(base44) {
     Promise.all(nomi.map(n => fetchAll(svc[n]))),
     fetchAll(svc.Fornitore),
   ]);
-  const movimenti = [];
+  const grezzi = [];
   elenchi.forEach((righe, i) => {
     for (const r of righe) {
       if (String(r.stato || '').toLowerCase().trim() !== 'terminato') continue;
       const m = movimento(r, nomi[i]);
-      if (m.fine) movimenti.push(m);
+      if (m.fine) grezzi.push(m);
     }
+  });
+  // Un formulario chiuso su piu' ordini e' un movimento solo: nell'elenco di un
+  // impianto compare una volta, col peso intero. Le quote si fondono qui, una
+  // volta per tutte - stesso numero, stesso giorno, stessa destinazione, stesso
+  // archivio - sommando i chili e tenendo i ticket in chiaro. Se si fondessero
+  // piu' a valle, chi conta gli ingressi della settimana ne conterebbe due.
+  const movimenti = unisciQuote(grezzi, {
+    numero: (m) => m.firN,
+    peso: (m) => m.kg,
+    stessoGruppo: (x, y) => x.fine === y.fine && x.fonte === y.fonte && x.canale === y.canale
+      && x.chiaveDest === y.chiaveDest && x.chiaveOrig === y.chiaveOrig,
+    fondi: (base, quote, kg) => ({
+      ...base,
+      kg,
+      ordine: quote.map(q => q.ordine).filter(Boolean).join(' + '),
+      quote: quote.map(q => ({ ordine: q.ordine, ticket: q.ticket, kg: q.kg })),
+    }),
   });
   const interni = new Set(['smoco']);
   const anagrafica = new Map();
@@ -490,24 +507,9 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   const tipoPresunto = (r) => (nomiCoincidono(r.produttore, nome) === true || (r.produttore && normalizzaRagioneSociale(r.produttore) === chiave) ? 'uscita' : 'ingresso');
   const da = aggiungiGiorni(inizio, -FINESTRA_ABBINAMENTO_GIORNI);
   const a = aggiungiGiorni(fine, FINESTRA_ABBINAMENTO_GIORNI);
-  // Un formulario chiuso su piu' ordini e' un documento solo: nel report
-  // dell'impianto compare una volta, col peso intero. Le quote si fondono prima
-  // del confronto - stesso numero, stesso giorno, stessa destinazione, stesso
-  // archivio - sommando i chili e tenendo i ticket in chiaro. Senza questo, una
-  // riga del report da 3.460 kg si abbinava a una quota sola da 1.960 e
-  // risultavano insieme una differenza di peso e un movimento mancante.
-  const bacino = unisciQuote(movimenti.filter(m => m.fine >= da && m.fine <= a), {
-    numero: (m) => m.firN,
-    peso: (m) => m.kg,
-    stessoGruppo: (x, y) => x.fine === y.fine && x.fonte === y.fonte && x.canale === y.canale
-      && x.chiaveDest === y.chiaveDest && x.chiaveOrig === y.chiaveOrig,
-    fondi: (base, quote, kg) => ({
-      ...base,
-      kg,
-      ordine: quote.map(q => q.ordine).filter(Boolean).join(' + '),
-      quote: quote.map(q => ({ ordine: q.ordine, ticket: q.ticket, kg: q.kg })),
-    }),
-  });
+  // Le quote dei formulari ripartiti sono gia' fuse da caricaMovimenti: qui
+  // resta solo la fascia di giorni intorno alla settimana.
+  const bacino = movimenti.filter(m => m.fine >= da && m.fine <= a);
   const perFir = new Map();
   for (const m of bacino) {
     if (!m.firN) continue;
