@@ -820,6 +820,16 @@ export default async function(req) {
         const um = pt.tariffa ? pt.tariffa.unita_misura : '';
         const valore = pt.tariffa ? pt.tariffa.valore : 0;
 
+        // Le tonnellate di questo canale: sono la base di tutto quello che
+        // segue, riga e anomalie comprese.
+        const tonnellateCanale = tipologia === 'ACI' ? tonnellateAci : tonnellateRete;
+        const tonnellateAltro = tipologia === 'ACI' ? tonnellateRete : tonnellateAci;
+
+        // Se in questo canale la tratta non ha portato niente, non e' affar suo:
+        // niente riga e nemmeno l'anomalia, che altrimenti uscirebbe due volte,
+        // una per canale, anche dove non c'entra.
+        if (round3(tonnellateCanale) === 0 && viaggi === 0) continue;
+
         if (!pt.tariffa && !interno) {
           anomalie.push({
             descrizione: `Tratta secondaria senza tariffa TRASPORTO_SECONDARIA: ${tratta.stoccaggio} → ${tratta.destinazione} (trasportatore: ${tratta.trasportatore})`,
@@ -881,13 +891,6 @@ export default async function(req) {
         // mai esserci. La riga porta le tonnellate del canale che si sta
         // guardando; quelle dell'altro restano accanto, dichiarate, perche'
         // spiegano perche' un viaggio misto si paga tutto di qua.
-        const tonnellateCanale = tipologia === 'ACI' ? tonnellateAci : tonnellateRete;
-        const tonnellateAltro = tipologia === 'ACI' ? tonnellateRete : tonnellateAci;
-
-        // Una tratta che in questo canale non ha ne' tonnellate ne' importo e'
-        // di un altro canale: non ha niente da fare in questa tabella.
-        if (round3(tonnellateCanale) === 0 && round2(importo) === 0) continue;
-
         trasportiRows.push({
           fornitore: fatturante, fornitore_norm: fatturanteKey, interno,
           riga: {
