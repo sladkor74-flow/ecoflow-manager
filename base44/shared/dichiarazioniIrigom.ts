@@ -54,7 +54,24 @@ export function quantoDichiarare(giacenzaPortaleKg, giacenzaPfuKg) {
  */
 export function componiDichiarazione(daDichiarareKg, ddt, opzioni = {}) {
   const maxTot = Number(opzioni.maxPerDichiarazione) || MAX_PER_DICHIARAZIONE_KG;
-  const righe = (ddt || []).map(d => ({ data: d.data, ddt: d.ddt, cssc_kg: arrotonda(d.kg), ferro_kg: 0 }));
+
+  // Un DDT di CSS-C puo' superare da solo il limite del portale: ad agosto 2026
+  // sono usciti 70.000 e 74.780 kg, un DDT ciascuno. Il documento resta uno, ma
+  // a portale va spezzato in piu' dichiarazioni, che portano lo stesso numero di
+  // DDT con l'indicazione della parte.
+  const righe = [];
+  let spezzati = 0;
+  for (const d of (ddt || [])) {
+    const kg = arrotonda(d.kg);
+    const parti = Math.max(1, Math.ceil(kg / maxTot));
+    if (parti > 1) spezzati++;
+    let resto = kg;
+    for (let i = 0; i < parti; i++) {
+      const quota = Math.min(maxTot, resto);
+      righe.push({ data: d.data, ddt: d.ddt, parte: parti > 1 ? `${i + 1} di ${parti}` : '', cssc_kg: quota, ferro_kg: 0 });
+      resto -= quota;
+    }
+  }
   const cssc = righe.reduce((s, r) => s + r.cssc_kg, 0);
   const daDichiarare = arrotonda(daDichiarareKg);
   const ferroServe = daDichiarare - cssc;
@@ -108,6 +125,9 @@ export function componiDichiarazione(daDichiarareKg, ddt, opzioni = {}) {
 
   if (ferroServe < 0) {
     avvisi.push(`Il CSS-C uscito nel mese, ${cssc} kg, e' piu' di quello che serve dichiarare, ${daDichiarare} kg: controlla la giacenza a portale e il mese di riferimento, perche' dichiarando tutto il CSS-C si scenderebbe sotto la giacenza attesa.`);
+  }
+  if (spezzati > 0) {
+    avvisi.push(`${spezzati === 1 ? 'Un DDT di CSS-C supera' : spezzati + ' DDT di CSS-C superano'} da solo il limite di ${maxTot} kg per dichiarazione: a portale ${spezzati === 1 ? 'va caricato' : 'vanno caricati'} in piu' dichiarazioni, con lo stesso numero di DDT e l'indicazione della parte.`);
   }
   if (soloFerro > 0) {
     avvisi.push(`Il ferro non entra tutto nei DDT di CSS-C: servono altre ${soloFerro} ${soloFerro === 1 ? 'dichiarazione' : 'dichiarazioni'} di soli metalli, perche' il portale non accetta piu' di ${maxTot} kg per dichiarazione.`);

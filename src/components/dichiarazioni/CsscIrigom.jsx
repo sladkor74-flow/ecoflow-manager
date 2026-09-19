@@ -76,7 +76,7 @@ export default function CsscIrigom({ giacenzaPortaleT, anno }) {
       titolo: `Irigom · dichiarazione di ${mese} ${anno}`,
       sottotitolo: `Da dichiarare ${formatKg(dich.da_dichiarare_kg)} kg perché a portale resti una giacenza di ${formatKg(conto.giacenza_attesa_kg)} kg di PFU (cippato ${formatKg(riga.giacenza_cippato_kg)} + interi ${formatKg(riga.giacenza_intero_kg)})`,
       colonne: [
-        { titolo: 'DDT', valore: r => r.ddt || 'soli metalli', tipo: 'testo' },
+        { titolo: 'DDT', valore: r => (r.ddt ? r.ddt + (r.parte ? ' (parte ' + r.parte + ')' : '') : 'soli metalli'), tipo: 'testo' },
         { titolo: 'Data', valore: r => r.data, tipo: 'data' },
         { titolo: 'CSS-C', valore: r => r.cssc_kg, tipo: 'kg' },
         { titolo: 'Metalli ferrosi', valore: r => r.ferro_kg, tipo: 'kg' },
@@ -207,7 +207,7 @@ export default function CsscIrigom({ giacenzaPortaleT, anno }) {
                   {dich.righe.map((r, i) => (
                     <tr key={i} className={`border-t ${r.tipo === 'ferro' ? 'bg-muted/20' : ''}`}>
                       <td className="px-3 py-2 tabular-nums text-muted-foreground">{i + 1}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{r.ddt || <span className="font-sans text-muted-foreground">soli metalli</span>}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{r.ddt ? <>{r.ddt}{r.parte ? <span className="font-sans text-muted-foreground"> · parte {r.parte}</span> : null}</> : <span className="font-sans text-muted-foreground">soli metalli</span>}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{r.data ? r.data.split('-').reverse().join('/') : '—'}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{formatKg(r.cssc_kg)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{formatKg(r.ferro_kg)}</td>
