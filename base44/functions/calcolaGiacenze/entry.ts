@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
+import { eAci } from "../../shared/canaleSecondaria.ts";
 
 // Calcola la situazione delle giacenze di impianti e stoccaggi per l'anno richiesto.
 //
@@ -286,20 +287,28 @@ export default async function(req) {
     const confAciMap = conferitoPer(aciAll);
     const confExtraMap = conferitoPer(extraAll);
 
-    const secInMap = new Map(); // ns -> t
+    // Le secondarie di rete e quelle ACI viaggiano nello stesso archivio e si
+    // distinguono dalla classe. Vanno tenute separate: la colonna "Conferito
+    // RETE" sommava anche le secondarie ACI, e su un impianto che riceve
+    // entrambe il numero era piu' alto del vero.
+    const secInMap = new Map();     // ns -> t di rete in ingresso
+    const secOutMap = new Map();    // ns -> t di rete in uscita
+    const secAciInMap = new Map();  // ns -> t ACI in ingresso
+    const secAciOutMap = new Map(); // ns -> t ACI in uscita
     for (const r of secAll) {
       if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
+      const t = (Number(r.peso_effettivo) || 0) / 1000;
+      const aci = eAci(r);
       const nd = norm(r.destinazione);
-      if (!nd) continue;
-      secInMap.set(nd, (secInMap.get(nd) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
-    }
-
-    const secOutMap = new Map(); // ns -> t
-    for (const r of secAll) {
-      if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
+      if (nd) {
+        const m = aci ? secAciInMap : secInMap;
+        m.set(nd, (m.get(nd) || 0) + t);
+      }
       const ns = norm(r.stoccaggio);
-      if (!ns) continue;
-      secOutMap.set(ns, (secOutMap.get(ns) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
+      if (ns) {
+        const m = aci ? secAciOutMap : secOutMap;
+        m.set(ns, (m.get(ns) || 0) + t);
+      }
     }
 
     const terzMap = new Map(); // ns -> t
@@ -437,6 +446,9 @@ export default async function(req) {
       // sempre da un impianto.
       const secondarie_in_t = td === 'imp' ? (secInMap.get(ns) || 0) : 0;
       const secondarie_out_t = td === 'stoc' ? (secOutMap.get(ns) || 0) : 0;
+      // Le secondarie ACI restano a parte: non entrano nel conferito di rete.
+      const secondarie_aci_in_t = td === 'imp' ? (secAciInMap.get(ns) || 0) : 0;
+      const secondarie_aci_out_t = td === 'stoc' ? (secAciOutMap.get(ns) || 0) : 0;
       const secondarie_nette_t = secondarie_in_t - secondarie_out_t;
       const terziarie_t = td === 'imp' ? (terzMap.get(ns) || 0) : 0;
 
@@ -504,6 +516,8 @@ export default async function(req) {
         secondarie_in_t: r2(secondarie_in_t),
         secondarie_out_t: r2(secondarie_out_t),
         secondarie_nette_t: r2(secondarie_nette_t),
+        secondarie_aci_in_t: r2(secondarie_aci_in_t),
+        secondarie_aci_out_t: r2(secondarie_aci_out_t),
         terziarie_t: r2(terziarie_t),
         conferito_t: r2(conferito_t),
         target_primarie_t: r2(target_primarie_t),

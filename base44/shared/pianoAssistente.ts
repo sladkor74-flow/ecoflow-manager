@@ -11,6 +11,27 @@
 
 const CANALI = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
 
+// Per un solo strumento il canale e' obbligatorio, perche' legge tre archivi
+// diversi e senza canale non saprebbe quale aprire. Per tutti gli altri e' un
+// filtro: imporgli "RETE" quando nessuno l'ha chiesto significa nascondere le
+// righe ACI ed extra che lo strumento avrebbe restituito gia' separate.
+const CANALE_OBBLIGATORIO = new Set(['raccolto']);
+
+// Nella fatturazione e nelle tariffe il canale si chiama tipologia.
+const SINONIMI_CANALE = { fatturazione: 'tipologia', tariffe: 'tipologia' };
+
+// Qualche filtro il pianificatore lo scrive con un nome vicino ma non uguale.
+const SINONIMI_PARAMETRI = {
+  fornitore: ['raccoglitore', 'soggetto', 'produttore'],
+  raccoglitore: ['fornitore'],
+  soggetto: ['fornitore'],
+  produttore: ['fornitore', 'soggetto'],
+  cerca: ['testo'],
+  testo: ['cerca'],
+  sito: ['destinazione'],
+  destinazione: ['sito'],
+};
+
 /** L'unione dei parametri di tutti gli strumenti, dichiarati uno per uno. */
 const PARAMETRI = {
   anno: { type: 'integer' },
@@ -129,26 +150,52 @@ export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
   // domanda non nomini proprio un canale.
   const t = ' ' + String(domanda || '').toLowerCase() + ' ';
   const chiedeTutto = /(in tutto|complessiv|tutti e tre|tutti i canali|totale generale|tutte le commesse)/.test(t);
-  const nominaCanale = /(rete|aci|autodemoliz|extra raccolta)/.test(t);
+  const nominaCanale = /(\brete\b|\baci\b|autodemoliz|extra raccolta)/.test(t);
   if (chiedeTutto && !nominaCanale) canali = [...CANALI];
+  // Se la domanda parla dell'anno, il mese non deve entrarci. Il pianificatore
+  // ci mette il mese in corso per abitudine, e la risposta finisce per dare
+  // settembre a chi aveva chiesto l'anno.
+  const chiedeAnno = /(quest'? ?anno|nell'anno|dell'anno|annual|da inizio anno|dall'inizio dell'anno|finora|fino a oggi|a oggi|year to date|ytd)/.test(t);
+  const nominaMese = /(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre|questo mese|mese scorso|il mese)/.test(t);
+  const senzaMese = chiedeAnno && !nominaMese;
   const scelti = [];
   for (const x of (piano && Array.isArray(piano.strumenti) ? piano.strumenti : []).slice(0, 4)) {
     const nome = String((x && x.nome) || '').trim();
     const ok = accetta.get(nome);
     if (!ok) continue;
     const base = {};
+    const ignorati = [];
     for (const [k, v] of Object.entries((x && x.parametri) || {})) {
-      if (v === null || v === undefined || v === '' || !ok.has(k)) continue;
-      base[k] = v;
+      if (v === null || v === undefined || v === '') continue;
+      if (ok.has(k)) { base[k] = v; continue; }
+      // Un filtro scritto con il nome vicino si recupera; uno che non esiste
+      // proprio si segnala, perche' buttarlo via in silenzio vuol dire
+      // rispondere su tutto quando era stato chiesto su uno.
+      const alias = (SINONIMI_PARAMETRI[k] || []).find(a => ok.has(a) && base[a] === undefined);
+      if (alias) base[alias] = v;
+      else ignorati.push({ parametro: k, valore: String(v) });
     }
     if (ok.has('anno') && base.anno == null) base.anno = Number(per.anno) || annoOggi;
-    if (ok.has('mese') && !base.mese && per.mese) base.mese = per.mese;
+    if (ok.has('mese') && !base.mese && per.mese && !senzaMese) base.mese = per.mese;
+    if (senzaMese) delete base.mese;
     if (ok.has('settimana') && base.settimana == null && per.settimana) base.settimana = Number(per.settimana);
-    if (ok.has('canale')) {
-      const suoi = base.canale ? [base.canale] : (canali.length ? canali : ['RETE']);
-      for (const c of suoi) scelti.push({ nome, parametri: { ...base, canale: c } });
+    // Il canale, che in fatturazione e tariffe si chiama tipologia.
+    const campoCanale = ok.has('canale') ? 'canale' : (ok.has(SINONIMI_CANALE[nome] || '') ? SINONIMI_CANALE[nome] : '');
+    if (campoCanale) {
+      const tuttiICanali = chiedeTutto && !nominaCanale;
+      const suoi = tuttiICanali ? [...CANALI]
+        : base[campoCanale] ? [base[campoCanale]]
+        : canali.length ? canali
+        : CANALE_OBBLIGATORIO.has(nome) ? ['RETE'] : [];
+      if (!suoi.length) {
+        // Filtro facoltativo e nessuno l'ha chiesto: si interroga senza, e lo
+        // strumento restituisce i canali gia' separati nel suo riepilogo.
+        scelti.push({ nome, parametri: base, ignorati });
+      } else {
+        for (const c of suoi) scelti.push({ nome, parametri: { ...base, [campoCanale]: c }, ignorati });
+      }
     } else {
-      scelti.push({ nome, parametri: base });
+      scelti.push({ nome, parametri: base, ignorati });
     }
   }
   const visti = new Set();
@@ -170,6 +217,9 @@ export function testoDati(risultati) {
     parti.push(`--- strumento: ${r.strumento}${r.parametri && Object.keys(r.parametri).length ? ' ' + JSON.stringify(r.parametri) : ''}`);
     if (r.errore) { parti.push(`NON DISPONIBILE: ${r.errore}`); continue; }
     parti.push(`fonte: ${r.fonte} | periodo: ${r.periodo} | dati al: ${r.dati_al}`);
+    if (r.parametri_ignorati && r.parametri_ignorati.length) {
+      parti.push(`ATTENZIONE: questo strumento non conosce ${r.parametri_ignorati.map(i => `"${i.parametro}" (${i.valore})`).join(', ')}: il numero qui sotto NON e' filtrato per quello. Dillo nella risposta invece di far finta che il filtro ci fosse.`);
+    }
     const testo = typeof r.dati === 'string' ? r.dati : JSON.stringify(r.dati);
     parti.push(testo.length > 24000 ? testo.slice(0, 24000) + ' …(troncato)' : testo);
   }

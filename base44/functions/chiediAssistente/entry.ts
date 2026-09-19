@@ -177,7 +177,12 @@ export default async function(req) {
       // rispetta, perche' e' una domanda di norma.
       const daFare = scelti.length ? scelti
         : (!pianoRiuscito && analisi.dati ? [{ nome: 'panoramica_commessa', parametri: {} }] : []);
-      if (daFare.length) risultati = await Promise.all(daFare.map(x => eseguiStrumento(base44, x.nome, x.parametri || {})));
+      if (daFare.length) {
+        risultati = await Promise.all(daFare.map(async (x) => {
+          const esito = await eseguiStrumento(base44, x.nome, x.parametri || {});
+          return x.ignorati && x.ignorati.length ? { ...esito, parametri_ignorati: x.ignorati } : esito;
+        }));
+      }
     }
 
     const [approvate, dati, corso] = await Promise.all([

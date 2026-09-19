@@ -90,7 +90,13 @@ export function proiettaImpianto(impianto, dati, opzioni) {
   const righe = [];
   for (const m of mesi) {
     const ip = ipotesi[m.nome] || ipotesi[m.indice] || {};
-    const primaria = ip.primaria_kg != null ? Number(ip.primaria_kg) : mediaPrimaria;
+    // Nel mese da cui si parte una parte della primaria e' gia' arrivata, ed e'
+    // gia' dentro "conferito": contarla anche qui come attesa la farebbe valere
+    // due volte, e i viaggi che servono risulterebbero meno di quelli veri.
+    // Si mette quindi solo la parte che manca ad arrivare.
+    const giaArrivata = m.indice === meseCorrente ? (Number((dati.conferito_primaria_per_mese || {})[m.indice]) || 0) : 0;
+    const attesa = ip.primaria_kg != null ? Number(ip.primaria_kg) : mediaPrimaria;
+    const primaria = Math.max(0, attesa - giaArrivata);
     // Quanti viaggi servono: quello che resta dopo la primaria, spalmato sui mesi
     // che restano, a 13,5 t per viaggio.
     const mesiRimanenti = mesi.length - righe.length;

@@ -25,9 +25,9 @@ import { eAci } from "./canaleSecondaria.ts";
 import { PIVOT_DEFS, calcolaPivot, MESI } from "./reportMensile.ts";
 import { caricaGestionale } from "./quadraturaFirDati.ts";
 import { intervalloSettimana, settimanaIso } from "./reportSettimanali.ts";
-import { proiettaImpianto, viaggiPerMese } from "./proiezioneSecondarie.ts";
 import { situazioneGestionale } from "./assistente.ts";
 import { listaOrdini, statoRichiesta } from "./richiesteEct.ts";
+import { targetDelPortale } from "./targetRaccoglitori.ts";
 import { statoDichiarazione, sommaMateriali } from "./dichiarazioniImpianti.ts";
 import { giorniAllaScadenza, fasciaScadenza } from "./omologhe.ts";
 import { statoRequisito } from "./qualificaFornitori.ts";
@@ -54,6 +54,10 @@ async function movimenti(base44, { canale, anno, mese, provincia, regione, racco
   const chiave = (v) => normalizzaRagioneSociale(v);
   return righe.filter(r => {
     if (!terminato(r)) return false;
+    // Nell'extra raccolta lo stesso archivio tiene la raccolta dal produttore e
+    // i trasferimenti successivi: il raccolto sono solo le primarie, altrimenti
+    // il materiale si conta due volte, una quando arriva e una quando si sposta.
+    if (canale === 'EXTRA_RACCOLTA' && String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'primaria') return false;
     const m = meseDi(r.trasporto_finito_il, anno);
     if (m < 0) return false;
     if (meseIdx >= 0 && m !== meseIdx) return false;
@@ -160,10 +164,24 @@ export const STRUMENTI = [
         svc.TargetRaccoglitore.filter({ anno }, 'raccoglitore', 500),
         movimenti(base44, { canale: 'RETE', anno }),
       ]);
+      // Il nome del target puo' essere l'abbreviazione di quello che scrive il
+      // portale ("PNEUSERVICE SRL" per "PNEUSERVICE CONVERSANO SRL"): abbinando
+      // solo per nome uguale, il raccolto di quel raccoglitore risultava zero e
+      // finiva in cima alla lista di chi e' sotto target. Stesso criterio degli
+      // altri moduli: uguale, oppure abbreviazione le cui parole stanno tutte
+      // nel nome del portale.
+      const nomiTarget = [...new Set(target.map(t => t.raccoglitore).filter(Boolean))];
       const fatto = new Map();
+      const senzaTarget = new Map();
       for (const r of righe) {
-        const k = normalizzaRagioneSociale(r.trasportatore);
-        fatto.set(k, (fatto.get(k) || 0) + peso(r));
+        const nome = targetDelPortale(nomiTarget, r.trasportatore);
+        if (nome) {
+          const k = normalizzaRagioneSociale(nome);
+          fatto.set(k, (fatto.get(k) || 0) + peso(r));
+        } else {
+          const k = String(r.trasportatore || 'N/D').trim();
+          senzaTarget.set(k, (senzaTarget.get(k) || 0) + peso(r));
+        }
       }
       const per = new Map();
       for (const t of target) {
@@ -181,7 +199,12 @@ export const STRUMENTI = [
         fonte: 'Target & Status, canale RETE',
         periodo: `anno ${anno}`,
         dati_al: oggiRoma(),
-        dati: { raccoglitori: dettaglio, target_totale_t: dettaglio.reduce((s, x) => s + x.target_t, 0), fatto_totale_t: Math.round(dettaglio.reduce((s, x) => s + x.fatto_t, 0) * 100) / 100 },
+        dati: {
+          raccoglitori: dettaglio,
+          target_totale_t: Math.round(dettaglio.reduce((s, x) => s + x.target_t, 0) * 100) / 100,
+          fatto_totale_t: Math.round(dettaglio.reduce((s, x) => s + x.fatto_t, 0) * 100) / 100,
+          ...(senzaTarget.size ? { raccolto_senza_target: [...senzaTarget.entries()].map(([nome, kg]) => ({ raccoglitore: nome, tonnellate: t3(kg) })).sort((a, b) => b.tonnellate - a.tonnellate) } : {}),
+        },
       };
     },
   },
@@ -192,15 +215,28 @@ export const STRUMENTI = [
     moduli: ['Report Mensile'],
     async esegui(base44, p) {
       const chiave = PIVOT_DEFS[p.pivot] ? p.pivot : 'raccolta';
+      const pivotIgnorata = p.pivot && !PIVOT_DEFS[p.pivot] ? String(p.pivot) : '';
       const def = PIVOT_DEFS[chiave];
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
+      // Una pivot mensile copre un mese solo. Se il mese non e' stato chiesto si
+      // prende quello in corso, ma allora bisogna dirlo: prima il periodo diceva
+      // "2026" e il numero era del solo mese corrente.
+      const meseValido = p.mese ? MESI.find(m => m.toLowerCase() === String(p.mese).toLowerCase()) : '';
+      const meseUsato = def.periodo === 'mese' ? (meseValido || MESI[Number(oggiRoma().slice(5, 7)) - 1]) : '';
       const righe = await fetchAll(base44.asServiceRole.entities[def.entita]);
-      const pivot = calcolaPivot(chiave, righe, anno, p.mese || MESI[Number(oggiRoma().slice(5, 7)) - 1]);
+      const pivot = calcolaPivot(chiave, righe, anno, meseUsato);
+      const avvisi = [];
+      if (def.periodo === 'mese' && !meseValido) avvisi.push(`Questa pivot copre un mese solo e il mese non era indicato: sono i dati di ${meseUsato} ${anno}, non dell'anno.`);
+      if (pivotIgnorata) avvisi.push(`La pivot "${pivotIgnorata}" non esiste: ho preso "${chiave}".`);
       return {
         fonte: `Report Mensile, pivot ${pivot.titolo}`,
-        periodo: def.periodo === 'mese' ? `${p.mese || ''} ${anno}`.trim() : `anno ${anno}`,
+        periodo: def.periodo === 'mese' ? `${meseUsato} ${anno}` : `anno ${anno}`,
         dati_al: oggiRoma(),
-        dati: { titolo: pivot.titolo, misure: pivot.etichetteMisure, colonne: pivot.colonne, righe_lette: pivot.righeLette, albero: pivot.radice },
+        dati: {
+          titolo: pivot.titolo, misure: pivot.etichetteMisure, colonne: pivot.colonne,
+          righe_lette: pivot.righeLette, albero: pivot.radice,
+          ...(avvisi.length ? { avvisi } : {}),
+        },
       };
     },
   },
@@ -218,11 +254,28 @@ export const STRUMENTI = [
         flusso: chiave, formulari: d.totale.n, tonnellate: t3(d.totale.kg),
         celle: d.celle.map(c => ({ impianto: c.impianto, trasportatore: c.trasportatore, formulari: c.n, tonnellate: t3(c.kg) })),
       })).filter(f => f.formulari > 0);
+      // I flussi stanno sotto il loro canale, ciascuno con il proprio totale. Un
+      // totale della settimana non esiste: sommare rete, ACI ed extra raccolta
+      // darebbe un numero che non vuol dire niente, e continuava a succedere.
+      const canaleDelFlusso = (nome) => (/aci/.test(nome) ? 'ACI' : /extra/.test(nome) ? 'EXTRA_RACCOLTA' : 'RETE');
+      const perCanale = {};
+      for (const f of flussi) {
+        const c = canaleDelFlusso(f.flusso);
+        if (!perCanale[c]) perCanale[c] = { canale: c, formulari: 0, tonnellate: 0, flussi: [] };
+        perCanale[c].formulari += f.formulari;
+        perCanale[c].tonnellate = Math.round((perCanale[c].tonnellate + f.tonnellate) * 1000) / 1000;
+        perCanale[c].flussi.push(f);
+      }
       return {
         fonte: 'Formulari terminati nella settimana',
         periodo: `settimana ${settimana} del ${anno}, dal ${intervallo.inizio} al ${intervallo.fine}`,
         dati_al: oggiRoma(),
-        dati: { settimana, intervallo, flussi },
+        dati: {
+          settimana, intervallo,
+          canali: Object.values(perCanale),
+          totale_della_settimana: null,
+          nota: 'Ogni canale ha il suo totale. Un totale della settimana che li metta insieme NON ESISTE e non va calcolato: rete, ACI ed extra raccolta sono commesse indipendenti. Nella risposta i numeri vanno dati per canale.',
+        },
       };
     },
   },
@@ -259,45 +312,41 @@ export const STRUMENTI = [
   },
   {
     nome: 'proiezione_secondarie',
-    descrizione: 'Quanti viaggi di secondaria restano da portare a ciascun impianto per arrivare al target, mese per mese, e se gli stoccaggi hanno materiale per farli.',
+    descrizione: 'Quanti viaggi di secondaria restano da portare a ciascun impianto per arrivare al target, mese per mese, se gli stoccaggi hanno materiale per farli e quali ipotesi sono state fissate a mano. Solo rete: le secondarie ACI non consumano il target.',
     parametri: { anno: 'numero', mese_da: 'indice del mese da cui proiettare, 0 = gennaio' },
     moduli: ['Predittivita Secondarie'],
     async esegui(base44, p) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       const meseDa = p.mese_da != null ? Number(p.mese_da) : Number(oggiRoma().slice(5, 7)) - 1;
-      const svc = base44.asServiceRole.entities;
-      const [impianti, primarie, secondarie] = await Promise.all([
-        svc.ImpiantoTargetSecondaria.filter({ stato: 'attivo' }),
-        fetchAll(svc.PrimariaRete, { stato: 'terminato' }),
-        fetchAll(svc.Secondaria, { stato: 'terminato' }),
-      ]);
-      const perSito = (righe, campo, filtro) => {
-        const m = new Map();
-        for (const r of righe) {
-          if (filtro && !filtro(r)) continue;
-          const mese = meseDi(r.trasporto_finito_il, anno);
-          if (mese < 0) continue;
-          const k = normalizzaRagioneSociale(r[campo]);
-          if (!m.has(k)) m.set(k, {});
-          m.get(k)[mese] = (m.get(k)[mese] || 0) + peso(r);
-        }
-        return m;
-      };
-      const prim = perSito(primarie, 'destinazione');
-      const sec = perSito(secondarie, 'destinazione', r => !eAci(r));
-      const proiezioni = impianti.map(imp => {
-        const k = normalizzaRagioneSociale(imp.nome_impianto);
-        return proiettaImpianto(
-          { nome: imp.nome_impianto, target_kg: Number(imp.target) || 0, data_fine: imp.data_fine || `${anno}-12-18` },
-          { conferito_primaria_per_mese: prim.get(k) || {}, conferito_secondaria_per_mese: sec.get(k) || {}, stoccaggi: [] },
-          { meseCorrente: meseDa },
-        );
-      });
+      // Si chiama il modulo, non si rifa' il conto: qui mancavano le giacenze
+      // degli stoccaggi e le ipotesi scritte a mano, e uscivano viaggi diversi
+      // da quelli che l'utente vede a video, con avvisi di materiale mancante
+      // che a video non c'erano.
+      const res = await base44.functions.invoke('proiezioneSecondarie', { anno, mese_da: meseDa });
+      const d = (res && res.data) || res || {};
+      const impianti = (d.impianti || []).map(x => ({
+        impianto: x.impianto,
+        target_t: t3(x.target_kg), conferito_t: t3(x.conferito_kg), residuo_t: t3(x.residuo_kg),
+        viaggi_totali: x.viaggi_totali,
+        mesi: (x.mesi || []).map(m => ({
+          mese: m.mese, primaria_attesa_t: t3(m.primaria_kg), viaggi: m.viaggi,
+          residuo_t: t3(m.residuo_kg), viaggi_disponibili: m.viaggi_disponibili, viaggi_mancanti: m.viaggi_mancanti,
+          da_ipotesi: !!m.da_ipotesi,
+        })),
+        stoccaggi: (x.stoccaggi || []).map(st => ({ nome: st.nome, giacenza_t: t3(st.giacenza_kg), nota: st.giacenza_nota || '' })),
+        avvisi: x.avvisi || [],
+      }));
       return {
         fonte: 'Predittivita delle secondarie, canale RETE',
-        periodo: `da ${MESI[meseDa]} ${anno} alla data obiettivo`,
+        periodo: `da ${MESI[meseDa] || ''} ${anno} alla data obiettivo`.trim(),
         dati_al: oggiRoma(),
-        dati: { impianti: proiezioni.map(x => ({ impianto: x.impianto, target_t: t3(x.target_kg), conferito_t: t3(x.conferito_kg), residuo_t: t3(x.residuo_kg), viaggi_totali: x.viaggi_totali, mesi: x.mesi.map(m => ({ mese: m.mese, primaria_t: t3(m.primaria_kg), viaggi: m.viaggi, residuo_t: t3(m.residuo_kg) })), avvisi: x.avvisi })), viaggi_per_mese: viaggiPerMese(proiezioni) },
+        dati: {
+          kg_per_viaggio: d.kg_per_viaggio,
+          impianti,
+          viaggi_per_mese: d.viaggi_per_mese,
+          ipotesi_fissate: (d.ipotesi || []).map(i => ({ impianto: i.impianto, mese: i.mese, primaria_attesa_kg: i.primaria_attesa_kg, viaggi_previsti: i.viaggi_previsti, note: i.note })),
+          nota: 'Sono gli stessi numeri del modulo Predittivita Secondarie, ipotesi scritte a mano comprese.',
+        },
       };
     },
   },
@@ -363,7 +412,10 @@ export const STRUMENTI = [
       let righe = d.righe || [];
       // Il tipo si applica solo quando non e' stato chiesto un sito preciso:
       // chiedendo "la giacenza di Nappi Sud" con tipo "impianto" si finiva per
-      // non trovare niente, perche' Nappi Sud e' uno stoccaggio.
+      // non trovare niente, perche' Nappi Sud e' uno stoccaggio. E se non si
+      // applica sparisce, perche' altrimenti resta scritto fra i parametri e la
+      // risposta chiama impianto uno stoccaggio.
+      if (p.tipo && p.sito) delete p.tipo;
       if (p.tipo && !p.sito) {
         const vuole = /stoc/i.test(String(p.tipo)) ? 'stoc' : 'imp';
         righe = righe.filter(r => (String(r.tipo_destinazione || '').toLowerCase() === 'stoc' ? 'stoc' : 'imp') === vuole);
@@ -384,11 +436,19 @@ export const STRUMENTI = [
         target_totale_t: r.target_totale_t, giacenza_riferimento_t: r.giacenza_riferimento_t,
         data_rilevazione: r.data_rilevazione, giacenza_classi_kg: r.giacenza_classi_kg,
       }));
+      // I totali che arrivano dal modulo sono su tutti i siti: se qui si e'
+      // filtrato per sito o per tipo, quel totale risponderebbe a un'altra
+      // domanda. Allora si rifa' sulle righe rimaste.
+      const filtrato = !!(p.sito || p.tipo);
+      const somma = (campo) => Math.round(utili.reduce((s, r) => s + (Number(r[campo]) || 0), 0) * 1000) / 1000;
+      const totali = filtrato
+        ? { perimetro: `solo ${utili.length === 1 ? 'il sito richiesto' : 'i siti richiesti'}`, siti: utili.length, giacenza_portale_t: somma('giacenza_portale_t'), in_attesa_dichiarazione_t: somma('in_attesa_dichiarazione_t'), ordini_da_dichiarare: utili.reduce((s, r) => s + (Number(r.ordini_da_dichiarare) || 0), 0) }
+        : { perimetro: 'tutti i siti', ...(d.totali || {}) };
       return {
         fonte: 'Giacenze, giacenza a portale',
         periodo: `anno ${anno}`,
         dati_al: oggiRoma(),
-        dati: { siti: elenco(utili, 80), totali: d.totali, anomalie: elenco(d.anomalie || [], 20) },
+        dati: { siti: elenco(utili, 80), totali, anomalie: elenco(d.anomalie || [], 20) },
       };
     },
   },
@@ -561,8 +621,10 @@ export const STRUMENTI = [
         if (!perSoggetto.has(nome)) perSoggetto.set(nome, { soggetto: nome, documenti: 0, validi: 0, scaduti: 0, in_scadenza: 0, non_conformi: 0, da_verificare: 0, dettaglio: [] });
         const x = perSoggetto.get(nome);
         x.documenti++;
-        if (st.stato === 'valido') x.validi++;
-        else if (x[st.stato] !== undefined) x[st.stato]++;
+        // statoRequisito dice "scaduto" e "non_conforme" al singolare: senza
+        // questa corrispondenza i due contatori restavano a zero per tutti.
+        const contatore = { valido: 'validi', scaduto: 'scaduti', non_conforme: 'non_conformi', in_scadenza: 'in_scadenza', da_verificare: 'da_verificare', in_analisi: 'da_verificare' }[st.stato];
+        if (contatore && x[contatore] !== undefined) x[contatore]++;
         if (st.stato !== 'valido' && x.dettaglio.length < 10) {
           x.dettaglio.push({ documento: d.tipo_documento_nome, stato: st.stato, scadenza: st.scadenza, giorni: st.giorni });
         }
