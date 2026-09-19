@@ -1,3 +1,9 @@
+// SUPERATA da calcolaPassiva. Non la chiama piu' nessuna pagina del gestionale e
+// non deve tornare a girare: paginava le primarie ordinando per created_date, l'ordinamento che il
+// 15/09/2026 ci e' costato 663 righe lette due volte e 663 mai lette.
+// Il codice resta leggibile per capire come si faceva prima, ma la funzione
+// rifiuta di eseguire, altrimenti basterebbe una chiamata per riempire lo
+// storico di documenti sbagliati accanto a quelli buoni.
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
@@ -12,6 +18,12 @@ export default async function(req) {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return rispostaSolaLettura();
+    return Response.json({
+      error: "Questo calcolo e superato: la fatturazione passiva si ottiene dalla scheda Passiva, che la ricalcola sui dati aggiornati con le regole in vigore. La funzione elaboraFatturazionePassivaRete non produce piu documenti.",
+      superata: true,
+      usa: 'calcolaPassiva',
+    }, { status: 410 });
+
     const { anno, mese, fornitoreId } = await req.json();
     if (!anno || !mese) return Response.json({ error: 'Anno e mese obbligatori' }, { status: 400 });
 

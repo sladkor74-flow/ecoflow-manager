@@ -1,3 +1,10 @@
+// SUPERATA da calcolaPassiva. Non la chiama piu' nessuna pagina del gestionale e
+// non deve tornare a girare: leggeva le primarie dal campo mese memorizzato dal portale invece che
+// dalla fine del trasporto, senza filtro sull'anno e senza filtro sui formulari
+// terminati, e riusciva a produrre documenti da zero euro.
+// Il codice resta leggibile per capire come si faceva prima, ma la funzione
+// rifiuta di eseguire, altrimenti basterebbe una chiamata per riempire lo
+// storico di documenti sbagliati accanto a quelli buoni.
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
@@ -17,6 +24,12 @@ export default async function(req) {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return rispostaSolaLettura();
+    return Response.json({
+      error: "Questo calcolo e superato: la fatturazione passiva si ottiene dalla scheda Passiva, che la ricalcola sui dati aggiornati con le regole in vigore. La funzione elaboraFatturazionePassiva non produce piu documenti.",
+      superata: true,
+      usa: 'calcolaPassiva',
+    }, { status: 410 });
+
     const { anno, mese, tipo_fatturazione = 'completa' } = await req.json();
     if (!anno || !mese) return Response.json({ error: 'Anno e mese obbligatori' }, { status: 400 });
 

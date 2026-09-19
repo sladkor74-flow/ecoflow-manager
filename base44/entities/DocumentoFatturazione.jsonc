@@ -86,6 +86,15 @@
     },
     "note": {
       "type": "string"
+    },
+    "superato": {
+      "type": "boolean",
+      "default": false,
+      "description": "Documento prodotto da un calcolo non piu' in uso: resta nello storico ma non fa testo"
+    },
+    "motivo_superato": {
+      "type": "string",
+      "description": "Perche' il documento e' superato: si scrive sempre, cosi' fra un anno si capisce"
     }
   },
   "required": [
