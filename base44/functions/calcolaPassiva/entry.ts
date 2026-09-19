@@ -175,6 +175,16 @@ function elencoDiCui(mappa) {
     fornitore, tonnellate: round3(d.peso_kg / 1000), viaggi: d.viaggiSet.size,
   }));
 }
+// Come elencoDiCui, ma si porta dietro quali viaggi: sommare i conteggi riga per
+// riga contava due volte lo stesso camion, quando lo stesso viaggio compariva in
+// due righe (per esempio due province).
+function elencoDiCuiConViaggi(mappa) {
+  if (!mappa || mappa.size === 0) return [];
+  return [...mappa.entries()].map(([fornitore, d]) => ({
+    fornitore, tonnellate: round3(d.peso_kg / 1000), viaggi: d.viaggiSet.size,
+    viaggi_keys: [...d.viaggiSet],
+  }));
+}
 
 // ─── Calcolo importo ───
 function calcImporto(um, valore, peso_kg, viaggi) {
@@ -448,7 +458,7 @@ export default async function(req) {
       let importo = 0;
       if (g.tariffa && !g.interno) importo = calcImporto(um, valore, g.peso_kg, g.viaggiSet.size);
       raccoglitoriRows.push({
-        fornitore: g.trasportatore, fornitore_norm: g.trasKey, interno: g.interno, di_cui: elencoDiCui(g.diCui),
+        fornitore: g.trasportatore, fornitore_norm: g.trasKey, interno: g.interno, di_cui: elencoDiCuiConViaggi(g.diCui),
         riga: {
           provincia: g.provincia || '—', destinazione: g.destinazione || '—',
           classe: Array.from(g.classi_set).join(', ') || '—',
@@ -466,15 +476,30 @@ export default async function(req) {
     // €/viaggio
     for (const g of raccPerTras.values()) {
       const tonnellate = g.peso_kg / 1000;
-      const viaggi = g.viaggiSet.size;
-      let importo = 0, um = '', valore = 0;
+      let importo = 0, um = '', valore = 0, viaggiFatturati = 0;
       for (const pt of g.perTariffa.values()) {
         if (!pt.tariffa || g.interno) continue;
         importo += calcImporto(pt.tariffa.unita_misura, pt.tariffa.valore, pt.peso_kg, pt.viaggiSet.size);
+        viaggiFatturati += pt.viaggiSet.size;
         um = pt.tariffa.unita_misura; valore = pt.tariffa.valore;
       }
+      // I viaggi a video sono quelli fatturati, altrimenti la moltiplicazione
+      // mostrata non tornerebbe con l'importo. Se sono piu' dei viaggi
+      // distinti, lo stesso camion dello stesso giorno e' finito sotto due
+      // tariffe e si sta pagando due volte: si segnala.
+      const viaggi = g.interno ? g.viaggiSet.size : (viaggiFatturati || g.viaggiSet.size);
+      if (!g.interno && viaggiFatturati > g.viaggiSet.size) {
+        anomalie.push({
+          descrizione: `${g.trasportatore}: ${viaggiFatturati} viaggi fatturati su ${g.viaggiSet.size} viaggi distinti. Lo stesso mezzo nello stesso giorno ricade sotto due tariffe a viaggio e viene pagato due volte.`,
+          fornitore: g.trasportatore,
+          prestazione: 'RACCOLTA',
+          classe: '—',
+          ambito: 'Tariffe a viaggio',
+          tonnellate: round3(tonnellate),
+        });
+      }
       raccoglitoriRows.push({
-        fornitore: g.trasportatore, fornitore_norm: g.trasKey, interno: g.interno, di_cui: elencoDiCui(g.diCui),
+        fornitore: g.trasportatore, fornitore_norm: g.trasKey, interno: g.interno, di_cui: elencoDiCuiConViaggi(g.diCui),
         riga: {
           provincia: '—', destinazione: '—', classe: '—',
           tonnellate: round3(tonnellate), viaggi,
@@ -499,8 +524,10 @@ export default async function(req) {
       f.totale_tonnellate += row.riga.tonnellate;
       f.totale_euro += row.riga.importo;
       for (const d of (row.di_cui || [])) {
-        const prima = f.diCui.get(d.fornitore) || { peso_kg: 0, viaggi: 0 };
-        f.diCui.set(d.fornitore, { peso_kg: prima.peso_kg + d.tonnellate * 1000, viaggi: prima.viaggi + d.viaggi });
+        if (!f.diCui.has(d.fornitore)) f.diCui.set(d.fornitore, { peso_kg: 0, viaggiSet: new Set() });
+        const acc = f.diCui.get(d.fornitore);
+        acc.peso_kg += d.tonnellate * 1000;
+        for (const k of (d.viaggi_keys || [])) acc.viaggiSet.add(k);
       }
     }
     const raccoglitori = Array.from(raccByForn.values()).map(f => ({
@@ -508,7 +535,7 @@ export default async function(req) {
       totale_tonnellate: round3(f.totale_tonnellate), totale_euro: round2(f.totale_euro),
       // Le tonnellate dei subraccoglitori sono comprese nel totale: si mostrano
       // per sapere quanto ha portato ciascuno, non per fatturarle a lui.
-      di_cui: [...f.diCui.entries()].map(([fornitore, v]) => ({ fornitore, tonnellate: round3(v.peso_kg / 1000), viaggi: v.viaggi }))
+      di_cui: [...f.diCui.entries()].map(([fornitore, v]) => ({ fornitore, tonnellate: round3(v.peso_kg / 1000), viaggi: v.viaggiSet.size }))
         .sort((a, b) => b.tonnellate - a.tonnellate),
     })).sort((a, b) => b.totale_euro - a.totale_euro);
 
