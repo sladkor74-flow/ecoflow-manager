@@ -185,9 +185,12 @@ export default async function(req) {
       }
     }
 
+    // Uno strumento che va in errore non consegna dati: se sono andati storti
+    // tutti, la domanda resterebbe senza numeri anche potendo avere il riepilogo.
+    const conDati = risultati.filter(r => !r.errore).length;
     const [approvate, dati, corso] = await Promise.all([
       vociApprovate(base44),
-      analisi.dati && !risultati.length ? situazioneGestionale(base44, oggi).catch(e => `Dati del gestionale non disponibili: ${e.message || e}`) : Promise.resolve(''),
+      analisi.dati && !conDati ? situazioneGestionale(base44, oggi).catch(e => `Dati del gestionale non disponibili: ${e.message || e}`) : Promise.resolve(''),
       // Schede del corso RT pertinenti: solo per le domande sulle norme e per i quiz.
       analisi.norma ? materialePertinente(base44, quiz ? `${quiz.domanda} ${(quiz.risposte || []).join(' ')}` : domanda).catch(() => ({ testo: '', fonti: [] })) : Promise.resolve({ testo: '', fonti: [] }),
     ]);
@@ -243,7 +246,8 @@ export default async function(req) {
       ...(storia ? ['', 'CONVERSAZIONE PRECEDENTE', storia] : []),
       ...(!allegati.length && ultimiAllegati ? ['', 'FILE ALLEGATI IN PRECEDENZA IN QUESTA CONVERSAZIONE (estratto)', ultimiAllegati.map(a => `[${a.rif || ''}] ${a.nome}\n${a.estratto || ''}`).join('\n\n')] : []),
       ...(allegati.length ? ['', 'ALLEGATI (file inviati con questa domanda)', sezioneAllegati] : []),
-      ...(risultati.length ? ['', testoDati(risultati)] : (dati ? ['', dati] : [])),
+      ...(risultati.length ? ['', testoDati(risultati)] : []),
+      ...(dati ? ['', dati] : []),
       '',
       'DOMANDA',
       domanda,
@@ -272,7 +276,7 @@ export default async function(req) {
       strumenti_json: risultati.length ? JSON.stringify(risultati.map(r => ({ strumento: r.strumento, parametri: r.parametri, fonte: r.fonte, periodo: r.periodo, dati_al: r.dati_al, errore: r.errore || '' }))) : undefined,
       // Se il pianificatore ha guardato nel gestionale, la scheda lo dice, anche
       // se l'analisi iniziale della domanda non se n'era accorta.
-      dati_gestionale: risultati.length > 0 || analisi.dati,
+      dati_gestionale: conDati > 0 || analisi.dati,
       ambito: risultati.length && analisi.ambito === 'normativa' ? 'mista' : analisi.ambito,
       dati_mancanti_json: Array.isArray(esito.dati_mancanti) && esito.dati_mancanti.length ? JSON.stringify(esito.dati_mancanti) : undefined,
       allegati_json: allegati.length ? JSON.stringify(allegatiSalvati) : '',

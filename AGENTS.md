@@ -52,11 +52,15 @@ Usa `dataPeriodo(record)` da `base44/shared/dataEnrichment.ts`, che incapsula la
 regola. I campi memorizzati possono venire da importazioni vecchie, quando la
 data di riferimento era la chiusura: non fidarsene, ricalcolare.
 
-Due sole eccezioni, ed e' giusto che lo siano:
-- la **giacenza a portale** (`riepilogoDichiarazioni`, `calcolaGiacenze`), perche'
-  il portale conta un ordine nel momento in cui lo chiude;
-- i **tempi di evasione**, che misurano proprio la distanza fra immissione e
-  chiusura.
+Non ci sono eccezioni, nemmeno per le giacenze. Il portale aggiorna il suo saldo
+quando chiude l'ordine, giorni dopo il trasporto, ma quella e' una sua abitudine
+amministrativa: la giacenza vera di un piazzale cambia quando il camion arriva o
+parte, non quando qualcuno chiude una pratica. Regola della direzione,
+19/09/2026: vale la fine del trasporto per la fatturazione, per le registrazioni
+e per le giacenze, in tutto.
+
+L'unico uso legittimo di `ordine_chiuso_il` sono i **tempi di evasione**, che non
+assegnano un periodo: misurano proprio la distanza fra immissione e chiusura.
 
 Un assegnato non e' un movimento: il suo periodo e' `ordine_immesso_il`.
 

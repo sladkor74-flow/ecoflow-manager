@@ -79,12 +79,18 @@ export function proiettaImpianto(impianto, dati, opzioni) {
   const mediaPrimaria = mediaMensile(primPerMese, meseCorrente);
 
   // Gli stoccaggi che alimentano l'impianto: quanto hanno adesso e quanto arriva.
+  // Uno stoccaggio di cui non si conosce la giacenza non vale zero: non si sa, ed
+  // e' un'altra cosa. Contarlo come vuoto faceva scrivere "ne mancano N viaggi"
+  // su un piazzale che nessuno ha ancora rilevato.
   const stoccaggi = (dati.stoccaggi || []).map(s => ({
     nome: s.nome,
-    giacenza_kg: Number(s.giacenza_kg) || 0,
+    giacenza_kg: s.giacenza_kg == null ? null : Number(s.giacenza_kg) || 0,
+    giacenza_nota: s.giacenza_nota || '',
+    nota: s.giacenza_nota || '',
     media_ingressi_kg: mediaMensile(s.ingressi_per_mese || {}, meseCorrente),
   }));
-  let disponibileKg = stoccaggi.reduce((s, x) => s + x.giacenza_kg, 0);
+  const senzaRilevazione = stoccaggi.filter(s => s.giacenza_kg == null);
+  let disponibileKg = stoccaggi.reduce((s, x) => s + (x.giacenza_kg || 0), 0);
 
   let residuo = target - conferito;
   const righe = [];
@@ -134,7 +140,12 @@ export function proiettaImpianto(impianto, dati, opzioni) {
   if (scoperto > KG_PER_VIAGGIO / 2) {
     avvisi.push(`Il piano non arriva al target: a fine anno resterebbero ${arrotonda(scoperto / 1000)} t da conferire, cioe' ${Math.ceil(viaggiDa(scoperto))} viaggi in piu' di quelli previsti.`);
   }
-  const mancanti = righe.filter(r => r.viaggi_mancanti > 0);
+  // Con uno stoccaggio non rilevato la disponibilita' e' una stima per difetto:
+  // si dice, invece di dare per mancante un materiale che forse c'e'.
+  if (senzaRilevazione.length) {
+    avvisi.push(`Di ${senzaRilevazione.map(s => s.nome).join(', ')} non c'e' una rilevazione del portale: la giacenza disponibile qui sotto e' calcolata senza, quindi per difetto.`);
+  }
+  const mancanti = senzaRilevazione.length ? [] : righe.filter(r => r.viaggi_mancanti > 0);
   if (mancanti.length) {
     avvisi.push(`Negli stoccaggi non c'e' materiale per tutti i viaggi previsti: ${mancanti.map(r => `${r.mese} ne mancano ${r.viaggi_mancanti}`).join(', ')}.`);
   }
@@ -159,6 +170,31 @@ export function proiettaImpianto(impianto, dati, opzioni) {
 }
 
 /** I viaggi che servono ogni mese su tutti gli impianti, come la riga 27 del foglio. */
+/**
+ * Uno stoccaggio che alimenta due impianti ha un piazzale solo: la sua giacenza
+ * non puo' essere contata per intero da tutti e due. Qui la si divide fra gli
+ * impianti che ci attingono, in proporzione a quanto ciascuno ha gia' ricevuto
+ * da li' nell'anno; a pari merito, in parti uguali.
+ */
+export function ripartisciStoccaggi(impianti) {
+  const usi = new Map();
+  for (const imp of impianti) {
+    for (const s of (imp.stoccaggi || [])) {
+      const k = String(s.nome || '').toLowerCase().trim();
+      if (!usi.has(k)) usi.set(k, []);
+      usi.get(k).push({ impianto: imp.nome, peso: Number(s.ricevuto_kg) || 0 });
+    }
+  }
+  const quote = new Map();
+  for (const [k, elenco] of usi) {
+    const totale = elenco.reduce((s, x) => s + x.peso, 0);
+    for (const x of elenco) {
+      quote.set(k + '|' + x.impianto, elenco.length === 1 ? 1 : (totale > 0 ? x.peso / totale : 1 / elenco.length));
+    }
+  }
+  return quote;
+}
+
 export function viaggiPerMese(proiezioni) {
   const per = new Map();
   for (const p of proiezioni) {

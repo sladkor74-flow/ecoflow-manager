@@ -21,6 +21,7 @@
 
 import { fetchAll } from "./fetchAll.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
+import { getRegioneFromProvincia } from "./dataEnrichment.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { PIVOT_DEFS, calcolaPivot, MESI } from "./reportMensile.ts";
 import { caricaGestionale } from "./quadraturaFirDati.ts";
@@ -34,7 +35,21 @@ import { statoRequisito } from "./qualificaFornitori.ts";
 
 export const oggiRoma = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
 
-const soloData = (v) => (v ? String(v).slice(0, 10) : '');
+// Le date arrivano quasi sempre a mezzanotte UTC, ma qualcuna e' salvata alle
+// 22:00 o 23:00 Z, che in Italia e' gia' il giorno dopo: tagliando la stringa si
+// sbaglia il giorno, e a fine mese si sbaglia il mese. Stessa correzione del
+// Report Settimanale.
+const giornoItaliano = (v) => {
+  if (!v) return null;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return null;
+  const mezzanotteItaliana = (d.getUTCHours() === 22 || d.getUTCHours() === 23) && !d.getUTCMinutes() && !d.getUTCSeconds();
+  return mezzanotteItaliana ? new Date(d.getTime() + 3 * 3600000) : d;
+};
+const soloData = (v) => {
+  const d = giornoItaliano(v);
+  return d ? d.toISOString().slice(0, 10) : '';
+};
 const terminato = (r) => String(r.stato || '').toLowerCase().trim() === 'terminato';
 const peso = (r) => Number(r.peso_effettivo) || 0;
 const t3 = (kg) => Math.round((Number(kg) || 0) / 1000 * 1000) / 1000;
@@ -44,6 +59,8 @@ const meseDi = (v, anno) => {
   if (!d || (anno && Number(d.slice(0, 4)) !== Number(anno))) return -1;
   return Number(d.slice(5, 7)) - 1;
 };
+
+const annoDi = (v) => { const d = soloData(v); return d ? Number(d.slice(0, 4)) : null; };
 
 /** Le primarie o le extra di un canale, filtrate per periodo e per luogo. */
 async function movimenti(base44, { canale, anno, mese, provincia, regione, raccoglitore, destinazione }) {
@@ -62,7 +79,7 @@ async function movimenti(base44, { canale, anno, mese, provincia, regione, racco
     if (m < 0) return false;
     if (meseIdx >= 0 && m !== meseIdx) return false;
     if (provincia && String(r.provincia || '').toUpperCase() !== String(provincia).toUpperCase()) return false;
-    if (regione && normalizzaRagioneSociale(r.regioni || r.regione) !== normalizzaRagioneSociale(regione)) return false;
+    if (regione && normalizzaRagioneSociale(r.regioni || r.regione || getRegioneFromProvincia(r.provincia)) !== normalizzaRagioneSociale(regione)) return false;
     if (raccoglitore && chiave(r.trasportatore) !== chiave(raccoglitore)) return false;
     if (destinazione && chiave(r.destinazione) !== chiave(destinazione)) return false;
     return true;
@@ -95,10 +112,17 @@ const MESE_DA_DATA = (r) => {
   return d ? MESI[Number(d.slice(5, 7)) - 1] || 'N/D' : 'N/D';
 };
 
+// La regione di un movimento: la colonna del portale, il campo vecchio, e in
+// mancanza la provincia. Il filtro la cercava cosi' e il raggruppamento no, e
+// filtrando per Campania usciva un dettaglio con la riga "N/D".
+const REGIONE_DI = (r) => String(r.regioni || r.regione || getRegioneFromProvincia(r.provincia) || 'N/D').trim();
+
 function perChiave(righe, campo) {
   const m = new Map();
   for (const r of righe) {
-    const k = campo === 'mese' ? MESE_DA_DATA(r) : String(r[campo] || 'N/D').trim();
+    const k = campo === 'mese' ? MESE_DA_DATA(r)
+      : campo === 'regioni' ? REGIONE_DI(r)
+      : String(r[campo] || 'N/D').trim();
     if (!m.has(k)) m.set(k, { nome: k, formulari: 0, kg: 0 });
     const x = m.get(k);
     x.formulari++;
@@ -356,17 +380,31 @@ export const STRUMENTI = [
     parametri: { modulo: 'opzionale' },
     moduli: ['Alert & Controllo'],
     async esegui(base44, p) {
-      const filtro = p.modulo ? { stato: 'aperto', modulo: p.modulo } : { stato: 'aperto' };
-      const alert = await fetchAll(base44.asServiceRole.entities.Alert, filtro);
+      // Il modulo arriva scritto come capita: basta una maiuscola o uno spazio
+      // per non trovare niente e rispondere "nessun alert".
+      const chiesto = String(p.modulo || '').toLowerCase().trim().replace(/\s+/g, '_');
+      const alert = await fetchAll(base44.asServiceRole.entities.Alert, { stato: 'aperto' });
+      const moduli = [...new Set(alert.map(a => String(a.modulo || 'altro')))];
+      const filtrati = chiesto && moduli.includes(chiesto) ? alert.filter(a => String(a.modulo || 'altro') === chiesto) : alert;
+      const moduloIgnorato = chiesto && !moduli.includes(chiesto) ? chiesto : '';
       const per = new Map();
-      for (const a of alert) {
+      for (const a of filtrati) {
         const k = `${a.modulo || 'altro'}|${a.severita || 'info'}`;
         if (!per.has(k)) per.set(k, { modulo: a.modulo || 'altro', severita: a.severita || 'info', quanti: 0, esempi: [] });
         const x = per.get(k);
         x.quanti++;
         if (x.esempi.length < 3) x.esempi.push(a.titolo);
       }
-      return { fonte: 'Alert & Controllo', periodo: 'adesso', dati_al: oggiRoma(), dati: { totale: alert.length, gruppi: [...per.values()].sort((a, b) => b.quanti - a.quanti) } };
+      return {
+        fonte: 'Alert & Controllo',
+        periodo: 'adesso',
+        dati_al: oggiRoma(),
+        dati: {
+          totale: filtrati.length,
+          gruppi: [...per.values()].sort((a, b) => b.quanti - a.quanti),
+          ...(moduloIgnorato ? { avviso: `"${moduloIgnorato}" non e' un modulo degli alert (ci sono: ${moduli.join(', ')}): il totale qui sotto e' di tutti.` } : {}),
+        },
+      };
     },
   },
   {
@@ -377,12 +415,44 @@ export const STRUMENTI = [
     async esegui(base44, p) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       const richieste = await fetchAll(base44.asServiceRole.entities.RichiestaEct, { anno });
-      const righe = richieste.map(r => ({
-        pdr: r.pdr_nome, provincia: r.provincia, classe: r.classe,
-        ordini: listaOrdini(r), stato: statoRichiesta(r), scadenza: r.scadenza,
-        immesso_il: soloData(r.ordine_immesso_il), evaso_il: soloData(r.evaso_il || r.evasione_rilevata_il),
-      })).filter(r => !p.stato || r.stato === p.stato);
-      return { fonte: 'Richieste ECT', periodo: `anno ${anno}`, dati_al: oggiRoma(), dati: { richieste: elenco(righe, 60) } };
+      const oggi = oggiRoma();
+      const giorni = (scadenza) => {
+        const d = soloData(scadenza);
+        if (!d) return null;
+        return Math.round((new Date(d).getTime() - new Date(oggi).getTime()) / 86400000);
+      };
+      const tutte = richieste.map(r => {
+        const stato = statoRichiesta(r);
+        const g = giorni(r.scadenza);
+        return {
+          pdr: r.pdr_nome, provincia: r.provincia, classe: r.classe,
+          ordini: listaOrdini(r), stato, scadenza: soloData(r.scadenza),
+          giorni_alla_scadenza: g,
+          scaduta: stato === 'aperta' && g !== null && g < 0,
+          immesso_il: soloData(r.ordine_immesso_il), evaso_il: soloData(r.evaso_il || r.evasione_rilevata_il),
+        };
+      });
+      // "scaduta" non e' uno stato dell'archivio ma e' quello che si chiede piu'
+      // spesso: e' una richiesta ancora aperta con la scadenza passata. E uno
+      // stato che non esiste non deve svuotare l'elenco in silenzio.
+      const chiesto = String(p.stato || '').toLowerCase().trim();
+      const stati = [...new Set(tutte.map(r => r.stato))];
+      const righe = !chiesto ? tutte
+        : chiesto === 'scaduta' ? tutte.filter(r => r.scaduta)
+        : stati.includes(chiesto) ? tutte.filter(r => r.stato === chiesto)
+        : tutte;
+      const statoIgnorato = chiesto && chiesto !== 'scaduta' && !stati.includes(chiesto) ? chiesto : '';
+      return {
+        fonte: 'Richieste ECT',
+        periodo: `anno ${anno}`,
+        dati_al: oggi,
+        dati: {
+          aperte: tutte.filter(r => r.stato === 'aperta').length,
+          scadute: tutte.filter(r => r.scaduta).length,
+          richieste: elenco(righe, 60),
+          ...(statoIgnorato ? { avviso: `"${statoIgnorato}" non e' uno stato delle richieste (ci sono: ${stati.join(', ')}, piu' "scaduta" che vuol dire aperta e fuori termine): qui sotto ci sono tutte.` } : {}),
+        },
+      };
     },
   },
   {
@@ -391,13 +461,32 @@ export const STRUMENTI = [
     parametri: {},
     moduli: ['Caricamento Dati'],
     async esegui(base44) {
-      const log = await base44.asServiceRole.entities.UploadLog.list('-created_date', 60);
+      // Sessanta righe non bastano a coprire tutti i tipi di file, e l'ultima
+      // riga di un tipo puo' essere un tentativo fallito: "caricato oggi" con
+      // dentro zero righe non e' un caricamento. Si tiene l'ultimo riuscito, e
+      // il tentativo fallito si dice a parte.
+      const log = await fetchAll(base44.asServiceRole.entities.UploadLog);
+      log.sort((a, b) => String(b.created_date || '').localeCompare(String(a.created_date || '')));
       const per = new Map();
+      const falliti = new Map();
       for (const l of log) {
-        if (per.has(l.tipo_file)) continue;
-        per.set(l.tipo_file, { tipo: l.tipo_file, quando: soloData(l.created_date), file: l.nome_file, righe: l.righe_importate, esito: l.esito });
+        const tipo = l.tipo_file || 'altro';
+        const fallito = String(l.esito || '').toLowerCase().includes('err');
+        if (fallito) {
+          if (!falliti.has(tipo) && !per.has(tipo)) falliti.set(tipo, { tipo, quando: soloData(l.created_date), file: l.nome_file, esito: l.esito });
+          continue;
+        }
+        if (!per.has(tipo)) per.set(tipo, { tipo, quando: soloData(l.created_date), file: l.nome_file, righe: l.righe_importate, esito: l.esito });
       }
-      return { fonte: 'Caricamento Dati', periodo: 'ultimi caricamenti', dati_al: oggiRoma(), dati: { caricamenti: [...per.values()] } };
+      return {
+        fonte: 'Caricamento Dati',
+        periodo: 'ultimi caricamenti riusciti',
+        dati_al: oggiRoma(),
+        dati: {
+          caricamenti: [...per.values()].sort((a, b) => String(b.quando).localeCompare(String(a.quando))),
+          ...(falliti.size ? { tentativi_falliti_dopo_l_ultimo_riuscito: [...falliti.values()] } : {}),
+        },
+      };
     },
   },
   {
@@ -448,7 +537,10 @@ export const STRUMENTI = [
         fonte: 'Giacenze, giacenza a portale',
         periodo: `anno ${anno}`,
         dati_al: oggiRoma(),
-        dati: { siti: elenco(utili, 80), totali, anomalie: elenco(d.anomalie || [], 20) },
+        dati: {
+          siti: elenco(utili, 80), totali, anomalie: elenco(d.anomalie || [], 20),
+          nota: "Per gli stoccaggi la giacenza e la rilevazione del portale piu i movimenti con il trasporto finito dopo di essa. Il portale aggiorna il suo saldo quando chiude l’ordine, qualche giorno dopo: su un ordine chiuso in ritardo i due numeri possono discostarsi.",
+        },
       };
     },
   },
@@ -543,7 +635,9 @@ export const STRUMENTI = [
     moduli: ['Dichiarazioni RENTRI'],
     async esegui(base44, p) {
       const svc = base44.asServiceRole.entities;
-      const tutte = await fetchAll(svc.DichiarazioneRentri);
+      // Chi e' sparito dall'ultimo foglio del portale non conta piu': resta in
+      // archivio per lo storico, ma non nei conteggi di oggi.
+      const tutte = (await fetchAll(svc.DichiarazioneRentri)).filter(d => d.nel_foglio !== false);
       const k = p.produttore ? normalizzaRagioneSociale(p.produttore) : '';
       let righe = tutte.filter(d => !k || normalizzaRagioneSociale(d.produttore).includes(k));
       if (p.solo_non_iscritti) righe = righe.filter(d => !d.iscritto_rentri);
@@ -657,12 +751,17 @@ export const STRUMENTI = [
       const tipo = String(p.tipo || 'PASSIVA').toUpperCase();
       const svc = base44.asServiceRole.entities;
 
+      // Il mese si normalizza subito, prima di qualunque ramo: nei documenti
+      // salvati e' scritto con l'iniziale maiuscola, e un "marzo" minuscolo
+      // passato al filtro non trovava niente e faceva dire "nessun importo".
+      const meseChiesto = p.mese ? MESI.find(m => m.toLowerCase() === String(p.mese).toLowerCase()) : '';
+      const meseIgnorato = p.mese && !meseChiesto ? String(p.mese) : '';
+
       // La passiva di un mese si calcola, non si legge: le voci salvate esistono
       // solo dopo che qualcuno ha elaborato e salvato il documento, e chiedendo
       // "quanto dobbiamo a Green Tyre per marzo" si rispondeva "niente" mentre
       // il modulo diceva 13.271,40 euro. Qui si chiama lo stesso conto del
       // modulo, cosi' i due numeri non possono divergere.
-      const meseChiesto = p.mese ? MESI.find(m => m.toLowerCase() === String(p.mese).toLowerCase()) : '';
       if (tipo === 'PASSIVA' && meseChiesto) {
         const tipologia = String(p.tipologia || 'RETE').toUpperCase();
         const res = await base44.functions.invoke('calcolaPassiva', { anno, mese: meseChiesto, tipologia });
@@ -680,22 +779,26 @@ export const STRUMENTI = [
           ...sezione('impianti e stoccaggi', d.impianti_stoccaggi),
           ...sezione('trasporto di secondaria', d.trasporti_secondaria),
         ].sort((a, b) => (Number(b.euro) || 0) - (Number(a.euro) || 0));
+        // I totali e la quadratura che arrivano dal modulo sono di tutto il mese:
+        // se qui si e' chiesto un fornitore solo, rispondono a un'altra domanda.
+        const suo = Math.round(voci.reduce((s, v) => s + (Number(v.euro) || 0), 0) * 100) / 100;
         return {
           fonte: `Fatturazione passiva, canale ${tipologia}`,
           periodo: `${meseChiesto} ${anno}`,
           dati_al: oggiRoma(),
           dati: {
             fornitori: elenco(voci, 60),
-            totali: d.totali,
+            ...(k
+              ? { totale_del_fornitore_euro: suo, totali_del_mese_tutti_i_fornitori: d.totali }
+              : { totali: d.totali, quadratura: d.quadratura }),
             anomalie: elenco(d.anomalie || [], 20),
-            quadratura: d.quadratura,
             nota: 'Conto fatto adesso sui movimenti terminati del mese, lo stesso del modulo Fatturazione. Un fornitore che ne fattura un altro porta il secondo in "di cui": si paga al primo.',
           },
         };
       }
 
       const filtro = { anno, tipo };
-      if (p.mese) filtro.mese = p.mese;
+      if (meseChiesto) filtro.mese = meseChiesto;
       if (p.tipologia) filtro.tipologia = String(p.tipologia).toUpperCase();
       const voci = await fetchAll(svc.VoceFatturazione, filtro);
       const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
@@ -725,7 +828,12 @@ export const STRUMENTI = [
         dati_al: oggiRoma(),
         dati: {
           voci: righe.length,
-          totale_euro: Math.round(gruppi.reduce((s, g) => s + g.totale_euro, 0) * 100) / 100,
+          // Un totale unico ha senso solo dentro un canale: senza filtro di
+          // tipologia sommerebbe rete, ACI ed extra raccolta in un numero solo.
+          ...(p.tipologia
+            ? { totale_euro: Math.round(gruppi.reduce((s, g) => s + g.totale_euro, 0) * 100) / 100 }
+            : { totale_per_canale: Object.entries(gruppi.reduce((acc, g) => { const c = g.tipologia || 'N/D'; acc[c] = Math.round(((acc[c] || 0) + g.totale_euro) * 100) / 100; return acc; }, {})).map(([canale, euro]) => ({ canale, euro })), nota_totale: 'Non c\'e\' un totale unico: rete, ACI ed extra raccolta sono commesse indipendenti.' }),
+          ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso tutto l'anno ${anno}.` } : {}),
           gruppi: elenco(gruppi, 60),
           nota: tipo === 'PASSIVA'
             ? 'Qui ci sono solo le voci dei documenti gia\' elaborati e salvati: per sapere quanto si deve a un fornitore in un mese preciso rifai la domanda indicando il mese, cosi\' il conto si fa sui movimenti.'

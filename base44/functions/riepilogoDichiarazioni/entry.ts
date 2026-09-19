@@ -66,11 +66,11 @@ export default async function(req) {
       const d = String(r.created_date || '').slice(0, 10);
       return d > max ? d : max;
     }, '');
-    // Un ordine entra nella giacenza del portale quando viene chiuso: quelli chiusi
-    // dopo la fotografia il portale non li ha ancora contati, anche se il trasporto
-    // era finito prima.
-    const chiusoIl = (r) => String(r.ordine_chiuso_il || r.trasporto_finito_il || '').slice(0, 10);
-    const dopoLaFoto = (r) => !!fotoPortale && chiusoIl(r) > fotoPortale;
+    // Il taglio della fotografia lo da' la fine del trasporto, come ovunque nel
+    // gestionale: il portale chiude l'ordine giorni dopo, ma la giacenza vera
+    // cambia quando il camion arriva o parte.
+    const finitoIl = (r) => String(r.trasporto_finito_il || r.ordine_chiuso_il || '').slice(0, 10);
+    const dopoLaFoto = (r) => !!fotoPortale && finitoIl(r) > fotoPortale;
     const allaFoto = { rete: new Map(), secIn: new Map(), secOut: new Map(), dopo: new Map() };
 
     // Per gli stoccaggi la giacenza del portale e' l'ultima rilevazione piu' i

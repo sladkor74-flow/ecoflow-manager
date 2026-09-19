@@ -86,7 +86,10 @@ export async function situazioneGestionale(base44, oggi) {
     provaA(() => fetchAll(svc.TargetRaccoglitore, { anno }), []),
     provaA(() => svc.CommessaEcotyre.filter({ anno }), []),
     provaA(() => fetchAll(svc.ControlloEvasione, { anno, mese: meseIdx + 1 }), []),
-    provaA(() => svc.Alert.filter({ stato: 'aperto' }, '-created_date', 200), []),
+    // Tutti gli alert aperti, non i primi duecento: il riepilogo diceva "200"
+    // mentre lo strumento alert_aperti ne contava 54 o 340, e i due numeri non
+    // coincidevano mai per il motivo sbagliato.
+    provaA(() => fetchAll(svc.Alert, { stato: 'aperto' }), []),
     provaA(() => svc.RiepilogoQualifica.filter({ anno }, '-created_date', 1), []),
     provaA(async () => (await base44.functions.invoke('calcolaGiacenze', { anno })).data, null),
   ]);

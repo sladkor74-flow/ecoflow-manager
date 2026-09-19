@@ -213,14 +213,14 @@ export default async function(req) {
     const contaMovimento = (r, ns, verso) => {
       const m = movStoc.get(ns);
       if (!m) return;
-      const t = istante(r.ordine_chiuso_il || r.trasporto_finito_il);
+      const t = istante(r.trasporto_finito_il || r.ordine_chiuso_il);
       if (!t || t <= m.dopo) return;
       const kg = Number(r.peso_effettivo) || 0;
       m[verso][classeDa(r.classe, r.prodotto)] += kg;
       if (verso === 'ingressi') m.nIngressi++; else m.nUscite++;
     };
     for (const r of [...reteAll, ...aciAll, ...extraAll, ...secAll]) {
-      const t = istante(r.ordine_chiuso_il || r.trasporto_finito_il);
+      const t = istante(r.trasporto_finito_il || r.ordine_chiuso_il);
       if (isTerminato(r) && t && t > datiAggiornatiAl && t <= Date.now()) datiAggiornatiAl = t;
     }
     for (const r of [...reteAll, ...aciAll, ...extraAll.filter(x => !eSecondariaExtra(x))]) {

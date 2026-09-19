@@ -159,10 +159,19 @@ export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
   const nominaMese = /(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre|questo mese|mese scorso|il mese)/.test(t);
   const senzaMese = chiedeAnno && !nominaMese;
   const scelti = [];
-  for (const x of (piano && Array.isArray(piano.strumenti) ? piano.strumenti : []).slice(0, 4)) {
+  const sconosciuti = [];
+  // Prima si scartano i nomi che non esistono, poi si conta fino a quattro:
+  // altrimenti due nomi inventati in cima al piano si portavano via i posti
+  // degli strumenti veri.
+  const validi = (piano && Array.isArray(piano.strumenti) ? piano.strumenti : []).filter(x => {
+    const nome = String((x && x.nome) || '').trim();
+    if (accetta.has(nome)) return true;
+    if (nome) sconosciuti.push(nome);
+    return false;
+  });
+  for (const x of validi.slice(0, 4)) {
     const nome = String((x && x.nome) || '').trim();
     const ok = accetta.get(nome);
-    if (!ok) continue;
     const base = {};
     const ignorati = [];
     for (const [k, v] of Object.entries((x && x.parametri) || {})) {
@@ -199,12 +208,51 @@ export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
     }
   }
   const visti = new Set();
-  return scelti.filter(s => {
+  const unici = scelti.filter(s => {
     const k = s.nome + JSON.stringify(s.parametri);
     if (visti.has(k)) return false;
     visti.add(k);
     return true;
-  }).slice(0, 8);
+  });
+  // Quattro strumenti per tre canali fanno dodici chiamate: il tetto le deve
+  // contenere, altrimenti gli ultimi canali sparivano senza che si sapesse.
+  const TETTO = 12;
+  const tenuti = unici.slice(0, TETTO);
+  const scartati = unici.slice(TETTO);
+  if (sconosciuti.length) tenuti.sconosciuti = sconosciuti;
+  if (scartati.length) tenuti.scartati = scartati.map(s => `${s.nome} ${JSON.stringify(s.parametri)}`);
+  return tenuti;
+}
+
+/**
+ * I dati di uno strumento, dentro un budget di caratteri.
+ *
+ * Tagliare la stringa gia' serializzata spezzava il JSON a meta' e portava via
+ * proprio le chiavi finali - totali, note, avvisi - che dicono come leggerlo.
+ * Qui invece si accorciano gli elenchi finche' l'oggetto ci sta, e il resto
+ * resta intero.
+ */
+function serializza(dati, budget) {
+  if (typeof dati === 'string') return dati.length > budget ? dati.slice(0, budget) + ' …(troncato)' : dati;
+  let testo = JSON.stringify(dati);
+  if (testo.length <= budget) return testo;
+  for (const quante of [30, 15, 8, 4, 2, 1, 0]) {
+    const ridotto = JSON.parse(JSON.stringify(dati), function (chiave, valore) {
+      if (valore && typeof valore === 'object' && Array.isArray(valore.righe) && typeof valore.quanti === 'number') {
+        const tenute = valore.righe.slice(0, quante);
+        return {
+          ...valore,
+          mostrate: tenute.length,
+          righe: tenute,
+          avviso: `ELENCO TAGLIATO: qui ci sono ${tenute.length} righe delle ${valore.quanti} totali. Il numero giusto e' "quanti": non contare le righe di questo elenco.`,
+        };
+      }
+      return valore;
+    });
+    testo = JSON.stringify(ridotto);
+    if (testo.length <= budget) return testo;
+  }
+  return testo.slice(0, budget) + ' …(troncato)';
 }
 
 /** Il blocco dei dati da mettere nel prompt della risposta. */
@@ -220,8 +268,7 @@ export function testoDati(risultati) {
     if (r.parametri_ignorati && r.parametri_ignorati.length) {
       parti.push(`ATTENZIONE: questo strumento non conosce ${r.parametri_ignorati.map(i => `"${i.parametro}" (${i.valore})`).join(', ')}: il numero qui sotto NON e' filtrato per quello. Dillo nella risposta invece di far finta che il filtro ci fosse.`);
     }
-    const testo = typeof r.dati === 'string' ? r.dati : JSON.stringify(r.dati);
-    parti.push(testo.length > 24000 ? testo.slice(0, 24000) + ' …(troncato)' : testo);
+    parti.push(serializza(r.dati, 24000));
   }
   return parti.join('\n');
 }

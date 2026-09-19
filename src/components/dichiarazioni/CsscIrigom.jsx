@@ -48,7 +48,16 @@ export default function CsscIrigom({ giacenzaPortaleT, anno }) {
     return Math.round((Number(giacenzaPortaleT) || 0) * 1000);
   }, [portaleManuale, giacenzaPortaleT]);
 
-  const conto = riga ? quantoDichiarare(portaleKg, riga.giacenza_pfu_kg) : null;
+  // Un mese che nel registro e' ancora tutto a zero non e' un mese da zero
+  // giacenza: e' un mese non compilato. Senza questo controllo il conto diceva
+  // di dichiarare tutta la giacenza a portale, che per Irigom sono centinaia di
+  // tonnellate, e nessuno se ne sarebbe accorto guardando il numero.
+  const meseVuoto = !!riga
+    && !(Number(riga.giacenza_pfu_kg) > 0)
+    && !(Number(riga.uscite_cssc_kg) > 0)
+    && !(Number(riga.uscite_ferro_kg) > 0)
+    && !ddtMese.length;
+  const conto = riga && !meseVuoto ? quantoDichiarare(portaleKg, riga.giacenza_pfu_kg) : null;
   const dich = conto ? componiDichiarazione(conto.da_dichiarare_kg, ddtMese) : null;
   const ferro = dich && riga ? quotaFerro(dich.ferro_kg, riga.uscite_ferro_kg) : null;
 
@@ -129,6 +138,17 @@ export default function CsscIrigom({ giacenzaPortaleT, anno }) {
         </div>
       )}
 
+      {riga && meseVuoto && (
+        <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm space-y-1">
+          <div className="flex items-center gap-2 font-medium"><AlertTriangle className="w-4 h-4" />Questo mese nel registro è ancora vuoto</div>
+          <div className="text-xs">
+            Nella riga di {mese} del foglio Cons. non ci sono né giacenze né uscite, e non risultano DDT di CSS-C della nostra commessa.
+            Non è un mese con giacenza zero: è un mese che Irigom non ha ancora compilato. Finché resta così non si calcola nulla,
+            perché il conto direbbe di dichiarare tutta la giacenza a portale.
+          </div>
+        </div>
+      )}
+
       {riga && conto && dich && (
         <>
           <div className="flex gap-2 flex-wrap">
@@ -151,7 +171,7 @@ export default function CsscIrigom({ giacenzaPortaleT, anno }) {
             <div className="px-3 py-2 rounded-md border bg-muted/30 min-w-[170px]">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">CSS-C del mese</div>
               <div className="tabular-nums">{t(dich.cssc_kg)} t</div>
-              <div className="text-[11px] text-muted-foreground">{dich.righe.length} DDT arancioni</div>
+              <div className="text-[11px] text-muted-foreground">{ddtMese.length} {ddtMese.length === 1 ? 'DDT arancione' : 'DDT arancioni'}</div>
             </div>
             <div className="px-3 py-2 rounded-md border bg-muted/30 min-w-[170px]">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Metalli ferrosi</div>

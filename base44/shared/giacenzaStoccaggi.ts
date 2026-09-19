@@ -9,17 +9,17 @@
 // - il momento della fotografia non e' il giorno della rilevazione ma il primo
 //   fra quello e l'istante in cui e' stata registrata, perche' chi la scrive la
 //   sera sta gia' guardando un portale aggiornato;
-// - un movimento conta dalla CHIUSURA dell'ordine, non dalla fine del trasporto,
-//   perche' e' alla chiusura che il portale aggiorna il saldo. E' l'unica
-//   eccezione alla regola generale del gestionale, dove il periodo lo da' sempre
-//   la fine del trasporto, ed e' verificata al chilogrammo su Nappi Sud il
-//   16/09/2026: rilevazione del 13/09 piu' dieci ingressi meno due uscite
-//   coincide con il portale, classe per classe.
+// - un movimento conta dalla FINE DEL TRASPORTO, come ovunque nel gestionale.
+//   Il portale aggiorna il suo saldo quando chiude l'ordine, giorni dopo, ma
+//   quella e' una sua abitudine amministrativa: la giacenza vera di un piazzale
+//   cambia quando il camion arriva o parte, non quando qualcuno chiude una
+//   pratica. Regola della direzione, 19/09/2026: vale la fine del trasporto per
+//   la fatturazione, per le registrazioni e per le giacenze, in tutto.
 //
-// La predittivita' delle secondarie usava invece la data di fine trasporto
-// confrontata con il giorno della rilevazione, e uno stesso carico risultava
-// dentro per le Giacenze e fuori per la Predittivita': la pagina scriveva "ne
-// mancano due viaggi" su un mese in cui il materiale c'era.
+// Le Giacenze e la Predittivita' delle secondarie avevano ciascuna la sua
+// regola, e uno stesso carico risultava dentro per l'una e fuori per l'altra:
+// la pagina scriveva "ne mancano due viaggi" su un mese in cui il materiale
+// c'era. Adesso la regola e' questa, e la usano tutte e due.
 
 /** Un valore di data in millisecondi, trattando come UTC cio' che non porta fuso. */
 export function istante(v) {
@@ -38,9 +38,9 @@ export function momentoRilevazione(rec) {
   return creato || giorno || 0;
 }
 
-/** Vero se il movimento e' stato chiuso dopo la fotografia del portale. */
+/** Vero se il trasporto del movimento e' finito dopo la fotografia del portale. */
 export function dopoLaRilevazione(movimento, momento) {
-  const t = istante(movimento.ordine_chiuso_il || movimento.trasporto_finito_il);
+  const t = istante(movimento.trasporto_finito_il || movimento.ordine_chiuso_il);
   return !!t && !!momento && t > momento;
 }
 

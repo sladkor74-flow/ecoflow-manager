@@ -2,7 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { proiettaImpianto, viaggiPerMese, MESI, KG_PER_VIAGGIO } from "../../shared/proiezioneSecondarie.ts";
+import { proiettaImpianto, viaggiPerMese, ripartisciStoccaggi, MESI, KG_PER_VIAGGIO } from "../../shared/proiezioneSecondarie.ts";
 import { dopoLaRilevazione, ultimeRilevazioni, kgReteDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 
 // Quante secondarie restano da portare a ogni impianto per arrivare al target.
@@ -136,6 +136,18 @@ export default async function(req) {
     };
 
     // --- gli stoccaggi che alimentano ciascun impianto ---
+    // Quanto ogni impianto ha gia' ricevuto da ciascuno stoccaggio quest'anno:
+    // serve a dividere la giacenza di uno stoccaggio condiviso.
+    const ricevutoDa = new Map(); // "stoccaggio|impianto" -> kg
+    for (const s2 of secondarie) {
+      if (!terminato(s2) || eAci(s2)) continue;
+      const o = normalizzaRagioneSociale(s2.stoccaggio);
+      const d2 = normalizzaRagioneSociale(s2.destinazione);
+      if (!o || !d2) continue;
+      const k = o + '|' + d2;
+      ricevutoDa.set(k, (ricevutoDa.get(k) || 0) + peso(s2));
+    }
+
     const stoccaggiDi = (chiaveImpianto) => {
       const nomi = new Set();
       // da chi e' registrato nella predittivita' come stoccaggio dell'impianto
@@ -151,12 +163,34 @@ export default async function(req) {
         if (o) nomi.add(o);
       }
       return [...nomi].map(chiave => ({
+        chiave,
         nome: nomeSito.get(chiave) || chiave,
-        giacenza_kg: giacenzaStoccaggio(chiave) || 0,
+        giacenza_kg: giacenzaStoccaggio(chiave),
         giacenza_nota: giacenzaStoccaggio(chiave) === null ? 'nessuna rilevazione del portale per questo stoccaggio' : '',
         ingressi_per_mese: primariaPerSito.get(chiave) || {},
+        ricevuto_kg: ricevutoDa.get(chiave + '|' + chiaveImpianto) || 0,
       }));
     };
+
+    // Un piazzale solo non puo' essere contato per intero da due impianti: la
+    // giacenza di uno stoccaggio condiviso si divide fra chi ci attinge, in
+    // proporzione a quanto ciascuno ha gia' ricevuto da li' quest'anno.
+    const stoccaggiPerImpianto = new Map();
+    for (const imp of impianti) {
+      const chiave = normalizzaRagioneSociale(imp.nome_impianto);
+      stoccaggiPerImpianto.set(chiave, stoccaggiDi(chiave));
+    }
+    const quote = ripartisciStoccaggi([...stoccaggiPerImpianto.entries()].map(([chiave, stoccaggi]) => ({ nome: chiave, stoccaggi })));
+    const stoccaggiRipartiti = (chiaveImpianto) => (stoccaggiPerImpianto.get(chiaveImpianto) || []).map(s2 => {
+      const quota = quote.get(String(s2.nome).toLowerCase().trim() + '|' + chiaveImpianto);
+      const q = quota == null ? 1 : quota;
+      return {
+        ...s2,
+        giacenza_kg: s2.giacenza_kg == null ? null : Math.round(s2.giacenza_kg * q),
+        quota_condivisione: Math.round(q * 1000) / 1000,
+        giacenza_nota: s2.giacenza_nota || (q < 1 ? `Stoccaggio condiviso: a questo impianto se ne attribuisce il ${Math.round(q * 100)}%, in proporzione a quanto ha gia' ricevuto quest'anno.` : ''),
+      };
+    });
 
     // Il target scritto nel foglio delle giacenze, per il confronto.
     const giacenzaSitoPer = new Map();
@@ -172,7 +206,7 @@ export default async function(req) {
         {
           conferito_primaria_per_mese: primariaPerSito.get(chiave) || {},
           conferito_secondaria_per_mese: secondariaInSito.get(chiave) || {},
-          stoccaggi: stoccaggiDi(chiave),
+          stoccaggi: stoccaggiRipartiti(chiave),
         },
         { meseCorrente: meseDa, ipotesi: ipotesiPulite(chiave) },
       );
