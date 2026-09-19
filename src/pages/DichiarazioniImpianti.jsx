@@ -11,6 +11,7 @@ import Riepilogo from '@/components/dichiarazioni/Riepilogo';
 import SezioneImpianto from '@/components/dichiarazioni/SezioneImpianto';
 import Quadratura from '@/components/dichiarazioni/Quadratura';
 import DialogoMese from '@/components/dichiarazioni/DialogoMese';
+import CsscIrigom from '@/components/dichiarazioni/CsscIrigom';
 import { esportaDichiarazioni } from '@/lib/dichiarazioniExport';
 
 // Dichiarazioni degli impianti: che cosa ogni impianto ricava dai PFU che gli
@@ -146,6 +147,7 @@ export default function DichiarazioniImpianti() {
             <TabsList>
               <TabsTrigger value="riepilogo">Riepilogo</TabsTrigger>
               <TabsTrigger value="impianti">Impianti</TabsTrigger>
+              <TabsTrigger value="irigom">Irigom e CSS-C</TabsTrigger>
               <TabsTrigger value="quadratura" className="gap-1">
                 Quadratura
                 {totali.siti_da_quadrare > 0 ? <AlertTriangle className="w-3.5 h-3.5 text-red-600" /> : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
@@ -158,6 +160,10 @@ export default function DichiarazioniImpianti() {
 
             <TabsContent value="impianti" className="mt-4 space-y-4">
               {dati.siti.map(s => <SezioneImpianto key={s.chiave} sito={s} onApri={apri} soloLettura={soloLettura} />)}
+            </TabsContent>
+
+            <TabsContent value="irigom" className="mt-4">
+              <CsscIrigom anno={anno} giacenzaPortaleT={(dati.siti.find(s => /irigom/i.test(s.nome || s.chiave || '')) || {}).giacenza_portale_t} />
             </TabsContent>
 
             <TabsContent value="quadratura" className="mt-4">
