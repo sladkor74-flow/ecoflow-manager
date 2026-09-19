@@ -10,6 +10,7 @@ import { computeRaccoltoData, MESI } from "./raccoltoCalculator.ts";
 import { aggregaTargetMensili, aggregaTargetAnnui } from "./targetRaccoglitori.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { formatoTonnellate } from "./formato.ts";
+import { giornoRoma } from "./giornoItaliano.ts";
 
 const PAROLE_DATI = [
   'target', 'raccolt', 'raccoglitor', 'giacenz', 'plafond', 'tonnellat', 'campania', 'puglia', 'basilicata',
@@ -130,14 +131,13 @@ export async function situazioneGestionale(base44, oggi) {
     righe.push(`Canale ACI ${anno} (indipendente, previsione indicativa del contratto ACI Ecotyre): raccolto ${t1(raccoltoAci.totale_raccolto)} t. Per regione, raccolto su previsione: ${dettaglio || 'nessun dato'}.`);
   }
   if (extra.length) {
-    const giorno = (v) => { const d = v ? new Date(v) : null; if (!d || isNaN(d.getTime())) return null; return (d.getUTCHours() >= 22 && !d.getUTCMinutes()) ? new Date(d.getTime() + 3 * 3600000) : d; };
-    const delAnno = extra.map(r => ({ r, d: giorno(r.trasporto_finito_il) })).filter(x => x.d && x.d.getUTCFullYear() === anno);
+    const delAnno = extra.map(r => ({ r, g: giornoRoma(r.trasporto_finito_il) })).filter(x => x.g && Number(x.g.slice(0, 4)) === anno);
     const peso = (xs) => xs.reduce((s, x) => s + (Number(x.r.peso_effettivo) || 0), 0) / 1000;
     // La raccolta dal produttore e i trasferimenti successivi stanno nello stesso
     // archivio: sommandoli, lo stesso materiale si conta due volte.
     const primarie = delAnno.filter(x => String(x.r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'secondaria');
     const trasferimenti = delAnno.filter(x => String(x.r.tipo_movimento || '').toLowerCase().trim() === 'secondaria');
-    righe.push(`Canale EXTRA RACCOLTA ${anno} (indipendente, senza target): terminati ${primarie.length} interventi di raccolta, ${t1(peso(primarie))} t; nel mese in corso ${t1(peso(primarie.filter(x => x.d.getUTCMonth() === meseIdx)))} t.`);
+    righe.push(`Canale EXTRA RACCOLTA ${anno} (indipendente, senza target): terminati ${primarie.length} interventi di raccolta, ${t1(peso(primarie))} t; nel mese in corso ${t1(peso(primarie.filter(x => Number(x.g.slice(5, 7)) - 1 === meseIdx)))} t.`);
     if (trasferimenti.length) {
       righe.push(`  di cui gia' raccolti e poi trasferiti da uno stoccaggio a un impianto: ${trasferimenti.length} viaggi, ${t1(peso(trasferimenti))} t. Non si sommano alla raccolta: e' lo stesso materiale che si sposta.`);
     }

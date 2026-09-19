@@ -22,6 +22,7 @@
 import { fetchAll } from "./fetchAll.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { getRegioneFromProvincia } from "./dataEnrichment.ts";
+import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { PIVOT_DEFS, calcolaPivot, MESI } from "./reportMensile.ts";
 import { caricaGestionale } from "./quadraturaFirDati.ts";
@@ -33,23 +34,10 @@ import { statoDichiarazione, sommaMateriali } from "./dichiarazioniImpianti.ts";
 import { giorniAllaScadenza, fasciaScadenza } from "./omologhe.ts";
 import { statoRequisito } from "./qualificaFornitori.ts";
 
-export const oggiRoma = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
+export { oggiRoma };
 
-// Le date arrivano quasi sempre a mezzanotte UTC, ma qualcuna e' salvata alle
-// 22:00 o 23:00 Z, che in Italia e' gia' il giorno dopo: tagliando la stringa si
-// sbaglia il giorno, e a fine mese si sbaglia il mese. Stessa correzione del
-// Report Settimanale.
-const giornoItaliano = (v) => {
-  if (!v) return null;
-  const d = new Date(v);
-  if (isNaN(d.getTime())) return null;
-  const mezzanotteItaliana = (d.getUTCHours() === 22 || d.getUTCHours() === 23) && !d.getUTCMinutes() && !d.getUTCSeconds();
-  return mezzanotteItaliana ? new Date(d.getTime() + 3 * 3600000) : d;
-};
-const soloData = (v) => {
-  const d = giornoItaliano(v);
-  return d ? d.toISOString().slice(0, 10) : '';
-};
+// Di una data conta il giorno italiano: la regola sta in shared/giornoItaliano.ts.
+const soloData = (v) => giornoRoma(v);
 const terminato = (r) => String(r.stato || '').toLowerCase().trim() === 'terminato';
 const peso = (r) => Number(r.peso_effettivo) || 0;
 const t3 = (kg) => Math.round((Number(kg) || 0) / 1000 * 1000) / 1000;

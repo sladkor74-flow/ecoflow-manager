@@ -49,9 +49,12 @@ export default function CsscIrigom({ giacenzaPortaleT, anno }) {
   }, [portaleManuale, giacenzaPortaleT]);
 
   // Un mese che nel registro e' ancora tutto a zero non e' un mese da zero
-  // giacenza: e' un mese non compilato. Senza questo controllo il conto diceva
-  // di dichiarare tutta la giacenza a portale, che per Irigom sono centinaia di
-  // tonnellate, e nessuno se ne sarebbe accorto guardando il numero.
+  // giacenza: e' un mese non compilato. E finche' non lo e', quello che si e'
+  // raccolto resta in giacenza: si dichiarera' il mese dopo, quando si preparano
+  // le dichiarazioni, ed e' allora che i PFU si decurtano. Vale per tutti gli
+  // impianti. Senza questo controllo il conto diceva di dichiarare tutta la
+  // giacenza a portale - per Irigom sono centinaia di tonnellate - e nessuno se
+  // ne sarebbe accorto guardando il numero.
   const meseVuoto = !!riga
     && !(Number(riga.giacenza_pfu_kg) > 0)
     && !(Number(riga.uscite_cssc_kg) > 0)
@@ -140,11 +143,15 @@ export default function CsscIrigom({ giacenzaPortaleT, anno }) {
 
       {riga && meseVuoto && (
         <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm space-y-1">
-          <div className="flex items-center gap-2 font-medium"><AlertTriangle className="w-4 h-4" />Questo mese nel registro è ancora vuoto</div>
+          <div className="flex items-center gap-2 font-medium"><AlertTriangle className="w-4 h-4" />{mese} non è ancora stato compilato nel registro</div>
           <div className="text-xs">
-            Nella riga di {mese} del foglio Cons. non ci sono né giacenze né uscite, e non risultano DDT di CSS-C della nostra commessa.
-            Non è un mese con giacenza zero: è un mese che Irigom non ha ancora compilato. Finché resta così non si calcola nulla,
-            perché il conto direbbe di dichiarare tutta la giacenza a portale.
+            Nella riga di {mese} del foglio Cons. non ci sono né giacenze né uscite, e non risultano DDT di CSS-C della nostra commessa:
+            è un mese che l&apos;impianto non ha ancora chiuso, non un mese con giacenza zero.
+          </div>
+          <div className="text-xs">
+            Finché è così non si dichiara nulla e quello che è stato raccolto <strong>resta in giacenza</strong>: si dichiarerà il mese
+            prossimo, quando si preparano le dichiarazioni, ed è allora che i PFU si decurtano. Calcolare adesso vorrebbe dire
+            dichiarare tutta la giacenza a portale.
           </div>
         </div>
       )}

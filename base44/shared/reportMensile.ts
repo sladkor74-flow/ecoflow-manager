@@ -11,6 +11,7 @@
 // sommerebbero lo stesso mese di anni diversi.
 
 import { getClasseFromProdotto, getRegioneFromProvincia } from "./dataEnrichment.ts";
+import { giornoRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { meseToIndice } from "./filtroPeriodo.ts";
 
@@ -31,10 +32,9 @@ function testo(v) {
   return s || 'N/D';
 }
 
-function dataFine(r) {
-  if (!r.trasporto_finito_il) return null;
-  const d = new Date(r.trasporto_finito_il);
-  return isNaN(d.getTime()) ? null : d;
+// Il giorno di un movimento e' quello italiano della fine del trasporto.
+function giornoDi(r) {
+  return giornoRoma(r.trasporto_finito_il);
 }
 
 function eTerminato(r) {
@@ -55,7 +55,7 @@ const ESTRATTORI = {
   'Stoccaggio': (r) => testo(r.stoccaggio),
   'Ragione sociale': (r) => testo(r.ragione_sociale),
   'Produttore': (r) => testo(r.produttore || r.ragione_sociale),
-  'Mese': (r) => { const d = dataFine(r); return d ? MESI[d.getMonth()] : 'N/D'; },
+  'Mese': (r) => { const g = giornoDi(r); return g ? MESI[Number(g.slice(5, 7)) - 1] : 'N/D'; },
 };
 
 const MISURE = {
@@ -291,9 +291,9 @@ export function calcolaPivot(chiave, records, anno, mese) {
     // Nell'extra raccolta la raccolta dal produttore e il trasferimento stanno
     // nello stesso archivio: una pivot dell'una non deve contenere l'altra.
     if (def.movimento && String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== def.movimento) return false;
-    const d = dataFine(r);
-    if (!d || d.getFullYear() !== annoNum) return false;
-    if (def.periodo === 'mese' && d.getMonth() !== meseNum) return false;
+    const g = giornoDi(r);
+    if (!g || Number(g.slice(0, 4)) !== annoNum) return false;
+    if (def.periodo === 'mese' && Number(g.slice(5, 7)) - 1 !== meseNum) return false;
     return true;
   });
 

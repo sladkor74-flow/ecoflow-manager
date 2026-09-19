@@ -1,3 +1,5 @@
+import { giornoRoma } from "./giornoItaliano.ts";
+
 // Filtro periodo condiviso per fatturazione attiva e anteprima Ecotyre.
 // Regola: stato="terminato" + trasporto_finito_il cade in anno/mese.
 // Non usa mai i campi mese, anno o ordine_chiuso_il dei record per stabilire il periodo.
@@ -33,12 +35,12 @@ export function filtraPeriodo(records, anno, mese) {
   return (records || []).filter(r => {
     const stato = String(r.stato || '').toLowerCase().trim();
     if (stato !== 'terminato') return false;
-    const d = r.trasporto_finito_il;
-    if (!d) return false;
-    const dt = new Date(d);
-    if (isNaN(dt.getTime())) return false;
-    if (dt.getFullYear() !== annoNum) return false;
-    if (dt.getMonth() !== meseNum) return false;
+    // Il giorno e' quello italiano: una data salvata alle 22:00Z appartiene al
+    // giorno dopo, e a cavallo di fine mese cambierebbe mese.
+    const g = giornoRoma(r.trasporto_finito_il);
+    if (!g) return false;
+    if (Number(g.slice(0, 4)) !== annoNum) return false;
+    if (Number(g.slice(5, 7)) - 1 !== meseNum) return false;
     return true;
   });
 }

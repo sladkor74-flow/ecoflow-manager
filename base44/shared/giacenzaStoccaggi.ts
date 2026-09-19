@@ -20,6 +20,12 @@
 // regola, e uno stesso carico risultava dentro per l'una e fuori per l'altra:
 // la pagina scriveva "ne mancano due viaggi" su un mese in cui il materiale
 // c'era. Adesso la regola e' questa, e la usano tutte e due.
+//
+// Uno scostamento fra questo numero e quello che si legge a portale e'
+// fisiologico fra un aggiornamento e l'altro: si riassorbe quando in
+// "Caricamento dati" si caricano le liste aggiornate di primarie, secondarie e
+// terziarie insieme alla nuova rilevazione, perche' da li' in poi la fotografia
+// e i movimenti tornano a parlare dello stesso giorno.
 
 /** Un valore di data in millisecondi, trattando come UTC cio' che non porta fuso. */
 export function istante(v) {

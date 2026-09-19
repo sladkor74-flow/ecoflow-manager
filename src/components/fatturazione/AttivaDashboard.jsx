@@ -45,10 +45,6 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
     onElabora();
   };
 
-  const totaleRete = data.RETE?.documento?.totale || 0;
-  const totaleAci = data.ACI?.documento?.totale || 0;
-  const totaleExtra = data.EXTRA_RACCOLTA?.documento?.totale || 0;
-  const totaleGenerale = totaleRete + totaleAci + totaleExtra;
   const errori = TIPS.reduce((s, t) => s + (data[t.key]?.documento?.voci_errore || 0), 0);
   const sospesi = TIPS.reduce((s, t) => s + (data[t.key]?.documento?.voci_sospese || 0), 0);
   const tuttiElaborati = TIPS.every(t => data[t.key]?.documento);
@@ -110,10 +106,19 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
             })}
           </div>
 
+          {/* Rete, ACI ed extra raccolta sono commesse indipendenti: i totali
+              restano tre, uno accanto all'altro. Un totale unico che li somma
+              non vuol dire niente e non si fattura a nessuno. */}
           <div className="border rounded-lg p-4 bg-primary/5">
-            <div className="flex items-center justify-between">
-              <h3 className="font-heading font-bold text-lg">TOTALE FATTURAZIONE ATTIVA</h3>
-              <span className="text-2xl font-bold">€ {totaleGenerale.toFixed(2)}</span>
+            <h3 className="font-heading font-bold text-lg mb-1">TOTALE FATTURAZIONE ATTIVA</h3>
+            <p className="text-xs text-muted-foreground mb-3">Le tre commesse sono indipendenti e non si sommano.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {TIPS.map(t => (
+                <div key={t.key} className="flex items-baseline justify-between gap-2 border-t pt-2 sm:border-t-0 sm:pt-0">
+                  <span className="text-sm font-medium">{t.label}</span>
+                  <span className="text-xl font-bold tabular-nums">€ {(data[t.key]?.documento?.totale || 0).toFixed(2)}</span>
+                </div>
+              ))}
             </div>
           </div>
 

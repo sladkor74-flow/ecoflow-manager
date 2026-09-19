@@ -1,5 +1,6 @@
 // Modulo condiviso per il calcolo del raccolto PFU aggregato dalle primarie.
 import { fetchAll } from "./fetchAll.ts";
+import { annoRoma, meseRoma } from "./giornoItaliano.ts";
 
 export const PROV_TO_REGION: Record<string, string> = {
   // Valle d'Aosta
@@ -77,8 +78,7 @@ export async function computeRaccoltoData(base44, filters: any = {}) {
   // Filter options from ALL records
   const filterOptions = {
     anni: [...new Set(all.map((p: any) => {
-      const d = new Date(p.trasporto_finito_il);
-      return d && !isNaN(d.getTime()) ? d.getFullYear() : null;
+      return annoRoma(p.trasporto_finito_il);
     }).filter(Boolean))].sort((a: any, b: any) => b - a),
     mesi: MESI,
     regioni: [...new Set(all.map((p: any) => PROV_TO_REGION[(p.provincia || '').toUpperCase().trim()] || 'Altro').filter(Boolean))].sort(),
@@ -90,10 +90,9 @@ export async function computeRaccoltoData(base44, filters: any = {}) {
   const filtered = all.filter((p: any) => {
     const raccoglitore = (p.trasportatore || 'N/D').trim();
     const regione = PROV_TO_REGION[(p.provincia || '').toUpperCase().trim()] || 'Altro';
-    const dataChiusura = new Date(p.trasporto_finito_il);
-    const meseIdx = dataChiusura ? dataChiusura.getMonth() : -1;
+    const meseIdx = meseRoma(p.trasporto_finito_il);
     const mese = meseIdx >= 0 ? MESI[meseIdx] : 'N/D';
-    const anno = dataChiusura ? dataChiusura.getFullYear() : null;
+    const anno = annoRoma(p.trasporto_finito_il);
     const impianto = (p.destinazione || 'N/D').trim();
 
     if (fAnno.length > 0 && !fAnno.includes(anno)) return false;
@@ -113,8 +112,7 @@ export async function computeRaccoltoData(base44, filters: any = {}) {
   for (const p of filtered) {
     const raccoglitore = (p.trasportatore || 'N/D').trim();
     const regione = PROV_TO_REGION[(p.provincia || '').toUpperCase().trim()] || 'Altro';
-    const dataChiusura = new Date(p.trasporto_finito_il);
-    const meseIdx = dataChiusura ? dataChiusura.getMonth() : -1;
+    const meseIdx = meseRoma(p.trasporto_finito_il);
     const mese = meseIdx >= 0 ? MESI[meseIdx] : 'N/D';
     const peso = (p.peso_effettivo || 0) / 1000; // kg -> ton
 

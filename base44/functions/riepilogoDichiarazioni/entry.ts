@@ -313,8 +313,12 @@ export default async function(req) {
           ? perRuoli(perAnno.rete) + perRuoli(perAnno.aci) + perRuoli(perAnno.extra)
           : perRuoli(allaFoto.rete)) / 1000),
         conferito_dopo_foto_t: t3((soloStoccaggio ? 0 : perRuoli(allaFoto.dopo)) / 1000),
-        secondarie_in_alla_foto_t: t3(((soloStoccaggio ? perAnno.secIn.get(ns) : allaFoto.secIn.get(ns)) || 0) / 1000),
-        secondarie_out_alla_foto_t: t3(((soloStoccaggio ? perAnno.secOut.get(ns) : allaFoto.secOut.get(ns)) || 0) / 1000),
+        // La quadratura e' il bilancio fisico di un piazzale, e un piazzale non sa
+        // di che canale e' la gomma che ci sta sopra: quello che entra ed esce
+        // conta tutto, rete e ACI. I canali restano separati dove servono - nei
+        // totali di commessa, qui sopra - non nel bilancio di un magazzino.
+        secondarie_in_alla_foto_t: t3(((soloStoccaggio ? (perAnno.secIn.get(ns) || 0) + (perAnno.secAciIn.get(ns) || 0) : allaFoto.secIn.get(ns)) || 0) / 1000),
+        secondarie_out_alla_foto_t: t3(((soloStoccaggio ? (perAnno.secOut.get(ns) || 0) + (perAnno.secAciOut.get(ns) || 0) : allaFoto.secOut.get(ns)) || 0) / 1000),
         flussi,
       };
       return { ...sito, ...quadratura(sito) };

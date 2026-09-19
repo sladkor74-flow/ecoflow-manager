@@ -3,14 +3,16 @@
 // Le colonne derivate vengono calcolate e salvate affiancate ai dati grezzi,
 // senza alterare la struttura sorgente.
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
+import { giornoRoma, annoRoma, meseRoma } from "./giornoItaliano.ts";
+
+export { giornoRoma, annoRoma, meseRoma };
 
 // --- Helper di data ---
 
+
 export function getMeseFromDate(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  return MESI[d.getMonth()];
+  const m = meseRoma(dateStr);
+  return m < 0 ? null : MESI[m];
 }
 
 export function getSettimanaFromDate(dateStr) {
