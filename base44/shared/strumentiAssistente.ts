@@ -813,8 +813,8 @@ export const STRUMENTI = [
         sospese: x.sospese, da_controllare: x.da_controllare, servizi: [...x.servizi].slice(0, 4),
       })).sort((a, b) => b.totale_euro - a.totale_euro);
       return {
-        fonte: `Fatturazione ${tipo}`,
-        periodo: p.mese ? `${p.mese} ${anno}` : `anno ${anno}`,
+        fonte: `Fatturazione ${tipo}` + (p.tipologia ? `, canale ${String(p.tipologia).toUpperCase()}` : ', tutti i canali insieme'),
+        periodo: meseChiesto ? `${meseChiesto} ${anno}` : `anno ${anno}`,
         dati_al: oggiRoma(),
         dati: {
           voci: righe.length,
@@ -824,6 +824,7 @@ export const STRUMENTI = [
             ? { totale_euro: Math.round(gruppi.reduce((s, g) => s + g.totale_euro, 0) * 100) / 100 }
             : { totale_per_canale: Object.entries(gruppi.reduce((acc, g) => { const c = g.tipologia || 'N/D'; acc[c] = Math.round(((acc[c] || 0) + g.totale_euro) * 100) / 100; return acc; }, {})).map(([canale, euro]) => ({ canale, euro })), nota_totale: 'Non c\'e\' un totale unico: rete, ACI ed extra raccolta sono commesse indipendenti.' }),
           ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso tutto l'anno ${anno}.` } : {}),
+          canale: p.tipologia ? String(p.tipologia).toUpperCase() : 'nessun filtro di canale: qui dentro ci sono rete, ACI ed extra raccolta, da tenere distinti',
           gruppi: elenco(gruppi, 60),
           nota: tipo === 'PASSIVA'
             ? 'Qui ci sono solo le voci dei documenti gia\' elaborati e salvati: per sapere quanto si deve a un fornitore in un mese preciso rifai la domanda indicando il mese, cosi\' il conto si fa sui movimenti.'
