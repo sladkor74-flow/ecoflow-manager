@@ -594,7 +594,7 @@ export default async function(req) {
       // la raccolta dal trattamento. Vale solo quando chi ha raccolto e chi
       // tratta sono lo stesso fornitore in fattura.
       const fattConf = fatturaA(perFattura, conferente);
-      const tarRacc = prestazione === 'TRATTAMENTO' && fattConf.chiave === destKey
+      const tarRacc = prestazione === 'TRATTAMENTO' && provenienza !== 'extra' && fattConf.chiave === destKey
         ? findTariffaRaccolta(tariffe, destKey, norm(r.provincia), getRegione(r), norm(destinazione), classe, tipologia, dataIso)
         : null;
       const compresoNellaRaccolta = !!(tarRacc && tarRacc.comprensiva_trattamento === true);
