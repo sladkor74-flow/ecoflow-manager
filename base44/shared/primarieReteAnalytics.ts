@@ -27,8 +27,9 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
     if (!provincia) continue;
     const regione = r.regione || PROV_TO_REGION[provincia] || 'Altro';
 
-    const dataChiusura = r.ordine_chiuso_il ? new Date(r.ordine_chiuso_il)
-      : r.trasporto_finito_il ? new Date(r.trasporto_finito_il) : null;
+    // Il periodo lo da' la fine del trasporto, non la chiusura a portale.
+    const dataChiusura = r.trasporto_finito_il ? new Date(r.trasporto_finito_il)
+      : r.ordine_chiuso_il ? new Date(r.ordine_chiuso_il) : null;
     if (!dataChiusura) continue;
 
     if (dataChiusura.getFullYear() !== currYear) continue;
@@ -118,8 +119,9 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
   const filtered = records.filter((r: any) => {
     const regione = r.regione || PROV_TO_REGION[(r.provincia || '').toUpperCase().trim()] || 'Altro';
     const stato = (r.stato || '').trim();
-    const dataChiusura = r.ordine_chiuso_il ? new Date(r.ordine_chiuso_il)
-      : r.trasporto_finito_il ? new Date(r.trasporto_finito_il) : null;
+    // Il periodo lo da' la fine del trasporto, non la chiusura a portale.
+    const dataChiusura = r.trasporto_finito_il ? new Date(r.trasporto_finito_il)
+      : r.ordine_chiuso_il ? new Date(r.ordine_chiuso_il) : null;
     const meseIdx = dataChiusura ? dataChiusura.getMonth() : -1;
     const mese = meseIdx >= 0 ? MESI[meseIdx] : 'N/D';
     const anno = dataChiusura ? dataChiusura.getFullYear() : null;

@@ -25,15 +25,13 @@ export default async function(req) {
 
     const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
     function getMese(r) {
-      if (r.mese) return r.mese;
-      const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+      const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
       if (!d) return null;
       const dt = new Date(d);
       return isNaN(dt.getTime()) ? null : MESI[dt.getMonth()];
     }
     function getAnno(r) {
-      if (r.anno != null) return r.anno;
-      const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+      const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
       if (!d) return null;
       const dt = new Date(d);
       return isNaN(dt.getTime()) ? null : dt.getFullYear();

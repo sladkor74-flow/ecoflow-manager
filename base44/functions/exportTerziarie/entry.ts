@@ -20,8 +20,7 @@ export default async function(req) {
 
     const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
     function getMese(r) {
-      if (r.mese) return r.mese;
-      const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+      const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
       if (!d) return null;
       const dt = new Date(d);
       return isNaN(dt.getTime()) ? null : MESI[dt.getMonth()];
@@ -39,7 +38,7 @@ export default async function(req) {
       if (!matchesFilter((r.trasportatore || '').trim(), filters.trasportatore)) return false;
       if (!matchesFilter(getMateriale(r), filters.materiale)) return false;
       if (filters.anno != null && (!Array.isArray(filters.anno) ? filters.anno : filters.anno.length > 0)) {
-        const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+        const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
         const dt = d ? new Date(d) : null;
         const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
         if (!matchesFilterString(anno, filters.anno)) return false;

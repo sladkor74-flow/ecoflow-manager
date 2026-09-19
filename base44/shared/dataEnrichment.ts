@@ -58,11 +58,33 @@ export function getClasseFromProdotto(prodotto) {
 // Entità per cui la "data riferimento" è l'immissione (Assegnati) vs la chiusura (tutte le altre).
 const ASSEGNATO_ENTITIES = new Set(['Assegnato']);
 
+/**
+ * La data che stabilisce a quale periodo appartiene un movimento.
+ *
+ * E' la FINE DEL TRASPORTO, mai la chiusura dell'ordine a portale. Le due date
+ * non coincidono: il portale chiude l'ordine giorni dopo, e un trasporto finito
+ * il 31 luglio con l'ordine chiuso l'11 agosto finirebbe contato ad agosto.
+ * Contato sul 2026: succede su 96 primarie di rete (272,65 t), 2 ACI, una
+ * secondaria e 65 terziarie su 99 (2.198,64 t).
+ *
+ * Vale in tutto il gestionale, per i conti come per i filtri. Fanno eccezione
+ * soltanto due cose, ed e' giusto cosi':
+ * - la giacenza a portale, perche' il portale conta un ordine quando lo chiude
+ *   (vedi riepilogoDichiarazioni e calcolaGiacenze);
+ * - i tempi di evasione, che misurano proprio la distanza fra immissione e
+ *   chiusura.
+ */
+export function dataPeriodo(record) {
+  if (!record) return null;
+  return record.trasporto_finito_il || record.ordine_chiuso_il || record.ordine_immesso_il;
+}
+
 function getDataRiferimento(record, entityType) {
+  // Un assegnato non e' un movimento: non ha un trasporto, ha una data di immissione.
   if (ASSEGNATO_ENTITIES.has(entityType)) {
     return record.ordine_immesso_il;
   }
-  return record.ordine_chiuso_il || record.trasporto_finito_il || record.ordine_immesso_il;
+  return dataPeriodo(record);
 }
 
 // Arricchisce un record con tutte le colonne calcolate/derivate.

@@ -32,7 +32,7 @@ export default async function(req) {
       if (!matchesFilter(r.classe, filters.classe)) return false;
       if (!matchesFilter((r.trasportatore || '').trim(), filters.trasportatore)) return false;
       if (filters.anno != null && (!Array.isArray(filters.anno) ? filters.anno : filters.anno.length > 0)) {
-        const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+        const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
         const dt = d ? new Date(d) : null;
         const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
         if (!matchesFilterString(anno, filters.anno)) return false;

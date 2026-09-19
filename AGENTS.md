@@ -32,3 +32,43 @@ npx skills add base44/skills
 - Prefer the existing Base44 CLI workflow over adding new npm scripts for Base44-specific tasks.
 - Reuse the existing SDK client and Vite plugin patterns before adding new Base44 integration paths.
 - Run the relevant checks from `package.json` before finishing code changes.
+
+## Regole della commessa
+
+Regole di dominio che il codice deve rispettare sempre. Valgono per ogni nuovo
+conto, filtro, export o assistente: se una modifica le viola, e' sbagliata anche
+quando "funziona".
+
+### Il periodo di un movimento e' la fine del trasporto
+
+A quale giorno, settimana, mese e anno appartiene un movimento lo decide
+**`trasporto_finito_il`**, mai `ordine_chiuso_il` e mai i campi `mese`, `anno` o
+`settimane` memorizzati sul record. Il portale chiude l'ordine giorni dopo la
+fine del trasporto, e i due non cadono nello stesso mese: contato sul 2026,
+96 primarie di rete su 2.827 (272,65 t), 2 ACI su 44, una secondaria e 65
+terziarie su 99 (2.198,64 t).
+
+Usa `dataPeriodo(record)` da `base44/shared/dataEnrichment.ts`, che incapsula la
+regola. I campi memorizzati possono venire da importazioni vecchie, quando la
+data di riferimento era la chiusura: non fidarsene, ricalcolare.
+
+Due sole eccezioni, ed e' giusto che lo siano:
+- la **giacenza a portale** (`riepilogoDichiarazioni`, `calcolaGiacenze`), perche'
+  il portale conta un ordine nel momento in cui lo chiude;
+- i **tempi di evasione**, che misurano proprio la distanza fra immissione e
+  chiusura.
+
+Un assegnato non e' un movimento: il suo periodo e' `ordine_immesso_il`.
+
+### Canali indipendenti
+
+RETE, ACI ed EXTRA RACCOLTA sono commesse separate: non si sommano mai, in
+nessun modulo, nemmeno come totale di controllo o come conteggio di formulari, e
+anche quando un viaggio di secondaria porta formulari di piu' canali. I target
+esistono solo per la rete.
+
+### Pesi
+
+Le valutazioni si fanno sul peso effettivo (`peso_effettivo`), mai sullo stimato.
+Tonnellate con due decimali, tre se i kg non sono tondi; kg sempre interi;
+ovunque, export compresi.

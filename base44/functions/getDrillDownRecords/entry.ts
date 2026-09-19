@@ -48,7 +48,7 @@ export default async function(req) {
     const records = await base44.asServiceRole.entities[entityName].filter(query, '-created_date', 400);
 
     const filtered = records.filter((row) => {
-      const data = source === 'assegnato' ? row.ordine_immesso_il : (row.ordine_chiuso_il || row.trasporto_finito_il || row.ordine_immesso_il);
+      const data = source === 'assegnato' ? row.ordine_immesso_il : (row.trasporto_finito_il || row.ordine_chiuso_il || row.ordine_immesso_il);
       if (filters.classe) {
         const cls = (row.classe || '').trim() || getClasseFromProdotto(row.prodotto) || 'N/D';
         if (!matchesFilter(cls, filters.classe)) return false;

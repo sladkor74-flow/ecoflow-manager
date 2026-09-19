@@ -2,7 +2,7 @@
 // Le pivot attingono dai campi arricchiti memorizzati (mese, settimane, anno, classe, regione)
 // calcolati al momento dell'importazione. Fallback on-the-fly per record non arricchiti.
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
-import { getMeseFromDate, getSettimanaFromDate, getAnnoFromDate, getRegioneFromProvincia, getClasseFromProdotto } from "./dataEnrichment.ts";
+import { getMeseFromDate, getSettimanaFromDate, getAnnoFromDate, getRegioneFromProvincia, getClasseFromProdotto, dataPeriodo } from "./dataEnrichment.ts";
 import { matchesFilter } from "./multiFilter.ts";
 import { fetchAll } from "./fetchAll.ts";
 
@@ -30,19 +30,18 @@ function getClasse(r) {
   return getClasseFromProdotto(r.prodotto) || 'N/D';
 }
 
-// Usa il campo arricchito memorizzato; fallback al calcolo on-the-fly dalla data.
+// Periodo sempre dalla data di fine trasporto: i campi mese, settimane e anno
+// memorizzati sul record possono venire da un'importazione vecchia, quando la
+// data di riferimento era la chiusura dell'ordine, e direbbero un mese diverso.
 function getRecordMese(r) {
-  if (r.mese && String(r.mese).trim()) return r.mese;
   return getMeseFromDate(getDataChiusura(r));
 }
 
 function getRecordSettimana(r) {
-  if (r.settimane != null) return r.settimane;
   return getSettimanaFromDate(getDataChiusura(r));
 }
 
 function getRecordAnno(r) {
-  if (r.anno != null) return r.anno;
   return getAnnoFromDate(getDataChiusura(r));
 }
 
@@ -51,18 +50,18 @@ function getRecordMeseImmissione(r) {
   return getMeseFromDate(getDataImmissione(r));
 }
 
+// I campi anno e settimane memorizzati si riferiscono alla data di riferimento
+// del record, non all'immissione: qui si calcolano dall'immissione e basta.
 function getRecordAnnoImmissione(r) {
-  if (r.anno != null) return r.anno;
   return getAnnoFromDate(getDataImmissione(r));
 }
 
 function getRecordSettimanaImmissione(r) {
-  if (r.settimane != null) return r.settimane;
   return getSettimanaFromDate(getDataImmissione(r));
 }
 
 function getDataChiusura(r) {
-  return r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+  return dataPeriodo(r);
 }
 
 function getDataImmissione(r) {

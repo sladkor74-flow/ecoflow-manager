@@ -38,11 +38,11 @@ export default async function(req) {
       }
       if (!matchesFilterLower(r.stato, filters.stato)) return false;
       if (filters.data) {
-        const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+        const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
         if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
       }
       if (filters.anno != null && (!Array.isArray(filters.anno) ? filters.anno : filters.anno.length > 0)) {
-        const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+        const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
         const dt = d ? new Date(d) : null;
         const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
         if (!matchesFilterString(anno, filters.anno)) return false;
@@ -132,7 +132,7 @@ export default async function(req) {
       stati: [...new Set(all.map(r => (r.stato || '').trim()).filter(Boolean))].sort(),
       canali: ['Rete', 'ACI'].filter(c => all.some(r => (canaleDi(r) === 'ACI' ? 'ACI' : 'Rete') === c)),
       anni: [...new Set(all.map(r => {
-        const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
+        const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
         if (!d) return null;
         const dt = new Date(d);
         return isNaN(dt.getTime()) ? null : dt.getFullYear();
