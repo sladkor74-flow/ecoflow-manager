@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
+import { istante, momentoRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 
 // Calcola la situazione delle giacenze di impianti e stoccaggi per l'anno richiesto.
 //
@@ -75,12 +76,9 @@ export default async function(req) {
     }
     const classiVuote = () => ({ P: 0, M: 0, G1: 0, G2: 0, ACI: 0, ND: 0 });
     // Istante di un movimento per il portale: la chiusura dell'ordine, altrimenti la fine trasporto.
-    const istante = (v) => {
-      if (!v) return null;
-      const s = String(v);
-      const d = new Date(/Z$|[+-]\d\d:\d\d$/.test(s) || s.length <= 10 ? s : s + 'Z');
-      return isNaN(d.getTime()) ? null : d.getTime();
-    };
+    // istante e momentoRilevazione stanno in shared/giacenzaStoccaggi.ts: la
+    // regola della fotografia del portale e' una sola, e la usa anche la
+    // Predittivita' delle secondarie.
 
     // --- Filtri temporali per movimentazione ---
     function isTerminato(r) { return String(r.stato || '').trim().toLowerCase() === 'terminato'; }
@@ -203,12 +201,6 @@ export default async function(req) {
     // le uscite (secondarie) partite dallo stoccaggio. Verificato su Nappi Sud il
     // 16/09/2026: rilevazione del 13/09 piu' 10 ingressi meno 2 uscite coincide con
     // il portale al chilogrammo, classe per classe.
-    const momentoRilevazione = (rec) => {
-      const creato = istante(rec.created_date);
-      const giorno = rec.data_rilevazione ? new Date(String(rec.data_rilevazione).slice(0, 10) + 'T23:00:00Z').getTime() : null;
-      if (creato && giorno) return Math.min(creato, giorno);
-      return creato || giorno || 0;
-    };
     const tipoStoc = (r) => tdNorm(r.tipo_destinazione) === 'stoc';
     const eSecondariaExtra = (r) => String(r.tipo_movimento || '').toLowerCase().trim() === 'secondaria';
     let datiAggiornatiAl = 0;

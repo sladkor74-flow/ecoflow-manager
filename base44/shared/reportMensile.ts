@@ -164,10 +164,25 @@ export const PIVOT_DEFS = {
   },
   extra: {
     titolo: 'Extra raccolta',
-    nota: 'Raccolte fuori circuito ordinario, per produttore e vettore.',
+    nota: 'Raccolte fuori circuito ordinario, per produttore e vettore. Solo la raccolta dal produttore: i trasferimenti successivi hanno una pivot loro.',
     entita: 'ExtraRaccolta',
     gruppo: 'terziarie',
     periodo: 'anno',
+    // Nell'extra raccolta lo stesso archivio tiene la raccolta dal produttore e
+    // i trasferimenti da stoccaggio a impianto. Messi insieme, lo stesso
+    // materiale si conta due volte: una quando arriva, una quando si sposta.
+    movimento: 'primaria',
+    righe: ['Produttore', 'Trasportatore'],
+    colonna: 'Destinazione',
+    misure: ['peso'],
+  },
+  extraSecondarie: {
+    titolo: 'Extra raccolta · trasferimenti',
+    nota: 'Spostamenti di extra raccolta da uno stoccaggio a un impianto. Non sono raccolta: il materiale era gia' + "'" + ` entrato con la pivot qui sopra e non va sommato a quella.`,
+    entita: 'ExtraRaccolta',
+    gruppo: 'terziarie',
+    periodo: 'anno',
+    movimento: 'secondaria',
     righe: ['Produttore', 'Trasportatore'],
     colonna: 'Destinazione',
     misure: ['peso'],
@@ -179,7 +194,7 @@ export const GRUPPI = [
   { chiave: 'rete', titolo: 'Rete', pivot: ['raccolta', 'impianti', 'viaggiRete'] },
   { chiave: 'aci', titolo: 'ACI', pivot: ['aci', 'secondarieAci', 'viaggiSecondarieAci'] },
   { chiave: 'secondarie', titolo: 'Secondarie di rete', pivot: ['secondarie', 'viaggiSecondarie'] },
-  { chiave: 'terziarie', titolo: 'Terziarie ed extra', pivot: ['terziarie', 'extra'] },
+  { chiave: 'terziarie', titolo: 'Terziarie ed extra', pivot: ['terziarie', 'extra', 'extraSecondarie'] },
 ];
 
 // === costruzione dell'albero ===
@@ -273,6 +288,9 @@ export function calcolaPivot(chiave, records, anno, mese) {
     // Le secondarie di rete e quelle ACI stanno nello stesso archivio: una pivot
     // di un canale non deve mai contenere le righe dell'altro.
     if (def.canale && (def.canale === 'ACI') !== eAci(r)) return false;
+    // Nell'extra raccolta la raccolta dal produttore e il trasferimento stanno
+    // nello stesso archivio: una pivot dell'una non deve contenere l'altra.
+    if (def.movimento && String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== def.movimento) return false;
     const d = dataFine(r);
     if (!d || d.getFullYear() !== annoNum) return false;
     if (def.periodo === 'mese' && d.getMonth() !== meseNum) return false;

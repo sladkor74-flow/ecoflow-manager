@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll, perPagina } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
+import { eAci } from "../../shared/canaleSecondaria.ts";
 import { MESI, meseDa, operazioneDa, quadratura } from "../../shared/dichiarazioniImpianti.ts";
 
 // Dichiarazioni degli impianti, mese per mese, con la quadratura delle giacenze.
@@ -31,7 +32,7 @@ export default async function(req) {
     const terminato = (r) => String(r.stato || '').trim().toLowerCase() === 'terminato';
     const nellAnno = (d) => !!d && new Date(d).getUTCFullYear() === annoNum;
     const peso = (r) => (Number(r.peso_effettivo) || 0);
-    const eAci = (r) => /aci|autodemoliz/i.test(`${r.prodotto || ''} ${r.classe || ''} ${r.codice_prodotto || ''}`);
+    // eAci arriva da shared/canaleSecondaria.ts: una regola sola per tutto il gestionale.
 
     const svc = base44.asServiceRole.entities;
     // Le primarie della rete e le dichiarazioni di trattamento del portale sono
@@ -56,7 +57,7 @@ export default async function(req) {
       const k = `${ns}|${canale}|${provenienza}|${mese}`;
       conferito.set(k, (conferito.get(k) || 0) + kg);
     };
-    const perAnno = { rete: new Map(), aci: new Map(), extra: new Map(), secIn: new Map(), secOut: new Map(), terz: new Map() };
+    const perAnno = { rete: new Map(), aci: new Map(), extra: new Map(), secIn: new Map(), secOut: new Map(), secAciIn: new Map(), secAciOut: new Map(), terz: new Map() };
     const somma = (mappa, chiave, valore) => mappa.set(chiave, (mappa.get(chiave) || 0) + valore);
 
     // La giacenza del portale è la fotografia dell'ultimo file degli ordini non
@@ -135,10 +136,19 @@ export default async function(req) {
       if (!terminato(r) || !nellAnno(r.trasporto_finito_il)) continue;
       const dest = norm(r.destinazione);
       const stoc = norm(r.stoccaggio);
-      if (eAci(r)) aggiungi(dest, 'ACI', 'secondaria', meseDa(r.trasporto_finito_il), peso(r));
-      else aggiungi(dest, 'RETE_SECONDARIE', '', meseDa(r.trasporto_finito_il), peso(r));
-      somma(perAnno.secIn, dest, peso(r));
-      somma(perAnno.secOut, stoc, peso(r));
+      // Le secondarie di rete e quelle ACI stanno nello stesso archivio: i totali
+      // dell'impianto devono restare separati, altrimenti la scheda scrive
+      // "secondarie in ingresso" con dentro anche l'ACI, accanto al conferito di
+      // rete, e non coincide piu' con la pivot del Report Mensile.
+      if (eAci(r)) {
+        aggiungi(dest, 'ACI', 'secondaria', meseDa(r.trasporto_finito_il), peso(r));
+        somma(perAnno.secAciIn, dest, peso(r));
+        somma(perAnno.secAciOut, stoc, peso(r));
+      } else {
+        aggiungi(dest, 'RETE_SECONDARIE', '', meseDa(r.trasporto_finito_il), peso(r));
+        somma(perAnno.secIn, dest, peso(r));
+        somma(perAnno.secOut, stoc, peso(r));
+      }
       // Le secondarie ACI non entrano nella giacenza del portale: canale a parte.
       if (!dopoLaFoto(r) && !eAci(r)) {
         somma(allaFoto.secIn, dest, peso(r));
@@ -274,6 +284,8 @@ export default async function(req) {
         conferito_extra_t: t3(perRuoli(perAnno.extra) / 1000),
         secondarie_in_t: t3((perAnno.secIn.get(ns) || 0) / 1000),
         secondarie_out_t: t3((perAnno.secOut.get(ns) || 0) / 1000),
+        secondarie_aci_in_t: t3((perAnno.secAciIn.get(ns) || 0) / 1000),
+        secondarie_aci_out_t: t3((perAnno.secAciOut.get(ns) || 0) / 1000),
         terziarie_out_t: t3((perAnno.terz.get(ns) || 0) / 1000),
         in_attesa_dichiarazione_t: t3(inAttesa.get(ns) || 0),
         // Chi ha anche l'impianto: la giacenza a portale sono i suoi ordini non

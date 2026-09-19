@@ -3,6 +3,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { proiettaImpianto, viaggiPerMese, MESI, KG_PER_VIAGGIO } from "../../shared/proiezioneSecondarie.ts";
+import { dopoLaRilevazione, ultimeRilevazioni, kgReteDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 
 // Quante secondarie restano da portare a ogni impianto per arrivare al target.
 //
@@ -38,11 +39,12 @@ export default async function(req) {
     const meseDa = body.mese_da != null ? Number(body.mese_da) : Number(oggi.slice(5, 7)) - 1;
 
     const svc = base44.asServiceRole.entities;
-    const [impianti, fornitori, primarie, secondarie, rilevazioni, ipotesiTutte, giacenzeSito] = await Promise.all([
+    const [impianti, fornitori, primarie, secondarie, extra, rilevazioni, ipotesiTutte, giacenzeSito] = await Promise.all([
       svc.ImpiantoTargetSecondaria.filter({ stato: 'attivo' }),
       svc.FornitoreSecondaria.filter({ stato: 'attivo' }),
       fetchAll(svc.PrimariaRete, { stato: 'terminato' }),
       fetchAll(svc.Secondaria, { stato: 'terminato' }),
+      fetchAll(svc.ExtraRaccolta, { stato: 'terminato' }),
       fetchAll(svc.GiacenzaStoccaggio),
       svc.IpotesiMensileSecondarie.filter({ anno }, 'mese', 500),
       svc.GiacenzaSito.filter({ anno }, 'sito', 100).catch(() => []),
@@ -82,30 +84,29 @@ export default async function(req) {
     // --- quanto c'e' adesso negli stoccaggi, rete ---
     // Ultima rilevazione del portale piu' quello che si e' mosso dopo: e' la
     // regola del modulo Giacenze, e la rete esclude la classe 9.
-    const rilevazionePer = new Map();
-    for (const g of rilevazioni) {
-      const chiave = normalizzaRagioneSociale(g.sito);
-      if (!chiave) continue;
-      const data = soloData(g.data_rilevazione);
-      const prima = rilevazionePer.get(chiave);
-      if (!prima || data > prima.data) {
-        rilevazionePer.set(chiave, {
-          data,
-          kg: ['class1_kg', 'class2_kg', 'class3_kg', 'class4_kg'].reduce((s, c) => s + (Number(g[c]) || 0), 0),
-        });
-      }
-    }
+    const rilevazionePer = ultimeRilevazioni(rilevazioni, normalizzaRagioneSociale);
+    // Stessa regola del modulo Giacenze, adesso in comune: si parte dalla
+    // fotografia del portale e si contano i movimenti CHIUSI dopo di essa.
+    // Prima qui si guardava la fine del trasporto contro il giorno della
+    // rilevazione, e un carico chiuso il giorno dopo risultava dentro per le
+    // Giacenze e fuori per la Predittivita', che scriveva "ne mancano N viaggi"
+    // su un mese in cui il materiale c'era.
     const giacenzaStoccaggio = (chiave) => {
       const r = rilevazionePer.get(chiave);
       if (!r) return null;
-      let kg = r.kg;
+      let kg = kgReteDiRilevazione(r.record);
       for (const p of primarie) {
         if (!terminato(p) || normalizzaRagioneSociale(p.destinazione) !== chiave) continue;
-        if (soloData(p.trasporto_finito_il) > r.data) kg += peso(p);
+        if (dopoLaRilevazione(p, r.quando)) kg += peso(p);
+      }
+      for (const e of extra) {
+        if (!terminato(e) || normalizzaRagioneSociale(e.destinazione) !== chiave) continue;
+        if (String(e.tipo_movimento || 'primaria').toLowerCase().trim() === 'secondaria') continue;
+        if (dopoLaRilevazione(e, r.quando)) kg += peso(e);
       }
       for (const s of secondarie) {
         if (!terminato(s) || eAci(s) || normalizzaRagioneSociale(s.stoccaggio) !== chiave) continue;
-        if (soloData(s.trasporto_finito_il) > r.data) kg -= peso(s);
+        if (dopoLaRilevazione(s, r.quando)) kg -= peso(s);
       }
       return Math.max(0, Math.round(kg));
     };

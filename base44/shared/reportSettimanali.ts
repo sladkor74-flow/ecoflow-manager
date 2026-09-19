@@ -234,7 +234,11 @@ export function eSecondariaExtra(r) {
 function canale(r, entita) {
   if (entita === 'ExtraRaccolta') return 'extra';
   if (entita === 'PrimariaAci') return 'aci';
-  if (entita === 'Secondaria' && /autodemolizione|\baci\b/i.test(`${r.classe || ''} ${r.prodotto || ''}`)) return 'aci';
+  // Stessa regola di tutto il gestionale: eAci guarda anche il codice prodotto,
+  // dove l'ACI arriva nella forma ".class9". Con la regola locale una secondaria
+  // ACI con la classe vuota finiva fra quelle di rete, e la settimana non
+  // quadrava ne' di qua ne' di la'.
+  if (entita === 'Secondaria' && eAci(r)) return 'aci';
   return 'rete';
 }
 
