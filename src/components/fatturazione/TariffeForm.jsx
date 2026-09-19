@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Save, AlertTriangle, X } from 'lucide-react';
 
 const REGIONI = ['Campania', 'Puglia', 'Basilicata', 'Calabria', 'Lazio', 'Molise', 'Abruzzo', 'Sicilia', 'Sardegna', 'Toscana', 'Lombardia', 'Piemonte', 'Veneto', 'Emilia-Romagna', 'Marche', 'Umbria', 'Liguria', 'Friuli-Venezia Giulia', 'Trentino-Alto Adige', "Valle d'Aosta"];
@@ -42,7 +43,7 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
       setForm({ ...duplicating, id: undefined, prestazione: '', data_inizio_validita: duplicating.data_inizio_validita ? duplicating.data_inizio_validita.slice(0,10) : '', data_fine_validita: duplicating.data_fine_validita ? duplicating.data_fine_validita.slice(0,10) : '' });
       setMultiClasse(false);
     } else {
-      setForm({ direzione: 'PASSIVA', tipologia: '', unita_misura: '€/t', valore: 0, data_inizio_validita: '', data_fine_validita: '', note: '', classe_materiale: '', fornitore_id: '', prestazione: '', provincia: '', regione: '', destinazione: '', produttore: '', destinatario: '', cliente: 'ECOTYRE', eer_codice: '', servizio_ecotyre: '' });
+      setForm({ direzione: 'PASSIVA', tipologia: '', unita_misura: '€/t', valore: 0, data_inizio_validita: '', data_fine_validita: '', note: '', classe_materiale: '', fornitore_id: '', prestazione: '', provincia: '', regione: '', destinazione: '', produttore: '', destinatario: '', cliente: 'ECOTYRE', eer_codice: '', servizio_ecotyre: '', comprensiva_trattamento: false });
       setMultiClasse(false);
     }
   }, [open, editing, duplicating]);
@@ -88,7 +89,12 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
       data_fine_validita: form.data_fine_validita || undefined,
       stato: 'attivo', note: form.note,
     };
-    if (form.prestazione === 'RACCOLTA') { data.provincia = form.provincia || undefined; data.regione = form.regione || undefined; data.destinazione = form.destinazione || undefined; }
+    if (form.prestazione === 'RACCOLTA') {
+      data.provincia = form.provincia || undefined;
+      data.regione = form.regione || undefined;
+      data.destinazione = form.destinazione || undefined;
+      data.comprensiva_trattamento = !!form.comprensiva_trattamento;
+    }
     if (form.prestazione === 'TRASPORTO_SECONDARIA') { data.produttore = form.produttore || undefined; data.destinatario = form.destinatario || undefined; }
     return data;
   };
@@ -120,6 +126,7 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
               updateData.provincia = form.provincia || undefined;
               updateData.regione = form.regione || undefined;
               updateData.destinazione = form.destinazione || undefined;
+              updateData.comprensiva_trattamento = !!form.comprensiva_trattamento;
             }
             if (form.prestazione === 'TRASPORTO_SECONDARIA') {
               updateData.produttore = form.produttore || undefined;
@@ -315,6 +322,25 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
                     </Select>
                   </div>
                   <p className="text-xs text-muted-foreground">In fase di calcolo vince la tariffa più specifica: prima destinazione, poi provincia, poi regione, infine generica.</p>
+                  {/* Prezzo unico: la raccolta comprende anche il trattamento presso
+                      l'impianto dello stesso fornitore, e il trattamento non si
+                      fattura a parte. Nel 2026 riguarda solo Green Tyre Project
+                      sull'ACI, a 225 €/t. */}
+                  <label className="flex items-start gap-2 rounded-md border bg-muted/20 p-2 cursor-pointer">
+                    <Checkbox
+                      checked={!!form.comprensiva_trattamento}
+                      onCheckedChange={v => setForm({ ...form, comprensiva_trattamento: !!v })}
+                      className="mt-0.5"
+                    />
+                    <span className="text-xs">
+                      <span className="font-medium">Prezzo unico: comprende anche il trattamento</span>
+                      <span className="block text-muted-foreground">
+                        Da spuntare solo quando il contratto non distingue raccolta e trattamento. Il
+                        trattamento presso l'impianto di questo stesso fornitore non verrà fatturato a
+                        parte e in fatturazione comparirà come «compreso nel prezzo unico».
+                      </span>
+                    </span>
+                  </label>
                 </div>
               )}
               {form.prestazione === 'TRASPORTO_SECONDARIA' && !archiviata && (

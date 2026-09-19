@@ -36,6 +36,11 @@
       "type": "string",
       "description": "Solo TRASPORTO_SECONDARIA: destinatario della tratta"
     },
+    "comprensiva_trattamento": {
+      "type": "boolean",
+      "default": false,
+      "description": "Solo RACCOLTA passiva: il prezzo comprende anche il trattamento presso l'impianto dello stesso fornitore, quindi il trattamento non si fattura a parte (nel 2026 solo Green Tyre Project sull'ACI, 225 euro/t)"
+    },
     "classe_materiale": {
       "type": "string",
       "description": "P, M, G1, G2 o vuoto per tutte le classi"

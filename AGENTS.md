@@ -95,6 +95,45 @@ destinazione sotto il 5% dei loro viaggi e sotto i cinque viaggi e' sospetta.
 Il controllo sta in `base44/shared/rotteConferimenti.ts`, legge le rotte dalla
 storia dell'anno e non ha bisogno che nessuno le scriva a mano.
 
+### Su quali tonnellate si paga ciascuna prestazione
+
+**La raccolta si paga a chi ha raccolto.** La base sono le tonnellate dei
+formulari di quel raccoglitore, nel canale giusto, nel mese in cui e' finito il
+trasporto.
+
+**Stoccaggio e trattamento si pagano su tutto cio' che arriva al sito**, anche
+quando l'ha portato un altro. Se Nappi Sud raccoglie 100 t e sul suo piazzale
+conferiscono altri raccoglitori per 30 t, a Nappi Sud si pagano 100 t di raccolta
+e 130 t di stoccaggio. Su Gatim conferisce anche Emmesse, e il conferito di
+Emmesse si somma in fattura a quello che Gatim ha raccolto e trattato. Il "di
+cui" sotto ogni riga di impianto o stoccaggio dice chi ha portato cosa, cosi' la
+differenza resta visibile invece di sparire in un totale.
+
+I canali restano separati anche quando il prezzo e' lo stesso: lo stoccaggio di
+Nappi Sud costa 16 euro la tonnellata sia sulla rete sia sull'ACI, e sono due
+righe, non una.
+
+**Il prezzo unico.** Di regola raccolta e trattamento sono due prestazioni con
+due prezzi. L'eccezione si dichiara sulla tariffa di raccolta col flag
+`comprensiva_trattamento`: allora il trattamento presso l'impianto dello stesso
+fornitore non si fattura a parte e in fatturazione compare come «compreso nel
+prezzo unico». Nel 2026 riguarda solo Green Tyre Project sull'ACI, 225 euro la
+tonnellata. Se per lo stesso fornitore e canale esistono sia il prezzo unico sia
+una tariffa di trattamento, il gestionale lo segnala: si pagherebbe due volte.
+
+**Il prezzo puo' dipendere dalla zona o dalla destinazione.** La cascata e'
+destinazione, provincia, regione, generica. La raccolta ACI di Nappi Sud costa 82
+euro in Basilicata e 92 in Campania, e la regione si legge dalla provincia del
+demolitore a cui afferisce il formulario; la raccolta di Emmesse costa 72 euro se
+scarica a Gatim e 90 se scarica a Irigom. In fatturazione la destinazione sta in
+colonna e la riga porta il criterio con cui la tariffa e' stata scelta.
+
+**Tariffa zero non e' un dato mancante.** Il trattamento della rete su Tecnogum
+e' davvero a zero, perche' nessun contratto lo prevede. Eco Faso e' una
+autodemolizione dove SMOCO va a raccogliere, non un trasportatore: e' giusto che
+non abbia un prezzo. Nel 2026 non sono coinvolti MGM, Barone Trasporti,
+Minervini ed Eco Faso.
+
 **Nappi Sud e' raccoglitore e stoccaggio insieme**, ed e' la distinzione che fa
 sbagliare i moduli:
 

@@ -4,6 +4,7 @@ import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.
 import { getRegioneFromProvincia } from '../../shared/regioneMap.ts';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { mappaFatturazione, fatturaA } from "../../shared/subfornitori.ts";
+import { giornoRoma, annoRoma, meseRoma } from "../../shared/giornoItaliano.ts";
 
 const MESI_MAP = {
   'gennaio': 0, 'febbraio': 1, 'marzo': 2, 'aprile': 3, 'maggio': 4, 'giugno': 5,
@@ -16,19 +17,15 @@ function isEmpty(s) { return !s || String(s).trim() === ''; }
 function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 function round3(n) { return Math.round((n + Number.EPSILON) * 1000) / 1000; }
 
+// Il giorno di una data e' quello italiano, non quello del fuso del server:
+// un trasporto finito alle 23 del 31 agosto e' di agosto, non di settembre.
 function tariffaValidaPerData(t, dataIso) {
-  if (!dataIso) return false;
-  const dt = new Date(dataIso);
-  if (isNaN(dt.getTime())) return false;
-  const dtOnly = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime();
-  if (t.data_inizio_validita) {
-    const di = new Date(t.data_inizio_validita);
-    if (!isNaN(di.getTime()) && new Date(di.getFullYear(), di.getMonth(), di.getDate()).getTime() > dtOnly) return false;
-  }
-  if (t.data_fine_validita) {
-    const df = new Date(t.data_fine_validita);
-    if (!isNaN(df.getTime()) && new Date(df.getFullYear(), df.getMonth(), df.getDate()).getTime() < dtOnly) return false;
-  }
+  const giorno = giornoRoma(dataIso);
+  if (!giorno) return false;
+  const inizio = String(t.data_inizio_validita || '').slice(0, 10);
+  if (inizio && inizio > giorno) return false;
+  const fine = String(t.data_fine_validita || '').slice(0, 10);
+  if (fine && fine < giorno) return false;
   return true;
 }
 
@@ -203,17 +200,33 @@ export default async function(req) {
     }
     const tariffe = tariffeAll.filter(t => !isEmpty(t.prestazione));
 
+    // Il prezzo unico e una tariffa di trattamento per lo stesso fornitore e lo
+    // stesso canale non possono convivere: si pagherebbe due volte lo stesso
+    // trattamento. Meglio dirlo prima che dopo.
+    for (const t of tariffe.filter(x => x.prestazione === 'RACCOLTA' && x.comprensiva_trattamento === true)) {
+      const doppia = tariffe.find(x => x.prestazione === 'TRATTAMENTO'
+        && normalizzaRagioneSociale(x.fornitore_nome) === normalizzaRagioneSociale(t.fornitore_nome)
+        && x.tipologia === t.tipologia);
+      if (!doppia) continue;
+      anomalie.push({
+        descrizione: `${t.fornitore_nome || '—'}: la raccolta ${t.tipologia} e' a prezzo unico comprensivo del trattamento, ma esiste anche una tariffa di trattamento (${doppia.valore} ${doppia.unita_misura}). Il trattamento non viene fatturato a parte: se invece va pagato, togli il prezzo unico dalla raccolta.`,
+        fornitore: t.fornitore_nome || '—',
+        prestazione: 'RACCOLTA / TRATTAMENTO',
+        classe: doppia.classe_materiale || '—',
+        ambito: `Canale ${t.tipologia}`,
+        tonnellate: 0,
+      });
+    }
+
     // ─── Filtro comune ───
+    // Il mese di competenza e' quello in cui e' finito il trasporto, letto sul
+    // giorno italiano.
     function filterRecords(records) {
       return records.filter(r => {
         const stato = String(r.stato || '').toLowerCase().trim();
         if (stato !== 'terminato') return false;
-        const d = r.trasporto_finito_il;
-        if (!d) return false;
-        const dt = new Date(d);
-        if (isNaN(dt.getTime())) return false;
-        if (dt.getFullYear() !== annoNum) return false;
-        if (dt.getMonth() !== meseNum) return false;
+        if (annoRoma(r.trasporto_finito_il) !== annoNum) return false;
+        if (meseRoma(r.trasporto_finito_il) !== meseNum) return false;
         return true;
       });
     }
@@ -405,6 +418,11 @@ export default async function(req) {
     const impPerGroup = new Map();  // €/t, €/kg: (destKey|prestazione|classe|provenienza|tariffa)
     const impPerDest = new Map();   // €/viaggio: (destKey|tariffa)
 
+    // Stoccaggio e trattamento si pagano su TUTTO cio' che arriva al sito, non
+    // solo su cio' che il titolare del sito ha raccolto: su Nappi Sud conferiscono
+    // anche altri raccoglitori e lo stoccaggio si paga anche sul loro conferito,
+    // su Gatim conferisce anche Emmesse e il suo quantitativo si somma a quello
+    // trattato da Gatim. Il "di cui" qui sotto tiene visibile chi ha portato cosa.
     for (const { r, provenienza } of impiantiRecords) {
       const tipoDest = String(r.tipo_destinazione || '').toLowerCase().trim();
       const prestazione = tipoDest === 'imp' ? 'TRATTAMENTO' : tipoDest === 'stoc' ? 'CONFERIMENTO_STOCCAGGIO' : '';
@@ -431,11 +449,30 @@ export default async function(req) {
       const viaggioKey = `${dataFine}|${automezzo}`;
       const interno = isInterno(destinazione);
 
-      const tariffa = findTariffaImpianto(tariffe, destKey, prestazione, classe, provenienza, tipologia, dataIso);
-      const tk = tariffa ? tariffa.id : '__NESSUNA__';
+      // Chi ha materialmente portato il carico: il raccoglitore per le primarie
+      // e per l'extra raccolta, lo stoccaggio di partenza per le secondarie.
+      const conferente = (provenienza === 'secondaria'
+        ? String(r.stoccaggio || '').trim()
+        : String(r.trasportatore || '').trim()) || '—';
+
+      // Prezzo unico: una tariffa di raccolta puo' comprendere anche il
+      // trattamento. Nel 2026 capita solo con Green Tyre Project sull'ACI, a 225
+      // euro la tonnellata: si paga una volta sola, sul conferito, senza scindere
+      // la raccolta dal trattamento. Vale solo quando chi ha raccolto e chi
+      // tratta sono lo stesso fornitore in fattura.
+      const fattConf = fatturaA(perFattura, conferente);
+      const tarRacc = prestazione === 'TRATTAMENTO' && fattConf.chiave === destKey
+        ? findTariffaRaccolta(tariffe, destKey, norm(r.provincia), getRegione(r), norm(destinazione), classe, tipologia, dataIso)
+        : null;
+      const compresoNellaRaccolta = !!(tarRacc && tarRacc.comprensiva_trattamento === true);
+
+      const tariffa = compresoNellaRaccolta
+        ? null
+        : findTariffaImpianto(tariffe, destKey, prestazione, classe, provenienza, tipologia, dataIso);
+      const tk = compresoNellaRaccolta ? '__COMPRESO__' : (tariffa ? tariffa.id : '__NESSUNA__');
       const um = tariffa ? tariffa.unita_misura : '';
 
-      if (!tariffa && !interno) {
+      if (!tariffa && !interno && !compresoNellaRaccolta) {
         anomalie.push({
           descrizione: `Impianto/stoccaggio senza tariffa ${prestazione}: ${destinazione}`,
           fornitore: destinazione,
@@ -450,24 +487,26 @@ export default async function(req) {
         const dkey = `${destKey}|${tk}`;
         if (!impPerDest.has(dkey)) {
           impPerDest.set(dkey, {
-            destinazione, destKey, interno, tariffa,
-            peso_kg: 0, viaggiSet: new Set(),
+            destinazione, destKey, interno, tariffa, compresoNellaRaccolta,
+            peso_kg: 0, viaggiSet: new Set(), diCui: new Map(),
           });
         }
         const g = impPerDest.get(dkey);
         g.peso_kg += peso;
         g.viaggiSet.add(viaggioKey);
+        segnaDiCui(g.diCui, conferente, peso, viaggioKey);
       } else {
         const key = `${destKey}|${prestazione}|${classe}|${provenienza}|${tk}`;
         if (!impPerGroup.has(key)) {
           impPerGroup.set(key, {
             destinazione, destKey, prestazione, classe, provenienza, interno,
-            tariffa, peso_kg: 0, viaggiSet: new Set(),
+            tariffa, compresoNellaRaccolta, peso_kg: 0, viaggiSet: new Set(), diCui: new Map(),
           });
         }
         const g = impPerGroup.get(key);
         g.peso_kg += peso;
         g.viaggiSet.add(viaggioKey);
+        segnaDiCui(g.diCui, conferente, peso, viaggioKey);
       }
     }
 
@@ -485,7 +524,11 @@ export default async function(req) {
           tonnellate: round3(tonnellate), viaggi: g.viaggiSet.size,
           tariffa_valore: valore, unita_misura: um,
           importo: round2(importo),
-          note: g.interno ? 'interno, non fatturato' : (!g.tariffa ? 'senza tariffa' : ''),
+          compreso_nella_raccolta: !!g.compresoNellaRaccolta,
+          di_cui: elencoDiCui(g.diCui),
+          note: g.interno ? 'interno, non fatturato'
+            : g.compresoNellaRaccolta ? 'compreso nel prezzo unico della raccolta'
+            : (!g.tariffa ? 'senza tariffa' : ''),
         },
       });
     }
@@ -503,7 +546,11 @@ export default async function(req) {
           tonnellate: round3(tonnellate), viaggi: g.viaggiSet.size,
           tariffa_valore: valore, unita_misura: um,
           importo: round2(importo),
-          note: g.interno ? 'interno, non fatturato' : (!g.tariffa ? 'senza tariffa' : ''),
+          compreso_nella_raccolta: !!g.compresoNellaRaccolta,
+          di_cui: elencoDiCui(g.diCui),
+          note: g.interno ? 'interno, non fatturato'
+            : g.compresoNellaRaccolta ? 'compreso nel prezzo unico della raccolta'
+            : (!g.tariffa ? 'senza tariffa' : ''),
         },
       });
     }

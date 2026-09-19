@@ -104,6 +104,12 @@ export default async function(req) {
         return Response.json({ error: 'Il campo servizio_ecotyre si applica solo alla fatturazione attiva.' }, { status: 400 });
       }
 
+      // Il prezzo unico che comprende il trattamento riguarda solo la raccolta
+      // passiva: altrove non avrebbe significato.
+      if (effettivi.comprensiva_trattamento === true && (isAttiva || norm(effettivi.prestazione) !== 'RACCOLTA')) {
+        return Response.json({ error: 'Il prezzo unico comprensivo del trattamento si applica solo alle tariffe passive di raccolta.' }, { status: 400 });
+      }
+
       // f) Data fine precedente a data inizio
       const inizio = effettivi.data_inizio_validita;
       const fine = effettivi.data_fine_validita;

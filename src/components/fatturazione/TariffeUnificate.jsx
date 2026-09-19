@@ -23,7 +23,14 @@ function isAperta(t) { return t.stato === 'attivo' && !t.data_fine_validita; }
 function countRuoli(f) { return ['ruolo_raccolta','ruolo_trasporto_secondaria','ruolo_trattamento','ruolo_stoccaggio'].filter(r => f[r]).length; }
 function getAmbito(t) {
   if (t.direzione === 'ATTIVA') return t.regione || 'Tutte le regioni';
-  if (t.prestazione === 'RACCOLTA') { let a = t.provincia || t.regione || 'Tutte le zone'; if (t.destinazione) a += ` → ${t.destinazione}`; return a; }
+  // Il prezzo unico che comprende anche il trattamento si legge nell'ambito:
+  // altrimenti una differenza importante resterebbe nascosta in un flag.
+  if (t.prestazione === 'RACCOLTA') {
+    let a = t.provincia || t.regione || 'Tutte le zone';
+    if (t.destinazione) a += ` → ${t.destinazione}`;
+    if (t.comprensiva_trattamento) a += ' — prezzo unico, comprende il trattamento';
+    return a;
+  }
   if (t.prestazione === 'TRASPORTO_SECONDARIA') return `${t.produttore || '?'} → ${t.destinatario || '?'}`;
   return '—';
 }
