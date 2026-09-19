@@ -157,14 +157,20 @@ export default async function(req) {
       }
 
       // d) Chiudi le tariffe chiudibili (rinegoziazione prezzo)
+      // La tariffa chiusa resta 'attivo': lo stato non_attivo vuol dire "non
+      // deve valere mai", e usarlo qui cancellerebbe il prezzo da tutti i mesi
+      // gia' fatturati con quel prezzo. A dire fino a quando vale e' la data di
+      // fine. Nell'elenco delle tariffe sparisce lo stesso, perche' isArchiviata
+      // guarda anche la data di fine passata.
       for (const t of chiudibili) {
         const fineChiusura = new Date(inizio);
         fineChiusura.setDate(fineChiusura.getDate() - 1);
-        await base44.asServiceRole.entities.Tariffa.update(t.id, {
-          data_fine_validita: fineChiusura.toISOString().slice(0, 10),
-          stato: 'non_attivo',
+        const dataFine = fineChiusura.toISOString().slice(0, 10);
+        await base44.asServiceRole.entities.Tariffa.update(t.id, { data_fine_validita: dataFine });
+        tariffeChiuse.push({
+          id: t.id, fornitore_nome: t.fornitore_nome,
+          data_fine_validita: dataFine, valore: t.valore, unita_misura: t.unita_misura,
         });
-        tariffeChiuse.push({ id: t.id, fornitore_nome: t.fornitore_nome });
       }
     }
 

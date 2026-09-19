@@ -194,7 +194,10 @@ export default function TariffeUnificate() {
     const dataFine = prompt('Inserisci la data di fine validità (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
     if (!dataFine) return;
     try {
-      await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: { data_fine_validita: dataFine, stato: 'non_attivo' } });
+      // Solo la data di fine: la tariffa resta valida per i giorni che ha
+      // coperto, altrimenti i mesi gia' fatturati con quel prezzo resterebbero
+      // senza prezzo. Dall'elenco sparisce lo stesso, per data di fine passata.
+      await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: { data_fine_validita: dataFine } });
       load();
     } catch (e) { alert(e?.response?.data?.error || e?.message); }
   };

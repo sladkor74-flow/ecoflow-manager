@@ -217,7 +217,7 @@ export default async function(req) {
       fetchAll(base44.asServiceRole.entities.PrimariaAci),
       fetchAll(base44.asServiceRole.entities.Secondaria),
       fetchAll(base44.asServiceRole.entities.ExtraRaccolta),
-      fetchAll(base44.asServiceRole.entities.Tariffa, { direzione: 'PASSIVA', stato: 'attivo' }),
+      fetchAll(base44.asServiceRole.entities.Tariffa, { direzione: 'PASSIVA' }),
       fetchAll(base44.asServiceRole.entities.Fornitore, { stato: 'attivo' }),
     ]);
 
@@ -234,6 +234,7 @@ export default async function(req) {
     // Tariffe con prestazione vuota → anomalia
     const anomalie = [];
     for (const t of tariffeAll) {
+      if (t.stato !== 'attivo') continue;
       if (isEmpty(t.prestazione)) {
         anomalie.push({
           descrizione: `Tariffa senza prestazione assegnata (ID ${t.id}) — fornitore: ${t.fornitore_nome || '—'}`,
@@ -245,7 +246,16 @@ export default async function(req) {
         });
       }
     }
-    const tariffe = tariffeAll.filter(t => !isEmpty(t.prestazione));
+      // Le tariffe si leggono tutte, non solo quelle attive. Quando un prezzo
+      // viene rinegoziato, la tariffa vecchia viene chiusa con una data di fine
+      // e messa a non_attivo: se si leggessero solo le attive, tutti i mesi
+      // prima del cambio resterebbero senza prezzo e finirebbero a zero. A
+      // decidere se una tariffa vale per un movimento e' la sua finestra di
+      // validita', non il suo stato. Resta fuori solo la tariffa disattivata
+      // senza data di fine: quella non e' una rinegoziazione, e' una tariffa
+      // che non deve valere mai.
+      const valeAlmenoUnPeriodo = (t) => t.stato === 'attivo' || !!t.data_fine_validita;
+    const tariffe = tariffeAll.filter(t => !isEmpty(t.prestazione) && valeAlmenoUnPeriodo(t));
 
     // Il prezzo unico e una tariffa di trattamento per lo stesso fornitore e lo
     // stesso canale non possono convivere: si pagherebbe due volte lo stesso

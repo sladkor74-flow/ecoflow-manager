@@ -67,7 +67,10 @@ export default async function(req) {
     }
 
     // Load attiva tariffe
-    const tariffe = await base44.asServiceRole.entities.Tariffa.filter({ direzione: 'ATTIVA', stato: 'attivo' });
+    // Anche qui vale la finestra di validita', non lo stato: una tariffa
+    // rinegoziata resta buona per i mesi prima del cambio. Vedi calcolaPassiva.
+    const tariffeTutte = await base44.asServiceRole.entities.Tariffa.filter({ direzione: 'ATTIVA' });
+    const tariffe = tariffeTutte.filter(t => t.stato === 'attivo' || !!t.data_fine_validita);
     const tariffeSorted = sortTariffe(tariffe);
 
     const anomalieMap = new Map();

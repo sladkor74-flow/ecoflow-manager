@@ -99,6 +99,18 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
     return data;
   };
 
+  // Quando si salva un prezzo nuovo, quello vecchio viene chiuso il giorno
+  // prima: va detto, con la data e la cifra, perche' e' una decisione che vale
+  // soldi e finora passava inosservata.
+  const avvisaChiusure = (res) => {
+    const chiuse = res?.data?.tariffe_chiuse || [];
+    if (chiuse.length === 0) return;
+    const c = chiuse[0];
+    const prezzo = c.valore !== undefined && c.valore !== null ? ` (${c.valore} ${c.unita_misura || ''})`.trimEnd() : '';
+    const altre = chiuse.length > 1 ? ` e altri ${chiuse.length - 1}` : '';
+    setSuccess(`Tariffa salvata. Il prezzo precedente${prezzo}${altre} è stato chiuso al ${c.data_fine_validita || 'giorno indicato'}: resta valido per i movimenti fino a quel giorno.`);
+  };
+
   const handleResponseError = (e) => {
     const status = e?.response?.status;
     const data = e?.response?.data;
@@ -135,10 +147,7 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
           }
         }
         const res = await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: editing.id, dati: updateData });
-        if (res.data?.tariffe_chiuse?.length > 0) {
-          const chiusa = res.data.tariffe_chiuse[0];
-          setSuccess(`Tariffa salvata. Il prezzo precedente è stato chiuso al ${chiusa.data_fine_validita || 'giorno indicato'}.`);
-        }
+        avvisaChiusure(res);
         onSaved(); onClose();
       } else {
         const base = buildBase();
@@ -148,7 +157,10 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
             await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'create', dati: { ...base, classe_materiale: c, valore: v } });
           }
         } else {
-          await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'create', dati: { ...base, classe_materiale: form.classe_materiale || undefined, valore: Number(form.valore) } });
+          const res = await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'create', dati: { ...base, classe_materiale: form.classe_materiale || undefined, valore: Number(form.valore) } });
+          // Anche inserendo una tariffa nuova il prezzo precedente viene chiuso:
+          // succedeva in silenzio, e chi salvava non lo sapeva.
+          avvisaChiusure(res);
         }
         onSaved(); onClose();
       }

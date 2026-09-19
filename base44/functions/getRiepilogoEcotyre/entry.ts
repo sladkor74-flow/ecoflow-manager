@@ -52,7 +52,9 @@ export default async function(req) {
     }
 
     // Load attiva tariffe
-    const tariffe = await base44.asServiceRole.entities.Tariffa.filter({ direzione: 'ATTIVA', stato: 'attivo' });
+    // La finestra di validita' decide, non lo stato: vedi calcolaPassiva.
+    const tariffeTutte = await base44.asServiceRole.entities.Tariffa.filter({ direzione: 'ATTIVA' });
+    const tariffe = tariffeTutte.filter(t => t.stato === 'attivo' || !!t.data_fine_validita);
     const tariffeSorted = sortTariffe(tariffe);
 
     const anomalieMap = new Map();
