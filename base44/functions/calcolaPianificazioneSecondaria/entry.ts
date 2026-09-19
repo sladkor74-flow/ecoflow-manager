@@ -262,7 +262,7 @@ export default async function(req) {
         const targetRaccoglitoreKg = quotaTarget != null ? Math.round(targetPieno * quotaTarget) : targetPieno;
 
         let consuntivo = 0, consuntivoPrim = 0, consuntivoSec = 0;
-        let residuo = 0, PREV = 0, viaggiPerSett = 0;
+        let residuo = 0, residuoImpianto = null, PREV = 0, viaggiPerSett = 0;
         const execByWeek = {};
         let quotaPlafondImpianto = 0;
         let baseCascata = 0;
@@ -292,7 +292,16 @@ export default async function(req) {
             if (sRes > 0) sumResiduoTargetStoc += sRes;
           }
           quotaPlafondImpianto = sumResiduoTargetStoc > 0 && resTargetImp > 0 ? (m.residuo_plafond || 0) * (resTargetImp / sumResiduoTargetStoc) : 0;
-          residuo = resTargetImp;
+          // Per uno stoccaggio il residuo mostrato e' sempre stato quello
+          // dell'impianto: quanto manca a lui, che questo piazzale dovrebbe
+          // coprire. Da quando il target di un fornitore condiviso si divide
+          // fra gli impianti, quel numero accanto al target diviso non si
+          // legge piu': Nappi Sud mostrava "target 1.125.993, residuo
+          // 1.470.100", un residuo piu' grande del target. Quando la quota
+          // c'e', il residuo e' il suo: quanto le manca da portare a questo
+          // impianto. Quello dell'impianto resta, in un campo che lo dice.
+          residuoImpianto = resTargetImp;
+          residuo = quotaTarget != null ? Math.max(0, targetRaccoglitoreKg - consuntivoSec) : resTargetImp;
           baseCascata = quotaPlafondImpianto;
         } else {
           const fPrim = prim2026.filter(r => normalizzaRagioneSociale(r.trasportatore) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm && isImp(r));
@@ -367,6 +376,7 @@ export default async function(req) {
         const fr = {
           id: f.id, nome: f.nome, ruolo: fRuolo, tipo: isStoccaggio ? 'stoccaggio' : 'primaria_diretta',
           target_raccoglitore_kg: targetRaccoglitoreKg,
+          ...(residuoImpianto != null ? { residuo_impianto_kg: Math.round(residuoImpianto) } : {}),
           ...(quotaTarget != null ? {
             target_raccoglitore_intero_kg: targetPieno,
             quota_target: Math.round(quotaTarget * 1000) / 1000,
