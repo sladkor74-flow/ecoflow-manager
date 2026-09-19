@@ -39,7 +39,15 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
     setLoadingRecords(true);
     try {
       const all = await fetchAllClient(base44.entities[entity], null, '-ordine_immesso_il');
-      setTuttiRecords(all.map(r => ({ ...r, peso_t: +((r.peso_stimato || 0) / 1000).toFixed(3) })));
+      // Sull'ACI un formulario non si chiude a piu' del 10% del peso stimato del
+      // suo ticket: il massimo si mostra accanto allo stimato, cosi' chi evade
+      // l'ordine sa fin dove puo' arrivare senza doverlo ripartire.
+      const eAciRiga = (r) => /autodemoliz|class ?9/i.test(`${r.classe || ''} ${r.prodotto || ''} ${r.codice_prodotto || ''}`);
+      setTuttiRecords(all.map(r => ({
+        ...r,
+        peso_t: +((r.peso_stimato || 0) / 1000).toFixed(3),
+        max_chiudibile_kg: eAciRiga(r) && Number(r.peso_stimato) > 0 ? Math.round(Number(r.peso_stimato) * 1.1) : null,
+      })));
     } catch (e) { console.error(e); }
     setLoadingRecords(false);
   }, [entity]);

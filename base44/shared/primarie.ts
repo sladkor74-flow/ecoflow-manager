@@ -13,6 +13,10 @@ export const CAMPI_ASSEGNATO = [
   'id_pdr', 'punto_di_raccolta', 'indirizzo', 'cap', 'comune', 'provincia',
   'codice_regione', 'macroarea', 'codice_prodotto', 'prodotto', 'classe',
   'cer', 'tipo_contenitori', 'quantita_richiesta', 'quantita_ritirata',
+  // Il ticket serve mentre l'ordine e' ancora assegnato: sull'ACI e' li' che si
+  // legge il peso stimato su cui misurare la soglia del 10% quando si chiude il
+  // formulario.
+  'numero_ordine_interno',
   'peso_stimato', 'peso_effettivo', 'key_account', 'partner_operativo',
   'id_partner_operativo', 'id_trasportatore', 'trasportatore', 'regioni', 'mese', 'anno', 'sigla', 'regione'
 ];

@@ -68,6 +68,10 @@
     "quantita_ritirata": {
       "type": "number"
     },
+    "numero_ordine_interno": {
+      "type": "string",
+      "description": "Il ticket dell'ordine (colonna Numero_Ordine_Interno): sull'ACI e' il riferimento su cui si misura la soglia del 10% sul peso stimato"
+    },
     "peso_stimato": {
       "type": "number"
     },

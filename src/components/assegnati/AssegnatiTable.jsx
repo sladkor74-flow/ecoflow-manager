@@ -7,6 +7,10 @@ import BadgeRentri from '@/components/shared/BadgeRentri';
 
 const COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
+  // Il ticket dell'ordine: sull'ACI e' il riferimento su cui si misura quanto si
+  // puo' chiudere il formulario, e serve averlo sotto gli occhi qui, mentre
+  // l'ordine e' ancora da evadere.
+  { key: 'numero_ordine_interno', label: 'Ticket' },
   { key: 'ordine_immesso_il', label: 'Immesso il', format: 'date' },
   { key: 'ragione_sociale', label: 'Ragione Sociale' },
   { key: 'comune', label: 'Comune' },
@@ -16,6 +20,9 @@ const COLUMNS = [
   { key: 'prodotto', label: 'Prodotto' },
   { key: 'quantita_richiesta', label: 'Q.tà Rich.', format: 'number' },
   { key: 'peso_stimato', label: 'Peso stimato (kg)', format: 'number' },
+  // Solo per l'ACI: un formulario non si chiude a piu' del 10% del peso stimato
+  // del suo ticket. Oltre, il peso va ripartito su un altro ordine.
+  { key: 'max_chiudibile_kg', label: 'Max chiudibile (kg)', format: 'number', titolo: 'Solo ACI: il 10% in piu\' del peso stimato del ticket. Oltre questa cifra il peso va ripartito su un altro ordine.' },
   { key: 'peso_t', label: 'Peso (t)', format: 'ton' },
   { key: 'mese', label: 'Mese' },
   { key: 'anno', label: 'Anno' },
@@ -52,7 +59,7 @@ export default function AssegnatiTable({ records, loading, ragioneSocialeFilter,
             )}
             {COLUMNS.map((col) => (
               <React.Fragment key={col.key}>
-                <th className="text-left px-3 py-2.5 font-medium whitespace-nowrap">{col.label}</th>
+                <th className="text-left px-3 py-2.5 font-medium whitespace-nowrap" title={col.titolo || undefined}>{col.label}</th>
                 {col.key === DOPO_COLONNA_OMOLOGA && (
                   <>
                     <th className="text-left px-3 py-2.5 font-medium whitespace-nowrap" title="Omologa registrata per il punto di raccolta, con la sua scadenza">Omologa</th>
