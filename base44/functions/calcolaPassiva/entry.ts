@@ -269,6 +269,39 @@ export default async function(req) {
       secondarieForBlock = [];
     }
 
+    // ─── FORMULARI RIPETUTI ───
+    // Un formulario che compare due volte nello stesso mese si paga due volte:
+    // la raccolta a chi ha raccolto, lo stoccaggio o il trattamento a chi lo
+    // riceve. Nel 2026 le 2.827 primarie di rete non hanno un solo numero
+    // ripetuto, quindi una ripetizione non e' la normalita' dell'archivio: e'
+    // qualcosa da guardare prima di pagare. Il gestionale la segnala e basta -
+    // quale delle due righe sia quella buona lo decide chi conosce il ritiro.
+    const perFir = new Map();
+    const firVisti = new Set();
+    const raccogliFir = (rec) => {
+      if (!rec || !rec.id || firVisti.has(rec.id)) return;
+      firVisti.add(rec.id);
+      const fir = String(rec.numero_fir || '').trim();
+      if (!fir) return;
+      if (!perFir.has(fir)) perFir.set(fir, []);
+      perFir.get(fir).push(rec);
+    };
+    for (const rec of raccoglitoriSource) raccogliFir(rec);
+    for (const { r: rec } of impiantiRecords) raccogliFir(rec);
+    for (const [fir, righe] of perFir) {
+      if (righe.length < 2) continue;
+      const kg = righe.reduce((s, x) => s + Number(x.peso_effettivo || 0), 0);
+      const pesi = righe.map(x => `${Math.round(Number(x.peso_effettivo || 0))} kg`).join(' + ');
+      anomalie.push({
+        descrizione: `Formulario ${fir} presente ${righe.length} volte nel mese (${pesi}): se e' lo stesso ritiro caricato piu' volte, raccolta, stoccaggio e trattamento si pagano due volte. ID ordine ${righe[0].codice_import || '—'}, ${righe[0].trasportatore || '—'} → ${righe[0].destinazione || '—'}.`,
+        fornitore: righe[0].trasportatore || '—',
+        prestazione: 'FORMULARIO RIPETUTO',
+        classe: String(righe[0].classe || '—'),
+        ambito: `FIR ${fir}`,
+        tonnellate: round3(kg / 1000),
+      });
+    }
+
     // ─── BLOCCO 1: RACCOGLITORI (RACCOLTA) ───
     const tonnellateTotali = raccoglitoriSource.reduce((s, r) => s + Number(r.peso_effettivo || 0), 0) / 1000;
 
@@ -658,11 +691,27 @@ export default async function(req) {
           importo = calcImporto(um, valore, pesoCanale, viaggi);
         }
 
+        // Un viaggio di secondaria puo' portare formulari di rete e formulari
+        // ACI insieme. L'importo e' gia' diviso fra i due canali qui sopra, ma
+        // le tonnellate no: finivano tutte in entrambe le viste, e il totale del
+        // trasportatore sommava rete e ACI - proprio la commistione che non deve
+        // mai esserci. La riga porta le tonnellate del canale che si sta
+        // guardando; quelle dell'altro restano accanto, dichiarate, perche'
+        // spiegano perche' un viaggio misto si paga tutto di qua.
+        const tonnellateCanale = tipologia === 'ACI' ? tonnellateAci : tonnellateRete;
+        const tonnellateAltro = tipologia === 'ACI' ? tonnellateRete : tonnellateAci;
+
+        // Una tratta che in questo canale non ha ne' tonnellate ne' importo e'
+        // di un altro canale: non ha niente da fare in questa tabella.
+        if (round3(tonnellateCanale) === 0 && round2(importo) === 0) continue;
+
         trasportiRows.push({
           fornitore: tratta.trasportatore, fornitore_norm: tratta.trasKey, interno,
           riga: {
             stoccaggio: tratta.stoccaggio, destinazione: tratta.destinazione,
-            tonnellate_rete: round3(tonnellateRete), tonnellate_aci: round3(tonnellateAci),
+            tonnellate: round3(tonnellateCanale),
+            tonnellate_altro_canale: round3(tonnellateAltro),
+            canale_altro: tipologia === 'ACI' ? 'RETE' : 'ACI',
             viaggi, tariffa_valore: valore, unita_misura: um,
             importo: round2(importo), viaggio_misto: viaggioMisto, note,
           },
@@ -680,12 +729,22 @@ export default async function(req) {
       }
       const f = trasByForn.get(row.fornitore_norm);
       f.righe.push(row.riga);
-      f.totale_tonnellate += row.riga.tonnellate_rete + row.riga.tonnellate_aci;
+      f.totale_tonnellate += row.riga.tonnellate;
       f.totale_euro += row.riga.importo;
     }
     const trasporti_secondaria = Array.from(trasByForn.values()).map(f => ({
       ...f, totale_tonnellate: round3(f.totale_tonnellate), totale_euro: round2(f.totale_euro),
     })).sort((a, b) => b.totale_euro - a.totale_euro);
+
+    // Una stessa anomalia puo' nascere da piu' righe uguali: si dice una volta
+    // sola, altrimenti l'elenco sembra piu' grave di quello che e'.
+    const anomalieViste = new Set();
+    const anomalieUniche = anomalie.filter(a => {
+      const k = `${a.descrizione}|${a.fornitore}|${a.prestazione}|${a.classe}|${a.ambito}`;
+      if (anomalieViste.has(k)) return false;
+      anomalieViste.add(k);
+      return true;
+    });
 
     // ─── TOTALI ───
     const totaleRaccoglitori = raccoglitori.reduce((s, f) => s + f.totale_euro, 0);
@@ -708,7 +767,7 @@ export default async function(req) {
         trasporti_secondaria: round2(totaleSecondaria),
         totale_complessivo: round2(totaleRaccoglitori + totaleImpianti + totaleSecondaria),
       },
-      anomalie,
+      anomalie: anomalieUniche,
       quadratura: {
         tonnellate_totali: round3(tonnellateTotali),
         tonnellate_raccoglitori: round3(tonnellateRaccoglitori),

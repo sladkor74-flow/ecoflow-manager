@@ -110,7 +110,7 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
             </div>
             <div>
               <h3 className="text-sm font-semibold mb-2">Trasporti secondaria (TRASPORTO_SECONDARIA)</h3>
-              <PassivaSecondariaTable data={result.trasporti_secondaria} />
+              <PassivaSecondariaTable data={result.trasporti_secondaria} tipologia={tipologia} />
             </div>
           </div>
         </>
