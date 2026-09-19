@@ -64,24 +64,29 @@ function findTariffaRaccolta(tariffe, trasKey, provincia, regione, destinazione,
       (isEmpty(t.classe_materiale) || norm(t.classe_materiale) === cls)
     );
     sortPerClasse(candidates);
+    // Il criterio con cui si e' scelto resta attaccato alla tariffa: serve a
+    // vedere a colpo d'occhio, in fatturazione, quando un contratto prevede un
+    // prezzo per destinazione e si sta invece applicando quello generico. Le
+    // tariffe di Emmesse - 72 euro a Gatim, 90 a Irigom - sono nate cosi'.
+    const con = (m, criterio) => (m ? { ...m, criterio } : null);
     // a) destinazione
     if (!isEmpty(destinazione)) {
       const m = candidates.find(t => norm(t.destinazione) === destinazione);
-      if (m) return m;
+      if (m) return con(m, 'destinazione');
     }
     // b) provincia (senza destinazione)
     if (!isEmpty(provincia)) {
       const m = candidates.find(t => norm(t.provincia) === provincia && isEmpty(t.destinazione));
-      if (m) return m;
+      if (m) return con(m, 'provincia');
     }
     // c) regione (senza provincia e destinazione)
     if (!isEmpty(regione)) {
       const m = candidates.find(t => norm(t.regione) === regione && isEmpty(t.provincia) && isEmpty(t.destinazione));
-      if (m) return m;
+      if (m) return con(m, 'regione');
     }
     // d) generica
     const m = candidates.find(t => isEmpty(t.destinazione) && isEmpty(t.provincia) && isEmpty(t.regione));
-    if (m) return m;
+    if (m) return con(m, 'generica');
   }
   return null;
 }
@@ -336,6 +341,10 @@ export default async function(req) {
           classe: Array.from(g.classi_set).join(', ') || '—',
           tonnellate: round3(tonnellate), viaggi: g.viaggiSet.size,
           tariffa_valore: valore, unita_misura: um,
+          // Con che criterio e' stata scelta: destinazione, provincia, regione o
+          // generica. Si vede subito quando un contratto prevede un prezzo per
+          // destinazione e si sta applicando invece quello generico.
+          tariffa_criterio: g.tariffa ? (g.tariffa.criterio || 'generica') : '',
           importo: round2(importo),
           note: g.interno ? 'interno, non fatturato' : (!g.tariffa ? 'senza tariffa' : ''),
         },

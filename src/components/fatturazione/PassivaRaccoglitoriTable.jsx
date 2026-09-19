@@ -12,6 +12,7 @@ export default function PassivaRaccoglitoriTable({ data }) {
           <thead className="bg-muted/50">
             <tr className="text-left">
               <th className="px-3 py-2 font-semibold">Fornitore</th>
+              <th className="px-3 py-2 font-semibold">Destinazione</th>
               <th className="px-3 py-2 font-semibold text-right">Tonnellate</th>
               <th className="px-3 py-2 font-semibold text-right">Viaggi</th>
               <th className="px-3 py-2 font-semibold text-right">Tariffa</th>
@@ -28,10 +29,12 @@ export default function PassivaRaccoglitoriTable({ data }) {
                       {ri === 0 && <span className="font-semibold">{f.fornitore}</span>}
                       {ri === 0 && f.interno && <span className="ml-1 text-xs">(interno, non fatturato)</span>}
                     </td>
+                    <td className="px-3 py-1.5">{r.destinazione !== '—' ? r.destinazione : ''}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(r.tonnellate)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{r.viaggi}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">
                       {r.tariffa_valore ? `${formatNumber(r.tariffa_valore)} ${r.unita_misura}` : '—'}
+                      {r.tariffa_criterio === 'destinazione' && <span className="ml-1 text-[10px] font-normal text-primary" title="Tariffa specifica per questa destinazione, come da contratto">per dest.</span>}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatNumber(r.importo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     <td className="px-3 py-1.5 text-xs text-muted-foreground">
@@ -44,6 +47,7 @@ export default function PassivaRaccoglitoriTable({ data }) {
                 ))}
                 <tr className="border-t bg-muted/30 font-semibold">
                   <td className="px-3 py-1.5">Totale {f.fornitore}</td>
+                  <td></td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(f.totale_tonnellate)}</td>
                   <td colSpan={2}></td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(f.totale_euro, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -54,6 +58,7 @@ export default function PassivaRaccoglitoriTable({ data }) {
                 {(f.di_cui || []).map((d, di) => (
                   <tr key={`${fi}-dicui-${di}`} className="bg-muted/10 text-xs text-muted-foreground">
                     <td className="px-3 py-1 pl-8">di cui {d.fornitore}</td>
+                    <td></td>
                     <td className="px-3 py-1 text-right tabular-nums">{formatNumber(d.tonnellate)}</td>
                     <td className="px-3 py-1 text-right tabular-nums">{d.viaggi}</td>
                     <td colSpan={2}></td>
