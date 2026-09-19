@@ -130,6 +130,7 @@ export default async function(req) {
     }
 
     const result = [];
+    const anomalie = [];
     const creates = [];
     const updates = [];
     const stoccaggiResult = [];
@@ -215,7 +216,27 @@ export default async function(req) {
       // === FORNITORI CONFIGURATI (logica generalizzata) ===
       for (const f of impFornitori) {
         const fNorm = normalizzaRagioneSociale(f.nome);
-        const fRuolo = f.ruolo || (tipoNorm(f.tipo) === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore');
+        const fRuoloScritto = f.ruolo || (tipoNorm(f.tipo) === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore');
+
+        // Il ruolo scritto in anagrafica puo' non corrispondere a quello che il
+        // fornitore fa davvero, e allora il consuntivo esce a zero: un raccoglitore
+        // si conta sulle primarie che porta all'impianto, uno stoccaggio sulle
+        // secondarie che gli spedisce. Nappi Sud e' l'una e l'altra cosa: raccoglie
+        // dai punti di raccolta con un target suo e spedisce secondarie a Irigom e a
+        // Tecnogum. Segnata come solo raccoglitore risultava a zero su tutti e due,
+        // perche' le sue primarie le porta al proprio piazzale, non agli impianti.
+        // Qui vincono i fatti, e la discordanza si segnala.
+        const primDiQuesto = prim2026.filter(r => normalizzaRagioneSociale(r.trasportatore) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm && isImp(r)).length;
+        const secDiQuesto = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm).length;
+        const fRuolo = (fRuoloScritto === 'raccoglitore' && !primDiQuesto && secDiQuesto) ? 'doppio_ruolo' : fRuoloScritto;
+        if (fRuolo !== fRuoloScritto) {
+          anomalie.push({
+            tipo: 'ruolo_discorde',
+            fornitore: f.nome,
+            impianto: imp.nome_impianto,
+            testo: f.nome + " e' registrato come solo raccoglitore per " + imp.nome_impianto + ", ma a questo impianto non porta primarie: gli manda " + secDiQuesto + " secondarie. E' un doppio ruolo - raccoglie con un target suo e spedisce dal proprio piazzale - e come tale lo conto, altrimenti il consuntivo resterebbe a zero. Correggilo nella configurazione.",
+          });
+        }
         const isStoccaggio = fRuolo === 'stoccaggio' || fRuolo === 'doppio_ruolo';
         const targetRaccoglitoreKg = targetByNome[fNorm] || 0;
 
@@ -369,6 +390,7 @@ export default async function(req) {
     }
 
     return Response.json({
+      anomalie,
       impianti: result,
       stoccaggi: stoccaggiResult,
       settimane,
