@@ -36,10 +36,12 @@ export default async function(req) {
     // I contratti si fanno per l'anno che viene, ma i soggetti si conoscono dai
     // movimenti di quello in corso: se l'anno chiesto non ha ancora movimenti si
     // guarda l'anno prima, altrimenti non ci sarebbe nessuno da contrattualizzare.
-    let soggetti = await individuaSoggetti(base44, annoNum);
+    // individuaSoggetti restituisce { soggetti, esclusi }: gli esclusi qui non
+    // servono, chi e' fuori dalla qualifica e' fuori anche dai contratti.
+    let soggetti = (await individuaSoggetti(base44, annoNum)).soggetti || [];
     let annoSoggetti = annoNum;
     if (!soggetti.length) {
-      soggetti = await individuaSoggetti(base44, annoNum - 1);
+      soggetti = (await individuaSoggetti(base44, annoNum - 1)).soggetti || [];
       annoSoggetti = annoNum - 1;
     }
 

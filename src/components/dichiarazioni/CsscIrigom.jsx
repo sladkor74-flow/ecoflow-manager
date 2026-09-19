@@ -76,7 +76,7 @@ export default function CsscIrigom({ giacenzaPortaleT, anno }) {
       titolo: `Irigom · dichiarazione di ${mese} ${anno}`,
       sottotitolo: `Da dichiarare ${formatKg(dich.da_dichiarare_kg)} kg perché a portale resti una giacenza di ${formatKg(conto.giacenza_attesa_kg)} kg di PFU (cippato ${formatKg(riga.giacenza_cippato_kg)} + interi ${formatKg(riga.giacenza_intero_kg)})`,
       colonne: [
-        { titolo: 'DDT', valore: r => r.ddt, tipo: 'testo' },
+        { titolo: 'DDT', valore: r => r.ddt || 'soli metalli', tipo: 'testo' },
         { titolo: 'Data', valore: r => r.data, tipo: 'data' },
         { titolo: 'CSS-C', valore: r => r.cssc_kg, tipo: 'kg' },
         { titolo: 'Metalli ferrosi', valore: r => r.ferro_kg, tipo: 'kg' },
@@ -177,8 +177,10 @@ export default function CsscIrigom({ giacenzaPortaleT, anno }) {
               <div>
                 <h4 className="font-heading font-semibold text-sm">Dichiarazione di {mese} {anno}</h4>
                 <p className="text-xs text-muted-foreground">
-                  Un allegato VII per ogni DDT, al massimo {formatKg(MAX_PER_DICHIARAZIONE_KG)} kg ciascuno.
-                  La suddivisione del ferro fra i DDT è una proposta: il totale è quello che conta per il portale.
+                  {dich.dichiarazioni} {dich.dichiarazioni === 1 ? 'dichiarazione' : 'dichiarazioni'} da caricare a portale, al massimo {formatKg(MAX_PER_DICHIARAZIONE_KG)} kg ciascuna:
+                  è il limite del portale e il conto si spezza di conseguenza.
+                  {dich.dichiarazioni_solo_ferro > 0 && ` ${dich.dichiarazioni_solo_ferro} ${dich.dichiarazioni_solo_ferro === 1 ? 'è' : 'sono'} di soli metalli.`}
+                  {' '}La suddivisione del ferro è una proposta: il totale è quello che conta.
                 </p>
               </div>
               <div className="flex gap-1">
@@ -193,6 +195,7 @@ export default function CsscIrigom({ giacenzaPortaleT, anno }) {
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 text-left">
                   <tr>
+                    <th className="px-3 py-2 font-semibold">#</th>
                     <th className="px-3 py-2 font-semibold">DDT</th>
                     <th className="px-3 py-2 font-semibold">Data</th>
                     <th className="px-3 py-2 font-semibold text-right">CSS-C</th>
@@ -202,21 +205,22 @@ export default function CsscIrigom({ giacenzaPortaleT, anno }) {
                 </thead>
                 <tbody>
                   {dich.righe.map((r, i) => (
-                    <tr key={i} className="border-t">
-                      <td className="px-3 py-2 font-mono text-xs">{r.ddt || '—'}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">{r.data.split('-').reverse().join('/')}</td>
+                    <tr key={i} className={`border-t ${r.tipo === 'ferro' ? 'bg-muted/20' : ''}`}>
+                      <td className="px-3 py-2 tabular-nums text-muted-foreground">{i + 1}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{r.ddt || <span className="font-sans text-muted-foreground">soli metalli</span>}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{r.data ? r.data.split('-').reverse().join('/') : '—'}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{formatKg(r.cssc_kg)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{formatKg(r.ferro_kg)}</td>
                       <td className="px-3 py-2 text-right tabular-nums font-medium">{formatKg(r.totale_kg)}</td>
                     </tr>
                   ))}
                   {dich.righe.length === 0 && (
-                    <tr><td colSpan={5} className="px-3 py-6 text-center text-muted-foreground text-sm">
-                      In questo mese non ci sono uscite di CSS-C della nostra commessa.
+                    <tr><td colSpan={6} className="px-3 py-6 text-center text-muted-foreground text-sm">
+                      Niente da dichiarare per questo mese.
                     </td></tr>
                   )}
                   <tr className="border-t bg-muted/30 font-semibold">
-                    <td className="px-3 py-2" colSpan={2}>Totale</td>
+                    <td className="px-3 py-2" colSpan={3}>Totale · {dich.dichiarazioni} {dich.dichiarazioni === 1 ? 'dichiarazione' : 'dichiarazioni'}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatKg(dich.cssc_kg)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatKg(dich.ferro_kg)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatKg(dich.totale_kg)}</td>

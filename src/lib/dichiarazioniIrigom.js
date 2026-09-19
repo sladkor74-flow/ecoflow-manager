@@ -16,10 +16,11 @@
 // giusto, ed e' anche quella che va ripartita con le terziarie: il ferro uscito
 // nel mese serve anche a loro, e alla dichiarazione va solo la sua quota.
 //
-// Ogni dichiarazione - un allegato VII per ogni DDT - non puo' portare piu' di
-// 38.000 kg di PFU, quindi con 25.000 kg di CSS-C restano al massimo 13.000 kg
-// di ferro per DDT. Se il ferro da dichiarare non ci sta, la differenza va su
-// una dichiarazione a parte e il gestionale lo dice invece di sforare.
+// Il portale Ecotyre non accetta una dichiarazione di piu' di 38.000 kg: e' un
+// limite suo, e ci si adatta. Ogni DDT di CSS-C porta quindi al massimo 13.000
+// kg di ferro oltre ai suoi 25.000, e il ferro che avanza va in altre
+// dichiarazioni di soli metalli, da 38.000 kg l'una finche' basta. Il numero di
+// dichiarazioni non e' un problema: quello che deve tornare e' il totale.
 //
 // Specchio del backend: base44/shared/dichiarazioniIrigom.ts.
 
@@ -59,7 +60,7 @@ export function componiDichiarazione(daDichiarareKg, ddt, opzioni = {}) {
   const ferroServe = daDichiarare - cssc;
   const avvisi = [];
 
-  // Quanto ferro puo' stare in tutto, rispettando il limite di ogni allegato.
+  // Quanto ferro puo' stare nei DDT di CSS-C, rispettando il limite del portale.
   const capienza = righe.reduce((s, r) => s + Math.max(0, maxTot - r.cssc_kg), 0);
   let ferroDaMettere = Math.max(0, Math.min(ferroServe, capienza));
 
@@ -88,19 +89,31 @@ export function componiDichiarazione(daDichiarareKg, ddt, opzioni = {}) {
     }
   }
 
+  for (const r of righe) { r.totale_kg = r.cssc_kg + r.ferro_kg; r.tipo = 'cssc'; }
+
+  // Il ferro che non entra nei DDT di CSS-C va in dichiarazioni di soli metalli,
+  // da 38.000 kg l'una: il portale non ne accetta di piu' e ci si adatta.
+  let avanza = Math.max(0, ferroServe - righe.reduce((s, r) => s + r.ferro_kg, 0));
+  let n = 0;
+  while (avanza > 0 && n < 200) {
+    const kg = Math.min(maxTot, avanza);
+    righe.push({ data: '', ddt: '', cssc_kg: 0, ferro_kg: kg, totale_kg: kg, tipo: 'ferro' });
+    avanza -= kg;
+    n++;
+  }
+
   const ferroMesso = righe.reduce((s, r) => s + r.ferro_kg, 0);
-  for (const r of righe) r.totale_kg = r.cssc_kg + r.ferro_kg;
   const totale = righe.reduce((s, r) => s + r.totale_kg, 0);
+  const soloFerro = righe.filter(r => r.tipo === 'ferro').length;
 
   if (ferroServe < 0) {
     avvisi.push(`Il CSS-C uscito nel mese, ${cssc} kg, e' piu' di quello che serve dichiarare, ${daDichiarare} kg: controlla la giacenza a portale e il mese di riferimento, perche' dichiarando tutto il CSS-C si scenderebbe sotto la giacenza attesa.`);
-  } else if (ferroMesso < ferroServe) {
-    const resto = ferroServe - ferroMesso;
-    const dove = righe.length === 1 ? 'Nell\'unico DDT di CSS-C' : `Nei ${righe.length} DDT di CSS-C`;
-    avvisi.push(`${dove} non c'e' spazio per tutto il ferro: ne restano ${resto} kg da mettere su una dichiarazione a parte, perche' ogni allegato VII si ferma a ${maxTot} kg.`);
   }
-  if (!righe.length && daDichiarare > 0) {
-    avvisi.push(`Questo mese non ci sono uscite di CSS-C della nostra commessa: i ${daDichiarare} kg da dichiarare vanno tutti sulle altre dichiarazioni, ferro e nave.`);
+  if (soloFerro > 0) {
+    avvisi.push(`Il ferro non entra tutto nei DDT di CSS-C: servono altre ${soloFerro} ${soloFerro === 1 ? 'dichiarazione' : 'dichiarazioni'} di soli metalli, perche' il portale non accetta piu' di ${maxTot} kg per dichiarazione.`);
+  }
+  if (!ddt.length && daDichiarare > 0) {
+    avvisi.push('Questo mese non ci sono uscite di CSS-C della nostra commessa: si dichiarano soltanto metalli.');
   }
 
   return {
@@ -108,7 +121,8 @@ export function componiDichiarazione(daDichiarareKg, ddt, opzioni = {}) {
     cssc_kg: cssc,
     ferro_kg: ferroMesso,
     ferro_necessario_kg: Math.max(0, ferroServe),
-    ferro_non_collocato_kg: Math.max(0, ferroServe - ferroMesso),
+    dichiarazioni: righe.length,
+    dichiarazioni_solo_ferro: soloFerro,
     totale_kg: totale,
     da_dichiarare_kg: daDichiarare,
     differenza_kg: totale - daDichiarare,
