@@ -45,6 +45,29 @@ const CERTEZZA = {
 };
 
 const leggiFonti = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+
+// Come si chiamano, in italiano, i posti dove EcoTyna va a prendere i numeri.
+const ETICHETTE_STRUMENTO = {
+  panoramica_commessa: 'Riepilogo della commessa',
+  raccolto: 'Raccolto per canale',
+  target_raccoglitori: 'Target & Status',
+  report_mensile: 'Report Mensile',
+  settimana_formulari: 'Formulari della settimana',
+  cerca_movimento: 'Ricerca di un formulario',
+  proiezione_secondarie: 'Predittività Secondarie',
+  alert_aperti: 'Alert & Controllo',
+  richieste_ect: 'Richieste ECT',
+  caricamenti: 'Ultimi caricamenti',
+  giacenze: 'Giacenze',
+  dichiarazioni_impianti: 'Dichiarazioni Impianti',
+  omologhe: 'Omologhe',
+  dichiarazioni_rentri: 'Dichiarazioni RENTRI',
+  punti_di_raccolta: 'Anagrafica PDR',
+  qualifica_fornitori: 'Qualifica Fornitori',
+  fatturazione: 'Fatturazione',
+  tariffe: 'Tariffe',
+};
+const giornoIt = (v) => { const d = String(v || '').slice(0, 10); return d ? d.split('-').reverse().join('/') : ''; };
 const oggi = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
 const areaPredefinita = (d) => (d.ambito === 'operativa' ? 'gestionale' : d.ambito === 'esercitazione' ? 'albo' : 'tua');
 
@@ -153,6 +176,8 @@ function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica }) {
   const certezza = CERTEZZA[d.certezza];
   const allegati = leggiFonti(d.allegati_json);
   const salvati = leggiFonti(d.file_generati_json);
+  const strumenti = leggiFonti(d.strumenti_json);
+  const mancanti = leggiFonti(d.dati_mancanti_json);
   const file = fileRecenti && fileRecenti.length ? fileRecenti : salvati;
   return (
     <div className="space-y-2">
@@ -208,6 +233,31 @@ function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica }) {
                     {f.titolo && f.riferimento ? ` — ${f.riferimento}` : ''}
                     {f.verificato_il ? ` (verificata il ${f.verificato_il})` : ''}
                   </p>
+                ))}
+              </div>
+            )}
+            {strumenti.length > 0 && (
+              <details className="text-xs text-muted-foreground border-t pt-2">
+                <summary className="font-medium flex items-center gap-1 cursor-pointer select-none hover:text-foreground">
+                  <Database className="w-3 h-3" /> Dove ho guardato ({strumenti.length})
+                </summary>
+                <div className="mt-1 space-y-0.5 pl-4">
+                  {strumenti.map((s, i) => (
+                    <p key={i} className={s.errore ? 'text-amber-700' : ''}>
+                      <span className="font-medium">{ETICHETTE_STRUMENTO[s.strumento] || s.strumento}</span>
+                      {s.errore
+                        ? ` — non sono riuscita a leggerlo: ${s.errore}`
+                        : `${s.periodo ? ` — ${s.periodo}` : ''}${s.dati_al ? `, dati al ${giornoIt(s.dati_al)}` : ''}`}
+                    </p>
+                  ))}
+                </div>
+              </details>
+            )}
+            {mancanti.length > 0 && (
+              <div className="text-xs border-t pt-2 space-y-0.5">
+                <p className="font-medium flex items-center gap-1 text-amber-700"><AlertTriangle className="w-3 h-3" /> Quello che non ho</p>
+                {mancanti.map((m, i) => (
+                  <p key={i} className="text-muted-foreground pl-4">{m.cosa}{m.dove_trovarlo ? ` — lo trovi in ${m.dove_trovarlo}` : ''}</p>
                 ))}
               </div>
             )}

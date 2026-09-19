@@ -66,6 +66,14 @@
       "type": "string",
       "description": "File allegati alla domanda: nome, tipo, dimensione e un estratto del contenuto per le domande successive (i file non si conservano)"
     },
+    "strumenti_json": {
+      "type": "string",
+      "description": "Strumenti del gestionale interrogati per rispondere: [{ strumento, parametri, fonte, periodo, dati_al, errore }]"
+    },
+    "dati_mancanti_json": {
+      "type": "string",
+      "description": "Dati che EcoTyna non ha trovato: [{ cosa, dove_trovarlo }]"
+    },
     "file_generati_json": {
       "type": "string",
       "description": "Descrizione dei file preparati da EcoTyna (formato, fogli o testo, operazioni): il file si genera nel browser quando lo si scarica"

@@ -4,6 +4,8 @@ import {
   proponiNovita, proponiPrecisazioni, scartaSuperate,
 } from "../../shared/baseConoscenza.ts";
 import { analizzaDomanda, situazioneGestionale } from "../../shared/assistente.ts";
+import { catalogoStrumenti, eseguiStrumento } from "../../shared/strumentiAssistente.ts";
+import { SCHEMA_PIANO, istruzioniPiano, testoDati } from "../../shared/pianoAssistente.ts";
 import { materialePertinente } from "../../shared/materialeCorso.ts";
 import { oggiRoma } from "../../shared/qualificaFornitori.ts";
 import {
@@ -33,6 +35,19 @@ const SCHEMA_RISPOSTA = {
           riferimento: { type: 'string' },
           url: { type: 'string' },
           verificato_il: { type: 'string' },
+          tipo: { type: 'string', enum: ['norma', 'gestionale'] },
+          strumento: { type: 'string' },
+          periodo: { type: 'string' },
+        },
+      },
+    },
+    dati_mancanti: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          cosa: { type: 'string' },
+          dove_trovarlo: { type: 'string' },
         },
       },
     },
@@ -132,9 +147,29 @@ export default async function(req) {
     const ultimiAllegati = [...precedenti].reverse().map(p => { try { return JSON.parse(p.allegati_json || '[]'); } catch { return []; } }).find(l => l.some(a => a.estratto));
 
     const oggi = oggiRoma();
+
+    // Per le domande sui dati si decide prima dove guardare: una chiamata che
+    // sceglie gli strumenti, poi gli strumenti si eseguono davvero. Se la scelta
+    // non riesce si torna al riepilogo generale, che e' meglio di niente.
+    let piano = null;
+    let risultati = [];
+    if (analisi.dati) {
+      try {
+        const p = comeOggetto(await base44.asServiceRole.integrations.Core.InvokeLLM({
+          prompt: istruzioniPiano(catalogoStrumenti(), domanda, oggi, precedenti.slice(-3)),
+          response_json_schema: SCHEMA_PIANO,
+        }));
+        piano = p && Array.isArray(p.strumenti) ? p : null;
+      } catch (e) {
+        piano = null;
+      }
+      const scelti = (piano && piano.strumenti.length ? piano.strumenti : [{ nome: 'panoramica_commessa', parametri: {} }]).slice(0, 5);
+      risultati = await Promise.all(scelti.map(x => eseguiStrumento(base44, x.nome, x.parametri || {})));
+    }
+
     const [approvate, dati, corso] = await Promise.all([
       vociApprovate(base44),
-      analisi.dati ? situazioneGestionale(base44, oggi).catch(e => `Dati del gestionale non disponibili: ${e.message || e}`) : Promise.resolve(''),
+      analisi.dati && !risultati.length ? situazioneGestionale(base44, oggi).catch(e => `Dati del gestionale non disponibili: ${e.message || e}`) : Promise.resolve(''),
       // Schede del corso RT pertinenti: solo per le domande sulle norme e per i quiz.
       analisi.norma ? materialePertinente(base44, quiz ? `${quiz.domanda} ${(quiz.risposte || []).join(' ')}` : domanda).catch(() => ({ testo: '', fonti: [] })) : Promise.resolve({ testo: '', fonti: [] }),
     ]);
@@ -157,7 +192,9 @@ export default async function(req) {
       'REGOLE',
       `1. Parti dalla base di conoscenza qui sotto, verificata alla data indicata voce per voce. Per le domande sulle norme controlla online sulle fonti ufficiali (${FONTI_UFFICIALI.join('; ')}) se ci sono novita' successive alla data della voce: se ne trovi una certa, applicala, dillo chiaramente nella risposta e riportala in novita_normative con voce_id della voce da aggiornare (vuoto se serve una voce nuova), data_norma (AAAA-MM-GG), fonte e testo_proposto, che deve essere il testo COMPLETO della voce aggiornata, conservando tutto cio' che resta valido. In novita_normative vanno solo norme nuove: mai riassunti, consigli, lettere o norme gia' citate nella voce.`,
       '2. Ogni affermazione normativa deve avere una fonte precisa in fonti (norma e articolo, delibera, FAQ o sentenza) con la data di verifica. Non inventare numeri di articolo, date, importi o scadenze: se non sei sicuro dillo e spiega come verificarlo.',
-      '3. Per le domande sui dati usa solo i DATI DEL GESTIONALE forniti. Se un dato manca dillo e indica in quale sezione del gestionale trovarlo (Target & Status, Assegnati, Verifiche, Giacenze, Omologhe, Dichiarazioni RENTRI, Qualifica Fornitori, Fatturazione). Non inventare numeri.',
+      '3. Per le domande sui dati usa solo i DATI DEL GESTIONALE forniti. Ogni numero che scrivi deve venire da li\', e accanto va detto da dove: lo strumento, il periodo e la data del dato. Se un dato manca dillo apertamente, mettilo in dati_mancanti con la sezione del gestionale dove si trova (Target & Status, Assegnati, Verifiche, Giacenze, Omologhe, Dichiarazioni RENTRI, Qualifica Fornitori, Fatturazione, Predittivita Secondarie, To-Do List) e non stimarlo: una risposta che dice "questo non ce l\'ho" e\' utile, una che tira a indovinare no.',
+      '3-ter. Rete, ACI ed extra raccolta sono commesse indipendenti: non sommarle mai in un unico numero e di\' sempre di quale canale stai parlando. I target sono solo della rete.',
+      '3-quater. In fonti metti le norme e i documenti: i moduli del gestionale che hai interrogato sono gia\' registrati sotto la risposta, non ripeterli. Quando la risposta e\' un elenco lungo, chiudi offrendo di prepararlo in Excel o in PDF: il file si crea solo se l\'utente lo chiede.',
       '3-bis. Se nella domanda o nella conversazione l\'utente corregge una tua risposta o afferma una regola ("non e\' cosi\'", "da noi si fa cosi\'", "il decreto dice che..."), tienine conto subito nella risposta e riportala in precisazioni_utente: tipo regola_interna se e\' una regola dell\'azienda, faq se chiarisce come si applica una norma; testo chiaro e autosufficiente. Diventera\' una proposta da approvare. Mai per una semplice domanda e mai per cio\' che la base di conoscenza dice gia\': in quei casi precisazioni_utente resta vuoto. Se contrasta con una norma verificata, spiegalo con garbo citando la fonte.',
       '4. Le voci dell\'area gestionale sono regole della direzione SMOCO: applicale. Distingui sempre gli obblighi di legge dalle regole interne e dalla prassi.',
       '5. Scrivi in italiano semplice e pratico, in markdown. Prima la risposta in una o due frasi, poi i dettagli utili; elenchi solo se aiutano; niente formule di cortesia ne\' ripetizioni della domanda.',
@@ -184,7 +221,7 @@ export default async function(req) {
       ...(storia ? ['', 'CONVERSAZIONE PRECEDENTE', storia] : []),
       ...(!allegati.length && ultimiAllegati ? ['', 'FILE ALLEGATI IN PRECEDENZA IN QUESTA CONVERSAZIONE (estratto)', ultimiAllegati.map(a => `[${a.rif || ''}] ${a.nome}\n${a.estratto || ''}`).join('\n\n')] : []),
       ...(allegati.length ? ['', 'ALLEGATI (file inviati con questa domanda)', sezioneAllegati] : []),
-      ...(dati ? ['', dati] : []),
+      ...(risultati.length ? ['', testoDati(risultati)] : (dati ? ['', dati] : [])),
       '',
       'DOMANDA',
       domanda,
@@ -210,6 +247,8 @@ export default async function(req) {
       risposta: String(esito.risposta || 'Non sono riuscito a formulare una risposta: riprova riformulando la domanda.'),
       fonti_json: JSON.stringify(fonti),
       certezza,
+      strumenti_json: risultati.length ? JSON.stringify(risultati.map(r => ({ strumento: r.strumento, parametri: r.parametri, fonte: r.fonte, periodo: r.periodo, dati_al: r.dati_al, errore: r.errore || '' }))) : undefined,
+      dati_mancanti_json: Array.isArray(esito.dati_mancanti) && esito.dati_mancanti.length ? JSON.stringify(esito.dati_mancanti) : undefined,
       allegati_json: allegati.length ? JSON.stringify(allegatiSalvati) : '',
       file_generati_json: fileGenerati.length ? (fileJson.length <= 300000 ? fileJson : JSON.stringify(fileGenerati.map(f => ({ ...f, fogli: undefined, testo: undefined, non_conservato: true })))) : '',
       stato: 'completata',
