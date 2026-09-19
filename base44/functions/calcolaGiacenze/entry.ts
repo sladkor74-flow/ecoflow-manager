@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { annoRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
@@ -82,10 +83,10 @@ export default async function(req) {
 
     // --- Filtri temporali per movimentazione ---
     function isTerminato(r) { return String(r.stato || '').trim().toLowerCase() === 'terminato'; }
+    // L'anno e' quello del giorno italiano: un trasporto finito alle 23 del 31
+    // dicembre appartiene all'anno che si chiude, non a quello che comincia.
     function inYear(dateField) {
-      if (!dateField) return false;
-      const d = new Date(dateField);
-      return !isNaN(d.getTime()) && d.getFullYear() === annoNum;
+      return annoRoma(dateField) === annoNum;
     }
 
     // === 0a. NOMI DEI SITI DA MOSTRARE ===

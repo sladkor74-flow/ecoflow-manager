@@ -1,4 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { dataPeriodo } from "../../shared/dataEnrichment.ts";
+import { annoRoma, meseRoma } from "../../shared/giornoItaliano.ts";
 import { matchesFilter } from "../../shared/multiFilter.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 
@@ -24,17 +26,14 @@ export default async function(req) {
     ]);
 
     const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+    // Il periodo di un movimento e' la fine del trasporto, letta sul giorno
+    // italiano.
     function getMese(r) {
-      const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
-      if (!d) return null;
-      const dt = new Date(d);
-      return isNaN(dt.getTime()) ? null : MESI[dt.getMonth()];
+      const m = meseRoma(dataPeriodo(r));
+      return m < 0 ? null : MESI[m];
     }
     function getAnno(r) {
-      const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
-      if (!d) return null;
-      const dt = new Date(d);
-      return isNaN(dt.getTime()) ? null : dt.getFullYear();
+      return annoRoma(dataPeriodo(r));
     }
 
     // --- INPUT (ingressi in impianto) ---
