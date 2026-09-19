@@ -71,6 +71,14 @@ nessun modulo, nemmeno come totale di controllo o come conteggio di formulari, e
 anche quando un viaggio di secondaria porta formulari di piu' canali. I target
 esistono solo per la rete.
 
+**Un movimento si fattura in un canale solo.** Un record dell'extra raccolta non
+deve comparire fra gli impianti del giro RETE: ci compariva, e la stessa riga di
+trattamento si pagava due volte, una per scheda. Quando un viaggio di secondaria
+porta insieme formulari di rete e formulari ACI, l'importo si paga una volta
+sola - a tonnellata si divide per canale, a viaggio si addebita alla rete se c'e'
+almeno un formulario di rete - e le tonnellate mostrate sono quelle del canale
+che si sta guardando, mai la somma dei due.
+
 ### Pesi
 
 Le valutazioni si fanno sul peso effettivo (`peso_effettivo`), mai sullo stimato.

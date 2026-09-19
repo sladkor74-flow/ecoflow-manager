@@ -45,6 +45,32 @@ function sortPerClasse(arr) {
   return arr.sort((a, b) => (isEmpty(b.classe_materiale) ? 0 : 1) - (isEmpty(a.classe_materiale) ? 0 : 1));
 }
 
+// Nell'extra raccolta il prezzo non viene da una tariffa di contratto: sta
+// scritto sull'intervento, riga per riga, perche' ogni intervento fa storia a
+// se' - un ritiro straordinario puo' avere il suo prezzo di raccolta, di
+// stoccaggio, di trattamento, piu' la pulizia e gli oneri. Il modulo Extra
+// Raccolta somma quei campi, e la fatturazione passiva deve arrivare allo stesso
+// numero: prima applicava le tariffe della rete e il 14 aprile perdeva per
+// strada 36,00 euro di raccolta su 400 kg.
+const CAMPO_COSTO = {
+  RACCOLTA: 'costo_raccolta_t',
+  TRATTAMENTO: 'costo_trattamento_t',
+  CONFERIMENTO_STOCCAGGIO: 'costo_stoccaggio_t',
+};
+function tariffaDallIntervento(record, prestazione) {
+  const valore = Number(record[CAMPO_COSTO[prestazione]] || 0);
+  return {
+    // il valore entra nella chiave: due interventi dello stesso fornitore
+    // possono avere prezzi diversi e non vanno fusi in una riga sola
+    id: `intervento|${prestazione}|${valore}`,
+    prestazione,
+    unita_misura: '€/t',
+    valore,
+    criterio: 'intervento',
+    da_intervento: true,
+  };
+}
+
 // ─── Ricerca tariffe ───
 
 // RACCOLTA: gerarchia destinazione > provincia > regione > generica
@@ -328,9 +354,28 @@ export default async function(req) {
       const viaggioKey = `${dataFine}|${automezzo}`;
       const interno = isInterno(trasportatore);
 
-      const tariffa = findTariffaRaccolta(tariffe, trasKey, provincia, regione, destinazione, classe, tipologia, dataIso);
+      const tariffa = tipologia === 'EXTRA_RACCOLTA'
+        ? tariffaDallIntervento(r, 'RACCOLTA')
+        : findTariffaRaccolta(tariffe, trasKey, provincia, regione, destinazione, classe, tipologia, dataIso);
       const tk = tariffa ? tariffa.id : '__NESSUNA__';
       const um = tariffa ? tariffa.unita_misura : '';
+
+      // Un intervento a zero puo' essere giusto (SMOCO raccoglie da se'), ma se
+      // il contratto un prezzo lo prevede, il campo e' rimasto vuoto per
+      // dimenticanza e la raccolta finirebbe non pagata.
+      if (tipologia === 'EXTRA_RACCOLTA' && !interno && tariffa.valore === 0) {
+        const daContratto = findTariffaRaccolta(tariffe, trasKey, provincia, regione, destinazione, classe, tipologia, dataIso);
+        if (daContratto && Number(daContratto.valore) > 0) {
+          anomalie.push({
+            descrizione: `Extra raccolta: sull'intervento il costo di raccolta e' zero, ma per ${trasportatore} il contratto prevede ${daContratto.valore} ${daContratto.unita_misura}. Se va pagato, scrivilo sull'intervento.`,
+            fornitore: trasportatore,
+            prestazione: 'RACCOLTA',
+            classe: classe || '—',
+            ambito: `FIR ${r.numero_fir || '—'}`,
+            tonnellate: round3(peso / 1000),
+          });
+        }
+      }
 
       if (!tariffa && !interno) {
         anomalie.push({
@@ -504,7 +549,25 @@ export default async function(req) {
 
       const tariffa = compresoNellaRaccolta
         ? null
-        : findTariffaImpianto(tariffe, destKey, prestazione, classe, provenienza, tipologia, dataIso);
+        : provenienza === 'extra'
+          ? tariffaDallIntervento(r, prestazione)
+          : findTariffaImpianto(tariffe, destKey, prestazione, classe, provenienza, tipologia, dataIso);
+
+      // Stesso discorso per chi tratta o stocca un intervento di extra raccolta:
+      // se il campo e' vuoto ma il contratto un prezzo lo prevede, si segnala.
+      if (provenienza === 'extra' && !interno && tariffa && tariffa.valore === 0) {
+        const daContratto = findTariffaImpianto(tariffe, destKey, prestazione, classe, provenienza, tipologia, dataIso);
+        if (daContratto && Number(daContratto.valore) > 0) {
+          anomalie.push({
+            descrizione: `Extra raccolta: sull'intervento il costo di ${prestazione === 'TRATTAMENTO' ? 'trattamento' : 'stoccaggio'} e' zero, ma per ${destinazione} il contratto prevede ${daContratto.valore} ${daContratto.unita_misura}. Se va pagato, scrivilo sull'intervento.`,
+            fornitore: destinazione,
+            prestazione,
+            classe: classe || '—',
+            ambito: `FIR ${r.numero_fir || '—'}`,
+            tonnellate: round3(peso / 1000),
+          });
+        }
+      }
       const tk = compresoNellaRaccolta ? '__COMPRESO__' : (tariffa ? tariffa.id : '__NESSUNA__');
       const um = tariffa ? tariffa.unita_misura : '';
 
@@ -607,6 +670,42 @@ export default async function(req) {
     const impianti_stoccaggi = Array.from(impByForn.values()).map(f => ({
       ...f, totale_tonnellate: round3(f.totale_tonnellate), totale_euro: round2(f.totale_euro),
     })).sort((a, b) => b.totale_euro - a.totale_euro);
+
+    // La pulizia e gli oneri aggiuntivi di un intervento sono importi fissi che
+    // non appartengono a un fornitore: il modulo Extra Raccolta li somma nel
+    // costo dell'intervento, qui non si possono mettere in fattura a nessuno. Si
+    // dichiarano, cosi' il totale della passiva non sembra sbagliato a chi
+    // confronta i due moduli.
+    if (tipologia === 'EXTRA_RACCOLTA') {
+      // Un intervento marcato come secondaria e' un trasferimento da uno
+      // stoccaggio a un impianto, non una raccolta: finirebbe fra i raccoglitori
+      // col nome del trasportatore e col costo di raccolta dell'intervento.
+      // Finche' l'extra raccolta non avra' un campo per il costo del trasporto,
+      // il gestionale lo dice invece di far finta di niente.
+      for (const rec of extraRaccoltaF) {
+        if (String(rec.tipo_movimento || 'primaria').toLowerCase().trim() !== 'secondaria') continue;
+        anomalie.push({
+          descrizione: `Extra raccolta: l'intervento ${rec.numero_fir || '—'} e' un trasferimento da ${rec.stoccaggio || '—'} a ${rec.destinazione || '—'}, ma viene conteggiato come raccolta di ${rec.trasportatore || '—'}. Il trasporto di una secondaria di extra raccolta va verificato a mano.`,
+          fornitore: rec.trasportatore || '—',
+          prestazione: 'TRASPORTO_SECONDARIA',
+          classe: String(rec.classe || '—'),
+          ambito: `FIR ${rec.numero_fir || '—'}`,
+          tonnellate: round3(Number(rec.peso_effettivo || 0) / 1000),
+        });
+      }
+      for (const rec of extraRaccoltaF) {
+        const fissi = Number(rec.costo_pulizia || 0) + Number(rec.costi_aggiuntivi || 0);
+        if (fissi <= 0) continue;
+        anomalie.push({
+          descrizione: `Extra raccolta: l'intervento ${rec.numero_fir || '—'} ha ${round2(fissi)} euro di oneri fissi (pulizia e costi aggiuntivi) che il modulo Extra Raccolta conta nel costo ma qui non sono attribuiti a nessun fornitore. ${rec.note_costi || ''}`.trim(),
+          fornitore: rec.destinazione || '—',
+          prestazione: 'ONERI INTERVENTO',
+          classe: String(rec.classe || '—'),
+          ambito: `FIR ${rec.numero_fir || '—'}`,
+          tonnellate: 0,
+        });
+      }
+    }
 
     // ─── BLOCCO 3: TRASPORTO SECONDARIE (TRASPORTO_SECONDARIA) ───
     // Raggruppa per tratta: stoccaggio (produttore), trasportatore, destinazione (destinatario)
