@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { quoteDaStoccaggio } from "../../shared/rotteConferimenti.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
 
@@ -131,6 +132,22 @@ export default async function(req) {
 
     const result = [];
     const anomalie = [];
+
+    // Uno stoccaggio che spedisce a piu' impianti ha un target di raccolta solo,
+    // e quel target non puo' comparire per intero sotto ciascuno: Nappi Sud, con
+    // 2.100 t di target, risultava avere 2.100 t di residuo sotto Irigom e altre
+    // 2.100 sotto Tecnogum, cioe' il doppio di quello che deve raccogliere. Si
+    // divide fra gli impianti in proporzione alle secondarie che ciascuno riceve
+    // da lui, che e' il criterio deciso dalla direzione il 19/09/2026.
+    const quotaTargetPerImpianto = new Map(); // "stoccaggio|impianto" -> quota
+    const nomiStoccaggio = [...new Set(sec2026.map(r => String(r.stoccaggio || '').trim()).filter(Boolean))];
+    for (const nome of nomiStoccaggio) {
+      const q = quoteDaStoccaggio(sec2026, nome);
+      if (q.impianti.length < 2) continue;
+      for (const imp of q.impianti) {
+        quotaTargetPerImpianto.set(normalizzaRagioneSociale(nome) + '|' + normalizzaRagioneSociale(imp.impianto), imp.quota);
+      }
+    }
     const creates = [];
     const updates = [];
     const stoccaggiResult = [];
@@ -238,7 +255,11 @@ export default async function(req) {
           });
         }
         const isStoccaggio = fRuolo === 'stoccaggio' || fRuolo === 'doppio_ruolo';
-        const targetRaccoglitoreKg = targetByNome[fNorm] || 0;
+        // Il target di un fornitore che alimenta piu' impianti si divide fra
+        // loro: quello che gli appartiene una volta sola non si conta due volte.
+        const targetPieno = targetByNome[fNorm] || 0;
+        const quotaTarget = quotaTargetPerImpianto.get(fNorm + '|' + impNorm);
+        const targetRaccoglitoreKg = quotaTarget != null ? Math.round(targetPieno * quotaTarget) : targetPieno;
 
         let consuntivo = 0, consuntivoPrim = 0, consuntivoSec = 0;
         let residuo = 0, PREV = 0, viaggiPerSett = 0;
@@ -346,6 +367,11 @@ export default async function(req) {
         const fr = {
           id: f.id, nome: f.nome, ruolo: fRuolo, tipo: isStoccaggio ? 'stoccaggio' : 'primaria_diretta',
           target_raccoglitore_kg: targetRaccoglitoreKg,
+          ...(quotaTarget != null ? {
+            target_raccoglitore_intero_kg: targetPieno,
+            quota_target: Math.round(quotaTarget * 1000) / 1000,
+            nota_quota: `${f.nome} alimenta piu' di un impianto: del suo target di raccolta, ${Math.round(targetPieno / 1000)} t, a questo impianto ne compete il ${Math.round(quotaTarget * 100)}%, in proporzione alle secondarie che riceve.`,
+          } : {}),
           quota_target_deprecato: f.quota_target || 0,
           ipotesi_mese_corrente: f.ipotesi_mese_corrente || 0,
           consuntivo, consuntivo_primarie: consuntivoPrim, consuntivo_secondarie: consuntivoSec,

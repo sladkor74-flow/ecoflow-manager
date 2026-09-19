@@ -365,6 +365,43 @@ export const STRUMENTI = [
     },
   },
   {
+    nome: 'rotte_conferimenti',
+    descrizione: 'Chi conferisce dove: le rotte della commessa lette dai movimenti dell\'anno, e i formulari che sembrano chiusi sulla destinazione sbagliata. Un raccoglitore conferisce dove ha il proprio impianto o dove ha l\'accordo di stoccare; nelle secondarie l\'origine e\' lo stoccaggio, che per quel viaggio e\' il produttore.',
+    parametri: { anno: 'numero', origine: 'raccoglitore o stoccaggio, opzionale', solo_sospetti: 'vero per avere solo i conferimenti fuori rotta' },
+    moduli: ['Alert & Controllo', 'Verifiche'],
+    async esegui(base44, p) {
+      const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
+      const res = await base44.functions.invoke('controlloRotte', { anno });
+      const d = (res && res.data) || res || {};
+      const k = p.origine ? normalizzaRagioneSociale(p.origine) : '';
+      const flussi = (d.flussi || []).map(f2 => ({
+        flusso: f2.nome,
+        movimenti: f2.movimenti,
+        rotte: (f2.rotte || [])
+          .filter(o => !k || normalizzaRagioneSociale(o.origine).includes(k))
+          .map(o => ({
+            origine: o.origine,
+            ruolo: o.ruolo,
+            viaggi: o.totale_viaggi,
+            tonnellate: t3(o.totale_kg),
+            conferisce_a: (o.destinazioni || []).map(dd => `${dd.destinazione}: ${dd.viaggi} viaggi, ${t3(dd.kg)} t${dd.sospetta ? ' (FUORI ROTTA)' : ''}`),
+          })),
+        sospetti: (f2.sospetti || []).filter(x => !k || normalizzaRagioneSociale(x.origine).includes(k)),
+      }));
+      return {
+        fonte: 'Rotte dei conferimenti',
+        periodo: `anno ${anno}`,
+        dati_al: oggiRoma(),
+        dati: {
+          sospetti_totali: flussi.reduce((n, f2) => n + f2.sospetti.length, 0),
+          flussi: p.solo_sospetti ? flussi.map(f2 => ({ flusso: f2.flusso, sospetti: f2.sospetti })) : flussi,
+          stoccaggi_condivisi: d.stoccaggi_condivisi,
+          nota: "Le rotte si leggono dalla storia dell'anno: quello che un'origine fa quasi sempre e' la sua rotta, quello che fa una volta sola contro centinaia di viaggi e' quasi sempre un formulario chiuso male. Chi ha due rotte vere, con numeri consistenti, non viene segnalato.",
+        },
+      };
+    },
+  },
+  {
     nome: 'alert_aperti',
     descrizione: 'Gli alert aperti del gestionale, per modulo e gravita\'.',
     parametri: { modulo: 'opzionale' },

@@ -76,3 +76,31 @@ esistono solo per la rete.
 Le valutazioni si fanno sul peso effettivo (`peso_effettivo`), mai sullo stimato.
 Tonnellate con due decimali, tre se i kg non sono tondi; kg sempre interi;
 ovunque, export compresi.
+
+### Chi conferisce dove
+
+Un movimento non va da chiunque a chiunque. Nelle primarie il raccoglitore
+conferisce dove ha il proprio impianto o dove ha l'accordo di stoccare: Green
+Tyre Project conferisce a Green Tyre Project, Nappi Sud raccoglie e stocca a
+Nappi Sud, Ecorecuperi porta a Tecnogum. Qualcuno ha due rotte vere - C.L.
+Service stocca sia a Nappi Sud sia a T-Cycle - ma sono entrambe consistenti; un
+viaggio solo verso un impianto dove quell'origine non va mai e' quasi sempre un
+formulario chiuso male, e va segnalato. Il controllo sta in
+`base44/shared/rotteConferimenti.ts`, legge le rotte dalla storia dell'anno e
+non ha bisogno che nessuno le scriva a mano.
+
+**Nappi Sud e' raccoglitore e stoccaggio insieme**, ed e' la distinzione che fa
+sbagliare i moduli:
+
+- come **raccoglitore** ritira dai punti di raccolta con un target suo e porta
+  in primaria al proprio piazzale (`Nappi Sud -> NAPPI SUD`). Altri raccoglitori
+  possono stoccare li', per esempio C.L. Service;
+- come **stoccaggio** e' il **produttore** delle secondarie che partono dal suo
+  piazzale verso Irigom e Tecnogum. In quei viaggi non e' un raccoglitore: e'
+  l'origine del rifiuto.
+
+Ne discendono due cose. Il suo consuntivo verso un impianto sono le **secondarie**
+che gli spedisce, non le primarie, che porta a se stesso. E il suo target di
+raccolta e' uno solo: fra gli impianti si divide **in proporzione alle secondarie
+che ciascuno riceve da lui**, altrimenti compare intero sotto entrambi e il
+residuo risulta il doppio di quello vero.

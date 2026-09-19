@@ -66,6 +66,7 @@ const ETICHETTE_STRUMENTO = {
   qualifica_fornitori: 'Qualifica Fornitori',
   fatturazione: 'Fatturazione',
   tariffe: 'Tariffe',
+  rotte_conferimenti: 'Rotte dei conferimenti',
 };
 const giornoIt = (v) => { const d = String(v || '').slice(0, 10); return d ? d.split('-').reverse().join('/') : ''; };
 const oggi = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());

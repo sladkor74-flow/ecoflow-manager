@@ -1,0 +1,74 @@
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { fetchAll } from "../../shared/fetchAll.ts";
+import { eAci } from "../../shared/canaleSecondaria.ts";
+import { rotte, conferimentiSospetti, quoteDaStoccaggio } from "../../shared/rotteConferimenti.ts";
+import { annoRoma } from "../../shared/giornoItaliano.ts";
+
+// Chi conferisce dove, e i formulari che sembrano chiusi sulla destinazione
+// sbagliata.
+//
+// Le rotte si leggono dalla storia dell'anno, archivio per archivio, tenendo i
+// canali separati: le secondarie di rete e quelle ACI hanno rotte diverse e non
+// vanno confrontate fra loro.
+//
+// Payload: { anno }
+
+export default async function(req) {
+  try {
+    const base44 = createClientFromRequest(req);
+    const user = await base44.auth.me();
+    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const body = await req.json().catch(() => ({}));
+    const anno = Number(body.anno) || new Date().getUTCFullYear();
+    const svc = base44.asServiceRole.entities;
+
+    const terminato = (r) => String(r.stato || '').toLowerCase().trim() === 'terminato';
+    const dellAnno = (r) => terminato(r) && annoRoma(r.trasporto_finito_il) === anno;
+
+    const [rete, aciPrim, secondarie, extra, terziarie] = await Promise.all([
+      fetchAll(svc.PrimariaRete, { stato: 'terminato' }),
+      fetchAll(svc.PrimariaAci, { stato: 'terminato' }),
+      fetchAll(svc.Secondaria, { stato: 'terminato' }),
+      fetchAll(svc.ExtraRaccolta, { stato: 'terminato' }),
+      fetchAll(svc.Terziaria, { stato: 'terminato' }),
+    ]);
+
+    const secAnno = secondarie.filter(dellAnno);
+    const flussi = [
+      { chiave: 'primarie_rete', nome: 'Primarie di rete', archivio: 'PrimariaRete', righe: rete.filter(dellAnno) },
+      { chiave: 'primarie_aci', nome: 'Primarie ACI', archivio: 'PrimariaAci', righe: aciPrim.filter(dellAnno) },
+      { chiave: 'secondarie_rete', nome: 'Secondarie di rete', archivio: 'Secondaria', righe: secAnno.filter(r => !eAci(r)) },
+      { chiave: 'secondarie_aci', nome: 'Secondarie ACI', archivio: 'Secondaria', righe: secAnno.filter(eAci) },
+      { chiave: 'extra_raccolta', nome: 'Extra raccolta', archivio: 'ExtraRaccolta', righe: extra.filter(dellAnno).filter(r => String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'secondaria') },
+      { chiave: 'terziarie', nome: 'Terziarie', archivio: 'Terziaria', righe: terziarie.filter(dellAnno) },
+    ];
+
+    const senzaRighe = (d) => ({ ...d, righe: undefined });
+    const risultato = flussi.map(f => ({
+      flusso: f.chiave,
+      nome: f.nome,
+      movimenti: f.righe.length,
+      rotte: rotte(f.righe, f.archivio).map(o => ({ ...o, destinazioni: o.destinazioni.map(senzaRighe) })),
+      sospetti: conferimentiSospetti(f.righe, f.archivio),
+    }));
+
+    // Gli stoccaggi che alimentano piu' di un impianto: quello che gli
+    // appartiene una volta sola - il target di raccolta - si divide fra gli
+    // impianti in proporzione alle secondarie che ciascuno riceve.
+    const secRete = secAnno.filter(r => !eAci(r));
+    const nomiStoccaggio = [...new Set(secRete.map(r => String(r.stoccaggio || '').trim()).filter(Boolean))];
+    const condivisi = nomiStoccaggio
+      .map(nome => quoteDaStoccaggio(secRete, nome))
+      .filter(q => q.impianti.length > 1);
+
+    return Response.json({
+      anno,
+      flussi: risultato,
+      sospetti_totali: risultato.reduce((s, f) => s + f.sospetti.length, 0),
+      stoccaggi_condivisi: condivisi,
+    });
+  } catch (error) {
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+}

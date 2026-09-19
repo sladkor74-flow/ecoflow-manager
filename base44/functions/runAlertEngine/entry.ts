@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetrics } from "../../shared/primarieReteAnalytics.ts";
+import { conferimentiSospetti } from "../../shared/rotteConferimenti.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { canaleDi } from "../../shared/canaleSecondaria.ts";
@@ -113,12 +114,16 @@ export default async function(req) {
       }
     }
 
-    // --- Controlli aggregati per primarie_rete (province inattive + mix classi) ---
+    // --- Controlli aggregati ---
+    // Le rotte si controllano su tutti i moduli: vale per le primarie come per
+    // le secondarie, dove l'origine e' lo stoccaggio che produce il viaggio.
+    // Gli altri controlli aggregati riguardano solo le primarie di rete.
     if (modulo === 'primarie_rete') {
       // Target dell'anno in corso, sommati per raccoglitore, regione e mese.
       const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter({ anno: new Date().getFullYear() }, '-created_date', 5000));
-      const aggregateAlerts = checkAggregateRules(records, regole, existingKeys, targets, attuali);
-      newAlerts.push(...aggregateAlerts);
+      newAlerts.push(...checkAggregateRules(records, regole, existingKeys, targets, attuali));
+    } else {
+      newAlerts.push(...soloRotte(records, existingKeys, attuali, entityName, modulo));
     }
 
     // Bulk create alerts (chunk di 100)
@@ -268,9 +273,42 @@ function checkRegola(record, regola, entityName) {
   return null;
 }
 
+// I soli controlli di rotta, per i moduli che non hanno gli altri aggregati.
+function soloRotte(records, existingKeys, attuali, archivio, modulo) {
+  return checkAggregateRules(records, [], existingKeys, [], attuali, archivio, modulo);
+}
+
 // --- Controlli aggregati per primarie_rete ---
-function checkAggregateRules(records, regole, existingKeys, targets = [], attuali = new Set()) {
+function checkAggregateRules(records, regole, existingKeys, targets = [], attuali = new Set(), archivio = 'PrimariaRete', modulo = 'primarie_rete') {
   const alerts = [];
+
+  // Formulari chiusi su una destinazione dove quell'origine non va mai.
+  //
+  // Non serve una regola scritta in configurazione: e' un controllo di coerenza
+  // della commessa, non una soglia da tarare. Un raccoglitore conferisce dove ha
+  // il proprio impianto o dove ha l'accordo di stoccare, e quando un formulario
+  // si chiude sulla destinazione sbagliata il movimento finisce su un impianto
+  // che non l'ha mai visto: da li' sbagliano giacenze, dichiarazioni e
+  // fatturazione.
+  for (const sospetto of conferimentiSospetti(records, archivio)) {
+    const key = `rotta|||${sospetto.numero_fir || sospetto.id_ordine}`;
+    attuali.add(key);
+    if (existingKeys.has(key)) continue;
+    alerts.push({
+      titolo: `Conferimento fuori rotta: ${sospetto.origine} a ${sospetto.destinazione}`,
+      descrizione: `${sospetto.testo} Formulario ${sospetto.numero_fir || '(senza numero)'}`
+        + (sospetto.id_ordine ? `, ordine ${sospetto.id_ordine}` : '')
+        + `, del ${sospetto.giorno}, ${sospetto.kg} kg.`,
+      severita: 'warning',
+      modulo,
+      entity_type: archivio,
+      record_id: sospetto.numero_fir || sospetto.id_ordine || '',
+      regola_id: 'rotta_conferimento',
+      regola_nome: 'Conferimento fuori rotta',
+      stato: 'aperto',
+    });
+    existingKeys.add(key);
+  }
 
   // Regole province inattive (2 mesi consecutivi a zero)
   const regoleProvince = regole.filter(r => r.tipo_regola === 'province_inattive');
