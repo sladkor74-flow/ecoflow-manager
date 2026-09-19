@@ -84,9 +84,20 @@ export default async function(req) {
         const canale = 'RETE';
         const contratto = contratti.find(c => c.soggetto_chiave === s.chiave && c.tipo_contratto === tipo.chiave
           && (c.canale || 'RETE') === canale && Number(c.anno) === annoNum && c.stato !== 'annullato') || null;
-        const precedente = contratti.find(c => c.soggetto_chiave === s.chiave && c.tipo_contratto === tipo.chiave
-          && (c.canale || 'RETE') === canale && Number(c.anno) === annoNum - 1 && c.stato !== 'annullato') || null;
-        const modello = modelli.find(m => m.tipo_contratto === tipo.chiave && (m.canale || 'RETE') === canale) || null;
+        // Il contratto di riferimento e' l'ultimo fatto, non quello dell'anno
+        // prima per forza: se nel corso dell'anno se n'e' firmato uno nuovo -
+        // una decorrenza diversa, condizioni cambiate - vale quello, come in
+        // tutto il resto del gestionale.
+        const precedente = contratti
+          .filter(c => c.soggetto_chiave === s.chiave && c.tipo_contratto === tipo.chiave
+            && (c.canale || 'RETE') === canale && Number(c.anno) < annoNum && c.stato !== 'annullato')
+          .sort((a, b) => Number(b.anno) - Number(a.anno)
+            || String(b.data_inizio || '').localeCompare(String(a.data_inizio || ''))
+            || String(b.created_date || '').localeCompare(String(a.created_date || '')))[0] || null;
+        const modello = modelli
+          .filter(m => m.tipo_contratto === tipo.chiave && (m.canale || 'RETE') === canale)
+          .sort((a, b) => Number(b.anno_riferimento || 0) - Number(a.anno_riferimento || 0)
+            || String(b.created_date || '').localeCompare(String(a.created_date || '')))[0] || null;
 
         const impianto = impiantoPer.get(s.chiave);
         const target = tipo.chiave === 'raccolta' ? (targetPer.get(s.chiave) || null)

@@ -374,6 +374,7 @@ function GestioneModelli({ modelli, onChiudi, onSalvato }) {
           <DialogDescription>
             Un modello è il contratto Word di un anno in cui i valori che cambiano sono stati sostituiti da segnaposto fra doppie graffe,
             per esempio <code>{'{{TARGET_TON}}'}</code> o <code>{'{{CORRISPETTIVO_RACCOLTA}}'}</code>. Il resto del documento resta com&apos;è.
+            Basta un modello per tipo: parti sempre dal contratto più recente di quel tipo, che è quello più vicino al format dell&apos;azienda.
           </DialogDescription>
         </DialogHeader>
 
