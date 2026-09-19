@@ -20,6 +20,7 @@
 // che li somma non esiste.
 
 import { fetchAll } from "./fetchAll.ts";
+import { contaFormulari } from "./formulari.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { getRegioneFromProvincia } from "./dataEnrichment.ts";
 import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
@@ -107,16 +108,21 @@ const REGIONE_DI = (r) => String(r.regioni || r.regione || getRegioneFromProvinc
 
 function perChiave(righe, campo) {
   const m = new Map();
+  // I chili si sommano riga per riga, i formulari si contano per numero: un
+  // formulario chiuso su piu' ordini - sull'ACI capita per regola - resta un
+  // formulario solo.
   for (const r of righe) {
     const k = campo === 'mese' ? MESE_DA_DATA(r)
       : campo === 'regioni' ? REGIONE_DI(r)
       : String(r[campo] || 'N/D').trim();
-    if (!m.has(k)) m.set(k, { nome: k, formulari: 0, kg: 0 });
+    if (!m.has(k)) m.set(k, { nome: k, righe: [], kg: 0 });
     const x = m.get(k);
-    x.formulari++;
+    x.righe.push(r);
     x.kg += peso(r);
   }
-  return [...m.values()].map(x => ({ ...x, tonnellate: t3(x.kg) })).sort((a, b) => b.kg - a.kg);
+  return [...m.values()]
+    .map(x => ({ nome: x.nome, formulari: contaFormulari(x.righe), kg: x.kg, tonnellate: t3(x.kg) }))
+    .sort((a, b) => b.kg - a.kg);
 }
 
 // ─── il registro ───
@@ -156,7 +162,7 @@ export const STRUMENTI = [
         periodo: meseValido ? `${meseValido} ${anno}` : `anno ${anno}`,
         dati_al: oggiRoma(),
         dati: {
-          canale, formulari: righe.length, tonnellate: t3(totale),
+          canale, formulari: contaFormulari(righe), tonnellate: t3(totale),
           ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso tutto l'anno ${anno}.` } : {}),
           per: p.raggruppa || 'raccoglitore',
           dettaglio: elenco(perChiave(righe, campo), 60),

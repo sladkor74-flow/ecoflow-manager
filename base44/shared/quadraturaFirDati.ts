@@ -12,6 +12,7 @@
 
 import { fetchAll, perPagina } from "./fetchAll.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
+import { ticketDi } from "./formulari.ts";
 import { eAci } from "./canaleSecondaria.ts";
 
 export const GIORNI_FASCIA = 4;
@@ -76,11 +77,28 @@ function formulario(r) {
   return {
     fir: nome(r.numero_fir),
     ordine: nome(r.id_ordine),
+    // Il ticket distingue le quote di un formulario chiuso su piu' ordini: e'
+    // quello che rende il conto leggibile invece che sospetto.
+    ticket: ticketDi(r),
     kg: Math.round(Number(r.peso_effettivo) || 0),
     data: soloData(r.trasporto_finito_il),
     impianto: nome(r.destinazione),
     trasportatore: nome(r.trasportatore),
   };
+}
+
+// I formulari contati una volta sola. La stampa del portale elenca un
+// formulario una volta, col suo peso intero: se qui si contassero le righe, un
+// formulario chiuso su due ordini varrebbe due formulari e la quadratura non
+// tornerebbe mai. I chili invece si sommano, perche' ogni quota e' peso vero.
+function contaDistinti(formulari) {
+  const numeri = new Set();
+  let senzaNumero = 0;
+  for (const f of formulari) {
+    if (f.fir) numeri.add(f.fir.toUpperCase());
+    else senzaNumero++;
+  }
+  return numeri.size + senzaNumero;
 }
 
 /**
@@ -130,10 +148,8 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null) {
         dati.celle.set(k, { impianto: fir.impianto, trasportatore: fir.trasportatore, n: 0, kg: 0, formulari: [] });
       }
       const cella = dati.celle.get(k);
-      cella.n++;
       cella.kg += fir.kg;
       cella.formulari.push(fir);
-      dati.totale.n++;
       dati.totale.kg += fir.kg;
       if (!fir.kg) dati.senza_peso.push(fir);
     }
@@ -147,6 +163,17 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null) {
     const buono = (righe || []).find(r => r.esito !== 'errore');
     if (buono) ultimi[t] = { data: soloData(buono.created_date), nome_file: nome(buono.nome_file) };
   }));
+
+  // I conteggi si fanno alla fine, sui formulari distinti.
+  for (const f of flussi) {
+    const dati = raccolta[f.chiave];
+    let totale = 0;
+    for (const cella of dati.celle.values()) {
+      cella.n = contaDistinti(cella.formulari);
+      totale += cella.n;
+    }
+    dati.totale.n = totale;
+  }
 
   const out = {};
   for (const f of flussi) {

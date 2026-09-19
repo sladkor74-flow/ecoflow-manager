@@ -24,6 +24,7 @@ import { fetchAll } from "./fetchAll.ts";
 import { formatoKg } from "./formato.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { eAci } from "./canaleSecondaria.ts";
+import { unisciQuote, ticketDi } from "./formulari.ts";
 
 export const GIORNI_CONSERVAZIONE = 40;
 const FINESTRA_ABBINAMENTO_GIORNI = 21;
@@ -264,6 +265,7 @@ function movimento(r, entita) {
     fonte,
     canale: canale(r, entita),
     ordine: String(r.id_ordine || ''),
+    ticket: ticketDi(r),
     fir: String(r.numero_fir || ''),
     firN: normalizzaFir(r.numero_fir),
     kg: Math.round(Number(r.peso_effettivo) || 0),
@@ -488,7 +490,24 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   const tipoPresunto = (r) => (nomiCoincidono(r.produttore, nome) === true || (r.produttore && normalizzaRagioneSociale(r.produttore) === chiave) ? 'uscita' : 'ingresso');
   const da = aggiungiGiorni(inizio, -FINESTRA_ABBINAMENTO_GIORNI);
   const a = aggiungiGiorni(fine, FINESTRA_ABBINAMENTO_GIORNI);
-  const bacino = movimenti.filter(m => m.fine >= da && m.fine <= a);
+  // Un formulario chiuso su piu' ordini e' un documento solo: nel report
+  // dell'impianto compare una volta, col peso intero. Le quote si fondono prima
+  // del confronto - stesso numero, stesso giorno, stessa destinazione, stesso
+  // archivio - sommando i chili e tenendo i ticket in chiaro. Senza questo, una
+  // riga del report da 3.460 kg si abbinava a una quota sola da 1.960 e
+  // risultavano insieme una differenza di peso e un movimento mancante.
+  const bacino = unisciQuote(movimenti.filter(m => m.fine >= da && m.fine <= a), {
+    numero: (m) => m.firN,
+    peso: (m) => m.kg,
+    stessoGruppo: (x, y) => x.fine === y.fine && x.fonte === y.fonte && x.canale === y.canale
+      && x.chiaveDest === y.chiaveDest && x.chiaveOrig === y.chiaveOrig,
+    fondi: (base, quote, kg) => ({
+      ...base,
+      kg,
+      ordine: quote.map(q => q.ordine).filter(Boolean).join(' + '),
+      quote: quote.map(q => ({ ordine: q.ordine, ticket: q.ticket, kg: q.kg })),
+    }),
+  });
   const perFir = new Map();
   for (const m of bacino) {
     if (!m.firN) continue;
@@ -625,13 +644,22 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       aggiungi('classe', `Nel report la classe accanto al numero d'ordine (${r.classe_ordine}) non coincide con la colonna classe (${r.classe})`, 'osservazione');
     }
 
-    if (r.ordine && m.ordine && normalizzaOrdine(r.ordine) !== normalizzaOrdine(m.ordine)) {
+    // Se il formulario e' chiuso su piu' ordini, il report puo' citarne uno
+    // qualsiasi: va bene tutti quelli su cui il peso e' stato ripartito.
+    const ordiniDelMovimento = (m.quote || []).map(q => q.ordine).filter(Boolean);
+    const ordiniAmmessi = (ordiniDelMovimento.length ? ordiniDelMovimento : [m.ordine])
+      .filter(Boolean).map(normalizzaOrdine);
+    if (r.ordine && ordiniAmmessi.length && !ordiniAmmessi.includes(normalizzaOrdine(r.ordine))) {
       aggiungi('ordine', `Ordine diverso: report ${r.ordine}, gestionale ${m.ordine}`);
     }
 
     const gestionale = {
-      fonte: m.fonte, canale: m.canale, ordine: m.ordine, fir: m.fir, kg: m.kg, inizio: m.inizio, fine: m.fine, produttore: m.produttore,
+      fonte: m.fonte, canale: m.canale, ordine: m.ordine, ticket: m.ticket, fir: m.fir, kg: m.kg, inizio: m.inizio, fine: m.fine, produttore: m.produttore,
       punto_raccolta: m.punto_raccolta, codice_pdr: m.codice_pdr, destinatario: m.destinatario, trasportatore: m.trasportatore, classe: m.classe,
+      // Se il peso del formulario e' ripartito su piu' ordini, le quote restano
+      // in chiaro col loro ticket: e' la differenza fra un conto che torna e un
+      // conto che sembra sbagliato.
+      quote: m.quote || null,
     };
 
     const presunto = tipo ? { categoria: categoria(m) } : { tipo_presunto: tipoPresunto(r), categoria: 'non_registrati' };

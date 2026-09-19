@@ -158,6 +158,21 @@ leggibile da dove viene il totale. E' un'anomalia vera, invece, lo stesso
 formulario due volte sullo **stesso** ordine: quello e' un ritiro caricato due
 volte e si pagherebbe due volte.
 
+Da qui due regole che valgono **in ogni modulo**, non solo nella fatturazione:
+
+- **i pesi si sommano**: ogni quota e' peso vero;
+- **i formulari si contano una volta sola, per numero**. Chi conta formulari usa
+  `contaFormulari()` da `base44/shared/formulari.ts`, mai `righe.length`: due
+  quote dello stesso documento contate come due formulari fanno sballare la
+  quadratura contro la stampa del portale, che quel formulario lo elenca una
+  volta. Chi confronta il gestionale con un elenco esterno - la quadratura FIR, i
+  report settimanali degli impianti - fonde prima le quote con `unisciQuote()`,
+  altrimenti una riga del report col peso intero si abbina a una quota sola e
+  risultano insieme una differenza di peso e un movimento mancante.
+
+A distinguere le quote e' il **ticket**: si mostra sempre accanto al peso
+effettivo, ed e' quello che rende il conto leggibile invece che sospetto.
+
 **Tariffa zero non e' un dato mancante.** Il trattamento della rete su Tecnogum
 e' davvero a zero, perche' nessun contratto lo prevede. Eco Faso e' una
 autodemolizione dove SMOCO va a raccogliere, non un trasportatore: e' giusto che
