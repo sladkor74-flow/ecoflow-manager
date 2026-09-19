@@ -23,6 +23,7 @@
 import { fetchAll } from "./fetchAll.ts";
 import { formatoKg } from "./formato.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
+import { eAci } from "./canaleSecondaria.ts";
 
 export const GIORNI_CONSERVAZIONE = 40;
 const FINESTRA_ABBINAMENTO_GIORNI = 21;

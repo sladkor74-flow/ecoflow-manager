@@ -983,7 +983,7 @@ export default async function(req) {
         } else if (um === '€/t' || um === '€/kg') {
           // Per canale: RETE usa tonnellate non-ACI, ACI usa tonnellate ACI
           const pesoCanale = tipologia === 'RETE' ? tonnellateRete * 1000 : tonnellateAci * 1000;
-          importo = calcImporto(um, valore, pesoCanale, viaggi);
+          importo = calcImporto(um, valore, pesoCanale, viaggiDaPagare);
         }
 
         // Un viaggio di secondaria puo' portare formulari di rete e formulari
