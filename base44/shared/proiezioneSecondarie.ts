@@ -145,7 +145,12 @@ export function proiettaImpianto(impianto, dati, opzioni) {
   if (senzaRilevazione.length) {
     avvisi.push(`Di ${senzaRilevazione.map(s => s.nome).join(', ')} non c'e' una rilevazione del portale: la giacenza disponibile qui sotto e' calcolata senza, quindi per difetto.`);
   }
-  const mancanti = senzaRilevazione.length ? [] : righe.filter(r => r.viaggi_mancanti > 0);
+  // "Mancano quattro viaggi" si puo' dire solo se si sa quanto c'e': senza
+  // nemmeno uno stoccaggio registrato, o con uno non rilevato, il numero non si
+  // conosce e dirlo mancante sarebbe un allarme inventato. I due avvisi insieme
+  // si contraddicevano, su T-Cycle si leggevano tutti e due.
+  const disponibilitaIgnota = !stoccaggi.length || senzaRilevazione.length > 0;
+  const mancanti = disponibilitaIgnota ? [] : righe.filter(r => r.viaggi_mancanti > 0);
   if (mancanti.length) {
     avvisi.push(`Negli stoccaggi non c'e' materiale per tutti i viaggi previsti: ${mancanti.map(r => `${r.mese} ne mancano ${r.viaggi_mancanti}`).join(', ')}.`);
   }
