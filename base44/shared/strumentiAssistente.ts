@@ -587,13 +587,51 @@ export const STRUMENTI = [
   },
   {
     nome: 'fatturazione',
-    descrizione: 'La fatturazione attiva e passiva: totali per fornitore o cliente, voci sospese e voci da controllare. Si fattura solo sui movimenti terminati e i canali restano separati.',
-    parametri: { anno: 'numero', mese: 'nome del mese, opzionale', tipo: 'PASSIVA o ATTIVA', tipologia: 'RETE, ACI o EXTRA_RACCOLTA', fornitore: 'opzionale' },
+    descrizione: 'Quanto dobbiamo pagare ai fornitori (passiva) e quanto ci spetta (attiva), per fornitore e per mese. Per la passiva con il mese indicato fa lo stesso conto del modulo, sui movimenti terminati; senza mese legge solo i documenti gia\' elaborati. I canali restano separati.',
+    parametri: { anno: 'numero', mese: 'nome del mese: indicalo sempre per la passiva', tipo: 'PASSIVA o ATTIVA', tipologia: 'RETE, ACI o EXTRA_RACCOLTA', fornitore: 'opzionale' },
     moduli: ['Fatturazione'],
     async esegui(base44, p) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       const tipo = String(p.tipo || 'PASSIVA').toUpperCase();
       const svc = base44.asServiceRole.entities;
+
+      // La passiva di un mese si calcola, non si legge: le voci salvate esistono
+      // solo dopo che qualcuno ha elaborato e salvato il documento, e chiedendo
+      // "quanto dobbiamo a Green Tyre per marzo" si rispondeva "niente" mentre
+      // il modulo diceva 13.271,40 euro. Qui si chiama lo stesso conto del
+      // modulo, cosi' i due numeri non possono divergere.
+      const meseChiesto = p.mese ? MESI.find(m => m.toLowerCase() === String(p.mese).toLowerCase()) : '';
+      if (tipo === 'PASSIVA' && meseChiesto) {
+        const tipologia = String(p.tipologia || 'RETE').toUpperCase();
+        const res = await base44.functions.invoke('calcolaPassiva', { anno, mese: meseChiesto, tipologia });
+        const d = (res && res.data) || res || {};
+        const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
+        const sezione = (nome, gruppi) => (gruppi || [])
+          .filter(f => !k || normalizzaRagioneSociale(f.fornitore).includes(k))
+          .map(f => ({
+            sezione: nome, fornitore: f.fornitore, interno: !!f.interno,
+            tonnellate: f.totale_tonnellate, euro: f.totale_euro,
+            ...(f.di_cui && f.di_cui.length ? { di_cui: f.di_cui.map(x => ({ fornitore: x.fornitore, tonnellate: x.tonnellate, viaggi: x.viaggi })) } : {}),
+          }));
+        const voci = [
+          ...sezione('raccolta', d.raccoglitori),
+          ...sezione('impianti e stoccaggi', d.impianti_stoccaggi),
+          ...sezione('trasporto di secondaria', d.trasporti_secondaria),
+        ].sort((a, b) => (Number(b.euro) || 0) - (Number(a.euro) || 0));
+        return {
+          fonte: `Fatturazione passiva, canale ${tipologia}`,
+          periodo: `${meseChiesto} ${anno}`,
+          dati_al: oggiRoma(),
+          dati: {
+            fornitori: elenco(voci, 60),
+            totali: d.totali,
+            anomalie: elenco(d.anomalie || [], 20),
+            quadratura: d.quadratura,
+            nota: 'Conto fatto adesso sui movimenti terminati del mese, lo stesso del modulo Fatturazione. Un fornitore che ne fattura un altro porta il secondo in "di cui": si paga al primo.',
+          },
+        };
+      }
+
       const filtro = { anno, tipo };
       if (p.mese) filtro.mese = p.mese;
       if (p.tipologia) filtro.tipologia = String(p.tipologia).toUpperCase();
@@ -627,7 +665,9 @@ export const STRUMENTI = [
           voci: righe.length,
           totale_euro: Math.round(gruppi.reduce((s, g) => s + g.totale_euro, 0) * 100) / 100,
           gruppi: elenco(gruppi, 60),
-          nota: 'Le tonnellate di un subfornitore si fatturano al fornitore principale: nel riepilogo compaiono come "di cui".',
+          nota: tipo === 'PASSIVA'
+            ? 'Qui ci sono solo le voci dei documenti gia\' elaborati e salvati: per sapere quanto si deve a un fornitore in un mese preciso rifai la domanda indicando il mese, cosi\' il conto si fa sui movimenti.'
+            : 'La fatturazione attiva si vede dopo che il documento del mese e\' stato elaborato nel modulo Fatturazione: quello che non compare qui non e\' ancora stato elaborato.',
         },
       };
     },
