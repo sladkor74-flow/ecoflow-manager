@@ -238,6 +238,9 @@ export function proiettaInsieme(elenco, opzioni = {}) {
         impianto: p.impianto, riga, suoi, noti,
         serve_kg: (Number(riga.viaggi) || 0) * KG_PER_VIAGGIO,
         avuto_kg: 0,
+        // quanto ha preso da ciascun piazzale, non solo in tutto: senza questo
+        // il registro scriveva lo stesso prelievo sotto due piazzali diversi.
+        preso_da: {},
         ignoto: suoi.length === 0 || noti.length < suoi.length,
       });
     }
@@ -257,6 +260,7 @@ export function proiettaInsieme(elenco, opzioni = {}) {
           const quota = Math.min(resta, Math.floor(pz.saldo_kg * (resta / bisogno)));
           if (quota <= 0) continue;
           r.avuto_kg += quota;
+          r.preso_da[k] = (r.preso_da[k] || 0) + quota;
           uscito += quota;
         }
         pz.saldo_kg = Math.max(0, pz.saldo_kg - uscito);
@@ -278,8 +282,8 @@ export function proiettaInsieme(elenco, opzioni = {}) {
         ignoto: pz.ignoto,
         ingressi_kg: pz.ignoto ? null : Math.round(pz.ingressi_kg),
         saldo_fine_mese_kg: pz.ignoto ? null : Math.round(pz.saldo_kg),
-        prelievi: richieste.filter(r => r.noti.includes(chiave(pz.nome)) && r.avuto_kg > 0)
-          .map(r => ({ impianto: r.impianto, kg: Math.round(r.avuto_kg) })),
+        prelievi: richieste.filter(r => (r.preso_da[chiave(pz.nome)] || 0) > 0)
+          .map(r => ({ impianto: r.impianto, kg: Math.round(r.preso_da[chiave(pz.nome)]) })),
       })),
     });
   }
