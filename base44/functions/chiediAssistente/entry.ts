@@ -5,7 +5,7 @@ import {
 } from "../../shared/baseConoscenza.ts";
 import { analizzaDomanda, situazioneGestionale } from "../../shared/assistente.ts";
 import { catalogoStrumenti, eseguiStrumento } from "../../shared/strumentiAssistente.ts";
-import { SCHEMA_PIANO, istruzioniPiano, testoDati } from "../../shared/pianoAssistente.ts";
+import { SCHEMA_PIANO, istruzioniPiano, strumentiDalPiano, testoDati } from "../../shared/pianoAssistente.ts";
 import { materialePertinente } from "../../shared/materialeCorso.ts";
 import { oggiRoma } from "../../shared/qualificaFornitori.ts";
 import {
@@ -148,23 +148,36 @@ export default async function(req) {
 
     const oggi = oggiRoma();
 
-    // Per le domande sui dati si decide prima dove guardare: una chiamata che
-    // sceglie gli strumenti, poi gli strumenti si eseguono davvero. Se la scelta
-    // non riesce si torna al riepilogo generale, che e' meglio di niente.
+    // Prima di rispondere si decide dove guardare: una chiamata che sceglie gli
+    // strumenti, poi gli strumenti si eseguono davvero.
+    //
+    // Questo passaggio si fa per ogni domanda, non solo per quelle che sembrano
+    // "sui dati". Prima decideva un elenco di parole, e bastava una domanda
+    // scritta con parole diverse - le omologhe che scadono, chi non e' iscritto
+    // al RENTRI, quanto dobbiamo pagare a un fornitore - perche' EcoTyna
+    // rispondesse senza aver guardato niente. Ora e' il pianificatore a dire se
+    // servono dati: se la domanda e' solo di norma lascia l'elenco vuoto e non
+    // si interroga nulla.
     let piano = null;
+    let pianoRiuscito = false;
     let risultati = [];
-    if (analisi.dati) {
+    if (!quiz) {
       try {
         const p = comeOggetto(await base44.asServiceRole.integrations.Core.InvokeLLM({
           prompt: istruzioniPiano(catalogoStrumenti(), domanda, oggi, precedenti.slice(-3)),
           response_json_schema: SCHEMA_PIANO,
         }));
-        piano = p && Array.isArray(p.strumenti) ? p : null;
+        if (p && Array.isArray(p.strumenti)) { piano = p; pianoRiuscito = true; }
       } catch (e) {
         piano = null;
       }
-      const scelti = (piano && piano.strumenti.length ? piano.strumenti : [{ nome: 'panoramica_commessa', parametri: {} }]).slice(0, 5);
-      risultati = await Promise.all(scelti.map(x => eseguiStrumento(base44, x.nome, x.parametri || {})));
+      const scelti = strumentiDalPiano(piano, catalogoStrumenti(), oggi);
+      // Se la scelta non riesce del tutto si torna al riepilogo generale, che e'
+      // meglio di niente; se invece il piano dice "nessuno strumento" lo si
+      // rispetta, perche' e' una domanda di norma.
+      const daFare = scelti.length ? scelti
+        : (!pianoRiuscito && analisi.dati ? [{ nome: 'panoramica_commessa', parametri: {} }] : []);
+      if (daFare.length) risultati = await Promise.all(daFare.map(x => eseguiStrumento(base44, x.nome, x.parametri || {})));
     }
 
     const [approvate, dati, corso] = await Promise.all([
@@ -194,6 +207,9 @@ export default async function(req) {
       '2. Ogni affermazione normativa deve avere una fonte precisa in fonti (norma e articolo, delibera, FAQ o sentenza) con la data di verifica. Non inventare numeri di articolo, date, importi o scadenze: se non sei sicuro dillo e spiega come verificarlo.',
       '3. Per le domande sui dati usa solo i DATI DEL GESTIONALE forniti. Ogni numero che scrivi deve venire da li\', e accanto va detto da dove: lo strumento, il periodo e la data del dato. Se un dato manca dillo apertamente, mettilo in dati_mancanti con la sezione del gestionale dove si trova (Target & Status, Assegnati, Verifiche, Giacenze, Omologhe, Dichiarazioni RENTRI, Qualifica Fornitori, Fatturazione, Predittivita Secondarie, To-Do List) e non stimarlo: una risposta che dice "questo non ce l\'ho" e\' utile, una che tira a indovinare no.',
       '3-ter. Rete, ACI ed extra raccolta sono commesse indipendenti: non sommarle mai in un unico numero e di\' sempre di quale canale stai parlando. I target sono solo della rete.',
+      '3-quinquies. Il periodo del dato e\' quello scritto nel blocco, non quello della domanda: se ti hanno chiesto un mese e il dato e\' dell\'anno, di\' che hai il dato dell\'anno e non scrivere mai quel numero accanto al nome del mese. Rietichettare un totale annuo come mensile e\' l\'errore peggiore che puoi fare. Lo stesso vale per il canale, per l\'impianto e per il raccoglitore: il numero resta attaccato all\'etichetta con cui e\' arrivato. E un sito e\' un impianto o uno stoccaggio secondo quello che dice il dato, che non e\' la stessa cosa. Non dire mai che un periodo, un soggetto o un luogo "non ha dati" se non e\' quello che hai guardato: di\' che cosa hai guardato e che per l\'altro serve rifare la domanda.',
+      '3-septies. Non contare mai le righe di un elenco per dire quanti sono. Gli elenchi arrivano tagliati e lo dichiarano: hanno "quanti" (il totale vero), "mostrate" (quante se ne vedono) e, se sono tagliati, un avviso. Il numero da scrivere e\' sempre "quanti". Se ti serve un conto che il dato non fornisce - quanti di un certo tipo, quanti in una certa provincia - e l\'elenco e\' tagliato, dillo invece di contare a occhio.',
+      '3-sexies. Non sommare mai rete, ACI ed extra raccolta, nemmeno se te lo chiedono in modo esplicito ("in tutto", "complessivamente", "tutti e tre"). In quel caso dai i tre numeri uno sotto l\'altro, ciascuno con il suo nome, e spiega in una riga che sono commesse indipendenti e che un totale unico non vuol dire niente. Un unico numero che le mette insieme non deve comparire nella risposta.',
       '3-quater. In fonti metti le norme e i documenti: i moduli del gestionale che hai interrogato sono gia\' registrati sotto la risposta, non ripeterli. Quando la risposta e\' un elenco lungo, chiudi offrendo di prepararlo in Excel o in PDF: il file si crea solo se l\'utente lo chiede.',
       '3-bis. Se nella domanda o nella conversazione l\'utente corregge una tua risposta o afferma una regola ("non e\' cosi\'", "da noi si fa cosi\'", "il decreto dice che..."), tienine conto subito nella risposta e riportala in precisazioni_utente: tipo regola_interna se e\' una regola dell\'azienda, faq se chiarisce come si applica una norma; testo chiaro e autosufficiente. Diventera\' una proposta da approvare. Mai per una semplice domanda e mai per cio\' che la base di conoscenza dice gia\': in quei casi precisazioni_utente resta vuoto. Se contrasta con una norma verificata, spiegalo con garbo citando la fonte.',
       '4. Le voci dell\'area gestionale sono regole della direzione SMOCO: applicale. Distingui sempre gli obblighi di legge dalle regole interne e dalla prassi.',
@@ -248,6 +264,10 @@ export default async function(req) {
       fonti_json: JSON.stringify(fonti),
       certezza,
       strumenti_json: risultati.length ? JSON.stringify(risultati.map(r => ({ strumento: r.strumento, parametri: r.parametri, fonte: r.fonte, periodo: r.periodo, dati_al: r.dati_al, errore: r.errore || '' }))) : undefined,
+      // Se il pianificatore ha guardato nel gestionale, la scheda lo dice, anche
+      // se l'analisi iniziale della domanda non se n'era accorta.
+      dati_gestionale: risultati.length > 0 || analisi.dati,
+      ambito: risultati.length && analisi.ambito === 'normativa' ? 'mista' : analisi.ambito,
       dati_mancanti_json: Array.isArray(esito.dati_mancanti) && esito.dati_mancanti.length ? JSON.stringify(esito.dati_mancanti) : undefined,
       allegati_json: allegati.length ? JSON.stringify(allegatiSalvati) : '',
       file_generati_json: fileGenerati.length ? (fileJson.length <= 300000 ? fileJson : JSON.stringify(fileGenerati.map(f => ({ ...f, fogli: undefined, testo: undefined, non_conservato: true })))) : '',

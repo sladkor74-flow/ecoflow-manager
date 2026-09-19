@@ -65,6 +65,23 @@ async function movimenti(base44, { canale, anno, mese, provincia, regione, racco
   });
 }
 
+/**
+ * Un elenco lungo non si consegna intero: si taglia, altrimenti il prompt non
+ * sta in piedi. Ma il taglio va detto a voce alta, perche' chi legge conta le
+ * righe che vede e crede sia quello il totale: e' successo davvero il
+ * 19/09/2026, con 268 punti di raccolta della provincia di Bari diventati 6
+ * nella risposta. Da qui in poi ogni elenco porta con se' quanti sono in tutto,
+ * quanti se ne vedono e, se e' tagliato, l'avviso di non contarli.
+ */
+function elenco(righe, quanti = 60) {
+  const mostrate = righe.slice(0, quanti);
+  const esito = { quanti: righe.length, mostrate: mostrate.length, righe: mostrate };
+  if (righe.length > mostrate.length) {
+    esito.avviso = `ELENCO TAGLIATO: qui ci sono ${mostrate.length} righe delle ${righe.length} totali. Il numero giusto e' "quanti": non contare le righe di questo elenco.`;
+  }
+  return esito;
+}
+
 function perChiave(righe, campo) {
   const m = new Map();
   for (const r of righe) {
@@ -113,7 +130,7 @@ export const STRUMENTI = [
         dati: {
           canale, formulari: righe.length, tonnellate: t3(totale),
           per: p.raggruppa || 'raccoglitore',
-          dettaglio: perChiave(righe, campo).slice(0, 60),
+          dettaglio: elenco(perChiave(righe, campo), 60),
         },
       };
     },
@@ -224,7 +241,7 @@ export const STRUMENTI = [
           });
         }
       }));
-      return { fonte: 'Archivi dei movimenti', periodo: 'tutti gli anni', dati_al: oggiRoma(), dati: { cercato: cerca, trovati: trovati.slice(0, 40), quanti: trovati.length } };
+      return { fonte: 'Archivi dei movimenti', periodo: 'tutti gli anni', dati_al: oggiRoma(), dati: { cercato: cerca, trovati: elenco(trovati, 40) } };
     },
   },
   {
@@ -303,7 +320,7 @@ export const STRUMENTI = [
         ordini: listaOrdini(r), stato: statoRichiesta(r), scadenza: r.scadenza,
         immesso_il: soloData(r.ordine_immesso_il), evaso_il: soloData(r.evaso_il || r.evasione_rilevata_il),
       })).filter(r => !p.stato || r.stato === p.stato);
-      return { fonte: 'Richieste ECT', periodo: `anno ${anno}`, dati_al: oggiRoma(), dati: { quante: righe.length, richieste: righe.slice(0, 60) } };
+      return { fonte: 'Richieste ECT', periodo: `anno ${anno}`, dati_al: oggiRoma(), dati: { richieste: elenco(righe, 60) } };
     },
   },
   {
@@ -324,20 +341,27 @@ export const STRUMENTI = [
   {
     nome: 'giacenze',
     descrizione: 'La giacenza a portale di impianti e stoccaggi: il materiale conferito che non e\' ancora stato dichiarato, con target, ordini da dichiarare e arretrato per anno. Usa lo stesso calcolo del modulo Giacenze, cosi\' i numeri sono quelli che si vedono a video.',
-    parametri: { anno: 'numero', sito: 'nome dell\'impianto o dello stoccaggio, opzionale', tipo: 'imp per gli impianti, stoc per gli stoccaggi, opzionale' },
+    parametri: { anno: 'numero', sito: 'nome dell\'impianto o dello stoccaggio, opzionale', tipo: 'impianto o stoccaggio, opzionale' },
     moduli: ['Giacenze'],
     async esegui(base44, p) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       const res = await base44.functions.invoke('calcolaGiacenze', { anno });
       const d = (res && res.data) || res || {};
       let righe = d.righe || [];
-      if (p.tipo) righe = righe.filter(r => String(r.tipo_destinazione || '').toLowerCase() === String(p.tipo).toLowerCase());
+      if (p.tipo) {
+        const vuole = /stoc/i.test(String(p.tipo)) ? 'stoc' : 'imp';
+        righe = righe.filter(r => (String(r.tipo_destinazione || '').toLowerCase() === 'stoc' ? 'stoc' : 'imp') === vuole);
+      }
       if (p.sito) {
+        // Il nome puo' arrivare accorciato ("Nappi Sud" per "NAPPI SUD SRL"):
+        // si accetta anche chi lo contiene, purche' sia uno solo.
         const k = normalizzaRagioneSociale(p.sito);
-        righe = righe.filter(r => normalizzaRagioneSociale(r.sito) === k);
+        const esatti = righe.filter(r => normalizzaRagioneSociale(r.sito) === k);
+        righe = esatti.length ? esatti : righe.filter(r => normalizzaRagioneSociale(r.sito).includes(k));
       }
       const utili = righe.map(r => ({
-        sito: r.sito, tipo: r.tipo_destinazione, giacenza_portale_t: r.giacenza_portale_t,
+        sito: r.sito, tipo: String(r.tipo_destinazione || '').toLowerCase() === 'stoc' ? 'stoccaggio' : 'impianto',
+        giacenza_portale_t: r.giacenza_portale_t,
         in_attesa_dichiarazione_t: r.in_attesa_dichiarazione_t, ordini_da_dichiarare: r.ordini_da_dichiarare,
         dichiarato_t: r.dichiarato_t, conferito_primarie_t: r.conferito_primarie_t, conferito_aci_t: r.conferito_aci_t,
         conferito_extra_t: r.conferito_extra_t, secondarie_in_t: r.secondarie_in_t, secondarie_out_t: r.secondarie_out_t,
@@ -348,7 +372,7 @@ export const STRUMENTI = [
         fonte: 'Giacenze, giacenza a portale',
         periodo: `anno ${anno}`,
         dati_al: oggiRoma(),
-        dati: { siti: utili.slice(0, 80), totali: d.totali, anomalie: (d.anomalie || []).slice(0, 20) },
+        dati: { siti: elenco(utili, 80), totali: d.totali, anomalie: elenco(d.anomalie || [], 20) },
       };
     },
   },
@@ -389,9 +413,8 @@ export const STRUMENTI = [
         periodo: p.mese ? `${p.mese} ${anno}` : `anno ${anno}`,
         dati_al: oggiRoma(),
         dati: {
-          quante: righe.length,
           riepilogo: [...perSito.values()].map(x => ({ ...x, dichiarato_t: t3(x.dichiarato_kg) })).sort((a, b) => b.dichiarato_kg - a.dichiarato_kg),
-          dichiarazioni: righe.slice(0, 80),
+          dichiarazioni: elenco(righe, 80),
           nota: 'Una dichiarazione decurta la giacenza a portale solo quando risulta caricata.',
         },
       };
@@ -430,10 +453,9 @@ export const STRUMENTI = [
         periodo: `situazione al ${oggi}`,
         dati_al: oggi,
         dati: {
-          quante: filtrate.length,
           scadute: filtrate.filter(r => r.giorni_alla_scadenza !== null && r.giorni_alla_scadenza < 0).length,
           da_verificare: filtrate.filter(r => r.stato === 'da_verificare').length,
-          omologhe: filtrate.slice(0, 80),
+          omologhe: elenco(filtrate, 80),
         },
       };
     },
@@ -454,17 +476,16 @@ export const STRUMENTI = [
         periodo: 'ultimo file del portale caricato',
         dati_al: oggiRoma(),
         dati: {
-          quante: righe.length,
           iscritti: righe.filter(d => d.iscritto_rentri).length,
           fir_digitale: righe.filter(d => d.fir_digitale).length,
           fir_cartaceo: righe.filter(d => d.fir_cartaceo).length,
           senza_collegamento: righe.filter(d => d.collegamento === 'nessuno').length,
-          dichiarazioni: righe.slice(0, 80).map(d => ({
+          dichiarazioni: elenco(righe.map(d => ({
             produttore: d.produttore, tipologia_materiale: d.tipologia_materiale,
             data_dichiarazione: soloData(d.data_dichiarazione), iscritto_rentri: d.iscritto_rentri,
             fir_digitale: d.fir_digitale, fir_cartaceo: d.fir_cartaceo, codice_rentri: d.codice_rentri,
             collegamento: d.collegamento, pdr_collegati: (d.pdr_collegati || []).length,
-          })),
+          })), 80),
         },
       };
     },
@@ -488,13 +509,12 @@ export const STRUMENTI = [
         periodo: 'ultimo file PDR caricato',
         dati_al: oggiRoma(),
         dati: {
-          quanti: righe.length,
-          pdr: righe.slice(0, 60).map(r => ({
+          pdr: elenco(righe.map(r => ({
             ragione_sociale: r.ragione_sociale, descrizione_pdr: r.descrizione_pdr,
             comune: r.comune_pdr || r.comune, provincia: r.provincia_pdr || r.provincia,
             partita_iva: r.partita_iva, rentri_iscrizione: r.rentri_iscrizione, tipo_formulario: r.tipo_formulario,
             key_account: r.key_account, trasportatore_principale: r.trasportatore_principale, sospeso: r.sospeso,
-          })),
+          })), 60),
         },
       };
     },
@@ -537,11 +557,13 @@ export const STRUMENTI = [
       return {
         fonte: 'Qualifica Fornitori',
         periodo: `anno ${anno}`,
-        dati_al: (riepilogo[0] && soloData(riepilogo[0].aggiornato_il)) || oggi,
+        // Gli stati dei documenti si ricalcolano adesso: la data del riepilogo
+        // salvato riguarda solo i conteggi, e resta scritta dentro.
+        dati_al: oggi,
         dati: {
-          riepilogo: riepilogo[0] || null,
-          soggetti: soggetti.slice(0, 80),
-          contratti: contratti.slice(0, 60).map(c => ({ soggetto: c.soggetto_nome, tipo: c.tipo_contratto, canale: c.canale, stato: c.stato, anno: c.anno, decorrenza: soloData(c.data_inizio), scadenza: soloData(c.data_fine), quantitativo_t: c.quantitativo_previsto_t })),
+          riepilogo: riepilogo[0] ? { ...riepilogo[0], nota: `Conteggi salvati il ${soloData(riepilogo[0].aggiornato_il)}` } : null,
+          soggetti: elenco(soggetti, 80),
+          contratti: elenco(contratti.map(c => ({ soggetto: c.soggetto_nome, tipo: c.tipo_contratto, canale: c.canale, stato: c.stato, anno: c.anno, decorrenza: soloData(c.data_inizio), scadenza: soloData(c.data_fine), quantitativo_t: c.quantitativo_previsto_t })), 60),
           nota: 'Qui ci sono i documenti caricati. I documenti che mancano del tutto si vedono nel modulo Qualifica Fornitori, che confronta ogni soggetto con il catalogo dei requisiti del suo ruolo.',
         },
       };
@@ -588,7 +610,7 @@ export const STRUMENTI = [
         dati: {
           voci: righe.length,
           totale_euro: Math.round(gruppi.reduce((s, g) => s + g.totale_euro, 0) * 100) / 100,
-          gruppi: gruppi.slice(0, 60),
+          gruppi: elenco(gruppi, 60),
           nota: 'Le tonnellate di un subfornitore si fatturano al fornitore principale: nel riepilogo compaiono come "di cui".',
         },
       };
@@ -616,14 +638,13 @@ export const STRUMENTI = [
         periodo: 'tariffe attive',
         dati_al: oggiRoma(),
         dati: {
-          quante: righe.length,
-          tariffe: righe.slice(0, 80).map(t => ({
+          tariffe: elenco(righe.map(t => ({
             fornitore: t.fornitore_nome || t.cliente, prestazione: t.prestazione, direzione: t.direzione,
             tipologia: t.tipologia, servizio: t.servizio_nome, produttore: t.produttore, destinatario: t.destinatario || t.destinazione,
             regione: t.regione, provincia: t.provincia, classe: t.classe_materiale,
             valore: t.valore, unita_misura: t.unita_misura,
             validita: `${soloData(t.data_inizio_validita)} - ${soloData(t.data_fine_validita) || 'senza scadenza'}`,
-          })),
+          })), 80),
         },
       };
     },

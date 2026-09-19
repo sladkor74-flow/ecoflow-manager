@@ -18,6 +18,9 @@ const PAROLE_DATI = [
   'secondari', 'terziari', 'extra raccolta', 'quanto abbiamo', 'quanti', 'quante', 'come stiamo', 'come va',
   'situazione', 'questo mese', 'mese scorso', 'settimana', 'oggi', 'in ritardo', 'scadut', 'in scadenza',
   'smoco', 'pneuservice', 'nappi', 'ecorecuperi', 'emmesse', 'gatim', 'irigom', 'tecnogum', 't-cycle', 'trs',
+  'omologh', 'dichiaraz', 'scad', 'pdr', 'punto di raccolta', 'punti di raccolta', 'produttor', 'client',
+  'tariff', 'viagg', 'caricat', 'caricament', 'ultimo file', 'quanto dobbiamo', 'paghiam', 'pagare', 'incassi',
+  'green tyre', 'ielapi', 'silvano', 'torres', 'logistica', 'ecological', 'barone', 'minervini', 'rpn',
 ];
 
 const PAROLE_NORMA = [

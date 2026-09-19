@@ -9,6 +9,38 @@
 // differenza e' fra un assistente che riassume quello che gli hanno messo in
 // tasca e uno che va a guardare la cosa giusta.
 
+const CANALI = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
+
+/** L'unione dei parametri di tutti gli strumenti, dichiarati uno per uno. */
+const PARAMETRI = {
+  anno: { type: 'integer' },
+  mese: { type: 'string' },
+  mese_da: { type: 'integer' },
+  settimana: { type: 'integer' },
+  canale: { type: 'string', enum: CANALI },
+  raggruppa: { type: 'string', enum: ['raccoglitore', 'provincia', 'regione', 'classe', 'destinazione', 'mese'] },
+  provincia: { type: 'string' },
+  regione: { type: 'string' },
+  raccoglitore: { type: 'string' },
+  destinazione: { type: 'string' },
+  sito: { type: 'string' },
+  tipo: { type: 'string' },
+  pivot: { type: 'string' },
+  testo: { type: 'string' },
+  cerca: { type: 'string' },
+  produttore: { type: 'string' },
+  fornitore: { type: 'string' },
+  soggetto: { type: 'string' },
+  stato: { type: 'string' },
+  modulo: { type: 'string' },
+  tipologia: { type: 'string', enum: [...CANALI, 'TUTTE'] },
+  direzione: { type: 'string', enum: ['PASSIVA', 'ATTIVA'] },
+  prestazione: { type: 'string', enum: ['RACCOLTA', 'TRASPORTO_SECONDARIA', 'TRATTAMENTO', 'CONFERIMENTO_STOCCAGGIO'] },
+  in_scadenza: { type: 'boolean' },
+  solo_problemi: { type: 'boolean' },
+  solo_non_iscritti: { type: 'boolean' },
+};
+
 export const SCHEMA_PIANO = {
   type: 'object',
   properties: {
@@ -28,7 +60,11 @@ export const SCHEMA_PIANO = {
         type: 'object',
         properties: {
           nome: { type: 'string' },
-          parametri: { type: 'object' },
+          // I parametri vanno elencati uno per uno. Un oggetto libero, senza
+          // proprieta' dichiarate, torna indietro sempre vuoto: e uno strumento
+          // senza parametri risponde sull'anno intero, che quasi mai e' la
+          // domanda. Qui c'e' l'unione dei parametri di tutti gli strumenti.
+          parametri: { type: 'object', properties: PARAMETRI },
           perche: { type: 'string' },
         },
         required: ['nome'],
@@ -53,8 +89,10 @@ export function istruzioniPiano(catalogo, domanda, oggi, storia = []) {
     '',
     'Regole:',
     '- Scegli il numero piu' + '̀ piccolo di strumenti che basta a rispondere. Se ne serve uno solo, uno solo.',
-    '- Il canale va sempre deciso: RETE, ACI ed EXTRA RACCOLTA sono commesse indipendenti e non si sommano mai. Se la domanda non lo dice e parla di raccolta, e\' RETE; se parla di autodemolizione o ACI, e\' ACI. Se la domanda riguarda piu\' canali, chiedi lo stesso strumento una volta per canale.',
+    '- COMPILA SEMPRE I PARAMETRI. Sono la parte piu\' importante del tuo lavoro: uno strumento senza parametri risponde sull\'anno intero e su tutta la rete, e quasi mai e\' la domanda. Se la domanda dice un mese, metti mese; se dice una settimana, metti settimana; se nomina un raccoglitore, un impianto, un fornitore o un produttore, mettilo nel parametro giusto. Riempi anche periodo, cosi\' resta scritto di che cosa si parla.',
+    '- Il canale va sempre deciso: RETE, ACI ed EXTRA RACCOLTA sono commesse indipendenti e non si sommano mai. Se la domanda non lo dice e parla di raccolta, e\' RETE; se parla di autodemolizione o ACI, e\' ACI. Se la domanda chiede "in tutto", "complessivamente" o riguarda piu\' canali, metti in canali tutti quelli che servono: lo strumento verra\' eseguito una volta per canale e i numeri resteranno distinti.',
     '- I target sono solo della rete: per l\'ACI non esistono.',
+    '- Per "quanto abbiamo raccolto" usa raccolto, non report_mensile: raccolto da il totale e il dettaglio di un canale e di un periodo. Usa report_mensile solo se la domanda chiede proprio le pivot del Report Mensile o il confronto fra i mesi.',
     '- Se la domanda cita un numero di formulario o un ID ordine, usa cerca_movimento.',
     '- Se la domanda non riguarda i dati del gestionale ma una norma, una procedura o il corso, lascia strumenti vuoto.',
     '- Non inventare parametri che non esistono nello strumento.',
@@ -69,6 +107,49 @@ export function istruzioniPiano(catalogo, domanda, oggi, storia = []) {
     'Domanda:',
     domanda,
   ].filter(Boolean).join('\n');
+}
+
+/**
+ * Quali strumenti eseguire davvero, a partire dal piano.
+ *
+ * Due cose il modello se le dimentica quasi sempre, e sono proprio quelle che
+ * fanno sbagliare il numero: il periodo che ha appena deciso non lo riporta nei
+ * parametri, e quando i canali sono piu' d'uno chiede una cosa sola. Qui il
+ * periodo si travasa in ogni strumento che lo accetta e i canali diventano una
+ * chiamata ciascuno, cosi' restano separati anche nei dati, non solo a parole.
+ */
+export function strumentiDalPiano(piano, catalogo, oggi) {
+  const annoOggi = Number(String(oggi).slice(0, 4));
+  const accetta = new Map(catalogo.map(s => [s.nome, new Set(Object.keys(s.parametri || {}))]));
+  const per = (piano && piano.periodo) || {};
+  const canali = Array.isArray(piano && piano.canali) ? [...new Set(piano.canali.filter(c => CANALI.includes(c)))] : [];
+  const scelti = [];
+  for (const x of (piano && Array.isArray(piano.strumenti) ? piano.strumenti : []).slice(0, 4)) {
+    const nome = String((x && x.nome) || '').trim();
+    const ok = accetta.get(nome);
+    if (!ok) continue;
+    const base = {};
+    for (const [k, v] of Object.entries((x && x.parametri) || {})) {
+      if (v === null || v === undefined || v === '' || !ok.has(k)) continue;
+      base[k] = v;
+    }
+    if (ok.has('anno') && base.anno == null) base.anno = Number(per.anno) || annoOggi;
+    if (ok.has('mese') && !base.mese && per.mese) base.mese = per.mese;
+    if (ok.has('settimana') && base.settimana == null && per.settimana) base.settimana = Number(per.settimana);
+    if (ok.has('canale')) {
+      const suoi = base.canale ? [base.canale] : (canali.length ? canali : ['RETE']);
+      for (const c of suoi) scelti.push({ nome, parametri: { ...base, canale: c } });
+    } else {
+      scelti.push({ nome, parametri: base });
+    }
+  }
+  const visti = new Set();
+  return scelti.filter(s => {
+    const k = s.nome + JSON.stringify(s.parametri);
+    if (visti.has(k)) return false;
+    visti.add(k);
+    return true;
+  }).slice(0, 8);
 }
 
 /** Il blocco dei dati da mettere nel prompt della risposta. */
