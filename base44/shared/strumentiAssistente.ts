@@ -345,7 +345,7 @@ export const STRUMENTI = [
           residuo_t: t3(m.residuo_kg), viaggi_disponibili: m.viaggi_disponibili, viaggi_mancanti: m.viaggi_mancanti,
           da_ipotesi: !!m.da_ipotesi,
         })),
-        stoccaggi: (x.stoccaggi || []).map(st => ({ nome: st.nome, giacenza_t: t3(st.giacenza_kg), nota: st.giacenza_nota || '' })),
+        stoccaggi: (x.stoccaggi || []).map(st => ({ nome: st.nome, giacenza_t: st.giacenza_kg == null ? null : t3(st.giacenza_kg), nota: st.giacenza_nota || '' })),
         avvisi: x.avvisi || [],
       }));
       return {
@@ -356,8 +356,10 @@ export const STRUMENTI = [
           kg_per_viaggio: d.kg_per_viaggio,
           impianti,
           viaggi_per_mese: d.viaggi_per_mese,
+          piazzali_condivisi: d.piazzali_condivisi,
+          registro_piazzali: d.registro_piazzali,
           ipotesi_fissate: (d.ipotesi || []).map(i => ({ impianto: i.impianto, mese: i.mese, primaria_attesa_kg: i.primaria_attesa_kg, viaggi_previsti: i.viaggi_previsti, note: i.note })),
-          nota: 'Sono gli stessi numeri del modulo Predittivita Secondarie, ipotesi scritte a mano comprese.',
+          nota: "Sono gli stessi numeri del modulo Predittivita Secondarie, ipotesi scritte a mano comprese. Gli impianti che attingono allo stesso stoccaggio sono calcolati insieme: quel piazzale ha una giacenza sola e il registro qui sotto dice mese per mese quanto ne prende ciascuno.",
         },
       };
     },

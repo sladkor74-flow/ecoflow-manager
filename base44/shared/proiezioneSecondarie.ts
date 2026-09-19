@@ -65,6 +65,7 @@ export function mediaMensile(perMese, finoAMeseEscluso, quantiMesi = 3) {
 export function proiettaImpianto(impianto, dati, opzioni) {
   const meseCorrente = opzioni && opzioni.meseCorrente != null ? opzioni.meseCorrente : 0;
   const ipotesi = (opzioni && opzioni.ipotesi) || {};
+  const condivisa = !!(opzioni && opzioni.disponibilitaCondivisa);
   const primPerMese = dati.conferito_primaria_per_mese || {};
   const secPerMese = dati.conferito_secondaria_per_mese || {};
 
@@ -112,12 +113,18 @@ export function proiettaImpianto(impianto, dati, opzioni) {
     const secondarieKg = viaggiNecessari * KG_PER_VIAGGIO;
 
     // Disponibilita': quello che c'e' negli stoccaggi piu' quello che ci arriva
-    // nel mese, meno quello che questo piano porta via.
+    // nel mese, meno quello che questo piano porta via. Quando gli impianti si
+    // proiettano insieme questo conto non si fa qui: un piazzale condiviso ha un
+    // saldo solo, e lo distribuisce proiettaInsieme.
     const ingressiMese = stoccaggi.reduce((s, x) => s + x.media_ingressi_kg, 0);
-    disponibileKg += ingressiMese;
-    const viaggiDisponibili = Math.floor(viaggiDa(disponibileKg));
-    const viaggiFattibili = Math.min(viaggiNecessari, Math.max(0, viaggiDisponibili));
-    disponibileKg = Math.max(0, disponibileKg - viaggiFattibili * KG_PER_VIAGGIO);
+    let viaggiDisponibili = null;
+    let viaggiFattibili = viaggiNecessari;
+    if (!condivisa) {
+      disponibileKg += ingressiMese;
+      viaggiDisponibili = Math.floor(viaggiDa(disponibileKg));
+      viaggiFattibili = Math.min(viaggiNecessari, Math.max(0, viaggiDisponibili));
+      disponibileKg = Math.max(0, disponibileKg - viaggiFattibili * KG_PER_VIAGGIO);
+    }
 
     residuo = residuo - primaria - secondarieKg;
     righe.push({
@@ -129,7 +136,7 @@ export function proiettaImpianto(impianto, dati, opzioni) {
       secondarie_kg: secondarieKg,
       residuo_kg: Math.round(residuo),
       viaggi_disponibili: viaggiDisponibili,
-      viaggi_mancanti: Math.max(0, viaggiNecessari - viaggiFattibili),
+      viaggi_mancanti: condivisa ? null : Math.max(0, viaggiNecessari - viaggiFattibili),
       ingressi_stoccaggi_kg: Math.round(ingressiMese),
     });
   }
@@ -150,7 +157,7 @@ export function proiettaImpianto(impianto, dati, opzioni) {
   // conosce e dirlo mancante sarebbe un allarme inventato. I due avvisi insieme
   // si contraddicevano, su T-Cycle si leggevano tutti e due.
   const disponibilitaIgnota = !stoccaggi.length || senzaRilevazione.length > 0;
-  const mancanti = disponibilitaIgnota ? [] : righe.filter(r => r.viaggi_mancanti > 0);
+  const mancanti = disponibilitaIgnota || condivisa ? [] : righe.filter(r => r.viaggi_mancanti > 0);
   if (mancanti.length) {
     avvisi.push(`Negli stoccaggi non c'e' materiale per tutti i viaggi previsti: ${mancanti.map(r => `${r.mese} ne mancano ${r.viaggi_mancanti}`).join(', ')}.`);
   }
@@ -176,28 +183,125 @@ export function proiettaImpianto(impianto, dati, opzioni) {
 
 /** I viaggi che servono ogni mese su tutti gli impianti, come la riga 27 del foglio. */
 /**
- * Uno stoccaggio che alimenta due impianti ha un piazzale solo: la sua giacenza
- * non puo' essere contata per intero da tutti e due. Qui la si divide fra gli
- * impianti che ci attingono, in proporzione a quanto ciascuno ha gia' ricevuto
- * da li' nell'anno; a pari merito, in parti uguali.
+ * La proiezione di tutti gli impianti insieme, con i piazzali in comune.
+ *
+ * Da Nappi Sud escono secondarie sia per Irigom sia per Tecnogum, e la giacenza
+ * di quel piazzale e' una sola: pianificare i due impianti ciascuno per conto
+ * suo vuol dire promettere due volte lo stesso materiale. Qui i bisogni si
+ * calcolano impianto per impianto - quanto manca al target, mese per mese - e
+ * poi, mese per mese, si distribuisce quello che i piazzali hanno davvero.
+ *
+ * Il criterio della distribuzione e' il bisogno: chi ha piu' residuo da coprire
+ * prende di piu'. Si fanno tre giri, perche' chi chiede meno della sua quota
+ * lascia il resto a chi ne ha ancora bisogno.
+ *
+ * @param {array} elenco  [{ impianto, dati, opzioni }] gli impianti da proiettare
+ * @param {object} opzioni { meseCorrente }
  */
-export function ripartisciStoccaggi(impianti) {
-  const usi = new Map();
-  for (const imp of impianti) {
-    for (const s of (imp.stoccaggi || [])) {
-      const k = String(s.nome || '').toLowerCase().trim();
-      if (!usi.has(k)) usi.set(k, []);
-      usi.get(k).push({ impianto: imp.nome, peso: Number(s.ricevuto_kg) || 0 });
+export function proiettaInsieme(elenco, opzioni = {}) {
+  const chiave = (n) => String(n || '').toLowerCase().trim();
+
+  const proiezioni = (elenco || []).map(x => proiettaImpianto(
+    x.impianto, x.dati, { ...opzioni, ...(x.opzioni || {}), disponibilitaCondivisa: true },
+  ));
+
+  // Un piazzale per nome, non uno per impianto che ci attinge.
+  const piazzali = new Map();
+  for (const p of proiezioni) {
+    for (const st of (p.stoccaggi || [])) {
+      const k = chiave(st.nome);
+      if (piazzali.has(k)) continue;
+      piazzali.set(k, {
+        nome: st.nome,
+        ignoto: st.giacenza_kg == null,
+        saldo_kg: Number(st.giacenza_kg) || 0,
+        ingressi_kg: Number(st.media_ingressi_kg) || 0,
+        giacenza_iniziale_kg: Number(st.giacenza_kg) || 0,
+      });
     }
   }
-  const quote = new Map();
-  for (const [k, elenco] of usi) {
-    const totale = elenco.reduce((s, x) => s + x.peso, 0);
-    for (const x of elenco) {
-      quote.set(k + '|' + x.impianto, elenco.length === 1 ? 1 : (totale > 0 ? x.peso / totale : 1 / elenco.length));
+
+  const mesiMax = proiezioni.reduce((n, p) => Math.max(n, (p.mesi || []).length), 0);
+  const registro = [];
+
+  for (let i = 0; i < mesiMax; i++) {
+    for (const pz of piazzali.values()) if (!pz.ignoto) pz.saldo_kg += pz.ingressi_kg;
+
+    // chi chiede che cosa, questo mese
+    const richieste = [];
+    for (const p of proiezioni) {
+      const riga = (p.mesi || [])[i];
+      if (!riga) continue;
+      const suoi = (p.stoccaggi || []).map(st => chiave(st.nome)).filter(k => piazzali.has(k));
+      const noti = suoi.filter(k => !piazzali.get(k).ignoto);
+      richieste.push({
+        impianto: p.impianto, riga, suoi, noti,
+        serve_kg: (Number(riga.viaggi) || 0) * KG_PER_VIAGGIO,
+        avuto_kg: 0,
+        ignoto: suoi.length === 0 || noti.length < suoi.length,
+      });
+    }
+
+    // tre giri di distribuzione proporzionale al bisogno che resta
+    for (let giro = 0; giro < 3; giro++) {
+      for (const pz of piazzali.values()) {
+        if (pz.ignoto || pz.saldo_kg <= 0) continue;
+        const k = chiave(pz.nome);
+        const suoi = richieste.filter(r => r.noti.includes(k) && r.serve_kg - r.avuto_kg > 0);
+        if (!suoi.length) continue;
+        const bisogno = suoi.reduce((s, r) => s + (r.serve_kg - r.avuto_kg), 0);
+        if (bisogno <= 0) continue;
+        let uscito = 0;
+        for (const r of suoi) {
+          const resta = r.serve_kg - r.avuto_kg;
+          const quota = Math.min(resta, Math.floor(pz.saldo_kg * (resta / bisogno)));
+          if (quota <= 0) continue;
+          r.avuto_kg += quota;
+          uscito += quota;
+        }
+        pz.saldo_kg = Math.max(0, pz.saldo_kg - uscito);
+      }
+    }
+
+    for (const r of richieste) {
+      const disponibileSuo = r.noti.reduce((s, k) => s + piazzali.get(k).saldo_kg, 0) + r.avuto_kg;
+      const fattibili = Math.floor(r.avuto_kg / KG_PER_VIAGGIO);
+      r.riga.viaggi_disponibili = r.ignoto ? null : Math.floor(viaggiDa(disponibileSuo));
+      r.riga.viaggi_mancanti = r.ignoto ? null : Math.max(0, (Number(r.riga.viaggi) || 0) - fattibili);
+      r.riga.kg_dagli_stoccaggi = Math.round(r.avuto_kg);
+    }
+
+    registro.push({
+      mese: (proiezioni.find(p => (p.mesi || [])[i]) || { mesi: [] }).mesi[i].mese,
+      piazzali: [...piazzali.values()].map(pz => ({
+        nome: pz.nome,
+        ignoto: pz.ignoto,
+        ingressi_kg: pz.ignoto ? null : Math.round(pz.ingressi_kg),
+        saldo_fine_mese_kg: pz.ignoto ? null : Math.round(pz.saldo_kg),
+        prelievi: richieste.filter(r => r.noti.includes(chiave(pz.nome)) && r.avuto_kg > 0)
+          .map(r => ({ impianto: r.impianto, kg: Math.round(r.avuto_kg) })),
+      })),
+    });
+  }
+
+  // gli avvisi sui viaggi mancanti si rifanno adesso, con i numeri veri
+  for (const p of proiezioni) {
+    const mancanti = (p.mesi || []).filter(m => m.viaggi_mancanti > 0);
+    if (mancanti.length) {
+      p.avvisi = [...(p.avvisi || []), `Negli stoccaggi non c'e' materiale per tutti i viaggi previsti: ${mancanti.map(m => `${m.mese} ne mancano ${m.viaggi_mancanti}`).join(', ')}. Il conto tiene conto anche di quello che gli altri impianti prendono dagli stessi piazzali.`];
     }
   }
-  return quote;
+
+  const condivisi = [...piazzali.values()].filter(pz => proiezioni.filter(p => (p.stoccaggi || []).some(st => chiave(st.nome) === chiave(pz.nome))).length > 1);
+  for (const pz of condivisi) {
+    const chi = proiezioni.filter(p => (p.stoccaggi || []).some(st => chiave(st.nome) === chiave(pz.nome))).map(p => p.impianto);
+    for (const p of proiezioni) {
+      if (!chi.includes(p.impianto)) continue;
+      p.avvisi = [...(p.avvisi || []), `${pz.nome} alimenta anche ${chi.filter(n => n !== p.impianto).join(' e ')}: la sua giacenza e' una sola e i piani sono calcolati insieme.`];
+    }
+  }
+
+  return { impianti: proiezioni, piazzali_condivisi: condivisi.map(pz => pz.nome), registro_piazzali: registro };
 }
 
 export function viaggiPerMese(proiezioni) {

@@ -2,7 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { proiettaImpianto, viaggiPerMese, ripartisciStoccaggi, MESI, KG_PER_VIAGGIO } from "../../shared/proiezioneSecondarie.ts";
+import { proiettaInsieme, viaggiPerMese, MESI, KG_PER_VIAGGIO } from "../../shared/proiezioneSecondarie.ts";
 import { dopoLaRilevazione, ultimeRilevazioni, kgReteDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 
 // Quante secondarie restano da portare a ogni impianto per arrivare al target.
@@ -155,9 +155,14 @@ export default async function(req) {
         if (normalizzaRagioneSociale(f.impianto_nome) !== chiaveImpianto) continue;
         if (f.ruolo === 'stoccaggio' || f.ruolo === 'doppio_ruolo') nomi.add(normalizzaRagioneSociale(f.nome));
       }
-      // e da chi gli ha davvero mandato secondarie quest'anno
+      // e da chi gli ha davvero mandato secondarie QUEST'ANNO: un piazzale che
+      // lavorava l'anno scorso e che per quest'anno non e' contrattualizzato non
+      // entra nei conti del 2026. Senza il filtro d'anno rientrava dalla porta di
+      // servizio - e' successo con RPN, che nel 2026 non ha ne' contratto ne'
+      // giacenza, e compariva fra le fonti di Tecnogum con "0 t, non rilevato".
       for (const s of secondarie) {
         if (!terminato(s) || eAci(s)) continue;
+        if (meseDi(s.trasporto_finito_il, anno) < 0) continue;
         if (normalizzaRagioneSociale(s.destinazione) !== chiaveImpianto) continue;
         const o = normalizzaRagioneSociale(s.stoccaggio);
         if (o) nomi.add(o);
@@ -172,25 +177,16 @@ export default async function(req) {
       }));
     };
 
-    // Un piazzale solo non puo' essere contato per intero da due impianti: la
-    // giacenza di uno stoccaggio condiviso si divide fra chi ci attinge, in
-    // proporzione a quanto ciascuno ha gia' ricevuto da li' quest'anno.
+    // Un piazzale solo non puo' essere promesso a due impianti. Prima se ne
+    // divideva la giacenza con una quota fissa, il che era meglio di niente ma
+    // restava una finzione: la quota giusta cambia mese per mese, secondo quanto
+    // manca a ciascuno. Adesso i due impianti si proiettano insieme e ogni mese
+    // il piazzale distribuisce quello che ha davvero, a chi ne ha piu' bisogno.
     const stoccaggiPerImpianto = new Map();
     for (const imp of impianti) {
       const chiave = normalizzaRagioneSociale(imp.nome_impianto);
       stoccaggiPerImpianto.set(chiave, stoccaggiDi(chiave));
     }
-    const quote = ripartisciStoccaggi([...stoccaggiPerImpianto.entries()].map(([chiave, stoccaggi]) => ({ nome: chiave, stoccaggi })));
-    const stoccaggiRipartiti = (chiaveImpianto) => (stoccaggiPerImpianto.get(chiaveImpianto) || []).map(s2 => {
-      const quota = quote.get(String(s2.nome).toLowerCase().trim() + '|' + chiaveImpianto);
-      const q = quota == null ? 1 : quota;
-      return {
-        ...s2,
-        giacenza_kg: s2.giacenza_kg == null ? null : Math.round(s2.giacenza_kg * q),
-        quota_condivisione: Math.round(q * 1000) / 1000,
-        giacenza_nota: s2.giacenza_nota || (q < 1 ? `Stoccaggio condiviso: a questo impianto se ne attribuisce il ${Math.round(q * 100)}%, in proporzione a quanto ha gia' ricevuto quest'anno.` : ''),
-      };
-    });
 
     // Il target scritto nel foglio delle giacenze, per il confronto.
     const giacenzaSitoPer = new Map();
@@ -199,17 +195,22 @@ export default async function(req) {
       if (k && !giacenzaSitoPer.has(k)) giacenzaSitoPer.set(k, g2);
     }
 
-    const proiezioni = impianti.map(imp => {
+    const insieme = proiettaInsieme(impianti.map(imp => {
       const chiave = normalizzaRagioneSociale(imp.nome_impianto);
-      const p = proiettaImpianto(
-        { nome: nomeSito.get(chiave) || imp.nome_impianto, target_kg: Number(imp.target) || 0, data_fine: imp.data_fine || `${anno}-12-18` },
-        {
+      return {
+        impianto: { nome: nomeSito.get(chiave) || imp.nome_impianto, target_kg: Number(imp.target) || 0, data_fine: imp.data_fine || `${anno}-12-18` },
+        dati: {
           conferito_primaria_per_mese: primariaPerSito.get(chiave) || {},
           conferito_secondaria_per_mese: secondariaInSito.get(chiave) || {},
-          stoccaggi: stoccaggiRipartiti(chiave),
+          stoccaggi: stoccaggiPerImpianto.get(chiave) || [],
         },
-        { meseCorrente: meseDa, ipotesi: ipotesiPulite(chiave) },
-      );
+        opzioni: { ipotesi: ipotesiPulite(chiave) },
+      };
+    }), { meseCorrente: meseDa });
+
+    const proiezioni = impianti.map((imp, i) => {
+      const chiave = normalizzaRagioneSociale(imp.nome_impianto);
+      const p = insieme.impianti[i];
       // Il target dell'impianto sta scritto in due posti - qui e nel foglio delle
       // giacenze - e devono dire la stessa cosa: se non la dicono, la proiezione
       // lo segnala invece di scegliere da sola quale sia quello buono. Trovata
@@ -230,6 +231,8 @@ export default async function(req) {
       kg_per_viaggio: KG_PER_VIAGGIO,
       impianti: proiezioni,
       viaggi_per_mese: viaggiPerMese(proiezioni),
+      piazzali_condivisi: insieme.piazzali_condivisi,
+      registro_piazzali: insieme.registro_piazzali,
       ipotesi: ipotesiTutte.map(i => ({
         id: i.id, impianto: i.impianto, mese: i.mese,
         primaria_attesa_kg: i.primaria_attesa_kg, viaggi_previsti: i.viaggi_previsti, note: i.note,
