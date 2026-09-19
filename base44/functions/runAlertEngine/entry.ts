@@ -1,6 +1,13 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetrics } from "../../shared/primarieReteAnalytics.ts";
 import { conferimentiSospetti } from "../../shared/rotteConferimenti.ts";
+import { eAci } from "../../shared/canaleSecondaria.ts";
+
+// Il controllo delle rotte non nasce da una RegolaAlert configurata: e' un
+// controllo di coerenza della commessa. Ha pero' bisogno di un identificativo
+// suo, e deve essere lo stesso nella chiave, nell'alert salvato e nella
+// chiusura, altrimenti l'alert si ricrea a ogni giro e non si chiude mai.
+const REGOLA_ROTTA = 'rotta_conferimento';
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { canaleDi } from "../../shared/canaleSecondaria.ts";
@@ -39,7 +46,11 @@ function daControllare(record, modulo, anno) {
     const d = giorno(record.trasporto_finito_il);
     return !!d && d.getUTCFullYear() === anno;
   }
-  const d = giorno(record.trasporto_finito_il) || giorno(record.ordine_immesso_il);
+  // Anche per le secondarie e le terziarie contano solo i movimenti terminati,
+  // e il periodo lo da' la fine del trasporto: un ordine annullato ha ancora
+  // destinazione e peso in archivio, e finiva nel denominatore delle rotte.
+  if (String(record.stato || '').toLowerCase().trim() !== 'terminato') return false;
+  const d = giorno(record.trasporto_finito_il);
   return !!d && d.getUTCFullYear() === anno;
 }
 
@@ -122,6 +133,13 @@ export default async function(req) {
       // Target dell'anno in corso, sommati per raccoglitore, regione e mese.
       const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter({ anno: new Date().getFullYear() }, '-created_date', 5000));
       newAlerts.push(...checkAggregateRules(records, regole, existingKeys, targets, attuali));
+    } else if (modulo === 'secondarie') {
+      // Le secondarie di rete e quelle ACI stanno nello stesso archivio: contarle
+      // insieme farebbe un denominatore che non esiste in nessun altro modulo, e
+      // una rotta ACI vera finirebbe segnalata come errore perche' annegata fra
+      // i viaggi di rete.
+      newAlerts.push(...soloRotte(records.filter(r => !eAci(r)), existingKeys, attuali, entityName, modulo, 'rete'));
+      newAlerts.push(...soloRotte(records.filter(eAci), existingKeys, attuali, entityName, modulo, 'ACI'));
     } else {
       newAlerts.push(...soloRotte(records, existingKeys, attuali, entityName, modulo));
     }
@@ -139,7 +157,9 @@ export default async function(req) {
 
     // Chiusura degli alert superati e dei doppioni, solo per le regole di questo
     // motore: gli alert creati da altri controlli restano come sono.
-    const idRegole = new Set(regole.map(r => r.id));
+    // La regola delle rotte non sta fra le RegolaAlert configurate, ma i suoi
+    // alert devono chiudersi come gli altri quando il formulario viene corretto.
+    const idRegole = new Set([...regole.map(r => r.id), REGOLA_ROTTA, REGOLA_ROTTA + '_rete', REGOLA_ROTTA + '_ACI']);
     const visti = new Set();
     const daChiudere = [];
     for (const a of existingAlerts) {
@@ -274,12 +294,12 @@ function checkRegola(record, regola, entityName) {
 }
 
 // I soli controlli di rotta, per i moduli che non hanno gli altri aggregati.
-function soloRotte(records, existingKeys, attuali, archivio, modulo) {
-  return checkAggregateRules(records, [], existingKeys, [], attuali, archivio, modulo);
+function soloRotte(records, existingKeys, attuali, archivio, modulo, canale = '') {
+  return checkAggregateRules(records, [], existingKeys, [], attuali, archivio, modulo, canale);
 }
 
 // --- Controlli aggregati per primarie_rete ---
-function checkAggregateRules(records, regole, existingKeys, targets = [], attuali = new Set(), archivio = 'PrimariaRete', modulo = 'primarie_rete') {
+function checkAggregateRules(records, regole, existingKeys, targets = [], attuali = new Set(), archivio = 'PrimariaRete', modulo = 'primarie_rete', canale = '') {
   const alerts = [];
 
   // Formulari chiusi su una destinazione dove quell'origine non va mai.
@@ -291,19 +311,20 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
   // che non l'ha mai visto: da li' sbagliano giacenze, dichiarazioni e
   // fatturazione.
   for (const sospetto of conferimentiSospetti(records, archivio)) {
-    const key = `rotta|||${sospetto.numero_fir || sospetto.id_ordine}`;
+    const record_id = sospetto.numero_fir || sospetto.id_ordine || '';
+    const key = `${record_id}|||${REGOLA_ROTTA}${canale ? '_' + canale : ''}`;
     attuali.add(key);
     if (existingKeys.has(key)) continue;
     alerts.push({
-      titolo: `Conferimento fuori rotta: ${sospetto.origine} a ${sospetto.destinazione}`,
+      titolo: `Conferimento fuori rotta${canale ? ' (' + canale + ')' : ''}: ${sospetto.origine} a ${sospetto.destinazione}`,
       descrizione: `${sospetto.testo} Formulario ${sospetto.numero_fir || '(senza numero)'}`
         + (sospetto.id_ordine ? `, ordine ${sospetto.id_ordine}` : '')
         + `, del ${sospetto.giorno}, ${sospetto.kg} kg.`,
       severita: 'warning',
       modulo,
       entity_type: archivio,
-      record_id: sospetto.numero_fir || sospetto.id_ordine || '',
-      regola_id: 'rotta_conferimento',
+      record_id,
+      regola_id: REGOLA_ROTTA + (canale ? '_' + canale : ''),
       regola_nome: 'Conferimento fuori rotta',
       stato: 'aperto',
     });

@@ -89,6 +89,7 @@ export function proiettaImpianto(impianto, dati, opzioni) {
     giacenza_nota: s.giacenza_nota || '',
     nota: s.giacenza_nota || '',
     media_ingressi_kg: mediaMensile(s.ingressi_per_mese || {}, meseCorrente),
+    ingressi_per_mese: s.ingressi_per_mese || {},
   }));
   const senzaRilevazione = stoccaggi.filter(s => s.giacenza_kg == null);
   let disponibileKg = stoccaggi.reduce((s, x) => s + (x.giacenza_kg || 0), 0);
@@ -200,6 +201,7 @@ export function proiettaImpianto(impianto, dati, opzioni) {
  */
 export function proiettaInsieme(elenco, opzioni = {}) {
   const chiave = (n) => String(n || '').toLowerCase().trim();
+  const meseDaCui = opzioni && opzioni.meseCorrente != null ? opzioni.meseCorrente : 0;
 
   const proiezioni = (elenco || []).map(x => proiettaImpianto(
     x.impianto, x.dati, { ...opzioni, ...(x.opzioni || {}), disponibilitaCondivisa: true },
@@ -217,7 +219,21 @@ export function proiettaInsieme(elenco, opzioni = {}) {
         saldo_kg: Number(st.giacenza_kg) || 0,
         ingressi_kg: Number(st.media_ingressi_kg) || 0,
         giacenza_iniziale_kg: Number(st.giacenza_kg) || 0,
+        // Nel mese da cui si parte una parte degli ingressi e' gia' arrivata, ed
+        // e' gia' dentro la giacenza rilevata: aggiungerla di nuovo la conterebbe
+        // due volte. Si aggiunge solo quello che manca ad arrivare.
+        gia_arrivato_kg: Number((st.ingressi_per_mese || {})[meseDaCui]) || 0,
+        quanti_la_usano: 0,
       });
+    }
+  }
+
+  // Quanti impianti attingono a ciascun piazzale: serve a servirli nell'ordine
+  // giusto, dal piu' vincolato al meno.
+  for (const p of proiezioni) {
+    for (const st of (p.stoccaggi || [])) {
+      const pz = piazzali.get(chiave(st.nome));
+      if (pz) pz.quanti_la_usano++;
     }
   }
 
@@ -225,7 +241,11 @@ export function proiettaInsieme(elenco, opzioni = {}) {
   const registro = [];
 
   for (let i = 0; i < mesiMax; i++) {
-    for (const pz of piazzali.values()) if (!pz.ignoto) pz.saldo_kg += pz.ingressi_kg;
+    for (const pz of piazzali.values()) {
+      if (pz.ignoto) continue;
+      const attesi = i === 0 ? Math.max(0, pz.ingressi_kg - pz.gia_arrivato_kg) : pz.ingressi_kg;
+      pz.saldo_kg += attesi;
+    }
 
     // chi chiede che cosa, questo mese
     const richieste = [];
@@ -246,8 +266,12 @@ export function proiettaInsieme(elenco, opzioni = {}) {
     }
 
     // tre giri di distribuzione proporzionale al bisogno che resta
+    // Gli esclusivi prima, i condivisi dopo: chi ha un piazzale suo lo consuma
+    // per primo e non toglie a chi sul condiviso non ha alternative. Altrimenti
+    // l'ordine dei record decideva chi resta a secco.
+    const inOrdine = [...piazzali.values()].sort((a, b) => a.quanti_la_usano - b.quanti_la_usano);
     for (let giro = 0; giro < 3; giro++) {
-      for (const pz of piazzali.values()) {
+      for (const pz of inOrdine) {
         if (pz.ignoto || pz.saldo_kg <= 0) continue;
         const k = chiave(pz.nome);
         const suoi = richieste.filter(r => r.noti.includes(k) && r.serve_kg - r.avuto_kg > 0);
@@ -267,8 +291,18 @@ export function proiettaInsieme(elenco, opzioni = {}) {
       }
     }
 
+    // L'avanzo di un piazzale condiviso non e' tutto di chi lo guarda: se ne
+    // conta la parte che gli spetterebbe, in proporzione a quanto gli manca.
+    const bisognoResiduo = (r) => Math.max(0, r.serve_kg - r.avuto_kg);
     for (const r of richieste) {
-      const disponibileSuo = r.noti.reduce((s, k) => s + piazzali.get(k).saldo_kg, 0) + r.avuto_kg;
+      const disponibileSuo = r.noti.reduce((s, k) => {
+        const pz = piazzali.get(k);
+        if (pz.quanti_la_usano <= 1) return s + pz.saldo_kg;
+        const concorrenti = richieste.filter(x => x.noti.includes(k));
+        const totale = concorrenti.reduce((n, x) => n + bisognoResiduo(x), 0);
+        const quota = totale > 0 ? bisognoResiduo(r) / totale : 1 / Math.max(1, concorrenti.length);
+        return s + pz.saldo_kg * quota;
+      }, 0) + r.avuto_kg;
       const fattibili = Math.floor(r.avuto_kg / KG_PER_VIAGGIO);
       r.riga.viaggi_disponibili = r.ignoto ? null : Math.floor(viaggiDa(disponibileSuo));
       r.riga.viaggi_mancanti = r.ignoto ? null : Math.max(0, (Number(r.riga.viaggi) || 0) - fattibili);

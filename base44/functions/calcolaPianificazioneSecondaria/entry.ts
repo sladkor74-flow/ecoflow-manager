@@ -56,7 +56,21 @@ export default async function(req) {
     }
 
     // === RUOLO-BASE: stoccaggi = ruolo stoccaggio o doppio_ruolo ===
-    const stoccaggiFornitori = fornitori.filter(f => f.ruolo === 'stoccaggio' || f.ruolo === 'doppio_ruolo' || (!f.ruolo && tipoNorm(f.tipo) === 'stoccaggio'));
+    // Chi spedisce secondarie a un impianto, per quell'impianto e' uno stoccaggio,
+    // qualunque cosa dica l'anagrafica. La correzione va fatta PRIMA di costruire
+    // plafond e metriche, altrimenti un fornitore corretto piu' avanti si ritrova
+    // senza metriche e con il piano a zero.
+    const spedisceSecondarie = new Set();
+    for (const r of secondarie) {
+      if (statoNorm(r.stato) !== 'terminato') continue;
+      if (yearOf(r.trasporto_finito_il) !== ANNO_RIFERIMENTO) continue;
+      const o = normalizzaRagioneSociale(r.stoccaggio);
+      if (o) spedisceSecondarie.add(o);
+    }
+    const eStoccaggio = (f) => f.ruolo === 'stoccaggio' || f.ruolo === 'doppio_ruolo'
+      || (!f.ruolo && tipoNorm(f.tipo) === 'stoccaggio')
+      || spedisceSecondarie.has(normalizzaRagioneSociale(f.nome));
+    const stoccaggiFornitori = fornitori.filter(eStoccaggio);
     const stoccaggioNames = new Set(stoccaggiFornitori.map(f => normalizzaRagioneSociale(f.nome)));
 
     // Map impianti normalizzati
@@ -246,6 +260,7 @@ export default async function(req) {
         const primDiQuesto = prim2026.filter(r => normalizzaRagioneSociale(r.trasportatore) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm && isImp(r)).length;
         const secDiQuesto = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm).length;
         const fRuolo = (fRuoloScritto === 'raccoglitore' && !primDiQuesto && secDiQuesto) ? 'doppio_ruolo' : fRuoloScritto;
+        // (stessa regola di eStoccaggio, calcolata sopra prima delle metriche)
         if (fRuolo !== fRuoloScritto) {
           anomalie.push({
             tipo: 'ruolo_discorde',
@@ -281,7 +296,15 @@ export default async function(req) {
           }
           // Riparto plafond residuo proporzionale al residuo target di questo impianto
           const resTargetImp = (imp.target || 0) - consuntivoSec;
-          const stocImpiantiIds = stoccaggiFornitori.filter(sf => normalizzaRagioneSociale(sf.nome) === fNorm).map(sf => sf.impianto_id);
+          // Gli impianti da cui parte il riparto sono quelli a cui questo
+          // piazzale spedisce davvero, piu' quello in corso: prendendoli dal solo
+          // ruolo scritto, un fornitore corretto sui fatti restava con un
+          // denominatore parziale e la quota poteva superare il 100%.
+          const stocImpiantiIds = [...new Set([
+            ...stoccaggiFornitori.filter(sf => normalizzaRagioneSociale(sf.nome) === fNorm).map(sf => sf.impianto_id),
+            ...impianti.filter(i => sec2026.some(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm && normalizzaRagioneSociale(r.destinazione) === normalizzaRagioneSociale(i.nome_impianto))).map(i => i.id),
+            imp.id,
+          ].filter(Boolean))];
           let sumResiduoTargetStoc = 0;
           for (const sImpId of stocImpiantiIds) {
             const sImp = impianti.find(i => i.id === sImpId);
@@ -291,7 +314,9 @@ export default async function(req) {
             const sRes = (sImp.target || 0) - sCons;
             if (sRes > 0) sumResiduoTargetStoc += sRes;
           }
-          quotaPlafondImpianto = sumResiduoTargetStoc > 0 && resTargetImp > 0 ? (m.residuo_plafond || 0) * (resTargetImp / sumResiduoTargetStoc) : 0;
+          quotaPlafondImpianto = sumResiduoTargetStoc > 0 && resTargetImp > 0
+            ? Math.min(m.residuo_plafond || 0, (m.residuo_plafond || 0) * (resTargetImp / sumResiduoTargetStoc))
+            : 0;
           // Per uno stoccaggio il residuo mostrato e' sempre stato quello
           // dell'impianto: quanto manca a lui, che questo piazzale dovrebbe
           // coprire. Da quando il target di un fornitore condiviso si divide
@@ -302,7 +327,13 @@ export default async function(req) {
           // impianto. Quello dell'impianto resta, in un campo che lo dice.
           residuoImpianto = resTargetImp;
           residuo = quotaTarget != null ? Math.max(0, targetRaccoglitoreKg - consuntivoSec) : resTargetImp;
-          baseCascata = quotaPlafondImpianto;
+          // Il piano settimanale nasce dal residuo di questo fornitore, non da un
+          // secondo riparto: con due criteri diversi il residuo mostrato e i kg a
+          // settimana raccontavano due storie. Il plafond resta un tetto, non la
+          // base del conto.
+          baseCascata = quotaTarget != null
+            ? Math.min(residuo, quotaPlafondImpianto > 0 ? quotaPlafondImpianto : residuo)
+            : quotaPlafondImpianto;
         } else {
           const fPrim = prim2026.filter(r => normalizzaRagioneSociale(r.trasportatore) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm && isImp(r));
           consuntivoPrim = fPrim.reduce((s, r) => s + (r.peso_effettivo || 0), 0);

@@ -109,7 +109,7 @@ function Impianto({ p, kgPerViaggio, isAdmin, onIpotesi, occupato }) {
                   <Cella>{t(r.secondarie_kg)} t</Cella>
                   <Cella classe={r.residuo_kg > 0 ? '' : 'text-emerald-700'}>{t(r.residuo_kg)} t</Cella>
                   <Cella classe={r.viaggi_mancanti > 0 ? 'text-red-700 font-medium' : 'text-muted-foreground'}>
-                    {formatIntero(r.viaggi_disponibili)}
+                    {r.viaggi_disponibili == null ? <span title="Manca la rilevazione di uno stoccaggio: la disponibilita non si puo calcolare">—</span> : formatIntero(r.viaggi_disponibili)}
                     {r.viaggi_mancanti > 0 && <span className="ml-1 text-[11px]">ne mancano {r.viaggi_mancanti}</span>}
                   </Cella>
                   {isAdmin && (

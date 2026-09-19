@@ -273,9 +273,10 @@ export const STRUMENTI = [
       const perCanale = {};
       for (const f of flussi) {
         const c = canaleDelFlusso(f.flusso);
-        if (!perCanale[c]) perCanale[c] = { canale: c, formulari: 0, tonnellate: 0, flussi: [] };
-        perCanale[c].formulari += f.formulari;
-        perCanale[c].tonnellate = Math.round((perCanale[c].tonnellate + f.tonnellate) * 1000) / 1000;
+        // Dentro un canale, primarie e secondarie non si sommano: lo stesso
+        // materiale e' arrivato una volta in primaria e poi si e' spostato in
+        // secondaria, e sommarli lo conterebbe due volte.
+        if (!perCanale[c]) perCanale[c] = { canale: c, totale_del_canale: null, flussi: [] };
         perCanale[c].flussi.push(f);
       }
       return {
@@ -286,7 +287,7 @@ export const STRUMENTI = [
           settimana, intervallo,
           canali: Object.values(perCanale),
           totale_della_settimana: null,
-          nota: 'Ogni canale ha il suo totale. Un totale della settimana che li metta insieme NON ESISTE e non va calcolato: rete, ACI ed extra raccolta sono commesse indipendenti. Nella risposta i numeri vanno dati per canale.',
+          nota: "Ogni flusso ha il suo totale e i totali NON si sommano, per due motivi diversi: fra canali perche' rete, ACI ed extra raccolta sono commesse indipendenti; dentro lo stesso canale perche' primaria e secondaria sono lo stesso materiale che si sposta, e sommarle lo conterebbe due volte. Nella risposta i numeri vanno dati flusso per flusso.",
         },
       };
     },
@@ -343,7 +344,7 @@ export const STRUMENTI = [
         mesi: (x.mesi || []).map(m => ({
           mese: m.mese, primaria_attesa_t: t3(m.primaria_kg), viaggi: m.viaggi,
           residuo_t: t3(m.residuo_kg), viaggi_disponibili: m.viaggi_disponibili, viaggi_mancanti: m.viaggi_mancanti,
-          da_ipotesi: !!m.da_ipotesi,
+          da_ipotesi: !!(m.primaria_da_ipotesi || m.viaggi_da_ipotesi),
         })),
         stoccaggi: (x.stoccaggi || []).map(st => ({ nome: st.nome, giacenza_t: st.giacenza_kg == null ? null : t3(st.giacenza_kg), nota: st.giacenza_nota || '' })),
         avvisi: x.avvisi || [],
@@ -393,7 +394,7 @@ export const STRUMENTI = [
         periodo: `anno ${anno}`,
         dati_al: oggiRoma(),
         dati: {
-          sospetti_totali: flussi.reduce((n, f2) => n + f2.sospetti.length, 0),
+          sospetti_per_flusso: flussi.map(f2 => ({ flusso: f2.flusso, quanti: f2.sospetti.length })),
           flussi: p.solo_sospetti ? flussi.map(f2 => ({ flusso: f2.flusso, sospetti: f2.sospetti })) : flussi,
           stoccaggi_condivisi: d.stoccaggi_condivisi,
           nota: "Le rotte si leggono dalla storia dell'anno: quello che un'origine fa quasi sempre e' la sua rotta, quello che fa una volta sola contro centinaia di viaggi e' quasi sempre un formulario chiuso male. Chi ha due rotte vere, con numeri consistenti, non viene segnalato.",
@@ -828,11 +829,14 @@ export const STRUMENTI = [
       if (meseChiesto) filtro.mese = meseChiesto;
       if (p.tipologia) filtro.tipologia = String(p.tipologia).toUpperCase();
       const voci = await fetchAll(svc.VoceFatturazione, filtro);
+      // Nell'attiva non c'e' un fornitore: c'e' chi fattura e c'e' Ecotyre, che
+      // paga. Filtrando su fornitore_nome, che li' e' vuoto, usciva sempre zero.
+      const nomeDi = (v) => (tipo === 'ATTIVA' ? (v.fatturante || v.cliente || 'ECOTYRE') : (v.fornitore_nome || 'N/D'));
       const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
-      const righe = k ? voci.filter(v => normalizzaRagioneSociale(v.fornitore_nome).includes(k)) : voci;
+      const righe = k ? voci.filter(v => normalizzaRagioneSociale(nomeDi(v)).includes(k)) : voci;
       const per = new Map();
       for (const v of righe) {
-        const nome = v.fornitore_nome || 'N/D';
+        const nome = nomeDi(v);
         const key = `${nome}|${v.tipologia || ''}`;
         if (!per.has(key)) per.set(key, { fornitore: nome, tipologia: v.tipologia, voci: 0, quantita: 0, totale_euro: 0, sospese: 0, da_controllare: 0, servizi: new Set() });
         const x = per.get(key);
