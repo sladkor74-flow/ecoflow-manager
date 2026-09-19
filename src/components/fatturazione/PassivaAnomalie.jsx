@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { formatNumber } from '@/lib/utils';
 import { ChevronDown, AlertTriangle } from 'lucide-react';
 
 export default function PassivaAnomalie({ anomalie }) {
@@ -24,7 +25,8 @@ export default function PassivaAnomalie({ anomalie }) {
               <span className="text-muted-foreground">[{a.prestazione}]</span>{' '}
               <span className="font-medium">{a.fornitore}</span>{' '}
               <span className="text-muted-foreground">— {a.descrizione}</span>
-              {a.tonnellate > 0 && <span className="text-muted-foreground ml-1">({a.tonnellate} t)</span>}
+              {a.tonnellate > 0 && <span className="text-muted-foreground ml-1">({formatNumber(a.tonnellate)} t)</span>}
+              {a.occorrenze > 1 && <span className="text-muted-foreground ml-1">— {a.occorrenze} righe</span>}
             </div>
           ))}
         </div>

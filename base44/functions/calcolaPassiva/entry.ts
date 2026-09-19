@@ -5,6 +5,7 @@ import { getRegioneFromProvincia } from '../../shared/regioneMap.ts';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { mappaFatturazione, fatturaA } from "../../shared/subfornitori.ts";
 import { giornoRoma, annoRoma, meseRoma } from "../../shared/giornoItaliano.ts";
+import { eAci } from "../../shared/canaleSecondaria.ts";
 
 const MESI_MAP = {
   'gennaio': 0, 'febbraio': 1, 'marzo': 2, 'aprile': 3, 'maggio': 4, 'giugno': 5,
@@ -29,11 +30,18 @@ function tariffaValidaPerData(t, dataIso) {
   return true;
 }
 
-function isAciRow(r) {
-  const c = String(r.classe || '').toLowerCase();
-  if (c.includes('autodemolizione')) return true;
-  const p = String(r.prodotto || '').toLowerCase();
-  return p.includes('autodemolizione');
+// L'ACI si riconosce con la regola condivisa (base44/shared/canaleSecondaria.ts),
+// non con una copia piu' debole: quella guardava solo classe e prodotto e si
+// perdeva il codice prodotto ".class9".
+const isAciRow = (r) => eAci(r);
+
+// Un viaggio e' un camion in un giorno. Il giorno e' quello italiano, come il
+// periodo, e la targa si normalizza: "GC 599 nl" e "GC599NL" sono lo stesso
+// mezzo, e contati due volte varrebbero due viaggi in fattura.
+function chiaveViaggio(rec) {
+  const giorno = giornoRoma(rec && rec.trasporto_finito_il);
+  const targa = String((rec && rec.automezzo) || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return `${giorno}|${targa}`;
 }
 
 function getRegione(r) {
@@ -92,9 +100,12 @@ function findTariffaRaccolta(tariffe, trasKey, provincia, regione, destinazione,
     // prezzo per destinazione e si sta invece applicando quello generico. Le
     // tariffe di Emmesse - 72 euro a Gatim, 90 a Irigom - sono nate cosi'.
     const con = (m, criterio) => (m ? { ...m, criterio } : null);
-    // a) destinazione
+    // a) destinazione - confrontata come ragione sociale, altrimenti "Gatim" e
+    // "GATIM S.R.L." sarebbero due destinazioni diverse e il prezzo per
+    // destinazione non si aggancerebbe mai
     if (!isEmpty(destinazione)) {
-      const m = candidates.find(t => norm(t.destinazione) === destinazione);
+      const dest = normalizzaRagioneSociale(destinazione);
+      const m = candidates.find(t => normalizzaRagioneSociale(t.destinazione) === dest);
       if (m) return con(m, 'destinazione');
     }
     // b) provincia (senza destinazione)
@@ -229,7 +240,7 @@ export default async function(req) {
     // Il prezzo unico e una tariffa di trattamento per lo stesso fornitore e lo
     // stesso canale non possono convivere: si pagherebbe due volte lo stesso
     // trattamento. Meglio dirlo prima che dopo.
-    for (const t of tariffe.filter(x => x.prestazione === 'RACCOLTA' && x.comprensiva_trattamento === true)) {
+    for (const t of tariffe.filter(x => x.prestazione === 'RACCOLTA' && x.comprensiva_trattamento === true && x.tipologia === tipologia)) {
       const doppia = tariffe.find(x => x.prestazione === 'TRATTAMENTO'
         && normalizzaRagioneSociale(x.fornitore_nome) === normalizzaRagioneSociale(t.fornitore_nome)
         && x.tipologia === t.tipologia);
@@ -339,7 +350,17 @@ export default async function(req) {
 
     for (const r of raccoglitoriSource) {
       const raccoglitore = String(r.trasportatore || '').trim();
-      if (!raccoglitore) continue;
+      if (!raccoglitore) {
+        // Senza raccoglitore non si sa a chi pagare: il peso uscirebbe dai
+        // conti senza che nessuno se ne accorga.
+        anomalie.push({
+          descrizione: `Formulario ${r.numero_fir || '—'} senza raccoglitore: non viene fatturato a nessuno.`,
+          fornitore: '—', prestazione: 'RACCOLTA', classe: String(r.classe || '—'),
+          ambito: `Dest: ${r.destinazione || '—'}`,
+          tonnellate: round3(Number(r.peso_effettivo || 0) / 1000),
+        });
+        continue;
+      }
       const fatt = fatturaA(perFattura, raccoglitore);
       const trasportatore = fatt.nome;
       const trasKey = fatt.chiave;
@@ -349,9 +370,7 @@ export default async function(req) {
       const classe = String(r.classe || '').trim();
       const dataIso = r.trasporto_finito_il;
       const peso = Number(r.peso_effettivo || 0);
-      const dataFine = dataIso ? dataIso.slice(0, 10) : '';
-      const automezzo = String(r.automezzo || '').trim();
-      const viaggioKey = `${dataFine}|${automezzo}`;
+      const viaggioKey = chiaveViaggio(r);
       const interno = isInterno(trasportatore);
 
       const tariffa = tipologia === 'EXTRA_RACCOLTA'
@@ -520,14 +539,20 @@ export default async function(req) {
         continue;
       }
       const destinazione = String(r.destinazione || '').trim();
-      if (!destinazione) continue;
+      if (!destinazione) {
+        anomalie.push({
+          descrizione: `Formulario ${r.numero_fir || '—'} senza destinazione: il trattamento o lo stoccaggio non viene fatturato a nessuno.`,
+          fornitore: '—', prestazione, classe: String(r.classe || '—'),
+          ambito: `Raccoglitore: ${r.trasportatore || '—'}`,
+          tonnellate: round3(Number(r.peso_effettivo || 0) / 1000),
+        });
+        continue;
+      }
       const destKey = normalizzaRagioneSociale(destinazione);
       const classe = String(r.classe || '').trim();
       const dataIso = r.trasporto_finito_il;
       const peso = Number(r.peso_effettivo || 0);
-      const dataFine = dataIso ? dataIso.slice(0, 10) : '';
-      const automezzo = String(r.automezzo || '').trim();
-      const viaggioKey = `${dataFine}|${automezzo}`;
+      const viaggioKey = chiaveViaggio(r);
       const interno = isInterno(destinazione);
 
       // Chi ha materialmente portato il carico: il raccoglitore per le primarie
@@ -725,18 +750,19 @@ export default async function(req) {
 
     const trasportiRows = [];
     for (const tratta of tratte.values()) {
-      const interno = isInterno(tratta.trasportatore);
+      // Anche qui vale la catena dei subfornitori: chi trasporta col proprio
+      // nome puo' fatturare tramite il principale, come nei primi due blocchi.
+      const fatt = fatturaA(perFattura, tratta.trasportatore);
+      const fatturante = fatt.nome;
+      const fatturanteKey = fatt.chiave;
+      const interno = isInterno(fatturante);
       // Sub-raggruppa per tariffa (validita' per record)
       const perTariffa = new Map();
       for (const r of tratta.records) {
-        const tariffa = findTariffaSecondaria(tariffe, tratta.trasKey, tratta.stoccaggio, tratta.destinazione, tipologia, r.trasporto_finito_il);
+        const tariffa = findTariffaSecondaria(tariffe, fatturanteKey, tratta.stoccaggio, tratta.destinazione, tipologia, r.trasporto_finito_il);
         const tk = tariffa ? tariffa.id : '__NESSUNA__';
-        if (!perTariffa.has(tk)) perTariffa.set(tk, { tariffa, records: [], viaggiSet: new Set() });
-        const pt = perTariffa.get(tk);
-        pt.records.push(r);
-        const dataFine = r.trasporto_finito_il ? r.trasporto_finito_il.slice(0, 10) : '';
-        const automezzo = String(r.automezzo || '').trim();
-        pt.viaggiSet.add(`${dataFine}|${automezzo}`);
+        if (!perTariffa.has(tk)) perTariffa.set(tk, { tariffa, records: [] });
+        perTariffa.get(tk).records.push(r);
       }
 
       for (const pt of perTariffa.values()) {
@@ -744,19 +770,37 @@ export default async function(req) {
         const aciRecs = pt.records.filter(r => isAciRow(r));
         const tonnellateRete = nonAciRecs.reduce((s, r) => s + Number(r.peso_effettivo || 0), 0) / 1000;
         const tonnellateAci = aciRecs.reduce((s, r) => s + Number(r.peso_effettivo || 0), 0) / 1000;
-        const viaggi = pt.viaggiSet.size;
+
+        // Ogni viaggio appartiene a un canale: e' della rete se porta almeno un
+        // formulario di rete, altrimenti e' ACI. Prima si contavano tutti i
+        // viaggi della tratta e si addebitavano alla rete, compresi quelli fatti
+        // di soli formulari ACI: un viaggio di un canale finiva nella fattura
+        // dell'altro.
+        const canalePerViaggio = new Map();
+        for (const rec of pt.records) {
+          const k = chiaveViaggio(rec);
+          const aci = isAciRow(rec);
+          if (!canalePerViaggio.has(k)) canalePerViaggio.set(k, aci);
+          else if (!aci) canalePerViaggio.set(k, false);
+        }
+        const valori = [...canalePerViaggio.values()];
+        const viaggiRete = valori.filter(v => !v).length;
+        const viaggiAci = valori.filter(v => v).length;
+        const viaggi = tipologia === 'ACI' ? viaggiAci : viaggiRete;
+        const viaggiTotali = canalePerViaggio.size;
         const viaggioMisto = nonAciRecs.length > 0 && aciRecs.length > 0;
+        const senzaTarga = pt.records.some(rec => !String(rec.automezzo || '').trim());
         const um = pt.tariffa ? pt.tariffa.unita_misura : '';
         const valore = pt.tariffa ? pt.tariffa.valore : 0;
 
         if (!pt.tariffa && !interno) {
           anomalie.push({
             descrizione: `Tratta secondaria senza tariffa TRASPORTO_SECONDARIA: ${tratta.stoccaggio} → ${tratta.destinazione} (trasportatore: ${tratta.trasportatore})`,
-            fornitore: tratta.trasportatore,
+            fornitore: fatturante,
             prestazione: 'TRASPORTO_SECONDARIA',
             classe: '—',
             ambito: `${tratta.stoccaggio} → ${tratta.destinazione}`,
-            tonnellate: round3(tonnellateRete + tonnellateAci),
+            tonnellate: round3(tipologia === 'ACI' ? tonnellateAci : tonnellateRete),
           });
           continue;
         }
@@ -765,11 +809,11 @@ export default async function(req) {
         if (viaggioMisto && um === '€/viaggio') {
           anomalie.push({
             descrizione: `Tratta con viaggio misto (RETE+ACI) e tariffa €/viaggio: ${tratta.stoccaggio} → ${tratta.destinazione} (trasportatore: ${tratta.trasportatore})`,
-            fornitore: tratta.trasportatore,
+            fornitore: fatturante,
             prestazione: 'TRASPORTO_SECONDARIA',
             classe: '—',
             ambito: `${tratta.stoccaggio} → ${tratta.destinazione}`,
-            tonnellate: round3(tonnellateRete + tonnellateAci),
+            tonnellate: round3(tipologia === 'ACI' ? tonnellateAci : tonnellateRete),
           });
         }
 
@@ -779,13 +823,23 @@ export default async function(req) {
           importo = 0;
           note = 'interno, non fatturato';
         } else if (um === '€/viaggio') {
-          // Una sola volta sulla tratta: RETE se ha non-ACI, altrimenti ACI
-          if (tipologia === 'RETE') {
-            if (nonAciRecs.length > 0) importo = viaggi * valore;
-            else { importo = 0; note = 'nessuna riga RETE'; }
-          } else { // ACI
-            if (nonAciRecs.length > 0) { importo = 0; note = 'viaggio fatturato nel canale RETE'; }
-            else importo = viaggi * valore;
+          // Si pagano i viaggi di questo canale. Un viaggio misto porta anche
+          // formulari ACI ma si paga una volta sola, sulla rete.
+          importo = viaggi * valore;
+          if (viaggi === 0) {
+            note = tipologia === 'ACI'
+              ? 'nessun viaggio di soli formulari ACI: i viaggi misti si pagano sulla rete'
+              : 'nessun viaggio con formulari di rete';
+          }
+          if (senzaTarga && !interno) {
+            anomalie.push({
+              descrizione: `Tratta a ${valore} euro a viaggio senza targa su almeno un formulario: ${tratta.stoccaggio} → ${tratta.destinazione}. Senza targa i carichi dello stesso giorno contano come un viaggio solo.`,
+              fornitore: fatturante,
+              prestazione: 'TRASPORTO_SECONDARIA',
+              classe: '—',
+              ambito: `${tratta.stoccaggio} → ${tratta.destinazione}`,
+              tonnellate: round3(tonnellateRete + tonnellateAci),
+            });
           }
         } else if (um === '€/t' || um === '€/kg') {
           // Per canale: RETE usa tonnellate non-ACI, ACI usa tonnellate ACI
@@ -808,13 +862,15 @@ export default async function(req) {
         if (round3(tonnellateCanale) === 0 && round2(importo) === 0) continue;
 
         trasportiRows.push({
-          fornitore: tratta.trasportatore, fornitore_norm: tratta.trasKey, interno,
+          fornitore: fatturante, fornitore_norm: fatturanteKey, interno,
           riga: {
             stoccaggio: tratta.stoccaggio, destinazione: tratta.destinazione,
+            trasportatore: tratta.trasportatore,
             tonnellate: round3(tonnellateCanale),
             tonnellate_altro_canale: round3(tonnellateAltro),
             canale_altro: tipologia === 'ACI' ? 'RETE' : 'ACI',
-            viaggi, tariffa_valore: valore, unita_misura: um,
+            viaggi, viaggi_totali_tratta: viaggiTotali,
+            tariffa_valore: valore, unita_misura: um,
             importo: round2(importo), viaggio_misto: viaggioMisto, note,
           },
         });
@@ -840,13 +896,18 @@ export default async function(req) {
 
     // Una stessa anomalia puo' nascere da piu' righe uguali: si dice una volta
     // sola, altrimenti l'elenco sembra piu' grave di quello che e'.
-    const anomalieViste = new Set();
-    const anomalieUniche = anomalie.filter(a => {
+    // Due righe che sollevano la stessa anomalia diventano una riga sola, ma le
+    // tonnellate si sommano: altrimenti l'anomalia dichiarerebbe il peso di un
+    // formulario solo e il problema sembrerebbe piu' piccolo di quello che e'.
+    const anomaliePerChiave = new Map();
+    for (const a of anomalie) {
       const k = `${a.descrizione}|${a.fornitore}|${a.prestazione}|${a.classe}|${a.ambito}`;
-      if (anomalieViste.has(k)) return false;
-      anomalieViste.add(k);
-      return true;
-    });
+      const prima = anomaliePerChiave.get(k);
+      if (!prima) { anomaliePerChiave.set(k, { ...a, occorrenze: 1 }); continue; }
+      prima.tonnellate = round3(Number(prima.tonnellate || 0) + Number(a.tonnellate || 0));
+      prima.occorrenze += 1;
+    }
+    const anomalieUniche = [...anomaliePerChiave.values()];
 
     // ─── TOTALI ───
     const totaleRaccoglitori = raccoglitori.reduce((s, f) => s + f.totale_euro, 0);

@@ -36,6 +36,9 @@ export default function PassivaSecondariaTable({ data, tipologia }) {
                     <td className="px-3 py-1.5">
                       {r.stoccaggio} → {r.destinazione}
                       {r.viaggio_misto && <span className="ml-1.5 text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded dark:bg-amber-900/40 dark:text-amber-200">viaggio misto</span>}
+                      {r.trasportatore && r.trasportatore !== f.fornitore && (
+                        <div className="text-[11px] text-muted-foreground">guidato da {r.trasportatore}</div>
+                      )}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">
                       {formatNumber(r.tonnellate)}
