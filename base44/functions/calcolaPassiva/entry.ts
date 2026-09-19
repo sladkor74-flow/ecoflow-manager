@@ -813,7 +813,17 @@ export default async function(req) {
         const valori = [...canalePerViaggio.values()];
         const viaggiRete = valori.filter(v => !v).length;
         const viaggiAci = valori.filter(v => v).length;
-        const viaggi = tipologia === 'ACI' ? viaggiAci : viaggiRete;
+        // I viaggi che si pagano in questo canale: un viaggio misto si paga
+        // tutto sulla rete, quindi sull'ACI non se ne paga nessuno.
+        const viaggiDaPagare = tipologia === 'ACI' ? viaggiAci : viaggiRete;
+        // I viaggi che hanno portato formulari di questo canale: sono altra
+        // cosa, e sono quelli che ha senso mostrare accanto a un prezzo a
+        // tonnellata, dove "zero viaggi" non vorrebbe dire niente.
+        const conFormulari = new Set();
+        for (const rec of pt.records) {
+          if (isAciRow(rec) === (tipologia === 'ACI')) conFormulari.add(chiaveViaggio(rec));
+        }
+        const viaggiConFormulari = conFormulari.size;
         const viaggiTotali = canalePerViaggio.size;
         const viaggioMisto = nonAciRecs.length > 0 && aciRecs.length > 0;
         const senzaTarga = pt.records.some(rec => !String(rec.automezzo || '').trim());
@@ -828,7 +838,7 @@ export default async function(req) {
         // Se in questo canale la tratta non ha portato niente, non e' affar suo:
         // niente riga e nemmeno l'anomalia, che altrimenti uscirebbe due volte,
         // una per canale, anche dove non c'entra.
-        if (round3(tonnellateCanale) === 0 && viaggi === 0) continue;
+        if (round3(tonnellateCanale) === 0 && viaggiDaPagare === 0 && viaggiConFormulari === 0) continue;
 
         if (!pt.tariffa && !interno) {
           anomalie.push({
@@ -862,8 +872,8 @@ export default async function(req) {
         } else if (um === '€/viaggio') {
           // Si pagano i viaggi di questo canale. Un viaggio misto porta anche
           // formulari ACI ma si paga una volta sola, sulla rete.
-          importo = viaggi * valore;
-          if (viaggi === 0) {
+          importo = viaggiDaPagare * valore;
+          if (viaggiDaPagare === 0) {
             note = tipologia === 'ACI'
               ? 'nessun viaggio di soli formulari ACI: i viaggi misti si pagano sulla rete'
               : 'nessun viaggio con formulari di rete';
@@ -899,7 +909,11 @@ export default async function(req) {
             tonnellate: round3(tonnellateCanale),
             tonnellate_altro_canale: round3(tonnellateAltro),
             canale_altro: tipologia === 'ACI' ? 'RETE' : 'ACI',
-            viaggi, viaggi_totali_tratta: viaggiTotali,
+            // A viaggio si mostrano i viaggi che si pagano, cosi' la
+            // moltiplicazione torna con l'importo; a tonnellata quelli che hanno
+            // portato i formulari del canale.
+            viaggi: um === '€/viaggio' ? viaggiDaPagare : viaggiConFormulari,
+            viaggi_totali_tratta: viaggiTotali,
             tariffa_valore: valore, unita_misura: um,
             importo: round2(importo), viaggio_misto: viaggioMisto, note,
           },
