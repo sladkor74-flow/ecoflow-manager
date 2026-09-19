@@ -100,6 +100,11 @@ const TARIFFE: TariffaSeed[] = [
   { fornitore: 'TRANSAR SRL', prestazione: 'TRASPORTO_SECONDARIA', tipologia: 'TUTTE', unita_misura: '€/viaggio', valore: 400, produttore: 'NAPPI SUD SRL', destinatario: 'Irigom S.r.l.' },
   { fornitore: 'PATERTRANS SRL', prestazione: 'TRASPORTO_SECONDARIA', tipologia: 'TUTTE', unita_misura: '€/viaggio', valore: 500, produttore: 'NAPPI SUD SRL', destinatario: 'TECNOGUM SRL' },
   { fornitore: 'TRANSAR SRL', prestazione: 'TRASPORTO_SECONDARIA', tipologia: 'TUTTE', unita_misura: '€/viaggio', valore: 300, produttore: 'T-CYCLE INDUSTRIES SRL', destinatario: 'TECNOGUM SRL' },
+  // Comunicate dall'amministratore il 19/09/2026 e gia' inserite in archivio:
+  // stanno qui perche' il seed resti l'elenco completo delle tariffe 2026.
+  { fornitore: 'AUTOTRASPORTI IELAPI DI CUNOCCHIELLA RITA', prestazione: 'TRASPORTO_SECONDARIA', tipologia: 'TUTTE', unita_misura: '€/viaggio', valore: 500, produttore: 'IRIGOM S.R.L.', destinatario: 'Gatim' },
+  { fornitore: 'SILVANO RENATO', prestazione: 'TRASPORTO_SECONDARIA', tipologia: 'TUTTE', unita_misura: '€/viaggio', valore: 450, produttore: 'NAPPI SUD SRL', destinatario: 'Irigom S.r.l.' },
+  { fornitore: 'ECOSERVICE SRL - Carrara (MS)', prestazione: 'TRASPORTO_SECONDARIA', tipologia: 'TUTTE', unita_misura: '€/t', valore: 30, produttore: 'T-CYCLE INDUSTRIES SRL', destinatario: 'TECNOGUM SRL' },
 ];
 
 function tariffaKey(t: any, fornitoreId: string): string {

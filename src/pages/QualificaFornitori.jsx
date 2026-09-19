@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { base44 } from '@/api/base44Client';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import ContrattiAnno from '@/components/qualifica/ContrattiAnno';
 import { useAuth } from '@/lib/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -286,6 +288,17 @@ export default function QualificaFornitori() {
             <Kpi etichetta="Alert aperti" valore={r.alert_aperti} Icona={Bell} tono="text-amber-600" />
           </div>
 
+          <Tabs defaultValue="documenti">
+            <TabsList>
+              <TabsTrigger value="documenti">Documenti</TabsTrigger>
+              <TabsTrigger value="contratti">Contratti</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="contratti" className="mt-4">
+              <ContrattiAnno anno={anno} isAdmin={isAdmin} />
+            </TabsContent>
+
+            <TabsContent value="documenti" className="mt-4 space-y-4">
           <PannelloAlert soggetti={dati.soggetti} onApri={setAperto} />
 
           <section className="space-y-3">
@@ -374,6 +387,8 @@ export default function QualificaFornitori() {
               </div>
             </section>
           )}
+            </TabsContent>
+          </Tabs>
         </>
       )}
 

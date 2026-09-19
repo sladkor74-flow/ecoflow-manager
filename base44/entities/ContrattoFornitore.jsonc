@@ -1,0 +1,128 @@
+{
+  "name": "ContrattoFornitore",
+  "type": "object",
+  "properties": {
+    "anno": {
+      "type": "number"
+    },
+    "soggetto_chiave": {
+      "type": "string",
+      "description": "Ragione sociale normalizzata, la stessa chiave dei documenti di qualifica"
+    },
+    "soggetto_nome": {
+      "type": "string"
+    },
+    "tipo_contratto": {
+      "type": "string",
+      "enum": [
+        "raccolta",
+        "stoccaggio",
+        "trattamento",
+        "trasporto_secondaria"
+      ]
+    },
+    "canale": {
+      "type": "string",
+      "enum": [
+        "RETE",
+        "ACI",
+        "EXTRA_RACCOLTA"
+      ],
+      "default": "RETE"
+    },
+    "modello_id": {
+      "type": "string"
+    },
+    "modello_nome": {
+      "type": "string"
+    },
+    "contratto_precedente_id": {
+      "type": "string",
+      "description": "Il contratto dell'anno prima da cui sono stati ripresi i valori"
+    },
+    "data_inizio": {
+      "type": "string",
+      "format": "date"
+    },
+    "data_fine": {
+      "type": "string",
+      "format": "date"
+    },
+    "quantitativo_previsto_t": {
+      "type": "number",
+      "description": "Quantitativo previsto per l'anno, in tonnellate"
+    },
+    "condizioni_pagamento": {
+      "type": "string",
+      "description": "Condizioni economiche di pagamento, come vanno scritte nel contratto"
+    },
+    "valori_json": {
+      "type": "string",
+      "description": "Tutti i valori dei segnaposto del modello: e' quello che serve per rigenerare il documento identico"
+    },
+    "importi_json": {
+      "type": "string",
+      "description": "Le righe delle condizioni economiche: voce, importo, unita' di misura"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "bozza",
+        "generato",
+        "inviato",
+        "controfirmato",
+        "annullato"
+      ],
+      "default": "bozza"
+    },
+    "file_uri": {
+      "type": "string",
+      "description": "Il documento generato"
+    },
+    "file_nome": {
+      "type": "string"
+    },
+    "generato_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "inviato_il": {
+      "type": "string",
+      "format": "date"
+    },
+    "controfirmato_il": {
+      "type": "string",
+      "format": "date"
+    },
+    "documento_qualifica_id": {
+      "type": "string",
+      "description": "Il documento di qualifica creato quando si carica il contratto controfirmato"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "anno",
+    "soggetto_chiave",
+    "tipo_contratto"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "name": "ModelloContratto",
+  "type": "object",
+  "properties": {
+    "nome": {
+      "type": "string",
+      "description": "Come si chiama il modello, per riconoscerlo nell'elenco"
+    },
+    "tipo_contratto": {
+      "type": "string",
+      "enum": [
+        "raccolta",
+        "stoccaggio",
+        "trattamento",
+        "trasporto_secondaria"
+      ]
+    },
+    "canale": {
+      "type": "string",
+      "enum": [
+        "RETE",
+        "ACI",
+        "EXTRA_RACCOLTA"
+      ],
+      "default": "RETE",
+      "description": "Canale a cui si applica: rete, ACI ed extra raccolta hanno contratti e condizioni diversi e non vanno mai mescolati"
+    },
+    "anno_riferimento": {
+      "type": "number",
+      "description": "Anno del contratto da cui il modello e' stato ricavato"
+    },
+    "file_uri": {
+      "type": "string",
+      "description": "Il .docx del modello, con i segnaposto fra doppie graffe"
+    },
+    "file_nome": {
+      "type": "string"
+    },
+    "segnaposti_json": {
+      "type": "string",
+      "description": "I segnaposto trovati nel modello quando e' stato caricato, in ordine di comparsa"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "attivo",
+        "sostituito"
+      ],
+      "default": "attivo",
+      "description": "Un modello superato resta in archivio con il motivo: si scarta cio' che e' superato, non lo si cancella"
+    },
+    "sostituisce_id": {
+      "type": "string"
+    },
+    "motivo_sostituzione": {
+      "type": "string"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "nome",
+    "tipo_contratto"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
