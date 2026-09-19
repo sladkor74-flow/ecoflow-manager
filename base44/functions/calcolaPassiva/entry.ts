@@ -352,8 +352,12 @@ export default async function(req) {
       if (righe.length < 2) continue;
       const kg = righe.reduce((s, x) => s + Number(x.peso_effettivo || 0), 0);
       const pesi = righe.map(x => `${Math.round(Number(x.peso_effettivo || 0))} kg`).join(' + ');
+      // Gli ID ordine si mostrano tutti: se sono due diversi il formulario e'
+      // stato usato su due ordini, se e' lo stesso e' un ritiro caricato due
+      // volte. Sono due cose diverse e chi guarda deve poterle distinguere.
+      const ordini = [...new Set(righe.map(x => String(x.id_ordine || x.codice_import || '').trim()).filter(Boolean))];
       anomalie.push({
-        descrizione: `Formulario ${fir} presente ${righe.length} volte nel mese (${pesi}): se e' lo stesso ritiro caricato piu' volte, raccolta, stoccaggio e trattamento si pagano due volte. ID ordine ${righe[0].codice_import || '—'}, ${righe[0].trasportatore || '—'} → ${righe[0].destinazione || '—'}.`,
+        descrizione: `Formulario ${fir} presente ${righe.length} volte nel mese (${pesi}): se e' lo stesso ritiro caricato piu' volte, raccolta, stoccaggio e trattamento si pagano due volte. ${ordini.length > 1 ? 'ID ordine diversi' : 'ID ordine'}: ${ordini.join(', ') || '—'}. ${righe[0].trasportatore || '—'} → ${righe[0].destinazione || '—'}.`,
         fornitore: righe[0].trasportatore || '—',
         prestazione: 'FORMULARIO RIPETUTO',
         classe: String(righe[0].classe || '—'),
