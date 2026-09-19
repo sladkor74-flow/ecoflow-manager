@@ -38,13 +38,14 @@ export default async function(req) {
     const meseDa = body.mese_da != null ? Number(body.mese_da) : Number(oggi.slice(5, 7)) - 1;
 
     const svc = base44.asServiceRole.entities;
-    const [impianti, fornitori, primarie, secondarie, rilevazioni, ipotesiTutte] = await Promise.all([
+    const [impianti, fornitori, primarie, secondarie, rilevazioni, ipotesiTutte, giacenzeSito] = await Promise.all([
       svc.ImpiantoTargetSecondaria.filter({ stato: 'attivo' }),
       svc.FornitoreSecondaria.filter({ stato: 'attivo' }),
       fetchAll(svc.PrimariaRete, { stato: 'terminato' }),
       fetchAll(svc.Secondaria, { stato: 'terminato' }),
       fetchAll(svc.GiacenzaStoccaggio),
       svc.IpotesiMensileSecondarie.filter({ anno }, 'mese', 500),
+      svc.GiacenzaSito.filter({ anno }, 'sito', 100).catch(() => []),
     ]);
 
     // --- dove arriva la roba, mese per mese ---
@@ -156,6 +157,13 @@ export default async function(req) {
       }));
     };
 
+    // Il target scritto nel foglio delle giacenze, per il confronto.
+    const giacenzaSitoPer = new Map();
+    for (const g2 of giacenzeSito) {
+      const k = normalizzaRagioneSociale(g2.sito);
+      if (k && !giacenzaSitoPer.has(k)) giacenzaSitoPer.set(k, g2);
+    }
+
     const proiezioni = impianti.map(imp => {
       const chiave = normalizzaRagioneSociale(imp.nome_impianto);
       const p = proiettaImpianto(
@@ -167,7 +175,17 @@ export default async function(req) {
         },
         { meseCorrente: meseDa, ipotesi: ipotesiPulite(chiave) },
       );
-      return { ...p, impianto_id: imp.id, impianto_registrato: imp.nome_impianto, data_fine: imp.data_fine || `${anno}-12-18` };
+      // Il target dell'impianto sta scritto in due posti - qui e nel foglio delle
+      // giacenze - e devono dire la stessa cosa: se non la dicono, la proiezione
+      // lo segnala invece di scegliere da sola quale sia quello buono. Trovata
+      // cosi' una differenza di 5 t su Tecnogum, il 19/09/2026.
+      const sito = giacenzaSitoPer.get(chiave);
+      const altroTarget = sito && Number(sito.target_totale_t) > 0 ? Math.round(Number(sito.target_totale_t) * 1000) : null;
+      const avvisi = [...(p.avvisi || [])];
+      if (altroTarget !== null && Math.abs(altroTarget - (Number(imp.target) || 0)) >= 1000) {
+        avvisi.push(`Il target di questo impianto non coincide fra i moduli: qui vale ${Math.round((Number(imp.target) || 0) / 1000)} t, nelle Giacenze ${Math.round(altroTarget / 1000)} t. La proiezione usa il primo: correggi quello sbagliato, perche' i due numeri devono coincidere.`);
+      }
+      return { ...p, avvisi, impianto_id: imp.id, impianto_registrato: imp.nome_impianto, data_fine: imp.data_fine || `${anno}-12-18` };
     });
 
     return Response.json({
