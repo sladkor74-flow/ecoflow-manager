@@ -136,6 +136,28 @@ demolitore a cui afferisce il formulario; la raccolta di Emmesse costa 72 euro s
 scarica a Gatim e 90 se scarica a Irigom. In fatturazione la destinazione sta in
 colonna e la riga porta il criterio con cui la tariffa e' stata scelta.
 
+### Le due regole del portale sull'ACI
+
+Una richiesta ACI non si stima sotto i **1.500 kg**, e un formulario ACI non si
+chiude a piu' del **10% del peso stimato del suo ticket**. Il ticket e' il
+`numero_ordine_interno` (colonna AL, Numero_Ordine_Interno, nei file delle
+primarie e degli assegnati); il peso stimato e' `peso_stimato` (colonna U), letto
+sullo stesso ID ordine (colonna A).
+
+Da qui una conseguenza che sembra un errore e non lo e': **lo stesso formulario
+puo' comparire su due ID ordine diversi.** Succede quando il carico supera la
+soglia del primo ticket e il peso effettivo viene ripartito su un secondo ordine,
+col suo ticket e il suo stimato. Il 9 giugno 2026 il formulario RGYTR022620TW sta
+su ET26091175 (ticket 162684-15, stimato 2.800, effettivo 1.960) e su ET26102183
+(ticket 163142-85, stimato 1.500, effettivo 1.500): tutti i 3.460 kg sul primo
+ticket avrebbero sforato i 3.080 ammessi.
+
+In fattura conta **solo la somma dei pesi effettivi**. La scomposizione - un rigo
+per ID con ticket, stimato ed effettivo - si mostra lo stesso, perche' rende
+leggibile da dove viene il totale. E' un'anomalia vera, invece, lo stesso
+formulario due volte sullo **stesso** ordine: quello e' un ritiro caricato due
+volte e si pagherebbe due volte.
+
 **Tariffa zero non e' un dato mancante.** Il trattamento della rete su Tecnogum
 e' davvero a zero, perche' nessun contratto lo prevede. Eco Faso e' una
 autodemolizione dove SMOCO va a raccogliere, non un trasportatore: e' giusto che

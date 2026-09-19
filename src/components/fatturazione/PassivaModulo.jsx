@@ -9,6 +9,7 @@ import PassivaRaccoglitoriTable from './PassivaRaccoglitoriTable';
 import PassivaImpiantiTable from './PassivaImpiantiTable';
 import PassivaSecondariaTable from './PassivaSecondariaTable';
 import PassivaAnomalie from './PassivaAnomalie';
+import PassivaFormulariRipartiti from './PassivaFormulariRipartiti';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const ANNI = [2024, 2025, 2026];
@@ -97,6 +98,9 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
 
           {/* Anomalie */}
           <PassivaAnomalie anomalie={result.anomalie} />
+
+          {/* Formulari il cui peso e' stato ripartito su piu' ordini */}
+          <PassivaFormulariRipartiti formulari={result.formulari_ripartiti} />
 
           {/* Tabelle */}
           <div className="space-y-4">

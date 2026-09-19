@@ -7,6 +7,12 @@ import { mappaFatturazione, fatturaA } from "../../shared/subfornitori.ts";
 import { giornoRoma, annoRoma, meseRoma } from "../../shared/giornoItaliano.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 
+// Regole del portale sull'ACI, dette dalla direzione il 19/09/2026: una
+// richiesta non si stima sotto i 1.500 kg, e un formulario non si chiude a piu'
+// del 10% del peso stimato del suo ticket.
+const MINIMO_ACI_KG = 1500;
+const SOGLIA_ACI = 1.1;
+
 const MESI_MAP = {
   'gennaio': 0, 'febbraio': 1, 'marzo': 2, 'aprile': 3, 'maggio': 4, 'giugno': 5,
   'luglio': 6, 'agosto': 7, 'settembre': 8, 'ottobre': 9, 'novembre': 10, 'dicembre': 11
@@ -348,22 +354,94 @@ export default async function(req) {
     };
     for (const rec of raccoglitoriSource) raccogliFir(rec);
     for (const { r: rec } of impiantiRecords) raccogliFir(rec);
+    // Lo stesso formulario su piu' ordini non e' un errore: nell'ACI e' il modo
+    // normale di stare dentro le regole del portale. Una richiesta ACI non puo'
+    // essere stimata sotto i 1.500 kg, e un formulario non puo' chiudersi a piu'
+    // del 10% del peso stimato del suo ticket (il Numero_Ordine_Interno): quando
+    // il carico supera quella soglia, il peso effettivo si ripartisce su un
+    // secondo ordine, con il suo ticket e il suo stimato. In fattura conta solo
+    // la somma dei pesi effettivi, ma la scomposizione si tiene e si mostra.
+    //
+    // Il 9 giugno 2026 il formulario RGYTR022620TW sta su ET26091175 (ticket
+    // 162684-15, stimato 2.800, effettivo 1.960) e su ET26102183 (ticket
+    // 163142-85, stimato 1.500, effettivo 1.500): tutti i 3.460 kg sul primo
+    // ticket avrebbero sforato i 3.080 ammessi.
+    //
+    // Resta invece un'anomalia vera il formulario che compare due volte sullo
+    // STESSO ordine: quello si', e' un ritiro caricato due volte, e si pagherebbe
+    // due volte.
+    const formulariRipartiti = [];
     for (const [fir, righe] of perFir) {
       if (righe.length < 2) continue;
       const kg = righe.reduce((s, x) => s + Number(x.peso_effettivo || 0), 0);
-      const pesi = righe.map(x => `${Math.round(Number(x.peso_effettivo || 0))} kg`).join(' + ');
-      // Gli ID ordine si mostrano tutti: se sono due diversi il formulario e'
-      // stato usato su due ordini, se e' lo stesso e' un ritiro caricato due
-      // volte. Sono due cose diverse e chi guarda deve poterle distinguere.
       const ordini = [...new Set(righe.map(x => String(x.id_ordine || x.codice_import || '').trim()).filter(Boolean))];
+
+      if (ordini.length > 1) {
+        formulariRipartiti.push({
+          numero_fir: fir,
+          trasportatore: righe[0].trasportatore || '—',
+          destinazione: righe[0].destinazione || '—',
+          classe: String(righe[0].classe || '—'),
+          tonnellate_fatturate: round3(kg / 1000),
+          quote: righe.map(x => {
+            const stimato = Math.round(Number(x.peso_stimato || 0));
+            const effettivo = Math.round(Number(x.peso_effettivo || 0));
+            const massimo = stimato ? Math.round(stimato * SOGLIA_ACI) : 0;
+            return {
+              id_ordine: x.id_ordine || x.codice_import || '—',
+              ticket: x.numero_ordine_interno || '—',
+              peso_stimato_kg: stimato,
+              peso_effettivo_kg: effettivo,
+              massimo_ammesso_kg: massimo,
+              oltre_soglia: !!(massimo && effettivo > massimo),
+            };
+          }).sort((a, b) => b.peso_effettivo_kg - a.peso_effettivo_kg),
+        });
+        continue;
+      }
+
+      const pesi = righe.map(x => `${Math.round(Number(x.peso_effettivo || 0))} kg`).join(' + ');
       anomalie.push({
-        descrizione: `Formulario ${fir} presente ${righe.length} volte nel mese (${pesi}): se e' lo stesso ritiro caricato piu' volte, raccolta, stoccaggio e trattamento si pagano due volte. ${ordini.length > 1 ? 'ID ordine diversi' : 'ID ordine'}: ${ordini.join(', ') || '—'}. ${righe[0].trasportatore || '—'} → ${righe[0].destinazione || '—'}.`,
+        descrizione: `Formulario ${fir} presente ${righe.length} volte sullo stesso ordine ${ordini[0] || '—'} (${pesi}): e' lo stesso ritiro caricato piu' volte, e raccolta, stoccaggio e trattamento si pagano due volte. ${righe[0].trasportatore || '—'} → ${righe[0].destinazione || '—'}.`,
         fornitore: righe[0].trasportatore || '—',
         prestazione: 'FORMULARIO RIPETUTO',
         classe: String(righe[0].classe || '—'),
         ambito: `FIR ${fir}`,
         tonnellate: round3(kg / 1000),
       });
+    }
+
+    // ─── LE DUE REGOLE DEL PORTALE SULL'ACI ───
+    // Si controllano qui perche' e' il peso effettivo che si paga, e un
+    // formulario chiuso oltre la soglia e' un formulario da correggere prima di
+    // fatturarlo.
+    if (tipologia === 'ACI') {
+      for (const rec of raccoglitoriSource) {
+        const stimato = Number(rec.peso_stimato || 0);
+        const effettivo = Number(rec.peso_effettivo || 0);
+        const ticket = rec.numero_ordine_interno || '—';
+        if (stimato > 0 && effettivo > stimato * SOGLIA_ACI) {
+          const eccesso = Math.round((effettivo / stimato - 1) * 1000) / 10;
+          anomalie.push({
+            descrizione: `Formulario ${rec.numero_fir || '—'} (ordine ${rec.id_ordine || '—'}, ticket ${ticket}) chiuso a ${Math.round(effettivo)} kg su ${Math.round(stimato)} stimati, cioe' +${eccesso}%: oltre il 10% ammesso per un ticket ACI. Il peso in eccesso va ripartito su un altro ordine.`,
+            fornitore: rec.trasportatore || '—',
+            prestazione: 'SOGLIA ACI',
+            classe: String(rec.classe || '—'),
+            ambito: `FIR ${rec.numero_fir || '—'}`,
+            tonnellate: round3(effettivo / 1000),
+          });
+        }
+        if (stimato > 0 && stimato < MINIMO_ACI_KG) {
+          anomalie.push({
+            descrizione: `Ordine ${rec.id_ordine || '—'} (ticket ${ticket}) stimato ${Math.round(stimato)} kg: una richiesta ACI non puo' essere stimata sotto i ${MINIMO_ACI_KG} kg.`,
+            fornitore: rec.trasportatore || '—',
+            prestazione: 'MINIMO ACI',
+            classe: String(rec.classe || '—'),
+            ambito: `FIR ${rec.numero_fir || '—'}`,
+            tonnellate: round3(effettivo / 1000),
+          });
+        }
+      }
     }
 
     // ─── BLOCCO 1: RACCOGLITORI (RACCOLTA) ───
@@ -989,6 +1067,10 @@ export default async function(req) {
         totale_complessivo: round2(totaleRaccoglitori + totaleImpianti + totaleSecondaria),
       },
       anomalie: anomalieUniche,
+      // Un formulario il cui peso e' stato ripartito su piu' ordini: non e' un
+      // problema, e' come si sta dentro le regole del portale. Si mostra per
+      // chiarezza, con i ticket e i pesi di ciascun ordine.
+      formulari_ripartiti: formulariRipartiti,
       quadratura: {
         tonnellate_totali: round3(tonnellateTotali),
         tonnellate_raccoglitori: round3(tonnellateRaccoglitori),
