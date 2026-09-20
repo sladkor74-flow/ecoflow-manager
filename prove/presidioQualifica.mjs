@@ -1,6 +1,6 @@
 // Prova della scelta dei documenti da far rileggere all'agente
 // (daAnalizzare in base44/shared/analisiDocumento.ts). npm run prove
-import { daAnalizzare, RILEGGI_DOPO_GIORNI } from '../base44/shared/analisiDocumento.ts';
+import { daAnalizzare, RILEGGI_DOPO_GIORNI, controlliFormali } from '../base44/shared/analisiDocumento.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -61,6 +61,17 @@ const tre = daAnalizzare(documenti, tipi, { adessoMs: ADESSO, massimo: 3 });
 verifica('il limite si rispetta', tre.length === 3 && tre[0].id === 'mai');
 verifica('senza limite indicato ne prende cinque', daAnalizzare(documenti, tipi, { adessoMs: ADESSO }).length === 5);
 verifica('ogni scelta dice perche, in italiano', tutti.every(x => x.spiegazione && x.spiegazione.length > 10));
+
+
+console.log('CHI E INTESTATARIO');
+const g = (l, c) => controlliFormali(l, c).map(p => p.gravita + ':' + p.messaggio.slice(0, 40));
+verifica('stessa ragione sociale: nessun problema', g({ intestatario: 'ALFA RACCOLTA SRL' }, { nome: 'Alfa Raccolta S.r.l.' }).length === 0);
+verifica('nome e cognome al contrario sono la stessa persona', g({ intestatario: 'GIOVANNI TORRES' }, { nome: 'TORRES GIOVANNI' }).length === 0);
+verifica('un altro intestatario e bloccante', g({ intestatario: 'BETA SRL' }, { nome: 'ALFA RACCOLTA SRL' }).some(x => x.startsWith('bloccante')));
+verifica('partita IVA diversa: bloccante', g({ intestatario: 'ALFA', partita_iva: '11111111111' }, { nome: 'ALFA', piva: '22222222222' }).some(x => x.startsWith('bloccante')));
+verifica('codice fiscale diverso: bloccante', g({ intestatario: 'TORRES GIOVANNI', codice_fiscale: 'TRRGNN82H28G273G' }, { nome: 'TORRES GIOVANNI', codice_fiscale: 'RSSMRA80A01H501U' }).some(x => x.startsWith('bloccante')));
+verifica('codice fiscale uguale: va bene anche se il nome e scritto diverso', g({ intestatario: 'TORRES GIOVANNI DITTA', codice_fiscale: 'TRRGNN82H28G273G' }, { nome: 'GIOVANNI TORRES', codice_fiscale: 'TRRGNN82H28G273G' }).length === 0);
+verifica('documento non firmato: solo attenzione', g({ intestatario: 'ALFA', firmato: 'no' }, { nome: 'ALFA' }).every(x => x.startsWith('attenzione')));
 
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');

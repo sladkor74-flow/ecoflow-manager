@@ -112,7 +112,7 @@ function regolaCatalogo(tipo) {
 }
 
 // Controlli formali che non dipendono dal giudizio del modello.
-function controlliFormali(lettura, contesto) {
+export function controlliFormali(lettura, contesto) {
   const problemi = [];
 
   // Intestatario: deve corrispondere la ragione sociale oppure la partita IVA.
@@ -132,7 +132,12 @@ function controlliFormali(lettura, contesto) {
   const cfCoincide = cfConfrontabile && cfAtteso === cfLetto;
   const cfDiverso = cfConfrontabile && cfAtteso !== cfLetto;
 
-  const nomeCoincide = atteso && letto && (atteso === letto || (Math.min(atteso.length, letto.length) >= 4 && (atteso.includes(letto) || letto.includes(atteso))));
+  // Le ditte individuali si firmano indifferentemente "TORRES GIOVANNI" o
+  // "GIOVANNI TORRES": le stesse parole in altro ordine sono la stessa persona.
+  const parole = (v) => String(v || '').split(/\s+/).filter(x => x.length > 2).sort().join(' ');
+  const nomeCoincide = atteso && letto && (atteso === letto
+    || (Math.min(atteso.length, letto.length) >= 4 && (atteso.includes(letto) || letto.includes(atteso)))
+    || (parole(atteso).length >= 6 && parole(atteso) === parole(letto)));
   if (cfDiverso) {
     problemi.push({ gravita: 'bloccante', messaggio: `Il codice fiscale del documento, ${cfLetto}, non corrisponde a quello del soggetto, ${cfAtteso}.` });
   } else if (pivaDiversa) {
@@ -239,10 +244,17 @@ export async function analizzaDocumento(base44, { doc, tipo, contesto, conoscenz
     if (confronto.esito === 'diverso') {
       problemi.unshift(problemaTipoSbagliato(tipo.nome, lettura));
     } else if (valutazione.corrisponde_al_tipo_atteso === false) {
+      // Se il riconoscimento deterministico dice che la famiglia e' quella giusta,
+      // il dubbio dell'agente non basta a rifiutare il documento: quasi sempre e'
+      // solo il titolo che non combacia con il nome della casella. E' successo su
+      // undici contratti veri, intitolati "Contratto Servizi Trasporto" o
+      // "Contratto di stoccaggio PFU" invece che "Contratto con SMOCO".
+      const solaSfumatura = confronto.esito === 'coincide';
       problemi.unshift({
-        gravita: 'bloccante',
-        messaggio: 'Il documento non sembra essere "' + tipo.nome + '": e\' stato riconosciuto come ' + (letto || 'un altro documento') + '.'
-          + (confronto.esito === 'coincide' ? ' La lettura pero\' lo riconosce proprio come ' + confronto.attesa.nome + ': controllalo prima di richiederlo al fornitore.' : ''),
+        gravita: solaSfumatura ? 'attenzione' : 'bloccante',
+        messaggio: solaSfumatura
+          ? 'Il titolo del documento, ' + (letto || 'non leggibile') + ', non coincide con il nome della casella "' + tipo.nome + '", ma si tratta dello stesso tipo di documento. Guardalo, se e\' quello giusto va bene cosi\'.'
+          : 'Il documento non sembra essere "' + tipo.nome + '": e\' stato riconosciuto come ' + (letto || 'un altro documento') + '.',
       });
     }
     for (const p of (valutazione.problemi || [])) {
