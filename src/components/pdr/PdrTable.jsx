@@ -1,11 +1,20 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Loader2, MapPin, Eye } from 'lucide-react';
 import { streetViewUrl, precisioneCoordinata } from '@/lib/geoLinks';
 import { useIndiceOmologhe } from '@/lib/omologheIndice';
 import BadgeOmologa from '@/components/shared/BadgeOmologa';
+import { formatIntero } from '@/lib/utils';
+
+// I punti di raccolta sono piu' di tremila: disegnarli tutti insieme pesa mezzo
+// milione di caratteri a video e su un telefono si sente. Se ne mostrano 200 alla
+// volta; ricerca, filtri ed esportazione lavorano comunque su tutti.
+const PASSO = 200;
 
 export default function PdrTable({ records, loading, onSelectPdr }) {
   const indiceOmologhe = useIndiceOmologhe();
+  const [quante, setQuante] = useState(PASSO);
+  // cambiando filtro o ricerca si riparte dalle prime
+  useEffect(() => { setQuante(PASSO); }, [records]);
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
@@ -44,7 +53,7 @@ export default function PdrTable({ records, loading, onSelectPdr }) {
           </tr>
         </thead>
         <tbody>
-          {records.map((r) => (
+          {records.slice(0, quante).map((r) => (
             <tr key={r.id} className="border-t hover:bg-muted/50">
               <td className="px-2 py-2 text-center">
                 {(() => {
@@ -134,6 +143,13 @@ export default function PdrTable({ records, loading, onSelectPdr }) {
           ))}
         </tbody>
       </table>
+      {records.length > quante && (
+        <div className="flex flex-wrap items-center justify-center gap-3 border-t bg-muted/30 px-3 py-2.5 text-sm">
+          <span className="text-muted-foreground">Mostrati {formatIntero(quante)} punti di raccolta su {formatIntero(records.length)}.</span>
+          <button type="button" onClick={() => setQuante(q => q + PASSO)} className="text-primary hover:underline font-medium">Mostra altri {formatIntero(Math.min(PASSO, records.length - quante))}</button>
+          <button type="button" onClick={() => setQuante(records.length)} className="text-primary hover:underline">Mostra tutti</button>
+        </div>
+      )}
     </div>
   );
 }

@@ -13,8 +13,8 @@ const EER = 160103;
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 const r3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
 const unita = (um) => String(um || '').replace('/', '\\');
-// tonnellate scritte dentro un testo: virgola italiana
-const tTesto = (v) => String(r3(v)).replace('.', ',');
+// tonnellate scritte dentro un testo: virgola italiana, stessi decimali delle colonne
+const tTesto = (v) => r3(v).toFixed(3).replace(/0$/, '').replace('.', ',');   // due decimali, tre se i chili non sono tondi
 
 // Da dove viene il prezzo di una riga di raccolta: destinazione, provincia o classe
 const ambitoRaccolta = (r) => [r.provincia !== '—' && r.provincia, r.destinazione !== '—' && `verso ${r.destinazione}`, r.classe !== '—' && `classe ${r.classe}`].filter(Boolean).join(' · ') || 'tutte';
