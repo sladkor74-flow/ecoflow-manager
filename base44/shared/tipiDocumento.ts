@@ -35,6 +35,10 @@ export const FAMIGLIE = [
   { chiave: 'cqc', nome: 'Carta di qualificazione del conducente (CQC)', parole: ['cqc', 'carta di qualificazione del conducente'] },
   { chiave: 'carta_circolazione', nome: 'Carta di circolazione', parole: ['carta di circolazione', 'libretto di circolazione'] },
   { chiave: 'adr', nome: 'Certificato ADR', parole: ['adr', 'certificato adr', 'merci pericolose'] },
+  // La ricevuta del pagamento non e' il certificato: e' l'errore di archiviazione
+  // piu' comune, la quietanza al posto della polizza, l'attestato di pagamento al
+  // posto del provvedimento di iscrizione all'Albo.
+  { chiave: 'attestato_pagamento', nome: 'una ricevuta di pagamento', parole: ['attestato di pagamento', 'attestazione di pagamento', 'ricevuta di pagamento', 'atto di quietanza', 'quietanza', 'attestazione di versamento', 'ricevuta di versamento', 'diritto annuale'] },
 ];
 
 // minuscolo, senza accenti e senza punteggiatura, con uno spazio ai due capi:

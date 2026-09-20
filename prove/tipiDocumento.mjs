@@ -36,6 +36,7 @@ verifica('la comunicazione antimafia non e la White List', fam('Comunicazione an
 verifica('la fideiussione non e la polizza RC', fam('Polizza fideiussoria a garanzia degli obblighi') === 'garanzia_finanziaria');
 verifica('la CQC e la patente sono due cose', fam('Carta di qualificazione del conducente') === 'cqc' && fam('Patente di guida categoria C') === 'patente');
 
+verifica('la ricevuta di pagamento non e il certificato', fam('Attestato di Pagamento') === 'attestato_pagamento' && fam('Atto di quietanza') === 'attestato_pagamento');
 console.log('CASELLA CONTRO FILE');
 const letto = (tipo, resto) => Object.assign({ tipo_documento: tipo, leggibile: true, sintesi: 'documento', intestatario: 'ALFA SRL' }, resto || {});
 verifica('DURC nella casella della visura: sbagliato', confrontaTipoDocumento('Visura camerale', letto('DURC')).esito === 'diverso');
@@ -46,6 +47,10 @@ verifica("l'Albo nella sua casella: coincide", confrontaTipoDocumento('Iscrizion
 verifica('tipo non riconosciuto: non si grida al lupo', confrontaTipoDocumento('DURC', letto('Attestazione SOA')).esito === 'incerto');
 verifica('casella non riconosciuta: non si grida al lupo', confrontaTipoDocumento('Modulo interno 47', letto('DURC')).esito === 'incerto');
 verifica('lettura senza tipo: si guarda la sintesi', confrontaTipoDocumento('Visura camerale', { tipo_documento: '', sintesi: 'Il documento e un DURC che attesta la regolarita' }).esito === 'diverso');
+
+verifica('attestato di pagamento sotto l Albo: sbagliato (caso vero, TRANSAR)', confrontaTipoDocumento('Iscrizione Albo Nazionale Gestori Ambientali', letto('Attestato di Pagamento')).esito === 'diverso');
+verifica('quietanza sotto la polizza: sbagliato (caso vero, Logistica)', confrontaTipoDocumento('Polizza di responsabilita civile', letto('Atto di quietanza')).esito === 'diverso');
+verifica('la polizza vera sotto la polizza: coincide', confrontaTipoDocumento('Polizza di responsabilita civile', letto('Polizza di responsabilita civile')).esito === 'coincide');
 
 console.log('QUANDO IL FILE NON SI LEGGE');
 const p1 = problemiLettura({ leggibile: false, note_lettura: 'pagine tagliate' });
