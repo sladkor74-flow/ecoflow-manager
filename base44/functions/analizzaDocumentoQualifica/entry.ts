@@ -289,10 +289,24 @@ export default async function(req) {
       problemi.push({ gravita: 'attenzione', messaggio: 'L\'agente non e\' sicuro della propria valutazione: conviene una verifica a mano.' });
     }
 
+    // Una nuova lettura non puo' cancellare una scadenza gia' accertata. Se
+    // l'agente non riesce a ricavarla - succede con le scansioni difficili -
+    // resta quella che c'era e lo si dice, invece di svuotare il campo e far
+    // sparire dagli alert un documento che invece scade.
+    let scadenzaFinale = scadenza;
+    if (!scadenzaFinale && tipo.tipo_scadenza !== 'nessuna' && doc.data_scadenza) {
+      scadenzaFinale = doc.data_scadenza;
+      problemi.push({
+        gravita: 'attenzione',
+        messaggio: 'Da questa lettura non e\' emersa nessuna data di scadenza: resta quella gia\' registrata, '
+          + formatoIt(doc.data_scadenza) + '. Controllala.',
+      });
+    }
+
     await svc.DocumentoQualifica.update(documentoId, {
       analisi_stato: 'completata',
       data_emissione: emissione || doc.data_emissione || null,
-      data_scadenza: scadenza,
+      data_scadenza: scadenzaFinale,
       sintesi: lettura.sintesi || '',
       richiesta_al_fornitore: valutazione.richiesta_al_fornitore || '',
       confidenza,
@@ -309,7 +323,7 @@ export default async function(req) {
       errore_analisi: '',
     });
 
-    return Response.json({ ok: true, data_scadenza: scadenza, problemi: problemi.length });
+    return Response.json({ ok: true, data_scadenza: scadenzaFinale, problemi: problemi.length });
   } catch (error) {
     const messaggio = error && error.message ? error.message : String(error);
     if (base44 && documentoId) {
