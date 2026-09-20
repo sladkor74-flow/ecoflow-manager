@@ -51,11 +51,14 @@ export default async function(req) {
 
     const body = await req.json().catch(() => ({}));
     const anno = Number(body.anno) || Number(oggiRoma().slice(0, 4));
-    const inviaEmail = body.invia_email !== false;
     const forza = body.forza === true;
-    if (forza && user.role !== 'admin') {
-      return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
+    // Il promemoria arriva agli amministratori e li impegna: lo puo' far partire
+    // solo un amministratore. Il lavoro programmato gira con quel ruolo. Chi
+    // consulta soltanto puo' comunque chiedere il ricalcolo, senza invio.
+    if (user.role !== 'admin' && (body.invia_email !== false || forza)) {
+      return Response.json({ error: 'Solo un amministratore puo inviare il promemoria.' }, { status: 403 });
     }
+    const inviaEmail = body.invia_email !== false;
 
     const oggi = oggiRoma();
     const svc = base44.asServiceRole.entities;
