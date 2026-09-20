@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { LayoutDashboard, Table, Download } from 'lucide-react';
+import { LayoutDashboard, Table, Download, FileCheck } from 'lucide-react';
 import AttivaDashboard from './AttivaDashboard';
 import AttivaDetail from './AttivaDetail';
 import AttivaEsportazioni from './AttivaEsportazioni';
+import PrefatturaEcotyre from './PrefatturaEcotyre';
 
 export default function FatturazioneAttiva({ isAdmin, onVaiTariffe }) {
   const [tab, setTab] = useState('dashboard');
@@ -40,6 +41,7 @@ export default function FatturazioneAttiva({ isAdmin, onVaiTariffe }) {
       <TabsList>
         <TabsTrigger value="dashboard"><LayoutDashboard className="w-4 h-4 mr-1.5" /> Dashboard</TabsTrigger>
         <TabsTrigger value="dettaglio"><Table className="w-4 h-4 mr-1.5" /> Dettaglio</TabsTrigger>
+        <TabsTrigger value="prefattura"><FileCheck className="w-4 h-4 mr-1.5" /> Prefattura Ecotyre</TabsTrigger>
         <TabsTrigger value="esportazioni"><Download className="w-4 h-4 mr-1.5" /> Esportazioni</TabsTrigger>
       </TabsList>
       <TabsContent value="dashboard" className="mt-4">
@@ -48,8 +50,11 @@ export default function FatturazioneAttiva({ isAdmin, onVaiTariffe }) {
       <TabsContent value="dettaglio" className="mt-4">
         <AttivaDetail data={data} loading={loading} periodo={periodo} />
       </TabsContent>
+      <TabsContent value="prefattura" className="mt-4">
+        <PrefatturaEcotyre periodo={periodo} isAdmin={isAdmin} />
+      </TabsContent>
       <TabsContent value="esportazioni" className="mt-4">
-        <AttivaEsportazioni periodo={periodo} data={data} onReload={loadData} />
+        <AttivaEsportazioni periodo={periodo} data={data} onReload={loadData} onVaiPrefattura={() => setTab('prefattura')} />
       </TabsContent>
     </Tabs>
   );

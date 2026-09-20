@@ -227,3 +227,39 @@ lascia scritto nelle note del documento chi, quando e da che stato. Una
 rielaborazione scrive prima i documenti nuovi e ritira i vecchi solo alla fine;
 cio' che era gia' approvato o esportato non si cancella, resta come superato col
 motivo.
+
+**La chiusura del mese attivo** non e' un passaggio interno: un mese si chiude
+quando l'amministrazione conferma che la fattura al cliente e' stata emessa ed e'
+andata a buon fine. Il giorno della conferma (e il numero di fattura, se c'e')
+restano sul documento. L'esportazione fa avanzare lo stato solo da «approvata».
+
+**La prefattura del portale Ecotyre** (`base44/shared/prefattura.ts`, funzione
+`prefatturaEcotyre`, scheda «Prefattura Ecotyre»). Si carica in Excel o in PDF e
+si confronta ordine per ordine con le righe di `attivaCalcolo.ts`, PRIMA di
+esportare: solo in prefattura (con la ragione: altro mese, cancellato,
+sconosciuto), solo nel gestionale, peso diverso, stesso peso e importo diverso
+(col prezzo per tonnellata ricavato). Il canale di un ordine non si chiede: e'
+quello che ha nel gestionale. La prefattura non ha un tracciato garantito: le
+colonne si riconoscono dai nomi e gli ordini dalla forma (`ET26084363`). Il PDF lo
+legge l'agente e la lettura si controlla sui totali stampati; l'Excel e' la via
+affidabile. Una prefattura nuova non cancella la precedente: la segna superata.
+
+### Il margine
+
+`base44/shared/margine.ts`, funzione `calcolaMargine`, scheda «Margine» della
+fatturazione (solo admin). Ricavo attivo meno costo passivo, mese per mese e
+canale per canale, con una sola lettura degli archivi. **Non ha regole sue**: usa
+`attivaCalcolo.ts` e `passivaCalcolo.ts` (il calcolo della passiva, che la
+funzione `calcolaPassiva` si limita a chiamare), quindi i numeri sono gli stessi
+delle due fatturazioni al centesimo. Tre canali, tre margini, mai un totale. Il
+costo di un mese comprende stoccaggio, trattamento e secondarie di quel mese, che
+possono riguardare tonnellate raccolte prima: il numero che conta e' l'anno.
+
+### Le dichiarazioni e il mese di competenza
+
+Le dichiarazioni si fanno a consuntivo: i PFU raccolti a luglio, lavorati e usciti
+dall'impianto ad agosto, si dichiarano a settembre. **Il rigo dell'extra raccolta
+sta sul mese del formulario** (fine trasporto), non su quello in cui la
+dichiarazione arriva: altrimenti la stessa raccolta compare due volte, un mese col
+conferito senza dichiarazione e un altro con la dichiarazione senza conferito.
+Quando e con quale dichiarazione e' stata fatta si scrive nella nota.

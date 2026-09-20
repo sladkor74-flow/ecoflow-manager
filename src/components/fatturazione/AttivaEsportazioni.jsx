@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
-import { Loader2, Download, FileSpreadsheet } from 'lucide-react';
+import { Loader2, Download, FileSpreadsheet, CheckCircle, AlertTriangle, ArrowRight } from 'lucide-react';
 import { exportFatturazioneAttiva } from '@/lib/fatturazioneExport';
 
 const TIPS = [
@@ -10,8 +10,10 @@ const TIPS = [
   { key: 'EXTRA_RACCOLTA', label: 'Extra Raccolta' },
 ];
 
-export default function AttivaEsportazioni({ periodo, data, onReload }) {
+export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefattura }) {
   const [exporting, setExporting] = useState(false);
+  // Prima di esportare si guarda il confronto con la prefattura del portale
+  const [prefattura, setPrefattura] = useState({ stato: 'caricamento' });
   const [storico, setStorico] = useState([]);
   const [loadingStorico, setLoadingStorico] = useState(true);
 
@@ -23,7 +25,27 @@ export default function AttivaEsportazioni({ periodo, data, onReload }) {
 
   useEffect(() => { loadStorico(); }, []);
 
+  useEffect(() => {
+    let vivo = true;
+    setPrefattura({ stato: 'caricamento' });
+    base44.functions.invoke('prefatturaEcotyre', { azione: 'confronta', anno: periodo.anno, mese: periodo.mese })
+      .then(res => { if (vivo) setPrefattura(!res.data?.prefattura ? { stato: 'assente' } : { stato: res.data.confronto.coincide ? 'coincide' : 'differenze', ...res.data }); })
+      .catch(e => { if (vivo) setPrefattura({ stato: 'errore', errore: e?.response?.data?.error || e.message }); });
+    return () => { vivo = false; };
+  }, [periodo.anno, periodo.mese]);
+
+  // L'esportazione non si blocca, ma chi esporta senza un confronto pulito lo fa sapendolo
+  const consenso = () => {
+    if (prefattura.stato === 'coincide') return true;
+    const perche = prefattura.stato === 'differenze'
+      ? `Il confronto con la prefattura Ecotyre ha ${prefattura.confronto.differenze} differenze non chiarite.`
+      : prefattura.stato === 'assente' ? `Per ${periodo.mese} ${periodo.anno} non è stata caricata la prefattura Ecotyre: il confronto non è stato fatto.`
+      : 'Il confronto con la prefattura Ecotyre non è disponibile.';
+    return window.confirm(`${perche}\n\nEsportare comunque?`);
+  };
+
   const esporta = async (tipologia) => {
+    if (!consenso()) return;
     setExporting(true);
     try {
       const righe = data[tipologia]?.righe || [];
@@ -41,6 +63,7 @@ export default function AttivaEsportazioni({ periodo, data, onReload }) {
   };
 
   const esportaTutto = async () => {
+    if (!consenso()) return;
     setExporting(true);
     for (const t of TIPS) {
       try {
@@ -64,6 +87,20 @@ export default function AttivaEsportazioni({ periodo, data, onReload }) {
       <div>
         <h2 className="font-heading font-semibold mb-2">Esportazione Excel — {periodo.mese} {periodo.anno}</h2>
         <p className="text-sm text-muted-foreground mb-3">Genera i file Excel nel formato dei modelli SMOCO. I file vengono scaricati automaticamente.</p>
+        {prefattura.stato !== 'caricamento' && (
+          <div className={`mb-3 border rounded-lg p-3 text-sm flex flex-wrap items-center gap-2 ${prefattura.stato === 'coincide' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
+            {prefattura.stato === 'coincide' ? <CheckCircle className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+            <span>
+              {prefattura.stato === 'coincide' && 'La prefattura Ecotyre coincide con il gestionale, ordine per ordine.'}
+              {prefattura.stato === 'differenze' && `Prefattura Ecotyre: ${prefattura.confronto.differenze} differenze da chiarire prima di esportare.`}
+              {prefattura.stato === 'assente' && 'Prefattura Ecotyre non ancora caricata: il confronto non è stato fatto.'}
+              {prefattura.stato === 'errore' && `Confronto con la prefattura non disponibile: ${prefattura.errore}`}
+            </span>
+            {onVaiPrefattura && prefattura.stato !== 'coincide' && (
+              <button onClick={onVaiPrefattura} className="text-primary hover:underline inline-flex items-center gap-1">Vai alla prefattura <ArrowRight className="w-3.5 h-3.5" /></button>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
           {TIPS.map(t => (
             <Button key={t.key} variant="outline" onClick={() => esporta(t.key)} disabled={exporting || !data[t.key]?.documento}>

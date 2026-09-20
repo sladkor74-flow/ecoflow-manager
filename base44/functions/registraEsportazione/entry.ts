@@ -20,14 +20,19 @@ export default async function(req) {
       stato: 'completata',
     });
 
-    // Update documents to esportata
+    // Lo stato avanza a "esportata" solo da "approvata": esportare una bozza per
+    // guardarla si puo', ma non fa saltare verifica e approvazione (prima bastava
+    // un'esportazione per arrivare alla chiusura senza passare dai controlli).
+    // La data dell'esportazione si scrive comunque.
     for (const docId of (documento_ids || [])) {
       try {
+        const doc = await base44.asServiceRole.entities.DocumentoFatturazione.get(docId);
+        if (!doc || doc.superato || doc.stato === 'chiusa') continue;
         await base44.asServiceRole.entities.DocumentoFatturazione.update(docId, {
-          stato: 'esportata',
+          ...(doc.stato === 'approvata' ? { stato: 'esportata' } : {}),
           data_esportazione: new Date().toISOString(),
         });
-      } catch (e) { /* skip */ }
+      } catch (e) { /* il registro dell'esportazione e' gia' scritto */ }
     }
 
     return Response.json({ success: true });

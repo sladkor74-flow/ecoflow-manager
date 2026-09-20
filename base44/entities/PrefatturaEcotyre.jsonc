@@ -1,0 +1,83 @@
+{
+  "name": "PrefatturaEcotyre",
+  "type": "object",
+  "properties": {
+    "anno": {
+      "type": "number",
+      "description": "Anno della prefattura"
+    },
+    "mese": {
+      "type": "string",
+      "description": "Mese della prefattura, in italiano con l'iniziale maiuscola"
+    },
+    "nome_file": {
+      "type": "string",
+      "description": "Nome del file scaricato dal portale Ecotyre"
+    },
+    "formato": {
+      "type": "string",
+      "enum": [
+        "excel",
+        "pdf"
+      ],
+      "description": "Excel si legge cella per cella; il PDF lo legge l'agente e la lettura va guardata"
+    },
+    "righe": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Le righe lette: id_ordine, numero_fir, kg, importo, prezzo, servizio, foglio. Il canale non c'e' apposta: e' quello che l'ordine ha nel gestionale"
+    },
+    "totale_kg_stampato": {
+      "type": "number",
+      "description": "Totale dei chili stampato sul documento, quando c'e': serve a capire se la lettura e' completa"
+    },
+    "totale_euro_stampato": {
+      "type": "number",
+      "description": "Totale degli importi stampato sul documento, quando c'e'"
+    },
+    "note_lettura": {
+      "type": "string",
+      "description": "Che cosa la lettura ha trovato o non ha trovato: colonne mancanti, pesi convertiti, totali che non tornano"
+    },
+    "caricata_il": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "caricata_da": {
+      "type": "string"
+    },
+    "superata": {
+      "type": "boolean",
+      "default": false,
+      "description": "Sostituita da una prefattura piu' recente dello stesso mese: resta nello storico"
+    },
+    "motivo_superata": {
+      "type": "string",
+      "description": "Perche' e' superata: si scrive sempre"
+    }
+  },
+  "required": [
+    "anno",
+    "mese"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
