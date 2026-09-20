@@ -19,6 +19,9 @@ import { leggiTabellePrefattura, leggiLineePdfPrefattura, confrontaPrefattura, c
 // del gestionale cambiano a ogni importazione.
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
+// I numeri nelle note si scrivono all'italiana: punto per le migliaia, virgola per i decimali.
+const migliaia = (v, decimali = 0) => { const [i, d] = Number(v || 0).toFixed(decimali).split('.'); return i.replace(/B(?=(d{3})+(?!d))/g, '.') + (d ? ',' + d : ''); };
+
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -53,7 +56,7 @@ export default async function(req) {
         righe = letto.righe; note = letto.note; periodoLetto = letto.periodo;
         if (letto.totali_stampati) { totKg = letto.totali_stampati.kg; totEuro = letto.totali_stampati.euro; }
         if (letto.completa === false) return Response.json({ error: note.filter(n => /ATTENZIONE/.test(n)).join(' ') + ' Non ho salvato niente: usa l\'Excel del portale.' }, { status: 400 });
-        if (letto.completa) note.push(`PDF letto per intero: ${righe.length} righe, pari al riepilogo stampato (${letto.totali_stampati.kg} kg, ${letto.totali_stampati.euro.toFixed(2)} euro).`);
+        if (letto.completa) note.push(`PDF letto per intero: ${righe.length} righe, pari al riepilogo stampato (${migliaia(letto.totali_stampati.kg)} kg, ${migliaia(letto.totali_stampati.euro, 2)} euro).`);
       }
       if (!righe.length) return Response.json({ error: 'Nel file non ho trovato righe con un ID ordine: non sembra una prefattura. ' + note.join(' ') }, { status: 400 });
       // Il mese e' scritto nel file (le date di fine trasporto): una prefattura di

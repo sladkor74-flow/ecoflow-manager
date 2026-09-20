@@ -4,12 +4,14 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Upload, CheckCircle, AlertTriangle, FileText, Info } from 'lucide-react';
 import { formatKg, formatNumber, formatIntero } from '@/lib/utils';
+import { giornoRoma } from '@/lib/giornoItaliano';
 
 const NOMI = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 const SERVIZI = { TRASP: 'Trasp', TRASP_TRATT: 'Trasp+Tratt' };
 const euro = (v) => (v === null || v === undefined ? '—' : formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const kg = (v) => (v === null || v === undefined ? '—' : formatKg(v));
-const giorno = (v) => (v ? String(v).slice(0, 10).split('-').reverse().join('/') : '—');
+// il giorno e' quello italiano: un caricamento fatto dopo mezzanotte non deve risultare del giorno prima
+const giorno = (v) => (v ? (giornoRoma(v) || String(v).slice(0, 10)).split('-').reverse().join('/') : '—');
 const messaggio = (e) => e?.response?.data?.error || e?.data?.error || e.message || String(e);
 
 function Tabella({ titolo, spiega, colonne, righe, tono = 'amber' }) {
