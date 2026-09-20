@@ -122,10 +122,22 @@ function controlliFormali(lettura, contesto) {
   const pivaLetta = cifre(lettura.partita_iva).slice(-11);
   const pivaCoincide = pivaAttesa.length === 11 && pivaLetta.length === 11 && pivaAttesa === pivaLetta;
   const pivaDiversa = pivaAttesa.length === 11 && pivaLetta.length === 11 && pivaAttesa !== pivaLetta;
+  // Le ditte individuali non hanno una partita IVA sui documenti: l'Albo e il
+  // DURC le identificano col codice fiscale della persona. Senza questo
+  // confronto, su di loro non si verificherebbe nessun intestatario.
+  const soloLettere = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const cfAtteso = soloLettere(contesto.codice_fiscale);
+  const cfLetto = soloLettere(lettura.codice_fiscale);
+  const cfConfrontabile = cfAtteso.length === 16 && cfLetto.length === 16;
+  const cfCoincide = cfConfrontabile && cfAtteso === cfLetto;
+  const cfDiverso = cfConfrontabile && cfAtteso !== cfLetto;
+
   const nomeCoincide = atteso && letto && (atteso === letto || (Math.min(atteso.length, letto.length) >= 4 && (atteso.includes(letto) || letto.includes(atteso))));
-  if (pivaDiversa) {
+  if (cfDiverso) {
+    problemi.push({ gravita: 'bloccante', messaggio: `Il codice fiscale del documento, ${cfLetto}, non corrisponde a quello del soggetto, ${cfAtteso}.` });
+  } else if (pivaDiversa) {
     problemi.push({ gravita: 'bloccante', messaggio: `La partita IVA del documento, ${pivaLetta}, non corrisponde a quella del soggetto, ${pivaAttesa}.` });
-  } else if (letto && atteso && !nomeCoincide && !pivaCoincide) {
+  } else if (letto && atteso && !nomeCoincide && !pivaCoincide && !cfCoincide) {
     problemi.push({ gravita: 'bloccante', messaggio: `Il documento e' intestato a "${lettura.intestatario}", non a ${contesto.nome}.` });
   }
 
@@ -217,7 +229,7 @@ export async function analizzaDocumento(base44, { doc, tipo, contesto, conoscenz
 
     // === Problemi: controlli formali piu' valutazione del modello ===
     // Prima cio' che si vede dalla lettura, poi il giudizio dell'agente.
-    const problemi = [...problemiLettura(lettura), ...controlliFormali(lettura, { nome, piva })];
+    const problemi = [...problemiLettura(lettura), ...controlliFormali(lettura, { nome, piva, codice_fiscale: ctx.codice_fiscale })];
 
     // Un DURC caricato dove va una visura e' un documento valido nel posto
     // sbagliato: l'errore piu' facile da fare. Il confronto fra la casella e il
