@@ -127,9 +127,9 @@ export default async function(req) {
     const prefattura = valide[0] || null;
     if (!prefattura) return Response.json({ prefattura: null, confronto: null });
 
-    const [reteAll, aciAll, extraAll, fornitori, tariffe] = await Promise.all([
+    const [reteAll, aciAll, extraAll, fornitori, tariffe, terziarie] = await Promise.all([
       fetchAll(svc.PrimariaRete), fetchAll(svc.PrimariaAci), fetchAll(svc.ExtraRaccolta),
-      fetchAll(svc.Fornitore), svc.Tariffa.filter({ direzione: 'ATTIVA' }),
+      fetchAll(svc.Fornitore), svc.Tariffa.filter({ direzione: 'ATTIVA' }), fetchAll(svc.Terziaria),
     ]);
     const { righe } = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: annoNum, mese });
 
@@ -148,6 +148,7 @@ export default async function(req) {
     segna(reteAll, (o) => (eAci(o) ? 'ACI' : 'RETE'));
     segna(aciAll, () => 'ACI');
     segna(extraAll, () => 'EXTRA_RACCOLTA');
+    segna(terziarie, () => 'TERZIARIE');
 
     const { righe: _righe, ...meta } = prefattura;
     return Response.json({

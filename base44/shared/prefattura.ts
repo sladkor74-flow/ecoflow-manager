@@ -189,6 +189,22 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
     });
   }
 
+  // Le terziarie (ordini TER...): il portale le paga come "Trasp" a 8 euro la
+  // tonnellata con l'allegato VII e a 10 col formulario (prefatture gennaio-agosto
+  // 2026: 105 ordini, 25.846,51 euro). La fatturazione attiva del gestionale non
+  // le calcola: si mostrano in un gruppo a parte, col loro totale, invece di
+  // cento righe di "ordine sconosciuto".
+  const terziarie = { ordini: 0, kg: 0, euro: 0, righe: [] };
+  for (const [id, p] of pre) {
+    if (visti.has(id) || !/^TER/.test(id)) continue;
+    visti.add(id);
+    terziarie.ordini++; terziarie.kg += p.kg; terziarie.euro += p.importo;
+    const a = altrove.get(id) || null;
+    terziarie.righe.push({ id_ordine: id, numero_fir: p.fir, kg: Math.round(p.kg), importo: r2(p.importo), prezzo_t: p.kg ? r2(p.importo / (p.kg / 1000)) : null, in_archivio: !!a });
+  }
+  terziarie.kg = Math.round(terziarie.kg); terziarie.euro = r2(terziarie.euro);
+  terziarie.non_in_archivio = terziarie.righe.filter(x => !x.in_archivio).length;
+
   // Ordini della prefattura che il mese del gestionale non ha: si dice dove stanno
   const soloPrefattura = [];
   for (const [id, p] of pre) {
@@ -203,12 +219,12 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
         : `nel gestionale la fine trasporto è il ${a.giorno.split('-').reverse().join('/')}: un altro mese`,
     });
   }
-  const differenze = soloPrefattura.length + canali.reduce((s, c) => s + (c.fuori_prefattura ? 0 : c.solo_gestionale.length) + c.peso_diverso.length + c.importo_diverso.length + c.servizio_diverso.length + c.fir_diverso.length, 0);
+  const differenze = soloPrefattura.length + (terziarie.ordini > 0 ? 1 : 0) + canali.reduce((s, c) => s + (c.fuori_prefattura ? 0 : c.solo_gestionale.length) + c.peso_diverso.length + c.importo_diverso.length + c.servizio_diverso.length + c.fir_diverso.length, 0);
   return {
     coincide: differenze === 0 && pre.size > 0,
     differenze,
     ordini_prefattura: pre.size,
     con_importi: conImporti, con_pesi: conPesi,
-    canali, solo_prefattura: soloPrefattura,
+    canali, solo_prefattura: soloPrefattura, terziarie,
   };
 }

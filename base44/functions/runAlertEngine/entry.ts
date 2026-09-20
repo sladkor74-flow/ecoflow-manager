@@ -86,7 +86,7 @@ export default async function(req) {
     }
 
     // Record da validare: anno in corso, per le primarie solo i terminati.
-    const anno = new Date().getUTCFullYear();
+    const anno = Number(oggiRoma().slice(0, 4));
     const tutti = await fetchAll(base44.asServiceRole.entities[entityName]);
     const records = tutti.filter(r => daControllare(r, modulo, anno));
 
@@ -94,6 +94,11 @@ export default async function(req) {
     // doppioni vedeva solo i primi e a ogni caricamento li ricreava.
     const existingAlerts = await fetchAll(base44.asServiceRole.entities.Alert, { modulo, stato: 'aperto' }, 'created_date');
     const existingKeys = new Set(existingAlerts.map(a => `${a.record_id}|||${a.regola_id}`));
+    // Un alert che l'amministratore ha ignorato e' una decisione presa: la stessa
+    // condizione sullo stesso record non si ripropone. Prima si guardavano solo
+    // gli aperti, e al giro dopo l'alert ignorato rinasceva come nuovo.
+    const ignorati = await fetchAll(base44.asServiceRole.entities.Alert, { modulo, stato: 'ignorato' }, 'created_date');
+    for (const a of ignorati) existingKeys.add(`${a.record_id}|||${a.regola_id}`);
     // Condizioni presenti oggi nei dati: gli alert aperti fuori da questo insieme si chiudono.
     const attuali = new Set();
 

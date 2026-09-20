@@ -1,6 +1,20 @@
 import * as XLSX from 'xlsx';
 import { formattaPesi } from '@/lib/formatoExcel';
 
+// Il tipo di servizio come lo scrive la prefattura del portale: dipende
+// dall'impianto di destinazione (Trasp. quando il trattamento lo fattura Ecotyre).
+// Prima l'export scriveva "Trasp.+Tratt." su tutte le righe.
+const tipoServizio = (r) => (r.servizio_ecotyre === 'TRASP' ? 'Trasp.' : 'Trasp.+Tratt.');
+
+// Nel modello dell'amministrazione la rete ha il prezzo in euro al CHILO (0,202),
+// accanto alla quantita' in chili, come nella prefattura; l'ACI in euro a
+// tonnellata. La riga salva il prezzo a tonnellata e il fattore per convertirlo.
+const prezzoAlChilo = (r) => {
+  const v = Number(r.tariffa_valore) || 0;
+  const f = Number(r.fattore_conversione) || (/€\/t/.test(r.unita_misura || '') ? 1000 : 1);
+  return Math.round((v / f) * 1e6) / 1e6;
+};
+
 // Esporta le righe di fatturazione attiva in Excel nel formato del modello corrispondente
 export function exportFatturazioneAttiva(tipologia, righe, anno, mese) {
   let wsData = [];
@@ -9,17 +23,17 @@ export function exportFatturazioneAttiva(tipologia, righe, anno, mese) {
 
   if (tipologia === 'RETE') {
     sheetName = 'Fatturazione RETE';
-    wsData = [['Periodo', 'Tipo', 'Ordine', 'Data Fine Trasporto', 'Numero FIR', 'Classe', 'Quantità (kg)', 'Prezzo Unitario', 'Prezzo Totale']];
+    wsData = [['Periodo', 'Tipo', 'Ordine', 'Data Fine Trasporto', 'Numero FIR', 'Classe', 'Quantità (kg)', 'Prezzo Unitario (Euro/Kg)', 'Prezzo Totale']];
     for (const r of righe) {
       if (r.sospesa) continue;
       wsData.push([
-        periodo, 'Trasp.+Tratt.',
+        periodo, tipoServizio(r),
         r.ordine || '',
         r.data_fine_trasporto ? new Date(r.data_fine_trasporto).toLocaleDateString('it-IT') : '',
         r.numero_fir || '',
         r.classe || '',
         r.quantita || 0,
-        r.tariffa_valore || 0,
+        prezzoAlChilo(r),
         r.totale || 0,
       ]);
     }
@@ -28,11 +42,11 @@ export function exportFatturazioneAttiva(tipologia, righe, anno, mese) {
     wsData.push(['', '', '', '', '', '', '', 'TOTALE', Math.round(tot * 100) / 100]);
   } else if (tipologia === 'ACI') {
     sheetName = 'Fatturazione ACI';
-    wsData = [['Regione', 'Fatturante', 'Periodo', 'Tipo', 'Ticket n°', 'Ordine', 'Data Fine Trasporto', 'Numero FIR', 'Classe', 'Quantità (kg)', 'Prezzo Unitario', 'Prezzo Totale', 'Note']];
+    wsData = [['Regione', 'Fatturante', 'Periodo', 'Tipo', 'Ticket n°', 'Ordine', 'Data Fine Trasporto', 'Numero FIR', 'Classe', 'Quantità (kg)', 'Prezzo Unitario (Euro/TON)', 'Prezzo Totale', 'Note']];
     for (const r of righe) {
       if (r.sospesa) continue;
       wsData.push([
-        r.regione || '', r.fatturante || '', periodo, 'Trasp.+Tratt.',
+        r.regione || '', r.fatturante || '', periodo, tipoServizio(r),
         r.ticket_n || '', r.ordine || '',
         r.data_fine_trasporto ? new Date(r.data_fine_trasporto).toLocaleDateString('it-IT') : '',
         r.numero_fir || '', r.classe || '',

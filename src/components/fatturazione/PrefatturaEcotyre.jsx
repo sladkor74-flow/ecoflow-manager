@@ -144,6 +144,13 @@ export default function PrefatturaEcotyre({ periodo, isAdmin, onEsito }) {
           </div>
           <p className="text-xs text-muted-foreground -mt-2">Nelle colonne della prefattura entrano solo gli ordini che il gestionale ha nello stesso mese; gli altri sono elencati qui sotto.</p>
 
+          {c.terziarie?.ordini > 0 && (
+            <Tabella tono="red" titolo={`Terziarie pagate in prefattura: € ${euro(c.terziarie.euro)} su ${kg(c.terziarie.kg)} kg`}
+              spiega={`Il portale le paga come trasporto (8 €/t con l'allegato VII, 10 €/t col formulario). La fatturazione attiva del gestionale oggi non le calcola: questo importo è in prefattura e non nei tre report.${c.terziarie.non_in_archivio > 0 ? ` ${c.terziarie.non_in_archivio} di questi ordini non sono nemmeno nell'archivio Terziarie.` : ''}`}
+              righe={c.terziarie.righe}
+              colonne={[{ t: 'ID ordine', v: r => r.id_ordine, m: true }, { t: 'Documento', v: r => r.numero_fir || '—' }, { t: 'kg', v: r => kg(r.kg), d: true }, { t: '€/t', v: r => euro(r.prezzo_t), d: true }, { t: '€', v: r => euro(r.importo), d: true }, { t: 'In archivio', v: r => (r.in_archivio ? 'sì' : 'no') }]} />
+          )}
+
           <Tabella tono="red" titolo="Nella prefattura ma non nel mese del gestionale" spiega="Ecotyre li riconosce in questo mese, il gestionale no: la ragione è scritta accanto."
             righe={c.solo_prefattura}
             colonne={[{ t: 'ID ordine', v: r => r.id_ordine, m: true }, { t: 'Canale', v: r => NOMI[r.canale] || '—' }, { t: 'Perché', v: r => r.spiegazione }, { t: 'kg', v: r => kg(r.kg), d: true }, { t: '€', v: r => euro(r.importo), d: true }]} />

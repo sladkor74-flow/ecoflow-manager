@@ -77,6 +77,10 @@ const serv = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo: 
 verifica('tipo di servizio e formulario diversi: due differenze', serv.differenze === 2 && serv.canali[0].servizio_diverso[0].servizio_prefattura === 'TRASP' && serv.canali[0].fir_diverso[0].fir_gestionale === 'FIR-Y');
 const conExtra = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo: 202 }], { RETE: [riga('ET26000001', 1000, 202)], ACI: [], EXTRA_RACCOLTA: [riga('BSDCL002230PQ', 460, 92.92)] });
 verifica('l\'extra raccolta non passa dalla prefattura: non e\' una differenza', conExtra.coincide === true && conExtra.canali[2].fuori_prefattura === true && conExtra.canali[2].solo_gestionale.length === 1);
+const conTer = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo: 202 }, { id_ordine: 'TER26018323', kg: 27160, importo: 217.28, numero_fir: 'ALL700091/26' }, { id_ordine: 'TER26002903', kg: 27680, importo: 276.8 }],
+  { RETE: [riga('ET26000001', 1000, 202)], ACI: [], EXTRA_RACCOLTA: [] }, new Map([['TER26002903', { canale: 'TERZIARIE', stato: 'terminato', giorno: '2026-01-10' }]]));
+verifica('terziarie: un gruppo a parte col totale e il prezzo ricavato, non ordini sconosciuti', conTer.terziarie.ordini === 2 && conTer.terziarie.euro === 494.08 && conTer.terziarie.righe[0].prezzo_t === 8 && conTer.terziarie.righe[1].prezzo_t === 10
+  && conTer.terziarie.non_in_archivio === 1 && conTer.solo_prefattura.length === 0 && conTer.differenze === 1 && conTer.coincide === false, JSON.stringify(conTer.terziarie));
 verifica('prefattura vuota: non "coincide"', confrontaPrefattura([], { RETE: [], ACI: [], EXTRA_RACCOLTA: [] }).coincide === false);
 const soloOrdini = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: null, importo: null }], { RETE: [riga('ET26000001', 1000, 202)], ACI: [], EXTRA_RACCOLTA: [] });
 verifica('prefattura con i soli ordini: si confronta quel che c\'e\'', soloOrdini.coincide === true && soloOrdini.con_importi === false && soloOrdini.canali[0].prefattura.euro === null);
