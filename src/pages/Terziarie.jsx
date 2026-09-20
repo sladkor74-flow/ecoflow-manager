@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileSpreadsheet, Filter, X } from 'lucide-react';
 import TerziarieKpi from '@/components/terziarie/TerziarieKpi';
-import GiacenzeTable from '@/components/terziarie/GiacenzeTable';
+import UscitePerImpianto from '@/components/terziarie/UscitePerImpianto';
 import TerziarieTable from '@/components/terziarie/TerziarieTable';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
 import MultiSelect from '@/components/shared/MultiSelect';
@@ -26,22 +26,11 @@ function getMateriale(r) {
 
 export default function Terziarie() {
   const [records, setRecords] = useState([]);
-  const [giacenze, setGiacenze] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [loadingGiac, setLoadingGiac] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [filters, setFilters] = useState({ impianto: [], destinazione: [], mese: [], trasportatore: [], materiale: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
   const [filterOptions, setFilterOptions] = useState({ impianti: [], destinazioni: [], trasportatori: [], anni: [], province: [], regioni: [], stati: [] });
   const [searchIdOrdine, setSearchIdOrdine] = useState('');
-
-  const loadGiacenze = useCallback(async () => {
-    setLoadingGiac(true);
-    try {
-      const res = await base44.functions.invoke('computeGiacenze', { filters: { impianto: filters.impianto, mese: filters.mese, anno: filters.anno } });
-      setGiacenze(res.data.giacenze);
-    } catch (e) { console.error(e); }
-    setLoadingGiac(false);
-  }, [filters.impianto, filters.mese, filters.anno]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -91,21 +80,19 @@ export default function Terziarie() {
   }, [filters, searchIdOrdine]);
 
   useEffect(() => { loadData(); }, [loadData]);
-  useEffect(() => { loadGiacenze(); }, [loadGiacenze]);
 
   // Auto-refresh on new uploads
   useEffect(() => {
     const unsub = base44.entities.UploadLog.subscribe((event) => {
-      if (event.type === 'create') { loadData(); loadGiacenze(); }
+      if (event.type === 'create') loadData();
     });
     return unsub;
-  }, [loadData, loadGiacenze]);
+  }, [loadData]);
 
   const kpi = {
     totale_t: records.reduce((s, r) => s + (r.peso_t || 0), 0),
     spedizioni: records.length,
     impianti_attivi: new Set(records.map(r => r.unita_locale_origine).filter(Boolean)).size,
-    giacenza_totale: giacenze.reduce((s, g) => s + (g.giacenza_t || 0), 0),
   };
 
   const handleExport = async () => {
@@ -131,7 +118,7 @@ export default function Terziarie() {
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl lg:text-3xl font-heading font-bold">Terziarie</h1>
-          <p className="text-muted-foreground mt-1">Trasporti terziari, uscite PFU e giacenze impianto in tempo reale.</p>
+          <p className="text-muted-foreground mt-1">Trasporti terziari: i prodotti che escono dagli impianti, per impianto e per materiale.</p>
         </div>
         <button onClick={handleExport} disabled={exporting} className="inline-flex items-center gap-2 px-4 py-2 text-sm btn-secondario">
           {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />} Esporta Excel
@@ -165,10 +152,10 @@ export default function Terziarie() {
         </div>
       </div>
 
-      {/* Giacenze real-time */}
+      {/* Uscite di prodotti per impianto, dagli stessi trasporti filtrati qui sotto */}
       <div className="space-y-3">
-        <h2 className="text-lg font-heading font-semibold">Giacenze Impianto (Real-Time)</h2>
-        <GiacenzeTable giacenze={giacenze} loading={loadingGiac} />
+        <h2 className="text-lg font-heading font-semibold">Uscite per impianto</h2>
+        <UscitePerImpianto records={records} loading={loading} />
       </div>
 
       {/* Data table */}

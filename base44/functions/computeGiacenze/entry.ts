@@ -1,103 +1,15 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { dataPeriodo } from "../../shared/dataEnrichment.ts";
-import { annoRoma, meseRoma } from "../../shared/giornoItaliano.ts";
-import { matchesFilter } from "../../shared/multiFilter.ts";
-import { fetchAll } from "../../shared/fetchAll.ts";
-
-// Calcola le giacenze di impianto in tempo reale:
-//   Ingressi = PrimariaRete + PrimariaAci + Secondaria (dove l'impianto è Destinazione)
-//   Uscite   = Terziaria (dove l'impianto è Unita_Locale_Origine) + Secondaria (dove l'impianto è Stoccaggio/origine)
-//   Giacenza = Ingressi - Uscite
-// Payload: { filters?: { impianto?, mese?, anno? } }
-export default async function(req) {
-  try {
-    const base44 = createClientFromRequest(req);
-    const user = await base44.auth.me();
-    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const body = await req.json().catch(() => ({}));
-    const filters = body.filters || {};
-
-    const [rete, aci, sec, terz] = await Promise.all([
-      fetchAll(base44.asServiceRole.entities.PrimariaRete),
-      fetchAll(base44.asServiceRole.entities.PrimariaAci),
-      fetchAll(base44.asServiceRole.entities.Secondaria),
-      fetchAll(base44.asServiceRole.entities.Terziaria),
-    ]);
-
-    const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
-    // Il periodo di un movimento e' la fine del trasporto, letta sul giorno
-    // italiano.
-    function getMese(r) {
-      const m = meseRoma(dataPeriodo(r));
-      return m < 0 ? null : MESI[m];
-    }
-    function getAnno(r) {
-      return annoRoma(dataPeriodo(r));
-    }
-
-    // --- INPUT (ingressi in impianto) ---
-    const inputs = {}; // impianto -> { totale, mesi: {mese -> ton} }
-    function addInput(impianto, pesoKg, r) {
-      if (!impianto) return;
-      const imp = impianto.trim();
-      if (!imp) return;
-      if (!matchesFilter(imp, filters.impianto)) return;
-      if (!matchesFilter(getMese(r), filters.mese)) return;
-      if (filters.anno != null && (!Array.isArray(filters.anno) ? filters.anno : filters.anno.length > 0)) {
-        const anni = Array.isArray(filters.anno) ? filters.anno.map(Number) : [parseInt(filters.anno)];
-        if (!anni.includes(getAnno(r))) return;
-      }
-      if (!inputs[imp]) inputs[imp] = { impianto: imp, totale: 0, spedizioni: 0 };
-      const ton = (pesoKg || 0) / 1000;
-      inputs[imp].totale += ton;
-      inputs[imp].spedizioni += 1;
-    }
-    for (const r of rete) addInput(r.destinazione, r.peso_effettivo, r);
-    for (const r of aci) addInput(r.destinazione, r.peso_effettivo, r);
-    for (const r of sec) addInput(r.destinazione, r.peso_effettivo, r);
-
-    // --- OUTPUT (uscite dall'impianto) ---
-    const outputs = {}; // impianto -> { totale, spedizioni }
-    function addOutput(impianto, pesoKg, r) {
-      if (!impianto) return;
-      const imp = impianto.trim();
-      if (!imp) return;
-      if (!matchesFilter(imp, filters.impianto)) return;
-      if (!matchesFilter(getMese(r), filters.mese)) return;
-      if (filters.anno != null && (!Array.isArray(filters.anno) ? filters.anno : filters.anno.length > 0)) {
-        const anni = Array.isArray(filters.anno) ? filters.anno.map(Number) : [parseInt(filters.anno)];
-        if (!anni.includes(getAnno(r))) return;
-      }
-      if (!outputs[imp]) outputs[imp] = { impianto: imp, totale: 0, spedizioni: 0 };
-      const ton = (pesoKg || 0) / 1000;
-      outputs[imp].totale += ton;
-      outputs[imp].spedizioni += 1;
-    }
-    // Terziarie: l'impianto di origine è unita_locale_origine
-    for (const r of terz) addOutput(r.unita_locale_origine, r.peso_effettivo, r);
-    // Secondarie in uscita: l'impianto di origine è lo stoccaggio
-    for (const r of sec) addOutput(r.stoccaggio, r.peso_effettivo, r);
-
-    // --- GIACENZE ---
-    const allImpianti = new Set([...Object.keys(inputs), ...Object.keys(outputs)]);
-    const giacenze = [...allImpianti].map((imp) => {
-      const ing = inputs[imp]?.totale || 0;
-      const out = outputs[imp]?.totale || 0;
-      const ingSped = inputs[imp]?.spedizioni || 0;
-      const outSped = outputs[imp]?.spedizioni || 0;
-      return {
-        impianto: imp,
-        ingressi_t: +ing.toFixed(3),
-        uscite_t: +out.toFixed(3),
-        giacenza_t: +(ing - out).toFixed(3),
-        spedizioni_ingresso: ingSped,
-        spedizioni_uscita: outSped,
-      };
-    }).sort((a, b) => b.giacenza_t - a.giacenza_t);
-
-    return Response.json({ giacenze });
-  } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
-  }
+// SUPERATA il 20/09/2026 (audit generale, B5). Non e' piu' chiamata da nessuna
+// pagina: la usava la pagina Terziarie per una "giacenza in tempo reale" fatta di
+// ingressi meno uscite. Era un secondo motore di giacenza, con regole sue:
+// sommava rete e ACI nello stesso totale, non filtrava lo stato dei movimenti e
+// toglieva alle tonnellate di PFU entrate le uscite di PRODOTTI (granulo, ferro).
+// Due schermate dicevano due giacenze per lo stesso impianto.
+//
+// Il motore delle giacenze e' uno solo: calcolaGiacenze, che parte dal saldo del
+// portale. La funzione resta qui, spenta, perche' chi la cercasse trovi il motivo.
+export default async function() {
+  return Response.json({
+    error: 'Funzione superata: la giacenza si legge da calcolaGiacenze (modulo Giacenze).',
+    superata: true, usa: 'calcolaGiacenze',
+  }, { status: 410 });
 }
