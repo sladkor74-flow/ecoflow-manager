@@ -383,3 +383,29 @@ silenzioso**: nessuno la chiederebbe mai e sembrerebbe tutto a posto.
 rosso in cima al modulo, la dashboard (dal campo `anomalie_catalogo` del
 RiepilogoQualifica, senza rifare la valutazione) e l'email del controllo
 giornaliero, che parte anche quando non c'e' nessun'altra novita'.
+
+**Un DURC non e' una visura e non e' una White List.** Caricare un documento
+valido nella casella sbagliata e' l'errore piu' facile da fare e il piu' difficile
+da vedere. L'agente lo controlla gia', ma il suo e' un giudizio:
+`base44/shared/tipiDocumento.ts` e' la rete di sicurezza che non dipende dal
+modello. Riconosce la famiglia del documento dal nome della casella e dal tipo
+letto nel file, e segnala solo quando riconosce con certezza tutti e due e sono
+diversi. Se anche solo uno dei due non si riconosce non dice niente: meglio un
+controllo in meno che dichiarare sbagliato un documento giusto. Il confronto si
+rifa' anche dentro `statoRequisito`, cosi' vale per i documenti analizzati prima
+che il controllo esistesse, senza doverli rileggere con l'agente.
+
+**Quando il file non si legge si dice, e si dice cosa fare.** `problemiLettura`
+distingue tre casi: il modello dichiara il file illeggibile; il modello dice di
+averlo letto ma non ne ha tirato fuori un solo dato (scansione senza testo, file
+protetto, pagina bianca); il tipo non e' dichiarato. I primi due sono bloccanti,
+quindi il requisito diventa "non conforme" e finisce negli alert, nell'email
+giornaliera e nei conteggi della dashboard. Se invece e' l'analisi a fallire, il
+motivo viaggia insieme allo stato "da verificare" e arriva anche nell'email.
+
+**I 97 documenti caricati dall'archivio nel settembre 2026 non hanno
+`analisi_json`**: furono letti con l'OCR di Windows e scritti a mano, non
+dall'agente. Il controllo sul tipo quindi non li tocca (non c'e' una lettura da
+confrontare) e non produce falsi allarmi. Non si usa `sintesi` come ripiego a
+questo livello: quelle sintesi dicono "trovato nell'archivio contratti" e
+farebbero scattare la famiglia "contratto" su mezzo catalogo.

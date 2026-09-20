@@ -4,6 +4,7 @@
 import {
   soggettiDelTipo, richiestoA, valutaSoggetto, eventiDaSegnalare, anomalieCatalogo,
 } from '../base44/shared/qualificaFornitori.ts';
+import { problemaTipoSbagliato } from '../base44/shared/tipiDocumento.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -50,6 +51,21 @@ const scaduto = valutaSoggetto(alfa, [patenti], [
   { id: 'd2', soggetto_chiave: 'alfa raccolta', tipo_documento_id: 't2', stato: 'attivo', analisi_stato: 'completata', data_scadenza: '2026-09-01' },
 ], OGGI);
 verifica('dopo la scadenza il documento e scaduto e il soggetto critico', scaduto.requisiti[0].stato === 'scaduto' && scaduto.stato === 'critico');
+
+console.log('DOCUMENTO NELLA CASELLA SBAGLIATA');
+// Il controllo sul tipo vale anche per i documenti analizzati prima che esistesse:
+// si rilegge cio che l agente aveva estratto, senza chiamarlo di nuovo.
+const visuraTipo = { id: 't7', nome: 'Visura camerale', si_applica_a: 'raccolta', obbligatorio: true, tipo_scadenza: 'nessuna' };
+const conLettura = (tipoLetto, problemiSalvati) => ({ id: 'd3', soggetto_chiave: 'alfa raccolta', tipo_documento_id: 't7', stato: 'attivo', analisi_stato: 'completata', problemi_json: JSON.stringify(problemiSalvati || []), analisi_json: JSON.stringify({ lettura: { leggibile: true, tipo_documento: tipoLetto } }) });
+const sbagliato = valutaSoggetto(alfa, [visuraTipo], [conLettura('DURC')], OGGI).requisiti[0];
+verifica('un DURC caricato sotto la visura e non conforme, senza rianalizzarlo', sbagliato.stato === 'non_conforme' && /Documento sbagliato/.test(sbagliato.problemi[0].messaggio), sbagliato.stato + ' ' + JSON.stringify(sbagliato.problemi));
+verifica('il messaggio nomina tutti e due i documenti', /Visura camerale/.test(sbagliato.problemi[0].messaggio) && /DURC/.test(sbagliato.problemi[0].messaggio));
+const giusto = valutaSoggetto(alfa, [visuraTipo], [conLettura('Visura ordinaria')], OGGI).requisiti[0];
+verifica('il documento giusto resta valido', giusto.stato === 'valido' && giusto.problemi.length === 0, giusto.stato);
+const ignoto = valutaSoggetto(alfa, [visuraTipo], [conLettura('Attestazione SOA')], OGGI).requisiti[0];
+verifica('se il tipo non si riconosce non si inventa un problema', ignoto.problemi.length === 0);
+const dopoAgente = valutaSoggetto(alfa, [visuraTipo], [conLettura('DURC', [problemaTipoSbagliato('Visura camerale', { tipo_documento: 'DURC' })])], OGGI).requisiti[0];
+verifica('il problema non si sdoppia se l agente lo aveva gia scritto', dopoAgente.problemi.filter(p => /Documento sbagliato/.test(p.messaggio)).length === 1);
 
 console.log('ERRORI DI IMPOSTAZIONE');
 const an = anomalieCatalogo(catalogo, soggetti, 2026);

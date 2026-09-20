@@ -3,6 +3,7 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 import { aggiungiPeriodo, oggiRoma } from "../../shared/qualificaFornitori.ts";
 import { testoConoscenza, vociApprovate, proponiNovita, AREE_NORMATIVE, FONTI_UFFICIALI, REGOLE_FONTI } from "../../shared/baseConoscenza.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
+import { confrontaTipoDocumento, problemaTipoSbagliato, problemiLettura } from "../../shared/tipiDocumento.ts";
 
 // Agente di analisi dei documenti di qualifica.
 //
@@ -120,10 +121,6 @@ function regolaCatalogo(tipo) {
 function controlliFormali(lettura, contesto) {
   const problemi = [];
 
-  if (lettura.leggibile === false) {
-    problemi.push({ gravita: 'bloccante', messaggio: 'Il documento non e\' leggibile o e\' incompleto' + (lettura.note_lettura ? ': ' + lettura.note_lettura : '.') });
-  }
-
   // Intestatario: deve corrispondere la ragione sociale oppure la partita IVA.
   const atteso = normalizzaRagioneSociale(contesto.nome || '');
   const letto = normalizzaRagioneSociale(lettura.intestatario || '');
@@ -193,6 +190,7 @@ export default async function(req) {
         '- firmato: si se il documento reca firma o sottoscrizione, anche digitale; no se dovrebbe averla e manca.',
         '- Per iscrizioni all\'Albo gestori ambientali, autorizzazioni e comunicazioni di impianti: riporta i codici EER autorizzati (codici_eer, per esempio 16 01 03), le operazioni di recupero o smaltimento (operazioni, per esempio R13, R3), le categorie e classi dell\'Albo (categorie_albo), le targhe dei veicoli (veicoli) e il nome del responsabile tecnico (responsabile_tecnico). Per gli altri documenti lascia questi campi vuoti.',
         '- Se il file e\' illeggibile, tagliato o non e\' un documento, imposta leggibile a false e spiega in note_lettura.',
+        '- tipo_documento: il nome proprio del documento come si presenta, per esempio DURC, Visura camerale, Iscrizione White List, Iscrizione Albo Nazionale Gestori Ambientali. Scrivi quello che il file E\', anche quando e\' diverso dal documento atteso: serve proprio ad accorgersi di un file caricato nella casella sbagliata.',
         '- sintesi: una o due frasi in italiano su che documento e\' e cosa attesta.',
       ].join('\n'),
       file_urls: [signed_url],
@@ -238,9 +236,22 @@ export default async function(req) {
     }));
 
     // === Problemi: controlli formali piu' valutazione del modello ===
-    const problemi = controlliFormali(lettura, { nome, piva });
-    if (valutazione.corrisponde_al_tipo_atteso === false) {
-      problemi.unshift({ gravita: 'bloccante', messaggio: `Il documento non sembra essere "${tipo.nome}": e' stato riconosciuto come ${lettura.tipo_documento || 'un altro documento'}.` });
+    // Prima cio' che si vede dalla lettura, poi il giudizio dell'agente.
+    const problemi = [...problemiLettura(lettura), ...controlliFormali(lettura, { nome, piva })];
+
+    // Un DURC caricato dove va una visura e' un documento valido nel posto
+    // sbagliato: l'errore piu' facile da fare. Il confronto fra la casella e il
+    // tipo letto non passa dal modello, cosi' non dipende dal suo giudizio.
+    const confronto = confrontaTipoDocumento(tipo.nome, lettura);
+    const letto = String(lettura.tipo_documento || '').trim();
+    if (confronto.esito === 'diverso') {
+      problemi.unshift(problemaTipoSbagliato(tipo.nome, lettura));
+    } else if (valutazione.corrisponde_al_tipo_atteso === false) {
+      problemi.unshift({
+        gravita: 'bloccante',
+        messaggio: 'Il documento non sembra essere "' + tipo.nome + '": e\' stato riconosciuto come ' + (letto || 'un altro documento') + '.'
+          + (confronto.esito === 'coincide' ? ' La lettura pero\' lo riconosce proprio come ' + confronto.attesa.nome + ': controllalo prima di richiederlo al fornitore.' : ''),
+      });
     }
     for (const p of (valutazione.problemi || [])) {
       if (!p || !p.messaggio) continue;

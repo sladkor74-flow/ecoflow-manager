@@ -26,6 +26,7 @@
 
 import { fetchAll } from "./fetchAll.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
+import { problemaTipoSbagliato } from "./tipiDocumento.ts";
 
 export const RUOLI = ['raccolta', 'trasporto_secondaria', 'trattamento', 'stoccaggio', 'cliente'];
 
@@ -95,6 +96,19 @@ export function richiestoA(tipo, soggetto) {
   const nominati = soggettiDelTipo(tipo);
   if (nominati.length > 0) return nominati.some(n => n.chiave === soggetto.chiave);
   return ruoliDaTesto(tipo.si_applica_a).some(r => soggetto.ruoli.includes(r));
+}
+
+/**
+ * I dati letti dal file, salvati dall'agente dentro analisi_json.
+ */
+export function letturaDi(doc) {
+  if (!doc || !doc.analisi_json) return null;
+  try {
+    const j = JSON.parse(doc.analisi_json);
+    return j && j.lettura ? j.lettura : null;
+  } catch (_e) {
+    return null;
+  }
 }
 
 export function leggiProblemi(doc) {
@@ -237,7 +251,12 @@ export function statoRequisito(tipo, doc, oggi) {
     return { ...base, stato: tipo.obbligatorio === false ? 'facoltativo_mancante' : 'mancante' };
   }
 
-  const problemi = leggiProblemi(doc);
+  // Il controllo sul tipo si rifa' qui e non solo quando l'agente legge il file:
+  // cosi' vale anche per i documenti analizzati prima che esistesse, senza
+  // doverli rileggere tutti da capo.
+  const salvati = leggiProblemi(doc);
+  const sbagliato = problemaTipoSbagliato(tipo.nome, letturaDi(doc));
+  const problemi = sbagliato && !salvati.some(p => p.messaggio === sbagliato.messaggio) ? [sbagliato, ...salvati] : salvati;
   const scadenza = soloData(doc.data_scadenza_manuale) || soloData(doc.data_scadenza);
   const giorni = scadenza ? giorniTra(oggi, scadenza) : null;
   const esito = { scadenza, giorni, problemi };
@@ -261,7 +280,9 @@ export function statoRequisito(tipo, doc, oggi) {
   if (giorni !== null && giorni <= preavviso) return { ...esito, stato: 'in_scadenza' };
 
   if (!doc.verificato_manualmente) {
-    if (doc.analisi_stato === 'errore') return { ...esito, stato: 'da_verificare' };
+    // Il motivo del fallimento viaggia insieme allo stato: cosi arriva anche
+    // nel promemoria via email, non solo sulla scheda del fornitore.
+    if (doc.analisi_stato === 'errore') return { ...esito, stato: 'da_verificare', problemi: [...problemi, { gravita: 'attenzione', messaggio: 'La lettura automatica del file non ha funzionato' + (doc.errore_analisi ? ': ' + doc.errore_analisi : '.') + ' Controlla il file a mano.' }] };
     if (giorni === null && tipo.tipo_scadenza !== 'nessuna') return { ...esito, stato: 'da_verificare' };
   }
 
