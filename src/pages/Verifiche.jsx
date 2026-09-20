@@ -1,4 +1,5 @@
 import React from 'react';
+import ControlloRotte from '@/components/verifiche/ControlloRotte';
 import { useAuth } from '@/lib/AuthContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ClipboardCheck } from 'lucide-react';
@@ -34,6 +35,7 @@ export default function Verifiche() {
           <TabsTrigger value="evasione-assegnati">Evasione assegnati</TabsTrigger>
           <TabsTrigger value="raccolto-province">Raccolto per provincia</TabsTrigger>
           <TabsTrigger value="ritiri-province">Ritiri per provincia</TabsTrigger>
+          <TabsTrigger value="rotte">Rotte</TabsTrigger>
         </TabsList>
         <TabsContent value="report-settimanali" className="pt-4">
           <ReportSettimanali isAdmin={isAdmin} />
@@ -49,6 +51,9 @@ export default function Verifiche() {
         </TabsContent>
         <TabsContent value="ritiri-province" className="pt-4">
           <MatriceProvince tipo="ritiri" />
+        </TabsContent>
+        <TabsContent value="rotte" className="pt-4">
+          <ControlloRotte />
         </TabsContent>
       </Tabs>
     </div>

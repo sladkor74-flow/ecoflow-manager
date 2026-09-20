@@ -27,6 +27,13 @@
     "da_verificare": {
       "type": "number"
     },
+    "soggetti_critici": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "I soggetti con almeno un documento scaduto o non conforme: nome, chiave, elenco dei documenti. Lo legge la fatturazione passiva per avvisare prima di pagare, senza ricalcolare la qualifica"
+    },
     "aggiornato_il": {
       "type": "string",
       "format": "date-time"

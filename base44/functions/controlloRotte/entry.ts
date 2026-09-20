@@ -2,7 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { rotte, conferimentiSospetti, quoteDaStoccaggio, tariffeDaVerificare } from "../../shared/rotteConferimenti.ts";
-import { annoRoma } from "../../shared/giornoItaliano.ts";
+import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 
 // Chi conferisce dove, e i formulari che sembrano chiusi sulla destinazione
 // sbagliata.
@@ -20,7 +20,7 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const anno = Number(body.anno) || new Date().getUTCFullYear();
+    const anno = Number(body.anno) || Number(oggiRoma().slice(0, 4));
     const svc = base44.asServiceRole.entities;
 
     const terminato = (r) => String(r.stato || '').toLowerCase().trim() === 'terminato';

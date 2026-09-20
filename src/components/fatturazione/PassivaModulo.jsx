@@ -10,6 +10,7 @@ import PassivaImpiantiTable from './PassivaImpiantiTable';
 import PassivaSecondariaTable from './PassivaSecondariaTable';
 import PassivaAnomalie from './PassivaAnomalie';
 import PassivaFormulariRipartiti from './PassivaFormulariRipartiti';
+import PassivaQualifica from './PassivaQualifica';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const ANNI = [2024, 2025, 2026];
@@ -95,6 +96,9 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
               ? <><CheckCircle2 className="w-4 h-4" /> Quadratura OK: {formatNumber(result.quadratura.tonnellate_totali)} t</>
               : <><XCircle className="w-4 h-4" /> Quadratura: {formatNumber(result.quadratura.tonnellate_totali)} t contro {formatNumber(result.quadratura.tonnellate_raccoglitori)} t</>}
           </div>
+
+          {/* Fornitori del mese con documenti di qualifica scaduti o non conformi */}
+          <PassivaQualifica result={result} anno={result.anno} />
 
           {/* Anomalie */}
           <PassivaAnomalie anomalie={result.anomalie} />

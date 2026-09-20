@@ -1,4 +1,5 @@
 import { base44 } from '@/api/base44Client';
+import { eAci } from '@/lib/canaleSecondaria';
 
 // Importazione dei report di grandi dimensioni del portale Ecotyre.
 //
@@ -289,8 +290,8 @@ function classeDalProdotto(prodotto) {
 function archivioRiga(riga) {
   const classeFile = riga.Classe != null && riga.Classe !== '' ? String(riga.Classe).trim() : '';
   const c = (classeFile || classeDalProdotto(riga.Prodotto) || '').toLowerCase();
-  const p = String(riga.Prodotto || '').trim().toLowerCase();
-  const aci = c.includes('autodemolizione') || c.includes('aci') || p.includes('autodemolizione') || p.includes('aci');
+  // stessa regola di tutto il gestionale: vedi base44/shared/primarie.ts
+  const aci = eAci({ classe: c, prodotto: riga.Prodotto, codice_prodotto: riga.Codice_Prodotto });
   const assegnato = String(riga.Stato || '').toLowerCase().trim() === 'assegnato';
   if (assegnato) return aci ? 'AssegnatoAci' : 'Assegnato';
   return aci ? 'PrimariaAci' : 'PrimariaRete';

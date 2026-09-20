@@ -1,3 +1,4 @@
+import { eAci } from "./canaleSecondaria.ts";
 // Il file unico delle primarie si divide in quattro archivi secondo stato e classe:
 // ordini assegnati o no, classe ACI (PFU Autodemolizione) o rete. La regola e' una
 // sola per l'importazione lato server e per quella a blocchi letta nel browser.
@@ -23,10 +24,12 @@ export const CAMPI_ASSEGNATO = [
 
 /** Archivio di destinazione di un record gia' mappato e arricchito (con la classe). */
 export function archivioPrimaria(record) {
-  const c = String(record.classe || '').trim().toLowerCase();
-  const p = String(record.prodotto || '').trim().toLowerCase();
-  const aci = c.includes('autodemolizione') || c.includes('aci')
-    || p.includes('autodemolizione') || p.includes('aci');
+  // Il canale si decide con la regola di tutto il gestionale (canaleSecondaria.ts),
+  // non con una copia: questa guardava solo classe e prodotto, cercava "aci" anche
+  // dentro altre parole e ignorava il codice prodotto ".class9". Un ordine
+  // smistato qui in un archivio e letto altrove nell'altro canale non quadra piu'
+  // da nessuna parte. Verificato il 20/09/2026 su 11.249 record: stesso esito.
+  const aci = eAci(record);
   const assegnato = String(record.stato || '').toLowerCase().trim() === 'assegnato';
   if (assegnato) return aci ? 'AssegnatoAci' : 'Assegnato';
   return aci ? 'PrimariaAci' : 'PrimariaRete';

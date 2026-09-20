@@ -326,6 +326,15 @@ export async function salvaRiepilogo(base44, anno, valutati) {
     mancanti: conta('mancante'),
     in_scadenza: conta('in_scadenza'),
     da_verificare: conta('da_verificare'),
+    // Chi ha documenti scaduti o non conformi, per nome: la fatturazione passiva
+    // lo legge da qui e avvisa prima di pagare, senza rifare tutta la valutazione.
+    soggetti_critici: valutati
+      .map(s => ({
+        nome: s.nome || '', chiave: s.chiave || '',
+        scaduti: s.requisiti.filter(r => r.stato === 'scaduto').map(r => r.tipo_nome),
+        non_conformi: s.requisiti.filter(r => r.stato === 'non_conforme').map(r => r.tipo_nome),
+      }))
+      .filter(s => s.scaduti.length + s.non_conformi.length > 0),
     aggiornato_il: new Date().toISOString(),
   };
   const ent = base44.asServiceRole.entities.RiepilogoQualifica;

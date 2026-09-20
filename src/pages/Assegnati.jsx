@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { eAci } from '@/lib/canaleSecondaria';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Search, ListOrdered } from 'lucide-react';
 import { formatIntero } from '@/lib/utils';
@@ -42,11 +43,10 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
       // Sull'ACI un formulario non si chiude a piu' del 10% del peso stimato del
       // suo ticket: il massimo si mostra accanto allo stimato, cosi' chi evade
       // l'ordine sa fin dove puo' arrivare senza doverlo ripartire.
-      const eAciRiga = (r) => /autodemoliz|class ?9/i.test(`${r.classe || ''} ${r.prodotto || ''} ${r.codice_prodotto || ''}`);
       setTuttiRecords(all.map(r => ({
         ...r,
         peso_t: +((r.peso_stimato || 0) / 1000).toFixed(3),
-        max_chiudibile_kg: eAciRiga(r) && Number(r.peso_stimato) > 0 ? Math.round(Number(r.peso_stimato) * 1.1) : null,
+        max_chiudibile_kg: eAci(r) && Number(r.peso_stimato) > 0 ? Math.round(Number(r.peso_stimato) * 1.1) : null,
       })));
     } catch (e) { console.error(e); }
     setLoadingRecords(false);
