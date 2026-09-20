@@ -13,9 +13,17 @@
 const pulisci = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 const r2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
 
+// Il tracciato vero (prefattura provvisoria 3716, luglio 2026): ID Prefattura,
+// Fatturante, Periodo, KeyAccount, Tipo (Trasp / Trasp+Tratt), Ordine, Data fine
+// trasporto, Numero FIR, Prodotto, Quantità (kg), Prezzo Unitario (Euro/Kg),
+// Prezzo Totale. Un foglio solo, rete e ACI insieme, l'extra raccolta non c'e'.
+
 // Un ID ordine del portale: due-quattro lettere e almeno sei cifre (ET26084363, SEC26154852)
 const E_ORDINE = /^[A-Z]{2,4}\d{6,}$/;
 export const comeOrdine = (v) => pulisci(v).toUpperCase().replace(/[\s.]/g, '');
+
+/** Il tipo di servizio come lo scrive il gestionale: "Trasp+Tratt" -> TRASP_TRATT, "Trasp" -> TRASP. */
+export const comeServizio = (v) => { const t = pulisci(v).toUpperCase(); return /TRATT/.test(t) ? 'TRASP_TRATT' : /TRASP/.test(t) ? 'TRASP' : ''; };
 
 const INTESTAZIONI = [
   ['ordine', /(id|n|num|numero|cod|codice)?[\s._°-]*ordine|^order/i],
@@ -106,7 +114,7 @@ export function leggiTabellePrefattura(tabelle) {
 }
 
 const somma = (m, id, kg, importo) => {
-  const e = m.get(id) || { id_ordine: id, kg: 0, importo: 0, righe: 0, conKg: false, conImporto: false };
+  const e = m.get(id) || { id_ordine: id, kg: 0, importo: 0, righe: 0, conKg: false, conImporto: false, servizio: '', fir: '' };
   if (kg !== null && kg !== undefined) { e.kg += kg; e.conKg = true; }
   if (importo !== null && importo !== undefined) { e.importo += importo; e.conImporto = true; }
   e.righe++;
@@ -123,7 +131,12 @@ const somma = (m, id, kg, importo) => {
  */
 export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Map()) {
   const pre = new Map();
-  for (const r of righePrefattura || []) somma(pre, r.id_ordine, r.kg, r.importo);
+  for (const r of righePrefattura || []) {
+    somma(pre, r.id_ordine, r.kg, r.importo);
+    const e = pre.get(r.id_ordine);
+    if (!e.servizio) e.servizio = comeServizio(r.servizio);
+    if (!e.fir) e.fir = pulisci(r.numero_fir).toUpperCase();
+  }
   const conImporti = [...pre.values()].some(e => e.conImporto);
   const conPesi = [...pre.values()].some(e => e.conKg);
 
@@ -133,22 +146,26 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
     const gest = new Map();
     for (const r of righeVive[canale] || []) {
       const id = comeOrdine(r.ordine);
-      const e = gest.get(id) || { id_ordine: id, numero_fir: r.numero_fir || '', kg: 0, importo: 0, prezzo: 0 };
+      const e = gest.get(id) || { id_ordine: id, numero_fir: r.numero_fir || '', kg: 0, importo: 0, prezzo: 0, servizio: r.servizio_ecotyre || '' };
       e.kg += Number(r.quantita) || 0;
       e.importo += Number(r.totale) || 0;
       if (r.quantita > 0) e.prezzo = r.tariffa_valore;
       gest.set(id, e);
     }
-    const soloGestionale = [], pesoDiverso = [], importoDiverso = [];
+    const soloGestionale = [], pesoDiverso = [], importoDiverso = [], servizioDiverso = [], firDiverso = [];
     let kgPre = 0, euroPre = 0, ordiniPre = 0;
     for (const [id, g] of gest) {
       const p = pre.get(id);
       if (!p) { soloGestionale.push({ id_ordine: id, numero_fir: g.numero_fir, kg: g.kg, importo: r2(g.importo) }); continue; }
       visti.add(id);
       ordiniPre++; kgPre += p.kg; euroPre += p.importo;
+      // il tipo di servizio decide il prezzo: se la prefattura dice Trasp e il gestionale Trasp+Tratt va saputo
+      if (p.servizio && g.servizio && p.servizio !== g.servizio) servizioDiverso.push({ id_ordine: id, numero_fir: g.numero_fir, servizio_prefattura: p.servizio, servizio_gestionale: g.servizio, kg: Math.round(g.kg) });
+      const firGest = pulisci(g.numero_fir).toUpperCase();
+      if (p.fir && firGest && p.fir !== firGest) firDiverso.push({ id_ordine: id, fir_prefattura: p.fir, fir_gestionale: firGest, kg: Math.round(g.kg) });
       const kgDiversi = p.conKg && Math.round(p.kg) !== Math.round(g.kg);
       if (kgDiversi) pesoDiverso.push({ id_ordine: id, numero_fir: g.numero_fir, kg_prefattura: Math.round(p.kg), kg_gestionale: Math.round(g.kg), importo_prefattura: p.conImporto ? r2(p.importo) : null, importo_gestionale: r2(g.importo) });
-      else if (p.conImporto && Math.abs(p.importo - g.importo) > 0.01) {
+      else if (p.conImporto && Math.abs(p.importo - g.importo) > 0.015) {
         importoDiverso.push({
           id_ordine: id, numero_fir: g.numero_fir, kg: Math.round(g.kg),
           importo_prefattura: r2(p.importo), importo_gestionale: r2(g.importo),
@@ -159,11 +176,16 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
     }
     const kgGest = [...gest.values()].reduce((s, e) => s + e.kg, 0);
     const euroGest = [...gest.values()].reduce((s, e) => s + e.importo, 0);
+    // L'extra raccolta non passa dalla prefattura del portale (verificato sulla
+    // 3716 di luglio 2026: 416 ordini fra rete e ACI, l'intervento extra non c'e').
+    // Se la prefattura non ne porta nessun ordine, le sue righe non sono differenze.
+    const fuoriPrefattura = canale === 'EXTRA_RACCOLTA' && ordiniPre === 0;
     canali.push({
-      canale,
+      canale, fuori_prefattura: fuoriPrefattura,
       gestionale: { ordini: gest.size, kg: Math.round(kgGest), euro: r2(euroGest) },
       prefattura: { ordini: ordiniPre, kg: conPesi ? Math.round(kgPre) : null, euro: conImporti ? r2(euroPre) : null },
       solo_gestionale: soloGestionale, peso_diverso: pesoDiverso, importo_diverso: importoDiverso,
+      servizio_diverso: servizioDiverso, fir_diverso: firDiverso,
     });
   }
 
@@ -181,7 +203,7 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
         : `nel gestionale la fine trasporto è il ${a.giorno.split('-').reverse().join('/')}: un altro mese`,
     });
   }
-  const differenze = soloPrefattura.length + canali.reduce((s, c) => s + c.solo_gestionale.length + c.peso_diverso.length + c.importo_diverso.length, 0);
+  const differenze = soloPrefattura.length + canali.reduce((s, c) => s + (c.fuori_prefattura ? 0 : c.solo_gestionale.length) + c.peso_diverso.length + c.importo_diverso.length + c.servizio_diverso.length + c.fir_diverso.length, 0);
   return {
     coincide: differenze === 0 && pre.size > 0,
     differenze,

@@ -6,6 +6,7 @@ import { Loader2, Upload, CheckCircle, AlertTriangle, FileText, Info } from 'luc
 import { formatKg, formatNumber, formatIntero } from '@/lib/utils';
 
 const NOMI = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
+const SERVIZI = { TRASP: 'Trasp', TRASP_TRATT: 'Trasp+Tratt' };
 const euro = (v) => (v === null || v === undefined ? '—' : formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const kg = (v) => (v === null || v === undefined ? '—' : formatKg(v));
 const giorno = (v) => (v ? String(v).slice(0, 10).split('-').reverse().join('/') : '—');
@@ -149,12 +150,22 @@ export default function PrefatturaEcotyre({ periodo, isAdmin, onEsito }) {
 
           {c.canali.map(x => (
             <React.Fragment key={x.canale}>
+              {x.fuori_prefattura && x.solo_gestionale.length > 0 && (
+                <p className="text-xs text-muted-foreground flex items-start gap-1.5"><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span>{NOMI[x.canale]}: {x.solo_gestionale.length} {x.solo_gestionale.length === 1 ? 'intervento' : 'interventi'} per € {euro(x.gestionale.euro)}. L'extra raccolta non passa dalla prefattura del portale e si fattura a parte: non è una differenza.</span></p>
+              )}
               <Tabella tono="red" titolo={`${NOMI[x.canale]}: nel gestionale ma non nella prefattura`} spiega="Il gestionale li fatturerebbe, Ecotyre non li ha messi in prefattura."
-                righe={x.solo_gestionale}
+                righe={x.fuori_prefattura ? [] : x.solo_gestionale}
                 colonne={[{ t: 'ID ordine', v: r => r.id_ordine, m: true }, { t: 'Formulario', v: r => r.numero_fir || '—' }, { t: 'kg', v: r => kg(r.kg), d: true }, { t: '€', v: r => euro(r.importo), d: true }]} />
               <Tabella titolo={`${NOMI[x.canale]}: peso diverso`}
                 righe={x.peso_diverso}
                 colonne={[{ t: 'ID ordine', v: r => r.id_ordine, m: true }, { t: 'Formulario', v: r => r.numero_fir || '—' }, { t: 'kg prefattura', v: r => kg(r.kg_prefattura), d: true }, { t: 'kg gestionale', v: r => kg(r.kg_gestionale), d: true }, { t: '€ prefattura', v: r => euro(r.importo_prefattura), d: true }, { t: '€ gestionale', v: r => euro(r.importo_gestionale), d: true }]} />
+              <Tabella titolo={`${NOMI[x.canale]}: tipo di servizio diverso`} spiega="Il tipo di servizio dipende dall'impianto di destinazione: Trasp quando il trattamento lo fattura Ecotyre, Trasp+Tratt negli altri casi."
+                righe={x.servizio_diverso}
+                colonne={[{ t: 'ID ordine', v: r => r.id_ordine, m: true }, { t: 'Formulario', v: r => r.numero_fir || '—' }, { t: 'Prefattura', v: r => SERVIZI[r.servizio_prefattura] || r.servizio_prefattura }, { t: 'Gestionale', v: r => SERVIZI[r.servizio_gestionale] || r.servizio_gestionale }, { t: 'kg', v: r => kg(r.kg), d: true }]} />
+              <Tabella titolo={`${NOMI[x.canale]}: numero di formulario diverso`}
+                righe={x.fir_diverso}
+                colonne={[{ t: 'ID ordine', v: r => r.id_ordine, m: true }, { t: 'FIR prefattura', v: r => r.fir_prefattura }, { t: 'FIR gestionale', v: r => r.fir_gestionale }, { t: 'kg', v: r => kg(r.kg), d: true }]} />
               <Tabella titolo={`${NOMI[x.canale]}: stesso peso, importo diverso`} spiega="Il prezzo per tonnellata della prefattura è ricavato dall'importo: dice subito se è una tariffa diversa."
                 righe={x.importo_diverso}
                 colonne={[{ t: 'ID ordine', v: r => r.id_ordine, m: true }, { t: 'Formulario', v: r => r.numero_fir || '—' }, { t: 'kg', v: r => kg(r.kg), d: true }, { t: '€ prefattura', v: r => euro(r.importo_prefattura), d: true }, { t: '€ gestionale', v: r => euro(r.importo_gestionale), d: true }, { t: '€/t prefattura', v: r => euro(r.prezzo_prefattura_t), d: true }, { t: '€/t gestionale', v: r => euro(r.prezzo_gestionale_t), d: true }]} />

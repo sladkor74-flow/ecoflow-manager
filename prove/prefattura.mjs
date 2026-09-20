@@ -35,6 +35,14 @@ verifica('foglio senza ordini: saltato con una nota', l.note.some(n => /Note/.te
 const tonn = leggiTabellePrefattura([{ nome: 'T', celle: [['Ordine', 'Peso t', 'Importo'], ['ET26000001', 1.0, 202], ['ET26000002', 2.5, 505]] }]);
 verifica('pesi in tonnellate convertiti in kg, e detto', tonn.righe[1].kg === 2500 && tonn.note.some(n => /tonnellate/.test(n)));
 
+const vero = leggiTabellePrefattura([{ nome: 'Worksheet', celle: [
+  ['ID Prefattura', 'Fatturante', 'Periodo', 'KeyAccount', 'Tipo', 'Ordine', 'Data fine trasporto', 'Numero FIR', 'Prodotto', 'Quantità (kg)', 'Prezzo Unitario (Euro/Kg)', 'Prezzo Totale'],
+  [3716, 'SMOCO Srl', 46204, 'Ecotyre Scrl', 'Trasp+Tratt', 'ET25047044', 46204, 'BSDCL002149HV', '.class1', 2300, 0.202, 464.6],
+  [3716, 'SMOCO Srl', 46204, 'Ecotyre Scrl', 'Trasp', 'ET26130005', 46234, 'LQQDP001408LD', '.class1', 3840, 0.202, 775.68],
+] }]);
+verifica('il tracciato vero del portale: ordine, FIR, kg, importo e tipo di servizio', vero.righe.length === 2 && vero.note.length === 0
+  && vero.righe[0].id_ordine === 'ET25047044' && vero.righe[0].numero_fir === 'BSDCL002149HV' && vero.righe[0].kg === 2300 && vero.righe[0].importo === 464.6 && vero.righe[1].servizio === 'Trasp', JSON.stringify(vero));
+
 console.log('CONFRONTO');
 const riga = (ordine, quantita, totale, altro = {}) => ({ ordine, numero_fir: 'F-' + ordine, quantita, totale, tariffa_valore: 202, ...altro });
 const vive = {
@@ -65,6 +73,10 @@ verifica('solo in prefattura: tre, ciascuno con la sua ragione', c.solo_prefattu
 verifica('il canale dell\'ordine viene dal gestionale, nessun totale fra canali', c.canali.length === 3 && !('totale' in c) && c.differenze === 6 && c.coincide === false, String(c.differenze));
 const uguale = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo: 202 }], { RETE: [riga('ET26000001', 1000, 202)], ACI: [], EXTRA_RACCOLTA: [] });
 verifica('tutto uguale: coincide', uguale.coincide === true && uguale.differenze === 0);
+const serv = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo: 202, servizio: 'Trasp', numero_fir: 'fir-x' }], { RETE: [riga('ET26000001', 1000, 202, { servizio_ecotyre: 'TRASP_TRATT', numero_fir: 'FIR-Y' })], ACI: [], EXTRA_RACCOLTA: [] });
+verifica('tipo di servizio e formulario diversi: due differenze', serv.differenze === 2 && serv.canali[0].servizio_diverso[0].servizio_prefattura === 'TRASP' && serv.canali[0].fir_diverso[0].fir_gestionale === 'FIR-Y');
+const conExtra = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo: 202 }], { RETE: [riga('ET26000001', 1000, 202)], ACI: [], EXTRA_RACCOLTA: [riga('BSDCL002230PQ', 460, 92.92)] });
+verifica('l\'extra raccolta non passa dalla prefattura: non e\' una differenza', conExtra.coincide === true && conExtra.canali[2].fuori_prefattura === true && conExtra.canali[2].solo_gestionale.length === 1);
 verifica('prefattura vuota: non "coincide"', confrontaPrefattura([], { RETE: [], ACI: [], EXTRA_RACCOLTA: [] }).coincide === false);
 const soloOrdini = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: null, importo: null }], { RETE: [riga('ET26000001', 1000, 202)], ACI: [], EXTRA_RACCOLTA: [] });
 verifica('prefattura con i soli ordini: si confronta quel che c\'e\'', soloOrdini.coincide === true && soloOrdini.con_importi === false && soloOrdini.canali[0].prefattura.euro === null);
