@@ -240,9 +240,9 @@ esportare: solo in prefattura (con la ragione: altro mese, cancellato,
 sconosciuto), solo nel gestionale, peso diverso, stesso peso e importo diverso
 (col prezzo per tonnellata ricavato). Il canale di un ordine non si chiede: e'
 quello che ha nel gestionale. La prefattura non ha un tracciato garantito: le
-colonne si riconoscono dai nomi e gli ordini dalla forma (`ET26084363`). Il PDF lo
-legge l'agente e la lettura si controlla sui totali stampati; l'Excel e' la via
-affidabile. Una prefattura nuova non cancella la precedente: la segna superata.
+colonne si riconoscono dai nomi e gli ordini dalla forma (`ET26084363`). Il PDF si
+legge dal suo testo (vedi piu' sotto), non con un agente. Una prefattura nuova non
+cancella la precedente: la segna superata.
 
 ### Il margine
 
