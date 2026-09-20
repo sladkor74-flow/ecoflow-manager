@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
 
@@ -16,7 +17,7 @@ export default async function(req) {
     const b = base44.asServiceRole;
 
     const body = await req.json().catch(() => ({}));
-    const anno = Number(body.anno) || new Date().getFullYear();
+    const anno = Number(body.anno) || Number(oggiRoma().slice(0, 4));
 
     const [targets, primarieRete, primarieAci] = await Promise.all([
       b.entities.TargetRaccoglitorePrimaria.filter({ anno }, '-created_date', 5000),

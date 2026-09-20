@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { annoOrdine } from "../../shared/movimenti.ts";
 import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
@@ -32,9 +33,7 @@ export default async function(req) {
       if (!matchesFilter(r.classe, filters.classe)) return false;
       if (!matchesFilter((r.trasportatore || '').trim(), filters.trasportatore)) return false;
       if (filters.anno != null && (!Array.isArray(filters.anno) ? filters.anno : filters.anno.length > 0)) {
-        const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
-        const dt = d ? new Date(d) : null;
-        const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
+        const anno = annoOrdine(r);
         if (!matchesFilterString(anno, filters.anno)) return false;
       }
       return true;

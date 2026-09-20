@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { annoOrdine, giornoOrdine, meseOrdine } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileSpreadsheet, Filter, X } from 'lucide-react';
 import TerziarieKpi from '@/components/terziarie/TerziarieKpi';
@@ -11,13 +12,8 @@ import { fetchAllClient } from '@/lib/fetchAllClient';
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const MATERIALI = ['PFU SFUSO', 'CIAB/CIPP', 'FERRO'];
 
-function getMeseFromRecord(r) {
-  if (r.mese) return r.mese;
-  const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
-  if (!d) return null;
-  const dt = new Date(d);
-  return isNaN(dt.getTime()) ? null : MESI[dt.getMonth()];
-}
+// Il mese e' quello della fine trasporto, letto sul giorno italiano.
+const getMeseFromRecord = (r) => meseOrdine(r) || r.mese || null;
 function getMateriale(r) {
   if (r.peso_ciab_cipp) return 'CIAB/CIPP';
   if (r.ferro) return 'FERRO';
@@ -45,10 +41,7 @@ export default function Terziarie() {
         regioni: [...new Set(all.map(r => (getRegioneFromProvincia(r.provincia) || '').trim()).filter(Boolean))].sort(),
         stati: [...new Set(all.map(r => (r.stato || '').trim()).filter(Boolean))].sort(),
         anni: [...new Set(all.map(r => {
-          const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
-          if (!d) return null;
-          const dt = new Date(d);
-          return isNaN(dt.getTime()) ? null : dt.getFullYear();
+          return annoOrdine(r);
         }).filter(Boolean))].sort(),
       });
       // Apply filters
@@ -60,16 +53,13 @@ export default function Terziarie() {
         if (filters.regione.length > 0 && !filters.regione.includes((getRegioneFromProvincia(r.provincia) || '').trim())) return false;
         if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
         if (filters.data) {
-          const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
-          if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
+          if (giornoOrdine(r) !== filters.data) return false;
         }
         if (filters.mese.length > 0 && !filters.mese.includes(getMeseFromRecord(r))) return false;
         if (filters.trasportatore.length > 0 && !filters.trasportatore.includes((r.trasportatore || '').trim())) return false;
         if (filters.materiale.length > 0 && !filters.materiale.includes(getMateriale(r))) return false;
         if (filters.anno.length > 0) {
-          const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
-          const dt = d ? new Date(d) : null;
-          const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
+          const anno = annoOrdine(r);
           if (!filters.anno.map(String).includes(String(anno))) return false;
         }
         return true;

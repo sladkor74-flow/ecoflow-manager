@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Raccolta per regione con i target mensili. I canali restano separati: il
@@ -14,7 +15,7 @@ export default async function(req) {
 
     const body = await req.json().catch(() => ({}));
     const mese = body.mese || '';
-    const anno = body.anno || new Date().getFullYear();
+    const anno = body.anno || Number(oggiRoma().slice(0, 4));
 
     const meseIdx = MESI.indexOf(mese);
     const nelPeriodo = (r) => {

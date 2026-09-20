@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { computeRaccoltoData, MESI } from "../../shared/raccoltoCalculator.ts";
@@ -15,7 +16,7 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const anno = Number(body.anno) || new Date().getFullYear();
+    const anno = Number(body.anno) || Number(oggiRoma().slice(0, 4));
 
     // 1. Calcola raccolto dell'anno
     // Target contro il solo canale RETE.

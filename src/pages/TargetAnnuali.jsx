@@ -7,7 +7,7 @@ import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { formatTonnellate, formatIntero } from '@/lib/utils';
 import { usePermessi } from '@/lib/permessi';
 
-const ANNO_DEFAULT = 2026;
+const ANNO_DEFAULT = new Date().getFullYear();
 const ANNI = [2024, 2025, 2026, 2027];
 
 function fmt(n) { return formatTonnellate((Number(n) || 0)); }
@@ -105,7 +105,7 @@ export default function TargetAnnuali({ incorporato = false, anno: annoEsterno }
   const [migratingRegionali, setMigratingRegionali] = useState(false);
   const [migratingRegioni, setMigratingRegioni] = useState(false);
   const [raccForm, setRaccForm] = useState({ raccoglitore: '', target_tonnellate: 0 });
-  const [impForm, setImpForm] = useState({ nome_impianto: '', target: 0, data_fine: '2026-12-18' });
+  const [impForm, setImpForm] = useState({ nome_impianto: '', target: 0, data_fine: `${new Date().getFullYear()}-12-18` });
 
   const load = async () => {
     setLoading(true);
@@ -224,7 +224,7 @@ export default function TargetAnnuali({ incorporato = false, anno: annoEsterno }
     try {
       const created = await base44.entities.ImpiantoTargetSecondaria.create({ ...impForm, target: Number(impForm.target), stato: 'attivo' });
       setImpianti(prev => [...prev, created]);
-      setImpForm({ nome_impianto: '', target: 0, data_fine: '2026-12-18' });
+      setImpForm({ nome_impianto: '', target: 0, data_fine: `${new Date().getFullYear()}-12-18` });
       setShowImpForm(false);
     } catch (e) {}
     setSaving(false);

@@ -263,3 +263,20 @@ sta sul mese del formulario** (fine trasporto), non su quello in cui la
 dichiarazione arriva: altrimenti la stessa raccolta compare due volte, un mese col
 conferito senza dichiarazione e un altro con la dichiarazione senza conferito.
 Quando e con quale dichiarazione e' stata fatta si scrive nella nota.
+
+### Come si legge un movimento: un punto solo
+
+`base44/shared/movimenti.ts` (specchio per le pagine: `src/lib/movimenti.js`).
+Chi deve decidere se un movimento conta, in che mese e in che canale lo chiede
+li', e non riscrive la regola:
+
+- `eTerminato(r)`: conta solo un movimento terminato;
+- `periodoMovimento(r)`: giorno, anno, mese e settimana ISO dalla **fine del
+  trasporto sul giorno italiano**; `filtraMovimenti(records, { anno, mese, canale })`;
+- `giornoOrdine / annoOrdine / meseOrdine`: per gli elenchi, che mostrano anche
+  ordini senza trasporto (si collocano all'immissione). Mai la chiusura a portale;
+- `canaleMovimento(r, archivio)`: rete, ACI (con `eAci`) o extra raccolta.
+
+Anche «oggi» e' il giorno italiano (`oggiRoma()`), non `new Date()` del server.
+Gli specchi in `src/lib` devono restare identici agli originali: lo controlla
+`prove/specchi.mjs`. **Prima di spingere: `npm run lint` e `npm run prove`.**

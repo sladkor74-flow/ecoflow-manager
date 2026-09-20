@@ -10,8 +10,9 @@ export default async function(req) {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
+    const { anno } = await req.json().catch(() => ({}));
     const records = await fetchAll(base44.asServiceRole.entities.PrimariaRete);
-    const result = computeSlaMetrics(records);
+    const result = computeSlaMetrics(records, anno);
 
     return Response.json(result);
   } catch (error) {

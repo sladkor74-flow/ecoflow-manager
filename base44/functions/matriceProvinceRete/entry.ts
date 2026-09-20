@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Raccolta della RETE per provincia e mese: peso effettivo e numero di ritiri.
@@ -35,7 +36,7 @@ export default async function(req) {
       const d = giorno(r.trasporto_finito_il);
       if (d && String(r.stato || '').toLowerCase().trim() === 'terminato') anni.add(Number(d.slice(0, 4)));
     }
-    const anno = Number(body.anno) || Math.max(...anni, new Date().getFullYear());
+    const anno = Number(body.anno) || Math.max(...anni, Number(oggiRoma().slice(0, 4)));
 
     const province = new Map();
     for (const r of record) {

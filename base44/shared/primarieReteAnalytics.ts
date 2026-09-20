@@ -3,6 +3,8 @@
 // 2. Mix classi PFU per Raccoglitore con confronto target consorziali
 
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
+import { eTerminato, periodoMovimento } from "./movimenti.ts";
+import { oggiRoma } from "./giornoItaliano.ts";
 
 export const TARGET_MIX_CLASSI: Record<string, number> = {
   P: 75,
@@ -16,9 +18,9 @@ export const TARGET_ANNUO_TON = 11550;
 // --- 1. Matrice Province ---
 
 export function computeProvinceMatrixData(records, currentMonthIdx = null) {
-  const now = new Date();
-  const currMonth = currentMonthIdx != null ? currentMonthIdx : now.getMonth();
-  const currYear = now.getFullYear();
+  const oggi = oggiRoma();
+  const currMonth = currentMonthIdx != null ? currentMonthIdx : Number(oggi.slice(5, 7)) - 1;
+  const currYear = Number(oggi.slice(0, 4));
 
   const byProvince: Record<string, any> = {};
 
@@ -27,15 +29,13 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
     if (!provincia) continue;
     const regione = r.regione || PROV_TO_REGION[provincia] || 'Altro';
 
-    // Il periodo lo da' la fine del trasporto, non la chiusura a portale.
-    const dataChiusura = r.trasporto_finito_il ? new Date(r.trasporto_finito_il)
-      : r.ordine_chiuso_il ? new Date(r.ordine_chiuso_il) : null;
-    if (!dataChiusura) continue;
+    // Conta un ritiro fatto: terminato, nel mese in cui e' finito il trasporto
+    // (base44/shared/movimenti.ts). Prima entravano anche i cancellati.
+    if (!eTerminato(r)) continue;
+    const periodo = periodoMovimento(r);
+    if (!periodo || periodo.anno !== currYear) continue;
 
-    if (dataChiusura.getFullYear() !== currYear) continue;
-
-    const meseIdx = dataChiusura.getMonth();
-    const mese = MESI[meseIdx];
+    const mese = MESI[periodo.mese_idx];
     const hasFir = r.numero_fir && String(r.numero_fir).trim() !== '';
 
     if (!byProvince[provincia]) {
@@ -114,18 +114,18 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
   const fStato = toArray(filters.stato);
 
   // Default: anno in corso se nessun filtro anno specificato
-  const effectiveAnni = fAnno.length > 0 ? fAnno : [new Date().getFullYear()];
+  const effectiveAnni = fAnno.length > 0 ? fAnno : [Number(oggiRoma().slice(0, 4))];
 
   const filtered = records.filter((r: any) => {
     const regione = r.regione || PROV_TO_REGION[(r.provincia || '').toUpperCase().trim()] || 'Altro';
     const stato = (r.stato || '').trim();
-    // Il periodo lo da' la fine del trasporto, non la chiusura a portale.
-    const dataChiusura = r.trasporto_finito_il ? new Date(r.trasporto_finito_il)
-      : r.ordine_chiuso_il ? new Date(r.ordine_chiuso_il) : null;
-    const meseIdx = dataChiusura ? dataChiusura.getMonth() : -1;
-    const mese = meseIdx >= 0 ? MESI[meseIdx] : 'N/D';
-    const anno = dataChiusura ? dataChiusura.getFullYear() : null;
+    // Il periodo e' la fine del trasporto sul giorno italiano; il mix si valuta
+    // sul raccolto, cioe' sui terminati, a meno che il filtro chieda altro.
+    const periodo = periodoMovimento(r);
+    const mese = periodo ? periodo.mese : 'N/D';
+    const anno = periodo ? periodo.anno : null;
 
+    if (fStato.length === 0 && !eTerminato(r)) return false;
     if (!effectiveAnni.includes(anno)) return false;
     if (fMese.length > 0 && !fMese.includes(mese)) return false;
     if (fRegione.length > 0 && !fRegione.includes(regione)) return false;
@@ -213,10 +213,17 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
 
 // --- 3. SLA Metrics per Trasportatore ---
 
-export function computeSlaMetrics(records) {
+// Si misura sui ritiri fatti (terminati) dell'anno richiesto, per default quello
+// in corso: prima entravano tutti gli anni dell'archivio e i cancellati, e la
+// media giorni a video non era dell'anno di lavoro.
+export function computeSlaMetrics(records, anno = null) {
   const byTrasportatore: Record<string, any> = {};
+  const annoNum = Number(anno) || Number(oggiRoma().slice(0, 4));
 
   for (const r of records) {
+    if (!eTerminato(r)) continue;
+    const periodo = periodoMovimento(r);
+    if (!periodo || periodo.anno !== annoNum) continue;
     const trasportatore = (r.trasportatore || 'N/D').trim();
 
     if (!byTrasportatore[trasportatore]) {
@@ -269,6 +276,7 @@ export function computeSlaMetrics(records) {
   return {
     trasportatori,
     totale_ordini,
+    anno: annoNum,
     avg_giorni: totale_giorni_count > 0 ? totale_giorni / totale_giorni_count : 0,
     pct_nei_tempi_globale: totale_ordini > 0 ? (totale_nei_tempi / totale_ordini) * 100 : 0,
   };

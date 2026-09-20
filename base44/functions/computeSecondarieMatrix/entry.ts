@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { annoOrdine, giornoOrdine } from "../../shared/movimenti.ts";
 import { MESI } from "../../shared/raccoltoCalculator.ts";
 import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
 import { matchesFilter, matchesFilterString, matchesFilterLower } from "../../shared/multiFilter.ts";
@@ -38,13 +39,10 @@ export default async function(req) {
       }
       if (!matchesFilterLower(r.stato, filters.stato)) return false;
       if (filters.data) {
-        const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
-        if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
+        if (giornoOrdine(r) !== filters.data) return false;
       }
       if (filters.anno != null && (!Array.isArray(filters.anno) ? filters.anno : filters.anno.length > 0)) {
-        const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
-        const dt = d ? new Date(d) : null;
-        const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
+        const anno = annoOrdine(r);
         if (!matchesFilterString(anno, filters.anno)) return false;
       }
       return true;
@@ -132,10 +130,7 @@ export default async function(req) {
       stati: [...new Set(all.map(r => (r.stato || '').trim()).filter(Boolean))].sort(),
       canali: ['Rete', 'ACI'].filter(c => all.some(r => (canaleDi(r) === 'ACI' ? 'ACI' : 'Rete') === c)),
       anni: [...new Set(all.map(r => {
-        const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
-        if (!d) return null;
-        const dt = new Date(d);
-        return isNaN(dt.getTime()) ? null : dt.getFullYear();
+        return annoOrdine(r);
       }).filter(Boolean))].sort((a: any, b: any) => b - a),
     };
 

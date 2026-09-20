@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { annoOrdine, giornoOrdine } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
 import { Loader2, RefreshCw, Truck, Factory, Package, Filter, X } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -58,10 +59,7 @@ export default function PrimarieAci() {
   const regioni = [...new Set(records.map(r => (r.regione || '').trim()).filter(Boolean))].sort();
   const stati = [...new Set(records.map(r => (r.stato || '').trim()).filter(Boolean))].sort();
   const anni = [...new Set(records.map(r => {
-    const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
-    if (!d) return null;
-    const dt = new Date(d);
-    return isNaN(dt.getTime()) ? null : dt.getFullYear();
+    return annoOrdine(r);
   }).filter(Boolean))].sort((a, b) => b - a);
 
   const filtered = records.filter(r => {
@@ -72,14 +70,11 @@ export default function PrimarieAci() {
     if (filterRegione.length > 0 && !filterRegione.includes((r.regione || '').trim())) return false;
     if (filterStato.length > 0 && !filterStato.includes((r.stato || '').trim())) return false;
     if (filterAnno.length > 0) {
-      const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
-      const dt = d ? new Date(d) : null;
-      const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
+      const anno = annoOrdine(r);
       if (!filterAnno.map(String).includes(String(anno))) return false;
     }
     if (filterData) {
-      const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
-      if (!d || new Date(d).toISOString().slice(0, 10) !== filterData) return false;
+      if (giornoOrdine(r) !== filterData) return false;
     }
     return true;
   });

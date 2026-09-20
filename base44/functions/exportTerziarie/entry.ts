@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { annoOrdine, meseOrdine } from "../../shared/movimenti.ts";
 import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
@@ -20,10 +21,7 @@ export default async function(req) {
 
     const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
     function getMese(r) {
-      const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
-      if (!d) return null;
-      const dt = new Date(d);
-      return isNaN(dt.getTime()) ? null : MESI[dt.getMonth()];
+      return meseOrdine(r);
     }
     function getMateriale(r) {
       if (r.peso_ciab_cipp) return 'CIAB/CIPP';
@@ -38,9 +36,7 @@ export default async function(req) {
       if (!matchesFilter((r.trasportatore || '').trim(), filters.trasportatore)) return false;
       if (!matchesFilter(getMateriale(r), filters.materiale)) return false;
       if (filters.anno != null && (!Array.isArray(filters.anno) ? filters.anno : filters.anno.length > 0)) {
-        const d = r.trasporto_finito_il || r.ordine_chiuso_il || r.ordine_immesso_il;
-        const dt = d ? new Date(d) : null;
-        const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
+        const anno = annoOrdine(r);
         if (!matchesFilterString(anno, filters.anno)) return false;
       }
       if (filters.provincia != null && (!Array.isArray(filters.provincia) ? filters.provincia : filters.provincia.length > 0)) {

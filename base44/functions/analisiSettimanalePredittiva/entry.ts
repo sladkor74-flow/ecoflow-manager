@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { formatoKg } from "../../shared/formato.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
@@ -8,7 +9,13 @@ import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 // Media reale di un viaggio di secondaria: 13,5 tonnellate.
 const KG_PER_VIAGGIO = 13500;
-const DATA_FINE_DEFAULT = '2026-12-18';
+// L'anno di lavoro e' quello in corso (giorno italiano) e la fine della
+// programmazione, se l'impianto non ne ha una sua, e' il 18 dicembre di
+// quell'anno. Prima c'erano scritti "2026" e "2026-12-18": dal 19 dicembre 2026
+// il modulo si sarebbe spento senza dirlo, e nel 2027 avrebbe continuato a
+// leggere il 2026.
+const annoRiferimento = () => Number(oggiRoma().slice(0, 4));
+const dataFineDefault = () => `${annoRiferimento()}-12-18`;
 
 function getMonday(date) {
   const d = new Date(date);
@@ -72,7 +79,7 @@ export default async function(req) {
       const residuo = Math.max(0, target - consuntivoTot);
 
       // settimane rimanenti
-      const dataFine = new Date(DATA_FINE_DEFAULT + 'T00:00:00');
+      const dataFine = new Date(dataFineDefault() + 'T00:00:00');
       let cur = new Date(thisMonday);
       let settRim = 0;
       while (cur <= dataFine) { settRim++; cur.setDate(cur.getDate() + 7); }

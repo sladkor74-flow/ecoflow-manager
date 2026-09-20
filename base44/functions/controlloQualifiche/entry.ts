@@ -91,7 +91,7 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const anno = Number(body.anno) || new Date().getFullYear();
+    const anno = Number(body.anno) || Number(oggiRoma().slice(0, 4));
     const inviaEmail = body.invia_email !== false;
     const forza = body.forza === true;
     if (forza && user.role !== 'admin') {

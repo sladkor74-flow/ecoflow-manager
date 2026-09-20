@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { annoOrdine, giornoOrdine } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Route } from 'lucide-react';
 import AlertBadge from '@/components/alerts/AlertBadge';
@@ -53,13 +54,10 @@ export default function Secondarie() {
         }
         if (filters.stato.length > 0 && !filters.stato.map(s => s.toLowerCase()).includes((r.stato || '').trim().toLowerCase())) return false;
         if (filters.data) {
-          const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
-          if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
+          if (giornoOrdine(r) !== filters.data) return false;
         }
         if (filters.anno.length > 0) {
-          const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
-          const dt = d ? new Date(d) : null;
-          const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
+          const anno = annoOrdine(r);
           if (!filters.anno.map(String).includes(String(anno))) return false;
         }
         return true;

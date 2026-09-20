@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { PROV_TO_REGION, MESI } from "../../shared/raccoltoCalculator.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
@@ -16,9 +17,12 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const now = new Date();
-    const meseCorrente = MESI[now.getMonth()];
-    const annoCorrente = now.getFullYear();
+    // "oggi" e' il giorno italiano: fra le 22 e le 24 UTC dell'ultimo del mese il
+    // server e' ancora nel mese prima.
+    const oggi = oggiRoma();
+    const meseCorrenteIdx = Number(oggi.slice(5, 7)) - 1;
+    const meseCorrente = MESI[meseCorrenteIdx];
+    const annoCorrente = Number(oggi.slice(0, 4));
     const mese = body.mese || meseCorrente;
     const anno = Number(body.anno || annoCorrente);
     // Gli alert li scrive solo l'amministratore: agli altri la funzione risponde con i soli numeri.
@@ -61,8 +65,8 @@ export default async function(req) {
 
     // Determina se stiamo valutando il mese corrente o un mese passato
     const isMeseCorrente = (mese === meseCorrente && anno === annoCorrente);
-    const giornoDelMese = now.getDate();
-    const giorniInMese = new Date(anno, now.getMonth() + 1, 0).getDate();
+    const giornoDelMese = Number(oggi.slice(8, 10));
+    const giorniInMese = new Date(Date.UTC(anno, meseCorrenteIdx + 1, 0)).getUTCDate();
     const fattoreTemporale = isMeseCorrente && giornoDelMese > 0 ? (giornoDelMese / giorniInMese) : 1;
 
     const missed = [];

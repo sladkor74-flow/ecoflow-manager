@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { annoOrdine, giornoOrdine } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
 import { Loader2, Upload, MapPin, BarChart3, Clock, Table2, Filter, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -58,14 +59,11 @@ export default function PrimarieRete() {
         if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
         if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;
         if (filters.anno.length > 0) {
-          const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
-          const dt = d ? new Date(d) : null;
-          const anno = dt && !isNaN(dt.getTime()) ? dt.getFullYear() : null;
+          const anno = annoOrdine(r);
           if (!filters.anno.map(String).includes(String(anno))) return false;
         }
         if (filters.data) {
-          const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
-          if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
+          if (giornoOrdine(r) !== filters.data) return false;
         }
         return true;
       });
@@ -83,10 +81,7 @@ export default function PrimarieRete() {
   const regioni = [...new Set(allRecords.map(r => (r.regione || '').trim()).filter(Boolean))].sort();
   const stati = [...new Set(allRecords.map(r => (r.stato || '').trim()).filter(Boolean))].sort();
   const anni = [...new Set(allRecords.map(r => {
-    const d = r.ordine_chiuso_il || r.trasporto_finito_il || r.ordine_immesso_il;
-    if (!d) return null;
-    const dt = new Date(d);
-    return isNaN(dt.getTime()) ? null : dt.getFullYear();
+    return annoOrdine(r);
   }).filter(Boolean))].sort((a, b) => b - a);
 
   const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);

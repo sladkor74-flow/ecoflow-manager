@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { quoteDaStoccaggio } from "../../shared/rotteConferimenti.ts";
@@ -8,8 +9,13 @@ import { eAmministratore } from "../../shared/permessi.ts";
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 // Media reale di un viaggio di secondaria: 13,5 tonnellate.
 const KG_PER_VIAGGIO = 13500;
-const DATA_FINE_DEFAULT = '2026-12-18';
-const ANNO_RIFERIMENTO = 2026;
+// L'anno di lavoro e' quello in corso (giorno italiano) e la fine della
+// programmazione, se l'impianto non ne ha una sua, e' il 18 dicembre di
+// quell'anno. Prima c'erano scritti "2026" e "2026-12-18": dal 19 dicembre 2026
+// il modulo si sarebbe spento senza dirlo, e nel 2027 avrebbe continuato a
+// leggere il 2026.
+const annoRiferimento = () => Number(oggiRoma().slice(0, 4));
+const dataFineDefault = () => `${annoRiferimento()}-12-18`;
 
 function getMonday(date) {
   const d = new Date(date);
@@ -48,7 +54,7 @@ export default async function(req) {
     // Aggrega (somma) i record con stesso raccoglitore normalizzato indipendentemente
     // dalla regione, cosi' uno split regionale (es. Smoco Puglia/Calabria/Basilicata)
     // contribuisce con un unico totale al target del fornitore.
-    const targetRaccogli = await b.entities.TargetRaccoglitore.filter({ anno: ANNO_RIFERIMENTO });
+    const targetRaccogli = await b.entities.TargetRaccoglitore.filter({ anno: annoRiferimento() });
     const targetByNome = {};
     for (const t of targetRaccogli) {
       const key = normalizzaRagioneSociale(t.raccoglitore);
@@ -63,7 +69,7 @@ export default async function(req) {
     const spedisceSecondarie = new Set();
     for (const r of secondarie) {
       if (statoNorm(r.stato) !== 'terminato') continue;
-      if (yearOf(r.trasporto_finito_il) !== ANNO_RIFERIMENTO) continue;
+      if (yearOf(r.trasporto_finito_il) !== annoRiferimento()) continue;
       const o = normalizzaRagioneSociale(r.stoccaggio);
       if (o) spedisceSecondarie.add(o);
     }
@@ -79,7 +85,7 @@ export default async function(req) {
 
     // Settimane: dal lunedì della settimana corrente fino al 18/12
     const oggi = new Date();
-    const dataFine = new Date(DATA_FINE_DEFAULT + 'T00:00:00');
+    const dataFine = new Date(dataFineDefault() + 'T00:00:00');
     let cur = getMonday(oggi);
     const settimane = [];
     let wn = 1;
@@ -96,13 +102,13 @@ export default async function(req) {
     const prim2026 = primarie.filter(r => {
       if (statoNorm(r.stato) !== 'terminato') return false;
       if (!r.trasporto_finito_il) return false;
-      if (yearOf(r.trasporto_finito_il) !== ANNO_RIFERIMENTO) return false;
+      if (yearOf(r.trasporto_finito_il) !== annoRiferimento()) return false;
       return true;
     });
     const sec2026 = secondarie.filter(r => {
       if (statoNorm(r.stato) !== 'terminato') return false;
       if (!r.trasporto_finito_il) return false;
-      if (yearOf(r.trasporto_finito_il) !== ANNO_RIFERIMENTO) return false;
+      if (yearOf(r.trasporto_finito_il) !== annoRiferimento()) return false;
       return true;
     });
 
@@ -381,7 +387,7 @@ export default async function(req) {
               fornitore_id: f.id, fornitore_nome: f.nome,
               settimana_numero: s.numero, data_inizio: s.data_inizio, data_fine: s.data_fine,
               kg_previsti: prev, kg_effettivi: exec, viaggi_previsti: viaggiPrev, viaggi_effettivi: viaggiEff,
-              stato: congelata ? 'completato' : 'da_programmare', anno: ANNO_RIFERIMENTO, modificato_manuale: false,
+              stato: congelata ? 'completato' : 'da_programmare', anno: annoRiferimento(), modificato_manuale: false,
             });
           } else {
             recordId = existing.id;
@@ -432,7 +438,7 @@ export default async function(req) {
       result.push({
         impianto: {
           id: imp.id, nome: imp.nome_impianto, target: imp.target || 0,
-          totale_capacity: imp.totale_capacity_kg || 0, data_fine: imp.data_fine || DATA_FINE_DEFAULT,
+          totale_capacity: imp.totale_capacity_kg || 0, data_fine: imp.data_fine || dataFineDefault(),
           is_double_role: isDoubleRole,
         },
         consuntivo: impConsuntivo,
@@ -462,7 +468,7 @@ export default async function(req) {
       stoccaggi: stoccaggiResult,
       settimane,
       data_inizio: settimane[0] ? settimane[0].data_inizio : null,
-      data_fine: DATA_FINE_DEFAULT,
+      data_fine: dataFineDefault(),
       num_settimane: settimane.length,
     });
   } catch (error) {

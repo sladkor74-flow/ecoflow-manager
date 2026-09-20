@@ -4,6 +4,7 @@
 // senza alterare la struttura sorgente.
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
 import { giornoRoma, annoRoma, meseRoma } from "./giornoItaliano.ts";
+import { settimanaIso } from "./movimenti.ts";
 
 export { giornoRoma, annoRoma, meseRoma };
 
@@ -15,24 +16,15 @@ export function getMeseFromDate(dateStr) {
   return m < 0 ? null : MESI[m];
 }
 
+// Settimana e anno si leggono sul giorno italiano, come il mese: col fuso del
+// server una mezzanotte italiana (22:00Z del giorno prima) finiva nella settimana
+// e, a capodanno, nell'anno precedenti.
 export function getSettimanaFromDate(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  const target = new Date(d.valueOf());
-  const dayNr = (d.getDay() + 6) % 7;
-  target.setDate(target.getDate() - dayNr + 3);
-  const firstThursday = target.valueOf();
-  target.setMonth(0, 1);
-  if (target.getDay() !== 4) target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
-  return 1 + Math.ceil((firstThursday - target) / 604800000);
+  return settimanaIso(giornoRoma(dateStr));
 }
 
 export function getAnnoFromDate(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  return d.getFullYear();
+  return annoRoma(dateStr);
 }
 
 export function getRegioneFromProvincia(provincia) {
@@ -78,7 +70,11 @@ const ASSEGNATO_ENTITIES = new Set(['Assegnato']);
  */
 export function dataPeriodo(record) {
   if (!record) return null;
-  return record.trasporto_finito_il || record.ordine_chiuso_il || record.ordine_immesso_il;
+  // Un movimento terminato ha la sua fine trasporto, e il periodo e' quello. La
+  // chiusura a portale non e' mai un periodo: arriva giorni dopo e sposta il
+  // movimento nel mese sbagliato. Chi non ha ancora un trasporto (un ordine
+  // aperto) si colloca alla data di immissione.
+  return record.trasporto_finito_il || record.ordine_immesso_il;
 }
 
 function getDataRiferimento(record, entityType) {

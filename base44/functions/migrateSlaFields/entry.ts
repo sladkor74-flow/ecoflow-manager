@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Migrazione one-shot: calcola nr_giorni, scadenza_ordine, raccolta_nei_tempi
 // sui record PrimariaRete esistenti che non hanno questi campi popolati.
@@ -8,6 +9,8 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    // Riscrive le primarie: solo l'amministratore. Mancava del tutto il controllo del ruolo.
+    if (user.role !== 'admin') return rispostaSolaLettura();
 
     const records = await fetchAll(base44.asServiceRole.entities.PrimariaRete);
 

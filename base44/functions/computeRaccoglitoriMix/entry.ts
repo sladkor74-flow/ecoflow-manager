@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { computeRaccoglitoriMixData } from "../../shared/primarieReteAnalytics.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 
@@ -18,7 +19,7 @@ export default async function(req) {
     // Determina l'anno effettivo: primo anno filtrato o anno in corso
     const toArray = (v: any) => Array.isArray(v) ? v : (v != null ? [v] : []);
     const fAnno = toArray(filters.anno).map(Number);
-    const effectiveYear = fAnno.length > 0 ? fAnno[0] : new Date().getFullYear();
+    const effectiveYear = fAnno.length > 0 ? fAnno[0] : Number(oggiRoma().slice(0, 4));
 
     // Recupera i target per raccoglitore per l'anno effettivo
     const targetRecords = await base44.asServiceRole.entities.TargetRaccoglitore.filter(

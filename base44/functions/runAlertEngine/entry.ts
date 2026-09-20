@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetrics } from "../../shared/primarieReteAnalytics.ts";
 import { conferimentiSospetti } from "../../shared/rotteConferimenti.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
@@ -131,7 +132,7 @@ export default async function(req) {
     // Gli altri controlli aggregati riguardano solo le primarie di rete.
     if (modulo === 'primarie_rete') {
       // Target dell'anno in corso, sommati per raccoglitore, regione e mese.
-      const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter({ anno: new Date().getFullYear() }, '-created_date', 5000));
+      const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter({ anno: Number(oggiRoma().slice(0, 4)) }, '-created_date', 5000));
       newAlerts.push(...checkAggregateRules(records, regole, existingKeys, targets, attuali));
     } else if (modulo === 'secondarie') {
       // Le secondarie di rete e quelle ACI stanno nello stesso archivio: contarle
@@ -389,7 +390,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
   const regoleScostamento = regole.filter(r => r.tipo_regola === 'scostamento_target');
   if (regoleScostamento.length > 0 && targets && targets.length > 0) {
     // Solo RETE terminati dell'anno dei target, nel mese della fine trasporto.
-    const annoTarget = Number(targets[0]?.anno) || new Date().getFullYear();
+    const annoTarget = Number(targets[0]?.anno) || Number(oggiRoma().slice(0, 4));
     const oggi = new Date();
     const raccoltoByKey = {};
     for (const r of records) {

@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { PROV_TO_REGION, MESI } from "../../shared/raccoltoCalculator.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 
@@ -21,7 +22,7 @@ export default async function(req) {
     const annoRaw = body.anno || [];
     const anni = Array.isArray(annoRaw)
       ? annoRaw.map(Number).filter(a => !isNaN(a))
-      : (annoRaw ? [Number(annoRaw)] : [new Date().getFullYear()]);
+      : (annoRaw ? [Number(annoRaw)] : [Number(oggiRoma().slice(0, 4))]);
 
     const [rete, aci] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.PrimariaRete, { stato: 'terminato' }),
