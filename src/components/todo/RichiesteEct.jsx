@@ -181,6 +181,9 @@ export default function RichiesteEct({ isAdmin }) {
               Risultano ritirate e aspettano la tua spunta: {esitoImport.da_confermare.map(x => `${x.pdr} (${String(x.evasa_il).split('-').reverse().join('/')})`).join(', ')}.
             </p>
           )}
+          {esitoImport.spostate > 0 && (
+            <p className="text-muted-foreground">{esitoImport.spostate} richieste hanno cambiato riga nel foglio: sono state riconosciute dal produttore e dalla data, spunte e note sono rimaste al loro posto.</p>
+          )}
           {esitoImport.orfane > 0 && (
             <p className="text-muted-foreground">{esitoImport.orfane} righe non sono più nel foglio: restano qui nello storico.</p>
           )}

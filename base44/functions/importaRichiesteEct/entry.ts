@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { leggiFoglio, riconosciOrdine, scadenzaDaNota, statoRichiesta, soloData, listaOrdini, evasioneOrdini } from "../../shared/richiesteEct.ts";
+import { leggiFoglio, riconosciOrdine, scadenzaDaNota, statoRichiesta, soloData, listaOrdini, evasioneOrdini, abbinaRichieste } from "../../shared/richiesteEct.ts";
 
 // Carica il foglio "Richieste ECT" del file di gestione e ne tiene aggiornato
 // l'elenco: per ogni richiesta cerca l'ID ordine fra gli assegnati (nome del
@@ -10,6 +10,10 @@ import { leggiFoglio, riconosciOrdine, scadenzaDaNota, statoRichiesta, soloData,
 //
 // Non sovrascrive mai quello che ha messo l'utente: la spunta di evasione, la
 // data di conferma, l'ID scelto a mano e le note interne restano.
+//
+// Una richiesta si riconosce da produttore, classe e data di immissione
+// (abbinaRichieste), non dal numero di riga del foglio: ordinare il foglio o
+// inserirci una riga non deve spostare le spunte su altre richieste.
 //
 // Payload: { file_url, anno? }
 const FOGLIO = 'Richieste ECT';
@@ -63,14 +67,15 @@ export default async function(req) {
       if (d && (!terminati.has(id) || d < terminati.get(id))) terminati.set(id, d);
     }
 
-    const perRiga = new Map();
-    for (const e of esistenti) if (e.riga_excel) perRiga.set(e.riga_excel, e);
+    const abbinate = abbinaRichieste(righe, esistenti);
 
-    let creati = 0, aggiornati = 0, invariati = 0;
+    let creati = 0, aggiornati = 0, invariati = 0, spostate = 0;
     const daConfermare = [];
-    for (const r of righe) {
+    for (let i = 0; i < righe.length; i++) {
+      const r = righe[i];
       const ric = riconosciOrdine(r, ordini);
-      const gia = perRiga.get(r.riga_excel) || null;
+      const gia = abbinate[i];
+      if (gia && gia.riga_excel !== r.riga_excel) spostate++;
       // Gli ID scritti a mano restano e vincono: una richiesta puo' coprire piu'
       // ordini, e l'evasione si propone solo quando sono tutti ritirati.
       const ids = listaOrdini({ id_ordine_manuale: gia && gia.id_ordine_manuale, id_ordine: ric.id_ordine });
@@ -114,11 +119,12 @@ export default async function(req) {
     }
 
     // Le righe cancellate dal foglio non si toccano: restano nello storico.
-    const orfane = esistenti.filter(e => e.riga_excel && !righe.some(r => r.riga_excel === e.riga_excel)).length;
+    const ritrovate = new Set(abbinate.filter(Boolean).map(e => e.id));
+    const orfane = esistenti.filter(e => !ritrovate.has(e.id)).length;
 
     return Response.json({
       ok: true, anno: annoNum, righe_lette: righe.length,
-      creati, aggiornati, invariati, orfane,
+      creati, aggiornati, invariati, orfane, spostate,
       riconosciuti: righe.filter(r => riconosciOrdine(r, ordini).id_ordine_stato === 'trovato').length,
       da_confermare: daConfermare,
     });

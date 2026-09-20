@@ -222,3 +222,48 @@ export function giorniAllaScadenza(scadenza, oggi) {
   const b = Date.UTC(+scadenza.slice(0, 4), +scadenza.slice(5, 7) - 1, +scadenza.slice(8, 10));
   return Math.round((b - a) / 86400000);
 }
+
+/**
+ * L'identita' di una richiesta: produttore, classe e data di immissione
+ * dell'ordine, piu' il giorno della mail (il consorzio puo' sollecitare due
+ * volte lo stesso ordine). Mai il numero di riga del foglio: basta ordinare il
+ * foglio o inserirci una riga perche' tutte le successive cambino numero, e le
+ * spunte e gli ID scritti a mano finirebbero su altre richieste, senza errore.
+ */
+export const chiaveRichiesta = (r, conMail = true) =>
+  [chiaveNome(r && r.pdr_nome), pulisci(r && r.classe).toUpperCase(), soloData(r && r.ordine_immesso_il) || '', conMail ? (soloData(r && r.mail_inviata_il) || '') : ''].join('|');
+
+/**
+ * Abbina le righe lette dal foglio alle richieste gia' in elenco. Ogni richiesta
+ * esistente si abbina una volta sola. Nell'ordine: stessa identita' completa;
+ * stessa identita' senza il giorno della mail (nel foglio e' stata corretta o
+ * aggiunta); stesso produttore sulla stessa riga (e' stata corretta la data di
+ * immissione). Fra piu' candidate uguali - due ordini dello stesso produttore
+ * lo stesso giorno - vince quella che somiglia di piu' per nota, trasportatore e
+ * posizione nel foglio. Restituisce, per ogni riga, la richiesta o null.
+ */
+export function abbinaRichieste(righe, esistenti) {
+  const libere = new Set(esistenti || []);
+  const somiglianza = (r, e) =>
+    (pulisci(r.nota) === pulisci(e.nota) ? 4 : 0) +
+    (pulisci(r.trasportatore).toUpperCase() === pulisci(e.trasportatore).toUpperCase() ? 2 : 0) +
+    (pulisci(r.provincia).toUpperCase() === pulisci(e.provincia).toUpperCase() ? 1 : 0) +
+    (r.riga_excel && r.riga_excel === e.riga_excel ? 1 : 0);
+  const esito = new Array((righe || []).length).fill(null);
+  const passata = (criterio) => {
+    (righe || []).forEach((r, i) => {
+      if (esito[i]) return;
+      let scelta = null, punti = -1;
+      for (const e of libere) {
+        if (!criterio(r, e)) continue;
+        const p = somiglianza(r, e);
+        if (p > punti) { scelta = e; punti = p; }
+      }
+      if (scelta) { esito[i] = scelta; libere.delete(scelta); }
+    });
+  };
+  passata((r, e) => chiaveRichiesta(r) === chiaveRichiesta(e));
+  passata((r, e) => chiaveRichiesta(r, false) === chiaveRichiesta(e, false));
+  passata((r, e) => !!r.riga_excel && r.riga_excel === e.riga_excel && chiaveNome(r.pdr_nome) === chiaveNome(e.pdr_nome));
+  return esito;
+}
