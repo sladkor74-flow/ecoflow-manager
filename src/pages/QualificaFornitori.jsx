@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import {
-  Loader2, ShieldCheck, BookOpen, UserPlus, Send, Search, ChevronRight, AlertTriangle, Users, CheckCircle2, ClipboardList, Bell,
+  Loader2, ShieldCheck, BookOpen, UserPlus, Send, Search, ChevronRight, AlertTriangle, Users, CheckCircle2, ClipboardList, Bell, FileSpreadsheet, FileDown,
 } from 'lucide-react';
 import SoggettoDettaglio from '@/components/qualifica/SoggettoDettaglio';
 import CatalogoDocumenti from '@/components/qualifica/CatalogoDocumenti';
@@ -143,6 +143,7 @@ export default function QualificaFornitori() {
   const [catalogoAperto, setCatalogoAperto] = useState(false);
   const [includiAperto, setIncludiAperto] = useState(false);
   const [inControllo, setInControllo] = useState(false);
+  const [scaricando, setScaricando] = useState(null);
   const datiRef = useRef(null);
   datiRef.current = dati;
 
@@ -206,6 +207,21 @@ export default function QualificaFornitori() {
   }, [dati, filtro, ricerca]);
 
   const soggettoAperto = dati && aperto ? dati.soggetti.find(s => s.chiave === aperto) : null;
+
+  const scarica = async (formato) => {
+    if (!dati) return;
+    setScaricando(formato);
+    try {
+      const { esportaQualificaExcel, esportaQualificaPdf } = await import('@/lib/qualificaExport');
+      const nome = formato === 'pdf'
+        ? await esportaQualificaPdf(dati.soggetti, anno, dati.anomalie)
+        : await esportaQualificaExcel(dati.soggetti, anno);
+      toast({ title: 'Elenco scaricato', description: nome });
+    } catch (e) {
+      toast({ title: 'Esportazione non riuscita', description: e.message || String(e), variant: 'destructive' });
+    }
+    setScaricando(null);
+  };
 
   const controllaEInvia = async () => {
     setInControllo(true);
@@ -272,6 +288,15 @@ export default function QualificaFornitori() {
               {anni.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           </label>
+          {/* L'elenco da portare via: lo puo' scaricare chiunque, anche chi consulta soltanto */}
+          <Button variant="outline" size="sm" onClick={() => scarica('excel')} disabled={!dati || scaricando}>
+            {scaricando === 'excel' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileSpreadsheet className="w-4 h-4 mr-1" />}
+            Elenco in Excel
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => scarica('pdf')} disabled={!dati || scaricando}>
+            {scaricando === 'pdf' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileDown className="w-4 h-4 mr-1" />}
+            Elenco in PDF
+          </Button>
           {isAdmin && (
             <>
               <Button variant="outline" size="sm" onClick={() => setCatalogoAperto(true)}><BookOpen className="w-4 h-4 mr-1" />Catalogo documenti</Button>
