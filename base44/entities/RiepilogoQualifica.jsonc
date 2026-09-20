@@ -24,6 +24,14 @@
     "in_scadenza": {
       "type": "number"
     },
+    "anomalie_catalogo": {
+      "type": "number",
+      "description": "Voci del catalogo che non chiederanno mai niente a nessuno: intestate a un fornitore che nell'anno non risulta, oppure senza ne' ruolo ne' fornitore. La dashboard le legge da qui"
+    },
+    "anomalie_catalogo_testo": {
+      "type": "string",
+      "description": "I nomi di quelle voci, per la dashboard"
+    },
     "da_verificare": {
       "type": "number"
     },

@@ -3,17 +3,29 @@ import { base44 } from '@/api/base44Client';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { Plus, PencilLine, Loader2, ListPlus, Trash2 } from 'lucide-react';
+import { Plus, PencilLine, Loader2, ListPlus, Trash2, X, AlertTriangle } from 'lucide-react';
 import { RUOLI, CATEGORIE, CATALOGO_PROPOSTO } from '@/lib/qualifica';
+import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 
 // Catalogo dei documenti richiesti per la qualifica.
-// Ogni voce dice a quali ruoli si applica e come si calcola la scadenza.
+//
+// Una voce si chiede in due modi, mai insieme:
+// - per ruolo: vale per tutti i soggetti che quell'anno fanno raccolta, trasporto
+//   secondarie, impianto, stoccaggio o cliente;
+// - per fornitore: vale solo per i nomi indicati e i ruoli non contano. Serve ai
+//   documenti che non riguardano una categoria intera ma un fornitore solo, per
+//   esempio le patenti degli autisti o la CQC.
 
 const VUOTO = {
-  nome: '', categoria: 'altro', si_applica_a: '', obbligatorio: true, tipo_scadenza: 'da_documento',
+  nome: '', categoria: 'altro', si_applica_a: '', solo_per_soggetti: [], obbligatorio: true, tipo_scadenza: 'da_documento',
   validita_mesi: '', validita_giorni: '', preavviso_giorni: 60, riferimento_normativo: '', descrizione: '',
   ordine: 100, attivo: true,
 };
+
+// I fornitori indicati su una voce, sempre nella forma { chiave, nome }.
+const nominati = (v) => (Array.isArray(v && v.solo_per_soggetti) ? v.solo_per_soggetti : [])
+  .map(s => (typeof s === 'string' ? { chiave: normalizzaRagioneSociale(s), nome: s } : s))
+  .filter(s => s && s.chiave);
 
 const SCADENZE = {
   da_documento: 'Scritta sul documento',
@@ -32,11 +44,13 @@ function descriviScadenza(t) {
   return 'Scritta sul documento';
 }
 
-export default function CatalogoDocumenti({ open, onClose, onModificato }) {
+export default function CatalogoDocumenti({ open, onClose, onModificato, soggetti = [], anno }) {
   const [voci, setVoci] = useState([]);
   const [caricando, setCaricando] = useState(false);
   const [modifica, setModifica] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [anagrafica, setAnagrafica] = useState([]);
+  const [cercaSoggetto, setCercaSoggetto] = useState('');
   const { toast } = useToast();
 
   const carica = async () => {
@@ -50,17 +64,58 @@ export default function CatalogoDocumenti({ open, onClose, onModificato }) {
     setCaricando(false);
   };
 
-  useEffect(() => { if (open) { carica(); setModifica(null); } }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    carica();
+    setModifica(null);
+    setCercaSoggetto('');
+    // Si sceglie fra i soggetti dell'anno e, per chi non ha ancora lavorato,
+    // fra tutta l'anagrafica dei fornitori.
+    base44.entities.Fornitore.list('ragione_sociale', 1000).then(setAnagrafica).catch(() => setAnagrafica([]));
+  }, [open]);
+
+  // L'elenco da cui scegliere: prima i soggetti da qualificare quest'anno, poi il resto.
+  const scegliibili = React.useMemo(() => {
+    const visti = new Map();
+    for (const s of soggetti) if (s.chiave && !visti.has(s.chiave)) visti.set(s.chiave, { chiave: s.chiave, nome: s.nome, nellAnno: true });
+    for (const f of anagrafica) {
+      const k = normalizzaRagioneSociale(f.ragione_sociale);
+      if (k && !visti.has(k)) visti.set(k, { chiave: k, nome: f.ragione_sociale, nellAnno: false });
+    }
+    return [...visti.values()].sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'it'));
+  }, [soggetti, anagrafica]);
+
+  const chiaviAnno = React.useMemo(() => new Set(soggetti.map(s => s.chiave)), [soggetti]);
+  const scelti = modifica ? nominati(modifica) : [];
+
+  const aggiungiSoggetto = (testo) => {
+    const nome = String(testo || '').trim();
+    const chiave = normalizzaRagioneSociale(nome);
+    if (!chiave) return;
+    if (scelti.some(s => s.chiave === chiave)) { setCercaSoggetto(''); return; }
+    // Se il nome corrisponde a un soggetto noto si salva la sua ragione sociale intera.
+    const noto = scegliibili.find(s => s.chiave === chiave);
+    setModifica({ ...modifica, solo_per_soggetti: [...scelti, { chiave, nome: noto ? noto.nome : nome }] });
+    setCercaSoggetto('');
+  };
+
+  const togliSoggetto = (chiave) => setModifica({ ...modifica, solo_per_soggetti: scelti.filter(s => s.chiave !== chiave) });
 
   const salva = async () => {
     if (!modifica.nome.trim()) { toast({ title: 'Il nome è obbligatorio', variant: 'destructive' }); return; }
-    if (!modifica.si_applica_a) { toast({ title: 'Scegli almeno un ruolo', variant: 'destructive' }); return; }
+    if (!modifica.si_applica_a && scelti.length === 0) {
+      toast({ title: 'A chi va chiesto?', description: 'Scegli almeno un ruolo oppure indica i fornitori a cui chiederlo.', variant: 'destructive' });
+      return;
+    }
     setSalvando(true);
     const numero = (v) => (v === '' || v == null ? null : Number(v));
     const dati = {
       nome: modifica.nome.trim(),
       categoria: modifica.categoria,
-      si_applica_a: modifica.si_applica_a,
+      // Con i fornitori indicati i ruoli non contano: non si salvano, altrimenti
+      // la voce direbbe una cosa e ne farebbe un'altra.
+      si_applica_a: scelti.length > 0 ? '' : modifica.si_applica_a,
+      solo_per_soggetti: scelti,
       obbligatorio: !!modifica.obbligatorio,
       tipo_scadenza: modifica.tipo_scadenza,
       validita_mesi: modifica.tipo_scadenza === 'da_emissione' ? numero(modifica.validita_mesi) : null,
@@ -116,7 +171,7 @@ export default function CatalogoDocumenti({ open, onClose, onModificato }) {
     setSalvando(false);
   };
 
-  const ruoliScelti = modifica ? modifica.si_applica_a.split(',').filter(Boolean) : [];
+  const ruoliScelti = modifica ? String(modifica.si_applica_a || '').split(',').filter(Boolean) : [];
   const commutaRuolo = (r) => {
     const s = new Set(ruoliScelti);
     s.has(r) ? s.delete(r) : s.add(r);
@@ -177,8 +232,8 @@ export default function CatalogoDocumenti({ open, onClose, onModificato }) {
               </label>
             </div>
 
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Richiesto a</div>
+            <div className={scelti.length > 0 ? 'opacity-40 pointer-events-none' : ''}>
+              <div className="text-xs text-muted-foreground mb-1">Richiesto a tutti i soggetti con questo ruolo</div>
               <div className="flex flex-wrap gap-1.5">
                 {Object.entries(RUOLI).map(([k, v]) => (
                   <button key={k} type="button" onClick={() => commutaRuolo(k)}
@@ -186,6 +241,50 @@ export default function CatalogoDocumenti({ open, onClose, onModificato }) {
                     {v}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            <div className="border rounded-lg p-3 bg-muted/30">
+              <div className="text-xs text-muted-foreground mb-1">
+                Oppure richiesto solo a questi fornitori
+              </div>
+              <p className="text-xs text-muted-foreground mb-2">
+                Per i documenti che non riguardano una categoria intera ma un fornitore solo: le patenti degli autisti,
+                la CQC, un’autorizzazione particolare. Indicando anche un solo nome, i ruoli qui sopra non contano più
+                e il documento non viene chiesto agli altri.
+              </p>
+              {scelti.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {scelti.map(s => {
+                    const noto = scegliibili.find(x => x.chiave === s.chiave);
+                    return (
+                      <span key={s.chiave} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border bg-card text-xs">
+                        {s.nome || s.chiave}
+                        {noto && !noto.nellAnno && <span className="text-amber-700" title={`Non risulta fra i soggetti da qualificare del ${anno}`}>·&nbsp;fuori anno</span>}
+                        {!noto && <span className="text-amber-700" title="Non trovato né fra i soggetti dell’anno né in anagrafica">·&nbsp;non trovato</span>}
+                        <button type="button" onClick={() => togliSoggetto(s.chiave)} className="text-muted-foreground hover:text-foreground">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <input
+                  list="qualifica-soggetti"
+                  className="flex-1 px-2 py-1.5 rounded-md border bg-card text-sm text-foreground"
+                  placeholder="Ragione sociale del fornitore…"
+                  value={cercaSoggetto}
+                  onChange={(e) => setCercaSoggetto(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); aggiungiSoggetto(cercaSoggetto); } }}
+                />
+                <datalist id="qualifica-soggetti">
+                  {scegliibili.map(s => <option key={s.chiave} value={s.nome} />)}
+                </datalist>
+                <Button type="button" size="sm" variant="outline" onClick={() => aggiungiSoggetto(cercaSoggetto)} disabled={!cercaSoggetto.trim()}>
+                  Aggiungi
+                </Button>
               </div>
             </div>
 
@@ -226,7 +325,10 @@ export default function CatalogoDocumenti({ open, onClose, onModificato }) {
               </div>
             ) : (
               <div className="border rounded-lg divide-y">
-                {voci.map(v => (
+                {voci.map(v => {
+                  const suoi = nominati(v);
+                  const fuoriAnno = suoi.filter(s => !chiaviAnno.has(s.chiave));
+                  return (
                   <div key={v.id} className={`flex items-start justify-between gap-3 px-3 py-2.5 ${v.attivo === false ? 'opacity-50' : ''}`}>
                     <div className="min-w-0">
                       <div className="font-medium">
@@ -235,17 +337,36 @@ export default function CatalogoDocumenti({ open, onClose, onModificato }) {
                         {v.attivo === false && <span className="ml-2 text-xs font-normal text-muted-foreground">disattivato</span>}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {String(v.si_applica_a || '').split(',').filter(Boolean).map(r => RUOLI[r] || r).join(', ')}
+                        {suoi.length > 0
+                          ? <span className="text-foreground">Solo per {suoi.map(s => s.nome || s.chiave).join(', ')}</span>
+                          : String(v.si_applica_a || '').split(',').filter(Boolean).map(r => RUOLI[r] || r).join(', ')}
                         {' · '}{descriviScadenza(v)}
                         {' · preavviso '}{v.preavviso_giorni ?? 60}{' giorni'}
                       </div>
+                      {v.attivo !== false && fuoriAnno.length > 0 && (
+                        <div className="text-xs text-amber-700 flex items-start gap-1 mt-0.5">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                          <span>
+                            {fuoriAnno.map(s => s.nome || s.chiave).join(', ')} non {fuoriAnno.length === 1 ? 'risulta' : 'risultano'} fra i soggetti da
+                            qualificare del {anno}: questo documento non verrà mai chiesto. Controlla la ragione sociale
+                            oppure includi il soggetto nell’anno.
+                          </span>
+                        </div>
+                      )}
+                      {v.attivo !== false && suoi.length === 0 && !String(v.si_applica_a || '').split(',').filter(Boolean).length && (
+                        <div className="text-xs text-amber-700 flex items-center gap-1 mt-0.5">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                          <span>Non è richiesto a nessuno: manca sia il ruolo sia il fornitore.</span>
+                        </div>
+                      )}
                     </div>
                     <div className="flex gap-1 shrink-0">
                       <Button size="sm" variant="ghost" className="h-7" onClick={() => setModifica({ ...VUOTO, ...v })}><PencilLine className="w-3.5 h-3.5" /></Button>
                       <Button size="sm" variant="ghost" className="h-7 text-red-600 hover:text-red-700" onClick={() => disattivaOElimina(v)}><Trash2 className="w-3.5 h-3.5" /></Button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

@@ -364,3 +364,22 @@ grandi ogni tanto cadono: su Terminati Rete bastava `computeRaccoglitoriMix` a
 500 per lasciare vuote anche la matrice per provincia, i tempi di evasione e gli
 alert. Chi non ha risposto si dice per nome, con "Riprova"; il resto resta a
 video.
+
+**Un documento della qualifica si chiede per ruolo oppure a fornitori indicati
+per nome, mai in tutti e due i modi.** Il catalogo nasceva solo per ruolo
+(raccolta, trasporto secondarie, impianto, stoccaggio, cliente): un documento che
+riguarda un fornitore solo — le patenti degli autisti, la CQC, un'autorizzazione
+particolare — andava messo su un ruolo intero e risultava mancante a tutti gli
+altri, sporcando gli alert. Ora `TipoDocumentoQualifica.solo_per_soggetti` porta
+l'elenco `[{ chiave, nome }]`: quando c'e', il documento vale SOLTANTO per quei
+fornitori e i ruoli non contano (`richiestoA` in `base44/shared/qualificaFornitori.ts`).
+La chiave e' la ragione sociale normalizzata, la stessa delle movimentazioni.
+Scadenze, mancanze e non conformita' passano dalla valutazione di sempre, quindi
+gli alert e l'email giornaliera li coprono senza modifiche.
+
+**Una voce intestata a un fornitore che nell'anno non risulta e' un errore
+silenzioso**: nessuno la chiederebbe mai e sembrerebbe tutto a posto.
+`anomalieCatalogo` la segnala, e la segnalazione arriva in tre posti: il riquadro
+rosso in cima al modulo, la dashboard (dal campo `anomalie_catalogo` del
+RiepilogoQualifica, senza rifare la valutazione) e l'email del controllo
+giornaliero, che parte anche quando non c'e' nessun'altra novita'.

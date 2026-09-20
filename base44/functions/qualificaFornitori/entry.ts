@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { individuaSoggetti, valutaSoggetto, oggiRoma, salvaRiepilogo } from "../../shared/qualificaFornitori.ts";
+import { individuaSoggetti, valutaSoggetto, oggiRoma, salvaRiepilogo, anomalieCatalogo } from "../../shared/qualificaFornitori.ts";
 import { applicaControlloClasse } from "../../shared/classeAlbo.ts";
 
 // Situazione della qualifica fornitori per un anno.
@@ -39,7 +39,10 @@ export default async function(req) {
     const documenti = applicaControlloClasse(documentiSalvati, soggetti, targetAnnui, targetMensili, anno);
 
     const valutati = soggetti.map(s => valutaSoggetto(s, catalogo, documenti, oggi));
-    const alert = await salvaRiepilogo(base44, anno, valutati);
+    // Voci del catalogo intestate a un fornitore che quest'anno non c'e': senza
+    // questo controllo resterebbero mute e sembrerebbe tutto a posto.
+    const anomalie = anomalieCatalogo(catalogo, soggetti, anno);
+    const alert = await salvaRiepilogo(base44, anno, valutati, anomalie);
 
     const conta = (fn) => valutati.filter(fn).length;
     const requisiti = valutati.flatMap(s => s.requisiti);
@@ -56,9 +59,10 @@ export default async function(req) {
       catalogo_vuoto: catalogo.filter(t => t.attivo !== false).length === 0,
       alert_aperti: alert.alert_aperti,
       soggetti_con_alert: alert.soggetti_con_alert,
+      anomalie_catalogo: anomalie.filter(a => a.gravita === 'errore').length,
     };
 
-    return Response.json({ anno, oggi, riepilogo, soggetti: valutati, esclusi, catalogo });
+    return Response.json({ anno, oggi, riepilogo, soggetti: valutati, esclusi, catalogo, anomalie });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });
   }

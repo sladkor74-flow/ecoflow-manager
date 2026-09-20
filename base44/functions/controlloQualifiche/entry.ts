@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import {
   individuaSoggetti, valutaSoggetto, eventiDaSegnalare, oggiRoma, giorniTra, RIPETIZIONE_GIORNI, salvaRiepilogo,
+  anomalieCatalogo,
 } from "../../shared/qualificaFornitori.ts";
 import { applicaControlloClasse } from "../../shared/classeAlbo.ts";
 
@@ -41,7 +42,7 @@ function rigaEvento(e) {
   return `${ETICHETTA[e.stato] || e.stato}: ${e.tipo}`;
 }
 
-function componiEmail(anno, oggi, eventi, riepilogo, completo) {
+function componiEmail(anno, oggi, eventi, riepilogo, completo, anomalie) {
   const righe = [];
   righe.push(`Qualifica fornitori ${anno}, situazione al ${it(oggi)}`);
   righe.push('');
@@ -70,6 +71,14 @@ function componiEmail(anno, oggi, eventi, riepilogo, completo) {
         if (e.richiesta) righe.push('      Testo proposto per il fornitore: ' + e.richiesta);
       }
     }
+  }
+
+  const errori = (anomalie || []).filter(a => a.gravita === 'errore');
+  if (errori.length > 0) {
+    righe.push('');
+    righe.push('DOCUMENTI CHE NON VERRANNO MAI CHIESTI');
+    righe.push('  Sono voci del catalogo intestate a un fornitore che nell\'anno non risulta.');
+    for (const a of errori) righe.push('  - ' + a.messaggio);
   }
 
   righe.push('');
@@ -113,9 +122,10 @@ export default async function(req) {
     // La classe dell'iscrizione all'Albo si confronta con i target in vigore.
     const documenti = applicaControlloClasse(documentiSalvati, soggetti, targetAnnui, targetMensili, anno);
     const valutati = soggetti.map(s => valutaSoggetto(s, catalogo, documenti, oggi));
+    const anomalie = anomalieCatalogo(catalogo, soggetti, anno);
     // Il riepilogo alimenta il contatore del menu: si aggiorna sempre, anche
     // quando non c'e' nulla da inviare.
-    const alert = await salvaRiepilogo(base44, anno, valutati);
+    const alert = await salvaRiepilogo(base44, anno, valutati, anomalie);
     const requisiti = valutati.flatMap(s => s.requisiti);
     const riepilogo = {
       soggetti: valutati.length,
@@ -138,8 +148,11 @@ export default async function(req) {
       return !ultimo || giorniTra(ultimo, oggi) >= RIPETIZIONE_GIORNI;
     });
 
-    const esito = { anno, oggi, riepilogo, alert_aperti: alert.alert_aperti, eventi: eventi.length, da_inviare: daInviare.length, inviata: false, destinatari: [] };
-    if (!inviaEmail || daInviare.length === 0) return Response.json(esito);
+    const erroriCatalogo = anomalie.filter(a => a.gravita === 'errore');
+    const esito = { anno, oggi, riepilogo, alert_aperti: alert.alert_aperti, eventi: eventi.length, da_inviare: daInviare.length, anomalie, inviata: false, destinatari: [] };
+    // Un documento intestato a un fornitore inesistente va detto anche quando non
+    // c'e' nessun'altra novita': altrimenti non lo scopre nessuno.
+    if (!inviaEmail || (daInviare.length === 0 && erroriCatalogo.length === 0)) return Response.json(esito);
 
     // Destinatari: gli amministratori del gestionale. Se l'elenco utenti non e'
     // leggibile si ripiega su chi ha avviato il controllo.
@@ -159,8 +172,9 @@ export default async function(req) {
     if (conta('in_scadenza')) parti.push(conta('in_scadenza') + ' in scadenza');
     if (conta('mancante')) parti.push(conta('mancante') + ' mancanti');
     if (conta('da_verificare')) parti.push(conta('da_verificare') + ' da verificare');
+    if (erroriCatalogo.length) parti.push(erroriCatalogo.length + (erroriCatalogo.length === 1 ? ' documento senza destinatario' : ' documenti senza destinatario'));
     const oggetto = `Qualifica fornitori ${anno}: ${parti.join(', ')}`;
-    const testo = componiEmail(anno, oggi, daInviare, riepilogo, forza);
+    const testo = componiEmail(anno, oggi, daInviare, riepilogo, forza, anomalie);
 
     for (const to of destinatari) {
       await base44.asServiceRole.integrations.Core.SendEmail({ to, subject: oggetto, body: testo, from_name: 'Gestionale PFU - Qualifica fornitori' });

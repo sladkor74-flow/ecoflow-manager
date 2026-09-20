@@ -58,6 +58,8 @@ function Requisito({ req, soggetto, isAdmin, occupato, onCarica, onApri, onAnali
             <div className="font-medium leading-tight">{req.tipo_nome}</div>
             <div className="text-xs text-muted-foreground">
               {req.obbligatorio ? 'Obbligatorio' : 'Facoltativo'}
+              {/* chiesto a questo fornitore per nome, non a tutta la sua categoria */}
+              {req.nominale ? ' · chiesto solo a lui' : ''}
               {doc && doc.file_nome ? ' · ' + doc.file_nome : ''}
             </div>
           </div>

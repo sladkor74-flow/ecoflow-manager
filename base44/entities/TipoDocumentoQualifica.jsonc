@@ -26,7 +26,14 @@
     },
     "si_applica_a": {
       "type": "string",
-      "description": "Ruoli a cui il documento e' richiesto, separati da virgola: raccolta, trasporto_secondaria, trattamento, stoccaggio, cliente"
+      "description": "Ruoli a cui il documento e' richiesto, separati da virgola: raccolta, trasporto_secondaria, trattamento, stoccaggio, cliente. Si lascia vuoto quando il documento e' chiesto a fornitori nominati uno per uno in solo_per_soggetti"
+    },
+    "solo_per_soggetti": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Se valorizzato, il documento e' richiesto SOLTANTO a questi fornitori e i ruoli non contano: [{ chiave, nome }], la chiave e' la ragione sociale normalizzata. Serve per i documenti che non valgono per una categoria intera ma per un fornitore solo, per esempio le patenti degli autisti o la CQC. Vuoto: vale per tutti i soggetti dei ruoli in si_applica_a"
     },
     "obbligatorio": {
       "type": "boolean",
@@ -72,8 +79,7 @@
     }
   },
   "required": [
-    "nome",
-    "si_applica_a"
+    "nome"
   ],
   "rls": {
     "read": true,

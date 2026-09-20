@@ -134,6 +134,9 @@ export function cruscotto(dati) {
   const q = dati.riepilogoQualifica || null;
   if (q && (Number(q.scaduti) > 0 || Number(q.non_conformi) > 0)) voce('Qualifica fornitori', 'critico', `${Number(q.scaduti) || 0} documenti scaduti, ${Number(q.non_conformi) || 0} non conformi`, (q.soggetti_critici || []).slice(0, 5).map(s => s.nome).join(', '), '/qualifica-fornitori');
   if (q && Number(q.in_scadenza) > 0) voce('Qualifica fornitori', 'info', `${q.in_scadenza} documenti in scadenza`, '', '/qualifica-fornitori');
+  // Un documento intestato a un fornitore che non risulta non lo chiede nessuno:
+  // e' un errore silenzioso, quindi va detto qui.
+  if (q && Number(q.anomalie_catalogo) > 0) voce('Qualifica fornitori', 'critico', Number(q.anomalie_catalogo) === 1 ? 'Un documento del catalogo non verrà mai chiesto a nessuno' : `${q.anomalie_catalogo} documenti del catalogo non verranno mai chiesti a nessuno`, q.anomalie_catalogo_testo || '', '/qualifica-fornitori');
 
   // Target dell'impianto diverso fra Giacenze e Target & Status
   for (const d of divergenzeTargetImpianti(dati.giacenzeSito, dati.impiantiTarget, anno)) voce('Target', 'critico', `Target divergente: ${d.impianto}`, testoDivergenza(d), '/giacenze');

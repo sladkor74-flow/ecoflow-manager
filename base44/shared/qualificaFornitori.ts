@@ -70,6 +70,33 @@ export function ruoliDaTesto(s) {
   return String(s || '').split(',').map(x => x.trim()).filter(Boolean);
 }
 
+/**
+ * I fornitori nominati uno per uno su una voce del catalogo.
+ * Si accetta sia la forma { chiave, nome } sia la sola chiave scritta come testo.
+ */
+export function soggettiDelTipo(tipo) {
+  const elenco = Array.isArray(tipo && tipo.solo_per_soggetti) ? tipo.solo_per_soggetti : [];
+  return elenco
+    .map(v => (typeof v === 'string'
+      ? { chiave: normalizzaRagioneSociale(v), nome: v }
+      : { chiave: v && (v.chiave || normalizzaRagioneSociale(v.nome)), nome: (v && v.nome) || '' }))
+    .filter(v => v.chiave);
+}
+
+/**
+ * Un documento e' richiesto a un soggetto quando la voce e' attiva e:
+ * - ha dei fornitori nominati e il soggetto e' fra quelli (i ruoli non contano:
+ *   le patenti degli autisti o la CQC si chiedono a quel trasportatore, non a
+ *   tutti i trasportatori);
+ * - oppure non ne ha e uno dei suoi ruoli coincide con quelli del soggetto.
+ */
+export function richiestoA(tipo, soggetto) {
+  if (!tipo || tipo.attivo === false) return false;
+  const nominati = soggettiDelTipo(tipo);
+  if (nominati.length > 0) return nominati.some(n => n.chiave === soggetto.chiave);
+  return ruoliDaTesto(tipo.si_applica_a).some(r => soggetto.ruoli.includes(r));
+}
+
 export function leggiProblemi(doc) {
   if (!doc || !doc.problemi_json) return [];
   try {
@@ -246,7 +273,7 @@ export function statoRequisito(tipo, doc, oggi) {
  */
 export function valutaSoggetto(soggetto, catalogo, documenti, oggi) {
   const applicabili = catalogo
-    .filter(t => t.attivo !== false && ruoliDaTesto(t.si_applica_a).some(r => soggetto.ruoli.includes(r)))
+    .filter(t => richiestoA(t, soggetto))
     .sort((a, b) => (a.ordine ?? 100) - (b.ordine ?? 100) || String(a.nome).localeCompare(String(b.nome), 'it'));
 
   const propri = documenti.filter(d => d.soggetto_chiave === soggetto.chiave && d.stato !== 'sostituito');
@@ -255,10 +282,13 @@ export function valutaSoggetto(soggetto, catalogo, documenti, oggi) {
     const doc = propri
       .filter(d => d.tipo_documento_id === t.id)
       .sort((a, b) => String(b.data_emissione || b.created_date || '').localeCompare(String(a.data_emissione || a.created_date || '')))[0] || null;
+    const nominati = soggettiDelTipo(t);
     return {
       tipo_id: t.id,
       tipo_nome: t.nome,
       categoria: t.categoria,
+      // vero quando il documento e' stato chiesto a questo fornitore per nome
+      nominale: nominati.length > 0,
       obbligatorio: t.obbligatorio !== false,
       tipo_scadenza: t.tipo_scadenza,
       preavviso_giorni: t.preavviso_giorni,
@@ -303,6 +333,49 @@ export function valutaSoggetto(soggetto, catalogo, documenti, oggi) {
   };
 }
 
+/**
+ * Errori di impostazione del catalogo: voci che non chiederanno mai niente a
+ * nessuno. Senza questo controllo un documento intestato a un fornitore scritto
+ * male, o a uno che quest'anno non ha lavorato, resterebbe muto per sempre e
+ * sembrerebbe tutto a posto.
+ */
+export function anomalieCatalogo(catalogo, soggetti, anno) {
+  const presenti = new Map((soggetti || []).map(s => [s.chiave, s.nome]));
+  const fuori = [];
+  for (const t of catalogo || []) {
+    if (t.attivo === false) continue;
+    const nominati = soggettiDelTipo(t);
+    const ruoli = ruoliDaTesto(t.si_applica_a);
+
+    if (nominati.length === 0) {
+      if (ruoli.length === 0) {
+        fuori.push({
+          tipo_id: t.id, tipo_nome: t.nome, gravita: 'errore',
+          messaggio: `"${t.nome}" non e' richiesto a nessuno: non ha ne' ruoli ne' fornitori indicati.`,
+        });
+      }
+      continue;
+    }
+
+    const assenti = nominati.filter(n => !presenti.has(n.chiave));
+    if (assenti.length > 0) {
+      const nomi = assenti.map(n => n.nome || n.chiave).join(', ');
+      fuori.push({
+        tipo_id: t.id, tipo_nome: t.nome, gravita: 'errore',
+        soggetti: assenti.map(n => n.chiave),
+        messaggio: `"${t.nome}" e' richiesto a ${nomi}, che nel ${anno} non risulta fra i soggetti da qualificare: il documento non verra' mai chiesto. Controlla la ragione sociale oppure includi il soggetto nell'anno.`,
+      });
+    }
+    if (ruoli.length > 0) {
+      fuori.push({
+        tipo_id: t.id, tipo_nome: t.nome, gravita: 'attenzione',
+        messaggio: `"${t.nome}" e' intestato a fornitori precisi: i ruoli indicati non contano e il documento non viene chiesto agli altri soggetti di quei ruoli.`,
+      });
+    }
+  }
+  return fuori;
+}
+
 // Stati che richiedono un intervento e che quindi contano come alert.
 export const STATI_ALERT = ['scaduto', 'non_conforme', 'mancante', 'in_scadenza', 'da_verificare'];
 
@@ -314,7 +387,7 @@ export const STATI_ALERT = ['scaduto', 'non_conforme', 'mancante', 'in_scadenza'
  * aggiorna ogni volta che il modulo calcola la situazione e a ogni controllo
  * giornaliero, che coglie anche i documenti scaduti durante la notte.
  */
-export async function salvaRiepilogo(base44, anno, valutati) {
+export async function salvaRiepilogo(base44, anno, valutati, anomalie) {
   const requisiti = valutati.flatMap(s => s.requisiti);
   const conta = (stato) => requisiti.filter(r => r.stato === stato).length;
   const dati = {
@@ -326,6 +399,10 @@ export async function salvaRiepilogo(base44, anno, valutati) {
     mancanti: conta('mancante'),
     in_scadenza: conta('in_scadenza'),
     da_verificare: conta('da_verificare'),
+    // Errori di impostazione del catalogo: la dashboard li legge da qui senza
+    // rifare tutta la valutazione.
+    anomalie_catalogo: (anomalie || []).filter(a => a.gravita === 'errore').length,
+    anomalie_catalogo_testo: [...new Set((anomalie || []).filter(a => a.gravita === 'errore').map(a => a.tipo_nome))].join(', ').slice(0, 300),
     // Chi ha documenti scaduti o non conformi, per nome: la fatturazione passiva
     // lo legge da qui e avvisa prima di pagare, senza rifare tutta la valutazione.
     soggetti_critici: valutati

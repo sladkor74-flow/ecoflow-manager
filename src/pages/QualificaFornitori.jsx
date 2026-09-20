@@ -53,6 +53,30 @@ function dettaglioAlert(r) {
   return principale ? principale.messaggio : (r.stato === 'da_verificare' ? 'Scadenza non determinata: verifica il documento' : '');
 }
 
+// Voci del catalogo che non chiederanno mai niente a nessuno: un documento
+// intestato a un fornitore scritto male, o a uno che quest'anno non ha lavorato,
+// resterebbe muto per sempre e sembrerebbe tutto a posto.
+function AnomalieCatalogo({ anomalie, isAdmin, onApriCatalogo }) {
+  const errori = (anomalie || []).filter(a => a.gravita === 'errore');
+  if (errori.length === 0) return null;
+  return (
+    <div className="border border-red-300 bg-red-50 text-red-900 rounded-lg p-3">
+      <div className="flex items-center gap-2 font-medium text-sm">
+        <AlertTriangle className="w-4 h-4" />
+        {errori.length === 1 ? 'Un documento del catalogo non verrà mai chiesto' : `${errori.length} documenti del catalogo non verranno mai chiesti`}
+      </div>
+      <ul className="mt-1.5 space-y-1 text-sm">
+        {errori.map((a, i) => <li key={i}>• {a.messaggio}</li>)}
+      </ul>
+      {isAdmin && (
+        <button type="button" onClick={onApriCatalogo} className="mt-2 text-sm text-primary hover:underline font-medium">
+          Apri il catalogo e correggi
+        </button>
+      )}
+    </div>
+  );
+}
+
 function PannelloAlert({ soggetti, onApri }) {
   const [tutti, setTutti] = useState(false);
   const alert = useMemo(() => soggetti
@@ -299,6 +323,8 @@ export default function QualificaFornitori() {
             </TabsContent>
 
             <TabsContent value="documenti" className="mt-4 space-y-4">
+          <AnomalieCatalogo anomalie={dati.anomalie} isAdmin={isAdmin} onApriCatalogo={() => setCatalogoAperto(true)} />
+
           <PannelloAlert soggetti={dati.soggetti} onApri={setAperto} />
 
           <section className="space-y-3">
@@ -403,7 +429,13 @@ export default function QualificaFornitori() {
       />
 
       {isAdmin && (
-        <CatalogoDocumenti open={catalogoAperto} onClose={() => setCatalogoAperto(false)} onModificato={aggiorna} />
+        <CatalogoDocumenti
+          open={catalogoAperto}
+          onClose={() => setCatalogoAperto(false)}
+          onModificato={aggiorna}
+          soggetti={dati ? dati.soggetti : []}
+          anno={anno}
+        />
       )}
 
       {isAdmin && (
