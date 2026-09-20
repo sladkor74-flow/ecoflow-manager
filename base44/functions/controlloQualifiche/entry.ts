@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { emailQualifica } from "../../shared/emailQualifica.ts";
 import {
   individuaSoggetti, valutaSoggetto, eventiDaSegnalare, oggiRoma, giorniTra, RIPETIZIONE_GIORNI, salvaRiepilogo,
   anomalieCatalogo,
@@ -40,57 +41,6 @@ function rigaEvento(e) {
     return `${ETICHETTA.in_scadenza}: ${e.tipo}, ${quando}`;
   }
   return `${ETICHETTA[e.stato] || e.stato}: ${e.tipo}`;
-}
-
-function componiEmail(anno, oggi, eventi, riepilogo, completo, anomalie) {
-  const righe = [];
-  righe.push(`Qualifica fornitori ${anno}, situazione al ${it(oggi)}`);
-  righe.push('');
-
-  if (eventi.length === 0) {
-    righe.push('Non ci sono documenti da richiedere o da rinnovare.');
-  } else {
-    righe.push(completo ? 'DOCUMENTI DA GESTIRE' : 'NOVITA\' DA GESTIRE');
-    const perSoggetto = new Map();
-    for (const e of eventi) {
-      if (!perSoggetto.has(e.soggetto)) perSoggetto.set(e.soggetto, []);
-      perSoggetto.get(e.soggetto).push(e);
-    }
-    const soggetti = [...perSoggetto.entries()].sort((a, b) => {
-      const pa = Math.min(...a[1].map(e => ORDINE[e.stato] ?? 9));
-      const pb = Math.min(...b[1].map(e => ORDINE[e.stato] ?? 9));
-      return pa - pb || a[0].localeCompare(b[0], 'it');
-    });
-    for (const [nome, lista] of soggetti) {
-      righe.push('');
-      righe.push(nome.toUpperCase());
-      lista.sort((a, b) => (ORDINE[a.stato] ?? 9) - (ORDINE[b.stato] ?? 9) || (a.giorni ?? 9999) - (b.giorni ?? 9999));
-      for (const e of lista) {
-        righe.push('  - ' + rigaEvento(e));
-        for (const p of (e.problemi || []).slice(0, 4)) righe.push('      ' + p.messaggio);
-        if (e.richiesta) righe.push('      Testo proposto per il fornitore: ' + e.richiesta);
-      }
-    }
-  }
-
-  const errori = (anomalie || []).filter(a => a.gravita === 'errore');
-  if (errori.length > 0) {
-    righe.push('');
-    righe.push('DOCUMENTI CHE NON VERRANNO MAI CHIESTI');
-    righe.push('  Sono voci del catalogo intestate a un fornitore che nell\'anno non risulta.');
-    for (const a of errori) righe.push('  - ' + a.messaggio);
-  }
-
-  righe.push('');
-  righe.push('QUADRO GENERALE');
-  righe.push(`  Soggetti da qualificare: ${riepilogo.soggetti}`);
-  righe.push(`  Qualificati: ${riepilogo.qualificati}`);
-  righe.push(`  Da completare: ${riepilogo.da_completare}`);
-  righe.push(`  Con documenti scaduti o non conformi: ${riepilogo.critici}`);
-  righe.push(`  Documenti mancanti ${riepilogo.mancanti}, in scadenza ${riepilogo.in_scadenza}, scaduti ${riepilogo.scaduti}, non conformi ${riepilogo.non_conformi}`);
-  righe.push('');
-  righe.push('Per caricare i documenti apri il modulo Qualifica Fornitori del gestionale.');
-  return righe.join('\n');
 }
 
 export default async function(req) {
@@ -165,19 +115,15 @@ export default async function(req) {
     destinatari = [...new Set(destinatari)];
     if (destinatari.length === 0) return Response.json({ ...esito, error: 'Nessun destinatario disponibile' }, { status: 400 });
 
-    const conta = (stato) => daInviare.filter(e => e.stato === stato).length;
-    const parti = [];
-    if (conta('scaduto')) parti.push(conta('scaduto') + ' scaduti');
-    if (conta('non_conforme')) parti.push(conta('non_conforme') + ' non conformi');
-    if (conta('in_scadenza')) parti.push(conta('in_scadenza') + ' in scadenza');
-    if (conta('mancante')) parti.push(conta('mancante') + ' mancanti');
-    if (conta('da_verificare')) parti.push(conta('da_verificare') + ' da verificare');
-    if (erroriCatalogo.length) parti.push(erroriCatalogo.length + (erroriCatalogo.length === 1 ? ' documento senza destinatario' : ' documenti senza destinatario'));
-    const oggetto = `Qualifica fornitori ${anno}: ${parti.join(', ')}`;
-    const testo = componiEmail(anno, oggi, daInviare, riepilogo, forza, anomalie);
+    // Il promemoria e' un documento ordinato, diviso per urgenza: in HTML, perche'
+    // il testo semplice la posta lo appiattisce e centoventi righe diventano un muro.
+    const { oggetto, html } = emailQualifica({
+      anno, oggi, eventi: daInviare, riepilogo, anomalie, completo: forza,
+      indirizzo: body.indirizzo_modulo || '',
+    });
 
     for (const to of destinatari) {
-      await base44.asServiceRole.integrations.Core.SendEmail({ to, subject: oggetto, body: testo, from_name: 'Gestionale PFU - Qualifica fornitori' });
+      await base44.asServiceRole.integrations.Core.SendEmail({ to, subject: oggetto, body: html, from_name: 'Gestionale PFU - Qualifica fornitori' });
     }
 
     // Si registra solo cio' che e' stato effettivamente inviato.

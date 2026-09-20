@@ -289,6 +289,24 @@ export default async function(req) {
       problemi.push({ gravita: 'attenzione', messaggio: 'L\'agente non e\' sicuro della propria valutazione: conviene una verifica a mano.' });
     }
 
+    // La conferma data a mano vale su cio' che si sapeva quando e' stata data.
+    // Se una lettura nuova trova un problema bloccante - documento sbagliato,
+    // intestato ad altri, illeggibile - la conferma non copre piu' niente: si
+    // toglie, si scrive perche', e la rimette chi controlla il documento.
+    const bloccantiTrovati = problemi.filter(p => p.gravita === 'bloccante');
+    const revocaConferma = !!doc.verificato_manualmente && bloccantiTrovati.length > 0;
+    if (revocaConferma) {
+      problemi.push({
+        gravita: 'attenzione',
+        messaggio: 'Questo documento era segnato come verificato a mano: la conferma e\' stata tolta perche\' questa lettura ha trovato '
+          + (bloccantiTrovati.length === 1 ? 'un problema bloccante' : bloccantiTrovati.length + ' problemi bloccanti')
+          + '. Controlla il documento e, se va bene, rimetti la conferma.',
+      });
+    }
+    const traccia = revocaConferma
+      ? [String(doc.note || '').trim(), 'Conferma manuale tolta il ' + oggi + ': ' + bloccantiTrovati[0].messaggio].filter(Boolean).join('\n')
+      : null;
+
     // Una nuova lettura non puo' cancellare una scadenza gia' accertata. Se
     // l'agente non riesce a ricavarla - succede con le scansioni difficili -
     // resta quella che c'era e lo si dice, invece di svuotare il campo e far
@@ -305,6 +323,7 @@ export default async function(req) {
 
     await svc.DocumentoQualifica.update(documentoId, {
       analisi_stato: 'completata',
+      ...(revocaConferma ? { verificato_manualmente: false, note: traccia } : {}),
       data_emissione: emissione || doc.data_emissione || null,
       data_scadenza: scadenzaFinale,
       sintesi: lettura.sintesi || '',
@@ -323,7 +342,7 @@ export default async function(req) {
       errore_analisi: '',
     });
 
-    return Response.json({ ok: true, data_scadenza: scadenzaFinale, problemi: problemi.length });
+    return Response.json({ ok: true, data_scadenza: scadenzaFinale, problemi: problemi.length, bloccanti: bloccantiTrovati.length, conferma_tolta: revocaConferma });
   } catch (error) {
     const messaggio = error && error.message ? error.message : String(error);
     if (base44 && documentoId) {
