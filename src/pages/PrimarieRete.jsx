@@ -21,6 +21,8 @@ export default function PrimarieRete() {
   const [slaData, setSlaData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [alertCount, setAlertCount] = useState(0);
+  // i riquadri che non hanno risposto: si dice quali, invece di lasciarli vuoti
+  const [nonCaricati, setNonCaricati] = useState([]);
 
   const [records, setRecords] = useState([]);
   const [allRecords, setAllRecords] = useState([]);
@@ -29,23 +31,27 @@ export default function PrimarieRete() {
   const [cercaId, setCercaId] = useState('');
   const [scheda, setScheda] = useState('dettaglio');
 
+  // I quattro riquadri sono indipendenti e leggono archivi pesanti: se uno non
+  // risponde gli altri tre devono restare a video lo stesso. Prima bastava una
+  // chiamata caduta per lasciare la pagina vuota senza dire perche'.
   const loadData = useCallback(async () => {
     setLoading(true);
-    try {
-      const mixFilters = { regione: filters.regione, stato: filters.stato, mese: filters.mese, anno: filters.anno };
-      const [provRes, mixRes, slaRes, alertRes] = await Promise.all([
-        base44.functions.invoke('computeProvinceMatrix', {}),
-        base44.functions.invoke('computeRaccoglitoriMix', { filters: mixFilters }),
-        base44.functions.invoke('computeSlaMetrics', {}),
-        base44.functions.invoke('getAlerts', { modulo: 'primarie_rete', solo_aperti: true }),
-      ]);
-      setProvinceData(provRes.data);
-      setMixData(mixRes.data);
-      setSlaData(slaRes.data);
-      setAlertCount(alertRes.data?.total || 0);
-    } catch (e) {
-      console.error(e);
-    }
+    const mixFilters = { regione: filters.regione, stato: filters.stato, mese: filters.mese, anno: filters.anno };
+    const esiti = await Promise.allSettled([
+      base44.functions.invoke('computeProvinceMatrix', {}),
+      base44.functions.invoke('computeRaccoglitoriMix', { filters: mixFilters }),
+      base44.functions.invoke('computeSlaMetrics', {}),
+      base44.functions.invoke('getAlerts', { modulo: 'primarie_rete', solo_aperti: true }),
+    ]);
+    const [provRes, mixRes, slaRes, alertRes] = esiti;
+    const dato = (r) => (r.status === 'fulfilled' ? r.value.data : null);
+    setProvinceData(dato(provRes));
+    setMixData(dato(mixRes));
+    setSlaData(dato(slaRes));
+    setAlertCount(dato(alertRes)?.total || 0);
+    const nomi = ['la matrice per provincia', 'il mix dei raccoglitori', 'i tempi di evasione', 'gli alert aperti'];
+    setNonCaricati(esiti.map((r, i) => (r.status === 'rejected' ? nomi[i] : null)).filter(Boolean));
+    esiti.filter(r => r.status === 'rejected').forEach(r => console.error(r.reason));
     setLoading(false);
   }, [filters]);
 
@@ -91,7 +97,7 @@ export default function PrimarieRete() {
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-heading font-bold">Terminati Rete — Terminati Rete</h1>
+          <h1 className="text-2xl lg:text-3xl font-heading font-bold">Terminati Rete</h1>
           <p className="text-muted-foreground mt-1">
             Monitoraggio raccolte PFU per provincia e mix classi consorziali per raccoglitore.
           </p>
@@ -103,6 +109,13 @@ export default function PrimarieRete() {
           </Link>
         </div>
       </div>
+
+      {nonCaricati.length > 0 && (
+        <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 text-sm flex flex-wrap items-center gap-2">
+          <span>Non {nonCaricati.length === 1 ? 'si è caricato' : 'si sono caricati'} {nonCaricati.join(', ')}. Il resto della pagina è aggiornato.</span>
+          <button type="button" onClick={loadData} className="text-primary hover:underline font-medium">Riprova</button>
+        </div>
+      )}
 
       <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loadingRecords || !allRecords.length ? null : ordiniMostrati.length} />
 
