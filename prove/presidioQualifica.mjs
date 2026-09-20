@@ -71,6 +71,11 @@ verifica('un altro intestatario e bloccante', g({ intestatario: 'BETA SRL' }, { 
 verifica('partita IVA diversa: bloccante', g({ intestatario: 'ALFA', partita_iva: '11111111111' }, { nome: 'ALFA', piva: '22222222222' }).some(x => x.startsWith('bloccante')));
 verifica('codice fiscale diverso: bloccante', g({ intestatario: 'TORRES GIOVANNI', codice_fiscale: 'TRRGNN82H28G273G' }, { nome: 'TORRES GIOVANNI', codice_fiscale: 'RSSMRA80A01H501U' }).some(x => x.startsWith('bloccante')));
 verifica('codice fiscale uguale: va bene anche se il nome e scritto diverso', g({ intestatario: 'TORRES GIOVANNI DITTA', codice_fiscale: 'TRRGNN82H28G273G' }, { nome: 'GIOVANNI TORRES', codice_fiscale: 'TRRGNN82H28G273G' }).length === 0);
+verifica('partita IVA e codice fiscale diversi sono lo stesso soggetto', g({ intestatario: 'ALFA', codice_fiscale: '11111111111' }, { nome: 'ALFA', piva: '22222222222', codice_fiscale: '11111111111' }).length === 0);
+verifica('il documento riporta il CF, in anagrafica ce la piva: nessun falso allarme', g({ intestatario: 'ALFA', partita_iva: '11111111111' }, { nome: 'ALFA', piva: '22222222222', codice_fiscale: '11111111111' }).length === 0);
+verifica('nessuno dei numeri coincide: bloccante', g({ intestatario: 'ALFA', partita_iva: '33333333333' }, { nome: 'ALFA', piva: '22222222222', codice_fiscale: '11111111111' }).some(x => x.startsWith('bloccante')));
+verifica('su un contratto il numero diverso avvisa, non blocca', controlliFormali({ intestatario: 'ALFA', partita_iva: '33333333333' }, { nome: 'ALFA', piva: '22222222222' }, { bilaterale: true }).every(p => p.gravita === 'attenzione'));
+verifica('e spiega che le parti sono due', controlliFormali({ intestatario: 'SMOCO SRL' }, { nome: 'ECOTYRE SCRL' }, { bilaterale: true })[0].messaggio.includes('due parti'));
 verifica('documento non firmato: solo attenzione', g({ intestatario: 'ALFA', firmato: 'no' }, { nome: 'ALFA' }).every(x => x.startsWith('attenzione')));
 
 console.log('');

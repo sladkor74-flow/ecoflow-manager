@@ -112,16 +112,25 @@ function regolaCatalogo(tipo) {
 }
 
 // Controlli formali che non dipendono dal giudizio del modello.
-export function controlliFormali(lettura, contesto) {
+export function controlliFormali(lettura, contesto, opzioni) {
+  // Un contratto ha due parti: chi legge puo' trovare per prima la nostra
+  // ragione sociale invece di quella del fornitore, e non e' un errore.
+  const bilaterale = !!(opzioni && opzioni.bilaterale);
   const problemi = [];
 
   // Intestatario: deve corrispondere la ragione sociale oppure la partita IVA.
   const atteso = normalizzaRagioneSociale(contesto.nome || '');
   const letto = normalizzaRagioneSociale(lettura.intestatario || '');
-  const pivaAttesa = cifre(contesto.piva).slice(-11);
-  const pivaLetta = cifre(lettura.partita_iva).slice(-11);
-  const pivaCoincide = pivaAttesa.length === 11 && pivaLetta.length === 11 && pivaAttesa === pivaLetta;
-  const pivaDiversa = pivaAttesa.length === 11 && pivaLetta.length === 11 && pivaAttesa !== pivaLetta;
+  // In molte societa' la partita IVA e il codice fiscale sono due numeri
+  // diversi, e un documento puo' riportare l'uno o l'altro: valgono entrambi.
+  // Si confrontano come insiemi, e basta che uno coincida.
+  const undici = (v) => { const c = cifre(v); return c.length >= 11 ? c.slice(-11) : ''; };
+  const attesi = [undici(contesto.piva), undici(contesto.codice_fiscale)].filter(Boolean);
+  const letti = [undici(lettura.partita_iva), undici(lettura.codice_fiscale)].filter(Boolean);
+  const pivaAttesa = attesi[0] || '';
+  const pivaLetta = letti[0] || '';
+  const pivaCoincide = letti.some(x => attesi.includes(x));
+  const pivaDiversa = attesi.length > 0 && letti.length > 0 && !pivaCoincide;
   // Le ditte individuali non hanno una partita IVA sui documenti: l'Albo e il
   // DURC le identificano col codice fiscale della persona. Senza questo
   // confronto, su di loro non si verificherebbe nessun intestatario.
@@ -138,12 +147,18 @@ export function controlliFormali(lettura, contesto) {
   const nomeCoincide = atteso && letto && (atteso === letto
     || (Math.min(atteso.length, letto.length) >= 4 && (atteso.includes(letto) || letto.includes(atteso)))
     || (parole(atteso).length >= 6 && parole(atteso) === parole(letto)));
+  const graveSeUnilaterale = bilaterale ? 'attenzione' : 'bloccante';
+  const perche = bilaterale ? ' In un contratto ci sono due parti: controlla che non sia la nostra.' : '';
   if (cfDiverso) {
-    problemi.push({ gravita: 'bloccante', messaggio: `Il codice fiscale del documento, ${cfLetto}, non corrisponde a quello del soggetto, ${cfAtteso}.` });
+    problemi.push({ gravita: graveSeUnilaterale, messaggio: `Il codice fiscale del documento, ${cfLetto}, non corrisponde a quello del soggetto, ${cfAtteso}.` + perche });
   } else if (pivaDiversa) {
-    problemi.push({ gravita: 'bloccante', messaggio: `La partita IVA del documento, ${pivaLetta}, non corrisponde a quella del soggetto, ${pivaAttesa}.` });
+    problemi.push({
+      gravita: graveSeUnilaterale,
+      messaggio: `Il numero fiscale del documento, ${pivaLetta}, non corrisponde a quelli del soggetto (${attesi.join(' o ')}).`
+        + (bilaterale ? perche : ' Ricorda che partita IVA e codice fiscale possono essere numeri diversi: controlla quale dei due riporta il documento.'),
+    });
   } else if (letto && atteso && !nomeCoincide && !pivaCoincide && !cfCoincide) {
-    problemi.push({ gravita: 'bloccante', messaggio: `Il documento e' intestato a "${lettura.intestatario}", non a ${contesto.nome}.` });
+    problemi.push({ gravita: graveSeUnilaterale, messaggio: `Il documento e' intestato a "${lettura.intestatario}", non a ${contesto.nome}.` + perche });
   }
 
   if (lettura.firmato === 'no') {
@@ -234,12 +249,16 @@ export async function analizzaDocumento(base44, { doc, tipo, contesto, conoscenz
 
     // === Problemi: controlli formali piu' valutazione del modello ===
     // Prima cio' che si vede dalla lettura, poi il giudizio dell'agente.
-    const problemi = [...problemiLettura(lettura), ...controlliFormali(lettura, { nome, piva, codice_fiscale: ctx.codice_fiscale })];
+    const famiglia = confrontaTipoDocumento(tipo.nome, lettura);
+    const problemi = [
+      ...problemiLettura(lettura),
+      ...controlliFormali(lettura, { nome, piva, codice_fiscale: ctx.codice_fiscale }, { bilaterale: famiglia.attesa && famiglia.attesa.chiave === 'contratto' }),
+    ];
 
     // Un DURC caricato dove va una visura e' un documento valido nel posto
     // sbagliato: l'errore piu' facile da fare. Il confronto fra la casella e il
     // tipo letto non passa dal modello, cosi' non dipende dal suo giudizio.
-    const confronto = confrontaTipoDocumento(tipo.nome, lettura);
+    const confronto = famiglia;
     const letto = String(lettura.tipo_documento || '').trim();
     if (confronto.esito === 'diverso') {
       problemi.unshift(problemaTipoSbagliato(tipo.nome, lettura));
