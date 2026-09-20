@@ -5,8 +5,13 @@
 // agente no. La libreria si carica solo quando serve.
 export async function lineeDelPdf(file) {
   const pdfjs = await import('pdfjs-dist');
-  const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
-  pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+  // Il motore di pdf.js di solito gira in un worker caricato da un file .mjs a parte,
+  // ma l'hosting serve i .mjs come application/octet-stream e il browser li rifiuta
+  // come moduli (provato in produzione il 21/09/2026). Lo si importa allora come un
+  // normale pezzo del sito e lo si fa girare nella pagina: pdf.js lo usa da solo
+  // quando lo trova in globalThis.pdfjsWorker. Per una prefattura di nove pagine non
+  // si nota.
+  globalThis.pdfjsWorker = await import('pdfjs-dist/build/pdf.worker.min.mjs');
   const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
   const linee = [];
   for (let p = 1; p <= doc.numPages; p++) {
