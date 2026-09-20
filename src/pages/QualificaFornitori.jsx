@@ -77,6 +77,63 @@ function AnomalieCatalogo({ anomalie, isAdmin, onApriCatalogo }) {
   );
 }
 
+// Manutenzione dell'archivio: un documento sostituito da anni conserva il suo
+// file, e l'archivio si riempie di DURC vecchi. Il record resta sempre - e' la
+// storia del fornitore - ma dopo qualche anno il file puo' andarsene: quello
+// buono e' un altro, e l'originale sta comunque nella cartella dei contratti.
+// Non e' automatico: cancellare file e' una decisione, si guarda prima.
+function ManutenzioneArchivio({ anno }) {
+  const [esito, setEsito] = useState(null);
+  const [inCorso, setInCorso] = useState(false);
+  const { toast } = useToast();
+
+  const chiedi = async (soloElenco) => {
+    setInCorso(true);
+    try {
+      const res = await base44.functions.invoke('alleggerisciQualifica', { anno, anni: 3, solo_elenco: soloElenco });
+      const d = res.data || res;
+      setEsito(d);
+      if (!soloElenco) {
+        if (d.non_supportata) toast({ title: 'Nessun file rimosso', description: d.non_supportata, variant: 'destructive' });
+        else toast({ title: 'Archivio alleggerito', description: `${d.alleggeriti} file rimossi.` });
+      }
+    } catch (e) {
+      const msg = e && e.response && e.response.data && e.response.data.error;
+      toast({ title: 'Operazione non riuscita', description: msg || e.message || String(e), variant: 'destructive' });
+    }
+    setInCorso(false);
+  };
+
+  return (
+    <section className="border rounded-lg p-3 text-sm bg-muted/20">
+      <h3 className="font-semibold text-muted-foreground mb-1">Manutenzione dell’archivio</h3>
+      <p className="text-muted-foreground">
+        I documenti sostituiti tengono il loro file. Dopo tre anni il file si può togliere: la scheda del documento
+        resta — sintesi, scadenza, problemi e motivo della sostituzione — e l’originale è comunque nella cartella dei contratti.
+      </p>
+      <div className="flex flex-wrap items-center gap-2 mt-2">
+        <Button size="sm" variant="outline" onClick={() => chiedi(true)} disabled={inCorso}>
+          {inCorso ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+          Guarda cosa si può togliere
+        </Button>
+        {esito && esito.quanti > 0 && (
+          <Button size="sm" variant="outline" className="text-red-700" disabled={inCorso}
+            onClick={() => { if (window.confirm(`Togliere il file a ${esito.quanti} documenti sostituiti da oltre tre anni? Le schede restano, i file no.`)) chiedi(false); }}>
+            Togli i file ({esito.quanti})
+          </Button>
+        )}
+      </div>
+      {esito && (
+        <p className="text-muted-foreground mt-2">
+          {esito.quanti === 0
+            ? `Niente da togliere: ${esito.sostituiti_in_tutto === 0 ? 'non ci sono ancora documenti sostituiti' : `i ${esito.sostituiti_in_tutto} documenti sostituiti sono tutti più recenti di tre anni`}.`
+            : `${esito.quanti} documenti sostituiti da oltre tre anni hanno ancora il file${esito.alleggeriti ? `, ${esito.alleggeriti} già tolti` : ''}.`}
+        </p>
+      )}
+    </section>
+  );
+}
+
 // Un documento mai letto dall'agente non e' un documento controllato: il report
 // che lo dava per buono non valeva niente. Finche' ce ne sono, si dice.
 function DocumentiDaLeggere({ riepilogo, elenco, isAdmin, inCorso, onLeggi }) {
@@ -500,6 +557,8 @@ export default function QualificaFornitori() {
               </div>
             </section>
           )}
+
+          {isAdmin && <ManutenzioneArchivio anno={anno} />}
             </TabsContent>
           </Tabs>
         </>

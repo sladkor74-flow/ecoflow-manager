@@ -3,6 +3,7 @@ import { normalizzaLettura, confronta, sintesi } from "../../shared/quadraturaFi
 import { caricaGestionale } from "../../shared/quadraturaFirDati.ts";
 import { valoreCampo, leggiJson } from "../../shared/testoLungo.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
+import { cancellaFile } from "../../shared/fileArchivio.ts";
 
 // Legge la stampa settimanale del conteggio e della somma dei FIR e la confronta
 // con il gestionale.
@@ -122,22 +123,6 @@ async function leggiDocumento(base44, fileUri, problemi = null) {
   return comeOggetto(risposta);
 }
 
-// Il file era li' solo per essere letto: si prova a toglierlo. Se la piattaforma
-// non lo consente resta nell'archivio privato, e la lettura lo scrive.
-async function cancellaFile(base44, fileUri) {
-  const core = base44.asServiceRole.integrations.Core;
-  for (const nome of ['DeleteFile', 'DeletePrivateFile', 'RemoveFile']) {
-    if (typeof core[nome] !== 'function') continue;
-    try {
-      await core[nome]({ file_uri: fileUri });
-      return nome;
-    } catch (e) {
-      return `${nome} non riuscita: ${e && e.message ? e.message : e}`;
-    }
-  }
-  return 'non supportata';
-}
-
 export default async function(req) {
   const base44 = createClientFromRequest(req);
   let quadraturaId = null;
@@ -192,7 +177,7 @@ export default async function(req) {
         lettura.problemi.push('La rilettura non è riuscita: ' + (e && e.message ? e.message : e));
       }
     }
-    if (file_uri) cancellazione = await cancellaFile(base44, file_uri);
+    if (file_uri) cancellazione = (await cancellaFile(base44, file_uri)).come;
     if (!lettura.tabelle.length) {
       throw new Error('Nel file non ho trovato nessuna tabella con il conteggio e la somma dei formulari.' + (lettura.note ? ' ' + lettura.note : ''));
     }

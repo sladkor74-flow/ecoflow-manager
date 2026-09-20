@@ -204,7 +204,24 @@ export default function SoggettoDettaglio({ soggetto, anno, isAdmin, open, onClo
     await onAggiorna();
   };
 
+  // Un documento di qualifica sta in poche centinaia di chili: se pesa molto di
+  // piu' e' quasi sempre una scansione a colori ad alta risoluzione. Moltiplicato
+  // per trenta documenti e venti fornitori l'archivio diventa ingestibile, quindi
+  // conviene dirlo prima di caricare, quando rifare la scansione costa niente.
+  const LIMITE_MB = 5;
+  const troppoPesante = (file) => {
+    const mb = file.size / (1024 * 1024);
+    if (mb <= LIMITE_MB) return false;
+    const quanto = mb.toFixed(1).replace('.', ',');
+    return !window.confirm(
+      `Questo file pesa ${quanto} MB, molto piu' dei pochi decimi di un documento normale.\n\n`
+      + 'Di solito e\' una scansione a colori ad alta risoluzione: rifatta in scala di grigi a 200 dpi pesa circa un decimo, '
+      + 'e si legge uguale. L\'archivio della qualifica arrivera\' a centinaia di documenti.\n\n'
+      + 'Caricarlo lo stesso?');
+  };
+
   const carica = async (req, file) => {
+    if (troppoPesante(file)) return;
     setOccupato(req.tipo_id);
     try {
       const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });

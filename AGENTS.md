@@ -436,3 +436,18 @@ builder ne rinnova 10.000 al mese: il costo di un controllo completo e' un giorn
 di consumo normale. Il quadro vero che ne e' uscito: nessun fornitore
 qualificato, 41 documenti scaduti, 56 mai ricevuti, 29 non conformi, e trentaquattro
 conferme manuali revocate perche' la lettura ha trovato problemi bloccanti.
+
+**Lo spazio dell'archivio: nel gestionale va solo cio' che scade e va
+controllato.** Il contratto firmato si', gli allegati no: standard operativi,
+disciplinari e descrizioni dei servizi non scadono e nessuno li verifica, quindi
+restano nel repository sul computer, dove si leggono quando servono. Per
+riferimento, il 21/09/2026 la cartella `CONTRATTI SUBFORNITORI` pesava 1,4 GB
+mentre i documenti caricati nel gestionale erano 99. Due presidi: al caricamento
+un file oltre 5 MB fa comparire un avviso (quasi sempre e' una scansione a colori
+ad alta risoluzione, che in scala di grigi a 200 dpi pesa un decimo e si legge
+uguale); e `alleggerisciQualifica` toglie il file ai documenti **sostituiti** da
+oltre tre anni, lasciando la scheda - sintesi, scadenza, problemi, motivo della
+sostituzione - che e' la storia del fornitore. Non e' automatico apposta:
+cancellare file e' una decisione, l'amministratore guarda prima l'elenco. Se la
+piattaforma non espone una cancellazione, la funzione si ferma al primo tentativo
+e lo dice, invece di svuotare `file_uri` lasciando i file dov'erano.
