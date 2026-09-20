@@ -113,19 +113,24 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
     y = 27;
   };
 
+  // L'intestazione va a capo invece di essere tagliata: "Prezzo Unitario (Euro/TON)"
+  // deve arrivare intera, perche' l'unita' di misura fa parte del nome della colonna
+  // e nell'Excel c'e'. I due formati devono dire le stesse cose.
   const intestazioni = () => {
-    doc.setFillColor(...C.scuro);
-    doc.roundedRect(M, y, W - 2 * M, 8, 1, 1, 'F');
-    doc.setTextColor(...C.bianco);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.4);
+    doc.setFontSize(7.2);
+    const titoli = colonne.map((c, i) => doc.splitTextToSize(perPdf(c.titolo), larghezze[i] - 3).slice(0, 2));
+    const alta = titoli.some(t => t.length > 1) ? 10.5 : 8;
+    doc.setFillColor(...C.scuro);
+    doc.roundedRect(M, y, W - 2 * M, alta, 1, 1, 'F');
+    doc.setTextColor(...C.bianco);
     let x = M;
     colonne.forEach((c, i) => {
       const destra = NUMERICI.has(c.tipo);
-      doc.text(doc.splitTextToSize(c.titolo, larghezze[i] - 3)[0], destra ? x + larghezze[i] - 2 : x + 2, y + 5.2, { align: destra ? 'right' : 'left' });
+      titoli[i].forEach((t, n) => doc.text(t, destra ? x + larghezze[i] - 2 : x + 2, y + (titoli[i].length > 1 ? 4.2 : alta / 2 + 1.2) + n * 3.3, { align: destra ? 'right' : 'left' }));
       x += larghezze[i];
     });
-    y += 8;
+    y += alta;
   };
 
   const piede = () => {
@@ -139,7 +144,15 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
     doc.text(`Esportato il ${esportato}  ·  Pagina ${pagina}`, W - M, H - 5, { align: 'right' });
   };
 
-  const riga = (celle, { sfondo, grassetto, coloreTesto, altezza = 6 } = {}) => {
+  // Anche le celle vanno a capo, fino a tre righe: una nota lunga non si perde.
+  const riga = (celle, { sfondo, grassetto, coloreTesto, altezza: minima = 6 } = {}) => {
+    doc.setFont('helvetica', grassetto ? 'bold' : 'normal');
+    doc.setFontSize(7.4);
+    const testi = colonne.map((c, i) => {
+      const v = celle[i];
+      return v === null || v === undefined || v === '' ? [] : doc.splitTextToSize(perPdf(v), larghezze[i] - 3).slice(0, 3);
+    });
+    const altezza = minima + (Math.max(1, ...testi.map(t => t.length)) - 1) * 3.3;
     if (y + altezza > H - 12) {
       piede();
       doc.addPage();
@@ -157,8 +170,7 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
     let x = M;
     colonne.forEach((c, i) => {
       const destra = NUMERICI.has(c.tipo);
-      const t = doc.splitTextToSize(perPdf(celle[i]), larghezze[i] - 3)[0] || '';
-      doc.text(t, destra ? x + larghezze[i] - 2 : x + 2, y + altezza - 1.9, { align: destra ? 'right' : 'left' });
+      testi[i].forEach((t, k) => doc.text(t, destra ? x + larghezze[i] - 2 : x + 2, y + minima - 1.9 + k * 3.3, { align: destra ? 'right' : 'left' }));
       x += larghezze[i];
     });
     if (!sfondo || sfondo === C.zebra) {

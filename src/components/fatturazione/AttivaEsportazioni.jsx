@@ -16,6 +16,8 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
   const [prefattura, setPrefattura] = useState({ stato: 'caricamento' });
   const [storico, setStorico] = useState([]);
   const [loadingStorico, setLoadingStorico] = useState(true);
+  // com'e' andata l'ultima esportazione, un rigo per canale
+  const [esiti, setEsiti] = useState([]);
 
   const loadStorico = async () => {
     setLoadingStorico(true);
@@ -34,6 +36,9 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
     return () => { vivo = false; };
   }, [periodo.anno, periodo.mese]);
 
+  // il messaggio del server quando c'e', altrimenti quello generico della rete
+  const perche = (e) => e?.response?.data?.error || e?.message || 'errore sconosciuto';
+
   // L'esportazione non si blocca, ma chi esporta senza un confronto pulito lo fa sapendolo
   const consenso = () => {
     if (prefattura.stato === 'coincide') return true;
@@ -51,38 +56,46 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
     return nomeFileAttiva(tipologia, periodo.anno, periodo.mese, formato === 'pdf' ? 'pdf' : 'xlsx');
   };
 
-  const esporta = async (tipologia, formato = 'excel') => {
-    if (!consenso()) return;
-    setExporting(true);
+  // Scrive il file e poi lo registra nello storico. Sono due cose distinte: il file
+  // e' gia' sul computer di chi esporta, quindi un problema nella registrazione non
+  // va raccontato come un'esportazione fallita. Niente finestre di sistema: bloccano
+  // la pagina e non si possono copiare.
+  const unoSolo = async (tipologia, formato) => {
+    const etichetta = TIPS.find(t => t.key === tipologia)?.label || tipologia;
+    const righe = data[tipologia]?.righe || [];
+    if (righe.length === 0) return { tipo: 'avviso', testo: `${etichetta}: nessuna riga da esportare.` };
+    let nomeFile;
     try {
-      const righe = data[tipologia]?.righe || [];
-      if (righe.length === 0) { alert(`Nessuna riga da esportare per ${tipologia}`); setExporting(false); return; }
-      const nomeFile = await scrivi(tipologia, righe, formato);
+      nomeFile = await scrivi(tipologia, righe, formato);
+    } catch (e) {
+      return { tipo: 'errore', testo: `${etichetta}: il file non è stato prodotto (${perche(e)}).` };
+    }
+    try {
       const doc = data[tipologia]?.documento;
       await base44.functions.invoke('registraEsportazione', {
         tipologia, anno: periodo.anno, mese: periodo.mese,
         documento_ids: doc ? [doc.id] : [], nome_file: nomeFile,
       });
-      await loadStorico(); await onReload();
-    } catch (e) { alert(e.message); }
+      return { tipo: 'ok', testo: `${nomeFile} scaricato e registrato nello storico.` };
+    } catch (e) {
+      return { tipo: 'avviso', testo: `${nomeFile} è stato scaricato, ma non è stato registrato nello storico: ${perche(e)}.` };
+    }
+  };
+
+  const esporta = async (tipologia, formato = 'excel') => {
+    if (!consenso()) return;
+    setExporting(true); setEsiti([]);
+    setEsiti([await unoSolo(tipologia, formato)]);
+    await loadStorico(); await onReload();
     setExporting(false);
   };
 
   const esportaTutto = async (formato = 'excel') => {
     if (!consenso()) return;
-    setExporting(true);
-    for (const t of TIPS) {
-      try {
-        const righe = data[t.key]?.righe || [];
-        if (righe.length === 0) continue;
-        const nomeFile = await scrivi(t.key, righe, formato);
-        const doc = data[t.key]?.documento;
-        await base44.functions.invoke('registraEsportazione', {
-          tipologia: t.key, anno: periodo.anno, mese: periodo.mese,
-          documento_ids: doc ? [doc.id] : [], nome_file: nomeFile,
-        });
-      } catch (e) {}
-    }
+    setExporting(true); setEsiti([]);
+    const fatti = [];
+    for (const t of TIPS) fatti.push(await unoSolo(t.key, formato));
+    setEsiti(fatti);
     await loadStorico(); await onReload();
     setExporting(false);
   };
@@ -130,6 +143,19 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
             <FileDown className="w-4 h-4 mr-1.5" /> Tutti e tre in PDF
           </Button>
         </div>
+        {esiti.length > 0 && (
+          <div className="mt-3 space-y-1.5">
+            {esiti.map((e, i) => (
+              <div key={i} className={`border rounded-lg px-3 py-2 text-sm flex items-start gap-2 ${
+                e.tipo === 'ok' ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                  : e.tipo === 'errore' ? 'border-red-300 bg-red-50 text-red-800'
+                  : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
+                {e.tipo === 'ok' ? <CheckCircle className="w-4 h-4 mt-0.5 shrink-0" /> : <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />}
+                <span>{e.testo}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div>

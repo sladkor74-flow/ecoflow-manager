@@ -81,8 +81,11 @@
       ]
     },
     "record_ids": {
-      "type": "object",
-      "description": "Array di ID record sorgente (max 50)"
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Gli ID dei record di origine (al massimo 50). Come documento_ids era dichiarato 'object': chi ci scriveva un elenco riceveva un errore dal server"
     },
     "record_count": {
       "type": "number"
@@ -141,8 +144,11 @@
       "type": "string"
     },
     "modifiche": {
-      "type": "object",
-      "description": "Storico modifiche manuali"
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Storico delle modifiche manuali. Oggi nessuno lo scrive: e' dichiarato come elenco perche' un elenco e' quello che conterra'"
     },
     "origine_record_id": {
       "type": "string"

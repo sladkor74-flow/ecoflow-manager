@@ -26,8 +26,11 @@
       "type": "string"
     },
     "documento_ids": {
-      "type": "object",
-      "description": "Array di ID documenti esportati"
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Gli ID dei documenti esportati. Era dichiarato 'object' e il server rifiutava l'elenco: nessuna esportazione si registrava"
     },
     "file_url": {
       "type": "string"
