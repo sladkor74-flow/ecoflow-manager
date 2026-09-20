@@ -1,71 +1,103 @@
 import * as XLSX from 'xlsx';
 
 // L'export della fatturazione passiva: un file per canale (rete, ACI, extra
-// raccolta non si sommano mai), con i blocchi del modello dell'amministrazione
-// ("[FORMAT] - Fatturazione passiva Ecotyre"): raccoglitori, impianti e stoccaggi,
-// trasporto delle secondarie. Per ogni fornitore una riga col totale e, sotto, il
-// dettaglio con l'ambito, le tonnellate, il prezzo e l'importo. I numeri sono
-// quelli a video: l'export non ricalcola niente.
+// raccolta non si sommano mai), in Excel e in PDF, con i blocchi del modello
+// dell'amministrazione ("[FORMAT] - Fatturazione passiva Ecotyre"): raccoglitori,
+// impianti e stoccaggi, trasporto delle secondarie. Per ogni fornitore una riga col
+// totale e, sotto, il dettaglio con l'ambito, le tonnellate, il prezzo e l'importo.
+// I numeri sono quelli a video: l'export non ricalcola niente. La struttura si
+// costruisce in un punto solo (sezioniPassiva): Excel e PDF dicono le stesse cose.
 const NOMI = { RETE: 'RETE', ACI: 'ACI', EXTRA_RACCOLTA: 'EXTRA RACCOLTA' };
+const NOMI_TITOLO = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 const EER = 160103;
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 const r3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
 const unita = (um) => String(um || '').replace('/', '\\');
+// tonnellate scritte dentro un testo: virgola italiana
+const tTesto = (v) => String(r3(v)).replace('.', ',');
 
 // Da dove viene il prezzo di una riga di raccolta: destinazione, provincia o classe
 const ambitoRaccolta = (r) => [r.provincia !== '—' && r.provincia, r.destinazione !== '—' && `verso ${r.destinazione}`, r.classe !== '—' && `classe ${r.classe}`].filter(Boolean).join(' · ') || 'tutte';
 const ambitoImpianto = (r) => [r.prestazione === 'CONFERIMENTO_STOCCAGGIO' ? 'Stoccaggio' : r.prestazione === 'TRATTAMENTO' ? 'Trattamento' : r.prestazione, r.classe !== '—' && `classe ${r.classe}`, r.provenienza && r.provenienza !== '—' && `da ${r.provenienza}`].filter(Boolean).join(' · ');
 
-// Per ogni riga, in che blocco sta: decide quale colonna e' in tonnellate e quale in euro
+/**
+ * Le tre sezioni del report: [{ tipo, titolo, colonne, righe: [{ celle, stile }] }].
+ * stile: 'gruppo' per la riga del fornitore, 'totale' per il totale della sezione.
+ */
+export function sezioniPassiva(result) {
+  const blocco = (titolo, colonnaPrezzo, fornitori, ambito, totale) => {
+    const righe = [];
+    for (const f of fornitori || []) {
+      righe.push({ stile: 'gruppo', celle: [f.fornitore, r3(f.totale_tonnellate), null, null, EER, r2(f.totale_euro), f.interno ? 'interno, non fatturato' : null] });
+      for (const r of f.righe || []) {
+        const conferenti = (r.di_cui || []).map(d => `${d.fornitore} ${tTesto(d.tonnellate)} t`).join('; ');
+        righe.push({ celle: [`   ${ambito(r)}`, r3(r.tonnellate), r.tariffa_valore || 0, unita(r.unita_misura), null, r2(r.importo), [r.note, conferenti && `di cui conferito da: ${conferenti}`].filter(Boolean).join(' — ') || null] });
+      }
+      for (const d of f.di_cui || []) righe.push({ celle: [`   di cui ${d.fornitore}`, r3(d.tonnellate), null, null, null, null, 'subraccoglitore, fatturato dal principale'] });
+    }
+    righe.push({ stile: 'totale', celle: ['Totale complessivo', r3((fornitori || []).reduce((s, f) => s + (f.totale_tonnellate || 0), 0)), null, null, null, r2(totale), null] });
+    return {
+      tipo: 'blocco', titolo,
+      colonne: [
+        { titolo, tipo: 'testo', peso: 3.2 }, { titolo: 'Totale [t]', tipo: 't', peso: 0.9 }, { titolo: colonnaPrezzo, tipo: 'euro', peso: 1 }, { titolo: 'Unità', tipo: 'testo', peso: 0.7 },
+        { titolo: 'EER', tipo: 'testo', peso: 0.7 }, { titolo: 'TOTALE [€]', tipo: 'euro', peso: 1.1 }, { titolo: 'Note', tipo: 'testo', peso: 3.2 },
+      ],
+      righe,
+    };
+  };
+
+  const secondarie = [];
+  for (const f of result.trasporti_secondaria || []) {
+    for (const r of f.righe || []) {
+      secondarie.push({ celle: [r.stoccaggio, r.trasportatore || f.fornitore, r.destinazione, r3(r.tonnellate), unita(r.unita_misura), r.tariffa_valore || 0, r.viaggi || 0, r2(r.importo), f.fornitore, r.note || null] });
+    }
+  }
+  secondarie.push({ stile: 'totale', celle: ['Totale complessivo', null, null, r3((result.trasporti_secondaria || []).reduce((s, f) => s + (f.totale_tonnellate || 0), 0)), null, null, null, r2(result.totali.trasporti_secondaria), null, null] });
+
+  return [
+    blocco('RACCOGLITORI', 'Costo di Raccolta', result.raccoglitori, ambitoRaccolta, result.totali.raccoglitori),
+    blocco('IMPIANTI \\ STOCCAGGI', 'Costo', result.impianti_stoccaggi, ambitoImpianto, result.totali.impianti_stoccaggi),
+    {
+      tipo: 'secondarie', titolo: 'TRASPORTO DELLE SECONDARIE',
+      colonne: [
+        { titolo: 'PRODUTTORE', tipo: 'testo', peso: 1.6 }, { titolo: 'TRASPORTATORE', tipo: 'testo', peso: 1.7 }, { titolo: 'DESTINATARIO', tipo: 'testo', peso: 1.5 }, { titolo: 'PESO [t]', tipo: 't', peso: 0.8 },
+        { titolo: "UNITA' DI MISURA", tipo: 'testo', peso: 0.8 }, { titolo: 'COSTO', tipo: 'euro', peso: 0.8 }, { titolo: 'nr. di viaggi', tipo: 'intero', peso: 0.7 }, { titolo: 'TOTALE [€]', tipo: 'euro', peso: 1 },
+        { titolo: 'Fatturato da', tipo: 'testo', peso: 1.6 }, { titolo: 'Note', tipo: 'testo', peso: 2.2 },
+      ],
+      righe: secondarie,
+    },
+  ];
+}
+
+// Per ogni riga del foglio, in che blocco sta: decide quale colonna e' in tonnellate e quale in euro
 const FORMATI = {
   testa: { 6: '#,##0.00' },
   blocco: { 1: '#,##0.00#', 2: '#,##0.00', 5: '#,##0.00' },
   secondarie: { 3: '#,##0.00#', 5: '#,##0.00', 6: '#,##0', 7: '#,##0.00' },
 };
 
+/** Le righe del foglio Excel, dalle stesse sezioni del PDF. tipi[i] dice il blocco della riga i. */
 export function righePassiva(result, tipi = []) {
-  const canale = NOMI[result.tipologia] || result.tipologia;
   const aoa = [];
-  // ogni riga registra in che blocco sta, per i formati
   let tipo = 'testa';
   const riga = (r) => { tipi.push(tipo); aoa.push(r); };
-  riga([canale, `${result.mese} ${result.anno}`, null, null, null, 'TOTALE', r2(result.totali.totale_complessivo)]);
+  riga([NOMI[result.tipologia] || result.tipologia, `${result.mese} ${result.anno}`, null, null, null, 'TOTALE', r2(result.totali.totale_complessivo)]);
   riga([]);
-
-  const blocco = (titolo, colonnaPrezzo, fornitori, ambito, totale) => {
-    tipo = 'blocco';
-    riga([titolo, 'Totale [t]', colonnaPrezzo, 'Unità', 'EER', 'TOTALE [€]', 'Note']);
-    for (const f of fornitori || []) {
-      riga([f.fornitore, r3(f.totale_tonnellate), null, null, EER, r2(f.totale_euro), f.interno ? 'interno, non fatturato' : null]);
-      for (const r of f.righe || []) {
-        const conferenti = (r.di_cui || []).map(d => `${d.fornitore} ${r3(d.tonnellate)} t`).join('; ');
-        riga([`   ${ambito(r)}`, r3(r.tonnellate), r.tariffa_valore || 0, unita(r.unita_misura), null, r2(r.importo), [r.note, conferenti && `di cui conferito da: ${conferenti}`].filter(Boolean).join(' — ') || null]);
-      }
-      for (const d of f.di_cui || []) riga([`   di cui ${d.fornitore}`, r3(d.tonnellate), null, null, null, null, 'subraccoglitore, fatturato dal principale']);
-    }
-    riga(['Totale complessivo', r3((fornitori || []).reduce((s, f) => s + (f.totale_tonnellate || 0), 0)), null, null, null, r2(totale), null]);
+  for (const s of sezioniPassiva(result)) {
+    tipo = s.tipo;
+    riga(s.colonne.map(c => c.titolo));
+    for (const r of s.righe) riga(r.celle);
     riga([]);
-  };
-  blocco('RACCOGLITORI', 'Costo di Raccolta', result.raccoglitori, ambitoRaccolta, result.totali.raccoglitori);
-  blocco('IMPIANTI \\ STOCCAGGI', 'Costo', result.impianti_stoccaggi, ambitoImpianto, result.totali.impianti_stoccaggi);
-
-  tipo = 'secondarie';
-  riga(['PRODUTTORE', 'TRASPORTATORE', 'DESTINATARIO', 'PESO [t]', "UNITA' DI MISURA", 'COSTO', 'nr. di viaggi', 'TOTALE [€]', 'Fatturato da', 'Note']);
-  for (const f of result.trasporti_secondaria || []) {
-    for (const r of f.righe || []) {
-      riga([r.stoccaggio, r.trasportatore || f.fornitore, r.destinazione, r3(r.tonnellate), unita(r.unita_misura), r.tariffa_valore || 0, r.viaggi || 0, r2(r.importo), f.fornitore, r.note || null]);
-    }
   }
-  riga(['Totale complessivo', null, null, r3((result.trasporti_secondaria || []).reduce((s, f) => s + (f.totale_tonnellate || 0), 0)), null, null, null, r2(result.totali.trasporti_secondaria)]);
-
   tipo = 'testa';
   if ((result.anomalie || []).length) {
-    riga([]);
     riga(['ANOMALIE DA GUARDARE PRIMA DI PAGARE']);
     for (const a of result.anomalie) riga([a.descrizione, a.tonnellate ? r3(a.tonnellate) : null]);
   }
   return aoa;
 }
+
+const nomeFile = (result, estensione) => `Fatturazione_passiva_${result.tipologia}_${result.mese}_${result.anno}${estensione ? `.${estensione}` : ''}`;
 
 export function exportFatturazionePassiva(result) {
   const tipi = [];
@@ -79,7 +111,26 @@ export function exportFatturazionePassiva(result) {
   ws['!cols'] = [{ wch: 46 }, { wch: 26 }, { wch: 24 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 28 }, { wch: 60 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, NOMI[result.tipologia] || 'Passiva');
-  const nome = `Fatturazione_passiva_${result.tipologia}_${result.mese}_${result.anno}.xlsx`;
-  XLSX.writeFile(wb, nome);
-  return nome;
+  XLSX.writeFile(wb, nomeFile(result, 'xlsx'));
+  return nomeFile(result, 'xlsx');
+}
+
+// Lo stesso report in PDF: stesse sezioni, stesse righe, stessi totali
+export async function exportFatturazionePassivaPdf(result) {
+  const { esportaSezioniPdf } = await import('@/lib/esportaTabella');
+  await esportaSezioniPdf({
+    nomeFile: nomeFile(result),
+    intestazione: 'SMOCO S.r.l.  ·  COMMESSA ECOTYRE  ·  FATTURAZIONE PASSIVA',
+    titolo: `Fatturazione passiva ${NOMI_TITOLO[result.tipologia] || result.tipologia} — ${result.mese} ${result.anno}`,
+    sottotitolo: 'Costi verso i fornitori, per prestazione',
+    riepilogo: [
+      { etichetta: 'Raccoglitori', valore: r2(result.totali.raccoglitori), tipo: 'euro' },
+      { etichetta: 'Impianti e stoccaggi', valore: r2(result.totali.impianti_stoccaggi), tipo: 'euro' },
+      { etichetta: 'Trasporto delle secondarie', valore: r2(result.totali.trasporti_secondaria), tipo: 'euro' },
+      { etichetta: `Totale ${NOMI_TITOLO[result.tipologia] || ''}`, valore: r2(result.totali.totale_complessivo), tipo: 'euro' },
+    ],
+    sezioni: sezioniPassiva(result),
+    note: (result.anomalie || []).map(a => a.descrizione),
+  });
+  return nomeFile(result, 'pdf');
 }

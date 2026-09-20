@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Calculator, CheckCircle2, XCircle, ExternalLink, FileSpreadsheet } from 'lucide-react';
+import { Loader2, Calculator, CheckCircle2, XCircle, ExternalLink, FileSpreadsheet, FileDown } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
 import PassivaRaccoglitoriTable from './PassivaRaccoglitoriTable';
 import PassivaImpiantiTable from './PassivaImpiantiTable';
@@ -11,7 +11,7 @@ import PassivaSecondariaTable from './PassivaSecondariaTable';
 import PassivaAnomalie from './PassivaAnomalie';
 import PassivaFormulariRipartiti from './PassivaFormulariRipartiti';
 import PassivaQualifica from './PassivaQualifica';
-import { exportFatturazionePassiva } from '@/lib/passivaExport';
+import { exportFatturazionePassiva, exportFatturazionePassivaPdf } from '@/lib/passivaExport';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const ANNI = [2024, 2025, 2026];
@@ -63,7 +63,11 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
         {/* Un file per canale, come nell'attiva: rete, ACI ed extra raccolta non si sommano */}
         <Button variant="outline" disabled={!result || loading} title={!result ? 'Prima calcola il mese' : ''}
           onClick={() => { try { exportFatturazionePassiva(result); } catch (e) { setError(e.message || 'Esportazione non riuscita'); } }}>
-          <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Esporta {TIPOLABEL[tipologia]}
+          <FileSpreadsheet className="w-4 h-4 mr-1.5" /> {TIPOLABEL[tipologia]} in Excel
+        </Button>
+        <Button variant="outline" disabled={!result || loading} title={!result ? 'Prima calcola il mese' : ''}
+          onClick={async () => { try { await exportFatturazionePassivaPdf(result); } catch (e) { setError(e.message || 'Esportazione non riuscita'); } }}>
+          <FileDown className="w-4 h-4 mr-1.5" /> {TIPOLABEL[tipologia]} in PDF
         </Button>
         {tipologia === 'EXTRA_RACCOLTA' && (
           <Link to="/extra-raccolta" className="ml-auto text-sm text-primary hover:underline inline-flex items-center gap-1">

@@ -36,6 +36,10 @@ function testoCella(valore, tipo) {
 
 const nomeSicuro = (s) => String(s).replace(/[\\/:*?"<>|]+/g, '-').trim();
 
+// Il font dei PDF (Helvetica) non ha frecce, puntini di sospensione e simili: lasciati
+// cosi' diventano segni a caso e allargano la riga. Si scrivono con caratteri che ha.
+const perPdf = (t) => String(t ?? '').replace(/[→➜➔]/g, '>').replace(/←/g, '<').replace(/…/g, '...').replace(/[≤]/g, '<=').replace(/[≥]/g, '>=').replace(/[⋮]/g, ':').replace(/[\u2028\u2029]/g, ' ');
+
 /** Foglio Excel con titolo, intestazioni, righe e totali formattati. */
 export async function esportaTabellaExcel({ nomeFile, foglio = 'Dettaglio', titolo, sottotitolo, colonne, righe, totali }) {
   const XLSX = await import('xlsx');
@@ -153,7 +157,7 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
     let x = M;
     colonne.forEach((c, i) => {
       const destra = NUMERICI.has(c.tipo);
-      const t = doc.splitTextToSize(celle[i], larghezze[i] - 3)[0] || '';
+      const t = doc.splitTextToSize(perPdf(celle[i]), larghezze[i] - 3)[0] || '';
       doc.text(t, destra ? x + larghezze[i] - 2 : x + 2, y + altezza - 1.9, { align: destra ? 'right' : 'left' });
       x += larghezze[i];
     });
@@ -181,6 +185,117 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
     y += 1.5;
     riga(colonne.map((c, i) => (i === 0 ? totali.etichetta : (totali.valori[i] !== undefined ? testoCella(totali.valori[i], c.tipo) : ''))),
       { sfondo: C.chiaro, grassetto: true, coloreTesto: C.scuro, altezza: 7 });
+  }
+  piede();
+  doc.save(`${nomeSicuro(nomeFile)}.pdf`);
+}
+
+/**
+ * PDF A4 orizzontale a SEZIONI: piu' tabelle una sotto l'altra, ciascuna col suo
+ * titolo e le sue colonne (la fatturazione passiva ne ha tre: raccoglitori,
+ * impianti e stoccaggi, trasporto delle secondarie). Stessa grafica di
+ * esportaTabellaPdf. Le intestazioni della sezione si ripetono a ogni cambio pagina.
+ *
+ * sezioni: [{ titolo, colonne: [{ titolo, tipo, peso }], righe: [{ celle: [...], stile?: 'gruppo'|'totale' }] }]
+ * riepilogo: [{ etichetta, valore }] mostrato sotto la testata; note: [testo] in coda.
+ */
+export async function esportaSezioniPdf({ nomeFile, intestazione, titolo, sottotitolo, sezioni, riepilogo, note }) {
+  const { jsPDF } = await import('jspdf');
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const W = doc.internal.pageSize.getWidth();
+  const H = doc.internal.pageSize.getHeight();
+  const M = 10;
+  const esportato = new Date().toLocaleString('it-IT');
+  let y = 0;
+  let pagina = 1;
+
+  const testata = () => {
+    doc.setFillColor(...C.scuro); doc.rect(0, 0, W, 20, 'F');
+    doc.setFillColor(...C.medio); doc.rect(0, 20, W, 1.2, 'F');
+    doc.setTextColor(...C.bianco);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
+    doc.text(intestazione || 'SMOCO S.r.l.  ·  COMMESSA ECOTYRE', M, 7.5);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14);
+    doc.text(titolo, M, 15);
+    if (sottotitolo) { doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.text(sottotitolo, W - M, 15, { align: 'right' }); }
+    y = 27;
+  };
+  const piede = () => {
+    doc.setDrawColor(...C.bordo); doc.setLineWidth(0.2); doc.line(M, H - 9, W - M, H - 9);
+    doc.setTextColor(...C.grigio); doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+    doc.text(`Esportato il ${esportato}  ·  Pagina ${pagina}`, W - M, H - 5, { align: 'right' });
+  };
+  const nuovaPagina = () => { piede(); doc.addPage(); pagina++; testata(); };
+
+  testata();
+  if (riepilogo && riepilogo.length) {
+    const larghezza = (W - 2 * M) / riepilogo.length;
+    riepilogo.forEach((r, i) => {
+      doc.setFillColor(...C.chiaro); doc.roundedRect(M + i * larghezza, y, larghezza - 2, 13, 1, 1, 'F');
+      doc.setTextColor(...C.grigio); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.2); doc.text(r.etichetta, M + i * larghezza + 3, y + 4.6);
+      doc.setTextColor(...C.scuro); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(typeof r.valore === 'number' ? testoCella(r.valore, r.tipo || 'euro') : perPdf(r.valore), M + i * larghezza + 3, y + 10.4);
+    });
+    y += 17;
+  }
+
+  for (const s of sezioni) {
+    const pesoTotale = s.colonne.reduce((t, c) => t + (c.peso || 1), 0);
+    const larghezze = s.colonne.map(c => ((W - 2 * M) * (c.peso || 1)) / pesoTotale);
+    const intestazioni = () => {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7.2);
+      const titoli = s.colonne.map((c, i) => doc.splitTextToSize(perPdf(c.titolo), larghezze[i] - 3).slice(0, 2));
+      const alta = titoli.some(t => t.length > 1) ? 10.5 : 8;
+      doc.setFillColor(...C.scuro); doc.roundedRect(M, y, W - 2 * M, alta, 1, 1, 'F');
+      doc.setTextColor(...C.bianco);
+      let x = M;
+      s.colonne.forEach((c, i) => {
+        const destra = NUMERICI.has(c.tipo);
+        titoli[i].forEach((t, n) => doc.text(t, destra ? x + larghezze[i] - 2 : x + 2, y + (titoli[i].length > 1 ? 4.2 : alta / 2 + 1.2) + n * 3.3, { align: destra ? 'right' : 'left' }));
+        x += larghezze[i];
+      });
+      y += alta;
+    };
+    // il titolo della sezione non resta solo in fondo alla pagina
+    if (y + 26 > H - 12) nuovaPagina();
+    doc.setTextColor(...C.scuro); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+    doc.text(s.titolo, M, y + 4); y += 7;
+    intestazioni();
+    if (!s.righe.length) s.righe = [{ celle: s.colonne.map((c, i) => (i === 0 ? 'Nessuna riga' : null)) }];
+    s.righe.forEach((r, n) => {
+      doc.setFont('helvetica', r.stile ? 'bold' : 'normal'); doc.setFontSize(7.4);
+      const testi = s.colonne.map((c, i) => {
+        const v = r.celle[i];
+        return v === null || v === undefined || v === '' ? [] : doc.splitTextToSize(perPdf(testoCella(v, c.tipo)), larghezze[i] - 3).slice(0, 3);
+      });
+      const linee = Math.max(1, ...testi.map(t => t.length));
+      const altezza = (r.stile === 'totale' ? 7 : 6) + (linee - 1) * 3.3;
+      if (y + altezza > H - 12) { nuovaPagina(); doc.setTextColor(...C.scuro); doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text(`${s.titolo} (segue)`, M, y + 4); y += 7; intestazioni(); }
+      const sfondo = r.stile === 'totale' ? C.chiaro : r.stile === 'gruppo' ? C.zebra : null;
+      if (sfondo) { doc.setFillColor(...sfondo); doc.rect(M, y, W - 2 * M, altezza, 'F'); }
+      doc.setFont('helvetica', r.stile ? 'bold' : 'normal'); doc.setFontSize(7.4);
+      doc.setTextColor(...(r.stile === 'totale' ? C.scuro : C.testo));
+      let x = M;
+      s.colonne.forEach((c, i) => {
+        const destra = NUMERICI.has(c.tipo);
+        testi[i].forEach((t, k) => doc.text(t, destra ? x + larghezze[i] - 2 : x + 2, y + 4.1 + k * 3.3, { align: destra ? 'right' : 'left' }));
+        x += larghezze[i];
+      });
+      doc.setDrawColor(...C.bordo); doc.setLineWidth(0.1); doc.line(M, y + altezza, W - M, y + altezza);
+      y += altezza;
+      void n;
+    });
+    y += 6;
+  }
+
+  if (note && note.length) {
+    if (y + 12 > H - 12) nuovaPagina();
+    doc.setTextColor(...C.ambra); doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text('Anomalie da guardare prima di pagare', M, y + 4); y += 8;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.6); doc.setTextColor(...C.testo);
+    for (const n of note) {
+      const righe = doc.splitTextToSize(`•  ${perPdf(n)}`, W - 2 * M);
+      if (y + righe.length * 3.8 > H - 12) nuovaPagina();
+      doc.text(righe, M, y + 3); y += righe.length * 3.8 + 1.2;
+    }
   }
   piede();
   doc.save(`${nomeSicuro(nomeFile)}.pdf`);

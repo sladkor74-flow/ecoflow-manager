@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
-import { Loader2, Download, FileSpreadsheet, CheckCircle, AlertTriangle, ArrowRight } from 'lucide-react';
-import { exportFatturazioneAttiva } from '@/lib/fatturazioneExport';
+import { Loader2, Download, FileSpreadsheet, FileDown, CheckCircle, AlertTriangle, ArrowRight } from 'lucide-react';
+import { exportFatturazioneAttiva, exportFatturazioneAttivaPdf, nomeFileAttiva } from '@/lib/fatturazioneExport';
 
 const TIPS = [
   { key: 'RETE', label: 'Rete' },
@@ -44,14 +44,20 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
     return window.confirm(`${perche}\n\nEsportare comunque?`);
   };
 
-  const esporta = async (tipologia) => {
+  // Excel o PDF: stesse colonne e stesse righe, un file per canale
+  const scrivi = async (tipologia, righe, formato) => {
+    if (formato === 'pdf') await exportFatturazioneAttivaPdf(tipologia, righe, periodo.anno, periodo.mese);
+    else exportFatturazioneAttiva(tipologia, righe, periodo.anno, periodo.mese);
+    return nomeFileAttiva(tipologia, periodo.anno, periodo.mese, formato === 'pdf' ? 'pdf' : 'xlsx');
+  };
+
+  const esporta = async (tipologia, formato = 'excel') => {
     if (!consenso()) return;
     setExporting(true);
     try {
       const righe = data[tipologia]?.righe || [];
       if (righe.length === 0) { alert(`Nessuna riga da esportare per ${tipologia}`); setExporting(false); return; }
-      const nomeFile = `Fatturazione_${tipologia}_${periodo.mese}_${periodo.anno}.xlsx`;
-      exportFatturazioneAttiva(tipologia, righe, periodo.anno, periodo.mese);
+      const nomeFile = await scrivi(tipologia, righe, formato);
       const doc = data[tipologia]?.documento;
       await base44.functions.invoke('registraEsportazione', {
         tipologia, anno: periodo.anno, mese: periodo.mese,
@@ -62,15 +68,14 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
     setExporting(false);
   };
 
-  const esportaTutto = async () => {
+  const esportaTutto = async (formato = 'excel') => {
     if (!consenso()) return;
     setExporting(true);
     for (const t of TIPS) {
       try {
         const righe = data[t.key]?.righe || [];
         if (righe.length === 0) continue;
-        const nomeFile = `Fatturazione_${t.key}_${periodo.mese}_${periodo.anno}.xlsx`;
-        exportFatturazioneAttiva(t.key, righe, periodo.anno, periodo.mese);
+        const nomeFile = await scrivi(t.key, righe, formato);
         const doc = data[t.key]?.documento;
         await base44.functions.invoke('registraEsportazione', {
           tipologia: t.key, anno: periodo.anno, mese: periodo.mese,
@@ -86,7 +91,7 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
     <div className="space-y-4">
       <div>
         <h2 className="font-heading font-semibold mb-2">Esportazione Excel — {periodo.mese} {periodo.anno}</h2>
-        <p className="text-sm text-muted-foreground mb-3">Genera i file Excel nel formato dei modelli SMOCO. I file vengono scaricati automaticamente.</p>
+        <p className="text-sm text-muted-foreground mb-3">Un file per canale, in Excel o in PDF, con le colonne dei modelli SMOCO: i due formati dicono le stesse cose. I file vengono scaricati automaticamente.</p>
         {prefattura.stato !== 'caricamento' && (
           <div className={`mb-3 border rounded-lg p-3 text-sm flex flex-wrap items-center gap-2 ${prefattura.stato === 'coincide' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
             {prefattura.stato === 'coincide' ? <CheckCircle className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
@@ -101,15 +106,28 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
             )}
           </div>
         )}
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {TIPS.map(t => (
-            <Button key={t.key} variant="outline" onClick={() => esporta(t.key)} disabled={exporting || !data[t.key]?.documento}>
-              <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Esporta {t.label}
-            </Button>
+            <div key={t.key} className="border rounded-lg p-3">
+              <p className="text-sm font-medium mb-2">{t.label}</p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => esporta(t.key, 'excel')} disabled={exporting || !data[t.key]?.documento}>
+                  <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Excel
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => esporta(t.key, 'pdf')} disabled={exporting || !data[t.key]?.documento}>
+                  <FileDown className="w-4 h-4 mr-1.5" /> PDF
+                </Button>
+              </div>
+            </div>
           ))}
-          <Button onClick={esportaTutto} disabled={exporting}>
+        </div>
+        <div className="flex flex-wrap gap-2 mt-3">
+          <Button onClick={() => esportaTutto('excel')} disabled={exporting}>
             {exporting ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Download className="w-4 h-4 mr-1.5" />}
-            Esporta Tutto
+            Tutti e tre in Excel
+          </Button>
+          <Button variant="outline" onClick={() => esportaTutto('pdf')} disabled={exporting}>
+            <FileDown className="w-4 h-4 mr-1.5" /> Tutti e tre in PDF
           </Button>
         </div>
       </div>
