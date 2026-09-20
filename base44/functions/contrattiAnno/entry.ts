@@ -114,6 +114,7 @@ export default async function(req) {
             id: contratto.id, data_inizio: contratto.data_inizio, data_fine: contratto.data_fine,
             quantitativo_previsto_t: contratto.quantitativo_previsto_t, condizioni_pagamento: contratto.condizioni_pagamento,
             file_nome: contratto.file_nome, file_uri: contratto.file_uri, generato_il: contratto.generato_il,
+            inviato_il: contratto.inviato_il, controfirmato_il: contratto.controfirmato_il,
             modello_nome: contratto.modello_nome, note: contratto.note,
           } : null,
           precedente_id: precedente ? precedente.id : null,

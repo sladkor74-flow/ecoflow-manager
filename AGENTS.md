@@ -309,3 +309,23 @@ l'utente; la registrazione finale la chiude. Una riga rimasta `in_corso` e' la
 traccia di un caricamento interrotto (archivio forse incompleto), e blocca per
 dieci minuti un secondo caricamento dello stesso archivio da parte di un altro
 utente. Chi legge «l'ultimo caricamento» esclude `errore` e `in_corso`.
+
+### La dashboard e l'elenco unico delle cose da gestire
+
+`base44/shared/cruscotto.ts`, funzione `cruscottoOperativo`, componente
+`src/components/dashboard/Cruscotto.jsx`. Un solo elenco, ordinato per gravita',
+di cio' che richiede attenzione, ogni voce col collegamento a dove si risolve.
+Legge **solo archivi piccoli** (alert, registro dei caricamenti, ordini aperti,
+documenti di fatturazione, prefatture, riepilogo della qualifica, target,
+richieste del consorzio): chi aggiunge un controllo non deve farle rileggere le
+primarie. Le anomalie di prezzo delle fatturazioni arrivano dal margine, che la
+pagina chiede dopo e solo per l'amministratore. Un controllo nuovo si aggiunge
+li', con un caso in `prove/cruscotto.mjs`.
+
+Il target annuo dell'impianto sta sia in Giacenze sia in Target & Status perche'
+servono a cose diverse, ma deve essere lo stesso numero: l'unico confronto e'
+`base44/shared/targetImpianti.ts` e una divergenza si dice sempre (Giacenze,
+proiezione, alert critico, dashboard).
+
+I contratti passano da generato a inviato a controfirmato, con la data di ogni
+passaggio: un contratto generato non e' un contratto fatto.

@@ -1,5 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { annoOrdine, giornoOrdine } from "../../shared/movimenti.ts";
+import { annoOrdine, giornoOrdine, eTerminato } from "../../shared/movimenti.ts";
 import { MESI } from "../../shared/raccoltoCalculator.ts";
 import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
 import { matchesFilter, matchesFilterString, matchesFilterLower } from "../../shared/multiFilter.ts";
@@ -24,7 +24,7 @@ export default async function(req) {
     const all = await fetchAll(base44.asServiceRole.entities.Secondaria);
 
     // Applica filtri (supporto multi-selezione via array)
-    const filtered = all.filter(r => {
+    const filtrati = all.filter(r => {
       if (!matchesFilter(canaleDi(r) === 'ACI' ? 'ACI' : 'Rete', filters.canale)) return false;
       if (!matchesFilter((r.stoccaggio || '').trim(), filters.stoccaggio)) return false;
       if (!matchesFilter((r.destinazione || '').trim(), filters.destinazione)) return false;
@@ -49,6 +49,11 @@ export default async function(req) {
     });
 
     // KPI
+    // I conteggi e la matrice parlano di trasporti fatti: senza un filtro sullo stato
+    // contano solo i terminati. Prima entravano anche i cancellati, e il numero dei
+    // trasporti secondari non tornava con nessun altro modulo.
+    const conStato = Array.isArray(filters.stato) ? filters.stato.length > 0 : !!filters.stato;
+    const filtered = conStato ? filtrati : filtrati.filter(eTerminato);
     let total_orders = filtered.length;
     let total_peso_kg = 0;
     let total_quantita = 0;

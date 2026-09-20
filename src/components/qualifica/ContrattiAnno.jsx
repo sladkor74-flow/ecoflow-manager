@@ -32,6 +32,25 @@ export default function ContrattiAnno({ anno, isAdmin }) {
   const [modelli, setModelli] = useState(false); // dialogo modelli
   const [occupato, setOccupato] = useState(false);
 
+  // Un contratto generato non e' un contratto fatto: va inviato al fornitore e
+  // deve tornare controfirmato. I due passaggi erano previsti negli stati ma
+  // nessuno poteva segnarli, e ogni contratto restava "generato" per sempre.
+  const avanza = async (riga, nome) => {
+    const passo = riga.stato === 'generato' ? { stato: 'inviato', campo: 'inviato_il', testo: 'inviato al fornitore' }
+      : riga.stato === 'inviato' ? { stato: 'controfirmato', campo: 'controfirmato_il', testo: 'tornato controfirmato' } : null;
+    if (!passo || !riga.contratto_id) return;
+    const oggi = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
+    const giorno = window.prompt(`${nome}: in che giorno il contratto è ${passo.testo}? (AAAA-MM-GG)`, oggi);
+    if (giorno === null) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(giorno.trim()) || giorno.trim() > oggi) { setErrore('La data va scritta come AAAA-MM-GG e non può essere futura.'); return; }
+    setOccupato(true);
+    try {
+      await base44.entities.ContrattoFornitore.update(riga.contratto_id, { stato: passo.stato, [passo.campo]: giorno.trim() });
+      await carica();
+    } catch (e) { setErrore((e && e.data && e.data.error) || e.message || 'Il passaggio non è stato salvato'); }
+    setOccupato(false);
+  };
+
   const carica = useCallback(async () => {
     setCaricando(true);
     setErrore('');
@@ -130,6 +149,13 @@ export default function ContrattiAnno({ anno, isAdmin }) {
                               <div className="text-[11px] text-muted-foreground mt-0.5">c&apos;è il {r.precedente.anno}</div>
                             )}
                           </button>
+                          {r.contratto && r.contratto.inviato_il && <div className="text-[11px] text-muted-foreground">inviato il {dataIt(r.contratto.inviato_il)}</div>}
+                          {r.contratto && r.contratto.controfirmato_il && <div className="text-[11px] text-emerald-700">controfirmato il {dataIt(r.contratto.controfirmato_il)}</div>}
+                          {isAdmin && (r.stato === 'generato' || r.stato === 'inviato') && (
+                            <button type="button" disabled={occupato} onClick={() => avanza(r, s.nome)} className="block text-[11px] text-primary hover:underline mt-0.5">
+                              {r.stato === 'generato' ? 'segna inviato' : 'segna controfirmato'}
+                            </button>
+                          )}
                         </td>
                       );
                     })}
