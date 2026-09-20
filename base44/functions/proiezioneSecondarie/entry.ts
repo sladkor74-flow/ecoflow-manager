@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
+import { fineProgrammazione, avvisoFineProgrammazione } from "../../shared/fineProgrammazione.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
@@ -198,7 +199,7 @@ export default async function(req) {
     const insieme = proiettaInsieme(impianti.map(imp => {
       const chiave = normalizzaRagioneSociale(imp.nome_impianto);
       return {
-        impianto: { nome: nomeSito.get(chiave) || imp.nome_impianto, target_kg: Number(imp.target) || 0, data_fine: imp.data_fine || `${anno}-12-18` },
+        impianto: { nome: nomeSito.get(chiave) || imp.nome_impianto, target_kg: Number(imp.target) || 0, data_fine: imp.data_fine || fineProgrammazione(anno).data },
         dati: {
           conferito_primaria_per_mese: primariaPerSito.get(chiave) || {},
           conferito_secondaria_per_mese: secondariaInSito.get(chiave) || {},
@@ -221,7 +222,8 @@ export default async function(req) {
       if (altroTarget !== null && Math.abs(altroTarget - (Number(imp.target) || 0)) >= 1000) {
         avvisi.push(`Il target di questo impianto non coincide fra i moduli: qui vale ${Math.round((Number(imp.target) || 0) / 1000)} t, nelle Giacenze ${Math.round(altroTarget / 1000)} t. La proiezione usa il primo: correggi quello sbagliato, perche' i due numeri devono coincidere.`);
       }
-      return { ...p, avvisi, impianto_id: imp.id, impianto_registrato: imp.nome_impianto, data_fine: imp.data_fine || `${anno}-12-18` };
+      if (!imp.data_fine && avvisoFineProgrammazione(anno)) avvisi.push(avvisoFineProgrammazione(anno));
+      return { ...p, avvisi, impianto_id: imp.id, impianto_registrato: imp.nome_impianto, data_fine: imp.data_fine || fineProgrammazione(anno).data };
     });
 
     return Response.json({

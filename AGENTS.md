@@ -280,3 +280,32 @@ li', e non riscrive la regola:
 Anche «oggi» e' il giorno italiano (`oggiRoma()`), non `new Date()` del server.
 Gli specchi in `src/lib` devono restare identici agli originali: lo controlla
 `prove/specchi.mjs`. **Prima di spingere: `npm run lint` e `npm run prove`.**
+
+### Decisioni della direzione del 20/09/2026 sulla fatturazione attiva
+
+- Nel 2026 a Ecotyre si fattura a **202 euro la tonnellata** sulla **rete** e
+  sull'**extra raccolta**; l'**ACI** ha le sue tariffe per regione. Nei report il
+  prezzo si scrive a tonnellata (la prefattura del portale lo scrive al chilo,
+  0,202: e' lo stesso prezzo).
+- I report per l'amministrazione sono **tre, separati**: rete, ACI, extra
+  raccolta. Le loro colonne non si toccano senza l'assenso dell'amministrazione.
+- La prefattura del portale copre **solo rete e ACI**. L'extra raccolta non e'
+  gestita a portale: il suo report nasce da quello che si scrive a mano nel modulo
+  Extra Raccolta (formulario, prezzo, eventuali sovracosti di raccolta e di
+  lavorazione).
+- Le **terziarie** che il portale paga in prefattura (ordini TER, 8 euro/t con
+  allegato VII, 10 col formulario) restano **fuori** dalla fatturazione attiva:
+  nel confronto stanno in una sezione a parte, pronta per quando servira', e non
+  contano come differenza.
+- Il mese di una prefattura si ricava dal file (date di fine trasporto): caricata
+  sul mese sbagliato viene rifiutata.
+- La fine della programmazione delle secondarie al **18 dicembre vale solo per il
+  2026** (`base44/shared/fineProgrammazione.ts`): per gli altri anni va comunicata.
+
+### Il registro dei caricamenti
+
+La preparazione di un caricamento apre una riga `in_corso` in `UploadLog` con
+l'utente; la registrazione finale la chiude. Una riga rimasta `in_corso` e' la
+traccia di un caricamento interrotto (archivio forse incompleto), e blocca per
+dieci minuti un secondo caricamento dello stesso archivio da parte di un altro
+utente. Chi legge «l'ultimo caricamento» esclude `errore` e `in_corso`.

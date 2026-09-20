@@ -33,7 +33,7 @@ export default function PredittivitaSecondarie() {
   // Ricalcolo automatico a ogni nuovo caricamento Excel
   useEffect(() => {
     const unsubscribe = base44.entities.UploadLog.subscribe((event) => {
-      if (event.type === 'create') loadRef.current();
+      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso') loadRef.current();
     });
     return unsubscribe;
   }, []);

@@ -74,7 +74,7 @@ export default function Terziarie() {
   // Auto-refresh on new uploads
   useEffect(() => {
     const unsub = base44.entities.UploadLog.subscribe((event) => {
-      if (event.type === 'create') loadData();
+      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso') loadData();
     });
     return unsub;
   }, [loadData]);

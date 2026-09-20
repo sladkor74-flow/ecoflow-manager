@@ -160,7 +160,7 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null) {
   const ultimi = {};
   await Promise.all(tipi.map(async (t) => {
     const righe = await svc.UploadLog.filter({ tipo_file: t }, '-created_date', 5);
-    const buono = (righe || []).find(r => r.esito !== 'errore');
+    const buono = (righe || []).find(r => r.esito !== 'errore' && r.esito !== 'in_corso');
     if (buono) ultimi[t] = { data: soloData(buono.created_date), nome_file: nome(buono.nome_file) };
   }));
 

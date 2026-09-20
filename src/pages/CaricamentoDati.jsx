@@ -223,6 +223,7 @@ export default function CaricamentoDati() {
                   <th className="text-left px-4 py-3 font-medium">Data</th>
                   <th className="text-left px-4 py-3 font-medium">Tipo</th>
                   <th className="text-left px-4 py-3 font-medium">File</th>
+                  <th className="text-left px-4 py-3 font-medium">Da</th>
                   <th className="text-right px-4 py-3 font-medium">Righe</th>
                   <th className="text-center px-4 py-3 font-medium">Esito</th>
                 </tr>
@@ -233,15 +234,19 @@ export default function CaricamentoDati() {
                     <td className="px-4 py-3 text-muted-foreground">{dataServer(log.created_date).toLocaleString('it-IT')}</td>
                     <td className="px-4 py-3 font-medium">{log.tipo_file}</td>
                     <td className="px-4 py-3">{log.nome_file}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{log.utente || '—'}</td>
                     <td className="px-4 py-3 text-right">{formatIntero(log.righe_importate)}</td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                        log.esito === 'successo' ? 'bg-green-100 text-green-700' :
-                        log.esito === 'parziale' ? 'bg-amber-100 text-amber-700' :
-                        'bg-red-100 text-red-700'
-                      }`}>
-                        {log.esito}
-                      </span>
+                      {(() => {
+                        // una riga rimasta "in corso" oltre dieci minuti e' un caricamento interrotto
+                        const interrotto = log.esito === 'in_corso' && Date.now() - dataServer(log.created_date).getTime() > 10 * 60 * 1000;
+                        const classe = log.esito === 'successo' ? 'bg-green-100 text-green-700' : log.esito === 'parziale' ? 'bg-amber-100 text-amber-700' : log.esito === 'in_corso' && !interrotto ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700';
+                        return (
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${classe}`} title={interrotto ? "Il caricamento non è mai stato concluso: l'archivio può essere vuoto o incompleto. Ricarica il file." : log.messaggio || ''}>
+                            {interrotto ? 'interrotto: ricarica il file' : log.esito === 'in_corso' ? 'in corso' : log.esito}
+                          </span>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}

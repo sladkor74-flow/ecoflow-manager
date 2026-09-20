@@ -61,7 +61,7 @@ export default function PredittivitaImpiantiManager({ onReload }) {
   const [loading, setLoading] = useState(true);
   const [showImpiantoForm, setShowImpiantoForm] = useState(false);
   const [fornitoreFormFor, setFornitoreFormFor] = useState(null);
-  const [impiantoForm, setImpiantoForm] = useState({ nome_impianto: '', target: 0, data_fine: `${new Date().getFullYear()}-12-18` });
+  const [impiantoForm, setImpiantoForm] = useState({ nome_impianto: '', target: 0, data_fine: new Date().getFullYear() === 2026 ? '2026-12-18' : '' });
   const [fornitoreForm, setFornitoreForm] = useState({ nome: '', ruolo: 'raccoglitore', plafond_stoccaggio_kg: 0 });
 
   const load = async () => {
@@ -88,7 +88,7 @@ export default function PredittivitaImpiantiManager({ onReload }) {
   const addImpianto = async () => {
     if (!impiantoForm.nome_impianto) return;
     await base44.entities.ImpiantoTargetSecondaria.create({ ...impiantoForm, target: Number(impiantoForm.target), stato: 'attivo' });
-    setImpiantoForm({ nome_impianto: '', target: 0, data_fine: `${new Date().getFullYear()}-12-18` });
+    setImpiantoForm({ nome_impianto: '', target: 0, data_fine: new Date().getFullYear() === 2026 ? '2026-12-18' : '' });
     setShowImpiantoForm(false); load(); onReload();
   };
 

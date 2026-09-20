@@ -81,7 +81,7 @@ export default function Secondarie() {
 
   useEffect(() => {
     const unsub = base44.entities.UploadLog.subscribe((event) => {
-      if (event.type === 'create' && event.data?.tipo_file === 'secondarie') loadData();
+      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso' && event.data?.tipo_file === 'secondarie') loadData();
     });
     return unsub;
   }, [loadData]);

@@ -14,7 +14,7 @@ const messaggio = (e) => e?.response?.data?.error || e?.data?.error || e.message
 
 function Tabella({ titolo, spiega, colonne, righe, tono = 'amber' }) {
   if (!righe || righe.length === 0) return null;
-  const c = tono === 'red' ? 'border-red-200 bg-red-50/60' : 'border-amber-200 bg-amber-50/60';
+  const c = tono === 'red' ? 'border-red-200 bg-red-50/60' : tono === 'grigio' ? 'border-border bg-muted/30' : 'border-amber-200 bg-amber-50/60';
   return (
     <div className={`border rounded-lg p-3 ${c}`}>
       <p className="text-sm font-semibold">{titolo} ({righe.length})</p>
@@ -125,15 +125,17 @@ export default function PrefatturaEcotyre({ periodo, isAdmin, onEsito }) {
               </tr></thead>
               <tbody>
                 {c.canali.map(x => {
-                  const d = x.prefattura.euro === null ? null : Math.round((x.prefattura.euro - x.gestionale.euro) * 100) / 100;
+                  // l'extra raccolta non passa dalla prefattura: niente zeri e niente differenza, che non esistono
+                  const fuori = x.fuori_prefattura;
+                  const d = fuori || x.prefattura.euro === null ? null : Math.round((x.prefattura.euro - x.gestionale.euro) * 100) / 100;
                   return (
                     <tr key={x.canale} className="border-t">
                       <td className="px-3 py-1.5 font-medium">{NOMI[x.canale]}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{formatIntero(x.prefattura.ordini)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{fuori ? '—' : formatIntero(x.prefattura.ordini)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{formatIntero(x.gestionale.ordini)}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{kg(x.prefattura.kg)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{fuori ? '—' : kg(x.prefattura.kg)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{kg(x.gestionale.kg)}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{euro(x.prefattura.euro)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{fuori ? '—' : euro(x.prefattura.euro)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{euro(x.gestionale.euro)}</td>
                       <td className={`px-3 py-1.5 text-right tabular-nums font-medium ${d ? 'text-amber-700' : ''}`}>{d === null ? '—' : euro(d)}</td>
                     </tr>
@@ -145,8 +147,8 @@ export default function PrefatturaEcotyre({ periodo, isAdmin, onEsito }) {
           <p className="text-xs text-muted-foreground -mt-2">Nelle colonne della prefattura entrano solo gli ordini che il gestionale ha nello stesso mese; gli altri sono elencati qui sotto.</p>
 
           {c.terziarie?.ordini > 0 && (
-            <Tabella tono="red" titolo={`Terziarie pagate in prefattura: € ${euro(c.terziarie.euro)} su ${kg(c.terziarie.kg)} kg`}
-              spiega={`Il portale le paga come trasporto (8 €/t con l'allegato VII, 10 €/t col formulario). La fatturazione attiva del gestionale oggi non le calcola: questo importo è in prefattura e non nei tre report.${c.terziarie.non_in_archivio > 0 ? ` ${c.terziarie.non_in_archivio} di questi ordini non sono nemmeno nell'archivio Terziarie.` : ''}`}
+            <Tabella tono="grigio" titolo={`Terziarie in prefattura (sezione a parte): € ${euro(c.terziarie.euro)} su ${kg(c.terziarie.kg)} kg`}
+              spiega={`Il portale le paga come trasporto (8 €/t con l'allegato VII, 10 €/t col formulario). Per ora restano fuori dalla fatturazione attiva e dai tre report: non sono una differenza, l'importo è qui per quando servirà.${c.terziarie.non_in_archivio > 0 ? ` ${c.terziarie.non_in_archivio} di questi ordini non sono nell'archivio Terziarie.` : ''}`}
               righe={c.terziarie.righe}
               colonne={[{ t: 'ID ordine', v: r => r.id_ordine, m: true }, { t: 'Documento', v: r => r.numero_fir || '—' }, { t: 'kg', v: r => kg(r.kg), d: true }, { t: '€/t', v: r => euro(r.prezzo_t), d: true }, { t: '€', v: r => euro(r.importo), d: true }, { t: 'In archivio', v: r => (r.in_archivio ? 'sì' : 'no') }]} />
           )}

@@ -6,14 +6,10 @@ import { formattaPesi } from '@/lib/formatoExcel';
 // Prima l'export scriveva "Trasp.+Tratt." su tutte le righe.
 const tipoServizio = (r) => (r.servizio_ecotyre === 'TRASP' ? 'Trasp.' : 'Trasp.+Tratt.');
 
-// Nel modello dell'amministrazione la rete ha il prezzo in euro al CHILO (0,202),
-// accanto alla quantita' in chili, come nella prefattura; l'ACI in euro a
-// tonnellata. La riga salva il prezzo a tonnellata e il fattore per convertirlo.
-const prezzoAlChilo = (r) => {
-  const v = Number(r.tariffa_valore) || 0;
-  const f = Number(r.fattore_conversione) || (/€\/t/.test(r.unita_misura || '') ? 1000 : 1);
-  return Math.round((v / f) * 1e6) / 1e6;
-};
+// Il prezzo si scrive in euro a TONNELLATA, in tutti i report: nel 2026 a Ecotyre
+// si fattura a 202 euro la tonnellata, ed e' quello il numero che l'amministrazione
+// deve leggere (la prefattura del portale lo esprime al chilo, 0,202: e' lo stesso
+// prezzo, e il confronto con la prefattura lo sa).
 
 // Esporta le righe di fatturazione attiva in Excel nel formato del modello corrispondente
 export function exportFatturazioneAttiva(tipologia, righe, anno, mese) {
@@ -23,7 +19,7 @@ export function exportFatturazioneAttiva(tipologia, righe, anno, mese) {
 
   if (tipologia === 'RETE') {
     sheetName = 'Fatturazione RETE';
-    wsData = [['Periodo', 'Tipo', 'Ordine', 'Data Fine Trasporto', 'Numero FIR', 'Classe', 'Quantità (kg)', 'Prezzo Unitario (Euro/Kg)', 'Prezzo Totale']];
+    wsData = [['Periodo', 'Tipo', 'Ordine', 'Data Fine Trasporto', 'Numero FIR', 'Classe', 'Quantità (kg)', 'Prezzo Unitario (Euro/TON)', 'Prezzo Totale']];
     for (const r of righe) {
       if (r.sospesa) continue;
       wsData.push([
@@ -33,7 +29,7 @@ export function exportFatturazioneAttiva(tipologia, righe, anno, mese) {
         r.numero_fir || '',
         r.classe || '',
         r.quantita || 0,
-        prezzoAlChilo(r),
+        r.tariffa_valore || 0,
         r.totale || 0,
       ]);
     }

@@ -39,8 +39,14 @@
       "enum": [
         "successo",
         "parziale",
-        "errore"
-      ]
+        "errore",
+        "in_corso"
+      ],
+      "description": "in_corso: l'archivio e' stato svuotato e la scrittura non e' ancora finita. Se resta cosi', il caricamento si e' interrotto e l'archivio puo' essere incompleto"
+    },
+    "utente": {
+      "type": "string",
+      "description": "Chi ha fatto il caricamento"
     },
     "messaggio": {
       "type": "string"

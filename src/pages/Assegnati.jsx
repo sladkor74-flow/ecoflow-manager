@@ -104,7 +104,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
   // Auto-refresh on new uploads
   useEffect(() => {
     const unsub = base44.entities.UploadLog.subscribe((event) => {
-      if (event.type === 'create' && event.data?.tipo_file === 'primarie') loadData();
+      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso' && event.data?.tipo_file === 'primarie') loadData();
     });
     return unsub;
   }, [loadData]);

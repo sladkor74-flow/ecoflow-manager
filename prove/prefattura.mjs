@@ -1,7 +1,7 @@
 // Prova della prefattura Ecotyre (base44/shared/prefattura.ts): lettura di un
 // foglio senza tracciato garantito e confronto ordine per ordine col gestionale.
 // Si lancia con: npm run prove
-import { leggiTabellePrefattura, confrontaPrefattura, comeNumero } from '../base44/shared/prefattura.ts';
+import { leggiTabellePrefattura, confrontaPrefattura, comeNumero, periodoPrefattura, comeGiorno } from '../base44/shared/prefattura.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -43,6 +43,10 @@ const vero = leggiTabellePrefattura([{ nome: 'Worksheet', celle: [
 verifica('il tracciato vero del portale: ordine, FIR, kg, importo e tipo di servizio', vero.righe.length === 2 && vero.note.length === 0
   && vero.righe[0].id_ordine === 'ET25047044' && vero.righe[0].numero_fir === 'BSDCL002149HV' && vero.righe[0].kg === 2300 && vero.righe[0].importo === 464.6 && vero.righe[1].servizio === 'Trasp', JSON.stringify(vero));
 
+const per = periodoPrefattura(vero.righe);
+verifica('il mese si ricava dal file: luglio 2026 (seriali 46204 e 46234)', vero.righe[0].giorno === '2026-07-01' && vero.righe[1].giorno === '2026-07-31' && per.anno === 2026 && per.mese_idx === 6 && per.quota === 1);
+verifica('date scritte come testo', comeGiorno('31/07/2026') === '2026-07-31' && comeGiorno('2026-07-31T00:00:00Z') === '2026-07-31' && comeGiorno('n.d.') === '' && periodoPrefattura([{ giorno: '' }]) === null);
+
 console.log('CONFRONTO');
 const riga = (ordine, quantita, totale, altro = {}) => ({ ordine, numero_fir: 'F-' + ordine, quantita, totale, tariffa_valore: 202, ...altro });
 const vive = {
@@ -79,8 +83,12 @@ const conExtra = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, impor
 verifica('l\'extra raccolta non passa dalla prefattura: non e\' una differenza', conExtra.coincide === true && conExtra.canali[2].fuori_prefattura === true && conExtra.canali[2].solo_gestionale.length === 1);
 const conTer = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo: 202 }, { id_ordine: 'TER26018323', kg: 27160, importo: 217.28, numero_fir: 'ALL700091/26' }, { id_ordine: 'TER26002903', kg: 27680, importo: 276.8 }],
   { RETE: [riga('ET26000001', 1000, 202)], ACI: [], EXTRA_RACCOLTA: [] }, new Map([['TER26002903', { canale: 'TERZIARIE', stato: 'terminato', giorno: '2026-01-10' }]]));
-verifica('terziarie: un gruppo a parte col totale e il prezzo ricavato, non ordini sconosciuti', conTer.terziarie.ordini === 2 && conTer.terziarie.euro === 494.08 && conTer.terziarie.righe[0].prezzo_t === 8 && conTer.terziarie.righe[1].prezzo_t === 10
-  && conTer.terziarie.non_in_archivio === 1 && conTer.solo_prefattura.length === 0 && conTer.differenze === 1 && conTer.coincide === false, JSON.stringify(conTer.terziarie));
+verifica('terziarie: una sezione a parte col totale e il prezzo ricavato; non sono ne\' ordini sconosciuti ne\' differenze', conTer.terziarie.ordini === 2 && conTer.terziarie.euro === 494.08 && conTer.terziarie.righe[0].prezzo_t === 8 && conTer.terziarie.righe[1].prezzo_t === 10
+  && conTer.terziarie.non_in_archivio === 1 && conTer.solo_prefattura.length === 0 && conTer.differenze === 0 && conTer.coincide === true, JSON.stringify(conTer.terziarie));
+const tanti = Array.from({ length: 410 }, (_, i) => ({ id_ordine: 'ET26' + String(100000 + i), kg: 2300, importo: 464.6 }));
+const tantiG = { RETE: tanti.map(t => riga(t.id_ordine, 2300, 464.6)), ACI: [], EXTRA_RACCOLTA: [] };
+const cTanti = confrontaPrefattura(tanti, tantiG);
+verifica('quattrocento righe uguali: i due totali sono uguali al centesimo', cTanti.canali[0].prefattura.euro === cTanti.canali[0].gestionale.euro && cTanti.canali[0].gestionale.euro === 190486);
 verifica('prefattura vuota: non "coincide"', confrontaPrefattura([], { RETE: [], ACI: [], EXTRA_RACCOLTA: [] }).coincide === false);
 const soloOrdini = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: null, importo: null }], { RETE: [riga('ET26000001', 1000, 202)], ACI: [], EXTRA_RACCOLTA: [] });
 verifica('prefattura con i soli ordini: si confronta quel che c\'e\'', soloOrdini.coincide === true && soloOrdini.con_importi === false && soloOrdini.canali[0].prefattura.euro === null);

@@ -4,6 +4,12 @@ import { PROV_TO_REGION, MESI } from "../../shared/raccoltoCalculator.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
+import { filtraMovimenti, giornoMovimento } from "../../shared/movimenti.ts";
+
+// Sotto questo numero di giorni coperti dai dati la proiezione di fine mese non
+// si fa: con tre giorni di raccolto, o con l'ultimo caricamento fermo al 2 del
+// mese, moltiplicare per dieci da' numeri che non vogliono dire niente.
+const GIORNI_MINIMI_PROIEZIONE = 10;
 
 // Controlla i target mensili di raccolta e genera alert per target non raggiunti o a rischio.
 // Payload: { mese?, anno?, crea_alerts?: boolean }
@@ -44,13 +50,10 @@ export default async function(req) {
 
     // Raccolto del solo canale RETE: i target dei raccoglitori non riguardano ACI
     // ed Extra Raccolta. Solo i terminati, nel mese della fine trasporto.
-    const meseIdx = MESI.indexOf(mese);
-    const nelPeriodo = (r) => {
-      if (String(r.stato || '').toLowerCase().trim() !== 'terminato' || !r.trasporto_finito_il) return false;
-      const d = new Date(r.trasporto_finito_il);
-      return !isNaN(d.getTime()) && d.getUTCFullYear() === anno && d.getUTCMonth() === meseIdx;
-    };
-    const rete = (await fetchAll(base44.asServiceRole.entities.PrimariaRete, { stato: 'terminato' })).filter(nelPeriodo);
+    // Il periodo si legge come in tutto il gestionale (base44/shared/movimenti.ts).
+    const rete = filtraMovimenti(await fetchAll(base44.asServiceRole.entities.PrimariaRete, { stato: 'terminato' }), { anno, mese });
+    // Fin dove arrivano i dati: l'ultimo giorno del mese con un ritiro in archivio.
+    const ultimoGiornoDati = rete.reduce((m, r) => (giornoMovimento(r) > m ? giornoMovimento(r) : m), '');
 
     const raccoltoByKey = {};
     const addRaccolto = (r) => {
@@ -67,7 +70,13 @@ export default async function(req) {
     const isMeseCorrente = (mese === meseCorrente && anno === annoCorrente);
     const giornoDelMese = Number(oggi.slice(8, 10));
     const giorniInMese = new Date(Date.UTC(anno, meseCorrenteIdx + 1, 0)).getUTCDate();
-    const fattoreTemporale = isMeseCorrente && giornoDelMese > 0 ? (giornoDelMese / giorniInMese) : 1;
+    // La frazione di mese trascorsa si misura sui DATI, non sul calendario: i file
+    // si caricano ogni tanto e il portale chiude gli ordini giorni dopo. Se oggi e'
+    // il 20 ma l'archivio arriva al 12, il raccolto e' di dodici giorni, non di
+    // venti: proiettarlo su venti dava allarmi critici che non esistevano.
+    const giorniCoperti = isMeseCorrente ? Math.min(giornoDelMese, Number(ultimoGiornoDati.slice(8, 10)) || 0) : giorniInMese;
+    const proiezioneAffidabile = !isMeseCorrente || giorniCoperti >= GIORNI_MINIMI_PROIEZIONE;
+    const fattoreTemporale = isMeseCorrente && giorniCoperti > 0 ? (giorniCoperti / giorniInMese) : 1;
 
     const missed = [];
     const atRisk = [];
@@ -107,6 +116,8 @@ export default async function(req) {
         pct_proiezione: +pctProiezione.toFixed(1),
         is_mese_corrente: isMeseCorrente,
         giorno_del_mese: isMeseCorrente ? giornoDelMese : null,
+        giorni_coperti_dai_dati: isMeseCorrente ? giorniCoperti : null,
+        proiezione_affidabile: proiezioneAffidabile,
         giorni_in_mese: isMeseCorrente ? giorniInMese : null,
       };
 
@@ -118,8 +129,9 @@ export default async function(req) {
           okCount++;
         }
       } else {
-        // Mese corrente: valuta proiezione fine mese
-        if (pctProiezione < 90) {
+        // Mese corrente: valuta proiezione fine mese, ma solo se i dati coprono
+        // abbastanza giorni da poterla fare
+        if (proiezioneAffidabile && pctProiezione < 90) {
           atRisk.push(item);
         } else {
           okCount++;

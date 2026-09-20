@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { fineProgrammazione } from "../../shared/fineProgrammazione.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { formatoKg } from "../../shared/formato.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
@@ -9,13 +10,13 @@ import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 // Media reale di un viaggio di secondaria: 13,5 tonnellate.
 const KG_PER_VIAGGIO = 13500;
-// L'anno di lavoro e' quello in corso (giorno italiano) e la fine della
-// programmazione, se l'impianto non ne ha una sua, e' il 18 dicembre di
-// quell'anno. Prima c'erano scritti "2026" e "2026-12-18": dal 19 dicembre 2026
+// L'anno di lavoro e' quello in corso (giorno italiano); la fine della
+// programmazione, se l'impianto non ne ha una sua, viene da
+// base44/shared/fineProgrammazione.ts (il 18 dicembre vale solo per il 2026). Prima c'erano scritti "2026" e "2026-12-18": dal 19 dicembre 2026
 // il modulo si sarebbe spento senza dirlo, e nel 2027 avrebbe continuato a
 // leggere il 2026.
 const annoRiferimento = () => Number(oggiRoma().slice(0, 4));
-const dataFineDefault = () => `${annoRiferimento()}-12-18`;
+const dataFineDefault = () => fineProgrammazione(annoRiferimento()).data;
 
 function getMonday(date) {
   const d = new Date(date);

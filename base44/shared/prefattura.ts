@@ -12,6 +12,10 @@
 
 const pulisci = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 const r2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
+// Gli importi si sommano in centesimi interi: sommando quattrocento importi con
+// la virgola mobile il totale di luglio 2026 usciva 226.692,48 da una parte e
+// 226.692,49 dall'altra, con tutte le righe identiche.
+const centesimi = (v) => Math.round((Number(v) || 0) * 100);
 
 // Il tracciato vero (prefattura provvisoria 3716, luglio 2026): ID Prefattura,
 // Fatturante, Periodo, KeyAccount, Tipo (Trasp / Trasp+Tratt), Ordine, Data fine
@@ -47,6 +51,32 @@ export function comeNumero(v) {
   else if ((s.match(/\./g) || []).length > 1 || /^-?\d{1,3}\.\d{3}$/.test(s)) s = s.replace(/\./g, '');
   const n = Number(s);
   return isFinite(n) ? n : null;
+}
+
+/** Il giorno 'AAAA-MM-GG' di una cella: seriale di Excel, data o testo (gg/mm/aaaa o aaaa-mm-gg). */
+export function comeGiorno(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000).toISOString().slice(0, 10);
+  if (v instanceof Date && !isNaN(v.getTime())) return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
+  const s = pulisci(v);
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})/);
+  return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : '';
+}
+
+/**
+ * Il mese a cui si riferisce la prefattura, ricavato dalle date di fine trasporto
+ * delle sue righe: e' scritto nel file, non serve che lo dica chi lo carica.
+ * { anno, mese_idx, quota } col mese piu' frequente, oppure null se le date mancano.
+ */
+export function periodoPrefattura(righe) {
+  const conta = new Map();
+  for (const r of righe || []) if (r.giorno) conta.set(r.giorno.slice(0, 7), (conta.get(r.giorno.slice(0, 7)) || 0) + 1);
+  const ordinati = [...conta.entries()].sort((a, b) => b[1] - a[1]);
+  if (!ordinati.length) return null;
+  const totale = ordinati.reduce((s, e) => s + e[1], 0);
+  return { anno: Number(ordinati[0][0].slice(0, 4)), mese_idx: Number(ordinati[0][0].slice(5, 7)) - 1, quota: ordinati[0][1] / totale };
 }
 
 /**
@@ -103,6 +133,7 @@ export function leggiTabellePrefattura(tabelle) {
         importo: col('importo') >= 0 ? comeNumero(r[col('importo')]) : null,
         prezzo: col('prezzo') >= 0 ? comeNumero(r[col('prezzo')]) : null,
         servizio: col('servizio') >= 0 ? pulisci(r[col('servizio')]) : '',
+        giorno: col('data') >= 0 ? comeGiorno(r[col('data')]) : '',
         foglio: nome || '',
       });
       lette++;
@@ -158,7 +189,7 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
       const p = pre.get(id);
       if (!p) { soloGestionale.push({ id_ordine: id, numero_fir: g.numero_fir, kg: g.kg, importo: r2(g.importo) }); continue; }
       visti.add(id);
-      ordiniPre++; kgPre += p.kg; euroPre += p.importo;
+      ordiniPre++; kgPre += p.kg; euroPre += centesimi(p.importo);
       // il tipo di servizio decide il prezzo: se la prefattura dice Trasp e il gestionale Trasp+Tratt va saputo
       if (p.servizio && g.servizio && p.servizio !== g.servizio) servizioDiverso.push({ id_ordine: id, numero_fir: g.numero_fir, servizio_prefattura: p.servizio, servizio_gestionale: g.servizio, kg: Math.round(g.kg) });
       const firGest = pulisci(g.numero_fir).toUpperCase();
@@ -175,7 +206,7 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
       }
     }
     const kgGest = [...gest.values()].reduce((s, e) => s + e.kg, 0);
-    const euroGest = [...gest.values()].reduce((s, e) => s + e.importo, 0);
+    const euroGest = [...gest.values()].reduce((s, e) => s + centesimi(e.importo), 0) / 100;
     // L'extra raccolta non passa dalla prefattura del portale (verificato sulla
     // 3716 di luglio 2026: 416 ordini fra rete e ACI, l'intervento extra non c'e').
     // Se la prefattura non ne porta nessun ordine, le sue righe non sono differenze.
@@ -183,7 +214,7 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
     canali.push({
       canale, fuori_prefattura: fuoriPrefattura,
       gestionale: { ordini: gest.size, kg: Math.round(kgGest), euro: r2(euroGest) },
-      prefattura: { ordini: ordiniPre, kg: conPesi ? Math.round(kgPre) : null, euro: conImporti ? r2(euroPre) : null },
+      prefattura: { ordini: ordiniPre, kg: conPesi ? Math.round(kgPre) : null, euro: conImporti ? euroPre / 100 : null },
       solo_gestionale: soloGestionale, peso_diverso: pesoDiverso, importo_diverso: importoDiverso,
       servizio_diverso: servizioDiverso, fir_diverso: firDiverso,
     });
@@ -191,18 +222,19 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
 
   // Le terziarie (ordini TER...): il portale le paga come "Trasp" a 8 euro la
   // tonnellata con l'allegato VII e a 10 col formulario (prefatture gennaio-agosto
-  // 2026: 105 ordini, 25.846,51 euro). La fatturazione attiva del gestionale non
-  // le calcola: si mostrano in un gruppo a parte, col loro totale, invece di
-  // cento righe di "ordine sconosciuto".
+  // 2026: 105 ordini, 25.846,51 euro). Decisione della direzione (20/09/2026): per
+  // ora restano FUORI dalla fatturazione attiva e dai tre report, in una sezione
+  // a parte tenuta pronta per quando servira'. Percio' non sono una differenza:
+  // si mostrano col loro totale, e basta.
   const terziarie = { ordini: 0, kg: 0, euro: 0, righe: [] };
   for (const [id, p] of pre) {
     if (visti.has(id) || !/^TER/.test(id)) continue;
     visti.add(id);
-    terziarie.ordini++; terziarie.kg += p.kg; terziarie.euro += p.importo;
+    terziarie.ordini++; terziarie.kg += p.kg; terziarie.euro += centesimi(p.importo);
     const a = altrove.get(id) || null;
     terziarie.righe.push({ id_ordine: id, numero_fir: p.fir, kg: Math.round(p.kg), importo: r2(p.importo), prezzo_t: p.kg ? r2(p.importo / (p.kg / 1000)) : null, in_archivio: !!a });
   }
-  terziarie.kg = Math.round(terziarie.kg); terziarie.euro = r2(terziarie.euro);
+  terziarie.kg = Math.round(terziarie.kg); terziarie.euro = terziarie.euro / 100;
   terziarie.non_in_archivio = terziarie.righe.filter(x => !x.in_archivio).length;
 
   // Ordini della prefattura che il mese del gestionale non ha: si dice dove stanno
@@ -219,7 +251,7 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
         : `nel gestionale la fine trasporto è il ${a.giorno.split('-').reverse().join('/')}: un altro mese`,
     });
   }
-  const differenze = soloPrefattura.length + (terziarie.ordini > 0 ? 1 : 0) + canali.reduce((s, c) => s + (c.fuori_prefattura ? 0 : c.solo_gestionale.length) + c.peso_diverso.length + c.importo_diverso.length + c.servizio_diverso.length + c.fir_diverso.length, 0);
+  const differenze = soloPrefattura.length + canali.reduce((s, c) => s + (c.fuori_prefattura ? 0 : c.solo_gestionale.length) + c.peso_diverso.length + c.importo_diverso.length + c.servizio_diverso.length + c.fir_diverso.length, 0);
   return {
     coincide: differenze === 0 && pre.size > 0,
     differenze,

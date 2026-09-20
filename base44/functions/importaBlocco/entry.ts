@@ -33,6 +33,45 @@ import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/
 // arrivata a destinazione nonostante l'errore di rete.
 
 const LIMITE_INVOCAZIONE_MS = 12000;
+
+// Un caricamento svuota l'archivio e poi lo riscrive a blocchi dal browser. Se la
+// scheda si chiude a meta', l'archivio resta vuoto o parziale: prima non restava
+// scritto da nessuna parte. Ora la preparazione apre una riga "in_corso" nel
+// registro, con chi l'ha avviata, e la registrazione finale la chiude. Una riga
+// rimasta "in_corso" E' la traccia dell'interruzione. Serve anche da blocco:
+// due persone non caricano lo stesso archivio nello stesso momento.
+const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
+const chi = (user) => (user && (user.full_name || user.email)) || '';
+
+async function apriCaricamento(base44, user, tipo_file, nome_file, prima) {
+  const Log = base44.asServiceRole.entities.UploadLog;
+  const aperti = await Log.filter({ tipo_file, esito: 'in_corso' }, '-created_date', 20);
+  const adesso = Date.now();
+  for (const l of aperti) {
+    const eta = adesso - new Date(String(l.created_date).replace(/(Z|[+-]\d{2}:?\d{2})?$/, 'Z')).getTime();
+    if (eta < FINESTRA_IN_CORSO_MS && l.utente && l.utente !== chi(user)) {
+      return { bloccato: `${l.utente} sta caricando lo stesso archivio da ${Math.max(1, Math.round(eta / 60000))} minuti: aspetta che finisca, altrimenti i due caricamenti si sovrascrivono.` };
+    }
+    // un caricamento precedente rimasto a meta': lo si dice, e se ne apre uno nuovo
+    await Log.update(l.id, { esito: 'errore', messaggio: `Caricamento interrotto: avviato da ${l.utente || 'sconosciuto'} e mai concluso. L'archivio poteva essere incompleto; e' stato ricaricato dopo.` });
+  }
+  const riga = await Log.create({
+    tipo_file, nome_file: nome_file || 'N/D', esito: 'in_corso', utente: chi(user),
+    righe_importate: 0, righe_fallite: 0, modalita: 'sostituzione',
+    righe_archivio_prima: typeof prima === 'number' ? prima : undefined,
+    messaggio: 'Caricamento in corso: archivio in riscrittura.',
+  });
+  return { id: riga.id };
+}
+
+// La registrazione finale chiude la riga aperta dalla preparazione; se non la trova ne scrive una nuova.
+async function chiudiCaricamento(base44, user, tipo_file, campi) {
+  const Log = base44.asServiceRole.entities.UploadLog;
+  const aperti = await Log.filter({ tipo_file, esito: 'in_corso' }, '-created_date', 5);
+  const mio = aperti.find(l => !l.utente || l.utente === chi(user)) || null;
+  if (mio) await Log.update(mio.id, { ...campi, utente: chi(user) });
+  else await Log.create({ ...campi, utente: chi(user) });
+}
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // Campi che rappresentano una data: accettano seriale Excel o testo AAAA-MM-GG.
@@ -202,7 +241,7 @@ export default async function(req) {
       if (disallineati.length) messaggio += ' — archivio non allineato: ' + disallineati.map(a => `${a} ${n(a, 'archivio')} su ${n(a, 'attese')}`).join(', ');
       if (body.ultimo_errore) messaggio += ' — ultimo errore: ' + body.ultimo_errore;
       if (body.durata_secondi) messaggio += ` [durata: ${body.durata_secondi}s]`;
-      await base44.asServiceRole.entities.UploadLog.create({
+      await chiudiCaricamento(base44, user, tipo_file, {
         tipo_file, nome_file: nome_file || 'N/D',
         righe_importate: scritte, righe_fallite: fallite, esito, messaggio,
         righe_archivio_prima: typeof body.righe_archivio_prima === 'number' ? body.righe_archivio_prima : undefined,
@@ -222,7 +261,7 @@ export default async function(req) {
       if (fallite > 0) parti.push(fallite + ' righe non scritte');
       if (body.ultimo_errore) parti.push('ultimo errore: ' + body.ultimo_errore);
       if (typeof body.conteggio_finale === 'number') parti.push('archivio verificato: ' + body.conteggio_finale + ' record');
-      await base44.asServiceRole.entities.UploadLog.create({
+      await chiudiCaricamento(base44, user, tipo_file, {
         tipo_file, nome_file: nome_file || 'N/D',
         righe_importate: scritte, righe_fallite: fallite, esito,
         messaggio: parti.join(' — '),
@@ -309,6 +348,9 @@ export default async function(req) {
           }
         }
 
+        fase = 'apertura del registro';
+        const aperto = await apriCaricamento(base44, user, tipo_file, nome_file, inArchivio.size);
+        if (aperto.bloccato) return Response.json({ error: aperto.bloccato, dati_intatti: true }, { status: 409 });
         return Response.json({ preparato: true, righe_archivio_prima: inArchivio.size, avviso_date, dati_intatti: true });
       }
 
@@ -338,6 +380,9 @@ export default async function(req) {
         avviso_calo = { righe_precedenti: precedenti, righe_attuali: totale_righe };
       }
 
+      fase = 'apertura del registro';
+      const aperto = await apriCaricamento(base44, user, tipo_file, nome_file, precedenti);
+      if (aperto.bloccato) return Response.json({ error: aperto.bloccato, dati_intatti: true }, { status: 409 });
       fase = "svuotamento dell'archivio precedente";
       await base44.asServiceRole.entities[entita].deleteMany({});
       archivioSvuotato = true;

@@ -60,9 +60,10 @@ function leggiIntestazioni(ws) {
 export default async function(req) {
   let tipo_file = null, nome_file = 'N/D', file_url = null;
   let fase = 'avvio';
+  let user = null;
   try {
     const base44 = createClientFromRequest(req);
-    const user = await base44.auth.me();
+    user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     const startTime = Date.now();
     const body = await req.json();
@@ -161,6 +162,7 @@ export default async function(req) {
           errResp.tipo_rilevato = `Il file caricato sembra di tipo ${tipo_rilevato.toUpperCase()} ma e' stato caricato nello slot ${tipo_file.toUpperCase()}`;
         }
         await base44.asServiceRole.entities.UploadLog.create({
+          utente: (user && (user.full_name || user.email)) || '',
           tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
           esito: 'errore', messaggio: errResp.error + (tipo_rilevato ? ' - ' + errResp.tipo_rilevato : ''),
           periodo_riferimento: periodo_riferimento || ''
@@ -177,6 +179,7 @@ export default async function(req) {
           fogli_trovati: wb.SheetNames
         };
         await base44.asServiceRole.entities.UploadLog.create({
+          utente: (user && (user.full_name || user.email)) || '',
           tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
           esito: 'errore', messaggio: errResp.dettaglio,
           periodo_riferimento: periodo_riferimento || ''
@@ -230,6 +233,7 @@ export default async function(req) {
       if (!hasTerminato) {
         const errResp = { error: "Il file non contiene alcun ordine terminato: sembra una selezione filtrata (es. soli assegnati), non l'export completo delle primarie." };
         await base44.asServiceRole.entities.UploadLog.create({
+          utente: (user && (user.full_name || user.email)) || '',
           tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
           esito: 'errore', messaggio: errResp.error,
           periodo_riferimento: periodo_riferimento || '', foglio_usato: sheetName
@@ -242,6 +246,7 @@ export default async function(req) {
     if (enriched.filter(r => r[keyField]).length === 0) {
       const errResp = { error: 'Nessuna riga valida trovata nel file' };
       await base44.asServiceRole.entities.UploadLog.create({
+          utente: (user && (user.full_name || user.email)) || '',
         tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
         esito: 'errore', messaggio: errResp.error,
         periodo_riferimento: periodo_riferimento || '', foglio_usato: sheetName
@@ -323,6 +328,7 @@ export default async function(req) {
           richiede_conferma: true
         };
         await base44.asServiceRole.entities.UploadLog.create({
+          utente: (user && (user.full_name || user.email)) || '',
           tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
           esito: 'errore', messaggio: `${errResp.error} (${mancanti.length} ordini mancanti su ${existingIds.size} in archivio)`,
           periodo_riferimento: periodo_riferimento || '', foglio_usato: sheetName,
@@ -377,6 +383,7 @@ export default async function(req) {
           richiede_conferma: true
         };
         await base44.asServiceRole.entities.UploadLog.create({
+          utente: (user && (user.full_name || user.email)) || '',
           tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
           esito: 'errore', messaggio: `${errResp.error} (${mancanti.length} dichiarazioni mancanti su ${existingKeys.size} in archivio)`,
           periodo_riferimento: periodo_riferimento || '', foglio_usato: sheetName,
@@ -491,6 +498,7 @@ export default async function(req) {
       ? ` | dichiarazioni riconosciute a portale: ${allineamento.aggiornate.length}`
       : (allineamento && allineamento.errore ? ` | allineamento non riuscito: ${allineamento.errore}` : '');
     await base44.asServiceRole.entities.UploadLog.create({
+          utente: (user && (user.full_name || user.email)) || '',
       tipo_file, nome_file, file_url,
       righe_importate: imported, righe_fallite: failed, esito,
       messaggio: messaggio + notaAllineamento, periodo_riferimento: periodo_riferimento || '',
@@ -518,6 +526,7 @@ export default async function(req) {
     try {
       const base44 = createClientFromRequest(req);
       await base44.asServiceRole.entities.UploadLog.create({
+          utente: (user && (user.full_name || user.email)) || '',
         tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
         esito: 'errore', messaggio: error.message || 'Errore imprevisto',
         periodo_riferimento: ''

@@ -28,7 +28,7 @@ export default async function(req) {
     ]);
 
     const report = calcolaReportSettimanale({ rete, mensili, annui, anno, mese });
-    const ultimo = caricamenti.find(c => c.esito !== 'errore');
+    const ultimo = caricamenti.find(c => c.esito !== 'errore' && c.esito !== 'in_corso');
     return Response.json({
       ...report,
       oggi,

@@ -5,7 +5,7 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { giornoRoma } from "../../shared/giornoItaliano.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { calcolaRigheAttiva } from "../../shared/attivaCalcolo.ts";
-import { leggiTabellePrefattura, confrontaPrefattura, comeOrdine, comeNumero } from "../../shared/prefattura.ts";
+import { leggiTabellePrefattura, confrontaPrefattura, comeOrdine, comeNumero, periodoPrefattura } from "../../shared/prefattura.ts";
 
 // La prefattura del portale Ecotyre: si carica (Excel o PDF), si tiene per il
 // mese, e si confronta con le righe che il gestionale calcola sui dati di oggi.
@@ -102,6 +102,12 @@ export default async function(req) {
         if (letto.note) note.push(String(letto.note));
       }
       if (!righe.length) return Response.json({ error: 'Nel file non ho trovato righe con un ID ordine: non sembra una prefattura. ' + note.join(' ') }, { status: 400 });
+      // Il mese e' scritto nel file (le date di fine trasporto): una prefattura di
+      // giugno caricata su luglio darebbe quattrocento differenze finte.
+      const periodo = periodoPrefattura(righe);
+      if (periodo && (periodo.anno !== annoNum || MESI[periodo.mese_idx] !== mese)) {
+        return Response.json({ error: `Questo file è la prefattura di ${MESI[periodo.mese_idx]} ${periodo.anno}, ma stai caricando su ${mese} ${annoNum}. Seleziona il mese giusto e ricaricalo: non ho salvato niente.`, periodo_del_file: { anno: periodo.anno, mese: MESI[periodo.mese_idx] } }, { status: 400 });
+      }
 
       const adesso = new Date().toISOString();
       const precedenti = (await svc.PrefatturaEcotyre.filter({ anno: annoNum, mese })).filter(p => !p.superata);
