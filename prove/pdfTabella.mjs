@@ -46,10 +46,13 @@ await esportaTabellaPdf({
   colonne, righe, totali: { etichetta: 'Totale', valori: { 3: 24650, 5: 4979.3 } },
 });
 const pdf = globalThis.__pdf;
-// Nel PDF il testo sta fra parentesi tonde e le parentesi del testo sono protette
-// da una barra rovescia: vanno tolte, altrimenti "(Euro/TON)" non si trova.
-const scritte = [...new Set((pdf.match(/\((?:\\.|[^()\\])*\)\s*Tj/g) || [])
-  .map(x => x.slice(1, x.lastIndexOf(')')).replace(/\\([()\\])/g, '$1')))];
+// Nel PDF il testo sta fra parentesi tonde: le parentesi del testo sono protette da
+// una barra rovescia e le lettere accentate sono scritte in ottale (\340 per la à).
+const leggi = (s) => [...new Set((s.match(/\((?:\\.|[^()\\])*\)\s*Tj/g) || [])
+  .map(x => x.slice(1, x.lastIndexOf(')'))
+    .replace(/\\(\d{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)))
+    .replace(/\\([()\\])/g, '$1')))];
+const scritte = leggi(pdf);
 const c_e = (t) => scritte.some(s => s.includes(t));
 
 verifica("l'unita' di misura resta nell'intestazione", c_e('Euro/TON'), `— scritte: ${scritte.filter(s => /Prezzo/.test(s)).join(' | ')}`);
@@ -59,6 +62,20 @@ verifica('la nota lunga non si ferma alla prima riga', c_e('rientro a vuoto') &&
 verifica('i numeri sono in formato italiano', c_e('23.400') && c_e('4.726,80'));
 verifica('il totale viene scritto', c_e('Totale') && c_e('24.650') && c_e('4.979,30'));
 verifica('una pagina sola per due righe', (pdf.match(/\/Type\s*\/Page[^s]/g) || []).length === 1);
+
+// Il caso peggiore: l'ACI ha tredici colonne, quindi strette. Nessun titolo deve
+// perdere pezzi per strada, nemmeno l'unita' di misura.
+const colonneAci = [
+  ['Regione', 0.9], ['Fatturante', 0.9], ['Periodo', 0.9], ['Tipo', 0.9], ['Ticket n°', 0.9], ['Ordine', 1],
+  ['Data Fine Trasporto', 1], ['Numero FIR', 1.2], ['Classe', 1.1], ['Quantità (kg)', 0.8],
+  ['Prezzo Unitario (Euro/TON)', 1.1], ['Prezzo Totale', 0.9], ['Note', 1.4],
+].map(([titolo, peso]) => ({ titolo, peso, tipo: /Quantit/.test(titolo) ? 'kg' : /Prezzo/.test(titolo) ? 'euro' : 'testo', valore: () => '' }));
+await esportaTabellaPdf({ nomeFile: 'prova', titolo: 'Fatturazione ACI — Luglio 2026', colonne: colonneAci, righe: [] });
+const paroleAci = leggi(globalThis.__pdf);
+const persi = colonneAci
+  .map(c => c.titolo.split(/\s+/).filter(p => !paroleAci.some(s => s.includes(p))))
+  .flat();
+verifica('ACI a tredici colonne: nessun titolo perde pezzi', persi.length === 0, `— manca: ${persi.join(' ')}`);
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);
