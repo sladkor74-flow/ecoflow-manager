@@ -337,3 +337,30 @@ con pdf.js (`src/lib/pdfTesto.js`, caricata solo quando serve) e
 riepilogo stampato (ordini, chili, euro per classi 1-4 e classe 9) e il mese: se
 le righe lette non sommano quel riepilogo il caricamento viene rifiutato. Sul PDF
 vero di luglio 2026: 416 righe, identiche all'Excel una per una.
+
+**Nello schema un elenco va dichiarato `"type": "array"`.** Scritto come `object`
+il server rifiuta il dato con `Error in field X: Input should be a valid
+dictionary` e la funzione risponde 500. E' successo per davvero: il registro delle
+esportazioni (`EsportazioneFatturazione.documento_ids`) non ha registrato niente
+dal giorno in cui e' nato, e nessuno se n'era accorto perche' il file veniva
+comunque prodotto. Quando si aggiunge un campo che conterra' un elenco lo si
+dichiara `array` con i suoi `items`, anche se per ora non ci scrive nessuno.
+
+**Produrre un file e registrarlo sono due passi distinti.** Il file e' gia' sul
+computer di chi esporta: se la registrazione non riesce non si dice
+"esportazione fallita", si dice che il file c'e' ma non e' finito nello storico.
+E non si usano le finestre di sistema (`alert`, `confirm`) per raccontarlo:
+bloccano la pagina, non si copiano e fanno sembrare rotto cio' che ha funzionato.
+
+**Nei PDF le intestazioni vanno a capo su due righe e le celle fino a tre.**
+Tagliare alla prima riga faceva sparire l'unita' di misura: "Prezzo Unitario
+(Euro/TON)" arrivava come "Prezzo Unitario" mentre nell'Excel c'era tutto. Vale
+per `esportaTabellaPdf` e per `esportaSezioniPdf`; la prova `prove/pdfTabella.mjs`
+rende il PDF in memoria e rilegge le scritte, cosi' il taglio non puo' tornare.
+
+**Quando una pagina carica piu' riquadri indipendenti si usa
+`Promise.allSettled`, non `Promise.all`.** Le funzioni che leggono gli archivi
+grandi ogni tanto cadono: su Terminati Rete bastava `computeRaccoglitoriMix` a
+500 per lasciare vuote anche la matrice per provincia, i tempi di evasione e gli
+alert. Chi non ha risposto si dice per nome, con "Riprova"; il resto resta a
+video.
