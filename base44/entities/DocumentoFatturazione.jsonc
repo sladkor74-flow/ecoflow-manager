@@ -95,6 +95,19 @@
     "motivo_superato": {
       "type": "string",
       "description": "Perche' il documento e' superato: si scrive sempre, cosi' fra un anno si capisce"
+    },
+    "fattura_confermata_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Giorno in cui l'amministrazione ha confermato che la fattura al cliente e' stata emessa ed e' andata a buon fine. Un periodo si chiude solo con questa conferma"
+    },
+    "fattura_numero": {
+      "type": "string",
+      "description": "Numero o riferimento della fattura emessa, se comunicato dall'amministrazione"
+    },
+    "fattura_confermata_da": {
+      "type": "string",
+      "description": "Chi ha registrato la conferma nel gestionale"
     }
   },
   "required": [

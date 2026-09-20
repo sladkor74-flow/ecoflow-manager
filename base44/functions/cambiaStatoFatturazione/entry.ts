@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 
 // Cambia lo stato di un documento di fatturazione:
 // azione: 'verifica' | 'approva' | 'chiudi' | 'riapri'
@@ -11,13 +12,18 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 // scritto da nessuna parte. Un periodo chiuso si riapre solo con 'riapri', e
 // la riapertura lascia la sua riga nelle note del documento: chi, quando, da
 // che stato.
+//
+// 'chiudi' non e' un passaggio interno: un mese attivo si chiude quando
+// l'amministrazione conferma che la fattura al cliente e' stata emessa ed e'
+// andata a buon fine. La conferma (giorno, numero se c'e') si scrive sul
+// documento: payload { conferma: { data, numero? } }.
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return rispostaSolaLettura();
-    const { documento_id, azione } = await req.json();
+    const { documento_id, azione, conferma } = await req.json();
     if (!documento_id || !azione) return Response.json({ error: 'documento_id e azione obbligatori' }, { status: 400 });
 
     const doc = await base44.asServiceRole.entities.DocumentoFatturazione.get(documento_id);
@@ -50,8 +56,16 @@ export default async function(req) {
     if (azione === 'chiudi') {
       // anche un documento gia' esportato si chiude: l'esportazione viene dopo l'approvazione
       if (!['approvata', 'esportata'].includes(doc.stato)) return rifiuta(['approvata', 'esportata']);
+      const giorno = String((conferma && conferma.data) || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(giorno)) {
+        return Response.json({ error: "Per chiudere il periodo serve il giorno in cui l'amministrazione ha confermato la fatturazione al cliente." }, { status: 400 });
+      }
+      if (giorno > oggiRoma()) return Response.json({ error: 'La conferma della fatturazione non può avere una data futura.' }, { status: 400 });
       await base44.asServiceRole.entities.DocumentoFatturazione.update(documento_id, {
         stato: 'chiusa', data_chiusura: new Date().toISOString(),
+        fattura_confermata_il: giorno,
+        fattura_numero: String((conferma && conferma.numero) || '').trim(),
+        fattura_confermata_da: user.full_name || user.email || '',
       });
       return Response.json({ stato: 'chiusa' });
     }
@@ -59,9 +73,12 @@ export default async function(req) {
     if (azione === 'riapri') {
       if (doc.stato === 'elaborata') return Response.json({ stato: 'elaborata' });
       const quando = new Date().toISOString();
-      const traccia = `Riaperto il ${quando.slice(0, 10)} da ${user.full_name || user.email}: era "${doc.stato}"${doc.data_chiusura ? ` dal ${String(doc.data_chiusura).slice(0, 10)}` : ''}.`;
+      const fattura = doc.fattura_confermata_il ? ` Fatturazione confermata il ${doc.fattura_confermata_il}${doc.fattura_numero ? `, fattura ${doc.fattura_numero}` : ''}.` : '';
+      const traccia = `Riaperto il ${quando.slice(0, 10)} da ${user.full_name || user.email}: era "${doc.stato}"${doc.data_chiusura ? ` dal ${String(doc.data_chiusura).slice(0, 10)}` : ''}.${fattura}`;
       await base44.asServiceRole.entities.DocumentoFatturazione.update(documento_id, {
         stato: 'elaborata', data_chiusura: null, data_approvazione: null, data_verifica: null,
+        // la conferma valeva per il documento chiuso: resta scritta nella nota qui sotto
+        fattura_confermata_il: null, fattura_numero: '', fattura_confermata_da: '',
         note: [doc.note, traccia].filter(Boolean).join('\n'),
       });
       return Response.json({ stato: 'elaborata' });

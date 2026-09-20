@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { FileText, Users, DollarSign, History, TrendingUp } from 'lucide-react';
+import { FileText, Users, DollarSign, History, TrendingUp, Scale } from 'lucide-react';
 import PassivaModulo from '@/components/fatturazione/PassivaModulo';
 import FornitoriManager from '@/components/fatturazione/FornitoriManager';
 import TariffeUnificate from '@/components/fatturazione/TariffeUnificate';
 import StoricoFatturazione from '@/components/fatturazione/StoricoFatturazione';
 import FatturazioneAttiva from '@/components/fatturazione/FatturazioneAttiva';
+import MargineCommessa from '@/components/fatturazione/MargineCommessa';
 import { useAuth } from '@/lib/AuthContext';
 
 export default function Fatturazione() {
@@ -29,6 +30,7 @@ export default function Fatturazione() {
         <TabsList>
           <TabsTrigger value="passiva"><FileText className="w-4 h-4 mr-1.5" /> Passiva</TabsTrigger>
           <TabsTrigger value="attiva"><TrendingUp className="w-4 h-4 mr-1.5" /> Attiva</TabsTrigger>
+          {isAdmin && <TabsTrigger value="margine"><Scale className="w-4 h-4 mr-1.5" /> Margine</TabsTrigger>}
           {isAdmin && <TabsTrigger value="fornitori"><Users className="w-4 h-4 mr-1.5" /> Fornitori</TabsTrigger>}
           {isAdmin && <TabsTrigger value="tariffe"><DollarSign className="w-4 h-4 mr-1.5" /> Tariffe & Anagrafiche</TabsTrigger>}
           <TabsTrigger value="storico"><History className="w-4 h-4 mr-1.5" /> Storico</TabsTrigger>
@@ -46,6 +48,7 @@ export default function Fatturazione() {
           </Tabs>
         </TabsContent>
         <TabsContent value="attiva" className="mt-4"><FatturazioneAttiva isAdmin={isAdmin} onVaiTariffe={() => setTab('tariffe')} /></TabsContent>
+        {isAdmin && <TabsContent value="margine" className="mt-4"><MargineCommessa /></TabsContent>}
         {isAdmin && <TabsContent value="fornitori" className="mt-4"><FornitoriManager /></TabsContent>}
         {isAdmin && <TabsContent value="tariffe" className="mt-4"><TariffeUnificate /></TabsContent>}
         <TabsContent value="storico" className="mt-4"><StoricoFatturazione onOpen={openPeriod} /></TabsContent>

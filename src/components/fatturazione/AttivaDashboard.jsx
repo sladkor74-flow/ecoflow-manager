@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { Loader2, Play, CheckCircle, AlertTriangle, Lock, RotateCcw } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import { Input } from '@/components/ui/input';
 import RiepilogoEcotyre from './RiepilogoEcotyre';
 import AttivaAnomalie from './AttivaAnomalie';
 
@@ -26,18 +27,21 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
   const [anomalieAnteprima, setAnomalieAnteprima] = useState([]);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showRiapri, setShowRiapri] = useState(false);
+  // La chiusura chiede la conferma dell'amministrazione: giorno e, se c'e', numero di fattura per canale
+  const [showChiudi, setShowChiudi] = useState(false);
+  const [conferma, setConferma] = useState({ data: new Date().toISOString().slice(0, 10), numeri: {} });
   const [versione, setVersione] = useState(0);
   const { toast } = useToast();
 
   // Un'azione rifiutata si dice: prima l'errore veniva inghiottito e il pulsante
   // sembrava non fare niente.
-  const cambiaStato = async (azione) => {
+  const cambiaStato = async (azione, extra = null) => {
     const rifiuti = [];
     for (const t of TIPS) {
       const doc = data[t.key]?.documento;
       if (!doc) continue;
       try {
-        const res = await base44.functions.invoke('cambiaStatoFatturazione', { documento_id: doc.id, azione });
+        const res = await base44.functions.invoke('cambiaStatoFatturazione', { documento_id: doc.id, azione, ...(extra ? extra(t) : {}) });
         if (azione === 'verifica' && res.data?.errori > 0) rifiuti.push(`${t.label}: ${res.data.errori} righe senza tariffa, il documento resta "elaborata"`);
       } catch (e) {
         rifiuti.push(`${t.label}: ${e?.response?.data?.error || e.message}`);
@@ -124,6 +128,9 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
                   </div>
                   <p className="text-2xl font-bold">€ {tot.toFixed(2)}</p>
                   <p className="text-xs text-muted-foreground mt-1">{voci} prestazioni</p>
+                  {doc?.stato === 'chiusa' && doc.fattura_confermata_il && (
+                    <p className="text-xs text-emerald-700 mt-1">Fatturazione confermata il {doc.fattura_confermata_il.split('-').reverse().join('/')}{doc.fattura_numero ? ` · fattura ${doc.fattura_numero}` : ''}</p>
+                  )}
                 </div>
               );
             })}
@@ -161,7 +168,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('verifica')}><CheckCircle className="w-4 h-4 mr-1.5" /> Verifica</Button>
             {tuttiVerificati && <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('approva')}><CheckCircle className="w-4 h-4 mr-1.5" /> Approva</Button>}
-            {tuttiApprovati && <Button disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('chiudi')}><Lock className="w-4 h-4 mr-1.5" /> Chiudi Periodo</Button>}
+            {tuttiApprovati && <Button disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => setShowChiudi(true)}><Lock className="w-4 h-4 mr-1.5" /> Chiudi Periodo</Button>}
             {qualcunoChiuso && <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => setShowRiapri(true)}><RotateCcw className="w-4 h-4 mr-1.5" /> Riapri periodo</Button>}
           </div>
         </>
@@ -182,6 +189,35 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
           <AlertDialogFooter>
             <AlertDialogCancel>Annulla</AlertDialogCancel>
             <AlertDialogAction onClick={confermaElabora}>Elabora comunque</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showChiudi} onOpenChange={setShowChiudi}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Chiudere {mese} {anno}?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <p>Il mese si chiude quando l'amministrazione conferma che la fattura a Ecotyre è stata emessa ed è andata a buon fine. Da chiuso non si rielabora più, se non riaprendolo.</p>
+                <div>
+                  <label className="text-xs block mb-1 text-foreground">Giorno della conferma dell'amministrazione</label>
+                  <Input type="date" className="w-44" value={conferma.data} max={new Date().toISOString().slice(0, 10)} onChange={e => setConferma(c => ({ ...c, data: e.target.value }))} />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {TIPS.filter(t => (data[t.key]?.documento?.totale || 0) > 0).map(t => (
+                    <div key={t.key}>
+                      <label className="text-xs block mb-1 text-foreground">Fattura {t.label} (facoltativo)</label>
+                      <Input placeholder="numero" value={conferma.numeri[t.key] || ''} onChange={e => setConferma(c => ({ ...c, numeri: { ...c.numeri, [t.key]: e.target.value } }))} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction disabled={!conferma.data} onClick={() => { setShowChiudi(false); cambiaStato('chiudi', (t) => ({ conferma: { data: conferma.data, numero: conferma.numeri[t.key] || '' } })); }}>Conferma e chiudi</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -90,6 +90,15 @@ export function controlliDichiarazione(d, conferito, operazione, dove = {}) {
       testo: `Conferiti ${mig(conferito)} kg in questo mese e nessuna dichiarazione.`,
     });
   }
+  // L'extra raccolta si dichiara sul mese del formulario (fine trasporto), anche
+  // se la dichiarazione arriva mesi dopo: i PFU raccolti a luglio, lavorati e
+  // usciti ad agosto, si dichiarano a consuntivo in settembre, ma il rigo resta
+  // a luglio. Messa sul mese in cui la si riceve, la stessa raccolta comparirebbe
+  // due volte: un mese col conferito senza dichiarazione, un altro con la
+  // dichiarazione senza conferito.
+  if (q > 0 && !conferito && (dove.canale || 'RETE') === 'EXTRA_RACCOLTA') {
+    esiti.push({ tipo: 'extra_fuori_mese', livello: 'attenzione', testo: 'Nessun conferimento di extra raccolta in questo mese: la dichiarazione va sul mese del formulario (fine trasporto), non su quello in cui arriva.' });
+  }
   if (q > 0 && materiali === 0) {
     esiti.push({ tipo: 'senza_dettaglio', livello: 'info', testo: 'Manca il dettaglio dei materiali ricavati.' });
   }
