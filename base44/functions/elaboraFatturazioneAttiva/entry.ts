@@ -1,23 +1,20 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { filtraPeriodo } from "../../shared/filtroPeriodo.ts";
-import { sortTariffe, resolveTariffa, calcolaTotale, fattoreConv } from "../../shared/ecotyreTariffe.ts";
-import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
-import { PROV_TO_REGION } from "../../shared/raccoltoCalculator.ts";
+import { calcolaRigheAttiva, eRigaACorpo, TIPOLOGIE_ATTIVA } from "../../shared/attivaCalcolo.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
-// Regione del ritiro mostrata nel dettaglio: se il record non la riporta si ricava
-// dalla provincia. La tariffa continua a usare la regione del record come prima.
-const regioneRitiro = (r) => r.regione || PROV_TO_REGION[String(r.provincia || '').toUpperCase().trim()] || '';
-
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+const r2 = (v) => Math.round(v * 100) / 100;
 
 // Elabora la fatturazione attiva per un dato anno/mese:
-// Genera 3 documenti (RETE, ACI, EXTRA_RACCOLTA) con righe automatiche
-// dai dati operativi del gestionale. Cliente/committente: sempre ECOTYRE.
-// Periodo determinato da filtraPeriodo (stato terminato + trasporto_finito_il in anno/mese).
-// Per ogni record determina il tipo di servizio (TRASP / TRASP_TRATT) in base
-// alla destinazione: se l'impianto ha trattamento_fatturato_da_ecotyre = true -> TRASP.
+// genera 3 documenti (RETE, ACI, EXTRA_RACCOLTA), mai sommati fra loro, con le
+// righe calcolate da base44/shared/attivaCalcolo.ts - le stesse dell'anteprima.
+// Cliente/committente: sempre ECOTYRE.
+//
+// La sostituzione e' in due tempi: prima si scrive il documento nuovo come
+// bozza, poi lo si promuove, e solo alla fine si ritira il vecchio. Un'interruzione
+// a meta' lascia il mese com'era, non vuoto. Un documento gia' approvato o
+// esportato non si cancella: resta nello storico come superato, col motivo.
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -26,241 +23,97 @@ export default async function(req) {
     if (user.role !== 'admin') return rispostaSolaLettura();
     const { anno, mese } = await req.json();
     if (!anno || !mese) return Response.json({ error: 'Anno e mese obbligatori' }, { status: 400 });
+    const meseIdx = MESI.indexOf(mese);
+    if (meseIdx < 0) return Response.json({ error: `Mese non riconosciuto: ${mese}` }, { status: 400 });
 
     const annoNum = Number(anno);
+    const Doc = base44.asServiceRole.entities.DocumentoFatturazione;
+    const Voce = base44.asServiceRole.entities.VoceFatturazione;
 
-    // Check for existing closed documents
-    const existing = await base44.asServiceRole.entities.DocumentoFatturazione.filter({
-      tipo: 'ATTIVA', anno: annoNum, mese
-    });
-    const closedDocs = existing.filter(d => d.stato === 'chiusa');
-    if (closedDocs.length > 0) {
+    const existing = await Doc.filter({ tipo: 'ATTIVA', anno: annoNum, mese });
+    if (existing.some(d => d.stato === 'chiusa' && !d.superato)) {
       return Response.json({ error: 'Periodo già chiuso. Impossibile rielaborare.' }, { status: 400 });
     }
 
-    // Load operational data WITHOUT month filter, then apply filtraPeriodo
-    const [reteAll, aciAll, extraAll, fornitoriAll] = await Promise.all([
+    const [reteAll, aciAll, extraAll, fornitori, tariffe] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.PrimariaRete),
       fetchAll(base44.asServiceRole.entities.PrimariaAci),
       fetchAll(base44.asServiceRole.entities.ExtraRaccolta),
       fetchAll(base44.asServiceRole.entities.Fornitore),
+      base44.asServiceRole.entities.Tariffa.filter({ direzione: 'ATTIVA' }),
     ]);
-    const rete = filtraPeriodo(reteAll, annoNum, mese);
-    const aci = filtraPeriodo(aciAll, annoNum, mese);
-    const extraRaccolta = filtraPeriodo(extraAll, annoNum, mese);
+    const { righe, anomalie, extra_secondarie_escluse } = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: annoNum, mese });
 
-    // Build fornitore map: normalizzaRagioneSociale(destinazione) -> fornitore
-    const fornitoreMap = new Map();
-    for (const f of fornitoriAll) {
-      const key = normalizzaRagioneSociale(f.ragione_sociale);
-      if (key) fornitoreMap.set(key, f);
+    // Bozze rimaste da un'elaborazione interrotta: non sono mai state valide.
+    for (const d of existing.filter(d => d.stato === 'bozza')) {
+      await Voce.deleteMany({ documento_id: d.id });
+      await Doc.delete(d.id);
     }
+    const precedenti = existing.filter(d => d.stato !== 'bozza' && !d.superato);
 
-    // Determine tipo servizio from destinazione: TRASP if impianto has trattamento_fatturato_da_ecotyre
-    function getTipoServizio(r) {
-      const dest = r.destinazione;
-      if (!dest) return 'TRASP_TRATT';
-      const key = normalizzaRagioneSociale(dest);
-      const f = fornitoreMap.get(key);
-      if (f && f.trattamento_fatturato_da_ecotyre === true) return 'TRASP';
-      return 'TRASP_TRATT';
-    }
-
-    // Load attiva tariffe
-    // Anche qui vale la finestra di validita', non lo stato: una tariffa
-    // rinegoziata resta buona per i mesi prima del cambio. Vedi calcolaPassiva.
-    const tariffeTutte = await base44.asServiceRole.entities.Tariffa.filter({ direzione: 'ATTIVA' });
-    const tariffe = tariffeTutte.filter(t => t.stato === 'attivo' || !!t.data_fine_validita);
-    const tariffeSorted = sortTariffe(tariffe);
-
-    const anomalieMap = new Map();
-    function addAnomalia(tipologia, regione, classe, eer, servizioEcotyre, quantitaKg) {
-      const key = `${tipologia}|${regione || ''}|${classe || ''}|${eer || ''}|${servizioEcotyre || ''}`;
-      const tonn = quantitaKg / 1000;
-      if (anomalieMap.has(key)) {
-        anomalieMap.get(key).tonnellate += tonn;
-      } else {
-        let desc = `Nessuna tariffa attiva ECOTYRE per tipologia ${tipologia}`;
-        if (regione) desc += `, regione ${regione}`;
-        if (classe) desc += `, classe ${classe}`;
-        if (eer) desc += `, EER ${eer}`;
-        desc += `, servizio ${servizioEcotyre}`;
-        anomalieMap.set(key, { tipologia, regione: regione || '', classe: classe || '', eer_codice: eer || '', servizio_ecotyre: servizioEcotyre || '', tonnellate: tonn, descrizione: desc });
-      }
-    }
-
-    // Ripartizione per tipo di servizio
-    const ripartizione = {
-      TRASP: { ordini: 0, kg: 0, totale: 0 },
-      TRASP_TRATT: { ordini: 0, kg: 0, totale: 0 },
-    };
-    function addRipartizione(tipoServ, kg, totale) {
-      const r = ripartizione[tipoServ];
-      if (!r) return;
-      r.ordini++;
-      r.kg += kg;
-      r.totale += totale;
-    }
-
-    // --- ELABORAZIONE RETE ---
-    const righeRete = [];
-    for (const r of rete) {
-      const quantitaKg = r.peso_effettivo || 0;
-      if (quantitaKg === 0) continue;
-      const tipoServizio = getTipoServizio(r);
-      const dataRiferimento = r.trasporto_finito_il;
-      const tariffa = resolveTariffa(tariffeSorted, 'RETE', r.classe, '', r.cer, dataRiferimento, tipoServizio);
-      if (!tariffa) addAnomalia('RETE', r.regione, r.classe, r.cer, tipoServizio, quantitaKg);
-      const totale = Math.round(calcolaTotale(quantitaKg, tariffa) * 100) / 100;
-      addRipartizione(tipoServizio, quantitaKg, totale);
-      righeRete.push({
-        tipologia: 'RETE', tipo: 'ATTIVA',
-        servizio_ecotyre: tipoServizio,
-        regione: regioneRitiro(r), fatturante: 'ECOTYRE',
-        ordine: r.id_ordine || '',
-        data_fine_trasporto: r.trasporto_finito_il || null,
-        numero_fir: r.numero_fir || '',
-        classe: r.classe || '', eer_codice: r.cer || '',
-        quantita: quantitaKg, unita_quantita: 'kg',
-        tariffa_id: tariffa?.id || '', tariffa_valore: tariffa?.valore || 0,
-        unita_misura: tariffa?.unita_misura || '€/t',
-        unita_prezzo: tariffa?.unita_misura || '€/t',
-        fattore_conversione: fattoreConv(tariffa),
-        totale,
-        origine_dato: 'TERMINATI_RETE', origine_record_id: r.id,
-        sospesa: false, motivo_sospensione: '',
-        stato_validazione: 'verificato',
-        anno: annoNum, mese,
-      });
-    }
-
-    // --- ELABORAZIONE ACI --- (cliente ECOTYRE, tariffa per regione)
-    const righeAci = [];
-    for (const r of aci) {
-      const quantitaKg = r.peso_effettivo || 0;
-      if (quantitaKg === 0) continue;
-      const regione = r.regione || '';
-      const tipoServizio = getTipoServizio(r);
-      const dataRiferimento = r.trasporto_finito_il;
-      const tariffa = resolveTariffa(tariffeSorted, 'ACI', r.classe, regione, r.cer, dataRiferimento, tipoServizio);
-      if (!tariffa) addAnomalia('ACI', regione, r.classe, r.cer, tipoServizio, quantitaKg);
-      const totale = Math.round(calcolaTotale(quantitaKg, tariffa) * 100) / 100;
-      addRipartizione(tipoServizio, quantitaKg, totale);
-      righeAci.push({
-        tipologia: 'ACI', tipo: 'ATTIVA',
-        servizio_ecotyre: tipoServizio,
-        regione, fatturante: 'ECOTYRE',
-        ticket_n: r.numero_ordine_interno || '',
-        ordine: r.id_ordine || '',
-        data_fine_trasporto: r.trasporto_finito_il || null,
-        numero_fir: r.numero_fir || '',
-        classe: r.classe || '', eer_codice: r.cer || '',
-        quantita: quantitaKg, unita_quantita: 'kg',
-        tariffa_id: tariffa?.id || '', tariffa_valore: tariffa?.valore || 0,
-        unita_misura: tariffa?.unita_misura || '€/t',
-        unita_prezzo: tariffa?.unita_misura || '€/t',
-        fattore_conversione: fattoreConv(tariffa),
-        totale,
-        origine_dato: 'ACI', origine_record_id: r.id,
-        sospesa: false, motivo_sospensione: '',
-        stato_validazione: 'verificato',
-        anno: annoNum, mese,
-      });
-    }
-
-    // --- ELABORAZIONE EXTRA RACCOLTA --- (dati manuali da ExtraRaccolta)
-    const righeExtra = [];
-    for (const r of extraRaccolta) {
-      const quantitaKg = r.peso_effettivo || 0;
-      if (quantitaKg === 0) continue;
-      const tipoServizio = getTipoServizio(r);
-      const dataRiferimento = r.trasporto_finito_il;
-      const tariffa = resolveTariffa(tariffeSorted, 'EXTRA_RACCOLTA', r.classe, r.regione || '', r.cer, dataRiferimento, tipoServizio);
-      if (!tariffa) addAnomalia('EXTRA_RACCOLTA', r.regione, r.classe, r.cer, tipoServizio, quantitaKg);
-      const totale = Math.round(calcolaTotale(quantitaKg, tariffa) * 100) / 100;
-      addRipartizione(tipoServizio, quantitaKg, totale);
-      righeExtra.push({
-        tipologia: 'EXTRA_RACCOLTA', tipo: 'ATTIVA',
-        servizio_ecotyre: tipoServizio,
-        regione: regioneRitiro(r), fatturante: 'ECOTYRE',
-        ordine: r.id_ordine || '',
-        data_fine_trasporto: r.trasporto_finito_il || null,
-        numero_fir: r.numero_fir || '',
-        classe: r.classe || '', eer_codice: r.cer || '',
-        quantita: quantitaKg, unita_quantita: 'kg',
-        tariffa_id: tariffa?.id || '', tariffa_valore: tariffa?.valore || 0,
-        unita_misura: tariffa?.unita_misura || '€/t',
-        unita_prezzo: tariffa?.unita_misura || '€/t',
-        fattore_conversione: fattoreConv(tariffa),
-        totale,
-        origine_dato: 'EXTRA_RACCOLTA', origine_record_id: r.id,
-        sospesa: false, motivo_sospensione: '',
-        stato_validazione: 'verificato',
-        anno: annoNum, mese,
-      });
-    }
-
-    // Delete existing documents and righe
-    for (const doc of existing) {
-      await base44.asServiceRole.entities.VoceFatturazione.deleteMany({ documento_id: doc.id });
-      await base44.asServiceRole.entities.DocumentoFatturazione.delete(doc.id);
-    }
-
-    // Create documents
-    const meseIdx = MESI.indexOf(mese);
-    const dataInizio = new Date(annoNum, meseIdx, 1).toISOString().split('T')[0];
-    const dataFine = new Date(annoNum, meseIdx + 1, 0).toISOString().split('T')[0];
-
-    const tipologie = [
-      { tipo: 'RETE', righe: righeRete },
-      { tipo: 'ACI', righe: righeAci },
-      { tipo: 'EXTRA_RACCOLTA', righe: righeExtra },
-    ];
+    // La data e' un giorno di calendario: si scrive senza passare dal fuso del server.
+    const pad = (n) => String(n).padStart(2, '0');
+    const dataInizio = `${annoNum}-${pad(meseIdx + 1)}-01`;
+    const dataFine = `${annoNum}-${pad(meseIdx + 1)}-${pad(new Date(Date.UTC(annoNum, meseIdx + 1, 0)).getUTCDate())}`;
+    const adesso = new Date().toISOString();
 
     const docs = [];
-    for (const { tipo, righe } of tipologie) {
-      const totaleNonSospese = righe.reduce((s, r) => s + r.totale, 0);
+    const ripartizionePerTipologia = {};
+    for (const tipo of TIPOLOGIE_ATTIVA) {
+      const lista = righe[tipo];
+      const errori = lista.filter(r => r.stato_validazione === 'errore').length;
+      const totale = r2(lista.reduce((s, r) => s + r.totale, 0));
+      const rip = { TRASP: { ordini: 0, kg: 0, totale: 0 }, TRASP_TRATT: { ordini: 0, kg: 0, totale: 0 } };
+      for (const r of lista) {
+        const x = rip[r.servizio_ecotyre];
+        if (!x) continue;
+        if (!eRigaACorpo(r)) { x.ordini++; x.kg += r.quantita; }
+        x.totale += r.totale;
+      }
+      ripartizionePerTipologia[tipo] = rip;
 
-      const doc = await base44.asServiceRole.entities.DocumentoFatturazione.create({
+      const doc = await Doc.create({
         tipo: 'ATTIVA', tipologia: tipo, anno: annoNum, mese,
         data_inizio: dataInizio, data_fine: dataFine,
-        stato: 'elaborata',
-        totale: Math.round(totaleNonSospese * 100) / 100,
-        numero_voci: righe.length,
-        voci_errore: 0, voci_sospese: 0,
-        data_elaborazione: new Date().toISOString(),
+        stato: 'bozza',
+        totale, numero_voci: lista.length,
+        voci_errore: errori, voci_sospese: 0,
+        data_elaborazione: adesso,
         cliente: 'ECOTYRE',
       });
-
-      const righeWithDoc = righe.map(r => ({ ...r, documento_id: doc.id }));
-      for (let i = 0; i < righeWithDoc.length; i += 100) {
-        await base44.asServiceRole.entities.VoceFatturazione.bulkCreate(righeWithDoc.slice(i, i + 100));
-      }
-
-      docs.push({ tipologia: tipo, documento_id: doc.id, totale: doc.totale, voci: righe.length, errori: 0, sospese: 0 });
+      const conDoc = lista.map(r => ({ ...r, documento_id: doc.id }));
+      for (let i = 0; i < conDoc.length; i += 100) await Voce.bulkCreate(conDoc.slice(i, i + 100));
+      docs.push({ tipologia: tipo, documento_id: doc.id, totale, voci: lista.length, errori, sospese: 0 });
     }
 
-    const anomalie = Array.from(anomalieMap.values()).map(a => ({
-      ...a,
-      tonnellate: Math.round(a.tonnellate * 100) / 100,
-    }));
+    // Tutte le righe sono scritte: i nuovi documenti diventano validi...
+    for (const d of docs) await Doc.update(d.documento_id, { stato: 'elaborata' });
+    // ...e i precedenti si ritirano. Una bozza di lavoro si sostituisce; cio' che
+    // era gia' stato approvato o esportato resta nello storico, col motivo.
+    const superati = [];
+    for (const d of precedenti) {
+      if (['approvata', 'esportata'].includes(d.stato)) {
+        const nuovo = docs.find(x => x.tipologia === d.tipologia);
+        await Doc.update(d.id, {
+          superato: true,
+          motivo_superato: `Rielaborato il ${adesso.slice(0, 10)} da ${user.full_name || user.email}: il documento era ${d.stato} con totale ${Number(d.totale || 0).toFixed(2)} €, il nuovo calcolo dà ${Number(nuovo?.totale || 0).toFixed(2)} €.`,
+        });
+        superati.push({ tipologia: d.tipologia, stato: d.stato, totale: d.totale });
+      } else {
+        await Voce.deleteMany({ documento_id: d.id });
+        await Doc.delete(d.id);
+      }
+    }
 
-    const ripartizione_servizio = {
-      TRASP: {
-        ordini: ripartizione.TRASP.ordini,
-        kg: Math.round(ripartizione.TRASP.kg),
-        ton: Math.round((ripartizione.TRASP.kg / 1000) * 100) / 100,
-        totale: Math.round(ripartizione.TRASP.totale * 100) / 100,
-      },
-      TRASP_TRATT: {
-        ordini: ripartizione.TRASP_TRATT.ordini,
-        kg: Math.round(ripartizione.TRASP_TRATT.kg),
-        ton: Math.round((ripartizione.TRASP_TRATT.kg / 1000) * 100) / 100,
-        totale: Math.round(ripartizione.TRASP_TRATT.totale * 100) / 100,
-      },
-    };
-
-    return Response.json({ documenti: docs, anomalie, ripartizione_servizio });
+    const chiudi = (x) => ({ ordini: x.ordini, kg: Math.round(x.kg), ton: r2(x.kg / 1000), totale: r2(x.totale) });
+    return Response.json({
+      documenti: docs,
+      anomalie,
+      superati,
+      extra_secondarie_escluse,
+      // Per canale, come tutto il resto: i tre canali non si sommano.
+      ripartizione_servizio_per_tipologia: Object.fromEntries(TIPOLOGIE_ATTIVA.map(t => [t, { TRASP: chiudi(ripartizionePerTipologia[t].TRASP), TRASP_TRATT: chiudi(ripartizionePerTipologia[t].TRASP_TRATT) }])),
+    });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

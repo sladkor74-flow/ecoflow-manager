@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { PROV_TO_REGION } from "../../shared/raccoltoCalculator.ts";
+import { documentoValido } from "../../shared/attivaCalcolo.ts";
 
 // Archivio d'origine di ogni voce, per ricavare la regione del ritiro quando la voce
 // non l'ha salvata (es. extra raccolta inserita con la sola provincia).
@@ -21,7 +22,8 @@ export default async function(req) {
 
     const result = {};
     for (const tipologia of ['RETE', 'ACI', 'EXTRA_RACCOLTA']) {
-      const doc = docs.find(d => d.tipologia === tipologia);
+      // mai un documento superato ne' una bozza rimasta da un'elaborazione interrotta
+      const doc = documentoValido(docs, tipologia);
       if (!doc) {
         result[tipologia] = { documento: null, righe: [], totale: 0 };
         continue;

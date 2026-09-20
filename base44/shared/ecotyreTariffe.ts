@@ -3,6 +3,8 @@
 // Nessun valore predefinito: la tariffa deve esistere in tabella Tariffa (direzione ATTIVA).
 // Risoluzione con validita' temporale, cliente case-insensitive e preferenza servizio_ecotyre.
 
+import { giornoRoma } from "./giornoItaliano.ts";
+
 function normText(v) { return String(v || '').trim().toUpperCase(); }
 
 export function sortTariffe(tariffe) {
@@ -17,7 +19,10 @@ export function sortTariffe(tariffe) {
 // servizioEcotyre '' = solo tariffe con servizio_ecotyre vuoto (valgono per entrambi).
 // servizioEcotyre 'TRASP'/'TRASP_TRATT' = solo tariffe con quel servizio_esatto.
 export function findTariffa(tariffeSorted, tipologia, cliente, classe, regione, eer, dataRiferimento, servizioEcotyre) {
-  const dt = dataRiferimento ? new Date(dataRiferimento).getTime() : null;
+  // La validita' si confronta sul giorno italiano, non sull'istante: una tariffa
+  // che finisce il 30 giugno vale per tutto il 30 giugno, anche per un trasporto
+  // memorizzato con l'ora vera. Stessa regola di calcolaPassiva.
+  const giorno = dataRiferimento ? giornoRoma(dataRiferimento) : '';
   for (const t of tariffeSorted) {
     if (t.tipologia !== tipologia) continue;
     if (t.cliente && normText(t.cliente) !== normText(cliente)) continue;
@@ -25,9 +30,11 @@ export function findTariffa(tariffeSorted, tipologia, cliente, classe, regione, 
     if (t.regione && t.regione !== regione) continue;
     if (t.eer_codice && t.eer_codice !== eer) continue;
     if (servizioEcotyre !== undefined && (t.servizio_ecotyre || '') !== servizioEcotyre) continue;
-    if (dt !== null) {
-      if (t.data_inizio_validita && new Date(t.data_inizio_validita).getTime() > dt) continue;
-      if (t.data_fine_validita && new Date(t.data_fine_validita).getTime() < dt) continue;
+    if (giorno) {
+      const inizio = String(t.data_inizio_validita || '').slice(0, 10);
+      const fine = String(t.data_fine_validita || '').slice(0, 10);
+      if (inizio && inizio > giorno) continue;
+      if (fine && fine < giorno) continue;
     }
     return t;
   }

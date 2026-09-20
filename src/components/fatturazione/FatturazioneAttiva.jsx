@@ -31,7 +31,7 @@ export default function FatturazioneAttiva({ isAdmin, onVaiTariffe }) {
       const res = await base44.functions.invoke('elaboraFatturazioneAttiva', { anno: periodo.anno, mese: periodo.mese });
       setAnomalie(res.data?.anomalie || []);
       await loadData();
-    } catch (e) { alert(e.message); }
+    } catch (e) { alert(e?.response?.data?.error || e.message); }
     setElaborating(false);
   };
 

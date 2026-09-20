@@ -76,6 +76,7 @@
         "TERMINATI_RETE",
         "ACI",
         "TERZIARIE",
+        "EXTRA_RACCOLTA",
         "MANUALE"
       ]
     },

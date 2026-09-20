@@ -3,7 +3,8 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
-import { Loader2, Play, CheckCircle, AlertTriangle, Lock } from 'lucide-react';
+import { Loader2, Play, CheckCircle, AlertTriangle, Lock, RotateCcw } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
 import RiepilogoEcotyre from './RiepilogoEcotyre';
 import AttivaAnomalie from './AttivaAnomalie';
 
@@ -24,25 +25,46 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
   const { anno, mese } = periodo;
   const [anomalieAnteprima, setAnomalieAnteprima] = useState([]);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showRiapri, setShowRiapri] = useState(false);
+  const [versione, setVersione] = useState(0);
+  const { toast } = useToast();
 
+  // Un'azione rifiutata si dice: prima l'errore veniva inghiottito e il pulsante
+  // sembrava non fare niente.
   const cambiaStato = async (azione) => {
+    const rifiuti = [];
     for (const t of TIPS) {
       const doc = data[t.key]?.documento;
-      if (doc) {
-        try { await base44.functions.invoke('cambiaStatoFatturazione', { documento_id: doc.id, azione }); } catch (e) {}
+      if (!doc) continue;
+      try {
+        const res = await base44.functions.invoke('cambiaStatoFatturazione', { documento_id: doc.id, azione });
+        if (azione === 'verifica' && res.data?.errori > 0) rifiuti.push(`${t.label}: ${res.data.errori} righe senza tariffa, il documento resta "elaborata"`);
+      } catch (e) {
+        rifiuti.push(`${t.label}: ${e?.response?.data?.error || e.message}`);
       }
     }
+    if (rifiuti.length > 0) toast({ title: 'Azione non completata', description: rifiuti.join(' — '), variant: 'destructive' });
     await onReload();
+    setVersione(v => v + 1);
   };
 
+  const senzaTariffa = anomalieAnteprima.filter(a => !a.tipo || a.tipo === 'senza_tariffa');
+  // Un documento gia' approvato o esportato non si cancella: resta nello storico come superato.
+  const giaUsciti = TIPS.filter(t => ['approvata', 'esportata'].includes(data[t.key]?.documento?.stato));
+
   const handleElabora = () => {
-    if (anomalieAnteprima.length > 0) setShowConfirm(true);
-    else onElabora();
+    if (senzaTariffa.length > 0 || giaUsciti.length > 0) setShowConfirm(true);
+    else avviaElabora();
+  };
+
+  const avviaElabora = async () => {
+    await onElabora();
+    setVersione(v => v + 1);
   };
 
   const confermaElabora = () => {
     setShowConfirm(false);
-    onElabora();
+    avviaElabora();
   };
 
   const errori = TIPS.reduce((s, t) => s + (data[t.key]?.documento?.voci_errore || 0), 0);
@@ -50,6 +72,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
   const tuttiElaborati = TIPS.every(t => data[t.key]?.documento);
   const tuttiVerificati = TIPS.every(t => data[t.key]?.documento?.stato === 'verificata');
   const tuttiApprovati = TIPS.every(t => data[t.key]?.documento?.stato === 'approvata' || data[t.key]?.documento?.stato === 'esportata');
+  const qualcunoChiuso = TIPS.some(t => data[t.key]?.documento?.stato === 'chiusa');
 
   return (
     <div className="space-y-4">
@@ -75,7 +98,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
       </div>
 
       {/* Riepilogo automatico dovuto da Ecotyre (anteprima) */}
-      <RiepilogoEcotyre periodo={periodo} onAnomalieChange={setAnomalieAnteprima} onVaiTariffe={onVaiTariffe} />
+      <RiepilogoEcotyre periodo={periodo} onAnomalieChange={setAnomalieAnteprima} onVaiTariffe={onVaiTariffe} versione={versione} />
 
       {/* Anomalie rilevate dopo elaborazione (documenta) */}
       <AttivaAnomalie anomalie={anomalie} />
@@ -139,6 +162,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
             <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('verifica')}><CheckCircle className="w-4 h-4 mr-1.5" /> Verifica</Button>
             {tuttiVerificati && <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('approva')}><CheckCircle className="w-4 h-4 mr-1.5" /> Approva</Button>}
             {tuttiApprovati && <Button disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('chiudi')}><Lock className="w-4 h-4 mr-1.5" /> Chiudi Periodo</Button>}
+            {qualcunoChiuso && <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => setShowRiapri(true)}><RotateCcw className="w-4 h-4 mr-1.5" /> Riapri periodo</Button>}
           </div>
         </>
       )}
@@ -147,13 +171,32 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confermi l'elaborazione?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Alcune tonnellate non hanno una tariffa applicabile e verranno conteggiate a zero euro: il documento risulterà incompleto. Confermi di voler elaborare comunque?
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                {senzaTariffa.length > 0 && <p>Alcune tonnellate non hanno una tariffa applicabile: le righe saranno salvate a zero euro e segnate come errore, e il documento non potrà essere verificato finché la tariffa manca.</p>}
+                {giaUsciti.length > 0 && <p>{giaUsciti.map(t => t.label).join(', ')}: il documento di questo mese è già stato approvato o esportato. Non viene cancellato: resta nello storico come superato, con la data e i due totali a confronto.</p>}
+                <p>Confermi di voler elaborare?</p>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Annulla</AlertDialogCancel>
             <AlertDialogAction onClick={confermaElabora}>Elabora comunque</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showRiapri} onOpenChange={setShowRiapri}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Riaprire {mese} {anno}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              I documenti tornano allo stato "elaborata" e il mese si può rielaborare. La riapertura resta scritta nelle note di ogni documento: chi, quando e da che stato.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { setShowRiapri(false); cambiaStato('riapri'); }}>Riapri</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

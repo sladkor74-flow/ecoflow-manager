@@ -194,3 +194,36 @@ che gli spedisce, non le primarie, che porta a se stesso. E il suo target di
 raccolta e' uno solo: fra gli impianti si divide **in proporzione alle secondarie
 che ciascuno riceve da lui**, altrimenti compare intero sotto entrambi e il
 residuo risulta il doppio di quello vero.
+
+### La fatturazione attiva verso Ecotyre
+
+Le righe si calcolano in un punto solo, `base44/shared/attivaCalcolo.ts`:
+l'anteprima (`getRiepilogoEcotyre`) e il documento (`elaboraFatturazioneAttiva`)
+passano entrambi di li', cosi' non possono dire due ricavi per lo stesso mese.
+Chi aggiunge una regola la aggiunge li', e aggiunge un caso a
+`prove/attivaCalcolo.mjs` (`npm run prove`).
+
+- **Rete e ACI** prendono il prezzo dalla tabella delle tariffe attive; la
+  validita' si confronta sul giorno italiano, come nella passiva.
+- **L'extra raccolta prende prezzo e sovracosti dall'intervento**
+  (`prezzo_attivo_t` e i tre `sovracosto_*`), gli stessi che usa la pagina Extra
+  Raccolta: pagina e fattura devono dire lo stesso ricavo. Ogni sovracosto e' una
+  riga a corpo, senza chili. Le **secondarie di extra raccolta non si fatturano**:
+  il ricavo sta sulla raccolta.
+- **Una riga senza prezzo e' un errore**, non una riga verificata: il documento
+  non si puo' verificare finche' la tariffa manca.
+- **I tre canali non si sommano mai**, nemmeno nel riepilogo per tipo di servizio.
+
+**La riconciliazione.** Il portale chiude gli ordini giorni dopo il trasporto: un
+ritiro del 30 giugno chiuso il 4 luglio entra negli archivi dopo che giugno e'
+stato elaborato. A ogni apertura del mese il documento salvato si confronta con i
+dati di oggi (`riconciliaAttiva`, chiave ordine + formulario: gli id dei record
+cambiano a ogni importazione) e le differenze si mostrano: arrivati dopo,
+cambiati, non piu' nel mese.
+
+**Gli stati.** elaborata, verificata, approvata, (esportata), chiusa. Ogni azione
+parte solo dallo stato giusto; un periodo chiuso si riapre solo con «riapri», che
+lascia scritto nelle note del documento chi, quando e da che stato. Una
+rielaborazione scrive prima i documenti nuovi e ritira i vecchi solo alla fine;
+cio' che era gia' approvato o esportato non si cancella, resta come superato col
+motivo.

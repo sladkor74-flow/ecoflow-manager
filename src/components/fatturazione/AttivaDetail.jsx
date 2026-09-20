@@ -22,7 +22,8 @@ const euro = (v) => `€ ${formatNumber(v || 0, { minimumFractionDigits: 2, maxi
 const COLONNE = [
   { titolo: 'Ordine', valore: r => r.ordine || '', tipo: 'testo', peso: 1.25 },
   { titolo: 'Fine trasporto', valore: r => r.data_fine_trasporto || null, tipo: 'data', peso: 0.95 },
-  { titolo: 'FIR', valore: r => r.numero_fir || '', tipo: 'testo', peso: 1.35 },
+  // una riga a corpo (sovracosto dell'extra raccolta) porta la sua descrizione accanto al formulario
+  { titolo: 'FIR', valore: r => [r.numero_fir, r.descrizione].filter(Boolean).join(' · '), tipo: 'testo', peso: 1.35 },
   { titolo: 'Regione ritiro', valore: r => r.regione || '', tipo: 'testo', peso: 1.1 },
   { titolo: 'Classe', valore: r => r.classe || '', tipo: 'testo', peso: 0.7 },
   { titolo: 'Quantità (kg)', valore: r => r.quantita ?? null, tipo: 'kg', peso: 0.95 },
@@ -113,7 +114,7 @@ export default function AttivaDetail({ data, loading, periodo }) {
             {righe.map((r, i) => (
               <tr key={r.id || i} className={`cursor-pointer hover:bg-muted/30 ${r.sospesa ? 'opacity-50' : ''} ${i % 2 ? 'bg-muted/20' : ''}`} onClick={() => setSelectedRiga(r)}>
                 <td className="px-2 py-1.5 font-mono text-xs">{r.ordine || '-'}</td>
-                <td className="px-2 py-1.5 text-xs">{r.numero_fir || '-'}</td>
+                <td className="px-2 py-1.5 text-xs">{[r.numero_fir, r.descrizione].filter(Boolean).join(' · ') || '-'}</td>
                 <td className="px-2 py-1.5">{r.regione || <span className="text-muted-foreground">—</span>}</td>
                 <td className="px-2 py-1.5">{r.classe || '-'}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatKg(r.quantita)} kg</td>
