@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { divergenzeTargetImpianti } from "../../shared/targetImpianti.ts";
 import { annoRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
@@ -566,6 +567,12 @@ export default async function(req) {
     totali.giacenza_classi_kg = classiVuote();
     for (const r of righe) for (const [c, v] of Object.entries(r.giacenza_classi_kg || {})) totali.giacenza_classi_kg[c] += v;
     totali.ordini_da_dichiarare = righe.reduce((s, r) => s + (r.ordini_da_dichiarare || 0), 0);
+
+    // Il target dell'impianto scritto anche in Target & Status: se diverge si dice qui
+    const impiantiTarget = await fetchAll(base44.asServiceRole.entities.ImpiantoTargetSecondaria);
+    for (const d of divergenzeTargetImpianti(giacenzeSito, impiantiTarget, annoNum)) {
+      anomalie.push({ tipo: 'target_divergente', sito: d.impianto, giacenze_t: d.giacenze_t, target_status_t: d.target_status_t, differenza_t: d.differenza_t });
+    }
 
     return Response.json({ anno: annoNum, righe, totali, anomalie });
   } catch (error) {

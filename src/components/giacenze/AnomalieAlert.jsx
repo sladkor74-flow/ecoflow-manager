@@ -8,6 +8,7 @@ const TIPO_LABEL = {
   ordine_senza_riscontro: 'Ordine senza riscontro',
   stoccaggio_senza_rilevazione: 'Stoccaggio senza rilevazione',
   giacenza_negativa: 'Giacenza negativa',
+  target_divergente: 'Target diverso da Target & Status',
 };
 
 export default function AnomalieAlert({ anomalie }) {
@@ -39,6 +40,7 @@ export default function AnomalieAlert({ anomalie }) {
                 {a.tipo === 'giacenza_sopra_target' && ` — giacenza ${a.giacenza_portale_t} t contro target ${a.target_totale_t} t`}
                 {a.tipo === 'sito_senza_target' && ` — nessun record GiacenzaSito per l'anno ${a.anno}`}
                 {a.tipo === 'giacenza_negativa' && ` — classe ${a.classe}: ${a.kg} kg dopo i movimenti successivi alla rilevazione, mancano ingressi o la rilevazione va aggiornata`}
+                {a.tipo === 'target_divergente' && ` — qui ${a.giacenze_t} t, in Target & Status ${a.target_status_t} t (differenza ${a.differenza_t} t): i due numeri devono essere uguali, correggi quello sbagliato`}
                 {a.tipo === 'stoccaggio_senza_rilevazione' && ` — il dato va letto dalla pagina Unita' Locali di Stoccaggio del portale`}
               </span>
             </div>

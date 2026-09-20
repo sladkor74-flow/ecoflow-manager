@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { divergenzeTargetImpianti, testoDivergenza } from "../../shared/targetImpianti.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { PROV_TO_REGION, MESI } from "../../shared/raccoltoCalculator.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
@@ -184,9 +185,38 @@ export default async function(req) {
       }
     }
 
+    // I due target dell'impianto (Giacenze e Target & Status) devono coincidere:
+    // una divergenza diventa un alert critico, che si chiude da solo quando torna a posto.
+    let targetDivergenti = [];
+    try {
+      const [siti, impiantiTarget] = await Promise.all([
+        fetchAll(base44.asServiceRole.entities.GiacenzaSito),
+        fetchAll(base44.asServiceRole.entities.ImpiantoTargetSecondaria),
+      ]);
+      targetDivergenti = divergenzeTargetImpianti(siti, impiantiTarget, annoCorrente);
+      if (creaAlerts) {
+        const REGOLA = 'target_impianto_divergente';
+        const aperti = (await fetchAll(base44.asServiceRole.entities.Alert, { modulo: 'giacenze', stato: 'aperto' })).filter(a => a.regola_id === REGOLA);
+        const attuali = new Set(targetDivergenti.map(d => `${d.impianto}|${annoCorrente}`));
+        for (const d of targetDivergenti) {
+          const recordId = `${d.impianto}|${annoCorrente}`;
+          if (aperti.some(a => a.record_id === recordId)) continue;
+          await base44.asServiceRole.entities.Alert.create({
+            titolo: `Target divergente: ${d.impianto}`, descrizione: testoDivergenza(d), severita: 'critico',
+            modulo: 'giacenze', entity_type: 'GiacenzaSito', record_id: recordId, regola_id: REGOLA, regola_nome: 'Target impianto uguale in Giacenze e in Target & Status', stato: 'aperto',
+          });
+          alertsCreati++;
+        }
+        for (const a of aperti) {
+          if (!attuali.has(a.record_id)) await base44.asServiceRole.entities.Alert.update(a.id, { stato: 'risolto', risolto_note: `Chiuso automaticamente il ${oggi}: i due target sono tornati uguali` });
+        }
+      }
+    } catch (_e) { /* il controllo dei target mensili non deve fallire per questo */ }
+
     return Response.json({
       mese,
       anno,
+      target_impianti_divergenti: targetDivergenti,
       is_mese_corrente: isMeseCorrente,
       totale_target: targets.length,
       missed: missed.sort((a, b) => a.pct_raggiungimento - b.pct_raggiungimento),
