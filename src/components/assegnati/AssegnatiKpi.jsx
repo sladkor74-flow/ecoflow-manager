@@ -26,7 +26,7 @@ export default function AssegnatiKpi({ kpi }) {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
           <div><p className="text-xl font-heading font-bold tabular-nums">{intFmt(eta.entro_30)}</p><p className="text-xs text-muted-foreground">entro 30 giorni{quota(eta.entro_30)}</p></div>
           <div><p className="text-xl font-heading font-bold tabular-nums text-amber-600">{intFmt(eta.da_31_a_60)}</p><p className="text-xs text-muted-foreground">da 31 a 60 giorni{quota(eta.da_31_a_60)}</p></div>
-          <div><p className="text-xl font-heading font-bold tabular-nums text-red-600">{intFmt(eta.oltre_60)}</p><p className="text-xs text-muted-foreground">da oltre 60 giorni{quota(eta.oltre_60)} · {fmtTon((eta.kg_oltre_60 || 0) / 1000)} t stimate</p></div>
+          <div><p className="text-xl font-heading font-bold tabular-nums text-red-600">{intFmt(eta.oltre_60)}</p><p className="text-xs text-muted-foreground">da oltre 60 giorni{quota(eta.oltre_60)} · {fmtTon((eta.kg_oltre_60 || 0) / 1000)} stimate</p></div>
           <div>
             <p className="text-xl font-heading font-bold tabular-nums">{vecchio ? `${intFmt(vecchio.giorni)} giorni` : '—'}</p>
             <p className="text-xs text-muted-foreground">il più vecchio{vecchio ? `: ${vecchio.id_ordine} · ${vecchio.ragione_sociale}${vecchio.provincia ? ` (${vecchio.provincia})` : ''}, immesso il ${vecchio.immesso_il.split('-').reverse().join('/')}` : ''}</p>
