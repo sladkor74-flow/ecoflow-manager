@@ -2,7 +2,8 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { MESI } from "../../shared/raccoltoCalculator.ts";
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
+import { etaArretrato } from "../../shared/cruscotto.ts";
 
 // Calcola la matrice analitica aggregata del backlog degli ordini Assegnati.
 // Payload: { filters: { anno?, mese?, regione?, provincia?, partner_operativo?, classe? } }
@@ -109,16 +110,8 @@ export default async function(req) {
     // dal giorno italiano dell'immissione. Il numero degli ordini da solo non dice
     // se la coda e' fresca o ferma da mesi (audit 20/09/2026: 499 aperti, 344 da
     // oltre 30 giorni, 287 da oltre 60, il piu' vecchio da 361).
-    const oggi = oggiRoma();
-    const giorniFra = (a, b) => Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10))) / 86400000);
-    const eta = { entro_30: 0, da_31_a_60: 0, oltre_60: 0, kg_oltre_60: 0, senza_data: 0, piu_vecchio: null };
-    for (const r of filtered) {
-      const g = giornoRoma(r.ordine_immesso_il);
-      if (!g) { eta.senza_data++; continue; }
-      const giorni = giorniFra(g, oggi);
-      if (giorni <= 30) eta.entro_30++; else if (giorni <= 60) eta.da_31_a_60++; else { eta.oltre_60++; eta.kg_oltre_60 += Number(r.peso_stimato) || 0; }
-      if (!eta.piu_vecchio || giorni > eta.piu_vecchio.giorni) eta.piu_vecchio = { giorni, id_ordine: r.id_ordine || '', ragione_sociale: r.ragione_sociale || r.punto_di_raccolta || '', provincia: r.provincia || '', immesso_il: g, partner_operativo: r.partner_operativo || '' };
-    }
+    // Stesso calcolo del cruscotto della dashboard (base44/shared/cruscotto.ts).
+    const eta = etaArretrato(filtered, oggiRoma());
 
     return Response.json({
       kpi: {

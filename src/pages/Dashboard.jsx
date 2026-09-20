@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
-import { ClipboardList, Truck, Factory, Ship, Upload, TrendingUp, AlertTriangle, BarChart3 } from 'lucide-react';
+import { ClipboardList, Truck, Factory, Ship, TrendingUp, AlertTriangle, BarChart3 } from 'lucide-react';
 import AlertBadge from '@/components/alerts/AlertBadge';
 import TargetAlertsPanel from '@/components/dashboard/TargetAlertsPanel';
 import DashboardFilters from '@/components/dashboard/DashboardFilters';
@@ -9,11 +9,15 @@ import DashboardKpi from '@/components/dashboard/DashboardKpi';
 import ReteVsAciChart from '@/components/dashboard/ReteVsAciChart';
 import TargetVsRaccoltoChart from '@/components/dashboard/TargetVsRaccoltoChart';
 import { formatIntero } from '@/lib/utils';
+import Cruscotto from '@/components/dashboard/Cruscotto';
+import { useAuth } from '@/lib/AuthContext';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
   'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
 export default function Dashboard() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [counts, setCounts] = useState({});
   const [alertCount, setAlertCount] = useState(0);
   const [alertCritici, setAlertCritici] = useState(0);
@@ -68,6 +72,9 @@ export default function Dashboard() {
         {alertCount > 0 && <AlertBadge count={alertCount} critici={alertCritici} />}
       </div>
 
+      {/* Che cosa c'e' da gestire, l'arretrato, i dati, i mesi da fatturare, il margine */}
+      <Cruscotto isAdmin={isAdmin} />
+
       {loading ? (
         <div className="text-muted-foreground">Caricamento...</div>
       ) : (
@@ -120,18 +127,6 @@ export default function Dashboard() {
         <TargetAlertsPanel />
       </div>
 
-      <div className="border rounded-lg p-5 bg-muted/30">
-        <div className="flex items-center gap-2 mb-2">
-          <TrendingUp className="w-5 h-5 text-primary" />
-          <h2 className="font-heading font-semibold">Prossimi passi</h2>
-        </div>
-        <p className="text-sm text-muted-foreground mb-3">
-          Per popolare il gestionale, carica i file Excel dal portale Ecotyre nella sezione dedicata.
-        </p>
-        <Link to="/caricamento-dati" className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90">
-          <Upload className="w-4 h-4" /> Vai al caricamento dati
-        </Link>
-      </div>
     </div>
   );
 }
