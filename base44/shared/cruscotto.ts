@@ -74,6 +74,17 @@ export function statoMesiAttiva(documenti, prefatture, anno, oggi) {
 
 const GRAVITA = { critico: 0, attenzione: 1, info: 2 };
 
+// Le regole degli alert sono salvate col loro codice (REGOLA_SCOSTAMENTO_TARGET):
+// a video si leggono come parole, tenendo maiuscole le sigle.
+const SIGLE = new Set(['SLA', 'ACI', 'FIR', 'PFU', 'PDR', 'ECT']);
+export function nomeRegola(v) {
+  const t = String(v || '').trim();
+  if (!/^REGOLA_/.test(t)) return t;
+  const parole = t.replace(/^REGOLA_/, '').split('_').filter(Boolean).map(p => (SIGLE.has(p) ? p : p.toLowerCase()));
+  const frase = parole.join(' ');
+  return frase.charAt(0).toUpperCase() + frase.slice(1);
+}
+
 /**
  * L'elenco unico delle cose da gestire. Ogni voce: { area, gravita, titolo,
  * dettaglio, link }. dati: { oggi, adessoMs, anno, alertAperti, uploadLogs,
@@ -91,7 +102,7 @@ export function cruscotto(dati) {
   for (const a of dati.alertAperti || []) {
     alert.totale++;
     if (a.severita === 'critico') alert.critici++; else if (a.severita === 'warning') alert.warning++; else alert.info++;
-    const k = a.regola_nome || a.titolo || 'Senza regola';
+    const k = nomeRegola(a.regola_nome) || a.titolo || 'Senza regola';
     perRegola.set(k, (perRegola.get(k) || 0) + 1);
   }
   alert.per_regola = [...perRegola.entries()].map(([regola, quanti]) => ({ regola, quanti })).sort((a, b) => b.quanti - a.quanti).slice(0, 8);

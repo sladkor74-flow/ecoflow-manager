@@ -5,12 +5,13 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { giornoRoma } from "../../shared/giornoItaliano.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { calcolaRigheAttiva } from "../../shared/attivaCalcolo.ts";
-import { leggiTabellePrefattura, confrontaPrefattura, comeOrdine, comeNumero, periodoPrefattura } from "../../shared/prefattura.ts";
+import { leggiTabellePrefattura, leggiLineePdfPrefattura, confrontaPrefattura, comeOrdine, periodoPrefattura } from "../../shared/prefattura.ts";
 
 // La prefattura del portale Ecotyre: si carica (Excel o PDF), si tiene per il
 // mese, e si confronta con le righe che il gestionale calcola sui dati di oggi.
 //
-// azione 'carica'    (solo admin): { anno, mese, file_uri, nome_file } -> legge, salva, confronta
+// azione 'carica'    (solo admin): Excel { anno, mese, file_uri, nome_file }; PDF { anno, mese, linee_pdf, nome_file }
+//                     (il testo del PDF lo estrae il browser con pdf.js) -> legge, salva, confronta
 // azione 'confronta' (tutti):      { anno, mese } -> confronto con la prefattura valida del mese
 //
 // Una nuova prefattura dello stesso mese non cancella la precedente: la segna
@@ -18,53 +19,12 @@ import { leggiTabellePrefattura, confrontaPrefattura, comeOrdine, comeNumero, pe
 // del gestionale cambiano a ogni importazione.
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
-const SCHEMA_PDF = {
-  type: 'object',
-  properties: {
-    righe: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          id_ordine: { type: 'string' }, numero_fir: { type: 'string' },
-          kg: { type: 'number' }, importo: { type: 'number' }, prezzo: { type: 'number' }, servizio: { type: 'string' },
-        },
-        required: ['id_ordine'],
-      },
-    },
-    totale_kg: { type: 'number' },
-    totale_euro: { type: 'number' },
-    note: { type: 'string' },
-  },
-  required: ['righe'],
-};
-const PROMPT_PDF = [
-  'Questo documento e\' una prefattura del consorzio Ecotyre verso un raccoglitore di pneumatici fuori uso.',
-  'Estrai TUTTE le righe di dettaglio, una per ordine, senza saltarne e senza riassumere:',
-  '- id_ordine: il codice dell\'ordine (due-quattro lettere e almeno sei cifre, per esempio ET26084363);',
-  '- numero_fir: il numero del formulario, se c\'e\';',
-  '- kg: il peso in chilogrammi (se il documento lo da\' in tonnellate, moltiplica per 1000);',
-  '- importo: l\'importo in euro della riga; prezzo: il prezzo unitario in euro a tonnellata, se c\'e\';',
-  '- servizio: la descrizione del servizio della riga, se c\'e\'.',
-  'In totale_kg e totale_euro riporta i totali complessivi STAMPATI sul documento, se ci sono; non calcolarli tu.',
-  'I numeri sono all\'italiana: il punto separa le migliaia, la virgola i decimali. Restituisci numeri, non testo.',
-  'Non inventare niente: se un valore non c\'e\', lascialo vuoto.',
-].join('\n');
-
-function comeOggetto(v) {
-  if (v && typeof v === 'object') return v;
-  const s = String(v || '');
-  const inizio = s.indexOf('{'), fine = s.lastIndexOf('}');
-  if (inizio < 0 || fine <= inizio) throw new Error('La lettura del PDF non ha restituito un elenco leggibile.');
-  return JSON.parse(s.slice(inizio, fine + 1));
-}
-
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    const { azione = 'confronta', anno, mese, file_uri, nome_file } = await req.json().catch(() => ({}));
+    const { azione = 'confronta', anno, mese, file_uri, nome_file, linee_pdf } = await req.json().catch(() => ({}));
     const annoNum = Number(anno);
     if (!annoNum || !MESI.includes(mese)) return Response.json({ error: 'Anno e mese obbligatori' }, { status: 400 });
 
@@ -73,38 +33,32 @@ export default async function(req) {
 
     if (azione === 'carica') {
       if (user.role !== 'admin') return rispostaSolaLettura();
-      if (!file_uri) return Response.json({ error: 'file_uri obbligatorio' }, { status: 400 });
       const nome = String(nome_file || '');
       const formato = /\.pdf$/i.test(nome) ? 'pdf' : /\.(xlsx|xlsm|xls|csv)$/i.test(nome) ? 'excel' : '';
       if (!formato) return Response.json({ error: 'La prefattura si carica in Excel (.xlsx, .xls, .csv) o in PDF.' }, { status: 400 });
 
-      const { signed_url } = await core.CreateFileSignedUrl({ file_uri, expires_in: 900 });
-      let righe = [], note = [], totKg = null, totEuro = null;
+      let righe = [], note = [], totKg = null, totEuro = null, periodoLetto = null;
       if (formato === 'excel') {
+        if (!file_uri) return Response.json({ error: 'file_uri obbligatorio' }, { status: 400 });
+        const { signed_url } = await core.CreateFileSignedUrl({ file_uri, expires_in: 900 });
         const risposta = await fetch(signed_url);
         if (!risposta.ok) return Response.json({ error: 'Il file non si riesce a leggere: ' + risposta.status }, { status: 400 });
         const wb = XLSX.read(new Uint8Array(await risposta.arrayBuffer()), { type: 'array' });
         const tabelle = wb.SheetNames.map(n => ({ nome: n, celle: XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null }) }));
         ({ righe, note } = leggiTabellePrefattura(tabelle));
       } else {
-        const letto = comeOggetto(await core.InvokeLLM({ prompt: PROMPT_PDF, file_urls: [signed_url], response_json_schema: SCHEMA_PDF }));
-        righe = (letto.righe || []).map(r => ({
-          id_ordine: comeOrdine(r.id_ordine), numero_fir: String(r.numero_fir || '').toUpperCase().trim(),
-          kg: comeNumero(r.kg) === null ? null : Math.round(comeNumero(r.kg)), importo: comeNumero(r.importo), prezzo: comeNumero(r.prezzo),
-          servizio: String(r.servizio || ''), foglio: 'PDF',
-        })).filter(r => r.id_ordine);
-        totKg = comeNumero(letto.totale_kg); totEuro = comeNumero(letto.totale_euro);
-        note.push('PDF letto dall\'agente: la lettura va guardata. Quando c\'e\', l\'Excel del portale e\' piu\' affidabile.');
-        // la lettura e' completa solo se le righe sommano i totali stampati
-        const sKg = righe.reduce((s, r) => s + (r.kg || 0), 0), sEuro = righe.reduce((s, r) => s + (r.importo || 0), 0);
-        if (totKg && Math.abs(sKg - totKg) > 1) note.push(`ATTENZIONE: le righe lette sommano ${Math.round(sKg)} kg, il documento ne stampa ${Math.round(totKg)}: la lettura e' incompleta, il confronto ordine per ordine non e' affidabile.`);
-        if (totEuro && Math.abs(sEuro - totEuro) > 0.05) note.push(`ATTENZIONE: le righe lette sommano ${sEuro.toFixed(2)} euro, il documento ne stampa ${totEuro.toFixed(2)}: la lettura e' incompleta.`);
-        if (letto.note) note.push(String(letto.note));
+        // Il testo del PDF arriva gia' estratto dal browser: qui si legge riga per riga.
+        if (!Array.isArray(linee_pdf) || !linee_pdf.length) return Response.json({ error: 'Il testo del PDF non è arrivato: ricarica la pagina e riprova.' }, { status: 400 });
+        const letto = leggiLineePdfPrefattura(linee_pdf);
+        righe = letto.righe; note = letto.note; periodoLetto = letto.periodo;
+        if (letto.totali_stampati) { totKg = letto.totali_stampati.kg; totEuro = letto.totali_stampati.euro; }
+        if (letto.completa === false) return Response.json({ error: note.filter(n => /ATTENZIONE/.test(n)).join(' ') + ' Non ho salvato niente: usa l\'Excel del portale.' }, { status: 400 });
+        if (letto.completa) note.push(`PDF letto per intero: ${righe.length} righe, pari al riepilogo stampato (${letto.totali_stampati.kg} kg, ${letto.totali_stampati.euro.toFixed(2)} euro).`);
       }
       if (!righe.length) return Response.json({ error: 'Nel file non ho trovato righe con un ID ordine: non sembra una prefattura. ' + note.join(' ') }, { status: 400 });
       // Il mese e' scritto nel file (le date di fine trasporto): una prefattura di
       // giugno caricata su luglio darebbe quattrocento differenze finte.
-      const periodo = periodoPrefattura(righe);
+      const periodo = periodoLetto || periodoPrefattura(righe);
       if (periodo && (periodo.anno !== annoNum || MESI[periodo.mese_idx] !== mese)) {
         return Response.json({ error: `Questo file è la prefattura di ${MESI[periodo.mese_idx]} ${periodo.anno}, ma stai caricando su ${mese} ${annoNum}. Seleziona il mese giusto e ricaricalo: non ho salvato niente.`, periodo_del_file: { anno: periodo.anno, mese: MESI[periodo.mese_idx] } }, { status: 400 });
       }
@@ -120,7 +74,7 @@ export default async function(req) {
         await svc.PrefatturaEcotyre.update(p.id, { superata: true, motivo_superata: `Sostituita il ${adesso.slice(0, 10)} dal file "${nome}" (${righe.length} righe), caricato da ${user.full_name || user.email}.` });
       }
       // Il file serviva solo a essere letto: le righe sono salvate.
-      for (const n of ['DeleteFile', 'DeletePrivateFile', 'RemoveFile']) {
+      for (const n of (file_uri ? ['DeleteFile', 'DeletePrivateFile', 'RemoveFile'] : [])) {
         if (typeof core[n] !== 'function') continue;
         try { await core[n]({ file_uri }); break; } catch (_e) { /* resta nell'archivio privato */ }
       }

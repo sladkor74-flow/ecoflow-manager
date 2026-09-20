@@ -329,3 +329,11 @@ proiezione, alert critico, dashboard).
 
 I contratti passano da generato a inviato a controfirmato, con la data di ogni
 passaggio: un contratto generato non e' un contratto fatto.
+
+**La prefattura in PDF** non la legge un agente: con oltre quattrocento righe si
+rifiuta di restituirle tutte (provato il 20/09/2026). Il browser ne estrae il testo
+con pdf.js (`src/lib/pdfTesto.js`, caricata solo quando serve) e
+`leggiLineePdfPrefattura` lo legge riga per riga. Il PDF porta in testa il
+riepilogo stampato (ordini, chili, euro per classi 1-4 e classe 9) e il mese: se
+le righe lette non sommano quel riepilogo il caricamento viene rifiutato. Sul PDF
+vero di luglio 2026: 416 righe, identiche all'Excel una per una.

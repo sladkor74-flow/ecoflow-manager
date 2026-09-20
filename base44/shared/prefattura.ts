@@ -144,6 +144,52 @@ export function leggiTabellePrefattura(tabelle) {
   return { righe, note };
 }
 
+/**
+ * Legge la prefattura dal TESTO del suo PDF: le righe arrivano gia' ricostruite
+ * (un array di celle per riga, da sinistra a destra), estratte nel browser con
+ * pdf.js. Niente agente: con oltre quattrocento righe l'agente si rifiuta di
+ * restituirle tutte (provato il 20/09/2026), mentre il testo del PDF e' esatto.
+ *
+ * Una riga di dettaglio: ID ordine, KeyAccount, produttore, classe, data
+ * (gg-mm-aaaa), formulario, tipo, chili ("4 700"), prezzo al chilo ("0,2020"),
+ * importo ("949,40"). Le celle a volte si fondono, percio' si lavora sulla riga
+ * intera. In testa al documento c'e' il riepilogo stampato, per classi 1-4 e
+ * per classe 9: i suoi totali dicono se la lettura e' completa.
+ */
+export function leggiLineePdfPrefattura(linee) {
+  const righe = [];
+  const note = [];
+  let periodo = null;
+  const stampati = { ordini: 0, kg: 0, euro: 0, blocchi: 0 };
+  const numero = (t) => comeNumero(String(t).replace(/\s/g, '').replace(/Kg|Euro/gi, ''));
+  for (const celle of linee || []) {
+    const riga = (celle || []).map(pulisci).filter(Boolean).join(' ');
+    if (!riga) continue;
+    const mese = riga.match(/nel mese:\s*(\d{1,2})\/(\d{4})/i);
+    if (mese) { periodo = { anno: Number(mese[2]), mese_idx: Number(mese[1]) - 1, quota: 1 }; continue; }
+    // "Totale 410 1 122 240 Kg 226 692,48 Euro"
+    const tot = riga.match(/^Totale\s+(\d+)\s+([\d ]+)\s*Kg\s+([\d .]+,\d{2})\s*Euro/i);
+    if (tot) { stampati.ordini += Number(tot[1]); stampati.kg += numero(tot[2]) || 0; stampati.euro += Math.round((numero(tot[3]) || 0) * 100); stampati.blocchi++; continue; }
+    const id = (riga.match(/^([A-Z]{2,4}\d{6,})\b/) || [])[1];
+    if (!id) continue;
+    const coda = riga.match(/(\d{2})-(\d{2})-(\d{4})\s+(\S+)\s+(Trasp\+Tratt|Trasp|Tratt)\s+([\d ]+?)\s+(\d+,\d{3,6})\s+([\d .]*\d,\d{2})$/);
+    if (!coda) { note.push(`Riga dell'ordine ${id} non riconosciuta: "${riga.slice(0, 120)}".`); continue; }
+    righe.push({
+      id_ordine: id, numero_fir: coda[4].toUpperCase(), kg: Math.round(numero(coda[6]) || 0), importo: numero(coda[8]), prezzo: numero(coda[7]),
+      servizio: coda[5], giorno: `${coda[3]}-${coda[2]}-${coda[1]}`, foglio: 'PDF',
+    });
+  }
+  const sKg = righe.reduce((s, r) => s + (r.kg || 0), 0), sCent = righe.reduce((s, r) => s + Math.round((r.importo || 0) * 100), 0);
+  const totali = stampati.blocchi ? { ordini: stampati.ordini, kg: stampati.kg, euro: stampati.euro / 100 } : null;
+  let completa = null;
+  if (totali) {
+    // sugli importi il portale arrotonda il totale a modo suo: un centesimo per blocco e' tollerato
+    completa = righe.length === totali.ordini && sKg === totali.kg && Math.abs(sCent - stampati.euro) <= 2 * stampati.blocchi;
+    if (!completa) note.push(`ATTENZIONE: lette ${righe.length} righe per ${sKg} kg e ${(sCent / 100).toFixed(2)} euro, ma il riepilogo stampato dice ${totali.ordini} ordini, ${totali.kg} kg e ${totali.euro.toFixed(2)} euro: la lettura non e' completa.`);
+  } else note.push('Nel PDF non ho trovato il riepilogo stampato dei totali: non posso controllare che la lettura sia completa.');
+  return { righe, note, totali_stampati: totali, periodo: periodo || periodoPrefattura(righe), completa };
+}
+
 const somma = (m, id, kg, importo) => {
   const e = m.get(id) || { id_ordine: id, kg: 0, importo: 0, righe: 0, conKg: false, conImporto: false, servizio: '', fir: '' };
   if (kg !== null && kg !== undefined) { e.kg += kg; e.conKg = true; }

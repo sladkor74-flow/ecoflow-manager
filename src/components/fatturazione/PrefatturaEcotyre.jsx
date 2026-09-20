@@ -62,8 +62,11 @@ export default function PrefatturaEcotyre({ periodo, isAdmin, onEsito }) {
     if (data?.prefattura && !window.confirm(`Per ${periodo.mese} ${periodo.anno} c'è già la prefattura "${data.prefattura.nome_file}". La nuova la sostituisce; la precedente resta nello storico come superata. Continuare?`)) return;
     setOccupato(true); setErrore('');
     try {
-      const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
-      const res = await base44.functions.invoke('prefatturaEcotyre', { azione: 'carica', anno: periodo.anno, mese: periodo.mese, file_uri, nome_file: file.name });
+      // L'Excel si carica e lo legge la funzione; del PDF si estrae qui il testo, riga per riga, e si manda quello.
+      const corpo = /\.pdf$/i.test(file.name)
+        ? { linee_pdf: await (await import('@/lib/pdfTesto')).lineeDelPdf(file) }
+        : { file_uri: (await base44.integrations.Core.UploadPrivateFile({ file })).file_uri };
+      const res = await base44.functions.invoke('prefatturaEcotyre', { azione: 'carica', anno: periodo.anno, mese: periodo.mese, nome_file: file.name, ...corpo });
       setData(res.data);
       if (onEsito) onEsito(res.data);
       toast({ title: 'Prefattura letta', description: `${res.data?.prefattura?.numero_righe || 0} righe da ${file.name}` });

@@ -1,6 +1,6 @@
 // Prova del cruscotto (base44/shared/cruscotto.ts): l'elenco unico delle cose da
 // gestire, l'arretrato, i caricamenti, i mesi della fatturazione. npm run prove
-import { cruscotto, etaArretrato, statoCaricamenti, statoMesiAttiva } from '../base44/shared/cruscotto.ts';
+import { cruscotto, etaArretrato, statoCaricamenti, statoMesiAttiva, nomeRegola } from '../base44/shared/cruscotto.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -43,6 +43,8 @@ const docs = [
 const mesi = statoMesiAttiva(docs, [{ anno: 2026, mese: 'Luglio', superata: false }, { anno: 2026, mese: 'Gennaio', superata: true }], 2026, OGGI);
 verifica('si guardano i mesi finiti: da gennaio ad agosto, settembre e\' in corso', mesi.length === 8 && mesi[7].mese === 'Agosto');
 verifica('gennaio chiuso, luglio elaborato con prefattura, marzo superato = da elaborare', mesi[0].chiuso && mesi[6].elaborato && mesi[6].prefattura && !mesi[2].elaborato && mesi[0].prefattura === false);
+
+verifica('i codici delle regole si leggono come parole, le sigle restano maiuscole', nomeRegola('REGOLA_RITARDO_SLA') === 'Ritardo SLA' && nomeRegola('REGOLA_MIX_CLASSI_CONSORZIALE') === 'Mix classi consorziale' && nomeRegola('Conferimento fuori rotta') === 'Conferimento fuori rotta');
 
 console.log('ELENCO UNICO');
 const r = cruscotto({
