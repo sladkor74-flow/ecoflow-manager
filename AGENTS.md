@@ -409,3 +409,30 @@ dall'agente. Il controllo sul tipo quindi non li tocca (non c'e' una lettura da
 confrontare) e non produce falsi allarmi. Non si usa `sintesi` come ripiego a
 questo livello: quelle sintesi dicono "trovato nell'archivio contratti" e
 farebbero scattare la famiglia "contratto" su mezzo catalogo.
+
+**Il controllo giornaliero della qualifica non legge i documenti: li valuta.**
+E' la distinzione che ha tenuto nascosto per mesi un quadro falso. Il workflow
+`ControlloQualificaFornitori` (7:30, giorni feriali) ricalcola stati e scadenze e
+manda il promemoria, ma chi legge davvero i file e' l'agente, e l'agente lo
+chiama solo chi carica un documento. I novantasette documenti caricati
+dall'archivio risultavano "analizzati" senza che nessuno li avesse mai letti: il
+report li dava per buoni. Il presidio (`presidioQualifica`, workflow
+`PresidioDocumentiQualifica`, 6:40 dei giorni feriali, cinquanta minuti prima del
+promemoria) chiude il buco: prende fino a sei documenti per giro, nell'ordine in
+cui conviene guardarli - mai letti, letture fallite, letture interrotte da piu'
+di un quarto d'ora, documenti senza scadenza ricavata, letture piu' vecchie di
+sei mesi (`daAnalizzare` in `base44/shared/analisiDocumento.ts`). Non rilegge
+tutto ogni volta: un file non cambia, cambiano le norme e il tempo.
+
+**L'analisi di un documento sta in `base44/shared/analisiDocumento.ts`**, non
+dentro la sua funzione, perche' la usano in due: il pulsante del modulo e il
+presidio. Un documento si controlla allo stesso modo comunque lo si guardi. Chi
+analizza piu' documenti di fila passa `conoscenza` (le voci approvate lette una
+volta sola) invece di rileggerle a ogni giro.
+
+**La rianalisi dei 97 documenti, 21/09/2026**: 5 minuti a blocco di 48, due
+richieste in parallelo, zero errori, circa 194 chiamate al modello. Il piano
+builder ne rinnova 10.000 al mese: il costo di un controllo completo e' un giorno
+di consumo normale. Il quadro vero che ne e' uscito: nessun fornitore
+qualificato, 41 documenti scaduti, 56 mai ricevuti, 29 non conformi, e trentaquattro
+conferme manuali revocate perche' la lettura ha trovato problemi bloccanti.

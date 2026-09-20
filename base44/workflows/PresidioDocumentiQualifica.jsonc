@@ -1,0 +1,47 @@
+{
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "presidio_documenti_qualifica",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "presidia_documenti": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "presidioQualifica",
+            "args": {
+              "massimo": 6
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Fai leggere all'agente i documenti rimasti indietro",
+            "description": "Recupera i documenti mai letti, quelli con la lettura fallita o interrotta, quelli senza scadenza e quelli letti piu' di sei mesi fa"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Presidio Documenti Qualifica",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "40 6 * * 1-5",
+      "one_time_date": null,
+      "timezone": "Europe/Rome",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "description": "Ogni giorno lavorativo alle 6:40, cinquanta minuti prima del promemoria, fa leggere all'agente fino a sei documenti di qualifica rimasti indietro: mai letti, letture fallite o interrotte, documenti senza scadenza, letture piu' vecchie di sei mesi. Cosi' il report delle 7:30 si basa su documenti davvero controllati"
+}

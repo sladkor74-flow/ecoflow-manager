@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { individuaSoggetti, valutaSoggetto, oggiRoma, salvaRiepilogo, anomalieCatalogo } from "../../shared/qualificaFornitori.ts";
 import { applicaControlloClasse } from "../../shared/classeAlbo.ts";
+import { daAnalizzare } from "../../shared/analisiDocumento.ts";
 
 // Situazione della qualifica fornitori per un anno.
 //
@@ -42,6 +43,9 @@ export default async function(req) {
     // Voci del catalogo intestate a un fornitore che quest'anno non c'e': senza
     // questo controllo resterebbero mute e sembrerebbe tutto a posto.
     const anomalie = anomalieCatalogo(catalogo, soggetti, anno);
+    // Documenti che l agente non ha mai letto, o che conviene rileggere: si
+    // conta qui perche gli archivi sono gia in mano, senza una chiamata in piu.
+    const daLeggere = daAnalizzare(documentiSalvati, catalogo, { adessoMs: Date.now(), massimo: 0 });
     const alert = await salvaRiepilogo(base44, anno, valutati, anomalie);
 
     const conta = (fn) => valutati.filter(fn).length;
@@ -60,9 +64,11 @@ export default async function(req) {
       alert_aperti: alert.alert_aperti,
       soggetti_con_alert: alert.soggetti_con_alert,
       anomalie_catalogo: anomalie.filter(a => a.gravita === 'errore').length,
+      da_leggere: daLeggere.length,
+      mai_letti: daLeggere.filter(d => d.motivo === 'mai_letto').length,
     };
 
-    return Response.json({ anno, oggi, riepilogo, soggetti: valutati, esclusi, catalogo, anomalie });
+    return Response.json({ anno, oggi, riepilogo, soggetti: valutati, esclusi, catalogo, anomalie, da_leggere: daLeggere.slice(0, 40) });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });
   }

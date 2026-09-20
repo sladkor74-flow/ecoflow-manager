@@ -77,6 +77,39 @@ function AnomalieCatalogo({ anomalie, isAdmin, onApriCatalogo }) {
   );
 }
 
+// Un documento mai letto dall'agente non e' un documento controllato: il report
+// che lo dava per buono non valeva niente. Finche' ce ne sono, si dice.
+function DocumentiDaLeggere({ riepilogo, elenco, isAdmin, inCorso, onLeggi }) {
+  const quanti = Number(riepilogo?.da_leggere) || 0;
+  if (quanti === 0) return null;
+  const mai = Number(riepilogo?.mai_letti) || 0;
+  const perMotivo = {};
+  for (const d of elenco || []) perMotivo[d.spiegazione] = (perMotivo[d.spiegazione] || 0) + 1;
+  return (
+    <div className="border border-sky-300 bg-sky-50 text-sky-900 rounded-lg p-3">
+      <div className="flex items-center gap-2 font-medium text-sm">
+        <ClipboardList className="w-4 h-4" />
+        {quanti === 1 ? 'Un documento aspetta di essere letto dall’agente' : `${quanti} documenti aspettano di essere letti dall’agente`}
+      </div>
+      <p className="text-sm mt-1">
+        {mai > 0 && <><strong>{mai}</strong> non {mai === 1 ? 'è' : 'sono'} mai stat{mai === 1 ? 'o letto' : 'i letti'}: finché è così, su {mai === 1 ? 'quello' : 'quelli'} il gestionale non ha controllato niente. </>}
+        Il presidio automatico ne prende sei ogni mattina feriale alle 6:40, prima del promemoria.
+      </p>
+      {Object.keys(perMotivo).length > 0 && (
+        <ul className="mt-1.5 text-xs space-y-0.5">
+          {Object.entries(perMotivo).map(([k, v]) => <li key={k}>• {v} {v === 1 ? 'documento' : 'documenti'}: {k}</li>)}
+        </ul>
+      )}
+      {isAdmin && (
+        <Button size="sm" variant="outline" className="mt-2" onClick={onLeggi} disabled={inCorso}>
+          {inCorso ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <ShieldCheck className="w-4 h-4 mr-1" />}
+          {inCorso ? 'Lettura in corso…' : 'Falli leggere adesso (sei per volta)'}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function PannelloAlert({ soggetti, onApri }) {
   const [tutti, setTutti] = useState(false);
   const alert = useMemo(() => soggetti
@@ -144,6 +177,7 @@ export default function QualificaFornitori() {
   const [includiAperto, setIncludiAperto] = useState(false);
   const [inControllo, setInControllo] = useState(false);
   const [scaricando, setScaricando] = useState(null);
+  const [inPresidio, setInPresidio] = useState(false);
   const datiRef = useRef(null);
   datiRef.current = dati;
 
@@ -221,6 +255,26 @@ export default function QualificaFornitori() {
       toast({ title: 'Esportazione non riuscita', description: e.message || String(e), variant: 'destructive' });
     }
     setScaricando(null);
+  };
+
+  // Fa leggere all'agente i documenti rimasti indietro, sei per volta: e' lo
+  // stesso lavoro del presidio automatico, fatto adesso invece che domattina.
+  const presidia = async () => {
+    setInPresidio(true);
+    try {
+      const res = await base44.functions.invoke('presidioQualifica', { anno, massimo: 6 });
+      const d = res.data || res;
+      const parti = [`${d.analizzati} letti`];
+      if (d.conferme_tolte) parti.push(`${d.conferme_tolte} con la conferma a mano tolta`);
+      if (d.falliti) parti.push(`${d.falliti} non riusciti`);
+      if (d.restano) parti.push(`ne restano ${d.restano}`);
+      toast({ title: 'Lettura eseguita', description: parti.join(', ') + '.' });
+      await caricaTutto();
+    } catch (e) {
+      const msg = e && e.response && e.response.data && e.response.data.error;
+      toast({ title: 'Lettura non riuscita', description: msg || e.message || String(e), variant: 'destructive' });
+    }
+    setInPresidio(false);
   };
 
   const controllaEInvia = async () => {
@@ -348,6 +402,14 @@ export default function QualificaFornitori() {
             </TabsContent>
 
             <TabsContent value="documenti" className="mt-4 space-y-4">
+          <DocumentiDaLeggere
+            riepilogo={dati.riepilogo}
+            elenco={dati.da_leggere}
+            isAdmin={isAdmin}
+            inCorso={inPresidio}
+            onLeggi={presidia}
+          />
+
           <AnomalieCatalogo anomalie={dati.anomalie} isAdmin={isAdmin} onApriCatalogo={() => setCatalogoAperto(true)} />
 
           <PannelloAlert soggetti={dati.soggetti} onApri={setAperto} />
