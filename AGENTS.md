@@ -59,8 +59,10 @@ parte, non quando qualcuno chiude una pratica. Regola della direzione,
 19/09/2026: vale la fine del trasporto per la fatturazione, per le registrazioni
 e per le giacenze, in tutto.
 
-L'unico uso legittimo di `ordine_chiuso_il` sono i **tempi di evasione**, che non
-assegnano un periodo: misurano proprio la distanza fra immissione e chiusura.
+`ordine_chiuso_il` non decide niente, **nemmeno i tempi di evasione** (regola
+dell'utente del 21/09/2026, "mai, dico mai"): nr_giorni, raccolta_nei_tempi e
+gli SLA si misurano dall'immissione alla fine del trasporto con `tempiRaccolta()`
+di `base44/shared/movimenti.ts`. La chiusura si puo' solo mostrare.
 
 Un assegnato non e' un movimento: il suo periodo e' `ordine_immesso_il`.
 

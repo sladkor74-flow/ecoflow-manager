@@ -111,11 +111,11 @@ export default function DichiarazioniImpianti() {
       {esitoAllineamento && (
         <div className="text-sm border rounded-lg px-3 py-2 bg-muted/40">
           {esitoAllineamento.aggiornate?.length
-            ? <p><strong>{esitoAllineamento.aggiornate.length}</strong> {esitoAllineamento.aggiornate.length === 1 ? 'dichiarazione riconosciuta' : 'dichiarazioni riconosciute'} fra quelle caricate a portale: {esitoAllineamento.aggiornate.map(a => `${a.sito} ${a.mese} (${a.caricata_il.split('-').reverse().join('/')})`).join(', ')}.</p>
+            ? <p><strong>{esitoAllineamento.aggiornate.length}</strong> {esitoAllineamento.aggiornate.length === 1 ? 'dichiarazione riconosciuta' : 'dichiarazioni riconosciute'} fra quelle caricate a portale: {esitoAllineamento.aggiornate.map(a => `${a.sito} ${a.mese}${a.canale && a.canale !== 'RETE' ? ` ${a.canale}` : ''} (${a.caricata_il.split('-').reverse().join('/')})`).join(', ')}.</p>
             : <p>Nessuna novita': quello che risulta caricato a portale era gia' segnato.</p>}
           {esitoAllineamento.non_trovate?.filter(n => n.era_segnata).length > 0 && (
             <p className="text-amber-700 mt-1">
-              Segnate come caricate ma non trovate nel report del portale: {esitoAllineamento.non_trovate.filter(n => n.era_segnata).map(n => `${n.sito} ${n.mese}`).join(', ')}.
+              Segnate come caricate ma non trovate nel report del portale: {esitoAllineamento.non_trovate.filter(n => n.era_segnata).map(n => `${n.sito} ${n.mese}${n.canale && n.canale !== 'RETE' ? ` ${n.canale}` : ''}`).join(', ')}.
             </p>
           )}
         </div>
