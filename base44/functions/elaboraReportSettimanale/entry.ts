@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import {
-  caricaMovimenti, normalizzaRigheReport, CAMPI_REPORT,
+  caricaMovimenti, normalizzaRigheReport, CAMPI_REPORT, statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento,
 } from "../../shared/reportSettimanali.ts";
 import { valoreCampo, leggiCampo } from "../../shared/testoLungo.ts";
 import { calcolaEsito, salvaEsito } from "../../shared/esitoVerifica.ts";
@@ -14,6 +14,10 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 //   { verifica_id, file: { file_uri, mime } }                                   PDF o immagine caricata dal browser
 //   { verifica_id, solo_verifica: true }        ripete il confronto sulle righe gia' lette
 //   { verifica_id, nessuna_movimentazione: true } l'impianto dichiara che non ci sono state movimentazioni
+//
+// Se un archivio dei movimenti si sta riscrivendo, o un caricamento l'ha lasciato
+// a meta', risponde 409 (rinviato): le righe lette restano salvate, esito e
+// alert non si scrivono, e il riconfronto a caricamento finito completa la verifica.
 //
 // Un Excel arriva gia' aperto dal browser e non viene mai salvato. Un PDF o
 // un'immagine, che il codice non sa leggere, si caricano nell'archivio privato
@@ -304,8 +308,35 @@ export default async function(req) {
       });
     }
 
-    const { movimenti } = await conRitentativi(() => caricaMovimenti(base44));
-    const esito = calcolaEsito(verifica, righe, movimenti);
+    // Regola 2: mentre un archivio dei movimenti si riscrive, o dopo un
+    // caricamento interrotto o fallito, il confronto darebbe formulari "non
+    // presenti nel gestionale" che ci sono, e confermerebbe una dichiarazione di
+    // nessuna movimentazione chiudendone l'alert. Lo stato si legge prima e dopo
+    // gli archivi, come in verificheReport e ricontrollaDichiarazioni: un
+    // caricamento partito mentre li si leggeva non si vedrebbe con una lettura sola.
+    const primaDegliArchivi = await statoCaricamenti(base44);
+    let durante = primaDegliArchivi.in_corso;
+    let letti = null;
+    if (!durante.length) {
+      letti = await conRitentativi(() => caricaMovimenti(base44));
+      durante = caricamentiDuranteLettura(primaDegliArchivi, await statoCaricamenti(base44));
+    }
+    if (durante.length) {
+      // Le righe lette restano salvate; esito e alert non si toccano. Un
+      // confronto ripetuto su una verifica completata la lascia com'era; le
+      // altre restano senza esito, e le completa il riconfronto a caricamento
+      // finito (ricontrollaVerifiche, daRiconfrontare).
+      const motivo = `Caricamento ${durante.map(descriviCaricamento).join('; ')}.`;
+      const ripetuta = body.solo_verifica && verifica.stato === 'completata';
+      const cosaResta = body.nessuna_movimentazione ? 'La comunicazione è registrata' : 'Le righe del report sono salvate';
+      const messaggio = ripetuta
+        ? `Verifica non ripetuta. ${motivo} Resta l'esito dell'ultimo confronto, che si rifà da solo a caricamento finito.`
+        : `Confronto rinviato. ${motivo} ${cosaResta}: il confronto si fa da solo a caricamento finito, oppure con «Ripeti la verifica».`;
+      await svc.VerificaReport.update(verificaId, ripetuta ? { stato: 'completata', errore: '' } : { stato: 'errore', errore: messaggio });
+      return Response.json({ error: messaggio, rinviato: true, caricamenti: durante }, { status: 409 });
+    }
+
+    const esito = calcolaEsito(verifica, righe, letti.movimenti, letti.senza_fine);
     await salvaEsito(base44, verifica, esito, conRitentativi);
 
     return Response.json({ ok: true, ...esito.riepilogo });

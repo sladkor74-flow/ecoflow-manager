@@ -6,7 +6,7 @@ import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRacco
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
 import { filtraMovimenti, giornoMovimento } from "../../shared/movimenti.ts";
-import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
+import { statoCaricamenti, caricamentiDuranteLettura } from "../../shared/reportSettimanali.ts";
 
 // Sotto questo numero di giorni coperti dai dati la proiezione di fine mese non
 // si fa: con tre giorni di raccolto, o con l'ultimo caricamento fermo al 2 del
@@ -43,6 +43,17 @@ function periodoAlert(a) {
   return MESI.includes(mese) && anno ? { mese, anno } : null;
 }
 
+// Regola 1: i ritiri terminati senza fine trasporto sono esclusi dal raccolto di
+// ogni mese. Chi legge un "non raggiunto" deve sapere che puo' dipendere da
+// ritiri fatti ma senza data sul portale.
+function testoSenzaFine(item) {
+  const n = item.senza_fine_trasporto || 0;
+  if (!n) return '';
+  return n === 1
+    ? ` Un ritiro terminato del raccoglitore in ${item.regione} non ha la fine trasporto: è escluso dal raccolto di ogni mese finché la data non viene inserita sul portale.`
+    : ` ${n} ritiri terminati del raccoglitore in ${item.regione} non hanno la fine trasporto: sono esclusi dal raccolto di ogni mese finché la data non viene inserita sul portale.`;
+}
+
 function testoAlert(item) {
   const isMissed = item.mese_chiuso;
   const finito = !item.is_mese_corrente;
@@ -50,9 +61,10 @@ function testoAlert(item) {
     titolo: isMissed
       ? `Target non raggiunto: ${item.raccoglitore} — ${item.regione} (${item.mese} ${item.anno})`
       : `Target a rischio: ${item.raccoglitore} — ${item.regione} (${item.mese} ${item.anno})`,
-    descrizione: isMissed
+    descrizione: (isMissed
       ? `Il raccoglitore "${item.raccoglitore}" in ${item.regione} non ha raggiunto il target mensile di ${item.target} ton per ${item.mese} ${item.anno}. Raccolto effettivo: ${item.raccolto} ton (Δ ${item.delta} ton, ${item.pct_raggiungimento}% del target).`
-      : `Il raccoglitore "${item.raccoglitore}" in ${item.regione} è a rischio di non raggiungere il target di ${item.target} ton per ${item.mese} ${item.anno}. Raccolto finora: ${item.raccolto} ton con i dati fino al giorno ${item.giorni_coperti_dai_dati}/${item.giorni_in_mese}${finito ? " (il mese e' finito, ma i ritiri degli ultimi giorni possono non essere ancora terminati a portale)" : ''}, proiezione fine mese: ${item.proiezione} ton (${item.pct_proiezione}% del target).`,
+      : `Il raccoglitore "${item.raccoglitore}" in ${item.regione} è a rischio di non raggiungere il target di ${item.target} ton per ${item.mese} ${item.anno}. Raccolto finora: ${item.raccolto} ton con i dati fino al giorno ${item.giorni_coperti_dai_dati}/${item.giorni_in_mese}${finito ? " (il mese e' finito, ma i ritiri degli ultimi giorni possono non essere ancora terminati a portale)" : ''}, proiezione fine mese: ${item.proiezione} ton (${item.pct_proiezione}% del target).`)
+      + testoSenzaFine(item),
     severita: (isMissed ? item.pct_raggiungimento : item.pct_proiezione) < 50 ? 'critico' : 'warning',
   };
 }
@@ -107,11 +119,29 @@ export default async function(req) {
     // stesso dopo un caricamento interrotto, che ha lasciato l'archivio a meta'
     // finche' qualcuno non ricarica il file.
     let rimandato = false;
-    if (creaAlerts && (await statoCaricamenti(base44, ['primarie'])).in_corso.length) { creaAlerts = false; rimandato = true; }
+    const statoPrima = creaAlerts ? await statoCaricamenti(base44, ['primarie']) : null;
+    if (statoPrima && statoPrima.in_corso.length) { creaAlerts = false; rimandato = true; }
 
     // Le primarie terminate si leggono una volta sola, anche quando i mesi sono piu' d'uno.
     let terminate = null;
-    const primarieTerminate = async () => terminate || (terminate = await fetchAll(base44.asServiceRole.entities.PrimariaRete, { stato: 'terminato' }));
+    // Lo stato si rilegge dopo l'archivio: un caricamento partito o concluso mentre
+    // lo si leggeva lo ha lasciato a meta', e gli alert si rimandano lo stesso.
+    const primarieTerminate = async () => {
+      if (terminate) return terminate;
+      terminate = await fetchAll(base44.asServiceRole.entities.PrimariaRete, { stato: 'terminato' });
+      if (creaAlerts && statoPrima && caricamentiDuranteLettura(statoPrima, await statoCaricamenti(base44, ['primarie'])).length) { creaAlerts = false; rimandato = true; }
+      return terminate;
+    };
+    // I terminati senza fine trasporto non hanno un mese: restano fuori dal
+    // raccolto di tutti, e si contano (regola 1). Di qualunque anno, anche senza
+    // immissione: attribuirli al mese di immissione sarebbe un ripiego.
+    let senzaFine = null;
+    const terminatiSenzaFine = async () => senzaFine || (senzaFine = (await primarieTerminate()).filter(r => !giornoMovimento(r)));
+    // Raccoglitore e regione di un ritiro, per il raccolto e per i senza fine trasporto.
+    const raccRegione = (r) => ({
+      raccoglitore: (r.trasportatore || 'N/D').trim(),
+      regione: r.regione || PROV_TO_REGION[(r.provincia || '').toUpperCase().trim()] || 'Altro',
+    });
     // Fin dove arrivano i dati in tutto l'archivio: decide quando un mese finito e'
     // anche chiuso. Mai oltre oggi: una data sbagliata nel futuro chiuderebbe tutto.
     let ultimoGiornoArchivio = null;
@@ -144,14 +174,20 @@ export default async function(req) {
 
       const raccoltoByKey = {};
       const addRaccolto = (r) => {
-        const racc = (r.trasportatore || 'N/D').trim();
-        const regione = r.regione || PROV_TO_REGION[(r.provincia || '').toUpperCase().trim()] || 'Altro';
+        const { raccoglitore: racc, regione } = raccRegione(r);
         const peso = Number(r.peso_effettivo || 0) / 1000; // kg -> ton
         const key = `${racc}|||${regione}`;
         if (!raccoltoByKey[key]) raccoltoByKey[key] = { raccoglitore: racc, regione, raccolto: 0 };
         raccoltoByKey[key].raccolto += peso;
       };
       rete.forEach(addRaccolto);
+      const senzaFineByKey = {};
+      for (const r of await terminatiSenzaFine()) {
+        const { raccoglitore, regione } = raccRegione(r);
+        const key = `${raccoglitore}|||${regione}`;
+        if (!senzaFineByKey[key]) senzaFineByKey[key] = { raccoglitore, regione, quanti: 0 };
+        senzaFineByKey[key].quanti++;
+      }
 
       const idxMese = MESI.indexOf(mese);
       const giornoDelMese = Number(oggi.slice(8, 10));
@@ -182,6 +218,10 @@ export default async function(req) {
         const raccolto = Object.values(raccoltoByKey)
           .filter(x => x.regione === regione && targetDelPortale(nomiRegione, x.raccoglitore) === racc)
           .reduce((s, x) => s + x.raccolto, 0);
+        // i suoi ritiri terminati senza fine trasporto, con lo stesso abbinamento dei nomi
+        const senzaFineTarget = Object.values(senzaFineByKey)
+          .filter(x => x.regione === regione && targetDelPortale(nomiRegione, x.raccoglitore) === racc)
+          .reduce((s, x) => s + x.quanti, 0);
         const pctRaggiungimento = (raccolto / targetVal) * 100;
         const delta = raccolto - targetVal;
 
@@ -208,6 +248,7 @@ export default async function(req) {
           giorni_coperti_dai_dati: chiuso ? null : giorniCoperti,
           proiezione_affidabile: proiezioneAffidabile,
           giorni_in_mese: chiuso ? null : giorniInMese,
+          senza_fine_trasporto: senzaFineTarget,
         };
         const chiave = chiaveAlert(item);
         esito.chiavi.add(chiave);
@@ -383,6 +424,9 @@ export default async function(req) {
       alerts_chiusi: alertsChiusi,
       mesi_rivalutati: valutazioni.slice(1).map(v => `${v.mese} ${v.anno}`),
       alert_rimandati: rimandato || undefined,
+      // primarie di rete terminate senza fine trasporto, di qualunque anno: escluse
+      // dal raccolto di ogni mese (per raccoglitore, in ogni voce di missed e at_risk)
+      senza_fine_trasporto: senzaFine ? senzaFine.length : undefined,
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

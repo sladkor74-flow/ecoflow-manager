@@ -348,8 +348,17 @@ li', e non riscrive la regola:
 - `eTerminato(r)`: conta solo un movimento terminato;
 - `periodoMovimento(r)`: giorno, anno, mese e settimana ISO dalla **fine del
   trasporto sul giorno italiano**; `filtraMovimenti(records, { anno, mese, canale })`;
-- `giornoOrdine / annoOrdine / meseOrdine`: per gli elenchi, che mostrano anche
-  ordini senza trasporto (si collocano all'immissione). Mai la chiusura a portale;
+- `giornoElenco / annoElenco / meseElenco`: per gli elenchi e i loro filtri di
+  giorno, mese e anno, che mostrano anche ordini senza trasporto. Un terminato
+  si colloca solo sulla fine trasporto; un ordine non terminato all'immissione.
+  Un **terminato senza fine trasporto** non ha giorno, mese ne' anno: nessun
+  filtro di periodo lo prende, e la pagina lo conta e lo segnala a parte. Mai la
+  chiusura a portale;
+- `giornoOrdine / annoOrdine / meseOrdine`: ripiegano sull'immissione anche per
+  un terminato senza fine trasporto. **Non** servono agli elenchi: restano solo
+  per chi attribuisce apposta all'anno di immissione il conteggio dei senza fine
+  (`analisiSettimanalePredittiva`, `calcolaPianificazioneSecondaria`,
+  `proiezioneSecondarie`);
 - `canaleMovimento(r, archivio)`: rete, ACI (con `eAci`) o extra raccolta.
 
 Anche «oggi» e' il giorno italiano (`oggiRoma()`), non `new Date()` del server.

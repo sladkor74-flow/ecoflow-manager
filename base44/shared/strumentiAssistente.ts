@@ -23,13 +23,13 @@ import { fetchAll } from "./fetchAll.ts";
 import { contaFormulari } from "./formulari.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { getRegioneFromProvincia } from "./dataEnrichment.ts";
-import { giornoRoma, oggiRoma, annoRoma } from "./giornoItaliano.ts";
+import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { eTerminato, giornoMovimento } from "./movimenti.ts";
 import { PIVOT_DEFS, calcolaPivot, MESI } from "./reportMensile.ts";
 import { caricaGestionale, caricamentiAperti } from "./quadraturaFirDati.ts";
 import { intervalloSettimana, settimanaIso, statoCaricamenti } from "./reportSettimanali.ts";
-import { situazioneGestionale } from "./assistente.ts";
+import { situazioneGestionale, terminatiSenzaFine } from "./assistente.ts";
 import { listaOrdini, statoRichiesta, evasioneOrdini } from "./richiesteEct.ts";
 import { targetDelPortale } from "./targetRaccoglitori.ts";
 import { statoDichiarazione, sommaMateriali } from "./dichiarazioniImpianti.ts";
@@ -67,17 +67,27 @@ function canaleChiesto(v) {
 /**
  * I terminati senza fine trasporto: non stanno in nessun mese e ogni conto li
  * scarta, ma scartati in silenzio fanno sembrare completo un conto che non lo
- * e'. Si contano a parte, per dirli. L'anno e' quello dell'immissione, l'unica
- * data che hanno: mai la chiusura a portale. null se non ce ne sono.
+ * e'. Si contano a parte, per dirli, tutti e di qualunque periodo, come fanno
+ * la Dashboard e il Report Mensile: contando solo gli immessi nell'anno
+ * sparivano quelli immessi a fine dicembre dell'anno prima e quelli senza
+ * immissione. Si dividono per anno di immissione, l'unica data che hanno, con
+ * una voce per chi non ha nemmeno quella; mai la chiusura a portale. La regola
+ * sta in terminatiSenzaFine (assistente.ts), la stessa del riepilogo. Un canale
+ * per volta: chi chiama passa le righe di un canale solo. null se non ce ne sono.
  */
-function senzaFineTrasporto(righe, anno) {
-  const esclusi = (righe || []).filter(r => eTerminato(r) && !giornoMovimento(r) && annoRoma(r.ordine_immesso_il) === Number(anno));
+function senzaFineTrasporto(righe) {
+  const { esclusi, per_anno } = terminatiSenzaFine(righe);
   if (!esclusi.length) return null;
+  const kg = (xs) => xs.reduce((s, r) => s + peso(r), 0);
   return {
     formulari: contaFormulari(esclusi),
-    tonnellate: t3(esclusi.reduce((s, r) => s + peso(r), 0)),
+    tonnellate: t3(kg(esclusi)),
+    per_anno_immissione: per_anno.map(g => ({
+      anno_immissione: g.anno === null ? 'senza data di immissione' : g.anno,
+      formulari: contaFormulari(g.righe), tonnellate: t3(kg(g.righe)),
+    })),
     esempi: esclusi.map(r => r.id_ordine || r.numero_fir).filter(Boolean).slice(0, 5),
-    nota: 'Terminati senza data di fine trasporto, immessi nell\'anno: esclusi dal conto perche\' non si sa in che mese cadono, e potrebbero appartenere anche al periodo chiesto. Vanno corretti nel file del portale e ricaricati.',
+    nota: 'Terminati senza data di fine trasporto, di qualunque periodo: esclusi dal conto perche\' non si sa in che mese cadono, e qualcuno potrebbe appartenere al periodo chiesto. Sono divisi per anno di immissione, l\'unica data che hanno; chi non ha nemmeno quella sta nella voce "senza data di immissione". Vanno corretti nel file del portale e ricaricati.',
   };
 }
 
@@ -109,7 +119,7 @@ async function movimenti(base44, { canale, anno, mese, provincia, regione, racco
     if (meseIdx >= 0 && m !== meseIdx) return false;
     return true;
   });
-  return { righe, senza_fine: senzaFineTrasporto(delLuogo, anno) };
+  return { righe, senza_fine: senzaFineTrasporto(delLuogo) };
 }
 
 /**
@@ -187,7 +197,7 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
   // spetta e' incompleto invece di tacerlo. Le secondarie dell'extra raccolta
   // non si fatturano, e non si contano nemmeno qui.
   const archivioDi = { RETE: reteAll, ACI: aciAll, EXTRA_RACCOLTA: (extraAll || []).filter(r => !eSecondariaExtra(r)) };
-  const senzaFine = canali.map(c => ({ canale: c, esclusi: senzaFineTrasporto(archivioDi[c], anno) })).filter(x => x.esclusi);
+  const senzaFine = canali.map(c => ({ canale: c, esclusi: senzaFineTrasporto(archivioDi[c]) })).filter(x => x.esclusi);
 
   // Senza mese: i mesi dell'anno fino a quello in corso, per fine trasporto.
   const oggi = oggiRoma();
@@ -407,6 +417,14 @@ export const STRUMENTI = [
       const meseUsato = def.periodo === 'mese' ? (meseValido || MESI[Number(oggiRoma().slice(5, 7)) - 1]) : '';
       const righe = await fetchAll(base44.asServiceRole.entities[def.entita]);
       const pivot = calcolaPivot(chiave, righe, anno, meseUsato);
+      // La pivot scarta i terminati senza fine trasporto: la pagina li segnala,
+      // e qui si contano sulle stesse righe con gli stessi filtri della pivot
+      // (il canale delle secondarie, la raccolta o il trasferimento dell'extra).
+      const senzaFine = senzaFineTrasporto(righe.filter(r => {
+        if (def.canale && (def.canale === 'ACI') !== eAci(r)) return false;
+        if (def.movimento && String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== def.movimento) return false;
+        return true;
+      }));
       const avvisi = [];
       if (def.periodo === 'mese' && !meseValido) avvisi.push(`Questa pivot copre un mese solo e il mese non era indicato: sono i dati di ${meseUsato} ${anno}, non dell'anno.`);
       if (pivotIgnorata) avvisi.push(`La pivot "${pivotIgnorata}" non esiste: ho preso "${chiave}".`);
@@ -417,6 +435,7 @@ export const STRUMENTI = [
         dati: {
           titolo: pivot.titolo, misure: pivot.etichetteMisure, colonne: pivot.colonne,
           righe_lette: pivot.righeLette, albero: pivot.radice,
+          ...(senzaFine ? { senza_fine_trasporto: senzaFine } : {}),
           ...(avvisi.length ? { avvisi } : {}),
         },
       };
@@ -505,7 +524,7 @@ export const STRUMENTI = [
   },
   {
     nome: 'proiezione_secondarie',
-    descrizione: 'Quanti viaggi di secondaria restano da portare a ciascun impianto per arrivare al target, mese per mese, se gli stoccaggi hanno materiale per farli e quali ipotesi sono state fissate a mano. Solo rete: le secondarie ACI non consumano il target.',
+    descrizione: 'Quanti viaggi di secondaria restano da portare a ciascun impianto per arrivare al target, mese per mese, se gli stoccaggi hanno materiale per farli e quali ipotesi sono state fissate a mano. Solo rete: ACI ed extra raccolta non entrano nella predittivita\'.',
     parametri: { anno: 'numero', mese_da: 'indice del mese da cui proiettare, 0 = gennaio' },
     moduli: ['Predittivita Secondarie'],
     async esegui(base44, p) {
@@ -529,18 +548,26 @@ export const STRUMENTI = [
         stoccaggi: (x.stoccaggi || []).map(st => ({ nome: st.nome, giacenza_t: st.giacenza_kg == null ? null : t3(st.giacenza_kg), nota: st.giacenza_nota || '' })),
         avvisi: x.avvisi || [],
       }));
+      // Gli avvisi che valgono per tutta la proiezione si passano cosi' come
+      // arrivano: un archivio che si sta ricaricando e' a meta' e i viaggi non
+      // sono definitivi, e i terminati senza fine trasporto restano fuori dal
+      // gia' arrivato. Scartati qui, la risposta li dava per completi.
+      const sf = d.senza_fine_trasporto;
       return {
         fonte: 'Predittivita delle secondarie, canale RETE',
         periodo: `da ${MESI[meseDa] || ''} ${anno} alla data obiettivo`.trim(),
         dati_al: oggiRoma(),
         dati: {
+          ...(d.caricamento_in_corso ? { avviso_caricamenti: d.caricamento_in_corso } : {}),
+          ...(d.avvisi_generali && d.avvisi_generali.length ? { avvisi_generali: d.avvisi_generali } : {}),
+          ...(sf && (sf.primarie || sf.secondarie) ? { senza_fine_trasporto: sf } : {}),
           kg_per_viaggio: d.kg_per_viaggio,
           impianti,
           viaggi_per_mese: d.viaggi_per_mese,
           piazzali_condivisi: d.piazzali_condivisi,
           registro_piazzali: d.registro_piazzali,
           ipotesi_fissate: (d.ipotesi || []).map(i => ({ impianto: i.impianto, mese: i.mese, primaria_attesa_kg: i.primaria_attesa_kg, viaggi_previsti: i.viaggi_previsti, note: i.note })),
-          nota: "Sono gli stessi numeri del modulo Predittivita Secondarie, ipotesi scritte a mano comprese. Gli impianti che attingono allo stesso stoccaggio sono calcolati insieme: quel piazzale ha una giacenza sola e il registro qui sotto dice mese per mese quanto ne prende ciascuno.",
+          nota: "Sono gli stessi numeri del modulo Predittivita Secondarie, ipotesi scritte a mano comprese. Solo rete: ACI ed extra raccolta non entrano. Gli impianti che attingono allo stesso stoccaggio sono calcolati insieme: quel piazzale ha una giacenza sola e il registro qui sotto dice mese per mese quanto ne prende ciascuno.",
         },
       };
     },
@@ -636,22 +663,32 @@ export const STRUMENTI = [
       // riscrivono il caricamento delle primarie e l'apertura della pagina: se
       // nessuno dei due era ancora partito, una richiesta gia' ritirata restava
       // aperta e "scaduta", e la risposta suggeriva di sollecitare un ritiro
-      // fatto. Stessa regola di importaBlocco (ritiri_ect): il giorno e' quello
-      // italiano della fine trasporto, mai la chiusura a portale, e la richiesta
-      // e' ritirata solo quando lo sono tutti i suoi ordini. Un ordine terminato
-      // senza fine trasporto non conta come ritirato, e si dice.
+      // fatto. Stessa regola di importaBlocco (ritiri_ect, dataRitiro): il giorno
+      // e' quello italiano della fine trasporto, mai la chiusura a portale, e la
+      // richiesta e' ritirata solo quando lo sono tutti i suoi ordini. Un ordine
+      // terminato senza fine trasporto non conta come ritirato, e si dice.
+      // Un ritiro gia' rilevato si toglie solo se l'archivio dice che un suo
+      // ordine non e' ritirato; un ordine che negli archivi non c'e' affatto (un
+      // caricamento parziale, un ID scritto male) non basta, e resta la data
+      // salvata: altrimenti la richiesta tornava aperta e scaduta qui, mentre la
+      // pagina - che quella data la conserva di proposito - non si riallineava mai.
+      // Qui l'ID ordine non si riconosce di nuovo: vale quello salvato.
       // Mentre le primarie si ricaricano l'archivio e' a meta': allora vale
       // l'esito salvato, calcolato su un archivio intero, e lo si dice.
       const daControllare = richieste.filter(r => listaOrdini(r).length && !r.motivo_annullamento && !r.evasione_confermata);
-      let terminati = null, senzaFine = null, inCorso = [], statoNonLetto = false;
+      let terminati = null, senzaFine = null, presenti = null, inCorso = [], statoNonLetto = false;
       if (daControllare.length) {
         const caricamenti = await statoCaricamenti(base44, ['primarie', 'primarie_rete', 'primarie_aci']).catch(() => null);
         if (!caricamenti) statoNonLetto = true;
         inCorso = (caricamenti && caricamenti.in_corso) || [];
         if (!inCorso.length) {
-          const [rete, aci] = await Promise.all([
-            fetchAll(svc.PrimariaRete, { stato: 'terminato' }),
-            fetchAll(svc.PrimariaAci, { stato: 'terminato' }),
+          // Gli stessi archivi di importaBlocco: tutte le primarie, di ogni
+          // stato, e gli assegnati, per sapere quali ordini l'archivio conosce.
+          const [assRete, assAci, rete, aci] = await Promise.all([
+            fetchAll(svc.Assegnato),
+            fetchAll(svc.AssegnatoAci),
+            fetchAll(svc.PrimariaRete),
+            fetchAll(svc.PrimariaAci),
           ]);
           terminati = new Map(); // id ordine -> primo giorno di fine trasporto
           senzaFine = new Set(); // id degli ordini terminati senza fine trasporto
@@ -662,14 +699,23 @@ export const STRUMENTI = [
             if (!g) { senzaFine.add(id); continue; }
             if (!terminati.has(id) || g < terminati.get(id)) terminati.set(id, g);
           }
+          presenti = new Set([...assRete, ...assAci, ...rete, ...aci].map(o => String(o.id_ordine || '').trim()).filter(Boolean));
         }
       }
+      // Copia di dataRitiro in base44/functions/importaBlocco/entry.ts: se la
+      // regola cambia la', va cambiata anche qui.
+      const dataRitiro = (salvata, ids, ev) => {
+        if (ev.ultima) return ev.ultima;
+        if (!salvata) return null;
+        const mancanti = ids.filter(id => !terminati.has(id));
+        return mancanti.every(id => presenti.has(id)) ? null : salvata;
+      };
 
       const tutte = richieste.map(r => {
         const ordini = listaOrdini(r);
         // Senza ID ordine non c'e' niente da cercare fra i terminati: resta il salvato.
         const ev = terminati && ordini.length ? evasioneOrdini(ordini, terminati) : null;
-        const rilevata = ev ? ev.ultima : r.evasione_rilevata_il;
+        const rilevata = ev ? dataRitiro(r.evasione_rilevata_il, ordini, ev) : r.evasione_rilevata_il;
         const stato = statoRichiesta({ ...r, evasione_rilevata_il: rilevata || null });
         const salvato = r.esito || statoRichiesta(r);
         const g = giorni(r.scadenza);
@@ -699,6 +745,12 @@ export const STRUMENTI = [
       const statoIgnorato = chiesto && chiesto !== 'scaduta' && !stati.includes(chiesto) ? chiesto : '';
       const diverse = tutte.filter(r => r.stato_nella_pagina).length;
       const senzaFineTot = tutte.filter(r => r.ordini_terminati_senza_fine_trasporto).length;
+      // Il ricontrollo automatico della pagina (caricamento delle primarie,
+      // apertura da parte dell'amministratore) lavora solo sull'anno in corso:
+      // per un anno passato la pagina non si riallinea da sola.
+      const riallineo = anno === Number(oggi.slice(0, 4))
+        ? 'la pagina si riallinea al prossimo caricamento delle primarie o alla sua apertura da parte dell\'amministratore.'
+        : `per il ${anno} la pagina non si ricalcola da sola: il ricontrollo automatico riguarda solo le richieste dell'anno in corso.`;
       return {
         fonte: `Richieste ECT${terminati ? ', ritiri ricontrollati sui terminati di adesso' : inCorso.length ? ', esito salvato' : ''}`,
         periodo: `anno ${anno}`,
@@ -711,7 +763,7 @@ export const STRUMENTI = [
           ...(statoIgnorato ? { avviso: `"${statoIgnorato}" non e' uno stato delle richieste (ci sono: ${stati.join(', ')}, piu' "scaduta" che vuol dire aperta e fuori termine): qui sotto ci sono tutte.` } : {}),
           ...(inCorso.length ? { avviso_caricamenti: `Caricamento delle primarie ${inCorso.some(a => a.interrotto) ? 'interrotto' : 'in corso'}: l'archivio puo' essere a meta', quindi i ritiri non si sono ricontrollati e qui c'e' l'esito salvato dall'ultimo caricamento completo.` } : {}),
           ...(statoNonLetto ? { avviso_caricamenti: 'Non sono riuscita a leggere lo stato dei caricamenti: i ritiri sono ricontrollati sui terminati di adesso, ma se le primarie si stavano ricaricando potrebbero non essere definitivi.' } : {}),
-          ...(diverse ? { avviso_pagina: `${diverse} ${diverse === 1 ? 'richiesta ha' : 'richieste hanno'} qui uno stato diverso da quello salvato nella To-Do List ("stato_nella_pagina"): vale quello ricontrollato adesso; la pagina si riallinea al prossimo caricamento delle primarie o alla sua apertura da parte dell'amministratore.` } : {}),
+          ...(diverse ? { avviso_pagina: `${diverse} ${diverse === 1 ? 'richiesta ha' : 'richieste hanno'} qui uno stato diverso da quello salvato nella To-Do List ("stato_nella_pagina"): vale quello ricontrollato adesso; ${riallineo}` } : {}),
           ...(senzaFineTot ? { avviso_senza_fine_trasporto: `${senzaFineTot} ${senzaFineTot === 1 ? 'richiesta ha' : 'richieste hanno'} ordini terminati senza data di fine trasporto: non contano come ritirati finche' la data non si corregge nel file del portale e si ricarica.` } : {}),
         },
       };
@@ -919,9 +971,15 @@ export const STRUMENTI = [
       const svc = base44.asServiceRole.entities;
       const tutte = await fetchAll(svc.Omologa);
       const k = p.produttore ? normalizzaRagioneSociale(p.produttore) : '';
+      // Un canale non riconosciuto toglie il filtro e lo si dice; l'extra
+      // raccolta qui non ha omologhe, e l'elenco vuoto va spiegato.
+      const canale = canaleChiesto(p.canale);
+      const avvisoCanale = p.canale && !canale
+        ? `"${p.canale}" non e' un canale: le omologhe sono di RETE e di ACI, ciascuna col suo conteggio, e qui ci sono tutte e due.`
+        : canale === 'EXTRA_RACCOLTA' ? 'L\'extra raccolta non ha omologhe in questo modulo: ci sono solo quelle di RETE e di ACI.' : '';
       const righe = tutte.filter(o => {
         if (k && normalizzaRagioneSociale(o.produttore) !== k && !normalizzaRagioneSociale(o.produttore).includes(k)) return false;
-        if (canaleChiesto(p.canale) && String(o.canale || '').toUpperCase() !== canaleChiesto(p.canale)) return false;
+        if (canale && String(o.canale || '').toUpperCase() !== canale) return false;
         if (p.stato && o.stato !== p.stato) return false;
         return true;
       }).map(o => {
@@ -937,14 +995,25 @@ export const STRUMENTI = [
       });
       const filtrate = p.in_scadenza ? righe.filter(r => r.giorni_alla_scadenza !== null && r.giorni_alla_scadenza <= 90) : righe;
       filtrate.sort((a, b) => (a.giorni_alla_scadenza ?? 9999) - (b.giorni_alla_scadenza ?? 9999));
+      // I conteggi un canale per volta: rete e ACI non si sommano, nemmeno
+      // quando il canale non e' stato indicato.
+      const canaliDelConto = canale === 'RETE' || canale === 'ACI' ? [canale] : canale ? [] : ['RETE', 'ACI'];
+      const perCanale = Object.fromEntries(canaliDelConto.map(c => [c, { scadute: 0, da_verificare: 0 }]));
+      for (const r of filtrate) {
+        const c = String(r.canale || 'N/D').toUpperCase();
+        if (!perCanale[c]) perCanale[c] = { scadute: 0, da_verificare: 0 };
+        if (r.giorni_alla_scadenza !== null && r.giorni_alla_scadenza < 0) perCanale[c].scadute++;
+        if (r.stato === 'da_verificare') perCanale[c].da_verificare++;
+      }
       return {
         fonte: 'Omologhe',
         periodo: `situazione al ${oggi}`,
         dati_al: oggi,
         dati: {
-          scadute: filtrate.filter(r => r.giorni_alla_scadenza !== null && r.giorni_alla_scadenza < 0).length,
-          da_verificare: filtrate.filter(r => r.stato === 'da_verificare').length,
+          per_canale: perCanale,
+          ...(avvisoCanale ? { avviso_canale: avvisoCanale } : {}),
           omologhe: elenco(filtrate, 80),
+          nota: 'RETE e ACI sono canali indipendenti: i conteggi stanno canale per canale e non si sommano.',
         },
       };
     },
@@ -1089,8 +1158,25 @@ export const STRUMENTI = [
 
       if (tipo === 'PASSIVA' && meseChiesto) {
         const tipologia = tipologiaChiesta || 'RETE';
-        const res = await base44.functions.invoke('calcolaPassiva', { anno, mese: meseChiesto, tipologia });
+        // Il conto del modulo scarta i terminati senza fine trasporto senza
+        // contarli: qui si contano sugli archivi del canale, con lo stesso filtro
+        // sul campo vuoto della quadratura, cosi' la risposta dice che il conto
+        // e' incompleto invece di tacerlo. Primarie e secondarie a parte: sono lo
+        // stesso materiale che si sposta. null se l'archivio non accetta il
+        // filtro: il conteggio non c'e', che non vuol dire zero.
+        const senzaData = (entita) => fetchAll(svc[entita], { trasporto_finito_il: null }).catch(() => null);
+        const [res, primSenza, secSenza] = await Promise.all([
+          base44.functions.invoke('calcolaPassiva', { anno, mese: meseChiesto, tipologia }),
+          senzaData(tipologia === 'ACI' ? 'PrimariaAci' : tipologia === 'EXTRA_RACCOLTA' ? 'ExtraRaccolta' : 'PrimariaRete'),
+          tipologia === 'EXTRA_RACCOLTA' ? Promise.resolve([]) : senzaData('Secondaria'),
+        ]);
         const d = (res && res.data) || res || {};
+        const conteggioFatto = primSenza !== null && secSenza !== null;
+        const primarieCanale = tipologia === 'EXTRA_RACCOLTA' ? (primSenza || []).filter(r => !eSecondariaExtra(r)) : (primSenza || []);
+        const secondarieCanale = tipologia === 'EXTRA_RACCOLTA' ? (primSenza || []).filter(eSecondariaExtra)
+          : (secSenza || []).filter(r => eAci(r) === (tipologia === 'ACI'));
+        const sfPrimarie = senzaFineTrasporto(primarieCanale);
+        const sfSecondarie = senzaFineTrasporto(secondarieCanale);
         const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
         const sezione = (nome, gruppi) => (gruppi || [])
           .filter(f => !k || normalizzaRagioneSociale(f.fornitore).includes(k))
@@ -1117,6 +1203,14 @@ export const STRUMENTI = [
               ? { totale_del_fornitore_euro: suo, totali_del_mese_tutti_i_fornitori: d.totali }
               : { totali: d.totali, quadratura: d.quadratura }),
             anomalie: elenco(d.anomalie || [], 20),
+            ...(sfPrimarie || sfSecondarie ? {
+              senza_fine_trasporto: {
+                canale: tipologia,
+                ...(sfPrimarie ? { [tipologia === 'EXTRA_RACCOLTA' ? 'raccolta' : 'primarie']: sfPrimarie } : {}),
+                ...(sfSecondarie ? { [tipologia === 'EXTRA_RACCOLTA' ? 'trasferimenti' : 'secondarie']: sfSecondarie } : {}),
+              },
+            } : {}),
+            ...(conteggioFatto ? {} : { avviso_senza_fine_trasporto: 'Non sono riuscita a contare i terminati senza data di fine trasporto: se ce ne sono, il conto qui sopra li esclude.' }),
             ...(tipologiaChiesta ? {} : { avviso_canale: `${tipologiaIgnorata ? `"${tipologiaIgnorata}" non e' un canale` : 'Canale non indicato'}: questo e' il conto della RETE. ACI ed extra raccolta hanno il loro, e non si sommano.` }),
             nota: 'Conto fatto adesso sui movimenti terminati del mese, lo stesso del modulo Fatturazione. Un fornitore che ne fattura un altro porta il secondo in "di cui": si paga al primo.',
           },
@@ -1162,12 +1256,12 @@ export const STRUMENTI = [
         periodo: meseChiesto ? `${meseChiesto} ${anno}` : `anno ${anno}`,
         dati_al: oggiRoma(),
         dati: {
-          voci: righe.length,
           // Un totale unico ha senso solo dentro un canale: senza filtro di
-          // tipologia sommerebbe rete, ACI ed extra raccolta in un numero solo.
+          // tipologia sommerebbe rete, ACI ed extra raccolta in un numero solo,
+          // e questo vale per gli euro come per il numero delle voci.
           ...(tipologiaChiesta
-            ? { totale_euro: Math.round(gruppi.reduce((s, g) => s + g.totale_euro, 0) * 100) / 100 }
-            : { totale_per_canale: Object.entries(gruppi.reduce((acc, g) => { const c = g.tipologia || 'N/D'; acc[c] = Math.round(((acc[c] || 0) + g.totale_euro) * 100) / 100; return acc; }, {})).map(([canale, euro]) => ({ canale, euro })), nota_totale: 'Non c\'e\' un totale unico: rete, ACI ed extra raccolta sono commesse indipendenti.' }),
+            ? { voci: righe.length, totale_euro: Math.round(gruppi.reduce((s, g) => s + g.totale_euro, 0) * 100) / 100 }
+            : { totale_per_canale: Object.values(gruppi.reduce((acc, g) => { const c = g.tipologia || 'N/D'; if (!acc[c]) acc[c] = { canale: c, voci: 0, euro: 0 }; acc[c].voci += g.voci; acc[c].euro = Math.round((acc[c].euro + g.totale_euro) * 100) / 100; return acc; }, {})), nota_totale: 'Non c\'e\' un totale unico, ne\' di euro ne\' di voci: rete, ACI ed extra raccolta sono commesse indipendenti.' }),
           ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso tutto l'anno ${anno}.` } : {}),
           ...(tipologiaIgnorata ? { avviso_canale: `"${tipologiaIgnorata}" non e' un canale: qui sotto ci sono tutti e tre, un totale per canale.` } : {}),
           canale: tipologiaChiesta || 'nessun filtro di canale: qui dentro ci sono rete, ACI ed extra raccolta, da tenere distinti',

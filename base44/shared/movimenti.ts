@@ -49,19 +49,34 @@ export function periodoMovimento(r) {
 }
 
 /**
- * Il giorno con cui un elenco colloca un ordine: la fine del trasporto; per chi
- * non l'ha (un ordine cancellato prima del ritiro) la data di immissione. Mai la
+ * Il giorno di un ordine: la fine del trasporto; per chi non l'ha (un ordine
+ * cancellato prima del ritiro) la data di immissione. Mai la
  * chiusura a portale: i filtri per anno e per giorno delle pagine la usavano, e
  * un ritiro del 31 dicembre chiuso a gennaio finiva nell'anno dopo mentre il
  * filtro per mese, che legge la fine trasporto, lo teneva a dicembre.
  *
  * Attenzione: giornoOrdine ripiega sull'immissione anche per un TERMINATO
- * senza fine trasporto. Chi filtra o conta per periodo lo tiene fuori a parte e lo
- * segnala (vedi PrimarieRete.jsx, PrimarieAci.jsx, computeSecondarieMatrix).
+ * senza fine trasporto. Gli elenchi e i filtri delle pagine usano giornoElenco,
+ * qui sotto. giornoOrdine e annoOrdine restano per chi attribuisce apposta
+ * all'anno di immissione il solo conteggio dei senza fine trasporto
+ * (analisiSettimanalePredittiva, calcolaPianificazioneSecondaria,
+ * proiezioneSecondarie).
  */
 export const giornoOrdine = (r) => giornoMovimento(r) || giornoRoma(r && r.ordine_immesso_il);
 export const annoOrdine = (r) => { const g = giornoOrdine(r); return g ? Number(g.slice(0, 4)) : null; };
 export const meseOrdine = (r) => { const g = giornoOrdine(r); return g ? MESI_MOVIMENTI[Number(g.slice(5, 7)) - 1] : null; };
+
+/**
+ * Il giorno con cui un elenco colloca un ordine, per filtri e colonne di giorno,
+ * mese e anno: un terminato solo sulla fine del trasporto; un ordine non
+ * terminato, che non e' un movimento, come giornoOrdine (l'immissione, se non ha
+ * la fine trasporto). Un terminato senza fine trasporto non ha giorno (stringa
+ * vuota), mese ne' anno (null): nessun filtro di periodo lo prende, e chi lo
+ * elenca lo conta a parte e lo segnala. Era riscritta a mano in quattro pagine.
+ */
+export const giornoElenco = (r) => (eTerminato(r) ? giornoMovimento(r) : giornoOrdine(r));
+export const annoElenco = (r) => { const g = giornoElenco(r); return g ? Number(g.slice(0, 4)) : null; };
+export const meseElenco = (r) => { const g = giornoElenco(r); return g ? MESI_MOVIMENTI[Number(g.slice(5, 7)) - 1] : null; };
 
 export const GIORNI_SCADENZA_ORDINE = 30;
 // i conti si fanno fra giorni di calendario a mezzanotte UTC: il cambio dell'ora

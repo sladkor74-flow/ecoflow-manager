@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { oggiRoma, annoRoma } from "../../shared/giornoItaliano.ts";
-import { eTerminato, periodoMovimento } from "../../shared/movimenti.ts";
+import { eTerminato, periodoMovimento, giornoMovimento } from "../../shared/movimenti.ts";
 import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetrics } from "../../shared/primarieReteAnalytics.ts";
 import { conferimentiSospetti } from "../../shared/rotteConferimenti.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
@@ -16,7 +16,7 @@ import { canaleDi } from "../../shared/canaleSecondaria.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { formatoTonnellate } from "../../shared/formato.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
-import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
+import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from "../../shared/reportSettimanali.ts";
 
 // I caricamenti che riscrivono l'archivio letto da ciascun modulo. Il file unico
 // delle primarie riscrive rete, ACI e assegnati; primarie_rete e primarie_aci
@@ -57,6 +57,12 @@ const segna = (attuali, key, alert) => { if (!attuali.has(key)) attuali.set(key,
 // - Se l'archivio del modulo si sta riscrivendo (un caricamento aperto o rimasto
 //   a meta') non si tocca niente e si risponde 409: su un archivio a meta' ogni
 //   condizione sembrerebbe sparita, e gli alert aperti si chiuderebbero tutti.
+//   Lo stato dei caricamenti si legge prima dell'archivio e si rilegge dopo,
+//   prima di scrivere: un caricamento partito o concluso nel frattempo rinvia
+//   il controllo allo stesso modo.
+// - I terminati senza fine trasporto non hanno un anno e restano fuori dal
+//   controllo (regola 1): non si ripiega sull'immissione, ma si contano, di
+//   qualunque anno, e la risposta li dice, per canale.
 
 const TEMPO_MASSIMO_MS = 40000;
 const MESI_ANNO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -107,16 +113,16 @@ export default async function(req) {
     // Prima di leggere l'archivio: se un caricamento lo sta riscrivendo, o l'ha
     // lasciato a meta', il controllo si rinvia. Il flusso automatico riparte da
     // solo quando il caricamento si conclude.
-    const caricamenti = await statoCaricamenti(base44, CARICAMENTI_DEL_MODULO[modulo]);
-    if (caricamenti.in_corso.length) {
-      const c = caricamenti.in_corso[0];
+    const prima = await statoCaricamenti(base44, CARICAMENTI_DEL_MODULO[modulo]);
+    if (prima.in_corso.length) {
+      const c = prima.in_corso[0];
       const chi = [c.nome_file && `file ${c.nome_file}`, c.utente && `di ${c.utente}`, c.data && `del ${c.data}`].filter(Boolean).join(', ');
       return Response.json({
         error: c.interrotto
           ? `Il caricamento ${c.tipo_file}${chi ? ` (${chi})` : ''} si è interrotto e l'archivio può essere a metà: ricaricare il file, poi ripetere il controllo degli alert.`
           : `È aperto il caricamento ${c.tipo_file}${chi ? ` (${chi})` : ''}: gli alert si ricontrollano da soli quando è concluso.`,
         rinviato: true,
-        caricamenti_in_corso: caricamenti.in_corso,
+        caricamenti_in_corso: prima.in_corso,
       }, { status: 409 });
     }
 
@@ -124,6 +130,22 @@ export default async function(req) {
     const anno = Number(oggiRoma().slice(0, 4));
     const tutti = await fetchAll(base44.asServiceRole.entities[entityName]);
     const records = tutti.filter(r => daControllare(r, modulo, anno));
+    // Regola 1: un terminato senza fine trasporto non ha anno, e daControllare lo
+    // scarta in silenzio: su di lui non si valutano pesi, tratte e rotte. Si
+    // conta, di qualunque anno e anche senza immissione, e la risposta lo dice.
+    // Le secondarie di rete e quelle ACI stanno nello stesso archivio: si contano
+    // per canale, mai insieme.
+    const senzaFine = new Map();
+    if (modulo !== 'assegnati') {
+      for (const r of tutti) {
+        if (!eTerminato(r) || giornoMovimento(r)) continue;
+        const canale = modulo === 'secondarie' ? (eAci(r) ? 'ACI' : 'rete') : '';
+        if (!senzaFine.has(canale)) senzaFine.set(canale, { canale, quanti: 0, esempi: [] });
+        const g = senzaFine.get(canale);
+        g.quanti++;
+        if (g.esempi.length < 5 && r.id_ordine) g.esempi.push(String(r.id_ordine));
+      }
+    }
 
     // Tutti gli alert aperti del modulo, pagina per pagina: senza, il controllo dei
     // doppioni vedeva solo i primi e a ogni caricamento li ricreava.
@@ -199,6 +221,21 @@ export default async function(req) {
       newAlerts.push(...soloRotte(records, existingKeys, attuali, entityName, modulo));
     }
 
+    // Prima di scrivere si rilegge lo stato dei caricamenti: uno partito mentre si
+    // leggeva l'archivio o si valutavano le regole non si vedeva, e su un archivio
+    // a meta' gli alert aperti si chiudevano come "condizione non presente nei
+    // dati". Lo stesso per uno concluso nel frattempo: l'archivio letto puo'
+    // essere quello a meta'. Non si scrive niente; il flusso automatico riparte a
+    // caricamento concluso.
+    const durante = caricamentiDuranteLettura(prima, await statoCaricamenti(base44, CARICAMENTI_DEL_MODULO[modulo]));
+    if (durante.length) {
+      return Response.json({
+        error: `Controllo degli alert rinviato, non è stato scritto niente. Caricamento ${durante.map(descriviCaricamento).join('; ')}.`,
+        rinviato: true,
+        caricamenti_in_corso: durante,
+      }, { status: 409 });
+    }
+
     // Bulk create alerts (chunk di 100)
     let creati = 0;
     const CHUNK = 100;
@@ -269,6 +306,8 @@ export default async function(req) {
       alerts_chiusi: chiusi,
       alerts_da_chiudere: daChiudere.length - chiusi,
       alerts_totali_aperti: existingAlerts.length + creati - chiusi,
+      // terminati esclusi dal controllo perche' senza fine trasporto, per canale
+      terminati_senza_fine_trasporto: [...senzaFine.values()],
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

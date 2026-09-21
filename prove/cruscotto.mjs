@@ -36,6 +36,15 @@ const rifatto = statoCaricamenti([{ tipo_file: 'secondarie', esito: 'successo', 
 verifica('un caricamento interrotto alle 9 e rifatto alle 10 non e\' piu\' un problema', rifatto.interrotti.length === 0, JSON.stringify(rifatto.interrotti));
 const nonRifatto = statoCaricamenti([{ tipo_file: 'secondarie', esito: 'successo', created_date: '2026-09-20T08:00:00' }, ...logs], OGGI, ADESSO, ['secondarie']);
 verifica('se l\'ultimo riuscito e\' di PRIMA dell\'interruzione, il problema resta', nonRifatto.interrotti.length === 1);
+// Un caricamento fallito dopo lo svuotamento resta "in_corso" (importEcotyreFile,
+// importaBlocco); un file sbagliato caricato dopo si chiude in "errore" a dati
+// intatti, e non deve nascondere l'archivio rimasto vuoto.
+const fallito = statoCaricamenti([
+  { tipo_file: 'secondarie', esito: 'errore', created_date: '2026-09-20T12:00:00', messaggio: 'Formato file non valido' },
+  { tipo_file: 'secondarie', esito: 'in_corso', created_date: '2026-09-20T11:00:00', messaggio: 'Caricamento non riuscito: nessuna riga scritta dopo lo svuotamento dell\'archivio' },
+  { tipo_file: 'secondarie', esito: 'successo', created_date: '2026-09-18T08:00:00' },
+], OGGI, ADESSO, ['secondarie']);
+verifica('fallito dopo lo svuotamento e poi un file rifiutato: resta interrotto', fallito.interrotti.length === 1 && fallito.interrotti[0].il === '2026-09-20', JSON.stringify(fallito.interrotti));
 
 console.log('MESI DELLA FATTURAZIONE ATTIVA');
 const docs = [

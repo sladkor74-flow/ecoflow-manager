@@ -4,9 +4,9 @@ import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { formatoKg } from "../../shared/formato.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { eTerminato, periodoMovimento, canaleMovimento, annoOrdine } from "../../shared/movimenti.ts";
+import { eTerminato, periodoMovimento, canaleMovimento } from "../../shared/movimenti.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
-import { statoCaricamenti, descriviCaricamento } from "../../shared/reportSettimanali.ts";
+import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from "../../shared/reportSettimanali.ts";
 
 // Media reale di un viaggio di secondaria: 13,5 tonnellate.
 const KG_PER_VIAGGIO = 13500;
@@ -52,12 +52,19 @@ const eSuggerimento = (a) => a.regola_id === REGOLA || String(a.titolo || '').st
 // riscritto gli stessi archivi. Un "primarie_rete" storico, che nessuna scheda
 // di Caricamento Dati scrive piu' ne' chiude, altrimenti bloccava per sempre il
 // piano, il suggerimento del lunedi' e la proiezione.
+// Lo stato si legge prima e dopo gli archivi (caricamentiDuranteLettura): la
+// lettura di migliaia di primarie e secondarie dura secondi, e un caricamento
+// partito o concluso intanto, con una lettura sola fatta prima, non si vedeva:
+// il suggerimento si sarebbe scritto su un archivio a meta'. Se lo stato non si
+// legge non si sa se gli archivi sono interi, e si rinvia lo stesso.
 const TIPI_LETTI = ['primarie', 'primarie_rete', 'secondarie'];
-async function caricamentoAperto(base44) {
-  const stato = await statoCaricamenti(base44, TIPI_LETTI).catch(() => ({ in_corso: [] }));
-  const aperti = stato.in_corso || [];
-  return aperti.length ? aperti.map(descriviCaricamento).join('; ') : null;
-}
+const leggiStato = (base44) => statoCaricamenti(base44, TIPI_LETTI).catch(() => null);
+const NON_LETTO = "lo stato dei caricamenti non si e' potuto leggere, e non si sa se primarie e secondarie sono complete";
+const rinvio = (motivo, caricamenti = []) => Response.json({
+  error: `Rinviato: ${motivo}. Il suggerimento della settimana non si scrive: resta quello di prima e si rifa' al prossimo caricamento concluso.`,
+  rinviato: true,
+  caricamenti_in_corso: caricamenti,
+}, { status: 409 });
 
 // Funzione richiamata dal workflow del lunedì: analizza la settimana appena
 // conclusa e genera un suggerimento proattivo salvato come Alert (modulo
@@ -72,10 +79,9 @@ export default async function(req) {
     if (chiamante && !eAmministratore(chiamante)) return rispostaSolaLettura();
     const b = base44.asServiceRole;
 
-    const aperto = await caricamentoAperto(base44);
-    if (aperto) {
-      return Response.json({ error: `Rinviato: ${aperto}. Il suggerimento della settimana si rifa' quando il caricamento e' chiuso.`, rinviato: true }, { status: 409 });
-    }
+    const primaDegliArchivi = await leggiStato(base44);
+    if (!primaDegliArchivi) return rinvio(NON_LETTO);
+    if (primaDegliArchivi.in_corso.length) return rinvio(primaDegliArchivi.in_corso.map(descriviCaricamento).join('; '), primaDegliArchivi.in_corso);
 
     const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
     // Solo rete: il target di un impianto e' della rete e ACI ed extra raccolta
@@ -85,6 +91,11 @@ export default async function(req) {
       fetchAll(b.entities.PrimariaRete, { stato: 'terminato' }).then(r => soloRete(r, 'PrimariaRete')),
       fetchAll(b.entities.Secondaria, { stato: 'terminato' }).then(r => soloRete(r, 'Secondaria')),
     ]);
+    // la seconda lettura dello stato, a archivi letti (vedi leggiStato)
+    const dopoGliArchivi = await leggiStato(base44);
+    if (!dopoGliArchivi) return rinvio(NON_LETTO);
+    const durante = caricamentiDuranteLettura(primaDegliArchivi, dopoGliArchivi);
+    if (durante.length) return rinvio(durante.map(descriviCaricamento).join('; '), durante);
 
     // Settimana appena conclusa = lunedì-domenica della settimana scorsa, sul
     // calendario italiano
@@ -103,8 +114,10 @@ export default async function(req) {
     // contando le sole secondarie il residuo usciva gonfiato di tutte le
     // primarie gia' arrivate, e il suggerimento diceva un numero diverso da
     // quello della pagina. Chi non ha la fine trasporto non si colloca in
-    // nessuna settimana (non si ripiega sulla chiusura a portale): si conta,
-    // fra quelli dell'anno per data di immissione, e si dice in fondo.
+    // nessuna settimana (non si ripiega sulla chiusura a portale): si conta, di
+    // qualunque anno, e si dice in fondo. Prima si contavano solo gli immessi
+    // nell'anno (annoOrdine, che AGENTS.md riserva agli elenchi): uno senza data
+    // di immissione, o immesso a dicembre dell'anno prima, spariva senza avviso.
     const terminati = [];
     const senzaFine = { primarie: 0, secondarie: 0 };
     const leggi = (righe, flusso) => {
@@ -112,7 +125,7 @@ export default async function(req) {
         if (!eTerminato(r)) continue;
         if (!impNormMap[normalizzaRagioneSociale(r.destinazione)]) continue;
         const p = periodoMovimento(r);
-        if (!p) { if (annoOrdine(r) === anno) senzaFine[flusso]++; continue; }
+        if (!p) { senzaFine[flusso]++; continue; }
         terminati.push({ r, flusso, giorno: p.giorno, anno: p.anno, dest: normalizzaRagioneSociale(r.destinazione) });
       }
     };
@@ -151,7 +164,11 @@ export default async function(req) {
       const deltaSett = execSett - prevSett;
       const deltaViaggi = Math.round(deltaSett / KG_PER_VIAGGIO);
       const arrivati = `${formatoKg(execSett)} kg arrivati (primaria ${formatoKg(kg(primSett))} kg, secondaria ${formatoKg(kg(secSett))} kg in ${viaggiSett} ${viaggiSett === 1 ? 'viaggio' : 'viaggi'})`;
-      const coda = `Consuntivo di rete ${anno}: ${formatoKg(consuntivoTot)} kg su un target di ${formatoKg(target)} kg. Residuo: ${formatoKg(residuo)} kg.`;
+      // Il numero si chiama come nella Proiezione a fine anno, di cui e' lo
+      // stesso conto: detto "Consuntivo di rete" si confondeva con quello della
+      // Dashboard, che somma solo i fornitori configurati. L'agente legge tutti
+      // e due.
+      const coda = `Già arrivato di rete nel ${anno}: ${formatoKg(consuntivoTot)} kg su un target di ${formatoKg(target)} kg. Residuo: ${formatoKg(residuo)} kg.`;
 
       let frase;
       if (settRim === 0) {
@@ -173,9 +190,9 @@ export default async function(req) {
     // Un terminato senza fine trasporto resta fuori dal conto, e lo si dice.
     const nSenzaFine = senzaFine.primarie + senzaFine.secondarie;
     if (nSenzaFine > 0) {
-      parti.push(`Terminati di rete del ${anno} (per data di immissione) verso questi impianti senza la data di fine trasporto (primarie: ${senzaFine.primarie}, secondarie: ${senzaFine.secondarie}). Non sono contati né nella settimana né nel consuntivo, finché la data non arriva con un nuovo caricamento.`);
+      parti.push(`Terminati di rete di qualunque anno verso questi impianti senza la data di fine trasporto (primarie: ${senzaFine.primarie}, secondarie: ${senzaFine.secondarie}). Non sono contati né nella settimana né nel già arrivato, finché la data non arriva con un nuovo caricamento.`);
     }
-    const suggestion = `Suggerimento settimanale della predittività delle secondarie (settimana ${it(lastMonday)}→${it(lastSunday)}, calcolato il ${it(oggi)}). Solo rete: ACI ed extra raccolta non entrano nella predittività.\n\n` + parti.join('\n\n');
+    const suggestion = `Suggerimento settimanale della predittività delle secondarie (settimana ${it(lastMonday)}→${it(lastSunday)}, calcolato il ${it(oggi)}). Solo rete: ACI ed extra raccolta non entrano nella predittività. Già arrivato e residuo sono quelli della Proiezione a fine anno (tutte le primarie e le secondarie di rete arrivate all'impianto), non il consuntivo della Dashboard, che somma solo i fornitori configurati.\n\n` + parti.join('\n\n');
 
     // Salva come Alert consultabile dall'agente: uno per settimana, i precedenti superati.
     const Alert = b.entities.Alert;

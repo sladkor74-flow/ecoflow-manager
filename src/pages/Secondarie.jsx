@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { eTerminato, giornoOrdine, periodoMovimento, settimanaIso, MESI_MOVIMENTI } from '@/lib/movimenti';
+import { eTerminato, giornoElenco, settimanaIso, MESI_MOVIMENTI } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Route } from 'lucide-react';
 import AlertBadge from '@/components/alerts/AlertBadge';
@@ -23,20 +23,20 @@ const canaleRiga = (r) => (canaleDi(r) === 'ACI' ? 'ACI' : 'Rete');
 const filtriVuoti = (canale) => ({ canale: [canale], stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
 
 // Il periodo di una secondaria, con la stessa regola di computeSecondarieMatrix
-// e di exportSecondarie: un terminato si colloca solo sulla fine del trasporto
-// (giorno italiano); un ordine non terminato, che non e' un movimento,
-// all'immissione; un terminato senza fine trasporto non ha periodo (null) e
-// nessun filtro di periodo lo prende. Il dettaglio filtrava sui campi mese e
-// settimane salvati sul record: con lo stesso filtro la matrice mostrava un
-// insieme di viaggi e il dettaglio un altro.
+// e di exportSecondarie (giornoElenco): un terminato si colloca solo sulla fine
+// del trasporto (giorno italiano); un ordine non terminato, che non e' un
+// movimento, all'immissione; un terminato senza fine trasporto non ha periodo
+// (null) e nessun filtro di periodo lo prende. Il dettaglio filtrava sui campi
+// mese e settimane salvati sul record; ora il periodo e' lo stesso della
+// matrice. L'insieme invece no: senza un filtro sullo stato la matrice e i KPI
+// contano i soli terminati con la fine trasporto, il dettaglio elenca tutti gli
+// ordini (anche assegnati, cancellati e terminati senza fine trasporto). Per
+// questo il suo titolo li conta separati: senza filtro sullo stato il primo
+// numero e' quello del KPI.
 function periodoDi(r) {
-  const pm = periodoMovimento(r);
-  if (pm) return { giorno: pm.giorno, anno: pm.anno, mese: pm.mese, settimana: pm.settimana };
-  if (eTerminato(r)) return null;
-  const g = giornoOrdine(r);
-  return g
-    ? { giorno: g, anno: Number(g.slice(0, 4)), mese: MESI_MOVIMENTI[Number(g.slice(5, 7)) - 1], settimana: settimanaIso(g) }
-    : { giorno: '', anno: null, mese: 'N/D', settimana: 'N/D' };
+  const g = giornoElenco(r);
+  if (g) return { giorno: g, anno: Number(g.slice(0, 4)), mese: MESI_MOVIMENTI[Number(g.slice(5, 7)) - 1], settimana: settimanaIso(g) };
+  return eTerminato(r) ? null : { giorno: '', anno: null, mese: 'N/D', settimana: 'N/D' };
 }
 
 export default function Secondarie() {
@@ -174,6 +174,14 @@ export default function Secondarie() {
     return `Nessun trasporto secondario ${canale === 'ACI' ? 'ACI' : 'di rete'} trovato.`;
   };
 
+  // Gli ordini del dettaglio divisi come li contano KPI e matrice: un terminato
+  // senza fine trasporto e' escluso dai conti ma si conta e si dice (regola 1).
+  const conteggiDettaglio = {
+    conFine: records.filter(r => eTerminato(r) && !r.senza_fine_trasporto).length,
+    senzaFine: records.filter(r => r.senza_fine_trasporto).length,
+    nonTerminati: records.filter(r => !eTerminato(r)).length,
+  };
+
   // La sintesi per classe e' gia' per canale (una riga per canale|classe): qui
   // si tengono solo le righe della scheda aperta.
   const classiDelCanale = (data?.byClasse || []).filter(c => !c.canale || c.canale === canale);
@@ -254,10 +262,17 @@ export default function Secondarie() {
                   <TrattaMatrix matrix={data?.matrix} />
                 </TabsContent>
                 <TabsContent value="detail" className="space-y-3 mt-3">
-                  {/* Il conteggio e' del solo canale aperto: prima sommava i
-                      viaggi di rete e quelli ACI. */}
+                  {/* I conteggi sono del solo canale aperto (prima sommavano i
+                      viaggi di rete e quelli ACI) e divisi: un numero solo
+                      metteva insieme ai terminati gli assegnati, i cancellati e
+                      i terminati senza fine trasporto, e non tornava col KPI. */}
                   <h2 className="text-lg font-heading font-semibold">
-                    Dettaglio Trasporti Secondari {canale}{loadingRecords ? '' : ` (${formatIntero(records.length)})`}
+                    Dettaglio Ordini Secondari {canale}
+                    {!loadingRecords && (
+                      <span className="ml-2 text-sm font-normal text-muted-foreground">
+                        (terminati con fine trasporto {formatIntero(conteggiDettaglio.conFine)}, senza fine trasporto {formatIntero(conteggiDettaglio.senzaFine)}, non terminati {formatIntero(conteggiDettaglio.nonTerminati)})
+                      </span>
+                    )}
                   </h2>
                   <SecondarieTable records={records} loading={loadingRecords} emptyMessage={getEmptyMessage()} />
                 </TabsContent>

@@ -106,22 +106,49 @@ const archiviDelTipo = (tipo) => ARCHIVI_DEL_TIPO[tipo] || [tipo];
 // soglia di importaBlocco e di Caricamento Dati.
 const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
 
+// Quante righe del registro si guardano per tipo: bastano a scavalcare qualche
+// rifiuto a dati intatti arrivato dopo un caricamento fallito.
+const RIGHE_REGISTRO = 10;
+
 // created_date arriva in UTC senza la Z finale: si rimette, poi si prende il giorno italiano.
 const conZ = (v) => String(v).replace(/(Z|[+-]\d{2}:?\d{2})?$/, 'Z');
 const giornoCaricamento = (v) => (v ? giornoRoma(conZ(v)) : '');
 const istanteCaricamento = (v) => { const t = v ? new Date(conZ(v)).getTime() : NaN; return isNaN(t) ? 0 : t; };
+const istanteIso = (v) => (istanteCaricamento(v) ? new Date(istanteCaricamento(v)).toISOString() : '');
+
+// Una riga del registro che ha riscritto l'archivio: nata "in_corso" subito prima
+// di svuotarlo. La riconosce la modalita' "sostituzione" (importaBlocco la scrive
+// sempre, importEcotyreFile alla fine) oppure la fase, successiva allo
+// svuotamento, in cui importEcotyreFile si e' fermato; "Caricamento interrotto"
+// e' una riga rimasta aperta e chiusa dal caricamento dopo. I rifiuti di
+// "prepara" e dei controlli anti-regressione non hanno ne' l'una ne' l'altra:
+// l'archivio e' intatto e non bloccano niente.
+const FASE_DOPO_SVUOTAMENTO = /\(fase: (?:scrittura dei record|allineamento delle dichiarazioni mensili)\)|^Caricamento interrotto:/;
+const eraRiscrittura = (r) => r.modalita === 'sostituzione' || FASE_DOPO_SVUOTAMENTO.test(String(r.messaggio || ''));
+
+// Una riga che lascia l'archivio inaffidabile: aperta, oppure una riscrittura
+// finita in errore (archivio vuoto o a meta') o parziale (righe non scritte,
+// archivio "non allineato").
+const bloccante = (r) => r.esito === 'in_corso' || ((r.esito === 'errore' || r.esito === 'parziale') && eraRiscrittura(r));
+const riuscito = (r) => !bloccante(r) && r.esito !== 'errore';
 
 /**
  * Lo stato dei caricamenti di ogni tipo: l'ultimo riuscito, che spiega un
- * gestionale non ancora aggiornato, e quello rimasto aperto, se l'ultimo del suo
- * tipo e' ancora "in_corso". Un archivio che si sta riscrivendo (o che e' rimasto
- * a meta' per un caricamento interrotto) non e' una base su cui rifare un
- * confronto: l'esito verrebbe calcolato su un archivio a meta'.
+ * gestionale non ancora aggiornato, e quello che ha lasciato l'archivio
+ * inaffidabile, se dopo di lui non ne e' riuscito un altro: ancora "in_corso",
+ * oppure una riscrittura finita in errore o parziale. Un archivio che si sta
+ * riscrivendo, o che un caricamento interrotto o fallito ha lasciato vuoto o a
+ * meta', non e' una base su cui rifare un confronto: l'esito verrebbe calcolato
+ * su un archivio a meta' (regola 2).
  *
- * Un caricamento aperto non conta piu' quando dopo di lui un caricamento riuscito
- * ha riscritto tutti i suoi archivi. Uno aperto da oltre dieci minuti e'
- * interrotto: blocca lo stesso, perche' l'archivio puo' essere a meta', e chi lo
- * mostra dice che va ripetuto.
+ * Fra le righe del registro si scavalcano i rifiuti a dati intatti: un file
+ * sbagliato caricato dopo un caricamento fallito non rende buono l'archivio.
+ *
+ * Un caricamento aperto o fallito non conta piu' quando dopo di lui un
+ * caricamento riuscito ha riscritto tutti i suoi archivi: un registro vecchio e
+ * superato non ferma niente. Uno aperto da oltre dieci minuti e' interrotto, uno
+ * fallito e' "errore": bloccano lo stesso, perche' l'archivio puo' essere a
+ * meta', e chi li mostra dice che il caricamento va ripetuto.
  *
  * Di ogni caricamento si tiene l'id: confrontando due letture si capisce se
  * nel frattempo ne e' finito un altro (caricamentiDuranteLettura).
@@ -133,23 +160,29 @@ export async function statoCaricamenti(base44, tipi = TIPI_CARICAMENTO_MOVIMENTI
   const archivi = new Set(tipi.flatMap(archiviDelTipo));
   const daLeggere = [...new Set([...tipi, ...Object.keys(ARCHIVI_DEL_TIPO).filter(t => archiviDelTipo(t).some(a => archivi.has(a)))])];
   const letti = await Promise.all(daLeggere.map(async (tipo) => {
-    const righe = (await Log.filter({ tipo_file: tipo }, '-created_date', 5)) || [];
-    return {
-      tipo,
-      buono: righe.find(r => r.esito !== 'errore' && r.esito !== 'in_corso') || null,
-      aperto: righe[0] && righe[0].esito === 'in_corso' ? righe[0] : null,
-    };
+    const righe = (await Log.filter({ tipo_file: tipo }, '-created_date', RIGHE_REGISTRO)) || [];
+    // Dalla piu' recente: il primo riuscito chiude la ricerca, il primo bloccante
+    // prima di lui e' il caricamento che ha lasciato l'archivio inaffidabile.
+    let aperto = null;
+    for (const r of righe) {
+      if (riuscito(r)) break;
+      if (bloccante(r)) { aperto = r; break; }
+    }
+    return { tipo, buono: righe.find(riuscito) || null, aperto };
   }));
   const riscritto = (archivio, dopo) => letti.some(({ tipo, buono }) => buono
     && istanteCaricamento(buono.created_date) > dopo && archiviDelTipo(tipo).includes(archivio));
   const adesso = Date.now();
-  // creato_il e' l'istante, con la Z: serve a dire se un esito salvato e'
-  // successivo all'ultimo caricamento o se lo precede ed e' da rifare.
+  // creato_il e' l'istante, con la Z. concluso_il e' l'ultima scrittura della
+  // riga, cioe' la fine del caricamento: un esito salvato vale per l'archivio
+  // riscritto solo se e' successivo a questa, perche' uno calcolato mentre il
+  // caricamento scriveva e' successivo al suo inizio ma non alla sua fine.
   const scheda = (r, tipo) => ({
     id: r.id || null,
     tipo_file: tipo,
     data: giornoCaricamento(r.created_date),
-    creato_il: istanteCaricamento(r.created_date) ? new Date(istanteCaricamento(r.created_date)).toISOString() : '',
+    creato_il: istanteIso(r.created_date),
+    concluso_il: istanteIso(r.updated_date) || istanteIso(r.created_date),
     nome_file: String(r.nome_file || '').trim(),
     utente: r.utente || '',
   });
@@ -162,7 +195,14 @@ export async function statoCaricamenti(base44, tipi = TIPI_CARICAMENTO_MOVIMENTI
     if (!aperto) continue;
     const inizio = istanteCaricamento(aperto.created_date);
     if (archiviDelTipo(tipo).every(a => riscritto(a, inizio))) continue;
-    inCorso.push({ ...scheda(aperto, tipo), interrotto: adesso - inizio > FINESTRA_IN_CORSO_MS });
+    // Una riscrittura finita in errore o parziale e' un caricamento non
+    // riuscito: per chi la mostra vale come interrotta, e va ripetuta.
+    const fallito = aperto.esito !== 'in_corso';
+    inCorso.push({
+      ...scheda(aperto, tipo),
+      interrotto: fallito || adesso - inizio > FINESTRA_IN_CORSO_MS,
+      ...(fallito ? { esito: 'errore' } : {}),
+    });
   }
   inCorso.sort((a, b) => a.tipo_file.localeCompare(b.tipo_file));
   return { ultimi, in_corso: inCorso };
@@ -178,7 +218,8 @@ export async function statoCaricamenti(base44, tipi = TIPI_CARICAMENTO_MOVIMENTI
  */
 export function caricamentiDuranteLettura(prima, dopo) {
   const out = new Map();
-  for (const a of [...(prima.in_corso || []), ...(dopo.in_corso || [])]) if (!out.has(a.tipo_file)) out.set(a.tipo_file, a);
+  // Prima la lettura di dopo: un caricamento aperto e poi fallito si descrive com'e' finito.
+  for (const a of [...(dopo.in_corso || []), ...(prima.in_corso || [])]) if (!out.has(a.tipo_file)) out.set(a.tipo_file, a);
   for (const [tipo, u] of Object.entries(dopo.ultimi || {})) {
     const p = (prima.ultimi || {})[tipo];
     if ((!p || p.id !== u.id) && !out.has(tipo)) out.set(tipo, { ...u, concluso_durante_la_lettura: true });
@@ -191,6 +232,7 @@ export function descriviCaricamento(a) {
   const chi = [a.utente, a.nome_file].filter(Boolean).join(', ');
   const cosa = `${String(a.tipo_file || '').replace(/_/g, ' ')}${a.data ? ` del ${it(a.data)}` : ''}${chi ? ` (${chi})` : ''}`;
   if (a.concluso_durante_la_lettura) return `${cosa}: si è concluso mentre si leggevano gli archivi`;
+  if (a.esito === 'errore') return `${cosa}: non riuscito, l'archivio può essere incompleto e il caricamento va ripetuto`;
   if (a.interrotto) return `${cosa}: risulta interrotto, l'archivio può essere incompleto e il caricamento va ripetuto`;
   return `${cosa}: non ancora concluso`;
 }
@@ -427,14 +469,16 @@ export async function caricaMovimenti(base44) {
   // Un terminato senza fine trasporto non sta in nessuna settimana e non si
   // colloca con la chiusura ne' con l'immissione: si esclude, ma si tiene
   // l'elenco per dirlo. Scartato in silenzio, un suo formulario nel report di un
-  // impianto risultava "non presente nel gestionale" senza spiegazione.
+  // impianto risultava "non presente nel gestionale" senza spiegazione. Si tiene
+  // il movimento intero (con fine a null): verificaReport lo riconosce per
+  // formulario e ne mostra i dati registrati.
   const senzaFine = [];
   elenchi.forEach((righe, i) => {
     for (const r of righe) {
       if (String(r.stato || '').toLowerCase().trim() !== 'terminato') continue;
       const m = movimento(r, nomi[i]);
       if (m.fine) grezzi.push(m);
-      else senzaFine.push({ fonte: m.fonte, canale: m.canale, fir: m.fir, ordine: m.ordine, destinatario: m.destinatario });
+      else senzaFine.push(m);
     }
   });
   senzaFine.sort((a, b) => a.canale.localeCompare(b.canale) || a.fonte.localeCompare(b.fonte) || a.fir.localeCompare(b.fir) || a.ordine.localeCompare(b.ordine));
@@ -466,8 +510,17 @@ export async function caricaMovimenti(base44) {
   // Gli archivi cosi' come sono, annullati compresi: chi dopo un caricamento
   // rifa' anche le quadrature FIR li riusa invece di rileggerli.
   const archivi = Object.fromEntries(nomi.map((n, i) => [n, elenchi[i]]));
+  SENZA_FINE_DEI_MOVIMENTI.set(movimenti, senzaFine);
   return { movimenti, interni, anagrafica, archivi, senza_fine: senzaFine };
 }
+
+// I terminati senza fine trasporto letti insieme a un elenco di movimenti. Chi
+// riconfronta le verifiche (verificheReport, ricontrollaDichiarazioni) passa a
+// ricontrollaVerifiche i soli movimenti: senza questo legame il riconfronto
+// avrebbe rifatto "non presente nel gestionale" la riga di un formulario
+// registrato ma senza fine trasporto, e riscritto l'esito.
+const SENZA_FINE_DEI_MOVIMENTI = new WeakMap();
+export const senzaFineDei = (movimenti) => (movimenti && SENZA_FINE_DEI_MOVIMENTI.get(movimenti)) || [];
 
 /**
  * I terminati senza fine trasporto per canale e archivio, da mostrare: quanti
@@ -675,8 +728,15 @@ const altroCircuito = (intermediario) => !!intermediario && !/ecotyre/i.test(int
  *   - rettifica: l'errore e' nei dati del portale, non nel report.
  * La conformita' e' piena solo senza anomalie e con formulari e pesi che
  * quadrano, per gli ingressi e per le uscite.
+ *
+ * Una riga col formulario di un terminato senza fine trasporto (senzaFine, di
+ * norma quelli letti con i movimenti da caricaMovimenti) non si abbina: il
+ * formulario e' registrato, ma non ha una settimana. E' una rettifica a nostra
+ * cura - il dato va corretto sul portale e il file ricaricato - e non
+ * un'anomalia dell'impianto: resta fuori dalla quadratura e dal verdetto
+ * (regola 1: chi non ha la fine trasporto non si conta, ma si segnala).
  */
-export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, fine }) {
+export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, fine, senzaFine = senzaFineDei(movimenti) }) {
   const relazione = (m) => relazioneConSito(m, chiave);
   const categoria = (m) => `${m.secondaria ? 'secondaria' : 'primaria'}-${relazione(m)}-${m.canale}`;
   // Una riga che il gestionale non collega al sito e' un'uscita se parte dal sito stesso.
@@ -691,6 +751,14 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     if (!m.firN) continue;
     if (!perFir.has(m.firN)) perFir.set(m.firN, []);
     perFir.get(m.firN).push(m);
+  }
+  // I terminati senza fine trasporto, per formulario.
+  const senzaFinePerFir = new Map();
+  for (const m of senzaFine || []) {
+    const k = m.firN || normalizzaFir(m.fir);
+    if (!k) continue;
+    if (!senzaFinePerFir.has(k)) senzaFinePerFir.set(k, []);
+    senzaFinePerFir.get(k).push(m);
   }
   const nellaSettimana = (m) => m.fine >= inizio && m.fine <= fine;
   const ingressi = bacino.filter(m => nellaSettimana(m) && relazione(m) === 'ingresso');
@@ -724,7 +792,12 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       modo = 'fir';
     }
 
-    if (!m && r.firN.length >= 5) {
+    // Lo stesso formulario fra i terminati senza fine trasporto: e' registrato,
+    // quindi non si cerca un formulario simile ne' un carico dello stesso peso,
+    // che lo abbinerebbero a un altro movimento.
+    const senzaData = !m && r.firN ? senzaFinePerFir.get(r.firN) || null : null;
+
+    if (!m && !senzaData && r.firN.length >= 5) {
       let scelto = null, sceltoDist = 3, sceltoPunti = Infinity;
       for (const c of bacino) {
         if (!c.firN) continue;
@@ -739,7 +812,7 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       }
     }
 
-    if (!m && r.kg !== null) {
+    if (!m && !senzaData && r.kg !== null) {
       const d = dataRiga(r);
       const candidati = bacino.filter(c => relazione(c) && !usati.has(c.id) && c.kg === r.kg
         && (!d || Math.abs(giorniTra(d, c.fine)) <= 1));
@@ -763,6 +836,27 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     if (!m) {
       if (altroCircuito(r.intermediario)) { escludi(r, `Carico di un altro circuito: intermediario ${r.intermediario}`); continue; }
       if (fuoriSettimana) { escludi(r, `Data ${it(dataReport)}, fuori dalla settimana verificata`); continue; }
+      if (senzaData) {
+        // Formulario registrato ma senza fine trasporto: l'errore e' nel dato del
+        // portale. Nessuna anomalia per l'impianto; senza_fine_trasporto lo tiene
+        // fuori dalla quadratura, dove il gestionale non lo conta.
+        const s = senzaData.find(x => relazione(x)) || senzaData[0];
+        const quote = senzaData.filter(x => x.fonte === s.fonte && x.canale === s.canale && x.chiaveDest === s.chiaveDest && x.chiaveOrig === s.chiaveOrig);
+        const tipoS = relazione(s);
+        esiti.push({
+          n: r.n, ...foglio, tipo: tipoS,
+          ...(tipoS ? { categoria: categoria(s) } : { tipo_presunto: tipoPresunto(r), categoria: 'non_registrati' }),
+          esito: 'discrepanze', anomalia: false, senza_fine_trasporto: true, report,
+          gestionale: {
+            fonte: s.fonte, canale: s.canale, ordine: quote.map(q => q.ordine).filter(Boolean).join(' + '), ticket: s.ticket, fir: s.fir,
+            kg: quote.reduce((t, q) => t + q.kg, 0), inizio: s.inizio, fine: null, produttore: s.produttore, punto_raccolta: s.punto_raccolta,
+            codice_pdr: s.codice_pdr, destinatario: s.destinatario, trasportatore: s.trasportatore, classe: s.classe,
+            quote: quote.length > 1 ? quote.map(q => ({ ordine: q.ordine, ticket: q.ticket, kg: q.kg })) : null,
+          },
+          discrepanze: [{ campo: 'fine', gravita: 'rettifica', messaggio: 'Formulario registrato ma terminato senza data di fine trasporto: da correggere sul portale e ricaricare' }],
+        });
+        continue;
+      }
       // Senza formulario nel gestionale resta il numero d'ordine del report, l'unico riferimento.
       esiti.push({ n: r.n, ...foglio, tipo: null, tipo_presunto: tipoPresunto(r), categoria: 'non_registrati', esito: 'non_trovata', anomalia: true, report, gestionale: null, discrepanze: [{ campo: 'fir', gravita: 'anomalia', messaggio: r.firN ? 'Formulario non presente nel gestionale' : 'Riga senza formulario, non abbinabile a nessun movimento' }] });
       continue;
@@ -862,16 +956,19 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   ].sort((x, y) => x.tipo.localeCompare(y.tipo) || String(x.fine).localeCompare(String(y.fine)) || x.fir.localeCompare(y.fir));
 
   // Quadratura per movimentazione e canale: formulari e pesi del report contro quelli registrati.
+  // Le righe dei terminati senza fine trasporto non ci sono: il gestionale non
+  // le colloca nella settimana, e contate solo dal lato del report farebbero
+  // "non quadra" per un errore del portale.
   const somma = (lista, kg) => lista.reduce((t, x) => t + (kg(x) || 0), 0);
   const registrati = [...ingressi, ...uscite];
   const quadratura = [
     ...CATEGORIE_MOVIMENTO.map(c => {
-      const righe = esiti.filter(e => e.categoria === c.chiave);
+      const righe = esiti.filter(e => e.categoria === c.chiave && !e.senza_fine_trasporto);
       const mov = registrati.filter(m => categoria(m) === c.chiave);
       return { ...c, formulari_report: righe.length, kg_report: somma(righe, e => e.report.kg), formulari_gestionale: mov.length, kg_gestionale: somma(mov, m => m.kg) };
     }),
     (() => {
-      const righe = esiti.filter(e => e.categoria === 'non_registrati');
+      const righe = esiti.filter(e => e.categoria === 'non_registrati' && !e.senza_fine_trasporto);
       return { chiave: 'non_registrati', tipo: null, nome: 'Formulari del report non registrati per l\'impianto', formulari_report: righe.length, kg_report: somma(righe, e => e.report.kg), formulari_gestionale: 0, kg_gestionale: 0 };
     })(),
   ];

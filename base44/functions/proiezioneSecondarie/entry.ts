@@ -2,11 +2,11 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { fineProgrammazione, avvisoFineProgrammazione } from "../../shared/fineProgrammazione.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
-import { canaleMovimento, annoOrdine } from "../../shared/movimenti.ts";
+import { canaleMovimento } from "../../shared/movimenti.ts";
 import { proiettaInsieme, viaggiPerMese, MESI, KG_PER_VIAGGIO } from "../../shared/proiezioneSecondarie.ts";
 import { dopoLaRilevazione, ultimeRilevazioni, kgReteDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
-import { statoCaricamenti, descriviCaricamento } from "../../shared/reportSettimanali.ts";
+import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from "../../shared/reportSettimanali.ts";
 
 // Quante secondarie restano da portare a ogni impianto per arrivare al target.
 //
@@ -38,11 +38,16 @@ const soloRete = (righe, archivio) => righe.filter(r => canaleMovimento(r, archi
 // riscritto gli stessi archivi. Un "primarie_rete" storico, che nessuna scheda
 // di Caricamento Dati scrive piu' ne' chiude, altrimenti bloccava per sempre il
 // piano, il suggerimento del lunedi' e la proiezione.
+// Lo stato si legge prima e dopo gli archivi (caricamentiDuranteLettura): letto
+// una volta sola, insieme agli archivi, non vedeva un caricamento partito o
+// concluso mentre li si leggeva. Se non si legge, non si sa se gli archivi sono
+// interi, e si dice lo stesso.
 const TIPI_LETTI = ['primarie', 'primarie_rete', 'secondarie'];
-async function caricamentoAperto(base44) {
-  const stato = await statoCaricamenti(base44, TIPI_LETTI).catch(() => ({ in_corso: [] }));
-  const aperti = stato.in_corso || [];
-  return aperti.length ? aperti.map(descriviCaricamento).join('; ') : null;
+const leggiStato = (base44) => statoCaricamenti(base44, TIPI_LETTI).catch(() => null);
+function caricamentoDurante(prima, dopo) {
+  if (!prima || !dopo) return "Lo stato dei caricamenti non si e' potuto leggere: non si sa se primarie e secondarie sono complete.";
+  const durante = caricamentiDuranteLettura(prima, dopo);
+  return durante.length ? durante.map(descriviCaricamento).join('; ') : null;
 }
 
 function meseDi(v, anno) {
@@ -65,7 +70,8 @@ export default async function(req) {
     const meseDa = body.mese_da != null ? Number(body.mese_da) : Number(oggi.slice(5, 7)) - 1;
 
     const svc = base44.asServiceRole.entities;
-    const [impianti, fornitori, primarieTutte, secondarieTutte, rilevazioni, ipotesiTutte, giacenzeSito, caricamentoInCorso] = await Promise.all([
+    const primaDegliArchivi = await leggiStato(base44);
+    const [impianti, fornitori, primarieTutte, secondarieTutte, rilevazioni, ipotesiTutte, giacenzeSito] = await Promise.all([
       svc.ImpiantoTargetSecondaria.filter({ stato: 'attivo' }),
       svc.FornitoreSecondaria.filter({ stato: 'attivo' }),
       fetchAll(svc.PrimariaRete, { stato: 'terminato' }),
@@ -73,8 +79,9 @@ export default async function(req) {
       fetchAll(svc.GiacenzaStoccaggio),
       svc.IpotesiMensileSecondarie.filter({ anno }, 'mese', 500),
       svc.GiacenzaSito.filter({ anno }, 'sito', 100).catch(() => []),
-      caricamentoAperto(base44),
     ]);
+    // la seconda lettura dello stato, a archivi letti (vedi leggiStato)
+    const caricamentoInCorso = caricamentoDurante(primaDegliArchivi, await leggiStato(base44));
     // Solo rete, una volta qui per tutti i conti che seguono: una primaria di
     // classe 9 finita fra quelle di rete e le secondarie ACI, che stanno nello
     // stesso archivio, si scartano con la regola condivisa.
@@ -83,13 +90,15 @@ export default async function(req) {
 
     // Un terminato senza fine trasporto non si colloca in nessun mese e non
     // entra ne' nel gia' arrivato ne' nella giacenza (mai ripiegando sulla
-    // chiusura): si conta, fra quelli dell'anno per data di immissione, e si dice.
-    const senzaFine = (righe) => righe.filter(r => terminato(r) && !soloData(r.trasporto_finito_il) && annoOrdine(r) === anno).length;
+    // chiusura): si conta, di qualunque anno, e si dice. Prima si contavano solo
+    // gli immessi nell'anno (annoOrdine, che AGENTS.md riserva agli elenchi): uno
+    // senza data di immissione, o immesso a dicembre dell'anno prima, spariva.
+    const senzaFine = (righe) => righe.filter(r => terminato(r) && !soloData(r.trasporto_finito_il)).length;
     const senzaFineTrasporto = { primarie: senzaFine(primarie), secondarie: senzaFine(secondarie) };
     const avvisiGenerali = [];
     if (caricamentoInCorso) avvisiGenerali.push(caricamentoInCorso);
     if (senzaFineTrasporto.primarie || senzaFineTrasporto.secondarie) {
-      avvisiGenerali.push(`Terminati di rete del ${anno} (per data di immissione) senza la data di fine trasporto (primarie: ${senzaFineTrasporto.primarie}, secondarie: ${senzaFineTrasporto.secondarie}). Non sono contati ne' nel gia' arrivato ne' nelle giacenze degli stoccaggi finche' un nuovo caricamento non porta la data.`);
+      avvisiGenerali.push(`Terminati di rete di qualunque anno senza la data di fine trasporto (primarie: ${senzaFineTrasporto.primarie}, secondarie: ${senzaFineTrasporto.secondarie}). Non sono contati ne' nel gia' arrivato ne' nelle giacenze degli stoccaggi finche' un nuovo caricamento non porta la data.`);
     }
 
     // --- dove arriva la roba, mese per mese ---

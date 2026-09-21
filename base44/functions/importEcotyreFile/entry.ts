@@ -22,7 +22,8 @@ const perCanale = (righe) => [['RETE', 'rete'], ['ACI', 'ACI'], ['EXTRA_RACCOLTA
 // 5. se zero righe valide -> 400
 // 6. controllo anti-regressione (id mancanti -> 409, a meno di conferma_forzatura)
 // 7. SOLO ORA: riga "in_corso" nel registro, poi deleteMany + bulkCreate
-// 8. la riga del registro prende l'esito
+// 8. la riga del registro prende l'esito; se dopo lo svuotamento non e' entrato
+//    niente, o arriva un errore, resta "in_corso" col solo messaggio cambiato
 // Payload: { file_url, tipo_file, nome_file, periodo_riferimento?, replace_existing?, conferma_forzatura? }
 
 const CHUNK = 250;
@@ -39,7 +40,18 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // svuotare, si chiude con l'esito alla fine o con l'errore, e una rimasta
 // aperta e' la traccia di un caricamento interrotto. Blocca per dieci minuti lo
 // stesso archivio a un altro utente, che altrimenti lo sovrascriverebbe.
+//
+// Un errore DOPO lo svuotamento - un'eccezione in scrittura, o nessuna riga
+// entrata - non chiude la riga in "errore": resta "in_corso" e cambia solo il
+// messaggio, che comincia con NON_RIUSCITO. Chiusa, nessuno vedeva piu'
+// l'archivio vuoto o a meta' (statoCaricamenti, il cruscotto e i ricalcoli dopo
+// i caricamenti guardano le righe "in_corso") e i ricalcoli salvavano esiti su
+// quello: il caso opposto a quello che la riga doveva coprire. Cosi' la vedono
+// aperta, e interrotta dopo dieci minuti. In "errore" si chiude solo cio' che
+// fallisce prima dello svuotamento, a dati intatti. Una riga NON_RIUSCITO non
+// blocca un altro utente: nessuno sta piu' scrivendo.
 const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
+const NON_RIUSCITO = 'Caricamento non riuscito';
 const chi = (user) => (user && (user.full_name || user.email)) || '';
 
 async function apriCaricamento(base44, user, tipo_file, nome_file, file_url, prima) {
@@ -49,10 +61,11 @@ async function apriCaricamento(base44, user, tipo_file, nome_file, file_url, pri
   for (const l of aperti) {
     // created_date arriva in UTC senza la Z finale
     const eta = adesso - new Date(String(l.created_date).replace(/(Z|[+-]\d{2}:?\d{2})?$/, 'Z')).getTime();
-    if (eta < FINESTRA_IN_CORSO_MS && l.utente && l.utente !== chi(user)) {
+    const fallito = String(l.messaggio || '').startsWith(NON_RIUSCITO);
+    if (!fallito && eta < FINESTRA_IN_CORSO_MS && l.utente && l.utente !== chi(user)) {
       return { bloccato: `${l.utente} sta caricando lo stesso archivio da ${Math.max(1, Math.round(eta / 60000))} minuti: aspetta che finisca, altrimenti i due caricamenti si sovrascrivono.` };
     }
-    await Log.update(l.id, { esito: 'errore', messaggio: `Caricamento interrotto: avviato da ${l.utente || 'sconosciuto'} e mai concluso. L'archivio poteva essere incompleto; e' stato ricaricato dopo.` });
+    await Log.update(l.id, { esito: 'errore', messaggio: fallito ? `${l.messaggio} E' stato ricaricato dopo.` : `Caricamento interrotto: avviato da ${l.utente || 'sconosciuto'} e mai concluso. L'archivio poteva essere incompleto; e' stato ricaricato dopo.` });
   }
   const riga = await Log.create({
     tipo_file, nome_file: nome_file || 'N/D', file_url, esito: 'in_corso', utente: chi(user),
@@ -105,6 +118,8 @@ export default async function(req) {
   let user = null;
   // la riga "in_corso" del registro, da chiudere con l'esito o con l'errore
   let rigaRegistro = null;
+  // vero da quando l'archivio puo' essere cambiato (svuotamento o prima scrittura)
+  let archivioToccato = false;
   try {
     const base44 = createClientFromRequest(req);
     user = await base44.auth.me();
@@ -452,6 +467,7 @@ export default async function(req) {
       let toImport = records;
       if (sostituisci) {
         // Sostituzione integrale: cancella tutto e ricarica
+        archivioToccato = true;
         await base44.asServiceRole.entities[entityName].deleteMany({});
       } else {
         // Modalita' additiva: filtra i record il cui id_ordine e' gia' presente
@@ -467,6 +483,7 @@ export default async function(req) {
         }
         toImport = records.filter(r => r.id_ordine && !existingIds.has(r.id_ordine));
       }
+      if (toImport.length) archivioToccato = true;
 
       let imp = 0, fail = 0, lastError = null;
       for (let i = 0; i < toImport.length; i += CHUNK) {
@@ -559,6 +576,8 @@ export default async function(req) {
       : (allineamento && allineamento.errore ? ` | allineamento non riuscito: ${allineamento.errore}` : '');
     // La riga aperta prima di svuotare prende l'esito: e' questo aggiornamento a
     // far partire gli alert (workflow AlertEngineAutoRun, su create e update).
+    // Se dopo lo svuotamento non e' entrata nessuna riga l'archivio e' vuoto: la
+    // riga resta "in_corso" e cambia solo il messaggio (vedi NON_RIUSCITO).
     const registro = {
       utente: chi(user),
       tipo_file, nome_file, file_url,
@@ -567,7 +586,11 @@ export default async function(req) {
       foglio_usato: sheetName, righe_archivio_prima, forzato: !!conferma_forzatura,
       modalita
     };
-    if (rigaRegistro) await base44.asServiceRole.entities.UploadLog.update(rigaRegistro, registro);
+    if (rigaRegistro && esito === 'errore' && sostituisci) {
+      await base44.asServiceRole.entities.UploadLog.update(rigaRegistro, {
+        messaggio: `${NON_RIUSCITO}: nessuna riga scritta dopo lo svuotamento dell'archivio (${messaggio}${lastError ? ` - ultimo errore: ${lastError}` : ''}). L'archivio e' vuoto: ricarica il file.`,
+      });
+    } else if (rigaRegistro) await base44.asServiceRole.entities.UploadLog.update(rigaRegistro, registro);
     else await base44.asServiceRole.entities.UploadLog.create(registro);
     rigaRegistro = null;
 
@@ -590,17 +613,25 @@ export default async function(req) {
   } catch (error) {
     try {
       const base44 = createClientFromRequest(req);
-      // Con la riga "in_corso" gia' aperta la si chiude in errore: l'archivio puo'
-      // essere stato svuotato, e resta scritto dove ci si e' fermati.
-      const campi = {
-        utente: chi(user),
-        tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
-        esito: 'errore', messaggio: `${error.message || 'Errore imprevisto'} (fase: ${fase})`,
-        periodo_riferimento: ''
-      };
-      if (rigaRegistro) await base44.asServiceRole.entities.UploadLog.update(rigaRegistro, campi);
-      else await base44.asServiceRole.entities.UploadLog.create(campi);
+      const motivo = `${error.message || 'Errore imprevisto'} (fase: ${fase})`;
+      if (rigaRegistro && archivioToccato) {
+        // L'archivio puo' essere vuoto o a meta': la riga resta "in_corso" e
+        // cambia solo il messaggio, con la fase in cui ci si e' fermati.
+        await base44.asServiceRole.entities.UploadLog.update(rigaRegistro, {
+          messaggio: `${NON_RIUSCITO} dopo lo svuotamento dell'archivio: ${motivo}. L'archivio puo' essere vuoto o incompleto: ricarica il file.`,
+        });
+      } else {
+        // Prima dello svuotamento: dati intatti, la riga si chiude in errore.
+        const campi = {
+          utente: chi(user),
+          tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          esito: 'errore', messaggio: motivo,
+          periodo_riferimento: ''
+        };
+        if (rigaRegistro) await base44.asServiceRole.entities.UploadLog.update(rigaRegistro, campi);
+        else await base44.asServiceRole.entities.UploadLog.create(campi);
+      }
     } catch (_) {}
-    return Response.json({ error: error.message, fase, dettaglio: 'Interruzione durante: ' + fase }, { status: 500 });
+    return Response.json({ error: error.message, fase, dettaglio: 'Interruzione durante: ' + fase, dati_intatti: !archivioToccato }, { status: 500 });
   }
 }

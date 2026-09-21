@@ -19,8 +19,10 @@ export default function DashboardFilters({ mese, anno, onMeseChange, onAnnoChang
       </div>
       <div className="min-w-[140px] flex-1 max-w-[220px]">
         <label className="text-xs text-muted-foreground mb-1 block">Anno</label>
+        {/* Senza anno scelto getDashboardStats e getDashboardRaccolta usano l'anno
+            in corso: "Tutti gli anni" prometteva un totale che nessuno calcola. */}
         <MultiSelect
-          allLabel="Tutti gli anni"
+          allLabel="Anno in corso"
           options={anni.map(String)}
           selected={(anno || []).map(String)}
           onChange={(v) => onAnnoChange(v.map(Number))}

@@ -6,7 +6,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { ChevronLeft, ChevronRight, Upload, Loader2, Eye, Trash2, AlertTriangle, Info, RefreshCw, Bell, CheckCircle2 } from 'lucide-react';
 import DettaglioEvasione from '@/components/verifiche/DettaglioEvasione';
 import { MESI, GRAVITA, tonnellate, dataIt, dataOraIt, leggiFogliLista } from '@/lib/evasioneAssegnati';
-import { formatTonnellate, dataServer } from '@/lib/utils';
+import { formatTonnellate } from '@/lib/utils';
 import { eliminaParti } from '@/lib/testoLungo';
 import { oggiRoma } from '@/lib/giornoItaliano';
 
@@ -19,31 +19,29 @@ import { oggiRoma } from '@/lib/giornoItaliano';
 // Rete, ACI ed extra raccolta restano separati: lista, target e previsione
 // riguardano la rete; di ACI ed extra si vedono raccolto e richieste aperte.
 
-// Oltre questo tempo un caricamento ancora aperto si e' interrotto (la soglia del
-// registro dei caricamenti).
-const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
+// Il caricamento delle primarie aperto, interrotto o concluso mentre la funzione
+// leggeva gli archivi: lo dice evasioneAssegnati in caricamento_aperto, con le
+// due letture del registro che stanno attorno a quella degli archivi (regola 2).
+// In quel caso le liste non si ricontrollano, e raccolto, canali e alert dei
+// canali vengono da un archivio che si stava riscrivendo: la pagina lo dice,
+// invece di mostrarli come validi.
+const DATI_IN_RISCRITTURA = "raccolto rete, ACI ed extra raccolta, richieste aperte e alert dei canali sono letti da un archivio che si stava riscrivendo e possono essere incompleti";
 
-// Il caricamento delle primarie rimasto aperto dopo l'ultimo riuscito, se c'e'.
-// Finche' resta aperto le liste non si ricontrollano, perche' l'archivio puo'
-// essere a meta' (stessa regola di evasioneAssegnatiDati.ts): la pagina lo dice,
-// invece di mostrare in silenzio i controlli del caricamento precedente.
-async function primarieInCaricamento() {
-  const log = await base44.entities.UploadLog.filter({ tipo_file: 'primarie' }, '-created_date', 20);
-  for (const l of log || []) {
-    if (l.esito === 'in_corso') return l;
-    if (l.esito !== 'errore') return null;
+function testoCaricamentoAperto(c) {
+  if (c.concluso) {
+    return `Un caricamento delle primarie si è concluso mentre si leggevano gli archivi: ${DATI_IN_RISCRITTURA}. Riapri la pagina per vederli aggiornati, con le liste ricontrollate sui dati nuovi.`;
   }
-  return null;
+  if (!c.created_date) return `${c.messaggio} I controlli delle liste restano quelli del caricamento precedente, e ${DATI_IN_RISCRITTURA}.`;
+  const chi = [c.utente, c.nome_file].filter(Boolean).join(', ');
+  const cosa = `Il caricamento delle primarie del ${dataOraIt(c.created_date)}${chi ? ` (${chi})` : ''}`;
+  if (c.interrotto) {
+    return `${cosa} risulta interrotto: l'archivio può essere incompleto e il caricamento va ripetuto. Fino ad allora le liste non si ricontrollano e restano i controlli del caricamento precedente, e ${DATI_IN_RISCRITTURA}.`;
+  }
+  return `${cosa} non è ancora concluso: le liste si ricontrollano da sole quando si conclude. Intanto restano i controlli del caricamento precedente, e ${DATI_IN_RISCRITTURA}.`;
 }
 
-function testoCaricamentoAperto(l) {
-  const inizio = dataServer(l.created_date);
-  const chi = [l.utente, l.nome_file].filter(Boolean).join(', ');
-  const cosa = `Il caricamento delle primarie del ${dataOraIt(l.created_date)}${chi ? ` (${chi})` : ''}`;
-  if (inizio && Date.now() - inizio.getTime() > FINESTRA_IN_CORSO_MS) {
-    return `${cosa} risulta interrotto: l'archivio può essere incompleto e il caricamento va ripetuto. Fino ad allora le liste non si ricontrollano e restano i controlli del caricamento precedente.`;
-  }
-  return `${cosa} non è ancora concluso: le liste si ricontrollano da sole quando si conclude. Intanto restano i controlli del caricamento precedente.`;
+function InRiscrittura() {
+  return <div className="text-xs text-amber-700 font-medium" title="Letto mentre si caricavano le primarie: può essere incompleto">archivio in riscrittura</div>;
 }
 
 // Stato e messaggio di una funzione che ha risposto con un errore: l'SDK li mette
@@ -112,7 +110,7 @@ function primoFeriale(anno, mese) {
   return d.toISOString().slice(0, 10);
 }
 
-function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina }) {
+function RigaRaccoglitore({ riga, isAdmin, occupato, inRiscrittura, onCarica, onApri, onElimina }) {
   const input = useRef(null);
   const c = riga.controllo;
   const l = riga.lista;
@@ -131,10 +129,12 @@ function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina
             {senzaFine(riga.canali.rete)} senza fine trasporto, esclus{senzaFine(riga.canali.rete) === 1 ? 'o' : 'i'}
           </div>
         )}
+        {inRiscrittura && <InRiscrittura />}
       </td>
       <td className="px-4 py-3 whitespace-nowrap">
         <CanaleBreve etichetta="ACI" canale={riga.canali && riga.canali.aci} tono="text-red-600" />
         <CanaleBreve etichetta="Extra" canale={riga.canali && riga.canali.extra} tono="text-amber-700" />
+        {inRiscrittura && <InRiscrittura />}
       </td>
       <td className="px-4 py-3 max-w-[200px]">
         {l ? (
@@ -201,19 +201,13 @@ export default function EvasioneAssegnati({ isAdmin }) {
   const [tuttiAlert, setTuttiAlert] = useState(false);
   const [mostraAltri, setMostraAltri] = useState(false);
   const [inviataIl, setInviataIl] = useState(primoFeriale(annoOggi, meseOggi));
-  const [caricamentoAperto, setCaricamentoAperto] = useState(null);
 
   const carica = useCallback(async (silenzioso = false) => {
     if (!silenzioso) setCaricando(true);
     setErrore(null);
     try {
-      const [res, primarieAperte] = await Promise.all([
-        base44.functions.invoke('evasioneAssegnati', { anno, mese }),
-        // Se il registro non si legge la pagina resta com'era: e' solo un avviso.
-        primarieInCaricamento().catch(() => null),
-      ]);
+      const res = await base44.functions.invoke('evasioneAssegnati', { anno, mese });
       setDati(res.data || res);
-      setCaricamentoAperto(primarieAperte);
     } catch (e) {
       setErrore(messaggioErrore(e) || 'Errore nel caricamento');
     }
@@ -249,6 +243,10 @@ export default function EvasioneAssegnati({ isAdmin }) {
       if (d.gia_annullate) dettagli.push(`${d.gia_annullate} risultano già annullate sul portale.`);
       if (d.senza_fine) dettagli.push(`${d.senza_fine} ${d.senza_fine === 1 ? 'risulta terminata' : 'risultano terminate'} sul portale senza data di fine trasporto: ${d.senza_fine === 1 ? 'esclusa' : 'escluse'} dai conteggi finché la data manca.`);
       if (d.non_riconosciute) dettagli.push(`${d.non_riconosciute} ID non corrispondono a nessun ordine.`);
+      // Ordini di altri canali finiti nella lista di rete: per canale, mai sommati.
+      const altro = d.altro_canale || {};
+      const fuori = [altro.aci ? `${altro.aci} ACI` : '', altro.extra ? `${altro.extra} di extra raccolta` : ''].filter(Boolean);
+      if (fuori.length) dettagli.push(`Nella lista anche ${fuori.join(' e ')}: di altro canale, fuori dai conti.`);
       if (d.liste_ricontrollate) dettagli.push(`Ricontrollate anche ${d.liste_ricontrollate === 1 ? "un'altra lista" : `${d.liste_ricontrollate} altre liste`} degli altri raccoglitori, nei mesi toccati dal caricamento.`);
       if (senzaColori) dettagli.push('Il file non è in formato xlsx: le righe evidenziate non si possono riconoscere.');
       dettagli.push(...(d.avvisi || []));
@@ -303,6 +301,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
   };
 
   const righe = dati ? dati.raccoglitori : [];
+  const caricamentoAperto = (dati && dati.caricamento_aperto) || null;
   const inEvidenza = (r) => r.lista || (!r.non_raccoglie && (r.assegnati_ora > 0 || r.raccolto_kg > 0)) || attivitaCanali(r);
   const principali = righe.filter(inEvidenza);
   const altri = righe.filter(r => !inEvidenza(r));
@@ -426,7 +425,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
               {intestazioneTabella}
               <tbody>
                 {principali.map(r => (
-                  <RigaRaccoglitore key={r.chiave} riga={r} isAdmin={isAdmin} occupato={occupato === r.chiave}
+                  <RigaRaccoglitore key={r.chiave} riga={r} isAdmin={isAdmin} occupato={occupato === r.chiave} inRiscrittura={!!caricamentoAperto}
                     onCarica={caricaLista} onApri={setAperto} onElimina={eliminaLista} />
                 ))}
                 {principali.length === 0 && (
@@ -442,7 +441,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
                   </tr>
                 )}
                 {mostraAltri && altri.map(r => (
-                  <RigaRaccoglitore key={r.chiave} riga={r} isAdmin={isAdmin} occupato={occupato === r.chiave}
+                  <RigaRaccoglitore key={r.chiave} riga={r} isAdmin={isAdmin} occupato={occupato === r.chiave} inRiscrittura={!!caricamentoAperto}
                     onCarica={caricaLista} onApri={setAperto} onElimina={eliminaLista} />
                 ))}
               </tbody>
@@ -462,7 +461,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
         </>
       )}
 
-      <DettaglioEvasione riga={aperto} anno={anno} mese={mese} open={!!aperto} onClose={() => setAperto(null)} />
+      <DettaglioEvasione riga={aperto} anno={anno} mese={mese} open={!!aperto} inRiscrittura={!!caricamentoAperto} onClose={() => setAperto(null)} />
     </div>
   );
 }

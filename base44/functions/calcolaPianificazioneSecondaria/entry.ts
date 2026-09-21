@@ -4,9 +4,9 @@ import { oggiRoma, giornoRoma, annoRoma } from "../../shared/giornoItaliano.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { quoteDaStoccaggio } from "../../shared/rotteConferimenti.ts";
-import { canaleMovimento, annoOrdine } from "../../shared/movimenti.ts";
+import { canaleMovimento } from "../../shared/movimenti.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
-import { statoCaricamenti, descriviCaricamento } from "../../shared/reportSettimanali.ts";
+import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from "../../shared/reportSettimanali.ts";
 
 // La predittivita' delle secondarie e' SOLO della rete (regola dell'utente,
 // 22/09/2026): target, consuntivi, primarie, secondarie, stoccaggi e piano
@@ -27,11 +27,17 @@ const soloRete = (righe, archivio) => righe.filter(r => canaleMovimento(r, archi
 // riscritto gli stessi archivi. Un "primarie_rete" storico, che nessuna scheda
 // di Caricamento Dati scrive piu' ne' chiude, altrimenti bloccava per sempre il
 // piano, il suggerimento del lunedi' e la proiezione.
+// Lo stato si legge prima e dopo gli archivi (caricamentiDuranteLettura): la
+// lettura di migliaia di primarie e secondarie dura secondi, e un caricamento
+// partito o concluso intanto, con una lettura sola fatta prima, non si vedeva.
+// Se lo stato non si legge non si sa se gli archivi sono interi: si dice, e il
+// piano non si salva.
 const TIPI_LETTI = ['primarie', 'primarie_rete', 'secondarie'];
-async function caricamentoAperto(base44) {
-  const stato = await statoCaricamenti(base44, TIPI_LETTI).catch(() => ({ in_corso: [] }));
-  const aperti = stato.in_corso || [];
-  return aperti.length ? aperti.map(descriviCaricamento).join('; ') : null;
+const leggiStato = (base44) => statoCaricamenti(base44, TIPI_LETTI).catch(() => null);
+function caricamentoDurante(prima, dopo) {
+  if (!prima || !dopo) return "Lo stato dei caricamenti non si e' potuto leggere: non si sa se primarie e secondarie sono complete.";
+  const durante = caricamentiDuranteLettura(prima, dopo);
+  return durante.length ? durante.map(descriviCaricamento).join('; ') : null;
 }
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
@@ -57,6 +63,7 @@ const lunediDi = (g) => piuGiorni(g, -((aUtc(g).getUTCDay() + 6) % 7));
 // Il lunedi' della settimana in cui e' finito il trasporto; null se la data manca.
 const settimanaDi = (r) => { const g = giornoRoma(r.trasporto_finito_il); return g ? lunediDi(g) : null; };
 const yearOf = (dt) => annoRoma(dt);
+const it = (g) => (g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : '');
 function statoNorm(s) { return String(s || '').toLowerCase().trim(); }
 function tipoNorm(s) { return String(s || '').toLowerCase().trim(); }
 
@@ -70,7 +77,7 @@ export default async function(req) {
     const puoScrivere = eAmministratore(user);
     const b = base44.asServiceRole;
 
-    const caricamentoInCorso = await caricamentoAperto(base44);
+    const primaDegliArchivi = await leggiStato(base44);
     const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
     const fornitori = await b.entities.FornitoreSecondaria.filter({ stato: 'attivo' });
     // Solo rete: i target degli impianti e dei raccoglitori sono della rete, e
@@ -80,6 +87,8 @@ export default async function(req) {
     const primarie = soloRete(await fetchAll(b.entities.PrimariaRete, { stato: 'terminato' }), 'PrimariaRete');
     const secondarie = soloRete(await fetchAll(b.entities.Secondaria, { stato: 'terminato' }), 'Secondaria');
     const existingPlans = await b.entities.PianificazioneSettimanale.list('-created_date', 5000);
+    // la seconda lettura dello stato, a archivi letti (vedi leggiStato)
+    const caricamentoInCorso = caricamentoDurante(primaDegliArchivi, await leggiStato(base44));
 
     // === FONTE UNICA TARGET: TargetRaccoglitore (anno di riferimento) ===
     // Aggrega (somma) i record con stesso raccoglitore normalizzato indipendentemente
@@ -115,8 +124,14 @@ export default async function(req) {
     for (const imp of impianti) impNormMap[normalizzaRagioneSociale(imp.nome_impianto)] = imp;
 
     // Settimane: dal lunedì della settimana corrente (in Italia) fino alla fine
-    // della programmazione
-    const dataFine = dataFineDefault();
+    // della programmazione di ciascun impianto, la sua se ce l'ha, come nel
+    // suggerimento del lunedi' e nella Proiezione a fine anno. Prima il residuo
+    // si spalmava per tutti fino alla data di default, e un impianto con una
+    // data sua aveva qui kg a settimana diversi da quelli del suggerimento.
+    // L'elenco comune arriva alla data piu' lontana; le settimane di un impianto
+    // ne sono l'inizio, fino alla sua data.
+    const fineDi = (imp) => String(imp.data_fine || '').slice(0, 10) || dataFineDefault();
+    const dataFine = impianti.map(fineDi).reduce((a, g) => (g > a ? g : a), dataFineDefault());
     const settimane = [];
     let wn = 1;
     for (let cur = lunediDi(oggiRoma()); cur <= dataFine; cur = piuGiorni(cur, 7)) {
@@ -124,15 +139,17 @@ export default async function(req) {
       settimane.push({ numero: wn, data_inizio: cur, data_fine: fineSett > dataFine ? dataFine : fineSett, mese: MESI[Number(cur.slice(5, 7)) - 1] });
       wn++;
     }
+    const settimaneFino = (fine) => settimane.filter(s => s.data_inizio <= fine)
+      .map(s => (s.data_fine > fine ? { ...s, data_fine: fine } : s));
 
     // Terminati senza una fine trasporto leggibile: non si collocano in nessuna
     // settimana e in nessun anno (mai ripiegando sulla chiusura), si contano per
-    // dirlo fra le anomalie. Si contano quelli dell'anno di lavoro: senza la fine
-    // trasporto l'anno si legge dall'immissione (annoOrdine), che qui serve solo
-    // a non ripetere ogni anno i buchi degli anni prima, non a collocare il
-    // movimento, che resta fuori da consuntivi e settimane.
-    const senzaFine = (righe) => righe.filter(r => statoNorm(r.stato) === 'terminato' && !giornoRoma(r.trasporto_finito_il)
-      && annoOrdine(r) === annoRiferimento()).length;
+    // dirlo fra le anomalie, di qualunque anno, come nella matrice delle province
+    // e nel cruscotto della raccolta. Prima si tenevano quelli immessi nell'anno
+    // di lavoro (annoOrdine, che AGENTS.md riserva agli elenchi): uno senza data
+    // di immissione, o immesso a dicembre dell'anno prima, spariva senza che
+    // nessuno lo dicesse.
+    const senzaFine = (righe) => righe.filter(r => statoNorm(r.stato) === 'terminato' && !giornoRoma(r.trasporto_finito_il)).length;
     const senzaFineTrasporto = { primarie: senzaFine(primarie), secondarie: senzaFine(secondarie) };
 
     // Terminati dell'anno di lavoro, per il giorno italiano della fine trasporto
@@ -192,7 +209,7 @@ export default async function(req) {
     if (senzaFineTrasporto.primarie || senzaFineTrasporto.secondarie) {
       anomalie.push({
         tipo: 'senza_fine_trasporto',
-        testo: `Terminati del ${annoRiferimento()} (per data di immissione) senza data di fine trasporto, esclusi dal consuntivo e dalle settimane (primarie di rete: ${senzaFineTrasporto.primarie}, secondarie di rete: ${senzaFineTrasporto.secondarie}). Entrano da soli quando un nuovo caricamento porta la data.`,
+        testo: `Terminati di rete di qualunque anno senza data di fine trasporto, esclusi dal consuntivo e dalle settimane (primarie di rete: ${senzaFineTrasporto.primarie}, secondarie di rete: ${senzaFineTrasporto.secondarie}). Entrano da soli, nell'anno della loro fine trasporto, quando un nuovo caricamento porta la data.`,
       });
     }
 
@@ -254,6 +271,14 @@ export default async function(req) {
       const impNorm = normalizzaRagioneSociale(imp.nome_impianto);
       const impFornitori = fornitori.filter(f => f.impianto_id === imp.id);
       const isDoubleRole = doubleRoleImpianti.has(imp.id);
+      const settimaneImp = settimaneFino(fineDi(imp));
+      if (!settimaneImp.length) {
+        anomalie.push({
+          tipo: 'programmazione_chiusa',
+          impianto: imp.nome_impianto,
+          testo: `La programmazione di ${imp.nome_impianto} si e' chiusa il ${it(fineDi(imp))}: non ci sono settimane da pianificare. Se non e' cosi', correggi la data di fine nella configurazione dell'impianto.`,
+        });
+      }
 
       let impConsuntivo = 0, impConsuntivoPrim = 0, impConsuntivoSec = 0, impTotalePianificato = 0;
       const fornitoriResult = [];
@@ -279,7 +304,7 @@ export default async function(req) {
           conferitoriMap[cNorm].record.push(r);
         }
 
-        const nSett = settimane.length;
+        const nSett = settimaneImp.length;
         for (const cNorm of Object.keys(conferitoriMap)) {
           const c = conferitoriMap[cNorm];
           const targetConf = targetByNome[cNorm] || 0;
@@ -294,7 +319,7 @@ export default async function(req) {
           }
 
           const piano = [];
-          for (const s of settimane) {
+          for (const s of settimaneImp) {
             const exec = execByWeek[s.data_inizio] || 0;
             const congelata = exec > 0;
             const prev = congelata ? exec : PREV;
@@ -418,8 +443,8 @@ export default async function(req) {
           baseCascata = residuo;
         }
 
-        const nSett = settimane.length;
-        const settimaneRimanenti = settimane.filter(s => !(execByWeek[s.data_inizio] > 0)).length;
+        const nSett = settimaneImp.length;
+        const settimaneRimanenti = settimaneImp.filter(s => !(execByWeek[s.data_inizio] > 0)).length;
         if (isStoccaggio) {
           PREV = quotaPlafondImpianto > 0 && settimaneRimanenti > 0 ? Math.round(quotaPlafondImpianto / settimaneRimanenti) : 0;
         } else {
@@ -429,7 +454,7 @@ export default async function(req) {
 
         const piano = [];
         let cumulative = 0;
-        for (const s of settimane) {
+        for (const s of settimaneImp) {
           const exec = execByWeek[s.data_inizio] || 0;
           const congelata = exec > 0;
           const override = existingPlans.find(p => p.fornitore_id === f.id && p.data_inizio === s.data_inizio && p.modificato_manuale);
@@ -502,7 +527,7 @@ export default async function(req) {
       result.push({
         impianto: {
           id: imp.id, nome: imp.nome_impianto, target: imp.target || 0,
-          totale_capacity: imp.totale_capacity_kg || 0, data_fine: imp.data_fine || dataFineDefault(),
+          totale_capacity: imp.totale_capacity_kg || 0, data_fine: fineDi(imp),
           is_double_role: isDoubleRole,
         },
         consuntivo: impConsuntivo,
@@ -515,7 +540,7 @@ export default async function(req) {
     }
 
     // Persistenza chunked, riservata all'amministratore, e mai su un archivio a
-    // meta' (vedi caricamentoAperto): il piano si salva alla prossima apertura.
+    // meta' (vedi leggiStato): il piano si salva alla prossima apertura.
     const salvato = puoScrivere && !caricamentoInCorso;
     if (salvato) {
       for (let i = 0; i < creates.length; i += 100) {
@@ -539,7 +564,7 @@ export default async function(req) {
       stoccaggi: stoccaggiResult,
       settimane,
       data_inizio: settimane[0] ? settimane[0].data_inizio : null,
-      data_fine: dataFineDefault(),
+      data_fine: dataFine,
       num_settimane: settimane.length,
     });
   } catch (error) {

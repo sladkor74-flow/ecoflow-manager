@@ -116,7 +116,9 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
       toast({ title: 'Verifica ripetuta sui dati aggiornati del gestionale' });
     } catch (e) {
       const msg = (e && e.data && e.data.error) || (e && e.response && e.response.data && e.response.data.error);
-      toast({ title: 'Verifica non riuscita', description: msg || e.message || String(e), variant: 'destructive' });
+      // Un 409 non e' un errore: un caricamento sta riscrivendo gli archivi e la verifica si rifa' a caricamento finito.
+      const rinviata = !!((e && e.data && e.data.rinviato) || (e && e.response && e.response.data && e.response.data.rinviato));
+      toast({ title: rinviata ? 'Verifica rinviata' : 'Verifica non riuscita', description: msg || e.message || String(e), variant: rinviata ? undefined : 'destructive' });
     }
     await carica();
     onModificata();

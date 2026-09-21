@@ -13,6 +13,8 @@ import { leggiJson } from "../../shared/testoLungo.ts";
 // raccolta), richieste ACI ed extra ancora aperte, lista caricata e ultimo
 // controllo con i suoi alert. Se nel frattempo sono state caricate primarie piu'
 // recenti e il controllo non e' ancora partito, lo esegue prima di rispondere.
+// Con un caricamento delle primarie aperto non lo esegue e lo dice in
+// caricamento_aperto ({ interrotto, messaggio }, altrimenti null).
 
 const CAMPI_CONTROLLO = [
   'id', 'eseguito_il', 'primarie_caricate_il', 'dati_al', 'richieste', 'evase', 'evase_da_altri', 'aperte', 'prioritarie_aperte', 'arretrate_aperte',
@@ -118,7 +120,15 @@ export default async function(req) {
     const haAperte = (x) => Number(!x.non_raccoglie && (x.assegnati_ora > 0 || x.canali.aci.aperte.length > 0 || x.canali.extra.aperte.length > 0));
     righe.sort((a, b) => (Number(!!b.lista) - Number(!!a.lista)) || (haAperte(b) - haAperte(a)) || a.nome.localeCompare(b.nome, 'it'));
 
-    return Response.json({ anno, mese, primarie_caricate_il: primarieIl, raccoglitori: righe, senza_raccolta: senzaRaccolta });
+    // Regola 2: con un caricamento delle primarie aperto, interrotto o concluso
+    // durante la lettura, eseguiControlli non ha ricontrollato niente e raccolto,
+    // canali e alert dei canali qui sopra vengono da un archivio che si stava
+    // riscrivendo. La pagina lo deve dire, e lo sa solo da qui: prima il rinvio
+    // restava muto e quei numeri sembravano validi.
+    return Response.json({
+      anno, mese, primarie_caricate_il: primarieIl, raccoglitori: righe, senza_raccolta: senzaRaccolta,
+      caricamento_aperto: dati.caricamento_aperto,
+    });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });
   }

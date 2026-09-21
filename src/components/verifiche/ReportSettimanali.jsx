@@ -103,6 +103,11 @@ function Esito({ riga }) {
   if (analisiInCorso(v)) {
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-violet-200 bg-violet-50 text-violet-800 text-xs"><Loader2 className="w-3 h-3 animate-spin" />{v.stato === 'in_lettura' ? 'Lettura' : 'Verifica'} in corso</span>;
   }
+  // Confronto rinviato da elaboraReportSettimanale perche' un archivio si stava
+  // riscrivendo: le righe sono lette, l'esito arriva a caricamento finito.
+  if (v.stato === 'errore' && /^Confronto rinviato/.test(v.errore || '')) {
+    return <span title={v.errore} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-800 text-xs"><Clock className="w-3 h-3" />Rinviata</span>;
+  }
   if (analisiInterrotta(v) || v.stato === 'errore') {
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-800 text-xs"><AlertTriangle className="w-3 h-3" />{v.stato === 'errore' ? 'Errore' : 'Interrotta'}</span>;
   }
@@ -154,7 +159,7 @@ function RigaSoggetto({ riga, isAdmin, occupato, onCarica, onDichiara, onApri, o
         <div className="flex gap-1 mt-1">
           {riga.ruoli.map(r => <span key={r} className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[11px]">{RUOLI[r] || r}</span>)}
         </div>
-        {v && v.stato === 'errore' && <div className="text-xs text-red-700 mt-1 max-w-md">{v.errore}</div>}
+        {v && v.stato === 'errore' && <div className={`text-xs mt-1 max-w-md ${/^Confronto rinviato/.test(v.errore || '') ? 'text-amber-800' : 'text-red-700'}`}>{v.errore}</div>}
       </td>
       <td className="px-4 py-3 tabular-nums whitespace-nowrap">
         <PerCanale canali={riga.canali} tipo="ingressi" />
@@ -270,8 +275,14 @@ export default function ReportSettimanali({ isAdmin }) {
 
     base44.functions.invoke('elaboraReportSettimanale', { verifica_id: nuova.id, ...payload })
       .catch((e) => {
-        const msg = (e && e.data && e.data.error) || (e && e.response && e.response.data && e.response.data.error);
-        if (msg) toast({ title: `Verifica di ${riga.nome} non riuscita`, description: msg, variant: 'destructive' });
+        const risposta = (e && e.data) || (e && e.response && e.response.data) || {};
+        // Rinviata (409): un archivio dei movimenti si sta riscrivendo. Le righe
+        // lette sono salvate e il confronto si completa a caricamento finito.
+        if (risposta.error) {
+          toast(risposta.rinviato
+            ? { title: `Verifica di ${riga.nome} rinviata`, description: risposta.error }
+            : { title: `Verifica di ${riga.nome} non riuscita`, description: risposta.error, variant: 'destructive' });
+        }
       })
       .finally(() => carica(true));
 
@@ -415,7 +426,7 @@ export default function ReportSettimanali({ isAdmin }) {
           <span>
             Caricamento {ricalcolo.rinviato.map(a => a.descrizione || `${a.tipo_file.replace(/_/g, ' ')}${a.data ? ` del ${dataIt(a.data)}` : ''}${a.utente ? `, ${a.utente}` : ''}`).join('; ')}.
             {' '}L&apos;archivio può essere a metà, quindi gli esiti mostrati sono quelli dell&apos;ultimo confronto e anche ingressi e uscite possono essere incompleti.
-            Si aggiornano da soli a caricamento finito; se il caricamento si è interrotto, va ripetuto.
+            Si aggiornano da soli a caricamento finito; se il caricamento si è interrotto o non è riuscito, va ripetuto.
           </span>
         </div>
       )}
@@ -426,8 +437,8 @@ export default function ReportSettimanali({ isAdmin }) {
           <div className="space-y-1">
             <div>
               Movimenti terminati senza data di fine trasporto: non stanno in nessuna settimana, quindi non sono né fra gli ingressi e le uscite
-              né nelle verifiche. Se un loro formulario compare nel report di un impianto, risulta non presente nel gestionale.
-              La data si sistema con un nuovo caricamento del file che la riporti.
+              né nelle verifiche. Se un loro formulario compare nel report di un impianto, la riga risulta una rettifica a nostra cura,
+              senza anomalia per l&apos;impianto e fuori dalla quadratura. La data si corregge sul portale e si sistema con un nuovo caricamento del file che la riporti.
             </div>
             <ul className="list-disc pl-5 text-xs">
               {dati.senza_fine.map(g => (

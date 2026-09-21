@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { eTerminato, giornoMovimento, giornoOrdine } from '@/lib/movimenti';
+import { eTerminato, giornoMovimento, giornoElenco, meseElenco, annoElenco } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
 import { Loader2, Upload, MapPin, BarChart3, Clock, Table2, Filter, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -17,15 +17,13 @@ import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdO
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
 // Il giorno con cui l'elenco colloca un ordine, per i filtri di giorno, mese e
-// anno: la fine del trasporto; per un ordine non terminato (cancellato prima del
-// ritiro) l'immissione. Un terminato senza fine trasporto non ha giorno: con
-// giornoOrdine ripiegava sull'immissione, e un ritiro di luglio su un ordine di
-// maggio rispondeva al filtro di maggio. Resta fuori dai filtri di periodo e si
-// conta nell'avviso sopra l'elenco. Il campo mese salvato sul record non si usa:
-// puo' venire da un'importazione vecchia, quando il riferimento era la chiusura.
-const giornoElenco = (r) => (eTerminato(r) ? giornoMovimento(r) : giornoOrdine(r));
-const meseElenco = (r) => { const g = giornoElenco(r); return g ? MESI[Number(g.slice(5, 7)) - 1] : null; };
-const annoElenco = (r) => { const g = giornoElenco(r); return g ? Number(g.slice(0, 4)) : null; };
+// anno, e' giornoElenco (src/lib/movimenti.js): la fine del trasporto; per un
+// ordine non terminato (cancellato prima del ritiro) l'immissione. Un terminato
+// senza fine trasporto non ha giorno: con giornoOrdine ripiegava
+// sull'immissione, e un ritiro di luglio su un ordine di maggio rispondeva al
+// filtro di maggio. Resta fuori dai filtri di periodo e si conta nell'avviso
+// sopra l'elenco. Il campo mese salvato sul record non si usa: puo' venire da
+// un'importazione vecchia, quando il riferimento era la chiusura.
 
 // I caricamenti che riscrivono l'archivio delle primarie di rete.
 const CARICAMENTI_RETE = ['primarie', 'primarie_rete'];

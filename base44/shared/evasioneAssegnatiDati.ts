@@ -7,7 +7,7 @@ import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { oggiRoma } from "./giornoItaliano.ts";
 import { eTerminato } from "./movimenti.ts";
 import { eAci } from "./canaleSecondaria.ts";
-import { normalizzaPrimaria, normalizzaAssegnato, normalizzaCancellato, controllaLista, indiceMese, MESI } from "./evasioneAssegnati.ts";
+import { normalizzaPrimaria, normalizzaAssegnato, normalizzaCancellato, controllaLista, indiceMese, MESI, VERSIONE_REGOLE } from "./evasioneAssegnati.ts";
 import { targetMensiliAnno, targetRaccoglitoreMese } from "./targetRaccoglitori.ts";
 import { valoreCampo, leggiJson, leggiCampo, eliminaCampo } from "./testoLungo.ts";
 
@@ -59,6 +59,7 @@ export async function ultimoCaricamentoPrimarie(base44) {
 // Perche' gli archivi letti fra le due letture del registro non sono una base
 // su cui ricontrollare, oppure null. Il registro letto solo prima non basta: un
 // caricamento che parte o finisce mentre si leggono gli archivi non si vedrebbe.
+// Oltre al messaggio, i dati del caricamento per le pagine che lo mostrano.
 function letturaInstabile(prima, dopo) {
   const aperto = dopo.aperto || prima.aperto;
   if (aperto) {
@@ -67,13 +68,17 @@ function letturaInstabile(prima, dopo) {
     const interrotto = Date.now() - istante(aperto.created_date) > FINESTRA_IN_CORSO_MS;
     return {
       interrotto,
+      concluso: false,
+      created_date: aperto.created_date || null,
+      utente: aperto.utente || '',
+      nome_file: aperto.nome_file || '',
       messaggio: interrotto
         ? `${cosa} risulta interrotto: l'archivio puo' essere incompleto e il caricamento va ripetuto. Fino ad allora le liste non si ricontrollano.`
         : `${cosa} non e' ancora concluso: le liste si ricontrollano quando si conclude.`,
     };
   }
   if ((prima.valido && prima.valido.id) !== (dopo.valido && dopo.valido.id)) {
-    return { interrotto: false, messaggio: "Un caricamento delle primarie si e' concluso mentre si leggevano gli archivi: le liste si ricontrollano con i dati nuovi." };
+    return { interrotto: false, concluso: true, messaggio: "Un caricamento delle primarie si e' concluso mentre si leggevano gli archivi: le liste si ricontrollano con i dati nuovi." };
   }
   return null;
 }
@@ -159,18 +164,25 @@ export function indiceSicurezza() {
   return indiceMese(+oggi.slice(0, 4), +oggi.slice(5, 7)) - 2;
 }
 
-// I controlli fatti prima della regola del 21/09/2026 valutavano il mese fino a
-// un margine ricavato dalla chiusura a portale (previsione.consolidato_al): vanno
-// rifatti anche senza primarie nuove. ControlloEvasione non ha un campo di
-// versione, quindi si legge l'esito, ma solo dei controlli eseguiti prima di
-// questa data: dopo, quelli vecchi sono stati rifatti da un caricamento delle
-// primarie o cancellati con la loro lista, e la lettura in piu' non serve.
+// Un controllo calcolato con regole superate va rifatto anche senza primarie
+// nuove, target cambiato o liste nuove. Non solo quelli di prima del 21/09/2026,
+// che valutavano il mese fino a un margine ricavato dalla chiusura a portale
+// (previsione.consolidato_al): anche i primi fatti dopo contavano come "non piu'
+// presenti" le richieste terminate senza fine trasporto, mettevano gli ordini
+// ACI o di extra raccolta in lista fra le richieste della rete e davano "Mese
+// chiuso" nell'ultimo giorno del mese. Vale chi porta nell'esito la versione
+// delle regole in corso (VERSIONE_REGOLE di evasioneAssegnati.ts).
+// ControlloEvasione non ha un campo di versione, quindi si legge l'esito, ma
+// solo dei controlli eseguiti prima di questa data: dopo, quelli vecchi sono
+// stati rifatti da un caricamento delle primarie o cancellati con la loro lista,
+// e la lettura in piu' non serve.
 const CONTROLLI_DA_VERIFICARE_FINO_AL = Date.parse('2026-10-15T00:00:00Z');
 
-async function controlloConChiusura(base44, c) {
+async function controlloSuperato(base44, c) {
   if (istante(c.eseguito_il) >= CONTROLLI_DA_VERIFICARE_FINO_AL) return false;
   try {
-    return (await leggiCampo(base44, 'ControlloEvasione', c, 'esito_json')).includes('"consolidato_al"');
+    const esito = JSON.parse(await leggiCampo(base44, 'ControlloEvasione', c, 'esito_json'));
+    return !esito || esito.regole !== VERSIONE_REGOLE;
   } catch {
     // Un esito che non si ricompone non si puo' nemmeno mostrare: si rifa'.
     return true;
@@ -187,7 +199,7 @@ async function motivoRicontrollo(base44, ultimo, { targetKg, primarieIl, listeMe
   // compaiono "dalla lista di" lui.
   const eseguito = istante(ultimo.eseguito_il);
   if (listeMese.some(l => istante(l.caricata_il) > eseguito)) return 'lista caricata dopo';
-  if (await controlloConChiusura(base44, ultimo)) return 'controllo sulla chiusura a portale';
+  if (await controlloSuperato(base44, ultimo)) return 'controllo con regole superate';
   return null;
 }
 
@@ -197,7 +209,7 @@ async function motivoRicontrollo(base44, ultimo, { targetKg, primarieIl, listeMe
  * primarie viene saltata: il controllo resta uno per caricamento. Si ripete
  * invece se nel frattempo e' cambiato il target del mese in Target & Status, se
  * dopo e' stata caricata la lista di un altro raccoglitore dello stesso mese, o
- * se il controllo e' di prima della regola della fine trasporto.
+ * se il controllo e' calcolato con regole superate (VERSIONE_REGOLE).
  *
  * L'eliminazione di una lista non lascia traccia: chi la cancella ricontrolla
  * con "forza" le liste rimaste in quel mese (caricaListaAssegnati, e la pagina

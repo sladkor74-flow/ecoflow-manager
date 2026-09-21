@@ -12,7 +12,7 @@ import { exportExtraRaccoltaExcel, exportExtraRaccoltaPDF } from '@/lib/extraRac
 import ExtraRaccoltaForm from '@/components/fatturazione/ExtraRaccoltaForm';
 import { STATI_EXTRA, statoExtra, eTerminato, datiChiusuraCompleti, dateDaCorreggere, competenza } from '@/lib/extraRaccoltaStato';
 import { giornoRoma, oggiRoma } from '@/lib/giornoItaliano';
-import { giornoMovimento, giornoOrdine, MESI_MOVIMENTI } from '@/lib/movimenti';
+import { giornoMovimento, giornoElenco, MESI_MOVIMENTI } from '@/lib/movimenti';
 import { dopoCaricamento, testoRicalcoli } from '@/lib/importGrandeFile';
 
 const ANNI = [2024, 2025, 2026];
@@ -20,9 +20,9 @@ const ANNI = [2024, 2025, 2026];
 // Dove si colloca una scheda, come in tutto il gestionale: un terminato sul giorno
 // italiano della fine trasporto, e se non ce l'ha non si colloca (niente ripiego
 // sulla richiesta); una richiesta ancora aperta, che non e' un movimento, sulla
-// data della richiesta. Mese e anno salvati sulla scheda non decidono: possono
+// data della richiesta. E' giornoElenco (src/lib/movimenti.js), la regola di
+// tutti gli elenchi. Mese e anno salvati sulla scheda non decidono: possono
 // venire da una scrittura vecchia.
-const giornoScheda = (r) => (eTerminato(r) ? giornoMovimento(r) : giornoOrdine(r));
 const giornoIt = (v) => { const g = giornoRoma(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
 const eSecondaria = (r) => String((r && r.tipo_movimento) || 'primaria').toLowerCase().trim() === 'secondaria';
 
@@ -112,7 +112,7 @@ export default function ExtraRaccolta() {
   const filtered = useMemo(() => {
     return records.filter(r => {
       if (filters.anno || filters.mese) {
-        const g = giornoScheda(r);
+        const g = giornoElenco(r);
         if (!g) return false;
         if (filters.anno && Number(g.slice(0, 4)) !== Number(filters.anno)) return false;
         if (filters.mese && MESI_MOVIMENTI[Number(g.slice(5, 7)) - 1] !== filters.mese) return false;
@@ -125,7 +125,7 @@ export default function ExtraRaccolta() {
     }).sort((a, b) => {
       // Prima le richieste da evadere, poi le altre dalla piu' recente.
       const aperta = (r) => Number(statoExtra(r) === 'assegnato');
-      return (aperta(b) - aperta(a)) || giornoScheda(b).localeCompare(giornoScheda(a));
+      return (aperta(b) - aperta(a)) || giornoElenco(b).localeCompare(giornoElenco(a));
     });
   }, [records, filters]);
 

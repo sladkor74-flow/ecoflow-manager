@@ -89,9 +89,26 @@ export default function AlertEngine() {
     try {
       const res = await base44.functions.invoke('runAlertEngine', { modulo });
       const d = res.data;
-      alert(`${d.alerts_creati} alert creati e ${d.alerts_chiusi || 0} chiusi perché superati o doppi, su ${d.record_scansionati} record ${d.anno ? `del ${d.anno} ` : ''}controllati${d.alerts_da_chiudere ? `. Restano ${d.alerts_da_chiudere} alert da chiudere: esegui di nuovo il controllo` : ''}.`);
+      if (d.messaggio) { alert(d.messaggio); setRunning(null); return; }
+      // Restano da scrivere aggiornamenti o chiusure fermati dal tempo massimo:
+      // si riprendono ripetendo il controllo.
+      const restano = [
+        d.alerts_da_aggiornare > 0 && `${d.alerts_da_aggiornare} alert da aggiornare`,
+        d.alerts_da_chiudere > 0 && `${d.alerts_da_chiudere} alert da chiudere`,
+      ].filter(Boolean);
+      // I terminati senza fine trasporto restano fuori dal controllo: si dicono,
+      // canale per canale (rete e ACI non si sommano).
+      const senzaFine = (d.terminati_senza_fine_trasporto || []).filter(g => g.quanti > 0).map(g =>
+        `${g.canale ? `${g.canale === 'ACI' ? 'ACI' : 'Rete'}: ` : ''}${g.quanti === 1 ? '1 terminato' : `${g.quanti} terminati`} senza fine trasporto${g.esempi?.length ? ` (es. ${g.esempi.join(', ')})` : ''}`);
+      alert(`${d.alerts_creati} alert creati, ${d.alerts_aggiornati || 0} aggiornati e ${d.alerts_chiusi || 0} chiusi perché superati o doppi, su ${d.record_scansionati} record ${d.anno ? `del ${d.anno} ` : ''}controllati.`
+        + (restano.length ? ` Restano ${restano.join(' e ')}: esegui di nuovo il controllo.` : '')
+        + (senzaFine.length ? ` Esclusi dal controllo, di qualunque anno: ${senzaFine.join('; ')}. Vanno corretti nel file del portale e ricaricati.` : ''));
       load();
-    } catch (e) { alert(e.message); }
+    } catch (e) {
+      // Gli errori delle funzioni portano il testo nella risposta (e.data):
+      // e.message e' solo "Request failed with status code 409".
+      alert(e?.data?.error || e?.response?.data?.error || e.message);
+    }
     setRunning(null);
   };
 

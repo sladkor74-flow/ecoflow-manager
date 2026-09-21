@@ -49,6 +49,11 @@ export default async function(req) {
       return Response.json({ error: `${dati.caricamento_aperto.messaggio} La lista si completa con i dati delle primarie: caricala a caricamento concluso.`, rinviato: true }, { status: 409 });
     }
     const righe = arricchisciLista(lettura.righe, dati.assegnati, dati.terminati, dati.cancellati);
+    // Lista e target sono della rete (regola 3): i conteggi si fanno sulle righe
+    // di rete, o senza canale perche' non riconosciute; gli ordini ACI o di extra
+    // raccolta finiti in lista si dicono a parte, fuori dai conti.
+    const diRete = righe.filter(r => !r.canale || r.canale === 'rete');
+    const quante = (stato) => diRete.filter(r => r.stato_al_caricamento === stato).length;
 
     const { cancellati, mesi: mesiSvuotati } = await cancellaVecchi(base44, { finoAIndice: indiceMese(anno, mese), raccoglitoreChiave: raccoglitore_chiave });
 
@@ -61,8 +66,8 @@ export default async function(req) {
       inviata_il: inviataIl,
       righe_json: '',
       avvisi_json: '',
-      richieste: righe.length,
-      prioritarie: righe.filter(r => r.prioritaria).length,
+      richieste: diRete.length,
+      prioritarie: diRete.filter(r => r.prioritaria).length,
     });
     // Le liste lunghe superano la dimensione di un campo: si salvano divise in parti.
     let lista;
@@ -95,12 +100,17 @@ export default async function(req) {
     return Response.json({
       lista_id: lista.id,
       inviata_il: inviataIl,
-      richieste: righe.length,
+      richieste: diRete.length,
       prioritarie: lista.prioritarie,
-      non_riconosciute: righe.filter(r => r.stato_al_caricamento === 'non_riconosciuta').length,
-      gia_evase: righe.filter(r => r.stato_al_caricamento === 'gia_evasa').length,
-      gia_annullate: righe.filter(r => r.stato_al_caricamento === 'annullata').length,
-      senza_fine: righe.filter(r => r.stato_al_caricamento === 'terminata_senza_fine').length,
+      non_riconosciute: quante('non_riconosciuta'),
+      gia_evase: quante('gia_evasa'),
+      gia_annullate: quante('annullata'),
+      senza_fine: quante('terminata_senza_fine'),
+      // Per canale, mai sommati.
+      altro_canale: {
+        aci: righe.filter(r => r.canale === 'aci').length,
+        extra: righe.filter(r => r.canale === 'extra').length,
+      },
       liste_ricontrollate: altre.length,
       avvisi: lettura.avvisi,
       fogli: lettura.fogli,

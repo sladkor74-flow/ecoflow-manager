@@ -6,9 +6,8 @@ import { ARCHIVI_PRIMARIE, DATE_PRIMARIE, archivioPrimaria, recordAssegnato } fr
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
-import { evasioneOrdini, listaOrdini, statoRichiesta, riconosciOrdine } from "../../shared/richiesteEct.ts";
+import { evasioneOrdini, listaOrdini, statoRichiesta, riconosciOrdine, ritiriTerminati, idOrdineDaSalvare } from "../../shared/richiesteEct.ts";
 import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
-import { eTerminato, giornoMovimento } from "../../shared/movimenti.ts";
 import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
 
 // Le dichiarazioni riconosciute, un canale per volta: nel registro non si sommano.
@@ -61,7 +60,18 @@ const LIMITE_INVOCAZIONE_MS = 12000;
 // registro, con chi l'ha avviata, e la registrazione finale la chiude. Una riga
 // rimasta "in_corso" E' la traccia dell'interruzione. Serve anche da blocco:
 // due persone non caricano lo stesso archivio nello stesso momento.
+//
+// Un caricamento che finisce senza nessuna riga scritta ha gia' svuotato
+// l'archivio: la sua riga NON si chiude in "errore", resta "in_corso" e cambia
+// solo il messaggio, che comincia con NON_RIUSCITO. Chiusa, nessuno vedeva piu'
+// l'archivio vuoto: statoCaricamenti, il cruscotto e i ricalcoli dopo i
+// caricamenti guardano le righe "in_corso", e rifacevano e salvavano esiti
+// sull'archivio vuoto (regola 2). Cosi' la vedono aperta, e interrotta dopo
+// dieci minuti. Si chiude in "errore" solo cio' che fallisce prima dello
+// svuotamento, a dati intatti. Una riga NON_RIUSCITO non blocca un altro utente:
+// nessuno sta piu' scrivendo.
 const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
+const NON_RIUSCITO = 'Caricamento non riuscito';
 const chi = (user) => (user && (user.full_name || user.email)) || '';
 
 async function apriCaricamento(base44, user, tipo_file, nome_file, prima) {
@@ -70,11 +80,12 @@ async function apriCaricamento(base44, user, tipo_file, nome_file, prima) {
   const adesso = Date.now();
   for (const l of aperti) {
     const eta = adesso - new Date(String(l.created_date).replace(/(Z|[+-]\d{2}:?\d{2})?$/, 'Z')).getTime();
-    if (eta < FINESTRA_IN_CORSO_MS && l.utente && l.utente !== chi(user)) {
+    const fallito = String(l.messaggio || '').startsWith(NON_RIUSCITO);
+    if (!fallito && eta < FINESTRA_IN_CORSO_MS && l.utente && l.utente !== chi(user)) {
       return { bloccato: `${l.utente} sta caricando lo stesso archivio da ${Math.max(1, Math.round(eta / 60000))} minuti: aspetta che finisca, altrimenti i due caricamenti si sovrascrivono.` };
     }
     // un caricamento precedente rimasto a meta': lo si dice, e se ne apre uno nuovo
-    await Log.update(l.id, { esito: 'errore', messaggio: `Caricamento interrotto: avviato da ${l.utente || 'sconosciuto'} e mai concluso. L'archivio poteva essere incompleto; e' stato ricaricato dopo.` });
+    await Log.update(l.id, { esito: 'errore', messaggio: fallito ? `${l.messaggio} E' stato ricaricato dopo.` : `Caricamento interrotto: avviato da ${l.utente || 'sconosciuto'} e mai concluso. L'archivio poteva essere incompleto; e' stato ricaricato dopo.` });
   }
   const riga = await Log.create({
     tipo_file, nome_file: nome_file || 'N/D', esito: 'in_corso', utente: chi(user),
@@ -86,11 +97,17 @@ async function apriCaricamento(base44, user, tipo_file, nome_file, prima) {
 }
 
 // La registrazione finale chiude la riga aperta dalla preparazione; se non la trova ne scrive una nuova.
+// Arriva sempre dopo lo svuotamento: con esito "errore" non e' entrata nessuna
+// riga e l'archivio e' vuoto, quindi la riga resta "in_corso" col solo messaggio
+// cambiato. Se la riga non c'e' piu', l'ha chiusa un caricamento partito dopo,
+// che decide lui dell'archivio: questa resta nello storico.
 async function chiudiCaricamento(base44, user, tipo_file, campi) {
   const Log = base44.asServiceRole.entities.UploadLog;
   const aperti = await Log.filter({ tipo_file, esito: 'in_corso' }, '-created_date', 5);
   const mio = aperti.find(l => !l.utente || l.utente === chi(user)) || null;
-  if (mio) await Log.update(mio.id, { ...campi, utente: chi(user) });
+  if (mio && campi.esito === 'errore') {
+    await Log.update(mio.id, { messaggio: `${NON_RIUSCITO}: nessuna riga scritta dopo lo svuotamento dell'archivio (${campi.messaggio}). L'archivio e' vuoto: ricarica il file.` });
+  } else if (mio) await Log.update(mio.id, { ...campi, utente: chi(user) });
   else await Log.create({ ...campi, utente: chi(user) });
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -199,21 +216,6 @@ async function contaRecord(base44, entita, ipotesi) {
   return basso + 1;
 }
 
-// id ordine -> primo giorno italiano di fine trasporto, dei soli terminati che ce
-// l'hanno: un ordine senza fine trasporto non conta come ritirato, e non si
-// ripiega sulla chiusura a portale. La stessa regola del caricamento delle
-// richieste (importaRichiesteEct).
-function terminatiConFine(movimenti) {
-  const terminati = new Map();
-  for (const o of movimenti) {
-    const id = String(o.id_ordine || '').trim();
-    const giorno = giornoMovimento(o);
-    if (!id || !eTerminato(o) || !giorno) continue;
-    if (!terminati.has(id) || giorno < terminati.get(id)) terminati.set(id, giorno);
-  }
-  return terminati;
-}
-
 // La data del ritiro da salvare. Si riscrive a ogni ricalcolo: prima si scriveva
 // solo quando c'era, e non si toglieva mai, cosi' una richiesta a cui si
 // aggiungeva a mano un secondo ordine non ancora ritirato restava "da
@@ -242,14 +244,19 @@ function dataRitiro(salvata, ids, ev, terminati, presenti) {
 // richieste senza ID scritti a mano, che vincono sempre; un ID gia' riconosciuto
 // si sostituisce solo con un altro ID, mai con "non trovato" o "ambiguo" (un
 // secondo ordine dello stesso produttore e dello stesso giorno avrebbe tolto
-// l'ordine, e con lui il ritiro, a una richiesta gia' evasa). Spunte, ID scritti
-// a mano e note non si toccano.
+// l'ordine, e con lui il ritiro, a una richiesta gia' evasa): la regola sta in
+// idOrdineDaSalvare, la stessa del caricamento del foglio ECT. Spunte, ID
+// scritti a mano e note non si toccano.
+//
+// Una richiesta ancora aperta che aspetta un ordine terminato senza fine
+// trasporto si segnala (terminati_senza_fine): il ritiro non si conta senza la
+// data (regola 1), ma c'e', e sollecitarlo sarebbe sbagliato.
 async function riconosciRitiriEct(base44) {
   const svc = base44.asServiceRole.entities;
   const anno = Number(oggiRoma().slice(0, 4));
   const richieste = (await fetchAll(svc.RichiestaEct, { anno }))
     .filter(r => r.esito !== 'evasa' && r.esito !== 'annullata');
-  if (!richieste.length) return { controllate: 0, aggiornate: 0, da_confermare: [] };
+  if (!richieste.length) return { controllate: 0, aggiornate: 0, da_confermare: [], terminati_senza_fine: [] };
 
   // Gli stessi archivi del caricamento delle richieste: gli assegnati e tutte le
   // primarie, perche' l'ordine della richiesta puo' essere gia' terminato.
@@ -260,34 +267,30 @@ async function riconosciRitiriEct(base44) {
     fetchAll(svc.PrimariaAci),
   ]);
   const ordini = [...assRete, ...assAci, ...rete, ...aci];
-  const terminati = terminatiConFine([...rete, ...aci]);
+  const { terminati, senzaFine } = ritiriTerminati([...rete, ...aci]);
   const presenti = new Set(ordini.map(o => String(o.id_ordine || '').trim()).filter(Boolean));
 
   let aggiornate = 0;
   const daConfermare = [];
+  const terminatiSenzaFine = [];
   for (const r of richieste) {
     const campi: any = {};
-    if (!String(r.id_ordine_manuale || '').trim()) {
-      const ric = riconosciOrdine(r, ordini);
-      if (ric.id_ordine || !String(r.id_ordine || '').trim()) {
-        campi.id_ordine = ric.id_ordine;
-        campi.id_ordine_stato = ric.id_ordine_stato;
-        campi.id_ordine_candidati = ric.id_ordine_candidati;
-      }
-    }
+    if (!String(r.id_ordine_manuale || '').trim()) Object.assign(campi, idOrdineDaSalvare(r, riconosciOrdine(r, ordini)));
     const ids = listaOrdini({ ...r, ...campi });
     const ev = evasioneOrdini(ids, terminati);
     campi.ordini_totali = ev.totali;
     campi.ordini_evasi = ev.evasi;
     campi.evasione_rilevata_il = dataRitiro(r.evasione_rilevata_il, ids, ev, terminati, presenti);
     campi.esito = statoRichiesta({ ...r, ...campi });
+    const senzaData = ids.filter(id => senzaFine.has(id));
+    if (campi.esito === 'aperta' && senzaData.length) terminatiSenzaFine.push({ pdr: r.pdr_nome, id_ordine: senzaData.join(', ') });
     if (!Object.keys(campi).some(k => String(r[k] ?? '') !== String(campi[k] ?? ''))) continue;
     // chi diventa "ritirata, da spuntare" adesso va detto: e' la riga su cui rispondere al consorzio
     if (campi.esito === 'da_confermare' && r.esito !== 'da_confermare') daConfermare.push({ pdr: r.pdr_nome, id_ordine: ids.join(', '), evasa_il: campi.evasione_rilevata_il });
     await svc.RichiestaEct.update(r.id, campi);
     aggiornate++;
   }
-  return { controllate: richieste.length, aggiornate, da_confermare: daConfermare };
+  return { controllate: richieste.length, aggiornate, da_confermare: daConfermare, terminati_senza_fine: terminatiSenzaFine };
 }
 
 // Gli ordini delle richieste si cercano fra primarie e assegnati: se il loro

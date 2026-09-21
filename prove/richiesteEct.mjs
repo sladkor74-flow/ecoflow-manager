@@ -1,7 +1,7 @@
 // Prova dell'abbinamento delle richieste ECT (base44/shared/richiesteEct.ts):
 // una richiesta si riconosce da produttore, classe e data di immissione, non dal
 // numero di riga del foglio. Si lancia con: npm run prove
-import { abbinaRichieste, chiaveRichiesta } from '../base44/shared/richiesteEct.ts';
+import { abbinaRichieste, chiaveRichiesta, idOrdineDaSalvare, riconosciOrdine, ritiriTerminati, evasioneOrdini, listaOrdini, testoTerminatiSenzaFine } from '../base44/shared/richiesteEct.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -46,6 +46,39 @@ const a2 = abbinaRichieste(senzaB, esistenti);
 verifica('nessuna prende il posto di quella tolta', ids(a2) === 'A,C1,C2,D' && !a2.some(e => e && e.id === 'B'), ids(a2));
 verifica('ogni richiesta esistente si abbina al massimo una volta', new Set(a1.filter(Boolean).map(e => e.id)).size === a1.filter(Boolean).length);
 verifica('chiave: il giorno conta, l\'ora no', chiaveRichiesta({ pdr_nome: 'x', ordine_immesso_il: '2026-08-01T00:00:00.000Z' }) === chiaveRichiesta({ pdr_nome: 'X', ordine_immesso_il: '2026-08-01' }));
+
+// La stessa regola per il foglio ECT (importaRichiesteEct) e per il ricalcolo
+// dopo le primarie (importaBlocco): un ID riconosciuto non si perde.
+console.log('ID GIA\' RICONOSCIUTO');
+const richiesta = { pdr_nome: 'Rossi Gomme', classe: '', ordine_immesso_il: '2026-09-01' };
+const gia = { ...richiesta, id_ordine: 'ET26000001', id_ordine_stato: 'trovato', id_ordine_candidati: '' };
+const unOrdine = [{ id_ordine: 'ET26000001', punto_di_raccolta: 'ROSSI GOMME', ordine_immesso_il: '2026-09-01T07:00:00Z', stato: 'terminato' }];
+const dueOrdini = [...unOrdine, { id_ordine: 'ET26000002', punto_di_raccolta: 'ROSSI GOMME', ordine_immesso_il: '2026-09-01T09:00:00Z', stato: 'assegnato' }];
+const ambiguo = riconosciOrdine(richiesta, dueOrdini);
+verifica('un secondo ordine dello stesso giorno rende ambiguo il riconoscimento', ambiguo.id_ordine_stato === 'ambiguo' && ambiguo.id_ordine === '', JSON.stringify(ambiguo));
+const tenuto = idOrdineDaSalvare(gia, ambiguo);
+verifica('ma l\'ID gia\' riconosciuto resta, col suo stato', tenuto.id_ordine === 'ET26000001' && tenuto.id_ordine_stato === 'trovato', JSON.stringify(tenuto));
+verifica('e resta anche se l\'ordine non si trova piu\'', idOrdineDaSalvare(gia, riconosciOrdine(richiesta, [])).id_ordine === 'ET26000001');
+verifica('un altro ID lo sostituisce', idOrdineDaSalvare(gia, { id_ordine: 'ET26000009', id_ordine_stato: 'trovato', id_ordine_candidati: '' }).id_ordine === 'ET26000009');
+const nuovo = idOrdineDaSalvare(null, ambiguo);
+verifica('senza ID salvato vale il riconoscimento, ambiguo compreso', nuovo.id_ordine === '' && nuovo.id_ordine_stato === 'ambiguo' && nuovo.id_ordine_candidati === 'ET26000001, ET26000002' && idOrdineDaSalvare({ ...richiesta, id_ordine: '' }, ambiguo).id_ordine_stato === 'ambiguo', JSON.stringify(nuovo));
+verifica('richiesta nuova: il riconoscimento', idOrdineDaSalvare(null, riconosciOrdine(richiesta, unOrdine)).id_ordine === 'ET26000001');
+
+console.log('RITIRI SULLA FINE TRASPORTO');
+const { terminati, senzaFine } = ritiriTerminati([
+  { id_ordine: 'A', stato: 'terminato', trasporto_finito_il: '2026-09-30T22:30:00Z', ordine_chiuso_il: '2026-10-04T08:00:00Z' },
+  { id_ordine: 'B', stato: 'Terminato', trasporto_finito_il: null, ordine_chiuso_il: '2026-09-20T08:00:00Z' },
+  { id_ordine: 'C', stato: 'assegnato', trasporto_finito_il: null },
+  { id_ordine: 'D', stato: 'terminato', trasporto_finito_il: null },
+  { id_ordine: 'D', stato: 'terminato', trasporto_finito_il: '2026-09-12T08:00:00Z' },
+]);
+verifica('il giorno e\' quello italiano della fine trasporto, mai la chiusura', terminati.get('A') === '2026-10-01', terminati.get('A'));
+verifica('un terminato senza fine trasporto non e\' ritirato, e non ripiega sulla chiusura', !terminati.has('B') && senzaFine.has('B'));
+verifica('chi non e\' terminato non e\' in nessuno dei due', !terminati.has('C') && !senzaFine.has('C'));
+verifica('basta una riga con la data perche\' l\'ordine sia ritirato', terminati.get('D') === '2026-09-12' && !senzaFine.has('D'));
+const ev = evasioneOrdini(listaOrdini({ id_ordine_manuale: 'A, B' }), terminati);
+verifica('una richiesta con un ordine senza data non e\' evasa', ev.totali === 2 && ev.evasi === 1 && ev.ultima === null, JSON.stringify(ev));
+verifica('il testo dice quante e quali restano aperte', testoTerminatiSenzaFine([{ pdr: 'Rossi Gomme', id_ordine: 'B' }]).startsWith('Una richiesta') && testoTerminatiSenzaFine([{ pdr: 'X', id_ordine: 'B' }, { pdr: 'Y', id_ordine: 'E' }]).includes('2 richieste') && testoTerminatiSenzaFine([]) === '');
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

@@ -16,6 +16,9 @@ import { cancellaFile } from "../../shared/fileArchivio.ts";
 //   { quadratura_id, tabelle: [...] }       tabelle gia' lette dal browser da un Excel
 //   { quadratura_id, solo_confronto: true } ripete il confronto sulle righe gia' lette
 //
+// Mentre un archivio dei movimenti si riscrive il confronto ripetuto risponde
+// 409 senza salvare; una stampa nuova si salva, ma con l'esito non confermato.
+//
 // La stampa e' una scansione senza testo dentro, quindi la trascrive l'agente,
 // che la legge dall'archivio privato con un link firmato - la stessa strada dei
 // documenti della qualifica. Finita la lettura si prova a cancellare il file,
@@ -203,10 +206,24 @@ export default async function(req) {
     const gestionale = await caricaGestionale(base44, periodo, null, { caricamenti: primaDegliArchivi });
     const durante = caricamentiDuranteLettura(primaDegliArchivi, await statoCaricamenti(base44, TIPI_CARICAMENTO));
 
-    // 3. il confronto, con la conformita' canale per canale dentro l'esito. La
-    // stampa si salva lo stesso, perche' l'ha caricata l'amministratore; se un
-    // archivio si stava riscrivendo lo si dice, e all'apertura della settimana, a
-    // caricamento finito, il confronto si rifa' da solo.
+    // Regola 2: ripetere il confronto sulle righe salvate mentre un archivio si
+    // riscrive (o dopo un caricamento interrotto o fallito) sovrascriverebbe un
+    // esito buono con uno calcolato su un archivio a meta'. Non si salva niente e
+    // si risponde come rifaiQuadratura: resta l'ultimo esito, e si rifa' da solo
+    // a caricamento finito.
+    if (modo === 'salvate' && durante.length) {
+      return Response.json({
+        error: `Confronto non ripetuto. Caricamento ${durante.map(descriviCaricamento).join('; ')}. L'esito è quello dell'ultimo confronto e si rifà da solo a caricamento finito.`,
+        rinviato: true,
+        caricamenti: durante,
+      }, { status: 409 });
+    }
+
+    // 3. il confronto, con la conformita' canale per canale dentro l'esito. Una
+    // stampa nuova si salva lo stesso, perche' l'ha caricata l'amministratore; se
+    // un archivio si stava riscrivendo lo si dice, e l'esito non si conferma
+    // (niente verificata_il): lo storico lo mostra senza colore finche' il
+    // riconfronto, a caricamento finito, non lo rifa'.
     const esito = confrontaSettimana(lettura, gestionale, periodo);
     for (const a of durante) {
       esito.osservazioni.push(`Caricamento ${descriviCaricamento(a)}. I numeri del gestionale usati in questo confronto potevano essere incompleti: il confronto si rifà all'apertura della settimana, a caricamento finito.`);
@@ -223,7 +240,7 @@ export default async function(req) {
       // La conformita' si salva canale per canale: i conteggi e il verdetto
       // complessivi sommavano rete, ACI ed extra raccolta.
       per_canale: esito.per_canale,
-      verificata_il: new Date().toISOString(),
+      verificata_il: durante.length ? null : new Date().toISOString(),
       errore: '',
       esito_json: await valoreCampo(base44, 'QuadraturaFir', quadratura_id, 'esito_json', JSON.stringify(esito)),
     };
@@ -242,7 +259,10 @@ export default async function(req) {
     }
     await svc.QuadraturaFir.update(quadratura_id, aggiornamento);
 
-    return Response.json({ ok: true, per_canale: esito.per_canale, tabelle: lettura.tabelle.length, lettura_verificata: !!lettura.verificata });
+    return Response.json({
+      ok: true, per_canale: esito.per_canale, tabelle: lettura.tabelle.length, lettura_verificata: !!lettura.verificata,
+      ...(durante.length ? { confermato: false, caricamenti: durante } : {}),
+    });
   } catch (error) {
     const messaggio = error && error.message ? error.message : String(error);
     if (quadraturaId) {

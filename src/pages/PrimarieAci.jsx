@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { eTerminato, giornoOrdine, giornoMovimento } from '@/lib/movimenti';
+import { eTerminato, giornoElenco, giornoMovimento } from '@/lib/movimenti';
 import { giornoRoma } from '@/lib/giornoItaliano';
 import { base44 } from '@/api/base44Client';
 import { Loader2, RefreshCw, Truck, Factory, Package, Filter, X } from 'lucide-react';
@@ -13,12 +13,12 @@ import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdO
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
-// Il giorno con cui la pagina colloca un ordine: la fine del trasporto; per un
-// ordine non terminato (cancellato prima del ritiro) l'immissione. Un terminato
-// senza fine trasporto non ha giorno, mese ne' anno: giornoOrdine ripiegava
-// sull'immissione, e un ritiro di luglio su un ordine di maggio finiva nel
-// riepilogo di maggio. Resta fuori da conteggi e riepiloghi e si segnala.
-const giornoElenco = (r) => (eTerminato(r) ? giornoMovimento(r) : giornoOrdine(r));
+// Il giorno con cui la pagina colloca un ordine e' giornoElenco
+// (src/lib/movimenti.js): la fine del trasporto; per un ordine non terminato
+// (cancellato prima del ritiro) l'immissione. Un terminato senza fine trasporto
+// non ha giorno, mese ne' anno: giornoOrdine ripiegava sull'immissione, e un
+// ritiro di luglio su un ordine di maggio finiva nel riepilogo di maggio. Resta
+// fuori da conteggi e riepiloghi e si segnala.
 
 // I caricamenti che riscrivono l'archivio delle primarie ACI.
 const CARICAMENTI_ACI = ['primarie', 'primarie_aci'];
@@ -152,15 +152,24 @@ export default function PrimarieAci() {
   });
   const destRows = Object.entries(byDest).sort((a, b) => b[1].kg - a[1].kg);
 
-  // Aggregazione per mese, quello della fine del trasporto
+  // Aggregazione per mese, quello della fine del trasporto, e per anno: l'archivio
+  // ACI copre piu' anni, e raggruppando per il solo nome del mese "Luglio"
+  // sommava luglio 2025 e luglio 2026. I contati hanno tutti giorno, mese e anno.
   const byMese = {};
   contati.forEach(r => {
-    const m = r.mese || 'N/D';
-    if (!byMese[m]) byMese[m] = { count: 0, kg: 0 };
-    byMese[m].count++;
-    byMese[m].kg += r.peso_effettivo || 0;
+    const k = `${r.anno_ordine}|${r.mese}`;
+    if (!byMese[k]) byMese[k] = { anno: r.anno_ordine, meseIdx: MESI.indexOf(r.mese), count: 0, kg: 0 };
+    byMese[k].count++;
+    byMese[k].kg += r.peso_effettivo || 0;
   });
-  const meseRows = MESI.filter(m => byMese[m]).map(m => [m, byMese[m]]);
+  const meseRows = Object.values(byMese)
+    .sort((a, b) => (a.anno - b.anno) || (a.meseIdx - b.meseIdx))
+    .map(v => [`${MESI[v.meseIdx]} ${v.anno}`, v]);
+  // Di quali anni sono i numeri: senza un anno scelto, di tutti quelli in archivio.
+  const anniScelti = [...filterAnno].sort((a, b) => a - b);
+  const anniDeiNumeri = anniScelti.length === 0
+    ? 'di tutti gli anni in archivio (scegli un anno per vederne uno solo)'
+    : `${anniScelti.length === 1 ? "dell'anno" : 'degli anni'} ${anniScelti.join(', ')}`;
 
   if (loading) {
     return <div className="flex items-center justify-center py-20 text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin mr-2" /> Caricamento Terminati ACI...</div>;
@@ -198,7 +207,7 @@ export default function PrimarieAci() {
         </div>
       </div>
       <p className="text-xs text-muted-foreground -mt-3">
-        Indicatori e riepiloghi per destinazione e per mese contano {conStato ? 'gli ordini degli stati scelti' : 'gli ordini terminati'}, nel mese in cui è finito il trasporto; il dettaglio elenca tutti gli ordini che rispondono ai filtri.
+        Indicatori e riepiloghi per destinazione e per mese contano {conStato ? 'gli ordini degli stati scelti' : 'gli ordini terminati'} {anniDeiNumeri}, ciascuno nel mese e nell&apos;anno in cui è finito il trasporto{conStato ? ' (un ordine non terminato, in quelli dell\'immissione)' : ''}; il dettaglio elenca tutti gli ordini che rispondono ai filtri.
       </p>
       {senzaFine.length > 0 && (
         <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 text-sm">

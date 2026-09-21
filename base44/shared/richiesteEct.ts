@@ -8,6 +8,7 @@
 //
 // Quando quell'ordine compare fra i terminati, l'evasione si propone da sola: la
 // spunta la mette l'utente, perche' e' lui a rispondere alla mail del consorzio.
+import { eTerminato, giornoMovimento } from "./movimenti.ts";
 
 export const MESI_IT = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
 
@@ -214,6 +215,62 @@ export function evasioneOrdini(ids, terminati) {
     evasi: fatti.length,
     ultima: ids.length > 0 && fatti.length === ids.length ? fatti.sort().reverse()[0] : null,
   };
+}
+
+/**
+ * I ritiri fra i movimenti di primaria: id ordine -> primo giorno italiano di
+ * fine trasporto, dei soli terminati che ce l'hanno. Lo usano il caricamento del
+ * foglio ECT (importaRichiesteEct) e il ricalcolo dopo le primarie (importaBlocco,
+ * ritiri_ect), che cosi' non possono dire due cose diverse.
+ *
+ * Un terminato senza fine trasporto non conta come ritirato, e non si ripiega
+ * sulla chiusura a portale (regola 1). Si esclude ma non si perde: resta in
+ * `senzaFine`, perche' la richiesta che lo aspetta resterebbe aperta e in
+ * ritardo senza che nessuno lo dica, e si rischierebbe di sollecitare un ritiro
+ * che c'e' ma non ha ancora la data.
+ */
+export function ritiriTerminati(movimenti) {
+  const terminati = new Map();
+  const senzaFine = new Set();
+  for (const o of movimenti || []) {
+    const id = String((o && o.id_ordine) || '').trim();
+    if (!id || !eTerminato(o)) continue;
+    const giorno = giornoMovimento(o);
+    if (!giorno) { senzaFine.add(id); continue; }
+    if (!terminati.has(id) || giorno < terminati.get(id)) terminati.set(id, giorno);
+  }
+  // basta una riga con la data perche' l'ordine risulti ritirato
+  for (const id of terminati.keys()) senzaFine.delete(id);
+  return { terminati, senzaFine };
+}
+
+/**
+ * L'ID riconosciuto da salvare su una richiesta, dato quello che c'e' gia' (o
+ * null) e l'esito di `riconosciOrdine`. Un ID gia' riconosciuto si sostituisce
+ * solo con un altro ID, mai con "non trovato" o "ambiguo": un secondo ordine
+ * dello stesso produttore nato lo stesso giorno rende ambiguo il riconoscimento,
+ * e riscrivendolo la richiesta perdeva l'ordine e con lui il ritiro - tornava
+ * aperta, col rischio di sollecitare un ritiro gia' fatto. La regola e' la
+ * stessa per il caricamento del foglio ECT e per il ricalcolo dopo le primarie:
+ * prima l'esito dipendeva da quale dei due aveva girato per ultimo. Gli ID
+ * scritti a mano non passano di qui: vincono sempre (listaOrdini).
+ */
+export function idOrdineDaSalvare(gia, ric) {
+  const da = !ric.id_ordine && gia && String(gia.id_ordine || '').trim() ? gia : ric;
+  return { id_ordine: da.id_ordine, id_ordine_stato: da.id_ordine_stato, id_ordine_candidati: da.id_ordine_candidati };
+}
+
+/**
+ * La riga da mostrare per le richieste aperte che aspettano un ordine terminato a
+ * portale ma senza fine trasporto: [{ pdr, id_ordine }]. Vuota se non ce ne sono.
+ */
+export function testoTerminatiSenzaFine(lista) {
+  const n = (lista || []).length;
+  if (!n) return '';
+  const quali = lista.slice(0, 5).map(x => (x.id_ordine ? `${x.pdr} (${x.id_ordine})` : x.pdr)).join(', ') + (n > 5 ? ` e altre ${n - 5}` : '');
+  return n === 1
+    ? `Una richiesta del consorzio ha l'ordine terminato ma senza data di fine trasporto: resta aperta finché la data non arriva (${quali}).`
+    : `${n} richieste del consorzio hanno l'ordine terminato ma senza data di fine trasporto: restano aperte finché la data non arriva (${quali}).`;
 }
 
 export function giorniAllaScadenza(scadenza, oggi) {

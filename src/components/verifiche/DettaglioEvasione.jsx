@@ -51,7 +51,7 @@ const CANALI = [
 
 const scavalcata = (r) => (r.scavalcata_successive || 0) + (r.scavalcata_fuori || 0) > 0;
 
-function SezioneCanali({ riga, anno, mese }) {
+function SezioneCanali({ riga, anno, mese, inRiscrittura }) {
   const canali = riga.canali;
   if (!canali) return null;
   const alertCanali = riga.alert_canali || [];
@@ -62,6 +62,12 @@ function SezioneCanali({ riga, anno, mese }) {
   return (
     <section className="mt-5 space-y-3">
       <h4 className="font-semibold">Canali di raccolta a {MESI[mese - 1]} {anno}</h4>
+      {/* Regola 2: letti mentre si caricavano le primarie, non si presentano come validi. */}
+      {inRiscrittura && (
+        <p className="text-xs text-amber-700 font-medium">
+          Archivio in riscrittura: raccolto, richieste aperte e alert dei canali sono letti mentre si caricavano le primarie e possono essere incompleti.
+        </p>
+      )}
       {alertCanali.map((a, i) => (
         <div key={i} className="flex items-start gap-2 text-sm">
           <span className={`mt-0.5 px-2 py-0.5 rounded-full border text-xs font-medium shrink-0 ${GRAVITA[a.gravita].classe}`}>{GRAVITA[a.gravita].etichetta}</span>
@@ -129,7 +135,7 @@ function Riga({ etichetta, valore }) {
   );
 }
 
-export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
+export default function DettaglioEvasione({ riga, anno, mese, open, inRiscrittura = false, onClose }) {
   const [controlli, setControlli] = useState([]);
   const [indice, setIndice] = useState(0);
   const [caricando, setCaricando] = useState(false);
@@ -168,7 +174,8 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
   const s = esito ? esito.storico : null;
   // Contati dalle righe: ControlloEvasione non ha un campo per loro.
   const nSenzaFine = esito ? esito.righe.filter(r => r.stato === 'terminata_senza_fine').length : 0;
-  const nAltroCanale = esito ? esito.righe.filter(r => r.stato === 'altro_canale').length : 0;
+  // Ordini di altri canali finiti nella lista di rete: per canale, mai sommati.
+  const nAltroCanale = (k) => (esito ? esito.righe.filter(r => r.stato === 'altro_canale' && r.canale === k).length : 0);
   const righe = esito ? esito.righe.filter(r => {
     if (filtro === 'tutte') return true;
     if (filtro === 'fuori_ordine') return r.saltate > 0;
@@ -191,7 +198,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
           </SheetDescription>
         </SheetHeader>
 
-        <SezioneCanali riga={riga} anno={anno} mese={mese} />
+        <SezioneCanali riga={riga} anno={anno} mese={mese} inRiscrittura={inRiscrittura} />
 
         {!riga.lista ? null : caricando ? (
           <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" />Caricamento…</div>
@@ -261,7 +268,8 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                   c.riassegnate ? `${c.riassegnate} riassegnate` : '',
                   c.non_piu_presenti ? `${c.non_piu_presenti} sparite` : '',
                   nSenzaFine ? `${nSenzaFine} senza fine trasporto` : '',
-                  nAltroCanale ? `${nAltroCanale} di altro canale` : '',
+                  nAltroCanale('aci') ? `${nAltroCanale('aci')} ACI, fuori dai conti` : '',
+                  nAltroCanale('extra') ? `${nAltroCanale('extra')} di extra raccolta, fuori dai conti` : '',
                 ].filter(Boolean).join(', ')} />
             </div>
 

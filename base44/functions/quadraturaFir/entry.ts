@@ -111,9 +111,13 @@ export default async function(req) {
     // settimane recenti, l'apertura della settimana per le altre. Un esito
     // anteriore a un caricamento e' di un gestionale che non c'e' piu': quella
     // settimana si mostra senza colore, e l'esito vero si vede aprendola.
-    const ultimoCaricamento = Math.max(0, ...Object.values(dopo.ultimi || {}).map(u => istante(u.creato_il)));
+    // Conta la fine del caricamento, non l'inizio: un confronto fatto mentre il
+    // caricamento scriveva e' successivo al suo inizio, ma l'archivio era a meta'.
+    // Un esito salvato senza verificata_il non e' stato confermato (stampa
+    // caricata durante un caricamento) e non si colora.
+    const ultimoCaricamento = Math.max(0, ...Object.values(dopo.ultimi || {}).map(u => istante(u.concluso_il || u.creato_il)));
     const esitoValido = (r) => r.stato === 'completata' && Array.isArray(r.per_canale) && r.per_canale.length > 0
-      && istante(r.verificata_il) >= ultimoCaricamento;
+      && !!r.verificata_il && istante(r.verificata_il) >= ultimoCaricamento;
     // La settimana aperta ha l'esito appena rifatto, salvato o no.
     const perCanaleStorico = (r) => (q && r.id === q.id && ricalcolo.rifatto ? q.per_canale : esitoValido(r) ? r.per_canale : null);
 

@@ -11,6 +11,7 @@ import TargetVsRaccoltoChart from '@/components/dashboard/TargetVsRaccoltoChart'
 import { formatIntero } from '@/lib/utils';
 import Cruscotto from '@/components/dashboard/Cruscotto';
 import { useAuth } from '@/lib/AuthContext';
+import { oggiRoma } from '@/lib/giornoItaliano';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
   'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -23,8 +24,10 @@ export default function Dashboard() {
   const [alertCritici, setAlertCritici] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  // L'anno in corso e' quello italiano, non quello dell'orologio del dispositivo.
+  const annoOggi = Number(oggiRoma().slice(0, 4));
   const [mese, setMese] = useState([]);
-  const [anno, setAnno] = useState([new Date().getFullYear()]);
+  const [anno, setAnno] = useState(() => [annoOggi]);
   const [raccoltaData, setRaccoltaData] = useState(null);
   const [raccoltaLoading, setRaccoltaLoading] = useState(true);
 
@@ -53,7 +56,12 @@ export default function Dashboard() {
     })();
   }, [mese, anno]);
 
-  const periodo = `${mese.length ? `${mese.join(', ')} ` : ''}${anno.length ? anno.join(', ') : new Date().getFullYear()}`;
+  // Senza anno scelto getDashboardStats e getDashboardRaccolta usano l'anno in
+  // corso: i testi dicono quello, e i titoli dei grafici gli anni che la funzione
+  // ha davvero usato, non "Tutti gli anni".
+  const anniScelti = anno.length ? anno.join(', ') : String(annoOggi);
+  const anniRaccolta = raccoltaData && raccoltaData.anni && raccoltaData.anni.length ? raccoltaData.anni.join(', ') : anniScelti;
+  const periodo = `${mese.length ? `${mese.join(', ')} ` : ''}${anniScelti}`;
   const cards = [
     { key: 'assegnati', label: 'Assegnati Rete', sotto: counts.assegnati_aci ? `da evadere · ACI ${formatIntero(counts.assegnati_aci)}` : 'da evadere', icon: ClipboardList, path: '/assegnati', color: 'text-blue-600 bg-blue-50' },
     { key: 'primarie_rete', label: 'Terminati Rete', sotto: periodo, icon: Truck, path: '/primarie-rete', color: 'text-green-600 bg-green-50' },
@@ -99,13 +107,13 @@ export default function Dashboard() {
       <DashboardFilters mese={mese} anno={anno} onMeseChange={setMese} onAnnoChange={setAnno} />
 
       {/* KPI Raccolta */}
-      <DashboardKpi kpi={raccoltaData?.kpi} loading={raccoltaLoading} />
+      <DashboardKpi kpi={raccoltaData?.kpi} senzaFine={raccoltaData?.senza_fine_trasporto} loading={raccoltaLoading} />
 
       {/* Raccolta RETE vs ACI per Regione */}
       <div className="border rounded-lg p-5">
         <div className="flex items-center gap-2 mb-4">
           <BarChart3 className="w-5 h-5 text-primary" />
-          <h2 className="font-heading font-semibold text-lg">Raccolta RETE vs ACI per Regione — {mese.length ? mese.join(', ') : 'Tutti i mesi'} {anno.length ? anno.join(', ') : 'Tutti gli anni'}</h2>
+          <h2 className="font-heading font-semibold text-lg">Raccolta RETE vs ACI per Regione — {mese.length ? mese.join(', ') : 'Tutti i mesi'} {anniRaccolta}</h2>
         </div>
         <ReteVsAciChart data={raccoltaData?.per_regione} />
       </div>
@@ -114,7 +122,7 @@ export default function Dashboard() {
       <div className="border rounded-lg p-5">
         <div className="flex items-center gap-2 mb-4">
           <TrendingUp className="w-5 h-5 text-primary" />
-          <h2 className="font-heading font-semibold text-lg">Target vs Raccolto per Regione — {anno.length ? anno.join(', ') : 'Tutti gli anni'} (solo Rete)</h2>
+          <h2 className="font-heading font-semibold text-lg">Target vs Raccolto per Regione — {anniRaccolta} (solo Rete)</h2>
         </div>
         <TargetVsRaccoltoChart data={raccoltaData?.target_vs_raccolto} />
       </div>

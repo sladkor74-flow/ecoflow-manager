@@ -72,6 +72,32 @@ async function provaA(fn, ripiego) {
 }
 
 /**
+ * I terminati senza fine trasporto, di qualunque periodo: non stanno in nessun
+ * mese e ogni conto li scarta, percio' si contano a parte per dirli. Prima si
+ * contavano solo quelli immessi nell'anno chiesto, e sparivano proprio i casi
+ * dubbi - un ordine immesso a fine dicembre e finito a gennaio, un ordine senza
+ * nemmeno l'immissione - mentre Dashboard e Report Mensile li contano tutti.
+ * Si dividono per anno di immissione, l'unica data che hanno (mai la chiusura a
+ * portale); chi non ha nemmeno quella ha anno null. Lo usano il riepilogo qui
+ * sotto e gli strumenti di EcoTyna, cosi' i due testi dicono lo stesso numero.
+ * Restituisce { esclusi, per_anno: [{ anno, righe }] }, anni dal piu' recente e
+ * in fondo chi non ha l'immissione.
+ */
+export function terminatiSenzaFine(righe) {
+  const esclusi = (righe || []).filter(r => eTerminato(r) && !giornoMovimento(r));
+  const perAnno = new Map();
+  for (const r of esclusi) {
+    const a = annoRoma(r.ordine_immesso_il);
+    if (!perAnno.has(a)) perAnno.set(a, []);
+    perAnno.get(a).push(r);
+  }
+  const per_anno = [...perAnno.entries()]
+    .sort(([a], [b]) => (a === null ? 1 : b === null ? -1 : b - a))
+    .map(([anno, xs]) => ({ anno, righe: xs }));
+  return { esclusi, per_anno };
+}
+
+/**
  * Riepilogo testuale della situazione della commessa nell'anno di "oggi"
  * (formato AAAA-MM-GG, ora italiana).
  */
@@ -151,16 +177,17 @@ export async function situazioneGestionale(base44, oggi) {
   }
 
   // I terminati senza fine trasporto non stanno in nessun mese: il raccolto qui
-  // sopra li esclude, e va detto, altrimenti sembra completo. L'anno e' quello
-  // dell'immissione, l'unica data che hanno; mai la chiusura a portale.
-  const senzaData = (xs) => (xs || []).filter(r => eTerminato(r) && !giornoMovimento(r) && annoRoma(r.ordine_immesso_il) === anno);
+  // sopra li esclude, e va detto, altrimenti sembra completo. Si contano tutti,
+  // di qualunque periodo, divisi per anno di immissione (terminatiSenzaFine).
   const esclusi = [
-    ['RETE', reteSenzaData && senzaData(reteSenzaData)],
-    ['ACI', aciSenzaData && senzaData(aciSenzaData)],
-    ['EXTRA RACCOLTA', senzaData(extra.filter(r => String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'secondaria'))],
-  ].filter(([, xs]) => xs && xs.length);
+    ['RETE', reteSenzaData && terminatiSenzaFine(reteSenzaData)],
+    ['ACI', aciSenzaData && terminatiSenzaFine(aciSenzaData)],
+    ['EXTRA RACCOLTA', terminatiSenzaFine(extra.filter(r => String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'secondaria'))],
+  ].filter(([, x]) => x && x.esclusi.length);
   if (esclusi.length) {
-    righe.push(`Terminati senza data di fine trasporto, immessi nel ${anno} ed esclusi dal raccolto qui sopra, un canale per volta: ${esclusi.map(([c, xs]) => `${c} ${contaFormulari(xs)} ${contaFormulari(xs) === 1 ? 'formulario' : 'formulari'}, ${t1(xs.reduce((s, r) => s + (Number(r.peso_effettivo) || 0), 0) / 1000)} t`).join('; ')}. Vanno corretti nel file del portale e ricaricati.`);
+    const nf = (xs) => { const n = contaFormulari(xs); return `${n} ${n === 1 ? 'formulario' : 'formulari'}`; };
+    const perAnno = (x) => x.per_anno.map(g => `${g.anno === null ? 'senza data di immissione' : `immessi nel ${g.anno}`} ${contaFormulari(g.righe)}`).join(', ');
+    righe.push(`Terminati senza data di fine trasporto, di qualunque periodo, esclusi dal raccolto qui sopra perche' non si sa in che mese cadono, un canale per volta: ${esclusi.map(([c, x]) => `${c} ${nf(x.esclusi)}, ${t1(x.esclusi.reduce((s, r) => s + (Number(r.peso_effettivo) || 0), 0) / 1000)} t (${perAnno(x)})`).join('; ')}. Vanno corretti nel file del portale e ricaricati.`);
   }
 
   // --- Raccoglitori: target contro raccolto ---

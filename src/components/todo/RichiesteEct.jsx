@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Loader2, CheckSquare, Square, AlertTriangle, Mail, Search, Upload } from 'lucide-react';
-import { giorniAllaScadenza, statoRichiesta, listaOrdini } from '@/lib/richiesteEct';
+import { giorniAllaScadenza, statoRichiesta, listaOrdini, testoTerminatiSenzaFine } from '@/lib/richiesteEct';
 
 // Richieste del consorzio arrivate via email: ci chiedono di anticipare certi
 // ritiri. L'ID ordine non sta nella richiesta e lo riconosce il gestionale fra
@@ -215,6 +215,14 @@ export default function RichiesteEct({ isAdmin }) {
       {ritiri?.da_confermare?.length > 0 && (
         <p className="text-sm border rounded-lg px-3 py-2 bg-muted/40 text-emerald-800">
           Dai terminati caricati risultano ritirate e aspettano la tua spunta: {ritiri.da_confermare.map(x => `${x.pdr} (${String(x.evasa_il).split('-').reverse().join('/')})`).join(', ')}.
+        </p>
+      )}
+
+      {/* Un ordine terminato senza fine trasporto non conta come ritiro, ma si dice (regola 1). */}
+      {((ritiri && ritiri.terminati_senza_fine) || (esitoImport && esitoImport.terminati_senza_fine) || []).length > 0 && (
+        <p className="flex items-start gap-2 text-sm border border-amber-200 bg-amber-50 text-amber-900 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          {testoTerminatiSenzaFine((ritiri && ritiri.terminati_senza_fine && ritiri.terminati_senza_fine.length ? ritiri : esitoImport).terminati_senza_fine)}
         </p>
       )}
 

@@ -13,7 +13,7 @@
 // ripeteva la verifica a mano. ricontrollaVerifiche rifa' il confronto sulle righe
 // gia' lette, dopo ogni caricamento e all'apertura della settimana.
 
-import { verificaReport, CATEGORIE_MOVIMENTO } from "./reportSettimanali.ts";
+import { verificaReport, senzaFineDei, CATEGORIE_MOVIMENTO } from "./reportSettimanali.ts";
 import { valoreCampo, leggiCampo } from "./testoLungo.ts";
 import { formatoKg } from "./formato.ts";
 import { oggiRoma } from "./giornoItaliano.ts";
@@ -40,16 +40,30 @@ export async function conRitentativi(fn) {
   }
 }
 
-/** Esito della verifica: confronto con i movimenti e campi da salvare. */
-export function calcolaEsito(verifica, righe, movimenti) {
+/**
+ * Esito della verifica: confronto con i movimenti e campi da salvare.
+ * senzaFine sono i terminati senza fine trasporto (caricaMovimenti): se non si
+ * passano, valgono quelli letti insieme ai movimenti.
+ */
+export function calcolaEsito(verifica, righe, movimenti, senzaFine = senzaFineDei(movimenti)) {
   const esito = verificaReport(righe, movimenti, {
     chiave: verifica.soggetto_chiave,
     nome: verifica.soggetto_nome,
     inizio: String(verifica.data_inizio).slice(0, 10),
     fine: String(verifica.data_fine).slice(0, 10),
+    senzaFine,
   });
   return esito;
 }
+
+/**
+ * Una verifica da riconfrontare: completata, oppure rimasta senza esito con le
+ * righe del report gia' lette - il confronto rinviato perche' un archivio si
+ * stava riscrivendo, o non riuscito dopo la lettura. Il riconfronto dopo il
+ * caricamento e all'apertura della settimana la completa senza rileggere il file.
+ */
+export const daRiconfrontare = (v) => !!v && (v.stato === 'completata'
+  || (v.stato === 'errore' && (eDichiarazione(v) || !!v.righe_report_json)));
 
 // Il testo dell'esito cosi' come si salva: serve anche a capire se un nuovo
 // confronto cambia qualcosa rispetto a quello salvato.
@@ -130,22 +144,27 @@ async function aggiornaAlertDichiarazione(base44, verifica, esito) {
  * Rifa' il confronto delle verifiche completate con i movimenti di adesso: le
  * dichiarazioni di nessuna movimentazione e i report veri, sulle righe gia'
  * lette dal file (righe_report_json), senza rileggere niente e senza agente.
+ * Completa anche quelle rimaste senza esito con le righe gia' lette
+ * (daRiconfrontare), come un confronto rinviato durante un caricamento.
  *
  * Si scrive solo se l'esito cambia, e solo con scrivi: chi guarda la settimana
  * senza essere amministratore vede l'esito rifatto ma non lo salva.
  *
+ * senzaFine: i terminati senza fine trasporto; se non si passano, quelli letti
+ * da caricaMovimenti insieme ai movimenti.
+ *
  * Restituisce, per ogni verifica riconfrontata, { id, soggetto_chiave, cambiato,
  * salvato, campi } (i campi del riepilogo di adesso) oppure { id, errore }.
  */
-export async function ricontrollaVerifiche(base44, verifiche, movimenti, { scrivi = true, riprova = conRitentativi } = {}) {
+export async function ricontrollaVerifiche(base44, verifiche, movimenti, { scrivi = true, riprova = conRitentativi, senzaFine = senzaFineDei(movimenti) } = {}) {
   const risultati = [];
   for (const v of verifiche) {
-    if (!v || v.stato !== 'completata') continue;
+    if (!daRiconfrontare(v)) continue;
     const dichiarazione = eDichiarazione(v);
     if (!dichiarazione && !v.righe_report_json) continue;
     try {
       const righe = dichiarazione ? [] : JSON.parse((await riprova(() => leggiCampo(base44, 'VerificaReport', v, 'righe_report_json'))) || '[]');
-      const esito = calcolaEsito(v, righe, movimenti);
+      const esito = calcolaEsito(v, righe, movimenti, senzaFine);
       // Un esito salvato che non si ricompone (parti doppie o mancanti) non e'
       // un errore della verifica: si riscrive, e valoreCampo cancella tutte le
       // parti del campo prima di rifarle. Lanciato, lasciava la verifica fra gli
@@ -153,9 +172,10 @@ export async function ricontrollaVerifiche(base44, verifiche, movimenti, { scriv
       let prima = '';
       try { prima = await riprova(() => leggiCampo(base44, 'VerificaReport', v, 'esito_json')); } catch { /* si riscrive */ }
       const firma = (lista) => (Array.isArray(lista) ? lista.map(c => `${c.canale}:${c.conformita}:${c.anomalie}:${c.assenti}`).join('|') : '');
-      const cambiato = testoEsito(esito) !== prima || esito.riepilogo.conformita !== v.conformita
+      // Una verifica senza esito si salva comunque: e' li' che si completa.
+      const cambiato = v.stato !== 'completata' || testoEsito(esito) !== prima || esito.riepilogo.conformita !== v.conformita
         || firma(esito.riepilogo.per_canale) !== firma(v.per_canale);
-      const campi = { ...esito.riepilogo, stato: 'completata' };
+      const campi = { ...esito.riepilogo, stato: 'completata', errore: '' };
       let salvato = false;
       if (cambiato && scrivi) {
         campi.verificata_il = await salvaEsito(base44, v, esito, riprova);

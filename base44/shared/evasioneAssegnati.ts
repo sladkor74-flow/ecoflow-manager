@@ -63,6 +63,12 @@ const MINIMO_ORDINI_CLASSE = 8;
 // Peso indicativo di un ritiro, il cassone di una motrice con ragno, quando il
 // raccoglitore non ha ancora formulari nell'anno.
 const KG_RITIRO_INDICATIVO = 4000;
+// Versione delle regole con cui e' calcolato un controllo, scritta nel suo esito.
+// Un controllo salvato con regole diverse si rifa' anche senza primarie nuove
+// (evasioneAssegnatiDati.ts). La 2 e' quella del 21/09/2026: fine trasporto mai
+// chiusura, terminate senza fine trasporto segnalate, ordini di altri canali
+// fuori dai conti della lista. Si alza a ogni cambio che sposta i risultati.
+export const VERSIONE_REGOLE = 2;
 
 // === calendario ===
 
@@ -725,9 +731,14 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     viaggi_possibili: storico.viaggi_per_giorno ? Math.floor(storico.viaggi_per_giorno * giorniResidui) : null,
   };
 
+  // Le richieste della lista sono quelle di rete: un ordine ACI o di extra
+  // raccolta finito in lista non si conta fra le sue richieste (regola 3), ne' in
+  // totale ne' per provincia; si dice a parte in esito.altro_canale.
+  const righeRete = righe.filter(r => r.stato !== 'altro_canale');
+
   // --- per provincia, quando la lista ne tocca piu' d'una ---
-  const province = [...new Set(righe.map(provinciaDi).filter(Boolean))];
-  const nella = (p) => righe.filter(r => provinciaDi(r) === p);
+  const province = [...new Set(righeRete.map(provinciaDi).filter(Boolean))];
+  const nella = (p) => righeRete.filter(r => provinciaDi(r) === p);
   const perProvincia = province.length > 1 ? province.map(p => ({
     provincia: p,
     richieste: nella(p).length,
@@ -819,10 +830,19 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     aggiungi('media', 'senza_fine', `${n === 1 ? "Una richiesta della lista risulta terminata" : `${n} richieste della lista risultano terminate`} sul portale senza data di fine trasporto: ${n === 1 ? "e' esclusa" : 'sono escluse'} da evase, cronologia e raccolto finche' la data non viene inserita sul portale: ${elenco(senzaFine.map(r => r.id_ordine))}.`);
   }
   const altroCanale = righe.filter(r => r.stato === 'altro_canale');
+  // Per canale, mai sommati: ACI ed extra raccolta si contano ciascuno per se'.
+  const altroPerCanale = {
+    aci: altroCanale.filter(r => r.canale === 'aci').length,
+    extra: altroCanale.filter(r => r.canale === 'extra').length,
+  };
   if (altroCanale.length) {
-    const n = altroCanale.length;
+    const uno = altroCanale.length === 1;
+    const quali = [
+      altroPerCanale.aci ? (altroPerCanale.aci === 1 ? 'un ordine ACI' : `${altroPerCanale.aci} ordini ACI`) : '',
+      altroPerCanale.extra ? (altroPerCanale.extra === 1 ? 'un ordine di extra raccolta' : `${altroPerCanale.extra} ordini di extra raccolta`) : '',
+    ].filter(Boolean).join(' e ');
     const nomeCanale = (k) => (k === 'aci' ? 'ACI' : k === 'extra' ? 'extra raccolta' : k);
-    aggiungi('media', 'altro_canale', `${n === 1 ? "Una richiesta della lista non e'" : `${n} richieste della lista non sono`} di rete: lista e target sono della sola rete, e ${n === 1 ? "resta fuori" : 'restano fuori'} dai suoi conti. ${n === 1 ? 'Si segue' : 'Si seguono'} nei canali del raccoglitore: ${elenco(altroCanale.map(r => `${r.id_ordine} (${nomeCanale(r.canale)})`))}.`);
+    aggiungi('media', 'altro_canale', `Nella lista di rete ${uno ? "c'e'" : 'ci sono'} ${quali}: lista e target sono della sola rete, e ${uno ? 'resta fuori' : 'restano fuori'} dai suoi conti. ${uno ? 'Si segue' : 'Si seguono'} nei canali del raccoglitore: ${elenco(altroCanale.map(r => `${r.id_ordine} (${nomeCanale(r.canale)})`))}.`);
   }
   const annullate = righe.filter(r => r.stato === 'annullata');
   if (annullate.length) {
@@ -846,7 +866,7 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
 
   return {
     riepilogo: {
-      richieste: righe.length,
+      richieste: righeRete.length,
       evase: righe.filter(evasaDalRaccoglitore).length,
       evase_da_altri: daAltri.length,
       aperte: aperte.length,
@@ -869,6 +889,7 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     },
     alert,
     esito: {
+      regole: VERSIONE_REGOLE,
       righe: ordinate.map(r => ({
         posizione: r.posizione, id_ordine: r.id_ordine, prioritaria: r.prioritaria, motivo_priorita: r.motivo_priorita,
         data_immissione: r.data_immissione, produttore: r.produttore, comune: r.comune, provincia: r.provincia, regione: r.regione,
@@ -890,7 +911,7 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
       data_riferimento: itData(datiAl),
       // Nell'esito e non nel riepilogo: ControlloEvasione non ha questi campi.
       terminate_senza_fine: senzaFine.length,
-      altro_canale: altroCanale.length,
+      altro_canale: altroPerCanale,
     },
   };
 }

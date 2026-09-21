@@ -3,7 +3,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import {
   caricaMovimenti, oggiRoma, aggiungiGiorni, statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento, GIORNI_CONSERVAZIONE,
 } from "../../shared/reportSettimanali.ts";
-import { ricontrollaVerifiche, conRitentativi, piuRecentiPerSoggetto } from "../../shared/esitoVerifica.ts";
+import { ricontrollaVerifiche, conRitentativi, piuRecentiPerSoggetto, daRiconfrontare } from "../../shared/esitoVerifica.ts";
 import { caricaGestionale, rifaiQuadratura, TIPI_CARICAMENTO } from "../../shared/quadraturaFirDati.ts";
 
 // Dopo un caricamento di primarie o secondarie (lo lancia Caricamento Dati a
@@ -66,7 +66,9 @@ export default async function(req) {
     const oggi = oggiRoma();
     const scaduta = (v) => !!v.scade_il && String(v.scade_il).slice(0, 10) <= oggi;
     const verifiche = piuRecentiPerSoggetto(await fetchAll(svc.VerificaReport))
-      .filter(v => v.stato === 'completata' && !scaduta(v));
+      // anche le verifiche rinviate durante un caricamento, con le righe gia' lette:
+      // e' qui, a caricamento finito, che si completano
+      .filter(v => daRiconfrontare(v) && !scaduta(v));
     const dal = aggiungiGiorni(oggi, -GIORNI_CONSERVAZIONE);
     // Una scheda di extra raccolta scritta o corretta in ritardo porta i giorni di
     // fine trasporto toccati: si rifanno anche le quadrature, di qualunque eta',

@@ -182,7 +182,8 @@ export default function PredittivitaDashboard({ data, onReload }) {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
                 <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Target di rete</p><p className="font-bold">{fmt(target)} kg</p></div>
-                <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Consuntivo di rete</p><p className="font-bold">{fmt(imp.consuntivo)} kg</p>
+                {/* Somma dei soli fornitori configurati: non e' il "Gia' arrivato di rete" della Proiezione e del suggerimento del lunedi', che conta tutto quello che arriva all'impianto. */}
+                <div className="border rounded p-2" title="Somma dei fornitori configurati per questo impianto. Il «Già arrivato di rete» della Proiezione a fine anno e del suggerimento del lunedì conta invece tutte le primarie e le secondarie di rete arrivate all'impianto."><p className="text-xs text-muted-foreground">Consuntivo di rete</p><p className="font-bold">{fmt(imp.consuntivo)} kg</p>
                   <p className="text-[10px] text-muted-foreground">Prim {fmt(imp.consuntivo_primarie)} · Sec {fmt(imp.consuntivo_secondarie)}</p></div>
                 <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Residuo</p><p className="font-bold text-amber-600">{fmt(imp.residuo)} kg</p></div>
                 <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Pianificato</p><p className="font-bold">{fmt(imp.totale_pianificato)} kg</p></div>

@@ -1,6 +1,7 @@
 import { base44 } from '@/api/base44Client';
 import { eAci } from '@/lib/canaleSecondaria';
 import { oggiRoma } from '@/lib/giornoItaliano';
+import { testoTerminatiSenzaFine } from '@/lib/richiesteEct';
 import { dataServer } from '@/lib/utils';
 
 // Importazione dei report di grandi dimensioni del portale Ecotyre.
@@ -486,14 +487,25 @@ const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
 // suo (risponde 409); qui vale per tutti i ricalcoli, qualifica compresa. Se il
 // registro non si riesce a leggere si prosegue: meglio un ricalcolo in piu' che
 // uno perso, e il controllo lato server resta.
+//
+// Un caricamento fallito dopo lo svuotamento lascia la sua riga "in_corso", col
+// messaggio che comincia con NON_RIUSCITO (importEcotyreFile, importaBlocco); in
+// "errore" si chiude solo chi fallisce prima di svuotare, a dati intatti. Percio'
+// le righe in errore si saltano: un file sbagliato caricato dopo non deve
+// nascondere l'archivio rimasto vuoto.
+const NON_RIUSCITO = 'Caricamento non riuscito';
 async function caricamentoAperto() {
   try {
     for (const tipo of TIPI_LETTI_DAI_RICALCOLI) {
-      const [ultimo] = await base44.entities.UploadLog.filter({ tipo_file: tipo }, '-created_date', 1);
+      const righe = await base44.entities.UploadLog.filter({ tipo_file: tipo }, '-created_date', 10);
+      const ultimo = (righe || []).find(r => r.esito !== 'errore');
       if (!ultimo || ultimo.esito !== 'in_corso') continue;
       const inizio = dataServer(ultimo.created_date);
       const chi = ultimo.utente ? ` di ${ultimo.utente}` : '';
       const file = ultimo.nome_file && ultimo.nome_file !== 'N/D' ? ` (${ultimo.nome_file})` : '';
+      if (String(ultimo.messaggio || '').startsWith(NON_RIUSCITO)) {
+        return `rinviato: il caricamento ${tipo}${chi}${file} non e' riuscito e l'archivio puo' essere vuoto o incompleto; ricarica il file`;
+      }
       if (inizio && Date.now() - inizio.getTime() > FINESTRA_IN_CORSO_MS) {
         return `rinviato: il caricamento ${tipo}${chi}${file} e' rimasto interrotto e l'archivio puo' essere incompleto; ricarica il file`;
       }
@@ -529,6 +541,15 @@ function problemaRisposta(res) {
   if (Array.isArray(dati.errori) && dati.errori.length) return `${dati.errori.length} non riusciti: ${testoErrori(dati.errori)}`;
   if (dati.error) return String(dati.error);
   return null;
+}
+
+// Cio' che un ricalcolo riuscito deve comunque far sapere, o null. I ritiri delle
+// richieste del consorzio dicono quali richieste restano aperte su un ordine
+// terminato senza fine trasporto: non si contano come ritirate (regola 1), ma
+// sollecitarle sarebbe sbagliato.
+function avvisoRisposta(res) {
+  const dati = (res && res.data !== undefined ? res.data : res) || {};
+  return testoTerminatiSenzaFine(Array.isArray(dati.terminati_senza_fine) ? dati.terminati_senza_fine : []) || null;
 }
 
 // Il messaggio di un ricalcolo rifiutato: quello della funzione, o i suoi primi errori.
@@ -603,7 +624,8 @@ export async function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
     try {
       const risposte = [].concat(await compiti[k]());
       const problema = risposte.map(problemaRisposta).find(Boolean);
-      esiti.push(problema ? { nome: NOMI_RICALCOLI[k], ok: false, errore: problema } : { nome: NOMI_RICALCOLI[k], ok: true });
+      const avviso = risposte.map(avvisoRisposta).find(Boolean);
+      esiti.push(problema ? { nome: NOMI_RICALCOLI[k], ok: false, errore: problema } : { nome: NOMI_RICALCOLI[k], ok: true, ...(avviso ? { avviso } : {}) });
     } catch (e) {
       esiti.push({ nome: NOMI_RICALCOLI[k], ok: false, errore: messaggioRicalcolo(e) });
     }
@@ -617,7 +639,9 @@ export function testoRicalcoli(esiti) {
   if (esiti.in_corso) return { classe: 'text-muted-foreground', testo: 'Aggiornamento dei moduli collegati in corso…' };
   if (!esiti.length) return null;
   const falliti = esiti.filter(e => !e.ok);
-  if (!falliti.length) return { classe: 'text-green-700', testo: `Aggiornati: ${esiti.map(e => e.nome).join(', ')}.` };
+  // gli avvisi dei ricalcoli riusciti, in coda: si leggono anche quando e' tutto aggiornato
+  const avvisi = esiti.filter(e => e.ok && e.avviso).map(e => ` ${e.avviso}`).join('');
+  if (!falliti.length) return { classe: avvisi ? 'text-amber-700' : 'text-green-700', testo: `Aggiornati: ${esiti.map(e => e.nome).join(', ')}.${avvisi}` };
   // Lo stesso motivo per tutti (un caricamento aperto) si dice una volta sola.
   const motivi = [...new Set(falliti.map(e => e.errore))];
   const riusciti = esiti.filter(e => e.ok).map(e => e.nome);
@@ -626,6 +650,6 @@ export function testoRicalcoli(esiti) {
     : `Non aggiornati: ${falliti.map(e => `${e.nome} (${e.errore})`).join('; ')}.`;
   return {
     classe: 'text-amber-700',
-    testo: `${testo}${riusciti.length ? ` Aggiornati: ${riusciti.join(', ')}.` : ''} Si rifanno al prossimo caricamento o dal modulo.`,
+    testo: `${testo}${riusciti.length ? ` Aggiornati: ${riusciti.join(', ')}.` : ''} Si rifanno al prossimo caricamento o dal modulo.${avvisi}`,
   };
 }

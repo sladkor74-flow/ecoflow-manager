@@ -5,6 +5,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Loader2, RefreshCw, FileSpreadsheet, FileText, Info, AlertTriangle } from 'lucide-react';
 import { formatKg, formatIntero, formatTonnellate } from '@/lib/utils';
 import { esportaTabellaExcel, esportaTabellaPdf } from '@/lib/esportaTabella';
+import { oggiRoma } from '@/lib/giornoItaliano';
 
 // Sezioni 3 e 4 del modulo Verifiche: la raccolta della RETE per provincia e mese,
 // nei chilogrammi effettivi e nel numero di ritiri. Sono le due tabelle che
@@ -60,8 +61,21 @@ export default function MatriceProvince({ tipo = 'peso' }) {
   useEffect(() => { carica(); }, [carica]);
 
   const peso = tipo === 'peso';
-  // Nell'anno in corso valgono i mesi fino a quello corrente, come nel motore di alert.
-  const mesiTrascorsi = dati ? (dati.anno === new Date().getFullYear() ? new Date().getMonth() + 1 : 12) : 0;
+  // Nell'anno in corso valgono i mesi fino a quello corrente, come nel motore di
+  // alert. Anno e mese sono quelli di oggi in Italia, non dell'orologio del
+  // dispositivo: fra il 31/12 e l'1/1 e a cavallo di fine mese sbagliava di un mese.
+  const oggi = oggiRoma();
+  const annoOggi = Number(oggi.slice(0, 4));
+  const mesiTrascorsi = dati ? (dati.anno < annoOggi ? 12 : dati.anno === annoOggi ? Number(oggi.slice(5, 7)) : 0) : 0;
+  // Regola 1: chi resta fuori dalla matrice si conta e si dice, solo se c'e'.
+  // I terminati senza fine trasporto sono di qualunque anno, i ritiri senza
+  // provincia dell'anno mostrato.
+  const nSenzaFine = dati ? Number(dati.senza_fine_trasporto) || 0 : 0;
+  const senzaProvincia = (dati && dati.senza_provincia) || { ritiri: 0, kg: 0 };
+  const esclusi = [
+    nSenzaFine > 0 ? `${formatIntero(nSenzaFine)} ${nSenzaFine === 1 ? 'terminato' : 'terminati'} di rete senza fine trasporto, ${nSenzaFine === 1 ? 'escluso' : 'esclusi'} da ogni mese` : '',
+    senzaProvincia.ritiri > 0 ? `${formatIntero(senzaProvincia.ritiri)} ${senzaProvincia.ritiri === 1 ? 'ritiro' : 'ritiri'} del ${dati.anno} senza provincia (${formatTonnellate(senzaProvincia.kg / 1000)} t), ${senzaProvincia.ritiri === 1 ? 'escluso' : 'esclusi'} dalle righe e dai totali` : '',
+  ].filter(Boolean);
   const vuoti = new Map();
   if (dati) for (const r of dati.righe) { const s = mesiSenzaRitiri(r, mesiTrascorsi); if (s.length) vuoti.set(r.provincia, s); }
   const gravi = [...vuoti.entries()].filter(([, s]) => s.some(x => x.a - x.da + 1 >= 3));
@@ -97,9 +111,11 @@ export default function MatriceProvince({ tipo = 'peso' }) {
     setEsportando(formato);
     try {
       const titolo = peso ? `Raccolto per provincia ${anno} (kg)` : `Ritiri per provincia ${anno}`;
-      const sottotitolo = peso
+      const sottotitolo = (peso
         ? `Rete, peso effettivo dei ritiri terminati per mese di fine trasporto · totale ${formatTonnellate(dati.totali.kg_totale / 1000)} t`
-        : `Rete, numero di ritiri terminati per mese di fine trasporto · totale ${formatIntero(dati.totali.ritiri_totale)}`;
+        : `Rete, numero di ritiri terminati per mese di fine trasporto · totale ${formatIntero(dati.totali.ritiri_totale)}`)
+        // Anche nel file si dice chi e' rimasto fuori dai totali.
+        + esclusi.map(e => ` · ${e}`).join('');
       const comuni = { nomeFile: titolo, colonne: colonneExport(), righe: dati.righe, totali: totaliExport() };
       if (formato === 'excel') await esportaTabellaExcel({ ...comuni, foglio: peso ? 'Raccolto' : 'Ritiri', titolo, sottotitolo });
       else await esportaTabellaPdf({ ...comuni, titolo, sottotitolo });
@@ -246,6 +262,16 @@ export default function MatriceProvince({ tipo = 'peso' }) {
             {peso && <span>Totale dell'anno: {formatTonnellate(dati.totali.kg_totale / 1000)} t in {formatIntero(dati.totali.ritiri_totale)} ritiri.</span>}
           </div>
         </>
+      )}
+
+      {/* Fuori dalla tabella, cosi' si vede anche in un anno senza righe. */}
+      {dati && esclusi.length > 0 && (
+        <div className="flex items-start gap-2 text-xs text-amber-800 border border-amber-200 bg-amber-50 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <div className="space-y-0.5">
+            {esclusi.map(e => <div key={e}>{e[0].toUpperCase() + e.slice(1)}.</div>)}
+          </div>
+        </div>
       )}
     </div>
   );

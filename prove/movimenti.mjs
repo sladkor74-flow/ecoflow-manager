@@ -1,6 +1,7 @@
 // Prova delle regole di lettura dei movimenti (base44/shared/movimenti.ts):
-// stato, periodo sul giorno italiano, settimana ISO, canale. npm run prove
-import { eTerminato, periodoMovimento, settimanaIso, canaleMovimento, filtraMovimenti } from '../base44/shared/movimenti.ts';
+// stato, periodo sul giorno italiano, settimana ISO, canale, giorno degli
+// elenchi. npm run prove
+import { eTerminato, periodoMovimento, settimanaIso, canaleMovimento, filtraMovimenti, giornoOrdine, giornoElenco, annoElenco, meseElenco } from '../base44/shared/movimenti.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -35,6 +36,17 @@ verifica('giugno 2026 rete: l\'ACI resta fuori', ids(filtraMovimenti(dati, { ann
 verifica('anno 2026: senza il 2025 e senza chi non ha la fine trasporto', ids(filtraMovimenti(dati, { anno: 2026 })) === '1,3,6');
 verifica('piu\' mesi e piu\' anni', ids(filtraMovimenti(dati, { anno: [2025, 2026], mese: ['giugno', 'Luglio'], canale: 'RETE' })) === '1,4,6');
 verifica('anche non terminati, se chiesto', ids(filtraMovimenti(dati, { anno: 2026, mese: 'Giugno', ancheNonTerminati: true })) === '1,2,3');
+
+console.log('GIORNO DEGLI ELENCHI');
+const immessoMaggio = '2026-05-20T08:00:00Z';
+verifica('terminato: la fine trasporto, non la chiusura ne\' l\'immissione', giornoElenco({ stato: 'terminato', ordine_immesso_il: immessoMaggio, trasporto_finito_il: '2026-06-30T22:30:00Z', ordine_chiuso_il: '2026-07-04T10:00:00Z' }) === '2026-07-01');
+const senzaFine = { stato: 'terminato', ordine_immesso_il: immessoMaggio, ordine_chiuso_il: '2026-07-04T10:00:00Z' };
+verifica('terminato senza fine trasporto: niente giorno, mese e anno', giornoElenco(senzaFine) === '' && meseElenco(senzaFine) === null && annoElenco(senzaFine) === null);
+verifica('giornoOrdine invece ripiega sull\'immissione (resta per i conteggi per anno di immissione)', giornoOrdine(senzaFine) === '2026-05-20');
+const cancellato = { stato: 'cancellato', ordine_immesso_il: '2025-12-31T23:30:00Z' };
+verifica('non terminato: l\'immissione, sul giorno italiano', giornoElenco(cancellato) === '2026-01-01' && annoElenco(cancellato) === 2026 && meseElenco(cancellato) === 'Gennaio');
+verifica('non terminato con la fine trasporto: la fine trasporto', meseElenco({ stato: 'assegnato', ordine_immesso_il: immessoMaggio, trasporto_finito_il: '2026-06-10T08:00:00Z' }) === 'Giugno');
+verifica('senza date: niente', giornoElenco({ stato: 'assegnato' }) === '' && annoElenco({}) === null);
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

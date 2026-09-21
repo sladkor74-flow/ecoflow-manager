@@ -1,5 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { annoOrdine, meseOrdine } from "../../shared/movimenti.ts";
+import { eTerminato, giornoMovimento, giornoElenco, annoElenco, meseElenco } from "../../shared/movimenti.ts";
 import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
@@ -7,7 +7,16 @@ import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 
 // Esporta i dati terziarie filtrati in Excel.
-// Payload: { filters: { impianto?, destinazione?, mese?, trasportatore?, materiale?, anno? } }
+// Payload: { filters: { impianto?, destinazione?, mese?, trasportatore?, materiale?, anno?, data? } }
+//
+// Giorno, mese e anno come nella pagina Terziarie.jsx (giornoElenco): la fine del
+// trasporto; per un ordine non terminato, l'immissione. Un terminato senza fine
+// trasporto non ha periodo: meseOrdine e annoOrdine lo mettevano nel mese di
+// immissione. Nessun filtro di periodo lo prende; nel file c'e' solo senza
+// filtri di periodo, marcato nella colonna Mese, e la risposta lo conta.
+const SENZA_FINE = 'MANCA FINE TRASPORTO';
+const senzaFineTrasporto = (r) => eTerminato(r) && !giornoMovimento(r);
+
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -19,9 +28,8 @@ export default async function(req) {
 
     const records = await fetchAll(base44.asServiceRole.entities.Terziaria);
 
-    const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
     function getMese(r) {
-      return meseOrdine(r);
+      return senzaFineTrasporto(r) ? SENZA_FINE : meseElenco(r);
     }
     function getMateriale(r) {
       if (r.peso_ciab_cipp) return 'CIAB/CIPP';
@@ -32,11 +40,12 @@ export default async function(req) {
     const filtered = records.filter((r) => {
       if (!matchesFilter((r.unita_locale_origine || '').trim(), filters.impianto)) return false;
       if (!matchesFilter((r.destinazione || '').trim(), filters.destinazione)) return false;
-      if (!matchesFilter(getMese(r), filters.mese)) return false;
+      if (!matchesFilter(meseElenco(r), filters.mese)) return false;
+      if (filters.data && giornoElenco(r) !== filters.data) return false;
       if (!matchesFilter((r.trasportatore || '').trim(), filters.trasportatore)) return false;
       if (!matchesFilter(getMateriale(r), filters.materiale)) return false;
       if (filters.anno != null && (!Array.isArray(filters.anno) ? filters.anno : filters.anno.length > 0)) {
-        const anno = annoOrdine(r);
+        const anno = annoElenco(r);
         if (!matchesFilterString(anno, filters.anno)) return false;
       }
       if (filters.provincia != null && (!Array.isArray(filters.provincia) ? filters.provincia : filters.provincia.length > 0)) {
@@ -82,7 +91,13 @@ export default async function(req) {
     XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), 'Terziarie');
 
     const buf = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-    return Response.json({ file_base64: buf, filename: 'terziarie_export.xlsx', righe: rows.length });
+    return Response.json({
+      file_base64: buf,
+      filename: 'terziarie_export.xlsx',
+      righe: rows.length,
+      // le righe del file senza fine trasporto: marcate, fuori da ogni mese
+      senza_fine_trasporto: filtered.filter(senzaFineTrasporto).length,
+    });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

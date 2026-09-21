@@ -1,8 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { leggiFoglio, riconosciOrdine, scadenzaDaNota, statoRichiesta, listaOrdini, evasioneOrdini, abbinaRichieste } from "../../shared/richiesteEct.ts";
-import { eTerminato, giornoMovimento } from "../../shared/movimenti.ts";
+import { leggiFoglio, riconosciOrdine, scadenzaDaNota, statoRichiesta, listaOrdini, evasioneOrdini, abbinaRichieste, ritiriTerminati, idOrdineDaSalvare } from "../../shared/richiesteEct.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
 
@@ -81,24 +80,21 @@ export default async function(req) {
     // trasporto finito a mezzanotte italiana cadeva il giorno prima, e la data
     // rilevata cambiava a ogni alternanza fra questo caricamento e quello delle
     // primarie (importaBlocco, ritiri_ect), che legge il giorno italiano. Un
-    // terminato senza fine trasporto non conta come ritirato: non si ripiega sulla
-    // chiusura a portale.
-    const terminati = new Map();
-    for (const o of [...rete, ...aci]) {
-      const id = String(o.id_ordine || '').trim();
-      const d = giornoMovimento(o);
-      if (!id || !eTerminato(o) || !d) continue;
-      if (!terminati.has(id) || d < terminati.get(id)) terminati.set(id, d);
-    }
+    // terminato senza fine trasporto non conta come ritirato - non si ripiega
+    // sulla chiusura a portale - ma la richiesta che lo aspetta si segnala.
+    const { terminati, senzaFine } = ritiriTerminati([...rete, ...aci]);
 
     const abbinate = abbinaRichieste(righe, esistenti);
 
     let creati = 0, aggiornati = 0, invariati = 0, spostate = 0;
     const daConfermare = [];
+    const terminatiSenzaFine = [];
     for (let i = 0; i < righe.length; i++) {
       const r = righe[i];
-      const ric = riconosciOrdine(r, ordini);
       const gia = abbinate[i];
+      // Un ID gia' riconosciuto non si perde per un riconoscimento diventato
+      // ambiguo: la stessa regola del ricalcolo dopo le primarie.
+      const ric = idOrdineDaSalvare(gia, riconosciOrdine(r, ordini));
       if (gia && gia.riga_excel !== r.riga_excel) spostate++;
       // Gli ID scritti a mano restano e vincono: una richiesta puo' coprire piu'
       // ordini, e l'evasione si propone solo quando sono tutti ritirati.
@@ -150,6 +146,10 @@ export default async function(req) {
       if (campi.esito === 'da_confermare' && !(gia && gia.evasione_confermata) && rilevata) {
         daConfermare.push({ pdr: r.pdr_nome, id_ordine: ids.join(', '), evasa_il: rilevata });
       }
+      // Ancora aperta ma con un ordine terminato senza fine trasporto: si dice,
+      // perche' il ritiro c'e' e sollecitarlo sarebbe sbagliato (regola 1).
+      const senzaData = ids.filter(id => senzaFine.has(id));
+      if (campi.esito === 'aperta' && senzaData.length) terminatiSenzaFine.push({ pdr: r.pdr_nome, id_ordine: senzaData.join(', ') });
     }
 
     // Le righe cancellate dal foglio non si toccano: restano nello storico.
@@ -161,6 +161,7 @@ export default async function(req) {
       creati, aggiornati, invariati, orfane, spostate,
       riconosciuti: righe.filter(r => riconosciOrdine(r, ordini).id_ordine_stato === 'trovato').length,
       da_confermare: daConfermare,
+      terminati_senza_fine: terminatiSenzaFine,
     });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });

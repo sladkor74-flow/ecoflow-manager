@@ -237,6 +237,14 @@ export default function CaricamentoDati() {
                 </div>
               )}
 
+              {res && res.ok && res.data.esito === 'errore' && (
+                // Nessuna riga entrata dopo lo svuotamento: il registro lo tiene aperto
+                // e i moduli collegati non si ricalcolano finche' non si ricarica.
+                <p className="mt-1 text-xs text-red-700">
+                  Nessuna riga è entrata dopo lo svuotamento: l'archivio è vuoto e i moduli collegati non si aggiornano. Ricarica il file.
+                </p>
+              )}
+
               {res && res.ok && res.data.allineamento && (
                 // Il report delle dichiarazioni riconosce da solo i nostri mesi caricati a portale.
                 <p className={`mt-1 text-xs ${res.data.allineamento.errore ? 'text-amber-700' : 'text-muted-foreground'}`}>
@@ -290,12 +298,15 @@ export default function CaricamentoDati() {
                     <td className="px-4 py-3 text-right">{formatIntero(log.righe_importate)}</td>
                     <td className="px-4 py-3 text-center">
                       {(() => {
-                        // una riga rimasta "in corso" oltre dieci minuti e' un caricamento interrotto
-                        const interrotto = log.esito === 'in_corso' && Date.now() - dataServer(log.created_date).getTime() > 10 * 60 * 1000;
-                        const classe = log.esito === 'successo' ? 'bg-green-100 text-green-700' : log.esito === 'parziale' ? 'bg-amber-100 text-amber-700' : log.esito === 'in_corso' && !interrotto ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700';
+                        // una riga rimasta "in corso" oltre dieci minuti e' un caricamento interrotto;
+                        // una fallita dopo lo svuotamento resta "in_corso" (e' l'archivio a essere
+                        // vuoto) col messaggio che lo dice: non e' in corso, va ricaricata subito
+                        const nonRiuscito = log.esito === 'in_corso' && String(log.messaggio || '').startsWith('Caricamento non riuscito');
+                        const interrotto = log.esito === 'in_corso' && !nonRiuscito && Date.now() - dataServer(log.created_date).getTime() > 10 * 60 * 1000;
+                        const classe = log.esito === 'successo' ? 'bg-green-100 text-green-700' : log.esito === 'parziale' ? 'bg-amber-100 text-amber-700' : log.esito === 'in_corso' && !interrotto && !nonRiuscito ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700';
                         return (
                           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${classe}`} title={interrotto ? "Il caricamento non è mai stato concluso: l'archivio può essere vuoto o incompleto. Ricarica il file." : log.messaggio || ''}>
-                            {interrotto ? 'interrotto: ricarica il file' : log.esito === 'in_corso' ? 'in corso' : log.esito}
+                            {nonRiuscito ? 'non riuscito: ricarica il file' : interrotto ? 'interrotto: ricarica il file' : log.esito === 'in_corso' ? 'in corso' : log.esito}
                           </span>
                         );
                       })()}
