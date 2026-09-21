@@ -5,9 +5,10 @@ import { caricaDati, cancellaVecchi, eseguiControlli, indiceSicurezza } from "..
 // Controlla l'evasione di tutte le liste di assegnati presenti.
 //
 // Payload: { forza?, raccoglitore_chiave? }
-// Parte da sola dopo ogni caricamento delle primarie. Una lista gia' controllata
-// su quel caricamento viene saltata, a meno di "forza": serve dopo aver cambiato
-// il target, perche' la previsione va rifatta sui dati gia' presenti.
+// Parte da sola dopo ogni caricamento delle primarie, anche parziale: ogni
+// caricamento che riscrive l'archivio aggiorna tutte le liste. Una lista gia'
+// controllata su quel caricamento, con lo stesso target e dopo le liste del suo
+// mese, viene saltata, a meno di "forza" (il pulsante "Controlla ora").
 
 export default async function(req) {
   try {

@@ -3,8 +3,8 @@
 // 2. Mix classi PFU per Raccoglitore con confronto target consorziali
 
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
-import { eTerminato, periodoMovimento } from "./movimenti.ts";
-import { oggiRoma } from "./giornoItaliano.ts";
+import { eTerminato, periodoMovimento, tempiRaccolta } from "./movimenti.ts";
+import { oggiRoma, annoRoma } from "./giornoItaliano.ts";
 
 export const TARGET_MIX_CLASSI: Record<string, number> = {
   P: 75,
@@ -216,14 +216,34 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
 // Si misura sui ritiri fatti (terminati) dell'anno richiesto, per default quello
 // in corso: prima entravano tutti gli anni dell'archivio e i cancellati, e la
 // media giorni a video non era dell'anno di lavoro.
+//
+// I giorni e l'esito si ricalcolano qui dall'immissione alla fine del trasporto
+// (tempiRaccolta), senza leggere nr_giorni e raccolta_nei_tempi salvati sul
+// record: erano misurati sulla chiusura a portale, e un archivio caricato prima
+// della correzione li porta ancora. Cosi' anche il badge "Critico" e l'alert di
+// ritardo guardano il ritiro, non la pratica.
+//
+// Un terminato senza fine trasporto (o senza immissione) non si misura: si conta
+// a parte e si segnala, e l'anno per contarlo e' quello dell'immissione.
 export function computeSlaMetrics(records, anno = null) {
   const byTrasportatore: Record<string, any> = {};
   const annoNum = Number(anno) || Number(oggiRoma().slice(0, 4));
+  const nonMisurati = { senza_fine_trasporto: 0, senza_immissione: 0, esempi: [] as string[] };
+  const segnala = (r: any, perche: 'senza_fine_trasporto' | 'senza_immissione') => {
+    nonMisurati[perche] += 1;
+    if (nonMisurati.esempi.length < 5 && r.id_ordine) nonMisurati.esempi.push(String(r.id_ordine));
+  };
 
   for (const r of records) {
     if (!eTerminato(r)) continue;
     const periodo = periodoMovimento(r);
-    if (!periodo || periodo.anno !== annoNum) continue;
+    if (!periodo) {
+      if (annoRoma(r.ordine_immesso_il) === annoNum) segnala(r, 'senza_fine_trasporto');
+      continue;
+    }
+    if (periodo.anno !== annoNum) continue;
+    const tempi = tempiRaccolta(r);
+    if (!tempi) { segnala(r, 'senza_immissione'); continue; }
     const trasportatore = (r.trasportatore || 'N/D').trim();
 
     if (!byTrasportatore[trasportatore]) {
@@ -242,15 +262,13 @@ export function computeSlaMetrics(records, anno = null) {
     const t = byTrasportatore[trasportatore];
     t.totale += 1;
 
-    if (r.raccolta_nei_tempi === 'OK') t.nei_tempi += 1;
-    else if (r.raccolta_nei_tempi === 'DOPO SCADENZA') t.dopo_scadenza += 1;
+    if (tempi.esito === 'OK') t.nei_tempi += 1;
+    else t.dopo_scadenza += 1;
 
-    if (r.nr_giorni != null && !isNaN(r.nr_giorni)) {
-      t.nr_giorni_sum += r.nr_giorni;
-      t.nr_giorni_count += 1;
-      if (r.nr_giorni > 10) t.oltre_10gg += 1;
-      if (r.nr_giorni > 12) t.oltre_12gg += 1;
-    }
+    t.nr_giorni_sum += tempi.giorni;
+    t.nr_giorni_count += 1;
+    if (tempi.giorni > 10) t.oltre_10gg += 1;
+    if (tempi.giorni > 12) t.oltre_12gg += 1;
   }
 
   const trasportatori = Object.values(byTrasportatore).map((t: any) => {
@@ -270,6 +288,7 @@ export function computeSlaMetrics(records, anno = null) {
 
   const totale_ordini = trasportatori.reduce((s, t) => s + t.totale, 0);
   const totale_nei_tempi = trasportatori.reduce((s, t) => s + t.nei_tempi, 0);
+  const totale_dopo_scadenza = trasportatori.reduce((s, t) => s + t.dopo_scadenza, 0);
   const totale_giorni = trasportatori.reduce((s, t) => s + t.nr_giorni_sum, 0);
   const totale_giorni_count = trasportatori.reduce((s, t) => s + t.nr_giorni_count, 0);
 
@@ -279,5 +298,8 @@ export function computeSlaMetrics(records, anno = null) {
     anno: annoNum,
     avg_giorni: totale_giorni_count > 0 ? totale_giorni / totale_giorni_count : 0,
     pct_nei_tempi_globale: totale_ordini > 0 ? (totale_nei_tempi / totale_ordini) * 100 : 0,
+    // contato, non ricavato come 100 - nei tempi
+    pct_dopo_scadenza_globale: totale_ordini > 0 ? (totale_dopo_scadenza / totale_ordini) * 100 : 0,
+    non_misurati: nonMisurati,
   };
 }

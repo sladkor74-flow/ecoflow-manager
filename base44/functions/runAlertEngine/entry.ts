@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { oggiRoma } from "../../shared/giornoItaliano.ts";
+import { oggiRoma, annoRoma } from "../../shared/giornoItaliano.ts";
+import { eTerminato, periodoMovimento } from "../../shared/movimenti.ts";
 import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetrics } from "../../shared/primarieReteAnalytics.ts";
 import { conferimentiSospetti } from "../../shared/rotteConferimenti.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
@@ -30,29 +31,17 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 const TEMPO_MASSIMO_MS = 40000;
 const MESI_ANNO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
-// Giorno della data del portale: quelle salvate a mezzanotte italiana (22 o 23 UTC)
-// si riportano al giorno giusto.
-function giorno(v) {
-  if (!v) return null;
-  const d = new Date(v);
-  if (isNaN(d.getTime())) return null;
-  const italiana = (d.getUTCHours() === 22 || d.getUTCHours() === 23) && !d.getUTCMinutes() && !d.getUTCSeconds();
-  return italiana ? new Date(d.getTime() + 3 * 3600000) : d;
-}
-
+// L'anno di un movimento e' quello del giorno italiano della fine del trasporto
+// (annoRoma). Prima una correzione a mano riportava al giorno giusto solo le
+// mezzanotti italiane esatte: un trasporto finito alle 00:30 del 1 gennaio restava
+// nell'anno prima.
 function daControllare(record, modulo, anno) {
   if (modulo === 'assegnati') return true;
-  if (modulo === 'primarie_rete' || modulo === 'primarie_aci') {
-    if (String(record.stato || '').toLowerCase().trim() !== 'terminato') return false;
-    const d = giorno(record.trasporto_finito_il);
-    return !!d && d.getUTCFullYear() === anno;
-  }
-  // Anche per le secondarie e le terziarie contano solo i movimenti terminati,
-  // e il periodo lo da' la fine del trasporto: un ordine annullato ha ancora
-  // destinazione e peso in archivio, e finiva nel denominatore delle rotte.
-  if (String(record.stato || '').toLowerCase().trim() !== 'terminato') return false;
-  const d = giorno(record.trasporto_finito_il);
-  return !!d && d.getUTCFullYear() === anno;
+  // Per tutti i movimenti, primarie, secondarie e terziarie, contano solo i
+  // terminati: un ordine annullato ha ancora destinazione e peso in archivio, e
+  // finiva nel denominatore delle rotte.
+  if (!eTerminato(record)) return false;
+  return annoRoma(record.trasporto_finito_il) === anno;
 }
 
 export default async function(req) {
@@ -172,9 +161,9 @@ export default async function(req) {
       if (!idRegole.has(a.regola_id)) continue;
       const key = `${a.record_id}|||${a.regola_id}`;
       if (!attuali.has(key)) {
-        daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: `Chiuso automaticamente il ${new Date().toISOString().slice(0, 10)}: condizione non presente nei dati ${anno}` });
+        daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: `Chiuso automaticamente il ${oggiRoma()}: condizione non presente nei dati ${anno}` });
       } else if (visti.has(key)) {
-        daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: `Chiuso automaticamente il ${new Date().toISOString().slice(0, 10)}: doppione di un alert ancora aperto` });
+        daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: `Chiuso automaticamente il ${oggiRoma()}: doppione di un alert ancora aperto` });
       } else {
         visti.add(key);
       }
@@ -394,17 +383,23 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
   // Regole scostamento target grave (Delta < soglia_pct, default -15%)
   const regoleScostamento = regole.filter(r => r.tipo_regola === 'scostamento_target');
   if (regoleScostamento.length > 0 && targets && targets.length > 0) {
-    // Solo RETE terminati dell'anno dei target, nel mese della fine trasporto.
+    // Solo RETE terminati dell'anno dei target, nel mese della fine trasporto letto
+    // sul giorno italiano (periodoMovimento): col mese UTC un ritiro del primo del
+    // mese salvato a mezzanotte italiana finiva nel mese prima, e il delta di quel
+    // mese poteva scendere sotto soglia senza motivo.
     const annoTarget = Number(targets[0]?.anno) || Number(oggiRoma().slice(0, 4));
-    const oggi = new Date();
+    // anche "oggi" e' il giorno italiano, per decidere quali mesi sono conclusi
+    const oggi = oggiRoma();
+    const annoOggi = Number(oggi.slice(0, 4));
+    const meseOggi = Number(oggi.slice(5, 7)) - 1;
     const raccoltoByKey = {};
     for (const r of records) {
-      if (String(r.stato || '').toLowerCase().trim() !== 'terminato' || !r.trasporto_finito_il) continue;
-      const fine = new Date(r.trasporto_finito_il);
-      if (isNaN(fine.getTime()) || fine.getUTCFullYear() !== annoTarget) continue;
+      if (!eTerminato(r)) continue;
+      const periodo = periodoMovimento(r);
+      if (!periodo || periodo.anno !== annoTarget) continue;
       const racc = (r.trasportatore || 'N/D').trim();
       const regione = r.regione || 'Altro';
-      const mese = MESI_ANNO[fine.getUTCMonth()];
+      const mese = MESI_ANNO[periodo.mese_idx];
       const peso = (r.peso_effettivo || 0) / 1000;
       const key = `${racc}|||${regione}|||${mese}`;
       raccoltoByKey[key] = (raccoltoByKey[key] || 0) + peso;
@@ -417,7 +412,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
       if (targetVal <= 0) continue;
       // Solo mesi conclusi: il mese in corso lo segue il controllo dei target con la proiezione.
       const indiceMese = MESI_ANNO.indexOf(mese);
-      if (indiceMese < 0 || (annoTarget === oggi.getUTCFullYear() && indiceMese >= oggi.getUTCMonth()) || annoTarget > oggi.getUTCFullYear()) continue;
+      if (indiceMese < 0 || (annoTarget === annoOggi && indiceMese >= meseOggi) || annoTarget > annoOggi) continue;
       const nomiRegione = targets.filter(x => (x.regione || '').trim() === regione && (x.mese || '').trim() === mese).map(x => (x.raccoglitore || '').trim());
       const raccolto = Object.entries(raccoltoByKey)
         .filter(([k]) => { const [r, reg, m] = k.split('|||'); return reg === regione && m === mese && targetDelPortale(nomiRegione, r) === racc; })
@@ -449,7 +444,11 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
     }
   }
 
-  // Regole ritardo SLA critico (Nr Giorni medio > 12 o % fuori tempo > 20%)
+  // Regole ritardo SLA critico (Nr Giorni medio > 12 o % fuori tempo > 20%).
+  // I giorni vanno dall'immissione alla fine del trasporto (computeSlaMetrics li
+  // ricalcola, non legge i campi salvati): un alert aperto sulla vecchia misura,
+  // quella fino alla chiusura a portale, si chiude da solo al giro dopo se il
+  // ritiro era in tempo.
   const regoleSla = regole.filter(r => r.tipo_regola === 'ritardo_sla');
   if (regoleSla.length > 0) {
     const sla = computeSlaMetrics(records);
@@ -461,7 +460,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
           if (existingKeys.has(key)) continue;
           alerts.push({
             titolo: regola.messaggio_alert || `Ritardo SLA critico: ${t.trasportatore}`,
-            descrizione: `Trasportatore "${t.trasportatore}": Nr Giorni medio ${t.nr_giorni_medio.toFixed(1)} gg, % fuori tempo ${t.pct_dopo_scadenza.toFixed(1)}%. Soglie: > 12 gg medio o > 20% fuori tempo.`,
+            descrizione: `Trasportatore "${t.trasportatore}": Nr Giorni medio ${t.nr_giorni_medio.toFixed(1)} gg dall'immissione alla fine del trasporto, % fuori tempo ${t.pct_dopo_scadenza.toFixed(1)}%. Soglie: > 12 gg medio o > 20% fuori tempo.`,
             severita: regola.severita || 'warning',
             modulo: 'primarie_rete',
             entity_type: 'PrimariaRete',

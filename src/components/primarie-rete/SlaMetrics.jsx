@@ -2,13 +2,32 @@ import React from 'react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { formatIntero } from '@/lib/utils';
 
+// I tempi arrivano gia' calcolati da computeSlaMetrics (primarieReteAnalytics.ts):
+// dall'immissione dell'ordine alla fine del trasporto, mai alla chiusura a portale.
+// Qui si dice a parole cosa misurano e quanti terminati non si sono potuti misurare.
 export default function SlaMetrics({ data }) {
   if (!data) return null;
 
   const { trasportatori, totale_ordini, avg_giorni, pct_nei_tempi_globale } = data;
+  // una risposta della funzione precedente non ha il dato contato
+  const pctDopoScadenza = data.pct_dopo_scadenza_globale ?? (100 - pct_nei_tempi_globale);
+  const nonMisurati = data.non_misurati;
+  const quantiNonMisurati = nonMisurati ? (nonMisurati.senza_fine_trasporto || 0) + (nonMisurati.senza_immissione || 0) : 0;
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Giorni dall'immissione dell'ordine alla fine del trasporto, sul giorno italiano. Un ritiro è nei tempi se il trasporto finisce entro 30 giorni dall'immissione. La chiusura dell'ordine a portale non conta.
+      </p>
+      {quantiNonMisurati > 0 && (
+        <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 text-sm">
+          {formatIntero(quantiNonMisurati)} {quantiNonMisurati === 1 ? 'ordine terminato non è stato misurato' : 'ordini terminati non sono stati misurati'}
+          {nonMisurati.senza_fine_trasporto > 0 && <> · {formatIntero(nonMisurati.senza_fine_trasporto)} senza fine trasporto</>}
+          {nonMisurati.senza_immissione > 0 && <> · {formatIntero(nonMisurati.senza_immissione)} senza data di immissione</>}
+          {nonMisurati.esempi?.length > 0 && <> (es. {nonMisurati.esempi.join(', ')})</>}
+          : restano fuori dai tempi finché manca la data.
+        </div>
+      )}
       {/* KPI summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="border rounded-lg p-3">
@@ -27,7 +46,7 @@ export default function SlaMetrics({ data }) {
         </div>
         <div className="border rounded-lg p-3">
           <p className="text-xs text-muted-foreground">% Dopo scadenza</p>
-          <p className="text-xl font-heading font-bold text-red-600">{(100 - pct_nei_tempi_globale).toFixed(1)}%</p>
+          <p className="text-xl font-heading font-bold text-red-600">{pctDopoScadenza.toFixed(1)}%</p>
         </div>
       </div>
 

@@ -27,6 +27,7 @@
 import { fetchAll } from "./fetchAll.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { problemaTipoSbagliato } from "./tipiDocumento.ts";
+import { annoRoma } from "./giornoItaliano.ts";
 
 export const RUOLI = ['raccolta', 'trasporto_secondaria', 'trattamento', 'stoccaggio', 'cliente'];
 
@@ -127,11 +128,12 @@ function pulisci(v) {
   return String(v ?? '').replace(/\s+/g, ' ').trim();
 }
 
+// L'anno e' quello del giorno italiano della fine trasporto: getFullYear leggeva
+// il fuso del server, e un ritiro del 1 gennaio salvato a mezzanotte italiana
+// (31/12 23:00Z) faceva entrare il trasportatore fra i soggetti dell'anno prima.
 function nelAnno(r, anno) {
   if (String(r.stato || '').toLowerCase().trim() !== 'terminato') return false;
-  if (!r.trasporto_finito_il) return false;
-  const d = new Date(r.trasporto_finito_il);
-  return !isNaN(d.getTime()) && d.getFullYear() === anno;
+  return annoRoma(r.trasporto_finito_il) === anno;
 }
 
 /**

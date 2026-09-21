@@ -11,6 +11,8 @@ import { formatNumber } from '@/lib/utils';
 import { exportExtraRaccoltaExcel, exportExtraRaccoltaPDF } from '@/lib/extraRaccoltaExport';
 import ExtraRaccoltaForm from '@/components/fatturazione/ExtraRaccoltaForm';
 import { STATI_EXTRA, statoExtra, eTerminato, datiChiusuraCompleti, dateDaCorreggere, giornoDaData, competenza } from '@/lib/extraRaccoltaStato';
+import { giornoRoma } from '@/lib/giornoItaliano';
+import { dopoCaricamento, testoRicalcoli } from '@/lib/importGrandeFile';
 
 const ANNI = [2024, 2025, 2026];
 
@@ -22,6 +24,18 @@ export default function ExtraRaccolta() {
   const [sistemando, setSistemando] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [formInitial, setFormInitial] = useState(null);
+  const [ricalcoli, setRicalcoli] = useState(null);
+
+  // Una scheda di extra raccolta e' un movimento come quelli dei file del portale:
+  // scriverla, correggerla o cancellarla cambia le dichiarazioni di nessuna
+  // movimentazione, le verifiche dei report e le quadrature FIR della sua
+  // settimana, la qualifica. Si ricalcola come dopo un caricamento (elenco unico
+  // in dopoCaricamento), sui giorni italiani di fine trasporto di prima e di dopo.
+  const aggiornaModuli = (record) => {
+    const giorni = record.map(r => giornoRoma(r && r.trasporto_finito_il)).filter(Boolean);
+    setRicalcoli({ in_corso: true });
+    dopoCaricamento('extra_raccolta', { giorni }).then(setRicalcoli);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -80,6 +94,7 @@ export default function ExtraRaccolta() {
       } else {
         await base44.entities.ExtraRaccolta.create(payload);
       }
+      aggiornaModuli([formInitial, payload]);
       setFormOpen(false);
       setFormInitial(null);
       load();
@@ -91,6 +106,7 @@ export default function ExtraRaccolta() {
   const remove = async (r) => {
     if (!confirm('Eliminare questo intervento?')) return;
     await base44.entities.ExtraRaccolta.delete(r.id);
+    aggiornaModuli([r]);
     load();
   };
 
@@ -105,16 +121,19 @@ export default function ExtraRaccolta() {
   const segnaTerminati = async () => {
     if (!confirm(`Segnare come terminati ${daSegnare.length} interventi con FIR, data di fine trasporto e peso? Da quel momento entrano in fatturazione, giacenze, report e verifiche nel mese della loro fine trasporto.`)) return;
     setSistemando(true);
+    const toccati = [];
     try {
       for (const r of daSegnare) {
         const date = dateDaCorreggere(r);
         const fine = giornoDaData(date.trasporto_finito_il || r.trasporto_finito_il);
         await base44.entities.ExtraRaccolta.update(r.id, { stato: 'terminato', ...date, ...competenza(fine) });
+        toccati.push(r, { trasporto_finito_il: date.trasporto_finito_il });
       }
     } catch (e) {
       alert(e.message);
     }
     setSistemando(false);
+    if (toccati.length) aggiornaModuli(toccati);
     load();
   };
 
@@ -145,6 +164,11 @@ export default function ExtraRaccolta() {
       </div>
 
       <BannerSolaLettura cosa="gli interventi di extra raccolta" />
+
+      {(() => {
+        const r = testoRicalcoli(ricalcoli);
+        return r ? <p className={`text-xs ${r.classe}`}>{r.testo}</p> : null;
+      })()}
 
       {senzaStato.length > 0 && (
         <div className="flex items-start gap-3 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">

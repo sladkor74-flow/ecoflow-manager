@@ -172,21 +172,27 @@ export function dividiExtra(pfuKg, quotaFerro = 120 / 460) {
  * @param {number} p.portaleFineMeseKg giacenza di rete a portale a fine mese (per fine trasporto)
  * @param {string} p.lettura         'giacenza' (regola del 19/09/2026) oppure 'uscite'
  * @param {object} p.extra           { formulari: [...], cippato_kg, ferro_kg } oppure null
+ * @param {number} p.extraInGiacenzaKg extra raccolta arrivata a Irigom entro fine mese e non ancora lavorata
  * @param {array}  p.terziarie       numeri TER aperti a portale, se gia' ci sono
  */
-export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portaleFineMeseKg = null, lettura = 'giacenza', extra = null, terziarie = [] }) {
+export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portaleFineMeseKg = null, lettura = 'giacenza', extra = null, extraInGiacenzaKg = 0, terziarie = [] }) {
   const avvisi = [];
   const blocchi = [];
   const V = intero(riga && riga.uscite_cippato_kg);
   const X = intero(riga && riga.uscite_ferro_kg);
   const Y = intero(riga && riga.uscite_cssc_kg);
-  const restaKg = intero(riga && riga.giacenza_cippato_kg) + intero(riga && riga.giacenza_intero_kg);
+  // La giacenza del registro comprende anche l'extra raccolta arrivata e non
+  // ancora lavorata, che il portale di rete non conosce: a portale deve restare la
+  // sola parte di rete. A luglio 2026 non la si era tolta, e 460 kg di extra sono
+  // rimasti a portale come rete.
+  const restaRegistroKg = intero(riga && riga.giacenza_cippato_kg) + intero(riga && riga.giacenza_intero_kg);
+  const restaKg = Math.max(0, restaRegistroKg - intero(extraInGiacenzaKg));
   const extraPfu = extra ? intero(extra.cippato_kg) + intero(extra.ferro_kg) : 0;
   const extraCipp = extra ? intero(extra.cippato_kg) : 0;
   const extraFerro = extra ? intero(extra.ferro_kg) : 0;
 
   // Un mese ancora tutto a zero nel registro non e' compilato: non si dichiara.
-  const vuoto = !V && !X && !Y && !restaKg && !(ddt || []).length;
+  const vuoto = !V && !X && !Y && !restaRegistroKg && !(ddt || []).length;
   if (vuoto) blocchi.push('Il mese non e\' ancora compilato nel registro: giacenze, uscite e DDT sono tutti a zero. Finche\' e\' cosi\' non si dichiara nulla e i PFU restano in giacenza.');
 
   // Il ferro dei formulari: deve fare la colonna X del foglio Cons.
@@ -196,7 +202,7 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
   // Le due letture di quanto dichiarare.
   const uscite = { totale_kg: V + X + Y, rete_kg: V + X + Y - extraPfu };
   const giacenza = portaleFineMeseKg === null || portaleFineMeseKg === undefined ? null
-    : { portale_kg: intero(portaleFineMeseKg), resta_kg: restaKg, rete_kg: intero(portaleFineMeseKg) - restaKg };
+    : { portale_kg: intero(portaleFineMeseKg), resta_kg: restaKg, extra_in_giacenza_kg: intero(extraInGiacenzaKg), rete_kg: intero(portaleFineMeseKg) - restaKg };
   const scarto = giacenza ? giacenza.rete_kg - uscite.rete_kg : null;
   const usata = lettura === 'uscite' || !giacenza ? 'uscite' : 'giacenza';
   if (lettura === 'giacenza' && !giacenza) avvisi.push('Manca la giacenza a portale di fine mese: uso le uscite del registro.');

@@ -50,9 +50,15 @@ export async function caricaDati(base44) {
   return { terminati, assegnati, cancellati, anagrafica };
 }
 
+// L'ultimo caricamento delle primarie che ha riscritto l'archivio: anche un
+// "parziale", con poche righe fallite su migliaia scritte, e' un archivio nuovo
+// e le liste vanno ricontrollate; contando solo i "successo" restavano ferme ai
+// dati di prima. Si escludono, come ovunque, "errore" e "in_corso": su un
+// archivio a meta' un controllo darebbe alert falsi.
 export async function ultimoCaricamentoPrimarie(base44) {
-  const log = await base44.asServiceRole.entities.UploadLog.filter({ tipo_file: 'primarie', esito: 'successo' }, '-created_date', 1);
-  return log.length ? log[0].created_date : null;
+  const log = await base44.asServiceRole.entities.UploadLog.filter({ tipo_file: 'primarie' }, '-created_date', 20);
+  const valido = (log || []).find(l => l.esito !== 'errore' && l.esito !== 'in_corso');
+  return valido ? valido.created_date : null;
 }
 
 /**
@@ -81,7 +87,10 @@ export function indiceSicurezza() {
  * Esegue il controllo sulle liste indicate.
  * Senza "forza" una lista gia' controllata sull'ultimo caricamento delle
  * primarie viene saltata: il controllo resta uno per caricamento. Si ripete
- * invece se nel frattempo e' cambiato il target del mese in Target & Status.
+ * invece se nel frattempo e' cambiato il target del mese in Target & Status, o
+ * se dopo e' stata caricata la lista di un altro raccoglitore dello stesso mese:
+ * le richieste finite in quella diventano "in lista di altri", e i fuori lista
+ * che vi compaiono "dalla lista di" lui.
  */
 export async function eseguiControlli(base44, { liste, dati, forza = false }) {
   const svc = base44.asServiceRole.entities;
@@ -102,14 +111,18 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
     if (!targetPerAnno.has(anno)) targetPerAnno.set(anno, await targetMensiliAnno(base44, anno));
     const target = targetRaccoglitoreMese(targetPerAnno.get(anno), lista.raccoglitore_nome, MESI[mese - 1]);
     const targetKg = target && target.target_kg > 0 ? target.target_kg : null;
+    const listeMese = tutteLeListe.filter(x => Number(x.anno) === anno && Number(x.mese) === mese);
     if (!forza) {
       const ultimo = await svc.ControlloEvasione.filter({ lista_id: lista.id }, '-eseguito_il', 1);
       const stessoTarget = ultimo.length && (Number(ultimo[0].target_kg) || null) === targetKg;
-      if (ultimo.length && stessoTarget && ultimo[0].primarie_caricate_il === primarieIl && String(ultimo[0].eseguito_il) >= String(lista.caricata_il)) continue;
+      // Tutte le liste del mese, questa compresa, caricate prima del controllo.
+      const eseguitoIl = ultimo.length ? String(ultimo[0].eseguito_il || '') : '';
+      const listeGiaViste = [lista, ...listeMese].every(l => eseguitoIl >= String(l.caricata_il || ''));
+      if (ultimo.length && stessoTarget && ultimo[0].primarie_caricate_il === primarieIl && listeGiaViste) continue;
     }
 
     const altreListe = [];
-    for (const l of tutteLeListe.filter(x => Number(x.anno) === anno && Number(x.mese) === mese)) {
+    for (const l of listeMese) {
       altreListe.push({ chiave: l.raccoglitore_chiave, nome: l.raccoglitore_nome, caricata_il: l.caricata_il, ids: new Set((await righeDi(l)).map(r => r.id_ordine)) });
     }
 

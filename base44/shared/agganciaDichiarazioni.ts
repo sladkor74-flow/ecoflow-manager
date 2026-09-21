@@ -14,6 +14,8 @@
 // dichiarazioni dei primi mesi: e' giusto che non trovi un nostro mese.
 
 import { MESI } from "./dichiarazioniImpianti.ts";
+import { eAci } from "./canaleSecondaria.ts";
+import { giornoRoma } from "./giornoItaliano.ts";
 
 /** Dal nome del campo del portale a quello della nostra dichiarazione. */
 export const MATERIALI_PORTALE = [
@@ -30,17 +32,28 @@ export const TOLLERANZA_KG = 2;
 export const MAX_RIPRESE = 3;
 
 const num = (v) => Number(v) || 0;
-const giorno = (v) => String(v || '').slice(0, 10);
+// Il giorno italiano: tagliare la stringa UTC spostava al giorno prima una data
+// salvata a mezzanotte italiana.
+const giorno = (v) => giornoRoma(v);
+
+/** Il canale di una riga del report delle dichiarazioni: l'ACI e' la classe 9 del prodotto. */
+export const canaleRigaPortale = (r) => (eAci({ prodotto: r.prodotto }) ? 'ACI' : 'RETE');
 
 /**
  * I caricamenti del portale, uno per impianto e per giorno.
  * `chi tratta` e' la destinazione secondaria quando c'e', altrimenti la
  * destinazione: la destinazione finale e' invece dove e' finito il prodotto -
  * le cementerie - e non e' chi dichiara.
+ *
+ * Con `canale` ('RETE' o 'ACI') si contano solo le righe di quel canale. Un
+ * impianto puo' caricare lo stesso giorno la dichiarazione di rete e quella ACI:
+ * sommate, il caricamento del giorno non tornava con nessun nostro mese di rete,
+ * il mese restava "senza riscontro" e il caricamento finiva fra l'arretrato.
  */
-export function caricamentiPortale(righe, anno) {
+export function caricamentiPortale(righe, anno, canale = '') {
   const per = new Map(); // impianto -> Map(data -> { kg, materiali })
   for (const r of righe) {
+    if (canale && canaleRigaPortale(r) !== canale) continue;
     const data = giorno(r.data_dichiarazione);
     if (!data || Number(data.slice(0, 4)) !== Number(anno)) continue;
     const sito = String(r.destinazione_secondaria || '').trim() || String(r.destinazione || '').trim();
@@ -101,37 +114,40 @@ export function agganciaMesi(nostre, caricamenti) {
 const chiave = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 /**
- * Allinea le nostre dichiarazioni di rete a quelle caricate a portale: segna
- * quali sono caricate, con che data, e scrive i materiali che ne sono usciti.
- * Non toglie mai una spunta messa a mano: se un nostro mese non si ritrova,
- * lo dice e basta.
+ * Allinea le nostre dichiarazioni a quelle caricate a portale, canale per
+ * canale: segna quali sono caricate, con che data, e scrive i materiali che ne
+ * sono usciti. Le righe ACI del report si agganciano solo alle nostre
+ * dichiarazioni ACI e quelle di rete solo alle nostre di rete; l'extra raccolta
+ * a portale non c'e'. Non toglie mai una spunta messa a mano: se un nostro mese
+ * non si ritrova, lo dice e basta.
  */
 export async function allineaDalPortale(svc, anno, righePortale = null, nostreRighe = null) {
   const annoNum = Number(anno);
   const righe = righePortale || await leggiTutto(svc.DichiarazioneTrattamento);
   const nostre = nostreRighe || await svc.DichiarazioneSito.filter({ anno: annoNum }, 'id', 500, 0);
-  const caricamenti = caricamentiPortale(righe, annoNum);
-
-  const perSito = new Map(); // chiave -> { nome, caricamenti }
-  for (const [sito, lista] of caricamenti) perSito.set(chiave(sito), { nome: sito, lista });
 
   const aggiornate = [];
   const nonTrovate = [];
   const arretrato = [];
-  for (const [k, { nome, lista }] of perSito) {
-    const mie = nostre.filter(d => chiave(d.sito) === k && (d.canale || 'RETE') === 'RETE');
-    if (!mie.length) { arretrato.push({ sito: nome, caricamenti: lista.length, kg: lista.reduce((s, c) => s + c.kg, 0), motivo: 'nessuna nostra dichiarazione per questo impianto' }); continue; }
-    const { trovati, senzaRiscontro, avanzi } = agganciaMesi(mie, lista);
-    for (const t of trovati) {
-      const d = t.dichiarazione;
-      const campi = { caricata_inviata: true, caricata_il: t.caricata_il, ...t.materiali };
-      const cambia = Object.entries(campi).some(([c, v]) => (c === 'caricata_inviata' ? !d[c] : Math.round(num(d[c])) !== Math.round(num(v))));
-      if (!cambia) continue;
-      await svc.DichiarazioneSito.update(d.id, campi);
-      aggiornate.push({ sito: nome, mese: d.mese, kg: Math.round(num(d.quantita_kg)), caricata_il: t.caricata_il, riprese: t.date.length, gia_segnata: !!d.caricata_inviata });
+  for (const canale of ['RETE', 'ACI']) {
+    const perSito = new Map(); // chiave -> { nome, caricamenti }
+    for (const [sito, lista] of caricamentiPortale(righe, annoNum, canale)) perSito.set(chiave(sito), { nome: sito, lista });
+
+    for (const [k, { nome, lista }] of perSito) {
+      const mie = nostre.filter(d => chiave(d.sito) === k && (d.canale || 'RETE') === canale);
+      if (!mie.length) { arretrato.push({ sito: nome, canale, caricamenti: lista.length, kg: lista.reduce((s, c) => s + c.kg, 0), motivo: `nessuna nostra dichiarazione ${canale === 'ACI' ? 'ACI' : 'di rete'} per questo impianto` }); continue; }
+      const { trovati, senzaRiscontro, avanzi } = agganciaMesi(mie, lista);
+      for (const t of trovati) {
+        const d = t.dichiarazione;
+        const campi = { caricata_inviata: true, caricata_il: t.caricata_il, ...t.materiali };
+        const cambia = Object.entries(campi).some(([c, v]) => (c === 'caricata_inviata' ? !d[c] : Math.round(num(d[c])) !== Math.round(num(v))));
+        if (!cambia) continue;
+        await svc.DichiarazioneSito.update(d.id, campi);
+        aggiornate.push({ sito: nome, canale, mese: d.mese, kg: Math.round(num(d.quantita_kg)), caricata_il: t.caricata_il, riprese: t.date.length, gia_segnata: !!d.caricata_inviata });
+      }
+      for (const n of senzaRiscontro) nonTrovate.push({ sito: nome, canale, mese: n.mese, kg: Math.round(num(n.quantita_kg)), era_segnata: !!n.caricata_inviata });
+      if (avanzi.length) arretrato.push({ sito: nome, canale, caricamenti: avanzi.length, kg: avanzi.reduce((s, c) => s + c.kg, 0), motivo: 'caricamenti senza un nostro mese: arretrato dell\'anno prima' });
     }
-    for (const n of senzaRiscontro) nonTrovate.push({ sito: nome, mese: n.mese, kg: Math.round(num(n.quantita_kg)), era_segnata: !!n.caricata_inviata });
-    if (avanzi.length) arretrato.push({ sito: nome, caricamenti: avanzi.length, kg: avanzi.reduce((s, c) => s + c.kg, 0), motivo: 'caricamenti senza un nostro mese: arretrato dell\'anno prima' });
   }
   return { anno: annoNum, aggiornate, non_trovate: nonTrovate, arretrato };
 }

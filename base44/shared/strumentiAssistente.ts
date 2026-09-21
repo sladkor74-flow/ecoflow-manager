@@ -34,6 +34,7 @@ import { targetDelPortale } from "./targetRaccoglitori.ts";
 import { statoDichiarazione, sommaMateriali } from "./dichiarazioniImpianti.ts";
 import { giorniAllaScadenza, fasciaScadenza } from "./omologhe.ts";
 import { statoRequisito } from "./qualificaFornitori.ts";
+import { calcolaRigheAttiva, riconciliaAttiva, documentoValido, eRigaACorpo, TIPOLOGIE_ATTIVA } from "./attivaCalcolo.ts";
 
 export { oggiRoma };
 
@@ -123,6 +124,110 @@ function perChiave(righe, campo) {
   return [...m.values()]
     .map(x => ({ nome: x.nome, formulari: contaFormulari(x.righe), kg: x.kg, tonnellate: t3(x.kg) }))
     .sort((a, b) => b.kg - a.kg);
+}
+
+const euro2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+
+/**
+ * Quanto ci spetta da Ecotyre, calcolato sui dati di oggi con le righe del
+ * modulo (attivaCalcolo.ts) e messo accanto al documento salvato di ogni mese.
+ * Col mese si fa anche la riconciliazione riga per riga, come nella pagina;
+ * sull'anno si confrontano i totali, che bastano a dire quale mese e' indietro.
+ * Rete, ACI ed extra raccolta: tre conti, nessun totale che li somma.
+ */
+async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, tipologia, fornitore }) {
+  const svc = base44.asServiceRole.entities;
+  const [reteAll, aciAll, extraAll, fornitori, tariffe, documenti] = await Promise.all([
+    fetchAll(svc.PrimariaRete), fetchAll(svc.PrimariaAci), fetchAll(svc.ExtraRaccolta),
+    fetchAll(svc.Fornitore), fetchAll(svc.Tariffa, { direzione: 'ATTIVA' }),
+    fetchAll(svc.DocumentoFatturazione, { tipo: 'ATTIVA', anno }),
+  ]);
+  const chiesta = tipologia ? String(tipologia).toUpperCase() : '';
+  const canaleIgnorato = chiesta && !TIPOLOGIE_ATTIVA.includes(chiesta) ? chiesta : '';
+  const canali = TIPOLOGIE_ATTIVA.filter(c => !chiesta || canaleIgnorato || c === chiesta);
+
+  // Senza mese: i mesi dell'anno fino a quello in corso, per fine trasporto.
+  const oggi = oggiRoma();
+  const annoOggi = Number(oggi.slice(0, 4));
+  const ultimo = anno < annoOggi ? 11 : anno === annoOggi ? Number(oggi.slice(5, 7)) - 1 : -1;
+  const mesi = meseChiesto ? [meseChiesto] : MESI.slice(0, ultimo + 1);
+
+  const perCanale = new Map(canali.map(c => [c, { canale: c, kg: 0, ordini: 0, euro: 0, senza_prezzo: 0, kg_senza_prezzo: 0, mesi: [] }]));
+  const anomalie = [];
+  for (const mese of mesi) {
+    const { righe, anomalie: an } = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno, mese });
+    for (const a of an) if (canali.includes(a.tipologia)) anomalie.push({ mese, ...a });
+    const docsMese = documenti.filter(d => String(d.mese || '').toLowerCase() === mese.toLowerCase());
+    for (const c of canali) {
+      const lista = righe[c] || [];
+      const x = { kg: 0, ordini: 0, euro: 0, senza_prezzo: 0, kg_senza_prezzo: 0 };
+      for (const r of lista) {
+        x.euro += Number(r.totale) || 0;
+        // Un sovracosto a corpo e' un importo, non un movimento: niente chili ne' ordini.
+        if (eRigaACorpo(r)) continue;
+        x.kg += Number(r.quantita) || 0;
+        x.ordini++;
+        if (r.stato_validazione === 'errore') { x.senza_prezzo++; x.kg_senza_prezzo += Number(r.quantita) || 0; }
+      }
+      const doc = documentoValido(docsMese, c);
+      let documento;
+      if (!doc) {
+        documento = { stato: 'non elaborato', ...(lista.length ? { avviso: 'Il mese non ha ancora un documento: questi importi non sono ancora in fattura.' } : {}) };
+      } else {
+        documento = {
+          stato: doc.stato, elaborato_il: soloData(doc.data_elaborazione),
+          totale_documento_euro: euro2(doc.totale), differenza_euro: euro2(x.euro - (Number(doc.totale) || 0)),
+        };
+        if (meseChiesto) {
+          const voci = await fetchAll(svc.VoceFatturazione, { documento_id: doc.id });
+          const ric = riconciliaAttiva(lista, voci);
+          // La fine trasporto si scrive come giorno italiano: l'ora UTC del
+          // record, a mezzanotte, mostrerebbe il giorno prima.
+          const conGiorno = (xs) => xs.map(x => ({ ...x, data_fine_trasporto: soloData(x.data_fine_trasporto) }));
+          Object.assign(documento, {
+            allineato: ric.allineato,
+            arrivati_dopo: elenco(conGiorno(ric.nuovi), 20), cambiati: elenco(conGiorno(ric.cambiati), 20), non_piu_nel_mese: elenco(conGiorno(ric.spariti), 20),
+            differenza_kg: ric.delta_kg, differenza_euro: ric.delta_euro,
+          });
+        } else {
+          documento.allineato = Math.abs(documento.differenza_euro) < 0.005;
+        }
+        if (!documento.allineato) {
+          documento.avviso = doc.stato === 'chiusa'
+            ? 'Il documento e\' indietro rispetto ai dati caricati e il periodo e\' chiuso: va riaperto, oppure la differenza si fattura con un\'integrazione.'
+            : 'Il documento e\' indietro rispetto ai dati caricati: va rielaborato (Elabora Mese nel modulo Fatturazione).';
+        }
+      }
+      const tot = perCanale.get(c);
+      for (const campo of ['kg', 'ordini', 'euro', 'senza_prezzo', 'kg_senza_prezzo']) tot[campo] += x[campo];
+      if (lista.length || doc) {
+        tot.mesi.push({
+          mese, tonnellate: t3(x.kg), ordini: x.ordini, euro: euro2(x.euro),
+          ...(x.senza_prezzo ? { righe_senza_prezzo: x.senza_prezzo, tonnellate_senza_prezzo: t3(x.kg_senza_prezzo) } : {}),
+          documento,
+        });
+      }
+    }
+  }
+
+  return {
+    fonte: `Fatturazione attiva verso Ecotyre, calcolata sui dati di oggi${chiesta && !canaleIgnorato ? `, canale ${chiesta}` : ', un canale per volta'}`,
+    periodo: meseChiesto ? `${meseChiesto} ${anno}` : ultimo >= 0 ? `anno ${anno}, da ${MESI[0]} a ${MESI[ultimo]}` : `anno ${anno}`,
+    dati_al: oggi,
+    dati: {
+      canali: [...perCanale.values()].map(x => ({
+        canale: x.canale, tonnellate: t3(x.kg), ordini: x.ordini, euro: euro2(x.euro),
+        ...(x.senza_prezzo ? { righe_senza_prezzo: x.senza_prezzo, tonnellate_senza_prezzo: t3(x.kg_senza_prezzo) } : {}),
+        mesi: x.mesi,
+      })),
+      anomalie: elenco(anomalie, 30),
+      ...(ultimo < 0 && !meseChiesto ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
+      ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
+      ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: ci sono tutti e tre, separati.` } : {}),
+      ...(fornitore ? { avviso_fornitore: 'Nell\'attiva il cliente e\' uno solo, Ecotyre: il filtro sul fornitore non si applica.' } : {}),
+      nota: 'Conto fatto adesso sui movimenti terminati, per fine trasporto, con le stesse righe dell\'anteprima e di "Elabora Mese". Accanto a ogni mese c\'e\' il documento salvato: una differenza vuol dire che dopo l\'elaborazione sono arrivati o cambiati dei movimenti, e il documento va aggiornato. Rete, ACI ed extra raccolta non si sommano.',
+    },
+  };
 }
 
 // ─── il registro ───
@@ -526,7 +631,7 @@ export const STRUMENTI = [
   },
   {
     nome: 'giacenze',
-    descrizione: 'La giacenza a portale di impianti e stoccaggi: il materiale conferito che non e\' ancora stato dichiarato, con target, ordini da dichiarare e arretrato per anno. Usa lo stesso calcolo del modulo Giacenze, cosi\' i numeri sono quelli che si vedono a video.',
+    descrizione: 'La giacenza di impianti e stoccaggi, un canale per volta (rete, ACI, extra raccolta), aggiornata a ogni caricamento: il materiale arrivato che non e\' ancora stato dichiarato, con target di rete, ordini da dichiarare e arretrato per anno. Usa lo stesso calcolo del modulo Giacenze, cosi\' i numeri sono quelli che si vedono a video.',
     parametri: { anno: 'numero', sito: 'nome dell\'impianto o dello stoccaggio, opzionale', tipo: 'impianto o stoccaggio, opzionale' },
     moduli: ['Giacenze'],
     async esegui(base44, p) {
@@ -551,30 +656,70 @@ export const STRUMENTI = [
         const esatti = righe.filter(r => normalizzaRagioneSociale(r.sito) === k);
         righe = esatti.length ? esatti : righe.filter(r => normalizzaRagioneSociale(r.sito).includes(k));
       }
-      const utili = righe.map(r => ({
-        sito: r.sito, tipo: String(r.tipo_destinazione || '').toLowerCase() === 'stoc' ? 'stoccaggio' : 'impianto',
-        giacenza_portale_t: r.giacenza_portale_t,
-        in_attesa_dichiarazione_t: r.in_attesa_dichiarazione_t, ordini_da_dichiarare: r.ordini_da_dichiarare,
-        dichiarato_t: r.dichiarato_t, conferito_primarie_t: r.conferito_primarie_t, conferito_aci_t: r.conferito_aci_t,
-        conferito_extra_t: r.conferito_extra_t, secondarie_in_t: r.secondarie_in_t, secondarie_out_t: r.secondarie_out_t,
-        target_totale_t: r.target_totale_t, giacenza_riferimento_t: r.giacenza_riferimento_t,
-        data_rilevazione: r.data_rilevazione, giacenza_classi_kg: r.giacenza_classi_kg,
-      }));
-      // I totali che arrivano dal modulo sono su tutti i siti: se qui si e'
-      // filtrato per sito o per tipo, quel totale risponderebbe a un'altra
-      // domanda. Allora si rifa' sulle righe rimaste.
+      // Un campo per canale, mai una giacenza unica: prima passava solo
+      // giacenza_portale_t, e alla domanda "quanta giacenza ha Nappi Sud?" la
+      // risposta comprendeva la classe 9. Il null vuol dire "non calcolata"
+      // (uno stoccaggio senza rilevazione, l'ACI di un impianto), non zero.
+      // calcolaGiacenze usa per gli impianti la regola di Dichiarazioni Impianti
+      // (shared/giacenzaPortale.ts), quindi i due moduli dicono lo stesso numero.
+      const utili = righe.map(r => {
+        const stoc = String(r.tipo_destinazione || '').toLowerCase() === 'stoc';
+        const f = r.fotografia;
+        return {
+          sito: r.sito, tipo: stoc ? 'stoccaggio' : 'impianto',
+          giacenza_rete_t: r.giacenza_rete_t ?? null,
+          giacenza_aci_t: r.giacenza_aci_t ?? null,
+          extra_raccolta_in_piazzale_t: r.giacenza_extra_t ?? null,
+          // Da dove viene il numero, cosi' uno scarto col portale si spiega coi dati.
+          calcolo: stoc
+            ? (r.data_rilevazione
+              ? { rilevazione_del: r.data_rilevazione, rilevazione_classi_kg: r.rilevazione_classi_kg, dopo_la_rilevazione: r.dopo_rilevazione, rilevazione_obsoleta: !!r.rilevazione_obsoleta }
+              : { avviso: 'Nessuna rilevazione del portale per questo stoccaggio: la giacenza non si puo\' calcolare.' })
+            : (f
+              ? { file_del_portale_del: f.del, fotografia_t: f.foto_t, carichi_aggiunti: f.aggiunti, carichi_aggiunti_t: f.aggiunti_t, dichiarato_dopo_la_fotografia_t: f.dichiarato_dopo_t }
+              : { avviso: 'Nessun file degli ordini non dichiarati caricato.' }),
+          movimenti_caricati_fino_al: r.aggiornata_al || null,
+          in_attesa_dichiarazione_t: r.in_attesa_dichiarazione_t, ordini_da_dichiarare: r.ordini_da_dichiarare,
+          dichiarato_rete_t: r.dichiarato_t, conferito_primarie_rete_t: r.conferito_primarie_t, conferito_aci_t: r.conferito_aci_t,
+          conferito_extra_t: r.conferito_extra_t,
+          secondarie_rete_in_t: r.secondarie_in_t, secondarie_rete_out_t: r.secondarie_out_t,
+          secondarie_aci_in_t: r.secondarie_aci_in_t, secondarie_aci_out_t: r.secondarie_aci_out_t,
+          target_rete_t: r.target_totale_t, giacenza_riferimento_t: r.giacenza_riferimento_t,
+          giacenza_classi_kg: r.giacenza_classi_kg,
+        };
+      });
+      // I totali si rifanno sulle righe rimaste, un canale per volta: quelli del
+      // modulo sono di tutti i siti e, filtrando per sito o per tipo,
+      // risponderebbero a un'altra domanda. Nessun totale somma i canali.
       const filtrato = !!(p.sito || p.tipo);
-      const somma = (campo) => Math.round(utili.reduce((s, r) => s + (Number(r[campo]) || 0), 0) * 1000) / 1000;
-      const totali = filtrato
-        ? { perimetro: `solo ${utili.length === 1 ? 'il sito richiesto' : 'i siti richiesti'}`, siti: utili.length, giacenza_portale_t: somma('giacenza_portale_t'), in_attesa_dichiarazione_t: somma('in_attesa_dichiarazione_t'), ordini_da_dichiarare: utili.reduce((s, r) => s + (Number(r.ordini_da_dichiarare) || 0), 0) }
-        : { perimetro: 'tutti i siti', ...(d.totali || {}) };
+      const somma = (xs, campo) => Math.round(xs.reduce((s, r) => s + (Number(r[campo]) || 0), 0) * 1000) / 1000;
+      const impianti = utili.filter(r => r.tipo === 'impianto');
+      const stoccaggi = utili.filter(r => r.tipo === 'stoccaggio');
+      const senzaRilevazione = stoccaggi.filter(r => r.giacenza_rete_t === null).map(r => r.sito);
+      const totali = {
+        perimetro: filtrato ? `solo ${utili.length === 1 ? 'il sito richiesto' : 'i siti richiesti'}` : 'tutti i siti',
+        siti: utili.length,
+        rete: {
+          giacenza_t: somma(utili, 'giacenza_rete_t'),
+          di_cui_impianti_t: somma(impianti, 'giacenza_rete_t'),
+          di_cui_stoccaggi_t: somma(stoccaggi, 'giacenza_rete_t'),
+          in_attesa_dichiarazione_t: somma(utili, 'in_attesa_dichiarazione_t'),
+          ordini_da_dichiarare: utili.reduce((s, r) => s + (Number(r.ordini_da_dichiarare) || 0), 0),
+          ...(senzaRilevazione.length ? { stoccaggi_senza_rilevazione_esclusi: senzaRilevazione } : {}),
+        },
+        aci: { giacenza_stoccaggi_t: somma(stoccaggi, 'giacenza_aci_t') },
+        extra_raccolta: { in_piazzale_t: somma(stoccaggi, 'extra_raccolta_in_piazzale_t') },
+        nota_totali: 'Tre canali, tre totali: rete, ACI ed extra raccolta non si sommano.',
+      };
       return {
-        fonte: 'Giacenze, giacenza a portale',
+        fonte: 'Giacenze, giacenza a portale per canale',
         periodo: `anno ${anno}`,
         dati_al: oggiRoma(),
         dati: {
           siti: elenco(utili, 80), totali, anomalie: elenco(d.anomalie || [], 20),
-          nota: "Per gli stoccaggi la giacenza e la rilevazione del portale piu i movimenti con il trasporto finito dopo di essa. Il portale aggiorna il suo saldo quando chiude l’ordine, qualche giorno dopo: su un ordine chiuso in ritardo i due numeri possono discostarsi.",
+          // Niente giustificazioni con la chiusura a portale: la giacenza segue i
+          // caricamenti, e uno scarto e' un'anomalia da dire, non da spiegare via.
+          nota: "La giacenza segue i caricamenti e si legge per fine trasporto, un canale per volta. Impianti (rete): la fotografia del file degli ordini non dichiarati, piu' i carichi che il gestionale conosce e il file no (riconosciuti dal numero d'ordine), meno le dichiarazioni caricate a portale dopo la fotografia. Stoccaggi: la rilevazione del portale per classe (1-4 rete, 9 ACI) piu' ingressi e uscite con il trasporto finito dopo. L'extra raccolta a portale non c'e': e' il saldo del piazzale nell'anno. Se un numero non torna con il portale, dillo come anomalia da verificare (un file non ancora caricato, una rilevazione vecchia, una dichiarazione non registrata) e non spiegarlo con la data di chiusura dell'ordine a portale, che non decide niente.",
         },
       };
     },
@@ -778,7 +923,7 @@ export const STRUMENTI = [
   },
   {
     nome: 'fatturazione',
-    descrizione: 'Quanto dobbiamo pagare ai fornitori (passiva) e quanto ci spetta (attiva), per fornitore e per mese. Per la passiva con il mese indicato fa lo stesso conto del modulo, sui movimenti terminati; senza mese legge solo i documenti gia\' elaborati. I canali restano separati.',
+    descrizione: 'Quanto dobbiamo pagare ai fornitori (passiva) e quanto ci spetta (attiva), per fornitore e per mese. Per la passiva con il mese indicato fa lo stesso conto del modulo, sui movimenti terminati; senza mese legge solo i documenti gia\' elaborati. L\'attiva si calcola sempre sui dati di oggi, mese per mese, e dice di quanto il documento salvato e\' indietro. I canali restano separati.',
     parametri: { anno: 'numero', mese: 'nome del mese: indicalo sempre per la passiva', tipo: 'PASSIVA o ATTIVA', tipologia: 'RETE, ACI o EXTRA_RACCOLTA', fornitore: 'opzionale' },
     moduli: ['Fatturazione'],
     async esegui(base44, p) {
@@ -832,13 +977,19 @@ export const STRUMENTI = [
         };
       }
 
+      // L'attiva si calcola adesso, con le righe del modulo (attivaCalcolo.ts,
+      // le stesse dell'anteprima e di "Elabora Mese"), e il documento salvato si
+      // mette accanto. Leggendo solo le voci salvate, un ritiro del 30/06 arrivato
+      // col caricamento del 04/07 non esisteva per "quanto ci spetta a giugno"
+      // finche' qualcuno non rielaborava il mese: la pagina lo vedeva con la
+      // riconciliazione, EcoTyna no.
+      if (tipo === 'ATTIVA') return await attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, tipologia: p.tipologia, fornitore: p.fornitore });
+
       const filtro = { anno, tipo };
       if (meseChiesto) filtro.mese = meseChiesto;
       if (p.tipologia) filtro.tipologia = String(p.tipologia).toUpperCase();
       const voci = await fetchAll(svc.VoceFatturazione, filtro);
-      // Nell'attiva non c'e' un fornitore: c'e' chi fattura e c'e' Ecotyre, che
-      // paga. Filtrando su fornitore_nome, che li' e' vuoto, usciva sempre zero.
-      const nomeDi = (v) => (tipo === 'ATTIVA' ? (v.fatturante || v.cliente || 'ECOTYRE') : (v.fornitore_nome || 'N/D'));
+      const nomeDi = (v) => v.fornitore_nome || 'N/D';
       const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
       const righe = k ? voci.filter(v => normalizzaRagioneSociale(nomeDi(v)).includes(k)) : voci;
       const per = new Map();
@@ -874,9 +1025,7 @@ export const STRUMENTI = [
           ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso tutto l'anno ${anno}.` } : {}),
           canale: p.tipologia ? String(p.tipologia).toUpperCase() : 'nessun filtro di canale: qui dentro ci sono rete, ACI ed extra raccolta, da tenere distinti',
           gruppi: elenco(gruppi, 60),
-          nota: tipo === 'PASSIVA'
-            ? 'Qui ci sono solo le voci dei documenti gia\' elaborati e salvati: per sapere quanto si deve a un fornitore in un mese preciso rifai la domanda indicando il mese, cosi\' il conto si fa sui movimenti.'
-            : 'La fatturazione attiva si vede dopo che il documento del mese e\' stato elaborato nel modulo Fatturazione: quello che non compare qui non e\' ancora stato elaborato.',
+          nota: 'Qui ci sono solo le voci dei documenti gia\' elaborati e salvati: per sapere quanto si deve a un fornitore in un mese preciso rifai la domanda indicando il mese, cosi\' il conto si fa sui movimenti.',
         },
       };
     },

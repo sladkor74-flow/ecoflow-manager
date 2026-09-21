@@ -37,12 +37,14 @@ export default function RichiesteEct({ isAdmin }) {
   const [caricando, setCaricando] = useState(false);
   const [modifica, setModifica] = useState(null); // { id, testo }
   const [esitoImport, setEsitoImport] = useState(null);
+  const [ritiri, setRitiri] = useState(null); // esito del ricontrollo fra i terminati
 
   const carica = useCallback(async () => {
     setCaricamento(true);
     setErrore('');
     try {
-      const anno = new Date().getUTCFullYear();
+      // l'anno di lavoro e' quello italiano, come "oggi" per le scadenze
+      const anno = Number(OGGI().slice(0, 4));
       const r = await base44.entities.RichiestaEct.filter({ anno }, '-mail_inviata_il', 500);
       setRighe(r);
     } catch (e) {
@@ -52,6 +54,26 @@ export default function RichiesteEct({ isAdmin }) {
     }
   }, []);
   useEffect(() => { carica(); }, [carica]);
+
+  // Il ritiro di una richiesta si riconosce fra i terminati delle primarie. Lo fa
+  // gia' ogni caricamento delle primarie (dopoCaricamento), ma se quel ricalcolo
+  // non e' partito la riga restava "in attesa" e in ritardo finche' non si
+  // ricaricava il file delle richieste, col rischio di sollecitare un ritiro gia'
+  // fatto. All'apertura lo si ripete, in background, sulla fine trasporto (giorno
+  // italiano); scrive, quindi solo per l'amministratore.
+  useEffect(() => {
+    if (!isAdmin) return undefined;
+    let vivo = true;
+    base44.functions.invoke('importaBlocco', { azione: 'ritiri_ect', tipo_file: 'primarie' })
+      .then(res => {
+        const dati = res.data || res;
+        if (!vivo) return;
+        setRitiri(dati);
+        if (dati.aggiornate > 0) carica();
+      })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [isAdmin, carica]);
 
   // Il file di gestione si carica da qui: le richieste arrivano da un foglio suo
   // e non c'entrano con gli export del portale.
@@ -188,6 +210,12 @@ export default function RichiesteEct({ isAdmin }) {
             <p className="text-muted-foreground">{esitoImport.orfane} righe non sono più nel foglio: restano qui nello storico.</p>
           )}
         </div>
+      )}
+
+      {ritiri?.da_confermare?.length > 0 && (
+        <p className="text-sm border rounded-lg px-3 py-2 bg-muted/40 text-emerald-800">
+          Dai terminati caricati risultano ritirate e aspettano la tua spunta: {ritiri.da_confermare.map(x => `${x.pdr} (${String(x.evasa_il).split('-').reverse().join('/')})`).join(', ')}.
+        </p>
       )}
 
       {conteggi.in_ritardo > 0 && (

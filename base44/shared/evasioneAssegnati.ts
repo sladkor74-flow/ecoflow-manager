@@ -26,14 +26,13 @@
 // poi con priorita' assoluta le richieste immesse negli anni precedenti, poi le
 // altre dalla richiesta immessa per prima.
 //
-// Una richiesta resta assegnata sul portale finche' non viene cancellata o chiusa
-// come terminata, e il raccoglitore chiude i ritiri qualche giorno dopo il
-// trasporto. Le primarie sono complete solo fino a qualche giorno prima
-// dell'estrazione del file: cronologia, trascurate, prioritarie e ritmo del mese
-// si valutano fino a quella data, perche' dopo una richiesta aperta puo' essere
-// gia' ritirata ma non ancora chiusa.
-//
-// La data di evasione e' quella di fine trasporto, come in tutto il gestionale.
+// La data di evasione e' quella di fine trasporto, sul giorno italiano, come in
+// tutto il gestionale, e il mese si valuta fino all'ultima fine trasporto di rete
+// presente nelle primarie caricate. La chiusura dell'ordine a portale non decide
+// niente (regola dell'utente, 21/09/2026): prima se ne ricavava un margine di
+// "dati completi" e i ritiri degli ultimi giorni, gia' nel file, uscivano da
+// ritmo, proiezione e alert. Una richiesta gia' ritirata ma non ancora chiusa
+// risulta aperta, perche' sul portale lo e': gli alert chiedono di chiuderla.
 //
 // Rete, ACI ed extra raccolta restano sempre separati. Le liste e il target
 // riguardano la sola rete: gli ACI non hanno target e non si mandano in lista, ma
@@ -45,6 +44,8 @@ import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { formatoKgInTonnellate } from "./formato.ts";
 import { getRegioneFromProvincia } from "./dataEnrichment.ts";
 import { classeNormalizzata, nomiCoincidono, aggiungiGiorni, giorniTra, dataDaValore } from "./reportSettimanali.ts";
+import { giornoRoma } from "./giornoItaliano.ts";
+import { giornoMovimento } from "./movimenti.ts";
 
 export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 const RE_ID_ORDINE = /^[A-Z]{2}[0-9]{6,10}$/;
@@ -58,9 +59,6 @@ const MINIMO_ORDINI_CLASSE = 8;
 // Peso indicativo di un ritiro, il cassone di una motrice con ragno, quando il
 // raccoglitore non ha ancora formulari nell'anno.
 const KG_RITIRO_INDICATIVO = 4000;
-// Limiti dei giorni entro cui un raccoglitore chiude i ritiri sul portale.
-const RITARDO_CHIUSURA_MINIMO = 2;
-const RITARDO_CHIUSURA_MASSIMO = 7;
 
 // === calendario ===
 
@@ -102,8 +100,8 @@ export function giorniLavorativi(da, a, sabato = false) {
   return n;
 }
 
-// Un raccoglitore lavora di sabato se nell'anno ha chiuso formulari in almeno
-// quattro sabati e in almeno un sabato su quattro.
+// Un raccoglitore lavora di sabato se nell'anno ha finito trasporti in almeno
+// quattro sabati e in almeno un sabato su quattro (giorno di fine trasporto).
 function lavoraDiSabato(movimenti, da, a) {
   const sabatiAttivi = new Set(movimenti.filter(m => new Date(m.fine + 'T00:00:00Z').getUTCDay() === 6).map(m => m.fine)).size;
   let sabati = 0;
@@ -111,11 +109,10 @@ function lavoraDiSabato(movimenti, da, a) {
   return sabatiAttivi >= 4 && sabati > 0 && sabatiAttivi / sabati >= 0.25;
 }
 
-const ymd = (v) => {
-  if (!v) return null;
-  const s = String(v).slice(0, 10);
-  return /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(s) ? s : null;
-};
+// Il giorno italiano, non i primi dieci caratteri della stringa: una mezzanotte
+// italiana salvata come 22:00Z del giorno prima portava un ritiro del 1 del mese
+// nel mese precedente, diverso da periodoMovimento degli altri moduli.
+const ymd = (v) => giornoRoma(v) || null;
 const targa = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const kgT = (kg) => formatoKgInTonnellate(kg) + ' t';
 const itData = (d) => (d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) : '');
@@ -138,8 +135,8 @@ export function normalizzaPrimaria(r, canale) {
     trasportatore: String(r.trasportatore || '').trim(),
     chiaveTrasp: normalizzaRagioneSociale(r.trasportatore || ''),
     immesso: ymd(r.ordine_immesso_il),
-    fine: ymd(r.trasporto_finito_il),
-    chiuso: ymd(r.ordine_chiuso_il),
+    // La chiusura a portale non si legge nemmeno: qui niente la deve usare.
+    fine: giornoMovimento(r) || null,
     kg: Math.round(Number(r.peso_effettivo) || 0),
     pdr: chiavePdr(r),
     classe: classeNormalizzata(r.classe) || classeNormalizzata(r.prodotto),
@@ -417,20 +414,6 @@ function statistiche(movimenti) {
   };
 }
 
-// Giorni entro cui il raccoglitore chiude sul portale nove ritiri su dieci, dai
-// suoi formulari dell'anno o, se ne ha pochi, da quelli di tutti. Zero se le
-// primarie non portano la data di chiusura: in quel caso non si puo' misurare.
-function ritardoChiusura(propri, tutti, anno) {
-  const ritardi = (mov) => mov.filter(t => t.canale !== 'extra' && t.chiuso && t.fine && t.fine.slice(0, 4) === String(anno) && t.chiuso >= t.fine)
-    .map(t => giorniTra(t.fine, t.chiuso));
-  let v = ritardi(propri);
-  if (v.length < MINIMO_ORDINI_CLASSE) v = ritardi(tutti);
-  if (!v.length) return 0;
-  v.sort((a, b) => a - b);
-  const p90 = v[Math.min(v.length - 1, Math.floor(v.length * 0.9))];
-  return Math.min(RITARDO_CHIUSURA_MASSIMO, Math.max(RITARDO_CHIUSURA_MINIMO, Math.ceil(p90)));
-}
-
 // === controllo ===
 
 /**
@@ -454,20 +437,18 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   // Liste, target e previsione riguardano la sola rete.
   const rete = terminati.filter(t => t.canale === 'rete');
 
-  // Orizzonte dei dati: l'ultima fine trasporto presente nelle primarie caricate.
-  // L'extra raccolta, inserita a mano, non lo sposta.
+  // Orizzonte dei dati: l'ultima fine trasporto di RETE presente nelle primarie
+  // caricate. Ritmo e previsione sono della rete: un ACI piu' recente lo
+  // spostava in avanti e contava giorni senza dati di rete, abbassando il ritmo.
   let datiAl = null;
-  for (const t of terminati) if (t.canale !== 'extra' && t.fine && t.fine <= oggi && (!datiAl || t.fine > datiAl)) datiAl = t.fine;
+  for (const t of rete) if (t.fine && t.fine <= oggi && (!datiAl || t.fine > datiAl)) datiAl = t.fine;
   const finestraA = datiAl && datiAl < fineMese ? datiAl : fineMese;
 
-  // Dati completi: fino alla data di estrazione del file, cioe' l'ultima chiusura
-  // sul portale, meno i giorni entro cui il raccoglitore chiude i suoi ritiri.
-  let dataFile = null;
-  for (const t of terminati) if (t.canale !== 'extra' && t.chiuso && t.chiuso <= oggi && (!dataFile || t.chiuso > dataFile)) dataFile = t.chiuso;
-  const ritardo = dataFile ? ritardoChiusura(terminati.filter(t => t.chiaveTrasp === chiave), terminati, anno) : 0;
-  let consolidatoAl = datiAl ? aggiungiGiorni(dataFile || datiAl, -ritardo) : aggiungiGiorni(inizioMese, -1);
-  if (consolidatoAl > finestraA) consolidatoAl = finestraA;
-  const consolidata = (d) => !!d && d <= consolidatoAl;
+  // Il mese si valuta fino a quel giorno, e su tutti i ritiri del file fino a
+  // li': niente margini ricavati dalla chiusura a portale. Senza primarie di
+  // rete non si valuta nessun giorno.
+  const valutatoAl = datiAl ? finestraA : aggiungiGiorni(inizioMese, -1);
+  const valutabile = (d) => !!d && d <= valutatoAl;
 
   const perId = new Map();
   for (const t of terminati) if (t.fine) perId.set(t.id_ordine, t);
@@ -560,12 +541,12 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   // Una richiesta chiusa il giorno D salta quelle che la precedono nella stessa
   // zona e che a fine giornata D erano ancora da evadere. Le chiusure dello stesso
   // giorno non si saltano a vicenda: un giro di raccolta ne chiude diverse
-  // insieme. Una richiesta ancora aperta risulta saltata solo da chiusure con dati
-  // completi: potrebbe essere gia' ritirata e non ancora chiusa sul portale.
+  // insieme. Una richiesta ancora aperta risulta saltata dalle evasioni fino
+  // all'ultima fine trasporto del file.
   const saltateDa = (o) => ordinate.filter(e => rango.get(e.id_ordine) < rango.get(o.id_ordine)
     && !['non_piu_presente', 'evasa_prima', 'annullata'].includes(e.stato)
     && stessaZona(e, o)
-    && (e.chiusa_il ? e.chiusa_il > o.chiusa_il : consolidata(o.chiusa_il)));
+    && (e.chiusa_il ? e.chiusa_il > o.chiusa_il : valutabile(o.chiusa_il)));
   for (const o of righe) {
     if (!evasaDalRaccoglitore(o)) continue;
     const saltate = saltateDa(o);
@@ -578,16 +559,16 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   // raccoglitore ha evaso richieste che la seguono nella stessa provincia. Un
   // ordine evaso fuori lista scavalca invece la prima richiesta ancora aperta
   // della sua provincia, quella che andava evasa per prima. Non serve che sia
-  // prioritaria o evidenziata: scavalcarla va sollecitato. Contano solo le
-  // chiusure con dati completi.
+  // prioritaria o evidenziata: scavalcarla va sollecitato, e se e' gia' ritirata
+  // va chiusa sul portale. Contano le evasioni fino all'ultima fine trasporto.
   for (const e of righe) {
     e.scavalcata_successive = 0;
     e.scavalcata_fuori = 0;
     if (e.stato !== 'aperta') continue;
-    e.scavalcata_successive = righe.filter(o => evasaDalRaccoglitore(o) && o.chiusa_il >= caricataIl && consolidata(o.chiusa_il) && rango.get(o.id_ordine) > rango.get(e.id_ordine) && stessaZona(o, e)).length;
+    e.scavalcata_successive = righe.filter(o => evasaDalRaccoglitore(o) && o.chiusa_il >= caricataIl && valutabile(o.chiusa_il) && rango.get(o.id_ordine) > rango.get(e.id_ordine) && stessaZona(o, e)).length;
   }
   for (const x of fuoriListaEffettivi) {
-    if (x.chiusa_il < caricataIl || !consolidata(x.chiusa_il)) continue;
+    if (x.chiusa_il < caricataIl || !valutabile(x.chiusa_il)) continue;
     const prima = ordinate.find(e => e.stato === 'aperta' && stessaZona(e, x));
     if (prima) prima.scavalcata_fuori++;
   }
@@ -603,9 +584,10 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   const generale = statistiche(terminatiAnno);
   const inizioAttivita = storicoMovimenti.reduce((m, t) => (!m || t.fine < m ? t.fine : m), null);
   const inizioStorico = inizioAttivita ? (inizioAttivita < `${anno}-01-01` ? `${anno}-01-01` : inizioAttivita) : null;
-  // Il sabato si riconosce da tutti i formulari del raccoglitore, anche ACI ed extra.
-  const tuttiPropri = terminati.filter(t => t.chiaveTrasp === chiave && t.fine && t.fine.slice(0, 4) === String(anno) && t.fine <= finestraA);
-  const sabato = inizioStorico ? lavoraDiSabato(tuttiPropri, inizioStorico, finestraA) : false;
+  // Il sabato si riconosce dai formulari di rete del raccoglitore: i giorni
+  // lavorativi servono al ritmo della rete, e un ritiro ACI o di extra raccolta
+  // fatto di sabato non fa lavorare di sabato la rete.
+  const sabato = inizioStorico ? lavoraDiSabato(propriAnno, inizioStorico, finestraA) : false;
   const giorniStorico = inizioStorico ? giorniLavorativi(inizioStorico, storicoFinoA, sabato) : 0;
   storico.giorni_lavorativi = giorniStorico;
   storico.kg_per_giorno = giorniStorico ? Math.round(storico.kg / giorniStorico) : null;
@@ -640,18 +622,18 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
 
   // --- previsione ---
   const giorniTotali = giorniLavorativi(inizioMese, fineMese, sabato);
-  const giorniTrascorsi = datiAl && datiAl >= inizioMese ? giorniLavorativi(inizioMese, finestraA, sabato) : 0;
-  // Il ritmo del mese si misura sui giorni con dati completi; quelli successivi,
-  // ancora in parte da chiudere sul portale, si stimano con il ritmo.
-  const giorniConsolidati = consolidatoAl >= inizioMese ? giorniLavorativi(inizioMese, consolidatoAl, sabato) : 0;
-  const kgConsolidati = delMese.filter(t => t.fine <= consolidatoAl).reduce((s, t) => s + t.kg, 0);
-  const meseConcluso = !!datiAl && consolidatoAl >= fineMese;
+  // Il ritmo del mese si misura sui giorni lavorativi fino all'ultima fine
+  // trasporto del file, con tutti i ritiri di rete finiti fino a li'; i giorni
+  // successivi si stimano con il ritmo.
+  const giorniTrascorsi = valutatoAl >= inizioMese ? giorniLavorativi(inizioMese, valutatoAl, sabato) : 0;
+  const kgTrascorsi = delMese.filter(t => valutabile(t.fine)).reduce((s, t) => s + t.kg, 0);
+  const meseConcluso = !!datiAl && valutatoAl >= fineMese;
   const giorniResidui = meseConcluso ? 0 : Math.max(0, giorniTotali - giorniTrascorsi);
-  const ritmoMese = giorniConsolidati > 0 ? Math.round(kgConsolidati / giorniConsolidati) : null;
+  const ritmoMese = giorniTrascorsi > 0 ? Math.round(kgTrascorsi / giorniTrascorsi) : null;
   let ritmo;
-  if (giorniConsolidati >= 5 && ritmoMese !== null && storico.kg_per_giorno) ritmo = Math.round((ritmoMese + storico.kg_per_giorno) / 2);
+  if (giorniTrascorsi >= 5 && ritmoMese !== null && storico.kg_per_giorno) ritmo = Math.round((ritmoMese + storico.kg_per_giorno) / 2);
   else ritmo = storico.kg_per_giorno ?? ritmoMese ?? 0;
-  const proiezioneKg = meseConcluso ? raccoltoKg : Math.max(raccoltoKg, kgConsolidati + ritmo * Math.max(0, giorniTotali - giorniConsolidati));
+  const proiezioneKg = meseConcluso ? raccoltoKg : Math.max(raccoltoKg, kgTrascorsi + ritmo * giorniResidui);
   const capacitaResidua = proiezioneKg - raccoltoKg;
 
   const target = targetKg || null;
@@ -681,11 +663,7 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
 
   const previsione = {
     dati_al: datiAl,
-    data_file: dataFile,
-    consolidato_al: consolidatoAl,
-    ritardo_chiusura_giorni: ritardo,
-    giorni_consolidati: giorniConsolidati,
-    kg_consolidati: kgConsolidati,
+    valutato_al: valutatoAl,
     giorni_totali: giorniTotali,
     lavora_sabato: sabato,
     giorni_trascorsi: giorniTrascorsi,
@@ -726,7 +704,7 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
 
   // --- conteggi ---
   const fuoriOrdine = righe.filter(r => evasaDalRaccoglitore(r) && r.saltate > 0);
-  const giorniDallInvio = giorniLavorativi(aggiungiGiorni(caricataIl, 1), consolidatoAl, sabato);
+  const giorniDallInvio = giorniLavorativi(aggiungiGiorni(caricataIl, 1), valutatoAl, sabato);
   const prioritarieAperte = righe.filter(r => r.prioritaria && r.stato === 'aperta');
   const arretrateAperte = ordinate.filter(r => arretrata(r) && !r.prioritaria && r.stato === 'aperta');
 
@@ -742,16 +720,16 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     if (prima.scavalcata_successive) cosa.push(`${prima.scavalcata_successive} ${prima.scavalcata_successive === 1 ? 'richiesta successiva' : 'richieste successive'}`);
     if (prima.scavalcata_fuori) cosa.push(`${prima.scavalcata_fuori} ${prima.scavalcata_fuori === 1 ? 'ordine fuori lista' : 'ordini fuori lista'}`);
     const altre = trascurate.length > 1 ? ` Trascurate anche: ${elenco(trascurate.slice(1).map(r => `n. ${r.posizione} ${r.id_ordine}`), 4)}.` : '';
-    aggiungi('alta', 'trascurate', `${trascurate.length === 1 ? 'Una richiesta trascurata' : `${trascurate.length} richieste trascurate`}: la n. ${prima.posizione}, ${prima.id_ordine}${prima.produttore ? ' di ' + prima.produttore : ''}, immessa il ${itData(prima.data_immissione)}, e' ancora aperta sul portale, ma il raccoglitore ha gia' evaso ${cosa.join(' e ')}.${altre}`);
+    aggiungi('alta', 'trascurate', `${trascurate.length === 1 ? 'Una richiesta trascurata' : `${trascurate.length} richieste trascurate`}: la n. ${prima.posizione}, ${prima.id_ordine}${prima.produttore ? ' di ' + prima.produttore : ''}, immessa il ${itData(prima.data_immissione)}, e' ancora aperta sul portale, ma il raccoglitore ha gia' evaso ${cosa.join(' e ')}. Se e' gia' stata ritirata va chiusa sul portale.${altre}`);
   }
   if (arretrateAperte.length && giorniDallInvio >= GIORNI_TOLLERANZA_PRIORITARIE) {
     const n = arretrateAperte.length;
     aggiungi('alta', 'arretrate', `${n === 1 ? 'Una richiesta immessa' : `${n} richieste immesse`} prima del ${anno}, con priorita' assoluta, ${n === 1 ? "e' ancora aperta" : 'sono ancora aperte'} sul portale dopo ${giorniDallInvio} giorni lavorativi dall'invio: ${elenco(arretrateAperte.map(r => `${r.id_ordine} del ${itData(r.data_immissione)}`), 4)}.`);
   }
   if (prioritarieAperte.length && giorniDallInvio >= GIORNI_TOLLERANZA_PRIORITARIE) {
-    aggiungi('alta', 'prioritarie', `${prioritarieAperte.length} ${prioritarieAperte.length === 1 ? 'richiesta prioritaria ancora aperta' : 'richieste prioritarie ancora aperte'} sul portale dopo ${giorniDallInvio} giorni lavorativi dall'invio, con dati completi fino al ${itData(consolidatoAl)}: ${elenco(prioritarieAperte.map(r => r.id_ordine))}.`);
+    aggiungi('alta', 'prioritarie', `${prioritarieAperte.length} ${prioritarieAperte.length === 1 ? 'richiesta prioritaria ancora aperta' : 'richieste prioritarie ancora aperte'} sul portale dopo ${giorniDallInvio} giorni lavorativi dall'invio, con trasporti conclusi fino al ${itData(valutatoAl)}: ${elenco(prioritarieAperte.map(r => r.id_ordine))}.`);
   }
-  if (target && giorniConsolidati >= 5 && !meseConcluso && proiezioneKg < target * SOGLIA_PROIEZIONE) {
+  if (target && giorniTrascorsi >= 5 && !meseConcluso && proiezioneKg < target * SOGLIA_PROIEZIONE) {
     aggiungi('alta', 'proiezione', `A questo ritmo chiude il mese a ${kgT(proiezioneKg)}, il ${previsione.percentuale_proiezione}% del target di ${kgT(target)}.`);
   }
   if (meseConcluso && target && raccoltoKg < target) {

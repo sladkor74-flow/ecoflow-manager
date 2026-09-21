@@ -8,7 +8,7 @@ import {
 import { formatKg } from '@/lib/utils';
 import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
 import {
-  oggiRoma, aggiungiGiorni, settimanaIso, intervalloSettimana, settimaneNellAnno, descriviIntervallo,
+  oggiRoma, aggiungiGiorni, settimanaIso, intervalloSettimana, settimaneNellAnno, descriviIntervallo, dataIt,
 } from '@/lib/verifiche';
 import { NOME_VERDETTO, COLORE_VERDETTO, misura, tonnellate, giornoRoma, FORMATI, tipoDiFile, leggiPivotDaExcel } from '@/lib/quadraturaFir';
 import { esportaQuadraturaFirPdf } from '@/lib/quadraturaFirPdf';
@@ -20,9 +20,38 @@ import { esportaQuadraturaFirPdf } from '@/lib/quadraturaFirPdf';
 // quadratura restano i numeri letti e l'esito del confronto.
 //
 // I canali non si mischiano: rete, ACI ed extra raccolta hanno ognuno la propria
-// tabella e il proprio totale.
+// tabella, il proprio totale e il proprio esito. Un esito unico per la settimana
+// dava "da sistemare" alla rete per una riga dell'extra raccolta.
+//
+// L'esito arriva gia' rifatto dal server sui movimenti di adesso: quello salvato
+// il giorno della stampa non conosceva i formulari caricati dopo.
 
 const LIMITE = 5 * 1024 * 1024;
+
+const NOME_CANALE = { RETE: 'Rete', ACI: 'ACI', 'EXTRA RACCOLTA': 'Extra raccolta' };
+
+// Il verdetto di un canale in una frase: le righe da sistemare, oppure perche'
+// quadra solo in parte anche senza righe diverse.
+function verdettoCanale(c) {
+  if (c.conformita === 'piena') return 'Le tre fonti quadrano';
+  if (c.incongruenti > 0) return `${c.incongruenti} ${c.incongruenti === 1 ? 'riga da sistemare' : 'righe da sistemare'}`;
+  if (!c.lettura_verificata) return 'Le righe quadrano, ma la trascrizione va controllata';
+  return 'Le righe quadrano, ma il confronto è incompleto: vedi le note';
+}
+
+function EsitoCanale({ c }) {
+  const piena = c.conformita === 'piena';
+  return (
+    <div className={`rounded-md border px-3 py-2 ${piena ? 'border-emerald-200 bg-emerald-50' : 'border-amber-300 bg-amber-50'}`}>
+      <div className="flex items-center gap-1.5">
+        {piena ? <CheckCircle2 className="w-4 h-4 text-emerald-700" /> : <AlertTriangle className="w-4 h-4 text-amber-700" />}
+        <span className={`text-sm font-semibold ${piena ? 'text-emerald-900' : 'text-amber-900'}`}>{NOME_CANALE[c.canale] || c.canale}</span>
+      </div>
+      <div className={`text-sm ${piena ? 'text-emerald-900' : 'text-amber-900'}`}>{verdettoCanale(c)}</div>
+      <div className="text-xs text-muted-foreground">{c.congruenti} {c.congruenti === 1 ? 'riga congruente' : 'righe congruenti'}</div>
+    </div>
+  );
+}
 
 function Pastiglia({ verdetto }) {
   return (
@@ -242,10 +271,14 @@ export default function QuadraturaFir({ isAdmin }) {
     setOccupato(false);
   };
 
+  // Il PDF porta l'esito che si vede a video, rifatto sui movimenti di adesso,
+  // non quello salvato il giorno della stampa; dal record serve solo come e'
+  // stato letto il file.
   const scarica = async () => {
     try {
-      const q = await conCampiCompleti('QuadraturaFir', await base44.entities.QuadraturaFir.get(dati.quadratura.id), ['esito_json', 'lettura_json']);
-      await esportaQuadraturaFirPdf(q, JSON.parse(q.esito_json || '{}'), q.lettura_json ? JSON.parse(q.lettura_json) : null);
+      const salvata = await conCampiCompleti('QuadraturaFir', await base44.entities.QuadraturaFir.get(dati.quadratura.id), ['lettura_json']);
+      const { esito_json: _esito, righe_json: _righe, lettura_json: _lettura, ...aggiornata } = dati.quadratura;
+      await esportaQuadraturaFirPdf({ ...salvata, ...aggiornata }, dati.esito || {}, salvata.lettura_json ? JSON.parse(salvata.lettura_json) : null);
     } catch (e) {
       toast({ title: 'Esportazione non riuscita', description: e.message || String(e), variant: 'destructive' });
     }
@@ -253,8 +286,15 @@ export default function QuadraturaFir({ isAdmin }) {
 
   const q = dati && dati.quadratura;
   const esito = dati && dati.esito;
+  const perCanale = (dati && dati.per_canale) || [];
+  const ricalcolo = (dati && dati.ricalcolo) || {};
+  const inCorso = (dati && dati.caricamenti_in_corso) || [];
   const gestionale = (dati && dati.gestionale) || {};
   const flussiGestionale = Object.entries(gestionale).filter(([, v]) => v.totale && v.totale.n > 0);
+  // Fino a quando i movimenti del gestionale sono aggiornati: l'ultimo caricamento di ogni tipo.
+  const aggiornatoAl = [...new Map(Object.values(gestionale).filter(v => v.ultimo_caricamento && v.ultimo_caricamento.data)
+    .map(v => [v.ultimo_caricamento.data + v.ultimo_caricamento.nome_file, v.ultimo_caricamento])).values()]
+    .sort((a, b) => String(b.data).localeCompare(String(a.data)));
 
   return (
     <div className="space-y-5">
@@ -327,16 +367,29 @@ export default function QuadraturaFir({ isAdmin }) {
           )}
 
           {q && q.stato === 'completata' && (
-            <div className={`rounded-lg border px-4 py-3 ${q.conformita === 'piena' ? 'border-emerald-200 bg-emerald-50' : 'border-amber-300 bg-amber-50'}`}>
-              <div className="flex items-center gap-2 flex-wrap">
-                {q.conformita === 'piena'
-                  ? <><CheckCircle2 className="w-5 h-5 text-emerald-700" /><span className="font-semibold text-emerald-900">Le tre fonti quadrano su tutti i flussi.</span></>
-                  : <><AlertTriangle className="w-5 h-5 text-amber-700" /><span className="font-semibold text-amber-900">{q.incongruenti} {q.incongruenti === 1 ? 'riga da sistemare' : 'righe da sistemare'} prima di riaggiornare il gestionale.</span></>}
-                <span className="text-sm text-muted-foreground ml-auto">
-                  {q.congruenti} righe congruenti · {q.righe_lette} righe lette in {q.tabelle} tabelle · {q.file_nome}
-                  {q.verificata_il ? ` · confronto del ${giornoRoma(q.verificata_il)}` : ''}
+            <div className="rounded-lg border px-4 py-3 bg-card space-y-2">
+              <div className="flex items-center gap-2 flex-wrap text-sm text-muted-foreground">
+                <span>{q.righe_lette} righe lette in {q.tabelle} tabelle · {q.file_nome}</span>
+                <span className="ml-auto">
+                  {ricalcolo.rifatto
+                    ? `Esito rifatto ora sui movimenti del gestionale${aggiornatoAl.length ? `, caricati il ${aggiornatoAl.map(c => dataIt(c.data)).filter((d, i, a) => a.indexOf(d) === i).join(', ')}` : ''}`
+                    : q.verificata_il ? `Confronto del ${giornoRoma(q.verificata_il)}` : ''}
+                  {ricalcolo.rifatto && ricalcolo.cambiato && !ricalcolo.salvato ? ' · diverso da quello salvato, che si aggiorna quando lo apre un amministratore' : ''}
                 </span>
               </div>
+              {(ricalcolo.motivo || inCorso.length > 0) && (
+                <div className="text-sm text-amber-900 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>{ricalcolo.motivo || `Un caricamento non è concluso (${inCorso.map(a => a.tipo_file.replace(/_/g, ' ')).join(', ')}): i numeri del gestionale possono essere incompleti.`}</span>
+                </div>
+              )}
+              {perCanale.length > 0 ? (
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {perCanale.map(c => <EsitoCanale key={c.canale} c={c} />)}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">Nel file e nel gestionale non c&apos;è nessun flusso da confrontare in questa settimana.</div>
+              )}
               {!q.lettura_verificata && (
                 <div className="mt-2 text-sm text-amber-900 flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
@@ -375,19 +428,28 @@ export default function QuadraturaFir({ isAdmin }) {
                   ))}
                 </div>
               )}
+              {inCorso.length > 0 && (
+                <p className="text-sm text-amber-900">
+                  Un caricamento non è concluso ({inCorso.map(a => a.tipo_file.replace(/_/g, ' ')).join(', ')}): questi numeri possono essere incompleti.
+                </p>
+              )}
               <p className="text-sm text-muted-foreground">
                 Carica la stampa della settimana per confrontarla con WINSINFO e con il portale.
               </p>
             </div>
           )}
 
+          {/* Lo storico elenca le settimane con una stampa caricata, senza colore:
+              un colore solo per settimana sarebbe un verdetto comune ai tre canali,
+              e quello salvato puo' precedere i caricamenti successivi. L'esito,
+              canale per canale e aggiornato, si vede aprendo la settimana. */}
           {dati && dati.storico && dati.storico.length > 1 && (
             <div className="text-xs text-muted-foreground">
-              Settimane già verificate nel {anno}:{' '}
+              Settimane con la stampa caricata nel {anno}:{' '}
               {dati.storico.map(s => (
                 <button key={s.id} type="button" onClick={() => setSettimana(s.settimana)}
-                  className={`mx-0.5 px-1.5 py-0.5 rounded border ${s.conformita === 'piena' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}
-                  title={s.conformita === 'piena' ? 'Quadra' : `${s.incongruenti} righe da sistemare`}>
+                  className={`mx-0.5 px-1.5 py-0.5 rounded border ${s.settimana === settimana ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-muted/30'} ${s.stato === 'errore' ? 'text-red-700' : ''}`}
+                  title={s.stato === 'errore' ? 'La lettura del file non è riuscita' : 'Apri la settimana: l\'esito si rifà sui movimenti di adesso, canale per canale'}>
                   {s.settimana}
                 </button>
               ))}

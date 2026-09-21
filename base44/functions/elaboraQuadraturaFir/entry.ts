@@ -1,6 +1,8 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
-import { normalizzaLettura, confronta, sintesi } from "../../shared/quadraturaFir.ts";
-import { caricaGestionale } from "../../shared/quadraturaFirDati.ts";
+import { normalizzaLettura, sintesi } from "../../shared/quadraturaFir.ts";
+import {
+  caricaGestionale, caricamentiAperti, confrontaSettimana, righeDaConservare, righeConservate,
+} from "../../shared/quadraturaFirDati.ts";
 import { valoreCampo, leggiJson } from "../../shared/testoLungo.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { cancellaFile } from "../../shared/fileArchivio.ts";
@@ -152,7 +154,7 @@ export default async function(req) {
       letto = { settimana: null, anno: null, tabelle, note: '' };
       modo = 'excel';
     } else if (solo_confronto) {
-      letto = await leggiJson(base44, 'QuadraturaFir', q, 'righe_json', null);
+      letto = righeConservate(await leggiJson(base44, 'QuadraturaFir', q, 'righe_json', null));
       if (!letto) throw new Error('Non ci sono righe salvate: ricarica il file.');
     } else {
       return Response.json({ error: 'Serve un file caricato, delle tabelle o solo_confronto' }, { status: 400 });
@@ -178,6 +180,16 @@ export default async function(req) {
       }
     }
     if (file_uri) cancellazione = (await cancellaFile(base44, file_uri)).come;
+    // Ripetendo il confronto la lettura del file non cambia: restano i problemi
+    // trovati quando e' stato letto (seconda lettura, righe riassegnate con i
+    // subtotali), che le righe conservate da sole non raccontano piu', e la sua
+    // descrizione salvata non si tocca. Lo stesso fa rifaiQuadratura.
+    let letturaSalvata = null;
+    if (modo === 'salvate') {
+      try { letturaSalvata = await leggiJson(base44, 'QuadraturaFir', q, 'lettura_json', null); } catch { /* valgono i problemi di adesso */ }
+      if (letturaSalvata && Array.isArray(letturaSalvata.problemi)) lettura.problemi = letturaSalvata.problemi;
+      else letturaSalvata = null;
+    }
     if (!lettura.tabelle.length) {
       throw new Error('Nel file non ho trovato nessuna tabella con il conteggio e la somma dei formulari.' + (lettura.note ? ' ' + lettura.note : ''));
     }
@@ -186,17 +198,16 @@ export default async function(req) {
     const periodo = { anno: q.anno, settimana: q.settimana, inizio: q.data_inizio, fine: q.data_fine };
     const gestionale = await caricaGestionale(base44, periodo);
 
-    // 3. il confronto
-    const esito = confronta(lettura, gestionale, periodo);
+    // 3. il confronto, con la conformita' canale per canale dentro l'esito. Se un
+    // archivio si sta riscrivendo proprio adesso lo si dice: all'apertura della
+    // settimana, a caricamento finito, il confronto si rifa' da solo.
+    const esito = confrontaSettimana(lettura, gestionale, periodo);
+    for (const a of caricamentiAperti(gestionale)) {
+      esito.osservazioni.push(`Durante il confronto il caricamento ${a.tipo_file.replace(/_/g, ' ')}${a.nome_file ? ` (${a.nome_file})` : ''} non era concluso: i numeri del gestionale potevano essere incompleti. Il confronto si rifa' all'apertura della settimana, a caricamento finito.`);
+    }
     const s = sintesi(esito);
 
-    const righeSalvate = modo === 'salvate' ? null : {
-      settimana: lettura.settimana_indicata, anno: lettura.anno_indicato, note: lettura.note,
-      tabelle: lettura.tabelle.map(t => ({
-        titolo: t.titolo, fonte: t.fonte, righe: t.righe, subtotali: t.subtotali,
-        totale_conteggio: t.stampato.n, totale_kg: t.stampato.kg,
-      })),
-    };
+    const righeSalvate = modo === 'salvate' ? null : righeDaConservare(lettura);
 
     const aggiornamento = {
       stato: 'completata',
@@ -212,15 +223,17 @@ export default async function(req) {
       verificata_il: new Date().toISOString(),
       errore: '',
       esito_json: await valoreCampo(base44, 'QuadraturaFir', quadratura_id, 'esito_json', JSON.stringify(esito)),
-      lettura_json: await valoreCampo(base44, 'QuadraturaFir', quadratura_id, 'lettura_json', JSON.stringify({
+    };
+    if (!letturaSalvata) {
+      aggiornamento.lettura_json = await valoreCampo(base44, 'QuadraturaFir', quadratura_id, 'lettura_json', JSON.stringify({
         modo, letture, note: lettura.note, problemi: lettura.problemi, cancellazione_file: cancellazione,
         tabelle: lettura.tabelle.map(t => ({
           titolo: t.titolo, fonte: t.fonte, flusso: t.flusso, unita: t.unita,
           righe: t.righe.length, somma: t.somma, stampato: t.stampato,
           quadra: t.quadra, quadra_totali: t.quadra_totali, ricostruita: t.ricostruita,
         })),
-      })),
-    };
+      }));
+    }
     if (righeSalvate) {
       aggiornamento.righe_json = await valoreCampo(base44, 'QuadraturaFir', quadratura_id, 'righe_json', JSON.stringify(righeSalvate));
     }

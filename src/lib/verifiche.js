@@ -269,12 +269,16 @@ export function testoPerImpianto(messaggio) {
     .replace(/\b([a-z]*?)([aeiou])'(?=[\s.,;:)]|$)/g, (_m, radice, v) => radice + ACCENTI[v]);
 }
 
-// '11 nel report, 11 registrati; differenze: Ingressi primaria · rete +1, Uscite secondaria · rete -1'
-function dettaglioPerTipo(quadratura, report, registrati, formato) {
-  const tot = (k) => quadratura.reduce((t, q) => t + (q[k] || 0), 0);
-  const diverse = quadratura.filter(q => q[report] !== q[registrati])
-    .map(q => `${q.nome} ${q[report] > q[registrati] ? '+' : '-'}${formato(Math.abs(q[report] - q[registrati]))}`);
-  return `${formato(tot(report))} nel report, ${formato(tot(registrati))} registrati${diverse.length ? '; differenze: ' + diverse.join(', ') : ''}`;
+// 'Ingressi primaria · rete: 12 nel report, 11 registrati; Uscite secondaria · ACI: 0 nel report, 1 registrati'.
+// Movimentazione per movimentazione, senza un totale: "24 nel report, 24
+// registrati" sommava ingressi e uscite di rete, ACI ed extra raccolta.
+function dettaglioPerCategoria(quadratura, report, registrati, formato) {
+  const diverse = quadratura.filter(q => q[report] !== q[registrati]);
+  if (!diverse.length) {
+    if (!quadratura.length) return 'nessuna movimentazione nel report né fra i registrati';
+    return quadratura.length === 1 ? `coincide: ${quadratura[0].nome}` : `coincidono in tutte le ${quadratura.length} movimentazioni`;
+  }
+  return diverse.map(q => `${q.nome}: ${formato(q[report])} nel report, ${formato(q[registrati])} registrati`).join('; ');
 }
 
 const ETICHETTA_CAMPO = {
@@ -305,6 +309,12 @@ export function sintesiVerifica(v, esito) {
   // Tutte le movimentazioni previste (per il PDF) e quelle con almeno un formulario (per la pagina).
   const categorie = quadratura;
   const righeQuadratura = quadratura.filter(q => q.formulari_report || q.formulari_gestionale);
+  // Da togliere: somma formulari e chili di tutte le movimentazioni, cioe'
+  // ingressi e uscite di rete, ACI ed extra raccolta in un numero solo. Nessuno
+  // dei conti di questo file lo usa piu'; resta perche' DettaglioVerifica.jsx
+  // (riga del totale e testo della dichiarazione) ed esitoVerificaPdf.js (stessa
+  // riga e sottotitolo) lo leggono e senza andrebbero in errore. Quando
+  // mostreranno le sole righe per movimentazione e canale, si toglie.
   const totale = righeQuadratura.reduce((t, q) => ({
     tipo: 'totale', nome: 'Totale', formulari_report: t.formulari_report + q.formulari_report, formulari_gestionale: t.formulari_gestionale + q.formulari_gestionale,
     kg_report: t.kg_report + q.kg_report, kg_gestionale: t.kg_gestionale + q.kg_gestionale,
@@ -329,10 +339,10 @@ export function sintesiVerifica(v, esito) {
 
   const conta = (campi) => voci.anomalia.filter(x => campi.includes(x.campo) && x.etichetta !== 'Riga duplicata' && x.etichetta !== 'Formulario di un altro impianto').length;
   const controlli = [
-    { nome: 'Numero dei formulari', ok: righeQuadratura.every(q => q.formulari_report === q.formulari_gestionale),
-      dettaglio: dettaglioPerTipo(righeQuadratura, 'formulari_report', 'formulari_gestionale', formatIntero) },
-    { nome: 'Peso effettivo totale', ok: righeQuadratura.every(q => q.kg_report === q.kg_gestionale),
-      dettaglio: dettaglioPerTipo(righeQuadratura, 'kg_report', 'kg_gestionale', (n) => formatKg(n) + ' kg') },
+    { nome: 'Numero dei formulari per movimentazione', ok: righeQuadratura.every(q => q.formulari_report === q.formulari_gestionale),
+      dettaglio: dettaglioPerCategoria(righeQuadratura, 'formulari_report', 'formulari_gestionale', formatIntero) },
+    { nome: 'Peso effettivo per movimentazione', ok: righeQuadratura.every(q => q.kg_report === q.kg_gestionale),
+      dettaglio: dettaglioPerCategoria(righeQuadratura, 'kg_report', 'kg_gestionale', (n) => formatKg(n) + ' kg') },
     { nome: 'Numeri di formulario', n: conta(['fir']) },
     { nome: 'Peso effettivo di ciascun formulario', n: conta(['kg']) },
     { nome: 'Date di trasporto', n: conta(['fine', 'inizio']) },
@@ -344,7 +354,8 @@ export function sintesiVerifica(v, esito) {
 
   const righeConAnomalie = new Set(voci.anomalia.map(x => x.esito)).size;
   const numeroAnomalie = righeConAnomalie + inPiu.length + mancanti.length;
-  const conformita = v.conformita || (numeroAnomalie === 0 && totale.quadra && righeQuadratura.every(q => q.quadra) ? 'piena' : 'parziale');
+  // La conformita' si decide movimentazione per movimentazione: se quadrano tutte, niente da sommare.
+  const conformita = v.conformita || (numeroAnomalie === 0 && righeQuadratura.every(q => q.quadra) ? 'piena' : 'parziale');
 
   return {
     conformita, numeroAnomalie, quadratura: righeQuadratura, categorie, totale, controlli, dichiarazione: v.file_tipo === 'dichiarazione',
@@ -412,20 +423,24 @@ export async function scaricaExcelVerifica(v) {
   const ExcelJS = modulo.default || modulo;
   const esito = v.esito_json ? JSON.parse(v.esito_json) : { esiti: [], assenti: [] };
   const lettura = v.lettura_json ? JSON.parse(v.lettura_json) : {};
+  const sintesi = sintesiVerifica(v, esito);
   const nomeTipo = (t) => (t === 'uscita' ? 'Uscita' : t === 'ingresso' ? 'Ingresso' : 'Non pertinente');
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Gestionale PFU';
   wb.created = new Date();
 
   // --- Riepilogo ---
+  // Sette colonne: la quadratura sta per movimentazione e canale, con formulari e
+  // chili del report e dei registrati affiancati.
+  const COLONNE_RIEPILOGO = 7;
   const r = wb.addWorksheet('Riepilogo', { views: [{ showGridLines: false }] });
-  r.columns = [{ width: 38 }, { width: 22 }, { width: 22 }, { width: 22 }];
+  r.columns = [{ width: 38 }, { width: 14 }, { width: 14 }, { width: 12 }, { width: 16 }, { width: 16 }, { width: 14 }];
   const titolo = r.addRow(['Verifica del report settimanale']);
   titolo.font = { bold: true, size: 16 };
   r.addRow([]);
   const info = [
     ['Impianto o stoccaggio', v.soggetto_nome],
-    ['Esito', sintesiVerifica(v, esito).conformita === 'piena' ? 'Conformità piena' : 'Conformità parziale'],
+    ['Esito', sintesi.conformita === 'piena' ? 'Conformità piena' : 'Conformità parziale'],
     ['Settimana', `${v.settimana} del ${v.anno}, dal ${dataIt(v.data_inizio)} al ${dataIt(v.data_fine)}, secondo la data di fine trasporto`],
     ['File verificato', v.file_nome],
     ['Lettura del file', lettura.modo === 'dichiarazione'
@@ -441,13 +456,13 @@ export async function scaricaExcelVerifica(v) {
   for (const [k, val] of info) {
     const riga = r.addRow([k, val]);
     riga.getCell(1).font = { bold: true };
-    r.mergeCells(riga.number, 2, riga.number, 4);
+    r.mergeCells(riga.number, 2, riga.number, COLONNE_RIEPILOGO);
     riga.getCell(2).alignment = { wrapText: true, vertical: 'top' };
   }
   const avviso = (testo, sfondo, colore) => {
     r.addRow([]);
     const nota = r.addRow([testo]);
-    r.mergeCells(nota.number, 1, nota.number, 4);
+    r.mergeCells(nota.number, 1, nota.number, COLONNE_RIEPILOGO);
     nota.getCell(1).fill = riempi(sfondo);
     nota.getCell(1).font = { color: { argb: colore }, bold: true };
     nota.getCell(1).alignment = { wrapText: true };
@@ -456,30 +471,27 @@ export async function scaricaExcelVerifica(v) {
   if (lettura.trascritto_da_agente) {
     avviso('Attenzione: il report non era un Excel e i formulari sono stati trascritti dall\'agente. Prima di contestare un formulario errato, confrontalo con il documento originale.', COLORI.ambra, COLORI.ambraTesto);
   }
-  if (v.uscite_gestionale && !v.uscite_verificate) {
-    avviso(`Il report non contiene uscite: le ${v.uscite_gestionale} secondarie partite nella settimana non sono state verificate.`, COLORI.grigio, 'FF374151');
+  // Le uscite registrate e non verificate, canale per canale.
+  const usciteRegistrate = sintesi.categorie.filter(q => q.tipo === 'uscita' && q.formulari_gestionale > 0);
+  if (usciteRegistrate.length && !v.uscite_verificate) {
+    avviso(`Il report non contiene uscite, e quelle registrate nella settimana non sono state verificate: ${usciteRegistrate.map(q => `${q.nome}, ${q.formulari_gestionale} ${q.formulari_gestionale === 1 ? 'formulario' : 'formulari'} per ${formatKg(q.kg_gestionale)} kg`).join('; ')}.`, COLORI.grigio, 'FF374151');
   }
+  // La quadratura per movimentazione e canale, senza una riga di totale: i canali
+  // non si sommano, e nemmeno gli ingressi con le uscite.
   r.addRow([]);
-  intestazione(r, ['Confronto', 'Report', 'Gestionale', 'Differenza']);
-  const usciteContate = v.uscite_verificate ? (v.uscite_gestionale || 0) : 0;
-  const pesoUsciteContato = v.uscite_verificate ? (v.peso_uscite_kg || 0) : 0;
-  const confronti = [
-    ['Carichi', v.righe_report || 0, (v.ingressi_gestionale || 0) + usciteContate],
-    ['Peso totale (kg)', v.peso_report_kg || 0, (v.peso_ingressi_kg || 0) + pesoUsciteContato],
-  ];
-  for (const [k, a, b] of confronti) {
-    const riga = r.addRow([k, a, b, a - b]);
-    riga.eachCell((c, i) => { c.border = bordi; if (i > 1) c.numFmt = '#,##0'; });
-    if (a !== b) riga.getCell(4).fill = riempi(COLORI.rosso);
+  intestazione(r, ['Movimentazione', 'Formulari nel report', 'Formulari registrati', 'Differenza', 'Peso nel report (kg)', 'Peso registrato (kg)', 'Differenza (kg)']);
+  if (!sintesi.quadratura.length) {
+    const vuota = r.addRow(['Nessuna movimentazione nel report né fra i formulari registrati']);
+    r.mergeCells(vuota.number, 1, vuota.number, COLONNE_RIEPILOGO);
+    vuota.getCell(1).font = { italic: true, color: { argb: 'FF6B7280' } };
   }
-  const dettaglio = [
-    ['di cui ingressi nel gestionale', v.ingressi_gestionale || 0, v.peso_ingressi_kg || 0],
-    [`di cui uscite nel gestionale${v.uscite_verificate ? '' : ', non verificate'}`, v.uscite_gestionale || 0, v.peso_uscite_kg || 0],
-  ];
-  for (const [k, n, kg] of dettaglio) {
-    const riga = r.addRow([k, '', `${n} carichi, ${formatKg(kg)} kg`]);
-    riga.getCell(1).font = { italic: true, color: { argb: 'FF6B7280' } };
-    r.mergeCells(riga.number, 3, riga.number, 4);
+  for (const q of sintesi.quadratura) {
+    const dF = q.formulari_report - q.formulari_gestionale;
+    const dK = q.kg_report - q.kg_gestionale;
+    const riga = r.addRow([q.nome, q.formulari_report, q.formulari_gestionale, dF, q.kg_report, q.kg_gestionale, dK]);
+    riga.eachCell((c, i) => { c.border = bordi; if (i > 1) c.numFmt = '#,##0'; });
+    if (dF) riga.getCell(4).fill = riempi(COLORI.rosso);
+    if (dK) riga.getCell(7).fill = riempi(COLORI.rosso);
   }
   r.addRow([]);
   intestazione(r, ['Esito delle righe', 'Numero']);

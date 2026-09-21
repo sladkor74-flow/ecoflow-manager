@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2, Clock } from 'lucide-react';
 import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
-import { importaGrandeFile, importaPrimarie, TIPI_LETTURA_BROWSER } from '@/lib/importGrandeFile';
+import { importaGrandeFile, importaPrimarie, TIPI_LETTURA_BROWSER, dopoCaricamento, testoRicalcoli } from '@/lib/importGrandeFile';
 import { formatIntero, dataServer } from '@/lib/utils';
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
@@ -23,7 +23,19 @@ export default function CaricamentoDati() {
   const [risultato, setRisultato] = useState({});
   const [dialogState, setDialogState] = useState(null);
   const [progresso, setProgresso] = useState({});
+  const [ricalcoli, setRicalcoli] = useState({});
   const pendingFileUrlRef = useRef({});
+
+  // Ogni caricamento aggiorna tutto: i ricalcoli che dipendono dal file partono
+  // in background (elenco unico in dopoCaricamento) e il loro esito resta sotto
+  // la scheda, cosi' uno non riuscito si vede invece di restare fermo in silenzio.
+  // Un caricamento finito in errore ha lasciato l'archivio vuoto o a meta':
+  // ricalcolare su quello chiuderebbe controlli ancora veri.
+  const aggiornaModuli = (tipoKey, esito) => {
+    if (esito === 'errore') { setRicalcoli(prev => ({ ...prev, [tipoKey]: null })); return; }
+    setRicalcoli(prev => ({ ...prev, [tipoKey]: { in_corso: true } }));
+    dopoCaricamento(tipoKey).then(esiti => setRicalcoli(prev => ({ ...prev, [tipoKey]: esiti })));
+  };
 
   const caricaLogs = async () => {
     setLoadingLogs(true);
@@ -51,6 +63,7 @@ export default function CaricamentoDati() {
     if (!file) return;
     setUploading(tipoKey);
     setRisultato(prev => ({ ...prev, [tipoKey]: null }));
+    setRicalcoli(prev => ({ ...prev, [tipoKey]: null }));
     try {
       // Le primarie e i due report del portale sono troppo grandi per essere
       // importati dentro una sola function: la lettura avviene nel browser e al
@@ -62,11 +75,7 @@ export default function CaricamentoDati() {
           : await importaGrandeFile({ file, tipoFile: tipoKey, confermaForzatura: conferma_forzatura, onProgress });
         setProgresso(prev => ({ ...prev, [tipoKey]: null }));
         setRisultato(prev => ({ ...prev, [tipoKey]: { ok: true, data } }));
-        // Nuove primarie: si aggiorna il controllo delle liste di assegnati del
-        // modulo Verifiche. Gira in background e non blocca il caricamento.
-        if (tipoKey === 'primarie') base44.functions.invoke('controllaEvasioneAssegnati', {}).catch(() => {});
-        // Nuovi movimenti: si riconfrontano le dichiarazioni di nessuna movimentazione.
-        if (tipoKey === 'primarie' || tipoKey === 'secondarie') base44.functions.invoke('ricontrollaDichiarazioni', {}).catch(() => {});
+        aggiornaModuli(tipoKey, data && data.esito);
         const warnings = extractUploadWarnings(data);
         if (warnings) setDialogState(warnings);
         caricaLogs();
@@ -87,11 +96,7 @@ export default function CaricamentoDati() {
       if (conferma_forzatura) params.conferma_forzatura = true;
       const res = await base44.functions.invoke(fnName, params);
       setRisultato(prev => ({ ...prev, [tipoKey]: { ok: true, data: res.data } }));
-      // Nuove primarie: si aggiorna il controllo delle liste di assegnati del
-      // modulo Verifiche. Gira in background e non blocca il caricamento.
-      if (tipoKey === 'primarie') base44.functions.invoke('controllaEvasioneAssegnati', {}).catch(() => {});
-      // Nuovi movimenti: si riconfrontano le dichiarazioni di nessuna movimentazione.
-      if (tipoKey === 'primarie' || tipoKey === 'secondarie') base44.functions.invoke('ricontrollaDichiarazioni', {}).catch(() => {});
+      aggiornaModuli(tipoKey, res.data && res.data.esito);
       const warnings = extractUploadWarnings(res.data);
       if (warnings) setDialogState(warnings);
       caricaLogs();
@@ -198,6 +203,20 @@ export default function CaricamentoDati() {
                   </span>
                 </div>
               )}
+
+              {res && res.ok && res.data.allineamento && (
+                // Il report delle dichiarazioni riconosce da solo i nostri mesi caricati a portale.
+                <p className={`mt-1 text-xs ${res.data.allineamento.errore ? 'text-amber-700' : 'text-muted-foreground'}`}>
+                  {res.data.allineamento.errore
+                    ? `Dichiarazioni mensili non riconosciute (${res.data.allineamento.errore}): premi «Allinea dal portale» in Dichiarazioni Impianti.`
+                    : `Dichiarazioni mensili riconosciute come caricate a portale: ${formatIntero((res.data.allineamento.aggiornate || []).length)} aggiornate${(res.data.allineamento.non_trovate || []).length ? `; ${formatIntero(res.data.allineamento.non_trovate.length)} nostri mesi non ancora ritrovati nel report` : ''}.`}
+                </p>
+              )}
+
+              {(() => {
+                const r = testoRicalcoli(ricalcoli[tipo.key]);
+                return r ? <p className={`mt-1 text-xs ${r.classe}`}>{r.testo}</p> : null;
+              })()}
             </div>
           );
         })}

@@ -2,10 +2,12 @@ import React, { useState, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Upload, Loader2, FileSpreadsheet, CheckCircle } from 'lucide-react';
 import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
+import { dopoCaricamento, testoRicalcoli } from '@/lib/importGrandeFile';
 
 export default function SecondarieUpload({ onImported }) {
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
+  const [ricalcoli, setRicalcoli] = useState(null);
   const [dialogState, setDialogState] = useState(null);
   const inputRef = useRef(null);
   const pendingFileUrlRef = useRef(null);
@@ -14,6 +16,7 @@ export default function SecondarieUpload({ onImported }) {
     if (!file) return;
     setUploading(true);
     setResult(null);
+    setRicalcoli(null);
     try {
       let fileUrl;
       if (conferma_forzatura && pendingFileUrlRef.current) {
@@ -35,6 +38,14 @@ export default function SecondarieUpload({ onImported }) {
       const warnings = extractUploadWarnings(res.data);
       if (warnings) setDialogState(warnings);
       if (onImported) onImported();
+      // Questo e' un secondo punto di caricamento delle secondarie: aggiorna gli
+      // stessi moduli di Caricamento Dati (elenco unico in dopoCaricamento), non
+      // solo la matrice della pagina. Un esito "errore" ha lasciato l'archivio a
+      // meta' e non si ricalcola su quello.
+      if (res.data && res.data.esito !== 'errore') {
+        setRicalcoli({ in_corso: true });
+        dopoCaricamento('secondarie').then(setRicalcoli);
+      }
     } catch (e) {
       const errInfo = extractUploadError(e);
       setDialogState({ ...errInfo, onForza: () => handleFile(file, true) });
@@ -77,6 +88,10 @@ export default function SecondarieUpload({ onImported }) {
               {result.righe_importate} righe importate su {result.righe_da_importare} da importare.
               {result.righe_fallite > 0 && ` · ${result.righe_fallite} fallite.`}
             </p>
+            {(() => {
+              const r = testoRicalcoli(ricalcoli);
+              return r ? <p className={`mt-1 text-xs ${r.classe}`}>{r.testo}</p> : null;
+            })()}
           </div>
         </div>
       )}

@@ -28,12 +28,47 @@ import {
   GIORNI_CONSERVAZIONE, oggiRoma, aggiungiGiorni, settimanaIso, intervalloSettimana, settimaneNellAnno, descriviIntervallo,
   dataIt, tonnellate, tipoDiFile, leggiTabelleDaFile, segnalazioni, analisiInCorso, analisiInterrotta, scaricaExcelVerifica,
 } from '@/lib/verifiche';
+import { giornoRoma } from '@/lib/giornoItaliano';
 
 // Sezione 1 del modulo Verifiche: confronto fra i report settimanali inviati da
 // impianti e stoccaggi e il gestionale. Gli ingressi si verificano sulle
 // primarie, le uscite sulle secondarie.
+//
+// Ingressi e uscite si mostrano canale per canale: rete, ACI ed extra raccolta
+// non si sommano mai, nemmeno nel numero di formulari di una riga. L'esito di
+// ogni verifica e' rifatto dal server sui movimenti di adesso a ogni apertura.
 
 const RUOLI = { trattamento: 'Impianto', stoccaggio: 'Stoccaggio' };
+const NOME_CANALE = { rete: 'Rete', aci: 'ACI', extra: 'Extra' };
+
+/** "Rete 20 · 260,00 t" una riga per canale, solo i canali che hanno movimenti. */
+function PerCanale({ canali, tipo }) {
+  const righe = (canali || []).filter(c => c[tipo] > 0);
+  if (!righe.length) return <span className="text-muted-foreground">—</span>;
+  return (
+    <div className="space-y-0.5">
+      {righe.map(c => (
+        <div key={c.canale}>
+          <span className="inline-block min-w-[38px] text-[11px] text-muted-foreground">{NOME_CANALE[c.canale] || c.canale}</span>
+          {c[tipo]} <span className="text-muted-foreground">·</span> {tonnellate(c[`kg_${tipo}`])} t
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** "rete 2 ingressi, ACI 1 uscita": i movimenti di un soggetto, un canale alla volta. */
+function descriviPerCanale(canali) {
+  const parti = [];
+  for (const c of canali || []) {
+    const nome = c.canale === 'aci' ? 'ACI' : c.canale === 'extra' ? 'extra raccolta' : 'rete';
+    const voci = [];
+    if (c.ingressi) voci.push(`${c.ingressi} ${c.ingressi === 1 ? 'ingresso' : 'ingressi'}`);
+    if (c.uscite) voci.push(`${c.uscite} ${c.uscite === 1 ? 'uscita' : 'uscite'}`);
+    if (voci.length) parti.push(`${nome} ${voci.join(' e ')}`);
+  }
+  return parti.join(', ');
+}
 const LIMITE_EXCEL = 15 * 1024 * 1024;
 // Excel (.xlsx, .xls, .xlsm), LibreOffice/OpenOffice (.ods), CSV, PDF e immagini:
 // estensioni e tipi MIME, cosi' la finestra di scelta non nasconde nessun formato.
@@ -50,7 +85,7 @@ const LIMITE_PDF = 5 * 1024 * 1024;
 function Esito({ riga }) {
   const v = riga.verifica;
   if (!v) {
-    return riga.ingressi + riga.uscite > 0
+    return riga.movimentato
       ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs text-muted-foreground"><Clock className="w-3 h-3" />Da caricare</span>
       : <span className="text-xs text-muted-foreground">Nessun movimento</span>;
   }
@@ -62,9 +97,11 @@ function Esito({ riga }) {
   }
   const n = segnalazioni(v);
   if (v.file_tipo === 'dichiarazione') {
+    // Senza un numero di formulari: sommerebbe i canali. Quali movimenti la
+    // smentiscono lo dicono le colonne accanto, canale per canale.
     return v.conformita === 'piena'
       ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs"><CheckCircle2 className="w-3 h-3" />Confermata</span>
-      : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-800 text-xs font-medium"><AlertTriangle className="w-3 h-3" />Smentita · {n} {n === 1 ? 'formulario' : 'formulari'}</span>;
+      : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-800 text-xs font-medium"><AlertTriangle className="w-3 h-3" />Smentita dai formulari registrati</span>;
   }
   if (v.conformita ? v.conformita === 'piena' : n === 0) {
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs"><CheckCircle2 className="w-3 h-3" />Conformità piena</span>;
@@ -90,10 +127,10 @@ function RigaSoggetto({ riga, isAdmin, occupato, onCarica, onDichiara, onApri, o
         {v && v.stato === 'errore' && <div className="text-xs text-red-700 mt-1 max-w-md">{v.errore}</div>}
       </td>
       <td className="px-4 py-3 tabular-nums whitespace-nowrap">
-        {riga.ingressi > 0 ? <>{riga.ingressi} <span className="text-muted-foreground">·</span> {tonnellate(riga.kg_ingressi)} t</> : <span className="text-muted-foreground">—</span>}
+        <PerCanale canali={riga.canali} tipo="ingressi" />
       </td>
       <td className="px-4 py-3 tabular-nums whitespace-nowrap">
-        {riga.uscite > 0 ? <>{riga.uscite} <span className="text-muted-foreground">·</span> {tonnellate(riga.kg_uscite)} t</> : <span className="text-muted-foreground">—</span>}
+        <PerCanale canali={riga.canali} tipo="uscite" />
       </td>
       <td className="px-4 py-3 max-w-[220px]">
         {v ? (
@@ -101,8 +138,13 @@ function RigaSoggetto({ riga, isAdmin, occupato, onCarica, onDichiara, onApri, o
             <div className="text-sm truncate" title={v.file_nome}>{v.file_nome}</div>
             <div className="text-xs text-muted-foreground truncate" title={v.nota || ''}>
               {v.file_tipo === 'dichiarazione' ? (v.nota || 'comunicata dall\'impianto')
-                : v.stato === 'completata' ? `${v.righe_report} righe · ${tonnellate(v.peso_report_kg)} t` : ''}
+                : v.stato === 'completata' && v.verificata_il ? `confronto del ${dataIt(giornoRoma(v.verificata_il))}` : ''}
             </div>
+            {v.esito_ricalcolato === 'solo_a_video' && (
+              <div className="text-[11px] text-amber-700" title="Il dettaglio, il PDF e l'Excel mostrano ancora il confronto salvato: si aggiornano quando un amministratore apre la settimana o dopo il prossimo caricamento.">
+                esito rifatto sui movimenti di oggi
+              </div>
+            )}
           </>
         ) : <span className="text-muted-foreground text-sm">—</span>}
       </td>
@@ -292,7 +334,8 @@ export default function ReportSettimanali({ isAdmin }) {
   };
 
   const soggetti = dati ? dati.soggetti : [];
-  const movimentato = (r) => r.ingressi + r.uscite > 0;
+  const movimentato = (r) => !!r.movimentato;
+  const ricalcolo = dati && dati.ricalcolo;
   const conMovimenti = soggetti.filter(r => movimentato(r) || r.verifica);
   const senzaMovimenti = soggetti.filter(r => !movimentato(r) && !r.verifica);
   const caricati = soggetti.filter(r => r.verifica && r.verifica.stato === 'completata');
@@ -332,8 +375,30 @@ export default function ReportSettimanali({ isAdmin }) {
           le uscite con le secondarie; il peso al chilogrammo, la data su quella di fine trasporto. Nella verifica restano solo i dati letti
           e l'esito, che si cancellano da soli {GIORNI_CONSERVAZIONE} giorni dopo il caricamento: un Excel si legge qui nel browser senza
           caricare niente, un PDF o un'immagine vengono caricati nell'archivio privato perché l'agente li possa leggere.
+          Il confronto si rifà da solo sui movimenti di adesso dopo ogni caricamento di primarie e secondarie e a ogni apertura della settimana.
         </span>
       </div>
+
+      {ricalcolo && ricalcolo.rinviato && ricalcolo.rinviato.length > 0 && (
+        <div className="flex items-start gap-2 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>
+            Un caricamento non è concluso ({ricalcolo.rinviato.map(a => `${a.tipo_file.replace(/_/g, ' ')}${a.data ? ` del ${dataIt(a.data)}` : ''}${a.utente ? `, ${a.utente}` : ''}`).join('; ')}):
+            l&apos;archivio può essere a metà, quindi gli esiti mostrati sono quelli dell&apos;ultimo confronto e anche ingressi e uscite possono essere incompleti.
+            Si aggiornano da soli a caricamento finito; se il caricamento si è interrotto, va ripetuto.
+          </span>
+        </div>
+      )}
+
+      {ricalcolo && ricalcolo.errori && ricalcolo.errori.length > 0 && (
+        <div className="flex items-start gap-2 border border-red-300 bg-red-50 text-red-800 rounded-lg px-4 py-3 text-sm">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>
+            Per {ricalcolo.errori.length === 1 ? 'una verifica' : `${ricalcolo.errori.length} verifiche`} il confronto non si è potuto rifare con i movimenti di adesso,
+            e resta quello salvato: {ricalcolo.errori.map(e => e.errore).join('; ')}
+          </span>
+        </div>
+      )}
 
       {errore && (
         <div className="flex items-start gap-2 border border-red-300 bg-red-50 text-red-800 rounded-lg px-4 py-3 text-sm">
@@ -349,8 +414,8 @@ export default function ReportSettimanali({ isAdmin }) {
             <thead className="bg-muted/50 text-left">
               <tr>
                 <th className="px-4 py-2.5 font-semibold">Impianto o stoccaggio</th>
-                <th className="px-4 py-2.5 font-semibold">Ingressi <span className="font-normal text-muted-foreground">primarie</span></th>
-                <th className="px-4 py-2.5 font-semibold">Uscite <span className="font-normal text-muted-foreground">secondarie</span></th>
+                <th className="px-4 py-2.5 font-semibold">Ingressi <span className="font-normal text-muted-foreground">per canale</span></th>
+                <th className="px-4 py-2.5 font-semibold">Uscite <span className="font-normal text-muted-foreground">per canale</span></th>
                 <th className="px-4 py-2.5 font-semibold">Report</th>
                 <th className="px-4 py-2.5 font-semibold">Esito</th>
                 <th className="px-4 py-2.5 font-semibold">Si cancella il</th>
@@ -390,10 +455,10 @@ export default function ReportSettimanali({ isAdmin }) {
               {' '}La comunicazione viene confrontata con i formulari registrati: se ne risultano, si apre un alert. Il controllo si ripete a ogni nuovo caricamento di primarie e secondarie.
             </DialogDescription>
           </DialogHeader>
-          {dichiara && dichiara.ingressi + dichiara.uscite > 0 && (
+          {dichiara && dichiara.movimentato && (
             <div className="flex items-start gap-2 text-sm text-red-800 border border-red-200 bg-red-50 rounded-lg px-3 py-2">
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>Nel gestionale risultano già {dichiara.ingressi} ingressi e {dichiara.uscite} uscite in questa settimana: la comunicazione sarà smentita.</span>
+              <span>Nel gestionale risultano già movimenti in questa settimana ({descriviPerCanale(dichiara.canali)}): la comunicazione sarà smentita.</span>
             </div>
           )}
           {dichiara && dichiara.verifica && (

@@ -6,6 +6,7 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { Loader2, Play, CheckCircle, AlertTriangle, Lock, RotateCcw } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Input } from '@/components/ui/input';
+import { oggiRoma } from '@/lib/giornoItaliano';
 import RiepilogoEcotyre from './RiepilogoEcotyre';
 import AttivaAnomalie from './AttivaAnomalie';
 
@@ -21,33 +22,39 @@ const TIPS = [
   { key: 'ACI', label: 'ACI' },
   { key: 'EXTRA_RACCOLTA', label: 'Extra Raccolta' },
 ];
+const ADMIN = "Riservato all'amministratore";
 
 export default function AttivaDashboard({ periodo, setPeriodo, data, loading, elaborating, onElabora, onReload, isAdmin, anomalie, onVaiTariffe }) {
   const { anno, mese } = periodo;
   const [anomalieAnteprima, setAnomalieAnteprima] = useState([]);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [showRiapri, setShowRiapri] = useState(false);
-  // La chiusura chiede la conferma dell'amministrazione: giorno e, se c'e', numero di fattura per canale
-  const [showChiudi, setShowChiudi] = useState(false);
-  const [conferma, setConferma] = useState({ data: new Date().toISOString().slice(0, 10), numeri: {} });
+  // Chiusura e riapertura valgono per un canale alla volta: qui c'e' quale
+  const [daRiaprire, setDaRiaprire] = useState(null);
+  // La chiusura chiede la conferma dell'amministrazione: giorno e, se c'e', numero di fattura
+  const [daChiudere, setDaChiudere] = useState(null);
+  const [conferma, setConferma] = useState({ data: oggiRoma(), numero: '' });
+  const [inCorso, setInCorso] = useState('');
   const [versione, setVersione] = useState(0);
   const { toast } = useToast();
 
-  // Un'azione rifiutata si dice: prima l'errore veniva inghiottito e il pulsante
-  // sembrava non fare niente.
-  const cambiaStato = async (azione, extra = null) => {
-    const rifiuti = [];
-    for (const t of TIPS) {
-      const doc = data[t.key]?.documento;
-      if (!doc) continue;
-      try {
-        const res = await base44.functions.invoke('cambiaStatoFatturazione', { documento_id: doc.id, azione, ...(extra ? extra(t) : {}) });
-        if (azione === 'verifica' && res.data?.errori > 0) rifiuti.push(`${t.label}: ${res.data.errori} righe senza tariffa, il documento resta "elaborata"`);
-      } catch (e) {
-        rifiuti.push(`${t.label}: ${e?.response?.data?.error || e.message}`);
-      }
+  // Rete, ACI ed extra raccolta sono commesse indipendenti, ciascuna col suo
+  // documento e il suo ciclo di vita. Prima Verifica, Approva e Chiudi agivano
+  // sui tre documenti insieme e comparivano solo se lo erano tutti e tre: due
+  // righe ACI senza tariffa bastavano a far sparire "Approva" anche alla rete
+  // verificata al 100%. Ora ogni azione vale per il documento del suo canale.
+  // Un'azione rifiutata si dice: prima l'errore veniva inghiottito e il
+  // pulsante sembrava non fare niente.
+  const cambiaStato = async (t, azione, extra = {}) => {
+    const doc = data[t.key]?.documento;
+    if (!doc) return;
+    setInCorso(`${t.key}|${azione}`);
+    try {
+      const res = await base44.functions.invoke('cambiaStatoFatturazione', { documento_id: doc.id, azione, ...extra });
+      if (azione === 'verifica' && res.data?.errori > 0) toast({ title: `${t.label}: non verificato`, description: `${res.data.errori} righe senza tariffa, il documento resta "elaborata"`, variant: 'destructive' });
+    } catch (e) {
+      toast({ title: `${t.label}: azione non completata`, description: e?.response?.data?.error || e.message, variant: 'destructive' });
     }
-    if (rifiuti.length > 0) toast({ title: 'Azione non completata', description: rifiuti.join(' — '), variant: 'destructive' });
+    setInCorso('');
     await onReload();
     setVersione(v => v + 1);
   };
@@ -71,12 +78,21 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
     avviaElabora();
   };
 
-  const errori = TIPS.reduce((s, t) => s + (data[t.key]?.documento?.voci_errore || 0), 0);
-  const sospesi = TIPS.reduce((s, t) => s + (data[t.key]?.documento?.voci_sospese || 0), 0);
-  const tuttiElaborati = TIPS.every(t => data[t.key]?.documento);
-  const tuttiVerificati = TIPS.every(t => data[t.key]?.documento?.stato === 'verificata');
-  const tuttiApprovati = TIPS.every(t => data[t.key]?.documento?.stato === 'approvata' || data[t.key]?.documento?.stato === 'esportata');
-  const qualcunoChiuso = TIPS.some(t => data[t.key]?.documento?.stato === 'chiusa');
+  const apriChiusura = (t) => {
+    setConferma({ data: oggiRoma(), numero: '' });
+    setDaChiudere(t);
+  };
+
+  // Il documento di un canale si mostra anche quando quello di un altro manca.
+  const qualcunoElaborato = TIPS.some(t => data[t.key]?.documento);
+  const conErrori = TIPS.filter(t => (data[t.key]?.documento?.voci_errore || 0) > 0);
+
+  const Pulsante = ({ t, azione, children, variant = 'outline', onClick }) => (
+    <Button size="sm" variant={variant} disabled={!isAdmin || !!inCorso} title={!isAdmin ? ADMIN : ''} onClick={onClick || (() => cambiaStato(t, azione))}>
+      {inCorso === `${t.key}|${azione}` && <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />}
+      {children}
+    </Button>
+  );
 
   return (
     <div className="space-y-4">
@@ -95,7 +111,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
             <SelectContent>{MESI.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        <Button onClick={handleElabora} disabled={elaborating || !isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''}>
+        <Button onClick={handleElabora} disabled={elaborating || !isAdmin} title={!isAdmin ? ADMIN : ''}>
           {elaborating ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Play className="w-4 h-4 mr-1.5" />}
           Elabora Mese
         </Button>
@@ -109,28 +125,50 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
 
       {loading ? (
         <div className="text-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin inline mr-2" /> Caricamento...</div>
-      ) : !tuttiElaborati ? (
+      ) : !qualcunoElaborato ? (
         <div className="text-center py-12 text-muted-foreground border rounded-lg">
           Nessuna fatturazione attiva elaborata per {mese} {anno}.<br />Clicca "Elabora Mese" per generare.
         </div>
       ) : (
         <>
+          {/* Un riquadro per canale, con i suoi numeri e i suoi pulsanti: nessuna
+              somma fra i canali, nemmeno delle prestazioni o degli errori. */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {TIPS.map(t => {
               const doc = data[t.key]?.documento;
-              const tot = data[t.key]?.documento?.totale || 0;
-              const voci = data[t.key]?.documento?.numero_voci || 0;
+              if (!doc) {
+                return (
+                  <div key={t.key} className="border rounded-lg p-4 border-amber-200 bg-amber-50/50">
+                    <h3 className="font-heading font-semibold mb-2">{t.label}</h3>
+                    <p className="text-sm text-amber-800">Non elaborato per {mese} {anno}: clicca "Elabora Mese".</p>
+                  </div>
+                );
+              }
+              const verificate = data[t.key]?.righe?.filter(r => r.stato_validazione === 'verificato').length || 0;
+              const errori = doc.voci_errore || 0;
+              const sospese = doc.voci_sospese || 0;
               return (
-                <div key={t.key} className="border rounded-lg p-4">
+                <div key={t.key} className="border rounded-lg p-4 flex flex-col">
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="font-heading font-semibold">{t.label}</h3>
-                    {doc && <span className={`text-xs px-2 py-0.5 rounded ${STATI[doc.stato] || ''}`}>{doc.stato}</span>}
+                    <span className={`text-xs px-2 py-0.5 rounded ${STATI[doc.stato] || ''}`}>{doc.stato}</span>
                   </div>
-                  <p className="text-2xl font-bold">€ {tot.toFixed(2)}</p>
-                  <p className="text-xs text-muted-foreground mt-1">{voci} prestazioni</p>
-                  {doc?.stato === 'chiusa' && doc.fattura_confermata_il && (
-                    <p className="text-xs text-emerald-700 mt-1">Fatturazione confermata il {doc.fattura_confermata_il.split('-').reverse().join('/')}{doc.fattura_numero ? ` · fattura ${doc.fattura_numero}` : ''}</p>
+                  <p className="text-2xl font-bold">€ {(doc.totale || 0).toFixed(2)}</p>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs mt-2">
+                    <span className="text-muted-foreground">Prestazioni</span><span className="text-right tabular-nums font-medium">{doc.numero_voci || 0}</span>
+                    <span className="text-muted-foreground">Verificate</span><span className="text-right tabular-nums font-medium text-green-600">{verificate}</span>
+                    <span className="text-muted-foreground">Errori</span><span className={`text-right tabular-nums font-medium ${errori > 0 ? 'text-red-600' : 'text-green-600'}`}>{errori}</span>
+                    <span className="text-muted-foreground">Sospese</span><span className={`text-right tabular-nums font-medium ${sospese > 0 ? 'text-amber-600' : 'text-green-600'}`}>{sospese}</span>
+                  </div>
+                  {doc.stato === 'chiusa' && doc.fattura_confermata_il && (
+                    <p className="text-xs text-emerald-700 mt-2">Fatturazione confermata il {doc.fattura_confermata_il.split('-').reverse().join('/')}{doc.fattura_numero ? ` · fattura ${doc.fattura_numero}` : ''}</p>
                   )}
+                  <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t">
+                    {['elaborata', 'verificata'].includes(doc.stato) && <Pulsante t={t} azione="verifica"><CheckCircle className="w-3.5 h-3.5 mr-1" /> Verifica</Pulsante>}
+                    {doc.stato === 'verificata' && <Pulsante t={t} azione="approva"><CheckCircle className="w-3.5 h-3.5 mr-1" /> Approva</Pulsante>}
+                    {['approvata', 'esportata'].includes(doc.stato) && <Pulsante t={t} azione="chiudi" variant="default" onClick={() => apriChiusura(t)}><Lock className="w-3.5 h-3.5 mr-1" /> Chiudi</Pulsante>}
+                    {doc.stato === 'chiusa' && <Pulsante t={t} azione="riapri" onClick={() => setDaRiaprire(t)}><RotateCcw className="w-3.5 h-3.5 mr-1" /> Riapri</Pulsante>}
+                  </div>
                 </div>
               );
             })}
@@ -152,25 +190,11 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="border rounded-lg p-3"><p className="text-xs text-muted-foreground">Prestazioni</p><p className="text-lg font-bold">{TIPS.reduce((s, t) => s + (data[t.key]?.documento?.numero_voci || 0), 0)}</p></div>
-            <div className="border rounded-lg p-3"><p className="text-xs text-muted-foreground">🟢 Verificate</p><p className="text-lg font-bold text-green-600">{TIPS.reduce((s, t) => s + (data[t.key]?.righe?.filter(r => r.stato_validazione === 'verificato').length || 0), 0)}</p></div>
-            <div className="border rounded-lg p-3"><p className="text-xs text-muted-foreground">🔴 Errori</p><p className={`text-lg font-bold ${errori > 0 ? 'text-red-600' : 'text-green-600'}`}>{errori}</p></div>
-            <div className="border rounded-lg p-3"><p className="text-xs text-muted-foreground">⚠ Sospese</p><p className={`text-lg font-bold ${sospesi > 0 ? 'text-amber-600' : 'text-green-600'}`}>{sospesi}</p></div>
-          </div>
-
-          {errori > 0 && (
+          {conErrori.length > 0 && (
             <div className="text-sm text-red-600 flex items-center gap-1 border border-red-200 bg-red-50 p-3 rounded-lg">
-              <AlertTriangle className="w-4 h-4" /> {errori} prestazioni con errori (tariffa mancante). Verificare le tariffe nella tab "Tariffe".
+              <AlertTriangle className="w-4 h-4 shrink-0" /> Prestazioni con errori (tariffa mancante): {conErrori.map(t => `${t.label} ${data[t.key].documento.voci_errore}`).join(' · ')}. Verificare le tariffe nella tab "Tariffe": finché mancano, quel documento non si può verificare; gli altri canali vanno avanti per conto loro.
             </div>
           )}
-
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('verifica')}><CheckCircle className="w-4 h-4 mr-1.5" /> Verifica</Button>
-            {tuttiVerificati && <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => cambiaStato('approva')}><CheckCircle className="w-4 h-4 mr-1.5" /> Approva</Button>}
-            {tuttiApprovati && <Button disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => setShowChiudi(true)}><Lock className="w-4 h-4 mr-1.5" /> Chiudi Periodo</Button>}
-            {qualcunoChiuso && <Button variant="outline" disabled={!isAdmin} title={!isAdmin ? "Riservato all'amministratore" : ''} onClick={() => setShowRiapri(true)}><RotateCcw className="w-4 h-4 mr-1.5" /> Riapri periodo</Button>}
-          </div>
         </>
       )}
 
@@ -193,46 +217,42 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={showChiudi} onOpenChange={setShowChiudi}>
+      <AlertDialog open={!!daChiudere} onOpenChange={(v) => { if (!v) setDaChiudere(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Chiudere {mese} {anno}?</AlertDialogTitle>
+            <AlertDialogTitle>Chiudere {daChiudere?.label} di {mese} {anno}?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3 text-sm text-muted-foreground">
-                <p>Il mese si chiude quando l'amministrazione conferma che la fattura a Ecotyre è stata emessa ed è andata a buon fine. Da chiuso non si rielabora più, se non riaprendolo.</p>
+                <p>Il documento si chiude quando l'amministrazione conferma che la fattura a Ecotyre per questo canale è stata emessa ed è andata a buon fine. Da chiuso non si rielabora più, se non riaprendolo. Gli altri canali restano come sono.</p>
                 <div>
                   <label className="text-xs block mb-1 text-foreground">Giorno della conferma dell'amministrazione</label>
-                  <Input type="date" className="w-44" value={conferma.data} max={new Date().toISOString().slice(0, 10)} onChange={e => setConferma(c => ({ ...c, data: e.target.value }))} />
+                  <Input type="date" className="w-44" value={conferma.data} max={oggiRoma()} onChange={e => setConferma(c => ({ ...c, data: e.target.value }))} />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {TIPS.filter(t => (data[t.key]?.documento?.totale || 0) > 0).map(t => (
-                    <div key={t.key}>
-                      <label className="text-xs block mb-1 text-foreground">Fattura {t.label} (facoltativo)</label>
-                      <Input placeholder="numero" value={conferma.numeri[t.key] || ''} onChange={e => setConferma(c => ({ ...c, numeri: { ...c.numeri, [t.key]: e.target.value } }))} />
-                    </div>
-                  ))}
+                <div>
+                  <label className="text-xs block mb-1 text-foreground">Fattura {daChiudere?.label} (facoltativo)</label>
+                  <Input placeholder="numero" className="w-56" value={conferma.numero} onChange={e => setConferma(c => ({ ...c, numero: e.target.value }))} />
                 </div>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Annulla</AlertDialogCancel>
-            <AlertDialogAction disabled={!conferma.data} onClick={() => { setShowChiudi(false); cambiaStato('chiudi', (t) => ({ conferma: { data: conferma.data, numero: conferma.numeri[t.key] || '' } })); }}>Conferma e chiudi</AlertDialogAction>
+            <AlertDialogAction disabled={!conferma.data} onClick={() => { const t = daChiudere; setDaChiudere(null); cambiaStato(t, 'chiudi', { conferma: { data: conferma.data, numero: conferma.numero || '' } }); }}>Conferma e chiudi</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={showRiapri} onOpenChange={setShowRiapri}>
+      <AlertDialog open={!!daRiaprire} onOpenChange={(v) => { if (!v) setDaRiaprire(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Riaprire {mese} {anno}?</AlertDialogTitle>
+            <AlertDialogTitle>Riaprire {daRiaprire?.label} di {mese} {anno}?</AlertDialogTitle>
             <AlertDialogDescription>
-              I documenti tornano allo stato "elaborata" e il mese si può rielaborare. La riapertura resta scritta nelle note di ogni documento: chi, quando e da che stato.
+              Il documento torna allo stato "elaborata" e si può rielaborare. La riapertura resta scritta nelle sue note: chi, quando e da che stato. Gli altri canali restano come sono.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Annulla</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { setShowRiapri(false); cambiaStato('riapri'); }}>Riapri</AlertDialogAction>
+            <AlertDialogAction onClick={() => { const t = daRiaprire; setDaRiaprire(null); cambiaStato(t, 'riapri'); }}>Riapri</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

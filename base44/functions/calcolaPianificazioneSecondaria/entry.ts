@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
 import { fineProgrammazione } from "../../shared/fineProgrammazione.ts";
-import { oggiRoma } from "../../shared/giornoItaliano.ts";
+import { oggiRoma, giornoRoma, annoRoma } from "../../shared/giornoItaliano.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { quoteDaStoccaggio } from "../../shared/rotteConferimenti.ts";
@@ -18,17 +18,18 @@ const KG_PER_VIAGGIO = 13500;
 const annoRiferimento = () => Number(oggiRoma().slice(0, 4));
 const dataFineDefault = () => fineProgrammazione(annoRiferimento()).data;
 
-function getMonday(date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d;
-}
-
-function dateStr(d) { return d.toISOString().split('T')[0]; }
-function yearOf(dt) { if (!dt) return null; const d = new Date(dt); return d.getFullYear(); }
+// Settimane e anni si contano sul giorno italiano della fine trasporto, come
+// stringhe 'AAAA-MM-GG' con l'aritmetica in UTC che non ha ora legale.
+// getMonday e yearOf lavoravano nel fuso del server: un trasporto finito lunedi'
+// 14/09 e salvato a mezzanotte italiana (13/09 22:00Z) finiva nella settimana
+// del 07/09, che risultava "congelata" con kg in piu' e veniva salvata cosi' in
+// PianificazioneSettimanale.
+const aUtc = (g) => new Date(Date.UTC(+g.slice(0, 4), +g.slice(5, 7) - 1, +g.slice(8, 10)));
+function piuGiorni(g, n) { const d = aUtc(g); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+const lunediDi = (g) => piuGiorni(g, -((aUtc(g).getUTCDay() + 6) % 7));
+// Il lunedi' della settimana in cui e' finito il trasporto; null se la data manca.
+const settimanaDi = (r) => { const g = giornoRoma(r.trasporto_finito_il); return g ? lunediDi(g) : null; };
+const yearOf = (dt) => annoRoma(dt);
 function statoNorm(s) { return String(s || '').toLowerCase().trim(); }
 function tipoNorm(s) { return String(s || '').toLowerCase().trim(); }
 
@@ -84,22 +85,24 @@ export default async function(req) {
     const impNormMap = {};
     for (const imp of impianti) impNormMap[normalizzaRagioneSociale(imp.nome_impianto)] = imp;
 
-    // Settimane: dal lunedì della settimana corrente fino al 18/12
-    const oggi = new Date();
-    const dataFine = new Date(dataFineDefault() + 'T00:00:00');
-    let cur = getMonday(oggi);
+    // Settimane: dal lunedì della settimana corrente (in Italia) fino alla fine
+    // della programmazione
+    const dataFine = dataFineDefault();
     const settimane = [];
     let wn = 1;
-    while (cur <= dataFine) {
-      const ws = new Date(cur);
-      const we = new Date(cur); we.setDate(we.getDate() + 6);
-      if (we > dataFine) we.setTime(dataFine.getTime());
-      settimane.push({ numero: wn, data_inizio: dateStr(ws), data_fine: dateStr(we), mese: MESI[ws.getMonth()] });
-      cur = new Date(cur); cur.setDate(cur.getDate() + 7);
+    for (let cur = lunediDi(oggiRoma()); cur <= dataFine; cur = piuGiorni(cur, 7)) {
+      const fineSett = piuGiorni(cur, 6);
+      settimane.push({ numero: wn, data_inizio: cur, data_fine: fineSett > dataFine ? dataFine : fineSett, mese: MESI[Number(cur.slice(5, 7)) - 1] });
       wn++;
     }
 
-    // Filtra record 2026 terminati con trasporto_finito_il presente
+    // Terminati senza una fine trasporto leggibile: non si collocano in nessuna
+    // settimana e in nessun anno (mai ripiegando sulla chiusura), si contano per
+    // dirlo fra le anomalie.
+    const senzaFine = (righe) => righe.filter(r => statoNorm(r.stato) === 'terminato' && !giornoRoma(r.trasporto_finito_il)).length;
+    const senzaFineTrasporto = { primarie: senzaFine(primarie), secondarie: senzaFine(secondarie) };
+
+    // Terminati dell'anno di lavoro, per il giorno italiano della fine trasporto
     const prim2026 = primarie.filter(r => {
       if (statoNorm(r.stato) !== 'terminato') return false;
       if (!r.trasporto_finito_il) return false;
@@ -153,6 +156,12 @@ export default async function(req) {
 
     const result = [];
     const anomalie = [];
+    if (senzaFineTrasporto.primarie || senzaFineTrasporto.secondarie) {
+      anomalie.push({
+        tipo: 'senza_fine_trasporto',
+        testo: `Terminati senza data di fine trasporto, esclusi dal consuntivo e dalle settimane: ${senzaFineTrasporto.primarie} primarie di rete e ${senzaFineTrasporto.secondarie} secondarie di rete.`,
+      });
+    }
 
     // Uno stoccaggio che spedisce a piu' impianti ha un target di raccolta solo,
     // e quel target non puo' comparire per intero sotto ciascuno: Nappi Sud, con
@@ -223,8 +232,7 @@ export default async function(req) {
 
           const execByWeek = {};
           for (const r of c.record) {
-            const monday = getMonday(new Date(r.trasporto_finito_il));
-            const key = dateStr(monday);
+            const key = settimanaDi(r);
             execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
           }
 
@@ -297,8 +305,7 @@ export default async function(req) {
           consuntivoSec = fSec.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
           consuntivo = consuntivoSec;
           for (const r of fSec) {
-            const monday = getMonday(new Date(r.trasporto_finito_il));
-            const key = dateStr(monday);
+            const key = settimanaDi(r);
             execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
           }
           // Riparto plafond residuo proporzionale al residuo target di questo impianto
@@ -346,8 +353,7 @@ export default async function(req) {
           consuntivoPrim = fPrim.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
           consuntivo = consuntivoPrim;
           for (const r of fPrim) {
-            const monday = getMonday(new Date(r.trasporto_finito_il));
-            const key = dateStr(monday);
+            const key = settimanaDi(r);
             execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
           }
           const ipotesi = f.ipotesi_mese_corrente || 0;
@@ -465,6 +471,7 @@ export default async function(req) {
 
     return Response.json({
       anomalie,
+      senza_fine_trasporto: senzaFineTrasporto,
       impianti: result,
       stoccaggi: stoccaggiResult,
       settimane,

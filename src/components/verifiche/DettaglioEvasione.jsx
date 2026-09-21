@@ -191,12 +191,11 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                 ))}
               </div>
             )}
+            {/* Il mese si valuta fino all'ultima fine trasporto di rete del file, mai
+                con margini ricavati dalla chiusura a portale (regola del 21/09/2026). */}
             <p className="text-xs text-muted-foreground">
-              Primarie caricate il {dataOraIt(c.primarie_caricate_il)}, con trasporti conclusi fino al {dataIt(c.dati_al)}.
-              {p && p.ritardo_chiusura_giorni > 0 && (
-                <> Dati completi fino al {dataIt(p.consolidato_al)}: questo raccoglitore chiude sul portale nove ritiri su dieci entro {p.ritardo_chiusura_giorni} giorni
-                dal trasporto, quindi sui giorni successivi una richiesta aperta può essere già ritirata e non genera alert.</>
-              )}
+              Primarie caricate il {dataOraIt(c.primarie_caricate_il)}, con trasporti di rete conclusi fino al {dataIt(c.dati_al)}:
+              il mese si valuta fino a quel giorno. Una richiesta già ritirata ma non ancora chiusa sul portale risulta aperta.
             </p>
 
             {alert.length > 0 && (
@@ -235,7 +234,7 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                   {p.valore_lista_kg !== undefined ? <Riga etichetta="Valore della lista" valore={`circa ${tonnellate(p.valore_lista_kg)} t tra evase e aperte`} /> : null}
                   <Riga etichetta="Raccolto finora" valore={`${tonnellate(c.raccolto_kg)} t${p.target_kg ? ` · ${Math.round((c.raccolto_kg / p.target_kg) * 100)}%` : ''}`} />
                   <Riga etichetta="Giorni lavorativi" valore={`${p.giorni_trascorsi} trascorsi su ${p.giorni_totali}, ${p.giorni_residui} residui${p.lavora_sabato ? ', sabato compreso' : ''}`} />
-                  <Riga etichetta={p.ritardo_chiusura_giorni > 0 ? 'Ritmo del mese, dati completi' : 'Ritmo del mese'} valore={p.ritmo_mese_kg_giorno !== null ? `${tonnellate(p.ritmo_mese_kg_giorno)} t al giorno` : '—'} />
+                  <Riga etichetta="Ritmo del mese" valore={p.ritmo_mese_kg_giorno !== null ? `${tonnellate(p.ritmo_mese_kg_giorno)} t al giorno` : '—'} />
                   <Riga etichetta="Ritmo dell'anno" valore={p.ritmo_storico_kg_giorno ? `${tonnellate(p.ritmo_storico_kg_giorno)} t al giorno` : '—'} />
                   <Riga etichetta="Proiezione a fine mese" valore={`${tonnellate(p.proiezione_kg)} t${p.percentuale_proiezione !== null ? ` · ${p.percentuale_proiezione}%` : ''}`} />
                   <Riga etichetta="Richieste aperte" valore={`${c.aperte}, circa ${tonnellate(p.kg_richieste_aperte)} t`} />

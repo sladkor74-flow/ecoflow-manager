@@ -25,6 +25,8 @@ import { formatoKg } from "./formato.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { unisciQuote, ticketDi } from "./formulari.ts";
+import { giornoRoma } from "./giornoItaliano.ts";
+import { giornoMovimento } from "./movimenti.ts";
 
 export const GIORNI_CONSERVAZIONE = 40;
 const FINESTRA_ABBINAMENTO_GIORNI = 21;
@@ -74,12 +76,40 @@ export function intervalloSettimana(anno, settimana) {
   return { inizio: lunedi < primo ? primo : lunedi, fine: domenica > ultimo ? ultimo : domenica };
 }
 
-// Data di un movimento del gestionale. Le date importate conservano l'ora
-// indicata dal portale espressa come UTC: la parte di data e' il giorno reale.
-function ymd(v) {
-  if (!v) return null;
-  const s = String(v).slice(0, 10);
-  return /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(s) ? s : null;
+// Il giorno di un movimento del gestionale e' quello italiano (giornoItaliano.ts),
+// come in Dichiarazioni, Giacenze e Report Mensile: tagliare la stringa UTC
+// mette nel giorno prima un trasporto finito a mezzanotte italiana (22:00Z), e
+// la verifica segnalava all'impianto una data di fine trasporto sbagliata che
+// sbagliata non era.
+
+// === caricamenti ===
+
+// I tipi di file che riscrivono gli archivi letti dalle verifiche.
+export const TIPI_CARICAMENTO_MOVIMENTI = ['primarie', 'primarie_rete', 'primarie_aci', 'secondarie', 'extra_raccolta'];
+
+// created_date arriva in UTC senza la Z finale: si rimette, poi si prende il giorno italiano.
+const giornoCaricamento = (v) => (v ? giornoRoma(String(v).replace(/(Z|[+-]\d{2}:?\d{2})?$/, 'Z')) : '');
+
+/**
+ * Lo stato dei caricamenti di ogni tipo: l'ultimo riuscito, che spiega un
+ * gestionale non ancora aggiornato, e quello rimasto aperto, se l'ultimo del suo
+ * tipo e' ancora "in_corso". Un archivio che si sta riscrivendo (o che e' rimasto
+ * a meta' per un caricamento interrotto) non e' una base su cui rifare un
+ * confronto: l'esito verrebbe calcolato su un archivio a meta'.
+ */
+export async function statoCaricamenti(base44, tipi = TIPI_CARICAMENTO_MOVIMENTI) {
+  const Log = base44.asServiceRole.entities.UploadLog;
+  const ultimi = {};
+  const inCorso = [];
+  await Promise.all(tipi.map(async (tipo) => {
+    const righe = (await Log.filter({ tipo_file: tipo }, '-created_date', 5)) || [];
+    const buono = righe.find(r => r.esito !== 'errore' && r.esito !== 'in_corso');
+    if (buono) ultimi[tipo] = { data: giornoCaricamento(buono.created_date), nome_file: String(buono.nome_file || '').trim() };
+    const aperto = righe[0] && righe[0].esito === 'in_corso' ? righe[0] : null;
+    if (aperto) inCorso.push({ tipo_file: tipo, data: giornoCaricamento(aperto.created_date), nome_file: String(aperto.nome_file || '').trim(), utente: aperto.utente || '' });
+  }));
+  inCorso.sort((a, b) => a.tipo_file.localeCompare(b.tipo_file));
+  return { ultimi, in_corso: inCorso };
 }
 
 // Data scritta in un report: seriale Excel, gg/mm/aaaa con o senza ora,
@@ -269,8 +299,8 @@ function movimento(r, entita) {
     fir: String(r.numero_fir || ''),
     firN: normalizzaFir(r.numero_fir),
     kg: Math.round(Number(r.peso_effettivo) || 0),
-    inizio: ymd(r.trasporto_iniziato_il),
-    fine: ymd(r.trasporto_finito_il),
+    inizio: giornoRoma(r.trasporto_iniziato_il) || null,
+    fine: giornoMovimento(r) || null,
     produttore: String((secondaria ? (r.stoccaggio || r.ragione_sociale) : (r.produttore || r.ragione_sociale)) || ''),
     punto_raccolta: secondaria ? '' : String(r.punto_di_raccolta || ''),
     codice_pdr: String((entita === 'Secondaria' ? r.id_stoccaggio : (secondaria ? '' : r.id_pdr)) ?? ''),
@@ -324,7 +354,10 @@ export async function caricaMovimenti(base44) {
     anagrafica.set(k, f);
     if (f.interno) interni.add(k);
   }
-  return { movimenti, interni, anagrafica };
+  // Gli archivi cosi' come sono, annullati compresi: chi dopo un caricamento
+  // rifa' anche le quadrature FIR li riusa invece di rileggerli.
+  const archivi = Object.fromEntries(nomi.map((n, i) => [n, elenchi[i]]));
+  return { movimenti, interni, anagrafica, archivi };
 }
 
 // Che cosa rappresenta un movimento per il sito verificato: un ingresso e' una
@@ -336,8 +369,14 @@ export function relazioneConSito(m, chiave) {
   return null;
 }
 
+export const CANALI_VERIFICA = ['rete', 'aci', 'extra'];
+
 /**
- * Impianti e stoccaggi attivi nell'anno, con ingressi e uscite della settimana.
+ * Impianti e stoccaggi attivi nell'anno, con ingressi e uscite della settimana
+ * canale per canale: { canale, ingressi, kg_ingressi, uscite, kg_uscite }, solo
+ * i canali che hanno movimenti. Un numero unico sommava primarie di rete, ACI ed
+ * extra raccolta, e non si poteva confrontare ne' col target di rete ne' col
+ * report ACI dell'impianto.
  */
 export function soggettiDellaSettimana({ movimenti, interni, anagrafica }, anno, settimana) {
   const { inizio, fine } = intervalloSettimana(anno, settimana);
@@ -358,22 +397,32 @@ export function soggettiDellaSettimana({ movimenti, interni, anagrafica }, anno,
     } else tocca(m.destinatario.trim(), m.chiaveDest, m.tipo_destinazione === 'stoc' ? 'stoccaggio' : 'trattamento');
   }
 
+  const settimanali = movimenti.filter(m => m.fine >= inizio && m.fine <= fine);
   const righe = [];
   for (const s of soggetti.values()) {
     const f = anagrafica.get(s.chiave);
     let nome = f && f.ragione_sociale ? f.ragione_sociale : '';
     if (!nome) for (const n of s.nomi.keys()) if (n.length > nome.length) nome = n;
-    const settimanali = movimenti.filter(m => m.fine >= inizio && m.fine <= fine);
-    const ingressi = settimanali.filter(m => relazioneConSito(m, s.chiave) === 'ingresso');
-    const uscite = settimanali.filter(m => relazioneConSito(m, s.chiave) === 'uscita');
+    const canali = [];
+    for (const canale of CANALI_VERIFICA) {
+      const delCanale = settimanali.filter(m => m.canale === canale);
+      const ingressi = delCanale.filter(m => relazioneConSito(m, s.chiave) === 'ingresso');
+      const uscite = delCanale.filter(m => relazioneConSito(m, s.chiave) === 'uscita');
+      if (!ingressi.length && !uscite.length) continue;
+      canali.push({
+        canale,
+        ingressi: ingressi.length,
+        kg_ingressi: ingressi.reduce((t, m) => t + m.kg, 0),
+        uscite: uscite.length,
+        kg_uscite: uscite.reduce((t, m) => t + m.kg, 0),
+      });
+    }
     righe.push({
       chiave: s.chiave,
       nome,
       ruoli: ['trattamento', 'stoccaggio'].filter(r => s.ruoli.has(r)),
-      ingressi: ingressi.length,
-      kg_ingressi: ingressi.reduce((t, m) => t + m.kg, 0),
-      uscite: uscite.length,
-      kg_uscite: uscite.reduce((t, m) => t + m.kg, 0),
+      canali,
+      movimentato: canali.length > 0,
     });
   }
   righe.sort((a, b) => a.nome.localeCompare(b.nome, 'it'));
@@ -703,6 +752,10 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   const anomalie = esiti.filter(e => e.anomalia).length + assenti.length;
 
   const conta = (e) => esiti.filter(x => x.esito === e).length;
+  // Nel riepilogo non ci sono piu' ingressi, uscite e pesi complessivi: sommavano
+  // primarie e secondarie di rete, ACI ed extra raccolta in un numero solo. Quanti
+  // formulari e quanti chili ci sono, per movimentazione e canale, lo dice la
+  // quadratura qui sopra.
   return {
     esiti,
     assenti,
@@ -719,12 +772,7 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       non_trovate: conta('non_trovata'),
       duplicate: conta('duplicata'),
       assenti_nel_report: assenti.length,
-      ingressi_gestionale: ingressi.length,
-      peso_ingressi_kg: ingressi.reduce((t, m) => t + m.kg, 0),
-      uscite_gestionale: uscite.length,
-      peso_uscite_kg: uscite.reduce((t, m) => t + m.kg, 0),
       uscite_verificate: usciteVerificate,
-      peso_report_kg: esiti.reduce((t, e) => t + (e.report.kg || 0), 0),
       righe_escluse: escluse.length,
       peso_escluse_kg: escluse.reduce((t, e) => t + (e.kg || 0), 0),
     },

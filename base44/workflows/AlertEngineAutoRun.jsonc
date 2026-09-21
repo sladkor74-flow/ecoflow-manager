@@ -1,15 +1,16 @@
 {
   "name": "Alert Engine Auto-Run",
-  "description": "Esegue automaticamente il motore di alert dopo ogni caricamento dati nei moduli Secondarie, Primarie (Rete/ACI), Terziarie e Assegnati",
+  "description": "Esegue il motore di alert quando un caricamento di Secondarie, Primarie (Rete/ACI e Assegnati), Terziarie e' concluso; dopo le primarie ricontrolla anche i target mensili. La riga del registro delle primarie nasce 'in_corso' mentre l'archivio si svuota e si riscrive, e prende l'esito solo alla fine: il motore parte li', su 'create' o su 'update', mai su un archivio in riscrittura. Parte su 'successo' e 'parziale' (caricamento finito: l'archivio e' quello che leggono tutti i moduli), non su 'in_corso' ne' su 'errore' (archivio vuoto o a meta').",
   "trigger": {
     "config": {
       "trigger_type": "entity",
       "entity_name": "UploadLog",
       "events": [
-        "create"
+        "create",
+        "update"
       ]
     },
-    "condition": "${ (.trigger.data.tipo_file // \"\") | IN(\"secondarie\",\"primarie_rete\",\"primarie_aci\",\"terziarie\",\"assegnati\",\"primarie\") }"
+    "condition": "${ ((.trigger.data.tipo_file // \"\") | IN(\"secondarie\",\"primarie_rete\",\"primarie_aci\",\"terziarie\",\"assegnati\",\"primarie\")) and ((.trigger.data.esito // \"\") | IN(\"successo\",\"parziale\")) }"
   },
   "definition": {
     "document": {
@@ -60,9 +61,41 @@
               "modulo": "primarie_aci"
             }
           },
-          "then": "end",
+          "then": "run_assegnati",
           "x-base44": {
             "title": "Alert su Primarie ACI"
+          }
+        }
+      },
+      {
+        "run_assegnati": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runAlertEngine",
+            "args": {
+              "modulo": "assegnati"
+            }
+          },
+          "then": "run_target",
+          "x-base44": {
+            "title": "Alert sugli Assegnati",
+            "description": "Il file unico delle primarie riscrive anche gli assegnati di rete"
+          }
+        }
+      },
+      {
+        "run_target": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkTargetAlerts",
+            "args": {
+              "crea_alerts": true
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Ricontrolla i target mensili",
+            "description": "Apre, aggiorna e chiude gli alert di target sul raccolto appena caricato, anche per il mese precedente"
           }
         }
       },

@@ -4,7 +4,7 @@
 // senza alterare la struttura sorgente.
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
 import { giornoRoma, annoRoma, meseRoma } from "./giornoItaliano.ts";
-import { settimanaIso } from "./movimenti.ts";
+import { settimanaIso, tempiRaccolta } from "./movimenti.ts";
 
 export { giornoRoma, annoRoma, meseRoma };
 
@@ -49,7 +49,7 @@ export function getClasseFromProdotto(prodotto) {
 
 // --- Enrichment ---
 
-// Entità per cui la "data riferimento" è l'immissione (Assegnati) vs la chiusura (tutte le altre).
+// Entità per cui la "data riferimento" è l'immissione (Assegnati) vs la fine del trasporto (tutte le altre).
 const ASSEGNATO_ENTITIES = new Set(['Assegnato']);
 
 /**
@@ -61,12 +61,11 @@ const ASSEGNATO_ENTITIES = new Set(['Assegnato']);
  * Contato sul 2026: succede su 96 primarie di rete (272,65 t), 2 ACI, una
  * secondaria e 65 terziarie su 99 (2.198,64 t).
  *
- * Vale in tutto il gestionale, per i conti come per i filtri. Fanno eccezione
- * soltanto due cose, ed e' giusto cosi':
- * - la giacenza a portale, perche' il portale conta un ordine quando lo chiude
- *   (vedi riepilogoDichiarazioni e calcolaGiacenze);
- * - i tempi di evasione, che misurano proprio la distanza fra immissione e
- *   chiusura.
+ * Vale in tutto il gestionale, per i conti come per i filtri, e non ha eccezioni
+ * (regola dell'utente, 21/09/2026): nemmeno le giacenze, perche' il piazzale
+ * cambia quando il camion arriva o parte, non quando il portale chiude la
+ * pratica; nemmeno i tempi di raccolta, che vanno dall'immissione alla fine del
+ * trasporto (tempiRaccolta in movimenti.ts). La chiusura si puo' solo mostrare.
  */
 export function dataPeriodo(record) {
   if (!record) return null;
@@ -123,27 +122,24 @@ export function enrichRecord(record, entityType) {
   // Sigla = provincia
   if (r.provincia) r.sigla = r.provincia.toUpperCase().trim();
 
-  // Nr di giorni (tempo evasione) - solo per entità con ordine_chiuso_il
-  if (!ASSEGNATO_ENTITIES.has(entityType) && r.ordine_immesso_il && r.ordine_chiuso_il) {
-    const d1 = new Date(r.ordine_immesso_il);
-    const d2 = new Date(r.ordine_chiuso_il);
-    if (!isNaN(d1.getTime()) && !isNaN(d2.getTime())) {
-      r.nr_giorni = Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24));
-    }
-  }
+  // Tempi di raccolta: dall'immissione alla FINE DEL TRASPORTO, sul giorno
+  // italiano (tempiRaccolta in movimenti.ts). Si misuravano fino alla chiusura a
+  // portale, e un raccoglitore puntuale risultava fuori tempo quando la pratica si
+  // chiudeva dopo. Il file Excel porta gia' Nr di Giorni e Raccolta nei tempi,
+  // con una regola sua: qui si ricalcolano sempre, e senza fine trasporto si
+  // svuotano invece di restare quelli del file.
+  if (!ASSEGNATO_ENTITIES.has(entityType)) {
+    const tempi = tempiRaccolta(r);
+    if (tempi && tempi.giorni != null) r.nr_giorni = tempi.giorni;
+    else if (r.nr_giorni != null) r.nr_giorni = null;
 
-  // Scadenza ordine (immissione + 30 giorni) e esito tempi - solo per PrimariaRete
-  if (entityType === 'PrimariaRete' && r.ordine_immesso_il) {
-    const d = new Date(r.ordine_immesso_il);
-    if (!isNaN(d.getTime())) {
-      d.setDate(d.getDate() + 30);
-      r.scadenza_ordine = d.toISOString();
-      if (r.ordine_chiuso_il) {
-        const chiusura = new Date(r.ordine_chiuso_il);
-        if (!isNaN(chiusura.getTime())) {
-          r.raccolta_nei_tempi = chiusura.getTime() <= d.getTime() ? 'OK' : 'DOPO SCADENZA';
-        }
-      }
+    // Scadenza (immissione + 30 giorni) ed esito, solo per le primarie di rete.
+    // La scadenza si salva a mezzogiorno UTC, che in Italia e' sempre lo stesso
+    // giorno: l'istante di immissione piu' 30 giorni, attraversando il cambio
+    // dell'ora legale, cadeva alle 23 italiane del giorno prima.
+    if (entityType === 'PrimariaRete') {
+      if (tempi) r.scadenza_ordine = `${tempi.scadenza}T12:00:00.000Z`;
+      r.raccolta_nei_tempi = tempi && tempi.esito ? tempi.esito : null;
     }
   }
 

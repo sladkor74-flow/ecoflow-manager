@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { filtraMovimenti } from "../../shared/movimenti.ts";
 
 // Raccolta per regione con i target mensili. I canali restano separati: il
 // raggiungimento del target si calcola solo sulla RETE, ACI si mostra a parte.
@@ -17,13 +18,11 @@ export default async function(req) {
     const mese = body.mese || '';
     const anno = body.anno || Number(oggiRoma().slice(0, 4));
 
+    // Anno e mese del giorno italiano della fine trasporto: letti in UTC, i
+    // ritiri del primo del mese salvati a mezzanotte italiana finivano nel mese
+    // prima e spostavano le percentuali di regione.
     const meseIdx = MESI.indexOf(mese);
-    const nelPeriodo = (r) => {
-      if (String(r.stato || '').toLowerCase().trim() !== 'terminato' || !r.trasporto_finito_il) return false;
-      const d = new Date(r.trasporto_finito_il);
-      if (isNaN(d.getTime()) || d.getUTCFullYear() !== Number(anno)) return false;
-      return meseIdx < 0 || d.getUTCMonth() === meseIdx;
-    };
+    const nelPeriodo = (righe) => filtraMovimenti(righe, { anno: Number(anno), ...(meseIdx >= 0 ? { mese: meseIdx } : {}) });
 
     const [reteTutte, aciTutte, targets] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.PrimariaRete, { stato: 'terminato' }),
@@ -31,8 +30,8 @@ export default async function(req) {
       base44.asServiceRole.entities.TargetMensile.filter(mese ? { mese, anno: Number(anno) } : { anno: Number(anno) }, '-created_date', 10000),
     ]);
 
-    const rete = reteTutte.filter(nelPeriodo);
-    const aci = aciTutte.filter(nelPeriodo);
+    const rete = nelPeriodo(reteTutte);
+    const aci = nelPeriodo(aciTutte);
 
     // Aggrega per regione
     const regioniMap = {};

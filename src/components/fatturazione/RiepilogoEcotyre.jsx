@@ -120,7 +120,16 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
   const tutte = data.anomalie || [];
   const senzaTariffa = tutte.filter(a => !a.tipo || a.tipo === 'senza_tariffa');
   const altre = tutte.filter(a => a.tipo && a.tipo !== 'senza_tariffa');
-  const tonnSenzaPrezzo = senzaTariffa.reduce((s, a) => s + (a.tonnellate || 0), 0);
+  // Le tonnellate senza prezzo si contano per canale: una somma unica di rete,
+  // ACI ed extra raccolta non appartiene a nessuna commessa.
+  const canaleDi = (a) => String(a.tipologia || 'N/D').toUpperCase();
+  const senzaPrezzoPerCanale = [...new Set(['RETE', 'ACI', 'EXTRA_RACCOLTA', ...senzaTariffa.map(canaleDi)])]
+    .map(c => {
+      const sue = senzaTariffa.filter(a => canaleDi(a) === c);
+      return { canale: c, combinazioni: sue.length, tonnellate: sue.reduce((s, a) => s + (a.tonnellate || 0), 0) };
+    })
+    .filter(x => x.combinazioni > 0);
+  const nomeCanale = (c) => ({ RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra Raccolta' }[c] || c);
 
   function renderBadge(badge) {
     if (!badge) return null;
@@ -172,7 +181,7 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
         <div className="border-2 border-destructive/40 bg-destructive/5 rounded-lg p-4">
           <div className="flex items-center gap-2 text-destructive font-semibold mb-2">
             <AlertTriangle className="w-5 h-5" />
-            <span>{senzaTariffa.length} combinazioni senza tariffa — {formatTonnellate(tonnSenzaPrezzo)} t senza prezzo</span>
+            <span>Combinazioni senza tariffa, per canale: {senzaPrezzoPerCanale.map(x => `${nomeCanale(x.canale)} ${x.combinazioni} (${formatTonnellate(x.tonnellate)} t senza prezzo)`).join(' · ')}</span>
           </div>
           <div className="space-y-1 max-h-48 overflow-y-auto">
             {senzaTariffa.map((a, i) => (

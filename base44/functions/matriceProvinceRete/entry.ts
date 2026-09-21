@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { eTerminato, periodoMovimento } from "../../shared/movimenti.ts";
 
 // Raccolta della RETE per provincia e mese: peso effettivo e numero di ritiri.
 //
@@ -16,11 +17,9 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
-const giorno = (v) => {
-  if (!v) return null;
-  const s = String(v).slice(0, 10);
-  return /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(s) ? s : null;
-};
+// Anno e mese vengono dal giorno italiano della fine trasporto (periodoMovimento):
+// tagliare la stringa UTC metteva un ritiro del 1 settembre a mezzanotte
+// italiana (31/08 22:00Z) nella colonna di agosto.
 
 export default async function(req) {
   try {
@@ -33,16 +32,16 @@ export default async function(req) {
 
     const anni = new Set();
     for (const r of record) {
-      const d = giorno(r.trasporto_finito_il);
-      if (d && String(r.stato || '').toLowerCase().trim() === 'terminato') anni.add(Number(d.slice(0, 4)));
+      const p = eTerminato(r) ? periodoMovimento(r) : null;
+      if (p) anni.add(p.anno);
     }
     const anno = Number(body.anno) || Math.max(...anni, Number(oggiRoma().slice(0, 4)));
 
     const province = new Map();
     for (const r of record) {
-      if (String(r.stato || '').toLowerCase().trim() !== 'terminato') continue;
-      const d = giorno(r.trasporto_finito_il);
-      if (!d || Number(d.slice(0, 4)) !== anno) continue;
+      if (!eTerminato(r)) continue;
+      const p = periodoMovimento(r);
+      if (!p || p.anno !== anno) continue;
       const sigla = String(r.provincia || r.sigla || '').toUpperCase().trim();
       if (!sigla) continue;
       if (!province.has(sigla)) {
@@ -50,9 +49,8 @@ export default async function(req) {
       }
       const riga = province.get(sigla);
       if (!riga.regione && r.regione) riga.regione = String(r.regione).trim();
-      const mese = Number(d.slice(5, 7)) - 1;
-      riga.kg[mese] += Math.round(Number(r.peso_effettivo) || 0);
-      riga.ritiri[mese] += 1;
+      riga.kg[p.mese_idx] += Math.round(Number(r.peso_effettivo) || 0);
+      riga.ritiri[p.mese_idx] += 1;
     }
 
     const righe = [...province.values()]

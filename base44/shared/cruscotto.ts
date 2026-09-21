@@ -11,8 +11,13 @@
 // restano separati anche qui.
 import { giornoRoma } from "./giornoItaliano.ts";
 import { divergenzeTargetImpianti, testoDivergenza } from "./targetImpianti.ts";
+import { eTerminato, giornoMovimento } from "./movimenti.ts";
+import { listaOrdini, evasioneOrdini, statoRichiesta } from "./richiesteEct.ts";
 
 export const MESI_CRUSCOTTO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+// I tre documenti di un mese della fatturazione attiva, uno per canale.
+export const CANALI_ATTIVA = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
+const NOMI_CANALI_ATTIVA = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 // Oltre questi giorni senza un caricamento riuscito un archivio si considera non aggiornato.
 export const GIORNI_DATI_VECCHI = 10;
 const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
@@ -52,24 +57,79 @@ export function statoCaricamenti(logs, oggi, adessoMs, tipi) {
   };
 }
 
-/** Lo stato dei mesi della fatturazione attiva: elaborato, prefattura caricata, chiuso. Solo i mesi gia' finiti. */
+/**
+ * Lo stato dei mesi della fatturazione attiva: elaborato, prefattura caricata,
+ * chiuso. Solo i mesi gia' finiti.
+ *
+ * Rete, ACI ed extra raccolta hanno ciascuno il suo documento e il suo ciclo di
+ * vita: lo stato del mese da solo non basta, perche' "elaborato" bastava che lo
+ * fosse un canale e uno stato "chiusa / approvata" non diceva quale dei due era
+ * indietro. Percio' accanto allo stato del mese c'e' quello di ogni canale, e
+ * `canali_mancanti` dice quali documenti mancano in un mese elaborato. I
+ * documenti senza canale (tipologia) valgono solo per lo stato del mese.
+ */
 export function statoMesiAttiva(documenti, prefatture, anno, oggi) {
   const annoNum = Number(anno);
   const ultimoFinito = Number(oggi.slice(0, 4)) > annoNum ? 11 : Number(oggi.slice(5, 7)) - 2;   // il mese in corso non e' ancora da fatturare
   const mesi = [];
+  const statoDi = (docs) => {
+    const stati = [...new Set(docs.map(d => d.stato))];
+    return !docs.length ? 'da elaborare' : stati.length === 1 ? stati[0] : stati.join(' / ');
+  };
   for (let m = 0; m <= ultimoFinito; m++) {
     const nome = MESI_CRUSCOTTO[m];
     const docs = (documenti || []).filter(d => d.tipo === 'ATTIVA' && Number(d.anno) === annoNum && d.mese === nome && !d.superato && d.stato !== 'bozza');
-    const stati = [...new Set(docs.map(d => d.stato))];
+    const conCanale = docs.some(d => CANALI_ATTIVA.includes(d.tipologia));
+    const canali = conCanale ? Object.fromEntries(CANALI_ATTIVA.map(k => {
+      const dk = docs.filter(d => d.tipologia === k);
+      return [k, { elaborato: dk.length > 0, stato: statoDi(dk), chiuso: dk.length > 0 && dk.every(d => d.stato === 'chiusa') }];
+    })) : null;
     mesi.push({
       mese: nome,
       elaborato: docs.length > 0,
-      stato: !docs.length ? 'da elaborare' : stati.length === 1 ? stati[0] : stati.join(' / '),
+      stato: statoDi(docs),
       chiuso: docs.length > 0 && docs.every(d => d.stato === 'chiusa'),
       prefattura: (prefatture || []).some(p => Number(p.anno) === annoNum && p.mese === nome && !p.superata),
+      canali,
+      canali_mancanti: canali ? CANALI_ATTIVA.filter(k => !canali[k].elaborato) : [],
     });
   }
   return mesi;
+}
+
+/**
+ * Quando e' finito il trasporto di ciascun ordine terminato: Map id_ordine ->
+ * giorno italiano della fine trasporto (il primo, se l'ordine compare piu'
+ * volte). Serve a ricalcolare l'esito delle richieste del consorzio. Un
+ * terminato senza fine trasporto non conta come ritirato: non si ripiega sulla
+ * chiusura a portale.
+ */
+export function terminatiPerRichiesteEct(movimenti) {
+  const terminati = new Map();
+  for (const o of movimenti || []) {
+    const id = String((o && o.id_ordine) || '').trim();
+    if (!id || !eTerminato(o)) continue;
+    const g = giornoMovimento(o);
+    if (g && (!terminati.has(id) || g < terminati.get(id))) terminati.set(id, g);
+  }
+  return terminati;
+}
+
+/** Gli ID ordine di tutte le richieste: quelli da cercare fra i terminati. */
+export const ordiniRichiesteEct = (richieste) => [...new Set((richieste || []).flatMap(r => listaOrdini(r)))];
+
+/**
+ * L'esito di una richiesta del consorzio sui ritiri di adesso. esito ed
+ * evasione_rilevata_il salvati su RichiestaEct si riscrivono solo quando si
+ * ricarica il foglio delle richieste: un ritiro arrivato dopo, con le primarie,
+ * lasciava la richiesta "aperta" e "oltre il termine" finche' qualcuno non
+ * ricaricava il file ECT. Ogni caricamento deve aggiornare tutto, quindi con i
+ * terminati di oggi l'esito si rifa' qui. Senza terminati resta quello salvato.
+ */
+export function esitoRichiestaEct(r, terminati) {
+  if (!terminati) return r.esito || statoRichiesta(r);
+  const ev = evasioneOrdini(listaOrdini(r), terminati);
+  return statoRichiesta({ ...r, evasione_rilevata_il: ev.ultima });
 }
 
 const GRAVITA = { critico: 0, attenzione: 1, info: 2 };
@@ -89,7 +149,9 @@ export function nomeRegola(v) {
  * L'elenco unico delle cose da gestire. Ogni voce: { area, gravita, titolo,
  * dettaglio, link }. dati: { oggi, adessoMs, anno, alertAperti, uploadLogs,
  * tipiFile, assegnatiRete, assegnatiAci, documenti, prefatture, riepilogoQualifica,
- * giacenzeSito, impiantiTarget, richiesteEct }.
+ * giacenzeSito, impiantiTarget, richiesteEct, terminatiEct? }. terminatiEct e'
+ * la Map di terminatiPerRichiesteEct sugli ordini delle richieste: quando c'e',
+ * l'esito delle richieste si ricalcola sui ritiri di oggi.
  */
 export function cruscotto(dati) {
   const { oggi, anno } = dati;
@@ -126,8 +188,14 @@ export function cruscotto(dati) {
   // Fatturazione attiva: mesi finiti e non ancora elaborati, o senza prefattura
   const mesiAttiva = statoMesiAttiva(dati.documenti, dati.prefatture, anno, oggi);
   const daElaborare = mesiAttiva.filter(m => !m.elaborato).map(m => m.mese);
-  const senzaPrefattura = mesiAttiva.filter(m => m.elaborato && !m.chiuso && !m.prefattura).map(m => m.mese);
+  // Un mese elaborato puo' avere un canale indietro: si dice quale, invece di
+  // darlo per elaborato perche' lo e' un altro canale.
+  const canaleMancante = mesiAttiva.filter(m => m.elaborato && m.canali_mancanti.length);
+  // La prefattura del portale copre solo rete e ACI: la chiede un mese in cui
+  // uno dei due e' elaborato e non ancora chiuso, non l'extra raccolta.
+  const senzaPrefattura = mesiAttiva.filter(m => m.elaborato && !m.prefattura && (m.canali ? ['RETE', 'ACI'].some(k => m.canali[k].elaborato && !m.canali[k].chiuso) : !m.chiuso)).map(m => m.mese);
   if (daElaborare.length) voce('Fatturazione attiva', 'attenzione', `${daElaborare.length} ${daElaborare.length === 1 ? 'mese finito non ancora elaborato' : 'mesi finiti non ancora elaborati'}`, daElaborare.join(', '), '/fatturazione');
+  if (canaleMancante.length) voce('Fatturazione attiva', 'attenzione', `${canaleMancante.length} ${canaleMancante.length === 1 ? 'mese con un canale non elaborato' : 'mesi con un canale non elaborato'}`, canaleMancante.map(m => `${m.mese}: ${m.canali_mancanti.map(k => NOMI_CANALI_ATTIVA[k]).join(', ')}`).join(' · '), '/fatturazione');
   if (senzaPrefattura.length) voce('Fatturazione attiva', 'info', `Prefattura Ecotyre non caricata: ${senzaPrefattura.join(', ')}`, 'Il confronto con la prefattura si fa prima di esportare.', '/fatturazione');
 
   // Qualifica dei fornitori
@@ -141,11 +209,13 @@ export function cruscotto(dati) {
   // Target dell'impianto diverso fra Giacenze e Target & Status
   for (const d of divergenzeTargetImpianti(dati.giacenzeSito, dati.impiantiTarget, anno)) voce('Target', 'critico', `Target divergente: ${d.impianto}`, testoDivergenza(d), '/giacenze');
 
-  // Richieste del consorzio: scadute e ancora aperte, o ritirate e da confermare
+  // Richieste del consorzio: scadute e ancora aperte, o ritirate e da confermare.
+  // L'esito si rifa' sui terminati di oggi quando chi chiama li passa.
   let ectScadute = 0, ectDaConfermare = 0;
   for (const r of dati.richiesteEct || []) {
-    if (r.esito === 'da_confermare') ectDaConfermare++;
-    else if (r.esito === 'aperta' && r.scadenza && String(r.scadenza).slice(0, 10) < oggi) ectScadute++;
+    const esito = esitoRichiestaEct(r, dati.terminatiEct);
+    if (esito === 'da_confermare') ectDaConfermare++;
+    else if (esito === 'aperta' && r.scadenza && String(r.scadenza).slice(0, 10) < oggi) ectScadute++;
   }
   if (ectScadute) voce('Richieste ECT', 'critico', `${ectScadute} richieste del consorzio oltre il termine`, 'Ritiri chiesti per email da Ecotyre e non ancora evasi alla data indicata.', '/todo');
   if (ectDaConfermare) voce('Richieste ECT', 'info', `${ectDaConfermare} richieste risultano ritirate e aspettano la tua spunta`, '', '/todo');

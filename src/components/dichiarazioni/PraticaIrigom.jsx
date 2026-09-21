@@ -233,9 +233,12 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
       allegati: registro.allegati.filter(r => r.mese === mese),
       ddt: registro.cssc.righe.filter(r => r.mese === mese && r.nostra).map(r => ({ ddt: r.ddt, data: r.data, kg: r.kg })),
       portaleFineMeseKg: portaleFineMese ? portaleFineMese.kg : null,
+      // L'extra raccolta arrivata e non dichiarata con questa pratica e' ancora in
+      // impianto: il registro la conta in giacenza, il portale di rete no.
+      extraInGiacenzaKg: extraCandidati.filter(r => !sceltiExtra.has(r.id) && !dichiarataAMano(r)).reduce((s, r) => s + (Number(r.peso_effettivo) || 0), 0),
       lettura, extra, terziarie,
     });
-  }, [riga, registro, mese, portaleFineMese, lettura, extra, terziarie]);
+  }, [riga, registro, mese, portaleFineMese, lettura, extra, terziarie, extraCandidati, sceltiExtra, dichiarataAMano]);
 
   // --- I documenti forniti ---
   const aggiungiDocumenti = (lista) => {
@@ -459,7 +462,7 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                   <button type="button" className="text-left" disabled={!pratica.letture.giacenza} onClick={() => setLettura('giacenza')}>
                     <Riquadro titolo="Giacenza a portale a fine mese" tono={pratica.letture.usata === 'giacenza' ? 'scelto' : ''}
                       valore={pratica.letture.giacenza ? `${t(pratica.letture.giacenza.rete_kg)} t` : 'non disponibile'}
-                      nota={pratica.letture.giacenza ? `${t(pratica.letture.giacenza.portale_kg)} a portale meno ${t(pratica.letture.giacenza.resta_kg)} di cippato e interi` : 'serve il file degli ordini non dichiarati'} />
+                      nota={pratica.letture.giacenza ? `${t(pratica.letture.giacenza.portale_kg)} a portale meno ${t(pratica.letture.giacenza.resta_kg)} di cippato e interi di rete${pratica.letture.giacenza.extra_in_giacenza_kg ? ` (tolti ${t(pratica.letture.giacenza.extra_in_giacenza_kg)} di extra raccolta ancora in impianto)` : ''}` : 'serve il file degli ordini non dichiarati'} />
                   </button>
                   {pratica.letture.scarto_kg !== null && (
                     <Riquadro titolo="Scarto fra le due letture" valore={`${pratica.letture.scarto_kg > 0 ? '+' : ''}${formatKg(pratica.letture.scarto_kg)} kg`}

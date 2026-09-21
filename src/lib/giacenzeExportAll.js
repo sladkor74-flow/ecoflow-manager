@@ -19,14 +19,21 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
   const wb = XLSX.utils.book_new();
 
   // --- Foglio 1: Situazione ---
-  // Giacenza per classe in kg, come nel portale Ecotyre.
+  // Giacenza per classe in kg, come nel portale Ecotyre. Una colonna per canale:
+  // con una sola, uno stoccaggio usciva con rete e ACI in un numero e il TOTALE
+  // sommava la classe 9 degli stoccaggi alla rete degli impianti. La cella vuota
+  // vuol dire non calcolata (l'ACI di un impianto, uno stoccaggio senza
+  // rilevazione), non zero.
   const CLASSI = ['P', 'M', 'G1', 'G2', 'ACI'];
-  const sitHeaders = ['Sito', 'Ruolo', 'Giacenza a portale (t)', ...CLASSI.map(c => `${c} (kg)`), 'Rilevazione stoccaggio', 'Dati aggiornati al', 'In attesa di dichiarazione (t)', 'Ordini da dichiarare', 'Dichiarato (t)', 'Tipologia trattamento'];
+  const sitHeaders = ['Sito', 'Ruolo', 'Giacenza rete a portale (t)', 'Giacenza ACI (t)', 'Extra raccolta in piazzale, fuori portale (t)', ...CLASSI.map(c => `${c} (kg)`), 'Rilevazione stoccaggio', 'Dati aggiornati al', 'In attesa di dichiarazione (t)', 'Ordini da dichiarare', 'Dichiarato (t)', 'Tipologia trattamento'];
   const classi = (r) => CLASSI.map(c => (r.giacenza_classi_kg ? r.giacenza_classi_kg[c] || 0 : null));
+  const vuotaSeManca = (v) => (v === null || v === undefined ? '' : v);
   const sitRows = data.righe.map(r => [
     r.sito,
     r.tipo_destinazione === 'imp' ? 'Impianto' : 'Stoccaggio',
-    r.giacenza_portale_t,
+    vuotaSeManca(r.giacenza_rete_t),
+    vuotaSeManca(r.giacenza_aci_t),
+    vuotaSeManca(r.giacenza_extra_t),
     ...classi(r),
     r.tipo_destinazione === 'stoc' ? fmtData(r.data_rilevazione) : '',
     fmtData(r.aggiornata_al),
@@ -35,9 +42,10 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
     r.dichiarato_t,
     r.tipologia_trattamento || '',
   ]);
-  sitRows.push(['TOTALE', '', data.totali.giacenza_portale_t, ...classi(data.totali), '', '', data.totali.in_attesa_dichiarazione_t, data.totali.ordini_da_dichiarare, data.totali.dichiarato_t, '']);
+  // Il totale e' per canale, come le colonne: tre numeri, mai uno che li somma.
+  sitRows.push(['TOTALE', '', data.totali.giacenza_portale_t, data.totali.giacenza_aci_t || 0, data.totali.giacenza_extra_t || 0, ...classi(data.totali), '', '', data.totali.in_attesa_dichiarazione_t, data.totali.ordini_da_dichiarare, data.totali.dichiarato_t, '']);
   const ws1 = XLSX.utils.aoa_to_sheet([sitHeaders, ...sitRows]);
-  ws1['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 20 }, ...CLASSI.map(() => ({ wch: 11 })), { wch: 20 }, { wch: 18 }, { wch: 24 }, { wch: 18 }, { wch: 16 }, { wch: 20 }];
+  ws1['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 22 }, { wch: 16 }, { wch: 24 }, ...CLASSI.map(() => ({ wch: 11 })), { wch: 20 }, { wch: 18 }, { wch: 24 }, { wch: 18 }, { wch: 16 }, { wch: 20 }];
   XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws1), 'Situazione');
 
   // --- Foglio 2: Da dichiarare ---

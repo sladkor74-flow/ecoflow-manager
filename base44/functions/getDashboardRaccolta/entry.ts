@@ -1,7 +1,8 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
-import { PROV_TO_REGION, MESI } from "../../shared/raccoltoCalculator.ts";
+import { PROV_TO_REGION } from "../../shared/raccoltoCalculator.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { periodoMovimento } from "../../shared/movimenti.ts";
 
 // Restituisce aggregati raccolta per la Dashboard filtrati per mese/anno.
 // Payload: { mese?, anno? } — mese è il nome del mese (es. "Agosto"), anno è numerico.
@@ -33,10 +34,12 @@ export default async function(req) {
     const sumTon = (arr) => arr.reduce((s, r) => s + (r.peso_effettivo || 0), 0) / 1000;
 
     // Come in tutto il gestionale il periodo e' quello della fine trasporto, non i
-    // campi mese e anno del record.
-    const fine = (r) => { const d = r.trasporto_finito_il ? new Date(r.trasporto_finito_il) : null; return d && !isNaN(d.getTime()) ? d : null; };
-    const getAnno = (r) => { const d = fine(r); return d ? d.getUTCFullYear() : 0; };
-    const getMese = (r) => { const d = fine(r); return d ? MESI[d.getUTCMonth()] : ''; };
+    // campi mese e anno del record, e il giorno e' quello italiano per tutti e tre
+    // i canali: rete e ACI si leggevano in UTC mentre l'extra correggeva la
+    // mezzanotte italiana, e un ritiro del 1 ottobre finiva a settembre nella rete
+    // e a ottobre nell'extra. Senza fine trasporto un movimento non ha periodo.
+    const getAnno = (r) => { const p = periodoMovimento(r); return p ? p.anno : 0; };
+    const getMese = (r) => { const p = periodoMovimento(r); return p ? p.mese : ''; };
 
     const reteAnno = anni.length > 0 ? rete.filter(r => anni.includes(getAnno(r))) : rete;
     const aciAnno = anni.length > 0 ? aci.filter(r => anni.includes(getAnno(r))) : aci;
@@ -63,16 +66,14 @@ export default async function(req) {
       try { return (c ? JSON.parse(c.target_prezzo_regioni_json || '[]') : []).reduce((s, r) => s + (Number(r.target_t) || 0), 0); } catch { return 0; }
     };
     const previsione_aci = anni.reduce((s, a) => s + previsioneAciDi(a), 0);
-    const giornoExtra = (v) => {
-      const d = v ? new Date(v) : null;
-      if (!d || isNaN(d.getTime())) return null;
-      const italiana = (d.getUTCHours() === 22 || d.getUTCHours() === 23) && !d.getUTCMinutes() && !d.getUTCSeconds();
-      return italiana ? new Date(d.getTime() + 3 * 3600000) : d;
-    };
+    // L'extra raccolta: la raccolta dal produttore, non i trasferimenti in
+    // secondaria che stanno nello stesso archivio e riporterebbero lo stesso peso
+    // una seconda volta.
     const extra = (await fetchAll(base44.asServiceRole.entities.ExtraRaccolta, { stato: 'terminato' }))
-      .map(r => ({ r, d: giornoExtra(r.trasporto_finito_il) }))
-      .filter(({ d }) => d && (anni.length === 0 || anni.includes(d.getUTCFullYear())));
-    const raccolta_extra = extra.filter(({ d }) => mesi.length === 0 || mesi.includes(MESI[d.getUTCMonth()])).reduce((s, { r }) => s + (Number(r.peso_effettivo) || 0), 0) / 1000;
+      .filter(r => String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'secondaria')
+      .map(r => ({ r, p: periodoMovimento(r) }))
+      .filter(({ p }) => p && (anni.length === 0 || anni.includes(p.anno)));
+    const raccolta_extra = extra.filter(({ p }) => mesi.length === 0 || mesi.includes(p.mese)).reduce((s, { r }) => s + (Number(r.peso_effettivo) || 0), 0) / 1000;
     const raccolto_extra_anno = extra.reduce((s, { r }) => s + (Number(r.peso_effettivo) || 0), 0) / 1000;
 
     // Raccolta RETE vs ACI per regione (mese+anno selezionati)
@@ -115,7 +116,9 @@ export default async function(req) {
 
     return Response.json({
       kpi: { raccolta_rete, raccolta_aci, raccolta_extra, raccolto_rete_anno, raccolto_aci_anno, raccolto_extra_anno, previsione_aci, target, raggiungimento_pct },
-      per_regione: Object.values(regioniMap).sort((a, b) => (b.rete + b.aci) - (a.rete + a.aci)),
+      // In ordine di rete e poi di ACI: ordinare sulla somma dei due canali era
+      // gia' un totale che li mescolava.
+      per_regione: Object.values(regioniMap).sort((a, b) => (b.rete - a.rete) || (b.aci - a.aci)),
       target_vs_raccolto
     });
   } catch (error) {

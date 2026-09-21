@@ -141,13 +141,19 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
                   <th className="px-3 py-2 font-semibold text-right">G1 (kg)</th>
                   <th className="px-3 py-2 font-semibold text-right">G2 (kg)</th>
                   <th className="px-3 py-2 font-semibold text-right">ACI (kg)</th>
-                  <th className="px-3 py-2 font-semibold text-right">Totale (t)</th>
+                  <th className="px-3 py-2 font-semibold text-right">Rete (t)</th>
+                  <th className="px-3 py-2 font-semibold text-right">ACI (t)</th>
                   <th className="px-3 py-2 font-semibold">Azioni</th>
                 </tr>
               </thead>
               <tbody>
                 {righe.map(r => {
-                  const tot = (r.class1_kg || 0) + (r.class2_kg || 0) + (r.class3_kg || 0) + (r.class4_kg || 0) + (r.class9_kg || 0);
+                  // Rete (classi 1-4) e ACI (classe 9) non si sommano mai: un
+                  // "Totale" delle due metteva insieme due commesse diverse. Stessa
+                  // divisione di kgReteDiRilevazione / kgAciDiRilevazione in
+                  // base44/shared/giacenzaStoccaggi.ts.
+                  const rete = ['class1_kg', 'class2_kg', 'class3_kg', 'class4_kg'].reduce((s, c) => s + (Number(r[c]) || 0), 0);
+                  const aci = Number(r.class9_kg) || 0;
                   const obs = isObsolete(r.data_rilevazione);
                   return (
                     <tr key={r.id} className={`border-t hover:bg-muted/30 ${obs ? 'bg-amber-50' : ''}`}>
@@ -164,7 +170,8 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
                       <td className="px-3 py-2 text-right">{fmt(r.class3_kg, 0)}</td>
                       <td className="px-3 py-2 text-right">{fmt(r.class4_kg, 0)}</td>
                       <td className="px-3 py-2 text-right">{fmt(r.class9_kg, 0)}</td>
-                      <td className="px-3 py-2 text-right font-medium">{fmt(tot / 1000)}</td>
+                      <td className="px-3 py-2 text-right font-medium">{fmt(rete / 1000)}</td>
+                      <td className="px-3 py-2 text-right font-medium">{fmt(aci / 1000)}</td>
                       <td className="px-3 py-2">
                         {isAdmin && (
                           <div className="flex gap-1">
@@ -184,7 +191,7 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
                   );
                 })}
                 {righe.length === 0 && (
-                  <tr><td colSpan={10} className="px-3 py-4 text-center text-muted-foreground">Nessuna rilevazione. Usa "Importa rilevazione iniziale" o "Aggiungi rilevazione".</td></tr>
+                  <tr><td colSpan={11} className="px-3 py-4 text-center text-muted-foreground">Nessuna rilevazione. Usa "Importa rilevazione iniziale" o "Aggiungi rilevazione".</td></tr>
                 )}
               </tbody>
             </table>
@@ -197,7 +204,10 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
         onClose={() => setShowForm(false)}
         precompilato={precompilato}
         sitiSuggeriti={sitiSuggeriti}
-        onSaved={loadRilevazioni}
+        // Una rilevazione nuova cambia la giacenza a portale dello stoccaggio: si
+        // ricalcola la pagina (situazione, KPI, anomalie), non solo questo elenco,
+        // come dopo Elimina e Importa.
+        onSaved={async () => { await loadRilevazioni(); if (onSaved) onSaved(); }}
       />
 
       <StoricoRilevazioni

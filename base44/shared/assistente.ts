@@ -183,13 +183,24 @@ export async function situazioneGestionale(base44, oggi) {
   }
 
   // --- Giacenze ---
+  // Una colonna per canale, come le calcola il modulo Giacenze: la rete (impianti:
+  // fotografia del portale aggiornata ai caricamenti; stoccaggi: rilevazione delle
+  // classi 1-4 piu' i movimenti finiti dopo), l'ACI degli stoccaggi (classe 9) e
+  // l'extra raccolta in piazzale, che a portale non c'e'. Con una colonna sola lo
+  // stoccaggio di Irigom mostrava la classe 9 dentro la giacenza e poi di nuovo
+  // "ACI a parte". Il trattino vuol dire non calcolata, non zero: per esempio uno
+  // stoccaggio senza rilevazione.
   if (giacenze && Array.isArray(giacenze.righe) && giacenze.righe.length) {
-    righe.push('Impianti e stoccaggi (giacenza a portale | target totale | primarie RETE nell\'anno | % del target RETE | residuo | ACI a parte | Extra a parte):');
+    const tc = (v) => (v === null || v === undefined ? '-' : t1(v));
+    righe.push('Impianti e stoccaggi, un canale per colonna e mai sommati (giacenza RETE | giacenza ACI | extra raccolta in piazzale | target RETE | primarie RETE nell\'anno | % del target RETE | residuo RETE | conferito ACI nell\'anno | conferito extra raccolta nell\'anno):');
     for (const g of giacenze.righe.slice(0, 25)) {
-      righe.push(`- ${g.sito} (${g.tipo_destinazione === 'stoc' ? 'stoccaggio' : 'impianto'}): ${t1(g.giacenza_portale_t)} | ${g.target_totale_t ? t1(g.target_totale_t) : '-'} | ${t1(g.conferito_primarie_t)} | ${g.percentuale_target !== null && g.percentuale_target !== undefined ? p1(g.percentuale_target) + '%' : '-'} | ${g.residuo_t !== null && g.residuo_t !== undefined ? t1(g.residuo_t) : '-'} | ${t1(g.conferito_aci_t)} | ${t1(g.conferito_extra_t)}`);
+      righe.push(`- ${g.sito} (${g.tipo_destinazione === 'stoc' ? 'stoccaggio' : 'impianto'}): ${tc(g.giacenza_rete_t)} | ${tc(g.giacenza_aci_t)} | ${tc(g.giacenza_extra_t)} | ${g.target_totale_t ? t1(g.target_totale_t) : '-'} | ${t1(g.conferito_primarie_t)} | ${g.percentuale_target !== null && g.percentuale_target !== undefined ? p1(g.percentuale_target) + '%' : '-'} | ${g.residuo_t !== null && g.residuo_t !== undefined ? t1(g.residuo_t) : '-'} | ${t1(g.conferito_aci_t)} | ${t1(g.conferito_extra_t)}`);
     }
+    const tot = giacenze.totali || {};
+    righe.push(`Giacenze per canale, tre totali distinti: RETE ${t1(tot.giacenza_portale_t)} t; ACI negli stoccaggi ${t1(tot.giacenza_aci_t)} t; extra raccolta in piazzale ${t1(tot.giacenza_extra_t)} t.`);
+    // Il confronto col target lo fa calcolaGiacenze sulla sola giacenza di rete.
     const sopra = (giacenze.anomalie || []).filter(a => a.tipo === 'giacenza_sopra_target');
-    if (sopra.length) righe.push(`Siti con giacenza sopra il target: ${sopra.map(a => a.sito).join(', ')}.`);
+    if (sopra.length) righe.push(`Siti con giacenza RETE sopra il target: ${sopra.map(a => a.sito).join(', ')}.`);
   }
 
   // --- Alert e qualifica ---

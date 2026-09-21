@@ -9,11 +9,25 @@
 // Oltre alla settimana si guarda una fascia di quattro giorni prima e dopo: un
 // formulario che a portale cade nella settimana e nel gestionale no si spiega
 // quasi sempre con una fine trasporto a cavallo del lunedi' o della domenica.
+//
+// Il giorno di un movimento e' quello italiano della fine trasporto
+// (giornoMovimento), come in tutto il gestionale: tagliando la stringa UTC un
+// trasporto finito a mezzanotte italiana del lunedi' (22:00Z della domenica)
+// cadeva nella settimana prima.
+//
+// Qui sta anche il riconfronto di una quadratura gia' fatta con i movimenti di
+// adesso (rifaiQuadratura): l'esito salvato il giorno della stampa non si
+// aggiornava piu', e i formulari caricati dopo restavano "mancanti nel
+// gestionale" finche' qualcuno non premeva il pulsante.
 
 import { fetchAll, perPagina } from "./fetchAll.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { ticketDi } from "./formulari.ts";
 import { eAci } from "./canaleSecondaria.ts";
+import { eTerminato, giornoMovimento } from "./movimenti.ts";
+import { statoCaricamenti } from "./reportSettimanali.ts";
+import { FLUSSI, normalizzaLettura, confronta, sintesi } from "./quadraturaFir.ts";
+import { valoreCampo, leggiCampo, leggiJson } from "./testoLungo.ts";
 
 export const GIORNI_FASCIA = 4;
 
@@ -41,9 +55,11 @@ function piuGiorni(ymd, giorni) {
   return d.toISOString().slice(0, 10);
 }
 
-const soloData = (v) => (v ? String(v).slice(0, 10) : null);
-const eTerminato = (r) => String(r.stato || '').toLowerCase().trim() === 'terminato';
 const nome = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+
+// I tipi di file da cui vengono i flussi: dicono quando il gestionale e' stato
+// aggiornato e se un archivio si sta riscrivendo proprio adesso.
+export const TIPI_CARICAMENTO = [...new Set(FLUSSI_DATI.flatMap(f => f.caricamenti))];
 
 function chiaveCella(r) {
   return normalizzaRagioneSociale(r.destinazione) + '|' + normalizzaRagioneSociale(r.trasportatore);
@@ -56,9 +72,14 @@ function chiaveCella(r) {
  *
  * Se il filtro per intervallo non restituisce niente si rilegge tutto e si
  * filtra qui: meglio lento che dire che non ci sono movimenti quando ci sono.
+ *
+ * L'archivio confronta istanti UTC, il gestionale ragiona sul giorno italiano:
+ * la mezzanotte italiana del primo giorno e' ancora il giorno prima in UTC
+ * (22:00Z d'estate), quindi si chiede un giorno in piu' e il taglio vero lo fa
+ * il giorno italiano, in caricaGestionale.
  */
 async function nellaFascia(svc, entita, primo, ultimo) {
-  const filtro = { trasporto_finito_il: { $gte: primo, $lte: ultimo + 'T23:59:59.999Z' } };
+  const filtro = { trasporto_finito_il: { $gte: piuGiorni(primo, -1), $lte: ultimo + 'T23:59:59.999Z' } };
   try {
     const righe = await fetchAll(svc[entita], filtro, 'id');
     if (righe.length) return righe;
@@ -67,7 +88,7 @@ async function nellaFascia(svc, entita, primo, ultimo) {
   }
   const tutte = [];
   await perPagina(svc[entita], null, (r) => {
-    const d = soloData(r.trasporto_finito_il);
+    const d = giornoMovimento(r);
     if (d && d >= primo && d <= ultimo) tutte.push(r);
   });
   return tutte;
@@ -81,7 +102,7 @@ function formulario(r) {
     // quello che rende il conto leggibile invece che sospetto.
     ticket: ticketDi(r),
     kg: Math.round(Number(r.peso_effettivo) || 0),
-    data: soloData(r.trasporto_finito_il),
+    data: giornoMovimento(r) || null,
     impianto: nome(r.destinazione),
     trasportatore: nome(r.trasportatore),
   };
@@ -107,8 +128,11 @@ function contaDistinti(formulari) {
  * @param {object} base44   client con asServiceRole
  * @param {object} periodo  { inizio, fine } giorni compresi
  * @param {array}  soloFlussi chiavi da calcolare; se vuoto, tutte
+ * @param {object} pronti   { archivi, caricamenti } gia' letti, per chi rifa' piu'
+ *                          settimane di fila: archivi per entita', interi
+ *                          (annullati compresi), e l'esito di statoCaricamenti
  */
-export async function caricaGestionale(base44, periodo, soloFlussi = null) {
+export async function caricaGestionale(base44, periodo, soloFlussi = null, pronti = null) {
   const svc = base44.asServiceRole.entities;
   const { inizio, fine } = periodo;
   const primoFascia = piuGiorni(inizio, -GIORNI_FASCIA);
@@ -123,12 +147,18 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null) {
   }
 
   const perEntita = {};
-  await Promise.all(entita.map(async (e) => { perEntita[e] = await nellaFascia(svc, e, primoFascia, ultimoFascia); }));
+  if (pronti && pronti.archivi) {
+    // In ordine di id, come li restituisce la lettura per intervallo: dall'ordine
+    // dipendono i nomi mostrati per ogni cella.
+    for (const e of entita) perEntita[e] = [...(pronti.archivi[e] || [])].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  } else {
+    await Promise.all(entita.map(async (e) => { perEntita[e] = await nellaFascia(svc, e, primoFascia, ultimoFascia); }));
+  }
 
   for (const f of flussi) {
     const dati = raccolta[f.chiave];
     for (const r of (perEntita[f.entita] || [])) {
-      const d = soloData(r.trasporto_finito_il);
+      const d = giornoMovimento(r);
       if (!d || d < primoFascia || d > ultimoFascia) continue;
       const movimento = String(r.tipo_movimento || 'primaria').toLowerCase().trim();
       if (f.movimento && movimento !== f.movimento) continue;
@@ -155,14 +185,10 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null) {
     }
   }
 
-  // L'ultimo caricamento di ogni tipo di file: spiega un gestionale non aggiornato.
+  // L'ultimo caricamento di ogni tipo di file spiega un gestionale non aggiornato;
+  // uno ancora aperto dice che l'archivio si sta riscrivendo.
   const tipi = [...new Set(flussi.flatMap(f => f.caricamenti))];
-  const ultimi = {};
-  await Promise.all(tipi.map(async (t) => {
-    const righe = await svc.UploadLog.filter({ tipo_file: t }, '-created_date', 5);
-    const buono = (righe || []).find(r => r.esito !== 'errore' && r.esito !== 'in_corso');
-    if (buono) ultimi[t] = { data: soloData(buono.created_date), nome_file: nome(buono.nome_file) };
-  }));
+  const { ultimi, in_corso: aperti } = (pronti && pronti.caricamenti) || await statoCaricamenti(base44, tipi);
 
   // I conteggi si fanno alla fine, sui formulari distinti.
   for (const f of flussi) {
@@ -175,18 +201,162 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null) {
     dati.totale.n = totale;
   }
 
+  // Gli elenchi in un ordine che non dipende da come e' stato letto l'archivio:
+  // lo stesso confronto deve dare lo stesso esito, altrimenti il riconfronto lo
+  // crederebbe cambiato e lo riscriverebbe ogni volta.
+  const perData = (a, b) => String(a.data).localeCompare(String(b.data)) || a.fir.localeCompare(b.fir) || a.ordine.localeCompare(b.ordine);
   const out = {};
   for (const f of flussi) {
     const dati = raccolta[f.chiave];
     const caricamenti = f.caricamenti.map(t => ultimi[t]).filter(Boolean).sort((a, b) => String(b.data).localeCompare(String(a.data)));
     out[f.chiave] = {
-      celle: [...dati.celle.values()].map(c => ({ ...c, kg: Math.round(c.kg) })),
-      vicini: dati.vicini,
-      annullati: dati.annullati,
-      senza_peso: dati.senza_peso,
+      celle: [...dati.celle.values()].map(c => ({ ...c, kg: Math.round(c.kg), formulari: [...c.formulari].sort(perData) })),
+      vicini: [...dati.vicini].sort(perData),
+      annullati: [...dati.annullati].sort(perData),
+      senza_peso: [...dati.senza_peso].sort(perData),
       totale: { n: dati.totale.n, kg: Math.round(dati.totale.kg) },
       ultimo_caricamento: caricamenti[0] || null,
+      caricamento_in_corso: (aperti || []).find(a => f.caricamenti.includes(a.tipo_file)) || null,
     };
   }
   return out;
+}
+
+/** I caricamenti ancora aperti fra quelli dei flussi letti, senza doppioni. */
+export function caricamentiAperti(gestionale) {
+  const visti = new Map();
+  for (const dati of Object.values(gestionale || {})) {
+    const a = dati && dati.caricamento_in_corso;
+    if (a && !visti.has(a.tipo_file)) visti.set(a.tipo_file, a);
+  }
+  return [...visti.values()];
+}
+
+// === conformita' per canale ===
+
+export const CANALI_QUADRATURA = ['RETE', 'ACI', 'EXTRA RACCOLTA'];
+
+/**
+ * La conformita' della settimana canale per canale. sintesi() ne da' una sola
+ * per tutti i flussi, e una settimana in cui la rete quadrava al chilo ma
+ * l'extra raccolta aveva una riga diversa compariva "da sistemare" anche per la
+ * rete: un verdetto che mescolava i canali.
+ *
+ * La lettura del file conta per il canale delle sue tabelle; una tabella di cui
+ * non si e' capito il flusso potrebbe essere di qualunque canale, e allora la
+ * lettura e' in dubbio per tutti. Senza la lettura (esiti salvati prima) vale
+ * il controllo complessivo salvato con l'esito.
+ */
+export function sintesiPerCanale(esito, lettura = null) {
+  const tabelle = lettura && Array.isArray(lettura.tabelle) ? lettura.tabelle : null;
+  const senzaFlusso = !!tabelle && tabelle.some(t => !t.flusso);
+  const out = [];
+  for (const canale of CANALI_QUADRATURA) {
+    const flussi = ((esito && esito.flussi) || []).filter(f => f.canale === canale);
+    if (!flussi.length) continue;
+    const letturaVerificata = tabelle
+      ? !senzaFlusso && tabelle.filter(t => FLUSSI[t.flusso] && FLUSSI[t.flusso].canale === canale).every(t => t.quadra && t.fonte)
+      : !!esito.lettura_verificata;
+    const s = sintesi({ flussi, osservazioni: [], lettura_verificata: letturaVerificata, settimana_discorde: esito.settimana_discorde });
+    out.push({ canale, ...s, lettura_verificata: letturaVerificata });
+  }
+  return out;
+}
+
+/** Il confronto di una settimana con la conformita' canale per canale gia' dentro l'esito. */
+export function confrontaSettimana(lettura, gestionale, periodo) {
+  const esito = confronta(lettura, gestionale, periodo);
+  esito.per_canale = sintesiPerCanale(esito, lettura);
+  return esito;
+}
+
+// === righe lette dalla stampa ===
+
+/**
+ * Le righe da conservare per rifare il confronto senza rileggere il file, nella
+ * stessa forma che normalizzaLettura si aspetta dal file (conteggio, non n).
+ * Si salvavano le righe gia' normalizzate, col conteggio in "n": rilette,
+ * valevano zero formulari, e "ripeti il confronto" dava ogni cella in
+ * scostamento.
+ */
+export function righeDaConservare(lettura) {
+  const riga = (r) => ({ impianto: r.impianto, trasportatore: r.trasportatore, conteggio: r.n, kg: r.kg });
+  const subtotale = (s) => ({ impianto: s.impianto, conteggio: s.n, kg: s.kg });
+  return {
+    settimana: lettura.settimana_indicata, anno: lettura.anno_indicato, note: lettura.note,
+    tabelle: lettura.tabelle.map(t => ({
+      titolo: t.titolo, fonte: t.fonte, righe: t.righe.map(riga), subtotali: (t.subtotali || []).map(subtotale),
+      totale_conteggio: t.stampato.n, totale_kg: t.stampato.kg,
+    })),
+  };
+}
+
+/** Le righe conservate, pronte per normalizzaLettura: anche quelle salvate col conteggio in "n". */
+export function righeConservate(salvate) {
+  if (!salvate) return null;
+  const conConteggio = (x) => ({ ...x, conteggio: x.conteggio ?? x.n });
+  return {
+    ...salvate,
+    tabelle: (salvate.tabelle || []).map(t => ({
+      ...t, righe: (t.righe || []).map(conConteggio), subtotali: (t.subtotali || []).map(conConteggio),
+    })),
+  };
+}
+
+// === riconfronto ===
+
+/**
+ * Rifa' il confronto di una quadratura gia' fatta, sulle righe lette dalla
+ * stampa e con i movimenti di adesso, e lo salva se e' cambiato e se scrivi e'
+ * vero.
+ *
+ * I problemi di lettura restano quelli trovati quando il file e' stato letto
+ * (la seconda lettura, la ricostruzione dai subtotali): le righe conservate sono
+ * gia' quelle buone e da sole non li racconterebbero piu'.
+ *
+ * Non si rifa' niente mentre un archivio dei flussi si sta riscrivendo: un
+ * confronto su un archivio a meta' darebbe scostamenti che non esistono.
+ *
+ * Restituisce null se non c'e' niente da rifare, altrimenti { esito, sintesi,
+ * lettura_verificata, cambiato, salvato, verificata_il } oppure { rinviato }.
+ */
+export async function rifaiQuadratura(base44, q, gestionale, { scrivi = false } = {}) {
+  if (!q || q.stato !== 'completata' || !q.righe_json) return null;
+  const aperti = caricamentiAperti(gestionale);
+  if (aperti.length) return { rinviato: aperti };
+
+  const letto = righeConservate(await leggiJson(base44, 'QuadraturaFir', q, 'righe_json', null));
+  if (!letto) return null;
+  const lettura = normalizzaLettura(letto);
+  let letturaSalvata = null;
+  try { letturaSalvata = await leggiJson(base44, 'QuadraturaFir', q, 'lettura_json', null); } catch { /* restano i problemi di adesso */ }
+  if (letturaSalvata && Array.isArray(letturaSalvata.problemi)) lettura.problemi = letturaSalvata.problemi;
+
+  const periodo = { anno: q.anno, settimana: q.settimana, inizio: q.data_inizio, fine: q.data_fine };
+  const esito = confrontaSettimana(lettura, gestionale, periodo);
+  const s = sintesi(esito);
+  const testo = JSON.stringify(esito);
+  let prima = '';
+  try { prima = await leggiCampo(base44, 'QuadraturaFir', q, 'esito_json'); } catch { /* si riscrive */ }
+  const cambiato = testo !== prima;
+
+  let verificata_il = q.verificata_il || null;
+  let salvato = false;
+  if (cambiato && scrivi) {
+    verificata_il = new Date().toISOString();
+    // conformita' e incongruenti restano anche complessivi perche' li legge il
+    // PDF (quadraturaFirPdf.js); la pagina mostra quelli per canale.
+    await base44.asServiceRole.entities.QuadraturaFir.update(q.id, {
+      congruenti: s.congruenti,
+      incongruenti: s.incongruenti,
+      osservazioni: s.osservazioni,
+      non_confrontabili: s.non_confrontabili,
+      conformita: s.conformita,
+      lettura_verificata: !!lettura.verificata,
+      verificata_il,
+      esito_json: await valoreCampo(base44, 'QuadraturaFir', q.id, 'esito_json', testo),
+    });
+    salvato = true;
+  }
+  return { esito, sintesi: s, lettura_verificata: !!lettura.verificata, cambiato, salvato, verificata_il };
 }

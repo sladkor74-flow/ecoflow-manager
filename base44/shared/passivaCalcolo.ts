@@ -969,7 +969,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
               prestazione: 'TRASPORTO_SECONDARIA',
               classe: '—',
               ambito: `${tratta.stoccaggio} → ${tratta.destinazione}`,
-              tonnellate: round3(tonnellateRete + tonnellateAci),
+              // Le tonnellate del canale che si sta guardando: la somma di rete e
+              // ACI mescolava i due canali anche nell'elenco delle anomalie.
+              tonnellate: round3(tonnellateCanale),
             });
           }
         } else if (um === '€/t' || um === '€/kg') {

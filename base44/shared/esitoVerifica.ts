@@ -1,15 +1,22 @@
-// Salvataggio dell'esito di una verifica di report settimanale e alert sulle
-// dichiarazioni di "nessuna movimentazione".
+// Salvataggio dell'esito di una verifica di report settimanale, riconfronto con i
+// dati di adesso e alert sulle dichiarazioni di "nessuna movimentazione".
 //
 // Un impianto a volte non manda il report e scrive nell'email che nella settimana
 // non ci sono state movimentazioni. La dichiarazione si registra come una verifica
 // senza righe: se nel gestionale risultano formulari, la dichiarazione e' smentita
 // e si apre un alert. L'alert si chiude da solo quando i dati la confermano o
 // quando arriva il report vero.
+//
+// Un esito non si calcola una volta per tutte: il report di un impianto verificato
+// prima che si caricassero le primarie della sua settimana risultava "formulario
+// non presente nel gestionale" anche dopo il caricamento, finche' qualcuno non
+// ripeteva la verifica a mano. ricontrollaVerifiche rifa' il confronto sulle righe
+// gia' lette, dopo ogni caricamento e all'apertura della settimana.
 
 import { verificaReport, CATEGORIE_MOVIMENTO } from "./reportSettimanali.ts";
-import { valoreCampo } from "./testoLungo.ts";
+import { valoreCampo, leggiCampo } from "./testoLungo.ts";
 import { formatoKg } from "./formato.ts";
+import { oggiRoma } from "./giornoItaliano.ts";
 
 export const REGOLA_DICHIARAZIONE = 'verifica_nessuna_movimentazione';
 
@@ -17,6 +24,21 @@ export const eDichiarazione = (v) => v && v.file_tipo === 'dichiarazione';
 
 const chiaveAlert = (v) => `${v.anno}-S${String(v.settimana).padStart(2, '0')}-${v.soggetto_chiave}`;
 const it = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : '');
+
+// Piu' verifiche riscritte una dopo l'altra possono incontrare il limite di
+// richieste della piattaforma: si riprova dopo una pausa crescente.
+const ATTESE_RITENTATIVO = [5000, 12000, 25000];
+export async function conRitentativi(fn) {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const messaggio = String(e && e.message ? e.message : e);
+      if (!/rate limit|too many requests|429/i.test(messaggio) || i >= ATTESE_RITENTATIVO.length) throw e;
+      await new Promise(r => setTimeout(r, ATTESE_RITENTATIVO[i]));
+    }
+  }
+}
 
 /** Esito della verifica: confronto con i movimenti e campi da salvare. */
 export function calcolaEsito(verifica, righe, movimenti) {
@@ -29,26 +51,50 @@ export function calcolaEsito(verifica, righe, movimenti) {
   return esito;
 }
 
+// Il testo dell'esito cosi' come si salva: serve anche a capire se un nuovo
+// confronto cambia qualcosa rispetto a quello salvato.
+const testoEsito = (esito) => JSON.stringify({
+  esiti: esito.esiti, assenti: esito.assenti, escluse: esito.escluse, quadratura: esito.quadratura,
+});
+
+// Ingressi, uscite e pesi complessivi, di tutti i canali insieme. Il confronto non
+// li produce piu', perche' i canali non si sommano; DettaglioVerifica.jsx ed
+// esitoVerificaPdf.js pero' li leggono ancora dal record, e senza di loro
+// mostrerebbero zero ingressi dove ce ne sono. Si scrivono qui, in un punto solo,
+// ricavati dalla quadratura per movimentazione e canale, finche' quelle due
+// pagine non passano alle righe per canale: poi si tolgono.
+function campiDaDismettere(esito) {
+  const somma = (tipo, campo) => esito.quadratura.filter(q => q.tipo === tipo).reduce((t, q) => t + (q[campo] || 0), 0);
+  return {
+    ingressi_gestionale: somma('ingresso', 'formulari_gestionale'),
+    peso_ingressi_kg: somma('ingresso', 'kg_gestionale'),
+    uscite_gestionale: somma('uscita', 'formulari_gestionale'),
+    peso_uscite_kg: somma('uscita', 'kg_gestionale'),
+    peso_report_kg: esito.esiti.reduce((t, e) => t + ((e.report && e.report.kg) || 0), 0),
+  };
+}
+
 /** Scrive esito e riepilogo sulla verifica, poi aggiorna l'alert della dichiarazione. */
-export async function salvaEsito(base44, verifica, esito, conRitentativi = (fn) => fn()) {
+export async function salvaEsito(base44, verifica, esito, riprova = (fn) => fn()) {
   const id = verifica.id;
-  await conRitentativi(async () => base44.asServiceRole.entities.VerificaReport.update(id, {
+  const verificata_il = new Date().toISOString();
+  await riprova(async () => base44.asServiceRole.entities.VerificaReport.update(id, {
     stato: 'completata',
-    esito_json: await valoreCampo(base44, 'VerificaReport', id, 'esito_json', JSON.stringify({
-      esiti: esito.esiti, assenti: esito.assenti, escluse: esito.escluse, quadratura: esito.quadratura,
-    })),
+    esito_json: await valoreCampo(base44, 'VerificaReport', id, 'esito_json', testoEsito(esito)),
     ...esito.riepilogo,
-    verificata_il: new Date().toISOString(),
+    ...campiDaDismettere(esito),
+    verificata_il,
     errore: '',
   }));
-  await conRitentativi(() => aggiornaAlertDichiarazione(base44, verifica, esito));
+  await riprova(() => aggiornaAlertDichiarazione(base44, verifica, esito));
+  return verificata_il;
 }
 
 async function aggiornaAlertDichiarazione(base44, verifica, esito) {
   const Alert = base44.asServiceRole.entities.Alert;
   const record_id = chiaveAlert(verifica);
   const aperti = await Alert.filter({ regola_id: REGOLA_DICHIARAZIONE, record_id, stato: 'aperto' }, 'id', 100);
-  const oggi = new Date().toISOString().slice(0, 10);
+  const oggi = it(oggiRoma());
   const smentita = eDichiarazione(verifica) && esito.riepilogo.conformita !== 'piena';
 
   if (!smentita) {
@@ -59,18 +105,19 @@ async function aggiornaAlertDichiarazione(base44, verifica, esito) {
     return;
   }
 
+  // Formulari e chili si dicono per movimentazione e canale, mai in un totale:
+  // "5 formulari" con dentro tre di rete e due ACI e' un conteggio che somma i canali.
   const righe = esito.quadratura
     .filter(q => q.formulari_gestionale > 0)
     .map(q => `${q.nome}: ${q.formulari_gestionale} ${q.formulari_gestionale === 1 ? 'formulario' : 'formulari'}, ${formatoKg(q.kg_gestionale)} kg`);
   const tutti = esito.assenti || [];
   const elenco = tutti.slice(0, 30).map(a => `- ${a.fir}${a.ordine ? ` (ordine ${a.ordine})` : ''}, ${formatoKg(a.kg)} kg del ${it(String(a.fine))}`);
   if (tutti.length > elenco.length) elenco.push(`- e altri ${tutti.length - elenco.length}`);
-  const totale = esito.quadratura.reduce((t, q) => ({ n: t.n + q.formulari_gestionale, kg: t.kg + q.kg_gestionale }), { n: 0, kg: 0 });
   const dati = {
-    titolo: `${verifica.soggetto_nome}: dichiarata nessuna movimentazione nella settimana ${verifica.settimana}, ma risultano ${totale.n} formulari`,
+    titolo: `${verifica.soggetto_nome}: dichiarata nessuna movimentazione nella settimana ${verifica.settimana}, ma risultano formulari registrati`,
     descrizione: [
       `L'impianto ha comunicato che dal ${it(String(verifica.data_inizio))} al ${it(String(verifica.data_fine))} non ci sono state movimentazioni${verifica.nota ? ` (${verifica.nota})` : ''}.`,
-      `Nel gestionale risultano ${totale.n} formulari per ${formatoKg(totale.kg)} kg:`,
+      'Nel gestionale risultano, per movimentazione e canale:',
       ...righe.map(r => `- ${r}`),
       ...(elenco.length ? ['Formulari registrati:', ...elenco] : []),
       'Chiedere all\'impianto il report della settimana o una rettifica della comunicazione.',
@@ -92,24 +139,39 @@ async function aggiornaAlertDichiarazione(base44, verifica, esito) {
 }
 
 /**
- * Ripete il confronto delle dichiarazioni di nessuna movimentazione con i dati
- * attuali: un caricamento successivo puo' portare formulari della settimana.
- * Si scrive solo se l'esito cambia.
+ * Rifa' il confronto delle verifiche completate con i movimenti di adesso: le
+ * dichiarazioni di nessuna movimentazione e i report veri, sulle righe gia'
+ * lette dal file (righe_report_json), senza rileggere niente e senza agente.
+ *
+ * Si scrive solo se l'esito cambia, e solo con scrivi: chi guarda la settimana
+ * senza essere amministratore vede l'esito rifatto ma non lo salva.
+ *
+ * Restituisce, per ogni verifica riconfrontata, { id, soggetto_chiave, cambiato,
+ * salvato, campi } (i campi del riepilogo di adesso) oppure { id, errore }.
  */
-export async function ricontrollaDichiarazioni(base44, dichiarazioni, movimenti, conRitentativi = (fn) => fn()) {
-  let aggiornate = 0;
-  for (const v of dichiarazioni) {
-    if (!eDichiarazione(v) || v.stato !== 'completata') continue;
-    const esito = calcolaEsito(v, [], movimenti);
-    const r = esito.riepilogo;
-    const invariata = r.conformita === v.conformita && r.anomalie === v.anomalie
-      && r.ingressi_gestionale === v.ingressi_gestionale && r.uscite_gestionale === v.uscite_gestionale
-      && r.peso_ingressi_kg === v.peso_ingressi_kg && r.peso_uscite_kg === v.peso_uscite_kg;
-    if (invariata) continue;
-    await salvaEsito(base44, v, esito, conRitentativi);
-    aggiornate++;
+export async function ricontrollaVerifiche(base44, verifiche, movimenti, { scrivi = true, riprova = conRitentativi } = {}) {
+  const risultati = [];
+  for (const v of verifiche) {
+    if (!v || v.stato !== 'completata') continue;
+    const dichiarazione = eDichiarazione(v);
+    if (!dichiarazione && !v.righe_report_json) continue;
+    try {
+      const righe = dichiarazione ? [] : JSON.parse((await riprova(() => leggiCampo(base44, 'VerificaReport', v, 'righe_report_json'))) || '[]');
+      const esito = calcolaEsito(v, righe, movimenti);
+      const prima = await riprova(() => leggiCampo(base44, 'VerificaReport', v, 'esito_json'));
+      const cambiato = testoEsito(esito) !== prima || esito.riepilogo.conformita !== v.conformita;
+      const campi = { ...esito.riepilogo, stato: 'completata' };
+      let salvato = false;
+      if (cambiato && scrivi) {
+        campi.verificata_il = await salvaEsito(base44, v, esito, riprova);
+        salvato = true;
+      }
+      risultati.push({ id: v.id, soggetto_chiave: v.soggetto_chiave, cambiato, salvato, campi });
+    } catch (e) {
+      risultati.push({ id: v.id, soggetto_chiave: v.soggetto_chiave, errore: e && e.message ? e.message : String(e) });
+    }
   }
-  return aggiornate;
+  return risultati;
 }
 
 export { CATEGORIE_MOVIMENTO };

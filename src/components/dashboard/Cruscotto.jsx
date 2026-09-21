@@ -173,14 +173,23 @@ export default function Cruscotto({ isAdmin }) {
             <h2 className="font-heading font-semibold text-lg flex items-center gap-2"><FileCheck className="w-5 h-5 text-primary" /> Fatturazione attiva {dati.anno}: i mesi finiti</h2>
             <Link to="/fatturazione" className="text-xs text-primary hover:underline inline-flex items-center gap-1">Apri la fatturazione <ArrowRight className="w-3 h-3" /></Link>
           </div>
+          {/* Ogni canale ha il suo documento e il suo stato: un mese con la rete
+              elaborata e l'ACI no non e' "elaborato", e' indietro sull'ACI. */}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
-            {dati.mesi_attiva.map(m => (
-              <div key={m.mese} className={`border rounded-md px-3 py-2 text-xs ${m.chiuso ? 'bg-emerald-50 border-emerald-200' : m.elaborato ? 'bg-blue-50 border-blue-200' : 'bg-amber-50 border-amber-200'}`}>
-                <p className="font-medium text-sm">{m.mese}</p>
-                <p>{m.stato}</p>
-                <p className="text-muted-foreground">{m.prefattura ? 'prefattura caricata' : 'senza prefattura'}</p>
-              </div>
-            ))}
+            {dati.mesi_attiva.map(m => {
+              const indietro = !m.elaborato || (m.canali_mancanti || []).length > 0;
+              return (
+                <div key={m.mese} className={`border rounded-md px-3 py-2 text-xs ${m.chiuso ? 'bg-emerald-50 border-emerald-200' : indietro ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'}`}>
+                  <p className="font-medium text-sm">{m.mese}</p>
+                  {m.canali
+                    ? Object.entries(m.canali).map(([k, c]) => (
+                      <p key={k} className={c.elaborato ? '' : 'text-amber-800 font-medium'}>{NOMI_CANALE[k]}: {c.stato}</p>
+                    ))
+                    : <p>{m.stato}</p>}
+                  <p className="text-muted-foreground">{m.prefattura ? 'prefattura caricata' : 'senza prefattura'}</p>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

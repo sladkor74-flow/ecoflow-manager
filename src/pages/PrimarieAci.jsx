@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { annoOrdine, giornoOrdine } from '@/lib/movimenti';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { annoOrdine, giornoOrdine, giornoMovimento, meseOrdine } from '@/lib/movimenti';
+import { giornoRoma } from '@/lib/giornoItaliano';
 import { base44 } from '@/api/base44Client';
 import { Loader2, RefreshCw, Truck, Factory, Package, Filter, X } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -22,9 +23,14 @@ const DETAIL_COLUMNS = [
   { key: 'peso_effettivo', label: 'Kg', format: 'number' },
   { key: 'mese', label: 'Mese' },
   { key: 'trasportatore', label: 'Trasportatore' },
-  { key: 'ordine_chiuso_il', label: 'Chiuso il', format: 'date' },
+  { key: 'fine_trasporto', label: 'Fine trasporto', format: 'date' },
   { key: 'stato', label: 'Stato' },
+  // la chiusura a portale si mostra soltanto: non ordina e non filtra niente
+  { key: 'ordine_chiuso_il', label: 'Chiuso il', format: 'date' },
 ];
+
+// Le date si mostrano come giorno italiano, 'GG/MM/AAAA'.
+const dataIt = (v) => { const g = giornoRoma(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
 
 export default function PrimarieAci() {
   const [records, setRecords] = useState([]);
@@ -53,6 +59,17 @@ export default function PrimarieAci() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Mese e giorno di ogni ordine si ricavano una volta per caricamento dalla fine
+  // del trasporto (movimenti.js; per chi non l'ha, l'immissione): il campo mese
+  // salvato puo' venire da un'importazione vecchia, quando il riferimento era la
+  // chiusura a portale, e filtro per mese e riepilogo mensile lo usavano.
+  const righe = useMemo(() => records.map(r => ({
+    ...r,
+    giorno_ordine: giornoOrdine(r) || null,
+    fine_trasporto: giornoMovimento(r) || null,
+    mese: meseOrdine(r),
+  })), [records]);
+
   const destinazioni = [...new Set(records.map(r => r.destinazione).filter(Boolean))].sort();
   const province = [...new Set(records.map(r => (r.provincia || '').trim()).filter(Boolean))].sort();
   const trasportatori = [...new Set(records.map(r => (r.trasportatore || '').trim()).filter(Boolean))].sort();
@@ -62,7 +79,7 @@ export default function PrimarieAci() {
     return annoOrdine(r);
   }).filter(Boolean))].sort((a, b) => b - a);
 
-  const filtered = records.filter(r => {
+  const filtered = righe.filter(r => {
     if (filterMese.length > 0 && !filterMese.includes(r.mese)) return false;
     if (filterDestinazione.length > 0 && !filterDestinazione.includes(r.destinazione)) return false;
     if (filterProvincia.length > 0 && !filterProvincia.includes((r.provincia || '').trim())) return false;
@@ -74,14 +91,16 @@ export default function PrimarieAci() {
       if (!filterAnno.map(String).includes(String(anno))) return false;
     }
     if (filterData) {
-      if (giornoOrdine(r) !== filterData) return false;
+      if (r.giorno_ordine !== filterData) return false;
     }
     return true;
   });
 
-  // Aggiorna i record ordinati per il dettaglio
-  const dettaglio = cercaId.trim() ? records.filter(r => corrispondeIdOrdine(r, cercaId)) : filtered;
-  const sortedDetail = useTableSort(dettaglio, 'ordine_chiuso_il', 'desc');
+  // Il dettaglio si apre sui piu' recenti per fine trasporto: ordinato per
+  // chiusura, fra i primi 500 mancava chi aveva ritirato ieri e non era ancora
+  // chiuso a portale.
+  const dettaglio = cercaId.trim() ? righe.filter(r => corrispondeIdOrdine(r, cercaId)) : filtered;
+  const sortedDetail = useTableSort(dettaglio, 'giorno_ordine', 'desc');
 
   const totalKg = filtered.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
   const totalRichiesti = filtered.reduce((s, r) => s + (r.quantita_richiesta || 0), 0);
@@ -163,7 +182,7 @@ export default function PrimarieAci() {
           <MultiSelect allLabel="Tutte le destinazioni" options={destinazioni} selected={filterDestinazione} onChange={setFilterDestinazione} />
           <MultiSelect allLabel="Tutte le province" options={province} selected={filterProvincia} onChange={setFilterProvincia} />
           <MultiSelect allLabel="Tutti i trasportatori" options={trasportatori} selected={filterTrasportatore} onChange={setFilterTrasportatore} />
-          <input type="date" value={filterData} onChange={e => setFilterData(e.target.value)} className="border rounded-md px-3 py-2 text-sm" placeholder="Data chiusura" />
+          <input type="date" value={filterData} onChange={e => setFilterData(e.target.value)} className="border rounded-md px-3 py-2 text-sm" placeholder="Fine trasporto" title="Giorno di fine trasporto (per gli ordini senza trasporto, giorno di immissione)" aria-label="Giorno di fine trasporto" />
         </div>
       </div>
 
@@ -240,7 +259,7 @@ export default function PrimarieAci() {
                     {DETAIL_COLUMNS.map((col) => {
                       let val = r[col.key];
                       if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
-                      else if (col.format === 'date') val = val ? new Date(val).toLocaleDateString('it-IT') : '';
+                      else if (col.format === 'date') val = dataIt(val);
                       return <td key={col.key} className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''}`}>{val ?? ''}</td>;
                     })}
                   </tr>
@@ -248,7 +267,7 @@ export default function PrimarieAci() {
               </tbody>
             </table>
           </div>
-          {sortedDetail.sorted.length > 500 && <p className="text-xs text-muted-foreground mt-2">Mostrati primi 500 di {formatNumber(sortedDetail.sorted.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} record.</p>}
+          {sortedDetail.sorted.length > 500 && <p className="text-xs text-muted-foreground mt-2">Mostrati primi 500 di {formatNumber(sortedDetail.sorted.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} record{sortedDetail.sortKey === 'giorno_ordine' ? ', i più recenti per fine trasporto (per chi non l\'ha, per immissione)' : ''}.</p>}
         </TabsContent>
       </Tabs>
     </div>

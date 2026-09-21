@@ -4,6 +4,11 @@ import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSi
 import { enrichRecords } from "../../shared/dataEnrichment.ts";
 import { ARCHIVI_PRIMARIE, DATE_PRIMARIE, archivioPrimaria, recordAssegnato } from "../../shared/primarie.ts";
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
+import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
+import { evasioneOrdini, listaOrdini, statoRichiesta } from "../../shared/richiesteEct.ts";
+import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
+import { eTerminato } from "../../shared/movimenti.ts";
 
 // Importazione a blocchi per i report di grandi dimensioni del portale Ecotyre.
 //
@@ -26,6 +31,15 @@ import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/
 //   svuota   - svuota l'archivio indicato
 // La preparazione delle primarie non cancella nulla: confronta gli ordini del
 // file con quelli in archivio e blocca il caricamento se ne mancano.
+//
+// Dopo la registrazione, due azioni rifanno cio' che dipende dal file appena
+// caricato (ogni caricamento aggiorna tutto, regola dell'utente del 21/09/2026).
+// Stanno fuori da "registra" apposta: leggono archivi interi, e se non riescono
+// il caricamento resta buono e il registro chiuso.
+//   allinea    - report delle dichiarazioni: riconosce le nostre dichiarazioni
+//                mensili caricate a portale (caricata_inviata, data, materiali)
+//   ritiri_ect - primarie: riconosce fra i terminati i ritiri delle richieste
+//                del consorzio
 //
 // Un blocco corrisponde a una sola scrittura: o la riga vanno tutte a buon fine o
 // non ne va nessuna. Il browser puo' quindi ritentare un blocco fallito senza
@@ -178,6 +192,49 @@ async function contaRecord(base44, entita, ipotesi) {
   return basso + 1;
 }
 
+// Le richieste del consorzio dicono "ritirato il" quando il loro ordine compare
+// fra i terminati. Prima lo si calcolava solo ricaricando il file delle richieste
+// (importaRichiesteEct): un ritiro arrivato con le primarie restava "in attesa" e
+// in ritardo, e si rischiava di sollecitare un ritiro gia' fatto. Il giorno e'
+// quello italiano della fine trasporto, mai la chiusura a portale; un ordine senza
+// fine trasporto non conta come ritirato. Spunte, ID scritti a mano e note non si
+// toccano: cambiano solo la data rilevata, i conteggi e lo stato che ne discende.
+async function riconosciRitiriEct(base44) {
+  const svc = base44.asServiceRole.entities;
+  const anno = Number(oggiRoma().slice(0, 4));
+  const richieste = (await fetchAll(svc.RichiestaEct, { anno }))
+    .filter(r => r.esito !== 'evasa' && r.esito !== 'annullata');
+  if (!richieste.length) return { controllate: 0, aggiornate: 0, da_confermare: [] };
+
+  const [rete, aci] = await Promise.all([
+    fetchAll(svc.PrimariaRete, { stato: 'terminato' }),
+    fetchAll(svc.PrimariaAci, { stato: 'terminato' }),
+  ]);
+  const terminati = new Map(); // id ordine -> primo giorno di fine trasporto
+  for (const o of [...rete, ...aci]) {
+    const id = String(o.id_ordine || '').trim();
+    const giorno = giornoRoma(o.trasporto_finito_il);
+    if (!id || !eTerminato(o) || !giorno) continue;
+    if (!terminati.has(id) || giorno < terminati.get(id)) terminati.set(id, giorno);
+  }
+
+  let aggiornate = 0;
+  const daConfermare = [];
+  for (const r of richieste) {
+    const ids = listaOrdini(r);
+    const ev = evasioneOrdini(ids, terminati);
+    const campi: any = { ordini_totali: ev.totali, ordini_evasi: ev.evasi };
+    if (ev.ultima) campi.evasione_rilevata_il = ev.ultima;
+    campi.esito = statoRichiesta({ ...r, ...campi });
+    if (!Object.keys(campi).some(k => String(r[k] ?? '') !== String(campi[k] ?? ''))) continue;
+    // chi diventa "ritirata, da spuntare" adesso va detto: e' la riga su cui rispondere al consorzio
+    if (campi.esito === 'da_confermare' && r.esito !== 'da_confermare') daConfermare.push({ pdr: r.pdr_nome, id_ordine: ids.join(', '), evasa_il: ev.ultima });
+    await svc.RichiestaEct.update(r.id, campi);
+    aggiornate++;
+  }
+  return { controllate: richieste.length, aggiornate, da_confermare: daConfermare };
+}
+
 export default async function(req) {
   const t0 = Date.now();
   let fase = 'avvio';
@@ -206,6 +263,42 @@ export default async function(req) {
       return Response.json({ error: 'tipo_file non valido: ' + tipo_file, dati_intatti: true }, { status: 400 });
     }
     const primarie = tipo_file === 'primarie';
+
+    // === ALLINEAMENTO delle dichiarazioni mensili al report appena caricato ===
+    // Succedeva solo nell'importazione lato server (importEcotyreFile), che per
+    // questo report non si usa piu' da quando si legge nel browser: le nostre
+    // dichiarazioni restavano "non caricate" e la giacenza calcolata della
+    // quadratura restava alta proprio del mese gia' dichiarato. Si allinea ogni
+    // anno presente nel report, come fa il pulsante di Dichiarazioni Impianti.
+    if (azione === 'allinea') {
+      if (tipo_file !== 'dichiarazioni_trattamento') return Response.json({ error: 'Azione non prevista per ' + tipo_file, dati_intatti: true }, { status: 400 });
+      fase = 'allineamento delle dichiarazioni mensili';
+      const svc = base44.asServiceRole.entities;
+      const righePortale = await fetchAll(svc.DichiarazioneTrattamento, null, 'id');
+      const anni = [...new Set(righePortale.map(r => String(r.data_dichiarazione || '').slice(0, 4)).filter(a => /^\d{4}$/.test(a)))].sort();
+      const aggiornate = [];
+      const nonTrovate = [];
+      for (const a of anni) {
+        const esito = await allineaDalPortale(svc, Number(a), righePortale);
+        aggiornate.push(...esito.aggiornate);
+        nonTrovate.push(...esito.non_trovate);
+      }
+      // Nel registro, accanto al caricamento, come faceva l'importazione lato server.
+      fase = 'nota nel registro caricamenti';
+      const [ultimo] = await svc.UploadLog.filter({ tipo_file }, '-created_date', 1);
+      if (ultimo && (ultimo.esito === 'successo' || ultimo.esito === 'parziale') && !String(ultimo.messaggio || '').includes('dichiarazioni riconosciute a portale')) {
+        await svc.UploadLog.update(ultimo.id, { messaggio: `${ultimo.messaggio || ''} | dichiarazioni riconosciute a portale: ${aggiornate.length}` });
+      }
+      return Response.json({ allineamento: { anni: anni.map(Number), aggiornate, non_trovate: nonTrovate }, dati_intatti: true });
+    }
+
+    // === RITIRI delle richieste del consorzio, fra i terminati appena caricati ===
+    if (azione === 'ritiri_ect') {
+      if (!primarie) return Response.json({ error: 'Azione non prevista per ' + tipo_file, dati_intatti: true }, { status: 400 });
+      fase = 'riconoscimento dei ritiri delle richieste ECT';
+      return Response.json({ ...(await riconosciRitiriEct(base44)), dati_intatti: true });
+    }
+
     if (primarie && azione !== 'prepara' && azione !== 'registra' && !ARCHIVI_PRIMARIE.includes(body.entita)) {
       return Response.json({ error: 'Archivio delle primarie non valido: ' + body.entita, dati_intatti: true }, { status: 400 });
     }

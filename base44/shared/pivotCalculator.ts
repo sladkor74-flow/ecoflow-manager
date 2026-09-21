@@ -2,9 +2,11 @@
 // Le pivot attingono dai campi arricchiti memorizzati (mese, settimane, anno, classe, regione)
 // calcolati al momento dell'importazione. Fallback on-the-fly per record non arricchiti.
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
-import { getMeseFromDate, getSettimanaFromDate, getAnnoFromDate, getRegioneFromProvincia, getClasseFromProdotto, dataPeriodo } from "./dataEnrichment.ts";
+import { getMeseFromDate, getSettimanaFromDate, getAnnoFromDate, getRegioneFromProvincia, getClasseFromProdotto } from "./dataEnrichment.ts";
 import { matchesFilter } from "./multiFilter.ts";
 import { fetchAll } from "./fetchAll.ts";
+import { eTerminato, giornoMovimento } from "./movimenti.ts";
+import { eAci } from "./canaleSecondaria.ts";
 
 function getMese(dateStr) {
   return getMeseFromDate(dateStr);
@@ -34,15 +36,15 @@ function getClasse(r) {
 // memorizzati sul record possono venire da un'importazione vecchia, quando la
 // data di riferimento era la chiusura dell'ordine, e direbbero un mese diverso.
 function getRecordMese(r) {
-  return getMeseFromDate(getDataChiusura(r));
+  return getMeseFromDate(getDataFineTrasporto(r));
 }
 
 function getRecordSettimana(r) {
-  return getSettimanaFromDate(getDataChiusura(r));
+  return getSettimanaFromDate(getDataFineTrasporto(r));
 }
 
 function getRecordAnno(r) {
-  return getAnnoFromDate(getDataChiusura(r));
+  return getAnnoFromDate(getDataFineTrasporto(r));
 }
 
 function getRecordMeseImmissione(r) {
@@ -60,8 +62,30 @@ function getRecordSettimanaImmissione(r) {
   return getSettimanaFromDate(getDataImmissione(r));
 }
 
-function getDataChiusura(r) {
-  return dataPeriodo(r);
+// Si chiamava getDataChiusura e ripiegava sull'immissione: un ordine cancellato
+// o un terminato senza data finivano nel mese in cui erano stati immessi. Il
+// periodo di un movimento e' solo la fine del trasporto; chi non l'ha resta fuori
+// dalle pivot e si conta a parte (movimentiContati).
+function getDataFineTrasporto(r) {
+  return r.trasporto_finito_il || null;
+}
+
+// I movimenti che entrano nelle pivot: terminati con una fine trasporto
+// leggibile. Gli altri si contano per dirli, non si collocano in un mese.
+function movimentiContati(righe) {
+  const contati = [];
+  let senzaFine = 0;
+  const esempi = [];
+  for (const r of righe) {
+    if (!eTerminato(r)) continue;
+    if (!giornoMovimento(r)) {
+      senzaFine++;
+      if (esempi.length < 10) esempi.push(r.id_ordine || r.numero_fir || '');
+      continue;
+    }
+    contati.push(r);
+  }
+  return { contati, senza_fine_trasporto: senzaFine, esempi: esempi.filter(Boolean) };
 }
 
 function getDataImmissione(r) {
@@ -177,27 +201,50 @@ const PESO_FN = (r) => (r.peso_effettivo || 0) / 1000;
 const PESO_STIM_FN = (r) => (r.peso_stimato || 0) / 1000;
 const COUNT_FN = () => 1;
 
+// Le pivot: A, B, E sulle primarie di rete; C, G sulle primarie ACI; D, F sulle
+// secondarie di RETE; D_ACI, F_ACI sulle secondarie ACI; H sugli assegnati.
+// Rete e ACI stanno nello stesso archivio delle secondarie, ma sono canali che
+// non si sommano: nella D la classe "PFU Autodemolizione" finiva accanto a P, M,
+// G1 e G2 e il subtotale dell'impianto e il totale generale li mescolavano.
 export async function computeAllPivots(base44, filters, pivotKeys = null) {
   const shouldCompute = (key) => !pivotKeys || pivotKeys.includes(key);
-  const keys = pivotKeys || ['A','B','C','D','E','F','G','H'];
+  const keys = pivotKeys || ['A','B','C','D','D_ACI','E','F','F_ACI','G','H'];
   const needRete = keys.some(k => ['A','B','E'].includes(k));
   const needAci = keys.some(k => ['C','G'].includes(k));
-  const needSec = keys.some(k => ['D','F'].includes(k));
+  const needSec = keys.some(k => ['D','F','D_ACI','F_ACI'].includes(k));
   const needAss = keys.some(k => ['H'].includes(k));
 
-  const [rete, aci, sec, assegnati] = await Promise.all([
+  const [reteTutte, aciTutte, secTutte, assegnati] = await Promise.all([
     needRete ? fetchAll(base44.asServiceRole.entities.PrimariaRete) : Promise.resolve([]),
     needAci ? fetchAll(base44.asServiceRole.entities.PrimariaAci) : Promise.resolve([]),
     needSec ? fetchAll(base44.asServiceRole.entities.Secondaria) : Promise.resolve([]),
     needAss ? fetchAll(base44.asServiceRole.entities.Assegnato) : Promise.resolve([]),
   ]);
 
+  // Contano solo i terminati con la fine del trasporto: cancellati e assegnati
+  // non sono raccolto, e un terminato senza data si segnala invece di finire nel
+  // mese di immissione. Solo la pivot H (assegnati) resta sull'immissione.
+  const reteM = movimentiContati(reteTutte);
+  const aciM = movimentiContati(aciTutte);
+  const secReteM = movimentiContati(secTutte.filter(r => !eAci(r)));
+  const secAciM = movimentiContati(secTutte.filter(r => eAci(r)));
+  const rete = reteM.contati, aci = aciM.contati;
+  const secRete = secReteM.contati, secAci = secAciM.contati;
+  const sec = [...secRete, ...secAci];   // solo per le opzioni dei filtri
+
   const reteF = applyFilters(rete, filters, false);
   const aciF = applyFilters(aci, filters, false);
-  const secF = applyFilters(sec, filters, false);
+  const secReteF = applyFilters(secRete, filters, false);
+  const secAciF = applyFilters(secAci, filters, false);
   const assF = applyFilters(assegnati, filters, true);
 
   const result = {};
+  result.senzaFineTrasporto = {
+    rete: { quanti: reteM.senza_fine_trasporto, esempi: reteM.esempi },
+    aci: { quanti: aciM.senza_fine_trasporto, esempi: aciM.esempi },
+    secondarie_rete: { quanti: secReteM.senza_fine_trasporto, esempi: secReteM.esempi },
+    secondarie_aci: { quanti: secAciM.senza_fine_trasporto, esempi: secAciM.esempi },
+  };
 
   if (shouldCompute('A')) {
     const pivotA = buildPivotTree(reteF, [(r) => (r.trasportatore || 'N/D').trim(), (r) => getRegione(r), getClasse], (r) => getRecordMese(r), { peso: PESO_FN, count: COUNT_FN });
@@ -215,11 +262,16 @@ export async function computeAllPivots(base44, filters, pivotKeys = null) {
     result.pivotC = pivotC;
   }
   if (shouldCompute('D')) {
-    const pivotD = buildPivotTree(secF, [(r) => (r.destinazione || 'N/D').trim(), getClasse], (r) => getRecordMese(r), { peso: PESO_FN });
-    pivotD.valueKeys = ['peso']; pivotD.valueLabels = ['Peso [t]']; pivotD.rowLabels = ['Impianto', 'Classe'];
+    const pivotD = buildPivotTree(secReteF, [(r) => (r.destinazione || 'N/D').trim(), getClasse], (r) => getRecordMese(r), { peso: PESO_FN });
+    pivotD.valueKeys = ['peso']; pivotD.valueLabels = ['Peso [t]']; pivotD.rowLabels = ['Impianto', 'Classe']; pivotD.canale = 'RETE';
     result.pivotD = pivotD;
   }
-  if (shouldCompute('E') || shouldCompute('F') || shouldCompute('G')) {
+  if (shouldCompute('D_ACI')) {
+    const pivotDAci = buildPivotTree(secAciF, [(r) => (r.destinazione || 'N/D').trim(), getClasse], (r) => getRecordMese(r), { peso: PESO_FN });
+    pivotDAci.valueKeys = ['peso']; pivotDAci.valueLabels = ['Peso [t]']; pivotDAci.rowLabels = ['Impianto', 'Classe']; pivotDAci.canale = 'ACI';
+    result.pivotD_ACI = pivotDAci;
+  }
+  if (['E', 'F', 'F_ACI', 'G'].some(shouldCompute)) {
     const detailRowKeys = [getClasse, (r) => getRecordMese(r) || 'N/D', (r) => { const s = getRecordSettimana(r); return s != null ? String(s) : 'N/D'; }];
     const detailCollectors = { peso: sumCol('peso_effettivo'), count: countCol(), firCount: uniqueCol('numero_fir') };
     const detailMeta = { valueKeys: ['peso', 'count', 'firCount'], valueLabels: ['Peso [t]', 'Conteggio', 'FIR Univoci'], rowLabels: ['Classe', 'Mese', 'Settimana'] };
@@ -229,9 +281,14 @@ export async function computeAllPivots(base44, filters, pivotKeys = null) {
       result.pivotE = { rows, ...detailMeta };
     }
     if (shouldCompute('F')) {
-      const rows = buildDetailTable(secF, detailRowKeys, detailCollectors);
+      const rows = buildDetailTable(secReteF, detailRowKeys, detailCollectors);
       rows.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(3); });
-      result.pivotF = { rows, ...detailMeta };
+      result.pivotF = { rows, ...detailMeta, canale: 'RETE' };
+    }
+    if (shouldCompute('F_ACI')) {
+      const rows = buildDetailTable(secAciF, detailRowKeys, detailCollectors);
+      rows.forEach((r) => { r.values.peso = +(r.values.peso / 1000).toFixed(3); });
+      result.pivotF_ACI = { rows, ...detailMeta, canale: 'ACI' };
     }
     if (shouldCompute('G')) {
       const rows = buildDetailTable(aciF, detailRowKeys, detailCollectors);
@@ -245,7 +302,7 @@ export async function computeAllPivots(base44, filters, pivotKeys = null) {
     result.pivotH = pivotH;
   }
 
-  // Filter options from whatever entities are already loaded
+  // Opzioni dei filtri dai movimenti contati (con fine trasporto) e dagli assegnati
   const allSourceRows = [...rete, ...aci, ...sec, ...assegnati];
   if (allSourceRows.length > 0) {
     const raccoglitori = [...new Set(allSourceRows.map((r) => (r.trasportatore || '').trim()).filter(Boolean))].sort();

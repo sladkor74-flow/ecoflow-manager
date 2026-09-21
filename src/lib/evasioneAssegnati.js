@@ -3,6 +3,7 @@
 // per ogni riga, l'indicazione se e' evidenziata.
 
 import { formatTonnellate, dataServer } from '@/lib/utils';
+import { giornoRoma } from '@/lib/giornoItaliano';
 
 export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -28,9 +29,11 @@ export function tonnellate(kg) {
   return formatTonnellate((Number(kg) || 0) / 1000);
 }
 
+// Il giorno italiano: un orario come quello di caricamento di una lista, tagliato
+// sulla stringa UTC, cade il giorno prima fra mezzanotte e le due.
 export function dataIt(d) {
   if (!d) return '';
-  const s = String(d).slice(0, 10);
+  const s = giornoRoma(dataServer(d)) || String(d).slice(0, 10);
   return `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}`;
 }
 

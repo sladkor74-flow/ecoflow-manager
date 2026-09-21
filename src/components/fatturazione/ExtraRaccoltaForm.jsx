@@ -11,6 +11,7 @@ import { PROV_TO_REGION } from '@/lib/regioneMap';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { formatNumber } from '@/lib/utils';
 import { giornoDaData, dataDaGiorno, competenza, datiChiusuraCompleti } from '@/lib/extraRaccoltaStato';
+import { oggiRoma } from '@/lib/giornoItaliano';
 
 const CLASSI = ['P', 'M', 'G1', 'G2'];
 
@@ -67,6 +68,14 @@ function ComboSelect({ value, onChange, options, placeholder }) {
       </SelectContent>
     </Select>
   );
+}
+
+// Da quale contratto viene il costo precompilato. Una tariffa di rete usata per
+// l'extra raccolta e' un ripiego (manca quella del canale) e va detto, perche' i
+// canali restano separati anche nei prezzi.
+function TestoDaContratto({ tipologia }) {
+  if (tipologia === 'RETE') return <p className="text-xs text-amber-700">dalla tariffa di RETE: per questo fornitore manca una tariffa di extra raccolta</p>;
+  return <p className="text-xs text-success">da contratto</p>;
 }
 
 export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
@@ -157,19 +166,33 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
       set('costo_raccolta_t', 0); setDaContrattoR(false);
       return;
     }
-    const data = dataRif || form.trasporto_finito_il || new Date().toISOString().split('T')[0];
-    const candidate = tariffe.find(t => {
+    // La validita' si guarda sul giorno di fine trasporto; per un intervento
+    // ancora assegnato, che non ce l'ha, su oggi in Italia (non sul giorno UTC).
+    const data = dataRif || form.trasporto_finito_il || oggiRoma();
+    const valida = (t, tipologia) => {
       if (t.fornitore_id !== forn.id || t.prestazione !== prestazione || t.direzione !== 'PASSIVA' || t.stato !== 'attivo') return false;
-      if (t.tipologia !== 'EXTRA_RACCOLTA' && t.tipologia !== 'RETE') return false;
-      if (t.data_inizio_validita && data < t.data_inizio_validita) return false;
-      if (t.data_fine_validita && data > t.data_fine_validita) return false;
+      if (t.tipologia !== tipologia) return false;
+      const inizio = String(t.data_inizio_validita || '').slice(0, 10);
+      const fine = String(t.data_fine_validita || '').slice(0, 10);
+      if (inizio && data < inizio) return false;
+      if (fine && data > fine) return false;
       if (t.classe_materiale && t.classe_materiale !== form.classe) return false;
       return true;
-    });
+    };
+    // Prima la tariffa di extra raccolta, e solo se manca quella di rete, come
+    // fa la fatturazione passiva (passivaCalcolo). Prima si prendeva la prima
+    // che capitava fra le due: una tariffa di rete poteva vincere su quella di
+    // extra raccolta dello stesso fornitore. A parita' di canale vince quella
+    // per classe sulla generica. Quando si usa la rete il form lo dice.
+    const scegli = (tipologia) => {
+      const c = tariffe.filter(t => valida(t, tipologia));
+      return c.find(t => t.classe_materiale) || c[0] || null;
+    };
+    const candidate = scegli('EXTRA_RACCOLTA') || scegli('RETE');
     if (candidate) {
-      if (prestazione === 'RACCOLTA') { set('costo_raccolta_t', candidate.valore); setDaContrattoR(true); }
-      else if (prestazione === 'TRATTAMENTO') { set('costo_trattamento_t', candidate.valore); setDaContrattoD(true); }
-      else if (prestazione === 'CONFERIMENTO_STOCCAGGIO') { set('costo_stoccaggio_t', candidate.valore); setDaContrattoD(true); }
+      if (prestazione === 'RACCOLTA') { set('costo_raccolta_t', candidate.valore); setDaContrattoR(candidate.tipologia); }
+      else if (prestazione === 'TRATTAMENTO') { set('costo_trattamento_t', candidate.valore); setDaContrattoD(candidate.tipologia); }
+      else if (prestazione === 'CONFERIMENTO_STOCCAGGIO') { set('costo_stoccaggio_t', candidate.valore); setDaContrattoD(candidate.tipologia); }
     }
   };
 
@@ -432,14 +455,14 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Costo raccolta (€/t)</Label>
                 <Input type="number" className="h-9 text-sm" value={form.costo_raccolta_t} onChange={e => { set('costo_raccolta_t', e.target.value); setDaContrattoR(false); }} />
-                {daContrattoR && <p className="text-xs text-success">da contratto</p>}
+                {daContrattoR && <TestoDaContratto tipologia={daContrattoR} />}
                 {raccoltaInterna && <p className="text-xs text-muted-foreground">trasportatore interno: non fatturato</p>}
               </div>
               <NumField label="Costo stoccaggio (€/t)" k="costo_stoccaggio_t" />
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Costo trattamento (€/t)</Label>
                 <Input type="number" className="h-9 text-sm" value={form.costo_trattamento_t} onChange={e => { set('costo_trattamento_t', e.target.value); setDaContrattoD(false); }} />
-                {daContrattoD && <p className="text-xs text-success">da contratto</p>}
+                {daContrattoD && <TestoDaContratto tipologia={daContrattoD} />}
               </div>
               <NumField label="Costo pulizia (€)" k="costo_pulizia" />
               <NumField label="Costi aggiuntivi (€)" k="costi_aggiuntivi" />

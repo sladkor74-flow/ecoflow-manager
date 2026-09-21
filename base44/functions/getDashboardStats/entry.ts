@@ -1,7 +1,8 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { MESI } from "../../shared/raccoltoCalculator.ts";
+import { filtraMovimenti } from "../../shared/movimenti.ts";
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 
 // Conteggi per la Dashboard nel periodo scelto con i filtri (anno e mesi), come i
 // grafici: formulari terminati per data di fine trasporto, canali separati.
@@ -17,14 +18,12 @@ export default async function(req) {
     const comeElenco = (v) => (Array.isArray(v) ? v : (v ? [v] : []));
     const anni = comeElenco(body.anno).map(Number).filter(a => !isNaN(a) && a > 0);
     const mesi = comeElenco(body.mese).filter(m => m && m !== 'Tutti i mesi');
-    if (!anni.length) anni.push(new Date().getUTCFullYear());
+    if (!anni.length) anni.push(Number(oggiRoma().slice(0, 4)));
 
-    const nelPeriodo = (r) => {
-      if (String(r.stato || '').toLowerCase().trim() !== 'terminato') return false;
-      const d = r.trasporto_finito_il ? new Date(r.trasporto_finito_il) : null;
-      if (!d || isNaN(d.getTime())) return false;
-      return anni.includes(d.getUTCFullYear()) && (!mesi.length || mesi.includes(MESI[d.getUTCMonth()]));
-    };
+    // Terminati nel periodo della fine trasporto, sul giorno italiano: letto in
+    // UTC un formulario finito il 1 agosto a mezzanotte italiana contava a luglio
+    // e i conteggi non tornavano con il Report Mensile.
+    const nelPeriodo = (righe) => filtraMovimenti(righe, { anno: anni, mese: mesi });
 
     const [assegnati, assegnatiAci, rete, aci, sec, terz, alerts] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.Assegnato),
@@ -35,19 +34,20 @@ export default async function(req) {
       fetchAll(base44.asServiceRole.entities.Terziaria),
       fetchAll(base44.asServiceRole.entities.Alert, { stato: 'aperto' }),
     ]);
+    const secNelPeriodo = nelPeriodo(sec);
 
     return Response.json({
       anni, mesi,
       counts: {
         assegnati: assegnati.length,
         assegnati_aci: assegnatiAci.length,
-        primarie_rete: rete.filter(nelPeriodo).length,
-        primarie_aci: aci.filter(nelPeriodo).length,
+        primarie_rete: nelPeriodo(rete).length,
+        primarie_aci: nelPeriodo(aci).length,
         // Le secondarie di rete e quelle dell'autodemolizione si contano a parte:
         // stanno nello stesso archivio ma sono canali indipendenti.
-        secondarie: sec.filter(r => nelPeriodo(r) && !eAci(r)).length,
-        secondarie_aci: sec.filter(r => nelPeriodo(r) && eAci(r)).length,
-        terziarie: terz.filter(nelPeriodo).length,
+        secondarie: secNelPeriodo.filter(r => !eAci(r)).length,
+        secondarie_aci: secNelPeriodo.filter(r => eAci(r)).length,
+        terziarie: nelPeriodo(terz).length,
       },
       alert_count: alerts.length,
       alert_critici: alerts.filter(a => a.severita === 'critico').length,

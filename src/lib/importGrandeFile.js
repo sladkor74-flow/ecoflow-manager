@@ -1,5 +1,7 @@
 import { base44 } from '@/api/base44Client';
 import { eAci } from '@/lib/canaleSecondaria';
+import { oggiRoma } from '@/lib/giornoItaliano';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 
 // Importazione dei report di grandi dimensioni del portale Ecotyre.
 //
@@ -251,6 +253,23 @@ export async function importaGrandeFile({ file, tipoFile, onProgress, confermaFo
     conferma_forzatura: confermaForzatura || undefined,
   });
 
+  // === Le dichiarazioni caricate a portale si riconoscono da sole ===
+  // Dal report appena caricato si capisce quali nostre dichiarazioni mensili sono
+  // state caricate e quando: senza questo passo restavano "non caricate" finche'
+  // qualcuno non premeva "Allinea dal portale", e la quadratura con il portale
+  // restava alta di un mese gia' dichiarato. Se non riesce il caricamento resta
+  // buono: lo si dice, e il pulsante in Dichiarazioni Impianti lo rifa'.
+  let allineamento = null;
+  if (tipoFile === 'dichiarazioni_trattamento' && totaleScritte > 0) {
+    avvisa({ fase: 'riconoscimento delle dichiarazioni caricate a portale' });
+    try {
+      const res = await base44.functions.invoke('importaBlocco', { azione: 'allinea', tipo_file: tipoFile });
+      allineamento = (res.data || res).allineamento || null;
+    } catch (e) {
+      allineamento = { errore: messaggioErrore(e) };
+    }
+  }
+
   return {
     tipo_file: tipoFile,
     foglio: nomeFoglio,
@@ -263,6 +282,7 @@ export async function importaGrandeFile({ file, tipoFile, onProgress, confermaFo
     avviso_calo: avvisoCalo,
     avviso_disallineamento: disallineamento,
     ultimo_errore: ultimoErrore,
+    allineamento,
     esito,
   };
 }
@@ -416,3 +436,108 @@ export async function importaPrimarie({ file, onProgress, confermaForzatura = fa
 
 // Tipi che usano la lettura nel browser invece dell'import lato server.
 export const TIPI_LETTURA_BROWSER = ['dichiarazioni_trattamento', 'ordini_non_dichiarati'];
+
+// === Dopo un caricamento ===
+// Regola dell'utente (21/09/2026): ogni caricamento aggiorna tutto. Qui c'e'
+// l'elenco unico di cio' che si ricalcola dopo ciascun tipo di dato, usato da
+// tutti i punti da cui i dati entrano: Caricamento Dati, la pagina Secondarie e
+// le schede dell'Extra Raccolta. Prima ognuno lanciava la sua parte - o niente -
+// e il resto restava fermo al caricamento precedente.
+//
+// Non stanno qui gli alert, che partono dal registro dei caricamenti a
+// caricamento concluso (workflow AlertEngineAutoRun), e l'allineamento delle
+// dichiarazioni mensili, che fa parte di importaGrandeFile perche' il suo esito
+// si mostra subito. I moduli che calcolano all'apertura (giacenze, dichiarazioni,
+// fatturazione) non hanno niente da ricalcolare.
+//
+// Le terziarie non compaiono: nessuno dei ricalcoli le legge (i soggetti della
+// qualifica vengono da primarie, secondarie ed extra raccolta).
+const RICALCOLI = {
+  primarie: ['evasioneAssegnati', 'ritiriEct', 'nessunaMovimentazione', 'qualifica'],
+  secondarie: ['nessunaMovimentazione', 'qualifica'],
+  extra_raccolta: ['nessunaMovimentazione', 'qualifica', 'verificheSettimana'],
+};
+
+const NOMI_RICALCOLI = {
+  evasioneAssegnati: 'evasione delle liste di assegnati',
+  ritiriEct: 'ritiri delle richieste del consorzio',
+  nessunaMovimentazione: 'dichiarazioni di nessuna movimentazione',
+  qualifica: 'qualifica fornitori',
+  verificheSettimana: 'verifiche dei report e quadrature FIR della settimana',
+};
+
+// Le verifiche dei report settimanali e le quadrature FIR confrontano un elenco
+// esterno con i movimenti del gestionale del momento in cui si fanno. Una scheda
+// di extra raccolta scritta o corretta dopo cambia ingressi e uscite di quella
+// settimana: le verifiche concluse che la coprono si ripetono sulle righe gia'
+// lette, senza rileggere il file ne' chiamare l'agente. `giorni` sono i giorni
+// italiani di fine trasporto toccati, prima e dopo la modifica.
+async function riverificaSettimane(giorni) {
+  const dentro = (x) => giorni.some(g => g >= String(x.data_inizio || '').slice(0, 10) && g <= String(x.data_fine || '').slice(0, 10));
+  const [verifiche, quadrature] = await Promise.all([
+    fetchAllClient(base44.entities.VerificaReport, { stato: 'completata' }, 'id'),
+    fetchAllClient(base44.entities.QuadraturaFir, { stato: 'completata' }, 'id'),
+  ]);
+  const errori = [];
+  // Una alla volta: ognuna rilegge tutti i movimenti, e in parallelo la
+  // piattaforma rifiuta le richieste troppo ravvicinate.
+  // Le dichiarazioni di nessuna movimentazione le ricontrolla ricontrollaDichiarazioni.
+  for (const v of verifiche.filter(x => x.file_tipo !== 'dichiarazione' && dentro(x))) {
+    try {
+      await base44.functions.invoke('elaboraReportSettimanale', { verifica_id: v.id, solo_verifica: true });
+    } catch (e) { errori.push(`${v.soggetto_nome || 'report'} sett. ${v.settimana}: ${messaggioErrore(e)}`); }
+  }
+  for (const q of quadrature.filter(dentro)) {
+    try {
+      await base44.functions.invoke('elaboraQuadraturaFir', { quadratura_id: q.id, solo_confronto: true });
+    } catch (e) { errori.push(`quadratura FIR sett. ${q.settimana}: ${messaggioErrore(e)}`); }
+  }
+  if (errori.length) throw new Error(errori.join('; '));
+}
+
+/**
+ * Lancia i ricalcoli che dipendono da un tipo di dato appena caricato o scritto.
+ * Non blocca chi chiama: restituisce una promessa con l'esito di ciascun
+ * ricalcolo, { nome, ok, errore }, da mostrare a chi ha caricato. Un ricalcolo
+ * non riuscito si dice per nome, non si perde.
+ *
+ * @param {string} tipoFile  primarie, secondarie, extra_raccolta, ...
+ * @param {object} opzioni   { giorni: giorni italiani di fine trasporto toccati (extra raccolta) }
+ */
+export function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
+  const elenco = RICALCOLI[tipoFile] || [];
+  if (!elenco.length) return Promise.resolve([]);
+  const giorniValidi = [...new Set(giorni.filter(Boolean))];
+  // La qualifica si rifa' sull'anno dei dati toccati; per un file, l'anno in corso.
+  const anni = [...new Set(giorniValidi.map(g => Number(g.slice(0, 4))))];
+  if (!anni.length) anni.push(Number(oggiRoma().slice(0, 4)));
+
+  const compiti = {
+    evasioneAssegnati: () => base44.functions.invoke('controllaEvasioneAssegnati', {}),
+    ritiriEct: () => base44.functions.invoke('importaBlocco', { azione: 'ritiri_ect', tipo_file: 'primarie' }),
+    nessunaMovimentazione: () => base44.functions.invoke('ricontrollaDichiarazioni', {}),
+    qualifica: () => Promise.all(anni.map(anno => base44.functions.invoke('qualificaFornitori', { anno }))),
+    verificheSettimana: () => (giorniValidi.length ? riverificaSettimane(giorniValidi) : Promise.resolve()),
+  };
+  return Promise.all(elenco.map(async (k) => {
+    try {
+      await compiti[k]();
+      return { nome: NOMI_RICALCOLI[k], ok: true };
+    } catch (e) {
+      return { nome: NOMI_RICALCOLI[k], ok: false, errore: messaggioErrore(e) };
+    }
+  }));
+}
+
+/** Una riga da mostrare sotto il caricamento: cosa si e' aggiornato e cosa no. */
+export function testoRicalcoli(esiti) {
+  if (!esiti) return null;
+  if (esiti.in_corso) return { classe: 'text-muted-foreground', testo: 'Aggiornamento dei moduli collegati in corso…' };
+  if (!esiti.length) return null;
+  const falliti = esiti.filter(e => !e.ok);
+  if (!falliti.length) return { classe: 'text-green-700', testo: `Aggiornati: ${esiti.map(e => e.nome).join(', ')}.` };
+  return {
+    classe: 'text-amber-700',
+    testo: `Non aggiornati: ${falliti.map(e => `${e.nome} (${e.errore})`).join('; ')}. Si rifanno al prossimo caricamento o dal modulo.`,
+  };
+}

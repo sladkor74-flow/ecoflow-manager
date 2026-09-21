@@ -7,8 +7,14 @@
 // in che mese? in che canale?" lo chiede qui.
 //
 // - CONTA un movimento terminato. Cancellati e assegnati non sono raccolto.
-// - Il PERIODO e' la fine del trasporto, letta sul giorno italiano. Mai la
-//   chiusura a portale (serve solo ai tempi di evasione), mai il fuso del server.
+// - Il PERIODO e' la fine del trasporto, letta sul giorno italiano. Mai il fuso
+//   del server.
+// - Anche i TEMPI di un ordine (giorni per evaderlo, esito rispetto alla
+//   scadenza) si misurano fino alla fine del trasporto: tempiRaccolta().
+// - La CHIUSURA A PORTALE non decide niente: ne' un periodo, ne' un tempo, ne' una
+//   giacenza. Si puo' solo mostrare (regola dell'utente, 21/09/2026: "mai, dico
+//   mai"). Un movimento senza fine trasporto si esclude e si segnala, non si
+//   ripiega sulla chiusura.
 // - Il CANALE e' rete, ACI o extra raccolta, con la regola condivisa eAci().
 //   I canali non si sommano mai.
 //
@@ -52,6 +58,31 @@ export function periodoMovimento(r) {
 export const giornoOrdine = (r) => giornoMovimento(r) || giornoRoma(r && r.ordine_immesso_il);
 export const annoOrdine = (r) => { const g = giornoOrdine(r); return g ? Number(g.slice(0, 4)) : null; };
 export const meseOrdine = (r) => { const g = giornoOrdine(r); return g ? MESI_MOVIMENTI[Number(g.slice(5, 7)) - 1] : null; };
+
+/**
+ * I tempi di raccolta di un ordine: i giorni dall'immissione alla FINE DEL
+ * TRASPORTO e l'esito rispetto alla scadenza (immissione + 30 giorni), sul giorno
+ * italiano. Misurano il ritiro, che e' il lavoro del raccoglitore. Si misuravano
+ * fino alla chiusura a portale, una pratica che arriva giorni dopo: un ritiro
+ * fatto in 9 giorni e chiuso al 14esimo usciva "Critico" senza nessun ritardo.
+ *
+ * Restituisce { scadenza: 'AAAA-MM-GG', giorni, esito: 'OK' | 'DOPO SCADENZA' }.
+ * Senza fine trasporto giorni ed esito sono null: non si misura e chi conta lo
+ * segnala. null se manca l'immissione.
+ */
+export const GIORNI_SCADENZA_ORDINE = 30;
+// i conti si fanno fra giorni di calendario a mezzanotte UTC: il cambio dell'ora
+// legale non li sposta, come faceva setDate sull'istante di immissione
+const istanteGiorno = (g) => Date.UTC(+g.slice(0, 4), +g.slice(5, 7) - 1, +g.slice(8, 10));
+export function tempiRaccolta(r) {
+  const immesso = giornoRoma(r && r.ordine_immesso_il);
+  if (!immesso) return null;
+  const scadenza = new Date(istanteGiorno(immesso) + GIORNI_SCADENZA_ORDINE * 86400000).toISOString().slice(0, 10);
+  const fine = giornoMovimento(r);
+  if (!fine) return { scadenza, giorni: null, esito: null };
+  const giorni = Math.round((istanteGiorno(fine) - istanteGiorno(immesso)) / 86400000);
+  return { scadenza, giorni, esito: fine <= scadenza ? 'OK' : 'DOPO SCADENZA' };
+}
 
 /** Il canale di una primaria o di una secondaria. L'archivio dell'extra raccolta si dichiara. */
 export const canaleMovimento = (r, archivio = '') => (archivio === 'ExtraRaccolta' ? 'EXTRA_RACCOLTA' : archivio === 'PrimariaAci' || eAci(r) ? 'ACI' : 'RETE');
