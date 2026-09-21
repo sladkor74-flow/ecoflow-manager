@@ -115,8 +115,15 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
+  // SMOCO raccoglie anche con i suoi mezzi: va indicata come trasportatore per
+  // chiarezza e completezza, anche se non puo' fatturare a se stessa. Nella
+  // passiva compare a zero con questa motivazione; qui lo si dice gia' nella
+  // scelta, cosi' nessuno si aspetta una fattura.
   const trasportatori = useMemo(
-    () => fornitori.filter(f => f.ruolo_raccolta).map(f => ({ value: f.ragione_sociale, label: f.ragione_sociale })),
+    () => fornitori.filter(f => f.ruolo_raccolta).map(f => ({
+      value: f.ragione_sociale,
+      label: f.interno ? `${f.ragione_sociale} — interno, non fatturato` : f.ragione_sociale,
+    })),
     [fornitori]
   );
   const destinatari = useMemo(
@@ -129,12 +136,27 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
   );
   const secondaria = form.tipo_movimento === 'secondaria';
   const terminato = form.stato === 'terminato';
+  // Vero quando il trasportatore scelto e' interno: la raccolta non si paga.
+  // Si ricava dal trasportatore, non si tiene a parte: cosi' e' giusto anche
+  // aprendo un ritiro gia' salvato.
+  const raccoltaInterna = useMemo(() => {
+    if (secondaria || !form.trasportatore) return false;
+    const f = fornitori.find(x => normalizzaRagioneSociale(x.ragione_sociale) === normalizzaRagioneSociale(form.trasportatore));
+    return !!(f && f.interno);
+  }, [fornitori, form.trasportatore, secondaria]);
 
   const precompila = (nome, prestazione, dataRif) => {
     if (!nome) return;
     if (prestazione === 'RACCOLTA' && form.tipo_movimento === 'secondaria') return;
     const forn = fornitori.find(f => normalizzaRagioneSociale(f.ragione_sociale) === normalizzaRagioneSociale(nome));
     if (!forn) return;
+    // Un trasportatore interno non fattura a SMOCO: il costo di raccolta e' zero.
+    // Va scritto esplicitamente, altrimenti resterebbe il costo del trasportatore
+    // scelto prima e la passiva lo conterebbe.
+    if (prestazione === 'RACCOLTA' && forn.interno) {
+      set('costo_raccolta_t', 0); setDaContrattoR(false);
+      return;
+    }
     const data = dataRif || form.trasporto_finito_il || new Date().toISOString().split('T')[0];
     const candidate = tariffe.find(t => {
       if (t.fornitore_id !== forn.id || t.prestazione !== prestazione || t.direzione !== 'PASSIVA' || t.stato !== 'attivo') return false;
@@ -411,6 +433,7 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
                 <Label className="text-xs text-muted-foreground">Costo raccolta (€/t)</Label>
                 <Input type="number" className="h-9 text-sm" value={form.costo_raccolta_t} onChange={e => { set('costo_raccolta_t', e.target.value); setDaContrattoR(false); }} />
                 {daContrattoR && <p className="text-xs text-success">da contratto</p>}
+                {raccoltaInterna && <p className="text-xs text-muted-foreground">trasportatore interno: non fatturato</p>}
               </div>
               <NumField label="Costo stoccaggio (€/t)" k="costo_stoccaggio_t" />
               <div className="space-y-1">
