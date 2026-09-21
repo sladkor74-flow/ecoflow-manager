@@ -6,7 +6,7 @@ const nomeCanale = (f) => {
   const c = CANALI.find(x => x.chiave === f.canale);
   return `${c ? c.nome : f.canale}${f.provenienza ? ` ${f.provenienza}` : ''}`;
 };
-const STATO_PAROLE = { nessuna: '', inserita: 'inserita', ricevuta: 'in mano', caricata: 'caricata a portale' };
+const STATO_PAROLE = { nessuna: '', non_dovuta: 'non dovuta', solo_metalli: 'solo metalli ferrosi', inserita: 'inserita', ricevuta: 'in mano', caricata: 'caricata a portale' };
 
 export async function esportaDichiarazioni(dati) {
   if (!dati) return;
@@ -29,7 +29,7 @@ export async function esportaDichiarazioni(dati) {
           s.sito, nomeCanale(f), s.operazione || '', m.mese, m.conferito_kg || null,
           d ? d.quantita_kg : null, d ? d.granulo_kg : null, d ? d.fibre_kg : null, d ? d.metalli_kg : null,
           d ? d.ciabattato_kg : null, d ? d.cippato_kg : null, d ? d.cssc_kg : null, d ? d.altro_kg : null,
-          STATO_PAROLE[statoDichiarazione(d)], (d && d.ricevuta_il) || '', (d && d.caricata_il) || '', (d && d.note) || '',
+          STATO_PAROLE[statoDichiarazione(d, { canale: f.canale, dichiara_rete: s.dichiara_rete })], (d && d.ricevuta_il) || '', (d && d.caricata_il) || '', (d && d.note) || '',
         ]);
       }
     }

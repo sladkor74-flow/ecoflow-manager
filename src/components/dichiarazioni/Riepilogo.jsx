@@ -1,8 +1,8 @@
 import React from 'react';
 import CellaMese from '@/components/dichiarazioni/CellaMese';
-import { MESI_BREVI, CANALI } from '@/lib/dichiarazioniImpianti';
+import { MESI_BREVI, CANALI, MOTIVI_ASSENZA } from '@/lib/dichiarazioniImpianti';
 import { formatTonnellate } from '@/lib/utils';
-import { Check, Mail } from 'lucide-react';
+import { Check, Mail, Minus } from 'lucide-react';
 
 // Riepilogo: una riga per impianto e canale, una colonna per mese.
 // Verde pieno = caricata a portale, verde chiaro = dichiarazione in mano,
@@ -31,6 +31,8 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
         <span className="flex items-center gap-1"><span className="w-4 h-4 rounded bg-emerald-600 inline-flex items-center justify-center"><Check className="w-3 h-3 text-white" /></span> caricata a portale</span>
         <span className="flex items-center gap-1"><span className="w-4 h-4 rounded bg-emerald-100 inline-flex items-center justify-center"><Mail className="w-3 h-3" /></span> dichiarazione in mano</span>
         <span className="flex items-center gap-1"><span className="w-4 h-4 rounded bg-amber-50 border" /> conferimenti senza dichiarazione</span>
+        <span className="flex items-center gap-1" title={MOTIVI_ASSENZA.solo_metalli.spiega}><span className="w-4 h-4 rounded bg-sky-50 border" /> solo metalli ferrosi</span>
+        <span className="flex items-center gap-1" title={MOTIVI_ASSENZA.non_dovuta.spiega}><span className="w-4 h-4 rounded bg-slate-50 border inline-flex items-center justify-center"><Minus className="w-3 h-3 text-slate-500" /></span> non dovuta</span>
         <span>Le quantità sono in kg; i totali in tonnellate contano solo le dichiarazioni caricate.</span>
         <span>Gli stoccaggi non compaiono perché non dichiarano: le secondarie che spediscono stanno sulla riga dell&apos;impianto che le riceve.</span>
         {nascoste > 0 && <span>Non compaiono {nascoste === 1 ? 'una riga' : `${nascoste} righe`} su cui non c'è mai stata una dichiarazione e su cui il portale non aspetta niente.</span>}
@@ -57,7 +59,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                 </td>
                 {flusso.mesi.map(m => (
                   <td key={m.mese} className="px-0.5 py-1">
-                    <CellaMese mese={m} soloLettura={soloLettura} attesa={flusso.canale === 'RETE' && sito.dichiara_rete !== false && m.non_dichiarato_kg > 0} onApri={() => onApri(sito, flusso, m)} />
+                    <CellaMese mese={m} soloLettura={soloLettura} attesa={flusso.canale === 'RETE' && sito.dichiara_rete !== false && m.non_dichiarato_kg > 0} dove={{ canale: flusso.canale, dichiara_rete: sito.dichiara_rete }} onApri={() => onApri(sito, flusso, m)} />
                   </td>
                 ))}
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatTonnellate(flusso.dichiarato_caricato_t)}</td>

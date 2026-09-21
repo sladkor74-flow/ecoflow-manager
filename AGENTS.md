@@ -276,6 +276,14 @@ solo entrate, partenze e piazzale (scheda Stoccaggi). Chi e' insieme impianto e
 stoccaggio (Irigom, T-Cycle) si tiene diviso per `tipo_destinazione` del
 movimento: quello che arriva al suo stoccaggio non e' suo da dichiarare.
 
+**Un mese senza dichiarazione puo' essere a posto** (22/09/2026): si segna in
+`DichiarazioneSito.motivo_assenza`, con quantita' a zero. `non_dovuta` quando il
+trattamento di quel canale non e' a nostro carico (la rete di Tecnogum: vale
+anche senza segnarla, con `dichiara_rete` falso in Giacenze); `solo_metalli`
+quando dall'impianto sono usciti solo metalli ferrosi e nessuna gomma (Irigom,
+rete di aprile 2026): a portale non si carica nulla e il ferro si dichiara con
+la prossima uscita di gomma. Nessuno dei due e' un mancante.
+
 ### La pratica mensile di Irigom
 
 Le dichiarazioni di Irigom le prepariamo noi, nella scheda Irigom di

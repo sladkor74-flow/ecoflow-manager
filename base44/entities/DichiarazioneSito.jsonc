@@ -94,6 +94,16 @@
       "default": 0,
       "description": "Quantita' ricavate che non rientrano nelle voci precedenti"
     },
+    "motivo_assenza": {
+      "type": "string",
+      "enum": [
+        "",
+        "non_dovuta",
+        "solo_metalli"
+      ],
+      "default": "",
+      "description": "Perche' un mese non ha dichiarazione ed e' a posto lo stesso. non_dovuta: il trattamento di quel canale non e' a nostro carico, l'impianto non ci deve la dichiarazione (la rete di Tecnogum). solo_metalli: dall'impianto sono usciti solo metalli ferrosi e nessuna gomma, a portale non si carica nulla e il ferro si dichiara con la prossima uscita di gomma (Irigom, rete di aprile 2026). Vale solo con quantita_kg a zero."
+    },
     "note": {
       "type": "string"
     }

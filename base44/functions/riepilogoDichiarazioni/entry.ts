@@ -318,7 +318,7 @@ export default async function(req) {
     }
     const dichiarazioneDi = (d) => d && {
       id: d.id, quantita_kg: Number(d.quantita_kg) || 0, caricata_inviata: !!d.caricata_inviata, ricevuta_email: !!d.ricevuta_email,
-      ricevuta_il: d.ricevuta_il || '', caricata_il: d.caricata_il || '', note: d.note || '',
+      ricevuta_il: d.ricevuta_il || '', caricata_il: d.caricata_il || '', note: d.note || '', motivo_assenza: d.motivo_assenza || '',
       granulo_kg: Number(d.granulo_kg) || 0, fibre_kg: Number(d.fibre_kg) || 0, metalli_kg: Number(d.metalli_kg) || 0,
       ciabattato_kg: Number(d.ciabattato_kg) || 0, cippato_kg: Number(d.cippato_kg) || 0, cssc_kg: Number(d.cssc_kg) || 0, altro_kg: Number(d.altro_kg) || 0,
     };

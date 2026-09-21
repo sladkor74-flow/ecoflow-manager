@@ -69,6 +69,7 @@ verifica('il ferro che non entra nei DDT resta in giacenza: nessuna dichiarazion
 verifica('e lo dice', soloCssc.avvisi.some(a => /restano in giacenza/.test(a)));
 const soloFerro = componiMese({ riga: { uscite_ferro_kg: 89780, giacenza_cippato_kg: 5000, giacenza_intero_kg: 1000 }, ferro: [{ destinatario: 'TRS', colore: 'FFC000', kg: 89780 }], lettura: 'uscite' });
 verifica('aprile: solo metalli, a portale non si carica nulla', soloFerro.rete_kg === 0 && soloFerro.avvisi.some(a => /solo metalli/.test(a)), String(soloFerro.rete_kg));
+verifica('aprile si segna come solo metalli ferrosi', soloFerro.solo_metalli === true && m.solo_metalli === false && soloCssc.solo_metalli === false);
 
 console.log('IL FERRO IN ECCESSO SI DIVIDE');
 // Due terziarie piene e due con posto: i 4.000 kg di ferro che le prime non

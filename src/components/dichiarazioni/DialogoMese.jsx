@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, AlertTriangle, Info, Check } from 'lucide-react';
-import { materialiDi, sommaMateriali, controlliDichiarazione, CANALI } from '@/lib/dichiarazioniImpianti';
+import { materialiDi, sommaMateriali, controlliDichiarazione, CANALI, MOTIVI_ASSENZA } from '@/lib/dichiarazioniImpianti';
 import { formatKg } from '@/lib/utils';
 
 // La dichiarazione di un mese: quanto ha dichiarato l'impianto, che cosa ne è
@@ -27,8 +27,11 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
     caricata_inviata: d ? d.caricata_inviata : false,
     caricata_il: (d && d.caricata_il) || '',
     note: (d && d.note) || '',
+    motivo_assenza: (d && !(d.quantita_kg > 0) && d.motivo_assenza) || '',
     ...Object.fromEntries(materiali.map(m => [m.chiave, d ? d[m.chiave] || 0 : 0])),
   }));
+  // Senza dichiarazione e a posto lo stesso: non dovuta, o usciti solo metalli.
+  const senza = !!dati.motivo_assenza;
   const [salvataggio, setSalvataggio] = useState(false);
   const imposta = (k, v) => setDati(x => ({ ...x, [k]: v }));
 
@@ -44,13 +47,21 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
   const salva = async () => {
     setSalvataggio(true);
     try {
-      const campi = {
-        ...dati,
-        quantita_kg: numero(dati.quantita_kg),
-        ricevuta_il: dati.ricevuta_email ? (dati.ricevuta_il || oggi()) : '',
-        caricata_il: dati.caricata_inviata ? (dati.caricata_il || oggi()) : '',
-        ...Object.fromEntries(materiali.map(m => [m.chiave, numero(dati[m.chiave])])),
-      };
+      const campi = senza
+        // Un mese senza dichiarazione non ha quantita' ne' materiali e non si carica.
+        ? {
+          motivo_assenza: dati.motivo_assenza, note: dati.note, quantita_kg: 0,
+          ricevuta_email: false, ricevuta_il: '', caricata_inviata: false, caricata_il: '',
+          ...Object.fromEntries(materiali.map(m => [m.chiave, 0])),
+        }
+        : {
+          ...dati,
+          motivo_assenza: '',
+          quantita_kg: numero(dati.quantita_kg),
+          ricevuta_il: dati.ricevuta_email ? (dati.ricevuta_il || oggi()) : '',
+          caricata_il: dati.caricata_inviata ? (dati.caricata_il || oggi()) : '',
+          ...Object.fromEntries(materiali.map(m => [m.chiave, numero(dati[m.chiave])])),
+        };
       if (d && d.id) await base44.entities.DichiarazioneSito.update(d.id, campi);
       else {
         await base44.entities.DichiarazioneSito.create({
@@ -85,6 +96,20 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
         </DialogHeader>
 
         <div className="space-y-4">
+          <div>
+            <p className="text-sm font-medium mb-2">Esito del mese</p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {[['', 'Con dichiarazione', 'L\'impianto dichiara quello che ha lavorato.'], ...Object.entries(MOTIVI_ASSENZA).map(([k, m]) => [k, m.nome, m.spiega])].map(([k, nome, spiega]) => (
+                <button key={k || 'dichiarazione'} type="button" onClick={() => imposta('motivo_assenza', k)}
+                  className={`text-left rounded-lg border px-3 py-2 transition-colors ${dati.motivo_assenza === k ? 'border-primary bg-primary/5 ring-1 ring-primary/40' : 'hover:bg-muted'}`}>
+                  <span className="text-sm font-medium block">{nome}</span>
+                  <span className="text-[11px] text-muted-foreground leading-snug block">{spiega}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {!senza && (<>
           <div>
             <p className="text-sm font-medium mb-2">Quantità ricavate dalla lavorazione</p>
             <div className="grid gap-2 sm:grid-cols-2">
@@ -126,6 +151,7 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
               )}
             </div>
           </div>
+          </>)}
 
           <div className="space-y-1">
             <p className="text-sm font-medium">Note</p>

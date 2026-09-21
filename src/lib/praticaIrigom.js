@@ -306,6 +306,9 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
     ferro: { ...ff, dichiarato_kg: ff.quota_kg },
     allegati: { ordinati: scelta.ordinati, scelti: scelta.scelti, coperto_kg: scelta.coperto_kg },
     terziarie_da_aprire: righeTer.length,
+    // Usciti solo metalli ferrosi, nessuna gomma e nessun CSS-C: il mese si segna
+    // "solo metalli ferrosi" e a portale non si carica nulla.
+    solo_metalli: !posti.length && X > 0,
     cssc,
     terziarie: terz,
     solo_ferro: soloFerro,

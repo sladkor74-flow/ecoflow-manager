@@ -129,7 +129,9 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
   const scegliMese = (m) => {
     setMese(m);
     setEsito(null);
-    setDocumenti([]);
+    // I PDF caricati prima di scegliere il mese restano; passando da un mese a un
+    // altro si ripulisce, perche' la numerazione degli allegati VII riparte a ogni nave.
+    if (mese && mese !== m) setDocumenti([]);
     setExtraScelti(null);
     const p = pratiche.filter(x => x.mese === m && x.stato !== 'sostituita').sort((a, b) => (b.versione || 1) - (a.versione || 1))[0];
     const base = p || ultimaRegistrata;
@@ -245,6 +247,30 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
     const nuovi = [...lista].map(file => ({ file, nome: file.name, ...riconosci(file.name) }));
     setDocumenti(prima => [...prima.filter(d => !nuovi.some(n => n.nome === d.nome)), ...nuovi]);
   };
+  // Da qualunque pulsante o trascinandoli: l'Excel e' il registro, i PDF i documenti.
+  const aggiungiFile = (lista) => {
+    const tutti = [...(lista || [])];
+    const excel = tutti.filter(x => /\.(xlsx|xlsm|xls)$/i.test(x.name));
+    const pdf = tutti.filter(x => /\.pdf$/i.test(x.name));
+    const altri = tutti.filter(x => !excel.includes(x) && !pdf.includes(x));
+    if (pdf.length) aggiungiDocumenti(pdf);
+    if (excel.length) caricaRegistro(excel[0]);
+    if (altri.length || excel.length > 1) {
+      setErrore([altri.length ? `Non so leggere ${altri.map(x => x.name).join(', ')}: servono il registro in Excel e i documenti in PDF.` : '',
+        excel.length > 1 ? `Ho letto un solo registro, ${excel[0].name}.` : ''].filter(Boolean).join(' '));
+    }
+  };
+  const [sopra, setSopra] = useState(false);
+  const trascina = {
+    onDragOver: (e) => { e.preventDefault(); setSopra(true); },
+    onDragLeave: () => setSopra(false),
+    onDrop: (e) => { e.preventDefault(); setSopra(false); aggiungiFile(e.dataTransfer && e.dataTransfer.files); },
+  };
+  // Un PDF dal nome non riconoscibile si assegna a mano al documento che manca.
+  const assegna = (nome, valore) => {
+    const [tipo, chiave] = valore.split('|');
+    setDocumenti(prima => prima.map(d => (d.nome === nome ? { ...d, tipo, chiave: chiave || '' } : d)));
+  };
   const richiesti = useMemo(() => {
     if (!pratica) return [];
     const r = [];
@@ -339,14 +365,17 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
     try {
       const oggi = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
       const utente = await base44.auth.me().catch(() => null);
-      const nota = `Preparata nel gestionale il ${dataIt(oggi)} dal registro ${registro.file_nome}: ${pratica.terziarie.righe.length} terziarie${terziarie.length ? ` (${terziarie[0]} - ${terziarie[terziarie.length - 1]})` : ''}, ${pratica.cssc.righe.length} dichiarazioni di CSS-C${nave.nome ? `, nave ${nave.nome}` : ''}; lettura dalla ${pratica.letture.usata === 'giacenza' ? 'giacenza a portale' : 'uscite del registro'}.`;
+      const nota = pratica.solo_metalli
+        ? `Segnata nel gestionale il ${dataIt(oggi)} dal registro ${registro.file_nome}: nel mese sono usciti solo metalli ferrosi (${formatKg(riga.uscite_ferro_kg)} kg) e nessuna gomma. A portale non si carica nulla: il ferro si dichiara con la prossima uscita di gomma.`
+        : `Preparata nel gestionale il ${dataIt(oggi)} dal registro ${registro.file_nome}: ${pratica.terziarie.righe.length} terziarie${terziarie.length ? ` (${terziarie[0]} - ${terziarie[terziarie.length - 1]})` : ''}, ${pratica.cssc.righe.length} dichiarazioni di CSS-C${nave.nome ? `, nave ${nave.nome}` : ''}; lettura dalla ${pratica.letture.usata === 'giacenza' ? 'giacenza a portale' : 'uscite del registro'}.`;
       // La dichiarazione di rete del mese: si aggiorna quella che c'e', con traccia di prima.
       const esistenti = await base44.entities.DichiarazioneSito.filter({ anno, mese });
       const suIrigom = (d) => normalizzaRagioneSociale(d.sito) === nsIrigom;
       const reteEsistente = esistenti.find(d => suIrigom(d) && (d.canale || 'RETE') === 'RETE' && !d.provenienza);
       const campiRete = {
         quantita_kg: pratica.rete_kg, cippato_kg: pratica.materiali.cippato_kg, metalli_kg: pratica.materiali.metalli_kg, cssc_kg: pratica.materiali.cssc_kg,
-        ricevuta_email: true, ricevuta_il: (reteEsistente && reteEsistente.ricevuta_il) || oggi,
+        motivo_assenza: pratica.solo_metalli ? 'solo_metalli' : '',
+        ricevuta_email: !pratica.solo_metalli, ricevuta_il: pratica.solo_metalli ? '' : ((reteEsistente && reteEsistente.ricevuta_il) || oggi),
         note: [reteEsistente && reteEsistente.note, reteEsistente && reteEsistente.quantita_kg ? `Prima: ${formatKg(reteEsistente.quantita_kg)} kg; aggiornata il ${dataIt(oggi)}${motivo ? ` perche' ${motivo}` : ''}.` : '', nota].filter(Boolean).join('\n'),
       };
       const rete = reteEsistente
@@ -417,15 +446,18 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
       {errore && <Avviso testo={errore} grave />}
 
       <Passo numero={1} titolo="Il registro e il mese" fatto={!!registro && !!mese}
-        spiega="Il file dell'impianto, con i fogli Cons. e Dettaglio. Si legge nel browser.">
-        <div className="flex items-center gap-2 flex-wrap">
-          <input ref={inputRegistro} type="file" className="hidden" accept=".xlsx,.xlsm,.xls"
-            onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) caricaRegistro(f); }} />
+        spiega="Il file dell'impianto, con i fogli Cons. e Dettaglio, e se vuoi già i PDF del mese: formulari del ferro, DDT del CSS-C, allegati VII. Si leggono nel browser.">
+        <div {...trascina} className={`flex items-center gap-2 flex-wrap rounded-lg border border-dashed px-3 py-2.5 transition-colors ${sopra ? 'border-primary bg-primary/5' : 'border-muted-foreground/30'}`}>
+          <input ref={inputRegistro} type="file" multiple className="hidden" accept=".xlsx,.xlsm,.xls,.pdf"
+            onChange={e => { const f = [...(e.target.files || [])]; e.target.value = ''; aggiungiFile(f); }} />
           <Button variant={registro ? 'outline' : 'default'} disabled={caricando} onClick={() => inputRegistro.current && inputRegistro.current.click()}>
             {caricando ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
-            {registro ? 'Cambia registro' : 'Carica il registro Irigom'}
+            {registro ? 'Cambia registro o aggiungi PDF' : 'Carica il registro e i PDF'}
           </Button>
-          {registro && <span className="text-xs text-muted-foreground">{registro.file_nome}</span>}
+          <span className="text-xs text-muted-foreground">
+            {registro ? registro.file_nome : 'oppure trascinali qui'}
+            {documenti.length > 0 && ` · ${documenti.length} PDF${documenti.some(d => d.tipo === 'altro') ? `, ${documenti.filter(d => d.tipo === 'altro').length} da assegnare` : ''}`}
+          </span>
         </div>
         {registro && registro.controlli.map((c, i) => <Avviso key={i} testo={c} />)}
         <div className="flex flex-wrap gap-1.5">
@@ -548,7 +580,7 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
 
           {!pratica.vuoto && (
             <Passo numero={3} titolo="Terziarie, nave e documenti" fatto={!mancanoTer && !mancaNave && richiesti.every(r => r.file)}
-              spiega="Quello che il gestionale non può sapere da solo. I PDF non si caricano da nessuna parte: servono a controllarli e a metterli nella cartella del mese.">
+              spiega="Quello che il gestionale non può sapere da solo. I PDF restano nel browser: servono a controllarli e a metterli, rinominati, nella cartella del mese.">
               <div className="grid gap-4 lg:grid-cols-3">
                 {pratica.terziarie.righe.length > 0 && (
                   <div className="space-y-1">
@@ -570,11 +602,14 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                 )}
                 <div className="space-y-1.5">
                   <p className="text-xs font-semibold flex items-center gap-1"><FileCheck2 className="w-3.5 h-3.5" /> Documenti</p>
-                  <input ref={inputDocumenti} type="file" multiple accept=".pdf" className="hidden"
-                    onChange={e => { const f = e.target.files; if (f && f.length) aggiungiDocumenti(f); e.target.value = ''; }} />
-                  <Button size="sm" variant="outline" onClick={() => inputDocumenti.current && inputDocumenti.current.click()}>
-                    <Upload className="w-3.5 h-3.5 mr-1" /> Aggiungi i PDF
-                  </Button>
+                  <input ref={inputDocumenti} type="file" multiple accept=".pdf,.xlsx,.xlsm,.xls" className="hidden"
+                    onChange={e => { const f = [...(e.target.files || [])]; e.target.value = ''; aggiungiFile(f); }} />
+                  <div {...trascina} className={`rounded-md border border-dashed px-2 py-1.5 flex items-center gap-2 transition-colors ${sopra ? 'border-primary bg-primary/5' : 'border-muted-foreground/30'}`}>
+                    <Button size="sm" variant="outline" onClick={() => inputDocumenti.current && inputDocumenti.current.click()}>
+                      <Upload className="w-3.5 h-3.5 mr-1" /> Aggiungi i PDF
+                    </Button>
+                    <span className="text-[11px] text-muted-foreground">o trascinali qui</span>
+                  </div>
                   <ul className="text-xs space-y-0.5 max-h-48 overflow-y-auto">
                     {richiesti.map(r => (
                       <li key={`${r.tipo}-${r.chiave}`} className="flex items-center gap-1.5">
@@ -583,7 +618,16 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                       </li>
                     ))}
                     {navePresente && <li className="flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />File intero della nave</li>}
-                    {documenti.filter(d => d.tipo === 'altro').map(d => <li key={d.nome} className="text-amber-700">Non riconosciuto dal nome: {d.nome}</li>)}
+                    {documenti.filter(d => d.tipo === 'altro').map(d => (
+                      <li key={d.nome} className="text-amber-800 pt-1">
+                        <span className="block truncate" title={d.nome}>{d.nome}</span>
+                        <select defaultValue="" onChange={e => e.target.value && assegna(d.nome, e.target.value)} className="mt-0.5 w-full border rounded px-1 py-0.5 text-xs bg-background text-foreground">
+                          <option value="">Non riconosciuto dal nome: che documento è?</option>
+                          {richiesti.filter(r => !r.file).map(r => <option key={`${r.tipo}-${r.chiave}`} value={`${r.tipo}|${r.chiave}`}>{r.nome}</option>)}
+                          {pratica.terziarie.righe.length > 0 && !navePresente && <option value="nave|">File intero degli allegati VII della nave</option>}
+                        </select>
+                      </li>
+                    ))}
                   </ul>
                   <label className="flex items-center gap-2 text-xs pt-1">
                     Data della lettera <input value={dataLettera} onChange={e => setDataLettera(e.target.value)} className="w-28 border rounded px-1.5 py-0.5" />
@@ -631,6 +675,12 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                   </table>
                 </div>
               )}
+              {pratica.solo_metalli && (
+                <p className="text-sm rounded-lg border border-sky-200 bg-sky-50 text-sky-900 px-3 py-2">
+                  Nel mese sono usciti solo metalli ferrosi ({formatKg(riga.uscite_ferro_kg)} kg) e nessuna gomma: a portale non si carica nulla. Registrandolo, il mese
+                  risulta <strong>solo metalli ferrosi</strong> nel riepilogo; il ferro si dichiara con la prossima uscita di gomma.
+                </p>
+              )}
               <div className="flex flex-wrap gap-2 text-sm">
                 <Riquadro titolo="Rete" valore={`${formatKg(pratica.rete_kg)} kg`} nota="CSS-C + terziarie: va nella riga IRIGOM" tono="scelto" />
                 {pratica.extra_kg > 0 && <Riquadro titolo="Extra raccolta" valore={`${formatKg(pratica.extra_kg)} kg`} nota="a parte, riga EXTRA RACCOLTA" />}
@@ -647,7 +697,7 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                 {isAdmin && (
                   <Button variant="outline" disabled={bloccata || !!lavoro || mancanoTer} onClick={registra}
                     title="Scrive la dichiarazione del mese nel gestionale, come dichiarazione in mano: diventa caricata quando il report del portale la riconosce">
-                    {lavoro === 'registra' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-2" />} Registra la dichiarazione di {mese}
+                    {lavoro === 'registra' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-2" />} {pratica.solo_metalli ? `Segna ${mese}: solo metalli ferrosi` : `Registra la dichiarazione di ${mese}`}
                   </Button>
                 )}
               </div>

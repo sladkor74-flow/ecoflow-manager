@@ -2,7 +2,7 @@ import React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { formatTonnellate, formatKg } from '@/lib/utils';
-import { materialiDi, OPERAZIONI, CANALI, controlliDichiarazione } from '@/lib/dichiarazioniImpianti';
+import { materialiDi, OPERAZIONI, CANALI, controlliDichiarazione, statoDichiarazione } from '@/lib/dichiarazioniImpianti';
 import { Pencil, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 // La sezione di un impianto: mese per mese quanto gli è arrivato - in primaria
@@ -73,6 +73,7 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                 <tbody>
                   {mesiConDati.map(m => {
                     const d = m.dichiarazione;
+                    const stato = statoDichiarazione(d, { canale: flusso.canale, dichiara_rete: sito.dichiara_rete });
                     const avvisi = controlliDichiarazione(d, m.conferito_kg, sito.operazione, { tipo_destinazione: sito.tipo_destinazione, canale: flusso.canale, dichiara_rete: sito.dichiara_rete, non_dichiarato_kg: m.non_dichiarato_kg }).filter(c => c.livello === 'attenzione');
                     return (
                       <tr key={m.mese} className="border-b last:border-b-0">
@@ -86,10 +87,12 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                         <td className="px-2 py-1.5 text-right tabular-nums font-medium">{kg(d && d.quantita_kg)}</td>
                         {materiali.map(x => <td key={x.chiave} className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{kg(d && d[x.chiave])}</td>)}
                         <td className="px-2 py-1.5">
-                          {d && d.caricata_inviata ? <span className="text-emerald-700">caricata a portale</span>
-                            : d && d.ricevuta_email ? <span className="text-emerald-800">in mano, da caricare</span>
-                              : d && d.quantita_kg > 0 ? <span className="text-slate-600">inserita</span>
-                                : <span className="text-amber-700">da chiedere</span>}
+                          {stato === 'caricata' ? <span className="text-emerald-700">caricata a portale</span>
+                            : stato === 'ricevuta' ? <span className="text-emerald-800">in mano, da caricare</span>
+                              : stato === 'inserita' ? <span className="text-slate-600">inserita</span>
+                                : stato === 'solo_metalli' ? <span className="text-sky-800">solo metalli ferrosi</span>
+                                  : stato === 'non_dovuta' ? <span className="text-slate-500">non dovuta</span>
+                                    : <span className="text-amber-700">da chiedere</span>}
                           {avvisi.length > 0 && <span className="block text-[11px] text-amber-700">{avvisi[0].testo}</span>}
                         </td>
                         <td className="px-2 py-1.5 text-right">

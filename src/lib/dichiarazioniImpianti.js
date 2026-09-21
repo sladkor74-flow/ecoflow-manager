@@ -48,9 +48,34 @@ export function operazioneDa(tipologia) {
 export const materialiDi = (operazione) => MATERIALI.filter(m => m.operazioni.includes(operazione === 'R1' ? 'R1' : 'R3'));
 export const sommaMateriali = (d) => MATERIALI.reduce((s, m) => s + (Number(d && d[m.chiave]) || 0), 0);
 
-/** Stato di una casella del riepilogo: come i colori del foglio di gestione. */
-export function statoDichiarazione(d) {
-  if (!d || !(Number(d.quantita_kg) > 0)) return 'nessuna';
+/**
+ * Perche' un mese senza dichiarazione e' a posto lo stesso. Si segna sulla
+ * dichiarazione del mese (motivo_assenza, con quantita' a zero); la rete di chi
+ * non la manda per accordo (dichiara_rete falso in Giacenze) e' non dovuta anche
+ * senza segnarla.
+ */
+export const MOTIVI_ASSENZA = {
+  non_dovuta: {
+    nome: 'Non dovuta',
+    spiega: 'Il trattamento di questo canale non e\' a nostro carico: l\'impianto non ci deve la dichiarazione.',
+  },
+  solo_metalli: {
+    nome: 'Solo metalli ferrosi',
+    spiega: 'Nel mese sono usciti solo metalli ferrosi e nessuna gomma: a portale non si carica nulla e il ferro si dichiara con la prossima uscita di gomma.',
+  },
+};
+
+/**
+ * Stato di una casella del riepilogo: come i colori del foglio di gestione.
+ * `dove` ({ canale, dichiara_rete }) serve a riconoscere la rete non dovuta.
+ */
+export function statoDichiarazione(d, dove = {}) {
+  if (!d || !(Number(d.quantita_kg) > 0)) {
+    const motivo = d && d.motivo_assenza;
+    if (motivo === 'solo_metalli') return 'solo_metalli';
+    if (motivo === 'non_dovuta' || (dove.dichiara_rete === false && (dove.canale || 'RETE') === 'RETE')) return 'non_dovuta';
+    return 'nessuna';
+  }
   if (d.caricata_inviata) return 'caricata';
   if (d.ricevuta_email) return 'ricevuta';
   return 'inserita';
@@ -58,6 +83,8 @@ export function statoDichiarazione(d) {
 
 export const STATI = {
   nessuna: { nome: 'Nessuna dichiarazione', classe: '' },
+  non_dovuta: { nome: 'Dichiarazione non dovuta: il trattamento di questo canale non e\' a nostro carico', classe: 'bg-slate-50 text-slate-500' },
+  solo_metalli: { nome: 'Solo metalli ferrosi usciti: nessuna gomma da dichiarare, il ferro va con la prossima uscita di gomma', classe: 'bg-sky-50 text-sky-900' },
   inserita: { nome: 'Quantita\' inserita, documento non ancora segnato', classe: 'bg-slate-100' },
   ricevuta: { nome: 'Dichiarazione in mano, non ancora caricata a portale', classe: 'bg-emerald-100' },
   caricata: { nome: 'Caricata a portale: decurta la giacenza', classe: 'bg-emerald-600 text-white' },
@@ -85,7 +112,9 @@ export function controlliDichiarazione(d, conferito, operazione, dove = {}) {
   // stata: magari dentro quella del mese dopo, perche' il portale scala gli ordini
   // dal piu' vecchio. Non manca nulla e non si segnala.
   const attesoAPortale = dove.non_dichiarato_kg === undefined || dove.non_dichiarato_kg > 0;
-  if (!q && conferito > 0 && !stoccaggio && !nonDichiaraRete && attesoAPortale) {
+  // Un mese segnato come non dovuto o di soli metalli e' a posto cosi'.
+  const giustificato = !!(d && d.motivo_assenza);
+  if (!q && conferito > 0 && !stoccaggio && !nonDichiaraRete && attesoAPortale && !giustificato) {
     const canale = dove.canale || 'RETE';
     esiti.push({
       tipo: 'mancante',
@@ -101,6 +130,9 @@ export function controlliDichiarazione(d, conferito, operazione, dove = {}) {
   // dichiarazione senza conferito.
   if (q > 0 && !conferito && (dove.canale || 'RETE') === 'EXTRA_RACCOLTA') {
     esiti.push({ tipo: 'extra_fuori_mese', livello: 'attenzione', testo: 'Nessun conferimento di extra raccolta in questo mese: la dichiarazione va sul mese del formulario (fine trasporto), non su quello in cui arriva.' });
+  }
+  if (q > 0 && giustificato) {
+    esiti.push({ tipo: 'motivo_con_quantita', livello: 'info', testo: `Il mese e' segnato come «${(MOTIVI_ASSENZA[d.motivo_assenza] || {}).nome || d.motivo_assenza}» ma ha una quantita' dichiarata: vale la quantita'.` });
   }
   if (q > 0 && materiali === 0) {
     esiti.push({ tipo: 'senza_dettaglio', livello: 'info', testo: 'Manca il dettaglio dei materiali ricavati.' });
