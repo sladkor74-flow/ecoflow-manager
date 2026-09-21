@@ -123,10 +123,13 @@ export const TOLLERANZA_QUADRATURA_T = 0.5;
  * Quadratura di un sito: la giacenza che risulta dalle dichiarazioni deve
  * coincidere con quella del portale, che è il conferito non ancora dichiarato.
  *
- * Tre accortezze, senza le quali i numeri non tornano mai:
- * - si confronta alla data della fotografia del portale (l'ultimo file degli
- *   ordini non dichiarati), non a oggi: quello che si è chiuso dopo il portale
- *   non lo sa ancora;
+ * Quattro accortezze, senza le quali i numeri non tornano mai:
+ * - si confronta con quello che il portale conosceva alla fotografia (l'ultimo
+ *   file degli ordini non dichiarati), cioe' con gli ordini CHIUSI quel giorno:
+ *   un carico arrivato prima e chiuso dopo e' gia' in piazzale ma il portale non
+ *   l'ha ancora contato, e non e' uno scarto;
+ * - per un impianto conta solo quello che arriva all'impianto, in primaria e in
+ *   secondaria: il suo stoccaggio, se ne ha uno, sta a parte;
  * - solo il canale rete: i conferimenti ACI e l'extra raccolta hanno un giro
  *   proprio e non entrano nella giacenza del portale;
  * - le terziarie non si tolgono: sono uscite di materiale già trasformato, che

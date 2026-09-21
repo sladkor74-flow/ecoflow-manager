@@ -14,16 +14,18 @@ export default function CellaMese({ mese, onApri, soloLettura, attesa = true }) 
   const stato = statoDichiarazione(d);
   const conferito = mese.conferito_kg;
   // "Da chiedere" ha senso solo dove una dichiarazione ci si aspetta davvero:
-  // uno stoccaggio non dichiara, e sui canali diversi dalla rete non e' la regola.
+  // sui canali diversi dalla rete non e' la regola. Gli stoccaggi qui non
+  // arrivano: non dichiarano.
   const manca = !d && conferito > 0 && attesa;
   const fondo = stato === 'caricata' ? 'bg-emerald-600 text-white hover:bg-emerald-700'
     : stato === 'ricevuta' ? 'bg-emerald-100 hover:bg-emerald-200'
       : stato === 'inserita' ? 'bg-slate-100 hover:bg-slate-200'
         : manca ? 'bg-amber-50 hover:bg-amber-100 text-amber-900'
           : 'hover:bg-muted';
+  const daStoccaggi = (mese.da_stoccaggi || []).map(s => `${kg(s.kg)} kg da ${s.stoccaggio}`).join(', ');
   const titolo = [
     `${mese.mese}`,
-    conferito ? `conferiti ${kg(conferito)} kg` : 'nessun conferimento',
+    conferito ? `arrivati ${kg(conferito)} kg${daStoccaggi ? ` (in secondaria: ${daStoccaggi})` : ''}` : 'nessun conferimento',
     d ? `dichiarati ${kg(d.quantita_kg)} kg` : 'nessuna dichiarazione',
     STATI[stato].nome,
     soloLettura ? '' : 'clicca per aprire',

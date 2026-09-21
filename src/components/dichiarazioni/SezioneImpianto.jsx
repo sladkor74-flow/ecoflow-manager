@@ -5,8 +5,9 @@ import { formatTonnellate, formatKg } from '@/lib/utils';
 import { materialiDi, OPERAZIONI, CANALI, controlliDichiarazione } from '@/lib/dichiarazioniImpianti';
 import { Pencil, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
-// La sezione di un impianto: mese per mese quanto è stato conferito, quanto è
-// stato dichiarato e che cosa ne è uscito, con il conto della giacenza in fondo.
+// La sezione di un impianto: mese per mese quanto gli è arrivato - in primaria
+// e in secondaria dagli stoccaggi - quanto ha dichiarato e che cosa ne è
+// uscito, con il conto della giacenza in fondo.
 
 const kg = (v) => (Number(v) ? formatKg(v) : '—');
 const t = (v) => formatTonnellate(Number(v) || 0);
@@ -20,10 +21,16 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
         <div>
           <p className="font-semibold flex items-center gap-2">
             {sito.sito}
-            {sito.tipo_destinazione === 'stoc' && <Badge variant="outline" className="font-normal">stoccaggio</Badge>}
             {sito.operazione && <Badge variant="outline" className="font-normal">{sito.operazione}</Badge>}
+            {sito.anche_stoccaggio && <Badge variant="outline" className="font-normal">anche stoccaggio</Badge>}
           </p>
           {operazione && <p className="text-xs text-muted-foreground mt-0.5">{operazione.spiega}</p>}
+          {sito.anche_stoccaggio && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Qui c&apos;è solo quello che arriva all&apos;impianto. Quello che arriva al suo stoccaggio non è suo da dichiarare finché non
+              riparte in secondaria: lo trovi nella scheda Stoccaggi.
+            </p>
+          )}
           {sito.dichiara_rete === false && (
             <p className="text-xs text-muted-foreground mt-0.5">
               Della rete non manda dichiarazione, perche' quel trattamento non glielo paghiamo: qui si seguono le sue dichiarazioni ACI.
@@ -41,18 +48,22 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
         const canale = CANALI.find(c => c.chiave === flusso.canale);
         const mesiConDati = flusso.mesi.filter(m => m.conferito_kg > 0 || (m.dichiarazione && m.dichiarazione.quantita_kg > 0));
         if (!mesiConDati.length) return null;
+        const conStoccaggi = flusso.da_stoccaggi_t > 0;
         return (
           <div key={`${flusso.canale}-${flusso.provenienza}`} className="border-b last:border-b-0">
             <p className="px-4 pt-3 pb-1 text-sm font-medium">
               {canale ? canale.nome : flusso.canale}{flusso.provenienza ? ` · ${flusso.provenienza}` : ''}
-              <span className="text-xs text-muted-foreground font-normal"> — conferiti {t(flusso.conferito_t)} t, dichiarati e caricati {t(flusso.dichiarato_caricato_t)} t</span>
+              <span className="text-xs text-muted-foreground font-normal">
+                {' '}— arrivati {t(flusso.conferito_t)} t{conStoccaggi ? `, di cui ${t(flusso.da_stoccaggi_t)} t in secondaria dagli stoccaggi` : ''}, dichiarati e caricati {t(flusso.dichiarato_caricato_t)} t
+              </span>
             </p>
             <div data-scorre-lato>
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-y bg-muted/40">
                     <th className="text-left px-3 py-1.5 font-semibold min-w-[110px]">Mese</th>
-                    <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap">Conferito (kg)</th>
+                    <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap">Arrivato (kg)</th>
+                    {conStoccaggi && <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap">di cui da stoccaggi</th>}
                     <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap">Dichiarato (kg)</th>
                     {materiali.map(m => <th key={m.chiave} className="text-right px-2 py-1.5 font-semibold whitespace-nowrap">{m.nome} (kg)</th>)}
                     <th className="text-left px-2 py-1.5 font-semibold whitespace-nowrap">Stato</th>
@@ -67,6 +78,11 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                       <tr key={m.mese} className="border-b last:border-b-0">
                         <td className="px-3 py-1.5 font-medium">{m.mese}</td>
                         <td className="px-2 py-1.5 text-right tabular-nums">{kg(m.conferito_kg)}</td>
+                        {conStoccaggi && (
+                          <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground" title={(m.da_stoccaggi || []).map(s => `${formatKg(s.kg)} kg da ${s.stoccaggio}`).join(' · ')}>
+                            {kg((m.da_stoccaggi || []).reduce((s, x) => s + x.kg, 0))}
+                          </td>
+                        )}
                         <td className="px-2 py-1.5 text-right tabular-nums font-medium">{kg(d && d.quantita_kg)}</td>
                         {materiali.map(x => <td key={x.chiave} className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{kg(d && d[x.chiave])}</td>)}
                         <td className="px-2 py-1.5">
@@ -95,11 +111,12 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
 
       <div className="px-4 py-3 bg-muted/20 text-xs grid gap-x-6 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
         <span>Giacenza al 31/12 dell'anno prima: <strong>{t(sito.giacenza_iniziale_t)} t</strong></span>
-        <span>Conferito rete: <strong>{t(sito.conferito_t)} t</strong></span>
-        {sito.conferito_aci_t > 0 && <span>Conferito ACI: <strong>{t(sito.conferito_aci_t)} t</strong></span>}
-        {sito.conferito_extra_t > 0 && <span>Extra raccolta: <strong>{t(sito.conferito_extra_t)} t</strong></span>}
-        {sito.secondarie_in_t > 0 && <span>Secondarie in ingresso: <strong>{t(sito.secondarie_in_t)} t</strong></span>}
-        {sito.secondarie_out_t > 0 && <span>Secondarie in uscita: <strong>{t(sito.secondarie_out_t)} t</strong></span>}
+        <span>Primarie di rete arrivate: <strong>{t(sito.conferito_t)} t</strong></span>
+        {sito.secondarie_in_t > 0 && <span>Secondarie di rete dagli stoccaggi: <strong>{t(sito.secondarie_in_t)} t</strong></span>}
+        {sito.conferito_aci_t > 0 && <span>Primarie ACI: <strong>{t(sito.conferito_aci_t)} t</strong></span>}
+        {sito.secondarie_aci_in_t > 0 && <span>Secondarie ACI: <strong>{t(sito.secondarie_aci_in_t)} t</strong></span>}
+        {sito.conferito_extra_t > 0 && <span>Extra raccolta diretta: <strong>{t(sito.conferito_extra_t)} t</strong></span>}
+        {sito.secondarie_extra_in_t > 0 && <span>Extra raccolta dagli stoccaggi: <strong>{t(sito.secondarie_extra_in_t)} t</strong></span>}
         {sito.terziarie_out_t > 0 && <span>Terziarie in uscita: <strong>{t(sito.terziarie_out_t)} t</strong></span>}
         {/* Della rete, perche' e' la rete che fa la giacenza a portale: gli altri canali hanno il loro giro. */}
         <span>Dichiarato e caricato (rete): <strong>{t(sito.dichiarato_caricato_rete_t)} t</strong></span>

@@ -74,7 +74,13 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
           <DialogTitle>{sito.sito} · {mese.mese} {anno}</DialogTitle>
           <DialogDescription>
             Canale {canale ? canale.nome : flusso.canale}{flusso.provenienza ? `, ${flusso.provenienza}` : ''}
-            {flusso.operazione ? ` · ${flusso.operazione}` : ''} · conferiti nel mese <strong>{kg(mese.conferito_kg)} kg</strong>
+            {flusso.operazione ? ` · ${flusso.operazione}` : ''} · arrivati nel mese <strong>{kg(mese.conferito_kg)} kg</strong>
+            {mese.da_stoccaggi && mese.da_stoccaggi.length > 0 && (
+              <span className="block mt-1">
+                di cui {kg(mese.diretto_kg)} kg in primaria e {mese.da_stoccaggi.map(s => `${kg(s.kg)} kg in secondaria da ${s.stoccaggio}`).join(', ')}:
+                lo stoccaggio non dichiara, la dichiarazione di quei PFU la fa questo impianto.
+              </span>
+            )}
           </DialogDescription>
         </DialogHeader>
 

@@ -264,6 +264,25 @@ dichiarazione arriva: altrimenti la stessa raccolta compare due volte, un mese c
 conferito senza dichiarazione e un altro con la dichiarazione senza conferito.
 Quando e con quale dichiarazione e' stata fatta si scrive nella nota.
 
+**Gli stoccaggi non dichiarano** (regola dell'utente, 21/09/2026). Non trattano:
+ricevono i PFU e li rimandano in secondaria, e in quel viaggio sono il
+produttore. La dichiarazione si chiede all'impianto che li riceve, solo dopo il
+secondo viaggio, per rete, ACI ed extra raccolta. Nel modulo Dichiarazioni
+Impianti le secondarie stanno quindi sulla riga dell'impianto di destinazione,
+nel mese in cui arrivano e con scritto da quale stoccaggio; uno stoccaggio ha
+solo entrate, partenze e piazzale (scheda Stoccaggi). Chi e' insieme impianto e
+stoccaggio (Irigom, T-Cycle) si tiene diviso per `tipo_destinazione` del
+movimento: quello che arriva al suo stoccaggio non e' suo da dichiarare.
+
+**La quadratura col portale si fa sulla chiusura.** Il periodo di un movimento
+resta la fine del trasporto, ma il portale mette un carico nella giacenza di un
+impianto quando **chiude** l'ordine: il confronto con la fotografia degli ordini
+non dichiarati conta quindi gli ordini chiusi entro quel giorno. Un carico
+arrivato prima e chiuso dopo non e' uno scarto: si elenca a parte, ordine per
+ordine (`in_viaggio_a_portale`). Il 21/09/2026 i 51,07 t di "scarto" di Green
+Tyre, Gatim e T-Cycle erano tutti cosi'. La giacenza fisica di uno stoccaggio
+(rilevazione piu' movimenti) resta invece sulla fine del trasporto.
+
 ### Come si legge un movimento: un punto solo
 
 `base44/shared/movimenti.ts` (specchio per le pagine: `src/lib/movimenti.js`).

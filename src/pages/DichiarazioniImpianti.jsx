@@ -12,6 +12,7 @@ import SezioneImpianto from '@/components/dichiarazioni/SezioneImpianto';
 import Quadratura from '@/components/dichiarazioni/Quadratura';
 import DialogoMese from '@/components/dichiarazioni/DialogoMese';
 import CsscIrigom from '@/components/dichiarazioni/CsscIrigom';
+import Stoccaggi from '@/components/dichiarazioni/Stoccaggi';
 import { esportaDichiarazioni } from '@/lib/dichiarazioniExport';
 
 // Dichiarazioni degli impianti: che cosa ogni impianto ricava dai PFU che gli
@@ -81,6 +82,7 @@ export default function DichiarazioniImpianti() {
           <p className="text-sm text-muted-foreground max-w-3xl">
             Ogni mese gli impianti dichiarano che cosa hanno ricavato dai PFU che abbiamo conferito: granulo, metalli ferrosi e fibre
             per chi fa recupero di materia, ciabattato o cippato per chi fa valorizzazione energetica. Le dichiarazioni di Irigom le prepariamo noi.
+            Gli stoccaggi non trattano e non dichiarano: quello che rimandano in secondaria lo dichiara l'impianto che lo riceve.
             Quando una dichiarazione viene caricata a portale, decurta la giacenza dell'impianto.
           </p>
         </div>
@@ -138,7 +140,10 @@ export default function DichiarazioniImpianti() {
             <Kpi
               titolo="Quadratura con il portale"
               valore={`${totali.siti_che_quadrano} su ${totali.siti_che_quadrano + totali.siti_da_quadrare}`}
-              nota={totali.siti_da_quadrare ? `${totali.siti_da_quadrare} da verificare` : 'tutti in linea'}
+              nota={[
+                totali.siti_da_quadrare ? `${totali.siti_da_quadrare} da verificare` : 'tutti in linea',
+                totali.in_viaggio_a_portale_t > 0 ? `${formatTonnellate(totali.in_viaggio_a_portale_t)} t arrivate e chiuse a portale dopo la fotografia` : '',
+              ].filter(Boolean).join(' · ')}
               tono={totali.siti_da_quadrare ? 'male' : 'buono'}
             />
           </div>
@@ -147,6 +152,7 @@ export default function DichiarazioniImpianti() {
             <TabsList>
               <TabsTrigger value="riepilogo">Riepilogo</TabsTrigger>
               <TabsTrigger value="impianti">Impianti</TabsTrigger>
+              <TabsTrigger value="stoccaggi">Stoccaggi</TabsTrigger>
               <TabsTrigger value="irigom">Irigom e CSS-C</TabsTrigger>
               <TabsTrigger value="quadratura" className="gap-1">
                 Quadratura
@@ -159,7 +165,11 @@ export default function DichiarazioniImpianti() {
             </TabsContent>
 
             <TabsContent value="impianti" className="mt-4 space-y-4">
-              {dati.siti.map(s => <SezioneImpianto key={s.chiave} sito={s} onApri={apri} soloLettura={soloLettura} />)}
+              {dati.siti.filter(s => s.tipo_destinazione !== 'stoc').map(s => <SezioneImpianto key={s.chiave} sito={s} onApri={apri} soloLettura={soloLettura} />)}
+            </TabsContent>
+
+            <TabsContent value="stoccaggi" className="mt-4">
+              <Stoccaggi stoccaggi={dati.stoccaggi} />
             </TabsContent>
 
             <TabsContent value="irigom" className="mt-4">
