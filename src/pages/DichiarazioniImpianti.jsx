@@ -11,7 +11,7 @@ import Riepilogo from '@/components/dichiarazioni/Riepilogo';
 import SezioneImpianto from '@/components/dichiarazioni/SezioneImpianto';
 import Quadratura from '@/components/dichiarazioni/Quadratura';
 import DialogoMese from '@/components/dichiarazioni/DialogoMese';
-import CsscIrigom from '@/components/dichiarazioni/CsscIrigom';
+import PraticaIrigom from '@/components/dichiarazioni/PraticaIrigom';
 import Stoccaggi from '@/components/dichiarazioni/Stoccaggi';
 import { esportaDichiarazioni } from '@/lib/dichiarazioniExport';
 
@@ -159,7 +159,7 @@ export default function DichiarazioniImpianti() {
               <TabsTrigger value="riepilogo">Riepilogo</TabsTrigger>
               <TabsTrigger value="impianti">Impianti</TabsTrigger>
               <TabsTrigger value="stoccaggi">Stoccaggi</TabsTrigger>
-              <TabsTrigger value="irigom">Irigom e CSS-C</TabsTrigger>
+              <TabsTrigger value="irigom">Irigom</TabsTrigger>
               <TabsTrigger value="quadratura" className="gap-1">
                 Quadratura
                 {totali.siti_da_quadrare > 0 ? <AlertTriangle className="w-3.5 h-3.5 text-red-600" /> : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
@@ -179,7 +179,7 @@ export default function DichiarazioniImpianti() {
             </TabsContent>
 
             <TabsContent value="irigom" className="mt-4">
-              <CsscIrigom anno={anno} giacenzaPortaleT={(dati.siti.find(s => /irigom/i.test(s.nome || s.chiave || '')) || {}).giacenza_portale_t} />
+              <PraticaIrigom anno={anno} irigom={dati.siti.find(s => s.tipo_destinazione !== 'stoc' && /irigom/i.test(s.sito || s.chiave || '')) || null} fotoPortaleIl={dati.foto_portale_il} onRegistrata={carica} />
             </TabsContent>
 
             <TabsContent value="quadratura" className="mt-4">

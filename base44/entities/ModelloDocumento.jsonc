@@ -1,0 +1,72 @@
+{
+  "name": "ModelloDocumento",
+  "type": "object",
+  "properties": {
+    "uso": {
+      "type": "string",
+      "enum": [
+        "irigom_ferro",
+        "irigom_nave",
+        "irigom_extra",
+        "irigom_cssc"
+      ],
+      "description": "A che documento serve: le dichiarazioni mensili di Irigom (ferro EER 19.12.02, ciabattato spedito in nave, extra raccolta, CSS-C per DDT)"
+    },
+    "nome": {
+      "type": "string"
+    },
+    "file_uri": {
+      "type": "string",
+      "description": "Il .docx del modello nell'archivio privato, con i segnaposto fra doppie graffe e le tabelle come {{TABELLA_...}}"
+    },
+    "file_nome": {
+      "type": "string"
+    },
+    "segnaposti": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "I segnaposto trovati nel modello quando e' stato caricato"
+    },
+    "attivo": {
+      "type": "boolean",
+      "default": true,
+      "description": "Il modello in uso per quel documento. Quando se ne carica uno nuovo, il vecchio resta, non attivo, con il motivo"
+    },
+    "caricato_il": {
+      "type": "string"
+    },
+    "sostituito_il": {
+      "type": "string"
+    },
+    "motivo_sostituzione": {
+      "type": "string"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "uso",
+    "file_uri"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

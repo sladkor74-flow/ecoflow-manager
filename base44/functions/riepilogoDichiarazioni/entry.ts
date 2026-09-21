@@ -271,6 +271,7 @@ export default async function(req) {
     const attesaCoppia = new Map(); // nsStoccaggio|nsImpianto -> t partite e non ancora dichiarate
     const aPortale = new Set();     // chi compare nella fotografia del portale
     const daDichiarare = new Map(); // ns|mese -> kg ancora in attesa di dichiarazione
+    const fotoPerGiorno = new Map(); // ns|giorno di fine trasporto -> kg ancora in attesa
     for (const r of nonDichiarati) {
       const sec = String(r.destinazione_secondaria || '').trim();
       const sito = sec || String(r.destinazione || '').trim();
@@ -286,7 +287,24 @@ export default async function(req) {
       // ancora: l'unico modo onesto di dire "questo mese e' da dichiarare".
       const g = giornoRoma(r.fine_trasporto);
       if (g) somma(daDichiarare, `${ns}|${MESI[Number(g.slice(5, 7)) - 1]}`, t * 1000);
+      // Per la giacenza a fine mese: fino a che giorno arriva il carico.
+      if (g) somma(fotoPerGiorno, `${ns}|${g}`, t * 1000);
     }
+    // La giacenza di rete a portale alla fine di ogni mese, per fine trasporto:
+    // quello che il file del portale aspetta ancora, piu' i carichi che il file
+    // non contiene. Serve a calcolare quanto dichiarare per un mese chiuso (la
+    // pratica di Irigom). Le dichiarazioni caricate dopo la fotografia le toglie
+    // chi la usa, perche' dipende da quale mese sta dichiarando.
+    const fineMese = (ns) => MESI.map((mese, i) => {
+      const fine = `${annoNum}-${String(i + 1).padStart(2, '0')}-31`;
+      let foto = 0;
+      for (const [k, kg] of fotoPerGiorno) {
+        const [sito, giorno] = k.split('|');
+        if (sito === ns && giorno <= fine) foto += kg;
+      }
+      const aggiunti = (nonAncora.get(ns) || []).filter(x => x.fine_trasporto && x.fine_trasporto <= fine).reduce((s, x) => s + x.kg, 0);
+      return { mese, foto_kg: Math.round(foto), aggiunti_kg: Math.round(aggiunti) };
+    });
 
     // --- Dichiarazioni per sito, canale, provenienza e mese ---
     const perDich = new Map();
@@ -405,6 +423,7 @@ export default async function(req) {
         aggiunti_alla_foto_t: aggiuntiT,
         dichiarato_dopo_foto_t: dopoFoto,
         giacenza_portale_t: fotoT === null ? null : t3(fotoT + aggiuntiT - dopoFoto),
+        portale_fine_mese: senzaPortale ? [] : fineMese(ns),
         // La rilevazione del suo stoccaggio sta a parte (scheda Stoccaggi).
         rilevazione_stoccaggio: ruoli.includes('stoc') && rilevazione.has(ns) ? { RETE: t3(rilevazione.get(ns).RETE), ACI: t3(rilevazione.get(ns).ACI), data: rilevazione.get(ns).data } : null,
         flussi,

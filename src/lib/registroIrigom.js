@@ -103,9 +103,74 @@ function usciteCssc(XLSX, ws, anno) {
   return { righe, per_colore: perColore };
 }
 
+const giornoDi = (c) => {
+  const d = c && c.v instanceof Date && !isNaN(c.v.getTime()) ? c.v : null;
+  return d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : '';
+};
+const riempimento = (c) => (c && c.s && c.s.fgColor && c.s.fgColor.rgb ? String(c.s.fgColor.rgb).toUpperCase().slice(-6) : '');
+// La nota di Excel sulla cella: e' li' che Irigom scrive come si divide un
+// formulario fra i consorzi ("ECP:10,72 ECT:6,62 LM: 10,62").
+const notaDi = (c) => (c && Array.isArray(c.c) ? c.c.map(x => String(x.t || '')).join('\n').trim() : '');
+
+/**
+ * Le uscite di ferro (EER 19.12.02) del foglio Dettaglio, colonna AH, con il
+ * colore e la nota di ciascuna: e' da li' che si capisce quale parte e' della
+ * nostra commessa (vedi praticaIrigom.formulariFerro).
+ */
+function usciteFerro(XLSX, ws, anno) {
+  const r = XLSX.utils.decode_range(ws['!ref']);
+  const righe = [];
+  for (let R = r.s.r; R <= r.e.r; R++) {
+    const kg = ws['AH' + (R + 1)];
+    if (!kg || typeof kg.v !== 'number' || !(kg.v > 0)) continue;
+    const giorno = giornoDi(ws['A' + (R + 1)]);
+    if (!giorno || Number(giorno.slice(0, 4)) !== anno) continue;
+    righe.push({
+      riga: R + 1,
+      data: giorno,
+      mese: MESI[Number(giorno.slice(5, 7)) - 1],
+      trasportatore: testo(ws['G' + (R + 1)]),
+      destinatario: testo(ws['H' + (R + 1)]),
+      formulario: testo(ws['J' + (R + 1)]),
+      tipologia: testo(ws['K' + (R + 1)]),
+      kg: Math.round(kg.v),
+      colore: riempimento(kg),
+      nota: notaDi(kg),
+    });
+  }
+  return righe;
+}
+
+/**
+ * Gli allegati VII del ciabattato spedito in nave: foglio Dettaglio, numero in
+ * J e peso in AL. La numerazione riparte a ogni nave.
+ */
+function allegatiVII(XLSX, ws, anno) {
+  const r = XLSX.utils.decode_range(ws['!ref']);
+  const righe = [];
+  for (let R = r.s.r; R <= r.e.r; R++) {
+    const kg = ws['AL' + (R + 1)];
+    if (!kg || typeof kg.v !== 'number' || !(kg.v > 0)) continue;
+    const giorno = giornoDi(ws['A' + (R + 1)]);
+    if (!giorno || Number(giorno.slice(0, 4)) !== anno) continue;
+    const numero = Number(String((ws['J' + (R + 1)] || {}).v ?? '').replace(/[^\d]/g, ''));
+    righe.push({
+      riga: R + 1,
+      data: giorno,
+      mese: MESI[Number(giorno.slice(5, 7)) - 1],
+      numero: Number.isFinite(numero) ? numero : 0,
+      trasportatore: testo(ws['G' + (R + 1)]),
+      destinatario: testo(ws['H' + (R + 1)]),
+      intermediario: testo(ws['I' + (R + 1)]),
+      kg: Math.round(kg.v),
+    });
+  }
+  return righe;
+}
+
 /**
  * Legge il registro e restituisce quello che serve alle dichiarazioni.
- * @returns { anno, mesi: [...], cssc: { righe, per_colore }, controlli: [...] }
+ * @returns { anno, mesi: [...], cssc: { righe, per_colore }, ferro: [...], allegati: [...], controlli: [...] }
  */
 export async function leggiRegistroIrigom(file, anno) {
   const XLSX = await import('xlsx');
@@ -144,7 +209,7 @@ export async function leggiRegistroIrigom(file, anno) {
     }
   }
 
-  return { anno, mesi, cssc, controlli, file_nome: file.name };
+  return { anno, mesi, cssc, ferro: usciteFerro(XLSX, dettaglio, anno), allegati: allegatiVII(XLSX, dettaglio, anno), controlli, file_nome: file.name };
 }
 
 export { MESI, ARANCIONI };

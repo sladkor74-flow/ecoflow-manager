@@ -1,0 +1,852 @@
+{
+ "descrizione": "Dichiarazioni Irigom di agosto 2026: ingressi dal registro di carico e scarico (settimana 37) e uscite davvero prodotte il 18/09/2026. Ricavato da un secondo agente che le ha rifatte da capo: 525 valori su 525.",
+ "riga": {
+  "uscite_cippato_kg": 452100,
+  "uscite_ferro_kg": 82500,
+  "uscite_cssc_kg": 0,
+  "giacenza_cippato_kg": 70000,
+  "giacenza_intero_kg": 74780
+ },
+ "ferro": [
+  {
+   "riga": 3490,
+   "data": "2026-08-03",
+   "trasportatore": "SMOCO",
+   "destinatario": "TRS",
+   "formulario": "CNDJM000341SG",
+   "kg": 27160,
+   "colore": "92D050",
+   "nota": ""
+  },
+  {
+   "riga": 3502,
+   "data": "2026-08-03",
+   "trasportatore": "SMOCO",
+   "destinatario": "TRS",
+   "formulario": "CNDJM000342KP",
+   "kg": 28280,
+   "colore": "FFC000",
+   "nota": ""
+  },
+  {
+   "riga": 3523,
+   "data": "2026-08-04",
+   "trasportatore": "SMOCO",
+   "destinatario": "TRS",
+   "formulario": "CNDJM000343VD",
+   "kg": 27960,
+   "colore": "FF66CC",
+   "nota": "ECP:10,72 ECT:6,62 LM: 10,62"
+  },
+  {
+   "riga": 3548,
+   "data": "2026-08-05",
+   "trasportatore": "MMF",
+   "destinatario": "MMF",
+   "formulario": "CNDJM000344RJ",
+   "kg": 9380,
+   "colore": "FFFF00",
+   "nota": ""
+  },
+  {
+   "riga": 3557,
+   "data": "2026-08-05",
+   "trasportatore": "SMOCO",
+   "destinatario": "TRS",
+   "formulario": "CNDJM000345VB",
+   "kg": 28100,
+   "colore": "92D050",
+   "nota": ""
+  },
+  {
+   "riga": 3692,
+   "data": "2026-08-17",
+   "trasportatore": "SMOCO",
+   "destinatario": "TRS",
+   "formulario": "CNDJM000346NH",
+   "kg": 27500,
+   "colore": "92D050",
+   "nota": ""
+  },
+  {
+   "riga": 3696,
+   "data": "2026-08-18",
+   "trasportatore": "RICICLA",
+   "destinatario": "TRS",
+   "formulario": "CNDJM000347TS",
+   "kg": 24700,
+   "colore": "92D050",
+   "nota": ""
+  },
+  {
+   "riga": 3719,
+   "data": "2026-08-25",
+   "trasportatore": "MMF",
+   "destinatario": "MMF",
+   "formulario": "CNDJM000348TT",
+   "kg": 6860,
+   "colore": "FFCCCC",
+   "nota": ""
+  },
+  {
+   "riga": 3722,
+   "data": "2026-08-25",
+   "trasportatore": "SMOCO",
+   "destinatario": "TRS",
+   "formulario": "CNDJM000349CB",
+   "kg": 27560,
+   "colore": "FF66CC",
+   "nota": "ecp: 24,2 lm:3,36"
+  },
+  {
+   "riga": 3724,
+   "data": "2026-08-25",
+   "trasportatore": "MMF",
+   "destinatario": "MMF",
+   "formulario": "CNDJM000351TD",
+   "kg": 1260,
+   "colore": "FFFF00",
+   "nota": ""
+  },
+  {
+   "riga": 3725,
+   "data": "2026-08-25",
+   "trasportatore": "MMF",
+   "destinatario": "MMF",
+   "formulario": "CNDJM000350SF",
+   "kg": 3720,
+   "colore": "FFCCCC",
+   "nota": ""
+  },
+  {
+   "riga": 3755,
+   "data": "2026-08-27",
+   "trasportatore": "SILVANO RENATO",
+   "destinatario": "TRS",
+   "formulario": "CNDJM000352SK",
+   "kg": 29360,
+   "colore": "FF66CC",
+   "nota": "ECP: 28,52 LM: 0,84"
+  },
+  {
+   "riga": 3831,
+   "data": "2026-08-28",
+   "trasportatore": "SMOCO",
+   "destinatario": "TRS",
+   "formulario": "CNDJM000353BB",
+   "kg": 27920,
+   "colore": "FFC000",
+   "nota": ""
+  },
+  {
+   "riga": 3841,
+   "data": "2026-08-28",
+   "trasportatore": "SMOCO",
+   "destinatario": "TRS",
+   "formulario": "CNDJM000354XB",
+   "kg": 27340,
+   "colore": "FF66CC",
+   "nota": "ECT: 19,68 LM: 7,66"
+  }
+ ],
+ "allegati": [
+  {
+   "riga": 3760,
+   "data": "2026-08-27",
+   "numero": 1,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 25880
+  },
+  {
+   "riga": 3761,
+   "data": "2026-08-27",
+   "numero": 2,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 28120
+  },
+  {
+   "riga": 3762,
+   "data": "2026-08-27",
+   "numero": 3,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27460
+  },
+  {
+   "riga": 3763,
+   "data": "2026-08-27",
+   "numero": 4,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 26800
+  },
+  {
+   "riga": 3764,
+   "data": "2026-08-27",
+   "numero": 5,
+   "trasportatore": "FAP SRL",
+   "destinatario": "AKCANSA",
+   "kg": 27400
+  },
+  {
+   "riga": 3765,
+   "data": "2026-08-27",
+   "numero": 6,
+   "trasportatore": "PARASCANDOLO",
+   "destinatario": "AKCANSA",
+   "kg": 28040
+  },
+  {
+   "riga": 3766,
+   "data": "2026-08-27",
+   "numero": 7,
+   "trasportatore": "MONTANARO",
+   "destinatario": "AKCANSA",
+   "kg": 27020
+  },
+  {
+   "riga": 3767,
+   "data": "2026-08-27",
+   "numero": 8,
+   "trasportatore": "RIA PIETRINA",
+   "destinatario": "AKCANSA",
+   "kg": 27860
+  },
+  {
+   "riga": 3768,
+   "data": "2026-08-27",
+   "numero": 9,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27920
+  },
+  {
+   "riga": 3769,
+   "data": "2026-08-27",
+   "numero": 10,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27620
+  },
+  {
+   "riga": 3770,
+   "data": "2026-08-27",
+   "numero": 11,
+   "trasportatore": "FAP SRL",
+   "destinatario": "AKCANSA",
+   "kg": 27720
+  },
+  {
+   "riga": 3771,
+   "data": "2026-08-27",
+   "numero": 12,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27140
+  },
+  {
+   "riga": 3773,
+   "data": "2026-08-27",
+   "numero": 13,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 26640
+  },
+  {
+   "riga": 3774,
+   "data": "2026-08-27",
+   "numero": 14,
+   "trasportatore": "PARASCANDOLO",
+   "destinatario": "AKCANSA",
+   "kg": 27240
+  },
+  {
+   "riga": 3775,
+   "data": "2026-08-27",
+   "numero": 15,
+   "trasportatore": "MONTANARO",
+   "destinatario": "AKCANSA",
+   "kg": 26400
+  },
+  {
+   "riga": 3776,
+   "data": "2026-08-27",
+   "numero": 16,
+   "trasportatore": "RIA PIETRINA",
+   "destinatario": "AKCANSA",
+   "kg": 27520
+  },
+  {
+   "riga": 3777,
+   "data": "2026-08-27",
+   "numero": 17,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27660
+  },
+  {
+   "riga": 3778,
+   "data": "2026-08-27",
+   "numero": 18,
+   "trasportatore": "FAP SRL",
+   "destinatario": "AKCANSA",
+   "kg": 27360
+  },
+  {
+   "riga": 3779,
+   "data": "2026-08-27",
+   "numero": 19,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27660
+  },
+  {
+   "riga": 3780,
+   "data": "2026-08-27",
+   "numero": 20,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27400
+  },
+  {
+   "riga": 3781,
+   "data": "2026-08-27",
+   "numero": 21,
+   "trasportatore": "TRANSAR",
+   "destinatario": "AKCANSA",
+   "kg": 26600
+  },
+  {
+   "riga": 3782,
+   "data": "2026-08-27",
+   "numero": 22,
+   "trasportatore": "PARASCANDOLO",
+   "destinatario": "AKCANSA",
+   "kg": 28080
+  },
+  {
+   "riga": 3783,
+   "data": "2026-08-27",
+   "numero": 23,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 26960
+  },
+  {
+   "riga": 3784,
+   "data": "2026-08-27",
+   "numero": 24,
+   "trasportatore": "MONTANARO",
+   "destinatario": "AKCANSA",
+   "kg": 27000
+  },
+  {
+   "riga": 3785,
+   "data": "2026-08-27",
+   "numero": 25,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27760
+  },
+  {
+   "riga": 3786,
+   "data": "2026-08-27",
+   "numero": 26,
+   "trasportatore": "FAP SRL",
+   "destinatario": "AKCANSA",
+   "kg": 27760
+  },
+  {
+   "riga": 3787,
+   "data": "2026-08-27",
+   "numero": 27,
+   "trasportatore": "RIA PIETRINA",
+   "destinatario": "AKCANSA",
+   "kg": 26440
+  },
+  {
+   "riga": 3788,
+   "data": "2026-08-27",
+   "numero": 28,
+   "trasportatore": "PARASCANDOLO",
+   "destinatario": "AKCANSA",
+   "kg": 27380
+  },
+  {
+   "riga": 3789,
+   "data": "2026-08-27",
+   "numero": 29,
+   "trasportatore": "TRANSAR",
+   "destinatario": "AKCANSA",
+   "kg": 25480
+  },
+  {
+   "riga": 3790,
+   "data": "2026-08-27",
+   "numero": 30,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 26320
+  },
+  {
+   "riga": 3791,
+   "data": "2026-08-27",
+   "numero": 31,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27380
+  },
+  {
+   "riga": 3792,
+   "data": "2026-08-27",
+   "numero": 32,
+   "trasportatore": "MONTANARO",
+   "destinatario": "AKCANSA",
+   "kg": 27020
+  },
+  {
+   "riga": 3793,
+   "data": "2026-08-27",
+   "numero": 33,
+   "trasportatore": "PARASCANDOLO",
+   "destinatario": "AKCANSA",
+   "kg": 26800
+  },
+  {
+   "riga": 3794,
+   "data": "2026-08-27",
+   "numero": 34,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27940
+  },
+  {
+   "riga": 3795,
+   "data": "2026-08-27",
+   "numero": 35,
+   "trasportatore": "FAP SRL",
+   "destinatario": "AKCANSA",
+   "kg": 27040
+  },
+  {
+   "riga": 3796,
+   "data": "2026-08-27",
+   "numero": 36,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27140
+  },
+  {
+   "riga": 3797,
+   "data": "2026-08-27",
+   "numero": 37,
+   "trasportatore": "TRANSAR",
+   "destinatario": "AKCANSA",
+   "kg": 27260
+  },
+  {
+   "riga": 3798,
+   "data": "2026-08-27",
+   "numero": 38,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27340
+  },
+  {
+   "riga": 3799,
+   "data": "2026-08-27",
+   "numero": 39,
+   "trasportatore": "RIA PIETRINA",
+   "destinatario": "AKCANSA",
+   "kg": 27660
+  },
+  {
+   "riga": 3800,
+   "data": "2026-08-27",
+   "numero": 40,
+   "trasportatore": "TRANSAR",
+   "destinatario": "AKCANSA",
+   "kg": 25940
+  },
+  {
+   "riga": 3801,
+   "data": "2026-08-27",
+   "numero": 41,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 26940
+  },
+  {
+   "riga": 3802,
+   "data": "2026-08-27",
+   "numero": 42,
+   "trasportatore": "MONTANARO",
+   "destinatario": "AKCANSA",
+   "kg": 27140
+  },
+  {
+   "riga": 3803,
+   "data": "2026-08-27",
+   "numero": 43,
+   "trasportatore": "PARASCANDOLO",
+   "destinatario": "AKCANSA",
+   "kg": 28040
+  },
+  {
+   "riga": 3804,
+   "data": "2026-08-27",
+   "numero": 44,
+   "trasportatore": "FAP SRL",
+   "destinatario": "AKCANSA",
+   "kg": 27100
+  },
+  {
+   "riga": 3805,
+   "data": "2026-08-27",
+   "numero": 45,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27680
+  },
+  {
+   "riga": 3806,
+   "data": "2026-08-27",
+   "numero": 46,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27080
+  },
+  {
+   "riga": 3807,
+   "data": "2026-08-27",
+   "numero": 47,
+   "trasportatore": "TRANSAR",
+   "destinatario": "AKCANSA",
+   "kg": 27160
+  },
+  {
+   "riga": 3814,
+   "data": "2026-08-28",
+   "numero": 48,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 28040
+  },
+  {
+   "riga": 3815,
+   "data": "2026-08-28",
+   "numero": 49,
+   "trasportatore": "TRANSAR",
+   "destinatario": "AKCANSA",
+   "kg": 26280
+  },
+  {
+   "riga": 3816,
+   "data": "2026-08-28",
+   "numero": 50,
+   "trasportatore": "FAP SRL",
+   "destinatario": "AKCANSA",
+   "kg": 24400
+  },
+  {
+   "riga": 3817,
+   "data": "2026-08-28",
+   "numero": 51,
+   "trasportatore": "MONTANARO",
+   "destinatario": "AKCANSA",
+   "kg": 26300
+  },
+  {
+   "riga": 3818,
+   "data": "2026-08-28",
+   "numero": 52,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 27660
+  },
+  {
+   "riga": 3819,
+   "data": "2026-08-28",
+   "numero": 53,
+   "trasportatore": "TRANSAR",
+   "destinatario": "AKCANSA",
+   "kg": 26860
+  },
+  {
+   "riga": 3820,
+   "data": "2026-08-28",
+   "numero": 54,
+   "trasportatore": "TRANSAR",
+   "destinatario": "AKCANSA",
+   "kg": 24600
+  },
+  {
+   "riga": 3821,
+   "data": "2026-08-28",
+   "numero": 55,
+   "trasportatore": "RIA PIETRINA",
+   "destinatario": "AKCANSA",
+   "kg": 25540
+  },
+  {
+   "riga": 3824,
+   "data": "2026-08-28",
+   "numero": 56,
+   "trasportatore": "SMOCO",
+   "destinatario": "AKCANSA",
+   "kg": 28180
+  },
+  {
+   "riga": 3825,
+   "data": "2026-08-28",
+   "numero": 57,
+   "trasportatore": "TRANSAR",
+   "destinatario": "AKCANSA",
+   "kg": 26940
+  },
+  {
+   "riga": 3826,
+   "data": "2026-08-28",
+   "numero": 58,
+   "trasportatore": "FAP SRL",
+   "destinatario": "AKCANSA",
+   "kg": 26300
+  },
+  {
+   "riga": 3827,
+   "data": "2026-08-28",
+   "numero": 59,
+   "trasportatore": "MONTANARO",
+   "destinatario": "AKCANSA",
+   "kg": 23600
+  }
+ ],
+ "extra": {
+  "formulari": [
+   {
+    "formulario": "BSDCL002230PQ",
+    "peso_kg": 460
+   }
+  ],
+  "cippato_kg": 340,
+  "ferro_kg": 120
+ },
+ "terziarie": [
+  "TER26153987",
+  "TER26153994",
+  "TER26154000",
+  "TER26154016",
+  "TER26154028",
+  "TER26154037",
+  "TER26154044",
+  "TER26154059",
+  "TER26154063",
+  "TER26154071",
+  "TER26154085",
+  "TER26154092",
+  "TER26154102",
+  "TER26154118",
+  "TER26154125",
+  "TER26154139",
+  "TER26154141"
+ ],
+ "portale_fine_mese_kg": 695140,
+ "attese": {
+  "ferro_tabella": [
+   {
+    "formulario": "CNDJM000342KP",
+    "peso_kg": 28280,
+    "quota_kg": 28280
+   },
+   {
+    "formulario": "CNDJM000343VD",
+    "peso_kg": 27960,
+    "quota_kg": 6620
+   },
+   {
+    "formulario": "CNDJM000353BB",
+    "peso_kg": 27920,
+    "quota_kg": 27920
+   },
+   {
+    "formulario": "CNDJM000354XB",
+    "peso_kg": 27340,
+    "quota_kg": 19680
+   }
+  ],
+  "allegati_scelti": [
+   1,
+   2,
+   3,
+   4,
+   9,
+   10,
+   12,
+   13,
+   17,
+   19,
+   20,
+   23,
+   25,
+   30,
+   31,
+   34,
+   36
+  ],
+  "terziarie": [
+   {
+    "terziaria": "TER26153987",
+    "allegato": 1,
+    "peso_allegato_kg": 25880,
+    "cippato_kg": 25880,
+    "ferro_kg": 4850,
+    "totale_kg": 30730
+   },
+   {
+    "terziaria": "TER26153994",
+    "allegato": 2,
+    "peso_allegato_kg": 28120,
+    "cippato_kg": 28120,
+    "ferro_kg": 4850,
+    "totale_kg": 32970
+   },
+   {
+    "terziaria": "TER26154000",
+    "allegato": 3,
+    "peso_allegato_kg": 27460,
+    "cippato_kg": 27460,
+    "ferro_kg": 4850,
+    "totale_kg": 32310
+   },
+   {
+    "terziaria": "TER26154016",
+    "allegato": 4,
+    "peso_allegato_kg": 26800,
+    "cippato_kg": 26800,
+    "ferro_kg": 4850,
+    "totale_kg": 31650
+   },
+   {
+    "terziaria": "TER26154028",
+    "allegato": 9,
+    "peso_allegato_kg": 27920,
+    "cippato_kg": 27920,
+    "ferro_kg": 4850,
+    "totale_kg": 32770
+   },
+   {
+    "terziaria": "TER26154037",
+    "allegato": 10,
+    "peso_allegato_kg": 27620,
+    "cippato_kg": 27620,
+    "ferro_kg": 4850,
+    "totale_kg": 32470
+   },
+   {
+    "terziaria": "TER26154044",
+    "allegato": 12,
+    "peso_allegato_kg": 27140,
+    "cippato_kg": 27140,
+    "ferro_kg": 4850,
+    "totale_kg": 31990
+   },
+   {
+    "terziaria": "TER26154059",
+    "allegato": 13,
+    "peso_allegato_kg": 26640,
+    "cippato_kg": 26640,
+    "ferro_kg": 4850,
+    "totale_kg": 31490
+   },
+   {
+    "terziaria": "TER26154063",
+    "allegato": 17,
+    "peso_allegato_kg": 27660,
+    "cippato_kg": 27660,
+    "ferro_kg": 4850,
+    "totale_kg": 32510
+   },
+   {
+    "terziaria": "TER26154071",
+    "allegato": 19,
+    "peso_allegato_kg": 27660,
+    "cippato_kg": 27660,
+    "ferro_kg": 4850,
+    "totale_kg": 32510
+   },
+   {
+    "terziaria": "TER26154085",
+    "allegato": 20,
+    "peso_allegato_kg": 27400,
+    "cippato_kg": 27400,
+    "ferro_kg": 4850,
+    "totale_kg": 32250
+   },
+   {
+    "terziaria": "TER26154092",
+    "allegato": 23,
+    "peso_allegato_kg": 26960,
+    "cippato_kg": 26960,
+    "ferro_kg": 4850,
+    "totale_kg": 31810
+   },
+   {
+    "terziaria": "TER26154102",
+    "allegato": 25,
+    "peso_allegato_kg": 27760,
+    "cippato_kg": 27760,
+    "ferro_kg": 4850,
+    "totale_kg": 32610
+   },
+   {
+    "terziaria": "TER26154118",
+    "allegato": 30,
+    "peso_allegato_kg": 26320,
+    "cippato_kg": 26320,
+    "ferro_kg": 4850,
+    "totale_kg": 31170
+   },
+   {
+    "terziaria": "TER26154125",
+    "allegato": 31,
+    "peso_allegato_kg": 27380,
+    "cippato_kg": 27380,
+    "ferro_kg": 4850,
+    "totale_kg": 32230
+   },
+   {
+    "terziaria": "TER26154139",
+    "allegato": 34,
+    "peso_allegato_kg": 27940,
+    "cippato_kg": 27940,
+    "ferro_kg": 4850,
+    "totale_kg": 32790
+   },
+   {
+    "terziaria": "TER26154141",
+    "allegato": 36,
+    "peso_allegato_kg": 27140,
+    "cippato_kg": 15100,
+    "ferro_kg": 4780,
+    "totale_kg": 19880
+   }
+  ],
+  "totali": {
+   "peso_allegati_kg": 463800,
+   "cippato_kg": 451760,
+   "ferro_kg": 82380,
+   "totale_kg": 534140
+  },
+  "extra": {
+   "terziaria": "TER26154141",
+   "allegato": 36,
+   "cippato_kg": 340,
+   "ferro_kg": 120,
+   "totale_kg": 460
+  },
+  "rete_kg": 534140
+ },
+ "nota_portale": "Giacenza di rete di Irigom a portale a fine agosto, dal file Ordini non dichiarati del 18/09/2026: ordini con fine trasporto entro il 31/08, per fine trasporto e mai per data di chiusura."
+}

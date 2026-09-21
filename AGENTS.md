@@ -274,6 +274,35 @@ solo entrate, partenze e piazzale (scheda Stoccaggi). Chi e' insieme impianto e
 stoccaggio (Irigom, T-Cycle) si tiene diviso per `tipo_destinazione` del
 movimento: quello che arriva al suo stoccaggio non e' suo da dichiarare.
 
+### La pratica mensile di Irigom
+
+Le dichiarazioni di Irigom le prepariamo noi, nella scheda Irigom di
+Dichiarazioni Impianti (`PraticaIrigom.jsx`). Le regole stanno in
+`src/lib/praticaIrigom.js` e sono provate sul caso vero di agosto 2026
+(`prove/praticaIrigom.mjs`, dati in `prove/dati/`): toccarle vuol dire rifare
+quella prova.
+
+- **Ferro**: formulari del foglio Dettaglio, colonna AH. Destinatario MMF mai;
+  cella arancione FFC000 per intero; altrimenti conta la **nota** di Excel
+  ("ECT: 6,62" in tonnellate, anche "27,5 ECP 1,06 ECT"), non il colore, che
+  cambia nell'anno. La somma deve fare la colonna X del foglio Cons.
+- **Allegati VII** (J numero, AL peso): prima SMOCO, poi TRANSAR, poi gli altri,
+  per numero, finche' coprono il ciabattato uscito (V). Tante terziarie quanti
+  allegati; le TER in ordine crescente vanno agli allegati in ordine di scelta.
+- **Ripartizione**: ciabattato a peso pieno dell'allegato, l'ultima terziaria il
+  resto; ferro uguale per tutte alle decine, l'ultima il resto; mai oltre 38.000
+  kg per dichiarazione. L'extra raccolta si attacca all'ultima terziaria e si
+  scrive a parte (canale suo).
+- **Quanto**: due letture, sempre mostrate insieme. Uscite del registro
+  (V + X + Y) oppure la regola del 19/09/2026, giacenza di rete a portale a fine
+  mese (per fine trasporto) meno cippato e interi (AA + AC). Il ferro e' la parte
+  che si aggiusta.
+- I Word nascono dai modelli in `ModelloDocumento` (docx con segnaposto; le
+  tabelle con `tabellaWord`, lo stile di agosto). Il registro e i PDF si leggono
+  nel browser e non si conservano: resta la `PraticaIrigom` con i numeri.
+- `docxModello.unisciRun` fonde solo run con lo stesso stile: fonderli tutti
+  faceva perdere grassetti e caratteri ai documenti generati.
+
 ### Le tre regole che l'utente non vuole ripetere (21/09/2026)
 
 1. **Fine trasporto, MAI chiusura a portale.** In ogni modulo ogni ragionamento

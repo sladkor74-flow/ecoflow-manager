@@ -1,0 +1,122 @@
+{
+  "name": "PraticaIrigom",
+  "type": "object",
+  "properties": {
+    "anno": {
+      "type": "number"
+    },
+    "mese": {
+      "type": "string",
+      "description": "Il mese dichiarato, per esteso: Gennaio ... Dicembre"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "in_preparazione",
+        "registrata",
+        "sostituita"
+      ],
+      "default": "in_preparazione",
+      "description": "Registrata: la dichiarazione del mese e' stata scritta nel gestionale. Sostituita: rifatta, il motivo e' scritto e questa resta nello storico"
+    },
+    "versione": {
+      "type": "number",
+      "default": 1
+    },
+    "motivo_sostituzione": {
+      "type": "string"
+    },
+    "registro_file": {
+      "type": "string",
+      "description": "Il nome del registro di carico e scarico da cui e' stata calcolata"
+    },
+    "lettura": {
+      "type": "string",
+      "enum": [
+        "giacenza",
+        "uscite"
+      ],
+      "description": "Giacenza: si dichiara quanto lascia a portale la giacenza di cippato e interi del registro (regola del 19/09/2026). Uscite: si dichiarano le uscite del mese del foglio Cons."
+    },
+    "portale_fine_mese_kg": {
+      "type": "number",
+      "description": "Giacenza di rete a portale a fine mese, per fine trasporto, usata per la lettura dalla giacenza"
+    },
+    "rete_kg": {
+      "type": "number",
+      "description": "Dichiarato di rete: CSS-C piu' terziarie"
+    },
+    "extra_kg": {
+      "type": "number",
+      "description": "Extra raccolta dichiarata con questa pratica: canale a parte, non si somma alla rete"
+    },
+    "cippato_kg": {
+      "type": "number"
+    },
+    "metalli_kg": {
+      "type": "number"
+    },
+    "cssc_kg": {
+      "type": "number"
+    },
+    "terziarie": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "data_lettera": {
+      "type": "string"
+    },
+    "nave_json": {
+      "type": "string",
+      "description": "Nome, IMO, porto, partenza e cementeria della nave del mese"
+    },
+    "extra_json": {
+      "type": "string",
+      "description": "I formulari di extra raccolta dichiarati con questa pratica e come sono stati divisi fra ciabattato e ferro"
+    },
+    "dati_json": {
+      "type": "string",
+      "description": "La pratica composta: letture, ferro, allegati VII, terziarie, CSS-C, avvisi. Basta per rifare documenti e riepilogo"
+    },
+    "documenti_json": {
+      "type": "string",
+      "description": "I documenti forniti (formulari, DDT, allegati VII): solo i nomi e l'esito del controllo, i file non si conservano"
+    },
+    "registrata_il": {
+      "type": "string"
+    },
+    "registrata_da": {
+      "type": "string"
+    },
+    "dichiarazione_rete_id": {
+      "type": "string"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "anno",
+    "mese"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
