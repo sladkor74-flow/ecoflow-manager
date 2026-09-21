@@ -296,9 +296,12 @@ quella prova.
   kg per dichiarazione. L'extra raccolta si attacca all'ultima terziaria e si
   scrive a parte (canale suo).
 - **Quanto**: due letture, sempre mostrate insieme. Uscite del registro
-  (V + X + Y) oppure la regola del 19/09/2026, giacenza di rete a portale a fine
-  mese (per fine trasporto) meno cippato e interi (AA + AC). Il ferro e' la parte
-  che si aggiusta.
+  (V + X + Y) oppure la giacenza: dopo la dichiarazione del mese M a portale
+  deve restare **AD + AE della riga di M nel foglio Cons.** (gomma in impianto:
+  cippato, SACI e interi; piu' ferro in giacenza), regola dell'utente del
+  22/09/2026. Da dichiarare = giacenza di rete a portale a fine mese (per fine
+  trasporto) - (AD + AE) - extra raccolta ancora in impianto. Il CSS-C in
+  giacenza (Z) non resta: e' end of waste. Il ferro e' la parte che si aggiusta.
 - I Word nascono dai modelli in `ModelloDocumento` (docx con segnaposto; le
   tabelle con `tabellaWord`, lo stile di agosto). Il registro e i PDF si leggono
   nel browser e non si conservano: resta la `PraticaIrigom` con i numeri.

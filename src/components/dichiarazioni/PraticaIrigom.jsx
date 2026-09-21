@@ -462,7 +462,7 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                   <button type="button" className="text-left" disabled={!pratica.letture.giacenza} onClick={() => setLettura('giacenza')}>
                     <Riquadro titolo="Giacenza a portale a fine mese" tono={pratica.letture.usata === 'giacenza' ? 'scelto' : ''}
                       valore={pratica.letture.giacenza ? `${t(pratica.letture.giacenza.rete_kg)} t` : 'non disponibile'}
-                      nota={pratica.letture.giacenza ? `${t(pratica.letture.giacenza.portale_kg)} a portale meno ${t(pratica.letture.giacenza.resta_kg)} di cippato e interi di rete${pratica.letture.giacenza.extra_in_giacenza_kg ? ` (tolti ${t(pratica.letture.giacenza.extra_in_giacenza_kg)} di extra raccolta ancora in impianto)` : ''}` : 'serve il file degli ordini non dichiarati'} />
+                      nota={pratica.letture.giacenza ? `${t(pratica.letture.giacenza.portale_kg)} a portale meno ${t(pratica.letture.giacenza.resta_kg)} che devono restare (gomma AD + ferro AE del registro)${pratica.letture.giacenza.extra_in_giacenza_kg ? ` (tolti ${t(pratica.letture.giacenza.extra_in_giacenza_kg)} di extra raccolta ancora in impianto)` : ''}` : 'serve il file degli ordini non dichiarati'} />
                   </button>
                   {pratica.letture.scarto_kg !== null && (
                     <Riquadro titolo="Scarto fra le due letture" valore={`${pratica.letture.scarto_kg > 0 ? '+' : ''}${formatKg(pratica.letture.scarto_kg)} kg`}

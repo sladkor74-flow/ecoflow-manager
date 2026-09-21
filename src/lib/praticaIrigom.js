@@ -181,11 +181,21 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
   const V = intero(riga && riga.uscite_cippato_kg);
   const X = intero(riga && riga.uscite_ferro_kg);
   const Y = intero(riga && riga.uscite_cssc_kg);
+  // Quanto deve restare a portale dopo la dichiarazione del mese, regola
+  // dell'utente del 22/09/2026: la somma delle celle AD e AE della riga del mese
+  // nel foglio Cons. AD e' la giacenza TOTALE di gomma (cippato AA + SACI AB +
+  // PFU interi AC), AE quella dei metalli ferrosi (19.12.02): insieme sono quello
+  // che resta in impianto dei PFU ricevuti, ancora da trattare o da far uscire.
+  // Il CSS-C in giacenza (Z) non c'e': una volta prodotto non e' piu' rifiuto.
+  // Torna al chilo con luglio (381.860 + 25.140) e agosto (144.780 + 0) 2026.
+  const gomma = riga && riga.giacenza_totale_kg !== undefined && riga.giacenza_totale_kg !== null
+    ? intero(riga.giacenza_totale_kg)
+    : intero(riga && riga.giacenza_cippato_kg) + intero(riga && riga.giacenza_saci_kg) + intero(riga && riga.giacenza_intero_kg);
+  const restaRegistroKg = gomma + intero(riga && riga.giacenza_ferro_kg);
   // La giacenza del registro comprende anche l'extra raccolta arrivata e non
   // ancora lavorata, che il portale di rete non conosce: a portale deve restare la
   // sola parte di rete. A luglio 2026 non la si era tolta, e 460 kg di extra sono
   // rimasti a portale come rete.
-  const restaRegistroKg = intero(riga && riga.giacenza_cippato_kg) + intero(riga && riga.giacenza_intero_kg);
   const restaKg = Math.max(0, restaRegistroKg - intero(extraInGiacenzaKg));
   const extraPfu = extra ? intero(extra.cippato_kg) + intero(extra.ferro_kg) : 0;
   const extraCipp = extra ? intero(extra.cippato_kg) : 0;

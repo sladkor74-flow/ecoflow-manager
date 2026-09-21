@@ -54,6 +54,15 @@ verifica('lo scarto con le uscite sono i 460 kg di extra tolti due volte', g.let
 verifica('il ciabattato non cambia, cambia il ferro', g.terziarie.cippato_kg === 451760 && g.terziarie.ferro_kg + g.extra.ferro_kg === 534600 + 460 - 452100);
 verifica('e lo dice, perche\' supera il ferro uscito', g.avvisi.some(a => /supera quello uscito/.test(a)));
 
+console.log('LA REGOLA DEL 22/09: A PORTALE RESTANO AD + AE DEL MESE');
+// Luglio 2026: gomma in giacenza AD92 = 381.860, ferro AE92 = 25.140; giacenza di
+// rete a portale a fine luglio 809.740. Dichiarato davvero: 402.740.
+const luglio = componiMese({ riga: { uscite_cippato_kg: 252040, uscite_ferro_kg: 126160, uscite_cssc_kg: 25000, giacenza_cssc_kg: 0, giacenza_cippato_kg: 344600, giacenza_intero_kg: 37260, giacenza_totale_kg: 381860, giacenza_ferro_kg: 25140 }, lettura: 'giacenza', portaleFineMeseKg: 809740 });
+verifica('luglio: 809.740 - (381.860 + 25.140) = 402.740', luglio.letture.giacenza.rete_kg === 402740 && luglio.letture.giacenza.resta_kg === 407000, String(luglio.letture.giacenza.rete_kg));
+// Il CSS-C in giacenza (Z) non resta a portale: una volta prodotto non e' piu' rifiuto.
+const conCssc = componiMese({ riga: { uscite_cippato_kg: 1, giacenza_cssc_kg: 25000, giacenza_totale_kg: 100000, giacenza_ferro_kg: 5000 }, lettura: 'giacenza', portaleFineMeseKg: 200000 });
+verifica('il CSS-C in giacenza non conta', conCssc.letture.giacenza.resta_kg === 105000, String(conCssc.letture.giacenza.resta_kg));
+
 console.log('I MESI SENZA NAVE');
 const soloCssc = componiMese({ riga: { uscite_cssc_kg: 50000, uscite_ferro_kg: 84100, giacenza_cippato_kg: 1, giacenza_intero_kg: 0 }, ferro: [{ destinatario: 'TRS', colore: 'FFC000', kg: 84100 }], ddt: [{ ddt: '15', data: '2026-01-08', kg: 25000 }, { ddt: '22', data: '2026-01-13', kg: 25000 }], lettura: 'uscite' });
 verifica('il ferro che non entra nei DDT resta in giacenza: nessuna dichiarazione di soli metalli', soloCssc.solo_ferro.length === 0 && soloCssc.rete_kg === 50000 + 26000, `${soloCssc.solo_ferro.length} ${soloCssc.rete_kg}`);

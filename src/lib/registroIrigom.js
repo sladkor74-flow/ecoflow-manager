@@ -5,9 +5,9 @@
 //
 // 1. Dal foglio "Cons." la riga del mese: quanto cippato, ferro e CSS-C sono
 //    stati prodotti, quanto e' uscito, e la giacenza a fine mese divisa per
-//    materiale. Le due giacenze che contano per le dichiarazioni sono il
-//    cippato e i PFU interi: la loro somma e' la giacenza di PFU che deve
-//    restare a portale dopo la dichiarazione del mese.
+//    materiale. Dopo la dichiarazione del mese a portale deve restare la
+//    giacenza di gomma (AD, totale di cippato, SACI e interi) piu' quella dei
+//    metalli ferrosi (AE): regola dell'utente del 22/09/2026.
 //
 // 2. Dal foglio "Dettaglio" le uscite di CSS-C. Il CSS-C ha cessato la qualifica
 //    di rifiuto - e' un end of waste - quindi viaggia con documento di trasporto
@@ -188,8 +188,10 @@ export async function leggiRegistroIrigom(file, anno) {
     const riga = prima + i;
     const m = { mese: nome, indice: i, riga };
     for (const [campo, col] of Object.entries(COLONNE)) m[campo] = numero(cons[col + riga]);
-    // La giacenza di PFU che deve restare a portale: cippato piu' interi.
-    m.giacenza_pfu_kg = m.giacenza_cippato_kg + m.giacenza_intero_kg;
+    // La giacenza di PFU che deve restare a portale dopo la dichiarazione del
+    // mese: gomma in giacenza (AD, totale di cippato, SACI e interi) piu' metalli
+    // ferrosi in giacenza (AE). Regola dell'utente del 22/09/2026.
+    m.giacenza_pfu_kg = m.giacenza_totale_kg + m.giacenza_ferro_kg;
     return m;
   });
 

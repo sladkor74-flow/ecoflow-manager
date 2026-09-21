@@ -5,7 +5,10 @@
   "uscite_ferro_kg": 82500,
   "uscite_cssc_kg": 0,
   "giacenza_cippato_kg": 70000,
-  "giacenza_intero_kg": 74780
+  "giacenza_intero_kg": 74780,
+  "giacenza_totale_kg": 144780,
+  "giacenza_ferro_kg": 0,
+  "giacenza_saci_kg": 0
  },
  "ferro": [
   {
