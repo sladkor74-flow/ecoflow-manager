@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -35,7 +35,14 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
   const [conferma, setConferma] = useState({ data: oggiRoma(), numero: '' });
   const [inCorso, setInCorso] = useState('');
   const [versione, setVersione] = useState(0);
+  // Rielaborare un canale solo: quale aspetta conferma, e le anomalie che ne
+  // escono, che sostituiscono solo quelle del suo canale.
+  const [daRielaborare, setDaRielaborare] = useState(null);
+  const [anomalieLocali, setAnomalieLocali] = useState(null);
   const { toast } = useToast();
+
+  // Un'elaborazione del mese intero o un altro periodo: valgono di nuovo le anomalie che arrivano da fuori
+  useEffect(() => { setAnomalieLocali(null); }, [anomalie, anno, mese]);
 
   // Rete, ACI ed extra raccolta sono commesse indipendenti, ciascuna col suo
   // documento e il suo ciclo di vita. Prima Verifica, Approva e Chiudi agivano
@@ -62,10 +69,41 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
   const senzaTariffa = anomalieAnteprima.filter(a => !a.tipo || a.tipo === 'senza_tariffa');
   // Un documento gia' approvato o esportato non si cancella: resta nello storico come superato.
   const giaUsciti = TIPS.filter(t => ['approvata', 'esportata'].includes(data[t.key]?.documento?.stato));
+  // "Elabora Mese" rifa' i canali non chiusi: uno chiuso resta com'e' finche' non lo si riapre.
+  const chiusi = TIPS.filter(t => data[t.key]?.documento?.stato === 'chiusa');
+  const tuttiChiusi = chiusi.length === TIPS.length;
 
   const handleElabora = () => {
-    if (senzaTariffa.length > 0 || giaUsciti.length > 0) setShowConfirm(true);
+    if (senzaTariffa.length > 0 || giaUsciti.length > 0 || chiusi.length > 0) setShowConfirm(true);
     else avviaElabora();
+  };
+
+  // Un canale si rielabora da solo, senza toccare i documenti degli altri: la
+  // rete chiusa non impedisce piu' di rifare l'ACI a cui si e' appena aggiunta
+  // la tariffa, e la rete approvata non finisce fra i superati per questo.
+  const senzaTariffaDi = (t) => senzaTariffa.filter(a => a.tipologia === t.key);
+  const chiediRielabora = (t) => {
+    const documento = data[t.key]?.documento;
+    const stato = documento?.stato;
+    // anche un documento riaperto: era stato chiuso, e resta nello storico come superato
+    const riaperto = /Riaperto il /.test(String(documento?.note || ''));
+    if (['approvata', 'esportata'].includes(stato) || riaperto || senzaTariffaDi(t).length > 0) setDaRielaborare(t);
+    else rielaboraCanale(t);
+  };
+  const rielaboraCanale = async (t) => {
+    setInCorso(`${t.key}|rielabora`);
+    try {
+      const res = await base44.functions.invoke('elaboraFatturazioneAttiva', { anno, mese, tipologie: [t.key] });
+      const nuove = (res.data?.anomalie || []).filter(a => a.tipologia === t.key);
+      setAnomalieLocali(prima => [...(prima ?? anomalie ?? []).filter(a => a.tipologia !== t.key), ...nuove]);
+      const superati = res.data?.superati || [];
+      toast({ title: `${t.label}: rielaborato`, description: superati.length ? `Il documento ${superati[0].stato} resta nello storico come superato. Gli altri canali non sono cambiati.` : 'Gli altri canali non sono cambiati.' });
+    } catch (e) {
+      toast({ title: `${t.label}: non rielaborato`, description: e?.response?.data?.error || e.message, variant: 'destructive' });
+    }
+    setInCorso('');
+    await onReload();
+    setVersione(v => v + 1);
   };
 
   const avviaElabora = async () => {
@@ -88,7 +126,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
   const conErrori = TIPS.filter(t => (data[t.key]?.documento?.voci_errore || 0) > 0);
 
   const Pulsante = ({ t, azione, children, variant = 'outline', onClick }) => (
-    <Button size="sm" variant={variant} disabled={!isAdmin || !!inCorso} title={!isAdmin ? ADMIN : ''} onClick={onClick || (() => cambiaStato(t, azione))}>
+    <Button size="sm" variant={variant} disabled={!isAdmin || !!inCorso || !!elaborating} title={!isAdmin ? ADMIN : ''} onClick={onClick || (() => cambiaStato(t, azione))}>
       {inCorso === `${t.key}|${azione}` && <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />}
       {children}
     </Button>
@@ -111,7 +149,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
             <SelectContent>{MESI.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        <Button onClick={handleElabora} disabled={elaborating || !isAdmin} title={!isAdmin ? ADMIN : ''}>
+        <Button onClick={handleElabora} disabled={elaborating || !isAdmin || !!inCorso || tuttiChiusi} title={!isAdmin ? ADMIN : tuttiChiusi ? 'Tutti i canali del mese sono chiusi: per rielaborarne uno va prima riaperto' : 'Rifà i canali non chiusi; quelli chiusi restano come sono'}>
           {elaborating ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Play className="w-4 h-4 mr-1.5" />}
           Elabora Mese
         </Button>
@@ -121,7 +159,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
       <RiepilogoEcotyre periodo={periodo} onAnomalieChange={setAnomalieAnteprima} onVaiTariffe={onVaiTariffe} versione={versione} />
 
       {/* Anomalie rilevate dopo elaborazione (documenta) */}
-      <AttivaAnomalie anomalie={anomalie} />
+      <AttivaAnomalie anomalie={anomalieLocali ?? anomalie} />
 
       {loading ? (
         <div className="text-center py-8 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin inline mr-2" /> Caricamento...</div>
@@ -138,9 +176,12 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
               const doc = data[t.key]?.documento;
               if (!doc) {
                 return (
-                  <div key={t.key} className="border rounded-lg p-4 border-amber-200 bg-amber-50/50">
+                  <div key={t.key} className="border rounded-lg p-4 border-amber-200 bg-amber-50/50 flex flex-col">
                     <h3 className="font-heading font-semibold mb-2">{t.label}</h3>
-                    <p className="text-sm text-amber-800">Non elaborato per {mese} {anno}: clicca "Elabora Mese".</p>
+                    <p className="text-sm text-amber-800">Non elaborato per {mese} {anno}.</p>
+                    <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-amber-200">
+                      <Pulsante t={t} azione="rielabora" onClick={() => chiediRielabora(t)}><Play className="w-3.5 h-3.5 mr-1" /> Elabora {t.label}</Pulsante>
+                    </div>
                   </div>
                 );
               }
@@ -168,6 +209,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
                     {doc.stato === 'verificata' && <Pulsante t={t} azione="approva"><CheckCircle className="w-3.5 h-3.5 mr-1" /> Approva</Pulsante>}
                     {['approvata', 'esportata'].includes(doc.stato) && <Pulsante t={t} azione="chiudi" variant="default" onClick={() => apriChiusura(t)}><Lock className="w-3.5 h-3.5 mr-1" /> Chiudi</Pulsante>}
                     {doc.stato === 'chiusa' && <Pulsante t={t} azione="riapri" onClick={() => setDaRiaprire(t)}><RotateCcw className="w-3.5 h-3.5 mr-1" /> Riapri</Pulsante>}
+                    {doc.stato !== 'chiusa' && <Pulsante t={t} azione="rielabora" onClick={() => chiediRielabora(t)}><Play className="w-3.5 h-3.5 mr-1" /> Rielabora</Pulsante>}
                   </div>
                 </div>
               );
@@ -206,6 +248,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
               <div className="space-y-2 text-sm text-muted-foreground">
                 {senzaTariffa.length > 0 && <p>Alcune tonnellate non hanno una tariffa applicabile: le righe saranno salvate a zero euro e segnate come errore, e il documento non potrà essere verificato finché la tariffa manca.</p>}
                 {giaUsciti.length > 0 && <p>{giaUsciti.map(t => t.label).join(', ')}: il documento di questo mese è già stato approvato o esportato. Non viene cancellato: resta nello storico come superato, con la data e i due totali a confronto.</p>}
+                {chiusi.length > 0 && <p>{chiusi.map(t => t.label).join(', ')}: il documento è chiuso e resta com'è. Si rielaborano solo gli altri canali; per rifare un canale chiuso va prima riaperto.</p>}
                 <p>Confermi di voler elaborare?</p>
               </div>
             </AlertDialogDescription>
@@ -247,12 +290,34 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
           <AlertDialogHeader>
             <AlertDialogTitle>Riaprire {daRiaprire?.label} di {mese} {anno}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Il documento torna allo stato "elaborata" e si può rielaborare. La riapertura resta scritta nelle sue note: chi, quando e da che stato. Gli altri canali restano come sono.
+              Il documento torna allo stato "elaborata" e si può rielaborare col suo pulsante "Rielabora". La riapertura resta scritta nelle sue note: chi, quando, da che stato e la conferma di fattura che aveva. Gli altri canali restano come sono.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Annulla</AlertDialogCancel>
             <AlertDialogAction onClick={() => { const t = daRiaprire; setDaRiaprire(null); cambiaStato(t, 'riapri'); }}>Riapri</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Rielaborare un canale solo: si chiede conferma quando il suo documento
+          e' gia' uscito o quando restano righe senza tariffa, come per il mese. */}
+      <AlertDialog open={!!daRielaborare} onOpenChange={(v) => { if (!v) setDaRielaborare(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Rielaborare {daRielaborare?.label} di {mese} {anno}?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                {daRielaborare && senzaTariffaDi(daRielaborare).length > 0 && <p>{senzaTariffaDi(daRielaborare).length} gruppi di righe di questo canale non hanno una tariffa applicabile: saranno salvati a zero euro e segnati come errore, e il documento non potrà essere verificato finché la tariffa manca.</p>}
+                {daRielaborare && ['approvata', 'esportata'].includes(data[daRielaborare.key]?.documento?.stato) && <p>Il documento è già stato {data[daRielaborare.key].documento.stato}. Non viene cancellato: resta nello storico come superato, con la data e i due totali a confronto.</p>}
+                {daRielaborare && !['approvata', 'esportata'].includes(data[daRielaborare.key]?.documento?.stato) && /Riaperto il /.test(String(data[daRielaborare.key]?.documento?.note || '')) && <p>Il documento era stato chiuso e poi riaperto. Non viene cancellato: resta nello storico come superato, con la nota della riapertura e della fattura, e la nota passa al documento nuovo.</p>}
+                <p>Gli altri canali non vengono toccati.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { const t = daRielaborare; setDaRielaborare(null); rielaboraCanale(t); }}>Rielabora</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

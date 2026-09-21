@@ -84,8 +84,12 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
   const [tariffe, setTariffe] = useState([]);
   const [province, setProvince] = useState([]);
   const [tipologie, setTipologie] = useState([]);
+  // Da quale contratto vengono i costi precompilati: raccolta, trattamento,
+  // stoccaggio. Ciascuno sotto il suo campo, altrimenti l'avviso del ripiego
+  // sulla rete compariva sotto un campo che non era stato toccato.
   const [daContrattoR, setDaContrattoR] = useState(false);
   const [daContrattoD, setDaContrattoD] = useState(false);
+  const [daContrattoS, setDaContrattoS] = useState(false);
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
@@ -118,6 +122,7 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
       setForm(d);
       setDaContrattoR(false);
       setDaContrattoD(false);
+      setDaContrattoS(false);
       setErrors({});
     }
   }, [open, initial]);
@@ -154,10 +159,14 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
     return !!(f && f.interno);
   }, [fornitori, form.trasportatore, secondaria]);
 
-  const precompila = (nome, prestazione, dataRif) => {
+  // `nuovi` sono i valori appena scelti: set() non ha ancora aggiornato `form`,
+  // e leggerli da li' faceva cercare la tariffa con la classe, la data o la
+  // destinazione di prima.
+  const precompila = (nome, prestazione, nuovi = {}) => {
     if (!nome) return;
-    if (prestazione === 'RACCOLTA' && form.tipo_movimento === 'secondaria') return;
-    const forn = fornitori.find(f => normalizzaRagioneSociale(f.ragione_sociale) === normalizzaRagioneSociale(nome));
+    const f = { ...form, ...nuovi };
+    if (prestazione === 'RACCOLTA' && f.tipo_movimento === 'secondaria') return;
+    const forn = fornitori.find(x => normalizzaRagioneSociale(x.ragione_sociale) === normalizzaRagioneSociale(nome));
     if (!forn) return;
     // Un trasportatore interno non fattura a SMOCO: il costo di raccolta e' zero.
     // Va scritto esplicitamente, altrimenti resterebbe il costo del trasportatore
@@ -168,7 +177,7 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
     }
     // La validita' si guarda sul giorno di fine trasporto; per un intervento
     // ancora assegnato, che non ce l'ha, su oggi in Italia (non sul giorno UTC).
-    const data = dataRif || form.trasporto_finito_il || oggiRoma();
+    const data = f.trasporto_finito_il || oggiRoma();
     const valida = (t, tipologia) => {
       if (t.fornitore_id !== forn.id || t.prestazione !== prestazione || t.direzione !== 'PASSIVA' || t.stato !== 'attivo') return false;
       if (t.tipologia !== tipologia) return false;
@@ -176,25 +185,46 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
       const fine = String(t.data_fine_validita || '').slice(0, 10);
       if (inizio && data < inizio) return false;
       if (fine && data > fine) return false;
-      if (t.classe_materiale && t.classe_materiale !== form.classe) return false;
+      if (t.classe_materiale && t.classe_materiale !== f.classe) return false;
       return true;
     };
-    // Prima la tariffa di extra raccolta, e solo se manca quella di rete, come
-    // fa la fatturazione passiva (passivaCalcolo). Prima si prendeva la prima
-    // che capitava fra le due: una tariffa di rete poteva vincere su quella di
-    // extra raccolta dello stesso fornitore. A parita' di canale vince quella
-    // per classe sulla generica. Quando si usa la rete il form lo dice.
+    const vuoto = (s) => !String(s || '').trim();
+    const maiuscolo = (s) => String(s || '').trim().toUpperCase();
+    const perClasse = (c) => c.find(t => t.classe_materiale) || c[0] || null;
+    // La scelta di passivaCalcolo, perche' la passiva paga proprio il costo che
+    // il form scrive sull'intervento. Per la raccolta la cascata di
+    // findTariffaRaccolta: destinazione, provincia, regione, generica. Prendere
+    // la prima tariffa del fornitore precompilava, per Emmesse, i 72 euro di
+    // Gatim su un ritiro scaricato a Irigom, che ne costa 90. Per impianti e
+    // stoccaggi, come findTariffaImpianto, conta solo la classe. A parita' di
+    // livello vince quella per classe sulla generica.
     const scegli = (tipologia) => {
       const c = tariffe.filter(t => valida(t, tipologia));
-      return c.find(t => t.classe_materiale) || c[0] || null;
+      if (prestazione !== 'RACCOLTA') return perClasse(c);
+      const dest = vuoto(f.destinazione) ? '' : normalizzaRagioneSociale(f.destinazione);
+      const prov = maiuscolo(f.provincia);
+      const reg = maiuscolo(PROV_TO_REGION[prov]);
+      const livelli = [
+        dest ? c.filter(t => !vuoto(t.destinazione) && normalizzaRagioneSociale(t.destinazione) === dest) : [],
+        prov ? c.filter(t => vuoto(t.destinazione) && maiuscolo(t.provincia) === prov) : [],
+        reg ? c.filter(t => vuoto(t.destinazione) && vuoto(t.provincia) && maiuscolo(t.regione) === reg) : [],
+        c.filter(t => vuoto(t.destinazione) && vuoto(t.provincia) && vuoto(t.regione)),
+      ];
+      for (const l of livelli) { const m = perClasse(l); if (m) return m; }
+      return null;
     };
+    // Prima la tariffa di extra raccolta; se manca, quella di rete, come fa la
+    // passiva. Il ripiego sulla rete e' una scelta di fatturazione che spetta
+    // all'utente: qui resta com'e', ma sotto il campo si dice quando lo si usa.
     const candidate = scegli('EXTRA_RACCOLTA') || scegli('RETE');
     if (candidate) {
       if (prestazione === 'RACCOLTA') { set('costo_raccolta_t', candidate.valore); setDaContrattoR(candidate.tipologia); }
       else if (prestazione === 'TRATTAMENTO') { set('costo_trattamento_t', candidate.valore); setDaContrattoD(candidate.tipologia); }
-      else if (prestazione === 'CONFERIMENTO_STOCCAGGIO') { set('costo_stoccaggio_t', candidate.valore); setDaContrattoD(candidate.tipologia); }
+      else if (prestazione === 'CONFERIMENTO_STOCCAGGIO') { set('costo_stoccaggio_t', candidate.valore); setDaContrattoS(candidate.tipologia); }
     }
   };
+
+  const prestazioneDestinazione = (tipoDest) => (tipoDest === 'stoc' ? 'CONFERIMENTO_STOCCAGGIO' : 'TRATTAMENTO');
 
   const onTrasportatoreChange = (v) => {
     set('trasportatore', v);
@@ -202,42 +232,39 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
     if (v) precompila(v, 'RACCOLTA');
   };
 
+  // La destinazione decide anche il prezzo della raccolta: si rifanno tutti e due.
   const onDestinatarioChange = (v) => {
     set('destinazione', v);
-    setDaContrattoD(false);
-    if (v) {
-      const prest = form.tipo_destinazione === 'stoc' ? 'CONFERIMENTO_STOCCAGGIO' : 'TRATTAMENTO';
-      precompila(v, prest);
-    }
+    setDaContrattoR(false); setDaContrattoD(false); setDaContrattoS(false);
+    if (form.trasportatore) precompila(form.trasportatore, 'RACCOLTA', { destinazione: v });
+    if (v) precompila(v, prestazioneDestinazione(form.tipo_destinazione), { destinazione: v });
   };
 
   const onTipoDestChange = (v) => {
     set('tipo_destinazione', v);
-    setDaContrattoD(false);
-    if (form.destinazione) {
-      const prest = v === 'stoc' ? 'CONFERIMENTO_STOCCAGGIO' : 'TRATTAMENTO';
-      precompila(form.destinazione, prest);
-    }
+    setDaContrattoD(false); setDaContrattoS(false);
+    if (form.destinazione) precompila(form.destinazione, prestazioneDestinazione(v), { tipo_destinazione: v });
+  };
+
+  // Anche la provincia puo' decidere il prezzo della raccolta (cascata per zona).
+  const onProvinciaChange = (v) => {
+    set('provincia', v);
+    setDaContrattoR(false);
+    if (form.trasportatore) precompila(form.trasportatore, 'RACCOLTA', { provincia: v });
   };
 
   const onClasseChange = (v) => {
     set('classe', v);
-    setDaContrattoR(false); setDaContrattoD(false);
-    if (form.trasportatore) precompila(form.trasportatore, 'RACCOLTA');
-    if (form.destinazione) {
-      const prest = form.tipo_destinazione === 'stoc' ? 'CONFERIMENTO_STOCCAGGIO' : 'TRATTAMENTO';
-      precompila(form.destinazione, prest);
-    }
+    setDaContrattoR(false); setDaContrattoD(false); setDaContrattoS(false);
+    if (form.trasportatore) precompila(form.trasportatore, 'RACCOLTA', { classe: v });
+    if (form.destinazione) precompila(form.destinazione, prestazioneDestinazione(form.tipo_destinazione), { classe: v });
   };
 
   const onDataFineChange = (v) => {
     set('trasporto_finito_il', v);
-    setDaContrattoR(false); setDaContrattoD(false);
-    if (form.trasportatore) precompila(form.trasportatore, 'RACCOLTA', v);
-    if (form.destinazione) {
-      const prest = form.tipo_destinazione === 'stoc' ? 'CONFERIMENTO_STOCCAGGIO' : 'TRATTAMENTO';
-      precompila(form.destinazione, prest, v);
-    }
+    setDaContrattoR(false); setDaContrattoD(false); setDaContrattoS(false);
+    if (form.trasportatore) precompila(form.trasportatore, 'RACCOLTA', { trasporto_finito_il: v });
+    if (form.destinazione) precompila(form.destinazione, prestazioneDestinazione(form.tipo_destinazione), { trasporto_finito_il: v });
   };
 
   // Assegnato: la richiesta, con chi la deve evadere e da quando. Terminato: in
@@ -402,7 +429,7 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Provincia</Label>
-                <Select value={form.provincia || undefined} onValueChange={v => set('provincia', v)}>
+                <Select value={form.provincia || undefined} onValueChange={onProvinciaChange}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Seleziona..." /></SelectTrigger>
                   <SelectContent>
                     {province.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
@@ -458,7 +485,11 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
                 {daContrattoR && <TestoDaContratto tipologia={daContrattoR} />}
                 {raccoltaInterna && <p className="text-xs text-muted-foreground">trasportatore interno: non fatturato</p>}
               </div>
-              <NumField label="Costo stoccaggio (€/t)" k="costo_stoccaggio_t" />
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Costo stoccaggio (€/t)</Label>
+                <Input type="number" className="h-9 text-sm" value={form.costo_stoccaggio_t} onChange={e => { set('costo_stoccaggio_t', e.target.value); setDaContrattoS(false); }} />
+                {daContrattoS && <TestoDaContratto tipologia={daContrattoS} />}
+              </div>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Costo trattamento (€/t)</Label>
                 <Input type="number" className="h-9 text-sm" value={form.costo_trattamento_t} onChange={e => { set('costo_trattamento_t', e.target.value); setDaContrattoD(false); }} />

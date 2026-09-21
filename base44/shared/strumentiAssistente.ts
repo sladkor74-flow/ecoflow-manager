@@ -23,18 +23,19 @@ import { fetchAll } from "./fetchAll.ts";
 import { contaFormulari } from "./formulari.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { getRegioneFromProvincia } from "./dataEnrichment.ts";
-import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
+import { giornoRoma, oggiRoma, annoRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
+import { eTerminato, giornoMovimento } from "./movimenti.ts";
 import { PIVOT_DEFS, calcolaPivot, MESI } from "./reportMensile.ts";
-import { caricaGestionale } from "./quadraturaFirDati.ts";
-import { intervalloSettimana, settimanaIso } from "./reportSettimanali.ts";
+import { caricaGestionale, caricamentiAperti } from "./quadraturaFirDati.ts";
+import { intervalloSettimana, settimanaIso, statoCaricamenti } from "./reportSettimanali.ts";
 import { situazioneGestionale } from "./assistente.ts";
-import { listaOrdini, statoRichiesta } from "./richiesteEct.ts";
+import { listaOrdini, statoRichiesta, evasioneOrdini } from "./richiesteEct.ts";
 import { targetDelPortale } from "./targetRaccoglitori.ts";
 import { statoDichiarazione, sommaMateriali } from "./dichiarazioniImpianti.ts";
 import { giorniAllaScadenza, fasciaScadenza } from "./omologhe.ts";
 import { statoRequisito } from "./qualificaFornitori.ts";
-import { calcolaRigheAttiva, riconciliaAttiva, documentoValido, eRigaACorpo, TIPOLOGIE_ATTIVA } from "./attivaCalcolo.ts";
+import { calcolaRigheAttiva, riconciliaAttiva, documentoValido, eRigaACorpo, eSecondariaExtra, TIPOLOGIE_ATTIVA } from "./attivaCalcolo.ts";
 
 export { oggiRoma };
 
@@ -52,28 +53,63 @@ const meseDi = (v, anno) => {
 
 const annoDi = (v) => { const d = soloData(v); return d ? Number(d.slice(0, 4)) : null; };
 
-/** Le primarie o le extra di un canale, filtrate per periodo e per luogo. */
+// Il canale arriva scritto come lo scrive l'utente ("extra raccolta", "Extra",
+// "aci"). Confrontato cosi' com'era, "EXTRA RACCOLTA" non era un canale: la
+// fatturazione attiva rispondeva con tutti e tre, e il raccolto dell'extra
+// raccolta usciva con i numeri della rete sotto il nome dell'extra.
+// Stringa vuota se non e' un canale.
+function canaleChiesto(v) {
+  const k = String(v ?? '').toUpperCase().trim().replace(/[\s-]+/g, '_');
+  if (k === 'EXTRA' || k === 'EXTRARACCOLTA') return 'EXTRA_RACCOLTA';
+  return TIPOLOGIE_ATTIVA.includes(k) ? k : '';
+}
+
+/**
+ * I terminati senza fine trasporto: non stanno in nessun mese e ogni conto li
+ * scarta, ma scartati in silenzio fanno sembrare completo un conto che non lo
+ * e'. Si contano a parte, per dirli. L'anno e' quello dell'immissione, l'unica
+ * data che hanno: mai la chiusura a portale. null se non ce ne sono.
+ */
+function senzaFineTrasporto(righe, anno) {
+  const esclusi = (righe || []).filter(r => eTerminato(r) && !giornoMovimento(r) && annoRoma(r.ordine_immesso_il) === Number(anno));
+  if (!esclusi.length) return null;
+  return {
+    formulari: contaFormulari(esclusi),
+    tonnellate: t3(esclusi.reduce((s, r) => s + peso(r), 0)),
+    esempi: esclusi.map(r => r.id_ordine || r.numero_fir).filter(Boolean).slice(0, 5),
+    nota: 'Terminati senza data di fine trasporto, immessi nell\'anno: esclusi dal conto perche\' non si sa in che mese cadono, e potrebbero appartenere anche al periodo chiesto. Vanno corretti nel file del portale e ricaricati.',
+  };
+}
+
+/**
+ * Le primarie o le extra di un canale, filtrate per periodo e per luogo, e a
+ * parte i terminati dello stesso luogo che il periodo non lo hanno.
+ */
 async function movimenti(base44, { canale, anno, mese, provincia, regione, raccoglitore, destinazione }) {
   const svc = base44.asServiceRole.entities;
   const entita = canale === 'ACI' ? 'PrimariaAci' : canale === 'EXTRA_RACCOLTA' ? 'ExtraRaccolta' : 'PrimariaRete';
-  const righe = await fetchAll(svc[entita], { stato: 'terminato' });
+  const tutte = await fetchAll(svc[entita], { stato: 'terminato' });
   const meseIdx = mese ? MESI.findIndex(m => m.toLowerCase() === String(mese).toLowerCase()) : -1;
   const chiave = (v) => normalizzaRagioneSociale(v);
-  return righe.filter(r => {
+  const delLuogo = tutte.filter(r => {
     if (!terminato(r)) return false;
     // Nell'extra raccolta lo stesso archivio tiene la raccolta dal produttore e
     // i trasferimenti successivi: il raccolto sono solo le primarie, altrimenti
     // il materiale si conta due volte, una quando arriva e una quando si sposta.
     if (canale === 'EXTRA_RACCOLTA' && String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'primaria') return false;
-    const m = meseDi(r.trasporto_finito_il, anno);
-    if (m < 0) return false;
-    if (meseIdx >= 0 && m !== meseIdx) return false;
     if (provincia && String(r.provincia || '').toUpperCase() !== String(provincia).toUpperCase()) return false;
     if (regione && normalizzaRagioneSociale(r.regioni || r.regione || getRegioneFromProvincia(r.provincia)) !== normalizzaRagioneSociale(regione)) return false;
     if (raccoglitore && chiave(r.trasportatore) !== chiave(raccoglitore)) return false;
     if (destinazione && chiave(r.destinazione) !== chiave(destinazione)) return false;
     return true;
   });
+  const righe = delLuogo.filter(r => {
+    const m = meseDi(r.trasporto_finito_il, anno);
+    if (m < 0) return false;
+    if (meseIdx >= 0 && m !== meseIdx) return false;
+    return true;
+  });
+  return { righe, senza_fine: senzaFineTrasporto(delLuogo, anno) };
 }
 
 /**
@@ -142,9 +178,16 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
     fetchAll(svc.Fornitore), fetchAll(svc.Tariffa, { direzione: 'ATTIVA' }),
     fetchAll(svc.DocumentoFatturazione, { tipo: 'ATTIVA', anno }),
   ]);
-  const chiesta = tipologia ? String(tipologia).toUpperCase() : '';
-  const canaleIgnorato = chiesta && !TIPOLOGIE_ATTIVA.includes(chiesta) ? chiesta : '';
-  const canali = TIPOLOGIE_ATTIVA.filter(c => !chiesta || canaleIgnorato || c === chiesta);
+  const chiesta = canaleChiesto(tipologia);
+  const canaleIgnorato = tipologia && !chiesta ? String(tipologia) : '';
+  const canali = TIPOLOGIE_ATTIVA.filter(c => !chiesta || c === chiesta);
+
+  // Il calcolo delle righe scarta i terminati senza fine trasporto: qui si
+  // contano, canale per canale, cosi' la risposta dice che il conto di quanto ci
+  // spetta e' incompleto invece di tacerlo. Le secondarie dell'extra raccolta
+  // non si fatturano, e non si contano nemmeno qui.
+  const archivioDi = { RETE: reteAll, ACI: aciAll, EXTRA_RACCOLTA: (extraAll || []).filter(r => !eSecondariaExtra(r)) };
+  const senzaFine = canali.map(c => ({ canale: c, esclusi: senzaFineTrasporto(archivioDi[c], anno) })).filter(x => x.esclusi);
 
   // Senza mese: i mesi dell'anno fino a quello in corso, per fine trasporto.
   const oggi = oggiRoma();
@@ -190,7 +233,15 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
             differenza_kg: ric.delta_kg, differenza_euro: ric.delta_euro,
           });
         } else {
-          documento.allineato = Math.abs(documento.differenza_euro) < 0.005;
+          // Senza il mese si confrontano i totali, non le righe. Gli euro da
+          // soli non bastano: una riga arrivata dopo a zero euro (senza tariffa,
+          // o un'extra raccolta col prezzo a zero) non li sposta. Si guarda
+          // anche quante sono le righe; il dettaglio riga per riga si ha
+          // chiedendo il mese. I documenti di prima del conteggio non lo hanno.
+          const righeDoc = doc.numero_voci === null || doc.numero_voci === undefined ? null : Number(doc.numero_voci);
+          documento.righe_documento = righeDoc;
+          documento.righe_oggi = lista.length;
+          documento.allineato = Math.abs(documento.differenza_euro) < 0.005 && (righeDoc === null || righeDoc === lista.length);
         }
         if (!documento.allineato) {
           documento.avviso = doc.stato === 'chiusa'
@@ -211,7 +262,7 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
   }
 
   return {
-    fonte: `Fatturazione attiva verso Ecotyre, calcolata sui dati di oggi${chiesta && !canaleIgnorato ? `, canale ${chiesta}` : ', un canale per volta'}`,
+    fonte: `Fatturazione attiva verso Ecotyre, calcolata sui dati di oggi${chiesta ? `, canale ${chiesta}` : ', un canale per volta'}`,
     periodo: meseChiesto ? `${meseChiesto} ${anno}` : ultimo >= 0 ? `anno ${anno}, da ${MESI[0]} a ${MESI[ultimo]}` : `anno ${anno}`,
     dati_al: oggi,
     dati: {
@@ -221,11 +272,12 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
         mesi: x.mesi,
       })),
       anomalie: elenco(anomalie, 30),
+      ...(senzaFine.length ? { senza_fine_trasporto: senzaFine.map(x => ({ canale: x.canale, ...x.esclusi })) } : {}),
       ...(ultimo < 0 && !meseChiesto ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
       ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
       ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: ci sono tutti e tre, separati.` } : {}),
       ...(fornitore ? { avviso_fornitore: 'Nell\'attiva il cliente e\' uno solo, Ecotyre: il filtro sul fornitore non si applica.' } : {}),
-      nota: 'Conto fatto adesso sui movimenti terminati, per fine trasporto, con le stesse righe dell\'anteprima e di "Elabora Mese". Accanto a ogni mese c\'e\' il documento salvato: una differenza vuol dire che dopo l\'elaborazione sono arrivati o cambiati dei movimenti, e il documento va aggiornato. Rete, ACI ed extra raccolta non si sommano.',
+      nota: `Conto fatto adesso sui movimenti terminati, per fine trasporto, con le stesse righe dell'anteprima e di "Elabora Mese". Accanto a ogni mese c'e' il documento salvato: una differenza vuol dire che dopo l'elaborazione sono arrivati o cambiati dei movimenti, e il documento va aggiornato.${meseChiesto ? '' : ' Senza il mese il documento si confronta sul totale in euro e sul numero di righe: una riga cambiata di peso con lo stesso importo si vede solo chiedendo il mese, che confronta riga per riga.'} Rete, ACI ed extra raccolta non si sommano.`,
     },
   };
 }
@@ -255,11 +307,15 @@ export const STRUMENTI = [
     moduli: ['Terminati Rete', 'Terminati ACI', 'Extra Raccolta', 'Report Mensile'],
     async esegui(base44, p) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
-      const canale = String(p.canale || 'RETE').toUpperCase();
+      // Un canale non riconosciuto non deve passare in silenzio per la rete: si
+      // prende la rete e lo si dice, perche' i tre canali non si sommano.
+      const canale = canaleChiesto(p.canale) || 'RETE';
+      const avvisoCanale = canaleChiesto(p.canale) ? ''
+        : `${p.canale ? `"${p.canale}" non e' un canale` : 'Canale non indicato'}: questi sono i numeri della RETE. ACI ed extra raccolta non si sommano: per loro rifai la domanda col canale.`;
       // Un mese che non esiste non deve passare in silenzio per "tutto l'anno".
       const meseValido = p.mese ? MESI.find(m => m.toLowerCase() === String(p.mese).toLowerCase()) : '';
       const meseIgnorato = p.mese && !meseValido ? String(p.mese) : '';
-      const righe = await movimenti(base44, { ...p, mese: meseValido, anno, canale });
+      const { righe, senza_fine } = await movimenti(base44, { ...p, mese: meseValido, anno, canale });
       const campo = { raccoglitore: 'trasportatore', provincia: 'provincia', regione: 'regioni', classe: 'classe', destinazione: 'destinazione', mese: 'mese' }[p.raggruppa] || 'trasportatore';
       const totale = righe.reduce((s, r) => s + peso(r), 0);
       return {
@@ -268,6 +324,8 @@ export const STRUMENTI = [
         dati_al: oggiRoma(),
         dati: {
           canale, formulari: contaFormulari(righe), tonnellate: t3(totale),
+          ...(avvisoCanale ? { avviso_canale: avvisoCanale } : {}),
+          ...(senza_fine ? { senza_fine_trasporto: senza_fine } : {}),
           ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso tutto l'anno ${anno}.` } : {}),
           per: p.raggruppa || 'raccoglitore',
           dettaglio: elenco(perChiave(righe, campo), 60),
@@ -283,7 +341,7 @@ export const STRUMENTI = [
     async esegui(base44, p) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       const svc = base44.asServiceRole.entities;
-      const [target, righe] = await Promise.all([
+      const [target, { righe, senza_fine }] = await Promise.all([
         svc.TargetRaccoglitore.filter({ anno }, 'raccoglitore', 500),
         movimenti(base44, { canale: 'RETE', anno }),
       ]);
@@ -327,6 +385,7 @@ export const STRUMENTI = [
           target_totale_t: Math.round(dettaglio.reduce((s, x) => s + x.target_t, 0) * 100) / 100,
           fatto_totale_t: Math.round(dettaglio.reduce((s, x) => s + x.fatto_t, 0) * 100) / 100,
           ...(senzaTarget.size ? { raccolto_senza_target: [...senzaTarget.entries()].map(([nome, kg]) => ({ raccoglitore: nome, tonnellate: t3(kg) })).sort((a, b) => b.tonnellate - a.tonnellate) } : {}),
+          ...(senza_fine ? { senza_fine_trasporto: senza_fine } : {}),
         },
       };
     },
@@ -390,6 +449,14 @@ export const STRUMENTI = [
         if (!perCanale[c]) perCanale[c] = { canale: c, totale_del_canale: null, flussi: [] };
         perCanale[c].flussi.push(f);
       }
+      // I terminati senza fine trasporto non stanno in nessuna settimana: la
+      // quadratura li conta a parte, flusso per flusso, e qui si dicono. E un
+      // archivio che si sta ricaricando e' a meta': i numeri vanno presi con
+      // quell'avviso, non come definitivi.
+      const senzaFine = Object.entries(g)
+        .filter(([, d]) => d && d.senza_fine && d.senza_fine.n > 0)
+        .map(([chiave, d]) => ({ flusso: chiave, canale: canaleDelFlusso(chiave), formulari: d.senza_fine.n, esempi: d.senza_fine.esempi }));
+      const aperti = caricamentiAperti(g);
       return {
         fonte: 'Formulari terminati nella settimana',
         periodo: `settimana ${settimana} del ${anno}, dal ${intervallo.inizio} al ${intervallo.fine}`,
@@ -397,6 +464,8 @@ export const STRUMENTI = [
         dati: {
           settimana, intervallo,
           canali: Object.values(perCanale),
+          ...(senzaFine.length ? { senza_fine_trasporto: { flussi: senzaFine, nota: 'Terminati senza data di fine trasporto, di qualunque periodo: esclusi da ogni settimana. Vanno corretti nel file del portale e ricaricati.' } } : {}),
+          ...(aperti.length ? { avviso_caricamenti: `Caricamento ${aperti.some(a => a.interrotto) ? 'interrotto' : 'in corso'} di ${aperti.map(a => a.tipo_file).join(', ')}: l'archivio puo' essere a meta' e questi numeri non sono definitivi.` } : {}),
           totale_della_settimana: null,
           nota: "Ogni flusso ha il suo totale e i totali NON si sommano, per due motivi diversi: fra canali perche' rete, ACI ed extra raccolta sono commesse indipendenti; dentro lo stesso canale perche' primaria e secondaria sono lo stesso materiale che si sposta, e sommarle lo conterebbe due volte. Nella risposta i numeri vanno dati flusso per flusso.",
         },
@@ -549,27 +618,73 @@ export const STRUMENTI = [
   },
   {
     nome: 'richieste_ect',
-    descrizione: 'Le richieste di ritiro arrivate dal consorzio per email: quali sono aperte, quali scadute e quali evase.',
+    descrizione: 'Le richieste di ritiro arrivate dal consorzio per email: quali sono aperte, quali scadute, quali ritirate da confermare e quali evase. Il ritiro si ricontrolla sui terminati di adesso, per fine trasporto.',
     parametri: { anno: 'numero', stato: 'aperta, da_confermare, evasa o annullata' },
     moduli: ['To-Do List'],
     async esegui(base44, p) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
-      const richieste = await fetchAll(base44.asServiceRole.entities.RichiestaEct, { anno });
+      const svc = base44.asServiceRole.entities;
+      const richieste = await fetchAll(svc.RichiestaEct, { anno });
       const oggi = oggiRoma();
       const giorni = (scadenza) => {
         const d = soloData(scadenza);
         if (!d) return null;
         return Math.round((new Date(d).getTime() - new Date(oggi).getTime()) / 86400000);
       };
+
+      // Il ritiro si rifa' qui sui terminati di adesso. L'esito salvato lo
+      // riscrivono il caricamento delle primarie e l'apertura della pagina: se
+      // nessuno dei due era ancora partito, una richiesta gia' ritirata restava
+      // aperta e "scaduta", e la risposta suggeriva di sollecitare un ritiro
+      // fatto. Stessa regola di importaBlocco (ritiri_ect): il giorno e' quello
+      // italiano della fine trasporto, mai la chiusura a portale, e la richiesta
+      // e' ritirata solo quando lo sono tutti i suoi ordini. Un ordine terminato
+      // senza fine trasporto non conta come ritirato, e si dice.
+      // Mentre le primarie si ricaricano l'archivio e' a meta': allora vale
+      // l'esito salvato, calcolato su un archivio intero, e lo si dice.
+      const daControllare = richieste.filter(r => listaOrdini(r).length && !r.motivo_annullamento && !r.evasione_confermata);
+      let terminati = null, senzaFine = null, inCorso = [], statoNonLetto = false;
+      if (daControllare.length) {
+        const caricamenti = await statoCaricamenti(base44, ['primarie', 'primarie_rete', 'primarie_aci']).catch(() => null);
+        if (!caricamenti) statoNonLetto = true;
+        inCorso = (caricamenti && caricamenti.in_corso) || [];
+        if (!inCorso.length) {
+          const [rete, aci] = await Promise.all([
+            fetchAll(svc.PrimariaRete, { stato: 'terminato' }),
+            fetchAll(svc.PrimariaAci, { stato: 'terminato' }),
+          ]);
+          terminati = new Map(); // id ordine -> primo giorno di fine trasporto
+          senzaFine = new Set(); // id degli ordini terminati senza fine trasporto
+          for (const o of [...rete, ...aci]) {
+            const id = String(o.id_ordine || '').trim();
+            if (!id || !eTerminato(o)) continue;
+            const g = giornoMovimento(o);
+            if (!g) { senzaFine.add(id); continue; }
+            if (!terminati.has(id) || g < terminati.get(id)) terminati.set(id, g);
+          }
+        }
+      }
+
       const tutte = richieste.map(r => {
-        const stato = statoRichiesta(r);
+        const ordini = listaOrdini(r);
+        // Senza ID ordine non c'e' niente da cercare fra i terminati: resta il salvato.
+        const ev = terminati && ordini.length ? evasioneOrdini(ordini, terminati) : null;
+        const rilevata = ev ? ev.ultima : r.evasione_rilevata_il;
+        const stato = statoRichiesta({ ...r, evasione_rilevata_il: rilevata || null });
+        const salvato = r.esito || statoRichiesta(r);
         const g = giorni(r.scadenza);
+        // Un ordine senza fine trasporto conta solo se non c'e' anche una sua
+        // riga terminata con la data: allora e' ritirato lo stesso.
+        const ordiniSenzaFine = senzaFine ? ordini.filter(id => senzaFine.has(id) && !terminati.has(id)) : [];
         return {
           pdr: r.pdr_nome, provincia: r.provincia, classe: r.classe,
-          ordini: listaOrdini(r), stato, scadenza: soloData(r.scadenza),
+          ordini, stato, scadenza: soloData(r.scadenza),
           giorni_alla_scadenza: g,
           scaduta: stato === 'aperta' && g !== null && g < 0,
-          immesso_il: soloData(r.ordine_immesso_il), evaso_il: soloData(r.evaso_il || r.evasione_rilevata_il),
+          immesso_il: soloData(r.ordine_immesso_il), evaso_il: soloData(r.evaso_il || rilevata),
+          ...(ev && ev.totali > 1 ? { ordini_ritirati: `${ev.evasi} su ${ev.totali}` } : {}),
+          ...(ordiniSenzaFine.length ? { ordini_terminati_senza_fine_trasporto: ordiniSenzaFine } : {}),
+          ...(salvato !== stato ? { stato_nella_pagina: salvato } : {}),
         };
       });
       // "scaduta" non e' uno stato dell'archivio ma e' quello che si chiede piu'
@@ -582,15 +697,22 @@ export const STRUMENTI = [
         : stati.includes(chiesto) ? tutte.filter(r => r.stato === chiesto)
         : tutte;
       const statoIgnorato = chiesto && chiesto !== 'scaduta' && !stati.includes(chiesto) ? chiesto : '';
+      const diverse = tutte.filter(r => r.stato_nella_pagina).length;
+      const senzaFineTot = tutte.filter(r => r.ordini_terminati_senza_fine_trasporto).length;
       return {
-        fonte: 'Richieste ECT',
+        fonte: `Richieste ECT${terminati ? ', ritiri ricontrollati sui terminati di adesso' : inCorso.length ? ', esito salvato' : ''}`,
         periodo: `anno ${anno}`,
         dati_al: oggi,
         dati: {
           aperte: tutte.filter(r => r.stato === 'aperta').length,
           scadute: tutte.filter(r => r.scaduta).length,
+          da_confermare: tutte.filter(r => r.stato === 'da_confermare').length,
           richieste: elenco(righe, 60),
           ...(statoIgnorato ? { avviso: `"${statoIgnorato}" non e' uno stato delle richieste (ci sono: ${stati.join(', ')}, piu' "scaduta" che vuol dire aperta e fuori termine): qui sotto ci sono tutte.` } : {}),
+          ...(inCorso.length ? { avviso_caricamenti: `Caricamento delle primarie ${inCorso.some(a => a.interrotto) ? 'interrotto' : 'in corso'}: l'archivio puo' essere a meta', quindi i ritiri non si sono ricontrollati e qui c'e' l'esito salvato dall'ultimo caricamento completo.` } : {}),
+          ...(statoNonLetto ? { avviso_caricamenti: 'Non sono riuscita a leggere lo stato dei caricamenti: i ritiri sono ricontrollati sui terminati di adesso, ma se le primarie si stavano ricaricando potrebbero non essere definitivi.' } : {}),
+          ...(diverse ? { avviso_pagina: `${diverse} ${diverse === 1 ? 'richiesta ha' : 'richieste hanno'} qui uno stato diverso da quello salvato nella To-Do List ("stato_nella_pagina"): vale quello ricontrollato adesso; la pagina si riallinea al prossimo caricamento delle primarie o alla sua apertura da parte dell'amministratore.` } : {}),
+          ...(senzaFineTot ? { avviso_senza_fine_trasporto: `${senzaFineTot} ${senzaFineTot === 1 ? 'richiesta ha' : 'richieste hanno'} ordini terminati senza data di fine trasporto: non contano come ritirati finche' la data non si corregge nel file del portale e si ricarica.` } : {}),
         },
       };
     },
@@ -659,15 +781,20 @@ export const STRUMENTI = [
       // Un campo per canale, mai una giacenza unica: prima passava solo
       // giacenza_portale_t, e alla domanda "quanta giacenza ha Nappi Sud?" la
       // risposta comprendeva la classe 9. Il null vuol dire "non calcolata"
-      // (uno stoccaggio senza rilevazione, l'ACI di un impianto), non zero.
+      // (uno stoccaggio senza rilevazione, un impianto senza il file degli
+      // ordini non dichiarati, l'ACI di un impianto), non zero.
       // calcolaGiacenze usa per gli impianti la regola di Dichiarazioni Impianti
       // (shared/giacenzaPortale.ts), quindi i due moduli dicono lo stesso numero.
+      // Senza il file, pero', l'impianto ha una fotografia col giorno vuoto e una
+      // giacenza a zero: quello zero non e' un dato, e passato cosi' EcoTyna
+      // diceva "nessuna giacenza".
       const utili = righe.map(r => {
         const stoc = String(r.tipo_destinazione || '').toLowerCase() === 'stoc';
         const f = r.fotografia;
+        const calcolata = stoc || !!(f && f.del);
         return {
           sito: r.sito, tipo: stoc ? 'stoccaggio' : 'impianto',
-          giacenza_rete_t: r.giacenza_rete_t ?? null,
+          giacenza_rete_t: calcolata ? (r.giacenza_rete_t ?? null) : null,
           giacenza_aci_t: r.giacenza_aci_t ?? null,
           extra_raccolta_in_piazzale_t: r.giacenza_extra_t ?? null,
           // Da dove viene il numero, cosi' uno scarto col portale si spiega coi dati.
@@ -675,9 +802,9 @@ export const STRUMENTI = [
             ? (r.data_rilevazione
               ? { rilevazione_del: r.data_rilevazione, rilevazione_classi_kg: r.rilevazione_classi_kg, dopo_la_rilevazione: r.dopo_rilevazione, rilevazione_obsoleta: !!r.rilevazione_obsoleta }
               : { avviso: 'Nessuna rilevazione del portale per questo stoccaggio: la giacenza non si puo\' calcolare.' })
-            : (f
+            : (calcolata
               ? { file_del_portale_del: f.del, fotografia_t: f.foto_t, carichi_aggiunti: f.aggiunti, carichi_aggiunti_t: f.aggiunti_t, dichiarato_dopo_la_fotografia_t: f.dichiarato_dopo_t }
-              : { avviso: 'Nessun file degli ordini non dichiarati caricato.' }),
+              : { avviso: 'Nessun file degli ordini non dichiarati caricato: senza la fotografia del portale la giacenza di rete dell\'impianto non si puo\' calcolare (non e\' zero). Va caricato il file.' }),
           movimenti_caricati_fino_al: r.aggiornata_al || null,
           in_attesa_dichiarazione_t: r.in_attesa_dichiarazione_t, ordini_da_dichiarare: r.ordini_da_dichiarare,
           dichiarato_rete_t: r.dichiarato_t, conferito_primarie_rete_t: r.conferito_primarie_t, conferito_aci_t: r.conferito_aci_t,
@@ -685,7 +812,7 @@ export const STRUMENTI = [
           secondarie_rete_in_t: r.secondarie_in_t, secondarie_rete_out_t: r.secondarie_out_t,
           secondarie_aci_in_t: r.secondarie_aci_in_t, secondarie_aci_out_t: r.secondarie_aci_out_t,
           target_rete_t: r.target_totale_t, giacenza_riferimento_t: r.giacenza_riferimento_t,
-          giacenza_classi_kg: r.giacenza_classi_kg,
+          giacenza_classi_kg: calcolata ? r.giacenza_classi_kg : null,
         };
       });
       // I totali si rifanno sulle righe rimaste, un canale per volta: quelli del
@@ -695,7 +822,12 @@ export const STRUMENTI = [
       const somma = (xs, campo) => Math.round(xs.reduce((s, r) => s + (Number(r[campo]) || 0), 0) * 1000) / 1000;
       const impianti = utili.filter(r => r.tipo === 'impianto');
       const stoccaggi = utili.filter(r => r.tipo === 'stoccaggio');
+      // Chi non ha il dato resta fuori dai totali, e lo si dice in ogni canale in
+      // cui manca: senza, il totale sembra completo. Uno stoccaggio senza
+      // rilevazione manca sia alla rete sia all'ACI (le classi 1-4 e la 9 stanno
+      // nella stessa rilevazione).
       const senzaRilevazione = stoccaggi.filter(r => r.giacenza_rete_t === null).map(r => r.sito);
+      const senzaFile = impianti.filter(r => r.giacenza_rete_t === null).map(r => r.sito);
       const totali = {
         perimetro: filtrato ? `solo ${utili.length === 1 ? 'il sito richiesto' : 'i siti richiesti'}` : 'tutti i siti',
         siti: utili.length,
@@ -705,9 +837,13 @@ export const STRUMENTI = [
           di_cui_stoccaggi_t: somma(stoccaggi, 'giacenza_rete_t'),
           in_attesa_dichiarazione_t: somma(utili, 'in_attesa_dichiarazione_t'),
           ordini_da_dichiarare: utili.reduce((s, r) => s + (Number(r.ordini_da_dichiarare) || 0), 0),
+          ...(senzaFile.length ? { impianti_senza_file_del_portale_esclusi: senzaFile } : {}),
           ...(senzaRilevazione.length ? { stoccaggi_senza_rilevazione_esclusi: senzaRilevazione } : {}),
         },
-        aci: { giacenza_stoccaggi_t: somma(stoccaggi, 'giacenza_aci_t') },
+        aci: {
+          giacenza_stoccaggi_t: somma(stoccaggi, 'giacenza_aci_t'),
+          ...(senzaRilevazione.length ? { stoccaggi_senza_rilevazione_esclusi: senzaRilevazione } : {}),
+        },
         extra_raccolta: { in_piazzale_t: somma(stoccaggi, 'extra_raccolta_in_piazzale_t') },
         nota_totali: 'Tre canali, tre totali: rete, ACI ed extra raccolta non si sommano.',
       };
@@ -734,10 +870,14 @@ export const STRUMENTI = [
       const svc = base44.asServiceRole.entities;
       const dich = await fetchAll(svc.DichiarazioneSito, { anno });
       const k = p.sito ? normalizzaRagioneSociale(p.sito) : '';
+      // Un canale scritto male non deve svuotare l'elenco in silenzio: si tolgono
+      // il filtro e lo si dice (il riepilogo resta comunque per sito e canale).
+      const canale = canaleChiesto(p.canale);
+      const canaleIgnorato = p.canale && !canale ? String(p.canale) : '';
       const righe = dich.filter(d => {
         if (p.mese && String(d.mese || '').toLowerCase() !== String(p.mese).toLowerCase()) return false;
         if (k && normalizzaRagioneSociale(d.sito) !== k) return false;
-        if (p.canale && String(d.canale || 'RETE').toUpperCase() !== String(p.canale).toUpperCase()) return false;
+        if (canale && String(d.canale || 'RETE').toUpperCase() !== canale) return false;
         return true;
       }).map(d => ({
         sito: d.sito, canale: d.canale || 'RETE', operazione: d.operazione, provenienza: d.provenienza,
@@ -763,6 +903,7 @@ export const STRUMENTI = [
         dati: {
           riepilogo: [...perSito.values()].map(x => ({ ...x, dichiarato_t: t3(x.dichiarato_kg) })).sort((a, b) => b.dichiarato_kg - a.dichiarato_kg),
           dichiarazioni: elenco(righe, 80),
+          ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: qui ci sono tutti e tre, ciascuno sulla sua riga e mai sommati.` } : {}),
           nota: 'Una dichiarazione decurta la giacenza a portale solo quando risulta caricata.',
         },
       };
@@ -780,7 +921,7 @@ export const STRUMENTI = [
       const k = p.produttore ? normalizzaRagioneSociale(p.produttore) : '';
       const righe = tutte.filter(o => {
         if (k && normalizzaRagioneSociale(o.produttore) !== k && !normalizzaRagioneSociale(o.produttore).includes(k)) return false;
-        if (p.canale && String(o.canale || '').toUpperCase() !== String(p.canale).toUpperCase()) return false;
+        if (canaleChiesto(p.canale) && String(o.canale || '').toUpperCase() !== canaleChiesto(p.canale)) return false;
         if (p.stato && o.stato !== p.stato) return false;
         return true;
       }).map(o => {
@@ -942,8 +1083,12 @@ export const STRUMENTI = [
       // "quanto dobbiamo a Green Tyre per marzo" si rispondeva "niente" mentre
       // il modulo diceva 13.271,40 euro. Qui si chiama lo stesso conto del
       // modulo, cosi' i due numeri non possono divergere.
+      // Il canale si riconosce anche scritto come capita ("extra raccolta").
+      const tipologiaChiesta = canaleChiesto(p.tipologia);
+      const tipologiaIgnorata = p.tipologia && !tipologiaChiesta ? String(p.tipologia) : '';
+
       if (tipo === 'PASSIVA' && meseChiesto) {
-        const tipologia = String(p.tipologia || 'RETE').toUpperCase();
+        const tipologia = tipologiaChiesta || 'RETE';
         const res = await base44.functions.invoke('calcolaPassiva', { anno, mese: meseChiesto, tipologia });
         const d = (res && res.data) || res || {};
         const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
@@ -972,6 +1117,7 @@ export const STRUMENTI = [
               ? { totale_del_fornitore_euro: suo, totali_del_mese_tutti_i_fornitori: d.totali }
               : { totali: d.totali, quadratura: d.quadratura }),
             anomalie: elenco(d.anomalie || [], 20),
+            ...(tipologiaChiesta ? {} : { avviso_canale: `${tipologiaIgnorata ? `"${tipologiaIgnorata}" non e' un canale` : 'Canale non indicato'}: questo e' il conto della RETE. ACI ed extra raccolta hanno il loro, e non si sommano.` }),
             nota: 'Conto fatto adesso sui movimenti terminati del mese, lo stesso del modulo Fatturazione. Un fornitore che ne fattura un altro porta il secondo in "di cui": si paga al primo.',
           },
         };
@@ -987,7 +1133,7 @@ export const STRUMENTI = [
 
       const filtro = { anno, tipo };
       if (meseChiesto) filtro.mese = meseChiesto;
-      if (p.tipologia) filtro.tipologia = String(p.tipologia).toUpperCase();
+      if (tipologiaChiesta) filtro.tipologia = tipologiaChiesta;
       const voci = await fetchAll(svc.VoceFatturazione, filtro);
       const nomeDi = (v) => v.fornitore_nome || 'N/D';
       const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
@@ -1012,18 +1158,19 @@ export const STRUMENTI = [
         sospese: x.sospese, da_controllare: x.da_controllare, servizi: [...x.servizi].slice(0, 4),
       })).sort((a, b) => b.totale_euro - a.totale_euro);
       return {
-        fonte: `Fatturazione ${tipo}` + (p.tipologia ? `, canale ${String(p.tipologia).toUpperCase()}` : ', tutti i canali insieme'),
+        fonte: `Fatturazione ${tipo}` + (tipologiaChiesta ? `, canale ${tipologiaChiesta}` : ', un canale per volta'),
         periodo: meseChiesto ? `${meseChiesto} ${anno}` : `anno ${anno}`,
         dati_al: oggiRoma(),
         dati: {
           voci: righe.length,
           // Un totale unico ha senso solo dentro un canale: senza filtro di
           // tipologia sommerebbe rete, ACI ed extra raccolta in un numero solo.
-          ...(p.tipologia
+          ...(tipologiaChiesta
             ? { totale_euro: Math.round(gruppi.reduce((s, g) => s + g.totale_euro, 0) * 100) / 100 }
             : { totale_per_canale: Object.entries(gruppi.reduce((acc, g) => { const c = g.tipologia || 'N/D'; acc[c] = Math.round(((acc[c] || 0) + g.totale_euro) * 100) / 100; return acc; }, {})).map(([canale, euro]) => ({ canale, euro })), nota_totale: 'Non c\'e\' un totale unico: rete, ACI ed extra raccolta sono commesse indipendenti.' }),
           ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso tutto l'anno ${anno}.` } : {}),
-          canale: p.tipologia ? String(p.tipologia).toUpperCase() : 'nessun filtro di canale: qui dentro ci sono rete, ACI ed extra raccolta, da tenere distinti',
+          ...(tipologiaIgnorata ? { avviso_canale: `"${tipologiaIgnorata}" non e' un canale: qui sotto ci sono tutti e tre, un totale per canale.` } : {}),
+          canale: tipologiaChiesta || 'nessun filtro di canale: qui dentro ci sono rete, ACI ed extra raccolta, da tenere distinti',
           gruppi: elenco(gruppi, 60),
           nota: 'Qui ci sono solo le voci dei documenti gia\' elaborati e salvati: per sapere quanto si deve a un fornitore in un mese preciso rifai la domanda indicando il mese, cosi\' il conto si fa sui movimenti.',
         },
@@ -1042,9 +1189,11 @@ export const STRUMENTI = [
       if (p.direzione) filtro.direzione = String(p.direzione).toUpperCase();
       const tutte = await fetchAll(svc.Tariffa, filtro);
       const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
+      // "TUTTE" e' una tipologia delle tariffe, non un canale: chiesta cosi', non filtra.
+      const tipologia = canaleChiesto(p.tipologia);
       const righe = tutte.filter(t => {
         if (k && !normalizzaRagioneSociale(t.fornitore_nome).includes(k) && !normalizzaRagioneSociale(t.cliente).includes(k)) return false;
-        if (p.tipologia && t.tipologia && String(t.tipologia).toUpperCase() !== String(p.tipologia).toUpperCase() && String(t.tipologia).toUpperCase() !== 'TUTTE') return false;
+        if (tipologia && t.tipologia && String(t.tipologia).toUpperCase() !== tipologia && String(t.tipologia).toUpperCase() !== 'TUTTE') return false;
         return true;
       });
       return {
@@ -1059,6 +1208,8 @@ export const STRUMENTI = [
             valore: t.valore, unita_misura: t.unita_misura,
             validita: `${soloData(t.data_inizio_validita)} - ${soloData(t.data_fine_validita) || 'senza scadenza'}`,
           })), 80),
+          ...(p.tipologia && !tipologia && String(p.tipologia).toUpperCase().trim() !== 'TUTTE'
+            ? { avviso_canale: `"${p.tipologia}" non e' un canale: qui ci sono le tariffe di tutti i canali, ciascuna col suo.` } : {}),
         },
       };
     },

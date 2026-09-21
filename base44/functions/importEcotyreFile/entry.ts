@@ -6,6 +6,12 @@ import { enrichRecords } from "../../shared/dataEnrichment.ts";
 import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSignatures.ts";
 import { CAMPI_ASSEGNATO, archivioPrimaria } from "../../shared/primarie.ts";
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
+import { annoRoma } from "../../shared/giornoItaliano.ts";
+
+// Le dichiarazioni riconosciute, un canale per volta: nel registro non si sommano.
+const perCanale = (righe) => [['RETE', 'rete'], ['ACI', 'ACI'], ['EXTRA_RACCOLTA', 'extra raccolta']]
+  .map(([c, nome]) => [nome, righe.filter(x => (x.canale || 'RETE') === c).length]).filter(([, n]) => n)
+  .map(([nome, n]) => `${nome} ${n}`).join(', ') || '0';
 
 // Importa un file Excel scaricato dal portale Ecotyre con validazione anti-perdita-dati.
 // Flusso tassativo:
@@ -15,11 +21,47 @@ import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/
 // 4. controllo contenuto (primarie: almeno un terminato)
 // 5. se zero righe valide -> 400
 // 6. controllo anti-regressione (id mancanti -> 409, a meno di conferma_forzatura)
-// 7. SOLO ORA: deleteMany + bulkCreate
+// 7. SOLO ORA: riga "in_corso" nel registro, poi deleteMany + bulkCreate
+// 8. la riga del registro prende l'esito
 // Payload: { file_url, tipo_file, nome_file, periodo_riferimento?, replace_existing?, conferma_forzatura? }
 
 const CHUNK = 250;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Mentre l'archivio si svuota e si riscrive, nel registro deve esserci una riga
+// "in_corso": e' da li' che verifiche dei report, quadrature FIR, riconfronti
+// dopo i caricamenti e alert capiscono che l'archivio e' a meta' e aspettano
+// (statoCaricamenti). Qui il registro si scriveva solo alla fine: durante un
+// caricamento delle secondarie quei moduli rifacevano e SALVAVANO esiti e alert
+// su un archivio vuoto o parziale - l'alert di una dichiarazione si chiudeva
+// come "confermata" e poi si ricreava. E' la stessa regola di importaBlocco
+// (apriCaricamento / chiudiCaricamento): la riga si apre subito prima di
+// svuotare, si chiude con l'esito alla fine o con l'errore, e una rimasta
+// aperta e' la traccia di un caricamento interrotto. Blocca per dieci minuti lo
+// stesso archivio a un altro utente, che altrimenti lo sovrascriverebbe.
+const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
+const chi = (user) => (user && (user.full_name || user.email)) || '';
+
+async function apriCaricamento(base44, user, tipo_file, nome_file, file_url, prima) {
+  const Log = base44.asServiceRole.entities.UploadLog;
+  const aperti = await Log.filter({ tipo_file, esito: 'in_corso' }, '-created_date', 20);
+  const adesso = Date.now();
+  for (const l of aperti) {
+    // created_date arriva in UTC senza la Z finale
+    const eta = adesso - new Date(String(l.created_date).replace(/(Z|[+-]\d{2}:?\d{2})?$/, 'Z')).getTime();
+    if (eta < FINESTRA_IN_CORSO_MS && l.utente && l.utente !== chi(user)) {
+      return { bloccato: `${l.utente} sta caricando lo stesso archivio da ${Math.max(1, Math.round(eta / 60000))} minuti: aspetta che finisca, altrimenti i due caricamenti si sovrascrivono.` };
+    }
+    await Log.update(l.id, { esito: 'errore', messaggio: `Caricamento interrotto: avviato da ${l.utente || 'sconosciuto'} e mai concluso. L'archivio poteva essere incompleto; e' stato ricaricato dopo.` });
+  }
+  const riga = await Log.create({
+    tipo_file, nome_file: nome_file || 'N/D', file_url, esito: 'in_corso', utente: chi(user),
+    righe_importate: 0, righe_fallite: 0,
+    righe_archivio_prima: typeof prima === 'number' ? prima : undefined,
+    messaggio: 'Caricamento in corso: archivio in riscrittura.',
+  });
+  return { id: riga.id };
+}
 
 // Campi data per le nuove entita' (dichiarazioni/ordini): accettano sia seriale Excel che testo AAAA-MM-GG
 const DATE_FIELDS = new Set([
@@ -61,6 +103,8 @@ export default async function(req) {
   let tipo_file = null, nome_file = 'N/D', file_url = null;
   let fase = 'avvio';
   let user = null;
+  // la riga "in_corso" del registro, da chiudere con l'esito o con l'errore
+  let rigaRegistro = null;
   try {
     const base44 = createClientFromRequest(req);
     user = await base44.auth.me();
@@ -393,7 +437,12 @@ export default async function(req) {
       }
     }
 
-    // === 7. SOLO ORA: cancellazione e import ===
+    // === 7. SOLO ORA: riga "in_corso" nel registro, cancellazione e import ===
+    fase = 'apertura del registro';
+    const aperto = await apriCaricamento(base44, user, tipo_file, nome_file, file_url, righe_archivio_prima);
+    if (aperto.bloccato) return Response.json({ error: aperto.bloccato, dati_intatti: true }, { status: 409 });
+    rigaRegistro = aperto.id;
+
     fase = 'scrittura dei record';
     const importBucket = async (rows, entityName, campi = null, sostituisci = true, kf = 'id_ordine') => {
       const records = campi
@@ -472,13 +521,24 @@ export default async function(req) {
     // Il report dice, per ogni caricamento, il giorno e i materiali usciti; i pesi
     // coincidono al chilo con le nostre righe mensili. Cosi' non c'e' piu' bisogno
     // di segnare a mano, impianto per impianto, che cosa e' stato dichiarato.
+    // Ogni anno presente nel report, come l'azione "allinea" di importaBlocco
+    // (la strada usata oggi per questo report) e il pulsante di Dichiarazioni
+    // Impianti; l'anno e' quello del giorno italiano, come lo legge
+    // allineaDalPortale: tagliando la stringa UTC un caricamento del 1 gennaio a
+    // mezzanotte italiana finiva nell'anno prima.
     let allineamento = null;
     if (tipo_file === 'dichiarazioni_trattamento' && imported > 0) {
       fase = 'allineamento delle dichiarazioni mensili';
       try {
-        const anni = [...new Set(enriched.map(r => String(r.data_dichiarazione || '').slice(0, 4)).filter(a => /^\d{4}$/.test(a)))].sort();
-        const anno = Number(anni[anni.length - 1]);
-        if (anno) allineamento = await allineaDalPortale(base44.asServiceRole.entities, anno, enriched);
+        const anni = [...new Set(enriched.map(r => annoRoma(r.data_dichiarazione)).filter(Boolean))].sort((x, y) => x - y);
+        const aggiornate = [];
+        const nonTrovate = [];
+        for (const a of anni) {
+          const esito = await allineaDalPortale(base44.asServiceRole.entities, a, enriched);
+          aggiornate.push(...esito.aggiornate.map(x => ({ ...x, anno: a })));
+          nonTrovate.push(...esito.non_trovate.map(x => ({ ...x, anno: a })));
+        }
+        if (anni.length) allineamento = { anni, aggiornate, non_trovate: nonTrovate };
       } catch (e) {
         allineamento = { errore: e && e.message ? e.message : String(e) };
       }
@@ -495,16 +555,21 @@ export default async function(req) {
       ? `Rete: ${primarie_rete_importati} | ACI: ${primarie_aci_importati} | Ass. Rete: ${assegnati_importati} | Ass. ACI: ${assegnati_aci_importati} (foglio: ${sheetName})${suffissoDurata}`
       : `${imported} righe importate su ${enriched.length} da importare (foglio: ${sheetName})${suffissoDurata}`;
     const notaAllineamento = allineamento && allineamento.aggiornate
-      ? ` | dichiarazioni riconosciute a portale: ${allineamento.aggiornate.length}`
+      ? ` | dichiarazioni riconosciute a portale: ${perCanale(allineamento.aggiornate)}`
       : (allineamento && allineamento.errore ? ` | allineamento non riuscito: ${allineamento.errore}` : '');
-    await base44.asServiceRole.entities.UploadLog.create({
-          utente: (user && (user.full_name || user.email)) || '',
+    // La riga aperta prima di svuotare prende l'esito: e' questo aggiornamento a
+    // far partire gli alert (workflow AlertEngineAutoRun, su create e update).
+    const registro = {
+      utente: chi(user),
       tipo_file, nome_file, file_url,
       righe_importate: imported, righe_fallite: failed, esito,
       messaggio: messaggio + notaAllineamento, periodo_riferimento: periodo_riferimento || '',
       foglio_usato: sheetName, righe_archivio_prima, forzato: !!conferma_forzatura,
       modalita
-    });
+    };
+    if (rigaRegistro) await base44.asServiceRole.entities.UploadLog.update(rigaRegistro, registro);
+    else await base44.asServiceRole.entities.UploadLog.create(registro);
+    rigaRegistro = null;
 
     return Response.json({
       tipo_file, entity: config.entity, foglio: sheetName,
@@ -525,12 +590,16 @@ export default async function(req) {
   } catch (error) {
     try {
       const base44 = createClientFromRequest(req);
-      await base44.asServiceRole.entities.UploadLog.create({
-          utente: (user && (user.full_name || user.email)) || '',
+      // Con la riga "in_corso" gia' aperta la si chiude in errore: l'archivio puo'
+      // essere stato svuotato, e resta scritto dove ci si e' fermati.
+      const campi = {
+        utente: chi(user),
         tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
-        esito: 'errore', messaggio: error.message || 'Errore imprevisto',
+        esito: 'errore', messaggio: `${error.message || 'Errore imprevisto'} (fase: ${fase})`,
         periodo_riferimento: ''
-      });
+      };
+      if (rigaRegistro) await base44.asServiceRole.entities.UploadLog.update(rigaRegistro, campi);
+      else await base44.asServiceRole.entities.UploadLog.create(campi);
     } catch (_) {}
     return Response.json({ error: error.message, fase, dettaglio: 'Interruzione durante: ' + fase }, { status: 500 });
   }

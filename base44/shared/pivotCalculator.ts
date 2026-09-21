@@ -1,6 +1,12 @@
+// NON USATO. Nessuna funzione e nessuna pagina importa questo modulo da quando la
+// funzione computePivotData e' stata tolta (commit a3b5475, "funzioni di sola
+// lettura mai chiamate"): le pivot vive stanno in base44/shared/reportMensile.ts.
+// Le correzioni fatte qui (periodo dalla fine trasporto, ACI per canale,
+// conteggio dei terminati senza fine trasporto) non hanno effetto su nessun
+// numero a video. Chi lo ricollega a una pagina lo riverifichi contro le regole
+// di AGENTS.md; altrimenti va tolto.
+//
 // Modulo condiviso per il calcolo delle pivot analitiche PFU.
-// Le pivot attingono dai campi arricchiti memorizzati (mese, settimane, anno, classe, regione)
-// calcolati al momento dell'importazione. Fallback on-the-fly per record non arricchiti.
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
 import { getMeseFromDate, getSettimanaFromDate, getAnnoFromDate, getRegioneFromProvincia, getClasseFromProdotto } from "./dataEnrichment.ts";
 import { matchesFilter } from "./multiFilter.ts";

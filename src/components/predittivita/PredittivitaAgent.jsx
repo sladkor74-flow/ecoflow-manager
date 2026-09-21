@@ -79,7 +79,7 @@ export default function PredittivitaAgent() {
 
   const newConversation = async () => {
     try {
-      const conv = await base44.agents.createConversation({ agent_name: AGENT_NAME, metadata: { name: 'Nuova analisi', description: 'Pianificazione predittiva' } });
+      const conv = await base44.agents.createConversation({ agent_name: AGENT_NAME, metadata: { name: 'Nuova analisi', description: 'Pianificazione predittiva delle secondarie, solo rete' } });
       setConversations(prev => [conv, ...prev]);
       setActiveId(conv.id);
     } catch (e) { /* ignore */ }
@@ -110,7 +110,8 @@ export default function PredittivitaAgent() {
             <Plus className="w-4 h-4" /> Nuova conversazione
           </button>
         </div>
-        <p className="text-sm text-muted-foreground">Interroga l'agente sullo stato di Tecnogum e Irigom, viaggi stimati della settimana, anticipo/ritardo e target raccoglitori primaria.</p>
+        <p className="text-sm text-muted-foreground">Interroga l'agente sullo stato degli impianti, sui viaggi stimati della settimana, su anticipo e ritardo e sui target dei raccoglitori.</p>
+        <p className="text-xs text-muted-foreground">Solo rete: ACI ed extra raccolta non entrano nella predittività, e qui non se ne parla. Per quei canali chiedi a EcoTyna.</p>
         <div className="space-y-2">
           {conversations.length === 0 && (
             <div className="text-center py-8 text-muted-foreground border rounded-lg">
@@ -149,7 +150,7 @@ export default function PredittivitaAgent() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-          placeholder="Es: come andiamo questa settimana? quanti viaggi servono per Irigom?"
+          placeholder="Es: come andiamo questa settimana sulla rete? quanti viaggi servono per Irigom?"
           className="flex-1 border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
         />
         <button onClick={send} disabled={!input.trim() || sending} className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50">

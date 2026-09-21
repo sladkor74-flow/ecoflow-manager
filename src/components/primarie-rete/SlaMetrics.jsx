@@ -4,34 +4,42 @@ import { formatIntero } from '@/lib/utils';
 
 // I tempi arrivano gia' calcolati da computeSlaMetrics (primarieReteAnalytics.ts):
 // dall'immissione dell'ordine alla fine del trasporto, mai alla chiusura a portale.
-// Qui si dice a parole cosa misurano e quanti terminati non si sono potuti misurare.
-export default function SlaMetrics({ data }) {
+// Qui si dice a parole cosa misurano, di quale anno, e quanti terminati non si
+// sono potuti misurare.
+export default function SlaMetrics({ data, anniFiltro = [] }) {
   if (!data) return null;
 
   const { trasportatori, totale_ordini, avg_giorni, pct_nei_tempi_globale } = data;
   // una risposta della funzione precedente non ha il dato contato
   const pctDopoScadenza = data.pct_dopo_scadenza_globale ?? (100 - pct_nei_tempi_globale);
   const nonMisurati = data.non_misurati;
-  const quantiNonMisurati = nonMisurati ? (nonMisurati.senza_fine_trasporto || 0) + (nonMisurati.senza_immissione || 0) : 0;
+  const quantiNonMisurati = nonMisurati
+    ? (nonMisurati.senza_fine_trasporto || 0) + (nonMisurati.senza_immissione || 0) + (nonMisurati.date_incoerenti || 0)
+    : 0;
+  // I tempi si misurano su un anno alla volta: con piu' anni scelti nel filtro
+  // la scheda resta sull'anno in corso, e va detto invece di lasciarlo credere.
+  const annoIgnorato = anniFiltro.length > 1;
 
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Giorni dall'immissione dell'ordine alla fine del trasporto, sul giorno italiano. Un ritiro è nei tempi se il trasporto finisce entro 30 giorni dall'immissione. La chiusura dell'ordine a portale non conta.
+        Giorni dall'immissione dell'ordine alla fine del trasporto, sul giorno italiano, per i ritiri terminati con fine trasporto {data.anno ? `nel ${data.anno}` : 'nell\'anno in corso'}. Un ritiro è nei tempi se il trasporto finisce entro 30 giorni dall'immissione. La chiusura dell'ordine a portale non conta.
+        {annoIgnorato && <> I tempi si misurano un anno alla volta: per un altro anno sceglierne uno solo nel filtro.</>}
       </p>
       {quantiNonMisurati > 0 && (
         <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 text-sm">
           {formatIntero(quantiNonMisurati)} {quantiNonMisurati === 1 ? 'ordine terminato non è stato misurato' : 'ordini terminati non sono stati misurati'}
           {nonMisurati.senza_fine_trasporto > 0 && <> · {formatIntero(nonMisurati.senza_fine_trasporto)} senza fine trasporto</>}
           {nonMisurati.senza_immissione > 0 && <> · {formatIntero(nonMisurati.senza_immissione)} senza data di immissione</>}
+          {nonMisurati.date_incoerenti > 0 && <> · {formatIntero(nonMisurati.date_incoerenti)} con la fine trasporto prima dell'immissione</>}
           {nonMisurati.esempi?.length > 0 && <> (es. {nonMisurati.esempi.join(', ')})</>}
-          : restano fuori dai tempi finché manca la data.
+          : {quantiNonMisurati === 1 ? 'resta fuori' : 'restano fuori'} dai tempi finché le date non si correggono a portale.
         </div>
       )}
       {/* KPI summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="border rounded-lg p-3">
-          <p className="text-xs text-muted-foreground">Ordini totali</p>
+          <p className="text-xs text-muted-foreground">Ordini misurati{data.anno ? ` nel ${data.anno}` : ''}</p>
           <p className="text-xl font-heading font-bold">{formatIntero(totale_ordini)}</p>
         </div>
         <div className="border rounded-lg p-3">

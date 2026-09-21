@@ -16,17 +16,47 @@ import { canaleDi } from "../../shared/canaleSecondaria.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { formatoTonnellate } from "../../shared/formato.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
+import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
+
+// I caricamenti che riscrivono l'archivio letto da ciascun modulo. Il file unico
+// delle primarie riscrive rete, ACI e assegnati; primarie_rete e primarie_aci
+// sono i tipi di quando si caricavano separati.
+const CARICAMENTI_DEL_MODULO = {
+  primarie_rete: ['primarie', 'primarie_rete'],
+  primarie_aci: ['primarie', 'primarie_aci'],
+  assegnati: ['primarie'],
+  secondarie: ['secondarie'],
+  terziarie: ['terziarie'],
+};
+
+// Le parole con cui l'alert di ritardo SLA dice cosa misura. Un alert ignorato
+// il cui testo non le contiene era stato scritto quando i giorni si contavano
+// fino alla chiusura a portale: quella decisione riguardava un'altra misura.
+const MISURA_SLA = "dall'immissione alla fine del trasporto";
+
+// La chiave di un alert: lo stesso record (o raccoglitore, provincia...) e la stessa regola.
+const chiaveAlert = (a) => `${a.record_id}|||${a.regola_id}`;
+
+// Registra una condizione presente oggi nei dati, col testo calcolato adesso. Se
+// la stessa chiave compare due volte vale la prima, come per l'alert che si crea.
+const segna = (attuali, key, alert) => { if (!attuali.has(key)) attuali.set(key, alert); };
 
 // Motore di controllo: scansiona i record di un modulo e genera Alert per le regole violate.
 // Payload: { modulo }
 //
 // - Si controllano solo i dati dell'anno in corso e, per le primarie, i soli
 //   formulari terminati: un ordine cancellato non ha pesi ne' destinazione.
-// - Un alert gia' aperto per lo stesso record e la stessa regola non si ricrea.
+// - Un alert gia' aperto per lo stesso record e la stessa regola non si ricrea,
+//   ma se la condizione c'e' ancora con numeri diversi (una media, una
+//   percentuale, un raccolto) se ne riscrive il testo: restava quello del giorno
+//   in cui era nato, e a video c'erano numeri che nessun modulo mostrava piu'.
 // - Gli alert aperti delle regole del modulo la cui condizione non c'e' piu' (o
 //   doppioni dello stesso alert) vengono chiusi come risolti, con una nota: non si
 //   cancella nulla. Le chiusure si fermano a un tempo massimo e riprendono al giro
 //   successivo.
+// - Se l'archivio del modulo si sta riscrivendo (un caricamento aperto o rimasto
+//   a meta') non si tocca niente e si risponde 409: su un archivio a meta' ogni
+//   condizione sembrerebbe sparita, e gli alert aperti si chiuderebbero tutti.
 
 const TEMPO_MASSIMO_MS = 40000;
 const MESI_ANNO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -74,6 +104,22 @@ export default async function(req) {
       return Response.json({ modulo, alerts_creati: 0, messaggio: 'Nessuna regola attiva per questo modulo' });
     }
 
+    // Prima di leggere l'archivio: se un caricamento lo sta riscrivendo, o l'ha
+    // lasciato a meta', il controllo si rinvia. Il flusso automatico riparte da
+    // solo quando il caricamento si conclude.
+    const caricamenti = await statoCaricamenti(base44, CARICAMENTI_DEL_MODULO[modulo]);
+    if (caricamenti.in_corso.length) {
+      const c = caricamenti.in_corso[0];
+      const chi = [c.nome_file && `file ${c.nome_file}`, c.utente && `di ${c.utente}`, c.data && `del ${c.data}`].filter(Boolean).join(', ');
+      return Response.json({
+        error: c.interrotto
+          ? `Il caricamento ${c.tipo_file}${chi ? ` (${chi})` : ''} si è interrotto e l'archivio può essere a metà: ricaricare il file, poi ripetere il controllo degli alert.`
+          : `È aperto il caricamento ${c.tipo_file}${chi ? ` (${chi})` : ''}: gli alert si ricontrollano da soli quando è concluso.`,
+        rinviato: true,
+        caricamenti_in_corso: caricamenti.in_corso,
+      }, { status: 409 });
+    }
+
     // Record da validare: anno in corso, per le primarie solo i terminati.
     const anno = Number(oggiRoma().slice(0, 4));
     const tutti = await fetchAll(base44.asServiceRole.entities[entityName]);
@@ -82,14 +128,27 @@ export default async function(req) {
     // Tutti gli alert aperti del modulo, pagina per pagina: senza, il controllo dei
     // doppioni vedeva solo i primi e a ogni caricamento li ricreava.
     const existingAlerts = await fetchAll(base44.asServiceRole.entities.Alert, { modulo, stato: 'aperto' }, 'created_date');
-    const existingKeys = new Set(existingAlerts.map(a => `${a.record_id}|||${a.regola_id}`));
+    const existingKeys = new Set(existingAlerts.map(chiaveAlert));
+    // L'alert aperto di ciascuna chiave, il piu' vecchio (gli altri sono doppioni
+    // e si chiudono sotto): e' quello di cui si aggiorna il testo.
+    const apertiPerChiave = new Map();
+    for (const a of existingAlerts) if (!apertiPerChiave.has(chiaveAlert(a))) apertiPerChiave.set(chiaveAlert(a), a);
     // Un alert che l'amministratore ha ignorato e' una decisione presa: la stessa
     // condizione sullo stesso record non si ripropone. Prima si guardavano solo
     // gli aperti, e al giro dopo l'alert ignorato rinasceva come nuovo.
+    // Fa eccezione il ritardo SLA ignorato sulla misura fino alla chiusura a
+    // portale: la decisione riguardava giorni che non si contano piu', e se il
+    // trasportatore resta critico anche fino alla fine del trasporto l'alert si
+    // ripropone con i numeri veri.
+    const regoleSlaId = new Set(regole.filter(r => r.tipo_regola === 'ritardo_sla').map(r => r.id));
     const ignorati = await fetchAll(base44.asServiceRole.entities.Alert, { modulo, stato: 'ignorato' }, 'created_date');
-    for (const a of ignorati) existingKeys.add(`${a.record_id}|||${a.regola_id}`);
-    // Condizioni presenti oggi nei dati: gli alert aperti fuori da questo insieme si chiudono.
-    const attuali = new Set();
+    for (const a of ignorati) {
+      if (regoleSlaId.has(a.regola_id) && !String(a.descrizione || '').includes(MISURA_SLA)) continue;
+      existingKeys.add(chiaveAlert(a));
+    }
+    // Condizioni presenti oggi nei dati, col testo di oggi: gli alert aperti fuori
+    // da questo insieme si chiudono, quelli dentro prendono il testo nuovo.
+    const attuali = new Map();
 
     const newAlerts = [];
 
@@ -98,14 +157,11 @@ export default async function(req) {
         const violazione = checkRegola(record, regola, entityName);
         if (violazione) {
           const key = `${record.id_ordine}|||${regola.id}`;
-          attuali.add(key);
-          if (existingKeys.has(key)) continue; // skip duplicati
-          existingKeys.add(key);
           // Le regole si valutano su un formulario alla volta, quindi i canali non
           // si sommano mai; ma su una secondaria va detto di quale canale e',
           // perche' rete e autodemolizione si guardano separatamente.
           const canale = entityName === 'Secondaria' ? canaleDi(record) : null;
-          newAlerts.push({
+          const alert = {
             titolo: canale === 'ACI' ? `${violazione.titolo} · ACI` : violazione.titolo,
             descrizione: violazione.descrizione,
             severita: regola.severita || 'warning',
@@ -115,7 +171,11 @@ export default async function(req) {
             regola_id: regola.id,
             regola_nome: regola.nome,
             stato: 'aperto',
-          });
+          };
+          segna(attuali, key, alert);
+          if (existingKeys.has(key)) continue; // skip duplicati
+          existingKeys.add(key);
+          newAlerts.push(alert);
         }
       }
     }
@@ -150,6 +210,27 @@ export default async function(req) {
       } catch (e) { /* skip */ }
     }
 
+    // Gli alert aperti la cui condizione c'e' ancora prendono il testo calcolato
+    // oggi: un "Nr Giorni medio 14,2" scritto sulla chiusura a portale, o il
+    // raccolto di un mese fermo al caricamento di allora, restavano a video
+    // mentre la pagina mostrava altri numeri. Si scrive solo dove cambia.
+    const daAggiornare = [];
+    for (const [key, a] of apertiPerChiave) {
+      const nuovo = attuali.get(key);
+      if (!nuovo) continue;
+      if ((a.titolo || '') !== (nuovo.titolo || '') || (a.descrizione || '') !== (nuovo.descrizione || '') || (a.severita || '') !== (nuovo.severita || '')) {
+        daAggiornare.push({ id: a.id, titolo: nuovo.titolo, descrizione: nuovo.descrizione, severita: nuovo.severita });
+      }
+    }
+    let aggiornati = 0;
+    for (let i = 0; i < daAggiornare.length && Date.now() - inizio < TEMPO_MASSIMO_MS; i += CHUNK) {
+      const blocco = daAggiornare.slice(i, i + CHUNK);
+      try {
+        await base44.asServiceRole.entities.Alert.bulkUpdate(blocco);
+        aggiornati += blocco.length;
+      } catch (e) { /* ripreso al giro successivo */ }
+    }
+
     // Chiusura degli alert superati e dei doppioni, solo per le regole di questo
     // motore: gli alert creati da altri controlli restano come sono.
     // La regola delle rotte non sta fra le RegolaAlert configurate, ma i suoi
@@ -159,7 +240,7 @@ export default async function(req) {
     const daChiudere = [];
     for (const a of existingAlerts) {
       if (!idRegole.has(a.regola_id)) continue;
-      const key = `${a.record_id}|||${a.regola_id}`;
+      const key = chiaveAlert(a);
       if (!attuali.has(key)) {
         daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: `Chiuso automaticamente il ${oggiRoma()}: condizione non presente nei dati ${anno}` });
       } else if (visti.has(key)) {
@@ -183,6 +264,8 @@ export default async function(req) {
       record_scansionati: records.length,
       regole_valutate: regole.length,
       alerts_creati: creati,
+      alerts_aggiornati: aggiornati,
+      alerts_da_aggiornare: daAggiornare.length - aggiornati,
       alerts_chiusi: chiusi,
       alerts_da_chiudere: daChiudere.length - chiusi,
       alerts_totali_aperti: existingAlerts.length + creati - chiusi,
@@ -294,8 +377,17 @@ function soloRotte(records, existingKeys, attuali, archivio, modulo, canale = ''
 }
 
 // --- Controlli aggregati per primarie_rete ---
-function checkAggregateRules(records, regole, existingKeys, targets = [], attuali = new Set(), archivio = 'PrimariaRete', modulo = 'primarie_rete', canale = '') {
+function checkAggregateRules(records, regole, existingKeys, targets = [], attuali = new Map(), archivio = 'PrimariaRete', modulo = 'primarie_rete', canale = '') {
   const alerts = [];
+  // Ogni condizione trovata si segna col testo calcolato adesso, anche quando
+  // l'alert c'e' gia' (per riscriverne il testo); si crea solo se la chiave non
+  // e' ne' aperta ne' ignorata.
+  const proponi = (key, alert) => {
+    segna(attuali, key, alert);
+    if (existingKeys.has(key)) return;
+    existingKeys.add(key);
+    alerts.push(alert);
+  };
 
   // Formulari chiusi su una destinazione dove quell'origine non va mai.
   //
@@ -308,9 +400,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
   for (const sospetto of conferimentiSospetti(records, archivio)) {
     const record_id = sospetto.numero_fir || sospetto.id_ordine || '';
     const key = `${record_id}|||${REGOLA_ROTTA}${canale ? '_' + canale : ''}`;
-    attuali.add(key);
-    if (existingKeys.has(key)) continue;
-    alerts.push({
+    proponi(key, {
       titolo: `Conferimento fuori rotta${canale ? ' (' + canale + ')' : ''}: ${sospetto.origine} a ${sospetto.destinazione}`,
       descrizione: `${sospetto.testo} Formulario ${sospetto.numero_fir || '(senza numero)'}`
         + (sospetto.id_ordine ? `, ordine ${sospetto.id_ordine}` : '')
@@ -323,7 +413,6 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
       regola_nome: 'Conferimento fuori rotta',
       stato: 'aperto',
     });
-    existingKeys.add(key);
   }
 
   // Regole province inattive (2 mesi consecutivi a zero)
@@ -333,10 +422,8 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
     for (const prov of matrix.province_with_zeros) {
       for (const regola of regoleProvince) {
         const key = `${prov.provincia}|||${regola.id}`;
-        attuali.add(key);
-        if (existingKeys.has(key)) continue;
         const zeroPair = prov.last_zero_pair;
-        alerts.push({
+        proponi(key, {
           titolo: regola.messaggio_alert || `Provincia inattiva: ${prov.provincia}`,
           descrizione: `Provincia ${prov.provincia} (${prov.regione}): 2 mesi consecutivi con 0 raccolte (${zeroPair?.start} - ${zeroPair?.end}). Pianificare raccolte nel terzo mese per rispettare i requisiti consorziali.`,
           severita: regola.severita || 'warning',
@@ -347,7 +434,6 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
           regola_nome: regola.nome,
           stato: 'aperto',
         });
-        existingKeys.add(key);
       }
     }
   }
@@ -359,12 +445,10 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
     for (const racc of mix.raccoglitori_con_deviazione) {
       for (const regola of regoleMix) {
         const key = `${racc.raccoglitore}|||${regola.id}`;
-        attuali.add(key);
-        if (existingKeys.has(key)) continue;
         const devDetails = racc.deviazioni_significative.map(d =>
           `${d.classe}: ${d.attuale.toFixed(1)}% vs target ${d.target}% (Δ${d.deviazione > 0 ? '+' : ''}${d.deviazione.toFixed(1)}%)`
         ).join('; ');
-        alerts.push({
+        proponi(key, {
           titolo: regola.messaggio_alert || `Mix classi non conforme: ${racc.raccoglitore}`,
           descrizione: `Raccoglitore "${racc.raccoglitore}": deviazione significativa dal mix classi consorziale. ${devDetails}. Totale raccolto: ${formatoTonnellate(racc.totale_peso)} t.`,
           severita: regola.severita || 'warning',
@@ -375,7 +459,6 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
           regola_nome: regola.nome,
           stato: 'aperto',
         });
-        existingKeys.add(key);
       }
     }
   }
@@ -425,9 +508,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
           // Stessa chiave degli alert salvati (record_id|||regola): prima non coincideva
           // e l'alert si ricreava a ogni giro.
           const alertKey = `${racc}|${regione}|${mese}|||${regola.id}`;
-          attuali.add(alertKey);
-          if (existingKeys.has(alertKey)) continue;
-          alerts.push({
+          proponi(alertKey, {
             titolo: regola.messaggio_alert || `Scostamento target grave: ${racc} - ${regione} - ${mese}`,
             descrizione: `Raccoglitore "${racc}" (${regione}, ${mese}): target ${formatoTonnellate(targetVal)} t, raccolto ${formatoTonnellate(raccolto)} t, Δ ${formatoTonnellate(delta)} ton (${pctDelta.toFixed(1)}%). Soglia: ${soglia}%.`,
             severita: regola.severita || 'critico',
@@ -438,7 +519,6 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
             regola_nome: regola.nome,
             stato: 'aperto',
           });
-          existingKeys.add(alertKey);
         }
       }
     }
@@ -446,9 +526,9 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
 
   // Regole ritardo SLA critico (Nr Giorni medio > 12 o % fuori tempo > 20%).
   // I giorni vanno dall'immissione alla fine del trasporto (computeSlaMetrics li
-  // ricalcola, non legge i campi salvati): un alert aperto sulla vecchia misura,
-  // quella fino alla chiusura a portale, si chiude da solo al giro dopo se il
-  // ritiro era in tempo.
+  // ricalcola, non legge i campi salvati). Un alert aperto sulla vecchia misura,
+  // quella fino alla chiusura a portale, si chiude da solo se il trasportatore
+  // non e' piu' critico, e se lo e' ancora prende il testo con i giorni nuovi.
   const regoleSla = regole.filter(r => r.tipo_regola === 'ritardo_sla');
   if (regoleSla.length > 0) {
     const sla = computeSlaMetrics(records);
@@ -456,11 +536,9 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
       if (t.has_sla_critical) {
         for (const regola of regoleSla) {
           const key = `${t.trasportatore}|||${regola.id}`;
-          attuali.add(key);
-          if (existingKeys.has(key)) continue;
-          alerts.push({
+          proponi(key, {
             titolo: regola.messaggio_alert || `Ritardo SLA critico: ${t.trasportatore}`,
-            descrizione: `Trasportatore "${t.trasportatore}": Nr Giorni medio ${t.nr_giorni_medio.toFixed(1)} gg dall'immissione alla fine del trasporto, % fuori tempo ${t.pct_dopo_scadenza.toFixed(1)}%. Soglie: > 12 gg medio o > 20% fuori tempo.`,
+            descrizione: `Trasportatore "${t.trasportatore}": Nr Giorni medio ${t.nr_giorni_medio.toFixed(1)} gg ${MISURA_SLA}, % fuori tempo ${t.pct_dopo_scadenza.toFixed(1)}%. Soglie: > 12 gg medio o > 20% fuori tempo.`,
             severita: regola.severita || 'warning',
             modulo: 'primarie_rete',
             entity_type: 'PrimariaRete',
@@ -469,7 +547,6 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
             regola_nome: regola.nome,
             stato: 'aperto',
           });
-          existingKeys.add(key);
         }
       }
     }

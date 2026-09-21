@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
-import { oggiRoma } from "../../shared/giornoItaliano.ts";
+import { oggiRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 
 // Cambia lo stato di un documento di fatturazione:
 // azione: 'verifica' | 'approva' | 'chiudi' | 'riapri'
@@ -72,9 +72,11 @@ export default async function(req) {
 
     if (azione === 'riapri') {
       if (doc.stato === 'elaborata') return Response.json({ stato: 'elaborata' });
-      const quando = new Date().toISOString();
+      // I giorni della nota sono quelli italiani: tagliare l'istante UTC, dopo la
+      // mezzanotte italiana, scriveva il giorno prima.
       const fattura = doc.fattura_confermata_il ? ` Fatturazione confermata il ${doc.fattura_confermata_il}${doc.fattura_numero ? `, fattura ${doc.fattura_numero}` : ''}.` : '';
-      const traccia = `Riaperto il ${quando.slice(0, 10)} da ${user.full_name || user.email}: era "${doc.stato}"${doc.data_chiusura ? ` dal ${String(doc.data_chiusura).slice(0, 10)}` : ''}.${fattura}`;
+      const chiusoIl = doc.data_chiusura ? giornoRoma(doc.data_chiusura) : null;
+      const traccia = `Riaperto il ${oggiRoma()} da ${user.full_name || user.email}: era "${doc.stato}"${chiusoIl ? ` dal ${chiusoIl}` : ''}.${fattura}`;
       await base44.asServiceRole.entities.DocumentoFatturazione.update(documento_id, {
         stato: 'elaborata', data_chiusura: null, data_approvazione: null, data_verifica: null,
         // la conferma valeva per il documento chiuso: resta scritta nella nota qui sotto

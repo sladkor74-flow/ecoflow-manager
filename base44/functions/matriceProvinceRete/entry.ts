@@ -13,7 +13,7 @@ import { eTerminato, periodoMovimento } from "../../shared/movimenti.ts";
 // misura tutto il resto; si contano i soli ordini terminati e il peso e' quello
 // effettivo, mai lo stimato.
 //
-// Payload: { anno }   Risposta: { anno, anni, mesi, righe, totali }
+// Payload: { anno }   Risposta: { anno, anni, mesi, righe, totali, senza_fine_trasporto, senza_provincia }
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -38,12 +38,18 @@ export default async function(req) {
     const anno = Number(body.anno) || Math.max(...anni, Number(oggiRoma().slice(0, 4)));
 
     const province = new Map();
+    // Chi resta fuori dalla matrice si conta, invece di sparire: un terminato
+    // senza fine trasporto non ha un mese (non si ripiega su chiusura o
+    // immissione), un ritiro senza provincia non ha una riga.
+    let senzaFineTrasporto = 0;
+    const senzaProvincia = { ritiri: 0, kg: 0 };
     for (const r of record) {
       if (!eTerminato(r)) continue;
       const p = periodoMovimento(r);
-      if (!p || p.anno !== anno) continue;
+      if (!p) { senzaFineTrasporto++; continue; }
+      if (p.anno !== anno) continue;
       const sigla = String(r.provincia || r.sigla || '').toUpperCase().trim();
-      if (!sigla) continue;
+      if (!sigla) { senzaProvincia.ritiri++; senzaProvincia.kg += Math.round(Number(r.peso_effettivo) || 0); continue; }
       if (!province.has(sigla)) {
         province.set(sigla, { provincia: sigla, regione: String(r.regione || '').trim(), kg: MESI.map(() => 0), ritiri: MESI.map(() => 0) });
       }
@@ -64,7 +70,8 @@ export default async function(req) {
       ritiri_totale: righe.reduce((t, r) => t + r.ritiri_totale, 0),
     };
 
-    return Response.json({ anno, anni: [...anni].sort((a, b) => b - a), mesi: MESI, righe, totali });
+    // senza_fine_trasporto: terminati di rete di qualunque anno, esclusi da ogni mese
+    return Response.json({ anno, anni: [...anni].sort((a, b) => b - a), mesi: MESI, righe, totali, senza_fine_trasporto: senzaFineTrasporto, senza_provincia: senzaProvincia });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

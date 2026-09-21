@@ -29,28 +29,47 @@ const COLUMNS = [
 // Le date si mostrano come giorno italiano, 'GG/MM/AAAA'.
 const dataIt = (v) => { const g = giornoRoma(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
 
+// Le segnalazioni della colonna Tempi, in ambra: un terminato che non si puo'
+// misurare lo dice, invece di restare vuoto come un ordine ancora aperto.
 const SENZA_FINE = 'MANCA FINE TRASPORTO';
+const SENZA_IMMISSIONE = 'MANCA IMMISSIONE';
+const DATE_INCOERENTI = 'DATE INCOERENTI';
+const SEGNALAZIONI = new Set([SENZA_FINE, SENZA_IMMISSIONE, DATE_INCOERENTI]);
+
+function esitoTempi(r, tempi, fine) {
+  if (tempi && tempi.esito) return tempi.esito;
+  // una fine trasporto prima dell'immissione e' un dato sporco, non un ritiro in anticipo
+  if (tempi && tempi.incoerente) return DATE_INCOERENTI;
+  if (!eTerminato(r)) return null;
+  if (!fine) return SENZA_FINE;
+  return tempi ? null : SENZA_IMMISSIONE;
+}
 
 export default function PrimarieReteTable({ records, loading }) {
   // Mese, giorni e tempi si ricalcolano dalla fine del trasporto (movimenti.js)
   // invece di leggere i campi salvati: nr_giorni e raccolta_nei_tempi venivano
   // dalla chiusura a portale, e un archivio caricato prima della correzione li
-  // porta ancora. Un terminato senza fine trasporto non si misura e si segnala.
+  // porta ancora. Un terminato senza fine trasporto non si misura e si segnala,
+  // e non ha nemmeno un mese: giornoOrdine e meseOrdine ripiegherebbero
+  // sull'immissione, e la colonna Mese direbbe il mese dell'ordine mentre la
+  // colonna Tempi dice che il ritiro non ha una data.
   const righe = useMemo(() => records.map((r) => {
     const tempi = tempiRaccolta(r);
     const fine = giornoMovimento(r);
+    const senzaPeriodo = eTerminato(r) && !fine;
     return {
       ...r,
-      giorno_ordine: giornoOrdine(r) || null,
+      giorno_ordine: senzaPeriodo ? null : giornoOrdine(r) || null,
       fine_trasporto: fine || null,
-      mese: meseOrdine(r),
+      mese: senzaPeriodo ? null : meseOrdine(r),
       nr_giorni: tempi && tempi.giorni != null ? tempi.giorni : null,
-      raccolta_nei_tempi: tempi && tempi.esito ? tempi.esito : (eTerminato(r) && !fine ? SENZA_FINE : null),
+      raccolta_nei_tempi: esitoTempi(r, tempi, fine),
     };
   }), [records]);
-  // I 500 mostrati sono gli ultimi per fine trasporto (l'immissione per chi non
-  // l'ha): ordinati per chiusura, un ritiro di ieri non ancora chiuso a portale
-  // finiva in fondo e poteva non comparire.
+  // I 500 mostrati sono gli ultimi per fine trasporto (l'immissione per un ordine
+  // non terminato): ordinati per chiusura, un ritiro di ieri non ancora chiuso a
+  // portale finiva in fondo e poteva non comparire. I terminati senza fine
+  // trasporto non hanno giorno e nell'ordine decrescente stanno in cima.
   const sorted = useTableSort(righe, 'giorno_ordine', 'desc');
 
   if (loading) {
@@ -82,7 +101,7 @@ export default function PrimarieReteTable({ records, loading }) {
                 return (
                   <td
                     key={col.key}
-                    className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''} ${isTempi && val === 'DOPO SCADENZA' ? 'text-red-600 font-medium' : ''} ${isTempi && val === 'OK' ? 'text-green-600 font-medium' : ''} ${isTempi && val === SENZA_FINE ? 'text-amber-600 font-medium' : ''}`}
+                    className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''} ${isTempi && val === 'DOPO SCADENZA' ? 'text-red-600 font-medium' : ''} ${isTempi && val === 'OK' ? 'text-green-600 font-medium' : ''} ${isTempi && SEGNALAZIONI.has(val) ? 'text-amber-600 font-medium' : ''}`}
                   >
                     {val ?? ''}
                   </td>
@@ -92,7 +111,7 @@ export default function PrimarieReteTable({ records, loading }) {
           ))}
         </tbody>
       </table>
-      {sorted.sorted.length > 500 && <p className="text-xs text-muted-foreground p-2">Mostrati primi 500 di {formatNumber(sorted.sorted.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} record{sorted.sortKey === 'giorno_ordine' ? ', i più recenti per fine trasporto (per chi non l\'ha, per immissione)' : ''}.</p>}
+      {sorted.sorted.length > 500 && <p className="text-xs text-muted-foreground p-2">Mostrati primi 500 di {formatNumber(sorted.sorted.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} record{sorted.sortKey === 'giorno_ordine' && sorted.sortDir === 'desc' ? ', i più recenti per fine trasporto (per un ordine non terminato, per immissione; i terminati senza fine trasporto in cima)' : ''}.</p>}
     </div>
   );
 }

@@ -4,12 +4,48 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Download, RefreshCw, Trash2, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, FileText } from 'lucide-react';
-import { dataIt, tonnellate, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_ESITO, rigaReport, descriviLettura, sintesiVerifica, gravita, ordineRiga } from '@/lib/verifiche';
+import { dataIt, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_ESITO, rigaReport, descriviLettura, sintesiVerifica, gravita, ordineRiga } from '@/lib/verifiche';
 import { esportaEsitoVerificaPdf } from '@/lib/esitoVerificaPdf';
-import { formatKg, formatIntero } from '@/lib/utils';
+import { formatKg, formatIntero, dataServer } from '@/lib/utils';
 import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
 
-const NOME_TIPO = { ingresso: 'Ingressi', uscita: 'Uscite', totale: 'Totale' };
+// Formulari, chili ed esiti si mostrano per movimentazione e canale: rete, ACI
+// ed extra raccolta non si sommano mai, nemmeno in una riga di totale o in una
+// tessera di "ingressi nel gestionale".
+const NOME_TIPO = { ingresso: 'Ingressi', uscita: 'Uscite' };
+const NOME_CANALE = { rete: 'Rete', aci: 'ACI', extra: 'Extra raccolta', non_registrati: 'Non registrati per l\'impianto' };
+const ORDINE_CANALI = ['rete', 'aci', 'extra', 'non_registrati'];
+
+// Il canale di una riga del report e' quello della movimentazione a cui e'
+// abbinata; le righe che il gestionale non registra per l'impianto non ne hanno.
+function canaleRiga(e) {
+  const parti = String(e.categoria || '').split('-');
+  if (parti.length === 3) return parti[2];
+  if (e.categoria === 'non_registrati' || !e.tipo || !e.gestionale) return 'non_registrati';
+  return e.gestionale.canale || 'non_registrati';
+}
+
+/** Righe del report, conformi e da sistemare, canale per canale. */
+function esitiPerCanale(esito) {
+  return ORDINE_CANALI.map(canale => {
+    const righe = (esito.esiti || []).filter(e => canaleRiga(e) === canale);
+    const assenti = (esito.assenti || []).filter(a => (a.canale || 'rete') === canale);
+    if (!righe.length && !assenti.length) return null;
+    const anomala = (e) => (e.anomalia !== undefined ? !!e.anomalia : e.esito !== 'conforme');
+    return {
+      canale,
+      righe: righe.length,
+      conformi: righe.filter(e => e.esito === 'conforme').length,
+      da_sistemare: righe.filter(anomala).length + assenti.length,
+      assenti: assenti.length,
+    };
+  }).filter(Boolean);
+}
+
+/** "Ingressi primaria · rete, 3 formulari per 12.340 kg; ..." dalle righe della quadratura. */
+const descriviRegistrati = (righe) => righe
+  .map(q => `${q.nome}, ${formatIntero(q.formulari_gestionale)} ${q.formulari_gestionale === 1 ? 'formulario' : 'formulari'} per ${formatKg(q.kg_gestionale)} kg`)
+  .join('; ');
 const STILE_GRAVITA = { osservazione: 'text-sky-700', rettifica: 'text-slate-500' };
 const ETICHETTA_GRAVITA = { osservazione: 'osservazione', rettifica: 'rettifica a nostra cura' };
 const differenza = (n, kg) => (n === 0 ? '0' : `${n > 0 ? '+' : '-'}${kg ? formatKg(Math.abs(n)) : formatIntero(Math.abs(n))}`);
@@ -68,6 +104,10 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
   const lettura = v && v.lettura_json ? JSON.parse(v.lettura_json) : {};
   const daSistemare = esito.esiti.filter(e => e.esito !== 'conforme');
   const conformi = esito.esiti.filter(e => e.esito === 'conforme');
+  const perCanale = sintesi ? esitiPerCanale(esito) : [];
+  // Movimentazioni con formulari registrati nella settimana, e fra queste le uscite.
+  const registrate = sintesi ? sintesi.categorie.filter(q => q.chiave !== 'non_registrati' && q.formulari_gestionale > 0) : [];
+  const usciteRegistrate = registrate.filter(q => q.tipo === 'uscita');
 
   const riesegui = async () => {
     setLavorando('riesegui');
@@ -129,7 +169,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
               <SheetDescription>
                 Settimana {v.settimana} · dal {dataIt(v.data_inizio)} al {dataIt(v.data_fine)} · {v.file_nome}
                 <br />
-                {v.verificata_il ? `Verificato il ${new Date(v.verificata_il).toLocaleString('it-IT')}` : ''}
+                {v.verificata_il ? `Verificato il ${dataServer(v.verificata_il).toLocaleString('it-IT', { timeZone: 'Europe/Rome' })}` : ''}
                 {v.scade_il ? ` · si cancella il ${dataIt(v.scade_il)}` : ''}
               </SheetDescription>
             </SheetHeader>
@@ -179,14 +219,30 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                 )}
 
                 {sintesi && (
-                  <div className={`rounded-lg border px-4 py-3 ${sintesi.conformita === 'piena' ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
-                    <div className={`flex items-center gap-2 font-semibold ${sintesi.conformita === 'piena' ? 'text-emerald-800' : 'text-amber-800'}`}>
-                      {sintesi.conformita === 'piena' ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
-                      {sintesi.conformita === 'piena' ? 'Conformità piena' : 'Conformità parziale'}
+                  <div className={`rounded-lg border px-4 py-3 ${sintesi.piena ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                    <div className={`flex items-center gap-2 font-semibold ${sintesi.piena ? 'text-emerald-800' : 'text-amber-800'}`}>
+                      {sintesi.piena ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+                      {sintesi.dichiarazione || !sintesi.perCanale.length
+                        ? (sintesi.piena ? 'Conformità piena' : 'Conformità parziale')
+                        : sintesi.piena ? (sintesi.perCanale.length > 1 ? 'Conformità piena in ogni canale' : `Conformità piena · ${sintesi.perCanale[0].nome}`) : 'Esito per canale'}
                     </div>
+                    {!sintesi.dichiarazione && sintesi.perCanale.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {sintesi.perCanale.map(c => (
+                          <span key={c.canale} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs ${c.conformita === 'piena' ? 'border-emerald-300 bg-white text-emerald-800' : 'border-amber-300 bg-white text-amber-900 font-medium'}`}>
+                            {c.conformita === 'piena' ? <CheckCircle2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                            {c.nome}: {c.conformita === 'piena' ? 'conformità piena' : `parziale, ${c.anomalie} ${c.anomalie === 1 ? 'anomalia' : 'anomalie'}${c.assenti ? ` (${c.assenti} formulari mancanti nel report)` : ''}`}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <div className="text-sm mt-1 text-slate-700">
-                      {sintesi.conformita === 'piena'
+                      {sintesi.piena
                         ? 'Stessi formulari, stessi pesi effettivi e stesse date di fine trasporto dei formulari registrati.'
+                        : !sintesi.dichiarazione && sintesi.perCanale.length
+                          ? (sintesi.inPiu.length
+                            ? `${sintesi.inPiu.length} ${sintesi.inPiu.length === 1 ? 'formulario del report non registrato' : 'formulari del report non registrati'}: il gestionale non li conosce, quindi non hanno canale.`
+                            : 'Le anomalie di ciascun canale sono elencate qui sotto.')
                         : `${sintesi.numeroAnomalie} ${sintesi.numeroAnomalie === 1 ? 'anomalia' : 'anomalie'}: ${[
                           sintesi.anomalie.length ? `${new Set(sintesi.anomalie.map(a => a.esito)).size} righe con errori o sviste` : '',
                           sintesi.mancanti.length ? `${sintesi.mancanti.length} formulari mancanti nel report` : '',
@@ -213,11 +269,14 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                           </tr>
                         </thead>
                         <tbody>
-                          {[...sintesi.quadratura, sintesi.totale].map(q => {
+                          {sintesi.quadratura.length === 0 && (
+                            <tr className="border-t"><td colSpan={7} className="px-3 py-2 text-muted-foreground">Nessuna movimentazione nel report né fra i formulari registrati.</td></tr>
+                          )}
+                          {sintesi.quadratura.map(q => {
                             const dF = q.formulari_report - q.formulari_gestionale;
                             const dK = q.kg_report - q.kg_gestionale;
                             return (
-                              <tr key={q.chiave || q.tipo} className={`border-t tabular-nums ${q.tipo === 'totale' ? 'font-semibold bg-muted/30' : ''}`}>
+                              <tr key={q.chiave || q.tipo} className="border-t tabular-nums">
                                 <td className="px-3 py-2">{q.nome || NOME_TIPO[q.tipo]}</td>
                                 <td className="px-3 py-2 text-right">{formatIntero(q.formulari_report)}</td>
                                 <td className="px-3 py-2 text-right">{formatIntero(q.formulari_gestionale)}</td>
@@ -234,21 +293,22 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                   </section>
                 )}
 
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                  <Tessera etichetta="Righe verificate" valore={v.righe_report || 0}
-                    dettaglio={`${tonnellate(v.peso_report_kg)} t${v.righe_escluse ? ` · altre ${v.righe_escluse} non considerate` : ''}`} />
-                  <Tessera etichetta="Ingressi nel gestionale" valore={v.ingressi_gestionale || 0} dettaglio={`${tonnellate(v.peso_ingressi_kg)} t`} />
-                  <Tessera etichetta="Uscite nel gestionale" valore={v.uscite_gestionale || 0}
-                    dettaglio={`${tonnellate(v.peso_uscite_kg)} t${v.uscite_gestionale && !v.uscite_verificate ? ' · non nel report' : ''}`} />
-                  <Tessera etichetta="Conformi" valore={v.conformi || 0} tono="text-emerald-600" />
-                  <Tessera etichetta="Da sistemare" valore={segnalazioni(v)} tono={segnalazioni(v) ? 'text-red-600' : 'text-emerald-600'}
-                    dettaglio={segnalazioni(v) ? [
-                      v.con_discrepanze ? `${v.con_discrepanze} con discrepanze` : '',
-                      v.non_trovate ? `${v.non_trovate} non trovate` : '',
-                      v.duplicate ? `${v.duplicate} duplicate` : '',
-                      v.assenti_nel_report ? `${v.assenti_nel_report} assenti` : '',
-                    ].filter(Boolean).join(', ') : 'nessuna'} />
-                </div>
+                {/* Una tessera per canale: righe del report, conformi e da sistemare
+                    (compresi i registrati assenti nel report). Le righe che il
+                    gestionale non registra per l'impianto hanno la loro, perche' un
+                    canale non ce l'hanno. */}
+                {perCanale.length > 0 && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {perCanale.map(c => (
+                      <Tessera key={c.canale} etichetta={`${NOME_CANALE[c.canale] || c.canale} · da sistemare`} valore={c.da_sistemare}
+                        tono={c.da_sistemare ? 'text-red-600' : 'text-emerald-600'}
+                        dettaglio={[
+                          `${c.righe} ${c.righe === 1 ? 'riga' : 'righe'} del report, ${c.conformi} ${c.conformi === 1 ? 'conforme' : 'conformi'}`,
+                          c.assenti ? `${c.assenti} ${c.assenti === 1 ? 'registrato assente' : 'registrati assenti'} nel report` : '',
+                        ].filter(Boolean).join(' · ')} />
+                    ))}
+                  </div>
+                )}
 
                 {lettura.modo === 'dichiarazione' && (
                   <div className={`flex items-start gap-2 text-sm rounded-lg px-3 py-2 border ${v.conformita === 'piena' ? 'text-emerald-900 border-emerald-200 bg-emerald-50' : 'text-red-900 border-red-200 bg-red-50'}`}>
@@ -257,15 +317,15 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                       L'impianto ha comunicato che nella settimana non ci sono state movimentazioni{v.nota ? ` (${v.nota})` : ''}.{' '}
                       {v.conformita === 'piena'
                         ? 'Nel gestionale non risultano formulari: la comunicazione è confermata.'
-                        : `Nel gestionale risultano ${sintesi ? sintesi.totale.formulari_gestionale : ''} formulari: la comunicazione è smentita ed è stato aperto un alert.`}
+                        : `Nel gestionale risultano formulari registrati${registrate.length ? `: ${descriviRegistrati(registrate)}` : ''}. La comunicazione è smentita ed è stato aperto un alert.`}
                     </span>
                   </div>
                 )}
 
-                {!!v.uscite_gestionale && !v.uscite_verificate && lettura.modo !== 'dichiarazione' && (
+                {usciteRegistrate.length > 0 && !v.uscite_verificate && lettura.modo !== 'dichiarazione' && (
                   <div className="flex items-start gap-2 text-sm text-red-900 border border-red-200 bg-red-50 rounded-lg px-3 py-2">
                     <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                    <span>Il report non contiene uscite: le {v.uscite_gestionale} secondarie partite nella settimana ({tonnellate(v.peso_uscite_kg)} t) mancano nel report.</span>
+                    <span>Il report non contiene uscite, e le secondarie partite nella settimana mancano nel report: {descriviRegistrati(usciteRegistrate)}.</span>
                   </div>
                 )}
 
@@ -294,7 +354,6 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                             <span className="text-muted-foreground first-letter:uppercase inline-block">{rigaReport(e)}{e.tipo ? ` · ${e.tipo === 'uscita' ? 'uscita' : 'ingresso'}` : ''}</span>
                             <span className="font-mono ml-2">{(e.report && e.report.fir) || 'senza formulario'}</span>
                             {ordineRiga(e) ? <span className="text-muted-foreground"> · ordine <span className="font-mono">{ordineRiga(e)}</span></span> : null}
-                            {ordineRiga(e) && <span className="text-muted-foreground"> · ordine <span className="font-mono">{ordineRiga(e)}</span></span>}
                             {e.report && e.report.kg != null && <span className="text-muted-foreground"> · {formatKg(Number(e.report.kg))} kg</span>}
                           </div>
                           <span className={`px-2 py-0.5 rounded-full border text-xs font-medium ${STILE_ESITO[e.esito]}`}>{ETICHETTE_ESITO[e.esito]}</span>

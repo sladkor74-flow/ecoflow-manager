@@ -1,6 +1,8 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { caricaMovimenti, soggettiDellaSettimana, oggiRoma, statoCaricamenti } from "../../shared/reportSettimanali.ts";
+import {
+  caricaMovimenti, soggettiDellaSettimana, oggiRoma, statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento, senzaFinePerCanale,
+} from "../../shared/reportSettimanali.ts";
 import { eliminaCampo } from "../../shared/testoLungo.ts";
 import { ricontrollaVerifiche } from "../../shared/esitoVerifica.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
@@ -62,7 +64,13 @@ export default async function(req) {
       }
     }
 
-    const [dati, caricamenti] = await Promise.all([caricaMovimenti(base44), statoCaricamenti(base44)]);
+    // Lo stato dei caricamenti si legge prima e dopo gli archivi: letto insieme
+    // agli archivi, un caricamento partito mentre li si leggeva non si vedeva, e
+    // gli esiti si riscrivevano su un archivio a meta'.
+    const primaDegliArchivi = await statoCaricamenti(base44);
+    const dati = await caricaMovimenti(base44);
+    const durante = caricamentiDuranteLettura(primaDegliArchivi, await statoCaricamenti(base44))
+      .map(a => ({ ...a, descrizione: descriviCaricamento(a) }));
     const { inizio, fine, righe } = soggettiDellaSettimana(dati, anno, settimana);
 
     const dellaSettimana = tutte
@@ -85,8 +93,8 @@ export default async function(req) {
 
     // Ogni verifica completata si riconfronta con i movimenti di adesso: report
     // veri e dichiarazioni di nessuna movimentazione.
-    const ricalcolo = { rinviato: caricamenti.in_corso, aggiornate: 0, solo_a_video: 0, errori: [] };
-    if (!caricamenti.in_corso.length) {
+    const ricalcolo = { rinviato: durante, aggiornate: 0, solo_a_video: 0, errori: [] };
+    if (!durante.length) {
       const esiti = await ricontrollaVerifiche(base44, [...perChiave.values()], dati.movimenti, { scrivi: puoScrivere });
       for (const r of esiti) {
         if (r.errore) { ricalcolo.errori.push({ soggetto_chiave: r.soggetto_chiave, errore: r.errore }); continue; }
@@ -107,7 +115,12 @@ export default async function(req) {
       elenco.push({ chiave: v.soggetto_chiave, nome: v.soggetto_nome, ruoli: [], canali: [], movimentato: false, verifica: riepilogo(v) });
     }
 
-    return Response.json({ anno, settimana, inizio, fine, oggi, soggetti: elenco, cancellate, ricalcolo });
+    // I terminati senza fine trasporto non stanno in nessuna settimana: si dicono
+    // per canale, cosi' un loro formulario "non presente" nel report si spiega.
+    return Response.json({
+      anno, settimana, inizio, fine, oggi, soggetti: elenco, cancellate, ricalcolo,
+      senza_fine: senzaFinePerCanale(dati.senza_fine),
+    });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });
   }

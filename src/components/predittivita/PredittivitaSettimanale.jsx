@@ -56,22 +56,28 @@ export default function PredittivitaSettimanale({ data, onReload }) {
 
   const settimane = data.settimane || [];
   const impianti = data.impianti;
+  // Il viaggio medio lo dice la funzione (13,5 t): qui era scritto 14.000 kg, e
+  // i viaggi di una cella modificata a mano non tornavano con quelli calcolati.
+  const kgViaggio = Number(data.kg_per_viaggio) || 13500;
+  const soglia = kgViaggio;
 
-  const saveCell = async (week, field, value) => {
+  // Si fissa a mano solo il PREV. L'EXEC e' quello che e' arrivato davvero, e lo
+  // ricalcola ogni caricamento dalle secondarie e primarie di rete: modificarlo
+  // a mano durava fino alla prossima apertura della pagina, e intanto segnava la
+  // settimana come modificata a mano, congelandone il PREV senza volerlo.
+  const saveCell = async (week, value) => {
     if (!week.record_id) return;
-    const patch = { modificato_manuale: true };
-    patch[field] = value;
-    if (field === 'kg_previsti') patch.viaggi_previsti = Math.ceil(value / 14000);
-    if (field === 'kg_effettivi') patch.viaggi_effettivi = value > 0 ? Math.ceil(value / 14000) : 0;
-    await base44.entities.PianificazioneSettimanale.update(week.record_id, patch);
+    await base44.entities.PianificazioneSettimanale.update(week.record_id, {
+      modificato_manuale: true, kg_previsti: value, viaggi_previsti: Math.ceil(value / kgViaggio),
+    });
     if (onReload) onReload();
   };
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h2 className="font-heading font-semibold">Pianificazione Settimanale per Fornitore</h2>
-        <p className="text-xs text-muted-foreground">Click su una cella PREV per override manuale. Settimane con EXEC reale congelate.</p>
+        <h2 className="font-heading font-semibold">Pianificazione Settimanale per Fornitore · solo rete</h2>
+        <p className="text-xs text-muted-foreground">Click su una cella PREV per fissarla a mano. EXEC è l&apos;arrivato di rete, ricalcolato a ogni caricamento: le settimane con un EXEC sono congelate.</p>
       </div>
       <div className="border rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
@@ -114,11 +120,11 @@ export default function PredittivitaSettimanale({ data, onReload }) {
                       {settimane.map((s, i) => {
                         const w = f.piano_settimanale?.[i];
                         if (!w) return <React.Fragment key={i}><td /><td /><td /></React.Fragment>;
-                        const deltaColor = w.delta > 14000 ? 'text-amber-600' : w.delta < -14000 ? 'text-red-600' : 'text-green-600';
+                        const deltaColor = w.delta > soglia ? 'text-amber-600' : w.delta < -soglia ? 'text-red-600' : 'text-green-600';
                         return (
                           <React.Fragment key={i}>
-                            <EditableCell value={w.prev} onSave={(v) => saveCell(w, 'kg_previsti', v)} disabled={w.congelata} />
-                            <EditableCell value={w.exec} onSave={(v) => saveCell(w, 'kg_effettivi', v)} />
+                            <EditableCell value={w.prev} onSave={(v) => saveCell(w, v)} disabled={w.congelata} />
+                            <EditableCell value={w.exec} disabled />
                             <td className={`px-1 py-1.5 text-right text-xs font-medium ${deltaColor}`}>{w.delta > 0 ? '+' : ''}{fmt(w.delta)}</td>
                           </React.Fragment>
                         );

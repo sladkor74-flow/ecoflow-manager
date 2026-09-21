@@ -51,11 +51,11 @@ function Impianto({ p, kgPerViaggio, isAdmin, onIpotesi, occupato }) {
         </div>
         <div className="flex gap-2 flex-wrap text-sm">
           <div className="px-3 py-1.5 rounded-md border bg-muted/30">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Target</div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Target di rete</div>
             <div className="tabular-nums">{t(p.target_kg)} t</div>
           </div>
           <div className="px-3 py-1.5 rounded-md border bg-muted/30">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Già arrivato</div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Già arrivato (rete)</div>
             <div className="tabular-nums">{t(p.conferito_kg)} t</div>
             <div className="text-[11px] text-muted-foreground">primaria {t(p.conferito_primaria_kg)} · secondaria {t(p.conferito_secondaria_kg)}</div>
           </div>
@@ -125,7 +125,7 @@ function Impianto({ p, kgPerViaggio, isAdmin, onIpotesi, occupato }) {
                     <td colSpan={isAdmin ? 7 : 6} className="px-3 py-2">
                       <div className="flex items-end gap-3 flex-wrap text-xs">
                         <label className="space-y-1">
-                          <span className="block text-muted-foreground">Primaria attesa (t)</span>
+                          <span className="block text-muted-foreground">Primaria di rete attesa (t)</span>
                           <input value={primaria} onChange={e => setPrimaria(e.target.value)} placeholder={t(r.primaria_kg)}
                             className="border rounded px-2 py-1 w-28 tabular-nums" />
                         </label>
@@ -151,7 +151,7 @@ function Impianto({ p, kgPerViaggio, isAdmin, onIpotesi, occupato }) {
   );
 }
 
-export default function ProiezioneAnnuale({ isAdmin }) {
+export default function ProiezioneAnnuale({ isAdmin, versione = 0 }) {
   const [dati, setDati] = useState(null);
   const [caricando, setCaricando] = useState(true);
   const [errore, setErrore] = useState(null);
@@ -169,7 +169,9 @@ export default function ProiezioneAnnuale({ isAdmin }) {
     setCaricando(false);
   }, []);
 
-  useEffect(() => { carica(); }, [carica]);
+  // Si ricalcola all'apertura e a ogni caricamento chiuso (versione la fa
+  // crescere la pagina): la proiezione non deve restare a un archivio vecchio.
+  useEffect(() => { carica(); }, [carica, versione]);
 
   // Fissa o libera l'ipotesi di un mese: un valore vuoto torna alla stima.
   const salvaIpotesi = async (impianto, mese, primariaKg, viaggi) => {
@@ -202,9 +204,16 @@ export default function ProiezioneAnnuale({ isAdmin }) {
           direttamente in primaria e i viaggi di secondaria dagli stoccaggi, contati a {dati ? t(dati.kg_per_viaggio) : '13,50'} tonnellate per viaggio.
           Il residuo si trascina di mese in mese: se a fine anno non arriva a zero, il piano non basta e te lo dice.
           L&apos;ultima colonna guarda l&apos;altra metà della questione, cioè se allo stoccaggio ci sarà materiale per fare quei viaggi.
-          Solo rete: le secondarie ACI non consumano il target.
+          Solo rete: ACI ed extra raccolta non entrano nella predittività, né nel target, né nel già arrivato, né nella giacenza
+          degli stoccaggi (classi 1-4 della rilevazione e soli movimenti di rete).
         </span>
       </div>
+
+      {dati && (dati.avvisi_generali || []).map((a, i) => (
+        <div key={i} className="flex items-start gap-2 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-2.5 text-sm">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{a}</span>
+        </div>
+      ))}
 
       {errore && (
         <div className="flex items-start gap-2 border border-red-300 bg-red-50 text-red-800 rounded-lg px-4 py-3 text-sm">
@@ -228,7 +237,7 @@ export default function ProiezioneAnnuale({ isAdmin }) {
             </div>
             <Button variant="outline" size="sm" onClick={carica} disabled={occupato}><RefreshCw className="w-4 h-4 mr-1.5" />Ricalcola</Button>
           </div>
-          <p className="text-xs text-muted-foreground -mt-2">Viaggi di secondaria che servono ogni mese, su tutti gli impianti.</p>
+          <p className="text-xs text-muted-foreground -mt-2">Viaggi di secondaria di rete che servono ogni mese, su tutti gli impianti.</p>
 
           {dati.impianti.length === 0 && (
             <div className="border rounded-lg bg-card p-6 text-center text-sm text-muted-foreground">

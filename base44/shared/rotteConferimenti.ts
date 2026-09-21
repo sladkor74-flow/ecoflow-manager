@@ -38,6 +38,7 @@
 
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
+import { eAci } from "./canaleSecondaria.ts";
 
 export const QUOTA_SOSPETTA = 0.05;
 export const VIAGGI_SOSPETTI = 5;
@@ -203,12 +204,19 @@ export function tariffeDaVerificare(righe, archivio, tariffe, tipologia) {
  * Quanto ciascun impianto riceve in secondaria da un dato stoccaggio, in quota.
  * Serve a dividere fra gli impianti quello che allo stoccaggio appartiene una
  * volta sola: il suo target di raccolta.
+ *
+ * Il target esiste solo per la rete, e allora anche le quote si misurano sulle
+ * sole secondarie di rete: una secondaria ACI verso uno dei due impianti
+ * sposterebbe la divisione di un target che l'ACI non ha. Si scarta qui, oltre
+ * che in chi chiama (la predittivita' e il controllo delle rotte), cosi' la
+ * regola non dipende da chi si ricorda di filtrare.
  */
 export function quoteDaStoccaggio(secondarie, stoccaggio) {
   const k = normalizzaRagioneSociale(stoccaggio);
   const per = new Map();
   let totale = 0;
   for (const r of secondarie || []) {
+    if (eAci(r)) continue;
     if (normalizzaRagioneSociale(r.stoccaggio) !== k) continue;
     const dest = String(r.destinazione || '').trim();
     if (!dest) continue;

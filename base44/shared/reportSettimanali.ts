@@ -87,8 +87,29 @@ export function intervalloSettimana(anno, settimana) {
 // I tipi di file che riscrivono gli archivi letti dalle verifiche.
 export const TIPI_CARICAMENTO_MOVIMENTI = ['primarie', 'primarie_rete', 'primarie_aci', 'secondarie', 'extra_raccolta'];
 
+// Gli archivi che ciascun tipo di caricamento riscrive. "primarie" riscrive
+// insieme le primarie di rete e quelle ACI, che un tempo si caricavano ciascuna
+// col suo tipo: un "primarie_rete" rimasto aperto a marzo non dice piu' niente
+// se dopo le primarie sono state ricaricate per intero. Senza questa tabella quel
+// caricamento storico, che nessuna scheda di Caricamento Dati puo' piu' chiudere,
+// bloccava per sempre ogni riconfronto.
+const ARCHIVI_DEL_TIPO = {
+  primarie: ['PrimariaRete', 'PrimariaAci'],
+  primarie_rete: ['PrimariaRete'],
+  primarie_aci: ['PrimariaAci'],
+  secondarie: ['Secondaria'],
+  extra_raccolta: ['ExtraRaccolta'],
+};
+const archiviDelTipo = (tipo) => ARCHIVI_DEL_TIPO[tipo] || [tipo];
+
+// Oltre questo tempo un caricamento ancora aperto si e' interrotto: la stessa
+// soglia di importaBlocco e di Caricamento Dati.
+const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
+
 // created_date arriva in UTC senza la Z finale: si rimette, poi si prende il giorno italiano.
-const giornoCaricamento = (v) => (v ? giornoRoma(String(v).replace(/(Z|[+-]\d{2}:?\d{2})?$/, 'Z')) : '');
+const conZ = (v) => String(v).replace(/(Z|[+-]\d{2}:?\d{2})?$/, 'Z');
+const giornoCaricamento = (v) => (v ? giornoRoma(conZ(v)) : '');
+const istanteCaricamento = (v) => { const t = v ? new Date(conZ(v)).getTime() : NaN; return isNaN(t) ? 0 : t; };
 
 /**
  * Lo stato dei caricamenti di ogni tipo: l'ultimo riuscito, che spiega un
@@ -96,20 +117,82 @@ const giornoCaricamento = (v) => (v ? giornoRoma(String(v).replace(/(Z|[+-]\d{2}
  * tipo e' ancora "in_corso". Un archivio che si sta riscrivendo (o che e' rimasto
  * a meta' per un caricamento interrotto) non e' una base su cui rifare un
  * confronto: l'esito verrebbe calcolato su un archivio a meta'.
+ *
+ * Un caricamento aperto non conta piu' quando dopo di lui un caricamento riuscito
+ * ha riscritto tutti i suoi archivi. Uno aperto da oltre dieci minuti e'
+ * interrotto: blocca lo stesso, perche' l'archivio puo' essere a meta', e chi lo
+ * mostra dice che va ripetuto.
+ *
+ * Di ogni caricamento si tiene l'id: confrontando due letture si capisce se
+ * nel frattempo ne e' finito un altro (caricamentiDuranteLettura).
  */
 export async function statoCaricamenti(base44, tipi = TIPI_CARICAMENTO_MOVIMENTI) {
   const Log = base44.asServiceRole.entities.UploadLog;
+  // Si leggono anche i tipi che riscrivono gli stessi archivi di quelli chiesti:
+  // servono a capire se un caricamento rimasto aperto e' stato superato.
+  const archivi = new Set(tipi.flatMap(archiviDelTipo));
+  const daLeggere = [...new Set([...tipi, ...Object.keys(ARCHIVI_DEL_TIPO).filter(t => archiviDelTipo(t).some(a => archivi.has(a)))])];
+  const letti = await Promise.all(daLeggere.map(async (tipo) => {
+    const righe = (await Log.filter({ tipo_file: tipo }, '-created_date', 5)) || [];
+    return {
+      tipo,
+      buono: righe.find(r => r.esito !== 'errore' && r.esito !== 'in_corso') || null,
+      aperto: righe[0] && righe[0].esito === 'in_corso' ? righe[0] : null,
+    };
+  }));
+  const riscritto = (archivio, dopo) => letti.some(({ tipo, buono }) => buono
+    && istanteCaricamento(buono.created_date) > dopo && archiviDelTipo(tipo).includes(archivio));
+  const adesso = Date.now();
+  // creato_il e' l'istante, con la Z: serve a dire se un esito salvato e'
+  // successivo all'ultimo caricamento o se lo precede ed e' da rifare.
+  const scheda = (r, tipo) => ({
+    id: r.id || null,
+    tipo_file: tipo,
+    data: giornoCaricamento(r.created_date),
+    creato_il: istanteCaricamento(r.created_date) ? new Date(istanteCaricamento(r.created_date)).toISOString() : '',
+    nome_file: String(r.nome_file || '').trim(),
+    utente: r.utente || '',
+  });
+
   const ultimi = {};
   const inCorso = [];
-  await Promise.all(tipi.map(async (tipo) => {
-    const righe = (await Log.filter({ tipo_file: tipo }, '-created_date', 5)) || [];
-    const buono = righe.find(r => r.esito !== 'errore' && r.esito !== 'in_corso');
-    if (buono) ultimi[tipo] = { data: giornoCaricamento(buono.created_date), nome_file: String(buono.nome_file || '').trim() };
-    const aperto = righe[0] && righe[0].esito === 'in_corso' ? righe[0] : null;
-    if (aperto) inCorso.push({ tipo_file: tipo, data: giornoCaricamento(aperto.created_date), nome_file: String(aperto.nome_file || '').trim(), utente: aperto.utente || '' });
-  }));
+  for (const { tipo, buono, aperto } of letti) {
+    if (!tipi.includes(tipo)) continue;
+    if (buono) ultimi[tipo] = scheda(buono, tipo);
+    if (!aperto) continue;
+    const inizio = istanteCaricamento(aperto.created_date);
+    if (archiviDelTipo(tipo).every(a => riscritto(a, inizio))) continue;
+    inCorso.push({ ...scheda(aperto, tipo), interrotto: adesso - inizio > FINESTRA_IN_CORSO_MS });
+  }
   inCorso.sort((a, b) => a.tipo_file.localeCompare(b.tipo_file));
   return { ultimi, in_corso: inCorso };
+}
+
+/**
+ * I caricamenti che rendono inaffidabile una lettura degli archivi fatta fra due
+ * letture dello stato: quelli aperti in una delle due, e quelli conclusi nel
+ * frattempo (l'ultimo riuscito di un tipo e' cambiato). Lo stato letto prima e
+ * gli archivi letti dopo non bastano: un caricamento che parte mentre si leggono
+ * gli archivi non si vedrebbe, e gli esiti si riscriverebbero su un archivio a
+ * meta'. Vuoto se la lettura e' buona.
+ */
+export function caricamentiDuranteLettura(prima, dopo) {
+  const out = new Map();
+  for (const a of [...(prima.in_corso || []), ...(dopo.in_corso || [])]) if (!out.has(a.tipo_file)) out.set(a.tipo_file, a);
+  for (const [tipo, u] of Object.entries(dopo.ultimi || {})) {
+    const p = (prima.ultimi || {})[tipo];
+    if ((!p || p.id !== u.id) && !out.has(tipo)) out.set(tipo, { ...u, concluso_durante_la_lettura: true });
+  }
+  return [...out.values()].sort((a, b) => a.tipo_file.localeCompare(b.tipo_file));
+}
+
+/** "primarie del 21/09/2026 (Mario Rossi, file.xlsx): risulta interrotto, ..." per i messaggi a video. */
+export function descriviCaricamento(a) {
+  const chi = [a.utente, a.nome_file].filter(Boolean).join(', ');
+  const cosa = `${String(a.tipo_file || '').replace(/_/g, ' ')}${a.data ? ` del ${it(a.data)}` : ''}${chi ? ` (${chi})` : ''}`;
+  if (a.concluso_durante_la_lettura) return `${cosa}: si è concluso mentre si leggevano gli archivi`;
+  if (a.interrotto) return `${cosa}: risulta interrotto, l'archivio può essere incompleto e il caricamento va ripetuto`;
+  return `${cosa}: non ancora concluso`;
 }
 
 // Data scritta in un report: seriale Excel, gg/mm/aaaa con o senza ora,
@@ -287,6 +370,25 @@ export const CATEGORIE_MOVIMENTO = [
   { chiave: 'secondaria-uscita-extra', tipo: 'uscita', nome: 'Uscite secondaria · extra raccolta' },
 ];
 
+// Il verdetto di una verifica, un canale per volta (regola 3): una riga ACI
+// sbagliata non rende "parziale" la rete dell'impianto. Per ogni canale con
+// almeno un formulario, nel report o registrato: piena se le sue movimentazioni
+// quadrano e non ha anomalie ne' formulari mancanti. I formulari del report che
+// il gestionale non conosce non hanno canale e si contano a parte.
+export const CANALI_DEL_VERDETTO = [['rete', 'Rete'], ['aci', 'ACI'], ['extra', 'Extra raccolta']];
+export function conformitaPerCanale(esito) {
+  const canaleDi = (k) => String(k || '').split('-')[2] || '';
+  return CANALI_DEL_VERDETTO.map(([canale, nome]) => {
+    const quadratura = (esito.quadratura || []).filter(q => canaleDi(q.chiave) === canale);
+    const righe = (esito.esiti || []).filter(e => canaleDi(e.categoria) === canale);
+    const assenti = (esito.assenti || []).filter(a => canaleDi(a.categoria) === canale);
+    if (!quadratura.some(q => q.formulari_report || q.formulari_gestionale) && !righe.length && !assenti.length) return null;
+    const anomalie = righe.filter(e => e.anomalia).length + assenti.length;
+    const quadra = quadratura.every(q => q.formulari_report === q.formulari_gestionale && q.kg_report === q.kg_gestionale);
+    return { canale, nome, conformita: anomalie === 0 && quadra ? 'piena' : 'parziale', anomalie, assenti: assenti.length };
+  }).filter(Boolean);
+}
+
 function movimento(r, entita) {
   const secondaria = entita === 'Secondaria' || (entita === 'ExtraRaccolta' && eSecondariaExtra(r));
   const fonte = entita === 'ExtraRaccolta' ? (secondaria ? 'Extra raccolta secondaria' : 'Extra raccolta primaria') : FONTI[entita];
@@ -322,13 +424,20 @@ export async function caricaMovimenti(base44) {
     fetchAll(svc.Fornitore),
   ]);
   const grezzi = [];
+  // Un terminato senza fine trasporto non sta in nessuna settimana e non si
+  // colloca con la chiusura ne' con l'immissione: si esclude, ma si tiene
+  // l'elenco per dirlo. Scartato in silenzio, un suo formulario nel report di un
+  // impianto risultava "non presente nel gestionale" senza spiegazione.
+  const senzaFine = [];
   elenchi.forEach((righe, i) => {
     for (const r of righe) {
       if (String(r.stato || '').toLowerCase().trim() !== 'terminato') continue;
       const m = movimento(r, nomi[i]);
       if (m.fine) grezzi.push(m);
+      else senzaFine.push({ fonte: m.fonte, canale: m.canale, fir: m.fir, ordine: m.ordine, destinatario: m.destinatario });
     }
   });
+  senzaFine.sort((a, b) => a.canale.localeCompare(b.canale) || a.fonte.localeCompare(b.fonte) || a.fir.localeCompare(b.fir) || a.ordine.localeCompare(b.ordine));
   // Un formulario chiuso su piu' ordini e' un movimento solo: nell'elenco di un
   // impianto compare una volta, col peso intero. Le quote si fondono qui, una
   // volta per tutte - stesso numero, stesso giorno, stessa destinazione, stesso
@@ -357,7 +466,25 @@ export async function caricaMovimenti(base44) {
   // Gli archivi cosi' come sono, annullati compresi: chi dopo un caricamento
   // rifa' anche le quadrature FIR li riusa invece di rileggerli.
   const archivi = Object.fromEntries(nomi.map((n, i) => [n, elenchi[i]]));
-  return { movimenti, interni, anagrafica, archivi };
+  return { movimenti, interni, anagrafica, archivi, senza_fine: senzaFine };
+}
+
+/**
+ * I terminati senza fine trasporto per canale e archivio, da mostrare: quanti
+ * sono e i primi, con formulario e ordine. Un conteggio per canale, mai uno solo
+ * per tutti: sono tre commesse diverse anche quando il dato manca.
+ */
+export function senzaFinePerCanale(senzaFine, quanti = 5) {
+  const gruppi = new Map();
+  for (const m of senzaFine || []) {
+    const k = m.canale + '|' + m.fonte;
+    if (!gruppi.has(k)) gruppi.set(k, { canale: m.canale, fonte: m.fonte, n: 0, esempi: [] });
+    const g = gruppi.get(k);
+    g.n++;
+    if (g.esempi.length < quanti) g.esempi.push({ fir: m.fir, ordine: m.ordine });
+  }
+  const ordine = (c) => CANALI_VERIFICA.indexOf(c);
+  return [...gruppi.values()].sort((a, b) => ordine(a.canale) - ordine(b.canale) || a.fonte.localeCompare(b.fonte));
 }
 
 // Che cosa rappresenta un movimento per il sito verificato: un ingresso e' una
@@ -531,10 +658,10 @@ const altroCircuito = (intermediario) => !!intermediario && !/ecotyre/i.test(int
  * Una volta abbinata una riga, ogni campo presente nel report viene confrontato:
  * il peso al chilogrammo, la data di verifica e' quella di fine trasporto.
  *
- * Alla fine, gli ingressi della settimana che nessuna riga ha reclamato sono
- * assenti nel report. Le uscite si controllano allo stesso modo, ma solo se il
- * report ne contiene: un sito che invia i soli ingressi non va segnalato per
- * tutte le secondarie della settimana.
+ * Alla fine, gli ingressi e le uscite della settimana che nessuna riga ha
+ * reclamato sono assenti nel report: il report deve contenere tutte le
+ * movimentazioni, e uno con i soli ingressi ha le secondarie partite fra gli
+ * assenti (uscite_verificate lo dice).
  *
  * Non si considerano, e si elencano a parte, le righe con una data di un'altra
  * settimana (molti report sono cumulativi del mese) quando anche il gestionale
@@ -762,7 +889,11 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     escluse,
     quadratura,
     riepilogo: {
+      // Il verdetto unico resta solo per l'alert della dichiarazione di nessuna
+      // movimentazione (smentita se lo e' in un canale qualsiasi): a video, nel
+      // PDF e nell'Excel vale per_canale.
       conformita: anomalie === 0 && quadra ? 'piena' : 'parziale',
+      per_canale: conformitaPerCanale({ quadratura, esiti, assenti }),
       anomalie,
       osservazioni: esiti.filter(e => (e.discrepanze || []).some(d => d.gravita === 'osservazione')).length,
       rettifiche: esiti.filter(e => (e.discrepanze || []).some(d => d.gravita === 'rettifica')).length,

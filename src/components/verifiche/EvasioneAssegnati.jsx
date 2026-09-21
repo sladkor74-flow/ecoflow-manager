@@ -6,8 +6,9 @@ import { useToast } from '@/components/ui/use-toast';
 import { ChevronLeft, ChevronRight, Upload, Loader2, Eye, Trash2, AlertTriangle, Info, RefreshCw, Bell, CheckCircle2 } from 'lucide-react';
 import DettaglioEvasione from '@/components/verifiche/DettaglioEvasione';
 import { MESI, GRAVITA, tonnellate, dataIt, dataOraIt, leggiFogliLista } from '@/lib/evasioneAssegnati';
-import { formatTonnellate } from '@/lib/utils';
+import { formatTonnellate, dataServer } from '@/lib/utils';
 import { eliminaParti } from '@/lib/testoLungo';
+import { oggiRoma } from '@/lib/giornoItaliano';
 
 // Sezione 2 del modulo Verifiche: evasione delle liste di assegnati inviate ai
 // raccoglitori a inizio mese. A ogni caricamento delle primarie il gestionale
@@ -17,6 +18,43 @@ import { eliminaParti } from '@/lib/testoLungo';
 //
 // Rete, ACI ed extra raccolta restano separati: lista, target e previsione
 // riguardano la rete; di ACI ed extra si vedono raccolto e richieste aperte.
+
+// Oltre questo tempo un caricamento ancora aperto si e' interrotto (la soglia del
+// registro dei caricamenti).
+const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
+
+// Il caricamento delle primarie rimasto aperto dopo l'ultimo riuscito, se c'e'.
+// Finche' resta aperto le liste non si ricontrollano, perche' l'archivio puo'
+// essere a meta' (stessa regola di evasioneAssegnatiDati.ts): la pagina lo dice,
+// invece di mostrare in silenzio i controlli del caricamento precedente.
+async function primarieInCaricamento() {
+  const log = await base44.entities.UploadLog.filter({ tipo_file: 'primarie' }, '-created_date', 20);
+  for (const l of log || []) {
+    if (l.esito === 'in_corso') return l;
+    if (l.esito !== 'errore') return null;
+  }
+  return null;
+}
+
+function testoCaricamentoAperto(l) {
+  const inizio = dataServer(l.created_date);
+  const chi = [l.utente, l.nome_file].filter(Boolean).join(', ');
+  const cosa = `Il caricamento delle primarie del ${dataOraIt(l.created_date)}${chi ? ` (${chi})` : ''}`;
+  if (inizio && Date.now() - inizio.getTime() > FINESTRA_IN_CORSO_MS) {
+    return `${cosa} risulta interrotto: l'archivio può essere incompleto e il caricamento va ripetuto. Fino ad allora le liste non si ricontrollano e restano i controlli del caricamento precedente.`;
+  }
+  return `${cosa} non è ancora concluso: le liste si ricontrollano da sole quando si conclude. Intanto restano i controlli del caricamento precedente.`;
+}
+
+// Stato e messaggio di una funzione che ha risposto con un errore: l'SDK li mette
+// sull'errore stesso o nella sua risposta (come in importGrandeFile.js).
+const statoErrore = (e) => (e && (e.status || (e.response && e.response.status))) || undefined;
+const messaggioErrore = (e) => {
+  const dati = e && (e.data || (e.response && e.response.data));
+  return (dati && dati.error) || (e && e.message) || String(e);
+};
+// 409: un caricamento delle primarie aperto o interrotto, che la funzione nomina.
+const rinviato = (e) => statoErrore(e) === 409;
 
 function Barra({ valore, massimo }) {
   const perc = massimo ? Math.min(100, Math.round((valore / massimo) * 100)) : 0;
@@ -36,7 +74,10 @@ function CampoTarget({ riga }) {
 }
 
 const alertDellaRiga = (riga) => [...(riga.controllo ? riga.controllo.alert : []), ...(riga.alert_canali || [])];
-const attivitaCanali = (riga) => ['aci', 'extra'].some(k => riga.canali && (riga.canali[k].evasi > 0 || riga.canali[k].aperte.length > 0));
+// Ordini terminati senza fine trasporto: esclusi da ogni conto, ma si vedono.
+const senzaFine = (canale) => (canale && canale.senza_fine ? canale.senza_fine.length : 0);
+const attivitaCanali = (riga) => ['aci', 'extra'].some(k => riga.canali && (riga.canali[k].evasi > 0 || riga.canali[k].aperte.length > 0))
+  || ['rete', 'aci', 'extra'].some(k => riga.canali && senzaFine(riga.canali[k]) > 0);
 
 function AlertBadge({ riga }) {
   const alert = alertDellaRiga(riga);
@@ -53,11 +94,13 @@ function AlertBadge({ riga }) {
 }
 
 function CanaleBreve({ etichetta, canale, tono }) {
-  if (!canale || (!canale.evasi && !canale.aperte.length)) return <div className="text-xs text-muted-foreground">{etichetta} —</div>;
+  const nSenzaFine = senzaFine(canale);
+  if (!canale || (!canale.evasi && !canale.aperte.length && !nSenzaFine)) return <div className="text-xs text-muted-foreground">{etichetta} —</div>;
   return (
     <div className="text-xs tabular-nums">
       <span className="text-muted-foreground">{etichetta}</span> {tonnellate(canale.kg)} t · {canale.evasi} {canale.evasi === 1 ? 'evaso' : 'evasi'}
       {canale.aperte.length > 0 && <span className={`ml-1 font-semibold ${tono}`}>· {canale.aperte.length} {canale.aperte.length === 1 ? 'aperta' : 'aperte'}</span>}
+      {nSenzaFine > 0 && <span className="ml-1 font-semibold text-red-600" title="Terminati senza data di fine trasporto: esclusi dal raccolto">· {nSenzaFine} senza fine trasporto</span>}
     </div>
   );
 }
@@ -83,6 +126,11 @@ function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina
       <td className="px-4 py-3 min-w-[130px]">
         <div className="tabular-nums text-sm">{tonnellate(riga.raccolto_kg)} t{riga.target_kg ? <span className="text-muted-foreground"> · {Math.round((riga.raccolto_kg / riga.target_kg) * 100)}%</span> : ''}</div>
         <Barra valore={riga.raccolto_kg} massimo={riga.target_kg} />
+        {riga.canali && senzaFine(riga.canali.rete) > 0 && (
+          <div className="text-xs text-red-600 font-medium mt-0.5" title="Terminati senza data di fine trasporto: esclusi dal raccolto">
+            {senzaFine(riga.canali.rete)} senza fine trasporto, esclus{senzaFine(riga.canali.rete) === 1 ? 'o' : 'i'}
+          </div>
+        )}
       </td>
       <td className="px-4 py-3 whitespace-nowrap">
         <CanaleBreve etichetta="ACI" canale={riga.canali && riga.canali.aci} tono="text-red-600" />
@@ -139,9 +187,11 @@ function RigaRaccoglitore({ riga, isAdmin, occupato, onCarica, onApri, onElimina
 
 export default function EvasioneAssegnati({ isAdmin }) {
   const { toast } = useToast();
-  const oggi = new Date();
-  const [anno, setAnno] = useState(oggi.getFullYear());
-  const [mese, setMese] = useState(oggi.getMonth() + 1);
+  // Il mese di partenza e' quello di oggi in Italia, non quello dell'orologio del dispositivo.
+  const annoOggi = Number(oggiRoma().slice(0, 4));
+  const meseOggi = Number(oggiRoma().slice(5, 7));
+  const [anno, setAnno] = useState(annoOggi);
+  const [mese, setMese] = useState(meseOggi);
   const [dati, setDati] = useState(null);
   const [caricando, setCaricando] = useState(true);
   const [errore, setErrore] = useState(null);
@@ -150,17 +200,22 @@ export default function EvasioneAssegnati({ isAdmin }) {
   const [inControllo, setInControllo] = useState(false);
   const [tuttiAlert, setTuttiAlert] = useState(false);
   const [mostraAltri, setMostraAltri] = useState(false);
-  const [inviataIl, setInviataIl] = useState(primoFeriale(oggi.getFullYear(), oggi.getMonth() + 1));
+  const [inviataIl, setInviataIl] = useState(primoFeriale(annoOggi, meseOggi));
+  const [caricamentoAperto, setCaricamentoAperto] = useState(null);
 
   const carica = useCallback(async (silenzioso = false) => {
     if (!silenzioso) setCaricando(true);
     setErrore(null);
     try {
-      const res = await base44.functions.invoke('evasioneAssegnati', { anno, mese });
+      const [res, primarieAperte] = await Promise.all([
+        base44.functions.invoke('evasioneAssegnati', { anno, mese }),
+        // Se il registro non si legge la pagina resta com'era: e' solo un avviso.
+        primarieInCaricamento().catch(() => null),
+      ]);
       setDati(res.data || res);
+      setCaricamentoAperto(primarieAperte);
     } catch (e) {
-      const msg = e && e.response && e.response.data && e.response.data.error;
-      setErrore(msg || e.message || 'Errore nel caricamento');
+      setErrore(messaggioErrore(e) || 'Errore nel caricamento');
     }
     if (!silenzioso) setCaricando(false);
   }, [anno, mese]);
@@ -192,15 +247,17 @@ export default function EvasioneAssegnati({ isAdmin }) {
       const dettagli = [`${d.richieste} richieste, ${d.prioritarie} prioritarie.`];
       if (d.gia_evase) dettagli.push(`${d.gia_evase} risultavano già evase.`);
       if (d.gia_annullate) dettagli.push(`${d.gia_annullate} risultano già annullate sul portale.`);
+      if (d.senza_fine) dettagli.push(`${d.senza_fine} ${d.senza_fine === 1 ? 'risulta terminata' : 'risultano terminate'} sul portale senza data di fine trasporto: ${d.senza_fine === 1 ? 'esclusa' : 'escluse'} dai conteggi finché la data manca.`);
       if (d.non_riconosciute) dettagli.push(`${d.non_riconosciute} ID non corrispondono a nessun ordine.`);
+      if (d.liste_ricontrollate) dettagli.push(`Ricontrollate anche ${d.liste_ricontrollate === 1 ? "un'altra lista" : `${d.liste_ricontrollate} altre liste`} degli altri raccoglitori, nei mesi toccati dal caricamento.`);
       if (senzaColori) dettagli.push('Il file non è in formato xlsx: le righe evidenziate non si possono riconoscere.');
       dettagli.push(...(d.avvisi || []));
       toast({ title: `Lista di ${riga.nome} caricata, inviata il ${dataIt(d.inviata_il || inviataIl)}`, description: dettagli.join(' ') });
-      await carica(true);
     } catch (e) {
-      const msg = e && e.response && e.response.data && e.response.data.error;
-      toast({ title: 'Caricamento non riuscito', description: msg || e.message || String(e), variant: 'destructive' });
+      toast({ title: rinviato(e) ? 'Caricamento rinviato' : 'Caricamento non riuscito', description: messaggioErrore(e), variant: 'destructive' });
     }
+    // Anche dopo un errore: la lista puo' essere stata salvata senza controllo.
+    await carica(true);
     setOccupato(null);
   };
 
@@ -211,12 +268,27 @@ export default function EvasioneAssegnati({ isAdmin }) {
       for (const c of controlli) { await eliminaParti('ControlloEvasione', c.id); await base44.entities.ControlloEvasione.delete(c.id); }
       await eliminaParti('ListaAssegnati', riga.lista.id);
       await base44.entities.ListaAssegnati.delete(riga.lista.id);
-      await carica(true);
     } catch (e) {
       toast({ title: 'Eliminazione non riuscita', description: e.message || String(e), variant: 'destructive' });
+      await carica(true);
+      return;
     }
+    // L'eliminazione non lascia traccia nei controlli: le richieste passate a
+    // questa lista restavano "in lista di altri" nelle liste degli altri
+    // raccoglitori del mese fino al caricamento dopo delle primarie. Si
+    // ricontrollano subito le liste rimaste in quel mese.
+    try {
+      await base44.functions.invoke('controllaEvasioneAssegnati', { forza: true, anno, mese });
+    } catch (e) {
+      // Con un caricamento aperto il ricontrollo lo rifa' la sua conclusione.
+      toast({
+        title: rinviato(e) ? 'Lista eliminata, ricontrollo delle altre liste rinviato' : 'Lista eliminata, le altre liste del mese non sono state ricontrollate',
+        description: rinviato(e) ? messaggioErrore(e) : `${messaggioErrore(e)} Si ripete con "Controlla ora".`,
+        variant: 'destructive',
+      });
+    }
+    await carica(true);
   };
-
 
   const controllaOra = async () => {
     setInControllo(true);
@@ -225,8 +297,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
       await carica(true);
       toast({ title: 'Controllo aggiornato sulle ultime primarie caricate' });
     } catch (e) {
-      const msg = e && e.response && e.response.data && e.response.data.error;
-      toast({ title: 'Controllo non riuscito', description: msg || e.message || String(e), variant: 'destructive' });
+      toast({ title: rinviato(e) ? 'Controllo rinviato' : 'Controllo non riuscito', description: messaggioErrore(e), variant: 'destructive' });
     }
     setInControllo(false);
   };
@@ -297,14 +368,21 @@ export default function EvasioneAssegnati({ isAdmin }) {
         <span>
           Carica per ogni raccoglitore la lista inviata a inizio mese: uno o più file Excel insieme, con la colonna ID degli assegnati, con in giallo
           le prioritarie oppure in un file con PRIORITA' nel nome. Chi deve evadere lo decide la lista, anche se sul portale l'ordine è assegnato a un
-          altro trasportatore. L'ordine si valuta per provincia: prima le prioritarie della lista, anche quando sono forzature chieste dal consorzio, poi con priorità assoluta le richieste immesse negli anni precedenti, poi per data di immissione. Il controllo si ripete da solo a ogni caricamento delle primarie, sulla data di fine trasporto.
+          altro trasportatore. L'ordine si valuta per provincia: prima le prioritarie della lista, anche quando sono forzature chieste dal consorzio, poi con priorità assoluta le richieste immesse negli anni precedenti, poi per data di immissione. Il controllo si ripete da solo a ogni caricamento delle primarie, sulla data di fine trasporto: la chiusura sul portale non decide niente.
           Target e "non raccoglie questo mese" si scrivono in Target & Status, scheda Target raccoglitori: se cambiano, il controllo si aggiorna da solo. Caricando la lista del mese successivo, quella precedente e i suoi controlli si cancellano.
           Lista, target e previsione riguardano la sola rete. ACI ed extra raccolta sono mostrati a parte: una richiesta ACI aperta o una richiesta
           di extra raccolta inserita come assegnata nel modulo Extra Raccolta genera un alert. Una richiesta resta assegnata finché non viene chiusa
-          o cancellata sul portale: gli ultimi giorni prima dell'estrazione del file, con ritiri ancora da chiudere, non generano alert sulle richieste aperte. Nel dettaglio trovi quante richieste vale il target
+          o cancellata sul portale: se è già stata ritirata ma non ancora chiusa risulta aperta, e gli alert chiedono di chiuderla. Un ordine terminato
+          senza data di fine trasporto non si conta in nessun mese e si segnala. Nel dettaglio trovi quante richieste vale il target
           al peso tipico di un ritiro e quante ne servono in più quando, tra annullate ed evase da altri, quelle aperte non bastano.
         </span>
       </div>
+
+      {caricamentoAperto && (
+        <div className="flex items-start gap-2 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{testoCaricamentoAperto(caricamentoAperto)}</span>
+        </div>
+      )}
 
       {errore && (
         <div className="flex items-start gap-2 border border-red-300 bg-red-50 text-red-800 rounded-lg px-4 py-3 text-sm">

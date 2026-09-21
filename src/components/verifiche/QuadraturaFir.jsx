@@ -30,6 +30,18 @@ const LIMITE = 5 * 1024 * 1024;
 
 const NOME_CANALE = { RETE: 'Rete', ACI: 'ACI', 'EXTRA RACCOLTA': 'Extra raccolta' };
 
+// I caricamenti aperti come li descrive il server: tipo, giorno, chi, file, e se
+// risulta interrotto (allora va ripetuto) o si e' concluso durante la lettura.
+const descriviInCorso = (elenco) => elenco
+  .map(a => a.descrizione || `${String(a.tipo_file || '').replace(/_/g, ' ')}${a.data ? ` del ${dataIt(a.data)}` : ''}: non ancora concluso`)
+  .join('; ');
+
+/** Il pallino di un canale nello storico: verde se quadra, ambra se c'e' da sistemare. */
+function Pallino({ c }) {
+  const piena = c.conformita === 'piena';
+  return <span className={`inline-block w-1.5 h-1.5 rounded-full ${piena ? 'bg-emerald-600' : 'bg-amber-500'}`} />;
+}
+
 // Il verdetto di un canale in una frase: le righe da sistemare, oppure perche'
 // quadra solo in parte anche senza righe diverse.
 function verdettoCanale(c) {
@@ -272,13 +284,17 @@ export default function QuadraturaFir({ isAdmin }) {
   };
 
   // Il PDF porta l'esito che si vede a video, rifatto sui movimenti di adesso,
-  // non quello salvato il giorno della stampa; dal record serve solo come e'
-  // stato letto il file.
+  // con la conformita' canale per canale e la data di quel confronto: con la
+  // data del record, quando l'esito rifatto non era salvato, contenuto e data
+  // non corrispondevano. Dal record serve solo come e' stato letto il file.
   const scarica = async () => {
     try {
       const salvata = await conCampiCompleti('QuadraturaFir', await base44.entities.QuadraturaFir.get(dati.quadratura.id), ['lettura_json']);
       const { esito_json: _esito, righe_json: _righe, lettura_json: _lettura, ...aggiornata } = dati.quadratura;
-      await esportaQuadraturaFirPdf({ ...salvata, ...aggiornata }, dati.esito || {}, salvata.lettura_json ? JSON.parse(salvata.lettura_json) : null);
+      const rifatto = dati.ricalcolo || {};
+      const confronto = rifatto.rifatto && rifatto.eseguito_il ? { verificata_il: rifatto.eseguito_il } : {};
+      await esportaQuadraturaFirPdf({ ...salvata, ...aggiornata, ...confronto }, { ...(dati.esito || {}), per_canale: dati.per_canale || null },
+        salvata.lettura_json ? JSON.parse(salvata.lettura_json) : null);
     } catch (e) {
       toast({ title: 'Esportazione non riuscita', description: e.message || String(e), variant: 'destructive' });
     }
@@ -291,6 +307,8 @@ export default function QuadraturaFir({ isAdmin }) {
   const inCorso = (dati && dati.caricamenti_in_corso) || [];
   const gestionale = (dati && dati.gestionale) || {};
   const flussiGestionale = Object.entries(gestionale).filter(([, v]) => v.totale && v.totale.n > 0);
+  // null: il conteggio dei senza fine trasporto non si e' potuto fare, e si dice.
+  const senzaFine = Object.entries(gestionale).filter(([, v]) => v.senza_fine === null || (v.senza_fine && v.senza_fine.n > 0));
   // Fino a quando i movimenti del gestionale sono aggiornati: l'ultimo caricamento di ogni tipo.
   const aggiornatoAl = [...new Map(Object.values(gestionale).filter(v => v.ultimo_caricamento && v.ultimo_caricamento.data)
     .map(v => [v.ultimo_caricamento.data + v.ultimo_caricamento.nome_file, v.ultimo_caricamento])).values()]
@@ -380,7 +398,7 @@ export default function QuadraturaFir({ isAdmin }) {
               {(ricalcolo.motivo || inCorso.length > 0) && (
                 <div className="text-sm text-amber-900 flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                  <span>{ricalcolo.motivo || `Un caricamento non è concluso (${inCorso.map(a => a.tipo_file.replace(/_/g, ' ')).join(', ')}): i numeri del gestionale possono essere incompleti.`}</span>
+                  <span>{ricalcolo.motivo || `Caricamento ${descriviInCorso(inCorso)}. I numeri del gestionale possono essere incompleti.`}</span>
                 </div>
               )}
               {perCanale.length > 0 ? (
@@ -428,9 +446,25 @@ export default function QuadraturaFir({ isAdmin }) {
                   ))}
                 </div>
               )}
+              {/* I terminati senza fine trasporto non stanno in nessuna settimana:
+                  non sono contati qui sopra, e si dice quanti sono, flusso per flusso. */}
+              {senzaFine.length > 0 && (
+                <div className="text-sm text-amber-900 space-y-0.5">
+                  {senzaFine.map(([k, v]) => (
+                    <div key={k} className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                      <span>
+                        {v.titolo} · {v.canale}: {v.senza_fine === null
+                          ? 'non si è potuto contare quanti formulari sono terminati senza data di fine trasporto.'
+                          : `${v.senza_fine.n} ${v.senza_fine.n === 1 ? 'formulario terminato' : 'formulari terminati'} senza data di fine trasporto (${v.senza_fine.esempi.map(x => x.fir || 'senza numero').join(', ')}${v.senza_fine.n > v.senza_fine.esempi.length ? ', …' : ''}): non stanno in nessuna settimana e non sono contati.`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {inCorso.length > 0 && (
                 <p className="text-sm text-amber-900">
-                  Un caricamento non è concluso ({inCorso.map(a => a.tipo_file.replace(/_/g, ' ')).join(', ')}): questi numeri possono essere incompleti.
+                  Caricamento {descriviInCorso(inCorso)}. Questi numeri possono essere incompleti.
                 </p>
               )}
               <p className="text-sm text-muted-foreground">
@@ -439,20 +473,27 @@ export default function QuadraturaFir({ isAdmin }) {
             </div>
           )}
 
-          {/* Lo storico elenca le settimane con una stampa caricata, senza colore:
-              un colore solo per settimana sarebbe un verdetto comune ai tre canali,
-              e quello salvato puo' precedere i caricamenti successivi. L'esito,
-              canale per canale e aggiornato, si vede aprendo la settimana. */}
+          {/* Lo storico elenca le settimane con una stampa caricata e, sotto il
+              numero, un pallino per canale: mai un colore solo per settimana, che
+              sarebbe un verdetto comune ai tre canali. Il server manda l'esito solo
+              se e' stato confermato dopo l'ultimo caricamento; altrimenti la
+              settimana resta senza colore, e l'esito vero si vede aprendola. */}
           {dati && dati.storico && dati.storico.length > 1 && (
             <div className="text-xs text-muted-foreground">
               Settimane con la stampa caricata nel {anno}:{' '}
-              {dati.storico.map(s => (
-                <button key={s.id} type="button" onClick={() => setSettimana(s.settimana)}
-                  className={`mx-0.5 px-1.5 py-0.5 rounded border ${s.settimana === settimana ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-muted/30'} ${s.stato === 'errore' ? 'text-red-700' : ''}`}
-                  title={s.stato === 'errore' ? 'La lettura del file non è riuscita' : 'Apri la settimana: l\'esito si rifà sui movimenti di adesso, canale per canale'}>
-                  {s.settimana}
-                </button>
-              ))}
+              {dati.storico.map(s => {
+                const canali = Array.isArray(s.per_canale) ? s.per_canale : [];
+                const titolo = s.stato === 'errore' ? 'La lettura del file non è riuscita'
+                  : canali.length ? canali.map(c => `${NOME_CANALE[c.canale] || c.canale}: ${verdettoCanale(c).toLowerCase()}`).join(' · ')
+                  : 'Esito da rifare sui movimenti di adesso: apri la settimana';
+                return (
+                  <button key={s.id} type="button" onClick={() => setSettimana(s.settimana)} title={titolo}
+                    className={`mx-0.5 px-1.5 py-0.5 rounded border inline-flex flex-col items-center align-top ${s.settimana === settimana ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-muted/30'} ${s.stato === 'errore' ? 'text-red-700' : ''}`}>
+                    <span>{s.settimana}</span>
+                    {canali.length > 0 && <span className="flex gap-0.5">{canali.map(c => <Pallino key={c.canale} c={c} />)}</span>}
+                  </button>
+                );
+              })}
             </div>
           )}
         </>

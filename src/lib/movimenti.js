@@ -18,7 +18,7 @@
 // - La CHIUSURA A PORTALE non decide niente: ne' un periodo, ne' un tempo, ne' una
 //   giacenza. Si puo' solo mostrare (regola dell'utente, 21/09/2026: "mai, dico
 //   mai"). Un movimento senza fine trasporto si esclude e si segnala, non si
-//   ripiega sulla chiusura.
+//   ripiega sulla chiusura ne' sull'immissione.
 // - Il CANALE e' rete, ACI o extra raccolta, con la regola condivisa eAci().
 //   I canali non si sommano mai.
 //
@@ -58,10 +58,19 @@ export function periodoMovimento(r) {
  * chiusura a portale: i filtri per anno e per giorno delle pagine la usavano, e
  * un ritiro del 31 dicembre chiuso a gennaio finiva nell'anno dopo mentre il
  * filtro per mese, che legge la fine trasporto, lo teneva a dicembre.
+ *
+ * Attenzione: giornoOrdine ripiega sull'immissione anche per un TERMINATO
+ * senza fine trasporto. Chi filtra o conta per periodo lo tiene fuori a parte e lo
+ * segnala (vedi PrimarieRete.jsx, PrimarieAci.jsx, computeSecondarieMatrix).
  */
 export const giornoOrdine = (r) => giornoMovimento(r) || giornoRoma(r && r.ordine_immesso_il);
 export const annoOrdine = (r) => { const g = giornoOrdine(r); return g ? Number(g.slice(0, 4)) : null; };
 export const meseOrdine = (r) => { const g = giornoOrdine(r); return g ? MESI_MOVIMENTI[Number(g.slice(5, 7)) - 1] : null; };
+
+export const GIORNI_SCADENZA_ORDINE = 30;
+// i conti si fanno fra giorni di calendario a mezzanotte UTC: il cambio dell'ora
+// legale non li sposta, come faceva setDate sull'istante di immissione
+const istanteGiorno = (g) => Date.UTC(+g.slice(0, 4), +g.slice(5, 7) - 1, +g.slice(8, 10));
 
 /**
  * I tempi di raccolta di un ordine: i giorni dall'immissione alla FINE DEL
@@ -72,18 +81,17 @@ export const meseOrdine = (r) => { const g = giornoOrdine(r); return g ? MESI_MO
  *
  * Restituisce { scadenza: 'AAAA-MM-GG', giorni, esito: 'OK' | 'DOPO SCADENZA' }.
  * Senza fine trasporto giorni ed esito sono null: non si misura e chi conta lo
- * segnala. null se manca l'immissione.
+ * segnala. Lo stesso con una fine trasporto anteriore all'immissione, che e' un
+ * dato sporco e non un ritiro velocissimo: darebbe giorni negativi e un "OK" che
+ * abbassa la media; allora c'e' anche incoerente: true. null se manca l'immissione.
  */
-export const GIORNI_SCADENZA_ORDINE = 30;
-// i conti si fanno fra giorni di calendario a mezzanotte UTC: il cambio dell'ora
-// legale non li sposta, come faceva setDate sull'istante di immissione
-const istanteGiorno = (g) => Date.UTC(+g.slice(0, 4), +g.slice(5, 7) - 1, +g.slice(8, 10));
 export function tempiRaccolta(r) {
   const immesso = giornoRoma(r && r.ordine_immesso_il);
   if (!immesso) return null;
   const scadenza = new Date(istanteGiorno(immesso) + GIORNI_SCADENZA_ORDINE * 86400000).toISOString().slice(0, 10);
   const fine = giornoMovimento(r);
   if (!fine) return { scadenza, giorni: null, esito: null };
+  if (fine < immesso) return { scadenza, giorni: null, esito: null, incoerente: true };
   const giorni = Math.round((istanteGiorno(fine) - istanteGiorno(immesso)) / 86400000);
   return { scadenza, giorni, esito: fine <= scadenza ? 'OK' : 'DOPO SCADENZA' };
 }

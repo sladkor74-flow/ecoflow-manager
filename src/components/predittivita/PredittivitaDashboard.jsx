@@ -132,6 +132,8 @@ export default function PredittivitaDashboard({ data, onReload }) {
       <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/30 flex-wrap gap-2">
         <div className="text-sm"><span className="text-muted-foreground">Periodo: </span><span className="font-medium">{data.data_inizio} → {data.data_fine}</span></div>
         <div className="text-sm"><span className="text-muted-foreground">Settimane: </span><span className="font-bold">{data.num_settimane}</span></div>
+        {/* Target, consuntivi, plafond e ipotesi qui sotto sono solo della rete. */}
+        <div className="text-sm"><span className="text-muted-foreground">Canale: </span><span className="font-medium">solo rete</span> <span className="text-xs text-muted-foreground">(ACI ed extra raccolta non entrano)</span></div>
       </div>
 
       {/* Plafond Stoccaggi (generalizzato) */}
@@ -179,8 +181,8 @@ export default function PredittivitaDashboard({ data, onReload }) {
                 <span className="text-xs text-muted-foreground">Scadenza: {imp.impianto.data_fine}</span>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Target</p><p className="font-bold">{fmt(target)} kg</p></div>
-                <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Consuntivo</p><p className="font-bold">{fmt(imp.consuntivo)} kg</p>
+                <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Target di rete</p><p className="font-bold">{fmt(target)} kg</p></div>
+                <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Consuntivo di rete</p><p className="font-bold">{fmt(imp.consuntivo)} kg</p>
                   <p className="text-[10px] text-muted-foreground">Prim {fmt(imp.consuntivo_primarie)} · Sec {fmt(imp.consuntivo_secondarie)}</p></div>
                 <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Residuo</p><p className="font-bold text-amber-600">{fmt(imp.residuo)} kg</p></div>
                 <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Pianificato</p><p className="font-bold">{fmt(imp.totale_pianificato)} kg</p></div>
@@ -247,7 +249,7 @@ export default function PredittivitaDashboard({ data, onReload }) {
       </div>
 
       <div className="border rounded-lg p-4">
-        <h3 className="font-heading font-semibold mb-3">Sintesi per Fornitore</h3>
+        <h3 className="font-heading font-semibold mb-3">Sintesi per Fornitore · rete</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted"><tr>

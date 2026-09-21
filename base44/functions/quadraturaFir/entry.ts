@@ -1,6 +1,8 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
-import { intervalloSettimana } from "../../shared/reportSettimanali.ts";
-import { caricaGestionale, caricamentiAperti, rifaiQuadratura, sintesiPerCanale } from "../../shared/quadraturaFirDati.ts";
+import {
+  intervalloSettimana, statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento,
+} from "../../shared/reportSettimanali.ts";
+import { caricaGestionale, rifaiQuadratura, sintesiPerCanale, TIPI_CARICAMENTO } from "../../shared/quadraturaFirDati.ts";
 import { FLUSSI, ORDINE_FLUSSI } from "../../shared/quadraturaFir.ts";
 import { leggiJson } from "../../shared/testoLungo.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
@@ -20,10 +22,19 @@ import { eAmministratore } from "../../shared/permessi.ts";
 // aggiornato lo stesso. Mentre un archivio si sta riscrivendo non si rifa'
 // niente e resta l'ultimo esito salvato, con il motivo.
 //
+// Lo stato dei caricamenti si legge prima e dopo gli archivi: letto una volta
+// sola, un caricamento partito o finito mentre si leggevano non si vedeva, e
+// l'esito si rifaceva su un archivio a meta'.
+//
 // Payload: { anno, settimana, con_esito }
 
-// I campi della quadratura che il riconfronto aggiorna.
-const CAMPI_SINTESI = ['congruenti', 'incongruenti', 'osservazioni', 'non_confrontabili', 'conformita'];
+// L'istante di una data del server, che puo' arrivare senza la Z finale.
+const istante = (v) => {
+  if (!v) return 0;
+  const s = String(v);
+  const t = new Date(s.includes('T') && !/(Z|[+-]\d{2}:?\d{2})$/i.test(s) ? s + 'Z' : s).getTime();
+  return isNaN(t) ? 0 : t;
+};
 
 export default async function(req) {
   try {
@@ -37,34 +48,38 @@ export default async function(req) {
     const svc = base44.asServiceRole.entities;
     const intervallo = intervalloSettimana(Number(anno), Number(settimana));
 
+    const primaDegliArchivi = await statoCaricamenti(base44, TIPI_CARICAMENTO);
     const [trovate, storico, gestionale] = await Promise.all([
       svc.QuadraturaFir.filter({ anno: Number(anno), settimana: Number(settimana) }, '-created_date', 5),
       svc.QuadraturaFir.filter({ anno: Number(anno) }, '-settimana', 60),
-      caricaGestionale(base44, intervallo),
+      caricaGestionale(base44, intervallo, null, { caricamenti: primaDegliArchivi }),
     ]);
+    const dopo = await statoCaricamenti(base44, TIPI_CARICAMENTO);
+    const durante = caricamentiDuranteLettura(primaDegliArchivi, dopo)
+      .map(a => ({ ...a, descrizione: descriviCaricamento(a) }));
 
     let q = (trovate || [])[0] || null;
     let esito = null;
     // come e' andato il riconfronto: rifatto, cambiato, salvato, oppure perche' no
-    const ricalcolo = { rifatto: false, cambiato: false, salvato: false, motivo: '' };
+    const ricalcolo = { rifatto: false, cambiato: false, salvato: false, eseguito_il: null, motivo: '' };
+    const rinvio = (elenco) => `Caricamento ${elenco.map(a => a.descrizione || descriviCaricamento(a)).join('; ')}. L'esito è quello dell'ultimo confronto e si rifà da solo a caricamento finito.`;
     if (q && con_esito !== false) {
       let rifatta = null;
-      try {
-        rifatta = await rifaiQuadratura(base44, q, gestionale, { scrivi: eAmministratore(user) });
-      } catch (e) {
-        ricalcolo.motivo = 'Il confronto non si è potuto rifare con i movimenti di adesso (' + (e && e.message ? e.message : String(e)) + '): è quello salvato.';
+      if (durante.length) {
+        ricalcolo.motivo = rinvio(durante);
+      } else {
+        try {
+          rifatta = await rifaiQuadratura(base44, q, gestionale, { scrivi: eAmministratore(user) });
+        } catch (e) {
+          ricalcolo.motivo = 'Il confronto non si è potuto rifare con i movimenti di adesso (' + (e && e.message ? e.message : String(e)) + '): è quello salvato.';
+        }
       }
       if (rifatta && rifatta.esito) {
         esito = rifatta.esito;
-        Object.assign(ricalcolo, { rifatto: true, cambiato: rifatta.cambiato, salvato: rifatta.salvato });
-        q = {
-          ...q,
-          ...Object.fromEntries(CAMPI_SINTESI.map(k => [k, rifatta.sintesi[k]])),
-          lettura_verificata: rifatta.lettura_verificata,
-          verificata_il: rifatta.verificata_il,
-        };
+        Object.assign(ricalcolo, { rifatto: true, cambiato: rifatta.cambiato, salvato: rifatta.salvato, eseguito_il: rifatta.eseguito_il });
+        q = { ...q, per_canale: rifatta.per_canale, lettura_verificata: rifatta.lettura_verificata, verificata_il: rifatta.verificata_il };
       } else if (rifatta && rifatta.rinviato) {
-        ricalcolo.motivo = 'Un caricamento non è concluso (' + rifatta.rinviato.map(a => a.tipo_file.replace(/_/g, ' ')).join(', ') + '): l\'esito è quello dell\'ultimo confronto e si rifà a caricamento finito.';
+        ricalcolo.motivo = rinvio(rifatta.rinviato);
       }
       if (!esito && q.esito_json) {
         try {
@@ -86,8 +101,21 @@ export default async function(req) {
         totale: dati.totale,
         celle: dati.celle.length,
         ultimo_caricamento: dati.ultimo_caricamento,
+        senza_fine: dati.senza_fine,
       };
     }
+
+    // Lo storico mostra l'esito salvato canale per canale solo se e' ancora
+    // buono, cioe' confermato dopo l'ultimo caricamento riuscito: il riconfronto
+    // che segue ogni caricamento lo rifa' (o ne conferma la data) per le
+    // settimane recenti, l'apertura della settimana per le altre. Un esito
+    // anteriore a un caricamento e' di un gestionale che non c'e' piu': quella
+    // settimana si mostra senza colore, e l'esito vero si vede aprendola.
+    const ultimoCaricamento = Math.max(0, ...Object.values(dopo.ultimi || {}).map(u => istante(u.creato_il)));
+    const esitoValido = (r) => r.stato === 'completata' && Array.isArray(r.per_canale) && r.per_canale.length > 0
+      && istante(r.verificata_il) >= ultimoCaricamento;
+    // La settimana aperta ha l'esito appena rifatto, salvato o no.
+    const perCanaleStorico = (r) => (q && r.id === q.id && ricalcolo.rifatto ? q.per_canale : esitoValido(r) ? r.per_canale : null);
 
     return Response.json({
       anno: Number(anno),
@@ -98,12 +126,11 @@ export default async function(req) {
       // La conformita' e' per canale: rete, ACI ed extra raccolta non hanno un verdetto comune.
       per_canale: esito ? (esito.per_canale || sintesiPerCanale(esito)) : null,
       ricalcolo,
-      caricamenti_in_corso: caricamentiAperti(gestionale),
+      caricamenti_in_corso: durante,
       gestionale: totali,
-      // Dello storico non si manda la conformita' salvata: era un verdetto unico
-      // per tutti i canali, e per le settimane non aperte poteva essere vecchio.
       storico: (storico || []).map(r => ({
         id: r.id, settimana: r.settimana, stato: r.stato, file_nome: r.file_nome, verificata_il: r.verificata_il,
+        per_canale: perCanaleStorico(r),
       })),
     });
   } catch (error) {

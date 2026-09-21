@@ -1,7 +1,7 @@
 import { base44 } from '@/api/base44Client';
 import { eAci } from '@/lib/canaleSecondaria';
 import { oggiRoma } from '@/lib/giornoItaliano';
-import { fetchAllClient } from '@/lib/fetchAllClient';
+import { dataServer } from '@/lib/utils';
 
 // Importazione dei report di grandi dimensioni del portale Ecotyre.
 //
@@ -452,81 +452,163 @@ export const TIPI_LETTURA_BROWSER = ['dichiarazioni_trattamento', 'ordini_non_di
 //
 // Le terziarie non compaiono: nessuno dei ricalcoli le legge (i soggetti della
 // qualifica vengono da primarie, secondarie ed extra raccolta).
+//
+// Le verifiche dei report e le quadrature FIR le riconfronta ricontrollaDichiarazioni
+// anche dopo una scheda di extra raccolta: tutte le verifiche concluse e le
+// quadrature delle ultime settimane, scrivendo solo cio' che cambia. Per l'extra
+// raccolta c'era un secondo giro che rifaceva le stesse verifiche con
+// elaboraReportSettimanale ed elaboraQuadraturaFir, in parallelo e sugli stessi
+// record: al primo errore metteva in "errore" una verifica conclusa, e una
+// quadratura senza righe salvate diventava "La lettura del file non e' riuscita".
 const RICALCOLI = {
-  primarie: ['evasioneAssegnati', 'ritiriEct', 'nessunaMovimentazione', 'qualifica'],
-  secondarie: ['nessunaMovimentazione', 'qualifica'],
-  extra_raccolta: ['nessunaMovimentazione', 'qualifica', 'verificheSettimana'],
+  primarie: ['evasioneAssegnati', 'ritiriEct', 'verifiche', 'qualifica', 'predittivita'],
+  secondarie: ['verifiche', 'qualifica', 'predittivita'],
+  extra_raccolta: ['verifiche', 'qualifica'],
 };
 
 const NOMI_RICALCOLI = {
   evasioneAssegnati: 'evasione delle liste di assegnati',
   ritiriEct: 'ritiri delle richieste del consorzio',
-  nessunaMovimentazione: 'dichiarazioni di nessuna movimentazione',
+  verifiche: 'verifiche dei report e quadrature FIR (anche nessuna movimentazione)',
   qualifica: 'qualifica fornitori',
-  verificheSettimana: 'verifiche dei report e quadrature FIR della settimana',
+  predittivita: 'piano delle secondarie di rete e suggerimento della settimana',
 };
 
-// Le verifiche dei report settimanali e le quadrature FIR confrontano un elenco
-// esterno con i movimenti del gestionale del momento in cui si fanno. Una scheda
-// di extra raccolta scritta o corretta dopo cambia ingressi e uscite di quella
-// settimana: le verifiche concluse che la coprono si ripetono sulle righe gia'
-// lette, senza rileggere il file ne' chiamare l'agente. `giorni` sono i giorni
-// italiani di fine trasporto toccati, prima e dopo la modifica.
-async function riverificaSettimane(giorni) {
-  const dentro = (x) => giorni.some(g => g >= String(x.data_inizio || '').slice(0, 10) && g <= String(x.data_fine || '').slice(0, 10));
-  const [verifiche, quadrature] = await Promise.all([
-    fetchAllClient(base44.entities.VerificaReport, { stato: 'completata' }, 'id'),
-    fetchAllClient(base44.entities.QuadraturaFir, { stato: 'completata' }, 'id'),
-  ]);
-  const errori = [];
-  // Una alla volta: ognuna rilegge tutti i movimenti, e in parallelo la
-  // piattaforma rifiuta le richieste troppo ravvicinate.
-  // Le dichiarazioni di nessuna movimentazione le ricontrolla ricontrollaDichiarazioni.
-  for (const v of verifiche.filter(x => x.file_tipo !== 'dichiarazione' && dentro(x))) {
-    try {
-      await base44.functions.invoke('elaboraReportSettimanale', { verifica_id: v.id, solo_verifica: true });
-    } catch (e) { errori.push(`${v.soggetto_nome || 'report'} sett. ${v.settimana}: ${messaggioErrore(e)}`); }
+// Gli archivi che i ricalcoli leggono, per tipo di caricamento: l'extra raccolta
+// non ha un caricamento da file.
+const TIPI_LETTI_DAI_RICALCOLI = ['primarie', 'secondarie'];
+const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
+
+// Un ricalcolo che parte mentre primarie o secondarie si stanno riscrivendo -
+// oppure dopo un caricamento interrotto, che le ha lasciate a meta' - salva esiti
+// letti su un archivio a meta' (regola 2). Non si parte, e si dice quale
+// caricamento lo impedisce. ricontrollaDichiarazioni lo controlla anche per conto
+// suo (risponde 409); qui vale per tutti i ricalcoli, qualifica compresa. Se il
+// registro non si riesce a leggere si prosegue: meglio un ricalcolo in piu' che
+// uno perso, e il controllo lato server resta.
+async function caricamentoAperto() {
+  try {
+    for (const tipo of TIPI_LETTI_DAI_RICALCOLI) {
+      const [ultimo] = await base44.entities.UploadLog.filter({ tipo_file: tipo }, '-created_date', 1);
+      if (!ultimo || ultimo.esito !== 'in_corso') continue;
+      const inizio = dataServer(ultimo.created_date);
+      const chi = ultimo.utente ? ` di ${ultimo.utente}` : '';
+      const file = ultimo.nome_file && ultimo.nome_file !== 'N/D' ? ` (${ultimo.nome_file})` : '';
+      if (inizio && Date.now() - inizio.getTime() > FINESTRA_IN_CORSO_MS) {
+        return `rinviato: il caricamento ${tipo}${chi}${file} e' rimasto interrotto e l'archivio puo' essere incompleto; ricarica il file`;
+      }
+      return `rinviato: caricamento ${tipo}${chi}${file} in corso; si rifa' quando finisce`;
+    }
+  } catch (e) {
+    return null;
   }
-  for (const q of quadrature.filter(dentro)) {
-    try {
-      await base44.functions.invoke('elaboraQuadraturaFir', { quadratura_id: q.id, solo_confronto: true });
-    } catch (e) { errori.push(`quadratura FIR sett. ${q.settimana}: ${messaggioErrore(e)}`); }
+  return null;
+}
+
+// I primi errori di un elenco, per la riga sotto il caricamento.
+function testoErrori(errori) {
+  const primi = errori.slice(0, 3).map(x => (typeof x === 'string' ? x : (x && (x.errore || x.error)) || JSON.stringify(x)));
+  return primi.join('; ') + (errori.length > primi.length ? ` (e altri ${errori.length - primi.length})` : '');
+}
+
+// Contratto con le funzioni dei ricalcoli: riuscito vuol dire risposta 200, e
+// basta. Un 409 (caricamento aperto) o un 500 (con i primi errori) arrivano come
+// eccezione. Una risposta 2xx diversa da 200, o un 200 che dice "rinviato" o porta
+// errori - come rispondeva ricontrollaDichiarazioni prima - non e' un ricalcolo
+// fatto e non si mostra in verde. Restituisce il motivo, o null se e' riuscito.
+function problemaRisposta(res) {
+  const stato = res && typeof res.status === 'number' ? res.status : null;
+  if (stato !== null && stato !== 200) return `risposta ${stato} invece di 200`;
+  const dati = (res && res.data !== undefined ? res.data : res) || {};
+  if (dati.rinviato) {
+    const aperti = Array.isArray(dati.caricamenti_in_corso) ? dati.caricamenti_in_corso : [];
+    return aperti.length
+      ? `rinviato: caricamento ${aperti.map(c => `${c.tipo_file}${c.utente ? ` di ${c.utente}` : ''}`).join(', ')} in corso`
+      : 'rinviato: caricamento in corso';
   }
-  if (errori.length) throw new Error(errori.join('; '));
+  if (Array.isArray(dati.errori) && dati.errori.length) return `${dati.errori.length} non riusciti: ${testoErrori(dati.errori)}`;
+  if (dati.error) return String(dati.error);
+  return null;
+}
+
+// Il messaggio di un ricalcolo rifiutato: quello della funzione, o i suoi primi errori.
+function messaggioRicalcolo(e) {
+  const dati = datiErrore(e);
+  if (dati && !dati.error && Array.isArray(dati.errori) && dati.errori.length) return testoErrori(dati.errori);
+  return messaggioErrore(e);
 }
 
 /**
  * Lancia i ricalcoli che dipendono da un tipo di dato appena caricato o scritto.
  * Non blocca chi chiama: restituisce una promessa con l'esito di ciascun
- * ricalcolo, { nome, ok, errore }, da mostrare a chi ha caricato. Un ricalcolo
- * non riuscito si dice per nome, non si perde.
+ * ricalcolo, { nome, ok, errore }, nell'ordine dell'elenco, da mostrare a chi ha
+ * caricato. Un ricalcolo non riuscito si dice per nome, non si perde.
+ *
+ * I ricalcoli si fanno uno alla volta: ognuno rilegge archivi interi, e nello
+ * stesso momento il workflow degli alert lancia i suoi. In parallelo la
+ * piattaforma rifiuta le richieste troppo ravvicinate, e gli errori che ne
+ * nascevano risultavano "Non aggiornati".
  *
  * @param {string} tipoFile  primarie, secondarie, extra_raccolta, ...
  * @param {object} opzioni   { giorni: giorni italiani di fine trasporto toccati (extra raccolta) }
  */
-export function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
+export async function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
   const elenco = RICALCOLI[tipoFile] || [];
-  if (!elenco.length) return Promise.resolve([]);
+  if (!elenco.length) return [];
   const giorniValidi = [...new Set(giorni.filter(Boolean))];
   // La qualifica si rifa' sull'anno dei dati toccati; per un file, l'anno in corso.
   const anni = [...new Set(giorniValidi.map(g => Number(g.slice(0, 4))))];
   if (!anni.length) anni.push(Number(oggiRoma().slice(0, 4)));
 
+  const aperto = await caricamentoAperto();
+  if (aperto) return elenco.map(k => ({ nome: NOMI_RICALCOLI[k], ok: false, errore: aperto }));
+
+  // Le schede di extra raccolta non passano da un file: la modifica si scrive nel
+  // registro dei caricamenti come le altre, cosi' lo storico delle quadrature e
+  // delle verifiche sa che gli esiti di prima vanno rifatti (regola 2).
+  if (tipoFile === 'extra_raccolta' && giorniValidi.length) {
+    try {
+      const utente = await base44.auth.me().catch(() => null);
+      const ordinati = [...giorniValidi].sort();
+      await base44.entities.UploadLog.create({
+        tipo_file: 'extra_raccolta', nome_file: 'Schede di extra raccolta', esito: 'successo',
+        righe_importate: ordinati.length, utente: (utente && (utente.full_name || utente.email)) || '',
+        messaggio: `Schede modificate con fine trasporto dal ${ordinati[0]} al ${ordinati[ordinati.length - 1]}`,
+      });
+    } catch (e) { /* il ricalcolo parte lo stesso */ }
+  }
+
   const compiti = {
     evasioneAssegnati: () => base44.functions.invoke('controllaEvasioneAssegnati', {}),
     ritiriEct: () => base44.functions.invoke('importaBlocco', { azione: 'ritiri_ect', tipo_file: 'primarie' }),
-    nessunaMovimentazione: () => base44.functions.invoke('ricontrollaDichiarazioni', {}),
-    qualifica: () => Promise.all(anni.map(anno => base44.functions.invoke('qualificaFornitori', { anno }))),
-    verificheSettimana: () => (giorniValidi.length ? riverificaSettimane(giorniValidi) : Promise.resolve()),
+    // Con i giorni toccati si rifanno anche le quadrature piu' vecchie di quelle settimane.
+    verifiche: () => base44.functions.invoke('ricontrollaDichiarazioni', { giorni: giorniValidi }),
+    // un anno alla volta anche qui, per la stessa ragione
+    qualifica: async () => {
+      const risposte = [];
+      for (const anno of anni) risposte.push(await base44.functions.invoke('qualificaFornitori', { anno }));
+      return risposte;
+    },
+    // Il piano settimanale e il suggerimento del lunedi' sono esiti salvati: si
+    // rifanno dopo ogni caricamento di primarie e secondarie, uno dopo l'altro.
+    predittivita: async () => {
+      const piano = await base44.functions.invoke('calcolaPianificazioneSecondaria', {});
+      const dati = (piano && piano.data) || {};
+      if (dati.piano_salvato === false) throw new Error(dati.caricamento_in_corso ? `piano non salvato: ${dati.caricamento_in_corso}` : 'piano non salvato');
+      return [piano, await base44.functions.invoke('analisiSettimanalePredittiva', {})];
+    },
   };
-  return Promise.all(elenco.map(async (k) => {
+  const esiti = [];
+  for (const k of elenco) {
     try {
-      await compiti[k]();
-      return { nome: NOMI_RICALCOLI[k], ok: true };
+      const risposte = [].concat(await compiti[k]());
+      const problema = risposte.map(problemaRisposta).find(Boolean);
+      esiti.push(problema ? { nome: NOMI_RICALCOLI[k], ok: false, errore: problema } : { nome: NOMI_RICALCOLI[k], ok: true });
     } catch (e) {
-      return { nome: NOMI_RICALCOLI[k], ok: false, errore: messaggioErrore(e) };
+      esiti.push({ nome: NOMI_RICALCOLI[k], ok: false, errore: messaggioRicalcolo(e) });
     }
-  }));
+  }
+  return esiti;
 }
 
 /** Una riga da mostrare sotto il caricamento: cosa si e' aggiornato e cosa no. */
@@ -536,8 +618,14 @@ export function testoRicalcoli(esiti) {
   if (!esiti.length) return null;
   const falliti = esiti.filter(e => !e.ok);
   if (!falliti.length) return { classe: 'text-green-700', testo: `Aggiornati: ${esiti.map(e => e.nome).join(', ')}.` };
+  // Lo stesso motivo per tutti (un caricamento aperto) si dice una volta sola.
+  const motivi = [...new Set(falliti.map(e => e.errore))];
+  const riusciti = esiti.filter(e => e.ok).map(e => e.nome);
+  const testo = motivi.length === 1 && falliti.length > 1
+    ? `Non aggiornati: ${falliti.map(e => e.nome).join(', ')} (${motivi[0]}).`
+    : `Non aggiornati: ${falliti.map(e => `${e.nome} (${e.errore})`).join('; ')}.`;
   return {
     classe: 'text-amber-700',
-    testo: `Non aggiornati: ${falliti.map(e => `${e.nome} (${e.errore})`).join('; ')}. Si rifanno al prossimo caricamento o dal modulo.`,
+    testo: `${testo}${riusciti.length ? ` Aggiornati: ${riusciti.join(', ')}.` : ''} Si rifanno al prossimo caricamento o dal modulo.`,
   };
 }

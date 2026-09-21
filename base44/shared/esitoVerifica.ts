@@ -57,24 +57,13 @@ const testoEsito = (esito) => JSON.stringify({
   esiti: esito.esiti, assenti: esito.assenti, escluse: esito.escluse, quadratura: esito.quadratura,
 });
 
-// Ingressi, uscite e pesi complessivi, di tutti i canali insieme. Il confronto non
-// li produce piu', perche' i canali non si sommano; DettaglioVerifica.jsx ed
-// esitoVerificaPdf.js pero' li leggono ancora dal record, e senza di loro
-// mostrerebbero zero ingressi dove ce ne sono. Si scrivono qui, in un punto solo,
-// ricavati dalla quadratura per movimentazione e canale, finche' quelle due
-// pagine non passano alle righe per canale: poi si tolgono.
-function campiDaDismettere(esito) {
-  const somma = (tipo, campo) => esito.quadratura.filter(q => q.tipo === tipo).reduce((t, q) => t + (q[campo] || 0), 0);
-  return {
-    ingressi_gestionale: somma('ingresso', 'formulari_gestionale'),
-    peso_ingressi_kg: somma('ingresso', 'kg_gestionale'),
-    uscite_gestionale: somma('uscita', 'formulari_gestionale'),
-    peso_uscite_kg: somma('uscita', 'kg_gestionale'),
-    peso_report_kg: esito.esiti.reduce((t, e) => t + ((e.report && e.report.kg) || 0), 0),
-  };
-}
-
-/** Scrive esito e riepilogo sulla verifica, poi aggiorna l'alert della dichiarazione. */
+/**
+ * Scrive esito e riepilogo sulla verifica, poi aggiorna l'alert della dichiarazione.
+ *
+ * Ingressi, uscite e pesi complessivi non si scrivono piu': sommavano rete, ACI
+ * ed extra raccolta in un numero solo. Formulari e chili stanno nella quadratura
+ * dell'esito, per movimentazione e canale, e da li' li leggono pagina e PDF.
+ */
 export async function salvaEsito(base44, verifica, esito, riprova = (fn) => fn()) {
   const id = verifica.id;
   const verificata_il = new Date().toISOString();
@@ -82,7 +71,6 @@ export async function salvaEsito(base44, verifica, esito, riprova = (fn) => fn()
     stato: 'completata',
     esito_json: await valoreCampo(base44, 'VerificaReport', id, 'esito_json', testoEsito(esito)),
     ...esito.riepilogo,
-    ...campiDaDismettere(esito),
     verificata_il,
     errore: '',
   }));
@@ -158,8 +146,15 @@ export async function ricontrollaVerifiche(base44, verifiche, movimenti, { scriv
     try {
       const righe = dichiarazione ? [] : JSON.parse((await riprova(() => leggiCampo(base44, 'VerificaReport', v, 'righe_report_json'))) || '[]');
       const esito = calcolaEsito(v, righe, movimenti);
-      const prima = await riprova(() => leggiCampo(base44, 'VerificaReport', v, 'esito_json'));
-      const cambiato = testoEsito(esito) !== prima || esito.riepilogo.conformita !== v.conformita;
+      // Un esito salvato che non si ricompone (parti doppie o mancanti) non e'
+      // un errore della verifica: si riscrive, e valoreCampo cancella tutte le
+      // parti del campo prima di rifarle. Lanciato, lasciava la verifica fra gli
+      // errori a ogni riconfronto, senza ripararsi mai.
+      let prima = '';
+      try { prima = await riprova(() => leggiCampo(base44, 'VerificaReport', v, 'esito_json')); } catch { /* si riscrive */ }
+      const firma = (lista) => (Array.isArray(lista) ? lista.map(c => `${c.canale}:${c.conformita}:${c.anomalie}:${c.assenti}`).join('|') : '');
+      const cambiato = testoEsito(esito) !== prima || esito.riepilogo.conformita !== v.conformita
+        || firma(esito.riepilogo.per_canale) !== firma(v.per_canale);
       const campi = { ...esito.riepilogo, stato: 'completata' };
       let salvato = false;
       if (cambiato && scrivi) {
@@ -172,6 +167,23 @@ export async function ricontrollaVerifiche(base44, verifiche, movimenti, { scriv
     }
   }
   return risultati;
+}
+
+/**
+ * Di ogni soggetto e settimana la verifica piu' recente (per created_date): le
+ * altre sono state sostituite da un report o da una dichiarazione successivi e
+ * restano solo finche' un amministratore non apre la settimana. Riconfrontate,
+ * una dichiarazione ormai sostituita dal report riapriva l'alert "dichiarata
+ * nessuna movimentazione", e che restasse aperto dipendeva dall'ordine di arrivo.
+ */
+export function piuRecentiPerSoggetto(verifiche) {
+  const perChiave = new Map();
+  for (const v of verifiche || []) {
+    const k = `${v.anno}-${v.settimana}-${v.soggetto_chiave}`;
+    const gia = perChiave.get(k);
+    if (!gia || String(v.created_date || '') > String(gia.created_date || '')) perChiave.set(k, v);
+  }
+  return [...perChiave.values()];
 }
 
 export { CATEGORIE_MOVIMENTO };

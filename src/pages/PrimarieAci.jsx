@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { annoOrdine, giornoOrdine, giornoMovimento, meseOrdine } from '@/lib/movimenti';
+import { eTerminato, giornoOrdine, giornoMovimento } from '@/lib/movimenti';
 import { giornoRoma } from '@/lib/giornoItaliano';
 import { base44 } from '@/api/base44Client';
 import { Loader2, RefreshCw, Truck, Factory, Package, Filter, X } from 'lucide-react';
@@ -7,10 +7,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useTableSort } from '@/hooks/useTableSort';
 import SortHeader from '@/components/shared/SortHeader';
 import MultiSelect from '@/components/shared/MultiSelect';
-import { formatNumber, fmtTon } from '@/lib/utils';
+import { formatNumber, formatIntero, fmtTon } from '@/lib/utils';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdOrdine';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+
+// Il giorno con cui la pagina colloca un ordine: la fine del trasporto; per un
+// ordine non terminato (cancellato prima del ritiro) l'immissione. Un terminato
+// senza fine trasporto non ha giorno, mese ne' anno: giornoOrdine ripiegava
+// sull'immissione, e un ritiro di luglio su un ordine di maggio finiva nel
+// riepilogo di maggio. Resta fuori da conteggi e riepiloghi e si segnala.
+const giornoElenco = (r) => (eTerminato(r) ? giornoMovimento(r) : giornoOrdine(r));
+
+// I caricamenti che riscrivono l'archivio delle primarie ACI.
+const CARICAMENTI_ACI = ['primarie', 'primarie_aci'];
 
 const DETAIL_COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
@@ -48,53 +59,78 @@ export default function PrimarieAci() {
   // Cercando un ID si passa al dettaglio dei record, in tutto l'archivio.
   useEffect(() => { if (cercaId.trim()) setScheda('dettaglio'); }, [cercaId]);
 
+  // Tutto l'archivio, a pagine: una lettura sola si ferma al suo limite e i
+  // conteggi restavano corti senza dirlo.
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await base44.entities.PrimariaAci.list('-created_date', 5000);
+      const data = await fetchAllClient(base44.entities.PrimariaAci);
       setRecords(data);
     } catch (e) { console.error(e); }
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  // Ogni caricamento delle primarie aggiorna la pagina: restava quella di prima
+  // finche' qualcuno non premeva Aggiorna. Si ricarica a caricamento concluso,
+  // mai mentre l'archivio si sta riscrivendo (in_corso).
+  useEffect(() => {
+    const unsub = base44.entities.UploadLog.subscribe((event) => {
+      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso' && CARICAMENTI_ACI.includes(event.data?.tipo_file)) load();
+    });
+    return unsub;
+  }, [load]);
 
-  // Mese e giorno di ogni ordine si ricavano una volta per caricamento dalla fine
-  // del trasporto (movimenti.js; per chi non l'ha, l'immissione): il campo mese
-  // salvato puo' venire da un'importazione vecchia, quando il riferimento era la
-  // chiusura a portale, e filtro per mese e riepilogo mensile lo usavano.
-  const righe = useMemo(() => records.map(r => ({
-    ...r,
-    giorno_ordine: giornoOrdine(r) || null,
-    fine_trasporto: giornoMovimento(r) || null,
-    mese: meseOrdine(r),
-  })), [records]);
+  // Mese, anno e giorno di ogni ordine si ricavano una volta per caricamento
+  // (giornoElenco): il campo mese salvato puo' venire da un'importazione vecchia,
+  // quando il riferimento era la chiusura a portale, e filtro per mese e
+  // riepilogo mensile lo usavano.
+  const righe = useMemo(() => records.map(r => {
+    const g = giornoElenco(r);
+    return {
+      ...r,
+      giorno_ordine: g || null,
+      anno_ordine: g ? Number(g.slice(0, 4)) : null,
+      fine_trasporto: giornoMovimento(r) || null,
+      mese: g ? MESI[Number(g.slice(5, 7)) - 1] : null,
+    };
+  }), [records]);
 
   const destinazioni = [...new Set(records.map(r => r.destinazione).filter(Boolean))].sort();
   const province = [...new Set(records.map(r => (r.provincia || '').trim()).filter(Boolean))].sort();
   const trasportatori = [...new Set(records.map(r => (r.trasportatore || '').trim()).filter(Boolean))].sort();
   const regioni = [...new Set(records.map(r => (r.regione || '').trim()).filter(Boolean))].sort();
   const stati = [...new Set(records.map(r => (r.stato || '').trim()).filter(Boolean))].sort();
-  const anni = [...new Set(records.map(r => {
-    return annoOrdine(r);
-  }).filter(Boolean))].sort((a, b) => b - a);
+  const anni = [...new Set(righe.map(r => r.anno_ordine).filter(Boolean))].sort((a, b) => b - a);
 
-  const filtered = righe.filter(r => {
-    if (filterMese.length > 0 && !filterMese.includes(r.mese)) return false;
+  // I filtri si dividono in due, come nelle secondarie (computeSecondarieMatrix):
+  // quelli di periodo leggono giorno, mese e anno ricavati sopra, gli altri il
+  // record. Servono separati per contare i terminati senza fine trasporto anche
+  // quando si guarda un mese, che nessun filtro di periodo prende.
+  const passaAltri = (r) => {
     if (filterDestinazione.length > 0 && !filterDestinazione.includes(r.destinazione)) return false;
     if (filterProvincia.length > 0 && !filterProvincia.includes((r.provincia || '').trim())) return false;
     if (filterTrasportatore.length > 0 && !filterTrasportatore.includes((r.trasportatore || '').trim())) return false;
     if (filterRegione.length > 0 && !filterRegione.includes((r.regione || '').trim())) return false;
     if (filterStato.length > 0 && !filterStato.includes((r.stato || '').trim())) return false;
-    if (filterAnno.length > 0) {
-      const anno = annoOrdine(r);
-      if (!filterAnno.map(String).includes(String(anno))) return false;
-    }
-    if (filterData) {
-      if (r.giorno_ordine !== filterData) return false;
-    }
     return true;
-  });
+  };
+  const passaPeriodo = (r) => {
+    if (filterMese.length > 0 && !filterMese.includes(r.mese)) return false;
+    if (filterAnno.length > 0 && !filterAnno.map(String).includes(String(r.anno_ordine))) return false;
+    if (filterData && r.giorno_ordine !== filterData) return false;
+    return true;
+  };
+  // L'elenco mostra ogni ordine che risponde ai filtri, qualunque sia lo stato.
+  const filtered = righe.filter(r => passaAltri(r) && passaPeriodo(r));
+  // KPI e riepiloghi parlano di ritiri fatti: senza un filtro sullo stato contano
+  // solo i terminati, nel giorno della fine del trasporto. Prima entravano anche
+  // i cancellati, che l'archivio ACI contiene, e i terminati senza fine
+  // trasporto, messi nel mese di immissione: questi si contano a parte.
+  const conStato = filterStato.length > 0;
+  const scelti = righe.filter(r => passaAltri(r) && (conStato || eTerminato(r)));
+  const senzaFine = scelti.filter(r => eTerminato(r) && !r.fine_trasporto);
+  const contati = scelti.filter(r => r.giorno_ordine && passaPeriodo(r));
 
   // Il dettaglio si apre sui piu' recenti per fine trasporto: ordinato per
   // chiusura, fra i primi 500 mancava chi aveva ritirato ieri e non era ancora
@@ -102,13 +138,13 @@ export default function PrimarieAci() {
   const dettaglio = cercaId.trim() ? righe.filter(r => corrispondeIdOrdine(r, cercaId)) : filtered;
   const sortedDetail = useTableSort(dettaglio, 'giorno_ordine', 'desc');
 
-  const totalKg = filtered.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
-  const totalRichiesti = filtered.reduce((s, r) => s + (r.quantita_richiesta || 0), 0);
-  const totalRitirati = filtered.reduce((s, r) => s + (r.quantita_ritirata || 0), 0);
+  const totalKg = contati.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
+  const totalRichiesti = contati.reduce((s, r) => s + (r.quantita_richiesta || 0), 0);
+  const totalRitirati = contati.reduce((s, r) => s + (r.quantita_ritirata || 0), 0);
 
   // Aggregazione per destinazione
   const byDest = {};
-  filtered.forEach(r => {
+  contati.forEach(r => {
     const d = r.destinazione || 'N/D';
     if (!byDest[d]) byDest[d] = { count: 0, kg: 0 };
     byDest[d].count++;
@@ -116,9 +152,9 @@ export default function PrimarieAci() {
   });
   const destRows = Object.entries(byDest).sort((a, b) => b[1].kg - a[1].kg);
 
-  // Aggregazione per mese
+  // Aggregazione per mese, quello della fine del trasporto
   const byMese = {};
-  filtered.forEach(r => {
+  contati.forEach(r => {
     const m = r.mese || 'N/D';
     if (!byMese[m]) byMese[m] = { count: 0, kg: 0 };
     byMese[m].count++;
@@ -142,14 +178,14 @@ export default function PrimarieAci() {
         </button>
       </div>
 
-      {/* KPI */}
+      {/* KPI: sui ritiri fatti (contati), non sull'elenco */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="border rounded-lg p-3">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1"><Package className="w-3.5 h-3.5" /> Record</div>
-          <p className="text-xl font-bold">{formatNumber(filtered.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1"><Package className="w-3.5 h-3.5" /> {conStato ? 'Ordini' : 'Ordini terminati'}</div>
+          <p className="text-xl font-bold">{formatIntero(contati.length)}</p>
         </div>
         <div className="border rounded-lg p-3">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1"><Truck className="w-3.5 h-3.5" /> Kg Totali</div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1"><Truck className="w-3.5 h-3.5" /> Tonnellate</div>
           <p className="text-xl font-bold">{fmtTon(totalKg / 1000)}</p>
         </div>
         <div className="border rounded-lg p-3">
@@ -161,6 +197,18 @@ export default function PrimarieAci() {
           <p className="text-xl font-bold">{formatNumber(totalRitirati, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
         </div>
       </div>
+      <p className="text-xs text-muted-foreground -mt-3">
+        Indicatori e riepiloghi per destinazione e per mese contano {conStato ? 'gli ordini degli stati scelti' : 'gli ordini terminati'}, nel mese in cui è finito il trasporto; il dettaglio elenca tutti gli ordini che rispondono ai filtri.
+      </p>
+      {senzaFine.length > 0 && (
+        <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 text-sm">
+          {senzaFine.length === 1 ? '1 ordine terminato non ha' : `${formatIntero(senzaFine.length)} ordini terminati non hanno`} la fine del trasporto
+          {senzaFine.some(r => r.id_ordine) && <> (es. {senzaFine.map(r => r.id_ordine).filter(Boolean).slice(0, 5).join(', ')})</>}:
+          {senzaFine.length === 1
+            ? ' non ha un mese e resta fuori da indicatori e riepiloghi. Si vede nel dettaglio senza filtri di periodo o cercando l\'ID.'
+            : ' non hanno un mese e restano fuori da indicatori e riepiloghi. Si vedono nel dettaglio senza filtri di periodo o cercando l\'ID.'}
+        </div>
+      )}
 
       <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loading || !records.length ? null : dettaglio.length} />
 
@@ -182,7 +230,7 @@ export default function PrimarieAci() {
           <MultiSelect allLabel="Tutte le destinazioni" options={destinazioni} selected={filterDestinazione} onChange={setFilterDestinazione} />
           <MultiSelect allLabel="Tutte le province" options={province} selected={filterProvincia} onChange={setFilterProvincia} />
           <MultiSelect allLabel="Tutti i trasportatori" options={trasportatori} selected={filterTrasportatore} onChange={setFilterTrasportatore} />
-          <input type="date" value={filterData} onChange={e => setFilterData(e.target.value)} className="border rounded-md px-3 py-2 text-sm" placeholder="Fine trasporto" title="Giorno di fine trasporto (per gli ordini senza trasporto, giorno di immissione)" aria-label="Giorno di fine trasporto" />
+          <input type="date" value={filterData} onChange={e => setFilterData(e.target.value)} className="border rounded-md px-3 py-2 text-sm" placeholder="Fine trasporto" title="Giorno di fine trasporto (per gli ordini non terminati, giorno di immissione)" aria-label="Giorno di fine trasporto" />
         </div>
       </div>
 
@@ -214,7 +262,7 @@ export default function PrimarieAci() {
               </tbody>
               <tfoot><tr className="bg-primary text-primary-foreground font-bold">
                 <td className="px-3 py-3">TOTALE</td>
-                <td className="px-3 py-3 text-right">{formatNumber(filtered.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                <td className="px-3 py-3 text-right">{formatIntero(contati.length)}</td>
                 <td className="px-3 py-3 text-right">{formatNumber(totalKg, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                 <td className="px-3 py-3 text-right">{fmtTon(totalKg / 1000)}</td>
               </tr></tfoot>
@@ -267,7 +315,7 @@ export default function PrimarieAci() {
               </tbody>
             </table>
           </div>
-          {sortedDetail.sorted.length > 500 && <p className="text-xs text-muted-foreground mt-2">Mostrati primi 500 di {formatNumber(sortedDetail.sorted.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} record{sortedDetail.sortKey === 'giorno_ordine' ? ', i più recenti per fine trasporto (per chi non l\'ha, per immissione)' : ''}.</p>}
+          {sortedDetail.sorted.length > 500 && <p className="text-xs text-muted-foreground mt-2">Mostrati primi 500 di {formatNumber(sortedDetail.sorted.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} record{sortedDetail.sortKey === 'giorno_ordine' && sortedDetail.sortDir === 'desc' ? ', i più recenti per fine trasporto (per un ordine non terminato, per immissione; i terminati senza fine trasporto in cima)' : ''}.</p>}
         </TabsContent>
       </Tabs>
     </div>

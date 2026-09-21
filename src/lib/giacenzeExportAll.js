@@ -1,17 +1,13 @@
 import * as XLSX from 'xlsx';
 import { formattaPesi } from '@/lib/formatoExcel';
-import { formatTonnellate } from '@/lib/utils';
+import { giornoRoma } from '@/lib/giornoItaliano';
 
-function fmt(n) {
-  if (n == null || n === '' || isNaN(n)) return '';
-  return formatTonnellate(Number(n));
-}
-
-function fmtData(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('it-IT');
+// Il giorno italiano, scritto GG/MM/AAAA. Con toLocaleDateString un giorno
+// salvato come AAAA-MM-GG (mezzanotte UTC) si leggeva nel fuso del computer, e
+// fuori dall'Italia usciva il giorno prima.
+function fmtData(v) {
+  const g = giornoRoma(v);
+  return g ? g.split('-').reverse().join('/') : '';
 }
 
 // Export complessivo: un foglio per ciascuna delle quattro schede.
@@ -23,15 +19,17 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
   // con una sola, uno stoccaggio usciva con rete e ACI in un numero e il TOTALE
   // sommava la classe 9 degli stoccaggi alla rete degli impianti. La cella vuota
   // vuol dire non calcolata (l'ACI di un impianto, uno stoccaggio senza
-  // rilevazione), non zero.
+  // rilevazione, un impianto senza il file degli ordini non dichiarati, la cui
+  // giacenza a zero non e' un dato), non zero.
   const CLASSI = ['P', 'M', 'G1', 'G2', 'ACI'];
   const sitHeaders = ['Sito', 'Ruolo', 'Giacenza rete a portale (t)', 'Giacenza ACI (t)', 'Extra raccolta in piazzale, fuori portale (t)', ...CLASSI.map(c => `${c} (kg)`), 'Rilevazione stoccaggio', 'Dati aggiornati al', 'In attesa di dichiarazione (t)', 'Ordini da dichiarare', 'Dichiarato (t)', 'Tipologia trattamento'];
-  const classi = (r) => CLASSI.map(c => (r.giacenza_classi_kg ? r.giacenza_classi_kg[c] || 0 : null));
+  const senzaFile = (r) => r.tipo_destinazione === 'imp' && !(r.fotografia && r.fotografia.del);
+  const classi = (r) => CLASSI.map(c => (r.giacenza_classi_kg && !senzaFile(r) ? r.giacenza_classi_kg[c] || 0 : null));
   const vuotaSeManca = (v) => (v === null || v === undefined ? '' : v);
   const sitRows = data.righe.map(r => [
     r.sito,
     r.tipo_destinazione === 'imp' ? 'Impianto' : 'Stoccaggio',
-    vuotaSeManca(r.giacenza_rete_t),
+    vuotaSeManca(senzaFile(r) ? null : r.giacenza_rete_t),
     vuotaSeManca(r.giacenza_aci_t),
     vuotaSeManca(r.giacenza_extra_t),
     ...classi(r),
@@ -49,16 +47,19 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
   XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws1), 'Situazione');
 
   // --- Foglio 2: Da dichiarare ---
-  const ddHeaders = ['Ordine', 'FIR', 'Data chiusura', 'Punto di raccolta', 'Comune', 'Prov.', 'Prodotto', 'CER', 'Peso da dichiarare (kg)', 'Destinazione', 'Trasferito a', 'Trasportatore'];
+  // La data che conta e' la fine del trasporto, gia' sul giorno italiano, come
+  // nell'export della scheda Da dichiarare: la stessa lista, le stesse colonne.
+  // La chiusura a portale non decide niente e qui non serve.
+  const ddHeaders = ['Ordine', 'FIR', 'Fine trasporto', 'Punto di raccolta', 'Comune', 'Prov.', 'Prodotto', 'CER', 'Peso da dichiarare (kg)', 'Destinazione', 'Trasferito a', 'Trasportatore'];
   const ddRows = (ordiniData.righe || []).map(r => [
-    r.ordine_primaria || '', r.numero_fir || '', fmtData(r.data_chiusura),
+    r.ordine_primaria || '', r.numero_fir || '', r.fine_trasporto ? r.fine_trasporto.split('-').reverse().join('/') : '',
     r.punto_di_raccolta || '', r.comune || '', r.provincia || '',
     r.prodotto || '', r.cer || '', r.peso_non_dichiarato_kg || 0,
     r.destinazione || '', r.destinazione_secondaria || '', r.trasportatore || '',
   ]);
   ddRows.push(['TOTALE', '', '', '', '', '', '', '', ordiniData.totale_kg, '', '', '']);
   const ws2 = XLSX.utils.aoa_to_sheet([ddHeaders, ...ddRows]);
-  ws2['!cols'] = [{ wch: 16 }, { wch: 16 }, { wch: 12 }, { wch: 28 }, { wch: 18 }, { wch: 6 }, { wch: 18 }, { wch: 10 }, { wch: 18 }, { wch: 24 }, { wch: 24 }, { wch: 24 }];
+  ws2['!cols'] = [{ wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 28 }, { wch: 18 }, { wch: 6 }, { wch: 18 }, { wch: 10 }, { wch: 18 }, { wch: 24 }, { wch: 24 }, { wch: 24 }];
   XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws2), 'Da dichiarare');
 
   // --- Foglio 3: Derivati ---

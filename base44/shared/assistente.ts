@@ -10,7 +10,9 @@ import { computeRaccoltoData, MESI } from "./raccoltoCalculator.ts";
 import { aggregaTargetMensili, aggregaTargetAnnui } from "./targetRaccoglitori.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { formatoTonnellate } from "./formato.ts";
-import { giornoRoma } from "./giornoItaliano.ts";
+import { giornoRoma, annoRoma } from "./giornoItaliano.ts";
+import { eTerminato, giornoMovimento } from "./movimenti.ts";
+import { contaFormulari } from "./formulari.ts";
 
 const PAROLE_DATI = [
   'target', 'raccolt', 'raccoglitor', 'giacenz', 'plafond', 'tonnellat', 'campania', 'puglia', 'basilicata',
@@ -79,10 +81,15 @@ export async function situazioneGestionale(base44, oggi) {
   const mese = MESI[meseIdx];
   const svc = base44.asServiceRole.entities;
 
-  const [raccolto, raccoltoAci, extra, mensili, annui, commesse, controlli, alert, riepilogoQualifica, giacenze] = await Promise.all([
+  const [raccolto, raccoltoAci, extra, reteSenzaData, aciSenzaData, mensili, annui, commesse, controlli, alert, riepilogoQualifica, giacenze] = await Promise.all([
     provaA(() => computeRaccoltoData(base44, { anno: [anno], canale: 'rete' }), null),
     provaA(() => computeRaccoltoData(base44, { anno: [anno], canale: 'aci' }), null),
     provaA(() => fetchAll(svc.ExtraRaccolta, { stato: 'terminato' }), []),
+    // Il raccolto scarta i terminati senza fine trasporto: si chiedono a parte,
+    // con un filtro sul campo vuoto, per poterli dire. null se l'archivio non
+    // accetta il filtro: allora il conteggio non c'e', che non vuol dire zero.
+    provaA(() => fetchAll(svc.PrimariaRete, { trasporto_finito_il: null }), null),
+    provaA(() => fetchAll(svc.PrimariaAci, { trasporto_finito_il: null }), null),
     provaA(() => fetchAll(svc.TargetMensile, { anno }), []),
     provaA(() => fetchAll(svc.TargetRaccoglitore, { anno }), []),
     provaA(() => svc.CommessaEcotyre.filter({ anno }), []),
@@ -143,6 +150,19 @@ export async function situazioneGestionale(base44, oggi) {
     }
   }
 
+  // I terminati senza fine trasporto non stanno in nessun mese: il raccolto qui
+  // sopra li esclude, e va detto, altrimenti sembra completo. L'anno e' quello
+  // dell'immissione, l'unica data che hanno; mai la chiusura a portale.
+  const senzaData = (xs) => (xs || []).filter(r => eTerminato(r) && !giornoMovimento(r) && annoRoma(r.ordine_immesso_il) === anno);
+  const esclusi = [
+    ['RETE', reteSenzaData && senzaData(reteSenzaData)],
+    ['ACI', aciSenzaData && senzaData(aciSenzaData)],
+    ['EXTRA RACCOLTA', senzaData(extra.filter(r => String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'secondaria'))],
+  ].filter(([, xs]) => xs && xs.length);
+  if (esclusi.length) {
+    righe.push(`Terminati senza data di fine trasporto, immessi nel ${anno} ed esclusi dal raccolto qui sopra, un canale per volta: ${esclusi.map(([c, xs]) => `${c} ${contaFormulari(xs)} ${contaFormulari(xs) === 1 ? 'formulario' : 'formulari'}, ${t1(xs.reduce((s, r) => s + (Number(r.peso_effettivo) || 0), 0) / 1000)} t`).join('; ')}. Vanno corretti nel file del portale e ricaricati.`);
+  }
+
   // --- Raccoglitori: target contro raccolto ---
   const annuiAgg = aggregaTargetAnnui(annui);
   const mensiliAgg = aggregaTargetMensili(mensili);
@@ -188,16 +208,30 @@ export async function situazioneGestionale(base44, oggi) {
   // classi 1-4 piu' i movimenti finiti dopo), l'ACI degli stoccaggi (classe 9) e
   // l'extra raccolta in piazzale, che a portale non c'e'. Con una colonna sola lo
   // stoccaggio di Irigom mostrava la classe 9 dentro la giacenza e poi di nuovo
-  // "ACI a parte". Il trattino vuol dire non calcolata, non zero: per esempio uno
-  // stoccaggio senza rilevazione.
+  // "ACI a parte". Il trattino vuol dire non calcolata o non pertinente, non
+  // zero, e va scritto nel testo: il modello non legge i commenti del codice, e
+  // un "-" lo puo' prendere per zero. Un impianto senza il file degli ordini non
+  // dichiarati ha una giacenza a zero che non e' un dato: anche li' il trattino.
   if (giacenze && Array.isArray(giacenze.righe) && giacenze.righe.length) {
     const tc = (v) => (v === null || v === undefined ? '-' : t1(v));
-    righe.push('Impianti e stoccaggi, un canale per colonna e mai sommati (giacenza RETE | giacenza ACI | extra raccolta in piazzale | target RETE | primarie RETE nell\'anno | % del target RETE | residuo RETE | conferito ACI nell\'anno | conferito extra raccolta nell\'anno):');
+    const stoc = (g) => g.tipo_destinazione === 'stoc';
+    const senzaFile = (g) => !stoc(g) && !(g.fotografia && g.fotografia.del);
+    righe.push('Impianti e stoccaggi, un canale per colonna e mai sommati (giacenza RETE | giacenza ACI | extra raccolta in piazzale | target RETE | primarie RETE nell\'anno | % del target RETE | residuo RETE | conferito ACI nell\'anno | conferito extra raccolta nell\'anno). Il trattino vuol dire non calcolata o non pertinente, MAI zero: la giacenza di uno stoccaggio senza rilevazione del portale o di un impianto senza il file degli ordini non dichiarati (non calcolata); l\'ACI e l\'extra raccolta di un impianto, l\'extra raccolta di uno stoccaggio che nell\'anno non ne ha movimentata (non pertinente).');
     for (const g of giacenze.righe.slice(0, 25)) {
-      righe.push(`- ${g.sito} (${g.tipo_destinazione === 'stoc' ? 'stoccaggio' : 'impianto'}): ${tc(g.giacenza_rete_t)} | ${tc(g.giacenza_aci_t)} | ${tc(g.giacenza_extra_t)} | ${g.target_totale_t ? t1(g.target_totale_t) : '-'} | ${t1(g.conferito_primarie_t)} | ${g.percentuale_target !== null && g.percentuale_target !== undefined ? p1(g.percentuale_target) + '%' : '-'} | ${g.residuo_t !== null && g.residuo_t !== undefined ? t1(g.residuo_t) : '-'} | ${t1(g.conferito_aci_t)} | ${t1(g.conferito_extra_t)}`);
+      righe.push(`- ${g.sito} (${stoc(g) ? 'stoccaggio' : 'impianto'}): ${senzaFile(g) ? '-' : tc(g.giacenza_rete_t)} | ${tc(g.giacenza_aci_t)} | ${tc(g.giacenza_extra_t)} | ${g.target_totale_t ? t1(g.target_totale_t) : '-'} | ${t1(g.conferito_primarie_t)} | ${g.percentuale_target !== null && g.percentuale_target !== undefined ? p1(g.percentuale_target) + '%' : '-'} | ${g.residuo_t !== null && g.residuo_t !== undefined ? t1(g.residuo_t) : '-'} | ${t1(g.conferito_aci_t)} | ${t1(g.conferito_extra_t)}`);
     }
     const tot = giacenze.totali || {};
-    righe.push(`Giacenze per canale, tre totali distinti: RETE ${t1(tot.giacenza_portale_t)} t; ACI negli stoccaggi ${t1(tot.giacenza_aci_t)} t; extra raccolta in piazzale ${t1(tot.giacenza_extra_t)} t.`);
+    // Chi non ha il dato resta fuori dai totali: lo si dice, canale per canale,
+    // altrimenti il totale sembra completo. Uno stoccaggio senza rilevazione
+    // manca sia alla rete sia all'ACI.
+    const senzaRilevazione = giacenze.righe.filter(g => stoc(g) && (g.giacenza_rete_t === null || g.giacenza_rete_t === undefined)).map(g => g.sito);
+    const impiantiSenzaFile = giacenze.righe.filter(senzaFile).map(g => g.sito);
+    const fuoriRete = [
+      ...(impiantiSenzaFile.length ? [`impianti senza il file degli ordini non dichiarati: ${impiantiSenzaFile.join(', ')}`] : []),
+      ...(senzaRilevazione.length ? [`stoccaggi senza rilevazione: ${senzaRilevazione.join(', ')}`] : []),
+    ];
+    const fuoriAci = senzaRilevazione.length ? ` (esclusi gli stoccaggi senza rilevazione: ${senzaRilevazione.join(', ')})` : '';
+    righe.push(`Giacenze per canale, tre totali distinti: RETE ${t1(tot.giacenza_portale_t)} t${fuoriRete.length ? ` (esclusi ${fuoriRete.join('; ')})` : ''}; ACI negli stoccaggi ${t1(tot.giacenza_aci_t)} t${fuoriAci}; extra raccolta in piazzale ${t1(tot.giacenza_extra_t)} t.`);
     // Il confronto col target lo fa calcolaGiacenze sulla sola giacenza di rete.
     const sopra = (giacenze.anomalie || []).filter(a => a.tipo === 'giacenza_sopra_target');
     if (sopra.length) righe.push(`Siti con giacenza RETE sopra il target: ${sopra.map(a => a.sito).join(', ')}.`);

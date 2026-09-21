@@ -7,7 +7,7 @@
 // ordine, non riassunti.
 //
 // Rete, ACI ed extra raccolta stanno in sezioni separate e non esiste un totale
-// che li somma: sono canali indipendenti.
+// che li somma: sono canali indipendenti. Anche l'esito e' uno per canale.
 
 import { formatKg, formatTonnellate } from '@/lib/utils';
 import { dataIt } from '@/lib/verifiche';
@@ -25,10 +25,38 @@ const tonn = (kg) => formatTonnellate((Number(kg) || 0) / 1000);
 const cifre = (v) => (v ? `${v.n} · ${formatKg(v.kg)}` : '—');
 const descrizione = (v) => (v ? `${v.n} FIR · ${formatKg(v.kg)} kg` : 'non presente');
 
+const CANALI = ['RETE', 'ACI', 'EXTRA RACCOLTA'];
+
+/**
+ * La conformita' canale per canale. Di norma arriva con l'esito (per_canale);
+ * per un esito salvato prima si ricava qui dai flussi, con le stesse regole del
+ * server: piena solo se nel canale tutte le righe quadrano, la trascrizione torna
+ * con i totali stampati, la settimana e' quella giusta e non manca nessuna tabella.
+ */
+function conformitaPerCanale(esito) {
+  if (esito && Array.isArray(esito.per_canale) && esito.per_canale.length) return esito.per_canale;
+  const out = [];
+  for (const canale of CANALI) {
+    const flussi = ((esito && esito.flussi) || []).filter(f => f.canale === canale);
+    if (!flussi.length) continue;
+    let congruenti = 0, incongruenti = 0, mancanti = 0;
+    for (const f of flussi) {
+      mancanti += (f.tabelle_mancanti || []).length;
+      for (const c of f.celle || []) { if (c.verdetto === 'congruente') congruenti++; else incongruenti++; }
+    }
+    const letturaVerificata = !!esito.lettura_verificata;
+    const piena = incongruenti === 0 && letturaVerificata && !esito.settimana_discorde && mancanti === 0;
+    out.push({ canale, congruenti, incongruenti, lettura_verificata: letturaVerificata, conformita: piena ? 'piena' : 'parziale' });
+  }
+  return out;
+}
+
 export async function esportaQuadraturaFirPdf(q, esito, lettura) {
   const { jsPDF } = await import('jspdf');
   const flussi = (esito && esito.flussi) || [];
-  const piena = q.conformita === 'piena';
+  // Rete, ACI ed extra raccolta hanno ciascuno il suo verdetto: una riga
+  // dell'extra raccolta non rende "parziale" la rete sul documento consegnato.
+  const perCanale = conformitaPerCanale(esito);
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
@@ -149,32 +177,50 @@ export async function esportaQuadraturaFirPdf(q, esito, lettura) {
   testata(true);
   testo('CONTEGGIO E SOMMA DEI FIR', M, y, { dim: 7, colore: C.grigio });
   testo('WINSINFO · portale Ecotyre · gestionale', M, y + 6, { dim: 13, grassetto: true, larghezza: L * 0.6 });
-  const quando = q.verificata_il ? new Date(/Z$|[+-]\d\d:\d\d$/.test(q.verificata_il) ? q.verificata_il : q.verificata_il + 'Z') : new Date();
+  // L'istante arriva dal server anche senza la Z; l'ora si scrive su quella italiana.
+  const quando = q.verificata_il ? new Date(/Z$|[+-]\d\d:?\d\d$/.test(q.verificata_il) ? q.verificata_il : q.verificata_il + 'Z') : new Date();
+  const ROMA = { timeZone: 'Europe/Rome' };
   [
     ['Riferimento', riferimento],
     ['File esaminato', q.file_nome || ''],
-    ['Confronto eseguito il', `${quando.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })} alle ${quando.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`],
+    ['Confronto eseguito il', `${quando.toLocaleDateString('it-IT', { ...ROMA, day: '2-digit', month: '2-digit', year: 'numeric' })} alle ${quando.toLocaleTimeString('it-IT', { ...ROMA, hour: '2-digit', minute: '2-digit' })}`],
   ].forEach(([k, val], i) => {
     testo(k, W - M - 68, y + i * 4.6, { dim: 7, colore: C.grigio });
     testo(doc.splitTextToSize(String(val), 46)[0], W - M, y + i * 4.6, { dim: 7.5, grassetto: true, allinea: 'right' });
   });
   y += 17;
 
-  const [fondo, scritta] = piena ? [C.verdeChiaro, C.verde] : [C.ambraChiaro, C.ambra];
-  const sottotitolo = piena
-    ? 'Su tutti i flussi WINSINFO, il portale Ecotyre e il gestionale danno lo stesso numero di formulari e lo stesso peso, impianto per impianto e trasportatore per trasportatore. La somma delle righe lette coincide con i totali stampati sul file.'
-    : `${q.incongruenti} ${q.incongruenti === 1 ? 'riga non quadra' : 'righe non quadrano'} fra le tre fonti${q.lettura_verificata ? '' : ', e la somma delle righe lette non torna con i totali stampati sul file'}. Il dettaglio e la motivazione di ogni scostamento sono riportati di seguito, con i formulari e il loro ID ordine.`;
-  doc.setFontSize(8.5);
-  const lineeSotto = doc.splitTextToSize(sottotitolo, L - 16);
-  const hEsito = 15 + lineeSotto.length * 3.8;
-  doc.setFillColor(...fondo);
-  doc.roundedRect(M, y, L, hEsito, 2, 2, 'F');
-  doc.setFillColor(...scritta);
-  doc.roundedRect(M, y, 3, hEsito, 1.5, 1.5, 'F');
-  testo('ESITO DELLA QUADRATURA', M + 8, y + 6, { dim: 7, grassetto: true, colore: scritta });
-  testo(piena ? 'QUADRATURA PIENA' : 'QUADRATURA PARZIALE', M + 8, y + 12.5, { dim: 15, grassetto: true, colore: scritta });
-  testo(lineeSotto, M + 8, y + 18, { dim: 8.5, colore: C.testo });
-  y += hEsito + 6;
+  // --- esito, un riquadro per canale ---
+  spazio(10);
+  testo('ESITO DELLA QUADRATURA, CANALE PER CANALE', M, y, { dim: 7, grassetto: true, colore: C.scuro });
+  y += 4;
+  if (!perCanale.length) {
+    testo('Nel file e nel gestionale non c\'è nessun flusso da confrontare in questa settimana.', M, y + 3, { dim: 8.5, colore: C.grigio });
+    y += 9;
+  }
+  for (const c of perCanale) {
+    const piena = c.conformita === 'piena';
+    const [fondo, scritta] = piena ? [C.verdeChiaro, C.verde] : [C.ambraChiaro, C.ambra];
+    const sottotitolo = piena
+      ? `Su tutti i flussi del canale WINSINFO, il portale Ecotyre e il gestionale danno lo stesso numero di formulari e lo stesso peso, impianto per impianto e trasportatore per trasportatore (${c.congruenti} ${c.congruenti === 1 ? 'riga' : 'righe'}). La somma delle righe lette coincide con i totali stampati sul file.`
+      : c.incongruenti > 0
+        ? `${c.incongruenti} ${c.incongruenti === 1 ? 'riga non quadra' : 'righe non quadrano'} fra le tre fonti, ${c.congruenti} ${c.congruenti === 1 ? 'quadra' : 'quadrano'}${c.lettura_verificata ? '' : '; la somma delle righe lette non torna con i totali stampati sul file'}. Il dettaglio e la motivazione di ogni scostamento sono riportati di seguito, con i formulari e il loro ID ordine.`
+        : !c.lettura_verificata
+          ? `Le ${c.congruenti} righe quadrano, ma la somma delle righe lette non torna con i totali stampati sul file: la trascrizione va controllata sull'originale.`
+          : `Le ${c.congruenti} righe quadrano, ma il confronto è incompleto: manca una tabella nel file o la settimana scritta sul file non è quella verificata. Vedi le note del flusso e le osservazioni.`;
+    doc.setFontSize(8.5);
+    const lineeSotto = doc.splitTextToSize(sottotitolo, L - 16);
+    const hEsito = 13 + lineeSotto.length * 3.8;
+    spazio(hEsito + 3);
+    doc.setFillColor(...fondo);
+    doc.roundedRect(M, y, L, hEsito, 2, 2, 'F');
+    doc.setFillColor(...scritta);
+    doc.roundedRect(M, y, 3, hEsito, 1.5, 1.5, 'F');
+    testo(`${c.canale} · ${piena ? 'QUADRATURA PIENA' : 'QUADRATURA PARZIALE'}`, M + 8, y + 7, { dim: 12, grassetto: true, colore: scritta });
+    testo(lineeSotto, M + 8, y + 12.5, { dim: 8.5, colore: C.testo });
+    y += hEsito + 3;
+  }
+  y += 3;
 
   // --- totali per flusso ---
   sezione('Totali per flusso',

@@ -77,28 +77,51 @@
       "type": "boolean",
       "description": "Vero se in ogni tabella la somma delle righe lette coincide con il totale stampato sul file: la trascrizione e' confermata dal file stesso"
     },
-    "congruenti": {
-      "type": "number",
-      "description": "Celle in cui WINSINFO, portale e gestionale danno lo stesso numero di formulari e lo stesso peso"
-    },
-    "incongruenti": {
-      "type": "number"
-    },
-    "osservazioni": {
-      "type": "number",
-      "description": "Celle che quadrano nei numeri e differiscono solo nella scrittura del nome"
-    },
-    "non_confrontabili": {
-      "type": "number",
-      "description": "Tabelle che il gestionale non puo' confrontare, per esempio le secondarie ACI che non registra"
-    },
-    "conformita": {
-      "type": "string",
-      "enum": [
-        "piena",
-        "parziale"
-      ],
-      "description": "piena: le tre fonti quadrano su tutti i flussi; parziale: c'e' almeno uno scostamento da sistemare"
+    "per_canale": {
+      "type": "array",
+      "description": "Esito dell'ultimo confronto salvato, canale per canale: rete, ACI ed extra raccolta non hanno un verdetto comune. Sostituisce conformita, congruenti e incongruenti complessivi, che sommavano i canali e non si scrivono piu'",
+      "items": {
+        "type": "object",
+        "properties": {
+          "canale": {
+            "type": "string",
+            "enum": [
+              "RETE",
+              "ACI",
+              "EXTRA RACCOLTA"
+            ]
+          },
+          "conformita": {
+            "type": "string",
+            "enum": [
+              "piena",
+              "parziale"
+            ],
+            "description": "piena: nel canale le tre fonti quadrano su tutte le righe, la trascrizione torna con i totali stampati e non manca nessuna tabella; parziale: altrimenti"
+          },
+          "celle": {
+            "type": "number"
+          },
+          "congruenti": {
+            "type": "number",
+            "description": "Righe del canale in cui WINSINFO, portale e gestionale danno lo stesso numero di formulari e lo stesso peso"
+          },
+          "incongruenti": {
+            "type": "number"
+          },
+          "osservazioni": {
+            "type": "number",
+            "description": "Righe del canale che quadrano nei numeri e differiscono solo nella scrittura del nome"
+          },
+          "non_confrontabili": {
+            "type": "number"
+          },
+          "lettura_verificata": {
+            "type": "boolean",
+            "description": "Le tabelle del canale tornano con i totali stampati sul file"
+          }
+        }
+      }
     }
   },
   "required": [

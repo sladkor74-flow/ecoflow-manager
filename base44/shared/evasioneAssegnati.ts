@@ -32,11 +32,15 @@
 // niente (regola dell'utente, 21/09/2026): prima se ne ricavava un margine di
 // "dati completi" e i ritiri degli ultimi giorni, gia' nel file, uscivano da
 // ritmo, proiezione e alert. Una richiesta gia' ritirata ma non ancora chiusa
-// risulta aperta, perche' sul portale lo e': gli alert chiedono di chiuderla.
+// risulta aperta, perche' sul portale lo e': gli alert delle trascurate, delle
+// prioritarie e delle arretrate chiedono di chiuderla. Un ordine terminato senza
+// fine trasporto non ha un giorno: si esclude da ogni conto e si segnala, senza
+// ripiegare sulla chiusura ne' sull'immissione.
 //
 // Rete, ACI ed extra raccolta restano sempre separati. Le liste e il target
 // riguardano la sola rete: gli ACI non hanno target e non si mandano in lista, ma
 // una richiesta ACI aperta va segnalata perche' il raccoglitore la evada subito.
+// Una richiesta di un altro canale finita in una lista non entra nei suoi conti.
 // Le richieste di extra raccolta si inseriscono a mano nel modulo Extra Raccolta
 // come assegnate e si seguono allo stesso modo.
 
@@ -320,7 +324,9 @@ export function leggiListaDaFogli(fogli) {
  */
 export function arricchisciLista(righe, assegnati, terminati, cancellati = []) {
   const perIdAss = new Map(assegnati.map(a => [a.id_ordine, a]));
-  const perIdTer = new Map(terminati.map(t => [t.id_ordine, t]));
+  // Fra due righe dello stesso ordine vale quella con la fine trasporto.
+  const perIdTer = new Map();
+  for (const t of terminati) if (!perIdTer.has(t.id_ordine) || (t.fine && !perIdTer.get(t.id_ordine).fine)) perIdTer.set(t.id_ordine, t);
   const perIdCanc = new Map(cancellati.map(c => [c.id_ordine, c]));
   return righe.map(r => {
     const a = perIdAss.get(r.id_ordine);
@@ -345,7 +351,8 @@ export function arricchisciLista(righe, assegnati, terminati, cancellati = []) {
       classe: fonte.classe || r.file_classe || null,
       pdr: fonte.pdr || '',
       trasportatore_assegnato: a ? a.trasportatore : '',
-      stato_al_caricamento: a ? 'assegnata' : t ? 'gia_evasa' : c ? 'annullata' : 'non_riconosciuta',
+      // Terminata senza fine trasporto non e' "gia' evasa": non si sa quando.
+      stato_al_caricamento: a ? 'assegnata' : t ? (t.fine ? 'gia_evasa' : 'terminata_senza_fine') : c ? 'annullata' : 'non_riconosciuta',
     };
   });
 }
@@ -421,8 +428,8 @@ function statistiche(movimenti) {
  *
  * @param lista        { righe (arricchite), caricata_il }
  * @param raccoglitore { chiave, nome }
- * @param terminati    primarie terminate normalizzate, rete e ACI
- * @param assegnati    ordini assegnati attuali normalizzati, rete e ACI
+ * @param terminati    primarie terminate normalizzate, rete, ACI ed extra; senza fine trasporto hanno fine null
+ * @param assegnati    ordini assegnati attuali normalizzati, rete, ACI ed extra
  * @param altreListe   [{ chiave, nome, ids: Set, caricata_il }] liste degli altri raccoglitori nello stesso mese
  * @param targetKg     target del gestionale, oppure null
  * @param cancellati   ordini cancellati sul portale normalizzati, con il motivo
@@ -451,7 +458,13 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   const valutabile = (d) => !!d && d <= valutatoAl;
 
   const perId = new Map();
-  for (const t of terminati) if (t.fine) perId.set(t.id_ordine, t);
+  // Terminati senza fine trasporto: non hanno un giorno, quindi non sono evasi in
+  // nessun giorno. Si escludono da ogni conto e si segnalano (regola 1).
+  const senzaFinePerId = new Map();
+  for (const t of terminati) {
+    if (t.fine) perId.set(t.id_ordine, t);
+    else if (!senzaFinePerId.has(t.id_ordine)) senzaFinePerId.set(t.id_ordine, t);
+  }
   const assegnatiPerId = new Map(assegnati.map(a => [a.id_ordine, a]));
   const cancellatiPerId = new Map(cancellati.map(c => [c.id_ordine, c]));
 
@@ -459,8 +472,18 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   const righe = lista.righe.map(r => {
     const t = perId.get(r.id_ordine);
     const a = assegnatiPerId.get(r.id_ordine);
-    const base = { ...r, stato: null, chiusa_il: null, chiusa_da: '', kg: null, automezzo: '', saltate: 0, saltate_ids: [], stima_kg: null };
-    if (t) {
+    const s = t || a ? null : senzaFinePerId.get(r.id_ordine);
+    const c = cancellatiPerId.get(r.id_ordine);
+    const fonte = t || a || s || c;
+    const base = { ...r, canale: fonte ? fonte.canale : r.canale, stato: null, chiusa_il: null, chiusa_da: '', kg: null, automezzo: '', saltate: 0, saltate_ids: [], stima_kg: null };
+    if (fonte && fonte.canale !== 'rete') {
+      // La lista e il target sono della rete: un ordine ACI o di extra raccolta
+      // finito in lista non si somma alle sue evase, al suo valore o alle aperte.
+      // Si segue nella sezione dei canali.
+      base.stato = 'altro_canale';
+      base.chiusa_il = t ? t.fine : null;
+      base.chiusa_da = t ? t.trasportatore : '';
+    } else if (t) {
       base.chiusa_il = t.fine;
       base.chiusa_da = t.trasportatore;
       base.kg = t.kg;
@@ -475,9 +498,15 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
       base.stato = spostata ? 'riassegnata' : 'aperta';
       if (spostata) base.chiusa_da = spostata.nome;
       else if (a.chiaveTrasp && a.chiaveTrasp !== chiave) base.assegnata_sul_portale_a = a.trasportatore;
-    } else if (cancellatiPerId.has(r.id_ordine)) {
+    } else if (s) {
+      // Terminata sul portale ma senza fine trasporto: non si sa quando e' stata
+      // evasa, e la chiusura non la sostituisce. Prima risultava "non piu'
+      // presente", come se non fosse ne' tra gli assegnati ne' tra i terminati.
+      base.stato = 'terminata_senza_fine';
+      base.chiusa_da = s.trasportatore;
+    } else if (c) {
       base.stato = 'annullata';
-      base.motivo_annullamento = cancellatiPerId.get(r.id_ordine).motivo || 'motivo non indicato';
+      base.motivo_annullamento = c.motivo || 'motivo non indicato';
     } else {
       base.stato = 'non_piu_presente';
     }
@@ -542,9 +571,11 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   // zona e che a fine giornata D erano ancora da evadere. Le chiusure dello stesso
   // giorno non si saltano a vicenda: un giro di raccolta ne chiude diverse
   // insieme. Una richiesta ancora aperta risulta saltata dalle evasioni fino
-  // all'ultima fine trasporto del file.
+  // all'ultima fine trasporto del file. Una terminata senza fine trasporto non si
+  // sa quando e' stata evasa, e una di un altro canale non e' della lista: non
+  // contano come saltate.
   const saltateDa = (o) => ordinate.filter(e => rango.get(e.id_ordine) < rango.get(o.id_ordine)
-    && !['non_piu_presente', 'evasa_prima', 'annullata'].includes(e.stato)
+    && !['non_piu_presente', 'evasa_prima', 'annullata', 'terminata_senza_fine', 'altro_canale'].includes(e.stato)
     && stessaZona(e, o)
     && (e.chiusa_il ? e.chiusa_il > o.chiusa_il : valutabile(o.chiusa_il)));
   for (const o of righe) {
@@ -627,7 +658,11 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   // successivi si stimano con il ritmo.
   const giorniTrascorsi = valutatoAl >= inizioMese ? giorniLavorativi(inizioMese, valutatoAl, sabato) : 0;
   const kgTrascorsi = delMese.filter(t => valutabile(t.fine)).reduce((s, t) => s + t.kg, 0);
-  const meseConcluso = !!datiAl && valutatoAl >= fineMese;
+  // Il mese e' concluso quando il file arriva alla sua fine e anche il calendario
+  // l'ha superata: con un trasporto dell'ultimo giorno del mese, se quel giorno e'
+  // oggi, la giornata e' ancora in corso (prima lo garantiva il margine della
+  // chiusura a portale, che non decide piu' niente).
+  const meseConcluso = !!datiAl && valutatoAl >= fineMese && oggi > fineMese;
   const giorniResidui = meseConcluso ? 0 : Math.max(0, giorniTotali - giorniTrascorsi);
   const ritmoMese = giorniTrascorsi > 0 ? Math.round(kgTrascorsi / giorniTrascorsi) : null;
   let ritmo;
@@ -722,12 +757,19 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     const altre = trascurate.length > 1 ? ` Trascurate anche: ${elenco(trascurate.slice(1).map(r => `n. ${r.posizione} ${r.id_ordine}`), 4)}.` : '';
     aggiungi('alta', 'trascurate', `${trascurate.length === 1 ? 'Una richiesta trascurata' : `${trascurate.length} richieste trascurate`}: la n. ${prima.posizione}, ${prima.id_ordine}${prima.produttore ? ' di ' + prima.produttore : ''}, immessa il ${itData(prima.data_immissione)}, e' ancora aperta sul portale, ma il raccoglitore ha gia' evaso ${cosa.join(' e ')}. Se e' gia' stata ritirata va chiusa sul portale.${altre}`);
   }
+  // Senza il margine della chiusura queste scattano anche per ritiri gia' fatti e
+  // non ancora chiusi sul portale: l'alert lo dice, come quello delle trascurate.
+  const daChiudere = (n) => (n === 1 ? " Se e' gia' stata ritirata va chiusa sul portale." : " Se gia' ritirate vanno chiuse sul portale.");
   if (arretrateAperte.length && giorniDallInvio >= GIORNI_TOLLERANZA_PRIORITARIE) {
     const n = arretrateAperte.length;
-    aggiungi('alta', 'arretrate', `${n === 1 ? 'Una richiesta immessa' : `${n} richieste immesse`} prima del ${anno}, con priorita' assoluta, ${n === 1 ? "e' ancora aperta" : 'sono ancora aperte'} sul portale dopo ${giorniDallInvio} giorni lavorativi dall'invio: ${elenco(arretrateAperte.map(r => `${r.id_ordine} del ${itData(r.data_immissione)}`), 4)}.`);
+    aggiungi('alta', 'arretrate', `${n === 1 ? 'Una richiesta immessa' : `${n} richieste immesse`} prima del ${anno}, con priorita' assoluta, ${n === 1 ? "e' ancora aperta" : 'sono ancora aperte'} sul portale dopo ${giorniDallInvio} giorni lavorativi dall'invio: ${elenco(arretrateAperte.map(r => `${r.id_ordine} del ${itData(r.data_immissione)}`), 4)}.${daChiudere(n)}`);
   }
   if (prioritarieAperte.length && giorniDallInvio >= GIORNI_TOLLERANZA_PRIORITARIE) {
-    aggiungi('alta', 'prioritarie', `${prioritarieAperte.length} ${prioritarieAperte.length === 1 ? 'richiesta prioritaria ancora aperta' : 'richieste prioritarie ancora aperte'} sul portale dopo ${giorniDallInvio} giorni lavorativi dall'invio, con trasporti conclusi fino al ${itData(valutatoAl)}: ${elenco(prioritarieAperte.map(r => r.id_ordine))}.`);
+    // "Valutate fino al": per un mese gia' finito e' la sua fine, mentre il file
+    // ha trasporti anche dopo; "trasporti conclusi fino al" faceva credere che i
+    // dati si fermassero li'.
+    const n = prioritarieAperte.length;
+    aggiungi('alta', 'prioritarie', `${n} ${n === 1 ? 'richiesta prioritaria ancora aperta' : 'richieste prioritarie ancora aperte'} sul portale dopo ${giorniDallInvio} giorni lavorativi dall'invio, ${n === 1 ? 'valutata' : 'valutate'} fino al ${itData(valutatoAl)}: ${elenco(prioritarieAperte.map(r => r.id_ordine))}.${daChiudere(n)}`);
   }
   if (target && giorniTrascorsi >= 5 && !meseConcluso && proiezioneKg < target * SOGLIA_PROIEZIONE) {
     aggiungi('alta', 'proiezione', `A questo ritmo chiude il mese a ${kgT(proiezioneKg)}, il ${previsione.percentuale_proiezione}% del target di ${kgT(target)}.`);
@@ -746,7 +788,7 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   // Annullate, evase da altri e riassegnate svuotano la lista: quando le aperte
   // non bastano piu' al target servono nuove richieste.
   if (target && targetResiduo > 0 && kgAperte < targetResiduo * SOGLIA_PROIEZIONE && !meseConcluso) {
-    const uscite = righe.filter(r => ['annullata', 'evasa_da_altri', 'riassegnata', 'non_piu_presente'].includes(r.stato) && !r.evasa_con).length;
+    const uscite = righe.filter(r => ['annullata', 'evasa_da_altri', 'riassegnata', 'non_piu_presente', 'terminata_senza_fine'].includes(r.stato) && !r.evasa_con).length;
     const causa = uscite ? ` Dalla lista ${uscite === 1 ? "e' uscita una richiesta" : `sono uscite ${uscite} richieste`} tra annullate, evase da altri e riassegnate.` : '';
     aggiungi('media', 'portafoglio', `Le richieste ancora aperte valgono circa ${kgT(kgAperte)}, meno dei ${kgT(targetResiduo)} che mancano al target: servono circa ${richiesteMancanti} ${richiesteMancanti === 1 ? 'richiesta' : 'richieste'} in piu', a ${kgT(kgRitiro)} per ritiro.${causa}`);
   }
@@ -769,6 +811,19 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
   if (riassegnate.length) aggiungi('info', 'riassegnate', `${riassegnate.length} ${riassegnate.length === 1 ? 'richiesta e\' passata' : 'richieste sono passate'} nella lista di un altro raccoglitore caricata dopo: ${elenco(riassegnate.map(r => `${r.id_ordine} a ${r.chiusa_da}`), 3)}.`);
   const sparite = righe.filter(r => r.stato === 'non_piu_presente');
   if (sparite.length) aggiungi('info', 'non_presenti', `${sparite.length} ${sparite.length === 1 ? 'richiesta non e\' piu\'' : 'richieste non sono piu\''} ne' tra gli assegnati ne' tra i terminati ne' tra i cancellati del file caricato: ${elenco(sparite.map(r => r.id_ordine))}.`);
+  // Regola 1: escluse, e dette con il loro numero. Media e non informazione:
+  // e' un dato da correggere, e le informazioni la pagina non le mostra subito.
+  const senzaFine = righe.filter(r => r.stato === 'terminata_senza_fine');
+  if (senzaFine.length) {
+    const n = senzaFine.length;
+    aggiungi('media', 'senza_fine', `${n === 1 ? "Una richiesta della lista risulta terminata" : `${n} richieste della lista risultano terminate`} sul portale senza data di fine trasporto: ${n === 1 ? "e' esclusa" : 'sono escluse'} da evase, cronologia e raccolto finche' la data non viene inserita sul portale: ${elenco(senzaFine.map(r => r.id_ordine))}.`);
+  }
+  const altroCanale = righe.filter(r => r.stato === 'altro_canale');
+  if (altroCanale.length) {
+    const n = altroCanale.length;
+    const nomeCanale = (k) => (k === 'aci' ? 'ACI' : k === 'extra' ? 'extra raccolta' : k);
+    aggiungi('media', 'altro_canale', `${n === 1 ? "Una richiesta della lista non e'" : `${n} richieste della lista non sono`} di rete: lista e target sono della sola rete, e ${n === 1 ? "resta fuori" : 'restano fuori'} dai suoi conti. ${n === 1 ? 'Si segue' : 'Si seguono'} nei canali del raccoglitore: ${elenco(altroCanale.map(r => `${r.id_ordine} (${nomeCanale(r.canale)})`))}.`);
+  }
   const annullate = righe.filter(r => r.stato === 'annullata');
   if (annullate.length) {
     const motivi = new Map();
@@ -833,13 +888,17 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
       },
       per_provincia: perProvincia,
       data_riferimento: itData(datiAl),
+      // Nell'esito e non nel riepilogo: ControlloEvasione non ha questi campi.
+      terminate_senza_fine: senzaFine.length,
+      altro_canale: altroCanale.length,
     },
   };
 }
 
 /**
  * Cosa fa un raccoglitore nel mese nei tre canali, rete, ACI ed extra raccolta:
- * formulari evasi, peso e richieste ancora aperte. Non dipende dalla lista:
+ * ordini evasi, peso, richieste ancora aperte e ordini terminati senza fine
+ * trasporto, che non si contano in nessun mese. Non dipende dalla lista:
  * vale anche per chi non ne ha ricevuta una, ed e' li' che si vedono le
  * richieste ACI e di extra raccolta da sollecitare.
  */
@@ -847,14 +906,20 @@ export function situazioneCanali({ chiave, anno, mese, oggi, terminati, assegnat
   const inizio = primoGiorno(anno, mese), fine = ultimoGiorno(anno, mese);
   const canali = {};
   for (const canale of ['rete', 'aci', 'extra']) {
-    const evasi = terminati.filter(t => t.canale === canale && t.chiaveTrasp === chiave && t.fine && t.fine >= inizio && t.fine <= fine);
+    const propri = terminati.filter(t => t.canale === canale && t.chiaveTrasp === chiave);
+    const evasi = propri.filter(t => t.fine && t.fine >= inizio && t.fine <= fine);
+    // Regola 1: senza fine trasporto un ordine non ha un mese. Non si conta in
+    // nessuno, ne' si colloca sulla chiusura: si segnala con i suoi ID.
+    const senzaFine = [...new Set(propri.filter(t => !t.fine).map(t => t.id_ordine))];
     const aperte = assegnati.filter(a => a.canale === canale && a.chiaveTrasp === chiave)
       .map(a => ({
         id_ordine: a.id_ordine, immesso: a.immesso, giorni: a.immesso ? giorniTra(a.immesso, oggi) : null,
         produttore: a.produttore, comune: a.comune, provincia: a.provincia, classe: a.classe,
       }))
       .sort((x, y) => String(x.immesso || '9999').localeCompare(String(y.immesso || '9999')));
-    canali[canale] = { evasi: evasi.length, kg: evasi.reduce((t, m) => t + m.kg, 0), aperte };
+    // evasi conta gli ordini (le richieste evase), non i formulari: sull'ACI un
+    // formulario puo' stare su due ordini.
+    canali[canale] = { evasi: evasi.length, kg: evasi.reduce((t, m) => t + m.kg, 0), aperte, senza_fine: senzaFine };
   }
   const alert = [];
   const descrivi = (lista) => lista.slice(0, 4).map(a => `${a.id_ordine}${a.giorni !== null ? ` da ${a.giorni} ${a.giorni === 1 ? 'giorno' : 'giorni'}` : ''}`).join(', ') + (lista.length > 4 ? ` e altre ${lista.length - 4}` : '');
@@ -863,6 +928,15 @@ export function situazioneCanali({ chiave, anno, mese, oggi, terminati, assegnat
   }
   if (canali.extra.aperte.length) {
     alert.push({ gravita: 'media', tipo: 'extra_aperte', messaggio: `${canali.extra.aperte.length === 1 ? 'Una richiesta di extra raccolta aperta' : `${canali.extra.aperte.length} richieste di extra raccolta aperte`}, da evadere o da segnare terminate nel modulo Extra Raccolta: ${descrivi(canali.extra.aperte)}.` });
+  }
+  // Un alert per canale, mai uno solo per i tre.
+  const NOMI_CANALI = { rete: 'di rete', aci: 'ACI', extra: 'di extra raccolta' };
+  for (const canale of ['rete', 'aci', 'extra']) {
+    const ids = canali[canale].senza_fine;
+    if (!ids.length) continue;
+    const n = ids.length;
+    const dove = canale === 'extra' ? 'la data va inserita nel modulo Extra Raccolta' : 'la data va inserita sul portale';
+    alert.push({ gravita: 'media', tipo: 'senza_fine', messaggio: `${n === 1 ? `Un ordine ${NOMI_CANALI[canale]} risulta terminato` : `${n} ordini ${NOMI_CANALI[canale]} risultano terminati`} senza data di fine trasporto: ${n === 1 ? "e' escluso" : 'sono esclusi'} dal raccolto di ogni mese, ${dove}: ${ids.slice(0, 4).join(', ')}${n > 4 ? ` e altri ${n - 4}` : ''}.` });
   }
   return { canali, alert };
 }

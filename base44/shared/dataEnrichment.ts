@@ -4,7 +4,7 @@
 // senza alterare la struttura sorgente.
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
 import { giornoRoma, annoRoma, meseRoma } from "./giornoItaliano.ts";
-import { settimanaIso, tempiRaccolta } from "./movimenti.ts";
+import { eTerminato, settimanaIso, tempiRaccolta } from "./movimenti.ts";
 
 export { giornoRoma, annoRoma, meseRoma };
 
@@ -71,9 +71,37 @@ export function dataPeriodo(record) {
   if (!record) return null;
   // Un movimento terminato ha la sua fine trasporto, e il periodo e' quello. La
   // chiusura a portale non e' mai un periodo: arriva giorni dopo e sposta il
-  // movimento nel mese sbagliato. Chi non ha ancora un trasporto (un ordine
-  // aperto) si colloca alla data di immissione.
-  return record.trasporto_finito_il || record.ordine_immesso_il;
+  // movimento nel mese sbagliato. Chi non ha avuto un trasporto (un ordine
+  // aperto o cancellato) si colloca alla data di immissione.
+  if (record.trasporto_finito_il) return record.trasporto_finito_il;
+  // Un terminato senza fine trasporto non ha periodo: metterlo nel mese di
+  // immissione sarebbe un ripiego, e un ritiro fatto a luglio su un ordine di
+  // maggio risulterebbe raccolto a maggio. Resta senza mese e anno, e chi conta
+  // lo esclude e lo segnala.
+  if (eTerminato(record)) return null;
+  return record.ordine_immesso_il;
+}
+
+/**
+ * I campi dei tempi di raccolta come si salvano su una primaria di rete:
+ * nr_giorni, scadenza_ordine e raccolta_nei_tempi, da tempiRaccolta (immissione
+ * -> fine del trasporto). Dove non si misura sono vuoti, non quelli di prima: il
+ * file Excel porta i suoi, con una regola che non e' la nostra, e un archivio
+ * vecchio porta quelli misurati sulla chiusura a portale. Li usano il
+ * caricamento (enrichRecord) e la migrazione migrateSlaFields, cosi' la regola
+ * sta in un punto solo.
+ *
+ * La scadenza si salva a mezzogiorno UTC, che in Italia e' sempre lo stesso
+ * giorno: l'istante di immissione piu' 30 giorni, attraversando il cambio
+ * dell'ora legale, cadeva alle 23 italiane del giorno prima.
+ */
+export function campiTempiRaccolta(record) {
+  const tempi = tempiRaccolta(record);
+  return {
+    nr_giorni: tempi && tempi.giorni != null ? tempi.giorni : null,
+    scadenza_ordine: tempi ? `${tempi.scadenza}T12:00:00.000Z` : null,
+    raccolta_nei_tempi: tempi && tempi.esito ? tempi.esito : null,
+  };
 }
 
 function getDataRiferimento(record, entityType) {
@@ -91,17 +119,13 @@ export function enrichRecord(record, entityType) {
 
   const dataRif = getDataRiferimento(r, entityType);
 
-  // Mese (riferimento)
-  const mese = getMeseFromDate(dataRif);
-  if (mese) r.mese = mese;
-
-  // Settimana (ISO week)
-  const sett = getSettimanaFromDate(dataRif);
-  if (sett != null) r.settimane = sett;
-
-  // Anno
-  const anno = getAnnoFromDate(dataRif);
-  if (anno != null) r.anno = anno;
+  // Mese, settimana ISO e anno di riferimento. Si scrivono sempre, anche vuoti:
+  // il file porta le sue colonne Mese, Settimane e Anno, con una regola che non e'
+  // la nostra, e dove il periodo non c'e' (un terminato senza fine trasporto)
+  // restavano quelle, cioe' un periodo di cui nessuno sa la base.
+  r.mese = getMeseFromDate(dataRif);
+  r.settimane = getSettimanaFromDate(dataRif);
+  r.anno = getAnnoFromDate(dataRif);
 
   // Mese di immissione (solo per entità non-Assegnato)
   if (!ASSEGNATO_ENTITIES.has(entityType) && r.ordine_immesso_il) {
@@ -129,17 +153,15 @@ export function enrichRecord(record, entityType) {
   // con una regola sua: qui si ricalcolano sempre, e senza fine trasporto si
   // svuotano invece di restare quelli del file.
   if (!ASSEGNATO_ENTITIES.has(entityType)) {
-    const tempi = tempiRaccolta(r);
-    if (tempi && tempi.giorni != null) r.nr_giorni = tempi.giorni;
-    else if (r.nr_giorni != null) r.nr_giorni = null;
+    const tempi = campiTempiRaccolta(r);
+    if (tempi.nr_giorni != null || r.nr_giorni != null) r.nr_giorni = tempi.nr_giorni;
 
     // Scadenza (immissione + 30 giorni) ed esito, solo per le primarie di rete.
-    // La scadenza si salva a mezzogiorno UTC, che in Italia e' sempre lo stesso
-    // giorno: l'istante di immissione piu' 30 giorni, attraversando il cambio
-    // dell'ora legale, cadeva alle 23 italiane del giorno prima.
+    // Anche la scadenza si svuota senza immissione: restava quella del file
+    // mentre giorni ed esito si ricalcolavano.
     if (entityType === 'PrimariaRete') {
-      if (tempi) r.scadenza_ordine = `${tempi.scadenza}T12:00:00.000Z`;
-      r.raccolta_nei_tempi = tempi && tempi.esito ? tempi.esito : null;
+      r.scadenza_ordine = tempi.scadenza_ordine;
+      r.raccolta_nei_tempi = tempi.raccolta_nei_tempi;
     }
   }
 

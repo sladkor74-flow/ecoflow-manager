@@ -4,9 +4,9 @@ import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { formatoKg } from "../../shared/formato.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { eAci } from "../../shared/canaleSecondaria.ts";
-import { eTerminato, periodoMovimento } from "../../shared/movimenti.ts";
+import { eTerminato, periodoMovimento, canaleMovimento, annoOrdine } from "../../shared/movimenti.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
+import { statoCaricamenti, descriviCaricamento } from "../../shared/reportSettimanali.ts";
 
 // Media reale di un viaggio di secondaria: 13,5 tonnellate.
 const KG_PER_VIAGGIO = 13500;
@@ -25,10 +25,44 @@ const dataFineDefault = () => fineProgrammazione(annoRiferimento()).data;
 const aUtc = (g) => new Date(Date.UTC(+g.slice(0, 4), +g.slice(5, 7) - 1, +g.slice(8, 10)));
 function piuGiorni(g, n) { const d = aUtc(g); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 const lunediDi = (g) => piuGiorni(g, -((aUtc(g).getUTCDay() + 6) % 7));
+const it = (g) => (g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : '');
 
-// Funzione richiamata dal workflow del lunedì: ricalcola la pianificazione,
-// analizza la settimana appena conclusa e genera un suggerimento proattivo
-// salvato come Alert (modulo secondarie) consultabile dall'agente.
+// La predittivita' e' SOLO della rete (regola dell'utente, 22/09/2026): ACI ed
+// extra raccolta non entrano ne' nel consuntivo ne' nella settimana. L'extra
+// raccolta sta in un archivio suo e non si legge; primarie e secondarie si
+// tengono solo se il canale e' la rete, con la regola condivisa.
+const soloRete = (righe, archivio) => righe.filter(r => canaleMovimento(r, archivio) === 'RETE');
+
+// Il suggerimento e' uno per settimana. Ogni lunedi' se ne scriveva uno nuovo e
+// quelli prima restavano aperti con i loro consuntivi, mai ricalcolati: si
+// accumulavano fra gli alert aperti del cruscotto e l'agente poteva leggere i
+// numeri di un mese fa. Adesso quello della settimana si aggiorna al suo posto
+// e i precedenti si chiudono come superati. Il titolo vecchio, senza regola_id,
+// si riconosce dal testo.
+const REGOLA = 'suggerimento_predittivita_settimanale';
+const TITOLO = 'Suggerimento Predittività Settimanale · solo rete';
+const eSuggerimento = (a) => a.regola_id === REGOLA || String(a.titolo || '').startsWith('Suggerimento Predittività Settimanale');
+
+// Un caricamento delle primarie o delle secondarie aperto (o rimasto
+// interrotto) vuol dire un archivio a meta': il suggerimento non si scrive,
+// si risponde 409 col nome del caricamento e resta quello di prima. Stessa
+// finestra di dieci minuti di importaBlocco e di dopoCaricamento.
+// Si usa la regola condivisa di base44/shared/reportSettimanali.ts: un
+// caricamento rimasto aperto non conta piu' se dopo un caricamento riuscito ha
+// riscritto gli stessi archivi. Un "primarie_rete" storico, che nessuna scheda
+// di Caricamento Dati scrive piu' ne' chiude, altrimenti bloccava per sempre il
+// piano, il suggerimento del lunedi' e la proiezione.
+const TIPI_LETTI = ['primarie', 'primarie_rete', 'secondarie'];
+async function caricamentoAperto(base44) {
+  const stato = await statoCaricamenti(base44, TIPI_LETTI).catch(() => ({ in_corso: [] }));
+  const aperti = stato.in_corso || [];
+  return aperti.length ? aperti.map(descriviCaricamento).join('; ') : null;
+}
+
+// Funzione richiamata dal workflow del lunedì: analizza la settimana appena
+// conclusa e genera un suggerimento proattivo salvato come Alert (modulo
+// secondarie) consultabile dall'agente. Risponde 200 solo quando l'ha scritto,
+// 409 quando rinvia per un caricamento aperto, 500 quando qualcosa non riesce.
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -38,53 +72,74 @@ export default async function(req) {
     if (chiamante && !eAmministratore(chiamante)) return rispostaSolaLettura();
     const b = base44.asServiceRole;
 
+    const aperto = await caricamentoAperto(base44);
+    if (aperto) {
+      return Response.json({ error: `Rinviato: ${aperto}. Il suggerimento della settimana si rifa' quando il caricamento e' chiuso.`, rinviato: true }, { status: 409 });
+    }
+
     const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
-    // Solo rete: il target di un impianto e' della rete e l'autodemolizione non
-    // lo consuma. Le secondarie ACI stanno nello stesso archivio e si
+    // Solo rete: il target di un impianto e' della rete e ACI ed extra raccolta
+    // non lo consumano. Le secondarie ACI stanno nello stesso archivio e si
     // riconoscono dalla classe.
-    const secondarie = (await fetchAll(b.entities.Secondaria)).filter(r => !eAci(r));
+    const [primarie, secondarie] = await Promise.all([
+      fetchAll(b.entities.PrimariaRete, { stato: 'terminato' }).then(r => soloRete(r, 'PrimariaRete')),
+      fetchAll(b.entities.Secondaria, { stato: 'terminato' }).then(r => soloRete(r, 'Secondaria')),
+    ]);
 
     // Settimana appena conclusa = lunedì-domenica della settimana scorsa, sul
     // calendario italiano
     const anno = annoRiferimento();
-    const thisMonday = lunediDi(oggiRoma());
+    const oggi = oggiRoma();
+    const thisMonday = lunediDi(oggi);
     const lastMonday = piuGiorni(thisMonday, -7);
     const lastSunday = piuGiorni(thisMonday, -1);
 
     const impNormMap = {};
     for (const imp of impianti) impNormMap[normalizzaRagioneSociale(imp.nome_impianto)] = imp;
 
-    // Terminati verso un impianto seguito, col giorno italiano della fine
-    // trasporto. Chi non ce l'ha non si colloca in nessuna settimana (non si
-    // ripiega sulla chiusura a portale): si conta e si dice in fondo.
+    // Terminati di rete arrivati a un impianto seguito, primarie e secondarie,
+    // col giorno italiano della fine trasporto. Il target dell'impianto si
+    // misura su tutto quello che gli arriva, come nella Proiezione a fine anno:
+    // contando le sole secondarie il residuo usciva gonfiato di tutte le
+    // primarie gia' arrivate, e il suggerimento diceva un numero diverso da
+    // quello della pagina. Chi non ha la fine trasporto non si colloca in
+    // nessuna settimana (non si ripiega sulla chiusura a portale): si conta,
+    // fra quelli dell'anno per data di immissione, e si dice in fondo.
     const terminati = [];
-    let senzaFineTrasporto = 0;
-    for (const r of secondarie) {
-      if (!eTerminato(r)) continue;
-      if (!impNormMap[normalizzaRagioneSociale(r.destinazione)]) continue;
-      const p = periodoMovimento(r);
-      if (!p) { senzaFineTrasporto++; continue; }
-      terminati.push({ r, giorno: p.giorno, anno: p.anno, dest: normalizzaRagioneSociale(r.destinazione) });
-    }
+    const senzaFine = { primarie: 0, secondarie: 0 };
+    const leggi = (righe, flusso) => {
+      for (const r of righe) {
+        if (!eTerminato(r)) continue;
+        if (!impNormMap[normalizzaRagioneSociale(r.destinazione)]) continue;
+        const p = periodoMovimento(r);
+        if (!p) { if (annoOrdine(r) === anno) senzaFine[flusso]++; continue; }
+        terminati.push({ r, flusso, giorno: p.giorno, anno: p.anno, dest: normalizzaRagioneSociale(r.destinazione) });
+      }
+    };
+    leggi(primarie, 'primarie');
+    leggi(secondarie, 'secondarie');
 
+    const kg = (righe) => righe.reduce((s, t) => s + (Number(t.r.peso_effettivo) || 0), 0);
     const parti = [];
     for (const imp of impianti) {
       const impNorm = normalizzaRagioneSociale(imp.nome_impianto);
       const suoi = terminati.filter(t => t.dest === impNorm);
-      const weekRecords = suoi.filter(t => t.giorno >= lastMonday && t.giorno <= lastSunday).map(t => t.r);
-      const execSett = weekRecords.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
-      const viaggiSett = weekRecords.length;
+      const settimana = suoi.filter(t => t.giorno >= lastMonday && t.giorno <= lastSunday);
+      const secSett = settimana.filter(t => t.flusso === 'secondarie');
+      const primSett = settimana.filter(t => t.flusso === 'primarie');
+      const execSett = kg(settimana);
+      const viaggiSett = secSett.length;
 
-      // Il consuntivo si confronta col target dell'anno: solo le secondarie
-      // finite quest'anno. Senza il filtro entravano anche quelle degli anni
-      // prima, il residuo andava a zero e il suggerimento diceva "0 kg/settimana"
-      // a un impianto a cui mancavano centinaia di tonnellate.
-      const consuntivoTot = suoi.filter(t => t.anno === anno).reduce((s, t) => s + (t.r.peso_effettivo || 0), 0);
+      // Il consuntivo si confronta col target dell'anno: solo quello finito
+      // quest'anno. Senza il filtro entravano anche gli anni prima, il residuo
+      // andava a zero e il suggerimento diceva "0 kg/settimana" a un impianto a
+      // cui mancavano centinaia di tonnellate.
+      const consuntivoTot = kg(suoi.filter(t => t.anno === anno));
       const target = imp.target || 0;
       const residuo = Math.max(0, target - consuntivoTot);
 
-      // settimane rimanenti
-      const dataFine = dataFineDefault();
+      // settimane rimanenti fino alla data obiettivo dell'impianto
+      const dataFine = imp.data_fine || dataFineDefault();
       let settRim = 0;
       for (let cur = thisMonday; cur <= dataFine; cur = piuGiorni(cur, 7)) settRim++;
       const kgPerSett = settRim > 0 ? Math.round(residuo / settRim) : 0;
@@ -95,36 +150,58 @@ export default async function(req) {
       const prevSett = kgPerSett;
       const deltaSett = execSett - prevSett;
       const deltaViaggi = Math.round(deltaSett / KG_PER_VIAGGIO);
+      const arrivati = `${formatoKg(execSett)} kg arrivati (primaria ${formatoKg(kg(primSett))} kg, secondaria ${formatoKg(kg(secSett))} kg in ${viaggiSett} ${viaggiSett === 1 ? 'viaggio' : 'viaggi'})`;
+      const coda = `Consuntivo di rete ${anno}: ${formatoKg(consuntivoTot)} kg su un target di ${formatoKg(target)} kg. Residuo: ${formatoKg(residuo)} kg.`;
 
       let frase;
-      if (viaggiSett === 0) {
-        frase = `${imp.nome_impianto}: nessun trasporto registrato nella settimana ${lastMonday}→${lastSunday}. Recupero previsto: ${formatoKg(kgPerSett)} kg/settimana (${viaggiPerSett} viaggi) per le ${settRim} settimane rimanenti. Residuo: ${formatoKg(residuo)} kg.`;
+      if (settRim === 0) {
+        frase = `${imp.nome_impianto}: la programmazione si e' chiusa il ${it(dataFine)}. ${coda}`;
+      } else if (execSett === 0) {
+        frase = `${imp.nome_impianto}: nessun arrivo di rete registrato nella settimana ${it(lastMonday)}→${it(lastSunday)}. Recupero previsto: ${formatoKg(kgPerSett)} kg/settimana (pari a ${viaggiPerSett} viaggi da 13,5 t) per le ${settRim} settimane rimanenti. ${coda}`;
       } else if (Math.abs(deltaSett) <= KG_PER_VIAGGIO) {
-        frase = `${imp.nome_impianto}: settimana in linea — ${formatoKg(execSett)} kg trasportati (${viaggiSett} viaggi) vs ${formatoKg(prevSett)} kg previsti. Mantieni ${formatoKg(kgPerSett)} kg/settimana (${viaggiPerSett} viaggi) per le ${settRim} settimane rimanenti. Residuo: ${formatoKg(residuo)} kg.`;
+        frase = `${imp.nome_impianto}: settimana in linea — ${arrivati} contro ${formatoKg(prevSett)} kg previsti. Mantieni ${formatoKg(kgPerSett)} kg/settimana (pari a ${viaggiPerSett} viaggi da 13,5 t) per le ${settRim} settimane rimanenti. ${coda}`;
       } else if (deltaSett > 0) {
         const nuovaPrev = Math.max(0, kgPerSett - Math.round(deltaSett / settRim));
-        frase = `${imp.nome_impianto}: anticipo di ${formatoKg(deltaSett)} kg (${deltaViaggi} viaggi) — ${formatoKg(execSett)} kg vs ${formatoKg(prevSett)} kg previsti. Suggerisco di ridurre le settimane rimanenti a ~${formatoKg(nuovaPrev)} kg/settimana per mantenere la costanza. Residuo: ${formatoKg(residuo)} kg.`;
+        frase = `${imp.nome_impianto}: anticipo di ${formatoKg(deltaSett)} kg (${deltaViaggi} viaggi) — ${arrivati} contro ${formatoKg(prevSett)} kg previsti. Suggerisco di ridurre le settimane rimanenti a ~${formatoKg(nuovaPrev)} kg/settimana per mantenere la costanza. ${coda}`;
       } else {
         const nuovaPrev = kgPerSett + Math.round(Math.abs(deltaSett) / Math.max(1, settRim));
-        frase = `${imp.nome_impianto}: ritardo di ${formatoKg(Math.abs(deltaSett))} kg (${Math.abs(deltaViaggi)} viaggi) — ${formatoKg(execSett)} kg vs ${formatoKg(prevSett)} kg previsti. Suggerisco di aumentare le settimane rimanenti a ~${formatoKg(nuovaPrev)} kg/settimana. Residuo: ${formatoKg(residuo)} kg.`;
+        frase = `${imp.nome_impianto}: ritardo di ${formatoKg(Math.abs(deltaSett))} kg (${Math.abs(deltaViaggi)} viaggi) — ${arrivati} contro ${formatoKg(prevSett)} kg previsti. Suggerisco di aumentare le settimane rimanenti a ~${formatoKg(nuovaPrev)} kg/settimana. ${coda}`;
       }
       parti.push(frase);
     }
 
     // Un terminato senza fine trasporto resta fuori dal conto, e lo si dice.
-    if (senzaFineTrasporto > 0) parti.push(`${senzaFineTrasporto} ${senzaFineTrasporto === 1 ? 'secondaria terminata non ha' : 'secondarie terminate non hanno'} la data di fine trasporto: non ${senzaFineTrasporto === 1 ? 'è contata' : 'sono contate'} né nella settimana né nel consuntivo, finché la data non arriva con un nuovo caricamento.`);
-    const suggestion = `Suggerimento settimanale predittività delle secondarie di rete (settimana ${lastMonday}→${lastSunday}). L'autodemolizione è un canale a parte e non entra in questo conto:\n\n` + parti.join('\n\n');
+    const nSenzaFine = senzaFine.primarie + senzaFine.secondarie;
+    if (nSenzaFine > 0) {
+      parti.push(`Terminati di rete del ${anno} (per data di immissione) verso questi impianti senza la data di fine trasporto (primarie: ${senzaFine.primarie}, secondarie: ${senzaFine.secondarie}). Non sono contati né nella settimana né nel consuntivo, finché la data non arriva con un nuovo caricamento.`);
+    }
+    const suggestion = `Suggerimento settimanale della predittività delle secondarie (settimana ${it(lastMonday)}→${it(lastSunday)}, calcolato il ${it(oggi)}). Solo rete: ACI ed extra raccolta non entrano nella predittività.\n\n` + parti.join('\n\n');
 
-    // Salva come Alert consultabile dall'agente
-    await b.entities.Alert.create({
-      titolo: 'Suggerimento Predittività Settimanale · secondarie di rete',
+    // Salva come Alert consultabile dall'agente: uno per settimana, i precedenti superati.
+    const Alert = b.entities.Alert;
+    const aperti = (await fetchAll(Alert, { modulo: 'secondarie', stato: 'aperto' })).filter(eSuggerimento);
+    const diQuesta = aperti.find(a => a.regola_id === REGOLA && a.record_id === lastMonday) || null;
+    const dati = {
+      titolo: TITOLO,
       descrizione: suggestion,
       severita: 'info',
       modulo: 'secondarie',
+      entity_type: 'PianificazioneSettimanale',
+      record_id: lastMonday,
+      regola_id: REGOLA,
+      regola_nome: 'Suggerimento settimanale della predittività (solo rete)',
       stato: 'aperto',
-    });
+    };
+    if (diQuesta) await Alert.update(diQuesta.id, dati);
+    else await Alert.create(dati);
+    let superati = 0;
+    for (const a of aperti) {
+      if (diQuesta && a.id === diQuesta.id) continue;
+      await Alert.update(a.id, { stato: 'risolto', risolto_note: `Superato il ${it(oggi)} dal suggerimento della settimana ${it(lastMonday)}→${it(lastSunday)}: i numeri di questo non erano piu' aggiornati.` });
+      superati++;
+    }
 
-    return Response.json({ ok: true, suggestion, data_riferimento: lastMonday });
+    return Response.json({ ok: true, canale: 'RETE', suggestion, data_riferimento: lastMonday, senza_fine_trasporto: senzaFine, suggerimenti_superati: superati });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

@@ -19,8 +19,11 @@
 // confronta con i viaggi che servono. Chiedere venti viaggi a uno stoccaggio che
 // ne ha materiale per dodici e' un piano che non sta in piedi.
 //
-// Rete e ACI restano separati: le secondarie ACI non consumano il target di rete
-// e non entrano in questo conto.
+// Solo rete (regola dell'utente, 22/09/2026): la predittivita' delle secondarie
+// non considera ne' l'ACI ne' l'extra raccolta. Qui non si filtra niente: chi
+// chiama passa gia' conferiti, giacenze e ingressi della sola rete
+// (functions/proiezioneSecondarie), e i totali di questo file sommano impianti
+// e mesi, mai canali.
 //
 // Specchio nel frontend: src/lib/proiezioneSecondarie.js.
 

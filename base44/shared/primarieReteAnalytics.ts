@@ -224,12 +224,14 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
 // ritardo guardano il ritiro, non la pratica.
 //
 // Un terminato senza fine trasporto (o senza immissione) non si misura: si conta
-// a parte e si segnala, e l'anno per contarlo e' quello dell'immissione.
+// a parte e si segnala, e l'anno per contarlo e' quello dell'immissione. Lo
+// stesso per una fine trasporto anteriore all'immissione: e' un dato sporco, e
+// misurato darebbe giorni negativi e un "nei tempi" che abbassa la media.
 export function computeSlaMetrics(records, anno = null) {
   const byTrasportatore: Record<string, any> = {};
   const annoNum = Number(anno) || Number(oggiRoma().slice(0, 4));
-  const nonMisurati = { senza_fine_trasporto: 0, senza_immissione: 0, esempi: [] as string[] };
-  const segnala = (r: any, perche: 'senza_fine_trasporto' | 'senza_immissione') => {
+  const nonMisurati = { senza_fine_trasporto: 0, senza_immissione: 0, date_incoerenti: 0, esempi: [] as string[] };
+  const segnala = (r: any, perche: 'senza_fine_trasporto' | 'senza_immissione' | 'date_incoerenti') => {
     nonMisurati[perche] += 1;
     if (nonMisurati.esempi.length < 5 && r.id_ordine) nonMisurati.esempi.push(String(r.id_ordine));
   };
@@ -244,6 +246,7 @@ export function computeSlaMetrics(records, anno = null) {
     if (periodo.anno !== annoNum) continue;
     const tempi = tempiRaccolta(r);
     if (!tempi) { segnala(r, 'senza_immissione'); continue; }
+    if (tempi.incoerente || tempi.giorni == null) { segnala(r, 'date_incoerenti'); continue; }
     const trasportatore = (r.trasportatore || 'N/D').trim();
 
     if (!byTrasportatore[trasportatore]) {

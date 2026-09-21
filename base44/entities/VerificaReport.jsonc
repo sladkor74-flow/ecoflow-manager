@@ -89,32 +89,28 @@
     "assenti_nel_report": {
       "type": "number"
     },
-    "ingressi_gestionale": {
-      "type": "number",
-      "description": "Primarie arrivate al sito nella settimana"
-    },
-    "peso_ingressi_kg": {
-      "type": "number"
-    },
-    "uscite_gestionale": {
-      "type": "number",
-      "description": "Secondarie partite dal sito nella settimana"
-    },
-    "peso_uscite_kg": {
-      "type": "number"
-    },
     "uscite_verificate": {
       "type": "boolean",
-      "description": "Il report contiene uscite e quelle della settimana sono state controllate. Se falso, il report riporta i soli ingressi"
-    },
-    "peso_report_kg": {
-      "type": "number",
-      "description": "Peso delle righe verificate, escluse quelle non considerate"
+      "description": "Il report contiene uscite e quelle della settimana sono state controllate. Se falso, il report riporta i soli ingressi. Formulari e chili, ingressi e uscite, stanno nella quadratura di esito_json per movimentazione e canale: i totali che sommavano rete, ACI ed extra raccolta non si salvano piu'"
     },
     "conformita": {
       "type": "string",
       "enum": ["piena", "parziale"],
       "description": "piena: nessuna anomalia e formulari e pesi che quadrano con il gestionale; parziale: errori, sviste o mancanze"
+    },
+    "per_canale": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "canale": { "type": "string" },
+          "nome": { "type": "string" },
+          "conformita": { "type": "string" },
+          "anomalie": { "type": "number" },
+          "assenti": { "type": "number" }
+        }
+      },
+      "description": "Il verdetto per canale (rete, aci, extra), solo dei canali con almeno un formulario: rete, ACI ed extra raccolta non si sommano. conformita e' il verdetto unico, che resta per l'alert della dichiarazione di nessuna movimentazione"
     },
     "anomalie": {
       "type": "number",

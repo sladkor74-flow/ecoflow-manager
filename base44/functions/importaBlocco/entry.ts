@@ -6,9 +6,15 @@ import { ARCHIVI_PRIMARIE, DATE_PRIMARIE, archivioPrimaria, recordAssegnato } fr
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
-import { evasioneOrdini, listaOrdini, statoRichiesta } from "../../shared/richiesteEct.ts";
-import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
-import { eTerminato } from "../../shared/movimenti.ts";
+import { evasioneOrdini, listaOrdini, statoRichiesta, riconosciOrdine } from "../../shared/richiesteEct.ts";
+import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
+import { eTerminato, giornoMovimento } from "../../shared/movimenti.ts";
+import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
+
+// Le dichiarazioni riconosciute, un canale per volta: nel registro non si sommano.
+const perCanale = (righe) => [['RETE', 'rete'], ['ACI', 'ACI'], ['EXTRA_RACCOLTA', 'extra raccolta']]
+  .map(([c, nome]) => [nome, righe.filter(x => (x.canale || 'RETE') === c).length]).filter(([, n]) => n)
+  .map(([nome, n]) => `${nome} ${n}`).join(', ') || '0';
 
 // Importazione a blocchi per i report di grandi dimensioni del portale Ecotyre.
 //
@@ -38,8 +44,9 @@ import { eTerminato } from "../../shared/movimenti.ts";
 // il caricamento resta buono e il registro chiuso.
 //   allinea    - report delle dichiarazioni: riconosce le nostre dichiarazioni
 //                mensili caricate a portale (caricata_inviata, data, materiali)
-//   ritiri_ect - primarie: riconosce fra i terminati i ritiri delle richieste
-//                del consorzio
+//   ritiri_ect - primarie: riconosce fra assegnati e primarie l'ordine delle
+//                richieste del consorzio, e fra i terminati il loro ritiro; con
+//                un caricamento delle primarie aperto rinvia (409)
 //
 // Un blocco corrisponde a una sola scrittura: o la riga vanno tutte a buon fine o
 // non ne va nessuna. Il browser puo' quindi ritentare un blocco fallito senza
@@ -192,13 +199,51 @@ async function contaRecord(base44, entita, ipotesi) {
   return basso + 1;
 }
 
+// id ordine -> primo giorno italiano di fine trasporto, dei soli terminati che ce
+// l'hanno: un ordine senza fine trasporto non conta come ritirato, e non si
+// ripiega sulla chiusura a portale. La stessa regola del caricamento delle
+// richieste (importaRichiesteEct).
+function terminatiConFine(movimenti) {
+  const terminati = new Map();
+  for (const o of movimenti) {
+    const id = String(o.id_ordine || '').trim();
+    const giorno = giornoMovimento(o);
+    if (!id || !eTerminato(o) || !giorno) continue;
+    if (!terminati.has(id) || giorno < terminati.get(id)) terminati.set(id, giorno);
+  }
+  return terminati;
+}
+
+// La data del ritiro da salvare. Si riscrive a ogni ricalcolo: prima si scriveva
+// solo quando c'era, e non si toglieva mai, cosi' una richiesta a cui si
+// aggiungeva a mano un secondo ordine non ancora ritirato restava "da
+// confermare" sulla data vecchia, con ordini_evasi minore di ordini_totali. Si
+// toglie pero' solo quando l'archivio dice che un suo ordine non e' ritirato
+// (c'e', ma non terminato con la fine trasporto); un ordine che nell'archivio
+// non c'e' affatto - un caricamento parziale, un blocco non scritto - non basta
+// a cancellare un ritiro gia' rilevato: si tiene la data salvata.
+function dataRitiro(salvata, ids, ev, terminati, presenti) {
+  if (ev.ultima) return ev.ultima;
+  if (!salvata) return null;
+  const mancanti = ids.filter(id => !terminati.has(id));
+  return mancanti.every(id => presenti.has(id)) ? null : salvata;
+}
+
 // Le richieste del consorzio dicono "ritirato il" quando il loro ordine compare
 // fra i terminati. Prima lo si calcolava solo ricaricando il file delle richieste
 // (importaRichiesteEct): un ritiro arrivato con le primarie restava "in attesa" e
 // in ritardo, e si rischiava di sollecitare un ritiro gia' fatto. Il giorno e'
-// quello italiano della fine trasporto, mai la chiusura a portale; un ordine senza
-// fine trasporto non conta come ritirato. Spunte, ID scritti a mano e note non si
-// toccano: cambiano solo la data rilevata, i conteggi e lo stato che ne discende.
+// quello italiano della fine trasporto, mai la chiusura a portale.
+//
+// Anche l'ID ordine si ricerca: il file delle primarie riscrive gli assegnati, e
+// una richiesta rimasta "non trovata" o "ambigua" perche' il suo ordine non era
+// ancora fra gli assegnati quando si e' caricato il foglio ECT restava senza ID,
+// quindi "in attesa", finche' qualcuno non ricaricava quel foglio. Vale per le
+// richieste senza ID scritti a mano, che vincono sempre; un ID gia' riconosciuto
+// si sostituisce solo con un altro ID, mai con "non trovato" o "ambiguo" (un
+// secondo ordine dello stesso produttore e dello stesso giorno avrebbe tolto
+// l'ordine, e con lui il ritiro, a una richiesta gia' evasa). Spunte, ID scritti
+// a mano e note non si toccano.
 async function riconosciRitiriEct(base44) {
   const svc = base44.asServiceRole.entities;
   const anno = Number(oggiRoma().slice(0, 4));
@@ -206,33 +251,58 @@ async function riconosciRitiriEct(base44) {
     .filter(r => r.esito !== 'evasa' && r.esito !== 'annullata');
   if (!richieste.length) return { controllate: 0, aggiornate: 0, da_confermare: [] };
 
-  const [rete, aci] = await Promise.all([
-    fetchAll(svc.PrimariaRete, { stato: 'terminato' }),
-    fetchAll(svc.PrimariaAci, { stato: 'terminato' }),
+  // Gli stessi archivi del caricamento delle richieste: gli assegnati e tutte le
+  // primarie, perche' l'ordine della richiesta puo' essere gia' terminato.
+  const [assRete, assAci, rete, aci] = await Promise.all([
+    fetchAll(svc.Assegnato),
+    fetchAll(svc.AssegnatoAci),
+    fetchAll(svc.PrimariaRete),
+    fetchAll(svc.PrimariaAci),
   ]);
-  const terminati = new Map(); // id ordine -> primo giorno di fine trasporto
-  for (const o of [...rete, ...aci]) {
-    const id = String(o.id_ordine || '').trim();
-    const giorno = giornoRoma(o.trasporto_finito_il);
-    if (!id || !eTerminato(o) || !giorno) continue;
-    if (!terminati.has(id) || giorno < terminati.get(id)) terminati.set(id, giorno);
-  }
+  const ordini = [...assRete, ...assAci, ...rete, ...aci];
+  const terminati = terminatiConFine([...rete, ...aci]);
+  const presenti = new Set(ordini.map(o => String(o.id_ordine || '').trim()).filter(Boolean));
 
   let aggiornate = 0;
   const daConfermare = [];
   for (const r of richieste) {
-    const ids = listaOrdini(r);
+    const campi: any = {};
+    if (!String(r.id_ordine_manuale || '').trim()) {
+      const ric = riconosciOrdine(r, ordini);
+      if (ric.id_ordine || !String(r.id_ordine || '').trim()) {
+        campi.id_ordine = ric.id_ordine;
+        campi.id_ordine_stato = ric.id_ordine_stato;
+        campi.id_ordine_candidati = ric.id_ordine_candidati;
+      }
+    }
+    const ids = listaOrdini({ ...r, ...campi });
     const ev = evasioneOrdini(ids, terminati);
-    const campi: any = { ordini_totali: ev.totali, ordini_evasi: ev.evasi };
-    if (ev.ultima) campi.evasione_rilevata_il = ev.ultima;
+    campi.ordini_totali = ev.totali;
+    campi.ordini_evasi = ev.evasi;
+    campi.evasione_rilevata_il = dataRitiro(r.evasione_rilevata_il, ids, ev, terminati, presenti);
     campi.esito = statoRichiesta({ ...r, ...campi });
     if (!Object.keys(campi).some(k => String(r[k] ?? '') !== String(campi[k] ?? ''))) continue;
     // chi diventa "ritirata, da spuntare" adesso va detto: e' la riga su cui rispondere al consorzio
-    if (campi.esito === 'da_confermare' && r.esito !== 'da_confermare') daConfermare.push({ pdr: r.pdr_nome, id_ordine: ids.join(', '), evasa_il: ev.ultima });
+    if (campi.esito === 'da_confermare' && r.esito !== 'da_confermare') daConfermare.push({ pdr: r.pdr_nome, id_ordine: ids.join(', '), evasa_il: campi.evasione_rilevata_il });
     await svc.RichiestaEct.update(r.id, campi);
     aggiornate++;
   }
   return { controllate: richieste.length, aggiornate, da_confermare: daConfermare };
+}
+
+// Gli ordini delle richieste si cercano fra primarie e assegnati: se il loro
+// archivio si sta riscrivendo, o un caricamento l'ha lasciato a meta', ID e ritiri
+// letti adesso sarebbero sbagliati e verrebbero salvati. Si rinvia (409) dicendo
+// quale caricamento lo impedisce; si rifa' a caricamento concluso.
+async function rinvioPerCaricamento(base44) {
+  const { in_corso } = await statoCaricamenti(base44, ['primarie']);
+  if (!in_corso.length) return null;
+  const c = in_corso[0];
+  const chi = c.utente ? ` di ${c.utente}` : '';
+  const file = c.nome_file ? ` (${c.nome_file})` : '';
+  return c.interrotto
+    ? `Rinviato: il caricamento delle primarie${chi}${file} del ${c.data} e' rimasto interrotto e l'archivio puo' essere incompleto. Ricarica il file delle primarie.`
+    : `Rinviato: caricamento delle primarie${chi}${file} in corso. I ritiri si riconoscono quando finisce.`;
 }
 
 export default async function(req) {
@@ -275,19 +345,24 @@ export default async function(req) {
       fase = 'allineamento delle dichiarazioni mensili';
       const svc = base44.asServiceRole.entities;
       const righePortale = await fetchAll(svc.DichiarazioneTrattamento, null, 'id');
-      const anni = [...new Set(righePortale.map(r => String(r.data_dichiarazione || '').slice(0, 4)).filter(a => /^\d{4}$/.test(a)))].sort();
+      // L'anno del giorno italiano, come lo legge allineaDalPortale: tagliando la
+      // stringa UTC un caricamento del 1 gennaio a mezzanotte italiana cadeva
+      // nell'anno prima, e il suo anno restava fuori.
+      const anni = [...new Set(righePortale.map(r => annoRoma(r.data_dichiarazione)).filter(Boolean))].sort((x, y) => x - y);
       const aggiornate = [];
       const nonTrovate = [];
       for (const a of anni) {
-        const esito = await allineaDalPortale(svc, Number(a), righePortale);
-        aggiornate.push(...esito.aggiornate);
-        nonTrovate.push(...esito.non_trovate);
+        const esito = await allineaDalPortale(svc, a, righePortale);
+        aggiornate.push(...esito.aggiornate.map(x => ({ ...x, anno: a })));
+        // Con l'anno, chi le mostra distingue i mesi dell'ultimo anno, che possono
+        // ancora comparire, da quelli degli anni chiusi.
+        nonTrovate.push(...esito.non_trovate.map(x => ({ ...x, anno: a })));
       }
       // Nel registro, accanto al caricamento, come faceva l'importazione lato server.
       fase = 'nota nel registro caricamenti';
       const [ultimo] = await svc.UploadLog.filter({ tipo_file }, '-created_date', 1);
       if (ultimo && (ultimo.esito === 'successo' || ultimo.esito === 'parziale') && !String(ultimo.messaggio || '').includes('dichiarazioni riconosciute a portale')) {
-        await svc.UploadLog.update(ultimo.id, { messaggio: `${ultimo.messaggio || ''} | dichiarazioni riconosciute a portale: ${aggiornate.length}` });
+        await svc.UploadLog.update(ultimo.id, { messaggio: `${ultimo.messaggio || ''} | dichiarazioni riconosciute a portale: ${perCanale(aggiornate)}` });
       }
       return Response.json({ allineamento: { anni: anni.map(Number), aggiornate, non_trovate: nonTrovate }, dati_intatti: true });
     }
@@ -295,6 +370,9 @@ export default async function(req) {
     // === RITIRI delle richieste del consorzio, fra i terminati appena caricati ===
     if (azione === 'ritiri_ect') {
       if (!primarie) return Response.json({ error: 'Azione non prevista per ' + tipo_file, dati_intatti: true }, { status: 400 });
+      fase = 'controllo dei caricamenti in corso';
+      const rinvio = await rinvioPerCaricamento(base44);
+      if (rinvio) return Response.json({ error: rinvio, rinviato: true, dati_intatti: true }, { status: 409 });
       fase = 'riconoscimento dei ritiri delle richieste ECT';
       return Response.json({ ...(await riconosciRitiriEct(base44)), dati_intatti: true });
     }

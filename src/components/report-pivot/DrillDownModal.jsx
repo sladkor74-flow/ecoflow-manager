@@ -2,7 +2,15 @@ import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Loader2 } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
+import { giornoRoma } from '@/lib/giornoItaliano';
 
+// Le date come giorno italiano, 'GG/MM/AAAA': toLocaleDateString leggeva
+// l'istante nel fuso del browser.
+const dataIt = (v) => { const g = giornoRoma(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
+
+// La data di un movimento e' la fine del trasporto: e' la prima colonna di date.
+// La chiusura a portale, che prima era l'unica data mostrata, resta in fondo
+// solo come informazione.
 export default function DrillDownModal({ open, onClose, title, loading, records, total }) {
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -27,13 +35,14 @@ export default function DrillDownModal({ open, onClose, title, loading, records,
                   <tr>
                     <th className="px-2 py-2 text-left">ID Ordine</th>
                     <th className="px-2 py-2 text-left">Stato</th>
+                    <th className="px-2 py-2 text-left">Fine trasporto</th>
                     <th className="px-2 py-2 text-left">Ragione Sociale</th>
                     <th className="px-2 py-2 text-left">Comune</th>
                     <th className="px-2 py-2 text-left">Prov.</th>
                     <th className="px-2 py-2 text-left">Classe</th>
                     <th className="px-2 py-2 text-right">Peso Eff. [kg]</th>
                     <th className="px-2 py-2 text-left">N. FIR</th>
-                    <th className="px-2 py-2 text-left">Data Chiusura</th>
+                    <th className="px-2 py-2 text-left text-muted-foreground font-normal">Chiuso il</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -41,13 +50,14 @@ export default function DrillDownModal({ open, onClose, title, loading, records,
                     <tr key={i} className="border-t hover:bg-muted/30">
                       <td className="px-2 py-1.5 font-mono">{r.id_ordine}</td>
                       <td className="px-2 py-1.5">{r.stato}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap">{dataIt(r.trasporto_finito_il) || '—'}</td>
                       <td className="px-2 py-1.5 max-w-[200px] truncate" title={r.ragione_sociale}>{r.ragione_sociale}</td>
                       <td className="px-2 py-1.5">{r.comune}</td>
                       <td className="px-2 py-1.5">{r.provincia}</td>
                       <td className="px-2 py-1.5">{r.classe}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{r.peso_effettivo != null ? formatNumber(r.peso_effettivo, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—'}</td>
                       <td className="px-2 py-1.5 font-mono">{r.numero_fir}</td>
-                      <td className="px-2 py-1.5">{r.ordine_chiuso_il ? new Date(r.ordine_chiuso_il).toLocaleDateString('it-IT') : '—'}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground">{dataIt(r.ordine_chiuso_il) || '—'}</td>
                     </tr>
                   ))}
                 </tbody>

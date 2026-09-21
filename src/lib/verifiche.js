@@ -291,6 +291,25 @@ const ETICHETTA_CAMPO = {
  * formulari e pesi, controlli eseguiti, anomalie, osservazioni, rettifiche,
  * formulari mancanti e in piu', conformita' piena o parziale.
  */
+// Il verdetto di una verifica, un canale per volta (regola 3): una riga ACI
+// sbagliata non rende "parziale" la rete dell'impianto. Per ogni canale con
+// almeno un formulario, nel report o registrato: piena se le sue movimentazioni
+// quadrano e non ha anomalie ne' formulari mancanti. I formulari del report che
+// il gestionale non conosce non hanno canale e si contano a parte.
+export const CANALI_DEL_VERDETTO = [['rete', 'Rete'], ['aci', 'ACI'], ['extra', 'Extra raccolta']];
+export function conformitaPerCanale(esito) {
+  const canaleDi = (k) => String(k || '').split('-')[2] || '';
+  return CANALI_DEL_VERDETTO.map(([canale, nome]) => {
+    const quadratura = (esito.quadratura || []).filter(q => canaleDi(q.chiave) === canale);
+    const righe = (esito.esiti || []).filter(e => canaleDi(e.categoria) === canale);
+    const assenti = (esito.assenti || []).filter(a => canaleDi(a.categoria) === canale);
+    if (!quadratura.some(q => q.formulari_report || q.formulari_gestionale) && !righe.length && !assenti.length) return null;
+    const anomalie = righe.filter(e => e.anomalia).length + assenti.length;
+    const quadra = quadratura.every(q => q.formulari_report === q.formulari_gestionale && q.kg_report === q.kg_gestionale);
+    return { canale, nome, conformita: anomalie === 0 && quadra ? 'piena' : 'parziale', anomalie, assenti: assenti.length };
+  }).filter(Boolean);
+}
+
 export function sintesiVerifica(v, esito) {
   const esiti = esito.esiti || [];
   const assenti = esito.assenti || [];
@@ -356,9 +375,15 @@ export function sintesiVerifica(v, esito) {
   const numeroAnomalie = righeConAnomalie + inPiu.length + mancanti.length;
   // La conformita' si decide movimentazione per movimentazione: se quadrano tutte, niente da sommare.
   const conformita = v.conformita || (numeroAnomalie === 0 && righeQuadratura.every(q => q.quadra) ? 'piena' : 'parziale');
+  // Il verdetto per canale: dall'esito, cosi' vale anche per le verifiche salvate prima.
+  const perCanale = esito.quadratura ? conformitaPerCanale(esito) : (v.per_canale || []);
 
   return {
     conformita, numeroAnomalie, quadratura: righeQuadratura, categorie, totale, controlli, dichiarazione: v.file_tipo === 'dichiarazione',
+    perCanale,
+    // Tutto a posto: ogni canale pieno e nessun formulario sconosciuto. Non e' un
+    // verdetto unico che somma i canali: e' "pieni tutti".
+    piena: perCanale.length && v.file_tipo !== 'dichiarazione' ? perCanale.every(c => c.conformita === 'piena') && !inPiu.length : conformita === 'piena',
     anomalie: voci.anomalia, osservazioni: voci.osservazione, rettifiche: voci.rettifica,
     mancanti, inPiu, escluse, esiti,
   };
@@ -440,7 +465,10 @@ export async function scaricaExcelVerifica(v) {
   r.addRow([]);
   const info = [
     ['Impianto o stoccaggio', v.soggetto_nome],
-    ['Esito', sintesi.conformita === 'piena' ? 'Conformità piena' : 'Conformità parziale'],
+    ...(sintesi.dichiarazione || !sintesi.perCanale.length
+      ? [['Esito', sintesi.conformita === 'piena' ? 'Conformità piena' : 'Conformità parziale']]
+      : sintesi.perCanale.map(c => [`Esito ${c.nome.toLowerCase() === 'aci' ? 'ACI' : c.nome.toLowerCase()}`, c.conformita === 'piena' ? 'Conformità piena' : `Conformità parziale · ${c.anomalie} ${c.anomalie === 1 ? 'anomalia' : 'anomalie'}`])),
+    ...(!sintesi.dichiarazione && sintesi.inPiu.length ? [['Formulari del report non registrati', `${sintesi.inPiu.length}, senza canale: il gestionale non li conosce`]] : []),
     ['Settimana', `${v.settimana} del ${v.anno}, dal ${dataIt(v.data_inizio)} al ${dataIt(v.data_fine)}, secondo la data di fine trasporto`],
     ['File verificato', v.file_nome],
     ['Lettura del file', lettura.modo === 'dichiarazione'

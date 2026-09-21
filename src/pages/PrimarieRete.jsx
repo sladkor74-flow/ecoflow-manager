@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { annoOrdine, giornoOrdine } from '@/lib/movimenti';
+import { eTerminato, giornoMovimento, giornoOrdine } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
 import { Loader2, Upload, MapPin, BarChart3, Clock, Table2, Filter, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -11,9 +11,24 @@ import SlaMetrics from '@/components/primarie-rete/SlaMetrics';
 import PrimarieReteTable from '@/components/primarie-rete/PrimarieReteTable';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { fetchAllClient } from '@/lib/fetchAllClient';
+import { formatIntero } from '@/lib/utils';
 import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdOrdine';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+
+// Il giorno con cui l'elenco colloca un ordine, per i filtri di giorno, mese e
+// anno: la fine del trasporto; per un ordine non terminato (cancellato prima del
+// ritiro) l'immissione. Un terminato senza fine trasporto non ha giorno: con
+// giornoOrdine ripiegava sull'immissione, e un ritiro di luglio su un ordine di
+// maggio rispondeva al filtro di maggio. Resta fuori dai filtri di periodo e si
+// conta nell'avviso sopra l'elenco. Il campo mese salvato sul record non si usa:
+// puo' venire da un'importazione vecchia, quando il riferimento era la chiusura.
+const giornoElenco = (r) => (eTerminato(r) ? giornoMovimento(r) : giornoOrdine(r));
+const meseElenco = (r) => { const g = giornoElenco(r); return g ? MESI[Number(g.slice(5, 7)) - 1] : null; };
+const annoElenco = (r) => { const g = giornoElenco(r); return g ? Number(g.slice(0, 4)) : null; };
+
+// I caricamenti che riscrivono l'archivio delle primarie di rete.
+const CARICAMENTI_RETE = ['primarie', 'primarie_rete'];
 
 export default function PrimarieRete() {
   const [provinceData, setProvinceData] = useState(null);
@@ -26,6 +41,8 @@ export default function PrimarieRete() {
 
   const [records, setRecords] = useState([]);
   const [allRecords, setAllRecords] = useState([]);
+  // i terminati senza fine trasporto che rispondono ai filtri di regione e stato
+  const [senzaFine, setSenzaFine] = useState([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [filters, setFilters] = useState({ regione: [], stato: [], data: '', mese: [], anno: [] });
   const [cercaId, setCercaId] = useState('');
@@ -37,10 +54,14 @@ export default function PrimarieRete() {
   const loadData = useCallback(async () => {
     setLoading(true);
     const mixFilters = { regione: filters.regione, stato: filters.stato, mese: filters.mese, anno: filters.anno };
+    // I tempi si misurano su un anno: quello scelto nel filtro, se e' uno solo,
+    // altrimenti l'anno in corso. Prima la scheda restava sempre sull'anno in
+    // corso anche filtrando un altro anno, e non lo diceva.
+    const annoSla = filters.anno.length === 1 ? filters.anno[0] : null;
     const esiti = await Promise.allSettled([
       base44.functions.invoke('computeProvinceMatrix', {}),
       base44.functions.invoke('computeRaccoglitoriMix', { filters: mixFilters }),
-      base44.functions.invoke('computeSlaMetrics', {}),
+      base44.functions.invoke('computeSlaMetrics', annoSla ? { anno: annoSla } : {}),
       base44.functions.invoke('getAlerts', { modulo: 'primarie_rete', solo_aperti: true }),
     ]);
     const [provRes, mixRes, slaRes, alertRes] = esiti;
@@ -49,7 +70,7 @@ export default function PrimarieRete() {
     setMixData(dato(mixRes));
     setSlaData(dato(slaRes));
     setAlertCount(dato(alertRes)?.total || 0);
-    const nomi = ['la matrice per provincia', 'il mix dei raccoglitori', 'i tempi di evasione', 'gli alert aperti'];
+    const nomi = ['la matrice per provincia', 'il mix dei raccoglitori', 'i tempi di raccolta', 'gli alert aperti'];
     setNonCaricati(esiti.map((r, i) => (r.status === 'rejected' ? nomi[i] : null)).filter(Boolean));
     esiti.filter(r => r.status === 'rejected').forEach(r => console.error(r.reason));
     setLoading(false);
@@ -60,35 +81,47 @@ export default function PrimarieRete() {
     try {
       const all = await fetchAllClient(base44.entities.PrimariaRete);
       setAllRecords(all);
-      const filtered = all.filter(r => {
+      // Regione e stato si leggono sul record, giorno, mese e anno sul periodo
+      // (giornoElenco). Separati, per contare i terminati senza fine trasporto
+      // anche quando si guarda un mese: nessun filtro di periodo li prende.
+      const passaAltri = (r) => {
         if (filters.regione.length > 0 && !filters.regione.includes((r.regione || '').trim())) return false;
         if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
-        if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;
-        if (filters.anno.length > 0) {
-          const anno = annoOrdine(r);
-          if (!filters.anno.map(String).includes(String(anno))) return false;
-        }
-        if (filters.data) {
-          if (giornoOrdine(r) !== filters.data) return false;
-        }
         return true;
-      });
-      setRecords(filtered);
+      };
+      const passaPeriodo = (r) => {
+        if (filters.mese.length > 0 && !filters.mese.includes(meseElenco(r))) return false;
+        if (filters.anno.length > 0 && !filters.anno.map(String).includes(String(annoElenco(r)))) return false;
+        if (filters.data && giornoElenco(r) !== filters.data) return false;
+        return true;
+      };
+      setRecords(all.filter(r => passaAltri(r) && passaPeriodo(r)));
+      setSenzaFine(all.filter(r => passaAltri(r) && eTerminato(r) && !giornoMovimento(r)));
     } catch (e) { console.error(e); }
     setLoadingRecords(false);
   }, [filters]);
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadRecords(); }, [loadRecords]);
+  // Ogni caricamento delle primarie aggiorna la pagina, riquadri ed elenco: la
+  // pagina restava quella di prima finche' qualcuno non la riapriva. Si ricarica
+  // a caricamento concluso, mai mentre l'archivio si sta riscrivendo (in_corso).
+  useEffect(() => {
+    const unsub = base44.entities.UploadLog.subscribe((event) => {
+      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso' && CARICAMENTI_RETE.includes(event.data?.tipo_file)) {
+        loadData();
+        loadRecords();
+      }
+    });
+    return unsub;
+  }, [loadData, loadRecords]);
   // Cercando un ID si passa al dettaglio degli ordini, in tutto l'archivio.
   useEffect(() => { if (cercaId.trim()) setScheda('dettaglio'); }, [cercaId]);
   const ordiniMostrati = cercaId.trim() ? allRecords.filter(r => corrispondeIdOrdine(r, cercaId)) : records;
 
   const regioni = [...new Set(allRecords.map(r => (r.regione || '').trim()).filter(Boolean))].sort();
   const stati = [...new Set(allRecords.map(r => (r.stato || '').trim()).filter(Boolean))].sort();
-  const anni = [...new Set(allRecords.map(r => {
-    return annoOrdine(r);
-  }).filter(Boolean))].sort((a, b) => b - a);
+  const anni = [...new Set(allRecords.map(annoElenco).filter(Boolean))].sort((a, b) => b - a);
 
   const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
   const resetFilters = () => setFilters({ regione: [], stato: [], data: '', mese: [], anno: [] });
@@ -134,8 +167,17 @@ export default function PrimarieRete() {
           <MultiSelect allLabel="Tutti gli stati" options={stati} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
           <MultiSelect allLabel="Tutti i mesi" options={MESI} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
           <MultiSelect allLabel="Tutti gli anni" options={anni.map(String)} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v.map(Number) }))} />
-          <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" />
+          <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" title="Giorno di fine trasporto (per gli ordini non terminati, giorno di immissione)" aria-label="Giorno di fine trasporto" />
         </div>
+        {senzaFine.length > 0 && (
+          <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 text-sm">
+            {senzaFine.length === 1 ? '1 ordine terminato non ha' : `${formatIntero(senzaFine.length)} ordini terminati non hanno`} la fine del trasporto
+            {senzaFine.some(r => r.id_ordine) && <> (es. {senzaFine.map(r => r.id_ordine).filter(Boolean).slice(0, 5).join(', ')})</>}:
+            {senzaFine.length === 1
+              ? ' senza giorno, mese e anno resta fuori dai filtri di periodo e dai tempi di raccolta. Si vede senza filtri di periodo o cercando l\'ID.'
+              : ' senza giorno, mese e anno restano fuori dai filtri di periodo e dai tempi di raccolta. Si vedono senza filtri di periodo o cercando l\'ID.'}
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -173,9 +215,9 @@ export default function PrimarieRete() {
 
           <TabsContent value="sla" className="mt-4">
             <div className="mb-3 text-sm text-muted-foreground">
-              Tempi di evasione e puntualità delle raccolte per trasportatore. Alert critico se Nr Giorni medio {'>'} 12 o % fuori tempo {'>'} 20%.
+              Tempi di raccolta per trasportatore, dall'immissione dell'ordine alla fine del trasporto. Alert critico se Nr Giorni medio {'>'} 12 o % fuori tempo {'>'} 20%.
             </div>
-            <SlaMetrics data={slaData} />
+            <SlaMetrics data={slaData} anniFiltro={filters.anno} />
           </TabsContent>
         </Tabs>
       )}

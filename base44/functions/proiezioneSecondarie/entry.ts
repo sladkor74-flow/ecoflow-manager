@@ -2,10 +2,11 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { fineProgrammazione, avvisoFineProgrammazione } from "../../shared/fineProgrammazione.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
-import { eAci } from "../../shared/canaleSecondaria.ts";
+import { canaleMovimento, annoOrdine } from "../../shared/movimenti.ts";
 import { proiettaInsieme, viaggiPerMese, MESI, KG_PER_VIAGGIO } from "../../shared/proiezioneSecondarie.ts";
 import { dopoLaRilevazione, ultimeRilevazioni, kgReteDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
-import { giornoRoma } from "../../shared/giornoItaliano.ts";
+import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
+import { statoCaricamenti, descriviCaricamento } from "../../shared/reportSettimanali.ts";
 
 // Quante secondarie restano da portare a ogni impianto per arrivare al target.
 //
@@ -14,7 +15,10 @@ import { giornoRoma } from "../../shared/giornoItaliano.ts";
 // arrivato in primaria e in secondaria, quanto arriva in media ogni mese, e
 // quanto materiale hanno gli stoccaggi che lo alimentano.
 //
-// Solo rete: le secondarie ACI non consumano il target di rete.
+// Solo rete (regola dell'utente, 22/09/2026): ACI ed extra raccolta non entrano
+// nella predittivita', ne' nel target, ne' nel gia' arrivato, ne' nella
+// giacenza degli stoccaggi. L'extra raccolta sta in un archivio suo e non si
+// legge; primarie e secondarie si tengono solo se il canale e' la rete.
 //
 // Payload: { anno, mese_da }  mese_da e' l'indice del mese da cui proiettare
 // (0 = gennaio); se manca si parte dal mese in corso.
@@ -23,6 +27,23 @@ import { giornoRoma } from "../../shared/giornoItaliano.ts";
 const soloData = (v) => giornoRoma(v);
 const terminato = (r) => String(r.stato || '').toLowerCase().trim() === 'terminato';
 const peso = (r) => Number(r.peso_effettivo) || 0;
+const soloRete = (righe, archivio) => righe.filter(r => canaleMovimento(r, archivio) === 'RETE');
+
+// La proiezione non salva niente, ma se primarie o secondarie si stanno
+// ricaricando (o il caricamento e' rimasto interrotto) i numeri escono da mezzo
+// archivio: si dice a video, e la pagina si ricalcola quando il caricamento si
+// chiude. Stessa finestra di dieci minuti di importaBlocco.
+// Si usa la regola condivisa di base44/shared/reportSettimanali.ts: un
+// caricamento rimasto aperto non conta piu' se dopo un caricamento riuscito ha
+// riscritto gli stessi archivi. Un "primarie_rete" storico, che nessuna scheda
+// di Caricamento Dati scrive piu' ne' chiude, altrimenti bloccava per sempre il
+// piano, il suggerimento del lunedi' e la proiezione.
+const TIPI_LETTI = ['primarie', 'primarie_rete', 'secondarie'];
+async function caricamentoAperto(base44) {
+  const stato = await statoCaricamenti(base44, TIPI_LETTI).catch(() => ({ in_corso: [] }));
+  const aperti = stato.in_corso || [];
+  return aperti.length ? aperti.map(descriviCaricamento).join('; ') : null;
+}
 
 function meseDi(v, anno) {
   const d = soloData(v);
@@ -37,12 +58,14 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const anno = Number(body.anno) || new Date().getUTCFullYear();
-    const oggi = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
+    // Anno e mese dal giorno italiano, tutti e due: con l'anno letto in UTC, la
+    // notte di Capodanno l'anno restava il vecchio mentre il mese era gennaio.
+    const oggi = oggiRoma();
+    const anno = Number(body.anno) || Number(oggi.slice(0, 4));
     const meseDa = body.mese_da != null ? Number(body.mese_da) : Number(oggi.slice(5, 7)) - 1;
 
     const svc = base44.asServiceRole.entities;
-    const [impianti, fornitori, primarie, secondarie, rilevazioni, ipotesiTutte, giacenzeSito] = await Promise.all([
+    const [impianti, fornitori, primarieTutte, secondarieTutte, rilevazioni, ipotesiTutte, giacenzeSito, caricamentoInCorso] = await Promise.all([
       svc.ImpiantoTargetSecondaria.filter({ stato: 'attivo' }),
       svc.FornitoreSecondaria.filter({ stato: 'attivo' }),
       fetchAll(svc.PrimariaRete, { stato: 'terminato' }),
@@ -50,10 +73,30 @@ export default async function(req) {
       fetchAll(svc.GiacenzaStoccaggio),
       svc.IpotesiMensileSecondarie.filter({ anno }, 'mese', 500),
       svc.GiacenzaSito.filter({ anno }, 'sito', 100).catch(() => []),
+      caricamentoAperto(base44),
     ]);
+    // Solo rete, una volta qui per tutti i conti che seguono: una primaria di
+    // classe 9 finita fra quelle di rete e le secondarie ACI, che stanno nello
+    // stesso archivio, si scartano con la regola condivisa.
+    const primarie = soloRete(primarieTutte, 'PrimariaRete');
+    const secondarie = soloRete(secondarieTutte, 'Secondaria');
+
+    // Un terminato senza fine trasporto non si colloca in nessun mese e non
+    // entra ne' nel gia' arrivato ne' nella giacenza (mai ripiegando sulla
+    // chiusura): si conta, fra quelli dell'anno per data di immissione, e si dice.
+    const senzaFine = (righe) => righe.filter(r => terminato(r) && !soloData(r.trasporto_finito_il) && annoOrdine(r) === anno).length;
+    const senzaFineTrasporto = { primarie: senzaFine(primarie), secondarie: senzaFine(secondarie) };
+    const avvisiGenerali = [];
+    if (caricamentoInCorso) avvisiGenerali.push(caricamentoInCorso);
+    if (senzaFineTrasporto.primarie || senzaFineTrasporto.secondarie) {
+      avvisiGenerali.push(`Terminati di rete del ${anno} (per data di immissione) senza la data di fine trasporto (primarie: ${senzaFineTrasporto.primarie}, secondarie: ${senzaFineTrasporto.secondarie}). Non sono contati ne' nel gia' arrivato ne' nelle giacenze degli stoccaggi finche' un nuovo caricamento non porta la data.`);
+    }
 
     // --- dove arriva la roba, mese per mese ---
-    const primariaPerSito = new Map();   // chiave sito -> { mese -> kg }  (impianti: tipo imp; stoccaggi: tipo stoc)
+    // chiave sito -> { mese -> kg }, per destinazione: di un soggetto che e'
+    // impianto e stoccaggio insieme qui ci sono le due cose, non distinte per
+    // tipo_destinazione (la giacenza qui sotto invece le distingue).
+    const primariaPerSito = new Map();
     const nomeSito = new Map();
     const aggiungi = (mappa, chiave, mese, kg) => {
       if (!mappa.has(chiave)) mappa.set(chiave, {});
@@ -74,7 +117,7 @@ export default async function(req) {
     const secondariaInSito = new Map();  // chiave impianto -> { mese -> kg }
     const secondariaDaStoccaggio = new Map(); // chiave stoccaggio -> { mese -> kg }
     for (const r of secondarie) {
-      if (!terminato(r) || eAci(r)) continue;
+      if (!terminato(r)) continue;
       const m = meseDi(r.trasporto_finito_il, anno);
       if (m < 0) continue;
       const dest = normalizzaRagioneSociale(r.destinazione);
@@ -89,21 +132,25 @@ export default async function(req) {
     const rilevazionePer = ultimeRilevazioni(rilevazioni, normalizzaRagioneSociale);
     // Stessa regola del modulo Giacenze, in comune (shared/giacenzaStoccaggi.ts):
     // la rilevazione del portale e i movimenti finiti dopo, per fine trasporto.
-    // Solo rete: le primarie arrivate allo stoccaggio (non all'impianto, se il
-    // soggetto e' anche impianto) e le secondarie di rete partite. L'extra
-    // raccolta e' un canale a parte e non entra nella giacenza di rete.
+    // Solo rete: le classi 1-4 della rilevazione, le primarie di rete arrivate
+    // allo stoccaggio (non all'impianto, se il soggetto e' anche impianto), le
+    // secondarie di rete arrivate allo stoccaggio e quelle partite. La classe 9
+    // e le secondarie ACI sono l'ACI; l'extra raccolta, che a portale non c'e',
+    // ha una giacenza sua: nessuna delle due entra qui. Le secondarie in arrivo
+    // mancavano, mentre Giacenze le conta: lo stesso piazzale aveva due saldi.
+    const tipoStoc = (x) => String(x.tipo_destinazione || '').toLowerCase().trim() === 'stoc';
     const giacenzaStoccaggio = (chiave) => {
       const r = rilevazionePer.get(chiave);
       if (!r) return null;
       let kg = kgReteDiRilevazione(r.record);
       for (const p of primarie) {
-        if (!terminato(p) || normalizzaRagioneSociale(p.destinazione) !== chiave) continue;
-        if (String(p.tipo_destinazione || '').toLowerCase().trim() !== 'stoc') continue;
+        if (!terminato(p) || normalizzaRagioneSociale(p.destinazione) !== chiave || !tipoStoc(p)) continue;
         if (dopoLaRilevazione(p, r.quando)) kg += peso(p);
       }
       for (const s of secondarie) {
-        if (!terminato(s) || eAci(s) || normalizzaRagioneSociale(s.stoccaggio) !== chiave) continue;
-        if (dopoLaRilevazione(s, r.quando)) kg -= peso(s);
+        if (!terminato(s) || !dopoLaRilevazione(s, r.quando)) continue;
+        if (tipoStoc(s) && normalizzaRagioneSociale(s.destinazione) === chiave) kg += peso(s);
+        if (normalizzaRagioneSociale(s.stoccaggio) === chiave) kg -= peso(s);
       }
       return Math.max(0, Math.round(kg));
     };
@@ -137,7 +184,7 @@ export default async function(req) {
     // serve a dividere la giacenza di uno stoccaggio condiviso.
     const ricevutoDa = new Map(); // "stoccaggio|impianto" -> kg
     for (const s2 of secondarie) {
-      if (!terminato(s2) || eAci(s2) || meseDi(s2.trasporto_finito_il, anno) < 0) continue;
+      if (!terminato(s2) || meseDi(s2.trasporto_finito_il, anno) < 0) continue;
       const o = normalizzaRagioneSociale(s2.stoccaggio);
       const d2 = normalizzaRagioneSociale(s2.destinazione);
       if (!o || !d2) continue;
@@ -158,7 +205,7 @@ export default async function(req) {
       // servizio - e' successo con RPN, che nel 2026 non ha ne' contratto ne'
       // giacenza, e compariva fra le fonti di Tecnogum con "0 t, non rilevato".
       for (const s of secondarie) {
-        if (!terminato(s) || eAci(s)) continue;
+        if (!terminato(s)) continue;
         if (meseDi(s.trasporto_finito_il, anno) < 0) continue;
         if (normalizzaRagioneSociale(s.destinazione) !== chiaveImpianto) continue;
         const o = normalizzaRagioneSociale(s.stoccaggio);
@@ -223,10 +270,16 @@ export default async function(req) {
     });
 
     return Response.json({
+      canale: 'RETE',
       anno,
       mese_da: meseDa,
       mese_da_nome: MESI[meseDa] || '',
       kg_per_viaggio: KG_PER_VIAGGIO,
+      // Avvisi che valgono per tutta la proiezione, non per un impianto: un
+      // caricamento aperto e i terminati senza fine trasporto lasciati fuori.
+      avvisi_generali: avvisiGenerali,
+      senza_fine_trasporto: senzaFineTrasporto,
+      caricamento_in_corso: caricamentoInCorso || '',
       impianti: proiezioni,
       viaggi_per_mese: viaggiPerMese(proiezioni),
       piazzali_condivisi: insieme.piazzali_condivisi,

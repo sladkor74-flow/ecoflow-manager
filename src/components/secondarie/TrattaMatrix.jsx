@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { ChevronRight, ChevronDown } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
 
-// Matrice gerarchica per tratta: Tratta -> Mese -> Classe
+// Matrice gerarchica per tratta: Tratta -> Mese -> Classe. Il mese e' quello
+// della fine del trasporto (computeSecondarieMatrix).
 export default function TrattaMatrix({ matrix }) {
   const [expanded, setExpanded] = useState({});
 
@@ -66,7 +67,10 @@ export default function TrattaMatrix({ matrix }) {
                             <td className="px-3 py-2 text-right">{fmt(m.quantita)}</td>
                             <td></td>
                           </tr>
-                          {expanded[meseKey] && Object.entries(tratta.classi || {}).map(([classe, c]) => (
+                          {/* Le classi di quel mese, non della tratta intera: sotto
+                              ogni mese comparivano quelle di tutti i mesi, con
+                              numeri maggiori del mese stesso. */}
+                          {expanded[meseKey] && Object.entries(m.classi || {}).map(([classe, c]) => (
                             <tr key={`${meseKey}|c:${classe}`} className="hover:bg-muted/20">
                               <td className="px-3 py-2 pl-20 text-muted-foreground">Classe {classe}</td>
                               <td className="px-3 py-2 text-right">{fmt(c.ordini)}</td>

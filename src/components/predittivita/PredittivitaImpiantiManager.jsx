@@ -5,6 +5,15 @@ import { Input } from '@/components/ui/input';
 import { Loader2, Plus, Trash2, Edit3 } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { formatKg } from '@/lib/utils';
+import { oggiRoma } from '@/lib/giornoItaliano';
+
+// L'anno di lavoro e' quello del giorno italiano, come nella funzione che
+// calcola il piano. La fine della programmazione al 18 dicembre vale solo per il
+// 2026 (base44/shared/fineProgrammazione.ts): per gli altri anni resta da
+// scrivere, e finche' manca la funzione usa il 31 dicembre e lo dice.
+const annoCorrente = () => Number(oggiRoma().slice(0, 4));
+const fineDefault = () => (annoCorrente() === 2026 ? '2026-12-18' : '');
+const it = (g) => (g ? String(g).slice(0, 10).split('-').reverse().join('/') : '');
 
 function ruoloBadgeClass(ruolo) {
   switch (ruolo) {
@@ -61,7 +70,7 @@ export default function PredittivitaImpiantiManager({ onReload }) {
   const [loading, setLoading] = useState(true);
   const [showImpiantoForm, setShowImpiantoForm] = useState(false);
   const [fornitoreFormFor, setFornitoreFormFor] = useState(null);
-  const [impiantoForm, setImpiantoForm] = useState({ nome_impianto: '', target: 0, data_fine: new Date().getFullYear() === 2026 ? '2026-12-18' : '' });
+  const [impiantoForm, setImpiantoForm] = useState({ nome_impianto: '', target: 0, data_fine: fineDefault() });
   const [fornitoreForm, setFornitoreForm] = useState({ nome: '', ruolo: 'raccoglitore', plafond_stoccaggio_kg: 0 });
 
   const load = async () => {
@@ -70,13 +79,16 @@ export default function PredittivitaImpiantiManager({ onReload }) {
       const [imps, forns, targets] = await Promise.all([
         base44.entities.ImpiantoTargetSecondaria.list('-created_date', 50),
         base44.entities.FornitoreSecondaria.list('-created_date', 200),
-        base44.entities.TargetRaccoglitore.filter({ anno: new Date().getFullYear() }),
+        base44.entities.TargetRaccoglitore.filter({ anno: annoCorrente() }),
       ]);
       setImpianti(imps); setFornitori(forns);
+      // Target di rete (gli unici che esistono). Un raccoglitore diviso per
+      // regione ha piu' righe: si sommano, come fa la funzione del piano;
+      // prima qui vinceva l'ultima riga letta e il numero non tornava col piano.
       const tm = {};
       for (const t of targets) {
         const key = normalizzaRagioneSociale(t.raccoglitore);
-        if (key) tm[key] = (t.target_tonnellate || 0) * 1000;
+        if (key) tm[key] = (tm[key] || 0) + (t.target_tonnellate || 0) * 1000;
       }
       setTargetMap(tm);
     } catch (e) {}
@@ -88,7 +100,7 @@ export default function PredittivitaImpiantiManager({ onReload }) {
   const addImpianto = async () => {
     if (!impiantoForm.nome_impianto) return;
     await base44.entities.ImpiantoTargetSecondaria.create({ ...impiantoForm, target: Number(impiantoForm.target), stato: 'attivo' });
-    setImpiantoForm({ nome_impianto: '', target: 0, data_fine: new Date().getFullYear() === 2026 ? '2026-12-18' : '' });
+    setImpiantoForm({ nome_impianto: '', target: 0, data_fine: fineDefault() });
     setShowImpiantoForm(false); load(); onReload();
   };
 
@@ -132,6 +144,11 @@ export default function PredittivitaImpiantiManager({ onReload }) {
         <h2 className="font-heading font-semibold">Impianti Target ({impianti.length})</h2>
         <Button size="sm" onClick={() => setShowImpiantoForm(!showImpiantoForm)}><Plus className="w-4 h-4 mr-1" /> Aggiungi Impianto</Button>
       </div>
+      <p className="text-xs text-muted-foreground">
+        Solo rete: ACI ed extra raccolta non entrano nella predittività. Il target dell&apos;impianto è quello di rete, e fra i fornitori
+        vanno registrati solo raccoglitori e stoccaggi che lavorano sulla rete: chi lavora solo per l&apos;ACI o l&apos;extra raccolta non ha
+        niente da pianificare qui, e la pagina lo segnala.
+      </p>
 
       {showImpiantoForm && (
         <div className="border rounded-lg p-3 space-y-2 bg-muted/30">
@@ -152,7 +169,7 @@ export default function PredittivitaImpiantiManager({ onReload }) {
               <p className="text-sm text-muted-foreground flex items-center gap-1.5">
                 Target:
                 <InlineEditTarget value={imp.target || 0} onSave={(v) => updateImpianto(imp, { target: v })} />
-                <span>kg · Scadenza: {imp.data_fine || '18/12'}</span>
+                <span>kg di rete · Scadenza: {imp.data_fine ? it(imp.data_fine) : (fineDefault() ? it(fineDefault()) : '31/12, finché non si scrive la fine della programmazione')}</span>
               </p>
             </div>
             <div className="flex gap-1">
@@ -199,7 +216,7 @@ export default function PredittivitaImpiantiManager({ onReload }) {
                   <button onClick={() => removeFornitore(f)} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-3 h-3 text-red-500" /></button>
                 </div>
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Target annuo (da Target Annuali): <span className="font-medium text-foreground">{formatKg(targetMap[normalizzaRagioneSociale(f.nome)] || 0)} kg</span>
+                  <span>Target annuo di rete (da Target Annuali): <span className="font-medium text-foreground">{formatKg(targetMap[normalizzaRagioneSociale(f.nome)] || 0)} kg</span>
                     {(f.ruolo === 'stoccaggio' || f.ruolo === 'doppio_ruolo' || (!f.ruolo && f.tipo === 'stoccaggio')) && f.plafond_stoccaggio_kg != null && (
                       <span className="ml-2">· Plafond: <span className="font-medium text-foreground">{formatKg(f.plafond_stoccaggio_kg || 0)} kg</span></span>
                     )}

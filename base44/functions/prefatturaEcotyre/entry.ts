@@ -74,7 +74,8 @@ export default async function(req) {
         note_lettura: note.join('\n'), caricata_il: adesso, caricata_da: user.full_name || user.email || '',
       });
       for (const p of precedenti) {
-        await svc.PrefatturaEcotyre.update(p.id, { superata: true, motivo_superata: `Sostituita il ${adesso.slice(0, 10)} dal file "${nome}" (${righe.length} righe), caricato da ${user.full_name || user.email}.` });
+        // il giorno italiano: tagliare l'istante UTC, dopo la mezzanotte, scriveva il giorno prima
+        await svc.PrefatturaEcotyre.update(p.id, { superata: true, motivo_superata: `Sostituita il ${giornoRoma(adesso)} dal file "${nome}" (${righe.length} righe), caricato da ${user.full_name || user.email}.` });
       }
       // Il file serviva solo a essere letto: le righe sono salvate.
       for (const n of (file_uri ? ['DeleteFile', 'DeletePrivateFile', 'RemoveFile'] : [])) {
@@ -92,7 +93,8 @@ export default async function(req) {
 
     const [reteAll, aciAll, extraAll, fornitori, tariffe, terziarie] = await Promise.all([
       fetchAll(svc.PrimariaRete), fetchAll(svc.PrimariaAci), fetchAll(svc.ExtraRaccolta),
-      fetchAll(svc.Fornitore), svc.Tariffa.filter({ direzione: 'ATTIVA' }), fetchAll(svc.Terziaria),
+      // le tariffe tutte, come l'anteprima e il documento: con una pagina sola il confronto poteva usare prezzi diversi
+      fetchAll(svc.Fornitore), fetchAll(svc.Tariffa, { direzione: 'ATTIVA' }), fetchAll(svc.Terziaria),
     ]);
     const { righe } = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: annoNum, mese });
 

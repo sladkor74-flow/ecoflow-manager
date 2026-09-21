@@ -16,7 +16,7 @@ const C = {
 const nomeSicuro = (s) => String(s).replace(/[\\/:*?"<>|]+/g, '-').trim();
 const segno = (n) => (n > 0 ? '+' : '') + formatIntero(n);
 const segnoKg = (n) => (n > 0 ? '+' : n < 0 ? '-' : '') + formatKg(Math.abs(n));
-const NOME_TIPO = { ingresso: 'Ingressi', uscita: 'Uscite', totale: 'Totale' };
+const NOME_TIPO = { ingresso: 'Ingressi', uscita: 'Uscite' };
 const CANALE = { rete: 'rete', aci: 'ACI', extra: 'extra raccolta' };
 // 'Ingresso primaria · rete' dal movimento registrato.
 const nomeCategoria = (m) => {
@@ -29,7 +29,9 @@ export async function esportaEsitoVerificaPdf(v) {
   const { jsPDF } = await import('jspdf');
   const esito = v.esito_json ? JSON.parse(v.esito_json) : { esiti: [], assenti: [] };
   const s = sintesiVerifica(v, esito);
-  const piena = s.conformita === 'piena';
+  // Un verdetto per canale: pieno vuol dire pieni tutti, non un totale che li somma.
+  const piena = s.piena;
+  const perCanale = !s.dichiarazione && s.perCanale.length > 0;
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
@@ -136,11 +138,13 @@ export async function esportaEsitoVerificaPdf(v) {
   testata(true);
   testo('IMPIANTO / STOCCAGGIO', M, y, { dim: 7, colore: C.grigio });
   testo(v.soggetto_nome, M, y + 6, { dim: 14, grassetto: true, colore: C.testo, larghezza: L * 0.58 });
-  const verificata = v.verificata_il ? new Date(/Z$|[+-]\d\d:\d\d$/.test(v.verificata_il) ? v.verificata_il : v.verificata_il + 'Z') : new Date();
+  // L'istante arriva dal server anche senza la Z; l'ora si scrive su quella italiana.
+  const verificata = v.verificata_il ? new Date(/Z$|[+-]\d\d:?\d\d$/.test(v.verificata_il) ? v.verificata_il : v.verificata_il + 'Z') : new Date();
+  const ROMA = { timeZone: 'Europe/Rome' };
   const dati = [
     ['Riferimento', riferimento],
     [s.dichiarazione ? 'Comunicazione' : 'Report ricevuto', s.dichiarazione ? (v.nota || 'Nessuna movimentazione dichiarata') : (v.file_nome || '')],
-    ['Verifica eseguita il', `${verificata.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })} alle ${verificata.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`],
+    ['Verifica eseguita il', `${verificata.toLocaleDateString('it-IT', { ...ROMA, day: '2-digit', month: '2-digit', year: 'numeric' })} alle ${verificata.toLocaleTimeString('it-IT', { ...ROMA, hour: '2-digit', minute: '2-digit' })}`],
   ];
   dati.forEach(([k, val], i) => {
     testo(k, W - M - 62, y + i * 4.6, { dim: 7, colore: C.grigio });
@@ -149,13 +153,20 @@ export async function esportaEsitoVerificaPdf(v) {
   y += 17;
 
   const [fondo, scritta] = piena ? [C.verdeChiaro, C.verde] : [C.ambraChiaro, C.ambra];
-  const totaleRegistrato = `${formatIntero(s.totale.formulari_gestionale)} ${s.totale.formulari_gestionale === 1 ? 'formulario registrato' : 'formulari registrati'} per ${formatKg(s.totale.kg_gestionale)} kg`;
+  // I formulari registrati si dicono per movimentazione e canale, mai in un
+  // numero solo: "5 formulari" con dentro tre di rete e due ACI sommava i canali.
+  const registrati = s.categorie
+    .filter(q => q.formulari_gestionale > 0)
+    .map(q => `${q.nome}, ${formatIntero(q.formulari_gestionale)} ${q.formulari_gestionale === 1 ? 'formulario' : 'formulari'} per ${formatKg(q.kg_gestionale)} kg`)
+    .join('; ');
   const sottotitolo = s.dichiarazione
     ? (piena
       ? 'L\'impianto ha comunicato che nella settimana non ci sono state movimentazioni: nessun formulario risulta registrato. La comunicazione è confermata.'
-      : `L'impianto ha comunicato che nella settimana non ci sono state movimentazioni, ma risultano ${totaleRegistrato}. Vi chiediamo di inviarci il report della settimana.`)
+      : `L'impianto ha comunicato che nella settimana non ci sono state movimentazioni, ma risultano formulari registrati: ${registrati || 'vedi l\'elenco che segue'}. Vi chiediamo di inviarci il report della settimana.`)
     : piena
     ? 'Il report corrisponde ai formulari registrati per la settimana: stesso numero di formulari, stessi numeri, stessi pesi effettivi e stesse date di fine trasporto.'
+    : perCanale
+    ? `Il report non corrisponde pienamente ai formulari registrati. ${s.perCanale.filter(c => c.conformita !== 'piena').map(c => `${c.nome}: ${c.anomalie} ${c.anomalie === 1 ? 'anomalia da verificare' : 'anomalie da verificare'}${c.assenti ? `, di cui ${c.assenti} ${c.assenti === 1 ? 'formulario mancante' : 'formulari mancanti'}` : ''}.`).join(' ')}${s.inPiu.length ? ` ${s.inPiu.length} ${s.inPiu.length === 1 ? 'formulario del report non risulta registrato' : 'formulari del report non risultano registrati'}.` : ''} Il dettaglio è riportato di seguito.`
     : `Il report non corrisponde pienamente ai formulari registrati: ${s.numeroAnomalie} ${s.numeroAnomalie === 1 ? 'anomalia da verificare' : 'anomalie da verificare'}${s.mancanti.length ? `, di cui ${s.mancanti.length} ${s.mancanti.length === 1 ? 'formulario mancante' : 'formulari mancanti'}` : ''}${s.inPiu.length ? `${s.mancanti.length ? ' e' : ', di cui'} ${s.inPiu.length} ${s.inPiu.length === 1 ? 'formulario non registrato' : 'formulari non registrati'}` : ''}. Il dettaglio è riportato di seguito.`;
   doc.setFontSize(8.5);
   const lineeSotto = doc.splitTextToSize(sottotitolo, L - 16);
@@ -165,33 +176,38 @@ export async function esportaEsitoVerificaPdf(v) {
   doc.setFillColor(...scritta);
   doc.roundedRect(M, y, 3, hEsito, 1.5, 1.5, 'F');
   testo('ESITO DELLA VERIFICA', M + 8, y + 6, { dim: 7, grassetto: true, colore: scritta });
-  testo(piena ? 'CONFORMITÀ PIENA' : 'CONFORMITÀ PARZIALE', M + 8, y + 12.5, { dim: 15, grassetto: true, colore: scritta });
+  if (perCanale && s.perCanale.length > 1) {
+    testo(s.perCanale.map(c => `${c.nome.toUpperCase()}: ${c.conformita === 'piena' ? 'PIENA' : 'PARZIALE'}`).join('   ·   '), M + 8, y + 12.5, { dim: 12, grassetto: true, colore: scritta });
+  } else {
+    testo(`${piena ? 'CONFORMITÀ PIENA' : 'CONFORMITÀ PARZIALE'}${perCanale ? ` · ${s.perCanale[0].nome.toUpperCase()}` : ''}`, M + 8, y + 12.5, { dim: 15, grassetto: true, colore: scritta });
+  }
   testo(lineeSotto, M + 8, y + 18, { dim: 8.5, colore: C.testo });
   y += hEsito + 6;
 
   // --- Quadratura ---
   sezione('Quadratura di formulari e pesi',
     `${s.dichiarazione ? 'Movimentazioni dichiarate confrontate' : 'Formulari del report confrontati'} con quelli registrati con fine trasporto ${periodo}, per ciascuna movimentazione e canale: ingressi in primaria e ingressi e uscite in secondaria, di rete, ACI ed extra raccolta.`);
-  const rigaQ = (q, grassetto) => {
+  const rigaQ = (q) => {
     const dF = q.formulari_report - q.formulari_gestionale;
     const dK = q.kg_report - q.kg_gestionale;
-    const vuota = !grassetto && !q.formulari_report && !q.formulari_gestionale;
+    const vuota = !q.formulari_report && !q.formulari_gestionale;
     const grigio = vuota ? C.grigio : null;
     return {
       celle: [q.nome || NOME_TIPO[q.tipo] || '', formatIntero(q.formulari_report), formatIntero(q.formulari_gestionale), dF ? segno(dF) : '0',
         formatKg(q.kg_report), formatKg(q.kg_gestionale), dK ? segnoKg(dK) : '0', vuota ? 'Nessuna' : q.quadra ? 'Quadra' : 'Non quadra'],
       colori: [grigio, grigio, grigio, vuota ? C.grigio : dF ? C.rosso : C.verde, grigio, grigio, vuota ? C.grigio : dK ? C.rosso : C.verde, vuota ? C.grigio : q.quadra ? C.verde : C.rosso],
-      grassetti: [grassetto, grassetto, grassetto, !vuota, grassetto, grassetto, !vuota, !vuota],
-      sfondo: grassetto ? C.chiaro : null,
+      grassetti: [false, false, false, !vuota, false, false, !vuota, !vuota],
     };
   };
-  // Tutte le movimentazioni previste; i formulari non registrati solo se ce ne sono.
+  // Tutte le movimentazioni previste; i formulari non registrati solo se ce ne
+  // sono. Nessuna riga di totale: sommerebbe ingressi e uscite di rete, ACI ed
+  // extra raccolta in un numero solo.
   const righeQ = s.categorie.filter(q => q.chiave !== 'non_registrati' || q.formulari_report);
   tabella([
     { titolo: 'Movimentazione', peso: 1.85 }, { titolo: 'Formulari nel report', peso: 0.95, allinea: 'right' }, { titolo: 'Formulari registrati', peso: 0.95, allinea: 'right' },
     { titolo: 'Differenza', peso: 0.8, allinea: 'right' }, { titolo: 'Peso nel report (kg)', peso: 1.05, allinea: 'right' },
     { titolo: 'Peso registrato (kg)', peso: 1.05, allinea: 'right' }, { titolo: 'Differenza (kg)', peso: 0.95, allinea: 'right' }, { titolo: 'Esito', peso: 1.05, allinea: 'center' },
-  ], [...righeQ.map(q => rigaQ(q, false)), rigaQ(s.totale, true)]);
+  ], righeQ.map(rigaQ));
 
   // --- Controlli ---
   sezione('Controlli eseguiti');
@@ -283,7 +299,7 @@ export async function esportaEsitoVerificaPdf(v) {
   const criteri = [
     'Il report settimanale deve riportare tutte le movimentazioni: ingressi in primaria e ingressi e uscite in secondaria, di rete, ACI ed extra raccolta. Se non ce ne sono, l\'impianto lo comunica e la comunicazione viene verificata sui formulari registrati.',
     `Ogni riga del report è confrontata con i formulari registrati con fine trasporto ${periodo}: numero di formulario, peso effettivo al chilogrammo, date di trasporto e classe dei PFU.`,
-    'La quadratura richiede lo stesso numero di formulari e lo stesso peso complessivo, distinti fra ingressi e uscite.',
+    'La quadratura richiede lo stesso numero di formulari e lo stesso peso per ciascuna movimentazione e canale: ingressi e uscite, primarie e secondarie, rete, ACI ed extra raccolta si confrontano separatamente e non si sommano fra loro.',
     piena
       ? `${s.dichiarazione ? 'La comunicazione risulta confermata' : 'Il report risulta pienamente conforme'}: non è richiesta alcuna azione. Grazie per la collaborazione.`
       : 'Vi chiediamo di verificare le anomalie indicate e di inviarci il report corretto o le vostre osservazioni. Per ogni chiarimento potete rispondere a questa comunicazione.',

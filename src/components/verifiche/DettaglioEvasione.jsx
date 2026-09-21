@@ -19,8 +19,19 @@ const FILTRI = [
   { chiave: 'arretrate', etichetta: 'Anni precedenti' },
   { chiave: 'evasa', etichetta: 'Evase' },
   { chiave: 'fuori_ordine', etichetta: 'Fuori ordine' },
-  { chiave: 'altro', etichetta: 'Da altri, annullate o non più presenti' },
+  { chiave: 'altro', etichetta: 'Da altri, annullate o escluse' },
 ];
+
+// Due stati che l'elenco di src/lib/evasioneAssegnati.js non ha ancora: una
+// richiesta terminata sul portale senza fine trasporto (regola 1: esclusa e
+// segnalata, non "non piu' presente") e una di un altro canale finita nella
+// lista della rete (regola 3: fuori dai conti della lista).
+const STATI = {
+  terminata_senza_fine: { etichetta: 'Terminata senza fine trasporto', classe: 'bg-red-100 text-red-800 border-red-200' },
+  altro_canale: { etichetta: 'Altro canale', classe: 'bg-zinc-100 text-zinc-700 border-zinc-300' },
+  ...STATI_RICHIESTA,
+};
+const STATI_ALTRO = ['evasa_da_altri', 'riassegnata', 'annullata', 'non_piu_presente', 'evasa_prima', 'terminata_senza_fine', 'altro_canale'];
 
 function Tessera({ etichetta, valore, dettaglio, tono = '' }) {
   return (
@@ -62,14 +73,21 @@ function SezioneCanali({ riga, anno, mese }) {
           const x = canali[k.chiave];
           const aperteN = k.chiave === 'rete' ? riga.assegnati_ora : x.aperte.length;
           const evidenzia = k.chiave !== 'rete' && aperteN > 0;
+          const senzaFine = (x.senza_fine || []).length;
+          // Ordini, non formulari: sull'ACI un formulario puo' stare su due ordini.
           return (
             <div key={k.chiave} className="border rounded-lg p-3 bg-card">
               <div className="text-xs text-muted-foreground">{k.etichetta}</div>
               <div className="text-xl font-bold tabular-nums">{tonnellate(x.kg)} t</div>
               <div className="text-xs text-muted-foreground tabular-nums">
-                {x.evasi} {x.evasi === 1 ? 'formulario' : 'formulari'} nel mese ·{' '}
+                {x.evasi} {x.evasi === 1 ? 'ordine evaso' : 'ordini evasi'} nel mese ·{' '}
                 <span className={evidenzia ? 'text-red-600 font-medium' : ''}>{aperteN} {aperteN === 1 ? 'richiesta aperta' : 'richieste aperte'} oggi</span>
               </div>
+              {senzaFine > 0 && (
+                <div className="text-xs text-red-600 font-medium tabular-nums" title={x.senza_fine.join(', ')}>
+                  {senzaFine} {senzaFine === 1 ? 'terminato' : 'terminati'} senza fine trasporto, fuori dal conto
+                </div>
+              )}
             </div>
           );
         })}
@@ -148,12 +166,15 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
 
   const p = esito ? esito.previsione : null;
   const s = esito ? esito.storico : null;
+  // Contati dalle righe: ControlloEvasione non ha un campo per loro.
+  const nSenzaFine = esito ? esito.righe.filter(r => r.stato === 'terminata_senza_fine').length : 0;
+  const nAltroCanale = esito ? esito.righe.filter(r => r.stato === 'altro_canale').length : 0;
   const righe = esito ? esito.righe.filter(r => {
     if (filtro === 'tutte') return true;
     if (filtro === 'fuori_ordine') return r.saltate > 0;
     if (filtro === 'trascurate') return r.stato === 'aperta' && scavalcata(r);
     if (filtro === 'arretrate') return !!r.data_immissione && r.data_immissione.slice(0, 4) < String(anno);
-    if (filtro === 'altro') return ['evasa_da_altri', 'riassegnata', 'annullata', 'non_piu_presente', 'evasa_prima'].includes(r.stato);
+    if (filtro === 'altro') return STATI_ALTRO.includes(r.stato);
     if (filtro === 'evasa') return r.stato === 'evasa' || r.stato === 'evasa_altro_ordine';
     return r.stato === filtro;
   }) : [];
@@ -192,10 +213,26 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
               </div>
             )}
             {/* Il mese si valuta fino all'ultima fine trasporto di rete del file, mai
-                con margini ricavati dalla chiusura a portale (regola del 21/09/2026). */}
+                con margini ricavati dalla chiusura a portale (regola del 21/09/2026).
+                Il giorno fino a cui si valuta e' valutato_al, non dati_al: per un mese
+                gia' finito il file ha trasporti anche dopo la sua fine. I controlli di
+                prima della regola portavano consolidato_al, e il loro dati_al
+                comprendeva gli ACI. */}
             <p className="text-xs text-muted-foreground">
-              Primarie caricate il {dataOraIt(c.primarie_caricate_il)}, con trasporti di rete conclusi fino al {dataIt(c.dati_al)}:
-              il mese si valuta fino a quel giorno. Una richiesta già ritirata ma non ancora chiusa sul portale risulta aperta.
+              {c.dati_al ? (
+                <>
+                  Primarie caricate il {dataOraIt(c.primarie_caricate_il)}, con trasporti di rete conclusi fino al {dataIt(c.dati_al)}:
+                  il mese si valuta fino al {dataIt((p && (p.valutato_al || p.consolidato_al)) || c.dati_al)}.
+                </>
+              ) : (
+                <>Primarie caricate il {dataOraIt(c.primarie_caricate_il)}, senza trasporti di rete conclusi: il mese non si valuta ancora.</>
+              )}
+              {' '}Una richiesta già ritirata ma non ancora chiusa sul portale risulta aperta.
+              {p && p.consolidato_al && !p.valutato_al && (
+                <span className="text-amber-700">
+                  {' '}Controllo precedente alla regola del 21/09/2026: valutava il mese solo fino a un margine ricavato dalla chiusura a portale, e la data dei trasporti comprendeva gli ACI.
+                </span>
+              )}
             </p>
 
             {alert.length > 0 && (
@@ -219,7 +256,13 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
               <Tessera etichetta="Fuori ordine" valore={c.fuori_ordine} tono={c.fuori_ordine ? 'text-amber-600' : ''} />
               <Tessera etichetta="Fuori lista" valore={c.fuori_lista} />
               <Tessera etichetta="Annullate" valore={c.annullate ?? '—'} dettaglio="sul portale" />
-              <Tessera etichetta="Da altri" valore={c.evase_da_altri} dettaglio={c.riassegnate || c.non_piu_presenti ? `${c.riassegnate} riassegnate, ${c.non_piu_presenti} sparite` : ''} />
+              <Tessera etichetta="Da altri" valore={c.evase_da_altri}
+                dettaglio={[
+                  c.riassegnate ? `${c.riassegnate} riassegnate` : '',
+                  c.non_piu_presenti ? `${c.non_piu_presenti} sparite` : '',
+                  nSenzaFine ? `${nSenzaFine} senza fine trasporto` : '',
+                  nAltroCanale ? `${nAltroCanale} di altro canale` : '',
+                ].filter(Boolean).join(', ')} />
             </div>
 
             {p && (
@@ -244,18 +287,20 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                   {p.viaggi_necessari !== null && <Riga etichetta="Viaggi per il target residuo" valore={`${p.viaggi_necessari} necessari, circa ${p.viaggi_possibili ?? '—'} possibili`} />}
                   <p className="text-xs text-muted-foreground mt-2">
                     Il peso di una richiesta aperta si stima solo dal peso effettivo a destinazione: quello dei ritiri già fatti presso lo stesso
-                    punto di raccolta, altrimenti il peso tipico di un formulario della stessa classe.
+                    punto di raccolta, altrimenti il peso tipico di un ritiro della stessa classe.
                   </p>
                 </section>
 
+                {/* Si contano ordini evasi, uno per ID: i formulari si contano per
+                    numero (contaFormulari), e un formulario puo' stare su due ordini. */}
                 <section className="border rounded-lg p-4 bg-card text-sm">
                   <h4 className="font-semibold mb-2">Storia dell'anno in rete</h4>
-                  <Riga etichetta="Formulari" valore={`${s.ordini}, ${tonnellate(s.kg)} t`} />
-                  <Riga etichetta="Viaggi" valore={`${s.viaggi}, ${s.ordini_per_viaggio ?? '—'} formulari per viaggio`} />
+                  <Riga etichetta="Ordini evasi" valore={`${s.ordini}, ${tonnellate(s.kg)} t`} />
+                  <Riga etichetta="Viaggi" valore={`${s.viaggi}, ${s.ordini_per_viaggio ?? '—'} ordini per viaggio`} />
                   <Riga etichetta="Peso medio per viaggio" valore={s.kg_per_viaggio ? `${tonnellate(s.kg_per_viaggio)} t` : '—'} />
                   <div className="mt-3 text-xs">
                     <div className="grid grid-cols-3 gap-2 font-medium text-muted-foreground border-b pb-1">
-                      <span>Classe</span><span className="text-right">Formulari</span><span className="text-right">Peso effettivo tipico</span>
+                      <span>Classe</span><span className="text-right">Ordini</span><span className="text-right">Peso effettivo tipico</span>
                     </div>
                     {Object.entries(s.classi).sort((a, b) => b[1].ordini - a[1].ordini).map(([cl, v]) => (
                       <div key={cl} className="grid grid-cols-3 gap-2 py-0.5 tabular-nums">
@@ -321,10 +366,10 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                           <td className={`px-2 py-1.5 tabular-nums ${r.data_immissione && r.data_immissione.slice(0, 4) < String(anno) ? 'text-red-700 font-semibold' : ''}`}>{dataIt(r.data_immissione)}</td>
                           <td className="px-2 py-1.5">{r.produttore}<div className="text-muted-foreground">{r.comune}{r.provincia ? ` (${r.provincia})` : ''}</div></td>
                           <td className="px-2 py-1.5">{r.classe || '—'}</td>
-                          <td className="px-2 py-1.5"><span className={`px-1.5 py-0.5 rounded-full border ${(STATI_RICHIESTA[r.stato] || STATI_RICHIESTA.aperta).classe}`}>{(STATI_RICHIESTA[r.stato] || {}).etichetta || r.stato}</span></td>
+                          <td className="px-2 py-1.5"><span className={`px-1.5 py-0.5 rounded-full border ${(STATI[r.stato] || STATI.aperta).classe}`}>{(STATI[r.stato] || {}).etichetta || r.stato}</span></td>
                           <td className="px-2 py-1.5 tabular-nums">{r.chiusa_il ? dataIt(r.chiusa_il) : ''}{r.chiusa_da && r.stato !== 'evasa' ? <div className="text-muted-foreground">{r.stato === 'riassegnata' ? 'a ' : 'da '}{r.chiusa_da}</div> : null}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums">
-                            {r.kg !== null && r.kg !== undefined ? `${formatKg(r.kg)} kg` : r.stima_kg ? <span className="text-muted-foreground" title={r.metodo_stima}>~{r.stima_kg.toLocaleString('it-IT')} kg</span> : ''}
+                            {r.kg !== null && r.kg !== undefined ? `${formatKg(r.kg)} kg` : r.stima_kg ? <span className="text-muted-foreground" title={r.metodo_stima}>~{formatKg(r.stima_kg)} kg</span> : ''}
                           </td>
                           <td className="px-2 py-1.5 text-muted-foreground">
                             {r.assegnata_sul_portale_a && <div>sul portale: {r.assegnata_sul_portale_a}</div>}
@@ -336,6 +381,8 @@ export default function DettaglioEvasione({ riga, anno, mese, open, onClose }) {
                             )}
                             {r.stato === 'annullata' && <div>{r.motivo_annullamento}{r.evasa_con ? `, evasa con ${r.evasa_con}` : ''}</div>}
                             {r.stato === 'evasa_altro_ordine' && <div className="text-amber-700">evasa con l'ordine {r.evasa_con}: doppione da annullare?</div>}
+                            {r.stato === 'terminata_senza_fine' && <div className="text-red-700">manca la data di fine trasporto sul portale: fuori dai conteggi finché non c'è</div>}
+                            {r.stato === 'altro_canale' && <div>ordine {r.canale === 'aci' ? 'ACI' : r.canale === 'extra' ? 'di extra raccolta' : r.canale}: fuori dai conti della lista di rete</div>}
                             {r.stato === 'aperta' && r.entro_capacita === false && <span>oltre la capacità stimata del mese</span>}
                           </td>
                         </tr>

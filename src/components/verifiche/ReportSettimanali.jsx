@@ -29,6 +29,9 @@ import {
   dataIt, tonnellate, tipoDiFile, leggiTabelleDaFile, segnalazioni, analisiInCorso, analisiInterrotta, scaricaExcelVerifica,
 } from '@/lib/verifiche';
 import { giornoRoma } from '@/lib/giornoItaliano';
+// Gli istanti del server possono arrivare senza la Z: letti come ora locale, un
+// confronto salvato fra le 22 e mezzanotte UTC risultava del giorno prima.
+import { dataServer } from '@/lib/utils';
 
 // Sezione 1 del modulo Verifiche: confronto fra i report settimanali inviati da
 // impianti e stoccaggi e il gestionale. Gli ingressi si verificano sulle
@@ -69,6 +72,14 @@ function descriviPerCanale(canali) {
   }
   return parti.join(', ');
 }
+
+/** "Secondarie ACI", "Primarie di extra raccolta": un gruppo di terminati senza fine trasporto, col suo canale. */
+function nomeGruppoSenzaFine(g) {
+  const tipo = /secondaria/i.test(g.fonte) ? 'Secondarie' : 'Primarie';
+  if (g.canale === 'extra') return `${tipo} di extra raccolta`;
+  return `${tipo} ${g.canale === 'aci' ? 'ACI' : 'di rete'}`;
+}
+
 const LIMITE_EXCEL = 15 * 1024 * 1024;
 // Excel (.xlsx, .xls, .xlsm), LibreOffice/OpenOffice (.ods), CSV, PDF e immagini:
 // estensioni e tipi MIME, cosi' la finestra di scelta non nasconde nessun formato.
@@ -102,6 +113,25 @@ function Esito({ riga }) {
     return v.conformita === 'piena'
       ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs"><CheckCircle2 className="w-3 h-3" />Confermata</span>
       : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-800 text-xs font-medium"><AlertTriangle className="w-3 h-3" />Smentita dai formulari registrati</span>;
+  }
+  // Un verdetto per canale: una riga ACI sbagliata non rende parziale la rete.
+  if (Array.isArray(v.per_canale) && v.per_canale.length) {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1">
+        {v.per_canale.map(c => (
+          <span key={c.canale} title={c.conformita === 'piena' ? `${c.nome}: conformità piena` : `${c.nome}: ${c.anomalie} ${c.anomalie === 1 ? 'anomalia' : 'anomalie'}${c.assenti ? `, di cui ${c.assenti} formulari mancanti nel report` : ''}`}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs ${c.conformita === 'piena' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : c.assenti ? 'border-red-200 bg-red-50 text-red-800 font-medium' : 'border-amber-200 bg-amber-50 text-amber-800 font-medium'}`}>
+            {c.conformita === 'piena' ? <CheckCircle2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+            {c.nome}{c.conformita === 'piena' ? '' : ` · ${c.anomalie}`}
+          </span>
+        ))}
+        {(v.non_trovate || 0) > 0 && (
+          <span title="Formulari del report che il gestionale non conosce: non hanno canale" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-800 text-xs font-medium">
+            <AlertTriangle className="w-3 h-3" />{v.non_trovate} non registrati
+          </span>
+        )}
+      </span>
+    );
   }
   if (v.conformita ? v.conformita === 'piena' : n === 0) {
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs"><CheckCircle2 className="w-3 h-3" />Conformità piena</span>;
@@ -138,7 +168,7 @@ function RigaSoggetto({ riga, isAdmin, occupato, onCarica, onDichiara, onApri, o
             <div className="text-sm truncate" title={v.file_nome}>{v.file_nome}</div>
             <div className="text-xs text-muted-foreground truncate" title={v.nota || ''}>
               {v.file_tipo === 'dichiarazione' ? (v.nota || 'comunicata dall\'impianto')
-                : v.stato === 'completata' && v.verificata_il ? `confronto del ${dataIt(giornoRoma(v.verificata_il))}` : ''}
+                : v.stato === 'completata' && v.verificata_il ? `confronto del ${dataIt(giornoRoma(dataServer(v.verificata_il)))}` : ''}
             </div>
             {v.esito_ricalcolato === 'solo_a_video' && (
               <div className="text-[11px] text-amber-700" title="Il dettaglio, il PDF e l'Excel mostrano ancora il confronto salvato: si aggiornano quando un amministratore apre la settimana o dopo il prossimo caricamento.">
@@ -383,10 +413,32 @@ export default function ReportSettimanali({ isAdmin }) {
         <div className="flex items-start gap-2 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
           <span>
-            Un caricamento non è concluso ({ricalcolo.rinviato.map(a => `${a.tipo_file.replace(/_/g, ' ')}${a.data ? ` del ${dataIt(a.data)}` : ''}${a.utente ? `, ${a.utente}` : ''}`).join('; ')}):
-            l&apos;archivio può essere a metà, quindi gli esiti mostrati sono quelli dell&apos;ultimo confronto e anche ingressi e uscite possono essere incompleti.
+            Caricamento {ricalcolo.rinviato.map(a => a.descrizione || `${a.tipo_file.replace(/_/g, ' ')}${a.data ? ` del ${dataIt(a.data)}` : ''}${a.utente ? `, ${a.utente}` : ''}`).join('; ')}.
+            {' '}L&apos;archivio può essere a metà, quindi gli esiti mostrati sono quelli dell&apos;ultimo confronto e anche ingressi e uscite possono essere incompleti.
             Si aggiornano da soli a caricamento finito; se il caricamento si è interrotto, va ripetuto.
           </span>
+        </div>
+      )}
+
+      {dati && dati.senza_fine && dati.senza_fine.length > 0 && (
+        <div className="flex items-start gap-2 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div className="space-y-1">
+            <div>
+              Movimenti terminati senza data di fine trasporto: non stanno in nessuna settimana, quindi non sono né fra gli ingressi e le uscite
+              né nelle verifiche. Se un loro formulario compare nel report di un impianto, risulta non presente nel gestionale.
+              La data si sistema con un nuovo caricamento del file che la riporti.
+            </div>
+            <ul className="list-disc pl-5 text-xs">
+              {dati.senza_fine.map(g => (
+                <li key={g.canale + g.fonte}>
+                  <strong>{nomeGruppoSenzaFine(g)}</strong>: {g.n} {g.n === 1 ? 'movimento' : 'movimenti'} ·{' '}
+                  {g.esempi.map(x => `${x.fir || 'senza formulario'}${x.ordine ? ` (ordine ${x.ordine})` : ''}`).join(', ')}
+                  {g.n > g.esempi.length ? `, e altri ${g.n - g.esempi.length}` : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       )}
 

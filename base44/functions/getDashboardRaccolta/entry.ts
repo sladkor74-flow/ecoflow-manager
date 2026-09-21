@@ -22,8 +22,13 @@ export default async function(req) {
 
     const annoRaw = body.anno || [];
     const anni = Array.isArray(annoRaw)
-      ? annoRaw.map(Number).filter(a => !isNaN(a))
-      : (annoRaw ? [Number(annoRaw)] : [Number(oggiRoma().slice(0, 4))]);
+      ? annoRaw.map(Number).filter(a => !isNaN(a) && a > 0)
+      : (annoRaw ? [Number(annoRaw)].filter(a => !isNaN(a) && a > 0) : []);
+    // Senza anno, l'anno in corso in Italia, come getDashboardStats: prima un anno
+    // assente o vuoto arrivava qui come elenco vuoto, cioe' nessun filtro, e i KPI
+    // sommavano la raccolta di tutti gli anni contro un target zero mentre i
+    // conteggi della stessa pagina parlavano dell'anno in corso.
+    if (!anni.length) anni.push(Number(oggiRoma().slice(0, 4)));
 
     const [rete, aci] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.PrimariaRete, { stato: 'terminato' }),
@@ -41,8 +46,12 @@ export default async function(req) {
     const getAnno = (r) => { const p = periodoMovimento(r); return p ? p.anno : 0; };
     const getMese = (r) => { const p = periodoMovimento(r); return p ? p.mese : ''; };
 
-    const reteAnno = anni.length > 0 ? rete.filter(r => anni.includes(getAnno(r))) : rete;
-    const aciAnno = anni.length > 0 ? aci.filter(r => anni.includes(getAnno(r))) : aci;
+    const reteAnno = rete.filter(r => anni.includes(getAnno(r)));
+    const aciAnno = aci.filter(r => anni.includes(getAnno(r)));
+    // Un terminato senza fine trasporto non ha periodo: resta fuori da ogni conto
+    // e si dice quanti sono, canale per canale, invece di perderli in silenzio.
+    // Non si ripiega sulla chiusura ne' sull'immissione.
+    const senzaFine = (arr) => arr.filter(r => !periodoMovimento(r)).length;
     const reteMese = mesi.length > 0 ? reteAnno.filter(r => mesi.includes(getMese(r))) : reteAnno;
     const aciMese = mesi.length > 0 ? aciAnno.filter(r => mesi.includes(getMese(r))) : aciAnno;
 
@@ -69,10 +78,10 @@ export default async function(req) {
     // L'extra raccolta: la raccolta dal produttore, non i trasferimenti in
     // secondaria che stanno nello stesso archivio e riporterebbero lo stesso peso
     // una seconda volta.
-    const extra = (await fetchAll(base44.asServiceRole.entities.ExtraRaccolta, { stato: 'terminato' }))
+    const extraTutti = (await fetchAll(base44.asServiceRole.entities.ExtraRaccolta, { stato: 'terminato' }))
       .filter(r => String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'secondaria')
-      .map(r => ({ r, p: periodoMovimento(r) }))
-      .filter(({ p }) => p && (anni.length === 0 || anni.includes(p.anno)));
+      .map(r => ({ r, p: periodoMovimento(r) }));
+    const extra = extraTutti.filter(({ p }) => p && anni.includes(p.anno));
     const raccolta_extra = extra.filter(({ p }) => mesi.length === 0 || mesi.includes(p.mese)).reduce((s, { r }) => s + (Number(r.peso_effettivo) || 0), 0) / 1000;
     const raccolto_extra_anno = extra.reduce((s, { r }) => s + (Number(r.peso_effettivo) || 0), 0) / 1000;
 
@@ -119,7 +128,10 @@ export default async function(req) {
       // In ordine di rete e poi di ACI: ordinare sulla somma dei due canali era
       // gia' un totale che li mescolava.
       per_regione: Object.values(regioniMap).sort((a, b) => (b.rete - a.rete) || (b.aci - a.aci)),
-      target_vs_raccolto
+      target_vs_raccolto,
+      anni,
+      // terminati esclusi perche' senza fine trasporto, di qualunque anno: per canale, mai sommati
+      senza_fine_trasporto: { rete: senzaFine(rete), aci: senzaFine(aci), extra: extraTutti.filter(({ p }) => !p).length },
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

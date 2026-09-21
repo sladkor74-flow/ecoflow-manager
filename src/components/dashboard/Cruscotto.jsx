@@ -174,12 +174,14 @@ export default function Cruscotto({ isAdmin }) {
             <Link to="/fatturazione" className="text-xs text-primary hover:underline inline-flex items-center gap-1">Apri la fatturazione <ArrowRight className="w-3 h-3" /></Link>
           </div>
           {/* Ogni canale ha il suo documento e il suo stato: un mese con la rete
-              elaborata e l'ACI no non e' "elaborato", e' indietro sull'ACI. */}
+              elaborata e l'ACI no non e' "elaborato", e' indietro sull'ACI. Il
+              ritardo si guarda prima della chiusura: un canale che manca non
+              diventa verde perche' gli altri sono chiusi. */}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
             {dati.mesi_attiva.map(m => {
               const indietro = !m.elaborato || (m.canali_mancanti || []).length > 0;
               return (
-                <div key={m.mese} className={`border rounded-md px-3 py-2 text-xs ${m.chiuso ? 'bg-emerald-50 border-emerald-200' : indietro ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'}`}>
+                <div key={m.mese} className={`border rounded-md px-3 py-2 text-xs ${indietro ? 'bg-amber-50 border-amber-200' : m.chiuso ? 'bg-emerald-50 border-emerald-200' : 'bg-blue-50 border-blue-200'}`}>
                   <p className="font-medium text-sm">{m.mese}</p>
                   {m.canali
                     ? Object.entries(m.canali).map(([k, c]) => (

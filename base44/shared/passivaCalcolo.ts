@@ -56,8 +56,11 @@ function chiaveViaggio(rec) {
   return `${giorno}|${targa}`;
 }
 
+// In maiuscolo anche quando la regione si ricava dalla provincia: la tariffa si
+// confronta con norm(t.regione), e "Campania" contro "CAMPANIA" non tornava mai,
+// quindi un record senza regione scritta perdeva il prezzo per regione.
 function getRegione(r) {
-  return norm(r.regione || r.regioni) || getRegioneFromProvincia(r.provincia) || '';
+  return norm(r.regione || r.regioni) || norm(getRegioneFromProvincia(r.provincia)) || '';
 }
 
 function sortPerClasse(arr) {
@@ -910,7 +913,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         const viaggiConFormulari = conFormulari.size;
         const viaggiTotali = canalePerViaggio.size;
         const viaggioMisto = nonAciRecs.length > 0 && aciRecs.length > 0;
-        const senzaTarga = pt.records.some(rec => !String(rec.automezzo || '').trim());
+        // Senza targa, fra i viaggi che si pagano in questo canale: guardarli
+        // tutti faceva uscire l'anomalia due volte su una tratta mista, una per
+        // canale, anche sull'ACI che quei viaggi non li paga.
+        const pagatoQui = (rec) => canalePerViaggio.get(chiaveViaggio(rec)) === (tipologia === 'ACI');
+        const senzaTarga = pt.records.some(rec => !String(rec.automezzo || '').trim() && pagatoQui(rec));
         const um = pt.tariffa ? pt.tariffa.unita_misura : '';
         const valore = pt.tariffa ? pt.tariffa.valore : 0;
 
@@ -962,7 +969,7 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
               ? 'nessun viaggio di soli formulari ACI: i viaggi misti si pagano sulla rete'
               : 'nessun viaggio con formulari di rete';
           }
-          if (senzaTarga && !interno) {
+          if (senzaTarga && viaggiDaPagare > 0) {
             anomalie.push({
               descrizione: `Tratta a ${valore} euro a viaggio senza targa su almeno un formulario: ${tratta.stoccaggio} → ${tratta.destinazione}. Senza targa i carichi dello stesso giorno contano come un viaggio solo.`,
               fornitore: fatturante,

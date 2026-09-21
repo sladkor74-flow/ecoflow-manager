@@ -1,8 +1,9 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
-import { normalizzaLettura, sintesi } from "../../shared/quadraturaFir.ts";
+import { normalizzaLettura } from "../../shared/quadraturaFir.ts";
 import {
-  caricaGestionale, caricamentiAperti, confrontaSettimana, righeDaConservare, righeConservate,
+  caricaGestionale, confrontaSettimana, righeDaConservare, righeConservate, TIPI_CARICAMENTO,
 } from "../../shared/quadraturaFirDati.ts";
+import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from "../../shared/reportSettimanali.ts";
 import { valoreCampo, leggiJson } from "../../shared/testoLungo.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { cancellaFile } from "../../shared/fileArchivio.ts";
@@ -194,18 +195,22 @@ export default async function(req) {
       throw new Error('Nel file non ho trovato nessuna tabella con il conteggio e la somma dei formulari.' + (lettura.note ? ' ' + lettura.note : ''));
     }
 
-    // 2. i numeri del gestionale nella settimana
+    // 2. i numeri del gestionale nella settimana. Lo stato dei caricamenti si
+    // legge prima e dopo gli archivi: un caricamento partito o finito mentre li
+    // si leggeva non si vedrebbe con una lettura sola.
     const periodo = { anno: q.anno, settimana: q.settimana, inizio: q.data_inizio, fine: q.data_fine };
-    const gestionale = await caricaGestionale(base44, periodo);
+    const primaDegliArchivi = await statoCaricamenti(base44, TIPI_CARICAMENTO);
+    const gestionale = await caricaGestionale(base44, periodo, null, { caricamenti: primaDegliArchivi });
+    const durante = caricamentiDuranteLettura(primaDegliArchivi, await statoCaricamenti(base44, TIPI_CARICAMENTO));
 
-    // 3. il confronto, con la conformita' canale per canale dentro l'esito. Se un
-    // archivio si sta riscrivendo proprio adesso lo si dice: all'apertura della
-    // settimana, a caricamento finito, il confronto si rifa' da solo.
+    // 3. il confronto, con la conformita' canale per canale dentro l'esito. La
+    // stampa si salva lo stesso, perche' l'ha caricata l'amministratore; se un
+    // archivio si stava riscrivendo lo si dice, e all'apertura della settimana, a
+    // caricamento finito, il confronto si rifa' da solo.
     const esito = confrontaSettimana(lettura, gestionale, periodo);
-    for (const a of caricamentiAperti(gestionale)) {
-      esito.osservazioni.push(`Durante il confronto il caricamento ${a.tipo_file.replace(/_/g, ' ')}${a.nome_file ? ` (${a.nome_file})` : ''} non era concluso: i numeri del gestionale potevano essere incompleti. Il confronto si rifa' all'apertura della settimana, a caricamento finito.`);
+    for (const a of durante) {
+      esito.osservazioni.push(`Caricamento ${descriviCaricamento(a)}. I numeri del gestionale usati in questo confronto potevano essere incompleti: il confronto si rifà all'apertura della settimana, a caricamento finito.`);
     }
-    const s = sintesi(esito);
 
     const righeSalvate = modo === 'salvate' ? null : righeDaConservare(lettura);
 
@@ -215,11 +220,9 @@ export default async function(req) {
       tabelle: lettura.tabelle.length,
       righe_lette: lettura.tabelle.reduce((n, t) => n + t.righe.length, 0),
       lettura_verificata: !!lettura.verificata,
-      congruenti: s.congruenti,
-      incongruenti: s.incongruenti,
-      osservazioni: s.osservazioni,
-      non_confrontabili: s.non_confrontabili,
-      conformita: s.conformita,
+      // La conformita' si salva canale per canale: i conteggi e il verdetto
+      // complessivi sommavano rete, ACI ed extra raccolta.
+      per_canale: esito.per_canale,
       verificata_il: new Date().toISOString(),
       errore: '',
       esito_json: await valoreCampo(base44, 'QuadraturaFir', quadratura_id, 'esito_json', JSON.stringify(esito)),
@@ -239,7 +242,7 @@ export default async function(req) {
     }
     await svc.QuadraturaFir.update(quadratura_id, aggiornamento);
 
-    return Response.json({ ok: true, sintesi: s, tabelle: lettura.tabelle.length, lettura_verificata: !!lettura.verificata });
+    return Response.json({ ok: true, per_canale: esito.per_canale, tabelle: lettura.tabelle.length, lettura_verificata: !!lettura.verificata });
   } catch (error) {
     const messaggio = error && error.message ? error.message : String(error);
     if (quadraturaId) {

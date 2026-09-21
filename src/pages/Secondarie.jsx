@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { annoOrdine, giornoOrdine } from '@/lib/movimenti';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { eTerminato, giornoOrdine, periodoMovimento, settimanaIso, MESI_MOVIMENTI } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Route } from 'lucide-react';
 import AlertBadge from '@/components/alerts/AlertBadge';
@@ -9,10 +9,35 @@ import TrattaMatrix from '@/components/secondarie/TrattaMatrix';
 import SecondarieTable from '@/components/secondarie/SecondarieTable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
-import { fmtTon, formatNumber } from '@/lib/utils';
+import { fmtTon, formatIntero } from '@/lib/utils';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { canaleDi } from '@/lib/canaleSecondaria';
+
+// Rete e ACI stanno nello stesso archivio ma sono commesse separate: la pagina
+// ne guarda una alla volta, e si apre sulla rete. Il filtro partiva vuoto, con
+// l'etichetta "Rete e ACI insieme", e il titolo del dettaglio contava i viaggi
+// dei due canali in un numero solo.
+const CANALI = ['Rete', 'ACI'];
+const canaleRiga = (r) => (canaleDi(r) === 'ACI' ? 'ACI' : 'Rete');
+const filtriVuoti = (canale) => ({ canale: [canale], stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
+
+// Il periodo di una secondaria, con la stessa regola di computeSecondarieMatrix
+// e di exportSecondarie: un terminato si colloca solo sulla fine del trasporto
+// (giorno italiano); un ordine non terminato, che non e' un movimento,
+// all'immissione; un terminato senza fine trasporto non ha periodo (null) e
+// nessun filtro di periodo lo prende. Il dettaglio filtrava sui campi mese e
+// settimane salvati sul record: con lo stesso filtro la matrice mostrava un
+// insieme di viaggi e il dettaglio un altro.
+function periodoDi(r) {
+  const pm = periodoMovimento(r);
+  if (pm) return { giorno: pm.giorno, anno: pm.anno, mese: pm.mese, settimana: pm.settimana };
+  if (eTerminato(r)) return null;
+  const g = giornoOrdine(r);
+  return g
+    ? { giorno: g, anno: Number(g.slice(0, 4)), mese: MESI_MOVIMENTI[Number(g.slice(5, 7)) - 1], settimana: settimanaIso(g) }
+    : { giorno: '', anno: null, mese: 'N/D', settimana: 'N/D' };
+}
 
 export default function Secondarie() {
   const [data, setData] = useState(null);
@@ -21,70 +46,94 @@ export default function Secondarie() {
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
-  const [filters, setFilters] = useState({ canale: [], stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
+  const [filters, setFilters] = useState(() => filtriVuoti('Rete'));
   const [viewMode, setViewMode] = useState('matrix');
   const [searchIdOrdine, setSearchIdOrdine] = useState('');
+  // Ogni caricamento del file aggiorna tutta la pagina: matrice, KPI, avvisi e
+  // anche il dettaglio, che prima restava quello di prima del caricamento.
+  const [versione, setVersione] = useState(0);
+  const aggiorna = useCallback(() => setVersione(v => v + 1), []);
+  // Vale solo l'ultima richiesta: passando da Rete ad ACI, una risposta della
+  // rete arrivata in ritardo finiva sotto la scheda ACI.
+  const ultimaMatrice = useRef(0);
+  const ultimoDettaglio = useRef(0);
+
+  const canale = filters.canale[0] || 'Rete';
 
   const loadData = useCallback(async () => {
+    const n = ++ultimaMatrice.current;
     setLoading(true);
     try {
       const res = await base44.functions.invoke('computeSecondarieMatrix', { filters });
-      setData(res.data);
+      if (n === ultimaMatrice.current) setData(res.data);
     } catch (e) { console.error(e); }
-    setLoading(false);
+    if (n === ultimaMatrice.current) setLoading(false);
   }, [filters]);
 
   const loadRecords = useCallback(async () => {
+    const n = ++ultimoDettaglio.current;
     setLoadingRecords(true);
     try {
       const all = await fetchAllClient(base44.entities.Secondaria);
-      const filtered = all.filter(r => {
-        if (searchIdOrdine && !(r.id_ordine || '').toLowerCase().includes(searchIdOrdine.toLowerCase().trim())) return false;
-        if (filters.canale.length > 0 && !filters.canale.includes(canaleDi(r) === 'ACI' ? 'ACI' : 'Rete')) return false;
-        if (filters.stoccaggio.length > 0 && !filters.stoccaggio.includes((r.stoccaggio || '').trim())) return false;
-        if (filters.destinazione.length > 0 && !filters.destinazione.includes((r.destinazione || '').trim())) return false;
-        if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;
-        if (filters.settimana.length > 0 && !filters.settimana.map(String).includes(String(r.settimane))) return false;
-        if (filters.classe.length > 0 && !filters.classe.includes(r.classe)) return false;
-        if (filters.trasportatore.length > 0 && !filters.trasportatore.includes((r.trasportatore || '').trim())) return false;
-        if (filters.provincia.length > 0 && !filters.provincia.includes((r.provincia || '').trim())) return false;
+      const cerca = searchIdOrdine.toLowerCase().trim();
+      const righe = [];
+      for (const r of all) {
+        if (cerca && !(r.id_ordine || '').toLowerCase().includes(cerca)) continue;
+        if (filters.canale.length > 0 && !filters.canale.includes(canaleRiga(r))) continue;
+        if (filters.stoccaggio.length > 0 && !filters.stoccaggio.includes((r.stoccaggio || '').trim())) continue;
+        if (filters.destinazione.length > 0 && !filters.destinazione.includes((r.destinazione || '').trim())) continue;
+        if (filters.classe.length > 0 && !filters.classe.includes(r.classe)) continue;
+        if (filters.trasportatore.length > 0 && !filters.trasportatore.includes((r.trasportatore || '').trim())) continue;
+        if (filters.provincia.length > 0 && !filters.provincia.includes((r.provincia || '').trim())) continue;
         if (filters.regione.length > 0) {
           const reg = r.regione || getRegioneFromProvincia(r.provincia);
-          if (!filters.regione.includes((reg || '').trim())) return false;
+          if (!filters.regione.includes((reg || '').trim())) continue;
         }
-        if (filters.stato.length > 0 && !filters.stato.map(s => s.toLowerCase()).includes((r.stato || '').trim().toLowerCase())) return false;
-        if (filters.data) {
-          if (giornoOrdine(r) !== filters.data) return false;
-        }
-        if (filters.anno.length > 0) {
-          const anno = annoOrdine(r);
-          if (!filters.anno.map(String).includes(String(anno))) return false;
-        }
-        return true;
-      }).map(r => ({ ...r, peso_t: +((r.peso_effettivo || 0) / 1000).toFixed(3) }));
-      setRecords(filtered);
+        if (filters.stato.length > 0 && !filters.stato.map(s => s.toLowerCase()).includes((r.stato || '').trim().toLowerCase())) continue;
+        // Mese, settimana, giorno e anno come nel server (matchesFilter e
+        // matchesFilterString): senza periodo vale 'N/D', che nessuna opzione
+        // dei filtri propone.
+        const p = periodoDi(r);
+        if (filters.mese.length > 0 && !filters.mese.includes(p ? p.mese : 'N/D')) continue;
+        if (filters.settimana.length > 0 && !filters.settimana.map(String).includes(String(p ? p.settimana : 'N/D'))) continue;
+        if (filters.data && (!p || p.giorno !== filters.data)) continue;
+        if (filters.anno.length > 0 && (!p || p.anno == null || !filters.anno.map(String).includes(String(p.anno)))) continue;
+        righe.push({
+          ...r,
+          peso_t: +((r.peso_effettivo || 0) / 1000).toFixed(3),
+          // Le colonne della tabella vengono dal periodo, non dai campi mese e
+          // settimane salvati. Un terminato senza fine trasporto non ha giorno:
+          // nell'ordinamento per data sta in cima, marcato, perche' va corretto.
+          giorno_ordine: p && p.giorno ? p.giorno : null,
+          fine_trasporto: r.trasporto_finito_il || null,
+          mese: p && p.mese !== 'N/D' ? p.mese : null,
+          settimana: p && typeof p.settimana === 'number' ? p.settimana : null,
+          senza_fine_trasporto: p === null,
+        });
+      }
+      if (n === ultimoDettaglio.current) setRecords(righe);
     } catch (e) { console.error(e); }
-    setLoadingRecords(false);
+    if (n === ultimoDettaglio.current) setLoadingRecords(false);
   }, [filters, searchIdOrdine]);
 
-  useEffect(() => { loadData(); }, [loadData]);
-  useEffect(() => { if (viewMode === 'detail') loadRecords(); }, [loadRecords, viewMode]);
+  useEffect(() => { loadData(); }, [loadData, versione]);
+  useEffect(() => { if (viewMode === 'detail') loadRecords(); }, [loadRecords, viewMode, versione]);
 
   useEffect(() => {
     (async () => {
       try {
         const res = await base44.functions.invoke('getAlerts', { modulo: 'secondarie', solo_aperti: true });
         setAlertCount(res.data?.total || 0);
-      } catch (e) { /* ignore */ }
+      } catch { /* il contatore degli avvisi non e' essenziale */ }
     })();
-  }, [loadData]);
+  }, [versione]);
 
   useEffect(() => {
     const unsub = base44.entities.UploadLog.subscribe((event) => {
-      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso' && event.data?.tipo_file === 'secondarie') loadData();
+      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso' && event.data?.tipo_file === 'secondarie') aggiorna();
     });
     return unsub;
-  }, [loadData]);
+  }, [aggiorna]);
 
   const handleExport = async (mode) => {
     setExporting(true);
@@ -101,8 +150,10 @@ export default function Secondarie() {
     setExporting(false);
   };
 
-  const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v) || searchIdOrdine;
-  const resetFilters = () => setFilters({ canale: [], stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
+  // Il canale non e' un filtro da azzerare: e' la scheda che si sta guardando.
+  const hasFilters = Object.entries(filters).some(([k, v]) => k !== 'canale' && (Array.isArray(v) ? v.length > 0 : v)) || searchIdOrdine;
+  const resetFilters = () => { setFilters(filtriVuoti(canale)); setSearchIdOrdine(''); };
+  const scegliCanale = (c) => setFilters(p => ({ ...p, canale: [c] }));
   const opts = data?.filterOptions || {};
 
   // Stati garantiti sempre presenti nel filtro, anche senza record (valori normalizzati in minuscolo)
@@ -117,11 +168,15 @@ export default function Secondarie() {
   const getEmptyMessage = () => {
     if (filters.stato.length === 1) {
       const s = filters.stato[0].toLowerCase();
-      if (s === 'eseguito') return 'Non sono presenti secondarie in stato di eseguito';
-      if (s === 'assegnato') return 'Non sono presenti secondarie in stato di assegnato';
+      if (s === 'eseguito') return `Non sono presenti secondarie ${canale === 'ACI' ? 'ACI' : 'di rete'} in stato di eseguito`;
+      if (s === 'assegnato') return `Non sono presenti secondarie ${canale === 'ACI' ? 'ACI' : 'di rete'} in stato di assegnato`;
     }
-    return 'Nessun trasporto secondario trovato.';
+    return `Nessun trasporto secondario ${canale === 'ACI' ? 'ACI' : 'di rete'} trovato.`;
   };
+
+  // La sintesi per classe e' gia' per canale (una riga per canale|classe): qui
+  // si tengono solo le righe della scheda aperta.
+  const classiDelCanale = (data?.byClasse || []).filter(c => !c.canale || c.canale === canale);
 
   return (
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
@@ -133,15 +188,24 @@ export default function Secondarie() {
         <div className="flex items-center gap-2">
           {alertCount > 0 && <AlertBadge count={alertCount} modulo="secondarie" />}
           <button onClick={() => handleExport('matrix')} disabled={exporting} className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
-            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <LayoutGrid className="w-4 h-4" />} Excel Sintesi
+            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <LayoutGrid className="w-4 h-4" />} Excel Sintesi {canale}
           </button>
           <button onClick={() => handleExport('detail')} disabled={exporting} className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
-            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />} Excel Dettaglio
+            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />} Excel Dettaglio {canale}
           </button>
         </div>
       </div>
 
-      <SecondarieUpload onImported={loadData} />
+      <SecondarieUpload onImported={aggiorna} />
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <Tabs value={canale} onValueChange={scegliCanale}>
+          <TabsList>
+            {CANALI.map(c => <TabsTrigger key={c} value={c}>{c}</TabsTrigger>)}
+          </TabsList>
+        </Tabs>
+        <p className="text-xs text-muted-foreground">Rete e ACI sono commesse separate: numeri, matrice, dettaglio ed Excel sono sempre di un canale solo.</p>
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-12 text-muted-foreground">
@@ -149,7 +213,7 @@ export default function Secondarie() {
         </div>
       ) : (
         <>
-          <SecondarieKpi kpi={data?.kpi} byClasse={data?.byClasse} canali={data?.canali} />
+          <SecondarieKpi kpi={data?.kpi} byClasse={data?.byClasse} canali={data?.canali} elencoSenzaFine={data?.senza_fine_trasporto} />
 
           {/* Filtri rapidi */}
           <div className="border rounded-lg p-4 space-y-3">
@@ -163,10 +227,9 @@ export default function Secondarie() {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
               <input type="text" value={searchIdOrdine} onChange={e => setSearchIdOrdine(e.target.value)} placeholder="Cerca ID ordine..." className="w-full border rounded-md px-3 py-2 text-sm" />
-              <MultiSelect allLabel="Rete e ACI insieme" options={opts.canali || ['Rete', 'ACI']} selected={filters.canale} onChange={v => setFilters(p => ({ ...p, canale: v }))} />
               <MultiSelect allLabel="Tutte le regioni" options={opts.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
               <MultiSelect allLabel="Tutti gli stati" options={statiOptions.map(s => ({ value: s, label: prettyStato(s) }))} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
-              <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" />
+              <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} title="Giorno di fine trasporto" className="border rounded-md px-3 py-2 text-sm" />
               <MultiSelect allLabel="Tutte le origini" options={opts.stoccaggi || []} selected={filters.stoccaggio} onChange={v => setFilters(p => ({ ...p, stoccaggio: v }))} />
               <MultiSelect allLabel="Tutte le destinazioni" options={opts.destinazioni || []} selected={filters.destinazione} onChange={v => setFilters(p => ({ ...p, destinazione: v }))} />
               <MultiSelect allLabel="Tutte le province" options={opts.province || []} selected={filters.provincia} onChange={v => setFilters(p => ({ ...p, provincia: v }))} />
@@ -176,19 +239,8 @@ export default function Secondarie() {
               <MultiSelect allLabel="Tutti i trasportatori" options={opts.trasportatori || []} selected={filters.trasportatore} onChange={v => setFilters(p => ({ ...p, trasportatore: v }))} />
               <MultiSelect allLabel="Tutti gli anni" options={(opts.anni || []).map(a => String(a))} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v }))} />
             </div>
+            <p className="text-xs text-muted-foreground">Giorno, settimana, mese e anno sono quelli della fine del trasporto; per un ordine non ancora trasportato, quelli dell&apos;immissione.</p>
           </div>
-
-          {(data?.canali || []).length > 1 && (
-            <div className="flex items-start gap-2 border border-amber-200 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
-              <Filter className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>
-                Questa vista comprende <strong>rete e ACI insieme</strong>:{' '}
-                {(data.canali || []).map(c => `${c.canale} ${fmtTon(c.peso_kg / 1000)} t in ${c.ordini} ${c.ordini === 1 ? 'viaggio' : 'viaggi'}`).join(', ')}.
-                Sono canali indipendenti e non vanno sommati: usa il filtro <em>Rete e ACI insieme</em> per guardarli separati.
-                Nel Report Mensile le secondarie di rete e quelle ACI hanno già pivot distinte.
-              </span>
-            </div>
-          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-3">
@@ -198,17 +250,21 @@ export default function Secondarie() {
                   <TabsTrigger value="detail"><Table2 className="w-4 h-4 mr-1.5" /> Dettaglio Ordini</TabsTrigger>
                 </TabsList>
                 <TabsContent value="matrix" className="space-y-3 mt-3">
-                  <h2 className="text-lg font-heading font-semibold">Matrice Tratte: Origine → Destinazione</h2>
+                  <h2 className="text-lg font-heading font-semibold">Matrice Tratte {canale}: Origine → Destinazione</h2>
                   <TrattaMatrix matrix={data?.matrix} />
                 </TabsContent>
                 <TabsContent value="detail" className="space-y-3 mt-3">
-                  <h2 className="text-lg font-heading font-semibold">Dettaglio Trasporti Secondari ({records.length})</h2>
+                  {/* Il conteggio e' del solo canale aperto: prima sommava i
+                      viaggi di rete e quelli ACI. */}
+                  <h2 className="text-lg font-heading font-semibold">
+                    Dettaglio Trasporti Secondari {canale}{loadingRecords ? '' : ` (${formatIntero(records.length)})`}
+                  </h2>
                   <SecondarieTable records={records} loading={loadingRecords} emptyMessage={getEmptyMessage()} />
                 </TabsContent>
               </Tabs>
             </div>
             <div className="space-y-3">
-              <h2 className="text-lg font-heading font-semibold">Sintesi per Classe PFU</h2>
+              <h2 className="text-lg font-heading font-semibold">Sintesi per Classe PFU · {canale}</h2>
               <div className="border rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-muted">
@@ -219,10 +275,18 @@ export default function Secondarie() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(data?.byClasse || []).map((c) => (
-                      <tr key={c.classe} className="border-t hover:bg-muted/50">
-                        <td className="px-3 py-2 font-medium">{c.classe}</td>
-                        <td className="px-3 py-2 text-right">{formatNumber(c.ordini, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                    {classiDelCanale.length === 0 && (
+                      <tr><td colSpan={3} className="px-3 py-4 text-center text-muted-foreground">Nessun trasporto nella vista.</td></tr>
+                    )}
+                    {/* Una riga per canale e classe: la chiave era la sola classe,
+                        e una classe presente nei due canali dava chiavi doppie. */}
+                    {classiDelCanale.map((c) => (
+                      <tr key={`${c.canale}|${c.classe}`} className="border-t hover:bg-muted/50">
+                        <td className="px-3 py-2 font-medium">
+                          {c.classe}
+                          {c.canale === 'ACI' && <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[11px] align-middle">ACI</span>}
+                        </td>
+                        <td className="px-3 py-2 text-right">{formatIntero(c.ordini)}</td>
                         <td className="px-3 py-2 text-right">{fmtTon(c.peso_kg / 1000)}</td>
                       </tr>
                     ))}

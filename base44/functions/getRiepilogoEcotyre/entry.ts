@@ -28,7 +28,9 @@ export default async function(req) {
       fetchAll(base44.asServiceRole.entities.PrimariaAci),
       fetchAll(base44.asServiceRole.entities.ExtraRaccolta),
       fetchAll(base44.asServiceRole.entities.Fornitore),
-      base44.asServiceRole.entities.Tariffa.filter({ direzione: 'ATTIVA' }),
+      // Tutte le pagine, come il documento e l'assistente: con la pagina di
+      // default del backend anteprima e documento potevano dire importi diversi.
+      fetchAll(base44.asServiceRole.entities.Tariffa, { direzione: 'ATTIVA' }),
       base44.asServiceRole.entities.DocumentoFatturazione.filter({ tipo: 'ATTIVA', anno: annoNum, mese }),
     ]);
     const { righe, anomalie, extra_secondarie_escluse } = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: annoNum, mese });

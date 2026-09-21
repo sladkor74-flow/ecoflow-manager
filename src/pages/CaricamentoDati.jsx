@@ -15,6 +15,37 @@ const TIPI_FILE = [
   { key: 'ordini_non_dichiarati', label: 'Ordini Non Dichiarati', desc: 'Ordini in attesa di dichiarazione di trattamento: determina la giacenza a portale di ciascun impianto', colore: 'bg-amber-50 border-amber-200' },
 ];
 
+// Cosa ha riconosciuto l'allineamento delle dichiarazioni mensili. I nostri mesi
+// senza riscontro non sono tutti uguali: quelli dell'ultimo anno del report
+// possono ancora comparire; quelli degli anni prima no. E il dicembre di un anno
+// chiuso si carica a portale a gennaio dell'anno dopo, mentre l'aggancio cerca i
+// caricamenti nello stesso anno (base44/shared/agganciaDichiarazioni.ts): usciva
+// a ogni caricamento fra i "non ancora ritrovati", come se dovesse arrivare.
+// Una risposta senza l'anno delle righe (versione precedente) conta tutto sull'ultimo.
+// Un canale per volta: rete e ACI non si sommano nemmeno qui (regola 3).
+const NOMI_CANALE = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
+function testoAllineamento(allineamento) {
+  const anni = (allineamento.anni || []).map(Number).filter(Boolean);
+  const ultimo = anni.length ? Math.max(...anni) : null;
+  const chiuso = (n) => ultimo && n.anno && Number(n.anno) < ultimo;
+  const canaleDi = (n) => n.canale || 'RETE';
+  const tutte = [...(allineamento.aggiornate || []), ...(allineamento.non_trovate || [])];
+  const canali = Object.keys(NOMI_CANALE).filter(c => tutte.some(n => canaleDi(n) === c));
+  if (!canali.length) canali.push('RETE');
+  const perCanale = canali.map(c => {
+    const lista = (allineamento.non_trovate || []).filter(n => canaleDi(n) === c);
+    const dicembri = lista.filter(n => chiuso(n) && String(n.mese || '').toLowerCase() === 'dicembre').length;
+    const vecchi = lista.filter(n => chiuso(n) && String(n.mese || '').toLowerCase() !== 'dicembre').length;
+    const recenti = lista.length - dicembri - vecchi;
+    const parti = [`${formatIntero((allineamento.aggiornate || []).filter(n => canaleDi(n) === c).length)} aggiornate`];
+    if (recenti) parti.push(`${formatIntero(recenti)} nostri mesi${ultimo ? ` del ${ultimo}` : ''} non ancora ritrovati nel report`);
+    if (vecchi) parti.push(`${formatIntero(vecchi)} mesi degli anni prima senza riscontro: da controllare in Dichiarazioni Impianti`);
+    if (dicembri) parti.push(`${formatIntero(dicembri)} dicembre di anni chiusi non agganciati (si caricano a portale a gennaio dell'anno dopo)`);
+    return `${NOMI_CANALE[c]}: ${parti.join(', ')}`;
+  });
+  return `Dichiarazioni mensili riconosciute come caricate a portale. ${perCanale.join('. ')}.`;
+}
+
 export default function CaricamentoDati() {
   const { isAdmin, puoCaricare } = usePermessi();
   const [logs, setLogs] = useState([]);
@@ -51,13 +82,15 @@ export default function CaricamentoDati() {
   useEffect(() => { caricaLogs(); }, []);
 
   // Durante un caricamento l'archivio viene riscritto: chiudere la pagina lo
-  // lascerebbe a meta'.
+  // lascerebbe a meta'. Anche durante i ricalcoli: partono dal browser uno alla
+  // volta, e chiudendo la pagina quelli ancora da fare non partirebbero piu'.
+  const ricalcoliInCorso = Object.values(ricalcoli).some(r => r && r.in_corso);
   useEffect(() => {
-    if (!uploading) return undefined;
+    if (!uploading && !ricalcoliInCorso) return undefined;
     const avviso = (e) => { e.preventDefault(); e.returnValue = ''; };
     window.addEventListener('beforeunload', avviso);
     return () => window.removeEventListener('beforeunload', avviso);
-  }, [uploading]);
+  }, [uploading, ricalcoliInCorso]);
 
   const handleUpload = async (tipoKey, file, conferma_forzatura = false) => {
     if (!file) return;
@@ -209,7 +242,7 @@ export default function CaricamentoDati() {
                 <p className={`mt-1 text-xs ${res.data.allineamento.errore ? 'text-amber-700' : 'text-muted-foreground'}`}>
                   {res.data.allineamento.errore
                     ? `Dichiarazioni mensili non riconosciute (${res.data.allineamento.errore}): premi «Allinea dal portale» in Dichiarazioni Impianti.`
-                    : `Dichiarazioni mensili riconosciute come caricate a portale: ${formatIntero((res.data.allineamento.aggiornate || []).length)} aggiornate${(res.data.allineamento.non_trovate || []).length ? `; ${formatIntero(res.data.allineamento.non_trovate.length)} nostri mesi non ancora ritrovati nel report` : ''}.`}
+                    : testoAllineamento(res.data.allineamento)}
                 </p>
               )}
 

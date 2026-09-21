@@ -4,8 +4,35 @@ import { oggiRoma, giornoRoma, annoRoma } from "../../shared/giornoItaliano.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { quoteDaStoccaggio } from "../../shared/rotteConferimenti.ts";
-import { eAci } from "../../shared/canaleSecondaria.ts";
+import { canaleMovimento, annoOrdine } from "../../shared/movimenti.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
+import { statoCaricamenti, descriviCaricamento } from "../../shared/reportSettimanali.ts";
+
+// La predittivita' delle secondarie e' SOLO della rete (regola dell'utente,
+// 22/09/2026): target, consuntivi, primarie, secondarie, stoccaggi e piano
+// settimanale. L'ACI ha un contratto suo senza target e l'extra raccolta non ha
+// target: qui non entrano, nemmeno come conteggio. L'extra raccolta sta in un
+// archivio suo e non si legge; primarie e secondarie si tengono solo se il
+// canale e' la rete, con la regola condivisa (canaleMovimento / eAci).
+const soloRete = (righe, archivio) => righe.filter(r => canaleMovimento(r, archivio) === 'RETE');
+
+// Un caricamento delle primarie o delle secondarie aperto (o rimasto
+// interrotto) vuol dire un archivio a meta': i numeri si mostrano con
+// l'avviso, ma il piano settimanale non si salva, altrimenti restano scritti
+// consuntivi e settimane "congelate" contati su mezzo file. La pagina si
+// ricalcola da sola quando il caricamento si chiude. Stessa finestra di dieci
+// minuti di importaBlocco e di dopoCaricamento.
+// Si usa la regola condivisa di base44/shared/reportSettimanali.ts: un
+// caricamento rimasto aperto non conta piu' se dopo un caricamento riuscito ha
+// riscritto gli stessi archivi. Un "primarie_rete" storico, che nessuna scheda
+// di Caricamento Dati scrive piu' ne' chiude, altrimenti bloccava per sempre il
+// piano, il suggerimento del lunedi' e la proiezione.
+const TIPI_LETTI = ['primarie', 'primarie_rete', 'secondarie'];
+async function caricamentoAperto(base44) {
+  const stato = await statoCaricamenti(base44, TIPI_LETTI).catch(() => ({ in_corso: [] }));
+  const aperti = stato.in_corso || [];
+  return aperti.length ? aperti.map(descriviCaricamento).join('; ') : null;
+}
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 // Media reale di un viaggio di secondaria: 13,5 tonnellate.
@@ -43,13 +70,15 @@ export default async function(req) {
     const puoScrivere = eAmministratore(user);
     const b = base44.asServiceRole;
 
+    const caricamentoInCorso = await caricamentoAperto(base44);
     const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
     const fornitori = await b.entities.FornitoreSecondaria.filter({ stato: 'attivo' });
-    const primarie = await fetchAll(b.entities.PrimariaRete, { stato: 'terminato' });
     // Solo rete: i target degli impianti e dei raccoglitori sono della rete, e
-    // l'autodemolizione non li consuma. Le secondarie ACI stanno nello stesso
-    // archivio e si riconoscono dalla classe.
-    const secondarie = (await fetchAll(b.entities.Secondaria, { stato: 'terminato' })).filter(r => !eAci(r));
+    // ACI ed extra raccolta non li consumano. Le secondarie ACI stanno nello
+    // stesso archivio di quelle di rete e si riconoscono dalla classe; una primaria di
+    // classe 9 finita fra quelle di rete si scarta con la stessa regola.
+    const primarie = soloRete(await fetchAll(b.entities.PrimariaRete, { stato: 'terminato' }), 'PrimariaRete');
+    const secondarie = soloRete(await fetchAll(b.entities.Secondaria, { stato: 'terminato' }), 'Secondaria');
     const existingPlans = await b.entities.PianificazioneSettimanale.list('-created_date', 5000);
 
     // === FONTE UNICA TARGET: TargetRaccoglitore (anno di riferimento) ===
@@ -98,8 +127,12 @@ export default async function(req) {
 
     // Terminati senza una fine trasporto leggibile: non si collocano in nessuna
     // settimana e in nessun anno (mai ripiegando sulla chiusura), si contano per
-    // dirlo fra le anomalie.
-    const senzaFine = (righe) => righe.filter(r => statoNorm(r.stato) === 'terminato' && !giornoRoma(r.trasporto_finito_il)).length;
+    // dirlo fra le anomalie. Si contano quelli dell'anno di lavoro: senza la fine
+    // trasporto l'anno si legge dall'immissione (annoOrdine), che qui serve solo
+    // a non ripetere ogni anno i buchi degli anni prima, non a collocare il
+    // movimento, che resta fuori da consuntivi e settimane.
+    const senzaFine = (righe) => righe.filter(r => statoNorm(r.stato) === 'terminato' && !giornoRoma(r.trasporto_finito_il)
+      && annoOrdine(r) === annoRiferimento()).length;
     const senzaFineTrasporto = { primarie: senzaFine(primarie), secondarie: senzaFine(secondarie) };
 
     // Terminati dell'anno di lavoro, per il giorno italiano della fine trasporto
@@ -159,7 +192,31 @@ export default async function(req) {
     if (senzaFineTrasporto.primarie || senzaFineTrasporto.secondarie) {
       anomalie.push({
         tipo: 'senza_fine_trasporto',
-        testo: `Terminati senza data di fine trasporto, esclusi dal consuntivo e dalle settimane: ${senzaFineTrasporto.primarie} primarie di rete e ${senzaFineTrasporto.secondarie} secondarie di rete.`,
+        testo: `Terminati del ${annoRiferimento()} (per data di immissione) senza data di fine trasporto, esclusi dal consuntivo e dalle settimane (primarie di rete: ${senzaFineTrasporto.primarie}, secondarie di rete: ${senzaFineTrasporto.secondarie}). Entrano da soli quando un nuovo caricamento porta la data.`,
+      });
+    }
+
+    // Un fornitore registrato qui che nell'anno non ha ne' un target di rete ne'
+    // un movimento di rete (non raccoglie, non riceve primarie, non spedisce
+    // secondarie) non ha niente da fare nella predittivita': o lavora solo per
+    // l'ACI o l'extra raccolta, che qui non entrano, o non e' contrattualizzato
+    // (RPN nel 2026). I conti lo lasciano gia' a zero; si dice, perche' la
+    // configurazione non resti a raccontare un canale che non c'e'.
+    const attiviSullaRete = new Set(Object.keys(targetByNome));
+    for (const r of prim2026) { attiviSullaRete.add(normalizzaRagioneSociale(r.trasportatore)); attiviSullaRete.add(normalizzaRagioneSociale(r.destinazione)); }
+    for (const r of sec2026) attiviSullaRete.add(normalizzaRagioneSociale(r.stoccaggio));
+    const fuoriRete = new Map(); // nome normalizzato -> { nome, impianti }
+    for (const f of fornitori) {
+      const k = normalizzaRagioneSociale(f.nome);
+      if (!k || attiviSullaRete.has(k)) continue;
+      if (!fuoriRete.has(k)) fuoriRete.set(k, { nome: f.nome, impianti: [] });
+      if (f.impianto_nome) fuoriRete.get(k).impianti.push(f.impianto_nome);
+    }
+    for (const x of fuoriRete.values()) {
+      anomalie.push({
+        tipo: 'fornitore_senza_rete',
+        fornitore: x.nome,
+        testo: `${x.nome} e' registrato nella predittivita'${x.impianti.length ? ` (per ${x.impianti.join(', ')})` : ''} ma nel ${annoRiferimento()} non ha un target di rete ne' movimenti di rete. La predittivita' e' solo della rete: se lavora solo per l'ACI o l'extra raccolta, o non e' contrattualizzato quest'anno, toglilo dalla configurazione.`,
       });
     }
 
@@ -457,8 +514,10 @@ export default async function(req) {
       });
     }
 
-    // Persistenza chunked, riservata all'amministratore
-    if (puoScrivere) {
+    // Persistenza chunked, riservata all'amministratore, e mai su un archivio a
+    // meta' (vedi caricamentoAperto): il piano si salva alla prossima apertura.
+    const salvato = puoScrivere && !caricamentoInCorso;
+    if (salvato) {
       for (let i = 0; i < creates.length; i += 100) {
         await b.entities.PianificazioneSettimanale.bulkCreate(creates.slice(i, i + 100));
         await new Promise(r => setTimeout(r, 200));
@@ -470,8 +529,12 @@ export default async function(req) {
     }
 
     return Response.json({
+      canale: 'RETE',
       anomalie,
       senza_fine_trasporto: senzaFineTrasporto,
+      caricamento_in_corso: caricamentoInCorso || '',
+      piano_salvato: salvato,
+      kg_per_viaggio: KG_PER_VIAGGIO,
       impianti: result,
       stoccaggi: stoccaggiResult,
       settimane,

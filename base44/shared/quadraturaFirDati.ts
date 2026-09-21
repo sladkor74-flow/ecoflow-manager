@@ -13,7 +13,8 @@
 // Il giorno di un movimento e' quello italiano della fine trasporto
 // (giornoMovimento), come in tutto il gestionale: tagliando la stringa UTC un
 // trasporto finito a mezzanotte italiana del lunedi' (22:00Z della domenica)
-// cadeva nella settimana prima.
+// cadeva nella settimana prima. Un terminato senza fine trasporto non ha
+// settimana: non si conta, e l'esito lo dice flusso per flusso.
 //
 // Qui sta anche il riconfronto di una quadratura gia' fatta con i movimenti di
 // adesso (rifaiQuadratura): l'esito salvato il giorno della stampa non si
@@ -26,7 +27,7 @@ import { ticketDi } from "./formulari.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { eTerminato, giornoMovimento } from "./movimenti.ts";
 import { statoCaricamenti } from "./reportSettimanali.ts";
-import { FLUSSI, normalizzaLettura, confronta, sintesi } from "./quadraturaFir.ts";
+import { FLUSSI, ORDINE_FLUSSI, normalizzaLettura, confronta, sintesi } from "./quadraturaFir.ts";
 import { valoreCampo, leggiCampo, leggiJson } from "./testoLungo.ts";
 
 export const GIORNI_FASCIA = 4;
@@ -94,6 +95,21 @@ async function nellaFascia(svc, entita, primo, ultimo) {
   return tutte;
 }
 
+/**
+ * I movimenti senza fine trasporto, chiesti all'archivio con un filtro a parte:
+ * la lettura per intervallo non li restituisce mai. Il filtro su un campo vuoto
+ * riporta anche gli ordini ancora aperti o annullati, che si scartano dopo. Se
+ * l'archivio non accetta il filtro si restituisce null: il conteggio non si e'
+ * potuto fare, e lo si dice invece di scrivere zero.
+ */
+async function senzaFineTrasporto(svc, entita) {
+  try {
+    return await fetchAll(svc[entita], { trasporto_finito_il: null }, 'id');
+  } catch (e) {
+    return null;
+  }
+}
+
 function formulario(r) {
   return {
     fir: nome(r.numero_fir),
@@ -143,26 +159,45 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null, pront
   const entita = [...new Set(flussi.map(f => f.entita))];
   const raccolta = {};
   for (const f of flussi) {
-    raccolta[f.chiave] = { celle: new Map(), vicini: [], annullati: [], senza_peso: [], totale: { n: 0, kg: 0 } };
+    raccolta[f.chiave] = { celle: new Map(), vicini: [], annullati: [], senza_peso: [], senza_fine: [], totale: { n: 0, kg: 0 } };
   }
 
   const perEntita = {};
+  // I terminati senza fine trasporto non stanno in nessuna settimana: non si
+  // contano, ma si dicono. Con gli archivi interi gia' in memoria sono li'
+  // dentro; altrimenti si chiedono a parte.
+  const senzaFinePerEntita = {};
   if (pronti && pronti.archivi) {
     // In ordine di id, come li restituisce la lettura per intervallo: dall'ordine
     // dipendono i nomi mostrati per ogni cella.
     for (const e of entita) perEntita[e] = [...(pronti.archivi[e] || [])].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    for (const e of entita) senzaFinePerEntita[e] = perEntita[e];
   } else {
-    await Promise.all(entita.map(async (e) => { perEntita[e] = await nellaFascia(svc, e, primoFascia, ultimoFascia); }));
+    await Promise.all(entita.map(async (e) => {
+      const [fascia, senzaFine] = await Promise.all([nellaFascia(svc, e, primoFascia, ultimoFascia), senzaFineTrasporto(svc, e)]);
+      perEntita[e] = fascia;
+      senzaFinePerEntita[e] = senzaFine;
+    }));
   }
+
+  // Primaria o secondaria dell'extra raccolta, rete o ACI delle secondarie.
+  const delFlusso = (f, r) => {
+    const movimento = String(r.tipo_movimento || 'primaria').toLowerCase().trim();
+    if (f.movimento && movimento !== f.movimento) return false;
+    if (f.canale && (f.canale === 'ACI') !== eAci(r)) return false;
+    return true;
+  };
 
   for (const f of flussi) {
     const dati = raccolta[f.chiave];
+    const senzaFine = senzaFinePerEntita[f.entita];
+    if (senzaFine === null) dati.senza_fine = null;
+    else for (const r of (senzaFine || [])) if (eTerminato(r) && !giornoMovimento(r) && delFlusso(f, r)) dati.senza_fine.push(formulario(r));
+
     for (const r of (perEntita[f.entita] || [])) {
       const d = giornoMovimento(r);
       if (!d || d < primoFascia || d > ultimoFascia) continue;
-      const movimento = String(r.tipo_movimento || 'primaria').toLowerCase().trim();
-      if (f.movimento && movimento !== f.movimento) continue;
-      if (f.canale && (f.canale === 'ACI') !== eAci(r)) continue;
+      if (!delFlusso(f, r)) continue;
       const dentro = d >= inizio && d <= fine;
       const fir = formulario(r);
       if (!eTerminato(r)) {
@@ -214,6 +249,9 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null, pront
       vicini: [...dati.vicini].sort(perData),
       annullati: [...dati.annullati].sort(perData),
       senza_peso: [...dati.senza_peso].sort(perData),
+      // null se il conteggio non si e' potuto fare; i formulari contati una volta sola
+      senza_fine: dati.senza_fine === null ? null
+        : { n: contaDistinti(dati.senza_fine), esempi: [...dati.senza_fine].sort(perData).slice(0, 5).map(x => ({ fir: x.fir, ordine: x.ordine })) },
       totale: { n: dati.totale.n, kg: Math.round(dati.totale.kg) },
       ultimo_caricamento: caricamenti[0] || null,
       caricamento_in_corso: (aperti || []).find(a => f.caricamenti.includes(a.tipo_file)) || null,
@@ -263,9 +301,39 @@ export function sintesiPerCanale(esito, lettura = null) {
   return out;
 }
 
-/** Il confronto di una settimana con la conformita' canale per canale gia' dentro l'esito. */
+/**
+ * I terminati senza fine trasporto, flusso per flusso: non stanno in nessuna
+ * settimana e non si contano, ma senza dirlo un loro formulario a portale
+ * risultava "Manca nel gestionale" senza spiegazione.
+ */
+export function osservazioniSenzaFine(gestionale) {
+  const out = [];
+  for (const chiave of ORDINE_FLUSSI) {
+    const dati = gestionale && gestionale[chiave];
+    if (!dati || dati.senza_fine === undefined) continue;
+    const nome = `${FLUSSI[chiave].titolo} · ${FLUSSI[chiave].canale}`;
+    const sf = dati.senza_fine;
+    if (sf === null) {
+      out.push(`${nome}: non si è potuto contare quanti formulari sono terminati senza data di fine trasporto. Un formulario che a portale risulta "Manca nel gestionale" può essere uno di questi.`);
+      continue;
+    }
+    if (!sf.n) continue;
+    const esempi = sf.esempi.map(x => (x.fir ? `FIR ${x.fir}` : 'formulario senza numero') + (x.ordine ? `, ordine ${x.ordine}` : '')).join('; ');
+    const altri = sf.n > sf.esempi.length ? `; e altri ${sf.n - sf.esempi.length}` : '';
+    out.push(sf.n === 1
+      ? `${nome}: nel gestionale c'è un formulario terminato senza data di fine trasporto (${esempi}). Non sta in nessuna settimana e qui non è contato: se a portale è della settimana, la sua riga risulta "Manca nel gestionale". La data si sistema con un nuovo caricamento del file che la riporti.`
+      : `${nome}: nel gestionale ci sono ${sf.n} formulari terminati senza data di fine trasporto (${esempi}${altri}). Non stanno in nessuna settimana e qui non sono contati: se a portale uno di questi è della settimana, la sua riga risulta "Manca nel gestionale". La data si sistema con un nuovo caricamento del file che la riporti.`);
+  }
+  return out;
+}
+
+/**
+ * Il confronto di una settimana, con dentro la conformita' canale per canale e
+ * le osservazioni sui terminati senza fine trasporto.
+ */
 export function confrontaSettimana(lettura, gestionale, periodo) {
   const esito = confronta(lettura, gestionale, periodo);
+  esito.osservazioni.push(...osservazioniSenzaFine(gestionale));
   esito.per_canale = sintesiPerCanale(esito, lettura);
   return esito;
 }
@@ -317,8 +385,15 @@ export function righeConservate(salvate) {
  * Non si rifa' niente mentre un archivio dei flussi si sta riscrivendo: un
  * confronto su un archivio a meta' darebbe scostamenti che non esistono.
  *
- * Restituisce null se non c'e' niente da rifare, altrimenti { esito, sintesi,
- * lettura_verificata, cambiato, salvato, verificata_il } oppure { rinviato }.
+ * Sul record si salva la conformita' canale per canale (per_canale), che lo
+ * storico mostra; i conteggi e il verdetto complessivi non si scrivono piu',
+ * perche' sommavano rete, ACI ed extra raccolta. Una quadratura salvata prima,
+ * senza per_canale, si riscrive anche se l'esito e' lo stesso.
+ *
+ * Restituisce null se non c'e' niente da rifare, altrimenti { esito, per_canale,
+ * lettura_verificata, cambiato, salvato, verificata_il, eseguito_il } oppure
+ * { rinviato }. eseguito_il e' l'istante di questo confronto, anche quando non
+ * si salva: e' la data da stampare accanto a un esito rifatto adesso.
  */
 export async function rifaiQuadratura(base44, q, gestionale, { scrivi = false } = {}) {
   if (!q || q.stato !== 'completata' || !q.righe_json) return null;
@@ -333,30 +408,32 @@ export async function rifaiQuadratura(base44, q, gestionale, { scrivi = false } 
   if (letturaSalvata && Array.isArray(letturaSalvata.problemi)) lettura.problemi = letturaSalvata.problemi;
 
   const periodo = { anno: q.anno, settimana: q.settimana, inizio: q.data_inizio, fine: q.data_fine };
+  const eseguito_il = new Date().toISOString();
   const esito = confrontaSettimana(lettura, gestionale, periodo);
-  const s = sintesi(esito);
   const testo = JSON.stringify(esito);
   let prima = '';
   try { prima = await leggiCampo(base44, 'QuadraturaFir', q, 'esito_json'); } catch { /* si riscrive */ }
   const cambiato = testo !== prima;
+  const daSalvare = cambiato || !Array.isArray(q.per_canale);
 
   let verificata_il = q.verificata_il || null;
   let salvato = false;
-  if (cambiato && scrivi) {
-    verificata_il = new Date().toISOString();
-    // conformita' e incongruenti restano anche complessivi perche' li legge il
-    // PDF (quadraturaFirPdf.js); la pagina mostra quelli per canale.
+  if (daSalvare && scrivi) {
+    verificata_il = eseguito_il;
     await base44.asServiceRole.entities.QuadraturaFir.update(q.id, {
-      congruenti: s.congruenti,
-      incongruenti: s.incongruenti,
-      osservazioni: s.osservazioni,
-      non_confrontabili: s.non_confrontabili,
-      conformita: s.conformita,
+      per_canale: esito.per_canale,
       lettura_verificata: !!lettura.verificata,
       verificata_il,
       esito_json: await valoreCampo(base44, 'QuadraturaFir', q.id, 'esito_json', testo),
     });
     salvato = true;
+  } else if (scrivi) {
+    // Stesso esito sui movimenti di adesso: si segna solo quando e' stato
+    // confermato. Lo storico mostra l'esito salvato solo se e' successivo
+    // all'ultimo caricamento, e senza questa data un esito ancora buono
+    // sembrerebbe vecchio.
+    verificata_il = eseguito_il;
+    await base44.asServiceRole.entities.QuadraturaFir.update(q.id, { verificata_il });
   }
-  return { esito, sintesi: s, lettura_verificata: !!lettura.verificata, cambiato, salvato, verificata_il };
+  return { esito, per_canale: esito.per_canale, lettura_verificata: !!lettura.verificata, cambiato, salvato, verificata_il, eseguito_il };
 }

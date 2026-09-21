@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -7,14 +7,50 @@ import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import { MESI } from '@/lib/pfuConstants';
 import { calcExtraRaccolta } from '@/lib/extraRaccoltaCalc';
-import { formatNumber } from '@/lib/utils';
+import { formatNumber, formatTonnellate, formatKg } from '@/lib/utils';
 import { exportExtraRaccoltaExcel, exportExtraRaccoltaPDF } from '@/lib/extraRaccoltaExport';
 import ExtraRaccoltaForm from '@/components/fatturazione/ExtraRaccoltaForm';
-import { STATI_EXTRA, statoExtra, eTerminato, datiChiusuraCompleti, dateDaCorreggere, giornoDaData, competenza } from '@/lib/extraRaccoltaStato';
-import { giornoRoma } from '@/lib/giornoItaliano';
+import { STATI_EXTRA, statoExtra, eTerminato, datiChiusuraCompleti, dateDaCorreggere, competenza } from '@/lib/extraRaccoltaStato';
+import { giornoRoma, oggiRoma } from '@/lib/giornoItaliano';
+import { giornoMovimento, giornoOrdine, MESI_MOVIMENTI } from '@/lib/movimenti';
 import { dopoCaricamento, testoRicalcoli } from '@/lib/importGrandeFile';
 
 const ANNI = [2024, 2025, 2026];
+
+// Dove si colloca una scheda, come in tutto il gestionale: un terminato sul giorno
+// italiano della fine trasporto, e se non ce l'ha non si colloca (niente ripiego
+// sulla richiesta); una richiesta ancora aperta, che non e' un movimento, sulla
+// data della richiesta. Mese e anno salvati sulla scheda non decidono: possono
+// venire da una scrittura vecchia.
+const giornoScheda = (r) => (eTerminato(r) ? giornoMovimento(r) : giornoOrdine(r));
+const giornoIt = (v) => { const g = giornoRoma(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
+const eSecondaria = (r) => String((r && r.tipo_movimento) || 'primaria').toLowerCase().trim() === 'secondaria';
+
+// Le schede si salvano una dopo l'altra, e ogni salvataggio lanciava tutti i
+// ricalcoli: con piu' schede di fila partivano giri sovrapposti, e sotto il
+// titolo restava l'esito di quello finito per ultimo, non per forza dell'ultimo
+// salvataggio. Ora le modifiche si accumulano (con i loro giorni di fine
+// trasporto) e i ricalcoli partono una volta sola, qualche secondo dopo l'ultima;
+// se ne arrivano mentre un giro e' in corso, se ne fa un altro alla fine, e si
+// mostra solo l'esito del giro che le comprende tutte.
+const ATTESA_RICALCOLI_MS = 4000;
+const nuovaCoda = () => ({ giorni: new Set(), pendente: false, timer: null, inCorso: false, mostra: null });
+function avviaRicalcoli(c) {
+  c.timer = null;
+  if (c.inCorso || !c.pendente) return;
+  const giorni = [...c.giorni];
+  c.giorni = new Set();
+  c.pendente = false;
+  c.inCorso = true;
+  const fine = (esiti) => {
+    c.inCorso = false;
+    // modifiche arrivate durante il giro: se il loro timer e' gia' scaduto si riparte subito
+    if (c.pendente) { if (!c.timer) avviaRicalcoli(c); return; }
+    if (c.mostra) c.mostra(esiti);
+  };
+  dopoCaricamento('extra_raccolta', { giorni })
+    .then(fine, (e) => fine([{ nome: 'moduli collegati', ok: false, errore: e && e.message ? e.message : String(e) }]));
+}
 
 export default function ExtraRaccolta() {
   const { isAdmin } = usePermessi();
@@ -25,6 +61,28 @@ export default function ExtraRaccolta() {
   const [formOpen, setFormOpen] = useState(false);
   const [formInitial, setFormInitial] = useState(null);
   const [ricalcoli, setRicalcoli] = useState(null);
+  const coda = useRef(null);
+  if (!coda.current) coda.current = nuovaCoda();
+
+  // Uscendo dalla pagina un ricalcolo in attesa parte subito, invece di perdersi.
+  useEffect(() => {
+    const c = coda.current;
+    c.mostra = setRicalcoli;
+    return () => {
+      c.mostra = null;
+      if (c.timer) { clearTimeout(c.timer); avviaRicalcoli(c); }
+    };
+  }, []);
+
+  // Chiudendo la scheda del browser, invece, i ricalcoli non ancora partiti si
+  // perderebbero: finche' ce ne sono, lo si chiede.
+  const ricalcoliInCorso = !!(ricalcoli && ricalcoli.in_corso);
+  useEffect(() => {
+    if (!ricalcoliInCorso) return undefined;
+    const avviso = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', avviso);
+    return () => window.removeEventListener('beforeunload', avviso);
+  }, [ricalcoliInCorso]);
 
   // Una scheda di extra raccolta e' un movimento come quelli dei file del portale:
   // scriverla, correggerla o cancellarla cambia le dichiarazioni di nessuna
@@ -32,9 +90,12 @@ export default function ExtraRaccolta() {
   // settimana, la qualifica. Si ricalcola come dopo un caricamento (elenco unico
   // in dopoCaricamento), sui giorni italiani di fine trasporto di prima e di dopo.
   const aggiornaModuli = (record) => {
-    const giorni = record.map(r => giornoRoma(r && r.trasporto_finito_il)).filter(Boolean);
+    const c = coda.current;
+    for (const r of record) { const g = giornoMovimento(r); if (g) c.giorni.add(g); }
+    c.pendente = true;
     setRicalcoli({ in_corso: true });
-    dopoCaricamento('extra_raccolta', { giorni }).then(setRicalcoli);
+    clearTimeout(c.timer);
+    c.timer = setTimeout(() => avviaRicalcoli(c), ATTESA_RICALCOLI_MS);
   };
 
   const load = async () => {
@@ -50,8 +111,12 @@ export default function ExtraRaccolta() {
 
   const filtered = useMemo(() => {
     return records.filter(r => {
-      if (filters.anno && String(r.anno) !== String(filters.anno)) return false;
-      if (filters.mese && r.mese !== filters.mese) return false;
+      if (filters.anno || filters.mese) {
+        const g = giornoScheda(r);
+        if (!g) return false;
+        if (filters.anno && Number(g.slice(0, 4)) !== Number(filters.anno)) return false;
+        if (filters.mese && MESI_MOVIMENTI[Number(g.slice(5, 7)) - 1] !== filters.mese) return false;
+      }
       if (filters.stato && statoExtra(r) !== (filters.stato === 'senza' ? '' : filters.stato)) return false;
       if (filters.trasportatore && r.trasportatore !== filters.trasportatore) return false;
       if (filters.destinazione && r.destinazione !== filters.destinazione) return false;
@@ -60,27 +125,33 @@ export default function ExtraRaccolta() {
     }).sort((a, b) => {
       // Prima le richieste da evadere, poi le altre dalla piu' recente.
       const aperta = (r) => Number(statoExtra(r) === 'assegnato');
-      const giorno = (r) => giornoDaData(r.trasporto_finito_il || r.ordine_immesso_il);
-      return (aperta(b) - aperta(a)) || giorno(b).localeCompare(giorno(a));
+      return (aperta(b) - aperta(a)) || giornoScheda(b).localeCompare(giornoScheda(a));
     });
   }, [records, filters]);
 
-  // Solo i terminati entrano nei totali e nelle esportazioni, come in fatturazione.
-  const terminati = useMemo(() => filtered.filter(eTerminato), [filtered]);
+  // Solo i terminati entrano nei totali e nelle esportazioni, come in fatturazione,
+  // e solo con la fine trasporto: senza, non hanno un mese e fuori da qui non
+  // contano da nessuna parte. Non si ripiega sulla richiesta: si contano e si dicono.
+  const terminati = useMemo(() => filtered.filter(r => eTerminato(r) && giornoMovimento(r)), [filtered]);
+  const terminatiSenzaFine = useMemo(() => records.filter(r => eTerminato(r) && !giornoMovimento(r)), [records]);
   const senzaStato = useMemo(() => records.filter(r => !statoExtra(r)), [records]);
   const daSegnare = senzaStato.filter(datiChiusuraCompleti);
 
+  // Le tonnellate sono la raccolta dal produttore, sul peso effettivo, come nella
+  // dashboard: un trasferimento in secondaria porta lo stesso peso una seconda
+  // volta, e sommarlo dava due numeri diversi per la stessa extra raccolta. Ricavi
+  // e costi restano tutti: il trasferimento si paga.
   const kpi = useMemo(() => {
-    let tonnellate = 0, ricavi = 0, costi = 0, margine = 0;
+    let kg = 0, ricavi = 0, costi = 0, margine = 0;
     for (const r of terminati) {
       const c = calcExtraRaccolta(r);
-      tonnellate += c.tonnellate;
+      if (!eSecondaria(r)) kg += Number(r.peso_effettivo) || 0;
       ricavi += c.ricavo;
       costi += c.costo_totale;
       margine += c.margine;
     }
     const margine_perc = ricavi !== 0 ? (margine / ricavi * 100) : 0;
-    return { tonnellate, ricavi, costi, margine, margine_perc };
+    return { tonnellate: kg / 1000, ricavi, costi, margine, margine_perc };
   }, [terminati]);
 
   const trasportatori = useMemo(() => [...new Set(records.map(r => r.trasportatore).filter(Boolean))].sort(), [records]);
@@ -125,7 +196,9 @@ export default function ExtraRaccolta() {
     try {
       for (const r of daSegnare) {
         const date = dateDaCorreggere(r);
-        const fine = giornoDaData(date.trasporto_finito_il || r.trasporto_finito_il);
+        // mese e anno scritti sulla scheda: quelli del giorno italiano della fine
+        // trasporto, come li legge il resto del gestionale
+        const fine = giornoRoma(date.trasporto_finito_il || r.trasporto_finito_il);
         await base44.entities.ExtraRaccolta.update(r.id, { stato: 'terminato', ...date, ...competenza(fine) });
         toccati.push(r, { trasporto_finito_il: date.trasporto_finito_il });
       }
@@ -137,15 +210,16 @@ export default function ExtraRaccolta() {
     load();
   };
 
+  // Senza un anno scelto, quello di oggi in Italia.
   const exportExcel = () => {
     const mese = filters.mese || 'Tutti';
-    const anno = filters.anno || new Date().getFullYear();
+    const anno = filters.anno || Number(oggiRoma().slice(0, 4));
     exportExtraRaccoltaExcel(terminati, mese, anno);
   };
 
   const exportPDF = () => {
     const mese = filters.mese || 'Tutti';
-    const anno = filters.anno || new Date().getFullYear();
+    const anno = filters.anno || Number(oggiRoma().slice(0, 4));
     exportExtraRaccoltaPDF(terminati, mese, anno);
   };
 
@@ -169,6 +243,16 @@ export default function ExtraRaccolta() {
         const r = testoRicalcoli(ricalcoli);
         return r ? <p className={`text-xs ${r.classe}`}>{r.testo}</p> : null;
       })()}
+
+      {terminatiSenzaFine.length > 0 && (
+        <div className="flex items-start gap-3 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <p>
+            <strong>{terminatiSenzaFine.length} {terminatiSenzaFine.length === 1 ? 'intervento terminato non ha' : 'interventi terminati non hanno'} la data di fine trasporto</strong>:
+            senza, non {terminatiSenzaFine.length === 1 ? 'ha' : 'hanno'} un mese e {terminatiSenzaFine.length === 1 ? 'resta escluso' : 'restano esclusi'} da totali, esportazioni, fatturazione, giacenze, report e verifiche. Aprili e scrivi la data.
+          </p>
+        </div>
+      )}
 
       {senzaStato.length > 0 && (
         <div className="flex items-start gap-3 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
@@ -258,8 +342,8 @@ export default function ExtraRaccolta() {
       {/* KPI */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="border rounded-lg p-3 bg-card">
-          <div className="text-xs text-muted-foreground">Tonnellate terminate</div>
-          <div className="text-lg font-bold tabular-nums">{formatNumber(kpi.tonnellate)} t</div>
+          <div className="text-xs text-muted-foreground">Tonnellate raccolte (senza le secondarie)</div>
+          <div className="text-lg font-bold tabular-nums">{formatTonnellate(kpi.tonnellate)} t</div>
         </div>
         <div className="border rounded-lg p-3 bg-card">
           <div className="text-xs text-muted-foreground">Ricavi</div>
@@ -321,7 +405,6 @@ export default function ExtraRaccolta() {
                 const c = calcExtraRaccolta(r);
                 const stato = statoExtra(r);
                 const conta = stato === 'terminato';
-                const giornoIt = (v) => { const g = giornoDaData(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
                 const euro = (v) => (conta ? `€ ${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—');
                 return (
                   <tr key={r.id} className="border-t hover:bg-muted/20">
@@ -338,7 +421,7 @@ export default function ExtraRaccolta() {
                     <td className="px-3 py-2 text-xs">{r.destinazione || '-'}</td>
                     <td className="px-3 py-2 text-xs">{r.tipologia_trasporto || '-'}</td>
                     <td className="px-3 py-2">{r.classe || '-'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{r.peso_effettivo ? formatNumber(r.peso_effettivo, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '-'}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{r.peso_effettivo ? formatKg(r.peso_effettivo) : '-'}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{euro(c.ricavo)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{euro(c.costo_totale)}</td>
                     <td className={`px-3 py-2 text-right tabular-nums font-medium ${!conta ? 'text-muted-foreground' : c.margine >= 0 ? 'text-success' : 'text-destructive'}`}>
