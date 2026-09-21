@@ -5,6 +5,7 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { proiettaInsieme, viaggiPerMese, MESI, KG_PER_VIAGGIO } from "../../shared/proiezioneSecondarie.ts";
 import { dopoLaRilevazione, ultimeRilevazioni, kgReteDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
+import { giornoRoma } from "../../shared/giornoItaliano.ts";
 
 // Quante secondarie restano da portare a ogni impianto per arrivare al target.
 //
@@ -18,7 +19,8 @@ import { dopoLaRilevazione, ultimeRilevazioni, kgReteDiRilevazione } from "../..
 // Payload: { anno, mese_da }  mese_da e' l'indice del mese da cui proiettare
 // (0 = gennaio); se manca si parte dal mese in corso.
 
-const soloData = (v) => (v ? String(v).slice(0, 10) : '');
+// Il giorno e' quello italiano della fine del trasporto, come ovunque.
+const soloData = (v) => giornoRoma(v);
 const terminato = (r) => String(r.stato || '').toLowerCase().trim() === 'terminato';
 const peso = (r) => Number(r.peso_effettivo) || 0;
 
@@ -40,12 +42,11 @@ export default async function(req) {
     const meseDa = body.mese_da != null ? Number(body.mese_da) : Number(oggi.slice(5, 7)) - 1;
 
     const svc = base44.asServiceRole.entities;
-    const [impianti, fornitori, primarie, secondarie, extra, rilevazioni, ipotesiTutte, giacenzeSito] = await Promise.all([
+    const [impianti, fornitori, primarie, secondarie, rilevazioni, ipotesiTutte, giacenzeSito] = await Promise.all([
       svc.ImpiantoTargetSecondaria.filter({ stato: 'attivo' }),
       svc.FornitoreSecondaria.filter({ stato: 'attivo' }),
       fetchAll(svc.PrimariaRete, { stato: 'terminato' }),
       fetchAll(svc.Secondaria, { stato: 'terminato' }),
-      fetchAll(svc.ExtraRaccolta, { stato: 'terminato' }),
       fetchAll(svc.GiacenzaStoccaggio),
       svc.IpotesiMensileSecondarie.filter({ anno }, 'mese', 500),
       svc.GiacenzaSito.filter({ anno }, 'sito', 100).catch(() => []),
@@ -86,24 +87,19 @@ export default async function(req) {
     // Ultima rilevazione del portale piu' quello che si e' mosso dopo: e' la
     // regola del modulo Giacenze, e la rete esclude la classe 9.
     const rilevazionePer = ultimeRilevazioni(rilevazioni, normalizzaRagioneSociale);
-    // Stessa regola del modulo Giacenze, adesso in comune: si parte dalla
-    // fotografia del portale e si contano i movimenti CHIUSI dopo di essa.
-    // Prima qui si guardava la fine del trasporto contro il giorno della
-    // rilevazione, e un carico chiuso il giorno dopo risultava dentro per le
-    // Giacenze e fuori per la Predittivita', che scriveva "ne mancano N viaggi"
-    // su un mese in cui il materiale c'era.
+    // Stessa regola del modulo Giacenze, in comune (shared/giacenzaStoccaggi.ts):
+    // la rilevazione del portale e i movimenti finiti dopo, per fine trasporto.
+    // Solo rete: le primarie arrivate allo stoccaggio (non all'impianto, se il
+    // soggetto e' anche impianto) e le secondarie di rete partite. L'extra
+    // raccolta e' un canale a parte e non entra nella giacenza di rete.
     const giacenzaStoccaggio = (chiave) => {
       const r = rilevazionePer.get(chiave);
       if (!r) return null;
       let kg = kgReteDiRilevazione(r.record);
       for (const p of primarie) {
         if (!terminato(p) || normalizzaRagioneSociale(p.destinazione) !== chiave) continue;
+        if (String(p.tipo_destinazione || '').toLowerCase().trim() !== 'stoc') continue;
         if (dopoLaRilevazione(p, r.quando)) kg += peso(p);
-      }
-      for (const e of extra) {
-        if (!terminato(e) || normalizzaRagioneSociale(e.destinazione) !== chiave) continue;
-        if (String(e.tipo_movimento || 'primaria').toLowerCase().trim() === 'secondaria') continue;
-        if (dopoLaRilevazione(e, r.quando)) kg += peso(e);
       }
       for (const s of secondarie) {
         if (!terminato(s) || eAci(s) || normalizzaRagioneSociale(s.stoccaggio) !== chiave) continue;
@@ -141,7 +137,7 @@ export default async function(req) {
     // serve a dividere la giacenza di uno stoccaggio condiviso.
     const ricevutoDa = new Map(); // "stoccaggio|impianto" -> kg
     for (const s2 of secondarie) {
-      if (!terminato(s2) || eAci(s2)) continue;
+      if (!terminato(s2) || eAci(s2) || meseDi(s2.trasporto_finito_il, anno) < 0) continue;
       const o = normalizzaRagioneSociale(s2.stoccaggio);
       const d2 = normalizzaRagioneSociale(s2.destinazione);
       if (!o || !d2) continue;

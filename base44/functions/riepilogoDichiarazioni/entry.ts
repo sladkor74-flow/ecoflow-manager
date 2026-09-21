@@ -5,6 +5,7 @@ import { eAci } from "../../shared/canaleSecondaria.ts";
 import { giornoRoma } from "../../shared/giornoItaliano.ts";
 import { eTerminato, periodoMovimento } from "../../shared/movimenti.ts";
 import { MESI, operazioneDa, quadratura } from "../../shared/dichiarazioniImpianti.ts";
+import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia } from "../../shared/giacenzaPortale.ts";
 
 // Dichiarazioni degli impianti, mese per mese, con la quadratura delle giacenze.
 //
@@ -69,35 +70,24 @@ export default async function(req) {
     // compaiono lì o nel report delle dichiarazioni: un carico che il gestionale
     // ha e il portale no - arrivato dopo, o non ancora nel file - si aggiunge alla
     // fotografia, cosi' la giacenza a portale segue ogni caricamento.
-    const fotoPortale = nonDichiarati.reduce((max, r) => {
-      const d = giornoRoma(r.created_date);
-      return d > max ? d : max;
-    }, '');
-    const aPortalePrimarie = new Set();
-    const aPortaleSecondarie = new Set();
-    const segnaAPortale = (r) => {
-      const p = String(r.ordine_primaria || '').trim();
-      const s = String(r.ordine_secondaria || '').trim();
-      if (p) aPortalePrimarie.add(p);
-      if (s) aPortaleSecondarie.add(s);
-    };
-    for (const r of nonDichiarati) segnaAPortale(r);
+    // La regola e' una sola per tutto il gestionale: shared/giacenzaPortale.ts.
+    const fotoPortale = giornoFotografia(nonDichiarati);
+    const portaleConosce = ordiniNotiAlPortale();
+    for (const r of nonDichiarati) portaleConosce.segna(r);
     // Il report delle dichiarazioni: che cosa risulta dichiarato al portale per gli
     // ordini dell'anno (per fine trasporto), e quali ordini il portale conosce.
     // Una dichiarazione che il portale ha agganciato a ordini dell'anno prima non
-    // compare qui, quindi una differenza non e' per forza un mese sfuggito.
+    // compare qui, quindi una differenza non e' per forza un mese sfuggito. Solo
+    // rete: se nel report comparisse una riga ACI, resta fuori.
     const dichiaratoPortale = new Map();
     await perPagina(svc.DichiarazioneTrattamento, null, (r) => {
-      segnaAPortale(r);
-      if (!giornoRoma(r.fine_trasporto).startsWith(String(annoNum))) return;
+      portaleConosce.segna(r);
+      if (eAci({ prodotto: r.prodotto }) || !giornoRoma(r.fine_trasporto).startsWith(String(annoNum))) return;
       const ns = norm(String(r.destinazione_secondaria || '').trim() || r.destinazione);
       if (!ns) return;
       somma(dichiaratoPortale, ns, Number(r.peso_associato_kg) || 0);
     });
-    const noto = (r, tipo) => {
-      const id = String(r.id_ordine || '').trim();
-      return !!id && (tipo === 'secondaria' ? aPortaleSecondarie.has(id) : aPortalePrimarie.has(id));
-    };
+    const noto = (r, tipo) => portaleConosce.noto(r, tipo);
     const nonAncora = new Map(); // ns impianto -> [{...}] carichi che la fotografia non contiene
     const segnaNonAncora = (ns, r, tipo) => {
       if (!fotoPortale || noto(r, tipo)) return;
@@ -267,7 +257,7 @@ export default async function(req) {
 
     // --- Giacenza del portale alla fotografia: conferito non ancora dichiarato ---
     const portale = new Map();      // ns impianto -> t
-    const inAttesa = new Map();     // ns stoccaggio -> t ancora in piazzale secondo il portale
+    const inAttesa = new Map();     // ns stoccaggio -> t gia' partite che il portale attribuisce ancora allo stoccaggio
     const attesaCoppia = new Map(); // nsStoccaggio|nsImpianto -> t partite e non ancora dichiarate
     const aPortale = new Set();     // chi compare nella fotografia del portale
     const daDichiarare = new Map(); // ns|mese -> kg ancora in attesa di dichiarazione
@@ -277,7 +267,9 @@ export default async function(req) {
       const sito = sec || String(r.destinazione || '').trim();
       const ruolo = sec ? 'imp' : (ordineTipo.get(String(r.ordine_primaria || '').trim()) || 'imp');
       const ns = norm(sito);
-      if (!ns) continue;
+      // Il file degli ordini non dichiarati e' della rete: una riga ACI, se mai ci
+      // fosse, non entra in una giacenza di rete.
+      if (!ns || eAci({ prodotto: r.prodotto })) continue;
       aPortale.add(ns);
       const t = (Number(r.peso_non_dichiarato_kg) || 0) / 1000;
       if (ruolo === 'stoc') { somma(inAttesa, ns, t); continue; }
@@ -368,6 +360,7 @@ export default async function(req) {
       .reduce((s, f) => s + (soloCaricate ? f.dichiarato_caricato_t : f.dichiarato_totale_t), 0));
 
     // --- Gli impianti ---
+    const dichiaratoDopo = dichiaratoDopoLaFotografia(dichiarazioni, fotoPortale, norm);
     const impianti = [...nomi.entries()].filter(([ns]) => (ruoliDi.get(ns) || new Set(['imp'])).has('imp')).map(([ns, nome]) => {
       const ruoli = [...(ruoliDi.get(ns) || new Set(['imp']))].sort();
       const g = giacenzeDi(ns, 'imp')[0] || giacenzeSito.find(x => norm(x.sito) === ns) || null;
@@ -378,9 +371,7 @@ export default async function(req) {
       const aggiuntiT = t3(aggiunti.reduce((s, x) => s + x.kg, 0) / 1000);
       // Le dichiarazioni di rete caricate a portale dopo la fotografia: il file le
       // conta ancora come giacenza, il gestionale no.
-      const dopoFoto = t3(flussi.filter(f => f.canale === 'RETE')
-        .reduce((s, f) => s + f.mesi.reduce((x, m) => x + (m.dichiarazione && m.dichiarazione.caricata_inviata
-          && fotoPortale && String(m.dichiarazione.caricata_il || '').slice(0, 10) > fotoPortale ? m.dichiarazione.quantita_kg : 0), 0), 0) / 1000);
+      const dopoFoto = t3((dichiaratoDopo.get(ns) || 0) / 1000);
       const fotoT = senzaPortale ? null : t3(portale.get(ns) || 0);
       const sito = {
         sito: nome,
@@ -485,7 +476,11 @@ export default async function(req) {
           .map(d => ({ canale: d.canale || 'RETE', provenienza: d.provenienza || '', mese: d.mese, quantita_kg: Number(d.quantita_kg) || 0 })) : [],
       };
     }).filter(s => s.canali.some(c => c.entrato_t || c.uscito_t || c.giacenza_iniziale_t) || s.dichiarazioni_registrate.length)
-      .sort((a, b) => b.canali.reduce((s, c) => s + c.entrato_t, 0) - a.canali.reduce((s, c) => s + c.entrato_t, 0));
+      // In ordine di rete entrata, poi di ACI: i canali non si sommano nemmeno per ordinare.
+      .sort((a, b) => {
+        const di = (s, k) => (s.canali.find(c => c.canale === k) || { entrato_t: 0 }).entrato_t;
+        return di(b, 'RETE') - di(a, 'RETE') || di(b, 'ACI') - di(a, 'ACI') || a.sito.localeCompare(b.sito);
+      });
 
     // La quadratura degli stoccaggi puri, un canale per volta: la loro giacenza a
     // portale e' la rilevazione per classe, aggiornata con i movimenti dopo.
@@ -527,8 +522,11 @@ export default async function(req) {
       giacenza_calcolata_confrontabile_t: t3(impianti.filter(x => x.giacenza_portale_t !== null).reduce((s, x) => s + x.giacenza_calcolata_t, 0)),
       giacenza_portale_t: t3(impianti.reduce((s, x) => s + (x.giacenza_portale_t || 0), 0)),
       aggiunti_alla_foto_t: perCanale('aggiunti_alla_foto_t'),
-      siti_che_quadrano: confrontabili.filter(x => x.quadra === true).length,
-      siti_da_quadrare: confrontabili.filter(x => x.quadra === false).length,
+      // I conteggi della quadratura, un canale per volta.
+      siti_che_quadrano: confrontabili.filter(x => x.canale === 'RETE' && x.quadra === true).length,
+      siti_da_quadrare: confrontabili.filter(x => x.canale === 'RETE' && x.quadra === false).length,
+      aci_che_quadrano: confrontabili.filter(x => x.canale === 'ACI' && x.quadra === true).length,
+      aci_da_quadrare: confrontabili.filter(x => x.canale === 'ACI' && x.quadra === false).length,
     };
 
     return Response.json({

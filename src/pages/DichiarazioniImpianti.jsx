@@ -147,9 +147,13 @@ export default function DichiarazioniImpianti() {
                 : `di cui ${formatTonnellate(totali.giacenza_calcolata_confrontabile_t)} t confrontabili col portale, che aggiornato ne segna ${formatTonnellate(totali.giacenza_portale_t)} t`}
             />
             <Kpi
-              titolo="Quadratura con il portale"
+              titolo="Rete: quadratura con il portale"
               valore={`${totali.siti_che_quadrano} su ${totali.siti_che_quadrano + totali.siti_da_quadrare}`}
-              nota={totali.siti_da_quadrare ? `${totali.siti_da_quadrare} da verificare` : 'tutti in linea'}
+              nota={[
+                totali.siti_da_quadrare ? `${totali.siti_da_quadrare} da verificare` : 'tutti in linea',
+                (totali.aci_che_quadrano || 0) + (totali.aci_da_quadrare || 0) > 0
+                  ? `ACI negli stoccaggi, a parte: ${totali.aci_che_quadrano} su ${totali.aci_che_quadrano + totali.aci_da_quadrare}` : '',
+              ].filter(Boolean).join(' · ')}
               tono={totali.siti_da_quadrare ? 'male' : 'buono'}
             />
           </div>
@@ -162,7 +166,7 @@ export default function DichiarazioniImpianti() {
               <TabsTrigger value="irigom">Irigom</TabsTrigger>
               <TabsTrigger value="quadratura" className="gap-1">
                 Quadratura
-                {totali.siti_da_quadrare > 0 ? <AlertTriangle className="w-3.5 h-3.5 text-red-600" /> : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
+                {totali.siti_da_quadrare > 0 || totali.aci_da_quadrare > 0 ? <AlertTriangle className="w-3.5 h-3.5 text-red-600" /> : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
               </TabsTrigger>
             </TabsList>
 

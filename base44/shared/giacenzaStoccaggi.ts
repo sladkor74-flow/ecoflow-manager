@@ -1,31 +1,23 @@
-// Quanto materiale ha davvero uno stoccaggio, adesso.
+// Quanto materiale ha davvero uno stoccaggio, adesso, un canale per volta.
 //
-// La rilevazione fotografa il saldo del portale in un istante; da allora il
-// portale lo aggiorna a ogni ordine chiuso. Per avere la giacenza di oggi si
-// parte dalla fotografia e si contano i movimenti arrivati dopo.
+// La rilevazione fotografa il saldo del portale per classe: P, M, G1 e G2 sono
+// la rete, la classe 9 e' l'ACI. Per avere la giacenza di oggi si parte dalla
+// fotografia e si contano i movimenti di quel canale finiti dopo.
 //
-// Due accortezze, e sono proprio quelle che facevano divergere i moduli:
+// Tre regole dell'utente, senza eccezioni (21/09/2026):
+// - un movimento conta dalla FINE DEL TRASPORTO, sul giorno italiano; la data di
+//   chiusura dell'ordine a portale non decide nulla, nemmeno come ripiego: un
+//   movimento senza fine trasporto non si conta;
+// - la giacenza segue ogni caricamento: entrate e uscite dopo la rilevazione;
+// - rete, ACI ed extra raccolta non si sommano mai. L'extra raccolta a portale
+//   non c'e': la sua giacenza si tiene a parte.
 //
-// - il momento della fotografia non e' il giorno della rilevazione ma il primo
-//   fra quello e l'istante in cui e' stata registrata, perche' chi la scrive la
-//   sera sta gia' guardando un portale aggiornato;
-// - un movimento conta dalla FINE DEL TRASPORTO, come ovunque nel gestionale.
-//   Il portale aggiorna il suo saldo quando chiude l'ordine, giorni dopo, ma
-//   quella e' una sua abitudine amministrativa: la giacenza vera di un piazzale
-//   cambia quando il camion arriva o parte, non quando qualcuno chiude una
-//   pratica. Regola della direzione, 19/09/2026: vale la fine del trasporto per
-//   la fatturazione, per le registrazioni e per le giacenze, in tutto.
-//
-// Le Giacenze e la Predittivita' delle secondarie avevano ciascuna la sua
-// regola, e uno stesso carico risultava dentro per l'una e fuori per l'altra:
-// la pagina scriveva "ne mancano due viaggi" su un mese in cui il materiale
-// c'era. Adesso la regola e' questa, e la usano tutte e due.
-//
-// Uno scostamento fra questo numero e quello che si legge a portale e'
-// fisiologico fra un aggiornamento e l'altro: si riassorbe quando in
-// "Caricamento dati" si caricano le liste aggiornate di primarie, secondarie e
-// terziarie insieme alla nuova rilevazione, perche' da li' in poi la fotografia
-// e i movimenti tornano a parlare dello stesso giorno.
+// Il taglio e' il GIORNO della rilevazione: i movimenti di quel giorno si
+// considerano dentro, perche' chi la scrive la sera sta gia' guardando un portale
+// aggiornato; contano quelli finiti dal giorno dopo. E' la stessa regola di
+// Dichiarazioni Impianti, Giacenze e Predittivita': un carico non puo' risultare
+// dentro per un modulo e fuori per un altro.
+import { giornoRoma } from "./giornoItaliano.ts";
 
 /** Un valore di data in millisecondi, trattando come UTC cio' che non porta fuso. */
 export function istante(v) {
@@ -35,19 +27,16 @@ export function istante(v) {
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
-/** Il momento a cui si riferisce una rilevazione di giacenza. */
+/** Il giorno a cui si riferisce una rilevazione di giacenza, 'AAAA-MM-GG'. */
 export function momentoRilevazione(rec) {
-  if (!rec) return 0;
-  const creato = istante(rec.created_date);
-  const giorno = rec.data_rilevazione ? istante(String(rec.data_rilevazione).slice(0, 10) + 'T23:00:00Z') : null;
-  if (creato && giorno) return Math.min(creato, giorno);
-  return creato || giorno || 0;
+  if (!rec) return '';
+  return rec.data_rilevazione ? String(rec.data_rilevazione).slice(0, 10) : giornoRoma(rec.created_date);
 }
 
-/** Vero se il trasporto del movimento e' finito dopo la fotografia del portale. */
-export function dopoLaRilevazione(movimento, momento) {
-  const t = istante(movimento.trasporto_finito_il || movimento.ordine_chiuso_il);
-  return !!t && !!momento && t > momento;
+/** Vero se il trasporto del movimento e' finito dopo il giorno della rilevazione. */
+export function dopoLaRilevazione(movimento, giorno) {
+  const g = giornoRoma(movimento && movimento.trasporto_finito_il);
+  return !!g && !!giorno && g > giorno;
 }
 
 /** L'ultima rilevazione per ciascuno stoccaggio, per chiave normalizzata. */
@@ -58,7 +47,10 @@ export function ultimeRilevazioni(rilevazioni, chiaveDi) {
     if (!k) continue;
     const quando = momentoRilevazione(r);
     const prima = per.get(k);
-    if (!prima || quando > prima.quando) per.set(k, { record: r, quando, data: String(r.data_rilevazione || '').slice(0, 10) });
+    // A parita' di giorno vale quella registrata per ultima.
+    const piuRecente = !prima || quando > prima.quando
+      || (quando === prima.quando && String(r.created_date || '') > String(prima.record.created_date || ''));
+    if (piuRecente) per.set(k, { record: r, quando, data: quando });
   }
   return per;
 }
@@ -66,3 +58,6 @@ export function ultimeRilevazioni(rilevazioni, chiaveDi) {
 /** I kg delle sole classi di rete di una rilevazione: la classe 9 e' ACI. */
 export const kgReteDiRilevazione = (rec) =>
   ['class1_kg', 'class2_kg', 'class3_kg', 'class4_kg'].reduce((s, c) => s + (Number(rec && rec[c]) || 0), 0);
+
+/** I kg ACI di una rilevazione: la classe 9, e basta. */
+export const kgAciDiRilevazione = (rec) => Number(rec && rec.class9_kg) || 0;

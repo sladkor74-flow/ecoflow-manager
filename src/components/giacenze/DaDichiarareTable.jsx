@@ -46,7 +46,7 @@ export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSi
       const payload = { limite: PAGE_SIZE, offset };
       if (sito) payload.sito = sito;
       if (provincia) payload.provincia = provincia;
-      if (annoChiusura) payload.anno_chiusura = Number(annoChiusura);
+      if (annoChiusura) payload.anno = Number(annoChiusura);
       if (ricerca) payload.ricerca = ricerca;
       const res = await base44.functions.invoke('getOrdiniDaDichiarare', payload);
       setData(res.data);
@@ -73,7 +73,7 @@ export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSi
       const payload = { limite: 100000, offset: 0 };
       if (sito) payload.sito = sito;
       if (provincia) payload.provincia = provincia;
-      if (annoChiusura) payload.anno_chiusura = Number(annoChiusura);
+      if (annoChiusura) payload.anno = Number(annoChiusura);
       if (ricerca) payload.ricerca = ricerca;
       const res = await base44.functions.invoke('getOrdiniDaDichiarare', payload);
       exportDaDichiarareExcel(res.data.righe, res.data.totale_righe, res.data.totale_kg);
@@ -113,7 +113,7 @@ export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSi
           </Select>
         </div>
         <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Anno chiusura</label>
+          <label className="text-xs text-muted-foreground" title="L'anno della fine del trasporto">Anno (fine trasporto)</label>
           <Select value={annoChiusura} onValueChange={v => { setAnnoChiusura(v === '__all__' ? '' : v); }}>
             <SelectTrigger className="w-[100px]"><SelectValue placeholder="Tutti" /></SelectTrigger>
             <SelectContent>
@@ -156,7 +156,7 @@ export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSi
               <tr className="text-left">
                 <th className="px-2 py-2 font-semibold">Ordine</th>
                 <th className="px-2 py-2 font-semibold">FIR</th>
-                <th className="px-2 py-2 font-semibold">Data chiusura</th>
+                <th className="px-2 py-2 font-semibold">Fine trasporto</th>
                 <th className="px-2 py-2 font-semibold">Punto di raccolta</th>
                 <th className="px-2 py-2 font-semibold">Comune</th>
                 <th className="px-2 py-2 font-semibold">Prov.</th>
@@ -179,7 +179,7 @@ export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSi
                   <tr key={i} className={rowClass}>
                     <td className="px-2 py-1.5 font-mono text-xs">{r.ordine_primaria}</td>
                     <td className="px-2 py-1.5 font-mono text-xs">{r.numero_fir || '—'}</td>
-                    <td className="px-2 py-1.5">{fmtData(r.data_chiusura)}</td>
+                    <td className="px-2 py-1.5" title={r.data_chiusura ? `chiuso a portale il ${fmtData(r.data_chiusura)}` : ''}>{fmtData(r.fine_trasporto)}</td>
                     <td className="px-2 py-1.5">{r.punto_di_raccolta || '—'}</td>
                     <td className="px-2 py-1.5">{r.comune || '—'}</td>
                     <td className="px-2 py-1.5">{r.provincia || '—'}</td>

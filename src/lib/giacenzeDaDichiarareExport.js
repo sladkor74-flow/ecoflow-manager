@@ -7,14 +7,15 @@ export function exportDaDichiarareExcel(righe, totaleRighe, totaleKg) {
   const wb = XLSX.utils.book_new();
 
   const headers = [
-    'Ordine', 'FIR', 'Data chiusura', 'Punto di raccolta', 'Comune', 'Prov.',
+    'Ordine', 'FIR', 'Fine trasporto', 'Punto di raccolta', 'Comune', 'Prov.',
     'Prodotto', 'CER', 'Peso da dichiarare (kg)', 'Destinazione', 'Trasferito a', 'Trasportatore'
   ];
 
   const rows = righe.map(r => [
     r.ordine_primaria || '',
     r.numero_fir || '',
-    r.data_chiusura ? new Date(r.data_chiusura).toLocaleDateString('it-IT') : '',
+    // La data che conta e' la fine del trasporto, gia' sul giorno italiano.
+    r.fine_trasporto ? r.fine_trasporto.split('-').reverse().join('/') : '',
     r.punto_di_raccolta || '',
     r.comune || '',
     r.provincia || '',

@@ -28,11 +28,13 @@ function fmtDataOra(d) {
   return `${x.toLocaleDateString('it-IT')} ${x.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
-// Come si arriva alla giacenza di uno stoccaggio: rilevazione, ingressi e uscite successivi.
+// Come si arriva alla giacenza di uno stoccaggio: rilevazione, ingressi e uscite
+// finiti dopo, un canale per volta. L'extra raccolta, che a portale non c'e', a parte.
 function DettaglioStoccaggio({ r }) {
   const d = r.dopo_rilevazione;
   if (!d) return null;
-  const kgRil = Object.values(r.rilevazione_classi_kg || {}).reduce((s, v) => s + v, 0);
+  const kgRil = (soloAci) => Object.entries(r.rilevazione_classi_kg || {}).reduce((s, [c, v]) => s + ((c === 'ACI') === soloAci ? v : 0), 0);
+  const mov = (m) => (m && (m.ingressi || m.uscite) ? ` · +${m.ingressi} −${m.uscite}` : '');
   return (
     <TooltipProvider>
       <Tooltip>
@@ -40,18 +42,32 @@ function DettaglioStoccaggio({ r }) {
           <div className={`mt-1 text-xs flex items-center justify-end gap-1 cursor-help ${r.rilevazione_obsoleta ? 'text-amber-600' : 'text-muted-foreground'}`}>
             {r.rilevazione_obsoleta && <AlertTriangle className="w-3 h-3" />}
             <span className="underline decoration-dotted underline-offset-2">
-              rilevato il {fmtDate(r.data_rilevazione)}{d.ingressi || d.uscite ? ` · +${d.ingressi} −${d.uscite} movimenti` : ''}
+              rilevato il {fmtDate(r.data_rilevazione)}{mov(d.rete)}
             </span>
           </div>
         </TooltipTrigger>
         <TooltipContent className="max-w-sm text-xs space-y-1">
-          <div>Rilevazione del portale al {fmtDataOra(d.dal)}: {formatKg(kgRil)} kg.</div>
-          <div>Ingressi chiusi dopo la rilevazione: {d.ingressi}, {formatKg(d.ingressi_kg)} kg.</div>
-          <div>Uscite chiuse dopo la rilevazione: {d.uscite}, {formatKg(d.uscite_kg)} kg.</div>
-          <div>Giacenza aggiornata ai dati del {fmtDataOra(r.aggiornata_al)}. {r.rilevazione_obsoleta ? RILEVAZ_OBSOLETA_TOOLTIP : ''}</div>
+          <div>Rilevazione del portale del {fmtDate(d.dal)}: rete {formatKg(kgRil(false))} kg (classi P, M, G1, G2), ACI {formatKg(kgRil(true))} kg (classe 9).</div>
+          <div>Rete, finiti dopo la rilevazione: {d.rete.ingressi} ingressi per {formatKg(d.rete.ingressi_kg)} kg, {d.rete.uscite} uscite per {formatKg(d.rete.uscite_kg)} kg.</div>
+          <div>ACI, finiti dopo la rilevazione: {d.aci.ingressi} ingressi per {formatKg(d.aci.ingressi_kg)} kg, {d.aci.uscite} uscite per {formatKg(d.aci.uscite_kg)} kg.</div>
+          {r.giacenza_extra_t ? <div>Extra raccolta in piazzale, fuori portale: {fmt(r.giacenza_extra_t)} t.</div> : null}
+          <div>Movimenti caricati fino al {fmtDate(r.aggiornata_al)}, per fine trasporto. {r.rilevazione_obsoleta ? RILEVAZ_OBSOLETA_TOOLTIP : ''}</div>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  );
+}
+
+// La giacenza di un impianto: la fotografia del portale aggiornata ai caricamenti.
+function DettaglioImpianto({ r }) {
+  const f = r.fotografia;
+  if (!f) return null;
+  const aggiornata = f.aggiunti > 0 || f.dichiarato_dopo_t > 0;
+  return (
+    <div className="mt-1 text-xs text-muted-foreground" title="La giacenza a portale segue i caricamenti: alla fotografia si aggiungono i carichi che il file del portale non contiene ancora, riconosciuti dal numero d'ordine, e si tolgono le dichiarazioni caricate dopo">
+      {f.del ? `file del portale del ${fmtDate(f.del)}: ${fmt(f.foto_t)} t` : 'nessun file del portale'}
+      {aggiornata && <span className="block">{f.aggiunti > 0 ? `+ ${fmt(f.aggiunti_t)} t di ${f.aggiunti} carichi non ancora nel file` : ''}{f.dichiarato_dopo_t > 0 ? ` − ${fmt(f.dichiarato_dopo_t)} t dichiarate dopo` : ''}</span>}
+    </div>
   );
 }
 
@@ -67,7 +83,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
             <tr className="text-left">
               <th className="px-3 py-2 font-semibold" rowSpan={2}>Sito</th>
               <th className="px-3 py-2 font-semibold" rowSpan={2}>Ruolo</th>
-              <th className="px-3 py-2 font-semibold text-right" rowSpan={2}>Giacenza a portale</th>
+              <th className="px-3 py-2 font-semibold text-right" rowSpan={2} title="Rete: per gli impianti la fotografia del portale aggiornata ai caricamenti, per gli stoccaggi la rilevazione per classe aggiornata con i movimenti. L'ACI e' nella sua colonna e non si somma">Giacenza rete a portale</th>
               <th className="px-3 pt-2 pb-0 font-semibold text-center border-l" colSpan={CLASSI.length}>Giacenza per classe (kg)</th>
               <th className="px-3 py-2 font-semibold text-right border-l" rowSpan={2}>In attesa di dichiarazione</th>
               <th className="px-3 py-2 font-semibold text-right" rowSpan={2}>Ordini da dichiarare</th>
@@ -101,9 +117,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                       <div className="h-full bg-primary rounded-full" style={{ width: `${barWidth}%` }} />
                     </div>
                     {r.tipo_destinazione === 'stoc' && r.data_rilevazione && <DettaglioStoccaggio r={r} />}
-                    {r.tipo_destinazione === 'imp' && r.aggiornata_al && (
-                      <div className="mt-1 text-xs text-muted-foreground">ordini non dichiarati al {fmtDate(r.aggiornata_al)}</div>
-                    )}
+                    {r.tipo_destinazione === 'imp' && <DettaglioImpianto r={r} />}
                   </td>
                   {CLASSI.map((c, k) => {
                     const v = kg(r, c.chiave);
@@ -160,7 +174,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
         </table>
       </div>
       <p className="px-3 py-2 text-xs text-muted-foreground italic">
-        La giacenza a portale e' il dato del portale Ecotyre, per classe come nel portale. Per gli impianti e' il peso degli ordini ricevuti e non ancora dichiarati come recuperati, alla data dell'ultimo file degli ordini non dichiarati. Per gli stoccaggi e' il saldo rilevato dalla pagina Unita' Locali di Stoccaggio, aggiornato con gli ingressi e le uscite chiusi dopo la rilevazione: passa col mouse sulla data per il dettaglio. La colonna In attesa di dichiarazione indica invece materiale gia' partito da uno stoccaggio verso un impianto, che il portale continua ad attribuire allo stoccaggio finche' il destinatario non presenta la dichiarazione: non e' giacenza.
+        La giacenza a portale e' della rete, per classe come nel portale; l'ACI sta nella sua colonna e l'extra raccolta, che a portale non c'e', nel dettaglio dello stoccaggio: i canali non si sommano. Per gli impianti e' il peso degli ordini non ancora dichiarati del file del portale, aggiornato a ogni caricamento con i carichi che il file non contiene ancora e le dichiarazioni caricate dopo. Per gli stoccaggi e' il saldo rilevato dalla pagina Unita' Locali di Stoccaggio, aggiornato con gli ingressi e le uscite finiti dopo la rilevazione: passa col mouse sulla data per il dettaglio. Tutto per fine del trasporto. La colonna In attesa di dichiarazione indica invece materiale gia' partito da uno stoccaggio verso un impianto, che il portale continua ad attribuire allo stoccaggio finche' il destinatario non presenta la dichiarazione: non e' giacenza.
       </p>
     </div>
   );

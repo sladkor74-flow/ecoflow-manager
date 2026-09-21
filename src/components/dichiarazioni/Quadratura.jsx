@@ -111,7 +111,7 @@ export default function Quadratura({ dati }) {
                       </span>
                     )}
                     {stoc && s.in_attesa_dichiarazione_t > 0 && (
-                      <span className="block text-[11px] text-muted-foreground">{t(s.in_attesa_dichiarazione_t)} t ancora in piazzale secondo il file del portale</span>
+                      <span className="block text-[11px] text-muted-foreground">{t(s.in_attesa_dichiarazione_t)} t gia' partite che il portale attribuisce ancora allo stoccaggio, finche' l'impianto non dichiara</span>
                     )}
                   </td>
                 </tr>
