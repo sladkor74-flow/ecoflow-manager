@@ -121,18 +121,25 @@ export function ripartisciFerro(posti, ferroKg, max = MAX_PER_DICHIARAZIONE_KG) 
   if (!n || ferroKg <= 0) return { ferro, avanza_kg: Math.max(0, intero(ferroKg)) };
   const quota = alleDecine(ferroKg / n);
   for (let i = 0; i < n; i++) ferro[i] = i < n - 1 ? quota : intero(ferroKg) - quota * (n - 1);
-  // Chi sfora cede l'eccedenza; chi ha posto la prende, a decine, dall'ultimo in su.
+  // Chi sfora cede l'eccedenza, e l'eccedenza si divide in parti uguali, a
+  // decine, fra chi ha ancora posto: messa tutta su una riga, a luglio 2026 ne
+  // sarebbe uscita una col 74% di ferro, e nel foglio nessuna ha mai passato il 40%.
   let eccedenza = 0;
   for (let i = 0; i < n; i++) {
     const posto = max - intero(posti[i].base_kg);
     if (ferro[i] > posto) { eccedenza += ferro[i] - Math.max(0, posto); ferro[i] = Math.max(0, posto); }
   }
-  for (let i = n - 1; i >= 0 && eccedenza > 0; i--) {
-    const posto = max - intero(posti[i].base_kg) - ferro[i];
-    if (posto <= 0) continue;
-    const metto = Math.min(eccedenza, posto);
-    ferro[i] += metto;
-    eccedenza -= metto;
+  const posto = (i) => max - intero(posti[i].base_kg) - ferro[i];
+  for (let giro = 0; giro < 100 && eccedenza > 0; giro++) {
+    const conPosto = posti.map((_, i) => i).filter(i => posto(i) > 0);
+    if (!conPosto.length) break;
+    const parte = Math.max(10, alleDecine(eccedenza / conPosto.length));
+    for (const i of conPosto) {
+      const metto = Math.min(parte, posto(i), eccedenza);
+      ferro[i] += metto;
+      eccedenza -= metto;
+      if (eccedenza <= 0) break;
+    }
   }
   return { ferro, avanza_kg: eccedenza };
 }
@@ -228,19 +235,17 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
   const posti = [...righeCssc, ...righeTer];
   const { ferro: quote, avanza_kg: avanza } = ripartisciFerro(posti, Math.max(0, ferroTotale));
   posti.forEach((r, i) => { r.ferro_kg = quote[i]; r.totale_kg = r.base_kg + r.ferro_kg; });
-  // Il ferro che non entra: dichiarazioni di soli metalli, se non c'e' una nave;
-  // con la nave va segnalato, perche' una terziaria senza allegato non esiste.
+  // Il ferro che non entra nelle dichiarazioni del mese non si carica da solo: le
+  // uscite di metalli non vanno a portale senza un DDT o un allegato VII. Resta in
+  // giacenza e rientra con la nave dopo, come a gennaio, marzo e aprile 2026:
+  // dichiarazioni di soli metalli non ce ne sono mai state.
   const soloFerro = [];
   if (avanza > 0) {
-    if (righeTer.length) avvisi.push(`Restano ${mig(avanza)} kg di ferro che non entrano nelle terziarie senza superare ${mig(MAX_PER_DICHIARAZIONE_KG)} kg: serve un altro allegato VII o una dichiarazione di soli metalli.`);
-    let resto = avanza;
-    while (resto > 0 && soloFerro.length < 200) {
-      const kg = Math.min(MAX_PER_DICHIARAZIONE_KG, resto);
-      soloFerro.push({ tipo: 'ferro', base_kg: 0, ferro_kg: kg, totale_kg: kg });
-      resto -= kg;
-    }
+    avvisi.push(righeTer.length
+      ? `Restano ${mig(avanza)} kg di ferro che non entrano nelle terziarie senza superare ${mig(MAX_PER_DICHIARAZIONE_KG)} kg: servirebbe un altro allegato VII; altrimenti restano in giacenza per la nave dopo.`
+      : `Restano ${mig(avanza)} kg di ferro che non entrano nei DDT di CSS-C: senza una nave non si caricano, restano in giacenza e si dichiarano con la prossima.`);
   }
-  if (!posti.length && ferroTotale > 0) avvisi.push('Nel mese sono usciti solo metalli: a portale non si carica nulla e la quantita\' resta in giacenza fino al mese dopo.');
+  if (!posti.length && ferroTotale > 0) avvisi.push('Nel mese sono usciti solo metalli: a portale non si carica nulla e la quantita\' resta in giacenza fino alla nave dopo.');
 
   // L'extra raccolta si attacca all'ultima terziaria e si scrive a parte.
   let rigaExtra = null;

@@ -44,12 +44,29 @@ verifica('nessuna dichiarazione oltre 38.000', m.terziarie.righe.every(r => r.to
 verifica('rete + extra = uscite del registro', m.terziarie.cippato_kg + m.extra.cippato_kg === A.riga.uscite_cippato_kg && m.terziarie.ferro_kg + m.extra.ferro_kg === A.riga.uscite_ferro_kg);
 
 console.log('LA REGOLA DEL 19/09: LASCIARE A PORTALE LA GIACENZA DEL REGISTRO');
-// Giacenza di rete a portale a fine agosto, per fine trasporto: 695.140 kg.
-const g = componiMese({ riga: A.riga, ferro: A.ferro, allegati: A.allegati, lettura: 'giacenza', portaleFineMeseKg: 695140, extra: A.extra, terziarie: A.terziarie });
-verifica('da dichiarare = 695.140 - (70.000 + 74.780)', g.rete_kg === 550360, String(g.rete_kg));
-verifica('lo scarto con le uscite si vede', g.letture.scarto_kg === 550360 - 534140, String(g.letture.scarto_kg));
-verifica('il ciabattato non cambia, cambia il ferro', g.terziarie.cippato_kg === 451760 && g.terziarie.ferro_kg + g.extra.ferro_kg === 550360 + 460 - 452100);
+// Giacenza di rete a portale a fine agosto, per fine trasporto (le secondarie con
+// la fine trasporto della secondaria): 679.380 kg.
+const g = componiMese({ riga: A.riga, ferro: A.ferro, allegati: A.allegati, lettura: 'giacenza', portaleFineMeseKg: A.portale_fine_mese_kg, extra: A.extra, terziarie: A.terziarie });
+verifica('da dichiarare = 679.380 - (70.000 + 74.780) = 534.600', g.rete_kg === 534600, String(g.rete_kg));
+// Luglio e' stato dichiarato con la giacenza, e i 460 kg di extra raccolta erano
+// gia' fuori: calcolato dalle uscite agosto li toglieva una seconda volta.
+verifica('lo scarto con le uscite sono i 460 kg di extra tolti due volte', g.letture.scarto_kg === 460, String(g.letture.scarto_kg));
+verifica('il ciabattato non cambia, cambia il ferro', g.terziarie.cippato_kg === 451760 && g.terziarie.ferro_kg + g.extra.ferro_kg === 534600 + 460 - 452100);
 verifica('e lo dice, perche\' supera il ferro uscito', g.avvisi.some(a => /supera quello uscito/.test(a)));
+
+console.log('I MESI SENZA NAVE');
+const soloCssc = componiMese({ riga: { uscite_cssc_kg: 50000, uscite_ferro_kg: 84100, giacenza_cippato_kg: 1, giacenza_intero_kg: 0 }, ferro: [{ destinatario: 'TRS', colore: 'FFC000', kg: 84100 }], ddt: [{ ddt: '15', data: '2026-01-08', kg: 25000 }, { ddt: '22', data: '2026-01-13', kg: 25000 }], lettura: 'uscite' });
+verifica('il ferro che non entra nei DDT resta in giacenza: nessuna dichiarazione di soli metalli', soloCssc.solo_ferro.length === 0 && soloCssc.rete_kg === 50000 + 26000, `${soloCssc.solo_ferro.length} ${soloCssc.rete_kg}`);
+verifica('e lo dice', soloCssc.avvisi.some(a => /restano in giacenza/.test(a)));
+const soloFerro = componiMese({ riga: { uscite_ferro_kg: 89780, giacenza_cippato_kg: 5000, giacenza_intero_kg: 1000 }, ferro: [{ destinatario: 'TRS', colore: 'FFC000', kg: 89780 }], lettura: 'uscite' });
+verifica('aprile: solo metalli, a portale non si carica nulla', soloFerro.rete_kg === 0 && soloFerro.avvisi.some(a => /solo metalli/.test(a)), String(soloFerro.rete_kg));
+
+console.log('IL FERRO IN ECCESSO SI DIVIDE');
+// Due terziarie piene e due con posto: i 4.000 kg di ferro che le prime non
+// reggono vanno meta' e meta' alle altre due, non tutti sull'ultima.
+const piene = componiMese({ riga: { uscite_cippato_kg: 100000, uscite_ferro_kg: 40000, giacenza_cippato_kg: 1, giacenza_intero_kg: 0 }, ferro: [{ destinatario: 'TRS', colore: 'FFC000', kg: 40000 }],
+  allegati: [{ numero: 1, trasportatore: 'SMOCO', kg: 30000 }, { numero: 2, trasportatore: 'SMOCO', kg: 30000 }, { numero: 3, trasportatore: 'SMOCO', kg: 20000 }, { numero: 4, trasportatore: 'SMOCO', kg: 20000 }], lettura: 'uscite' });
+verifica("l'eccesso si divide fra chi ha posto", JSON.stringify(piene.terziarie.righe.map(r => r.ferro_kg)) === JSON.stringify([8000, 8000, 12000, 12000]) && piene.terziarie.righe.every(r => r.totale_kg <= 38000), JSON.stringify(piene.terziarie.righe.map(r => [r.cippato_kg, r.ferro_kg])));
 
 console.log('I CASI DI CONFINE');
 verifica('extra divisa come ad agosto', JSON.stringify(dividiExtra(460)) === JSON.stringify({ pfu_kg: 460, cippato_kg: 340, ferro_kg: 120 }));

@@ -261,6 +261,12 @@ export default async function(req) {
     const attesaCoppia = new Map(); // nsStoccaggio|nsImpianto -> t partite e non ancora dichiarate
     const aPortale = new Set();     // chi compare nella fotografia del portale
     const daDichiarare = new Map(); // ns|mese -> kg ancora in attesa di dichiarazione
+    const fineSecondaria = new Map(); // id della secondaria -> giorno in cui e' arrivata all'impianto
+    for (const r of secondarie) {
+      const id = String(r.id_ordine || '').trim();
+      const g = giornoRoma(r.trasporto_finito_il);
+      if (id && g) fineSecondaria.set(id, g);
+    }
     const fotoPerGiorno = new Map(); // ns|giorno di fine trasporto -> kg ancora in attesa
     for (const r of nonDichiarati) {
       const sec = String(r.destinazione_secondaria || '').trim();
@@ -275,9 +281,14 @@ export default async function(req) {
       if (ruolo === 'stoc') { somma(inAttesa, ns, t); continue; }
       somma(portale, ns, t);
       if (sec && r.destinazione) somma(attesaCoppia, `${norm(r.destinazione)}|${ns}`, t);
-      // In che mese e' finito il trasporto dei carichi che il portale aspetta
-      // ancora: l'unico modo onesto di dire "questo mese e' da dichiarare".
-      const g = giornoRoma(r.fine_trasporto);
+      // In che mese il carico e' arrivato all'impianto: l'unico modo onesto di dire
+      // "questo mese e' da dichiarare". Per una primaria passata da uno stoccaggio
+      // conta la fine trasporto della SECONDARIA, cioe' quando e' arrivata qui: la
+      // fine trasporto della riga e' quella della primaria allo stoccaggio.
+      // Verificato su agosto 2026: cosi' la giacenza di Irigom a fine mese torna
+      // al chilo col registro dell'impianto.
+      const secId = String(r.ordine_secondaria || '').trim();
+      const g = (sec && secId && fineSecondaria.get(secId)) || giornoRoma(r.fine_trasporto);
       if (g) somma(daDichiarare, `${ns}|${MESI[Number(g.slice(5, 7)) - 1]}`, t * 1000);
       // Per la giacenza a fine mese: fino a che giorno arriva il carico.
       if (g) somma(fotoPerGiorno, `${ns}|${g}`, t * 1000);
