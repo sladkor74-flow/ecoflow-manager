@@ -118,13 +118,12 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
         {sito.conferito_extra_t > 0 && <span>Extra raccolta diretta: <strong>{t(sito.conferito_extra_t)} t</strong></span>}
         {sito.secondarie_extra_in_t > 0 && <span>Extra raccolta dagli stoccaggi: <strong>{t(sito.secondarie_extra_in_t)} t</strong></span>}
         {sito.terziarie_out_t > 0 && <span>Terziarie in uscita: <strong>{t(sito.terziarie_out_t)} t</strong></span>}
-        {/* Della rete, perche' e' la rete che fa la giacenza a portale: gli altri canali hanno il loro giro. */}
-        <span>Dichiarato e caricato (rete): <strong>{t(sito.dichiarato_caricato_rete_t)} t</strong></span>
-        {sito.dichiarato_caricato_t > sito.dichiarato_caricato_rete_t && (
-          <span>Dichiarato sugli altri canali: <strong>{t(sito.dichiarato_caricato_t - sito.dichiarato_caricato_rete_t)} t</strong></span>
-        )}
-        <span>Giacenza che ne risulta: <strong>{t(sito.giacenza_calcolata_t)} t</strong></span>
-        <span>Giacenza a portale: <strong>{sito.giacenza_portale_t === null ? '—' : `${t(sito.giacenza_portale_t)} t`}</strong></span>
+        {/* Un canale per volta: rete, ACI ed extra raccolta non si sommano mai. */}
+        <span>Dichiarato e caricato, rete: <strong>{t(sito.dichiarato_caricato_rete_t)} t</strong></span>
+        {sito.dichiarato_caricato_aci_t > 0 && <span>Dichiarato e caricato, ACI: <strong>{t(sito.dichiarato_caricato_aci_t)} t</strong></span>}
+        {sito.dichiarato_caricato_extra_t > 0 && <span>Dichiarato, extra raccolta: <strong>{t(sito.dichiarato_caricato_extra_t)} t</strong></span>}
+        <span>Giacenza di rete che ne risulta: <strong>{t(sito.giacenza_calcolata_t)} t</strong></span>
+        <span>Giacenza di rete a portale, aggiornata: <strong>{sito.giacenza_portale_t === null ? '—' : `${t(sito.giacenza_portale_t)} t`}</strong></span>
       </div>
     </div>
   );

@@ -29,7 +29,12 @@
     "giacenza_riferimento_t": {
       "type": "number",
       "default": 0,
-      "description": "Residuo a portale al 31 dicembre dell'anno precedente, a titolo di riferimento storico"
+      "description": "Residuo a portale al 31 dicembre dell'anno precedente, a titolo di riferimento storico: e' la giacenza della RETE"
+    },
+    "giacenza_riferimento_aci_t": {
+      "type": "number",
+      "default": 0,
+      "description": "Residuo ACI al 31 dicembre dell'anno precedente, dove c'e'. Rete e ACI non si sommano mai: ognuno ha la sua giacenza"
     },
     "dichiara_rete": {
       "type": "boolean",

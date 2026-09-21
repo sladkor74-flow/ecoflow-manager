@@ -274,14 +274,28 @@ solo entrate, partenze e piazzale (scheda Stoccaggi). Chi e' insieme impianto e
 stoccaggio (Irigom, T-Cycle) si tiene diviso per `tipo_destinazione` del
 movimento: quello che arriva al suo stoccaggio non e' suo da dichiarare.
 
-**La quadratura col portale si fa sulla chiusura.** Il periodo di un movimento
-resta la fine del trasporto, ma il portale mette un carico nella giacenza di un
-impianto quando **chiude** l'ordine: il confronto con la fotografia degli ordini
-non dichiarati conta quindi gli ordini chiusi entro quel giorno. Un carico
-arrivato prima e chiuso dopo non e' uno scarto: si elenca a parte, ordine per
-ordine (`in_viaggio_a_portale`). Il 21/09/2026 i 51,07 t di "scarto" di Green
-Tyre, Gatim e T-Cycle erano tutti cosi'. La giacenza fisica di uno stoccaggio
-(rilevazione piu' movimenti) resta invece sulla fine del trasporto.
+### Le tre regole che l'utente non vuole ripetere (21/09/2026)
+
+1. **Fine trasporto, MAI chiusura a portale.** In ogni modulo ogni ragionamento
+   - periodo, tagli a una data, confronti con una fotografia del portale,
+   ripieghi quando un campo manca - si fa sulla fine del trasporto.
+   `ordine_chiuso_il` / `data_chiusura` si possono mostrare, mai usare per
+   decidere.
+2. **Ogni caricamento aggiorna tutto.** Un modulo fermo a una fotografia vecchia
+   e' un difetto, non una spiegazione. La giacenza a portale di un impianto e'
+   la fotografia degli ordini non dichiarati **piu'** i carichi che il
+   gestionale conosce e il file no (riconosciuti dal **numero d'ordine** negli
+   ordini non dichiarati e nel report delle dichiarazioni, mai dalla data)
+   **meno** le dichiarazioni caricate dopo la fotografia. Quella di uno
+   stoccaggio e' la rilevazione per classe piu' i movimenti finiti dopo.
+3. **Rete, ACI ed extra raccolta non si mescolano mai**: giacenze, dichiarazioni,
+   totali, KPI. La rilevazione di uno stoccaggio si divide per classe (1-4 rete,
+   9 ACI); `GiacenzaSito.giacenza_riferimento_t` e' la rete e
+   `giacenza_riferimento_aci_t` l'ACI; l'extra raccolta a portale non c'e'.
+
+Il 21/09/2026 gli "scarti" di Green Tyre (24,56 t), Gatim (14,95 t) e T-Cycle
+(11,56 t) erano carichi caricati nel gestionale che la fotografia del 18/09 non
+conteneva ancora: con la regola 2 si aggiungono da soli.
 
 ### Come si legge un movimento: un punto solo
 

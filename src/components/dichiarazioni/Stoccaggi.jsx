@@ -10,7 +10,8 @@ import { AlertTriangle, ArrowRight, Warehouse } from 'lucide-react';
 // il secondo viaggio: rete, ACI ed extra raccolta allo stesso modo.
 //
 // Qui si vede, per ogni stoccaggio e canale, cosa e' entrato, cosa e' ripartito
-// e verso chi, e quanto resta in piazzale.
+// e verso chi, e quanto resta in piazzale. Sempre un canale per volta: rete,
+// ACI ed extra raccolta non si sommano mai, nemmeno in piazzale.
 
 const t = (v) => formatTonnellate(Number(v) || 0);
 const nomeCanale = (c) => (CANALI.find(x => x.chiave === c) || { nome: c }).nome;
@@ -53,13 +54,18 @@ function Scheda({ s }) {
             </p>
           )}
         </div>
-        <div className="text-right text-sm">
-          <p>In piazzale <strong className="tabular-nums">{t(s.in_piazzale_t)} t</strong></p>
-          <p className="text-xs text-muted-foreground">
-            {s.in_piazzale_da === 'rilevazione'
-              ? `dalla rilevazione del ${giorno(s.rilevazione_il)}, più i movimenti dopo`
-              : `dalla giacenza di inizio anno (${t(s.giacenza_iniziale_t)} t), più entrate meno partenze`}
-          </p>
+        {/* In piazzale un canale per volta: rete, ACI ed extra raccolta non si sommano. */}
+        <div className="text-right text-sm space-y-0.5">
+          {s.canali.map(c => (
+            <p key={c.canale}>
+              In piazzale, {nomeCanale(c.canale).toLowerCase()}: <strong className="tabular-nums">{t(c.in_piazzale_t)} t</strong>
+              <span className="block text-[11px] text-muted-foreground">
+                {c.in_piazzale_da === 'rilevazione'
+                  ? `dalla rilevazione del ${giorno(s.rilevazione_il)}, più i movimenti finiti dopo`
+                  : `giacenza di inizio anno (${t(c.giacenza_iniziale_t)} t), più entrate meno partenze`}
+              </span>
+            </p>
+          ))}
         </div>
       </div>
 

@@ -128,22 +128,28 @@ export default function DichiarazioniImpianti() {
       {dati && (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Kpi titolo="Dichiarato e caricato a portale" valore={`${formatTonnellate(totali.dichiarato_caricato_t)} t`} nota={`su ${formatTonnellate(totali.dichiarato_totale_t)} t dichiarate`} />
-            <Kpi titolo="Conferito rete nell'anno" valore={`${formatTonnellate(totali.conferito_t)} t`} />
+            {/* La rete: e' la rete che fa la giacenza a portale. ACI ed extra raccolta si scrivono a parte e non si sommano. */}
             <Kpi
-              titolo="Giacenza che risulta"
+              titolo="Rete: dichiarato e caricato a portale"
+              valore={`${formatTonnellate(totali.dichiarato_caricato_rete_t)} t`}
+              nota={[
+                `su ${formatTonnellate(totali.dichiarato_totale_rete_t)} t dichiarate`,
+                totali.dichiarato_caricato_aci_t > 0 ? `ACI a parte: ${formatTonnellate(totali.dichiarato_caricato_aci_t)} t` : '',
+                totali.dichiarato_caricato_extra_t > 0 ? `extra raccolta a parte: ${formatTonnellate(totali.dichiarato_caricato_extra_t)} t` : '',
+              ].filter(Boolean).join(' · ')}
+            />
+            <Kpi titolo="Rete: conferito nell'anno" valore={`${formatTonnellate(totali.conferito_t)} t`} nota="primarie a impianti e stoccaggi, per fine trasporto" />
+            <Kpi
+              titolo="Rete: giacenza degli impianti"
               valore={`${formatTonnellate(totali.giacenza_calcolata_t)} t`}
-              nota={totali.giacenza_calcolata_confrontabile_t === undefined || totali.giacenza_calcolata_confrontabile_t === totali.giacenza_calcolata_t
-                ? `a portale ${formatTonnellate(totali.giacenza_portale_t)} t`
-                : `di cui ${formatTonnellate(totali.giacenza_calcolata_confrontabile_t)} t confrontabili col portale, che ne segna ${formatTonnellate(totali.giacenza_portale_t)} t`}
+              nota={totali.giacenza_calcolata_confrontabile_t === totali.giacenza_calcolata_t
+                ? `a portale, aggiornata ai caricamenti: ${formatTonnellate(totali.giacenza_portale_t)} t`
+                : `di cui ${formatTonnellate(totali.giacenza_calcolata_confrontabile_t)} t confrontabili col portale, che aggiornato ne segna ${formatTonnellate(totali.giacenza_portale_t)} t`}
             />
             <Kpi
               titolo="Quadratura con il portale"
               valore={`${totali.siti_che_quadrano} su ${totali.siti_che_quadrano + totali.siti_da_quadrare}`}
-              nota={[
-                totali.siti_da_quadrare ? `${totali.siti_da_quadrare} da verificare` : 'tutti in linea',
-                totali.in_viaggio_a_portale_t > 0 ? `${formatTonnellate(totali.in_viaggio_a_portale_t)} t arrivate e chiuse a portale dopo la fotografia` : '',
-              ].filter(Boolean).join(' · ')}
+              nota={totali.siti_da_quadrare ? `${totali.siti_da_quadrare} da verificare` : 'tutti in linea'}
               tono={totali.siti_da_quadrare ? 'male' : 'buono'}
             />
           </div>

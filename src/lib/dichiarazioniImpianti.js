@@ -123,25 +123,28 @@ export function controlliDichiarazione(d, conferito, operazione, dove = {}) {
 export const TOLLERANZA_QUADRATURA_T = 0.5;
 
 /**
- * Quadratura di un sito: la giacenza che risulta dalle dichiarazioni deve
- * coincidere con quella del portale, che è il conferito non ancora dichiarato.
+ * Quadratura di un sito, un canale per volta: la giacenza che risulta dai
+ * movimenti e dalle dichiarazioni deve coincidere con quella del portale.
+ *
+ *   calcolata = giacenza al 31/12 dell'anno prima + entrato - uscito
+ *               - dichiarato e caricato
  *
  * Quattro accortezze, senza le quali i numeri non tornano mai:
- * - si confronta con quello che il portale conosceva alla fotografia (l'ultimo
- *   file degli ordini non dichiarati), cioe' con gli ordini CHIUSI quel giorno:
- *   un carico arrivato prima e chiuso dopo e' gia' in piazzale ma il portale non
- *   l'ha ancora contato, e non e' uno scarto;
- * - per un impianto conta solo quello che arriva all'impianto, in primaria e in
- *   secondaria: il suo stoccaggio, se ne ha uno, sta a parte;
- * - solo il canale rete: i conferimenti ACI e l'extra raccolta hanno un giro
- *   proprio e non entrano nella giacenza del portale;
- * - le terziarie non si tolgono: sono uscite di materiale già trasformato, che
- *   il portale ha già scalato con la dichiarazione.
+ * - tutto per fine del trasporto, mai per data di chiusura dell'ordine a portale;
+ * - la giacenza a portale segue i caricamenti: e' la fotografia degli ordini non
+ *   dichiarati, piu' i carichi che il gestionale conosce e il file no (li si
+ *   riconosce dal numero d'ordine), meno le dichiarazioni caricate dopo. Per uno
+ *   stoccaggio e' la rilevazione per classe piu' i movimenti finiti dopo;
+ * - un canale per volta: rete e ACI non si sommano, e l'extra raccolta a portale
+ *   non c'e'. Per un impianto conta la rete che arriva all'impianto, in primaria
+ *   e in secondaria; il suo stoccaggio, se ne ha uno, sta a parte;
+ * - le terziarie non si tolgono: sono uscite di materiale gia' trasformato, che
+ *   il portale ha gia' scalato con la dichiarazione.
  */
 export function quadratura(sito) {
   const calcolata = (sito.giacenza_iniziale_t || 0)
-    + (sito.conferito_alla_foto_t || 0) + (sito.secondarie_in_alla_foto_t || 0)
-    - (sito.dichiarato_caricato_rete_t || 0) - (sito.secondarie_out_alla_foto_t || 0);
+    + (sito.entrato_confronto_t || 0) - (sito.uscito_confronto_t || 0)
+    - (sito.dichiarato_caricato_rete_t || 0);
   const portale = sito.giacenza_portale_t;
   const scarto = portale === null || portale === undefined ? null : Math.round((calcolata - portale) * 1000) / 1000;
   return {
