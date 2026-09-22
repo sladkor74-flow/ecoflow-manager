@@ -1,7 +1,7 @@
 // Prova delle regole di lettura dei movimenti (base44/shared/movimenti.ts):
 // stato, periodo sul giorno italiano, settimana ISO, canale, giorno degli
 // elenchi. npm run prove
-import { eTerminato, periodoMovimento, settimanaIso, canaleMovimento, filtraMovimenti, giornoOrdine, giornoElenco, annoElenco, meseElenco } from '../base44/shared/movimenti.ts';
+import { eTerminato, periodoMovimento, settimanaIso, canaleMovimento, filtraMovimenti, giornoOrdine, giornoElenco, annoElenco, meseElenco, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate } from '../base44/shared/movimenti.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -47,6 +47,16 @@ const cancellato = { stato: 'cancellato', ordine_immesso_il: '2025-12-31T23:30:0
 verifica('non terminato: l\'immissione, sul giorno italiano', giornoElenco(cancellato) === '2026-01-01' && annoElenco(cancellato) === 2026 && meseElenco(cancellato) === 'Gennaio');
 verifica('non terminato con la fine trasporto: la fine trasporto', meseElenco({ stato: 'assegnato', ordine_immesso_il: immessoMaggio, trasporto_finito_il: '2026-06-10T08:00:00Z' }) === 'Giugno');
 verifica('senza date: niente', giornoElenco({ stato: 'assegnato' }) === '' && annoElenco({}) === null);
+
+console.log('LE DATE OBBLIGATORIE DI UN TERMINATO (regola del 22/09/2026)');
+const completo = { stato: 'terminato', ordine_immesso_il: '2026-09-01T08:00:00Z', trasporto_iniziato_il: '2026-09-03T07:00:00Z', trasporto_finito_il: '2026-09-03T22:30:00Z' };
+verifica('tutte e tre: niente da segnalare', dateMancanti(completo).length === 0 && !dateDaSistemare(completo));
+verifica('senza fine trasporto: la dice', JSON.stringify(dateMancanti({ ...completo, trasporto_finito_il: null })) === '["fine trasporto"]' && testoDate({ ...completo, trasporto_finito_il: null }) === 'manca la data di fine trasporto');
+verifica('senza nessuna: le dice tutte', dateMancanti({ stato: 'Terminato' }).length === 3);
+verifica('un ordine non terminato non si giudica', dateMancanti({ stato: 'assegnato' }).length === 0 && !dateDaSistemare({ stato: 'cancellato' }));
+verifica("fine prima dell'inizio: incoerente", dateIncoerenti({ ...completo, trasporto_finito_il: '2026-09-02T10:00:00Z' }).length === 1);
+verifica('stesso giorno italiano: coerente', dateIncoerenti({ ...completo, trasporto_iniziato_il: '2026-09-03T21:00:00Z', trasporto_finito_il: '2026-09-03T21:30:00Z' }).length === 0);
+verifica('la chiusura non sostituisce la fine', dateMancanti({ ...completo, trasporto_finito_il: null, ordine_chiuso_il: '2026-09-05T08:00:00Z' }).includes('fine trasporto'));
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

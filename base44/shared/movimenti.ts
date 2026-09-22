@@ -78,6 +78,55 @@ export const giornoElenco = (r) => (eTerminato(r) ? giornoMovimento(r) : giornoO
 export const annoElenco = (r) => { const g = giornoElenco(r); return g ? Number(g.slice(0, 4)) : null; };
 export const meseElenco = (r) => { const g = giornoElenco(r); return g ? MESI_MOVIMENTI[Number(g.slice(5, 7)) - 1] : null; };
 
+/**
+ * Le date che un formulario deve sempre avere (regola dell'utente, 22/09/2026):
+ * l'immissione dell'ordine, l'inizio e la fine del trasporto. Un ordine
+ * TERMINATO a cui ne manca una e' un dato incompleto e si segnala, in ogni modulo
+ * dove compaiono ordini terminati - elenchi, conti, verifiche, alert, assistente -
+ * non solo nei report settimanali. Chi conta continua a tenerlo fuori dai periodi
+ * se manca la fine trasporto (giornoElenco), ma dice quali date mancano.
+ * Anche le date nell'ordine sbagliato si segnalano: un inizio prima
+ * dell'immissione o una fine prima dell'inizio sono dati sporchi, non ritiri
+ * velocissimi.
+ */
+export const DATE_OBBLIGATORIE = [
+  { campo: 'ordine_immesso_il', nome: 'immissione' },
+  { campo: 'trasporto_iniziato_il', nome: 'inizio trasporto' },
+  { campo: 'trasporto_finito_il', nome: 'fine trasporto' },
+];
+
+/** I nomi delle date obbligatorie che mancano a un ordine terminato; [] se ci sono tutte o se non e' terminato. */
+export function dateMancanti(r) {
+  if (!eTerminato(r)) return [];
+  return DATE_OBBLIGATORIE.filter(d => !giornoRoma(r[d.campo])).map(d => d.nome);
+}
+
+/** Le incoerenze fra le date di un ordine terminato, a parole; [] se non ce ne sono. */
+export function dateIncoerenti(r) {
+  if (!eTerminato(r)) return [];
+  const immesso = giornoRoma(r.ordine_immesso_il);
+  const inizio = giornoRoma(r.trasporto_iniziato_il);
+  const fine = giornoRoma(r.trasporto_finito_il);
+  const esiti = [];
+  if (immesso && inizio && inizio < immesso) esiti.push('inizio trasporto prima dell\'immissione');
+  if (inizio && fine && fine < inizio) esiti.push('fine trasporto prima dell\'inizio');
+  else if (!inizio && immesso && fine && fine < immesso) esiti.push('fine trasporto prima dell\'immissione');
+  return esiti;
+}
+
+/** Un ordine terminato con le date da sistemare: ne manca una o sono incoerenti. */
+export const dateDaSistemare = (r) => dateMancanti(r).length > 0 || dateIncoerenti(r).length > 0;
+
+/** "manca la data di fine trasporto", "mancano le date di immissione e inizio trasporto", "fine trasporto prima dell'inizio". */
+export function testoDate(r) {
+  const mancanti = dateMancanti(r);
+  const parti = [];
+  if (mancanti.length === 1) parti.push(`manca la data di ${mancanti[0]}`);
+  else if (mancanti.length > 1) parti.push(`mancano le date di ${mancanti.slice(0, -1).join(', ')} e ${mancanti[mancanti.length - 1]}`);
+  parti.push(...dateIncoerenti(r));
+  return parti.join('; ');
+}
+
 export const GIORNI_SCADENZA_ORDINE = 30;
 // i conti si fanno fra giorni di calendario a mezzanotte UTC: il cambio dell'ora
 // legale non li sposta, come faceva setDate sull'istante di immissione
