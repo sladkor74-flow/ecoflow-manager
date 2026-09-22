@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { calcolaRigheAttiva, eRigaACorpo, TIPOLOGIE_ATTIVA } from "../../shared/attivaCalcolo.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
@@ -29,7 +30,7 @@ const r2 = (v) => Math.round(v * 100) / 100;
 // esportato non si cancella: resta nello storico come superato, col motivo.
 export default async function(req) {
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return rispostaSolaLettura();

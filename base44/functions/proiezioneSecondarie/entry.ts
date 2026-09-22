@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fineProgrammazione, avvisoFineProgrammazione } from "../../shared/fineProgrammazione.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
@@ -67,7 +68,7 @@ function meseDi(v, anno) {
 
 export default async function(req) {
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 

@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import {
   caricaMovimenti, normalizzaRigheReport, CAMPI_REPORT, statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento,
 } from "../../shared/reportSettimanali.ts";
@@ -263,7 +264,7 @@ export default async function(req) {
   let base44 = null;
   let verificaId = null;
   try {
-    base44 = createClientFromRequest(req);
+    base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return rispostaSolaLettura();

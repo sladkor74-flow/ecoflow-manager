@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fineProgrammazione } from "../../shared/fineProgrammazione.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { formatoKg } from "../../shared/formato.ts";
@@ -73,7 +74,7 @@ const rinvio = (motivo, caricamenti = []) => Response.json({
 // 409 quando rinvia per un caricamento aperto, 500 quando qualcosa non riesce.
 export default async function(req) {
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     // L'automazione del lunedi' gira senza utente; se invece la chiama una persona,
     // solo l'amministratore puo' scrivere il suggerimento.
     const chiamante = await base44.auth.me().catch(() => null);

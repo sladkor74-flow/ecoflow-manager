@@ -21,7 +21,7 @@
 // quelle a cui non manca niente.
 
 import { verificaReport, senzaFineDei, CATEGORIE_MOVIMENTO } from "./reportSettimanali.ts";
-import { valoreCampo, leggiCampo } from "./testoLungo.ts";
+import { valoreCampo, leggiCampo, precaricaParti } from "./testoLungo.ts";
 import { formatoKg } from "./formato.ts";
 import { oggiRoma } from "./giornoItaliano.ts";
 
@@ -166,6 +166,9 @@ async function aggiornaAlertDichiarazione(base44, verifica, esito) {
  */
 export async function ricontrollaVerifiche(base44, verifiche, movimenti, { scrivi = true, riprova = conRitentativi, senzaFine = senzaFineDei(movimenti) } = {}) {
   const risultati = [];
+  // Le righe e gli esiti salvati di tutte le verifiche, in blocco: una lettura
+  // per verifica e per campo pesava sul limite di richieste della piattaforma.
+  await precaricaParti(base44, 'VerificaReport', verifiche.filter(daRiconfrontare), ['righe_report_json', 'esito_json']);
   for (const v of verifiche) {
     if (!daRiconfrontare(v)) continue;
     const dichiarazione = eDichiarazione(v);

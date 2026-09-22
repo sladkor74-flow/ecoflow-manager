@@ -5,6 +5,7 @@
 // rifiuta di eseguire, altrimenti basterebbe una chiamata per riempire lo
 // storico di documenti sbagliati accanto a quelli buoni.
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
@@ -14,7 +15,7 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 // Output: { dettaglio: [{trasportatore, regione, totale_t, num_viaggi, tariffa_valore, unita_misura, totale_euro, eer, ...}], totale_complessivo }
 export default async function(req) {
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return rispostaSolaLettura();

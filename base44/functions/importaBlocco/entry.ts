@@ -1,10 +1,11 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
 import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSignatures.ts";
 import { enrichRecords } from "../../shared/dataEnrichment.ts";
 import { ARCHIVI_PRIMARIE, DATE_PRIMARIE, archivioPrimaria, recordAssegnato } from "../../shared/primarie.ts";
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
-import { fetchAll } from "../../shared/fetchAll.ts";
+import { fetchAll, RIGHE_PER_PAGINA, ultimaPagina } from "../../shared/fetchAll.ts";
 import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
 import { evasioneOrdini, listaOrdini, statoRichiesta, riconosciOrdine, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare } from "../../shared/richiesteEct.ts";
 import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
@@ -167,10 +168,11 @@ function mappaRiga(row, colMap, primarie = false) {
 // scritti insieme hanno la stessa data.
 async function idArchivio(base44, entita) {
   const ids = new Set();
-  for (let skip = 0; ; skip += 1000) {
-    const pagina = await base44.asServiceRole.entities[entita].list('id_ordine', 1000, skip, ['id_ordine']);
+  for (let skip = 0; ; ) {
+    const pagina = await base44.asServiceRole.entities[entita].list('id_ordine', RIGHE_PER_PAGINA, skip, ['id_ordine']);
     for (const r of pagina) if (r.id_ordine) ids.add(String(r.id_ordine));
-    if (pagina.length < 1000) break;
+    if (ultimaPagina(pagina.length, RIGHE_PER_PAGINA)) break;
+    skip += pagina.length;
     await sleep(100);
   }
   return ids;
@@ -323,7 +325,7 @@ export default async function(req) {
 
   try {
     fase = 'autenticazione';
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized', dati_intatti: true }, { status: 401 });
 

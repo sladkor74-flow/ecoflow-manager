@@ -3,6 +3,7 @@ import { eAci } from '@/lib/canaleSecondaria';
 import { oggiRoma } from '@/lib/giornoItaliano';
 import { testoTerminatiSenzaFine, testoOrdiniDateDaSistemare } from '@/lib/richiesteEct';
 import { dataServer } from '@/lib/utils';
+import { eLimiteRichieste } from '@/lib/limiteRichieste';
 
 // Importazione dei report di grandi dimensioni del portale Ecotyre.
 //
@@ -27,6 +28,7 @@ import { dataServer } from '@/lib/utils';
 // usa SHEET_MAP come unica fonte: qui le righe si spediscono cosi' come lette.
 
 const RIGHE_PER_BLOCCO = 200;
+const PAUSA_DOPO_LIMITE = 30000;
 const ATTESE_RITENTATIVO = [2000, 5000, 10000, 20000];
 
 const pausa = (ms) => new Promise(r => setTimeout(r, ms));
@@ -634,13 +636,23 @@ export async function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
   const daFare = tipoFile === 'extra_raccolta' && !registrata ? [...elenco, 'alertExtra'] : elenco;
   const esiti = [];
   for (const k of daFare) {
-    try {
-      const risposte = [].concat(await compiti[k]());
-      const problema = risposte.map(problemaRisposta).find(Boolean);
-      const avviso = risposte.map(avvisoRisposta).find(Boolean);
-      esiti.push(problema ? { nome: NOMI_RICALCOLI[k], ok: false, errore: problema } : { nome: NOMI_RICALCOLI[k], ok: true, ...(avviso ? { avviso } : {}) });
-    } catch (e) {
-      esiti.push({ nome: NOMI_RICALCOLI[k], ok: false, errore: messaggioRicalcolo(e) });
+    // Ogni richiesta respinta per il limite della piattaforma si ripete gia' da
+    // sola (limiteRichieste). Se un ricalcolo si arrende lo stesso, lo si rifa'
+    // una volta dopo mezzo minuto: i ricalcoli rileggono e riscrivono i loro
+    // esiti, ripeterli non crea doppioni.
+    for (let tentativo = 0; ; tentativo++) {
+      try {
+        const risposte = [].concat(await compiti[k]());
+        const problema = risposte.map(problemaRisposta).find(Boolean);
+        const avviso = risposte.map(avvisoRisposta).find(Boolean);
+        if (problema && tentativo === 0 && eLimiteRichieste(problema)) { await pausa(PAUSA_DOPO_LIMITE); continue; }
+        esiti.push(problema ? { nome: NOMI_RICALCOLI[k], ok: false, errore: problema } : { nome: NOMI_RICALCOLI[k], ok: true, ...(avviso ? { avviso } : {}) });
+      } catch (e) {
+        const messaggio = messaggioRicalcolo(e);
+        if (tentativo === 0 && (eLimiteRichieste(e) || eLimiteRichieste(messaggio))) { await pausa(PAUSA_DOPO_LIMITE); continue; }
+        esiti.push({ nome: NOMI_RICALCOLI[k], ok: false, errore: messaggio });
+      }
+      break;
     }
   }
   return esiti;

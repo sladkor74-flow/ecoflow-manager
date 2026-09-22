@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 
@@ -20,7 +21,7 @@ const TARGET_2026 = [
 ];
 
 export async function POST(req) {
-  const base44 = createClientFromRequest(req);
+  const base44 = conLimiteRichieste(createClientFromRequest(req));
 
   // Controllo ruolo admin
   const me = await base44.auth.me();

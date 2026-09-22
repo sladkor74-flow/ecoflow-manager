@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
@@ -121,7 +122,7 @@ export default async function(req) {
   // vero da quando l'archivio puo' essere cambiato (svuotamento o prima scrittura)
   let archivioToccato = false;
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     const startTime = Date.now();
@@ -612,7 +613,7 @@ export default async function(req) {
     });
   } catch (error) {
     try {
-      const base44 = createClientFromRequest(req);
+      const base44 = conLimiteRichieste(createClientFromRequest(req));
       const motivo = `${error.message || 'Errore imprevisto'} (fase: ${fase})`;
       if (rigaRegistro && archivioToccato) {
         // L'archivio puo' essere vuoto o a meta': la riga resta "in_corso" e

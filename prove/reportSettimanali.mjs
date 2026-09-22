@@ -123,7 +123,7 @@ verifica('un movimento a posto non porta il campo date', !('date' in dati.movime
 const scritte = [];
 const finto = { asServiceRole: { entities: {
   VerificaReport: { update: async (id, campi) => { scritte.push({ id, ...campi }); } },
-  ContenutoEsteso: { filter: async () => [], delete: async () => {}, bulkCreate: async () => {} },
+  ContenutoEsteso: { filter: async () => [], delete: async () => {}, deleteMany: async () => ({ deleted: 0 }), bulkCreate: async () => {} },
   Alert: { filter: async () => [], update: async () => {}, create: async () => {} },
 } } };
 const esitoVecchio = {

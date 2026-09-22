@@ -1,13 +1,15 @@
-// Helper di paginazione frontend: carica tutti i record di un'entita' paginando a blocchi di 1000.
+// Helper di paginazione frontend: carica tutti i record di un'entita' paginando.
 // Uso: fetchAllClient(base44.entities.PrimariaRete, { mese: 'Luglio' }, '-created_date')
-// Se filtro e' null usa list(), altrimenti filter(). Continua finche' il blocco e' pieno (1000).
-// Protezione anti-ciclo infinito: massimo 100 pagine (100.000 record).
+// Se filtro e' null usa list(), altrimenti filter(). Pagine da 5000 righe, il
+// massimo della piattaforma, e stessa regola di fine lettura di fetchAll: le
+// richieste delle pagine contano nel limite al minuto di tutta l'app.
+// Protezione anti-ciclo infinito: massimo 100 pagine.
 //
 // Specchio di base44/shared/fetchAll.ts: le pagine si leggono in ordine di id,
 // l'unico stabile (con created_date i record importati nello stesso istante si
 // leggono due volte o mai), e l'ordinamento richiesto si applica in memoria.
 export async function fetchAllClient(entity, filtro = null, ordinamento = '-created_date') {
-  const PAGE = 1000;
+  const PAGE = 5000;
   const MAX_PAGES = 100;
   let skip = 0;
   let all = [];
@@ -16,8 +18,8 @@ export async function fetchAllClient(entity, filtro = null, ordinamento = '-crea
       ? await entity.filter(filtro, 'id', PAGE, skip)
       : await entity.list('id', PAGE, skip);
     all = all.concat(batch);
-    if (batch.length < PAGE) break;
-    skip += PAGE;
+    if (batch.length === 0 || (batch.length < PAGE && batch.length % 1000 !== 0)) break;
+    skip += batch.length;
     await new Promise(r => setTimeout(r, 100));
   }
   const visti = new Set();

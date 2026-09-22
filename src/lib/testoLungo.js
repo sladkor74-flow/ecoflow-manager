@@ -22,8 +22,11 @@ export async function conCampiCompleti(entita, record, campi) {
   return { ...record, ...Object.fromEntries(campi.map((c, i) => [c, completi[i]])) };
 }
 
-/** Cancella le parti di tutti i campi di un record. */
+/**
+ * Cancella le parti di tutti i campi di un record, con una sola richiesta (una
+ * delete per parte pesava sul limite di richieste al minuto della piattaforma).
+ */
 export async function eliminaParti(entita, id) {
-  const parti = await base44.entities.ContenutoEsteso.filter({ entita, record_id: String(id) }, 'parte', 1000);
-  for (const p of parti) await base44.entities.ContenutoEsteso.delete(p.id);
+  if (!entita || id === undefined || id === null || String(id) === '') throw new Error('eliminaParti: servono entita e record');
+  await base44.entities.ContenutoEsteso.deleteMany({ entita, record_id: String(id) });
 }

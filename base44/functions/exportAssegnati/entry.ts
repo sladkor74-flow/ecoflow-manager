@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { MESI } from "../../shared/raccoltoCalculator.ts";
@@ -9,7 +10,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 // Payload: { filters: {...}, mode: 'detail' | 'matrix' }
 export default async function(req) {
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 

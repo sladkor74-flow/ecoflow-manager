@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from '../../shared/fetchAll.ts';
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
@@ -132,7 +133,7 @@ function descriviAmbito(t: TariffaSeed): string {
 
 export default async function(req: any) {
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return rispostaSolaLettura();

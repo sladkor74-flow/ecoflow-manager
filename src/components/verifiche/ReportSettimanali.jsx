@@ -232,28 +232,86 @@ export default function ReportSettimanali({ isAdmin }) {
   const [aperta, setAperta] = useState(null);
   const intervallo = intervalloSettimana(anno, settimana);
 
+  // Una lettura della settimana costa una quarantina di richieste (movimenti,
+  // registro dei caricamenti, testi delle verifiche). Le richieste di rilettura
+  // che arrivano mentre una e' in corso - dopo un caricamento, a verifica finita,
+  // dal ricontrollo - si fondono: finita quella, se ne fa una sola. Prima un
+  // report ne faceva partire tre o quattro, e con due o tre report di fila si
+  // superava il limite di richieste al minuto della piattaforma (22/09/2026).
+  const inVolo = useRef(null);
   const carica = useCallback(async (silenzioso = false) => {
-    if (!silenzioso) setCaricando(true);
-    setErrore(null);
-    try {
-      const res = await base44.functions.invoke('verificheReport', { anno, settimana });
-      setDati(res.data || res);
-    } catch (e) {
-      const msg = (e && e.data && e.data.error) || (e && e.response && e.response.data && e.response.data.error);
-      setErrore(msg || e.message || 'Errore nel caricamento');
+    const chiave = `${anno}-${settimana}`;
+    if (inVolo.current && inVolo.current.chiave === chiave) {
+      inVolo.current.ancora = true;
+      return inVolo.current.promessa;
     }
-    if (!silenzioso) setCaricando(false);
+    if (!silenzioso) setCaricando(true);
+    const volo = { chiave, ancora: false, promessa: null };
+    volo.promessa = (async () => {
+      do {
+        volo.ancora = false;
+        setErrore(null);
+        try {
+          const res = await base44.functions.invoke('verificheReport', { anno, settimana });
+          setDati(res.data || res);
+        } catch (e) {
+          const msg = (e && e.data && e.data.error) || (e && e.response && e.response.data && e.response.data.error);
+          setErrore(msg || e.message || 'Errore nel caricamento');
+        }
+      } while (volo.ancora);
+    })();
+    inVolo.current = volo;
+    try {
+      await volo.promessa;
+    } finally {
+      if (inVolo.current === volo) inVolo.current = null;
+      if (!silenzioso) setCaricando(false);
+    }
   }, [anno, settimana]);
 
   useEffect(() => { setDati(null); carica(); }, [carica]);
 
+  // Le verifiche avviate da questa pagina: a confronto finito le rilegge la
+  // chiamata stessa (avviaVerifica), il ricontrollo non le rilegge una seconda volta.
+  const avviateQui = useRef(new Set());
+
   // Finche' c'e' una lettura o una verifica in corso la tabella si aggiorna da sola.
+  // Ogni 8 secondi si guarda solo lo stato delle verifiche in corso, una richiesta:
+  // un passaggio da lettura a verifica si scrive nella riga, e la settimana intera
+  // si rilegge solo quando una verifica finisce (completata o in errore).
+  // Rileggerla a ogni giro voleva dire rileggere tutti i movimenti e, con qualche
+  // report aperto insieme, superare il limite di richieste al minuto della
+  // piattaforma: la pagina si fermava su "rate limit exceeded" (22/09/2026).
   const inCorso = !!dati && dati.soggetti.some(r => analisiInCorso(r.verifica));
+  const [giro, setGiro] = useState(0);
   useEffect(() => {
     if (!inCorso) return undefined;
-    const t = setTimeout(() => carica(true), 8000);
-    return () => clearTimeout(t);
-  }, [inCorso, dati, carica]);
+    let spento = false;
+    const t = setTimeout(async () => {
+      const aperte = dati.soggetti.filter(r => analisiInCorso(r.verifica)).map(r => r.verifica);
+      try {
+        const attuali = await base44.entities.VerificaReport.filter({ anno, settimana }, '-created_date', 500, 0, ['id', 'stato']);
+        if (spento) return;
+        const stato = new Map((attuali || []).map(v => [v.id, v.stato]));
+        const cambiate = aperte.filter(v => stato.get(v.id) !== v.stato);
+        const finite = cambiate.filter(v => !['in_lettura', 'in_verifica'].includes(stato.get(v.id)) && !avviateQui.current.has(v.id));
+        if (finite.length) { carica(true); return; }
+        // solo i passaggi fra lettura e verifica: un esito arriva con la rilettura
+        const passaggi = cambiate.filter(v => ['in_lettura', 'in_verifica'].includes(stato.get(v.id)));
+        if (passaggi.length) {
+          setDati(d => (d ? {
+            ...d,
+            soggetti: d.soggetti.map(r => (r.verifica && passaggi.some(v => v.id === r.verifica.id)
+              ? { ...r, verifica: { ...r.verifica, stato: stato.get(r.verifica.id) } } : r)),
+          } : d));
+        }
+        setGiro(g => g + 1);
+      } catch (e) {
+        if (!spento) setGiro(g => g + 1);
+      }
+    }, 8000);
+    return () => { spento = true; clearTimeout(t); };
+  }, [inCorso, dati, carica, giro, anno, settimana]);
 
   const sposta = (passo) => {
     let a = anno, s = settimana + passo;
@@ -279,6 +337,7 @@ export default function ReportSettimanali({ isAdmin }) {
       ...campi,
     }));
 
+    avviateQui.current.add(nuova.id);
     base44.functions.invoke('elaboraReportSettimanale', { verifica_id: nuova.id, ...payload })
       .catch((e) => {
         const risposta = (e && e.data) || (e && e.response && e.response.data) || {};
@@ -290,7 +349,7 @@ export default function ReportSettimanali({ isAdmin }) {
             : { title: `Verifica di ${riga.nome} non riuscita`, description: risposta.error, variant: 'destructive' });
         }
       })
-      .finally(() => carica(true));
+      .finally(() => { avviateQui.current.delete(nuova.id); carica(true); });
 
     if (precedenteVerifica) {
       try {

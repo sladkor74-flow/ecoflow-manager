@@ -32,6 +32,16 @@ npx skills add base44/skills
 - Prefer the existing Base44 CLI workflow over adding new npm scripts for Base44-specific tasks.
 - Reuse the existing SDK client and Vite plugin patterns before adding new Base44 integration paths.
 - Run the relevant checks from `package.json` before finishing code changes.
+- **Limite di richieste della piattaforma** (22/09/2026): le richieste agli archivi
+  si contano per tutta l'app insieme, su un minuto; oltre, 429 "Rate limit
+  exceeded". Ogni funzione avvolge il client con
+  `conLimiteRichieste(createClientFromRequest(req))` (`base44/shared/limiteRichieste.ts`,
+  specchio in `src/lib`, usato anche da `src/api/base44Client.js`): una richiesta
+  respinta si ripete dopo una pausa, le chiamate a funzione solo su 429. Le
+  letture intere passano da `fetchAll`/`perPagina`/`fetchAllClient`, a pagine da
+  5000 righe (il massimo che la piattaforma restituisce). Niente pagine che
+  rileggono archivi interi a intervalli: si guarda lo stato di cio' che e' in
+  corso, e si rilegge tutto solo quando cambia (`ReportSettimanali.jsx`).
 
 ## Regole della commessa
 

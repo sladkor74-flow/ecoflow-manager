@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 
@@ -21,7 +22,7 @@ const RILEVAZIONI = [
 ];
 
 export default async function(req) {
-  const base44 = createClientFromRequest(req);
+  const base44 = conLimiteRichieste(createClientFromRequest(req));
 
   const me = await base44.auth.me();
   if (!me || me.role !== 'admin') {

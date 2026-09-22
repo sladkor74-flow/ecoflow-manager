@@ -6,6 +6,7 @@
 // rifiuta di eseguire, altrimenti basterebbe una chiamata per riempire lo
 // storico di documenti sbagliati accanto a quelli buoni.
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
@@ -20,7 +21,7 @@ const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','
 // 6. Crea DocumentoFatturazione + VoceFatturazione
 export default async function(req) {
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return rispostaSolaLettura();

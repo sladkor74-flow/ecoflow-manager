@@ -9,7 +9,7 @@ import { eTerminato } from "./movimenti.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { normalizzaPrimaria, normalizzaAssegnato, normalizzaCancellato, controllaLista, indiceMese, MESI, VERSIONE_REGOLE } from "./evasioneAssegnati.ts";
 import { targetMensiliAnno, targetRaccoglitoreMese } from "./targetRaccoglitori.ts";
-import { valoreCampo, leggiJson, leggiCampo, eliminaCampo } from "./testoLungo.ts";
+import { valoreCampo, leggiJson, leggiCampo, eliminaCampo, precaricaParti } from "./testoLungo.ts";
 
 const stato = (r) => String(r.stato || '').toLowerCase().trim();
 // Extra raccolta: solo le primarie, cioe' le raccolte presso un produttore. Le
@@ -226,7 +226,10 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
   const oggi = oggiRoma();
   const primarieIl = dati.primarie_caricate_il !== undefined ? dati.primarie_caricate_il : await ultimoCaricamentoPrimarie(base44);
   const tutteLeListe = await fetchAll(svc.ListaAssegnati);
-  // Righe delle liste, ricomposte una volta sola anche se divise in parti.
+  // Righe delle liste, ricomposte una volta sola anche se divise in parti; le
+  // parti dei mesi delle liste da controllare si leggono in blocco.
+  const mesiDaControllare = new Set(liste.map(l => `${Number(l.anno)}-${Number(l.mese)}`));
+  await precaricaParti(base44, 'ListaAssegnati', tutteLeListe.filter(l => mesiDaControllare.has(`${Number(l.anno)}-${Number(l.mese)}`)), ['righe_json']);
   const righeListe = new Map();
   const righeDi = async (l) => {
     if (!righeListe.has(l.id)) righeListe.set(l.id, await leggiJson(base44, 'ListaAssegnati', l, 'righe_json'));
@@ -235,6 +238,16 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
   const targetPerAnno = new Map();
   const eseguiti = [];
   const errori = [];
+  // L'ultimo controllo di ogni lista, con una lettura sola invece di una per
+  // lista, e gli esiti salvati in blocco (limite di richieste, 22/09/2026).
+  const ultimoPerLista = new Map();
+  if (!forza) {
+    for (const c of await fetchAll(svc.ControlloEvasione)) {
+      const p = ultimoPerLista.get(c.lista_id);
+      if (!p || String(c.eseguito_il || '') > String(p.eseguito_il || '')) ultimoPerLista.set(c.lista_id, c);
+    }
+    await precaricaParti(base44, 'ControlloEvasione', liste.map(l => ultimoPerLista.get(l.id)).filter(c => c && istante(c.eseguito_il) < CONTROLLI_DA_VERIFICARE_FINO_AL), ['esito_json']);
+  }
 
   for (const lista of liste) {
     try {
@@ -244,7 +257,7 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
       const targetKg = target && target.target_kg > 0 ? target.target_kg : null;
       const listeMese = tutteLeListe.filter(x => Number(x.anno) === anno && Number(x.mese) === mese);
       if (!forza) {
-        const [ultimo] = await svc.ControlloEvasione.filter({ lista_id: lista.id }, '-eseguito_il', 1);
+        const ultimo = ultimoPerLista.get(lista.id);
         if (!(await motivoRicontrollo(base44, ultimo, { targetKg, primarieIl, listeMese: [lista, ...listeMese] }))) continue;
       }
 

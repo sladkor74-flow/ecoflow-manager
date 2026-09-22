@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 // Materiale del corso RT: caricamento delle parti di testo e stato dell'elaborazione.
@@ -13,7 +14,7 @@ const MAX_TESTO = 12000;
 
 export default async function(req) {
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     const body = await req.json().catch(() => ({}));

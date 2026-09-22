@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { normalizzaLettura } from "../../shared/quadraturaFir.ts";
 import {
   caricaGestionale, confrontaSettimana, righeDaConservare, righeConservate, TIPI_CARICAMENTO,
@@ -130,7 +131,7 @@ async function leggiDocumento(base44, fileUri, problemi = null) {
 }
 
 export default async function(req) {
-  const base44 = createClientFromRequest(req);
+  const base44 = conLimiteRichieste(createClientFromRequest(req));
   let quadraturaId = null;
   try {
     const user = await base44.auth.me();

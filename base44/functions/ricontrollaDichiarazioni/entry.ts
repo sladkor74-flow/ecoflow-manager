@@ -1,10 +1,12 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import {
   caricaMovimenti, oggiRoma, aggiungiGiorni, statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento, GIORNI_CONSERVAZIONE,
 } from "../../shared/reportSettimanali.ts";
 import { ricontrollaVerifiche, conRitentativi, piuRecentiPerSoggetto, daRiconfrontare } from "../../shared/esitoVerifica.ts";
 import { caricaGestionale, rifaiQuadratura, TIPI_CARICAMENTO } from "../../shared/quadraturaFirDati.ts";
+import { precaricaParti } from "../../shared/testoLungo.ts";
 
 // Dopo un caricamento di primarie o secondarie (lo lancia Caricamento Dati a
 // caricamento concluso) riconfronta con i nuovi dati tutto quello che il modulo
@@ -47,7 +49,7 @@ const PRIMI_ERRORI = 5;
 export default async function(req) {
   const avvio = Date.now();
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -94,6 +96,8 @@ export default async function(req) {
 
     let quadratureAggiornate = 0;
     const errori = esiti.filter(r => r.errore).map(r => ({ verifica: r.id, errore: r.errore }));
+    // i testi salvati delle quadrature, in blocco (vedi precaricaParti)
+    await precaricaParti(base44, 'QuadraturaFir', quadrature, ['righe_json', 'lettura_json', 'esito_json']);
     for (const q of quadrature) {
       try {
         // Gli archivi sono gia' in memoria: ogni settimana si conta li', senza rileggerli.

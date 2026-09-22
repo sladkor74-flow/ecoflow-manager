@@ -208,8 +208,22 @@ export async function statoCaricamenti(base44, tipi = TIPI_CARICAMENTO_MOVIMENTI
   // servono a capire se un caricamento rimasto aperto e' stato superato.
   const archivi = new Set(tipi.flatMap(archiviDelTipo));
   const daLeggere = [...new Set([...tipi, ...Object.keys(ARCHIVI_DEL_TIPO).filter(t => archiviDelTipo(t).some(a => archivi.has(a)))])];
+  // Tutti i tipi con una lettura sola: una per tipo, due volte per funzione, dopo
+  // un caricamento facevano una cinquantina di richieste solo per il registro
+  // (limite di richieste al minuto, 22/09/2026). Se la lettura unica e' piena e a
+  // un tipo non ha dato le sue RIGHE_REGISTRO righe, per quel tipo si rilegge come
+  // prima: il risultato e' lo stesso.
+  const MASSIMO_INSIEME = 200;
+  const insieme = (await Log.filter({ tipo_file: { $in: daLeggere } }, '-created_date', MASSIMO_INSIEME)) || [];
+  const perTipo = new Map(daLeggere.map(t => [t, []]));
+  for (const r of insieme) {
+    const l = perTipo.get(r.tipo_file);
+    if (l && l.length < RIGHE_REGISTRO) l.push(r);
+  }
   const letti = await Promise.all(daLeggere.map(async (tipo) => {
-    const righe = (await Log.filter({ tipo_file: tipo }, '-created_date', RIGHE_REGISTRO)) || [];
+    const righe = insieme.length >= MASSIMO_INSIEME && perTipo.get(tipo).length < RIGHE_REGISTRO
+      ? ((await Log.filter({ tipo_file: tipo }, '-created_date', RIGHE_REGISTRO)) || [])
+      : perTipo.get(tipo);
     // Dalla piu' recente: il primo riuscito chiude la ricerca, il primo bloccante
     // prima di lui e' il caricamento che ha lasciato l'archivio inaffidabile.
     let aperto = null;

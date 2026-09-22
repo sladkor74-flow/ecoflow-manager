@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
@@ -27,7 +28,7 @@ const migliaia = (v, decimali = 0) => { const [i, d] = Number(v || 0).toFixed(de
 
 export default async function(req) {
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     const { azione = 'confronta', anno, mese, file_uri, nome_file, linee_pdf } = await req.json().catch(() => ({}));

@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { computeRaccoglitoriMixData } from "../../shared/primarieReteAnalytics.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
@@ -9,7 +10,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 // Target consorziali: P=75%, M=20%, G1=4%, G2=1%. Deviazione significativa > ±5%.
 export default async function(req) {
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 

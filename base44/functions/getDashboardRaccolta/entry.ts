@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { PROV_TO_REGION, riepilogoDateVista } from "../../shared/raccoltoCalculator.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
@@ -8,7 +9,7 @@ import { periodoMovimento } from "../../shared/movimenti.ts";
 // Payload: { mese?, anno? } — mese è il nome del mese (es. "Agosto"), anno è numerico.
 export default async function(req) {
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
