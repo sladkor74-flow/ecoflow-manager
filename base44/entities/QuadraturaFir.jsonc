@@ -119,6 +119,10 @@
           "lettura_verificata": {
             "type": "boolean",
             "description": "Le tabelle del canale tornano con i totali stampati sul file"
+          },
+          "date_da_sistemare": {
+            "type": "number",
+            "description": "Formulari del canale contati nella settimana ma registrati senza una data obbligatoria (immissione o inizio trasporto) o con date incoerenti: vanno inseriti o corretti (regola del 22/09/2026). Non cambia la conformita' delle tre fonti; manca se sono tutti a posto"
           }
         }
       }

@@ -849,7 +849,16 @@
    "ferro_kg": 120,
    "totale_kg": 460
   },
-  "rete_kg": 534140
+  "rete_kg": 534140,
+  "portale_kg": 534600,
+  "chiusura_ultima_terziaria": {
+   "terziaria": "TER26154141",
+   "allegato": 36,
+   "rete_kg": 19880,
+   "extra_kg": 460,
+   "portale_kg": 20340
+  },
+  "nota_portale_kg": "Regola dell'utente del 22/09/2026: a portale si caricano 534.600 kg, di cui 534.140 di rete e 460 di extra raccolta nell'ultima terziaria, che si chiude a 20.340 kg (19.880 di rete + 460 di extra). Nel riepilogo e nei Word la rete e l'extra restano separate."
  },
  "nota_portale": "Giacenza di rete di Irigom a portale a fine agosto 2026 dal file Ordini non dichiarati del 18/09, per fine trasporto: le primarie dirette con la loro fine trasporto, quelle passate da Nappi Sud con la fine trasporto della SECONDARIA (arrivo a Irigom). Mai per data di chiusura."
 }

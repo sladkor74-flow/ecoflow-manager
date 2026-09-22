@@ -101,6 +101,33 @@ export function statoMesiAttiva(documenti, prefatture, anno, oggi) {
 
 const GRAVITA = { critico: 0, attenzione: 1, info: 2 };
 
+// Gli alert delle date obbligatorie (immissione, inizio e fine trasporto,
+// regola dell'utente del 22/09/2026): il motore degli alert ne apre uno per
+// modulo e canale a ogni caricamento, con quanti ordini e quanti senza fine
+// trasporto. Qui si leggono quelli, e non le primarie: il cruscotto legge solo
+// archivi piccoli. Ognuno e' una voce sua, col collegamento al modulo dove gli
+// ordini si vedono. Dal 22/09/2026 anche le schede di extra raccolta avviano il
+// motore quando si salvano (AlertEngineAutoRun e dopoCaricamento).
+const REGOLA_DATE = 'date_obbligatorie';
+export const eAlertDate = (a) => String((a && a.regola_id) || '').startsWith(REGOLA_DATE);
+const LINK_MODULO = { primarie_rete: '/primarie-rete', primarie_aci: '/primarie-aci', secondarie: '/secondarie', terziarie: '/terziarie', extra_raccolta: '/extra-raccolta' };
+const NOME_MODULO = { primarie_rete: 'Primarie rete', primarie_aci: 'Primarie ACI', secondarie: 'Secondarie', terziarie: 'Terziarie', extra_raccolta: 'Extra raccolta' };
+const NOME_CANALE_DATE = { rete: 'rete', ACI: 'ACI', extra: 'extra raccolta' };
+
+/** La voce dell'elenco per un alert delle date obbligatorie. */
+function voceDate(a) {
+  const quanti = Number(a.quanti);
+  const senzaFine = Number(a.senza_fine) || 0;
+  // Un alert scritto senza i conteggi si dice col suo titolo.
+  const dove = `${NOME_MODULO[a.modulo] || a.modulo || 'Movimenti'}${a.modulo === 'secondarie' && a.canale ? ` · ${NOME_CANALE_DATE[a.canale] || a.canale}` : ''}`;
+  const titolo = Number.isFinite(quanti) && quanti > 0
+    ? `${dove}: ${quanti} ${quanti === 1 ? 'ordine terminato' : 'ordini terminati'} con date obbligatorie mancanti o incoerenti`
+    : (a.titolo || `${dove}: ordini terminati con date obbligatorie mancanti o incoerenti`);
+  const dettaglio = `${senzaFine ? `Di cui ${senzaFine} senza fine trasporto: fuori da ogni periodo, fatturazione e target finché la data manca. ` : ''}`
+    + `Immissione, inizio e fine trasporto sono obbligatorie: ${a.modulo === 'extra_raccolta' ? 'le date si inseriscono nella scheda' : 'le date si correggono nel file del portale e si ricaricano'}. L'elenco degli ordini è nell'alert.`;
+  return { gravita: a.severita === 'critico' || senzaFine ? 'critico' : 'attenzione', titolo, dettaglio, link: LINK_MODULO[a.modulo] || '/alert-engine' };
+}
+
 // Le regole degli alert sono salvate col loro codice (REGOLA_SCOSTAMENTO_TARGET):
 // a video si leggono come parole, tenendo maiuscole le sigle.
 const SIGLE = new Set(['SLA', 'ACI', 'FIR', 'PFU', 'PDR', 'ECT']);
@@ -133,8 +160,19 @@ export function cruscotto(dati) {
     perRegola.set(k, (perRegola.get(k) || 0) + 1);
   }
   alert.per_regola = [...perRegola.entries()].map(([regola, quanti]) => ({ regola, quanti })).sort((a, b) => b.quanti - a.quanti).slice(0, 8);
-  if (alert.critici > 0) voce('Alert', 'critico', `${alert.critici} alert critici aperti`, alert.per_regola.slice(0, 3).map(r => `${r.regola} (${r.quanti})`).join(' · '), '/alert-engine');
-  else if (alert.totale > 0) voce('Alert', 'attenzione', `${alert.totale} alert aperti`, alert.per_regola.slice(0, 3).map(r => `${r.regola} (${r.quanti})`).join(' · '), '/alert-engine');
+  // Le date obbligatorie hanno una voce per modulo e canale, qui sotto: la voce
+  // generica degli alert conta gli altri, per non dire due volte la stessa cosa.
+  const altri = (dati.alertAperti || []).filter(a => !eAlertDate(a));
+  const altriCritici = altri.filter(a => a.severita === 'critico').length;
+  const altriPerRegola = new Map();
+  for (const a of altri) { const k = nomeRegola(a.regola_nome) || a.titolo || 'Senza regola'; altriPerRegola.set(k, (altriPerRegola.get(k) || 0) + 1); }
+  const principali = [...altriPerRegola.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([regola, quanti]) => `${regola} (${quanti})`).join(' · ');
+  if (altriCritici > 0) voce('Alert', 'critico', `${altriCritici} alert critici aperti`, principali, '/alert-engine');
+  else if (altri.length > 0) voce('Alert', 'attenzione', `${altri.length} alert aperti`, principali, '/alert-engine');
+  for (const a of (dati.alertAperti || []).filter(eAlertDate)) {
+    const v = voceDate(a);
+    voce('Date obbligatorie', v.gravita, v.titolo, v.dettaglio, v.link);
+  }
 
   // Caricamenti: interrotti e dati vecchi
   const caricamenti = statoCaricamenti(dati.uploadLogs, oggi, dati.adessoMs, dati.tipiFile);

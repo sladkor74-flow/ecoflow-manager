@@ -35,10 +35,17 @@
 // secondarie e' lo stoccaggio, che per quel viaggio e' il produttore: Nappi Sud,
 // che raccoglie con un target suo, quando spedisce a Irigom o a Tecnogum non e'
 // piu' un raccoglitore ma il produttore del rifiuto che parte dal suo piazzale.
+//
+// Le rotte si leggono sui terminati con la fine trasporto nell'anno. Un
+// terminato a cui manca una data obbligatoria (immissione, inizio o fine
+// trasporto: regola dell'utente del 22/09/2026) si dice: chi non ha la fine
+// resta fuori dalle rotte e lo dice chi le mostra (controlloRotte); un
+// conferimento sospetto a cui manca l'immissione o l'inizio lo porta scritto.
 
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
+import { dateDaSistemare, testoDate } from "./movimenti.ts";
 
 export const QUOTA_SOSPETTA = 0.05;
 export const VIAGGI_SOSPETTI = 5;
@@ -141,6 +148,8 @@ export function conferimentiSospetti(righe, archivio) {
           viaggi_su_questa_destinazione: d.viaggi,
           viaggi_totali_origine: o.totale_viaggi,
           testo,
+          // le date obbligatorie che mancano o non tornano, solo se ce ne sono
+          ...(dateDaSistemare(r) ? { date_da_sistemare: testoDate(r) } : {}),
         });
       }
     }

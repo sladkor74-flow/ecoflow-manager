@@ -11,10 +11,12 @@ import { usePermessi } from '@/lib/permessi';
 
 const it = (g) => (g ? String(g).slice(0, 10).split('-').reverse().join('/') : '');
 
-// Quello che la pianificazione ha lasciato fuori o trovato storto: i terminati
-// senza fine trasporto (esclusi, mai ricollocati sulla chiusura), i ruoli
-// discordi e i fornitori registrati che sulla rete non lavorano. La funzione li
-// restituiva e nessuno li mostrava.
+// Quello che la pianificazione ha lasciato fuori o trovato storto: i formulari
+// terminati con le date obbligatorie da sistemare (immissione, inizio e fine
+// trasporto, regola del 22/09/2026; quelli senza fine trasporto sono esclusi dai
+// conti, mai ricollocati sulla chiusura), i ruoli discordi e i fornitori
+// registrati che sulla rete non lavorano. La funzione li restituiva e nessuno li
+// mostrava.
 function Segnalazioni({ data }) {
   const anomalie = (data && data.anomalie) || [];
   if (!data || (!anomalie.length && !data.caricamento_in_corso)) return null;
@@ -94,6 +96,9 @@ export default function PredittivitaSecondarie() {
           <span>
             Solo rete: ACI ed extra raccolta non entrano nella predittività. Target, consuntivi, primarie, secondarie,
             giacenze degli stoccaggi (classi 1-4 della rilevazione e movimenti di rete), ipotesi e proiezioni sono tutti della rete.
+            Il già arrivato di rete di un impianto è lo stesso in tutte le schede: le primarie arrivate al suo sito, anche quelle
+            scaricate nel suo piazzale al netto di quello che ne riparte per altri impianti (lo contano loro), più le secondarie
+            da altri stoccaggi; residuo = target meno già arrivato.
           </span>
         </p>
       </div>

@@ -1,7 +1,7 @@
 import React from 'react';
 import CellaMese from '@/components/dichiarazioni/CellaMese';
 import { MESI_BREVI, CANALI, MOTIVI_ASSENZA } from '@/lib/dichiarazioniImpianti';
-import { formatTonnellate } from '@/lib/utils';
+import { formatTonnellate, formatKg } from '@/lib/utils';
 import { Check, Mail, Minus } from 'lucide-react';
 
 // Riepilogo: una riga per impianto e canale, una colonna per mese.
@@ -25,6 +25,19 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
   const tutte = dati.siti.filter(s => s.tipo_destinazione !== 'stoc').flatMap(s => s.flussi.map(f => ({ sito: s, flusso: f })));
   const righe = tutte.filter(({ flusso }) => flusso.dichiarato_totale_t > 0 || flusso.mesi.some(m => m.non_dichiarato_kg > 0));
   const nascoste = tutte.length - righe.length;
+  // I formulari arrivati agli impianti senza fine trasporto non sono in nessuna
+  // casella: si dice quanti e quanto pesano, canale per canale, mai sommati
+  // (22/09/2026). Solo gli ARRIVI agli IMPIANTI, perche' le caselle sono quello:
+  // il totale del canale contava anche gli stoccaggi e le terziarie, che qui non
+  // comparirebbero comunque, e il numero "fuori dalle caselle" usciva gonfiato.
+  // Ogni formulario arriva a un impianto solo: sommarli per impianto non conta
+  // nessuno due volte.
+  const impianti = dati.siti.filter(s => s.tipo_destinazione !== 'stoc');
+  const fuoriDaiMesi = CANALI.map(c => {
+    const gruppi = impianti.flatMap(s => (s.date_da_sistemare || []).filter(g => g.canale === c.chiave && g.ruolo !== 'stoc'));
+    const quanti = (campo) => gruppi.reduce((tot, g) => tot + ((g.senza_fine && g.senza_fine[campo]) || 0), 0);
+    return { nome: c.nome, n: quanti('arrivi_n'), kg: quanti('arrivi_kg') };
+  }).filter(c => c.n > 0);
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
@@ -37,6 +50,12 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
         <span>Gli stoccaggi non compaiono perché non dichiarano: le secondarie che spediscono stanno sulla riga dell&apos;impianto che le riceve.</span>
         {nascoste > 0 && <span>Non compaiono {nascoste === 1 ? 'una riga' : `${nascoste} righe`} su cui non c'è mai stata una dichiarazione e su cui il portale non aspetta niente.</span>}
       </div>
+      {fuoriDaiMesi.length > 0 && (
+        <p className="text-xs text-amber-800">
+          Senza fine trasporto un formulario arrivato all&apos;impianto non è in nessun mese, e nelle caselle non compare finché la data non arriva:{' '}
+          {fuoriDaiMesi.map(c => `${c.nome} ${c.n} (${formatKg(c.kg)} kg)`).join(' · ')}. Quali sono, nella scheda Impianti.
+        </p>
+      )}
 
       <div className="border rounded-xl bg-card" data-scorre-lato>
         <table className="w-full text-xs">

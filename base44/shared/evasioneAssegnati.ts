@@ -49,7 +49,7 @@ import { formatoKgInTonnellate } from "./formato.ts";
 import { getRegioneFromProvincia } from "./dataEnrichment.ts";
 import { classeNormalizzata, nomiCoincidono, aggiungiGiorni, giorniTra, dataDaValore } from "./reportSettimanali.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
-import { giornoMovimento } from "./movimenti.ts";
+import { giornoMovimento, testoDate } from "./movimenti.ts";
 
 export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 const RE_ID_ORDINE = /^[A-Z]{2}[0-9]{6,10}$/;
@@ -147,6 +147,10 @@ export function normalizzaPrimaria(r, canale) {
     immesso: ymd(r.ordine_immesso_il),
     // La chiusura a portale non si legge nemmeno: qui niente la deve usare.
     fine: giornoMovimento(r) || null,
+    // Le date obbligatorie che mancano o non tornano, a parole ('' se sono a
+    // posto): un evaso del mese senza immissione o inizio trasporto si conta, ma
+    // si dice (regola dell'utente del 22/09/2026).
+    date: testoDate(r),
     kg: Math.round(Number(r.peso_effettivo) || 0),
     pdr: chiavePdr(r),
     classe: classeNormalizzata(r.classe) || classeNormalizzata(r.prodotto),
@@ -938,9 +942,13 @@ export function situazioneCanali({ chiave, anno, mese, oggi, terminati, assegnat
         produttore: a.produttore, comune: a.comune, provincia: a.provincia, classe: a.classe,
       }))
       .sort((x, y) => String(x.immesso || '9999').localeCompare(String(y.immesso || '9999')));
+    // Gli evasi del mese con un'altra data obbligatoria che manca o non torna:
+    // sono nei conti, per la fine trasporto, ma il formulario va corretto.
+    const conDate = new Map();
+    for (const t of evasi) if (t.date && !conDate.has(t.id_ordine)) conDate.set(t.id_ordine, { id_ordine: t.id_ordine, date: t.date });
     // evasi conta gli ordini (le richieste evase), non i formulari: sull'ACI un
     // formulario puo' stare su due ordini.
-    canali[canale] = { evasi: evasi.length, kg: evasi.reduce((t, m) => t + m.kg, 0), aperte, senza_fine: senzaFine };
+    canali[canale] = { evasi: evasi.length, kg: evasi.reduce((t, m) => t + m.kg, 0), aperte, senza_fine: senzaFine, date_da_sistemare: [...conDate.values()] };
   }
   const alert = [];
   const descrivi = (lista) => lista.slice(0, 4).map(a => `${a.id_ordine}${a.giorni !== null ? ` da ${a.giorni} ${a.giorni === 1 ? 'giorno' : 'giorni'}` : ''}`).join(', ') + (lista.length > 4 ? ` e altre ${lista.length - 4}` : '');
@@ -958,6 +966,16 @@ export function situazioneCanali({ chiave, anno, mese, oggi, terminati, assegnat
     const n = ids.length;
     const dove = canale === 'extra' ? 'la data va inserita nel modulo Extra Raccolta' : 'la data va inserita sul portale';
     alert.push({ gravita: 'media', tipo: 'senza_fine', messaggio: `${n === 1 ? `Un ordine ${NOMI_CANALI[canale]} risulta terminato` : `${n} ordini ${NOMI_CANALI[canale]} risultano terminati`} senza data di fine trasporto: ${n === 1 ? "e' escluso" : 'sono esclusi'} dal raccolto di ogni mese, ${dove}: ${ids.slice(0, 4).join(', ')}${n > 4 ? ` e altri ${n - 4}` : ''}.` });
+  }
+  // Gli evasi del mese con le date obbligatorie da sistemare (immissione, inizio
+  // e fine trasporto, regola dell'utente del 22/09/2026): contati, ma si dicono.
+  // Un alert per canale anche qui.
+  for (const canale of ['rete', 'aci', 'extra']) {
+    const voci = canali[canale].date_da_sistemare;
+    if (!voci.length) continue;
+    const n = voci.length;
+    const dove = canale === 'extra' ? 'vanno corrette nel modulo Extra Raccolta' : 'vanno corrette sul portale';
+    alert.push({ gravita: 'media', tipo: 'date_da_sistemare', messaggio: `${n === 1 ? `Un ordine ${NOMI_CANALI[canale]} evaso nel mese ha` : `${n} ordini ${NOMI_CANALI[canale]} evasi nel mese hanno`} le date obbligatorie da sistemare (immissione, inizio e fine trasporto): ${n === 1 ? "e' contato" : 'sono contati'} per la fine trasporto, ma le date ${dove}: ${voci.slice(0, 4).map(v => `${v.id_ordine} (${v.date})`).join(', ')}${n > 4 ? ` e altri ${n - 4}` : ''}.` });
   }
   return { canali, alert };
 }

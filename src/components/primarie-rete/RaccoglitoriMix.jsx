@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
+import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 
 const CLASSI = ['P', 'M', 'G1', 'G2'];
 
@@ -35,6 +36,10 @@ export default function RaccoglitoriMix({ data }) {
           </div>
         </div>
       )}
+
+      {/* Le date obbligatorie dei formulari terminati (regola del 22/09/2026):
+          chi non ha la fine trasporto non e' nel mix di nessun anno. */}
+      <RiepilogoDate canale="Rete" riepilogo={data.date_da_sistemare} nomi={['ritiro terminato', 'ritiri terminati']} />
 
       {/* View toggle */}
       <div className="flex items-center gap-3 flex-wrap">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { eTerminato, giornoElenco, giornoMovimento } from '@/lib/movimenti';
+import { eTerminato, giornoElenco, giornoMovimento, dateDaSistemare, testoDate } from '@/lib/movimenti';
 import { giornoRoma } from '@/lib/giornoItaliano';
 import { base44 } from '@/api/base44Client';
 import { Loader2, RefreshCw, Truck, Factory, Package, Filter, X } from 'lucide-react';
@@ -10,6 +10,7 @@ import MultiSelect from '@/components/shared/MultiSelect';
 import { formatNumber, formatIntero, fmtTon } from '@/lib/utils';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdOrdine';
+import AvvisoDateDaSistemare, { SegnoDate } from '@/components/primarie-rete/DateDaSistemare';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -19,6 +20,12 @@ const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Lug
 // non ha giorno, mese ne' anno: giornoOrdine ripiegava sull'immissione, e un
 // ritiro di luglio su un ordine di maggio finiva nel riepilogo di maggio. Resta
 // fuori da conteggi e riepiloghi e si segnala.
+//
+// Immissione, inizio e fine trasporto sono obbligatorie in ogni formulario
+// terminato (regola dell'utente, 22/09/2026): l'avviso non conta piu' i soli
+// senza fine trasporto ma ogni terminato con una data che manca o non torna, le
+// righe del dettaglio hanno il segno e il filtro "Solo date da sistemare" le
+// mostra, anche quelle senza periodo con un mese scelto.
 
 // I caricamenti che riscrivono l'archivio delle primarie ACI.
 const CARICAMENTI_ACI = ['primarie', 'primarie_aci'];
@@ -55,6 +62,7 @@ export default function PrimarieAci() {
   const [filterStato, setFilterStato] = useState([]);
   const [filterAnno, setFilterAnno] = useState([]);
   const [cercaId, setCercaId] = useState('');
+  const [soloDate, setSoloDate] = useState(false);
   const [scheda, setScheda] = useState('destinazioni');
   // Cercando un ID si passa al dettaglio dei record, in tutto l'archivio.
   useEffect(() => { if (cercaId.trim()) setScheda('dettaglio'); }, [cercaId]);
@@ -93,6 +101,7 @@ export default function PrimarieAci() {
       anno_ordine: g ? Number(g.slice(0, 4)) : null,
       fine_trasporto: giornoMovimento(r) || null,
       mese: g ? MESI[Number(g.slice(5, 7)) - 1] : null,
+      date_da_sistemare: testoDate(r),
     };
   }), [records]);
 
@@ -129,13 +138,18 @@ export default function PrimarieAci() {
   // trasporto, messi nel mese di immissione: questi si contano a parte.
   const conStato = filterStato.length > 0;
   const scelti = righe.filter(r => passaAltri(r) && (conStato || eTerminato(r)));
-  const senzaFine = scelti.filter(r => eTerminato(r) && !r.fine_trasporto);
   const contati = scelti.filter(r => r.giorno_ordine && passaPeriodo(r));
+  // Per le date da sistemare: gli ordini dell'elenco e i terminati senza fine
+  // trasporto che rispondono agli altri filtri, che nessun filtro di periodo prende.
+  const perDate = righe.filter(r => passaAltri(r) && (passaPeriodo(r) || (eTerminato(r) && !r.fine_trasporto)));
 
   // Il dettaglio si apre sui piu' recenti per fine trasporto: ordinato per
   // chiusura, fra i primi 500 mancava chi aveva ritirato ieri e non era ancora
   // chiuso a portale.
-  const dettaglio = cercaId.trim() ? righe.filter(r => corrispondeIdOrdine(r, cercaId)) : filtered;
+  const dettaglio = cercaId.trim()
+    ? righe.filter(r => corrispondeIdOrdine(r, cercaId))
+    : soloDate ? perDate.filter(dateDaSistemare) : filtered;
+  const vediDate = (v) => { setSoloDate(v); if (v) setScheda('dettaglio'); };
   const sortedDetail = useTableSort(dettaglio, 'giorno_ordine', 'desc');
 
   const totalKg = contati.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
@@ -209,15 +223,13 @@ export default function PrimarieAci() {
       <p className="text-xs text-muted-foreground -mt-3">
         Indicatori e riepiloghi per destinazione e per mese contano {conStato ? 'gli ordini degli stati scelti' : 'gli ordini terminati'} {anniDeiNumeri}, ciascuno nel mese e nell&apos;anno in cui è finito il trasporto{conStato ? ' (un ordine non terminato, in quelli dell\'immissione)' : ''}; il dettaglio elenca tutti gli ordini che rispondono ai filtri.
       </p>
-      {senzaFine.length > 0 && (
-        <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 text-sm">
-          {senzaFine.length === 1 ? '1 ordine terminato non ha' : `${formatIntero(senzaFine.length)} ordini terminati non hanno`} la fine del trasporto
-          {senzaFine.some(r => r.id_ordine) && <> (es. {senzaFine.map(r => r.id_ordine).filter(Boolean).slice(0, 5).join(', ')})</>}:
-          {senzaFine.length === 1
-            ? ' non ha un mese e resta fuori da indicatori e riepiloghi. Si vede nel dettaglio senza filtri di periodo o cercando l\'ID.'
-            : ' non hanno un mese e restano fuori da indicatori e riepiloghi. Si vedono nel dettaglio senza filtri di periodo o cercando l\'ID.'}
-        </div>
-      )}
+      <AvvisoDateDaSistemare
+        righe={perDate}
+        canale="ACI"
+        nota="Chi non ha la fine trasporto non ha un mese e resta fuori da indicatori e riepiloghi; gli altri sono contati nel mese della fine trasporto."
+        attivo={soloDate}
+        onFiltra={vediDate}
+      />
 
       <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loading || !records.length ? null : dettaglio.length} />
 
@@ -225,8 +237,8 @@ export default function PrimarieAci() {
       <div className="border rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri rapidi</span>
-          {(filterMese.length > 0 || filterDestinazione.length > 0 || filterProvincia.length > 0 || filterTrasportatore.length > 0 || filterData || filterRegione.length > 0 || filterStato.length > 0 || filterAnno.length > 0) && (
-            <button onClick={() => { setFilterMese([]); setFilterDestinazione([]); setFilterProvincia([]); setFilterTrasportatore([]); setFilterData(''); setFilterRegione([]); setFilterStato([]); setFilterAnno([]); }} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+          {(soloDate || filterMese.length > 0 || filterDestinazione.length > 0 || filterProvincia.length > 0 || filterTrasportatore.length > 0 || filterData || filterRegione.length > 0 || filterStato.length > 0 || filterAnno.length > 0) && (
+            <button onClick={() => { setFilterMese([]); setFilterDestinazione([]); setFilterProvincia([]); setFilterTrasportatore([]); setFilterData(''); setFilterRegione([]); setFilterStato([]); setFilterAnno([]); setSoloDate(false); }} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
               <X className="w-3 h-3" /> Reset
             </button>
           )}
@@ -240,6 +252,9 @@ export default function PrimarieAci() {
           <MultiSelect allLabel="Tutte le province" options={province} selected={filterProvincia} onChange={setFilterProvincia} />
           <MultiSelect allLabel="Tutti i trasportatori" options={trasportatori} selected={filterTrasportatore} onChange={setFilterTrasportatore} />
           <input type="date" value={filterData} onChange={e => setFilterData(e.target.value)} className="border rounded-md px-3 py-2 text-sm" placeholder="Fine trasporto" title="Giorno di fine trasporto (per gli ordini non terminati, giorno di immissione)" aria-label="Giorno di fine trasporto" />
+          <label className="inline-flex items-center gap-2 border rounded-md px-3 py-2 text-sm cursor-pointer" title="Solo i terminati a cui manca l'immissione, l'inizio o la fine del trasporto, o con le date nell'ordine sbagliato">
+            <input type="checkbox" checked={soloDate} onChange={e => vediDate(e.target.checked)} /> Solo date da sistemare
+          </label>
         </div>
       </div>
 
@@ -312,12 +327,18 @@ export default function PrimarieAci() {
               </tr></thead>
               <tbody>
                 {sortedDetail.sorted.slice(0, 500).map((r, i) => (
-                  <tr key={r.id} className={`border-t hover:bg-muted/30 ${i % 2 ? 'bg-muted/10' : ''}`}>
+                  <tr key={r.id} className={`border-t hover:bg-muted/30 ${r.date_da_sistemare ? 'bg-amber-50/60' : i % 2 ? 'bg-muted/10' : ''}`}>
                     {DETAIL_COLUMNS.map((col) => {
                       let val = r[col.key];
                       if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
                       else if (col.format === 'date') val = dataIt(val);
-                      return <td key={col.key} className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''}`}>{val ?? ''}</td>;
+                      return (
+                        <td key={col.key} className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''}`}>
+                          {/* il segno delle date da sistemare, col dettaglio nel title (22/09/2026) */}
+                          {col.key === 'id_ordine' && <SegnoDate testo={r.date_da_sistemare} />}
+                          {val ?? ''}
+                        </td>
+                      );
                     })}
                   </tr>
                 ))}

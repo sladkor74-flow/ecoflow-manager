@@ -80,6 +80,8 @@ function SezioneCanali({ riga, anno, mese, inRiscrittura }) {
           const aperteN = k.chiave === 'rete' ? riga.assegnati_ora : x.aperte.length;
           const evidenzia = k.chiave !== 'rete' && aperteN > 0;
           const senzaFine = (x.senza_fine || []).length;
+          // evasi del mese, contati, con un'altra data obbligatoria da sistemare (22/09/2026)
+          const conDate = x.date_da_sistemare || [];
           // Ordini, non formulari: sull'ACI un formulario puo' stare su due ordini.
           return (
             <div key={k.chiave} className="border rounded-lg p-3 bg-card">
@@ -92,6 +94,11 @@ function SezioneCanali({ riga, anno, mese, inRiscrittura }) {
               {senzaFine > 0 && (
                 <div className="text-xs text-red-600 font-medium tabular-nums" title={x.senza_fine.join(', ')}>
                   {senzaFine} {senzaFine === 1 ? 'terminato' : 'terminati'} senza fine trasporto, fuori dal conto
+                </div>
+              )}
+              {conDate.length > 0 && (
+                <div className="text-xs text-amber-700 font-medium tabular-nums" title={conDate.map(v => `${v.id_ordine}: ${v.date}`).join('\n')}>
+                  {conDate.length} {conDate.length === 1 ? 'evaso' : 'evasi'} con date da sistemare, nel conto
                 </div>
               )}
             </div>

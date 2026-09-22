@@ -6,7 +6,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, RefreshCw, AlertTriangle, CheckCircle2, FileSpreadsheet, Link2 } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
-import { formatTonnellate } from '@/lib/utils';
+import { formatTonnellate, formatKg, formatIntero } from '@/lib/utils';
+import { CANALI } from '@/lib/dichiarazioniImpianti';
 import Riepilogo from '@/components/dichiarazioni/Riepilogo';
 import SezioneImpianto from '@/components/dichiarazioni/SezioneImpianto';
 import Quadratura from '@/components/dichiarazioni/Quadratura';
@@ -31,6 +32,44 @@ function Kpi({ titolo, valore, nota, tono }) {
   );
 }
 
+// I formulari terminati senza tutte le date obbligatorie (regola dell'utente,
+// 22/09/2026: immissione, inizio e fine trasporto vanno sempre segnalate dove
+// mancano). Un conteggio per canale, ciascun formulario una volta sola: rete, ACI
+// ed extra raccolta non si sommano. Gli elenchi stanno nelle schede.
+// Dei senza fine trasporto, arrivi e partenze restano divisi, ciascuno col suo
+// peso (22/09/2026): un arrivo di PFU e una terziaria in uscita sono materiali
+// diversi, in versi opposti, e un peso che li somma non vuol dire niente.
+const senzaFineInBreve = (c) => {
+  const parti = [];
+  if (c.arrivi_senza_fine) parti.push(`${formatIntero(c.arrivi_senza_fine)} ${c.arrivi_senza_fine === 1 ? 'arrivato' : 'arrivati'} (${formatKg(c.arrivi_senza_fine_kg)} kg)`);
+  if (c.partenze_senza_fine) parti.push(`${formatIntero(c.partenze_senza_fine)} in uscita (${formatKg(c.partenze_senza_fine_kg)} kg)`);
+  return parti.length ? `, di cui senza fine trasporto ${parti.join(' e ')}` : '';
+};
+
+function DateInBreve({ conti }) {
+  if (!conti) return null;
+  const voci = CANALI.map(c => ({ ...c, ...(conti[c.chiave] || { n: 0, senza_fine: 0 }) })).filter(c => c.n > 0);
+  if (!voci.length) return null;
+  const senzaFine = voci.some(c => c.senza_fine > 0);
+  return (
+    <div className="flex items-start gap-2 text-xs border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2">
+      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+      <div className="space-y-0.5">
+        <p>
+          <strong>Formulari terminati con le date da sistemare</strong> (immissione, inizio e fine trasporto sono obbligatorie):{' '}
+          {voci.map(c => `${c.nome} ${formatIntero(c.n)}${senzaFineInBreve(c)}`).join(' · ')}.
+        </p>
+        {senzaFine && (
+          <p>
+            Senza fine trasporto un ordine non si colloca in nessun mese e non entra nella giacenza calcolata finche&apos; la data non arriva;
+            il portale, se lo conosce, lo conta. Quali sono lo trovi nelle schede Impianti e Stoccaggi, che cosa cambia nella Quadratura.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DichiarazioniImpianti() {
   const { isAdmin, soloLettura } = usePermessi();
   const [anno, setAnno] = useState(2026);
@@ -41,8 +80,9 @@ export default function DichiarazioniImpianti() {
   const [allineo, setAllineo] = useState(false);
   const [esitoAllineamento, setEsitoAllineamento] = useState(null);
 
-  const carica = useCallback(async () => {
-    setCaricamento(true);
+  // silenzioso: rilegge senza mostrare il caricamento (la seconda lettura dopo un salvataggio).
+  const carica = useCallback(async ({ silenzioso = false } = {}) => {
+    if (!silenzioso) setCaricamento(true);
     setErrore('');
     try {
       const res = await base44.functions.invoke('riepilogoDichiarazioni', { anno });
@@ -158,6 +198,8 @@ export default function DichiarazioniImpianti() {
             />
           </div>
 
+          <DateInBreve conti={totali.date_da_sistemare} />
+
           <Tabs defaultValue="riepilogo">
             <TabsList>
               <TabsTrigger value="riepilogo">Riepilogo</TabsTrigger>
@@ -200,7 +242,10 @@ export default function DichiarazioniImpianti() {
           mese={apertura.mese}
           anno={anno}
           onChiudi={() => setApertura(null)}
-          onSalvato={() => { setApertura(null); carica(); }}
+          // Subito dopo il salvataggio la funzione a volte legge ancora la versione di
+          // prima (22/09/2026: aprile di Irigom restava 'nessuna dichiarazione' finche'
+          // non si premeva Aggiorna): si rilegge una seconda volta poco dopo.
+          onSalvato={() => { setApertura(null); carica(); setTimeout(() => carica({ silenzioso: true }), 3000); }}
         />
       )}
     </div>

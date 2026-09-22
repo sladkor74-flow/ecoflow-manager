@@ -1,5 +1,5 @@
 import React from 'react';
-import { Warehouse, ClipboardList, FileCheck, PackageOpen, Target } from 'lucide-react';
+import { Warehouse, ClipboardList, FileCheck, PackageOpen, Target, CalendarX } from 'lucide-react';
 import { formatNumber, formatTonnellate } from '@/lib/utils';
 
 function fmt(n, dec = 2) {
@@ -26,6 +26,23 @@ export default function GiacenzeKpi({ totali }) {
     { label: 'Raccolto RETE nell\'anno', value: fmt(totali.conferito_primarie_t), unit: 't', icon: PackageOpen, color: 'text-accent', subtitle: `ACI ${fmt(totali.conferito_aci_t)} t · Extra ${fmt(totali.conferito_extra_t)} t, fuori target` },
     { label: 'Copertura target RETE', value: copertura != null ? fmt(copertura, 1) : '—', unit: '%', icon: Target, color: copertura != null && copertura >= 100 ? 'text-success' : 'text-amber-600' },
   ];
+  // I formulari terminati senza tutte le date obbligatorie (regola dell'utente,
+  // 22/09/2026): la rete in grande, ACI ed extra raccolta a parte, mai sommati.
+  const date = totali.date_da_sistemare;
+  if (date) {
+    const d = (c) => date[c] || { n: 0, senza_fine: 0 };
+    const qualcosa = ['RETE', 'ACI', 'EXTRA_RACCOLTA'].some(c => d(c).n > 0);
+    cards.push({
+      label: 'Formulari RETE con date da sistemare',
+      value: fmt(d('RETE').n, 0),
+      unit: '',
+      icon: CalendarX,
+      color: qualcosa ? 'text-amber-600' : 'text-success',
+      subtitle: qualcosa
+        ? `${d('RETE').senza_fine} senza fine trasporto, fuori dai periodi · ACI ${d('ACI').n} · Extra ${d('EXTRA_RACCOLTA').n}, a parte`
+        : 'immissione, inizio e fine trasporto ci sono tutte',
+    });
+  }
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">

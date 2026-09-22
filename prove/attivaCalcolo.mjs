@@ -2,7 +2,10 @@
 // con dati di esempio: periodo sul giorno italiano, tariffa chiusa valida fino
 // all'ultimo giorno, extra raccolta al prezzo dell'intervento, riconciliazione.
 // Si lancia con: npm run prove
+import { readFileSync } from 'node:fs';
 import { calcolaRigheAttiva, riconciliaAttiva, documentoValido } from '../base44/shared/attivaCalcolo.ts';
+import { TARIFFA_BASE_EXTRA_RACCOLTA, tariffaBaseExtraRaccolta } from '../base44/shared/ecotyreTariffe.ts';
+import { TARIFFA_BASE_EXTRA_RACCOLTA as BASE_PAGINA, prezzoAttivoExtra as prezzoAttivoPagina } from '../src/lib/extraRaccoltaCalc.js';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -53,8 +56,80 @@ const x1 = x.filter(r => r.ordine === 'EX1');
 verifica('extra x1: 0,46 t x 350 = 161 + 120 + 45,5', x1.length === 3 && x1[0].totale === 161 && x1[1].totale === 120 && x1[2].totale === 45.5 && x1[1].quantita === 0 && x1[1].descrizione === 'Sovracosto raccolta');
 verifica('extra x1: stesso ricavo della pagina Extra Raccolta (326,50)', Math.abs(x1.reduce((s, r) => s + r.totale, 0) - 326.5) < 0.001);
 verifica('extra x2: 0,4 t x 202 = 80,80', x.find(r => r.ordine === 'EX2').totale === 80.8);
-verifica('extra x4 a prezzo zero: da controllare + anomalia col prezzo di contratto', x.find(r => r.ordine === 'EX4').stato_validazione === 'da_controllare' && g.anomalie.some(a => a.tipo === 'prezzo_zero' && /202/.test(a.descrizione)));
+// Regola dell'utente del 22/09/2026: senza un prezzo scritto vale la tariffa
+// base Ecotyre, quella della tabella se c'e', altrimenti 202 €/t nel 2026.
+const x4 = x.find(r => r.ordine === 'EX4');
+verifica('extra x4 a prezzo zero: tariffa base dalla tabella, 0,3 t x 202 = 60,60, verificata', x4.totale === 60.6 && x4.tariffa_valore === 202 && x4.tariffa_id === 't-extra' && x4.stato_validazione === 'verificato' && /Tariffa base Ecotyre 2026: 202/.test(x4.note), JSON.stringify(x4));
+verifica('extra x4: con la base niente anomalia "prezzo zero"', !g.anomalie.some(a => a.tipo === 'prezzo_zero'), JSON.stringify(g.anomalie.filter(a => a.tipo === 'prezzo_zero')));
 verifica('secondaria esclusa segnalata', g.extra_secondarie_escluse === 1 && g.anomalie.some(a => a.tipo === 'informazione'));
+
+console.log('TARIFFA BASE EXTRA RACCOLTA');
+// senza la EXTRA_RACCOLTA in tabella: la costante dell'anno
+const senzaTabella = tariffe.filter(t => t.tipologia !== 'EXTRA_RACCOLTA');
+const gb = calcolaRigheAttiva({ reteAll: [], aciAll: [], extraAll, fornitori, tariffe: senzaTabella, anno: 2026, mese: 'Giugno' });
+const x4b = gb.righe.EXTRA_RACCOLTA.find(r => r.ordine === 'EX4');
+verifica('senza tabella: 202 €/t della base 2026, e la riga dice da dove viene', x4b.totale === 60.6 && x4b.tariffa_valore === 202 && x4b.tariffa_id === 'base-2026' && x4b.stato_validazione === 'verificato' && x4b.note === 'Tariffa base Ecotyre 2026: 202 €/t (sull\'intervento il prezzo non e\' scritto)', JSON.stringify(x4b));
+verifica('senza tabella: il prezzo scritto vince sulla base (x1 a 350)', gb.righe.EXTRA_RACCOLTA.find(r => r.ordine === 'EX1').tariffa_valore === 350 && !gb.anomalie.some(a => a.tipo === 'prezzo_zero'));
+// un anno senza base e senza tabella: la riga e' un errore, e l'anomalia resta
+const extra2027 = [{ ...base, id: 'y1', id_ordine: 'EY1', numero_fir: 'FY1', classe: 'A', peso_effettivo: 500, ordine_immesso_il: '2027-03-01T00:00:00.000Z', trasporto_iniziato_il: '2027-03-02T00:00:00.000Z', trasporto_finito_il: '2027-03-02T00:00:00.000Z', prezzo_attivo_t: 0 }];
+const g27 = calcolaRigheAttiva({ reteAll: [], aciAll: [], extraAll: extra2027, fornitori, tariffe: senzaTabella, anno: 2027, mese: 'Marzo' });
+verifica('2027 senza base: riga in errore a zero e anomalia "prezzo zero"', g27.righe.EXTRA_RACCOLTA[0].stato_validazione === 'errore' && g27.righe.EXTRA_RACCOLTA[0].totale === 0 && g27.anomalie.some(a => a.tipo === 'prezzo_zero' && /2027/.test(a.descrizione)), JSON.stringify(g27));
+// la copia per il browser (modulo Extra Raccolta) dice lo stesso numero
+verifica('base uguale nel gestionale e nella pagina Extra Raccolta', JSON.stringify(TARIFFA_BASE_EXTRA_RACCOLTA) === JSON.stringify(BASE_PAGINA) && tariffaBaseExtraRaccolta(2026) === 202 && tariffaBaseExtraRaccolta(2027) === null, JSON.stringify([TARIFFA_BASE_EXTRA_RACCOLTA, BASE_PAGINA]));
+verifica('la pagina Extra Raccolta usa la base dove la fattura la usa', prezzoAttivoPagina(extraAll[3]).valore === 202 && prezzoAttivoPagina(extraAll[3]).base === true && prezzoAttivoPagina(extraAll[0]).valore === 350 && prezzoAttivoPagina({ ...extraAll[3], tipo_movimento: 'secondaria' }).valore === 0);
+const sorgenteSeed = readFileSync(new URL('../base44/functions/seedTariffeAttive2026/entry.ts', import.meta.url), 'utf8');
+verifica('la semina delle tariffe attive 2026 usa la stessa base', /tipologia: 'EXTRA_RACCOLTA', valore: TARIFFA_BASE_EXTRA_RACCOLTA\[2026\]/.test(sorgenteSeed));
+// nella fattura entrano solo i terminati: un assegnato con la fine trasporto no
+const conAssegnato = calcolaRigheAttiva({ reteAll: [], aciAll: [], extraAll: [...extraAll, { ...extraAll[1], id: 'x9', id_ordine: 'EX9', stato: 'assegnato' }], fornitori, tariffe, anno: 2026, mese: 'Giugno' });
+verifica('extra assegnato: fuori dalla fattura anche con la fine trasporto nel mese', !conAssegnato.righe.EXTRA_RACCOLTA.some(r => r.ordine === 'EX9'));
+
+console.log('DATE OBBLIGATORIE');
+// Regola dell'utente del 22/09/2026: immissione, inizio e fine trasporto sono
+// obbligatorie. Un terminato senza fine resta fuori dal mese ma si dice, per
+// canale; uno del mese con altre date mancanti o fuori ordine si dice.
+const conDate = (r) => ({ ...r, ordine_immesso_il: '2026-06-01T00:00:00.000Z', trasporto_iniziato_il: r.trasporto_finito_il });
+const reteD = [
+  conDate({ ...base, id: 'd1', id_ordine: 'ET31', numero_fir: 'FD1', classe: 'A', peso_effettivo: 1000, trasporto_finito_il: '2026-06-10T00:00:00.000Z' }),
+  // terminato senza fine trasporto, immesso a giugno: potrebbe essere di giugno
+  { ...base, id: 'd2', id_ordine: 'ET32', numero_fir: 'FD2', classe: 'A', peso_effettivo: 1200, ordine_immesso_il: '2026-06-05T00:00:00.000Z', trasporto_iniziato_il: '2026-06-06T00:00:00.000Z' },
+  // del mese, ma senza inizio trasporto
+  { ...base, id: 'd3', id_ordine: 'ET33', numero_fir: 'FD3', classe: 'A', peso_effettivo: 800, ordine_immesso_il: '2026-06-02T00:00:00.000Z', trasporto_finito_il: '2026-06-12T00:00:00.000Z' },
+  // del mese, con la fine prima dell'inizio
+  { ...base, id: 'd4', id_ordine: 'ET34', numero_fir: 'FD4', classe: 'A', peso_effettivo: 900, ordine_immesso_il: '2026-06-02T00:00:00.000Z', trasporto_iniziato_il: '2026-06-15T00:00:00.000Z', trasporto_finito_il: '2026-06-14T00:00:00.000Z' },
+  // un assegnato senza fine non e' un terminato: niente
+  { ...base, id: 'd5', id_ordine: 'ET35', stato: 'assegnato', peso_effettivo: 0, ordine_immesso_il: '2026-06-05T00:00:00.000Z' },
+];
+const aciD = [conDate({ ...base, id: 'd6', id_ordine: 'EA31', numero_fir: 'FAD1', classe: 'C', regione: 'Campania', peso_effettivo: 2000, trasporto_finito_il: '2026-06-11T00:00:00.000Z' })];
+const gd = calcolaRigheAttiva({ reteAll: reteD, aciAll: aciD, extraAll: [], fornitori, tariffe, anno: 2026, mese: 'Giugno' });
+const sfR = gd.anomalie.find(a => a.tipo === 'date_senza_fine' && a.tipologia === 'RETE');
+verifica('senza fine trasporto: fuori dalla fattura del mese', !gd.righe.RETE.some(r => r.ordine === 'ET32') && gd.righe.RETE.length === 3, JSON.stringify(gd.righe.RETE.map(r => r.ordine)));
+verifica('senza fine trasporto: anomalia di rete con quanti e quali', !!sfR && sfR.quanti === 1 && sfR.ordini[0].ordine === 'ET32' && /ET32/.test(sfR.descrizione) && /fine trasporto/.test(sfR.descrizione) && sfR.tonnellate === 1.2, JSON.stringify(sfR));
+const dsR = gd.anomalie.find(a => a.tipo === 'date_da_sistemare' && a.tipologia === 'RETE');
+verifica('del mese con le date da sistemare: restano in fattura e si dicono', !!dsR && dsR.quanti === 2 && /ET33.*inizio trasporto/.test(dsR.descrizione) && /ET34.*fine trasporto prima dell'inizio/.test(dsR.descrizione) && gd.righe.RETE.some(r => r.ordine === 'ET33'), JSON.stringify(dsR));
+verifica('canali separati: l\'ACI in ordine non ha anomalie di date, e nessuna voce somma i canali', !gd.anomalie.some(a => String(a.tipo).startsWith('date_') && a.tipologia === 'ACI') && gd.anomalie.filter(a => String(a.tipo).startsWith('date_')).every(a => a.tipologia === 'RETE'));
+const md = calcolaRigheAttiva({ reteAll: reteD, aciAll: aciD, extraAll: [], fornitori, tariffe, anno: 2026, mese: 'Maggio' });
+verifica('immesso a giugno: a maggio non puo\' cadere, e non si segnala', !md.anomalie.some(a => a.tipo === 'date_senza_fine'));
+const ld = calcolaRigheAttiva({ reteAll: reteD, aciAll: aciD, extraAll: [], fornitori, tariffe, anno: 2026, mese: 'Luglio' });
+verifica('a luglio potrebbe ancora cadere: si segnala anche li\'', ld.anomalie.some(a => a.tipo === 'date_senza_fine' && a.tipologia === 'RETE' && a.quanti === 1));
+
+// A cavallo d'anno (revisione del 22/09/2026): immesso il 20/12/2025, iniziato il
+// 28/12, senza fine trasporto. Prima si segnalava solo a dicembre 2025 e mai nel
+// 2026, dove quasi certamente e' finito. Ora si segnala anche nei mesi del 2026
+// fino a quello in cui cadono i 60 giorni dopo l'inizio trasporto (26/02/2026).
+const aCavallo = [
+  { ...base, id: 'c1', id_ordine: 'ET41', numero_fir: 'FC1', classe: 'A', peso_effettivo: 1500, ordine_immesso_il: '2025-12-20T09:00:00.000Z', trasporto_iniziato_il: '2025-12-28T09:00:00.000Z' },
+  // immesso a ottobre 2025 senza inizio: 60 giorni dopo e' il 9 dicembre, a gennaio non cade piu'
+  { ...base, id: 'c2', id_ordine: 'ET42', numero_fir: 'FC2', classe: 'A', peso_effettivo: 700, ordine_immesso_il: '2025-10-10T09:00:00.000Z' },
+  // immesso nel 2024: nel 2026 non si ripete
+  { ...base, id: 'c3', id_ordine: 'ET43', numero_fir: 'FC3', classe: 'A', peso_effettivo: 900, ordine_immesso_il: '2024-12-20T09:00:00.000Z' },
+];
+const senzaFineDi = (anno, mese) => calcolaRigheAttiva({ reteAll: aCavallo, aciAll: [], extraAll: [], fornitori, tariffe, anno, mese }).anomalie.find(a => a.tipo === 'date_senza_fine' && a.tipologia === 'RETE');
+const dic25 = senzaFineDi(2025, 'Dicembre'), gen26 = senzaFineDi(2026, 'Gennaio'), feb26 = senzaFineDi(2026, 'Febbraio'), mar26 = senzaFineDi(2026, 'Marzo');
+verifica('dicembre 2025: si segnalano quello di dicembre e quello di ottobre', !!dic25 && dic25.quanti === 2 && dic25.ordini.some(o => o.ordine === 'ET41') && dic25.ordini.some(o => o.ordine === 'ET42'), JSON.stringify(dic25 && dic25.ordini));
+verifica('gennaio e febbraio 2026: si segnala quello immesso a dicembre, e il testo dice quando', !!gen26 && gen26.quanti === 1 && gen26.ordini[0].ordine === 'ET41' && /immesso il 20\/12\/2025: manca la data di fine trasporto/.test(gen26.descrizione) && /gennaio 2026/.test(gen26.descrizione)
+  && !!feb26 && feb26.quanti === 1 && feb26.ordini[0].ordine === 'ET41', JSON.stringify([gen26, feb26]));
+verifica('marzo 2026: oltre i 60 giorni non si ripete; quello di ottobre e quello del 2024 mai nel 2026', !mar26 && !gen26.ordini.some(o => o.ordine === 'ET42' || o.ordine === 'ET43'), JSON.stringify(mar26));
+verifica('...e resta fuori dalla fattura di ogni mese', ['Dicembre', 'Gennaio'].every((m, i) => calcolaRigheAttiva({ reteAll: aCavallo, aciAll: [], extraAll: [], fornitori, tariffe, anno: 2025 + i, mese: m }).righe.RETE.length === 0));
 
 const l = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: 2026, mese: 'Luglio' });
 console.log('LUGLIO');

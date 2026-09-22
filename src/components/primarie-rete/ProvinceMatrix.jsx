@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
   'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -38,6 +39,9 @@ export default function ProvinceMatrix({ data }) {
       <div className="text-sm text-muted-foreground">
         Anno {current_year} — mese corrente: {current_month}. Le celle rosse indicano 0 FIR nel mese (mese già trascorso).
       </div>
+      {/* Le date obbligatorie dei formulari terminati (regola del 22/09/2026):
+          solo se qualcuno le ha da sistemare. */}
+      <RiepilogoDate canale="Rete" riepilogo={data.date_da_sistemare} nomi={['ritiro terminato', 'ritiri terminati']} />
 
       {/* Matrix table */}
       <div className="border rounded-lg overflow-x-auto">

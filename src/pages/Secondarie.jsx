@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { eTerminato, giornoElenco, settimanaIso, MESI_MOVIMENTI } from '@/lib/movimenti';
+import { eTerminato, giornoElenco, settimanaIso, dateDaSistemare, testoDate, MESI_MOVIMENTI } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Route } from 'lucide-react';
 import AlertBadge from '@/components/alerts/AlertBadge';
@@ -20,7 +20,11 @@ import { canaleDi } from '@/lib/canaleSecondaria';
 // dei due canali in un numero solo.
 const CANALI = ['Rete', 'ACI'];
 const canaleRiga = (r) => (canaleDi(r) === 'ACI' ? 'ACI' : 'Rete');
-const filtriVuoti = (canale) => ({ canale: [canale], stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
+// date_da_sistemare: il filtro dei terminati a cui manca l'immissione, l'inizio
+// o la fine del trasporto, o con le date incoerenti (regola dell'utente,
+// 22/09/2026). Va anche alle funzioni: matrice, KPI ed Excel dicono le stesse
+// righe dello schermo.
+const filtriVuoti = (canale) => ({ canale: [canale], stoccaggio: [], destinazione: [], mese: [], settimana: [], classe: [], trasportatore: [], anno: [], provincia: [], regione: [], stato: [], data: '', date_da_sistemare: false });
 
 // Il periodo di una secondaria, con la stessa regola di computeSecondarieMatrix
 // e di exportSecondarie (giornoElenco): un terminato si colloca solo sulla fine
@@ -90,14 +94,20 @@ export default function Secondarie() {
           if (!filters.regione.includes((reg || '').trim())) continue;
         }
         if (filters.stato.length > 0 && !filters.stato.map(s => s.toLowerCase()).includes((r.stato || '').trim().toLowerCase())) continue;
+        if (filters.date_da_sistemare && !dateDaSistemare(r)) continue;
         // Mese, settimana, giorno e anno come nel server (matchesFilter e
         // matchesFilterString): senza periodo vale 'N/D', che nessuna opzione
-        // dei filtri propone.
+        // dei filtri propone. Con il filtro delle date da sistemare un terminato
+        // senza fine trasporto resta anche con un periodo scelto, come
+        // nell'Excel: e' proprio quello da correggere, e un periodo non l'ha.
         const p = periodoDi(r);
-        if (filters.mese.length > 0 && !filters.mese.includes(p ? p.mese : 'N/D')) continue;
-        if (filters.settimana.length > 0 && !filters.settimana.map(String).includes(String(p ? p.settimana : 'N/D'))) continue;
-        if (filters.data && (!p || p.giorno !== filters.data)) continue;
-        if (filters.anno.length > 0 && (!p || p.anno == null || !filters.anno.map(String).includes(String(p.anno)))) continue;
+        const fuoriPeriodo = filters.date_da_sistemare && p === null;
+        if (!fuoriPeriodo) {
+          if (filters.mese.length > 0 && !filters.mese.includes(p ? p.mese : 'N/D')) continue;
+          if (filters.settimana.length > 0 && !filters.settimana.map(String).includes(String(p ? p.settimana : 'N/D'))) continue;
+          if (filters.data && (!p || p.giorno !== filters.data)) continue;
+          if (filters.anno.length > 0 && (!p || p.anno == null || !filters.anno.map(String).includes(String(p.anno)))) continue;
+        }
         righe.push({
           ...r,
           peso_t: +((r.peso_effettivo || 0) / 1000).toFixed(3),
@@ -109,6 +119,8 @@ export default function Secondarie() {
           mese: p && p.mese !== 'N/D' ? p.mese : null,
           settimana: p && typeof p.settimana === 'number' ? p.settimana : null,
           senza_fine_trasporto: p === null,
+          // quale data obbligatoria manca o non torna, per il segno sulla riga
+          date_da_sistemare: testoDate(r),
         });
       }
       if (n === ultimoDettaglio.current) setRecords(righe);
@@ -154,6 +166,8 @@ export default function Secondarie() {
   const hasFilters = Object.entries(filters).some(([k, v]) => k !== 'canale' && (Array.isArray(v) ? v.length > 0 : v)) || searchIdOrdine;
   const resetFilters = () => { setFilters(filtriVuoti(canale)); setSearchIdOrdine(''); };
   const scegliCanale = (c) => setFilters(p => ({ ...p, canale: [c] }));
+  // Il filtro delle date da sistemare apre il dettaglio: e' li' che si vedono.
+  const vediDate = (v) => { setFilters(p => ({ ...p, date_da_sistemare: v })); if (v) setViewMode('detail'); };
   const opts = data?.filterOptions || {};
 
   // Stati garantiti sempre presenti nel filtro, anche senza record (valori normalizzati in minuscolo)
@@ -180,6 +194,8 @@ export default function Secondarie() {
     conFine: records.filter(r => eTerminato(r) && !r.senza_fine_trasporto).length,
     senzaFine: records.filter(r => r.senza_fine_trasporto).length,
     nonTerminati: records.filter(r => !eTerminato(r)).length,
+    // i terminati con una data obbligatoria che manca o non torna, fra quelli elencati
+    daSistemare: records.filter(r => r.date_da_sistemare).length,
   };
 
   // La sintesi per classe e' gia' per canale (una riga per canale|classe): qui
@@ -221,7 +237,7 @@ export default function Secondarie() {
         </div>
       ) : (
         <>
-          <SecondarieKpi kpi={data?.kpi} byClasse={data?.byClasse} canali={data?.canali} elencoSenzaFine={data?.senza_fine_trasporto} />
+          <SecondarieKpi kpi={data?.kpi} byClasse={data?.byClasse} canali={data?.canali} elencoSenzaFine={data?.senza_fine_trasporto} filtroDate={filters.date_da_sistemare} onFiltroDate={vediDate} />
 
           {/* Filtri rapidi */}
           <div className="border rounded-lg p-4 space-y-3">
@@ -246,6 +262,9 @@ export default function Secondarie() {
               <MultiSelect allLabel="Tutte le classi" options={opts.classi || []} selected={filters.classe} onChange={v => setFilters(p => ({ ...p, classe: v }))} />
               <MultiSelect allLabel="Tutti i trasportatori" options={opts.trasportatori || []} selected={filters.trasportatore} onChange={v => setFilters(p => ({ ...p, trasportatore: v }))} />
               <MultiSelect allLabel="Tutti gli anni" options={(opts.anni || []).map(a => String(a))} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v }))} />
+              <label className="inline-flex items-center gap-2 border rounded-md px-3 py-2 text-sm cursor-pointer" title="Solo i terminati a cui manca l'immissione, l'inizio o la fine del trasporto, o con le date nell'ordine sbagliato">
+                <input type="checkbox" checked={!!filters.date_da_sistemare} onChange={e => vediDate(e.target.checked)} /> Solo date da sistemare
+              </label>
             </div>
             <p className="text-xs text-muted-foreground">Giorno, settimana, mese e anno sono quelli della fine del trasporto; per un ordine non ancora trasportato, quelli dell&apos;immissione.</p>
           </div>
@@ -270,7 +289,7 @@ export default function Secondarie() {
                     Dettaglio Ordini Secondari {canale}
                     {!loadingRecords && (
                       <span className="ml-2 text-sm font-normal text-muted-foreground">
-                        (terminati con fine trasporto {formatIntero(conteggiDettaglio.conFine)}, senza fine trasporto {formatIntero(conteggiDettaglio.senzaFine)}, non terminati {formatIntero(conteggiDettaglio.nonTerminati)})
+                        (terminati con fine trasporto {formatIntero(conteggiDettaglio.conFine)}, senza fine trasporto {formatIntero(conteggiDettaglio.senzaFine)}, non terminati {formatIntero(conteggiDettaglio.nonTerminati)}{conteggiDettaglio.daSistemare > 0 ? `; con date da sistemare ${formatIntero(conteggiDettaglio.daSistemare)}` : ''})
                       </span>
                     )}
                   </h2>

@@ -18,6 +18,29 @@ const tTesto = (v) => r3(v).toFixed(3).replace(/0$/, '').replace('.', ',');   //
 
 // Da dove viene il prezzo di una riga di raccolta: destinazione, provincia o classe
 const ambitoRaccolta = (r) => [r.provincia !== '—' && r.provincia, r.destinazione !== '—' && `verso ${r.destinazione}`, r.classe !== '—' && `classe ${r.classe}`].filter(Boolean).join(' · ') || 'tutte';
+// Il viaggio misto (rete e ACI sullo stesso camion) in poche parole: la nota
+// completa della pagina nel PDF si taglierebbe alla terza riga. A viaggio
+// l'importo e' la quota dei chili di questo canale (regola dell'utente del
+// 22/09/2026), quindi "nr. di viaggi" per "COSTO" non fa il totale: la nota dice
+// quanti viaggi si pagano davvero.
+const numeroIt = (v) => r2(v).toFixed(2).replace('.', ',');
+const euroIt = (v) => { const [i, d] = r2(v).toFixed(2).split('.'); return `${i.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${d}`; };
+// Se l'altro canale non ha una tariffa per la tratta, la sua quota dei misti non
+// la paga nessuno (altro_canale_da_pagare): la nota breve lo dice, con l'importo
+// calcolato a questa tariffa (revisione del 22/09/2026).
+function notaSecondaria(r, tipologia) {
+  const daPagare = r.altro_canale_da_pagare;
+  if (!(r.viaggi_misti > 0) || !(r.nota_informativa || daPagare)) return r.note || null;
+  const altro = tipologia === 'ACI' ? 'la rete' : "l'ACI";
+  const misti = `${r.viaggi_misti} ${r.viaggi_misti === 1 ? 'misto' : 'misti'} con ${altro}`;
+  const breve = r.unita_misura === '€/viaggio'
+    ? `${r.viaggi_interi || 0} ${r.viaggi_interi === 1 ? 'intero' : 'interi'} + ${misti}, ${r.viaggi_misti === 1 ? 'diviso' : 'divisi'} per peso: ${numeroIt(r.viaggi_quota)} viaggi pagati`
+    : `di cui ${misti}: ogni canale paga i suoi chili`;
+  if (!daPagare) return breve;
+  const quali = `${daPagare.viaggi_misti} ${daPagare.viaggi_misti === 1 ? 'misto' : 'misti'}`;
+  return `${breve}; quota ${daPagare.canale} di ${quali} senza tariffa ${daPagare.canale} o TUTTE: ${euroIt(daPagare.importo)} € da pagare`;
+}
+
 const ambitoImpianto = (r) => [r.prestazione === 'CONFERIMENTO_STOCCAGGIO' ? 'Stoccaggio' : r.prestazione === 'TRATTAMENTO' ? 'Trattamento' : r.prestazione, r.classe !== '—' && `classe ${r.classe}`, r.provenienza && r.provenienza !== '—' && `da ${r.provenienza}`].filter(Boolean).join(' · ');
 
 /**
@@ -49,7 +72,7 @@ export function sezioniPassiva(result) {
   const secondarie = [];
   for (const f of result.trasporti_secondaria || []) {
     for (const r of f.righe || []) {
-      secondarie.push({ celle: [r.stoccaggio, r.trasportatore || f.fornitore, r.destinazione, r3(r.tonnellate), unita(r.unita_misura), r.tariffa_valore || 0, r.viaggi || 0, r2(r.importo), f.fornitore, r.note || null] });
+      secondarie.push({ celle: [r.stoccaggio, r.trasportatore || f.fornitore, r.destinazione, r3(r.tonnellate), unita(r.unita_misura), r.tariffa_valore || 0, r.viaggi || 0, r2(r.importo), f.fornitore, notaSecondaria(r, result.tipologia)] });
     }
   }
   secondarie.push({ stile: 'totale', celle: ['Totale complessivo', null, null, r3((result.trasporti_secondaria || []).reduce((s, f) => s + (f.totale_tonnellate || 0), 0)), null, null, null, r2(result.totali.trasporti_secondaria), null, null] });

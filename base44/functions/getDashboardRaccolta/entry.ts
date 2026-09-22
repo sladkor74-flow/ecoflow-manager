@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
-import { PROV_TO_REGION } from "../../shared/raccoltoCalculator.ts";
+import { PROV_TO_REGION, riepilogoDateVista } from "../../shared/raccoltoCalculator.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { periodoMovimento } from "../../shared/movimenti.ts";
 
@@ -132,6 +132,16 @@ export default async function(req) {
       anni,
       // terminati esclusi perche' senza fine trasporto, di qualunque anno: per canale, mai sommati
       senza_fine_trasporto: { rete: senzaFine(rete), aci: senzaFine(aci), extra: extraTutti.filter(({ p }) => !p).length },
+      // Le date da sistemare, un canale per volta (regola dell'utente, 22/09/2026:
+      // immissione, inizio e fine trasporto sono obbligatorie in ogni formulario
+      // terminato): i senza fine trasporto qui sopra, e i terminati del periodo
+      // scelto - lo stesso della raccolta del mese - con un'altra data che manca o
+      // non torna. Quelli sono contati nei numeri, ma vanno corretti.
+      date_da_sistemare: {
+        rete: riepilogoDateVista(rete, reteMese, 5),
+        aci: riepilogoDateVista(aci, aciMese, 5),
+        extra: riepilogoDateVista(extraTutti.map(({ r }) => r), extra.filter(({ p }) => mesi.length === 0 || mesi.includes(p.mese)).map(({ r }) => r), 5),
+      },
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Calendar, Layers, Edit3, Loader2, Warehouse, Truck, Factory, Building2 } from 'lucide-react';
+import { Calendar, Layers, Edit3, Loader2, Warehouse, Truck, Factory, Building2, Info } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { formatKg } from '@/lib/utils';
 import { usePermessi } from '@/lib/permessi';
@@ -64,9 +64,18 @@ function RuoloBadge({ ruolo }) {
   return <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded ${m.cls}`}><Icon className="w-2.5 h-2.5" />{m.label}</span>;
 }
 
+// Il doppio ruolo: impianto e piazzale dello stesso soggetto. Dal 22/09/2026 le
+// primarie scaricate nel piazzale fanno parte del gia' arrivato dell'impianto
+// (la predittivita' «si basa sul residuo totale che diminuisce anche con le
+// primarie»), al netto di quello che dal piazzale riparte per altri impianti:
+// la quota dell'impianto e' il gia' arrivato di rete, il plafond del piazzale e'
+// quello che parte per gli altri (per T-Cycle 1.050.000 e 250.000 kg). I
+// trasbordi dal piazzale all'impianto stesso non consumano il plafond. Il sito
+// sulla capacita' totale e' tutto quello che ci e' arrivato, ripartito compreso,
+// contato una volta sola (gia_arrivato_al_sito).
 function DoubleRoleProgress({ imp, stocMetric }) {
   const targetImp = imp.impianto.target || 0;
-  const consImp = imp.consuntivo_primarie || 0;
+  const consImp = imp.consuntivo || 0;
   const pctImp = targetImp > 0 ? Math.min(100, (consImp / targetImp) * 100) : 0;
 
   const plafondStoc = stocMetric?.plafond || 0;
@@ -74,7 +83,7 @@ function DoubleRoleProgress({ imp, stocMetric }) {
   const pctStoc = plafondStoc > 0 ? Math.min(100, (partitiStoc / plafondStoc) * 100) : 0;
 
   const totaleCap = imp.impianto.totale_capacity || 0;
-  const consTotale = consImp + partitiStoc;
+  const consTotale = imp.gia_arrivato_al_sito != null ? imp.gia_arrivato_al_sito : consImp;
   const pctTotale = totaleCap > 0 ? Math.min(100, (consTotale / totaleCap) * 100) : 0;
 
   return (
@@ -83,30 +92,33 @@ function DoubleRoleProgress({ imp, stocMetric }) {
         <Building2 className="w-4 h-4 text-violet-600" />
         <span className="text-sm font-semibold text-violet-700">Avanzamento Doppio Ruolo</span>
       </div>
-      {/* Quota impianto (Contabile) */}
+      {/* Quota impianto (Contabile): il gia' arrivato di rete, piazzale compreso al netto di quello che riparte */}
       <div>
         <div className="flex justify-between text-xs mb-1">
-          <span className="text-muted-foreground font-medium">Quota impianto <span className="inline-flex items-center gap-0.5 ml-1 text-[9px] bg-blue-100 text-blue-700 px-1 rounded">Contabile</span></span>
+          <span className="text-muted-foreground font-medium" title="Primarie all'impianto e nel piazzale, meno quello che dal piazzale riparte per altri impianti, più le secondarie da altri stoccaggi.">Già arrivato di rete, impianto e piazzale al netto <span className="inline-flex items-center gap-0.5 ml-1 text-[9px] bg-blue-100 text-blue-700 px-1 rounded">Contabile</span></span>
           <span className="font-medium">{fmt(consImp)} / {fmt(targetImp)} kg ({pctImp.toFixed(1)}%)</span>
         </div>
         <div className="h-2 bg-muted rounded-full overflow-hidden">
           <div className="h-full bg-blue-500" style={{ width: `${pctImp}%` }} />
         </div>
       </div>
-      {/* Quota stoccaggio (Operativa) */}
+      {/* Quota stoccaggio (Operativa): quanto e' partito dal piazzale per altri impianti; i trasbordi all'impianto stesso a parte */}
       <div>
         <div className="flex justify-between text-xs mb-1">
-          <span className="text-muted-foreground font-medium">Quota stoccaggio <span className="inline-flex items-center gap-0.5 ml-1 text-[9px] bg-amber-100 text-amber-700 px-1 rounded">Operativa</span></span>
+          <span className="text-muted-foreground font-medium">Partito dal piazzale per altri impianti <span className="inline-flex items-center gap-0.5 ml-1 text-[9px] bg-amber-100 text-amber-700 px-1 rounded">Operativa</span></span>
           <span className="font-medium">{fmt(partitiStoc)} / {fmt(plafondStoc)} kg ({pctStoc.toFixed(1)}%)</span>
         </div>
         <div className="h-2 bg-muted rounded-full overflow-hidden">
           <div className="h-full bg-amber-500" style={{ width: `${pctStoc}%` }} />
         </div>
+        {stocMetric?.kg_trasbordati_a_se > 0 && (
+          <p className="text-[10px] text-muted-foreground mt-1">Trasbordati dal piazzale all&apos;impianto: {fmt(stocMetric.kg_trasbordati_a_se)} kg, fuori dal plafond e dal già arrivato (le primarie del piazzale sono già contate).</p>
+        )}
       </div>
-      {/* Totale cumulativo */}
+      {/* Il sito sulla capacita' totale: tutto quello che ci e' arrivato, una volta sola (vedi sopra) */}
       <div className="pt-2 border-t">
         <div className="flex justify-between text-xs mb-1">
-          <span className="font-semibold text-violet-700">Totale cumulativo</span>
+          <span className="font-semibold text-violet-700">Già arrivato al sito sulla capacità totale</span>
           <span className="font-bold">{fmt(consTotale)} / {fmt(totaleCap)} kg ({pctTotale.toFixed(1)}%)</span>
         </div>
         <div className="h-2.5 bg-muted rounded-full overflow-hidden">
@@ -151,7 +163,9 @@ export default function PredittivitaDashboard({ data, onReload }) {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                   <div><p className="text-xs text-muted-foreground">Plafond</p><p className="font-bold">{fmt(stoc.plafond)} kg</p></div>
                   <div><p className="text-xs text-muted-foreground">Kg entrati in stoccaggio</p><p className="font-bold text-primary">{fmt(stoc.kg_entrati)} kg</p></div>
-                  <div><p className="text-xs text-muted-foreground">Kg partiti (secondarie)</p><p className="font-bold text-amber-600">{fmt(stoc.kg_partiti)} kg</p></div>
+                  {/* Solo verso altri impianti: i trasbordi all'impianto dello stesso soggetto non consumano il plafond (22/09/2026) */}
+                  <div><p className="text-xs text-muted-foreground">Kg partiti per altri impianti</p><p className="font-bold text-amber-600">{fmt(stoc.kg_partiti)} kg</p>
+                    {stoc.kg_trasbordati_a_se > 0 && <p className="text-[10px] text-muted-foreground">più {fmt(stoc.kg_trasbordati_a_se)} kg trasbordati all&apos;impianto stesso</p>}</div>
                   <div><p className="text-xs text-muted-foreground">Residuo plafond</p><p className="font-bold text-green-700">{fmt(stoc.residuo_plafond)} kg</p></div>
                 </div>
                 <div className="mt-3">
@@ -182,9 +196,11 @@ export default function PredittivitaDashboard({ data, onReload }) {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
                 <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Target di rete</p><p className="font-bold">{fmt(target)} kg</p></div>
-                {/* Somma dei soli fornitori configurati: non e' il "Gia' arrivato di rete" della Proiezione e del suggerimento del lunedi', che conta tutto quello che arriva all'impianto. */}
-                <div className="border rounded p-2" title="Somma dei fornitori configurati per questo impianto. Il «Già arrivato di rete» della Proiezione a fine anno e del suggerimento del lunedì conta invece tutte le primarie e le secondarie di rete arrivate all'impianto."><p className="text-xs text-muted-foreground">Consuntivo di rete</p><p className="font-bold">{fmt(imp.consuntivo)} kg</p>
-                  <p className="text-[10px] text-muted-foreground">Prim {fmt(imp.consuntivo_primarie)} · Sec {fmt(imp.consuntivo_secondarie)}</p></div>
+                {/* Il gia' arrivato di rete, lo stesso numero della Proiezione, del suggerimento del lunedi' e dell'assistente (regola del 22/09/2026). Prima qui c'era la somma dei soli fornitori configurati, senza le primarie scaricate nel piazzale. */}
+                <div className="border rounded p-2" title="Primarie di rete arrivate al sito dell'impianto, anche quelle scaricate nel suo piazzale al netto di quello che ne riparte per altri impianti (lo contano loro), più le secondarie di rete arrivate da altri stoccaggi. Le secondarie dal piazzale all'impianto stesso non si contano: quei PFU sono già fra le primarie. È lo stesso numero della Proiezione a fine anno e del suggerimento del lunedì."><p className="text-xs text-muted-foreground">Già arrivato di rete</p><p className="font-bold">{fmt(imp.consuntivo)} kg</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    Prim {fmt(imp.consuntivo_primarie)}{imp.consuntivo_primarie_piazzale > 0 && <> (piazzale {fmt(imp.consuntivo_primarie_piazzale_netta ?? imp.consuntivo_primarie_piazzale)}{imp.consuntivo_piazzale_ripartito > 0 && <>, al netto di {fmt(imp.consuntivo_piazzale_ripartito)} ripartiti</>})</>} · Sec da altri stoccaggi {fmt(imp.consuntivo_secondarie)}
+                  </p></div>
                 <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Residuo</p><p className="font-bold text-amber-600">{fmt(imp.residuo)} kg</p></div>
                 <div className="border rounded p-2"><p className="text-xs text-muted-foreground">Pianificato</p><p className="font-bold">{fmt(imp.totale_pianificato)} kg</p></div>
               </div>
@@ -194,6 +210,15 @@ export default function PredittivitaDashboard({ data, onReload }) {
                   <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
                 </div>
               </div>
+
+              {/* Come e' fatto il gia' arrivato: le secondarie dal piazzale a se stesso lasciate fuori, quelle partite dal piazzale verso altri impianti e il piazzale al netto. */}
+              {(imp.note || []).length > 0 && (
+                <ul className="text-[11px] text-muted-foreground space-y-1">
+                  {imp.note.map((n, i) => (
+                    <li key={i} className="flex items-start gap-1.5"><Info className="w-3 h-3 mt-0.5 shrink-0" /><span>{n}</span></li>
+                  ))}
+                </ul>
+              )}
 
               {imp.impianto.is_double_role && <DoubleRoleProgress imp={imp} stocMetric={stocMetric} />}
 
@@ -231,6 +256,10 @@ export default function PredittivitaDashboard({ data, onReload }) {
                               <EditableIpotesi value={f.ipotesi_mese_corrente || 0} onSave={(v) => saveIpotesi(f.id, v)} /></div>
                             <div><span className="text-muted-foreground">Kg/sett: </span><span className="font-medium">{fmt(f.kg_per_settimana)} · {f.viaggi_per_settimana} viaggi</span></div>
                           </div>
+                        )}
+                        {/* Il target di un fornitore che alimenta piu' impianti e' diviso fra loro: qui si dice quale parte e' di questo (la Sintesi per Fornitore mostra quella parte come target annuo). */}
+                        {f.nota_quota && (
+                          <p className="text-[11px] text-muted-foreground flex items-start gap-1"><Info className="w-3 h-3 mt-0.5 shrink-0" /><span>{f.nota_quota}</span></p>
                         )}
                         <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                           <div className={`h-full ${isStocc ? 'bg-primary' : 'bg-accent'}`} style={{ width: `${fPct}%` }} />
@@ -275,7 +304,8 @@ export default function PredittivitaDashboard({ data, onReload }) {
                       <td className="px-3 py-2 font-medium">{imp.impianto.nome}</td>
                       <td className="px-3 py-2"><span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-primary text-primary-foreground"><Factory className="w-2.5 h-2.5" />Impianto</span></td>
                       <td className="px-3 py-2 text-right">{fmt(imp.impianto.target)}</td>
-                      <td className="px-3 py-2 text-right">{fmt(imp.consuntivo_primarie)}</td>
+                      {/* il gia' arrivato di rete dell'impianto, piazzale compreso al netto, come nelle schede sopra */}
+                      <td className="px-3 py-2 text-right">{fmt(imp.consuntivo)}</td>
                       <td className="px-3 py-2 text-right">—</td>
                       <td className={`px-3 py-2 text-right font-bold ${imp.residuo <= 0 ? 'text-green-700' : 'text-amber-600'}`}>{fmt(imp.residuo)}</td>
                       <td className="px-3 py-2 text-right">—</td>

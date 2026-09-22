@@ -74,8 +74,12 @@ function CampoTarget({ riga }) {
 const alertDellaRiga = (riga) => [...(riga.controllo ? riga.controllo.alert : []), ...(riga.alert_canali || [])];
 // Ordini terminati senza fine trasporto: esclusi da ogni conto, ma si vedono.
 const senzaFine = (canale) => (canale && canale.senza_fine ? canale.senza_fine.length : 0);
+// Evasi del mese con un'altra data obbligatoria che manca o non torna: contati,
+// ma si vedono anche loro (regola dell'utente del 22/09/2026).
+const conDate = (canale) => (canale && canale.date_da_sistemare ? canale.date_da_sistemare.length : 0);
+const titoloDate = (canale) => (canale && canale.date_da_sistemare ? canale.date_da_sistemare.map(v => `${v.id_ordine}: ${v.date}`).join('\n') : '');
 const attivitaCanali = (riga) => ['aci', 'extra'].some(k => riga.canali && (riga.canali[k].evasi > 0 || riga.canali[k].aperte.length > 0))
-  || ['rete', 'aci', 'extra'].some(k => riga.canali && senzaFine(riga.canali[k]) > 0);
+  || ['rete', 'aci', 'extra'].some(k => riga.canali && (senzaFine(riga.canali[k]) > 0 || conDate(riga.canali[k]) > 0));
 
 function AlertBadge({ riga }) {
   const alert = alertDellaRiga(riga);
@@ -93,12 +97,14 @@ function AlertBadge({ riga }) {
 
 function CanaleBreve({ etichetta, canale, tono }) {
   const nSenzaFine = senzaFine(canale);
+  const nDate = conDate(canale);
   if (!canale || (!canale.evasi && !canale.aperte.length && !nSenzaFine)) return <div className="text-xs text-muted-foreground">{etichetta} —</div>;
   return (
     <div className="text-xs tabular-nums">
       <span className="text-muted-foreground">{etichetta}</span> {tonnellate(canale.kg)} t · {canale.evasi} {canale.evasi === 1 ? 'evaso' : 'evasi'}
       {canale.aperte.length > 0 && <span className={`ml-1 font-semibold ${tono}`}>· {canale.aperte.length} {canale.aperte.length === 1 ? 'aperta' : 'aperte'}</span>}
       {nSenzaFine > 0 && <span className="ml-1 font-semibold text-red-600" title="Terminati senza data di fine trasporto: esclusi dal raccolto">· {nSenzaFine} senza fine trasporto</span>}
+      {nDate > 0 && <span className="ml-1 font-semibold text-amber-700" title={`Evasi del mese, contati, con le date obbligatorie da sistemare:\n${titoloDate(canale)}`}>· {nDate} con date da sistemare</span>}
     </div>
   );
 }
@@ -127,6 +133,11 @@ function RigaRaccoglitore({ riga, isAdmin, occupato, inRiscrittura, onCarica, on
         {riga.canali && senzaFine(riga.canali.rete) > 0 && (
           <div className="text-xs text-red-600 font-medium mt-0.5" title="Terminati senza data di fine trasporto: esclusi dal raccolto">
             {senzaFine(riga.canali.rete)} senza fine trasporto, esclus{senzaFine(riga.canali.rete) === 1 ? 'o' : 'i'}
+          </div>
+        )}
+        {riga.canali && conDate(riga.canali.rete) > 0 && (
+          <div className="text-xs text-amber-700 font-medium mt-0.5" title={`Evasi del mese, contati, con le date obbligatorie da sistemare:\n${titoloDate(riga.canali.rete)}`}>
+            {conDate(riga.canali.rete)} con date da sistemare, contat{conDate(riga.canali.rete) === 1 ? 'o' : 'i'}
           </div>
         )}
         {inRiscrittura && <InRiscrittura />}

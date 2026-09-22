@@ -2,6 +2,7 @@ import React from 'react';
 import { useTableSort } from '@/hooks/useTableSort';
 import SortHeader from '@/components/shared/SortHeader';
 import { formatNumber, fmtTon } from '@/lib/utils';
+import { SegnoDate } from '@/components/primarie-rete/DateDaSistemare';
 
 const COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
@@ -43,13 +44,20 @@ export default function TerziarieTable({ records, loading }) {
         </thead>
         <tbody>
           {sorted.map((r) => (
-            <tr key={r.id + r.id_ordine} className="border-t hover:bg-muted/50">
+            <tr key={r.id + r.id_ordine} className={`border-t hover:bg-muted/50 ${r.date_da_sistemare ? 'bg-amber-50/60' : ''}`}>
               {COLUMNS.map((col) => {
                 let val = r[col.key];
                 if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
                 else if (col.format === 'ton') val = val != null ? fmtTon(val) : '';
                 else if (col.format === 'date') val = val ? new Date(val).toLocaleDateString('it-IT') : '';
-                return <td key={col.key} className="px-3 py-2 whitespace-nowrap">{val ?? ''}</td>;
+                return (
+                  <td key={col.key} className="px-3 py-2 whitespace-nowrap">
+                    {/* il segno delle date da sistemare, col dettaglio nel title (22/09/2026):
+                        la pagina lo mette in date_da_sistemare, testoDate di movimenti */}
+                    {col.key === 'id_ordine' && <SegnoDate testo={r.date_da_sistemare} />}
+                    {val ?? ''}
+                  </td>
+                );
               })}
             </tr>
           ))}

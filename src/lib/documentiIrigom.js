@@ -11,6 +11,12 @@
 //
 // Il Word si converte in PDF da Word ("Salva con nome", PDF): nel browser non
 // c'e' un modo di farlo che tenga carta intestata e firma cosi' come sono.
+//
+// L'extra raccolta partita con la nave: a portale l'ultima terziaria si chiude
+// col peso intero, rete piu' extra, ma nei Word e nel riepilogo Excel la
+// terziaria porta la sola parte di rete e l'extra ha la sua riga, con la stessa
+// terziaria, come nei documenti consegnati per agosto 2026. Il riepilogo dice in
+// una riga a parte il totale da caricare a portale (regola del 22/09/2026).
 
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { MESI, MAX_PER_DICHIARAZIONE_KG, migliaia } from './praticaIrigom.js';
@@ -294,7 +300,7 @@ export async function excelDelMese({ pratica, contesto }) {
     ws.getCell(r, 1).value = `per il mese di ${String(mese).toLowerCase()} dichiarare extraraccolta ${kg(extra.totale_kg)} kg (pfu) = ${kg(extra.cippato_kg)} Kg (cipp) + ${kg(extra.ferro_kg)} Kg (fe)`;
     riempi(ws.getCell(r, 1), giallo);
     r++;
-    ws.getCell(r, 1).value = `formulari: ${(extra.formulari || []).map(f => `${f.formulario} (${kg(f.peso_kg)} kg, fine trasporto ${dataIt(f.fine_trasporto)})`).join(', ')}; terziaria ${extra.terziaria || '—'}, allegato VII ${extra.allegato}`;
+    ws.getCell(r, 1).value = `formulari: ${(extra.formulari || []).map(f => `${f.formulario} (${kg(f.peso_kg)} kg, fine trasporto ${dataIt(f.fine_trasporto)})`).join(', ')}; terziaria ${extra.terziaria || '—'}, allegato VII ${extra.allegato}${extra.nota ? `; ${extra.nota}` : ''}`;
     r += 2;
     intestazione(CSSC);
     const riga = ws.getRow(r);
@@ -335,7 +341,11 @@ export async function excelDelMese({ pratica, contesto }) {
   totTer.font = { bold: true };
   const rigaTotTer = r - 1;
 
-  // Il valore da riportare nel riepilogo in alto: CSS-C + terziarie, la sola rete.
+  // I valori da riportare nel riepilogo in alto, separati come nel foglio
+  // DICHIARAZIONI: la riga IRIGOM e' la sola rete (CSS-C + terziarie senza
+  // l'extra), la riga EXTRA RACCOLTA l'extra. Regola dell'utente del 22/09/2026:
+  // «nel riepilogo lascia così com'è separati», la riga dell'extra la chiude lui a
+  // mano, perche' e' gestita fuori portale.
   r += 2;
   ws.getCell(r, 1).value = `Riepilogo, riga IRIGOM, ${mese}:`;
   ws.getCell(r, 1).font = { bold: true };
@@ -350,6 +360,21 @@ export async function excelDelMese({ pratica, contesto }) {
     ws.getCell(r, 5).numFmt = '#,##0';
     riempi(ws.getCell(r, 5), 'FF70AD47');
   }
+  // E, ben visibile, quanto si carica davvero a portale: l'ultima terziaria si
+  // chiude col suo peso intero, parte di rete piu' extra (regola del 22/09/2026).
+  r += 2;
+  const chiusa = pratica.chiusura_ultima_terziaria;
+  const portale = pratica.portale_kg;
+  ws.mergeCells(r, 1, r, 13);
+  const rigaPortale = ws.getCell(r, 1);
+  rigaPortale.value = extra && chiusa && chiusa.extra_kg
+    ? `Totale da dichiarare a portale: ${kg(portale)} kg; la terziaria ${chiusa.terziaria || `dell'allegato VII n. ${chiusa.allegato}`} si chiude a portale a ${kg(chiusa.portale_kg)} kg (${kg(chiusa.rete_kg)} di rete + ${kg(chiusa.extra_kg)} di extra raccolta)`
+    : `Totale da dichiarare a portale: ${kg(portale)} kg (CSS-C + terziarie)`;
+  rigaPortale.font = { bold: true, size: 12, color: { argb: 'FFC00000' } };
+  rigaPortale.alignment = { vertical: 'middle', wrapText: true };
+  riempi(rigaPortale, giallo);
+  bordi(rigaPortale);
+  ws.getRow(r).height = 22;
 
   // Secondo foglio: le letture, le scelte e i controlli, cosi' il perche' resta scritto.
   const c = wb.addWorksheet('Controlli', { views: [{ showGridLines: false }] });
@@ -357,18 +382,27 @@ export async function excelDelMese({ pratica, contesto }) {
   const voce = (a, b, nota = '') => { const riga = c.addRow([a, b, nota]); if (typeof b === 'number') riga.getCell(2).numFmt = '#,##0'; return riga; };
   c.addRow([`Dichiarazioni Irigom · ${mese} ${anno}`]).font = { bold: true, size: 14 };
   c.addRow([]);
+  // Le voci seguono la regola del 22/09/2026: le due letture danno il totale da
+  // caricare a portale, extra raccolta partita con la nave compresa, e se ne
+  // mostrano le due parti. Superato: "Deve restare a portale (cippato + interi),
+  // foglio Cons., colonne AA + AC" (regola del 19/09) e la giacenza che dava la
+  // sola rete.
   const l = pratica.letture;
   voce('Lettura usata', l.usata === 'giacenza' ? 'giacenza a portale' : 'uscite del registro');
-  voce('Uscite del registro: ciabattato + ferro + CSS-C', l.uscite.totale_kg, 'foglio Cons., riga del mese, colonne V + X + Y (extra raccolta compresa)');
-  voce('Uscite del registro, sola rete', l.uscite.rete_kg);
+  voce('Totale a portale secondo le uscite del registro', l.uscite.totale_kg, `foglio Cons., riga del mese, colonne V + X + Y: ciabattato + ferro + CSS-C usciti${pratica.extra_kg ? ', extra raccolta compresa' : ''}`);
   if (l.giacenza) {
-    voce('Giacenza di rete a portale a fine mese', l.giacenza.portale_kg, 'per fine trasporto, aggiornata ai caricamenti');
-    voce('Deve restare a portale (cippato + interi)', l.giacenza.resta_kg, 'foglio Cons., colonne AA + AC');
-    voce('Da dichiarare secondo la giacenza', l.giacenza.rete_kg);
+    voce('Giacenza di rete a portale a fine mese', l.giacenza.portale_fine_mese_kg, 'per fine trasporto, aggiornata ai caricamenti');
+    voce('Deve restare a portale (gomma AD + ferro AE, meno l\'extra ancora in impianto)', l.giacenza.resta_kg,
+      `foglio Cons., riga del mese, colonne AD + AE${l.giacenza.extra_in_giacenza_kg ? `, meno ${kg(l.giacenza.extra_in_giacenza_kg)} kg di extra raccolta arrivata e ancora in impianto` : ''}`);
+    voce('Totale a portale secondo la giacenza', l.giacenza.totale_kg, 'giacenza a portale meno quello che deve restarci');
     voce('Scarto fra le due letture', l.scarto_kg, 'se non e\' zero va capito prima di caricare a portale');
   }
-  voce('Dichiarato di rete (CSS-C + terziarie)', pratica.rete_kg);
-  voce('Extra raccolta, a parte', pratica.extra_kg);
+  voce('Totale da dichiarare a portale (CSS-C + terziarie)', pratica.portale_kg, pratica.extra_kg ? 'ogni terziaria col peso con cui si chiude: l\'ultima porta anche l\'extra raccolta' : 'tutto di rete');
+  if (pratica.extra_kg) {
+    voce('di cui rete (CSS-C + terziarie senza l\'extra)', pratica.rete_kg, 'riga IRIGOM del riepilogo');
+    voce('di cui extra raccolta', pratica.extra_kg, 'riga EXTRA RACCOLTA del riepilogo, a parte, sul mese del formulario: e\' gestita fuori portale e la chiude a mano l\'utente');
+    if (chiusa) voce(`Chiusura a portale della terziaria ${chiusa.terziaria || `dell'allegato VII n. ${chiusa.allegato}`}`, chiusa.portale_kg, `${kg(chiusa.rete_kg)} di rete + ${kg(chiusa.extra_kg)} di extra raccolta`);
+  }
   voce('Terziarie da aprire a portale', pratica.terziarie_da_aprire);
   voce('Allegati VII scelti', pratica.allegati.scelti.map(a => a.numero).join(', '));
   c.addRow([]);
@@ -383,6 +417,33 @@ export async function excelDelMese({ pratica, contesto }) {
 
 // ---------------------------------------------------------------------------
 // La cartella
+
+/**
+ * I dati del mese per il file di gestione: il blocco del foglio DICHIARAZIONI di
+ * "Gestione Ecotyre 2026 NEW (1).xlsx" lo scrive, con Excel, lo script
+ * strumenti/irigom/scrivi_blocco_mese.ps1 (fuori dal gestionale, nella cartella
+ * di lavoro). Stessi numeri del riepilogo Excel: le terziarie con la parte di
+ * rete, l'extra raccolta a parte con la terziaria che la porta e la chiusura a
+ * portale di quella terziaria. Procedura dell'utente del 22/09/2026.
+ */
+export function datiFileGestione({ pratica, contesto }) {
+  const extra = pratica.extra;
+  return {
+    versione: 1,
+    anno: contesto.anno,
+    mese: contesto.mese,
+    partenza: (contesto.nave && contesto.nave.partenza) || '',
+    ferro: pratica.ferro.tabella.map(r => ({ data: r.data, trasportatore: r.trasportatore, destinatario: r.destinatario, formulario: r.formulario, peso_kg: r.kg, quota_kg: r.quota_kg })),
+    cssc: pratica.cssc.righe.map(r => ({ ddt: r.ddt, parte: r.parte || '', data: r.data, cssc_kg: r.cssc_kg, ferro_kg: r.ferro_kg })),
+    terziarie: pratica.terziarie.righe.map(r => ({ terziaria: r.terziaria || '', trasportatore: r.trasportatore, destinatario: r.destinatario, allegato: r.allegato, peso_allegato_kg: r.peso_allegato_kg, data: r.data, cippato_kg: r.cippato_kg, ferro_kg: r.ferro_kg })),
+    extra: extra ? {
+      totale_kg: extra.totale_kg, cippato_kg: extra.cippato_kg, ferro_kg: extra.ferro_kg,
+      terziaria: extra.terziaria || '', allegato: extra.allegato, chiusura_terziaria_kg: extra.chiusura_terziaria_kg,
+      formulari: (extra.formulari || []).map(f => ({ formulario: f.formulario, peso_kg: f.peso_kg, fine_trasporto: f.fine_trasporto })),
+    } : null,
+    totale_portale_kg: pratica.portale_kg,
+  };
+}
 
 /**
  * La cartella del mese, come sta nel repository sotto IRIGOM/<MESE>: i Word,

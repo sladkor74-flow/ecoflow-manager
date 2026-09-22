@@ -6,7 +6,8 @@ import { computeRaccoltoData, MESI } from "../../shared/raccoltoCalculator.ts";
 import { aggregaTargetMensili, aggregaTargetAnnui } from "../../shared/targetRaccoglitori.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 
-// Esporta i dati di Status & Target in un file Excel (3 fogli: Raccoglitori, Regioni, Impianti).
+// Esporta i dati di Status & Target in un file Excel (3 fogli: Raccoglitori, Regioni, Impianti;
+// un quarto, Date da sistemare, quando qualche terminato di rete ne ha).
 // Payload: { anno? }
 // Ritorna: { file_base64, filename }
 export default async function(req) {
@@ -19,8 +20,9 @@ export default async function(req) {
     const anno = Number(body.anno) || Number(oggiRoma().slice(0, 4));
 
     // 1. Calcola raccolto dell'anno
-    // Target contro il solo canale RETE.
-    const raccolto = await computeRaccoltoData(base44, { anno: [anno], canale: 'rete' });
+    // Target contro il solo canale RETE. Le date da sistemare si vogliono tutte:
+    // vanno in un foglio del file.
+    const raccolto = await computeRaccoltoData(base44, { anno: [anno], canale: 'rete' }, { esempiDate: Infinity });
 
     // 2. Leggi target dell'anno da Target & Status
     const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter({ anno }, '-created_date', 10000));
@@ -83,11 +85,32 @@ export default async function(req) {
     XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, XLSX.utils.aoa_to_sheet(regioniRows)), "Regioni");
     XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, XLSX.utils.aoa_to_sheet(impiantiRows)), "Impianti");
 
+    // 8. Le date da sistemare (regola dell'utente, 22/09/2026): immissione, inizio
+    // e fine trasporto sono obbligatorie in ogni formulario terminato. Chi non ha
+    // la fine trasporto e' fuori dal raccolto di questo file, di qualunque anno
+    // sia; gli altri ci sono, nel mese della fine trasporto, ma vanno corretti a
+    // portale lo stesso. Il foglio c'e' solo se ce n'e' almeno uno.
+    const daSistemare = raccolto.date_da_sistemare;
+    if (daSistemare && daSistemare.totale > 0) {
+      const giornoIt = (g) => (g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : '');
+      const righeDate = [
+        [`Rete: ${daSistemare.totale} ordini terminati con date da sistemare (${daSistemare.testo})`],
+        [],
+        ['Regione', 'Raccoglitore', 'ID Ordine', 'Numero FIR', 'Fine trasporto', 'Date da sistemare', 'Nel raccolto'],
+        ...daSistemare.esempi.map(e => [
+          e.regione, e.trasportatore, e.id_ordine, e.numero_fir, giornoIt(e.fine_trasporto), e.testo,
+          e.fine_trasporto ? 'Sì, nel mese della fine trasporto' : 'No: senza fine trasporto non ha un mese',
+        ]),
+      ];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(righeDate), "Date da sistemare");
+    }
+
     const xlsxBase64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
 
     return Response.json({
       file_base64: xlsxBase64,
-      filename: `Status_Target_${new Date().toISOString().slice(0, 10)}.xlsx`
+      // il giorno italiano: fra mezzanotte e le due quello UTC e' ancora ieri
+      filename: `Status_Target_${oggiRoma()}.xlsx`
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

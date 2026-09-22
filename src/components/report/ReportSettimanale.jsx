@@ -5,12 +5,18 @@ import { useToast } from '@/components/ui/use-toast';
 import { MESI } from '@/lib/pfuConstants';
 import { formatTonnellate, formatPercentuale } from '@/lib/utils';
 import { dataOra } from '@/lib/target';
-import { esportaReportSettimanalePdf } from '@/lib/reportSettimanaleExport';
-import { Loader2, RefreshCw, FileDown, CalendarRange, Target, Truck, TrendingUp, Hourglass, Sigma } from 'lucide-react';
+import { esportaReportSettimanalePdf, frasiDateDaSistemare, INTRO_DATE } from '@/lib/reportSettimanaleExport';
+import { Loader2, RefreshCw, FileDown, CalendarRange, Target, Truck, TrendingUp, Hourglass, Sigma, AlertTriangle } from 'lucide-react';
 
 // Report settimanale della raccolta primaria RETE: target del mese, raccolto per
 // settimana, residuo del mese e andamento annuo per regione e raccoglitore. Si
 // calcola ogni volta dai dati, quindi segue da solo i caricamenti delle primarie.
+//
+// Immissione, inizio e fine trasporto sono obbligatorie nei formulari (regola
+// dell'utente del 22/09/2026): sotto l'intestazione si dicono i terminati di rete
+// senza fine trasporto, fuori da ogni settimana, e quelli del mese contati con
+// un'altra data che manca o non torna. Prima lo diceva solo il PDF e a video i
+// totali uscivano senza avviso: le frasi sono le stesse (frasiDateDaSistemare).
 
 const t = (v) => formatTonnellate(v);
 const dataBreve = (iso) => (iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) : '');
@@ -90,6 +96,7 @@ export default function ReportSettimanale() {
     return [...mappa.entries()].map(([regione, righe]) => ({ regione, righe, totale: somma(righe, nSett) }));
   }, [report, nSett]);
   const totale = useMemo(() => (report ? somma(report.righe, nSett) : null), [report, nSett]);
+  const frasiDate = useMemo(() => frasiDateDaSistemare(report), [report]);
 
   // Settimana in corso: evidenziata nella tabella quando il mese e' quello attuale.
   const oggiIso = report?.oggi || '';
@@ -134,6 +141,16 @@ export default function ReportSettimanale() {
           </div>
         </div>
       </div>
+
+      {frasiDate.length > 0 && (
+        <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 text-sm flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div className="space-y-1">
+            <p className="font-medium">{INTRO_DATE}</p>
+            {frasiDate.map((f, i) => <p key={i}>{f}</p>)}
+          </div>
+        </div>
+      )}
 
       {caricamento && !report ? (
         <div className="flex items-center justify-center py-20 text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin mr-2" /> Calcolo del report…</div>

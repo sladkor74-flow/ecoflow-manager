@@ -2,7 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import {
   intervalloSettimana, statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento,
 } from "../../shared/reportSettimanali.ts";
-import { caricaGestionale, rifaiQuadratura, sintesiPerCanale, TIPI_CARICAMENTO } from "../../shared/quadraturaFirDati.ts";
+import { caricaGestionale, rifaiQuadratura, sintesiPerCanale, contaDistinti, TIPI_CARICAMENTO } from "../../shared/quadraturaFirDati.ts";
 import { FLUSSI, ORDINE_FLUSSI } from "../../shared/quadraturaFir.ts";
 import { leggiJson } from "../../shared/testoLungo.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
@@ -102,6 +102,10 @@ export default async function(req) {
         celle: dati.celle.length,
         ultimo_caricamento: dati.ultimo_caricamento,
         senza_fine: dati.senza_fine,
+        // Immissione, inizio e fine trasporto sono obbligatorie (22/09/2026): i
+        // formulari della settimana a cui manca l'immissione o l'inizio, o con
+        // date incoerenti, si dicono anche prima di caricare la stampa.
+        date_da_sistemare: { n: contaDistinti(dati.date_da_sistemare || []), esempi: (dati.date_da_sistemare || []).slice(0, 5).map(x => ({ fir: x.fir, ordine: x.ordine, date: x.date })) },
       };
     }
 

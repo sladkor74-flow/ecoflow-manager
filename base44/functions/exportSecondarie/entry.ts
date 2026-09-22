@@ -1,5 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { giornoOrdine, periodoMovimento, settimanaIso, eTerminato, MESI_MOVIMENTI as MESI } from "../../shared/movimenti.ts";
+import { giornoOrdine, periodoMovimento, settimanaIso, eTerminato, dateDaSistemare, testoDate, MESI_MOVIMENTI as MESI } from "../../shared/movimenti.ts";
 import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
 import { formattaPesi } from "../../shared/formatoExcel.ts";
@@ -19,6 +19,11 @@ import { canaleDi } from "../../shared/canaleSecondaria.ts";
 // colonna di date del dettaglio, e mese e settimana si leggono da li'
 // (movimenti.ts), non dai campi salvati sul record. La chiusura a portale resta
 // in fondo, solo come informazione.
+//
+// Immissione, inizio e fine trasporto sono obbligatorie in ogni formulario
+// terminato (regola dell'utente, 22/09/2026): il dettaglio ha la colonna "Date da
+// sistemare" (testoDate di movimenti.ts), la sintesi un foglio con i trasporti da
+// correggere, e il filtro "date da sistemare" della pagina vale anche qui.
 
 // Il giorno italiano come 'GG/MM/AAAA'. toLocaleDateString sul server (UTC)
 // scriveva il giorno prima per le date salvate a mezzanotte italiana.
@@ -73,6 +78,7 @@ export default async function(req) {
         if (!matchesFilter((reg || '').trim(), filters.regione)) return false;
       }
       if (!matchesFilterLower(r.stato, filters.stato)) return false;
+      if (filters.date_da_sistemare && !dateDaSistemare(r)) return false;
       return true;
     };
     const conAnno = filters.anno != null && (!Array.isArray(filters.anno) ? !!filters.anno : filters.anno.length > 0);
@@ -84,7 +90,10 @@ export default async function(req) {
       if (conAnno && (!p || p.anno == null || !matchesFilterString(p.anno, filters.anno))) return false;
       return true;
     };
-    const filtered = all.filter(r => passaAltri(r) && passaPeriodo(r));
+    // Con il filtro "date da sistemare" il dettaglio tiene anche i terminati senza
+    // fine trasporto quando un filtro di periodo e' attivo, come la pagina: sono
+    // proprio quelli da correggere, e un periodo non l'hanno.
+    const filtered = all.filter(r => passaAltri(r) && (passaPeriodo(r) || (filters.date_da_sistemare && periodi.get(r) === null)));
 
     const wb = XLSX.utils.book_new();
     // Righe e terminati senza fine trasporto si contano per canale, mai insieme.
@@ -94,6 +103,7 @@ export default async function(req) {
       return n;
     };
     let senzaFineTrasporto: any[] = [];
+    let daSistemare: any[] = [];
     let contati = filtered;
 
     if (mode === 'matrix') {
@@ -142,20 +152,34 @@ export default async function(req) {
       const wsClassi = XLSX.utils.json_to_sheet(classi);
       XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, wsClassi), 'Sintesi per Classe');
 
-      if (senzaFineTrasporto.length > 0) {
-        const wsSenza = XLSX.utils.json_to_sheet(senzaFineTrasporto.map(r => ({
-          'Canale': canaleRiga(r),
-          'ID Ordine': r.id_ordine,
-          'Stato': r.stato,
-          'Numero FIR': r.numero_fir,
-          'Stoccaggio Origine': r.stoccaggio,
-          'Destinazione': r.destinazione,
-          'Classe PFU': r.classe,
-          'Peso Effettivo (kg)': r.peso_effettivo,
-          'Ordine Immesso': dataIt(r.ordine_immesso_il),
-          'Nota': 'Terminato senza data di fine trasporto: escluso dalle sintesi. Va corretto nel file del portale e ricaricato.',
-        })));
-        XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, wsSenza), 'Senza fine trasporto');
+      // Il foglio dei trasporti da correggere: i terminati senza fine trasporto,
+      // fuori dalle sintesi, e quelli nelle sintesi con un'altra data che manca o
+      // non torna (regola del 22/09/2026). Si chiamava "Senza fine trasporto" e
+      // aveva solo i primi. Canale per canale, rete prima.
+      daSistemare = [...senzaFineTrasporto, ...fatti.filter(dateDaSistemare)]
+        .sort((a, b) => canaleRiga(b).localeCompare(canaleRiga(a)));
+      if (daSistemare.length > 0) {
+        const wsDate = XLSX.utils.json_to_sheet(daSistemare.map(r => {
+          const senza = periodi.get(r) === null;
+          return {
+            'Canale': canaleRiga(r),
+            'ID Ordine': r.id_ordine,
+            'Stato': r.stato,
+            'Numero FIR': r.numero_fir,
+            'Stoccaggio Origine': r.stoccaggio,
+            'Destinazione': r.destinazione,
+            'Classe PFU': r.classe,
+            'Peso Effettivo (kg)': r.peso_effettivo,
+            'Ordine Immesso': dataIt(r.ordine_immesso_il),
+            'Trasporto Iniziato': dataIt(r.trasporto_iniziato_il),
+            'Trasporto Finito': dataIt(r.trasporto_finito_il),
+            'Date da sistemare': testoDate(r),
+            'Nota': senza
+              ? 'Senza fine trasporto non ha un mese: escluso dalle sintesi. Va corretto nel file del portale e ricaricato.'
+              : 'Nelle sintesi, nel mese della fine trasporto. Va corretto nel file del portale e ricaricato.',
+          };
+        }));
+        XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, wsDate), 'Date da sistemare');
       }
     } else {
       // Nel dettaglio un terminato senza fine trasporto c'e' (se nessun filtro
@@ -163,6 +187,7 @@ export default async function(req) {
       // quello della tabella a video: prima le righe senza un giorno, che vanno
       // corrette, poi dal giorno piu' recente.
       senzaFineTrasporto = filtered.filter(r => periodi.get(r) === null);
+      daSistemare = filtered.filter(dateDaSistemare);
       const giornoDi = (r) => periodi.get(r)?.giorno || '';
       const ordinati = [...filtered].sort((a, b) => {
         const ga = giornoDi(a), gb = giornoDi(b);
@@ -197,6 +222,8 @@ export default async function(req) {
           'Fatturato Trasporto': r.fatturato_trasporto,
           'Fatturato Riciclo': r.fatturato_riciclo,
           'Numero FIR': r.numero_fir,
+          // quale data obbligatoria manca o non torna; vuota se sono a posto
+          'Date da sistemare': testoDate(r),
           // solo informazione: non decide mese, settimana ne' filtri
           'Ordine Chiuso': dataIt(r.ordine_chiuso_il),
         };
@@ -215,6 +242,7 @@ export default async function(req) {
       filename: `secondarie_${mode}${nomeCanale}_${oggiRoma()}.xlsx`,
       righe_per_canale: perCanale(contati),
       senza_fine_trasporto_per_canale: perCanale(senzaFineTrasporto),
+      date_da_sistemare_per_canale: perCanale(daSistemare),
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

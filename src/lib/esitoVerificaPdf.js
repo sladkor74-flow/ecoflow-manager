@@ -4,7 +4,7 @@
 // completo delle righe verificate.
 
 import { formatKg, formatIntero } from '@/lib/utils';
-import { dataIt, sintesiVerifica, rigaReport, testoPerImpianto, firConOrdine, ordineRiga } from '@/lib/verifiche';
+import { dataIt, sintesiVerifica, rigaReport, testoPerImpianto, firConOrdine, ordineRiga, gravita } from '@/lib/verifiche';
 
 const C = {
   scuro: [15, 76, 92], medio: [26, 127, 142], chiaro: [226, 238, 241], zebra: [247, 250, 251],
@@ -23,6 +23,18 @@ const nomeCategoria = (m) => {
   const [mov, tipo, canale] = String(m.categoria || '').split('-');
   if (!mov) return m.tipo === 'uscita' ? 'Uscita' : 'Ingresso';
   return `${tipo === 'uscita' ? 'Uscita' : 'Ingresso'} ${mov} · ${CANALE[canale] || canale}`;
+};
+// "Senza data di inizio trasporto, obbligatoria" per un registrato assente nel
+// report: immissione, inizio e fine trasporto sono obbligatorie (22/09/2026).
+const elencoNomi = (xs) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} e ${xs[xs.length - 1]}`);
+const dateBreve = (m) => {
+  const voci = Array.isArray(m && m.date) ? m.date : [];
+  const mancanti = [...new Set(voci.flatMap(v => v.mancanti || []))];
+  const incoerenti = [...new Set(voci.flatMap(v => v.incoerenti || []))];
+  return [
+    mancanti.length ? `Senza ${mancanti.length === 1 ? 'data' : 'le date'} di ${elencoNomi(mancanti)}, ${mancanti.length === 1 ? 'obbligatoria' : 'obbligatorie'}` : '',
+    incoerenti.length ? `Date incoerenti: ${incoerenti.join('; ')}` : '',
+  ].filter(Boolean).join('. ');
 };
 
 export async function esportaEsitoVerificaPdf(v) {
@@ -166,7 +178,15 @@ export async function esportaEsitoVerificaPdf(v) {
     : piena
     ? 'Il report corrisponde ai formulari registrati per la settimana: stesso numero di formulari, stessi numeri, stessi pesi effettivi e stesse date di fine trasporto.'
     : perCanale
-    ? `Il report non corrisponde pienamente ai formulari registrati. ${s.perCanale.filter(c => c.conformita !== 'piena').map(c => `${c.nome}: ${c.anomalie} ${c.anomalie === 1 ? 'anomalia da verificare' : 'anomalie da verificare'}${c.assenti ? `, di cui ${c.assenti} ${c.assenti === 1 ? 'formulario mancante' : 'formulari mancanti'}` : ''}.`).join(' ')}${s.inPiu.length ? ` ${s.inPiu.length} ${s.inPiu.length === 1 ? 'formulario del report non risulta registrato' : 'formulari del report non risultano registrati'}.` : ''} Il dettaglio è riportato di seguito.`
+    // Le righe di altri impianti non hanno canale: si dicono a parte, come i
+    // formulari in piu', perche' il "pienamente conforme" le esclude (22/09/2026).
+    ? [
+      'Il report non corrisponde pienamente ai formulari registrati.',
+      ...s.perCanale.filter(c => c.conformita !== 'piena').map(c => `${c.nome}: ${c.anomalie} ${c.anomalie === 1 ? 'anomalia da verificare' : 'anomalie da verificare'}${c.assenti ? `, di cui ${c.assenti} ${c.assenti === 1 ? 'formulario mancante' : 'formulari mancanti'}` : ''}.`),
+      s.inPiu.length ? `${s.inPiu.length} ${s.inPiu.length === 1 ? 'formulario del report non risulta registrato' : 'formulari del report non risultano registrati'}.` : '',
+      s.senzaCanale && s.senzaCanale.length ? `${s.senzaCanale.length} ${s.senzaCanale.length === 1 ? 'riga del report riporta un formulario registrato che non riguarda il vostro impianto' : 'righe del report riportano formulari registrati che non riguardano il vostro impianto'}.` : '',
+      'Il dettaglio è riportato di seguito.',
+    ].filter(Boolean).join(' ')
     : `Il report non corrisponde pienamente ai formulari registrati: ${s.numeroAnomalie} ${s.numeroAnomalie === 1 ? 'anomalia da verificare' : 'anomalie da verificare'}${s.mancanti.length ? `, di cui ${s.mancanti.length} ${s.mancanti.length === 1 ? 'formulario mancante' : 'formulari mancanti'}` : ''}${s.inPiu.length ? `${s.mancanti.length ? ' e' : ', di cui'} ${s.inPiu.length} ${s.inPiu.length === 1 ? 'formulario non registrato' : 'formulari non registrati'}` : ''}. Il dettaglio è riportato di seguito.`;
   doc.setFontSize(8.5);
   const lineeSotto = doc.splitTextToSize(sottotitolo, L - 16);
@@ -185,8 +205,12 @@ export async function esportaEsitoVerificaPdf(v) {
   y += hEsito + 6;
 
   // --- Quadratura ---
+  // Un formulario registrato senza data di fine trasporto non sta in nessuna
+  // settimana: non entra nella quadratura, e lo si dice, perche' e' fra le anomalie.
+  const senzaFineInQuadratura = s.esiti.some(e => e.senza_fine_trasporto);
   sezione('Quadratura di formulari e pesi',
-    `${s.dichiarazione ? 'Movimentazioni dichiarate confrontate' : 'Formulari del report confrontati'} con quelli registrati con fine trasporto ${periodo}, per ciascuna movimentazione e canale: ingressi in primaria e ingressi e uscite in secondaria, di rete, ACI ed extra raccolta.`);
+    `${s.dichiarazione ? 'Movimentazioni dichiarate confrontate' : 'Formulari del report confrontati'} con quelli registrati con fine trasporto ${periodo}, per ciascuna movimentazione e canale: ingressi in primaria e ingressi e uscite in secondaria, di rete, ACI ed extra raccolta.`
+    + (senzaFineInQuadratura ? ' Le righe dei formulari registrati senza data di fine trasporto non sono collocate in nessuna settimana e restano fuori dalla quadratura: sono elencate fra le anomalie, perché la data è obbligatoria e va inserita.' : ''));
   const rigaQ = (q) => {
     const dF = q.formulari_report - q.formulari_gestionale;
     const dK = q.kg_report - q.kg_gestionale;
@@ -216,7 +240,9 @@ export async function esportaEsitoVerificaPdf(v) {
 
   // --- Anomalie riga per riga ---
   if (s.anomalie.length) {
-    sezione('Anomalie da correggere', 'Errori o sviste nelle righe del report rispetto ai formulari registrati.');
+    sezione('Anomalie da correggere', s.conDate.length
+      ? 'Errori o sviste nelle righe del report rispetto ai formulari registrati, e formulari registrati senza una data obbligatoria (immissione, inizio o fine trasporto) o con date incoerenti: la data va inserita o corretta.'
+      : 'Errori o sviste nelle righe del report rispetto ai formulari registrati.');
     tabella([{ titolo: 'Riga del report', peso: 1.1 }, { titolo: 'Formulario e ordine', peso: 1.5 }, { titolo: 'Controllo', peso: 1.2 }, { titolo: 'Dettaglio', peso: 3.3 }],
       s.anomalie.map(a => ({ celle: [cap(rigaReport(a.esito)), firConOrdine(a.esito), a.etichetta, a.testo], colori: [C.grigio, null, C.rosso, null], grassetti: [false, true, true, false] })));
   }
@@ -227,8 +253,9 @@ export async function esportaEsitoVerificaPdf(v) {
       : 'Report parziale: questi formulari risultano registrati per la settimana ma non compaiono nel report. Vi chiediamo di integrarli.');
     tabella([{ titolo: 'Formulario e ordine', peso: 1.5 }, { titolo: 'Movimentazione', peso: 1.25 }, { titolo: 'Fine trasporto', peso: 0.9 }, { titolo: 'Produttore / destinatario', peso: 1.75 }, { titolo: 'Trasportatore', peso: 1.3 }, { titolo: 'Peso (kg)', peso: 0.8, allinea: 'right' }],
       s.mancanti.map(m => ({
-        celle: [firConOrdine(m, m.fir), nomeCategoria(m), dataIt(m.fine), m.tipo === 'uscita' ? `verso ${m.destinatario || ''}` : (m.produttore || ''), m.trasportatore || '', formatKg(m.kg)],
-        grassetti: [true, false, false, false, false, true], colori: [C.rosso],
+        // accanto alla movimentazione, le date obbligatorie che mancano al formulario registrato
+        celle: [firConOrdine(m, m.fir), m.date ? `${nomeCategoria(m)}\n${dateBreve(m)}` : nomeCategoria(m), dataIt(m.fine), m.tipo === 'uscita' ? `verso ${m.destinatario || ''}` : (m.produttore || ''), m.trasportatore || '', formatKg(m.kg)],
+        grassetti: [true, false, false, false, false, true], colori: [C.rosso, m.date ? C.rosso : null],
       })));
   }
 
@@ -260,7 +287,9 @@ export async function esportaEsitoVerificaPdf(v) {
     const esitoRiga = (e) => {
       if (e.esito === 'non_trovata') return ['Non registrato', C.rosso];
       if (e.esito === 'duplicata') return ['Duplicata', C.rosso];
-      const gr = (e.discrepanze || []).map(d => d.gravita || (/errato nel gestionale/i.test(d.messaggio) ? 'rettifica' : ['produttore', 'destinatario', 'trasportatore'].includes(d.campo) && !/non riguarda|codice/i.test(d.messaggio) ? 'osservazione' : 'anomalia'));
+      // la stessa gravita' della sintesi: un formulario senza una data
+      // obbligatoria e' un'anomalia anche nelle verifiche salvate prima
+      const gr = (e.discrepanze || []).map(gravita);
       if (gr.includes('anomalia')) return ['Anomalia', C.rosso];
       if (gr.length) return ['Conforme*', C.verde];
       return ['Conforme', C.verde];
@@ -300,6 +329,7 @@ export async function esportaEsitoVerificaPdf(v) {
     'Il report settimanale deve riportare tutte le movimentazioni: ingressi in primaria e ingressi e uscite in secondaria, di rete, ACI ed extra raccolta. Se non ce ne sono, l\'impianto lo comunica e la comunicazione viene verificata sui formulari registrati.',
     `Ogni riga del report è confrontata con i formulari registrati con fine trasporto ${periodo}: numero di formulario, peso effettivo al chilogrammo, date di trasporto e classe dei PFU.`,
     'La quadratura richiede lo stesso numero di formulari e lo stesso peso per ciascuna movimentazione e canale: ingressi e uscite, primarie e secondarie, rete, ACI ed extra raccolta si confrontano separatamente e non si sommano fra loro.',
+    'Le date di immissione, di inizio e di fine trasporto sono obbligatorie nei formulari: un formulario registrato a cui ne manca una, o con date incoerenti, è un\'anomalia del suo canale e la data va inserita o corretta. Senza la data di fine trasporto il formulario non è collocato in nessuna settimana.',
     piena
       ? `${s.dichiarazione ? 'La comunicazione risulta confermata' : 'Il report risulta pienamente conforme'}: non è richiesta alcuna azione. Grazie per la collaborazione.`
       : 'Vi chiediamo di verificare le anomalie indicate e di inviarci il report corretto o le vostre osservazioni. Per ogni chiarimento potete rispondere a questa comunicazione.',

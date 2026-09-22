@@ -10,7 +10,6 @@
 
 export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 export const MESI_BREVI = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
-export const meseDa = (data) => (data ? MESI[new Date(data).getUTCMonth()] : '');
 
 export const CANALI = [
   { chiave: 'RETE', nome: 'Rete' },

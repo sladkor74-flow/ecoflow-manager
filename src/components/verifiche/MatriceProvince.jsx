@@ -70,10 +70,27 @@ export default function MatriceProvince({ tipo = 'peso' }) {
   // Regola 1: chi resta fuori dalla matrice si conta e si dice, solo se c'e'.
   // I terminati senza fine trasporto sono di qualunque anno, i ritiri senza
   // provincia dell'anno mostrato.
+  //
+  // Dal 22/09/2026 si dicono tutte le date obbligatorie dei formulari terminati
+  // che mancano o non tornano (regola dell'utente: immissione, inizio e fine
+  // trasporto), non solo la fine trasporto: date_da_sistemare di
+  // matriceProvinceRete, del solo canale RETE. Chi ha la fine trasporto e' nella
+  // matrice, nel mese della fine trasporto, ma va corretto lo stesso. Una
+  // risposta di prima porta solo i senza fine trasporto, e si dice quello.
   const nSenzaFine = dati ? Number(dati.senza_fine_trasporto) || 0 : 0;
+  const riepDate = dati && dati.date_da_sistemare;
+  const nDate = riepDate ? Number(riepDate.totale) || 0 : 0;
+  const altriDate = riepDate ? Math.max(0, nDate - (Number(riepDate.senza_fine_trasporto) || 0)) : 0;
+  const testoDateRete = nDate > 0
+    ? `rete: ${formatIntero(nDate)} ${nDate === 1 ? 'ritiro terminato' : 'ritiri terminati'} con date da sistemare (${riepDate.testo})`
+      + [nSenzaFine > 0 ? `${formatIntero(nSenzaFine)} ${nSenzaFine === 1 ? 'escluso' : 'esclusi'} da ogni mese perché senza fine trasporto` : '',
+        altriDate > 0 ? `${formatIntero(altriDate)} ${altriDate === 1 ? 'contato' : 'contati'} nel mese della fine trasporto` : ''].filter(Boolean).map((t, i) => (i ? `, ${t}` : `: ${t}`)).join('')
+    : '';
   const senzaProvincia = (dati && dati.senza_provincia) || { ritiri: 0, kg: 0 };
   const esclusi = [
-    nSenzaFine > 0 ? `${formatIntero(nSenzaFine)} ${nSenzaFine === 1 ? 'terminato' : 'terminati'} di rete senza fine trasporto, ${nSenzaFine === 1 ? 'escluso' : 'esclusi'} da ogni mese` : '',
+    riepDate
+      ? testoDateRete
+      : nSenzaFine > 0 ? `${formatIntero(nSenzaFine)} ${nSenzaFine === 1 ? 'terminato' : 'terminati'} di rete senza fine trasporto, ${nSenzaFine === 1 ? 'escluso' : 'esclusi'} da ogni mese` : '',
     senzaProvincia.ritiri > 0 ? `${formatIntero(senzaProvincia.ritiri)} ${senzaProvincia.ritiri === 1 ? 'ritiro' : 'ritiri'} del ${dati.anno} senza provincia (${formatTonnellate(senzaProvincia.kg / 1000)} t), ${senzaProvincia.ritiri === 1 ? 'escluso' : 'esclusi'} dalle righe e dai totali` : '',
   ].filter(Boolean);
   const vuoti = new Map();

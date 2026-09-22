@@ -15,9 +15,15 @@
 // secondo agente con le sole regole scritte: 525 valori su 525 tornano. Il caso
 // di prova e' in prove/praticaIrigom.mjs.
 //
-// Canali: la rete e l'extra raccolta restano separate. L'extra raccolta si
-// attacca all'ultima terziaria (stesso allegato VII) ma si scrive in una tabella
-// sua e si dichiara a parte.
+// Canali: la rete e l'extra raccolta restano separate. L'extra raccolta parte con
+// la nave nell'ultima terziaria (stesso allegato VII): nei documenti e nel
+// riepilogo si scrive in una tabella sua e si dichiara a parte, sul canale extra
+// raccolta. A PORTALE invece quella terziaria si chiude col suo peso intero, parte
+// di rete piu' extra, e il totale caricato comprende l'extra (regola dell'utente
+// del 22/09/2026, agosto 2026: 534.600 kg a portale, di cui 460 di extra nella
+// terziaria TER26154141, chiusa a 20.340 = 19.880 di rete + 460). L'extra e'
+// gestita fuori portale: il gestionale vede solo il totale caricato, e la riga
+// dell'extra raccolta la chiude a mano l'utente.
 
 export const MAX_PER_DICHIARAZIONE_KG = 38000;
 export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -158,11 +164,169 @@ export function dividiExtra(pfuKg, quotaFerro = 120 / 460) {
   return { pfu_kg: pfu, cippato_kg: pfu - ferro, ferro_kg: ferro };
 }
 
+// Quale extra raccolta proporre, cosa ne resta scritto nella pratica e come si
+// scrive sul suo canale. Stavano nella pagina (PraticaIrigom.jsx), dove non si
+// potevano provare: qui le prova prove/praticaIrigom.mjs (correzioni del 22/09/2026).
+
+const leggiExtraJson = (p) => {
+  try { return JSON.parse((p && p.extra_json) || '{}') || {}; } catch (e) { return {}; }
+};
+const stessaPratica = (p, anno, mese) => Number(p.anno) === Number(anno) && p.mese === mese;
+
+/**
+ * Cosa si scrive in PraticaIrigom.extra_json: SOLO l'extra raccolta che la
+ * pratica dichiara davvero, cioe' pratica.extra, quella partita con la nave.
+ * Si scrivevano i formulari spuntati nella pagina: in un mese senza nave
+ * componiMese li lascia in impianto (pratica.extra = null), ma registrando quel
+ * mese finivano lo stesso nella pratica, e dal mese dopo risultavano dichiarati:
+ * non si proponevano piu', nessuna dichiarazione di extra raccolta li portava e la
+ * lettura dalla giacenza non li toglieva piu' da quello che resta a portale.
+ * Senza extra dichiarata resta solo la ripartizione del ferro, da riproporre.
+ */
+export function extraDaSalvare(pratica, quotaFerro = null) {
+  const e = pratica && pratica.extra;
+  if (!e) return quotaFerro === null || quotaFerro === undefined ? {} : { quota_ferro: quotaFerro };
+  return { formulari: e.formulari || [], cippato_kg: e.cippato_kg, ferro_kg: e.ferro_kg, quota_ferro: quotaFerro };
+}
+
+/**
+ * Gli id dei formulari di extra raccolta gia' dichiarati da una pratica
+ * registrata, dell'anno o dell'anno prima, tranne quella del mese che si sta
+ * rifacendo. Si leggono anche le pratiche dell'anno prima: un'extra arrivata a
+ * dicembre e partita con la nave di gennaio sta nella pratica di gennaio.
+ */
+export function extraGiaDichiarate(pratiche, { anno, mese }) {
+  const s = new Set();
+  for (const p of pratiche || []) {
+    if (!p || p.stato !== 'registrata' || stessaPratica(p, anno, mese)) continue;
+    for (const f of leggiExtraJson(p).formulari || []) if (f && f.id) s.add(f.id);
+  }
+  return s;
+}
+
+/**
+ * Da che giorno a che giorno, per fine trasporto (giorno italiano, 'AAAA-MM-GG'),
+ * l'extra raccolta arrivata a Irigom si propone nella pratica di un mese: fino
+ * all'ultimo giorno del mese dichiarato. Si parte dal primo gennaio dell'anno
+ * prima quando in quell'anno la pratica c'era gia' (almeno una registrata), per
+ * l'extra di dicembre che parte con la nave di gennaio; altrimenti dal primo
+ * gennaio dell'anno: prima della pratica l'extra la dichiarava l'utente a mano, e
+ * nessuna pratica l'avrebbe mai tolta dalle proposte.
+ * meseIdx 0-11; -1 se il mese non e' scelto (tutto l'anno).
+ */
+export function finestraExtra({ anno, meseIdx = -1, annoPrimaConPratica = false }) {
+  const a = Number(anno);
+  return {
+    da: `${annoPrimaConPratica ? a - 1 : a}-01-01`,
+    // '-31' anche per i mesi piu' corti: e' un confronto fra stringhe
+    a: `${a}-${String(meseIdx >= 0 ? meseIdx + 1 : 12).padStart(2, '0')}-31`,
+  };
+}
+
+/**
+ * L'extra raccolta di un blocco ({ formulari, cippato_kg, ferro_kg }: pratica.extra
+ * o l'extra_json di una pratica) mese per mese della fine trasporto dei suoi
+ * formulari, con l'anno: [{ anno, mese, pfu_kg, cippato_kg, ferro_kg }], in ordine.
+ * Il ferro si divide in proporzione al peso e l'ultimo mese prende il resto,
+ * cosi' i chili tornano. Un formulario senza fine trasporto non ha mese e resta
+ * fuori: nelle proposte non entra.
+ */
+export function extraPerMese(extra) {
+  const mesi = new Map();
+  for (const f of (extra && extra.formulari) || []) {
+    const g = String((f && f.fine_trasporto) || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(g)) continue;
+    const anno = Number(g.slice(0, 4));
+    const mese = MESI[Number(g.slice(5, 7)) - 1];
+    const k = `${anno}|${mese}`;
+    if (!mesi.has(k)) mesi.set(k, { anno, mese, pfu_kg: 0, cippato_kg: 0, ferro_kg: 0 });
+    mesi.get(k).pfu_kg += intero(f.peso_kg);
+  }
+  const elenco = [...mesi.values()].sort((x, y) => x.anno - y.anno || MESI.indexOf(x.mese) - MESI.indexOf(y.mese));
+  const pfu = somma(elenco, 'pfu_kg');
+  const ferro = intero(extra && extra.ferro_kg);
+  let messo = 0;
+  elenco.forEach((m, i) => {
+    m.ferro_kg = i < elenco.length - 1 ? (pfu ? Math.round((ferro * m.pfu_kg) / pfu) : 0) : ferro - messo;
+    messo += m.ferro_kg;
+    m.cippato_kg = m.pfu_kg - m.ferro_kg;
+  });
+  return elenco;
+}
+
+/**
+ * Quanto hanno scritto sul canale extra raccolta le pratiche registrate, mese per
+ * mese: Map 'AAAA|Mese' -> { anno, mese, pfu_kg, cippato_kg, ferro_kg }.
+ * escludi: { anno, mese } della pratica che si rifa', oppure null per tutte.
+ */
+export function extraDellePratiche(pratiche, escludi = null) {
+  const tot = new Map();
+  for (const p of pratiche || []) {
+    if (!p || p.stato !== 'registrata' || (escludi && stessaPratica(p, escludi.anno, escludi.mese))) continue;
+    for (const m of extraPerMese(leggiExtraJson(p))) {
+      const k = `${m.anno}|${m.mese}`;
+      const s = tot.get(k) || { anno: m.anno, mese: m.mese, pfu_kg: 0, cippato_kg: 0, ferro_kg: 0 };
+      s.pfu_kg += m.pfu_kg;
+      s.cippato_kg += m.cippato_kg;
+      s.ferro_kg += m.ferro_kg;
+      tot.set(k, s);
+    }
+  }
+  return tot;
+}
+
+/**
+ * Le dichiarazioni EXTRA_RACCOLTA da scrivere registrando la pratica { anno, mese }:
+ * una per mese (e anno) di fine trasporto dei suoi formulari, sul mese del
+ * formulario. Ciascuna vale quello che ci hanno scritto le ALTRE pratiche
+ * registrate piu' la parte di questa: la stessa extra di luglio puo' partire in
+ * parte con la nave di agosto e in parte con quella di settembre, e quella di
+ * dicembre con la nave di gennaio. Si scriveva la sola parte dell'ultima pratica,
+ * e quella di prima spariva dal numero.
+ * @returns [{ anno, mese, quantita_kg, cippato_kg, metalli_kg, questa_kg, altre_kg }]
+ */
+export function dichiarazioniExtra(extra, pratiche, { anno, mese }) {
+  const altre = extraDellePratiche(pratiche, { anno, mese });
+  return extraPerMese(extra).map(m => {
+    const a = altre.get(`${m.anno}|${m.mese}`) || { pfu_kg: 0, cippato_kg: 0, ferro_kg: 0 };
+    return {
+      anno: m.anno, mese: m.mese,
+      quantita_kg: m.pfu_kg + a.pfu_kg, cippato_kg: m.cippato_kg + a.cippato_kg, metalli_kg: m.ferro_kg + a.ferro_kg,
+      questa_kg: m.pfu_kg, altre_kg: a.pfu_kg,
+    };
+  });
+}
+
+// La dichiarazione di rete di Irigom vale il totale caricato a portale, extra
+// raccolta dell'ultima terziaria compresa (regola dell'utente del 22/09/2026).
+// Finche' DichiarazioneSito non ha un campo per dirlo, la sua nota porta sempre,
+// in fondo, questa frase fissa, anche con 0 kg: chi confronta la rete di Irigom
+// col conferito la legge con extraCompresaDaNota e sottrae quei chili, senza
+// sommarli all'extra, che ha la sua dichiarazione. Vale l'ultima frase della nota:
+// rifacendo la registrazione la nota di prima resta sopra, nello storico.
+export const testoExtraCompresa = (kg) => `[extra compresa: ${mig(kg)} kg]`;
+/** I kg di extra raccolta compresi nella dichiarazione di rete, dall'ultima frase fissa della nota; null se non c'e'. */
+export function extraCompresaDaNota(note) {
+  const tutte = [...String(note || '').matchAll(/\[extra compresa: (\d[\d.]*) kg\]/g)];
+  return tutte.length ? Number(tutte[tutte.length - 1][1].replace(/\./g, '')) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Il mese
 
 /**
  * Compone la pratica del mese.
+ *
+ * I tre numeri del risultato, da non confondere (regola dell'utente del
+ * 22/09/2026, agosto 2026 fra parentesi):
+ * - portale_kg: il totale da caricare A PORTALE, CSS-C piu' terziarie, ciascuna
+ *   col peso con cui si chiude. Comprende l'extra raccolta partita con la nave,
+ *   che sta nell'ultima terziaria. E' quello che il portale decurta dalla
+ *   giacenza di rete e che il report delle dichiarazioni riconosce (534.600).
+ * - rete_kg: la parte di rete, senza l'extra: la riga IRIGOM del riepilogo (534.140).
+ * - extra_kg: l'extra raccolta, riga EXTRA RACCOLTA, canale suo (460).
+ * Si mostrano sempre come "di cui", mai sommati fra loro: portale_kg e' gia' il
+ * totale, rete_kg + extra_kg lo ricompongono.
  *
  * @param {object} p
  * @param {object} p.riga            riga del mese dal foglio Cons. (uscite e giacenze)
@@ -171,7 +335,8 @@ export function dividiExtra(pfuKg, quotaFerro = 120 / 460) {
  * @param {array}  p.ddt             DDT di CSS-C nostri del mese [{ ddt, data, kg }]
  * @param {number} p.portaleFineMeseKg giacenza di rete a portale a fine mese (per fine trasporto)
  * @param {string} p.lettura         'giacenza' (regola del 19/09/2026) oppure 'uscite'
- * @param {object} p.extra           { formulari: [...], cippato_kg, ferro_kg } oppure null
+ * @param {object} p.extra           { formulari: [{ id, formulario, peso_kg, inizio_trasporto, fine_trasporto, date_da_sistemare, ... }], cippato_kg, ferro_kg } oppure null;
+ *                                   date_da_sistemare e' il testoDate del formulario, '' se le date ci sono tutte e tornano
  * @param {number} p.extraInGiacenzaKg extra raccolta arrivata a Irigom entro fine mese e non ancora lavorata
  * @param {array}  p.terziarie       numeri TER aperti a portale, se gia' ci sono
  */
@@ -181,6 +346,28 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
   const V = intero(riga && riga.uscite_cippato_kg);
   const X = intero(riga && riga.uscite_ferro_kg);
   const Y = intero(riga && riga.uscite_cssc_kg);
+
+  // Gli allegati VII: quanti ne servono a coprire il ciabattato. Si scelgono
+  // prima delle letture perche' dicono se nel mese e' partita una nave, e con
+  // lei l'extra raccolta.
+  const scelta = scegliAllegati(allegati, V);
+  const n = scelta.scelti.length;
+
+  // L'extra raccolta esce solo con la nave, nell'ultima terziaria. Senza
+  // terziarie nel mese non e' uscita: resta in impianto, non entra nei conti del
+  // mese e si dichiara con la nave dopo. Prima del 22/09/2026 restava nei conti:
+  // con la lettura dalla giacenza il suo peso finiva sui DDT del CSS-C, come
+  // ferro di rete.
+  const extraProposta = extra ? intero(extra.cippato_kg) + intero(extra.ferro_kg) : 0;
+  const extraSenzaNave = extraProposta > 0 && n === 0;
+  if (extraSenzaNave) {
+    avvisi.push(V > 0
+      ? `C'e' extra raccolta da dichiarare (${mig(extraProposta)} kg) ma senza allegati VII non c'e' la terziaria a cui attaccarla: resta fuori dai conti finche' gli allegati non ci sono.`
+      : `C'e' extra raccolta da dichiarare (${mig(extraProposta)} kg) ma nel mese non e' partita nessuna nave, quindi nessuna terziaria a cui attaccarla: resta in impianto e si dichiara con la nave dopo.`);
+  }
+  const extraPfu = extraSenzaNave ? 0 : extraProposta;
+  const extraCipp = extra && !extraSenzaNave ? intero(extra.cippato_kg) : 0;
+  const extraFerro = extra && !extraSenzaNave ? intero(extra.ferro_kg) : 0;
   // Quanto deve restare a portale dopo la dichiarazione del mese, regola
   // dell'utente del 22/09/2026: la somma delle celle AD e AE della riga del mese
   // nel foglio Cons. AD e' la giacenza TOTALE di gomma (cippato AA + SACI AB +
@@ -195,11 +382,12 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
   // La giacenza del registro comprende anche l'extra raccolta arrivata e non
   // ancora lavorata, che il portale di rete non conosce: a portale deve restare la
   // sola parte di rete. A luglio 2026 non la si era tolta, e 460 kg di extra sono
-  // rimasti a portale come rete.
-  const restaKg = Math.max(0, restaRegistroKg - intero(extraInGiacenzaKg));
-  const extraPfu = extra ? intero(extra.cippato_kg) + intero(extra.ferro_kg) : 0;
-  const extraCipp = extra ? intero(extra.cippato_kg) : 0;
-  const extraFerro = extra ? intero(extra.ferro_kg) : 0;
+  // rimasti a portale come rete. Ci va anche l'extra scelta per la pratica che
+  // resta in impianto perche' nel mese non e' partita la nave (senza ciabattato
+  // uscito: se il ciabattato e' uscito ma mancano gli allegati, la pratica e'
+  // comunque bloccata).
+  const extraRestaKg = intero(extraInGiacenzaKg) + (extraSenzaNave && V === 0 ? extraProposta : 0);
+  const restaKg = Math.max(0, restaRegistroKg - extraRestaKg);
 
   // Un mese ancora tutto a zero nel registro non e' compilato: non si dichiara.
   const vuoto = !V && !X && !Y && !restaRegistroKg && !(ddt || []).length;
@@ -209,24 +397,41 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
   const ff = formulariFerro(ferro);
   if (ff.quota_kg !== X) avvisi.push(`I formulari del ferro danno ${mig(ff.quota_kg)} kg di quota nostra, il foglio Cons. ne segna ${mig(X)}: il registro va controllato prima di dichiarare.`);
 
-  // Le due letture di quanto dichiarare.
-  const uscite = { totale_kg: V + X + Y, rete_kg: V + X + Y - extraPfu };
-  const giacenza = portaleFineMeseKg === null || portaleFineMeseKg === undefined ? null
-    : { portale_kg: intero(portaleFineMeseKg), resta_kg: restaKg, extra_in_giacenza_kg: intero(extraInGiacenzaKg), rete_kg: intero(portaleFineMeseKg) - restaKg };
-  const scarto = giacenza ? giacenza.rete_kg - uscite.rete_kg : null;
+  // Le due letture del totale da dichiarare A PORTALE (CSS-C + terziarie), con
+  // dentro l'extra raccolta partita con la nave: regola dell'utente del 22/09/2026.
+  // - uscite: V + X + Y del foglio Cons., tutto cio' che e' uscito nel mese,
+  //   extra raccolta compresa (i suoi 340 + 120 kg di agosto sono in V e in X);
+  // - giacenza: la giacenza di rete a portale a fine mese meno quello che deve
+  //   restarci (AD + AE, meno l'extra ancora in impianto).
+  // In tutte e due la parte di rete e' il totale meno l'extra. Superato il
+  // 22/09/2026: la lettura dalla giacenza dava la sola rete e l'extra si
+  // aggiungeva sopra; ad agosto usciva uno scarto di 460 kg fra le letture e un
+  // ferro di 82.960 kg, piu' di quello uscito. Con la regola nuova le due letture
+  // di agosto coincidono: 534.600 kg, scarto 0, ferro 82.500 = X.
+  const uscite = { totale_kg: V + X + Y, extra_kg: extraPfu, rete_kg: V + X + Y - extraPfu };
+  const giacenza = portaleFineMeseKg === null || portaleFineMeseKg === undefined ? null : {
+    // la giacenza di rete a portale a fine mese, per fine trasporto
+    portale_fine_mese_kg: intero(portaleFineMeseKg),
+    // quello che a portale deve restare: AD + AE meno l'extra ancora in impianto
+    resta_kg: restaKg,
+    extra_in_giacenza_kg: extraRestaKg,
+    // il totale da caricare a portale secondo questa lettura, e le sue due parti
+    totale_kg: intero(portaleFineMeseKg) - restaKg,
+    extra_kg: extraPfu,
+    rete_kg: intero(portaleFineMeseKg) - restaKg - extraPfu,
+  };
+  const scarto = giacenza ? giacenza.totale_kg - uscite.totale_kg : null;
   const usata = lettura === 'uscite' || !giacenza ? 'uscite' : 'giacenza';
   if (lettura === 'giacenza' && !giacenza) avvisi.push('Manca la giacenza a portale di fine mese: uso le uscite del registro.');
-  const reteKg = usata === 'giacenza' ? giacenza.rete_kg : uscite.rete_kg;
+  const totalePortaleKg = usata === 'giacenza' ? giacenza.totale_kg : uscite.totale_kg;
 
-  // Il ferro e' la parte che si aggiusta: CSS-C e ciabattato sono fatti documentati.
-  const ferroTotale = reteKg + extraPfu - V - Y;
+  // Il ferro e' la parte che si aggiusta: CSS-C e ciabattato sono fatti
+  // documentati. L'extra e' gia' dentro il totale a portale e non va aggiunta.
+  const ferroTotale = totalePortaleKg - V - Y;
   if (ferroTotale < 0) blocchi.push(`Con questa lettura il ferro verrebbe negativo (${mig(ferroTotale)} kg): ciabattato e CSS-C usciti superano gia' quanto dichiarare. Controlla la giacenza a portale e la riga del mese.`);
   if (ferroTotale > X) avvisi.push(`Il ferro da dichiarare (${mig(ferroTotale)} kg) supera quello uscito nel mese secondo il registro (${mig(X)} kg): la dichiarazione EER 19.12.02 resta di ${mig(X)} kg, la differenza la porta il portale.`);
 
-  // Gli allegati VII: quanti ne servono a coprire il ciabattato.
-  const scelta = scegliAllegati(allegati, V);
   if (V > 0 && !scelta.basta) blocchi.push(`Gli allegati VII del mese coprono ${mig(scelta.coperto_kg)} kg, meno del ciabattato uscito (${mig(V)} kg): mancano allegati nel registro.`);
-  const n = scelta.scelti.length;
 
   // Le righe da dichiarare: prima i DDT di CSS-C (spezzati se oltre il limite),
   // poi le terziarie, una per allegato scelto.
@@ -263,29 +468,57 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
   }
   if (!posti.length && ferroTotale > 0) avvisi.push('Nel mese sono usciti solo metalli: a portale non si carica nulla e la quantita\' resta in giacenza fino alla nave dopo.');
 
-  // L'extra raccolta si attacca all'ultima terziaria e si scrive a parte.
+  // L'extra raccolta parte nell'ultima terziaria. Nella riga della terziaria
+  // resta la parte di rete (cippato_kg, ferro_kg, totale_kg: ad agosto 19.880,
+  // come nei documenti consegnati), l'extra si scrive in una riga sua con la
+  // stessa terziaria, e la terziaria si chiude a portale col peso intero
+  // (chiusura_portale_kg = totale_kg + extra_kg: 20.340). Regola del 22/09/2026.
+  posti.forEach(r => { r.extra_kg = 0; });
   let rigaExtra = null;
-  if (extra && extraPfu > 0) {
-    const ultima = righeTer[righeTer.length - 1] || null;
-    if (!ultima) avvisi.push('C\'e\' extra raccolta da dichiarare ma nessuna terziaria a cui attaccarla: resta per il mese dopo.');
-    else if (ultima.cippato_kg < extraCipp || ultima.ferro_kg < extraFerro) blocchi.push('L\'ultima terziaria e\' troppo piccola per contenere l\'extra raccolta: controlla la ripartizione.');
+  if (extraPfu > 0) {
+    const ultima = righeTer[righeTer.length - 1];
+    if (ultima.cippato_kg < extraCipp || ultima.ferro_kg < extraFerro) blocchi.push('L\'ultima terziaria e\' troppo piccola per contenere l\'extra raccolta: controlla la ripartizione.');
     else {
       ultima.cippato_kg -= extraCipp;
       ultima.ferro_kg -= extraFerro;
       ultima.totale_kg = ultima.cippato_kg + ultima.ferro_kg;
-      rigaExtra = { allegato: ultima.allegato, trasportatore: ultima.trasportatore, destinatario: ultima.destinatario, data: ultima.data, peso_allegato_kg: ultima.peso_allegato_kg, cippato_kg: extraCipp, ferro_kg: extraFerro, totale_kg: extraPfu, formulari: extra.formulari || [] };
+      ultima.extra_kg = extraPfu;
+      // Le date obbligatorie dei formulari (regola dell'utente del 22/09/2026):
+      // un formulario con la fine trasporto ma con l'immissione o l'inizio che
+      // mancano, o con le date nell'ordine sbagliato, resta nella pratica, perche'
+      // l'extra e' partita e la fine trasporto la colloca; ma si segnala negli
+      // avvisi (passo 2 e foglio Controlli) e accanto ai documenti (avvisi_date),
+      // perche' il documento dell'extra riporta le date come sono. Prima l'avviso
+      // stava solo accanto alla casella del passo 2 e il Word usciva col buco.
+      const avvisiDate = (extra.formulari || []).filter(f => f && f.date_da_sistemare).map(f => `Il formulario ${f.formulario || 'senza numero'} dell'extra raccolta ha le date da sistemare: ${f.date_da_sistemare}. Immissione, inizio e fine trasporto sono obbligatorie: sistemale nel formulario prima di mandare il documento dell'extra raccolta, che riporta inizio e fine trasporto cosi' come sono (una data che manca resta vuota).`);
+      avvisi.push(...avvisiDate);
+      rigaExtra = {
+        allegato: ultima.allegato, trasportatore: ultima.trasportatore, destinatario: ultima.destinatario, data: ultima.data, peso_allegato_kg: ultima.peso_allegato_kg,
+        cippato_kg: extraCipp, ferro_kg: extraFerro, totale_kg: extraPfu, formulari: extra.formulari || [],
+        // la terziaria in cui sta e come si chiude a portale: parte di rete + questa extra
+        rete_terziaria_kg: ultima.totale_kg,
+        chiusura_terziaria_kg: ultima.totale_kg + extraPfu,
+        avvisi_date: avvisiDate,
+      };
     }
   }
+  // Il peso con cui ogni dichiarazione si chiude a portale: e' questo che non
+  // deve passare i 38.000 kg.
+  posti.forEach(r => { r.chiusura_portale_kg = r.totale_kg + r.extra_kg; });
 
   // I numeri TER, in ordine crescente, vanno agli allegati nell'ordine di scelta.
   const ter = [...new Set((terziarie || []).map(t => String(t).trim().toUpperCase()).filter(Boolean))].sort();
   righeTer.forEach((r, i) => { r.terziaria = ter[i] || ''; });
-  if (rigaExtra && righeTer.length) rigaExtra.terziaria = righeTer[righeTer.length - 1].terziaria;
   if (ter.length && ter.length !== righeTer.length) avvisi.push(`Servono ${righeTer.length} terziarie e ne sono state indicate ${ter.length}.`);
+  if (rigaExtra) {
+    rigaExtra.terziaria = righeTer[righeTer.length - 1].terziaria;
+    const quale = rigaExtra.terziaria || `dell'allegato VII n. ${rigaExtra.allegato}`;
+    rigaExtra.nota = `extra raccolta compresa nella chiusura a portale della terziaria ${quale}: ${mig(rigaExtra.chiusura_terziaria_kg)} kg = ${mig(rigaExtra.rete_terziaria_kg)} di rete + ${mig(rigaExtra.totale_kg)} di extra raccolta (${mig(rigaExtra.cippato_kg)} di ciabattato e ${mig(rigaExtra.ferro_kg)} di ferro)`;
+  }
 
-  for (const r of [...righeCssc, ...righeTer]) {
-    r.residuo_kg = MAX_PER_DICHIARAZIONE_KG - r.totale_kg;
-    if (r.totale_kg > MAX_PER_DICHIARAZIONE_KG) blocchi.push(`Una dichiarazione supera ${mig(MAX_PER_DICHIARAZIONE_KG)} kg (${mig(r.totale_kg)}).`);
+  for (const r of posti) {
+    r.residuo_kg = MAX_PER_DICHIARAZIONE_KG - r.chiusura_portale_kg;
+    if (r.chiusura_portale_kg > MAX_PER_DICHIARAZIONE_KG) blocchi.push(`Una dichiarazione supera ${mig(MAX_PER_DICHIARAZIONE_KG)} kg (${mig(r.chiusura_portale_kg)}).`);
   }
 
   const cssc = { righe: righeCssc, cssc_kg: somma(righeCssc, 'cssc_kg'), ferro_kg: somma(righeCssc, 'ferro_kg'), totale_kg: somma(righeCssc, 'totale_kg') };
@@ -293,16 +526,31 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
   const terz = {
     righe: righeTer,
     peso_allegati_kg: somma(righeTer, 'peso_allegato_kg'),
+    // la parte di rete delle terziarie: come nelle tabelle dei documenti
     cippato_kg: somma(righeTer, 'cippato_kg'),
     ferro_kg: somma(righeTer, 'ferro_kg'),
     totale_kg: somma(righeTer, 'totale_kg'),
+    // l'extra raccolta dentro l'ultima, e quanto fanno le terziarie a portale
+    extra_kg: somma(righeTer, 'extra_kg'),
+    chiusura_portale_kg: somma(righeTer, 'chiusura_portale_kg'),
   };
   const reteDichiarata = cssc.totale_kg + terz.totale_kg + somma(soloFerro, 'totale_kg');
+  const extraDichiarata = rigaExtra ? rigaExtra.totale_kg : 0;
+  const ultima = righeTer[righeTer.length - 1] || null;
   return {
     vuoto,
     letture: { uscite, giacenza, scarto_kg: scarto, usata },
+    // Il totale da caricare a portale: CSS-C + terziarie col peso di chiusura,
+    // extra raccolta partita con la nave compresa. Va nella dichiarazione di rete
+    // del gestionale, perche' e' quello che il portale decurta e riconosce.
+    portale_kg: reteDichiarata + extraDichiarata,
+    // La parte di rete, senza l'extra: la riga IRIGOM del riepilogo.
     rete_kg: reteDichiarata,
-    extra_kg: rigaExtra ? rigaExtra.totale_kg : 0,
+    // L'extra raccolta di questa pratica: riga EXTRA RACCOLTA, canale suo.
+    extra_kg: extraDichiarata,
+    // Come si chiude a portale l'ultima terziaria: la parte di rete, l'extra che
+    // porta (0 se non ce n'e') e il peso con cui si chiude.
+    chiusura_ultima_terziaria: ultima ? { terziaria: ultima.terziaria, allegato: ultima.allegato, rete_kg: ultima.totale_kg, extra_kg: ultima.extra_kg, portale_kg: ultima.chiusura_portale_kg } : null,
     ferro: { ...ff, dichiarato_kg: ff.quota_kg },
     allegati: { ordinati: scelta.ordinati, scelti: scelta.scelti, coperto_kg: scelta.coperto_kg },
     terziarie_da_aprire: righeTer.length,
@@ -313,10 +561,17 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
     terziarie: terz,
     solo_ferro: soloFerro,
     extra: rigaExtra,
-    // I materiali per la dichiarazione nel gestionale, della sola rete.
+    // I materiali della sola rete: cippato + metalli + CSS-C = rete_kg.
     materiali: {
       cippato_kg: terz.cippato_kg,
       metalli_kg: cssc.ferro_kg + terz.ferro_kg + somma(soloFerro, 'ferro_kg'),
+      cssc_kg: cssc.cssc_kg,
+    },
+    // I materiali di tutte le chiusure a portale, extra compresa: cippato +
+    // metalli + CSS-C = portale_kg. Vanno nella dichiarazione di rete del gestionale.
+    materiali_portale: {
+      cippato_kg: terz.cippato_kg + (rigaExtra ? rigaExtra.cippato_kg : 0),
+      metalli_kg: cssc.ferro_kg + terz.ferro_kg + somma(soloFerro, 'ferro_kg') + (rigaExtra ? rigaExtra.ferro_kg : 0),
       cssc_kg: cssc.cssc_kg,
     },
     avvisi,

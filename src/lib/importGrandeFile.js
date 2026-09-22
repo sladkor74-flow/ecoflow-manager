@@ -1,7 +1,7 @@
 import { base44 } from '@/api/base44Client';
 import { eAci } from '@/lib/canaleSecondaria';
 import { oggiRoma } from '@/lib/giornoItaliano';
-import { testoTerminatiSenzaFine } from '@/lib/richiesteEct';
+import { testoTerminatiSenzaFine, testoOrdiniDateDaSistemare } from '@/lib/richiesteEct';
 import { dataServer } from '@/lib/utils';
 
 // Importazione dei report di grandi dimensioni del portale Ecotyre.
@@ -473,6 +473,7 @@ const NOMI_RICALCOLI = {
   verifiche: 'verifiche dei report e quadrature FIR (anche nessuna movimentazione)',
   qualifica: 'qualifica fornitori',
   predittivita: 'piano delle secondarie di rete e suggerimento della settimana',
+  alertExtra: "alert delle date obbligatorie dell'extra raccolta",
 };
 
 // Gli archivi che i ricalcoli leggono, per tipo di caricamento: l'extra raccolta
@@ -546,10 +547,12 @@ function problemaRisposta(res) {
 // Cio' che un ricalcolo riuscito deve comunque far sapere, o null. I ritiri delle
 // richieste del consorzio dicono quali richieste restano aperte su un ordine
 // terminato senza fine trasporto: non si contano come ritirate (regola 1), ma
-// sollecitarle sarebbe sbagliato.
+// sollecitarle sarebbe sbagliato. E quali sono evase da ordini con un'altra data
+// obbligatoria da sistemare (regola dell'utente del 22/09/2026).
 function avvisoRisposta(res) {
   const dati = (res && res.data !== undefined ? res.data : res) || {};
-  return testoTerminatiSenzaFine(Array.isArray(dati.terminati_senza_fine) ? dati.terminati_senza_fine : []) || null;
+  const lista = (campo) => (Array.isArray(dati[campo]) ? dati[campo] : []);
+  return [testoTerminatiSenzaFine(lista('terminati_senza_fine')), testoOrdiniDateDaSistemare(lista('ordini_con_date_da_sistemare'))].filter(Boolean).join(' ') || null;
 }
 
 // Il messaggio di un ricalcolo rifiutato: quello della funzione, o i suoi primi errori.
@@ -586,7 +589,10 @@ export async function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
 
   // Le schede di extra raccolta non passano da un file: la modifica si scrive nel
   // registro dei caricamenti come le altre, cosi' lo storico delle quadrature e
-  // delle verifiche sa che gli esiti di prima vanno rifatti (regola 2).
+  // delle verifiche sa che gli esiti di prima vanno rifatti (regola 2). La stessa
+  // riga avvia il motore degli alert (AlertEngineAutoRun, dal 22/09/2026), che
+  // rivaluta le date obbligatorie dell'extra raccolta.
+  let registrata = false;
   if (tipoFile === 'extra_raccolta' && giorniValidi.length) {
     try {
       const utente = await base44.auth.me().catch(() => null);
@@ -596,6 +602,7 @@ export async function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
         righe_importate: ordinati.length, utente: (utente && (utente.full_name || utente.email)) || '',
         messaggio: `Schede modificate con fine trasporto dal ${ordinati[0]} al ${ordinati[ordinati.length - 1]}`,
       });
+      registrata = true;
     } catch (e) { /* il ricalcolo parte lo stesso */ }
   }
 
@@ -618,9 +625,15 @@ export async function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
       if (dati.piano_salvato === false) throw new Error(dati.caricamento_in_corso ? `piano non salvato: ${dati.caricamento_in_corso}` : 'piano non salvato');
       return [piano, await base44.functions.invoke('analisiSettimanalePredittiva', {})];
     },
+    // Una scheda senza fine trasporto la riga del registro non la scrive, e se
+    // la scrittura non riesce il workflow non parte: senza, l'alert delle date
+    // obbligatorie dell'extra raccolta restava vecchio proprio per chi la data non
+    // ce l'ha (22/09/2026). In quei casi il motore si lancia da qui, una volta.
+    alertExtra: () => base44.functions.invoke('runAlertEngine', { modulo: 'extra_raccolta' }),
   };
+  const daFare = tipoFile === 'extra_raccolta' && !registrata ? [...elenco, 'alertExtra'] : elenco;
   const esiti = [];
-  for (const k of elenco) {
+  for (const k of daFare) {
     try {
       const risposte = [].concat(await compiti[k]());
       const problema = risposte.map(problemaRisposta).find(Boolean);

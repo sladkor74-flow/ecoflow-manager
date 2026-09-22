@@ -114,7 +114,11 @@
     },
     "anomalie": {
       "type": "number",
-      "description": "Righe con errori o sviste dell'impianto, piu' i formulari mancanti nel report"
+      "description": "Righe con errori o sviste dell'impianto, piu' i formulari mancanti nel report. Comprende le righe dei formulari registrati senza una data obbligatoria (immissione, inizio o fine trasporto) o con date incoerenti: dal 22/09/2026 sono anomalie del loro canale, non rettifiche"
+    },
+    "date_da_sistemare": {
+      "type": "number",
+      "description": "Formulari registrati senza una data obbligatoria (immissione, inizio o fine trasporto) o con date incoerenti, fra le righe del report e i movimenti assenti nel report: le date vanno inserite o corrette (regola del 22/09/2026)"
     },
     "osservazioni": {
       "type": "number",

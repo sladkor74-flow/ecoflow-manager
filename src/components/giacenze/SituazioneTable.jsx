@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { AlertTriangle } from 'lucide-react';
 import { formatNumber, formatTonnellate, formatIntero, formatKg } from '@/lib/utils';
+import { riassuntoGruppo } from '@/components/giacenze/DateDaSistemare';
 
 function fmt(n, dec = 2) {
   if (n == null || n === '' || isNaN(n)) return '—';
@@ -66,8 +67,36 @@ function DettaglioImpianto({ r }) {
   return (
     <div className="mt-1 text-xs text-muted-foreground" title="La giacenza a portale segue i caricamenti: alla fotografia si aggiungono i carichi che il file del portale non contiene ancora, riconosciuti dal numero d'ordine, e si tolgono le dichiarazioni caricate dopo">
       {f.del ? `file del portale del ${fmtDate(f.del)}: ${fmt(f.foto_t)} t` : 'nessun file del portale'}
+      {f.rete_non_dichiarata && <span className="block">la rete non la dichiara per accordo: il portale non ne tiene la giacenza per noi, e i carichi non si aggiungono</span>}
       {aggiornata && <span className="block">{f.aggiunti > 0 ? `+ ${fmt(f.aggiunti_t)} t di ${f.aggiunti} carichi non ancora nel file` : ''}{f.dichiarato_dopo_t > 0 ? ` − ${fmt(f.dichiarato_dopo_t)} t dichiarate dopo` : ''}</span>}
     </div>
+  );
+}
+
+// I formulari terminati con le date da sistemare di questo soggetto, per canale
+// (regola dell'utente, 22/09/2026). Qui il riassunto; l'elenco degli ordini sta
+// nelle anomalie in cima alla pagina e nell'export.
+function DateRiga({ r }) {
+  const gruppi = r.date_da_sistemare || [];
+  if (!gruppi.length) return null;
+  const nome = { RETE: 'rete', ACI: 'ACI', EXTRA_RACCOLTA: 'extra' };
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="mt-0.5 text-[11px] text-amber-700 flex items-center gap-1 cursor-help">
+            <AlertTriangle className="w-3 h-3 shrink-0" />
+            <span className="underline decoration-dotted underline-offset-2">
+              date da sistemare: {gruppi.map(g => `${nome[g.canale] || g.canale} ${g.n}`).join(' · ')}
+            </span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-sm text-xs space-y-1">
+          {gruppi.map(g => <div key={g.canale}><strong>{riassuntoGruppo(g)}.</strong> {g.avviso}</div>)}
+          <div>Immissione, inizio e fine trasporto sono obbligatorie. Gli ordini sono elencati nelle anomalie, in cima alla pagina.</div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
@@ -101,7 +130,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
               const barWidth = Math.max((r.giacenza_portale_t / maxGiacenza) * 100, 1);
               return (
                 <tr key={i} className="border-t hover:bg-muted/30">
-                  <td className="px-3 py-2">{r.sito}</td>
+                  <td className="px-3 py-2">{r.sito}<DateRiga r={r} /></td>
                   <td className="px-3 py-2">
                     <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
                       r.tipo_destinazione === 'imp'
@@ -174,7 +203,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
         </table>
       </div>
       <p className="px-3 py-2 text-xs text-muted-foreground italic">
-        La giacenza a portale e' della rete, per classe come nel portale; l'ACI sta nella sua colonna e l'extra raccolta, che a portale non c'e', nel dettaglio dello stoccaggio: i canali non si sommano. Per gli impianti e' il peso degli ordini non ancora dichiarati del file del portale, aggiornato a ogni caricamento con i carichi che il file non contiene ancora e le dichiarazioni caricate dopo. Per gli stoccaggi e' il saldo rilevato dalla pagina Unita' Locali di Stoccaggio, aggiornato con gli ingressi e le uscite finiti dopo la rilevazione: passa col mouse sulla data per il dettaglio. Tutto per fine del trasporto. La colonna In attesa di dichiarazione indica invece materiale gia' partito da uno stoccaggio verso un impianto, che il portale continua ad attribuire allo stoccaggio finche' il destinatario non presenta la dichiarazione: non e' giacenza.
+        La giacenza a portale e' della rete, per classe come nel portale; l'ACI sta nella sua colonna e l'extra raccolta, che a portale non c'e', nel dettaglio dello stoccaggio: i canali non si sommano. Per gli impianti e' il peso degli ordini non ancora dichiarati del file del portale, aggiornato a ogni caricamento con i carichi che il file non contiene ancora e le dichiarazioni caricate dopo. Per gli stoccaggi e' il saldo rilevato dalla pagina Unita' Locali di Stoccaggio, aggiornato con gli ingressi e le uscite finiti dopo la rilevazione: passa col mouse sulla data per il dettaglio. Tutto per fine del trasporto: un terminato senza fine trasporto non si colloca in nessun periodo e non entra ne' fra i carichi aggiunti alla fotografia ne' fra i movimenti dopo la rilevazione finche' la data non arriva, mentre il portale, se lo conosce, lo conta; la riga del sito lo segnala, con le altre date obbligatorie che mancano. La colonna In attesa di dichiarazione indica invece materiale gia' partito da uno stoccaggio verso un impianto, che il portale continua ad attribuire allo stoccaggio finche' il destinatario non presenta la dichiarazione: non e' giacenza.
       </p>
     </div>
   );

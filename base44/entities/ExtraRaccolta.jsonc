@@ -7,7 +7,8 @@
       "description": "ID ordine / riferimento univoco"
     },
     "stato": {
-      "type": "string"
+      "type": "string",
+      "description": "assegnato o terminato. In fatturazione entrano solo i terminati, nel mese della fine trasporto (giorno italiano); un terminato ha sempre le date di immissione, inizio e fine trasporto"
     },
     "ordine_immesso_il": {
       "type": "string",
@@ -163,7 +164,7 @@
     "prezzo_attivo_t": {
       "type": "number",
       "default": 0,
-      "description": "Prezzo in euro per tonnellata fatturato al cliente"
+      "description": "Prezzo in euro per tonnellata fatturato a Ecotyre. Zero o vuoto: vale la tariffa base Ecotyre dell'anno (la EXTRA_RACCOLTA attiva in tabella, altrimenti 202 euro/t nel 2026). Le secondarie non si fatturano"
     },
     "sovracosto_raccolta": {
       "type": "number",
@@ -183,17 +184,17 @@
     "costo_raccolta_t": {
       "type": "number",
       "default": 0,
-      "description": "Costo in euro per tonnellata da pagare al raccoglitore"
+      "description": "Costo in euro per tonnellata da pagare al raccoglitore. Lo scrive l'amministratore prima di passare l'intervento a terminato; la passiva paga questo e non ripiega mai sulle tariffe di rete"
     },
     "costo_stoccaggio_t": {
       "type": "number",
       "default": 0,
-      "description": "Costo in euro per tonnellata da pagare allo stoccaggio"
+      "description": "Costo in euro per tonnellata da pagare allo stoccaggio. Scritto a mano sull'intervento, come la raccolta"
     },
     "costo_trattamento_t": {
       "type": "number",
       "default": 0,
-      "description": "Costo in euro per tonnellata da pagare all'impianto"
+      "description": "Costo in euro per tonnellata da pagare all'impianto. Scritto a mano sull'intervento, come la raccolta"
     },
     "costo_pulizia": {
       "type": "number",

@@ -77,9 +77,22 @@ esistono solo per la rete.
 deve comparire fra gli impianti del giro RETE: ci compariva, e la stessa riga di
 trattamento si pagava due volte, una per scheda. Quando un viaggio di secondaria
 porta insieme formulari di rete e formulari ACI, l'importo si paga una volta
-sola - a tonnellata si divide per canale, a viaggio si addebita alla rete se c'e'
-almeno un formulario di rete - e le tonnellate mostrate sono quelle del canale
-che si sta guardando, mai la somma dei due.
+sola: a tonnellata ogni canale paga i suoi chili; **a viaggio l'importo si divide
+fra i canali in proporzione ai chili effettivi di ciascuno su quel viaggio**
+(regola dell'utente del 22/09/2026, `quoteViaggioMisto` in
+`base44/shared/passivaCalcolo.ts`: la quota della rete si arrotonda al centesimo,
+l'ACI prende il resto, cosi' le parti fanno sempre l'importo). Il viaggio misto
+non e' un'anomalia. Le tonnellate mostrate sono quelle del canale che si sta
+guardando, mai la somma dei due.
+
+**Extra raccolta in fatturazione** (22/09/2026). In attiva vale il prezzo scritto
+sull'intervento; se e' zero o vuoto, la tariffa base: la Tariffa ATTIVA
+EXTRA_RACCOLTA della data, e senza quella **202 euro/t nel 2026**. In passiva i
+costi (raccolta, stoccaggio, trattamento) sono quelli che l'utente scrive a mano
+sull'intervento prima di passarlo da assegnato a terminato: **mai il ripiego sulle
+tariffe di rete**, ne' nel calcolo ne' nel modulo. In fatturazione entrano solo gli
+interventi terminati, nel mese della fine trasporto. Una scheda si chiude
+(terminato) solo con FIR, peso effettivo e le tre date obbligatorie.
 
 ### Pesi
 
@@ -197,6 +210,16 @@ raccolta e' uno solo: fra gli impianti si divide **in proporzione alle secondari
 che ciascuno riceve da lui**, altrimenti compare intero sotto entrambi e il
 residuo risulta il doppio di quello vero.
 
+**Il gia' arrivato della predittivita'** (solo rete, 22/09/2026) ha un conto solo,
+`giaArrivatoDiRete` in `base44/shared/proiezioneSecondarie.ts` (specchio in
+`src/lib`), usato da Dashboard, Proiezione, suggerimento del lunedi' e agente: le
+primarie di rete arrivate al **sito** dell'impianto seguito, cioe' all'impianto e
+al suo piazzale (`tipo_destinazione` 'stoc'), piu' le secondarie di rete da altri
+stoccaggi. Le primarie del piazzale contano perche' "il residuo totale diminuisce
+anche con le primarie" (utente); le secondarie dal proprio piazzale a se stesso
+non si contano, sarebbero contate due volte. Il piazzale conta al netto di quello
+che riparte verso altri impianti seguiti (scelta da confermare con l'utente).
+
 ### La fatturazione attiva verso Ecotyre
 
 Le righe si calcolano in un punto solo, `base44/shared/attivaCalcolo.ts`:
@@ -301,15 +324,34 @@ quella prova.
   allegati; le TER in ordine crescente vanno agli allegati in ordine di scelta.
 - **Ripartizione**: ciabattato a peso pieno dell'allegato, l'ultima terziaria il
   resto; ferro uguale per tutte alle decine, l'ultima il resto; mai oltre 38.000
-  kg per dichiarazione. L'extra raccolta si attacca all'ultima terziaria e si
-  scrive a parte (canale suo).
-- **Quanto**: due letture, sempre mostrate insieme. Uscite del registro
-  (V + X + Y) oppure la giacenza: dopo la dichiarazione del mese M a portale
-  deve restare **AD + AE della riga di M nel foglio Cons.** (gomma in impianto:
-  cippato, SACI e interi; piu' ferro in giacenza), regola dell'utente del
-  22/09/2026. Da dichiarare = giacenza di rete a portale a fine mese (per fine
-  trasporto) - (AD + AE) - extra raccolta ancora in impianto. Il CSS-C in
-  giacenza (Z) non resta: e' end of waste. Il ferro e' la parte che si aggiusta.
+  kg per dichiarazione, sul peso con cui la dichiarazione si chiude a portale.
+- **Quanto** (22/09/2026): due letture del **totale da caricare a portale**,
+  sempre mostrate insieme. Uscite del registro V + X + Y (extra raccolta
+  compresa), oppure la giacenza: dopo la dichiarazione del mese M a portale deve
+  restare **AD + AE della riga di M nel foglio Cons.** (gomma in impianto:
+  cippato, SACI e interi; piu' ferro in giacenza) meno l'extra ancora in
+  impianto. Totale a portale = giacenza di rete a portale a fine mese (per fine
+  trasporto) - quello che deve restare. Il CSS-C in giacenza (Z) non resta: e'
+  end of waste. Il ferro e' la parte che si aggiusta: totale a portale - V - Y.
+- **L'extra raccolta partita con la nave sta dentro l'ultima terziaria**
+  (utente, 22/09/2026): a portale quella terziaria si chiude col peso intero,
+  rete + extra (agosto 2026: 19.880 + 460 = 20.340, totale a portale 534.600).
+  Il rigo dell'extra resta, con la stessa terziaria, e dice che quella parte e'
+  extra raccolta. Nel riepilogo Excel e nel file di gestione rete ed extra
+  restano **separati** (IRIGOM 534.140, EXTRA RACCOLTA 460): l'utente chiude la
+  terziaria a mano, e dal report del portale il gestionale vede solo il totale.
+  La DichiarazioneSito RETE del mese vale il **totale a portale** (534.600): e'
+  quello che il portale decurta e che `agganciaDichiarazioni` riconosce con 2 kg
+  di tolleranza; nella nota c'e' `[extra compresa: N kg]`. L'extra ha la sua
+  DichiarazioneSito sul mese del formulario.
+- **Ogni mese** (procedura dell'utente): scelti gli allegati VII, si chiede
+  all'utente di aprire a portale tante terziarie quanti sono; con i numeri TER si
+  scrive il blocco del mese nel foglio DICHIARAZIONI del file di gestione e si
+  rinominano gli allegati scelti col numero della terziaria (la cartella del mese
+  scaricata li porta gia' in `EXPORT/TERZIARIE`). Il blocco lo scrive, con Excel,
+  `C:\Users\HOME\Desktop\BASE44\strumenti\irigom\scrivi_blocco_mese.ps1` dal file
+  `Dati per il file di gestione.json` della cartella (`datiFileGestione` in
+  `src/lib/documentiIrigom.js`); istruzioni in `LEGGIMI.md` accanto.
 - I Word nascono dai modelli in `ModelloDocumento` (docx con segnaposto; le
   tabelle con `tabellaWord`, lo stile di agosto). Il registro e i PDF si leggono
   nel browser e non si conservano: resta la `PraticaIrigom` con i numeri.
@@ -339,6 +381,40 @@ Il 21/09/2026 gli "scarti" di Green Tyre (24,56 t), Gatim (14,95 t) e T-Cycle
 (11,56 t) erano carichi caricati nel gestionale che la fotografia del 18/09 non
 conteneva ancora: con la regola 2 si aggiungono da soli.
 
+### Le date obbligatorie dei formulari (22/09/2026)
+
+Parole dell'utente: «le date immissione, inizio e fine trasporto sono
+obbligatorie nei formulari, se non ci sono vanno segnalate e questo vale sempre
+dove ci sono ordini terminati non solo nei report settimanali». La regola sta in
+`base44/shared/movimenti.ts` (specchio `src/lib/movimenti.js`):
+`DATE_OBBLIGATORIE`, `dateMancanti`, `dateIncoerenti`, `dateDaSistemare`,
+`testoDate`. Non si riscrive. Un terminato senza fine trasporto resta fuori da
+ogni periodo, ma si segnala sempre dicendo quali date mancano; uno con la fine
+trasporto ma senza un'altra data, o con date nell'ordine sbagliato, si conta e si
+segnala lo stesso. Dove si vede:
+
+- **elenchi** (Terminati Rete e ACI, Secondarie, Terziarie, Extra Raccolta): segno
+  sulla riga, avviso per canale, filtro "date da sistemare", colonna negli Excel
+  (componenti in `src/components/primarie-rete/DateDaSistemare.jsx`);
+- **conti**: le funzioni restituiscono `date_da_sistemare` per canale
+  (`riepilogoDate` in `base44/shared/raccoltoCalculator.ts`), mostrato in
+  Dashboard, matrice province, report mensile e settimanale, Target & Status;
+- **report settimanali**: un formulario registrato senza una data obbligatoria o
+  con date incoerenti e' un'**anomalia** del suo canale e conta nel verdetto
+  (`conformitaPerCanale`), non una rettifica a nostra cura;
+- **alert**: la regola "date obbligatorie" del motore degli alert, per modulo e
+  canale, si apre e si chiude da sola a ogni caricamento (anche delle schede di
+  extra raccolta) e compare nel cruscotto;
+- **giacenze e dichiarazioni**: per soggetto e canale (`formulariDaSistemare` in
+  `base44/shared/giacenzaPortale.ts`); senza fine trasporto un ordine non entra
+  nella giacenza calcolata, e se il portale lo conosce la differenza si dice;
+- **fatturazione** (anomalie per canale), **qualifica**, **richieste ECT**,
+  **evasione assegnati**, **prefattura** ed **EcoTyna**.
+
+Chi la rete non la dichiara per accordo (`dichiara_rete` falso, oggi Tecnogum)
+non ha una giacenza di rete che il portale tenga per noi: i suoi carichi non si
+aggiungono alla fotografia come "non ancora nel file".
+
 ### Come si legge un movimento: un punto solo
 
 `base44/shared/movimenti.ts` (specchio per le pagine: `src/lib/movimenti.js`).
@@ -357,8 +433,7 @@ li', e non riscrive la regola:
 - `giornoOrdine / annoOrdine / meseOrdine`: ripiegano sull'immissione anche per
   un terminato senza fine trasporto. **Non** servono agli elenchi: restano solo
   per chi attribuisce apposta all'anno di immissione il conteggio dei senza fine
-  (`analisiSettimanalePredittiva`, `calcolaPianificazioneSecondaria`,
-  `proiezioneSecondarie`);
+  (per esempio esportazioni, giacenze e qualifica: `grep annoOrdine` dice chi);
 - `canaleMovimento(r, archivio)`: rete, ACI (con `eAci`) o extra raccolta.
 
 Anche «oggi» e' il giorno italiano (`oggiRoma()`), non `new Date()` del server.

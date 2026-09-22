@@ -104,7 +104,8 @@ export default function PredittivitaSettimanale({ data, onReload }) {
               <React.Fragment key={imp.impianto.id}>
                 <tr className="bg-primary/10">
                   <td className="px-3 py-2 font-bold uppercase text-xs sticky left-0 bg-primary/10" colSpan={settimane.length * 3 + 2}>
-                    {imp.impianto.nome} · Target {fmt(imp.impianto.target)} · Consuntivo {fmt(imp.consuntivo)} · Residuo {fmt(imp.residuo)}
+                    {/* gia' arrivato e residuo: gli stessi della Dashboard, della Proiezione e del suggerimento del lunedi' */}
+                    {imp.impianto.nome} · Target di rete {fmt(imp.impianto.target)} · Già arrivato di rete {fmt(imp.consuntivo)} · Residuo {fmt(imp.residuo)}
                   </td>
                 </tr>
                 {(imp.fornitori || []).map(f => {

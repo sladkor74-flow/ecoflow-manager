@@ -115,6 +115,20 @@ export default function PrefatturaEcotyre({ periodo, isAdmin, onEsito }) {
             {p.note_lettura && <p className="text-xs mt-2 whitespace-pre-line flex items-start gap-1.5"><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span>{p.note_lettura}</span></p>}
           </div>
 
+          {/* Le date obbligatorie dei formulari del mese (immissione, inizio e fine
+              trasporto, regola dell'utente del 22/09/2026): una riga per canale e
+              per tipo, mai sommate. Le calcola la fatturazione attiva. */}
+          {(data.anomalie_date || []).length > 0 && (
+            <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg p-3 text-sm space-y-1">
+              {data.anomalie_date.map((a, i) => (
+                <p key={`${a.tipologia}|${a.tipo}|${i}`} className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span><strong>{NOMI[a.tipologia] || a.tipologia}:</strong> {a.descrizione}</span>
+                </p>
+              ))}
+            </div>
+          )}
+
           {/* Un riquadro per canale: i tre canali non si sommano */}
           <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
@@ -153,9 +167,9 @@ export default function PrefatturaEcotyre({ periodo, isAdmin, onEsito }) {
 
           {c.terziarie?.ordini > 0 && (
             <Tabella tono="grigio" titolo={`Terziarie in prefattura (sezione a parte): € ${euro(c.terziarie.euro)} su ${kg(c.terziarie.kg)} kg`}
-              spiega={`Il portale le paga come trasporto (8 €/t con l'allegato VII, 10 €/t col formulario). Per ora restano fuori dalla fatturazione attiva e dai tre report: non sono una differenza, l'importo è qui per quando servirà.${c.terziarie.non_in_archivio > 0 ? ` ${c.terziarie.non_in_archivio} di questi ordini non sono nell'archivio Terziarie.` : ''}`}
+              spiega={`Il portale le paga come trasporto (8 €/t con l'allegato VII, 10 €/t col formulario). Per ora restano fuori dalla fatturazione attiva e dai tre report: non sono una differenza, l'importo è qui per quando servirà.${c.terziarie.non_in_archivio > 0 ? ` ${c.terziarie.non_in_archivio} di questi ordini non sono nell'archivio Terziarie.` : ''}${c.terziarie.date_da_sistemare > 0 ? ` ${c.terziarie.date_da_sistemare === 1 ? "Uno ha" : `${c.terziarie.date_da_sistemare} hanno`} le date obbligatorie del formulario da sistemare (immissione, inizio e fine trasporto).` : ''}`}
               righe={c.terziarie.righe}
-              colonne={[{ t: 'ID ordine', v: r => r.id_ordine, m: true }, { t: 'Documento', v: r => r.numero_fir || '—' }, { t: 'kg', v: r => kg(r.kg), d: true }, { t: '€/t', v: r => euro(r.prezzo_t), d: true }, { t: '€', v: r => euro(r.importo), d: true }, { t: 'In archivio', v: r => (r.in_archivio ? 'sì' : 'no') }]} />
+              colonne={[{ t: 'ID ordine', v: r => r.id_ordine, m: true }, { t: 'Documento', v: r => r.numero_fir || '—' }, { t: 'kg', v: r => kg(r.kg), d: true }, { t: '€/t', v: r => euro(r.prezzo_t), d: true }, { t: '€', v: r => euro(r.importo), d: true }, { t: 'In archivio', v: r => (r.in_archivio ? 'sì' : 'no') }, { t: 'Date da sistemare', v: r => r.date || '—' }]} />
           )}
 
           <Tabella tono="red" titolo="Nella prefattura ma non nel mese del gestionale" spiega="Ecotyre li riconosce in questo mese, il gestionale no: la ragione è scritta accanto."

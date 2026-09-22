@@ -1,11 +1,11 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { divergenzeTargetImpianti, testoDivergenza } from "../../shared/targetImpianti.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
-import { PROV_TO_REGION, MESI } from "../../shared/raccoltoCalculator.ts";
+import { PROV_TO_REGION, MESI, riepilogoDate, riepilogoDateVista } from "../../shared/raccoltoCalculator.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
-import { filtraMovimenti, giornoMovimento } from "../../shared/movimenti.ts";
+import { filtraMovimenti, giornoMovimento, dateDaSistemare } from "../../shared/movimenti.ts";
 import { statoCaricamenti, caricamentiDuranteLettura } from "../../shared/reportSettimanali.ts";
 
 // Sotto questo numero di giorni coperti dai dati la proiezione di fine mese non
@@ -45,13 +45,26 @@ function periodoAlert(a) {
 
 // Regola 1: i ritiri terminati senza fine trasporto sono esclusi dal raccolto di
 // ogni mese. Chi legge un "non raggiunto" deve sapere che puo' dipendere da
-// ritiri fatti ma senza data sul portale.
-function testoSenzaFine(item) {
+// ritiri fatti ma senza data sul portale. Anche le altre date obbligatorie di un
+// formulario terminato - immissione e inizio trasporto - si segnalano quando
+// mancano o non tornano (regola dell'utente, 22/09/2026): quei ritiri sono nel
+// raccolto del mese, ma vanno corretti.
+function testoDateDaSistemare(item) {
   const n = item.senza_fine_trasporto || 0;
-  if (!n) return '';
-  return n === 1
-    ? ` Un ritiro terminato del raccoglitore in ${item.regione} non ha la fine trasporto: è escluso dal raccolto di ogni mese finché la data non viene inserita sul portale.`
-    : ` ${n} ritiri terminati del raccoglitore in ${item.regione} non hanno la fine trasporto: sono esclusi dal raccolto di ogni mese finché la data non viene inserita sul portale.`;
+  const altri = item.date_da_sistemare_nel_mese || 0;
+  let testo = '';
+  if (n) {
+    testo += n === 1
+      ? ` Un ritiro terminato del raccoglitore in ${item.regione} non ha la fine trasporto: è escluso dal raccolto di ogni mese finché la data non viene inserita sul portale.`
+      : ` ${n} ritiri terminati del raccoglitore in ${item.regione} non hanno la fine trasporto: sono esclusi dal raccolto di ogni mese finché la data non viene inserita sul portale.`;
+  }
+  if (altri) {
+    const dettaglio = item.testo_date_nel_mese ? ` (${item.testo_date_nel_mese})` : '';
+    testo += altri === 1
+      ? ` Un ritiro del mese, contato nel raccolto, ha date da sistemare${dettaglio}: va corretto sul portale.`
+      : ` ${altri} ritiri del mese, contati nel raccolto, hanno date da sistemare${dettaglio}: vanno corretti sul portale.`;
+  }
+  return testo;
 }
 
 function testoAlert(item) {
@@ -64,7 +77,7 @@ function testoAlert(item) {
     descrizione: (isMissed
       ? `Il raccoglitore "${item.raccoglitore}" in ${item.regione} non ha raggiunto il target mensile di ${item.target} ton per ${item.mese} ${item.anno}. Raccolto effettivo: ${item.raccolto} ton (Δ ${item.delta} ton, ${item.pct_raggiungimento}% del target).`
       : `Il raccoglitore "${item.raccoglitore}" in ${item.regione} è a rischio di non raggiungere il target di ${item.target} ton per ${item.mese} ${item.anno}. Raccolto finora: ${item.raccolto} ton con i dati fino al giorno ${item.giorni_coperti_dai_dati}/${item.giorni_in_mese}${finito ? " (il mese e' finito, ma i ritiri degli ultimi giorni possono non essere ancora terminati a portale)" : ''}, proiezione fine mese: ${item.proiezione} ton (${item.pct_proiezione}% del target).`)
-      + testoSenzaFine(item),
+      + testoDateDaSistemare(item),
     severita: (isMissed ? item.pct_raggiungimento : item.pct_proiezione) < 50 ? 'critico' : 'warning',
   };
 }
@@ -162,7 +175,7 @@ export default async function(req) {
       const isMeseCorrente = (mese === meseCorrente && anno === annoCorrente);
       // chiavi: i raccoglitori con un target; ok: quelli che i dati dicono a posto
       // (raggiunto a mese chiuso, o proiezione affidabile sopra il 90%)
-      const esito: any = { mese, anno, isMeseCorrente, chiuso: false, totale_target: targets.length, missed: [], atRisk: [], okCount: 0, chiavi: new Set(), ok: new Set() };
+      const esito: any = { mese, anno, isMeseCorrente, chiuso: false, totale_target: targets.length, missed: [], atRisk: [], okCount: 0, chiavi: new Set(), ok: new Set(), dateDaSistemare: null };
       if (targets.length === 0) return esito;
 
       // Raccolto del solo canale RETE: i target dei raccoglitori non riguardano ACI
@@ -188,6 +201,17 @@ export default async function(req) {
         if (!senzaFineByKey[key]) senzaFineByKey[key] = { raccoglitore, regione, quanti: 0 };
         senzaFineByKey[key].quanti++;
       }
+      // I ritiri del mese, contati nel raccolto, con un'altra data obbligatoria che
+      // manca o non torna (22/09/2026): per raccoglitore e regione, come i senza
+      // fine trasporto, e per tutta la rete del mese nella risposta.
+      const dateNelMeseByKey = {};
+      for (const r of rete.filter(dateDaSistemare)) {
+        const { raccoglitore, regione } = raccRegione(r);
+        const key = `${raccoglitore}|||${regione}`;
+        if (!dateNelMeseByKey[key]) dateNelMeseByKey[key] = { raccoglitore, regione, righe: [] };
+        dateNelMeseByKey[key].righe.push(r);
+      }
+      esito.dateDaSistemare = riepilogoDateVista(await primarieTerminate(), rete, 10);
 
       const idxMese = MESI.indexOf(mese);
       const giornoDelMese = Number(oggi.slice(8, 10));
@@ -222,6 +246,9 @@ export default async function(req) {
         const senzaFineTarget = Object.values(senzaFineByKey)
           .filter(x => x.regione === regione && targetDelPortale(nomiRegione, x.raccoglitore) === racc)
           .reduce((s, x) => s + x.quanti, 0);
+        const dateNelMese = riepilogoDate(Object.values(dateNelMeseByKey)
+          .filter(x => x.regione === regione && targetDelPortale(nomiRegione, x.raccoglitore) === racc)
+          .flatMap(x => x.righe), 0);
         const pctRaggiungimento = (raccolto / targetVal) * 100;
         const delta = raccolto - targetVal;
 
@@ -249,6 +276,8 @@ export default async function(req) {
           proiezione_affidabile: proiezioneAffidabile,
           giorni_in_mese: chiuso ? null : giorniInMese,
           senza_fine_trasporto: senzaFineTarget,
+          date_da_sistemare_nel_mese: dateNelMese.totale,
+          testo_date_nel_mese: dateNelMese.testo,
         };
         const chiave = chiaveAlert(item);
         esito.chiavi.add(chiave);
@@ -427,6 +456,9 @@ export default async function(req) {
       // primarie di rete terminate senza fine trasporto, di qualunque anno: escluse
       // dal raccolto di ogni mese (per raccoglitore, in ogni voce di missed e at_risk)
       senza_fine_trasporto: senzaFine ? senzaFine.length : undefined,
+      // le date da sistemare della rete per il mese richiesto: quei senza fine
+      // trasporto e i ritiri del mese con un'altra data che manca o non torna
+      date_da_sistemare: principale.dateDaSistemare || undefined,
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

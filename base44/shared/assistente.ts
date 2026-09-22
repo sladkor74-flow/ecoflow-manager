@@ -187,7 +187,26 @@ export async function situazioneGestionale(base44, oggi) {
   if (esclusi.length) {
     const nf = (xs) => { const n = contaFormulari(xs); return `${n} ${n === 1 ? 'formulario' : 'formulari'}`; };
     const perAnno = (x) => x.per_anno.map(g => `${g.anno === null ? 'senza data di immissione' : `immessi nel ${g.anno}`} ${contaFormulari(g.righe)}`).join(', ');
-    righe.push(`Terminati senza data di fine trasporto, di qualunque periodo, esclusi dal raccolto qui sopra perche' non si sa in che mese cadono, un canale per volta: ${esclusi.map(([c, x]) => `${c} ${nf(x.esclusi)}, ${t1(x.esclusi.reduce((s, r) => s + (Number(r.peso_effettivo) || 0), 0) / 1000)} t (${perAnno(x)})`).join('; ')}. Vanno corretti nel file del portale e ricaricati.`);
+    righe.push(`Terminati senza data di fine trasporto, di qualunque periodo, esclusi dal raccolto qui sopra perche' non si sa in che mese cadono, un canale per volta: ${esclusi.map(([c, x]) => `${c} ${nf(x.esclusi)}, ${t1(x.esclusi.reduce((s, r) => s + (Number(r.peso_effettivo) || 0), 0) / 1000)} t (${perAnno(x)})`).join('; ')}. La data e' obbligatoria e va inserita: si correggono nel file del portale e si ricaricano (l'extra raccolta nella sua scheda).`);
+  }
+
+  // Le date obbligatorie dei formulari - immissione, inizio e fine trasporto,
+  // regola dell'utente del 22/09/2026 - si dicono tutte, per modulo e canale e di
+  // qualunque anno, non solo la fine trasporto. Si leggono dagli alert del motore,
+  // che le rivaluta a ogni caricamento su tutti i terminati: rileggere qui ogni
+  // archivio per intero costerebbe quanto un ricalcolo. Anche l'extra raccolta,
+  // dal 22/09/2026: ogni scheda salvata avvia il motore.
+  const date = alert.filter(a => String(a.regola_id || '').startsWith('date_obbligatorie'));
+  if (date.length) {
+    const canale = { rete: 'RETE', ACI: 'ACI', extra: 'EXTRA RACCOLTA' };
+    const modulo = { primarie_rete: 'primarie', primarie_aci: 'primarie', secondarie: 'secondarie', terziarie: 'terziarie', extra_raccolta: 'raccolte e trasferimenti' };
+    righe.push(`Ordini terminati con date obbligatorie (immissione, inizio e fine trasporto) mancanti o incoerenti, di qualunque anno, per modulo e canale e mai sommati: ${date.map(a => {
+      const dove = `${a.canale ? `${canale[a.canale] || a.canale} ` : ''}${modulo[a.modulo] || a.modulo}`;
+      const n = Number(a.quanti);
+      return Number.isFinite(n) && n > 0
+        ? `${dove} ${n} ${n === 1 ? 'ordine' : 'ordini'}${Number(a.senza_fine) ? ` (di cui ${a.senza_fine} senza fine trasporto)` : ''}`
+        : `${dove}: ${a.titolo}`;
+    }).join('; ')}. Sono obbligatorie: vanno inserite o corrette. L'elenco degli ordini e' negli alert (strumento alert_aperti).`);
   }
 
   // --- Raccoglitori: target contro raccolto ---

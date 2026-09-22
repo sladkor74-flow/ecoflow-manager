@@ -20,6 +20,8 @@ export default function Dashboard() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [counts, setCounts] = useState({});
+  // le date da sistemare di ogni riquadro, un canale per volta (getDashboardStats)
+  const [dateDaSistemare, setDateDaSistemare] = useState({});
   const [alertCount, setAlertCount] = useState(0);
   const [alertCritici, setAlertCritici] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -38,6 +40,7 @@ export default function Dashboard() {
       try {
         const res = await base44.functions.invoke('getDashboardStats', { mese, anno });
         setCounts(res.data.counts);
+        setDateDaSistemare(res.data.date_da_sistemare || {});
         setAlertCount(res.data.alert_count || 0);
         setAlertCritici(res.data.alert_critici || 0);
       } catch (e) { /* ignore */ }
@@ -69,6 +72,19 @@ export default function Dashboard() {
     { key: 'secondarie', label: 'Secondarie di rete', sotto: counts.secondarie_aci ? `${periodo} · ACI ${formatIntero(counts.secondarie_aci)}` : periodo, icon: Truck, path: '/secondarie', color: 'text-purple-600 bg-purple-50' },
     { key: 'terziarie', label: 'Terziarie terminate', sotto: periodo, icon: Ship, path: '/terziarie', color: 'text-pink-600 bg-pink-50' },
   ];
+  // I terminati con una data obbligatoria che manca o non torna, per riquadro:
+  // quelli senza fine trasporto sono fuori dal numero grande, gli altri dentro.
+  // Il riquadro delle secondarie di rete dice anche quelle ACI, a parte, come fa
+  // col loro numero. Gli assegnati non sono terminati: niente.
+  const RIQUADRI_DATE = { primarie_rete: [['primarie_rete', '']], primarie_aci: [['primarie_aci', '']], secondarie: [['secondarie', ''], ['secondarie_aci', 'ACI ']], terziarie: [['terziarie', '']] };
+  const datePerRiquadro = (key) => (RIQUADRI_DATE[key] || [])
+    .map(([chiave, prefisso]) => ({ chiave, prefisso, d: dateDaSistemare[chiave] }))
+    .filter(({ d }) => d && d.totale > 0)
+    .map(({ chiave, prefisso, d }) => ({
+      chiave,
+      testo: `${prefisso}${formatIntero(d.totale)} con date da sistemare`,
+      title: `${d.testo}. Immissione, inizio e fine trasporto sono obbligatorie in ogni formulario terminato; chi non ha la fine trasporto è fuori dal conteggio.`,
+    }));
 
   return (
     <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-8">
@@ -97,6 +113,12 @@ export default function Dashboard() {
                 <p className="text-2xl font-heading font-bold">{formatIntero(counts[c.key] ?? 0)}</p>
                 <p className="text-sm text-muted-foreground">{c.label}</p>
                 <p className="text-xs text-muted-foreground/80">{c.sotto}</p>
+                {/* Le date obbligatorie dei formulari terminati (regola del
+                    22/09/2026): solo se qualcuno le ha da sistemare, del solo
+                    canale del riquadro. */}
+                {datePerRiquadro(c.key).map(({ chiave, testo, title }) => (
+                  <p key={chiave} className="text-xs text-amber-700 mt-0.5" title={title}>{testo}</p>
+                ))}
               </Link>
             );
           })}
@@ -107,7 +129,7 @@ export default function Dashboard() {
       <DashboardFilters mese={mese} anno={anno} onMeseChange={setMese} onAnnoChange={setAnno} />
 
       {/* KPI Raccolta */}
-      <DashboardKpi kpi={raccoltaData?.kpi} senzaFine={raccoltaData?.senza_fine_trasporto} loading={raccoltaLoading} />
+      <DashboardKpi kpi={raccoltaData?.kpi} senzaFine={raccoltaData?.senza_fine_trasporto} dateDaSistemare={raccoltaData?.date_da_sistemare} loading={raccoltaLoading} />
 
       {/* Raccolta RETE vs ACI per Regione */}
       <div className="border rounded-lg p-5">

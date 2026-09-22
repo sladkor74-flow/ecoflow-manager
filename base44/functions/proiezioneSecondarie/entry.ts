@@ -3,7 +3,7 @@ import { fineProgrammazione, avvisoFineProgrammazione } from "../../shared/fineP
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { canaleMovimento } from "../../shared/movimenti.ts";
-import { proiettaInsieme, viaggiPerMese, MESI, KG_PER_VIAGGIO } from "../../shared/proiezioneSecondarie.ts";
+import { proiettaInsieme, viaggiPerMese, MESI, KG_PER_VIAGGIO, giaArrivatoDiRete, residuoDiRete, noteGiaArrivato, sitiDellaPredittivita, dateDaSistemareDiRete, riassuntoDate } from "../../shared/proiezioneSecondarie.ts";
 import { dopoLaRilevazione, ultimeRilevazioni, kgReteDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from "../../shared/reportSettimanali.ts";
@@ -14,6 +14,15 @@ import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from
 // invece che scritti a mano: il target dell'impianto, quello che gli e' già
 // arrivato in primaria e in secondaria, quanto arriva in media ogni mese, e
 // quanto materiale hanno gli stoccaggi che lo alimentano.
+//
+// Il gia' arrivato e il residuo sono quelli di giaArrivatoDiRete
+// (shared/proiezioneSecondarie.ts), lo stesso conto della Dashboard e del
+// suggerimento del lunedi' (regola dell'utente, 22/09/2026): le primarie
+// arrivate al sito dell'impianto, anche quelle scaricate nel suo piazzale, piu'
+// le secondarie da altri stoccaggi. Il piazzale conta al netto di quello che
+// riparte per altri impianti, che lo contano loro. Le secondarie dal piazzale
+// dell'impianto a se stesso qui si contavano, e quei PFU valevano due volte: una
+// all'arrivo in primaria, una al trasbordo.
 //
 // Solo rete (regola dell'utente, 22/09/2026): ACI ed extra raccolta non entrano
 // nella predittivita', ne' nel target, ne' nel gia' arrivato, ne' nella
@@ -88,31 +97,36 @@ export default async function(req) {
     const primarie = soloRete(primarieTutte, 'PrimariaRete');
     const secondarie = soloRete(secondarieTutte, 'Secondaria');
 
-    // Un terminato senza fine trasporto non si colloca in nessun mese e non
-    // entra ne' nel gia' arrivato ne' nella giacenza (mai ripiegando sulla
-    // chiusura): si conta, di qualunque anno, e si dice. Prima si contavano solo
-    // gli immessi nell'anno (annoOrdine, che AGENTS.md riserva agli elenchi): uno
-    // senza data di immissione, o immesso a dicembre dell'anno prima, spariva.
-    const senzaFine = (righe) => righe.filter(r => terminato(r) && !soloData(r.trasporto_finito_il)).length;
-    const senzaFineTrasporto = { primarie: senzaFine(primarie), secondarie: senzaFine(secondarie) };
+    const chiaviImpianti = new Set(impianti.map(imp => normalizzaRagioneSociale(imp.nome_impianto)).filter(Boolean));
+
+    // Le date obbligatorie dei formulari (regola dell'utente, 22/09/2026):
+    // immissione, inizio e fine trasporto. Un terminato a cui ne manca una, o
+    // con le date nell'ordine sbagliato, si segnala; se manca la fine trasporto
+    // non si colloca in nessun mese e resta fuori dal gia' arrivato e dalle
+    // giacenze (mai ripiegando sulla chiusura). Prima qui si contavano solo i
+    // senza fine trasporto. I formulari guardati sono quelli degli impianti
+    // seguiti e dei loro stoccaggi, gli stessi della Dashboard e del
+    // suggerimento del lunedi' (sitiDellaPredittivita).
+    const siti = sitiDellaPredittivita(impianti, fornitori, secondarie, anno, normalizzaRagioneSociale);
+    const dateDaSistemare = dateDaSistemareDiRete(primarie, secondarie, siti.tutti, anno, normalizzaRagioneSociale);
+    const senzaFineTrasporto = dateDaSistemare.senza_fine;
     const avvisiGenerali = [];
     if (caricamentoInCorso) avvisiGenerali.push(caricamentoInCorso);
-    if (senzaFineTrasporto.primarie || senzaFineTrasporto.secondarie) {
-      avvisiGenerali.push(`Terminati di rete di qualunque anno senza la data di fine trasporto (primarie: ${senzaFineTrasporto.primarie}, secondarie: ${senzaFineTrasporto.secondarie}). Non sono contati ne' nel gia' arrivato ne' nelle giacenze degli stoccaggi finche' un nuovo caricamento non porta la data.`);
-    }
+    if (dateDaSistemare.avviso) avvisiGenerali.push(dateDaSistemare.avviso);
 
-    // --- dove arriva la roba, mese per mese ---
-    // chiave sito -> { mese -> kg }, per destinazione: di un soggetto che e'
-    // impianto e stoccaggio insieme qui ci sono le due cose, non distinte per
-    // tipo_destinazione (la giacenza qui sotto invece le distingue).
-    const primariaPerSito = new Map();
+    // --- il gia' arrivato di rete di ogni impianto seguito: il conto condiviso ---
+    const arrivati = giaArrivatoDiRete(chiaviImpianti, primarie, secondarie, anno, normalizzaRagioneSociale);
+
+    // --- quanto entra nei piazzali, mese per mese ---
+    // Gli ingressi di uno stoccaggio sono le primarie scaricate li'. Di un
+    // soggetto che e' anche un impianto seguito (T-Cycle, il cui piazzale
+    // alimenta Tecnogum) si tengono solo quelle scaricate nel piazzale
+    // (tipo_destinazione 'stoc'), come fa la giacenza qui sotto: prima c'erano
+    // anche quelle scaricate all'impianto, e la disponibilita' per Tecnogum
+    // usciva gonfiata di tutto quello che T-Cycle tratta.
+    const tipoStoc = (x) => String(x.tipo_destinazione || '').toLowerCase().trim() === 'stoc';
+    const ingressiPiazzale = new Map(); // chiave stoccaggio -> { mese -> kg }
     const nomeSito = new Map();
-    const aggiungi = (mappa, chiave, mese, kg) => {
-      if (!mappa.has(chiave)) mappa.set(chiave, {});
-      const m = mappa.get(chiave);
-      m[mese] = (m[mese] || 0) + kg;
-    };
-
     for (const r of primarie) {
       if (!terminato(r)) continue;
       const m = meseDi(r.trasporto_finito_il, anno);
@@ -120,19 +134,30 @@ export default async function(req) {
       const chiave = normalizzaRagioneSociale(r.destinazione);
       if (!chiave) continue;
       nomeSito.set(chiave, String(r.destinazione).trim());
-      aggiungi(primariaPerSito, chiave, m, peso(r));
+      if (chiaviImpianti.has(chiave) && !tipoStoc(r)) continue;
+      if (!ingressiPiazzale.has(chiave)) ingressiPiazzale.set(chiave, {});
+      const mesi = ingressiPiazzale.get(chiave);
+      mesi[m] = (mesi[m] || 0) + peso(r);
     }
-
-    const secondariaInSito = new Map();  // chiave impianto -> { mese -> kg }
-    const secondariaDaStoccaggio = new Map(); // chiave stoccaggio -> { mese -> kg }
+    // Quello che l'impianto trasborda ogni mese dal suo piazzale a se stesso
+    // (22/09/2026): da quel piazzale gli altri impianti possono prendere solo
+    // quello che avanza. T-Cycle, che dal suo piazzale porta all'impianto piu' di
+    // quanto spedisce a Tecnogum, da quando non e' piu' una fonte di se stesso
+    // lasciava a Tecnogum tutti gli ingressi del piazzale, e i viaggi possibili
+    // di Tecnogum da T-Cycle uscivano gonfiati. Si toglie in proiettaInsieme,
+    // mese per mese, prima di distribuire.
+    const trasbordiPropri = new Map(); // chiave impianto -> { mese -> kg }
     for (const r of secondarie) {
-      if (!terminato(r)) continue;
-      const m = meseDi(r.trasporto_finito_il, anno);
+      const m = terminato(r) ? meseDi(r.trasporto_finito_il, anno) : -1;
       if (m < 0) continue;
       const dest = normalizzaRagioneSociale(r.destinazione);
       const orig = normalizzaRagioneSociale(r.stoccaggio);
-      if (dest) { nomeSito.set(dest, String(r.destinazione).trim()); aggiungi(secondariaInSito, dest, m, peso(r)); }
-      if (orig) { nomeSito.set(orig, String(r.stoccaggio).trim()); aggiungi(secondariaDaStoccaggio, orig, m, peso(r)); }
+      if (dest) nomeSito.set(dest, String(r.destinazione).trim());
+      if (orig) nomeSito.set(orig, String(r.stoccaggio).trim());
+      if (!orig || orig !== dest || !chiaviImpianti.has(orig)) continue;
+      if (!trasbordiPropri.has(orig)) trasbordiPropri.set(orig, {});
+      const mesi = trasbordiPropri.get(orig);
+      mesi[m] = (mesi[m] || 0) + peso(r);
     }
 
     // --- quanto c'e' adesso negli stoccaggi, rete ---
@@ -147,7 +172,7 @@ export default async function(req) {
     // e le secondarie ACI sono l'ACI; l'extra raccolta, che a portale non c'e',
     // ha una giacenza sua: nessuna delle due entra qui. Le secondarie in arrivo
     // mancavano, mentre Giacenze le conta: lo stesso piazzale aveva due saldi.
-    const tipoStoc = (x) => String(x.tipo_destinazione || '').toLowerCase().trim() === 'stoc';
+    // (tipoStoc e' definito sopra, con gli ingressi dei piazzali)
     const giacenzaStoccaggio = (chiave) => {
       const r = rilevazionePer.get(chiave);
       if (!r) return null;
@@ -220,12 +245,21 @@ export default async function(req) {
         const o = normalizzaRagioneSociale(s.stoccaggio);
         if (o) nomi.add(o);
       }
+      // Il piazzale dell'impianto stesso non e' una fonte di secondarie per lui:
+      // le primarie che ci scarica sono gia' nel suo gia' arrivato (regola del
+      // 22/09/2026), e un viaggio dal piazzale all'impianto non abbassa il
+      // residuo. Tenuto fra le fonti, la proiezione ci avrebbe pianificato
+      // viaggi che non portano niente di nuovo. Per gli altri impianti quel
+      // piazzale resta una fonte, al netto dei trasbordi del suo impianto
+      // (prelievi_propri_per_mese, vedi trasbordiPropri).
+      nomi.delete(chiaveImpianto);
       return [...nomi].map(chiave => ({
         chiave,
         nome: nomeSito.get(chiave) || chiave,
         giacenza_kg: giacenzaStoccaggio(chiave),
         giacenza_nota: giacenzaStoccaggio(chiave) === null ? 'nessuna rilevazione del portale per questo stoccaggio' : '',
-        ingressi_per_mese: primariaPerSito.get(chiave) || {},
+        ingressi_per_mese: ingressiPiazzale.get(chiave) || {},
+        prelievi_propri_per_mese: trasbordiPropri.get(chiave) || {},
         ricevuto_kg: ricevutoDa.get(chiave + '|' + chiaveImpianto) || 0,
       }));
     };
@@ -250,11 +284,13 @@ export default async function(req) {
 
     const insieme = proiettaInsieme(impianti.map(imp => {
       const chiave = normalizzaRagioneSociale(imp.nome_impianto);
+      const arrivato = arrivati.get(chiave);
       return {
         impianto: { nome: nomeSito.get(chiave) || imp.nome_impianto, target_kg: Number(imp.target) || 0, data_fine: imp.data_fine || fineProgrammazione(anno).data },
         dati: {
-          conferito_primaria_per_mese: primariaPerSito.get(chiave) || {},
-          conferito_secondaria_per_mese: secondariaInSito.get(chiave) || {},
+          // il gia' arrivato mese per mese, dal conto condiviso
+          conferito_primaria_per_mese: arrivato ? arrivato.primaria_per_mese : {},
+          conferito_secondaria_per_mese: arrivato ? arrivato.secondaria_per_mese : {},
           stoccaggi: stoccaggiPerImpianto.get(chiave) || [],
         },
         opzioni: { ipotesi: ipotesiPulite(chiave) },
@@ -263,7 +299,17 @@ export default async function(req) {
 
     const proiezioni = impianti.map((imp, i) => {
       const chiave = normalizzaRagioneSociale(imp.nome_impianto);
-      const p = insieme.impianti[i];
+      const arrivato = arrivati.get(chiave);
+      // Il gia' arrivato e il residuo si prendono dal conto condiviso, gli stessi
+      // numeri della Dashboard e del suggerimento del lunedi'; proiettaImpianto
+      // li rifa' dai mesi e deve trovarli uguali.
+      const p = {
+        ...insieme.impianti[i],
+        conferito_kg: arrivato ? arrivato.totale_kg : 0,
+        conferito_primaria_kg: arrivato ? arrivato.primaria_kg : 0,
+        conferito_secondaria_kg: arrivato ? arrivato.secondaria_kg : 0,
+        residuo_kg: residuoDiRete(imp.target, arrivato),
+      };
       // Il target dell'impianto sta scritto in due posti - qui e nel foglio delle
       // giacenze - e devono dire la stessa cosa: se non la dicono, la proiezione
       // lo segnala invece di scegliere da sola quale sia quello buono. Trovata
@@ -275,7 +321,20 @@ export default async function(req) {
         avvisi.push(`Il target di questo impianto non coincide fra i moduli: qui vale ${Math.round((Number(imp.target) || 0) / 1000)} t, nelle Giacenze ${Math.round(altroTarget / 1000)} t. La proiezione usa il primo: correggi quello sbagliato, perche' i due numeri devono coincidere.`);
       }
       if (!imp.data_fine && avvisoFineProgrammazione(anno)) avvisi.push(avvisoFineProgrammazione(anno));
-      return { ...p, avvisi, impianto_id: imp.id, impianto_registrato: imp.nome_impianto, data_fine: imp.data_fine || fineProgrammazione(anno).data };
+      return {
+        ...p, avvisi, impianto_id: imp.id, impianto_registrato: imp.nome_impianto, data_fine: imp.data_fine || fineProgrammazione(anno).data,
+        // di cui scaricato nel piazzale dell'impianto, quanto ne e' ripartito
+        // per altri impianti (tolto: lo contano loro), e le secondarie dal
+        // piazzale a se stesso lasciate fuori: la pagina le mostra
+        conferito_primaria_impianto_kg: arrivato ? arrivato.primaria_impianto_kg : 0,
+        conferito_primaria_piazzale_kg: arrivato ? arrivato.primaria_piazzale_kg : 0,
+        conferito_piazzale_ripartito_kg: arrivato ? arrivato.piazzale_ripartito_kg : 0,
+        conferito_primaria_piazzale_netta_kg: arrivato ? arrivato.primaria_piazzale_netta_kg : 0,
+        arrivato_al_sito_kg: arrivato ? arrivato.arrivato_al_sito_kg : 0,
+        secondarie_da_se_escluse: arrivato ? arrivato.da_se_stesso : { viaggi: 0, kg: 0 },
+        // Note, non avvisi: dicono come e' fatto il conto, non che qualcosa non va.
+        note: noteGiaArrivato(arrivato, (k) => nomeSito.get(k) || k, anno),
+      };
     });
 
     return Response.json({
@@ -285,9 +344,11 @@ export default async function(req) {
       mese_da_nome: MESI[meseDa] || '',
       kg_per_viaggio: KG_PER_VIAGGIO,
       // Avvisi che valgono per tutta la proiezione, non per un impianto: un
-      // caricamento aperto e i terminati senza fine trasporto lasciati fuori.
+      // caricamento aperto e i terminati con le date obbligatorie da sistemare
+      // (quelli senza fine trasporto lasciati fuori dai conti).
       avvisi_generali: avvisiGenerali,
       senza_fine_trasporto: senzaFineTrasporto,
+      date_da_sistemare: riassuntoDate(dateDaSistemare),
       caricamento_in_corso: caricamentoInCorso || '',
       impianti: proiezioni,
       viaggi_per_mese: viaggiPerMese(proiezioni),

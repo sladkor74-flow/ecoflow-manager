@@ -3,6 +3,7 @@ import { useTableSort } from '@/hooks/useTableSort';
 import SortHeader from '@/components/shared/SortHeader';
 import { formatNumber, fmtTon } from '@/lib/utils';
 import { giornoRoma } from '@/lib/giornoItaliano';
+import { SegnoDate } from '@/components/primarie-rete/DateDaSistemare';
 
 // giorno_ordine, fine_trasporto, mese e settimana li prepara la pagina
 // (Secondarie.jsx) dalla fine del trasporto, con la stessa regola della matrice:
@@ -39,6 +40,9 @@ const dataIt = (v) => { const g = giornoRoma(v); return g ? `${g.slice(8, 10)}/$
 
 // Un terminato senza fine trasporto non ha mese ne' settimana: si scrive, invece
 // di collocarlo all'immissione (la pagina lo marca con senza_fine_trasporto).
+// Ogni terminato con una data obbligatoria che manca o non torna ha il segno
+// accanto all'ID, col dettaglio nel title: la pagina lo prepara in
+// date_da_sistemare con testoDate (regola dell'utente, 22/09/2026).
 const SENZA_FINE = 'MANCA FINE TRASPORTO';
 
 export default function SecondarieTable({ records, loading, emptyMessage }) {
@@ -66,14 +70,19 @@ export default function SecondarieTable({ records, loading, emptyMessage }) {
         </thead>
         <tbody>
           {sorted.map((r) => (
-            <tr key={r.id} className="border-t hover:bg-muted/50">
+            <tr key={r.id} className={`border-t hover:bg-muted/50 ${r.date_da_sistemare ? 'bg-amber-50/60' : ''}`}>
               {COLUMNS.map((col) => {
                 let val = r[col.key];
                 if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
                 else if (col.format === 'ton') val = val != null ? fmtTon(val) : '';
                 else if (col.format === 'date') val = dataIt(val);
                 if (col.key === 'mese' && r.senza_fine_trasporto) val = SENZA_FINE;
-                return <td key={col.key} className={`px-3 py-2 whitespace-nowrap ${val === SENZA_FINE ? 'text-amber-600 font-medium' : ''}`}>{val ?? ''}</td>;
+                return (
+                  <td key={col.key} className={`px-3 py-2 whitespace-nowrap ${val === SENZA_FINE ? 'text-amber-600 font-medium' : ''}`}>
+                    {col.key === 'id_ordine' && <SegnoDate testo={r.date_da_sistemare || ''} />}
+                    {val ?? ''}
+                  </td>
+                );
               })}
             </tr>
           ))}

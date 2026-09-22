@@ -1,9 +1,26 @@
 // Tariffe e logica di calcolo per la fatturazione attiva Ecotyre.
 // Condiviso tra elaboraFatturazioneAttiva e getRiepilogoEcotyre.
-// Nessun valore predefinito: la tariffa deve esistere in tabella Tariffa (direzione ATTIVA).
+// Rete e ACI non hanno un valore predefinito: la tariffa deve esistere in tabella
+// Tariffa (direzione ATTIVA). L'unica base scritta qui e' quella dell'extra
+// raccolta, piu' sotto, e vale solo quando l'intervento non ha un prezzo suo.
 // Risoluzione con validita' temporale, cliente case-insensitive e preferenza servizio_ecotyre.
 
 import { giornoRoma } from "./giornoItaliano.ts";
+
+// La tariffa base dell'extra raccolta verso Ecotyre, un valore per anno. Regola
+// dell'utente del 22/09/2026: «la tariffa dell'extra raccolta di base per la
+// fatturazione attiva e' sempre 202 €/t nel 2026». Vale quando sull'intervento
+// il prezzo attivo e' zero o vuoto e nella tabella delle tariffe attive non c'e'
+// una EXTRA_RACCOLTA valida alla fine del trasporto (seedTariffeAttive2026 la
+// semina a 202: i due numeri devono restare uguali). Un anno che qui non c'e' non
+// ha una base: il prezzo va scritto sull'intervento o messo in tabella, e fino ad
+// allora la riga e' un errore.
+// Il modulo Extra Raccolta ne ha una copia per il browser, in
+// src/lib/extraRaccoltaCalc.js: prove/attivaCalcolo.mjs controlla che siano uguali.
+export const TARIFFA_BASE_EXTRA_RACCOLTA: Record<number, number> = { 2026: 202 };
+
+/** La tariffa base dell'extra raccolta (€/t) per un anno, oppure null se per quell'anno non c'e'. */
+export const tariffaBaseExtraRaccolta = (anno) => TARIFFA_BASE_EXTRA_RACCOLTA[Number(anno)] || null;
 
 function normText(v) { return String(v || '').trim().toUpperCase(); }
 

@@ -120,6 +120,8 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
   const tutte = data.anomalie || [];
   const senzaTariffa = tutte.filter(a => !a.tipo || a.tipo === 'senza_tariffa');
   const altre = tutte.filter(a => a.tipo && a.tipo !== 'senza_tariffa');
+  // un prezzo che manca o delle date da sistemare si guardano; il resto e' informazione
+  const daGuardare = (a) => a.tipo === 'prezzo_zero' || String(a.tipo || '').startsWith('date_');
   // Le tonnellate senza prezzo si contano per canale: una somma unica di rete,
   // ACI ed extra raccolta non appartiene a nessuna commessa.
   const canaleDi = (a) => String(a.tipologia || 'N/D').toUpperCase();
@@ -202,12 +204,13 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
         </div>
       )}
 
-      {/* Avvisi sull'extra raccolta: prezzo a zero, secondarie non fatturate */}
+      {/* Avvisi: extra raccolta senza prezzo ne' base, secondarie non fatturate, e
+          le date obbligatorie dei formulari (22/09/2026), per canale */}
       {altre.length > 0 && (
         <div className="border rounded-lg p-3 bg-muted/30 space-y-1">
           {altre.map((a, i) => (
-            <div key={i} className={`text-sm flex items-start gap-2 ${a.tipo === 'prezzo_zero' ? 'text-amber-800' : 'text-muted-foreground'}`}>
-              {a.tipo === 'prezzo_zero' ? <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /> : <Info className="w-4 h-4 mt-0.5 shrink-0" />}
+            <div key={i} className={`text-sm flex items-start gap-2 ${daGuardare(a) ? 'text-amber-800' : 'text-muted-foreground'}`}>
+              {daGuardare(a) ? <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /> : <Info className="w-4 h-4 mt-0.5 shrink-0" />}
               <span>{a.descrizione}</span>
             </div>
           ))}
@@ -292,7 +295,7 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
 
       <div className="text-xs text-muted-foreground flex items-center gap-1.5">
         <FileText className="w-3.5 h-3.5" />
-        Movimenti terminati con fine trasporto nel mese. Rete e ACI al prezzo della tabella tariffe; extra raccolta al prezzo e ai sovracosti scritti sull'intervento.
+        Movimenti terminati con fine trasporto nel mese: un terminato senza la data resta fuori e si segnala fra gli avvisi. Rete e ACI al prezzo della tabella tariffe; extra raccolta al prezzo e ai sovracosti scritti sull'intervento, e, se il prezzo non è scritto, alla tariffa base Ecotyre dell'anno.
       </div>
     </div>
   );

@@ -4,7 +4,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Download, RefreshCw, Trash2, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, FileText } from 'lucide-react';
-import { dataIt, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_ESITO, rigaReport, descriviLettura, sintesiVerifica, gravita, ordineRiga } from '@/lib/verifiche';
+import { dataIt, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_ESITO, rigaReport, descriviLettura, sintesiVerifica, gravita, ordineRiga, noteDateAssente, canaleDelVerdetto } from '@/lib/verifiche';
 import { esportaEsitoVerificaPdf } from '@/lib/esitoVerificaPdf';
 import { formatKg, formatIntero, dataServer } from '@/lib/utils';
 import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
@@ -18,9 +18,11 @@ const ORDINE_CANALI = ['rete', 'aci', 'extra', 'non_registrati'];
 
 // Il canale di una riga del report e' quello della movimentazione a cui e'
 // abbinata; le righe che il gestionale non registra per l'impianto non ne hanno.
+// Una riga col formulario senza una data obbligatoria sta nel canale del
+// formulario anche se nel gestionale va altrove: come nel verdetto (22/09/2026).
 function canaleRiga(e) {
-  const parti = String(e.categoria || '').split('-');
-  if (parti.length === 3) return parti[2];
+  const delVerdetto = canaleDelVerdetto(e);
+  if (delVerdetto) return delVerdetto;
   if (e.categoria === 'non_registrati' || !e.tipo || !e.gestionale) return 'non_registrati';
   return e.gestionale.canale || 'non_registrati';
 }
@@ -31,7 +33,9 @@ function esitiPerCanale(esito) {
     const righe = (esito.esiti || []).filter(e => canaleRiga(e) === canale);
     const assenti = (esito.assenti || []).filter(a => (a.canale || 'rete') === canale);
     if (!righe.length && !assenti.length) return null;
-    const anomala = (e) => (e.anomalia !== undefined ? !!e.anomalia : e.esito !== 'conforme');
+    // Un formulario registrato senza fine trasporto e' un'anomalia (22/09/2026),
+    // anche in una verifica salvata prima che lo scriveva come rettifica.
+    const anomala = (e) => !!e.senza_fine_trasporto || (e.anomalia !== undefined ? !!e.anomalia : e.esito !== 'conforme');
     return {
       canale,
       righe: righe.length,
@@ -242,9 +246,10 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                       {sintesi.piena
                         ? 'Stessi formulari, stessi pesi effettivi e stesse date di fine trasporto dei formulari registrati.'
                         : !sintesi.dichiarazione && sintesi.perCanale.length
-                          ? (sintesi.inPiu.length
-                            ? `${sintesi.inPiu.length} ${sintesi.inPiu.length === 1 ? 'formulario del report non registrato' : 'formulari del report non registrati'}: il gestionale non li conosce, quindi non hanno canale.`
-                            : 'Le anomalie di ciascun canale sono elencate qui sotto.')
+                          ? [
+                            sintesi.inPiu.length ? `${sintesi.inPiu.length} ${sintesi.inPiu.length === 1 ? 'formulario del report non registrato' : 'formulari del report non registrati'}: il gestionale non li conosce, quindi non hanno canale.` : '',
+                            sintesi.senzaCanale.length ? `${sintesi.senzaCanale.length} ${sintesi.senzaCanale.length === 1 ? 'riga del report con un formulario che' : 'righe del report con formulari che'} nel gestionale non ${sintesi.senzaCanale.length === 1 ? 'riguarda' : 'riguardano'} l'impianto: fuori dal verdetto dei canali, ma da verificare.` : '',
+                          ].filter(Boolean).join(' ') || 'Le anomalie di ciascun canale sono elencate qui sotto.'
                         : `${sintesi.numeroAnomalie} ${sintesi.numeroAnomalie === 1 ? 'anomalia' : 'anomalie'}: ${[
                           sintesi.anomalie.length ? `${new Set(sintesi.anomalie.map(a => a.esito)).size} righe con errori o sviste` : '',
                           sintesi.mancanti.length ? `${sintesi.mancanti.length} formulari mancanti nel report` : '',
@@ -324,6 +329,22 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                   </div>
                 )}
 
+                {/* Immissione, inizio e fine trasporto sono obbligatorie nei
+                    formulari (regola del 22/09/2026): a chi ne manca una, o ha
+                    le date incoerenti, e' un'anomalia del suo canale. */}
+                {sintesi && (sintesi.conDate.length > 0 || sintesi.mancantiConDate.length > 0) && (
+                  <div className="flex items-start gap-2 text-sm text-red-900 border border-red-200 bg-red-50 rounded-lg px-3 py-2">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>
+                      {sintesi.conDate.length + sintesi.mancantiConDate.length === 1
+                        ? 'Un formulario registrato è senza una data obbligatoria (immissione, inizio o fine trasporto) o ha le date incoerenti'
+                        : `${sintesi.conDate.length + sintesi.mancantiConDate.length} formulari registrati sono senza una data obbligatoria (immissione, inizio o fine trasporto) o hanno le date incoerenti`}
+                      : {sintesi.conDate.length + sintesi.mancantiConDate.length === 1 ? 'è un\'anomalia del suo canale e la data va inserita o corretta' : 'sono anomalie del loro canale e le date vanno inserite o corrette'}.
+                      {' '}Un formulario senza fine trasporto non sta in nessuna settimana e resta fuori dalla quadratura. Il dettaglio è nelle righe qui sotto.
+                    </span>
+                  </div>
+                )}
+
                 {usciteRegistrate.length > 0 && !v.uscite_verificate && lettura.modo !== 'dichiarazione' && (
                   <div className="flex items-start gap-2 text-sm text-red-900 border border-red-200 bg-red-50 rounded-lg px-3 py-2">
                     <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
@@ -386,6 +407,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                             <span className="font-mono">{m.fir}</span>
                             {m.ordine ? <span className="text-muted-foreground"> · ordine <span className="font-mono">{m.ordine}</span></span> : null}
                             <span className="text-muted-foreground"> · {m.tipo === 'uscita' ? 'uscita verso ' + m.destinatario : 'ingresso'} · {dataIt(m.fine)} · {m.trasportatore}</span>
+                            {m.date && <span className="block text-xs text-red-700">{noteDateAssente(m)}</span>}
                           </span>
                           <span className="tabular-nums">{formatKg(Number(m.kg))} kg</span>
                         </div>

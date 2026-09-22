@@ -11,7 +11,7 @@
 
 import { formatKg, formatTonnellate } from '@/lib/utils';
 import { dataIt } from '@/lib/verifiche';
-import { NOME_VERDETTO, TITOLO_FLUSSO } from '@/lib/quadraturaFir';
+import { NOME_VERDETTO, TITOLO_FLUSSO, formulariConDate, descriviConDate } from '@/lib/quadraturaFir';
 
 const C = {
   scuro: [15, 76, 92], medio: [26, 127, 142], zebra: [247, 250, 251],
@@ -208,8 +208,13 @@ export async function esportaQuadraturaFirPdf(q, esito, lettura) {
         : !c.lettura_verificata
           ? `Le ${c.congruenti} righe quadrano, ma la somma delle righe lette non torna con i totali stampati sul file: la trascrizione va controllata sull'originale.`
           : `Le ${c.congruenti} righe quadrano, ma il confronto è incompleto: manca una tabella nel file o la settimana scritta sul file non è quella verificata. Vedi le note del flusso e le osservazioni.`;
+    // Immissione, inizio e fine trasporto sono obbligatorie (22/09/2026): i
+    // formulari del canale che ne mancano si dicono, anche se le fonti quadrano.
+    const date = c.date_da_sistemare > 0
+      ? ` ${c.date_da_sistemare === 1 ? 'Un formulario registrato è' : `${c.date_da_sistemare} formulari registrati sono`} senza una data obbligatoria (immissione o inizio trasporto) o con date incoerenti: le date vanno inserite o corrette, vedi il flusso.`
+      : '';
     doc.setFontSize(8.5);
-    const lineeSotto = doc.splitTextToSize(sottotitolo, L - 16);
+    const lineeSotto = doc.splitTextToSize(sottotitolo + date, L - 16);
     const hEsito = 13 + lineeSotto.length * 3.8;
     spazio(hEsito + 3);
     doc.setFillColor(...fondo);
@@ -255,6 +260,19 @@ export async function esportaQuadraturaFirPdf(q, esito, lettura) {
         `WINSINFO: ${descrizione(f.totali.winsinfo)}.  Portale Ecotyre: ${descrizione(f.totali.ecotyre)}.  Gestionale: ${descrizione(f.totali.gestionale)}${f.totali.gestionale ? ', cioè ' + tonn(f.totali.gestionale.kg) + ' t' : ''}.`,
         ...f.note,
       ].filter(Boolean).join('  '));
+
+    // I formulari del flusso contati nella settimana ma registrati senza una
+    // data obbligatoria o con date incoerenti: le date vanno inserite o corrette.
+    // Uno per formulario, anche se ripartito su piu' ordini: "e altri" conta i
+    // formulari, come il riquadro del canale.
+    const conDate = formulariConDate(f.date_da_sistemare || []);
+    if (conDate.length) {
+      const elenco = conDate.slice(0, 12).map(descriviConDate).join('; ')
+        + (conDate.length > 12 ? `; e altri ${conDate.length - 12}` : '');
+      spazio(10);
+      const n = testo(`Date obbligatorie da sistemare: ${elenco}. Sono contati nella settimana perché la fine trasporto c'è, ma le date vanno inserite o corrette.`, M, y, { dim: 8, colore: C.rosso, larghezza: L });
+      y += n * 3.6 + 3;
+    }
 
     if (!daGuardare.length) {
       testo(f.celle.length === 1

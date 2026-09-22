@@ -26,9 +26,58 @@ import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { unisciQuote, ticketDi } from "./formulari.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
-import { giornoMovimento } from "./movimenti.ts";
+import { giornoMovimento, eTerminato, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate } from "./movimenti.ts";
 
 export const GIORNI_CONSERVAZIONE = 40;
+
+// === date obbligatorie ===
+//
+// Immissione, inizio e fine trasporto sono obbligatorie nei formulari (regola
+// dell'utente del 22/09/2026, "questo vale sempre dove ci sono ordini
+// terminati"): la regola sta in movimenti.ts (dateMancanti, dateIncoerenti,
+// testoDate). Qui c'e' solo come si elencano, uguale per le verifiche, la
+// quadratura FIR, gli alert, le rotte ed EcoTyna, che leggono tutti questo file.
+
+/**
+ * Un ordine terminato con le date da sistemare, pronto da mostrare:
+ * { id_ordine, numero_fir, mancanti, incoerenti, date, senza_fine, giorno }.
+ * null se le date ci sono tutte e tornano. Un terminato senza fine trasporto non
+ * ha giorno: resta fuori dai periodi (giornoElenco), ma si dice lo stesso.
+ */
+export function voceDate(r) {
+  if (!eTerminato(r) || !dateDaSistemare(r)) return null;
+  const mancanti = dateMancanti(r);
+  return {
+    id_ordine: String(r.id_ordine || '').trim(),
+    numero_fir: String(r.numero_fir || '').trim(),
+    mancanti,
+    incoerenti: dateIncoerenti(r),
+    date: testoDate(r),
+    senza_fine: mancanti.includes('fine trasporto'),
+    giorno: giornoMovimento(r) || '',
+  };
+}
+
+/**
+ * Gli ordini terminati di un elenco con le date da sistemare, di qualunque
+ * anno: quanti ordini, quanti senza fine trasporto (quelli che nessun periodo
+ * conta) e i primi, con ID ordine, formulario e date che mancano. Chi chiama
+ * passa le righe di un modulo e di un canale solo: rete, ACI ed extra raccolta
+ * non si contano insieme nemmeno qui. null se non ce ne sono.
+ */
+export function riepilogoDate(righe, quanti = 10) {
+  const voci = (righe || []).map(voceDate).filter(Boolean)
+    .sort((a, b) => Number(b.senza_fine) - Number(a.senza_fine) || a.id_ordine.localeCompare(b.id_ordine) || a.numero_fir.localeCompare(b.numero_fir));
+  if (!voci.length) return null;
+  return {
+    ordini: voci.length,
+    senza_fine: voci.filter(v => v.senza_fine).length,
+    esempi: voci.slice(0, quanti),
+  };
+}
+
+/** "ET26091175 (FIR RGYTR022620TW): manca la data di fine trasporto" */
+export const descriviVoceDate = (v) => `${v.id_ordine || 'ordine senza ID'}${v.numero_fir ? ` (FIR ${v.numero_fir})` : ' (senza formulario)'}: ${v.date}`;
 const FINESTRA_ABBINAMENTO_GIORNI = 21;
 
 // === date ===
@@ -417,24 +466,54 @@ export const CATEGORIE_MOVIMENTO = [
 // almeno un formulario, nel report o registrato: piena se le sue movimentazioni
 // quadrano e non ha anomalie ne' formulari mancanti. I formulari del report che
 // il gestionale non conosce non hanno canale e si contano a parte.
+// Una riga col formulario registrato senza fine trasporto e' un'anomalia del suo
+// canale (22/09/2026): la data e' obbligatoria. Le verifiche salvate prima la
+// scrivevano senza "anomalia", come rettifica: si conta lo stesso, finche' il
+// riconfronto non le riscrive.
 export const CANALI_DEL_VERDETTO = [['rete', 'Rete'], ['aci', 'ACI'], ['extra', 'Extra raccolta']];
+// Il canale di una riga per il verdetto: quello della movimentazione a cui e'
+// abbinata. Una riga col formulario registrato senza una data obbligatoria, o
+// con date incoerenti, che nel gestionale non riguarda l'impianto (per esempio
+// chiuso su un'altra destinazione) non ha movimentazione, ma il formulario un
+// canale ce l'ha: l'anomalia della data pesa li' (22/09/2026). Senza, il canale
+// restava "pieno" accanto a un'anomalia, e il PDF diceva all'impianto che non
+// c'era niente da fare. '' per le righe senza canale.
+export function canaleDelVerdetto(e) {
+  const k = String((e && e.categoria) || '').split('-')[2] || '';
+  if (k) return k;
+  const conDate = !!e && (!!e.senza_fine_trasporto || (e.discrepanze || []).some(d => d.campo === 'date'));
+  return conDate && e.gestionale ? String(e.gestionale.canale || '') : '';
+}
 export function conformitaPerCanale(esito) {
   const canaleDi = (k) => String(k || '').split('-')[2] || '';
   return CANALI_DEL_VERDETTO.map(([canale, nome]) => {
     const quadratura = (esito.quadratura || []).filter(q => canaleDi(q.chiave) === canale);
-    const righe = (esito.esiti || []).filter(e => canaleDi(e.categoria) === canale);
+    const righe = (esito.esiti || []).filter(e => canaleDelVerdetto(e) === canale);
     const assenti = (esito.assenti || []).filter(a => canaleDi(a.categoria) === canale);
     if (!quadratura.some(q => q.formulari_report || q.formulari_gestionale) && !righe.length && !assenti.length) return null;
-    const anomalie = righe.filter(e => e.anomalia).length + assenti.length;
+    const anomalie = righe.filter(e => e.anomalia || e.senza_fine_trasporto).length + assenti.length;
     const quadra = quadratura.every(q => q.formulari_report === q.formulari_gestionale && q.kg_report === q.kg_gestionale);
     return { canale, nome, conformita: anomalie === 0 && quadra ? 'piena' : 'parziale', anomalie, assenti: assenti.length };
   }).filter(Boolean);
 }
 
+// Le date obbligatorie che mancano o non tornano a un movimento, ordine per
+// ordine: [{ ordine, mancanti, incoerenti }], null se sono a posto. Un formulario
+// ripartito su piu' ordini le porta di tutte le sue quote, perche' la data si
+// corregge sull'ordine che non l'ha.
+function dateDelMovimento(r) {
+  if (!dateDaSistemare(r)) return null;
+  return [{ ordine: String(r.id_ordine || ''), mancanti: dateMancanti(r), incoerenti: dateIncoerenti(r) }];
+}
+
 function movimento(r, entita) {
   const secondaria = entita === 'Secondaria' || (entita === 'ExtraRaccolta' && eSecondariaExtra(r));
   const fonte = entita === 'ExtraRaccolta' ? (secondaria ? 'Extra raccolta secondaria' : 'Extra raccolta primaria') : FONTI[entita];
+  const date = dateDelMovimento(r);
   return {
+    // solo quando c'e' da sistemare: sui movimenti a posto il campo non c'e',
+    // e l'esito salvato delle verifiche non cambia per niente
+    ...(date ? { date } : {}),
     id: entita + ':' + r.id,
     fonte,
     canale: canale(r, entita),
@@ -471,14 +550,19 @@ export async function caricaMovimenti(base44) {
   // l'elenco per dirlo. Scartato in silenzio, un suo formulario nel report di un
   // impianto risultava "non presente nel gestionale" senza spiegazione. Si tiene
   // il movimento intero (con fine a null): verificaReport lo riconosce per
-  // formulario e ne mostra i dati registrati.
+  // formulario e lo segnala come anomalia, perche' la data e' obbligatoria.
   const senzaFine = [];
+  // Tutti i terminati con una data obbligatoria che manca o non torna, di
+  // qualunque anno, con canale e archivio: la pagina li dice (datePerCanale).
+  const conDate = [];
   elenchi.forEach((righe, i) => {
     for (const r of righe) {
-      if (String(r.stato || '').toLowerCase().trim() !== 'terminato') continue;
+      if (!eTerminato(r)) continue;
       const m = movimento(r, nomi[i]);
       if (m.fine) grezzi.push(m);
       else senzaFine.push(m);
+      const v = voceDate(r);
+      if (v) conDate.push({ ...v, canale: m.canale, fonte: m.fonte });
     }
   });
   senzaFine.sort((a, b) => a.canale.localeCompare(b.canale) || a.fonte.localeCompare(b.fonte) || a.fir.localeCompare(b.fir) || a.ordine.localeCompare(b.ordine));
@@ -492,12 +576,18 @@ export async function caricaMovimenti(base44) {
     peso: (m) => m.kg,
     stessoGruppo: (x, y) => x.fine === y.fine && x.fonte === y.fonte && x.canale === y.canale
       && x.chiaveDest === y.chiaveDest && x.chiaveOrig === y.chiaveOrig,
-    fondi: (base, quote, kg) => ({
-      ...base,
-      kg,
-      ordine: quote.map(q => q.ordine).filter(Boolean).join(' + '),
-      quote: quote.map(q => ({ ordine: q.ordine, ticket: q.ticket, kg: q.kg })),
-    }),
+    fondi: (base, quote, kg) => {
+      // le date da sistemare di tutte le quote, non solo della prima
+      const { date: _date, ...resto } = base;
+      const date = quote.flatMap(q => q.date || []);
+      return {
+        ...resto,
+        ...(date.length ? { date } : {}),
+        kg,
+        ordine: quote.map(q => q.ordine).filter(Boolean).join(' + '),
+        quote: quote.map(q => ({ ordine: q.ordine, ticket: q.ticket, kg: q.kg })),
+      };
+    },
   });
   const interni = new Set(['smoco']);
   const anagrafica = new Map();
@@ -511,7 +601,7 @@ export async function caricaMovimenti(base44) {
   // rifa' anche le quadrature FIR li riusa invece di rileggerli.
   const archivi = Object.fromEntries(nomi.map((n, i) => [n, elenchi[i]]));
   SENZA_FINE_DEI_MOVIMENTI.set(movimenti, senzaFine);
-  return { movimenti, interni, anagrafica, archivi, senza_fine: senzaFine };
+  return { movimenti, interni, anagrafica, archivi, senza_fine: senzaFine, date_da_sistemare: conDate };
 }
 
 // I terminati senza fine trasporto letti insieme a un elenco di movimenti. Chi
@@ -523,18 +613,26 @@ const SENZA_FINE_DEI_MOVIMENTI = new WeakMap();
 export const senzaFineDei = (movimenti) => (movimenti && SENZA_FINE_DEI_MOVIMENTI.get(movimenti)) || [];
 
 /**
- * I terminati senza fine trasporto per canale e archivio, da mostrare: quanti
- * sono e i primi, con formulario e ordine. Un conteggio per canale, mai uno solo
- * per tutti: sono tre commesse diverse anche quando il dato manca.
+ * I terminati con le date obbligatorie da sistemare (date_da_sistemare di
+ * caricaMovimenti) per canale e archivio, da mostrare: quanti ordini, quanti
+ * senza fine trasporto e i primi, con ID ordine, formulario e date che mancano.
+ * Un gruppo per canale e archivio, mai un conteggio per tutti: sono tre
+ * commesse diverse anche quando il dato manca. Prende il posto dell'elenco dei
+ * soli senza fine trasporto (senzaFinePerCanale), che non diceva le altre date.
  */
-export function senzaFinePerCanale(senzaFine, quanti = 5) {
+export function datePerCanale(voci, quanti = 5) {
   const gruppi = new Map();
-  for (const m of senzaFine || []) {
-    const k = m.canale + '|' + m.fonte;
-    if (!gruppi.has(k)) gruppi.set(k, { canale: m.canale, fonte: m.fonte, n: 0, esempi: [] });
-    const g = gruppi.get(k);
-    g.n++;
-    if (g.esempi.length < quanti) g.esempi.push({ fir: m.fir, ordine: m.ordine });
+  for (const v of voci || []) {
+    const k = v.canale + '|' + v.fonte;
+    if (!gruppi.has(k)) gruppi.set(k, { canale: v.canale, fonte: v.fonte, n: 0, senza_fine: 0, esempi: [] });
+    gruppi.get(k).n++;
+    if (v.senza_fine) gruppi.get(k).senza_fine++;
+  }
+  // prima i senza fine trasporto, che nessun periodo conta
+  const ordinate = [...(voci || [])].sort((a, b) => Number(b.senza_fine) - Number(a.senza_fine) || a.id_ordine.localeCompare(b.id_ordine));
+  for (const v of ordinate) {
+    const g = gruppi.get(v.canale + '|' + v.fonte);
+    if (g.esempi.length < quanti) g.esempi.push({ fir: v.numero_fir, ordine: v.id_ordine, date: v.date });
   }
   const ordine = (c) => CANALI_VERIFICA.indexOf(c);
   return [...gruppi.values()].sort((a, b) => ordine(a.canale) - ordine(b.canale) || a.fonte.localeCompare(b.fonte));
@@ -692,6 +790,34 @@ export function normalizzaRigheReport(grezze, unitaIndicata) {
 
 // === verifica ===
 
+// "fine trasporto", "immissione e inizio trasporto"
+const elencoNomi = (xs) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} e ${xs[xs.length - 1]}`);
+
+/**
+ * Le anomalie di un formulario registrato a cui manca una data obbligatoria, o
+ * che ha date incoerenti: una frase per ordine (date di caricaMovimenti, una
+ * voce per ordine). Con un ordine solo non si ripete il numero; con un
+ * formulario ripartito si dice su quale ordine va corretta. Le parole sono
+ * quelle che l'utente ha chiesto nel report e nel PDF per l'impianto
+ * (22/09/2026): "Formulario registrato senza data di fine trasporto: la data e'
+ * obbligatoria e va inserita". Se il report la data mancante la scrive
+ * (dalReport, per nome della data), si dice accanto: e' quella da inserire, se
+ * e' giusta.
+ */
+export function messaggiDate(voci, dalReport = {}) {
+  const lista = voci || [];
+  return lista.map(v => {
+    const parti = [];
+    const mancanti = v.mancanti || [];
+    const nelReport = mancanti.length === 1 && dalReport[mancanti[0]] ? ` (nel report: ${it(dalReport[mancanti[0]])})` : '';
+    if (mancanti.length === 1) parti.push(`Formulario registrato senza data di ${mancanti[0]}: la data e' obbligatoria e va inserita${nelReport}`);
+    else if (mancanti.length > 1) parti.push(`Formulario registrato senza le date di ${elencoNomi(mancanti)}: le date sono obbligatorie e vanno inserite`);
+    if ((v.incoerenti || []).length) parti.push(`Date del formulario registrato incoerenti (${v.incoerenti.join('; ')}): vanno corrette`);
+    const testo = parti.join('. ');
+    return lista.length > 1 && v.ordine ? `Ordine ${v.ordine}: ${testo}` : testo;
+  }).filter(Boolean);
+}
+
 // Un carico che il report attribuisce a un altro consorzio (SMOCO lavora anche per
 // Ecopneus) non e' nel gestionale per scelta, non per errore.
 const altroCircuito = (intermediario) => !!intermediario && !/ecotyre/i.test(intermediario) && /ecopneus|cobat|green ?tire/i.test(intermediario);
@@ -723,18 +849,25 @@ const altroCircuito = (intermediario) => !!intermediario && !/ecotyre/i.test(int
  *
  * Ogni discrepanza ha una gravita':
  *   - anomalia: errore, svista o mancanza dell'impianto (formulario, peso, date,
- *     classe, righe mancanti, in piu' o duplicate);
+ *     classe, righe mancanti, in piu' o duplicate), e il formulario registrato
+ *     senza una data obbligatoria;
  *   - osservazione: nome scritto in modo diverso, a parita' di formulario e peso;
  *   - rettifica: l'errore e' nei dati del portale, non nel report.
  * La conformita' e' piena solo senza anomalie e con formulari e pesi che
  * quadrano, per gli ingressi e per le uscite.
  *
- * Una riga col formulario di un terminato senza fine trasporto (senzaFine, di
- * norma quelli letti con i movimenti da caricaMovimenti) non si abbina: il
- * formulario e' registrato, ma non ha una settimana. E' una rettifica a nostra
- * cura - il dato va corretto sul portale e il file ricaricato - e non
- * un'anomalia dell'impianto: resta fuori dalla quadratura e dal verdetto
- * (regola 1: chi non ha la fine trasporto non si conta, ma si segnala).
+ * Immissione, inizio e fine trasporto sono obbligatorie nei formulari (regola
+ * dell'utente del 22/09/2026). Una riga abbinata a un movimento a cui ne manca
+ * una, o con le date incoerenti, porta l'anomalia "date" e conta nel verdetto
+ * del suo canale. Una riga col formulario di un terminato senza fine trasporto
+ * (senzaFine, di norma quelli letti con i movimenti da caricaMovimenti) non si
+ * abbina, perche' il formulario non ha una settimana: e' un'anomalia anche lei -
+ * "Formulario registrato senza data di fine trasporto: la data e' obbligatoria
+ * e va inserita" - e conta nel verdetto del suo canale, ma resta fuori dalla
+ * quadratura, dove il gestionale non la colloca (regola 1: chi non ha la fine
+ * trasporto non si conta in nessun periodo, ma si segnala). Il 22/09/2026 la
+ * stessa riga era diventata una rettifica a nostra cura, senza peso sul
+ * verdetto: l'utente l'ha corretto lo stesso giorno.
  */
 export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, fine, senzaFine = senzaFineDei(movimenti) }) {
   const relazione = (m) => relazioneConSito(m, chiave);
@@ -837,23 +970,35 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       if (altroCircuito(r.intermediario)) { escludi(r, `Carico di un altro circuito: intermediario ${r.intermediario}`); continue; }
       if (fuoriSettimana) { escludi(r, `Data ${it(dataReport)}, fuori dalla settimana verificata`); continue; }
       if (senzaData) {
-        // Formulario registrato ma senza fine trasporto: l'errore e' nel dato del
-        // portale. Nessuna anomalia per l'impianto; senza_fine_trasporto lo tiene
-        // fuori dalla quadratura, dove il gestionale non lo conta.
+        // Formulario registrato ma senza fine trasporto, che e' una data
+        // obbligatoria: e' un'anomalia e conta nel verdetto del suo canale
+        // (22/09/2026). senza_fine_trasporto la tiene fuori dalla quadratura,
+        // dove il gestionale non la colloca in nessuna settimana.
         const s = senzaData.find(x => relazione(x)) || senzaData[0];
         const quote = senzaData.filter(x => x.fonte === s.fonte && x.canale === s.canale && x.chiaveDest === s.chiaveDest && x.chiaveOrig === s.chiaveOrig);
         const tipoS = relazione(s);
+        // Le date di tutte le quote; un movimento letto altrove senza il
+        // dettaglio porta almeno la fine trasporto che manca.
+        const date = quote.flatMap(q => q.date || []);
+        const voci = date.length ? date : [{ ordine: s.ordine, mancanti: ['fine trasporto'], incoerenti: [] }];
+        // Un formulario che nel gestionale va altrove lo si dice come per le
+        // righe abbinate: e' un'altra anomalia, oltre alla data che manca.
+        const altrove = tipoS ? [] : [{ campo: 'destinatario', gravita: 'anomalia', messaggio: `Nel gestionale questo formulario non riguarda ${nome}: va da ${s.produttore || 'produttore non indicato'} a ${s.destinatario}` }];
         esiti.push({
           n: r.n, ...foglio, tipo: tipoS,
           ...(tipoS ? { categoria: categoria(s) } : { tipo_presunto: tipoPresunto(r), categoria: 'non_registrati' }),
-          esito: 'discrepanze', anomalia: false, senza_fine_trasporto: true, report,
+          esito: 'discrepanze', anomalia: true, senza_fine_trasporto: true, report,
           gestionale: {
             fonte: s.fonte, canale: s.canale, ordine: quote.map(q => q.ordine).filter(Boolean).join(' + '), ticket: s.ticket, fir: s.fir,
             kg: quote.reduce((t, q) => t + q.kg, 0), inizio: s.inizio, fine: null, produttore: s.produttore, punto_raccolta: s.punto_raccolta,
             codice_pdr: s.codice_pdr, destinatario: s.destinatario, trasportatore: s.trasportatore, classe: s.classe,
             quote: quote.length > 1 ? quote.map(q => ({ ordine: q.ordine, ticket: q.ticket, kg: q.kg })) : null,
+            date: voci,
           },
-          discrepanze: [{ campo: 'fine', gravita: 'rettifica', messaggio: 'Formulario registrato ma terminato senza data di fine trasporto: da correggere sul portale e ricaricare' }],
+          discrepanze: [
+            ...messaggiDate(voci, { 'inizio trasporto': r.inizio, 'fine trasporto': r.fine || r.data }).map(messaggio => ({ campo: 'date', gravita: 'anomalia', messaggio })),
+            ...altrove,
+          ],
         });
         continue;
       }
@@ -885,6 +1030,10 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     else if (!r.fine && r.data && r.data !== m.fine) aggiungi('fine', `Data diversa dalla fine trasporto: report ${it(r.data)}, gestionale ${it(m.fine)}`);
     else if (!r.fine && !r.data) aggiungi('fine', 'Data di fine trasporto assente nel report');
     if (r.inizio && m.inizio && r.inizio !== m.inizio) aggiungi('inizio', `Data inizio trasporto diversa: report ${it(r.inizio)}, gestionale ${it(m.inizio)}`);
+    // Le date obbligatorie del formulario registrato: immissione e inizio del
+    // trasporto (la fine c'e', altrimenti il movimento non si abbinava), e date
+    // nell'ordine giusto. Mancano o non tornano: anomalia del canale.
+    for (const messaggio of messaggiDate(m.date, { 'inizio trasporto': r.inizio })) aggiungi('date', messaggio);
     if (tipo && !nellaSettimana(m)) {
       aggiungi('fine', `Nel gestionale il trasporto si conclude il ${it(m.fine)}, nella settimana ${settimanaIso(m.fine).settimana} e non in quella verificata`);
     }
@@ -932,6 +1081,7 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       // in chiaro col loro ticket: e' la differenza fra un conto che torna e un
       // conto che sembra sbagliato.
       quote: m.quote || null,
+      ...(m.date ? { date: m.date } : {}),
     };
 
     const presunto = tipo ? { categoria: categoria(m) } : { tipo_presunto: tipoPresunto(r), categoria: 'non_registrati' };
@@ -946,9 +1096,12 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   // Il report deve contenere tutte le movimentazioni: ingressi e uscite, di ogni canale.
   // Quelle registrate e non abbinate a nessuna riga mancano nel report.
   const usciteVerificate = esiti.some(e => e.tipo === 'uscita');
+  // Un assente a cui manca anche una data obbligatoria lo dice: la data va
+  // inserita insieme alla riga che manca nel report.
   const assente = (tipo) => (m) => ({
     tipo, categoria: categoria(m), fonte: m.fonte, canale: m.canale, ordine: m.ordine, fir: m.fir, kg: m.kg, inizio: m.inizio, fine: m.fine,
     produttore: m.produttore, destinatario: m.destinatario, trasportatore: m.trasportatore, classe: m.classe,
+    ...(m.date ? { date: m.date, date_testo: messaggiDate(m.date).join('. ') } : {}),
   });
   const assenti = [
     ...ingressi.filter(m => !usati.has(m.id)).map(assente('ingresso')),
@@ -957,8 +1110,9 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
 
   // Quadratura per movimentazione e canale: formulari e pesi del report contro quelli registrati.
   // Le righe dei terminati senza fine trasporto non ci sono: il gestionale non
-  // le colloca nella settimana, e contate solo dal lato del report farebbero
-  // "non quadra" per un errore del portale.
+  // le colloca nella settimana, e contate solo dal lato del report farebbero un
+  // secondo "non quadra" per la stessa mancanza. La mancanza pesa gia' sul
+  // verdetto del canale come anomalia della riga.
   const somma = (lista, kg) => lista.reduce((t, x) => t + (kg(x) || 0), 0);
   const registrati = [...ingressi, ...uscite];
   const quadratura = [
@@ -994,6 +1148,9 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       anomalie,
       osservazioni: esiti.filter(e => (e.discrepanze || []).some(d => d.gravita === 'osservazione')).length,
       rettifiche: esiti.filter(e => (e.discrepanze || []).some(d => d.gravita === 'rettifica')).length,
+      // formulari registrati senza una data obbligatoria o con date incoerenti:
+      // righe del report e movimenti assenti nel report
+      date_da_sistemare: esiti.filter(e => (e.discrepanze || []).some(d => d.campo === 'date')).length + assenti.filter(a => a.date).length,
       righe_report: esiti.length,
       conformi: conta('conforme'),
       con_discrepanze: conta('discrepanze'),

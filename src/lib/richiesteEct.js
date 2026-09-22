@@ -8,7 +8,7 @@
 //
 // Quando quell'ordine compare fra i terminati, l'evasione si propone da sola: la
 // spunta la mette l'utente, perche' e' lui a rispondere alla mail del consorzio.
-import { eTerminato, giornoMovimento } from '@/lib/movimenti';
+import { eTerminato, giornoMovimento, dateDaSistemare, testoDate } from '@/lib/movimenti';
 
 export const MESI_IT = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
 
@@ -228,20 +228,49 @@ export function evasioneOrdini(ids, terminati) {
  * `senzaFine`, perche' la richiesta che lo aspetta resterebbe aperta e in
  * ritardo senza che nessuno lo dica, e si rischierebbe di sollecitare un ritiro
  * che c'e' ma non ha ancora la data.
+ *
+ * Un ritiro con la fine trasporto ma senza immissione o inizio, o con le date
+ * incoerenti, conta come ritirato, ma le tre date sono obbligatorie (regola
+ * dell'utente del 22/09/2026): resta in `daSistemare`, id -> testoDate(), perche'
+ * la richiesta che evade si dica evasa con le date da correggere.
  */
 export function ritiriTerminati(movimenti) {
   const terminati = new Map();
   const senzaFine = new Set();
+  const daSistemare = new Map();
   for (const o of movimenti || []) {
     const id = String((o && o.id_ordine) || '').trim();
     if (!id || !eTerminato(o)) continue;
     const giorno = giornoMovimento(o);
     if (!giorno) { senzaFine.add(id); continue; }
     if (!terminati.has(id) || giorno < terminati.get(id)) terminati.set(id, giorno);
+    if (dateDaSistemare(o) && !daSistemare.has(id)) daSistemare.set(id, testoDate(o));
   }
   // basta una riga con la data perche' l'ordine risulti ritirato
   for (const id of terminati.keys()) senzaFine.delete(id);
-  return { terminati, senzaFine };
+  return { terminati, senzaFine, daSistemare };
+}
+
+/**
+ * Gli ordini di una richiesta ritirati ma con le date obbligatorie da sistemare:
+ * [{ pdr, id_ordine, date }], uno per ordine. Lo usano il caricamento del foglio
+ * ECT e il ricalcolo dopo le primarie.
+ */
+export function ordiniConDateDaSistemare(pdr, ids, terminati, daSistemare) {
+  return (ids || []).filter(id => terminati.has(id) && daSistemare.has(id)).map(id => ({ pdr, id_ordine: id, date: daSistemare.get(id) }));
+}
+
+/**
+ * La riga da mostrare per le richieste evase, o in parte evase, da ordini con le
+ * date obbligatorie da sistemare. Vuota se non ce ne sono.
+ */
+export function testoOrdiniDateDaSistemare(lista) {
+  const n = (lista || []).length;
+  if (!n) return '';
+  const quali = lista.slice(0, 5).map(x => `${x.pdr} (${x.id_ordine}: ${x.date})`).join(', ') + (n > 5 ? ` e altri ${n - 5}` : '');
+  return n === 1
+    ? `Un ordine che evade una richiesta del consorzio ha le date obbligatorie da sistemare (immissione, inizio e fine trasporto): il ritiro conta, ma il formulario va corretto nel file del portale (${quali}).`
+    : `${n} ordini che evadono richieste del consorzio hanno le date obbligatorie da sistemare (immissione, inizio e fine trasporto): i ritiri contano, ma i formulari vanno corretti nel file del portale (${quali}).`;
 }
 
 /**

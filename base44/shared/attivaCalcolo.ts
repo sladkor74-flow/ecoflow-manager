@@ -8,12 +8,18 @@
 // - RETE e ACI: prezzo dalla tabella delle tariffe attive;
 // - EXTRA RACCOLTA: prezzo e sovracosti scritti sull'intervento, gli stessi che
 //   usa la pagina Extra Raccolta. Ogni intervento ha il suo preventivo, e il
-//   ricavo della pagina e quello della fattura devono essere lo stesso numero;
+//   ricavo della pagina e quello della fattura devono essere lo stesso numero.
+//   Se il prezzo scritto e' zero o manca vale la tariffa base Ecotyre (regola
+//   dell'utente del 22/09/2026: «sempre 202 €/t nel 2026»): quella della tabella
+//   delle tariffe attive, altrimenti quella dell'anno in ecotyreTariffe.ts;
 // - le secondarie di extra raccolta non si fatturano: il ricavo sta sulla
 //   raccolta, il trasferimento dallo stoccaggio all'impianto e' un costo;
-// - una riga senza prezzo non e' "verificata": e' un errore da risolvere.
-import { filtraPeriodo } from "./filtroPeriodo.ts";
-import { sortTariffe, resolveTariffa, calcolaTotale, fattoreConv } from "./ecotyreTariffe.ts";
+// - una riga senza prezzo non e' "verificata": e' un errore da risolvere;
+// - un terminato senza fine trasporto non entra nel mese ma si segnala, per
+//   canale, e cosi' un terminato del mese con altre date mancanti o incoerenti
+//   (regola dell'utente del 22/09/2026, anomalieDateFormulari).
+import { filtraPeriodo, meseToIndice, anomalieDateFormulari } from "./filtroPeriodo.ts";
+import { sortTariffe, resolveTariffa, calcolaTotale, fattoreConv, tariffaBaseExtraRaccolta } from "./ecotyreTariffe.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { PROV_TO_REGION } from "./raccoltoCalculator.ts";
 
@@ -41,6 +47,38 @@ export const eSecondariaExtra = (r) => String(r.tipo_movimento || '').toLowerCas
 // Una riga a corpo (sovracosto) non e' un movimento: non porta chili e non si
 // conta fra gli ordini.
 export const eRigaACorpo = (riga) => riga.unita_misura === UNITA_A_CORPO;
+
+/**
+ * Il prezzo attivo di un intervento di extra raccolta e da dove viene:
+ * { origine: 'intervento' | 'tabella' | 'base' | '', id, valore, unita, fattore, nota, totale(kg) }.
+ * 1) il prezzo scritto sull'intervento, se e' maggiore di zero;
+ * 2) altrimenti la tariffa ATTIVA EXTRA_RACCOLTA valida alla fine del trasporto;
+ * 3) altrimenti la base dell'anno (ecotyreTariffe.ts: 202 €/t nel 2026);
+ * 4) altrimenti niente: valore 0, e la riga e' un errore.
+ * Prima un intervento a zero restava a zero "da controllare": dal 22/09/2026 lo
+ * zero non e' piu' una scelta, e' un prezzo non scritto.
+ */
+export function prezzoAttivoExtra(r, tariffeSorted, tipoServizio, anno) {
+  const aTonnellata = (valore) => (kg) => (kg / 1000) * valore;
+  const scritto = Number(r.prezzo_attivo_t || 0);
+  if (scritto > 0) {
+    return { origine: 'intervento', id: 'intervento', valore: scritto, unita: '€/t', fattore: 1000, nota: 'Prezzo scritto sull\'intervento', totale: aTonnellata(scritto) };
+  }
+  const daTabella = resolveTariffa(tariffeSorted, 'EXTRA_RACCOLTA', r.classe, r.regione || '', r.cer, r.trasporto_finito_il, tipoServizio);
+  if (daTabella && Number(daTabella.valore) > 0) {
+    const unita = daTabella.unita_misura || '€/t';
+    return {
+      origine: 'tabella', id: daTabella.id || 'tabella', valore: Number(daTabella.valore), unita, fattore: fattoreConv(daTabella),
+      nota: `Tariffa base Ecotyre ${anno}: ${daTabella.valore} ${unita}, dalla tabella delle tariffe attive (sull'intervento il prezzo non e' scritto)`,
+      totale: (kg) => calcolaTotale(kg, daTabella),
+    };
+  }
+  const baseAnno = tariffaBaseExtraRaccolta(anno);
+  if (baseAnno) {
+    return { origine: 'base', id: `base-${anno}`, valore: baseAnno, unita: '€/t', fattore: 1000, nota: `Tariffa base Ecotyre ${anno}: ${baseAnno} €/t (sull'intervento il prezzo non e' scritto)`, totale: aTonnellata(baseAnno) };
+  }
+  return { origine: '', id: 'intervento', valore: 0, unita: '€/t', fattore: 1000, nota: 'Prezzo attivo a zero sull\'intervento e nessuna tariffa base per l\'anno: riga a zero euro', totale: () => 0 };
+}
 
 export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno, mese }) {
   const annoNum = Number(anno);
@@ -124,29 +162,24 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
     const kg = r.peso_effettivo || 0;
     if (kg === 0) continue;
     const tipoServizio = tipoServizioDi(r);
-    const prezzo = Number(r.prezzo_attivo_t || 0);
     const base = comune(r, 'EXTRA_RACCOLTA', tipoServizio, 'EXTRA_RACCOLTA');
     const regione = regioneRitiro(r);
-    let nota = 'Prezzo scritto sull\'intervento';
-    let stato = 'verificato';
-    if (prezzo === 0) {
-      // Un intervento a zero puo' essere voluto; se pero' il contratto un prezzo
-      // lo prevede, il campo e' rimasto vuoto per dimenticanza.
-      const daContratto = resolveTariffa(tariffeSorted, 'EXTRA_RACCOLTA', r.classe, r.regione || '', r.cer, r.trasporto_finito_il, tipoServizio);
-      stato = 'da_controllare';
-      nota = 'Prezzo attivo a zero sull\'intervento';
-      const desc = daContratto && Number(daContratto.valore) > 0
-        ? `Extra raccolta ${r.id_ordine || r.numero_fir || ''}: sull'intervento il prezzo attivo e' zero, ma la tariffa Ecotyre prevede ${daContratto.valore} ${daContratto.unita_misura}. Se va fatturato, scrivilo sull'intervento.`
-        : `Extra raccolta ${r.id_ordine || r.numero_fir || ''}: prezzo attivo a zero sull'intervento.`;
-      anomalieMap.set(`extra0|${r.id}`, { tipo: 'prezzo_zero', tipologia: 'EXTRA_RACCOLTA', regione, classe: r.classe || '', eer_codice: r.cer || '', servizio_ecotyre: tipoServizio, tonnellate: kg / 1000, descrizione: desc });
+    const prezzo = prezzoAttivoExtra(r, tariffeSorted, tipoServizio, annoNum);
+    if (!prezzo.valore) {
+      // Niente prezzo sull'intervento e nessuna base per l'anno: e' un errore,
+      // come una riga di rete senza tariffa. Il 2026 una base ce l'ha.
+      anomalieMap.set(`extra0|${r.id}`, {
+        tipo: 'prezzo_zero', tipologia: 'EXTRA_RACCOLTA', regione, classe: r.classe || '', eer_codice: r.cer || '', servizio_ecotyre: tipoServizio, tonnellate: kg / 1000,
+        descrizione: `Extra raccolta ${r.id_ordine || r.numero_fir || ''}: sull'intervento il prezzo attivo e' zero e per il ${annoNum} non c'e' una tariffa base Ecotyre (ne' nella tabella delle tariffe attive ne' fra quelle note al gestionale). Scrivi il prezzo sull'intervento o aggiungi la tariffa EXTRA_RACCOLTA.`,
+      });
     }
     righe.EXTRA_RACCOLTA.push({
       ...base, regione,
       quantita: kg, unita_quantita: 'kg',
-      tariffa_id: 'intervento', tariffa_valore: prezzo,
-      unita_misura: '€/t', unita_prezzo: '€/t', fattore_conversione: 1000,
-      totale: r2((kg / 1000) * prezzo),
-      stato_validazione: stato, note: nota,
+      tariffa_id: prezzo.id, tariffa_valore: prezzo.valore,
+      unita_misura: prezzo.unita, unita_prezzo: prezzo.unita, fattore_conversione: prezzo.fattore,
+      totale: r2(prezzo.totale(kg)),
+      stato_validazione: prezzo.valore ? 'verificato' : 'errore', note: prezzo.nota,
     });
     for (const [campo, etichetta] of SOVRACOSTI) {
       const importo = Number(r[campo] || 0);
@@ -169,6 +202,20 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
       tipo: 'informazione', tipologia: 'EXTRA_RACCOLTA', regione: '', classe: '', eer_codice: '', servizio_ecotyre: '', tonnellate: 0,
       descrizione: `${extraSecondarieEscluse} ${extraSecondarieEscluse === 1 ? 'secondaria di extra raccolta non fatturata' : 'secondarie di extra raccolta non fatturate'} a Ecotyre: il ricavo sta sulla raccolta.`,
     });
+  }
+  // Le date obbligatorie dei formulari, canale per canale: i terminati senza fine
+  // trasporto che potrebbero essere di questo mese (fuori dalla fattura finche'
+  // la data manca) e quelli del mese con altre date mancanti o incoerenti.
+  // L'extra raccolta guarda solo cio' che si fattura: le sue secondarie no.
+  const meseIdx = meseToIndice(mese);
+  const perCanale = { RETE: reteAll, ACI: aciAll, EXTRA_RACCOLTA: (extraAll || []).filter(r => !eSecondariaExtra(r)) };
+  for (const tipologia of TIPOLOGIE_ATTIVA) {
+    for (const a of anomalieDateFormulari(perCanale[tipologia], annoNum, meseIdx, tipologia)) {
+      anomalie.push({
+        tipo: a.tipo, tipologia, regione: '', classe: '', eer_codice: '', servizio_ecotyre: '',
+        tonnellate: Math.round(a.kg) / 1000, quanti: a.quanti, ordini: a.ordini, descrizione: a.descrizione,
+      });
+    }
   }
   return { righe, anomalie, extra_secondarie_escluse: extraSecondarieEscluse };
 }

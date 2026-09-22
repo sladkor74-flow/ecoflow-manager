@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { formatTonnellate, formatKg } from '@/lib/utils';
 import { materialiDi, OPERAZIONI, CANALI, controlliDichiarazione, statoDichiarazione } from '@/lib/dichiarazioniImpianti';
 import { Pencil, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import DateDaSistemare from '@/components/giacenze/DateDaSistemare';
 
 // La sezione di un impianto: mese per mese quanto gli è arrivato - in primaria
 // e in secondaria dagli stoccaggi - quanto ha dichiarato e che cosa ne è
@@ -43,6 +44,18 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
           {sito.quadra === null && <span className="text-muted-foreground text-xs">giacenza a portale non disponibile</span>}
         </div>
       </div>
+
+      {/* I formulari arrivati qui o partiti da qui senza tutte le date obbligatorie,
+          un canale per volta (regola dell'utente, 22/09/2026): senza fine trasporto
+          non sono in nessun mese della tabella qui sotto. */}
+      <DateDaSistemare gruppi={sito.date_da_sistemare} className="mx-4 mt-3" />
+      {sito.foto_senza_giorno && sito.foto_senza_giorno.n > 0 && (
+        <p className="mx-4 mt-2 text-xs text-amber-800">
+          {sito.foto_senza_giorno.n === 1 ? '1 carico' : `${sito.foto_senza_giorno.n} carichi`} del file del portale ({formatKg(sito.foto_senza_giorno.kg)} kg)
+          {' '}senza un giorno di arrivo all&apos;impianto: nella giacenza a portale {sito.foto_senza_giorno.n === 1 ? 'c\'e\'' : 'ci sono'}, in nessun mese
+          {' '}fra i non dichiarati e in nessuna giacenza di fine mese ({[...new Set(sito.foto_senza_giorno.ordini.map(o => o.perche))].join('; ')}).
+        </p>
+      )}
 
       {sito.flussi.map(flusso => {
         const canale = CANALI.find(c => c.chiave === flusso.canale);

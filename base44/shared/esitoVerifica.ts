@@ -12,6 +12,13 @@
 // non presente nel gestionale" anche dopo il caricamento, finche' qualcuno non
 // ripeteva la verifica a mano. ricontrollaVerifiche rifa' il confronto sulle righe
 // gia' lette, dopo ogni caricamento e all'apertura della settimana.
+//
+// Vale anche per le regole che cambiano. Il 22/09/2026 un formulario registrato
+// senza una data obbligatoria (immissione, inizio o fine trasporto) e' diventato
+// un'anomalia del suo canale invece di una rettifica a nostra cura: le verifiche
+// salvate prima hanno un esito diverso da quello di adesso, e il confronto dei
+// testi (testoEsito) le riscrive da solo al primo riconfronto, senza toccare
+// quelle a cui non manca niente.
 
 import { verificaReport, senzaFineDei, CATEGORIE_MOVIMENTO } from "./reportSettimanali.ts";
 import { valoreCampo, leggiCampo } from "./testoLungo.ts";
@@ -113,7 +120,8 @@ async function aggiornaAlertDichiarazione(base44, verifica, esito) {
     .filter(q => q.formulari_gestionale > 0)
     .map(q => `${q.nome}: ${q.formulari_gestionale} ${q.formulari_gestionale === 1 ? 'formulario' : 'formulari'}, ${formatoKg(q.kg_gestionale)} kg`);
   const tutti = esito.assenti || [];
-  const elenco = tutti.slice(0, 30).map(a => `- ${a.fir}${a.ordine ? ` (ordine ${a.ordine})` : ''}, ${formatoKg(a.kg)} kg del ${it(String(a.fine))}`);
+  // Un formulario registrato senza una data obbligatoria lo dice accanto (22/09/2026).
+  const elenco = tutti.slice(0, 30).map(a => `- ${a.fir}${a.ordine ? ` (ordine ${a.ordine})` : ''}, ${formatoKg(a.kg)} kg del ${it(String(a.fine))}${a.date_testo ? `. ${a.date_testo}` : ''}`);
   if (tutti.length > elenco.length) elenco.push(`- e altri ${tutti.length - elenco.length}`);
   const dati = {
     titolo: `${verifica.soggetto_nome}: dichiarata nessuna movimentazione nella settimana ${verifica.settimana}, ma risultano formulari registrati`,

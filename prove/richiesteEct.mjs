@@ -1,7 +1,7 @@
 // Prova dell'abbinamento delle richieste ECT (base44/shared/richiesteEct.ts):
 // una richiesta si riconosce da produttore, classe e data di immissione, non dal
 // numero di riga del foglio. Si lancia con: npm run prove
-import { abbinaRichieste, chiaveRichiesta, idOrdineDaSalvare, riconosciOrdine, ritiriTerminati, evasioneOrdini, listaOrdini, testoTerminatiSenzaFine } from '../base44/shared/richiesteEct.ts';
+import { abbinaRichieste, chiaveRichiesta, idOrdineDaSalvare, riconosciOrdine, ritiriTerminati, evasioneOrdini, listaOrdini, testoTerminatiSenzaFine, ordiniConDateDaSistemare, testoOrdiniDateDaSistemare } from '../base44/shared/richiesteEct.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -79,6 +79,18 @@ verifica('basta una riga con la data perche\' l\'ordine sia ritirato', terminati
 const ev = evasioneOrdini(listaOrdini({ id_ordine_manuale: 'A, B' }), terminati);
 verifica('una richiesta con un ordine senza data non e\' evasa', ev.totali === 2 && ev.evasi === 1 && ev.ultima === null, JSON.stringify(ev));
 verifica('il testo dice quante e quali restano aperte', testoTerminatiSenzaFine([{ pdr: 'Rossi Gomme', id_ordine: 'B' }]).startsWith('Una richiesta') && testoTerminatiSenzaFine([{ pdr: 'X', id_ordine: 'B' }, { pdr: 'Y', id_ordine: 'E' }]).includes('2 richieste') && testoTerminatiSenzaFine([]) === '');
+
+console.log('RITIRI CON LE DATE DA SISTEMARE (regola del 22/09/2026)');
+const conDate = ritiriTerminati([
+  { id_ordine: 'F', stato: 'terminato', ordine_immesso_il: '2026-09-01T08:00:00Z', trasporto_iniziato_il: null, trasporto_finito_il: '2026-09-10T08:00:00Z' },
+  { id_ordine: 'G', stato: 'terminato', ordine_immesso_il: '2026-09-01T08:00:00Z', trasporto_iniziato_il: '2026-09-09T08:00:00Z', trasporto_finito_il: '2026-09-10T08:00:00Z' },
+  { id_ordine: 'H', stato: 'terminato', ordine_immesso_il: '2026-09-01T08:00:00Z', trasporto_iniziato_il: '2026-09-09T08:00:00Z', trasporto_finito_il: null },
+]);
+verifica('senza inizio trasporto il ritiro conta, ma resta fra le date da sistemare', conDate.terminati.get('F') === '2026-09-10' && conDate.daSistemare.get('F') === 'manca la data di inizio trasporto');
+verifica('le date a posto non ci sono, il senza fine resta fra i senza fine', !conDate.daSistemare.has('G') && !conDate.daSistemare.has('H') && conDate.senzaFine.has('H'));
+const voci = ordiniConDateDaSistemare('Rossi Gomme', ['F', 'G', 'H'], conDate.terminati, conDate.daSistemare);
+verifica('gli ordini di una richiesta con le date da sistemare, uno per ordine', voci.length === 1 && voci[0].pdr === 'Rossi Gomme' && voci[0].id_ordine === 'F' && voci[0].date === 'manca la data di inizio trasporto', JSON.stringify(voci));
+verifica('il testo dice quali e che cosa manca', testoOrdiniDateDaSistemare(voci).startsWith('Un ordine') && testoOrdiniDateDaSistemare(voci).includes('Rossi Gomme (F: manca la data di inizio trasporto)') && testoOrdiniDateDaSistemare([...voci, { ...voci[0], id_ordine: 'Z' }]).startsWith('2 ordini') && testoOrdiniDateDaSistemare([]) === '');
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

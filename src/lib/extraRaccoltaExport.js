@@ -2,7 +2,12 @@
 import * as XLSX from 'xlsx';
 import { formattaPesi } from '@/lib/formatoExcel';
 import { jsPDF } from 'jspdf';
-import { calcExtraRaccolta, totaleRiga, aggregaPerProduttore } from './extraRaccoltaCalc';
+import { totaleRiga, aggregaPerProduttore, prezzoAttivoExtra } from './extraRaccoltaCalc';
+
+// Il prezzo in colonna e' quello con cui la riga si fattura: il prezzo scritto
+// sull'intervento o, se manca, la tariffa base dell'anno (202 €/t nel 2026).
+// Scritto zero, il report diceva un prezzo e la fattura un altro.
+const prezzoRiga = (r) => prezzoAttivoExtra(r).valore;
 
 const MESI_UPPER = {
   'Gennaio': 'GENNAIO', 'Febbraio': 'FEBBRAIO', 'Marzo': 'MARZO',
@@ -52,7 +57,7 @@ export function exportExtraRaccoltaExcel(records, mese, anno) {
       r.cer || '160103',
       r.tipologia_trasporto || '',
       Number(r.peso_effettivo || 0),
-      Number(r.prezzo_attivo_t || 0),
+      prezzoRiga(r),
       tr,
     ]);
   }
@@ -150,7 +155,7 @@ export function exportExtraRaccoltaPDF(records, mese, anno) {
       String(r.cer || '160103').substring(0, 10),
       String(r.tipologia_trasporto || '').substring(0, 18),
       String(r.peso_effettivo || 0),
-      String(r.prezzo_attivo_t || 0),
+      String(prezzoRiga(r)),
       String(tr),
     ];
     row.forEach((cell, i) => { doc.text(cell, x, y); x += W1[i]; });

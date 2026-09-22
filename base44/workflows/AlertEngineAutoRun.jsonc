@@ -1,6 +1,6 @@
 {
   "name": "Alert Engine Auto-Run",
-  "description": "Esegue il motore di alert quando un caricamento di Secondarie, Primarie (Rete/ACI e Assegnati), Terziarie e' concluso; dopo le primarie ricontrolla anche i target mensili. La riga del registro delle primarie nasce 'in_corso' mentre l'archivio si svuota e si riscrive, e prende l'esito solo alla fine: il motore parte li', su 'create' o su 'update', mai su un archivio in riscrittura. Parte su 'successo' e 'parziale' (caricamento finito: l'archivio e' quello che leggono tutti i moduli), non su 'in_corso' ne' su 'errore' (archivio vuoto o a meta').",
+  "description": "Esegue il motore di alert quando un caricamento di Secondarie, Primarie (Rete/ACI e Assegnati), Terziarie e' concluso, e quando si salvano schede di Extra Raccolta (la riga 'extra_raccolta' del registro, dal 22/09/2026: le date obbligatorie dell'extra raccolta si rivalutano da sole); dopo le primarie ricontrolla anche i target mensili. La riga del registro delle primarie nasce 'in_corso' mentre l'archivio si svuota e si riscrive, e prende l'esito solo alla fine: il motore parte li', su 'create' o su 'update', mai su un archivio in riscrittura. Parte su 'successo' e 'parziale' (caricamento finito: l'archivio e' quello che leggono tutti i moduli), non su 'in_corso' ne' su 'errore' (archivio vuoto o a meta').",
   "trigger": {
     "config": {
       "trigger_type": "entity",
@@ -10,7 +10,7 @@
         "update"
       ]
     },
-    "condition": "${ ((.trigger.data.tipo_file // \"\") | IN(\"secondarie\",\"primarie_rete\",\"primarie_aci\",\"terziarie\",\"assegnati\",\"primarie\")) and ((.trigger.data.esito // \"\") | IN(\"successo\",\"parziale\")) }"
+    "condition": "${ ((.trigger.data.tipo_file // \"\") | IN(\"secondarie\",\"primarie_rete\",\"primarie_aci\",\"terziarie\",\"assegnati\",\"primarie\",\"extra_raccolta\")) and ((.trigger.data.esito // \"\") | IN(\"successo\",\"parziale\")) }"
   },
   "definition": {
     "document": {

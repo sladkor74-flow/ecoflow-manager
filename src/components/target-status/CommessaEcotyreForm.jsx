@@ -7,6 +7,7 @@ import { Loader2, Plus, Trash2, History, FileSpreadsheet } from 'lucide-react';
 import { MESI } from '@/lib/pfuConstants';
 import { tonnellate, percentuale, leggiNumero, leggiStorico, conModifica, nomeUtente, dataOra, REGIONI_COMMESSA } from '@/lib/target';
 import { leggiFileTargetContratto } from '@/lib/targetContratto';
+import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 
 // Commessa Ecotyre dell'anno, cioe' quanto richiede il contratto: target annuo e
 // per regione, ripartizione per classe, target mensile iniziale e rivisto, budget
@@ -133,19 +134,25 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
   // Consuntivo mese per mese, letto dai formulari terminati per data di fine
   // trasporto. RETE e ACI restano separati: il target del contratto riguarda la
   // RETE, l'ACI si confronta solo con il suo budget.
-  const [consuntivo, setConsuntivo] = useState({ rete: null, aci: null });
+  // Con il consuntivo arrivano le date obbligatorie da sistemare di ciascun
+  // canale (regola dell'utente del 22/09/2026): chi non ha la fine trasporto non
+  // e' nel consuntivo, e sotto la tabella si dice, una riga per canale.
+  const [consuntivo, setConsuntivo] = useState({ rete: null, aci: null, date_rete: null, date_aci: null });
   useEffect(() => {
     let attivo = true;
+    const dati = (res) => res && (res.data || res);
     const perMese = (res) => {
-      const d = res && (res.data || res);
+      const d = dati(res);
       if (!d || !Array.isArray(d.by_regione)) return null;
       return MESI.map(m => d.by_regione.reduce((s, r) => s + ((r.mesi && r.mesi[m]) || 0), 0));
     };
-    setConsuntivo({ rete: null, aci: null });
+    setConsuntivo({ rete: null, aci: null, date_rete: null, date_aci: null });
     Promise.all([
       base44.functions.invoke('computeRaccolto', { filters: { anno: [anno], canale: 'rete' } }).catch(() => null),
       base44.functions.invoke('computeRaccolto', { filters: { anno: [anno], canale: 'aci' } }).catch(() => null),
-    ]).then(([rete, aci]) => { if (attivo) setConsuntivo({ rete: perMese(rete), aci: perMese(aci) }); });
+    ]).then(([rete, aci]) => {
+      if (attivo) setConsuntivo({ rete: perMese(rete), aci: perMese(aci), date_rete: dati(rete)?.date_da_sistemare || null, date_aci: dati(aci)?.date_da_sistemare || null });
+    });
     return () => { attivo = false; };
   }, [anno]);
   const oggi = new Date();
@@ -327,6 +334,8 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
               </tbody>
             </table>
           </div>
+          <RiepilogoDate canale="Rete" riepilogo={consuntivo.date_rete} esempi />
+          <RiepilogoDate canale="ACI" riepilogo={consuntivo.date_aci} esempi />
         </Riquadro>
 
         <Riquadro titolo="Ripartizione per classe" nota={dati.classi.length ? <>Somma {percentuale(sommaClassi, 2)}%{Math.abs(sommaClassi - 100) > 0.01 ? <span className="text-amber-700"> (dovrebbe fare 100%)</span> : ''}</> : null}>

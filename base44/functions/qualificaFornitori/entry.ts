@@ -6,7 +6,7 @@ import { daAnalizzare } from "../../shared/analisiDocumento.ts";
 
 // Situazione della qualifica fornitori per un anno.
 //
-// Payload: { anno, soggetti? }
+// Payload: { anno, soggetti?, esclusi?, soggetti_da_date? }
 // Senza "soggetti" individua gli attori dell'anno dalle movimentazioni, che e'
 // l'operazione costosa perche' rilegge tutti gli archivi. Con "soggetti", cioe'
 // l'elenco gia' ottenuto in precedenza, rivaluta solo i documenti: e' la strada
@@ -24,10 +24,14 @@ export default async function(req) {
 
     let soggetti = Array.isArray(body.soggetti) ? body.soggetti : null;
     let esclusi = Array.isArray(body.esclusi) ? body.esclusi : [];
+    // Chi compare nell'anno solo in terminati senza fine trasporto (22/09/2026):
+    // come gli esclusi, la pagina lo rimanda indietro nell'aggiornamento rapido.
+    let soggettiDaDate = Array.isArray(body.soggetti_da_date) ? body.soggetti_da_date : [];
     if (!soggetti) {
       const esito = await individuaSoggetti(base44, anno);
       soggetti = esito.soggetti;
       esclusi = esito.esclusi;
+      soggettiDaDate = esito.soggetti_da_date || [];
     }
 
     const [catalogo, documentiSalvati, targetAnnui, targetMensili] = await Promise.all([
@@ -68,7 +72,7 @@ export default async function(req) {
       mai_letti: daLeggere.filter(d => d.motivo === 'mai_letto').length,
     };
 
-    return Response.json({ anno, oggi, riepilogo, soggetti: valutati, esclusi, catalogo, anomalie, da_leggere: daLeggere.slice(0, 40) });
+    return Response.json({ anno, oggi, riepilogo, soggetti: valutati, esclusi, soggetti_da_date: soggettiDaDate, catalogo, anomalie, da_leggere: daLeggere.slice(0, 40) });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });
   }

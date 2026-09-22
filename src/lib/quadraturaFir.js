@@ -43,6 +43,38 @@ export function misura(v) {
 export const tonnellate = (kg) => formatTonnellate((Number(kg) || 0) / 1000);
 
 /**
+ * I formulari con le date obbligatorie da sistemare, uno per numero di FIR:
+ * stessa regola di formulariConDate in base44/shared/quadraturaFirDati.ts (lo
+ * controlla prove/quadraturaFir.mjs). Il backend li salva gia' raggruppati; qui
+ * si ripassano per gli esiti salvati prima del 22/09/2026, che avevano una voce
+ * per quota: gli esempi e "e altri" si contano sui formulari, non sulle quote.
+ */
+export function formulariConDate(voci) {
+  const gruppi = [];
+  const perFir = new Map();
+  for (const x of voci || []) {
+    const k = x && x.fir ? String(x.fir).toUpperCase() : '';
+    if (k && perFir.has(k)) { perFir.get(k).push(x); continue; }
+    const quote = [x];
+    if (k) perFir.set(k, quote);
+    gruppi.push(quote);
+  }
+  return gruppi.map((quote) => {
+    if (quote.length === 1) return quote[0];
+    const ordini = [...new Set(quote.map(q => q.ordine).filter(Boolean))];
+    const testi = [...new Set(quote.map(q => q.date).filter(Boolean))];
+    // stesse date che mancano a tutte le quote: una volta; se no, ordine per ordine
+    const date = testi.length <= 1 ? (testi[0] || '')
+      : testi.map(t => `${t} (${[...new Set(quote.filter(q => q.date === t).map(q => q.ordine).filter(Boolean))].join(' + ') || 'ordine senza numero'})`).join(' · ');
+    const kg = quote.some(q => typeof q.kg === 'number') ? quote.reduce((t, q) => t + (Number(q.kg) || 0), 0) : undefined;
+    return { ...quote[0], ordine: ordini.join(' + '), date, ...(kg !== undefined ? { kg } : {}) };
+  });
+}
+
+/** "FIR RGYTR000001AA, ordine ET26000001: manca la data di inizio trasporto"; "ordini ET0 + ET1" per un formulario ripartito. */
+export const descriviConDate = (x) => `${x.fir ? `FIR ${x.fir}` : 'formulario senza numero'}${x.ordine ? `, ${/ \+ /.test(x.ordine) ? 'ordini' : 'ordine'} ${x.ordine}` : ''}${x.date ? `: ${x.date}` : ''}`;
+
+/**
  * Il giorno di un istante, letto sull'orologio italiano.
  *
  * Gli istanti sono salvati in UTC: tagliare la stringa mostrerebbe il giorno

@@ -202,7 +202,8 @@ const somma = (m, id, kg, importo) => {
  * Confronta la prefattura con le righe del mese calcolate dal gestionale.
  * righePrefattura: da leggiTabellePrefattura. righeVive: { RETE: [...], ACI: [...],
  * EXTRA_RACCOLTA: [...] } da calcolaRigheAttiva. altrove: Map ordine -> { canale,
- * stato, giorno } su tutti gli archivi, per dire dove sta un ordine che il mese
+ * stato, giorno, date? } su tutti gli archivi (date: cosa manca o non torna nelle
+ * date obbligatorie di un terminato, a parole), per dire dove sta un ordine che il mese
  * non ha. Una prefattura puo' avere piu' righe per lo stesso ordine (trasporto e
  * trattamento): si sommano, come le righe a corpo del gestionale.
  */
@@ -278,10 +279,16 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
     visti.add(id);
     terziarie.ordini++; terziarie.kg += p.kg; terziarie.euro += centesimi(p.importo);
     const a = altrove.get(id) || null;
-    terziarie.righe.push({ id_ordine: id, numero_fir: p.fir, kg: Math.round(p.kg), importo: r2(p.importo), prezzo_t: p.kg ? r2(p.importo / (p.kg / 1000)) : null, in_archivio: !!a });
+    // Le date obbligatorie del formulario nell'archivio Terziarie (22/09/2026):
+    // a.date e' il testoDate() di movimenti.ts, '' se sono a posto.
+    terziarie.righe.push({
+      id_ordine: id, numero_fir: p.fir, kg: Math.round(p.kg), importo: r2(p.importo), prezzo_t: p.kg ? r2(p.importo / (p.kg / 1000)) : null, in_archivio: !!a,
+      date: a && a.stato === 'terminato' ? (a.date || '') : '',
+    });
   }
   terziarie.kg = Math.round(terziarie.kg); terziarie.euro = terziarie.euro / 100;
   terziarie.non_in_archivio = terziarie.righe.filter(x => !x.in_archivio).length;
+  terziarie.date_da_sistemare = terziarie.righe.filter(x => x.date).length;
 
   // Ordini della prefattura che il mese del gestionale non ha: si dice dove stanno
   const soloPrefattura = [];
@@ -291,10 +298,13 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
     soloPrefattura.push({
       id_ordine: id, kg: p.conKg ? Math.round(p.kg) : null, importo: p.conImporto ? r2(p.importo) : null,
       canale: a ? a.canale : '', stato: a ? a.stato : '', giorno: a ? a.giorno : '',
+      // Un terminato senza fine trasporto non e' in nessun mese: si dice quale
+      // data manca, perche' le tre date del formulario sono obbligatorie
+      // (22/09/2026); a.date e' il testoDate() di movimenti.ts, se c'e'.
       spiegazione: !a ? 'ordine sconosciuto al gestionale'
         : a.stato !== 'terminato' ? `nel gestionale è ${a.stato || 'senza stato'}`
-        : !a.giorno ? 'nel gestionale non ha la fine trasporto'
-        : `nel gestionale la fine trasporto è il ${a.giorno.split('-').reverse().join('/')}: un altro mese`,
+        : !a.giorno ? `nel gestionale è terminato ma ${a.date || 'manca la data di fine trasporto'}: resta fuori da ogni mese finché la data non si scrive (immissione, inizio e fine trasporto sono obbligatorie)`
+        : `nel gestionale la fine trasporto è il ${a.giorno.split('-').reverse().join('/')}: un altro mese${a.date ? ` (e le date sono da sistemare: ${a.date})` : ''}`,
     });
   }
   const differenze = soloPrefattura.length + canali.reduce((s, c) => s + (c.fuori_prefattura ? 0 : c.solo_gestionale.length) + c.peso_diverso.length + c.importo_diverso.length + c.servizio_diverso.length + c.fir_diverso.length, 0);

@@ -1,12 +1,13 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { giornoOrdine, eTerminato, periodoMovimento, settimanaIso, MESI_MOVIMENTI as MESI } from "../../shared/movimenti.ts";
+import { giornoOrdine, eTerminato, periodoMovimento, settimanaIso, dateDaSistemare, MESI_MOVIMENTI as MESI } from "../../shared/movimenti.ts";
 import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
+import { riepilogoDateVista } from "../../shared/raccoltoCalculator.ts";
 import { matchesFilter, matchesFilterString, matchesFilterLower } from "../../shared/multiFilter.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { canaleDi } from "../../shared/canaleSecondaria.ts";
 
 // Calcola le matrici di aggregazione dei trasporti secondari per tratta.
-// Payload: { filters: { canale?, stoccaggio?, destinazione?, mese?, settimana?, classe?, trasportatore?, anno? } }
+// Payload: { filters: { canale?, stoccaggio?, destinazione?, mese?, settimana?, classe?, trasportatore?, anno?, date_da_sistemare? } }
 //
 // Rete e ACI sono canali indipendenti e nello stesso archivio. Ogni numero esce
 // per canale: i KPI, i mesi, le classi, le tratte. Un totale unico c'e' solo
@@ -67,6 +68,10 @@ export default async function(req) {
         if (!matchesFilter((reg || '').trim(), filters.regione)) return false;
       }
       if (!matchesFilterLower(r.stato, filters.stato)) return false;
+      // Il filtro "date da sistemare" della pagina (regola dell'utente,
+      // 22/09/2026): solo i terminati con una data obbligatoria che manca o non
+      // torna. Non e' un filtro di periodo: i senza fine trasporto li prende.
+      if (filters.date_da_sistemare && !dateDaSistemare(r)) return false;
       return true;
     };
     const conAnno = filters.anno != null && (!Array.isArray(filters.anno) ? !!filters.anno : filters.anno.length > 0);
@@ -187,6 +192,17 @@ export default async function(req) {
       senzaFinePerCanale[c] = (senzaFinePerCanale[c] || 0) + 1;
     }
     const canaliSenzaFine = Object.keys(senzaFinePerCanale);
+    // Le date da sistemare (regola dell'utente, 22/09/2026: immissione, inizio e
+    // fine trasporto sono obbligatorie in ogni formulario terminato), un canale
+    // per volta e solo per chi ne ha: i senza fine trasporto qui sopra, fuori dai
+    // conti, e i trasporti contati nella vista con un'altra data che manca o non
+    // torna, che nei conti ci sono.
+    const dateDaSistemarePerCanale: Record<string, any> = {};
+    for (const c of ['Rete', 'ACI']) {
+      const delCanale = (righe) => righe.filter(r => canaleRiga(r) === c);
+      const riep = riepilogoDateVista(delCanale(senzaFineTrasporto), delCanale(filtered), 50);
+      if (riep.totale > 0) dateDaSistemarePerCanale[c] = riep;
+    }
     const kpi = {
       canale: unico ? unico.canale : null,
       canali_separati: canali.length > 1,
@@ -196,6 +212,7 @@ export default async function(req) {
       tratte: unico ? unico.tratte : canali.length ? null : 0,
       senza_fine_trasporto: canaliSenzaFine.length > 1 ? null : senzaFineTrasporto.length,
       senza_fine_trasporto_per_canale: senzaFinePerCanale,
+      date_da_sistemare_per_canale: dateDaSistemarePerCanale,
     };
 
     // Opzioni filtri. Anni, mesi e settimane vengono da periodoDi, come i filtri

@@ -10,6 +10,7 @@
 // 23 UTC del giorno prima: si riconoscono e si riportano al giorno giusto.
 
 import { MESI } from '@/lib/pfuConstants';
+import { dateMancanti, dateIncoerenti } from '@/lib/movimenti';
 
 export const STATI_EXTRA = {
   assegnato: { etichetta: 'Assegnato', classe: 'bg-sky-50 text-sky-800 border-sky-200' },
@@ -24,7 +25,14 @@ export const statoExtra = (r) => {
 
 export const eTerminato = (r) => statoExtra(r) === 'terminato';
 
-export const datiChiusuraCompleti = (r) => !!(r && r.numero_fir && r.trasporto_finito_il && Number(r.peso_effettivo) > 0);
+// Per chiudere una scheda servono FIR, peso effettivo e le tre date obbligatorie
+// del formulario - immissione, inizio e fine trasporto - in ordine (regola
+// dell'utente del 22/09/2026): prima bastava la fine trasporto.
+export const datiChiusuraCompleti = (r) => {
+  if (!(r && r.numero_fir && Number(r.peso_effettivo) > 0)) return false;
+  const comeTerminato = { ...r, stato: 'terminato' };
+  return dateMancanti(comeTerminato).length === 0 && dateIncoerenti(comeTerminato).length === 0;
+};
 
 const mezzanotteItaliana = (d) => (d.getUTCHours() === 22 || d.getUTCHours() === 23) && !d.getUTCMinutes() && !d.getUTCSeconds() && !d.getUTCMilliseconds();
 

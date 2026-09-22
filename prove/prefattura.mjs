@@ -85,6 +85,27 @@ const conTer = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo
   { RETE: [riga('ET26000001', 1000, 202)], ACI: [], EXTRA_RACCOLTA: [] }, new Map([['TER26002903', { canale: 'TERZIARIE', stato: 'terminato', giorno: '2026-01-10' }]]));
 verifica('terziarie: una sezione a parte col totale e il prezzo ricavato; non sono ne\' ordini sconosciuti ne\' differenze', conTer.terziarie.ordini === 2 && conTer.terziarie.euro === 494.08 && conTer.terziarie.righe[0].prezzo_t === 8 && conTer.terziarie.righe[1].prezzo_t === 10
   && conTer.terziarie.non_in_archivio === 1 && conTer.solo_prefattura.length === 0 && conTer.differenze === 0 && conTer.coincide === true, JSON.stringify(conTer.terziarie));
+// Le date del formulario sono obbligatorie (22/09/2026): un ordine della
+// prefattura che nel gestionale e' terminato senza fine trasporto si spiega con
+// la data che manca, non con un "altro mese"
+const senzaFine = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo: 202 }, { id_ordine: 'ET26000077', kg: 1200, importo: 242.4 }],
+  { RETE: [riga('ET26000001', 1000, 202)], ACI: [], EXTRA_RACCOLTA: [] },
+  new Map([['ET26000077', { canale: 'RETE', stato: 'terminato', giorno: '', date: 'mancano le date di inizio trasporto e fine trasporto' }]]));
+const sf = senzaFine.solo_prefattura.find(x => x.id_ordine === 'ET26000077');
+verifica('terminato senza fine trasporto: la ragione dice quali date mancano', !!sf && /terminato/.test(sf.spiegazione) && /inizio trasporto e fine trasporto/.test(sf.spiegazione) && /obbligatorie/.test(sf.spiegazione), JSON.stringify(sf));
+const senzaTesto = confrontaPrefattura([{ id_ordine: 'ET26000078', kg: 1200, importo: 242.4 }], { RETE: [], ACI: [], EXTRA_RACCOLTA: [] },
+  new Map([['ET26000078', { canale: 'RETE', stato: 'terminato', giorno: '' }]]));
+verifica('senza il testo delle date: manca la data di fine trasporto', /manca la data di fine trasporto/.test(senzaTesto.solo_prefattura[0].spiegazione), senzaTesto.solo_prefattura[0].spiegazione);
+// Anche le terziarie in prefattura dicono le date del formulario da sistemare
+const terDate = confrontaPrefattura([{ id_ordine: 'TER26000001', kg: 27000, importo: 216 }, { id_ordine: 'TER26000002', kg: 27000, importo: 216 }, { id_ordine: 'TER26000003', kg: 27000, importo: 216 }],
+  { RETE: [], ACI: [], EXTRA_RACCOLTA: [] },
+  new Map([
+    ['TER26000001', { canale: 'TERZIARIE', stato: 'terminato', giorno: '2026-07-10', date: 'manca la data di immissione' }],
+    ['TER26000002', { canale: 'TERZIARIE', stato: 'terminato', giorno: '2026-07-11', date: '' }],
+    ['TER26000003', { canale: 'TERZIARIE', stato: 'assegnato', giorno: '', date: '' }],
+  ]));
+verifica('terziarie: le date da sistemare sulla riga e nel conteggio, solo dei terminati', terDate.terziarie.righe[0].date === 'manca la data di immissione' && terDate.terziarie.righe[1].date === '' && terDate.terziarie.righe[2].date === '' && terDate.terziarie.date_da_sistemare === 1, JSON.stringify(terDate.terziarie));
+
 const tanti = Array.from({ length: 410 }, (_, i) => ({ id_ordine: 'ET26' + String(100000 + i), kg: 2300, importo: 464.6 }));
 const tantiG = { RETE: tanti.map(t => riga(t.id_ordine, 2300, 464.6)), ACI: [], EXTRA_RACCOLTA: [] };
 const cTanti = confrontaPrefattura(tanti, tantiG);

@@ -5,9 +5,22 @@ import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { quoteDaStoccaggio } from "../../shared/rotteConferimenti.ts";
 import { canaleMovimento } from "../../shared/movimenti.ts";
+import { formatoKgInTonnellate } from "../../shared/formato.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
 import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from "../../shared/reportSettimanali.ts";
+import { giaArrivatoDiRete, residuoDiRete, noteGiaArrivato, sitiDellaPredittivita, dateDaSistemareDiRete, riassuntoDate } from "../../shared/proiezioneSecondarie.ts";
 
+// Il gia' arrivato e il residuo di ogni impianto sono quelli di
+// giaArrivatoDiRete (shared/proiezioneSecondarie.ts), lo stesso conto della
+// Proiezione a fine anno e del suggerimento del lunedi' (regola dell'utente,
+// 22/09/2026): primarie arrivate al sito dell'impianto, anche quelle scaricate
+// nel suo piazzale (al netto di quello che dal piazzale riparte per altri
+// impianti, che lo contano loro), piu' secondarie da altri stoccaggi. Qui prima
+// si contavano solo le primarie scaricate all'impianto (tipo_destinazione
+// diverso da 'stoc'), e l'impianto che non era doppio ruolo aveva come
+// consuntivo la somma dei soli fornitori configurati: tre numeri diversi per la
+// stessa cosa.
+//
 // La predittivita' delle secondarie e' SOLO della rete (regola dell'utente,
 // 22/09/2026): target, consuntivi, primarie, secondarie, stoccaggi e piano
 // settimanale. L'ACI ha un contratto suo senza target e l'extra raccolta non ha
@@ -142,15 +155,30 @@ export default async function(req) {
     const settimaneFino = (fine) => settimane.filter(s => s.data_inizio <= fine)
       .map(s => (s.data_fine > fine ? { ...s, data_fine: fine } : s));
 
-    // Terminati senza una fine trasporto leggibile: non si collocano in nessuna
-    // settimana e in nessun anno (mai ripiegando sulla chiusura), si contano per
-    // dirlo fra le anomalie, di qualunque anno, come nella matrice delle province
-    // e nel cruscotto della raccolta. Prima si tenevano quelli immessi nell'anno
-    // di lavoro (annoOrdine, che AGENTS.md riserva agli elenchi): uno senza data
-    // di immissione, o immesso a dicembre dell'anno prima, spariva senza che
-    // nessuno lo dicesse.
-    const senzaFine = (righe) => righe.filter(r => statoNorm(r.stato) === 'terminato' && !giornoRoma(r.trasporto_finito_il)).length;
-    const senzaFineTrasporto = { primarie: senzaFine(primarie), secondarie: senzaFine(secondarie) };
+    // Le date obbligatorie dei formulari (regola dell'utente, 22/09/2026):
+    // immissione, inizio e fine trasporto. Un terminato a cui ne manca una, o con
+    // le date nell'ordine sbagliato, si dice fra le anomalie, dicendo quali date
+    // mancano. Senza la fine trasporto non si colloca in nessuna settimana e in
+    // nessun anno (mai ripiegando sulla chiusura): resta fuori dal gia' arrivato
+    // e dalle settimane, di qualunque anno sia. Prima qui si contavano solo i
+    // senza fine trasporto, di tutta la rete; adesso si guardano i formulari
+    // degli impianti seguiti e dei loro stoccaggi, gli stessi della Proiezione e
+    // del suggerimento del lunedi' (sitiDellaPredittivita).
+    const siti = sitiDellaPredittivita(impianti, fornitori, secondarie, annoRiferimento(), normalizzaRagioneSociale);
+    const dateDaSistemare = dateDaSistemareDiRete(primarie, secondarie, siti.tutti, annoRiferimento(), normalizzaRagioneSociale);
+    const senzaFineTrasporto = dateDaSistemare.senza_fine;
+
+    // Il gia' arrivato di rete di ogni impianto seguito, il conto condiviso.
+    const arrivati = giaArrivatoDiRete(impianti.map(i => normalizzaRagioneSociale(i.nome_impianto)), primarie, secondarie, annoRiferimento(), normalizzaRagioneSociale);
+    const arrivatoDi = (imp) => arrivati.get(normalizzaRagioneSociale(imp.nome_impianto));
+    const residuoDi = (imp) => residuoDiRete(imp.target, arrivatoDi(imp));
+    // I nomi da mostrare nelle note, come li scrivono i movimenti o la configurazione.
+    const nomeDi = (k) => {
+      const imp = impianti.find(i => normalizzaRagioneSociale(i.nome_impianto) === k);
+      if (imp) return imp.nome_impianto;
+      const f = fornitori.find(x => normalizzaRagioneSociale(x.nome) === k);
+      return f ? f.nome : k;
+    };
 
     // Terminati dell'anno di lavoro, per il giorno italiano della fine trasporto
     const prim2026 = primarie.filter(r => {
@@ -166,12 +194,15 @@ export default async function(req) {
       return true;
     });
 
-    // Helper: is primaria stoc (con fallback per record storici senza tipo_destinazione)
+    // Una primaria scaricata in un piazzale (con fallback per record storici
+    // senza tipo_destinazione). Serve solo a dire quanto e' entrato in uno
+    // stoccaggio: per il gia' arrivato di un impianto e per i suoi fornitori il
+    // piazzale e l'impianto sono lo stesso sito (regola del 22/09/2026), e il
+    // filtro sulle sole primarie all'impianto (isImp) non c'e' piu'.
     const isStoc = (r) => {
       if (r.tipo_destinazione) return statoNorm(r.tipo_destinazione) === 'stoc';
       return stoccaggioNames.has(normalizzaRagioneSociale(r.destinazione));
     };
-    const isImp = (r) => !isStoc(r);
 
     // === METRICHE STOCCAGGI GENERALIZZATE ===
     const stoccaggiMetriche = {}; // stocNorm -> metriche
@@ -182,11 +213,24 @@ export default async function(req) {
         const kgEntrati = prim2026
           .filter(r => normalizzaRagioneSociale(r.destinazione) === sNorm && isStoc(r))
           .reduce((sum, r) => sum + (r.peso_effettivo || 0), 0);
-        const kgPartiti = sec2026
-          .filter(r => normalizzaRagioneSociale(r.stoccaggio) === sNorm && impNormMap[normalizzaRagioneSociale(r.destinazione)])
+        // Il plafond di un piazzale e' quello che spedisce agli altri impianti:
+        // per T-Cycle i 250.000 kg accanto alla quota impianto di 1.050.000
+        // (migraTCycleImpianto). I trasbordi dal piazzale all'impianto dello
+        // stesso soggetto non lo consumano (22/09/2026): sono la quota
+        // dell'impianto, gia' contata nel suo gia' arrivato. Contati fra i
+        // partiti, il plafond di T-Cycle risultava speso da quello che T-Cycle
+        // porta a se stesso, e a Tecnogum restava un piano piu' piccolo del vero.
+        // Si tengono a parte, per mostrarli.
+        const partitiDaQui = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) === sNorm && impNormMap[normalizzaRagioneSociale(r.destinazione)]);
+        const kgPartiti = partitiDaQui
+          .filter(r => normalizzaRagioneSociale(r.destinazione) !== sNorm)
+          .reduce((sum, r) => sum + (r.peso_effettivo || 0), 0);
+        const kgTrasbordati = partitiDaQui
+          .filter(r => normalizzaRagioneSociale(r.destinazione) === sNorm)
           .reduce((sum, r) => sum + (r.peso_effettivo || 0), 0);
         stoccaggiMetriche[sNorm] = {
           nome: s.nome, plafond, kg_entrati: kgEntrati, kg_partiti: kgPartiti,
+          kg_trasbordati_a_se: kgTrasbordati,
           residuo_plafond: plafond - kgPartiti,
         };
       }
@@ -206,11 +250,8 @@ export default async function(req) {
 
     const result = [];
     const anomalie = [];
-    if (senzaFineTrasporto.primarie || senzaFineTrasporto.secondarie) {
-      anomalie.push({
-        tipo: 'senza_fine_trasporto',
-        testo: `Terminati di rete di qualunque anno senza data di fine trasporto, esclusi dal consuntivo e dalle settimane (primarie di rete: ${senzaFineTrasporto.primarie}, secondarie di rete: ${senzaFineTrasporto.secondarie}). Entrano da soli, nell'anno della loro fine trasporto, quando un nuovo caricamento porta la data.`,
-      });
+    if (dateDaSistemare.avviso) {
+      anomalie.push({ tipo: 'date_da_sistemare', testo: dateDaSistemare.avviso });
     }
 
     // Un fornitore registrato qui che nell'anno non ha ne' un target di rete ne'
@@ -243,6 +284,19 @@ export default async function(req) {
     // 2.100 sotto Tecnogum, cioe' il doppio di quello che deve raccogliere. Si
     // divide fra gli impianti in proporzione alle secondarie che ciascuno riceve
     // da lui, che e' il criterio deciso dalla direzione il 19/09/2026.
+    // Il trasbordo dal piazzale di un impianto all'impianto stesso resta nel
+    // riparto (correzione del 22/09/2026): e' la parte della raccolta del
+    // soggetto che rimane al suo impianto. Tolto, con T-Cycle che spedisce solo
+    // a Tecnogum oltre che a se stesso il riparto vedeva un impianto solo, la
+    // quota non si creava e Tecnogum mostrava come suo l'intero target di
+    // raccolta di T-Cycle: se T-Cycle e' registrato anche come raccoglitore del
+    // proprio impianto, lo stesso target compariva intero sotto tutti e due. Con
+    // il trasbordo dentro, a Tecnogum tocca la parte in proporzione a quello che
+    // riceve sul totale che parte dal piazzale, come nel controllo delle rotte
+    // (controlloRotte, stessa quoteDaStoccaggio). Il trasbordo non fa invece di
+    // T-Cycle un impianto che il piazzale alimenta, per il riparto del plafond
+    // (secVersoAltri, piu' sotto).
+    const secVersoAltri = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) !== normalizzaRagioneSociale(r.destinazione));
     const quotaTargetPerImpianto = new Map(); // "stoccaggio|impianto" -> quota
     const nomiStoccaggio = [...new Set(sec2026.map(r => String(r.stoccaggio || '').trim()).filter(Boolean))];
     for (const nome of nomiStoccaggio) {
@@ -262,6 +316,7 @@ export default async function(req) {
       stoccaggiResult.push({
         nome: m.nome, nome_normalizzato: sNorm,
         plafond: m.plafond, kg_entrati: m.kg_entrati, kg_partiti: m.kg_partiti,
+        kg_trasbordati_a_se: m.kg_trasbordati_a_se,
         residuo_plafond: m.residuo_plafond,
         impianti_collegati: stoccaggiFornitori.filter(f => normalizzaRagioneSociale(f.nome) === sNorm).map(f => f.impianto_nome),
       });
@@ -280,18 +335,23 @@ export default async function(req) {
         });
       }
 
-      let impConsuntivo = 0, impConsuntivoPrim = 0, impConsuntivoSec = 0, impTotalePianificato = 0;
+      // Il gia' arrivato di rete dell'impianto e il suo residuo: il conto
+      // condiviso, per ogni impianto e non solo per i doppi ruoli. Prima un
+      // impianto senza doppio ruolo aveva come consuntivo la somma dei soli
+      // fornitori configurati, e chi non era configurato non contava.
+      const arrivato = arrivatoDi(imp);
+      const impConsuntivo = arrivato ? arrivato.totale_kg : 0;
+      const impConsuntivoPrim = arrivato ? arrivato.primaria_kg : 0;
+      const impConsuntivoSec = arrivato ? arrivato.secondaria_kg : 0;
+      let impConsuntivoFornitori = 0, impTotalePianificato = 0;
       const fornitoriResult = [];
       let conferitoriResult = [];
 
       // === DOPPIO RUOLO: scoperta conferitori dinamica ===
       if (isDoubleRole) {
-        // Consuntivo impianto: primarie imp + secondarie ricevute (escluso self-stoccaggio)
-        const primImp = prim2026.filter(r => normalizzaRagioneSociale(r.destinazione) === impNorm && isImp(r));
-        const secRicevute = sec2026.filter(r => normalizzaRagioneSociale(r.destinazione) === impNorm && normalizzaRagioneSociale(r.stoccaggio) !== impNorm);
-        impConsuntivoPrim = primImp.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
-        impConsuntivoSec = secRicevute.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
-        impConsuntivo = impConsuntivoPrim + impConsuntivoSec;
+        // Le primarie arrivate al sito, all'impianto o al suo piazzale (regola
+        // del 22/09/2026): sono quelle del gia' arrivato.
+        const primImp = arrivato ? arrivato.movimenti.filter(m => m.flusso === 'primaria').map(m => m.record) : [];
 
         // Scoperta conferitori non configurati
         const configuredNorms = new Set(impFornitori.map(f => normalizzaRagioneSociale(f.nome)));
@@ -354,8 +414,13 @@ export default async function(req) {
         // Tecnogum. Segnata come solo raccoglitore risultava a zero su tutti e due,
         // perche' le sue primarie le porta al proprio piazzale, non agli impianti.
         // Qui vincono i fatti, e la discordanza si segnala.
-        const primDiQuesto = prim2026.filter(r => normalizzaRagioneSociale(r.trasportatore) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm && isImp(r)).length;
-        const secDiQuesto = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm).length;
+        // Le primarie verso il sito contano anche se scaricate nel piazzale
+        // dell'impianto (regola del 22/09/2026); le secondarie dal piazzale
+        // dell'impianto a se stesso no, perche' quei PFU sono gia' fra le primarie.
+        const suoSito = (r) => normalizzaRagioneSociale(r.destinazione) === impNorm;
+        const daAltroStoccaggio = (r) => normalizzaRagioneSociale(r.stoccaggio) !== impNorm;
+        const primDiQuesto = prim2026.filter(r => normalizzaRagioneSociale(r.trasportatore) === fNorm && suoSito(r)).length;
+        const secDiQuesto = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm && suoSito(r) && daAltroStoccaggio(r)).length;
         const fRuolo = (fRuoloScritto === 'raccoglitore' && !primDiQuesto && secDiQuesto) ? 'doppio_ruolo' : fRuoloScritto;
         // (stessa regola di eStoccaggio, calcolata sopra prima delle metriche)
         if (fRuolo !== fRuoloScritto) {
@@ -367,10 +432,28 @@ export default async function(req) {
           });
         }
         const isStoccaggio = fRuolo === 'stoccaggio' || fRuolo === 'doppio_ruolo';
+        // Il piazzale dell'impianto registrato come stoccaggio dell'impianto
+        // stesso: i suoi viaggi verso l'impianto non abbassano il residuo, perche'
+        // le primarie scaricate li' sono gia' nel gia' arrivato (regola del
+        // 22/09/2026). Gli si pianificavano lo stesso le settimane col plafond,
+        // come se coprissero il target; la Proiezione quel piazzale lo toglie
+        // gia' dalle fonti. Qui il piano resta a zero e si dice.
+        const piazzaleProprio = isStoccaggio && fNorm === impNorm;
+        if (piazzaleProprio) {
+          anomalie.push({
+            tipo: 'piazzale_proprio',
+            fornitore: f.nome,
+            impianto: imp.nome_impianto,
+            testo: `${f.nome} e' registrato come stoccaggio di se stesso per ${imp.nome_impianto}. Le secondarie dal suo piazzale all'impianto non abbassano il residuo: le primarie scaricate nel piazzale sono gia' nel gia' arrivato di rete, e contarle anche al trasbordo le farebbe valere due volte. Non gli pianifico viaggi: se raccoglie in primaria registralo come raccoglitore, altrimenti toglilo dai fornitori di ${imp.nome_impianto}.`,
+          });
+        }
         // Il target di un fornitore che alimenta piu' impianti si divide fra
         // loro: quello che gli appartiene una volta sola non si conta due volte.
+        // Si divide solo un target che c'e': un piazzale senza target di raccolta
+        // (T-Cycle non raccoglie in primaria) con la quota avrebbe mostrato un
+        // residuo a zero, invece di quello dell'impianto che deve coprire.
         const targetPieno = targetByNome[fNorm] || 0;
-        const quotaTarget = quotaTargetPerImpianto.get(fNorm + '|' + impNorm);
+        const quotaTarget = targetPieno > 0 ? quotaTargetPerImpianto.get(fNorm + '|' + impNorm) : undefined;
         const targetRaccoglitoreKg = quotaTarget != null ? Math.round(targetPieno * quotaTarget) : targetPieno;
 
         let consuntivo = 0, consuntivoPrim = 0, consuntivoSec = 0;
@@ -383,34 +466,44 @@ export default async function(req) {
         if (isStoccaggio) {
           const m = stoccaggiMetriche[fNorm] || {};
           plafondUsato = m.plafond || (f.plafond_stoccaggio_kg && f.plafond_stoccaggio_kg > 0 ? f.plafond_stoccaggio_kg : targetRaccoglitoreKg);
-          const fSec = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm);
+          const fSec = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm && suoSito(r) && daAltroStoccaggio(r));
           consuntivoSec = fSec.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
           consuntivo = consuntivoSec;
           for (const r of fSec) {
             const key = settimanaDi(r);
             execByWeek[key] = (execByWeek[key] || 0) + (r.peso_effettivo || 0);
           }
-          // Riparto plafond residuo proporzionale al residuo target di questo impianto
-          const resTargetImp = (imp.target || 0) - consuntivoSec;
+          // Riparto plafond residuo proporzionale al residuo target di questo
+          // impianto. Il residuo e' quello condiviso, target meno tutto il gia'
+          // arrivato di rete: la predittivita' delle secondarie «si basa sul
+          // residuo totale che diminuisce anche con le primarie» (l'utente,
+          // 22/09/2026). Prima qui si toglievano dal target le sole secondarie di
+          // questo stoccaggio, e il residuo mostrato per lo stoccaggio - che e'
+          // quello dell'impianto - era piu' grande del vero di tutte le primarie.
+          const resTargetImp = residuoDi(imp);
           // Gli impianti da cui parte il riparto sono quelli a cui questo
           // piazzale spedisce davvero, piu' quello in corso: prendendoli dal solo
           // ruolo scritto, un fornitore corretto sui fatti restava con un
-          // denominatore parziale e la quota poteva superare il 100%.
+          // denominatore parziale e la quota poteva superare il 100%. Il
+          // trasbordo del piazzale all'impianto dello stesso soggetto non fa di
+          // quell'impianto uno che il piazzale alimenta (vedi secVersoAltri).
           const stocImpiantiIds = [...new Set([
             ...stoccaggiFornitori.filter(sf => normalizzaRagioneSociale(sf.nome) === fNorm).map(sf => sf.impianto_id),
-            ...impianti.filter(i => sec2026.some(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm && normalizzaRagioneSociale(r.destinazione) === normalizzaRagioneSociale(i.nome_impianto))).map(i => i.id),
+            ...impianti.filter(i => secVersoAltri.some(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm && normalizzaRagioneSociale(r.destinazione) === normalizzaRagioneSociale(i.nome_impianto))).map(i => i.id),
             imp.id,
           ].filter(Boolean))];
           let sumResiduoTargetStoc = 0;
           for (const sImpId of stocImpiantiIds) {
             const sImp = impianti.find(i => i.id === sImpId);
-            if (!sImp) continue;
-            const sImpNorm = normalizzaRagioneSociale(sImp.nome_impianto);
-            const sCons = sec2026.filter(r => normalizzaRagioneSociale(r.stoccaggio) === fNorm && normalizzaRagioneSociale(r.destinazione) === sImpNorm).reduce((s, r) => s + (r.peso_effettivo || 0), 0);
-            const sRes = (sImp.target || 0) - sCons;
+            // l'impianto dello stesso soggetto del piazzale non ne prende una
+            // quota, anche se e' registrato fra i suoi (vedi piazzaleProprio)
+            if (!sImp || normalizzaRagioneSociale(sImp.nome_impianto) === fNorm) continue;
+            // lo stesso residuo condiviso, per ciascuno degli impianti che
+            // attingono a questo piazzale
+            const sRes = residuoDi(sImp);
             if (sRes > 0) sumResiduoTargetStoc += sRes;
           }
-          quotaPlafondImpianto = sumResiduoTargetStoc > 0 && resTargetImp > 0
+          quotaPlafondImpianto = !piazzaleProprio && sumResiduoTargetStoc > 0 && resTargetImp > 0
             ? Math.min(m.residuo_plafond || 0, (m.residuo_plafond || 0) * (resTargetImp / sumResiduoTargetStoc))
             : 0;
           // Per uno stoccaggio il residuo mostrato e' sempre stato quello
@@ -431,7 +524,11 @@ export default async function(req) {
             ? Math.min(residuo, quotaPlafondImpianto > 0 ? quotaPlafondImpianto : residuo)
             : quotaPlafondImpianto;
         } else {
-          const fPrim = prim2026.filter(r => normalizzaRagioneSociale(r.trasportatore) === fNorm && normalizzaRagioneSociale(r.destinazione) === impNorm && isImp(r));
+          // Le primarie di questo raccoglitore arrivate al sito, anche quelle
+          // scaricate nel piazzale dell'impianto (regola del 22/09/2026): prima
+          // si tenevano solo quelle scaricate all'impianto, e chi scarica nello
+          // stoccaggio di Irigom restava indietro sul suo target senza esserlo.
+          const fPrim = prim2026.filter(r => normalizzaRagioneSociale(r.trasportatore) === fNorm && suoSito(r));
           consuntivoPrim = fPrim.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
           consuntivo = consuntivoPrim;
           for (const r of fPrim) {
@@ -492,11 +589,9 @@ export default async function(req) {
         }
 
         const totalePianificato = piano.reduce((s, w) => s + w.prev, 0);
-        if (!isDoubleRole) {
-          impConsuntivo += consuntivo;
-          impConsuntivoSec += consuntivoSec;
-          impConsuntivoPrim += consuntivoPrim;
-        }
+        // La somma dei fornitori configurati resta, ma solo come controllo: il
+        // gia' arrivato dell'impianto e' il conto condiviso qui sopra.
+        impConsuntivoFornitori += consuntivo;
         impTotalePianificato += totalePianificato;
 
         const fr = {
@@ -506,7 +601,9 @@ export default async function(req) {
           ...(quotaTarget != null ? {
             target_raccoglitore_intero_kg: targetPieno,
             quota_target: Math.round(quotaTarget * 1000) / 1000,
-            nota_quota: `${f.nome} alimenta piu' di un impianto: del suo target di raccolta, ${Math.round(targetPieno / 1000)} t, a questo impianto ne compete il ${Math.round(quotaTarget * 100)}%, in proporzione alle secondarie che riceve.`,
+            // le tonnellate con la virgola e due decimali, come ovunque; e se nel
+            // riparto c'e' il trasbordo all'impianto dello stesso soggetto, si dice
+            nota_quota: `${f.nome} alimenta piu' di un impianto: del suo target di raccolta, ${formatoKgInTonnellate(targetPieno)} t, a questo impianto ne compete il ${Math.round(quotaTarget * 100)}%, in proporzione alle secondarie che riceve sul totale partito dal piazzale${quotaTargetPerImpianto.has(fNorm + '|' + fNorm) ? `, compresi i trasbordi all'impianto ${f.nome} stesso` : ''}.`,
           } : {}),
           quota_target_deprecato: f.quota_target || 0,
           ipotesi_mese_corrente: f.ipotesi_mese_corrente || 0,
@@ -530,9 +627,24 @@ export default async function(req) {
           totale_capacity: imp.totale_capacity_kg || 0, data_fine: fineDi(imp),
           is_double_role: isDoubleRole,
         },
+        // consuntivo e' il gia' arrivato di rete (il nome del campo resta per chi
+        // lo legge gia'), residuo = target - gia' arrivato: gli stessi numeri
+        // della Proiezione e del suggerimento del lunedi'.
         consuntivo: impConsuntivo,
+        gia_arrivato: impConsuntivo,
         consuntivo_primarie: impConsuntivoPrim, consuntivo_secondarie: impConsuntivoSec,
-        residuo: (imp.target || 0) - impConsuntivo,
+        // Le primarie scaricate nel piazzale, quante ne sono ripartite per altri
+        // impianti (tolte dal gia' arrivato: le contano loro) e quante restano;
+        // arrivato al sito e' tutto quello che e' entrato, per la capacita'.
+        consuntivo_primarie_impianto: arrivato ? arrivato.primaria_impianto_kg : 0,
+        consuntivo_primarie_piazzale: arrivato ? arrivato.primaria_piazzale_kg : 0,
+        consuntivo_piazzale_ripartito: arrivato ? arrivato.piazzale_ripartito_kg : 0,
+        consuntivo_primarie_piazzale_netta: arrivato ? arrivato.primaria_piazzale_netta_kg : 0,
+        gia_arrivato_al_sito: arrivato ? arrivato.arrivato_al_sito_kg : 0,
+        secondarie_da_se_escluse: arrivato ? arrivato.da_se_stesso : { viaggi: 0, kg: 0 },
+        consuntivo_fornitori_configurati: Math.round(impConsuntivoFornitori),
+        residuo: residuoDi(imp),
+        note: noteGiaArrivato(arrivato, nomeDi, annoRiferimento()),
         totale_pianificato: impTotalePianificato,
         fornitori: fornitoriResult,
         conferitori: conferitoriResult,
@@ -557,6 +669,7 @@ export default async function(req) {
       canale: 'RETE',
       anomalie,
       senza_fine_trasporto: senzaFineTrasporto,
+      date_da_sistemare: riassuntoDate(dateDaSistemare),
       caricamento_in_corso: caricamentoInCorso || '',
       piano_salvato: salvato,
       kg_per_viaggio: KG_PER_VIAGGIO,

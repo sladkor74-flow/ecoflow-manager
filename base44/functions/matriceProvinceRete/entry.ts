@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eTerminato, periodoMovimento } from "../../shared/movimenti.ts";
+import { riepilogoDateVista } from "../../shared/raccoltoCalculator.ts";
 
 // Raccolta della RETE per provincia e mese: peso effettivo e numero di ritiri.
 //
@@ -13,7 +14,7 @@ import { eTerminato, periodoMovimento } from "../../shared/movimenti.ts";
 // misura tutto il resto; si contano i soli ordini terminati e il peso e' quello
 // effettivo, mai lo stimato.
 //
-// Payload: { anno }   Risposta: { anno, anni, mesi, righe, totali, senza_fine_trasporto, senza_provincia }
+// Payload: { anno }   Risposta: { anno, anni, mesi, righe, totali, senza_fine_trasporto, senza_provincia, date_da_sistemare }
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -43,11 +44,14 @@ export default async function(req) {
     // immissione), un ritiro senza provincia non ha una riga.
     let senzaFineTrasporto = 0;
     const senzaProvincia = { ritiri: 0, kg: 0 };
+    // i ritiri dell'anno, con o senza provincia, per le date da sistemare
+    const dellAnno = [];
     for (const r of record) {
       if (!eTerminato(r)) continue;
       const p = periodoMovimento(r);
       if (!p) { senzaFineTrasporto++; continue; }
       if (p.anno !== anno) continue;
+      dellAnno.push(r);
       const sigla = String(r.provincia || r.sigla || '').toUpperCase().trim();
       if (!sigla) { senzaProvincia.ritiri++; senzaProvincia.kg += Math.round(Number(r.peso_effettivo) || 0); continue; }
       if (!province.has(sigla)) {
@@ -70,8 +74,16 @@ export default async function(req) {
       ritiri_totale: righe.reduce((t, r) => t + r.ritiri_totale, 0),
     };
 
-    // senza_fine_trasporto: terminati di rete di qualunque anno, esclusi da ogni mese
-    return Response.json({ anno, anni: [...anni].sort((a, b) => b - a), mesi: MESI, righe, totali, senza_fine_trasporto: senzaFineTrasporto, senza_provincia: senzaProvincia });
+    // senza_fine_trasporto: terminati di rete di qualunque anno, esclusi da ogni mese.
+    // date_da_sistemare (regola dell'utente, 22/09/2026: immissione, inizio e fine
+    // trasporto sono obbligatorie in ogni formulario terminato): quei terminati
+    // senza fine trasporto e i ritiri dell'anno con un'altra data che manca o non
+    // torna, che nella matrice ci sono, nel mese della fine trasporto.
+    return Response.json({
+      anno, anni: [...anni].sort((a, b) => b - a), mesi: MESI, righe, totali,
+      senza_fine_trasporto: senzaFineTrasporto, senza_provincia: senzaProvincia,
+      date_da_sistemare: riepilogoDateVista(record, dellAnno),
+    });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

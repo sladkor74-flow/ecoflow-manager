@@ -10,8 +10,20 @@
 // trasporto delle secondarie di QUEL mese, che possono riguardare tonnellate
 // raccolte prima. Il margine del singolo mese oscilla per questo; quello
 // dell'anno e' il numero che conta.
+//
+// Un viaggio di secondaria che porta rete e ACI insieme, a prezzo per viaggio,
+// pesa su tutti e due i margini, ciascuno per la sua quota dei chili (regola
+// dell'utente del 22/09/2026, quoteViaggioMisto in passivaCalcolo.ts): prima
+// pesava tutto sulla rete.
+//
+// Un terminato senza fine trasporto non entra in nessun mese, quindi nemmeno nel
+// margine: si dice per canale, una volta per l'anno (senza_fine_trasporto), e
+// non fra le anomalie di ogni mese, dove lo stesso ordine si conterebbe dodici
+// volte. Sono quelli che la passiva segnala in almeno un mese dell'anno, compresi
+// gli immessi a fine dell'anno prima (anomaliaSenzaFineAnno).
 import { calcolaRigheAttiva, eRigaACorpo, TIPOLOGIE_ATTIVA } from "./attivaCalcolo.ts";
-import { calcolaPassivaMese } from "./passivaCalcolo.ts";
+import { calcolaPassivaMese, movimentiDateDelCanale } from "./passivaCalcolo.ts";
+import { anomaliaSenzaFineAnno } from "./filtroPeriodo.ts";
 
 export const MESI_MARGINE = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 const r2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
@@ -43,7 +55,7 @@ export function calcolaMargineAnno(dati, anno, finoAlMese = 11) {
     tariffeAll: (dati.tariffe || []).filter(t => t.direzione === 'PASSIVA'),
     fornitoriAll: (dati.fornitori || []).filter(f => f.stato === 'attivo'),
   };
-  const canali = Object.fromEntries(TIPOLOGIE_ATTIVA.map(c => [c, { canale: c, mesi: [] }]));
+  const canali = Object.fromEntries(TIPOLOGIE_ATTIVA.map(c => [c, { canale: c, mesi: [], senza_fine_trasporto: null }]));
 
   for (let m = 0; m <= Math.min(11, finoAlMese); m++) {
     const mese = MESI_MARGINE[m];
@@ -62,9 +74,22 @@ export function calcolaMargineAnno(dati, anno, finoAlMese = 11) {
         costo_trasporti: costo.totali.trasporti_secondaria,
         // un ricavo o un costo calcolato con un prezzo mancante e' un margine falso: si dice
         righe_senza_prezzo: righe.filter(r => r.stato_validazione === 'errore').length,
-        anomalie_passiva: (costo.anomalie || []).length,
+        // senza i terminati senza fine trasporto, che si dicono una volta per l'anno
+        anomalie_passiva: (costo.anomalie || []).filter(a => a.tipo !== 'date_senza_fine').length,
       }));
     }
+  }
+
+  // I terminati senza fine trasporto dell'anno fin qui, ciascuno una volta: gli
+  // stessi ordini che la passiva segnala mese per mese, primarie e secondarie del
+  // canale (il suo elenco comprende quello dell'attiva). Prima si prendevano
+  // quelli dell'ultimo mese calcolato, che bastava finche' un senza fine si
+  // segnalava solo nell'anno di immissione. Dal 22/09/2026 un ordine immesso a
+  // dicembre dell'anno prima si segnala solo nei primi mesi, e l'ultimo mese
+  // calcolato (per esempio settembre) non lo vedrebbe.
+  for (const canale of TIPOLOGIE_ATTIVA) {
+    const s = anomaliaSenzaFineAnno(movimentiDateDelCanale(passiva, canale), annoNum, Math.min(11, finoAlMese), canale);
+    canali[canale].senza_fine_trasporto = s ? { quanti: s.quanti, tonnellate: r3(s.kg / 1000), descrizione: s.descrizione } : null;
   }
 
   for (const canale of TIPOLOGIE_ATTIVA) {

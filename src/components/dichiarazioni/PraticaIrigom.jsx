@@ -6,9 +6,11 @@ import { formatKg, formatTonnellate } from '@/lib/utils';
 import { usePermessi } from '@/lib/permessi';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { giornoRoma } from '@/lib/giornoItaliano';
+import { eTerminato, giornoMovimento, dateDaSistemare, testoDate } from '@/lib/movimenti';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 import { leggiRegistroIrigom } from '@/lib/registroIrigom';
-import { componiMese, dividiExtra, MESI } from '@/lib/praticaIrigom';
-import { wordDelMese, excelDelMese, cartellaZip, dataIt } from '@/lib/documentiIrigom';
+import { componiMese, dividiExtra, MESI, extraDaSalvare, extraGiaDichiarate, finestraExtra, extraDellePratiche, dichiarazioniExtra, testoExtraCompresa } from '@/lib/praticaIrigom';
+import { wordDelMese, excelDelMese, cartellaZip, dataIt, datiFileGestione } from '@/lib/documentiIrigom';
 import { scarica } from '@/lib/docxModello';
 import ModelliIrigom from '@/components/dichiarazioni/ModelliIrigom';
 
@@ -30,6 +32,29 @@ const t = (kg) => formatTonnellate((Number(kg) || 0) / 1000);
 const oggiIt = () => new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date());
 const nomeCartella = (mese, anno) => `Irigom ${mese} ${anno}`;
 const FIR = /[A-Z]{5}\d{6}[A-Z]{2}/;
+
+// L'extra raccolta partita con la nave sta nell'ultima terziaria, che a portale
+// si chiude col peso intero (regola dell'utente del 22/09/2026). Le stesse parole
+// nei riquadri, nel pulsante e nelle note, perche' non si contraddicano.
+const quale = (c) => (c.terziaria ? `nella terziaria ${c.terziaria}` : `nella terziaria dell'allegato VII n. ${c.allegato}`);
+const conExtra = (p) => !!(p && p.extra_kg > 0 && p.chiusura_ultima_terziaria && p.chiusura_ultima_terziaria.extra_kg > 0);
+/** "di cui 460 kg di extra raccolta nella terziaria TER26154141, che si chiude a portale a 20.340 kg"; '' senza extra. */
+const diCuiExtra = (p) => (conExtra(p)
+  ? `di cui ${formatKg(p.extra_kg)} kg di extra raccolta ${quale(p.chiusura_ultima_terziaria)}, che si chiude a portale a ${formatKg(p.chiusura_ultima_terziaria.portale_kg)} kg`
+  : '');
+/** La frase per le note: il totale a portale e, se c'e', l'extra che contiene. */
+const testoPortale = (p) => (!p.portale_kg ? 'A portale non si carica nulla.' : conExtra(p)
+  ? `A portale ${formatKg(p.portale_kg)} kg, di cui ${formatKg(p.extra_kg)} kg di extra raccolta ${quale(p.chiusura_ultima_terziaria)}, chiusa a ${formatKg(p.chiusura_ultima_terziaria.portale_kg)} kg, dichiarata a parte sul canale extra raccolta; la parte di rete e' ${formatKg(p.rete_kg)} kg.`
+  : `A portale ${formatKg(p.portale_kg)} kg, tutti di rete.`);
+/** Il totale a portale di una pratica salvata, da dati_json; null per quelle di prima del 22/09/2026, che non l'avevano. */
+function portaleSalvato(p) {
+  try {
+    const d = JSON.parse((p && p.dati_json) || '{}');
+    return typeof d.portale_kg === 'number' ? d.portale_kg : null;
+  } catch (e) {
+    return null;
+  }
+}
 
 /** Che documento e' un file, dal nome. */
 function riconosci(nome) {
@@ -89,6 +114,10 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
   const [errore, setErrore] = useState('');
   const [mese, setMese] = useState('');
   const [pratiche, setPratiche] = useState([]);
+  // Le pratiche e le dichiarazioni di extra raccolta dell'anno prima servono al
+  // cambio d'anno: l'extra arrivata a dicembre parte con la nave di gennaio.
+  const [praticheAnnoPrima, setPraticheAnnoPrima] = useState([]);
+  const [extraDichiarate, setExtraDichiarate] = useState([]);
   const [modelli, setModelli] = useState([]);
   const [extraArchivio, setExtraArchivio] = useState([]);
   const [lettura, setLettura] = useState('giacenza');
@@ -103,12 +132,21 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
 
   const caricaArchivi = useCallback(async () => {
     try {
-      const [p, m, e] = await Promise.all([
+      // L'extra raccolta si legge tutta, a pagine: con le prime 500 per fine
+      // trasporto restavano fuori proprio i terminati senza fine trasporto, che
+      // vanno segnalati (regola del 22/09/2026).
+      const annoPrima = Number(anno) - 1;
+      const [p, pPrima, m, e, dEx, dExPrima] = await Promise.all([
         base44.entities.PraticaIrigom.filter({ anno }),
+        base44.entities.PraticaIrigom.filter({ anno: annoPrima }),
         base44.entities.ModelloDocumento.list(),
-        base44.entities.ExtraRaccolta.list('-trasporto_finito_il', 500),
+        fetchAllClient(base44.entities.ExtraRaccolta, null, '-trasporto_finito_il'),
+        fetchAllClient(base44.entities.DichiarazioneSito, { anno, canale: 'EXTRA_RACCOLTA' }, 'id'),
+        fetchAllClient(base44.entities.DichiarazioneSito, { anno: annoPrima, canale: 'EXTRA_RACCOLTA' }, 'id'),
       ]);
       setPratiche(p || []);
+      setPraticheAnnoPrima(pPrima || []);
+      setExtraDichiarate([...(dEx || []), ...(dExPrima || [])]);
       setModelli(m || []);
       setExtraArchivio(e || []);
     } catch (err) {
@@ -120,9 +158,10 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
   const praticaDelMese = useMemo(() => pratiche
     .filter(p => p.mese === mese && p.stato !== 'sostituita')
     .sort((a, b) => (b.versione || 1) - (a.versione || 1))[0] || null, [pratiche, mese]);
-  const ultimaRegistrata = useMemo(() => pratiche
+  // A gennaio l'ultima registrata e' quella di dicembre dell'anno prima.
+  const ultimaRegistrata = useMemo(() => [...pratiche, ...praticheAnnoPrima]
     .filter(p => p.stato === 'registrata')
-    .sort((a, b) => MESI.indexOf(b.mese) - MESI.indexOf(a.mese))[0] || null, [pratiche]);
+    .sort((a, b) => (Number(b.anno) - Number(a.anno)) || MESI.indexOf(b.mese) - MESI.indexOf(a.mese))[0] || null, [pratiche, praticheAnnoPrima]);
 
   // Scegliendo un mese si riparte da quello che la pratica aveva gia'; se non c'e',
   // la nave e la ripartizione dell'extra si propongono come l'ultima volta.
@@ -181,31 +220,52 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
 
   // --- L'extra raccolta arrivata a Irigom e non ancora dichiarata ---
   const nsIrigom = irigom ? normalizzaRagioneSociale(irigom.sito) : 'irigom';
-  const giaDichiarate = useMemo(() => {
-    const s = new Set();
-    for (const p of pratiche) {
-      if (p.stato !== 'registrata' || p.mese === mese) continue;
-      try { for (const f of (JSON.parse(p.extra_json || '{}').formulari || [])) s.add(f.id); } catch (e) { /* niente */ }
-    }
-    return s;
-  }, [pratiche, mese]);
-  // Per fine trasporto, sul giorno italiano: fino all'ultimo giorno del mese che si dichiara.
+  // Le pratiche registrate dell'anno e dell'anno prima, tranne quella del mese
+  // che si rifa' (src/lib/praticaIrigom.js, extraGiaDichiarate).
+  const praticheDueAnni = useMemo(() => [...pratiche, ...praticheAnnoPrima], [pratiche, praticheAnnoPrima]);
+  const giaDichiarate = useMemo(() => extraGiaDichiarate(praticheDueAnni, { anno, mese }), [praticheDueAnni, anno, mese]);
+  // Per fine trasporto, sul giorno italiano: fino all'ultimo giorno del mese che
+  // si dichiara, e dall'anno prima se in quell'anno la pratica c'era gia'. Si
+  // guardava solo l'anno della pratica: l'extra arrivata a dicembre e partita con
+  // la nave di gennaio non si sarebbe proposta mai, e ora che sta nel totale a
+  // portale l'errore pesa di piu'.
+  const finestra = useMemo(() => finestraExtra({ anno, meseIdx: idx, annoPrimaConPratica: praticheAnnoPrima.some(p => p.stato === 'registrata') }), [anno, idx, praticheAnnoPrima]);
   const extraCandidati = useMemo(() => extraArchivio.filter(r => {
-    const giorno = giornoRoma(r.trasporto_finito_il);
-    return String(r.stato || '').toLowerCase() === 'terminato'
+    const giorno = giornoMovimento(r);
+    return eTerminato(r)
       && normalizzaRagioneSociale(r.destinazione) === nsIrigom
-      && giorno.startsWith(String(anno))
-      && (idx < 0 || giorno <= `${anno}-${String(idx + 1).padStart(2, '0')}-31`)
+      && !!giorno && giorno >= finestra.da && giorno <= finestra.a
       && !giaDichiarate.has(r.id);
-  }), [extraArchivio, nsIrigom, anno, idx, giaDichiarate]);
+  }), [extraArchivio, nsIrigom, finestra, giaDichiarate]);
+  // Regola dell'utente del 22/09/2026: immissione, inizio e fine trasporto sono
+  // obbligatorie in ogni formulario. Un'extra raccolta terminata per Irigom senza
+  // fine trasporto non si colloca in nessun mese, quindi non si propone e non
+  // entra nella giacenza, ma si segnala dicendo quali date mancano: prima spariva
+  // in silenzio. Si mostrano nel passo 1, appena gli archivi sono letti, anche
+  // senza registro e su un mese vuoto: stavano nel passo 2 e si vedevano solo col
+  // registro caricato e un mese compilato. Quelle che la fine ce l'hanno ma hanno
+  // un'altra data mancante o nell'ordine sbagliato restano fra le proposte,
+  // segnalate accanto, negli avvisi della pratica e nel passo dei documenti.
+  const extraSenzaFine = useMemo(() => extraArchivio.filter(r => eTerminato(r)
+    && normalizzaRagioneSociale(r.destinazione) === nsIrigom
+    && !giornoMovimento(r)
+    && !giaDichiarate.has(r.id)), [extraArchivio, nsIrigom, giaDichiarate]);
   // Un'extra raccolta il cui mese ha gia' una dichiarazione scritta a mano non si
-  // propone di nuovo: si vede, e la si spunta solo se va rifatta.
+  // propone di nuovo: si vede, e la si spunta solo se va rifatta. "A mano" vuol
+  // dire che la dichiarazione di quel mese (e anno) vale piu' di quanto ci hanno
+  // scritto le pratiche registrate. Prima si guardava se la nota citava la pratica
+  // di questo mese: l'extra di un mese gia' toccato da un'altra pratica sembrava
+  // dichiarata anche quando non lo era, e l'anno prima non si guardava affatto.
+  const extraPratiche = useMemo(() => extraDellePratiche(praticheDueAnni), [praticheDueAnni]);
   const dichiarataAMano = useCallback((r) => {
-    const flusso = (irigom && irigom.flussi || []).find(f => f.canale === 'EXTRA_RACCOLTA');
-    const g = giornoRoma(r.trasporto_finito_il);
-    const m = flusso && g ? flusso.mesi[Number(g.slice(5, 7)) - 1] : null;
-    return !!(m && m.dichiarazione && m.dichiarazione.quantita_kg > 0 && !String(m.dichiarazione.note || '').includes(`pratica di ${mese}`));
-  }, [irigom, mese]);
+    const g = giornoMovimento(r);
+    if (!g) return false;
+    const a = Number(g.slice(0, 4));
+    const m = MESI[Number(g.slice(5, 7)) - 1];
+    const d = extraDichiarate.find(x => Number(x.anno) === a && x.mese === m && normalizzaRagioneSociale(x.sito) === nsIrigom);
+    const dallePratiche = (extraPratiche.get(`${a}|${m}`) || { pfu_kg: 0 }).pfu_kg;
+    return !!(d && (Number(d.quantita_kg) || 0) > dallePratiche);
+  }, [extraDichiarate, extraPratiche, nsIrigom]);
   const sceltiExtra = extraScelti || new Set(extraCandidati.filter(r => !dichiarataAMano(r)).map(r => r.id));
   const extra = useMemo(() => {
     const scelti = extraCandidati.filter(r => sceltiExtra.has(r.id));
@@ -220,6 +280,9 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
         inizio_trasporto: giornoRoma(r.trasporto_iniziato_il), fine_trasporto: giornoRoma(r.trasporto_finito_il),
         campagna: r.tipologia_trasporto || r.id_ordine || '', produttore: r.produttore || r.ragione_sociale || '',
         trasportatore: r.trasportatore || '', destinatario: 'IRIGOM SRL',
+        // Regola del 22/09/2026: le date mancanti o incoerenti vanno con la pratica,
+        // che le segnala anche nel passo dei documenti e nel foglio Controlli.
+        date_da_sistemare: dateDaSistemare(r) ? testoDate(r) : '',
       })),
     };
   }, [extraCandidati, sceltiExtra, quotaFerroExtra]);
@@ -301,11 +364,18 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
       anno, mese, stato, lettura: pratica.letture.usata,
       registro_file: registro.file_nome,
       portale_fine_mese_kg: portaleFineMese ? portaleFineMese.kg : null,
+      // rete_kg e' la sola parte di rete, extra_kg l'extra raccolta: il totale
+      // caricato a portale (portale_kg, extra compresa, regola del 22/09/2026)
+      // sta in dati_json e, a parole, nella nota. cippato, metalli e CSS-C sono
+      // quelli della rete e fanno rete_kg.
       rete_kg: pratica.rete_kg, extra_kg: pratica.extra_kg,
       cippato_kg: pratica.materiali.cippato_kg, metalli_kg: pratica.materiali.metalli_kg, cssc_kg: pratica.materiali.cssc_kg,
+      note: testoPortale(pratica),
       terziarie, data_lettera: dataLettera,
       nave_json: JSON.stringify(nave),
-      extra_json: JSON.stringify(extra ? { formulari: extra.formulari, cippato_kg: extra.cippato_kg, ferro_kg: extra.ferro_kg, quota_ferro: extra.quota_ferro } : {}),
+      // Solo l'extra che la pratica dichiara (pratica.extra), non quella spuntata:
+      // in un mese senza nave resta in impianto e il mese dopo si ripropone.
+      extra_json: JSON.stringify(extraDaSalvare(pratica, extra ? extra.quota_ferro : null)),
       dati_json: JSON.stringify({ ...pratica, allegati: { scelti: pratica.allegati.scelti, coperto_kg: pratica.allegati.coperto_kg } }),
       documenti_json: JSON.stringify(richiesti.map(r => ({ tipo: r.tipo, chiave: r.chiave, file: r.file ? r.file.nome : '' }))),
       ...extraCampi,
@@ -327,6 +397,8 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
         const m = await scaricaModelli();
         const word = wordDelMese({ pratica, contesto: contesto(), modelli: m });
         const file = [...word, { percorso: `${MESE}/Riepilogo dichiarazioni Irigom ${mese.toLowerCase()} ${anno}.xlsx`, bytes: xlsx }];
+        // I dati per scrivere il blocco del mese nel file di gestione (strumenti/irigom/scrivi_blocco_mese.ps1).
+        file.push({ percorso: `${MESE}/Dati per il file di gestione.json`, bytes: new TextEncoder().encode(JSON.stringify(datiFileGestione({ pratica, contesto: contesto() }), null, 1)) });
         // I PDF forniti, dove li vuole il repository; gli allegati VII anche col
         // numero della terziaria, come si caricano a portale.
         for (const d of documenti) {
@@ -365,15 +437,25 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
     try {
       const oggi = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
       const utente = await base44.auth.me().catch(() => null);
-      const nota = pratica.solo_metalli
+      // In fondo alla nota, sempre, la frase fissa con l'extra raccolta compresa
+      // nella quantita' (anche 0 kg): finche' DichiarazioneSito non ha un campo, e'
+      // quella che i confronti per canale leggono per non contare l'extra come
+      // rete (testoExtraCompresa, extraCompresaDaNota in src/lib/praticaIrigom.js).
+      const nota = `${pratica.solo_metalli
         ? `Segnata nel gestionale il ${dataIt(oggi)} dal registro ${registro.file_nome}: nel mese sono usciti solo metalli ferrosi (${formatKg(riga.uscite_ferro_kg)} kg) e nessuna gomma. A portale non si carica nulla: il ferro si dichiara con la prossima uscita di gomma.`
-        : `Preparata nel gestionale il ${dataIt(oggi)} dal registro ${registro.file_nome}: ${pratica.terziarie.righe.length} terziarie${terziarie.length ? ` (${terziarie[0]} - ${terziarie[terziarie.length - 1]})` : ''}, ${pratica.cssc.righe.length} dichiarazioni di CSS-C${nave.nome ? `, nave ${nave.nome}` : ''}; lettura dalla ${pratica.letture.usata === 'giacenza' ? 'giacenza a portale' : 'uscite del registro'}.`;
+        : `Preparata nel gestionale il ${dataIt(oggi)} dal registro ${registro.file_nome}: ${pratica.terziarie.righe.length} terziarie${terziarie.length ? ` (${terziarie[0]} - ${terziarie[terziarie.length - 1]})` : ''}, ${pratica.cssc.righe.length} dichiarazioni di CSS-C${nave.nome ? `, nave ${nave.nome}` : ''}; lettura dalla ${pratica.letture.usata === 'giacenza' ? 'giacenza a portale' : 'uscite del registro'}. ${testoPortale(pratica)}`} ${testoExtraCompresa(pratica.solo_metalli ? 0 : pratica.extra_kg)}`;
       // La dichiarazione di rete del mese: si aggiorna quella che c'e', con traccia di prima.
       const esistenti = await base44.entities.DichiarazioneSito.filter({ anno, mese });
       const suIrigom = (d) => normalizzaRagioneSociale(d.sito) === nsIrigom;
       const reteEsistente = esistenti.find(d => suIrigom(d) && (d.canale || 'RETE') === 'RETE' && !d.provenienza);
+      // La quantita' e' il totale caricato a portale, extra raccolta dell'ultima
+      // terziaria compresa, e cosi' i materiali (regola dell'utente del
+      // 22/09/2026): e' quello che il portale decurta dalla giacenza di rete e che
+      // il report delle dichiarazioni confronta, al chilo, per riconoscerla. La
+      // parte di extra e' scritta nella nota e dichiarata anche sul suo canale:
+      // gestita fuori portale, quella riga la chiude a mano l'utente.
       const campiRete = {
-        quantita_kg: pratica.rete_kg, cippato_kg: pratica.materiali.cippato_kg, metalli_kg: pratica.materiali.metalli_kg, cssc_kg: pratica.materiali.cssc_kg,
+        quantita_kg: pratica.portale_kg, cippato_kg: pratica.materiali_portale.cippato_kg, metalli_kg: pratica.materiali_portale.metalli_kg, cssc_kg: pratica.materiali_portale.cssc_kg,
         motivo_assenza: pratica.solo_metalli ? 'solo_metalli' : '',
         ricevuta_email: !pratica.solo_metalli, ricevuta_il: pratica.solo_metalli ? '' : ((reteEsistente && reteEsistente.ricevuta_il) || oggi),
         note: [reteEsistente && reteEsistente.note, reteEsistente && reteEsistente.quantita_kg ? `Prima: ${formatKg(reteEsistente.quantita_kg)} kg; aggiornata il ${dataIt(oggi)}${motivo ? ` perche' ${motivo}` : ''}.` : '', nota].filter(Boolean).join('\n'),
@@ -381,23 +463,25 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
       const rete = reteEsistente
         ? await base44.entities.DichiarazioneSito.update(reteEsistente.id, campiRete)
         : await base44.entities.DichiarazioneSito.create({ sito: irigom ? irigom.sito : 'Irigom S.r.l.', operazione: 'R1', canale: 'RETE', provenienza: '', anno, mese, ...campiRete });
-      // L'extra raccolta si scrive sul mese del formulario, canale a parte.
+      // L'extra raccolta si scrive sul mese del formulario, canale a parte, con
+      // l'anno del formulario: quella di dicembre partita con la nave di gennaio va
+      // su dicembre dell'anno prima. Ogni mese vale quello che ci hanno scritto le
+      // altre pratiche registrate piu' la parte di questa (dichiarazioniExtra): si
+      // scriveva la sola parte dell'ultima pratica e quella di prima spariva dal
+      // numero. Il ferro si divide in proporzione al peso. Il valore di prima resta
+      // nella nota.
       if (pratica.extra) {
-        const perMese = new Map();
-        for (const f of pratica.extra.formulari) {
-          const m = MESI[Number(String(f.fine_trasporto).slice(5, 7)) - 1];
-          perMese.set(m, (perMese.get(m) || 0) + f.peso_kg);
-        }
-        for (const [m, pfu] of perMese) {
-          const quota = pfu / pratica.extra.totale_kg;
-          const ferro = Math.round(pratica.extra.ferro_kg * quota);
-          const giaExtra = (await base44.entities.DichiarazioneSito.filter({ anno, mese: m })).find(d => suIrigom(d) && d.canale === 'EXTRA_RACCOLTA');
+        for (const x of dichiarazioniExtra(pratica.extra, praticheDueAnni, { anno, mese })) {
+          const giaExtra = (await base44.entities.DichiarazioneSito.filter({ anno: x.anno, mese: x.mese })).find(d => suIrigom(d) && d.canale === 'EXTRA_RACCOLTA');
+          const prima = giaExtra && Number(giaExtra.quantita_kg) && Number(giaExtra.quantita_kg) !== x.quantita_kg
+            ? `Prima: ${formatKg(giaExtra.quantita_kg)} kg; aggiornata il ${dataIt(oggi)}${motivo ? ` perche' ${motivo}` : ''}.` : '';
           const campiExtra = {
-            quantita_kg: pfu, cippato_kg: pfu - ferro, metalli_kg: ferro, ricevuta_email: true, ricevuta_il: (giaExtra && giaExtra.ricevuta_il) || oggi,
-            note: [giaExtra && giaExtra.note, `Dichiarata con la pratica di ${mese} ${anno}, terziaria ${pratica.extra.terziaria || '—'} (allegato VII ${pratica.extra.allegato}).`].filter(Boolean).join('\n'),
+            quantita_kg: x.quantita_kg, cippato_kg: x.cippato_kg, metalli_kg: x.metalli_kg, ricevuta_email: true, ricevuta_il: (giaExtra && giaExtra.ricevuta_il) || oggi,
+            note: [giaExtra && giaExtra.note, prima,
+              `Dichiarata con la pratica di ${mese} ${anno}, terziaria ${pratica.extra.terziaria || '—'} (allegato VII ${pratica.extra.allegato}): ${formatKg(x.questa_kg)} kg${x.altre_kg ? `, piu' ${formatKg(x.altre_kg)} kg dichiarati con altre pratiche` : ''}.`].filter(Boolean).join('\n'),
           };
           if (giaExtra) await base44.entities.DichiarazioneSito.update(giaExtra.id, campiExtra);
-          else await base44.entities.DichiarazioneSito.create({ sito: irigom ? irigom.sito : 'Irigom S.r.l.', operazione: 'R1', canale: 'EXTRA_RACCOLTA', provenienza: '', anno, mese: m, ...campiExtra });
+          else await base44.entities.DichiarazioneSito.create({ sito: irigom ? irigom.sito : 'Irigom S.r.l.', operazione: 'R1', canale: 'EXTRA_RACCOLTA', provenienza: '', anno: x.anno, mese: x.mese, ...campiExtra });
         }
       }
       if (precedente) await base44.entities.PraticaIrigom.update(precedente.id, { stato: 'sostituita', motivo_sostituzione: motivo.trim() });
@@ -473,9 +557,32 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
         </div>
         {mese && !registro && praticaDelMese && (
           <p className="text-xs text-muted-foreground">
-            {mese}: pratica {praticaDelMese.stato === 'registrata' ? 'registrata' : 'in preparazione'}, dichiarati di rete {t(praticaDelMese.rete_kg)} t
-            {praticaDelMese.extra_kg ? ` ed extra raccolta ${t(praticaDelMese.extra_kg)} t a parte` : ''}. Carica il registro per rifarla o scaricare di nuovo i documenti.
+            {mese}: pratica {praticaDelMese.stato === 'registrata' ? 'registrata' : 'in preparazione'}
+            {portaleSalvato(praticaDelMese) !== null
+              ? `, a portale ${t(portaleSalvato(praticaDelMese))} t${praticaDelMese.extra_kg ? `, di cui rete ${t(praticaDelMese.rete_kg)} t ed extra raccolta ${t(praticaDelMese.extra_kg)} t` : ', tutte di rete'}`
+              : `, dichiarati di rete ${t(praticaDelMese.rete_kg)} t${praticaDelMese.extra_kg ? ` ed extra raccolta ${t(praticaDelMese.extra_kg)} t a parte` : ''}`}
+            . Carica il registro per rifarla o scaricare di nuovo i documenti.
           </p>
+        )}
+        {/* Sempre, appena gli archivi sono letti: un terminato senza fine trasporto
+            si segnala comunque (regola del 22/09/2026), col registro o senza. */}
+        {extraSenzaFine.length > 0 && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-xs space-y-0.5">
+            <p className="font-medium flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              {extraSenzaFine.length === 1
+                ? 'Un\'extra raccolta terminata per Irigom non ha la fine del trasporto: senza non si colloca in nessun mese, quindi non si propone in nessuna pratica e non entra nei conti.'
+                : `${extraSenzaFine.length} extra raccolte terminate per Irigom non hanno la fine del trasporto: senza non si collocano in nessun mese, quindi non si propongono in nessuna pratica e non entrano nei conti.`}
+              {' '}Le date di immissione, inizio e fine trasporto sono obbligatorie: vanno sistemate nel formulario.
+            </p>
+            {extraSenzaFine.map(r => (
+              <p key={r.id} className="flex flex-wrap gap-x-2 pl-5">
+                <span className="font-mono">{r.numero_fir || r.id_ordine || '—'}</span>
+                <span>{r.produttore || r.ragione_sociale || ''}</span>
+                <span className="tabular-nums">{formatKg(r.peso_effettivo)} kg</span>
+                <span>{testoDate(r)}</span>
+              </p>
+            ))}
+          </div>
         )}
       </Passo>
 
@@ -487,20 +594,23 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
             {!pratica.vuoto && (
               <>
                 <div className="flex gap-2 flex-wrap">
+                  {/* Le due letture danno il totale da caricare a portale, extra raccolta
+                      partita con la nave compresa (regola del 22/09/2026). */}
                   <button type="button" className="text-left" onClick={() => setLettura('uscite')}>
-                    <Riquadro titolo="Uscite del registro" valore={`${t(pratica.letture.uscite.rete_kg)} t`} tono={pratica.letture.usata === 'uscite' ? 'scelto' : ''}
-                      nota={`ciabattato ${t(riga.uscite_cippato_kg)} + ferro ${t(riga.uscite_ferro_kg)} + CSS-C ${t(riga.uscite_cssc_kg)}${extra ? `, extra a parte` : ''}`} />
+                    <Riquadro titolo="Uscite del registro" valore={`${t(pratica.letture.uscite.totale_kg)} t`} tono={pratica.letture.usata === 'uscite' ? 'scelto' : ''}
+                      nota={`ciabattato ${t(riga.uscite_cippato_kg)} + ferro ${t(riga.uscite_ferro_kg)} + CSS-C ${t(riga.uscite_cssc_kg)}${pratica.letture.uscite.extra_kg ? `, extra raccolta compresa` : ''}`} />
                   </button>
                   <button type="button" className="text-left" disabled={!pratica.letture.giacenza} onClick={() => setLettura('giacenza')}>
                     <Riquadro titolo="Giacenza a portale a fine mese" tono={pratica.letture.usata === 'giacenza' ? 'scelto' : ''}
-                      valore={pratica.letture.giacenza ? `${t(pratica.letture.giacenza.rete_kg)} t` : 'non disponibile'}
-                      nota={pratica.letture.giacenza ? `${t(pratica.letture.giacenza.portale_kg)} a portale meno ${t(pratica.letture.giacenza.resta_kg)} che devono restare (gomma AD + ferro AE del registro)${pratica.letture.giacenza.extra_in_giacenza_kg ? ` (tolti ${t(pratica.letture.giacenza.extra_in_giacenza_kg)} di extra raccolta ancora in impianto)` : ''}` : 'serve il file degli ordini non dichiarati'} />
+                      valore={pratica.letture.giacenza ? `${t(pratica.letture.giacenza.totale_kg)} t` : 'non disponibile'}
+                      nota={pratica.letture.giacenza ? `${t(pratica.letture.giacenza.portale_fine_mese_kg)} a portale meno ${t(pratica.letture.giacenza.resta_kg)} che devono restare (gomma AD + ferro AE del registro)${pratica.letture.giacenza.extra_in_giacenza_kg ? ` (tolti ${t(pratica.letture.giacenza.extra_in_giacenza_kg)} di extra raccolta ancora in impianto)` : ''}` : 'serve il file degli ordini non dichiarati'} />
                   </button>
                   {pratica.letture.scarto_kg !== null && (
                     <Riquadro titolo="Scarto fra le due letture" valore={`${pratica.letture.scarto_kg > 0 ? '+' : ''}${formatKg(pratica.letture.scarto_kg)} kg`}
                       tono={Math.abs(pratica.letture.scarto_kg) > 500 ? 'attenzione' : ''} nota="va capito prima di caricare" />
                   )}
-                  <Riquadro titolo="Da dichiarare, rete" valore={`${t(pratica.rete_kg)} t`} tono="scelto" nota={`${formatKg(pratica.rete_kg)} kg`} />
+                  <Riquadro titolo="Da dichiarare a portale" valore={`${t(pratica.portale_kg)} t`} tono="scelto"
+                    nota={conExtra(pratica) ? `${formatKg(pratica.portale_kg)} kg, ${diCuiExtra(pratica)}` : `${formatKg(pratica.portale_kg)} kg, tutti di rete`} />
                 </div>
                 {portaleFineMese && (
                   <p className="text-xs text-muted-foreground">
@@ -546,28 +656,34 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                         </p>
                       </div>
                     )}
+                    {/* Qui solo le proposte: i terminati senza fine trasporto stanno nel passo 1. */}
                     {extraCandidati.length > 0 && (
                       <div className="border rounded-lg px-3 py-2 text-xs space-y-1.5">
                         <p className="font-semibold">Extra raccolta arrivata a Irigom e non ancora dichiarata</p>
                         {extraCandidati.map(r => (
-                          <label key={r.id} className="flex items-center gap-2">
-                            <input type="checkbox" checked={sceltiExtra.has(r.id)} onChange={e => {
-                              const s = new Set(sceltiExtra);
-                              if (e.target.checked) s.add(r.id); else s.delete(r.id);
-                              setExtraScelti(s);
-                            }} />
-                            <span className="font-mono">{r.numero_fir || '—'}</span>
-                            <span>{dataIt(giornoRoma(r.trasporto_finito_il))}</span>
-                            <span>{r.produttore || r.ragione_sociale}</span>
-                            {dichiarataAMano(r) && <span className="text-muted-foreground">già dichiarata nel suo mese</span>}
-                            <span className="tabular-nums ml-auto">{formatKg(r.peso_effettivo)} kg</span>
-                          </label>
+                          <div key={r.id}>
+                            <label className="flex items-center gap-2">
+                              <input type="checkbox" checked={sceltiExtra.has(r.id)} onChange={e => {
+                                const s = new Set(sceltiExtra);
+                                if (e.target.checked) s.add(r.id); else s.delete(r.id);
+                                setExtraScelti(s);
+                              }} />
+                              <span className="font-mono">{r.numero_fir || '—'}</span>
+                              <span>{dataIt(giornoMovimento(r))}</span>
+                              <span>{r.produttore || r.ragione_sociale}</span>
+                              {dichiarataAMano(r) && <span className="text-muted-foreground">già dichiarata nel suo mese</span>}
+                              <span className="tabular-nums ml-auto">{formatKg(r.peso_effettivo)} kg</span>
+                            </label>
+                            {dateDaSistemare(r) && (
+                              <p className="ml-6 text-amber-800 flex items-center gap-1"><AlertTriangle className="w-3 h-3 shrink-0" />Date del formulario da sistemare: {testoDate(r)}.</p>
+                            )}
+                          </div>
                         ))}
                         {extra && (
                           <p className="flex items-center gap-2 flex-wrap pt-1">
                             Ferro sul totale:
                             <input value={quotaFerroExtra} onChange={e => setQuotaFerroExtra(e.target.value)} className="w-14 border rounded px-1.5 py-0.5 text-right tabular-nums" />%
-                            <span className="text-muted-foreground">= {formatKg(extra.cippato_kg)} kg di ciabattato e {formatKg(extra.ferro_kg)} di ferro, sull&apos;ultima terziaria e in una tabella a parte. La ripartizione la dà l&apos;impianto: correggila se ti ha dato numeri diversi.</span>
+                            <span className="text-muted-foreground">= {formatKg(extra.cippato_kg)} kg di ciabattato e {formatKg(extra.ferro_kg)} di ferro. Partono con la nave nell&apos;ultima terziaria, che a portale si chiude col peso intero; nei documenti e nel riepilogo restano in una riga a parte. La ripartizione la dà l&apos;impianto: correggila se ti ha dato numeri diversi.</span>
                           </p>
                         )}
                       </div>
@@ -649,6 +765,9 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                       </tr>
                     </thead>
                     <tbody>
+                      {/* Ciabattato e ferro sono la parte di rete, come nei documenti; la
+                          colonna di chiusura e' il peso con cui si chiude a portale, che per
+                          l'ultima comprende l'extra raccolta (regola del 22/09/2026). */}
                       {pratica.terziarie.righe.map((r, i) => (
                         <tr key={i} className="border-t">
                           <td className="px-2 py-1 font-mono">{r.terziaria || <span className="text-muted-foreground">da indicare</span>}</td>
@@ -656,7 +775,10 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                           <td className="px-2 py-1 tabular-nums">{formatKg(r.peso_allegato_kg)}</td>
                           <td className="px-2 py-1 tabular-nums">{formatKg(r.cippato_kg)}</td>
                           <td className="px-2 py-1 tabular-nums">{formatKg(r.ferro_kg)}</td>
-                          <td className="px-2 py-1 tabular-nums font-semibold">{formatKg(r.totale_kg)} kg</td>
+                          <td className="px-2 py-1 tabular-nums">
+                            <span className="font-semibold">{formatKg(r.chiusura_portale_kg)} kg</span>
+                            {r.extra_kg > 0 && <span className="block text-[11px] text-amber-800">{formatKg(r.totale_kg)} di rete + {formatKg(r.extra_kg)} di extra raccolta</span>}
+                          </td>
                           <td className="px-2 py-1 tabular-nums text-muted-foreground">{formatKg(r.residuo_kg)}</td>
                         </tr>
                       ))}
@@ -664,14 +786,23 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                         <tr className="border-t bg-amber-50/60">
                           <td className="px-2 py-1 font-mono">{pratica.extra.terziaria || '—'}</td>
                           <td className="px-2 py-1 tabular-nums">{pratica.extra.allegato}</td>
-                          <td className="px-2 py-1" colSpan={1}>extra raccolta</td>
+                          <td className="px-2 py-1">extra raccolta</td>
                           <td className="px-2 py-1 tabular-nums">{formatKg(pratica.extra.cippato_kg)}</td>
                           <td className="px-2 py-1 tabular-nums">{formatKg(pratica.extra.ferro_kg)}</td>
-                          <td className="px-2 py-1 tabular-nums">{formatKg(pratica.extra.totale_kg)} kg, a parte</td>
-                          <td />
+                          <td className="px-2 py-1" colSpan={2}>
+                            <span className="tabular-nums">{formatKg(pratica.extra.totale_kg)} kg</span> di extra raccolta, compresi nella chiusura
+                            {pratica.extra.terziaria ? ` della terziaria ${pratica.extra.terziaria}` : ' di questa terziaria'} ({formatKg(pratica.extra.chiusura_terziaria_kg)} kg); dichiarati a parte, sul canale extra raccolta
+                          </td>
                         </tr>
                       )}
                     </tbody>
+                    <tfoot>
+                      <tr className="border-t bg-muted/30 font-semibold">
+                        <td className="px-2 py-1" colSpan={5}>Terziarie a portale</td>
+                        <td className="px-2 py-1 tabular-nums">{formatKg(pratica.terziarie.chiusura_portale_kg)} kg</td>
+                        <td />
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               )}
@@ -682,10 +813,25 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                 </p>
               )}
               <div className="flex flex-wrap gap-2 text-sm">
-                <Riquadro titolo="Rete" valore={`${formatKg(pratica.rete_kg)} kg`} nota="CSS-C + terziarie: va nella riga IRIGOM" tono="scelto" />
-                {pratica.extra_kg > 0 && <Riquadro titolo="Extra raccolta" valore={`${formatKg(pratica.extra_kg)} kg`} nota="a parte, riga EXTRA RACCOLTA" />}
+                <Riquadro titolo="Totale a portale" valore={`${formatKg(pratica.portale_kg)} kg`} tono="scelto"
+                  nota={conExtra(pratica) ? `CSS-C + terziarie, ${diCuiExtra(pratica)}` : 'CSS-C + terziarie, tutti di rete'} />
+                {conExtra(pratica) && (
+                  <>
+                    <Riquadro titolo="di cui rete" valore={`${formatKg(pratica.rete_kg)} kg`} nota="CSS-C + terziarie senza l'extra: riga IRIGOM del riepilogo" />
+                    <Riquadro titolo="di cui extra raccolta" valore={`${formatKg(pratica.extra_kg)} kg`} nota="a parte: riga EXTRA RACCOLTA, sul mese del formulario" />
+                  </>
+                )}
               </div>
+              {!pratica.solo_metalli && pratica.portale_kg > 0 && (
+                <p className="text-xs text-muted-foreground max-w-4xl">
+                  Registrando, la dichiarazione di rete di Irigom di {mese} si scrive con {formatKg(pratica.portale_kg)} kg, quelli che carichi a portale: il report
+                  delle dichiarazioni la riconosce da questo peso.
+                  {conExtra(pratica) && ` Nella nota resta scritto che ${formatKg(pratica.extra_kg)} kg sono extra raccolta ${quale(pratica.chiusura_ultima_terziaria)}, e in fondo ${testoExtraCompresa(pratica.extra_kg)}, perche' i confronti per canale non li contino come rete; l'extra raccolta si scrive anche a parte, sul suo canale e sul mese del formulario, e quella riga la chiudi tu: a portale non si distingue.`}
+                </p>
+              )}
               {mancaNave && <Avviso testo="Mancano i dati della nave: la dichiarazione del ciabattato li usa." />}
+              {/* Le date obbligatorie dei formulari dell'extra, anche qui accanto ai documenti (regola del 22/09/2026). */}
+              {pratica.extra && (pratica.extra.avvisi_date || []).map((a, i) => <Avviso key={`date-${i}`} testo={a} />)}
               {mancanoTer && <Avviso testo={`Servono ${pratica.terziarie.righe.length} numeri di terziaria: senza, nei documenti la colonna resta vuota.`} />}
               <div className="flex flex-wrap gap-2">
                 <Button disabled={bloccata || !!lavoro} onClick={() => scaricaCartella(false)}>
@@ -696,7 +842,7 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                 </Button>
                 {isAdmin && (
                   <Button variant="outline" disabled={bloccata || !!lavoro || mancanoTer} onClick={registra}
-                    title="Scrive la dichiarazione del mese nel gestionale, come dichiarazione in mano: diventa caricata quando il report del portale la riconosce">
+                    title={`Scrive la dichiarazione del mese nel gestionale col totale a portale, ${formatKg(pratica.portale_kg)} kg, come dichiarazione in mano: diventa caricata quando il report del portale la riconosce`}>
                     {lavoro === 'registra' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-2" />} {pratica.solo_metalli ? `Segna ${mese}: solo metalli ferrosi` : `Registra la dichiarazione di ${mese}`}
                   </Button>
                 )}

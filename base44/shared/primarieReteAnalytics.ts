@@ -2,8 +2,8 @@
 // 1. Matrice mensile FIR per Regione/Provincia con detection 2 mesi consecutivi a zero
 // 2. Mix classi PFU per Raccoglitore con confronto target consorziali
 
-import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
-import { eTerminato, periodoMovimento, tempiRaccolta } from "./movimenti.ts";
+import { PROV_TO_REGION, MESI, riepilogoDate, riepilogoDateVista } from "./raccoltoCalculator.ts";
+import { eTerminato, periodoMovimento, tempiRaccolta, dateIncoerenti } from "./movimenti.ts";
 import { oggiRoma, annoRoma } from "./giornoItaliano.ts";
 
 export const TARGET_MIX_CLASSI: Record<string, number> = {
@@ -23,6 +23,8 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
   const currYear = Number(oggi.slice(0, 4));
 
   const byProvince: Record<string, any> = {};
+  // i ritiri contati nella matrice, per le date da sistemare (in fondo)
+  const contati = [];
 
   for (const r of records) {
     const provincia = (r.provincia || '').toUpperCase().trim();
@@ -46,6 +48,7 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
     byProvince[provincia].totale += 1;
     if (hasFir) byProvince[provincia].fir_total += 1;
     byProvince[provincia].mesi[mese] += 1;
+    contati.push(r);
   }
 
   const provinceArray = Object.values(byProvince).map((p: any) => {
@@ -98,6 +101,10 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
     province_with_zeros: provinceWithZeros,
     current_month: MESI[currMonth],
     current_year: currYear,
+    // Le date da sistemare della rete (regola dell'utente, 22/09/2026): i
+    // terminati senza fine trasporto, di qualunque anno e fuori da ogni mese, e i
+    // ritiri contati qui con un'altra data che manca o non torna.
+    date_da_sistemare: riepilogoDateVista(records, contati),
   };
 }
 
@@ -115,6 +122,15 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
 
   // Default: anno in corso se nessun filtro anno specificato
   const effectiveAnni = fAnno.length > 0 ? fAnno : [Number(oggiRoma().slice(0, 4))];
+
+  // Regione e stato valgono anche per le date da sistemare: i terminati senza
+  // fine trasporto non hanno anno ne' mese, e nessun filtro di periodo li prende.
+  const passaNonPeriodo = (r: any) => {
+    const regione = r.regione || PROV_TO_REGION[(r.provincia || '').toUpperCase().trim()] || 'Altro';
+    if (fRegione.length > 0 && !fRegione.includes(regione)) return false;
+    if (fStato.length > 0 && !fStato.includes((r.stato || '').trim())) return false;
+    return true;
+  };
 
   const filtered = records.filter((r: any) => {
     const regione = r.regione || PROV_TO_REGION[(r.provincia || '').toUpperCase().trim()] || 'Altro';
@@ -208,6 +224,8 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
     target_mix: TARGET_MIX_CLASSI,
     target_totale: targetTotale,
     raccoglitori_con_deviazione: raccoglitoriArray.filter(r => r.has_deviazione),
+    // le date da sistemare della rete, con gli stessi filtri (22/09/2026)
+    date_da_sistemare: riepilogoDateVista(records.filter(passaNonPeriodo), filtered),
   };
 }
 
@@ -225,8 +243,13 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
 //
 // Un terminato senza fine trasporto (o senza immissione) non si misura: si conta
 // a parte e si segnala, e l'anno per contarlo e' quello dell'immissione. Lo
-// stesso per una fine trasporto anteriore all'immissione: e' un dato sporco, e
-// misurato darebbe giorni negativi e un "nei tempi" che abbassa la media.
+// stesso con le date incoerenti (dateIncoerenti in movimenti.ts): una fine
+// trasporto anteriore all'immissione darebbe giorni negativi e un "nei tempi"
+// che abbassa la media; un inizio prima dell'immissione o una fine prima
+// dell'inizio dicono che una delle date e' sbagliata, e non si sa quale (regola
+// dell'utente, 22/09/2026: le date di un formulario terminato sono obbligatorie
+// e vanno segnalate). Un ordine misurato a cui manca solo l'inizio del trasporto
+// resta nei tempi, che non lo usano, ma si conta in date_da_sistemare.
 export function computeSlaMetrics(records, anno = null) {
   const byTrasportatore: Record<string, any> = {};
   const annoNum = Number(anno) || Number(oggiRoma().slice(0, 4));
@@ -235,18 +258,21 @@ export function computeSlaMetrics(records, anno = null) {
     nonMisurati[perche] += 1;
     if (nonMisurati.esempi.length < 5 && r.id_ordine) nonMisurati.esempi.push(String(r.id_ordine));
   };
+  // i terminati dell'anno della scheda, misurati o no, per le date da sistemare
+  const dellAnno = [];
 
   for (const r of records) {
     if (!eTerminato(r)) continue;
     const periodo = periodoMovimento(r);
     if (!periodo) {
-      if (annoRoma(r.ordine_immesso_il) === annoNum) segnala(r, 'senza_fine_trasporto');
+      if (annoRoma(r.ordine_immesso_il) === annoNum) { segnala(r, 'senza_fine_trasporto'); dellAnno.push(r); }
       continue;
     }
     if (periodo.anno !== annoNum) continue;
+    dellAnno.push(r);
     const tempi = tempiRaccolta(r);
     if (!tempi) { segnala(r, 'senza_immissione'); continue; }
-    if (tempi.incoerente || tempi.giorni == null) { segnala(r, 'date_incoerenti'); continue; }
+    if (tempi.incoerente || tempi.giorni == null || dateIncoerenti(r).length > 0) { segnala(r, 'date_incoerenti'); continue; }
     const trasportatore = (r.trasportatore || 'N/D').trim();
 
     if (!byTrasportatore[trasportatore]) {
@@ -304,5 +330,7 @@ export function computeSlaMetrics(records, anno = null) {
     // contato, non ricavato come 100 - nei tempi
     pct_dopo_scadenza_globale: totale_ordini > 0 ? (totale_dopo_scadenza / totale_ordini) * 100 : 0,
     non_misurati: nonMisurati,
+    // tutte le date da sistemare dell'anno, anche degli ordini misurati
+    date_da_sistemare: riepilogoDate(dellAnno),
   };
 }

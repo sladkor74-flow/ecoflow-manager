@@ -73,8 +73,8 @@ function descriviPerCanale(canali) {
   return parti.join(', ');
 }
 
-/** "Secondarie ACI", "Primarie di extra raccolta": un gruppo di terminati senza fine trasporto, col suo canale. */
-function nomeGruppoSenzaFine(g) {
+/** "Secondarie ACI", "Primarie di extra raccolta": un gruppo di terminati con le date da sistemare, col suo canale. */
+function nomeGruppoDate(g) {
   const tipo = /secondaria/i.test(g.fonte) ? 'Secondarie' : 'Primarie';
   if (g.canale === 'extra') return `${tipo} di extra raccolta`;
   return `${tipo} ${g.canale === 'aci' ? 'ACI' : 'di rete'}`;
@@ -133,6 +133,12 @@ function Esito({ riga }) {
         {(v.non_trovate || 0) > 0 && (
           <span title="Formulari del report che il gestionale non conosce: non hanno canale" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-800 text-xs font-medium">
             <AlertTriangle className="w-3 h-3" />{v.non_trovate} non registrati
+          </span>
+        )}
+        {/* Gia' contati fra le anomalie del loro canale: qui si dice perche'. */}
+        {(v.date_da_sistemare || 0) > 0 && (
+          <span title="Formulari registrati senza una data obbligatoria (immissione, inizio o fine trasporto) o con date incoerenti: la data va inserita o corretta" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-800 text-xs">
+            <AlertTriangle className="w-3 h-3" />{v.date_da_sistemare} senza date obbligatorie
           </span>
         )}
       </span>
@@ -413,7 +419,8 @@ export default function ReportSettimanali({ isAdmin }) {
           Il report deve riportare tutte le movimentazioni: ingressi in primaria e ingressi e uscite in secondaria, di rete, ACI ed extra raccolta.
           Se l'impianto comunica che non ce ne sono state, registralo con l'icona della busta: la comunicazione viene verificata e, se i dati la smentiscono, si apre un alert.
           Carica il report inviato da ciascun impianto o stoccaggio: Excel, CSV, PDF o immagine. Gli ingressi si confrontano con le primarie,
-          le uscite con le secondarie; il peso al chilogrammo, la data su quella di fine trasporto. Nella verifica restano solo i dati letti
+          le uscite con le secondarie; il peso al chilogrammo, la data su quella di fine trasporto. Immissione, inizio e fine trasporto sono
+          obbligatorie: un formulario registrato a cui ne manca una, o con le date incoerenti, è un&apos;anomalia del suo canale. Nella verifica restano solo i dati letti
           e l'esito, che si cancellano da soli {GIORNI_CONSERVAZIONE} giorni dopo il caricamento: un Excel si legge qui nel browser senza
           caricare niente, un PDF o un'immagine vengono caricati nell'archivio privato perché l'agente li possa leggere.
           Il confronto si rifà da solo sui movimenti di adesso dopo ogni caricamento di primarie e secondarie e a ogni apertura della settimana.
@@ -431,21 +438,26 @@ export default function ReportSettimanali({ isAdmin }) {
         </div>
       )}
 
-      {dati && dati.senza_fine && dati.senza_fine.length > 0 && (
-        <div className="flex items-start gap-2 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
+      {/* Immissione, inizio e fine trasporto sono obbligatorie nei formulari
+          (regola dell'utente del 22/09/2026): i terminati a cui ne manca una, o
+          con date incoerenti, si dicono qui per canale e archivio, di qualunque
+          anno. Nel report di un impianto la loro riga e' un'anomalia del canale. */}
+      {dati && dati.date_da_sistemare && dati.date_da_sistemare.length > 0 && (
+        <div className="flex items-start gap-2 border border-red-300 bg-red-50 text-red-900 rounded-lg px-4 py-3 text-sm">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
           <div className="space-y-1">
             <div>
-              Movimenti terminati senza data di fine trasporto: non stanno in nessuna settimana, quindi non sono né fra gli ingressi e le uscite
-              né nelle verifiche. Se un loro formulario compare nel report di un impianto, la riga risulta una rettifica a nostra cura,
-              senza anomalia per l&apos;impianto e fuori dalla quadratura. La data si corregge sul portale e si sistema con un nuovo caricamento del file che la riporti.
+              Ordini terminati senza una data obbligatoria (immissione, inizio o fine trasporto) o con date incoerenti: le date vanno inserite o corrette.
+              Se un loro formulario compare nel report di un impianto, la riga è un&apos;anomalia del suo canale. Chi non ha la fine trasporto non sta
+              in nessuna settimana, quindi non è né fra gli ingressi e le uscite né nella quadratura. La data si sistema con un nuovo caricamento del file che la riporti,
+              o nella scheda per l&apos;extra raccolta.
             </div>
             <ul className="list-disc pl-5 text-xs">
-              {dati.senza_fine.map(g => (
+              {dati.date_da_sistemare.map(g => (
                 <li key={g.canale + g.fonte}>
-                  <strong>{nomeGruppoSenzaFine(g)}</strong>: {g.n} {g.n === 1 ? 'movimento' : 'movimenti'} ·{' '}
-                  {g.esempi.map(x => `${x.fir || 'senza formulario'}${x.ordine ? ` (ordine ${x.ordine})` : ''}`).join(', ')}
-                  {g.n > g.esempi.length ? `, e altri ${g.n - g.esempi.length}` : ''}
+                  <strong>{nomeGruppoDate(g)}</strong>: {g.n} {g.n === 1 ? 'ordine' : 'ordini'}{g.senza_fine ? `, di cui ${g.senza_fine} senza fine trasporto` : ''} ·{' '}
+                  {g.esempi.map(x => `${x.ordine || 'senza ID'}${x.fir ? ` (FIR ${x.fir})` : ' (senza formulario)'}: ${x.date}`).join('; ')}
+                  {g.n > g.esempi.length ? `; e altri ${g.n - g.esempi.length}` : ''}
                 </li>
               ))}
             </ul>

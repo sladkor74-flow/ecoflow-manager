@@ -5,8 +5,12 @@
 // soltanto che i documenti richiesti ci siano, siano quelli giusti e siano validi.
 //
 // I soggetti di un anno si ricavano dalle movimentazioni di PFU di quello stesso
-// anno, ordini terminati con trasporto concluso nell'anno. Dalle movimentazioni
-// viene anche il ruolo, che serve solo a stabilire quali documenti chiedere:
+// anno, ordini terminati con trasporto concluso nell'anno. Chi nell'anno compare
+// solo in terminati senza fine trasporto resta fuori (o resta fuori quel suo
+// ruolo), ma si dice a parte (soggetti_da_date, 22/09/2026): la data e'
+// obbligatoria e va scritta. Dalle
+// movimentazioni viene anche il ruolo, che serve solo a stabilire quali
+// documenti chiedere:
 //   raccolta              trasportatore delle primarie rete, ACI ed extra raccolta
 //   trattamento           destinazione "Imp" delle primarie, destinazione delle
 //                         secondarie
@@ -28,6 +32,7 @@ import { fetchAll } from "./fetchAll.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { problemaTipoSbagliato } from "./tipiDocumento.ts";
 import { annoRoma } from "./giornoItaliano.ts";
+import { eTerminato, giornoMovimento, annoOrdine, testoDate, canaleMovimento } from "./movimenti.ts";
 
 export const RUOLI = ['raccolta', 'trasporto_secondaria', 'trattamento', 'stoccaggio', 'cliente'];
 
@@ -136,10 +141,27 @@ function nelAnno(r, anno) {
   return annoRoma(r.trasporto_finito_il) === anno;
 }
 
+// Un terminato senza fine trasporto non ha un anno (regola 1) e non fa entrare
+// nessuno fra i soggetti. Ma le date del formulario sono obbligatorie (regola
+// dell'utente del 22/09/2026) e chi compare solo in ordini cosi' non deve
+// sparire in silenzio: si guarda l'anno dell'immissione, o dell'inizio trasporto
+// se manca anche quella.
+function senzaFineNelAnno(r, anno) {
+  if (!eTerminato(r) || giornoMovimento(r)) return false;
+  return (annoOrdine(r) ?? annoRoma(r.trasporto_iniziato_il)) === anno;
+}
+
+// Quanti ordini si scrivono per ogni soggetto da verificare: gli altri si contano.
+const ORDINI_DA_DATE = 20;
+
 /**
  * Individua i soggetti da qualificare per l'anno.
- * Restituisce { soggetti, esclusi }: gli esclusi manualmente restano visibili
- * cosi' da poterli reincludere.
+ * Restituisce { soggetti, esclusi, soggetti_da_date }: gli esclusi manualmente
+ * restano visibili cosi' da poterli reincludere. soggetti_da_date sono quelli
+ * che nell'anno compaiono solo in ordini terminati senza fine trasporto, o che
+ * solo da quelli hanno un ruolo: { chiave, nome, ruolo, movimento, canale,
+ * gia_fra_i_soggetti, quanti, ordini: ['ID (FIR ...): date che mancano'] }, uno
+ * per ruolo, movimento e canale, mai sommati.
  */
 export async function individuaSoggetti(base44, anno) {
   const annoNum = Number(anno);
@@ -213,6 +235,50 @@ export async function individuaSoggetti(base44, anno) {
     }
   }
 
+  // Chi resta fuori perche' ha solo terminati senza fine trasporto: con gli
+  // stessi ruoli dei movimenti dell'anno, ma a parte. Anche un soggetto gia'
+  // presente, se quel ruolo - e quindi i suoi documenti - gli viene solo da
+  // ordini cosi'. Un ruolo che ha gia', o chi e' stato escluso a mano, non si
+  // ripete.
+  const escluse = new Set(esclusi.map(e => e.chiave));
+  const daDate = new Map();
+  const annota = (nome, ruolo, movimento, canale, r) => {
+    const n = pulisci(nome);
+    if (!n) return;
+    const k = normalizzaRagioneSociale(n);
+    if (!k || interni.has(k) || escluse.has(k) || (mappa.has(k) && mappa.get(k).ruoli.has(ruolo))) return;
+    const gruppo = `${k}|${ruolo}|${movimento}|${canale}`;
+    if (!daDate.has(gruppo)) daDate.set(gruppo, { chiave: k, nomi: new Map(), ruolo, movimento, canale, voci: new Set() });
+    const g = daDate.get(gruppo);
+    g.nomi.set(n, (g.nomi.get(n) || 0) + 1);
+    const id = pulisci(r.id_ordine) || 'senza ID';
+    g.voci.add(`${id}${r.numero_fir ? ` (FIR ${pulisci(r.numero_fir)})` : ''}: ${testoDate(r)}`);
+  };
+  for (const [archivio, righe] of [['PrimariaRete', rete], ['PrimariaAci', aci], ['ExtraRaccolta', extra]]) {
+    for (const r of righe) {
+      if (!senzaFineNelAnno(r, annoNum)) continue;
+      const td = String(r.tipo_destinazione || '').toLowerCase().trim();
+      const canale = canaleMovimento(r, archivio);
+      annota(r.trasportatore, 'raccolta', 'primarie', canale, r);
+      annota(r.destinazione, td === 'stoc' ? 'stoccaggio' : 'trattamento', 'primarie', canale, r);
+      annota(r.key_account, 'cliente', 'primarie', canale, r);
+    }
+  }
+  for (const r of sec) {
+    if (!senzaFineNelAnno(r, annoNum)) continue;
+    const canale = canaleMovimento(r, 'Secondaria');
+    annota(r.stoccaggio, 'stoccaggio', 'secondarie', canale, r);
+    annota(r.trasportatore, 'trasporto_secondaria', 'secondarie', canale, r);
+    annota(r.destinazione, 'trattamento', 'secondarie', canale, r);
+  }
+  const soggetti_da_date = [...daDate.values()].map(g => {
+    const voci = [...g.voci].sort();
+    return {
+      chiave: g.chiave, nome: nomePreferito(mappa.get(g.chiave) || g, anagrafica.get(g.chiave)), ruolo: g.ruolo, movimento: g.movimento, canale: g.canale,
+      gia_fra_i_soggetti: mappa.has(g.chiave), quanti: voci.length, ordini: voci.slice(0, ORDINI_DA_DATE),
+    };
+  }).sort((a, b) => a.nome.localeCompare(b.nome, 'it') || RUOLI.indexOf(a.ruolo) - RUOLI.indexOf(b.ruolo) || a.movimento.localeCompare(b.movimento) || a.canale.localeCompare(b.canale));
+
   const soggetti = [...mappa.values()].map(s => {
     const f = anagrafica.get(s.chiave);
     return {
@@ -229,7 +295,7 @@ export async function individuaSoggetti(base44, anno) {
     };
   }).sort((a, b) => a.nome.localeCompare(b.nome, 'it'));
 
-  return { soggetti, esclusi };
+  return { soggetti, esclusi, soggetti_da_date };
 }
 
 // In anagrafica il nome e' curato a mano e ha la precedenza; altrimenti si usa

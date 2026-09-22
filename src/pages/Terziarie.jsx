@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { eTerminato, giornoMovimento, giornoElenco, annoElenco, meseElenco } from '@/lib/movimenti';
+import { eTerminato, giornoMovimento, giornoElenco, annoElenco, meseElenco, dateDaSistemare, testoDate } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileSpreadsheet, Filter, X } from 'lucide-react';
 import TerziarieKpi from '@/components/terziarie/TerziarieKpi';
@@ -9,6 +9,7 @@ import { getRegioneFromProvincia } from '@/lib/regioneMap';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { formatIntero } from '@/lib/utils';
+import AvvisoDateDaSistemare from '@/components/primarie-rete/DateDaSistemare';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const MATERIALI = ['PFU SFUSO', 'CIAB/CIPP', 'FERRO'];
@@ -20,6 +21,13 @@ const MATERIALI = ['PFU SFUSO', 'CIAB/CIPP', 'FERRO'];
 // un'importazione vecchia fatta sulla chiusura, gli faceva da ripiego. Resta
 // fuori dai filtri di periodo, dagli indicatori e dalle uscite per impianto, e
 // si conta nell'avviso sotto i filtri.
+//
+// Immissione, inizio e fine trasporto sono obbligatorie in ogni formulario
+// terminato (regola dell'utente, 22/09/2026): l'avviso conta ogni terminato con
+// una data che manca o non torna, non solo i senza fine trasporto, e li elenca;
+// il filtro "Solo date da sistemare" li mostra, anche quelli senza periodo con un
+// mese scelto, e vale anche per l'Excel (exportTerziarie). Ogni riga porta il
+// dettaglio in date_da_sistemare, per il segno nella tabella.
 const SENZA_FINE = 'MANCA FINE TRASPORTO';
 const senzaFineTrasporto = (r) => eTerminato(r) && !giornoMovimento(r);
 function getMateriale(r) {
@@ -32,11 +40,12 @@ export default function Terziarie() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
-  const [filters, setFilters] = useState({ impianto: [], destinazione: [], mese: [], trasportatore: [], materiale: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
+  const [filters, setFilters] = useState({ impianto: [], destinazione: [], mese: [], trasportatore: [], materiale: [], anno: [], provincia: [], regione: [], stato: [], data: '', date_da_sistemare: false });
   const [filterOptions, setFilterOptions] = useState({ impianti: [], destinazioni: [], trasportatori: [], anni: [], province: [], regioni: [], stati: [] });
   const [searchIdOrdine, setSearchIdOrdine] = useState('');
-  // i terminati senza fine trasporto che rispondono ai filtri che non sono di periodo
-  const [senzaFine, setSenzaFine] = useState([]);
+  // Per le date da sistemare: i trasporti dell'elenco e i terminati senza fine
+  // trasporto che rispondono ai filtri che non sono di periodo.
+  const [perDate, setPerDate] = useState([]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -64,6 +73,7 @@ export default function Terziarie() {
         if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
         if (filters.trasportatore.length > 0 && !filters.trasportatore.includes((r.trasportatore || '').trim())) return false;
         if (filters.materiale.length > 0 && !filters.materiale.includes(getMateriale(r))) return false;
+        if (filters.date_da_sistemare && !dateDaSistemare(r)) return false;
         return true;
       };
       const passaPeriodo = (r) => {
@@ -72,12 +82,14 @@ export default function Terziarie() {
         if (filters.anno.length > 0 && !filters.anno.map(String).includes(String(annoElenco(r)))) return false;
         return true;
       };
-      const filtered = all.filter(r => passaAltri(r) && passaPeriodo(r)).map(r => {
+      // Con il filtro delle date da sistemare un terminato senza fine trasporto
+      // resta anche con un periodo scelto: e' proprio quello da correggere.
+      const filtered = all.filter(r => passaAltri(r) && (passaPeriodo(r) || (filters.date_da_sistemare && senzaFineTrasporto(r)))).map(r => {
         const senza = senzaFineTrasporto(r);
-        return { ...r, mese: senza ? SENZA_FINE : meseElenco(r), senza_fine_trasporto: senza, materiale: getMateriale(r), peso_t: +((r.peso_effettivo || 0) / 1000).toFixed(3) };
+        return { ...r, mese: senza ? SENZA_FINE : meseElenco(r), senza_fine_trasporto: senza, date_da_sistemare: testoDate(r), materiale: getMateriale(r), peso_t: +((r.peso_effettivo || 0) / 1000).toFixed(3) };
       });
       setRecords(filtered);
-      setSenzaFine(all.filter(r => passaAltri(r) && senzaFineTrasporto(r)));
+      setPerDate(all.filter(r => passaAltri(r) && (passaPeriodo(r) || senzaFineTrasporto(r))));
     } catch (e) { console.error(e); }
     setLoading(false);
   }, [filters, searchIdOrdine]);
@@ -96,6 +108,7 @@ export default function Terziarie() {
   // non hanno un periodo, e si contano nell'avviso (regola 1).
   const contati = records.filter(r => !r.senza_fine_trasporto);
   const senzaFineInElenco = records.length - contati.length;
+  const dateInElenco = records.filter(r => r.date_da_sistemare).length;
   const kpi = {
     totale_t: contati.reduce((s, r) => s + (r.peso_t || 0), 0),
     spedizioni: contati.length,
@@ -118,7 +131,8 @@ export default function Terziarie() {
   };
 
   const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v) || searchIdOrdine;
-  const resetFilters = () => setFilters({ impianto: [], destinazione: [], mese: [], trasportatore: [], materiale: [], anno: [], provincia: [], regione: [], stato: [], data: '' });
+  const resetFilters = () => setFilters({ impianto: [], destinazione: [], mese: [], trasportatore: [], materiale: [], anno: [], provincia: [], regione: [], stato: [], data: '', date_da_sistemare: false });
+  const vediDate = (v) => setFilters(p => ({ ...p, date_da_sistemare: v }));
 
   return (
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
@@ -156,16 +170,19 @@ export default function Terziarie() {
           <MultiSelect allLabel="Tutti i trasportatori" options={filterOptions.trasportatori || []} selected={filters.trasportatore} onChange={v => setFilters(p => ({ ...p, trasportatore: v }))} />
           <MultiSelect allLabel="Tutti i materiali" options={MATERIALI} selected={filters.materiale} onChange={v => setFilters(p => ({ ...p, materiale: v }))} />
           <MultiSelect allLabel="Tutti gli anni" options={(filterOptions.anni || []).map(a => String(a))} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v }))} />
+          <label className="inline-flex items-center gap-2 border rounded-md px-3 py-2 text-sm cursor-pointer" title="Solo i terminati a cui manca l'immissione, l'inizio o la fine del trasporto, o con le date nell'ordine sbagliato">
+            <input type="checkbox" checked={!!filters.date_da_sistemare} onChange={e => vediDate(e.target.checked)} /> Solo date da sistemare
+          </label>
         </div>
         <p className="text-xs text-muted-foreground">Giorno, mese e anno sono quelli della fine del trasporto; per un ordine non ancora trasportato, quelli dell&apos;immissione.</p>
-        {senzaFine.length > 0 && (
-          <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 text-sm">
-            {senzaFine.length === 1 ? '1 trasporto terziario terminato non ha' : `${formatIntero(senzaFine.length)} trasporti terziari terminati non hanno`} la fine del trasporto
-            {senzaFine.some(r => r.id_ordine) && <> (es. {senzaFine.map(r => r.id_ordine).filter(Boolean).slice(0, 5).join(', ')})</>}:
-            {senzaFine.length === 1
-              ? ' senza giorno, mese e anno resta fuori dai filtri di periodo, dagli indicatori e dalle uscite per impianto. Si vede nel dettaglio senza filtri di periodo o cercando l\'ID; va corretto nel file del portale e ricaricato.'
-              : ' senza giorno, mese e anno restano fuori dai filtri di periodo, dagli indicatori e dalle uscite per impianto. Si vedono nel dettaglio senza filtri di periodo o cercando l\'ID; vanno corretti nel file del portale e ricaricati.'}
-          </div>
+        {!loading && (
+          <AvvisoDateDaSistemare
+            righe={perDate}
+            nomi={['trasporto terziario terminato', 'trasporti terziari terminati']}
+            nota="Chi non ha la fine trasporto non ha giorno, mese e anno: resta fuori dai filtri di periodo, dagli indicatori e dalle uscite per impianto."
+            attivo={!!filters.date_da_sistemare}
+            onFiltra={vediDate}
+          />
         )}
       </div>
 
@@ -178,7 +195,7 @@ export default function Terziarie() {
 
       {/* Data table */}
       <div className="space-y-3">
-        <h2 className="text-lg font-heading font-semibold">Dettaglio Trasporti Terziari ({formatIntero(records.length)}{senzaFineInElenco > 0 ? `, di cui ${formatIntero(senzaFineInElenco)} senza fine trasporto` : ''})</h2>
+        <h2 className="text-lg font-heading font-semibold">Dettaglio Trasporti Terziari ({formatIntero(records.length)}{senzaFineInElenco > 0 ? `, di cui ${formatIntero(senzaFineInElenco)} senza fine trasporto` : ''}{dateInElenco > 0 ? `; con date da sistemare ${formatIntero(dateInElenco)}` : ''})</h2>
         <TerziarieTable records={records} loading={loading} />
       </div>
     </div>

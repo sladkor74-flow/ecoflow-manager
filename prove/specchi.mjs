@@ -14,6 +14,7 @@ const SPECCHI = [
   ['base44/shared/canaleSecondaria.ts', 'src/lib/canaleSecondaria.js'],
   ['base44/shared/richiesteEct.ts', 'src/lib/richiesteEct.js'],
   ['base44/shared/dichiarazioniImpianti.ts', 'src/lib/dichiarazioniImpianti.js'],
+  ['base44/shared/proiezioneSecondarie.ts', 'src/lib/proiezioneSecondarie.js'],
 ];
 
 // il corpo: via i ritorni a capo di Windows, le righe di import e il commento di testa

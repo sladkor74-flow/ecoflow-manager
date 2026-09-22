@@ -58,9 +58,8 @@ export function periodoMovimento(r) {
  * Attenzione: giornoOrdine ripiega sull'immissione anche per un TERMINATO
  * senza fine trasporto. Gli elenchi e i filtri delle pagine usano giornoElenco,
  * qui sotto. giornoOrdine e annoOrdine restano per chi attribuisce apposta
- * all'anno di immissione il solo conteggio dei senza fine trasporto
- * (analisiSettimanalePredittiva, calcolaPianificazioneSecondaria,
- * proiezioneSecondarie).
+ * all'anno di immissione il solo conteggio dei senza fine trasporto (chi li
+ * usa lo dice grep: esportazioni, giacenze, qualifica).
  */
 export const giornoOrdine = (r) => giornoMovimento(r) || giornoRoma(r && r.ordine_immesso_il);
 export const annoOrdine = (r) => { const g = giornoOrdine(r); return g ? Number(g.slice(0, 4)) : null; };

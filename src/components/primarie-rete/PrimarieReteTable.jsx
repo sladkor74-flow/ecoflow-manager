@@ -3,8 +3,9 @@ import { Loader2 } from 'lucide-react';
 import { useTableSort } from '@/hooks/useTableSort';
 import SortHeader from '@/components/shared/SortHeader';
 import { formatNumber } from '@/lib/utils';
-import { eTerminato, giornoMovimento, giornoOrdine, meseOrdine, tempiRaccolta } from '@/lib/movimenti';
+import { eTerminato, giornoMovimento, giornoOrdine, meseOrdine, tempiRaccolta, dateIncoerenti, testoDate } from '@/lib/movimenti';
 import { giornoRoma } from '@/lib/giornoItaliano';
+import { SegnoDate } from '@/components/primarie-rete/DateDaSistemare';
 
 const COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
@@ -36,10 +37,17 @@ const SENZA_IMMISSIONE = 'MANCA IMMISSIONE';
 const DATE_INCOERENTI = 'DATE INCOERENTI';
 const SEGNALAZIONI = new Set([SENZA_FINE, SENZA_IMMISSIONE, DATE_INCOERENTI]);
 
+// Come computeSlaMetrics (primarieReteAnalytics.ts): un terminato con le date
+// incoerenti non si misura, qualunque sia l'incoerenza (dateIncoerenti, regola
+// del 22/09/2026). Prima bastava che la fine venisse dopo l'immissione: una fine
+// prima dell'inizio dava giorni ed esito come se niente fosse.
+const incoerente = (r, tempi) => !!(tempi && tempi.incoerente) || dateIncoerenti(r).length > 0;
+
 function esitoTempi(r, tempi, fine) {
-  if (tempi && tempi.esito) return tempi.esito;
   // una fine trasporto prima dell'immissione e' un dato sporco, non un ritiro in anticipo
   if (tempi && tempi.incoerente) return DATE_INCOERENTI;
+  if (eTerminato(r) && fine && incoerente(r, tempi)) return DATE_INCOERENTI;
+  if (tempi && tempi.esito) return tempi.esito;
   if (!eTerminato(r)) return null;
   if (!fine) return SENZA_FINE;
   return tempi ? null : SENZA_IMMISSIONE;
@@ -53,17 +61,23 @@ export default function PrimarieReteTable({ records, loading }) {
   // e non ha nemmeno un mese: giornoOrdine e meseOrdine ripiegherebbero
   // sull'immissione, e la colonna Mese direbbe il mese dell'ordine mentre la
   // colonna Tempi dice che il ritiro non ha una data.
+  //
+  // Immissione, inizio e fine trasporto sono obbligatorie in ogni formulario
+  // terminato (regola dell'utente, 22/09/2026): la riga che ne ha una che manca
+  // o non torna ha il segno accanto all'ID, con il testo di testoDate nel title.
   const righe = useMemo(() => records.map((r) => {
     const tempi = tempiRaccolta(r);
     const fine = giornoMovimento(r);
     const senzaPeriodo = eTerminato(r) && !fine;
+    const nonMisurato = eTerminato(r) && incoerente(r, tempi);
     return {
       ...r,
       giorno_ordine: senzaPeriodo ? null : giornoOrdine(r) || null,
       fine_trasporto: fine || null,
       mese: senzaPeriodo ? null : meseOrdine(r),
-      nr_giorni: tempi && tempi.giorni != null ? tempi.giorni : null,
+      nr_giorni: !nonMisurato && tempi && tempi.giorni != null ? tempi.giorni : null,
       raccolta_nei_tempi: esitoTempi(r, tempi, fine),
+      date_da_sistemare: testoDate(r),
     };
   }), [records]);
   // I 500 mostrati sono gli ultimi per fine trasporto (l'immissione per un ordine
@@ -92,7 +106,7 @@ export default function PrimarieReteTable({ records, loading }) {
         </thead>
         <tbody>
           {sorted.sorted.slice(0, 500).map((r, i) => (
-            <tr key={r.id} className={`border-t hover:bg-muted/30 ${i % 2 ? 'bg-muted/10' : ''}`}>
+            <tr key={r.id} className={`border-t hover:bg-muted/30 ${r.date_da_sistemare ? 'bg-amber-50/60' : i % 2 ? 'bg-muted/10' : ''}`}>
               {COLUMNS.map((col) => {
                 let val = r[col.key];
                 if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
@@ -101,8 +115,10 @@ export default function PrimarieReteTable({ records, loading }) {
                 return (
                   <td
                     key={col.key}
+                    title={isTempi && SEGNALAZIONI.has(val) && r.date_da_sistemare ? r.date_da_sistemare : undefined}
                     className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''} ${isTempi && val === 'DOPO SCADENZA' ? 'text-red-600 font-medium' : ''} ${isTempi && val === 'OK' ? 'text-green-600 font-medium' : ''} ${isTempi && SEGNALAZIONI.has(val) ? 'text-amber-600 font-medium' : ''}`}
                   >
+                    {col.key === 'id_ordine' && <SegnoDate testo={r.date_da_sistemare} />}
                     {val ?? ''}
                   </td>
                 );

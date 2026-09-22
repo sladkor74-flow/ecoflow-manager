@@ -5,7 +5,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { momentoRilevazione, dopoLaRilevazione } from "../../shared/giacenzaStoccaggi.ts";
-import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia } from "../../shared/giacenzaPortale.ts";
+import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine } from "../../shared/giacenzaPortale.ts";
 
 // Calcola la situazione delle giacenze di impianti e stoccaggi per l'anno richiesto.
 //
@@ -16,6 +16,11 @@ import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia } fro
 // Tre regole dell'utente, senza eccezioni (21/09/2026): ogni ragionamento sulla
 // FINE DEL TRASPORTO, mai sulla chiusura a portale; ogni caricamento aggiorna
 // tutto; rete, ACI ed extra raccolta mai mescolati.
+//
+// Dal 22/09/2026 un'altra regola dell'utente: immissione, inizio e fine trasporto
+// sono obbligatorie. Un terminato a cui ne manca una si segnala sul soggetto a cui
+// arriva o da cui parte, canale per canale (sezione 1e); senza fine trasporto
+// resta fuori da ogni periodo e da ogni giacenza calcolata, e lo si dice.
 //
 // Fonti dati:
 //   OrdineNonDichiarato  -> fotografia della giacenza a portale (impianti), ordini da dichiarare, arretrato per anno di fine trasporto, in_attesa_dichiarazione (stoccaggi)
@@ -165,6 +170,18 @@ export default async function(req) {
     const giornoFoto = giornoFotografia(nonDichiarati);
     const portaleConosce = ordiniNotiAlPortale();
     let senzaFineTrasporto = 0;
+    let senzaFineTrasportoKg = 0;
+    let senzaFineNelFile = 0;
+    let fineDalGestionale = 0;
+    // Una riga del file senza fine trasporto prende quella della sua primaria nel
+    // gestionale, se c'e': sempre la fine trasporto, mai la chiusura. Stessa
+    // regola di Dichiarazioni Impianti e degli ordini da dichiarare (22/09/2026).
+    const fineRete = new Map(); // id della primaria terminata -> giorno di fine trasporto
+    for (const r of reteAll) {
+      const id = String(r.id_ordine || '').trim();
+      const g = isTerminato(r) ? giornoRoma(r.trasporto_finito_il) : '';
+      if (id && g) fineRete.set(id, g);
+    }
     for (const r of nonDichiarati) {
       portaleConosce.segna(r);
       const { sito, td, anomalia } = attribuisci(r);
@@ -186,13 +203,20 @@ export default async function(req) {
       ordiniMap.set(key, (ordiniMap.get(key) || 0) + 1);
 
       // Arretrato per anno di fine trasporto: mai per data di chiusura a portale.
-      const annoFine = annoRoma(r.fine_trasporto);
-      if (annoFine === null) { senzaFineTrasporto++; continue; }
+      const fineFile = giornoRoma(r.fine_trasporto);
+      const fineGest = fineFile ? '' : (fineRete.get(String(r.ordine_primaria || '').trim()) || '');
+      if (!fineFile) { senzaFineNelFile++; if (fineGest) fineDalGestionale++; }
+      const annoFine = annoRoma(fineFile || fineGest);
+      if (annoFine === null) { senzaFineTrasporto++; senzaFineTrasportoKg += kg; continue; }
       if (!arretratoAnniMap.has(key)) arretratoAnniMap.set(key, {});
       const perAnno = arretratoAnniMap.get(key);
       perAnno[annoFine] = (perAnno[annoFine] || 0) + t;
     }
-    if (senzaFineTrasporto) anomalie.push({ tipo: 'ordini_senza_fine_trasporto', n: senzaFineTrasporto });
+    // Righe del FILE DEL PORTALE senza fine trasporto: quelle che non la trovano
+    // nemmeno nel gestionale sono nella giacenza a portale ma in nessun anno
+    // dell'arretrato. Si dicono, con il peso (22/09/2026); e si dice quante hanno
+    // preso la data dal gestionale.
+    if (senzaFineNelFile) anomalie.push({ tipo: 'ordini_senza_fine_trasporto', n: senzaFineTrasporto, kg: Math.round(senzaFineTrasportoKg), nel_file: senzaFineNelFile, dal_gestionale: fineDalGestionale });
 
     // === 1b. RILEVAZIONI GIACENZA STOCCAGGIO (saldo del portale per classe) ===
     // Per ogni stoccaggio, la rilevazione piu' recente; a parita' di giorno quella
@@ -257,14 +281,23 @@ export default async function(req) {
     // numero d'ordine. Si guardano quelli dell'anno della fotografia: il file del
     // portale non ne contiene di piu' vecchi. Poi si tolgono le dichiarazioni di
     // rete caricate a portale dopo la fotografia.
-    for (const d of dichiarazioni) portaleConosce.segna(d);
+    // Dal report delle dichiarazioni: il portale li conosce, ma nella sua
+    // giacenza non li conta piu' (serve a dire la differenza per chi non ha la
+    // fine trasporto, sezione 1e).
+    for (const d of dichiarazioni) portaleConosce.segna(d, 'dichiarazioni');
     const annoFoto = giornoFoto ? giornoFoto.slice(0, 4) : '';
     const aggiuntiMap = new Map(); // ns|imp -> { kg, classi, n }
+    // Chi la rete non la dichiara per accordo (dichiara_rete falso in Giacenze,
+    // oggi Tecnogum: il trattamento non lo paghiamo noi) non ha una giacenza di
+    // rete che il portale tenga per noi: i suoi carichi non sono 'in ritardo nel
+    // file', non ci sono proprio. Aggiungerli faceva comparire a Tecnogum 1.706,76 t
+    // a portale contro le 0 del file (22/09/2026).
+    const nonDichiaraRete = new Set(giacenzeSito.filter(g => g.dichiara_rete === false).map(g => norm(g.sito)));
     const aggiungiNonNoto = (r, tipo) => {
       const g = giornoRoma(r.trasporto_finito_il);
       if (!annoFoto || !g.startsWith(annoFoto) || portaleConosce.noto(r, tipo)) return;
       const ns = norm(r.destinazione);
-      if (!ns) return;
+      if (!ns || nonDichiaraRete.has(ns)) return;
       const key = ns + '|imp';
       if (!aggiuntiMap.has(key)) aggiuntiMap.set(key, { kg: 0, classi: classiVuote(), n: 0 });
       const a = aggiuntiMap.get(key);
@@ -276,6 +309,44 @@ export default async function(req) {
     for (const r of reteAll) if (isTerminato(r) && !tipoStoc(r)) aggiungiNonNoto(r, 'primaria');
     for (const r of secAll) if (isTerminato(r) && !eAci(r)) aggiungiNonNoto(r, 'secondaria');
     const dichiaratoDopoMap = dichiaratoDopoLaFotografia(dichiarazioniSito, giornoFoto, norm); // ns -> kg
+
+    // === 1e. TERMINATI CON LE DATE DA SISTEMARE (regola dell'utente, 22/09/2026) ===
+    // "Le date immissione, inizio e fine trasporto sono obbligatorie nei
+    // formulari, se non ci sono vanno segnalate". Un terminato a cui ne manca
+    // una, o con le date in ordine sbagliato, si segnala sul soggetto a cui arriva
+    // o da cui parte, un canale per volta. Senza fine trasporto non e' nel
+    // conferito, ne' fra i movimenti dopo la rilevazione, ne' fra i carichi
+    // aggiunti alla fotografia (qui sopra lo escludono inYear, dopoLaRilevazione e
+    // aggiungiNonNoto, che senza giorno non contano): se il portale lo conosce,
+    // nella giacenza a portale c'e' e il gestionale non lo colloca. La differenza
+    // si dice con i numeri, non si nasconde.
+    const daSistemare = formulariDaSistemare({ anno: annoNum, chiaveDi: norm });
+    const ruoloDest = (r) => (tipoStoc(r) ? 'stoc' : 'imp');
+    const daChi = (r) => r.trasportatore || r.ragione_sociale || '';
+    for (const r of reteAll) daSistemare.segna(r, { tipo: 'primaria', canale: 'RETE', ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: daChi(r) });
+    for (const r of aciAll) daSistemare.segna(r, { tipo: 'primaria', canale: 'ACI', ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: daChi(r) });
+    for (const r of extraAll) {
+      if (!eSecondariaExtra(r)) {
+        daSistemare.segna(r, { tipo: 'primaria', canale: 'EXTRA_RACCOLTA', ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: daChi(r) });
+        continue;
+      }
+      daSistemare.segna(r, { tipo: 'secondaria', canale: 'EXTRA_RACCOLTA', ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: r.stoccaggio });
+      daSistemare.segna(r, { tipo: 'secondaria', canale: 'EXTRA_RACCOLTA', ruolo: 'stoc', verso: 'partenza', sito: r.stoccaggio, controparte: r.destinazione });
+    }
+    for (const r of secAll) {
+      const canale = eAci(r) ? 'ACI' : 'RETE';
+      daSistemare.segna(r, { tipo: 'secondaria', canale, ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: r.stoccaggio });
+      daSistemare.segna(r, { tipo: 'secondaria', canale, ruolo: 'stoc', verso: 'partenza', sito: r.stoccaggio, controparte: r.destinazione });
+    }
+    // Le terziarie partono dall'impianto: la giacenza di PFU non la toccano, ma
+    // sono formulari terminati anche loro.
+    for (const r of terzAll) daSistemare.segna(r, { tipo: 'terziaria', canale: 'RETE', ruolo: 'imp', verso: 'partenza', sito: r.unita_locale_origine || r.ragione_sociale, controparte: r.destinazione });
+    const datePerRiga = new Map(); // ns|td -> gruppi di quel soggetto, uno per canale
+    for (const g of daSistemare.gruppi(portaleConosce)) {
+      const k = g.chiave + '|' + g.ruolo;
+      if (!datePerRiga.has(k)) datePerRiga.set(k, []);
+      datePerRiga.get(k).push(g);
+    }
 
     // === 2. DICHIARATO (DichiarazioneTrattamento, per ns|td) ===
     // Anno di competenza: quello della fine del trasporto dell'ordine, mai della
@@ -368,6 +439,8 @@ export default async function(req) {
     for (const k of giacMapKeys) rowKeys.add(k);
     for (const k of giacPortaleMap.keys()) rowKeys.add(k);
     for (const k of aggiuntiMap.keys()) rowKeys.add(k);
+    // Un soggetto con un terminato da sistemare compare, anche se e' l'unica cosa che ha.
+    for (const k of datePerRiga.keys()) rowKeys.add(k);
     for (const ns of stocRilevMap.keys()) rowKeys.add(ns + '|stoc');
     for (const k of dichiaratoMap.keys()) rowKeys.add(k);
     for (const k of confPrimMap.keys()) rowKeys.add(k);
@@ -487,7 +560,7 @@ export default async function(req) {
         const somma = Object.values(lordo).reduce((s, v) => s + v, 0);
         const fattore = somma > 0 ? totaleKg / somma : 0;
         giacenza_classi_kg = Object.fromEntries(Object.entries(lordo).map(([c, v]) => [c, v * fattore]));
-        fotografia = { del: giornoFoto || null, foto_t: fotoKg / 1000, aggiunti: agg.n, aggiunti_t: agg.kg / 1000, dichiarato_dopo_t: dopoKg / 1000 };
+        fotografia = { del: giornoFoto || null, foto_t: fotoKg / 1000, aggiunti: agg.n, aggiunti_t: agg.kg / 1000, dichiarato_dopo_t: dopoKg / 1000, rete_non_dichiarata: nonDichiaraRete.has(ns) };
         aggiornata_al = datiAggiornatiAl || giornoFoto || null;
       }
 
@@ -543,8 +616,11 @@ export default async function(req) {
       // dal contratto continua per qualche mese a spedire cio' che aveva in
       // piazzale, e quelle spedizioni lo tenevano in tabella con tutte le colonne
       // a zero.
+      // I terminati con le date da sistemare di questo soggetto, un canale per volta.
+      const dateRiga = datePerRiga.get(key) || [];
       const haAttivita = giacenza_portale_t > 0 || in_attesa_dichiarazione_t > 0
-        || ordini_da_dichiarare > 0 || dichiarato_t > 0 || conferito_t > 0 || conferito_aci_t > 0 || conferito_extra_t > 0;
+        || ordini_da_dichiarare > 0 || dichiarato_t > 0 || conferito_t > 0 || conferito_aci_t > 0 || conferito_extra_t > 0
+        || dateRiga.length > 0;
       if (!g && td === 'imp' && !haAttivita) continue;
 
       if (senzaRilevazione) anomalie.push({ tipo: 'stoccaggio_senza_rilevazione', sito: sitoNome });
@@ -588,7 +664,18 @@ export default async function(req) {
         tipologia_trattamento,
         residuo_t: residuo_t !== null ? r2(residuo_t) : null,
         percentuale_target: percentuale_target !== null ? r2(percentuale_target) : null,
+        // Il riassunto per canale; l'elenco degli ordini sta nelle anomalie.
+        date_da_sistemare: dateRiga.map(x => ({ canale: x.canale, ruolo: x.ruolo, n: x.n, arrivi: x.arrivi, arrivi_kg: x.arrivi_kg, partenze: x.partenze, partenze_kg: x.partenze_kg, senza_fine: x.senza_fine, avviso: avvisoSenzaFine(x, 'giacenze') })),
       });
+
+      // Una segnalazione per soggetto e canale: quanti, quali, che cosa manca.
+      for (const x of dateRiga) {
+        anomalie.push({
+          tipo: 'date_da_sistemare', sito: sitoNome, ruolo: td, canale: x.canale,
+          n: x.n, arrivi: x.arrivi, arrivi_kg: x.arrivi_kg, partenze: x.partenze, partenze_kg: x.partenze_kg, senza_fine: x.senza_fine,
+          avviso: avvisoSenzaFine(x, 'giacenze'), ordini: x.ordini,
+        });
+      }
 
       // --- Anomalie ---
       // Il target riguarda i soli impianti. Uno stoccaggio puo' legittimamente
@@ -636,6 +723,10 @@ export default async function(req) {
     totali.giacenza_classi_kg = classiVuote();
     for (const r of righe) for (const [c, v] of Object.entries(r.giacenza_classi_kg || {})) totali.giacenza_classi_kg[c] += v;
     totali.ordini_da_dichiarare = righe.reduce((s, r) => s + (r.ordini_da_dichiarare || 0), 0);
+    // I formulari con le date da sistemare, un conteggio per canale: mai un totale.
+    // Stesso portale dei gruppi: un senza fine di un altro anno che il portale
+    // conosce e' contato anche qui (22/09/2026).
+    totali.date_da_sistemare = daSistemare.perCanale(portaleConosce);
 
     // Il target dell'impianto scritto anche in Target & Status: se diverge si dice qui
     const impiantiTarget = await fetchAll(base44.asServiceRole.entities.ImpiantoTargetSecondaria);

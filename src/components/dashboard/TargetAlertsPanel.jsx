@@ -3,8 +3,12 @@ import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { AlertTriangle, TrendingDown, Loader2, ChevronRight } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
+import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 
 // Pannello dashboard: mostra trasportatori a rischio o sotto target per il mese corrente.
+// Sotto, se ce ne sono, le date da sistemare della rete del mese (regola
+// dell'utente, 22/09/2026): chi non ha la fine trasporto e' fuori dal raccolto
+// di ogni raccoglitore, e un "a rischio" puo' dipendere da questo.
 export default function TargetAlertsPanel() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -34,14 +38,24 @@ export default function TargetAlertsPanel() {
 
   const { at_risk = [], missed = [], is_mese_corrente, mese, anno } = data;
   const hasIssues = at_risk.length > 0 || missed.length > 0;
+  const date = (
+    <RiepilogoDate
+      canale="Rete"
+      riepilogo={data.date_da_sistemare}
+      nomi={['ritiro terminato', 'ritiri terminati']}
+      nota={`Il raccolto di ${mese} ${anno} è contato senza i ritiri che non hanno la fine trasporto. Si correggono sul portale e si ricarica il file.`}
+      className="px-4 py-2"
+    />
+  );
 
   if (!hasIssues) {
     return (
-      <div className="border rounded-lg p-4 bg-green-50 border-green-200">
-        <div className="flex items-center gap-2 text-green-700">
+      <div className="border rounded-lg bg-green-50 border-green-200">
+        <div className="flex items-center gap-2 text-green-700 p-4">
           <TrendingDown className="w-4 h-4 rotate-180" />
           <span className="text-sm font-medium">Tutti i trasportatori in linea con il target di {mese} {anno}</span>
         </div>
+        {date}
       </div>
     );
   }
@@ -118,6 +132,8 @@ export default function TargetAlertsPanel() {
           </div>
         ))}
       </div>
+
+      {date}
 
       <Link
         to="/target-status"

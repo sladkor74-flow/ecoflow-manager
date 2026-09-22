@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { formatTonnellate, formatKg } from '@/lib/utils';
 import { TOLLERANZA_QUADRATURA_T, CANALI } from '@/lib/dichiarazioniImpianti';
 import { CheckCircle2, AlertTriangle, PlusCircle } from 'lucide-react';
+import DateDaSistemare from '@/components/giacenze/DateDaSistemare';
 
 // Quadratura con il portale, un canale per volta: la giacenza che risulta dai
 // movimenti e dalle dichiarazioni deve coincidere con quella del portale.
@@ -11,6 +12,12 @@ import { CheckCircle2, AlertTriangle, PlusCircle } from 'lucide-react';
 // che il gestionale conosce e il file no - si riconoscono dal numero d'ordine -
 // e si tolgono le dichiarazioni caricate dopo. Tutto per fine del trasporto,
 // mai per data di chiusura a portale.
+//
+// Un formulario terminato senza fine trasporto (regola dell'utente, 22/09/2026:
+// immissione, inizio e fine trasporto sono obbligatorie e si segnalano) non si
+// colloca in nessun mese, e quindi non entra nella giacenza calcolata finche' la
+// data non arriva. Il portale, se lo conosce, lo conta: la riga lo dice, con il
+// peso, e dice quanto dello scarto viene da li'.
 
 const t = (v) => (v === null || v === undefined ? '—' : formatTonnellate(Number(v) || 0));
 const giorno = (g) => (g ? String(g).slice(0, 10).split('-').reverse().join('/') : '');
@@ -44,6 +51,56 @@ function Aggiunti({ s }) {
   );
 }
 
+// Sotto il nome: i formulari del soggetto con le date da sistemare, su questo
+// canale, e i carichi del file del portale senza un giorno di arrivo.
+// Arrivi e partenze senza fine trasporto stanno su righe diverse, ciascuno col
+// suo peso (22/09/2026): sommati facevano un numero senza senso, e una terziaria
+// nella giacenza di PFU dell'impianto non entra comunque.
+function DateRiga({ s }) {
+  const gruppi = s.date_da_sistemare || [];
+  const g = gruppi.find(x => x.canale === (s.canale || 'RETE'));
+  const sf = (g && g.senza_fine) || {};
+  const stoc = s.tipo_destinazione === 'stoc';
+  const foto = s.foto_senza_giorno;
+  if (!g && !(foto && foto.n)) return null;
+  const arrivi = sf.arrivi_n || 0;
+  const partenze = sf.partenze_n || 0;
+  // Gli altri: le date da sistemare sono altre, e sono nei conti per fine trasporto.
+  const altri = g ? g.n - (sf.n || 0) : 0;
+  const nomePartenze = stoc ? (partenze === 1 ? '1 secondaria partita' : `${partenze} secondarie partite`) : (partenze === 1 ? '1 terziaria partita' : `${partenze} terziarie partite`);
+  return (
+    <span className="block text-[11px] text-amber-700 mt-0.5" title={g && g.avviso ? g.avviso : ''}>
+      {arrivi > 0 && <span className="block">{arrivi === 1 ? '1 formulario arrivato' : `${arrivi} formulari arrivati`} senza fine trasporto ({formatKg(sf.arrivi_kg)} kg): in nessun mese, la calcolata non {arrivi === 1 ? 'lo conta' : 'li conta'}</span>}
+      {partenze > 0 && (
+        <span className="block">
+          {nomePartenze} senza fine trasporto ({formatKg(sf.partenze_kg)} kg):{' '}
+          {stoc
+            ? <>in nessun mese, la calcolata non {partenze === 1 ? 'la toglie' : 'le toglie'}</>
+            : <>fuori dalle uscite dell&apos;anno; la giacenza di PFU non {partenze === 1 ? 'la tocca' : 'le tocca'}</>}
+        </span>
+      )}
+      {altri > 0 && <span className="block">{altri === 1 ? '1 formulario' : `${altri} formulari`} con le date da sistemare, ma nei conti per fine trasporto</span>}
+      {foto && foto.n > 0 && <span className="block">{foto.n === 1 ? '1 carico' : `${foto.n} carichi`} del file ({formatKg(foto.kg)} kg) senza giorno di arrivo: a portale, in nessun mese</span>}
+    </span>
+  );
+}
+
+// Quanto dello scarto di un impianto viene di certo dai formulari senza fine
+// trasporto: quelli che il portale ha fra i non dichiarati (li conta, la
+// calcolata no). Quelli gia' dichiarati pesano solo se la dichiarazione e'
+// registrata anche qui: non si mettono nel conto. Se non si sa da quale file il
+// portale li conosce, valgono tutti i noti.
+const kgCerti = (s) => {
+  const sf = s.senza_fine_trasporto;
+  if (!sf || !sf.noti_al_portale_n) return 0;
+  const diviso = (sf.nel_file_n || 0) + (sf.gia_dichiarati_n || 0) === sf.noti_al_portale_n;
+  return diviso ? sf.nel_file_kg || 0 : sf.noti_al_portale_kg || 0;
+};
+
+// I gruppi che toccano la quadratura: la rete degli impianti, e il canale di
+// ciascuna riga degli stoccaggi.
+const gruppiQuadratura = (siti) => siti.flatMap(s => (s.date_da_sistemare || []).filter(g => g.canale === (s.canale || 'RETE')));
+
 export default function Quadratura({ dati }) {
   const righe = [...dati.siti].sort((a, b) => (a.tipo_destinazione === b.tipo_destinazione ? 0 : a.tipo_destinazione === 'imp' ? -1 : 1)
     || Math.abs(b.scarto_t || 0) - Math.abs(a.scarto_t || 0));
@@ -58,7 +115,12 @@ export default function Quadratura({ dati }) {
         si tolgono le dichiarazioni caricate dopo{dati.movimenti_fino_al ? <>; i movimenti caricati arrivano al <strong>{giorno(dati.movimenti_fino_al)}</strong></> : ''}.
         {' '}Per gli stoccaggi la giacenza a portale è la rilevazione per classe - P, M, G1 e G2 per la rete, la classe 9 per l&apos;ACI - più i
         movimenti finiti dopo. Tutto per fine del trasporto. In linea fino a {formatTonnellate(TOLLERANZA_QUADRATURA_T)} t di scarto.
+        {' '}Immissione, inizio e fine trasporto sono obbligatorie: un formulario terminato <strong>senza fine trasporto</strong> non si colloca
+        in nessun mese, e quindi non entra nella giacenza calcolata finche&apos; la data non arriva. Il portale, se lo conosce, lo conta:
+        la riga lo segnala con il peso, e dice quanto dello scarto viene da lì.
       </p>
+
+      <DateDaSistemare gruppi={gruppiQuadratura(righe)} mostraSito />
 
       <div className="border rounded-xl bg-card" data-scorre-lato>
         <table className="w-full text-xs">
@@ -89,6 +151,7 @@ export default function Quadratura({ dati }) {
                       {stoc ? `stoccaggio · ${nomeCanale(s.canale)}` : 'impianto · rete'}
                       {stoc && s.rilevazione_il ? ` · rilevazione del ${giorno(s.rilevazione_il)}` : ''}
                     </span>
+                    <DateRiga s={s} />
                     {!stoc && <Aggiunti s={s} />}
                   </td>
                   <td className="px-2 py-1.5 text-right tabular-nums">{t(s.giacenza_iniziale_t)}</td>
@@ -108,6 +171,11 @@ export default function Quadratura({ dati }) {
                     {!stoc && Math.abs((s.dichiarato_portale_t || 0) - (s.dichiarato_caricato_rete_t || 0)) > 0.5 && (
                       <span className="block text-[11px] text-amber-700" title="Quello che risulta dichiarato nel report del portale per i carichi dell'anno. Una dichiarazione che il portale ha agganciato a carichi dell'anno prima non compare qui: la differenza non è per forza un mese sfuggito.">
                         nel report del portale risultano {t(s.dichiarato_portale_t)} t dichiarate
+                      </span>
+                    )}
+                    {!stoc && kgCerti(s) > 0 && s.scarto_t !== null && (
+                      <span className="block text-[11px] text-amber-700" title="Formulari di rete arrivati all'impianto senza fine trasporto che il portale ha fra i non dichiarati: nella sua giacenza ci sono, nel gestionale no, e la giacenza calcolata esce più bassa di quel peso.">
+                        di cui − {t(kgCerti(s) / 1000)} t per formulari senza fine trasporto che il portale conta fra i non dichiarati: il resto dello scarto è {t(Math.round((s.scarto_t + kgCerti(s) / 1000) * 1000) / 1000)} t
                       </span>
                     )}
                     {stoc && s.in_attesa_dichiarazione_t > 0 && (

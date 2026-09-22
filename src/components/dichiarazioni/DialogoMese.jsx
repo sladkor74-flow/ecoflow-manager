@@ -43,6 +43,11 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
 
   const controlli = controlliDichiarazione({ ...dati }, mese.conferito_kg, flusso.operazione, { tipo_destinazione: sito.tipo_destinazione, canale: flusso.canale, dichiara_rete: sito.dichiara_rete, non_dichiarato_kg: mese.non_dichiarato_kg });
   const canale = CANALI.find(c => c.chiave === flusso.canale);
+  // I formulari di questo canale arrivati all'impianto senza fine trasporto: non
+  // sono nell'arrivato di nessun mese, questo compreso, finche' la data non arriva
+  // (regola dell'utente, 22/09/2026). Chi prepara la dichiarazione lo deve sapere.
+  const gruppoDate = (sito.date_da_sistemare || []).find(g => g.canale === flusso.canale);
+  const arriviSenzaFine = gruppoDate && gruppoDate.senza_fine ? gruppoDate.senza_fine : null;
 
   const salva = async () => {
     setSalvataggio(true);
@@ -157,6 +162,15 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
             <p className="text-sm font-medium">Note</p>
             <Textarea rows={2} value={dati.note} onChange={e => imposta('note', e.target.value)} placeholder="Per esempio: dichiarazione che comprende la lavorazione della giacenza di luglio" />
           </div>
+
+          {arriviSenzaFine && arriviSenzaFine.arrivi_n > 0 && (
+            <p className="flex items-start gap-2 text-xs rounded-md px-2 py-1.5 bg-amber-50 text-amber-900">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              {arriviSenzaFine.arrivi_n === 1 ? '1 formulario arrivato' : `${arriviSenzaFine.arrivi_n} formulari arrivati`} a questo impianto
+              {' '}({kg(arriviSenzaFine.arrivi_kg)} kg) {arriviSenzaFine.arrivi_n === 1 ? 'non ha' : 'non hanno'} la fine trasporto: non {arriviSenzaFine.arrivi_n === 1 ? 'e\'' : 'sono'} nell&apos;arrivato
+              {' '}di nessun mese, questo compreso, finche&apos; la data non arriva. Quali sono, nella scheda dell&apos;impianto.
+            </p>
+          )}
 
           {controlli.length > 0 && (
             <div className="space-y-1">

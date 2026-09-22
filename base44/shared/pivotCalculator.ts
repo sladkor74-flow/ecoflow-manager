@@ -7,7 +7,7 @@
 // di AGENTS.md; altrimenti va tolto.
 //
 // Modulo condiviso per il calcolo delle pivot analitiche PFU.
-import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
+import { PROV_TO_REGION, MESI, riepilogoDate } from "./raccoltoCalculator.ts";
 import { getMeseFromDate, getSettimanaFromDate, getAnnoFromDate, getRegioneFromProvincia, getClasseFromProdotto } from "./dataEnrichment.ts";
 import { matchesFilter } from "./multiFilter.ts";
 import { fetchAll } from "./fetchAll.ts";
@@ -77,7 +77,10 @@ function getDataFineTrasporto(r) {
 }
 
 // I movimenti che entrano nelle pivot: terminati con una fine trasporto
-// leggibile. Gli altri si contano per dirli, non si collocano in un mese.
+// leggibile. Gli altri si contano per dirli, non si collocano in un mese. Anche
+// le altre date obbligatorie di un terminato che mancano o non tornano si
+// contano (regola dell'utente, 22/09/2026), in date_da_sistemare: qui su tutto
+// l'archivio passato, perche' questo modulo non taglia ancora il periodo.
 function movimentiContati(righe) {
   const contati = [];
   let senzaFine = 0;
@@ -91,7 +94,7 @@ function movimentiContati(righe) {
     }
     contati.push(r);
   }
-  return { contati, senza_fine_trasporto: senzaFine, esempi: esempi.filter(Boolean) };
+  return { contati, senza_fine_trasporto: senzaFine, esempi: esempi.filter(Boolean), date_da_sistemare: riepilogoDate(righe) };
 }
 
 function getDataImmissione(r) {
@@ -250,6 +253,13 @@ export async function computeAllPivots(base44, filters, pivotKeys = null) {
     aci: { quanti: aciM.senza_fine_trasporto, esempi: aciM.esempi },
     secondarie_rete: { quanti: secReteM.senza_fine_trasporto, esempi: secReteM.esempi },
     secondarie_aci: { quanti: secAciM.senza_fine_trasporto, esempi: secAciM.esempi },
+  };
+  // un canale per volta, come i senza fine trasporto qui sopra
+  result.dateDaSistemare = {
+    rete: reteM.date_da_sistemare,
+    aci: aciM.date_da_sistemare,
+    secondarie_rete: secReteM.date_da_sistemare,
+    secondarie_aci: secAciM.date_da_sistemare,
   };
 
   if (shouldCompute('A')) {

@@ -148,6 +148,10 @@ export default function PredittivitaImpiantiManager({ onReload }) {
         Solo rete: ACI ed extra raccolta non entrano nella predittività. Il target dell&apos;impianto è quello di rete, e fra i fornitori
         vanno registrati solo raccoglitori e stoccaggi che lavorano sulla rete: chi lavora solo per l&apos;ACI o l&apos;extra raccolta non ha
         niente da pianificare qui, e la pagina lo segnala.
+        {/* Regola del 22/09/2026: le primarie scaricate nel piazzale dell'impianto sono gia' nel suo gia' arrivato, e i viaggi dal piazzale all'impianto non si contano. */}
+        {' '}Il piazzale dell&apos;impianto stesso non va registrato come suo stoccaggio: le primarie che ci arrivano sono già nel
+        già arrivato di rete dell&apos;impianto (tolto quello che riparte per gli altri impianti, che lo contano loro), e i viaggi dal
+        piazzale all&apos;impianto non abbassano il residuo. Va registrato solo come stoccaggio degli altri impianti a cui spedisce.
       </p>
 
       {showImpiantoForm && (

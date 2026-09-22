@@ -3,6 +3,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { rotte, conferimentiSospetti, quoteDaStoccaggio, tariffeDaVerificare } from "../../shared/rotteConferimenti.ts";
 import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
+import { riepilogoDate } from "../../shared/reportSettimanali.ts";
 
 // Chi conferisce dove, e i formulari che sembrano chiusi sulla destinazione
 // sbagliata.
@@ -10,6 +11,11 @@ import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 // Le rotte si leggono dalla storia dell'anno, archivio per archivio, tenendo i
 // canali separati: le secondarie di rete e quelle ACI hanno rotte diverse e non
 // vanno confrontate fra loro.
+//
+// Di ogni flusso si dicono anche i terminati con le date obbligatorie da
+// sistemare (immissione, inizio e fine trasporto: regola dell'utente del
+// 22/09/2026), di qualunque anno: chi non ha la fine trasporto non ha un anno e
+// resta fuori dalle rotte, e senza dirlo il conto dei viaggi sembrava completo.
 //
 // Payload: { anno }
 
@@ -36,13 +42,15 @@ export default async function(req) {
     ]);
 
     const secAnno = secondarie.filter(dellAnno);
+    const raccoltaExtra = (r) => String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'secondaria';
+    // "tutti": i terminati del flusso di qualunque anno, per le date obbligatorie.
     const flussi = [
-      { chiave: 'primarie_rete', nome: 'Primarie di rete', archivio: 'PrimariaRete', righe: rete.filter(dellAnno) },
-      { chiave: 'primarie_aci', nome: 'Primarie ACI', archivio: 'PrimariaAci', righe: aciPrim.filter(dellAnno) },
-      { chiave: 'secondarie_rete', nome: 'Secondarie di rete', archivio: 'Secondaria', righe: secAnno.filter(r => !eAci(r)) },
-      { chiave: 'secondarie_aci', nome: 'Secondarie ACI', archivio: 'Secondaria', righe: secAnno.filter(eAci) },
-      { chiave: 'extra_raccolta', nome: 'Extra raccolta', archivio: 'ExtraRaccolta', righe: extra.filter(dellAnno).filter(r => String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'secondaria') },
-      { chiave: 'terziarie', nome: 'Terziarie', archivio: 'Terziaria', righe: terziarie.filter(dellAnno) },
+      { chiave: 'primarie_rete', nome: 'Primarie di rete', archivio: 'PrimariaRete', righe: rete.filter(dellAnno), tutti: rete },
+      { chiave: 'primarie_aci', nome: 'Primarie ACI', archivio: 'PrimariaAci', righe: aciPrim.filter(dellAnno), tutti: aciPrim },
+      { chiave: 'secondarie_rete', nome: 'Secondarie di rete', archivio: 'Secondaria', righe: secAnno.filter(r => !eAci(r)), tutti: secondarie.filter(r => !eAci(r)) },
+      { chiave: 'secondarie_aci', nome: 'Secondarie ACI', archivio: 'Secondaria', righe: secAnno.filter(eAci), tutti: secondarie.filter(eAci) },
+      { chiave: 'extra_raccolta', nome: 'Extra raccolta', archivio: 'ExtraRaccolta', righe: extra.filter(dellAnno).filter(raccoltaExtra), tutti: extra.filter(raccoltaExtra) },
+      { chiave: 'terziarie', nome: 'Terziarie', archivio: 'Terziaria', righe: terziarie.filter(dellAnno), tutti: terziarie },
     ];
 
     const senzaRighe = (d) => ({ ...d, righe: undefined });
@@ -52,6 +60,8 @@ export default async function(req) {
       movimenti: f.righe.length,
       rotte: rotte(f.righe, f.archivio).map(o => ({ ...o, destinazioni: o.destinazioni.map(senzaRighe) })),
       sospetti: conferimentiSospetti(f.righe, f.archivio),
+      // { ordini, senza_fine, esempi: [{ id_ordine, numero_fir, date }] } oppure null
+      date_da_sistemare: riepilogoDate(f.tutti, 10),
     }));
 
     // Gli stoccaggi che alimentano piu' di un impianto: quello che gli

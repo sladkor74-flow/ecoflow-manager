@@ -17,9 +17,10 @@
         "primarie_rete",
         "primarie_aci",
         "terziarie",
-        "assegnati"
+        "assegnati",
+        "extra_raccolta"
       ],
-      "description": "Modolo su cui si applica la regola"
+      "description": "Modulo su cui si applica la regola. Il motore controlla sempre, in ogni modulo di movimenti e senza bisogno di una regola qui, i conferimenti fuori rotta e gli ordini terminati con date obbligatorie mancanti o incoerenti (immissione, inizio e fine trasporto, regola del 22/09/2026): non si configurano e non si spengono"
     },
     "tipo_regola": {
       "type": "string",

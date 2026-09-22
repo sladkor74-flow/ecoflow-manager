@@ -12,6 +12,27 @@ const MODULI = [
   { value: 'primarie_aci', label: 'Primarie ACI' },
   { value: 'terziarie', label: 'Terziarie' },
   { value: 'assegnati', label: 'Assegnati' },
+  { value: 'extra_raccolta', label: 'Extra Raccolta' },
+];
+
+// I controlli che il motore fa sempre, in ogni modulo di movimenti, senza una
+// regola da configurare: li chiede la commessa. Le date obbligatorie sono la
+// regola dell'utente del 22/09/2026 ("vanno segnalate e questo vale sempre dove
+// ci sono ordini terminati").
+// Il testo dice dove si rivaluta da solo: dal 22/09/2026 anche le schede di
+// extra raccolta avviano il motore (il workflow AlertEngineAutoRun ascolta le
+// righe 'extra_raccolta' del registro; una scheda senza fine trasporto, che la
+// riga non la scrive, lo avvia dalla pagina con dopoCaricamento). L'avviso che
+// diceva il contrario e' tolto.
+const CONTROLLI_FISSI = [
+  {
+    nome: 'Ordini terminati con date obbligatorie mancanti o incoerenti',
+    testo: 'Immissione, inizio e fine trasporto sono obbligatorie nei formulari. Un alert per modulo (primarie rete, primarie ACI, secondarie, terziarie, extra raccolta) e per canale, con l\'elenco degli ordini: ID ordine, formulario e date che mancano o non tornano, di qualunque anno. Critico se a qualcuno manca la fine trasporto, che lo toglie da ogni periodo. Si chiude da solo quando le date arrivano. Primarie, secondarie e terziarie si rivalutano a ogni caricamento del loro file, l\'extra raccolta a ogni scheda salvata.',
+  },
+  {
+    nome: 'Conferimento fuori rotta',
+    testo: 'Formulari chiusi su una destinazione dove quell\'origine non va mai, letti dalla storia dell\'anno: primarie e secondarie, rete e ACI separate.',
+  },
 ];
 
 const TIPI_REGOLA = [
@@ -100,9 +121,14 @@ export default function AlertEngine() {
       // canale per canale (rete e ACI non si sommano).
       const senzaFine = (d.terminati_senza_fine_trasporto || []).filter(g => g.quanti > 0).map(g =>
         `${g.canale ? `${g.canale === 'ACI' ? 'ACI' : 'Rete'}: ` : ''}${g.quanti === 1 ? '1 terminato' : `${g.quanti} terminati`} senza fine trasporto${g.esempi?.length ? ` (es. ${g.esempi.join(', ')})` : ''}`);
+      // Le date obbligatorie mancanti o incoerenti, canale per canale: l'elenco sta nell'alert.
+      const nomeCanale = { rete: 'rete', ACI: 'ACI', extra: 'extra raccolta' };
+      const date = (d.date_obbligatorie || []).filter(g => g.ordini > 0).map(g =>
+        `${g.canale ? `${nomeCanale[g.canale] || g.canale}: ` : ''}${g.ordini === 1 ? '1 ordine' : `${g.ordini} ordini`}${g.senza_fine ? `, di cui ${g.senza_fine} senza fine trasporto` : ''}`);
       alert(`${d.alerts_creati} alert creati, ${d.alerts_aggiornati || 0} aggiornati e ${d.alerts_chiusi || 0} chiusi perché superati o doppi, su ${d.record_scansionati} record ${d.anno ? `del ${d.anno} ` : ''}controllati.`
         + (restano.length ? ` Restano ${restano.join(' e ')}: esegui di nuovo il controllo.` : '')
-        + (senzaFine.length ? ` Esclusi dal controllo, di qualunque anno: ${senzaFine.join('; ')}. Vanno corretti nel file del portale e ricaricati.` : ''));
+        + (senzaFine.length ? ` Esclusi dalle regole dell'anno perché senza fine trasporto, di qualunque anno: ${senzaFine.join('; ')}.` : '')
+        + (date.length ? ` Terminati con date obbligatorie mancanti o incoerenti, di qualunque anno: ${date.join('; ')}. L'elenco è nell'alert; le date vanno inserite o corrette.` : ''));
       load();
     } catch (e) {
       // Gli errori delle funzioni portano il testo nella risposta (e.data):
@@ -224,6 +250,18 @@ export default function AlertEngine() {
               </div>
             </div>
           )}
+
+          <div className="border rounded-lg p-4 bg-muted/20 space-y-2">
+            <h3 className="font-heading font-semibold text-sm">Controlli sempre attivi</h3>
+            <p className="text-xs text-muted-foreground">Non si configurano e non si spengono: il motore li fa in ogni modulo di movimenti, anche senza regole qui sotto.</p>
+            {CONTROLLI_FISSI.map(c => (
+              <div key={c.nome}>
+                <p className="text-sm font-medium">{c.nome}</p>
+                <p className="text-xs text-muted-foreground">{c.testo}</p>
+                {c.avviso && <p className="text-xs text-amber-800 mt-0.5">{c.avviso}</p>}
+              </div>
+            ))}
+          </div>
 
           {loading ? (
             <div className="flex items-center justify-center py-12 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Caricamento regole...</div>

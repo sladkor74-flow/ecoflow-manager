@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
+import DateDaSistemare from '@/components/giacenze/DateDaSistemare';
+import { formatKg, formatTonnellate } from '@/lib/utils';
 
 const TIPO_LABEL = {
   coerenza_derivati: 'Incoerenza derivati',
@@ -9,10 +11,30 @@ const TIPO_LABEL = {
   stoccaggio_senza_rilevazione: 'Stoccaggio senza rilevazione',
   giacenza_negativa: 'Giacenza negativa',
   target_divergente: 'Target diverso da Target & Status',
+  ordini_senza_fine_trasporto: 'Righe del file del portale senza fine trasporto',
 };
+
+// Tonnellate con due decimali (tre se i kg non sono tondi), kg interi.
+const t = (v) => formatTonnellate(Number(v) || 0);
+
+// Le righe del file del portale senza fine trasporto: quelle che la prendono dal
+// formulario del gestionale e quelle che non la trovano in nessuno dei due, che
+// nella giacenza a portale ci sono ma in nessun anno dell'arretrato.
+function testoSenzaFineFile(a) {
+  const nelFile = a.nel_file ?? a.n;
+  const parti = [`${nelFile} ${nelFile === 1 ? 'riga' : 'righe'}`];
+  if (a.dal_gestionale) parti.push(`${a.dal_gestionale} con la fine trasporto presa dal formulario del gestionale`);
+  if (a.n) parti.push(`${a.n}${a.kg ? ` (${formatKg(a.kg)} kg)` : ''} senza la data nemmeno nel gestionale: nella giacenza a portale ci sono, ma in nessun anno dell'arretrato`);
+  return parti.join('; ');
+}
 
 export default function AnomalieAlert({ anomalie }) {
   const [expanded, setExpanded] = useState(false);
+  // I formulari terminati con le date da sistemare (regola dell'utente del
+  // 22/09/2026) portano l'elenco degli ordini: si mostrano insieme, per soggetto
+  // e canale, con che cosa manca e che cosa comporta per la giacenza.
+  const date = anomalie.filter(a => a.tipo === 'date_da_sistemare');
+  const altre = anomalie.filter(a => a.tipo !== 'date_da_sistemare');
 
   return (
     <div className="bg-amber-50 border border-amber-300 rounded-lg overflow-hidden">
@@ -20,28 +42,35 @@ export default function AnomalieAlert({ anomalie }) {
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-amber-100 transition-colors"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 text-left">
           <AlertTriangle className="w-5 h-5 text-amber-600" />
           <span className="font-semibold text-amber-900">
             {anomalie.length} {anomalie.length === 1 ? 'anomalia rilevata' : 'anomalie rilevate'}
           </span>
+          {date.length > 0 && (
+            <span className="text-xs text-amber-800">
+              di cui {date.length === 1 ? 'una' : date.length} per formulari terminati senza tutte le date obbligatorie
+            </span>
+          )}
         </div>
         {expanded ? <ChevronUp className="w-4 h-4 text-amber-700" /> : <ChevronDown className="w-4 h-4 text-amber-700" />}
       </button>
       {expanded && (
-        <div className="px-4 pb-3 space-y-1.5 max-h-64 overflow-y-auto">
-          {anomalie.map((a, i) => (
+        <div className="px-4 pb-3 space-y-1.5 max-h-96 overflow-y-auto">
+          {date.length > 0 && <DateDaSistemare gruppi={date} mostraSito />}
+          {altre.map((a, i) => (
             <div key={i} className="text-sm text-amber-900 flex items-start gap-2 border-t border-amber-200 pt-1.5">
               <span className="font-medium">{TIPO_LABEL[a.tipo] || a.tipo}:</span>
               <span className="text-amber-800">
                 {a.tipo === 'ordine_senza_riscontro' && `ordine ${a.ordine} non trovato in PrimariaRete/Aci — ruolo attribuito come Impianto`}
                 {a.sito && a.sito}
-                {a.tipo === 'coerenza_derivati' && ` — dichiarato ${a.dichiarato_t} t, derivati ${a.somma_derivati_t} t (diff. ${a.differenza_t} t)`}
-                {a.tipo === 'giacenza_sopra_target' && ` — giacenza ${a.giacenza_portale_t} t contro target ${a.target_totale_t} t`}
+                {a.tipo === 'coerenza_derivati' && ` — dichiarato ${t(a.dichiarato_t)} t, derivati ${t(a.somma_derivati_t)} t (diff. ${t(a.differenza_t)} t)`}
+                {a.tipo === 'giacenza_sopra_target' && ` — giacenza ${t(a.giacenza_portale_t)} t contro target ${t(a.target_totale_t)} t`}
                 {a.tipo === 'sito_senza_target' && ` — nessun record GiacenzaSito per l'anno ${a.anno}`}
-                {a.tipo === 'giacenza_negativa' && ` — classe ${a.classe}: ${a.kg} kg dopo i movimenti successivi alla rilevazione, mancano ingressi o la rilevazione va aggiornata`}
-                {a.tipo === 'target_divergente' && ` — qui ${a.giacenze_t} t, in Target & Status ${a.target_status_t} t (differenza ${a.differenza_t} t): i due numeri devono essere uguali, correggi quello sbagliato`}
+                {a.tipo === 'giacenza_negativa' && ` — classe ${a.classe}: ${formatKg(a.kg)} kg dopo i movimenti successivi alla rilevazione, mancano ingressi o la rilevazione va aggiornata`}
+                {a.tipo === 'target_divergente' && ` — qui ${t(a.giacenze_t)} t, in Target & Status ${t(a.target_status_t)} t (differenza ${t(a.differenza_t)} t): i due numeri devono essere uguali, correggi quello sbagliato`}
                 {a.tipo === 'stoccaggio_senza_rilevazione' && ` — il dato va letto dalla pagina Unita' Locali di Stoccaggio del portale`}
+                {a.tipo === 'ordini_senza_fine_trasporto' && testoSenzaFineFile(a)}
               </span>
             </div>
           ))}

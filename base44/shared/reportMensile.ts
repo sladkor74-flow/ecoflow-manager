@@ -14,6 +14,7 @@ import { getClasseFromProdotto, getRegioneFromProvincia } from "./dataEnrichment
 import { giornoRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { meseToIndice } from "./filtroPeriodo.ts";
+import { riepilogoDateVista } from "./raccoltoCalculator.ts";
 
 export const MESI = [
   'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
@@ -283,7 +284,8 @@ export function calcolaPivot(chiave, records, anno, mese) {
   const annoNum = Number(anno);
   const meseNum = def.periodo === 'mese' ? meseToIndice(mese) : -1;
 
-  const filtrati = (records || []).filter(r => {
+  // I terminati del canale e del movimento della pivot, prima del periodo.
+  const delCanale = (records || []).filter(r => {
     if (!eTerminato(r)) return false;
     // Le secondarie di rete e quelle ACI stanno nello stesso archivio: una pivot
     // di un canale non deve mai contenere le righe dell'altro.
@@ -291,6 +293,9 @@ export function calcolaPivot(chiave, records, anno, mese) {
     // Nell'extra raccolta la raccolta dal produttore e il trasferimento stanno
     // nello stesso archivio: una pivot dell'una non deve contenere l'altra.
     if (def.movimento && String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== def.movimento) return false;
+    return true;
+  });
+  const filtrati = delCanale.filter(r => {
     const g = giornoDi(r);
     if (!g || Number(g.slice(0, 4)) !== annoNum) return false;
     if (def.periodo === 'mese' && Number(g.slice(5, 7)) - 1 !== meseNum) return false;
@@ -314,5 +319,12 @@ export function calcolaPivot(chiave, records, anno, mese) {
     etichetteMisure: def.misure.map(m => ETICHETTE_MISURE[m]),
     radice,
     righeLette: filtrati.length,
+    // Le date da sistemare della pivot, che e' di un canale solo (regola
+    // dell'utente, 22/09/2026: immissione, inizio e fine trasporto sono
+    // obbligatorie in ogni formulario terminato). I terminati senza fine
+    // trasporto, di qualunque anno, non sono in nessuna pivot: prima sparivano
+    // senza dirlo. Gli altri sono nella pivot, nel mese della fine trasporto, ma
+    // hanno un'altra data che manca o non torna.
+    date_da_sistemare: riepilogoDateVista(delCanale, filtrati, 10),
   };
 }

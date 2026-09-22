@@ -1,15 +1,22 @@
 import React from 'react';
 import { Truck, Weight, Package, Route, AlertTriangle } from 'lucide-react';
 import { formatNumber, fmtTon } from '@/lib/utils';
+import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 
-export default function SecondarieKpi({ kpi, byClasse, canali, elencoSenzaFine }) {
+export default function SecondarieKpi({ kpi, byClasse, canali, elencoSenzaFine, filtroDate = false, onFiltroDate }) {
   if (!kpi) return null;
 
   const intFmt = (v) => formatNumber(v, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  // Le date da sistemare, canale per canale (computeSecondarieMatrix): i
+  // terminati senza fine trasporto, fuori dai conti, e quelli contati con
+  // un'altra data obbligatoria che manca o non torna (regola dell'utente,
+  // 22/09/2026). Quando la funzione le manda, sostituiscono l'avviso dei soli
+  // senza fine trasporto qui sotto, che resta per una risposta di prima.
+  const datePerCanale = kpi.date_da_sistemare_per_canale;
   // I terminati senza fine trasporto, canale per canale: un numero solo per rete
   // e ACI insieme sarebbe un conteggio che somma le due commesse. Una risposta
   // di prima porta solo il numero, ed e' del canale della vista.
-  const senzaFine = kpi.senza_fine_trasporto_per_canale
+  const senzaFine = datePerCanale ? [] : kpi.senza_fine_trasporto_per_canale
     ? ['Rete', 'ACI'].map(c => ({ canale: c, n: kpi.senza_fine_trasporto_per_canale[c] || 0 })).filter(x => x.n > 0)
     : kpi.senza_fine_trasporto > 0 ? [{ canale: kpi.canale, n: kpi.senza_fine_trasporto }] : [];
   // Rete e ACI non si sommano: quando ci sono tutti e due ogni riquadro mostra i
@@ -64,6 +71,18 @@ export default function SecondarieKpi({ kpi, byClasse, canali, elencoSenzaFine }
           );
         })}
       </div>
+      {datePerCanale && ['Rete', 'ACI'].map(c => (
+        <RiepilogoDate
+          key={c}
+          canale={c}
+          riepilogo={datePerCanale[c]}
+          nomi={['trasporto terminato', 'trasporti terminati']}
+          esempi
+          nota="Vanno corretti nel file del portale e ricaricati."
+          attivo={filtroDate}
+          onFiltra={onFiltroDate}
+        />
+      ))}
       {/* Un terminato senza fine trasporto non ha un mese: resta fuori dai conti e si dice. */}
       {senzaFine.length > 0 && (
         <div className="text-xs text-amber-700 space-y-1">

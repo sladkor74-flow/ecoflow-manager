@@ -16,6 +16,13 @@
 // cadeva nella settimana prima. Un terminato senza fine trasporto non ha
 // settimana: non si conta, e l'esito lo dice flusso per flusso.
 //
+// Immissione, inizio e fine trasporto sono obbligatorie nei formulari (regola
+// dell'utente del 22/09/2026, per ogni modulo dove ci sono ordini terminati):
+// oltre ai senza fine trasporto, l'esito dice flusso per flusso - quindi canale
+// per canale - i formulari della settimana a cui manca l'immissione o l'inizio
+// del trasporto, o che hanno le date incoerenti. Quelli si contano, perche' la
+// fine trasporto c'e', ma le date vanno inserite o corrette.
+//
 // Qui sta anche il riconfronto di una quadratura gia' fatta con i movimenti di
 // adesso (rifaiQuadratura): l'esito salvato il giorno della stampa non si
 // aggiornava piu', e i formulari caricati dopo restavano "mancanti nel
@@ -25,7 +32,7 @@ import { fetchAll, perPagina } from "./fetchAll.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { ticketDi } from "./formulari.ts";
 import { eAci } from "./canaleSecondaria.ts";
-import { eTerminato, giornoMovimento } from "./movimenti.ts";
+import { eTerminato, giornoMovimento, dateDaSistemare, testoDate } from "./movimenti.ts";
 import { statoCaricamenti } from "./reportSettimanali.ts";
 import { FLUSSI, ORDINE_FLUSSI, normalizzaLettura, confronta, sintesi } from "./quadraturaFir.ts";
 import { valoreCampo, leggiCampo, leggiJson } from "./testoLungo.ts";
@@ -128,7 +135,7 @@ function formulario(r) {
 // formulario una volta, col suo peso intero: se qui si contassero le righe, un
 // formulario chiuso su due ordini varrebbe due formulari e la quadratura non
 // tornerebbe mai. I chili invece si sommano, perche' ogni quota e' peso vero.
-function contaDistinti(formulari) {
+export function contaDistinti(formulari) {
   const numeri = new Set();
   let senzaNumero = 0;
   for (const f of formulari) {
@@ -136,6 +143,38 @@ function contaDistinti(formulari) {
     else senzaNumero++;
   }
   return numeri.size + senzaNumero;
+}
+
+/**
+ * I formulari con le date obbligatorie da sistemare, uno per numero di FIR: un
+ * formulario chiuso su piu' ordini e' una voce sola, con gli ordini uniti
+ * ('ET0 + ET1'), i chili sommati e le date che mancano a ciascuno. Le voci sono
+ * tante quante ne conta contaDistinti, cosi' gli esempi e "e altri" tornano col
+ * numero dei formulari: contati sulle quote, 7 voci per 4 formulari (22/09/2026).
+ * Una voce gia' raggruppata resta com'e': si puo' ripassare senza danni, e le
+ * pagine lo fanno con la stessa regola (src/lib/quadraturaFir.js) sugli esiti
+ * salvati prima, che hanno ancora una voce per quota.
+ */
+export function formulariConDate(voci) {
+  const gruppi = [];
+  const perFir = new Map();
+  for (const x of voci || []) {
+    const k = x && x.fir ? String(x.fir).toUpperCase() : '';
+    if (k && perFir.has(k)) { perFir.get(k).push(x); continue; }
+    const quote = [x];
+    if (k) perFir.set(k, quote);
+    gruppi.push(quote);
+  }
+  return gruppi.map((quote) => {
+    if (quote.length === 1) return quote[0];
+    const ordini = [...new Set(quote.map(q => q.ordine).filter(Boolean))];
+    const testi = [...new Set(quote.map(q => q.date).filter(Boolean))];
+    // stesse date che mancano a tutte le quote: una volta; se no, ordine per ordine
+    const date = testi.length <= 1 ? (testi[0] || '')
+      : testi.map(t => `${t} (${[...new Set(quote.filter(q => q.date === t).map(q => q.ordine).filter(Boolean))].join(' + ') || 'ordine senza numero'})`).join(' · ');
+    const kg = quote.some(q => typeof q.kg === 'number') ? quote.reduce((t, q) => t + (Number(q.kg) || 0), 0) : undefined;
+    return { ...quote[0], ordine: ordini.join(' + '), date, ...(kg !== undefined ? { kg } : {}) };
+  });
 }
 
 /**
@@ -159,7 +198,7 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null, pront
   const entita = [...new Set(flussi.map(f => f.entita))];
   const raccolta = {};
   for (const f of flussi) {
-    raccolta[f.chiave] = { celle: new Map(), vicini: [], annullati: [], senza_peso: [], senza_fine: [], totale: { n: 0, kg: 0 } };
+    raccolta[f.chiave] = { celle: new Map(), vicini: [], annullati: [], senza_peso: [], senza_fine: [], date_da_sistemare: [], totale: { n: 0, kg: 0 } };
   }
 
   const perEntita = {};
@@ -191,8 +230,9 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null, pront
   for (const f of flussi) {
     const dati = raccolta[f.chiave];
     const senzaFine = senzaFinePerEntita[f.entita];
+    // Del senza fine trasporto si dicono tutte le date che mancano: spesso manca anche l'inizio.
     if (senzaFine === null) dati.senza_fine = null;
-    else for (const r of (senzaFine || [])) if (eTerminato(r) && !giornoMovimento(r) && delFlusso(f, r)) dati.senza_fine.push(formulario(r));
+    else for (const r of (senzaFine || [])) if (eTerminato(r) && !giornoMovimento(r) && delFlusso(f, r)) dati.senza_fine.push({ ...formulario(r), date: testoDate(r) });
 
     for (const r of (perEntita[f.entita] || [])) {
       const d = giornoMovimento(r);
@@ -217,6 +257,8 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null, pront
       cella.formulari.push(fir);
       dati.totale.kg += fir.kg;
       if (!fir.kg) dati.senza_peso.push(fir);
+      // contato nella settimana, ma senza l'immissione o l'inizio del trasporto, o con date incoerenti
+      if (dateDaSistemare(r)) dati.date_da_sistemare.push({ ...fir, date: testoDate(r) });
     }
   }
 
@@ -249,9 +291,13 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null, pront
       vicini: [...dati.vicini].sort(perData),
       annullati: [...dati.annullati].sort(perData),
       senza_peso: [...dati.senza_peso].sort(perData),
-      // null se il conteggio non si e' potuto fare; i formulari contati una volta sola
+      // i formulari della settimana con le date obbligatorie da sistemare, uno
+      // per numero di FIR: le quote di un formulario ripartito sono una voce sola
+      date_da_sistemare: formulariConDate([...dati.date_da_sistemare].sort(perData)),
+      // null se il conteggio non si e' potuto fare; i formulari contati una volta
+      // sola, e anche gli esempi: cinque formulari, non cinque quote
       senza_fine: dati.senza_fine === null ? null
-        : { n: contaDistinti(dati.senza_fine), esempi: [...dati.senza_fine].sort(perData).slice(0, 5).map(x => ({ fir: x.fir, ordine: x.ordine })) },
+        : { n: contaDistinti(dati.senza_fine), esempi: formulariConDate([...dati.senza_fine].sort(perData)).slice(0, 5).map(x => ({ fir: x.fir, ordine: x.ordine, date: x.date })) },
       totale: { n: dati.totale.n, kg: Math.round(dati.totale.kg) },
       ultimo_caricamento: caricamenti[0] || null,
       caricamento_in_corso: (aperti || []).find(a => f.caricamenti.includes(a.tipo_file)) || null,
@@ -296,44 +342,70 @@ export function sintesiPerCanale(esito, lettura = null) {
       ? !senzaFlusso && tabelle.filter(t => FLUSSI[t.flusso] && FLUSSI[t.flusso].canale === canale).every(t => t.quadra && t.fonte)
       : !!esito.lettura_verificata;
     const s = sintesi({ flussi, osservazioni: [], lettura_verificata: letturaVerificata, settimana_discorde: esito.settimana_discorde });
-    out.push({ canale, ...s, lettura_verificata: letturaVerificata });
+    // I formulari del canale, contati nella settimana, con le date obbligatorie
+    // da sistemare (22/09/2026): non cambiano il verdetto delle tre fonti, ma si
+    // dicono accanto, canale per canale.
+    const conDate = flussi.flatMap(f => f.date_da_sistemare || []);
+    out.push({ canale, ...s, lettura_verificata: letturaVerificata, ...(conDate.length ? { date_da_sistemare: contaDistinti(conDate) } : {}) });
   }
   return out;
 }
 
+// "FIR RGYTR000001AA, ordine ET26000001: manca la data di inizio trasporto";
+// "ordini ET0 + ET1" per un formulario ripartito
+const descriviConDate = (x) => (x.fir ? `FIR ${x.fir}` : 'formulario senza numero') + (x.ordine ? `, ${/ \+ /.test(x.ordine) ? 'ordini' : 'ordine'} ${x.ordine}` : '') + (x.date ? `: ${x.date}` : '');
+
 /**
- * I terminati senza fine trasporto, flusso per flusso: non stanno in nessuna
- * settimana e non si contano, ma senza dirlo un loro formulario a portale
- * risultava "Manca nel gestionale" senza spiegazione.
+ * Le date obbligatorie dei formulari (immissione, inizio e fine trasporto,
+ * regola dell'utente del 22/09/2026), flusso per flusso e quindi canale per
+ * canale:
+ *   - i terminati senza fine trasporto, di qualunque periodo, non stanno in
+ *     nessuna settimana e non si contano, ma senza dirlo un loro formulario a
+ *     portale risultava "Manca nel gestionale" senza spiegazione;
+ *   - i formulari della settimana senza immissione o senza inizio del
+ *     trasporto, o con date incoerenti, si contano (la fine c'e'), e si dicono.
  */
-export function osservazioniSenzaFine(gestionale) {
+export function osservazioniDate(gestionale) {
   const out = [];
   for (const chiave of ORDINE_FLUSSI) {
     const dati = gestionale && gestionale[chiave];
-    if (!dati || dati.senza_fine === undefined) continue;
+    if (!dati) continue;
     const nome = `${FLUSSI[chiave].titolo} · ${FLUSSI[chiave].canale}`;
     const sf = dati.senza_fine;
     if (sf === null) {
       out.push(`${nome}: non si è potuto contare quanti formulari sono terminati senza data di fine trasporto. Un formulario che a portale risulta "Manca nel gestionale" può essere uno di questi.`);
-      continue;
+    } else if (sf && sf.n) {
+      const esempi = sf.esempi.map(descriviConDate).join('; ');
+      const altri = sf.n > sf.esempi.length ? `; e altri ${sf.n - sf.esempi.length}` : '';
+      out.push(sf.n === 1
+        ? `${nome}: nel gestionale c'è un formulario terminato senza data di fine trasporto (${esempi}). La data è obbligatoria e va inserita: finché manca non sta in nessuna settimana e qui non è contato, e se a portale è della settimana la sua riga risulta "Manca nel gestionale". Si sistema con un nuovo caricamento del file che la riporti.`
+        : `${nome}: nel gestionale ci sono ${sf.n} formulari terminati senza data di fine trasporto (${esempi}${altri}). La data è obbligatoria e va inserita: finché manca non stanno in nessuna settimana e qui non sono contati, e se a portale uno di questi è della settimana la sua riga risulta "Manca nel gestionale". Si sistemano con un nuovo caricamento del file che riporti la data.`);
     }
-    if (!sf.n) continue;
-    const esempi = sf.esempi.map(x => (x.fir ? `FIR ${x.fir}` : 'formulario senza numero') + (x.ordine ? `, ordine ${x.ordine}` : '')).join('; ');
-    const altri = sf.n > sf.esempi.length ? `; e altri ${sf.n - sf.esempi.length}` : '';
-    out.push(sf.n === 1
-      ? `${nome}: nel gestionale c'è un formulario terminato senza data di fine trasporto (${esempi}). Non sta in nessuna settimana e qui non è contato: se a portale è della settimana, la sua riga risulta "Manca nel gestionale". La data si sistema con un nuovo caricamento del file che la riporti.`
-      : `${nome}: nel gestionale ci sono ${sf.n} formulari terminati senza data di fine trasporto (${esempi}${altri}). Non stanno in nessuna settimana e qui non sono contati: se a portale uno di questi è della settimana, la sua riga risulta "Manca nel gestionale". La data si sistema con un nuovo caricamento del file che la riporti.`);
+    // Un formulario ripartito su piu' ordini e' una voce sola: gli esempi e "e
+    // altri" si contano sui formulari, come il numero che li precede.
+    const conDate = formulariConDate(dati.date_da_sistemare || []);
+    if (conDate.length) {
+      const n = conDate.length;
+      const esempi = conDate.slice(0, 5).map(descriviConDate).join('; ');
+      const altri = n > 5 ? `; e altri ${n - 5}` : '';
+      out.push(n === 1
+        ? `${nome}: un formulario della settimana è registrato senza una data obbligatoria o con date incoerenti (${esempi}). È contato nella settimana, perché la fine trasporto c'è, ma le date vanno inserite o corrette.`
+        : `${nome}: ${n} formulari della settimana sono registrati senza una data obbligatoria o con date incoerenti (${esempi}${altri}). Sono contati nella settimana, perché la fine trasporto c'è, ma le date vanno inserite o corrette.`);
+    }
   }
   return out;
 }
 
+// Il nome di prima, per chi lo chiamava cosi'.
+export const osservazioniSenzaFine = osservazioniDate;
+
 /**
  * Il confronto di una settimana, con dentro la conformita' canale per canale e
- * le osservazioni sui terminati senza fine trasporto.
+ * le osservazioni sulle date obbligatorie dei formulari.
  */
 export function confrontaSettimana(lettura, gestionale, periodo) {
   const esito = confronta(lettura, gestionale, periodo);
-  esito.osservazioni.push(...osservazioniSenzaFine(gestionale));
+  esito.osservazioni.push(...osservazioniDate(gestionale));
   esito.per_canale = sintesiPerCanale(esito, lettura);
   return esito;
 }

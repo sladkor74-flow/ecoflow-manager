@@ -29,9 +29,10 @@
         "terziarie",
         "assegnati",
         "verifiche",
-        "giacenze"
+        "giacenze",
+        "extra_raccolta"
       ],
-      "description": "Modulo in cui \u00e8 stata rilevata l'anomalia"
+      "description": "Modulo in cui \u00e8 stata rilevata l'anomalia. extra_raccolta: le schede di Extra Raccolta, per ora con il solo controllo delle date obbligatorie"
     },
     "entity_type": {
       "type": "string",
@@ -62,6 +63,18 @@
     "risolto_note": {
       "type": "string",
       "description": "Note di risoluzione se risolto/ignorato"
+    },
+    "canale": {
+      "type": "string",
+      "description": "Il canale a cui l'alert si riferisce, quando e' uno solo: rete, ACI o extra (extra raccolta); vuoto per le terziarie. Lo scrive il controllo delle date obbligatorie, un alert per modulo e canale: rete, ACI ed extra raccolta non si contano insieme"
+    },
+    "quanti": {
+      "type": "number",
+      "description": "Per gli alert che riassumono un elenco (date obbligatorie): quanti ordini terminati ne fanno parte. Il cruscotto lo legge da qui, senza rileggere gli archivi dei movimenti"
+    },
+    "senza_fine": {
+      "type": "number",
+      "description": "Date obbligatorie: quanti degli ordini dell'elenco non hanno la data di fine trasporto, e quindi non stanno in nessun periodo finche' la data manca"
     }
   },
   "required": [

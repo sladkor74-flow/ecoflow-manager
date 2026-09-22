@@ -6,7 +6,7 @@ import { ARCHIVI_PRIMARIE, DATE_PRIMARIE, archivioPrimaria, recordAssegnato } fr
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
-import { evasioneOrdini, listaOrdini, statoRichiesta, riconosciOrdine, ritiriTerminati, idOrdineDaSalvare } from "../../shared/richiesteEct.ts";
+import { evasioneOrdini, listaOrdini, statoRichiesta, riconosciOrdine, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare } from "../../shared/richiesteEct.ts";
 import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
 
@@ -250,13 +250,18 @@ function dataRitiro(salvata, ids, ev, terminati, presenti) {
 //
 // Una richiesta ancora aperta che aspetta un ordine terminato senza fine
 // trasporto si segnala (terminati_senza_fine): il ritiro non si conta senza la
-// data (regola 1), ma c'e', e sollecitarlo sarebbe sbagliato.
+// data (regola 1), ma c'e', e sollecitarlo sarebbe sbagliato. Una evasa (anche
+// gia' spuntata), o in parte evasa, da un ordine con la fine trasporto ma con un'altra data
+// obbligatoria che manca o non torna si dice anche lei
+// (ordini_con_date_da_sistemare, regola dell'utente del 22/09/2026).
 async function riconosciRitiriEct(base44) {
   const svc = base44.asServiceRole.entities;
   const anno = Number(oggiRoma().slice(0, 4));
-  const richieste = (await fetchAll(svc.RichiestaEct, { anno }))
-    .filter(r => r.esito !== 'evasa' && r.esito !== 'annullata');
-  if (!richieste.length) return { controllate: 0, aggiornate: 0, da_confermare: [], terminati_senza_fine: [] };
+  const tutte = await fetchAll(svc.RichiestaEct, { anno });
+  const richieste = tutte.filter(r => r.esito !== 'evasa' && r.esito !== 'annullata');
+  // Le evase gia' spuntate non si toccano: si guardano solo per le date.
+  const evase = tutte.filter(r => r.esito === 'evasa');
+  if (!richieste.length && !evase.length) return { controllate: 0, aggiornate: 0, da_confermare: [], terminati_senza_fine: [], ordini_con_date_da_sistemare: [] };
 
   // Gli stessi archivi del caricamento delle richieste: gli assegnati e tutte le
   // primarie, perche' l'ordine della richiesta puo' essere gia' terminato.
@@ -267,12 +272,13 @@ async function riconosciRitiriEct(base44) {
     fetchAll(svc.PrimariaAci),
   ]);
   const ordini = [...assRete, ...assAci, ...rete, ...aci];
-  const { terminati, senzaFine } = ritiriTerminati([...rete, ...aci]);
+  const { terminati, senzaFine, daSistemare } = ritiriTerminati([...rete, ...aci]);
   const presenti = new Set(ordini.map(o => String(o.id_ordine || '').trim()).filter(Boolean));
 
   let aggiornate = 0;
   const daConfermare = [];
   const terminatiSenzaFine = [];
+  const conDate = [];
   for (const r of richieste) {
     const campi: any = {};
     if (!String(r.id_ordine_manuale || '').trim()) Object.assign(campi, idOrdineDaSalvare(r, riconosciOrdine(r, ordini)));
@@ -284,13 +290,15 @@ async function riconosciRitiriEct(base44) {
     campi.esito = statoRichiesta({ ...r, ...campi });
     const senzaData = ids.filter(id => senzaFine.has(id));
     if (campi.esito === 'aperta' && senzaData.length) terminatiSenzaFine.push({ pdr: r.pdr_nome, id_ordine: senzaData.join(', ') });
+    conDate.push(...ordiniConDateDaSistemare(r.pdr_nome, ids, terminati, daSistemare));
     if (!Object.keys(campi).some(k => String(r[k] ?? '') !== String(campi[k] ?? ''))) continue;
     // chi diventa "ritirata, da spuntare" adesso va detto: e' la riga su cui rispondere al consorzio
     if (campi.esito === 'da_confermare' && r.esito !== 'da_confermare') daConfermare.push({ pdr: r.pdr_nome, id_ordine: ids.join(', '), evasa_il: campi.evasione_rilevata_il });
     await svc.RichiestaEct.update(r.id, campi);
     aggiornate++;
   }
-  return { controllate: richieste.length, aggiornate, da_confermare: daConfermare, terminati_senza_fine: terminatiSenzaFine };
+  for (const r of evase) conDate.push(...ordiniConDateDaSistemare(r.pdr_nome, listaOrdini(r), terminati, daSistemare));
+  return { controllate: richieste.length, aggiornate, da_confermare: daConfermare, terminati_senza_fine: terminatiSenzaFine, ordini_con_date_da_sistemare: conDate };
 }
 
 // Gli ordini delle richieste si cercano fra primarie e assegnati: se il loro

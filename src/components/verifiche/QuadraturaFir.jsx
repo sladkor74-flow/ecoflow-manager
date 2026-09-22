@@ -10,7 +10,7 @@ import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
 import {
   oggiRoma, aggiungiGiorni, settimanaIso, intervalloSettimana, settimaneNellAnno, descriviIntervallo, dataIt,
 } from '@/lib/verifiche';
-import { NOME_VERDETTO, COLORE_VERDETTO, misura, tonnellate, giornoRoma, FORMATI, tipoDiFile, leggiPivotDaExcel } from '@/lib/quadraturaFir';
+import { NOME_VERDETTO, COLORE_VERDETTO, misura, tonnellate, giornoRoma, FORMATI, tipoDiFile, leggiPivotDaExcel, formulariConDate, descriviConDate } from '@/lib/quadraturaFir';
 import { esportaQuadraturaFirPdf } from '@/lib/quadraturaFirPdf';
 
 // Sezione del modulo Verifiche: la quadratura settimanale dei formulari.
@@ -61,6 +61,13 @@ function EsitoCanale({ c }) {
       </div>
       <div className={`text-sm ${piena ? 'text-emerald-900' : 'text-amber-900'}`}>{verdettoCanale(c)}</div>
       <div className="text-xs text-muted-foreground">{c.congruenti} {c.congruenti === 1 ? 'riga congruente' : 'righe congruenti'}</div>
+      {/* Immissione, inizio e fine trasporto sono obbligatorie (22/09/2026):
+          non cambiano il verdetto delle tre fonti, ma nel canale si dicono. */}
+      {c.date_da_sistemare > 0 && (
+        <div className="text-xs text-red-700 mt-0.5">
+          {c.date_da_sistemare === 1 ? '1 formulario registrato' : `${c.date_da_sistemare} formulari registrati`} senza una data obbligatoria o con date incoerenti
+        </div>
+      )}
     </div>
   );
 }
@@ -97,6 +104,9 @@ function Totale({ etichetta, valore }) {
 function Flusso({ flusso, tutte }) {
   const celle = tutte ? flusso.celle : flusso.celle.filter(c => c.verdetto !== 'congruente' || c.osservazione);
   const nascoste = flusso.celle.length - celle.length;
+  // Uno per formulario, anche se ripartito su piu' ordini: "e altri" conta i
+  // formulari, come il riquadro del canale (22/09/2026).
+  const conDate = formulariConDate(flusso.date_da_sistemare || []);
   return (
     <div className="border rounded-lg bg-card overflow-hidden">
       <div className="px-4 py-3 border-b bg-muted/20 space-y-2">
@@ -118,6 +128,18 @@ function Flusso({ flusso, tutte }) {
             <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span>{n}</span>
           </div>
         ))}
+        {/* I formulari del flusso contati nella settimana ma senza l'immissione o
+            l'inizio del trasporto, o con date incoerenti: le date vanno inserite. */}
+        {conDate.length > 0 && (
+          <div className="flex items-start gap-2 text-xs text-red-800 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <span>
+              Formulari registrati senza una data obbligatoria o con date incoerenti, contati nella settimana perché la fine trasporto c&apos;è:{' '}
+              {conDate.slice(0, 8).map(descriviConDate).join('; ')}
+              {conDate.length > 8 ? `; e altri ${conDate.length - 8}` : ''}. Le date vanno inserite o corrette.
+            </span>
+          </div>
+        )}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -309,6 +331,8 @@ export default function QuadraturaFir({ isAdmin }) {
   const flussiGestionale = Object.entries(gestionale).filter(([, v]) => v.totale && v.totale.n > 0);
   // null: il conteggio dei senza fine trasporto non si e' potuto fare, e si dice.
   const senzaFine = Object.entries(gestionale).filter(([, v]) => v.senza_fine === null || (v.senza_fine && v.senza_fine.n > 0));
+  // i formulari della settimana senza l'immissione o l'inizio del trasporto, o con date incoerenti
+  const conDate = Object.entries(gestionale).filter(([, v]) => v.date_da_sistemare && v.date_da_sistemare.n > 0);
   // Fino a quando i movimenti del gestionale sono aggiornati: l'ultimo caricamento di ogni tipo.
   const aggiornatoAl = [...new Map(Object.values(gestionale).filter(v => v.ultimo_caricamento && v.ultimo_caricamento.data)
     .map(v => [v.ultimo_caricamento.data + v.ultimo_caricamento.nome_file, v.ultimo_caricamento])).values()]
@@ -446,17 +470,29 @@ export default function QuadraturaFir({ isAdmin }) {
                   ))}
                 </div>
               )}
-              {/* I terminati senza fine trasporto non stanno in nessuna settimana:
-                  non sono contati qui sopra, e si dice quanti sono, flusso per flusso. */}
-              {senzaFine.length > 0 && (
-                <div className="text-sm text-amber-900 space-y-0.5">
+              {/* Immissione, inizio e fine trasporto sono obbligatorie (regola
+                  dell'utente del 22/09/2026). I terminati senza fine trasporto non
+                  stanno in nessuna settimana: non sono contati qui sopra, e si dice
+                  quanti sono, flusso per flusso. Quelli della settimana senza
+                  immissione o inizio, o con date incoerenti, sono contati e si dicono. */}
+              {(senzaFine.length > 0 || conDate.length > 0) && (
+                <div className="text-sm text-red-900 space-y-0.5">
                   {senzaFine.map(([k, v]) => (
                     <div key={k} className="flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                       <span>
                         {v.titolo} · {v.canale}: {v.senza_fine === null
                           ? 'non si è potuto contare quanti formulari sono terminati senza data di fine trasporto.'
-                          : `${v.senza_fine.n} ${v.senza_fine.n === 1 ? 'formulario terminato' : 'formulari terminati'} senza data di fine trasporto (${v.senza_fine.esempi.map(x => x.fir || 'senza numero').join(', ')}${v.senza_fine.n > v.senza_fine.esempi.length ? ', …' : ''}): non stanno in nessuna settimana e non sono contati.`}
+                          : `${v.senza_fine.n} ${v.senza_fine.n === 1 ? 'formulario terminato' : 'formulari terminati'} senza data di fine trasporto (${v.senza_fine.esempi.map(descriviConDate).join('; ')}${v.senza_fine.n > v.senza_fine.esempi.length ? '; …' : ''}): la data è obbligatoria e va inserita. Finché manca non stanno in nessuna settimana e non sono contati.`}
+                      </span>
+                    </div>
+                  ))}
+                  {conDate.map(([k, v]) => (
+                    <div key={`date-${k}`} className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                      <span>
+                        {v.titolo} · {v.canale}: {v.date_da_sistemare.n} {v.date_da_sistemare.n === 1 ? 'formulario della settimana registrato' : 'formulari della settimana registrati'} senza una data obbligatoria o con date incoerenti
+                        {' '}({v.date_da_sistemare.esempi.map(descriviConDate).join('; ')}{v.date_da_sistemare.n > v.date_da_sistemare.esempi.length ? '; …' : ''}): sono contati, ma le date vanno inserite o corrette.
                       </span>
                     </div>
                   ))}

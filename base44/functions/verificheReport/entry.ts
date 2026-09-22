@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import {
-  caricaMovimenti, soggettiDellaSettimana, oggiRoma, statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento, senzaFinePerCanale,
+  caricaMovimenti, soggettiDellaSettimana, oggiRoma, statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento, datePerCanale,
 } from "../../shared/reportSettimanali.ts";
 import { eliminaCampo } from "../../shared/testoLungo.ts";
 import { ricontrollaVerifiche } from "../../shared/esitoVerifica.ts";
@@ -33,7 +33,7 @@ const CAMPI_RIEPILOGO = [
   'id', 'soggetto_chiave', 'soggetto_nome', 'anno', 'settimana', 'data_inizio', 'data_fine', 'file_nome', 'file_tipo', 'nota',
   'stato', 'avviata_il', 'errore', 'righe_report', 'conformi', 'con_discrepanze', 'non_trovate', 'duplicate',
   'assenti_nel_report', 'uscite_verificate', 'righe_escluse', 'conformita', 'anomalie', 'osservazioni', 'rettifiche',
-  'verificata_il', 'scade_il', 'created_date',
+  'date_da_sistemare', 'verificata_il', 'scade_il', 'created_date',
 ];
 
 export default async function(req) {
@@ -115,11 +115,14 @@ export default async function(req) {
       elenco.push({ chiave: v.soggetto_chiave, nome: v.soggetto_nome, ruoli: [], canali: [], movimentato: false, verifica: riepilogo(v) });
     }
 
-    // I terminati senza fine trasporto non stanno in nessuna settimana: si dicono
-    // per canale, cosi' un loro formulario "non presente" nel report si spiega.
+    // I terminati con una data obbligatoria che manca o non torna (immissione,
+    // inizio o fine trasporto: regola dell'utente del 22/09/2026) si dicono per
+    // canale e archivio, di qualunque anno. Quelli senza fine trasporto non
+    // stanno in nessuna settimana: un loro formulario nel report di un impianto
+    // e' l'anomalia "formulario registrato senza data di fine trasporto".
     return Response.json({
       anno, settimana, inizio, fine, oggi, soggetti: elenco, cancellate, ricalcolo,
-      senza_fine: senzaFinePerCanale(dati.senza_fine),
+      date_da_sistemare: datePerCanale(dati.date_da_sistemare),
     });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });

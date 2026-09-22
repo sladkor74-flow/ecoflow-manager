@@ -1,11 +1,15 @@
 import React from 'react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { formatIntero } from '@/lib/utils';
+import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 
 // I tempi arrivano gia' calcolati da computeSlaMetrics (primarieReteAnalytics.ts):
 // dall'immissione dell'ordine alla fine del trasporto, mai alla chiusura a portale.
 // Qui si dice a parole cosa misurano, di quale anno, e quanti terminati non si
-// sono potuti misurare.
+// sono potuti misurare. Dal 22/09/2026 le date incoerenti sono tutte quelle di
+// dateIncoerenti (inizio prima dell'immissione, fine prima dell'inizio o
+// dell'immissione), non piu' la sola fine prima dell'immissione; e sotto si
+// dicono tutte le date da sistemare dell'anno, anche degli ordini misurati.
 export default function SlaMetrics({ data, anniFiltro = [] }) {
   if (!data) return null;
 
@@ -31,11 +35,18 @@ export default function SlaMetrics({ data, anniFiltro = [] }) {
           {formatIntero(quantiNonMisurati)} {quantiNonMisurati === 1 ? 'ordine terminato non è stato misurato' : 'ordini terminati non sono stati misurati'}
           {nonMisurati.senza_fine_trasporto > 0 && <> · {formatIntero(nonMisurati.senza_fine_trasporto)} senza fine trasporto</>}
           {nonMisurati.senza_immissione > 0 && <> · {formatIntero(nonMisurati.senza_immissione)} senza data di immissione</>}
-          {nonMisurati.date_incoerenti > 0 && <> · {formatIntero(nonMisurati.date_incoerenti)} con la fine trasporto prima dell'immissione</>}
+          {nonMisurati.date_incoerenti > 0 && <> · {formatIntero(nonMisurati.date_incoerenti)} con date incoerenti</>}
           {nonMisurati.esempi?.length > 0 && <> (es. {nonMisurati.esempi.join(', ')})</>}
           : {quantiNonMisurati === 1 ? 'resta fuori' : 'restano fuori'} dai tempi finché le date non si correggono a portale.
         </div>
       )}
+      <RiepilogoDate
+        canale="Rete"
+        riepilogo={data.date_da_sistemare}
+        effetto={false}
+        esempi
+        nota={`Immissione, inizio e fine trasporto sono obbligatorie in ogni formulario${data.anno ? ` (terminati del ${data.anno}; chi non ha la fine trasporto, per l'anno di immissione)` : ''}: vanno corrette nel file del portale e ricaricate.`}
+      />
       {/* KPI summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="border rounded-lg p-3">

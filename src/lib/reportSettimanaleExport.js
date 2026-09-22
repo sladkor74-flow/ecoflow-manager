@@ -28,6 +28,24 @@ const t = (v) => formatTonnellate(v);
 const dataIt = (iso) => (iso ? iso.split('-').reverse().join('/') : '');
 const coloreAvanzamento = (p) => (p >= 100 ? C.verde : p >= 70 ? C.blu : p >= 40 ? C.ambra : C.rosso);
 
+// Le date obbligatorie dei formulari (regola dell'utente del 22/09/2026), a
+// parole: le stesse frasi nel PDF e a video (ReportSettimanale.jsx), che prima
+// non le mostrava e chi guardava la tabella non sapeva dei terminati di rete
+// esclusi. report.date_da_sistemare arriva da reportSettimanale: { senza_fine,
+// nel_mese }, ciascuno { ordini, senza_fine, esempi } (riepilogoDate di
+// reportSettimanali.ts) oppure null. [] se non c'e' niente da dire.
+export const INTRO_DATE = 'Date obbligatorie dei formulari (immissione, inizio e fine trasporto) da inserire o correggere.';
+export function frasiDateDaSistemare(report) {
+  const d = report && report.date_da_sistemare;
+  if (!d || (!d.senza_fine && !d.nel_mese)) return [];
+  const elenco = (r) => r.esempi.map(v => `${v.id_ordine || 'senza ID'}${v.numero_fir ? ` (FIR ${v.numero_fir})` : ''}: ${v.date}`).join('; ')
+    + (r.ordini > r.esempi.length ? `; e altri ${r.ordini - r.esempi.length}` : '');
+  return [
+    d.senza_fine ? `Senza data di fine trasporto, di qualunque periodo, e quindi non contati in nessuna settimana: ${d.senza_fine.ordini} ${d.senza_fine.ordini === 1 ? 'ordine' : 'ordini'} (${elenco(d.senza_fine)}).` : '',
+    d.nel_mese ? `Di ${report.nome_mese}, contati ma con una data obbligatoria mancante o date incoerenti: ${d.nel_mese.ordini} ${d.nel_mese.ordini === 1 ? 'ordine' : 'ordini'} (${elenco(d.nel_mese)}).` : '',
+  ].filter(Boolean);
+}
+
 export function esportaReportSettimanalePdf(report, gruppi, totale, { impianti = false } = {}) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
@@ -300,10 +318,39 @@ export function esportaReportSettimanalePdf(report, gruppi, totale, { impianti =
     totaleAnno: { testo: t(totale.totale_anno) },
   }, { sfondo: C.scuro, grassetto: true, colore: C.bianco, h: 7.5, senzaBordo: true });
 
+  noteDate();
   if (impianti) riepilogoImpianti();
   piede();
 
   doc.save(`Report settimanale ${report.nome_mese} ${report.anno}${impianti ? ' con impianti' : ''}.pdf`);
+
+  // Immissione, inizio e fine trasporto sono obbligatorie nei formulari (regola
+  // dell'utente del 22/09/2026): sotto la tabella si dicono i terminati di rete
+  // senza fine trasporto, che il report non conta in nessuna settimana, e quelli
+  // del mese a cui manca un'altra data o con date incoerenti, che sono contati
+  // ma vanno corretti. Il server li manda in date_da_sistemare.
+  function noteDate() {
+    const frasi = frasiDateDaSistemare(report);
+    if (!frasi.length) return;
+    const testo = `${INTRO_DATE} ${frasi.join(' ')}`;
+    doc.setFontSize(7.2);
+    const linee = doc.splitTextToSize(testo, W - 2 * M - 6);
+    const h = linee.length * 3.2 + 5;
+    // su una pagina nuova non si ripete l'intestazione della tabella
+    intestazioneRipetuta = () => {};
+    spazio(h + 4);
+    y += 4;
+    doc.setFillColor(254, 242, 242);
+    doc.setDrawColor(...C.rosso);
+    doc.setLineWidth(0.2);
+    doc.roundedRect(M, y, W - 2 * M, h, 1.2, 1.2, 'FD');
+    doc.setTextColor(...C.rosso);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.2);
+    linee.forEach((l, k) => doc.text(l, M + 3, y + 4.2 + k * 3.2));
+    doc.setTextColor(...C.testo);
+    y += h;
+  }
 
   // Riepilogo per impianto di destinazione: tonnellate del mese, quota sul raccolto
   // e raccoglitori che vi hanno conferito.

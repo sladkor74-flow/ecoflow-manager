@@ -172,9 +172,16 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
   };
 
   const fieldErr = (name) => fieldErrors.includes(name) ? 'border-destructive' : '';
+  // Regole dell'utente del 22/09/2026: un viaggio misto a prezzo per viaggio si
+  // divide fra i canali in proporzione ai chili; i costi dell'extra raccolta li
+  // scrive lui sull'intervento, e la tariffa serve solo a proporli.
   const tipologiaNote = !isAttiva && form.prestazione === 'TRASPORTO_SECONDARIA'
-    ? 'Sulle secondarie il prezzo dipende dalla tratta, non dal canale: lo stesso viaggio può trasportare sia RETE sia ACI. Scegli Tutte salvo contratti che distinguano espressamente i due canali.'
-    : '';
+    ? 'Sulle secondarie il prezzo dipende dalla tratta, non dal canale: lo stesso viaggio può trasportare sia RETE sia ACI. Scegli Tutte salvo contratti che distinguano espressamente i due canali. Con il prezzo a viaggio, un viaggio misto si divide fra RETE e ACI in proporzione ai chili di ciascuno. Con una tariffa del solo canale RETE (o del solo ACI), la quota dell\'altro canale sui viaggi misti resta senza prezzo: il gestionale la segnala come da pagare.'
+    : !isAttiva && form.tipologia === 'EXTRA_RACCOLTA'
+      ? "Nell'extra raccolta la passiva paga i costi scritti sull'intervento: questa tariffa serve solo a proporli nel modulo Extra Raccolta, quando il campo è ancora vuoto. La tariffa di RETE non si usa mai al suo posto."
+      : isAttiva && form.tipologia === 'EXTRA_RACCOLTA'
+        ? "Vale per gli interventi senza un prezzo scritto. Se per l'anno manca, il gestionale usa la tariffa base Ecotyre (202 €/t nel 2026)."
+        : '';
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -222,6 +229,7 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
                     <SelectContent>{tipologiaOpts.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
                   </Select>
                 )}
+                {tipologiaNote && <p className="text-xs text-muted-foreground mt-1">{tipologiaNote}</p>}
               </div>
               {/* Servizio Ecotyre */}
               {!archiviata && (

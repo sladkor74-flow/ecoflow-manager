@@ -244,7 +244,17 @@ export function segnalazioni(v) {
 
 const GRAVITA_CAMPO = { produttore: 'osservazione', destinatario: 'osservazione', trasportatore: 'osservazione' };
 
+// Un formulario registrato senza fine trasporto: le verifiche salvate prima del
+// 22/09/2026 lo scrivevano come rettifica a nostra cura, con campo "fine". Per la
+// regola dell'utente di quel giorno e' un'anomalia (la data e' obbligatoria), e
+// finche' il riconfronto non le riscrive si leggono cosi'.
+const SENZA_FINE_SALVATO = /terminato senza data di fine trasporto/i;
+
+/** Il campo di una discrepanza: "date" anche per le verifiche salvate prima della regola delle date obbligatorie. */
+export const campoDi = (d) => (SENZA_FINE_SALVATO.test(d.messaggio || '') ? 'date' : d.campo);
+
 export function gravita(d) {
+  if (campoDi(d) === 'date') return 'anomalia';
   if (d.gravita) return d.gravita;
   if (/errato nel gestionale/i.test(d.messaggio)) return 'rettifica';
   if (/non riguarda|codice produttore/i.test(d.messaggio)) return 'anomalia';
@@ -284,6 +294,7 @@ function dettaglioPerCategoria(quadratura, report, registrati, formato) {
 const ETICHETTA_CAMPO = {
   fir: 'Numero di formulario', kg: 'Peso effettivo', fine: 'Data di fine trasporto', inizio: 'Data di inizio trasporto',
   classe: 'Classe PFU', produttore: 'Produttore', destinatario: 'Destinatario', trasportatore: 'Trasportatore', ordine: 'Numero di ordine',
+  date: 'Date obbligatorie',
 };
 
 /**
@@ -296,15 +307,31 @@ const ETICHETTA_CAMPO = {
 // almeno un formulario, nel report o registrato: piena se le sue movimentazioni
 // quadrano e non ha anomalie ne' formulari mancanti. I formulari del report che
 // il gestionale non conosce non hanno canale e si contano a parte.
+// Una riga col formulario registrato senza fine trasporto e' un'anomalia del suo
+// canale (22/09/2026), anche nelle verifiche salvate prima senza "anomalia".
+// Stessa regola di base44/shared/reportSettimanali.ts, riga per riga.
 export const CANALI_DEL_VERDETTO = [['rete', 'Rete'], ['aci', 'ACI'], ['extra', 'Extra raccolta']];
+// Il canale di una riga per il verdetto: quello della movimentazione a cui e'
+// abbinata. Una riga col formulario registrato senza una data obbligatoria, o
+// con date incoerenti, che nel gestionale non riguarda l'impianto (per esempio
+// chiuso su un'altra destinazione) non ha movimentazione, ma il formulario un
+// canale ce l'ha: l'anomalia della data pesa li' (22/09/2026). Senza, il canale
+// restava "pieno" accanto a un'anomalia, e il PDF diceva all'impianto che non
+// c'era niente da fare. '' per le righe senza canale.
+export function canaleDelVerdetto(e) {
+  const k = String((e && e.categoria) || '').split('-')[2] || '';
+  if (k) return k;
+  const conDate = !!e && (!!e.senza_fine_trasporto || (e.discrepanze || []).some(d => d.campo === 'date'));
+  return conDate && e.gestionale ? String(e.gestionale.canale || '') : '';
+}
 export function conformitaPerCanale(esito) {
   const canaleDi = (k) => String(k || '').split('-')[2] || '';
   return CANALI_DEL_VERDETTO.map(([canale, nome]) => {
     const quadratura = (esito.quadratura || []).filter(q => canaleDi(q.chiave) === canale);
-    const righe = (esito.esiti || []).filter(e => canaleDi(e.categoria) === canale);
+    const righe = (esito.esiti || []).filter(e => canaleDelVerdetto(e) === canale);
     const assenti = (esito.assenti || []).filter(a => canaleDi(a.categoria) === canale);
     if (!quadratura.some(q => q.formulari_report || q.formulari_gestionale) && !righe.length && !assenti.length) return null;
-    const anomalie = righe.filter(e => e.anomalia).length + assenti.length;
+    const anomalie = righe.filter(e => e.anomalia || e.senza_fine_trasporto).length + assenti.length;
     const quadra = quadratura.every(q => q.formulari_report === q.formulari_gestionale && q.kg_report === q.kg_gestionale);
     return { canale, nome, conformita: anomalie === 0 && quadra ? 'piena' : 'parziale', anomalie, assenti: assenti.length };
   }).filter(Boolean);
@@ -345,16 +372,33 @@ export function sintesiVerifica(v, esito) {
   for (const e of esiti) {
     if (e.esito === 'non_trovata') continue;
     for (const d of (e.discrepanze || [])) {
+      const campo = campoDi(d);
       const g = e.esito === 'duplicata' && d.campo === 'fir' && /duplicata/i.test(d.messaggio) ? 'anomalia' : gravita(d);
       const etichetta = /duplicata/i.test(d.messaggio) ? 'Riga duplicata'
         : /non riguarda/i.test(d.messaggio) ? 'Formulario di un altro impianto'
           : /settimana \d+ e non in quella verificata/i.test(d.messaggio) ? 'Settimana di competenza'
-            : ETICHETTA_CAMPO[d.campo] || d.campo;
-      voci[g].push({ esito: e, campo: d.campo, etichetta, testo: testoPerImpianto(d.messaggio) });
+            : ETICHETTA_CAMPO[campo] || campo;
+      // Il messaggio salvato prima del 22/09/2026 si scrive con le parole di
+      // adesso: la data manca ed e' obbligatoria.
+      const testo = SENZA_FINE_SALVATO.test(d.messaggio || '')
+        ? 'Formulario registrato senza data di fine trasporto: la data è obbligatoria e va inserita'
+        : testoPerImpianto(d.messaggio);
+      voci[g].push({ esito: e, campo, etichetta, testo });
     }
   }
   const inPiu = esiti.filter(e => e.esito === 'non_trovata');
+  // Le altre righe del report con un'anomalia che restano senza canale: formulari
+  // che nel gestionale non riguardano l'impianto (o loro duplicati), con le date
+  // a posto. Il verdetto per canale non le vede, quindi il "tutto a posto" le
+  // esclude a parte, come i formulari in piu' (22/09/2026).
+  const senzaCanale = esiti.filter(e => e.esito !== 'non_trovata' && e.categoria === 'non_registrati' && !canaleDelVerdetto(e)
+    && (e.anomalia !== undefined ? !!e.anomalia : e.esito !== 'conforme'));
   const mancanti = [...assenti, ...usciteNonRiportate];
+  // Formulari registrati senza una data obbligatoria o con date incoerenti: righe
+  // del report e registrati assenti nel report. Si dicono tutti, perche' la data
+  // va inserita in ogni caso.
+  const conDate = [...new Set(voci.anomalia.filter(x => x.campo === 'date').map(x => x.esito))];
+  const mancantiConDate = mancanti.filter(m => m.date);
 
   const conta = (campi) => voci.anomalia.filter(x => campi.includes(x.campo) && x.etichetta !== 'Riga duplicata' && x.etichetta !== 'Formulario di un altro impianto').length;
   const controlli = [
@@ -365,6 +409,7 @@ export function sintesiVerifica(v, esito) {
     { nome: 'Numeri di formulario', n: conta(['fir']) },
     { nome: 'Peso effettivo di ciascun formulario', n: conta(['kg']) },
     { nome: 'Date di trasporto', n: conta(['fine', 'inizio']) },
+    { nome: 'Date obbligatorie dei formulari registrati (immissione, inizio e fine trasporto)', n: conDate.length + mancantiConDate.length },
     { nome: 'Classe dei PFU', n: conta(['classe']) },
     { nome: 'Formulari registrati assenti nel report', n: mancanti.length },
     { nome: 'Formulari del report non registrati', n: inPiu.length },
@@ -383,10 +428,18 @@ export function sintesiVerifica(v, esito) {
     perCanale,
     // Tutto a posto: ogni canale pieno e nessun formulario sconosciuto. Non e' un
     // verdetto unico che somma i canali: e' "pieni tutti".
-    piena: perCanale.length && v.file_tipo !== 'dichiarazione' ? perCanale.every(c => c.conformita === 'piena') && !inPiu.length : conformita === 'piena',
+    piena: perCanale.length && v.file_tipo !== 'dichiarazione' ? perCanale.every(c => c.conformita === 'piena') && !inPiu.length && !senzaCanale.length : conformita === 'piena',
     anomalie: voci.anomalia, osservazioni: voci.osservazione, rettifiche: voci.rettifica,
-    mancanti, inPiu, escluse, esiti,
+    mancanti, inPiu, senzaCanale, escluse, esiti,
+    // le righe e i registrati assenti a cui manca una data obbligatoria
+    conDate, mancantiConDate,
   };
+}
+
+/** La nota sulle date obbligatorie di un registrato assente nel report, o '' se sono a posto. */
+export function noteDateAssente(m) {
+  if (!m || !m.date) return '';
+  return testoPerImpianto(m.date_testo || 'Formulario registrato con date obbligatorie mancanti o incoerenti: vanno inserite o corrette');
 }
 
 export function analisiInCorso(v) {
@@ -469,6 +522,7 @@ export async function scaricaExcelVerifica(v) {
       ? [['Esito', sintesi.conformita === 'piena' ? 'Conformità piena' : 'Conformità parziale']]
       : sintesi.perCanale.map(c => [`Esito ${c.nome.toLowerCase() === 'aci' ? 'ACI' : c.nome.toLowerCase()}`, c.conformita === 'piena' ? 'Conformità piena' : `Conformità parziale · ${c.anomalie} ${c.anomalie === 1 ? 'anomalia' : 'anomalie'}`])),
     ...(!sintesi.dichiarazione && sintesi.inPiu.length ? [['Formulari del report non registrati', `${sintesi.inPiu.length}, senza canale: il gestionale non li conosce`]] : []),
+    ...(!sintesi.dichiarazione && sintesi.senzaCanale.length ? [['Formulari di altri impianti', `${sintesi.senzaCanale.length} ${sintesi.senzaCanale.length === 1 ? 'riga' : 'righe'} del report con formulari che nel gestionale non riguardano l'impianto: fuori dal verdetto dei canali, da verificare`]] : []),
     ['Settimana', `${v.settimana} del ${v.anno}, dal ${dataIt(v.data_inizio)} al ${dataIt(v.data_fine)}, secondo la data di fine trasporto`],
     ['File verificato', v.file_nome],
     ['Lettura del file', lettura.modo === 'dichiarazione'
@@ -477,6 +531,11 @@ export async function scaricaExcelVerifica(v) {
       ? descriviLettura(lettura).join('\n')
       : `${lettura.modo === 'pdf' ? 'PDF' : 'immagine'} trascritto dall'agente, pesi in ${lettura.unita === 't' ? 'tonnellate' : 'chilogrammi'}`],
     ['Righe non considerate', v.righe_escluse ? `${v.righe_escluse} (${formatKg(v.peso_escluse_kg || 0)} kg): carichi di altre settimane o di altri consorzi, elencati nel foglio "Non considerate"` : 'nessuna'],
+    // Immissione, inizio e fine trasporto sono obbligatorie (22/09/2026): se a un
+    // formulario registrato ne manca una si dice gia' nel riepilogo.
+    ...(sintesi.conDate.length || sintesi.mancantiConDate.length
+      ? [['Date obbligatorie', `${sintesi.conDate.length + sintesi.mancantiConDate.length} formulari registrati senza una data obbligatoria (immissione, inizio o fine trasporto) o con date incoerenti: anomalie del loro canale, le date vanno inserite o corrette. Il dettaglio è nei fogli "Verifica righe" e "Assenti nel report"`]]
+      : []),
     ['Criteri', 'Ingressi confrontati con le primarie, uscite con le secondarie; peso al chilogrammo; data di verifica: fine trasporto'],
     ['Verifica eseguita il', v.verificata_il ? new Date(v.verificata_il).toLocaleString('it-IT') : ''],
     ['Cancellazione dal gestionale', dataIt(v.scade_il)],
@@ -557,8 +616,9 @@ export async function scaricaExcelVerifica(v) {
   ];
   f.columns = colonne.map(([, w]) => ({ width: w }));
   intestazione(f, colonne.map(([t]) => t));
-  // Colonne da evidenziare per ciascun campo discordante.
-  const CELLE_CAMPO = { fir: [5, 6], ordine: [7, 23], kg: [8, 9, 10], fine: [11, 12], inizio: [13, 14], produttore: [15, 16], destinatario: [17, 18], trasportatore: [19, 20], classe: [21, 22] };
+  // Colonne da evidenziare per ciascun campo discordante. Le date obbligatorie
+  // mancanti accendono le colonne delle date di trasporto.
+  const CELLE_CAMPO = { fir: [5, 6], ordine: [7, 23], kg: [8, 9, 10], fine: [11, 12], inizio: [13, 14], date: [11, 12, 13, 14], produttore: [15, 16], destinatario: [17, 18], trasportatore: [19, 20], classe: [21, 22] };
 
   for (const e of esito.esiti) {
     const rep = e.report || {};
@@ -587,7 +647,7 @@ export async function scaricaExcelVerifica(v) {
     riga.getCell(3).font = { bold: true, color: { argb: testo } };
     if (e.esito !== 'conforme') riga.getCell(4).font = { color: { argb: testo } };
     for (const d of (e.discrepanze || [])) {
-      for (const i of (CELLE_CAMPO[d.campo] || [])) riga.getCell(i).fill = riempi(COLORI.rosso);
+      for (const i of (CELLE_CAMPO[campoDi(d)] || [])) riga.getCell(i).fill = riempi(COLORI.rosso);
     }
   }
   f.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: colonne.length } };
@@ -602,9 +662,10 @@ export async function scaricaExcelVerifica(v) {
     a.addRow(['', 'Tutti i movimenti della settimana verificati compaiono nel report.']);
   }
   for (const m of mancanti) {
+    const nota = m.tipo === 'uscita' ? 'Uscita registrata nel gestionale ma non riportata nel report del fornitore' : 'Ingresso registrato nel gestionale ma non riportato nel report del fornitore';
     const riga = a.addRow([nomeTipo(m.tipo), m.fir, m.kg, dataIt(m.fine), dataIt(m.inizio), m.produttore, m.destinatario, m.trasportatore, m.classe || '', m.fonte, m.ordine,
-      m.tipo === 'uscita' ? 'Uscita registrata nel gestionale ma non riportata nel report del fornitore' : 'Ingresso registrato nel gestionale ma non riportato nel report del fornitore']);
-    riga.eachCell({ includeEmpty: true }, (c, i) => { c.border = bordi; c.fill = riempi(COLORI.rosso); if (i === 3) c.numFmt = '#,##0'; });
+      m.date ? `${nota}. ${m.date_testo || 'Date obbligatorie mancanti o incoerenti: vanno inserite o corrette'}` : nota]);
+    riga.eachCell({ includeEmpty: true }, (c, i) => { c.border = bordi; c.fill = riempi(COLORI.rosso); if (i === 3) c.numFmt = '#,##0'; if (i === 12) c.alignment = { wrapText: true, vertical: 'top' }; });
   }
 
   // --- Righe non considerate ---
@@ -635,7 +696,7 @@ export async function scaricaExcelVerifica(v) {
   }
   for (const m of mancanti) {
     const cosa = m.tipo === 'uscita' ? `Uscita del ${dataIt(m.fine)} verso ${m.destinatario}` : `Ingresso del ${dataIt(m.fine)}`;
-    const riga = c.addRow([m.fir, `${cosa} di ${formatKg(m.kg)} kg, trasportato da ${m.trasportatore}, non riportato nel report`]);
+    const riga = c.addRow([m.fir, `${cosa} di ${formatKg(m.kg)} kg, trasportato da ${m.trasportatore}, non riportato nel report${m.date ? `. ${noteDateAssente(m)}` : ''}`]);
     riga.eachCell(x => { x.border = bordi; x.alignment = { wrapText: true, vertical: 'top' }; });
     righeComunicazione++;
   }

@@ -5,7 +5,8 @@ import { eAci } from "../../shared/canaleSecondaria.ts";
 import { giornoRoma } from "../../shared/giornoItaliano.ts";
 import { eTerminato, periodoMovimento } from "../../shared/movimenti.ts";
 import { MESI, operazioneDa, quadratura } from "../../shared/dichiarazioniImpianti.ts";
-import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia } from "../../shared/giacenzaPortale.ts";
+import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese } from "../../shared/giacenzaPortale.ts";
+import { ultimeRilevazioni, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 
 // Dichiarazioni degli impianti, mese per mese, con la quadratura delle giacenze.
 //
@@ -17,6 +18,12 @@ import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia } fro
 //    dopo, in entrata e in uscita.
 // 3. Rete, ACI ed extra raccolta non si mescolano mai: ne' nelle giacenze, ne'
 //    nelle dichiarazioni, ne' nei totali.
+// E dal 22/09/2026: immissione, inizio e fine trasporto sono obbligatorie nei
+// formulari. Un terminato a cui ne manca una, o con le date incoerenti, si
+// segnala sull'impianto o sullo stoccaggio a cui arriva o da cui parte, per
+// canale. Senza fine trasporto non si colloca in nessun mese e non entra nella
+// giacenza calcolata finche' la data non arriva; se il portale lo conosce, nella
+// sua giacenza c'e', e la quadratura lo dice (shared/giacenzaPortale.ts).
 //
 // Chi dichiara e' l'IMPIANTO, perche' e' l'impianto che tratta. Uno stoccaggio
 // non tratta: riceve i PFU e li rimanda in secondaria, e in quel viaggio e' il
@@ -81,16 +88,26 @@ export default async function(req) {
     // rete: se nel report comparisse una riga ACI, resta fuori.
     const dichiaratoPortale = new Map();
     await perPagina(svc.DichiarazioneTrattamento, null, (r) => {
-      portaleConosce.segna(r);
+      // Il portale lo conosce ma non lo conta piu' in giacenza: per chi non ha
+      // la fine trasporto la differenza si dice (22/09/2026).
+      portaleConosce.segna(r, 'dichiarazioni');
       if (eAci({ prodotto: r.prodotto }) || !giornoRoma(r.fine_trasporto).startsWith(String(annoNum))) return;
       const ns = norm(String(r.destinazione_secondaria || '').trim() || r.destinazione);
       if (!ns) return;
       somma(dichiaratoPortale, ns, Number(r.peso_associato_kg) || 0);
     });
     const noto = (r, tipo) => portaleConosce.noto(r, tipo);
+    // I terminati con le date da sistemare, per soggetto e canale (22/09/2026).
+    // Si segnano mentre si leggono gli archivi; se il portale li conosce lo si
+    // chiede alla fine, quando fotografia e report sono letti tutti.
+    const daSistemare = formulariDaSistemare({ anno: annoNum, chiaveDi: norm });
     const nonAncora = new Map(); // ns impianto -> [{...}] carichi che la fotografia non contiene
+    // Come in calcolaGiacenze: chi non dichiara la rete per accordo non ha una
+    // giacenza di rete che il portale tenga per noi, e i suoi carichi non sono
+    // 'non ancora nel file'.
+    const nonDichiaraRete = new Set(giacenzeSito.filter(g => g.dichiara_rete === false).map(g => norm(g.sito)));
     const segnaNonAncora = (ns, r, tipo) => {
-      if (!fotoPortale || noto(r, tipo)) return;
+      if (!fotoPortale || noto(r, tipo) || nonDichiaraRete.has(ns)) return;
       if (!nonAncora.has(ns)) nonAncora.set(ns, []);
       nonAncora.get(ns).push({
         tipo, id_ordine: r.id_ordine || '', numero_fir: r.numero_fir || '',
@@ -133,24 +150,21 @@ export default async function(req) {
     // La rilevazione di uno stoccaggio a portale e' per classe: P, M, G1 e G2 sono
     // la rete, la classe 9 e' l'ACI. Si tiene divisa per canale, e da lì la
     // giacenza segue i movimenti con la fine del trasporto dopo la rilevazione.
+    // Quale rilevazione vale e da che giorno lo dice shared/giacenzaStoccaggi.ts,
+    // la stessa regola di Giacenze e Predittivita': qui si leggeva solo
+    // data_rilevazione, e una rilevazione senza quel campo (che Giacenze data dal
+    // giorno in cui e' stata registrata) restava senza giorno, e lo stoccaggio
+    // tornava alla giacenza di inizio anno. Un modulo diceva un piazzale e
+    // l'altro un altro.
     const rilevazione = new Map(); // ns -> { data, RETE: t, ACI: t }
-    for (const r of rilevazioni) {
-      const ns = norm(r.sito);
-      if (!ns) continue;
-      const data = r.data_rilevazione ? String(r.data_rilevazione).slice(0, 10) : '';
-      const prima = rilevazione.get(ns);
-      if (prima && data <= prima.data) continue;
-      rilevazione.set(ns, {
-        data,
-        RETE: ['class1_kg', 'class2_kg', 'class3_kg', 'class4_kg'].reduce((s, c) => s + (Number(r[c]) || 0), 0) / 1000,
-        ACI: (Number(r.class9_kg) || 0) / 1000,
-      });
+    for (const [ns, ril] of ultimeRilevazioni(rilevazioni, norm)) {
+      rilevazione.set(ns, { data: ril.data, RETE: kgReteDiRilevazione(ril.record) / 1000, ACI: kgAciDiRilevazione(ril.record) / 1000 });
     }
     const dopoRilevazione = new Map(); // ns|canale -> t (entrate meno partenze finite dopo la rilevazione)
     const movimentoDopo = (ns, canale, r, valore) => {
+      // Senza fine trasporto non conta: non si sa se e' prima o dopo (e si segnala).
       const ril = rilevazione.get(ns);
-      const giorno = giornoRoma(r.trasporto_finito_il);
-      if (!ril || !ril.data || !giorno || giorno <= ril.data) return;
+      if (!ril || !dopoLaRilevazione(r, ril.data)) return;
       somma(dopoRilevazione, `${ns}|${canale}`, valore);
     };
 
@@ -173,6 +187,8 @@ export default async function(req) {
       const ruolo = td(r.tipo_destinazione) || 'imp';
       const id = String(r.id_ordine || '').trim();
       if (id && td(r.tipo_destinazione)) ordineTipo.set(id, ruolo);
+      // Prima del periodo: un terminato senza fine trasporto qui sotto esce, ma si segnala.
+      daSistemare.segna(r, { tipo: 'primaria', canale, ruolo, verso: 'arrivo', sito: r.destinazione, controparte: r.trasportatore || r.ragione_sociale });
       if (!eTerminato(r) || !r.destinazione) return null;
       const ns = norm(r.destinazione);
       if (ruolo === 'stoc') movimentoDopo(ns, canale, r, peso(r) / 1000);
@@ -185,7 +201,13 @@ export default async function(req) {
       return { ns, ruolo, p };
     };
 
+    // La fine trasporto delle primarie di rete nel gestionale, per le righe del file
+    // del portale che non la scrivono (piu' sotto).
+    const fineRete = new Map(); // id_ordine -> giorno
     await perPagina(svc.PrimariaRete, null, (r) => {
+      const idRete = String(r.id_ordine || '').trim();
+      const giornoRete = eTerminato(r) ? giornoRoma(r.trasporto_finito_il) : '';
+      if (idRete && giornoRete) fineRete.set(idRete, giornoRete);
       const c = primaria(r, 'RETE');
       if (!c) return;
       segnaFine(r);
@@ -212,6 +234,10 @@ export default async function(req) {
     const secondaria = (r, canale, provenienza) => {
       const dest = norm(r.destinazione);
       const daStoc = norm(r.stoccaggio);
+      // Lo stesso formulario arriva all'impianto e parte dallo stoccaggio: si
+      // segnala su tutti e due, e nel conteggio per canale vale uno.
+      daSistemare.segna(r, { tipo: 'secondaria', canale, ruolo: 'imp', verso: 'arrivo', sito: r.destinazione, controparte: r.stoccaggio });
+      daSistemare.segna(r, { tipo: 'secondaria', canale, ruolo: 'stoc', verso: 'partenza', sito: r.stoccaggio, controparte: r.destinazione });
       if (!dest || !eTerminato(r)) return null;
       movimentoDopo(daStoc, canale, r, -peso(r) / 1000);
       const p = periodo(r);
@@ -239,6 +265,7 @@ export default async function(req) {
       if (td(r.tipo_movimento) === 'secondaria') secondaria(r, 'EXTRA_RACCOLTA', '');
     }
     for (const r of terziarie) {
+      daSistemare.segna(r, { tipo: 'terziaria', canale: 'RETE', ruolo: 'imp', verso: 'partenza', sito: r.unita_locale_origine || r.ragione_sociale, controparte: r.destinazione });
       if (!periodo(r)) continue;
       somma(terz, norm(r.unita_locale_origine || r.ragione_sociale), peso(r));
     }
@@ -256,58 +283,41 @@ export default async function(req) {
     }
 
     // --- Giacenza del portale alla fotografia: conferito non ancora dichiarato ---
-    const portale = new Map();      // ns impianto -> t
-    const inAttesa = new Map();     // ns stoccaggio -> t gia' partite che il portale attribuisce ancora allo stoccaggio
-    const attesaCoppia = new Map(); // nsStoccaggio|nsImpianto -> t partite e non ancora dichiarate
-    const aPortale = new Set();     // chi compare nella fotografia del portale
-    const daDichiarare = new Map(); // ns|mese -> kg ancora in attesa di dichiarazione
-    const fineSecondaria = new Map(); // id della secondaria -> giorno in cui e' arrivata all'impianto
-    for (const r of secondarie) {
-      const id = String(r.id_ordine || '').trim();
-      const g = giornoRoma(r.trasporto_finito_il);
-      if (id && g) fineSecondaria.set(id, g);
-    }
-    const fotoPerGiorno = new Map(); // ns|giorno di fine trasporto -> kg ancora in attesa
-    for (const r of nonDichiarati) {
-      const sec = String(r.destinazione_secondaria || '').trim();
-      const sito = sec || String(r.destinazione || '').trim();
-      const ruolo = sec ? 'imp' : (ordineTipo.get(String(r.ordine_primaria || '').trim()) || 'imp');
-      const ns = norm(sito);
-      // Il file degli ordini non dichiarati e' della rete: una riga ACI, se mai ci
-      // fosse, non entra in una giacenza di rete.
-      if (!ns || eAci({ prodotto: r.prodotto })) continue;
-      aPortale.add(ns);
-      const t = (Number(r.peso_non_dichiarato_kg) || 0) / 1000;
-      if (ruolo === 'stoc') { somma(inAttesa, ns, t); continue; }
-      somma(portale, ns, t);
-      if (sec && r.destinazione) somma(attesaCoppia, `${norm(r.destinazione)}|${ns}`, t);
-      // In che mese il carico e' arrivato all'impianto: l'unico modo onesto di dire
-      // "questo mese e' da dichiarare". Per una primaria passata da uno stoccaggio
-      // conta la fine trasporto della SECONDARIA, cioe' quando e' arrivata qui: la
-      // fine trasporto della riga e' quella della primaria allo stoccaggio.
-      // Verificato su agosto 2026: cosi' la giacenza di Irigom a fine mese torna
-      // al chilo col registro dell'impianto.
-      const secId = String(r.ordine_secondaria || '').trim();
-      const g = (sec && secId && fineSecondaria.get(secId)) || giornoRoma(r.fine_trasporto);
-      if (g) somma(daDichiarare, `${ns}|${MESI[Number(g.slice(5, 7)) - 1]}`, t * 1000);
-      // Per la giacenza a fine mese: fino a che giorno arriva il carico.
-      if (g) somma(fotoPerGiorno, `${ns}|${g}`, t * 1000);
-    }
+    // Le righe del file, sull'impianto e sul giorno in cui il carico e' ARRIVATO:
+    // per una primaria passata da uno stoccaggio vale la fine trasporto della
+    // secondaria; una secondaria terminata senza fine trasporto non ha un giorno di
+    // arrivo, e il carico resta a portale ma in nessun mese (foto_senza_giorno); una
+    // riga senza fine trasporto prende quella della primaria nel gestionale, mai la
+    // chiusura. La regola sta in shared/giacenzaPortale.ts (collocaFotografia),
+    // dove e' provata (prove/giacenzaPortale.mjs), 22/09/2026.
+    const collocata = collocaFotografia(nonDichiarati, {
+      chiaveDi: norm,
+      ruoloPrimaria: (id) => ordineTipo.get(id) || '',
+      secondarie,
+      finePrimaria: (id) => fineRete.get(id) || '',
+    });
+    const portale = collocata.portale;           // ns impianto -> t
+    const inAttesa = collocata.inAttesa;         // ns stoccaggio -> t gia' partite che il portale attribuisce ancora allo stoccaggio
+    const attesaCoppia = collocata.attesaCoppia; // nsStoccaggio|nsImpianto -> t partite e non ancora dichiarate
+    const aPortale = collocata.aPortale;         // chi compare nella fotografia del portale
+    // Ancora in attesa di dichiarazione, per mese di arrivo: il mese con il suo
+    // anno, cosi' un carico di dicembre dell'anno prima non finisce nel dicembre
+    // di quest'anno.
+    const nonDichiaratoNel = (ns, i) => collocata.perMese.get(`${ns}|${annoNum}-${String(i + 1).padStart(2, '0')}`) || 0;
+
     // La giacenza di rete a portale alla fine di ogni mese, per fine trasporto:
     // quello che il file del portale aspetta ancora, piu' i carichi che il file
     // non contiene. Serve a calcolare quanto dichiarare per un mese chiuso (la
     // pratica di Irigom). Le dichiarazioni caricate dopo la fotografia le toglie
     // chi la usa, perche' dipende da quale mese sta dichiarando.
-    const fineMese = (ns) => MESI.map((mese, i) => {
-      const fine = `${annoNum}-${String(i + 1).padStart(2, '0')}-31`;
-      let foto = 0;
-      for (const [k, kg] of fotoPerGiorno) {
-        const [sito, giorno] = k.split('|');
-        if (sito === ns && giorno <= fine) foto += kg;
-      }
-      const aggiunti = (nonAncora.get(ns) || []).filter(x => x.fine_trasporto && x.fine_trasporto <= fine).reduce((s, x) => s + x.kg, 0);
-      return { mese, foto_kg: Math.round(foto), aggiunti_kg: Math.round(aggiunti) };
-    });
+    const fineMese = (ns) => {
+      const foto = fotoAFineMese(collocata, ns, annoNum);
+      return MESI.map((mese, i) => {
+        const fine = `${annoNum}-${String(i + 1).padStart(2, '0')}-31`;
+        const aggiunti = (nonAncora.get(ns) || []).filter(x => x.fine_trasporto && x.fine_trasporto <= fine).reduce((s, x) => s + x.kg, 0);
+        return { mese, foto_kg: foto[i], aggiunti_kg: Math.round(aggiunti) };
+      });
+    };
 
     // --- Dichiarazioni per sito, canale, provenienza e mese ---
     const perDich = new Map();
@@ -335,7 +345,7 @@ export default async function(req) {
       if (!chiavi.size) chiavi.add('RETE|');
       return [...chiavi].sort().map(c => {
         const [canale, provenienza] = c.split('|');
-        const mesi = MESI.map(mese => {
+        const mesi = MESI.map((mese, i) => {
           const chiave = `${ns}|${canale}|${provenienza}|${mese}`;
           const da = daStoccaggi.get(chiave);
           const daStoc = da ? [...da.entries()].map(([stoccaggio, kg]) => ({ stoccaggio, kg: Math.round(kg) })).sort((a, b) => b.kg - a.kg) : [];
@@ -346,7 +356,7 @@ export default async function(req) {
             // Quanto e' arrivato direttamente e quanto dagli stoccaggi, in secondaria.
             diretto_kg: totale - daStoc.reduce((s, x) => s + x.kg, 0),
             da_stoccaggi: daStoc,
-            non_dichiarato_kg: canale === 'RETE' ? Math.round(daDichiarare.get(`${ns}|${mese}`) || 0) : 0,
+            non_dichiarato_kg: canale === 'RETE' ? Math.round(nonDichiaratoNel(ns, i)) : 0,
             dichiarazione: dichiarazioneDi(perDich.get(chiave) || null),
           };
         });
@@ -370,6 +380,20 @@ export default async function(req) {
     const dichiaratoPerCanale = (flussi, canale, soloCaricate = true) => t3(flussi.filter(f => f.canale === canale)
       .reduce((s, f) => s + (soloCaricate ? f.dichiarato_caricato_t : f.dichiarato_totale_t), 0));
 
+    // --- I terminati con le date da sistemare, per soggetto e canale ---
+    // Un soggetto che ha solo questo compare lo stesso: e' la cosa da sistemare.
+    const datePer = new Map(); // ns|ruolo -> gruppi, uno per canale
+    for (const g of daSistemare.gruppi(portaleConosce)) {
+      const k = `${g.chiave}|${g.ruolo}`;
+      if (!datePer.has(k)) datePer.set(k, []);
+      datePer.get(k).push({ ...g, avviso: avvisoSenzaFine(g, 'quadratura') });
+      conosci(g.chiave, g.sito);
+      segnaRuolo(g.chiave, g.ruolo);
+      if (g.ruolo === 'stoc' && !stoc.has(g.chiave)) stoc.set(g.chiave, new Map());
+    }
+    const dateDi = (ns, ruolo) => datePer.get(`${ns}|${ruolo}`) || [];
+    const gruppoDate = (ns, ruolo, canale) => dateDi(ns, ruolo).find(g => g.canale === canale) || null;
+
     // --- Gli impianti ---
     const dichiaratoDopo = dichiaratoDopoLaFotografia(dichiarazioni, fotoPortale, norm);
     const impianti = [...nomi.entries()].filter(([ns]) => (ruoliDi.get(ns) || new Set(['imp'])).has('imp')).map(([ns, nome]) => {
@@ -384,6 +408,9 @@ export default async function(req) {
       // conta ancora come giacenza, il gestionale no.
       const dopoFoto = t3((dichiaratoDopo.get(ns) || 0) / 1000);
       const fotoT = senzaPortale ? null : t3(portale.get(ns) || 0);
+      // La quadratura e' della rete: i terminati di rete arrivati senza fine
+      // trasporto sono quelli che la giacenza calcolata non puo' contare.
+      const dateRete = gruppoDate(ns, 'imp', 'RETE');
       const sito = {
         sito: nome,
         chiave: ns,
@@ -429,10 +456,19 @@ export default async function(req) {
         // La rilevazione del suo stoccaggio sta a parte (scheda Stoccaggi).
         rilevazione_stoccaggio: ruoli.includes('stoc') && rilevazione.has(ns) ? { RETE: t3(rilevazione.get(ns).RETE), ACI: t3(rilevazione.get(ns).ACI), data: rilevazione.get(ns).data } : null,
         flussi,
+        // I terminati arrivati qui o partiti da qui con le date da sistemare, per
+        // canale, con l'elenco degli ordini (regola dell'utente, 22/09/2026).
+        date_da_sistemare: dateDi(ns, 'imp'),
+        senza_fine_trasporto: dateRete ? dateRete.senza_fine : null,
+        avviso_senza_fine: dateRete ? dateRete.avviso : '',
+        // I carichi del file del portale senza un giorno di arrivo: nella giacenza a
+        // portale ci sono, ma in nessuna giacenza a fine mese (portale_fine_mese).
+        foto_senza_giorno: collocata.senzaGiorno.get(ns) || null,
       };
       return { ...sito, ...quadratura(sito) };
     }).filter(s => s.conferito_t || s.conferito_aci_t || s.conferito_extra_t || s.secondarie_in_t || s.secondarie_aci_in_t || s.secondarie_extra_in_t
-      || s.dichiarato_totale_rete_t || s.flussi.some(f => f.dichiarato_totale_t) || s.giacenza_iniziale_t || s.giacenza_portale_t)
+      || s.dichiarato_totale_rete_t || s.flussi.some(f => f.dichiarato_totale_t) || s.giacenza_iniziale_t || s.giacenza_portale_t
+      || s.date_da_sistemare.length)
       .sort((a, b) => (b.conferito_t + b.secondarie_in_t) - (a.conferito_t + a.secondarie_in_t) || a.sito.localeCompare(b.sito));
 
     // --- Gli stoccaggi: canale per canale ---
@@ -485,8 +521,10 @@ export default async function(req) {
         dichiarazioni_registrate: soloStoccaggio(ns) ? dichiarazioni
           .filter(d => norm(d.sito) === ns && Number(d.quantita_kg) > 0)
           .map(d => ({ canale: d.canale || 'RETE', provenienza: d.provenienza || '', mese: d.mese, quantita_kg: Number(d.quantita_kg) || 0 })) : [],
+        // I terminati arrivati allo stoccaggio o ripartiti con le date da sistemare, per canale.
+        date_da_sistemare: dateDi(ns, 'stoc'),
       };
-    }).filter(s => s.canali.some(c => c.entrato_t || c.uscito_t || c.giacenza_iniziale_t) || s.dichiarazioni_registrate.length)
+    }).filter(s => s.canali.some(c => c.entrato_t || c.uscito_t || c.giacenza_iniziale_t) || s.dichiarazioni_registrate.length || s.date_da_sistemare.length)
       // In ordine di rete entrata, poi di ACI: i canali non si sommano nemmeno per ordinare.
       .sort((a, b) => {
         const di = (s, k) => (s.canali.find(c => c.canale === k) || { entrato_t: 0 }).entrato_t;
@@ -498,6 +536,7 @@ export default async function(req) {
     const righeStoccaggio = stoccaggi.filter(s => !s.anche_impianto).flatMap(s => s.canali
       .filter(c => CANALI_PORTALE.includes(c.canale))
       .map(c => {
+        const dateCanale = gruppoDate(s.chiave, 'stoc', c.canale);
         const riga = {
           sito: s.sito,
           chiave: `${s.chiave}|${c.canale}`,
@@ -511,6 +550,9 @@ export default async function(req) {
           rilevazione_il: s.rilevazione_il,
           in_attesa_dichiarazione_t: c.canale === 'RETE' ? s.in_attesa_portale_t : 0,
           flussi: [],
+          date_da_sistemare: dateCanale ? [dateCanale] : [],
+          senza_fine_trasporto: dateCanale ? dateCanale.senza_fine : null,
+          avviso_senza_fine: dateCanale ? dateCanale.avviso : '',
         };
         return { ...riga, ...quadratura(riga) };
       }));
@@ -538,6 +580,9 @@ export default async function(req) {
       siti_da_quadrare: confrontabili.filter(x => x.canale === 'RETE' && x.quadra === false).length,
       aci_che_quadrano: confrontabili.filter(x => x.canale === 'ACI' && x.quadra === true).length,
       aci_da_quadrare: confrontabili.filter(x => x.canale === 'ACI' && x.quadra === false).length,
+      // I formulari terminati con le date da sistemare: un conteggio per canale,
+      // ciascun formulario una volta sola, mai un totale dei tre.
+      date_da_sistemare: daSistemare.perCanale(portaleConosce),
     };
 
     return Response.json({

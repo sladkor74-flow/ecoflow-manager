@@ -80,7 +80,7 @@ export default function MargineCommessa() {
         </Button>
         <p className="text-xs text-muted-foreground max-w-2xl flex items-start gap-1.5">
           <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-          <span>Sono gli stessi numeri delle due fatturazioni: il ricavo è il dovuto da Ecotyre, il costo è la passiva del mese. Il costo di un mese comprende stoccaggio, trattamento e secondarie di quel mese, che possono riguardare tonnellate raccolte prima: il singolo mese oscilla, il numero che conta è quello dell'anno. I tre canali non si sommano.</span>
+          <span>Sono gli stessi numeri delle due fatturazioni: il ricavo è il dovuto da Ecotyre, il costo è la passiva del mese. Il costo di un mese comprende stoccaggio, trattamento e secondarie di quel mese, che possono riguardare tonnellate raccolte prima: il singolo mese oscilla, il numero che conta è quello dell'anno. Un viaggio di secondaria che porta rete e ACI insieme, a prezzo per viaggio, pesa su tutti e due i margini in proporzione ai chili. I tre canali non si sommano.</span>
         </p>
       </div>
 
@@ -101,6 +101,14 @@ export default function MargineCommessa() {
                   <div className="flex justify-between"><span className="text-muted-foreground">Tonnellate</span><span className="tabular-nums">{formatTonnellate(c.anno.tonnellate)} t</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Per tonnellata: ricavo / costo / margine</span><span className="tabular-nums">{euro(c.anno.ricavo_t)} / {euro(c.anno.costo_t)} / {euro(c.anno.margine_t)}</span></div>
                 </div>
+                {/* Un terminato senza fine trasporto non e' in nessun mese, quindi
+                    nemmeno nel margine: si dice una volta per l'anno (22/09/2026) */}
+                {c.senza_fine_trasporto && (
+                  <p className="mt-2 text-xs text-amber-700 flex items-start gap-1" title={c.senza_fine_trasporto.descrizione}>
+                    <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+                    <span>{c.senza_fine_trasporto.quanti} {c.senza_fine_trasporto.quanti === 1 ? 'terminato' : 'terminati'} senza fine trasporto ({formatTonnellate(c.senza_fine_trasporto.tonnellate)} t): fuori dal margine finché la data manca. L'elenco è nelle anomalie della passiva.</span>
+                  </p>
+                )}
               </div>
             ))}
           </div>

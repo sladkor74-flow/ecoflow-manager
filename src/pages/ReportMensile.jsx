@@ -3,10 +3,18 @@ import { base44 } from '@/api/base44Client';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, RefreshCw, Download, AlertCircle } from 'lucide-react';
 import ReportPivotTable from '@/components/report-mensile/ReportPivotTable';
+import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 
 // Riproduce le otto pivot del foglio REPORT MENSILE del gestionale Excel.
 // Le definizioni vivono nel backend, in shared/reportMensile.ts: qui restano solo
 // il raggruppamento in schede e la scelta del periodo.
+//
+// Sotto ogni pivot, se ce ne sono, le date da sistemare dei suoi terminati
+// (regola dell'utente, 22/09/2026: immissione, inizio e fine trasporto sono
+// obbligatorie in ogni formulario terminato). Ogni pivot e' di un canale solo,
+// e il riepilogo pure: rete, ACI ed extra raccolta non si sommano. Chi non ha la
+// fine trasporto non e' in nessuna pivot; gli altri ci sono, nel mese della
+// fine trasporto. Lo stesso nel CSV, in una riga sotto il totale.
 
 const MESI = [
   'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
@@ -19,6 +27,14 @@ const GRUPPI = [
   { chiave: 'secondarie', titolo: 'Secondarie di rete', pivot: ['secondarie', 'viaggiSecondarie'] },
   { chiave: 'terziarie', titolo: 'Terziarie ed extra', pivot: ['terziarie', 'extra', 'extraSecondarie'] },
 ];
+
+// L'archivio e il canale di ogni pivot, per il riepilogo delle date da sistemare.
+const ARCHIVIO_PIVOT = {
+  raccolta: 'Primarie di rete', impianti: 'Primarie di rete', viaggiRete: 'Primarie di rete',
+  aci: 'Primarie ACI', secondarieAci: 'Secondarie ACI', viaggiSecondarieAci: 'Secondarie ACI',
+  secondarie: 'Secondarie di rete', viaggiSecondarie: 'Secondarie di rete',
+  terziarie: 'Terziarie', extra: 'Extra raccolta', extraSecondarie: 'Extra raccolta, trasferimenti',
+};
 
 function anniDisponibili() {
   const corrente = new Date().getFullYear();
@@ -63,6 +79,12 @@ function componiCsv(pivots, gruppo, etichettaPeriodo) {
       ...colonne.flatMap(c => p.misure.map(m => num(p.radice.valori[c] ? p.radice.valori[c][m] : 0))),
       ...p.misure.map(m => num(p.radice.totali[m])),
     ]);
+    const d = p.date_da_sistemare;
+    if (d && d.totale > 0) {
+      const sf = d.senza_fine_trasporto || 0;
+      const effetto = [sf ? `${sf} fuori da ogni periodo perché senza fine trasporto` : '', d.totale - sf ? `${d.totale - sf} nella pivot, nel mese della fine trasporto` : ''].filter(Boolean).join(', ');
+      righe.push([`Date da sistemare: ${d.totale} terminati (${d.testo}): ${effetto}`]);
+    }
     righe.push([]);
   }
 
@@ -115,6 +137,7 @@ export default function ReportMensile() {
   }, [scheda, anno, mese]);
 
   const gruppoAttivo = GRUPPI.find(g => g.chiave === scheda);
+  const chiaveDate = (k) => `${ARCHIVIO_PIVOT[k] || k}|${pivots[k] ? pivots[k].periodo : ''}`;
   const etichettaMese = `${mese} ${anno}`;
   const etichettaAnno = `Anno ${anno}`;
 
@@ -196,12 +219,24 @@ export default function ReportMensile() {
                 <Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo in corso...
               </div>
             ) : (
-              g.pivot.map(k => pivots[k] && (
-                <ReportPivotTable
-                  key={k}
-                  pivot={pivots[k]}
-                  periodo={pivots[k].periodo === 'mese' ? etichettaMese : etichettaAnno}
-                />
+              g.pivot.map((k, i) => pivots[k] && (
+                <div key={k} className="space-y-2">
+                  <ReportPivotTable
+                    pivot={pivots[k]}
+                    periodo={pivots[k].periodo === 'mese' ? etichettaMese : etichettaAnno}
+                  />
+                  {/* Pivot vicine dello stesso archivio e dello stesso periodo hanno
+                      lo stesso riepilogo: si dice una volta, sotto l'ultima. */}
+                  {(i === g.pivot.length - 1 || chiaveDate(g.pivot[i + 1]) !== chiaveDate(k)) && (
+                    <RiepilogoDate
+                      canale={`${ARCHIVIO_PIVOT[k] || pivots[k].titolo} · ${pivots[k].periodo === 'mese' ? etichettaMese : etichettaAnno}`}
+                      riepilogo={pivots[k].date_da_sistemare}
+                      nomi={['movimento terminato', 'movimenti terminati']}
+                      esempi
+                      nota={k.startsWith('extra') ? 'Si correggono nel modulo Extra Raccolta.' : 'Si correggono nel file del portale e si ricarica.'}
+                    />
+                  )}
+                </div>
               ))
             )}
           </TabsContent>

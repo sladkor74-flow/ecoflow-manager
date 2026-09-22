@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { filtraMovimenti } from "../../shared/movimenti.ts";
+import { riepilogoDateVista } from "../../shared/raccoltoCalculator.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 
 // Conteggi per la Dashboard nel periodo scelto con i filtri (anno e mesi), come i
@@ -35,19 +36,40 @@ export default async function(req) {
       fetchAll(base44.asServiceRole.entities.Alert, { stato: 'aperto' }),
     ]);
     const secNelPeriodo = nelPeriodo(sec);
+    const reteNelPeriodo = nelPeriodo(rete);
+    const aciNelPeriodo = nelPeriodo(aci);
+    const terzNelPeriodo = nelPeriodo(terz);
+
+    // Le date da sistemare di ogni riquadro, cioe' di un canale per volta (regola
+    // dell'utente, 22/09/2026: immissione, inizio e fine trasporto sono
+    // obbligatorie in ogni formulario terminato): i terminati senza fine
+    // trasporto, di qualunque anno e fuori dai conteggi, e quelli contati nel
+    // periodo con un'altra data che manca o non torna. Senza gli esempi: la
+    // dashboard ne dice solo il numero, il dettaglio sta nei moduli.
+    const daSistemare = (tutti, contati) => {
+      const { totale, testo } = riepilogoDateVista(tutti, contati, 0);
+      return { totale, testo };
+    };
 
     return Response.json({
       anni, mesi,
       counts: {
         assegnati: assegnati.length,
         assegnati_aci: assegnatiAci.length,
-        primarie_rete: nelPeriodo(rete).length,
-        primarie_aci: nelPeriodo(aci).length,
+        primarie_rete: reteNelPeriodo.length,
+        primarie_aci: aciNelPeriodo.length,
         // Le secondarie di rete e quelle dell'autodemolizione si contano a parte:
         // stanno nello stesso archivio ma sono canali indipendenti.
         secondarie: secNelPeriodo.filter(r => !eAci(r)).length,
         secondarie_aci: secNelPeriodo.filter(r => eAci(r)).length,
-        terziarie: nelPeriodo(terz).length,
+        terziarie: terzNelPeriodo.length,
+      },
+      date_da_sistemare: {
+        primarie_rete: daSistemare(rete, reteNelPeriodo),
+        primarie_aci: daSistemare(aci, aciNelPeriodo),
+        secondarie: daSistemare(sec.filter(r => !eAci(r)), secNelPeriodo.filter(r => !eAci(r))),
+        secondarie_aci: daSistemare(sec.filter(r => eAci(r)), secNelPeriodo.filter(r => eAci(r))),
+        terziarie: daSistemare(terz, terzNelPeriodo),
       },
       alert_count: alerts.length,
       alert_critici: alerts.filter(a => a.severita === 'critico').length,

@@ -12,6 +12,9 @@ import { mappaFatturazione, fatturaA } from "./subfornitori.ts";
 import { giornoRoma, annoRoma, meseRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { chiaveFormulario, raggruppaPerFormulario, ordineDi, ticketDi } from "./formulari.ts";
+import { anomalieDateFormulari } from "./filtroPeriodo.ts";
+
+const NOMI_CANALE = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 
 // Regole del portale sull'ACI, dette dalla direzione il 19/09/2026: una
 // richiesta non si stima sotto i 1.500 kg, e un formulario non si chiude a piu'
@@ -96,66 +99,64 @@ function tariffaDallIntervento(record, prestazione) {
 
 // ─── Ricerca tariffe ───
 
+// Ogni canale cerca solo le sue tariffe, extra raccolta compresa. Prima l'extra
+// raccolta, se non trovava la sua, ripiegava su quella di RETE: regola
+// dell'utente del 22/09/2026, i costi di un intervento li scrive lui a mano
+// prima di passarlo a terminato, e la rete non c'entra mai. Qui per l'extra
+// raccolta le due ricerche servono solo a un confronto: se sull'intervento il
+// costo e' zero ma un contratto di EXTRA_RACCOLTA un prezzo lo prevede.
+
 // RACCOLTA: gerarchia destinazione > provincia > regione > generica
 function findTariffaRaccolta(tariffe, trasKey, provincia, regione, destinazione, classe, tipologia, dataIso) {
   const cls = norm(classe);
-  // Per EXTRA_RACCOLTA: prima EXTRA_RACCOLTA, poi ricaduta su RETE; per RETE/ACI: corrispondenza esatta
-  const tipologie = tipologia === 'EXTRA_RACCOLTA' ? ['EXTRA_RACCOLTA', 'RETE'] : [tipologia];
-  for (const tip of tipologie) {
-    const candidates = tariffe.filter(t =>
-      t.prestazione === 'RACCOLTA' &&
-      normalizzaRagioneSociale(t.fornitore_nome) === trasKey &&
-      t.tipologia === tip &&
-      tariffaValidaPerData(t, dataIso) &&
-      (isEmpty(t.classe_materiale) || norm(t.classe_materiale) === cls)
-    );
-    sortPerClasse(candidates);
-    // Il criterio con cui si e' scelto resta attaccato alla tariffa: serve a
-    // vedere a colpo d'occhio, in fatturazione, quando un contratto prevede un
-    // prezzo per destinazione e si sta invece applicando quello generico. Le
-    // tariffe di Emmesse - 72 euro a Gatim, 90 a Irigom - sono nate cosi'.
-    const con = (m, criterio) => (m ? { ...m, criterio } : null);
-    // a) destinazione - confrontata come ragione sociale, altrimenti "Gatim" e
-    // "GATIM S.R.L." sarebbero due destinazioni diverse e il prezzo per
-    // destinazione non si aggancerebbe mai
-    if (!isEmpty(destinazione)) {
-      const dest = normalizzaRagioneSociale(destinazione);
-      const m = candidates.find(t => normalizzaRagioneSociale(t.destinazione) === dest);
-      if (m) return con(m, 'destinazione');
-    }
-    // b) provincia (senza destinazione)
-    if (!isEmpty(provincia)) {
-      const m = candidates.find(t => norm(t.provincia) === provincia && isEmpty(t.destinazione));
-      if (m) return con(m, 'provincia');
-    }
-    // c) regione (senza provincia e destinazione)
-    if (!isEmpty(regione)) {
-      const m = candidates.find(t => norm(t.regione) === regione && isEmpty(t.provincia) && isEmpty(t.destinazione));
-      if (m) return con(m, 'regione');
-    }
-    // d) generica
-    const m = candidates.find(t => isEmpty(t.destinazione) && isEmpty(t.provincia) && isEmpty(t.regione));
-    if (m) return con(m, 'generica');
+  const candidates = tariffe.filter(t =>
+    t.prestazione === 'RACCOLTA' &&
+    normalizzaRagioneSociale(t.fornitore_nome) === trasKey &&
+    t.tipologia === tipologia &&
+    tariffaValidaPerData(t, dataIso) &&
+    (isEmpty(t.classe_materiale) || norm(t.classe_materiale) === cls)
+  );
+  sortPerClasse(candidates);
+  // Il criterio con cui si e' scelto resta attaccato alla tariffa: serve a
+  // vedere a colpo d'occhio, in fatturazione, quando un contratto prevede un
+  // prezzo per destinazione e si sta invece applicando quello generico. Le
+  // tariffe di Emmesse - 72 euro a Gatim, 90 a Irigom - sono nate cosi'.
+  const con = (m, criterio) => (m ? { ...m, criterio } : null);
+  // a) destinazione - confrontata come ragione sociale, altrimenti "Gatim" e
+  // "GATIM S.R.L." sarebbero due destinazioni diverse e il prezzo per
+  // destinazione non si aggancerebbe mai
+  if (!isEmpty(destinazione)) {
+    const dest = normalizzaRagioneSociale(destinazione);
+    const m = candidates.find(t => normalizzaRagioneSociale(t.destinazione) === dest);
+    if (m) return con(m, 'destinazione');
   }
-  return null;
+  // b) provincia (senza destinazione)
+  if (!isEmpty(provincia)) {
+    const m = candidates.find(t => norm(t.provincia) === provincia && isEmpty(t.destinazione));
+    if (m) return con(m, 'provincia');
+  }
+  // c) regione (senza provincia e destinazione)
+  if (!isEmpty(regione)) {
+    const m = candidates.find(t => norm(t.regione) === regione && isEmpty(t.provincia) && isEmpty(t.destinazione));
+    if (m) return con(m, 'regione');
+  }
+  // d) generica
+  const m = candidates.find(t => isEmpty(t.destinazione) && isEmpty(t.provincia) && isEmpty(t.regione));
+  return con(m, 'generica');
 }
 
-// IMPIANTI: fornitore=destinazione, prestazione, classe; per "extra" prova EXTRA_RACCOLTA poi RETE
-function findTariffaImpianto(tariffe, destKey, prestazione, classe, provenienza, tipologia, dataIso) {
+// IMPIANTI: fornitore=destinazione, prestazione, classe, nel canale che si sta guardando
+function findTariffaImpianto(tariffe, destKey, prestazione, classe, tipologia, dataIso) {
   const cls = norm(classe);
-  const tipologie = provenienza === 'extra' ? ['EXTRA_RACCOLTA', 'RETE'] : [tipologia];
-  for (const tip of tipologie) {
-    const candidates = tariffe.filter(t =>
-      t.prestazione === prestazione &&
-      normalizzaRagioneSociale(t.fornitore_nome) === destKey &&
-      t.tipologia === tip &&
-      tariffaValidaPerData(t, dataIso) &&
-      (isEmpty(t.classe_materiale) || norm(t.classe_materiale) === cls)
-    );
-    sortPerClasse(candidates);
-    if (candidates.length > 0) return candidates[0];
-  }
-  return null;
+  const candidates = tariffe.filter(t =>
+    t.prestazione === prestazione &&
+    normalizzaRagioneSociale(t.fornitore_nome) === destKey &&
+    t.tipologia === tipologia &&
+    tariffaValidaPerData(t, dataIso) &&
+    (isEmpty(t.classe_materiale) || norm(t.classe_materiale) === cls)
+  );
+  sortPerClasse(candidates);
+  return candidates[0] || null;
 }
 
 // TRASPORTO_SECONDARIA: fornitore=trasportatore, produttore=stoccaggio, destinatario=destinazione; prima TUTTE poi tipologia
@@ -210,7 +211,51 @@ function calcImporto(um, valore, peso_kg, viaggi) {
   return 0;
 }
 
+// ─── Viaggio misto: un camion, formulari di rete e formulari ACI ───
+// Un viaggio di secondaria puo' portare insieme formulari di rete e formulari
+// ACI. Con un prezzo a viaggio l'importo si paga una volta sola e si divide fra
+// i due canali in proporzione ai chili effettivi di ciascuno su quel viaggio
+// (regola dell'utente del 22/09/2026: «fai la proporzione in base al peso»).
+// Prima si pagava tutto sulla rete, e l'ACI risultava trasportato gratis.
+// La quota della rete si arrotonda al centesimo e quella dell'ACI e' il resto,
+// cosi' le due parti fanno sempre esattamente l'importo del viaggio; la vista
+// RETE e la vista ACI la calcolano allo stesso modo, ciascuna prende la sua.
+// Senza chili (pesi a zero) la proporzione si fa sul numero di formulari.
+export function quoteViaggioMisto(valore, kgRete, kgAci, formulariRete = 0, formulariAci = 0) {
+  const [pesoRete, pesoAci] = kgRete + kgAci > 0 ? [kgRete, kgAci] : [formulariRete, formulariAci];
+  const totale = pesoRete + pesoAci;
+  const quotaRete = totale > 0 ? pesoRete / totale : 1;
+  const rete = round2(valore * quotaRete);
+  return { RETE: rete, ACI: round2(valore - rete), quota_rete: quotaRete, quota_aci: 1 - quotaRete };
+}
+
+// Numeri scritti dentro una nota: all'italiana, tonnellate con due decimali (tre
+// se i chili non sono tondi), euro con due.
+const migliaiaIt = (s) => s.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+function tTesto(kg) {
+  const t = Math.round(kg) / 1000;
+  const [i, d] = t.toFixed(Math.round(kg) % 10 === 0 ? 2 : 3).split('.');
+  return `${migliaiaIt(i)},${d}`;
+}
+function euroTesto(v) {
+  const [i, d] = round2(v).toFixed(2).split('.');
+  return `${migliaiaIt(i)},${d}`;
+}
+const numTesto = (v) => String(round2(v)).replace('.', ',');
+
 export const MESI_PASSIVA = MESI_MAP;
+
+/**
+ * I movimenti di un canale su cui si controllano le date obbligatorie: per rete e
+ * ACI le primarie e le secondarie del canale, per l'extra raccolta tutti gli
+ * interventi. Lo usano la passiva di un mese e il margine dell'anno, che cosi'
+ * guardano gli stessi ordini.
+ */
+export function movimentiDateDelCanale({ primarieRete, primarieAci, secondarieAll, extraRaccoltaAll }, tipologia) {
+  if (tipologia === 'RETE') return [...(primarieRete || []), ...(secondarieAll || []).filter(r => !isAciRow(r))];
+  if (tipologia === 'ACI') return [...(primarieAci || []), ...(secondarieAll || []).filter(isAciRow)];
+  return extraRaccoltaAll || [];
+}
 
 /** L'indice 0-11 del mese: nome italiano oppure numero da 1 a 12. -1 se non riconosciuto. */
 export function indiceMesePassiva(mese) {
@@ -477,13 +522,14 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       const um = tariffa ? tariffa.unita_misura : '';
 
       // Un intervento a zero puo' essere giusto (SMOCO raccoglie da se'), ma se
-      // il contratto un prezzo lo prevede, il campo e' rimasto vuoto per
-      // dimenticanza e la raccolta finirebbe non pagata.
+      // un contratto di extra raccolta un prezzo lo prevede, il campo e' rimasto
+      // vuoto per dimenticanza e la raccolta finirebbe non pagata. Il contratto
+      // di rete non conta: non e' il prezzo di un intervento (22/09/2026).
       if (tipologia === 'EXTRA_RACCOLTA' && !interno && tariffa.valore === 0) {
-        const daContratto = findTariffaRaccolta(tariffe, trasKey, provincia, regione, destinazione, classe, tipologia, dataIso);
+        const daContratto = findTariffaRaccolta(tariffe, trasKey, provincia, regione, destinazione, classe, 'EXTRA_RACCOLTA', dataIso);
         if (daContratto && Number(daContratto.valore) > 0) {
           anomalie.push({
-            descrizione: `Extra raccolta: sull'intervento il costo di raccolta e' zero, ma per ${trasportatore} il contratto prevede ${daContratto.valore} ${daContratto.unita_misura}. Se va pagato, scrivilo sull'intervento.`,
+            descrizione: `Extra raccolta: sull'intervento il costo di raccolta e' zero, ma per ${trasportatore} il contratto di extra raccolta prevede ${daContratto.valore} ${daContratto.unita_misura}. Se va pagato, scrivilo sull'intervento.`,
             fornitore: trasportatore,
             prestazione: 'RACCOLTA',
             classe: classe || '—',
@@ -690,15 +736,16 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         ? null
         : provenienza === 'extra'
           ? tariffaDallIntervento(r, prestazione)
-          : findTariffaImpianto(tariffe, destKey, prestazione, classe, provenienza, tipologia, dataIso);
+          : findTariffaImpianto(tariffe, destKey, prestazione, classe, tipologia, dataIso);
 
       // Stesso discorso per chi tratta o stocca un intervento di extra raccolta:
-      // se il campo e' vuoto ma il contratto un prezzo lo prevede, si segnala.
+      // se il campo e' vuoto ma un contratto di extra raccolta un prezzo lo
+      // prevede, si segnala. Il contratto di rete non conta (22/09/2026).
       if (provenienza === 'extra' && !interno && tariffa && tariffa.valore === 0) {
-        const daContratto = findTariffaImpianto(tariffe, destKey, prestazione, classe, provenienza, tipologia, dataIso);
+        const daContratto = findTariffaImpianto(tariffe, destKey, prestazione, classe, 'EXTRA_RACCOLTA', dataIso);
         if (daContratto && Number(daContratto.valore) > 0) {
           anomalie.push({
-            descrizione: `Extra raccolta: sull'intervento il costo di ${prestazione === 'TRATTAMENTO' ? 'trattamento' : 'stoccaggio'} e' zero, ma per ${destinazione} il contratto prevede ${daContratto.valore} ${daContratto.unita_misura}. Se va pagato, scrivilo sull'intervento.`,
+            descrizione: `Extra raccolta: sull'intervento il costo di ${prestazione === 'TRATTAMENTO' ? 'trattamento' : 'stoccaggio'} e' zero, ma per ${destinazione} il contratto di extra raccolta prevede ${daContratto.valore} ${daContratto.unita_misura}. Se va pagato, scrivilo sull'intervento.`,
             fornitore: destinazione,
             prestazione,
             classe: classe || '—',
@@ -880,96 +927,165 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       }
 
       for (const pt of perTariffa.values()) {
-        const nonAciRecs = pt.records.filter(r => !isAciRow(r));
-        const aciRecs = pt.records.filter(r => isAciRow(r));
-        const tonnellateRete = nonAciRecs.reduce((s, r) => s + Number(r.peso_effettivo || 0), 0) / 1000;
-        const tonnellateAci = aciRecs.reduce((s, r) => s + Number(r.peso_effettivo || 0), 0) / 1000;
+        const aciQui = tipologia === 'ACI';
+        const nomeQui = aciQui ? 'ACI' : 'rete';
+        const nomeAltro = aciQui ? 'rete' : 'ACI';
+        const tipAltro = aciQui ? 'RETE' : 'ACI';
+        const conAltro = aciQui ? 'con la rete' : 'con l\'ACI';
+        const quotaQui = aciQui ? 'la quota ACI' : 'la quota di rete';
+        const quotaAltro = aciQui ? 'la quota di rete' : 'la quota ACI';
 
-        // Ogni viaggio appartiene a un canale: e' della rete se porta almeno un
-        // formulario di rete, altrimenti e' ACI. Prima si contavano tutti i
-        // viaggi della tratta e si addebitavano alla rete, compresi quelli fatti
-        // di soli formulari ACI: un viaggio di un canale finiva nella fattura
-        // dell'altro.
-        const canalePerViaggio = new Map();
+        // Ogni viaggio (un mezzo in un giorno) con i chili e i formulari di
+        // ciascun canale. Un viaggio e' di questo canale se porta almeno un suo
+        // formulario: intero se porta solo quelli, misto se porta anche l'altro
+        // canale. Prima un viaggio misto era tutto della rete.
+        const perViaggio = new Map();
         for (const rec of pt.records) {
           const k = chiaveViaggio(rec);
-          const aci = isAciRow(rec);
-          if (!canalePerViaggio.has(k)) canalePerViaggio.set(k, aci);
-          else if (!aci) canalePerViaggio.set(k, false);
+          // data: il giorno del viaggio, per la tariffa dell'altro canale
+          if (!perViaggio.has(k)) perViaggio.set(k, { kgRete: 0, kgAci: 0, nRete: 0, nAci: 0, senzaTarga: false, data: rec.trasporto_finito_il });
+          const v = perViaggio.get(k);
+          const kg = Number(rec.peso_effettivo || 0);
+          if (isAciRow(rec)) { v.kgAci += kg; v.nAci++; } else { v.kgRete += kg; v.nRete++; }
+          if (!String(rec.automezzo || '').trim()) v.senzaTarga = true;
         }
-        const valori = [...canalePerViaggio.values()];
-        const viaggiRete = valori.filter(v => !v).length;
-        const viaggiAci = valori.filter(v => v).length;
-        // I viaggi che si pagano in questo canale: un viaggio misto si paga
-        // tutto sulla rete, quindi sull'ACI non se ne paga nessuno.
-        const viaggiDaPagare = tipologia === 'ACI' ? viaggiAci : viaggiRete;
-        // I viaggi che hanno portato formulari di questo canale: sono altra
-        // cosa, e sono quelli che ha senso mostrare accanto a un prezzo a
-        // tonnellata, dove "zero viaggi" non vorrebbe dire niente.
-        const conFormulari = new Set();
-        for (const rec of pt.records) {
-          if (isAciRow(rec) === (tipologia === 'ACI')) conFormulari.add(chiaveViaggio(rec));
-        }
-        const viaggiConFormulari = conFormulari.size;
-        const viaggiTotali = canalePerViaggio.size;
-        const viaggioMisto = nonAciRecs.length > 0 && aciRecs.length > 0;
-        // Senza targa, fra i viaggi che si pagano in questo canale: guardarli
-        // tutti faceva uscire l'anomalia due volte su una tratta mista, una per
-        // canale, anche sull'ACI che quei viaggi non li paga.
-        const pagatoQui = (rec) => canalePerViaggio.get(chiaveViaggio(rec)) === (tipologia === 'ACI');
-        const senzaTarga = pt.records.some(rec => !String(rec.automezzo || '').trim() && pagatoQui(rec));
+        const kgQui = (v) => (aciQui ? v.kgAci : v.kgRete);
+        const kgAltro = (v) => (aciQui ? v.kgRete : v.kgAci);
+        const viaggiDelCanale = [...perViaggio.values()].filter(v => (aciQui ? v.nAci : v.nRete) > 0);
+        const misti = viaggiDelCanale.filter(v => v.nRete > 0 && v.nAci > 0);
+        const viaggiInteri = viaggiDelCanale.length - misti.length;
+        const viaggiConFormulari = viaggiDelCanale.length;
+        const viaggiTotali = perViaggio.size;
+        const viaggioMisto = misti.length > 0;
+        // Senza targa, fra i viaggi di questo canale: quelli di soli formulari
+        // dell'altro canale non sono affar suo, e l'anomalia uscirebbe due volte.
+        const senzaTarga = viaggiDelCanale.some(v => v.senzaTarga);
         const um = pt.tariffa ? pt.tariffa.unita_misura : '';
         const valore = pt.tariffa ? pt.tariffa.valore : 0;
 
         // Le tonnellate di questo canale: sono la base di tutto quello che
-        // segue, riga e anomalie comprese.
-        const tonnellateCanale = tipologia === 'ACI' ? tonnellateAci : tonnellateRete;
-        const tonnellateAltro = tipologia === 'ACI' ? tonnellateRete : tonnellateAci;
+        // segue, riga e anomalie comprese. Quelle dell'altro canale si dicono
+        // solo per i viaggi misti, perche' spiegano la proporzione.
+        const tonnellateCanale = viaggiDelCanale.reduce((s, v) => s + kgQui(v), 0) / 1000;
+        const kgQuiMisti = misti.reduce((s, v) => s + kgQui(v), 0);
+        const kgAltroMisti = misti.reduce((s, v) => s + kgAltro(v), 0);
+
+        // La tariffa dell'altro canale per un viaggio misto, alla data di quel
+        // viaggio: la passiva dell'altro canale paga la sua quota solo se li' la
+        // tratta ha una tariffa, sua o TUTTE. Con una tariffa a viaggio della sola
+        // rete la vista RETE pagava la sua quota e diceva che il resto stava nella
+        // passiva ACI, dove c'era soltanto "tratta senza tariffa": la quota ACI
+        // non si pagava da nessuna parte e nessun testo diceva quanto valeva
+        // (revisione del 22/09/2026). Ora la quota scoperta si dice, con l'importo,
+        // in tutte e due le viste.
+        const tariffaAltro = (v) => findTariffaSecondaria(tariffe, fatturanteKey, tratta.stoccaggio, tratta.destinazione, tipAltro, v.data);
 
         // Se in questo canale la tratta non ha portato niente, non e' affar suo:
         // niente riga e nemmeno l'anomalia, che altrimenti uscirebbe due volte,
         // una per canale, anche dove non c'entra.
-        if (round3(tonnellateCanale) === 0 && viaggiDaPagare === 0 && viaggiConFormulari === 0) continue;
+        if (round3(tonnellateCanale) === 0 && viaggiConFormulari === 0) continue;
 
         if (!pt.tariffa && !interno) {
+          // Sui viaggi misti l'altro canale paga solo la sua quota dei chili: la
+          // quota di questo canale resta da pagare, e si dice quanto vale alla
+          // tariffa che la tratta ha nell'altro canale.
+          const quiScoperta = { n: 0, quota: 0, kg: 0, euro: 0, aViaggio: false, prezzi: new Set() };
+          for (const v of misti) {
+            const tA = tariffaAltro(v);
+            if (!tA) continue;
+            quiScoperta.n++;
+            quiScoperta.kg += kgQui(v);
+            if (tA.unita_misura === '€/viaggio') {
+              const q = quoteViaggioMisto(tA.valore, v.kgRete, v.kgAci, v.nRete, v.nAci);
+              quiScoperta.quota += aciQui ? q.quota_aci : q.quota_rete;
+              quiScoperta.euro += aciQui ? q.ACI : q.RETE;
+              quiScoperta.aViaggio = true;
+            } else {
+              quiScoperta.euro += calcImporto(tA.unita_misura, tA.valore, kgQui(v), 0);
+            }
+            quiScoperta.prezzi.add(`${euroTesto(tA.valore)} ${tA.unita_misura}`);
+          }
+          let dettaglio = '';
+          if (quiScoperta.n) {
+            const n = quiScoperta.n;
+            const prezzo = quiScoperta.prezzi.size === 1 ? ` (${[...quiScoperta.prezzi][0]})` : '';
+            const quanto = quiScoperta.aViaggio ? `${numTesto(quiScoperta.quota)} viaggi, ${tTesto(quiScoperta.kg)} t` : `${tTesto(quiScoperta.kg)} t`;
+            dettaglio = `. ${n === 1 ? 'Sul viaggio misto' : `Sui ${n} viaggi misti`} ${conAltro} la passiva ${tipAltro} paga solo ${quotaAltro} dei chili: ${quotaQui} (${quanto}) resta da pagare, ${euroTesto(quiScoperta.euro)} € alla tariffa ${aciQui ? 'di rete' : 'ACI'} della tratta${prezzo}, finche' la tratta non ha una tariffa ${tipologia} o TUTTE`;
+          }
           anomalie.push({
-            descrizione: `Tratta secondaria senza tariffa TRASPORTO_SECONDARIA: ${tratta.stoccaggio} → ${tratta.destinazione} (trasportatore: ${tratta.trasportatore})`,
+            descrizione: `Tratta secondaria senza tariffa TRASPORTO_SECONDARIA: ${tratta.stoccaggio} → ${tratta.destinazione} (trasportatore: ${tratta.trasportatore})${dettaglio}`,
             fornitore: fatturante,
             prestazione: 'TRASPORTO_SECONDARIA',
             classe: '—',
             ambito: `${tratta.stoccaggio} → ${tratta.destinazione}`,
-            tonnellate: round3(tipologia === 'ACI' ? tonnellateAci : tonnellateRete),
+            tonnellate: round3(tonnellateCanale),
+            ...(quiScoperta.n ? {
+              viaggi_misti: quiScoperta.n,
+              viaggi_quota: quiScoperta.aViaggio ? round2(quiScoperta.quota) : null,
+              importo_da_pagare: round2(quiScoperta.euro),
+            } : {}),
           });
           continue;
         }
 
-        // Anomalia: viaggio misto con tariffa a viaggio
-        if (viaggioMisto && um === '€/viaggio') {
-          anomalie.push({
-            descrizione: `Tratta con viaggio misto (RETE+ACI) e tariffa €/viaggio: ${tratta.stoccaggio} → ${tratta.destinazione} (trasportatore: ${tratta.trasportatore})`,
-            fornitore: fatturante,
-            prestazione: 'TRASPORTO_SECONDARIA',
-            classe: '—',
-            ambito: `${tratta.stoccaggio} → ${tratta.destinazione}`,
-            tonnellate: round3(tipologia === 'ACI' ? tonnellateAci : tonnellateRete),
-          });
-        }
+        // La quota dell'altro canale sui viaggi misti di cui l'altro canale non
+        // ha una tariffa: la si dice nella nota, e la nota non e' piu' solo
+        // un'informazione. Importo e quota sono calcolati a questa tariffa.
+        const scoperta = { n: 0, quota: 0, kg: 0, euro: 0 };
+        const restoMisti = (n, aViaggio) => {
+          const dove = `sta nella passiva ${tipAltro}`;
+          if (!scoperta.n) return `Il resto ${n === 1 ? 'del viaggio misto' : 'dei viaggi misti'} ${dove}.`;
+          const coperti = n - scoperta.n;
+          const quali = !coperti
+            ? (n === 1 ? 'del viaggio misto' : 'dei viaggi misti')
+            : (scoperta.n === 1 ? 'dell\'altro' : `degli altri ${scoperta.n}`);
+          const quanto = aViaggio
+            ? `${numTesto(scoperta.quota)} viaggi, ${euroTesto(scoperta.euro)} € a questa tariffa`
+            : `${tTesto(scoperta.kg)} t, ${euroTesto(scoperta.euro)} € a questa tariffa`;
+          const scop = `${quotaAltro} ${quali} (${quanto}) non ha una tariffa ${tipAltro} o TUTTE per la tratta e resta da pagare.`;
+          return coperti
+            ? `Il resto di ${coperti} ${coperti === 1 ? 'viaggio misto' : 'viaggi misti'} ${dove}; ${scop}`
+            : scop.charAt(0).toUpperCase() + scop.slice(1);
+        };
 
+        // Un viaggio misto non e' piu' un'anomalia (22/09/2026): a viaggio si
+        // divide in proporzione ai chili, a tonnellata ogni canale paga i suoi.
+        // La nota della riga dice come, ed e' un'informazione, non un problema;
+        // lo diventa solo se l'altro canale non ha una tariffa per la sua quota.
         let importo = 0;
         let note = '';
+        let notaInformativa = false;
+        let viaggiQuota = viaggiConFormulari;
         if (interno) {
           importo = 0;
           note = 'interno, non fatturato';
         } else if (um === '€/viaggio') {
-          // Si pagano i viaggi di questo canale. Un viaggio misto porta anche
-          // formulari ACI ma si paga una volta sola, sulla rete.
-          importo = viaggiDaPagare * valore;
-          if (viaggiDaPagare === 0) {
-            note = tipologia === 'ACI'
-              ? 'nessun viaggio di soli formulari ACI: i viaggi misti si pagano sulla rete'
-              : 'nessun viaggio con formulari di rete';
+          // I viaggi interi si pagano per intero; di ogni viaggio misto questo
+          // canale paga la sua quota dei chili (quoteViaggioMisto).
+          let parteMisti = 0, quotaMisti = 0;
+          for (const v of misti) {
+            const q = quoteViaggioMisto(valore, v.kgRete, v.kgAci, v.nRete, v.nAci);
+            parteMisti += aciQui ? q.ACI : q.RETE;
+            quotaMisti += aciQui ? q.quota_aci : q.quota_rete;
+            if (!tariffaAltro(v)) {
+              scoperta.n++;
+              scoperta.kg += kgAltro(v);
+              scoperta.quota += aciQui ? q.quota_rete : q.quota_aci;
+              scoperta.euro += aciQui ? q.RETE : q.ACI;
+            }
           }
-          if (senzaTarga && viaggiDaPagare > 0) {
+          importo = viaggiInteri * valore + parteMisti;
+          viaggiQuota = round2(viaggiInteri + quotaMisti);
+          if (misti.length) {
+            const n = misti.length;
+            const interi = viaggiInteri
+              ? `${viaggiInteri} ${viaggiInteri === 1 ? 'viaggio intero' : 'viaggi interi'} a ${euroTesto(valore)} € e `
+              : `nessun viaggio di soli formulari ${nomeQui}; `;
+            const stessi = n === 1 ? 'sullo stesso viaggio' : 'sugli stessi viaggi';
+            note = `${interi}${n} ${n === 1 ? 'viaggio misto' : 'viaggi misti'} ${conAltro}, ${n === 1 ? 'pagato' : 'pagati'} per ${quotaQui} dei chili (${tTesto(kgQuiMisti)} t ${nomeQui} e ${tTesto(kgAltroMisti)} t ${nomeAltro} ${stessi}): ${numTesto(quotaMisti)} viaggi, ${euroTesto(parteMisti)} €. ${restoMisti(n, true)}`;
+            notaInformativa = scoperta.n === 0;
+          }
+          if (senzaTarga && viaggiConFormulari > 0) {
             anomalie.push({
               descrizione: `Tratta a ${valore} euro a viaggio senza targa su almeno un formulario: ${tratta.stoccaggio} → ${tratta.destinazione}. Senza targa i carichi dello stesso giorno contano come un viaggio solo.`,
               fornitore: fatturante,
@@ -982,33 +1098,54 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
             });
           }
         } else if (um === '€/t' || um === '€/kg') {
-          // Per canale: RETE usa tonnellate non-ACI, ACI usa tonnellate ACI
-          const pesoCanale = tipologia === 'RETE' ? tonnellateRete * 1000 : tonnellateAci * 1000;
-          importo = calcImporto(um, valore, pesoCanale, viaggiDaPagare);
+          // Ogni canale paga i suoi chili: anche un viaggio misto e' gia' diviso.
+          importo = calcImporto(um, valore, tonnellateCanale * 1000, viaggiConFormulari);
+          if (misti.length) {
+            const n = misti.length;
+            for (const v of misti) {
+              if (tariffaAltro(v)) continue;
+              scoperta.n++;
+              scoperta.kg += kgAltro(v);
+              scoperta.euro += calcImporto(um, valore, kgAltro(v), 0);
+            }
+            note = `di cui ${n} ${n === 1 ? 'viaggio misto' : 'viaggi misti'} ${conAltro}: a ${um === '€/t' ? 'tonnellata' : 'chilo'} ogni canale paga i suoi chili.${scoperta.n ? ` ${restoMisti(n, false)}` : ''}`;
+            notaInformativa = scoperta.n === 0;
+          }
         }
 
-        // Un viaggio di secondaria puo' portare formulari di rete e formulari
-        // ACI insieme. L'importo e' gia' diviso fra i due canali qui sopra, ma
-        // le tonnellate no: finivano tutte in entrambe le viste, e il totale del
-        // trasportatore sommava rete e ACI - proprio la commistione che non deve
-        // mai esserci. La riga porta le tonnellate del canale che si sta
-        // guardando; quelle dell'altro restano accanto, dichiarate, perche'
-        // spiegano perche' un viaggio misto si paga tutto di qua.
+        // Le tonnellate della riga sono sempre e solo quelle del canale che si
+        // sta guardando: il totale del trasportatore non somma mai rete e ACI.
         trasportiRows.push({
           fornitore: fatturante, fornitore_norm: fatturanteKey, interno,
           riga: {
             stoccaggio: tratta.stoccaggio, destinazione: tratta.destinazione,
             trasportatore: tratta.trasportatore,
             tonnellate: round3(tonnellateCanale),
-            tonnellate_altro_canale: round3(tonnellateAltro),
-            canale_altro: tipologia === 'ACI' ? 'RETE' : 'ACI',
-            // A viaggio si mostrano i viaggi che si pagano, cosi' la
-            // moltiplicazione torna con l'importo; a tonnellata quelli che hanno
-            // portato i formulari del canale.
-            viaggi: um === '€/viaggio' ? viaggiDaPagare : viaggiConFormulari,
+            // i chili dell'altro canale sugli stessi viaggi misti: spiegano la
+            // proporzione, non entrano in nessun totale
+            tonnellate_altro_canale: round3(kgAltroMisti / 1000),
+            canale_altro: aciQui ? 'RETE' : 'ACI',
+            // I viaggi che hanno portato formulari di questo canale, interi e
+            // misti. A viaggio l'importo e' viaggi_interi x tariffa piu' la quota
+            // dei misti: viaggi_quota e' il numero di viaggi equivalente.
+            viaggi: viaggiConFormulari,
+            viaggi_interi: viaggiInteri,
+            viaggi_misti: misti.length,
+            viaggi_quota: viaggiQuota,
             viaggi_totali_tratta: viaggiTotali,
             tariffa_valore: valore, unita_misura: um,
             importo: round2(importo), viaggio_misto: viaggioMisto, note,
+            nota_informativa: notaInformativa,
+            // la quota dell'altro canale sui misti che l'altro canale non paga,
+            // perche' li' la tratta non ha una tariffa: fuori da ogni totale,
+            // calcolata a questa tariffa. null se l'altro canale la paga.
+            altro_canale_da_pagare: scoperta.n ? {
+              canale: tipAltro,
+              viaggi_misti: scoperta.n,
+              viaggi_quota: um === '€/viaggio' ? round2(scoperta.quota) : null,
+              tonnellate: round3(scoperta.kg / 1000),
+              importo: round2(scoperta.euro),
+            } : null,
           },
         });
       }
@@ -1030,6 +1167,27 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
     const trasporti_secondaria = Array.from(trasByForn.values()).map(f => ({
       ...f, totale_tonnellate: round3(f.totale_tonnellate), totale_euro: round2(f.totale_euro),
     })).sort((a, b) => b.totale_euro - a.totale_euro);
+
+    // ─── LE DATE OBBLIGATORIE DEI FORMULARI ───
+    // Immissione, inizio e fine trasporto sono obbligatorie (regola dell'utente,
+    // 22/09/2026). Un terminato senza fine trasporto non entra nel mese e non si
+    // paga a nessuno finche' la data manca: si dice quanti e quali, per canale.
+    // Anche un terminato del mese con un'altra data mancante o fuori ordine si
+    // dice. I movimenti del canale: le primarie e le sue secondarie.
+    const movimentiDelCanale = movimentiDateDelCanale({ primarieRete, primarieAci, secondarieAll, extraRaccoltaAll }, tipologia);
+    for (const a of anomalieDateFormulari(movimentiDelCanale, annoNum, meseNum, tipologia)) {
+      anomalie.push({
+        tipo: a.tipo,
+        descrizione: a.descrizione,
+        fornitore: NOMI_CANALE[tipologia] || tipologia,
+        prestazione: 'DATE FORMULARIO',
+        classe: '—',
+        ambito: `Canale ${tipologia}`,
+        tonnellate: round3(a.kg / 1000),
+        quanti: a.quanti,
+        ordini: a.ordini,
+      });
+    }
 
     // Una stessa anomalia puo' nascere da piu' righe uguali: si dice una volta
     // sola, altrimenti l'elenco sembra piu' grave di quello che e'.

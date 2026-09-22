@@ -76,6 +76,14 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
         )}
       </div>
 
+      {/* Regole dell'utente del 22/09/2026: i costi di un intervento li scrive lui
+          prima di passarlo a terminato, e la passiva paga quelli */}
+      {tipologia === 'EXTRA_RACCOLTA' && (
+        <p className="text-xs text-muted-foreground">
+          Si pagano i costi di raccolta, stoccaggio e trattamento scritti su ciascun intervento, mai le tariffe di rete. Entrano solo gli interventi terminati, nel mese della fine trasporto; un terminato a cui manca una delle tre date obbligatorie (immissione, inizio e fine trasporto) si segnala fra le anomalie.
+        </p>
+      )}
+
       {error && <div className="text-sm text-destructive bg-destructive/10 px-4 py-2 rounded">{error}</div>}
 
       {result && (

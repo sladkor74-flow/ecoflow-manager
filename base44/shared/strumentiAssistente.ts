@@ -27,8 +27,8 @@ import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { eTerminato, giornoMovimento } from "./movimenti.ts";
 import { PIVOT_DEFS, calcolaPivot, MESI } from "./reportMensile.ts";
-import { caricaGestionale, caricamentiAperti } from "./quadraturaFirDati.ts";
-import { intervalloSettimana, settimanaIso, statoCaricamenti } from "./reportSettimanali.ts";
+import { caricaGestionale, caricamentiAperti, contaDistinti } from "./quadraturaFirDati.ts";
+import { intervalloSettimana, settimanaIso, statoCaricamenti, riepilogoDate, voceDate } from "./reportSettimanali.ts";
 import { situazioneGestionale, terminatiSenzaFine } from "./assistente.ts";
 import { listaOrdini, statoRichiesta, evasioneOrdini } from "./richiesteEct.ts";
 import { targetDelPortale } from "./targetRaccoglitori.ts";
@@ -65,35 +65,55 @@ function canaleChiesto(v) {
 }
 
 /**
- * I terminati senza fine trasporto: non stanno in nessun mese e ogni conto li
- * scarta, ma scartati in silenzio fanno sembrare completo un conto che non lo
- * e'. Si contano a parte, per dirli, tutti e di qualunque periodo, come fanno
- * la Dashboard e il Report Mensile: contando solo gli immessi nell'anno
- * sparivano quelli immessi a fine dicembre dell'anno prima e quelli senza
- * immissione. Si dividono per anno di immissione, l'unica data che hanno, con
- * una voce per chi non ha nemmeno quella; mai la chiusura a portale. La regola
- * sta in terminatiSenzaFine (assistente.ts), la stessa del riepilogo. Un canale
- * per volta: chi chiama passa le righe di un canale solo. null se non ce ne sono.
+ * Le date obbligatorie dei formulari: immissione, inizio e fine trasporto
+ * (regola dell'utente del 22/09/2026, "vanno segnalate e questo vale sempre dove
+ * ci sono ordini terminati"). Prima si dicevano solo i terminati senza fine
+ * trasporto; ora tutti quelli a cui una data manca o non torna, di qualunque
+ * anno, con ID ordine, formulario e date che mancano (voceDate in
+ * reportSettimanali.ts, sulle regole di movimenti.ts).
+ *
+ * I senza fine trasporto restano a parte perche' sono i soli che il conto
+ * scarta: non stanno in nessun mese, e scartati in silenzio fanno sembrare
+ * completo un conto che non lo e'. Si contano tutti, di qualunque periodo, come
+ * fanno la Dashboard e il Report Mensile, divisi per anno di immissione,
+ * l'unica data che hanno, con una voce per chi non ha nemmeno quella; mai la
+ * chiusura a portale (terminatiSenzaFine in assistente.ts, la stessa del
+ * riepilogo). Gli altri sono nel conto, ma le date vanno inserite o corrette.
+ *
+ * Un modulo e un canale per volta: chi chiama passa le righe di uno solo, e dice
+ * quale. null se sono tutte a posto.
  */
-function senzaFineTrasporto(righe) {
+function dateObbligatorie(righe, modulo = '') {
+  const riepilogo = riepilogoDate(righe, 10);
+  if (!riepilogo) return null;
   const { esclusi, per_anno } = terminatiSenzaFine(righe);
-  if (!esclusi.length) return null;
   const kg = (xs) => xs.reduce((s, r) => s + peso(r), 0);
   return {
-    formulari: contaFormulari(esclusi),
-    tonnellate: t3(kg(esclusi)),
-    per_anno_immissione: per_anno.map(g => ({
-      anno_immissione: g.anno === null ? 'senza data di immissione' : g.anno,
-      formulari: contaFormulari(g.righe), tonnellate: t3(kg(g.righe)),
+    ...(modulo ? { modulo } : {}),
+    ordini: riepilogo.ordini,
+    esempi: riepilogo.esempi.map(v => ({
+      id_ordine: v.id_ordine, numero_fir: v.numero_fir, date: v.date,
+      ...(v.giorno ? { fine_trasporto: v.giorno } : { escluso_dal_conto: true }),
     })),
-    esempi: esclusi.map(r => r.id_ordine || r.numero_fir).filter(Boolean).slice(0, 5),
-    nota: 'Terminati senza data di fine trasporto, di qualunque periodo: esclusi dal conto perche\' non si sa in che mese cadono, e qualcuno potrebbe appartenere al periodo chiesto. Sono divisi per anno di immissione, l\'unica data che hanno; chi non ha nemmeno quella sta nella voce "senza data di immissione". Vanno corretti nel file del portale e ricaricati.',
+    ...(riepilogo.ordini > riepilogo.esempi.length ? { avviso: `ELENCO TAGLIATO: qui ci sono ${riepilogo.esempi.length} ordini dei ${riepilogo.ordini}. Il numero giusto e' "ordini".` } : {}),
+    ...(esclusi.length ? {
+      senza_fine_trasporto: {
+        formulari: contaFormulari(esclusi),
+        tonnellate: t3(kg(esclusi)),
+        per_anno_immissione: per_anno.map(g => ({
+          anno_immissione: g.anno === null ? 'senza data di immissione' : g.anno,
+          formulari: contaFormulari(g.righe), tonnellate: t3(kg(g.righe)),
+        })),
+      },
+    } : {}),
+    nota: 'Immissione, inizio e fine trasporto sono date obbligatorie nei formulari: questi ordini terminati, di qualunque anno, ne hanno una che manca o non torna, e vanno segnalati sempre. Quelli senza fine trasporto ("senza_fine_trasporto", "escluso_dal_conto") sono esclusi dal conto perche\' non si sa in che mese cadono, e qualcuno potrebbe appartenere al periodo chiesto: sono divisi per anno di immissione, l\'unica data che hanno, e chi non ha nemmeno quella sta nella voce "senza data di immissione". Gli altri sono nel conto, ma le date vanno inserite o corrette. Si correggono nel file del portale e si ricaricano; l\'extra raccolta nella sua scheda.',
   };
 }
 
 /**
  * Le primarie o le extra di un canale, filtrate per periodo e per luogo, e a
- * parte i terminati dello stesso luogo che il periodo non lo hanno.
+ * parte i terminati dello stesso luogo con le date obbligatorie da sistemare, di
+ * qualunque periodo: chi non ha la fine trasporto il periodo non lo ha proprio.
  */
 async function movimenti(base44, { canale, anno, mese, provincia, regione, raccoglitore, destinazione }) {
   const svc = base44.asServiceRole.entities;
@@ -119,7 +139,8 @@ async function movimenti(base44, { canale, anno, mese, provincia, regione, racco
     if (meseIdx >= 0 && m !== meseIdx) return false;
     return true;
   });
-  return { righe, senza_fine: senzaFineTrasporto(delLuogo) };
+  const modulo = canale === 'ACI' ? 'primarie ACI' : canale === 'EXTRA_RACCOLTA' ? 'extra raccolta, raccolte' : 'primarie di rete';
+  return { righe, date: dateObbligatorie(delLuogo, modulo) };
 }
 
 /**
@@ -194,10 +215,12 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
 
   // Il calcolo delle righe scarta i terminati senza fine trasporto: qui si
   // contano, canale per canale, cosi' la risposta dice che il conto di quanto ci
-  // spetta e' incompleto invece di tacerlo. Le secondarie dell'extra raccolta
-  // non si fatturano, e non si contano nemmeno qui.
+  // spetta e' incompleto invece di tacerlo; e con loro gli ordini a cui manca
+  // un'altra data obbligatoria o che le hanno incoerenti (22/09/2026). Le
+  // secondarie dell'extra raccolta non si fatturano, e non si contano nemmeno qui.
   const archivioDi = { RETE: reteAll, ACI: aciAll, EXTRA_RACCOLTA: (extraAll || []).filter(r => !eSecondariaExtra(r)) };
-  const senzaFine = canali.map(c => ({ canale: c, esclusi: senzaFineTrasporto(archivioDi[c]) })).filter(x => x.esclusi);
+  const moduloDi = { RETE: 'primarie di rete', ACI: 'primarie ACI', EXTRA_RACCOLTA: 'extra raccolta, raccolte' };
+  const conDate = canali.map(c => ({ canale: c, date: dateObbligatorie(archivioDi[c], moduloDi[c]) })).filter(x => x.date);
 
   // Senza mese: i mesi dell'anno fino a quello in corso, per fine trasporto.
   const oggi = oggiRoma();
@@ -282,7 +305,7 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
         mesi: x.mesi,
       })),
       anomalie: elenco(anomalie, 30),
-      ...(senzaFine.length ? { senza_fine_trasporto: senzaFine.map(x => ({ canale: x.canale, ...x.esclusi })) } : {}),
+      ...(conDate.length ? { date_obbligatorie_da_sistemare: conDate.map(x => ({ canale: x.canale, ...x.date })) } : {}),
       ...(ultimo < 0 && !meseChiesto ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
       ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
       ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: ci sono tutti e tre, separati.` } : {}),
@@ -325,7 +348,7 @@ export const STRUMENTI = [
       // Un mese che non esiste non deve passare in silenzio per "tutto l'anno".
       const meseValido = p.mese ? MESI.find(m => m.toLowerCase() === String(p.mese).toLowerCase()) : '';
       const meseIgnorato = p.mese && !meseValido ? String(p.mese) : '';
-      const { righe, senza_fine } = await movimenti(base44, { ...p, mese: meseValido, anno, canale });
+      const { righe, date } = await movimenti(base44, { ...p, mese: meseValido, anno, canale });
       const campo = { raccoglitore: 'trasportatore', provincia: 'provincia', regione: 'regioni', classe: 'classe', destinazione: 'destinazione', mese: 'mese' }[p.raggruppa] || 'trasportatore';
       const totale = righe.reduce((s, r) => s + peso(r), 0);
       return {
@@ -335,7 +358,7 @@ export const STRUMENTI = [
         dati: {
           canale, formulari: contaFormulari(righe), tonnellate: t3(totale),
           ...(avvisoCanale ? { avviso_canale: avvisoCanale } : {}),
-          ...(senza_fine ? { senza_fine_trasporto: senza_fine } : {}),
+          ...(date ? { date_obbligatorie_da_sistemare: date } : {}),
           ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso tutto l'anno ${anno}.` } : {}),
           per: p.raggruppa || 'raccoglitore',
           dettaglio: elenco(perChiave(righe, campo), 60),
@@ -351,7 +374,7 @@ export const STRUMENTI = [
     async esegui(base44, p) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       const svc = base44.asServiceRole.entities;
-      const [target, { righe, senza_fine }] = await Promise.all([
+      const [target, { righe, date }] = await Promise.all([
         svc.TargetRaccoglitore.filter({ anno }, 'raccoglitore', 500),
         movimenti(base44, { canale: 'RETE', anno }),
       ]);
@@ -395,7 +418,7 @@ export const STRUMENTI = [
           target_totale_t: Math.round(dettaglio.reduce((s, x) => s + x.target_t, 0) * 100) / 100,
           fatto_totale_t: Math.round(dettaglio.reduce((s, x) => s + x.fatto_t, 0) * 100) / 100,
           ...(senzaTarget.size ? { raccolto_senza_target: [...senzaTarget.entries()].map(([nome, kg]) => ({ raccoglitore: nome, tonnellate: t3(kg) })).sort((a, b) => b.tonnellate - a.tonnellate) } : {}),
-          ...(senza_fine ? { senza_fine_trasporto: senza_fine } : {}),
+          ...(date ? { date_obbligatorie_da_sistemare: date } : {}),
         },
       };
     },
@@ -419,12 +442,13 @@ export const STRUMENTI = [
       const pivot = calcolaPivot(chiave, righe, anno, meseUsato);
       // La pivot scarta i terminati senza fine trasporto: la pagina li segnala,
       // e qui si contano sulle stesse righe con gli stessi filtri della pivot
-      // (il canale delle secondarie, la raccolta o il trasferimento dell'extra).
-      const senzaFine = senzaFineTrasporto(righe.filter(r => {
+      // (il canale delle secondarie, la raccolta o il trasferimento dell'extra),
+      // insieme agli ordini con le altre date obbligatorie da sistemare.
+      const date = dateObbligatorie(righe.filter(r => {
         if (def.canale && (def.canale === 'ACI') !== eAci(r)) return false;
         if (def.movimento && String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== def.movimento) return false;
         return true;
-      }));
+      }), `${def.entita}${def.canale ? ` ${def.canale}` : ''}${def.movimento ? ` (${def.movimento})` : ''}`);
       const avvisi = [];
       if (def.periodo === 'mese' && !meseValido) avvisi.push(`Questa pivot copre un mese solo e il mese non era indicato: sono i dati di ${meseUsato} ${anno}, non dell'anno.`);
       if (pivotIgnorata) avvisi.push(`La pivot "${pivotIgnorata}" non esiste: ho preso "${chiave}".`);
@@ -435,7 +459,7 @@ export const STRUMENTI = [
         dati: {
           titolo: pivot.titolo, misure: pivot.etichetteMisure, colonne: pivot.colonne,
           righe_lette: pivot.righeLette, albero: pivot.radice,
-          ...(senzaFine ? { senza_fine_trasporto: senzaFine } : {}),
+          ...(date ? { date_obbligatorie_da_sistemare: date } : {}),
           ...(avvisi.length ? { avvisi } : {}),
         },
       };
@@ -468,13 +492,19 @@ export const STRUMENTI = [
         if (!perCanale[c]) perCanale[c] = { canale: c, totale_del_canale: null, flussi: [] };
         perCanale[c].flussi.push(f);
       }
-      // I terminati senza fine trasporto non stanno in nessuna settimana: la
-      // quadratura li conta a parte, flusso per flusso, e qui si dicono. E un
-      // archivio che si sta ricaricando e' a meta': i numeri vanno presi con
-      // quell'avviso, non come definitivi.
-      const senzaFine = Object.entries(g)
-        .filter(([, d]) => d && d.senza_fine && d.senza_fine.n > 0)
-        .map(([chiave, d]) => ({ flusso: chiave, canale: canaleDelFlusso(chiave), formulari: d.senza_fine.n, esempi: d.senza_fine.esempi }));
+      // Le date obbligatorie, flusso per flusso (22/09/2026): i terminati senza
+      // fine trasporto non stanno in nessuna settimana e la quadratura li conta a
+      // parte; quelli della settimana senza immissione o inizio del trasporto, o
+      // con date incoerenti, sono contati ma vanno corretti. E un archivio che si
+      // sta ricaricando e' a meta': i numeri vanno presi con quell'avviso, non
+      // come definitivi.
+      const conDate = Object.entries(g)
+        .filter(([, d]) => d && ((d.senza_fine && d.senza_fine.n > 0) || (d.date_da_sistemare || []).length))
+        .map(([chiave, d]) => ({
+          flusso: chiave, canale: canaleDelFlusso(chiave),
+          ...(d.senza_fine && d.senza_fine.n > 0 ? { senza_fine_trasporto: { formulari: d.senza_fine.n, esempi: d.senza_fine.esempi, escluso_da_ogni_settimana: true } } : {}),
+          ...((d.date_da_sistemare || []).length ? { nella_settimana: { formulari: contaDistinti(d.date_da_sistemare), esempi: d.date_da_sistemare.slice(0, 10).map(x => ({ fir: x.fir, ordine: x.ordine, date: x.date })) } } : {}),
+        }));
       const aperti = caricamentiAperti(g);
       return {
         fonte: 'Formulari terminati nella settimana',
@@ -483,7 +513,7 @@ export const STRUMENTI = [
         dati: {
           settimana, intervallo,
           canali: Object.values(perCanale),
-          ...(senzaFine.length ? { senza_fine_trasporto: { flussi: senzaFine, nota: 'Terminati senza data di fine trasporto, di qualunque periodo: esclusi da ogni settimana. Vanno corretti nel file del portale e ricaricati.' } } : {}),
+          ...(conDate.length ? { date_obbligatorie_da_sistemare: { flussi: conDate, nota: 'Immissione, inizio e fine trasporto sono obbligatorie nei formulari. "senza_fine_trasporto": terminati di qualunque periodo senza la data di fine trasporto, esclusi da ogni settimana. "nella_settimana": formulari della settimana, contati, a cui manca l\'immissione o l\'inizio del trasporto o che hanno le date incoerenti. Vanno corretti nel file del portale e ricaricati; l\'extra raccolta nella sua scheda.' } } : {}),
           ...(aperti.length ? { avviso_caricamenti: `Caricamento ${aperti.some(a => a.interrotto) ? 'interrotto' : 'in corso'} di ${aperti.map(a => a.tipo_file).join(', ')}: l'archivio puo' essere a meta' e questi numeri non sono definitivi.` } : {}),
           totale_della_settimana: null,
           nota: "Ogni flusso ha il suo totale e i totali NON si sommano, per due motivi diversi: fra canali perche' rete, ACI ed extra raccolta sono commesse indipendenti; dentro lo stesso canale perche' primaria e secondaria sono lo stesso materiale che si sposta, e sommarle lo conterebbe due volte. Nella risposta i numeri vanno dati flusso per flusso.",
@@ -515,7 +545,10 @@ export const STRUMENTI = [
             punto_di_raccolta: r.punto_di_raccolta || '', provincia: r.provincia || '',
             trasportatore: r.trasportatore || '', destinazione: r.destinazione || '',
             classe: r.classe || '', peso_effettivo_kg: peso(r),
+            // tutte e tre le date obbligatorie, e cosa manca o non torna (22/09/2026)
+            ordine_immesso_il: soloData(r.ordine_immesso_il), trasporto_iniziato_il: soloData(r.trasporto_iniziato_il),
             trasporto_finito_il: soloData(r.trasporto_finito_il), ordine_chiuso_il: soloData(r.ordine_chiuso_il),
+            ...(voceDate(r) ? { date_obbligatorie_da_sistemare: voceDate(r).date } : {}),
           });
         }
       }));
@@ -561,6 +594,9 @@ export const STRUMENTI = [
           ...(d.caricamento_in_corso ? { avviso_caricamenti: d.caricamento_in_corso } : {}),
           ...(d.avvisi_generali && d.avvisi_generali.length ? { avvisi_generali: d.avvisi_generali } : {}),
           ...(sf && (sf.primarie || sf.secondarie) ? { senza_fine_trasporto: sf } : {}),
+          // le date obbligatorie mancanti o incoerenti dei terminati di rete, come
+          // le dice il modulo (22/09/2026): passano cosi' come arrivano
+          ...(d.date_da_sistemare ? { date_obbligatorie_da_sistemare: d.date_da_sistemare } : {}),
           kg_per_viaggio: d.kg_per_viaggio,
           impianti,
           viaggi_per_mese: d.viaggi_per_mese,
@@ -595,6 +631,8 @@ export const STRUMENTI = [
             conferisce_a: (o.destinazioni || []).map(dd => `${dd.destinazione}: ${dd.viaggi} viaggi, ${t3(dd.kg)} t${dd.sospetta ? ' (FUORI ROTTA)' : ''}`),
           })),
         sospetti: (f2.sospetti || []).filter(x => !k || normalizzaRagioneSociale(x.origine).includes(k)),
+        // i terminati del flusso, di qualunque anno, con date obbligatorie mancanti o incoerenti
+        ...(f2.date_da_sistemare ? { date_obbligatorie_da_sistemare: f2.date_da_sistemare } : {}),
       }));
       return {
         fonte: 'Rotte dei conferimenti',
@@ -602,7 +640,7 @@ export const STRUMENTI = [
         dati_al: oggiRoma(),
         dati: {
           sospetti_per_flusso: flussi.map(f2 => ({ flusso: f2.flusso, quanti: f2.sospetti.length })),
-          flussi: p.solo_sospetti ? flussi.map(f2 => ({ flusso: f2.flusso, sospetti: f2.sospetti })) : flussi,
+          flussi: p.solo_sospetti ? flussi.map(f2 => ({ flusso: f2.flusso, sospetti: f2.sospetti, ...(f2.date_obbligatorie_da_sistemare ? { date_obbligatorie_da_sistemare: f2.date_obbligatorie_da_sistemare } : {}) })) : flussi,
           stoccaggi_condivisi: d.stoccaggi_condivisi,
           tariffe_da_verificare: d.tariffe_da_verificare,
           nota: "Le rotte si leggono dalla storia dell'anno: quello che un'origine fa quasi sempre e' la sua rotta, quello che fa una volta sola contro centinaia di viaggi e' quasi sempre un formulario chiuso male. Chi ha due rotte vere, con numeri consistenti, non viene segnalato.",
@@ -612,7 +650,7 @@ export const STRUMENTI = [
   },
   {
     nome: 'alert_aperti',
-    descrizione: 'Gli alert aperti del gestionale, per modulo e gravita\'.',
+    descrizione: 'Gli alert aperti del gestionale, per modulo e gravita\'. Comprende, per modulo e canale e di qualunque anno, gli ordini terminati con date obbligatorie (immissione, inizio e fine trasporto) mancanti o incoerenti, con l\'elenco degli ordini.',
     parametri: { modulo: 'opzionale' },
     moduli: ['Alert & Controllo'],
     async esegui(base44, p) {
@@ -631,6 +669,14 @@ export const STRUMENTI = [
         x.quanti++;
         if (x.esempi.length < 3) x.esempi.push(a.titolo);
       }
+      // Le date obbligatorie (22/09/2026) per esteso: un alert per modulo e
+      // canale, col suo elenco di ordini. Il motore le rivaluta a ogni caricamento
+      // su tutti i terminati, di qualunque anno; dal 22/09/2026 anche l'extra
+      // raccolta, a ogni scheda salvata, e l'avviso che lo negava e' tolto.
+      const date = filtrati.filter(a => String(a.regola_id || '').startsWith('date_obbligatorie')).map(a => ({
+        modulo: a.modulo, canale: a.canale || '', ordini: a.quanti ?? null, senza_fine_trasporto: a.senza_fine ?? null,
+        titolo: a.titolo, elenco: a.descrizione,
+      }));
       return {
         fonte: 'Alert & Controllo',
         periodo: 'adesso',
@@ -638,6 +684,7 @@ export const STRUMENTI = [
         dati: {
           totale: filtrati.length,
           gruppi: [...per.values()].sort((a, b) => b.quanti - a.quanti),
+          ...(date.length ? { date_obbligatorie_da_sistemare: { per_modulo_e_canale: date, nota: 'Immissione, inizio e fine trasporto sono obbligatorie nei formulari: vanno inserite o corrette. Un modulo e un canale per voce, mai sommati.' } } : {}),
           ...(moduloIgnorato ? { avviso: `"${moduloIgnorato}" non e' un modulo degli alert (ci sono: ${moduli.join(', ')}): il totale qui sotto e' di tutti.` } : {}),
         },
       };
@@ -677,6 +724,9 @@ export const STRUMENTI = [
       // l'esito salvato, calcolato su un archivio intero, e lo si dice.
       const daControllare = richieste.filter(r => listaOrdini(r).length && !r.motivo_annullamento && !r.evasione_confermata);
       let terminati = null, senzaFine = null, presenti = null, inCorso = [], statoNonLetto = false;
+      // Immissione, inizio e fine trasporto sono obbligatorie (22/09/2026): di un
+      // ordine terminato a cui ne manca una, o con date incoerenti, si dice quale.
+      const dateDegliOrdini = new Map();
       if (daControllare.length) {
         const caricamenti = await statoCaricamenti(base44, ['primarie', 'primarie_rete', 'primarie_aci']).catch(() => null);
         if (!caricamenti) statoNonLetto = true;
@@ -695,6 +745,9 @@ export const STRUMENTI = [
           for (const o of [...rete, ...aci]) {
             const id = String(o.id_ordine || '').trim();
             if (!id || !eTerminato(o)) continue;
+            // le date obbligatorie che mancano o non tornano, per dirle accanto all'ordine
+            const v = voceDate(o);
+            if (v) dateDegliOrdini.set(id, v.date);
             const g = giornoMovimento(o);
             if (!g) { senzaFine.add(id); continue; }
             if (!terminati.has(id) || g < terminati.get(id)) terminati.set(id, g);
@@ -722,6 +775,7 @@ export const STRUMENTI = [
         // Un ordine senza fine trasporto conta solo se non c'e' anche una sua
         // riga terminata con la data: allora e' ritirato lo stesso.
         const ordiniSenzaFine = senzaFine ? ordini.filter(id => senzaFine.has(id) && !terminati.has(id)) : [];
+        const ordiniConDate = ordini.filter(id => dateDegliOrdini.has(id)).map(id => ({ id_ordine: id, date: dateDegliOrdini.get(id) }));
         return {
           pdr: r.pdr_nome, provincia: r.provincia, classe: r.classe,
           ordini, stato, scadenza: soloData(r.scadenza),
@@ -730,6 +784,7 @@ export const STRUMENTI = [
           immesso_il: soloData(r.ordine_immesso_il), evaso_il: soloData(r.evaso_il || rilevata),
           ...(ev && ev.totali > 1 ? { ordini_ritirati: `${ev.evasi} su ${ev.totali}` } : {}),
           ...(ordiniSenzaFine.length ? { ordini_terminati_senza_fine_trasporto: ordiniSenzaFine } : {}),
+          ...(ordiniConDate.length ? { ordini_con_date_obbligatorie_da_sistemare: ordiniConDate } : {}),
           ...(salvato !== stato ? { stato_nella_pagina: salvato } : {}),
         };
       });
@@ -745,6 +800,7 @@ export const STRUMENTI = [
       const statoIgnorato = chiesto && chiesto !== 'scaduta' && !stati.includes(chiesto) ? chiesto : '';
       const diverse = tutte.filter(r => r.stato_nella_pagina).length;
       const senzaFineTot = tutte.filter(r => r.ordini_terminati_senza_fine_trasporto).length;
+      const conDateTot = tutte.filter(r => r.ordini_con_date_obbligatorie_da_sistemare).length;
       // Il ricontrollo automatico della pagina (caricamento delle primarie,
       // apertura da parte dell'amministratore) lavora solo sull'anno in corso:
       // per un anno passato la pagina non si riallinea da sola.
@@ -765,6 +821,7 @@ export const STRUMENTI = [
           ...(statoNonLetto ? { avviso_caricamenti: 'Non sono riuscita a leggere lo stato dei caricamenti: i ritiri sono ricontrollati sui terminati di adesso, ma se le primarie si stavano ricaricando potrebbero non essere definitivi.' } : {}),
           ...(diverse ? { avviso_pagina: `${diverse} ${diverse === 1 ? 'richiesta ha' : 'richieste hanno'} qui uno stato diverso da quello salvato nella To-Do List ("stato_nella_pagina"): vale quello ricontrollato adesso; ${riallineo}` } : {}),
           ...(senzaFineTot ? { avviso_senza_fine_trasporto: `${senzaFineTot} ${senzaFineTot === 1 ? 'richiesta ha' : 'richieste hanno'} ordini terminati senza data di fine trasporto: non contano come ritirati finche' la data non si corregge nel file del portale e si ricarica.` } : {}),
+          ...(conDateTot ? { avviso_date_obbligatorie: `${conDateTot} ${conDateTot === 1 ? 'richiesta ha' : 'richieste hanno'} ordini terminati con date obbligatorie (immissione, inizio o fine trasporto) mancanti o incoerenti, detti in "ordini_con_date_obbligatorie_da_sistemare": vanno corretti nel file del portale e ricaricati.` } : {}),
         },
       };
     },
@@ -865,8 +922,22 @@ export const STRUMENTI = [
           secondarie_aci_in_t: r.secondarie_aci_in_t, secondarie_aci_out_t: r.secondarie_aci_out_t,
           target_rete_t: r.target_totale_t, giacenza_riferimento_t: r.giacenza_riferimento_t,
           giacenza_classi_kg: calcolata ? r.giacenza_classi_kg : null,
+          // I formulari terminati del soggetto con le date obbligatorie da
+          // sistemare, per canale (regola del 22/09/2026): prima si perdevano qui.
+          date_da_sistemare: r.date_da_sistemare || [],
         };
       });
+      // Chiedendo un sito, le sue anomalie vengono prima e le altre dei siti non
+      // chiesti restano fuori: in fila con quelle di tutti i siti, le date da
+      // sistemare del sito chiesto potevano finire oltre le prime 20 e sparire
+      // dalla risposta (22/09/2026). Restano, dopo, quelle senza sito (del file
+      // del portale e degli ordini senza riscontro).
+      let anomalie = d.anomalie || [];
+      if (p.sito) {
+        const chiavi = utili.map(r => normalizzaRagioneSociale(r.sito)).filter(Boolean);
+        const delSito = (a) => { const k = normalizzaRagioneSociale(a.sito || ''); return !!k && chiavi.some(c => k === c || k.includes(c)); };
+        anomalie = [...anomalie.filter(delSito), ...anomalie.filter(a => !a.sito)];
+      }
       // I totali si rifanno sulle righe rimaste, un canale per volta: quelli del
       // modulo sono di tutti i siti e, filtrando per sito o per tipo,
       // risponderebbero a un'altra domanda. Nessun totale somma i canali.
@@ -904,7 +975,7 @@ export const STRUMENTI = [
         periodo: `anno ${anno}`,
         dati_al: oggiRoma(),
         dati: {
-          siti: elenco(utili, 80), totali, anomalie: elenco(d.anomalie || [], 20),
+          siti: elenco(utili, 80), totali, anomalie: elenco(anomalie, 20),
           // Niente giustificazioni con la chiusura a portale: la giacenza segue i
           // caricamenti, e uno scarto e' un'anomalia da dire, non da spiegare via.
           nota: "La giacenza segue i caricamenti e si legge per fine trasporto, un canale per volta. Impianti (rete): la fotografia del file degli ordini non dichiarati, piu' i carichi che il gestionale conosce e il file no (riconosciuti dal numero d'ordine), meno le dichiarazioni caricate a portale dopo la fotografia. Stoccaggi: la rilevazione del portale per classe (1-4 rete, 9 ACI) piu' ingressi e uscite con il trasporto finito dopo. L'extra raccolta a portale non c'e': e' il saldo del piazzale nell'anno. Se un numero non torna con il portale, dillo come anomalia da verificare (un file non ancora caricato, una rilevazione vecchia, una dichiarazione non registrata) e non spiegarlo con la data di chiusura dell'ordine a portale, che non decide niente.",
@@ -1161,22 +1232,46 @@ export const STRUMENTI = [
         // Il conto del modulo scarta i terminati senza fine trasporto senza
         // contarli: qui si contano sugli archivi del canale, con lo stesso filtro
         // sul campo vuoto della quadratura, cosi' la risposta dice che il conto
-        // e' incompleto invece di tacerlo. Primarie e secondarie a parte: sono lo
-        // stesso materiale che si sposta. null se l'archivio non accetta il
-        // filtro: il conteggio non c'e', che non vuol dire zero.
+        // e' incompleto invece di tacerlo. Primarie e secondarie a parte: sono
+        // lo stesso materiale che si sposta. null se l'archivio non si e' letto:
+        // il conteggio non c'e', che non vuol dire zero.
+        // Gli ordini a cui manca un'altra data obbligatoria, o che le hanno
+        // incoerenti (22/09/2026), sono nel conto ma vanno corretti. Con un
+        // filtro non si trovano, e rileggere per intero primarie e secondarie di
+        // tutti gli anni a ogni domanda, accanto a calcolaPassiva, rischiava di
+        // sforare il tempo della funzione: si prendono dagli alert del motore
+        // (date_obbligatorie_<canale>), un modulo per volta, come fa il
+        // riepilogo di EcoTyna. L'extra raccolta e' un archivio piccolo, e il suo
+        // alert non si rivaluta ancora da solo quando si salva una scheda: li'
+        // si leggono i terminati interi.
+        const extra = tipologia === 'EXTRA_RACCOLTA';
         const senzaData = (entita) => fetchAll(svc[entita], { trasporto_finito_il: null }).catch(() => null);
-        const [res, primSenza, secSenza] = await Promise.all([
+        const canaleAlert = tipologia === 'ACI' ? 'ACI' : 'rete';
+        const [res, primLette, secLette, alertDate] = await Promise.all([
           base44.functions.invoke('calcolaPassiva', { anno, mese: meseChiesto, tipologia }),
-          senzaData(tipologia === 'ACI' ? 'PrimariaAci' : tipologia === 'EXTRA_RACCOLTA' ? 'ExtraRaccolta' : 'PrimariaRete'),
-          tipologia === 'EXTRA_RACCOLTA' ? Promise.resolve([]) : senzaData('Secondaria'),
+          extra ? fetchAll(svc.ExtraRaccolta, { stato: 'terminato' }).catch(() => null)
+            : senzaData(tipologia === 'ACI' ? 'PrimariaAci' : 'PrimariaRete'),
+          extra ? Promise.resolve([]) : senzaData('Secondaria'),
+          extra ? Promise.resolve([]) : fetchAll(svc.Alert, { regola_id: `date_obbligatorie_${canaleAlert}`, stato: 'aperto' }).catch(() => null),
         ]);
         const d = (res && res.data) || res || {};
-        const conteggioFatto = primSenza !== null && secSenza !== null;
-        const primarieCanale = tipologia === 'EXTRA_RACCOLTA' ? (primSenza || []).filter(r => !eSecondariaExtra(r)) : (primSenza || []);
-        const secondarieCanale = tipologia === 'EXTRA_RACCOLTA' ? (primSenza || []).filter(eSecondariaExtra)
-          : (secSenza || []).filter(r => eAci(r) === (tipologia === 'ACI'));
-        const sfPrimarie = senzaFineTrasporto(primarieCanale);
-        const sfSecondarie = senzaFineTrasporto(secondarieCanale);
+        const conteggioFatto = primLette !== null && secLette !== null;
+        // Gli alert del canale, primarie e secondarie ciascuna col suo: rete e
+        // ACI non si mescolano, e nemmeno primarie e secondarie.
+        const moduliAlert = tipologia === 'ACI' ? { primarie_aci: 'primarie', secondarie: 'secondarie' } : { primarie_rete: 'primarie', secondarie: 'secondarie' };
+        const dagliAlert = (alertDate || [])
+          .filter(a => moduliAlert[a.modulo] && String(a.canale || canaleAlert) === canaleAlert)
+          .map(a => ({
+            modulo: moduliAlert[a.modulo], canale: tipologia, ordini: a.quanti ?? null, senza_fine_trasporto: a.senza_fine ?? null,
+            elenco: a.descrizione,
+          }));
+        const primarieCanale = tipologia === 'EXTRA_RACCOLTA' ? (primLette || []).filter(r => !eSecondariaExtra(r)) : (primLette || []);
+        const secondarieCanale = tipologia === 'EXTRA_RACCOLTA' ? (primLette || []).filter(eSecondariaExtra)
+          : (secLette || []).filter(r => eAci(r) === (tipologia === 'ACI'));
+        const nomePrimarie = tipologia === 'EXTRA_RACCOLTA' ? 'raccolta' : 'primarie';
+        const nomeSecondarie = tipologia === 'EXTRA_RACCOLTA' ? 'trasferimenti' : 'secondarie';
+        const sfPrimarie = dateObbligatorie(primarieCanale, `${nomePrimarie}, canale ${tipologia}`);
+        const sfSecondarie = dateObbligatorie(secondarieCanale, `${nomeSecondarie}, canale ${tipologia}`);
         const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
         const sezione = (nome, gruppi) => (gruppi || [])
           .filter(f => !k || normalizzaRagioneSociale(f.fornitore).includes(k))
@@ -1203,14 +1298,19 @@ export const STRUMENTI = [
               ? { totale_del_fornitore_euro: suo, totali_del_mese_tutti_i_fornitori: d.totali }
               : { totali: d.totali, quadratura: d.quadratura }),
             anomalie: elenco(d.anomalie || [], 20),
-            ...(sfPrimarie || sfSecondarie ? {
-              senza_fine_trasporto: {
+            ...(sfPrimarie || sfSecondarie || dagliAlert.length ? {
+              date_obbligatorie_da_sistemare: {
                 canale: tipologia,
-                ...(sfPrimarie ? { [tipologia === 'EXTRA_RACCOLTA' ? 'raccolta' : 'primarie']: sfPrimarie } : {}),
-                ...(sfSecondarie ? { [tipologia === 'EXTRA_RACCOLTA' ? 'trasferimenti' : 'secondarie']: sfSecondarie } : {}),
+                ...(sfPrimarie ? { [nomePrimarie]: sfPrimarie } : {}),
+                ...(sfSecondarie ? { [nomeSecondarie]: sfSecondarie } : {}),
+                ...(dagliAlert.length ? {
+                  tutte_le_date_dagli_alert: dagliAlert,
+                  nota_alert: 'Per primarie e secondarie qui sopra ci sono i terminati senza fine trasporto, letti adesso: sono esclusi dal conto. "tutte_le_date_dagli_alert" sono gli alert del motore, uno per modulo e canale, con tutte le date obbligatorie mancanti o incoerenti (anche l\'immissione e l\'inizio del trasporto, che non tolgono l\'ordine dal conto: vanno corretti lo stesso) e l\'elenco degli ordini, rivalutati a ogni caricamento del file del modulo. I senza fine trasporto compaiono in tutte e due le voci: sono gli stessi ordini, non vanno sommati. Primarie e secondarie non si sommano.',
+                } : {}),
               },
             } : {}),
-            ...(conteggioFatto ? {} : { avviso_senza_fine_trasporto: 'Non sono riuscita a contare i terminati senza data di fine trasporto: se ce ne sono, il conto qui sopra li esclude.' }),
+            ...(conteggioFatto ? {} : { avviso_date_obbligatorie: 'Non sono riuscita a leggere i terminati per contare quelli con date obbligatorie mancanti o incoerenti: se ce ne sono senza data di fine trasporto, il conto qui sopra li esclude.' }),
+            ...(alertDate === null ? { avviso_alert_date: 'Non sono riuscita a leggere gli alert delle date obbligatorie: gli ordini a cui manca l\'immissione o l\'inizio del trasporto, o con date incoerenti, qui non ci sono. Si vedono in Alert & Controllo.' } : {}),
             ...(tipologiaChiesta ? {} : { avviso_canale: `${tipologiaIgnorata ? `"${tipologiaIgnorata}" non e' un canale` : 'Canale non indicato'}: questo e' il conto della RETE. ACI ed extra raccolta hanno il loro, e non si sommano.` }),
             nota: 'Conto fatto adesso sui movimenti terminati del mese, lo stesso del modulo Fatturazione. Un fornitore che ne fattura un altro porta il secondo in "di cui": si paga al primo.',
           },

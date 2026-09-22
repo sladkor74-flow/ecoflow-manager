@@ -5,6 +5,7 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { giornoRoma } from "../../shared/giornoItaliano.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { calcolaRigheAttiva } from "../../shared/attivaCalcolo.ts";
+import { testoDate } from "../../shared/movimenti.ts";
 import { leggiTabellePrefattura, leggiLineePdfPrefattura, confrontaPrefattura, comeOrdine, periodoPrefattura } from "../../shared/prefattura.ts";
 
 // La prefattura del portale Ecotyre: si carica (Excel o PDF), si tiene per il
@@ -20,7 +21,9 @@ import { leggiTabellePrefattura, leggiLineePdfPrefattura, confrontaPrefattura, c
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
 // I numeri nelle note si scrivono all'italiana: punto per le migliaia, virgola per i decimali.
-const migliaia = (v, decimali = 0) => { const [i, d] = Number(v || 0).toFixed(decimali).split('.'); return i.replace(/B(?=(d{3})+(?!d))/g, '.') + (d ? ',' + d : ''); };
+// L'espressione aveva perso le barre (/B(?=(d{3})+(?!d))/): cercava la lettera B
+// e non metteva mai il punto delle migliaia.
+const migliaia = (v, decimali = 0) => { const [i, d] = Number(v || 0).toFixed(decimali).split('.'); return i.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (d ? ',' + d : ''); };
 
 export default async function(req) {
   try {
@@ -96,9 +99,19 @@ export default async function(req) {
       // le tariffe tutte, come l'anteprima e il documento: con una pagina sola il confronto poteva usare prezzi diversi
       fetchAll(svc.Fornitore), fetchAll(svc.Tariffa, { direzione: 'ATTIVA' }), fetchAll(svc.Terziaria),
     ]);
-    const { righe } = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: annoNum, mese });
+    const { righe, anomalie } = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: annoNum, mese });
+    // Le date obbligatorie dei formulari del mese, canale per canale (regola
+    // dell'utente del 22/09/2026): i terminati confrontati con la prefattura a cui
+    // manca l'immissione o l'inizio, o con date incoerenti, e i senza fine
+    // trasporto che potrebbero essere del mese. Prima le vedeva solo la scheda
+    // Attiva: qui si scartavano con le altre anomalie.
+    const anomalieDate = (anomalie || []).filter(a => String(a.tipo || '').startsWith('date'));
 
-    // Dove sta, nel gestionale, un ordine che il mese non ha
+    // Dove sta, nel gestionale, un ordine che il mese non ha. Di un terminato si
+    // porta anche cosa non va nelle sue date (testoDate): immissione, inizio e
+    // fine trasporto sono obbligatorie (regola dell'utente del 22/09/2026), e un
+    // ordine della prefattura che nel gestionale e' terminato senza fine trasporto
+    // si spiega con la data che manca, non con un "altro mese".
     const altrove = new Map();
     const segna = (lista, canaleDi) => {
       for (const o of lista) {
@@ -107,7 +120,7 @@ export default async function(req) {
         const stato = String(o.stato || '').toLowerCase().trim();
         const gia = altrove.get(id);
         if (gia && gia.stato === 'terminato' && stato !== 'terminato') continue;
-        altrove.set(id, { canale: canaleDi(o), stato, giorno: giornoRoma(o.trasporto_finito_il) });
+        altrove.set(id, { canale: canaleDi(o), stato, giorno: giornoRoma(o.trasporto_finito_il), date: testoDate(o) });
       }
     };
     segna(reteAll, (o) => (eAci(o) ? 'ACI' : 'RETE'));
@@ -119,6 +132,7 @@ export default async function(req) {
     return Response.json({
       prefattura: { ...meta, numero_righe: (prefattura.righe || []).length },
       confronto: confrontaPrefattura(prefattura.righe || [], righe, altrove),
+      anomalie_date: anomalieDate,
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

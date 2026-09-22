@@ -14,6 +14,7 @@ import CommessaEcotyreForm from '@/components/target-status/CommessaEcotyreForm'
 import TargetAnnuali from '@/pages/TargetAnnuali';
 import ReportGenerale from '@/components/target-status/ReportGenerale';
 import CanaleAci from '@/components/target-status/CanaleAci';
+import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/lib/AuthContext';
@@ -313,6 +314,12 @@ export default function TargetStatus() {
             <div className="flex items-center justify-center py-20 text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin mr-2" /> Caricamento dati…</div>
           ) : (
             <>
+              {/* Immissione, inizio e fine trasporto sono obbligatorie (regola del
+                  22/09/2026): computeRaccolto dice i terminati di rete senza fine
+                  trasporto, esclusi dal raccolto contro il target, e quelli contati
+                  con un'altra data da sistemare. L'ACI ha la sua riga nella sezione
+                  Canale ACI: i due canali non si sommano. */}
+              <RiepilogoDate canale="Rete" riepilogo={raccolto?.date_da_sistemare} esempi />
               <KpiCards kpis={kpis} />
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-3">Raccolta RETE per regione e contratto</h2>
@@ -340,6 +347,7 @@ export default function TargetStatus() {
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-1">Canale ACI</h2>
                 <p className="text-xs text-muted-foreground mb-3">Ritiri dai centri di demolizione, separati dalla RETE.</p>
+                <RiepilogoDate canale="ACI" riepilogo={raccoltoAci?.date_da_sistemare} esempi className="mb-3" />
                 <CanaleAci raccoltoAci={raccoltoAci} commessa={commessa} anno={anno} />
               </div>
             </>

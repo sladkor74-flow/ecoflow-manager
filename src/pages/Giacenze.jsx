@@ -71,8 +71,9 @@ export default function Giacenze() {
   const handleExportAll = async () => {
     setExporting(true);
     try {
-      // Recupera l'intero elenco ordini da dichiarare (senza filtri)
-      const ordRes = await base44.functions.invoke('getOrdiniDaDichiarare', { limite: 100000, offset: 0 });
+      // Recupera l'intero elenco ordini da dichiarare (senza filtri): tutte le
+      // righe, non le prime mille sotto il totale di tutte.
+      const ordRes = await base44.functions.invoke('getOrdiniDaDichiarare', { tutte: true, offset: 0 });
       await exportGiacenzeAllExcel(data, ordRes.data, anno);
     } catch (e) { alert('Errore export: ' + e.message); }
     setExporting(false);
@@ -146,7 +147,9 @@ export default function Giacenze() {
 
             <TabsContent value="stoccaggi">
               <StoccaggiManager
-                stoccaggiFromCalcolo={data.righe.filter(r => r.tipo_destinazione === 'stoc').map(r => ({ sito: r.sito }))}
+                // Con i formulari da sistemare dello stoccaggio: senza fine trasporto
+                // non entrano fra i movimenti dopo la rilevazione (22/09/2026).
+                stoccaggiFromCalcolo={data.righe.filter(r => r.tipo_destinazione === 'stoc').map(r => ({ sito: r.sito, date_da_sistemare: r.date_da_sistemare || [] }))}
                 isAdmin={isAdmin}
                 onSaved={loadData}
               />

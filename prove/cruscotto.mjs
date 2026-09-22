@@ -107,6 +107,28 @@ verifica('una sola richiesta ECT oltre il termine (quella evasa e quella futura 
 const pulito = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: ['primarie'], alertAperti: [], uploadLogs: [logs[0]], assegnatiRete: [], assegnatiAci: [], documenti: MESI8(), prefatture: MESI8().map(d => ({ anno: 2026, mese: d.mese })), riepilogoQualifica: null, giacenzeSito: [], impiantiTarget: [], richiesteEct: [] });
 verifica('tutto a posto: elenco vuoto', pulito.da_gestire.length === 0, pulito.da_gestire.map(v => v.titolo).join(' | '));
 
+console.log('DATE OBBLIGATORIE (regola del 22/09/2026)');
+// Il motore degli alert apre un alert per modulo e canale con quanti ordini
+// terminati hanno date obbligatorie mancanti o incoerenti: il cruscotto li legge
+// da li', senza rileggere le primarie, e ne fa una voce ciascuno col collegamento.
+const alertDate = [
+  { severita: 'critico', modulo: 'primarie_rete', canale: 'rete', regola_id: 'date_obbligatorie_rete', regola_nome: 'Ordini terminati con date obbligatorie mancanti o incoerenti', quanti: 3, senza_fine: 1, titolo: 'x' },
+  { severita: 'warning', modulo: 'secondarie', canale: 'ACI', regola_id: 'date_obbligatorie_ACI', regola_nome: 'Ordini terminati con date obbligatorie mancanti o incoerenti', quanti: 1, senza_fine: 0, titolo: 'x' },
+  { severita: 'warning', modulo: 'extra_raccolta', canale: 'extra', regola_id: 'date_obbligatorie_extra', regola_nome: 'Ordini terminati con date obbligatorie mancanti o incoerenti', titolo: 'Extra raccolta: ordini con date da sistemare' },
+  { severita: 'warning', modulo: 'primarie_rete', regola_id: 'r1', regola_nome: 'Ritardo SLA' },
+];
+const rd = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: [], alertAperti: alertDate, uploadLogs: [], assegnatiRete: [], assegnatiAci: [], documenti: MESI8(), prefatture: MESI8().map(d => ({ anno: 2026, mese: d.mese })), riepilogoQualifica: null, giacenzeSito: [], impiantiTarget: [], richiesteEct: [] });
+const vDate = rd.da_gestire.filter(v => v.area === 'Date obbligatorie');
+const vRete = vDate.find(v => v.link === '/primarie-rete');
+const vSec = vDate.find(v => v.link === '/secondarie');
+const vExtra = vDate.find(v => v.link === '/extra-raccolta');
+verifica('una voce per modulo e canale, col collegamento al modulo', vDate.length === 3 && vRete && vSec && vExtra, vDate.map(v => `${v.titolo} -> ${v.link}`).join(' | '));
+verifica('rete: critica, 3 ordini, dice il senza fine trasporto', vRete.gravita === 'critico' && /^Primarie rete: 3 ordini terminati con date obbligatorie/.test(vRete.titolo) && /Di cui 1 senza fine trasporto/.test(vRete.dettaglio), JSON.stringify(vRete));
+verifica('secondarie ACI: da guardare, col canale nel titolo', vSec.gravita === 'attenzione' && /^Secondarie · ACI: 1 ordine terminato/.test(vSec.titolo), JSON.stringify(vSec));
+verifica('un alert senza conteggi si dice col suo titolo; l\'extra si corregge nella scheda', vExtra.titolo === 'Extra raccolta: ordini con date da sistemare' && /nella scheda/.test(vExtra.dettaglio), JSON.stringify(vExtra));
+const vAlert = rd.da_gestire.filter(v => v.area === 'Alert');
+verifica('la voce generica degli alert non li conta due volte: resta il ritardo SLA', vAlert.length === 1 && vAlert[0].titolo === '1 alert aperti' && /Ritardo SLA \(1\)/.test(vAlert[0].dettaglio) && rd.alert.totale === 4, vAlert.map(v => `${v.titolo} [${v.dettaglio}]`).join(' | '));
+
 console.log('DICHIARAZIONI RICONOSCIUTE A PORTALE');
 // Rete e ACI caricate lo stesso giorno, a mezzanotte italiana (22:00Z del giorno prima)
 const righePortale = [

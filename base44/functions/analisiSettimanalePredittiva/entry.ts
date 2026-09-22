@@ -4,9 +4,10 @@ import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { formatoKg } from "../../shared/formato.ts";
 import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.ts';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { eTerminato, periodoMovimento, canaleMovimento } from "../../shared/movimenti.ts";
+import { canaleMovimento } from "../../shared/movimenti.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from "../../shared/reportSettimanali.ts";
+import { giaArrivatoDiRete, residuoDiRete, sitiDellaPredittivita, dateDaSistemareDiRete, riassuntoDate } from "../../shared/proiezioneSecondarie.ts";
 
 // Media reale di un viaggio di secondaria: 13,5 tonnellate.
 const KG_PER_VIAGGIO = 13500;
@@ -84,6 +85,9 @@ export default async function(req) {
     if (primaDegliArchivi.in_corso.length) return rinvio(primaDegliArchivi.in_corso.map(descriviCaricamento).join('; '), primaDegliArchivi.in_corso);
 
     const impianti = await b.entities.ImpiantoTargetSecondaria.filter({ stato: 'attivo' });
+    // i fornitori registrati servono solo a sapere quali stoccaggi guardare per
+    // le date dei formulari, come fanno la Dashboard e la Proiezione
+    const fornitori = await b.entities.FornitoreSecondaria.filter({ stato: 'attivo' });
     // Solo rete: il target di un impianto e' della rete e ACI ed extra raccolta
     // non lo consumano. Le secondarie ACI stanno nello stesso archivio e si
     // riconoscono dalla classe.
@@ -105,51 +109,59 @@ export default async function(req) {
     const lastMonday = piuGiorni(thisMonday, -7);
     const lastSunday = piuGiorni(thisMonday, -1);
 
-    const impNormMap = {};
-    for (const imp of impianti) impNormMap[normalizzaRagioneSociale(imp.nome_impianto)] = imp;
+    // Il gia' arrivato di rete di ogni impianto seguito e' il conto condiviso
+    // (giaArrivatoDiRete, shared/proiezioneSecondarie.ts), lo stesso della
+    // Dashboard e della Proiezione a fine anno (regola dell'utente, 22/09/2026):
+    // primarie arrivate al sito dell'impianto, anche quelle scaricate nel suo
+    // piazzale, piu' secondarie da altri stoccaggi. Il piazzale conta al netto
+    // di quello che riparte per altri impianti: nella settimana le ripartite
+    // sono movimenti in negativo, sul giorno della partenza. Qui prima c'era un
+    // conto a parte che contava anche le secondarie dal piazzale dell'impianto a
+    // se stesso: quei PFU valevano due volte, all'arrivo in primaria e al
+    // trasbordo.
+    // Solo rete, solo terminati, sull'anno della fine trasporto (giorno
+    // italiano, mai la chiusura a portale).
+    const chiaviImpianti = impianti.map(imp => normalizzaRagioneSociale(imp.nome_impianto));
+    const arrivati = giaArrivatoDiRete(chiaviImpianti, primarie, secondarie, anno, normalizzaRagioneSociale);
+    // La settimana conclusa puo' cominciare nell'anno prima (lunedi' 5 gennaio,
+    // la settimana 29 dicembre-4 gennaio): i suoi giorni di dicembre stanno nel
+    // gia' arrivato di quell'anno, e con lo stesso conto si prendono da li'.
+    const annoLunedi = Number(lastMonday.slice(0, 4));
+    const arrivatiPrima = annoLunedi < anno ? giaArrivatoDiRete(chiaviImpianti, primarie, secondarie, annoLunedi, normalizzaRagioneSociale) : null;
 
-    // Terminati di rete arrivati a un impianto seguito, primarie e secondarie,
-    // col giorno italiano della fine trasporto. Il target dell'impianto si
-    // misura su tutto quello che gli arriva, come nella Proiezione a fine anno:
-    // contando le sole secondarie il residuo usciva gonfiato di tutte le
-    // primarie gia' arrivate, e il suggerimento diceva un numero diverso da
-    // quello della pagina. Chi non ha la fine trasporto non si colloca in
-    // nessuna settimana (non si ripiega sulla chiusura a portale): si conta, di
-    // qualunque anno, e si dice in fondo. Prima si contavano solo gli immessi
-    // nell'anno (annoOrdine, che AGENTS.md riserva agli elenchi): uno senza data
-    // di immissione, o immesso a dicembre dell'anno prima, spariva senza avviso.
-    const terminati = [];
-    const senzaFine = { primarie: 0, secondarie: 0 };
-    const leggi = (righe, flusso) => {
-      for (const r of righe) {
-        if (!eTerminato(r)) continue;
-        if (!impNormMap[normalizzaRagioneSociale(r.destinazione)]) continue;
-        const p = periodoMovimento(r);
-        if (!p) { senzaFine[flusso]++; continue; }
-        terminati.push({ r, flusso, giorno: p.giorno, anno: p.anno, dest: normalizzaRagioneSociale(r.destinazione) });
-      }
-    };
-    leggi(primarie, 'primarie');
-    leggi(secondarie, 'secondarie');
+    // Le date obbligatorie dei formulari (regola dell'utente, 22/09/2026):
+    // immissione, inizio e fine trasporto. Chi ne ha una mancante o incoerente
+    // si dice in fondo; chi non ha la fine trasporto non si colloca in nessuna
+    // settimana e resta fuori dal gia' arrivato. Prima si contavano solo i senza
+    // fine trasporto. Gli stessi formulari della Dashboard e della Proiezione.
+    const siti = sitiDellaPredittivita(impianti, fornitori, secondarie, anno, normalizzaRagioneSociale);
+    const dateDaSistemare = dateDaSistemareDiRete(primarie, secondarie, siti.tutti, anno, normalizzaRagioneSociale);
+    const senzaFine = dateDaSistemare.senza_fine;
 
-    const kg = (righe) => righe.reduce((s, t) => s + (Number(t.r.peso_effettivo) || 0), 0);
+    const kg = (movimenti) => movimenti.reduce((s, m) => s + (Number(m.kg) || 0), 0);
     const parti = [];
     for (const imp of impianti) {
       const impNorm = normalizzaRagioneSociale(imp.nome_impianto);
-      const suoi = terminati.filter(t => t.dest === impNorm);
-      const settimana = suoi.filter(t => t.giorno >= lastMonday && t.giorno <= lastSunday);
-      const secSett = settimana.filter(t => t.flusso === 'secondarie');
-      const primSett = settimana.filter(t => t.flusso === 'primarie');
+      const arrivato = arrivati.get(impNorm);
+      const suoi = [
+        ...((arrivatiPrima && arrivatiPrima.get(impNorm)) ? arrivatiPrima.get(impNorm).movimenti : []),
+        ...(arrivato ? arrivato.movimenti : []),
+      ];
+      const settimana = suoi.filter(m => m.giorno >= lastMonday && m.giorno <= lastSunday);
+      const secSett = settimana.filter(m => m.flusso === 'secondaria');
+      const primSett = settimana.filter(m => m.flusso === 'primaria');
+      const ripSett = settimana.filter(m => m.flusso === 'ripartita');
       const execSett = kg(settimana);
       const viaggiSett = secSett.length;
 
-      // Il consuntivo si confronta col target dell'anno: solo quello finito
-      // quest'anno. Senza il filtro entravano anche gli anni prima, il residuo
-      // andava a zero e il suggerimento diceva "0 kg/settimana" a un impianto a
-      // cui mancavano centinaia di tonnellate.
-      const consuntivoTot = kg(suoi.filter(t => t.anno === anno));
+      // Il gia' arrivato si confronta col target dell'anno: solo quello finito
+      // quest'anno, e lo garantisce il conto condiviso. Il residuo e' quello di
+      // tutte le pagine, anche sotto zero se il target e' superato; per i kg a
+      // settimana conta solo quanto manca davvero.
+      const consuntivoTot = arrivato ? arrivato.totale_kg : 0;
       const target = imp.target || 0;
-      const residuo = Math.max(0, target - consuntivoTot);
+      const residuoMostrato = residuoDiRete(target, arrivato);
+      const residuo = Math.max(0, residuoMostrato);
 
       // settimane rimanenti fino alla data obiettivo dell'impianto
       const dataFine = imp.data_fine || dataFineDefault();
@@ -163,12 +175,18 @@ export default async function(req) {
       const prevSett = kgPerSett;
       const deltaSett = execSett - prevSett;
       const deltaViaggi = Math.round(deltaSett / KG_PER_VIAGGIO);
-      const arrivati = `${formatoKg(execSett)} kg arrivati (primaria ${formatoKg(kg(primSett))} kg, secondaria ${formatoKg(kg(secSett))} kg in ${viaggiSett} ${viaggiSett === 1 ? 'viaggio' : 'viaggi'})`;
-      // Il numero si chiama come nella Proiezione a fine anno, di cui e' lo
-      // stesso conto: detto "Consuntivo di rete" si confondeva con quello della
-      // Dashboard, che somma solo i fornitori configurati. L'agente legge tutti
-      // e due.
-      const coda = `Già arrivato di rete nel ${anno}: ${formatoKg(consuntivoTot)} kg su un target di ${formatoKg(target)} kg. Residuo: ${formatoKg(residuo)} kg.`;
+      const ripartitiSett = ripSett.length ? `, meno ${formatoKg(-kg(ripSett))} kg ripartiti dal piazzale per altri impianti` : '';
+      const arrivatiSett = `${formatoKg(execSett)} kg arrivati (primaria ${formatoKg(kg(primSett))} kg, secondaria da altri stoccaggi ${formatoKg(kg(secSett))} kg in ${viaggiSett} ${viaggiSett === 1 ? 'viaggio' : 'viaggi'}${ripartitiSett})`;
+      // Il numero si chiama "Gia' arrivato di rete" in tutte le pagine, ed e' lo
+      // stesso conto della Dashboard e della Proiezione. Si dice di cosa e'
+      // fatto: le primarie, con la parte scaricata nel piazzale al netto di
+      // quello che ne e' ripartito per altri impianti, e le secondarie da altri
+      // stoccaggi.
+      const ripartito = arrivato && arrivato.piazzale_ripartito_kg ? `, al netto di ${formatoKg(arrivato.piazzale_ripartito_kg)} kg ripartiti per altri impianti` : '';
+      const piazzale = arrivato && arrivato.primaria_piazzale_kg ? `, di cui ${formatoKg(arrivato.primaria_piazzale_netta_kg)} kg nel piazzale dell'impianto${ripartito}` : '';
+      const composizione = `primarie ${formatoKg(arrivato ? arrivato.primaria_kg : 0)} kg${piazzale}; secondarie da altri stoccaggi ${formatoKg(arrivato ? arrivato.secondaria_kg : 0)} kg`;
+      const oltre = residuoMostrato < 0 ? ' (target superato)' : '';
+      const coda = `Già arrivato di rete nel ${anno}: ${formatoKg(consuntivoTot)} kg (${composizione}) su un target di ${formatoKg(target)} kg. Residuo: ${formatoKg(residuoMostrato)} kg${oltre}.`;
 
       let frase;
       if (settRim === 0) {
@@ -176,23 +194,21 @@ export default async function(req) {
       } else if (execSett === 0) {
         frase = `${imp.nome_impianto}: nessun arrivo di rete registrato nella settimana ${it(lastMonday)}→${it(lastSunday)}. Recupero previsto: ${formatoKg(kgPerSett)} kg/settimana (pari a ${viaggiPerSett} viaggi da 13,5 t) per le ${settRim} settimane rimanenti. ${coda}`;
       } else if (Math.abs(deltaSett) <= KG_PER_VIAGGIO) {
-        frase = `${imp.nome_impianto}: settimana in linea — ${arrivati} contro ${formatoKg(prevSett)} kg previsti. Mantieni ${formatoKg(kgPerSett)} kg/settimana (pari a ${viaggiPerSett} viaggi da 13,5 t) per le ${settRim} settimane rimanenti. ${coda}`;
+        frase = `${imp.nome_impianto}: settimana in linea — ${arrivatiSett} contro ${formatoKg(prevSett)} kg previsti. Mantieni ${formatoKg(kgPerSett)} kg/settimana (pari a ${viaggiPerSett} viaggi da 13,5 t) per le ${settRim} settimane rimanenti. ${coda}`;
       } else if (deltaSett > 0) {
         const nuovaPrev = Math.max(0, kgPerSett - Math.round(deltaSett / settRim));
-        frase = `${imp.nome_impianto}: anticipo di ${formatoKg(deltaSett)} kg (${deltaViaggi} viaggi) — ${arrivati} contro ${formatoKg(prevSett)} kg previsti. Suggerisco di ridurre le settimane rimanenti a ~${formatoKg(nuovaPrev)} kg/settimana per mantenere la costanza. ${coda}`;
+        frase = `${imp.nome_impianto}: anticipo di ${formatoKg(deltaSett)} kg (${deltaViaggi} viaggi) — ${arrivatiSett} contro ${formatoKg(prevSett)} kg previsti. Suggerisco di ridurre le settimane rimanenti a ~${formatoKg(nuovaPrev)} kg/settimana per mantenere la costanza. ${coda}`;
       } else {
         const nuovaPrev = kgPerSett + Math.round(Math.abs(deltaSett) / Math.max(1, settRim));
-        frase = `${imp.nome_impianto}: ritardo di ${formatoKg(Math.abs(deltaSett))} kg (${Math.abs(deltaViaggi)} viaggi) — ${arrivati} contro ${formatoKg(prevSett)} kg previsti. Suggerisco di aumentare le settimane rimanenti a ~${formatoKg(nuovaPrev)} kg/settimana. ${coda}`;
+        frase = `${imp.nome_impianto}: ritardo di ${formatoKg(Math.abs(deltaSett))} kg (${Math.abs(deltaViaggi)} viaggi) — ${arrivatiSett} contro ${formatoKg(prevSett)} kg previsti. Suggerisco di aumentare le settimane rimanenti a ~${formatoKg(nuovaPrev)} kg/settimana. ${coda}`;
       }
       parti.push(frase);
     }
 
-    // Un terminato senza fine trasporto resta fuori dal conto, e lo si dice.
-    const nSenzaFine = senzaFine.primarie + senzaFine.secondarie;
-    if (nSenzaFine > 0) {
-      parti.push(`Terminati di rete di qualunque anno verso questi impianti senza la data di fine trasporto (primarie: ${senzaFine.primarie}, secondarie: ${senzaFine.secondarie}). Non sono contati né nella settimana né nel già arrivato, finché la data non arriva con un nuovo caricamento.`);
-    }
-    const suggestion = `Suggerimento settimanale della predittività delle secondarie (settimana ${it(lastMonday)}→${it(lastSunday)}, calcolato il ${it(oggi)}). Solo rete: ACI ed extra raccolta non entrano nella predittività. Già arrivato e residuo sono quelli della Proiezione a fine anno (tutte le primarie e le secondarie di rete arrivate all'impianto), non il consuntivo della Dashboard, che somma solo i fornitori configurati.\n\n` + parti.join('\n\n');
+    // I formulari con le date obbligatorie da sistemare, in fondo: quelli senza
+    // fine trasporto sono fuori dal conto, gli altri dentro, e si dice.
+    if (dateDaSistemare.avviso) parti.push(dateDaSistemare.avviso);
+    const suggestion = `Suggerimento settimanale della predittività delle secondarie (settimana ${it(lastMonday)}→${it(lastSunday)}, calcolato il ${it(oggi)}). Solo rete: ACI ed extra raccolta non entrano nella predittività. Già arrivato e residuo sono gli stessi della Dashboard, della Proiezione a fine anno e dell'assistente: le primarie di rete arrivate al sito dell'impianto, anche quelle scaricate nel suo piazzale, più le secondarie di rete arrivate da altri stoccaggi. Il piazzale conta al netto di quello che ne riparte per altri impianti, che lo contano loro. Le secondarie dal piazzale dell'impianto all'impianto stesso non si contano: quei PFU sono già contati come primarie.\n\n` + parti.join('\n\n');
 
     // Salva come Alert consultabile dall'agente: uno per settimana, i precedenti superati.
     const Alert = b.entities.Alert;
@@ -218,7 +234,7 @@ export default async function(req) {
       superati++;
     }
 
-    return Response.json({ ok: true, canale: 'RETE', suggestion, data_riferimento: lastMonday, senza_fine_trasporto: senzaFine, suggerimenti_superati: superati });
+    return Response.json({ ok: true, canale: 'RETE', suggestion, data_riferimento: lastMonday, senza_fine_trasporto: senzaFine, date_da_sistemare: riassuntoDate(dateDaSistemare), suggerimenti_superati: superati });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

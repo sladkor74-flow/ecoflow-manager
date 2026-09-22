@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { formatTonnellate, formatKg } from '@/lib/utils';
 import { CANALI, MESI_BREVI } from '@/lib/dichiarazioniImpianti';
 import { AlertTriangle, ArrowRight, Warehouse } from 'lucide-react';
+import DateDaSistemare from '@/components/giacenze/DateDaSistemare';
 
 // Gli stoccaggi: non trattano e quindi non dichiarano. Ricevono i PFU e li
 // rimandano in secondaria verso gli impianti, e in quel viaggio sono il
@@ -69,6 +70,11 @@ function Scheda({ s }) {
         </div>
       </div>
 
+      {/* Arrivati allo stoccaggio o ripartiti senza tutte le date obbligatorie, per
+          canale (regola dell'utente, 22/09/2026): senza fine trasporto non sono
+          fra le entrate e le partenze dei mesi, ne' fra i movimenti dopo la rilevazione. */}
+      <DateDaSistemare gruppi={s.date_da_sistemare} className="mx-4 mt-3" />
+
       {s.dichiarazioni_registrate.length > 0 && (
         <div className="mx-4 mt-3 flex items-start gap-2 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 text-xs">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -93,10 +99,14 @@ function Scheda({ s }) {
               : <p className="mt-1 text-muted-foreground">Nessuna secondaria partita quest&apos;anno.</p>}
           </div>
         ))}
-        <button type="button" onClick={() => setAperto(v => !v)} className="text-xs text-primary hover:underline">
-          {aperto ? 'Nascondi il dettaglio mese per mese' : 'Mese per mese'}
-        </button>
-        {aperto && (
+        {/* Uno stoccaggio che compare solo per i formulari da sistemare non ha mesi da mostrare. */}
+        {s.canali.length === 0 && <p className="text-xs text-muted-foreground">Nessun movimento con la fine trasporto quest&apos;anno.</p>}
+        {s.canali.length > 0 && (
+          <button type="button" onClick={() => setAperto(v => !v)} className="text-xs text-primary hover:underline">
+            {aperto ? 'Nascondi il dettaglio mese per mese' : 'Mese per mese'}
+          </button>
+        )}
+        {aperto && s.canali.length > 0 && (
           <div className="border rounded-lg" data-scorre-lato>
             <table className="w-full text-xs">
               <thead>

@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { fetchAll } from '../../shared/fetchAll.ts';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
+import { TARIFFA_BASE_EXTRA_RACCOLTA } from "../../shared/ecotyreTariffe.ts";
 
 const DATA_INIZIO = '2026-01-01';
 const NOTE = 'Inserita da seedTariffeAttive2026';
@@ -13,7 +14,9 @@ interface TariffaAttivaSeed {
 
 const TARIFFE: TariffaAttivaSeed[] = [
   { tipologia: 'RETE', valore: 202 },
-  { tipologia: 'EXTRA_RACCOLTA', valore: 202 },
+  // La base dell'extra raccolta e' una sola: quella che la fatturazione attiva
+  // applica agli interventi senza prezzo quando la tabella non la ha (22/09/2026).
+  { tipologia: 'EXTRA_RACCOLTA', valore: TARIFFA_BASE_EXTRA_RACCOLTA[2026] },
   { tipologia: 'ACI', valore: 240, regione: 'Puglia' },
   { tipologia: 'ACI', valore: 240, regione: 'Campania' },
   { tipologia: 'ACI', valore: 230, regione: 'Basilicata' },

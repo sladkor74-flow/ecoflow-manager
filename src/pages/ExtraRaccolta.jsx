@@ -12,8 +12,9 @@ import { exportExtraRaccoltaExcel, exportExtraRaccoltaPDF } from '@/lib/extraRac
 import ExtraRaccoltaForm from '@/components/fatturazione/ExtraRaccoltaForm';
 import { STATI_EXTRA, statoExtra, eTerminato, datiChiusuraCompleti, dateDaCorreggere, competenza } from '@/lib/extraRaccoltaStato';
 import { giornoRoma, oggiRoma } from '@/lib/giornoItaliano';
-import { giornoMovimento, giornoElenco, MESI_MOVIMENTI } from '@/lib/movimenti';
+import { giornoMovimento, giornoElenco, dateDaSistemare, testoDate, MESI_MOVIMENTI } from '@/lib/movimenti';
 import { dopoCaricamento, testoRicalcoli } from '@/lib/importGrandeFile';
+import AvvisoDateDaSistemare, { SegnoDate, NotaDate } from '@/components/primarie-rete/DateDaSistemare';
 
 const ANNI = [2024, 2025, 2026];
 
@@ -24,6 +25,12 @@ const ANNI = [2024, 2025, 2026];
 // tutti gli elenchi. Mese e anno salvati sulla scheda non decidono: possono
 // venire da una scrittura vecchia.
 const giornoIt = (v) => { const g = giornoRoma(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
+// Immissione (la data della richiesta), inizio e fine trasporto sono obbligatorie
+// in ogni formulario terminato (regola dell'utente, 22/09/2026). Un intervento
+// terminato a cui ne manca una, o con le date nell'ordine sbagliato, ha il segno
+// sulla riga e si conta nell'avviso; il filtro Date lo mostra, anche senza un
+// mese: chi non ha la fine trasporto non ne ha uno. La validazione sul
+// salvataggio sta nel modulo di inserimento (ExtraRaccoltaForm): qui l'elenco.
 const eSecondaria = (r) => String((r && r.tipo_movimento) || 'primaria').toLowerCase().trim() === 'secondaria';
 
 // Le schede si salvano una dopo l'altra, e ogni salvataggio lanciava tutti i
@@ -56,7 +63,7 @@ export default function ExtraRaccolta() {
   const { isAdmin } = usePermessi();
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ anno: '', mese: '', stato: '', trasportatore: '', destinazione: '', tipologia_trasporto: '' });
+  const [filters, setFilters] = useState({ anno: '', mese: '', stato: '', trasportatore: '', destinazione: '', tipologia_trasporto: '', date: '' });
   const [sistemando, setSistemando] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [formInitial, setFormInitial] = useState(null);
@@ -109,31 +116,45 @@ export default function ExtraRaccolta() {
 
   useEffect(() => { load(); }, []);
 
+  // I filtri si dividono in due, come negli altri elenchi: quelli di periodo
+  // leggono giornoElenco, gli altri la scheda. Separati, per contare le date da
+  // sistemare anche di chi un periodo non l'ha (un terminato senza fine trasporto).
+  const passaAltri = (r) => {
+    if (filters.stato && statoExtra(r) !== (filters.stato === 'senza' ? '' : filters.stato)) return false;
+    if (filters.trasportatore && r.trasportatore !== filters.trasportatore) return false;
+    if (filters.destinazione && r.destinazione !== filters.destinazione) return false;
+    if (filters.tipologia_trasporto && r.tipologia_trasporto !== filters.tipologia_trasporto) return false;
+    if (filters.date === 'da_sistemare' && !dateDaSistemare(r)) return false;
+    return true;
+  };
+  const passaPeriodo = (r) => {
+    if (!filters.anno && !filters.mese) return true;
+    const g = giornoElenco(r);
+    if (!g) return false;
+    if (filters.anno && Number(g.slice(0, 4)) !== Number(filters.anno)) return false;
+    if (filters.mese && MESI_MOVIMENTI[Number(g.slice(5, 7)) - 1] !== filters.mese) return false;
+    return true;
+  };
+  const senzaPeriodo = (r) => eTerminato(r) && !giornoMovimento(r);
+
+  // Con il filtro Date un terminato senza fine trasporto resta anche con un anno
+  // o un mese scelto: e' proprio quello da correggere. passaAltri e passaPeriodo
+  // leggono solo filters, che e' fra le dipendenze.
   const filtered = useMemo(() => {
-    return records.filter(r => {
-      if (filters.anno || filters.mese) {
-        const g = giornoElenco(r);
-        if (!g) return false;
-        if (filters.anno && Number(g.slice(0, 4)) !== Number(filters.anno)) return false;
-        if (filters.mese && MESI_MOVIMENTI[Number(g.slice(5, 7)) - 1] !== filters.mese) return false;
-      }
-      if (filters.stato && statoExtra(r) !== (filters.stato === 'senza' ? '' : filters.stato)) return false;
-      if (filters.trasportatore && r.trasportatore !== filters.trasportatore) return false;
-      if (filters.destinazione && r.destinazione !== filters.destinazione) return false;
-      if (filters.tipologia_trasporto && r.tipologia_trasporto !== filters.tipologia_trasporto) return false;
-      return true;
-    }).sort((a, b) => {
+    return records.filter(r => passaAltri(r) && (passaPeriodo(r) || (filters.date === 'da_sistemare' && senzaPeriodo(r)))).sort((a, b) => {
       // Prima le richieste da evadere, poi le altre dalla piu' recente.
       const aperta = (r) => Number(statoExtra(r) === 'assegnato');
       return (aperta(b) - aperta(a)) || giornoElenco(b).localeCompare(giornoElenco(a));
     });
   }, [records, filters]);
+  // Le schede da guardare per le date da sistemare: quelle dell'elenco e i
+  // terminati senza fine trasporto che rispondono agli altri filtri.
+  const perDate = useMemo(() => records.filter(r => passaAltri(r) && (passaPeriodo(r) || senzaPeriodo(r))), [records, filters]);
 
   // Solo i terminati entrano nei totali e nelle esportazioni, come in fatturazione,
   // e solo con la fine trasporto: senza, non hanno un mese e fuori da qui non
   // contano da nessuna parte. Non si ripiega sulla richiesta: si contano e si dicono.
   const terminati = useMemo(() => filtered.filter(r => eTerminato(r) && giornoMovimento(r)), [filtered]);
-  const terminatiSenzaFine = useMemo(() => records.filter(r => eTerminato(r) && !giornoMovimento(r)), [records]);
   const senzaStato = useMemo(() => records.filter(r => !statoExtra(r)), [records]);
   const daSegnare = senzaStato.filter(datiChiusuraCompleti);
 
@@ -187,10 +208,10 @@ export default function ExtraRaccolta() {
     setFormOpen(true);
   };
 
-  // Le schede inserite prima dello stato: quelle con FIR, fine trasporto e peso
+  // Le schede inserite prima dello stato: quelle con FIR, peso e le tre date
   // si segnano terminate, riportando le date al giorno di calendario giusto.
   const segnaTerminati = async () => {
-    if (!confirm(`Segnare come terminati ${daSegnare.length} interventi con FIR, data di fine trasporto e peso? Da quel momento entrano in fatturazione, giacenze, report e verifiche nel mese della loro fine trasporto.`)) return;
+    if (!confirm(`Segnare come terminati ${daSegnare.length} interventi con FIR, peso e date di immissione, inizio e fine trasporto? Da quel momento entrano in fatturazione, giacenze, report e verifiche nel mese della loro fine trasporto.`)) return;
     setSistemando(true);
     const toccati = [];
     try {
@@ -244,14 +265,16 @@ export default function ExtraRaccolta() {
         return r ? <p className={`text-xs ${r.classe}`}>{r.testo}</p> : null;
       })()}
 
-      {terminatiSenzaFine.length > 0 && (
-        <div className="flex items-start gap-3 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
-          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-          <p>
-            <strong>{terminatiSenzaFine.length} {terminatiSenzaFine.length === 1 ? 'intervento terminato non ha' : 'interventi terminati non hanno'} la data di fine trasporto</strong>:
-            senza, non {terminatiSenzaFine.length === 1 ? 'ha' : 'hanno'} un mese e {terminatiSenzaFine.length === 1 ? 'resta escluso' : 'restano esclusi'} da totali, esportazioni, fatturazione, giacenze, report e verifiche. Aprili e scrivi la data.
-          </p>
-        </div>
+      {!loading && (
+        <AvvisoDateDaSistemare
+          righe={perDate}
+          canale="Extra Raccolta"
+          nomi={['intervento terminato', 'interventi terminati']}
+          nota="Chi non ha la fine trasporto non ha un mese e resta escluso da totali, esportazioni, fatturazione, giacenze, report e verifiche."
+          correzione={isAdmin ? 'Aprili e correggi le date.' : "Le corregge l'amministratore, aprendo l'intervento."}
+          attivo={filters.date === 'da_sistemare'}
+          onFiltra={(v) => setFilters({ ...filters, date: v ? 'da_sistemare' : '' })}
+        />
       )}
 
       {senzaStato.length > 0 && (
@@ -262,8 +285,8 @@ export default function ExtraRaccolta() {
               <strong>{senzaStato.length} {senzaStato.length === 1 ? 'intervento è stato salvato' : 'interventi sono stati salvati'} senza stato</strong> e
               {senzaStato.length === 1 ? ' non viene conteggiato' : ' non vengono conteggiati'} in fatturazione, giacenze, report e verifiche.
             </p>
-            {daSegnare.length > 0 && <p>{daSegnare.length} {daSegnare.length === 1 ? 'ha' : 'hanno'} FIR, data di fine trasporto e peso: si possono segnare come terminati.</p>}
-            {senzaStato.length > daSegnare.length && <p>{senzaStato.length - daSegnare.length} {senzaStato.length - daSegnare.length === 1 ? 'è incompleto' : 'sono incompleti'}: aprili con il filtro Stato «Senza stato» e scegli lo stato.</p>}
+            {daSegnare.length > 0 && <p>{daSegnare.length} {daSegnare.length === 1 ? 'ha' : 'hanno'} FIR, peso e le tre date (immissione, inizio e fine trasporto): si possono segnare come terminati.</p>}
+            {senzaStato.length > daSegnare.length && <p>{senzaStato.length - daSegnare.length} {senzaStato.length - daSegnare.length === 1 ? 'è incompleto' : 'sono incompleti'} (manca il FIR, il peso o una delle tre date, o le date non tornano): aprili con il filtro Stato «Senza stato», completali e scegli lo stato.</p>}
           </div>
           {isAdmin && daSegnare.length > 0 && (
             <Button size="sm" onClick={segnaTerminati} disabled={sistemando}>
@@ -274,7 +297,7 @@ export default function ExtraRaccolta() {
       )}
 
       {/* Filtri */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 p-4 border rounded-lg bg-muted/30">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 p-4 border rounded-lg bg-muted/30">
         <div>
           <label className="text-xs text-muted-foreground block mb-1">Anno</label>
           <Select value={filters.anno ? String(filters.anno) : 'all'} onValueChange={v => setFilters({ ...filters, anno: v === 'all' ? '' : Number(v) })}>
@@ -337,6 +360,16 @@ export default function ExtraRaccolta() {
             </SelectContent>
           </Select>
         </div>
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">Date</label>
+          <Select value={filters.date || 'all'} onValueChange={v => setFilters({ ...filters, date: v === 'all' ? '' : v })}>
+            <SelectTrigger className="h-9" title="Da sistemare: i terminati a cui manca l'immissione, l'inizio o la fine del trasporto, o con le date nell'ordine sbagliato"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tutte</SelectItem>
+              <SelectItem value="da_sistemare">Da sistemare</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* KPI */}
@@ -362,8 +395,11 @@ export default function ExtraRaccolta() {
         </div>
       </div>
 
-      {/* Export */}
-      <div className="flex gap-2">
+      {/* Export. Accanto ai pulsanti, quanti degli interventi che vanno nel file
+          hanno le date da sistemare (regola del 22/09/2026): i terminati senza
+          fine trasporto nel file non ci sono, gli altri si', e chi manda la
+          fatturazione deve saperlo prima. */}
+      <div className="flex flex-wrap gap-2">
         <Button variant="outline" size="sm" onClick={exportExcel} disabled={terminati.length === 0}>
           <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Esporta Excel
         </Button>
@@ -371,6 +407,7 @@ export default function ExtraRaccolta() {
           <FileText className="w-4 h-4 mr-1.5" /> Esporta PDF
         </Button>
         <span className="self-center text-xs text-muted-foreground">Totali ed esportazioni comprendono solo i terminati.</span>
+        <NotaDate righe={terminati} nomi={['intervento esportato', 'interventi esportati']} className="self-center" />
       </div>
 
       {/* Tabella */}
@@ -406,12 +443,19 @@ export default function ExtraRaccolta() {
                 const stato = statoExtra(r);
                 const conta = stato === 'terminato';
                 const euro = (v) => (conta ? `€ ${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—');
+                const date = testoDate(r);
                 return (
-                  <tr key={r.id} className="border-t hover:bg-muted/20">
+                  <tr key={r.id} className={`border-t hover:bg-muted/20 ${date ? 'bg-amber-50/60' : ''}`}>
                     <td className="px-3 py-2"><span className={`inline-block px-1.5 py-0.5 rounded border text-[11px] font-medium whitespace-nowrap ${STATI_EXTRA[stato].classe}`}>{STATI_EXTRA[stato].etichetta}</span></td>
                     <td className="px-3 py-2 font-mono text-xs">{r.numero_fir || '-'}</td>
                     <td className="px-3 py-2 whitespace-nowrap">
-                      {r.trasporto_finito_il ? giornoIt(r.trasporto_finito_il) : r.ordine_immesso_il ? <span className="text-muted-foreground">richiesta il {giornoIt(r.ordine_immesso_il)}</span> : '-'}
+                      {/* il segno delle date da sistemare, col dettaglio nel title */}
+                      <SegnoDate testo={date} />
+                      {giornoMovimento(r)
+                        ? giornoIt(r.trasporto_finito_il)
+                        : conta
+                          ? <span className="text-amber-700 font-medium" title={date}>manca</span>
+                          : r.ordine_immesso_il ? <span className="text-muted-foreground">richiesta il {giornoIt(r.ordine_immesso_il)}</span> : '-'}
                     </td>
                     <td className="px-3 py-2 text-xs">
                       {r.tipo_movimento === 'secondaria' && <span className="inline-block mr-1 px-1.5 py-0.5 rounded bg-accent/15 text-[10px] font-medium uppercase tracking-wide">Secondaria</span>}

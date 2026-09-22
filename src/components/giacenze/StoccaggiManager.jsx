@@ -7,6 +7,7 @@ import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import RilevazioneForm from './RilevazioneForm';
 import StoricoRilevazioni from './StoricoRilevazioni';
 import { formatNumber, formatTonnellate } from '@/lib/utils';
+import { riassuntoGruppo } from '@/components/giacenze/DateDaSistemare';
 
 function fmt(n, dec = 2) {
   if (n == null || isNaN(n)) return '—';
@@ -60,6 +61,15 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
     // per intero, visto che a video compare solo la rilevazione piu' recente.
     .map(g => ({ ...g.record, tutteLeRilevazioni: g.all }))
     .sort((a, b) => new Date(b.data_rilevazione).getTime() - new Date(a.data_rilevazione).getTime());
+
+  // I formulari terminati con le date da sistemare di ciascuno stoccaggio, dal
+  // calcolo delle giacenze (regola dell'utente, 22/09/2026). Senza fine trasporto
+  // un movimento non entra fra quelli dopo la rilevazione: chi registra una
+  // rilevazione nuova lo deve sapere.
+  const datePerSito = new Map();
+  for (const s of stoccaggiFromCalcolo) {
+    if (s.date_da_sistemare && s.date_da_sistemare.length) datePerSito.set(normalizzaRagioneSociale(s.sito), s.date_da_sistemare);
+  }
 
   const sitiSuggeriti = [...new Set([
     ...stoccaggiFromCalcolo.map(s => s.sito).filter(Boolean),
@@ -163,7 +173,16 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
                           {r.id_unita_stoccaggio ? `#${r.id_unita_stoccaggio}` : ''}{r.comune ? ` · ${r.comune} (${r.provincia || ''})` : ''}
                         </div>
                       </td>
-                      <td className="px-3 py-2">{r.sito}</td>
+                      <td className="px-3 py-2">
+                        {r.sito}
+                        {datePerSito.has(normalizzaRagioneSociale(r.sito)) && (
+                          <div className="text-[11px] text-amber-700 space-y-0.5 mt-0.5">
+                            {datePerSito.get(normalizzaRagioneSociale(r.sito)).map(g => (
+                              <p key={g.canale} title={g.avviso || ''}>{riassuntoGruppo(g)}{g.avviso ? ` — ${g.avviso}` : ''}</p>
+                            ))}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-3 py-2">{fmtDate(r.data_rilevazione)}</td>
                       <td className="px-3 py-2 text-right">{fmt(r.class1_kg, 0)}</td>
                       <td className="px-3 py-2 text-right">{fmt(r.class2_kg, 0)}</td>

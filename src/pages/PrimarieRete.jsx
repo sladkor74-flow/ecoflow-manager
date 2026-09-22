@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { eTerminato, giornoMovimento, giornoElenco, meseElenco, annoElenco } from '@/lib/movimenti';
+import { eTerminato, giornoMovimento, giornoElenco, meseElenco, annoElenco, dateDaSistemare } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
 import { Loader2, Upload, MapPin, BarChart3, Clock, Table2, Filter, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -9,9 +9,9 @@ import ProvinceMatrix from '@/components/primarie-rete/ProvinceMatrix';
 import RaccoglitoriMix from '@/components/primarie-rete/RaccoglitoriMix';
 import SlaMetrics from '@/components/primarie-rete/SlaMetrics';
 import PrimarieReteTable from '@/components/primarie-rete/PrimarieReteTable';
+import AvvisoDateDaSistemare from '@/components/primarie-rete/DateDaSistemare';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { fetchAllClient } from '@/lib/fetchAllClient';
-import { formatIntero } from '@/lib/utils';
 import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdOrdine';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -24,6 +24,12 @@ const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Lug
 // filtro di maggio. Resta fuori dai filtri di periodo e si conta nell'avviso
 // sopra l'elenco. Il campo mese salvato sul record non si usa: puo' venire da
 // un'importazione vecchia, quando il riferimento era la chiusura.
+//
+// Immissione, inizio e fine trasporto sono obbligatorie in ogni formulario
+// terminato (regola dell'utente, 22/09/2026): l'avviso sopra l'elenco non conta
+// piu' i soli senza fine trasporto ma ogni terminato con una data che manca o
+// non torna (dateDaSistemare), le righe hanno il segno, e il filtro "Solo date
+// da sistemare" le mostra, anche quelle senza periodo con un mese scelto.
 
 // I caricamenti che riscrivono l'archivio delle primarie di rete.
 const CARICAMENTI_RETE = ['primarie', 'primarie_rete'];
@@ -39,8 +45,12 @@ export default function PrimarieRete() {
 
   const [records, setRecords] = useState([]);
   const [allRecords, setAllRecords] = useState([]);
-  // i terminati senza fine trasporto che rispondono ai filtri di regione e stato
-  const [senzaFine, setSenzaFine] = useState([]);
+  // Gli ordini da guardare per le date da sistemare: quelli dell'elenco e, fra
+  // quelli che rispondono ai filtri di regione e stato, i terminati senza fine
+  // trasporto, che nessun filtro di periodo prende.
+  const [perDate, setPerDate] = useState([]);
+  // il filtro "Solo date da sistemare": non rilegge l'archivio ne' i riquadri
+  const [soloDate, setSoloDate] = useState(false);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [filters, setFilters] = useState({ regione: [], stato: [], data: '', mese: [], anno: [] });
   const [cercaId, setCercaId] = useState('');
@@ -94,7 +104,7 @@ export default function PrimarieRete() {
         return true;
       };
       setRecords(all.filter(r => passaAltri(r) && passaPeriodo(r)));
-      setSenzaFine(all.filter(r => passaAltri(r) && eTerminato(r) && !giornoMovimento(r)));
+      setPerDate(all.filter(r => passaAltri(r) && (passaPeriodo(r) || (eTerminato(r) && !giornoMovimento(r)))));
     } catch (e) { console.error(e); }
     setLoadingRecords(false);
   }, [filters]);
@@ -115,14 +125,17 @@ export default function PrimarieRete() {
   }, [loadData, loadRecords]);
   // Cercando un ID si passa al dettaglio degli ordini, in tutto l'archivio.
   useEffect(() => { if (cercaId.trim()) setScheda('dettaglio'); }, [cercaId]);
-  const ordiniMostrati = cercaId.trim() ? allRecords.filter(r => corrispondeIdOrdine(r, cercaId)) : records;
+  const ordiniMostrati = cercaId.trim()
+    ? allRecords.filter(r => corrispondeIdOrdine(r, cercaId))
+    : soloDate ? perDate.filter(dateDaSistemare) : records;
 
   const regioni = [...new Set(allRecords.map(r => (r.regione || '').trim()).filter(Boolean))].sort();
   const stati = [...new Set(allRecords.map(r => (r.stato || '').trim()).filter(Boolean))].sort();
   const anni = [...new Set(allRecords.map(annoElenco).filter(Boolean))].sort((a, b) => b - a);
 
-  const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
-  const resetFilters = () => setFilters({ regione: [], stato: [], data: '', mese: [], anno: [] });
+  const hasFilters = soloDate || Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
+  const resetFilters = () => { setFilters({ regione: [], stato: [], data: '', mese: [], anno: [] }); setSoloDate(false); };
+  const vediDate = (v) => { setSoloDate(v); if (v) setScheda('dettaglio'); };
 
   return (
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
@@ -166,15 +179,18 @@ export default function PrimarieRete() {
           <MultiSelect allLabel="Tutti i mesi" options={MESI} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
           <MultiSelect allLabel="Tutti gli anni" options={anni.map(String)} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v.map(Number) }))} />
           <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" title="Giorno di fine trasporto (per gli ordini non terminati, giorno di immissione)" aria-label="Giorno di fine trasporto" />
+          <label className="inline-flex items-center gap-2 border rounded-md px-3 py-2 text-sm cursor-pointer" title="Solo i terminati a cui manca l'immissione, l'inizio o la fine del trasporto, o con le date nell'ordine sbagliato">
+            <input type="checkbox" checked={soloDate} onChange={e => vediDate(e.target.checked)} /> Solo date da sistemare
+          </label>
         </div>
-        {senzaFine.length > 0 && (
-          <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 text-sm">
-            {senzaFine.length === 1 ? '1 ordine terminato non ha' : `${formatIntero(senzaFine.length)} ordini terminati non hanno`} la fine del trasporto
-            {senzaFine.some(r => r.id_ordine) && <> (es. {senzaFine.map(r => r.id_ordine).filter(Boolean).slice(0, 5).join(', ')})</>}:
-            {senzaFine.length === 1
-              ? ' senza giorno, mese e anno resta fuori dai filtri di periodo e dai tempi di raccolta. Si vede senza filtri di periodo o cercando l\'ID.'
-              : ' senza giorno, mese e anno restano fuori dai filtri di periodo e dai tempi di raccolta. Si vedono senza filtri di periodo o cercando l\'ID.'}
-          </div>
+        {!loadingRecords && (
+          <AvvisoDateDaSistemare
+            righe={perDate}
+            canale="Rete"
+            nota="Chi non ha la fine trasporto non ha giorno, mese e anno: resta fuori dai filtri di periodo e dai tempi di raccolta. Anche chi non ha l'immissione o ha le date incoerenti resta fuori dai tempi."
+            attivo={soloDate}
+            onFiltra={vediDate}
+          />
         )}
       </div>
 

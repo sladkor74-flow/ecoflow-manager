@@ -77,6 +77,38 @@ function AnomalieCatalogo({ anomalie, isAdmin, onApriCatalogo }) {
   );
 }
 
+// Chi nell'anno compare solo in ordini terminati senza fine trasporto, o ha da
+// quelli soltanto un ruolo: non e' fra i soggetti (o non con quel ruolo, e i suoi
+// documenti non si chiedono), perche' senza fine trasporto un ordine non ha un
+// anno (regola 1), ma non sparisce in silenzio. Immissione, inizio e fine
+// trasporto sono obbligatorie nei formulari (regola dell'utente del 22/09/2026).
+// Una riga per ruolo, movimento e canale: rete, ACI ed extra raccolta non si
+// sommano.
+const NOMI_CANALE = { RETE: 'rete', ACI: 'ACI', EXTRA_RACCOLTA: 'extra raccolta' };
+function SoggettiDaDate({ elenco, anno }) {
+  if (!elenco || elenco.length === 0) return null;
+  const quanti = new Set(elenco.map(s => s.chiave)).size;
+  return (
+    <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg p-3 text-sm">
+      <div className="flex items-start gap-2 font-medium">
+        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+        <span>
+          {quanti === 1 ? 'Un soggetto compare' : `${quanti} soggetti compaiono`} nel {anno}, in un ruolo, solo in ordini terminati senza fine trasporto: la data è obbligatoria.
+          {' '}Finché manca, quel ruolo non entra nella qualifica e i suoi documenti non si chiedono: vanno completati i formulari nel file del portale e ricaricati (l'extra raccolta nella sua scheda), oppure il soggetto va incluso a mano.
+        </span>
+      </div>
+      <ul className="mt-1.5 pl-6 space-y-1 text-xs">
+        {elenco.map(s => (
+          <li key={`${s.chiave}|${s.ruolo}|${s.movimento}|${s.canale}`}>
+            <span className="font-medium">{s.nome}</span>{s.gia_fra_i_soggetti ? ' (già fra i soggetti, non con questo ruolo)' : ''} · {RUOLI[s.ruolo] || s.ruolo} · {s.movimento} {NOMI_CANALE[s.canale] || s.canale}
+            {' · '}{s.quanti} {s.quanti === 1 ? 'ordine' : 'ordini'}: {(s.ordini || []).join('; ')}{s.quanti > (s.ordini || []).length ? `; e altri ${s.quanti - s.ordini.length}` : ''}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // Manutenzione dell'archivio: un documento sostituito da anni conserva il suo
 // file, e l'archivio si riempie di DURC vecchi. Il record resta sempre - e' la
 // storia del fornitore - ma dopo qualche anno il file puo' andarsene: quello
@@ -264,7 +296,7 @@ export default function QualificaFornitori() {
     if (!attuali) return caricaTutto();
     try {
       const soggetti = attuali.soggetti.map(s => Object.fromEntries(CAMPI_BASE.map(k => [k, s[k]])));
-      const res = await base44.functions.invoke('qualificaFornitori', { anno: attuali.anno, soggetti, esclusi: attuali.esclusi });
+      const res = await base44.functions.invoke('qualificaFornitori', { anno: attuali.anno, soggetti, esclusi: attuali.esclusi, soggetti_da_date: attuali.soggetti_da_date || [] });
       const d = res.data || res;
       setDati(d);
       notificaMenu(d);
@@ -468,6 +500,8 @@ export default function QualificaFornitori() {
           />
 
           <AnomalieCatalogo anomalie={dati.anomalie} isAdmin={isAdmin} onApriCatalogo={() => setCatalogoAperto(true)} />
+
+          <SoggettiDaDate elenco={dati.soggetti_da_date} anno={anno} />
 
           <PannelloAlert soggetti={dati.soggetti} onApri={setAperto} />
 

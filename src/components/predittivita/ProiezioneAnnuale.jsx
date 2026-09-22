@@ -54,10 +54,13 @@ function Impianto({ p, kgPerViaggio, isAdmin, onIpotesi, occupato }) {
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Target di rete</div>
             <div className="tabular-nums">{t(p.target_kg)} t</div>
           </div>
-          <div className="px-3 py-1.5 rounded-md border bg-muted/30">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Già arrivato (rete)</div>
+          {/* Lo stesso gia' arrivato della Dashboard e del suggerimento del lunedi' (regola del 22/09/2026): primarie al sito, piazzale compreso al netto di quello che riparte per altri impianti, e secondarie da altri stoccaggi. */}
+          <div className="px-3 py-1.5 rounded-md border bg-muted/30" title="Primarie di rete arrivate al sito dell'impianto, anche quelle scaricate nel suo piazzale al netto di quello che ne riparte per altri impianti (lo contano loro), più le secondarie di rete arrivate da altri stoccaggi. Le secondarie dal piazzale all'impianto stesso non si contano: quei PFU sono già fra le primarie.">
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Già arrivato di rete</div>
             <div className="tabular-nums">{t(p.conferito_kg)} t</div>
-            <div className="text-[11px] text-muted-foreground">primaria {t(p.conferito_primaria_kg)} · secondaria {t(p.conferito_secondaria_kg)}</div>
+            <div className="text-[11px] text-muted-foreground">
+              primaria {t(p.conferito_primaria_kg)}{p.conferito_primaria_piazzale_kg > 0 && <> (piazzale {t(p.conferito_primaria_piazzale_netta_kg ?? p.conferito_primaria_piazzale_kg)}{p.conferito_piazzale_ripartito_kg > 0 && <>, al netto di {t(p.conferito_piazzale_ripartito_kg)} ripartite</>})</>} · secondaria da altri stoccaggi {t(p.conferito_secondaria_kg)}
+            </div>
           </div>
           <div className="px-3 py-1.5 rounded-md border bg-muted/30">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Residuo</div>
@@ -74,9 +77,16 @@ function Impianto({ p, kgPerViaggio, isAdmin, onIpotesi, occupato }) {
             <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span>{a}</span>
           </div>
         ))}
+        {/* Note, non avvisi: come e' fatto il gia' arrivato, senza niente da correggere. */}
+        {(p.note || []).map((n, i) => (
+          <div key={`nota-${i}`} className="flex items-start gap-2 text-xs text-muted-foreground">
+            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span>{n}</span>
+          </div>
+        ))}
+        {/* Di un piazzale che e' anche impianto si dice quanto ne porta via ogni mese il suo impianto: agli altri resta il resto (22/09/2026). */}
         {p.stoccaggi.length > 0 && (
           <div className="text-xs text-muted-foreground">
-            Alimentato da: {p.stoccaggi.map(s => `${s.nome} (${s.giacenza_kg == null ? 'giacenza non rilevata' : t(s.giacenza_kg) + ' t in giacenza'}, ${t(s.media_ingressi_kg)} t/mese in arrivo)`).join(' · ')}
+            Alimentato da: {p.stoccaggi.map(s => `${s.nome} (${s.giacenza_kg == null ? 'giacenza non rilevata' : t(s.giacenza_kg) + ' t in giacenza'}, ${t(s.media_ingressi_kg)} t/mese in arrivo${s.media_prelievi_propri_kg > 0 ? `, ${t(s.media_prelievi_propri_kg)} t/mese trasbordate all'impianto ${s.nome} stesso` : ''})`).join(' · ')}
           </div>
         )}
       </div>
@@ -206,6 +216,11 @@ export default function ProiezioneAnnuale({ isAdmin, versione = 0 }) {
           L&apos;ultima colonna guarda l&apos;altra metà della questione, cioè se allo stoccaggio ci sarà materiale per fare quei viaggi.
           Solo rete: ACI ed extra raccolta non entrano nella predittività, né nel target, né nel già arrivato, né nella giacenza
           degli stoccaggi (classi 1-4 della rilevazione e soli movimenti di rete).
+          Il già arrivato è lo stesso della Dashboard e del suggerimento del lunedì: le primarie arrivate al sito dell&apos;impianto,
+          anche quelle scaricate nel suo piazzale, più le secondarie da altri stoccaggi. Il piazzale conta al netto di quello che
+          ne riparte per altri impianti, che lo contano loro. Il piazzale dell&apos;impianto non è una fonte di secondarie per lui:
+          quello che ci arriva è già nel già arrivato. Per gli altri impianti lo è, al netto di quello che l&apos;impianto
+          trasborda ogni mese a se stesso.
         </span>
       </div>
 
@@ -273,10 +288,12 @@ export default function ProiezioneAnnuale({ isAdmin, versione = 0 }) {
                       <tr key={riga.mese + pz.nome} className="border-t">
                         <td className="px-3 py-2 whitespace-nowrap">{i === 0 ? riga.mese : ''}</td>
                         <td className="px-3 py-2">{pz.nome}</td>
+                        {/* prima dei prelievi degli altri, i trasbordi dell'impianto dello stesso soggetto */}
                         <td className="px-3 py-2 text-muted-foreground">
+                          {pz.prelievi_propri_kg > 0 && `${pz.nome} stesso ${t(pz.prelievi_propri_kg)} t (trasbordi)${pz.prelievi && pz.prelievi.length ? ' · ' : ''}`}
                           {pz.prelievi && pz.prelievi.length
                             ? pz.prelievi.map(x => `${x.impianto} ${t(x.kg)} t`).join(' · ')
-                            : 'nessun prelievo'}
+                            : (pz.prelievi_propri_kg > 0 ? '' : 'nessun prelievo')}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums">{pz.ignoto ? '—' : `${t(pz.saldo_fine_mese_kg)} t`}</td>
                       </tr>

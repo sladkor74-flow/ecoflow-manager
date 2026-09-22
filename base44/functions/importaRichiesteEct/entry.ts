@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { leggiFoglio, riconosciOrdine, scadenzaDaNota, statoRichiesta, listaOrdini, evasioneOrdini, abbinaRichieste, ritiriTerminati, idOrdineDaSalvare } from "../../shared/richiesteEct.ts";
+import { leggiFoglio, riconosciOrdine, scadenzaDaNota, statoRichiesta, listaOrdini, evasioneOrdini, abbinaRichieste, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare } from "../../shared/richiesteEct.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
 
@@ -82,13 +82,16 @@ export default async function(req) {
     // primarie (importaBlocco, ritiri_ect), che legge il giorno italiano. Un
     // terminato senza fine trasporto non conta come ritirato - non si ripiega
     // sulla chiusura a portale - ma la richiesta che lo aspetta si segnala.
-    const { terminati, senzaFine } = ritiriTerminati([...rete, ...aci]);
+    // Un ritiro con un'altra data obbligatoria che manca o non torna conta, ma si
+    // dice (daSistemare, regola dell'utente del 22/09/2026).
+    const { terminati, senzaFine, daSistemare } = ritiriTerminati([...rete, ...aci]);
 
     const abbinate = abbinaRichieste(righe, esistenti);
 
     let creati = 0, aggiornati = 0, invariati = 0, spostate = 0;
     const daConfermare = [];
     const terminatiSenzaFine = [];
+    const conDate = [];
     for (let i = 0; i < righe.length; i++) {
       const r = righe[i];
       const gia = abbinate[i];
@@ -150,6 +153,7 @@ export default async function(req) {
       // perche' il ritiro c'e' e sollecitarlo sarebbe sbagliato (regola 1).
       const senzaData = ids.filter(id => senzaFine.has(id));
       if (campi.esito === 'aperta' && senzaData.length) terminatiSenzaFine.push({ pdr: r.pdr_nome, id_ordine: senzaData.join(', ') });
+      if (campi.esito !== 'annullata') conDate.push(...ordiniConDateDaSistemare(r.pdr_nome, ids, terminati, daSistemare));
     }
 
     // Le righe cancellate dal foglio non si toccano: restano nello storico.
@@ -162,6 +166,7 @@ export default async function(req) {
       riconosciuti: righe.filter(r => riconosciOrdine(r, ordini).id_ordine_stato === 'trovato').length,
       da_confermare: daConfermare,
       terminati_senza_fine: terminatiSenzaFine,
+      ordini_con_date_da_sistemare: conDate,
     });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });

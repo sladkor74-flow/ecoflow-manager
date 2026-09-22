@@ -440,8 +440,13 @@ export const NOME_VERDETTO = {
  * Confronta le tabelle lette con i movimenti del gestionale, flusso per flusso.
  *
  * @param {object} lettura    esito di normalizzaLettura
- * @param {object} gestionale per flusso: { celle, vicini, annullati, senza_peso, totale, ultimo_caricamento }
+ * @param {object} gestionale per flusso: { celle, vicini, annullati, senza_peso, date_da_sistemare, totale, ultimo_caricamento }
  * @param {object} periodo    { anno, settimana, inizio, fine }
+ *
+ * Ogni flusso porta i formulari della settimana registrati senza una data
+ * obbligatoria o con date incoerenti (date_da_sistemare): immissione, inizio e
+ * fine trasporto sono obbligatorie (regola dell'utente del 22/09/2026). Non
+ * cambiano il verdetto delle tre fonti, ma si dicono nel flusso e nel canale.
  */
 export function confronta(lettura, gestionale, periodo) {
   const flussi = [];
@@ -544,9 +549,12 @@ export function confronta(lettura, gestionale, periodo) {
     if (nelFile && !tab.ecotyre) mancanti.push('portale Ecotyre');
     for (const m of mancanti) note.push(`Nel file manca la tabella di ${m} per questo flusso: senza le due fonti il confronto è incompleto.`);
 
+    const conDate = confrontabile ? (dati.date_da_sistemare || []) : [];
     flussi.push({
       chiave, titolo: def.titolo, canale: def.canale, confrontabile, nel_file: nelFile,
       fonti: attese, totali, celle: elenco, note, tabelle_mancanti: mancanti,
+      // solo se ce ne sono: un esito salvato a posto resta identico e non si riscrive
+      ...(conDate.length ? { date_da_sistemare: conDate } : {}),
       quadra: {
         winsinfo_ecotyre: totali.winsinfo && totali.ecotyre ? uguali(totali.winsinfo, totali.ecotyre) : null,
         ecotyre_gestionale: totali.ecotyre && totali.gestionale ? uguali(totali.ecotyre, totali.gestionale) : null,

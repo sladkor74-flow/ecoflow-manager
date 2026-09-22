@@ -10,6 +10,7 @@ import { Loader2, Plus, History, Info, FileSpreadsheet } from 'lucide-react';
 import { MESI, MESI_BREVI } from '@/lib/pfuConstants';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { tonnellate, leggiNumero, leggiStorico, conModifica, nomeUtente, chiaveNome, dataOra, REGIONI_COMMESSA } from '@/lib/target';
+import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 import ImportaReportGenerale from '@/components/target-status/ImportaReportGenerale';
 
 
@@ -258,6 +259,9 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
   const [quoteImpianto, setQuoteImpianto] = useState(new Set());
   const [commessa, setCommessa] = useState(null);
   const [raccolto, setRaccolto] = useState([]);
+  // I terminati di rete con le date obbligatorie da sistemare (regola del
+  // 22/09/2026): chi non ha la fine trasporto non e' nel raccolto dei raccoglitori.
+  const [dateRete, setDateRete] = useState(null);
   const [nuovo, setNuovo] = useState(false);
   const [importa, setImporta] = useState(false);
   const [mostraVuote, setMostraVuote] = useState(false);
@@ -277,6 +281,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
       setQuoteImpianto(new Set(forn.filter(f => f.ruolo === 'doppio_ruolo' || f.ruolo === 'impianto').map(f => chiaveNome(f.nome))));
       setCommessa(comm[0] || null);
       setRaccolto(racc.by_raccoglitore || []);
+      setDateRete(racc.date_da_sistemare || null);
     } catch (e) {
       toast({ title: 'Caricamento non riuscito', description: e.message || String(e), variant: 'destructive' });
     }
@@ -437,6 +442,8 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
           Mostra le righe senza target e senza raccolto ({righeVuote.map(r => `${r.nome}${r.regione ? `, ${r.regione}` : ''}`).join('; ')})
         </label>
       )}
+
+      <RiepilogoDate canale="Rete" riepilogo={dateRete} esempi />
 
       {righe.doppioni.length > 0 && (
         <div className="flex items-start gap-2 text-xs text-amber-800"><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />Target mensili doppi sulla stessa riga, vale l'ultimo modificato: {righe.doppioni.slice(0, 5).join(', ')}{righe.doppioni.length > 5 ? '…' : ''}</div>

@@ -95,7 +95,7 @@
         "EXTRA_RACCOLTA",
         "TUTTE"
       ],
-      "description": "Tipologia fatturazione. TUTTE vale per entrambi i canali RETE+ACI, ammessa solo per TRASPORTO_SECONDARIA"
+      "description": "Tipologia fatturazione. TUTTE vale per entrambi i canali RETE+ACI, ammessa solo per TRASPORTO_SECONDARIA: a viaggio, un viaggio che porta formulari di rete e ACI si divide fra i due canali in proporzione ai chili. EXTRA_RACCOLTA passiva serve solo a proporre i costi sull'intervento (la passiva paga quelli scritti li', mai la rete); EXTRA_RACCOLTA attiva e' la tariffa base degli interventi senza prezzo scritto"
     },
     "cliente": {
       "type": "string",

@@ -63,7 +63,7 @@ export default async function(req) {
     const oggi = oggiRoma();
     const svc = base44.asServiceRole.entities;
 
-    const [{ soggetti }, catalogo, documentiSalvati, avvisi, targetAnnui, targetMensili] = await Promise.all([
+    const [{ soggetti, soggetti_da_date }, catalogo, documentiSalvati, avvisi, targetAnnui, targetMensili] = await Promise.all([
       individuaSoggetti(base44, anno),
       fetchAll(svc.TipoDocumentoQualifica),
       fetchAll(svc.DocumentoQualifica, { stato: 'attivo' }),
@@ -102,7 +102,9 @@ export default async function(req) {
     });
 
     const erroriCatalogo = anomalie.filter(a => a.gravita === 'errore');
-    const esito = { anno, oggi, riepilogo, alert_aperti: alert.alert_aperti, eventi: eventi.length, da_inviare: daInviare.length, anomalie, inviata: false, destinatari: [] };
+    // Chi compare solo in terminati senza fine trasporto non e' fra i soggetti, ma
+    // si dice anche qui (regola dell'utente del 22/09/2026).
+    const esito = { anno, oggi, riepilogo, alert_aperti: alert.alert_aperti, eventi: eventi.length, da_inviare: daInviare.length, anomalie, soggetti_da_date: soggetti_da_date || [], inviata: false, destinatari: [] };
     // Un documento intestato a un fornitore inesistente va detto anche quando non
     // c'e' nessun'altra novita': altrimenti non lo scopre nessuno.
     if (!inviaEmail || (daInviare.length === 0 && erroriCatalogo.length === 0)) return Response.json(esito);

@@ -29,6 +29,10 @@ export default function ControlloRotte() {
 
   const sospetti = (data.flussi || []).flatMap(f => (f.sospetti || []).map(s => ({ ...s, flusso: f.nome })));
   const tariffe = data.tariffe_da_verificare || [];
+  // I terminati con le date obbligatorie da sistemare, flusso per flusso e di
+  // qualunque anno (regola del 22/09/2026): chi non ha la fine trasporto resta
+  // fuori dalle rotte dell'anno, e va detto.
+  const conDate = (data.flussi || []).filter(f => f.date_da_sistemare && f.date_da_sistemare.ordini > 0);
 
   return (
     <div className="space-y-4">
@@ -72,6 +76,35 @@ export default function ControlloRotte() {
               ))}
             </tbody>
           </table>
+          {sospetti.some(s => s.date_da_sistemare) && (
+            <div className="border-t px-3 py-2 text-xs text-red-700 space-y-0.5">
+              {sospetti.filter(s => s.date_da_sistemare).map((s, i) => (
+                <div key={i}>{s.id_ordine || s.numero_fir || 'Ordine senza ID'}: {s.date_da_sistemare}. Le date obbligatorie vanno inserite o corrette.</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {conDate.length > 0 && (
+        <div className="border border-red-200 bg-red-50 rounded-lg p-4 space-y-1.5">
+          <p className="text-sm font-semibold text-red-900 flex items-center gap-1.5"><AlertTriangle className="w-4 h-4" /> Terminati con date obbligatorie mancanti o incoerenti</p>
+          <p className="text-xs text-red-900">
+            Immissione, inizio e fine trasporto sono obbligatorie nei formulari. Chi non ha la fine trasporto non ha un anno e non entra nelle rotte qui sopra;
+            gli altri ci sono, ma le date vanno inserite o corrette. Di qualunque anno, flusso per flusso.
+          </p>
+          <div className="space-y-1 text-sm">
+            {conDate.map(f => (
+              <div key={f.flusso}>
+                <span className="font-medium">{f.nome}</span>: {formatIntero(f.date_da_sistemare.ordini)} {f.date_da_sistemare.ordini === 1 ? 'ordine' : 'ordini'}
+                {f.date_da_sistemare.senza_fine ? `, di cui ${formatIntero(f.date_da_sistemare.senza_fine)} senza fine trasporto` : ''}
+                <span className="block text-xs text-muted-foreground">
+                  {f.date_da_sistemare.esempi.map(x => `${x.id_ordine || 'senza ID'}${x.numero_fir ? ` (FIR ${x.numero_fir})` : ''}: ${x.date}`).join('; ')}
+                  {f.date_da_sistemare.ordini > f.date_da_sistemare.esempi.length ? `; e altri ${formatIntero(f.date_da_sistemare.ordini - f.date_da_sistemare.esempi.length)}` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
