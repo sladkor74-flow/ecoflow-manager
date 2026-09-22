@@ -727,7 +727,7 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                       <div className="border rounded-lg px-3 py-2 text-xs space-y-1">
                         <p className="font-semibold">Allegati VII scelti: {pratica.allegati.scelti.map(a => a.numero).join(', ')}</p>
                         <p className="text-muted-foreground">
-                          La combinazione più vicina al ciabattato uscito, cercata fra {pratica.allegati.bacino === 'SMOCO' ? 'i soli allegati di SMOCO' : pratica.allegati.bacino === 'SMOCO e TRANSAR' ? 'gli allegati di SMOCO e TRANSAR, perché i soli SMOCO non bastavano' : 'tutti gli allegati, perché SMOCO e TRANSAR non bastavano'}:
+                          La combinazione più vicina al ciabattato uscito, cercata fra {pratica.allegati.bacino === 'SMOCO' ? 'i soli allegati di SMOCO' : pratica.allegati.bacino === 'SMOCO e TRANSAR' ? 'gli allegati di SMOCO e TRANSAR, perché i soli SMOCO non bastavano' : pratica.allegati.bacino === 'tutti i trasportatori' ? 'tutti gli allegati, perché SMOCO e TRANSAR non bastavano' : 'gli allegati del mese'}:
                           {' '}{formatKg(pratica.allegati.coperto_kg)} kg per {formatKg(riga.uscite_cippato_kg)} da coprire{pratica.allegati.scarto_kg > 0 ? `, ${formatKg(pratica.allegati.scarto_kg)} kg in più che restano fuori dall'ultima terziaria` : ', esatti'}.
                           {' '}Su {pratica.allegati.ordinati.length} allegati del mese.
                         </p>

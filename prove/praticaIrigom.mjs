@@ -78,6 +78,11 @@ console.log('LA PRATICA DI AGOSTO, COME E\' STATA FATTA (LETTURA DALLE USCITE)')
 const m = componiMese({ criterio: 'ordine', riga: A.riga, ferro: A.ferro, allegati: A.allegati, ddt: [], lettura: 'uscite', extra: A.extra, terziarie: A.terziarie });
 verifica('nessun blocco', m.blocchi.length === 0, JSON.stringify(m.blocchi));
 verifica('17 terziarie da aprire', m.terziarie_da_aprire === 17);
+// la pagina dice fra quali allegati ha cercato e di quanto sfora: se la pratica
+// non se li porta dietro, scrive il falso (visto dal vivo il 22/09/2026)
+verifica('la pratica porta il bacino e lo scarto degli allegati', m.allegati.bacino === "ordine di priorita'" && m.allegati.scarto_kg === 11700, JSON.stringify([m.allegati.bacino, m.allegati.scarto_kg]));
+const mVicino = componiMese({ riga: A.riga, ferro: A.ferro, allegati: A.allegati, ddt: [], lettura: 'uscite', extra: A.extra, terziarie: A.terziarie });
+verifica('col criterio di adesso: bacino SMOCO e 8.980 kg di scarto', mVicino.allegati.bacino === 'SMOCO' && mVicino.allegati.scarto_kg === 8980, JSON.stringify([mVicino.allegati.bacino, mVicino.allegati.scarto_kg]));
 const righe = m.terziarie.righe.map(r => ({ terziaria: r.terziaria, allegato: r.allegato, peso_allegato_kg: r.peso_allegato_kg, cippato_kg: r.cippato_kg, ferro_kg: r.ferro_kg, totale_kg: r.totale_kg }));
 verifica('le 17 righe al chilo', JSON.stringify(righe) === JSON.stringify(A.attese.terziarie), JSON.stringify(righe.slice(-2)));
 verifica('i totali della tabella', m.terziarie.peso_allegati_kg === A.attese.totali.peso_allegati_kg && m.terziarie.cippato_kg === A.attese.totali.cippato_kg

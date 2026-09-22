@@ -644,7 +644,9 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
     // porta (0 se non ce n'e') e il peso con cui si chiude.
     chiusura_ultima_terziaria: ultima ? { terziaria: ultima.terziaria, allegato: ultima.allegato, rete_kg: ultima.totale_kg, extra_kg: ultima.extra_kg, portale_kg: ultima.chiusura_portale_kg } : null,
     ferro: { ...ff, dichiarato_kg: ff.quota_kg },
-    allegati: { ordinati: scelta.ordinati, scelti: scelta.scelti, coperto_kg: scelta.coperto_kg },
+    // bacino e scarto vengono con la scelta: la pagina dice fra quali allegati ha
+    // cercato e di quanto la somma sfora, e senza questi due diceva il falso.
+    allegati: { ordinati: scelta.ordinati, scelti: scelta.scelti, coperto_kg: scelta.coperto_kg, bacino: scelta.bacino, scarto_kg: scelta.scarto_kg },
     terziarie_da_aprire: righeTer.length,
     // Usciti solo metalli ferrosi, nessuna gomma e nessun CSS-C: il mese si segna
     // "solo metalli ferrosi" e a portale non si carica nulla.
