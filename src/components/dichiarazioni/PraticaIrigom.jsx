@@ -13,6 +13,7 @@ import { componiMese, dividiExtra, MESI, extraDaSalvare, extraGiaDichiarate, fin
 import { wordDelMese, excelDelMese, cartellaZip, dataIt, datiFileGestione } from '@/lib/documentiIrigom';
 import { scarica } from '@/lib/docxModello';
 import { timbraPdf } from '@/lib/timbraPdf';
+import { excelBlocco } from '@/lib/bloccoGestione';
 import ModelliIrigom from '@/components/dichiarazioni/ModelliIrigom';
 
 // La pratica mensile delle dichiarazioni di Irigom, dentro il gestionale.
@@ -385,6 +386,22 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
     return base44.entities.PraticaIrigom.create({ ...dati, versione: praticaDelMese ? (praticaDelMese.versione || 1) + 1 : 1 });
   };
 
+  // Il blocco del mese da incollare nel foglio DICHIARAZIONI del file di
+  // gestione: il file sta sul computer dell'utente, e l'utente non e' sempre li'.
+  const scaricaBlocco = async () => {
+    setLavoro('blocco');
+    setErrore('');
+    setEsito(null);
+    try {
+      const bytes = await excelBlocco(datiFileGestione({ pratica, contesto: contesto() }));
+      scarica(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Blocco DICHIARAZIONI Irigom ${mese.toLowerCase()} ${anno}.xlsx`);
+      setEsito({ tipo: 'blocco' });
+    } catch (e) {
+      setErrore(e && e.message ? e.message : String(e));
+    }
+    setLavoro(null);
+  };
+
   const scaricaCartella = async (soloExcel = false) => {
     setLavoro(soloExcel ? 'excel' : 'cartella');
     setErrore('');
@@ -399,7 +416,11 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
         const word = wordDelMese({ pratica, contesto: contesto(), modelli: m });
         const file = [...word, { percorso: `${MESE}/Riepilogo dichiarazioni Irigom ${mese.toLowerCase()} ${anno}.xlsx`, bytes: xlsx }];
         // I dati per scrivere il blocco del mese nel file di gestione (strumenti/irigom/scrivi_blocco_mese.ps1).
-        file.push({ percorso: `${MESE}/Dati per il file di gestione.json`, bytes: new TextEncoder().encode(JSON.stringify(datiFileGestione({ pratica, contesto: contesto() }), null, 1)) });
+        const datiGestione = datiFileGestione({ pratica, contesto: contesto() });
+        file.push({ percorso: `${MESE}/Dati per il file di gestione.json`, bytes: new TextEncoder().encode(JSON.stringify(datiGestione, null, 1)) });
+        // Il blocco del mese pronto da incollare nel foglio DICHIARAZIONI: si fa
+        // da qualunque computer, senza il file di gestione (22/09/2026).
+        file.push({ percorso: `${MESE}/Blocco per il file di gestione.xlsx`, bytes: await excelBlocco(datiGestione) });
         // I PDF forniti, dove li vuole il repository; gli allegati VII anche col
         // numero della terziaria, nel nome e scritto in alto sulla prima pagina.
         const nonTimbrati = [];
@@ -853,6 +874,10 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                 <Button variant="outline" disabled={bloccata || !!lavoro} onClick={() => scaricaCartella(true)}>
                   {lavoro === 'excel' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileSpreadsheet className="w-4 h-4 mr-2" />} Solo il riepilogo Excel
                 </Button>
+                <Button variant="outline" disabled={bloccata || !!lavoro} onClick={scaricaBlocco}
+                  title="Le righe del mese come vanno nel foglio DICHIARAZIONI del file di gestione: si copiano e si incollano in coda al foglio, da qualunque computer">
+                  {lavoro === 'blocco' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileSpreadsheet className="w-4 h-4 mr-2" />} Blocco per il file di gestione
+                </Button>
                 {isAdmin && (
                   <Button variant="outline" disabled={bloccata || !!lavoro || mancanoTer} onClick={registra}
                     title={`Scrive la dichiarazione del mese nel gestionale col totale a portale, ${formatKg(pratica.portale_kg)} kg, come dichiarazione in mano: diventa caricata quando il report del portale la riconosce`}>
@@ -867,6 +892,9 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                   {esito.vuoti.length > 0 && <p className="text-amber-700">Nei Word sono rimasti da riempire: {esito.vuoti.join(', ')}.</p>}
                   {(esito.nonTimbrati || []).length > 0 && <p className="text-amber-700">Su questi allegati non sono riuscito a scrivere il numero della terziaria (il file ha comunque il nome giusto): {esito.nonTimbrati.join(', ')}.</p>}
                 </div>
+              )}
+              {esito && esito.tipo === 'blocco' && (
+                <p className="text-xs text-muted-foreground"><CheckCircle2 className="w-3.5 h-3.5 inline text-emerald-600 mr-1" />Blocco scaricato: nel foglio BLOCCO ci sono le righe da copiare, nel foglio "Come si incolla" i passi e le due celle del riepilogo da scrivere a mano.</p>
               )}
               {esito && esito.tipo === 'registrata' && (
                 <p className="text-xs text-emerald-700"><CheckCircle2 className="w-3.5 h-3.5 inline mr-1" />Registrata: la dichiarazione di {mese} è nel gestionale, in mano. Diventa caricata quando la carichi a portale e il report delle dichiarazioni la riconosce.</p>
