@@ -149,7 +149,13 @@ export default function Giacenze() {
               <StoccaggiManager
                 // Con i formulari da sistemare dello stoccaggio: senza fine trasporto
                 // non entrano fra i movimenti dopo la rilevazione (22/09/2026).
-                stoccaggiFromCalcolo={data.righe.filter(r => r.tipo_destinazione === 'stoc').map(r => ({ sito: r.sito, date_da_sistemare: r.date_da_sistemare || [] }))}
+                // E col controllo della rilevazione piu' recente, che si mostra a
+                // chi la inserisce (23/09/2026).
+                stoccaggiFromCalcolo={data.righe.filter(r => r.tipo_destinazione === 'stoc').map(r => ({
+                  sito: r.sito,
+                  date_da_sistemare: r.date_da_sistemare || [],
+                  verifica_rilevazione: r.verifica_rilevazione || null,
+                }))}
                 isAdmin={isAdmin}
                 onSaved={loadData}
               />

@@ -12,7 +12,26 @@ const TIPO_LABEL = {
   giacenza_negativa: 'Giacenza negativa',
   target_divergente: 'Target diverso da Target & Status',
   ordini_senza_fine_trasporto: 'Righe del file del portale senza fine trasporto',
+  rilevazione_da_controllare: 'Rilevazione da controllare',
 };
+
+// Un giorno 'AAAA-MM-GG' come lo si legge.
+const giorno = (g) => (g ? String(g).slice(0, 10).split('-').reverse().join('/') : '—');
+
+// Una rilevazione che non torna con i movimenti del periodo (23/09/2026): si
+// dice classe per classe che cosa ci si aspettava e che cosa si e' letto. Quando
+// il totale del canale torna e sono solo le classi a scostarsi lo si dice, perche'
+// e' il caso del 16/09 su Nappi Sud e indirizza la ricerca.
+function testoRilevazioneDaControllare(a) {
+  const classi = (a.classi || []).map(c => `classe ${c.classe} attesa ${formatKg(c.atteso)} kg, letta ${formatKg(c.letto)} kg (scarto ${Number(c.scarto) > 0 ? '+' : ''}${formatKg(c.scarto)} kg)`);
+  const ripartizione = Object.entries(a.canali || {})
+    .filter(([, c]) => c.ripartizione_sbagliata)
+    .map(([k]) => (k === 'ACI' ? "dell'ACI" : 'della rete'));
+  const coda = ripartizione.length
+    ? ` — ${ripartizione.length === 1 ? `il totale ${ripartizione[0]} torna` : `i totali ${ripartizione.join(' e ')} tornano`}: a sbagliare e' la ripartizione fra le classi, e ricaricare i file non la corregge`
+    : '';
+  return ` — rilevazione del ${giorno(a.del)} contro quella del ${giorno(a.precedente_del)}: ${classi.join('; ')}${coda}. Il dettaglio, con gli ordini che possono spiegarlo, e' nella scheda Stoccaggi.`;
+}
 
 // Tonnellate con due decimali (tre se i kg non sono tondi), kg interi.
 const t = (v) => formatTonnellate(Number(v) || 0);
@@ -71,6 +90,7 @@ export default function AnomalieAlert({ anomalie }) {
                 {a.tipo === 'target_divergente' && ` — qui ${t(a.giacenze_t)} t, in Target & Status ${t(a.target_status_t)} t (differenza ${t(a.differenza_t)} t): i due numeri devono essere uguali, correggi quello sbagliato`}
                 {a.tipo === 'stoccaggio_senza_rilevazione' && ` — il dato va letto dalla pagina Unita' Locali di Stoccaggio del portale`}
                 {a.tipo === 'ordini_senza_fine_trasporto' && testoSenzaFineFile(a)}
+                {a.tipo === 'rilevazione_da_controllare' && testoRilevazioneDaControllare(a)}
               </span>
             </div>
           ))}

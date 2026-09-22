@@ -5,7 +5,7 @@ import { annoRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { momentoRilevazione, dopoLaRilevazione } from "../../shared/giacenzaStoccaggi.ts";
+import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio } from "../../shared/giacenzaStoccaggi.ts";
 import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine } from "../../shared/giacenzaPortale.ts";
 
 // Calcola la situazione delle giacenze di impianti e stoccaggi per l'anno richiesto.
@@ -233,6 +233,19 @@ export default async function(req) {
         stocRilevMap.set(ns, { record: r, dataStr });
       }
     }
+    // Le rilevazioni di ciascuno stoccaggio in ordine: il controllo della piu'
+    // recente parte da quella prima di lei (23/09/2026).
+    const rilevPerStoc = new Map(); // ns -> rilevazioni dalla piu' vecchia alla piu' recente
+    for (const r of giacenzeStoccaggio) {
+      const ns = norm(r.sito);
+      if (!ns) continue;
+      if (!rilevPerStoc.has(ns)) rilevPerStoc.set(ns, []);
+      rilevPerStoc.get(ns).push(r);
+    }
+    for (const elenco of rilevPerStoc.values()) {
+      elenco.sort((a, b) => momentoRilevazione(a).localeCompare(momentoRilevazione(b))
+        || String(a.created_date || '').localeCompare(String(b.created_date || '')));
+    }
 
     // === 1c. MOVIMENTI DEGLI STOCCAGGI DOPO LA RILEVAZIONE, UN CANALE PER VOLTA ===
     // Alla rilevazione si aggiungono gli ingressi e si tolgono le uscite finiti
@@ -274,6 +287,34 @@ export default async function(req) {
       const t = (Number(r.peso_effettivo) || 0) / 1000;
       if (eSecondariaExtra(r)) { const ns = norm(r.stoccaggio); if (ns) extraStoc.set(ns, (extraStoc.get(ns) || 0) - t); }
       else if (tipoStoc(r)) { const ns = norm(r.destinazione); if (ns) extraStoc.set(ns, (extraStoc.get(ns) || 0) + t); }
+    }
+
+    // === 1c-bis. TUTTI I MOVIMENTI DEL PIAZZALE, IN FORMA COMPATTA ===
+    // Servono a due conti che sorvegliano la rilevazione (23/09/2026): il
+    // controllo di quella appena inserita - che cosa ci si aspettava di leggere -
+    // e la somma dei soli movimenti in archivio, da mostrare accanto alla
+    // giacenza. Qui si raccolgono tutti, non solo quelli dopo la rilevazione, e
+    // ciascuno resta nel suo canale: rete, ACI ed extra raccolta non si mescolano.
+    const daChi = (r) => r.trasportatore || r.ragione_sociale || '';
+    const movArchivio = new Map(); // ns -> movimenti del piazzale
+    const raccogli = (r, ns, canale, verso, classe, controparte) => {
+      if (!ns) return;
+      if (!movArchivio.has(ns)) movArchivio.set(ns, []);
+      movArchivio.get(ns).push(movimentoStoccaggio(r, { canale, verso, classe, controparte }));
+    };
+    for (const r of reteAll) if (isTerminato(r) && tipoStoc(r)) raccogli(r, norm(r.destinazione), 'RETE', 'ingresso', classeDa(r.classe, r.prodotto), daChi(r));
+    for (const r of aciAll) if (isTerminato(r) && tipoStoc(r)) raccogli(r, norm(r.destinazione), 'ACI', 'ingresso', 'ACI', daChi(r));
+    for (const r of secAll) {
+      if (!isTerminato(r)) continue;
+      const canale = eAci(r) ? 'ACI' : 'RETE';
+      const classe = canale === 'ACI' ? 'ACI' : classeDa(r.classe, r.prodotto);
+      if (tipoStoc(r)) raccogli(r, norm(r.destinazione), canale, 'ingresso', classe, r.stoccaggio);
+      raccogli(r, norm(r.stoccaggio), canale, 'uscita', classe, r.destinazione);
+    }
+    for (const r of extraAll) {
+      if (!isTerminato(r)) continue;
+      if (eSecondariaExtra(r)) raccogli(r, norm(r.stoccaggio), 'EXTRA_RACCOLTA', 'uscita', classeDa(r.classe, r.prodotto), r.destinazione);
+      else if (tipoStoc(r)) raccogli(r, norm(r.destinazione), 'EXTRA_RACCOLTA', 'ingresso', classeDa(r.classe, r.prodotto), daChi(r));
     }
 
     // === 1d. GIACENZA A PORTALE DEGLI IMPIANTI, AGGIORNATA AI CARICAMENTI ===
@@ -324,7 +365,6 @@ export default async function(req) {
     // si dice con i numeri, non si nasconde.
     const daSistemare = formulariDaSistemare({ anno: annoNum, chiaveDi: norm });
     const ruoloDest = (r) => (tipoStoc(r) ? 'stoc' : 'imp');
-    const daChi = (r) => r.trasportatore || r.ragione_sociale || '';
     for (const r of reteAll) daSistemare.segna(r, { tipo: 'primaria', canale: 'RETE', ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: daChi(r) });
     for (const r of aciAll) daSistemare.segna(r, { tipo: 'primaria', canale: 'ACI', ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: daChi(r) });
     for (const r of extraAll) {
@@ -510,12 +550,22 @@ export default async function(req) {
       let dopo_rilevazione = null;
       let aggiornata_al = null;
       let fotografia = null;
+      // I due conti che sorvegliano la rilevazione (23/09/2026): valgono solo per
+      // i piazzali, perche' solo loro partono da una lettura del portale.
+      let verifica_rilevazione = null;
+      let saldo_movimenti_archivio = null;
 
       if (td === 'stoc') {
         // in_attesa_dichiarazione_t: primarie arrivate allo stoccaggio che il file del
         // portale considera ancora in piazzale, non ancora abbinate a una secondaria.
         in_attesa_dichiarazione_t = inAttesaMap.get(ns) || 0;
         giacenza_extra_t = extraStoc.has(ns) ? extraStoc.get(ns) : null;
+
+        // La somma dei soli movimenti in archivio: non e' una giacenza, vale dal
+        // primo movimento caricato e si mostra accanto a quella vera per vedere
+        // quanto manca all'appello e da quando. Non dipende dalla rilevazione.
+        const suoiMovimenti = movArchivio.get(ns) || [];
+        saldo_movimenti_archivio = saldoMovimentiInArchivio(suoiMovimenti);
 
         const rilev = stocRilevMap.get(ns);
         if (rilev) {
@@ -546,6 +596,11 @@ export default async function(req) {
           }
           const trentaGiorniFa = giornoRoma(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
           rilevazione_obsoleta = rilev.dataStr < trentaGiorniFa;
+          // Il controllo della rilevazione: che cosa ci si aspettava di leggere,
+          // partendo dalla precedente e contando i movimenti fra le due date.
+          const storico = rilevPerStoc.get(ns) || [];
+          const precedente = storico.length > 1 ? storico[storico.length - 2] : null;
+          verifica_rilevazione = verificaRilevazione(rilev.record, precedente, suoiMovimenti);
         } else {
           giacenza_portale_t = 0;
           // L'anomalia si segnala solo se la riga sopravvive al filtro di
@@ -633,6 +688,19 @@ export default async function(req) {
       if (!g && td === 'imp' && !haAttivita) continue;
 
       if (senzaRilevazione) anomalie.push({ tipo: 'stoccaggio_senza_rilevazione', sito: sitoNome });
+      // Una classe che si scosta da quello che i movimenti dicono si segnala
+      // subito: e' il caso del 16/09 su Nappi Sud, dove nessun caricamento
+      // avrebbe potuto correggerla perche' l'errore stava nel punto di partenza.
+      if (verifica_rilevazione && verifica_rilevazione.scostano.length) {
+        anomalie.push({
+          tipo: 'rilevazione_da_controllare',
+          sito: sitoNome,
+          del: verifica_rilevazione.del,
+          precedente_del: verifica_rilevazione.precedente_del,
+          classi: verifica_rilevazione.classi.filter(c => c.scarto),
+          canali: verifica_rilevazione.canali,
+        });
+      }
 
       righe.push({
         sito: sitoNome,
@@ -645,6 +713,10 @@ export default async function(req) {
         giacenza_classi_kg: giacenza_classi_kg ? Object.fromEntries(Object.entries(giacenza_classi_kg).map(([c, v]) => [c, Math.round(v)])) : null,
         rilevazione_classi_kg,
         dopo_rilevazione,
+        // Il controllo della rilevazione e la somma dei soli movimenti in
+        // archivio: due termini di confronto, non due giacenze.
+        verifica_rilevazione,
+        saldo_movimenti_archivio,
         aggiornata_al,
         data_rilevazione,
         rilevazione_obsoleta,

@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel, AlertDialogFooter } from '@/components/ui/alert-dialog';
 import { Plus, Upload, History, ClipboardEdit, Trash2 } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import RilevazioneForm from './RilevazioneForm';
 import StoricoRilevazioni from './StoricoRilevazioni';
+import ControlloRilevazione, { EsitoRilevazione, riassuntoVerifica, giorno } from './ControlloRilevazione';
 import { formatNumber, formatTonnellate } from '@/lib/utils';
 import { riassuntoGruppo } from '@/components/giacenze/DateDaSistemare';
 
@@ -24,7 +26,8 @@ function isObsolete(dateStr) {
   return ms < Date.now() - 30 * 24 * 60 * 60 * 1000;
 }
 
-export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSaved }) {
+export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, onSaved }) {
+  const { toast } = useToast();
   const [rilevazioni, setRilevazioni] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -37,6 +40,11 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
   const [seeding, setSeeding] = useState(false);
   const [daEliminare, setDaEliminare] = useState(null);
   const [eliminando, setEliminando] = useState(false);
+  // Il controllo della rilevazione appena salvata: il conto lo fa il ricalcolo
+  // della pagina, che arriva un attimo dopo. Si aspetta che nel calcolo compaia
+  // la rilevazione di quel giorno, poi la si mostra (23/09/2026).
+  const [attesaControllo, setAttesaControllo] = useState(null);
+  const [controllo, setControllo] = useState(null);
 
   const loadRilevazioni = useCallback(async () => {
     setLoading(true);
@@ -70,6 +78,42 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
   for (const s of stoccaggiFromCalcolo) {
     if (s.date_da_sistemare && s.date_da_sistemare.length) datePerSito.set(normalizzaRagioneSociale(s.sito), s.date_da_sistemare);
   }
+
+  // Il confronto fra la rilevazione piu' recente e quello che i movimenti
+  // dicono, un piazzale per volta. Lo calcola calcolaGiacenze: qui si mostra.
+  const verifichePerSito = useMemo(() => {
+    const per = new Map();
+    for (const s of stoccaggiFromCalcolo) {
+      if (s.verifica_rilevazione) per.set(normalizzaRagioneSociale(s.sito), s.verifica_rilevazione);
+    }
+    return per;
+  }, [stoccaggiFromCalcolo]);
+
+  // Appena il ricalcolo porta la rilevazione salvata, si dice com'e' andata: il
+  // dettaglio solo quando una classe si scosta, altrimenti basta una riga.
+  useEffect(() => {
+    if (!attesaControllo) return;
+    const v = verifichePerSito.get(normalizzaRagioneSociale(attesaControllo.sito));
+    if (!v) return;
+    if (v.del !== attesaControllo.del) {
+      // La rilevazione appena salvata non e' la piu' recente del piazzale: il
+      // controllo riguarda sempre l'ultima, ed e' da quella che partono i
+      // calcoli. Si dice, invece di lasciare l'attesa senza risposta.
+      setAttesaControllo(null);
+      toast({
+        title: 'Rilevazione salvata, controllo non eseguito',
+        description: `Il piazzale ha gia' una rilevazione piu' recente, del ${giorno(v.del)}: il confronto riguarda sempre l'ultima, ed e' da quella che partono i calcoli.`,
+      });
+      return;
+    }
+    setAttesaControllo(null);
+    if (v.scostano && v.scostano.length) {
+      setControllo({ sito: attesaControllo.sito, verifica: v });
+    } else {
+      const r = riassuntoVerifica(v);
+      toast({ title: r.titolo, description: r.sintesi });
+    }
+  }, [attesaControllo, verifichePerSito, toast]);
 
   const sitiSuggeriti = [...new Set([
     ...stoccaggiFromCalcolo.map(s => s.sito).filter(Boolean),
@@ -153,6 +197,7 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
                   <th className="px-3 py-2 font-semibold text-right">ACI (kg)</th>
                   <th className="px-3 py-2 font-semibold text-right">Rete (t)</th>
                   <th className="px-3 py-2 font-semibold text-right">ACI (t)</th>
+                  <th className="px-3 py-2 font-semibold" title="La rilevazione a confronto con la precedente piu' i movimenti del periodo: se una classe si scosta lo dice qui">Controllo</th>
                   <th className="px-3 py-2 font-semibold">Azioni</th>
                 </tr>
               </thead>
@@ -192,6 +237,12 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
                       <td className="px-3 py-2 text-right font-medium">{fmt(rete / 1000)}</td>
                       <td className="px-3 py-2 text-right font-medium">{fmt(aci / 1000)}</td>
                       <td className="px-3 py-2">
+                        <EsitoRilevazione
+                          verifica={verifichePerSito.get(normalizzaRagioneSociale(r.sito))}
+                          onApri={() => setControllo({ sito: r.sito, verifica: verifichePerSito.get(normalizzaRagioneSociale(r.sito)) })}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
                         {isAdmin && (
                           <div className="flex gap-1">
                             <Button variant="outline" size="sm" className="h-7" onClick={() => handleNuova(r)}>
@@ -210,7 +261,7 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
                   );
                 })}
                 {righe.length === 0 && (
-                  <tr><td colSpan={11} className="px-3 py-4 text-center text-muted-foreground">Nessuna rilevazione. Usa "Importa rilevazione iniziale" o "Aggiungi rilevazione".</td></tr>
+                  <tr><td colSpan={12} className="px-3 py-4 text-center text-muted-foreground">Nessuna rilevazione. Usa "Importa rilevazione iniziale" o "Aggiungi rilevazione".</td></tr>
                 )}
               </tbody>
             </table>
@@ -225,8 +276,20 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo, isAdmin, onSave
         sitiSuggeriti={sitiSuggeriti}
         // Una rilevazione nuova cambia la giacenza a portale dello stoccaggio: si
         // ricalcola la pagina (situazione, KPI, anomalie), non solo questo elenco,
-        // come dopo Elimina e Importa.
-        onSaved={async () => { await loadRilevazioni(); if (onSaved) onSaved(); }}
+        // come dopo Elimina e Importa. Dal ricalcolo arriva anche il controllo
+        // della rilevazione appena inserita.
+        onSaved={async (salvata) => {
+          if (salvata) setAttesaControllo(salvata);
+          await loadRilevazioni();
+          if (onSaved) await onSaved();
+        }}
+      />
+
+      <ControlloRilevazione
+        open={!!controllo}
+        onClose={() => setControllo(null)}
+        sito={controllo?.sito}
+        verifica={controllo?.verifica}
       />
 
       <StoricoRilevazioni

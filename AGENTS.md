@@ -110,6 +110,17 @@ Le valutazioni si fanno sul peso effettivo (`peso_effettivo`), mai sullo stimato
 Tonnellate con due decimali, tre se i kg non sono tondi; kg sempre interi;
 ovunque, export compresi.
 
+### Gli impianti che svuotano la giacenza dell'anno prima
+
+Un impianto puo' non essere piu' contrattualizzato nell'anno in corso e avere
+lo stesso movimentazioni e dichiarazioni: deve svuotare la giacenza dell'anno
+precedente, e lo fa con secondarie e terziarie (regola dell'utente, 23/09/2026).
+Nessun modulo che parla di giacenze, dichiarazioni, verifiche o fatturazione puo'
+escludere un sito perche' non ha un contratto quest'anno: si escludono solo dai
+target e dalla predittivita', che sono cose dell'anno in corso. Verificato il
+23/09/2026: INNOREC e PRT compaiono in Giacenze e in Dichiarazioni Impianti con
+le loro righe, pur senza target 2026.
+
 ### Chi conferisce dove
 
 Un movimento non va da chiunque a chiunque, e ci sono due livelli.

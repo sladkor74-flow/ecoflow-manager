@@ -59,7 +59,11 @@ export default function RilevazioneForm({ open, onClose, precompilato, sitiSugge
         note: form.note || undefined,
       });
       toast({ title: 'Rilevazione salvata' });
-      onSaved?.();
+      // Chi ha salvato vuole sapere subito se la lettura torna con i movimenti:
+      // si dice quale rilevazione e' appena entrata, il controllo lo mostra chi
+      // ci sta sopra. Il salvataggio non si blocca mai - la lettura del portale
+      // e' un fatto - si avvisa (23/09/2026).
+      onSaved?.({ sito: form.sito, data_rilevazione: String(form.data_rilevazione).slice(0, 10) });
       onClose();
     } catch (e) {
       toast({ title: 'Errore: ' + e.message, variant: 'destructive' });
