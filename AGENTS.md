@@ -372,7 +372,11 @@ quella prova.
   gestione e gli allegati scelti prendono il numero della terziaria nel nome e
   **scritto in alto a destra sulla prima pagina** (`src/lib/timbraPdf.js`); la
   cartella del mese scaricata li porta gia' cosi' in `EXPORT/TERZIARIE`. Il
-  blocco lo scrive, con Excel,
+  blocco del mese si scarica dal gestionale, pronto da incollare nel foglio
+  DICHIARAZIONI (`src/lib/bloccoGestione.js`, pulsante e file nella cartella del
+  mese): serve da qualunque computer, perche' il file di gestione sta solo su
+  quello di casa. Quando quel computer e' acceso lo stesso blocco lo scrive, con
+  Excel e coi formati dei mesi gia' presenti,
   `C:\Users\HOME\Desktop\BASE44\strumenti\irigom\scrivi_blocco_mese.ps1` dal file
   `Dati per il file di gestione.json` della cartella (`datiFileGestione` in
   `src/lib/documentiIrigom.js`); istruzioni in `LEGGIMI.md` accanto.
