@@ -16,6 +16,7 @@ import { timbraPdf } from '@/lib/timbraPdf';
 import { excelBlocco } from '@/lib/bloccoGestione';
 import { scriviBloccoNelFile } from '@/lib/scriviBloccoGestione';
 import { esportaFoglioDichiarazioni } from '@/lib/foglioDichiarazioni';
+import { fileConversione } from '@/lib/convertiWordPdf';
 import ModelliIrigom from '@/components/dichiarazioni/ModelliIrigom';
 
 // La pratica mensile delle dichiarazioni di Irigom, dentro il gestionale.
@@ -484,6 +485,9 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
             }
           } else file.push({ percorso: `${MESE}/ALTRI/${d.nome}`, bytes });
         }
+        // Lo script che converte in PDF i Word della cartella, sottocartelle comprese:
+        // il browser non puo' avviare Word, quel doppio clic si.
+        file.push(...fileConversione(MESE));
         scarica(cartellaZip(file), `${nomeCartella(mese, anno)}.zip`);
         const vuoti = [...new Set(word.flatMap(w => w.vuoti))];
         const mancanoModelli = ['ferro', 'nave', 'extra', 'cssc'].filter(k => !m[k]);
