@@ -55,6 +55,11 @@ verifica('senza fine trasporto: la dice', JSON.stringify(dateMancanti({ ...compl
 verifica('senza nessuna: le dice tutte', dateMancanti({ stato: 'Terminato' }).length === 3);
 verifica('un ordine non terminato non si giudica', dateMancanti({ stato: 'assegnato' }).length === 0 && !dateDaSistemare({ stato: 'cancellato' }));
 verifica("fine prima dell'inizio: incoerente", dateIncoerenti({ ...completo, trasporto_finito_il: '2026-09-02T10:00:00Z' }).length === 1);
+// A portale l'immissione e' la registrazione dell'ordine, che spesso arriva dopo
+// la partenza: sui dati veri capita a 941 ordini (22/09/2026), fino a 129 giorni.
+// Non e' un'incoerenza: le date devono esserci, l'ordine fra le prime due no.
+verifica('partito prima di essere immesso: non e\' un\'incoerenza', dateIncoerenti({ ...completo, trasporto_iniziato_il: '2026-08-20T07:00:00Z', trasporto_finito_il: '2026-08-20T16:00:00Z' }).length === 0);
+verifica('ma le tre date devono esserci lo stesso', dateMancanti({ ...completo, ordine_immesso_il: null }).length === 1);
 verifica('stesso giorno italiano: coerente', dateIncoerenti({ ...completo, trasporto_iniziato_il: '2026-09-03T21:00:00Z', trasporto_finito_il: '2026-09-03T21:30:00Z' }).length === 0);
 verifica('la chiusura non sostituisce la fine', dateMancanti({ ...completo, trasporto_finito_il: null, ordine_chiuso_il: '2026-09-05T08:00:00Z' }).includes('fine trasporto'));
 

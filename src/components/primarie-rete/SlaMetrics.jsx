@@ -6,10 +6,10 @@ import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 // I tempi arrivano gia' calcolati da computeSlaMetrics (primarieReteAnalytics.ts):
 // dall'immissione dell'ordine alla fine del trasporto, mai alla chiusura a portale.
 // Qui si dice a parole cosa misurano, di quale anno, e quanti terminati non si
-// sono potuti misurare. Dal 22/09/2026 le date incoerenti sono tutte quelle di
-// dateIncoerenti (inizio prima dell'immissione, fine prima dell'inizio o
-// dell'immissione), non piu' la sola fine prima dell'immissione; e sotto si
-// dicono tutte le date da sistemare dell'anno, anche degli ordini misurati.
+// sono potuti misurare: senza fine trasporto, senza immissione, o con una fine
+// prima dell'inizio (dateIncoerenti). Un ritiro finito prima dell'immissione si
+// misura e vale zero giorni. Sotto si dicono tutte le date da sistemare
+// dell'anno, anche degli ordini misurati.
 export default function SlaMetrics({ data, anniFiltro = [] }) {
   if (!data) return null;
 

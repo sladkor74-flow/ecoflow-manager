@@ -26,9 +26,15 @@ const ULTIMA_RIEPILOGO = 14; // le righe IRIGOM ed EXTRA RACCOLTA stanno qui den
 const DISTANZA = 5;         // quattro righe vuote fra un blocco e il successivo
 const MESI_MAIUSCOLI = MESI_NOMI.map(m => m.toUpperCase());
 
+const ULTIMA_RIGA_EXCEL = 1048576; // oltre questa riga il foglio non esiste piu'
+
 const intero = (n) => Math.round(Number(n) || 0);
 const mig = (v) => String(intero(v)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-const scappa = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// I caratteri di controllo (tranne tabulazione e a capo) nell'XML non ci possono
+// stare: uno solo, arrivato da un nome importato male, renderebbe il file
+// illeggibile. Si tolgono prima di scrivere.
+const scappa = (s) => String(s ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const disScappa = (s) => String(s ?? '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 
 /** Il nome della colonna: 1 = A, 27 = AA. */
@@ -327,6 +333,12 @@ export async function scriviBloccoNelFile(bytes, dati) {
   // --- Le righe nuove, in coda al foglio ---
   const ultima = foglio.righe.reduce((m, r) => Math.max(m, r.n), 0);
   const inizio = ultima + DISTANZA;
+  // Sotto l'ultima riga di Excel non c'e' niente: se in fondo al foglio e'
+  // rimasta una riga di scarto (una formattazione, un incollato andato male) il
+  // blocco finirebbe fuori dal foglio e il file non si aprirebbe piu'.
+  if (inizio + righe.length - 1 > ULTIMA_RIGA_EXCEL) {
+    throw new Error(`Nel foglio ${FOGLIO} l'ultima riga scritta e' la ${ultima}: il blocco finirebbe oltre l'ultima riga di Excel (${mig(ULTIMA_RIGA_EXCEL)}). Non scrivo niente: va prima ripulito il fondo del foglio.`);
+  }
   const spostamento = inizio - 1;
   const nuove = [];
   const unioni = [];
@@ -365,7 +377,14 @@ export async function scriviBloccoNelFile(bytes, dati) {
     // L'extra raccolta si conta una volta sola, nel mese in cui si dichiara: se
     // il mese del formulario la contava gia', si svuota; se li' c'e' dell'altro
     // non si tocca e si dice, perche' e' roba dell'utente.
-    for (const [altroMese, kg] of perMeseDelFormulario(extra)) {
+    for (const [altroAnno, altroMese, kg] of perMeseDelFormulario(extra)) {
+      // Le colonne del foglio sono i mesi dell'anno che si sta scrivendo: un
+      // formulario di un altro anno (l'extra di dicembre che parte con la nave di
+      // gennaio) non c'entra con la colonna di quel mese qui, e non si tocca.
+      if (altroAnno !== anno) {
+        avvisi.push(`${mig(kg)} kg di questa extra raccolta vengono da formulari di ${altroMese.toLowerCase()} ${altroAnno}: la colonna di ${altroMese.toLowerCase()} di questo foglio e' del ${anno} e non l'ho toccata. Se quei chili erano gia' scritti nel file del ${altroAnno}, vanno tolti li'.`);
+        continue;
+      }
       if (altroMese === MESE) continue;
       const col = posti.mesi.get(altroMese) || 0;
       if (!col) continue;
@@ -374,7 +393,7 @@ export async function scriviBloccoNelFile(bytes, dati) {
       if (!cella || !Number.isFinite(valore) || valore === 0) continue;
       if (intero(valore) === intero(kg)) {
         cambiaCella(posti.extra, col, (vecchia) => cellaXml(cella.rif, (vecchia || {}).s, null));
-        avvisi.push(`EXTRA RACCOLTA di ${altroMese} svuotata (${mig(valore)} kg): la stessa raccolta ora sta in ${MESE}.`);
+        avvisi.push(`EXTRA RACCOLTA di ${altroMese} svuotata (${mig(valore)} kg): la stessa raccolta ora sta in ${MESE}.${cella.f ? ' In quella cella c\'era una formula, ed e\' stata tolta con il numero.' : ''}`);
       } else {
         avvisi.push(`ATTENZIONE: EXTRA RACCOLTA di ${altroMese} vale ${mig(valore)} kg e comprende altro oltre a questi ${mig(kg)} kg: non l'ho toccata, va vista a mano.`);
       }
@@ -398,16 +417,21 @@ export async function scriviBloccoNelFile(bytes, dati) {
   };
 }
 
-/** Quanti chili di extra raccolta per mese del formulario (la fine trasporto). */
+/**
+ * Quanti chili di extra raccolta per mese del formulario (la fine trasporto),
+ * con l'anno: il foglio ha una colonna per mese di UN anno solo, e l'extra di
+ * dicembre parte con la nave di gennaio dell'anno dopo.
+ * @returns [[anno, MESE, kg]]
+ */
 function perMeseDelFormulario(extra) {
   const per = new Map();
   for (const f of extra.formulari || []) {
     const g = String((f || {}).fine_trasporto || '').slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(g)) continue;
     const m = MESI_MAIUSCOLI[Number(g.slice(5, 7)) - 1];
-    if (m) per.set(m, (per.get(m) || 0) + intero(f.peso_kg));
+    if (m) per.set(`${g.slice(0, 4)}|${m}`, (per.get(`${g.slice(0, 4)}|${m}`) || 0) + intero(f.peso_kg));
   }
-  return [...per.entries()];
+  return [...per.entries()].map(([k, kg]) => [Number(k.slice(0, 4)), k.slice(5), kg]);
 }
 
 /**
@@ -454,7 +478,10 @@ const aggiornaDimensione = (xml, ultimaRiga) => xml.replace(/<dimension ref="([A
 // Le formule le scriviamo senza risultato: Excel deve ricalcolare all'apertura.
 function ricalcoloAllApertura(wbXml) {
   if (/<calcPr\b/.test(wbXml)) {
-    return wbXml.replace(/<calcPr\b([^>]*?)\/?>/, (tutto, attr) => `<calcPr${attr.replace(/\s*\bfullCalcOnLoad="[^"]*"/, '')} fullCalcOnLoad="1"/>`);
+    // Anche quando il calcPr e' scritto per esteso (<calcPr ...></calcPr>): la
+    // chiusura va mangiata con l'apertura, altrimenti resta orfana e il file non
+    // si apre piu'.
+    return wbXml.replace(/<calcPr\b([^>]*?)\/?>(?:<\/calcPr>)?/, (tutto, attr) => `<calcPr${attr.replace(/\s*\bfullCalcOnLoad="[^"]*"/, '')} fullCalcOnLoad="1"/>`);
   }
   const dopo = ['<pivotCaches', '<oleSize', '<customWorkbookViews', '<extLst', '</workbook>'].map(t => wbXml.indexOf(t)).filter(i => i >= 0);
   const dove = Math.min(...dopo);

@@ -88,9 +88,10 @@ export const meseElenco = (r) => { const g = giornoElenco(r); return g ? MESI_MO
  * dove compaiono ordini terminati - elenchi, conti, verifiche, alert, assistente -
  * non solo nei report settimanali. Chi conta continua a tenerlo fuori dai periodi
  * se manca la fine trasporto (giornoElenco), ma dice quali date mancano.
- * Anche le date nell'ordine sbagliato si segnalano: un inizio prima
- * dell'immissione o una fine prima dell'inizio sono dati sporchi, non ritiri
- * velocissimi.
+ * Si segnala anche una fine trasporto prima dell'inizio: una delle due date e'
+ * sbagliata e non si sa quale. L'ordine fra immissione e partenza invece non
+ * dice niente: a portale l'immissione e' la registrazione dell'ordine e arriva
+ * spesso dopo che il camion e' partito (vedi dateIncoerenti).
  */
 export const DATE_OBBLIGATORIE = [
   { campo: 'ordine_immesso_il', nome: 'immissione' },
@@ -104,17 +105,30 @@ export function dateMancanti(r) {
   return DATE_OBBLIGATORIE.filter(d => !giornoRoma(r[d.campo])).map(d => d.nome);
 }
 
-/** Le incoerenze fra le date di un ordine terminato, a parole; [] se non ce ne sono. */
+/**
+ * Le incoerenze fra le date di un ordine terminato, a parole; [] se non ce ne sono.
+ *
+ * L'unica impossibile e' un trasporto finito prima di essere cominciato.
+ *
+ * Un trasporto cominciato prima dell'immissione, invece, e' la regola: a portale
+ * l'immissione e' il giorno in cui l'ordine viene registrato, e il consorzio lo
+ * registra spesso dopo che il camion e' partito. Misurato sui dati veri il
+ * 22/09/2026: 446 primarie di rete su 9.796 terminate, 83 secondarie, 2 ACI e
+ * 410 terziarie su 411 - fino a 129 giorni di distanza. Segnalarle voleva dire
+ * 941 avvisi che nessuno puo' correggere, su ordini anche del 2024, e affogare
+ * le segnalazioni vere. Resta obbligatorio che la data ci sia: e' l'ordine fra
+ * immissione e partenza che non dice niente.
+ *
+ * Quello che conta resta la fine del trasporto: e' li' che un movimento si
+ * colloca, e sulla fine si misurano i tempi di raccolta (tempiRaccolta), dove
+ * una fine anteriore all'immissione si segnala ancora, perche' darebbe giorni
+ * negativi.
+ */
 export function dateIncoerenti(r) {
   if (!eTerminato(r)) return [];
-  const immesso = giornoRoma(r.ordine_immesso_il);
   const inizio = giornoRoma(r.trasporto_iniziato_il);
   const fine = giornoRoma(r.trasporto_finito_il);
-  const esiti = [];
-  if (immesso && inizio && inizio < immesso) esiti.push('inizio trasporto prima dell\'immissione');
-  if (inizio && fine && fine < inizio) esiti.push('fine trasporto prima dell\'inizio');
-  else if (!inizio && immesso && fine && fine < immesso) esiti.push('fine trasporto prima dell\'immissione');
-  return esiti;
+  return inizio && fine && fine < inizio ? ['fine trasporto prima dell\'inizio'] : [];
 }
 
 /** Un ordine terminato con le date da sistemare: ne manca una o sono incoerenti. */
@@ -144,9 +158,14 @@ const istanteGiorno = (g) => Date.UTC(+g.slice(0, 4), +g.slice(5, 7) - 1, +g.sli
  *
  * Restituisce { scadenza: 'AAAA-MM-GG', giorni, esito: 'OK' | 'DOPO SCADENZA' }.
  * Senza fine trasporto giorni ed esito sono null: non si misura e chi conta lo
- * segnala. Lo stesso con una fine trasporto anteriore all'immissione, che e' un
- * dato sporco e non un ritiro velocissimo: darebbe giorni negativi e un "OK" che
- * abbassa la media; allora c'e' anche incoerente: true. null se manca l'immissione.
+ * segnala. null se manca l'immissione.
+ *
+ * Un ritiro finito PRIMA dell'immissione vale zero giorni e "OK", con
+ * prima_dell_immissione: true. Non e' un dato sporco: a portale l'immissione e'
+ * la registrazione dell'ordine, e il consorzio la fa spesso dopo che il ritiro
+ * e' avvenuto (426 primarie di rete su 9.796, 99 nel 2026; misurato il
+ * 22/09/2026). Il raccoglitore non ha tardato di certo: tenerle fuori dalla
+ * misura le faceva comparire fra i "non misurati" come se ci fosse un errore.
  */
 export function tempiRaccolta(r) {
   const immesso = giornoRoma(r && r.ordine_immesso_il);
@@ -154,7 +173,7 @@ export function tempiRaccolta(r) {
   const scadenza = new Date(istanteGiorno(immesso) + GIORNI_SCADENZA_ORDINE * 86400000).toISOString().slice(0, 10);
   const fine = giornoMovimento(r);
   if (!fine) return { scadenza, giorni: null, esito: null };
-  if (fine < immesso) return { scadenza, giorni: null, esito: null, incoerente: true };
+  if (fine < immesso) return { scadenza, giorni: 0, esito: 'OK', prima_dell_immissione: true };
   const giorni = Math.round((istanteGiorno(fine) - istanteGiorno(immesso)) / 86400000);
   return { scadenza, giorni, esito: fine <= scadenza ? 'OK' : 'DOPO SCADENZA' };
 }

@@ -38,15 +38,14 @@ const DATE_INCOERENTI = 'DATE INCOERENTI';
 const SEGNALAZIONI = new Set([SENZA_FINE, SENZA_IMMISSIONE, DATE_INCOERENTI]);
 
 // Come computeSlaMetrics (primarieReteAnalytics.ts): un terminato con le date
-// incoerenti non si misura, qualunque sia l'incoerenza (dateIncoerenti, regola
-// del 22/09/2026). Prima bastava che la fine venisse dopo l'immissione: una fine
-// prima dell'inizio dava giorni ed esito come se niente fosse.
-const incoerente = (r, tempi) => !!(tempi && tempi.incoerente) || dateIncoerenti(r).length > 0;
+// incoerenti non si misura. L'unica incoerenza e' una fine trasporto prima
+// dell'inizio; un ritiro finito prima dell'immissione si misura e vale zero
+// giorni, perche' a portale l'immissione e' la registrazione dell'ordine e
+// arriva spesso dopo il ritiro (movimenti.js, 22/09/2026).
+const incoerente = (r) => dateIncoerenti(r).length > 0;
 
 function esitoTempi(r, tempi, fine) {
-  // una fine trasporto prima dell'immissione e' un dato sporco, non un ritiro in anticipo
-  if (tempi && tempi.incoerente) return DATE_INCOERENTI;
-  if (eTerminato(r) && fine && incoerente(r, tempi)) return DATE_INCOERENTI;
+  if (eTerminato(r) && fine && incoerente(r)) return DATE_INCOERENTI;
   if (tempi && tempi.esito) return tempi.esito;
   if (!eTerminato(r)) return null;
   if (!fine) return SENZA_FINE;
@@ -69,7 +68,7 @@ export default function PrimarieReteTable({ records, loading }) {
     const tempi = tempiRaccolta(r);
     const fine = giornoMovimento(r);
     const senzaPeriodo = eTerminato(r) && !fine;
-    const nonMisurato = eTerminato(r) && incoerente(r, tempi);
+    const nonMisurato = eTerminato(r) && incoerente(r);
     return {
       ...r,
       giorno_ordine: senzaPeriodo ? null : giornoOrdine(r) || null,

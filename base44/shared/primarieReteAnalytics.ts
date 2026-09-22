@@ -243,13 +243,13 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
 //
 // Un terminato senza fine trasporto (o senza immissione) non si misura: si conta
 // a parte e si segnala, e l'anno per contarlo e' quello dell'immissione. Lo
-// stesso con le date incoerenti (dateIncoerenti in movimenti.ts): una fine
-// trasporto anteriore all'immissione darebbe giorni negativi e un "nei tempi"
-// che abbassa la media; un inizio prima dell'immissione o una fine prima
-// dell'inizio dicono che una delle date e' sbagliata, e non si sa quale (regola
-// dell'utente, 22/09/2026: le date di un formulario terminato sono obbligatorie
-// e vanno segnalate). Un ordine misurato a cui manca solo l'inizio del trasporto
-// resta nei tempi, che non lo usano, ma si conta in date_da_sistemare.
+// stesso con le date incoerenti (dateIncoerenti in movimenti.ts), cioe' una fine
+// trasporto prima dell'inizio: una delle due e' sbagliata e non si sa quale.
+// Un ritiro finito prima dell'immissione, invece, si misura e vale zero giorni:
+// a portale l'immissione e' la registrazione dell'ordine e arriva spesso dopo il
+// ritiro (426 primarie di rete, misurato il 22/09/2026), e non e' un ritardo del
+// raccoglitore. Un ordine misurato a cui manca solo l'inizio del trasporto resta
+// nei tempi, che non lo usano, ma si conta in date_da_sistemare.
 export function computeSlaMetrics(records, anno = null) {
   const byTrasportatore: Record<string, any> = {};
   const annoNum = Number(anno) || Number(oggiRoma().slice(0, 4));
@@ -272,7 +272,7 @@ export function computeSlaMetrics(records, anno = null) {
     dellAnno.push(r);
     const tempi = tempiRaccolta(r);
     if (!tempi) { segnala(r, 'senza_immissione'); continue; }
-    if (tempi.incoerente || tempi.giorni == null || dateIncoerenti(r).length > 0) { segnala(r, 'date_incoerenti'); continue; }
+    if (tempi.giorni == null || dateIncoerenti(r).length > 0) { segnala(r, 'date_incoerenti'); continue; }
     const trasportatore = (r.trasportatore || 'N/D').trim();
 
     if (!byTrasportatore[trasportatore]) {

@@ -12,12 +12,19 @@
 // nel riepilogo col suo totale, senza blocco sotto, e la cella e' arancione
 // perche' si veda a colpo d'occhio che non viene da righe.
 //
+// Le due righe del riepilogo non si sovrappongono mai (correzione del
+// 22/09/2026): IRIGOM porta la sola rete, percio' dal totale a portale di un
+// mese senza blocco si toglie l'extra raccolta che la nota dichiara compresa;
+// ed EXTRA RACCOLTA porta l'extra una volta sola, nella colonna del mese che la
+// dichiara, non anche in quella dei mesi dei suoi formulari, dove il gestionale
+// scrive la DichiarazioneSito.
+//
 // Le righe di un mese le fa righeBlocco (bloccoGestione.js): sono le stesse che
 // si incollano nel file dell'utente. Qui prendono anche i colori e
 // l'allineamento dei mesi gia' nel foglio - letti sul blocco di agosto 2026 -
 // con exceljs, come excelDelMese in documentiIrigom.js.
 
-import { MESI, migliaia } from './praticaIrigom.js';
+import { MESI, migliaia, extraPerMese, extraCompresaDaNota } from './praticaIrigom.js';
 import { datiFileGestione, dataIt } from './documentiIrigom.js';
 import { righeBlocco } from './bloccoGestione.js';
 
@@ -241,10 +248,12 @@ function scriviRiepilogo(ws, mesi) {
     if (parti.length) {
       irigom.value = { formula: parti.join('+'), result: m.irigom_kg };
       riempi(irigom, VERDE_SCRITTO);
-    } else if (!m.blocco && m.rete && intero(m.rete.quantita_kg) > 0) {
-      // Senza blocco resta il solo totale della dichiarazione: e' il totale a
-      // portale, extra raccolta compresa, non la somma di righe che qui non ci sono.
-      irigom.value = intero(m.rete.quantita_kg);
+    } else if (!m.blocco && m.rete_senza_extra_kg > 0) {
+      // Senza blocco resta il solo totale della dichiarazione. Quel totale e'
+      // quello caricato a portale, extra raccolta compresa: la riga IRIGOM vale
+      // la sola rete, percio' l'extra dichiarata nella nota si toglie, altrimenti
+      // la si conterebbe qui e di nuovo nella riga EXTRA RACCOLTA.
+      irigom.value = m.rete_senza_extra_kg;
       riempi(irigom, ARANCIO);
     }
     irigom.numFmt = KG;
@@ -254,15 +263,15 @@ function scriviRiepilogo(ws, mesi) {
     if (m.extra_kg) {
       extra.value = m.extra_kg;
       riempi(extra, VERDE_SCRITTO);
-    } else if (m.extraDich && intero(m.extraDich.quantita_kg) > 0) {
-      extra.value = intero(m.extraDich.quantita_kg);
+    } else if (m.extra_dich_kg > 0) {
+      extra.value = m.extra_dich_kg;
       riempi(extra, ARANCIO);
     }
     extra.numFmt = KG;
     centra(extra);
 
-    for (const [riga, dich] of [[RIGA_EXTRA, m.extraDich], [RIGA_IRIGOM, m.rete]]) {
-      if (!dich || !dich.caricata_inviata) continue;
+    for (const [riga, dich, valore] of [[RIGA_EXTRA, m.extraDich, extra.value], [RIGA_IRIGOM, m.rete, irigom.value]]) {
+      if (!dich || !dich.caricata_inviata || valore === null || valore === undefined) continue;
       const cella = ws.getCell(riga, col + 1);
       cella.value = 'SI';
       centra(cella);
@@ -299,8 +308,8 @@ function scriviMesi(ws, mesi, anno) {
       m.pratica ? quando(m.pratica) : '',
       m.blocco ? m.cssc_kg : '',
       m.blocco ? m.terziarie_kg : '',
-      m.blocco ? m.irigom_kg : '',
-      m.extra_kg || '',
+      m.blocco ? m.irigom_kg : (m.rete_senza_extra_kg || ''),
+      m.extra_kg || m.extra_dich_kg || '',
       m.blocco ? m.portale_kg : '',
       m.rete ? intero(m.rete.quantita_kg) : '',
       m.rete && m.rete.caricata_inviata ? 'si' : '',
@@ -346,6 +355,32 @@ export async function esportaFoglioDichiarazioni({ pratiche = [], dichiarazioni 
     };
   });
 
+  // L'extra raccolta si conta una volta sola. Sta nella colonna del mese che la
+  // dichiara (quello della pratica, come nel file di gestione), ma la sua
+  // DichiarazioneSito il gestionale la scrive sul mese dei FORMULARI, che puo'
+  // essere un altro: quei chili sono gia' nella colonna della pratica e qui non
+  // si ripetono. Resta solo quello che nessuna pratica ha gia' messo altrove -
+  // l'extra dichiarata a mano, che il gestionale non conosce.
+  const altrove = new Map();
+  for (const m of mesi) {
+    if (!m.blocco || !m.blocco.extra) continue;
+    for (const x of extraPerMese(m.blocco.extra)) {
+      // il mese della pratica ha gia' la sua colonna: qui contano gli altri
+      if (Number(x.anno) !== quale || x.mese === m.mese) continue;
+      altrove.set(x.mese, (altrove.get(x.mese) || 0) + intero(x.pfu_kg));
+    }
+  }
+  for (const m of mesi) {
+    m.extra_altrove_kg = altrove.get(m.mese) || 0;
+    m.extra_dich_kg = Math.max(0, intero(m.extraDich && m.extraDich.quantita_kg) - m.extra_altrove_kg);
+    // La dichiarazione di rete porta il totale caricato a portale, extra
+    // compresa: la riga IRIGOM vuole la sola rete (testoExtraCompresa /
+    // extraCompresaDaNota in praticaIrigom.js).
+    const compresa = m.rete ? extraCompresaDaNota(m.rete.note) : null;
+    m.rete_senza_extra_kg = Math.max(0, intero(m.rete && m.rete.quantita_kg) - intero(compresa));
+    m.extra_nella_rete_kg = intero(compresa);
+  }
+
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Gestionale PFU';
   wb.created = new Date();
@@ -377,12 +412,16 @@ export async function esportaFoglioDichiarazioni({ pratiche = [], dichiarazioni 
         m.note.push(`La dichiarazione a portale dice ${kg(m.rete.quantita_kg)} kg, la pratica ${kg(m.portale_kg)}.`);
       }
     } else if (m.rete || m.extraDich) {
-      m.note.push(`Il gestionale non ha la pratica di ${m.mese}: nel riepilogo c'e' il solo totale della dichiarazione (${kg((m.rete && m.rete.quantita_kg) || 0)} kg a portale, extra raccolta compresa), il blocco con le righe manca e sta solo nel file di gestione.`);
+      m.note.push(`Il gestionale non ha la pratica di ${m.mese}: nel riepilogo c'e' il solo totale della dichiarazione (${kg((m.rete && m.rete.quantita_kg) || 0)} kg a portale${m.extra_nella_rete_kg ? `, di cui ${kg(m.extra_nella_rete_kg)} kg di extra raccolta, che nella riga IRIGOM non si contano: li' ci sono ${kg(m.rete_senza_extra_kg)} kg di rete` : ', extra raccolta compresa'}), il blocco con le righe manca e sta solo nel file di gestione.`);
     } else {
       m.note.push(`Di ${m.mese} il gestionale non ha ne' la pratica ne' la dichiarazione: se il mese e' stato preparato, il blocco sta solo nel file di gestione.`);
     }
     if (m.pratica && m.pratica.stato === 'in_preparazione') m.note.push('La pratica e\' ancora in preparazione: non e\' stata registrata.');
     if (m.pratica && !m.blocco) m.note.push('La pratica c\'e\' ma non porta i dati per rifare le righe: e\' di una versione vecchia del gestionale.');
+    if (m.extra_altrove_kg) {
+      const dove = mesi.filter(x => x.blocco && x.blocco.extra && elenco(x.blocco.extra.formulari).some(f => MESI[Number(String(f.fine_trasporto || '').slice(5, 7)) - 1] === m.mese)).map(x => x.mese);
+      m.note.push(`La dichiarazione di extra raccolta di ${m.mese} porta ${kg(m.extra_altrove_kg)} kg che ${dove.length > 1 ? 'le pratiche' : 'la pratica'} di ${dove.join(' e ') || 'un altro mese'} ${dove.length > 1 ? 'dichiarano' : 'dichiara'}: sono gia' nella colonna di quel mese e qui non si ripetono, perche' l'extra raccolta si conta una volta sola.`);
+    }
     if (m.quante_rete > 1) m.note.push(`Ci sono ${m.quante_rete} dichiarazioni di rete per questo mese: qui vale quella caricata a portale.`);
     if (m.quante_extra > 1) m.note.push(`Ci sono ${m.quante_extra} dichiarazioni di extra raccolta per questo mese: qui vale quella caricata a portale.`);
     if (m.rete && m.rete.motivo_assenza) m.note.push(`Mese senza dichiarazione, ed e' a posto: ${m.rete.motivo_assenza === 'solo_metalli' ? 'sono usciti solo metalli ferrosi' : 'il trattamento non e\' a nostro carico'}.`);

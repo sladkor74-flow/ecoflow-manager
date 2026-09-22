@@ -56,14 +56,17 @@ const terminati = [
   riga('ET11', 'rete', date('2026-09-01T08:00:00Z', null, '2026-09-05T10:00:00Z')),
   riga('ET12', 'rete', date('2026-09-01T08:00:00Z', null, null)),
   riga('ET13', 'rete', date(null, null, '2026-08-20T10:00:00Z')),
-  riga('EA10', 'aci', date('2026-09-10T08:00:00Z', '2026-09-08T08:00:00Z', '2026-09-12T10:00:00Z')),
+  // l'ACI di prova: gli manca l'immissione. Un inizio prima dell'immissione non
+  // e' piu' un'incoerenza (movimenti.ts): a portale l'immissione e' la
+  // registrazione dell'ordine e arriva spesso dopo la partenza.
+  riga('EA10', 'aci', date(null, '2026-09-08T08:00:00Z', '2026-09-12T10:00:00Z')),
 ];
 verifica('normalizzaPrimaria porta le date da sistemare, vuote se sono a posto', terminati[0].date === '' && terminati[1].date === 'manca la data di inizio trasporto');
 const { canali, alert } = situazioneCanali({ chiave: terminati[0].chiaveTrasp, anno: 2026, mese: 9, oggi: '2026-09-22', terminati, assegnati: [] });
 verifica('rete: l\'evaso senza inizio trasporto e\' contato e si dice', canali.rete.evasi === 2 && canali.rete.date_da_sistemare.length === 1 && canali.rete.date_da_sistemare[0].id_ordine === 'ET11', JSON.stringify(canali.rete));
 verifica('il senza fine resta fra i senza fine, non fra le date del mese', canali.rete.senza_fine.includes('ET12') && !canali.rete.date_da_sistemare.some(v => v.id_ordine === 'ET12'));
 verifica('un evaso di un altro mese non e\' nelle date del mese', !canali.rete.date_da_sistemare.some(v => v.id_ordine === 'ET13'));
-verifica('ACI a parte, con le date incoerenti', canali.aci.date_da_sistemare.length === 1 && canali.aci.date_da_sistemare[0].date === 'inizio trasporto prima dell\'immissione' && canali.extra.date_da_sistemare.length === 0, JSON.stringify(canali.aci));
+verifica('ACI a parte, con la sua data mancante', canali.aci.date_da_sistemare.length === 1 && canali.aci.date_da_sistemare[0].date === 'manca la data di immissione' && canali.extra.date_da_sistemare.length === 0, JSON.stringify(canali.aci));
 const alertDate = alert.filter(a => a.tipo === 'date_da_sistemare');
 verifica('un alert per canale, mai uno per tutti', alertDate.length === 2 && alertDate[0].messaggio.includes('di rete') && alertDate[0].messaggio.includes('ET11') && alertDate[1].messaggio.includes('ACI'), JSON.stringify(alertDate));
 
