@@ -94,13 +94,20 @@ export function dataPeriodo(record) {
  * La scadenza si salva a mezzogiorno UTC, che in Italia e' sempre lo stesso
  * giorno: l'istante di immissione piu' 30 giorni, attraversando il cambio
  * dell'ora legale, cadeva alle 23 italiane del giorno prima.
+ *
+ * Un ritiro finito prima dell'immissione (prima_dell_immissione) non ha giorni
+ * ne' esito da salvare: l'ordine e' stato registrato a portale dopo il ritiro e
+ * non c'e' un tempo da misurare. Scriverci zero giorni e "OK" avrebbe portato la
+ * media dei tempi nelle esportazioni e in chi legge l'archivio com'e'. La
+ * scadenza resta: e' l'immissione piu' 30 giorni, e quella si sa.
  */
 export function campiTempiRaccolta(record) {
   const tempi = tempiRaccolta(record);
+  const misurato = tempi && !tempi.prima_dell_immissione;
   return {
-    nr_giorni: tempi && tempi.giorni != null ? tempi.giorni : null,
+    nr_giorni: misurato && tempi.giorni != null ? tempi.giorni : null,
     scadenza_ordine: tempi ? `${tempi.scadenza}T12:00:00.000Z` : null,
-    raccolta_nei_tempi: tempi && tempi.esito ? tempi.esito : null,
+    raccolta_nei_tempi: misurato && tempi.esito ? tempi.esito : null,
   };
 }
 

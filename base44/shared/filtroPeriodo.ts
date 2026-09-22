@@ -1,4 +1,4 @@
-import { giornoRoma } from "./giornoItaliano.ts";
+import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
 import { eTerminato, giornoMovimento, dateDaSistemare, testoDate, GIORNI_SCADENZA_ORDINE } from "./movimenti.ts";
 
 // Filtro periodo condiviso per fatturazione attiva, passiva e anteprima Ecotyre.
@@ -56,12 +56,12 @@ export function filtraPeriodo(records, anno, mese) {
 //
 // - Un terminato SENZA FINE TRASPORTO resta fuori dal mese (filtraPeriodo non lo
 //   prende) e da ogni altro, ma si segnala in ogni mese in cui potrebbe cadere
-//   (senzaFineNelMese): quelli dello stesso anno a partire dal mese di
-//   immissione, perche' un trasporto non finisce prima che l'ordine sia immesso;
-//   e, per chi e' immesso l'anno prima, i primi mesi dell'anno, fino a quello in
-//   cui cadono i GIORNI_OLTRE_ANNO dopo l'immissione (o dopo l'inizio trasporto,
-//   se e' piu' tardi). Chi non ha nemmeno l'immissione si segnala sempre: non si
-//   sa dove metterlo.
+//   (senzaFineNelMese): quelli dello stesso anno a partire dal mese della prima
+//   data che hanno; e, per chi quella data ce l'ha l'anno prima, i primi mesi
+//   dell'anno, fino a quello in cui cadono i GIORNI_OLTRE_ANNO dopo l'ultima
+//   data che hanno. Chi non ha nessuna delle tre date si segnala nei mesi
+//   dell'anno in corso: non si sa dove metterlo, ma nemmeno lui va ripetuto in
+//   ogni anno per sempre.
 // - Un terminato DEL MESE a cui manca l'immissione o l'inizio trasporto, o che ha
 //   le date nell'ordine sbagliato, resta nel mese (la fine trasporto c'e') e si
 //   segnala.
@@ -84,15 +84,33 @@ const ggmmaaaa = (g) => (g ? g.split('-').reverse().join('/') : '');
 const GIORNI_OLTRE_ANNO = GIORNI_SCADENZA_ORDINE * 2;
 const piuGiorni = (g, n) => new Date(Date.UTC(+g.slice(0, 4), +g.slice(5, 7) - 1, +g.slice(8, 10)) + n * 86400000).toISOString().slice(0, 10);
 
-/** Se un terminato senza fine trasporto va segnalato nella fatturazione del mese meseIdx (0-11) di annoNum. */
+/**
+ * Se un terminato senza fine trasporto va segnalato nella fatturazione del mese
+ * meseIdx (0-11) di annoNum.
+ *
+ * La finestra sta fra le date che l'ordine ha: si apre col mese della prima e si
+ * chiude GIORNI_OLTRE_ANNO dopo l'ultima. Le date sono l'immissione e l'inizio
+ * del trasporto, e nessuna delle due viene per forza prima dell'altra: a portale
+ * l'immissione e' la registrazione dell'ordine e arriva spesso dopo la partenza
+ * (22/09/2026), quindi un trasporto puo' essere partito - e finito - nel mese
+ * prima di quello in cui l'ordine e' stato immesso.
+ *
+ * Chi non ha nemmeno una di quelle due date rispondeva vero e basta, e finiva
+ * segnalato nella fatturazione di ogni mese di ogni anno, per sempre, anche del
+ * 2030: nascondeva le segnalazioni vere invece di farsi vedere. Si limita anche
+ * lui a una finestra, la sola che si possa dire senza nessuna data: i mesi
+ * dell'anno in corso, quello in cui lo si sta lavorando.
+ */
 function senzaFineNelMese(r, annoNum, meseIdx) {
   const immesso = giornoRoma(r.ordine_immesso_il);
-  if (!immesso) return true;
-  const annoImm = Number(immesso.slice(0, 4));
-  if (annoImm === annoNum) return meseIdx >= Number(immesso.slice(5, 7)) - 1;
-  if (annoImm !== annoNum - 1) return false;
   const inizio = giornoRoma(r.trasporto_iniziato_il);
-  const ultimo = piuGiorni(inizio && inizio > immesso ? inizio : immesso, GIORNI_OLTRE_ANNO);
+  const prima = immesso && inizio ? (immesso < inizio ? immesso : inizio) : (immesso || inizio);
+  if (!prima) return annoNum === Number(oggiRoma().slice(0, 4));
+  const annoPrima = Number(prima.slice(0, 4));
+  if (annoPrima === annoNum) return meseIdx >= Number(prima.slice(5, 7)) - 1;
+  if (annoPrima !== annoNum - 1) return false;
+  const dopo = immesso && inizio ? (immesso > inizio ? immesso : inizio) : prima;
+  const ultimo = piuGiorni(dopo, GIORNI_OLTRE_ANNO);
   return `${annoNum}-${String(meseIdx + 1).padStart(2, '0')}-01` <= ultimo;
 }
 

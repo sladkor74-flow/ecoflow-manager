@@ -179,7 +179,7 @@ export default function Terziarie() {
           <AvvisoDateDaSistemare
             righe={perDate}
             nomi={['trasporto terziario terminato', 'trasporti terziari terminati']}
-            nota="Chi non ha la fine trasporto non ha giorno, mese e anno: resta fuori dai filtri di periodo, dagli indicatori e dalle uscite per impianto."
+            nota="Chi non ha la fine trasporto non ha giorno, mese e anno e resta fuori anche dagli indicatori e dalle uscite per impianto."
             attivo={!!filters.date_da_sistemare}
             onFiltra={vediDate}
           />

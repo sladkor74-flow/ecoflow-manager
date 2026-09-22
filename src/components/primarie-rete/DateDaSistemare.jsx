@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { DATE_OBBLIGATORIE, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate } from '@/lib/movimenti';
+import { DATE_OBBLIGATORIE, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate, giornoMovimento } from '@/lib/movimenti';
 import { formatIntero } from '@/lib/utils';
 
 // Le date obbligatorie di un formulario terminato - immissione, inizio e fine
@@ -11,11 +11,19 @@ import { formatIntero } from '@/lib/utils';
 // dateIncoerenti, dateDaSistemare, testoDate) e non si riscrive: qui c'e' solo
 // come si mostra, uguale in ogni modulo.
 //
+// Quanti sono si conta in ORDINI distinti, come negli altri moduli, mai in
+// righe: un ordine puo' averne piu' d'una. E il numero dice sempre di che cosa
+// parla, perche' le pagine passano insieme gli ordini del periodo scelto e i
+// terminati senza fine trasporto di qualunque anno, che nessun filtro di periodo
+// prende: le due quote si scrivono separate.
+//
 // - SegnoDate: il segno sulla riga, col testo di testoDate nel title;
-// - AvvisoDateDaSistemare: l'avviso in testa a un elenco, con quante sono, quali
-//   date mancano, l'elenco degli ordini e il pulsante del filtro;
+// - AvvisoDateDaSistemare: l'avviso in testa a un elenco, con quanti ordini sono
+//   e di che periodo, quali date mancano, l'elenco e il pulsante del filtro;
 // - RiepilogoDate: una riga, di un canale, col riepilogo che le funzioni
-//   restituiscono in date_da_sistemare (riepilogoDate di raccoltoCalculator.ts);
+//   restituiscono in date_da_sistemare (riepilogoDate di raccoltoCalculator.ts):
+//   quel conto e' ancora per riga, e il perimetro lo sa la funzione che lo manda;
+//   qui si mostra e basta;
 // - NotaDate: una nota in linea accanto a un'esportazione, per le righe che
 //   finiscono nel file.
 //
@@ -33,19 +41,84 @@ export function SegnoDate({ record, testo }) {
   );
 }
 
+/**
+ * Gli ORDINI con le date da sistemare, non le righe: lo stesso ordine puo' avere
+ * piu' righe (le quote di un formulario ripartito su piu' ordini, e in generale
+ * piu' formulari sullo stesso ordine), e gli altri moduli - giacenze, alert,
+ * report - contano gli ordini. Contare righe qui voleva dire due numeri diversi
+ * per lo stesso insieme. La chiave e' l'id dell'ordine, il numero del formulario
+ * quando l'id manca; una riga che non ha ne' l'uno ne' l'altro conta per se'.
+ * Ogni voce porta le sue righe, per l'elenco e per il dettaglio.
+ */
+function ordiniDaSistemare(righe) {
+  const gruppi = new Map();
+  let senzaChiave = 0;
+  for (const r of righe || []) {
+    if (!dateDaSistemare(r)) continue;
+    const id = String(r.id_ordine || '').trim().toUpperCase();
+    const fir = String(r.numero_fir || '').trim().toUpperCase();
+    const k = id ? `ID:${id}` : fir ? `FIR:${fir}` : `RIGA:${senzaChiave++}`;
+    if (!gruppi.has(k)) gruppi.set(k, { chiave: k, righe: [] });
+    gruppi.get(k).righe.push(r);
+  }
+  return [...gruppi.values()];
+}
+
+/** Un ordine senza fine trasporto: non ha giorno, mese ne' anno, e nessun filtro di periodo lo prende. */
+const senzaFineTrasporto = (o) => o.righe.some(r => !giornoMovimento(r));
+
+/** Che cosa c'e' da sistemare in un ordine: le date di tutte le sue righe, senza ripetizioni. */
+const testoOrdine = (o) => [...new Set(o.righe.map(testoDate).filter(Boolean))].join('; ');
+
 // Il dettaglio a parole, come il testo di riepilogoDate nelle funzioni:
-// "3 senza fine trasporto, 1 con date incoerenti". Un ordine a cui mancano due
-// date conta in tutte e due le voci.
-function dettaglioDate(righe) {
+// "3 senza fine trasporto, 1 con date incoerenti". Conta ordini: a un ordine a
+// cui mancano due date conta in tutte e due le voci, una volta sola anche se le
+// sue righe sono piu' d'una.
+function dettaglioDate(ordini) {
   const mancanti = Object.fromEntries(DATE_OBBLIGATORIE.map(d => [d.nome, 0]));
   let incoerenti = 0;
-  for (const r of righe) {
-    for (const nome of dateMancanti(r)) mancanti[nome] = (mancanti[nome] || 0) + 1;
-    if (dateIncoerenti(r).length) incoerenti++;
+  for (const o of ordini) {
+    for (const nome of new Set(o.righe.flatMap(dateMancanti))) mancanti[nome] = (mancanti[nome] || 0) + 1;
+    if (o.righe.some(r => dateIncoerenti(r).length)) incoerenti++;
   }
   const parti = DATE_OBBLIGATORIE.filter(d => mancanti[d.nome] > 0).map(d => `${formatIntero(mancanti[d.nome])} senza ${d.nome}`);
   if (incoerenti) parti.push(`${formatIntero(incoerenti)} con date incoerenti`);
   return parti.join(', ');
+}
+
+/**
+ * Di che cosa parla il numero in testa all'avviso. Le pagine passano gli ordini
+ * del periodo scelto PIU' i terminati senza fine trasporto di qualunque anno,
+ * che nessun filtro di periodo prende: sommarli senza dirlo faceva leggere "446
+ * segnalati" a chi nel 2026 ne vedeva 200. Le due quote si dicono separate.
+ */
+function perimetroDate(senzaFine, nelPeriodo) {
+  if (senzaFine && nelPeriodo) {
+    return `${formatIntero(senzaFine)} senza fine trasporto, di qualunque anno e fuori da ogni filtro di periodo, e ${formatIntero(nelPeriodo)} fra quelli che l'elenco mostra`;
+  }
+  if (senzaFine) return `tutti senza fine trasporto, di qualunque anno e fuori da ogni filtro di periodo`;
+  return '';
+}
+
+/**
+ * I numeri dell'avviso, in un punto solo (e quello che le prove controllano:
+ * prove/dateDaSistemareAvvisi.mjs): quanti ordini distinti, quanti senza fine
+ * trasporto e quanti fra quelli che l'elenco mostra, il perimetro e il dettaglio
+ * a parole. Un numero solo per ogni cosa, cosi' testo ed elenco non possono
+ * dirne due diversi.
+ */
+export function riepilogoAvviso(righe) {
+  const ordini = ordiniDaSistemare(righe);
+  const senzaFine = ordini.filter(senzaFineTrasporto).length;
+  const nelPeriodo = ordini.length - senzaFine;
+  return {
+    ordini,
+    quanti: ordini.length,
+    senza_fine_trasporto: senzaFine,
+    nel_periodo: nelPeriodo,
+    perimetro: perimetroDate(senzaFine, nelPeriodo),
+    dettaglio: dettaglioDate(ordini),
+  };
 }
 
 const NOTA_PORTALE = 'Vanno corrette nel file del portale e ricaricate.';
@@ -57,10 +130,13 @@ const MOSTRATI = 50;
  * sono ('Rete', 'ACI', ...), un canale solo; nomi: [singolare, plurale];
  * nota: cosa succede nella pagina a chi non ha la fine trasporto; correzione:
  * dove si correggono; attivo / onFiltra: il filtro "date da sistemare".
+ *
+ * Il numero e' di ORDINI distinti, non di righe, e dice sempre di che cosa parla:
+ * quanti senza fine trasporto, che sono di qualunque anno, e quanti fra quelli
+ * che i filtri dell'elenco mostrano.
  */
 export default function AvvisoDateDaSistemare({ righe, canale, nomi = ['ordine terminato', 'ordini terminati'], nota, correzione = NOTA_PORTALE, attivo = false, onFiltra }) {
-  const daSistemare = (righe || []).filter(dateDaSistemare);
-  const n = daSistemare.length;
+  const { ordini: daSistemare, quanti: n, perimetro, dettaglio } = riepilogoAvviso(righe);
   if (!n && !attivo) return null;
   const filtro = onFiltra && (
     <button type="button" onClick={() => onFiltra(!attivo)} className="text-primary hover:underline font-medium whitespace-nowrap">
@@ -80,7 +156,8 @@ export default function AvvisoDateDaSistemare({ righe, canale, nomi = ['ordine t
       <div className="flex items-start gap-2">
         <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
         <p className="flex-1">
-          <strong>{canale ? `${canale} · ` : ''}{formatIntero(n)} {n === 1 ? nomi[0] : nomi[1]} con date da sistemare</strong>: {dettaglioDate(daSistemare)}.
+          <strong>{canale ? `${canale} · ` : ''}{formatIntero(n)} {n === 1 ? nomi[0] : nomi[1]} con date da sistemare</strong>
+          {perimetro ? ` (${perimetro})` : ''}: {dettaglio}.
           {' '}Immissione, inizio e fine trasporto sono obbligatorie in ogni formulario.
           {nota ? ` ${nota}` : ''}{correzione ? ` ${correzione}` : ''}
         </p>
@@ -89,13 +166,18 @@ export default function AvvisoDateDaSistemare({ righe, canale, nomi = ['ordine t
       <details className="pl-6 text-xs">
         <summary className="cursor-pointer select-none">Quali sono{n > MOSTRATI ? ` (i primi ${MOSTRATI})` : ''}</summary>
         <ul className="mt-1 space-y-0.5">
-          {daSistemare.slice(0, MOSTRATI).map((r, i) => (
-            <li key={`${r.id || r.id_ordine || ''}|${i}`} title={testoDate(r)}>
-              <span className="font-mono">{r.id_ordine || r.numero_fir || 'senza ID'}</span>
-              {r.id_ordine && r.numero_fir ? <> · FIR <span className="font-mono">{r.numero_fir}</span></> : null}
-              {' · '}{testoDate(r)}
-            </li>
-          ))}
+          {daSistemare.slice(0, MOSTRATI).map((o, i) => {
+            const r = o.righe[0];
+            const testo = testoOrdine(o);
+            return (
+              <li key={`${o.chiave}|${i}`} title={testo}>
+                <span className="font-mono">{r.id_ordine || r.numero_fir || 'senza ID'}</span>
+                {r.id_ordine && r.numero_fir ? <> · FIR <span className="font-mono">{r.numero_fir}</span></> : null}
+                {o.righe.length > 1 ? ` · ${formatIntero(o.righe.length)} righe` : ''}
+                {' · '}{testo}
+              </li>
+            );
+          })}
         </ul>
       </details>
     </div>
@@ -103,19 +185,19 @@ export default function AvvisoDateDaSistemare({ righe, canale, nomi = ['ordine t
 }
 
 /**
- * Una nota in linea, accanto ai pulsanti di un'esportazione: quante delle righe
+ * Una nota in linea, accanto ai pulsanti di un'esportazione: quanti degli ordini
  * che vanno nel file hanno le date da sistemare, e quali date, con l'elenco nel
- * title. Niente se sono tutte a posto. righe: le righe esportate; nomi:
+ * title. Niente se sono tutti a posto. righe: le righe esportate; nomi:
  * [singolare, plurale]. Nasce per l'Extra Raccolta (22/09/2026): chi esporta la
  * fatturazione deve saperlo prima di mandare il file, qualunque cosa il file
- * mostri.
+ * mostri. Come l'avviso, conta ordini distinti, non righe.
  */
 export function NotaDate({ righe, nomi = ['ordine esportato', 'ordini esportati'], className = '' }) {
-  const daSistemare = (righe || []).filter(dateDaSistemare);
+  const daSistemare = ordiniDaSistemare(righe);
   const n = daSistemare.length;
   if (!n) return null;
   const chi = (r) => [r.id_ordine, r.numero_fir ? `FIR ${r.numero_fir}` : ''].filter(Boolean).join(' · ') || 'senza ID';
-  const elenco = daSistemare.slice(0, MOSTRATI).map(r => `${chi(r)}: ${testoDate(r)}`);
+  const elenco = daSistemare.slice(0, MOSTRATI).map(o => `${chi(o.righe[0])}: ${testoOrdine(o)}`);
   if (n > MOSTRATI) elenco.push(`e altri ${formatIntero(n - MOSTRATI)}`);
   return (
     <span className={`inline-flex items-start gap-1 text-xs text-amber-800 ${className}`} title={elenco.join('\n')}>

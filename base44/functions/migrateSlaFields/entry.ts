@@ -3,7 +3,7 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { campiTempiRaccolta } from "../../shared/dataEnrichment.ts";
-import { eTerminato } from "../../shared/movimenti.ts";
+import { eTerminato, tempiRaccolta } from "../../shared/movimenti.ts";
 import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
 
 // Riallinea i tempi di raccolta salvati sulle primarie di rete - nr_giorni,
@@ -53,9 +53,16 @@ export default async function(req) {
     const stessoGiorno = (salvato, giusto) => (salvato ? String(salvato).slice(0, 10) : null) === (giusto ? giusto.slice(0, 10) : null);
     const daAggiornare = [];
     let terminatiSenzaMisura = 0;
+    let immissioneDopoRitiro = 0;
     for (const r of records) {
       const campi = campiTempiRaccolta(r);
-      if (eTerminato(r) && campi.nr_giorni == null) terminatiSenzaMisura++;
+      // I due motivi per cui un ritiro fatto resta senza tempi non sono la stessa
+      // cosa: a portale l'immissione e' la registrazione dell'ordine e arriva
+      // spesso dopo il ritiro, e li' non c'e' niente da correggere.
+      if (eTerminato(r) && campi.nr_giorni == null) {
+        if (tempiRaccolta(r)?.prima_dell_immissione) immissioneDopoRitiro++;
+        else terminatiSenzaMisura++;
+      }
       const salvatoGiorni = r.nr_giorni == null || r.nr_giorni === '' ? null : Number(r.nr_giorni);
       if (salvatoGiorni === campi.nr_giorni && stesso(r.raccolta_nei_tempi, campi.raccolta_nei_tempi) && stessoGiorno(r.scadenza_ordine, campi.scadenza_ordine)) continue;
       daAggiornare.push({ id: r.id, ...campi });
@@ -80,6 +87,8 @@ export default async function(req) {
       aggiornati,
       // i ritiri fatti che restano senza tempi: da correggere a portale, non qui
       terminati_senza_misura: terminatiSenzaMisura,
+      // e quelli registrati a portale dopo il ritiro: non si misurano, ma non c'e' niente da correggere
+      immissione_dopo_ritiro: immissioneDopoRitiro,
     };
     if (errori.length) {
       return Response.json({ ...esito, error: `${errori.length} blocchi non scritti: ${errori.slice(0, 3).join('; ')}` }, { status: 500 });

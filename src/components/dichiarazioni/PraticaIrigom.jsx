@@ -631,6 +631,15 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
             );
           })}
         </div>
+        {/* Senza registro e senza mese non c'e' nessuna pratica, quindi nemmeno i
+            pulsanti: si vedono solo dopo, ed e' bene dirlo invece di lasciarli cercare. */}
+        {!pratica && (
+          <p className="text-xs text-muted-foreground">
+            {registro
+              ? 'Scegli il mese: sotto compaiono quanto dichiarare, quante terziarie aprire e i pulsanti per la cartella del mese, il blocco per il file di gestione e le esportazioni.'
+              : 'Carica il registro e poi scegli il mese: solo allora compaiono la pratica e i pulsanti per la cartella del mese, il blocco per il file di gestione e le esportazioni.'}
+          </p>
+        )}
         {mese && !registro && praticaDelMese && (
           <p className="text-xs text-muted-foreground">
             {mese}: pratica {praticaDelMese.stato === 'registrata' ? 'registrata' : 'in preparazione'}

@@ -30,6 +30,12 @@ const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Lug
 // piu' i soli senza fine trasporto ma ogni terminato con una data che manca o
 // non torna (dateDaSistemare), le righe hanno il segno, e il filtro "Solo date
 // da sistemare" le mostra, anche quelle senza periodo con un mese scelto.
+//
+// L'avviso riceve perDate, cioe' due insiemi in uno: gli ordini del periodo
+// scelto e i terminati senza fine trasporto di QUALUNQUE anno. Il componente
+// scrive le due quote separate (erano sommate senza dirlo: "446 segnalati" a chi
+// nel 2026 ne vedeva 200) e conta ordini distinti, non righe. Qui sotto la
+// scheda del dettaglio dice righe, perche' righe sono quelle che mostra.
 
 // I caricamenti che riscrivono l'archivio delle primarie di rete.
 const CARICAMENTI_RETE = ['primarie', 'primarie_rete'];
@@ -187,7 +193,7 @@ export default function PrimarieRete() {
           <AvvisoDateDaSistemare
             righe={perDate}
             canale="Rete"
-            nota="Chi non ha la fine trasporto non ha giorno, mese e anno: resta fuori dai filtri di periodo e dai tempi di raccolta. Anche chi non ha l'immissione o ha le date incoerenti resta fuori dai tempi."
+            nota="Chi non ha la fine trasporto non ha giorno, mese e anno e resta fuori anche dai tempi di raccolta; ne restano fuori pure chi non ha l'immissione e chi ha le date incoerenti."
             attivo={soloDate}
             onFiltra={vediDate}
           />
@@ -201,7 +207,7 @@ export default function PrimarieRete() {
       ) : (
         <Tabs value={scheda} onValueChange={setScheda}>
           <TabsList>
-            <TabsTrigger value="dettaglio"><Table2 className="w-4 h-4 mr-1.5" /> Dettaglio Ordini ({ordiniMostrati.length})</TabsTrigger>
+            <TabsTrigger value="dettaglio"><Table2 className="w-4 h-4 mr-1.5" /> Dettaglio Ordini ({ordiniMostrati.length} righe)</TabsTrigger>
             <TabsTrigger value="province"><MapPin className="w-4 h-4 mr-1.5" /> Province & FIR</TabsTrigger>
             <TabsTrigger value="mix"><BarChart3 className="w-4 h-4 mr-1.5" /> % di scostamento per classi</TabsTrigger>
             <TabsTrigger value="sla"><Clock className="w-4 h-4 mr-1.5" /> SLA & Tempi</TabsTrigger>

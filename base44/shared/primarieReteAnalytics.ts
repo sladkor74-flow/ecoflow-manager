@@ -245,18 +245,31 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
 // a parte e si segnala, e l'anno per contarlo e' quello dell'immissione. Lo
 // stesso con le date incoerenti (dateIncoerenti in movimenti.ts), cioe' una fine
 // trasporto prima dell'inizio: una delle due e' sbagliata e non si sa quale.
-// Un ritiro finito prima dell'immissione, invece, si misura e vale zero giorni:
-// a portale l'immissione e' la registrazione dell'ordine e arriva spesso dopo il
-// ritiro (426 primarie di rete, misurato il 22/09/2026), e non e' un ritardo del
-// raccoglitore. Un ordine misurato a cui manca solo l'inizio del trasporto resta
-// nei tempi, che non lo usano, ma si conta in date_da_sistemare.
+// Un ordine misurato a cui manca solo l'inizio del trasporto resta nei tempi,
+// che non lo usano, ma si conta in date_da_sistemare.
+//
+// Un ritiro finito PRIMA dell'immissione non si misura nemmeno lui, ma non e' un
+// errore: a portale l'immissione e' la registrazione dell'ordine e arriva spesso
+// dopo il ritiro (426 primarie di rete, 99 del 2026; misurato il 22/09/2026). Il
+// raccoglitore non ha tardato, solo non c'e' niente da misurare: contarlo zero
+// giorni e "nei tempi" abbassava la media di tutti e alzava la percentuale. Si
+// conta in non_misurati.immissione_dopo_ritiro, una voce che va detta per quello
+// che e': non c'e' niente da correggere a portale.
 export function computeSlaMetrics(records, anno = null) {
   const byTrasportatore: Record<string, any> = {};
   const annoNum = Number(anno) || Number(oggiRoma().slice(0, 4));
-  const nonMisurati = { senza_fine_trasporto: 0, senza_immissione: 0, date_incoerenti: 0, esempi: [] as string[] };
+  const nonMisurati = {
+    senza_fine_trasporto: 0, senza_immissione: 0, date_incoerenti: 0, esempi: [] as string[],
+    // non e' un errore: sta a parte anche negli esempi, che l'altro elenco e' di date da correggere
+    immissione_dopo_ritiro: 0, esempi_immissione_dopo_ritiro: [] as string[],
+  };
   const segnala = (r: any, perche: 'senza_fine_trasporto' | 'senza_immissione' | 'date_incoerenti') => {
     nonMisurati[perche] += 1;
     if (nonMisurati.esempi.length < 5 && r.id_ordine) nonMisurati.esempi.push(String(r.id_ordine));
+  };
+  const segnalaImmissioneDopo = (r: any) => {
+    nonMisurati.immissione_dopo_ritiro += 1;
+    if (nonMisurati.esempi_immissione_dopo_ritiro.length < 5 && r.id_ordine) nonMisurati.esempi_immissione_dopo_ritiro.push(String(r.id_ordine));
   };
   // i terminati dell'anno della scheda, misurati o no, per le date da sistemare
   const dellAnno = [];
@@ -273,6 +286,8 @@ export function computeSlaMetrics(records, anno = null) {
     const tempi = tempiRaccolta(r);
     if (!tempi) { segnala(r, 'senza_immissione'); continue; }
     if (tempi.giorni == null || dateIncoerenti(r).length > 0) { segnala(r, 'date_incoerenti'); continue; }
+    // fuori dai giorni e dai "nei tempi": non c'e' un tempo da misurare
+    if (tempi.prima_dell_immissione) { segnalaImmissioneDopo(r); continue; }
     const trasportatore = (r.trasportatore || 'N/D').trim();
 
     if (!byTrasportatore[trasportatore]) {

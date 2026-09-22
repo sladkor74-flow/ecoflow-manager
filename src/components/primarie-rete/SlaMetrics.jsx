@@ -7,9 +7,10 @@ import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 // dall'immissione dell'ordine alla fine del trasporto, mai alla chiusura a portale.
 // Qui si dice a parole cosa misurano, di quale anno, e quanti terminati non si
 // sono potuti misurare: senza fine trasporto, senza immissione, o con una fine
-// prima dell'inizio (dateIncoerenti). Un ritiro finito prima dell'immissione si
-// misura e vale zero giorni. Sotto si dicono tutte le date da sistemare
-// dell'anno, anche degli ordini misurati.
+// prima dell'inizio (dateIncoerenti). A parte, e senza l'ambra delle
+// segnalazioni, chi e' stato registrato a portale dopo il ritiro: non si misura
+// nemmeno lui, ma non c'e' niente da correggere. Sotto si dicono tutte le date
+// da sistemare dell'anno, anche degli ordini misurati.
 export default function SlaMetrics({ data, anniFiltro = [] }) {
   if (!data) return null;
 
@@ -20,6 +21,9 @@ export default function SlaMetrics({ data, anniFiltro = [] }) {
   const quantiNonMisurati = nonMisurati
     ? (nonMisurati.senza_fine_trasporto || 0) + (nonMisurati.senza_immissione || 0) + (nonMisurati.date_incoerenti || 0)
     : 0;
+  // non e' un'anomalia: sta fuori dal conto delle date da correggere
+  const immissioneDopoRitiro = (nonMisurati && nonMisurati.immissione_dopo_ritiro) || 0;
+  const esempiImmissioneDopo = (nonMisurati && nonMisurati.esempi_immissione_dopo_ritiro) || [];
   // I tempi si misurano su un anno alla volta: con piu' anni scelti nel filtro
   // la scheda resta sull'anno in corso, e va detto invece di lasciarlo credere.
   const annoIgnorato = anniFiltro.length > 1;
@@ -39,6 +43,13 @@ export default function SlaMetrics({ data, anniFiltro = [] }) {
           {nonMisurati.esempi?.length > 0 && <> (es. {nonMisurati.esempi.join(', ')})</>}
           : {quantiNonMisurati === 1 ? 'resta fuori' : 'restano fuori'} dai tempi finché le date non si correggono a portale.
         </div>
+      )}
+      {immissioneDopoRitiro > 0 && (
+        <p className="text-xs text-muted-foreground border rounded-lg px-3 py-2">
+          {formatIntero(immissioneDopoRitiro)} {immissioneDopoRitiro === 1 ? 'ordine terminato ha l\'immissione registrata dopo il ritiro' : 'ordini terminati hanno l\'immissione registrata dopo il ritiro'}
+          {esempiImmissioneDopo.length > 0 && <> (es. {esempiImmissioneDopo.join(', ')})</>}
+          : l&apos;ordine è stato registrato a portale dopo il ritiro, non si misura. Non è un errore da correggere: {immissioneDopoRitiro === 1 ? 'resta fuori' : 'restano fuori'} dalla media dei giorni e dalle percentuali perché non c&apos;è un tempo da misurare.
+        </p>
       )}
       <RiepilogoDate
         canale="Rete"

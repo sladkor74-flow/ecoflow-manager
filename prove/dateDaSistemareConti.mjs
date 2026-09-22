@@ -3,11 +3,13 @@
 // obbligatorie in ogni formulario terminato, e dove mancano o non tornano si
 // segnala in ogni modulo). La regola e' in movimenti.ts; qui si prova chi la
 // conta: riepilogoDate e riepilogoDateVista (raccoltoCalculator.ts), i tempi di
-// raccolta e la matrice delle primarie (primarieReteAnalytics.ts), le pivot del
-// Report Mensile (reportMensile.ts) e il raccolto di Target & Status. npm run prove
+// raccolta e la matrice delle primarie (primarieReteAnalytics.ts), i campi dei
+// tempi salvati sul record (dataEnrichment.ts), le pivot del Report Mensile
+// (reportMensile.ts) e il raccolto di Target & Status. npm run prove
 import { riepilogoDate, riepilogoDateVista, computeRaccoltoData } from '../base44/shared/raccoltoCalculator.ts';
 import { computeSlaMetrics, computeProvinceMatrixData, computeRaccoglitoriMixData } from '../base44/shared/primarieReteAnalytics.ts';
 import { calcolaPivot } from '../base44/shared/reportMensile.ts';
+import { campiTempiRaccolta } from '../base44/shared/dataEnrichment.ts';
 import { oggiRoma } from '../base44/shared/giornoItaliano.ts';
 
 let ok = 0, ko = 0;
@@ -46,6 +48,20 @@ verifica('fine prima dell\'inizio: non si misura, anche se viene dopo l\'immissi
 verifica('senza immissione e senza fine: non misurati, ciascuno col suo motivo', sla.non_misurati.senza_immissione === 1 && sla.non_misurati.senza_fine_trasporto === 1);
 verifica('senza il solo inizio: si misura (i tempi non lo usano)', sla.totale_ordini === 2, String(sla.totale_ordini));
 verifica('ma le date da sistemare dell\'anno lo dicono', sla.date_da_sistemare.totale === 4 && sla.date_da_sistemare.mancanti['inizio trasporto'] === 2, JSON.stringify(sla.date_da_sistemare));
+
+// L'ordine registrato a portale dopo il ritiro (426 primarie di rete, 99 del
+// 2026; misurato il 22/09/2026): le tre date ci sono e nessuna e' incoerente,
+// ma un tempo da misurare non c'e'. Contato zero giorni e "nei tempi" abbassava
+// la media di tutti e alzava la percentuale.
+const immessoDopoIlRitiro = { ...base, id_ordine: 'IDR1', ordine_immesso_il: g('06', '20'), trasporto_iniziato_il: g('06', '04') };
+const tardivo = { ...base, id_ordine: 'TAR1', ordine_immesso_il: g('05', '01'), trasporto_iniziato_il: g('06', '04') };
+const conIdr = computeSlaMetrics([completo, tardivo, immessoDopoIlRitiro], ANNO);
+verifica('immissione dopo il ritiro: fuori dagli ordini misurati, in una voce sua', conIdr.totale_ordini === 2 && conIdr.non_misurati.immissione_dopo_ritiro === 1 && conIdr.non_misurati.esempi_immissione_dopo_ritiro.includes('IDR1'), JSON.stringify(conIdr.non_misurati));
+verifica('non e\' un errore: non sta con le date da correggere', conIdr.date_da_sistemare.totale === 0 && !conIdr.non_misurati.esempi.includes('IDR1') && conIdr.non_misurati.senza_immissione === 0 && conIdr.non_misurati.date_incoerenti === 0, JSON.stringify(conIdr.non_misurati));
+verifica('non abbassa la media dei giorni (4 e 35, non zero)', conIdr.avg_giorni === 19.5 && conIdr.trasportatori[0].nr_giorni_medio === 19.5 && conIdr.trasportatori[0].totale === 2, String(conIdr.avg_giorni));
+verifica('e non alza la percentuale nei tempi', conIdr.pct_nei_tempi_globale === 50 && conIdr.pct_dopo_scadenza_globale === 50, JSON.stringify([conIdr.pct_nei_tempi_globale, conIdr.pct_dopo_scadenza_globale]));
+verifica('i campi salvati sul record restano vuoti, non zero giorni e "OK"', campiTempiRaccolta(immessoDopoIlRitiro).nr_giorni === null && campiTempiRaccolta(immessoDopoIlRitiro).raccolta_nei_tempi === null && campiTempiRaccolta(immessoDopoIlRitiro).scadenza_ordine.startsWith(`${ANNO}-07-20`), JSON.stringify(campiTempiRaccolta(immessoDopoIlRitiro)));
+verifica('un ritiro misurato invece li ha', campiTempiRaccolta(completo).nr_giorni === 4 && campiTempiRaccolta(completo).raccolta_nei_tempi === 'OK');
 
 console.log('MATRICE E MIX DELLE PRIMARIE');
 const matrice = computeProvinceMatrixData([completo, senzaFine, senzaInizio, dellAnnoPrima, aperto]);

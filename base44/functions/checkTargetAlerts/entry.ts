@@ -6,7 +6,7 @@ import { PROV_TO_REGION, MESI, riepilogoDate, riepilogoDateVista } from "../../s
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
-import { filtraMovimenti, giornoMovimento, dateDaSistemare } from "../../shared/movimenti.ts";
+import { filtraMovimenti, giornoMovimento, giornoOrdine, dateDaSistemare } from "../../shared/movimenti.ts";
 import { statoCaricamenti, caricamentiDuranteLettura } from "../../shared/reportSettimanali.ts";
 
 // Sotto questo numero di giorni coperti dai dati la proiezione di fine mese non
@@ -44,20 +44,61 @@ function periodoAlert(a) {
   return MESI.includes(mese) && anno ? { mese, anno } : null;
 }
 
+// Gli ordini distinti di un elenco di righe: lo stesso ordine puo' avere piu'
+// righe (le quote di un formulario ripartito), e chi conta righe dava un numero
+// diverso dagli elenchi e dalle giacenze, che contano ordini. La chiave e' l'id
+// dell'ordine, il numero del formulario quando l'id manca; una riga che non ha
+// ne' l'uno ne' l'altro conta per se'.
+function ordiniDistinti(righe) {
+  const chiavi = new Set();
+  let senzaChiave = 0;
+  for (const r of righe || []) {
+    const id = String((r && r.id_ordine) || '').trim().toUpperCase();
+    const fir = String((r && r.numero_fir) || '').trim().toUpperCase();
+    chiavi.add(id ? `ID:${id}` : fir ? `FIR:${fir}` : `RIGA:${senzaChiave++}`);
+  }
+  return chiavi;
+}
+
+// Il periodo a cui si attribuisce un terminato SENZA fine trasporto: l'anno del
+// target, piu' dicembre dell'anno prima per i ritiri di fine anno. Non avendo la
+// fine trasporto l'unica data che ha e' l'immissione (giornoOrdine, come in
+// giacenze e qualifica): non e' il suo periodo vero, e' l'unico appiglio per non
+// portare ordini di qualunque anno dentro l'alert di un mese solo.
+const nelPeriodoDelTarget = (r, anno) => {
+  const g = giornoOrdine(r);
+  if (!g) return false;
+  const a = Number(g.slice(0, 4));
+  return a === anno || (a === anno - 1 && g.slice(5, 7) === '12');
+};
+const periodoSenzaFine = (anno) => `immessi nel ${anno} o a dicembre ${anno - 1}`;
+
 // Regola 1: i ritiri terminati senza fine trasporto sono esclusi dal raccolto di
 // ogni mese. Chi legge un "non raggiunto" deve sapere che puo' dipendere da
 // ritiri fatti ma senza data sul portale. Anche le altre date obbligatorie di un
 // formulario terminato - immissione e inizio trasporto - si segnalano quando
 // mancano o non tornano (regola dell'utente, 22/09/2026): quei ritiri sono nel
 // raccolto del mese, ma vanno corretti.
+//
+// Un alert parla di UN mese: il suo conto dei senza fine trasporto e' quello del
+// periodo del target, e il testo lo dice. Quelli di altri periodi non spariscono
+// - si contano a parte e si dice dove si vedono - ma non gonfiano un alert che
+// non li riguarda (prima un ordine del 2024 restava dentro l'alert di settembre
+// 2026 per sempre, e a ogni caricamento ne riscriveva la descrizione).
 function testoDateDaSistemare(item) {
   const n = item.senza_fine_trasporto || 0;
+  const fuori = item.senza_fine_altri_periodi || 0;
   const altri = item.date_da_sistemare_nel_mese || 0;
   let testo = '';
   if (n) {
     testo += n === 1
-      ? ` Un ritiro terminato del raccoglitore in ${item.regione} non ha la fine trasporto: è escluso dal raccolto di ogni mese finché la data non viene inserita sul portale.`
-      : ` ${n} ritiri terminati del raccoglitore in ${item.regione} non hanno la fine trasporto: sono esclusi dal raccolto di ogni mese finché la data non viene inserita sul portale.`;
+      ? ` Un ordine terminato del raccoglitore in ${item.regione}, immesso nel ${item.anno} o a dicembre ${item.anno - 1}, non ha la fine trasporto: è escluso dal raccolto di ogni mese finché la data non viene inserita sul portale.`
+      : ` ${n} ordini terminati del raccoglitore in ${item.regione}, ${periodoSenzaFine(item.anno)}, non hanno la fine trasporto: sono esclusi dal raccolto di ogni mese finché la data non viene inserita sul portale.`;
+  }
+  if (fuori) {
+    testo += fuori === 1
+      ? ` Un altro ordine senza fine trasporto dello stesso raccoglitore è di un altro periodo, o non ha nemmeno l'immissione: si vede in Terminati Rete e non conta in questo alert.`
+      : ` Altri ${fuori} ordini senza fine trasporto dello stesso raccoglitore sono di altri periodi, o non hanno nemmeno l'immissione: si vedono in Terminati Rete e non contano in questo alert.`;
   }
   if (altri) {
     const dettaglio = item.testo_date_nel_mese ? ` (${item.testo_date_nel_mese})` : '';
@@ -147,8 +188,10 @@ export default async function(req) {
       return terminate;
     };
     // I terminati senza fine trasporto non hanno un mese: restano fuori dal
-    // raccolto di tutti, e si contano (regola 1). Di qualunque anno, anche senza
-    // immissione: attribuirli al mese di immissione sarebbe un ripiego.
+    // raccolto di tutti, e si contano (regola 1). Si leggono tutti, di qualunque
+    // anno; al mese non si attribuiscono mai - sarebbe un ripiego - ma nell'alert
+    // di un target si contano solo quelli del suo periodo (nelPeriodoDelTarget).
+    // Gli altri restano visibili: il totale di qui e l'elenco di Terminati Rete.
     let senzaFine = null;
     const terminatiSenzaFine = async () => senzaFine || (senzaFine = (await primarieTerminate()).filter(r => !giornoMovimento(r)));
     // Raccoglitore e regione di un ritiro, per il raccolto e per i senza fine trasporto.
@@ -195,12 +238,15 @@ export default async function(req) {
         raccoltoByKey[key].raccolto += peso;
       };
       rete.forEach(addRaccolto);
+      // I senza fine trasporto del raccoglitore, divisi per periodo: quelli del
+      // target (nelPeriodoDelTarget) e gli altri, che si dicono a parte invece
+      // di entrare nel conto di un mese che non li riguarda.
       const senzaFineByKey = {};
       for (const r of await terminatiSenzaFine()) {
         const { raccoglitore, regione } = raccRegione(r);
         const key = `${raccoglitore}|||${regione}`;
-        if (!senzaFineByKey[key]) senzaFineByKey[key] = { raccoglitore, regione, quanti: 0 };
-        senzaFineByKey[key].quanti++;
+        if (!senzaFineByKey[key]) senzaFineByKey[key] = { raccoglitore, regione, nel_periodo: [], altri_periodi: [] };
+        senzaFineByKey[key][nelPeriodoDelTarget(r, anno) ? 'nel_periodo' : 'altri_periodi'].push(r);
       }
       // I ritiri del mese, contati nel raccolto, con un'altra data obbligatoria che
       // manca o non torna (22/09/2026): per raccoglitore e regione, come i senza
@@ -243,10 +289,13 @@ export default async function(req) {
         const raccolto = Object.values(raccoltoByKey)
           .filter(x => x.regione === regione && targetDelPortale(nomiRegione, x.raccoglitore) === racc)
           .reduce((s, x) => s + x.raccolto, 0);
-        // i suoi ritiri terminati senza fine trasporto, con lo stesso abbinamento dei nomi
-        const senzaFineTarget = Object.values(senzaFineByKey)
-          .filter(x => x.regione === regione && targetDelPortale(nomiRegione, x.raccoglitore) === racc)
-          .reduce((s, x) => s + x.quanti, 0);
+        // i suoi ordini terminati senza fine trasporto, con lo stesso abbinamento
+        // dei nomi: quelli del periodo del target e, a parte, quelli di altri
+        // periodi (o senza nemmeno l'immissione, che non si possono collocare)
+        const suoiSenzaFine = Object.values(senzaFineByKey)
+          .filter(x => x.regione === regione && targetDelPortale(nomiRegione, x.raccoglitore) === racc);
+        const senzaFineTarget = ordiniDistinti(suoiSenzaFine.flatMap(x => x.nel_periodo)).size;
+        const senzaFineAltriPeriodi = ordiniDistinti(suoiSenzaFine.flatMap(x => x.altri_periodi)).size;
         const dateNelMese = riepilogoDate(Object.values(dateNelMeseByKey)
           .filter(x => x.regione === regione && targetDelPortale(nomiRegione, x.raccoglitore) === racc)
           .flatMap(x => x.righe), 0);
@@ -277,6 +326,8 @@ export default async function(req) {
           proiezione_affidabile: proiezioneAffidabile,
           giorni_in_mese: chiuso ? null : giorniInMese,
           senza_fine_trasporto: senzaFineTarget,
+          senza_fine_periodo: periodoSenzaFine(anno),
+          senza_fine_altri_periodi: senzaFineAltriPeriodi,
           date_da_sistemare_nel_mese: dateNelMese.totale,
           testo_date_nel_mese: dateNelMese.testo,
         };
@@ -454,9 +505,10 @@ export default async function(req) {
       alerts_chiusi: alertsChiusi,
       mesi_rivalutati: valutazioni.slice(1).map(v => `${v.mese} ${v.anno}`),
       alert_rimandati: rimandato || undefined,
-      // primarie di rete terminate senza fine trasporto, di qualunque anno: escluse
-      // dal raccolto di ogni mese (per raccoglitore, in ogni voce di missed e at_risk)
-      senza_fine_trasporto: senzaFine ? senzaFine.length : undefined,
+      // ordini di rete terminati senza fine trasporto, di qualunque anno: esclusi
+      // dal raccolto di ogni mese. Nelle voci di missed e at_risk il conto e' per
+      // raccoglitore e per il periodo del target, che il testo dell'alert dice.
+      senza_fine_trasporto: senzaFine ? ordiniDistinti(senzaFine).size : undefined,
       // le date da sistemare della rete per il mese richiesto: quei senza fine
       // trasporto e i ritiri del mese con un'altra data che manca o non torna
       date_da_sistemare: principale.dateDaSistemare || undefined,

@@ -37,15 +37,22 @@ const SENZA_IMMISSIONE = 'MANCA IMMISSIONE';
 const DATE_INCOERENTI = 'DATE INCOERENTI';
 const SEGNALAZIONI = new Set([SENZA_FINE, SENZA_IMMISSIONE, DATE_INCOERENTI]);
 
+// Non e' una segnalazione: l'ordine e' stato registrato a portale dopo il ritiro
+// e non c'e' un tempo da misurare. Si dice in grigio, non in ambra, e non c'e'
+// niente da correggere nel formulario.
+const IMMISSIONE_DOPO_RITIRO = 'IMMESSO DOPO IL RITIRO';
+const NOTA_IMMISSIONE_DOPO = "l'ordine è stato registrato a portale dopo il ritiro: non si misura";
+
 // Come computeSlaMetrics (primarieReteAnalytics.ts): un terminato con le date
 // incoerenti non si misura. L'unica incoerenza e' una fine trasporto prima
-// dell'inizio; un ritiro finito prima dell'immissione si misura e vale zero
-// giorni, perche' a portale l'immissione e' la registrazione dell'ordine e
-// arriva spesso dopo il ritiro (movimenti.js, 22/09/2026).
+// dell'inizio; un ritiro finito prima dell'immissione non e' un errore, ma non
+// si misura nemmeno lui - contarlo zero giorni e "OK" avrebbe detto un tempo che
+// nessuno ha misurato (movimenti.js, 22/09/2026).
 const incoerente = (r) => dateIncoerenti(r).length > 0;
 
 function esitoTempi(r, tempi, fine) {
   if (eTerminato(r) && fine && incoerente(r)) return DATE_INCOERENTI;
+  if (tempi && tempi.prima_dell_immissione) return IMMISSIONE_DOPO_RITIRO;
   if (tempi && tempi.esito) return tempi.esito;
   if (!eTerminato(r)) return null;
   if (!fine) return SENZA_FINE;
@@ -68,7 +75,7 @@ export default function PrimarieReteTable({ records, loading }) {
     const tempi = tempiRaccolta(r);
     const fine = giornoMovimento(r);
     const senzaPeriodo = eTerminato(r) && !fine;
-    const nonMisurato = eTerminato(r) && incoerente(r);
+    const nonMisurato = eTerminato(r) && (incoerente(r) || !!(tempi && tempi.prima_dell_immissione));
     return {
       ...r,
       giorno_ordine: senzaPeriodo ? null : giornoOrdine(r) || null,
@@ -114,8 +121,8 @@ export default function PrimarieReteTable({ records, loading }) {
                 return (
                   <td
                     key={col.key}
-                    title={isTempi && SEGNALAZIONI.has(val) && r.date_da_sistemare ? r.date_da_sistemare : undefined}
-                    className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''} ${isTempi && val === 'DOPO SCADENZA' ? 'text-red-600 font-medium' : ''} ${isTempi && val === 'OK' ? 'text-green-600 font-medium' : ''} ${isTempi && SEGNALAZIONI.has(val) ? 'text-amber-600 font-medium' : ''}`}
+                    title={isTempi && val === IMMISSIONE_DOPO_RITIRO ? NOTA_IMMISSIONE_DOPO : (isTempi && SEGNALAZIONI.has(val) && r.date_da_sistemare ? r.date_da_sistemare : undefined)}
+                    className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''} ${isTempi && val === 'DOPO SCADENZA' ? 'text-red-600 font-medium' : ''} ${isTempi && val === 'OK' ? 'text-green-600 font-medium' : ''} ${isTempi && SEGNALAZIONI.has(val) ? 'text-amber-600 font-medium' : ''} ${isTempi && val === IMMISSIONE_DOPO_RITIRO ? 'text-muted-foreground' : ''}`}
                   >
                     {col.key === 'id_ordine' && <SegnoDate testo={r.date_da_sistemare} />}
                     {val ?? ''}

@@ -14,7 +14,7 @@ export const DATE_PRIMARIE = new Set(['ordine_immesso_il', 'trasporto_iniziato_i
  * La data di un ritiro, da qualunque forma esca l'export del portale.
  * Il foglio si legge con cellDates, che restituisce un oggetto Date solo per le
  * celle con formato data: la stessa colonna esportata come testo ("13/09/2026")
- * o come numero generico (seriale 45905,54) arrivava come stringa e finiva in
+ * o come numero generico (seriale 46278,54) arrivava come stringa e finiva in
  * archivio cosi' com'era, dove giornoRoma la legge vuota. Bastava un export
  * fatto in modo diverso perche' tutte e tre le date obbligatorie risultassero
  * mancanti su ogni riga del caricamento. Una data che resta illeggibile torna

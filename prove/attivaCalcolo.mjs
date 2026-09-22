@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { calcolaRigheAttiva, riconciliaAttiva, documentoValido } from '../base44/shared/attivaCalcolo.ts';
 import { TARIFFA_BASE_EXTRA_RACCOLTA, tariffaBaseExtraRaccolta } from '../base44/shared/ecotyreTariffe.ts';
 import { TARIFFA_BASE_EXTRA_RACCOLTA as BASE_PAGINA, prezzoAttivoExtra as prezzoAttivoPagina } from '../src/lib/extraRaccoltaCalc.js';
+import { oggiRoma } from '../base44/shared/giornoItaliano.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -130,6 +131,23 @@ verifica('gennaio e febbraio 2026: si segnala quello immesso a dicembre, e il te
   && !!feb26 && feb26.quanti === 1 && feb26.ordini[0].ordine === 'ET41', JSON.stringify([gen26, feb26]));
 verifica('marzo 2026: oltre i 60 giorni non si ripete; quello di ottobre e quello del 2024 mai nel 2026', !mar26 && !gen26.ordini.some(o => o.ordine === 'ET42' || o.ordine === 'ET43'), JSON.stringify(mar26));
 verifica('...e resta fuori dalla fattura di ogni mese', ['Dicembre', 'Gennaio'].every((m, i) => calcolaRigheAttiva({ reteAll: aCavallo, aciAll: [], extraAll: [], fornitori, tariffe, anno: 2025 + i, mese: m }).righe.RETE.length === 0));
+
+// La finestra di chi non ha la fine trasporto (revisione del 23/09/2026). Prima
+// bastava che mancasse l'immissione perche' l'ordine fosse segnalato in ogni
+// mese di OGNI anno, per sempre. E l'inizio del trasporto puo' venire prima
+// dell'immissione, che a portale e' la registrazione dell'ordine: la finestra si
+// apre sulla prima data che l'ordine ha, non sull'immissione.
+const dateDi = (righe, anno, mese) => calcolaRigheAttiva({ reteAll: righe, aciAll: [], extraAll: [], fornitori, tariffe, anno, mese }).anomalie.find(a => a.tipo === 'date_senza_fine' && a.tipologia === 'RETE');
+const nessunaData = [{ ...base, id: 'n1', id_ordine: 'ET51', numero_fir: 'FN1', classe: 'A', peso_effettivo: 600 }];
+const annoInCorso = Number(oggiRoma().slice(0, 4));
+verifica('senza nessuna data: si segnala nei mesi dell\'anno in corso', !!dateDi(nessunaData, annoInCorso, 'Gennaio') && !!dateDi(nessunaData, annoInCorso, 'Dicembre'));
+verifica('...ma non in ogni mese di ogni anno per sempre', !dateDi(nessunaData, annoInCorso - 1, 'Giugno') && !dateDi(nessunaData, annoInCorso + 1, 'Giugno') && !dateDi(nessunaData, annoInCorso + 4, 'Gennaio'));
+const soloInizio = [{ ...base, id: 'n2', id_ordine: 'ET52', numero_fir: 'FN2', classe: 'A', peso_effettivo: 400, trasporto_iniziato_il: '2026-11-20T09:00:00.000Z' }];
+verifica('senza immissione ma con l\'inizio trasporto: la finestra parte da li\'', !dateDi(soloInizio, 2026, 'Ottobre') && !!dateDi(soloInizio, 2026, 'Novembre') && !!dateDi(soloInizio, 2027, 'Gennaio') && !dateDi(soloInizio, 2027, 'Febbraio'));
+// partito il 28 maggio, ordine registrato a portale il 5 giugno: puo' essere
+// finito a maggio, e a maggio va segnalato
+const partitoPrimaDellImmissione = [{ ...base, id: 'n3', id_ordine: 'ET53', numero_fir: 'FN3', classe: 'A', peso_effettivo: 300, ordine_immesso_il: '2026-06-05T09:00:00.000Z', trasporto_iniziato_il: '2026-05-28T09:00:00.000Z' }];
+verifica('partito prima di essere immesso: si segnala dal mese della partenza', !!dateDi(partitoPrimaDellImmissione, 2026, 'Maggio') && !!dateDi(partitoPrimaDellImmissione, 2026, 'Giugno') && !dateDi(partitoPrimaDellImmissione, 2026, 'Aprile'));
 
 const l = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: 2026, mese: 'Luglio' });
 console.log('LUGLIO');

@@ -575,7 +575,13 @@ export default async function(req) {
     }
 
     fase = 'scrittura del blocco ' + ((blocco || 0) + 1);
-    let records = righe.map(r => mappaRiga(r, config.columns, primarie));
+    // Le colonne del blocco sono le chiavi vere delle righe lette nel browser:
+    // la firma del file le accetta normalizzate, cercarle col nome esatto di
+    // SHEET_MAP lasciava fuori un'intestazione con uno spazio in coda
+    // (fileSignatures.mappaColonne). Una riga puo' non portare le celle vuote,
+    // quindi si guardano le intestazioni di tutto il blocco.
+    const colonne = mappaColonne(config.columns, [...new Set(righe.flatMap(r => Object.keys(r || {})))]);
+    let records = righe.map(r => mappaRiga(r, colonne, primarie));
     if (primarie) {
       // Stesso arricchimento e stessa suddivisione dell'importazione lato server.
       records = enrichRecords(records.filter(r => r.id_ordine), 'PrimariaRete');

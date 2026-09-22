@@ -164,8 +164,10 @@ const istanteGiorno = (g) => Date.UTC(+g.slice(0, 4), +g.slice(5, 7) - 1, +g.sli
  * prima_dell_immissione: true. Non e' un dato sporco: a portale l'immissione e'
  * la registrazione dell'ordine, e il consorzio la fa spesso dopo che il ritiro
  * e' avvenuto (426 primarie di rete su 9.796, 99 nel 2026; misurato il
- * 22/09/2026). Il raccoglitore non ha tardato di certo: tenerle fuori dalla
- * misura le faceva comparire fra i "non misurati" come se ci fosse un errore.
+ * 22/09/2026). Il raccoglitore non ha tardato di certo, e l'esito non dice un
+ * ritardo; ma un tempo da misurare non c'e', e chi fa medie e percentuali guarda
+ * prima_dell_immissione e lo tiene fuori, in una voce a parte che dice che non
+ * c'e' niente da correggere (computeSlaMetrics).
  */
 export function tempiRaccolta(r) {
   const immesso = giornoRoma(r && r.ordine_immesso_il);
