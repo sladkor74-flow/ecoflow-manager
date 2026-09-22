@@ -28,10 +28,13 @@ export default function GiacenzeKpi({ totali }) {
   ];
   // I formulari terminati senza tutte le date obbligatorie (regola dell'utente,
   // 22/09/2026): la rete in grande, ACI ed extra raccolta a parte, mai sommati.
+  // Le terziarie non sono un canale - partono verso le cementerie e la giacenza
+  // di PFU non la toccano - e hanno la loro voce: contate nella rete facevano
+  // dire alla rete un numero che non era il suo.
   const date = totali.date_da_sistemare;
   if (date) {
     const d = (c) => date[c] || { n: 0, senza_fine: 0 };
-    const qualcosa = ['RETE', 'ACI', 'EXTRA_RACCOLTA'].some(c => d(c).n > 0);
+    const qualcosa = ['RETE', 'ACI', 'EXTRA_RACCOLTA', 'TERZIARIE'].some(c => d(c).n > 0);
     cards.push({
       label: 'Formulari RETE con date da sistemare',
       value: fmt(d('RETE').n, 0),
@@ -39,7 +42,7 @@ export default function GiacenzeKpi({ totali }) {
       icon: CalendarX,
       color: qualcosa ? 'text-amber-600' : 'text-success',
       subtitle: qualcosa
-        ? `${d('RETE').senza_fine} senza fine trasporto, fuori dai periodi · ACI ${d('ACI').n} · Extra ${d('EXTRA_RACCOLTA').n}, a parte`
+        ? `${d('RETE').senza_fine} senza fine trasporto, fuori dai periodi · ACI ${d('ACI').n} · Extra ${d('EXTRA_RACCOLTA').n} · Terziarie ${d('TERZIARIE').n}, a parte`
         : 'immissione, inizio e fine trasporto ci sono tutte',
     });
   }

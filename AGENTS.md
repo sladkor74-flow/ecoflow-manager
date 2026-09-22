@@ -420,7 +420,12 @@ obbligatorie nei formulari, se non ci sono vanno segnalate e questo vale sempre
 dove ci sono ordini terminati non solo nei report settimanali». La regola sta in
 `base44/shared/movimenti.ts` (specchio `src/lib/movimenti.js`):
 `DATE_OBBLIGATORIE`, `dateMancanti`, `dateIncoerenti`, `dateDaSistemare`,
-`testoDate`. Non si riscrive. Un terminato senza fine trasporto resta fuori da
+`testoDate`. Non si riscrive. Quanti sono si conta in **ordini distinti**, mai in
+righe (`chiaveOrdine`, `ordiniDaSistemare`, `mancantiOrdine`, `incoerentiOrdine`,
+`testoOrdine`, `ordineSenzaFine`, nello stesso file): lo stesso ordine sta in
+archivio con piu' righe - una per classe o per prodotto - e contarle tutte
+faceva uscire due numeri diversi per lo stesso insieme (23/09/2026).
+Un terminato senza fine trasporto resta fuori da
 ogni periodo, ma si segnala sempre dicendo quali date mancano; uno con la fine
 trasporto ma senza un'altra data, o con date nell'ordine sbagliato, si conta e si
 segnala lo stesso. Dove si vede:
@@ -429,8 +434,14 @@ segnala lo stesso. Dove si vede:
   sulla riga, avviso per canale, filtro "date da sistemare", colonna negli Excel
   (componenti in `src/components/primarie-rete/DateDaSistemare.jsx`);
 - **conti**: le funzioni restituiscono `date_da_sistemare` per canale
-  (`riepilogoDate` in `base44/shared/raccoltoCalculator.ts`), mostrato in
-  Dashboard, matrice province, report mensile e settimanale, Target & Status;
+  (`riepilogoDate` e `riepilogoDateVista` in
+  `base44/shared/raccoltoCalculator.ts`: `{ totale, senza_fine_trasporto,
+  mancanti, incoerenti, esempi, testo }`), mostrato in Dashboard, matrice
+  province, report mensile, SLA e Target & Status. I report settimanali, le
+  rotte, gli alert ed EcoTyna usano `riepilogoVociDate` di
+  `base44/shared/reportSettimanali.ts`, che conta gli stessi ordini ma risponde
+  `{ ordini, senza_fine, esempi }`: due nomi diversi perche' chi le mostra ne
+  legge una sola forma;
 - **report settimanali**: un formulario registrato senza una data obbligatoria o
   con date incoerenti e' un'**anomalia** del suo canale e conta nel verdetto
   (`conformitaPerCanale`), non una rettifica a nostra cura;

@@ -168,6 +168,20 @@ verifica('per canale: nessun peso che li somma', !('senza_fine_kg' in cv) && !JS
 const avvV = avvisoSenzaFine(gv, 'quadratura');
 verifica('l\'avviso li scrive separati', avvV.includes('1 ordine arrivato (10.000 kg)') && avvV.includes('1 terziaria partita (25.000 kg)') && !avvV.includes('35.000'), avvV);
 
+console.log('LE TERZIARIE NON SONO UN CANALE');
+// Nelle Giacenze (calcolaGiacenze) le terziarie hanno il gruppo TERZIARIE: sono
+// uscite verso le cementerie, non un movimento di canale, e contate nella rete
+// facevano dire alla rete un numero che non era il suo.
+const terz = formulariDaSistemare({ anno: 2026 });
+terz.segna({ ...completo, id_ordine: 'AR2', trasporto_finito_il: null, peso_effettivo: 10000 }, arrivo('Gatim'));
+terz.segna({ ...completo, id_ordine: 'TER2', trasporto_finito_il: null, peso_effettivo: 25000 }, { tipo: 'terziaria', canale: 'TERZIARIE', ruolo: 'imp', verso: 'partenza', sito: 'Gatim', controparte: 'Cementeria' });
+const perT = terz.perCanale();
+verifica('la rete conta la sola rete', perT.RETE.n === 1 && perT.RETE.partenze_senza_fine === 0, JSON.stringify(perT.RETE));
+verifica('le terziarie hanno il loro conteggio', perT.TERZIARIE.n === 1 && perT.TERZIARIE.partenze_senza_fine === 1 && perT.TERZIARIE.partenze_senza_fine_kg === 25000, JSON.stringify(perT.TERZIARIE));
+const gT = terz.gruppi().find(x => x.canale === 'TERZIARIE');
+verifica('e un gruppo tutto loro sul soggetto', !!gT && gT.sito === 'Gatim' && gT.n === 1 && gT.arrivi === 0, JSON.stringify(gT && { n: gT.n, arrivi: gT.arrivi }));
+verifica('l\'avviso resta quello delle terziarie', avvisoSenzaFine(gT, 'giacenze').includes('terziaria resta fuori dalle uscite'), avvisoSenzaFine(gT, 'giacenze'));
+
 console.log('LA FOTOGRAFIA SUL GIORNO DI ARRIVO (collocaFotografia)');
 // Il blocco dei non dichiarati di riepilogoDichiarazioni, estratto per provarlo.
 // Da qui escono portale_fine_mese (la pratica di Irigom) e le caselle del Riepilogo.

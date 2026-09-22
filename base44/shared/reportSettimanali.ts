@@ -26,7 +26,7 @@ import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { unisciQuote, ticketDi } from "./formulari.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
-import { giornoMovimento, eTerminato, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate } from "./movimenti.ts";
+import { giornoMovimento, eTerminato, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate, ordiniDaSistemare, mancantiOrdine, incoerentiOrdine, testoOrdine } from "./movimenti.ts";
 
 export const GIORNI_CONSERVAZIONE = 40;
 
@@ -59,14 +59,41 @@ export function voceDate(r) {
 }
 
 /**
- * Gli ordini terminati di un elenco con le date da sistemare, di qualunque
- * anno: quanti ordini, quanti senza fine trasporto (quelli che nessun periodo
- * conta) e i primi, con ID ordine, formulario e date che mancano. Chi chiama
- * passa le righe di un modulo e di un canale solo: rete, ACI ed extra raccolta
- * non si contano insieme nemmeno qui. null se non ce ne sono.
+ * Un ORDINE terminato con le date da sistemare, dalle sue righe
+ * (ordiniDaSistemare di movimenti.ts): come voceDate, ma su tutte le righe
+ * dell'ordine - le date che mancano a una qualunque di esse - piu' quante righe
+ * sono.
  */
-export function riepilogoDate(righe, quanti = 10) {
-  const voci = (righe || []).map(voceDate).filter(Boolean)
+function voceOrdineDate(o) {
+  const r = o.righe[0];
+  const mancanti = mancantiOrdine(o);
+  const senzaFine = mancanti.includes('fine trasporto');
+  return {
+    id_ordine: String(r.id_ordine || '').trim(),
+    numero_fir: String(r.numero_fir || '').trim(),
+    mancanti,
+    incoerenti: incoerentiOrdine(o),
+    date: testoOrdine(o),
+    senza_fine: senzaFine,
+    giorno: senzaFine ? '' : giornoMovimento(r),
+    righe: o.righe.length,
+  };
+}
+
+/**
+ * Gli ordini terminati di un elenco con le date da sistemare, di qualunque
+ * anno: quanti ORDINI distinti (mai righe: lo stesso ordine sta in archivio con
+ * piu' righe), quanti senza fine trasporto (quelli che nessun periodo conta) e i
+ * primi, con ID ordine, formulario e date che mancano. Chi chiama passa le righe
+ * di un modulo e di un canale solo: rete, ACI ed extra raccolta non si contano
+ * insieme nemmeno qui. null se non ce ne sono.
+ *
+ * Si chiamava riepilogoDate come quella di raccoltoCalculator.ts, che pero'
+ * restituisce un'altra forma ({ totale, senza_fine_trasporto, testo, esempi }):
+ * chi le mostra ne legge una sola, e con l'altra spariva in silenzio.
+ */
+export function riepilogoVociDate(righe, quanti = 10) {
+  const voci = ordiniDaSistemare(righe).map(voceOrdineDate)
     .sort((a, b) => Number(b.senza_fine) - Number(a.senza_fine) || a.id_ordine.localeCompare(b.id_ordine) || a.numero_fir.localeCompare(b.numero_fir));
   if (!voci.length) return null;
   return {

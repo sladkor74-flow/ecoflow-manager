@@ -7,7 +7,7 @@
 // di AGENTS.md; altrimenti va tolto.
 //
 // Modulo condiviso per il calcolo delle pivot analitiche PFU.
-import { PROV_TO_REGION, MESI, riepilogoDate } from "./raccoltoCalculator.ts";
+import { PROV_TO_REGION, MESI, riepilogoDateVista } from "./raccoltoCalculator.ts";
 import { getMeseFromDate, getSettimanaFromDate, getAnnoFromDate, getRegioneFromProvincia, getClasseFromProdotto } from "./dataEnrichment.ts";
 import { matchesFilter } from "./multiFilter.ts";
 import { fetchAll } from "./fetchAll.ts";
@@ -77,10 +77,10 @@ function getDataFineTrasporto(r) {
 }
 
 // I movimenti che entrano nelle pivot: terminati con una fine trasporto
-// leggibile. Gli altri si contano per dirli, non si collocano in un mese. Anche
-// le altre date obbligatorie di un terminato che mancano o non tornano si
-// contano (regola dell'utente, 22/09/2026), in date_da_sistemare: qui su tutto
-// l'archivio passato, perche' questo modulo non taglia ancora il periodo.
+// leggibile. Gli altri si contano per dirli, non si collocano in un mese.
+// Le date obbligatorie da sistemare (regola dell'utente, 22/09/2026) non si
+// contano qui: si contano in computeAllPivots, dopo i filtri di periodo, ed e'
+// per questo che restano accanto ai contati anche tutte le righe di partenza.
 function movimentiContati(righe) {
   const contati = [];
   let senzaFine = 0;
@@ -94,7 +94,7 @@ function movimentiContati(righe) {
     }
     contati.push(r);
   }
-  return { contati, senza_fine_trasporto: senzaFine, esempi: esempi.filter(Boolean), date_da_sistemare: riepilogoDate(righe) };
+  return { tutti: righe, contati, senza_fine_trasporto: senzaFine, esempi: esempi.filter(Boolean) };
 }
 
 function getDataImmissione(r) {
@@ -254,12 +254,18 @@ export async function computeAllPivots(base44, filters, pivotKeys = null) {
     secondarie_rete: { quanti: secReteM.senza_fine_trasporto, esempi: secReteM.esempi },
     secondarie_aci: { quanti: secAciM.senza_fine_trasporto, esempi: secAciM.esempi },
   };
-  // un canale per volta, come i senza fine trasporto qui sopra
+  // Un canale per volta, come i senza fine trasporto qui sopra, e sul periodo
+  // che si sta guardando: riepilogoDateVista, lo stesso conto di dashboard,
+  // report mensile e matrice. Si contavano su tutto l'archivio del canale, di
+  // ogni anno, mentre le pivot accanto mostrano il periodo filtrato: due
+  // riquadri della stessa pagina dicevano numeri diversi con la stessa frase.
+  // I terminati senza fine trasporto restano di qualunque anno: nessun filtro di
+  // periodo li prende, e vanno detti sempre.
   result.dateDaSistemare = {
-    rete: reteM.date_da_sistemare,
-    aci: aciM.date_da_sistemare,
-    secondarie_rete: secReteM.date_da_sistemare,
-    secondarie_aci: secAciM.date_da_sistemare,
+    rete: riepilogoDateVista(reteM.tutti, reteF),
+    aci: riepilogoDateVista(aciM.tutti, aciF),
+    secondarie_rete: riepilogoDateVista(secReteM.tutti, secReteF),
+    secondarie_aci: riepilogoDateVista(secAciM.tutti, secAciF),
   };
 
   if (shouldCompute('A')) {

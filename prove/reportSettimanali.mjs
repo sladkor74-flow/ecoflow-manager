@@ -4,7 +4,7 @@
 // una, o con date incoerenti, e' un'anomalia del suo canale; senza fine
 // trasporto resta fuori dalla quadratura ma si segnala. npm run prove
 import { readFileSync } from 'node:fs';
-import { caricaMovimenti, verificaReport, conformitaPerCanale, canaleDelVerdetto, normalizzaRigheReport, riepilogoDate, datePerCanale, messaggiDate } from '../base44/shared/reportSettimanali.ts';
+import { caricaMovimenti, verificaReport, conformitaPerCanale, canaleDelVerdetto, normalizzaRigheReport, riepilogoVociDate, datePerCanale, messaggiDate } from '../base44/shared/reportSettimanali.ts';
 import { ricontrollaVerifiche } from '../base44/shared/esitoVerifica.ts';
 
 let ok = 0, ko = 0;
@@ -38,9 +38,16 @@ console.log('I TERMINATI CON LE DATE DA SISTEMARE');
 verifica('quattro ordini terminati da sistemare, il cancellato no', dati.date_da_sistemare.length === 4 && !dati.date_da_sistemare.some(v => v.id_ordine === 'ET6'), JSON.stringify(dati.date_da_sistemare.map(v => v.id_ordine)));
 const gruppi = datePerCanale(dati.date_da_sistemare);
 verifica('per canale e archivio: rete primaria, 4 ordini di cui 1 senza fine, il senza fine per primo', gruppi.length === 1 && gruppi[0].canale === 'rete' && gruppi[0].n === 4 && gruppi[0].senza_fine === 1 && gruppi[0].esempi[0].ordine === 'ET3', JSON.stringify(gruppi));
-const rd = riepilogoDate(dati.archivi.PrimariaRete);
-verifica('riepilogoDate sulle righe grezze: 4 ordini, 1 senza fine, con le date che mancano', rd && rd.ordini === 4 && rd.senza_fine === 1 && rd.esempi[0].date === 'manca la data di fine trasporto', JSON.stringify(rd));
-verifica('niente da sistemare: null', riepilogoDate([primaria('X', 'F', 1)]) === null);
+const rd = riepilogoVociDate(dati.archivi.PrimariaRete);
+verifica('riepilogoVociDate sulle righe grezze: 4 ordini, 1 senza fine, con le date che mancano', rd && rd.ordini === 4 && rd.senza_fine === 1 && rd.esempi[0].date === 'manca la data di fine trasporto', JSON.stringify(rd));
+verifica('niente da sistemare: null', riepilogoVociDate([primaria('X', 'F', 1)]) === null);
+// lo stesso ordine con due formulari: un ordine solo, con le date di tutte e due
+const rdDoppio = riepilogoVociDate([
+  primaria('ET7', 'RGYTR000007AA', 1000, { trasporto_finito_il: null }),
+  primaria('ET7', 'RGYTR000008AA', 500, { trasporto_iniziato_il: null }),
+]);
+verifica('due righe dello stesso ordine sono un ordine solo, non due', rdDoppio.ordini === 1 && rdDoppio.senza_fine === 1 && rdDoppio.esempi[0].righe === 2
+  && rdDoppio.esempi[0].date === 'manca la data di fine trasporto; manca la data di inizio trasporto', JSON.stringify(rdDoppio));
 verifica('un formulario ripartito dice su quale ordine', messaggiDate([{ ordine: 'A', mancanti: ['inizio trasporto'], incoerenti: [] }, { ordine: 'B', mancanti: [], incoerenti: ['fine trasporto prima dell\'inizio'] }])[0].startsWith('Ordine A: Formulario registrato senza data di inizio trasporto'));
 
 console.log('LA VERIFICA DEL REPORT');

@@ -80,10 +80,14 @@ export default function MatriceProvince({ tipo = 'peso' }) {
   const nSenzaFine = dati ? Number(dati.senza_fine_trasporto) || 0 : 0;
   const riepDate = dati && dati.date_da_sistemare;
   const nDate = riepDate ? Number(riepDate.totale) || 0 : 0;
-  const altriDate = riepDate ? Math.max(0, nDate - (Number(riepDate.senza_fine_trasporto) || 0)) : 0;
+  // Dentro la frase delle date i due numeri vengono dallo stesso riepilogo, che
+  // conta ordini distinti: senza_fine_trasporto della risposta conta righe, e
+  // messo qui faceva "3 con date da sistemare: 4 esclusi da ogni mese".
+  const senzaFineDate = riepDate ? Number(riepDate.senza_fine_trasporto) || 0 : 0;
+  const altriDate = Math.max(0, nDate - senzaFineDate);
   const testoDateRete = nDate > 0
     ? `rete: ${formatIntero(nDate)} ${nDate === 1 ? 'ritiro terminato' : 'ritiri terminati'} con date da sistemare (${riepDate.testo})`
-      + [nSenzaFine > 0 ? `${formatIntero(nSenzaFine)} ${nSenzaFine === 1 ? 'escluso' : 'esclusi'} da ogni mese perché senza fine trasporto` : '',
+      + [senzaFineDate > 0 ? `${formatIntero(senzaFineDate)} ${senzaFineDate === 1 ? 'escluso' : 'esclusi'} da ogni mese perché senza fine trasporto` : '',
         altriDate > 0 ? `${formatIntero(altriDate)} ${altriDate === 1 ? 'contato' : 'contati'} nel mese della fine trasporto` : ''].filter(Boolean).map((t, i) => (i ? `, ${t}` : `: ${t}`)).join('')
     : '';
   const senzaProvincia = (dati && dati.senza_provincia) || { ritiri: 0, kg: 0 };

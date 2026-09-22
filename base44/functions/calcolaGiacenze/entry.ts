@@ -315,7 +315,8 @@ export default async function(req) {
     // "Le date immissione, inizio e fine trasporto sono obbligatorie nei
     // formulari, se non ci sono vanno segnalate". Un terminato a cui ne manca
     // una, o con le date in ordine sbagliato, si segnala sul soggetto a cui arriva
-    // o da cui parte, un canale per volta. Senza fine trasporto non e' nel
+    // o da cui parte, un canale per volta; le terziarie, che un canale non ce
+    // l'hanno, stanno in un gruppo loro (piu' sotto). Senza fine trasporto non e' nel
     // conferito, ne' fra i movimenti dopo la rilevazione, ne' fra i carichi
     // aggiunti alla fotografia (qui sopra lo escludono inYear, dopoLaRilevazione e
     // aggiungiNonNoto, che senza giorno non contano): se il portale lo conosce,
@@ -339,15 +340,22 @@ export default async function(req) {
       daSistemare.segna(r, { tipo: 'secondaria', canale, ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: r.stoccaggio });
       daSistemare.segna(r, { tipo: 'secondaria', canale, ruolo: 'stoc', verso: 'partenza', sito: r.stoccaggio, controparte: r.destinazione });
     }
-    // Le terziarie partono dall'impianto: la giacenza di PFU non la toccano, ma
-    // sono formulari terminati anche loro.
-    for (const r of terzAll) daSistemare.segna(r, { tipo: 'terziaria', canale: 'RETE', ruolo: 'imp', verso: 'partenza', sito: r.unita_locale_origine || r.ragione_sociale, controparte: r.destinazione });
-    const datePerRiga = new Map(); // ns|td -> gruppi di quel soggetto, uno per canale
+    // Le terziarie partono dall'impianto verso le cementerie: sono formulari
+    // terminati anche loro, ma NON sono un movimento di canale - la giacenza di
+    // PFU non la toccano. Segnate 'RETE' finivano nel numero della rete insieme a
+    // primarie e secondarie, in un riquadro che dichiara di non mescolare mai i
+    // canali: hanno un gruppo loro, e il numero della rete resta quello della rete.
+    const GRUPPO_TERZIARIE = 'TERZIARIE';
+    for (const r of terzAll) daSistemare.segna(r, { tipo: 'terziaria', canale: GRUPPO_TERZIARIE, ruolo: 'imp', verso: 'partenza', sito: r.unita_locale_origine || r.ragione_sociale, controparte: r.destinazione });
+    // I gruppi di un soggetto: prima i canali nel loro ordine, le terziarie in coda.
+    const ORDINE_GRUPPI = ['RETE', 'ACI', 'EXTRA_RACCOLTA', GRUPPO_TERZIARIE];
+    const datePerRiga = new Map(); // ns|td -> gruppi di quel soggetto, uno per canale piu' le terziarie
     for (const g of daSistemare.gruppi(portaleConosce)) {
       const k = g.chiave + '|' + g.ruolo;
       if (!datePerRiga.has(k)) datePerRiga.set(k, []);
       datePerRiga.get(k).push(g);
     }
+    for (const gruppi of datePerRiga.values()) gruppi.sort((a, b) => ORDINE_GRUPPI.indexOf(a.canale) - ORDINE_GRUPPI.indexOf(b.canale));
 
     // === 2. DICHIARATO (DichiarazioneTrattamento, per ns|td) ===
     // Anno di competenza: quello della fine del trasporto dell'ordine, mai della

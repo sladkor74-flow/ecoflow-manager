@@ -28,7 +28,7 @@ import { eAci } from "./canaleSecondaria.ts";
 import { eTerminato, giornoMovimento } from "./movimenti.ts";
 import { PIVOT_DEFS, calcolaPivot, MESI } from "./reportMensile.ts";
 import { caricaGestionale, caricamentiAperti, contaDistinti } from "./quadraturaFirDati.ts";
-import { intervalloSettimana, settimanaIso, statoCaricamenti, riepilogoDate, voceDate } from "./reportSettimanali.ts";
+import { intervalloSettimana, settimanaIso, statoCaricamenti, riepilogoVociDate, voceDate } from "./reportSettimanali.ts";
 import { situazioneGestionale, terminatiSenzaFine } from "./assistente.ts";
 import { listaOrdini, statoRichiesta, evasioneOrdini } from "./richiesteEct.ts";
 import { targetDelPortale } from "./targetRaccoglitori.ts";
@@ -69,8 +69,9 @@ function canaleChiesto(v) {
  * (regola dell'utente del 22/09/2026, "vanno segnalate e questo vale sempre dove
  * ci sono ordini terminati"). Prima si dicevano solo i terminati senza fine
  * trasporto; ora tutti quelli a cui una data manca o non torna, di qualunque
- * anno, con ID ordine, formulario e date che mancano (voceDate in
- * reportSettimanali.ts, sulle regole di movimenti.ts).
+ * anno, con ID ordine, formulario e date che mancano (riepilogoVociDate in
+ * reportSettimanali.ts, sulle regole di movimenti.ts). Sono ordini distinti,
+ * non righe: lo stesso ordine con piu' righe vale una volta.
  *
  * I senza fine trasporto restano a parte perche' sono i soli che il conto
  * scarta: non stanno in nessun mese, e scartati in silenzio fanno sembrare
@@ -84,7 +85,7 @@ function canaleChiesto(v) {
  * quale. null se sono tutte a posto.
  */
 function dateObbligatorie(righe, modulo = '') {
-  const riepilogo = riepilogoDate(righe, 10);
+  const riepilogo = riepilogoVociDate(righe, 10);
   if (!riepilogo) return null;
   const { esclusi, per_anno } = terminatiSenzaFine(righe);
   const kg = (xs) => xs.reduce((s, r) => s + peso(r), 0);

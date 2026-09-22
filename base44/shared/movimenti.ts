@@ -140,6 +140,48 @@ export function testoDate(r) {
   return parti.join('; ');
 }
 
+/**
+ * La chiave con cui si riconosce un ORDINE fra le righe di un archivio: l'ID
+ * dell'ordine, il numero del formulario quando l'ID manca. Lo stesso ordine sta
+ * in archivio con piu' righe - una per classe o per prodotto, le quote di un
+ * formulario ripartito - e chi contava righe dava un numero diverso dagli
+ * elenchi, che contano ordini. Una riga che non ha ne' l'uno ne' l'altro non si
+ * accorpa a nessuno e conta per se': la sua posizione nell'elenco.
+ */
+export const chiaveOrdine = (r, posizione = 0) => {
+  const id = String((r && r.id_ordine) || '').trim().toUpperCase();
+  const fir = String((r && r.numero_fir) || '').trim().toUpperCase();
+  return id ? `ID:${id}` : fir ? `FIR:${fir}` : `RIGA:${posizione}`;
+};
+
+/**
+ * Gli ORDINI distinti con le date da sistemare fra le righe passate, ciascuno
+ * con le sue righe: [{ chiave, righe }]. La usano gli elenchi delle pagine e i
+ * conti dei moduli, cosi' lo stesso insieme non esce con due numeri diversi.
+ */
+export function ordiniDaSistemare(righe) {
+  const ordini = new Map();
+  (righe || []).forEach((r, i) => {
+    if (!dateDaSistemare(r)) return;
+    const chiave = chiaveOrdine(r, i);
+    if (!ordini.has(chiave)) ordini.set(chiave, { chiave, righe: [] });
+    ordini.get(chiave).righe.push(r);
+  });
+  return [...ordini.values()];
+}
+
+/** Le date obbligatorie che mancano a un ordine: quelle di tutte le sue righe, senza ripetizioni. */
+export const mancantiOrdine = (o) => [...new Set(o.righe.flatMap(dateMancanti))];
+
+/** Le incoerenze fra le date di un ordine: quelle di tutte le sue righe, senza ripetizioni. */
+export const incoerentiOrdine = (o) => [...new Set(o.righe.flatMap(dateIncoerenti))];
+
+/** Che cosa c'e' da sistemare in un ordine, a parole: le date di tutte le sue righe, senza ripetizioni. */
+export const testoOrdine = (o) => [...new Set(o.righe.map(testoDate).filter(Boolean))].join('; ');
+
+/** Un ordine senza fine trasporto: non ha giorno, mese ne' anno, e nessun filtro di periodo lo prende. */
+export const ordineSenzaFine = (o) => o.righe.some(r => !giornoMovimento(r));
+
 export const GIORNI_SCADENZA_ORDINE = 30;
 // i conti si fanno fra giorni di calendario a mezzanotte UTC: il cambio dell'ora
 // legale non li sposta, come faceva setDate sull'istante di immissione

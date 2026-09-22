@@ -84,6 +84,12 @@ function AnomalieCatalogo({ anomalie, isAdmin, onApriCatalogo }) {
 // trasporto sono obbligatorie nei formulari (regola dell'utente del 22/09/2026).
 // Una riga per ruolo, movimento e canale: rete, ACI ed extra raccolta non si
 // sommano.
+//
+// L'anno su cui il soggetto compare qui e' un RIPIEGO: quello dell'immissione,
+// o dell'inizio trasporto se manca anche quella (senzaFineNelAnno in
+// base44/shared/qualificaFornitori.ts). Vale solo per questo elenco - negli altri
+// moduli lo stesso ordine non ha anno e resta fuori da ogni periodo - e la
+// pagina lo scrive, cosi' nessuno confronta questo numero con quelli di la'.
 const NOMI_CANALE = { RETE: 'rete', ACI: 'ACI', EXTRA_RACCOLTA: 'extra raccolta' };
 function SoggettiDaDate({ elenco, anno }) {
   if (!elenco || elenco.length === 0) return null;
@@ -97,6 +103,11 @@ function SoggettiDaDate({ elenco, anno }) {
           {' '}Finché manca, quel ruolo non entra nella qualifica e i suoi documenti non si chiedono: vanno completati i formulari nel file del portale e ricaricati (l'extra raccolta nella sua scheda), oppure il soggetto va incluso a mano.
         </span>
       </div>
+      <p className="mt-1.5 pl-6 text-xs">
+        Senza la fine del trasporto quegli ordini non hanno un anno: qui si segnalano sull&apos;anno dell&apos;<strong>immissione</strong> (o dell&apos;inizio trasporto, se manca anche quella),
+        altrimenti non si saprebbe dove metterli e il fornitore sparirebbe. È un ripiego che vale solo per questo elenco: negli altri moduli lo stesso ordine resta fuori da ogni periodo,
+        quindi questi nomi non si confrontano con i conteggi per anno delle altre schede.
+      </p>
       <ul className="mt-1.5 pl-6 space-y-1 text-xs">
         {elenco.map(s => (
           <li key={`${s.chiave}|${s.ruolo}|${s.movimento}|${s.canale}`}>

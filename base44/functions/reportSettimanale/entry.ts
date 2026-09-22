@@ -3,7 +3,7 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { calcolaReportSettimanale } from "../../shared/reportSettimanale.ts";
 import { giornoMovimento } from "../../shared/movimenti.ts";
-import { riepilogoDate } from "../../shared/reportSettimanali.ts";
+import { riepilogoVociDate } from "../../shared/reportSettimanali.ts";
 
 // Report settimanale della raccolta primaria RETE per il mese scelto. Si calcola
 // ogni volta dai dati del gestionale, quindi segue da solo i caricamenti delle
@@ -41,8 +41,8 @@ export default async function(req) {
     const report = calcolaReportSettimanale({ rete, mensili, annui, anno, mese });
     const ultimo = caricamenti.find(c => c.esito !== 'errore' && c.esito !== 'in_corso');
     const delMese = `${anno}-${String(mese).padStart(2, '0')}`;
-    const senzaFine = riepilogoDate(rete.filter(r => !giornoMovimento(r)), 10);
-    const nelMese = riepilogoDate(rete.filter(r => giornoMovimento(r).slice(0, 7) === delMese), 10);
+    const senzaFine = riepilogoVociDate(rete.filter(r => !giornoMovimento(r)), 10);
+    const nelMese = riepilogoVociDate(rete.filter(r => giornoMovimento(r).slice(0, 7) === delMese), 10);
     return Response.json({
       ...report,
       oggi,

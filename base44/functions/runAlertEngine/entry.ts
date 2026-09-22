@@ -17,7 +17,7 @@ import { canaleDi } from "../../shared/canaleSecondaria.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { formatoTonnellate } from "../../shared/formato.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
-import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento, riepilogoDate, descriviVoceDate } from "../../shared/reportSettimanali.ts";
+import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento, riepilogoVociDate, descriviVoceDate } from "../../shared/reportSettimanali.ts";
 
 // Le date obbligatorie dei formulari: immissione, inizio e fine trasporto
 // (regola dell'utente del 22/09/2026, "vanno segnalate e questo vale sempre dove
@@ -289,7 +289,7 @@ export default async function(req) {
         perCanale.get(c).push(r);
       }
       for (const [canale, righe] of perCanale) {
-        const riepilogo = riepilogoDate(righe, ORDINI_NEL_TESTO);
+        const riepilogo = riepilogoVociDate(righe, ORDINI_NEL_TESTO);
         if (!riepilogo) continue;
         dateObbligatorie.push({ canale, ordini: riepilogo.ordini, senza_fine: riepilogo.senza_fine });
         const alert = alertDate(modulo, entityName, canale, riepilogo);

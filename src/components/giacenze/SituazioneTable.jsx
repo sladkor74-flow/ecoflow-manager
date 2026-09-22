@@ -22,6 +22,22 @@ const CLASSI = [
 
 const IN_ATTESA_TOOLTIP = "Materiale gia' partito da questo stoccaggio verso un impianto: il portale lo attribuisce ancora qui finche' il destinatario non presenta la dichiarazione. Non e' giacenza.";
 const RILEVAZ_OBSOLETA_TOOLTIP = "Rilevazione di oltre trenta giorni fa: aggiornala dalla pagina Unita' Locali di Stoccaggio del portale.";
+
+// Una classe sotto zero non e' un errore di conto da aggiustare: e' quello che
+// esce dai dati, e va detto da dove viene invece di mostrarlo e basta. Due
+// ragioni, tutte e due vere insieme. La rilevazione e' il saldo che il portale
+// aggiorna quando CHIUDE l'ordine, giorni dopo il trasporto, mentre qui i
+// movimenti contano dalla fine del trasporto (regola 1): un carico finito prima
+// della rilevazione e chiuso dopo non sta ne' nella fotografia ne' fra i
+// movimenti successivi, e quella classe resta senza il suo ingresso. E ogni
+// secondaria parte con una classe sola, mentre in piazzale il materiale e' misto:
+// basta un viaggio dichiarato in una classe per portarla sotto zero. Il totale
+// del sito puo' restare giusto: a sbagliare e' la ripartizione fra le classi.
+const CLASSE_NEGATIVA_TOOLTIP = (classe, giorno) => [
+  `Il numero e' il dato, non un arrotondamento: rilevazione del portale del ${giorno}, piu' gli ingressi e meno le uscite di classe ${classe} finiti dopo, per fine trasporto.`,
+  `La rilevazione pero' e' il saldo che il portale aggiorna quando chiude l'ordine, giorni dopo il trasporto: un carico finito prima della rilevazione e chiuso dopo non e' ne' nella fotografia ne' fra i movimenti successivi. E ogni secondaria parte con una classe sola, mentre in piazzale il materiale e' misto.`,
+  `Da guardare: la rilevazione, da rifare dalla pagina Unita' Locali di Stoccaggio del portale, e i formulari di classe ${classe} partiti dopo il ${giorno}. La segnalazione e' anche fra le anomalie, in cima alla pagina.`,
+];
 function fmtDate(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('it-IT'); }
 function fmtDataOra(d) {
   if (!d) return '';
@@ -73,13 +89,39 @@ function DettaglioImpianto({ r }) {
   );
 }
 
+// Una classe con la giacenza sotto zero: il numero resta quello che e', ma dice
+// da dove viene e che cosa andare a guardare.
+function ClasseNegativa({ r, classe, valore }) {
+  const giorno = fmtDate(r.data_rilevazione);
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex items-center gap-1 cursor-help underline decoration-dotted underline-offset-2">
+            <AlertTriangle className="w-3 h-3 shrink-0" />
+            {formatKg(valore)}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-sm text-xs space-y-1">
+          <div className="font-semibold">
+            Classe {classe.titolo} sotto zero: {formatKg(valore)} kg. Da questo piazzale e&apos; uscita piu&apos; classe {classe.titolo} di quanta ne risulti entrata.
+          </div>
+          {CLASSE_NEGATIVA_TOOLTIP(classe.titolo, giorno).map((t, i) => <div key={i}>{t}</div>)}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 // I formulari terminati con le date da sistemare di questo soggetto, per canale
-// (regola dell'utente, 22/09/2026). Qui il riassunto; l'elenco degli ordini sta
-// nelle anomalie in cima alla pagina e nell'export.
+// (regola dell'utente, 22/09/2026), con le terziarie a parte: non sono un
+// movimento di canale e nella rete non si contano. Qui il riassunto; l'elenco
+// degli ordini sta nelle anomalie in cima alla pagina e nell'export.
 function DateRiga({ r }) {
   const gruppi = r.date_da_sistemare || [];
   if (!gruppi.length) return null;
-  const nome = { RETE: 'rete', ACI: 'ACI', EXTRA_RACCOLTA: 'extra' };
+  // Le terziarie non sono un canale: hanno la loro voce, fuori dal numero della rete.
+  const nome = { RETE: 'rete', ACI: 'ACI', EXTRA_RACCOLTA: 'extra', TERZIARIE: 'terziarie' };
   return (
     <TooltipProvider>
       <Tooltip>
@@ -152,7 +194,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                     const v = kg(r, c.chiave);
                     return (
                       <td key={c.chiave} className={`px-3 py-2 text-right tabular-nums ${k === 0 ? 'border-l' : ''} ${v < 0 ? 'text-red-600 font-semibold' : v ? '' : 'text-muted-foreground'}`}>
-                        {v == null ? '—' : formatKg(v)}
+                        {v == null ? '—' : v < 0 ? <ClasseNegativa r={r} classe={c} valore={v} /> : formatKg(v)}
                       </td>
                     );
                   })}

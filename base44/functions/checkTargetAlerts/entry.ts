@@ -6,7 +6,7 @@ import { PROV_TO_REGION, MESI, riepilogoDate, riepilogoDateVista } from "../../s
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
-import { filtraMovimenti, giornoMovimento, giornoOrdine, dateDaSistemare } from "../../shared/movimenti.ts";
+import { filtraMovimenti, giornoMovimento, giornoOrdine, dateDaSistemare, chiaveOrdine } from "../../shared/movimenti.ts";
 import { statoCaricamenti, caricamentiDuranteLettura } from "../../shared/reportSettimanali.ts";
 
 // Sotto questo numero di giorni coperti dai dati la proiezione di fine mese non
@@ -46,18 +46,10 @@ function periodoAlert(a) {
 
 // Gli ordini distinti di un elenco di righe: lo stesso ordine puo' avere piu'
 // righe (le quote di un formulario ripartito), e chi conta righe dava un numero
-// diverso dagli elenchi e dalle giacenze, che contano ordini. La chiave e' l'id
-// dell'ordine, il numero del formulario quando l'id manca; una riga che non ha
-// ne' l'uno ne' l'altro conta per se'.
+// diverso dagli elenchi e dalle giacenze, che contano ordini. La chiave e'
+// quella di movimenti.ts (chiaveOrdine), la stessa degli elenchi e dei conti.
 function ordiniDistinti(righe) {
-  const chiavi = new Set();
-  let senzaChiave = 0;
-  for (const r of righe || []) {
-    const id = String((r && r.id_ordine) || '').trim().toUpperCase();
-    const fir = String((r && r.numero_fir) || '').trim().toUpperCase();
-    chiavi.add(id ? `ID:${id}` : fir ? `FIR:${fir}` : `RIGA:${senzaChiave++}`);
-  }
-  return chiavi;
+  return new Set((righe || []).map((r, i) => chiaveOrdine(r, i)));
 }
 
 // Il periodo a cui si attribuisce un terminato SENZA fine trasporto: l'anno del

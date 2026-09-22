@@ -1,8 +1,10 @@
 // Prova dei conteggi delle date da sistemare nei conti dei movimenti (regola
 // dell'utente del 22/09/2026: immissione, inizio e fine trasporto sono
 // obbligatorie in ogni formulario terminato, e dove mancano o non tornano si
-// segnala in ogni modulo). La regola e' in movimenti.ts; qui si prova chi la
-// conta: riepilogoDate e riepilogoDateVista (raccoltoCalculator.ts), i tempi di
+// segnala in ogni modulo). La regola e' in movimenti.ts, e i conti sono di
+// ORDINI distinti, mai di righe, come negli elenchi delle pagine (23/09/2026).
+// Qui si prova chi conta: riepilogoDate e riepilogoDateVista
+// (raccoltoCalculator.ts), i tempi di
 // raccolta e la matrice delle primarie (primarieReteAnalytics.ts), i campi dei
 // tempi salvati sul record (dataEnrichment.ts), le pivot del Report Mensile
 // (reportMensile.ts) e il raccolto di Target & Status. npm run prove
@@ -36,11 +38,33 @@ verifica('gli esempi dicono cosa manca', r.esempi.length === 4 && r.esempi[0].id
 verifica('esempi limitati a richiesta', riepilogoDate([senzaFine, senzaInizio], 1).esempi.length === 1 && riepilogoDate([senzaFine], 0).esempi.length === 0);
 verifica('niente da sistemare: tutto a zero', riepilogoDate([completo, aperto]).totale === 0 && riepilogoDate([]).testo === '' && riepilogoDate(null).totale === 0);
 
+console.log('UN ORDINE CON PIU\' RIGHE VALE UNA VOLTA');
+// Lo stesso ordine sta in archivio con piu' righe (una per classe o per
+// prodotto): contarle tutte dava un numero diverso dagli elenchi, che contano
+// ordini distinti (ordiniDaSistemare di movimenti.ts).
+const rigaA = { ...senzaInizio, id_ordine: 'MR1', numero_fir: 'FIR-A', classe: 'P' };
+const rigaB = { ...senzaInizio, id_ordine: 'MR1', numero_fir: 'FIR-B', classe: 'M' };
+const piuRighe = riepilogoDate([rigaA, rigaB]);
+verifica('due righe dello stesso ordine sono un ordine solo', piuRighe.totale === 1 && piuRighe.mancanti['inizio trasporto'] === 1, JSON.stringify(piuRighe));
+verifica('e l\'esempio dice quante righe sono', piuRighe.esempi.length === 1 && piuRighe.esempi[0].id_ordine === 'MR1' && piuRighe.esempi[0].righe === 2, JSON.stringify(piuRighe.esempi));
+// una riga senza fine trasporto e un'altra dello stesso ordine senza immissione
+const mistoSenzaFine = { ...base, id_ordine: 'MR2', trasporto_finito_il: null };
+const mistoSenzaImmissione = { ...base, id_ordine: 'MR2', ordine_immesso_il: null };
+const misto = riepilogoDate([mistoSenzaFine, mistoSenzaImmissione]);
+verifica('le date di tutte le sue righe, contate una volta sola', misto.totale === 1 && misto.senza_fine_trasporto === 1 && misto.mancanti.immissione === 1
+  && misto.esempi[0].testo === 'manca la data di fine trasporto; manca la data di immissione' && misto.esempi[0].fine_trasporto === '', JSON.stringify(misto));
+const senzaId = (fir) => ({ ...senzaInizio, id_ordine: '', numero_fir: fir });
+verifica('senza ID vale il formulario; senza nessuno dei due ogni riga conta per se\'',
+  riepilogoDate([senzaId('SOLOFIR'), senzaId('SOLOFIR'), senzaId(''), senzaId('')]).totale === 3);
+
 console.log('RIEPILOGO DI UNA VISTA');
 const dellAnnoPrima = { ...base, id_ordine: 'VEC', trasporto_iniziato_il: `${ANNO - 1}-03-01T08:00:00Z`, trasporto_finito_il: `${ANNO - 1}-03-01T10:00:00Z`, ordine_immesso_il: `${ANNO - 1}-03-05T08:00:00Z` };
 // tutti: l'archivio prima dei filtri di periodo; contati: il periodo (qui giugno dell'anno)
 const vista = riepilogoDateVista([completo, senzaFine, senzaInizio, dellAnnoPrima], [completo, senzaInizio, senzaFine]);
 verifica('senza fine trasporto da tutti, gli altri solo dai contati, senza doppioni', vista.totale === 2 && vista.senza_fine_trasporto === 1 && vista.mancanti['inizio trasporto'] === 1 && vista.incoerenti === 0, JSON.stringify(vista));
+// le due righe dello stesso ordine arrivano dai due elenchi: resta un ordine
+const vistaStessoOrdine = riepilogoDateVista([mistoSenzaFine, mistoSenzaImmissione], [mistoSenzaImmissione]);
+verifica('un ordine che arriva dai due elenchi non si spezza in due', vistaStessoOrdine.totale === 1 && vistaStessoOrdine.senza_fine_trasporto === 1, JSON.stringify(vistaStessoOrdine));
 
 console.log('TEMPI DI RACCOLTA');
 const sla = computeSlaMetrics([completo, senzaFine, senzaInizio, fineDopoImmissioneMaPrimaDellInizio, senzaImmissioneNeInizio], ANNO);

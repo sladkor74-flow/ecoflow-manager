@@ -154,5 +154,16 @@ verifica('se sono tutti senza fine trasporto lo dice lo stesso', soloSenzaFine.p
 verifica('se sono tutti del periodo non si scrive un perimetro inutile', riepilogoAvviso([riga('SI9', { trasporto_iniziato_il: null })]).perimetro === '');
 verifica('niente da sistemare: nessun numero', riepilogoAvviso([riga('OK9')]).quanti === 0 && riepilogoAvviso(null).quanti === 0);
 
+console.log('LO STESSO INSIEME, UN NUMERO SOLO');
+// L'avviso degli elenchi e i conti dei moduli (Dashboard, matrice, SLA, Target &
+// Status, report mensile) devono dire lo stesso numero sulle stesse righe:
+// contavano gli uni ordini e gli altri righe, e uscivano due numeri diversi.
+const { riepilogoDate } = await import('../base44/shared/raccoltoCalculator.ts');
+const { riepilogoVociDate } = await import('../base44/shared/reportSettimanali.ts');
+const conti = riepilogoDate(elenco);
+verifica('i conti dei moduli contano quanto l\'avviso', conti.totale === av.quanti && conti.senza_fine_trasporto === av.senza_fine_trasporto, JSON.stringify({ conti: conti.totale, avviso: av.quanti }));
+verifica('e lo dicono con le stesse parole', conti.testo === av.dettaglio, `${conti.testo} | ${av.dettaglio}`);
+verifica('anche i report settimanali e gli alert', riepilogoVociDate(elenco).ordini === av.quanti && riepilogoVociDate(elenco).senza_fine === av.senza_fine_trasporto, JSON.stringify(riepilogoVociDate(elenco)));
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

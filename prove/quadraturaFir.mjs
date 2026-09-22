@@ -81,6 +81,42 @@ const diverse = formulariConDate([{ fir: 'F1', ordine: 'A', date: 'manca la data
 verifica('quote con date diverse: una voce, le date ordine per ordine; i senza numero restano separati', diverse.length === 3 && diverse[0].date === 'manca la data di inizio trasporto (A) · manca la data di immissione (B)' && diverse[0].ordine === 'A + B', JSON.stringify(diverse));
 verifica('una lista gia\' raggruppata resta uguale', JSON.stringify(formulariConDate(dr)) === JSON.stringify(dr));
 
+console.log('I SENZA FINE TRASPORTO LETTI DALL\'ARCHIVIO');
+// Senza gli archivi gia' in memoria la quadratura li rilegge da sola. L'archivio
+// finto risponde al filtro per intervallo, e al filtro su un valore preciso solo
+// per quel valore: chiedendo il campo uguale a null - come si faceva - un record
+// con la data a stringa vuota o illeggibile restava fuori, mentre gli elenchi
+// delle primarie lo mostravano. L'insieme e' uno solo: terminato e senza un
+// giorno di fine trasporto leggibile.
+const righeArchivio = [
+  primaria('ET40', 'RGYTR000040AA', 2200),
+  primaria('ET41', 'RGYTR000041AA', 1100, { trasporto_finito_il: null }),
+  primaria('ET42', 'RGYTR000042AA', 900, { trasporto_finito_il: '' }),
+  primaria('ET43', 'RGYTR000043AA', 700, { trasporto_finito_il: 'data non letta' }),
+  primaria('ET44', 'RGYTR000044AA', 600, { stato: 'annullato', trasporto_finito_il: null }),
+];
+const nellIntervallo = (r, f) => {
+  const v = r.trasporto_finito_il;
+  if (f.$gte != null && !(v && String(v) >= f.$gte)) return false;
+  if (f.$lte != null && !(v && String(v) <= f.$lte)) return false;
+  return true;
+};
+const archivioFinto = (righe) => ({
+  list: async (_o, lim = 1e9, salta = 0) => righe.slice(salta, salta + lim),
+  filter: async (filtro, _o, lim = 1e9, salta = 0) => {
+    const f = (filtro || {}).trasporto_finito_il;
+    const sel = f && typeof f === 'object' ? righe.filter(r => nellIntervallo(r, f)) : righe.filter(r => (r.trasporto_finito_il ?? null) === (f ?? null));
+    return sel.slice(salta, salta + lim);
+  },
+});
+const clienteFinto = { asServiceRole: { entities: Object.fromEntries(
+  ['PrimariaRete', 'PrimariaAci', 'Secondaria', 'ExtraRaccolta'].map(n => [n, archivioFinto(n === 'PrimariaRete' ? righeArchivio : [])]),
+) } };
+const gArch = await caricaGestionale(clienteFinto, periodo, null, { caricamenti });
+verifica('la settimana conta solo il formulario con la fine trasporto', gArch.rete_primarie.totale.n === 1 && gArch.rete_primarie.totale.kg === 2200, JSON.stringify(gArch.rete_primarie.totale));
+verifica('senza fine trasporto: anche la data a stringa vuota e quella illeggibile, l\'annullato no', gArch.rete_primarie.senza_fine.n === 3
+  && gArch.rete_primarie.senza_fine.esempi.every(x => x.date === 'manca la data di fine trasporto'), JSON.stringify(gArch.rete_primarie.senza_fine));
+
 // La stessa regola nella copia delle pagine (src/lib/quadraturaFir.js), che la
 // ripassa sugli esiti salvati prima. La libreria importa gli alias @: qui si
 // sostituiscono.

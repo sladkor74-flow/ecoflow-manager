@@ -103,15 +103,30 @@ async function nellaFascia(svc, entita, primo, ultimo) {
 }
 
 /**
- * I movimenti senza fine trasporto, chiesti all'archivio con un filtro a parte:
- * la lettura per intervallo non li restituisce mai. Il filtro su un campo vuoto
- * riporta anche gli ordini ancora aperti o annullati, che si scartano dopo. Se
- * l'archivio non accetta il filtro si restituisce null: il conteggio non si e'
- * potuto fare, e lo si dice invece di scrivere zero.
+ * I movimenti senza fine trasporto, che la lettura per intervallo non restituisce
+ * mai: si rilegge l'archivio a pagine e si tengono le sole righe che servono,
+ * riconosciute con la regola di sempre - terminato e senza un giorno di fine
+ * trasporto leggibile (!giornoMovimento).
+ *
+ * Si chiedevano all'archivio con un filtro sul campo uguale a null. Quel filtro
+ * risponde per i soli null, mentre in tutto il resto del gestionale l'insieme e'
+ * "data assente O illeggibile": un record con la data a stringa vuota compariva
+ * nell'elenco delle primarie e non nella quadratura, cioe' lo stesso insieme
+ * aveva due perimetri e lo stesso nome. Una data scritta ma illeggibile non si
+ * puo' nemmeno chiedere con un filtro: l'unico modo perche' l'insieme sia uno
+ * solo e' applicare la stessa regola in memoria. Costa una lettura intera per
+ * archivio, come il ripiego di nellaFascia: meglio lento che contarne un altro.
+ *
+ * Se la lettura non riesce si restituisce null: il conteggio non si e' potuto
+ * fare, e lo si dice invece di scrivere zero.
  */
 async function senzaFineTrasporto(svc, entita) {
   try {
-    return await fetchAll(svc[entita], { trasporto_finito_il: null }, 'id');
+    const righe = [];
+    await perPagina(svc[entita], null, (r) => {
+      if (eTerminato(r) && !giornoMovimento(r)) righe.push(r);
+    });
+    return righe;
   } catch (e) {
     return null;
   }
@@ -204,7 +219,7 @@ export async function caricaGestionale(base44, periodo, soloFlussi = null, pront
   const perEntita = {};
   // I terminati senza fine trasporto non stanno in nessuna settimana: non si
   // contano, ma si dicono. Con gli archivi interi gia' in memoria sono li'
-  // dentro; altrimenti si chiedono a parte.
+  // dentro; altrimenti si rileggono a parte, con la stessa regola.
   const senzaFinePerEntita = {};
   if (pronti && pronti.archivi) {
     // In ordine di id, come li restituisce la lettura per intervallo: dall'ordine

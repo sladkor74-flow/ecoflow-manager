@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { DATE_OBBLIGATORIE, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate, giornoMovimento } from '@/lib/movimenti';
+import { DATE_OBBLIGATORIE, testoDate, ordiniDaSistemare, mancantiOrdine, incoerentiOrdine, testoOrdine, ordineSenzaFine } from '@/lib/movimenti';
 import { formatIntero } from '@/lib/utils';
 
 // Le date obbligatorie di un formulario terminato - immissione, inizio e fine
@@ -22,8 +22,8 @@ import { formatIntero } from '@/lib/utils';
 //   e di che periodo, quali date mancano, l'elenco e il pulsante del filtro;
 // - RiepilogoDate: una riga, di un canale, col riepilogo che le funzioni
 //   restituiscono in date_da_sistemare (riepilogoDate di raccoltoCalculator.ts):
-//   quel conto e' ancora per riga, e il perimetro lo sa la funzione che lo manda;
-//   qui si mostra e basta;
+//   anche quel conto e' di ordini distinti, e il perimetro lo sa la funzione che
+//   lo manda; qui si mostra e basta;
 // - NotaDate: una nota in linea accanto a un'esportazione, per le righe che
 //   finiscono nel file.
 //
@@ -41,34 +41,12 @@ export function SegnoDate({ record, testo }) {
   );
 }
 
-/**
- * Gli ORDINI con le date da sistemare, non le righe: lo stesso ordine puo' avere
- * piu' righe (le quote di un formulario ripartito su piu' ordini, e in generale
- * piu' formulari sullo stesso ordine), e gli altri moduli - giacenze, alert,
- * report - contano gli ordini. Contare righe qui voleva dire due numeri diversi
- * per lo stesso insieme. La chiave e' l'id dell'ordine, il numero del formulario
- * quando l'id manca; una riga che non ha ne' l'uno ne' l'altro conta per se'.
- * Ogni voce porta le sue righe, per l'elenco e per il dettaglio.
- */
-function ordiniDaSistemare(righe) {
-  const gruppi = new Map();
-  let senzaChiave = 0;
-  for (const r of righe || []) {
-    if (!dateDaSistemare(r)) continue;
-    const id = String(r.id_ordine || '').trim().toUpperCase();
-    const fir = String(r.numero_fir || '').trim().toUpperCase();
-    const k = id ? `ID:${id}` : fir ? `FIR:${fir}` : `RIGA:${senzaChiave++}`;
-    if (!gruppi.has(k)) gruppi.set(k, { chiave: k, righe: [] });
-    gruppi.get(k).righe.push(r);
-  }
-  return [...gruppi.values()];
-}
-
-/** Un ordine senza fine trasporto: non ha giorno, mese ne' anno, e nessun filtro di periodo lo prende. */
-const senzaFineTrasporto = (o) => o.righe.some(r => !giornoMovimento(r));
-
-/** Che cosa c'e' da sistemare in un ordine: le date di tutte le sue righe, senza ripetizioni. */
-const testoOrdine = (o) => [...new Set(o.righe.map(testoDate).filter(Boolean))].join('; ');
+// Gli ORDINI con le date da sistemare, non le righe, e che cosa c'e' da
+// sistemare in ciascuno: la regola sta in src/lib/movimenti.js
+// (ordiniDaSistemare, mancantiOrdine, incoerentiOrdine, testoOrdine,
+// ordineSenzaFine), la stessa che contano le funzioni. Era scritta qui e i
+// conti dei moduli contavano righe: per lo stesso insieme uscivano due numeri
+// diversi.
 
 // Il dettaglio a parole, come il testo di riepilogoDate nelle funzioni:
 // "3 senza fine trasporto, 1 con date incoerenti". Conta ordini: a un ordine a
@@ -78,8 +56,8 @@ function dettaglioDate(ordini) {
   const mancanti = Object.fromEntries(DATE_OBBLIGATORIE.map(d => [d.nome, 0]));
   let incoerenti = 0;
   for (const o of ordini) {
-    for (const nome of new Set(o.righe.flatMap(dateMancanti))) mancanti[nome] = (mancanti[nome] || 0) + 1;
-    if (o.righe.some(r => dateIncoerenti(r).length)) incoerenti++;
+    for (const nome of mancantiOrdine(o)) mancanti[nome] = (mancanti[nome] || 0) + 1;
+    if (incoerentiOrdine(o).length) incoerenti++;
   }
   const parti = DATE_OBBLIGATORIE.filter(d => mancanti[d.nome] > 0).map(d => `${formatIntero(mancanti[d.nome])} senza ${d.nome}`);
   if (incoerenti) parti.push(`${formatIntero(incoerenti)} con date incoerenti`);
@@ -109,7 +87,7 @@ function perimetroDate(senzaFine, nelPeriodo) {
  */
 export function riepilogoAvviso(righe) {
   const ordini = ordiniDaSistemare(righe);
-  const senzaFine = ordini.filter(senzaFineTrasporto).length;
+  const senzaFine = ordini.filter(ordineSenzaFine).length;
   const nelPeriodo = ordini.length - senzaFine;
   return {
     ordini,
@@ -251,6 +229,8 @@ export function RiepilogoDate({ canale, riepilogo, nomi = ['ordine terminato', '
               <li key={`${o.id_ordine}|${i}`} title={o.testo}>
                 <span className="font-mono">{o.id_ordine || o.numero_fir || 'senza ID'}</span>
                 {o.id_ordine && o.numero_fir ? <> · FIR <span className="font-mono">{o.numero_fir}</span></> : null}
+                {/* quante righe dell'archivio stanno dietro a quest'unico ordine */}
+                {o.righe > 1 ? ` · ${formatIntero(o.righe)} righe` : ''}
                 {o.stoccaggio || o.destinazione ? <> · {o.stoccaggio || 'N/D'} → {o.destinazione || 'N/D'}</> : null}
                 {' · '}{o.testo}
               </li>

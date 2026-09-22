@@ -12,9 +12,12 @@ import { CANALI } from '@/lib/dichiarazioniImpianti';
 // Lo usano Giacenze e Dichiarazioni Impianti: stesse parole in tutti e due.
 //
 // Rete, ACI ed extra raccolta restano su righe diverse e non si sommano: nemmeno
-// il numero dei formulari.
+// il numero dei formulari. Le terziarie non sono un canale - partono
+// dall'impianto verso le cementerie e la giacenza di PFU non la toccano - e
+// hanno una riga loro: contate nella rete gonfiavano il numero della rete.
 
-const nomeCanale = (c) => (CANALI.find(x => x.chiave === c) || { nome: c }).nome;
+const FUORI_CANALE = { TERZIARIE: 'Terziarie (fuori dai canali)' };
+const nomeCanale = (c) => FUORI_CANALE[c] || (CANALI.find(x => x.chiave === c) || { nome: c }).nome;
 const giorno = (g) => (g ? String(g).slice(0, 10).split('-').reverse().join('/') : '—');
 const RUOLO = { imp: 'impianto', stoc: 'stoccaggio' };
 

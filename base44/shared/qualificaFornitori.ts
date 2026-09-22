@@ -8,7 +8,8 @@
 // anno, ordini terminati con trasporto concluso nell'anno. Chi nell'anno compare
 // solo in terminati senza fine trasporto resta fuori (o resta fuori quel suo
 // ruolo), ma si dice a parte (soggetti_da_date, 22/09/2026): la data e'
-// obbligatoria e va scritta. Dalle
+// obbligatoria e va scritta. L'anno su cui si segnala e' quello dell'immissione,
+// un ripiego che vale solo per quell'elenco (vedi senzaFineNelAnno). Dalle
 // movimentazioni viene anche il ruolo, che serve solo a stabilire quali
 // documenti chiedere:
 //   raccolta              trasportatore delle primarie rete, ACI ed extra raccolta
@@ -144,8 +145,17 @@ function nelAnno(r, anno) {
 // Un terminato senza fine trasporto non ha un anno (regola 1) e non fa entrare
 // nessuno fra i soggetti. Ma le date del formulario sono obbligatorie (regola
 // dell'utente del 22/09/2026) e chi compare solo in ordini cosi' non deve
-// sparire in silenzio: si guarda l'anno dell'immissione, o dell'inizio trasporto
-// se manca anche quella.
+// sparire in silenzio: per sapere su quale anno segnalarlo si guarda l'anno
+// dell'immissione, o dell'inizio trasporto se manca anche quella.
+//
+// E' un RIPIEGO e vale solo per questa segnalazione. Negli elenchi e nei conti
+// lo stesso ordine non ha anno (annoElenco) e nessun filtro di periodo lo
+// prende: sta quindi in un anno qui e in nessuno altrove. E' voluto - senza un
+// anno la segnalazione non si saprebbe dove metterla, e il fornitore sparirebbe
+// - e non colloca il movimento in nessun periodo, perche' la qualifica non conta
+// tonnellate: guarda solo chi c'e'. Il ripiego e' scritto anche sulla pagina che
+// mostra l'elenco (SoggettiDaDate in src/pages/QualificaFornitori.jsx), cosi'
+// chi legge un nome in un anno sa da dove viene quell'anno.
 function senzaFineNelAnno(r, anno) {
   if (!eTerminato(r) || giornoMovimento(r)) return false;
   return (annoOrdine(r) ?? annoRoma(r.trasporto_iniziato_il)) === anno;
@@ -159,7 +169,8 @@ const ORDINI_DA_DATE = 20;
  * Restituisce { soggetti, esclusi, soggetti_da_date }: gli esclusi manualmente
  * restano visibili cosi' da poterli reincludere. soggetti_da_date sono quelli
  * che nell'anno compaiono solo in ordini terminati senza fine trasporto, o che
- * solo da quelli hanno un ruolo: { chiave, nome, ruolo, movimento, canale,
+ * solo da quelli hanno un ruolo - e "nell'anno" vuol dire nell'anno
+ * dell'immissione, il ripiego di senzaFineNelAnno: { chiave, nome, ruolo, movimento, canale,
  * gia_fra_i_soggetti, quanti, ordini: ['ID (FIR ...): date che mancano'] }, uno
  * per ruolo, movimento e canale, mai sommati.
  */

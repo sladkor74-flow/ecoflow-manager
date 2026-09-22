@@ -4,7 +4,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { rotte, conferimentiSospetti, quoteDaStoccaggio, tariffeDaVerificare } from "../../shared/rotteConferimenti.ts";
 import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
-import { riepilogoDate } from "../../shared/reportSettimanali.ts";
+import { riepilogoVociDate } from "../../shared/reportSettimanali.ts";
 
 // Chi conferisce dove, e i formulari che sembrano chiusi sulla destinazione
 // sbagliata.
@@ -62,7 +62,7 @@ export default async function(req) {
       rotte: rotte(f.righe, f.archivio).map(o => ({ ...o, destinazioni: o.destinazioni.map(senzaRighe) })),
       sospetti: conferimentiSospetti(f.righe, f.archivio),
       // { ordini, senza_fine, esempi: [{ id_ordine, numero_fir, date }] } oppure null
-      date_da_sistemare: riepilogoDate(f.tutti, 10),
+      date_da_sistemare: riepilogoVociDate(f.tutti, 10),
     }));
 
     // Gli stoccaggi che alimentano piu' di un impianto: quello che gli

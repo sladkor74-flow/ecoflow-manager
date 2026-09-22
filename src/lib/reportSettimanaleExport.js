@@ -32,7 +32,7 @@ const coloreAvanzamento = (p) => (p >= 100 ? C.verde : p >= 70 ? C.blu : p >= 40
 // parole: le stesse frasi nel PDF e a video (ReportSettimanale.jsx), che prima
 // non le mostrava e chi guardava la tabella non sapeva dei terminati di rete
 // esclusi. report.date_da_sistemare arriva da reportSettimanale: { senza_fine,
-// nel_mese }, ciascuno { ordini, senza_fine, esempi } (riepilogoDate di
+// nel_mese }, ciascuno { ordini, senza_fine, esempi } (riepilogoVociDate di
 // reportSettimanali.ts) oppure null. [] se non c'e' niente da dire.
 export const INTRO_DATE = 'Date obbligatorie dei formulari (immissione, inizio e fine trasporto) da inserire o correggere.';
 export function frasiDateDaSistemare(report) {

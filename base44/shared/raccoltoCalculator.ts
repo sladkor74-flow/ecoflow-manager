@@ -1,7 +1,7 @@
 // Modulo condiviso per il calcolo del raccolto PFU aggregato dalle primarie.
 import { fetchAll } from "./fetchAll.ts";
 import { annoRoma, meseRoma } from "./giornoItaliano.ts";
-import { DATE_OBBLIGATORIE, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate, eTerminato, giornoMovimento } from "./movimenti.ts";
+import { DATE_OBBLIGATORIE, ordiniDaSistemare, mancantiOrdine, incoerentiOrdine, testoOrdine, ordineSenzaFine, eTerminato, giornoMovimento } from "./movimenti.ts";
 
 export const PROV_TO_REGION: Record<string, string> = {
   // Valle d'Aosta
@@ -62,6 +62,9 @@ export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno
 // terminati, non solo nei report settimanali (regola dell'utente, 22/09/2026).
 // La regola sta in movimenti.ts (dateMancanti, dateIncoerenti, testoDate): qui
 // si contano soltanto i casi, perche' ogni conto dica quanti sono e quali.
+// Si contano ORDINI distinti, non righe (ordiniDaSistemare di movimenti.ts, la
+// stessa degli elenchi): lo stesso ordine sta in archivio con piu' righe, e
+// contarle tutte dava due numeri diversi per lo stesso insieme.
 // Stanno qui e non in dataEnrichment.ts perche' questo modulo non importa
 // nessun altro modulo dei conti, e lo leggono tutti senza giri circolari.
 //
@@ -74,23 +77,24 @@ const intero = (n: number) => Number(n || 0).toLocaleString('it-IT');
 /**
  * Il riepilogo delle date da sistemare fra i movimenti passati:
  * { totale, senza_fine_trasporto, mancanti: { immissione, 'inizio trasporto',
- * 'fine trasporto' }, incoerenti, esempi, testo }. Un ordine a cui mancano due
- * date conta una volta nel totale e una in ciascuna voce di mancanti; testo e'
+ * 'fine trasporto' }, incoerenti, esempi, testo }. totale e ogni voce contano
+ * ORDINI distinti: un ordine a cui mancano due date conta una volta nel totale e
+ * una in ciascuna voce di mancanti, anche se in archivio ha piu' righe. testo e'
  * il dettaglio a parole ("3 senza fine trasporto, 1 con date incoerenti").
- * Gli ordini non terminati non si giudicano (dateDaSistemare).
+ * Ogni esempio dice l'ordine, quante righe sono e che cosa c'e' da sistemare in
+ * tutte. Gli ordini non terminati non si giudicano (dateDaSistemare).
  */
 export function riepilogoDate(records, maxEsempi = 10) {
   const mancanti: Record<string, number> = Object.fromEntries(DATE_OBBLIGATORIE.map(d => [d.nome, 0]));
   const nomeFine = (DATE_OBBLIGATORIE.find(d => d.campo === 'trasporto_finito_il') || { nome: 'fine trasporto' }).nome;
-  let totale = 0;
+  const ordini = ordiniDaSistemare(records);
   let incoerenti = 0;
   const esempi = [];
-  for (const r of records || []) {
-    if (!dateDaSistemare(r)) continue;
-    totale++;
-    for (const nome of dateMancanti(r)) mancanti[nome] = (mancanti[nome] || 0) + 1;
-    if (dateIncoerenti(r).length) incoerenti++;
+  for (const o of ordini) {
+    for (const nome of mancantiOrdine(o)) mancanti[nome] = (mancanti[nome] || 0) + 1;
+    if (incoerentiOrdine(o).length) incoerenti++;
     if (esempi.length < maxEsempi) {
+      const r = o.righe[0];
       esempi.push({
         id_ordine: r.id_ordine || '',
         numero_fir: r.numero_fir || '',
@@ -98,14 +102,16 @@ export function riepilogoDate(records, maxEsempi = 10) {
         regione: r.regione || PROV_TO_REGION[String(r.provincia || '').toUpperCase().trim()] || '',
         stoccaggio: r.stoccaggio || r.unita_locale_origine || r.produttore || '',
         destinazione: r.destinazione || '',
-        fine_trasporto: giornoMovimento(r),
-        testo: testoDate(r),
+        // chi non ha la fine trasporto non ha un giorno da mostrare
+        fine_trasporto: ordineSenzaFine(o) ? '' : giornoMovimento(r),
+        righe: o.righe.length,
+        testo: testoOrdine(o),
       });
     }
   }
   const parti = DATE_OBBLIGATORIE.filter(d => mancanti[d.nome] > 0).map(d => `${intero(mancanti[d.nome])} senza ${d.nome}`);
   if (incoerenti) parti.push(`${intero(incoerenti)} con date incoerenti`);
-  return { totale, senza_fine_trasporto: mancanti[nomeFine] || 0, mancanti, incoerenti, esempi, testo: parti.join(', ') };
+  return { totale: ordini.length, senza_fine_trasporto: mancanti[nomeFine] || 0, mancanti, incoerenti, esempi, testo: parti.join(', ') };
 }
 
 /**
@@ -115,6 +121,9 @@ export function riepilogoDate(records, maxEsempi = 10) {
  * periodo lo prende: si prende fra tutti, di qualunque anno, ed e' escluso dai
  * conti. Gli altri si prendono fra i contati: sono nei numeri, nel mese della
  * loro fine trasporto, ma hanno un'altra data che manca o non torna.
+ * tutti e contati sono righe; il riepilogo che esce conta ordini distinti, e le
+ * righe dello stesso ordine fanno un ordine solo anche se arrivano dai due
+ * elenchi.
  */
 export function riepilogoDateVista(tutti, contati, maxEsempi = 10) {
   const senzaFine = (tutti || []).filter(r => eTerminato(r) && !giornoMovimento(r));

@@ -25,6 +25,17 @@ import { canaleDi } from "../../shared/canaleSecondaria.ts";
 // terminato (regola dell'utente, 22/09/2026): il dettaglio ha la colonna "Date da
 // sistemare" (testoDate di movimenti.ts), la sintesi un foglio con i trasporti da
 // correggere, e il filtro "date da sistemare" della pagina vale anche qui.
+//
+// La risposta porta tre conteggi per canale, che non si sommano fra loro:
+//   - righe_per_canale: le righe scritte nel file;
+//   - date_da_sistemare_per_canale: il TOTALE dei formulari da correggere, cioe'
+//     i terminati senza fine trasporto (di qualunque periodo: nessun filtro di
+//     periodo li prende) piu' quelli contati nel periodo a cui manca un'altra
+//     data obbligatoria o che le hanno incoerenti;
+//   - di_cui_senza_fine_trasporto_per_canale: la QUOTA del totale qui sopra che
+//     non ha la fine trasporto, quindi resta fuori da ogni mese.
+// La quota si chiamava senza_fine_trasporto_per_canale e sembrava un conteggio a
+// se': sommata al totale contava due volte gli stessi ordini.
 
 // Il giorno italiano come 'GG/MM/AAAA'. toLocaleDateString sul server (UTC)
 // scriveva il giorno prima per le date salvate a mezzanotte italiana.
@@ -183,12 +194,17 @@ export default async function(req) {
         XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, wsDate), 'Date da sistemare');
       }
     } else {
-      // Nel dettaglio un terminato senza fine trasporto c'e' (se nessun filtro
-      // di periodo e' attivo), marcato, e si conta nella risposta. L'ordine e'
-      // quello della tabella a video: prima le righe senza un giorno, che vanno
-      // corrette, poi dal giorno piu' recente.
-      senzaFineTrasporto = filtered.filter(r => periodi.get(r) === null);
-      daSistemare = filtered.filter(dateDaSistemare);
+      // Nel foglio un terminato senza fine trasporto c'e' se nessun filtro di
+      // periodo e' attivo, marcato. Il conteggio invece li prende di qualunque
+      // periodo, come la sintesi e come riepilogoDateVista in tutto il
+      // gestionale: nessun filtro di periodo li prende, e contandoli sulle sole
+      // righe del file con un mese scelto sparivano dal dettaglio mentre la
+      // sintesi, con gli stessi filtri, li diceva.
+      senzaFineTrasporto = all.filter(r => passaAltri(r) && periodi.get(r) === null);
+      // il totale: i senza fine piu' i contati nel periodo con un'altra data da sistemare
+      daSistemare = [...senzaFineTrasporto, ...filtered.filter(r => periodi.get(r) !== null && dateDaSistemare(r))];
+      // L'ordine e' quello della tabella a video: prima le righe senza un
+      // giorno, che vanno corrette, poi dal giorno piu' recente.
       const giornoDi = (r) => periodi.get(r)?.giorno || '';
       const ordinati = [...filtered].sort((a, b) => {
         const ga = giornoDi(a), gb = giornoDi(b);
@@ -242,8 +258,10 @@ export default async function(req) {
       file_base64: buf,
       filename: `secondarie_${mode}${nomeCanale}_${oggiRoma()}.xlsx`,
       righe_per_canale: perCanale(contati),
-      senza_fine_trasporto_per_canale: perCanale(senzaFineTrasporto),
+      // il totale dei formulari da correggere e la sua quota senza fine
+      // trasporto: non si sommano, la seconda e' dentro il primo (vedi in testa)
       date_da_sistemare_per_canale: perCanale(daSistemare),
+      di_cui_senza_fine_trasporto_per_canale: perCanale(senzaFineTrasporto),
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
