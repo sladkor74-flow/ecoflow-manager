@@ -113,6 +113,23 @@ function leggiIntestazioni(ws) {
   return headers;
 }
 
+// Il file appena caricato non e' sempre pronto quando la function lo chiede, e
+// la rete ogni tanto fa i capricci: si riprova, con una pausa breve. Qui non si
+// e' ancora toccato niente, quindi il fallimento non lascia l'archivio a meta'.
+async function scaricaFile(url, tentativi = 3) {
+  let ultima = { ok: false, status: 0, statusText: 'nessuna risposta' };
+  for (let i = 0; i < tentativi; i++) {
+    if (i) await new Promise(r => setTimeout(r, 1500 * i));
+    try {
+      ultima = await fetch(url);
+      if (ultima.ok) return ultima;
+    } catch (e) {
+      ultima = { ok: false, status: 0, statusText: e && e.message ? e.message : String(e) };
+    }
+  }
+  return ultima;
+}
+
 export default async function(req) {
   let tipo_file = null, nome_file = 'N/D', file_url = null;
   let fase = 'avvio';
@@ -124,7 +141,7 @@ export default async function(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
     user = await base44.auth.me();
-    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!user) return Response.json({ error: 'Unauthorized', dati_intatti: true }, { status: 401 });
     const startTime = Date.now();
     const body = await req.json();
     tipo_file = body.tipo_file;
@@ -143,32 +160,40 @@ export default async function(req) {
     const modalita = sostituisci ? 'sostituzione' : 'aggiunta';
 
     if (!file_url || !tipo_file) {
-      return Response.json({ error: 'file_url e tipo_file sono obbligatori' }, { status: 400 });
+      return Response.json({ error: 'file_url e tipo_file sono obbligatori', dati_intatti: true }, { status: 400 });
     }
 
     // === Punto 6: rifiuta "assegnati" ===
     if (tipo_file === 'assegnati') {
       return Response.json({
-        error: "Lo slot Assegnati e' stato rimosso. Gli assegnati vengono popolati automaticamente dal caricamento del file Primarie."
+        error: "Lo slot Assegnati e' stato rimosso. Gli assegnati vengono popolati automaticamente dal caricamento del file Primarie.",
+        dati_intatti: true,
       }, { status: 400 });
     }
 
     // === Rifiuta "extra_raccolta": inserimento solo dal modulo dedicato ===
     if (tipo_file === 'extra_raccolta') {
       return Response.json({
-        error: "L'extra raccolta si inserisce dal modulo dedicato Extra Raccolta, non dal caricamento file."
+        error: "L'extra raccolta si inserisce dal modulo dedicato Extra Raccolta, non dal caricamento file.",
+        dati_intatti: true,
       }, { status: 400 });
     }
 
     const config = SHEET_MAP[tipo_file];
     if (!config) {
-      return Response.json({ error: 'tipo_file non valido. Valori ammessi: ' + Object.keys(SHEET_MAP).join(', ') }, { status: 400 });
+      return Response.json({ error: 'tipo_file non valido. Valori ammessi: ' + Object.keys(SHEET_MAP).join(', '), dati_intatti: true }, { status: 400 });
     }
 
     // === 1. Scarica e parse il file Excel ===
     fase = 'download del file';
-    const fileRes = await fetch(file_url);
-    if (!fileRes.ok) return Response.json({ error: 'Impossibile scaricare il file' }, { status: 502 });
+    const fileRes = await scaricaFile(file_url);
+    if (!fileRes.ok) {
+      const quale = [fileRes.status || null, fileRes.statusText || null].filter(Boolean).join(' ');
+      return Response.json({
+        error: `Impossibile scaricare il file appena caricato${quale ? ` (${quale})` : ''}, dopo tre tentativi. Riprova il caricamento.`,
+        fase, dati_intatti: true,
+      }, { status: 502 });
+    }
     const ab = await fileRes.arrayBuffer();
     // I due report del portale portano le date come seriali Excel e vengono convertite
     // da DATE_FIELDS: disattivare cellDates evita di creare un oggetto Date per ogni
@@ -370,7 +395,8 @@ export default async function(req) {
           const probe = await base44.asServiceRole.entities[ent].list('-created_date', 1);
           if (probe.length > 0) {
             return Response.json({
-              error: "Controllo anti-regressione non attendibile: impossibile leggere gli identificativi in archivio. Caricamento annullato per sicurezza."
+              error: "Controllo anti-regressione non attendibile: impossibile leggere gli identificativi in archivio. Caricamento annullato per sicurezza.",
+              fase, dati_intatti: true,
             }, { status: 500 });
           }
         }

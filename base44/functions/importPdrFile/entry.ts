@@ -67,8 +67,8 @@ export default async function(req) {
     };
 
     // === 1. Scarica e parse il file ===
-    const fileRes = await fetch(file_url);
-    if (!fileRes.ok) return Response.json({ error: 'Impossibile scaricare il file' }, { status: 502 });
+    const fileRes = await fetch(file_url).catch(() => ({ ok: false, status: 0 }));
+    if (!fileRes.ok) return Response.json({ error: `Impossibile scaricare il file appena caricato${fileRes.status ? ` (${fileRes.status})` : ''}. Riprova il caricamento.`, dati_intatti: true }, { status: 502 });
     const ab = await fileRes.arrayBuffer();
     const wb = XLSX.read(ab, { type: 'array', cellDates: true });
 
