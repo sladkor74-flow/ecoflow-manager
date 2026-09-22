@@ -24,7 +24,7 @@ const rifiuta = (nome, azione, pezzo) => {
 const VERDE = 'FF00B050', GIALLO = 'FFFFFF00', ROSSO = 'FFFF0000', AZZURRO = 'FF99CCFF';
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
-async function fileDiProva({ senzaFoglio = false, soloTitolo = false } = {}) {
+async function fileDiProva({ senzaFoglio = false, soloTitolo = false, fondoLontano = false } = {}) {
   const modulo = await import('exceljs');
   const ExcelJS = modulo.default || modulo;
   const wb = new ExcelJS.Workbook();
@@ -84,6 +84,9 @@ async function fileDiProva({ senzaFoglio = false, soloTitolo = false } = {}) {
   riga(48, ['TER26134663', 'IRIGOM', 'SMOCO', 'AKCANSA', 1, 28180, new Date(Date.UTC(2026, 6, 23)), new Date(Date.UTC(2026, 6, 23)), 27040, 10960, { formula: 'I48+J48' }, { formula: '38000-K48' }, { formula: 'J48/K48' }],
     (i) => ({ numFmt: [6, 7].includes(i) ? 'dd/mm/yyyy' : (i === 12 ? '0.00%' : (i >= 4 ? '#,##0' : null)), fill: i === 8 ? GIALLO : null }));
   riga(49, [null, null, null, null, null, { formula: 'SUM(F48:F48)' }, null, null, { formula: 'SUM(I48:I48)' }, { formula: 'SUM(J48:J48)' }, { formula: 'SUM(K48:K48)' }], { numFmt: '#,##0' });
+  // Una riga di scarto in fondo al foglio, come ne restano dopo un incollato
+  // andato male: il blocco non ci starebbe piu' dentro il foglio.
+  if (fondoLontano) metti('A1048570', null, { fill: GIALLO });
   return new Uint8Array(await wb.xlsx.writeBuffer());
 }
 
@@ -169,6 +172,19 @@ verifica('luglio non e\' stato toccato', testo(ws, 'O12') === '=I32+K49');
 verifica('l\'extra del mese del formulario e\' stata svuotata', testo(ws, 'O11') === '', testo(ws, 'O11'));
 verifica('e lo dice', esito.avvisi.some(a => /EXTRA RACCOLTA di LUGLIO svuotata \(460 kg\)/.test(a)), esito.avvisi.join(' | '));
 
+// Nel file vero quella cella si calcola da sola con una SUMIFS: cancellarla
+// toglierebbe la formula per sempre e cambierebbe il totale dell'anno.
+const conFormula = await fileDiProva();
+const modulo2 = await import('exceljs');
+const ExcelJS2 = modulo2.default || modulo2;
+const wbF = new ExcelJS2.Workbook();
+await wbF.xlsx.load(conFormula);
+wbF.getWorksheet('DICHIARAZIONI').getCell('O11').value = { formula: 'SUMIFS(A:A,B:B,1)', result: 460 };
+const esitoF = await scriviBloccoNelFile(new Uint8Array(await wbF.xlsx.writeBuffer()), dati);
+const wsF = await rileggi(esitoF.bytes);
+verifica('una cella con la formula non si svuota', testo(wsF, 'O11') === '=SUMIFS(A:A,B:B,1)', testo(wsF, 'O11'));
+verifica('e lo dice, per farla guardare', esitoF.avvisi.some(a => /si calcola da sola con una formula/.test(a) && /non risultino due volte/.test(a)), esitoF.avvisi.join(' | '));
+
 console.log('\nUN MESE DIVERSO: CSS-C SI\', EXTRA NO');
 const settembre = {
   versione: 1, anno: 2026, mese: 'Settembre', partenza: '2026-09-28',
@@ -197,6 +213,28 @@ await rifiuta('un foglio senza i blocchi dei mesi prima', async () => scriviBloc
 await rifiuta('lo stesso mese due volte', () => scriviBloccoNelFile(esito.bytes, dati), 'c\'e\' gia\' il blocco AGOSTO 2026');
 await rifiuta('i totali che non tornano', async () => scriviBloccoNelFile(await fileDiProva(), { ...dati, totale_portale_kg: 999999 }), 'non tornano con i dati della pratica');
 await rifiuta('un file che non e\' un Excel', async () => scriviBloccoNelFile(new Uint8Array([1, 2, 3, 4]), dati), 'non e\' un file Excel');
+// Una riga vuota ma formattata in fondo al foglio: il blocco ci si attaccherebbe
+// sotto, lontanissimo dagli altri mesi. Si rifiuta e si dice come ripulire.
+await rifiuta('una riga di scarto in fondo al foglio', async () => scriviBloccoNelFile(await fileDiProva({ fondoLontano: true }), dati), 'seleziona le righe dopo la');
+
+console.log('\nQUELLO CHE ARRIVA DAI DATI E NON PUO\' STARE NEL FILE');
+// Un carattere di controllo in un nome renderebbe l'XML illeggibile: si toglie.
+const sporco = { ...settembre, terziarie: [{ ...settembre.terziarie[0], destinatario: `AKCAN${String.fromCharCode(31)}SA` }] };
+const esito3 = await scriviBloccoNelFile(await fileDiProva(), sporco);
+const ws3 = await rileggi(esito3.bytes);
+verifica('il carattere di controllo non finisce nel file', testo(ws3, `D${esito3.riga_fine - 1}`) === 'AKCANSA', testo(ws3, `D${esito3.riga_fine - 1}`));
+
+// Il riepilogo ha una colonna per mese di UN anno solo: un formulario dell'anno
+// prima non c'entra con quella colonna e non si tocca.
+const altroAnno = {
+  ...settembre, totale_portale_kg: 33000 + 31800 + 400,
+  extra: { totale_kg: 400, cippato_kg: 300, ferro_kg: 100, terziaria: 'TER26160001', allegato: 2, chiusura_terziaria_kg: 20000,
+    formulari: [{ formulario: 'X', peso_kg: 400, fine_trasporto: '2025-12-20' }] },
+};
+const esito4 = await scriviBloccoNelFile(await fileDiProva(), altroAnno);
+const ws4 = await rileggi(esito4.bytes);
+verifica('l\'extra di un altro anno non svuota la colonna di qui', testo(ws4, 'Y11') === '' && numero(ws4, 'S11') === 400, `Y11=${testo(ws4, 'Y11')} S11=${numero(ws4, 'S11')}`);
+verifica('e lo dice', esito4.avvisi.some(a => /dicembre 2025/.test(a) && /non l'ho toccata/.test(a)), esito4.avvisi.join(' | '));
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

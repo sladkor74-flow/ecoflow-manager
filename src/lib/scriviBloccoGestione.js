@@ -27,6 +27,7 @@ const DISTANZA = 5;         // quattro righe vuote fra un blocco e il successivo
 const MESI_MAIUSCOLI = MESI_NOMI.map(m => m.toUpperCase());
 
 const ULTIMA_RIGA_EXCEL = 1048576; // oltre questa riga il foglio non esiste piu'
+const RIGHE_DI_SCARTO = 50;        // righe vuote ma formattate tollerate in fondo al foglio
 
 const intero = (n) => Math.round(Number(n) || 0);
 const mig = (v) => String(intero(v)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
@@ -332,6 +333,14 @@ export async function scriviBloccoNelFile(bytes, dati) {
 
   // --- Le righe nuove, in coda al foglio ---
   const ultima = foglio.righe.reduce((m, r) => Math.max(m, r.n), 0);
+  // L'ultima riga con qualcosa scritto dentro: una riga che porta solo
+  // formattazione - quello che resta di un incollato andato male - non e' la fine
+  // del foglio, e attaccarsi a quella metterebbe il blocco centinaia di righe
+  // sotto l'ultimo mese, dove nessuno lo trova.
+  const ultimaPiena = foglio.righe.reduce((m, r) => ([...r.celle.values()].some(c => c.v !== undefined || c.f !== null) ? Math.max(m, r.n) : m), 0);
+  if (ultima - ultimaPiena > RIGHE_DI_SCARTO) {
+    throw new Error(`Nel foglio ${FOGLIO} l'ultimo mese finisce alla riga ${ultimaPiena}, ma piu' in basso ci sono righe vuote e formattate fino alla ${ultima}: il blocco finirebbe ${mig(ultima - ultimaPiena)} righe sotto, lontano dagli altri. Non scrivo niente: seleziona le righe dopo la ${ultimaPiena}, cancellale e riprova.`);
+  }
   const inizio = ultima + DISTANZA;
   // Sotto l'ultima riga di Excel non c'e' niente: se in fondo al foglio e'
   // rimasta una riga di scarto (una formattazione, un incollato andato male) il
@@ -391,9 +400,14 @@ export async function scriviBloccoNelFile(bytes, dati) {
       const cella = posti.extra.celle.get(col);
       const valore = Number((cella || {}).v);
       if (!cella || !Number.isFinite(valore) || valore === 0) continue;
-      if (intero(valore) === intero(kg)) {
+      if (cella.f) {
+        // Una cella che si calcola da sola (nel file vero e' una SUMIFS sui
+        // formulari) non si svuota: cancellarla toglierebbe la formula per
+        // sempre e cambierebbe il totale dell'anno. Lo si dice e decide l'utente.
+        avvisi.push(`EXTRA RACCOLTA di ${altroMese} vale ${mig(valore)} kg e si calcola da sola con una formula: non l'ho toccata. Quei chili ora sono dichiarati in ${MESE}: guarda che non risultino due volte.`);
+      } else if (intero(valore) === intero(kg)) {
         cambiaCella(posti.extra, col, (vecchia) => cellaXml(cella.rif, (vecchia || {}).s, null));
-        avvisi.push(`EXTRA RACCOLTA di ${altroMese} svuotata (${mig(valore)} kg): la stessa raccolta ora sta in ${MESE}.${cella.f ? ' In quella cella c\'era una formula, ed e\' stata tolta con il numero.' : ''}`);
+        avvisi.push(`EXTRA RACCOLTA di ${altroMese} svuotata (${mig(valore)} kg): la stessa raccolta ora sta in ${MESE}.`);
       } else {
         avvisi.push(`ATTENZIONE: EXTRA RACCOLTA di ${altroMese} vale ${mig(valore)} kg e comprende altro oltre a questi ${mig(kg)} kg: non l'ho toccata, va vista a mano.`);
       }

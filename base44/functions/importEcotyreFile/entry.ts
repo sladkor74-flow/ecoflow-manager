@@ -4,8 +4,8 @@ import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
 import { enrichRecords } from "../../shared/dataEnrichment.ts";
-import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSignatures.ts";
-import { CAMPI_ASSEGNATO, archivioPrimaria } from "../../shared/primarie.ts";
+import { FILE_SIGNATURES, checkSignature, detectType, mappaColonne } from "../../shared/fileSignatures.ts";
+import { CAMPI_ASSEGNATO, DATE_PRIMARIE, archivioPrimaria, dataPrimaria } from "../../shared/primarie.ts";
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 import { annoRoma } from "../../shared/giornoItaliano.ts";
 
@@ -280,7 +280,10 @@ export default async function(req) {
     const rawRows = XLSX.utils.sheet_to_json(ws, { raw: true });
 
     // === 3. Mappa colonne Excel -> campi entita' ===
-    const colMap = config.columns;
+    // Le colonne si cercano con le intestazioni vere del foglio: la firma le
+    // accetta normalizzate, e cercarle qui col nome esatto lasciava fuori
+    // un'intestazione con uno spazio in coda (fileSignatures.mappaColonne).
+    const colMap = mappaColonne(config.columns, leggiIntestazioni(ws));
     const keyField = config.keyField || 'id_ordine';
     const mapped = rawRows.map(row => {
       const obj = {};
@@ -292,6 +295,13 @@ export default async function(req) {
           obj[entityField] = isNaN(n) ? null : n;
         } else if (DATE_FIELDS.has(entityField)) {
           obj[entityField] = toDateISO(val);
+        } else if (DATE_PRIMARIE.has(entityField)) {
+          // Immissione, inizio e fine trasporto (e la chiusura): si convertono
+          // per il campo, non perche' la cella sia arrivata come Date. Una
+          // colonna esportata come testo o come numero generico finiva in
+          // archivio come stringa e le tre date obbligatorie risultavano
+          // mancanti su tutte le righe del caricamento.
+          obj[entityField] = dataPrimaria(val);
         } else if (val instanceof Date) {
           obj[entityField] = val.toISOString();
         } else {

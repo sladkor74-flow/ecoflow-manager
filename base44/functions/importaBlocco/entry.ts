@@ -1,9 +1,9 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
-import { FILE_SIGNATURES, checkSignature, detectType } from "../../shared/fileSignatures.ts";
+import { FILE_SIGNATURES, checkSignature, detectType, mappaColonne } from "../../shared/fileSignatures.ts";
 import { enrichRecords } from "../../shared/dataEnrichment.ts";
-import { ARCHIVI_PRIMARIE, DATE_PRIMARIE, archivioPrimaria, recordAssegnato } from "../../shared/primarie.ts";
+import { ARCHIVI_PRIMARIE, DATE_PRIMARIE, archivioPrimaria, dataPrimaria, recordAssegnato } from "../../shared/primarie.ts";
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 import { fetchAll, RIGHE_PER_PAGINA, ultimaPagina } from "../../shared/fetchAll.ts";
 import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
@@ -123,14 +123,6 @@ function serialeExcelInData(seriale) {
   return new Date(Date.UTC(1899, 11, 30) + Math.round(seriale * 86400000));
 }
 
-// Date delle primarie: il portale le registra al secondo.
-function dataPrimaria(val) {
-  if (typeof val === 'number' && val > 20000) {
-    return new Date(Date.UTC(1899, 11, 30) + Math.round(val * 86400) * 1000).toISOString();
-  }
-  return convertiData(val);
-}
-
 function convertiData(val) {
   if (val === undefined || val === null || val === '') return null;
   if (val instanceof Date) return isNaN(val.getTime()) ? null : val.toISOString();
@@ -144,12 +136,15 @@ function convertiData(val) {
 }
 
 // Trasforma una riga grezza del foglio nell'oggetto dell'entita'.
+// Le date si riconoscono dal campo, non dal tipo di file: la conversione delle
+// tre date obbligatorie era accesa solo per le primarie, e un nuovo slot che
+// porta le stesse colonne sarebbe entrato con le date illeggibili.
 function mappaRiga(row, colMap, primarie = false) {
   const obj = {};
   for (const [colonnaExcel, campo] of Object.entries(colMap)) {
     const val = row[colonnaExcel];
     if (DATE_FIELDS.has(campo)) { obj[campo] = convertiData(val); continue; }
-    if (primarie && DATE_PRIMARIE.has(campo)) { obj[campo] = dataPrimaria(val); continue; }
+    if (DATE_PRIMARIE.has(campo)) { obj[campo] = dataPrimaria(val); continue; }
     if (val === undefined || val === null || val === '') { obj[campo] = null; continue; }
     if (NUMERIC_FIELDS.has(campo)) {
       const n = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.'));

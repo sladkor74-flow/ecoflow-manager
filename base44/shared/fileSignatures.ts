@@ -118,6 +118,33 @@ export function checkSignature(
   return { match, chiave_mancanti, vietate_trovate, attese_mancanti };
 }
 
+// La mappa colonna del foglio -> campo dell'entita', costruita sulle
+// intestazioni vere del file.
+//
+// Il controllo della firma qui sopra normalizza (spazi doppi, spazi in coda,
+// maiuscole), mentre la lettura delle righe cercava la colonna con il nome
+// esatto di SHEET_MAP: un'intestazione con uno spazio in coda passava il
+// controllo e poi non veniva letta, e le sue date finivano a null senza che
+// nessuno lo dicesse. Si e' scelto di rendere la lettura tollerante quanto il
+// controllo, non di rifiutare il file: un export valido non va respinto per uno
+// spazio, e il file del portale e' gia' stato riconosciuto. Una colonna che nel
+// file non c'e' resta col suo nome, e vale null come prima.
+export function mappaColonne(
+  colMap: Record<string, string>,
+  intestazioni: string[]
+): Record<string, string> {
+  const vere = new Map<string, string>();
+  for (const h of intestazioni || []) {
+    const n = normalizeColName(h);
+    if (n && !vere.has(n)) vere.set(n, String(h));
+  }
+  const risolta: Record<string, string> = {};
+  for (const [colonna, campo] of Object.entries(colMap)) {
+    risolta[vere.get(normalizeColName(colonna)) ?? colonna] = campo;
+  }
+  return risolta;
+}
+
 // Trova quale tipo_file (tra quelli con firma) corrisponde alle intestazioni.
 export function detectType(headers: string[]): string | null {
   for (const [tipo, sig] of Object.entries(FILE_SIGNATURES)) {
