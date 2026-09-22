@@ -12,6 +12,7 @@ import { leggiRegistroIrigom } from '@/lib/registroIrigom';
 import { componiMese, dividiExtra, MESI, extraDaSalvare, extraGiaDichiarate, finestraExtra, extraDellePratiche, dichiarazioniExtra, testoExtraCompresa } from '@/lib/praticaIrigom';
 import { wordDelMese, excelDelMese, cartellaZip, dataIt, datiFileGestione } from '@/lib/documentiIrigom';
 import { scarica } from '@/lib/docxModello';
+import { timbraPdf } from '@/lib/timbraPdf';
 import ModelliIrigom from '@/components/dichiarazioni/ModelliIrigom';
 
 // La pratica mensile delle dichiarazioni di Irigom, dentro il gestionale.
@@ -400,7 +401,8 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
         // I dati per scrivere il blocco del mese nel file di gestione (strumenti/irigom/scrivi_blocco_mese.ps1).
         file.push({ percorso: `${MESE}/Dati per il file di gestione.json`, bytes: new TextEncoder().encode(JSON.stringify(datiFileGestione({ pratica, contesto: contesto() }), null, 1)) });
         // I PDF forniti, dove li vuole il repository; gli allegati VII anche col
-        // numero della terziaria, come si caricano a portale.
+        // numero della terziaria, nel nome e scritto in alto sulla prima pagina.
+        const nonTimbrati = [];
         for (const d of documenti) {
           const bytes = new Uint8Array(await d.file.arrayBuffer());
           if (d.tipo === 'formulario') file.push({ percorso: `${MESE}/FERRO/${d.chiave}.pdf`, bytes });
@@ -409,13 +411,20 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
           else if (d.tipo === 'allegato') {
             file.push({ percorso: `${MESE}/EXPORT/ALLEGATI VII/${d.nome}`, bytes });
             const r = pratica.terziarie.righe.find(x => String(x.allegato) === d.chiave);
-            if (r && r.terziaria) file.push({ percorso: `${MESE}/EXPORT/TERZIARIE/${r.terziaria}.pdf`, bytes });
+            if (r && r.terziaria) {
+              // La copia per il portale porta il numero della terziaria nel nome e
+              // scritto in alto a destra sulla prima pagina. Se il PDF non si
+              // lascia scrivere, la copia resta quella originale e lo si dice.
+              const timbro = await timbraPdf(bytes, r.terziaria);
+              if (!timbro.timbrato) nonTimbrati.push(`${r.terziaria} (allegato ${r.allegato})`);
+              file.push({ percorso: `${MESE}/EXPORT/TERZIARIE/${r.terziaria}.pdf`, bytes: timbro.bytes });
+            }
           } else file.push({ percorso: `${MESE}/ALTRI/${d.nome}`, bytes });
         }
         scarica(cartellaZip(file), `${nomeCartella(mese, anno)}.zip`);
         const vuoti = [...new Set(word.flatMap(w => w.vuoti))];
         const mancanoModelli = ['ferro', 'nave', 'extra', 'cssc'].filter(k => !m[k]);
-        setEsito({ tipo: 'cartella', vuoti, word: word.length, mancanoModelli });
+        setEsito({ tipo: 'cartella', vuoti, word: word.length, mancanoModelli, nonTimbrati });
       }
       if (isAdmin) { await salvaBozza(); await caricaArchivi(); }
     } catch (e) {
@@ -650,7 +659,11 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                     {pratica.terziarie.righe.length > 0 && (
                       <div className="border rounded-lg px-3 py-2 text-xs space-y-1">
                         <p className="font-semibold">Allegati VII scelti: {pratica.allegati.scelti.map(a => a.numero).join(', ')}</p>
-                        <p className="text-muted-foreground">Prima quelli trasportati da SMOCO, poi TRANSAR, poi gli altri, finché coprono il ciabattato uscito: {formatKg(pratica.allegati.coperto_kg)} kg per {formatKg(riga.uscite_cippato_kg)}.</p>
+                        <p className="text-muted-foreground">
+                          La combinazione più vicina al ciabattato uscito, cercata fra {pratica.allegati.bacino === 'SMOCO' ? 'i soli allegati di SMOCO' : pratica.allegati.bacino === 'SMOCO e TRANSAR' ? 'gli allegati di SMOCO e TRANSAR, perché i soli SMOCO non bastavano' : 'tutti gli allegati, perché SMOCO e TRANSAR non bastavano'}:
+                          {' '}{formatKg(pratica.allegati.coperto_kg)} kg per {formatKg(riga.uscite_cippato_kg)} da coprire{pratica.allegati.scarto_kg > 0 ? `, ${formatKg(pratica.allegati.scarto_kg)} kg in più che restano fuori dall'ultima terziaria` : ', esatti'}.
+                          {' '}Su {pratica.allegati.ordinati.length} allegati del mese.
+                        </p>
                         <p className="text-sm pt-1 flex items-center gap-2 text-primary font-medium">
                           <ClipboardCheck className="w-4 h-4" /> Apri a portale {pratica.terziarie_da_aprire} {pratica.terziarie_da_aprire === 1 ? 'terziaria' : 'terziarie'} da Irigom, con peso indicativo 1 kg.
                         </p>
@@ -852,6 +865,7 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                   <p><CheckCircle2 className="w-3.5 h-3.5 inline text-emerald-600 mr-1" />Cartella scaricata: {esito.word} Word, il riepilogo Excel e i PDF forniti.</p>
                   {esito.mancanoModelli.length > 0 && <p className="text-amber-700">Mancano i modelli per: {esito.mancanoModelli.join(', ')}. Caricali qui sopra.</p>}
                   {esito.vuoti.length > 0 && <p className="text-amber-700">Nei Word sono rimasti da riempire: {esito.vuoti.join(', ')}.</p>}
+                  {(esito.nonTimbrati || []).length > 0 && <p className="text-amber-700">Su questi allegati non sono riuscito a scrivere il numero della terziaria (il file ha comunque il nome giusto): {esito.nonTimbrati.join(', ')}.</p>}
                 </div>
               )}
               {esito && esito.tipo === 'registrata' && (

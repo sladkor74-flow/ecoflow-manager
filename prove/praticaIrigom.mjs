@@ -26,13 +26,56 @@ verifica('111.500 di peso, 82.500 di quota', ff.peso_kg === 111500 && ff.quota_k
 verifica('MMF escluso anche se arancione', formulariFerro([{ destinatario: 'MMF', colore: 'FFC000', kg: 1000 }]).quota_kg === 0);
 
 console.log('GLI ALLEGATI VII');
-const sc = scegliAllegati(A.allegati, A.riga.uscite_cippato_kg);
+// Agosto e' stato dichiarato col criterio di allora ('ordine'): la pratica si
+// rifa' uguale solo chiedendolo. Il criterio di adesso e' piu' avanti.
+const sc = scegliAllegati(A.allegati, A.riga.uscite_cippato_kg, { criterio: 'ordine' });
 verifica('i 17 allegati scelti', JSON.stringify(sc.scelti.map(a => a.numero)) === JSON.stringify(A.attese.allegati_scelti), JSON.stringify(sc.scelti.map(a => a.numero)));
 verifica('coprono 463.800 kg', sc.coperto_kg === 463800, String(sc.coperto_kg));
 verifica('prima SMOCO, poi TRANSAR', scegliAllegati([{ numero: 1, trasportatore: 'ALTRO', kg: 10 }, { numero: 2, trasportatore: 'TRANSAR', kg: 10 }, { numero: 3, trasportatore: 'SMOCO', kg: 10 }], 30).ordinati.map(a => a.numero).join() === '3,2,1');
 
+console.log('GLI ALLEGATI VII: LA COMBINAZIONE PIU\' VICINA (22/09/2026)');
+const vicino = scegliAllegati(A.allegati, A.riga.uscite_cippato_kg);
+verifica('su agosto sfora meno del criterio di allora', vicino.coperto_kg >= A.riga.uscite_cippato_kg && vicino.coperto_kg < 463800, `${vicino.coperto_kg} contro 463800`);
+verifica('sono tutti SMOCO: gli altri trasportatori non servono', vicino.scelti.every(a => /smoco/i.test(a.trasportatore)) && vicino.bacino === 'SMOCO');
+verifica('lo scarto e\' quello dichiarato', vicino.scarto_kg === vicino.coperto_kg - A.riga.uscite_cippato_kg && vicino.basta);
+const esatto = scegliAllegati([
+  { numero: 1, trasportatore: 'SMOCO', kg: 30000 }, { numero: 2, trasportatore: 'SMOCO', kg: 20000 },
+  { numero: 3, trasportatore: 'SMOCO', kg: 25000 }, { numero: 4, trasportatore: 'SMOCO', kg: 5000 },
+], 25000);
+verifica('se una combinazione fa il peso esatto, si prende quella', esatto.coperto_kg === 25000 && esatto.scarto_kg === 0, JSON.stringify(esatto.scelti.map(a => a.numero)));
+verifica('a parita\' di somma vincono gli allegati di testa', esatto.scelti.map(a => a.numero).join() === '2,4' || esatto.scelti.map(a => a.numero).join() === '3', JSON.stringify(esatto.scelti.map(a => a.numero)));
+const soloConTransar = scegliAllegati([
+  { numero: 1, trasportatore: 'SMOCO', kg: 10000 }, { numero: 2, trasportatore: 'TRANSAR', kg: 12000 }, { numero: 3, trasportatore: 'ALTRO', kg: 11000 },
+], 21000);
+verifica('se SMOCO non basta si aggiunge TRANSAR, non gli altri', soloConTransar.coperto_kg === 22000 && soloConTransar.bacino === 'SMOCO e TRANSAR'
+  && soloConTransar.scelti.map(a => a.numero).join() === '1,2', JSON.stringify(soloConTransar.scelti.map(a => a.numero)));
+const nonBasta = scegliAllegati([{ numero: 1, trasportatore: 'SMOCO', kg: 1000 }, { numero: 2, trasportatore: 'ALTRO', kg: 2000 }], 10000);
+verifica('se nemmeno tutti bastano si prende tutto e si dice che non basta', nonBasta.coperto_kg === 3000 && !nonBasta.basta && nonBasta.scelti.length === 2);
+verifica('senza allegati non sceglie niente', scegliAllegati([], 1000).scelti.length === 0 && scegliAllegati(null, 0).coperto_kg === 0);
+
+// Contro una ricerca esaustiva: su insiemi piccoli la combinazione trovata deve
+// essere la migliore possibile, cioe' la somma piu' piccola che copre il peso.
+let peggiori = 0;
+let seme = 12345;
+const caso = () => { seme = (seme * 1103515245 + 12345) & 0x7fffffff; return seme / 0x7fffffff; };
+for (let prova = 0; prova < 60; prova++) {
+  const n = 2 + Math.floor(caso() * 9);
+  const pezzi = Array.from({ length: n }, (_, i) => ({ numero: i + 1, trasportatore: 'SMOCO', kg: 100 + Math.floor(caso() * 9900) }));
+  const bersaglio = Math.floor(caso() * pezzi.reduce((s, p) => s + p.kg, 0));
+  let migliore = Infinity;
+  for (let mask = 0; mask < (1 << n); mask++) {
+    let s = 0;
+    for (let i = 0; i < n; i++) if (mask & (1 << i)) s += pezzi[i].kg;
+    if (s >= bersaglio && s < migliore) migliore = s;
+  }
+  const trovato = scegliAllegati(pezzi, bersaglio);
+  const sommaScelti = trovato.scelti.reduce((s, p) => s + p.kg, 0);
+  if (trovato.coperto_kg !== migliore || sommaScelti !== trovato.coperto_kg) peggiori++;
+}
+verifica('60 casi a caso: sempre la somma migliore, e gli allegati scelti la fanno davvero', peggiori === 0, `${peggiori} casi sbagliati`);
+
 console.log('LA PRATICA DI AGOSTO, COME E\' STATA FATTA (LETTURA DALLE USCITE)');
-const m = componiMese({ riga: A.riga, ferro: A.ferro, allegati: A.allegati, ddt: [], lettura: 'uscite', extra: A.extra, terziarie: A.terziarie });
+const m = componiMese({ criterio: 'ordine', riga: A.riga, ferro: A.ferro, allegati: A.allegati, ddt: [], lettura: 'uscite', extra: A.extra, terziarie: A.terziarie });
 verifica('nessun blocco', m.blocchi.length === 0, JSON.stringify(m.blocchi));
 verifica('17 terziarie da aprire', m.terziarie_da_aprire === 17);
 const righe = m.terziarie.righe.map(r => ({ terziaria: r.terziaria, allegato: r.allegato, peso_allegato_kg: r.peso_allegato_kg, cippato_kg: r.cippato_kg, ferro_kg: r.ferro_kg, totale_kg: r.totale_kg }));
@@ -63,7 +106,7 @@ verifica('i materiali di rete fanno la rete', m.materiali.cippato_kg + m.materia
 console.log('LA LETTURA DALLA GIACENZA AD AGOSTO: LE DUE LETTURE COINCIDONO');
 // Giacenza di rete a portale a fine agosto, per fine trasporto (le secondarie con
 // la fine trasporto della secondaria): 679.380 kg. Deve restare AD + AE = 144.780.
-const g = componiMese({ riga: A.riga, ferro: A.ferro, allegati: A.allegati, lettura: 'giacenza', portaleFineMeseKg: A.portale_fine_mese_kg, extra: A.extra, terziarie: A.terziarie });
+const g = componiMese({ criterio: 'ordine', riga: A.riga, ferro: A.ferro, allegati: A.allegati, lettura: 'giacenza', portaleFineMeseKg: A.portale_fine_mese_kg, extra: A.extra, terziarie: A.terziarie });
 verifica('nessun blocco e nessun avviso', g.blocchi.length === 0 && g.avvisi.length === 0, JSON.stringify([g.blocchi, g.avvisi]));
 verifica('a portale 679.380 - (144.780 + 0) = 534.600', g.letture.giacenza.totale_kg === 534600 && g.portale_kg === 534600, `${g.letture.giacenza.totale_kg} ${g.portale_kg}`);
 verifica('di cui rete 534.140 ed extra 460', g.rete_kg === 534140 && g.extra_kg === 460 && g.letture.giacenza.rete_kg === 534140, `${g.rete_kg} ${g.extra_kg}`);
@@ -86,7 +129,7 @@ verifica('il CSS-C in giacenza non conta', conCssc.letture.giacenza.resta_kg ===
 console.log('UN MESE SENZA EXTRA RACCOLTA NON CAMBIA');
 // Agosto senza l'extra: tutto e' rete, l'ultima terziaria prende 15.440 + 4.900 e
 // si chiude col suo totale.
-const senza = componiMese({ riga: A.riga, ferro: A.ferro, allegati: A.allegati, lettura: 'giacenza', portaleFineMeseKg: A.portale_fine_mese_kg, terziarie: A.terziarie });
+const senza = componiMese({ criterio: 'ordine', riga: A.riga, ferro: A.ferro, allegati: A.allegati, lettura: 'giacenza', portaleFineMeseKg: A.portale_fine_mese_kg, terziarie: A.terziarie });
 const ultimaSenza = senza.terziarie.righe[senza.terziarie.righe.length - 1];
 verifica('a portale = rete = 534.600, niente extra', senza.portale_kg === 534600 && senza.rete_kg === 534600 && senza.extra_kg === 0 && senza.extra === null, `${senza.portale_kg} ${senza.rete_kg}`);
 verifica('l\'ultima si chiude col suo totale', ultimaSenza.cippato_kg === 15440 && ultimaSenza.ferro_kg === 4900 && ultimaSenza.totale_kg === 20340 && ultimaSenza.chiusura_portale_kg === 20340
@@ -118,7 +161,7 @@ verifica('a ottobre l\'extra si ripropone', !extraGiaDichiarate([registrataSet],
 verifica('e nessuna dichiarazione di extra da scrivere', settembre.extra === null && extraDellePratiche([registrataSet]).size === 0);
 // Con la nave, invece, i formulari restano nella pratica: agosto 2026, l'extra di luglio.
 const extraLuglio = { ...A.extra, formulari: [{ ...A.extra.formulari[0], id: 'x-lug', fine_trasporto: '2026-07-21' }] };
-const agostoConId = componiMese({ riga: A.riga, ferro: A.ferro, allegati: A.allegati, lettura: 'uscite', extra: extraLuglio, terziarie: A.terziarie });
+const agostoConId = componiMese({ criterio: 'ordine', riga: A.riga, ferro: A.ferro, allegati: A.allegati, lettura: 'uscite', extra: extraLuglio, terziarie: A.terziarie });
 const agostoReg = { anno: 2026, mese: 'Agosto', stato: 'registrata', extra_json: JSON.stringify(extraDaSalvare(agostoConId, 0.26)) };
 verifica('con la nave l\'extra resta nella pratica e a settembre non si ripropone', extraGiaDichiarate([agostoReg], { anno: 2026, mese: 'Settembre' }).has('x-lug')
   && JSON.parse(agostoReg.extra_json).cippato_kg === 340 && JSON.parse(agostoReg.extra_json).ferro_kg === 120);
@@ -131,7 +174,7 @@ console.log('LE DATE OBBLIGATORIE DEI FORMULARI DELL\'EXTRA');
 // pratica (l'extra e' partita) ma si segnala negli avvisi e accanto ai documenti.
 const senzaInizio = { stato: 'terminato', ordine_immesso_il: '2026-07-01T08:00:00Z', trasporto_finito_il: '2026-07-21T10:00:00Z' };
 const extraSenzaInizio = { ...A.extra, formulari: [{ ...A.extra.formulari[0], date_da_sistemare: dateDaSistemare(senzaInizio) ? testoDate(senzaInizio) : '' }] };
-const conDate = componiMese({ riga: A.riga, ferro: A.ferro, allegati: A.allegati, lettura: 'uscite', extra: extraSenzaInizio, terziarie: A.terziarie });
+const conDate = componiMese({ criterio: 'ordine', riga: A.riga, ferro: A.ferro, allegati: A.allegati, lettura: 'uscite', extra: extraSenzaInizio, terziarie: A.terziarie });
 verifica('si segnala negli avvisi e nel passo dei documenti', conDate.avvisi.some(a => /BSDCL002230PQ/.test(a) && /manca la data di inizio trasporto/.test(a)) && conDate.extra.avvisi_date.length === 1, JSON.stringify(conDate.avvisi));
 verifica('e resta nella pratica: 534.600 a portale, 460 di extra', conDate.portale_kg === 534600 && conDate.extra_kg === 460 && conDate.blocchi.length === 0);
 verifica('con le date a posto nessun avviso', m.extra.avvisi_date.length === 0);

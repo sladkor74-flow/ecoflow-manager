@@ -329,9 +329,16 @@ quella prova.
   cella arancione FFC000 per intero; altrimenti conta la **nota** di Excel
   ("ECT: 6,62" in tonnellate, anche "27,5 ECP 1,06 ECT"), non il colore, che
   cambia nell'anno. La somma deve fare la colonna X del foglio Cons.
-- **Allegati VII** (J numero, AL peso): prima SMOCO, poi TRANSAR, poi gli altri,
-  per numero, finche' coprono il ciabattato uscito (V). Tante terziarie quanti
-  allegati; le TER in ordine crescente vanno agli allegati in ordine di scelta.
+- **Allegati VII** (J numero, AL peso): si cerca la **combinazione con la somma
+  piu' vicina al ciabattato uscito** (V), mai sotto se si puo', prima fra i soli
+  **SMOCO**; se non bastano si aggiungono i **TRANSAR** e per ultimi gli altri
+  trasportatori (regola dell'utente del 22/09/2026, `combinazioneVicina` in
+  `src/lib/praticaIrigom.js`: tutte le somme possibili, poi si tolgono gli
+  allegati di coda che non servono, cosi' restano quelli di testa). Tante
+  terziarie quanti allegati; le TER in ordine crescente vanno agli allegati in
+  ordine di scelta. Agosto 2026 e' stato dichiarato con la regola di prima - i
+  primi dell'ordine finche' bastano - che resta come `criterio: 'ordine'` per
+  rifare una pratica gia' consegnata.
 - **Ripartizione**: ciabattato a peso pieno dell'allegato, l'ultima terziaria il
   resto; ferro uguale per tutte alle decine, l'ultima il resto; mai oltre 38.000
   kg per dichiarazione, sul peso con cui la dichiarazione si chiude a portale.
@@ -354,11 +361,18 @@ quella prova.
   quello che il portale decurta e che `agganciaDichiarazioni` riconosce con 2 kg
   di tolleranza; nella nota c'e' `[extra compresa: N kg]`. L'extra ha la sua
   DichiarazioneSito sul mese del formulario.
-- **Ogni mese** (procedura dell'utente): scelti gli allegati VII, si chiede
-  all'utente di aprire a portale tante terziarie quanti sono; con i numeri TER si
-  scrive il blocco del mese nel foglio DICHIARAZIONI del file di gestione e si
-  rinominano gli allegati scelti col numero della terziaria (la cartella del mese
-  scaricata li porta gia' in `EXPORT/TERZIARIE`). Il blocco lo scrive, con Excel,
+- **Ogni mese** (procedura dell'utente, 22/09/2026). L'utente aggiorna il
+  registro di Irigom e lo dice; **l'agente lo legge e riferisce**: quanti e quali
+  formulari di ferro valgono (colore della cella e nota, con il motivo di ognuno),
+  quanti e quali DDT di CSS-C, quali allegati VII della nave coprono il mese e
+  **quante terziarie aprire a portale**. Per leggere il registro da fuori dal
+  browser c'e' `C:\Users\HOME\Desktop\BASE44\strumenti\irigom\leggi_registro.mjs`
+  (stesse regole del gestionale). Ricevuti i numeri TER e i PDF, si fanno Word ed
+  Excel, si scrive il blocco del mese nel foglio DICHIARAZIONI del file di
+  gestione e gli allegati scelti prendono il numero della terziaria nel nome e
+  **scritto in alto a destra sulla prima pagina** (`src/lib/timbraPdf.js`); la
+  cartella del mese scaricata li porta gia' cosi' in `EXPORT/TERZIARIE`. Il
+  blocco lo scrive, con Excel,
   `C:\Users\HOME\Desktop\BASE44\strumenti\irigom\scrivi_blocco_mese.ps1` dal file
   `Dati per il file di gestione.json` della cartella (`datiFileGestione` in
   `src/lib/documentiIrigom.js`); istruzioni in `LEGGIMI.md` accanto.

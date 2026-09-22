@@ -98,20 +98,112 @@ export function ordinaAllegati(allegati) {
 }
 
 /**
- * Gli allegati VII da dichiarare: il gruppo piu' corto, nell'ordine di priorita',
- * che arriva almeno al ciabattato uscito nel mese (extra raccolta compresa).
- * Tante terziarie quanti allegati scelti.
+ * La combinazione di allegati con la somma piu' vicina al peso da coprire, mai
+ * sotto se si puo' fare: fra due che vanno bene uguale vince quella che usa gli
+ * allegati piu' avanti nell'ordine di priorita' (SMOCO, TRANSAR, gli altri) e
+ * con i numeri piu' bassi.
+ *
+ * Si cercano tutte le somme possibili con un insieme di bit per passo, e poi si
+ * torna indietro scartando l'allegato piu' recente ogni volta che la somma si
+ * raggiunge anche senza: cosi' restano quelli di testa.
  */
-export function scegliAllegati(allegati, cippatoKg) {
-  const ordinati = ordinaAllegati(allegati);
-  const scelti = [];
-  let coperto = 0;
-  for (const a of ordinati) {
-    if (coperto >= cippatoKg) break;
-    scelti.push(a);
-    coperto += intero(a.kg);
+function combinazioneVicina(pool, target) {
+  const pesi = pool.map(a => Math.max(0, intero(a.kg)));
+  const n = pesi.length;
+  const massimo = pesi.reduce((s, k) => s + k, 0);
+  if (!n || massimo === 0) return { scelti: [], somma: 0 };
+  // oltre il peso da coprire non serve guardare piu' del piu' grande allegato
+  const limite = Math.min(massimo, target + Math.max(...pesi));
+  const parole = (limite >> 5) + 1;
+  // strati[i] = le somme che si fanno con i primi i allegati
+  const strati = [new Uint32Array(parole)];
+  strati[0][0] = 1;
+  for (let i = 0; i < n; i++) {
+    const prima = strati[i];
+    const dopo = new Uint32Array(prima);
+    const k = pesi[i];
+    if (k > 0 && k <= limite) {
+      const salto = k >> 5, bit = k & 31;
+      for (let w = parole - 1; w >= 0; w--) {
+        const sorgente = w - salto;
+        if (sorgente < 0) break;
+        let v = prima[sorgente] << bit;
+        if (bit && sorgente > 0) v |= prima[sorgente - 1] >>> (32 - bit);
+        dopo[w] |= v;
+      }
+    }
+    strati.push(dopo);
   }
-  return { ordinati, scelti, coperto_kg: coperto, basta: coperto >= intero(cippatoKg) };
+  const raggiunta = (strato, s) => s >= 0 && s <= limite && (strati[strato][s >> 5] & (1 << (s & 31))) !== 0;
+  let migliore = null;
+  for (let s = 0; s <= limite; s++) {
+    if (!raggiunta(n, s)) continue;
+    const scarto = Math.abs(s - target);
+    const sotto = s < target ? 1 : 0;
+    if (!migliore || sotto < migliore.sotto || (sotto === migliore.sotto && scarto < migliore.scarto)) {
+      migliore = { somma: s, scarto, sotto };
+    }
+  }
+  if (!migliore) return { scelti: [], somma: 0 };
+  const usati = [];
+  let resto = migliore.somma;
+  for (let i = n; i > 0; i--) {
+    if (raggiunta(i - 1, resto)) continue; // si arriva anche senza questo
+    usati.push(i - 1);
+    resto -= pesi[i - 1];
+  }
+  return { scelti: usati.reverse().map(i => pool[i]), somma: migliore.somma };
+}
+
+/**
+ * Gli allegati VII da dichiarare: la combinazione con la somma piu' vicina al
+ * ciabattato uscito nel mese (extra raccolta compresa), mai sotto se si puo'.
+ * Si cerca prima fra i soli SMOCO; se non bastano si aggiungono i TRANSAR e per
+ * ultimi gli altri trasportatori (regola dell'utente). Tante terziarie quanti
+ * allegati scelti, e l'ultimo si dichiara in parte.
+ *
+ * Fino al 22/09/2026 si prendevano i primi dell'ordine finche' non bastavano: la
+ * somma sforava anche di molto e l'ultima terziaria restava lontana dal peso del
+ * suo allegato.
+ */
+export function scegliAllegati(allegati, cippatoKg, { criterio = 'vicino' } = {}) {
+  const ordinati = ordinaAllegati(allegati);
+  const target = intero(cippatoKg);
+  // 'ordine' e' la regola di prima del 22/09/2026: i primi dell'ordine finche'
+  // non bastano. Serve a rifare una pratica gia' consegnata con quella regola
+  // (agosto 2026) senza cambiarne gli allegati.
+  if (criterio === 'ordine') {
+    const scelti = [];
+    let coperto = 0;
+    for (const a of ordinati) {
+      if (coperto >= target) break;
+      scelti.push(a);
+      coperto += intero(a.kg);
+    }
+    return { ordinati, scelti, coperto_kg: coperto, basta: coperto >= target, scarto_kg: coperto - target, bacino: 'ordine di priorita\'' };
+  }
+  const bacini = [
+    { fino: 0, nome: 'SMOCO' },
+    { fino: 1, nome: 'SMOCO e TRANSAR' },
+    { fino: 2, nome: 'tutti i trasportatori' },
+  ];
+  let ultima = { scelti: [], somma: 0, nome: '' };
+  for (const b of bacini) {
+    const pool = ordinati.filter(a => gruppoTrasporto(a) <= b.fino);
+    if (!pool.length) continue;
+    const c = combinazioneVicina(pool, target);
+    ultima = { ...c, nome: b.nome };
+    if (c.somma >= target) break;
+  }
+  const scelti = ordinaAllegati(ultima.scelti);
+  return {
+    ordinati,
+    scelti,
+    coperto_kg: ultima.somma,
+    basta: ultima.somma >= target,
+    scarto_kg: ultima.somma - target,
+    bacino: ultima.nome,
+  };
 }
 
 /**
@@ -340,7 +432,7 @@ export function extraCompresaDaNota(note) {
  * @param {number} p.extraInGiacenzaKg extra raccolta arrivata a Irigom entro fine mese e non ancora lavorata
  * @param {array}  p.terziarie       numeri TER aperti a portale, se gia' ci sono
  */
-export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portaleFineMeseKg = null, lettura = 'giacenza', extra = null, extraInGiacenzaKg = 0, terziarie = [] }) {
+export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portaleFineMeseKg = null, lettura = 'giacenza', extra = null, extraInGiacenzaKg = 0, terziarie = [], criterio = 'vicino' }) {
   const avvisi = [];
   const blocchi = [];
   const V = intero(riga && riga.uscite_cippato_kg);
@@ -350,7 +442,7 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
   // Gli allegati VII: quanti ne servono a coprire il ciabattato. Si scelgono
   // prima delle letture perche' dicono se nel mese e' partita una nave, e con
   // lei l'extra raccolta.
-  const scelta = scegliAllegati(allegati, V);
+  const scelta = scegliAllegati(allegati, V, { criterio });
   const n = scelta.scelti.length;
 
   // L'extra raccolta esce solo con la nave, nell'ultima terziaria. Senza
