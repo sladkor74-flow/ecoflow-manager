@@ -339,6 +339,10 @@ quella prova.
   ordine di scelta. Agosto 2026 e' stato dichiarato con la regola di prima - i
   primi dell'ordine finche' bastano - che resta come `criterio: 'ordine'` per
   rifare una pratica gia' consegnata.
+- **Domanda aperta** (22/09/2026): nel foglio Dettaglio alcune celle del peso
+  degli allegati VII sono gialle (6 ad agosto, fra cui il n. 30 che abbiamo
+  dichiarato): non e' un marcatore di 'non nostro'. L'utente lo chiedera' a
+  Irigom e vuole che glielo si ricordi: tirarlo fuori alla prossima pratica.
 - **Ripartizione**: ciabattato a peso pieno dell'allegato, l'ultima terziaria il
   resto; ferro uguale per tutte alle decine, l'ultima il resto; mai oltre 38.000
   kg per dichiarazione, sul peso con cui la dichiarazione si chiude a portale.
