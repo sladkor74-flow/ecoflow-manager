@@ -66,7 +66,11 @@ export function riassuntoArchivio(saldo, canale = 'RETE') {
     negativo,
     senza_fine: c.senza_fine,
     // Quello che si legge sulla riga: sempre da quando conta, mai «giacenza».
-    riga: `dai soli movimenti in archivio dal ${fmtGiorno(c.dal)}: ${formatTonnellate(c.saldo_kg / 1000)} t`,
+    // Sotto zero il numero da solo si leggerebbe come una giacenza impossibile:
+    // la riga stessa dice che l'archivio non copre tutta la storia del piazzale.
+    riga: negativo
+      ? `dai soli movimenti in archivio dal ${fmtGiorno(c.dal)}: ${formatTonnellate(c.saldo_kg / 1000)} t, cioe' l'archivio non copre tutto`
+      : `dai soli movimenti in archivio dal ${fmtGiorno(c.dal)}: ${formatTonnellate(c.saldo_kg / 1000)} t`,
     dettaglio: `${formatIntero(c.movimenti)} movimenti fino al ${fmtGiorno(c.al)}: ${formatIntero(c.ingressi)} ingressi per ${formatKg(c.ingressi_kg)} kg, ${formatIntero(c.uscite)} uscite per ${formatKg(c.uscite_kg)} kg.`,
     avvertenza: negativo
       ? `Sotto zero, e non e' un errore di conto: l'archivio non arriva a quando il piazzale era vuoto. I movimenti caricati cominciano il ${fmtGiorno(c.dal)} e manca tutto quello che c'era prima, percio' questo numero non e' una giacenza.`
