@@ -33,6 +33,7 @@ import { contaFormulari } from "./formulari.ts";
 import { formatoKg } from "./formato.ts";
 import {
   CLASSI_RILEVAZIONE,
+  ancoraDellAnno,
   classiDiRilevazione,
   momentoRilevazione,
   movimentoStoccaggio,
@@ -306,8 +307,19 @@ export function confrontoPiazzale(piazzale, { anno, fotografiaDel = '', lettura:
     atteso: c.atteso,
   }));
 
-  const verifica_lettura = lettura ? verificaRilevazione(rilevazioneDaLettura(piazzale.nome, giorno, rett.lettura), precedente, movimenti) : null;
-  const verifica_da_salvare = lettura ? verificaRilevazione(rilevazioneDaLettura(piazzale.nome, giorno, rett.classi), precedente, movimenti) : null;
+  // La chiusura si giudica anche dall'ancora dell'anno: la giacenza da cui
+  // l'anno e' ripartito, piu' tutti i movimenti da allora. E' il criterio con cui
+  // si chiude - si riparte da una giacenza dichiarata e non si sbaglia piu' - e
+  // qui serve piu' che altrove: se una lettura di mezzo era storta, il confronto
+  // con la sola precedente accuserebbe proprio la chiusura.
+  const ancora = ancoraDellAnno(storico, anno);
+  const ancoraDel = ancora ? momentoRilevazione(ancora) : '';
+  const intermedie = ancoraDel
+    ? storico.filter(r => momentoRilevazione(r) > ancoraDel && momentoRilevazione(r) < giorno)
+    : [];
+  const conAncora = { ancora, intermedie };
+  const verifica_lettura = lettura ? verificaRilevazione(rilevazioneDaLettura(piazzale.nome, giorno, rett.lettura), precedente, movimenti, conAncora) : null;
+  const verifica_da_salvare = lettura ? verificaRilevazione(rilevazioneDaLettura(piazzale.nome, giorno, rett.classi), precedente, movimenti, conAncora) : null;
 
   const negative = CLASSI_RILEVAZIONE.filter(c => rett.classi[c] < 0);
   const blocchi = [];

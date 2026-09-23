@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel, AlertDialogFooter } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/use-toast';
-import { RefreshCw, Download, Save, Upload, AlertTriangle, CheckCircle2, Camera, ClipboardList, ChevronDown, ChevronRight, Info } from 'lucide-react';
+import { RefreshCw, Download, Save, Upload, AlertTriangle, CheckCircle2, Camera, ClipboardList, ChevronDown, ChevronRight, Info, Anchor } from 'lucide-react';
 import { formatKg } from '@/lib/utils';
 import { giorno, kgSegno } from '@/components/giacenze/ControlloRilevazione';
 
@@ -282,6 +282,11 @@ function Confronto({ c }) {
   const lettaDi = (classe) => (c.verifica_lettura ? c.verifica_lettura.classi.find(x => x.classe === classe) : null);
   const salvataDi = (classe) => (c.verifica_da_salvare ? c.verifica_da_salvare.classi.find(x => x.classe === classe) : null);
   const classi = c.attesa.map(a => a.classe);
+  // Il verdetto dell'ancora dell'anno: la chiusura si scosta spesso dalla
+  // rilevazione prima, e senza questa riga lo scarto sembrerebbe colpa sua
+  // anche quando a sbagliare e' una lettura di mezzo.
+  const daAncora = c.verifica_da_salvare ? c.verifica_da_salvare.ancora : null;
+  const ancora = daAncora && !daAncora.senza_ancora && !daAncora.e_la_lettura ? daAncora : null;
   return (
     <div className="border rounded-md">
       <div className="flex flex-wrap items-center justify-between gap-2 p-2 border-b">
@@ -322,6 +327,11 @@ function Confronto({ c }) {
         </table>
       </div>
       <div className="p-2 space-y-1 text-[11px]">
+        {ancora && (
+          <p className={`flex items-start gap-1 ${ancora.quadra ? 'text-sky-700' : 'text-amber-700'}`}>
+            <Anchor className="w-3 h-3 mt-0.5 shrink-0" />{ancora.nota}
+          </p>
+        )}
         {c.lettera && (
           <p className="text-muted-foreground">
             La lettera delle giacenze dichiara per questo piazzale {CLASSI.map(cl => `${cl} ${formatKg(c.lettera.classi[cl])}`).join(', ')} kg.
@@ -433,6 +443,11 @@ export async function scaricaDossierChiusura(dossier) {
       scarto(riga, 9); scarto(riga, 11);
       if (c.lettura) riempi(riga.getCell(10), GIALLO);
     }
+    // Il verdetto dell'ancora dell'anno, sotto le classi del piazzale: senza di
+    // esso il foglio direbbe solo di quanto la chiusura si scosta dalla lettura
+    // prima, che e' proprio il confronto che puo' accusare la chiusura giusta.
+    const va = c.verifica_da_salvare ? c.verifica_da_salvare.ancora : null;
+    if (va && !va.senza_ancora && !va.e_la_lettura) s.addRow([va.nota]).font = { italic: true };
   }
 
   // 5. Il confronto con la lettera delle giacenze

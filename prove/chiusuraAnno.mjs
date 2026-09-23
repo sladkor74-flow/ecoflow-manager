@@ -338,5 +338,45 @@ verifica('il confronto con la lettera, senza sommare i derivati al PFU',
   lettera2.some(r => r.includes('GATIM SRL') && r.includes(176140) && r.includes(23860)));
 verifica('e i piazzali che la lettera dichiara', lettera2.some(r => r.includes('NAPPI SUD SRL') && r.includes(13680)));
 
+// --- La chiusura giudicata dall'ancora dell'anno ---
+//
+// La chiusura si confronta con la rilevazione prima di lei, ma quella puo'
+// essere storta: e' quello che e' successo su NAPPI SUD, dove la lettura buona
+// del 23/09 risultava "scostante" perche' confrontata con quella sbagliata del
+// 16/09. Al 31 dicembre lo stesso errore accuserebbe proprio la chiusura. Il
+// secondo confronto - l'ancora dell'anno piu' tutti i movimenti da allora - la
+// conferma e nomina la lettura di mezzo che sbaglia.
+console.log("LA CHIUSURA CONFERMATA DALL'ANCORA DELL'ANNO");
+const ANCORA_2024 = { sito: 'PIAZZALE PROVA', data_rilevazione: '2024-12-31', class1_kg: 10000, class2_kg: 0, class3_kg: 0, class4_kg: 0, class9_kg: 0 };
+// La lettura di settembre e' sbagliata: i 3.000 kg entrati in M il portale li
+// ha ancora in P. Il totale torna, la ripartizione no.
+const LETTURA_STORTA = { sito: 'PIAZZALE PROVA', data_rilevazione: '2025-09-30', class1_kg: 18000, class2_kg: 0, class3_kg: 0, class4_kg: 0, class9_kg: 0 };
+const MOV_PROVA = [
+  mov('ET25031000', 5000, g('2025-03-10'), g('2025-03-12'), { sito: 'prova', nome: 'PIAZZALE PROVA' }),
+  mov('ET25061000', 3000, g('2025-06-10'), g('2025-06-12'), { sito: 'prova', nome: 'PIAZZALE PROVA', classe: 'M' }),
+  mov('SEC25110500', 2000, g('2025-11-05'), g('2025-11-10'), { sito: 'prova', nome: 'PIAZZALE PROVA', tipo: 'secondaria', verso: 'uscita', controparte: 'IRIGOM SRL' }),
+];
+const piazzaleProva = { chiave: 'prova', nome: 'PIAZZALE PROVA', rilevazioni: [ANCORA_2024, LETTURA_STORTA], movimenti: MOV_PROVA };
+// Dall'ancora: P 10.000 + 5.000 - 2.000 = 13.000, M 3.000. E' quello che il
+// portale legge al 31/12.
+const chiusuraProva = confrontoPiazzale(piazzaleProva, { anno: 2025, lettura: { P: 13000, M: 3000, G1: 0, G2: 0, ACI: 0 }, voci: [] });
+const ancoraProva = chiusuraProva.verifica_da_salvare.ancora;
+verifica('la chiusura si scosta dalla lettura prima di lei', chiusuraProva.verifica_da_salvare.scostano.length === 2,
+  JSON.stringify(chiusuraProva.verifica_da_salvare.scostano.map(x => x.classe)));
+verifica('ma torna con l\'ancora dell\'anno, quindi e\' confermata',
+  chiusuraProva.verifica_da_salvare.confermata_dall_ancora === true && ancoraProva.quadra === true, ancoraProva.nota);
+verifica('l\'ancora e\' la giacenza da cui l\'anno e\' ripartito', ancoraProva.del === '2024-12-31' && ancoraProva.senza_ancora === false);
+verifica('e si dice quale lettura di mezzo sbaglia', ancoraProva.non_tornano.join() === '2025-09-30', JSON.stringify(ancoraProva.non_tornano));
+verifica('a parole: confermata, e il colpevole ha un nome',
+  ancoraProva.nota.includes("e' confermata") && ancoraProva.nota.includes("A sbagliare e' la lettura del 30/09/2025"), ancoraProva.nota);
+verifica('la chiusura resta salvabile: non e\' lei a sbagliare', chiusuraProva.pronto === true && chiusuraProva.blocchi.length === 0);
+// Senza un'ancora non si inventa un secondo confronto.
+const senzaAncora = confrontoPiazzale({ chiave: 'nuovo', nome: 'NUOVO', rilevazioni: [], movimenti: [] }, { anno: 2025, lettura: { P: 0 }, voci: [] });
+verifica('senza nessuna lettura non c\'e\' ancora, e lo si dice', senzaAncora.verifica_da_salvare.ancora.senza_ancora === true);
+// La prima lettura dell'anno fa da ancora quando la chiusura dell'anno prima
+// non c'e': se l'ancora e' la chiusura stessa, non c'e' niente prima di lei.
+const soloChiusura = confrontoPiazzale({ chiave: 'solo', nome: 'SOLO', rilevazioni: [], movimenti: MOV_PROVA }, { anno: 2025, lettura: { P: 3000 }, voci: [] });
+verifica('e la chiusura non si confronta con se stessa', soloChiusura.verifica_da_salvare.ancora.senza_ancora === true);
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);
