@@ -21,6 +21,9 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
   const [ragioneSocialeInput, setRagioneSocialeInput] = useState('');
   const [viewMode, setViewMode] = useState('matrix');
   const [cercaId, setCercaId] = useState('');
+  // Il dettaglio parte dalle richieste piu' vecchie: e' l'ordine con cui si
+  // evadono, e averle in alto evita di doverle cercare in fondo.
+  const [ordineDettaglio, setOrdineDettaglio] = useState('vecchi');
   const [tuttiRecords, setTuttiRecords] = useState(null);
 
   const applyRagioneSociale = () => setFilters(p => ({ ...p, ragione_sociale: ragioneSocialeInput }));
@@ -89,7 +92,16 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
     || `${r.ragione_sociale || ''} ${r.punto_di_raccolta || ''} ${r.id_pdr ?? ''}`.toLowerCase().includes(cercaPdr))),
   [tuttiRecords, inFiltri, cercaPdr]);
 
-  const ordiniMostrati = cercaId.trim() ? (tuttiRecords || []).filter(r => corrispondeIdOrdine(r, cercaId)) : records;
+  // La raccolta si fa in ordine cronologico: nel dettaglio le richieste piu'
+  // vecchie stanno in alto, che e' l'ordine in cui si lavorano. Si puo' girare,
+  // per guardare invece che cosa e' entrato per ultimo.
+  const trovati = cercaId.trim() ? (tuttiRecords || []).filter(r => corrispondeIdOrdine(r, cercaId)) : records;
+  const ordiniMostrati = useMemo(() => {
+    const verso = ordineDettaglio === 'recenti' ? -1 : 1;
+    const quando = (r) => String(r.ordine_immesso_il || '');
+    return [...trovati].sort((a, b) => verso * (quando(a).localeCompare(quando(b))
+      || String(a.id_ordine || '').localeCompare(String(b.id_ordine || ''))));
+  }, [trovati, ordineDettaglio]);
   // Del punto di raccolta cercato interessa la richiesta piu' avanti in coda.
   const primoInCoda = useMemo(() => {
     if (!cercaPdr && !cercaId.trim()) return null;
@@ -201,7 +213,26 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
                   <AssegnatiMatrix matrix={data?.matrix} />
                 </TabsContent>
                 <TabsContent value="detail" className="space-y-3 mt-3">
-                  <h2 className="text-lg font-heading font-semibold">Dettaglio Ordini Assegnati ({ordiniMostrati.length})</h2>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-lg font-heading font-semibold">Dettaglio Ordini Assegnati ({ordiniMostrati.length})</h2>
+                    <div className="flex items-center gap-1 text-xs">
+                      <span className="text-muted-foreground">Immesso il:</span>
+                      {[
+                        { valore: 'vecchi', testo: 'dal più vecchio', titolo: 'Le richieste più vecchie in alto: è l\'ordine con cui si evadono' },
+                        { valore: 'recenti', testo: 'dal più recente', titolo: 'Le richieste appena entrate in alto' },
+                      ].map(o => (
+                        <button
+                          key={o.valore}
+                          type="button"
+                          title={o.titolo}
+                          onClick={() => setOrdineDettaglio(o.valore)}
+                          className={`px-2 py-1 rounded border ${ordineDettaglio === o.valore ? 'bg-sky-50 border-sky-300 text-sky-900 font-medium' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+                        >
+                          {o.testo}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   {primoInCoda && (
                     <div className="border rounded-lg px-3 py-2 text-sm bg-sky-50 border-sky-200 text-sky-900 flex items-start gap-2">
                       <ListOrdered className="w-4 h-4 mt-0.5 shrink-0" />
