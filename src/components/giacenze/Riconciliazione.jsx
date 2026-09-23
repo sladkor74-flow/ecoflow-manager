@@ -1,7 +1,7 @@
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, CheckCircle2, Info, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Anchor, CheckCircle2, Info, RefreshCw } from 'lucide-react';
 import { formatKg, formatTonnellate, formatIntero } from '@/lib/utils';
 import { giorno, kgSegno, rigaClasse, rigaCandidato } from '@/components/giacenze/ControlloRilevazione';
 import { riassuntoArchivio } from '@/components/giacenze/SituazioneTable';
@@ -14,9 +14,10 @@ import { riassuntoArchivio } from '@/components/giacenze/SituazioneTable';
 // 1. da dove viene la giacenza di adesso, letta come un estratto conto:
 //    la fotografia del portale, piu' gli ingressi e meno le uscite finiti dopo,
 //    classe per classe, fino al numero che la pagina mostra;
-// 2. lo storico delle letture, ognuna col suo verdetto: prima si vedeva solo
-//    l'ultima contro la precedente, e una lettura sbagliata piu' indietro nel
-//    tempo non si ripescava piu';
+// 2. lo storico delle letture, ognuna col suo verdetto - contro la precedente e
+//    contro l'ancora del suo anno: prima si vedeva solo l'ultima contro la
+//    precedente, e cosi' una lettura sbagliata piu' indietro nel tempo non si
+//    ripescava piu', mentre quella giusta presa dopo di lei risultava storta;
 // 3. com'e' adesso: se l'ultima lettura tornava, e se no di quanto, se il
 //    totale del canale torna (il materiale c'e', sta nella classe sbagliata)
 //    oppure no (materiale che manca davvero), con i candidati a spiegarlo;
@@ -38,6 +39,7 @@ const CANALI = [
 
 const STILE = {
   quadra: { box: 'bg-emerald-50 border-emerald-300 text-emerald-900', Icona: CheckCircle2 },
+  confermata_ancora: { box: 'bg-sky-50 border-sky-300 text-sky-900', Icona: Anchor },
   scosta: { box: 'bg-amber-50 border-amber-300 text-amber-900', Icona: AlertTriangle },
   senza_lettura: { box: 'bg-amber-50 border-amber-300 text-amber-900', Icona: AlertTriangle },
   senza_precedente: { box: 'bg-muted/50 border-border text-foreground', Icona: Info },
@@ -58,6 +60,10 @@ export function esitoBreveRiconciliazione(riconciliazione) {
       testo: scosta.map(c => `${c.titolo}: ${r.canali[c.chiave].stato.classi_che_scostano.join(', ')}`).join(' · '),
     };
   }
+  // Confermata dall'ancora: si scostava dalla precedente, ma a sbagliare era la
+  // precedente. Non e' un piazzale da rileggere, e non si mostra come tale.
+  const ancora = CANALI.filter(c => r.canali[c.chiave] && r.canali[c.chiave].stato.esito === 'confermata_ancora');
+  if (ancora.length) return { stato: 'confermata_ancora', testo: "confermata dall'ancora" };
   const rileggere = CANALI.filter(c => r.canali[c.chiave] && r.canali[c.chiave].rileggere.conviene);
   if (rileggere.length) return { stato: 'rileggere', testo: 'conviene rileggere il portale' };
   return { stato: 'quadra', testo: 'quadra' };
@@ -68,8 +74,9 @@ export function EsitoRiconciliazione({ riconciliazione, onApri }) {
   const e = esitoBreveRiconciliazione(riconciliazione);
   if (!e) return <span className="text-muted-foreground text-xs">—</span>;
   const colore = e.stato === 'quadra' ? 'text-emerald-700 border-emerald-300 bg-emerald-50'
-    : e.stato === 'rileggere' ? 'text-muted-foreground border-border bg-muted/40'
-      : 'text-amber-700 border-amber-300 bg-amber-50';
+    : e.stato === 'confermata_ancora' ? 'text-sky-700 border-sky-300 bg-sky-50'
+      : e.stato === 'rileggere' ? 'text-muted-foreground border-border bg-muted/40'
+        : 'text-amber-700 border-amber-300 bg-amber-50';
   return (
     <button
       type="button"
@@ -78,6 +85,7 @@ export function EsitoRiconciliazione({ riconciliazione, onApri }) {
       title="Apri la riconciliazione del piazzale: da dove viene la giacenza, lo storico delle letture, che cosa non torna"
     >
       {e.stato === 'scosta' && <AlertTriangle className="w-3 h-3 shrink-0" />}
+      {e.stato === 'confermata_ancora' && <Anchor className="w-3 h-3 shrink-0" />}
       {e.stato === 'rileggere' && <RefreshCw className="w-3 h-3 shrink-0" />}
       {e.testo}
     </button>
@@ -162,10 +170,11 @@ function Letture({ canale }) {
           <tbody>
             {canale.letture.map(l => (
               <React.Fragment key={l.del}>
-                <tr className={`border-t ${l.quadra === false ? 'bg-amber-50' : ''}`}>
+                <tr className={`border-t ${l.quadra === false ? (l.confermata_dall_ancora ? 'bg-sky-50' : 'bg-amber-50') : ''}`}>
                   <td className="px-2 py-1.5">
                     {giorno(l.del)}
                     {l.ultima && <span className="ml-1 text-[10px] text-muted-foreground">(ultima)</span>}
+                    {l.e_ancora && <span className="ml-1 text-[10px] text-sky-700">(ancora dell&apos;anno)</span>}
                   </td>
                   <td className="px-2 py-1.5 text-right tabular-nums">{formatKg(l.letto_kg)} kg</td>
                   <td className="px-2 py-1.5">
@@ -173,14 +182,17 @@ function Letture({ canale }) {
                       ? <span className="text-muted-foreground">prima lettura: niente da confrontare</span>
                       : l.quadra
                         ? <span className="text-emerald-700">tornava</span>
-                        : l.ripartizione_sbagliata
-                          ? <span className="text-amber-700">il totale tornava, la ripartizione no</span>
-                          : <span className="text-amber-700">non tornava</span>}
+                        : l.confermata_dall_ancora
+                          // Si scosta dalla precedente ma torna con l'ancora: e' giusta lei.
+                          ? <span className="text-sky-700">confermata dall&apos;ancora del {giorno(l.ancora_del)}</span>
+                          : l.ripartizione_sbagliata
+                            ? <span className="text-amber-700">il totale tornava, la ripartizione no</span>
+                            : <span className="text-amber-700">non tornava</span>}
                     {!l.senza_precedente && (
                       <span className="text-muted-foreground"> · contro il {giorno(l.precedente_del)}, {formatIntero(l.movimenti)} movimenti nel periodo</span>
                     )}
                   </td>
-                  <td className={`px-2 py-1.5 text-right tabular-nums ${l.quadra === false ? 'font-semibold text-amber-700' : 'text-muted-foreground'}`}>
+                  <td className={`px-2 py-1.5 text-right tabular-nums ${l.quadra === false ? (l.confermata_dall_ancora ? 'text-sky-700' : 'font-semibold text-amber-700') : 'text-muted-foreground'}`}>
                     {l.quadra === false ? kgSegno(l.scarto_kg) : '—'}
                   </td>
                 </tr>
@@ -196,7 +208,7 @@ function Letture({ canale }) {
         </table>
       </div>
       <p className="px-2 py-1.5 text-[11px] text-muted-foreground italic">
-        Ogni lettura a confronto con quella prima di lei, piu&apos; i movimenti fra le due date: anche le piu&apos; vecchie, perche&apos; una lettura sbagliata resta il punto di partenza di tutto quello che viene dopo.
+        Ogni lettura a confronto con quella prima di lei, piu&apos; i movimenti fra le due date: anche le piu&apos; vecchie, perche&apos; una lettura sbagliata resta il punto di partenza di tutto quello che viene dopo. E a confronto con l&apos;ancora del suo anno - la giacenza da cui l&apos;anno riparte, piu&apos; tutti i movimenti da allora: una lettura che si scosta dalla precedente ma torna con l&apos;ancora e&apos; giusta lei, e a sbagliare e&apos; quella in mezzo.
       </p>
     </div>
   );
@@ -212,6 +224,16 @@ function Stato({ canale }) {
         <Icona className="w-4 h-4 shrink-0 mt-0.5" />
         <span>{s.perche}</span>
       </div>
+      {s.esito === 'confermata_ancora' && s.letture_che_sbagliano.length > 0 && (
+        <div className="bg-card/70 border rounded-md p-2 space-y-0.5 text-foreground">
+          <div className="text-[11px] text-muted-foreground">
+            {s.letture_che_sbagliano.length === 1 ? 'La lettura da rifare:' : 'Le letture da rifare:'}
+          </div>
+          {s.letture_che_sbagliano.map(l => (
+            <div key={l.del} className="text-[11px]">· Lettura del {giorno(l.del)}{l.quanto ? `: ${l.quanto}` : ''}</div>
+          ))}
+        </div>
+      )}
       {s.classi.filter(c => c.scarto).map(c => (
         <div key={c.classe} className="bg-card/70 border rounded-md p-2 space-y-1 text-foreground">
           <div className="text-xs font-medium">{rigaClasse(c)}</div>
@@ -236,7 +258,8 @@ function Rileggere({ canale }) {
   if (!r.conviene) {
     return (
       <p className="text-[11px] text-muted-foreground italic">
-        {r.perche.length ? r.perche[0] : `Non serve rileggere: la lettura ha ${formatIntero(r.giorni || 0)} giorni e il piazzale torna.`}
+        {/* La nota dell'ancora viene prima: dice perche' un piazzale che si scosta non va riletto. */}
+        {r.nota || (r.perche.length ? r.perche[0] : `Non serve rileggere: la lettura ha ${formatIntero(r.giorni || 0)} giorni e il piazzale torna.`)}
       </p>
     );
   }
@@ -291,7 +314,7 @@ export default function Riconciliazione({ sito, riconciliazione }) {
       <div className="text-xs text-muted-foreground">
         {r.senza_rilevazione
           ? `${sito}: nessuna lettura del portale. Sotto ci sono i ${formatIntero(r.movimenti)} movimenti in archivio, che una giacenza non sono.`
-          : `${sito}: ultima lettura del portale del ${giorno(r.ultima_del)}${r.giorni_dalla_lettura !== null ? `, ${formatIntero(r.giorni_dalla_lettura)} giorni fa` : ''} · ${formatIntero(r.rilevazioni)} letture in archivio · ${formatIntero(r.movimenti)} movimenti.`}
+          : `${sito}: ultima lettura del portale del ${giorno(r.ultima_del)}${r.giorni_dalla_lettura !== null ? `, ${formatIntero(r.giorni_dalla_lettura)} giorni fa` : ''} · ${formatIntero(r.rilevazioni)} letture in archivio · ${formatIntero(r.movimenti)} movimenti${r.ancora_del ? ` · ancora dell'anno: la lettura del ${giorno(r.ancora_del)}` : r.ultima_e_ancora ? " · e' lei l'ancora dell'anno" : ''}.`}
       </div>
 
       {CANALI.map(c => (

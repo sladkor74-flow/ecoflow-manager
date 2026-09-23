@@ -18,6 +18,7 @@
 // Dichiarazioni Impianti, Giacenze e Predittivita': un carico non puo' risultare
 // dentro per un modulo e fuori per un altro.
 import { giornoRoma } from "./giornoItaliano.ts";
+import { formatoKg } from "./formato.ts";
 
 /** Un valore di data in millisecondi, trattando come UTC cio' che non porta fuso. */
 export function istante(v) {
@@ -81,6 +82,22 @@ export const kgAciDiRilevazione = (rec) => Number(rec && rec.class9_kg) || 0;
 //   l'archivio comincia il 12/01/2024 e la somma da' P -61.420, M -24.150,
 //   G1 -2.690 kg, che un piazzale non puo' avere. E' un termine di confronto, e si
 //   mostra per quello che e', dicendo da quando conta.
+//
+// IL CONFRONTO CON L'ANCORA DELL'ANNO (23/09/2026).
+// Il confronto con la sola lettura precedente ha un difetto: se a sbagliare e'
+// la precedente, e' la lettura GIUSTA a risultare storta. E' successo il 23/09
+// su NAPPI SUD: la lettura nuova, presa coi valori del portale, si scostava
+// perche' la si confrontava con quella del 16/09, che aveva 6.160 kg nella
+// classe sbagliata; e "conviene rileggere" restava acceso su un piazzale appena
+// riletto. Misurato a mano lo stesso giorno: partendo dalla giacenza dichiarata
+// al 31/12/2025 (P 14.840, M 6.440, G1 13.680) e sommando TUTTI i movimenti del
+// 2026 si arriva esattamente al saldo letto il 23/09 (P 21.740, M 130, G1 350,
+// ACI 1.640), scarto zero su ogni classe.
+// Da qui il secondo confronto, accanto a quello con la precedente: l'ancora
+// dell'anno, cioe' la lettura piu' vecchia che copre l'anno - la rilevazione del
+// 31/12 precedente se c'e', altrimenti la prima lettura dell'anno. Se la lettura
+// torna con l'ancora e' confermata, anche quando si scosta dalla precedente: a
+// sbagliare e' una lettura in mezzo, e si dice quale e di quanto.
 
 /** I canali che toccano un piazzale. Restano separati: non si sommano mai. */
 export const CANALI_PIAZZALE = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
@@ -149,10 +166,13 @@ function giorniPrima(giorno, n) {
 }
 
 /**
- * Che cosa ci si aspettava di leggere in una rilevazione, classe per classe.
+ * Il confronto di una lettura con una base, classe per classe.
  *
- *   atteso = rilevazione precedente + ingressi - uscite del periodo
+ *   atteso = base + ingressi - uscite del periodo
  *   scarto = letto - atteso
+ *
+ * La base e' la lettura precedente oppure l'ancora dell'anno: il conto e' lo
+ * stesso, cambia solo da dove si parte e quanto periodo ci sta in mezzo.
  *
  * Uno scarto negativo vuol dire che il portale mostra meno di quanto i movimenti
  * dicono; positivo, di piu'. I candidati a spiegarlo si cercano fra i movimenti
@@ -161,17 +181,17 @@ function giorniPrima(giorno, n) {
  * finito nella classe sbagliata spiega due scarti opposti, uno per classe: per
  * questo i candidati si cercano in tutto il canale e non nella sola classe.
  *
- * @param {object} rilevazione  il record GiacenzaStoccaggio appena letto
- * @param {object} precedente   la rilevazione prima di questa, o null
+ * @param {object} rilevazione  il record GiacenzaStoccaggio letto
+ * @param {object} base         la lettura da cui si parte, o null
  * @param {array}  movimenti    movimenti del piazzale (movimentoStoccaggio), tutto l'archivio
  */
-export function verificaRilevazione(rilevazione, precedente, movimenti) {
+function confrontoConBase(rilevazione, base, movimenti) {
   const del = momentoRilevazione(rilevazione);
-  const precedenteDel = precedente ? momentoRilevazione(precedente) : '';
+  const baseDel = base ? momentoRilevazione(base) : '';
   const letto = classiDiRilevazione(rilevazione);
-  const partenza = precedenteDel ? classiDiRilevazione(precedente) : null;
-  // Senza una rilevazione prima non c'e' un punto di partenza: non si attende nulla.
-  const periodo = precedenteDel ? fraLeRilevazioni(movimenti, precedenteDel, del) : [];
+  const partenza = baseDel ? classiDiRilevazione(base) : null;
+  // Senza una lettura da cui partire non c'e' un punto di partenza: non si attende nulla.
+  const periodo = baseDel ? fraLeRilevazioni(movimenti, baseDel, del) : [];
   const aRidosso = giorniPrima(del, GIORNI_A_RIDOSSO);
 
   // I movimenti del periodo, canale per canale e classe per classe.
@@ -223,6 +243,7 @@ export function verificaRilevazione(rilevazione, precedente, movimenti) {
     }
     const scostano = [];
     let scartoCanale = 0;
+    let spostatiCanale = 0;
     let movimentiCanale = 0;
     for (const classe of elenco) {
       const s = per.get(canale + '|' + classe) || { ingressi: 0, ingressi_kg: 0, uscite: 0, uscite_kg: 0 };
@@ -242,6 +263,7 @@ export function verificaRilevazione(rilevazione, precedente, movimenti) {
       if (scarto) {
         scostano.push(classe);
         scartoCanale += scarto;
+        if (scarto > 0) spostatiCanale += scarto;
         voce.candidati = candidatiPer(canale, scarto);
         const esatti = voce.candidati.filter(c => c.peso_esatto).length;
         voce.spiegato = esatti > 0;
@@ -258,8 +280,12 @@ export function verificaRilevazione(rilevazione, precedente, movimenti) {
     canali[canale] = {
       movimenti: movimentiCanale,
       scarto_kg: scartoCanale,
+      // Quanti chili sono finiti nella casella sbagliata: la somma degli scarti
+      // in piu'. Quando il totale del canale torna e' questo il numero da dire,
+      // perche' lo scarto netto e' zero e da solo non direbbe niente.
+      spostati_kg: spostatiCanale,
       classi_che_scostano: scostano,
-      quadra: precedenteDel ? scostano.length === 0 : null,
+      quadra: baseDel ? scostano.length === 0 : null,
       // Il caso del 16/09: il totale del canale torna, la ripartizione fra le classi no.
       ripartizione_sbagliata: scostano.length > 0 && scartoCanale === 0,
     };
@@ -268,13 +294,173 @@ export function verificaRilevazione(rilevazione, precedente, movimenti) {
   const scostano = classi.filter(c => c.scarto).map(c => c.classe);
   return {
     del,
-    precedente_del: precedenteDel,
-    senza_precedente: !precedenteDel,
+    base_del: baseDel,
+    senza_base: !baseDel,
     classi,
     scostano,
-    // Senza una rilevazione precedente non si puo' dire se quadra: non si dice.
-    quadra: precedenteDel ? scostano.length === 0 : null,
+    // Senza una lettura da cui partire non si puo' dire se quadra: non si dice.
+    quadra: baseDel ? scostano.length === 0 : null,
     canali,
+  };
+}
+
+// --- L'ancora dell'anno ---
+
+/** Le letture di un piazzale in ordine: dalla piu' vecchia alla piu' recente. */
+function letturePerGiorno(rilevazioni) {
+  return [...(rilevazioni || [])].filter(Boolean).sort((a, b) =>
+    momentoRilevazione(a).localeCompare(momentoRilevazione(b))
+    // A parita' di giorno vale quella registrata per ultima, come ovunque.
+    || String(a.created_date || '').localeCompare(String(b.created_date || '')));
+}
+
+/** L'anno a cui appartiene una lettura, dal suo giorno 'AAAA-MM-GG'. */
+export const annoDellaLettura = (giorno) => String(giorno || '').slice(0, 4);
+
+/** Un giorno 'AAAA-MM-GG' come si scrive in una frase: GG/MM/AAAA. */
+const giornoScritto = (g) => (g ? String(g).slice(0, 10).split('-').reverse().join('/') : '');
+
+/**
+ * L'ancora di un anno: la lettura piu' vecchia che copre quell'anno.
+ * E' la rilevazione del 31/12 dell'anno prima - la giacenza dichiarata, il punto
+ * da cui l'anno riparte - e se non c'e' la prima lettura dell'anno stesso.
+ *
+ * @param {array} rilevazioni  i record GiacenzaStoccaggio del piazzale
+ * @param {string|number} anno l'anno da ancorare
+ */
+export function ancoraDellAnno(rilevazioni, anno) {
+  const a = String(anno || '');
+  if (!/^\d{4}$/.test(a)) return null;
+  const letture = letturePerGiorno(rilevazioni);
+  // La chiusura dell'anno prima vale su tutto: se ce ne fosse piu' d'una nello
+  // stesso giorno vale l'ultima registrata, come ovunque.
+  const chiusura = letture.filter(r => momentoRilevazione(r) === `${Number(a) - 1}-12-31`).pop();
+  if (chiusura) return chiusura;
+  return letture.find(r => annoDellaLettura(momentoRilevazione(r)) === a) || null;
+}
+
+/** Di quanto sbaglia una lettura su un canale, in kg e con le classi. */
+function quantoSbaglia(canale) {
+  if (!canale || canale.quadra !== false) return '';
+  const classi = canale.classi_che_scostano || [];
+  const dove = classi.length ? ` fra ${classi.join(' e ')}` : '';
+  // Se il totale del canale torna i chili non mancano: sono nella classe
+  // sbagliata, e quello che conta e' quanti se ne sono spostati.
+  if (canale.ripartizione_sbagliata) return `${formatoKg(canale.spostati_kg)} kg${dove}`;
+  return `${canale.scarto_kg > 0 ? '+' : ''}${formatoKg(canale.scarto_kg)} kg${dove}`;
+}
+
+/**
+ * Il confronto di una lettura con l'ancora dell'anno, piu' il verdetto di ogni
+ * lettura che sta in mezzo. Se la lettura torna con l'ancora e' confermata:
+ * a sbagliare e' una di quelle in mezzo, e le si nomina.
+ *
+ * @param {object} rilevazione  la lettura da giudicare
+ * @param {object} ancora       l'ancora del suo anno, o null
+ * @param {array}  intermedie   le letture fra l'ancora e questa, dalla piu' vecchia
+ * @param {array}  movimenti    movimenti del piazzale, tutto l'archivio
+ */
+function confrontoConAncora(rilevazione, ancora, intermedie, movimenti) {
+  const del = momentoRilevazione(rilevazione);
+  const vuoto = {
+    del: '', quadra: null, e_la_lettura: false, senza_ancora: true,
+    classi: [], scostano: [], canali: {}, intermedie: [], non_tornano: [],
+    nota: "Non c'e' un'ancora dell'anno con cui confrontare questa lettura.",
+  };
+  const ancoraDel = ancora ? momentoRilevazione(ancora) : '';
+  if (!ancora || !ancoraDel || !del) return vuoto;
+  // L'ancora e' questa lettura: e' lei il punto di partenza dell'anno, e prima
+  // di lei non c'e' niente da confrontare. Si dice, invece di tacere.
+  if (ancora === rilevazione || ancoraDel > del) {
+    return {
+      ...vuoto, del: ancoraDel, senza_ancora: false, e_la_lettura: true,
+      nota: `Questa lettura e' l'ancora del ${annoDellaLettura(del)}: e' il punto da cui l'anno riparte, e non c'e' una lettura piu' vecchia con cui confrontarla.`,
+    };
+  }
+
+  const c = confrontoConBase(rilevazione, ancora, movimenti);
+  // Ogni lettura in mezzo contro quella prima di lei: quando questa torna con
+  // l'ancora, e' fra loro che sta l'errore.
+  const catena = [ancora, ...(intermedie || []).filter(Boolean)];
+  const inMezzo = [];
+  for (let i = 1; i < catena.length; i++) {
+    const v = confrontoConBase(catena[i], catena[i - 1], movimenti);
+    inMezzo.push({
+      del: v.del,
+      precedente_del: v.base_del,
+      quadra: v.quadra,
+      scostano: v.scostano,
+      canali: v.canali,
+      classi: v.classi.filter(x => x.scarto),
+    });
+  }
+  const nonTornano = inMezzo.filter(l => l.quadra === false);
+
+  const daQuando = `l'ancora del ${annoDellaLettura(del)}, la lettura del ${giornoScritto(ancoraDel)} piu' tutti i movimenti da allora`;
+  let nota;
+  if (c.quadra) {
+    const chi = nonTornano.length
+      ? ` A sbagliare ${nonTornano.length === 1 ? "e' la lettura" : 'sono le letture'} del ${nonTornano.map(l => giornoScritto(l.del)).join(' e del ')}.`
+      : '';
+    nota = `Questa lettura torna con ${daQuando}: e' confermata.${chi}`;
+  } else {
+    nota = `Questa lettura non torna nemmeno con ${daQuando}.`;
+  }
+
+  return {
+    del: ancoraDel,
+    senza_ancora: false,
+    e_la_lettura: false,
+    quadra: c.quadra,
+    classi: c.classi,
+    scostano: c.scostano,
+    canali: c.canali,
+    intermedie: inMezzo,
+    // Le letture in mezzo che non tornano: quelle da rifare, non questa.
+    non_tornano: nonTornano.map(l => l.del),
+    nota,
+  };
+}
+
+/**
+ * Che cosa ci si aspettava di leggere in una rilevazione, classe per classe,
+ * partendo dalla lettura precedente, e - quando la si passa - anche partendo
+ * dall'ancora dell'anno.
+ *
+ * Due confronti, perche' quello con la sola precedente accusa la lettura giusta
+ * quando a sbagliare e' la precedente: e' il caso del 23/09 su NAPPI SUD.
+ *
+ * @param {object} rilevazione  il record GiacenzaStoccaggio appena letto
+ * @param {object} precedente   la rilevazione prima di questa, o null
+ * @param {array}  movimenti    movimenti del piazzale (movimentoStoccaggio), tutto l'archivio
+ * @param {object} opzioni      { ancora, intermedie }: l'ancora dell'anno e le letture fra le due
+ */
+export function verificaRilevazione(rilevazione, precedente, movimenti, { ancora = null, intermedie = [] } = {}) {
+  const c = confrontoConBase(rilevazione, precedente, movimenti);
+  const daAncora = confrontoConAncora(rilevazione, ancora, intermedie, movimenti);
+  // Il verdetto dell'ancora vale un canale per volta: rete e ACI non si sommano
+  // mai, e una puo' essere confermata mentre l'altra no.
+  const canali = {};
+  for (const [nome, v] of Object.entries(c.canali)) {
+    const a = daAncora.canali[nome] || null;
+    canali[nome] = {
+      ...v,
+      confermata_dall_ancora: !!(a && a.quadra === true),
+      ancora_quadra: a ? a.quadra : null,
+    };
+  }
+  return {
+    del: c.del,
+    precedente_del: c.base_del,
+    senza_precedente: c.senza_base,
+    classi: c.classi,
+    scostano: c.scostano,
+    quadra: c.quadra,
+    canali,
+    ancora: daAncora,
+    // Confermata dall'ancora: la lettura e' giusta anche se si scosta dalla
+    // precedente, perche' a sbagliare e' una lettura in mezzo.
+    confermata_dall_ancora: daAncora.quadra === true,
   };
 }
 
@@ -333,9 +519,10 @@ export function saldoMovimentiInArchivio(movimenti) {
 //
 // 1. l'estratto conto: la fotografia, piu' gli ingressi e meno le uscite finiti
 //    dopo, classe per classe, fino al numero che la pagina mostra;
-// 2. lo storico delle letture, ognuna col suo verdetto: una lettura sbagliata
-//    sepolta indietro nel tempo non si ripescava piu', perche' il controllo
-//    guarda solo la piu' recente contro la precedente;
+// 2. lo storico delle letture, ognuna col suo verdetto - contro la precedente e
+//    contro l'ancora dell'anno: una lettura sbagliata sepolta indietro nel tempo
+//    non si ripescava piu', e una lettura giusta presa dopo una sbagliata
+//    risultava storta lei;
 // 3. com'e' adesso: se l'ultima lettura tornava, e se no di quanto, se e' la
 //    ripartizione fra le classi a essere sbagliata (il materiale c'e', sta nella
 //    casella sbagliata) o se manca davvero, con i candidati a spiegarlo;
@@ -350,14 +537,6 @@ function giorniFra(dal, al) {
   const b = new Date(String(al || '') + 'T00:00:00Z').getTime();
   if (isNaN(a) || isNaN(b)) return null;
   return Math.round((b - a) / 86400000);
-}
-
-/** Le letture di un piazzale in ordine: dalla piu' vecchia alla piu' recente. */
-function letturePerGiorno(rilevazioni) {
-  return [...(rilevazioni || [])].filter(Boolean).sort((a, b) =>
-    momentoRilevazione(a).localeCompare(momentoRilevazione(b))
-    // A parita' di giorno vale quella registrata per ultima, come ovunque.
-    || String(a.created_date || '').localeCompare(String(b.created_date || '')));
 }
 
 /**
@@ -410,48 +589,101 @@ function estrattoDiCanale(canale, fotografia, movimenti, dal) {
   };
 }
 
+/** Le letture fra l'ancora e l'ultima che non tornano su questo canale. */
+function lettureCheSbagliano(verdetto, canale) {
+  const a = verdetto && verdetto.ancora ? verdetto.ancora : null;
+  if (!a || !a.intermedie) return [];
+  return a.intermedie
+    .filter(l => l.canali[canale] && l.canali[canale].quadra === false)
+    .map(l => ({
+      del: l.del,
+      precedente_del: l.precedente_del,
+      scarto_kg: l.canali[canale].scarto_kg,
+      spostati_kg: l.canali[canale].spostati_kg,
+      ripartizione_sbagliata: !!l.canali[canale].ripartizione_sbagliata,
+      classi_che_scostano: l.canali[canale].classi_che_scostano,
+      quanto: quantoSbaglia(l.canali[canale]),
+      classi: l.classi.filter(c => c.canale === canale),
+    }));
+}
+
 /** Com'e' messo un canale adesso, secondo l'ultima lettura. Niente frasi inventate. */
 function statoDiCanale(canale, verdetto, haFotografia) {
+  // Le stesse voci per ogni esito: chi legge non deve indovinare se un campo c'e'.
+  const base = {
+    quadra: null, scarto_kg: 0, ripartizione_sbagliata: false,
+    classi_che_scostano: [], classi: [],
+    confermata_dall_ancora: false, ancora_del: '', letture_che_sbagliano: [],
+  };
   if (canale === 'EXTRA_RACCOLTA') {
     return {
-      esito: 'fuori_portale', quadra: null, scarto_kg: 0, ripartizione_sbagliata: false,
-      classi_che_scostano: [], classi: [],
+      ...base, esito: 'fuori_portale',
       perche: "L'extra raccolta a portale non c'e': non esiste una lettura da cui partire, e la somma dei suoi movimenti non e' una giacenza.",
     };
   }
   if (!haFotografia) {
     return {
-      esito: 'senza_lettura', quadra: null, scarto_kg: 0, ripartizione_sbagliata: false,
-      classi_che_scostano: [], classi: [],
+      ...base, esito: 'senza_lettura',
       perche: "Questo piazzale non ha nessuna lettura del portale: senza un punto di partenza la giacenza non si calcola, e restano i soli movimenti in archivio, che una giacenza non sono.",
     };
   }
   const c = verdetto && verdetto.canali ? verdetto.canali[canale] : null;
+  const ancora = verdetto && verdetto.ancora ? verdetto.ancora : null;
+  const confermata = !!(c && c.confermata_dall_ancora);
+  const ancoraDel = ancora && !ancora.senza_ancora && !ancora.e_la_lettura ? ancora.del : '';
   if (!c || c.quadra === null) {
     return {
-      esito: 'senza_precedente', quadra: null, scarto_kg: 0, ripartizione_sbagliata: false,
-      classi_che_scostano: [], classi: [],
+      ...base, esito: 'senza_precedente',
       perche: "E' la prima lettura di questo piazzale: non ce n'e' una prima da cui partire, quindi non si puo' dire se tornava.",
     };
   }
   if (c.quadra) {
+    // Torna con la precedente ma non con l'ancora: l'errore sta piu' indietro,
+    // in una lettura che questa si porta dietro. Si dice, senza gridare.
+    const nonTornaConAncora = ancoraDel && c.ancora_quadra === false;
     return {
-      esito: 'quadra', quadra: true, scarto_kg: 0, ripartizione_sbagliata: false,
-      classi_che_scostano: [], classi: [],
-      perche: "L'ultima lettura tornava: ogni classe leggeva quello che i movimenti dicevano.",
+      ...base, esito: 'quadra', quadra: true, confermata_dall_ancora: confermata,
+      ancora_del: ancoraDel,
+      letture_che_sbagliano: lettureCheSbagliano(verdetto, canale),
+      perche: "L'ultima lettura tornava: ogni classe leggeva quello che i movimenti dicevano."
+        + (confermata ? ` Torna anche con l'ancora dell'anno, la lettura del ${giornoScritto(ancoraDel)}.` : '')
+        + (nonTornaConAncora ? ` Non torna pero' con l'ancora dell'anno, la lettura del ${giornoScritto(ancoraDel)} piu' tutti i movimenti da allora: fra le due c'e' una lettura che sbaglia e che questa si porta dietro.` : ''),
+    };
+  }
+  const classi = (verdetto.classi || []).filter(x => x.canale === canale);
+  if (confermata) {
+    // Il caso del 23/09 su NAPPI SUD: la lettura nuova si scosta dalla
+    // precedente, ma torna con l'ancora dell'anno. A sbagliare e' quella in mezzo.
+    const sbagliano = lettureCheSbagliano(verdetto, canale);
+    const chi = sbagliano.length
+      ? ` A sbagliare ${sbagliano.length === 1 ? "e' la lettura" : 'sono le letture'} del ${sbagliano.map(l => `${giornoScritto(l.del)}, di ${l.quanto}`).join('; del ')}.`
+      : ' A sbagliare e\' una delle letture in mezzo.';
+    return {
+      ...base, esito: 'confermata_ancora', quadra: false,
+      scarto_kg: c.scarto_kg,
+      ripartizione_sbagliata: !!c.ripartizione_sbagliata,
+      classi_che_scostano: c.classi_che_scostano,
+      classi,
+      confermata_dall_ancora: true,
+      ancora_del: ancoraDel,
+      letture_che_sbagliano: sbagliano,
+      perche: `L'ultima lettura si scosta da quella del ${giornoScritto(verdetto.precedente_del)}, ma torna con l'ancora dell'anno, la lettura del ${giornoScritto(ancoraDel)} piu' tutti i movimenti da allora: e' giusta lei.${chi}`,
     };
   }
   return {
-    esito: 'scosta', quadra: false,
+    ...base, esito: 'scosta', quadra: false,
     scarto_kg: c.scarto_kg,
     ripartizione_sbagliata: !!c.ripartizione_sbagliata,
     classi_che_scostano: c.classi_che_scostano,
     // Le classi che si scostano, con i candidati a spiegarle: stanno nel verdetto.
-    classi: (verdetto.classi || []).filter(x => x.canale === canale),
-    perche: c.ripartizione_sbagliata
+    classi,
+    ancora_del: ancoraDel,
+    letture_che_sbagliano: lettureCheSbagliano(verdetto, canale),
+    perche: (c.ripartizione_sbagliata
       // Il caso del 16/09 su Nappi Sud: i chili ci sono tutti, stanno nella classe sbagliata.
       ? "L'ultima lettura non tornava, ma il totale del canale si': il materiale c'e' tutto, e' la ripartizione fra le classi a essere sbagliata."
-      : "L'ultima lettura non tornava, e non torna nemmeno il totale del canale: non e' una questione di classi, e' materiale che non trova riscontro nei movimenti.",
+      : "L'ultima lettura non tornava, e non torna nemmeno il totale del canale: non e' una questione di classi, e' materiale che non trova riscontro nei movimenti.")
+      + (ancoraDel ? ` Non torna nemmeno con l'ancora dell'anno, la lettura del ${giornoScritto(ancoraDel)}: e' questa lettura a essere da rifare.` : ''),
   };
 }
 
@@ -460,13 +692,13 @@ function rileggereCanale(canale, estratto, stato, giorni) {
   // L'extra raccolta il portale non la tiene: non c'e' niente da rileggere.
   if (canale === 'EXTRA_RACCOLTA') {
     return {
-      conviene: false, giorni: null, vecchia: false, superata: false, classi_negative: [],
+      conviene: false, giorni: null, vecchia: false, superata: false, classi_negative: [], nota: '',
       perche: ["L'extra raccolta a portale non c'e': non c'e' una lettura da rifare."],
     };
   }
   if (stato.esito === 'senza_lettura') {
     return {
-      conviene: true, giorni: null, vecchia: false, superata: false, classi_negative: [],
+      conviene: true, giorni: null, vecchia: false, superata: false, classi_negative: [], nota: '',
       perche: ["Non c'e' nessuna lettura del portale da cui partire: la prima si prende dalla pagina delle unita' locali di stoccaggio."],
     };
   }
@@ -487,7 +719,13 @@ function rileggereCanale(canale, estratto, stato, giorni) {
   if (stato.esito === 'scosta') {
     perche.push("L'ultima lettura non tornava: rifarla adesso, che il portale ha chiuso quegli ordini, rimette a posto il punto di partenza.");
   }
-  return { conviene: perche.length > 0, giorni, vecchia, superata, classi_negative: estratto.classi_negative, perche };
+  // Una lettura confermata dall'ancora non e' un motivo per rileggere: si
+  // scostava dalla precedente perche' a sbagliare era la precedente. Il 23/09 su
+  // NAPPI SUD "conviene rileggere" restava acceso su un piazzale appena riletto.
+  const nota = stato.esito === 'confermata_ancora'
+    ? `La lettura e' confermata dall'ancora dell'anno${stato.ancora_del ? `, quella del ${giornoScritto(stato.ancora_del)}` : ''}: non e' lei a sbagliare, e rifarla non servirebbe.`
+    : '';
+  return { conviene: perche.length > 0, giorni, vecchia, superata, classi_negative: estratto.classi_negative, nota, perche };
 }
 
 /**
@@ -510,7 +748,12 @@ export function riconciliazionePiazzale(rilevazioni, movimenti, { oggi = '' } = 
   // tengono le sole classi che si scostano, coi loro candidati: le altre
   // tornavano e non c'e' niente da dire.
   const storico = letture.map((r, i) => {
-    const v = verificaRilevazione(r, i > 0 ? letture[i - 1] : null, mov);
+    // Ogni lettura ha due punti di partenza: quella prima di lei e l'ancora del
+    // suo anno. Le letture in mezzo servono a dire quale sbaglia, se sbaglia.
+    const ancora = ancoraDellAnno(letture, annoDellaLettura(momentoRilevazione(r)));
+    const iAncora = ancora ? letture.indexOf(ancora) : -1;
+    const intermedie = iAncora >= 0 && iAncora < i ? letture.slice(iAncora + 1, i) : [];
+    const v = verificaRilevazione(r, i > 0 ? letture[i - 1] : null, mov, { ancora, intermedie });
     return {
       del: v.del,
       precedente_del: v.precedente_del,
@@ -520,6 +763,8 @@ export function riconciliazionePiazzale(rilevazioni, movimenti, { oggi = '' } = 
       scostano: v.scostano,
       canali: v.canali,
       classi: v.classi.filter(c => c.scarto),
+      ancora: v.ancora,
+      confermata_dall_ancora: v.confermata_dall_ancora,
       // Quanto leggeva quel giorno, un canale per volta: mai la somma dei due.
       letto_kg: { RETE: kgReteDiRilevazione(r), ACI: kgAciDiRilevazione(r) },
     };
@@ -555,6 +800,11 @@ export function riconciliazionePiazzale(rilevazioni, movimenti, { oggi = '' } = 
         scarto_kg: s.canali[canale] ? s.canali[canale].scarto_kg : 0,
         movimenti: s.canali[canale] ? s.canali[canale].movimenti : 0,
         ripartizione_sbagliata: s.canali[canale] ? !!s.canali[canale].ripartizione_sbagliata : false,
+        // Confermata dall'ancora: si scosta dalla precedente ma torna con il
+        // punto di partenza dell'anno, quindi e' giusta lei.
+        confermata_dall_ancora: s.canali[canale] ? !!s.canali[canale].confermata_dall_ancora : false,
+        ancora_del: s.ancora && !s.ancora.senza_ancora && !s.ancora.e_la_lettura ? s.ancora.del : '',
+        e_ancora: !!(s.ancora && s.ancora.e_la_lettura),
         classi: s.classi.filter(c => c.canale === canale),
       })),
       // La somma dei soli movimenti in archivio di questo canale, per averla
@@ -563,6 +813,7 @@ export function riconciliazionePiazzale(rilevazioni, movimenti, { oggi = '' } = 
     };
   }
 
+  const suaAncora = verdetto ? verdetto.ancora : null;
   return {
     rilevazioni: letture.length,
     ultima_del: del,
@@ -570,6 +821,12 @@ export function riconciliazionePiazzale(rilevazioni, movimenti, { oggi = '' } = 
     senza_rilevazione: !ultima,
     movimenti: mov.length,
     senza_movimenti: mov.length === 0,
+    // L'ancora dell'anno dell'ultima lettura: da dove riparte il conto, e se e'
+    // l'ultima lettura stessa a fare da ancora.
+    ancora_del: suaAncora && !suaAncora.senza_ancora && !suaAncora.e_la_lettura ? suaAncora.del : '',
+    ultima_e_ancora: !!(suaAncora && suaAncora.e_la_lettura),
+    confermata_dall_ancora: !!(verdetto && verdetto.confermata_dall_ancora),
+    ancora_nota: suaAncora ? suaAncora.nota : '',
     storico,
     canali,
   };

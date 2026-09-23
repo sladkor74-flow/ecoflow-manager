@@ -1,7 +1,7 @@
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import { AlertTriangle, Anchor, CheckCircle2, Info } from 'lucide-react';
 import { formatKg } from '@/lib/utils';
 
 // Il controllo della rilevazione appena inserita (richiesta dell'utente,
@@ -15,6 +15,13 @@ import { formatKg } from '@/lib/utils';
 // letta 22.310, 6.160 kg di scarto, quanto quel formulario. Il totale della rete
 // tornava: a sbagliare era la ripartizione fra le classi, e nessun caricamento
 // poteva correggerla perche' l'errore stava nel punto di partenza.
+//
+// Il confronto con la sola precedente pero' accusa la lettura sbagliata: il
+// 23/09, con la lettura nuova e giusta, diceva che era lei a scostare. Per
+// questo c'e' anche il confronto con l'ANCORA DELL'ANNO - la giacenza dichiarata
+// al 31/12 precedente, o la prima lettura dell'anno - piu' tutti i movimenti da
+// allora: se la lettura torna con l'ancora e' confermata, e a sbagliare e' la
+// lettura in mezzo, che si nomina.
 //
 // Il conto lo fa calcolaGiacenze (verificaRilevazione in
 // base44/shared/giacenzaStoccaggi.ts): qui si mostra e basta. Il salvataggio non
@@ -31,11 +38,41 @@ const kgOppure = (n) => (n === null || n === undefined ? '—' : `${formatKg(n)}
 
 // I canali restano separati: si nominano uno per volta, non si sommano mai.
 const TOTALE_DI = { RETE: 'della rete', ACI: "dell'ACI" };
+const NOME_CANALE = { RETE: 'rete', ACI: 'ACI' };
+
+/**
+ * Di quanto sbaglia una lettura, canale per canale: mai un numero solo per tutti.
+ * Se il totale di un canale torna i chili non mancano, sono nella classe
+ * sbagliata, e quello che conta e' quanti se ne sono spostati.
+ */
+export function quantoSbaglia(lettura) {
+  const canali = (lettura && lettura.canali) || {};
+  const parti = Object.entries(canali)
+    .filter(([, c]) => c && c.quadra === false)
+    .map(([nome, c]) => {
+      const dove = (c.classi_che_scostano || []).length ? ` fra ${c.classi_che_scostano.join(' e ')}` : '';
+      const quanto = c.ripartizione_sbagliata ? `${formatKg(c.spostati_kg)} kg${dove}` : `${kgSegno(c.scarto_kg)}${dove}`;
+      return { nome, quanto };
+    });
+  if (!parti.length) return '';
+  return parti.length === 1 ? parti[0].quanto : parti.map(p => `${NOME_CANALE[p.nome] || p.nome} ${p.quanto}`).join(' · ');
+}
+
+/** Le letture in mezzo che non tornano: quando l'ancora conferma, sono loro a sbagliare. */
+export function lettureCheSbagliano(v) {
+  const inMezzo = (v && v.ancora && v.ancora.intermedie) || [];
+  return inMezzo.filter(l => l.quadra === false).map(l => ({ del: l.del, quanto: quantoSbaglia(l) }));
+}
+
+/** Le letture in mezzo che sbagliano, scritte di seguito: "del 16/09/2026, di 6.160 kg fra P e M". */
+const chiSbaglia = (elenco) =>
+  elenco.map(l => `del ${giorno(l.del)}${l.quanto ? `, di ${l.quanto}` : ''}`).join('; ');
 
 /**
  * L'esito del controllo in una frase sola, per chi ha appena salvato.
- * Tre casi e nessuno inventato: senza una rilevazione prima non c'e' un punto di
- * partenza, quindi non si dice se quadra.
+ * Quattro casi e nessuno inventato: senza una rilevazione prima non c'e' un
+ * punto di partenza, quindi non si dice se quadra; e una lettura che si scosta
+ * dalla precedente ma torna con l'ancora dell'anno e' confermata, non storta.
  */
 export function riassuntoVerifica(v) {
   if (!v) return null;
@@ -47,17 +84,24 @@ export function riassuntoVerifica(v) {
       sintesi: `${quando}: non c'e' una rilevazione precedente da cui partire, quindi non c'e' niente da confrontare. Dalla prossima il controllo dira' che cosa ci si aspettava di leggere, classe per classe.`,
       scostano: [],
       ripartizione: [],
+      sbagliano: [],
     };
   }
   const contro = `${quando}, confrontata con quella del ${giorno(v.precedente_del)} piu' i movimenti del periodo`;
   const scostano = (v.classi || []).filter(c => c.scarto);
+  const ancora = v.ancora || null;
+  const conAncora = ancora && !ancora.senza_ancora && !ancora.e_la_lettura
+    ? `l'ancora del ${String(v.del || '').slice(0, 4)}, la lettura del ${giorno(ancora.del)} piu' tutti i movimenti da allora`
+    : '';
   if (!scostano.length) {
     return {
       stato: 'quadra',
       titolo: 'Il controllo quadra',
-      sintesi: `${contro}: ogni classe legge quello che i movimenti dicono.`,
+      sintesi: `${contro}: ogni classe legge quello che i movimenti dicono.`
+        + (v.confermata_dall_ancora && conAncora ? ` Torna anche con ${conAncora}.` : ''),
       scostano: [],
       ripartizione: [],
+      sbagliano: [],
     };
   }
   // Il caso del 16/09: il totale del canale torna, a sbagliare e' la ripartizione
@@ -66,15 +110,35 @@ export function riassuntoVerifica(v) {
     .filter(([, c]) => c.ripartizione_sbagliata)
     .map(([k]) => TOTALE_DI[k] || k);
   const nomi = scostano.map(c => c.classe).join(', ');
+  const dettaglioRipartizione = ripartizione.length
+    ? ` ${ripartizione.length === 1 ? `Il totale ${ripartizione[0]} torna` : `I totali ${ripartizione.join(' e ')} tornano`}: a sbagliare e' la ripartizione fra le classi.`
+    : '';
+  // Si scosta dalla precedente ma torna con l'ancora dell'anno: e' giusta lei, e
+  // a sbagliare e' una lettura in mezzo. E' il caso del 23/09 su NAPPI SUD.
+  if (v.confermata_dall_ancora && conAncora) {
+    const sbagliano = lettureCheSbagliano(v);
+    return {
+      stato: 'confermata_ancora',
+      titolo: "Confermata dall'ancora dell'anno",
+      sintesi: `${contro}: ${scostano.length === 1 ? 'una classe legge un valore diverso' : `${scostano.length} classi leggono un valore diverso`} da quello atteso.`
+        + ` Torna pero' con ${conAncora}: e' giusta questa lettura.`
+        + (sbagliano.length
+          ? ` A sbagliare ${sbagliano.length === 1 ? "e' la lettura" : 'sono le letture'} ${chiSbaglia(sbagliano)}.`
+          : " A sbagliare e' una delle letture in mezzo."),
+      scostano,
+      ripartizione,
+      sbagliano,
+    };
+  }
   return {
     stato: 'scosta',
     titolo: scostano.length === 1 ? `La classe ${nomi} si scosta` : `Si scostano le classi ${nomi}`,
     sintesi: `${contro}: ${scostano.length === 1 ? 'una classe legge un valore diverso' : `${scostano.length} classi leggono un valore diverso`} da quello atteso.`
-      + (ripartizione.length
-        ? ` ${ripartizione.length === 1 ? `Il totale ${ripartizione[0]} torna` : `I totali ${ripartizione.join(' e ')} tornano`}: a sbagliare e' la ripartizione fra le classi.`
-        : ''),
+      + dettaglioRipartizione
+      + (conAncora ? ` Non torna nemmeno con ${conAncora}: e' questa lettura a essere da rifare.` : ''),
     scostano,
     ripartizione,
+    sbagliano: [],
   };
 }
 
@@ -112,12 +176,16 @@ export function esitoBreve(v) {
   if (!r) return null;
   if (r.stato === 'quadra') return { stato: 'quadra', testo: 'quadra' };
   if (r.stato === 'senza_precedente') return { stato: 'senza_precedente', testo: 'prima rilevazione' };
+  // Confermata dall'ancora: si scosta dalla precedente, ma e' la precedente a
+  // sbagliare. Dire "si scosta" manderebbe a rileggere un piazzale appena letto.
+  if (r.stato === 'confermata_ancora') return { stato: 'confermata_ancora', testo: "confermata dall'ancora" };
   return { stato: 'scosta', testo: r.scostano.map(c => `${c.classe} ${kgSegno(c.scarto)}`).join(' · ') };
 }
 
 const STILE = {
   quadra: { box: 'bg-emerald-50 border-emerald-300 text-emerald-900', Icona: CheckCircle2 },
   senza_precedente: { box: 'bg-muted/50 border-border text-foreground', Icona: Info },
+  confermata_ancora: { box: 'bg-sky-50 border-sky-300 text-sky-900', Icona: Anchor },
   scosta: { box: 'bg-amber-50 border-amber-300 text-amber-900', Icona: AlertTriangle },
 };
 
@@ -127,7 +195,8 @@ export function EsitoRilevazione({ verifica, onApri }) {
   if (!e) return <span className="text-muted-foreground text-xs">—</span>;
   const colore = e.stato === 'scosta' ? 'text-amber-700 border-amber-300 bg-amber-50'
     : e.stato === 'quadra' ? 'text-emerald-700 border-emerald-300 bg-emerald-50'
-      : 'text-muted-foreground border-border bg-muted/40';
+      : e.stato === 'confermata_ancora' ? 'text-sky-700 border-sky-300 bg-sky-50'
+        : 'text-muted-foreground border-border bg-muted/40';
   return (
     <button
       type="button"
@@ -201,6 +270,20 @@ export default function ControlloRilevazione({ open, onClose, sito, verifica }) 
             </div>
           )}
 
+          {r.sbagliano.length > 0 && (
+            <div className="border border-sky-300 bg-sky-50 text-sky-900 rounded-md p-3 space-y-1">
+              <div className="text-xs font-medium">
+                {r.sbagliano.length === 1 ? 'La lettura da rifare e\' un\'altra:' : 'Le letture da rifare sono altre:'}
+              </div>
+              {r.sbagliano.map(l => (
+                <div key={l.del} className="text-[11px]">· Lettura del {giorno(l.del)}{l.quanto ? `: ${l.quanto}` : ''}</div>
+              ))}
+              <div className="text-[11px] pt-1">
+                Questa rilevazione torna con l&apos;ancora dell&apos;anno - la giacenza da cui l&apos;anno riparte, piu&apos; tutti i movimenti da allora - quindi e&apos; giusta e non va rifatta.
+              </div>
+            </div>
+          )}
+
           {r.scostano.map(c => (
             <div key={`dett|${c.canale}|${c.classe}`} className="border rounded-md p-3 space-y-1">
               <div className="font-medium">{rigaClasse(c)}</div>
@@ -219,6 +302,7 @@ export default function ControlloRilevazione({ open, onClose, sito, verifica }) 
 
           <p className="text-xs text-muted-foreground italic">
             La rilevazione e&apos; salvata: quello che il portale mostra e&apos; un fatto e va tenuto, il controllo serve solo a dire dove guardare. Ed e&apos; il punto di partenza dei calcoli, perche&apos; i movimenti si sommano da li&apos;: una rilevazione sbagliata non si corregge ricaricando i file, si corregge rileggendo la pagina Unita&apos; Locali di Stoccaggio del portale e inserendone una nuova.
+            {r.stato === 'confermata_ancora' && ' Questa pero\' non e\' la rilevazione sbagliata: e\' quella in mezzo, e da qui in avanti il conto riparte giusto.'}
           </p>
         </div>
         <DialogFooter>

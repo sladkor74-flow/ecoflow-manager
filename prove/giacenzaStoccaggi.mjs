@@ -13,7 +13,7 @@
 // giacenza - i file non partono da quando il piazzale era vuoto - ma un termine
 // di confronto, che dice da quando conta.
 // npm run prove
-import { movimentoStoccaggio, fraLeRilevazioni, verificaRilevazione, saldoMovimentiInArchivio, classiDiRilevazione, riconciliazionePiazzale } from '../base44/shared/giacenzaStoccaggi.ts';
+import { movimentoStoccaggio, fraLeRilevazioni, verificaRilevazione, saldoMovimentiInArchivio, classiDiRilevazione, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura } from '../base44/shared/giacenzaStoccaggi.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -243,6 +243,121 @@ verifica('i suoi movimenti restano suoi', conCanali.canali.EXTRA_RACCOLTA.archiv
 // riusata e non rifatta: accanto alla giacenza, mai al posto suo.
 const suo = saldoMovimentiInArchivio(conAci);
 verifica('la somma dei movimenti in archivio e\' la stessa di sempre', JSON.stringify(conCanali.canali.RETE.archivio) === JSON.stringify(suo.RETE), JSON.stringify(conCanali.canali.RETE.archivio));
+
+// --- L'ANCORA DELL'ANNO (23/09/2026) ---
+//
+// Il caso vero, misurato a mano il 23/09/2026 su NAPPI SUD: partendo dalla
+// giacenza dichiarata al 31/12/2025 (P 14.840, M 6.440, G1 13.680) e sommando
+// TUTTI i movimenti del 2026 si arriva esattamente al saldo letto a portale il
+// 23/09 (P 21.740, M 130, G1 350, ACI 1.640), scarto zero su ogni classe.
+// La lettura del 23/09 e' dunque giusta: a sbagliare era quella del 16/09, che
+// aveva 6.160 kg nella classe sbagliata. Il confronto con la sola precedente
+// invece accusava la lettura nuova, e "conviene rileggere" restava acceso su un
+// piazzale appena riletto.
+
+console.log('\nL\'ANCORA DI UN ANNO: LA LETTURA PIU\' VECCHIA CHE LO COPRE');
+const fineAnno = { sito: 'NAPPI SUD', data_rilevazione: '2025-12-31', class1_kg: 14840, class2_kg: 6440, class3_kg: 13680, class4_kg: 0, class9_kg: 0 };
+verifica('l\'anno di una lettura viene dal suo giorno', annoDellaLettura('2026-09-23') === '2026' && annoDellaLettura('') === '');
+verifica('la rilevazione del 31/12 precedente e\' l\'ancora dell\'anno', ancoraDellAnno([rilev16, fineAnno, rilev13], 2026) === fineAnno);
+verifica('senza il 31/12 vale la prima lettura dell\'anno', ancoraDellAnno([rilev20, rilev16, rilev13], 2026) === rilev13);
+verifica('una lettura di un altro anno non fa da ancora', ancoraDellAnno([fineAnno], 2028) === null && ancoraDellAnno([rilev13], 'boh') === null);
+verifica('l\'ancora del 2025 e\' la lettura del 31/12/2025 stessa', ancoraDellAnno([fineAnno, rilev13], 2025) === fineAnno);
+
+console.log('NAPPI SUD, 23/09/2026: LA LETTURA NUOVA E\' CONFERMATA DALL\'ANCORA');
+// I movimenti veri del 2026, in forma compatta: il conto deve chiudere a zero.
+const mov2026 = [
+  m('ET26100000', 9560, '2026-02-05T08:00:00Z', '2026-02-07T08:00:00Z'),
+  m('SEC00100', 13330, '2026-03-10T09:00:00Z', '2026-03-12T08:00:00Z', { verso: 'uscita', classe: 'G1', controparte: 'Irigom' }),
+  m('SEC00412', 4499, '2026-09-14T09:00:00Z', '2026-09-14T18:00:00Z', { verso: 'uscita', classe: 'P', controparte: 'Irigom' }),
+  m('ET26137000', 2861, '2026-09-14T07:00:00Z', '2026-09-15T10:00:00Z', { classe: 'M' }),
+  // il formulario del caso vero: classe M, finito il 15/09, chiuso a portale il 18
+  m('ET26138377', 6160, '2026-09-15T10:00:00Z', '2026-09-18T09:00:00Z', { classe: 'M', controparte: 'Nappi Sud' }),
+  m('ET26139500', 1839, '2026-09-17T08:00:00Z', '2026-09-19T08:00:00Z'),
+  m('ACI0091', 1640, '2026-09-19T08:00:00Z', '2026-09-21T08:00:00Z', { canale: 'ACI', classe: 'ACI', controparte: 'Green Tyre' }),
+  m('SEC00500', 15331, '2026-09-21T09:00:00Z', '2026-09-24T08:00:00Z', { verso: 'uscita', classe: 'M', controparte: 'Irigom' }),
+];
+// La lettura sbagliata del 16/09: 6.160 kg spostati da M a P.
+const nappi16 = { sito: 'NAPPI SUD', data_rilevazione: '2026-09-16', class1_kg: 26061, class2_kg: 9301, class3_kg: 350, class4_kg: 0, class9_kg: 0 };
+// La lettura buona del 23/09, presa coi valori del portale.
+const nappi23 = { sito: 'NAPPI SUD', data_rilevazione: '2026-09-23', class1_kg: 21740, class2_kg: 130, class3_kg: 350, class4_kg: 0, class9_kg: 1640 };
+
+const nappi = riconciliazionePiazzale([fineAnno, nappi16, nappi23], mov2026, { oggi: '2026-09-23' });
+const nRete = nappi.canali.RETE;
+const ultima = nappi.storico[nappi.storico.length - 1];
+verifica('l\'ancora dell\'ultima lettura e\' il 31/12/2025', nappi.ancora_del === '2025-12-31' && nappi.ultima_e_ancora === false, nappi.ancora_del);
+verifica('dall\'ancora piu\' i movimenti del 2026 lo scarto e\' zero su ogni classe',
+  ultima.ancora.quadra === true && ultima.ancora.scostano.length === 0, JSON.stringify(ultima.ancora.classi.map(c => [c.classe, c.atteso, c.letto, c.scarto])));
+verifica('l\'attesa dall\'ancora e\' proprio il saldo letto: P 21.740, M 130, G1 350, ACI 1.640',
+  ultima.ancora.classi.filter(c => ['P', 'M', 'G1', 'ACI'].includes(c.classe)).map(c => c.atteso).join() === '21740,130,350,1640',
+  JSON.stringify(ultima.ancora.classi.map(c => [c.classe, c.atteso])));
+verifica('contro la precedente invece si scosta, di 6.160 kg fra P e M',
+  ultima.quadra === false && ultima.scostano.sort().join() === 'M,P' && ultima.canali.RETE.spostati_kg === 6160, JSON.stringify(ultima.canali.RETE));
+verifica('ma e\' confermata dall\'ancora, e lo si dice', ultima.confermata_dall_ancora === true && ultima.ancora.nota.includes("e' confermata"), ultima.ancora.nota);
+verifica('il canale lo dice da se\': la rete confermata, l\'ACI che tornava gia\'',
+  nRete.stato.esito === 'confermata_ancora' && nappi.canali.ACI.stato.esito === 'quadra', JSON.stringify([nRete.stato.esito, nappi.canali.ACI.stato.esito]));
+verifica('e si dice quale lettura sbaglia e di quanto',
+  nRete.stato.letture_che_sbagliano.length === 1
+  && nRete.stato.letture_che_sbagliano[0].del === '2026-09-16'
+  && nRete.stato.letture_che_sbagliano[0].quanto === '6.160 kg fra P e M',
+  JSON.stringify(nRete.stato.letture_che_sbagliano.map(l => [l.del, l.quanto])));
+verifica('la frase nomina l\'ancora e la lettura che sbaglia',
+  nRete.stato.perche.includes("torna con l'ancora dell'anno, la lettura del 31/12/2025")
+  && nRete.stato.perche.includes("A sbagliare e' la lettura del 16/09/2026, di 6.160 kg fra P e M."),
+  nRete.stato.perche);
+// Il punto per cui il lavoro e' nato: il piazzale era appena stato riletto.
+verifica('NON conviene rileggere un piazzale confermato dall\'ancora',
+  nRete.rileggere.conviene === false && nRete.rileggere.perche.length === 0 && nRete.rileggere.nota.includes('rifarla non servirebbe'),
+  JSON.stringify(nRete.rileggere));
+verifica('la lettura del 16/09 resta segnalata per quello che e\'',
+  nappi.storico[1].quadra === false && nappi.storico[1].confermata_dall_ancora === false && nappi.storico[1].canali.RETE.ripartizione_sbagliata === true,
+  JSON.stringify(nappi.storico[1].canali.RETE));
+verifica('nello storico del canale la lettura buona porta l\'ancora con se\'',
+  nRete.letture[0].del === '2026-09-23' && nRete.letture[0].confermata_dall_ancora === true && nRete.letture[0].ancora_del === '2025-12-31',
+  JSON.stringify(nRete.letture[0]));
+
+console.log('L\'ANCORA E\' LA LETTURA STESSA: NIENTE CONFRONTO, E SI DICE');
+const suAncora = nappi.storico[0];
+verifica('la lettura del 31/12/2025 e\' l\'ancora del 2025', suAncora.ancora.e_la_lettura === true && suAncora.ancora.quadra === null && suAncora.confermata_dall_ancora === false);
+verifica('e lo dice, invece di tacere', suAncora.ancora.nota.includes("e' l'ancora del 2025"), suAncora.ancora.nota);
+verifica('il canale non inventa un\'ancora che non c\'e\'', nappi.canali.RETE.letture[2].e_ancora === true && nappi.canali.RETE.letture[2].ancora_del === '');
+
+console.log('FRA L\'ANCORA E LA LETTURA CI SONO ALTRE LETTURE: SI DICE QUALE NON TORNA');
+// Il 20/09 si rilegge il portale, che l'errore del 16/09 ce l'ha ancora: quella
+// lettura torna con la precedente - sbaglia allo stesso modo - e a non tornare
+// resta solo il 16/09.
+const nappi20 = { sito: 'NAPPI SUD', data_rilevazione: '2026-09-20', class1_kg: 27900, class2_kg: 9301, class3_kg: 350, class4_kg: 0, class9_kg: 1640 };
+const conTre = riconciliazionePiazzale([fineAnno, nappi16, nappi20, nappi23], mov2026, { oggi: '2026-09-23' });
+const tRete = conTre.canali.RETE;
+const tUltima = conTre.storico[conTre.storico.length - 1];
+verifica('la lettura del 23/09 resta confermata dall\'ancora', tUltima.confermata_dall_ancora === true && tRete.stato.esito === 'confermata_ancora');
+verifica('fra l\'ancora e lei ci sono due letture', tUltima.ancora.intermedie.map(l => l.del).join() === '2026-09-16,2026-09-20', JSON.stringify(tUltima.ancora.intermedie.map(l => l.del)));
+verifica('a non tornare e\' solo il 16/09: il 20/09 sbaglia allo stesso modo e con la precedente torna',
+  tUltima.ancora.non_tornano.join() === '2026-09-16' && tUltima.ancora.intermedie[1].quadra === true,
+  JSON.stringify(tUltima.ancora.non_tornano));
+// La frase nomina il 20/09 come la precedente da cui si scosta, e il 16/09 come
+// quella che sbaglia: sono due ruoli diversi e non vanno confusi.
+verifica('e la frase accusa il 16/09, non il 20/09 da cui si scosta',
+  tRete.stato.perche.includes("si scosta da quella del 20/09/2026")
+  && tRete.stato.perche.includes("A sbagliare e' la lettura del 16/09/2026, di 6.160 kg fra P e M.")
+  && tRete.stato.letture_che_sbagliano.map(l => l.del).join() === '2026-09-16',
+  tRete.stato.perche);
+verifica('nemmeno qui conviene rileggere', tRete.rileggere.conviene === false, JSON.stringify(tRete.rileggere.perche));
+
+console.log('SE NON TORNA NE\' CON L\'ANCORA NE\' CON LA PRECEDENTE, RESTA COM\'ERA');
+// La stessa lettura del 23/09 con 777 kg di P in meno: non la conferma nessuno.
+const storta23 = riconciliazionePiazzale(
+  [fineAnno, nappi16, { ...nappi23, class1_kg: 21740 - 777 }], mov2026, { oggi: '2026-09-23' },
+).canali.RETE;
+verifica('resta una lettura che si scosta', storta23.stato.esito === 'scosta' && storta23.stato.confermata_dall_ancora === false, storta23.stato.esito);
+verifica('e si dice che non torna nemmeno con l\'ancora', storta23.stato.perche.includes("Non torna nemmeno con l'ancora dell'anno, la lettura del 31/12/2025"), storta23.stato.perche);
+verifica('e questa volta conviene rileggere', storta23.rileggere.conviene === true && storta23.rileggere.perche.some(p => p.includes('rimette a posto il punto di partenza')), JSON.stringify(storta23.rileggere.perche));
+
+console.log('SENZA ANCORA NON SI INVENTA UN CONFRONTO');
+const senzAncora = verificaRilevazione(nappi23, nappi16, mov2026);
+verifica('chiamata senza ancora, la verifica non ne inventa una', senzAncora.ancora.senza_ancora === true && senzAncora.ancora.quadra === null && senzAncora.confermata_dall_ancora === false);
+verifica('e il confronto con la precedente resta quello di sempre', senzAncora.quadra === false && senzAncora.scostano.sort().join() === 'M,P');
+verifica('i canali non si mescolano nemmeno nell\'ancora',
+  ultima.ancora.canali.RETE.quadra === true && ultima.ancora.canali.ACI.quadra === true && !('totale' in ultima.ancora));
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

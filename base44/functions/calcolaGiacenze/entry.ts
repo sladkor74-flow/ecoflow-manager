@@ -5,7 +5,7 @@ import { annoRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale } from "../../shared/giacenzaStoccaggi.ts";
+import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura } from "../../shared/giacenzaStoccaggi.ts";
 import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine } from "../../shared/giacenzaPortale.ts";
 
 // Calcola la situazione delle giacenze di impianti e stoccaggi per l'anno richiesto.
@@ -607,10 +607,15 @@ export default async function(req) {
           const trentaGiorniFa = giornoRoma(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
           rilevazione_obsoleta = rilev.dataStr < trentaGiorniFa;
           // Il controllo della rilevazione: che cosa ci si aspettava di leggere,
-          // partendo dalla precedente e contando i movimenti fra le due date.
+          // partendo dalla precedente e contando i movimenti fra le due date, e
+          // anche partendo dall'ancora dell'anno - altrimenti una lettura giusta
+          // presa dopo una sbagliata risulta storta lei (23/09/2026).
           const storico = rilevPerStoc.get(ns) || [];
           const precedente = storico.length > 1 ? storico[storico.length - 2] : null;
-          verifica_rilevazione = verificaRilevazione(rilev.record, precedente, suoiMovimenti);
+          const ancora = ancoraDellAnno(storico, annoDellaLettura(rilev.dataStr));
+          const iAncora = ancora ? storico.indexOf(ancora) : -1;
+          const intermedie = iAncora >= 0 ? storico.slice(iAncora + 1, storico.length - 1) : [];
+          verifica_rilevazione = verificaRilevazione(rilev.record, precedente, suoiMovimenti, { ancora, intermedie });
         } else {
           giacenza_portale_t = 0;
           // L'anomalia si segnala solo se la riga sopravvive al filtro di

@@ -47,7 +47,7 @@ globalThis.window = globalThis.window || { self: 1, top: 1 };
 
 const controllo = await impacchetta('../src/components/giacenze/ControlloRilevazione.jsx');
 const situazione = await impacchetta('../src/components/giacenze/SituazioneTable.jsx');
-const { riassuntoVerifica, rigaClasse, dettaglioClasse, rigaCandidato, esitoBreve } = controllo;
+const { riassuntoVerifica, rigaClasse, dettaglioClasse, rigaCandidato, esitoBreve, quantoSbaglia } = controllo;
 const { riassuntoArchivio } = situazione;
 
 // --- il caso vero di NAPPI SUD: la rilevazione del 16/09 con 6.160 kg nella
@@ -98,6 +98,46 @@ const prima = riassuntoVerifica(verificaRilevazione(rilev16, null, movimenti));
 verifica('senza una rilevazione prima non si dice che quadra: non si inventa nulla', prima.stato === 'senza_precedente' && !prima.sintesi.includes('quadra'), prima.sintesi);
 verifica('e si spiega perche\' non c\'e\' confronto', prima.sintesi.includes("non c'e' una rilevazione precedente da cui partire"), prima.sintesi);
 verifica('senza verifica non si mostra niente', riassuntoVerifica(null) === null && esitoBreve(null) === null);
+
+// --- La lettura confermata dall'ancora dell'anno (23/09/2026) ---
+//
+// Il caso vero: il 23/09 si rilegge il portale e la lettura nuova, giusta, si
+// scosta dalla precedente - quella sbagliata del 16/09. Il confronto con
+// l'ancora dell'anno, la giacenza dichiarata al 31/12/2025 piu' tutti i
+// movimenti del 2026, la conferma: a video deve leggersi che e' giusta lei e che
+// a sbagliare e' il 16/09, di 6.160 kg fra P e M.
+console.log('QUANDO L\'ANCORA DELL\'ANNO CONFERMA LA LETTURA NUOVA');
+const fineAnno = { data_rilevazione: '2025-12-31', class1_kg: 14840, class2_kg: 6440, class3_kg: 13680, class4_kg: 0, class9_kg: 0 };
+const nappi16 = { data_rilevazione: '2026-09-16', class1_kg: 26061, class2_kg: 9301, class3_kg: 350, class4_kg: 0, class9_kg: 0 };
+const nappi23 = { data_rilevazione: '2026-09-23', class1_kg: 21740, class2_kg: 130, class3_kg: 350, class4_kg: 0, class9_kg: 1640 };
+const mov2026 = [
+  m('ET26100000', 9560, '2026-02-05T08:00:00Z', '2026-02-07T08:00:00Z'),
+  m('SEC00100', 13330, '2026-03-10T09:00:00Z', '2026-03-12T08:00:00Z', { verso: 'uscita', classe: 'G1', controparte: 'Irigom' }),
+  m('SEC00412', 4499, '2026-09-14T09:00:00Z', '2026-09-14T18:00:00Z', { verso: 'uscita', controparte: 'Irigom' }),
+  m('ET26137000', 2861, '2026-09-14T07:00:00Z', '2026-09-15T10:00:00Z', { classe: 'M' }),
+  m('ET26138377', 6160, '2026-09-15T10:00:00Z', '2026-09-18T09:00:00Z', { classe: 'M', controparte: 'Nappi Sud' }),
+  m('ET26139500', 1839, '2026-09-17T08:00:00Z', '2026-09-19T08:00:00Z'),
+  m('ACI0091', 1640, '2026-09-19T08:00:00Z', '2026-09-21T08:00:00Z', { canale: 'ACI', classe: 'ACI', controparte: 'Green Tyre' }),
+  m('SEC00500', 15331, '2026-09-21T09:00:00Z', '2026-09-24T08:00:00Z', { verso: 'uscita', classe: 'M', controparte: 'Irigom' }),
+];
+const confermata = verificaRilevazione(nappi23, nappi16, mov2026, { ancora: fineAnno, intermedie: [nappi16] });
+const rA = riassuntoVerifica(confermata);
+verifica('non si dice che e\' storta: si dice che l\'ancora la conferma', rA.stato === 'confermata_ancora' && rA.titolo === "Confermata dall'ancora dell'anno", rA.titolo);
+verifica('si dice da che cosa e\' confermata', rA.sintesi.includes("Torna pero' con l'ancora del 2026, la lettura del 31/12/2025 piu' tutti i movimenti da allora: e' giusta questa lettura."), rA.sintesi);
+verifica('e si dice quale lettura sbaglia e di quanto', rA.sintesi.includes("A sbagliare e' la lettura del 16/09/2026, di 6.160 kg fra P e M."), rA.sintesi);
+verifica('le classi che si scostano si mostrano lo stesso', rA.scostano.map(c => c.classe).sort().join() === 'M,P' && rA.sbagliano.map(l => l.del).join() === '2026-09-16');
+verifica('in due parole: confermata dall\'ancora', esitoBreve(confermata).testo === "confermata dall'ancora" && esitoBreve(confermata).stato === 'confermata_ancora');
+// Il totale del canale torna: i chili non mancano, sono nella classe sbagliata.
+verifica('quanto sbaglia una lettura si dice per canale, mai sommando i canali',
+  quantoSbaglia({ canali: { RETE: { quadra: false, ripartizione_sbagliata: true, spostati_kg: 6160, classi_che_scostano: ['P', 'M'], scarto_kg: 0 } } }) === '6.160 kg fra P e M');
+verifica('e se il totale non torna si dice lo scarto col segno',
+  quantoSbaglia({ canali: { RETE: { quadra: false, ripartizione_sbagliata: false, spostati_kg: 0, classi_che_scostano: ['P'], scarto_kg: -777 } } }) === '-777 kg fra P');
+
+// Senza ancora, o con un'ancora che non conferma, non cambia niente.
+const nonConfermata = verificaRilevazione({ ...nappi23, class1_kg: 21740 - 777 }, nappi16, mov2026, { ancora: fineAnno, intermedie: [nappi16] });
+verifica('se non torna nemmeno con l\'ancora resta una lettura che si scosta', riassuntoVerifica(nonConfermata).stato === 'scosta');
+verifica('e si dice che e\' lei a essere da rifare', riassuntoVerifica(nonConfermata).sintesi.includes("Non torna nemmeno con l'ancora del 2026, la lettura del 31/12/2025 piu' tutti i movimenti da allora: e' questa lettura a essere da rifare."), riassuntoVerifica(nonConfermata).sintesi);
+verifica('senza ancora il riassunto resta quello di prima', riassuntoVerifica(storta).stato === 'scosta' && riassuntoVerifica(storta).sbagliano.length === 0);
 
 console.log('LA SOMMA DEI SOLI MOVIMENTI IN ARCHIVIO: NON E\' UNA GIACENZA');
 // Come su Nappi Sud: l'archivio comincia nel 2024 e non arriva a quando il
