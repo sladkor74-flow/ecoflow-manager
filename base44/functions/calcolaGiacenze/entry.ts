@@ -5,7 +5,7 @@ import { annoRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio } from "../../shared/giacenzaStoccaggi.ts";
+import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale } from "../../shared/giacenzaStoccaggi.ts";
 import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine } from "../../shared/giacenzaPortale.ts";
 
 // Calcola la situazione delle giacenze di impianti e stoccaggi per l'anno richiesto.
@@ -554,6 +554,9 @@ export default async function(req) {
       // i piazzali, perche' solo loro partono da una lettura del portale.
       let verifica_rilevazione = null;
       let saldo_movimenti_archivio = null;
+      // La riconciliazione del piazzale: l'estratto conto, lo storico delle
+      // letture, com'e' adesso e se conviene rileggere (23/09/2026).
+      let riconciliazione = null;
 
       if (td === 'stoc') {
         // in_attesa_dichiarazione_t: primarie arrivate allo stoccaggio che il file del
@@ -566,6 +569,13 @@ export default async function(req) {
         // quanto manca all'appello e da quando. Non dipende dalla rilevazione.
         const suoiMovimenti = movArchivio.get(ns) || [];
         saldo_movimenti_archivio = saldoMovimentiInArchivio(suoiMovimenti);
+
+        // La riconciliazione, il lavoro che il 22 e il 23 settembre si e' fatto
+        // a mano su Nappi Sud: da dove viene la giacenza di adesso, che verdetto
+        // ha avuto ogni lettura del portale - non solo l'ultima - come sta il
+        // piazzale e quando conviene rileggere. Si fa anche senza rilevazione:
+        // dire che manca il punto di partenza e' una risposta, non un vuoto.
+        riconciliazione = riconciliazionePiazzale(rilevPerStoc.get(ns) || [], suoiMovimenti, { oggi });
 
         const rilev = stocRilevMap.get(ns);
         if (rilev) {
@@ -717,6 +727,8 @@ export default async function(req) {
         // archivio: due termini di confronto, non due giacenze.
         verifica_rilevazione,
         saldo_movimenti_archivio,
+        // La riconciliazione del piazzale, canale per canale.
+        riconciliazione,
         aggiornata_al,
         data_rilevazione,
         rilevazione_obsoleta,

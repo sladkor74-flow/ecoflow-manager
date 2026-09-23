@@ -8,6 +8,7 @@ import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import RilevazioneForm from './RilevazioneForm';
 import StoricoRilevazioni from './StoricoRilevazioni';
 import ControlloRilevazione, { EsitoRilevazione, riassuntoVerifica, giorno } from './ControlloRilevazione';
+import { EsitoRiconciliazione, RiconciliazioneDialog } from './Riconciliazione';
 import { formatNumber, formatTonnellate } from '@/lib/utils';
 import { riassuntoGruppo } from '@/components/giacenze/DateDaSistemare';
 
@@ -27,6 +28,9 @@ function isObsolete(dateStr) {
 }
 
 export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, onSaved }) {
+  // L'estratto conto del piazzale: da dove viene la giacenza di adesso e come
+  // sono andate le letture di prima (23/09/2026).
+  const [riconciliazioneAperta, setRiconciliazioneAperta] = useState(null);
   const { toast } = useToast();
   const [rilevazioni, setRilevazioni] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -85,6 +89,16 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
     const per = new Map();
     for (const s of stoccaggiFromCalcolo) {
       if (s.verifica_rilevazione) per.set(normalizzaRagioneSociale(s.sito), s.verifica_rilevazione);
+    }
+    return per;
+  }, [stoccaggiFromCalcolo]);
+
+  // L'estratto conto di ogni piazzale: fotografia, movimenti dopo, storico delle
+  // letture. Anche questo lo calcola calcolaGiacenze.
+  const riconciliazioniPerSito = useMemo(() => {
+    const per = new Map();
+    for (const s of stoccaggiFromCalcolo) {
+      if (s.riconciliazione) per.set(normalizzaRagioneSociale(s.sito), s.riconciliazione);
     }
     return per;
   }, [stoccaggiFromCalcolo]);
@@ -198,6 +212,7 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
                   <th className="px-3 py-2 font-semibold text-right">Rete (t)</th>
                   <th className="px-3 py-2 font-semibold text-right">ACI (t)</th>
                   <th className="px-3 py-2 font-semibold" title="La rilevazione a confronto con la precedente piu' i movimenti del periodo: se una classe si scosta lo dice qui">Controllo</th>
+                  <th className="px-3 py-2 font-semibold" title="Da dove viene la giacenza di adesso: fotografia, ingressi e uscite dopo, e com'e' andata ogni lettura">Estratto conto</th>
                   <th className="px-3 py-2 font-semibold">Azioni</th>
                 </tr>
               </thead>
@@ -243,6 +258,12 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
                         />
                       </td>
                       <td className="px-3 py-2">
+                        <EsitoRiconciliazione
+                          riconciliazione={riconciliazioniPerSito.get(normalizzaRagioneSociale(r.sito))}
+                          onApri={() => setRiconciliazioneAperta({ sito: r.sito, riconciliazione: riconciliazioniPerSito.get(normalizzaRagioneSociale(r.sito)) })}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
                         {isAdmin && (
                           <div className="flex gap-1">
                             <Button variant="outline" size="sm" className="h-7" onClick={() => handleNuova(r)}>
@@ -285,6 +306,12 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
         }}
       />
 
+      <RiconciliazioneDialog
+        open={!!riconciliazioneAperta}
+        onClose={() => setRiconciliazioneAperta(null)}
+        sito={riconciliazioneAperta ? riconciliazioneAperta.sito : ''}
+        riconciliazione={riconciliazioneAperta ? riconciliazioneAperta.riconciliazione : null}
+      />
       <ControlloRilevazione
         open={!!controllo}
         onClose={() => setControllo(null)}

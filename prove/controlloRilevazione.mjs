@@ -109,7 +109,8 @@ const storia = saldoMovimentiInArchivio([
   m('ET26000099', 800, null, '2026-09-21T08:00:00Z'),
 ]);
 const rete = riassuntoArchivio(storia, 'RETE');
-verifica('si legge da quando conta e quanto fa', rete.riga === 'dai soli movimenti in archivio dal 12/01/2024: -61,42 t', rete.riga);
+verifica('si legge da quando conta, quanto fa e che l\'archivio non copre tutto',
+  rete.riga === 'dai soli movimenti in archivio dal 12/01/2024: -61,42 t, cioe\' l\'archivio non copre tutto', rete.riga);
 verifica('quanti movimenti sono e fino a quando', rete.dettaglio === '2 movimenti fino al 20/09/2026: 1 ingressi per 1.000 kg, 1 uscite per 62.420 kg.', rete.dettaglio);
 verifica('sotto zero si dice perche\', e che non e\' una giacenza',
   rete.negativo === true && rete.avvertenza.includes("l'archivio non arriva a quando il piazzale era vuoto") && rete.avvertenza.includes("non e' una giacenza"), rete.avvertenza);

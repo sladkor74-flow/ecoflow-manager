@@ -14,6 +14,7 @@ import DerivatiTable from '@/components/giacenze/DerivatiTable';
 import TargetTable from '@/components/giacenze/TargetTable';
 import TargetManager from '@/components/giacenze/TargetManager';
 import StoccaggiManager from '@/components/giacenze/StoccaggiManager';
+import ChiusuraAnno from '@/components/giacenze/ChiusuraAnno';
 import { exportGiacenzeAllExcel } from '@/lib/giacenzeExportAll';
 
 export default function Giacenze() {
@@ -115,6 +116,7 @@ export default function Giacenze() {
               <TabsTrigger value="derivati">Derivati</TabsTrigger>
               <TabsTrigger value="target">Target</TabsTrigger>
               <TabsTrigger value="stoccaggi">Stoccaggi</TabsTrigger>
+              <TabsTrigger value="chiusura">Chiusura anno</TabsTrigger>
             </TabsList>
 
             <TabsContent value="situazione">
@@ -145,6 +147,12 @@ export default function Giacenze() {
               </div>
             </TabsContent>
 
+            {/* La chiusura d'anno prepara la fotografia da cui parte l'anno dopo:
+                si chiude l'anno prima di quello che si sta guardando. */}
+            <TabsContent value="chiusura">
+              <ChiusuraAnno anno={Number(anno) - 1} isAdmin={isAdmin} onSaved={loadData} />
+            </TabsContent>
+
             <TabsContent value="stoccaggi">
               <StoccaggiManager
                 // Con i formulari da sistemare dello stoccaggio: senza fine trasporto
@@ -155,6 +163,8 @@ export default function Giacenze() {
                   sito: r.sito,
                   date_da_sistemare: r.date_da_sistemare || [],
                   verifica_rilevazione: r.verifica_rilevazione || null,
+                  // l'estratto conto del piazzale, con lo storico delle letture
+                  riconciliazione: r.riconciliazione || null,
                 }))}
                 isAdmin={isAdmin}
                 onSaved={loadData}
