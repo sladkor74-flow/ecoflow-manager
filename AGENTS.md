@@ -74,6 +74,23 @@ dell'utente del 21/09/2026, "mai, dico mai"): nr_giorni, raccolta_nei_tempi e
 gli SLA si misurano dall'immissione alla fine del trasporto con `tempiRaccolta()`
 di `base44/shared/movimenti.ts`. La chiusura si puo' solo mostrare.
 
+**E da dove parte, allora, un numero?** Questa domanda e' il punto in cui la
+regola si perde, perche' scritta come divieto non la risponde, e chi la
+riderivasse tornerebbe a guardare il portale. La forma positiva, decisa dalla
+direzione il 24/09/2026:
+
+> La giacenza di un piazzale e' una **somma algebrica**: l'ancora dell'anno - la
+> giacenza dichiarata al 31/12 precedente, o la prima lettura dell'anno - piu'
+> **tutti i movimenti con fine trasporto successiva**, classe per classe e canale
+> per canale. **La lettura del portale e' un riscontro, non la fonte del numero.**
+
+Quando una lettura si scosta, lo scarto si spiega - e li' `ordine_chiuso_il` si
+puo' nominare, perche' il portale chiude gli ordini qualche giorno dopo - ma il
+numero mostrato resta quello dei nostri movimenti. Cosi' ogni caricamento
+riallinea tutto da solo, che e' la seconda regola assoluta. Vale lo stesso
+ovunque ci sia una fotografia esterna da confrontare: la fotografia dice che cosa
+sapeva chi l'ha scattata, non che cosa e' successo.
+
 Un assegnato non e' un movimento: il suo periodo e' `ordine_immesso_il`.
 
 ### Canali indipendenti
