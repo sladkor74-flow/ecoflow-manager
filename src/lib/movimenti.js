@@ -24,7 +24,7 @@
 //
 // Questo file ha uno specchio per il browser: src/lib/movimenti.js. Una regola
 // cambiata qui va cambiata la'.
-import { giornoRoma } from '@/lib/giornoItaliano';
+import { giornoRoma, oggiRoma } from '@/lib/giornoItaliano';
 import { eAci } from '@/lib/canaleSecondaria';
 
 export const MESI_MOVIMENTI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -99,9 +99,28 @@ export const DATE_OBBLIGATORIE = [
   { campo: 'trasporto_finito_il', nome: 'fine trasporto' },
 ];
 
-/** I nomi delle date obbligatorie che mancano a un ordine terminato; [] se ci sono tutte o se non e' terminato. */
+/**
+ * Da quale anno le date si controllano: l'anno scorso e quello in corso. Il
+ * portale si ancora al 31/12 dell'anno prima, e piu' indietro nessun numero
+ * dipende dai singoli ordini; i loro avvisi erano solo rumore, che nessuno puo'
+ * piu' correggere (utente, 25/09/2026: "tieni il 2024 e toglilo dagli avvisi").
+ * Gli ordini restano in archivio e negli elenchi: non si segnalano e basta.
+ */
+export const primoAnnoControllato = (oggi = oggiRoma()) => Number(String(oggi).slice(0, 4)) - 1;
+
+/**
+ * Vero se le date di un ordine si controllano. L'anno e' SEMPRE quello della
+ * fine trasporto, mai l'immissione (utente, 25/09/2026): un terminato senza
+ * fine trasporto non ha anno, e si controlla e si segnala sempre.
+ */
+export function dateDaControllare(r, oggi = oggiRoma()) {
+  const giorno = giornoRoma(r && r.trasporto_finito_il);
+  return !giorno || Number(giorno.slice(0, 4)) >= primoAnnoControllato(oggi);
+}
+
+/** I nomi delle date obbligatorie che mancano a un ordine terminato; [] se ci sono tutte, se non e' terminato o se e' di un anno che non si controlla piu'. */
 export function dateMancanti(r) {
-  if (!eTerminato(r)) return [];
+  if (!eTerminato(r) || !dateDaControllare(r)) return [];
   return DATE_OBBLIGATORIE.filter(d => !giornoRoma(r[d.campo])).map(d => d.nome);
 }
 
@@ -125,7 +144,7 @@ export function dateMancanti(r) {
  * negativi.
  */
 export function dateIncoerenti(r) {
-  if (!eTerminato(r)) return [];
+  if (!eTerminato(r) || !dateDaControllare(r)) return [];
   const inizio = giornoRoma(r.trasporto_iniziato_il);
   const fine = giornoRoma(r.trasporto_finito_il);
   return inizio && fine && fine < inizio ? ['fine trasporto prima dell\'inizio'] : [];

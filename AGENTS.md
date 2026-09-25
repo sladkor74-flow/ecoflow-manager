@@ -490,6 +490,29 @@ Chi la rete non la dichiara per accordo (`dichiara_rete` falso, oggi Tecnogum)
 non ha una giacenza di rete che il portale tenga per noi: i suoi carichi non si
 aggiungono alla fotografia come "non ancora nel file".
 
+### Lo storico: si carica solo cio' che serve all'operativita' (25/09/2026)
+
+Il portale si ancora al 31/12 di ogni anno: quando un anno e' dichiarato e le
+sue giacenze svuotate, ricaricarne i movimenti non serve piu'. L'utente carica
+quindi i file di primarie, secondarie e terziarie dal 1 gennaio dell'anno
+scorso (nel 2026 dal 2025, nel 2027 dal 2026), ma gli anni prima devono restare
+nella memoria storica del gestionale. Due regole, entrambe sulla **fine del
+trasporto** (l'immissione conta solo per gli assegnati, la chiusura mai):
+
+- **Il caricamento conserva lo storico** (`base44/shared/storicoConservato.ts`).
+  L'anno da cui comincia un file e' la prima fine trasporto dei suoi terminati;
+  i terminati in archivio con la fine trasporto negli anni prima, assenti dal
+  file, restano come sono e non contano come "ordini mancanti". Non si
+  conservano mai gli assegnati (e' il file di oggi a dire se sono aperti), ne' i
+  terminati senza fine trasporto, che non hanno anno. Si cancella per ID a
+  blocchi, dopo una prova in sola lettura del filtro; senza niente da conservare
+  resta il `deleteMany({})` di sempre. Provato il 25/09/2026 sul file vero delle
+  primarie: 3.254 terminati del 2024 conservati, nessun mancante.
+- **Le date obbligatorie si controllano dall'anno scorso** (`dateDaControllare`
+  e `primoAnnoControllato` in `base44/shared/movimenti.ts`): un terminato con la
+  fine trasporto prima non si segnala piu', ovunque. Senza fine trasporto non ha
+  anno, e si segnala sempre.
+
 ### Come si legge un movimento: un punto solo
 
 `base44/shared/movimenti.ts` (specchio per le pagine: `src/lib/movimenti.js`).

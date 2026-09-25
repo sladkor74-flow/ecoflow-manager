@@ -38,13 +38,17 @@ export function extractUploadWarnings(data) {
   const hasDate = !!data.avviso_date;
   const hasCalo = !!data.avviso_calo;
   const hasDisallineamento = !!data.avviso_disallineamento;
-  if (!hasColonne && !hasDate && !hasCalo && !hasDisallineamento) return null;
+  // Non e' un problema, ma si dice: il file cominciava da un anno e lo storico
+  // degli anni prima e' rimasto in archivio invece di essere cancellato.
+  const hasStorico = !!data.storico_conservato;
+  if (!hasColonne && !hasDate && !hasCalo && !hasDisallineamento && !hasStorico) return null;
   return {
     type: 'warning',
     avviso_colonne: data.avviso_colonne,
     avviso_date: data.avviso_date,
     avviso_calo: data.avviso_calo,
     avviso_disallineamento: data.avviso_disallineamento,
+    storico_conservato: data.storico_conservato,
     ultimo_errore: data.ultimo_errore,
   };
 }
@@ -143,6 +147,13 @@ export default function UploadResultDialog({ state, onClose }) {
             <div className="p-2.5 rounded-md bg-amber-50 border border-amber-300 text-amber-900 text-sm">
               <strong>Avviso date:</strong> ultima data nel file ({new Date(state.avviso_date.data_file).toLocaleDateString('it-IT')})
               {' '}precedente all'archivio ({new Date(state.avviso_date.data_archivio).toLocaleDateString('it-IT')}).
+            </div>
+          )}
+
+          {state.storico_conservato && (
+            <div className="p-2.5 rounded-md bg-sky-50 border border-sky-300 text-sky-900 text-sm">
+              <strong>Storico conservato:</strong> il file comincia dal {state.storico_conservato.dal_anno}.
+              {' '}Le {state.storico_conservato.righe} righe dei terminati con la fine trasporto negli anni prima sono rimaste in archivio, come erano.
             </div>
           )}
 

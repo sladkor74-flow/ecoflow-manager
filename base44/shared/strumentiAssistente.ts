@@ -107,7 +107,7 @@ function dateObbligatorie(righe, modulo = '') {
         })),
       },
     } : {}),
-    nota: 'Immissione, inizio e fine trasporto sono date obbligatorie nei formulari: questi ordini terminati, di qualunque anno, ne hanno una che manca o non torna, e vanno segnalati sempre. Quelli senza fine trasporto ("senza_fine_trasporto", "escluso_dal_conto") sono esclusi dal conto perche\' non si sa in che mese cadono, e qualcuno potrebbe appartenere al periodo chiesto: sono divisi per anno di immissione, l\'unica data che hanno, e chi non ha nemmeno quella sta nella voce "senza data di immissione". Gli altri sono nel conto, ma le date vanno inserite o corrette. Si correggono nel file del portale e si ricaricano; l\'extra raccolta nella sua scheda.',
+    nota: 'Immissione, inizio e fine trasporto sono date obbligatorie nei formulari: questi ordini terminati, con la fine trasporto dall\'anno scorso in poi o senza fine trasporto (gli anni prima restano in archivio ma non si controllano piu\'), ne hanno una che manca o non torna, e vanno segnalati sempre. Quelli senza fine trasporto ("senza_fine_trasporto", "escluso_dal_conto") sono esclusi dal conto perche\' non si sa in che mese cadono, e qualcuno potrebbe appartenere al periodo chiesto: sono divisi per anno di immissione, l\'unica data che hanno, e chi non ha nemmeno quella sta nella voce "senza data di immissione". Gli altri sono nel conto, ma le date vanno inserite o corrette. Si correggono nel file del portale e si ricaricano; l\'extra raccolta nella sua scheda.',
   };
 }
 
@@ -632,7 +632,7 @@ export const STRUMENTI = [
             conferisce_a: (o.destinazioni || []).map(dd => `${dd.destinazione}: ${dd.viaggi} viaggi, ${t3(dd.kg)} t${dd.sospetta ? ' (FUORI ROTTA)' : ''}`),
           })),
         sospetti: (f2.sospetti || []).filter(x => !k || normalizzaRagioneSociale(x.origine).includes(k)),
-        // i terminati del flusso, di qualunque anno, con date obbligatorie mancanti o incoerenti
+        // i terminati del flusso, dall'anno scorso in poi, con date obbligatorie mancanti o incoerenti
         ...(f2.date_da_sistemare ? { date_obbligatorie_da_sistemare: f2.date_da_sistemare } : {}),
       }));
       return {
@@ -651,7 +651,7 @@ export const STRUMENTI = [
   },
   {
     nome: 'alert_aperti',
-    descrizione: 'Gli alert aperti del gestionale, per modulo e gravita\'. Comprende, per modulo e canale e di qualunque anno, gli ordini terminati con date obbligatorie (immissione, inizio e fine trasporto) mancanti o incoerenti, con l\'elenco degli ordini.',
+    descrizione: 'Gli alert aperti del gestionale, per modulo e gravita\'. Comprende, per modulo e canale e dall\'anno scorso in poi, gli ordini terminati con date obbligatorie (immissione, inizio e fine trasporto) mancanti o incoerenti, con l\'elenco degli ordini.',
     parametri: { modulo: 'opzionale' },
     moduli: ['Alert & Controllo'],
     async esegui(base44, p) {
@@ -672,7 +672,7 @@ export const STRUMENTI = [
       }
       // Le date obbligatorie (22/09/2026) per esteso: un alert per modulo e
       // canale, col suo elenco di ordini. Il motore le rivaluta a ogni caricamento
-      // su tutti i terminati, di qualunque anno; dal 22/09/2026 anche l'extra
+      // su tutti i terminati dall'anno scorso in poi; dal 22/09/2026 anche l'extra
       // raccolta, a ogni scheda salvata, e l'avviso che lo negava e' tolto.
       const date = filtrati.filter(a => String(a.regola_id || '').startsWith('date_obbligatorie')).map(a => ({
         modulo: a.modulo, canale: a.canale || '', ordini: a.quanti ?? null, senza_fine_trasporto: a.senza_fine ?? null,
