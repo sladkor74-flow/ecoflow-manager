@@ -256,7 +256,8 @@ al suo piazzale (`tipo_destinazione` 'stoc'), piu' le secondarie di rete da altr
 stoccaggi. Le primarie del piazzale contano perche' "il residuo totale diminuisce
 anche con le primarie" (utente); le secondarie dal proprio piazzale a se stesso
 non si contano, sarebbero contate due volte. Il piazzale conta al netto di quello
-che riparte verso altri impianti seguiti (scelta da confermare con l'utente).
+che riparte verso altri impianti seguiti (scelta confermata dall'utente il
+25/09/2026).
 
 ### La fatturazione attiva verso Ecotyre
 
@@ -367,10 +368,10 @@ quella prova.
   ordine di scelta. Agosto 2026 e' stato dichiarato con la regola di prima - i
   primi dell'ordine finche' bastano - che resta come `criterio: 'ordine'` per
   rifare una pratica gia' consegnata.
-- **Domanda aperta** (22/09/2026): nel foglio Dettaglio alcune celle del peso
-  degli allegati VII sono gialle (6 ad agosto, fra cui il n. 30 che abbiamo
-  dichiarato): non e' un marcatore di 'non nostro'. L'utente lo chiedera' a
-  Irigom e vuole che glielo si ricordi: tirarlo fuori alla prossima pratica.
+- **Le celle gialle** del peso degli allegati VII nel foglio Dettaglio (6 ad
+  agosto 2026, fra cui il n. 30 che abbiamo dichiarato) non contano nei nostri
+  ragionamenti (utente, 25/09/2026): non sono un marcatore di 'non nostro', non
+  cambiano la scelta degli allegati e non vanno segnalate.
 - **Ripartizione**: ciabattato a peso pieno dell'allegato, l'ultima terziaria il
   resto; ferro uguale per tutte alle decine, l'ultima il resto; mai oltre 38.000
   kg per dichiarazione, sul peso con cui la dichiarazione si chiude a portale.

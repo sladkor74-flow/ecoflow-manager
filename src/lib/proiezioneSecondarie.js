@@ -411,8 +411,8 @@ export function viaggiPerMese(proiezioni) {
 // contarli di nuovo al trasbordo li farebbe valere due volte. Si contano a parte
 // (da_se_stesso) e si dice quante sono.
 //
-// Il piazzale conta al netto (correzione del 22/09/2026, da far confermare
-// all'utente): quello che dal piazzale di T-Cycle parte per Tecnogum non lo
+// Il piazzale conta al netto (correzione del 22/09/2026, confermata
+// dall'utente il 25/09/2026): quello che dal piazzale di T-Cycle parte per Tecnogum non lo
 // tratta T-Cycle, e Tecnogum lo conta gia' fra le sue secondarie da altri
 // stoccaggi. Tenuto anche nel gia' arrivato di T-Cycle, gli stessi PFU
 // abbassavano due residui, e quello di T-Cycle usciva piu' piccolo del vero: il
