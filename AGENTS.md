@@ -509,8 +509,8 @@ trasporto** (l'immissione conta solo per gli assegnati, la chiusura mai):
   mancanti e si lasciano andare (`cancellatiDaLasciare`). Non avendo fine
   trasporto, il loro anno e' l'immissione: vale solo per loro. Quelli dell'anno
   del file in poi restano nel controllo, perche' servono come statistica: un
-  cancellato resta cancellato e inevaso, e torna assegnato (stesso ID ordine)
-  solo se viene riaperto perche' cancellato per errore. Una richiesta nuova ha
+  cancellato resta cancellato e inevaso, e puo' tornare assegnato con lo stesso
+  ID ordine solo se viene riaperto perche' e' stato cancellato per errore. Una richiesta nuova ha
   un altro ID ordine e compare fra gli assegnati da evadere. Si cancella per ID a
   blocchi, dopo una prova in sola lettura del filtro; senza niente da conservare
   resta il `deleteMany({})` di sempre. Provato il 25/09/2026 sul file vero delle
