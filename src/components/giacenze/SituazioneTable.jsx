@@ -21,22 +21,19 @@ const CLASSI = [
 ];
 
 const IN_ATTESA_TOOLTIP = "Materiale gia' partito da questo stoccaggio verso un impianto: il portale lo attribuisce ancora qui finche' il destinatario non presenta la dichiarazione. Non e' giacenza.";
-const RILEVAZ_OBSOLETA_TOOLTIP = "Rilevazione di oltre trenta giorni fa: aggiornala dalla pagina Unita' Locali di Stoccaggio del portale.";
+const RILEVAZ_OBSOLETA_TOOLTIP = "L'ultima rilevazione ha oltre trenta giorni: il numero non invecchia, perche' viene dai movimenti, ma il riscontro col portale si', e conviene rifarlo dalla pagina Unita' Locali di Stoccaggio.";
 
 // Una classe sotto zero non e' un errore di conto da aggiustare: e' quello che
-// esce dai dati, e va detto da dove viene invece di mostrarlo e basta. Due
-// ragioni, tutte e due vere insieme. La rilevazione e' il saldo che il portale
-// aggiorna quando CHIUDE l'ordine, giorni dopo il trasporto, mentre qui i
-// movimenti contano dalla fine del trasporto (regola 1): un carico finito prima
-// della rilevazione e chiuso dopo non sta ne' nella fotografia ne' fra i
-// movimenti successivi, e quella classe resta senza il suo ingresso. E ogni
-// secondaria parte con una classe sola, mentre in piazzale il materiale e' misto:
-// basta un viaggio dichiarato in una classe per portarla sotto zero. Il totale
-// del sito puo' restare giusto: a sbagliare e' la ripartizione fra le classi.
+// esce dai dati, e va detto da dove viene invece di mostrarlo e basta. Il
+// numero parte dall'ancora dell'anno (24/09/2026): se va sotto zero, o l'ancora
+// ha i chili nella classe sbagliata o manca un movimento in archivio. E ogni
+// secondaria parte con una classe sola, mentre in piazzale il materiale e'
+// misto: basta un viaggio dichiarato in una classe per portarla sotto zero. Il
+// totale del sito puo' restare giusto: a sbagliare e' la ripartizione.
 const CLASSE_NEGATIVA_TOOLTIP = (classe, giorno) => [
-  `Il numero e' il dato, non un arrotondamento: rilevazione del portale del ${giorno}, piu' gli ingressi e meno le uscite di classe ${classe} finiti dopo, per fine trasporto.`,
-  `La rilevazione pero' e' il saldo che il portale aggiorna quando chiude l'ordine, giorni dopo il trasporto: un carico finito prima della rilevazione e chiuso dopo non e' ne' nella fotografia ne' fra i movimenti successivi. E ogni secondaria parte con una classe sola, mentre in piazzale il materiale e' misto.`,
-  `Da guardare: la rilevazione, da rifare dalla pagina Unita' Locali di Stoccaggio del portale, e i formulari di classe ${classe} partiti dopo il ${giorno}. La segnalazione e' anche fra le anomalie, in cima alla pagina.`,
+  `Il numero e' il dato, non un arrotondamento: l'ancora dell'anno, la rilevazione del ${giorno}, piu' gli ingressi e meno le uscite di classe ${classe} finiti dopo, per fine trasporto.`,
+  `Sotto zero vuol dire che da allora ne risulta uscita piu' di quanta ne sia entrata: o l'ancora ha i chili nella classe sbagliata, o manca un ingresso in archivio. E ogni secondaria parte con una classe sola, mentre in piazzale il materiale e' misto.`,
+  `Da guardare: i formulari di classe ${classe} partiti dopo il ${giorno}, e il riscontro con una lettura nuova del portale, dalla pagina Unita' Locali di Stoccaggio. La segnalazione e' anche fra le anomalie, in cima alla pagina.`,
 ];
 function fmtDate(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('it-IT'); }
 /** Un giorno 'AAAA-MM-GG' come lo si legge: GG/MM/AAAA. */
@@ -83,8 +80,9 @@ function fmtDataOra(d) {
   return `${x.toLocaleDateString('it-IT')} ${x.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
-// Come si arriva alla giacenza di uno stoccaggio: rilevazione, ingressi e uscite
-// finiti dopo, un canale per volta. L'extra raccolta, che a portale non c'e', a parte.
+// Come si arriva alla giacenza di uno stoccaggio: l'ancora dell'anno, ingressi e
+// uscite finiti dopo, un canale per volta; l'ultima lettura e' il riscontro
+// (24/09/2026). L'extra raccolta, che a portale non c'e', a parte.
 function DettaglioStoccaggio({ r }) {
   const d = r.dopo_rilevazione;
   if (!d) return null;
@@ -97,14 +95,17 @@ function DettaglioStoccaggio({ r }) {
           <div className={`mt-1 text-xs flex items-center justify-end gap-1 cursor-help ${r.rilevazione_obsoleta ? 'text-amber-600' : 'text-muted-foreground'}`}>
             {r.rilevazione_obsoleta && <AlertTriangle className="w-3 h-3" />}
             <span className="underline decoration-dotted underline-offset-2">
-              rilevato il {fmtDate(r.data_rilevazione)}{mov(d.rete)}
+              {d.ultima_lettura && d.ultima_lettura !== d.dal
+                ? <>dall&apos;ancora del {fmtDate(d.dal)}{mov(d.rete)} · letto il {fmtDate(r.data_rilevazione)}</>
+                : <>dalla lettura del {fmtDate(d.dal)}{mov(d.rete)}</>}
             </span>
           </div>
         </TooltipTrigger>
         <TooltipContent className="max-w-sm text-xs space-y-1">
-          <div>Rilevazione del portale del {fmtDate(d.dal)}: rete {formatKg(kgRil(false))} kg (classi P, M, G1, G2), ACI {formatKg(kgRil(true))} kg (classe 9).</div>
-          <div>Rete, finiti dopo la rilevazione: {d.rete.ingressi} ingressi per {formatKg(d.rete.ingressi_kg)} kg, {d.rete.uscite} uscite per {formatKg(d.rete.uscite_kg)} kg.</div>
-          <div>ACI, finiti dopo la rilevazione: {d.aci.ingressi} ingressi per {formatKg(d.aci.ingressi_kg)} kg, {d.aci.uscite} uscite per {formatKg(d.aci.uscite_kg)} kg.</div>
+          <div>Ancora dell&apos;anno, la rilevazione del {fmtDate(d.dal)}: rete {formatKg(kgRil(false))} kg (classi P, M, G1, G2), ACI {formatKg(kgRil(true))} kg (classe 9).</div>
+          <div>Rete, finiti dopo l&apos;ancora: {d.rete.ingressi} ingressi per {formatKg(d.rete.ingressi_kg)} kg, {d.rete.uscite} uscite per {formatKg(d.rete.uscite_kg)} kg.</div>
+          <div>ACI, finiti dopo l&apos;ancora: {d.aci.ingressi} ingressi per {formatKg(d.aci.ingressi_kg)} kg, {d.aci.uscite} uscite per {formatKg(d.aci.uscite_kg)} kg.</div>
+          {d.ultima_lettura && d.ultima_lettura !== d.dal && <div>L&apos;ultima lettura del portale, del {fmtDate(d.ultima_lettura)}, e&apos; il riscontro: si confronta con questo numero nella riconciliazione del piazzale, ma non lo cambia.</div>}
           {r.giacenza_extra_t ? <div>Extra raccolta in piazzale, fuori portale: {fmt(r.giacenza_extra_t)} t.</div> : null}
           <div>Movimenti caricati fino al {fmtDate(r.aggiornata_al)}, per fine trasporto. {r.rilevazione_obsoleta ? RILEVAZ_OBSOLETA_TOOLTIP : ''}</div>
         </TooltipContent>
@@ -138,7 +139,7 @@ function SaldoArchivio({ r }) {
           {aci && <div>ACI, che non si somma alla rete: {formatTonnellate(aci.t)} t dal {fmtGiorno(aci.dal)}. {aci.dettaglio}</div>}
           {extra && <div>Extra raccolta, a parte anch&apos;essa: {formatTonnellate(extra.t)} t dal {fmtGiorno(extra.dal)}. {extra.dettaglio}</div>}
           {rete.senza_fine > 0 && <div>{formatIntero(rete.senza_fine)} movimenti di rete sono fuori da questa somma perche&apos; non hanno la fine trasporto: senza quella data non si collocano in nessun giorno.</div>}
-          <div>La giacenza vera resta quella sopra: rilevazione del portale piu&apos; i movimenti finiti dopo. Questa somma serve a vedere quanto manca all&apos;appello e da quando.</div>
+          <div>La giacenza vera resta quella sopra: l&apos;ancora dell&apos;anno piu&apos; i movimenti finiti dopo. Questa somma serve a vedere quanto manca all&apos;appello e da quando.</div>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -162,7 +163,8 @@ function DettaglioImpianto({ r }) {
 // Una classe con la giacenza sotto zero: il numero resta quello che e', ma dice
 // da dove viene e che cosa andare a guardare.
 function ClasseNegativa({ r, classe, valore }) {
-  const giorno = fmtDate(r.data_rilevazione);
+  // Il giorno da cui parte il conto: l'ancora dell'anno, non l'ultima lettura.
+  const giorno = fmtDate(r.dopo_rilevazione ? r.dopo_rilevazione.dal : r.data_rilevazione);
   return (
     <TooltipProvider>
       <Tooltip>

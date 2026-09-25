@@ -12,8 +12,10 @@ import { riassuntoArchivio } from '@/components/giacenze/SituazioneTable';
 //
 // Quattro cose, un canale per volta - rete e ACI non si sommano mai:
 // 1. da dove viene la giacenza di adesso, letta come un estratto conto:
-//    la fotografia del portale, piu' gli ingressi e meno le uscite finiti dopo,
-//    classe per classe, fino al numero che la pagina mostra;
+//    l'ancora dell'anno, piu' gli ingressi e meno le uscite finiti dopo,
+//    classe per classe, fino al numero che la pagina mostra; e sotto il
+//    riscontro dell'ultima lettura, che si confronta e non cambia il numero
+//    (regola della direzione, 24/09/2026);
 // 2. lo storico delle letture, ognuna col suo verdetto - contro la precedente e
 //    contro l'ancora del suo anno: prima si vedeva solo l'ultima contro la
 //    precedente, e cosi' una lettura sbagliata piu' indietro nel tempo non si
@@ -92,12 +94,13 @@ export function EsitoRiconciliazione({ riconciliazione, onApri }) {
   );
 }
 
-// 1. L'estratto conto: dalla fotografia al numero che la pagina mostra.
+// 1. L'estratto conto: dall'ancora dell'anno al numero che la pagina mostra.
 function Estratto({ canale }) {
   const e = canale.estratto;
   const intestazioneFoto = canale.fotografia
-    ? `Fotografia del ${giorno(canale.fotografia.del)}`
-    : 'Fotografia';
+    ? `Ancora del ${giorno(canale.fotografia.del)}`
+    : 'Ancora';
+  const ris = canale.riscontro;
   return (
     <div className="border rounded-md overflow-hidden">
       <div className="overflow-x-auto">
@@ -145,9 +148,19 @@ function Estratto({ canale }) {
       </div>
       <p className="px-2 py-1.5 text-[11px] text-muted-foreground italic">
         {canale.fotografia
-          ? `Il saldo che il portale mostrava il ${giorno(canale.fotografia.del)}, piu' gli ingressi e meno le uscite finiti dopo, per fine trasporto: contano dal giorno successivo alla lettura. E' il numero che la pagina mostra.`
+          ? `L'ancora dell'anno, la lettura del ${giorno(canale.fotografia.del)}, piu' gli ingressi e meno le uscite finiti dopo, per fine trasporto: contano dal giorno successivo. E' il numero che la pagina mostra; le letture successive sono un riscontro e non lo spostano.`
           : "Senza una lettura del portale non c'e' un punto di partenza: i movimenti si contano lo stesso, ma la loro somma non e' una giacenza."}
       </p>
+      {ris && (
+        <p className={`px-2 py-1.5 text-[11px] border-t ${ris.quadra ? 'text-emerald-800' : 'text-amber-800'}`}>
+          Riscontro dell&apos;ultima lettura, del {giorno(ris.del)}: il portale leggeva {formatKg(ris.letto_kg)} kg, l&apos;ancora piu&apos; i movimenti fino a quel giorno ne davano {formatKg(ris.atteso_kg)}.
+          {' '}{ris.quadra
+            ? 'Torna classe per classe.'
+            : ris.ripartizione_sbagliata
+              ? `Il totale torna, la ripartizione no (${ris.classi_che_scostano.join(', ')}): lo scarto si spiega sotto.`
+              : `Scarto di ${kgSegno(ris.scarto_kg)}: si spiega sotto, ma il numero mostrato resta quello dei movimenti.`}
+        </p>
+      )}
     </div>
   );
 }

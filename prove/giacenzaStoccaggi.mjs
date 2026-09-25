@@ -13,7 +13,7 @@
 // giacenza - i file non partono da quando il piazzale era vuoto - ma un termine
 // di confronto, che dice da quando conta.
 // npm run prove
-import { movimentoStoccaggio, fraLeRilevazioni, verificaRilevazione, saldoMovimentiInArchivio, classiDiRilevazione, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura } from '../base44/shared/giacenzaStoccaggi.ts';
+import { movimentoStoccaggio, fraLeRilevazioni, verificaRilevazione, saldoMovimentiInArchivio, classiDiRilevazione, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, puntiDiPartenza } from '../base44/shared/giacenzaStoccaggi.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -148,7 +148,10 @@ verifica('sulla storia intera puo\' uscire negativo: non e\' una giacenza', stor
 // caricamento: da dove viene la giacenza di adesso, che verdetto ha avuto ogni
 // lettura del portale, come sta il piazzale e quando conviene rileggere.
 
-console.log('\nL\'ESTRATTO CONTO: DALLA FOTOGRAFIA AL NUMERO CHE LA PAGINA MOSTRA');
+console.log('\nL\'ESTRATTO CONTO: DALL\'ANCORA AL NUMERO CHE LA PAGINA MOSTRA');
+// Regola della direzione del 24/09/2026: il numero parte dall'ancora dell'anno
+// (qui la prima lettura del 2026, il 13/09) piu' tutti i movimenti finiti dopo.
+// L'ultima lettura, del 20/09, e' il riscontro: non sposta il numero.
 // Dopo il 16/09 arriva una lettura che torna, il 20/09: 21.400 + 5.000 di P.
 const rilev20 = { sito: 'NAPPI SUD', data_rilevazione: '2026-09-20', class1_kg: 26400, class2_kg: 22310, class3_kg: 350, class4_kg: 0, class9_kg: 0 };
 // E dopo quella lettura il piazzale continua a lavorare.
@@ -161,12 +164,17 @@ const ric = riconciliazionePiazzale([rilev16, rilev13, rilev20], tutti, { oggi: 
 const rete = ric.canali.RETE;
 const classeDi = (canale, c) => canale.estratto.classi.find(x => x.classe === c);
 verifica('parte dalla lettura piu\' recente, comunque siano ordinate', ric.ultima_del === '2026-09-20' && ric.rilevazioni === 3 && ric.giorni_dalla_lettura === 3, JSON.stringify([ric.ultima_del, ric.giorni_dalla_lettura]));
-verifica('la fotografia e\' quella del 20/09: rete 49.060 kg', rete.fotografia.del === '2026-09-20' && rete.fotografia.totale_kg === 49060, JSON.stringify(rete.fotografia));
-verifica('P: 26.400 di fotografia, un\'uscita da 3.000, adesso 23.400', classeDi(rete, 'P').fotografia_kg === 26400 && classeDi(rete, 'P').uscite === 1 && classeDi(rete, 'P').uscite_kg === 3000 && classeDi(rete, 'P').adesso_kg === 23400, JSON.stringify(classeDi(rete, 'P')));
-verifica('M: 22.310 di fotografia, un ingresso da 2.000, adesso 24.310', classeDi(rete, 'M').ingressi === 1 && classeDi(rete, 'M').ingressi_kg === 2000 && classeDi(rete, 'M').adesso_kg === 24310, JSON.stringify(classeDi(rete, 'M')));
+verifica('si parte dall\'ancora, il 13/09: rete 39.538 kg', ric.partenza_del === '2026-09-13' && rete.fotografia.del === '2026-09-13' && rete.fotografia.totale_kg === 39538 && rete.fotografia.ultima_del === '2026-09-20', JSON.stringify(rete.fotografia));
+verifica('P: 19.739 all\'ancora, +5.000 -7.499, adesso 17.240', classeDi(rete, 'P').fotografia_kg === 19739 && classeDi(rete, 'P').ingressi_kg === 5000 && classeDi(rete, 'P').uscite_kg === 7499 && classeDi(rete, 'P').adesso_kg === 17240, JSON.stringify(classeDi(rete, 'P')));
+verifica('M: 19.449 all\'ancora, +11.021, adesso 30.470', classeDi(rete, 'M').ingressi === 3 && classeDi(rete, 'M').ingressi_kg === 11021 && classeDi(rete, 'M').adesso_kg === 30470, JSON.stringify(classeDi(rete, 'M')));
 verifica('una classe ferma resta com\'era', classeDi(rete, 'G1').adesso_kg === 350 && classeDi(rete, 'G1').ingressi === 0 && classeDi(rete, 'G1').uscite === 0);
-verifica('il conto chiude: 49.060 + 2.000 - 3.000 = 48.060', rete.estratto.adesso_kg === 48060 && rete.estratto.ingressi_kg === 2000 && rete.estratto.uscite_kg === 3000, JSON.stringify(rete.estratto.adesso_kg));
-verifica('i movimenti prima della lettura restano fuori: sono gia\' nella fotografia', rete.estratto.ingressi === 1 && rete.estratto.uscite === 1, JSON.stringify([rete.estratto.ingressi, rete.estratto.uscite]));
+verifica('il conto chiude: 39.538 + 16.021 - 7.499 = 48.060', rete.estratto.adesso_kg === 48060 && rete.estratto.ingressi_kg === 16021 && rete.estratto.uscite_kg === 7499, JSON.stringify(rete.estratto.adesso_kg));
+verifica('i movimenti prima dell\'ancora restano fuori: sono gia\' nella sua lettura', rete.estratto.ingressi === 4 && rete.estratto.uscite === 2, JSON.stringify([rete.estratto.ingressi, rete.estratto.uscite]));
+// Il riscontro: la lettura del 20/09 ha il totale giusto ma si porta dietro la
+// ripartizione storta del 16/09. Lo scarto si dice; il numero resta il nostro.
+verifica('il riscontro dell\'ultima lettura: 49.060 letti, 49.060 attesi, ripartizione sbagliata',
+  rete.riscontro.del === '2026-09-20' && rete.riscontro.letto_kg === 49060 && rete.riscontro.atteso_kg === 49060 && rete.riscontro.scarto_kg === 0 && rete.riscontro.ripartizione_sbagliata === true,
+  JSON.stringify(rete.riscontro));
 
 console.log('LO STORICO: OGNI LETTURA COL SUO VERDETTO, NON SOLO L\'ULTIMA');
 verifica('tre letture, dalla piu\' vecchia alla piu\' recente', ric.storico.map(s => s.del).join(' ') === '2026-09-13 2026-09-16 2026-09-20', ric.storico.map(s => s.del).join(' '));
@@ -183,14 +191,14 @@ verifica('e di quanto si scostava', rete.letture[1].quadra === false && rete.let
 
 console.log('LO STATO DI ADESSO');
 verifica('l\'ultima lettura tornava, e lo si dice', rete.stato.esito === 'quadra' && rete.stato.quadra === true && rete.stato.perche.startsWith("L'ultima lettura tornava"), rete.stato.perche);
-verifica('niente da rileggere: lettura fresca, piazzale che torna', rete.rileggere.conviene === false && rete.rileggere.vecchia === false && rete.rileggere.superata === false && rete.rileggere.perche.length === 0, JSON.stringify(rete.rileggere));
+verifica('niente da rileggere: lettura fresca, piazzale che torna', rete.rileggere.conviene === false && rete.rileggere.vecchia === false && rete.rileggere.perche.length === 0, JSON.stringify(rete.rileggere));
 
 // Lo stesso piazzale fermo al 16/09: la ripartizione e' sbagliata, il materiale c'e'.
 const al16 = riconciliazionePiazzale([rilev13, rilev16], movimenti, { oggi: '2026-09-23' }).canali.RETE;
 verifica('se l\'ultima non torna si dice di quanto, classe per classe', al16.stato.esito === 'scosta' && al16.stato.classi_che_scostano.sort().join() === 'M,P', JSON.stringify(al16.stato.classi_che_scostano));
 verifica('il totale del canale torna: e\' la ripartizione a essere sbagliata', al16.stato.ripartizione_sbagliata === true && al16.stato.scarto_kg === 0 && al16.stato.perche.includes("il materiale c'e' tutto"), al16.stato.perche);
 verifica('e i candidati a spiegarlo ci sono', al16.stato.classi.find(c => c.classe === 'M').candidati[0].id_ordine === 'ET26138377');
-verifica('una lettura che non torna e\' un motivo per rileggere', al16.rileggere.conviene === true && al16.rileggere.perche.some(p => p.includes('rimette a posto il punto di partenza')), JSON.stringify(al16.rileggere.perche));
+verifica('una lettura che non torna e\' un motivo per rileggere, ma il numero non cambia', al16.rileggere.conviene === true && al16.rileggere.perche.some(p => p.includes("La giacenza mostrata non cambia")), JSON.stringify(al16.rileggere.perche));
 
 // Materiale che manca davvero: il totale del canale non torna.
 const mancante = riconciliazionePiazzale([rilev13, { ...rilev16, class1_kg: 21400 - 777 }], movimenti, { oggi: '2026-09-23' }).canali.RETE;
@@ -199,25 +207,26 @@ verifica('se non torna nemmeno il totale si dice che e\' materiale che manca', m
 console.log('QUANDO CONVIENE RILEGGERE');
 const vecchia = riconciliazionePiazzale([rilev13, rilev20], tutti, { oggi: '2026-11-01' }).canali.RETE;
 verifica('una fotografia di oltre trenta giorni si dice vecchia, con quanti giorni ha', vecchia.rileggere.vecchia === true && vecchia.rileggere.giorni === 42 && vecchia.rileggere.perche[0] === "La lettura ha 42 giorni, piu' di 30: conviene rifarla.", JSON.stringify(vecchia.rileggere.perche));
-// Il viavai ha superato quello che c'era: la fotografia regge ormai poco del conto.
+// Tanto viavai dopo la lettura non e' piu' un motivo per rileggere: il numero
+// viene dall'ancora e dai movimenti, non dalla lettura.
 const viavai = riconciliazionePiazzale(
   [{ sito: 'PIAZZALE', data_rilevazione: '2026-09-20', class1_kg: 1000, class2_kg: 0, class3_kg: 0, class4_kg: 0, class9_kg: 0 }],
   [m('ET26142000', 5000, '2026-09-21T08:00:00Z', '')],
   { oggi: '2026-09-23' },
 ).canali.RETE;
-verifica('se dopo la lettura si e\' mosso piu' + ' di quanto ce n\'era, lo si dice', viavai.rileggere.superata === true && viavai.rileggere.conviene === true && viavai.rileggere.perche.some(p => p.includes('dipende ormai dai movimenti')), JSON.stringify(viavai.rileggere.perche));
+verifica('il viavai dopo l\'ancora non fa rileggere', viavai.rileggere.conviene === false && !('superata' in viavai.rileggere), JSON.stringify(viavai.rileggere));
 verifica('la giacenza pero\' resta quella: 1.000 + 5.000', viavai.estratto.adesso_kg === 6000 && viavai.estratto.movimentato_kg === 5000);
 
 console.log('I CASI LIMITE GIA\' VISTI');
-// Una classe sotto zero: il punto di partenza e' sbagliato, e nessun caricamento
-// puo' correggerlo. E' il caso del 16/09, visto dalla parte della giacenza.
+// Una classe sotto zero: l'ancora ha i chili nella classe sbagliata o manca un
+// movimento. E' il caso del 16/09, visto dalla parte della giacenza.
 const sottoZero = riconciliazionePiazzale(
   [{ sito: 'PIAZZALE', data_rilevazione: '2026-09-20', class1_kg: 10000, class2_kg: 0, class3_kg: 0, class4_kg: 0, class9_kg: 0 }],
   [m('SEC00430', 6030, '2026-09-21T09:00:00Z', '', { verso: 'uscita', classe: 'M', controparte: 'Tecnogum' })],
   { oggi: '2026-09-23' },
 ).canali.RETE;
 verifica('una classe sotto zero si mostra per quello che e\'', sottoZero.estratto.classi_negative.join() === 'M' && classeDi(sottoZero, 'M').adesso_kg === -6030, JSON.stringify(sottoZero.estratto.classi_negative));
-verifica('ed e\' un motivo per rileggere, detto con parole semplici', sottoZero.rileggere.conviene === true && sottoZero.rileggere.perche.some(p => p.includes('nessun caricamento puo\' correggerlo')), JSON.stringify(sottoZero.rileggere.perche));
+verifica('ed e\' un motivo per rileggere, detto con parole semplici', sottoZero.rileggere.conviene === true && sottoZero.rileggere.perche.some(p => p.includes('manca un movimento in archivio')), JSON.stringify(sottoZero.rileggere.perche));
 
 // Un piazzale senza nessuna lettura: la giacenza non si calcola, e si dice.
 const senzaLettura = riconciliazionePiazzale([], movimenti, { oggi: '2026-09-23' });
@@ -262,6 +271,11 @@ verifica('la rilevazione del 31/12 precedente e\' l\'ancora dell\'anno', ancoraD
 verifica('senza il 31/12 vale la prima lettura dell\'anno', ancoraDellAnno([rilev20, rilev16, rilev13], 2026) === rilev13);
 verifica('una lettura di un altro anno non fa da ancora', ancoraDellAnno([fineAnno], 2028) === null && ancoraDellAnno([rilev13], 'boh') === null);
 verifica('l\'ancora del 2025 e\' la lettura del 31/12/2025 stessa', ancoraDellAnno([fineAnno, rilev13], 2025) === fineAnno);
+verifica('il punto di partenza e\' l\'ancora dell\'anno dell\'ultima lettura', puntoDiPartenza([rilev20, fineAnno, rilev16]) === fineAnno && puntoDiPartenza([rilev20, rilev16, rilev13]) === rilev13 && puntoDiPartenza([]) === null);
+const punti = puntiDiPartenza([rilev20, fineAnno, rilev16, { ...rilev13, sito: 'ALTRO' }], s => String(s || '').toUpperCase());
+verifica('per ogni piazzale il suo punto di partenza, con l\'ultima lettura accanto',
+  punti.get('NAPPI SUD').record === fineAnno && punti.get('NAPPI SUD').quando === '2025-12-31' && punti.get('NAPPI SUD').ultima === rilev20 && punti.get('ALTRO').quando === '2026-09-13',
+  JSON.stringify([...punti].map(([k, v]) => [k, v.quando, v.ultima_del])));
 
 console.log('NAPPI SUD, 23/09/2026: LA LETTURA NUOVA E\' CONFERMATA DALL\'ANCORA');
 // I movimenti veri del 2026, in forma compatta: il conto deve chiudere a zero.
@@ -350,7 +364,24 @@ const storta23 = riconciliazionePiazzale(
 ).canali.RETE;
 verifica('resta una lettura che si scosta', storta23.stato.esito === 'scosta' && storta23.stato.confermata_dall_ancora === false, storta23.stato.esito);
 verifica('e si dice che non torna nemmeno con l\'ancora', storta23.stato.perche.includes("Non torna nemmeno con l'ancora dell'anno, la lettura del 31/12/2025"), storta23.stato.perche);
-verifica('e questa volta conviene rileggere', storta23.rileggere.conviene === true && storta23.rileggere.perche.some(p => p.includes('rimette a posto il punto di partenza')), JSON.stringify(storta23.rileggere.perche));
+verifica('e questa volta conviene rileggere', storta23.rileggere.conviene === true && storta23.rileggere.perche.some(p => p.includes('dice se lo scarto si chiude da solo')), JSON.stringify(storta23.rileggere.perche));
+
+console.log('LA LETTURA E\' UN RISCONTRO, NON LA FONTE DEL NUMERO (24/09/2026)');
+// L'ancora del 31/12/2025 piu' tutti i movimenti del 2026: P 21.740, M 130,
+// G1 350, ACI 1.640. Una lettura giusta o una storta non spostano il numero.
+verifica('la giacenza di NAPPI SUD e\' l\'ancora piu\' i movimenti: rete 22.220, ACI 1.640',
+  nRete.estratto.adesso_kg === 22220 && nappi.canali.ACI.estratto.adesso_kg === 1640 && nRete.fotografia.del === '2025-12-31',
+  JSON.stringify([nRete.estratto.adesso_kg, nappi.canali.ACI.estratto.adesso_kg]));
+verifica('con la lettura giusta il riscontro torna a zero', nRete.riscontro.scarto_kg === 0 && nRete.riscontro.quadra === true, JSON.stringify(nRete.riscontro));
+verifica('una lettura storta di 777 kg non sposta il numero', storta23.estratto.adesso_kg === 22220, JSON.stringify(storta23.estratto.adesso_kg));
+verifica('lo scarto si dice nel riscontro', storta23.riscontro.scarto_kg === -777 && storta23.riscontro.letto_kg === 22220 - 777 && storta23.riscontro.atteso_kg === 22220, JSON.stringify(storta23.riscontro));
+// Ultima lettura storta al 16/09 e basta: il numero non la segue.
+const fermaAl16 = riconciliazionePiazzale([fineAnno, nappi16], mov2026.filter(x => x.finito_il <= '2026-09-16'), { oggi: '2026-09-16' }).canali.RETE;
+verifica('anche quando l\'ultima lettura e\' quella storta del 16/09, le classi seguono i movimenti',
+  fermaAl16.estratto.classi.find(c => c.classe === 'M').adesso_kg === 6440 + 2861 + 6160 && fermaAl16.riscontro.ripartizione_sbagliata === true,
+  JSON.stringify(fermaAl16.estratto.classi.map(c => [c.classe, c.adesso_kg])));
+const unaSola = riconciliazionePiazzale([fineAnno], mov2026, { oggi: '2026-09-23' }).canali.RETE;
+verifica('quando l\'ultima lettura e\' l\'ancora non c\'e\' un riscontro da fare', unaSola.riscontro === null && unaSola.estratto.adesso_kg === 22220, JSON.stringify(unaSola.riscontro));
 
 console.log('SENZA ANCORA NON SI INVENTA UN CONFRONTO');
 const senzAncora = verificaRilevazione(nappi23, nappi16, mov2026);
