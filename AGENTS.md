@@ -504,10 +504,15 @@ trasporto** (l'immissione conta solo per gli assegnati, la chiusura mai):
   i terminati in archivio con la fine trasporto negli anni prima, assenti dal
   file, restano come sono e non contano come "ordini mancanti". Non si
   conservano mai gli assegnati (e' il file di oggi a dire se sono aperti), ne' i
-  terminati senza fine trasporto, che non hanno anno. Si cancella per ID a
+  terminati senza fine trasporto, che non hanno anno. I **cancellati** degli
+  anni prima, assenti dal file, non servono piu' (utente, 25/09/2026): non sono
+  mancanti e si lasciano andare (`cancellatiDaLasciare`). Non avendo fine
+  trasporto, il loro anno e' l'immissione: vale solo per loro. Quelli dell'anno
+  del file in poi restano nel controllo, perche' servono all'evasione. Si cancella per ID a
   blocchi, dopo una prova in sola lettura del filtro; senza niente da conservare
   resta il `deleteMany({})` di sempre. Provato il 25/09/2026 sul file vero delle
-  primarie: 3.254 terminati del 2024 conservati, nessun mancante.
+  primarie: 3.254 terminati del 2024 conservati, 410 cancellati del 2024
+  lasciati andare, nessun mancante.
 - **Le date obbligatorie si controllano dall'anno scorso** (`dateDaControllare`
   e `primoAnnoControllato` in `base44/shared/movimenti.ts`): un terminato con la
   fine trasporto prima non si segnala piu', ovunque. Senza fine trasporto non ha

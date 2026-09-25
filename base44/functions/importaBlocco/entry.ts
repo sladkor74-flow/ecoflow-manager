@@ -10,7 +10,7 @@ import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
 import { evasioneOrdini, listaOrdini, statoRichiesta, riconosciOrdine, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare } from "../../shared/richiesteEct.ts";
 import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
-import { ordiniDaConservare, svuotaTranne } from "../../shared/storicoConservato.ts";
+import { ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from "../../shared/storicoConservato.ts";
 
 // Le dichiarazioni riconosciute, un canale per volta: nel registro non si sommano.
 const perCanale = (righe) => [['RETE', 'rete'], ['ACI', 'ACI'], ['EXTRA_RACCOLTA', 'extra raccolta']]
@@ -179,7 +179,7 @@ async function idArchivio(base44, entita) {
 async function recordArchivio(base44, entita) {
   const righe = [];
   for (let skip = 0; ; ) {
-    const pagina = await base44.asServiceRole.entities[entita].list('id_ordine', RIGHE_PER_PAGINA, skip, ['id_ordine', 'stato', 'trasporto_finito_il']);
+    const pagina = await base44.asServiceRole.entities[entita].list('id_ordine', RIGHE_PER_PAGINA, skip, ['id_ordine', 'stato', 'trasporto_finito_il', 'ordine_immesso_il']);
     righe.push(...pagina);
     if (ultimaPagina(pagina.length, RIGHE_PER_PAGINA)) break;
     skip += pagina.length;
@@ -540,6 +540,7 @@ export default async function(req) {
         const annoInizio = annoInizioPrimarie(body);
         const conservati = {};
         const daConservare = new Set();
+        const daLasciare = new Set();
         for (const a of ARCHIVI_PRIMARIE) {
           if (annoInizio && ARCHIVI_CON_STORICO.includes(a)) {
             const archivio = await recordArchivio(base44, a);
@@ -547,11 +548,13 @@ export default async function(req) {
             const c = ordiniDaConservare(archivio, annoInizio, idFile);
             conservati[a] = { ordini: c.ordini.size, righe: c.righe };
             for (const id of c.ordini) daConservare.add(id);
+            // I cancellati degli anni prima non servono piu': non sono mancanti.
+            for (const id of cancellatiDaLasciare(archivio, annoInizio, idFile)) daLasciare.add(id);
           } else {
             for (const id of await idArchivio(base44, a)) inArchivio.add(id);
           }
         }
-        const mancanti = [...inArchivio].filter(id => !idFile.has(id) && !daConservare.has(id));
+        const mancanti = [...inArchivio].filter(id => !idFile.has(id) && !daConservare.has(id) && !daLasciare.has(id));
         if (mancanti.length > 0 && !conferma_forzatura) {
           const error = "Il file contiene meno dati di quelli gia' presenti in archivio";
           return await erroreRegistrato({

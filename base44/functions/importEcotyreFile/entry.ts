@@ -8,7 +8,7 @@ import { FILE_SIGNATURES, checkSignature, detectType, mappaColonne } from "../..
 import { CAMPI_ASSEGNATO, DATE_PRIMARIE, archivioPrimaria, dataPrimaria } from "../../shared/primarie.ts";
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 import { annoRoma } from "../../shared/giornoItaliano.ts";
-import { annoInizioFile, ordiniDaConservare, svuotaTranne } from "../../shared/storicoConservato.ts";
+import { annoInizioFile, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from "../../shared/storicoConservato.ts";
 
 // Le dichiarazioni riconosciute, un canale per volta: nel registro non si sommano.
 const perCanale = (righe) => [['RETE', 'rete'], ['ACI', 'ACI'], ['EXTRA_RACCOLTA', 'extra raccolta']]
@@ -400,7 +400,7 @@ export default async function(req) {
           // Servono anche stato e fine trasporto, non solo gli ID.
           const archivio = [];
           for (let skip = 0; ; skip += 1000) {
-            const batch = await base44.asServiceRole.entities[config.entity].list('id', 1000, skip, ['id_ordine', 'stato', 'trasporto_finito_il']);
+            const batch = await base44.asServiceRole.entities[config.entity].list('id', 1000, skip, ['id_ordine', 'stato', 'trasporto_finito_il', 'ordine_immesso_il']);
             archivio.push(...batch);
             if (batch.length < 1000) break;
             await sleep(100);
@@ -408,7 +408,8 @@ export default async function(req) {
           existingIds = new Set(archivio.filter(r => r.id_ordine).map(r => String(r.id_ordine)));
           const idNelFile = new Set(enriched.filter(r => r[keyField]).map(r => String(r[keyField])));
           const c = ordiniDaConservare(archivio, annoInizio, idNelFile);
-          if (c.ordini.size) storico = { anno_inizio: annoInizio, archivio, ordini: c.ordini, righe: c.righe };
+          const lasciati = cancellatiDaLasciare(archivio, annoInizio, idNelFile);
+          if (c.ordini.size || lasciati.size) storico = { anno_inizio: annoInizio, archivio, ordini: c.ordini, righe: c.righe, lasciati };
         } else {
           existingIds = await loadAllIds(config.entity);
         }
@@ -434,7 +435,7 @@ export default async function(req) {
 
       const fileIds = new Set(enriched.filter(r => r[keyField]).map(r => r[keyField]));
       const mancanti = [];
-      for (const id of existingIds) { if (!fileIds.has(id) && !(storico && storico.ordini.has(String(id)))) mancanti.push(id); }
+      for (const id of existingIds) { if (!fileIds.has(id) && !(storico && (storico.ordini.has(String(id)) || storico.lasciati.has(String(id))))) mancanti.push(id); }
 
       if (mancanti.length > 0 && !conferma_forzatura) {
         const errResp = {
@@ -666,7 +667,7 @@ export default async function(req) {
       avviso_calo,
       allineamento,
       // I terminati degli anni prima del file, rimasti in archivio.
-      storico_conservato: storico ? { dal_anno: storico.anno_inizio, righe: storico.righe } : null,
+      storico_conservato: storico && storico.righe ? { dal_anno: storico.anno_inizio, righe: storico.righe } : null,
       forzato: !!conferma_forzatura,
       modalita,
       durata_secondi

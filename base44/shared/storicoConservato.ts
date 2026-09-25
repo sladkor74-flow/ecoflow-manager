@@ -70,6 +70,40 @@ export function ordiniDaConservare(archivio, annoInizio, idFile) {
   return { ordini, righe };
 }
 
+/**
+ * I cancellati degli anni prima del file, assenti dal file: non servono piu'
+ * (utente, 25/09/2026) e si lasciano andare. Non sono "mancanti" e non si
+ * conservano: il caricamento li cancella senza chiedere conferma.
+ *
+ * Un cancellato non ha fine trasporto: l'unica data che ha e' l'immissione, ed
+ * e' quella che dice di che anno e'. Vale solo qui, per i cancellati. Quelli
+ * dell'anno del file in poi restano nel controllo: servono all'evasione degli
+ * assegnati.
+ *
+ * @returns {Set<string>} gli ID degli ordini da lasciar andare
+ */
+export function cancellatiDaLasciare(archivio, annoInizio, idFile) {
+  const esito = new Set();
+  if (!annoInizio) return esito;
+  const perOrdine = new Map();
+  for (const r of archivio || []) {
+    const id = r && r.id_ordine ? String(r.id_ordine) : '';
+    if (!id) continue;
+    if (!perOrdine.has(id)) perOrdine.set(id, []);
+    perOrdine.get(id).push(r);
+  }
+  const cancellato = (r) => String((r && r.stato) || '').toLowerCase().trim() === 'cancellato';
+  for (const [id, suoi] of perOrdine) {
+    if (idFile.has(id)) continue;
+    const vecchio = suoi.every(r => {
+      const a = annoRoma(r.ordine_immesso_il);
+      return cancellato(r) && a !== null && a < annoInizio;
+    });
+    if (vecchio) esito.add(id);
+  }
+  return esito;
+}
+
 /** Quanti ID per richiesta di cancellazione: abbastanza pochi da stare in una query. */
 const ID_PER_CANCELLAZIONE = 200;
 

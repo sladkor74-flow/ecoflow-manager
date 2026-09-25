@@ -2,7 +2,7 @@
 // Un file che comincia dal 2025 conserva i terminati con la fine trasporto nel
 // 2024: non sono mancanti e non si cancellano. L'anno e' sempre quello della
 // fine trasporto. npm run prove
-import { annoInizioFile, ordiniDaConservare, svuotaTranne } from '../base44/shared/storicoConservato.ts';
+import { annoInizioFile, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from '../base44/shared/storicoConservato.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -34,6 +34,17 @@ verifica('un assegnato non si conserva mai', !c.ordini.has('AS'));
 verifica('un ordine con una riga nel 2025 non si conserva', !c.ordini.has('MX'));
 verifica('quello che il file contiene non si conserva: lo riscrive il file', !c.ordini.has('F24') && !c.ordini.has('N1'));
 verifica('senza anno di inizio non si conserva niente', ordiniDaConservare(archivio, null, idFile).ordini.size === 0);
+
+console.log('I CANCELLATI DEGLI ANNI PRIMA SI LASCIANO ANDARE');
+const canc = (id, immesso) => ({ id_ordine: id, stato: 'Cancellato', ordine_immesso_il: immesso });
+const archivioCanc = [canc('C24', '2024-07-01T08:00:00Z'), canc('C25', '2025-02-01T08:00:00Z'), canc('C24F', '2024-03-01T08:00:00Z'), t('V1', '2024-06-10T08:00:00Z')];
+const lasciati = cancellatiDaLasciare(archivioCanc, 2025, new Set(['C24F']));
+verifica('un cancellato del 2024 assente dal file non serve piu\'', lasciati.has('C24'));
+verifica('uno del 2025 resta nel controllo: serve all\'evasione degli assegnati', !lasciati.has('C25'));
+verifica('uno che il file contiene lo riscrive il file', !lasciati.has('C24F'));
+verifica('un terminato non e\' un cancellato', !lasciati.has('V1'));
+verifica('e non si conserva: non e\' storico', !ordiniDaConservare(archivioCanc, 2025, new Set(['C24F'])).ordini.has('C24'));
+verifica('senza anno di inizio non si lascia andare niente', cancellatiDaLasciare(archivioCanc, null, new Set()).size === 0);
 
 console.log("LO SVUOTAMENTO TRANNE LO STORICO");
 // Un archivio finto con la stessa interfaccia della piattaforma.
