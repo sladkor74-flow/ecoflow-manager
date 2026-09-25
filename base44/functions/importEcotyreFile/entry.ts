@@ -8,7 +8,7 @@ import { FILE_SIGNATURES, checkSignature, detectType, mappaColonne } from "../..
 import { CAMPI_ASSEGNATO, DATE_PRIMARIE, archivioPrimaria, dataPrimaria } from "../../shared/primarie.ts";
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 import { annoRoma } from "../../shared/giornoItaliano.ts";
-import { annoInizioFile, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from "../../shared/storicoConservato.ts";
+import { annoDelloStorico, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from "../../shared/storicoConservato.ts";
 
 // Le dichiarazioni riconosciute, un canale per volta: nel registro non si sommano.
 const perCanale = (righe) => [['RETE', 'rete'], ['ACI', 'ACI'], ['EXTRA_RACCOLTA', 'extra raccolta']]
@@ -395,7 +395,7 @@ export default async function(req) {
           for (const id of ids) existingIds.add(id);
         }
       } else {
-        const annoInizio = annoInizioFile(enriched);
+        const annoInizio = annoDelloStorico();
         if (annoInizio) {
           // Servono anche stato e fine trasporto, non solo gli ID.
           const archivio = [];

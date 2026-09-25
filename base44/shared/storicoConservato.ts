@@ -9,34 +9,26 @@
 //
 // L'anno e' sempre quello della FINE DEL TRASPORTO, mai l'immissione (regola
 // dell'utente). Da qui tre conseguenze, volute:
-// - l'anno da cui comincia il file e' la prima fine trasporto dei suoi
-//   terminati: gli assegnati, che non hanno fine, non lo spostano indietro;
+// - da quale anno si carica non lo dice il file ma il calendario: l'anno
+//   scorso, come per gli avvisi sulle date (primoAnnoControllato). Nel file non
+//   lo si puo' leggere: il portale filtra per IMMISSIONE, e un ordine immesso
+//   nel 2025 puo' essere finito nel 2024 (una secondaria, undici terziarie nei
+//   file del 25/09/2026), mentre uno immesso a febbraio 2024 finisce nel 2026;
 // - un terminato senza fine trasporto non ha anno e non si conserva: se il file
 //   non lo contiene resta "mancante", e il controllo di sempre lo dice;
 // - un ordine ancora aperto (assegnato) non si conserva mai: e' il file di oggi
 //   a dire se e' ancora aperto.
-import { annoRoma } from "./giornoItaliano.ts";
-import { eTerminato } from "./movimenti.ts";
+import { annoRoma, oggiRoma } from "./giornoItaliano.ts";
+import { eTerminato, primoAnnoControllato } from "./movimenti.ts";
 
 /** L'anno della fine trasporto di un record, o null se non c'e'. */
 export const annoFine = (r) => annoRoma(r && r.trasporto_finito_il);
 
 /**
- * L'anno da cui comincia un file: la prima fine trasporto dei suoi terminati.
- * null se il file non ha terminati con la fine trasporto: allora non si
- * conserva niente, come prima.
- *
- * @param {array} righe  record gia' letti (stato, trasporto_finito_il)
+ * Da quale anno si carica: l'anno scorso. Cio' che e' finito prima si conserva
+ * in archivio se il file non lo contiene.
  */
-export function annoInizioFile(righe) {
-  let primo = null;
-  for (const r of righe || []) {
-    if (!eTerminato(r)) continue;
-    const a = annoFine(r);
-    if (a !== null && (primo === null || a < primo)) primo = a;
-  }
-  return primo;
-}
+export const annoDelloStorico = (oggi = oggiRoma()) => primoAnnoControllato(oggi);
 
 /**
  * Gli ordini dell'archivio da conservare: assenti dal file, terminati, con la
@@ -44,7 +36,7 @@ export function annoInizioFile(righe) {
  * ordine sta in archivio con piu' righe: si conserva solo se lo sono tutte.
  *
  * @param {array}  archivio    i record in archivio (id_ordine, stato, trasporto_finito_il)
- * @param {number} annoInizio  l'anno da cui comincia il file (annoInizioFile)
+ * @param {number} annoInizio  l'anno da cui si carica (annoDelloStorico)
  * @param {Set}    idFile      gli ID degli ordini nel file, come stringhe
  * @returns {{ ordini: Set<string>, righe: number }}
  */
