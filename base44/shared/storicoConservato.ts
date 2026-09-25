@@ -1,48 +1,45 @@
 // Lo storico che un caricamento conserva (richiesta dell'utente, 25/09/2026).
 //
 // Ogni caricamento di primarie, secondarie e terziarie sostituisce l'archivio
-// con il file. L'utente pero' vuole mandare i file dal 1 gennaio 2025, perche'
-// il portale si ancora al 31/12, e tenere lo stesso il 2024 nel gestionale.
-// Cosi' un file che comincia da un anno conserva gli ordini TERMINATI con la
-// fine del trasporto negli anni prima: non sono "mancanti", perche' il file non
-// poteva contenerli, e non si cancellano.
+// con il file. L'utente pero' esporta dal portale solo dal 1 gennaio dell'anno
+// scorso, perche' il portale si ancora al 31/12, e vuole che gli anni prima
+// restino nella memoria storica del gestionale.
 //
-// L'anno e' sempre quello della FINE DEL TRASPORTO, mai l'immissione (regola
-// dell'utente). Da qui tre conseguenze, volute:
-// - da quale anno si carica non lo dice il file ma il calendario: l'anno
-//   scorso, come per gli avvisi sulle date (primoAnnoControllato). Nel file non
-//   lo si puo' leggere: il portale filtra per IMMISSIONE, e un ordine immesso
-//   nel 2025 puo' essere finito nel 2024 (una secondaria, undici terziarie nei
-//   file del 25/09/2026), mentre uno immesso a febbraio 2024 finisce nel 2026;
-// - un terminato senza fine trasporto non ha anno e non si conserva: se il file
-//   non lo contiene resta "mancante", e il controllo di sempre lo dice;
-// - un ordine ancora aperto (assegnato) non si conserva mai: e' il file di oggi
-//   a dire se e' ancora aperto.
+// Il portale filtra l'export per data di IMMISSIONE. La regola dell'utente e'
+// che l'immissione conta solo per gli ordini aperti (assegnati); per i
+// terminati comanda la fine del trasporto. Quindi il filtro del portale non dice
+// niente sui terminati, e un terminato assente dal file resta com'e', qualunque
+// sia la sua fine: nei file del 25/09/2026 mancavano 909 terminati finiti nel
+// 2025-2026 ma immessi nel 2024 (fino a febbraio 2024), oltre ai 3.254 finiti
+// nel 2024. Restano, e contano nel loro anno di fine trasporto.
+//
+// Il limite, detto all'utente: un terminato fuori dal file resta com'era
+// all'ultimo caricamento che lo conteneva. Se il portale lo correggesse dopo,
+// il gestionale non lo vedrebbe.
+//
+// Non si conservano mai gli ordini aperti: un assegnato assente dal file e' un
+// vero mancante, e il controllo di sempre lo dice. I cancellati hanno la loro
+// regola, piu' sotto.
 import { annoRoma, oggiRoma } from "./giornoItaliano.ts";
 import { eTerminato, primoAnnoControllato } from "./movimenti.ts";
 
-/** L'anno della fine trasporto di un record, o null se non c'e'. */
-export const annoFine = (r) => annoRoma(r && r.trasporto_finito_il);
-
 /**
- * Da quale anno si carica: l'anno scorso. Cio' che e' finito prima si conserva
- * in archivio se il file non lo contiene.
+ * Da quale anno si esporta dal portale: il 1 gennaio dell'anno scorso, come per
+ * gli avvisi sulle date. Serve ai cancellati, che si giudicano per immissione.
  */
 export const annoDelloStorico = (oggi = oggiRoma()) => primoAnnoControllato(oggi);
 
 /**
- * Gli ordini dell'archivio da conservare: assenti dal file, terminati, con la
- * fine del trasporto in un anno prima di quello da cui comincia il file. Un
- * ordine sta in archivio con piu' righe: si conserva solo se lo sono tutte.
+ * Gli ordini dell'archivio da conservare: terminati e assenti dal file. Un
+ * ordine sta in archivio con piu' righe: si conserva solo se sono tutte di un
+ * terminato.
  *
- * @param {array}  archivio    i record in archivio (id_ordine, stato, trasporto_finito_il)
- * @param {number} annoInizio  l'anno da cui si carica (annoDelloStorico)
- * @param {Set}    idFile      gli ID degli ordini nel file, come stringhe
+ * @param {array}  archivio  i record in archivio (id_ordine, stato)
+ * @param {Set}    idFile    gli ID degli ordini nel file, come stringhe
  * @returns {{ ordini: Set<string>, righe: number }}
  */
-export function ordiniDaConservare(archivio, annoInizio, idFile) {
+export function ordiniDaConservare(archivio, idFile) {
   const ordini = new Set();
-  if (!annoInizio) return { ordini, righe: 0 };
   const perOrdine = new Map(); // id -> righe
   for (const r of archivio || []) {
     const id = r && r.id_ordine ? String(r.id_ordine) : '';
@@ -53,11 +50,7 @@ export function ordiniDaConservare(archivio, annoInizio, idFile) {
   let righe = 0;
   for (const [id, suoi] of perOrdine) {
     if (idFile.has(id)) continue;
-    const vecchio = suoi.every(r => {
-      const a = annoFine(r);
-      return eTerminato(r) && a !== null && a < annoInizio;
-    });
-    if (vecchio) { ordini.add(id); righe += suoi.length; }
+    if (suoi.every(eTerminato)) { ordini.add(id); righe += suoi.length; }
   }
   return { ordini, righe };
 }

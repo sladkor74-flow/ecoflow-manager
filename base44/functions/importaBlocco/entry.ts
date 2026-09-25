@@ -432,7 +432,7 @@ export default async function(req) {
       // browser li manda, cioe' quando la preparazione ha trovato qualcosa.
       if (annoInizio && ARCHIVI_CON_STORICO.includes(entita) && Array.isArray(body.ids) && body.ids.length) {
         archivio = await recordArchivio(base44, entita);
-        conservati = ordiniDaConservare(archivio, annoInizio, new Set(body.ids.map(String)));
+        conservati = ordiniDaConservare(archivio, new Set(body.ids.map(String)));
       }
       archivioSvuotato = true;
       await svuotaTranne(base44.asServiceRole.entities[entita], archivio, conservati.ordini, sleep);
@@ -545,7 +545,7 @@ export default async function(req) {
           if (annoInizio && ARCHIVI_CON_STORICO.includes(a)) {
             const archivio = await recordArchivio(base44, a);
             for (const r of archivio) if (r.id_ordine) inArchivio.add(String(r.id_ordine));
-            const c = ordiniDaConservare(archivio, annoInizio, idFile);
+            const c = ordiniDaConservare(archivio, idFile);
             conservati[a] = { ordini: c.ordini.size, righe: c.righe };
             for (const id of c.ordini) daConservare.add(id);
             // I cancellati degli anni prima non servono piu': non sono mancanti.

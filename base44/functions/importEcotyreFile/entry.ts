@@ -407,7 +407,7 @@ export default async function(req) {
           }
           existingIds = new Set(archivio.filter(r => r.id_ordine).map(r => String(r.id_ordine)));
           const idNelFile = new Set(enriched.filter(r => r[keyField]).map(r => String(r[keyField])));
-          const c = ordiniDaConservare(archivio, annoInizio, idNelFile);
+          const c = ordiniDaConservare(archivio, idNelFile);
           const lasciati = cancellatiDaLasciare(archivio, annoInizio, idNelFile);
           if (c.ordini.size || lasciati.size) storico = { anno_inizio: annoInizio, archivio, ordini: c.ordini, righe: c.righe, lasciati };
         } else {
