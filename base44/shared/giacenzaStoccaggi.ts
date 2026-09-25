@@ -521,6 +521,33 @@ export function verificaRilevazione(rilevazione, precedente, movimenti, { ancora
 }
 
 /**
+ * L'anomalia "rilevazione da controllare" di un piazzale, o null se non ce n'e'.
+ *
+ * Il riscontro che conta e' quello con l'ancora dell'anno piu' tutti i
+ * movimenti (regola della direzione, 24/09/2026): e' da li' che parte il
+ * numero. Una lettura che si scosta dalla precedente ma torna con l'ancora e'
+ * giusta, e a sbagliare era la precedente - NAPPI SUD il 23/09/2026, segnalata
+ * per giorni in cima a Giacenze senza motivo. Il confronto con la sola
+ * precedente vale solo quando l'ancora non c'e' o e' la lettura stessa.
+ *
+ * @param {object} verifica  il risultato di verificaRilevazione
+ */
+export function anomaliaRilevazione(verifica) {
+  if (!verifica) return null;
+  const a = verifica.ancora;
+  const conAncora = !!(a && !a.senza_ancora && !a.e_la_lettura);
+  const classi = (conAncora ? a.classi : verifica.classi).filter(c => c.scarto);
+  if (!classi.length) return null;
+  return {
+    del: verifica.del,
+    precedente_del: conAncora ? a.del : verifica.precedente_del,
+    contro_ancora: conAncora,
+    classi,
+    canali: conAncora ? a.canali : verifica.canali,
+  };
+}
+
+/**
  * Il saldo dei SOLI movimenti in archivio, canale per canale e classe per
  * classe, con il giorno del primo movimento che lo compone e quanti sono.
  *

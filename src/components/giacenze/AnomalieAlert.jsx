@@ -30,7 +30,10 @@ function testoRilevazioneDaControllare(a) {
   const coda = ripartizione.length
     ? ` — ${ripartizione.length === 1 ? `il totale ${ripartizione[0]} torna` : `i totali ${ripartizione.join(' e ')} tornano`}: a sbagliare e' la ripartizione fra le classi, e ricaricare i file non la corregge`
     : '';
-  return ` — rilevazione del ${giorno(a.del)} contro quella del ${giorno(a.precedente_del)}: ${classi.join('; ')}${coda}. Il dettaglio, con gli ordini che possono spiegarlo, e' nella scheda Stoccaggi.`;
+  const contro = a.contro_ancora
+    ? `contro l'ancora dell'anno, la lettura del ${giorno(a.precedente_del)} piu' tutti i movimenti da allora`
+    : `contro quella del ${giorno(a.precedente_del)}`;
+  return ` — rilevazione del ${giorno(a.del)} ${contro}: ${classi.join('; ')}${coda}. Il dettaglio, con gli ordini che possono spiegarlo, e' nella scheda Stoccaggi.`;
 }
 
 // Tonnellate con due decimali (tre se i kg non sono tondi), kg interi.

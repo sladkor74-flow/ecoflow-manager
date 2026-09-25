@@ -1,7 +1,7 @@
 // Prova delle regole di lettura dei movimenti (base44/shared/movimenti.ts):
 // stato, periodo sul giorno italiano, settimana ISO, canale, giorno degli
 // elenchi. npm run prove
-import { eTerminato, periodoMovimento, settimanaIso, canaleMovimento, filtraMovimenti, giornoOrdine, giornoElenco, annoElenco, meseElenco, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate } from '../base44/shared/movimenti.ts';
+import { eTerminato, periodoMovimento, settimanaIso, canaleMovimento, filtraMovimenti, giornoOrdine, giornoElenco, annoElenco, meseElenco, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate, primoAnnoControllato, dateDaControllare } from '../base44/shared/movimenti.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -62,6 +62,18 @@ verifica('partito prima di essere immesso: non e\' un\'incoerenza', dateIncoeren
 verifica('ma le tre date devono esserci lo stesso', dateMancanti({ ...completo, ordine_immesso_il: null }).length === 1);
 verifica('stesso giorno italiano: coerente', dateIncoerenti({ ...completo, trasporto_iniziato_il: '2026-09-03T21:00:00Z', trasporto_finito_il: '2026-09-03T21:30:00Z' }).length === 0);
 verifica('la chiusura non sostituisce la fine', dateMancanti({ ...completo, trasporto_finito_il: null, ordine_chiuso_il: '2026-09-05T08:00:00Z' }).includes('fine trasporto'));
+
+console.log('GLI ANNI CHE SI CONTROLLANO (25/09/2026)');
+// L'anno scorso e quello in corso: il 2024 resta in archivio ma non si segnala.
+verifica('nel 2026 si controlla dal 2025', primoAnnoControllato('2026-09-25') === 2025 && primoAnnoControllato('2027-01-02') === 2026);
+const del2024 = { stato: 'terminato', ordine_immesso_il: '2024-03-01T08:00:00Z', trasporto_iniziato_il: null, trasporto_finito_il: '2024-03-10T08:00:00Z' };
+verifica('un ordine del 2024 non si controlla piu\'', dateDaControllare(del2024, '2026-09-25') === false);
+verifica('e dunque non ha date da sistemare', dateMancanti(del2024).length === 0 && dateIncoerenti({ ...del2024, trasporto_iniziato_il: '2024-03-12T08:00:00Z' }).length === 0 && !dateDaSistemare(del2024));
+verifica('la stessa mancanza nel 2025 si segnala', dateMancanti({ ...del2024, ordine_immesso_il: '2025-03-01T08:00:00Z', trasporto_finito_il: '2025-03-10T08:00:00Z' }).includes('inizio trasporto'));
+verifica('vale la fine trasporto: immesso nel 2024 e finito nel 2025 si controlla', dateDaControllare({ ...del2024, trasporto_finito_il: '2025-01-05T08:00:00Z' }, '2026-09-25') === true);
+verifica('senza fine trasporto non c\'e\' anno: si controlla sempre, anche se immesso nel 2024', dateDaControllare({ stato: 'terminato', ordine_immesso_il: '2024-12-20T08:00:00Z' }, '2026-09-25') === true
+  && dateMancanti({ stato: 'terminato', ordine_immesso_il: '2024-12-20T08:00:00Z', trasporto_iniziato_il: '2024-12-21T08:00:00Z' }).join() === 'fine trasporto');
+verifica('senza nessuna data non si sa l\'anno: si controlla, e si segnala', dateDaControllare({ stato: 'terminato' }, '2026-09-25') === true && dateMancanti({ stato: 'terminato' }).length === 3);
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

@@ -110,7 +110,8 @@ async function chiediConteggio(tipoFile, atteso, minimo, entita) {
 
 // Scrive le righe a blocchi con ritentativo e verifica del conteggio.
 // avanzamento: { bloccoIniziale, totaleBlocchi, righeIniziali, totaleRighe, archivio }
-async function scriviBlocchi({ tipoFile, entita, righe, avvisa, avanzamento }) {
+// base: le righe che l'archivio ha gia' prima di scrivere (lo storico conservato).
+async function scriviBlocchi({ tipoFile, entita, righe, avvisa, avanzamento, base = 0 }) {
   const totaleBlocchi = Math.ceil(righe.length / RIGHE_PER_BLOCCO);
   let totaleScritte = 0;
   let totaleFallite = 0;
@@ -138,7 +139,8 @@ async function scriviBlocchi({ tipoFile, entita, righe, avvisa, avanzamento }) {
 
         // La scrittura potrebbe essere arrivata comunque: in quel caso ripeterla
         // creerebbe duplicati. Il conteggio dell'archivio scioglie il dubbio.
-        const conteggio = await chiediConteggio(tipoFile, atteso, totaleScritte, entita);
+        const letto = await chiediConteggio(tipoFile, base + atteso, base + totaleScritte, entita);
+        const conteggio = letto === null ? null : letto - base;
         if (conteggio !== null && conteggio > totaleScritte) {
           totaleScritte = conteggio;
           scritto = true;
@@ -310,6 +312,21 @@ function classeDalProdotto(prodotto) {
   return m ? m[1].toUpperCase() : null;
 }
 
+/**
+ * L'istante di una data com'e' scritta nel file, solo per confrontarla con le
+ * altre: seriale Excel o testo gg/mm/aaaa. null se non si legge. La data vera
+ * la legge il server (dataPrimaria), qui serve solo a trovare la prima.
+ */
+function istanteGrezzo(v) {
+  if (v === undefined || v === null || v === '') return null;
+  if (typeof v === 'number') return v > 20000 ? Date.UTC(1899, 11, 30) + Math.round(v * 86400) * 1000 : null;
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (m) return Date.UTC(+m[3], +m[2] - 1, +m[1]);
+  const t = new Date(s).getTime();
+  return isNaN(t) ? null : t;
+}
+
 function archivioRiga(riga) {
   const classeFile = riga.Classe != null && riga.Classe !== '' ? String(riga.Classe).trim() : '';
   const c = (classeFile || classeDalProdotto(riga.Prodotto) || '').toLowerCase();
@@ -341,10 +358,16 @@ export async function importaPrimarie({ file, onProgress, confermaForzatura = fa
   const perArchivio = Object.fromEntries(ARCHIVI_PRIMARIE.map(a => [a.entita, []]));
   let terminati = 0;
   let ultimaFine = null;
+  // La prima fine trasporto dei terminati: dice da che anno comincia il file.
+  // Si manda com'e' scritta nel file e la legge il server, come ogni data.
+  let primaFine = null, primaFineMs = null;
   for (const r of righe) {
     perArchivio[archivioRiga(r)].push(r);
-    if (String(r.Stato || '').toLowerCase().trim() === 'terminato') terminati++;
+    const terminato = String(r.Stato || '').toLowerCase().trim() === 'terminato';
+    if (terminato) terminati++;
     if (typeof r.Trasporto_finito_il === 'number' && (ultimaFine === null || r.Trasporto_finito_il > ultimaFine)) ultimaFine = r.Trasporto_finito_il;
+    const ms = terminato ? istanteGrezzo(r.Trasporto_finito_il) : null;
+    if (ms !== null && (primaFineMs === null || ms < primaFineMs)) { primaFineMs = ms; primaFine = r.Trasporto_finito_il; }
   }
 
   // === Verifica: firma, terminati, ordini in archivio assenti dal file. Nulla viene cancellato. ===
@@ -358,8 +381,11 @@ export async function importaPrimarie({ file, onProgress, confermaForzatura = fa
     ids: righe.map(r => r.ID),
     terminati,
     ultima_fine_trasporto: ultimaFine,
+    prima_fine_trasporto: primaFine,
     conferma_forzatura: confermaForzatura || undefined,
   }, avvisa, 'nuovo tentativo di verifica');
+  // Quante righe degli anni prima del file restano in archivio, per archivio.
+  const conservatiDi = (entita) => (prep.conservati && prep.conservati[entita] ? prep.conservati[entita].righe : 0);
 
   const totaleBlocchi = ARCHIVI_PRIMARIE.reduce((s, a) => s + Math.ceil(perArchivio[a.entita].length / RIGHE_PER_BLOCCO), 0);
   const archivi = {};
@@ -375,12 +401,15 @@ export async function importaPrimarie({ file, onProgress, confermaForzatura = fa
     avvisa({ fase: `svuotamento dell'archivio ${a.nome}`, archivio: a.nome });
     for (let tentativo = 0; ; tentativo++) {
       try {
-        await base44.functions.invoke('importaBlocco', { azione: 'svuota', tipo_file: tipoFile, entita: a.entita });
+        await base44.functions.invoke('importaBlocco', {
+          azione: 'svuota', tipo_file: tipoFile, entita: a.entita,
+          prima_fine_trasporto: primaFine, ids: conservatiDi(a.entita) ? righe.map(r => r.ID) : undefined,
+        });
       } catch (e) {
         if (nonRitentabile(e)) throw e;
       }
-      const rimasti = await chiediConteggio(tipoFile, 0, 0, a.entita);
-      if (rimasti === 0) break;
+      const rimasti = await chiediConteggio(tipoFile, conservatiDi(a.entita), 0, a.entita);
+      if (rimasti === conservatiDi(a.entita)) break;
       if (tentativo >= ATTESE_RITENTATIVO.length) {
         throw Object.assign(new Error(`Svuotamento dell'archivio ${a.nome} incompleto${rimasti !== null ? `: restano ${rimasti} record` : ''}. Ricarica il file.`), { data: { dati_intatti: false } });
       }
@@ -390,7 +419,7 @@ export async function importaPrimarie({ file, onProgress, confermaForzatura = fa
 
     // === Scrittura a blocchi ===
     const esito = await scriviBlocchi({
-      tipoFile, entita: a.entita, righe: righeArchivio, avvisa,
+      tipoFile, entita: a.entita, righe: righeArchivio, avvisa, base: conservatiDi(a.entita),
       avanzamento: { bloccoIniziale, totaleBlocchi, righeIniziali, totaleRighe, archivio: a.nome },
     });
     bloccoIniziale += esito.totaleBlocchi;
@@ -399,8 +428,9 @@ export async function importaPrimarie({ file, onProgress, confermaForzatura = fa
     blocchiRitentati += esito.blocchiRitentati;
 
     avvisa({ fase: `verifica dell'archivio ${a.nome}`, archivio: a.nome });
-    const conteggio = await chiediConteggio(tipoFile, righeArchivio.length, esito.totaleScritte, a.entita);
-    archivi[a.entita] = { attese: righeArchivio.length, scritte: esito.totaleScritte, fallite: esito.totaleFallite, archivio: conteggio };
+    const attese = righeArchivio.length + conservatiDi(a.entita);
+    const conteggio = await chiediConteggio(tipoFile, attese, esito.totaleScritte + conservatiDi(a.entita), a.entita);
+    archivi[a.entita] = { attese, scritte: esito.totaleScritte, fallite: esito.totaleFallite, archivio: conteggio, conservati: conservatiDi(a.entita) };
   }
 
   const durata = Math.round((Date.now() - inizio) / 1000);
@@ -429,7 +459,11 @@ export async function importaPrimarie({ file, onProgress, confermaForzatura = fa
     blocchi: totaleBlocchi,
     blocchi_ritentati: blocchiRitentati,
     avviso_date: prep.avviso_date || null,
-    avviso_disallineamento: disallineati.length ? { archivio: archivioTotale, file: totaleRighe } : null,
+    // Lo storico conservato: i terminati degli anni prima del file, che restano.
+    storico_conservato: prep.anno_inizio && (conservatiDi('PrimariaRete') || conservatiDi('PrimariaAci'))
+      ? { dal_anno: prep.anno_inizio, righe: conservatiDi('PrimariaRete') + conservatiDi('PrimariaAci') }
+      : null,
+    avviso_disallineamento: disallineati.length ? { archivio: archivioTotale, file: totaleRighe + conservatiDi('PrimariaRete') + conservatiDi('PrimariaAci') } : null,
     ultimo_errore: ultimoErrore,
     forzato: !!confermaForzatura,
     durata_secondi: durata,

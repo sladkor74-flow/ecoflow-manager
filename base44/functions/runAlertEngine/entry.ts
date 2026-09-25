@@ -95,7 +95,7 @@ const segna = (attuali, key, alert) => { if (!attuali.has(key)) attuali.set(key,
 //   il controllo allo stesso modo.
 // - I terminati senza fine trasporto non hanno un anno e restano fuori dal
 //   controllo delle altre regole (regola 1): non si ripiega sull'immissione, ma
-//   si contano, di qualunque anno, e la risposta li dice, per canale.
+//   si contano, dall'anno scorso in poi (dateDaControllare), e la risposta li dice, per canale.
 // - Le date obbligatorie (immissione, inizio e fine trasporto, 22/09/2026) si
 //   controllano su tutti i terminati del modulo, di qualunque anno: un alert per
 //   modulo e canale con l'elenco degli ordini (ID ordine, formulario, date che
