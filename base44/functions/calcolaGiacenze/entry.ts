@@ -5,7 +5,7 @@ import { annoRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza } from "../../shared/giacenzaStoccaggi.ts";
+import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, anomaliaRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine } from "../../shared/giacenzaPortale.ts";
 
 // Calcola la situazione delle giacenze di impianti e stoccaggi per l'anno richiesto.
@@ -715,19 +715,11 @@ export default async function(req) {
       if (!g && td === 'imp' && !haAttivita) continue;
 
       if (senzaRilevazione) anomalie.push({ tipo: 'stoccaggio_senza_rilevazione', sito: sitoNome });
-      // Una classe che si scosta da quello che i movimenti dicono si segnala
-      // subito: e' il caso del 16/09 su Nappi Sud, dove nessun caricamento
-      // avrebbe potuto correggerla perche' l'errore stava nel punto di partenza.
-      if (verifica_rilevazione && verifica_rilevazione.scostano.length) {
-        anomalie.push({
-          tipo: 'rilevazione_da_controllare',
-          sito: sitoNome,
-          del: verifica_rilevazione.del,
-          precedente_del: verifica_rilevazione.precedente_del,
-          classi: verifica_rilevazione.classi.filter(c => c.scarto),
-          canali: verifica_rilevazione.canali,
-        });
-      }
+      // Una lettura che non torna con l'ancora dell'anno piu' i movimenti si
+      // segnala subito. Una che si scosta solo dalla precedente, ma con l'ancora
+      // torna, e' giusta: non e' un'anomalia (NAPPI SUD, 23/09/2026).
+      const daControllare = anomaliaRilevazione(verifica_rilevazione);
+      if (daControllare) anomalie.push({ tipo: 'rilevazione_da_controllare', sito: sitoNome, ...daControllare });
 
       righe.push({
         sito: sitoNome,

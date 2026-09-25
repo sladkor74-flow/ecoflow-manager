@@ -13,7 +13,7 @@
 // giacenza - i file non partono da quando il piazzale era vuoto - ma un termine
 // di confronto, che dice da quando conta.
 // npm run prove
-import { movimentoStoccaggio, fraLeRilevazioni, verificaRilevazione, saldoMovimentiInArchivio, classiDiRilevazione, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, puntiDiPartenza } from '../base44/shared/giacenzaStoccaggi.ts';
+import { movimentoStoccaggio, fraLeRilevazioni, verificaRilevazione, saldoMovimentiInArchivio, classiDiRilevazione, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, puntiDiPartenza, anomaliaRilevazione } from '../base44/shared/giacenzaStoccaggi.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -382,6 +382,25 @@ verifica('anche quando l\'ultima lettura e\' quella storta del 16/09, le classi 
   JSON.stringify(fermaAl16.estratto.classi.map(c => [c.classe, c.adesso_kg])));
 const unaSola = riconciliazionePiazzale([fineAnno], mov2026, { oggi: '2026-09-23' }).canali.RETE;
 verifica('quando l\'ultima lettura e\' l\'ancora non c\'e\' un riscontro da fare', unaSola.riscontro === null && unaSola.estratto.adesso_kg === 22220, JSON.stringify(unaSola.riscontro));
+
+console.log('L\'ANOMALIA "RILEVAZIONE DA CONTROLLARE" SI GIUDICA DALL\'ANCORA');
+// Il 23/09 su NAPPI SUD: si scosta dal 16/09 ma torna con l'ancora. In cima a
+// Giacenze restava segnalata come anomalia anche dopo il 24/09.
+const vAncora = (ultimaLettura, letture) => verificaRilevazione(ultimaLettura, letture[letture.length - 2], mov2026, { ancora: fineAnno, intermedie: letture.slice(1, -1) });
+verifica('la lettura del 23/09, confermata dall\'ancora, non e\' un\'anomalia',
+  anomaliaRilevazione(vAncora(nappi23, [fineAnno, nappi16, nappi23])) === null);
+const anStorta = anomaliaRilevazione(vAncora({ ...nappi23, class1_kg: 21740 - 777 }, [fineAnno, nappi16, nappi23]));
+verifica('una lettura che non torna con l\'ancora resta un\'anomalia, contro l\'ancora',
+  anStorta && anStorta.contro_ancora === true && anStorta.precedente_del === '2025-12-31' && anStorta.classi.map(c => c.classe).join() === 'P' && anStorta.classi[0].scarto === -777,
+  JSON.stringify(anStorta));
+// Torna con la precedente ma non con l'ancora: per il numero conta l'ancora.
+const anSepolta = anomaliaRilevazione(verificaRilevazione(nappi20, nappi16, mov2026, { ancora: fineAnno, intermedie: [nappi16] }));
+verifica('una lettura che torna solo con la precedente storta e\' un\'anomalia',
+  anSepolta && anSepolta.contro_ancora === true && anSepolta.classi.length > 0, JSON.stringify(anSepolta && anSepolta.classi.map(c => c.classe)));
+// Senza ancora (o quando l'ancora e' la lettura stessa) vale la precedente.
+const anSenza = anomaliaRilevazione(verificaRilevazione(rilev16, rilev13, movimenti));
+verifica('senza ancora il confronto resta con la precedente', anSenza && anSenza.contro_ancora === false && anSenza.precedente_del === '2026-09-13', JSON.stringify(anSenza && anSenza.precedente_del));
+verifica('senza verifica nessuna anomalia', anomaliaRilevazione(null) === null);
 
 console.log('SENZA ANCORA NON SI INVENTA UN CONFRONTO');
 const senzAncora = verificaRilevazione(nappi23, nappi16, mov2026);
