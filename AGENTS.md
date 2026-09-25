@@ -506,8 +506,10 @@ trasporto** (l'immissione conta solo per gli assegnati, la chiusura mai):
   sia la sua fine, e conta nel suo anno: non e' un "ordine mancante". Nei file
   del 25/09/2026 (dal 1/1/2025) mancavano 3.254 terminati finiti nel 2024 e 909
   finiti nel 2025-2026 ma immessi nel 2024, fino a febbraio 2024: restano tutti.
-  Il limite: un terminato fuori dal file resta com'era all'ultimo caricamento
-  che lo conteneva. Un **assegnato** assente dal file e' un vero mancante e si
+  Un terminato fuori dal file resta com'era all'ultimo caricamento che lo
+  conteneva, e va bene cosi': a portale si puo' correggere al massimo un ordine
+  del mese precedente, e l'export parte dal 1 gennaio dell'anno scorso, quindi
+  nessun ordine ancora correggibile puo' restare fuori (utente, 25/09/2026). Un **assegnato** assente dal file e' un vero mancante e si
   segnala. I **cancellati** immessi prima dell'anno scorso, assenti dal file,
   non servono piu' (utente, 25/09/2026) e si lasciano andare
   (`cancellatiDaLasciare`); non avendo fine trasporto, per loro vale

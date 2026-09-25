@@ -13,9 +13,11 @@
 // 2025-2026 ma immessi nel 2024 (fino a febbraio 2024), oltre ai 3.254 finiti
 // nel 2024. Restano, e contano nel loro anno di fine trasporto.
 //
-// Il limite, detto all'utente: un terminato fuori dal file resta com'era
-// all'ultimo caricamento che lo conteneva. Se il portale lo correggesse dopo,
-// il gestionale non lo vedrebbe.
+// Un terminato fuori dal file resta com'era all'ultimo caricamento che lo
+// conteneva. Non e' un limite reale (utente, 25/09/2026): a portale si puo'
+// correggere al massimo un ordine del mese precedente, e l'export parte dal 1
+// gennaio dell'anno scorso, piu' di un anno prima: nessun ordine ancora
+// correggibile puo' restare fuori dal file.
 //
 // Non si conservano mai gli ordini aperti: un assegnato assente dal file e' un
 // vero mancante, e il controllo di sempre lo dice. I cancellati hanno la loro
