@@ -40,7 +40,7 @@ const canc = (id, immesso) => ({ id_ordine: id, stato: 'Cancellato', ordine_imme
 const archivioCanc = [canc('C24', '2024-07-01T08:00:00Z'), canc('C25', '2025-02-01T08:00:00Z'), canc('C24F', '2024-03-01T08:00:00Z'), t('V1', '2024-06-10T08:00:00Z')];
 const lasciati = cancellatiDaLasciare(archivioCanc, 2025, new Set(['C24F']));
 verifica('un cancellato del 2024 assente dal file non serve piu\'', lasciati.has('C24'));
-verifica('uno del 2025 resta nel controllo: serve all\'evasione degli assegnati', !lasciati.has('C25'));
+verifica('uno del 2025 resta nel controllo: serve come statistica', !lasciati.has('C25'));
 verifica('uno che il file contiene lo riscrive il file', !lasciati.has('C24F'));
 verifica('un terminato non e\' un cancellato', !lasciati.has('V1'));
 verifica('e non si conserva: non e\' storico', !ordiniDaConservare(archivioCanc, 2025, new Set(['C24F'])).ordini.has('C24'));

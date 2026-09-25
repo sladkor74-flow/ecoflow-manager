@@ -77,8 +77,10 @@ export function ordiniDaConservare(archivio, annoInizio, idFile) {
  *
  * Un cancellato non ha fine trasporto: l'unica data che ha e' l'immissione, ed
  * e' quella che dice di che anno e'. Vale solo qui, per i cancellati. Quelli
- * dell'anno del file in poi restano nel controllo: servono all'evasione degli
- * assegnati.
+ * dell'anno del file in poi restano nel controllo: servono come statistica.
+ * Un cancellato resta cancellato e inevaso; se viene riaperto perche'
+ * cancellato per errore torna assegnato con lo stesso ID ordine, e il file lo
+ * riscrive come tale (utente, 25/09/2026).
  *
  * @returns {Set<string>} gli ID degli ordini da lasciar andare
  */
