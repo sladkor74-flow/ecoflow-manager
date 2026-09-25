@@ -2,19 +2,15 @@
 // Un file che comincia dal 2025 conserva i terminati con la fine trasporto nel
 // 2024: non sono mancanti e non si cancellano. L'anno e' sempre quello della
 // fine trasporto. npm run prove
-import { annoInizioFile, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from '../base44/shared/storicoConservato.ts';
+import { annoDelloStorico, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from '../base44/shared/storicoConservato.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
 
 const t = (id, fine, extra = {}) => ({ id_ordine: id, stato: 'Terminato', trasporto_finito_il: fine, ordine_immesso_il: '2024-11-01T08:00:00Z', ...extra });
 
-console.log("L'ANNO DA CUI COMINCIA IL FILE");
-verifica('la prima fine trasporto dei terminati', annoInizioFile([t('A', '2025-01-03T09:00:00Z'), t('B', '2026-02-01T09:00:00Z')]) === 2025);
-verifica('gli assegnati, senza fine, non lo spostano', annoInizioFile([t('A', '2025-01-03T09:00:00Z'), { id_ordine: 'X', stato: 'Assegnato', ordine_immesso_il: '2023-05-01T08:00:00Z' }]) === 2025);
-verifica('l\'immissione non conta: immesso nel 2024, finito nel 2025, il file comincia dal 2025', annoInizioFile([t('A', '2025-01-02T09:00:00Z', { ordine_immesso_il: '2024-12-20T08:00:00Z' })]) === 2025);
-verifica('capodanno italiano: 23:30Z del 31/12/2024 e\' gia\' 2025', annoInizioFile([t('A', '2024-12-31T23:30:00Z')]) === 2025);
-verifica('senza terminati con la fine, nessun anno: non si conserva niente', annoInizioFile([{ id_ordine: 'X', stato: 'Assegnato' }]) === null);
+console.log("DA QUALE ANNO SI CARICA");
+verifica('nel 2026 dal 2025, nel 2027 dal 2026: lo dice il calendario, non il file', annoDelloStorico('2026-09-25') === 2025 && annoDelloStorico('2027-03-01') === 2026);
 
 console.log('CHE COSA SI CONSERVA');
 const archivio = [
@@ -27,13 +23,15 @@ const archivio = [
   t('F24', '2024-05-01T08:00:00Z'),                                 // del 2024, ma anche nel file
 ];
 const idFile = new Set(['N1', 'F24']);
-const c = ordiniDaConservare(archivio, 2025, idFile);
-verifica('si conservano i terminati del 2024 assenti dal file, con tutte le righe', c.ordini.has('V1') && c.ordini.has('V2') && c.righe === 3, JSON.stringify([...c.ordini]));
-verifica('il senza fine trasporto non ha anno: non si conserva', !c.ordini.has('SF'));
-verifica('un assegnato non si conserva mai', !c.ordini.has('AS'));
-verifica('un ordine con una riga nel 2025 non si conserva', !c.ordini.has('MX'));
+const c = ordiniDaConservare(archivio, idFile);
+// Il portale filtra per immissione: per un terminato non dice niente. Assente
+// dal file resta com'e', qualunque sia la sua fine trasporto (utente, 25/09/2026).
+verifica('si conservano i terminati del 2024 assenti dal file, con tutte le righe', c.ordini.has('V1') && c.ordini.has('V2'), JSON.stringify([...c.ordini]));
+verifica('anche un terminato finito nel 2025-2026 ma immesso prima dell\'export', c.ordini.has('MX'));
+verifica('anche un terminato senza fine trasporto: resta, e si segnala come sempre', c.ordini.has('SF'));
+verifica('in tutto 6 righe: V1 (2), V2, SF, MX (2)', c.righe === 6, String(c.righe));
+verifica('un assegnato non si conserva mai: assente, e\' un vero mancante', !c.ordini.has('AS'));
 verifica('quello che il file contiene non si conserva: lo riscrive il file', !c.ordini.has('F24') && !c.ordini.has('N1'));
-verifica('senza anno di inizio non si conserva niente', ordiniDaConservare(archivio, null, idFile).ordini.size === 0);
 
 console.log('I CANCELLATI DEGLI ANNI PRIMA SI LASCIANO ANDARE');
 const canc = (id, immesso) => ({ id_ordine: id, stato: 'Cancellato', ordine_immesso_il: immesso });
@@ -43,7 +41,7 @@ verifica('un cancellato del 2024 assente dal file non serve piu\'', lasciati.has
 verifica('uno del 2025 resta nel controllo: serve come statistica', !lasciati.has('C25'));
 verifica('uno che il file contiene lo riscrive il file', !lasciati.has('C24F'));
 verifica('un terminato non e\' un cancellato', !lasciati.has('V1'));
-verifica('e non si conserva: non e\' storico', !ordiniDaConservare(archivioCanc, 2025, new Set(['C24F'])).ordini.has('C24'));
+verifica('e non si conserva: non e\' storico', !ordiniDaConservare(archivioCanc, new Set(['C24F'])).ordini.has('C24'));
 verifica('senza anno di inizio non si lascia andare niente', cancellatiDaLasciare(archivioCanc, null, new Set()).size === 0);
 
 console.log("LO SVUOTAMENTO TRANNE LO STORICO");
@@ -59,7 +57,7 @@ const finto = (righe) => {
 };
 const a1 = finto(archivio);
 await svuotaTranne(a1.ent, archivio, c.ordini);
-verifica('restano solo le righe conservate', a1.righe.length === 3 && a1.righe.every(r => c.ordini.has(r.id_ordine)), JSON.stringify(a1.righe.map(r => r.id_ordine)));
+verifica('restano solo le righe conservate', a1.righe.length === 6 && a1.righe.every(r => c.ordini.has(r.id_ordine)), JSON.stringify(a1.righe.map(r => r.id_ordine)));
 verifica('non si usa mai il deleteMany({}) quando c\'e\' da conservare', a1.chiamate.every(q => Object.keys(q).length > 0));
 const a2 = finto(archivio);
 await svuotaTranne(a2.ent, archivio, new Set());

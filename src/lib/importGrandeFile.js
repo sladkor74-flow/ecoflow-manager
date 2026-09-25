@@ -312,21 +312,6 @@ function classeDalProdotto(prodotto) {
   return m ? m[1].toUpperCase() : null;
 }
 
-/**
- * L'istante di una data com'e' scritta nel file, solo per confrontarla con le
- * altre: seriale Excel o testo gg/mm/aaaa. null se non si legge. La data vera
- * la legge il server (dataPrimaria), qui serve solo a trovare la prima.
- */
-function istanteGrezzo(v) {
-  if (v === undefined || v === null || v === '') return null;
-  if (typeof v === 'number') return v > 20000 ? Date.UTC(1899, 11, 30) + Math.round(v * 86400) * 1000 : null;
-  const s = String(v).trim();
-  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
-  if (m) return Date.UTC(+m[3], +m[2] - 1, +m[1]);
-  const t = new Date(s).getTime();
-  return isNaN(t) ? null : t;
-}
-
 function archivioRiga(riga) {
   const classeFile = riga.Classe != null && riga.Classe !== '' ? String(riga.Classe).trim() : '';
   const c = (classeFile || classeDalProdotto(riga.Prodotto) || '').toLowerCase();
@@ -358,16 +343,10 @@ export async function importaPrimarie({ file, onProgress, confermaForzatura = fa
   const perArchivio = Object.fromEntries(ARCHIVI_PRIMARIE.map(a => [a.entita, []]));
   let terminati = 0;
   let ultimaFine = null;
-  // La prima fine trasporto dei terminati: dice da che anno comincia il file.
-  // Si manda com'e' scritta nel file e la legge il server, come ogni data.
-  let primaFine = null, primaFineMs = null;
   for (const r of righe) {
     perArchivio[archivioRiga(r)].push(r);
-    const terminato = String(r.Stato || '').toLowerCase().trim() === 'terminato';
-    if (terminato) terminati++;
+    if (String(r.Stato || '').toLowerCase().trim() === 'terminato') terminati++;
     if (typeof r.Trasporto_finito_il === 'number' && (ultimaFine === null || r.Trasporto_finito_il > ultimaFine)) ultimaFine = r.Trasporto_finito_il;
-    const ms = terminato ? istanteGrezzo(r.Trasporto_finito_il) : null;
-    if (ms !== null && (primaFineMs === null || ms < primaFineMs)) { primaFineMs = ms; primaFine = r.Trasporto_finito_il; }
   }
 
   // === Verifica: firma, terminati, ordini in archivio assenti dal file. Nulla viene cancellato. ===
@@ -381,7 +360,6 @@ export async function importaPrimarie({ file, onProgress, confermaForzatura = fa
     ids: righe.map(r => r.ID),
     terminati,
     ultima_fine_trasporto: ultimaFine,
-    prima_fine_trasporto: primaFine,
     conferma_forzatura: confermaForzatura || undefined,
   }, avvisa, 'nuovo tentativo di verifica');
   // Quante righe degli anni prima del file restano in archivio, per archivio.
@@ -403,7 +381,7 @@ export async function importaPrimarie({ file, onProgress, confermaForzatura = fa
       try {
         await base44.functions.invoke('importaBlocco', {
           azione: 'svuota', tipo_file: tipoFile, entita: a.entita,
-          prima_fine_trasporto: primaFine, ids: conservatiDi(a.entita) ? righe.map(r => r.ID) : undefined,
+          ids: conservatiDi(a.entita) ? righe.map(r => r.ID) : undefined,
         });
       } catch (e) {
         if (nonRitentabile(e)) throw e;

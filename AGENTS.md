@@ -500,22 +500,25 @@ nella memoria storica del gestionale. Due regole, entrambe sulla **fine del
 trasporto** (l'immissione conta solo per gli assegnati, la chiusura mai):
 
 - **Il caricamento conserva lo storico** (`base44/shared/storicoConservato.ts`).
-  L'anno da cui comincia un file e' la prima fine trasporto dei suoi terminati;
-  i terminati in archivio con la fine trasporto negli anni prima, assenti dal
-  file, restano come sono e non contano come "ordini mancanti". Non si
-  conservano mai gli assegnati (e' il file di oggi a dire se sono aperti), ne' i
-  terminati senza fine trasporto, che non hanno anno. I **cancellati** degli
-  anni prima, assenti dal file, non servono piu' (utente, 25/09/2026): non sono
-  mancanti e si lasciano andare (`cancellatiDaLasciare`). Non avendo fine
-  trasporto, il loro anno e' l'immissione: vale solo per loro. Quelli dell'anno
-  del file in poi restano nel controllo, perche' servono come statistica: un
-  cancellato resta cancellato e inevaso, e puo' tornare assegnato con lo stesso
-  ID ordine solo se viene riaperto perche' e' stato cancellato per errore. Una richiesta nuova ha
-  un altro ID ordine e compare fra gli assegnati da evadere. Si cancella per ID a
-  blocchi, dopo una prova in sola lettura del filtro; senza niente da conservare
-  resta il `deleteMany({})` di sempre. Provato il 25/09/2026 sul file vero delle
-  primarie: 3.254 terminati del 2024 conservati, 410 cancellati del 2024
-  lasciati andare, nessun mancante.
+  Il portale filtra l'export per data di **immissione**, che per l'utente conta
+  solo per gli ordini aperti: per i terminati comanda la fine del trasporto.
+  Quindi un **terminato** assente dal file resta in archivio com'e', qualunque
+  sia la sua fine, e conta nel suo anno: non e' un "ordine mancante". Nei file
+  del 25/09/2026 (dal 1/1/2025) mancavano 3.254 terminati finiti nel 2024 e 909
+  finiti nel 2025-2026 ma immessi nel 2024, fino a febbraio 2024: restano tutti.
+  Un terminato fuori dal file resta com'era all'ultimo caricamento che lo
+  conteneva, e va bene cosi': a portale si puo' correggere al massimo un ordine
+  del mese precedente, e l'export parte dal 1 gennaio dell'anno scorso, quindi
+  nessun ordine ancora correggibile puo' restare fuori (utente, 25/09/2026). Un **assegnato** assente dal file e' un vero mancante e si
+  segnala. I **cancellati** immessi prima dell'anno scorso, assenti dal file,
+  non servono piu' (utente, 25/09/2026) e si lasciano andare
+  (`cancellatiDaLasciare`); non avendo fine trasporto, per loro vale
+  l'immissione. Quelli piu' recenti restano nel controllo, perche' servono come
+  statistica: un cancellato resta cancellato e inevaso, e puo' tornare
+  assegnato con lo stesso ID ordine solo se viene riaperto perche' e' stato
+  cancellato per errore. Si cancella per ID a blocchi, dopo una prova in sola
+  lettura del filtro; senza niente da conservare resta il `deleteMany({})` di
+  sempre. Esportare sempre dal 1/1 dell'anno scorso tiene piccoli i file.
 - **Le date obbligatorie si controllano dall'anno scorso** (`dateDaControllare`
   e `primoAnnoControllato` in `base44/shared/movimenti.ts`): un terminato con la
   fine trasporto prima non si segnala piu', ovunque. Senza fine trasporto non ha

@@ -10,7 +10,7 @@ import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
 import { evasioneOrdini, listaOrdini, statoRichiesta, riconosciOrdine, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare } from "../../shared/richiesteEct.ts";
 import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
-import { ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from "../../shared/storicoConservato.ts";
+import { annoDelloStorico, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from "../../shared/storicoConservato.ts";
 
 // Le dichiarazioni riconosciute, un canale per volta: nel registro non si sommano.
 const perCanale = (righe) => [['RETE', 'rete'], ['ACI', 'ACI'], ['EXTRA_RACCOLTA', 'extra raccolta']]
@@ -191,9 +191,9 @@ async function recordArchivio(base44, entita) {
 // Solo i terminati si conservano: gli archivi degli assegnati si riscrivono sempre.
 const ARCHIVI_CON_STORICO = ['PrimariaRete', 'PrimariaAci'];
 
-// L'anno da cui comincia il file delle primarie, dalla prima fine trasporto dei
-// suoi terminati che il browser ha trovato: la legge come ogni data del file.
-const annoInizioPrimarie = (body) => (body.prima_fine_trasporto != null ? annoRoma(dataPrimaria(body.prima_fine_trasporto)) : null);
+// Da quale anno si carica: l'anno scorso, come per gli avvisi sulle date
+// (annoDelloStorico in shared/storicoConservato.ts).
+const annoInizioPrimarie = () => annoDelloStorico();
 
 // Riconosce gli errori di rete o di attesa: non vanno ritentati qui dentro perche'
 // ogni tentativo puo' bruciare venti secondi e far superare all'invocazione il
@@ -425,14 +425,14 @@ export default async function(req) {
       fase = "svuotamento dell'archivio " + entita;
       // Un file che comincia da un anno conserva i terminati degli anni prima
       // (storicoConservato.ts): gli altri ordini si cancellano, quelli restano.
-      const annoInizio = annoInizioPrimarie(body);
+      const annoInizio = annoInizioPrimarie();
       let conservati = { ordini: new Set(), righe: 0 };
       let archivio = [];
       // Senza gli ID del file non si sa che cosa manca: si conserva solo se il
       // browser li manda, cioe' quando la preparazione ha trovato qualcosa.
       if (annoInizio && ARCHIVI_CON_STORICO.includes(entita) && Array.isArray(body.ids) && body.ids.length) {
         archivio = await recordArchivio(base44, entita);
-        conservati = ordiniDaConservare(archivio, annoInizio, new Set(body.ids.map(String)));
+        conservati = ordiniDaConservare(archivio, new Set(body.ids.map(String)));
       }
       archivioSvuotato = true;
       await svuotaTranne(base44.asServiceRole.entities[entita], archivio, conservati.ordini, sleep);
@@ -537,7 +537,7 @@ export default async function(req) {
         const inArchivio = new Set();
         // I terminati con la fine trasporto prima dell'anno da cui comincia il
         // file non sono mancanti: si conservano (storicoConservato.ts).
-        const annoInizio = annoInizioPrimarie(body);
+        const annoInizio = annoInizioPrimarie();
         const conservati = {};
         const daConservare = new Set();
         const daLasciare = new Set();
@@ -545,7 +545,7 @@ export default async function(req) {
           if (annoInizio && ARCHIVI_CON_STORICO.includes(a)) {
             const archivio = await recordArchivio(base44, a);
             for (const r of archivio) if (r.id_ordine) inArchivio.add(String(r.id_ordine));
-            const c = ordiniDaConservare(archivio, annoInizio, idFile);
+            const c = ordiniDaConservare(archivio, idFile);
             conservati[a] = { ordini: c.ordini.size, righe: c.righe };
             for (const id of c.ordini) daConservare.add(id);
             // I cancellati degli anni prima non servono piu': non sono mancanti.

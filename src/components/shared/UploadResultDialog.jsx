@@ -152,8 +152,8 @@ export default function UploadResultDialog({ state, onClose }) {
 
           {state.storico_conservato && (
             <div className="p-2.5 rounded-md bg-sky-50 border border-sky-300 text-sky-900 text-sm">
-              <strong>Storico conservato:</strong> il file comincia dal {state.storico_conservato.dal_anno}.
-              {' '}Le {state.storico_conservato.righe} righe dei terminati con la fine trasporto negli anni prima sono rimaste in archivio, come erano.
+              <strong>Storico conservato:</strong> {state.storico_conservato.righe} righe di ordini terminati che il file non contiene sono rimaste in archivio, come erano.
+              {' '}Il portale filtra l&apos;export per data di immissione; per i terminati conta la fine trasporto, e restano nel loro anno.
             </div>
           )}
 
