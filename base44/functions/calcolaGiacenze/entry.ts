@@ -5,7 +5,7 @@ import { annoRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura } from "../../shared/giacenzaStoccaggi.ts";
+import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza } from "../../shared/giacenzaStoccaggi.ts";
 import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine } from "../../shared/giacenzaPortale.ts";
 
 // Calcola la situazione delle giacenze di impianti e stoccaggi per l'anno richiesto.
@@ -25,7 +25,7 @@ import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, form
 //
 // Fonti dati:
 //   OrdineNonDichiarato  -> fotografia della giacenza a portale (impianti), ordini da dichiarare, arretrato per anno di fine trasporto, in_attesa_dichiarazione (stoccaggi)
-//   GiacenzaStoccaggio   -> giacenza a portale degli stoccaggi (rilevazione per classe: 1-4 rete, 9 ACI)
+//   GiacenzaStoccaggio   -> rilevazioni degli stoccaggi (per classe: 1-4 rete, 9 ACI): l'ancora dell'anno da cui parte la giacenza, le altre come riscontro
 //   DichiarazioneTrattamento -> dichiarato e derivati (anno di fine trasporto dell'ordine)
 //   DichiarazioneSito    -> dichiarazioni caricate a portale dopo la fotografia
 //
@@ -246,17 +246,25 @@ export default async function(req) {
       elenco.sort((a, b) => momentoRilevazione(a).localeCompare(momentoRilevazione(b))
         || String(a.created_date || '').localeCompare(String(b.created_date || '')));
     }
+    // Da dove parte il numero di ciascun piazzale: l'ancora dell'anno, non
+    // l'ultima lettura (regola della direzione, 24/09/2026). L'ultima lettura
+    // (stocRilevMap) resta il riscontro: la sua data, se e' vecchia, se torna.
+    const partenzaMap = new Map(); // ns -> { record, dataStr }
+    for (const [ns, elenco] of rilevPerStoc) {
+      const record = puntoDiPartenza(elenco);
+      if (record) partenzaMap.set(ns, { record, dataStr: momentoRilevazione(record) });
+    }
 
-    // === 1c. MOVIMENTI DEGLI STOCCAGGI DOPO LA RILEVAZIONE, UN CANALE PER VOLTA ===
-    // Alla rilevazione si aggiungono gli ingressi e si tolgono le uscite finiti
-    // dopo, per fine trasporto (shared/giacenzaStoccaggi.ts). Rete, ACI ed extra
-    // raccolta hanno ciascuno il suo saldo: la rilevazione ha le classi 1-4 per la
-    // rete e la 9 per l'ACI, l'extra raccolta a portale non c'e'.
+    // === 1c. MOVIMENTI DEGLI STOCCAGGI DOPO L'ANCORA, UN CANALE PER VOLTA ===
+    // All'ancora dell'anno si aggiungono gli ingressi e si tolgono le uscite
+    // finiti dopo, per fine trasporto (shared/giacenzaStoccaggi.ts). Rete, ACI ed
+    // extra raccolta hanno ciascuno il suo saldo: la rilevazione ha le classi 1-4
+    // per la rete e la 9 per l'ACI, l'extra raccolta a portale non c'e'.
     const tipoStoc = (r) => tdNorm(r.tipo_destinazione) === 'stoc';
     const eSecondariaExtra = (r) => String(r.tipo_movimento || '').toLowerCase().trim() === 'secondaria';
     const saldoVuoto = () => ({ ingressi: classiVuote(), uscite: classiVuote(), nIngressi: 0, nUscite: 0 });
     const movStoc = new Map(); // ns -> { giorno, RETE, ACI }
-    for (const [ns, rilev] of stocRilevMap) movStoc.set(ns, { giorno: rilev.dataStr, RETE: saldoVuoto(), ACI: saldoVuoto() });
+    for (const [ns, partenza] of partenzaMap) movStoc.set(ns, { giorno: partenza.dataStr, RETE: saldoVuoto(), ACI: saldoVuoto() });
     const contaMovimento = (r, ns, canale, verso) => {
       const m = movStoc.get(ns);
       if (!m || !dopoLaRilevazione(r, m.giorno)) return;
@@ -578,10 +586,12 @@ export default async function(req) {
         riconciliazione = riconciliazionePiazzale(rilevPerStoc.get(ns) || [], suoiMovimenti, { oggi });
 
         const rilev = stocRilevMap.get(ns);
-        if (rilev) {
+        const partenza = partenzaMap.get(ns);
+        if (rilev && partenza) {
+          // Le classi da cui parte il numero sono quelle dell'ancora dell'anno.
           rilevazione_classi_kg = {
-            P: Number(rilev.record.class1_kg) || 0, M: Number(rilev.record.class2_kg) || 0, G1: Number(rilev.record.class3_kg) || 0,
-            G2: Number(rilev.record.class4_kg) || 0, ACI: Number(rilev.record.class9_kg) || 0, ND: 0,
+            P: Number(partenza.record.class1_kg) || 0, M: Number(partenza.record.class2_kg) || 0, G1: Number(partenza.record.class3_kg) || 0,
+            G2: Number(partenza.record.class4_kg) || 0, ACI: Number(partenza.record.class9_kg) || 0, ND: 0,
           };
           const mov = movStoc.get(ns);
           // Le classi di rete si muovono solo con la rete, la classe 9 solo con l'ACI.
@@ -591,7 +601,9 @@ export default async function(req) {
           }));
           const kgDi = (classi, soloAci) => Object.entries(classi).reduce((s, [c, v]) => s + ((c === 'ACI') === soloAci ? v : 0), 0);
           dopo_rilevazione = {
-            dal: rilev.dataStr,
+            // dal: l'ancora da cui parte il numero; ultima_lettura: il riscontro.
+            dal: partenza.dataStr,
+            ultima_lettura: rilev.dataStr,
             rete: { ingressi: mov.RETE.nIngressi, ingressi_kg: kgDi(mov.RETE.ingressi, false), uscite: mov.RETE.nUscite, uscite_kg: kgDi(mov.RETE.uscite, false) },
             aci: { ingressi: mov.ACI.nIngressi, ingressi_kg: kgDi(mov.ACI.ingressi, true), uscite: mov.ACI.nUscite, uscite_kg: kgDi(mov.ACI.uscite, true) },
           };

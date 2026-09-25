@@ -431,7 +431,10 @@ quella prova.
    gestionale conosce e il file no (riconosciuti dal **numero d'ordine** negli
    ordini non dichiarati e nel report delle dichiarazioni, mai dalla data)
    **meno** le dichiarazioni caricate dopo la fotografia. Quella di uno
-   stoccaggio e' la rilevazione per classe piu' i movimenti finiti dopo.
+   stoccaggio e' l'**ancora dell'anno** per classe piu' i movimenti finiti
+   dopo; le letture successive sono il riscontro (`puntoDiPartenza` in
+   `base44/shared/giacenzaStoccaggi.ts`, usato da Giacenze, riconciliazione,
+   predittivita' e riepilogo delle dichiarazioni).
 3. **Rete, ACI ed extra raccolta non si mescolano mai**: giacenze, dichiarazioni,
    totali, KPI. La rilevazione di uno stoccaggio si divide per classe (1-4 rete,
    9 ACI); `GiacenzaSito.giacenza_riferimento_t` e' la rete e

@@ -86,7 +86,7 @@ export default function AnomalieAlert({ anomalie }) {
                 {a.tipo === 'coerenza_derivati' && ` — dichiarato ${t(a.dichiarato_t)} t, derivati ${t(a.somma_derivati_t)} t (diff. ${t(a.differenza_t)} t)`}
                 {a.tipo === 'giacenza_sopra_target' && ` — giacenza ${t(a.giacenza_portale_t)} t contro target ${t(a.target_totale_t)} t`}
                 {a.tipo === 'sito_senza_target' && ` — nessun record GiacenzaSito per l'anno ${a.anno}`}
-                {a.tipo === 'giacenza_negativa' && ` — classe ${a.classe}: ${formatKg(a.kg)} kg dopo i movimenti successivi alla rilevazione, mancano ingressi o la rilevazione va aggiornata`}
+                {a.tipo === 'giacenza_negativa' && ` — classe ${a.classe}: ${formatKg(a.kg)} kg dall'ancora dell'anno piu' i movimenti successivi: mancano ingressi, o l'ancora ha i chili nella classe sbagliata`}
                 {a.tipo === 'target_divergente' && ` — qui ${t(a.giacenze_t)} t, in Target & Status ${t(a.target_status_t)} t (differenza ${t(a.differenza_t)} t): i due numeri devono essere uguali, correggi quello sbagliato`}
                 {a.tipo === 'stoccaggio_senza_rilevazione' && ` — il dato va letto dalla pagina Unita' Locali di Stoccaggio del portale`}
                 {a.tipo === 'ordini_senza_fine_trasporto' && testoSenzaFineFile(a)}

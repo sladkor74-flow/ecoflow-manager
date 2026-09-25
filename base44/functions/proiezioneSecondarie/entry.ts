@@ -5,7 +5,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { canaleMovimento } from "../../shared/movimenti.ts";
 import { proiettaInsieme, viaggiPerMese, MESI, KG_PER_VIAGGIO, giaArrivatoDiRete, residuoDiRete, noteGiaArrivato, sitiDellaPredittivita, dateDaSistemareDiRete, riassuntoDate } from "../../shared/proiezioneSecondarie.ts";
-import { dopoLaRilevazione, ultimeRilevazioni, kgReteDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
+import { dopoLaRilevazione, puntiDiPartenza, kgReteDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from "../../shared/reportSettimanali.ts";
 
@@ -162,11 +162,12 @@ export default async function(req) {
     }
 
     // --- quanto c'e' adesso negli stoccaggi, rete ---
-    // Ultima rilevazione del portale piu' quello che si e' mosso dopo: e' la
-    // regola del modulo Giacenze, e la rete esclude la classe 9.
-    const rilevazionePer = ultimeRilevazioni(rilevazioni, normalizzaRagioneSociale);
+    // L'ancora dell'anno piu' quello che si e' mosso dopo: e' la regola del
+    // modulo Giacenze (24/09/2026: l'ultima lettura e' un riscontro, non il
+    // punto di partenza), e la rete esclude la classe 9.
+    const rilevazionePer = puntiDiPartenza(rilevazioni, normalizzaRagioneSociale);
     // Stessa regola del modulo Giacenze, in comune (shared/giacenzaStoccaggi.ts):
-    // la rilevazione del portale e i movimenti finiti dopo, per fine trasporto.
+    // l'ancora dell'anno e i movimenti finiti dopo, per fine trasporto.
     // Solo rete: le classi 1-4 della rilevazione, le primarie di rete arrivate
     // allo stoccaggio (non all'impianto, se il soggetto e' anche impianto), le
     // secondarie di rete arrivate allo stoccaggio e quelle partite. La classe 9

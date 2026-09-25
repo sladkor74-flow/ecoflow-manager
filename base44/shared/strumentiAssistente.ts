@@ -910,7 +910,16 @@ export const STRUMENTI = [
           // Da dove viene il numero, cosi' uno scarto col portale si spiega coi dati.
           calcolo: stoc
             ? (r.data_rilevazione
-              ? { rilevazione_del: r.data_rilevazione, rilevazione_classi_kg: r.rilevazione_classi_kg, dopo_la_rilevazione: r.dopo_rilevazione, rilevazione_obsoleta: !!r.rilevazione_obsoleta }
+              // Il numero parte dall'ancora dell'anno; l'ultima lettura e' il
+              // riscontro, non la fonte (regola della direzione, 24/09/2026).
+              ? {
+                parte_dall_ancora_del: r.dopo_rilevazione ? r.dopo_rilevazione.dal : r.data_rilevazione,
+                classi_dell_ancora_kg: r.rilevazione_classi_kg,
+                movimenti_dopo_l_ancora: r.dopo_rilevazione,
+                ultima_lettura_del: r.data_rilevazione,
+                ultima_lettura_obsoleta: !!r.rilevazione_obsoleta,
+                regola: "Giacenza = ancora dell'anno + movimenti con fine trasporto successiva. L'ultima lettura del portale e' un riscontro: se si scosta, lo scarto si spiega, il numero non cambia.",
+              }
               : { avviso: 'Nessuna rilevazione del portale per questo stoccaggio: la giacenza non si puo\' calcolare.' })
             : (calcolata
               ? { file_del_portale_del: f.del, fotografia_t: f.foto_t, carichi_aggiunti: f.aggiunti, carichi_aggiunti_t: f.aggiunti_t, dichiarato_dopo_la_fotografia_t: f.dichiarato_dopo_t }

@@ -7,7 +7,7 @@ import { giornoRoma } from "../../shared/giornoItaliano.ts";
 import { eTerminato, periodoMovimento } from "../../shared/movimenti.ts";
 import { MESI, operazioneDa, quadratura } from "../../shared/dichiarazioniImpianti.ts";
 import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese } from "../../shared/giacenzaPortale.ts";
-import { ultimeRilevazioni, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
+import { puntiDiPartenza, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 
 // Dichiarazioni degli impianti, mese per mese, con la quadratura delle giacenze.
 //
@@ -149,8 +149,9 @@ export default async function(req) {
     };
 
     // La rilevazione di uno stoccaggio a portale e' per classe: P, M, G1 e G2 sono
-    // la rete, la classe 9 e' l'ACI. Si tiene divisa per canale, e da lì la
-    // giacenza segue i movimenti con la fine del trasporto dopo la rilevazione.
+    // la rete, la classe 9 e' l'ACI. Si tiene divisa per canale, e dall'ancora
+    // dell'anno la giacenza segue i movimenti con la fine del trasporto dopo
+    // (24/09/2026: le letture successive sono un riscontro, non la partenza).
     // Quale rilevazione vale e da che giorno lo dice shared/giacenzaStoccaggi.ts,
     // la stessa regola di Giacenze e Predittivita': qui si leggeva solo
     // data_rilevazione, e una rilevazione senza quel campo (che Giacenze data dal
@@ -158,7 +159,7 @@ export default async function(req) {
     // tornava alla giacenza di inizio anno. Un modulo diceva un piazzale e
     // l'altro un altro.
     const rilevazione = new Map(); // ns -> { data, RETE: t, ACI: t }
-    for (const [ns, ril] of ultimeRilevazioni(rilevazioni, norm)) {
+    for (const [ns, ril] of puntiDiPartenza(rilevazioni, norm)) {
       rilevazione.set(ns, { data: ril.data, RETE: kgReteDiRilevazione(ril.record) / 1000, ACI: kgAciDiRilevazione(ril.record) / 1000 });
     }
     const dopoRilevazione = new Map(); // ns|canale -> t (entrate meno partenze finite dopo la rilevazione)

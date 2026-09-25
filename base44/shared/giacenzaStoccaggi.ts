@@ -1,14 +1,17 @@
 // Quanto materiale ha davvero uno stoccaggio, adesso, un canale per volta.
 //
 // La rilevazione fotografa il saldo del portale per classe: P, M, G1 e G2 sono
-// la rete, la classe 9 e' l'ACI. Per avere la giacenza di oggi si parte dalla
-// fotografia e si contano i movimenti di quel canale finiti dopo.
+// la rete, la classe 9 e' l'ACI. Per avere la giacenza di oggi si parte
+// dall'ANCORA DELL'ANNO - la rilevazione del 31/12 precedente, o la prima
+// dell'anno - e si contano i movimenti di quel canale finiti dopo. Le letture
+// successive sono un riscontro: si confrontano, non spostano il numero (regola
+// della direzione, 24/09/2026; puntoDiPartenza, piu' sotto).
 //
 // Tre regole dell'utente, senza eccezioni (21/09/2026):
 // - un movimento conta dalla FINE DEL TRASPORTO, sul giorno italiano; la data di
 //   chiusura dell'ordine a portale non decide nulla, nemmeno come ripiego: un
 //   movimento senza fine trasporto non si conta;
-// - la giacenza segue ogni caricamento: entrate e uscite dopo la rilevazione;
+// - la giacenza segue ogni caricamento: entrate e uscite dopo l'ancora;
 // - rete, ACI ed extra raccolta non si sommano mai. L'extra raccolta a portale
 //   non c'e': la sua giacenza si tiene a parte.
 //
@@ -40,7 +43,11 @@ export function dopoLaRilevazione(movimento, giorno) {
   return !!g && !!giorno && g > giorno;
 }
 
-/** L'ultima rilevazione per ciascuno stoccaggio, per chiave normalizzata. */
+/**
+ * L'ultima rilevazione per ciascuno stoccaggio, per chiave normalizzata. E' il
+ * riscontro piu' recente, non il punto di partenza della giacenza: quello lo da'
+ * puntiDiPartenza.
+ */
 export function ultimeRilevazioni(rilevazioni, chiaveDi) {
   const per = new Map();
   for (const r of rilevazioni || []) {
@@ -339,6 +346,55 @@ export function ancoraDellAnno(rilevazioni, anno) {
   return letture.find(r => annoDellaLettura(momentoRilevazione(r)) === a) || null;
 }
 
+// --- Da dove parte il numero (regola della direzione, 24/09/2026) ---
+//
+// La giacenza di un piazzale e' una somma algebrica: l'ancora dell'anno piu'
+// tutti i movimenti con fine trasporto successiva, classe per classe e canale
+// per canale. La lettura del portale e' un riscontro, non la fonte del numero:
+// quando si scosta lo scarto si spiega, ma il numero mostrato resta quello dei
+// nostri movimenti. Prima si partiva dall'ultima lettura, e una lettura storta
+// (NAPPI SUD, 16/09/2026) si portava dietro la giacenza di tutti i moduli.
+
+/**
+ * Il punto da cui parte la giacenza di un piazzale: l'ancora dell'anno
+ * dell'ultima lettura - il 31/12 precedente, o la prima lettura dell'anno.
+ * Senza letture non c'e' un punto di partenza e la risposta e' null.
+ *
+ * @param {array} rilevazioni  i record GiacenzaStoccaggio del piazzale, in qualunque ordine
+ */
+export function puntoDiPartenza(rilevazioni) {
+  const letture = letturePerGiorno(rilevazioni);
+  if (!letture.length) return null;
+  const ultima = letture[letture.length - 1];
+  // L'ancora c'e' sempre, quando c'e' una lettura: al piu' e' l'ultima stessa,
+  // se e' la prima dell'anno.
+  return ancoraDellAnno(letture, annoDellaLettura(momentoRilevazione(ultima))) || ultima;
+}
+
+/**
+ * Il punto di partenza di ciascuno stoccaggio, per chiave normalizzata: la
+ * stessa forma di ultimeRilevazioni ({ record, quando, data }), piu' l'ultima
+ * lettura, che resta il riscontro.
+ */
+export function puntiDiPartenza(rilevazioni, chiaveDi) {
+  const per = new Map(); // chiave -> letture
+  for (const r of rilevazioni || []) {
+    const k = r && chiaveDi(r.sito);
+    if (!k) continue;
+    if (!per.has(k)) per.set(k, []);
+    per.get(k).push(r);
+  }
+  const esito = new Map();
+  for (const [k, letture] of per) {
+    const record = puntoDiPartenza(letture);
+    if (!record) continue;
+    const quando = momentoRilevazione(record);
+    const ultima = letturePerGiorno(letture).pop();
+    esito.set(k, { record, quando, data: quando, ultima, ultima_del: momentoRilevazione(ultima) });
+  }
+  return esito;
+}
+
 /** Di quanto sbaglia una lettura su un canale, in kg e con le classi. */
 function quantoSbaglia(canale) {
   if (!canale || canale.quadra !== false) return '';
@@ -517,8 +573,9 @@ export function saldoMovimentiInArchivio(movimenti) {
 // saldoMovimentiInArchivio per la somma dei soli movimenti, che una giacenza non
 // e'. Quattro cose, nell'ordine in cui servono:
 //
-// 1. l'estratto conto: la fotografia, piu' gli ingressi e meno le uscite finiti
-//    dopo, classe per classe, fino al numero che la pagina mostra;
+// 1. l'estratto conto: l'ancora dell'anno, piu' gli ingressi e meno le uscite
+//    finiti dopo, classe per classe, fino al numero che la pagina mostra; e
+//    accanto il riscontro dell'ultima lettura, con lo scarto (24/09/2026);
 // 2. lo storico delle letture, ognuna col suo verdetto - contro la precedente e
 //    contro l'ancora dell'anno: una lettura sbagliata sepolta indietro nel tempo
 //    non si ripescava piu', e una lettura giusta presa dopo una sbagliata
@@ -540,12 +597,12 @@ function giorniFra(dal, al) {
 }
 
 /**
- * L'estratto conto di un canale: la fotografia, poi gli ingressi e le uscite
- * finiti dopo, classe per classe, fino al numero di adesso.
+ * L'estratto conto di un canale: l'ancora dell'anno, poi gli ingressi e le
+ * uscite finiti dopo, classe per classe, fino al numero di adesso.
  *
- * Il taglio e' quello di sempre: contano i movimenti finiti DAL GIORNO DOPO la
- * lettura, per fine trasporto. Senza fotografia i movimenti si mostrano lo
- * stesso, ma il numero di adesso resta vuoto: una somma di movimenti non e' una
+ * Il taglio e' quello di sempre: contano i movimenti finiti DAL GIORNO DOPO
+ * l'ancora, per fine trasporto. Senza ancora i movimenti si mostrano lo stesso,
+ * ma il numero di adesso resta vuoto: una somma di movimenti non e' una
  * giacenza, e spacciarla per tale sarebbe una bugia comoda.
  */
 function estrattoDiCanale(canale, fotografia, movimenti, dal) {
@@ -581,8 +638,7 @@ function estrattoDiCanale(canale, fotografia, movimenti, dal) {
     fotografia_kg: fotografia ? fotoKg : null,
     ingressi, ingressi_kg: ingressiKg,
     uscite, uscite_kg: usciteKg,
-    // Quanto materiale si e' mosso dalla lettura in poi: entrate e uscite
-    // insieme, perche' e' il viavai che invecchia una fotografia.
+    // Quanto materiale si e' mosso dall'ancora in poi: entrate e uscite insieme.
     movimentato_kg: ingressiKg + usciteKg,
     adesso_kg: fotografia ? adessoKg : null,
     classi_negative: classi.filter(c => c.adesso_kg !== null && c.adesso_kg < 0).map(c => c.classe),
@@ -687,37 +743,35 @@ function statoDiCanale(canale, verdetto, haFotografia) {
   };
 }
 
-/** Se conviene rileggere il portale, e perche'. Parole semplici, un motivo per riga. */
+/**
+ * Se conviene rileggere il portale, e perche'. Parole semplici, un motivo per
+ * riga. Una lettura nuova e' un riscontro: dice se i nostri movimenti tornano
+ * con il portale, non cambia la giacenza, che parte dall'ancora dell'anno.
+ */
 function rileggereCanale(canale, estratto, stato, giorni) {
   // L'extra raccolta il portale non la tiene: non c'e' niente da rileggere.
   if (canale === 'EXTRA_RACCOLTA') {
     return {
-      conviene: false, giorni: null, vecchia: false, superata: false, classi_negative: [], nota: '',
+      conviene: false, giorni: null, vecchia: false, classi_negative: [], nota: '',
       perche: ["L'extra raccolta a portale non c'e': non c'e' una lettura da rifare."],
     };
   }
   if (stato.esito === 'senza_lettura') {
     return {
-      conviene: true, giorni: null, vecchia: false, superata: false, classi_negative: [], nota: '',
+      conviene: true, giorni: null, vecchia: false, classi_negative: [], nota: '',
       perche: ["Non c'e' nessuna lettura del portale da cui partire: la prima si prende dalla pagina delle unita' locali di stoccaggio."],
     };
   }
   const perche = [];
   const vecchia = giorni !== null && giorni > GIORNI_LETTURA_VECCHIA;
+  // Una lettura vecchia e' un riscontro vecchio: il numero non invecchia con
+  // lei, ma da troppo tempo nessuno controlla che i movimenti tornino col portale.
   if (vecchia) perche.push(`La lettura ha ${giorni} giorni, piu' di ${GIORNI_LETTURA_VECCHIA}: conviene rifarla.`);
-  // Il viavai ha superato quello che c'era: della giacenza di adesso la
-  // fotografia regge ormai poco, e un errore nella lettura pesa su tutto.
-  const superata = estratto.movimentato_kg > 0 && estratto.fotografia_kg !== null && estratto.movimentato_kg > estratto.fotografia_kg;
-  if (superata) {
-    perche.push(estratto.fotografia_kg > 0
-      ? "Dalla lettura si e' mosso piu' materiale di quanto il piazzale ne avesse: la giacenza di adesso dipende ormai dai movimenti, non piu' dalla lettura."
-      : "La lettura dava il piazzale vuoto su questo canale, e da allora si e' mosso materiale: conviene una lettura nuova.");
-  }
   if (estratto.classi_negative.length) {
-    perche.push(`Sotto zero ${estratto.classi_negative.length === 1 ? 'la classe' : 'le classi'} ${estratto.classi_negative.join(', ')}: il punto di partenza e' sbagliato e nessun caricamento puo' correggerlo, serve una lettura nuova.`);
+    perche.push(`Sotto zero ${estratto.classi_negative.length === 1 ? 'la classe' : 'le classi'} ${estratto.classi_negative.join(', ')}: dall'ancora dell'anno ne risulta uscita piu' di quanta ne sia entrata. O l'ancora ha i chili nella classe sbagliata o manca un movimento in archivio: una lettura nuova aiuta a capire quale.`);
   }
   if (stato.esito === 'scosta') {
-    perche.push("L'ultima lettura non tornava: rifarla adesso, che il portale ha chiuso quegli ordini, rimette a posto il punto di partenza.");
+    perche.push("L'ultima lettura non tornava con i nostri movimenti: rifarla adesso, che il portale ha chiuso quegli ordini, dice se lo scarto si chiude da solo. La giacenza mostrata non cambia: e' quella dei movimenti.");
   }
   // Una lettura confermata dall'ancora non e' un motivo per rileggere: si
   // scostava dalla precedente perche' a sbagliare era la precedente. Il 23/09 su
@@ -725,7 +779,27 @@ function rileggereCanale(canale, estratto, stato, giorni) {
   const nota = stato.esito === 'confermata_ancora'
     ? `La lettura e' confermata dall'ancora dell'anno${stato.ancora_del ? `, quella del ${giornoScritto(stato.ancora_del)}` : ''}: non e' lei a sbagliare, e rifarla non servirebbe.`
     : '';
-  return { conviene: perche.length > 0, giorni, vecchia, superata, classi_negative: estratto.classi_negative, nota, perche };
+  return { conviene: perche.length > 0, giorni, vecchia, classi_negative: estratto.classi_negative, nota, perche };
+}
+
+/**
+ * Il riscontro dell'ultima lettura su un canale: quanto leggeva il portale,
+ * quanto dicevano quel giorno l'ancora piu' i nostri movimenti, e lo scarto.
+ * Null quando l'ultima lettura e' l'ancora stessa: non c'e' niente da riscontrare.
+ */
+function riscontroDiCanale(canale, ultima, confronto) {
+  const c = confronto && confronto.canali[canale];
+  if (!c) return null;
+  const letto = canale === 'ACI' ? kgAciDiRilevazione(ultima) : kgReteDiRilevazione(ultima);
+  return {
+    del: confronto.del,
+    letto_kg: letto,
+    atteso_kg: letto - c.scarto_kg,
+    scarto_kg: c.scarto_kg,
+    quadra: c.quadra,
+    ripartizione_sbagliata: !!c.ripartizione_sbagliata,
+    classi_che_scostano: c.classi_che_scostano,
+  };
 }
 
 /**
@@ -742,7 +816,12 @@ export function riconciliazionePiazzale(rilevazioni, movimenti, { oggi = '' } = 
   const mov = (movimenti || []).filter(Boolean);
   const ultima = letture.length ? letture[letture.length - 1] : null;
   const del = ultima ? momentoRilevazione(ultima) : '';
-  const fotografia = ultima ? classiDiRilevazione(ultima) : null;
+  // Il numero parte dall'ancora dell'anno, non dall'ultima lettura (24/09/2026):
+  // l'ultima lettura e' il riscontro, e si confronta qui sotto canale per canale.
+  const partenza = puntoDiPartenza(letture);
+  const partenzaDel = partenza ? momentoRilevazione(partenza) : '';
+  const fotografia = partenza ? classiDiRilevazione(partenza) : null;
+  const riscontro = partenza && ultima && ultima !== partenza ? confrontoConBase(ultima, partenza, mov) : null;
 
   // Lo storico: ogni lettura col suo verdetto, non solo l'ultima. Di ciascuna si
   // tengono le sole classi che si scostano, coi loro candidati: le altre
@@ -779,13 +858,15 @@ export function riconciliazionePiazzale(rilevazioni, movimenti, { oggi = '' } = 
     // quando comincia l'archivio, e il numero di adesso resta vuoto.
     const fuoriPortale = canale === 'EXTRA_RACCOLTA';
     const senzaFotografia = fuoriPortale || !fotografia;
-    const estratto = estrattoDiCanale(canale, senzaFotografia ? null : fotografia, mov, fuoriPortale ? '' : del);
+    const estratto = estrattoDiCanale(canale, senzaFotografia ? null : fotografia, mov, fuoriPortale ? '' : partenzaDel);
     const stato = statoDiCanale(canale, verdetto, !!fotografia);
     canali[canale] = {
       canale,
       senza_fotografia: senzaFotografia,
-      fotografia: senzaFotografia ? null : { del, totale_kg: estratto.fotografia_kg },
+      // La "fotografia" da cui parte l'estratto e' l'ancora dell'anno.
+      fotografia: senzaFotografia ? null : { del: partenzaDel, totale_kg: estratto.fotografia_kg, ultima_del: del },
       estratto,
+      riscontro: fuoriPortale ? null : riscontroDiCanale(canale, ultima, riscontro),
       stato,
       rileggere: rileggereCanale(canale, estratto, stato, giorni),
       // Il verdetto di ogni lettura per questo canale, dalla piu' recente: una
@@ -817,6 +898,8 @@ export function riconciliazionePiazzale(rilevazioni, movimenti, { oggi = '' } = 
   return {
     rilevazioni: letture.length,
     ultima_del: del,
+    // Da dove parte il numero: l'ancora dell'anno dell'ultima lettura.
+    partenza_del: partenzaDel,
     giorni_dalla_lettura: giorni,
     senza_rilevazione: !ultima,
     movimenti: mov.length,
