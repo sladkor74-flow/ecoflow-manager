@@ -2,8 +2,8 @@
 // (base44/shared/predittivita.ts, calcolaPredittivita), con dati costruiti a
 // mano: le regole date dall'utente il 26/09/2026, una per una.
 //   - due proiezioni affiancate, sul target residuo dei raccoglitori e sul ritmo
-//     reale delle ultime 12 settimane; la prudente, flusso per flusso, prende la
-//     piu' bassa, e un flusso senza target vale il ritmo;
+//     reale delle ultime 12 settimane; un flusso senza target vale il ritmo; il
+//     programma si fa sul target (utente, 27/09/2026);
 //   - del target residuo di un raccoglitore conta la parte fino alla fine della
 //     programmazione, in proporzione ai giorni che restano fino al 31/12;
 //   - la priorita' di uno stoccaggio (Nappi Sud: prima Tecnogum, poi Irigom) non
@@ -20,7 +20,7 @@
 // La lettura dagli archivi: prove/predittivitaDati.mjs; la risposta per la
 // pagina: prove/predittivitaRisposta.mjs; le funzioni: prove/predittivitaFunzioni.mjs.
 // npm run prove
-import { calcolaPredittivita, giacenzaPiazzale, chiaveViaggio, piuGiorni, lunediDi, giorniFra, SCENARI } from '../base44/shared/predittivita.ts';
+import { calcolaPredittivita, giacenzaPiazzale, chiaveViaggio, piuGiorni, lunediDi, giorniFra, SCENARI, SCENARIO_PROGRAMMA } from '../base44/shared/predittivita.ts';
 import { regolePredittivita } from '../base44/shared/regolePredittivita.ts';
 import { normalizzaRagioneSociale as chiave } from '../base44/shared/normalizzaRagioneSociale.ts';
 
@@ -61,18 +61,18 @@ const riga = (c, stocc, imp) => c.programma.find(r => r.stoccaggio === stocc && 
 const tutti = (x, v) => SCENARI.every(s => x[s] === v);
 
 console.log('I GIORNI');
-verifica('gli scenari sono tre, e la prudente e\' l\'ultima', J(SCENARI) === J(['target', 'ritmo', 'prudente']));
+verifica('gli scenari sono due, e si programma sul target', J(SCENARI) === J(['target', 'ritmo']) && SCENARIO_PROGRAMMA === 'target');
 verifica('lunedi\' della settimana, anche di domenica', lunediDi('2026-09-23') === '2026-09-21' && lunediDi('2026-09-20') === '2026-09-14' && lunediDi('2026-09-21') === '2026-09-21');
 verifica('giorni fra due date e date spostate, anche a cavallo d\'anno e con l\'ora legale', giorniFra('2026-09-20', '2026-12-18') === 89 && giorniFra('2026-09-20', '2026-12-31') === 102 && piuGiorni('2026-12-28', 7) === '2027-01-04' && piuGiorni('2026-10-24', 2) === '2026-10-26');
 
-console.log('LE DUE PROIEZIONI E LA PRUDENTE');
+console.log('LE DUE PROIEZIONI');
 // Irigom, 1.000 t. Quattro flussi di primaria:
 //   Smoco       target 500 t, arrivate 296 t, 7 t a settimana: il target dice
-//               204 t x 89/102 = 178 t, il ritmo 7 x 89/7 = 89 t -> prudente 89;
+//               204 t x 89/102 = 178 t, il ritmo 7 x 89/7 = 89 t;
 //   Pneuservice target 300 t, arrivate 198 t, 14 t a settimana: il target dice
-//               102 x 89/102 = 89 t, il ritmo 178 t -> prudente 89;
+//               102 x 89/102 = 89 t, il ritmo 178 t;
 //   Emmesse     senza target, 7 t a settimana: vale il ritmo, 89 t;
-//   Nuovo       target 204 t, niente arrivato: target 178 t, ritmo 0 -> prudente 0.
+//   Nuovo       target 204 t, niente arrivato: target 178 t, ritmo 0.
 const IRIGOM = { chiave: 'irigom', nome: 'Irigom', target_kg: 1000000 };
 const flussiIrigom = [
   prim('Smoco Srl', 'Irigom Srl', 212000, '2026-03-10'), ...ogniSettimana('Smoco Srl', 'Irigom Srl', 7000),
@@ -91,15 +91,15 @@ const dueProiezioni = calcola({
 const irigom = impianto(dueProiezioni, 'irigom');
 const smoco = flusso(irigom, 'Smoco'), pneu = flusso(irigom, 'Pneuservice'), emmesse = flusso(irigom, 'Emmesse'), nuovo = flusso(irigom, 'Nuovo Raccoglitore');
 verifica('ogni flusso ha il suo consuntivo e il suo ritmo', smoco && smoco.consuntivo_kg === 296000 && smoco.ritmo_settimanale_kg === 7000 && pneu.consuntivo_kg === 198000 && pneu.ritmo_settimanale_kg === 14000 && emmesse.consuntivo_kg === 84000 && nuovo.consuntivo_kg === 0, J(irigom.primarie));
-verifica('Smoco rallenta: la prudente e\' il ritmo', J(smoco.attesa) === J({ target: 178000, ritmo: 89000, prudente: 89000 }), J(smoco.attesa));
-verifica('Pneuservice corre piu\' del target: la prudente e\' il target', J(pneu.attesa) === J({ target: 89000, ritmo: 178000, prudente: 89000 }), J(pneu.attesa));
-verifica('Emmesse senza target: in tutte e due le proiezioni vale il ritmo', emmesse.target_kg === null && emmesse.attesa.prudente === 89000 && emmesse.attesa.ritmo === 89000 && emmesse.attesa.target === 89000, J(emmesse));
-verifica('un raccoglitore col target ma fermo: la prudente e\' zero', J(nuovo.attesa) === J({ target: 178000, ritmo: 0, prudente: 0 }), J(nuovo.attesa));
+verifica('Smoco rallenta: il target resta quello che gli manca, il ritmo e\' piu\' basso', J(smoco.attesa) === J({ target: 178000, ritmo: 89000 }), J(smoco.attesa));
+verifica('Pneuservice corre piu\' del target: il target conta solo quello che gli manca', J(pneu.attesa) === J({ target: 89000, ritmo: 178000 }), J(pneu.attesa));
+verifica('Emmesse senza target: in tutte e due le proiezioni vale il ritmo', emmesse.target_kg === null && emmesse.attesa.ritmo === 89000 && emmesse.attesa.target === 89000, J(emmesse));
+verifica('un raccoglitore col target ma fermo: sul target porta il suo residuo, al ritmo niente', J(nuovo.attesa) === J({ target: 178000, ritmo: 0 }), J(nuovo.attesa));
 verifica('i flussi dal piu\' grande', irigom.primarie.map(p => p.raccoglitore).join(',') === 'Smoco,Pneuservice,Emmesse,Nuovo Raccoglitore', irigom.primarie.map(p => p.raccoglitore).join(','));
-verifica('la primaria attesa dell\'impianto, scenario per scenario', J(irigom.primaria_attesa) === J({ target: 534000, ritmo: 356000, prudente: 267000 }), J(irigom.primaria_attesa));
+verifica('la primaria attesa dell\'impianto, scenario per scenario', J(irigom.primaria_attesa) === J({ target: 534000, ritmo: 356000 }), J(irigom.primaria_attesa));
 verifica('gia\' arrivato e residuo', irigom.gia_arrivato_kg === 578000 && irigom.residuo_kg === 422000 && irigom.target_superato === false, J([irigom.gia_arrivato_kg, irigom.residuo_kg]));
-verifica('il resto deve arrivare in secondaria', J(irigom.fabbisogno_secondarie) === J({ target: 0, ritmo: 66000, prudente: 155000 }), J(irigom.fabbisogno_secondarie));
-verifica('nessuno stoccaggio lo alimenta: manca tutto il fabbisogno', irigom.senza_stoccaggi === true && J(irigom.mancanza_kg) === J(irigom.fabbisogno_secondarie) && J(irigom.raggiunge) === J({ target: true, ritmo: false, prudente: false }), J([irigom.mancanza_kg, irigom.raggiunge]));
+verifica('il resto deve arrivare in secondaria', J(irigom.fabbisogno_secondarie) === J({ target: 0, ritmo: 66000 }), J(irigom.fabbisogno_secondarie));
+verifica('nessuno stoccaggio lo alimenta: manca tutto il fabbisogno', irigom.senza_stoccaggi === true && J(irigom.mancanza_kg) === J(irigom.fabbisogno_secondarie) && J(irigom.raggiunge) === J({ target: true, ritmo: false }), J([irigom.mancanza_kg, irigom.raggiunge]));
 verifica('l\'orizzonte: dal giorno dopo i dati alla fine della programmazione', J(irigom.orizzonte) === J({ dal: '2026-09-21', al: '2026-12-18', giorni: 89, settimane: SETTIMANE }), J(irigom.orizzonte));
 
 console.log('LA QUOTA DEL TARGET FINO ALLA FINE DELLA PROGRAMMAZIONE');
@@ -109,7 +109,7 @@ console.log('LA QUOTA DEL TARGET FINO ALLA FINE DELLA PROGRAMMAZIONE');
 const conFine = (fine) => flusso(impianto(calcola({
   impianti: [{ ...IRIGOM, fine }], raccoglitori: [{ chiave: 'smoco', nome: 'Smoco', sito: 'irigom', target_kg: 500000 }], primarie: flussiIrigom,
 }), 'irigom'), 'Smoco');
-verifica('fine al 30/11: 71/102 del target residuo, e il ritmo su 71 giorni', J(conFine('2026-11-30').attesa) === J({ target: 142000, ritmo: 71000, prudente: 71000 }), J(conFine('2026-11-30').attesa));
+verifica('fine al 30/11: 71/102 del target residuo, e il ritmo su 71 giorni', J(conFine('2026-11-30').attesa) === J({ target: 142000, ritmo: 71000 }), J(conFine('2026-11-30').attesa));
 verifica('fine al 31/12: tutto il target residuo', conFine('2026-12-31').attesa.target === 204000, J(conFine('2026-12-31').attesa));
 verifica('fine del 2026 del motore: 89/102', smoco.attesa.target === Math.round(204000 * QUOTA));
 verifica('la fine dell\'impianto vale piu\' di quella dell\'anno', impianto(calcola({ impianti: [{ ...IRIGOM, fine: '2026-11-30' }] }), 'irigom').fine === '2026-11-30');
@@ -133,23 +133,23 @@ const nappi = ({ giacenza = 821000, ritmo = 7000, destinazioni = [{ impianto: 'i
 const prio = nappi();
 const tg = impianto(prio, 'tecnogum'), ir = impianto(prio, 'irigom'), ns = stoccaggio(prio, 'nappi sud');
 verifica('la priorita\' delle regole del 2026, anche se la configurazione elenca Irigom per primo', ns && ns.destinazioni.map(d => `${d.impianto}:${d.priorita}`).join(',') === 'tecnogum:1,irigom:2', J(ns && ns.destinazioni));
-verifica('i fabbisogni in secondaria', tg.fabbisogno_secondarie.prudente === 650000 && ir.fabbisogno_secondarie.prudente === 390000, J([tg.fabbisogno_secondarie, ir.fabbisogno_secondarie]));
-verifica('il disponibile di Nappi Sud: giacenza piu\' entrate al ritmo', ns.disponibile.prudente === 910000 && ns.entrate_attese.prudente === 89000 && ns.giacenza_kg === 821000 && ns.entrate_flussi.length === 1 && ns.entrate_flussi[0].ritmo_settimanale_kg === 7000, J([ns.disponibile, ns.entrate_attese]));
+verifica('i fabbisogni in secondaria', tg.fabbisogno_secondarie.target === 650000 && ir.fabbisogno_secondarie.target === 390000, J([tg.fabbisogno_secondarie, ir.fabbisogno_secondarie]));
+verifica('il disponibile di Nappi Sud: giacenza piu\' entrate al ritmo', ns.disponibile.target === 910000 && ns.entrate_attese.target === 89000 && ns.giacenza_kg === 821000 && ns.entrate_flussi.length === 1 && ns.entrate_flussi[0].ritmo_settimanale_kg === 7000, J([ns.disponibile, ns.entrate_attese]));
 const tgDaNappi = tg.da_stoccaggi.find(r => r.stoccaggio === 'nappi sud'), irDaNappi = ir.da_stoccaggi.find(r => r.stoccaggio === 'nappi sud');
-verifica('a Tecnogum tutto quello che gli serve, 50 viaggi', tgDaNappi.kg.prudente === 650000 && tgDaNappi.viaggi_totali.prudente === 50 && tgDaNappi.priorita === 1, J(tgDaNappi));
-verifica('a Irigom quello che avanza, 20 viaggi', irDaNappi.kg.prudente === 260000 && irDaNappi.viaggi_totali.prudente === 20 && irDaNappi.priorita === 2, J(irDaNappi));
-verifica('i viaggi a settimana sull\'orizzonte', Math.abs(tgDaNappi.viaggi_settimana.prudente - 50 / SETTIMANE) < 1e-9 && Math.abs(irDaNappi.viaggi_settimana.prudente - 20 / SETTIMANE) < 1e-9);
-verifica('Tecnogum raggiunge il target, a Irigom mancano 130 t', tg.mancanza_kg.prudente === 0 && tg.raggiunge.prudente === true && ir.mancanza_kg.prudente === 130000 && ir.raggiunge.prudente === false && ir.coperto_secondarie.prudente === 260000, J([tg.mancanza_kg, ir.mancanza_kg]));
-verifica('Nappi Sud non tiene niente da parte', ns.non_assegnato.prudente === 0, J(ns.non_assegnato));
+verifica('a Tecnogum tutto quello che gli serve, 50 viaggi', tgDaNappi.kg.target === 650000 && tgDaNappi.viaggi_totali.target === 50 && tgDaNappi.priorita === 1, J(tgDaNappi));
+verifica('a Irigom quello che avanza, 20 viaggi', irDaNappi.kg.target === 260000 && irDaNappi.viaggi_totali.target === 20 && irDaNappi.priorita === 2, J(irDaNappi));
+verifica('i viaggi a settimana sull\'orizzonte', Math.abs(tgDaNappi.viaggi_settimana.target - 50 / SETTIMANE) < 1e-9 && Math.abs(irDaNappi.viaggi_settimana.target - 20 / SETTIMANE) < 1e-9);
+verifica('Tecnogum raggiunge il target, a Irigom mancano 130 t', tg.mancanza_kg.target === 0 && tg.raggiunge.target === true && ir.mancanza_kg.target === 130000 && ir.raggiunge.target === false && ir.coperto_secondarie.target === 260000, J([tg.mancanza_kg, ir.mancanza_kg]));
+verifica('Nappi Sud non tiene niente da parte', ns.non_assegnato.target === 0, J(ns.non_assegnato));
 // Con materiale per tutti e due, tutti e due raggiungono, e il resto avanza.
 const abbondanza = nappi({ giacenza: 2000000 });
-verifica('con materiale per tutti nessuno resta indietro, e il resto avanza', impianto(abbondanza, 'irigom').mancanza_kg.prudente === 0 && impianto(abbondanza, 'tecnogum').mancanza_kg.prudente === 0 && stoccaggio(abbondanza, 'nappi sud').non_assegnato.prudente === 2089000 - 1040000, J(stoccaggio(abbondanza, 'nappi sud').non_assegnato));
+verifica('con materiale per tutti nessuno resta indietro, e il resto avanza', impianto(abbondanza, 'irigom').mancanza_kg.target === 0 && impianto(abbondanza, 'tecnogum').mancanza_kg.target === 0 && stoccaggio(abbondanza, 'nappi sud').non_assegnato.target === 2089000 - 1040000, J(stoccaggio(abbondanza, 'nappi sud').non_assegnato));
 // Una priorita' scritta nella configurazione vale piu' delle regole dell'anno.
 const irigomPrima = nappi({ destinazioni: [{ impianto: 'irigom', priorita: 1 }, { impianto: 'tecnogum', priorita: 2 }] });
-verifica('la priorita\' scritta in configurazione vale piu\' delle regole', impianto(irigomPrima, 'irigom').mancanza_kg.prudente === 0 && impianto(irigomPrima, 'tecnogum').mancanza_kg.prudente === 1040000 - 910000, J([impianto(irigomPrima, 'irigom').mancanza_kg, impianto(irigomPrima, 'tecnogum').mancanza_kg]));
+verifica('la priorita\' scritta in configurazione vale piu\' delle regole', impianto(irigomPrima, 'irigom').mancanza_kg.target === 0 && impianto(irigomPrima, 'tecnogum').mancanza_kg.target === 1040000 - 910000, J([impianto(irigomPrima, 'irigom').mancanza_kg, impianto(irigomPrima, 'tecnogum').mancanza_kg]));
 // A pari priorita' il disponibile si divide in proporzione a quello che manca.
 const pari = nappi({ destinazioni: [{ impianto: 'irigom', priorita: 1 }, { impianto: 'tecnogum', priorita: 1 }] });
-const pariTg = impianto(pari, 'tecnogum').da_stoccaggi[0].kg.prudente, pariIr = impianto(pari, 'irigom').da_stoccaggi[0].kg.prudente;
+const pariTg = impianto(pari, 'tecnogum').da_stoccaggi[0].kg.target, pariIr = impianto(pari, 'irigom').da_stoccaggi[0].kg.target;
 verifica('a pari priorita\' in proporzione al fabbisogno', pariTg === 568750 && pariIr === 341250, J([pariTg, pariIr]));
 
 console.log('IL PROGRAMMA DELLA SETTIMANA DOPO');
@@ -203,12 +203,12 @@ const plafond = calcola({
 });
 const ds = stoccaggio(plafond, 'deposito sud');
 verifica('il plafond si consuma con tutte le partenze dell\'anno verso altri', ds.plafond_kg === 100000 && ds.partiti_verso_altri_kg === 60000 && ds.residuo_plafond_kg === 40000, J(ds));
-verifica('il disponibile si ferma al plafond', tutti(ds.disponibile, 40000) && impianto(plafond, 'tecnogum').da_stoccaggi[0].kg.prudente === 40000, J(ds.disponibile));
+verifica('il disponibile si ferma al plafond', tutti(ds.disponibile, 40000) && impianto(plafond, 'tecnogum').da_stoccaggi[0].kg.target === 40000, J(ds.disponibile));
 verifica('la settimana dopo non si programma oltre il plafond, tolto quello che partira\' prima di lunedi\'', ds.viaggi_prossima_settimana.possibili === 2, J(ds.viaggi_prossima_settimana));
 // Senza plafond conta il materiale: 200 t, meno una settimana di partenze al
 // passo del piano (1,2 viaggi) prima di lunedi': 14 viaggi.
 const senzaPlafond = stoccaggio(calcola({ impianti: [{ chiave: 'tecnogum', nome: 'Tecnogum', target_kg: 2000000 }], stoccaggi: [{ chiave: 'deposito sud', nome: 'Deposito Sud', plafond_kg: 0, giacenza_kg: 200000, destinazioni: [{ impianto: 'tecnogum' }] }], primarie: [OROLOGIO] }), 'deposito sud');
-verifica('un plafond a zero vuol dire senza plafond', senzaPlafond.plafond_kg === null && senzaPlafond.residuo_plafond_kg === null && senzaPlafond.disponibile.prudente === 200000 && senzaPlafond.viaggi_prossima_settimana.possibili === 14, J(senzaPlafond));
+verifica('un plafond a zero vuol dire senza plafond', senzaPlafond.plafond_kg === null && senzaPlafond.residuo_plafond_kg === null && senzaPlafond.disponibile.target === 200000 && senzaPlafond.viaggi_prossima_settimana.possibili === 14, J(senzaPlafond));
 
 console.log('L\'IMPIANTO CHE E\' ANCHE PIAZZALE: T-CYCLE');
 // T-Cycle tratta (1.050 t di target) e dal suo piazzale spedisce a Tecnogum,
@@ -233,11 +233,11 @@ verifica('T-Cycle e\' impianto e piazzale, e il piazzale non alimenta se stesso'
 verifica('il gia\' arrivato di T-Cycle: il piazzale al netto di quello partito per Tecnogum, senza i trasbordi a se stesso', tcI.gia_arrivato_kg === 100000 + 200000 - 40000 && tcI.arrivato.da_se_stesso.kg === 60000 && tcTg.gia_arrivato_kg === 84000 + 40000, J([tcI.gia_arrivato_kg, tcTg.gia_arrivato_kg]));
 verifica('il plafond si consuma solo con le partenze verso Tecnogum', tcS.partiti_verso_altri_kg === 40000 && tcS.residuo_plafond_kg === 210000, J(tcS));
 verifica('le entrate del piazzale di un impianto si stimano sul ritmo in tutti gli scenari', tutti(tcS.entrate_attese, 178000), J(tcS.entrate_attese));
-verifica('a Tecnogum il piazzale di T-Cycle da\' giacenza ed entrate', tcS.disponibile.prudente === 198000 && tcTg.da_stoccaggi[0].stoccaggio === 't-cycle' && tcTg.da_stoccaggi[0].kg.prudente === 198000, J([tcS.disponibile, tcTg.da_stoccaggi]));
-verifica('a Tecnogum mancano 89 t', tcTg.fabbisogno_secondarie.prudente === 376000 - 89000 && tcTg.mancanza_kg.prudente === 89000, J([tcTg.fabbisogno_secondarie, tcTg.mancanza_kg]));
+verifica('a Tecnogum il piazzale di T-Cycle da\' giacenza ed entrate', tcS.disponibile.target === 198000 && tcTg.da_stoccaggi[0].stoccaggio === 't-cycle' && tcTg.da_stoccaggi[0].kg.target === 198000, J([tcS.disponibile, tcTg.da_stoccaggi]));
+verifica('a Tecnogum mancano 89 t', tcTg.fabbisogno_secondarie.target === 376000 - 89000 && tcTg.mancanza_kg.target === 89000, J([tcTg.fabbisogno_secondarie, tcTg.mancanza_kg]));
 // All'impianto T-Cycle arriverebbero 89 + 178 t; 198 t partiranno per Tecnogum
 // e non resteranno a lui.
-verifica('quello che il piazzale spedira\' agli altri non resta a T-Cycle', tcI.primaria_attesa.prudente === 89000 + 178000 - 198000 && tcI.fabbisogno_secondarie.prudente === 790000 - 69000 && tcI.senza_stoccaggi === true, J([tcI.primaria_attesa, tcI.fabbisogno_secondarie]));
+verifica('quello che il piazzale spedira\' agli altri non resta a T-Cycle', tcI.primaria_attesa.target === 89000 + 178000 - 198000 && tcI.fabbisogno_secondarie.target === 790000 - 69000 && tcI.senza_stoccaggi === true, J([tcI.primaria_attesa, tcI.fabbisogno_secondarie]));
 verifica('il fatto: i viaggi per Tecnogum, non i trasbordi a se stesso', tcycle.fatto.length === 1 && tcycle.fatto[0].stoccaggio === 't-cycle' && tcycle.fatto[0].impianto === 'tecnogum' && tcycle.fatto[0].viaggi === 3 && tcycle.fatto[0].kg === 40000, J(tcycle.fatto));
 verifica('nel programma T-Cycle alimenta Tecnogum, non se stesso', tcycle.programma.length === 1 && tcycle.programma[0].impianto === 'Tecnogum', J(tcycle.programma));
 // Se un altro stoccaggio alimenta T-Cycle, lo serve per quello che a T-Cycle
@@ -259,9 +259,9 @@ const tcycleNappi = calcola({
   secondarie: [sec('T-Cycle', 'Tecnogum', 13000, '2026-08-04'), sec('T-Cycle', 'Tecnogum', 13000, '2026-08-05'), sec('T-Cycle', 'Tecnogum', 14000, '2026-08-06')],
 });
 const tcN = impianto(tcycleNappi, 't-cycle'), nsN = stoccaggio(tcycleNappi, 'nappi sud');
-verifica('lo stoccaggio che alimenta T-Cycle copre quello che gli manca davvero', tcN.fabbisogno_secondarie.prudente === 721000 && tcN.da_stoccaggi[0].kg.prudente === 721000 && tcN.mancanza_kg.prudente === 0 && tcN.raggiunge.prudente === true, J([tcN.fabbisogno_secondarie, tcN.da_stoccaggi, tcN.mancanza_kg]));
-verifica('e a Nappi Sud avanza il resto', nsN.non_assegnato.prudente === 2000000 - 721000, J(nsN.non_assegnato));
-verifica('Tecnogum dal piazzale di T-Cycle come prima', impianto(tcycleNappi, 'tecnogum').mancanza_kg.prudente === 89000);
+verifica('lo stoccaggio che alimenta T-Cycle copre quello che gli manca davvero', tcN.fabbisogno_secondarie.target === 721000 && tcN.da_stoccaggi[0].kg.target === 721000 && tcN.mancanza_kg.target === 0 && tcN.raggiunge.target === true, J([tcN.fabbisogno_secondarie, tcN.da_stoccaggi, tcN.mancanza_kg]));
+verifica('e a Nappi Sud avanza il resto', nsN.non_assegnato.target === 2000000 - 721000, J(nsN.non_assegnato));
+verifica('Tecnogum dal piazzale di T-Cycle come prima', impianto(tcycleNappi, 'tecnogum').mancanza_kg.target === 89000);
 
 console.log('L\'IMPIANTO SENZA TARGET QUEST\'ANNO');
 const senzaTarget = calcola({
@@ -337,7 +337,7 @@ verifica('senza ancora non c\'e\' una giacenza', giacenzaPiazzale({ chiaveStocca
 const senzaGiacenza = calcola({ impianti: [{ chiave: 'tecnogum', nome: 'Tecnogum', target_kg: 500000 }], stoccaggi: [{ chiave: 'nappi sud', nome: 'Nappi Sud', giacenza_kg: null, destinazioni: [{ impianto: 'tecnogum' }] }] });
 verifica('il motore dice quando uno stoccaggio non ha da dove partire', stoccaggio(senzaGiacenza, 'nappi sud').giacenza_kg === null && senzaGiacenza.avvisi.some(a => a.tipo === 'stoccaggio_senza_giacenza' && a.stoccaggio === 'Nappi Sud'), J(senzaGiacenza.avvisi));
 const giacenzaNegativa = stoccaggio(calcola({ impianti: [{ chiave: 'tecnogum', nome: 'Tecnogum', target_kg: 500000 }], stoccaggi: [{ chiave: 'nappi sud', nome: 'Nappi Sud', giacenza_kg: -27000, destinazioni: [{ impianto: 'tecnogum' }] }] }), 'nappi sud');
-verifica('una giacenza sotto zero si mostra, ma non da\' materiale', giacenzaNegativa.giacenza_kg === -27000 && giacenzaNegativa.disponibile.prudente === 0 && giacenzaNegativa.viaggi_prossima_settimana.possibili === 0, J(giacenzaNegativa));
+verifica('una giacenza sotto zero si mostra, ma non da\' materiale', giacenzaNegativa.giacenza_kg === -27000 && giacenzaNegativa.disponibile.target === 0 && giacenzaNegativa.viaggi_prossima_settimana.possibili === 0, J(giacenzaNegativa));
 
 console.log('FIN DOVE ARRIVANO I DATI');
 verifica('i dati arrivano a domenica: la settimana scorsa e\' completa', dueProiezioni.dati_al === '2026-09-20' && dueProiezioni.settimana_scorsa_completa === true && !dueProiezioni.avvisi.some(a => a.tipo === 'dati_incompleti'), J([dueProiezioni.dati_al, dueProiezioni.avvisi]));
@@ -370,7 +370,7 @@ const smoco27 = flusso(impianto(cavallo, 'irigom'), 'Smoco');
 verifica('le ultime settimane chiuse, anche del 2026', cavallo.dati_al === '2027-01-10' && J(cavallo.finestra_ritmo) === J({ dal: '2026-10-19', al: '2027-01-10', settimane: 12 }), J(cavallo.finestra_ritmo));
 verifica('il ritmo usa dicembre, il consuntivo e\' solo del 2027', smoco27.ritmo_settimanale_kg === 7000 && smoco27.consuntivo_kg === 14000, J(smoco27));
 // al 31/12/2027 mancano 355 giorni: il target residuo (350 t) conta tutto, il ritmo 7 x 355/7
-verifica('le due proiezioni del 2027', J(smoco27.attesa) === J({ target: 350000, ritmo: 355000, prudente: 350000 }), J(smoco27.attesa));
+verifica('le due proiezioni del 2027', J(smoco27.attesa) === J({ target: 350000, ritmo: 355000 }), J(smoco27.attesa));
 verifica('il gia\' arrivato e\' dell\'anno: le secondarie di dicembre no', impianto(cavallo, 'irigom').gia_arrivato_kg === 14000 + 13000, String(impianto(cavallo, 'irigom').gia_arrivato_kg));
 verifica('il fatto e\' dell\'anno', cavallo.fatto.length === 1 && cavallo.fatto[0].settimana === '2027-01-04', J(cavallo.fatto));
 verifica('un anno senza regole scritte lo dice', cavallo.regole_definite === false && cavallo.kg_per_viaggio === 13000 && cavallo.anno === 2027);
@@ -396,14 +396,49 @@ const finito = calcola({
   stoccaggi: [{ chiave: 'nappi sud', nome: 'Nappi Sud', giacenza_kg: 400000, giacenza_da: '2025-12-31', destinazioni: [{ impianto: 'tecnogum', priorita: 1 }, { impianto: 'irigom', priorita: 2 }] }],
 });
 const tgF = impianto(finito, 'tecnogum'), irF = impianto(finito, 'irigom');
-verifica('programmazione finita prima di oggi: niente dagli stoccaggi, e non arriva al target', tgF.fine < '2026-09-23' && tgF.coperto_secondarie.prudente === 0 && tgF.mancanza_kg.prudente === tgF.residuo_kg && tgF.raggiunge.prudente === false, J([tgF.coperto_secondarie, tgF.mancanza_kg]));
-verifica('la sua parte resta a chi e\' ancora aperto', irF.coperto_secondarie.prudente === 400000, J(irF.coperto_secondarie));
+verifica('programmazione finita prima di oggi: niente dagli stoccaggi, e non arriva al target', tgF.fine < '2026-09-23' && tgF.coperto_secondarie.target === 0 && tgF.mancanza_kg.target === tgF.residuo_kg && tgF.raggiunge.target === false, J([tgF.coperto_secondarie, tgF.mancanza_kg]));
+verifica('la sua parte resta a chi e\' ancora aperto', irF.coperto_secondarie.target === 400000, J(irF.coperto_secondarie));
 const rIrF = riga(finito, 'Nappi Sud', 'Irigom');
 verifica('nel programma chi resta e\' il primo: la sua media per eccesso, senza "priorita\'"', rIrF && rIrF.viaggi > 0 && !rIrF.motivo.includes('priorità') && !riga(finito, 'Nappi Sud', 'Tecnogum'), J(rIrF));
 // La giacenza di un anno chiuso si ferma al 31/12: i movimenti dopo non contano.
 const movAnnoDopo = { primarie: [], secondarie: [sec('Nappi Sud', 'Tecnogum', 13000, '2026-06-10'), sec('Nappi Sud', 'Tecnogum', 13000, '2027-02-10')] };
 verifica('giacenza fino a un giorno: i movimenti dopo non entrano', giacenzaPiazzale({ chiaveStoccaggio: 'nappi sud', partenzaKg: 100000, partenzaDel: '2025-12-31', chiave, fino: '2026-12-31', ...movAnnoDopo }) === 87000
   && giacenzaPiazzale({ chiaveStoccaggio: 'nappi sud', partenzaKg: 100000, partenzaDel: '2025-12-31', chiave, ...movAnnoDopo }) === 74000);
+
+console.log('IL PROGRAMMA SUL TARGET (27/09/2026)');
+// Ecorecuperi porta a Tecnogum 20 t a settimana ma al suo target di 800 t
+// mancano solo 100 t: al ritmo arriverebbero 20 x 89/7 = 254 t, sul target
+// 100 x 89/102 = 87 t. Il programma segue il target residuo: a Tecnogum servono
+// piu' secondarie di quante ne direbbe il ritmo.
+const sulTarget = calcola({
+  impianti: [{ chiave: 'tecnogum', nome: 'Tecnogum', target_kg: 2000000 }],
+  raccoglitori: [{ chiave: 'ecorecuperi', nome: 'Ecorecuperi', sito: 'tecnogum', target_kg: 800000 }],
+  stoccaggi: [{ chiave: 'nappi sud', nome: 'Nappi Sud', giacenza_kg: 2000000, destinazioni: [{ impianto: 'tecnogum' }] }],
+  primarie: [prim('Ecorecuperi', 'Tecnogum', 460000, '2026-03-10'), ...ogniSettimana('Ecorecuperi', 'Tecnogum', 20000)],
+});
+const tgT = impianto(sulTarget, 'tecnogum');
+const rottaT = tgT.da_stoccaggi[0];
+const rigaT = riga(sulTarget, 'Nappi Sud', 'Tecnogum');
+verifica('sul target serve piu\' secondaria che al ritmo', tgT.fabbisogno_secondarie.target > tgT.fabbisogno_secondarie.ritmo, J(tgT.fabbisogno_secondarie));
+verifica('la media del programma e\' quella del target', rigaT && rigaT.media_settimanale === Math.round(rottaT.viaggi_settimana.target * 10) / 10 && rigaT.media_settimanale !== Math.round(rottaT.viaggi_settimana.ritmo * 10) / 10 && rigaT.viaggi === Math.ceil(rottaT.viaggi_settimana.target - 1e-9), J([rigaT, rottaT.viaggi_settimana]));
+// Un target cambiato in Target & Status cambia tutto da li': con 900 t a Ecorecuperi
+// mancano 200 t, e a Tecnogum servono meno secondarie.
+const cambiato = impianto(calcola({
+  impianti: [{ chiave: 'tecnogum', nome: 'Tecnogum', target_kg: 2000000 }],
+  raccoglitori: [{ chiave: 'ecorecuperi', nome: 'Ecorecuperi', sito: 'tecnogum', target_kg: 900000 }],
+  stoccaggi: [{ chiave: 'nappi sud', nome: 'Nappi Sud', giacenza_kg: 2000000, destinazioni: [{ impianto: 'tecnogum' }] }],
+  primarie: [prim('Ecorecuperi', 'Tecnogum', 460000, '2026-03-10'), ...ogniSettimana('Ecorecuperi', 'Tecnogum', 20000)],
+}), 'tecnogum');
+verifica('un target cambiato si riflette subito', cambiato.fabbisogno_secondarie.target === tgT.fabbisogno_secondarie.target - Math.round(100000 * QUOTA) && cambiato.gia_arrivato_kg === tgT.gia_arrivato_kg, J([cambiato.fabbisogno_secondarie, tgT.fabbisogno_secondarie]));
+
+console.log('LA GIACENZA VECCHIA DEL PIAZZALE DI UN IMPIANTO ESCE PRIMA');
+const conVecchia = (g) => impianto(calcola({
+  impianti: [{ chiave: 't-cycle', nome: 'T-Cycle', target_kg: 1000000, giacenza_iniziale_kg: g }, { chiave: 'tecnogum', nome: 'Tecnogum', target_kg: 1000000 }],
+  primarie: [prim('Smoco', 'T-Cycle', 50000, '2026-02-01', { tipo_destinazione: 'Stoc' })],
+  secondarie: [sec('T-Cycle', 'Tecnogum', 30000, '2026-03-01')],
+}), 't-cycle');
+verifica('con 30 t al 31/12 la partenza non tocca le primarie dell\'anno', conVecchia(30000).gia_arrivato_kg === 50000 && conVecchia(30000).arrivato.ripartito_da_giacenza_vecchia_kg === 30000, J(conVecchia(30000).arrivato));
+verifica('senza giacenza vecchia la partenza toglie dal gia\' arrivato', conVecchia(0).gia_arrivato_kg === 20000, String(conVecchia(0).gia_arrivato_kg));
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

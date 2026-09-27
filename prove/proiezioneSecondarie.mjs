@@ -68,25 +68,42 @@ const note = noteGiaArrivato(tc, (x) => ({ 't-cycle': 'T-Cycle', tecnogum: 'Tecn
 verifica('dice la secondaria a se stesso lasciata fuori, quella partita per Tecnogum e il piazzale al netto', note.length === 3 && note[0].includes('1 secondaria') && note[0].includes('50,00 t') && note[1].includes('Tecnogum') && note[1].includes('40,00 t') && note[1].includes('che le conta') && note[2].includes('al netto') && note[2].includes('ne restano 10,00 t') && note[2].includes('due residui'), JSON.stringify(note));
 verifica('nessuna nota se non c\'e\' niente da dire', noteGiaArrivato(tg, null, 2026).length === 0 && noteGiaArrivato(undefined).length === 0);
 
-console.log('IL PIAZZALE AL NETTO: SOLO QUELLO ENTRATO NELL\'ANNO');
-// Irigom spedisce a Gatim, che non e' un impianto seguito, il 5 gennaio (da una
-// giacenza del 2025: nel piazzale non e' ancora entrato niente), il primo marzo,
-// dopo i 15.000 kg entrati a febbraio, e il 3 aprile, lo stesso giorno di
-// un'entrata. Della prima non si toglie niente.
-const irigom = giaArrivatoDiRete(['irigom'], [
+console.log('IL PIAZZALE AL NETTO: ESCE PRIMA LA GIACENZA VECCHIA');
+// Regole dell'utente del 27/09/2026. Dal piazzale di Irigom esce prima la
+// giacenza rimasta al 31/12/2025 (qui 12.000 kg), poi, in ordine di arrivo,
+// quello che e' entrato nel 2026: solo da li' le partenze tolgono dal gia'
+// arrivato. Si tolgono solo quelle verso impianti seguiti (Tecnogum): quelle
+// verso un impianto senza target (Gatim) non sono della predittivita', ma
+// consumano il piazzale come le altre.
+//   5/1   Tecnogum 20.000: 12.000 dalla giacenza vecchia, 8.000 senza niente da cui togliere
+//   1/2   entrano 15.000
+//   10/2  Gatim 4.000: consuma 4.000 del 2026, non si toglie
+//   1/3   Tecnogum 10.000: toglie 10.000 (restano 1.000 del 2026)
+//   2/4, 3/4  entrano 5.000 e 2.000 (8.000 dentro)
+//   3/4   Tecnogum 6.000, stesso giorno di un'entrata (prima l'entrata): toglie 6.000
+const PIAZZALE_IRIGOM = [
   prim('I1', 'SMOCO', 'Irigom Srl', 'stoc', 15000, '2026-02-01T09:00:00Z'),
   prim('I2', 'SMOCO', 'Irigom Srl', 'stoc', 5000, '2026-04-02T09:00:00Z'),
   prim('I3', 'SMOCO', 'Irigom Srl', 'stoc', 2000, '2026-04-03T09:00:00Z'),
-], [
-  sec('J1', 'Irigom', 'Gatim', 20000, '2026-01-05T09:00:00Z'),
-  sec('J2', 'Irigom', 'Gatim', 10000, '2026-03-01T09:00:00Z'),
-  sec('J3', 'Irigom', 'Gatim', 6000, '2026-04-03T08:00:00Z'), // stesso giorno di I3, prima nell'ora: vale il giorno, prima l'entrata
-], 2026, k).get('irigom');
-verifica('si toglie al massimo quello che nell\'anno e\' entrato nel piazzale fino a quel giorno', irigom.piazzale_ripartito_kg === 16000 && irigom.ripartito_non_tolto_kg === 20000 && irigom.primaria_piazzale_netta_kg === 6000 && irigom.totale_kg === 6000, JSON.stringify({ rip: irigom.piazzale_ripartito_kg, non: irigom.ripartito_non_tolto_kg, netta: irigom.primaria_piazzale_netta_kg }));
-verifica('il ripartito sul mese della partenza, anche sotto zero in un mese', irigom.primaria_per_mese[1] === 15000 && irigom.primaria_per_mese[2] === -10000 && irigom.primaria_per_mese[3] === 1000 && !irigom.primaria_per_mese[0], JSON.stringify(irigom.primaria_per_mese));
-verifica('anche verso un impianto non seguito', irigom.verso_altri.gatim && irigom.verso_altri.gatim.seguito === false && irigom.verso_altri.gatim.kg === 36000 && irigom.verso_altri.gatim.viaggi === 3);
+];
+const USCITE_IRIGOM = [
+  sec('J1', 'Irigom', 'Tecnogum', 20000, '2026-01-05T09:00:00Z'),
+  sec('J4', 'Irigom', 'Gatim', 4000, '2026-02-10T09:00:00Z'),
+  sec('J2', 'Irigom', 'Tecnogum', 10000, '2026-03-01T09:00:00Z'),
+  sec('J3', 'Irigom', 'Tecnogum', 6000, '2026-04-03T08:00:00Z'), // stesso giorno di I3, prima nell'ora: vale il giorno, prima l'entrata
+];
+const conVecchia = giaArrivatoDiRete(['irigom', 'tecnogum'], PIAZZALE_IRIGOM, USCITE_IRIGOM, 2026, k, new Map([['irigom', 12000]]));
+const irigom = conVecchia.get('irigom');
+verifica('prima la giacenza vecchia, poi in ordine di arrivo', irigom.ripartito_da_giacenza_vecchia_kg === 12000 && irigom.ripartito_non_tolto_kg === 8000 && irigom.piazzale_ripartito_kg === 16000 && irigom.primaria_piazzale_netta_kg === 6000 && irigom.totale_kg === 6000, JSON.stringify({ vecchia: irigom.ripartito_da_giacenza_vecchia_kg, non: irigom.ripartito_non_tolto_kg, rip: irigom.piazzale_ripartito_kg, netta: irigom.primaria_piazzale_netta_kg }));
+verifica('il ripartito sul mese della partenza', irigom.primaria_per_mese[1] === 15000 && irigom.primaria_per_mese[2] === -10000 && irigom.primaria_per_mese[3] === 1000 && !irigom.primaria_per_mese[0], JSON.stringify(irigom.primaria_per_mese));
+verifica('verso un impianto senza target: si vede, ma non si toglie', irigom.verso_altri.gatim && irigom.verso_altri.gatim.seguito === false && irigom.verso_altri.gatim.kg === 4000 && irigom.verso_altri.tecnogum.seguito === true && irigom.verso_altri.tecnogum.kg === 36000);
+verifica('Tecnogum le conta tutte fra le sue secondarie', conVecchia.get('tecnogum').secondaria_kg === 36000);
+const senzaVecchia = giaArrivatoDiRete(['irigom', 'tecnogum'], PIAZZALE_IRIGOM, USCITE_IRIGOM, 2026, k).get('irigom');
+verifica('senza giacenza al 31/12 la prima partenza non trova niente da togliere', senzaVecchia.ripartito_da_giacenza_vecchia_kg === 0 && senzaVecchia.ripartito_non_tolto_kg === 20000 && senzaVecchia.piazzale_ripartito_kg === 16000, JSON.stringify(senzaVecchia));
+const soloGatim = giaArrivatoDiRete(['irigom'], PIAZZALE_IRIGOM, [sec('G1', 'Irigom', 'Gatim', 15000, '2026-03-01T09:00:00Z')], 2026, k).get('irigom');
+verifica('solo verso impianti senza target: il gia\' arrivato resta intero', soloGatim.piazzale_ripartito_kg === 0 && soloGatim.ripartito_non_tolto_kg === 0 && soloGatim.totale_kg === 22000, JSON.stringify(soloGatim));
 const noteIrigom = noteGiaArrivato(irigom, null, 2026);
-verifica('le note: niente "che le conta" per un impianto non seguito, e quello che non si toglie', noteIrigom.length === 3 && !noteIrigom[0].includes('che le conta') && !noteIrigom[1].includes('due residui') && noteIrigom[2].includes('20,00 t') && noteIrigom[2].includes('non si tolgono'), JSON.stringify(noteIrigom));
+verifica('le note: le uscite verso Gatim non si tolgono, la giacenza vecchia esce prima, quello che non si toglie', noteIrigom.some(n => n.includes('gatim') && n.includes('non ha un target')) && noteIrigom.some(n => n.includes('12,00 t') && n.includes('31/12/2025')) && noteIrigom.some(n => n.includes('8,00 t') && n.includes('non si tolgono')), JSON.stringify(noteIrigom));
 
 // I siti della predittivita' li decide il motore (predittivita.ts): qui quelli di prova.
 const siti = { tutti: new Set(['t-cycle', 'tecnogum', 'ecorecuperi', 'nappi sud', 'piazzale storico']) };

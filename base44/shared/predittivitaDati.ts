@@ -188,6 +188,14 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
     s.giacenza_da = del;
     s.giacenza_kg = giacenzaPiazzale({ chiaveStoccaggio: s.chiave, partenzaKg: kgReteDiRilevazione(ancora), partenzaDel: del, primarie: primarieRete, secondarie: secondarieRete, chiave, fino: oggi });
   }
+  // La giacenza al 31/12 dell'anno prima nel piazzale di un impianto seguito:
+  // le partenze dal piazzale escono prima da li' (utente, 27/09/2026), e solo
+  // dopo tolgono le primarie dell'anno dal gia' arrivato. Conta solo la
+  // chiusura dell'anno: una prima lettura a meta' anno non e' giacenza vecchia.
+  for (const i of impianti) {
+    const ancora = ancoraDellAnno(perSitoLetture.get(i.chiave) || [], annoN);
+    i.giacenza_iniziale_kg = ancora && momentoRilevazione(ancora) === `${annoN - 1}-12-31` ? Math.max(0, kgReteDiRilevazione(ancora)) : 0;
+  }
 
   return {
     ingresso: {

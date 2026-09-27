@@ -100,6 +100,7 @@ const ARCHIVI = {
     { id: 'g2', sito: 'Nappi Sud', data_rilevazione: '2026-09-01', class1_kg: 77777 },    // un riscontro, non il punto di partenza
     { id: 'g3', sito: 'T-Cycle', data_rilevazione: '2026-02-01', class1_kg: 20000 },       // la prima lettura dell'anno
     { id: 'g4', sito: 'Deposito Nord', data_rilevazione: '2025-06-30', class1_kg: 5000 },  // di un anno fa: non e' un'ancora
+    { id: 'g5', sito: 'Irigom Srl', data_rilevazione: '2025-12-31', class1_kg: 8000 },     // il piazzale di un impianto seguito al 31/12
   ],
   PianificazioneSettimanale: [
     { id: 'w1', anno: 2026, data_inizio: '2026-09-21', fornitore_nome: 'Nappi Sud', impianto_nome: 'Tecnogum Srl', viaggi_previsti: 4, origine: 'programma' },
@@ -132,6 +133,7 @@ console.log('LA CONFIGURAZIONE DELL\'ANNO');
 verifica('un record senza anno vale per il 2026', annoDelRecord({}) === 2026 && annoDelRecord({ anno: 2025 }) === 2025 && annoDelRecord({ anno: '2027' }) === 2027 && annoDelRecord(null) === 2026);
 const imp = (k) => dati.ingresso.impianti.find(i => i.chiave === k);
 verifica('gli impianti seguiti del 2026: con e senza anno, non quelli del 2025 ne\' i sospesi', dati.ingresso.impianti.map(i => i.chiave).join() === 'tecnogum,irigom,t-cycle', J(dati.ingresso.impianti));
+verifica('la giacenza al 31/12 del piazzale di un impianto (esce per prima); una prima lettura a meta\' anno non lo e\'', imp('irigom').giacenza_iniziale_kg === 8000 && imp('t-cycle').giacenza_iniziale_kg === 0 && imp('tecnogum').giacenza_iniziale_kg === 0, J(dati.ingresso.impianti));
 verifica('target e fine di ciascuno', imp('tecnogum').target_kg === 2295000 && imp('tecnogum').fine === '2026-12-18' && imp('t-cycle').fine === '2026-11-30' && imp('irigom').target_kg === 4445000, J(dati.ingresso.impianti));
 const fineAltroAnno = dati.avvisi.find(a => a.tipo === 'fine_di_un_altro_anno');
 verifica('una fine della programmazione di un altro anno non vale, e si dice', imp('irigom').fine === '2026-12-18' && fineAltroAnno && fineAltroAnno.impianto === 'Irigom Srl' && fineAltroAnno.testo.includes('18/12/2025') && fineAltroAnno.testo.includes('si usa il 18/12/2026'), J(fineAltroAnno));

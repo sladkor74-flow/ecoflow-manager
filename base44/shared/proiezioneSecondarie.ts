@@ -49,10 +49,19 @@ const tonnellate = (kg) => formatoTonnellate((Number(kg) || 0) / 1000);
 // abbassavano due residui, e quello di T-Cycle usciva piu' piccolo del vero: il
 // suo target di 1.050.000 kg e' la quota dell'impianto, mentre il plafond di
 // 250.000 kg del piazzale (migraTCycleImpianto) e' proprio quello che si spedisce
-// agli altri. Si toglie sul giorno della fine trasporto della secondaria, e al
-// massimo quanto nell'anno e' entrato nel piazzale fino a quel giorno: una
-// partenza da una giacenza di prima non era nel gia' arrivato dell'anno e non si
-// toglie (lo dice una nota).
+// agli altri. Si toglie sul giorno della fine trasporto della secondaria.
+//
+// Le uscite dal piazzale seguono l'ordine di arrivo (utente, 27/09/2026): esce
+// prima la giacenza vecchia, quella rimasta al 31/12 dell'anno prima, e poi, in
+// ordine cronologico, quello che e' entrato dopo. Una partenza che prende dalla
+// giacenza vecchia non era nel gia' arrivato dell'anno e non si toglie; solo
+// quando la giacenza vecchia e' finita le partenze cominciano a togliere le
+// primarie dell'anno.
+//
+// Si tolgono solo le partenze verso gli impianti seguiti, quelli con un target
+// (utente, 27/09/2026): le secondarie verso impianti senza target non sono
+// oggetto della predittivita' e stanno nel modulo Secondarie. Consumano pero'
+// il piazzale come tutte le altre, nell'ordine di arrivo.
 //
 // Solo rete, solo terminati, e l'anno e' quello della fine trasporto sul giorno
 // italiano (periodoMovimento): mai la chiusura a portale. Un terminato senza
@@ -72,14 +81,18 @@ const piu = (mappa, k, kg) => { mappa[k] = (mappa[k] || 0) + kg; };
  * @param {array} secondarie  le secondarie; idem
  * @param {number} anno       l'anno della fine trasporto
  * @param {function} chiave   la normalizzazione della ragione sociale (normalizzaRagioneSociale)
+ * @param {Map} [giacenzeIniziali]  chiave dell'impianto -> kg di rete nel suo
+ *                            piazzale al 31/12 dell'anno prima (esce per prima)
  * @returns {Map} chiave dell'impianto -> {
  *   primaria_kg            primarie contate: all'impianto + piazzale al netto
  *   primaria_impianto_kg   scaricate all'impianto
  *   primaria_piazzale_kg   scaricate nel piazzale, tutte
  *   piazzale_ripartito_kg  di quelle, ripartite per altri impianti e tolte
  *   primaria_piazzale_netta_kg  primaria_piazzale_kg - piazzale_ripartito_kg
- *   ripartito_non_tolto_kg partenze dal piazzale che non trovavano primarie
- *                          dell'anno da cui togliersi (giacenza di prima)
+ *   ripartito_da_giacenza_vecchia_kg  partenze verso impianti seguiti uscite
+ *                          dalla giacenza al 31/12 dell'anno prima: non si tolgono
+ *   ripartito_non_tolto_kg partenze verso impianti seguiti che non trovavano ne'
+ *                          giacenza vecchia ne' primarie dell'anno da cui togliersi
  *   secondaria_kg, totale_kg (il gia' arrivato), arrivato_al_sito_kg (tutto
  *   quello che e' arrivato al sito, ripartito compreso: per la capacita')
  *   primaria_per_mese, secondaria_per_mese   (indice del mese 0-11 -> kg; la
@@ -93,7 +106,7 @@ const piu = (mappa, k, kg) => { mappa[k] = (mappa[k] || 0) + kg; };
  *                un impianto della predittivita', che le conta nel suo gia' arrivato
  * }
  */
-export function giaArrivatoDiRete(impianti, primarie, secondarie, anno, chiave) {
+export function giaArrivatoDiRete(impianti, primarie, secondarie, anno, chiave, giacenzeIniziali = null) {
   const out = new Map();
   // entrate e uscite del piazzale di ciascun impianto, per il netto
   const piazzale = new Map();
@@ -102,7 +115,7 @@ export function giaArrivatoDiRete(impianti, primarie, secondarie, anno, chiave) 
     out.set(k, {
       chiave: k,
       primaria_kg: 0, primaria_impianto_kg: 0, primaria_piazzale_kg: 0,
-      piazzale_ripartito_kg: 0, primaria_piazzale_netta_kg: 0, ripartito_non_tolto_kg: 0,
+      piazzale_ripartito_kg: 0, primaria_piazzale_netta_kg: 0, ripartito_da_giacenza_vecchia_kg: 0, ripartito_non_tolto_kg: 0,
       secondaria_kg: 0, totale_kg: 0, arrivato_al_sito_kg: 0,
       primaria_per_mese: {}, secondaria_per_mese: {},
       movimenti: [],
@@ -138,14 +151,14 @@ export function giaArrivatoDiRete(impianti, primarie, secondarie, anno, chiave) 
     const dest = chiave(r.destinazione);
     const orig = chiave(r.stoccaggio);
     const kg = pesoDi(r);
-    // partita dal piazzale di un impianto seguito verso un altro impianto,
-    // seguito o no: non resta a lui (vedi sopra, il piazzale al netto)
+    // partita dal piazzale di un impianto seguito verso un altro impianto: consuma
+    // il piazzale; si toglie solo se l'altro e' seguito (vedi sopra)
     const partenza = orig && dest && orig !== dest ? out.get(orig) : null;
     if (partenza) {
       if (!partenza.verso_altri[dest]) partenza.verso_altri[dest] = { viaggi: 0, kg: 0, seguito: out.has(dest) };
       partenza.verso_altri[dest].viaggi++;
       partenza.verso_altri[dest].kg += kg;
-      piazzale.get(orig).push({ giorno: p.giorno, esce: kg, mese_idx: p.mese_idx, dest, record: r });
+      piazzale.get(orig).push({ giorno: p.giorno, esce: kg, mese_idx: p.mese_idx, dest, seguito: out.has(dest), record: r });
     }
     const x = out.get(dest);
     if (!x) continue;
@@ -157,15 +170,20 @@ export function giaArrivatoDiRete(impianti, primarie, secondarie, anno, chiave) 
 
   for (const x of out.values()) {
     // Il netto del piazzale, in ordine di giorno: nello stesso giorno prima le
-    // entrate. Ogni partenza toglie al massimo quello che nell'anno e' entrato
-    // nel piazzale e non e' ancora ripartito.
+    // entrate. Ogni partenza esce prima dalla giacenza vecchia, poi da quello
+    // che nell'anno e' entrato nel piazzale e non e' ancora ripartito.
     const eventi = piazzale.get(x.chiave).sort((a, b) => (a.giorno < b.giorno ? -1 : a.giorno > b.giorno ? 1 : (a.esce ? 1 : 0) - (b.esce ? 1 : 0)));
+    let vecchia = Math.max(0, Number(giacenzeIniziali && giacenzeIniziali.get(x.chiave)) || 0);
     let dentro = 0;
     for (const e of eventi) {
       if (!e.esce) { dentro += e.entra; continue; }
-      const tolto = Math.min(e.esce, dentro);
+      const daVecchia = Math.min(e.esce, vecchia);
+      vecchia -= daVecchia;
+      const tolto = Math.min(e.esce - daVecchia, dentro);
       dentro -= tolto;
-      x.ripartito_non_tolto_kg += e.esce - tolto;
+      if (!e.seguito) continue;
+      x.ripartito_da_giacenza_vecchia_kg += daVecchia;
+      x.ripartito_non_tolto_kg += e.esce - daVecchia - tolto;
       if (tolto <= 0) continue;
       x.piazzale_ripartito_kg += tolto;
       piu(x.primaria_per_mese, e.mese_idx, -tolto);
@@ -174,6 +192,7 @@ export function giaArrivatoDiRete(impianti, primarie, secondarie, anno, chiave) 
     x.primaria_impianto_kg = Math.round(x.primaria_impianto_kg);
     x.primaria_piazzale_kg = Math.round(x.primaria_piazzale_kg);
     x.piazzale_ripartito_kg = Math.round(x.piazzale_ripartito_kg);
+    x.ripartito_da_giacenza_vecchia_kg = Math.round(x.ripartito_da_giacenza_vecchia_kg);
     x.ripartito_non_tolto_kg = Math.round(x.ripartito_non_tolto_kg);
     x.primaria_piazzale_netta_kg = x.primaria_piazzale_kg - x.piazzale_ripartito_kg;
     x.primaria_kg = x.primaria_impianto_kg + x.primaria_piazzale_netta_kg;
@@ -210,14 +229,17 @@ export function noteGiaArrivato(x, nomeDi, anno) {
   }
   const uscite = Object.entries(x.verso_altri || {});
   for (const [dest, v] of uscite) {
-    note.push(`Dal piazzale di ${nome(x.chiave)} sono partite nel ${anno} ${tonnellate(v.kg)} t di secondarie di rete per ${nome(dest)} (${v.viaggi} ${v.viaggi === 1 ? 'viaggio' : 'viaggi'})${v.seguito ? ', che le conta nel suo già arrivato' : ''}.`);
+    note.push(`Dal piazzale di ${nome(x.chiave)} sono partite nel ${anno} ${tonnellate(v.kg)} t di secondarie di rete per ${nome(dest)} (${v.viaggi} ${v.viaggi === 1 ? 'viaggio' : 'viaggi'})${v.seguito ? ', che le conta nel suo già arrivato' : `: ${nome(dest)} non ha un target, quindi non sono oggetto della predittività e non si tolgono dal già arrivato (si vedono nel modulo Secondarie)`}.`);
+  }
+  if (x.ripartito_da_giacenza_vecchia_kg) {
+    note.push(`Delle secondarie partite dal piazzale di ${nome(x.chiave)} verso impianti seguiti, ${tonnellate(x.ripartito_da_giacenza_vecchia_kg)} t sono uscite dalla giacenza rimasta al 31/12/${Number(anno) - 1}: esce prima la giacenza vecchia, e quella non era nel già arrivato del ${anno}, quindi non si toglie.`);
   }
   if (x.piazzale_ripartito_kg) {
     const altroSeguito = uscite.some(([, v]) => v.seguito);
-    note.push(`Il piazzale conta per ${nome(x.chiave)} al netto di quello che riparte per altri impianti: delle ${tonnellate(x.primaria_piazzale_kg)} t di primarie di rete scaricate nel piazzale se ne tolgono ${tonnellate(x.piazzale_ripartito_kg)} t, e nel già arrivato ne restano ${tonnellate(x.primaria_piazzale_netta_kg)} t. Quello che riparte non lo tratta ${nome(x.chiave)}${altroSeguito ? ', e l\'impianto seguito che lo riceve lo conta già: tenuto anche qui, gli stessi PFU abbasserebbero due residui' : ''}.`);
+    note.push(`Il piazzale conta per ${nome(x.chiave)} al netto di quello che riparte per altri impianti seguiti, una volta finita la giacenza vecchia: delle ${tonnellate(x.primaria_piazzale_kg)} t di primarie di rete scaricate nel piazzale se ne tolgono ${tonnellate(x.piazzale_ripartito_kg)} t, e nel già arrivato ne restano ${tonnellate(x.primaria_piazzale_netta_kg)} t. Quello che riparte non lo tratta ${nome(x.chiave)}${altroSeguito ? ', e l\'impianto seguito che lo riceve lo conta già: tenuto anche qui, gli stessi PFU abbasserebbero due residui' : ''}.`);
   }
   if (x.ripartito_non_tolto_kg) {
-    note.push(`${tonnellate(x.ripartito_non_tolto_kg)} t partite dal piazzale di ${nome(x.chiave)} non si tolgono dal già arrivato: nel ${anno}, fino al giorno della partenza, nel piazzale non erano entrate abbastanza primarie di rete da cui toglierle. Vengono da una giacenza di prima, oppure le primarie arrivate non sono segnate come scaricate nel piazzale: in quel caso va corretto il formulario.`);
+    note.push(`${tonnellate(x.ripartito_non_tolto_kg)} t partite dal piazzale di ${nome(x.chiave)} non si tolgono dal già arrivato: nel ${anno}, fino al giorno della partenza, nel piazzale non c'erano né giacenza al 31/12/${Number(anno) - 1} né primarie di rete dell'anno da cui toglierle. Manca la giacenza al 31/12 del piazzale, oppure le primarie arrivate non sono segnate come scaricate nel piazzale: in quel caso va corretto il formulario.`);
   }
   return note;
 }

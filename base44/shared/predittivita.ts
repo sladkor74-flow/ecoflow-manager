@@ -16,10 +16,13 @@
 // 2. Quanto arrivera' ancora in primaria fino alla fine della programmazione,
 //    raccoglitore per raccoglitore, in due modi affiancati (utente,
 //    26/09/2026): sul TARGET residuo del raccoglitore e sul RITMO reale delle
-//    ultime settimane. Il PRUDENTE prende, flusso per flusso, il piu' basso dei
-//    due (il ritmo, per un flusso che un target non ce l'ha): e' quello su cui si
-//    programma, cosi' un raccoglitore che rallenta non lascia l'impianto sotto
-//    target.
+//    ultime settimane (un flusso senza target vale il ritmo in tutte e due). Si
+//    programma sul TARGET (utente, 27/09/2026): la proiezione si basa su quanto
+//    resta da raccogliere a ciascun raccoglitore, e la ripartizione su quanto ci
+//    sara' davvero negli stoccaggi. I target si possono cambiare durante l'anno
+//    in Target & Status: il conto riparte ogni volta dai numeri di adesso e da
+//    tutto quello che e' gia' stato fatto. Il ritmo resta accanto, per vedere se
+//    i raccoglitori ci stanno arrivando.
 // 3. Quello che manca, tolta la primaria attesa, deve arrivare in secondaria.
 // 4. Ogni stoccaggio ha a disposizione la giacenza di adesso (ancora +
 //    movimenti) piu' quello che ci entrera', nei limiti del suo plafond, e lo
@@ -39,7 +42,9 @@ import { giornoRoma } from "./giornoItaliano.ts";
 import { giaArrivatoDiRete, residuoDiRete } from "./proiezioneSecondarie.ts";
 import { formatoKgInTonnellate } from "./formato.ts";
 
-export const SCENARI = ['target', 'ritmo', 'prudente'];
+export const SCENARI = ['target', 'ritmo'];
+/** Lo scenario su cui si fa il programma: il target residuo dei raccoglitori. */
+export const SCENARIO_PROGRAMMA = 'target';
 
 // --- giorni ---
 const aUtc = (g) => Date.UTC(+g.slice(0, 4), +g.slice(5, 7) - 1, +g.slice(8, 10));
@@ -162,7 +167,7 @@ export function calcolaPredittivita(d) {
     impianti.push({ ...i, fine: String(i.fine || '').slice(0, 10) || fineDefault });
   }
   const chiaviImpianti = new Set(impianti.map(i => i.chiave));
-  const arrivati = giaArrivatoDiRete(impianti.map(i => i.chiave), primarie, secondarie, annoN, chiave);
+  const arrivati = giaArrivatoDiRete(impianti.map(i => i.chiave), primarie, secondarie, annoN, chiave, new Map(impianti.map(i => [i.chiave, Number(i.giacenza_iniziale_kg) || 0])));
 
   // --- i flussi di primaria: raccoglitore -> sito ---
   // Al sito di un impianto conta tutto (anche il suo piazzale, come nel gia'
@@ -206,11 +211,9 @@ export function calcolaPredittivita(d) {
     const r = ritmo * o.settimane;
     // Un flusso senza target (Emmesse su Irigom nel 2026, dopo l'incendio di
     // Gatim) porta materiale lo stesso: in tutte e due le proiezioni vale il
-    // ritmo reale. Cosi' la prudente, il piu' basso dei due flusso per flusso,
-    // non e' mai piu' alta della proiezione sul target.
+    // ritmo reale.
     const target = f.target_kg === null ? r : Math.max(0, f.target_kg - f.consuntivo_kg) * quotaDelTarget(fine);
-    const prudente = Math.min(target, r);
-    return { target: kgInt(target), ritmo: kgInt(r), prudente: kgInt(prudente), ritmo_settimanale_kg: kgInt(ritmo), con_target: f.target_kg !== null };
+    return { target: kgInt(target), ritmo: kgInt(r), ritmo_settimanale_kg: kgInt(ritmo), con_target: f.target_kg !== null };
   };
 
   // --- gli stoccaggi: disponibile fino alla fine ---
@@ -239,7 +242,7 @@ export function calcolaPredittivita(d) {
     const entrate = perScenario(sc => entrateFlussi.reduce((t, f) => t + f.attesa[sc], 0));
     // Un impianto che e' anche piazzale (T-Cycle) non ha target di raccolta
     // scritti sul piazzale: le sue entrate si stimano sul ritmo.
-    if (eImpianto) { entrate.target = entrate.ritmo; entrate.prudente = entrate.ritmo; }
+    if (eImpianto) entrate.target = entrate.ritmo;
     const partitiVersoAltri = secondarie
       .filter(r => chiave(r.stoccaggio) === s.chiave && chiave(r.destinazione) !== s.chiave && nellAnno(giornoFine(r)))
       .reduce((t, r) => t + peso(r), 0);
@@ -255,7 +258,7 @@ export function calcolaPredittivita(d) {
     stoccaggi.push({
       chiave: s.chiave, nome: s.nome, e_impianto: eImpianto, fine: fineS,
       giacenza_kg: giacenza, giacenza_da: s.giacenza_da || null,
-      entrate_attese: entrate, entrate_flussi: entrateFlussi.map(f => ({ raccoglitore: f.nome, target_kg: f.target_kg, consuntivo_kg: kgInt(f.consuntivo_kg), ritmo_settimanale_kg: f.attesa.ritmo_settimanale_kg, attesa: { target: f.attesa.target, ritmo: f.attesa.ritmo, prudente: f.attesa.prudente } })),
+      entrate_attese: entrate, entrate_flussi: entrateFlussi.map(f => ({ raccoglitore: f.nome, target_kg: f.target_kg, consuntivo_kg: kgInt(f.consuntivo_kg), ritmo_settimanale_kg: f.attesa.ritmo_settimanale_kg, attesa: { target: f.attesa.target, ritmo: f.attesa.ritmo } })),
       plafond_kg: plafond, partiti_verso_altri_kg: kgInt(partitiVersoAltri), residuo_plafond_kg: residuoPlafond,
       disponibile, destinazioni: dest,
     });
@@ -271,7 +274,7 @@ export function calcolaPredittivita(d) {
     perImpianto.set(i.chiave, {
       chiave: i.chiave, nome: i.nome, target_kg: kgInt(i.target_kg), fine: i.fine, orizzonte: orizzonte(i.fine),
       arrivato: arr, gia_arrivato_kg: arr ? arr.totale_kg : 0, residuo_kg: residuo,
-      primarie: fl.map(f => ({ raccoglitore: f.nome, target_kg: f.target_kg, consuntivo_kg: kgInt(f.consuntivo_kg), ritmo_settimanale_kg: f.attesa.ritmo_settimanale_kg, attesa: { target: f.attesa.target, ritmo: f.attesa.ritmo, prudente: f.attesa.prudente } }))
+      primarie: fl.map(f => ({ raccoglitore: f.nome, target_kg: f.target_kg, consuntivo_kg: kgInt(f.consuntivo_kg), ritmo_settimanale_kg: f.attesa.ritmo_settimanale_kg, attesa: { target: f.attesa.target, ritmo: f.attesa.ritmo } }))
         .sort((a, b) => b.consuntivo_kg - a.consuntivo_kg),
       primaria_attesa: attesa,
       fabbisogno_secondarie: perScenario(sc => Math.max(0, residuo - attesa[sc])),
@@ -344,7 +347,7 @@ export function calcolaPredittivita(d) {
     imp.senza_stoccaggi = imp.da_stoccaggi.length === 0;
   }
 
-  // --- il programma della prossima settimana (scenario prudente) ---
+  // --- il programma della prossima settimana (scenario del target) ---
   // Come lo fa chi programma (utente, 26/09/2026): ogni settimana lo stoccaggio
   // serve tutti gli impianti. Si guarda quanti viaggi potra' fare la prossima
   // settimana - la giacenza di adesso, piu' quello che entrera' al ritmo reale,
@@ -362,8 +365,8 @@ export function calcolaPredittivita(d) {
       const imp = perImpianto.get(x.impianto);
       if (!imp || imp.fine < prossimaSettimana.dal) continue;
       const rotta = imp.da_stoccaggi.find(r => r.stoccaggio === s.chiave);
-      const media = rotta ? rotta.viaggi_settimana.prudente : 0;
-      const spettanti = rotta ? rotta.viaggi_totali.prudente : 0;
+      const media = rotta ? rotta.viaggi_settimana[SCENARIO_PROGRAMMA] : 0;
+      const spettanti = rotta ? rotta.viaggi_totali[SCENARIO_PROGRAMMA] : 0;
       // media: quella vera, per i conti; media_settimanale: a un decimale, da mostrare
       righe.push({ stoccaggio: s.nome, impianto: imp.nome, chiave_impianto: imp.chiave, priorita: x.priorita, media, media_settimanale: Math.round(media * 10) / 10, spettanti, viaggi: 0 });
     }
@@ -449,7 +452,7 @@ function motivoRiga(r, imp, primoGruppo, kgv, s, conScelta) {
   const stoccaggio = s.nome;
   if (imp.target_superato) return `${imp.nome} ha già raggiunto il target.`;
   const media = String(r.media_settimanale).replace('.', ',');
-  const manca = imp.mancanza_kg.prudente >= kgv / 2;
+  const manca = imp.mancanza_kg[SCENARIO_PROGRAMMA] >= kgv / 2;
   const parti = [];
   if (r.priorita === primoGruppo) {
     if (r.media <= 1e-9) {
@@ -466,6 +469,6 @@ function motivoRiga(r, imp, primoGruppo, kgv, s, conScelta) {
     parti.push(`I viaggi che ${stoccaggio} può fare in più dopo gli impianti con la priorità: da qui alla fine della programmazione gliene spettano circa ${Math.floor(r.spettanti)}`);
   }
   if (r.limitato) parti.push("limitati dal materiale che il piazzale avrà in settimana");
-  if (manca) parti.push(`a ${imp.nome} mancheranno comunque circa ${formatoKgInTonnellate(imp.mancanza_kg.prudente)} t`);
+  if (manca) parti.push(`a ${imp.nome} mancheranno comunque circa ${formatoKgInTonnellate(imp.mancanza_kg[SCENARIO_PROGRAMMA])} t`);
   return parti.join('; ') + '.';
 }
