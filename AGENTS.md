@@ -295,8 +295,12 @@ che l'utente ha dato, da non riderivare:
 - **Si programma sul target** (utente, 27/09/2026; la terza proiezione, il piu' basso
   dei due flusso per flusso, non c'e' piu'): la proiezione usa quello che resta
   del target di raccolta di ogni raccoglitore che porta agli impianti, e la
-  divisione fra gli impianti si fa su quello che ci sara' davvero negli stoccaggi
-  (`SCENARI = ['target', 'ritmo']`, `SCENARIO_PROGRAMMA = 'target'`). Accanto
+  divisione fra gli impianti si fa su quello che ci sara' davvero negli stoccaggi:
+  le entrate di uno stoccaggio sono sempre quelle al ritmo reale, in tutti e due
+  i conti (`entrate_se_rispettano_il_target_kg` e' solo un'informazione; con il
+  target dei suoi raccoglitori Nappi Sud risultava avere 713 t invece di 441, e a
+  Irigom si promettevano 24 viaggi) (`SCENARI = ['target', 'ritmo']`,
+  `SCENARIO_PROGRAMMA = 'target'`). Accanto
   resta il **ritmo** reale delle ultime 12 settimane (anche a cavallo d'anno), per
   vedere se i raccoglitori ci stanno arrivando. Un flusso senza target (Emmesse
   su Irigom) vale il ritmo in tutte e due. I target si cambiano durante l'anno in

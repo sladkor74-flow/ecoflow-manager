@@ -188,5 +188,10 @@ const rifiutaNull = new Proxy({}, { get: (_t, nome) => {
 const senzaFineNonLetti = await leggiDatiPredittivita({ asServiceRole: { entities: rifiutaNull } }, { anno: 2026, oggi: '2026-09-23' });
 verifica('se i senza fine trasporto non si leggono si sa, e il resto va avanti', senzaFineNonLetti.senza_fine === null && senzaFineNonLetti.ingresso.primarie.length === 7, J(senzaFineNonLetti.senza_fine));
 
+const minuscolo = { ...ARCHIVI, ImpiantoTargetSecondaria: ARCHIVI.ImpiantoTargetSecondaria.map(i => (i.id === 'iTg' ? { ...i, nome_impianto: 'tecnogum' } : i)) };
+const conMinuscolo = await leggiDatiPredittivita(sdkFinto(minuscolo).base44, { anno: 2026, oggi: '2026-09-23' });
+const tgMinuscolo = conMinuscolo.ingresso.impianti.find(i => i.chiave === 'tecnogum');
+verifica('un nome scritto in minuscolo si mostra come nei formulari', tgMinuscolo && tgMinuscolo.nome !== 'tecnogum' && tgMinuscolo.nome.toLowerCase().includes('tecnogum'), J(tgMinuscolo));
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

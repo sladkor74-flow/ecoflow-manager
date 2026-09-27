@@ -65,7 +65,7 @@ function Stoccaggio({ s, impianti }) {
           </thead>
           <tbody>
             <tr className="border-t">
-              <td className="px-3 py-2">Entrerà nel piazzale</td>
+              <td className="px-3 py-2">Entrerà nel piazzale, al ritmo reale</td>
               {SCENARI.map(x => <td key={x.chiave} className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${colonna(x.chiave)}`}>{ton((s.entrate_attese || {})[x.chiave])}</td>)}
             </tr>
             <tr className="border-t">
@@ -90,8 +90,9 @@ function Stoccaggio({ s, impianti }) {
       </div>
       <p className="text-xs text-muted-foreground">
         Si può spedire: quello che c&apos;è adesso più quello che entrerà{s.residuo_plafond_kg !== null && s.residuo_plafond_kg !== undefined ? ', entro quello che resta del plafond' : ''}.
-        {' '}Il programma si fa sulla colonna del target: quello che resta da raccogliere a ogni raccoglitore; chi non ha un target vale il suo ritmo.
-        {s.e_impianto && ' Per un impianto che è anche piazzale le entrate si stimano sul ritmo reale.'}
+        {' '}Il materiale si ripartisce su quello che entrerà davvero, al ritmo reale delle ultime settimane, in tutti e due i conti; le colonne cambiano per quello che serve agli impianti.
+        {!s.e_impianto && s.entrate_se_rispettano_il_target_kg !== undefined && Math.abs(s.entrate_se_rispettano_il_target_kg - ((s.entrate_attese || {}).ritmo || 0)) >= 1000
+          && ` Se chi scarica qui portasse tutto il suo target entrerebbero ${ton(s.entrate_se_rispettano_il_target_kg)}: non si conta, finché non arriva davvero.`}
       </p>
 
       {flussi.length > 0 && (
@@ -105,7 +106,7 @@ function Stoccaggio({ s, impianti }) {
                   <th className="text-right px-3 py-2 font-semibold">Target dell&apos;anno</th>
                   <th className="text-right px-3 py-2 font-semibold">Già portato</th>
                   <th className="text-right px-3 py-2 font-semibold">Ritmo a settimana</th>
-                  <th className="text-right px-3 py-2 font-semibold bg-primary/10">Porterà sul target</th>
+                  <th className="text-right px-3 py-2 font-semibold">Porterebbe col target</th>
                   <th className="text-right px-3 py-2 font-semibold">Porterà sul ritmo</th>
                 </tr>
               </thead>
@@ -116,7 +117,7 @@ function Stoccaggio({ s, impianti }) {
                     <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{f.target_kg === null || f.target_kg === undefined ? <span className="text-muted-foreground">nessuno</span> : ton(f.target_kg)}</td>
                     <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{ton(f.consuntivo_kg)}</td>
                     <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{ton(f.ritmo_settimanale_kg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap bg-primary/5 font-medium">{f.target_kg === null || f.target_kg === undefined ? <span className="font-normal text-muted-foreground" title="Senza target vale il ritmo">{ton(f.attesa.target)}</span> : ton(f.attesa.target)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{f.target_kg === null || f.target_kg === undefined ? <span className="font-normal text-muted-foreground" title="Senza target vale il ritmo">{ton(f.attesa.target)}</span> : ton(f.attesa.target)}</td>
                     <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{ton(f.attesa.ritmo)}</td>
                   </tr>
                 ))}
