@@ -106,6 +106,13 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
     }
     impianti.push({ chiave: k, nome: i.nome_impianto, target_kg: Number(i.target) || 0, fine: fineImp || fine.data, id: i.id });
   }
+  // Un nome scritto tutto in minuscolo nella configurazione ("tecnogum") si
+  // mostra come lo scrive il portale nei formulari ("TECNOGUM SRL").
+  for (const i of impianti) {
+    if (!i.nome || i.nome !== i.nome.toLowerCase()) continue;
+    const r = secondarieRete.find(x => chiave(x.destinazione) === i.chiave) || primarieRete.find(x => chiave(x.destinazione) === i.chiave);
+    if (r && r.destinazione) i.nome = String(r.destinazione).trim();
+  }
   // Seguiti sono solo gli impianti con un target: gli altri il motore li lascia
   // fuori (non contrattualizzati quest'anno), e non devono attirare stoccaggi,
   // parti di target dei raccoglitori o avvisi sull'ancora.

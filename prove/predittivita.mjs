@@ -431,6 +431,19 @@ const cambiato = impianto(calcola({
 }), 'tecnogum');
 verifica('un target cambiato si riflette subito', cambiato.fabbisogno_secondarie.target === tgT.fabbisogno_secondarie.target - Math.round(100000 * QUOTA) && cambiato.gia_arrivato_kg === tgT.gia_arrivato_kg, J([cambiato.fabbisogno_secondarie, tgT.fabbisogno_secondarie]));
 
+console.log('LO STOCCAGGIO RIPARTISCE QUELLO CHE CI SARA\' DAVVERO');
+// Chi scarica a Nappi Sud ha un target di 1.000 t e ne ha portate 300: sul target
+// entrerebbero 700 x 89/102 t, al ritmo (5 t a settimana) 5 x 89/7 = 64 t. Il
+// materiale da ripartire e' quello del ritmo, in tutti e due i conti.
+const reale = stoccaggio(calcola({
+  impianti: [{ chiave: 'tecnogum', nome: 'Tecnogum', target_kg: 2000000 }],
+  raccoglitori: [{ chiave: 'grossista', nome: 'Grossista', sito: 'nappi sud', target_kg: 1000000 }],
+  stoccaggi: [{ chiave: 'nappi sud', nome: 'Nappi Sud', giacenza_kg: 10000, destinazioni: [{ impianto: 'tecnogum' }] }],
+  primarie: [prim('Grossista', 'Nappi Sud', 240000, '2026-03-10', { tipo_destinazione: 'Stoc' }), ...ogniSettimana('Grossista', 'Nappi Sud', 5000, { tipo_destinazione: 'Stoc' })],
+}), 'nappi sud');
+verifica('entrate al ritmo in tutti e due i conti', reale.entrate_attese.target === reale.entrate_attese.ritmo && reale.entrate_attese.ritmo === Math.round(5000 * SETTIMANE) && reale.disponibile.target === reale.disponibile.ritmo, J(reale.entrate_attese));
+verifica('quanto entrerebbe col target resta come informazione', reale.entrate_se_rispettano_il_target_kg === Math.round(700000 * QUOTA), String(reale.entrate_se_rispettano_il_target_kg));
+
 console.log('LA GIACENZA VECCHIA DEL PIAZZALE DI UN IMPIANTO ESCE PRIMA');
 const conVecchia = (g) => impianto(calcola({
   impianti: [{ chiave: 't-cycle', nome: 'T-Cycle', target_kg: 1000000, giacenza_iniziale_kg: g }, { chiave: 'tecnogum', nome: 'Tecnogum', target_kg: 1000000 }],

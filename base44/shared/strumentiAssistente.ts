@@ -657,7 +657,8 @@ export const STRUMENTI = [
       const stoccaggi = (d.stoccaggi || []).map(s => ({
         stoccaggio: s.nome,
         giacenza_t: s.giacenza_kg == null ? null : t3(s.giacenza_kg), giacenza_calcolata_dal: it(s.giacenza_da),
-        entrate_attese_t: due(s.entrate_attese),
+        entrate_al_ritmo_reale_t: t3((s.entrate_attese || {}).ritmo || 0),
+        entrate_se_i_raccoglitori_rispettassero_il_target_t: s.entrate_se_rispettano_il_target_kg == null ? null : t3(s.entrate_se_rispettano_il_target_kg),
         plafond_t: s.plafond_kg == null ? null : t3(s.plafond_kg), residuo_plafond_t: s.residuo_plafond_kg == null ? null : t3(s.residuo_plafond_kg),
         disponibile_t: due(s.disponibile),
         a_chi_va: aChiVa(gruppiDi(s)),

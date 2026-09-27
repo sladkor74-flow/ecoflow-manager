@@ -239,10 +239,15 @@ export function calcolaPredittivita(d) {
     const fineS = impianti.filter(i => destinazioni.has(i.chiave)).map(i => i.fine).reduce((a, b) => (b > a ? b : a), '') || fineDefault;
     const eImpianto = chiaviImpianti.has(s.chiave);
     const entrateFlussi = [...flussi.values()].filter(f => f.sito === s.chiave && f.livello === 'piazzale').map(f => ({ ...f, attesa: attesaFlusso(f, fineS) }));
-    const entrate = perScenario(sc => entrateFlussi.reduce((t, f) => t + f.attesa[sc], 0));
-    // Un impianto che e' anche piazzale (T-Cycle) non ha target di raccolta
-    // scritti sul piazzale: le sue entrate si stimano sul ritmo.
-    if (eImpianto) entrate.target = entrate.ritmo;
+    // Il materiale di uno stoccaggio si ripartisce su "quanto effettivamente ci
+    // sara'" (utente, 27/09/2026): le entrate del piazzale sono sempre quelle al
+    // ritmo reale, in tutti e due i conti. Quanto entrerebbe se i suoi
+    // raccoglitori portassero tutto il loro target resta come informazione: con
+    // quel numero Nappi Sud risultava avere 713 t invece delle 441 del ritmo, e a
+    // Irigom si promettevano 24 viaggi quando la settimana ne permette 3.
+    const alRitmo = entrateFlussi.reduce((t, f) => t + f.attesa.ritmo, 0);
+    const entrate = perScenario(() => alRitmo);
+    const entrateSeTarget = eImpianto ? alRitmo : entrateFlussi.reduce((t, f) => t + f.attesa.target, 0);
     const partitiVersoAltri = secondarie
       .filter(r => chiave(r.stoccaggio) === s.chiave && chiave(r.destinazione) !== s.chiave && nellAnno(giornoFine(r)))
       .reduce((t, r) => t + peso(r), 0);
@@ -258,7 +263,7 @@ export function calcolaPredittivita(d) {
     stoccaggi.push({
       chiave: s.chiave, nome: s.nome, e_impianto: eImpianto, fine: fineS,
       giacenza_kg: giacenza, giacenza_da: s.giacenza_da || null,
-      entrate_attese: entrate, entrate_flussi: entrateFlussi.map(f => ({ raccoglitore: f.nome, target_kg: f.target_kg, consuntivo_kg: kgInt(f.consuntivo_kg), ritmo_settimanale_kg: f.attesa.ritmo_settimanale_kg, attesa: { target: f.attesa.target, ritmo: f.attesa.ritmo } })),
+      entrate_attese: entrate, entrate_se_rispettano_il_target_kg: kgInt(entrateSeTarget), entrate_flussi: entrateFlussi.map(f => ({ raccoglitore: f.nome, target_kg: f.target_kg, consuntivo_kg: kgInt(f.consuntivo_kg), ritmo_settimanale_kg: f.attesa.ritmo_settimanale_kg, attesa: { target: f.attesa.target, ritmo: f.attesa.ritmo } })),
       plafond_kg: plafond, partiti_verso_altri_kg: kgInt(partitiVersoAltri), residuo_plafond_kg: residuoPlafond,
       disponibile, destinazioni: dest,
     });
