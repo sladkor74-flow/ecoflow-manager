@@ -325,6 +325,15 @@ che l'utente ha dato, da non riderivare:
   programmato non si sovrascrive mai con il fatto: accanto si vede se si e' in
   anticipo o in ritardo. Le righe senza `origine` sono del piano di prima e non si
   leggono piu'.
+- **La simulazione** (utente, 27/09/2026: "permettere a me una simulazione se
+  io variassi quanto dice la predittivita'", per accontentare il piu' possibile
+  tutti e due gli impianti): scheda Simulazione, conto in
+  `base44/shared/simulazioneViaggi.ts` (specchio in `src/lib`). Chi programma
+  prova i viaggi a settimana di ogni percorso fino alla fine della
+  programmazione e vede, accanto alla proposta, se e quando ogni impianto
+  arriva al target e quanto manca; se chiede a uno stoccaggio piu' del suo
+  materiale, i viaggi possibili si dividono in proporzione e si dice. Non scrive
+  niente: il programma resta quello della scheda Programma.
 - **Niente email**: il modulo ha il pulsante "Esporta la situazione", la
   fotografia a ogni aggiornamento. La pagina dice sempre fin dove arrivano i dati
   caricati.
