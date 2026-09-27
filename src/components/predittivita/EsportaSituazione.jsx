@@ -3,15 +3,16 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, FileDown } from 'lucide-react';
 import { oggiRoma } from '@/lib/giornoItaliano';
-import { ton, it, itBreve, viaggiDec, SCENARI, senzaProiezioni, esitoFinale, avvisiDaMostrare, programmiNonLetti, testoErrore } from './Comuni';
+import { ton, it, itBreve, viaggiDec, SCENARI, SCENARIO_PROGRAMMA, senzaProiezioni, esitoFinale, avvisiDaMostrare, programmiNonLetti, testoErrore } from './Comuni';
 import { viaggiDellaRiga, programmaVuoto } from './ProgrammaSettimana';
 import { perSettimana, esitoSettimana, statoSettimana, settimanaParziale } from './SchedaSettimane';
 import { ordineDestinazioni } from './SchedaStoccaggi';
 
 // "Esporta la situazione": la fotografia della predittivita' a ogni
 // aggiornamento, al posto dell'email (utente, 26/09/2026). Un PDF con
-// intestazione, programma della settimana prossima, impianti (le due proiezioni
-// e la prudente), stoccaggi, ultime sei settimane programmato/fatto e avvisi.
+// intestazione, programma della settimana prossima, impianti (le due proiezioni:
+// sul target, su cui si programma, e sul ritmo), stoccaggi, ultime sei settimane
+// programmato/fatto e avvisi.
 // I pesi vanno in tonnellate (kg / 1000): il PDF le scrive con 2 decimali, 3 se
 // i kg non sono tondi, come tutto il gestionale. Dice le stesse cose della
 // pagina, con le stesse funzioni: gli avvisi (avvisiDaMostrare), l'esito di un
@@ -42,7 +43,7 @@ export function situazionePdf(risposta, oggi = oggiRoma()) {
     programma.push({ stile: 'totale', celle: ['Totale', null, totale, t(totale * kgv), null, null] });
   }
 
-  // --- gli impianti: le due proiezioni e la prudente; com'e' finita se non ce ne sono piu' ---
+  // --- gli impianti: le due proiezioni (si programma sul target); com'e' finita se non ce ne sono piu' ---
   const impianti = [];
   const tuttiFiniti = (risposta.impianti || []).length > 0 && risposta.impianti.every(i => senzaProiezioni(i, risposta));
   for (const i of risposta.impianti || []) {
@@ -58,7 +59,7 @@ export function situazionePdf(risposta, oggi = oggiRoma()) {
         .map(d => `${d.nome} ${ton(d.kg[s.chiave])}: ${viaggiDec((d.viaggi_totali || {})[s.chiave])} viaggi, ${viaggiDec((d.viaggi_settimana || {})[s.chiave])} a settimana`)
         .join('; ');
       const esito = i.raggiunge[s.chiave] ? 'Sì' : `No, mancano ${ton(i.mancanza_kg[s.chiave])}`;
-      impianti.push({ celle: [null, null, null, null, s.chiave === 'prudente' ? 'Prudente (si programma su questa)' : s.nome, t(i.primaria_attesa[s.chiave]), t(i.fabbisogno_secondarie[s.chiave]), da || '—', esito] });
+      impianti.push({ celle: [null, null, null, null, s.chiave === SCENARIO_PROGRAMMA ? `${s.nome} (si programma su questa)` : s.nome, t(i.primaria_attesa[s.chiave]), t(i.fabbisogno_secondarie[s.chiave]), da || '—', esito] });
     }
   }
 
@@ -68,11 +69,11 @@ export function situazionePdf(risposta, oggi = oggiRoma()) {
       s.nome,
       t(s.giacenza_kg),
       s.giacenza_da ? it(s.giacenza_da) : 'manca',
-      t((s.entrate_attese || {}).target), t((s.entrate_attese || {}).ritmo), t((s.entrate_attese || {}).prudente),
+      t((s.entrate_attese || {}).target), t((s.entrate_attese || {}).ritmo),
       t(s.residuo_plafond_kg),
-      t((s.disponibile || {}).prudente),
+      t((s.disponibile || {})[SCENARIO_PROGRAMMA]),
       ordineDestinazioni(s.destinazioni),
-      t((s.non_assegnato || {}).prudente),
+      t((s.non_assegnato || {})[SCENARIO_PROGRAMMA]),
     ],
   }));
 
@@ -122,7 +123,7 @@ export function situazionePdf(risposta, oggi = oggiRoma()) {
       {
         titolo: tuttiFiniti
           ? (risposta.sola_lettura ? `Impianti: com'è finito il ${anno} (tonnellate)` : `Impianti: la programmazione del ${anno} è finita (tonnellate)`)
-          : 'Impianti: le due proiezioni e la prudente, fino alla fine della programmazione (tonnellate)',
+          : 'Impianti: sul target dei raccoglitori (si programma su questa) e sul ritmo reale, fino alla fine della programmazione (tonnellate)',
         colonne: [
           { titolo: 'Impianto', tipo: 'testo', peso: 1.1 },
           { titolo: 'Target', tipo: 't', peso: 0.8 },
@@ -144,11 +145,10 @@ export function situazionePdf(risposta, oggi = oggiRoma()) {
           { titolo: 'Dall\'ancora del', tipo: 'testo', peso: 0.8 },
           { titolo: 'Entrerà, sul target', tipo: 't', peso: 0.9 },
           { titolo: 'Entrerà, sul ritmo', tipo: 't', peso: 0.9 },
-          { titolo: 'Entrerà, prudente', tipo: 't', peso: 0.9 },
           { titolo: 'Resta del plafond', tipo: 't', peso: 0.9 },
-          { titolo: 'Si può spedire, prudente', tipo: 't', peso: 0.9 },
+          { titolo: 'Si può spedire, sul target', tipo: 't', peso: 0.9 },
           { titolo: 'A chi va', tipo: 'testo', peso: 1.6 },
-          { titolo: 'Non assegnato, prudente', tipo: 't', peso: 0.9 },
+          { titolo: 'Non assegnato, sul target', tipo: 't', peso: 0.9 },
         ],
         righe: stoccaggi,
       },

@@ -562,7 +562,7 @@ export const STRUMENTI = [
   },
   {
     nome: 'proiezione_secondarie',
-    descrizione: 'La predittivita\' delle secondarie dell\'anno in corso, la stessa del modulo: per ogni impianto seguito target, gia\' arrivato, quanto manca e se lo raggiunge con le due proiezioni affiancate (se i raccoglitori rispettano il target, al ritmo delle ultime settimane) e con la prudente, su cui si programma; gli stoccaggi con giacenza, plafond e ordine di priorita\'; i viaggi da programmare la settimana dopo, stoccaggio per impianto; il programmato contro il fatto delle ultime settimane; fin dove arrivano i dati caricati. Solo rete: ACI ed extra raccolta non entrano nella predittivita\'.',
+    descrizione: 'La predittivita\' delle secondarie dell\'anno in corso, la stessa del modulo: per ogni impianto seguito target, gia\' arrivato, quanto manca e se lo raggiunge con le due proiezioni affiancate: se i raccoglitori rispettano il target (quello che resta da raccogliere a ciascuno), su cui si programma, e al ritmo delle ultime settimane, per vedere se ci stanno arrivando; gli stoccaggi con giacenza, plafond e ordine di priorita\'; i viaggi da programmare la settimana dopo, stoccaggio per impianto; il programmato contro il fatto delle ultime settimane; fin dove arrivano i dati caricati. Solo rete: ACI ed extra raccolta non entrano nella predittivita\'.',
     parametri: { anno: "solo se l'utente chiede esplicitamente un anno gia' chiuso (si vede in sola lettura); altrimenti l'anno in corso" },
     moduli: ['Predittivita Secondarie'],
     async esegui(base44, p) {
@@ -577,7 +577,9 @@ export const STRUMENTI = [
       const d = (res && res.data) || res || {};
       if (d.error) throw new Error(d.error);
       const it = (g) => (g ? `${String(g).slice(8, 10)}/${String(g).slice(5, 7)}/${String(g).slice(0, 4)}` : '');
-      const tre = (o, f = t3) => (o ? { se_rispettano_il_target: f(o.target), al_ritmo_attuale: f(o.ritmo), prudente: f(o.prudente) } : null);
+      // Le due proiezioni affiancate: sul target si programma (27/09/2026), il
+      // ritmo resta accanto per vedere se i raccoglitori tengono il passo.
+      const due = (o, f = t3) => (o ? { se_rispettano_il_target: f(o.target), al_ritmo_attuale: f(o.ritmo) } : null);
       const uno = (v) => Math.round((Number(v) || 0) * 10) / 10;
       const nomeImpianto = new Map((d.impianti || []).map(i => [i.chiave, i.nome]));
       // La priorita' degli impianti di uno stoccaggio, a gruppi come nella pagina
@@ -618,23 +620,23 @@ export const STRUMENTI = [
         target_superato: !!i.target_superato,
         fine_programmazione: it(i.fine),
         note_gia_arrivato: i.note || [],
-        primaria_attesa_t: tre(i.primaria_attesa),
-        da_portare_in_secondaria_t: tre(i.fabbisogno_secondarie),
-        coperto_dagli_stoccaggi_t: tre(i.coperto_secondarie),
-        mancheranno_t: tre(i.mancanza_kg),
-        raggiunge_il_target: tre(i.raggiunge, (v) => !!v),
+        primaria_attesa_t: due(i.primaria_attesa),
+        da_portare_in_secondaria_t: due(i.fabbisogno_secondarie),
+        coperto_dagli_stoccaggi_t: due(i.coperto_secondarie),
+        mancheranno_t: due(i.mancanza_kg),
+        raggiunge_il_target: due(i.raggiunge, (v) => !!v),
         ...(i.senza_stoccaggi ? { nessuno_stoccaggio_lo_alimenta: true } : {}),
         // Programmazione finita: dagli stoccaggi non si assegna piu' niente, e
         // quello che manca resta mancante.
         ...(i.residuo_kg > 0 && ((i.orizzonte && Number(i.orizzonte.giorni) === 0) || (d.oggi && i.fine && i.fine < d.oggi)) ? { programmazione_finita: true } : {}),
         dagli_stoccaggi: (i.da_stoccaggi || []).map(x => ({
           stoccaggio: x.nome, come_lo_serve: comeLoServe(x.stoccaggio, i.nome),
-          viaggi_a_settimana_prudente: uno(x.viaggi_settimana && x.viaggi_settimana.prudente),
-          viaggi_fino_alla_fine_prudente: uno(x.viaggi_totali && x.viaggi_totali.prudente),
+          viaggi_a_settimana_sul_target: uno(x.viaggi_settimana && x.viaggi_settimana.target),
+          viaggi_fino_alla_fine_sul_target: uno(x.viaggi_totali && x.viaggi_totali.target),
         })),
         raccoglitori: (i.primarie || []).map(x => ({
           raccoglitore: x.raccoglitore, target_t: x.target_kg == null ? null : t3(x.target_kg),
-          arrivato_t: t3(x.consuntivo_kg), ritmo_a_settimana_t: t3(x.ritmo_settimanale_kg), atteso_ancora_t: tre(x.attesa),
+          arrivato_t: t3(x.consuntivo_kg), ritmo_a_settimana_t: t3(x.ritmo_settimanale_kg), atteso_ancora_t: due(x.attesa),
         })),
       }));
       // I viaggi della settimana dopo contano come nel modulo (ProgrammaSettimana):
@@ -655,9 +657,9 @@ export const STRUMENTI = [
       const stoccaggi = (d.stoccaggi || []).map(s => ({
         stoccaggio: s.nome,
         giacenza_t: s.giacenza_kg == null ? null : t3(s.giacenza_kg), giacenza_calcolata_dal: it(s.giacenza_da),
-        entrate_attese_t: tre(s.entrate_attese),
+        entrate_attese_t: due(s.entrate_attese),
         plafond_t: s.plafond_kg == null ? null : t3(s.plafond_kg), residuo_plafond_t: s.residuo_plafond_kg == null ? null : t3(s.residuo_plafond_kg),
-        disponibile_t: tre(s.disponibile),
+        disponibile_t: due(s.disponibile),
         a_chi_va: aChiVa(gruppiDi(s)),
         gruppi_di_priorita: gruppiDi(s),
         viaggi_prossima_settimana: viaggiStoccaggio(s),
@@ -739,7 +741,7 @@ export const STRUMENTI = [
           stoccaggi,
           programma_settimana_dopo: { dal: it(prossima.dal), al: it(prossima.al), stato_del_programma: statoProgramma(), righe: programma },
           programmato_e_fatto: elenco(settimane, 60),
-          nota: "Sono gli stessi numeri del modulo Predittivita Secondarie. Solo rete. Le proiezioni sono due affiancate - se i raccoglitori rispettano il loro target, e al ritmo reale delle ultime settimane - e la prudente prende raccoglitore per raccoglitore il piu' basso dei due: si programma su quella. La priorita' di uno stoccaggio non vuol dire servire un impianto e poi l'altro: ogni settimana li serve tutti, a chi ha la priorita' i viaggi che gli servono per il target, agli altri quello che avanza; impianti con la stessa priorita' (o senza) sono serviti insieme, in proporzione a quello che manca a ciascuno, e non c'e' un primo. Un impianto con la programmazione finita non riceve piu' niente dagli stoccaggi nei conti: quello che manca resta mancante. Un viaggio fatto e' un camion in un giorno sullo stesso percorso, anche con piu' formulari. Nel programma della settimana dopo i viaggi di ogni riga e di ogni stoccaggio sono quelli del modulo: il numero fissato (il mercoledi', o corretto a mano) dove c'e', altrimenti quello calcolato oggi; se il calcolo di oggi dice un numero diverso da quello fissato e' solo un'informazione. Lo stato del programma dice se e' gia' fissato e, se no, quando si fissa o se lo deve fissare a mano l'amministratore: riportalo cosi' com'e', senza promettere un mercoledi' gia' passato. Il programmato di una settimana passata non cambia: lo scarto dice se si e' in anticipo (positivo) o in ritardo (negativo). La settimana in corso non ha ancora uno scarto: il fatto puo' crescere.",
+          nota: "Sono gli stessi numeri del modulo Predittivita Secondarie. Solo rete. Le proiezioni sono due affiancate: se i raccoglitori rispettano il loro target, cioe' quello che resta da raccogliere a ciascuno, e al ritmo reale delle ultime settimane. Si programma sul target; il ritmo serve a vedere se i raccoglitori ci stanno arrivando. Un raccoglitore senza target vale il suo ritmo in tutte e due. I target si possono cambiare durante l'anno in Target & Status: i conti si rifanno con i numeri di adesso e con quello che e' gia' stato fatto. La priorita' di uno stoccaggio non vuol dire servire un impianto e poi l'altro: ogni settimana li serve tutti, a chi ha la priorita' i viaggi che gli servono per il target, agli altri quello che avanza; impianti con la stessa priorita' (o senza) sono serviti insieme, in proporzione a quello che manca a ciascuno, e non c'e' un primo. Un impianto con la programmazione finita non riceve piu' niente dagli stoccaggi nei conti: quello che manca resta mancante. Un viaggio fatto e' un camion in un giorno sullo stesso percorso, anche con piu' formulari. Nel programma della settimana dopo i viaggi di ogni riga e di ogni stoccaggio sono quelli del modulo: il numero fissato (il mercoledi', o corretto a mano) dove c'e', altrimenti quello calcolato oggi; se il calcolo di oggi dice un numero diverso da quello fissato e' solo un'informazione. Lo stato del programma dice se e' gia' fissato e, se no, quando si fissa o se lo deve fissare a mano l'amministratore: riportalo cosi' com'e', senza promettere un mercoledi' gia' passato. Il programmato di una settimana passata non cambia: lo scarto dice se si e' in anticipo (positivo) o in ritardo (negativo). La settimana in corso non ha ancora uno scarto: il fatto puo' crescere.",
         },
       };
     },

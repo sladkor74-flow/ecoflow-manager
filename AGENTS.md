@@ -258,7 +258,9 @@ stoccaggi. Le primarie del piazzale contano perche' "il residuo totale diminuisc
 anche con le primarie" (utente); le secondarie dal proprio piazzale a se stesso
 non si contano, sarebbero contate due volte. Il piazzale conta al netto di quello
 che riparte verso altri impianti seguiti (scelta confermata dall'utente il
-25/09/2026).
+25/09/2026), in ordine di arrivo (27/09/2026): esce prima la giacenza del
+piazzale al 31/12 dell'anno prima, che non si toglie perche' non era nel gia'
+arrivato dell'anno, e solo dopo le primarie dell'anno, in ordine cronologico.
 
 ### La predittivita' delle secondarie: un anno, un motore (26/09/2026)
 
@@ -290,10 +292,24 @@ che l'utente ha dato, da non riderivare:
   dell'anno concentrata in una settimana). Un impianto a fine programmazione non
   riceve piu' niente; il tetto e' il materiale del piazzale (giacenza + entrate al
   ritmo), al netto del plafond gia' usato.
-- **Due proiezioni affiancate**: sul target residuo dei raccoglitori e sul ritmo
-  reale delle ultime 12 settimane (anche a cavallo d'anno). Si programma sulla
-  **prudente**: flusso per flusso il piu' basso dei due; un flusso senza target
-  (Emmesse su Irigom) vale il ritmo.
+- **Si programma sul target** (utente, 27/09/2026; la terza proiezione, il piu' basso
+  dei due flusso per flusso, non c'e' piu'): la proiezione usa quello che resta
+  del target di raccolta di ogni raccoglitore che porta agli impianti, e la
+  divisione fra gli impianti si fa su quello che ci sara' davvero negli stoccaggi
+  (`SCENARI = ['target', 'ritmo']`, `SCENARIO_PROGRAMMA = 'target'`). Accanto
+  resta il **ritmo** reale delle ultime 12 settimane (anche a cavallo d'anno), per
+  vedere se i raccoglitori ci stanno arrivando. Un flusso senza target (Emmesse
+  su Irigom) vale il ritmo in tutte e due. I target si cambiano durante l'anno in
+  Target & Status e tutto si rifa' dai numeri di adesso e da quello che e' gia'
+  stato fatto.
+- **Il gia' arrivato e il piazzale** (27/09/2026): dal piazzale di un impianto
+  esce per prima la giacenza vecchia, quella al 31/12 dell'anno prima, poi in
+  ordine cronologico quello arrivato dopo (FIFO): finche' esce la giacenza
+  vecchia non si toglie niente dal gia' arrivato. Le partenze verso impianti
+  **senza target** non si tolgono: non sono oggetto della predittivita' e stanno
+  nel modulo Secondarie (consumano pero' il piazzale nell'ordine di arrivo).
+  Quelle ACI, come Irigom verso Gatim, restano fuori comunque, perche' conta
+  solo la rete.
 - **13 t a viaggio** nel 2026 (piu' formulari divisi per classe fanno lo stesso
   viaggio). Un viaggio **fatto** e' un camion in un giorno sullo stesso percorso
   (`chiaveViaggio`).

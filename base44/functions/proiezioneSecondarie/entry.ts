@@ -11,8 +11,8 @@ import { predittivitaDellAnno, annoInCorso } from "../../shared/predittivitaRisp
 // Prima la proiezione divideva il residuo per mesi interi e la Dashboard
 // ripartiva il plafond degli stoccaggi: per lo stesso impianto uscivano 97 viaggi
 // da una parte e 54 dall'altra. Ora le proiezioni sono due affiancate - sul
-// target dei raccoglitori e sul ritmo reale - con la prudente su cui si
-// programma, e sono le stesse ovunque.
+// target residuo dei raccoglitori, su cui si programma (27/09/2026), e sul
+// ritmo reale - e sono le stesse ovunque.
 //
 // Corpo: { anno? }  l'anno in corso se manca; un anno chiuso si guarda com'era
 // al 31 dicembre, in sola lettura. Non scrive niente.

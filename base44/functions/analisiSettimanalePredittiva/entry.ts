@@ -17,7 +17,7 @@ import { predittivitaDellAnno, fissaProgramma, annoInCorso, programmatiPerPercor
 //
 // I numeri sono quelli del motore unico (base44/shared/predittivita.ts), gli
 // stessi della pagina e degli assistenti: il programma sono le righe di
-// risposta.programma, scenario prudente.
+// risposta.programma, sullo scenario del target (SCENARIO_PROGRAMMA).
 //
 // Prima questa funzione scriveva il lunedi' un "suggerimento" fra gli Alert del
 // modulo secondarie, con un conto suo. Il programma adesso sta nella pagina:

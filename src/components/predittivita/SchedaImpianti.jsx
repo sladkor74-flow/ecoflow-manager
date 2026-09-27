@@ -1,19 +1,19 @@
 import React from 'react';
 import { Factory, Info, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
-import { ton, it, viaggiDec, SCENARI, senzaProiezioni, esitoFinale, Barra, Cifra, Vuoto } from './Comuni';
+import { ton, it, viaggiDec, SCENARI, SCENARIO_PROGRAMMA, senzaProiezioni, esitoFinale, Barra, Cifra, Vuoto } from './Comuni';
 
 // Gli impianti seguiti: quanto manca al target, e quanto ci arrivera' ancora in
-// due modi affiancati - sul target che resta ai raccoglitori e sul ritmo reale
-// delle ultime settimane - con la prudente, flusso per flusso la piu' bassa, che
-// e' quella su cui si programma (utente, 26/09/2026). In un anno chiuso, o
+// due modi affiancati - sul target che resta ai raccoglitori, su cui si
+// programma, e sul ritmo reale delle ultime settimane, per vedere se i
+// raccoglitori tengono il passo (utente, 27/09/2026). In un anno chiuso, o
 // quando la programmazione di un impianto e' finita, non si proietta piu'
 // niente: si dice com'e' finita.
 
 const settimane = (n) => formatNumber(Number(n) || 0, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 function Proiezioni({ i }) {
-  const colonna = (sc) => (sc === 'prudente' ? 'bg-primary/10 border-x-2 border-primary/40' : '');
+  const colonna = (sc) => (sc === SCENARIO_PROGRAMMA ? 'bg-primary/10 border-x-2 border-primary/40' : '');
   return (
     <div className="border rounded-lg overflow-x-auto">
       <table className="w-full text-sm">
@@ -56,7 +56,7 @@ function Proiezioni({ i }) {
           ))}
           {i.senza_stoccaggi && (
             <tr className="border-t">
-              <td className="px-3 py-2 text-muted-foreground" colSpan={4}>
+              <td className="px-3 py-2 text-muted-foreground" colSpan={SCENARI.length + 1}>
                 Nessuno stoccaggio alimenta {i.nome}: quello che manca può arrivare solo in primaria.
               </td>
             </tr>
@@ -111,9 +111,8 @@ function Raccoglitori({ i, finito }) {
               {!finito && (
                 <>
                   <th className="text-right px-3 py-2 font-semibold">Ritmo a settimana</th>
-                  <th className="text-right px-3 py-2 font-semibold">Porterà sul target</th>
+                  <th className="text-right px-3 py-2 font-semibold bg-primary/10">Porterà sul target</th>
                   <th className="text-right px-3 py-2 font-semibold">Porterà sul ritmo</th>
-                  <th className="text-right px-3 py-2 font-semibold bg-primary/10">Prudente</th>
                 </>
               )}
             </tr>
@@ -127,9 +126,8 @@ function Raccoglitori({ i, finito }) {
                 {!finito && (
                   <>
                     <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{ton(r.ritmo_settimanale_kg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{r.target_kg === null || r.target_kg === undefined ? '—' : ton(r.attesa.target)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap bg-primary/5 font-medium">{r.target_kg === null || r.target_kg === undefined ? <span className="font-normal text-muted-foreground" title="Senza target vale il ritmo">{ton(r.attesa.target)}</span> : ton(r.attesa.target)}</td>
                     <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{ton(r.attesa.ritmo)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap bg-primary/5 font-medium">{ton(r.attesa.prudente)}</td>
                   </>
                 )}
               </tr>
@@ -162,7 +160,7 @@ function Impianto({ i, risposta }) {
       {c && (
         <p className="text-xs text-muted-foreground">
           Già arrivato: primarie all&apos;impianto {ton(c.primaria_impianto_kg)}
-          {(c.primaria_piazzale_netta_kg > 0 || c.piazzale_ripartito_kg > 0) && <> · nel suo piazzale {ton(c.primaria_piazzale_netta_kg)}{c.piazzale_ripartito_kg > 0 && <> (tolte {ton(c.piazzale_ripartito_kg)} ripartite per altri impianti)</>}</>}
+          {(c.primaria_piazzale_netta_kg > 0 || c.piazzale_ripartito_kg > 0) && <> · nel suo piazzale {ton(c.primaria_piazzale_netta_kg)}{c.piazzale_ripartito_kg > 0 && <> (tolte {ton(c.piazzale_ripartito_kg)} ripartite per altri impianti seguiti)</>}</>}
           {' '}· secondarie da altri stoccaggi {ton(c.secondaria_kg)}.
         </p>
       )}
@@ -196,9 +194,10 @@ export default function SchedaImpianti({ risposta }) {
         </p>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Quanto arriverà ancora in primaria si stima in due modi: sul target che resta ai raccoglitori e sul ritmo reale
-          {f.settimane ? ` delle ultime ${f.settimane} settimane` : ''}{f.dal ? ` (dal ${it(f.dal)} al ${it(f.al)})` : ''}.
-          La prudente prende, raccoglitore per raccoglitore, la più bassa delle due (senza target vale il ritmo): il programma si fa su quella.
+          Quanto arriverà ancora in primaria si stima in due modi: sul target che resta da raccogliere a ciascun raccoglitore,
+          e sul ritmo reale{f.settimane ? ` delle ultime ${f.settimane} settimane` : ''}{f.dal ? ` (dal ${it(f.dal)} al ${it(f.al)})` : ''}.
+          Il programma si fa sul target; il ritmo serve a vedere se i raccoglitori tengono il passo. Chi non ha un target vale il suo ritmo in tutte e due.
+          Se cambi un target in Target &amp; Status, i conti si rifanno con i numeri nuovi e con quello che è già stato fatto.
         </p>
       )}
       {impianti.map(i => <Impianto key={i.chiave} i={i} risposta={risposta} />)}

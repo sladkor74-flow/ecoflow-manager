@@ -20,11 +20,15 @@ export const viaggiDec = (v) => formatNumber(Number(v) || 0, { minimumFractionDi
 /** 'N viaggio/viaggi'. */
 export const viaggi = (n) => `${formatKg(n)} ${Number(n) === 1 ? 'viaggio' : 'viaggi'}`;
 
-/** I tre modi di guardare quanto arrivera' ancora, con i nomi per chi legge. */
+/**
+ * I due modi di guardare quanto arrivera' ancora, con i nomi per chi legge. Si
+ * programma sul target (utente, 27/09/2026): il ritmo resta accanto per vedere
+ * se i raccoglitori tengono il passo.
+ */
+export const SCENARIO_PROGRAMMA = 'target';
 export const SCENARI = [
-  { chiave: 'target', nome: 'Sul target dei raccoglitori' },
+  { chiave: 'target', nome: 'Sul target dei raccoglitori', nota: 'quella usata per programmare' },
   { chiave: 'ritmo', nome: 'Sul ritmo reale' },
-  { chiave: 'prudente', nome: 'Prudente', nota: 'quella usata per programmare' },
 ];
 
 /** 'Tecnogum', 'Tecnogum e Irigom', 'A, B e C'. */
