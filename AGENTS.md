@@ -259,6 +259,53 @@ non si contano, sarebbero contate due volte. Il piazzale conta al netto di quell
 che riparte verso altri impianti seguiti (scelta confermata dall'utente il
 25/09/2026).
 
+### La predittivita' delle secondarie: un anno, un motore (26/09/2026)
+
+Rifondata dopo un'analisi che aveva trovato tre conti diversi per "quanti viaggi
+servono" (Dashboard, Proiezione e suggerimento del lunedi' davano 97 e 54 viaggi
+per lo stesso impianto). Ora c'e' **un motore solo**, `base44/shared/predittivita.ts`,
+che legge da `predittivitaDati.ts` e risponde con `predittivitaRisposta.ts`; le
+funzioni (`calcolaPianificazioneSecondaria`, `proiezioneSecondarie`,
+`analisiSettimanalePredittiva`) e gli assistenti passano tutti di li'. Le regole
+che l'utente ha dato, da non riderivare:
+
+- **Un anno alla volta.** Parte dall'ancora delle giacenze al 31/12 dell'anno
+  prima, guarda solo i movimenti dell'anno, sola rete, per fine trasporto. Al 31/12
+  l'anno si chiude: il 1 gennaio il modulo mostra l'anno nuovo, con le logiche del
+  nuovo contratto; gli anni chiusi si riaprono in sola lettura. La configurazione
+  e' per anno (`ImpiantoTargetSecondaria.anno`, `FornitoreSecondaria.anno`: senza
+  anno vale il 2026). Le regole che non sono input stanno in
+  `base44/shared/regolePredittivita.ts` (un anno nuovo si aggiunge col contratto).
+- **Tecnogum e Irigom (2026).** Tecnogum 2.295 t: primarie di Ecorecuperi (800 t),
+  250 t da T-Cycle, il resto da Nappi Sud. Irigom 4.445 t: primarie di Smoco e
+  Pneuservice (nel 2026 anche Emmesse, dopo l'incendio di Gatim di giugno), il
+  resto da Nappi Sud. Nappi Sud non basta per tutti e due.
+- **La priorita'** degli impianti di uno stoccaggio (`FornitoreSecondaria.priorita`,
+  o le regole dell'anno; 2026: Nappi Sud prima Tecnogum, poi Irigom) **non** vuol
+  dire servirne uno e poi l'altro: ogni settimana lo stoccaggio li serve tutti, al
+  primo va il numero di viaggi che gli fa raggiungere il target entro la fine della
+  programmazione (18/12/2026), agli altri quello che avanza, fino alla loro parte.
+- **Due proiezioni affiancate**: sul target residuo dei raccoglitori e sul ritmo
+  reale delle ultime 12 settimane (anche a cavallo d'anno). Si programma sulla
+  **prudente**: flusso per flusso il piu' basso dei due; un flusso senza target
+  (Emmesse su Irigom) vale il ritmo.
+- **13 t a viaggio** nel 2026 (piu' formulari divisi per classe fanno lo stesso
+  viaggio). Un viaggio **fatto** e' un camion in un giorno sullo stesso percorso
+  (`chiaveViaggio`).
+- **Il programma della settimana dopo** si fissa il **mercoledi' alle 8**
+  (`analisiSettimanalePredittiva`, `PianificazioneSettimanale` con `origine`
+  'programma'): il lunedi' si registrano i formulari della settimana prima, e
+  l'utente guarda il martedi'/mercoledi'. L'amministratore lo corregge a mano
+  (`origine` 'manuale', che il mercoledi' non tocca). Il programmato non si
+  sovrascrive mai con il fatto: accanto si vede se si e' in anticipo o in ritardo.
+  Le righe senza `origine` sono del piano di prima e non si leggono piu'.
+- **Niente email**: il modulo ha il pulsante "Esporta la situazione", la
+  fotografia a ogni aggiornamento. La pagina dice sempre fin dove arrivano i dati
+  caricati.
+- **Si legge solo quello che serve**: la finestra dell'anno e del ritmo con
+  `$gte` sulla fine trasporto, piu' i terminati senza fine trasporto; mai gli
+  archivi interi, che conservano ormai gli anni passati.
+
 ### La fatturazione attiva verso Ecotyre
 
 Le righe si calcolano in un punto solo, `base44/shared/attivaCalcolo.ts`:
