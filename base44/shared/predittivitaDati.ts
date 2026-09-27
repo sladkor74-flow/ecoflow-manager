@@ -74,7 +74,7 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
   ]);
   const dopo = await statoCaricamenti(base44, TIPI_LETTI).catch(() => null);
   let caricamentoInCorso = null;
-  if (!prima || !dopo) caricamentoInCorso = "Lo stato dei caricamenti non si e' potuto leggere: non si sa se primarie e secondarie sono complete.";
+  if (!prima || !dopo) caricamentoInCorso = "Lo stato dei caricamenti non si è potuto leggere: non si sa se primarie e secondarie sono complete.";
   else {
     const durante = caricamentiDuranteLettura(prima, dopo);
     if (durante.length) caricamentoInCorso = durante.map(descriviCaricamento).join('; ');
@@ -97,12 +97,15 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
     // una data di fine di un altro anno non vale: vale quella dell'anno
     let fineImp = String(i.data_fine || '').slice(0, 10);
     if (fineImp && fineImp.slice(0, 4) !== String(annoN)) {
-      avvisi.push({ tipo: 'fine_di_un_altro_anno', impianto: i.nome_impianto, testo: `${i.nome_impianto} ha come fine della programmazione il ${fineImp.split('-').reverse().join('/')}, che non e' del ${annoN}: si usa il ${fine.data.split('-').reverse().join('/')}. Correggila in Target & Status.` });
+      avvisi.push({ tipo: 'fine_di_un_altro_anno', impianto: i.nome_impianto, testo: `${i.nome_impianto} ha come fine della programmazione il ${fineImp.split('-').reverse().join('/')}, che non è del ${annoN}: si usa il ${fine.data.split('-').reverse().join('/')}. Correggila in Target & Status.` });
       fineImp = '';
     }
     impianti.push({ chiave: k, nome: i.nome_impianto, target_kg: Number(i.target) || 0, fine: fineImp || fine.data, id: i.id });
   }
-  const chiaviImpianti = new Set(impianti.map(i => i.chiave));
+  // Seguiti sono solo gli impianti con un target: gli altri il motore li lascia
+  // fuori (non contrattualizzati quest'anno), e non devono attirare stoccaggi,
+  // parti di target dei raccoglitori o avvisi sull'ancora.
+  const chiaviImpianti = new Set(impianti.filter(i => i.target_kg > 0).map(i => i.chiave));
 
   // --- i target dei raccoglitori, per sito ---
   // Un target scritto per un impianto o uno stoccaggio vale li'. Uno senza sito
@@ -143,14 +146,21 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
     const s = stoccaggio(k, f.nome);
     if (Number(f.plafond_stoccaggio_kg) > 0) s.plafond_kg = Math.max(s.plafond_kg || 0, Number(f.plafond_stoccaggio_kg));
     const I = perId.get(f.impianto_id) || chiave(f.impianto_nome);
-    if (I && chiaviImpianti.has(I) && !s.destinazioni.some(x => x.impianto === I)) s.destinazioni.push({ impianto: I, priorita: Number(f.priorita) || null });
+    if (I && I !== k && chiaviImpianti.has(I) && !s.destinazioni.some(x => x.impianto === I)) s.destinazioni.push({ impianto: I, priorita: Number(f.priorita) || null });
   }
+  const spediscono = new Set();
   for (const r of secondarieRete) {
     const g = giornoRoma(r.trasporto_finito_il);
     const S = chiave(r.stoccaggio), I = chiave(r.destinazione);
     if (!g || g.slice(0, 4) !== String(annoN) || !S || S === I || !chiaviImpianti.has(I)) continue;
     stoccaggio(S, r.stoccaggio);
+    spediscono.add(S);
   }
+  // Un piazzale registrato solo per il proprio impianto (Irigom per Irigom), o
+  // per un impianto che quest'anno non si segue, non alimenta nessun impianto
+  // seguito: il motore lo lascerebbe fuori, e chiedergli l'ancora era un avviso
+  // su qualcosa che la pagina non mostra.
+  for (const [k, s] of [...stoccaggi]) if (!s.destinazioni.length && !spediscono.has(k)) stoccaggi.delete(k);
 
   // --- la giacenza di ogni piazzale: l'ancora dell'anno piu' i movimenti dopo ---
   const perSitoLetture = new Map();
@@ -165,7 +175,7 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
     const del = ancora ? momentoRilevazione(ancora) : '';
     if (!ancora || del < dal) {
       s.giacenza_kg = null;
-      if (!ancora) avvisi.push({ tipo: 'ancora_mancante', stoccaggio: s.nome, testo: `${s.nome} non ha la rilevazione al 31/12/${annoN - 1} ne' una lettura del ${annoN}: senza l'ancora la giacenza del piazzale non si calcola. Va inserita in Giacenze, scheda Stoccaggi.` });
+      if (!ancora) avvisi.push({ tipo: 'ancora_mancante', stoccaggio: s.nome, testo: `${s.nome} non ha la rilevazione al 31/12/${annoN - 1} né una lettura del ${annoN}: senza l'ancora la giacenza del piazzale non si calcola. Va inserita in Giacenze, scheda Stoccaggi.` });
       continue;
     }
     s.giacenza_da = del;

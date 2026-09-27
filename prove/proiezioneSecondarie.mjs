@@ -4,14 +4,15 @@
 // del 22/09/2026), il doppio ruolo impianto + piazzale col piazzale al netto di
 // quello che riparte per altri impianti, i trasbordi dell'impianto dal proprio
 // piazzale nella disponibilita' degli altri, le date obbligatorie dei
-// formulari. Le tre funzioni insieme: prove/predittivitaFunzioni.mjs.
+// formulari, contati per ordine. Le tre funzioni insieme: prove/predittivitaFunzioni.mjs.
 // npm run prove
-import { giaArrivatoDiRete, residuoDiRete, noteGiaArrivato, sitiDellaPredittivita, dateDaSistemareDiRete, riassuntoDate, proiettaImpianto, proiettaInsieme } from '../base44/shared/proiezioneSecondarie.ts';
+import { giaArrivatoDiRete, residuoDiRete, noteGiaArrivato, dateDaSistemareDiRete } from '../base44/shared/proiezioneSecondarie.ts';
 import { normalizzaRagioneSociale } from '../base44/shared/normalizzaRagioneSociale.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
 const k = normalizzaRagioneSociale;
+const J = (x) => JSON.stringify(x);
 
 // Un formulario completo, con le tre date obbligatorie, finito il giorno dato.
 const date = (fine) => ({ ordine_immesso_il: '2026-06-01T08:00:00Z', trasporto_iniziato_il: fine, trasporto_finito_il: fine });
@@ -61,11 +62,6 @@ verifica('uno stoccaggio che non e\' un impianto seguito non ha un gia\' arrivat
 console.log('IL RESIDUO, LO STESSO OVUNQUE');
 verifica('residuo = target - gia\' arrivato', residuoDiRete(1050000, tc) === 909000 && residuoDiRete('100000', tg) === 40000);
 verifica('sotto zero se il target e\' superato, senza impianto il target intero', residuoDiRete(50000, tg) === -10000 && residuoDiRete(1000, undefined) === 1000);
-const p = proiettaImpianto({ nome: 'T-Cycle', target_kg: 1050000, data_fine: '2026-12-18' },
-  { conferito_primaria_per_mese: tc.primaria_per_mese, conferito_secondaria_per_mese: tc.secondaria_per_mese, stoccaggi: [] }, { meseCorrente: 8 });
-verifica('la Proiezione, rifatta dai mesi, trova lo stesso gia\' arrivato e lo stesso residuo', p.conferito_kg === tc.totale_kg && p.residuo_kg === residuoDiRete(1050000, tc), JSON.stringify({ c: p.conferito_kg, r: p.residuo_kg }));
-const scoperto = proiettaImpianto({ nome: 'X', target_kg: 12345, data_fine: '2026-01-31' }, {}, { meseCorrente: 0, ipotesi: { Gennaio: { viaggi: 0, primaria_kg: 0 } } });
-verifica('le tonnellate negli avvisi con la virgola e i kg non tondi', scoperto.avvisi[0].includes('12,345 t'), scoperto.avvisi[0]);
 
 console.log('LE NOTE');
 const note = noteGiaArrivato(tc, (x) => ({ 't-cycle': 'T-Cycle', tecnogum: 'Tecnogum' }[x] || x), 2026);
@@ -92,32 +88,8 @@ verifica('anche verso un impianto non seguito', irigom.verso_altri.gatim && irig
 const noteIrigom = noteGiaArrivato(irigom, null, 2026);
 verifica('le note: niente "che le conta" per un impianto non seguito, e quello che non si toglie', noteIrigom.length === 3 && !noteIrigom[0].includes('che le conta') && !noteIrigom[1].includes('due residui') && noteIrigom[2].includes('20,00 t') && noteIrigom[2].includes('non si tolgono'), JSON.stringify(noteIrigom));
 
-console.log('LA DISPONIBILITA\' DI UN PIAZZALE CHE E\' ANCHE IMPIANTO');
-// Nel piazzale di T-Cycle entrano 100.000 kg al mese, e T-Cycle ne trasborda
-// 60.000 al suo impianto: per Tecnogum ne restano 40.000, cioe' 2 viaggi, non 7.
-const fonteTCycle = (prelievi) => ({ nome: 'T-Cycle', giacenza_kg: 0, ingressi_per_mese: { 5: 100000, 6: 100000, 7: 100000 }, prelievi_propri_per_mese: prelievi });
-const tecnogum = (prelievi) => ({ impianto: { nome: 'Tecnogum', target_kg: 1000000, data_fine: '2026-12-18' }, dati: { conferito_primaria_per_mese: {}, conferito_secondaria_per_mese: {}, stoccaggi: [fonteTCycle(prelievi)] } });
-const TRASBORDI = { 5: 60000, 6: 60000, 7: 60000 };
-const conTrasbordi = proiettaInsieme([tecnogum(TRASBORDI)], { meseCorrente: 8 });
-const senzaTrasbordi = proiettaInsieme([tecnogum({})], { meseCorrente: 8 });
-verifica('Tecnogum non conta quello che T-Cycle trasborda a se stesso', conTrasbordi.impianti[0].mesi[0].viaggi_disponibili === 2 && senzaTrasbordi.impianti[0].mesi[0].viaggi_disponibili === 7, JSON.stringify([conTrasbordi.impianti[0].mesi[0].viaggi_disponibili, senzaTrasbordi.impianti[0].mesi[0].viaggi_disponibili]));
-verifica('il registro dice i trasbordi del mese', conTrasbordi.registro_piazzali[0].piazzali[0].prelievi_propri_kg === 60000 && conTrasbordi.impianti[0].stoccaggi[0].media_prelievi_propri_kg === 60000);
-const daSolo = proiettaImpianto(tecnogum(TRASBORDI).impianto, tecnogum(TRASBORDI).dati, { meseCorrente: 8 });
-verifica('anche proiettando un impianto da solo', daSolo.mesi[0].viaggi_disponibili === 2, JSON.stringify(daSolo.mesi[0]));
-const trasbordaTutto = proiettaInsieme([tecnogum({ 5: 150000, 6: 150000, 7: 150000 })], { meseCorrente: 8 });
-verifica('se T-Cycle trasborda piu\' di quello che entra il piazzale non va sotto zero', trasbordaTutto.impianti[0].mesi.every(r => r.viaggi_disponibili === 0) && trasbordaTutto.registro_piazzali.every(x => x.piazzali[0].saldo_fine_mese_kg === 0));
-
-console.log('I SITI DELLA PREDITTIVITA\'');
-const impiantiRec = [{ id: 'i1', nome_impianto: 'T-CYCLE SRL' }, { id: 'i2', nome_impianto: 'Tecnogum' }];
-const fornitori = [
-  { nome: 'Ecorecuperi', impianto_id: 'i2', ruolo: 'stoccaggio' },
-  { nome: 'Vecchio Stoccaggio', impianto_id: 'altro', impianto_nome: 'Non seguito', ruolo: 'stoccaggio' },
-  { nome: 'Logistica & Pneumatici', impianto_id: 'i1', ruolo: 'raccoglitore' },
-  { nome: 'Piazzale Storico', impianto_nome: 'Tecnogum Srl', tipo: 'stoccaggio' },
-];
-const siti = sitiDellaPredittivita(impiantiRec, fornitori, secondarie, 2026, k);
-verifica('impianti, stoccaggi registrati e chi ha spedito secondarie di rete nell\'anno', ['t-cycle', 'tecnogum', 'ecorecuperi', 'nappi sud', 'piazzale storico'].every(x => siti.tutti.has(x)), JSON.stringify([...siti.tutti]));
-verifica('non i raccoglitori ne\' gli stoccaggi di impianti non seguiti', !siti.tutti.has('logistica & pneumatici') && !siti.tutti.has('vecchio stoccaggio'));
+// I siti della predittivita' li decide il motore (predittivita.ts): qui quelli di prova.
+const siti = { tutti: new Set(['t-cycle', 'tecnogum', 'ecorecuperi', 'nappi sud', 'piazzale storico']) };
 
 console.log('LE DATE OBBLIGATORIE (regola del 22/09/2026)');
 const conDate = [
@@ -134,12 +106,38 @@ const idsP = esito.primarie.map(x => x.id_ordine).sort().join(',');
 verifica('primarie: il senza fine trasporto, l\'inizio mancante, le date in ordine sbagliato', idsP === 'D1,D2,P8', idsP);
 verifica('secondarie: quella senza nessuna data', esito.secondarie.length === 1 && esito.secondarie[0].id_ordine === 'D6' && esito.secondarie[0].testo === 'mancano le date di immissione, inizio trasporto e fine trasporto');
 verifica('fuori dai conti solo chi non ha la fine trasporto', esito.senza_fine.primarie === 1 && esito.senza_fine.secondarie === 1 && esito.primarie.find(x => x.id_ordine === 'D1').fuori_dai_conti === false && esito.primarie.find(x => x.id_ordine === 'P8').fuori_dai_conti === true);
-verifica('l\'avviso dice quali date mancano e quali ordini', esito.avviso.includes('manca la data di inizio trasporto, 1 ordine (D1)') && esito.avviso.includes("fine trasporto prima dell'inizio, 1 ordine (D2)") && esito.avviso.includes('manca la data di fine trasporto, 1 ordine (P8)') && esito.avviso.includes('Quelli senza fine trasporto (primarie: 1, secondarie: 1)') && esito.avviso.includes('Gli altri sono contati'), esito.avviso);
+verifica('l\'avviso dice quali date mancano e quali ordini', esito.avviso.includes('manca la data di inizio trasporto, 1 ordine (D1)') && esito.avviso.includes("fine trasporto prima dell'inizio, 1 ordine (D2)") && esito.avviso.includes('manca la data di fine trasporto, 1 ordine (P8)') && esito.avviso.includes('Gli ordini senza fine trasporto (primarie: 1, secondarie: 1)') && esito.avviso.includes('Primarie, 3 ordini:') && esito.avviso.includes('Secondarie, 1 ordine:') && esito.avviso.includes('Gli altri sono contati'), esito.avviso);
 const arrivatiConDate = giaArrivatoDiRete(IMPIANTI, conDate, secConDate, 2026, k);
 verifica('chi ha la fine trasporto resta nel gia\' arrivato anche con un\'altra data da sistemare', arrivatiConDate.get('tecnogum').primaria_kg === 22000);
 verifica('niente da segnalare, nessun avviso', dateDaSistemareDiRete(primarie.filter(r => r.id_ordine !== 'P8'), secondarie, siti.tutti, 2026, k).avviso === '');
-const riassunto = riassuntoDate(esito, 1);
-verifica('il riassunto per le risposte: conteggi e primi ordini', riassunto.primarie === 3 && riassunto.secondarie === 1 && riassunto.ordini.primarie.length === 1 && riassunto.senza_fine_trasporto.primarie === 1);
+
+console.log('LE DATE DA SISTEMARE SI CONTANO PER ORDINE');
+// Lo stesso ordine sta in archivio con piu' righe (una per classe, o le quote di
+// un formulario ripartito): contato riga per riga, l'avviso diceva "2 ordini
+// (O1, O1)". Si contano ORDINI distinti, con chiaveOrdine di movimenti.ts: l'ID
+// dell'ordine, il formulario se l'ID manca, la riga se mancano tutti e due.
+const perOrdine = dateDaSistemareDiRete([
+  prim('O1', 'Ecorecuperi', 'Tecnogum', 'imp', 1000, '2026-07-01T09:00:00Z', { classe: 'P', trasporto_iniziato_il: null }),
+  prim('O1', 'Ecorecuperi', 'Tecnogum', 'imp', 2000, '2026-07-01T09:00:00Z', { classe: 'M', trasporto_iniziato_il: null }),
+  prim('o1 ', 'Ecorecuperi', 'Tecnogum', 'imp', 500, '2026-07-01T09:00:00Z', { classe: 'G1', trasporto_iniziato_il: null }),        // lo stesso ID, scritto diverso
+  prim('O2', 'Ecorecuperi', 'Tecnogum', 'imp', 1000, '2026-07-02T09:00:00Z', { trasporto_iniziato_il: null }),
+  prim('O2', 'Ecorecuperi', 'Tecnogum', 'imp', 1000, '2026-07-02T09:00:00Z', { trasporto_finito_il: null }),                        // un'altra riga dello stesso ordine, senza fine
+  prim('O3', 'Ecorecuperi', 'Tecnogum', 'imp', 1000, '2026-07-03T09:00:00Z'),                                                      // una riga a posto: non si segnala
+  prim('', 'Ecorecuperi', 'Tecnogum', 'imp', 1000, '2026-07-04T09:00:00Z', { numero_fir: 'FIR-A', trasporto_iniziato_il: null }),
+  prim('', 'Ecorecuperi', 'Tecnogum', 'imp', 1000, '2026-07-04T09:00:00Z', { numero_fir: 'FIR-A', trasporto_iniziato_il: null }),  // senza ID vale il formulario
+  prim('', 'Ecorecuperi', 'Tecnogum', 'imp', 1000, '2026-07-05T09:00:00Z', { trasporto_iniziato_il: null }),
+  prim('', 'Ecorecuperi', 'Tecnogum', 'imp', 1000, '2026-07-05T09:00:00Z', { trasporto_iniziato_il: null }),                       // senza niente: ogni riga per se'
+  prim('O4', 'Ecorecuperi', 'Tecnogum', 'imp', 1000, '2025-07-05T09:00:00Z', { trasporto_iniziato_il: null }),                      // un altro anno: fuori
+], [
+  sec('S9', 'Nappi Sud', 'Tecnogum', 6000, '2026-07-06T09:00:00Z', { classe: 'P', ordine_immesso_il: null }),
+  sec('S9', 'Nappi Sud', 'Tecnogum', 7000, '2026-07-06T09:00:00Z', { classe: 'M', ordine_immesso_il: null }),
+], siti.tutti, 2026, k);
+const o = (id) => perOrdine.primarie.find(x => x.id_ordine === id);
+verifica('un ordine in piu\' righe e\' un ordine, e dice quante righe ha', o('O1') && o('O1').righe === 3 && perOrdine.primarie.filter(x => x.id_ordine.trim().toUpperCase() === 'O1').length === 1, J(perOrdine.primarie));
+verifica('le date da sistemare di tutte le sue righe, e fuori dai conti se a una manca la fine', o('O2').testo === 'manca la data di inizio trasporto; manca la data di fine trasporto' && o('O2').fuori_dai_conti === true && o('O1').fuori_dai_conti === false && perOrdine.senza_fine.primarie === 1, J(o('O2')));
+verifica('senza ID vale il formulario; senza nessuno dei due ogni riga conta per se\'', perOrdine.primarie.length === 5 && o('FIR-A') && o('FIR-A').righe === 2 && perOrdine.primarie.filter(x => x.id_ordine === '').length === 2, J(perOrdine.primarie.map(x => x.id_ordine)));
+verifica('anche le secondarie si contano per ordine', perOrdine.secondarie.length === 1 && perOrdine.secondarie[0].righe === 2 && perOrdine.secondarie[0].testo === 'manca la data di immissione', J(perOrdine.secondarie));
+verifica('l\'avviso conta ordini: ogni ID una volta', perOrdine.avviso.includes('Primarie, 5 ordini:') && perOrdine.avviso.includes('Secondarie, 1 ordine:') && perOrdine.avviso.includes('manca la data di inizio trasporto, 4 ordini (O1, FIR-A, senza numero, senza numero)') && !/O1, O1|FIR-A, FIR-A/.test(perOrdine.avviso) && perOrdine.avviso.includes('Ogni ordine si conta una volta'), perOrdine.avviso);
 
 console.log(`\n${ok} verifiche passate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

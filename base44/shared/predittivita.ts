@@ -37,6 +37,7 @@
 import { eTerminato, canaleMovimento } from "./movimenti.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
 import { giaArrivatoDiRete, residuoDiRete } from "./proiezioneSecondarie.ts";
+import { formatoKgInTonnellate } from "./formato.ts";
 
 export const SCENARI = ['target', 'ritmo', 'prudente'];
 
@@ -120,7 +121,7 @@ export function calcolaPredittivita(d) {
   const domenicaScorsa = piuGiorni(lunediCorrente, -1);
   const settimanaScorsaCompleta = datiAl >= domenicaScorsa;
   if (!settimanaScorsaCompleta) {
-    avvisi.push({ tipo: 'dati_incompleti', testo: `I formulari caricati arrivano al ${it(datiAl)}: quelli della settimana scorsa (fino a domenica ${it(domenicaScorsa)}) potrebbero non essere ancora tutti dentro. I numeri possono crescere col prossimo caricamento.` });
+    avvisi.push({ tipo: 'dati_incompleti', testo: `I formulari caricati arrivano al ${it(datiAl)}: quelli della settimana scorsa (fino a domenica ${it(domenicaScorsa)}) potrebbero non essere ancora tutti dentro. I numeri possono crescere con il prossimo caricamento.` });
   }
 
   // Il ritmo reale: le ultime settimane chiuse dai dati, anche a cavallo d'anno.
@@ -147,7 +148,7 @@ export function calcolaPredittivita(d) {
   const impianti = [];
   for (const i of d.impianti || []) {
     if (!(Number(i.target_kg) > 0)) {
-      avvisi.push({ tipo: 'impianto_senza_target', impianto: i.nome, testo: `${i.nome} non ha un target di rete per il ${annoN} in Target & Status: vale come non contrattualizzato quest'anno e resta fuori dalla predittivita'.` });
+      avvisi.push({ tipo: 'impianto_senza_target', impianto: i.nome, testo: `${i.nome} non ha un target di rete per il ${annoN} in Target & Status: vale come non contrattualizzato quest'anno e resta fuori dalla predittività.` });
       continue;
     }
     impianti.push({ ...i, fine: String(i.fine || '').slice(0, 10) || fineDefault });
@@ -191,12 +192,13 @@ export function calcolaPredittivita(d) {
   const attesaFlusso = (f, fine) => {
     const o = orizzonte(fine);
     const ritmo = f.finestra_kg / finestra.settimane;
-    const target = f.target_kg === null ? 0 : Math.max(0, f.target_kg - f.consuntivo_kg) * quotaDelTarget(fine);
     const r = ritmo * o.settimane;
-    // Il prudente: il piu' basso dei due quando il flusso ha un target; senza
-    // target (Emmesse su Irigom nel 2026, dopo l'incendio di Gatim) il materiale
-    // arriva lo stesso, e vale il ritmo reale.
-    const prudente = f.target_kg === null ? r : Math.min(target, r);
+    // Un flusso senza target (Emmesse su Irigom nel 2026, dopo l'incendio di
+    // Gatim) porta materiale lo stesso: in tutte e due le proiezioni vale il
+    // ritmo reale. Cosi' la prudente, il piu' basso dei due flusso per flusso,
+    // non e' mai piu' alta della proiezione sul target.
+    const target = f.target_kg === null ? r : Math.max(0, f.target_kg - f.consuntivo_kg) * quotaDelTarget(fine);
+    const prudente = Math.min(target, r);
     return { target: kgInt(target), ritmo: kgInt(r), prudente: kgInt(prudente), ritmo_settimanale_kg: kgInt(ritmo), con_target: f.target_kg !== null };
   };
 
@@ -267,15 +269,17 @@ export function calcolaPredittivita(d) {
   }
 
   // --- la ripartizione degli stoccaggi, scenario per scenario ---
-  // Prima gli stoccaggi che alimentano meno impianti (un piazzale che serve un
-  // impianto solo non ha scelte), poi gli altri. Dentro uno stoccaggio, per
-  // gruppi di priorita': il primo gruppo prende quello che gli serve, gli altri
-  // si dividono il resto in proporzione a quello che manca a ciascuno.
-  const ordineStoccaggi = [...stoccaggi].sort((a, b) => a.destinazioni.length - b.destinazioni.length || a.nome.localeCompare(b.nome));
+  // Prima i piazzali che sono anche impianti (T-Cycle, vedi sotto), poi gli
+  // stoccaggi che alimentano meno impianti (un piazzale che serve un impianto
+  // solo non ha scelte), poi gli altri. Dentro uno stoccaggio, per gruppi di
+  // priorita': il primo gruppo prende quello che gli serve, gli altri si
+  // dividono il resto in proporzione a quello che manca a ciascuno.
+  const ordineStoccaggi = [...stoccaggi].sort((a, b) => Number(b.e_impianto) - Number(a.e_impianto) || a.destinazioni.length - b.destinazioni.length || a.nome.localeCompare(b.nome));
   for (const sc of SCENARI) {
     const manca = new Map([...perImpianto.values()].map(x => [x.chiave, x.fabbisogno_secondarie[sc]]));
     for (const s of ordineStoccaggi) {
       let resta = s.disponibile[sc];
+      let dati = 0;
       const gruppi = new Map();
       for (const x of s.destinazioni) {
         if (!gruppi.has(x.priorita)) gruppi.set(x.priorita, []);
@@ -287,6 +291,7 @@ export function calcolaPredittivita(d) {
           const m = manca.get(I) || 0;
           const dato = bisogno <= resta ? m : (bisogno > 0 ? resta * m / bisogno : 0);
           const kg = kgInt(dato);
+          dati += kg;
           manca.set(I, Math.max(0, m - kg));
           const imp = perImpianto.get(I);
           let rotta = imp.da_stoccaggi.find(x => x.stoccaggio === s.chiave);
@@ -299,17 +304,18 @@ export function calcolaPredittivita(d) {
       }
       s.non_assegnato = s.non_assegnato || {};
       s.non_assegnato[sc] = kgInt(resta);
-    }
-  }
-  // Un impianto che e' anche piazzale (T-Cycle): quello che il piazzale deve
-  // ancora spedire agli altri non restera' a lui, e si toglie dalla sua attesa.
-  for (const s of stoccaggi) {
-    if (!s.e_impianto || !perImpianto.has(s.chiave)) continue;
-    const imp = perImpianto.get(s.chiave);
-    for (const sc of SCENARI) {
-      const via = [...perImpianto.values()].reduce((t, x) => t + ((x.da_stoccaggi.find(r => r.stoccaggio === s.chiave) || { kg: {} }).kg[sc] || 0), 0);
-      imp.primaria_attesa[sc] = Math.max(0, imp.primaria_attesa[sc] - via);
-      imp.fabbisogno_secondarie[sc] = Math.max(0, imp.residuo_kg - imp.primaria_attesa[sc]);
+      // Un impianto che e' anche piazzale (T-Cycle): quello che il piazzale
+      // spedira' agli altri non restera' a lui, e si toglie dalla sua attesa
+      // subito, prima che gli altri stoccaggi lo servano: altrimenti lo
+      // servivano per il fabbisogno di prima, piu' piccolo, e a T-Cycle mancava
+      // materiale che a loro avanzava.
+      const imp = s.e_impianto ? perImpianto.get(s.chiave) : null;
+      if (imp) {
+        const coperto = imp.fabbisogno_secondarie[sc] - (manca.get(s.chiave) || 0);
+        imp.primaria_attesa[sc] = Math.max(0, imp.primaria_attesa[sc] - dati);
+        imp.fabbisogno_secondarie[sc] = Math.max(0, imp.residuo_kg - imp.primaria_attesa[sc]);
+        manca.set(s.chiave, Math.max(0, imp.fabbisogno_secondarie[sc] - coperto));
+      }
     }
   }
   for (const imp of perImpianto.values()) {
@@ -356,7 +362,11 @@ export function calcolaPredittivita(d) {
     for (const prio of gruppi) {
       const gruppo = righe.filter(r => r.priorita === prio);
       for (const r of gruppo) {
-        const voluti = prio === primoGruppo ? Math.ceil(r.media_settimanale - 1e-9) : Math.floor(r.spettanti + 1e-9);
+        // Al primo gruppo la sua media per eccesso; agli altri anche, ma mai piu'
+        // della parte che resta loro fino alla fine: un viaggio in piu' quando il
+        // materiale avanza, non tutta la parte dell'anno in una settimana.
+        const perEccesso = Math.ceil(r.media_settimanale - 1e-9);
+        const voluti = prio === primoGruppo ? perEccesso : Math.min(Math.max(perEccesso, r.spettanti >= 1 ? 1 : 0), Math.floor(r.spettanti + 1e-9));
         r.voluti = voluti;
       }
       const voluti = gruppo.reduce((t, r) => t + r.voluti, 0);
@@ -371,7 +381,7 @@ export function calcolaPredittivita(d) {
     for (const r of righe) {
       r.kg = r.viaggi * kgv;
       const imp = perImpianto.get(r.chiave_impianto);
-      r.motivo = motivoRiga(r, imp, primoGruppo, kgv, s.nome);
+      r.motivo = motivoRiga(r, imp, primoGruppo, kgv, s.nome, gruppi.length > 1);
       delete r.voluti;
       programma.push(r);
     }
@@ -408,22 +418,24 @@ export function calcolaPredittivita(d) {
 }
 
 const it = (g) => (g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : '');
-const tonn = (kg) => `${(Math.round(kg / 10) / 100).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} t`;
 
-// Una riga del programma, detta a parole.
-function motivoRiga(r, imp, primoGruppo, kgv, stoccaggio) {
+// Una riga del programma, detta a parole: per chi programma, non per chi
+// scrive il codice. "Priorità" si dice solo quando lo stoccaggio sceglie davvero
+// fra piu' impianti.
+function motivoRiga(r, imp, primoGruppo, kgv, stoccaggio, conScelta) {
   if (!imp) return '';
-  if (imp.target_superato) return `${imp.nome} ha gia' raggiunto il target.`;
+  if (imp.target_superato) return `${imp.nome} ha già raggiunto il target.`;
   const media = String(r.media_settimanale).replace('.', ',');
   const parti = [];
   if (r.priorita === primoGruppo) {
-    if (r.media_settimanale <= 0) return `A ${imp.nome} non serve altro da ${stoccaggio}, con la primaria attesa.`;
-    parti.push(`Priorita': per arrivare al target di ${imp.nome} entro il ${it(imp.fine)} servono in media ${media} viaggi a settimana`);
+    if (r.media_settimanale <= 0) return `A ${imp.nome} non serve altro da ${stoccaggio}, con le primarie attese.`;
+    parti.push(`${conScelta ? 'Ha la priorità: p' : 'P'}er arrivare al target di ${imp.nome} entro il ${it(imp.fine)} servono in media ${media} viaggi a settimana da ${stoccaggio}`);
+  } else if (r.spettanti < 1) {
+    parti.push(`A ${stoccaggio} non avanza materiale per ${imp.nome}, dopo gli impianti con la priorità`);
   } else {
-    if (r.spettanti < 1) parti.push(`A ${stoccaggio} non avanza materiale per ${imp.nome}, dopo gli impianti con priorita'`);
-    else parti.push(`I viaggi che ${stoccaggio} puo' fare in piu', dopo gli impianti con priorita': fino a fine programmazione gliene spettano circa ${Math.floor(r.spettanti)}`);
+    parti.push(`I viaggi che ${stoccaggio} può fare in più dopo gli impianti con la priorità: da qui alla fine della programmazione gliene spettano circa ${Math.floor(r.spettanti)}`);
   }
-  if (r.limitato) parti.push('limitati dal materiale che il piazzale avra\' in settimana');
-  if (imp.mancanza_kg.prudente >= kgv / 2) parti.push(`a ${imp.nome} mancheranno comunque circa ${tonn(imp.mancanza_kg.prudente)}`);
+  if (r.limitato) parti.push("limitati dal materiale che il piazzale avrà in settimana");
+  if (imp.mancanza_kg.prudente >= kgv / 2) parti.push(`a ${imp.nome} mancheranno comunque circa ${formatoKgInTonnellate(imp.mancanza_kg.prudente)} t`);
   return parti.join('; ') + '.';
 }

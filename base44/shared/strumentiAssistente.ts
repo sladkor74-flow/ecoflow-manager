@@ -558,53 +558,91 @@ export const STRUMENTI = [
   },
   {
     nome: 'proiezione_secondarie',
-    descrizione: 'Quanti viaggi di secondaria restano da portare a ciascun impianto per arrivare al target, mese per mese, se gli stoccaggi hanno materiale per farli e quali ipotesi sono state fissate a mano. Solo rete: ACI ed extra raccolta non entrano nella predittivita\'.',
-    parametri: { anno: 'numero', mese_da: 'indice del mese da cui proiettare, 0 = gennaio' },
+    descrizione: 'La predittivita\' delle secondarie dell\'anno in corso, la stessa del modulo: per ogni impianto seguito target, gia\' arrivato, quanto manca e se lo raggiunge con le due proiezioni affiancate (se i raccoglitori rispettano il target, al ritmo delle ultime settimane) e con la prudente, su cui si programma; gli stoccaggi con giacenza, plafond e ordine di priorita\'; i viaggi da programmare la settimana dopo, stoccaggio per impianto; il programmato contro il fatto delle ultime settimane; fin dove arrivano i dati caricati. Solo rete: ACI ed extra raccolta non entrano nella predittivita\'.',
+    parametri: { anno: "solo se l'utente chiede esplicitamente un anno gia' chiuso (si vede in sola lettura); altrimenti l'anno in corso" },
     moduli: ['Predittivita Secondarie'],
     async esegui(base44, p) {
-      const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
-      const meseDa = p.mese_da != null ? Number(p.mese_da) : Number(oggiRoma().slice(5, 7)) - 1;
-      // Si chiama il modulo, non si rifa' il conto: qui mancavano le giacenze
-      // degli stoccaggi e le ipotesi scritte a mano, e uscivano viaggi diversi
-      // da quelli che l'utente vede a video, con avvisi di materiale mancante
-      // che a video non c'erano.
-      const res = await base44.functions.invoke('proiezioneSecondarie', { anno, mese_da: meseDa });
+      // Si chiama il modulo, non si rifa' il conto (26/09/2026: un motore solo,
+      // base44/shared/predittivita.ts). Un anno diverso da quello in corso si
+      // chiede solo se e' passato: la predittivita' e' dell'anno, e un anno
+      // chiuso si guarda com'era al 31 dicembre.
+      const annoCorrente = Number(oggiRoma().slice(0, 4));
+      const chiesto = Number(p.anno);
+      const anno = Number.isInteger(chiesto) && chiesto >= 2000 && chiesto < annoCorrente ? chiesto : annoCorrente;
+      const res = await base44.functions.invoke('proiezioneSecondarie', anno === annoCorrente ? {} : { anno });
       const d = (res && res.data) || res || {};
-      const impianti = (d.impianti || []).map(x => ({
-        impianto: x.impianto,
-        target_t: t3(x.target_kg), conferito_t: t3(x.conferito_kg), residuo_t: t3(x.residuo_kg),
-        viaggi_totali: x.viaggi_totali,
-        mesi: (x.mesi || []).map(m => ({
-          mese: m.mese, primaria_attesa_t: t3(m.primaria_kg), viaggi: m.viaggi,
-          residuo_t: t3(m.residuo_kg), viaggi_disponibili: m.viaggi_disponibili, viaggi_mancanti: m.viaggi_mancanti,
-          da_ipotesi: !!(m.primaria_da_ipotesi || m.viaggi_da_ipotesi),
+      if (d.error) throw new Error(d.error);
+      const it = (g) => (g ? `${String(g).slice(8, 10)}/${String(g).slice(5, 7)}/${String(g).slice(0, 4)}` : '');
+      const tre = (o, f = t3) => (o ? { se_rispettano_il_target: f(o.target), al_ritmo_attuale: f(o.ritmo), prudente: f(o.prudente) } : null);
+      const uno = (v) => Math.round((Number(v) || 0) * 10) / 10;
+      const nomeImpianto = new Map((d.impianti || []).map(i => [i.chiave, i.nome]));
+      const impianti = (d.impianti || []).map(i => ({
+        impianto: i.nome,
+        target_t: t3(i.target_kg), gia_arrivato_t: t3(i.gia_arrivato_kg), manca_t: t3(Math.max(0, i.residuo_kg)),
+        target_superato: !!i.target_superato,
+        fine_programmazione: it(i.fine),
+        note_gia_arrivato: i.note || [],
+        primaria_attesa_t: tre(i.primaria_attesa),
+        da_portare_in_secondaria_t: tre(i.fabbisogno_secondarie),
+        coperto_dagli_stoccaggi_t: tre(i.coperto_secondarie),
+        mancheranno_t: tre(i.mancanza_kg),
+        raggiunge_il_target: tre(i.raggiunge, (v) => !!v),
+        ...(i.senza_stoccaggi ? { nessuno_stoccaggio_lo_alimenta: true } : {}),
+        dagli_stoccaggi: (i.da_stoccaggi || []).map(x => ({
+          stoccaggio: x.nome, ordine_di_priorita: x.priorita,
+          viaggi_a_settimana_prudente: uno(x.viaggi_settimana && x.viaggi_settimana.prudente),
+          viaggi_fino_alla_fine_prudente: uno(x.viaggi_totali && x.viaggi_totali.prudente),
         })),
-        stoccaggi: (x.stoccaggi || []).map(st => ({ nome: st.nome, giacenza_t: st.giacenza_kg == null ? null : t3(st.giacenza_kg), nota: st.giacenza_nota || '' })),
-        avvisi: x.avvisi || [],
+        raccoglitori: (i.primarie || []).map(x => ({
+          raccoglitore: x.raccoglitore, target_t: x.target_kg == null ? null : t3(x.target_kg),
+          arrivato_t: t3(x.consuntivo_kg), ritmo_a_settimana_t: t3(x.ritmo_settimanale_kg), atteso_ancora_t: tre(x.attesa),
+        })),
       }));
-      // Gli avvisi che valgono per tutta la proiezione si passano cosi' come
-      // arrivano: un archivio che si sta ricaricando e' a meta' e i viaggi non
-      // sono definitivi, e i terminati senza fine trasporto restano fuori dal
-      // gia' arrivato. Scartati qui, la risposta li dava per completi.
-      const sf = d.senza_fine_trasporto;
+      const stoccaggi = (d.stoccaggi || []).map(s => ({
+        stoccaggio: s.nome,
+        giacenza_t: s.giacenza_kg == null ? null : t3(s.giacenza_kg), giacenza_calcolata_dal: it(s.giacenza_da),
+        entrate_attese_t: tre(s.entrate_attese),
+        plafond_t: s.plafond_kg == null ? null : t3(s.plafond_kg), residuo_plafond_t: s.residuo_plafond_kg == null ? null : t3(s.residuo_plafond_kg),
+        disponibile_t: tre(s.disponibile),
+        alimenta_in_ordine: (s.destinazioni || []).map(x => x.nome || nomeImpianto.get(x.impianto) || x.impianto),
+        viaggi_prossima_settimana: s.viaggi_prossima_settimana || null,
+      }));
+      const prossima = d.prossima_settimana || {};
+      const programma = (d.programma || []).map(r => ({
+        stoccaggio: r.stoccaggio, impianto: r.impianto, viaggi_calcolati: r.viaggi, perche: r.motivo || '',
+        ...(r.limitato ? { limitati_dal_materiale: true } : {}),
+        fissato: r.fissato ? { viaggi: r.fissato.viaggi, corretto_a_mano: !!r.fissato.manuale } : null,
+      }));
+      // Programmato e fatto: le settimane arrivano dalla piu' recente; bastano
+      // le ultime otto fino a questa, percorso per percorso. La settimana dopo
+      // sta gia' nel programma; quella in corso non ha ancora uno scarto.
+      const passate = (d.settimane || []).filter(x => !prossima.dal || x.settimana < prossima.dal);
+      const lunedi = [...new Set(passate.map(x => x.settimana))].slice(0, 8);
+      const settimane = passate.filter(x => lunedi.includes(x.settimana)).map(x => ({
+        dal: it(x.settimana), al: it(x.al), ...(x.aperta ? { in_corso: true } : {}),
+        stoccaggio: x.stoccaggio, impianto: x.impianto,
+        programmati: x.programmati, programmati_corretti_a_mano: !!x.programmati_manuale,
+        fatti: x.fatti, fatti_t: t3(x.fatti_kg),
+        scarto_viaggi: x.programmati == null || x.aperta ? null : x.fatti - x.programmati,
+      }));
       return {
         fonte: 'Predittivita delle secondarie, canale RETE',
-        periodo: `da ${MESI[meseDa] || ''} ${anno} alla data obiettivo`.trim(),
+        periodo: `anno ${d.anno || anno}${d.sola_lettura ? ', chiuso: in sola lettura, com\'era al 31/12' : ''}`,
         dati_al: oggiRoma(),
         dati: {
-          ...(d.caricamento_in_corso ? { avviso_caricamenti: d.caricamento_in_corso } : {}),
-          ...(d.avvisi_generali && d.avvisi_generali.length ? { avvisi_generali: d.avvisi_generali } : {}),
-          ...(sf && (sf.primarie || sf.secondarie) ? { senza_fine_trasporto: sf } : {}),
-          // le date obbligatorie mancanti o incoerenti dei terminati di rete, come
-          // le dice il modulo (22/09/2026): passano cosi' come arrivano
-          ...(d.date_da_sistemare ? { date_obbligatorie_da_sistemare: d.date_da_sistemare } : {}),
-          kg_per_viaggio: d.kg_per_viaggio,
+          canale: 'RETE',
+          avvisi: (d.avvisi || []).map(a => (a.grave ? `IMPORTANTE: ${a.testo}` : a.testo)),
+          formulari_caricati_fino_al: it(d.dati_al),
+          settimana_scorsa_completa: !!d.settimana_scorsa_completa,
+          tonnellate_per_viaggio: t3(d.kg_per_viaggio),
+          ritmo_misurato: d.finestra_ritmo ? `dal ${it(d.finestra_ritmo.dal)} al ${it(d.finestra_ritmo.al)} (${d.finestra_ritmo.settimane} settimane)` : '',
+          fine_programmazione: it(d.fine),
+          ...(d.configurazione_vuota ? { configurazione_vuota: true } : {}),
           impianti,
-          viaggi_per_mese: d.viaggi_per_mese,
-          piazzali_condivisi: d.piazzali_condivisi,
-          registro_piazzali: d.registro_piazzali,
-          ipotesi_fissate: (d.ipotesi || []).map(i => ({ impianto: i.impianto, mese: i.mese, primaria_attesa_kg: i.primaria_attesa_kg, viaggi_previsti: i.viaggi_previsti, note: i.note })),
-          nota: "Sono gli stessi numeri del modulo Predittivita Secondarie, ipotesi scritte a mano comprese. Solo rete: ACI ed extra raccolta non entrano. Gli impianti che attingono allo stesso stoccaggio sono calcolati insieme: quel piazzale ha una giacenza sola e il registro qui sotto dice mese per mese quanto ne prende ciascuno.",
+          stoccaggi,
+          programma_settimana_dopo: { dal: it(prossima.dal), al: it(prossima.al), righe: programma },
+          programmato_e_fatto: elenco(settimane, 60),
+          nota: "Sono gli stessi numeri del modulo Predittivita Secondarie. Solo rete. Le proiezioni sono due affiancate - se i raccoglitori rispettano il loro target, e al ritmo reale delle ultime settimane - e la prudente prende raccoglitore per raccoglitore il piu' basso dei due: si programma su quella. La priorita' di uno stoccaggio non vuol dire servire un impianto e poi l'altro: ogni settimana li serve tutti, al primo i viaggi che gli servono per il target, agli altri quello che avanza. Un viaggio fatto e' un camion in un giorno sullo stesso percorso, anche con piu' formulari. Nel programma della settimana dopo vale il numero fissato (il mercoledi', o corretto a mano); se non e' ancora fissato vale il calcolato. Il programmato di una settimana passata non cambia: lo scarto dice se si e' in anticipo (positivo) o in ritardo (negativo). La settimana in corso non ha ancora uno scarto: il fatto puo' crescere.",
         },
       };
     },

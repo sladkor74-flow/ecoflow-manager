@@ -13,6 +13,7 @@ import { leggiDatiPredittivita } from "./predittivitaDati.ts";
 import { noteGiaArrivato, dateDaSistemareDiRete } from "./proiezioneSecondarie.ts";
 import { normalizzaRagioneSociale as chiave } from "./normalizzaRagioneSociale.ts";
 import { oggiRoma } from "./giornoItaliano.ts";
+import { settimanaIso } from "./movimenti.ts";
 
 /** L'anno in corso, sul giorno italiano. */
 export const annoInCorso = () => Number(oggiRoma().slice(0, 4));
@@ -85,14 +86,15 @@ export function rispostaPredittivita({ dati, calcolo, anno, oggi, solaLettura, p
     return settimane.get(k);
   };
   for (const f of calcolo.fatto) {
-    const x = riga(f.settimana, f.nome_stoccaggio, f.nome_impianto);
+    // lo stesso percorso sempre con lo stesso nome: quello della configurazione
+    const x = riga(f.settimana, nomeDi(chiave(f.nome_stoccaggio)), nomeDi(chiave(f.nome_impianto)));
     x.fatti += f.viaggi;
     x.fatti_kg += f.kg;
   }
   for (const r of fissati.values()) {
     const settimana = String(r.data_inizio).slice(0, 10);
     if (settimana > prossima) continue;
-    const x = riga(settimana, r.fornitore_nome, r.impianto_nome);
+    const x = riga(settimana, nomeDi(chiave(r.fornitore_nome)), nomeDi(chiave(r.impianto_nome)));
     x.programmati = Number(r.viaggi_previsti) || 0;
     x.programmati_manuale = r.origine === 'manuale';
   }
@@ -132,18 +134,21 @@ export function rispostaPredittivita({ dati, calcolo, anno, oggi, solaLettura, p
  * l'amministratore ha corretto a mano; una correzione a mano le riscrive.
  *
  * @param {object} e       base44.asServiceRole.entities
- * @param {object} o       { anno, settimana ('AAAA-MM-GG', lunedi'), righe: [{ stoccaggio, impianto, viaggi, motivo? }], kgPerViaggio, manuale, esistenti }
+ * @param {object} o       { anno, settimana ('AAAA-MM-GG', lunedi'), righe: [{ stoccaggio, impianto, viaggi, motivo? }], kgPerViaggio, manuale, esistenti,
+ *                          impianti: [{ chiave, id }] per l'impianto_id, che lo schema chiede (con settimana_numero e data_inizio) }
  * @returns {Promise<{ scritte: number, lasciate: number }>}
  */
-export async function fissaProgramma(e, { anno, settimana, righe, kgPerViaggio, manuale = false, esistenti = [] }) {
+export async function fissaProgramma(e, { anno, settimana, righe, kgPerViaggio, manuale = false, esistenti = [], impianti = [] }) {
   const giaFissati = programmatiPerPercorso(esistenti);
+  const idDi = new Map((impianti || []).map(i => [i.chiave, i.id]));
   let scritte = 0, lasciate = 0;
   for (const r of righe || []) {
     const prima = giaFissati.get(chiaveRiga(settimana, r.stoccaggio, r.impianto));
     if (prima && prima.origine === 'manuale' && !manuale) { lasciate++; continue; }
     const viaggi = Math.max(0, Math.round(Number(r.viaggi) || 0));
     const dati = {
-      anno: Number(anno), data_inizio: settimana, data_fine: piuGiorni(settimana, 6),
+      anno: Number(anno), data_inizio: settimana, data_fine: piuGiorni(settimana, 6), settimana_numero: settimanaIso(settimana),
+      impianto_id: idDi.get(chiave(r.impianto)) || chiave(r.impianto),
       fornitore_nome: r.stoccaggio, impianto_nome: r.impianto,
       viaggi_previsti: viaggi, kg_previsti: viaggi * kgPerViaggio,
       origine: manuale ? 'manuale' : 'programma', modificato_manuale: !!manuale,

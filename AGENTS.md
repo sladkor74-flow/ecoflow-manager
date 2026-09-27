@@ -250,7 +250,8 @@ residuo risulta il doppio di quello vero.
 
 **Il gia' arrivato della predittivita'** (solo rete, 22/09/2026) ha un conto solo,
 `giaArrivatoDiRete` in `base44/shared/proiezioneSecondarie.ts` (specchio in
-`src/lib`), usato da Dashboard, Proiezione, suggerimento del lunedi' e agente: le
+`src/lib`), usato dal motore della predittivita' (e quindi da ogni scheda, dal
+programma del mercoledi' e dagli assistenti): le
 primarie di rete arrivate al **sito** dell'impianto seguito, cioe' all'impianto e
 al suo piazzale (`tipo_destinazione` 'stoc'), piu' le secondarie di rete da altri
 stoccaggi. Le primarie del piazzale contano perche' "il residuo totale diminuisce

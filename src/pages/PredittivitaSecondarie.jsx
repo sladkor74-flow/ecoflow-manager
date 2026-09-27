@@ -1,44 +1,91 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Loader2, BarChart3, Table, Settings, Bot, CalendarRange, AlertTriangle, Info } from 'lucide-react';
-import PredittivitaDashboard from '@/components/predittivita/PredittivitaDashboard';
-import ProiezioneAnnuale from '@/components/predittivita/ProiezioneAnnuale';
-import PredittivitaSettimanale from '@/components/predittivita/PredittivitaSettimanale';
+import { Button } from '@/components/ui/button';
+import { Loader2, CalendarCheck, Factory, Warehouse, CalendarRange, Settings, Bot, AlertTriangle, ChevronDown, ChevronRight, Lock, RefreshCw } from 'lucide-react';
+import ProgrammaSettimana from '@/components/predittivita/ProgrammaSettimana';
+import SchedaImpianti from '@/components/predittivita/SchedaImpianti';
+import SchedaStoccaggi from '@/components/predittivita/SchedaStoccaggi';
+import SchedaSettimane from '@/components/predittivita/SchedaSettimane';
+import EsportaSituazione from '@/components/predittivita/EsportaSituazione';
 import PredittivitaImpiantiManager from '@/components/predittivita/PredittivitaImpiantiManager';
 import PredittivitaAgent from '@/components/predittivita/PredittivitaAgent';
+import { it, testoErrore, Vuoto } from '@/components/predittivita/Comuni';
 import { usePermessi } from '@/lib/permessi';
+import { oggiRoma } from '@/lib/giornoItaliano';
 
-const it = (g) => (g ? String(g).slice(0, 10).split('-').reverse().join('/') : '');
+// La predittivita' delle secondarie, un anno alla volta (26/09/2026): parte
+// dall'ancora delle giacenze al 31/12 dell'anno prima, sola rete, per fine
+// trasporto. Un motore solo (base44/shared/predittivita.ts), letto dalla
+// funzione calcolaPianificazioneSecondaria, da cui escono tutte le schede.
+// Il 1 gennaio la pagina mostra l'anno nuovo; gli anni chiusi si riaprono in
+// sola lettura scegliendo l'anno.
 
-// Quello che la pianificazione ha lasciato fuori o trovato storto: i formulari
-// terminati con le date obbligatorie da sistemare (immissione, inizio e fine
-// trasporto, regola del 22/09/2026; quelli senza fine trasporto sono esclusi dai
-// conti, mai ricollocati sulla chiusura), i ruoli discordi e i fornitori
-// registrati che sulla rete non lavorano. La funzione li restituiva e nessuno li
-// mostrava.
-function Segnalazioni({ data }) {
-  const anomalie = (data && data.anomalie) || [];
-  if (!data || (!anomalie.length && !data.caricamento_in_corso)) return null;
+// L'anno in cui la predittivita' e' nata: prima non c'e' una configurazione.
+const PRIMO_ANNO = 2026;
+// I caricamenti che cambiano i numeri, e quanto si aspetta dopo che si sono
+// chiusi: la registrazione finale arriva un momento dopo l'ultima scrittura.
+const TIPI_RICALCOLO = ['primarie', 'primarie_rete', 'secondarie'];
+const ATTESA_RICALCOLO_MS = 4000;
+const NOMI_TIPI = { primarie: 'primarie', primarie_rete: 'primarie di rete', secondarie: 'secondarie' };
+
+const annoCorrente = () => Number(oggiRoma().slice(0, 4));
+
+/** La risposta del calcolo, o null se non ha la forma attesa. */
+function rispostaValida(d) {
+  const r = d && d.risposta && Array.isArray(d.risposta.impianti) ? d.risposta : d;
+  return r && Array.isArray(r.impianti) && Array.isArray(r.programma) && Array.isArray(r.stoccaggi) && Array.isArray(r.settimane) ? r : null;
+}
+
+/** Il caricamento in corso e gli altri avvisi, compatti e da aprire. */
+function Avvisi({ risposta, aperti }) {
+  const [apri, setApri] = useState(false);
+  const avvisi = (risposta && risposta.avvisi) || [];
+  const caricamento = avvisi.filter(a => a.tipo === 'caricamento_in_corso');
+  const gravi = avvisi.filter(a => a.grave && a.tipo !== 'caricamento_in_corso');
+  // quello dei dati incompleti sta gia' nella riga "Dati caricati fino al"
+  const altri = avvisi.filter(a => !a.grave && a.tipo !== 'caricamento_in_corso' && a.tipo !== 'dati_incompleti');
+  if (risposta && risposta.regole_definite === false) {
+    altri.push({ tipo: 'regole', testo: `Per il ${risposta.anno} le regole della predittività (quanto vale un viaggio, l'ordine degli impianti di uno stoccaggio) non sono ancora scritte: valgono quelle predefinite.` });
+  }
+  const locali = caricamento.length ? [] : aperti;
   return (
     <div className="space-y-2">
-      {data.caricamento_in_corso && (
-        <div className="flex items-start gap-2 text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
+      {caricamento.map((a, n) => (
+        <div key={`c${n}`} className="flex items-start gap-2 text-sm text-amber-900 bg-amber-50 border-2 border-amber-400 rounded-lg px-3 py-2">
+          <Loader2 className="w-4 h-4 mt-0.5 shrink-0 animate-spin" />
+          <span>{a.testo}</span>
+        </div>
+      ))}
+      {locali.length > 0 && (
+        <div className="flex items-start gap-2 text-sm text-amber-900 bg-amber-50 border-2 border-amber-400 rounded-lg px-3 py-2">
           <Loader2 className="w-4 h-4 mt-0.5 shrink-0 animate-spin" />
           <span>
-            {data.caricamento_in_corso} I numeri qui sotto possono essere incompleti e il piano settimanale non viene salvato:
-            la pagina si ricalcola da sola quando il caricamento si chiude.
+            È in corso un caricamento di {[...new Set(locali.map(x => NOMI_TIPI[x.tipo_file] || x.tipo_file))].join(' e ')}
+            {locali.some(x => x.utente) ? ` (${[...new Set(locali.map(x => x.utente).filter(Boolean))].join(', ')})` : ''}:
+            i numeri possono cambiare, la pagina si ricalcola da sola quando finisce.
           </span>
         </div>
       )}
-      {anomalie.length > 0 && (
-        <div className="border border-amber-300 bg-amber-50 rounded-lg px-3 py-2 space-y-1.5">
-          <p className="text-sm font-semibold text-amber-900 flex items-center gap-1.5">
-            <AlertTriangle className="w-4 h-4" /> Da controllare ({anomalie.length})
-          </p>
-          <ul className="text-xs text-amber-900 space-y-1 list-disc pl-5">
-            {anomalie.map((a, i) => <li key={`${a.tipo}-${i}`}>{a.testo}</li>)}
-          </ul>
+      {gravi.map((a, n) => (
+        <div key={`g${n}`} className="flex items-start gap-2 text-sm text-red-900 bg-red-50 border border-red-300 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>{a.testo}</span>
+        </div>
+      ))}
+      {altri.length > 0 && (
+        <div className="border border-amber-300 bg-amber-50/60 rounded-lg">
+          <button type="button" onClick={() => setApri(v => !v)} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-amber-900 text-left">
+            {apri ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            <AlertTriangle className="w-4 h-4" />
+            <span className="font-medium">Da guardare ({altri.length})</span>
+            {!apri && <span className="truncate text-xs text-amber-800/80">{altri[0].testo}</span>}
+          </button>
+          {apri && (
+            <ul className="text-sm text-amber-900 space-y-1 list-disc pl-9 pr-3 pb-2">
+              {altri.map((a, n) => <li key={`${a.tipo}-${n}`}>{a.testo}</li>)}
+            </ul>
+          )}
         </div>
       )}
     </div>
@@ -47,87 +94,197 @@ function Segnalazioni({ data }) {
 
 export default function PredittivitaSecondarie() {
   const { isAdmin } = usePermessi();
-  const [tab, setTab] = useState('dashboard');
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  // Cresce a ogni caricamento chiuso: la proiezione ha la sua funzione e il suo
-  // stato, e senza questo restava ai numeri di quando la scheda era stata aperta.
-  const [versione, setVersione] = useState(0);
+  const corrente = annoCorrente();
+  const [anno, setAnno] = useState(corrente);
+  const [tab, setTab] = useState('programma');
+  const [risposta, setRisposta] = useState(null);
+  const [errore, setErrore] = useState(null);
+  const [ricalcolo, setRicalcolo] = useState(false);
+  const [aperti, setAperti] = useState({}); // caricamenti aperti visti arrivare: id -> { tipo_file, utente }
 
-  const load = async () => {
-    setLoading(true); setError(null);
-    try {
-      const res = await base44.functions.invoke('calcolaPianificazioneSecondaria', {});
-      setData(res.data);
-    } catch (e) { setError(e?.data?.error || e?.message || 'Errore di caricamento'); }
-    setLoading(false);
-  };
+  // Un calcolo alla volta: se ne serve un altro mentre il primo e' in volo, si
+  // rifa' appena finisce. Le risposte si numerano: una piu' vecchia di quella
+  // gia' mostrata (per esempio un ricalcolo partito prima di "Fissa") si scarta.
+  const annoRef = useRef(anno);
+  const inVolo = useRef(false);
+  const daRifare = useRef(false);
+  const numero = useRef(0);
+  const applicato = useRef(0);
 
-  const loadRef = useRef(load);
-  loadRef.current = load;
-
-  useEffect(() => { load(); }, []);
-
-  // Ricalcolo automatico a ogni caricamento che si chiude (anche uno aperto che
-  // risulta interrotto): tutte le schede, proiezione compresa.
-  useEffect(() => {
-    const unsubscribe = base44.entities.UploadLog.subscribe((event) => {
-      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso') {
-        loadRef.current();
-        setVersione(v => v + 1);
-      }
-    });
-    return unsubscribe;
+  const applica = useCallback((n, r) => {
+    if (n < applicato.current || Number(r.anno) !== annoRef.current) return false;
+    applicato.current = n;
+    setRisposta(r);
+    setErrore(null);
+    return true;
   }, []);
 
-  const dataFine = data && data.data_fine ? it(data.data_fine) : '';
+  const carica = useCallback(async () => {
+    if (inVolo.current) { daRifare.current = true; return; }
+    inVolo.current = true;
+    setRicalcolo(true);
+    do {
+      daRifare.current = false;
+      const a = annoRef.current;
+      const n = ++numero.current;
+      try {
+        const res = await base44.functions.invoke('calcolaPianificazioneSecondaria', { anno: a });
+        if (a !== annoRef.current) { daRifare.current = true; continue; }
+        const r = rispostaValida(res.data);
+        if (!r) throw new Error((res.data && res.data.error) || 'la risposta del calcolo non ha la forma attesa');
+        applica(n, r);
+      } catch (e) {
+        if (a === annoRef.current && n >= applicato.current) setErrore(testoErrore(e));
+      }
+    } while (daRifare.current);
+    inVolo.current = false;
+    setRicalcolo(false);
+  }, [applica]);
+
+  const caricaRef = useRef(carica);
+  caricaRef.current = carica;
+
+  useEffect(() => {
+    annoRef.current = anno;
+    setRisposta(null);
+    setErrore(null);
+    carica();
+  }, [anno, carica]);
+
+  // Ricalcolo a ogni caricamento concluso di primarie o secondarie, dopo una
+  // breve attesa; piu' caricamenti vicini fanno un calcolo solo.
+  useEffect(() => {
+    let attesa = null;
+    const unsubscribe = base44.entities.UploadLog.subscribe((event) => {
+      const d = event && event.data;
+      if (!d || !TIPI_RICALCOLO.includes(d.tipo_file) || (event.type !== 'create' && event.type !== 'update')) return;
+      const id = d.id || event.id;
+      if (d.esito === 'in_corso') {
+        setAperti(m => ({ ...m, [id]: { tipo_file: d.tipo_file, utente: d.utente } }));
+        return;
+      }
+      setAperti(m => { if (!(id in m)) return m; const x = { ...m }; delete x[id]; return x; });
+      clearTimeout(attesa);
+      attesa = setTimeout(() => caricaRef.current(), ATTESA_RICALCOLO_MS);
+    });
+    return () => { clearTimeout(attesa); if (typeof unsubscribe === 'function') unsubscribe(); };
+  }, []);
+
+  // "Fissa il programma": la funzione scrive e risponde con la situazione aggiornata.
+  const fissa = async ({ settimana, righe }) => {
+    const n = ++numero.current;
+    const res = await base44.functions.invoke('calcolaPianificazioneSecondaria', { azione: 'fissa', anno, settimana, righe });
+    const r = rispostaValida(res.data);
+    if (r) applica(n, r);
+    else if (res.data && res.data.error) throw new Error(res.data.error);
+    else carica();
+  };
+
+  const anni = [];
+  for (let a = corrente; a >= Math.min(PRIMO_ANNO, corrente); a--) anni.push(a);
+  const chiuso = anno < corrente;
+  const schedaAttiva = !isAdmin && tab === 'config' ? 'programma' : tab;
+
+  // Le quattro schede dei numeri: finche' il calcolo non c'e' si aspetta, o si
+  // dice perche' manca. Configurazione e Assistente restano usabili comunque.
+  const conDati = (Scheda) => {
+    if (!risposta) {
+      if (errore) {
+        return (
+          <div className="text-center py-10 space-y-3 border rounded-lg">
+            <p className="text-red-700 font-medium">Il calcolo non è riuscito: {errore}</p>
+            <Button onClick={carica} disabled={ricalcolo}>{ricalcolo && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}Riprova</Button>
+            <p className="text-xs text-muted-foreground">Configurazione e Assistente funzionano lo stesso.</p>
+          </div>
+        );
+      }
+      return <div className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin inline" /><p className="text-sm text-muted-foreground mt-2">Calcolo del {anno} in corso…</p></div>;
+    }
+    if (risposta.configurazione_vuota) {
+      return <Vuoto>Per il {risposta.anno} non ci sono impianti seguiti con un target.{isAdmin && !risposta.sola_lettura ? ' Aggiungili nella scheda Configurazione.' : ''}</Vuoto>;
+    }
+    return <Scheda risposta={risposta} onFissa={fissa} />;
+  };
 
   return (
-    <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl lg:text-3xl font-heading font-bold">Predittività Secondarie</h1>
-        <p className="text-muted-foreground mt-1">
-          Pianificazione dei viaggi di secondaria verso gli impianti{dataFine ? ` fino al ${dataFine}` : ''}.
-          {loading && data && <span className="ml-2 text-xs inline-flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />ricalcolo…</span>}
-        </p>
-        <p className="mt-2 inline-flex items-start gap-1.5 text-xs text-primary bg-primary/5 border border-primary/20 rounded px-2 py-1">
-          <Info className="w-3.5 h-3.5 mt-px shrink-0" />
-          <span>
-            Solo rete: ACI ed extra raccolta non entrano nella predittività. Target, consuntivi, primarie, secondarie,
-            giacenze degli stoccaggi (classi 1-4 della rilevazione e movimenti di rete), ipotesi e proiezioni sono tutti della rete.
-            Il già arrivato di rete di un impianto è lo stesso in tutte le schede: le primarie arrivate al suo sito, anche quelle
-            scaricate nel suo piazzale al netto di quello che ne riparte per altri impianti (lo contano loro), più le secondarie
-            da altri stoccaggi; residuo = target meno già arrivato.
-          </span>
-        </p>
-      </div>
-      {loading && !data ? (
-        <div className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin inline" /></div>
-      ) : error ? (
-        <div className="text-center py-12 space-y-2">
-          <p className="text-destructive font-medium">Errore: {error}</p>
-          <button onClick={load} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm">Riprova</button>
+    <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <h1 className="text-2xl lg:text-3xl font-heading font-bold">Predittività delle secondarie</h1>
+          <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
+            Solo rete. Il già arrivato di un impianto sono le primarie arrivate all&apos;impianto e al suo piazzale
+            (tolto quello che riparte per altri impianti) più le secondarie da altri stoccaggi.
+          </p>
         </div>
-      ) : (
-        <>
-          <Segnalazioni data={data} />
-          <Tabs value={tab} onValueChange={setTab}>
-            <TabsList>
-              <TabsTrigger value="dashboard"><BarChart3 className="w-4 h-4 mr-1.5" /> Dashboard</TabsTrigger>
-              <TabsTrigger value="proiezione"><CalendarRange className="w-4 h-4 mr-1.5" /> Proiezione a fine anno</TabsTrigger>
-              <TabsTrigger value="settimanale"><Table className="w-4 h-4 mr-1.5" /> Settimanale</TabsTrigger>
-              {isAdmin && <TabsTrigger value="config"><Settings className="w-4 h-4 mr-1.5" /> Configurazione</TabsTrigger>}
-              <TabsTrigger value="agente"><Bot className="w-4 h-4 mr-1.5" /> Assistente</TabsTrigger>
-            </TabsList>
-            <TabsContent value="dashboard" className="mt-4"><PredittivitaDashboard data={data} onReload={load} /></TabsContent>
-            <TabsContent value="proiezione" className="mt-4"><ProiezioneAnnuale isAdmin={isAdmin} versione={versione} /></TabsContent>
-            <TabsContent value="settimanale" className="mt-4"><PredittivitaSettimanale data={data} onReload={load} /></TabsContent>
-            {isAdmin && <TabsContent value="config" className="mt-4"><PredittivitaImpiantiManager onReload={load} /></TabsContent>}
-            <TabsContent value="agente" className="mt-4"><PredittivitaAgent /></TabsContent>
-          </Tabs>
-        </>
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="text-sm text-muted-foreground flex items-center gap-1.5">
+            Anno
+            <select
+              value={anno}
+              onChange={e => setAnno(Number(e.target.value))}
+              className="border rounded-md px-2 h-9 text-sm bg-background text-foreground"
+            >
+              {anni.map(a => <option key={a} value={a}>{a}{a < corrente ? ' (chiuso, sola lettura)' : ' (in corso)'}</option>)}
+            </select>
+          </label>
+          <Button size="sm" variant="ghost" onClick={carica} disabled={ricalcolo} title="Ricalcola adesso">
+            <RefreshCw className={`w-4 h-4 ${ricalcolo ? 'animate-spin' : ''}`} />
+          </Button>
+          <EsportaSituazione risposta={risposta} />
+        </div>
+      </div>
+
+      {chiuso && (
+        <div className="flex items-start gap-2 text-sm bg-muted border rounded-lg px-3 py-2">
+          <Lock className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>Il {anno} è chiuso: lo vedi com&apos;era al 31/12/{anno}, in sola lettura. Niente si cancella.</span>
+        </div>
       )}
+
+      {risposta && (
+        <div className="flex items-center gap-x-4 gap-y-1 flex-wrap text-sm">
+          <span>Dati caricati fino al <strong>{it(risposta.dati_al)}</strong></span>
+          {!risposta.sola_lettura && !risposta.settimana_scorsa_completa && (
+            <span className="text-amber-800 flex items-center gap-1">
+              <AlertTriangle className="w-4 h-4" /> La settimana scorsa potrebbe non essere ancora tutta caricata: i numeri possono crescere.
+            </span>
+          )}
+          {risposta.fine && <span className="text-muted-foreground">Programmazione fino al {it(risposta.fine)}</span>}
+          {ricalcolo && <span className="text-xs text-muted-foreground inline-flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />ricalcolo…</span>}
+        </div>
+      )}
+
+      {risposta && errore && (
+        <div className="text-sm text-red-900 bg-red-50 border border-red-300 rounded-lg px-3 py-2 flex items-start gap-2 flex-wrap">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span className="flex-1">L&apos;ultimo ricalcolo non è riuscito ({errore}): i numeri sono quelli di prima.</span>
+          <Button size="sm" variant="outline" onClick={carica} disabled={ricalcolo}>Riprova</Button>
+        </div>
+      )}
+
+      <Avvisi risposta={risposta} aperti={Object.values(aperti)} />
+
+      <Tabs value={schedaAttiva} onValueChange={setTab}>
+        <TabsList className="flex-wrap h-auto">
+          <TabsTrigger value="programma"><CalendarCheck className="w-4 h-4 mr-1.5" /> Programma della settimana</TabsTrigger>
+          <TabsTrigger value="impianti"><Factory className="w-4 h-4 mr-1.5" /> Impianti</TabsTrigger>
+          <TabsTrigger value="stoccaggi"><Warehouse className="w-4 h-4 mr-1.5" /> Stoccaggi</TabsTrigger>
+          <TabsTrigger value="settimane"><CalendarRange className="w-4 h-4 mr-1.5" /> Settimane</TabsTrigger>
+          {isAdmin && <TabsTrigger value="config"><Settings className="w-4 h-4 mr-1.5" /> Configurazione</TabsTrigger>}
+          <TabsTrigger value="agente"><Bot className="w-4 h-4 mr-1.5" /> Assistente</TabsTrigger>
+        </TabsList>
+        {/* resta montata: i viaggi corretti a mano non si perdono passando a un'altra scheda */}
+        <TabsContent value="programma" forceMount className="mt-4 data-[state=inactive]:hidden">{conDati(ProgrammaSettimana)}</TabsContent>
+        <TabsContent value="impianti" className="mt-4">{conDati(SchedaImpianti)}</TabsContent>
+        <TabsContent value="stoccaggi" className="mt-4">{conDati(SchedaStoccaggi)}</TabsContent>
+        <TabsContent value="settimane" className="mt-4">{conDati(SchedaSettimane)}</TabsContent>
+        {isAdmin && (
+          <TabsContent value="config" className="mt-4">
+            <PredittivitaImpiantiManager anno={anno} solaLettura={chiuso} onReload={carica} />
+          </TabsContent>
+        )}
+        <TabsContent value="agente" className="mt-4"><PredittivitaAgent /></TabsContent>
+      </Tabs>
     </div>
   );
 }
