@@ -1,240 +1,427 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Loader2, Plus, Trash2, Edit3 } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
+import { Loader2, Plus, Trash2, Edit3, AlertTriangle, Info } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
-import { formatKg } from '@/lib/utils';
-import { oggiRoma } from '@/lib/giornoItaliano';
+import { ton, it, testoErrore } from './Comuni';
 
-// L'anno di lavoro e' quello del giorno italiano, come nella funzione che
-// calcola il piano. La fine della programmazione al 18 dicembre vale solo per il
-// 2026 (base44/shared/fineProgrammazione.ts): per gli altri anni resta da
-// scrivere, e finche' manca la funzione usa il 31 dicembre e lo dice.
-const annoCorrente = () => Number(oggiRoma().slice(0, 4));
-const fineDefault = () => (annoCorrente() === 2026 ? '2026-12-18' : '');
-const it = (g) => (g ? String(g).slice(0, 10).split('-').reverse().join('/') : '');
+// La configurazione della predittivita', anno per anno (26/09/2026): gli
+// impianti seguiti col loro target di rete, e per ognuno i raccoglitori e gli
+// stoccaggi che lo alimentano, con plafond e priorita'. Un record senza anno
+// vale per il 2026, l'anno in cui la predittivita' e' nata (annoDelRecord in
+// base44/shared/regolePredittivita.ts). Dal prossimo aggiornamento questi dati si
+// scriveranno in Target & Status.
+//
+// I pesi si scrivono in tonnellate e si salvano in chili, come li legge il
+// calcolo. Niente finestre di sistema: si cancella con una conferma sulla riga.
 
-function ruoloBadgeClass(ruolo) {
-  switch (ruolo) {
-    case 'raccoglitore': return 'bg-sky-100 text-sky-700 border-sky-300';
-    case 'impianto': return 'bg-blue-100 text-blue-700 border-blue-300';
-    case 'stoccaggio': return 'bg-amber-100 text-amber-700 border-amber-300';
-    case 'doppio_ruolo': return 'bg-violet-100 text-violet-700 border-violet-300';
-    default: return 'bg-muted text-muted-foreground border-border';
-  }
+const annoDelRecord = (r) => Number((r && r.anno) || 2026);
+const fineDefault = (anno) => (Number(anno) === 2026 ? '2026-12-18' : '');
+const eStoccaggio = (f) => ['stoccaggio', 'doppio_ruolo'].includes(f.ruolo || (f.tipo === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore'));
+const ruoloDi = (f) => f.ruolo || (f.tipo === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore');
+
+const RUOLI = [
+  { valore: 'raccoglitore', nome: 'Raccoglitore' },
+  { valore: 'stoccaggio', nome: 'Stoccaggio' },
+  { valore: 'doppio_ruolo', nome: 'Impianto e stoccaggio' },
+  { valore: 'impianto', nome: 'Impianto' },
+];
+const CLASSE_RUOLO = {
+  raccoglitore: 'bg-sky-100 text-sky-700 border-sky-300',
+  impianto: 'bg-blue-100 text-blue-700 border-blue-300',
+  stoccaggio: 'bg-amber-100 text-amber-700 border-amber-300',
+  doppio_ruolo: 'bg-violet-100 text-violet-700 border-violet-300',
+};
+
+/**
+ * Tonnellate scritte a mano in chili interi; vuoto vale 0, null se non e' un
+ * numero. All'italiana il punto separa le migliaia e la virgola i decimali:
+ * '2.295' sono 2.295 t, '1.250,5' e '1250,5' sono 1.250,5 t (27/09/2026: prima
+ * '2.295' si salvava come 2,295 t, mille volte meno). Un punto che non separa
+ * gruppi di tre cifre resta il separatore dei decimali: '2.5' sono 2,5 t.
+ */
+function daTonnellate(testo) {
+  const s = String(testo ?? '').trim().replace(/\s/g, '');
+  if (!s) return 0;
+  let n = NaN;
+  if (/^[1-9]\d{0,2}(\.\d{3})+(,\d+)?$/.test(s)) n = Number(s.replace(/\./g, '').replace(',', '.'));
+  else if (/^\d+(,\d+)?$/.test(s)) n = Number(s.replace(',', '.'));
+  else if (/^\d+\.\d+$/.test(s)) n = Number(s);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 1000) : null;
 }
+const inTonnellate = (kg) => String((Number(kg) || 0) / 1000).replace('.', ',');
 
-function InlineEditTarget({ value, onSave }) {
-  const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(String(value || 0));
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => { setVal(String(value || 0)); }, [value]);
-
-  const commit = async () => {
-    setEditing(false);
-    const num = Number(String(val).replace(/\./g, '').replace(',', '.'));
-    if (Number.isNaN(num) || num === value) return;
-    setSaving(true);
-    try { await onSave(num); } catch (e) { setVal(String(value || 0)); }
-    setSaving(false);
+/** Un valore che si corregge cliccandoci sopra. */
+function Modificabile({ mostra, iniziale, onSalva, larghezza = 'w-28', tipo = 'text', attivo = true }) {
+  const [aperto, setAperto] = useState(false);
+  const [val, setVal] = useState(iniziale);
+  const [salva, setSalva] = useState(false);
+  if (!attivo) return <span className="font-medium text-foreground">{mostra}</span>;
+  if (salva) return <Loader2 className="w-3 h-3 animate-spin inline" />;
+  const chiudi = async () => {
+    setAperto(false);
+    if (val === iniziale) return;
+    setSalva(true);
+    await onSalva(val);
+    setSalva(false);
   };
-
-  if (saving) return <Loader2 className="w-3 h-3 animate-spin inline" />;
-  if (editing) {
+  if (aperto) {
     return (
       <input
         autoFocus
-        type="text"
+        type={tipo}
         value={val}
         onChange={e => setVal(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setEditing(false); setVal(String(value || 0)); } }}
-        className="w-28 text-sm border border-primary rounded px-1 py-0.5 focus:outline-none"
+        onBlur={chiudi}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setVal(iniziale); setAperto(false); } }}
+        className={`${larghezza} text-sm border border-primary rounded px-1 py-0.5 bg-background focus:outline-none`}
       />
     );
   }
   return (
-    <span className="font-medium text-foreground cursor-text hover:bg-primary/10 rounded px-1 inline-flex items-center" onClick={() => setEditing(true)}>
-      {formatKg(value || 0)}
+    <button type="button" className="font-medium text-foreground hover:bg-primary/10 rounded px-1 inline-flex items-center" onClick={() => { setVal(iniziale); setAperto(true); }}>
+      {mostra}
       <Edit3 className="w-3 h-3 ml-1 opacity-40" />
-    </span>
+    </button>
   );
 }
 
-export default function PredittivitaImpiantiManager({ onReload }) {
+/** Il cestino con la conferma sulla riga, al posto di confirm(). */
+function Elimina({ nome, onElimina, piccolo = false }) {
+  const [chiedi, setChiedi] = useState(false);
+  const [lavoro, setLavoro] = useState(false);
+  if (lavoro) return <Loader2 className="w-4 h-4 animate-spin" />;
+  if (chiedi) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs">
+        Eliminare {nome}?
+        <Button size="sm" variant="destructive" className="h-7 px-2" onClick={async () => { setLavoro(true); await onElimina(); setLavoro(false); setChiedi(false); }}>Sì, elimina</Button>
+        <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => setChiedi(false)}>No</Button>
+      </span>
+    );
+  }
+  return (
+    <button type="button" aria-label={`Elimina ${nome}`} onClick={() => setChiedi(true)} className="p-1.5 hover:bg-red-50 rounded">
+      <Trash2 className={`${piccolo ? 'w-3 h-3' : 'w-4 h-4'} text-red-500`} />
+    </button>
+  );
+}
+
+function Fornitore({ f, target, modificabile, scrivi, elimina }) {
+  const stocc = eStoccaggio(f);
+  const ruolo = ruoloDi(f);
+  return (
+    <div className="border rounded px-2 py-1.5 space-y-1">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="font-medium text-sm flex items-center gap-1.5">
+          {f.nome}
+          {modificabile ? (
+            <select
+              value={ruolo}
+              aria-label={`Ruolo di ${f.nome}`}
+              onChange={e => {
+                const r = e.target.value;
+                const s = r === 'stoccaggio' || r === 'doppio_ruolo';
+                scrivi(() => base44.entities.FornitoreSecondaria.update(f.id, { ruolo: r, tipo: s ? 'stoccaggio' : 'primaria_diretta' }), 'Ruolo aggiornato');
+              }}
+              className={`text-[11px] border rounded px-1 py-0.5 bg-background font-semibold ${CLASSE_RUOLO[ruolo] || ''}`}
+            >
+              {RUOLI.map(r => <option key={r.valore} value={r.valore}>{r.nome}</option>)}
+            </select>
+          ) : (
+            <span className={`text-[11px] border rounded px-1 py-0.5 font-semibold ${CLASSE_RUOLO[ruolo] || ''}`}>{(RUOLI.find(r => r.valore === ruolo) || {}).nome}</span>
+          )}
+          {f.stato === 'non_attivo' && <span className="text-[11px] px-1 rounded bg-muted text-muted-foreground">non attivo</span>}
+        </span>
+        {modificabile && <Elimina nome={f.nome} piccolo onElimina={() => elimina(() => base44.entities.FornitoreSecondaria.delete(f.id), `${f.nome} eliminato`)} />}
+      </div>
+      <div className="flex items-center gap-x-4 gap-y-1 flex-wrap text-xs text-muted-foreground">
+        {!stocc || ruolo === 'doppio_ruolo' ? (
+          <span>Target di raccolta dell&apos;anno (da Target Annuali): <span className="font-medium text-foreground">{target ? ton(target) : 'nessuno'}</span></span>
+        ) : null}
+        {stocc && (
+          <>
+            <span className="flex items-center gap-1">Plafond:
+              <Modificabile
+                attivo={modificabile}
+                mostra={Number(f.plafond_stoccaggio_kg) > 0 ? ton(f.plafond_stoccaggio_kg) : 'nessuno'}
+                iniziale={Number(f.plafond_stoccaggio_kg) > 0 ? inTonnellate(f.plafond_stoccaggio_kg) : ''}
+                onSalva={async (v) => {
+                  const kg = daTonnellate(v);
+                  if (kg === null) { await scrivi(() => Promise.reject(new Error('Scrivi il plafond in tonnellate, per esempio 1.250,5 oppure 1250,5.'))); return; }
+                  await scrivi(() => base44.entities.FornitoreSecondaria.update(f.id, { plafond_stoccaggio_kg: kg }), 'Plafond aggiornato');
+                }}
+              />
+            </span>
+            <span className="flex items-center gap-1">Priorità verso questo impianto:
+              <Modificabile
+                attivo={modificabile}
+                larghezza="w-14"
+                mostra={Number(f.priorita) > 0 ? String(f.priorita) : 'quella dell\'anno'}
+                iniziale={Number(f.priorita) > 0 ? String(f.priorita) : ''}
+                onSalva={async (v) => {
+                  const s = String(v).trim();
+                  if (s && !/^[1-9]\d*$/.test(s)) { await scrivi(() => Promise.reject(new Error('La priorità è un numero intero: 1 per il primo impianto, 2 per il secondo.'))); return; }
+                  await scrivi(() => base44.entities.FornitoreSecondaria.update(f.id, { priorita: s ? Number(s) : null }), 'Priorità aggiornata');
+                }}
+              />
+            </span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function PredittivitaImpiantiManager({ anno, solaLettura = false, onReload }) {
+  const { toast } = useToast();
   const [impianti, setImpianti] = useState([]);
   const [fornitori, setFornitori] = useState([]);
-  const [targetMap, setTargetMap] = useState({}); // nomeNormalizzato -> target_kg
+  const [targetMap, setTargetMap] = useState({});
+  const [errori, setErrori] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showImpiantoForm, setShowImpiantoForm] = useState(false);
-  const [fornitoreFormFor, setFornitoreFormFor] = useState(null);
-  const [impiantoForm, setImpiantoForm] = useState({ nome_impianto: '', target: 0, data_fine: fineDefault() });
-  const [fornitoreForm, setFornitoreForm] = useState({ nome: '', ruolo: 'raccoglitore', plafond_stoccaggio_kg: 0 });
+  const [formImpianto, setFormImpianto] = useState(null);
+  const [formFornitoreDi, setFormFornitoreDi] = useState(null);
+  const [formFornitore, setFormFornitore] = useState({ nome: '', ruolo: 'raccoglitore', plafond: '', priorita: '' });
+  const [salvataggio, setSalvataggio] = useState(false);
+  const modificabile = !solaLettura;
+  // Le letture si numerano: una superata da un'altra (l'anno e' cambiato, o una
+  // scrittura ha riletto nel frattempo) non tocca niente. Senza, cambiando anno
+  // in fretta poteva restare a video, modificabile, la configurazione di un
+  // anno chiuso sotto il titolo di quello in corso.
+  const ultimaLettura = useRef(0);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const n = ++ultimaLettura.current;
     setLoading(true);
-    try {
-      const [imps, forns, targets] = await Promise.all([
-        base44.entities.ImpiantoTargetSecondaria.list('-created_date', 50),
-        base44.entities.FornitoreSecondaria.list('-created_date', 200),
-        base44.entities.TargetRaccoglitore.filter({ anno: annoCorrente() }),
-      ]);
-      setImpianti(imps); setFornitori(forns);
-      // Target di rete (gli unici che esistono). Un raccoglitore diviso per
-      // regione ha piu' righe: si sommano, come fa la funzione del piano;
-      // prima qui vinceva l'ultima riga letta e il numero non tornava col piano.
+    const [imps, forns, targets] = await Promise.allSettled([
+      base44.entities.ImpiantoTargetSecondaria.list('-created_date', 500),
+      base44.entities.FornitoreSecondaria.list('-created_date', 2000),
+      base44.entities.TargetRaccoglitore.filter({ anno }),
+    ]);
+    if (n !== ultimaLettura.current) return;
+    const nuovi = [];
+    if (imps.status === 'fulfilled') setImpianti((imps.value || []).filter(i => annoDelRecord(i) === anno));
+    else nuovi.push(`gli impianti seguiti (${testoErrore(imps.reason)})`);
+    if (forns.status === 'fulfilled') setFornitori((forns.value || []).filter(f => annoDelRecord(f) === anno));
+    else nuovi.push(`raccoglitori e stoccaggi (${testoErrore(forns.reason)})`);
+    if (targets.status === 'fulfilled') {
+      // Un raccoglitore diviso per regione ha piu' righe: si sommano, come fa il calcolo.
       const tm = {};
-      for (const t of targets) {
-        const key = normalizzaRagioneSociale(t.raccoglitore);
-        if (key) tm[key] = (tm[key] || 0) + (t.target_tonnellate || 0) * 1000;
+      for (const t of targets.value || []) {
+        const k = normalizzaRagioneSociale(t.raccoglitore);
+        if (k) tm[k] = (tm[k] || 0) + (Number(t.target_tonnellate) || 0) * 1000;
       }
       setTargetMap(tm);
-    } catch (e) {}
+    } else nuovi.push(`i target dei raccoglitori (${testoErrore(targets.reason)})`);
+    setErrori(nuovi);
     setLoading(false);
+  }, [anno]);
+
+  useEffect(() => { load(); setFormImpianto(null); setFormFornitoreDi(null); }, [load]);
+
+  // Ogni scrittura: se riesce si rilegge e si ricalcola, se no si dice perche'.
+  const scrivi = async (fn, messaggio) => {
+    try {
+      await fn();
+      if (messaggio) toast({ title: messaggio });
+      await load();
+      if (onReload) onReload();
+      return true;
+    } catch (e) {
+      toast({ title: 'Non salvato', description: testoErrore(e), variant: 'destructive' });
+      return false;
+    }
   };
 
-  useEffect(() => { load(); }, []);
-
-  const addImpianto = async () => {
-    if (!impiantoForm.nome_impianto) return;
-    await base44.entities.ImpiantoTargetSecondaria.create({ ...impiantoForm, target: Number(impiantoForm.target), stato: 'attivo' });
-    setImpiantoForm({ nome_impianto: '', target: 0, data_fine: fineDefault() });
-    setShowImpiantoForm(false); load(); onReload();
+  const aggiungiImpianto = async () => {
+    const nome = formImpianto.nome.trim();
+    const target = daTonnellate(formImpianto.target);
+    if (!nome) { toast({ title: 'Manca il nome dell\'impianto', variant: 'destructive' }); return; }
+    if (target === null) { toast({ title: 'Il target non è un numero', description: 'Scrivilo in tonnellate, per esempio 2.295 oppure 2295.', variant: 'destructive' }); return; }
+    if (!target) { toast({ title: 'Manca il target', description: `Scrivi il target di rete del ${anno} in tonnellate, più di zero: senza target l'impianto resta fuori dalla predittività.`, variant: 'destructive' }); return; }
+    setSalvataggio(true);
+    const ok = await scrivi(() => base44.entities.ImpiantoTargetSecondaria.create({
+      nome_impianto: nome, target, data_fine: formImpianto.data_fine || undefined, stato: 'attivo', anno,
+    }), `${nome} aggiunto al ${anno}`);
+    setSalvataggio(false);
+    if (ok) setFormImpianto(null);
   };
 
-  const addFornitore = async (impiantoId) => {
-    if (!fornitoreForm.nome) return;
-    const imp = impianti.find(i => i.id === impiantoId);
-    const isStocRole = fornitoreForm.ruolo === 'stoccaggio' || fornitoreForm.ruolo === 'doppio_ruolo';
-    await base44.entities.FornitoreSecondaria.create({
-      nome: fornitoreForm.nome, impianto_id: impiantoId, impianto_nome: imp?.nome_impianto,
-      ruolo: fornitoreForm.ruolo, tipo: isStocRole ? 'stoccaggio' : 'primaria_diretta', stato: 'attivo',
-      plafond_stoccaggio_kg: isStocRole ? Number(fornitoreForm.plafond_stoccaggio_kg) : 0,
-    });
-    setFornitoreForm({ nome: '', ruolo: 'raccoglitore', plafond_stoccaggio_kg: 0 }); setFornitoreFormFor(null); load(); onReload();
-  };
-
-  const updateImpianto = async (imp, patch) => {
-    await base44.entities.ImpiantoTargetSecondaria.update(imp.id, patch);
-    load(); onReload();
-  };
-
-  const removeImpianto = async (imp) => {
-    if (!confirm(`Eliminare ${imp.nome_impianto}?`)) return;
-    await base44.entities.ImpiantoTargetSecondaria.delete(imp.id); load(); onReload();
-  };
-
-  const removeFornitore = async (f) => {
-    if (!confirm(`Eliminare ${f.nome}?`)) return;
-    await base44.entities.FornitoreSecondaria.delete(f.id); load(); onReload();
-  };
-
-  const updateFornitore = async (f, patch) => {
-    await base44.entities.FornitoreSecondaria.update(f.id, patch);
-    load(); onReload();
+  const aggiungiFornitore = async (imp) => {
+    const nome = formFornitore.nome.trim();
+    const stocc = formFornitore.ruolo === 'stoccaggio' || formFornitore.ruolo === 'doppio_ruolo';
+    const plafond = stocc ? daTonnellate(formFornitore.plafond) : 0;
+    const prio = String(formFornitore.priorita).trim();
+    if (!nome) { toast({ title: 'Manca il nome', variant: 'destructive' }); return; }
+    if (plafond === null) { toast({ title: 'Il plafond non è un numero', description: 'Scrivilo in tonnellate.', variant: 'destructive' }); return; }
+    if (stocc && prio && !/^[1-9]\d*$/.test(prio)) { toast({ title: 'La priorità è un numero intero', description: '1 per il primo impianto, 2 per il secondo.', variant: 'destructive' }); return; }
+    setSalvataggio(true);
+    const ok = await scrivi(() => base44.entities.FornitoreSecondaria.create({
+      nome, impianto_id: imp.id, impianto_nome: imp.nome_impianto, ruolo: formFornitore.ruolo,
+      tipo: stocc ? 'stoccaggio' : 'primaria_diretta', stato: 'attivo', anno,
+      plafond_stoccaggio_kg: stocc ? plafond : 0,
+      ...(stocc && prio ? { priorita: Number(prio) } : {}),
+    }), `${nome} collegato a ${imp.nome_impianto}`);
+    setSalvataggio(false);
+    if (ok) { setFormFornitore({ nome: '', ruolo: 'raccoglitore', plafond: '', priorita: '' }); setFormFornitoreDi(null); }
   };
 
   if (loading) return <div className="text-center py-8"><Loader2 className="w-5 h-5 animate-spin inline" /></div>;
 
+  const idImpianti = new Set(impianti.map(i => i.id));
+  const senzaImpianto = fornitori.filter(f => !idImpianti.has(f.impianto_id));
+
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <h2 className="font-heading font-semibold">Impianti Target ({impianti.length})</h2>
-        <Button size="sm" onClick={() => setShowImpiantoForm(!showImpiantoForm)}><Plus className="w-4 h-4 mr-1" /> Aggiungi Impianto</Button>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Solo rete: ACI ed extra raccolta non entrano nella predittività. Il target dell&apos;impianto è quello di rete, e fra i fornitori
-        vanno registrati solo raccoglitori e stoccaggi che lavorano sulla rete: chi lavora solo per l&apos;ACI o l&apos;extra raccolta non ha
-        niente da pianificare qui, e la pagina lo segnala.
-        {/* Regola del 22/09/2026: le primarie scaricate nel piazzale dell'impianto sono gia' nel suo gia' arrivato, e i viaggi dal piazzale all'impianto non si contano. */}
-        {' '}Il piazzale dell&apos;impianto stesso non va registrato come suo stoccaggio: le primarie che ci arrivano sono già nel
-        già arrivato di rete dell&apos;impianto (tolto quello che riparte per gli altri impianti, che lo contano loro), e i viaggi dal
-        piazzale all&apos;impianto non abbassano il residuo. Va registrato solo come stoccaggio degli altri impianti a cui spedisce.
+      <p className="text-sm font-medium text-primary bg-primary/5 border border-primary/20 rounded px-3 py-2 flex items-start gap-2">
+        <Info className="w-4 h-4 mt-0.5 shrink-0" />
+        Dal prossimo aggiornamento questi dati si inseriscono in Target &amp; Status.
       </p>
 
-      {showImpiantoForm && (
-        <div className="border rounded-lg p-3 space-y-2 bg-muted/30">
-          <div className="grid grid-cols-3 gap-2">
-            <Input placeholder="Nome impianto" value={impiantoForm.nome_impianto} onChange={e => setImpiantoForm({ ...impiantoForm, nome_impianto: e.target.value })} />
-            <Input type="number" placeholder="Target (kg)" value={impiantoForm.target} onChange={e => setImpiantoForm({ ...impiantoForm, target: e.target.value })} />
-            <Input type="date" value={impiantoForm.data_fine} onChange={e => setImpiantoForm({ ...impiantoForm, data_fine: e.target.value })} />
-          </div>
-          <Button size="sm" onClick={addImpianto}>Salva</Button>
+      {errori.length > 0 && (
+        <div className="text-sm text-red-900 bg-red-50 border border-red-300 rounded-lg px-3 py-2 flex items-start gap-2 flex-wrap">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span className="flex-1">Non si sono potuti leggere {errori.join('; ')}.</span>
+          <Button size="sm" variant="outline" onClick={load}>Riprova</Button>
         </div>
       )}
 
-      {impianti.map(imp => (
-        <div key={imp.id} className="border rounded-lg p-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-heading font-semibold">{imp.nome_impianto}</h3>
-              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
-                Target:
-                <InlineEditTarget value={imp.target || 0} onSave={(v) => updateImpianto(imp, { target: v })} />
-                <span>kg di rete · Scadenza: {imp.data_fine ? it(imp.data_fine) : (fineDefault() ? it(fineDefault()) : '31/12, finché non si scrive la fine della programmazione')}</span>
-              </p>
-            </div>
-            <div className="flex gap-1">
-              <Button size="sm" variant="outline" onClick={() => setFornitoreFormFor(fornitoreFormFor === imp.id ? null : imp.id)}><Plus className="w-4 h-4 mr-1" /> Fornitore</Button>
-              <button onClick={() => removeImpianto(imp)} className="p-2 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button>
-            </div>
+      <div className="flex justify-between items-center flex-wrap gap-2">
+        <h2 className="font-heading font-semibold">Impianti seguiti nel {anno} ({impianti.length})</h2>
+        {modificabile && (
+          <Button size="sm" onClick={() => setFormImpianto(formImpianto ? null : { nome: '', target: '', data_fine: fineDefault(anno) })}>
+            <Plus className="w-4 h-4 mr-1" /> Aggiungi impianto
+          </Button>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {solaLettura ? `Il ${anno} è chiuso: la configurazione si consulta e non si cambia. ` : ''}
+        Il target è quello di rete. Il piazzale di un impianto non va registrato come suo stoccaggio: si registra solo come stoccaggio degli altri impianti a cui spedisce.
+        La priorità vale per uno stoccaggio che alimenta più impianti: 1 al primo; vuota vale quella dell&apos;anno.
+      </p>
+
+      {formImpianto && (
+        <div className="border rounded-lg p-3 space-y-2 bg-muted/30">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <label className="text-xs text-muted-foreground space-y-1">Nome dell&apos;impianto
+              <Input value={formImpianto.nome} onChange={e => setFormImpianto({ ...formImpianto, nome: e.target.value })} />
+            </label>
+            <label className="text-xs text-muted-foreground space-y-1">Target di rete del {anno} (tonnellate)
+              <Input inputMode="decimal" value={formImpianto.target} onChange={e => setFormImpianto({ ...formImpianto, target: e.target.value })} />
+            </label>
+            <label className="text-xs text-muted-foreground space-y-1">Fine della programmazione
+              <Input type="date" value={formImpianto.data_fine} onChange={e => setFormImpianto({ ...formImpianto, data_fine: e.target.value })} />
+            </label>
           </div>
-          {fornitoreFormFor === imp.id && (
-            <div className="border rounded p-2 bg-muted/30 flex flex-wrap gap-2">
-              <Input placeholder="Nome fornitore" value={fornitoreForm.nome} onChange={e => setFornitoreForm({ ...fornitoreForm, nome: e.target.value })} className="flex-1 min-w-[180px]" />
-              <select value={fornitoreForm.ruolo} onChange={e => setFornitoreForm({ ...fornitoreForm, ruolo: e.target.value })} className="border rounded px-2 text-sm bg-background">
-                <option value="raccoglitore">Raccoglitore</option>
-                <option value="impianto">Impianto</option>
-                <option value="stoccaggio">Stoccaggio</option>
-                <option value="doppio_ruolo">Doppio ruolo (impianto+stoccaggio)</option>
-              </select>
-              {(fornitoreForm.ruolo === 'stoccaggio' || fornitoreForm.ruolo === 'doppio_ruolo') && (
-                <Input type="number" placeholder="Plafond stoccaggio (kg)" value={fornitoreForm.plafond_stoccaggio_kg} onChange={e => setFornitoreForm({ ...fornitoreForm, plafond_stoccaggio_kg: e.target.value })} className="w-48" />
-              )}
-              <Button size="sm" onClick={() => addFornitore(imp.id)}>Salva</Button>
-            </div>
-          )}
-          <div className="space-y-1">
-            {fornitori.filter(f => f.impianto_id === imp.id).map(f => (
-              <div key={f.id} className="border rounded px-2 py-1.5 space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-sm flex items-center gap-1.5">
-                    {f.nome}
-                    <select
-                      value={f.ruolo || (f.tipo === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore')}
-                      onChange={e => {
-                        const newRuolo = e.target.value;
-                        const isStoc = newRuolo === 'stoccaggio' || newRuolo === 'doppio_ruolo';
-                        updateFornitore(f, { ruolo: newRuolo, tipo: isStoc ? 'stoccaggio' : 'primaria_diretta' });
-                      }}
-                      className={`text-[10px] border rounded px-1 py-0.5 bg-background font-semibold ${ruoloBadgeClass(f.ruolo || (f.tipo === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore'))}`}
-                    >
-                      <option value="raccoglitore">Raccoglitore</option>
-                      <option value="impianto">Impianto</option>
-                      <option value="stoccaggio">Stoccaggio</option>
-                      <option value="doppio_ruolo">Doppio ruolo</option>
-                    </select>
-                  </span>
-                  <button onClick={() => removeFornitore(f)} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-3 h-3 text-red-500" /></button>
-                </div>
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Target annuo di rete (da Target Annuali): <span className="font-medium text-foreground">{formatKg(targetMap[normalizzaRagioneSociale(f.nome)] || 0)} kg</span>
-                    {(f.ruolo === 'stoccaggio' || f.ruolo === 'doppio_ruolo' || (!f.ruolo && f.tipo === 'stoccaggio')) && f.plafond_stoccaggio_kg != null && (
-                      <span className="ml-2">· Plafond: <span className="font-medium text-foreground">{formatKg(f.plafond_stoccaggio_kg || 0)} kg</span></span>
-                    )}
-                  </span>
-                  <span className="flex items-center gap-1">Ipotesi mese corr.:
-                    <InlineEditTarget value={f.ipotesi_mese_corrente || 0} onSave={(v) => updateFornitore(f, { ipotesi_mese_corrente: v })} />
-                  </span>
-                </div>
-              </div>
-            ))}
-            {fornitori.filter(f => f.impianto_id === imp.id).length === 0 && <p className="text-xs text-muted-foreground">Nessun fornitore configurato.</p>}
-          </div>
+          <Button size="sm" onClick={aggiungiImpianto} disabled={salvataggio}>{salvataggio && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}Salva</Button>
         </div>
-      ))}
+      )}
+
+      {impianti.length === 0 && (
+        <p className="text-sm text-muted-foreground border rounded-lg p-4 text-center">
+          Per il {anno} non c&apos;è ancora nessun impianto seguito{modificabile ? ': aggiungili qui sopra.' : '.'}
+        </p>
+      )}
+
+      {impianti.map(imp => {
+        const suoi = fornitori.filter(f => f.impianto_id === imp.id);
+        return (
+          <div key={imp.id} className="border rounded-lg p-3 space-y-2">
+            <div className="flex items-start justify-between gap-2 flex-wrap">
+              <div>
+                <h3 className="font-heading font-semibold flex items-center gap-2">
+                  {imp.nome_impianto}
+                  {imp.stato === 'non_attivo' && <span className="text-[11px] px-1 rounded bg-muted text-muted-foreground font-normal">non attivo</span>}
+                </h3>
+                <p className="text-sm text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                  Target di rete:
+                  <Modificabile
+                    attivo={modificabile}
+                    mostra={ton(imp.target)}
+                    iniziale={inTonnellate(imp.target)}
+                    onSalva={async (v) => {
+                      const kg = daTonnellate(v);
+                      if (kg === null) { await scrivi(() => Promise.reject(new Error('Scrivi il target in tonnellate, per esempio 2.295 oppure 2295.'))); return; }
+                      if (!kg) { await scrivi(() => Promise.reject(new Error("Il target non può essere vuoto o zero: senza target l'impianto resta fuori dalla predittività."))); return; }
+                      await scrivi(() => base44.entities.ImpiantoTargetSecondaria.update(imp.id, { target: kg }), 'Target aggiornato');
+                    }}
+                  />
+                  <span>· fine della programmazione:</span>
+                  <Modificabile
+                    attivo={modificabile}
+                    tipo="date"
+                    larghezza="w-36"
+                    mostra={imp.data_fine ? it(imp.data_fine) : (fineDefault(anno) ? it(fineDefault(anno)) : 'da scrivere')}
+                    iniziale={imp.data_fine ? String(imp.data_fine).slice(0, 10) : ''}
+                    onSalva={async (v) => { if (v) await scrivi(() => base44.entities.ImpiantoTargetSecondaria.update(imp.id, { data_fine: v }), 'Fine della programmazione aggiornata'); }}
+                  />
+                </p>
+              </div>
+              {modificabile && (
+                <div className="flex gap-1 items-center">
+                  <Button size="sm" variant="outline" onClick={() => setFormFornitoreDi(formFornitoreDi === imp.id ? null : imp.id)}>
+                    <Plus className="w-4 h-4 mr-1" /> Raccoglitore o stoccaggio
+                  </Button>
+                  <Elimina nome={imp.nome_impianto} onElimina={() => scrivi(() => base44.entities.ImpiantoTargetSecondaria.delete(imp.id), `${imp.nome_impianto} eliminato`)} />
+                </div>
+              )}
+            </div>
+
+            {formFornitoreDi === imp.id && (
+              <div className="border rounded p-2 bg-muted/30 flex flex-wrap gap-2 items-end">
+                <label className="text-xs text-muted-foreground space-y-1 flex-1 min-w-[180px]">Nome
+                  <Input value={formFornitore.nome} onChange={e => setFormFornitore({ ...formFornitore, nome: e.target.value })} />
+                </label>
+                <label className="text-xs text-muted-foreground space-y-1">Ruolo
+                  <select value={formFornitore.ruolo} onChange={e => setFormFornitore({ ...formFornitore, ruolo: e.target.value })} className="block border rounded px-2 h-9 text-sm bg-background">
+                    {RUOLI.map(r => <option key={r.valore} value={r.valore}>{r.nome}</option>)}
+                  </select>
+                </label>
+                {(formFornitore.ruolo === 'stoccaggio' || formFornitore.ruolo === 'doppio_ruolo') && (
+                  <>
+                    <label className="text-xs text-muted-foreground space-y-1">Plafond (tonnellate)
+                      <Input inputMode="decimal" value={formFornitore.plafond} onChange={e => setFormFornitore({ ...formFornitore, plafond: e.target.value })} className="w-36" />
+                    </label>
+                    <label className="text-xs text-muted-foreground space-y-1">Priorità
+                      <Input inputMode="numeric" value={formFornitore.priorita} onChange={e => setFormFornitore({ ...formFornitore, priorita: e.target.value })} className="w-20" />
+                    </label>
+                  </>
+                )}
+                <Button size="sm" onClick={() => aggiungiFornitore(imp)} disabled={salvataggio}>{salvataggio && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}Salva</Button>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              {suoi.map(f => (
+                <Fornitore
+                  key={f.id}
+                  f={f}
+                  target={targetMap[normalizzaRagioneSociale(f.nome)] || 0}
+                  modificabile={modificabile}
+                  scrivi={scrivi}
+                  elimina={scrivi}
+                />
+              ))}
+              {suoi.length === 0 && <p className="text-xs text-muted-foreground">Nessun raccoglitore o stoccaggio collegato.</p>}
+            </div>
+          </div>
+        );
+      })}
+
+      {senzaImpianto.length > 0 && (
+        <div className="border border-amber-300 bg-amber-50 rounded-lg p-3 space-y-1">
+          <p className="text-sm font-medium text-amber-900">Collegati a un impianto che nel {anno} non è seguito ({senzaImpianto.length})</p>
+          {senzaImpianto.map(f => (
+            <div key={f.id} className="flex items-center justify-between text-sm">
+              <span>{f.nome} <span className="text-xs text-muted-foreground">verso {f.impianto_nome || 'impianto sconosciuto'}</span></span>
+              {modificabile && <Elimina nome={f.nome} piccolo onElimina={() => scrivi(() => base44.entities.FornitoreSecondaria.delete(f.id), `${f.nome} eliminato`)} />}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

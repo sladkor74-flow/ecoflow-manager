@@ -34,6 +34,10 @@
       ],
       "default": "attivo"
     },
+    "anno": {
+      "type": "number",
+      "description": "Anno della predittivita' a cui vale il record (26/09/2026): ogni anno ha i suoi impianti, stoccaggi e fornitori, copiati dall'anno prima e confermati. Un record senza anno vale per il 2026, l'anno in cui la predittivita' e' nata."
+    },
     "note": {
       "type": "string"
     }

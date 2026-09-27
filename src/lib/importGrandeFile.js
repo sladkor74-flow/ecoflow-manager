@@ -463,7 +463,13 @@ export const TIPI_LETTURA_BROWSER = ['dichiarazioni_trattamento', 'ordini_non_di
 // caricamento concluso (workflow AlertEngineAutoRun), e l'allineamento delle
 // dichiarazioni mensili, che fa parte di importaGrandeFile perche' il suo esito
 // si mostra subito. I moduli che calcolano all'apertura (giacenze, dichiarazioni,
-// fatturazione) non hanno niente da ricalcolare.
+// fatturazione, predittivita' delle secondarie) non hanno niente da ricalcolare.
+// La predittivita' qui c'era fino al 26/09/2026: il piano settimanale e il
+// suggerimento del lunedi' erano esiti salvati e si rifacevano a ogni
+// caricamento. Ora la pagina si ricalcola da sola a ogni apertura senza scrivere
+// niente, e il programma della settimana dopo si fissa il mercoledi' alle 8
+// (analisiSettimanalePredittiva): rifarlo a ogni caricamento lo cambierebbe,
+// mentre il programmato deve restare quello deciso per confrontarlo col fatto.
 //
 // Le terziarie non compaiono: nessuno dei ricalcoli le legge (i soggetti della
 // qualifica vengono da primarie, secondarie ed extra raccolta).
@@ -476,8 +482,8 @@ export const TIPI_LETTURA_BROWSER = ['dichiarazioni_trattamento', 'ordini_non_di
 // record: al primo errore metteva in "errore" una verifica conclusa, e una
 // quadratura senza righe salvate diventava "La lettura del file non e' riuscita".
 const RICALCOLI = {
-  primarie: ['evasioneAssegnati', 'ritiriEct', 'verifiche', 'qualifica', 'predittivita'],
-  secondarie: ['verifiche', 'qualifica', 'predittivita'],
+  primarie: ['evasioneAssegnati', 'ritiriEct', 'verifiche', 'qualifica'],
+  secondarie: ['verifiche', 'qualifica'],
   extra_raccolta: ['verifiche', 'qualifica'],
 };
 
@@ -486,7 +492,6 @@ const NOMI_RICALCOLI = {
   ritiriEct: 'ritiri delle richieste del consorzio',
   verifiche: 'verifiche dei report e quadrature FIR (anche nessuna movimentazione)',
   qualifica: 'qualifica fornitori',
-  predittivita: 'piano delle secondarie di rete e suggerimento della settimana',
   alertExtra: "alert delle date obbligatorie dell'extra raccolta",
 };
 
@@ -630,14 +635,6 @@ export async function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
       const risposte = [];
       for (const anno of anni) risposte.push(await base44.functions.invoke('qualificaFornitori', { anno }));
       return risposte;
-    },
-    // Il piano settimanale e il suggerimento del lunedi' sono esiti salvati: si
-    // rifanno dopo ogni caricamento di primarie e secondarie, uno dopo l'altro.
-    predittivita: async () => {
-      const piano = await base44.functions.invoke('calcolaPianificazioneSecondaria', {});
-      const dati = (piano && piano.data) || {};
-      if (dati.piano_salvato === false) throw new Error(dati.caricamento_in_corso ? `piano non salvato: ${dati.caricamento_in_corso}` : 'piano non salvato');
-      return [piano, await base44.functions.invoke('analisiSettimanalePredittiva', {})];
     },
     // Una scheda senza fine trasporto la riga del registro non la scrive, e se
     // la scrittura non riesce il workflow non parte: senza, l'alert delle date

@@ -3,6 +3,7 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { individuaSoggetti } from "../../shared/qualificaFornitori.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
+import { impiantiTargetDellAnno } from "../../shared/targetImpianti.ts";
 
 // La situazione contrattuale di un anno: chi va contrattualizzato, per cosa, e
 // a che punto e' ciascun contratto.
@@ -51,7 +52,7 @@ export default async function(req) {
       svc.ModelloContratto.filter({ stato: 'attivo' }, 'tipo_contratto', 100),
       fetchAll(svc.Fornitore),
       svc.TargetRaccoglitore.filter({ anno: annoNum }, 'raccoglitore', 500),
-      svc.ImpiantoTargetSecondaria.filter({ stato: 'attivo' }, 'nome_impianto', 100),
+      fetchAll(svc.ImpiantoTargetSecondaria, { stato: 'attivo' }),
     ]);
 
     const perChiave = (elenco, campo) => {
@@ -63,7 +64,11 @@ export default async function(req) {
       return m;
     };
     const fornitorePer = perChiave(fornitori, 'ragione_sociale');
-    const impiantoPer = perChiave(impiantiTarget, 'nome_impianto');
+    // Il target di un impianto vale un anno (26/09/2026): i record degli anni
+    // chiusi restano attivi, e ogni anno se ne aggiunge uno. Vale quello
+    // dell'anno chiesto, o se non c'e' ancora quello dell'ultimo anno scritto:
+    // mai il primo trovato per nome, che poteva essere di due anni prima.
+    const impiantoPer = impiantiTargetDellAnno(impiantiTarget, annoNum);
 
     // I target per raccoglitore si sommano fra le regioni: il contratto e' uno solo.
     const targetPer = new Map();

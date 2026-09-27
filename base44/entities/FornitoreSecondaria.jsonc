@@ -57,6 +57,14 @@
       ],
       "default": "attivo"
     },
+    "anno": {
+      "type": "number",
+      "description": "Anno della predittivita' a cui vale il record (26/09/2026): ogni anno ha i suoi impianti, stoccaggi e fornitori, copiati dall'anno prima e confermati. Un record senza anno vale per il 2026, l'anno in cui la predittivita' e' nata."
+    },
+    "priorita": {
+      "type": "number",
+      "description": "Per uno stoccaggio che alimenta piu' impianti: l'ordine dell'impianto (1 = il primo). Non vuol dire servirlo prima degli altri: ogni settimana lo stoccaggio li serve tutti, e al primo va il numero di viaggi che gli fa raggiungere il target entro la fine della programmazione, agli altri quello che resta. Vuoto: le regole dell'anno (regolePredittivita.ts), poi pari."
+    },
     "note": {
       "type": "string"
     }

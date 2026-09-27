@@ -42,6 +42,7 @@
       "enum": [
         "da_programmare",
         "programmatato",
+        "programmato",
         "completato",
         "annullato"
       ],
@@ -56,6 +57,11 @@
     },
     "note": {
       "type": "string"
+    },
+    "origine": {
+      "type": "string",
+      "enum": ["programma", "manuale"],
+      "description": "Da dove viene la riga (26/09/2026): 'programma' = fissata dal suggerimento del mercoledi' (i viaggi della settimana dopo, stoccaggio per impianto), 'manuale' = corretta a mano dall'amministratore, che il suggerimento non sovrascrive piu'. Le righe senza origine sono del piano di prima e non si leggono piu'."
     }
   },
   "required": [

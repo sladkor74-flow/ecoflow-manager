@@ -250,14 +250,87 @@ residuo risulta il doppio di quello vero.
 
 **Il gia' arrivato della predittivita'** (solo rete, 22/09/2026) ha un conto solo,
 `giaArrivatoDiRete` in `base44/shared/proiezioneSecondarie.ts` (specchio in
-`src/lib`), usato da Dashboard, Proiezione, suggerimento del lunedi' e agente: le
+`src/lib`), usato dal motore della predittivita' (e quindi da ogni scheda, dal
+programma del mercoledi' e dagli assistenti): le
 primarie di rete arrivate al **sito** dell'impianto seguito, cioe' all'impianto e
 al suo piazzale (`tipo_destinazione` 'stoc'), piu' le secondarie di rete da altri
 stoccaggi. Le primarie del piazzale contano perche' "il residuo totale diminuisce
 anche con le primarie" (utente); le secondarie dal proprio piazzale a se stesso
 non si contano, sarebbero contate due volte. Il piazzale conta al netto di quello
 che riparte verso altri impianti seguiti (scelta confermata dall'utente il
-25/09/2026).
+25/09/2026), in ordine di arrivo (27/09/2026): esce prima la giacenza del
+piazzale al 31/12 dell'anno prima, che non si toglie perche' non era nel gia'
+arrivato dell'anno, e solo dopo le primarie dell'anno, in ordine cronologico.
+
+### La predittivita' delle secondarie: un anno, un motore (26/09/2026)
+
+Rifondata dopo un'analisi che aveva trovato tre conti diversi per "quanti viaggi
+servono" (Dashboard, Proiezione e suggerimento del lunedi' davano 97 e 54 viaggi
+per lo stesso impianto). Ora c'e' **un motore solo**, `base44/shared/predittivita.ts`,
+che legge da `predittivitaDati.ts` e risponde con `predittivitaRisposta.ts`; le
+funzioni (`calcolaPianificazioneSecondaria`, `proiezioneSecondarie`,
+`analisiSettimanalePredittiva`) e gli assistenti passano tutti di li'. Le regole
+che l'utente ha dato, da non riderivare:
+
+- **Un anno alla volta.** Parte dall'ancora delle giacenze al 31/12 dell'anno
+  prima, guarda solo i movimenti dell'anno, sola rete, per fine trasporto. Al 31/12
+  l'anno si chiude: il 1 gennaio il modulo mostra l'anno nuovo, con le logiche del
+  nuovo contratto; gli anni chiusi si riaprono in sola lettura. La configurazione
+  e' per anno (`ImpiantoTargetSecondaria.anno`, `FornitoreSecondaria.anno`: senza
+  anno vale il 2026). Le regole che non sono input stanno in
+  `base44/shared/regolePredittivita.ts` (un anno nuovo si aggiunge col contratto).
+- **Tecnogum e Irigom (2026).** Tecnogum 2.295 t: primarie di Ecorecuperi (800 t),
+  250 t da T-Cycle, il resto da Nappi Sud. Irigom 4.445 t: primarie di Smoco e
+  Pneuservice (nel 2026 anche Emmesse, dopo l'incendio di Gatim di giugno), il
+  resto da Nappi Sud. Nappi Sud non basta per tutti e due.
+- **La priorita'** degli impianti di uno stoccaggio (`FornitoreSecondaria.priorita`,
+  o le regole dell'anno; 2026: Nappi Sud prima Tecnogum, poi Irigom) **non** vuol
+  dire servirne uno e poi l'altro: ogni settimana lo stoccaggio li serve tutti, al
+  primo va il numero di viaggi che gli fa raggiungere il target entro la fine della
+  programmazione (18/12/2026), agli altri quello che avanza, fino alla loro parte
+  e mai piu' della loro media settimanale arrotondata per eccesso (niente parte
+  dell'anno concentrata in una settimana). Un impianto a fine programmazione non
+  riceve piu' niente; il tetto e' il materiale del piazzale (giacenza + entrate al
+  ritmo), al netto del plafond gia' usato.
+- **Si programma sul target** (utente, 27/09/2026; la terza proiezione, il piu' basso
+  dei due flusso per flusso, non c'e' piu'): la proiezione usa quello che resta
+  del target di raccolta di ogni raccoglitore che porta agli impianti, e la
+  divisione fra gli impianti si fa su quello che ci sara' davvero negli stoccaggi
+  (`SCENARI = ['target', 'ritmo']`, `SCENARIO_PROGRAMMA = 'target'`). Accanto
+  resta il **ritmo** reale delle ultime 12 settimane (anche a cavallo d'anno), per
+  vedere se i raccoglitori ci stanno arrivando. Un flusso senza target (Emmesse
+  su Irigom) vale il ritmo in tutte e due. I target si cambiano durante l'anno in
+  Target & Status e tutto si rifa' dai numeri di adesso e da quello che e' gia'
+  stato fatto.
+- **Il gia' arrivato e il piazzale** (27/09/2026): dal piazzale di un impianto
+  esce per prima la giacenza vecchia, quella al 31/12 dell'anno prima, poi in
+  ordine cronologico quello arrivato dopo (FIFO): finche' esce la giacenza
+  vecchia non si toglie niente dal gia' arrivato. Le partenze verso impianti
+  **senza target** non si tolgono: non sono oggetto della predittivita' e stanno
+  nel modulo Secondarie (consumano pero' il piazzale nell'ordine di arrivo).
+  Quelle ACI, come Irigom verso Gatim, restano fuori comunque, perche' conta
+  solo la rete.
+- **13 t a viaggio** nel 2026 (piu' formulari divisi per classe fanno lo stesso
+  viaggio). Un viaggio **fatto** e' un camion in un giorno sullo stesso percorso
+  (`chiaveViaggio`).
+- **Il programma della settimana dopo** si fissa il **mercoledi' alle 8**, con un
+  secondo giro alle 14 (`analisiSettimanalePredittiva`, `PianificazioneSettimanale`
+  con `origine` 'programma'): il lunedi' si registrano i formulari della settimana
+  prima, e l'utente guarda il martedi'/mercoledi'. La funzione e' solo per
+  l'amministratore (il workflow gira come amministratore); scrive solo i percorsi
+  non ancora fissati, quindi il giro delle 14 non cambia quello delle 8. Con un
+  caricamento in corso rinvia (409), a meno che la settimana sia gia' fissata; se
+  il programma gia' fissato non si legge, non scrive niente. L'amministratore lo
+  corregge a mano (`origine` 'manuale', che il mercoledi' non tocca). Il
+  programmato non si sovrascrive mai con il fatto: accanto si vede se si e' in
+  anticipo o in ritardo. Le righe senza `origine` sono del piano di prima e non si
+  leggono piu'.
+- **Niente email**: il modulo ha il pulsante "Esporta la situazione", la
+  fotografia a ogni aggiornamento. La pagina dice sempre fin dove arrivano i dati
+  caricati.
+- **Si legge solo quello che serve**: la finestra dell'anno e del ritmo con
+  `$gte` sulla fine trasporto, piu' i terminati senza fine trasporto; mai gli
+  archivi interi, che conservano ormai gli anni passati.
 
 ### La fatturazione attiva verso Ecotyre
 
