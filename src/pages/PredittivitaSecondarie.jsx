@@ -2,11 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Loader2, CalendarCheck, Factory, Warehouse, CalendarRange, Settings, Bot, AlertTriangle, ChevronDown, ChevronRight, Lock, RefreshCw } from 'lucide-react';
+import { Loader2, CalendarCheck, Factory, Warehouse, CalendarRange, Settings, Bot, AlertTriangle, ChevronDown, ChevronRight, Lock, RefreshCw, FlaskConical } from 'lucide-react';
 import ProgrammaSettimana from '@/components/predittivita/ProgrammaSettimana';
 import SchedaImpianti from '@/components/predittivita/SchedaImpianti';
 import SchedaStoccaggi from '@/components/predittivita/SchedaStoccaggi';
 import SchedaSettimane from '@/components/predittivita/SchedaSettimane';
+import SimulazioneViaggi from '@/components/predittivita/SimulazioneViaggi';
 import EsportaSituazione from '@/components/predittivita/EsportaSituazione';
 import PredittivitaImpiantiManager from '@/components/predittivita/PredittivitaImpiantiManager';
 import PredittivitaAgent from '@/components/predittivita/PredittivitaAgent';
@@ -270,6 +271,7 @@ export default function PredittivitaSecondarie() {
       <Tabs value={schedaAttiva} onValueChange={setTab}>
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="programma"><CalendarCheck className="w-4 h-4 mr-1.5" /> Programma della settimana</TabsTrigger>
+          <TabsTrigger value="simulazione"><FlaskConical className="w-4 h-4 mr-1.5" /> Simulazione</TabsTrigger>
           <TabsTrigger value="impianti"><Factory className="w-4 h-4 mr-1.5" /> Impianti</TabsTrigger>
           <TabsTrigger value="stoccaggi"><Warehouse className="w-4 h-4 mr-1.5" /> Stoccaggi</TabsTrigger>
           <TabsTrigger value="settimane"><CalendarRange className="w-4 h-4 mr-1.5" /> Settimane</TabsTrigger>
@@ -278,6 +280,7 @@ export default function PredittivitaSecondarie() {
         </TabsList>
         {/* resta montata: i viaggi corretti a mano non si perdono passando a un'altra scheda */}
         <TabsContent value="programma" forceMount className="mt-4 data-[state=inactive]:hidden">{conDati(ProgrammaSettimana)}</TabsContent>
+        <TabsContent value="simulazione" className="mt-4">{conDati(SimulazioneViaggi)}</TabsContent>
         <TabsContent value="impianti" className="mt-4">{conDati(SchedaImpianti)}</TabsContent>
         <TabsContent value="stoccaggi" className="mt-4">{conDati(SchedaStoccaggi)}</TabsContent>
         <TabsContent value="settimane" className="mt-4">{conDati(SchedaSettimane)}</TabsContent>

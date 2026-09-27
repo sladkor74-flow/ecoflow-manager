@@ -15,6 +15,7 @@ const SPECCHI = [
   ['base44/shared/richiesteEct.ts', 'src/lib/richiesteEct.js'],
   ['base44/shared/dichiarazioniImpianti.ts', 'src/lib/dichiarazioniImpianti.js'],
   ['base44/shared/proiezioneSecondarie.ts', 'src/lib/proiezioneSecondarie.js'],
+  ['base44/shared/simulazioneViaggi.ts', 'src/lib/simulazioneViaggi.js'],
   ['base44/shared/limiteRichieste.ts', 'src/lib/limiteRichieste.js'],
 ];
 
