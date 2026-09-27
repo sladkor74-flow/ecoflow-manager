@@ -285,7 +285,11 @@ che l'utente ha dato, da non riderivare:
   o le regole dell'anno; 2026: Nappi Sud prima Tecnogum, poi Irigom) **non** vuol
   dire servirne uno e poi l'altro: ogni settimana lo stoccaggio li serve tutti, al
   primo va il numero di viaggi che gli fa raggiungere il target entro la fine della
-  programmazione (18/12/2026), agli altri quello che avanza, fino alla loro parte.
+  programmazione (18/12/2026), agli altri quello che avanza, fino alla loro parte
+  e mai piu' della loro media settimanale arrotondata per eccesso (niente parte
+  dell'anno concentrata in una settimana). Un impianto a fine programmazione non
+  riceve piu' niente; il tetto e' il materiale del piazzale (giacenza + entrate al
+  ritmo), al netto del plafond gia' usato.
 - **Due proiezioni affiancate**: sul target residuo dei raccoglitori e sul ritmo
   reale delle ultime 12 settimane (anche a cavallo d'anno). Si programma sulla
   **prudente**: flusso per flusso il piu' basso dei due; un flusso senza target
@@ -293,13 +297,18 @@ che l'utente ha dato, da non riderivare:
 - **13 t a viaggio** nel 2026 (piu' formulari divisi per classe fanno lo stesso
   viaggio). Un viaggio **fatto** e' un camion in un giorno sullo stesso percorso
   (`chiaveViaggio`).
-- **Il programma della settimana dopo** si fissa il **mercoledi' alle 8**
-  (`analisiSettimanalePredittiva`, `PianificazioneSettimanale` con `origine`
-  'programma'): il lunedi' si registrano i formulari della settimana prima, e
-  l'utente guarda il martedi'/mercoledi'. L'amministratore lo corregge a mano
-  (`origine` 'manuale', che il mercoledi' non tocca). Il programmato non si
-  sovrascrive mai con il fatto: accanto si vede se si e' in anticipo o in ritardo.
-  Le righe senza `origine` sono del piano di prima e non si leggono piu'.
+- **Il programma della settimana dopo** si fissa il **mercoledi' alle 8**, con un
+  secondo giro alle 14 (`analisiSettimanalePredittiva`, `PianificazioneSettimanale`
+  con `origine` 'programma'): il lunedi' si registrano i formulari della settimana
+  prima, e l'utente guarda il martedi'/mercoledi'. La funzione e' solo per
+  l'amministratore (il workflow gira come amministratore); scrive solo i percorsi
+  non ancora fissati, quindi il giro delle 14 non cambia quello delle 8. Con un
+  caricamento in corso rinvia (409), a meno che la settimana sia gia' fissata; se
+  il programma gia' fissato non si legge, non scrive niente. L'amministratore lo
+  corregge a mano (`origine` 'manuale', che il mercoledi' non tocca). Il
+  programmato non si sovrascrive mai con il fatto: accanto si vede se si e' in
+  anticipo o in ritardo. Le righe senza `origine` sono del piano di prima e non si
+  leggono piu'.
 - **Niente email**: il modulo ha il pulsante "Esporta la situazione", la
   fotografia a ogni aggiornamento. La pagina dice sempre fin dove arrivano i dati
   caricati.

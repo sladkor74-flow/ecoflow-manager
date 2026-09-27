@@ -1,12 +1,14 @@
 import React from 'react';
 import { Factory, Info, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
-import { ton, it, viaggiDec, SCENARI, Barra, Cifra, Vuoto } from './Comuni';
+import { ton, it, viaggiDec, SCENARI, senzaProiezioni, esitoFinale, Barra, Cifra, Vuoto } from './Comuni';
 
 // Gli impianti seguiti: quanto manca al target, e quanto ci arrivera' ancora in
 // due modi affiancati - sul target che resta ai raccoglitori e sul ritmo reale
 // delle ultime settimane - con la prudente, flusso per flusso la piu' bassa, che
-// e' quella su cui si programma (utente, 26/09/2026).
+// e' quella su cui si programma (utente, 26/09/2026). In un anno chiuso, o
+// quando la programmazione di un impianto e' finita, non si proietta piu'
+// niente: si dice com'e' finita.
 
 const settimane = (n) => formatNumber(Number(n) || 0, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
@@ -75,7 +77,25 @@ function Proiezioni({ i }) {
   );
 }
 
-function Raccoglitori({ i }) {
+/** Al posto delle proiezioni, quando non ce ne sono piu': target raggiunto o quanto e' mancato. */
+function EsitoFinale({ i, risposta }) {
+  const e = esitoFinale(i);
+  return (
+    <div className={`text-sm rounded-lg border px-3 py-2 flex items-start gap-2 ${e.raggiunto ? 'bg-emerald-50 border-emerald-300 text-emerald-900' : 'bg-red-50 border-red-300 text-red-900'}`}>
+      {e.raggiunto ? <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" /> : <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />}
+      {risposta.sola_lettura ? (
+        <span><strong>{e.testo}</strong>.</span>
+      ) : (
+        <span>
+          La programmazione di {i.nome} è finita il {it(i.fine)}: <strong>{e.testo.charAt(0).toLowerCase() + e.testo.slice(1)}</strong>.
+          {' '}Fino al 31/12 il già arrivato può ancora crescere con i formulari che si caricano.
+        </span>
+      )}
+    </div>
+  );
+}
+
+function Raccoglitori({ i, finito }) {
   const righe = i.primarie || [];
   if (!righe.length) return <p className="text-xs text-muted-foreground">Nessun raccoglitore ha portato primarie a {i.nome} quest&apos;anno.</p>;
   return (
@@ -88,10 +108,14 @@ function Raccoglitori({ i }) {
               <th className="text-left px-3 py-2 font-semibold">Raccoglitore</th>
               <th className="text-right px-3 py-2 font-semibold">Target dell&apos;anno</th>
               <th className="text-right px-3 py-2 font-semibold">Già portato</th>
-              <th className="text-right px-3 py-2 font-semibold">Ritmo a settimana</th>
-              <th className="text-right px-3 py-2 font-semibold">Porterà sul target</th>
-              <th className="text-right px-3 py-2 font-semibold">Porterà sul ritmo</th>
-              <th className="text-right px-3 py-2 font-semibold bg-primary/10">Prudente</th>
+              {!finito && (
+                <>
+                  <th className="text-right px-3 py-2 font-semibold">Ritmo a settimana</th>
+                  <th className="text-right px-3 py-2 font-semibold">Porterà sul target</th>
+                  <th className="text-right px-3 py-2 font-semibold">Porterà sul ritmo</th>
+                  <th className="text-right px-3 py-2 font-semibold bg-primary/10">Prudente</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -100,10 +124,14 @@ function Raccoglitori({ i }) {
                 <td className="px-3 py-2">{r.raccoglitore}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{r.target_kg === null || r.target_kg === undefined ? <span className="text-muted-foreground">nessuno</span> : ton(r.target_kg)}</td>
                 <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{ton(r.consuntivo_kg)}</td>
-                <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{ton(r.ritmo_settimanale_kg)}</td>
-                <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{r.target_kg === null || r.target_kg === undefined ? '—' : ton(r.attesa.target)}</td>
-                <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{ton(r.attesa.ritmo)}</td>
-                <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap bg-primary/5 font-medium">{ton(r.attesa.prudente)}</td>
+                {!finito && (
+                  <>
+                    <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{ton(r.ritmo_settimanale_kg)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{r.target_kg === null || r.target_kg === undefined ? '—' : ton(r.attesa.target)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{ton(r.attesa.ritmo)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap bg-primary/5 font-medium">{ton(r.attesa.prudente)}</td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>
@@ -113,8 +141,9 @@ function Raccoglitori({ i }) {
   );
 }
 
-function Impianto({ i }) {
+function Impianto({ i, risposta }) {
   const c = i.composizione;
+  const finito = senzaProiezioni(i, risposta);
   return (
     <div className="border rounded-lg p-4 space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
@@ -142,10 +171,12 @@ function Impianto({ i }) {
           {i.note.map((n, k) => <li key={k} className="flex items-start gap-1.5"><Info className="w-3 h-3 mt-0.5 shrink-0" /><span>{n}</span></li>)}
         </ul>
       )}
-      {i.target_superato
-        ? <p className="text-sm text-emerald-700">Il target è raggiunto: a {i.nome} non servono altre secondarie.</p>
-        : <Proiezioni i={i} />}
-      <Raccoglitori i={i} />
+      {finito
+        ? <EsitoFinale i={i} risposta={risposta} />
+        : i.target_superato
+          ? <p className="text-sm text-emerald-700">Il target è raggiunto: a {i.nome} non servono altre secondarie.</p>
+          : <Proiezioni i={i} />}
+      <Raccoglitori i={i} finito={finito} />
     </div>
   );
 }
@@ -154,14 +185,23 @@ export default function SchedaImpianti({ risposta }) {
   const impianti = risposta.impianti || [];
   if (!impianti.length) return <Vuoto>Nessun impianto seguito con un target per il {risposta.anno}.</Vuoto>;
   const f = risposta.finestra_ritmo || {};
+  const tuttiFiniti = impianti.every(i => senzaProiezioni(i, risposta));
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Quanto arriverà ancora in primaria si stima in due modi: sul target che resta ai raccoglitori e sul ritmo reale
-        {f.settimane ? ` delle ultime ${f.settimane} settimane` : ''}{f.dal ? ` (dal ${it(f.dal)} al ${it(f.al)})` : ''}.
-        La prudente prende, raccoglitore per raccoglitore, la più bassa delle due (senza target vale il ritmo): il programma si fa su quella.
-      </p>
-      {impianti.map(i => <Impianto key={i.chiave} i={i} />)}
+      {tuttiFiniti ? (
+        <p className="text-sm text-muted-foreground">
+          {risposta.sola_lettura
+            ? `Il ${risposta.anno} è chiuso: per ogni impianto, com'è finito l'anno.`
+            : `La programmazione del ${risposta.anno} è finita: per ogni impianto, com'è andata.`}
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Quanto arriverà ancora in primaria si stima in due modi: sul target che resta ai raccoglitori e sul ritmo reale
+          {f.settimane ? ` delle ultime ${f.settimane} settimane` : ''}{f.dal ? ` (dal ${it(f.dal)} al ${it(f.al)})` : ''}.
+          La prudente prende, raccoglitore per raccoglitore, la più bassa delle due (senza target vale il ritmo): il programma si fa su quella.
+        </p>
+      )}
+      {impianti.map(i => <Impianto key={i.chiave} i={i} risposta={risposta} />)}
     </div>
   );
 }

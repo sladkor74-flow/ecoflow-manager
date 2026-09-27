@@ -204,7 +204,7 @@ const plafond = calcola({
 const ds = stoccaggio(plafond, 'deposito sud');
 verifica('il plafond si consuma con tutte le partenze dell\'anno verso altri', ds.plafond_kg === 100000 && ds.partiti_verso_altri_kg === 60000 && ds.residuo_plafond_kg === 40000, J(ds));
 verifica('il disponibile si ferma al plafond', tutti(ds.disponibile, 40000) && impianto(plafond, 'tecnogum').da_stoccaggi[0].kg.prudente === 40000, J(ds.disponibile));
-verifica('la settimana dopo non si programma oltre il plafond', ds.viaggi_prossima_settimana.possibili === 3, J(ds.viaggi_prossima_settimana));
+verifica('la settimana dopo non si programma oltre il plafond, tolto quello che partira\' prima di lunedi\'', ds.viaggi_prossima_settimana.possibili === 2, J(ds.viaggi_prossima_settimana));
 // Senza plafond conta il materiale: 200 t, meno una settimana di partenze al
 // passo del piano (1,2 viaggi) prima di lunedi': 14 viaggi.
 const senzaPlafond = stoccaggio(calcola({ impianti: [{ chiave: 'tecnogum', nome: 'Tecnogum', target_kg: 2000000 }], stoccaggi: [{ chiave: 'deposito sud', nome: 'Deposito Sud', plafond_kg: 0, giacenza_kg: 200000, destinazioni: [{ impianto: 'tecnogum' }] }], primarie: [OROLOGIO] }), 'deposito sud');
@@ -346,7 +346,8 @@ const aVenerdi = calcola({ primarie: [prim('A', 'B', 1000, '2026-09-18'), prim('
 verifica('fermi a venerdi\': la settimana scorsa puo\' non essere completa, e si dice', aVenerdi.dati_al === '2026-09-18' && aVenerdi.settimana_scorsa_completa === false && aVenerdi.avvisi.some(a => a.tipo === 'dati_incompleti' && a.testo.includes('18/09/2026') && a.testo.includes('20/09/2026')), J([aVenerdi.dati_al, aVenerdi.avvisi]));
 verifica('un formulario dopo oggi non sposta i dati', aVenerdi.dati_al === '2026-09-18');
 const vuotoAnno = calcola({ primarie: [prim('A', 'B', 1000, '2025-12-20')] });
-verifica('niente dell\'anno: i dati arrivano al 31/12 dell\'anno prima', vuotoAnno.dati_al === '2025-12-31' && vuotoAnno.settimana_scorsa_completa === false, vuotoAnno.dati_al);
+verifica('niente dell\'anno: si dice il giorno vero a cui arrivano i dati, anche dell\'anno prima', vuotoAnno.dati_al === '2025-12-20' && vuotoAnno.settimana_scorsa_completa === false, vuotoAnno.dati_al);
+verifica('la finestra del ritmo finisce al giorno vero dei dati, non a un 31/12 senza dati', vuotoAnno.finestra_ritmo.al === '2025-12-20', J(vuotoAnno.finestra_ritmo));
 const lunedi = calcolaPredittivita({ anno: 2026, oggi: '2026-09-21', chiave, regole: REGOLE, fine: '2026-12-18', impianti: [], primarie: [prim('A', 'B', 1000, '2026-09-20')], secondarie: [] });
 verifica('il lunedi\' con i dati fino a domenica: completa, e la settimana dopo e\' quella del 28', lunedi.settimana_scorsa_completa === true && lunedi.prossima_settimana.dal === '2026-09-28', J(lunedi.prossima_settimana));
 verifica('le regole dell\'anno', dueProiezioni.kg_per_viaggio === 13000 && dueProiezioni.regole_definite === true && dueProiezioni.fine === '2026-12-18' && dueProiezioni.anno === 2026);
@@ -386,6 +387,23 @@ const soloRete = calcola({
   ],
 });
 verifica('ACI, assegnati e senza fine trasporto non entrano in nessun conto', impianto(soloRete, 'irigom').gia_arrivato_kg === 10000 && flusso(impianto(soloRete, 'irigom'), 'Smoco').consuntivo_kg === 10000 && soloRete.dati_al === '2026-09-01', J(impianto(soloRete, 'irigom').primarie));
+
+console.log('LA REVISIONE DEL 27/09/2026');
+// Un impianto con la programmazione finita non riceve piu' niente: prima si
+// prendeva tutto il materiale di Nappi Sud e risultava "arriva al target".
+const finito = calcola({
+  impianti: [{ chiave: 'tecnogum', nome: 'Tecnogum', target_kg: 1000000, fine: '2026-09-15' }, { chiave: 'irigom', nome: 'Irigom', target_kg: 1000000 }],
+  stoccaggi: [{ chiave: 'nappi sud', nome: 'Nappi Sud', giacenza_kg: 400000, giacenza_da: '2025-12-31', destinazioni: [{ impianto: 'tecnogum', priorita: 1 }, { impianto: 'irigom', priorita: 2 }] }],
+});
+const tgF = impianto(finito, 'tecnogum'), irF = impianto(finito, 'irigom');
+verifica('programmazione finita prima di oggi: niente dagli stoccaggi, e non arriva al target', tgF.fine < '2026-09-23' && tgF.coperto_secondarie.prudente === 0 && tgF.mancanza_kg.prudente === tgF.residuo_kg && tgF.raggiunge.prudente === false, J([tgF.coperto_secondarie, tgF.mancanza_kg]));
+verifica('la sua parte resta a chi e\' ancora aperto', irF.coperto_secondarie.prudente === 400000, J(irF.coperto_secondarie));
+const rIrF = riga(finito, 'Nappi Sud', 'Irigom');
+verifica('nel programma chi resta e\' il primo: la sua media per eccesso, senza "priorita\'"', rIrF && rIrF.viaggi > 0 && !rIrF.motivo.includes('priorità') && !riga(finito, 'Nappi Sud', 'Tecnogum'), J(rIrF));
+// La giacenza di un anno chiuso si ferma al 31/12: i movimenti dopo non contano.
+const movAnnoDopo = { primarie: [], secondarie: [sec('Nappi Sud', 'Tecnogum', 13000, '2026-06-10'), sec('Nappi Sud', 'Tecnogum', 13000, '2027-02-10')] };
+verifica('giacenza fino a un giorno: i movimenti dopo non entrano', giacenzaPiazzale({ chiaveStoccaggio: 'nappi sud', partenzaKg: 100000, partenzaDel: '2025-12-31', chiave, fino: '2026-12-31', ...movAnnoDopo }) === 87000
+  && giacenzaPiazzale({ chiaveStoccaggio: 'nappi sud', partenzaKg: 100000, partenzaDel: '2025-12-31', chiave, ...movAnnoDopo }) === 74000);
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

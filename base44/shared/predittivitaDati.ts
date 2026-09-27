@@ -22,13 +22,12 @@ import { giornoRoma } from "./giornoItaliano.ts";
 import { normalizzaRagioneSociale as chiave } from "./normalizzaRagioneSociale.ts";
 import { canaleMovimento, eTerminato } from "./movimenti.ts";
 import { fineProgrammazione, avvisoFineProgrammazione } from "./fineProgrammazione.ts";
-import { regolePredittivita } from "./regolePredittivita.ts";
+import { regolePredittivita, annoDelRecord } from "./regolePredittivita.ts";
 import { ancoraDellAnno, momentoRilevazione, kgReteDiRilevazione } from "./giacenzaStoccaggi.ts";
 import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from "./reportSettimanali.ts";
 import { giacenzaPiazzale, piuGiorni } from "./predittivita.ts";
 
-/** L'anno a cui vale un record di configurazione: il suo, o il 2026 se non lo dice. */
-export const annoDelRecord = (r) => Number((r && r.anno) || 2026);
+export { annoDelRecord };
 
 const ruoloDi = (f) => f.ruolo || (String(f.tipo || '').toLowerCase().trim() === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore');
 const eStoccaggio = (f) => ['stoccaggio', 'doppio_ruolo'].includes(ruoloDi(f));
@@ -52,9 +51,13 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
   const avvisi = [];
 
   // La finestra dei movimenti: dal 1 gennaio, o da prima se il ritmo lo chiede.
+  // Il ritmo si misura sulle settimane prima dell'ultimo dato, che non sta mai
+  // prima del 31/12 dell'anno prima: leggendo anche quelle settimane, la
+  // finestra del ritmo e' sempre coperta, anche con i dati in ritardo a inizio
+  // anno. Sono una dozzina di settimane in piu', non gli anni passati.
   const inizioAnno = `${annoN}-01-01`;
-  const inizioRitmo = piuGiorni(oggi, -7 * (regole.settimane_ritmo + 2));
-  const dal = piuGiorni(inizioRitmo < inizioAnno ? inizioRitmo : inizioAnno, -1);
+  const candidati = [inizioAnno, piuGiorni(oggi, -7 * (regole.settimane_ritmo + 2)), piuGiorni(inizioAnno, -7 * regole.settimane_ritmo - 1)];
+  const dal = piuGiorni(candidati.reduce((a, b) => (b < a ? b : a)), -1);
   const filtroFinestra = { stato: 'terminato', trasporto_finito_il: { $gte: `${dal}T00:00:00` } };
   const filtroSenzaFine = { stato: 'terminato', trasporto_finito_il: null };
 
@@ -70,7 +73,8 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
     fetchAll(e.PrimariaRete, filtroSenzaFine).then(rs => rs.filter(r => !giornoRoma(r.trasporto_finito_il))).catch(() => null),
     fetchAll(e.Secondaria, filtroSenzaFine).then(rs => rs.filter(r => !giornoRoma(r.trasporto_finito_il))).catch(() => null),
     fetchAll(e.GiacenzaStoccaggio),
-    e.PianificazioneSettimanale.filter({ anno: annoN }, 'data_inizio', 2000).catch(() => []),
+    // Una lettura fallita non e' "nessun programma": si dice, e nessuno scrive.
+    e.PianificazioneSettimanale.filter({ anno: annoN }, 'data_inizio', 2000).catch(() => null),
   ]);
   const dopo = await statoCaricamenti(base44, TIPI_LETTI).catch(() => null);
   let caricamentoInCorso = null;
@@ -97,7 +101,7 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
     // una data di fine di un altro anno non vale: vale quella dell'anno
     let fineImp = String(i.data_fine || '').slice(0, 10);
     if (fineImp && fineImp.slice(0, 4) !== String(annoN)) {
-      avvisi.push({ tipo: 'fine_di_un_altro_anno', impianto: i.nome_impianto, testo: `${i.nome_impianto} ha come fine della programmazione il ${fineImp.split('-').reverse().join('/')}, che non è del ${annoN}: si usa il ${fine.data.split('-').reverse().join('/')}. Correggila in Target & Status.` });
+      avvisi.push({ tipo: 'fine_di_un_altro_anno', impianto: i.nome_impianto, testo: `${i.nome_impianto} ha come fine della programmazione il ${fineImp.split('-').reverse().join('/')}, che non è del ${annoN}: si usa il ${fine.data.split('-').reverse().join('/')}. Correggila nella scheda Configurazione della Predittività Secondarie.` });
       fineImp = '';
     }
     impianti.push({ chiave: k, nome: i.nome_impianto, target_kg: Number(i.target) || 0, fine: fineImp || fine.data, id: i.id });
@@ -107,13 +111,45 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
   // parti di target dei raccoglitori o avvisi sull'ancora.
   const chiaviImpianti = new Set(impianti.filter(i => i.target_kg > 0).map(i => i.chiave));
 
+  const fornitoriAnno = fornitoriTutti.filter(f => annoDelRecord(f) === annoN);
+
+  // --- gli stoccaggi: configurati, o che spediscono a un impianto seguito ---
+  const stoccaggi = new Map();
+  const stoccaggio = (k, nome) => {
+    if (!stoccaggi.has(k)) stoccaggi.set(k, { chiave: k, nome, plafond_kg: null, destinazioni: [] });
+    return stoccaggi.get(k);
+  };
+  for (const f of fornitoriAnno) {
+    if (!eStoccaggio(f)) continue;
+    const k = chiave(f.nome);
+    if (!k) continue;
+    const s = stoccaggio(k, f.nome);
+    if (ruoloDi(f) === 'doppio_ruolo') s.doppio_ruolo = true;
+    if (Number(f.plafond_stoccaggio_kg) > 0) s.plafond_kg = Math.max(s.plafond_kg || 0, Number(f.plafond_stoccaggio_kg));
+    const I = perId.get(f.impianto_id) || chiave(f.impianto_nome);
+    if (I && I !== k && chiaviImpianti.has(I) && !s.destinazioni.some(x => x.impianto === I)) s.destinazioni.push({ impianto: I, priorita: Number(f.priorita) || null });
+  }
+  const spediscono = new Set();
+  for (const r of secondarieRete) {
+    const g = giornoRoma(r.trasporto_finito_il);
+    const S = chiave(r.stoccaggio), I = chiave(r.destinazione);
+    if (!g || g.slice(0, 4) !== String(annoN) || !S || S === I || !chiaviImpianti.has(I)) continue;
+    stoccaggio(S, r.stoccaggio);
+    spediscono.add(S);
+  }
+  // Un piazzale registrato solo per il proprio impianto (Irigom per Irigom), o
+  // per un impianto che quest'anno non si segue, non alimenta nessun impianto
+  // seguito: il motore lo lascerebbe fuori, e chiedergli l'ancora era un avviso
+  // su qualcosa che la pagina non mostra.
+  for (const [k, s] of [...stoccaggi]) if (!s.destinazioni.length && !spediscono.has(k)) stoccaggi.delete(k);
+
   // --- i target dei raccoglitori, per sito ---
   // Un target scritto per un impianto o uno stoccaggio vale li'. Uno senza sito
   // si divide fra i siti seguiti in proporzione a quanto il raccoglitore ci ha
   // portato quest'anno, come per lo stoccaggio che alimenta piu' impianti.
-  const fornitoriAnno = fornitoriTutti.filter(f => annoDelRecord(f) === annoN);
-  const chiaviStoccaggiConfig = new Set(fornitoriAnno.filter(eStoccaggio).map(f => chiave(f.nome)).filter(Boolean));
-  const sitoSeguito = (k) => chiaviImpianti.has(k) || chiaviStoccaggiConfig.has(k);
+  // I siti sono quelli su cui il motore crea i flussi: gli impianti seguiti e
+  // gli stoccaggi che ne alimentano almeno uno.
+  const sitoSeguito = (k) => chiaviImpianti.has(k) || stoccaggi.has(k);
   const raccoglitori = [];
   for (const t of targetRaccoglitori) {
     const R = chiave(t.raccoglitore);
@@ -133,35 +169,6 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
     for (const [X, v] of perSito) raccoglitori.push({ chiave: R, nome: t.raccoglitore, sito: X, target_kg: Math.round(kg * v / totale), diviso: true });
   }
 
-  // --- gli stoccaggi: configurati, o che spediscono a un impianto seguito ---
-  const stoccaggi = new Map();
-  const stoccaggio = (k, nome) => {
-    if (!stoccaggi.has(k)) stoccaggi.set(k, { chiave: k, nome, plafond_kg: null, destinazioni: [] });
-    return stoccaggi.get(k);
-  };
-  for (const f of fornitoriAnno) {
-    if (!eStoccaggio(f)) continue;
-    const k = chiave(f.nome);
-    if (!k) continue;
-    const s = stoccaggio(k, f.nome);
-    if (Number(f.plafond_stoccaggio_kg) > 0) s.plafond_kg = Math.max(s.plafond_kg || 0, Number(f.plafond_stoccaggio_kg));
-    const I = perId.get(f.impianto_id) || chiave(f.impianto_nome);
-    if (I && I !== k && chiaviImpianti.has(I) && !s.destinazioni.some(x => x.impianto === I)) s.destinazioni.push({ impianto: I, priorita: Number(f.priorita) || null });
-  }
-  const spediscono = new Set();
-  for (const r of secondarieRete) {
-    const g = giornoRoma(r.trasporto_finito_il);
-    const S = chiave(r.stoccaggio), I = chiave(r.destinazione);
-    if (!g || g.slice(0, 4) !== String(annoN) || !S || S === I || !chiaviImpianti.has(I)) continue;
-    stoccaggio(S, r.stoccaggio);
-    spediscono.add(S);
-  }
-  // Un piazzale registrato solo per il proprio impianto (Irigom per Irigom), o
-  // per un impianto che quest'anno non si segue, non alimenta nessun impianto
-  // seguito: il motore lo lascerebbe fuori, e chiedergli l'ancora era un avviso
-  // su qualcosa che la pagina non mostra.
-  for (const [k, s] of [...stoccaggi]) if (!s.destinazioni.length && !spediscono.has(k)) stoccaggi.delete(k);
-
   // --- la giacenza di ogni piazzale: l'ancora dell'anno piu' i movimenti dopo ---
   const perSitoLetture = new Map();
   for (const r of rilevazioni) {
@@ -179,7 +186,7 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
       continue;
     }
     s.giacenza_da = del;
-    s.giacenza_kg = giacenzaPiazzale({ chiaveStoccaggio: s.chiave, partenzaKg: kgReteDiRilevazione(ancora), partenzaDel: del, primarie: primarieRete, secondarie: secondarieRete, chiave });
+    s.giacenza_kg = giacenzaPiazzale({ chiaveStoccaggio: s.chiave, partenzaKg: kgReteDiRilevazione(ancora), partenzaDel: del, primarie: primarieRete, secondarie: secondarieRete, chiave, fino: oggi });
   }
 
   return {
@@ -189,7 +196,8 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
       primarie: primarieRete, secondarie: secondarieRete,
     },
     configurazione: { impianti: impiantiAnno, fornitori: fornitoriAnno, target_raccoglitori: targetRaccoglitori },
-    programmati: programmati || [],
+    // null: il programma fissato non si e' potuto leggere (non "non c'e'")
+    programmati: programmati === null ? null : (programmati || []),
     senza_fine: primarieSenzaFine === null || secondarieSenzaFine === null ? null : { primarie: primarieSenzaFine.filter(r => rete(r, 'PrimariaRete')), secondarie: secondarieSenzaFine.filter(r => rete(r, 'Secondaria')) },
     avvisi,
     lettura: { dal, primarie: primarie.length, secondarie: secondarie.length },

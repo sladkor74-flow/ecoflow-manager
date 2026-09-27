@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ton, it, itBreve, viaggi, Vuoto } from './Comuni';
+import { ton, it, itBreve, viaggi, programmiNonLetti, Vuoto } from './Comuni';
 
 // Settimana per settimana e percorso: i viaggi programmati - quelli fissati il
 // mercoledi' o a mano, che non cambiano piu' - contro quelli fatti. Prima il
@@ -60,6 +60,11 @@ export default function SchedaSettimane({ risposta }) {
       <p className="text-sm text-muted-foreground">
         Programmati: i viaggi fissati il mercoledì o a mano. Fatti: un camion in un giorno sullo stesso percorso, anche se porta più formulari.
       </p>
+      {programmiNonLetti(risposta) && (
+        <p className="text-sm text-red-700">
+          I programmi fissati non si sono potuti leggere: dove qui mancano i viaggi programmati, non vuol dire che non siano stati fissati.
+        </p>
+      )}
       {visibili.map(g => {
         const stato = statoSettimana(g, risposta);
         const conProgramma = g.righe.filter(x => x.programmati !== null && x.programmati !== undefined);

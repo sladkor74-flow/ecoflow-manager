@@ -27,6 +27,49 @@ export const SCENARI = [
   { chiave: 'prudente', nome: 'Prudente', nota: 'quella usata per programmare' },
 ];
 
+/** 'Tecnogum', 'Tecnogum e Irigom', 'A, B e C'. */
+export const elenco = (nomi) => (nomi.length > 1 ? `${nomi.slice(0, -1).join(', ')} e ${nomi[nomi.length - 1]}` : nomi[0] || '');
+
+/**
+ * Un impianto per cui non c'e' piu' niente da proiettare: l'anno e' chiuso, o i
+ * dati hanno passato la fine della sua programmazione e davanti non restano
+ * giorni. Al posto delle proiezioni si dice com'e' finita (27/09/2026: prima un
+ * anno chiuso diceva "Arriva al target? Si'" per un impianto che non ci era
+ * arrivato).
+ */
+export const senzaProiezioni = (i, risposta) => !!(risposta && risposta.sola_lettura) || !!(i && i.orizzonte && Number(i.orizzonte.giorni) === 0);
+
+/** Com'e' finita per un impianto senza proiezioni: 'Target raggiunto' o 'Chiuso con 100,00 t mancanti'. */
+export const esitoFinale = (i) => (i.target_superato || !(Number(i.residuo_kg) > 0)
+  ? { raggiunto: true, testo: 'Target raggiunto' }
+  : { raggiunto: false, testo: `Chiuso con ${ton(i.residuo_kg)} mancanti` });
+
+/** L'avviso dei programmi fissati che non si sono potuti leggere, se c'e'. */
+export const programmiNonLetti = (risposta) => ((risposta && risposta.avvisi) || []).find(a => a.tipo === 'programmi_non_letti') || null;
+
+/**
+ * Gli avvisi come si mostrano, uguali nella pagina e nel PDF:
+ * - caricamento: i caricamenti in corso, che la pagina mette in cima;
+ * - datiIncompleti: la settimana scorsa forse non ancora tutta caricata (la
+ *   pagina lo dice nella riga "Dati caricati fino al"); in un anno chiuso non
+ *   vale, i suoi numeri non crescono piu';
+ * - gravi e altri: il resto, con le regole dell'anno se non sono ancora scritte.
+ */
+export function avvisiDaMostrare(risposta) {
+  const tutti = (risposta && risposta.avvisi) || [];
+  const resto = tutti.filter(a => a.tipo !== 'caricamento_in_corso' && a.tipo !== 'dati_incompleti');
+  if (risposta && risposta.regole_definite === false && !resto.some(a => a.tipo === 'regole_non_definite')) {
+    resto.push({ tipo: 'regole_non_definite', testo: `Per il ${risposta.anno} le regole della predittività (quanto vale un viaggio, l'ordine degli impianti di uno stoccaggio) non sono ancora scritte: valgono quelle predefinite.` });
+  }
+  return {
+    caricamento: tutti.filter(a => a.tipo === 'caricamento_in_corso'),
+    datiIncompleti: risposta && risposta.sola_lettura ? null : tutti.find(a => a.tipo === 'dati_incompleti') || null,
+    // i programmi fissati non letti tengono fermo "Fissa": sempre in evidenza
+    gravi: resto.filter(a => a.grave || a.tipo === 'programmi_non_letti'),
+    altri: resto.filter(a => !a.grave && a.tipo !== 'programmi_non_letti'),
+  };
+}
+
 /** L'errore di una chiamata, detto con le parole del server quando ci sono. */
 export const testoErrore = (e) => (e && ((e.response && e.response.data && e.response.data.error) || (e.data && e.data.error) || e.message)) || String(e || 'errore sconosciuto');
 

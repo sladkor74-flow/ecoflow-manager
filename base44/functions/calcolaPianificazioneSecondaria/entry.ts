@@ -100,6 +100,9 @@ export default async function(req) {
     if (s.errore) return errore(s.errore, s.status || 400);
 
     const { dati, calcolo, risposta } = await predittivitaDellAnno(base44, { anno, puoFissare: true });
+    // Se il programma gia' fissato non si legge, scrivere potrebbe duplicare o
+    // sovrascrivere righe che non si vedono: ci si ferma.
+    if (dati.programmati === null) return errore("Il programma gia' fissato non si e' potuto leggere: per non sovrascriverlo non si scrive niente. Riprova tra poco.", 409);
     const r = righeChieste(body.righe, calcolo, user.full_name || user.email || '');
     if (r.errore) return errore(r.errore);
 

@@ -165,7 +165,7 @@ verifica('i campi di uno stoccaggio, e il nome delle destinazioni', chiavi(rispo
 verifica('i campi di una riga del programma', chiavi(pr('Tecnogum Srl')) === 'chiave_impianto,fissato,impianto,kg,media_settimanale,motivo,priorita,spettanti,stoccaggio,viaggi', chiavi(pr('Tecnogum Srl')));
 verifica('niente record interi nella risposta', !/trasporto_finito_il|"record"|"movimenti"/.test(J(risposta)));
 verifica('la composizione del gia\' arrivato', J(risposta.impianti.find(i => i.chiave === 'tecnogum').composizione) === J({ primaria_impianto_kg: 302000, primaria_piazzale_netta_kg: 0, piazzale_ripartito_kg: 0, secondaria_kg: 13000 * 9 + 1000 }), J(risposta.impianti.find(i => i.chiave === 'tecnogum').composizione));
-verifica('la lettura', risposta.lettura.dal === '2025-12-31' && risposta.lettura.primarie === 5 && risposta.lettura.secondarie === 12, J(risposta.lettura));
+verifica('la lettura', risposta.lettura.dal === '2025-10-07' && risposta.lettura.primarie === 5 && risposta.lettura.secondarie === 12, J(risposta.lettura));
 
 console.log('GLI AVVISI');
 const date_ = risposta.avvisi.find(a => a.tipo === 'date_da_sistemare');

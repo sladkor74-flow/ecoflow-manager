@@ -36,6 +36,7 @@ import { statoDichiarazione, sommaMateriali } from "./dichiarazioniImpianti.ts";
 import { giorniAllaScadenza, fasciaScadenza } from "./omologhe.ts";
 import { statoRequisito } from "./qualificaFornitori.ts";
 import { calcolaRigheAttiva, riconciliaAttiva, documentoValido, eRigaACorpo, eSecondariaExtra, TIPOLOGIE_ATTIVA } from "./attivaCalcolo.ts";
+import { piuGiorni } from "./predittivita.ts";
 
 export { oggiRoma };
 
@@ -44,6 +45,9 @@ const soloData = (v) => giornoRoma(v);
 const terminato = (r) => String(r.stato || '').toLowerCase().trim() === 'terminato';
 const peso = (r) => Number(r.peso_effettivo) || 0;
 const t3 = (kg) => Math.round((Number(kg) || 0) / 1000 * 1000) / 1000;
+// L'ora italiana di adesso (0-23): serve a dire se il programma del mercoledi' e' ancora in tempo.
+const ORA_ROMA = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Rome', hour: '2-digit', hourCycle: 'h23' });
+const oraRoma = () => Number(ORA_ROMA.format(new Date()));
 
 const meseDi = (v, anno) => {
   const d = soloData(v);
@@ -576,6 +580,38 @@ export const STRUMENTI = [
       const tre = (o, f = t3) => (o ? { se_rispettano_il_target: f(o.target), al_ritmo_attuale: f(o.ritmo), prudente: f(o.prudente) } : null);
       const uno = (v) => Math.round((Number(v) || 0) * 10) / 10;
       const nomeImpianto = new Map((d.impianti || []).map(i => [i.chiave, i.nome]));
+      // La priorita' degli impianti di uno stoccaggio, a gruppi come nella pagina
+      // (SchedaStoccaggi): chi ha la stessa priorita' e' servito insieme, e il
+      // materiale si divide in proporzione a quello che manca a ciascuno. Il 99
+      // del motore vuol dire "nessuna priorita'" e non si mostra: prima arrivava
+      // a EcoTyna come "priorita' 99", e un elenco in fila le faceva dire "prima
+      // uno, poi l'altro" anche a priorita' pari (27/09/2026).
+      const stoccaggioDi = new Map((d.stoccaggi || []).map(s => [s.chiave, s]));
+      const insieme = (nomi) => (nomi.length > 1 ? `${nomi.slice(0, -1).join(', ')} e ${nomi[nomi.length - 1]}` : nomi[0] || '');
+      const gruppiDi = (s) => {
+        const gruppi = [];
+        for (const x of (s && s.destinazioni) || []) {
+          const nome = x.nome || nomeImpianto.get(x.impianto) || x.impianto;
+          const g = gruppi.find(y => y.priorita === x.priorita);
+          if (g) g.nomi.push(nome); else gruppi.push({ priorita: x.priorita, nomi: [nome] });
+        }
+        return gruppi.map(g => g.nomi);
+      };
+      const aChiVa = (gruppi) => {
+        if (!gruppi.length) return '';
+        if (gruppi.length === 1) return gruppi[0].length > 1 ? `${insieme(gruppi[0])} insieme, senza priorita'` : `solo ${gruppi[0][0]}`;
+        return gruppi.map((g, n) => `${n === 0 ? 'prima' : 'poi'} ${insieme(g)}`).join(', ');
+      };
+      const comeLoServe = (chiaveStoccaggio, impianto) => {
+        const gruppi = gruppiDi(stoccaggioDi.get(chiaveStoccaggio));
+        const n = gruppi.findIndex(g => g.includes(impianto));
+        if (n < 0) return null;
+        const conLui = gruppi[n].filter(x => x !== impianto);
+        const conAltri = conLui.length ? `, insieme a ${insieme(conLui)}` : '';
+        if (gruppi.length === 1) return conLui.length ? `senza priorita'${conAltri}: il materiale si divide in proporzione a quello che manca` : "e' l'unico impianto che lo stoccaggio alimenta";
+        if (n === 0) return `ha la priorita'${conAltri}: gli vanno i viaggi per raggiungere il target entro la fine`;
+        return `dopo ${insieme(gruppi.slice(0, n).flat())}${conAltri}: gli va quello che avanza`;
+      };
       const impianti = (d.impianti || []).map(i => ({
         impianto: i.nome,
         target_t: t3(i.target_kg), gia_arrivato_t: t3(i.gia_arrivato_kg), manca_t: t3(Math.max(0, i.residuo_kg)),
@@ -588,8 +624,11 @@ export const STRUMENTI = [
         mancheranno_t: tre(i.mancanza_kg),
         raggiunge_il_target: tre(i.raggiunge, (v) => !!v),
         ...(i.senza_stoccaggi ? { nessuno_stoccaggio_lo_alimenta: true } : {}),
+        // Programmazione finita: dagli stoccaggi non si assegna piu' niente, e
+        // quello che manca resta mancante.
+        ...(i.residuo_kg > 0 && ((i.orizzonte && Number(i.orizzonte.giorni) === 0) || (d.oggi && i.fine && i.fine < d.oggi)) ? { programmazione_finita: true } : {}),
         dagli_stoccaggi: (i.da_stoccaggi || []).map(x => ({
-          stoccaggio: x.nome, ordine_di_priorita: x.priorita,
+          stoccaggio: x.nome, come_lo_serve: comeLoServe(x.stoccaggio, i.nome),
           viaggi_a_settimana_prudente: uno(x.viaggi_settimana && x.viaggi_settimana.prudente),
           viaggi_fino_alla_fine_prudente: uno(x.viaggi_totali && x.viaggi_totali.prudente),
         })),
@@ -598,21 +637,74 @@ export const STRUMENTI = [
           arrivato_t: t3(x.consuntivo_kg), ritmo_a_settimana_t: t3(x.ritmo_settimanale_kg), atteso_ancora_t: tre(x.attesa),
         })),
       }));
+      // I viaggi della settimana dopo contano come nel modulo (ProgrammaSettimana):
+      // quelli fissati dove ci sono, altrimenti quelli calcolati oggi. Il totale
+      // del motore per stoccaggio e' il solo calcolato, e da giovedi' puo'
+      // differire dal programma vero (27/09/2026).
+      const righeProgramma = d.programma || [];
+      const viaggiDellaRiga = (r) => (r.fissato ? Number(r.fissato.viaggi) || 0 : Number(r.viaggi) || 0);
+      const viaggiStoccaggio = (s) => {
+        const righe = righeProgramma.filter(r => r.stoccaggio === s.nome);
+        if (!s.viaggi_prossima_settimana && !righe.length) return null;
+        return {
+          possibili: s.viaggi_prossima_settimana ? Number(s.viaggi_prossima_settimana.possibili) || 0 : 0,
+          programmati: righe.reduce((t, r) => t + viaggiDellaRiga(r), 0),
+          calcolati_oggi: righe.reduce((t, r) => t + (Number(r.viaggi) || 0), 0),
+        };
+      };
       const stoccaggi = (d.stoccaggi || []).map(s => ({
         stoccaggio: s.nome,
         giacenza_t: s.giacenza_kg == null ? null : t3(s.giacenza_kg), giacenza_calcolata_dal: it(s.giacenza_da),
         entrate_attese_t: tre(s.entrate_attese),
         plafond_t: s.plafond_kg == null ? null : t3(s.plafond_kg), residuo_plafond_t: s.residuo_plafond_kg == null ? null : t3(s.residuo_plafond_kg),
         disponibile_t: tre(s.disponibile),
-        alimenta_in_ordine: (s.destinazioni || []).map(x => x.nome || nomeImpianto.get(x.impianto) || x.impianto),
-        viaggi_prossima_settimana: s.viaggi_prossima_settimana || null,
+        a_chi_va: aChiVa(gruppiDi(s)),
+        gruppi_di_priorita: gruppiDi(s),
+        viaggi_prossima_settimana: viaggiStoccaggio(s),
       }));
       const prossima = d.prossima_settimana || {};
-      const programma = (d.programma || []).map(r => ({
-        stoccaggio: r.stoccaggio, impianto: r.impianto, viaggi_calcolati: r.viaggi, perche: r.motivo || '',
+      const programma = righeProgramma.map(r => ({
+        stoccaggio: r.stoccaggio, impianto: r.impianto,
+        viaggi: viaggiDellaRiga(r), viaggi_calcolati_oggi: Number(r.viaggi) || 0, perche: r.motivo || '',
         ...(r.limitato ? { limitati_dal_materiale: true } : {}),
         fissato: r.fissato ? { viaggi: r.fissato.viaggi, corretto_a_mano: !!r.fissato.manuale } : null,
       }));
+      // Se il programma e' gia' fissato e, se no, quando si fissa o chi lo deve
+      // fissare. Il mercoledi' che fissa la settimana dopo e' quello di questa
+      // settimana, alle 8, e alle 14 se alle 8 c'era un caricamento: dopo non
+      // ripassa piu' per quella settimana, e un programma non fissato va fissato
+      // a mano. Lo si dice qui, sul giorno e sull'ora italiani, perche' EcoTyna
+      // non prometta un mercoledi' gia' passato (27/09/2026).
+      const statoProgramma = () => {
+        if (d.sola_lettura || !prossima.dal) return null;
+        if (!righeProgramma.length) {
+          // come nella pagina (ProgrammaSettimana, programmaVuoto): perche' e' vuoto
+          const tutti = d.impianti || [];
+          const finiti = tutti.filter(i => i.fine && i.fine < prossima.dal);
+          if (!tutti.length) return `Nessun programma: la predittivita' del ${d.anno || anno} non ha impianti seguiti con un target di rete.`;
+          if (finiti.length === tutti.length) return `La programmazione del ${d.anno || anno} e' finita il ${it(finiti.map(i => i.fine).sort().pop())}: non ci sono piu' viaggi da programmare.`;
+          if (finiti.length) return `Nessun viaggio da programmare: per ${insieme(finiti.map(i => i.nome))} la programmazione e' finita, e nessuno stoccaggio alimenta gli altri impianti seguiti.`;
+          return 'Nessun viaggio da programmare: nessuno stoccaggio alimenta gli impianti seguiti la settimana prossima.';
+        }
+        if ((d.avvisi || []).some(a => a.tipo === 'programmi_non_letti')) return "Il programma gia' fissato non si e' potuto leggere: non si sa se e come e' stato fissato. I viaggi qui sono quelli calcolati oggi, non il programma.";
+        const fissate = righeProgramma.filter(r => r.fissato).length;
+        if (fissate === righeProgramma.length) {
+          return `Fissato: valgono i viaggi fissati${righeProgramma.some(r => r.fissato.manuale) ? ", alcuni corretti a mano dall'amministratore" : ''}.`;
+        }
+        const mercoledi = piuGiorni(prossima.dal, -5);
+        const oggi = d.oggi || oggiRoma();
+        const ora = oraRoma();
+        const chi = fissate
+          ? "In parte fissato: per le righe fissate valgono i viaggi fissati; le altre si fissano da sole"
+          : 'Non ancora fissato: si fissa da solo';
+        const intanto = 'Fino ad allora i viaggi sono quelli calcolati oggi e possono cambiare.';
+        if (oggi < mercoledi) return `${chi} mercoledi' ${it(mercoledi)} alle 8 (o alle 14, se alle 8 c'e' un caricamento in corso). ${intanto}`;
+        if (oggi === mercoledi && ora < 9) return `${chi} oggi, mercoledi', alle 8 (o alle 14, se alle 8 c'e' un caricamento in corso). ${intanto}`;
+        if (oggi === mercoledi && ora < 15) return `${chi} oggi con il passaggio delle 14: alle 8 non e' stato possibile, di solito per un caricamento di formulari in corso. ${intanto}`;
+        return fissate
+          ? `In parte fissato: per le righe fissate valgono i viaggi fissati. Le altre non sono state fissate mercoledi' ${it(mercoledi)} e non si fissano piu' da sole: i loro viaggi sono quelli calcolati oggi, e se servono le fissa a mano l'amministratore dal modulo Predittivita Secondarie.`
+          : `Non fissato: il passaggio automatico di mercoledi' ${it(mercoledi)} non e' riuscito (di solito per un caricamento di formulari in corso) e per questa settimana non ripassa. Lo deve fissare a mano l'amministratore dal modulo Predittivita Secondarie; intanto i viaggi sono quelli calcolati oggi, e finche' non e' fissato la settimana non avra' un programmato da confrontare con il fatto.`;
+      };
       // Programmato e fatto: le settimane arrivano dalla piu' recente; bastano
       // le ultime otto fino a questa, percorso per percorso. La settimana dopo
       // sta gia' nel programma; quella in corso non ha ancora uno scarto.
@@ -625,13 +717,18 @@ export const STRUMENTI = [
         fatti: x.fatti, fatti_t: t3(x.fatti_kg),
         scarto_viaggi: x.programmati == null || x.aperta ? null : x.fatti - x.programmati,
       }));
+      // Le regole dell'anno non ancora scritte sono un avviso, come nella pagina.
+      const avvisi = [...(d.avvisi || [])];
+      if (d.regole_definite === false && !avvisi.some(a => a.tipo === 'regole_non_definite')) {
+        avvisi.push({ tipo: 'regole_non_definite', testo: `Per il ${d.anno || anno} le regole della predittivita' (quanto vale un viaggio, l'ordine degli impianti di uno stoccaggio) non sono ancora scritte: valgono quelle predefinite.` });
+      }
       return {
         fonte: 'Predittivita delle secondarie, canale RETE',
         periodo: `anno ${d.anno || anno}${d.sola_lettura ? ', chiuso: in sola lettura, com\'era al 31/12' : ''}`,
         dati_al: oggiRoma(),
         dati: {
           canale: 'RETE',
-          avvisi: (d.avvisi || []).map(a => (a.grave ? `IMPORTANTE: ${a.testo}` : a.testo)),
+          avvisi: avvisi.map(a => (a.grave ? `IMPORTANTE: ${a.testo}` : a.testo)),
           formulari_caricati_fino_al: it(d.dati_al),
           settimana_scorsa_completa: !!d.settimana_scorsa_completa,
           tonnellate_per_viaggio: t3(d.kg_per_viaggio),
@@ -640,9 +737,9 @@ export const STRUMENTI = [
           ...(d.configurazione_vuota ? { configurazione_vuota: true } : {}),
           impianti,
           stoccaggi,
-          programma_settimana_dopo: { dal: it(prossima.dal), al: it(prossima.al), righe: programma },
+          programma_settimana_dopo: { dal: it(prossima.dal), al: it(prossima.al), stato_del_programma: statoProgramma(), righe: programma },
           programmato_e_fatto: elenco(settimane, 60),
-          nota: "Sono gli stessi numeri del modulo Predittivita Secondarie. Solo rete. Le proiezioni sono due affiancate - se i raccoglitori rispettano il loro target, e al ritmo reale delle ultime settimane - e la prudente prende raccoglitore per raccoglitore il piu' basso dei due: si programma su quella. La priorita' di uno stoccaggio non vuol dire servire un impianto e poi l'altro: ogni settimana li serve tutti, al primo i viaggi che gli servono per il target, agli altri quello che avanza. Un viaggio fatto e' un camion in un giorno sullo stesso percorso, anche con piu' formulari. Nel programma della settimana dopo vale il numero fissato (il mercoledi', o corretto a mano); se non e' ancora fissato vale il calcolato. Il programmato di una settimana passata non cambia: lo scarto dice se si e' in anticipo (positivo) o in ritardo (negativo). La settimana in corso non ha ancora uno scarto: il fatto puo' crescere.",
+          nota: "Sono gli stessi numeri del modulo Predittivita Secondarie. Solo rete. Le proiezioni sono due affiancate - se i raccoglitori rispettano il loro target, e al ritmo reale delle ultime settimane - e la prudente prende raccoglitore per raccoglitore il piu' basso dei due: si programma su quella. La priorita' di uno stoccaggio non vuol dire servire un impianto e poi l'altro: ogni settimana li serve tutti, a chi ha la priorita' i viaggi che gli servono per il target, agli altri quello che avanza; impianti con la stessa priorita' (o senza) sono serviti insieme, in proporzione a quello che manca a ciascuno, e non c'e' un primo. Un impianto con la programmazione finita non riceve piu' niente dagli stoccaggi nei conti: quello che manca resta mancante. Un viaggio fatto e' un camion in un giorno sullo stesso percorso, anche con piu' formulari. Nel programma della settimana dopo i viaggi di ogni riga e di ogni stoccaggio sono quelli del modulo: il numero fissato (il mercoledi', o corretto a mano) dove c'e', altrimenti quello calcolato oggi; se il calcolo di oggi dice un numero diverso da quello fissato e' solo un'informazione. Lo stato del programma dice se e' gia' fissato e, se no, quando si fissa o se lo deve fissare a mano l'amministratore: riportalo cosi' com'e', senza promettere un mercoledi' gia' passato. Il programmato di una settimana passata non cambia: lo scarto dice se si e' in anticipo (positivo) o in ritardo (negativo). La settimana in corso non ha ancora uno scarto: il fatto puo' crescere.",
         },
       };
     },

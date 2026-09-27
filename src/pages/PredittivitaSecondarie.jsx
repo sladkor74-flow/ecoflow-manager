@@ -10,7 +10,7 @@ import SchedaSettimane from '@/components/predittivita/SchedaSettimane';
 import EsportaSituazione from '@/components/predittivita/EsportaSituazione';
 import PredittivitaImpiantiManager from '@/components/predittivita/PredittivitaImpiantiManager';
 import PredittivitaAgent from '@/components/predittivita/PredittivitaAgent';
-import { it, testoErrore, Vuoto } from '@/components/predittivita/Comuni';
+import { it, testoErrore, avvisiDaMostrare, Vuoto } from '@/components/predittivita/Comuni';
 import { usePermessi } from '@/lib/permessi';
 import { oggiRoma } from '@/lib/giornoItaliano';
 
@@ -37,17 +37,11 @@ function rispostaValida(d) {
   return r && Array.isArray(r.impianti) && Array.isArray(r.programma) && Array.isArray(r.stoccaggi) && Array.isArray(r.settimane) ? r : null;
 }
 
-/** Il caricamento in corso e gli altri avvisi, compatti e da aprire. */
+/** Il caricamento in corso, i gravi in evidenza, gli altri compatti e da aprire. */
 function Avvisi({ risposta, aperti }) {
   const [apri, setApri] = useState(false);
-  const avvisi = (risposta && risposta.avvisi) || [];
-  const caricamento = avvisi.filter(a => a.tipo === 'caricamento_in_corso');
-  const gravi = avvisi.filter(a => a.grave && a.tipo !== 'caricamento_in_corso');
-  // quello dei dati incompleti sta gia' nella riga "Dati caricati fino al"
-  const altri = avvisi.filter(a => !a.grave && a.tipo !== 'caricamento_in_corso' && a.tipo !== 'dati_incompleti');
-  if (risposta && risposta.regole_definite === false) {
-    altri.push({ tipo: 'regole', testo: `Per il ${risposta.anno} le regole della predittività (quanto vale un viaggio, l'ordine degli impianti di uno stoccaggio) non sono ancora scritte: valgono quelle predefinite.` });
-  }
+  // gli stessi del PDF; quello dei dati incompleti sta nella riga "Dati caricati fino al"
+  const { caricamento, gravi, altri } = avvisiDaMostrare(risposta);
   const locali = caricamento.length ? [] : aperti;
   return (
     <div className="space-y-2">
@@ -171,13 +165,22 @@ export default function PredittivitaSecondarie() {
   }, []);
 
   // "Fissa il programma": la funzione scrive e risponde con la situazione aggiornata.
+  // Un ricalcolo partito durante il salvataggio (il pulsante, o un caricamento
+  // che si chiude) puo' aver letto il programma prima della scrittura: se la sua
+  // risposta ha preso il posto di questa, o se e' ancora in volo, se ne fa un
+  // altro, che legge il programma appena fissato. Lo stesso se la funzione ha
+  // salvato ma non ha potuto rileggere.
   const fissa = async ({ settimana, righe }) => {
     const n = ++numero.current;
     const res = await base44.functions.invoke('calcolaPianificazioneSecondaria', { azione: 'fissa', anno, settimana, righe });
     const r = rispostaValida(res.data);
-    if (r) applica(n, r);
-    else if (res.data && res.data.error) throw new Error(res.data.error);
-    else carica();
+    if (!r) {
+      if (res.data && res.data.error) throw new Error(res.data.error);
+      carica();
+      return;
+    }
+    const mostrata = applica(n, r);
+    if (!mostrata || inVolo.current || (r.avvisi || []).some(a => a.tipo === 'programma_non_riletto')) carica();
   };
 
   const anni = [];
@@ -203,7 +206,7 @@ export default function PredittivitaSecondarie() {
     if (risposta.configurazione_vuota) {
       return <Vuoto>Per il {risposta.anno} non ci sono impianti seguiti con un target.{isAdmin && !risposta.sola_lettura ? ' Aggiungili nella scheda Configurazione.' : ''}</Vuoto>;
     }
-    return <Scheda risposta={risposta} onFissa={fissa} />;
+    return <Scheda risposta={risposta} onFissa={fissa} isAdmin={isAdmin} />;
   };
 
   return (
@@ -280,7 +283,8 @@ export default function PredittivitaSecondarie() {
         <TabsContent value="settimane" className="mt-4">{conDati(SchedaSettimane)}</TabsContent>
         {isAdmin && (
           <TabsContent value="config" className="mt-4">
-            <PredittivitaImpiantiManager anno={anno} solaLettura={chiuso} onReload={carica} />
+            {/* una per anno: niente di un anno resta a video, modificabile, quando si passa a un altro */}
+            <PredittivitaImpiantiManager key={anno} anno={anno} solaLettura={chiuso} onReload={carica} />
           </TabsContent>
         )}
         <TabsContent value="agente" className="mt-4"><PredittivitaAgent /></TabsContent>

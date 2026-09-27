@@ -1,9 +1,9 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
-import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
+import { soloAmministratore } from "../../shared/permessi.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
-import { predittivitaDellAnno, fissaProgramma, annoInCorso } from "../../shared/predittivitaRisposta.ts";
+import { predittivitaDellAnno, fissaProgramma, annoInCorso, programmatiPerPercorso } from "../../shared/predittivitaRisposta.ts";
 
 // Il programma del mercoledi' (26/09/2026): alle 8 di ogni mercoledi' il
 // workflow "Programma del mercoledi' Predittivita'" fissa i viaggi della
@@ -45,10 +45,10 @@ async function chiudiSuggerimenti(Alert, oggi) {
 export default async function(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
-    // Il workflow del mercoledi' gira senza utente; se invece la chiama una
-    // persona, solo l'amministratore puo' fissare il programma.
-    const chiamante = await base44.auth.me().catch(() => null);
-    if (chiamante && !eAmministratore(chiamante)) return rispostaSolaLettura();
+    // Scrive il programma: solo l'amministratore. Il workflow del mercoledi'
+    // gira con quel ruolo, come gli altri lavori programmati.
+    const { errore } = await soloAmministratore(base44);
+    if (errore) return errore;
     const e = base44.asServiceRole.entities;
     const oggi = oggiRoma();
     const anno = annoInCorso();
@@ -65,6 +65,16 @@ export default async function(req) {
       avvisi: risposta.avvisi.map(a => a.testo), suggerimenti_chiusi: suggerimentiChiusi,
     };
 
+    // Il programma gia' fissato per la settimana dopo, letto dall'archivio (non
+    // dal calcolo, che durante un caricamento e' fatto su un archivio a meta').
+    if (dati.programmati === null) {
+      return Response.json({ ...base, fissato: false, error: `Il programma gia' fissato per ${periodo} non si e' potuto leggere: per non sovrascriverlo non si scrive niente. Il workflow ripassa alle 14; altrimenti si fissa dal modulo Predittivita' Secondarie.` }, { status: 409 });
+    }
+    const giaFissate = [...programmatiPerPercorso(dati.programmati).values()].filter(r => String(r.data_inizio).slice(0, 10) === settimana.dal);
+    if (dati.caricamento_in_corso && giaFissate.length) {
+      const riassunto = `Il programma per ${periodo} era gia' fissato: resta com'e' (intanto e' in corso un caricamento).`;
+      return Response.json({ ...base, ok: true, fissato: false, gia_fissato: true, riassunto, righe: [] });
+    }
     if (dati.caricamento_in_corso) {
       return Response.json({
         ...base, rinviato: true, fissato: false,
@@ -77,14 +87,15 @@ export default async function(req) {
     }
 
     // Il workflow passa due volte, alle 8 e alle 14: il secondo passaggio serve
-    // solo se alle 8 c'era un caricamento in corso. Un programma gia' fissato per
-    // la settimana dopo non si rifa': deve restare quello deciso.
-    if (risposta.programma.some(r => r.fissato && !r.fissato.manuale)) {
+    // se alle 8 c'era un caricamento in corso, o se una scrittura si e'
+    // interrotta a meta'. Le righe gia' fissate restano quelle decise; si
+    // scrivono solo quelle che mancano.
+    if (risposta.programma.length && risposta.programma.every(r => r.fissato)) {
       const riassunto = `Il programma per ${periodo} era gia' fissato: resta com'e'. Per cambiarlo, l'amministratore lo corregge dal modulo Predittivita' Secondarie.`;
       return Response.json({ ...base, ok: true, fissato: false, gia_fissato: true, riassunto, righe: [] });
     }
 
-    const righe = risposta.programma.map(r => ({ stoccaggio: r.stoccaggio, impianto: r.impianto, viaggi: r.viaggi, motivo: r.motivo }));
+    const righe = risposta.programma.filter(r => !r.fissato).map(r => ({ stoccaggio: r.stoccaggio, impianto: r.impianto, viaggi: r.viaggi, motivo: r.motivo }));
     const esito = righe.length
       ? await fissaProgramma(e, { anno, settimana: settimana.dal, righe, kgPerViaggio: calcolo.kg_per_viaggio, manuale: false, esistenti: dati.programmati, impianti: dati.ingresso.impianti })
       : { scritte: 0, lasciate: 0 };

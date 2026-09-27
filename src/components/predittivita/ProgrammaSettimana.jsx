@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, CalendarCheck, RotateCcw, CheckCircle2, AlertTriangle, Warehouse } from 'lucide-react';
-import { ton, it, viaggi, testoErrore, Vuoto } from './Comuni';
+import { ton, it, viaggi, elenco, programmiNonLetti, testoErrore, Vuoto } from './Comuni';
 
 // La scheda che si apre per prima: i viaggi da programmare la settimana
 // prossima, stoccaggio per impianto (utente, 26/09/2026: "ogni settimana il
@@ -15,8 +15,32 @@ const chiaveRiga = (r) => `${r.stoccaggio}|${r.impianto}`;
 /** I viaggi di una riga: quelli fissati, se ci sono, altrimenti quelli calcolati. */
 export const viaggiDellaRiga = (r) => (r.fissato ? Number(r.fissato.viaggi) || 0 : Number(r.viaggi) || 0);
 
-function StatoRiga({ r }) {
-  if (!r.fissato) return <span className="text-xs text-muted-foreground">Non ancora fissato</span>;
+/**
+ * Perche' il programma della settimana prossima e' vuoto, detto a parole, e se
+ * e' perche' la programmazione e' finita per tutti. Si guarda la fine di ogni
+ * impianto: uno puo' avere una fine sua, dopo quella dell'anno.
+ */
+export function programmaVuoto(risposta) {
+  if (risposta.sola_lettura) return { finita: true, testo: `Il ${risposta.anno} è chiuso: non c'è più un programma da fare.` };
+  const dal = (risposta.prossima_settimana || {}).dal;
+  const impianti = risposta.impianti || [];
+  const finiti = impianti.filter(i => i.fine && dal && i.fine < dal);
+  if (impianti.length > 0 && finiti.length === impianti.length) {
+    const ultima = finiti.map(i => i.fine).sort().pop();
+    return { finita: true, testo: `La programmazione del ${risposta.anno} è finita il ${it(ultima)}: non ci sono più viaggi da programmare.` };
+  }
+  if (finiti.length) {
+    return { finita: false, testo: `Nessun viaggio da programmare: per ${elenco(finiti.map(i => i.nome))} la programmazione è finita, e nessuno stoccaggio alimenta gli altri impianti seguiti.` };
+  }
+  return { finita: false, testo: 'Nessun viaggio da programmare: nessuno stoccaggio alimenta gli impianti seguiti la settimana prossima.' };
+}
+
+function StatoRiga({ r, ignoto }) {
+  if (!r.fissato) {
+    return ignoto
+      ? <span className="text-xs text-red-700">Non si sa: i programmi fissati non si sono potuti leggere</span>
+      : <span className="text-xs text-muted-foreground">Non ancora fissato</span>;
+  }
   const diverso = Number(r.fissato.viaggi) !== Number(r.viaggi);
   return (
     <div className="text-xs">
@@ -28,7 +52,7 @@ function StatoRiga({ r }) {
   );
 }
 
-export default function ProgrammaSettimana({ risposta, onFissa }) {
+export default function ProgrammaSettimana({ risposta, onFissa, isAdmin = false }) {
   const { toast } = useToast();
   const [bozza, setBozza] = useState({}); // solo i viaggi toccati a mano
   const [salvataggio, setSalvataggio] = useState(false);
@@ -38,6 +62,10 @@ export default function ProgrammaSettimana({ risposta, onFissa }) {
   const kgv = Number(risposta.kg_per_viaggio) || 13000;
   const settimana = risposta.prossima_settimana || {};
   const modificabile = !!risposta.puo_fissare && !risposta.sola_lettura;
+  // l'amministratore che adesso non puo' fissare, per esempio perche' i
+  // programmi gia' fissati non si sono potuti leggere: "Fissa" resta spento
+  const bloccato = !!isAdmin && !modificabile && !risposta.sola_lettura;
+  const nonLetti = programmiNonLetti(risposta);
 
   const valore = (r) => (bozza[chiaveRiga(r)] !== undefined ? bozza[chiaveRiga(r)] : String(viaggiDellaRiga(r)));
   const numero = (r) => {
@@ -50,7 +78,7 @@ export default function ProgrammaSettimana({ risposta, onFissa }) {
   const toccata = Object.keys(bozza).length > 0;
 
   const fissa = async () => {
-    if (nonValide.length) return;
+    if (!modificabile || nonValide.length) return;
     setSalvataggio(true);
     setEsito(null);
     try {
@@ -74,6 +102,8 @@ export default function ProgrammaSettimana({ risposta, onFissa }) {
     return <Vuoto>Il {risposta.anno} è chiuso: non c&apos;è più un programma da fare. Le settimane dell&apos;anno sono nella scheda Settimane.</Vuoto>;
   }
 
+  const vuoto = programma.length === 0 ? programmaVuoto(risposta) : null;
+
   // per stoccaggio: quanti viaggi potra' fare e quanti ne sono in programma
   const perStoccaggio = (risposta.stoccaggi || []).map(s => {
     const righe = programma.filter(r => r.stoccaggio === s.nome);
@@ -91,18 +121,24 @@ export default function ProgrammaSettimana({ risposta, onFissa }) {
             Settimana dal {it(settimana.dal)} al {it(settimana.al)}
           </h2>
           <p className="text-sm text-muted-foreground">
-            Un viaggio vale {ton(kgv)}. Il programma si fissa da solo il mercoledì alle 8
-            {modificabile ? '; puoi correggerlo qui e fissarlo a mano, e il mercoledì non lo cambia più.' : "; può correggerlo l'amministratore."}
+            Un viaggio vale {ton(kgv)}.
+            {!(vuoto && vuoto.finita) && (
+              <> Il programma si fissa da solo il mercoledì alle 8
+                {modificabile
+                  ? '; puoi correggerlo qui e fissarlo a mano, e il mercoledì non lo cambia più.'
+                  : bloccato ? '; adesso non si può correggere a mano (vedi sotto).' : "; può correggerlo l'amministratore."}
+              </>
+            )}
           </p>
         </div>
-        {modificabile && programma.length > 0 && (
+        {(modificabile || bloccato) && programma.length > 0 && (
           <div className="flex gap-2">
-            {toccata && (
+            {modificabile && toccata && (
               <Button size="sm" variant="outline" onClick={() => setBozza({})} disabled={salvataggio}>
                 <RotateCcw className="w-4 h-4 mr-1" /> Annulla le modifiche
               </Button>
             )}
-            <Button size="sm" onClick={fissa} disabled={salvataggio || nonValide.length > 0}>
+            <Button size="sm" onClick={fissa} disabled={!modificabile || salvataggio || nonValide.length > 0} title={bloccato ? 'Adesso il programma non si può fissare' : undefined}>
               {salvataggio ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-1" />}
               Fissa il programma
             </Button>
@@ -110,6 +146,15 @@ export default function ProgrammaSettimana({ risposta, onFissa }) {
         )}
       </div>
 
+      {(bloccato || nonLetti) && programma.length > 0 && (
+        <div className="text-sm rounded-md border-2 border-red-400 bg-red-50 text-red-900 px-3 py-2 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>
+            {bloccato ? 'Adesso il programma non si può fissare. ' : ''}
+            {nonLetti ? nonLetti.testo : 'Ricalcola la pagina e riprova.'}
+          </span>
+        </div>
+      )}
       {esito && (
         <div className={`text-sm rounded-md border px-3 py-2 flex items-start gap-2 ${esito.ok ? 'bg-emerald-50 border-emerald-300 text-emerald-900' : 'bg-red-50 border-red-300 text-red-900'}`}>
           {esito.ok ? <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" /> : <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />}
@@ -120,8 +165,8 @@ export default function ProgrammaSettimana({ risposta, onFissa }) {
         <p className="text-sm text-red-700">Scrivi i viaggi come numeri interi, zero compreso.</p>
       )}
 
-      {programma.length === 0 ? (
-        <Vuoto>Nessun viaggio da programmare: nessuno stoccaggio alimenta gli impianti seguiti la settimana prossima.</Vuoto>
+      {vuoto ? (
+        <Vuoto>{vuoto.testo}</Vuoto>
       ) : (
         <div className="border rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
@@ -162,7 +207,7 @@ export default function ProgrammaSettimana({ risposta, onFissa }) {
                       {r.motivo}
                       {r.limitato && <span className="block text-amber-700">Il piazzale non ha materiale per tutti i viaggi che servirebbero.</span>}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap"><StatoRiga r={r} /></td>
+                    <td className="px-3 py-2 whitespace-nowrap"><StatoRiga r={r} ignoto={!!nonLetti} /></td>
                   </tr>
                 );
               })}

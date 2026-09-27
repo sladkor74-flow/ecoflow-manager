@@ -112,10 +112,10 @@ console.log('SI LEGGE SOLO LA FINESTRA');
 const { base44, letture } = sdkFinto(ARCHIVI);
 const dati = await leggiDatiPredittivita(base44, { anno: 2026, oggi: '2026-09-23' });
 const filtriDi = (nome) => letture.filter(l => l.nome === nome).map(l => l.filtro);
-verifica('primarie e secondarie: i terminati dal 31/12 dell\'anno prima, e i terminati senza fine trasporto',
-  ['PrimariaRete', 'Secondaria'].every(a => J(filtriDi(a)) === J([{ stato: 'terminato', trasporto_finito_il: { $gte: '2025-12-31T00:00:00' } }, { stato: 'terminato', trasporto_finito_il: null }])), J(letture.filter(l => ['PrimariaRete', 'Secondaria'].includes(l.nome))));
+verifica('primarie e secondarie: i terminati dalle 12 settimane prima del 1/1 (la finestra del ritmo a inizio anno), e i terminati senza fine trasporto',
+  ['PrimariaRete', 'Secondaria'].every(a => J(filtriDi(a)) === J([{ stato: 'terminato', trasporto_finito_il: { $gte: '2025-10-07T00:00:00' } }, { stato: 'terminato', trasporto_finito_il: null }])), J(letture.filter(l => ['PrimariaRete', 'Secondaria'].includes(l.nome))));
 verifica('gli archivi dei movimenti non si leggono mai interi', !letture.some(l => ['PrimariaRete', 'Secondaria'].includes(l.nome) && !l.filtro));
-verifica('quanti record sono arrivati', J(dati.lettura) === J({ dal: '2025-12-31', primarie: 8, secondarie: 5 }), J(dati.lettura));
+verifica('quanti record sono arrivati', J(dati.lettura) === J({ dal: '2025-10-07', primarie: 8, secondarie: 5 }), J(dati.lettura));
 const idsP = dati.ingresso.primarie.map(r => r.id_ordine);
 verifica('fuori dalla finestra non arriva niente; l\'ACI e i non terminati restano fuori', !idsP.includes('P5') && !idsP.includes('P7') && !idsP.includes('P8') && idsP.includes('P6') && idsP.includes('P4') && idsP.length === 7, J(idsP));
 verifica('i terminati senza fine trasporto, a parte', dati.senza_fine && dati.senza_fine.primarie.map(r => r.id_ordine).join() === 'PSF' && dati.senza_fine.secondarie.map(r => r.id_ordine).join() === 'SSF', J(dati.senza_fine));

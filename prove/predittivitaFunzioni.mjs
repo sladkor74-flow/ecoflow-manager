@@ -156,7 +156,7 @@ verifica('nessuna scrittura, nemmeno dall\'amministratore', globalThis.__SCRITTI
 verifica('la proiezione e\' la stessa risposta della pagina', J(pro.body) === J(dash.body));
 verifica('l\'anno in corso, oggi, la settimana dopo', dash.body.anno === 2026 && dash.body.oggi === '2026-09-23' && dash.body.sola_lettura === false && dash.body.puo_fissare === true && J(dash.body.prossima_settimana) === J({ dal: '2026-09-28', al: '2026-10-04' }), J([dash.body.anno, dash.body.oggi, dash.body.prossima_settimana]));
 verifica('fin dove arrivano i dati', dash.body.dati_al === '2026-09-18' && dash.body.settimana_scorsa_completa === false && dash.body.avvisi.some(a => a.tipo === 'dati_incompleti'), J([dash.body.dati_al, dash.body.settimana_scorsa_completa]));
-verifica('si legge solo dal 31/12/2025', dash.body.lettura.dal === '2025-12-31' && dash.body.lettura.primarie === 8, J(dash.body.lettura));
+verifica('si legge solo la finestra: dalle 12 settimane prima del 1/1 (il ritmo a inizio anno)', dash.body.lettura.dal === '2025-10-07' && dash.body.lettura.primarie === 8, J(dash.body.lettura));
 globalThis.__UTENTE = UTENTE;
 const dashUtente = await pianificazione();
 verifica('chi non e\' amministratore vede tutto ma non puo\' fissare', dashUtente.status === 200 && dashUtente.body.puo_fissare === false && dashUtente.body.impianti.length === 3);
@@ -230,13 +230,17 @@ console.log('IL PROGRAMMA DEL MERCOLEDI\'');
 globalThis.__UTENTE = UTENTE;
 const mercolediNegato = await mercoledi();
 verifica('una persona che non e\' amministratore non lo lancia', mercolediNegato.status === 403, J(mercolediNegato));
-globalThis.__UTENTE = null; // il workflow non ha utente
+globalThis.__UTENTE = null;
+globalThis.__SCRITTI = [];
+const anonimo = await mercoledi();
+verifica('senza utente non si fissa niente', anonimo.status === 401 && !scrittiIn('PianificazioneSettimanale').length, J(anonimo.body));
+globalThis.__UTENTE = AMMINISTRATORE; // il workflow gira come amministratore, come gli altri lavori programmati
 globalThis.__SCRITTI = [];
 const mer = await mercoledi();
 verifica('risponde', mer.status === 200 && mer.body.ok === true, J(mer.body));
 verifica('fissa la settimana dopo', mer.body.fissato === true && J(mer.body.settimana) === J({ dal: '2026-09-28', al: '2026-10-04' }), J(mer.body.settimana));
-verifica('con i numeri della pagina', J(mer.body.righe.map(r => [r.stoccaggio, r.impianto, r.viaggi])) === J(dash.body.programma.map(r => [r.stoccaggio, r.impianto, r.viaggi])), J([mer.body.righe, dash.body.programma.map(r => r.viaggi)]));
-verifica('non tocca la riga corretta a mano', mer.body.lasciate_manuali === 1 && mer.body.scritte === dash.body.programma.length - 1 && !scrittiIn('PianificazioneSettimanale').some(s => s.id === manuale.id) && righeFissate()[0].viaggi_previsti === 3 && righeFissate()[0].origine === 'manuale', J(scrittiIn('PianificazioneSettimanale')));
+verifica('con i numeri della pagina, per le righe non corrette a mano', J(mer.body.righe.map(r => [r.stoccaggio, r.impianto, r.viaggi])) === J(dash.body.programma.filter(r => !(r.stoccaggio === manuale.fornitore_nome && r.impianto === manuale.impianto_nome)).map(r => [r.stoccaggio, r.impianto, r.viaggi])), J([mer.body.righe, dash.body.programma.map(r => r.viaggi)]));
+verifica('non tocca la riga corretta a mano: non la passa nemmeno', mer.body.lasciate_manuali === 0 && mer.body.scritte === dash.body.programma.length - 1 && !scrittiIn('PianificazioneSettimanale').some(s => s.id === manuale.id) && righeFissate()[0].viaggi_previsti === 3 && righeFissate()[0].origine === 'manuale', J(scrittiIn('PianificazioneSettimanale')));
 verifica('le altre righe sono del programma', righeFissate().length === dash.body.programma.length && righeFissate().slice(1).every(r => r.origine === 'programma' && r.stato === 'programmato' && r.data_inizio === '2026-09-28' && r.modificato_manuale === false), J(righeFissate()));
 verifica('il riassunto dice la correzione a mano e fin dove arrivano i dati', mer.body.riassunto.includes('Nappi Sud → Tecnogum Srl: 3 viaggi (corretti a mano') && mer.body.riassunto.includes('18/09/2026'), mer.body.riassunto);
 verifica('i suggerimenti del lunedi\' rimasti aperti si chiudono, gli altri alert no', mer.body.suggerimenti_chiusi === 1 && globalThis.__ARCHIVI.Alert.find(a => a.id === 'a1').stato === 'risolto' && globalThis.__ARCHIVI.Alert.find(a => a.id === 'a2').stato === 'aperto');
@@ -248,10 +252,15 @@ const dopo = await pianificazione();
 verifica('la pagina mostra il programma fissato, nella riga della settimana dopo', dopo.body.programma.every(r => r.fissato && r.fissato.viaggi === (r.stoccaggio === 'Nappi Sud' && r.impianto === 'Tecnogum Srl' ? 3 : r.viaggi)) && dopo.body.settimane.filter(s => s.settimana === '2026-09-28').length === dopo.body.programma.length, J(dopo.body.settimane));
 
 console.log('UN CARICAMENTO IN CORSO');
-globalThis.__UTENTE = null;
+globalThis.__UTENTE = AMMINISTRATORE;
 globalThis.__ARCHIVI.UploadLog = [{ id: 'u1', tipo_file: 'secondarie', esito: 'in_corso', created_date: '2026-09-23T05:55:00', nome_file: 'secondarie.xlsx', utente: 'Mario' }];
 globalThis.__SCRITTI = [];
+const giaConCaricamento = await mercoledi();
+verifica('con un caricamento in corso un programma gia\' fissato resta com\'e\': risponde, e non scrive', giaConCaricamento.status === 200 && giaConCaricamento.body.gia_fissato === true && !scrittiIn('PianificazioneSettimanale').length, J(giaConCaricamento.body));
+const pianiSalvati = globalThis.__ARCHIVI.PianificazioneSettimanale;
+globalThis.__ARCHIVI.PianificazioneSettimanale = pianiSalvati.filter(r => String(r.data_inizio).slice(0, 10) !== '2026-09-28');
 const rinviato = await mercoledi();
+globalThis.__ARCHIVI.PianificazioneSettimanale = pianiSalvati;
 verifica('il programma non si fissa su un archivio a meta\'', rinviato.status === 409 && rinviato.body.rinviato === true && rinviato.body.fissato === false && !scrittiIn('PianificazioneSettimanale').length && rinviato.body.error.includes('secondarie'), J(rinviato.body));
 globalThis.__UTENTE = AMMINISTRATORE;
 const conCaricamento = await pianificazione();

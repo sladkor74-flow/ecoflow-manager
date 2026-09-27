@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,7 +11,7 @@ import { ton, it, testoErrore } from './Comuni';
 // impianti seguiti col loro target di rete, e per ognuno i raccoglitori e gli
 // stoccaggi che lo alimentano, con plafond e priorita'. Un record senza anno
 // vale per il 2026, l'anno in cui la predittivita' e' nata (annoDelRecord in
-// base44/shared/predittivitaDati.ts). Dal prossimo aggiornamento questi dati si
+// base44/shared/regolePredittivita.ts). Dal prossimo aggiornamento questi dati si
 // scriveranno in Target & Status.
 //
 // I pesi si scrivono in tonnellate e si salvano in chili, come li legge il
@@ -35,11 +35,20 @@ const CLASSE_RUOLO = {
   doppio_ruolo: 'bg-violet-100 text-violet-700 border-violet-300',
 };
 
-/** Tonnellate scritte a mano ('1.250,5' o '1250.5') in chili interi; null se non e' un numero. */
+/**
+ * Tonnellate scritte a mano in chili interi; vuoto vale 0, null se non e' un
+ * numero. All'italiana il punto separa le migliaia e la virgola i decimali:
+ * '2.295' sono 2.295 t, '1.250,5' e '1250,5' sono 1.250,5 t (27/09/2026: prima
+ * '2.295' si salvava come 2,295 t, mille volte meno). Un punto che non separa
+ * gruppi di tre cifre resta il separatore dei decimali: '2.5' sono 2,5 t.
+ */
 function daTonnellate(testo) {
-  const s = String(testo ?? '').trim();
+  const s = String(testo ?? '').trim().replace(/\s/g, '');
   if (!s) return 0;
-  const n = Number(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s);
+  let n = NaN;
+  if (/^[1-9]\d{0,2}(\.\d{3})+(,\d+)?$/.test(s)) n = Number(s.replace(/\./g, '').replace(',', '.'));
+  else if (/^\d+(,\d+)?$/.test(s)) n = Number(s.replace(',', '.'));
+  else if (/^\d+\.\d+$/.test(s)) n = Number(s);
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 1000) : null;
 }
 const inTonnellate = (kg) => String((Number(kg) || 0) / 1000).replace('.', ',');
@@ -141,7 +150,7 @@ function Fornitore({ f, target, modificabile, scrivi, elimina }) {
                 iniziale={Number(f.plafond_stoccaggio_kg) > 0 ? inTonnellate(f.plafond_stoccaggio_kg) : ''}
                 onSalva={async (v) => {
                   const kg = daTonnellate(v);
-                  if (kg === null) { await scrivi(() => Promise.reject(new Error('Scrivi il plafond in tonnellate, per esempio 1.250,5.'))); return; }
+                  if (kg === null) { await scrivi(() => Promise.reject(new Error('Scrivi il plafond in tonnellate, per esempio 1.250,5 oppure 1250,5.'))); return; }
                   await scrivi(() => base44.entities.FornitoreSecondaria.update(f.id, { plafond_stoccaggio_kg: kg }), 'Plafond aggiornato');
                 }}
               />
@@ -178,14 +187,21 @@ export default function PredittivitaImpiantiManager({ anno, solaLettura = false,
   const [formFornitore, setFormFornitore] = useState({ nome: '', ruolo: 'raccoglitore', plafond: '', priorita: '' });
   const [salvataggio, setSalvataggio] = useState(false);
   const modificabile = !solaLettura;
+  // Le letture si numerano: una superata da un'altra (l'anno e' cambiato, o una
+  // scrittura ha riletto nel frattempo) non tocca niente. Senza, cambiando anno
+  // in fretta poteva restare a video, modificabile, la configurazione di un
+  // anno chiuso sotto il titolo di quello in corso.
+  const ultimaLettura = useRef(0);
 
   const load = useCallback(async () => {
+    const n = ++ultimaLettura.current;
     setLoading(true);
     const [imps, forns, targets] = await Promise.allSettled([
       base44.entities.ImpiantoTargetSecondaria.list('-created_date', 500),
       base44.entities.FornitoreSecondaria.list('-created_date', 2000),
       base44.entities.TargetRaccoglitore.filter({ anno }),
     ]);
+    if (n !== ultimaLettura.current) return;
     const nuovi = [];
     if (imps.status === 'fulfilled') setImpianti((imps.value || []).filter(i => annoDelRecord(i) === anno));
     else nuovi.push(`gli impianti seguiti (${testoErrore(imps.reason)})`);
@@ -224,7 +240,8 @@ export default function PredittivitaImpiantiManager({ anno, solaLettura = false,
     const nome = formImpianto.nome.trim();
     const target = daTonnellate(formImpianto.target);
     if (!nome) { toast({ title: 'Manca il nome dell\'impianto', variant: 'destructive' }); return; }
-    if (target === null) { toast({ title: 'Il target non è un numero', description: 'Scrivilo in tonnellate, per esempio 2.295.', variant: 'destructive' }); return; }
+    if (target === null) { toast({ title: 'Il target non è un numero', description: 'Scrivilo in tonnellate, per esempio 2.295 oppure 2295.', variant: 'destructive' }); return; }
+    if (!target) { toast({ title: 'Manca il target', description: `Scrivi il target di rete del ${anno} in tonnellate, più di zero: senza target l'impianto resta fuori dalla predittività.`, variant: 'destructive' }); return; }
     setSalvataggio(true);
     const ok = await scrivi(() => base44.entities.ImpiantoTargetSecondaria.create({
       nome_impianto: nome, target, data_fine: formImpianto.data_fine || undefined, stato: 'attivo', anno,
@@ -327,7 +344,8 @@ export default function PredittivitaImpiantiManager({ anno, solaLettura = false,
                     iniziale={inTonnellate(imp.target)}
                     onSalva={async (v) => {
                       const kg = daTonnellate(v);
-                      if (kg === null) { await scrivi(() => Promise.reject(new Error('Scrivi il target in tonnellate, per esempio 2.295.'))); return; }
+                      if (kg === null) { await scrivi(() => Promise.reject(new Error('Scrivi il target in tonnellate, per esempio 2.295 oppure 2295.'))); return; }
+                      if (!kg) { await scrivi(() => Promise.reject(new Error("Il target non può essere vuoto o zero: senza target l'impianto resta fuori dalla predittività."))); return; }
                       await scrivi(() => base44.entities.ImpiantoTargetSecondaria.update(imp.id, { target: kg }), 'Target aggiornato');
                     }}
                   />

@@ -68,10 +68,12 @@ export function rispostaPredittivita({ dati, calcolo, anno, oggi, solaLettura, p
   const senzaFine = dati.senza_fine || { primarie: [], secondarie: [] };
   const date = dateDaSistemareDiRete([...dati.ingresso.primarie, ...senzaFine.primarie], [...dati.ingresso.secondarie, ...senzaFine.secondarie], siti, anno, chiave);
   if (date.avviso) avvisi.push({ tipo: 'date_da_sistemare', testo: date.avviso });
+  if (dati.programmati === null) avvisi.push({ tipo: 'programmi_non_letti', grave: true, testo: "Il programma già fissato non si è potuto leggere: per non sovrascriverlo, oggi non si può fissare niente. Riprova tra poco." });
+  if (!calcolo.regole_definite) avvisi.push({ tipo: 'regole_non_definite', testo: `Le regole della predittività del ${anno} (viaggio medio e priorità degli stoccaggi) non sono ancora state scritte: si usano quelle predefinite, 13 t a viaggio e priorità pari. Arrivano con il contratto dell'anno.` });
   if (dati.senza_fine === null) avvisi.push({ tipo: 'senza_fine_non_letti', testo: "I formulari terminati senza fine trasporto non si sono potuti leggere: se ce ne sono, non sono segnalati qui." });
 
   // --- il programma: quello calcolato, con accanto quello gia' fissato ---
-  const fissati = programmatiPerPercorso(dati.programmati);
+  const fissati = programmatiPerPercorso(dati.programmati || []);
   const prossima = calcolo.prossima_settimana.dal;
   const programma = calcolo.programma.map(r => {
     const f = fissati.get(chiaveRiga(prossima, r.stoccaggio, r.impianto));
@@ -103,7 +105,7 @@ export function rispostaPredittivita({ dati, calcolo, anno, oggi, solaLettura, p
     .sort((a, b) => b.settimana.localeCompare(a.settimana) || a.stoccaggio.localeCompare(b.stoccaggio) || a.impianto.localeCompare(b.impianto));
 
   return {
-    anno, oggi, sola_lettura: !!solaLettura, puo_fissare: !!puoFissare,
+    anno, oggi, sola_lettura: !!solaLettura, puo_fissare: !!puoFissare && dati.programmati !== null,
     dati_al: calcolo.dati_al, settimana_scorsa_completa: calcolo.settimana_scorsa_completa,
     kg_per_viaggio: calcolo.kg_per_viaggio, fine: calcolo.fine, finestra_ritmo: calcolo.finestra_ritmo,
     regole_definite: calcolo.regole_definite, prossima_settimana: calcolo.prossima_settimana,

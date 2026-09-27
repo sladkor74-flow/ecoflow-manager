@@ -31,6 +31,9 @@ const PER_ANNO = {
   },
 };
 
+/** L'anno a cui vale un record di configurazione: il suo, o il 2026 se non lo dice. */
+export const annoDelRecord = (r) => Number((r && r.anno) || 2026);
+
 /** Le regole dell'anno, con quelle predefinite dove l'anno non dice niente, e se l'anno e' stato definito. */
 export function regolePredittivita(anno) {
   const a = PER_ANNO[Number(anno)] || null;

@@ -70,17 +70,20 @@ export function chiaveViaggio(r, chiave) {
  * finiti dopo. La stessa regola del modulo Giacenze: entrano le primarie e le
  * secondarie scaricate nel piazzale, escono tutte le secondarie che ne partono.
  */
-export function giacenzaPiazzale({ chiaveStoccaggio, partenzaKg, partenzaDel, primarie, secondarie, chiave }) {
+export function giacenzaPiazzale({ chiaveStoccaggio, partenzaKg, partenzaDel, primarie, secondarie, chiave, fino = '' }) {
   if (partenzaKg === null || partenzaKg === undefined || !partenzaDel) return null;
+  // fino: il giorno a cui si vuole la giacenza. Per un anno chiuso e' il 31/12:
+  // i movimenti dell'anno dopo non ci entrano.
+  const dentro = (g) => g && g > partenzaDel && (!fino || g <= fino);
   let kg = Number(partenzaKg) || 0;
   for (const r of primarie || []) {
     const g = giornoFine(r);
-    if (!g || g <= partenzaDel || !eTerminato(r) || canaleMovimento(r, 'PrimariaRete') !== 'RETE') continue;
+    if (!dentro(g) || !eTerminato(r) || canaleMovimento(r, 'PrimariaRete') !== 'RETE') continue;
     if (nelPiazzale(r) && chiave(r.destinazione) === chiaveStoccaggio) kg += peso(r);
   }
   for (const r of secondarie || []) {
     const g = giornoFine(r);
-    if (!g || g <= partenzaDel || !eTerminato(r) || canaleMovimento(r, 'Secondaria') !== 'RETE') continue;
+    if (!dentro(g) || !eTerminato(r) || canaleMovimento(r, 'Secondaria') !== 'RETE') continue;
     if (chiave(r.stoccaggio) === chiaveStoccaggio) kg -= peso(r);
     else if (nelPiazzale(r) && chiave(r.destinazione) === chiaveStoccaggio) kg += peso(r);
   }
@@ -111,22 +114,27 @@ export function calcolaPredittivita(d) {
   // Fin dove arrivano i dati: l'ultima fine trasporto caricata, non oggi. Il
   // lunedi' si registrano i formulari della settimana prima: fino ad allora i
   // numeri della settimana passata possono crescere, e si dice.
-  let datiAl = '';
+  // Due date diverse: l'ultimo giorno vero dei dati (fin dove arrivano, e dove
+  // finisce la finestra del ritmo) e l'inizio dell'orizzonte, che non sta mai
+  // prima dell'anno: a gennaio, senza ancora dati nuovi, l'anno comincia il 1/1.
+  let ultimo = '';
   for (const r of [...primarie, ...secondarie]) {
     const g = giornoFine(r);
-    if (g <= oggi && g > datiAl) datiAl = g;
+    if (g <= oggi && g > ultimo) ultimo = g;
   }
-  if (!datiAl || datiAl < `${annoN}-01-01`) datiAl = piuGiorni(`${annoN}-01-01`, -1);
+  const fineAnnoPrima = piuGiorni(`${annoN}-01-01`, -1);
+  if (!ultimo) ultimo = fineAnnoPrima;
+  const datiAl = ultimo < fineAnnoPrima ? fineAnnoPrima : ultimo;
   const lunediCorrente = lunediDi(oggi);
   const domenicaScorsa = piuGiorni(lunediCorrente, -1);
-  const settimanaScorsaCompleta = datiAl >= domenicaScorsa;
+  const settimanaScorsaCompleta = ultimo >= domenicaScorsa;
   if (!settimanaScorsaCompleta) {
-    avvisi.push({ tipo: 'dati_incompleti', testo: `I formulari caricati arrivano al ${it(datiAl)}: quelli della settimana scorsa (fino a domenica ${it(domenicaScorsa)}) potrebbero non essere ancora tutti dentro. I numeri possono crescere con il prossimo caricamento.` });
+    avvisi.push({ tipo: 'dati_incompleti', testo: `I formulari caricati arrivano al ${it(ultimo)}: quelli della settimana scorsa (fino a domenica ${it(domenicaScorsa)}) potrebbero non essere ancora tutti dentro. I numeri possono crescere con il prossimo caricamento.` });
   }
 
   // Il ritmo reale: le ultime settimane chiuse dai dati, anche a cavallo d'anno.
   const settRitmo = Number(regole.settimane_ritmo) || 12;
-  const finestra = { dal: piuGiorni(datiAl, -7 * settRitmo + 1), al: datiAl, settimane: settRitmo };
+  const finestra = { dal: piuGiorni(ultimo, -7 * settRitmo + 1), al: ultimo, settimane: settRitmo };
   const inFinestra = (g) => g >= finestra.dal && g <= finestra.al;
 
   // L'orizzonte: dal giorno dopo i dati alla fine della programmazione. La
@@ -160,6 +168,9 @@ export function calcolaPredittivita(d) {
   // Al sito di un impianto conta tutto (anche il suo piazzale, come nel gia'
   // arrivato); al piazzale di uno stoccaggio conta cio' che vi e' scaricato.
   const chiaviStoccaggi = new Set((d.stoccaggi || []).map(s => s.chiave));
+  // Chi e' anche impianto (doppio ruolo), seguito o no: nel suo piazzale entra
+  // solo cio' che e' scaricato come stoccaggio, come in giacenzaPiazzale.
+  const doppioRuolo = new Set((d.stoccaggi || []).filter(s => s.doppio_ruolo).map(s => s.chiave));
   const flussi = new Map(); // `${R}|${sito}|${livello}` -> flusso
   const flusso = (R, nome, sito, livello) => {
     const k = `${R}|${sito}|${livello}`;
@@ -173,7 +184,7 @@ export function calcolaPredittivita(d) {
     if (!R || !X) continue;
     const livelli = [];
     if (chiaviImpianti.has(X)) livelli.push('impianto');
-    if (chiaviStoccaggi.has(X) && (nelPiazzale(r) || !chiaviImpianti.has(X))) livelli.push('piazzale');
+    if (chiaviStoccaggi.has(X) && (nelPiazzale(r) || (!chiaviImpianti.has(X) && !doppioRuolo.has(X)))) livelli.push('piazzale');
     for (const liv of livelli) {
       const f = flusso(R, r.trasportatore, X, liv);
       if (nellAnno(g)) f.consuntivo_kg += peso(r);
@@ -222,7 +233,7 @@ export function calcolaPredittivita(d) {
       const iRegole = ordineRegole.indexOf(I);
       return { impianto: I, priorita: p || (iRegole >= 0 ? iRegole + 1 : 99) };
     }).sort((a, b) => a.priorita - b.priorita);
-    const fineS = impianti.filter(i => destinazioni.has(i.chiave)).map(i => i.fine).reduce((a, b) => (b > a ? b : a), fineDefault);
+    const fineS = impianti.filter(i => destinazioni.has(i.chiave)).map(i => i.fine).reduce((a, b) => (b > a ? b : a), '') || fineDefault;
     const eImpianto = chiaviImpianti.has(s.chiave);
     const entrateFlussi = [...flussi.values()].filter(f => f.sito === s.chiave && f.livello === 'piazzale').map(f => ({ ...f, attesa: attesaFlusso(f, fineS) }));
     const entrate = perScenario(sc => entrateFlussi.reduce((t, f) => t + f.attesa[sc], 0));
@@ -286,9 +297,14 @@ export function calcolaPredittivita(d) {
         gruppi.get(x.priorita).push(x.impianto);
       }
       for (const [prio, gruppo] of [...gruppi.entries()].sort((a, b) => a[0] - b[0])) {
-        const bisogno = gruppo.reduce((t, I) => t + (manca.get(I) || 0), 0);
+        // Un impianto con la programmazione finita (prima di oggi, o senza giorni
+        // davanti ai dati) non puo' piu' ricevere niente: la sua parte resta agli
+        // altri. Quello che fosse arrivato e non e' ancora caricato lo dira' il
+        // prossimo caricamento.
+        const attivo = (I) => { const x = perImpianto.get(I); return x.orizzonte.giorni > 0 && x.fine >= oggi; };
+        const bisogno = gruppo.reduce((t, I) => t + (attivo(I) ? (manca.get(I) || 0) : 0), 0);
         for (const I of gruppo) {
-          const m = manca.get(I) || 0;
+          const m = attivo(I) ? (manca.get(I) || 0) : 0;
           const dato = bisogno <= resta ? m : (bisogno > 0 ? resta * m / bisogno : 0);
           const kg = kgInt(dato);
           dati += kg;
@@ -342,21 +358,26 @@ export function calcolaPredittivita(d) {
   const programma = [];
   for (const s of stoccaggi) {
     const righe = [];
-    const primoGruppo = s.destinazioni.length ? s.destinazioni[0].priorita : null;
     for (const x of s.destinazioni) {
       const imp = perImpianto.get(x.impianto);
       if (!imp || imp.fine < prossimaSettimana.dal) continue;
       const rotta = imp.da_stoccaggi.find(r => r.stoccaggio === s.chiave);
       const media = rotta ? rotta.viaggi_settimana.prudente : 0;
       const spettanti = rotta ? rotta.viaggi_totali.prudente : 0;
-      righe.push({ stoccaggio: s.nome, impianto: imp.nome, chiave_impianto: imp.chiave, priorita: x.priorita, media_settimanale: Math.round(media * 10) / 10, spettanti, viaggi: 0 });
+      // media: quella vera, per i conti; media_settimanale: a un decimale, da mostrare
+      righe.push({ stoccaggio: s.nome, impianto: imp.nome, chiave_impianto: imp.chiave, priorita: x.priorita, media, media_settimanale: Math.round(media * 10) / 10, spettanti, viaggi: 0 });
     }
+    // il primo gruppo fra gli impianti ancora da programmare: uno con la
+    // programmazione finita non toglie il posto a chi resta
+    const primoGruppo = righe.length ? Math.min(...righe.map(r => r.priorita)) : null;
     const entrataGiorno = (s.entrate_flussi || []).reduce((t, f) => t + f.ritmo_settimanale_kg, 0) / 7;
-    const uscitaGiorno = righe.reduce((t, r) => t + r.media_settimanale, 0) * kgv / 7;
+    const uscitaGiorno = righe.reduce((t, r) => t + r.media, 0) * kgv / 7;
     const giorniPrima = Math.max(0, giorniFra(datiAl, prossimaSettimana.dal) - 1);
-    const materiale = Math.max(0, s.giacenza_kg || 0) + entrataGiorno * Math.max(0, giorniFra(datiAl, prossimaSettimana.al)) - uscitaGiorno * giorniPrima;
+    const partenzePrima = uscitaGiorno * giorniPrima;
+    const materiale = Math.max(0, s.giacenza_kg || 0) + entrataGiorno * Math.max(0, giorniFra(datiAl, prossimaSettimana.al)) - partenzePrima;
     let tetto = Math.floor(Math.max(0, materiale) / kgv);
-    if (s.residuo_plafond_kg !== null) tetto = Math.min(tetto, Math.floor(Math.max(0, s.residuo_plafond_kg) / kgv));
+    // anche il plafond si consuma con quello che partira' prima di lunedi'
+    if (s.residuo_plafond_kg !== null) tetto = Math.min(tetto, Math.floor(Math.max(0, s.residuo_plafond_kg - partenzePrima) / kgv));
     let resta = tetto;
     const gruppi = [...new Set(righe.map(r => r.priorita))].sort((a, b) => a - b);
     for (const prio of gruppi) {
@@ -365,7 +386,7 @@ export function calcolaPredittivita(d) {
         // Al primo gruppo la sua media per eccesso; agli altri anche, ma mai piu'
         // della parte che resta loro fino alla fine: un viaggio in piu' quando il
         // materiale avanza, non tutta la parte dell'anno in una settimana.
-        const perEccesso = Math.ceil(r.media_settimanale - 1e-9);
+        const perEccesso = Math.ceil(r.media - 1e-9);
         const voluti = prio === primoGruppo ? perEccesso : Math.min(Math.max(perEccesso, r.spettanti >= 1 ? 1 : 0), Math.floor(r.spettanti + 1e-9));
         r.voluti = voluti;
       }
@@ -381,8 +402,9 @@ export function calcolaPredittivita(d) {
     for (const r of righe) {
       r.kg = r.viaggi * kgv;
       const imp = perImpianto.get(r.chiave_impianto);
-      r.motivo = motivoRiga(r, imp, primoGruppo, kgv, s.nome, gruppi.length > 1);
+      r.motivo = motivoRiga(r, imp, primoGruppo, kgv, s, gruppi.length > 1);
       delete r.voluti;
+      delete r.media;
       programma.push(r);
     }
     s.viaggi_prossima_settimana = { possibili: tetto, programmati: righe.reduce((t, r) => t + r.viaggi, 0) };
@@ -406,7 +428,7 @@ export function calcolaPredittivita(d) {
     .sort((a, b) => a.settimana.localeCompare(b.settimana) || a.nome_stoccaggio.localeCompare(b.nome_stoccaggio));
 
   return {
-    anno: annoN, oggi, dati_al: datiAl, settimana_scorsa_completa: settimanaScorsaCompleta,
+    anno: annoN, oggi, dati_al: ultimo, settimana_scorsa_completa: settimanaScorsaCompleta,
     kg_per_viaggio: kgv, finestra_ritmo: finestra, fine: fineDefault, regole_definite: !!regole.definite,
     prossima_settimana: prossimaSettimana,
     impianti: [...perImpianto.values()],
@@ -422,20 +444,28 @@ const it = (g) => (g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : '
 // Una riga del programma, detta a parole: per chi programma, non per chi
 // scrive il codice. "Priorità" si dice solo quando lo stoccaggio sceglie davvero
 // fra piu' impianti.
-function motivoRiga(r, imp, primoGruppo, kgv, stoccaggio, conScelta) {
+function motivoRiga(r, imp, primoGruppo, kgv, s, conScelta) {
   if (!imp) return '';
+  const stoccaggio = s.nome;
   if (imp.target_superato) return `${imp.nome} ha già raggiunto il target.`;
   const media = String(r.media_settimanale).replace('.', ',');
+  const manca = imp.mancanza_kg.prudente >= kgv / 2;
   const parti = [];
   if (r.priorita === primoGruppo) {
-    if (r.media_settimanale <= 0) return `A ${imp.nome} non serve altro da ${stoccaggio}, con le primarie attese.`;
-    parti.push(`${conScelta ? 'Ha la priorità: p' : 'P'}er arrivare al target di ${imp.nome} entro il ${it(imp.fine)} servono in media ${media} viaggi a settimana da ${stoccaggio}`);
+    if (r.media <= 1e-9) {
+      if (!manca) return `A ${imp.nome} non serve altro da ${stoccaggio}, con le primarie attese.`;
+      // serve, ma da qui non puo' arrivare: si dice perche'
+      const perche = s.residuo_plafond_kg !== null && s.residuo_plafond_kg <= 0 ? "il suo plafond è esaurito" : "il piazzale è vuoto e non ci entra materiale";
+      parti.push(`${stoccaggio} non ha materiale per ${imp.nome}: ${perche}`);
+    } else {
+      parti.push(`${conScelta ? 'Ha la priorità: p' : 'P'}er arrivare al target di ${imp.nome} entro il ${it(imp.fine)} servono in media ${media} viaggi a settimana da ${stoccaggio}`);
+    }
   } else if (r.spettanti < 1) {
     parti.push(`A ${stoccaggio} non avanza materiale per ${imp.nome}, dopo gli impianti con la priorità`);
   } else {
     parti.push(`I viaggi che ${stoccaggio} può fare in più dopo gli impianti con la priorità: da qui alla fine della programmazione gliene spettano circa ${Math.floor(r.spettanti)}`);
   }
   if (r.limitato) parti.push("limitati dal materiale che il piazzale avrà in settimana");
-  if (imp.mancanza_kg.prudente >= kgv / 2) parti.push(`a ${imp.nome} mancheranno comunque circa ${formatoKgInTonnellate(imp.mancanza_kg.prudente)} t`);
+  if (manca) parti.push(`a ${imp.nome} mancheranno comunque circa ${formatoKgInTonnellate(imp.mancanza_kg.prudente)} t`);
   return parti.join('; ') + '.';
 }

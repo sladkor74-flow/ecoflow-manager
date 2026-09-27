@@ -3,8 +3,8 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, FileDown } from 'lucide-react';
 import { oggiRoma } from '@/lib/giornoItaliano';
-import { ton, it, itBreve, viaggiDec, SCENARI, testoErrore } from './Comuni';
-import { viaggiDellaRiga } from './ProgrammaSettimana';
+import { ton, it, itBreve, viaggiDec, SCENARI, senzaProiezioni, esitoFinale, avvisiDaMostrare, programmiNonLetti, testoErrore } from './Comuni';
+import { viaggiDellaRiga, programmaVuoto } from './ProgrammaSettimana';
 import { perSettimana, esitoSettimana, statoSettimana, settimanaParziale } from './SchedaSettimane';
 import { ordineDestinazioni } from './SchedaStoccaggi';
 
@@ -13,7 +13,9 @@ import { ordineDestinazioni } from './SchedaStoccaggi';
 // intestazione, programma della settimana prossima, impianti (le due proiezioni
 // e la prudente), stoccaggi, ultime sei settimane programmato/fatto e avvisi.
 // I pesi vanno in tonnellate (kg / 1000): il PDF le scrive con 2 decimali, 3 se
-// i kg non sono tondi, come tutto il gestionale.
+// i kg non sono tondi, come tutto il gestionale. Dice le stesse cose della
+// pagina, con le stesse funzioni: gli avvisi (avvisiDaMostrare), l'esito di un
+// impianto senza piu' proiezioni (esitoFinale), il perche' di un programma vuoto.
 
 const t = (v) => (v === null || v === undefined ? null : (Number(v) || 0) / 1000);
 const SETTIMANE_NEL_PDF = 6;
@@ -25,9 +27,14 @@ export function situazionePdf(risposta, oggi = oggiRoma()) {
   const anno = risposta.anno;
 
   // --- il programma della settimana prossima ---
+  const nonLetti = programmiNonLetti(risposta);
+  // un anno chiuso non ha piu' un programma da fare
+  const vuoto = risposta.sola_lettura || !(risposta.programma || []).length ? programmaVuoto(risposta) : null;
   const programma = (risposta.programma || []).map(r => {
     const v = viaggiDellaRiga(r);
-    const fissato = !r.fissato ? 'No: è il calcolo di oggi' : r.fissato.manuale ? 'Sì, a mano' : 'Sì, il mercoledì';
+    const fissato = !r.fissato
+      ? (nonLetti ? 'Non si sa: i programmi fissati non si sono potuti leggere' : 'No: è il calcolo di oggi')
+      : r.fissato.manuale ? 'Sì, a mano' : 'Sì, il mercoledì';
     return { celle: [r.stoccaggio, r.impianto, v, t(v * kgv), fissato, r.motivo || ''] };
   });
   if (programma.length) {
@@ -35,12 +42,16 @@ export function situazionePdf(risposta, oggi = oggiRoma()) {
     programma.push({ stile: 'totale', celle: ['Totale', null, totale, t(totale * kgv), null, null] });
   }
 
-  // --- gli impianti: le due proiezioni e la prudente ---
+  // --- gli impianti: le due proiezioni e la prudente; com'e' finita se non ce ne sono piu' ---
   const impianti = [];
+  const tuttiFiniti = (risposta.impianti || []).length > 0 && risposta.impianti.every(i => senzaProiezioni(i, risposta));
   for (const i of risposta.impianti || []) {
-    const stato = i.target_superato ? 'Target raggiunto' : i.senza_stoccaggi ? 'Nessuno stoccaggio lo alimenta: il resto solo in primaria' : '';
+    const finito = senzaProiezioni(i, risposta);
+    const stato = finito
+      ? `${risposta.sola_lettura ? '' : `Programmazione finita il ${it(i.fine)}. `}${esitoFinale(i).testo}`
+      : i.target_superato ? 'Target raggiunto' : i.senza_stoccaggi ? 'Nessuno stoccaggio lo alimenta: il resto solo in primaria' : '';
     impianti.push({ stile: 'gruppo', celle: [i.nome, t(i.target_kg), t(i.gia_arrivato_kg), t(i.target_superato ? 0 : i.residuo_kg), stato, null, null, null, null] });
-    if (i.target_superato) continue;
+    if (i.target_superato || finito) continue;
     for (const s of SCENARI) {
       const da = (i.da_stoccaggi || [])
         .filter(d => Number((d.kg || {})[s.chiave]) > 0)
@@ -75,7 +86,10 @@ export function situazionePdf(risposta, oggi = oggiRoma()) {
     }));
   }
 
-  const avvisi = (risposta.avvisi || []).map(a => ({ celle: [a.testo] }));
+  // gli stessi della pagina: in un anno chiuso niente "i numeri possono crescere"
+  const gruppi = avvisiDaMostrare(risposta);
+  const avvisi = [...gruppi.caricamento, ...gruppi.gravi, ...(gruppi.datiIncompleti ? [gruppi.datiIncompleti] : []), ...gruppi.altri]
+    .map(a => ({ celle: [a.testo] }));
 
   return {
     nomeFile: `Predittivita-secondarie-${oggi}`,
@@ -85,12 +99,16 @@ export function situazionePdf(risposta, oggi = oggiRoma()) {
     riepilogo: [
       { etichetta: 'Anno', valore: `${anno}${risposta.sola_lettura ? ' (chiuso)' : ''}` },
       { etichetta: 'Dati caricati fino al', valore: it(risposta.dati_al) },
-      { etichetta: 'Programma della settimana', valore: settimana.dal && !risposta.sola_lettura ? `${itBreve(settimana.dal)} - ${it(settimana.al)}` : '—' },
+      { etichetta: 'Programma della settimana', valore: settimana.dal && !(vuoto && vuoto.finita) ? `${itBreve(settimana.dal)} - ${it(settimana.al)}` : '—' },
       { etichetta: 'Un viaggio vale', valore: ton(kgv) },
     ],
     sezioni: [
-      {
+      vuoto ? {
         titolo: risposta.sola_lettura ? `Programma: il ${anno} è chiuso` : `Programma della settimana dal ${it(settimana.dal)} al ${it(settimana.al)}`,
+        colonne: [{ titolo: 'Programma', tipo: 'testo', peso: 1 }],
+        righe: [{ celle: [vuoto.testo] }],
+      } : {
+        titolo: `Programma della settimana dal ${it(settimana.dal)} al ${it(settimana.al)}`,
         colonne: [
           { titolo: 'Da', tipo: 'testo', peso: 1.2 },
           { titolo: 'A', tipo: 'testo', peso: 1.2 },
@@ -102,13 +120,15 @@ export function situazionePdf(risposta, oggi = oggiRoma()) {
         righe: programma,
       },
       {
-        titolo: 'Impianti: le due proiezioni e la prudente, fino alla fine della programmazione (tonnellate)',
+        titolo: tuttiFiniti
+          ? (risposta.sola_lettura ? `Impianti: com'è finito il ${anno} (tonnellate)` : `Impianti: la programmazione del ${anno} è finita (tonnellate)`)
+          : 'Impianti: le due proiezioni e la prudente, fino alla fine della programmazione (tonnellate)',
         colonne: [
           { titolo: 'Impianto', tipo: 'testo', peso: 1.1 },
           { titolo: 'Target', tipo: 't', peso: 0.8 },
           { titolo: 'Già arrivato', tipo: 't', peso: 0.8 },
           { titolo: 'Manca', tipo: 't', peso: 0.8 },
-          { titolo: 'Proiezione', tipo: 'testo', peso: 1.5 },
+          { titolo: tuttiFiniti ? 'Com\'è finita' : 'Proiezione', tipo: 'testo', peso: 1.5 },
           { titolo: 'Arriverà in primaria', tipo: 't', peso: 0.9 },
           { titolo: 'Serve in secondaria', tipo: 't', peso: 0.9 },
           { titolo: 'Da quali stoccaggi', tipo: 'testo', peso: 2.6 },
