@@ -190,6 +190,12 @@ const rifiutaNull = new Proxy({}, { get: (_t, nome) => {
 const senzaFineNonLetti = await leggiDatiPredittivita({ asServiceRole: { entities: rifiutaNull } }, { anno: 2026, oggi: '2026-09-23' });
 verifica('se i senza fine trasporto non si leggono si sa, e il resto va avanti', senzaFineNonLetti.senza_fine === null && senzaFineNonLetti.ingresso.primarie.length === 7, J(senzaFineNonLetti.senza_fine));
 
+const nappiRaccoglie = { ...ARCHIVI, FornitoreSecondaria: ARCHIVI.FornitoreSecondaria.map(f => (/nappi/i.test(f.nome) ? { ...f, ruolo: 'raccoglitore_stoccaggio' } : f)) };
+const conNappiRaccoglie = await leggiDatiPredittivita(sdkFinto(nappiRaccoglie).base44, { anno: 2026, oggi: '2026-09-23' });
+const nappiR = conNappiRaccoglie.ingresso.stoccaggi.find(s => s.chiave === 'nappi sud');
+const nappiS = dati.ingresso.stoccaggi.find(s => s.chiave === 'nappi sud');
+verifica('raccoglitore e stoccaggio (Nappi Sud): resta uno stoccaggio, con le stesse destinazioni', nappiR && J(nappiR.destinazioni) === J(nappiS.destinazioni) && nappiR.giacenza_kg === nappiS.giacenza_kg, J([nappiR, nappiS]));
+
 const minuscolo = { ...ARCHIVI, ImpiantoTargetSecondaria: ARCHIVI.ImpiantoTargetSecondaria.map(i => (i.id === 'iTg' ? { ...i, nome_impianto: 'tecnogum' } : i)) };
 const conMinuscolo = await leggiDatiPredittivita(sdkFinto(minuscolo).base44, { anno: 2026, oggi: '2026-09-23' });
 const tgMinuscolo = conMinuscolo.ingresso.impianti.find(i => i.chiave === 'tecnogum');

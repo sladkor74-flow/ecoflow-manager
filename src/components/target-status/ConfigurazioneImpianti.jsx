@@ -33,13 +33,16 @@ const FINE_2026 = '2026-12-18';
 const KG_PER_VIAGGIO_PREDEFINITI = 13000;
 // fra piu' commesse dello stesso anno vale la modificata per ultima, come nelle funzioni
 const piuRecente = (righe) => (righe || []).reduce((x, r) => (!x || String(r.updated_date || r.created_date || '') > String(x.updated_date || x.created_date || '') ? r : x), null);
-const eStoccaggio = (f) => ['stoccaggio', 'doppio_ruolo'].includes(ruoloDi(f));
+const eStoccaggio = (f) => ['stoccaggio', 'doppio_ruolo', 'raccoglitore_stoccaggio'].includes(ruoloDi(f));
+// raccoglie primarie nel proprio piazzale e da li' spedisce secondarie (Nappi Sud, 28/09/2026)
+const STOCCA = (r) => r === 'stoccaggio' || r === 'doppio_ruolo' || r === 'raccoglitore_stoccaggio';
 const ruoloDi = (f) => f.ruolo || (f.tipo === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore');
 const segue = (imp) => imp.segue_predittivita !== false;
 
 const RUOLI = [
   { valore: 'raccoglitore', nome: 'Raccoglitore' },
   { valore: 'stoccaggio', nome: 'Stoccaggio' },
+  { valore: 'raccoglitore_stoccaggio', nome: 'Raccoglitore e stoccaggio' },
   { valore: 'doppio_ruolo', nome: 'Impianto e stoccaggio' },
   { valore: 'impianto', nome: 'Impianto' },
 ];
@@ -48,6 +51,7 @@ const CLASSE_RUOLO = {
   impianto: 'bg-blue-100 text-blue-700 border-blue-300',
   stoccaggio: 'bg-amber-100 text-amber-700 border-amber-300',
   doppio_ruolo: 'bg-violet-100 text-violet-700 border-violet-300',
+  raccoglitore_stoccaggio: 'bg-orange-100 text-orange-700 border-orange-300',
 };
 
 // Come si chiamano, per chi legge, le cose che la copia dell'anno conta.
@@ -194,7 +198,7 @@ function Fornitore({ f, target, modificabile, scrivi, salvaPlafond }) {
               aria-label={`Ruolo di ${f.nome}`}
               onChange={e => {
                 const r = e.target.value;
-                const s = r === 'stoccaggio' || r === 'doppio_ruolo';
+                const s = STOCCA(r);
                 scrivi(() => base44.entities.FornitoreSecondaria.update(f.id, { ruolo: r, tipo: s ? 'stoccaggio' : 'primaria_diretta' }), 'Ruolo aggiornato');
               }}
               className={`text-[11px] border rounded px-1 py-0.5 bg-background font-semibold ${CLASSE_RUOLO[ruolo] || ''}`}
@@ -211,7 +215,7 @@ function Fornitore({ f, target, modificabile, scrivi, salvaPlafond }) {
         {modificabile && <Elimina nome={f.nome} piccolo onElimina={() => scrivi(() => base44.entities.FornitoreSecondaria.delete(f.id), `${f.nome} eliminato`)} />}
       </div>
       <div className="flex items-center gap-x-4 gap-y-1 flex-wrap text-xs text-muted-foreground">
-        {!stocc || ruolo === 'doppio_ruolo' ? (
+        {!stocc || ruolo === 'doppio_ruolo' || ruolo === 'raccoglitore_stoccaggio' ? (
           <span>Target di raccolta dell&apos;anno (scheda Target raccoglitori): <span className="font-medium text-foreground">{target ? ton(target) : 'nessuno'}</span></span>
         ) : null}
         {stocc && (
@@ -558,7 +562,7 @@ export default function ConfigurazioneImpianti({ anno, solaLettura = false, user
 
   const aggiungiFornitore = async (imp) => {
     const nome = formFornitore.nome.trim();
-    const stocc = formFornitore.ruolo === 'stoccaggio' || formFornitore.ruolo === 'doppio_ruolo';
+    const stocc = STOCCA(formFornitore.ruolo);
     const plafond = stocc ? daTonnellate(formFornitore.plafond) : 0;
     const prio = String(formFornitore.priorita).trim();
     if (!nome) { toast({ title: 'Manca il nome', variant: 'destructive' }); return; }
@@ -834,7 +838,7 @@ export default function ConfigurazioneImpianti({ anno, solaLettura = false, user
                     {RUOLI.map(r => <option key={r.valore} value={r.valore}>{r.nome}</option>)}
                   </select>
                 </label>
-                {(formFornitore.ruolo === 'stoccaggio' || formFornitore.ruolo === 'doppio_ruolo') && (
+                {STOCCA(formFornitore.ruolo) && (
                   <>
                     <label className="text-xs text-muted-foreground space-y-1">Plafond (tonnellate)
                       <Input inputMode="decimal" value={formFornitore.plafond} onChange={e => setFormFornitore({ ...formFornitore, plafond: e.target.value })} className="w-36" />

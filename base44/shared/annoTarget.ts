@@ -29,7 +29,7 @@ const attivo = (r) => !!r && r.stato !== 'non_attivo';
 const quando = (r) => String((r && (r.updated_date || r.created_date)) || '');
 const piuRecente = (a, b) => (quando(b) > quando(a) ? b : a);
 const testo = (v) => String(v || '').trim().toLowerCase();
-const eStoccaggio = (f) => (f.ruolo ? f.ruolo === 'stoccaggio' || f.ruolo === 'doppio_ruolo' : f.tipo === 'stoccaggio');
+const eStoccaggio = (f) => (f.ruolo ? ['stoccaggio', 'doppio_ruolo', 'raccoglitore_stoccaggio'].includes(f.ruolo) : f.tipo === 'stoccaggio');
 const conValore = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== ''));
 const comeLista = (v) => (Array.isArray(v) ? v : v ? [v] : []);
 

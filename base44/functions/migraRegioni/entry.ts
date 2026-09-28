@@ -74,7 +74,7 @@ export default async function(req) {
     }
 
     const fornitori = await b.entities.FornitoreSecondaria.list('-created_date', 1000);
-    const stoccaggi = fornitori.filter(f => f.ruolo === 'stoccaggio' || f.ruolo === 'doppio_ruolo' || (!f.ruolo && String(f.tipo || '').toLowerCase() === 'stoccaggio'));
+    const stoccaggi = fornitori.filter(f => f.ruolo === 'stoccaggio' || f.ruolo === 'doppio_ruolo' || f.ruolo === 'raccoglitore_stoccaggio' || (!f.ruolo && String(f.tipo || '').toLowerCase() === 'stoccaggio'));
     const stocUpdates = [];
     for (const f of stoccaggi) {
       const norm = normalizzaRagioneSociale(f.nome);

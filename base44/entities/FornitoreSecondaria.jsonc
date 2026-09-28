@@ -18,10 +18,11 @@
         "raccoglitore",
         "impianto",
         "stoccaggio",
-        "doppio_ruolo"
+        "doppio_ruolo",
+        "raccoglitore_stoccaggio"
       ],
       "default": "raccoglitore",
-      "description": "Ruolo esplicito del soggetto nella filiera: raccoglitore (gommista->primaria), impianto (destinazione finale), stoccaggio (accumulo intermedio), doppio_ruolo (impianto+stoccaggio, es. T-CYCLE)"
+      "description": "Ruolo esplicito del soggetto nella filiera: raccoglitore (gommista->primaria), impianto (destinazione finale), stoccaggio (accumulo intermedio), doppio_ruolo (impianto+stoccaggio, es. T-CYCLE), raccoglitore_stoccaggio (raccoglie primarie nel proprio piazzale e spedisce secondarie, es. NAPPI SUD)"
     },
     "tipo": {
       "type": "string",
