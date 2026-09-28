@@ -3,14 +3,13 @@
 // Ogni modulo ha le sue anomalie nella sua pagina, e per sapere se c'era qualcosa
 // da fare bisognava aprirle tutte. Qui si raccolgono, leggendo solo archivi
 // piccoli (alert, registro dei caricamenti, ordini aperti, documenti di
-// fatturazione, prefatture, riepilogo della qualifica, target, richieste del
+// fatturazione, prefatture, riepilogo della qualifica, richieste del
 // consorzio): niente che costi quanto un ricalcolo. Le anomalie di prezzo della
 // fatturazione arrivano a parte, dal margine, che la pagina chiede dopo.
 //
 // Funzioni pure: ricevono gli elenchi gia' letti. Rete, ACI ed extra raccolta
 // restano separati anche qui.
 import { giornoRoma } from "./giornoItaliano.ts";
-import { divergenzeTargetImpianti, testoDivergenza } from "./targetImpianti.ts";
 import { statoRichiesta } from "./richiesteEct.ts";
 
 export const MESI_CRUSCOTTO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -143,7 +142,7 @@ export function nomeRegola(v) {
  * L'elenco unico delle cose da gestire. Ogni voce: { area, gravita, titolo,
  * dettaglio, link }. dati: { oggi, adessoMs, anno, alertAperti, uploadLogs,
  * tipiFile, assegnatiRete, assegnatiAci, documenti, prefatture, riepilogoQualifica,
- * giacenzeSito, impiantiTarget, richiesteEct }.
+ * richiesteEct }.
  */
 export function cruscotto(dati) {
   const { oggi, anno } = dati;
@@ -208,9 +207,6 @@ export function cruscotto(dati) {
   // Un documento intestato a un fornitore che non risulta non lo chiede nessuno:
   // e' un errore silenzioso, quindi va detto qui.
   if (q && Number(q.anomalie_catalogo) > 0) voce('Qualifica fornitori', 'critico', Number(q.anomalie_catalogo) === 1 ? 'Un documento del catalogo non verrà mai chiesto a nessuno' : `${q.anomalie_catalogo} documenti del catalogo non verranno mai chiesti a nessuno`, q.anomalie_catalogo_testo || '', '/qualifica-fornitori');
-
-  // Target dell'impianto diverso fra Giacenze e Target & Status
-  for (const d of divergenzeTargetImpianti(dati.giacenzeSito, dati.impiantiTarget, anno)) voce('Target', 'critico', `Target divergente: ${d.impianto}`, testoDivergenza(d), '/giacenze');
 
   // Richieste del consorzio: scadute e ancora aperte, o ritirate e da confermare.
   // L'esito e' quello salvato: lo ricalcola sui terminati ogni caricamento delle

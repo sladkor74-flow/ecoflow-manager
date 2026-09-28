@@ -275,10 +275,43 @@ che l'utente ha dato, da non riderivare:
 - **Un anno alla volta.** Parte dall'ancora delle giacenze al 31/12 dell'anno
   prima, guarda solo i movimenti dell'anno, sola rete, per fine trasporto. Al 31/12
   l'anno si chiude: il 1 gennaio il modulo mostra l'anno nuovo, con le logiche del
-  nuovo contratto; gli anni chiusi si riaprono in sola lettura. La configurazione
-  e' per anno (`ImpiantoTargetSecondaria.anno`, `FornitoreSecondaria.anno`: senza
-  anno vale il 2026). Le regole che non sono input stanno in
-  `base44/shared/regolePredittivita.ts` (un anno nuovo si aggiunge col contratto).
+  nuovo contratto; gli anni chiusi si riaprono in sola lettura. Le regole che
+  non sono input stanno in `base44/shared/regolePredittivita.ts` (un anno nuovo
+  si aggiunge col contratto).
+- **La configurazione si scrive in Target & Status** (utente, 27/09/2026: "mettiamo
+  tutto in 'Target & Status' e gli altri moduli leggono da li'"), scheda Impianti
+  e stoccaggi (`src/components/target-status/ConfigurazioneImpianti.jsx`), anno per
+  anno col selettore dell'anno (`?anno=` nell'indirizzo). La vecchia scheda
+  Configurazione della predittivita' e la pagina Target annuali non ci sono piu'
+  (i loro indirizzi portano li'). E' per anno (`ImpiantoTargetSecondaria.anno`,
+  `FornitoreSecondaria.anno`): l'anno di un record e' `annoDelRecord(r)`, cioe'
+  il suo o il 2026 se non lo dice (`base44/shared/annoTarget.ts`, specchio in
+  `src/lib/annoTarget.js`). Percio' questi due archivi **non** si leggono mai con
+  `.filter({ anno })` (perderebbe i record senza anno): si leggono interi con
+  `fetchAll` e si tengono per anno in memoria; ogni record nuovo porta `anno`.
+- **Un anno nuovo nasce come copia del precedente**: pulsante "Copia dal
+  {anno-1}" in Target & Status, funzione `copiaAnnoTarget` (`{ anno, simula }`,
+  prima sempre con `simula: true` e la conferma dell'utente). Copia impianti e
+  loro target, collegamenti degli stoccaggi (con la priorita' scritta per
+  esteso), target dei raccoglitori annui e mensili, contratto Ecotyre (solo se
+  l'anno non ne ha uno) ed elenco dei siti delle giacenze; tutto "copiato dal
+  {anno-1}, da confermare". Salta quello che l'anno ha gia': si puo' ripetere e
+  completa una copia interrotta. Il piano e' puro (`pianoCopiaAnno`, provato in
+  `prove/annoTarget.mjs` e `prove/copiaAnnoTarget.mjs`).
+- **Gli anni chiusi** (prima dell'anno in corso, ora italiana: `annoChiuso`) si
+  leggono soltanto: la pagina non lascia scrivere e le funzioni che scrivono li
+  rifiutano. Scrive solo l'amministratore (`soloAmministratore`).
+- **Chi la predittivita' segue**: solo gli impianti con un target e
+  `segue_predittivita !== false` (se manca vale vero). Green Tyre Project, T.R.S.
+  e Gatim fanno R3: hanno solo il target, che le Giacenze leggono, e la
+  predittivita' non li segue (interruttore "Segui nella predittivita'"); con
+  loro non si seguono neanche i loro stoccaggi.
+- **Fine della programmazione e chili a viaggio** stanno sul contratto Ecotyre
+  dell'anno (`CommessaEcotyre.fine_programmazione`, `kg_per_viaggio`, scritti in
+  Impianti e stoccaggi). `fineProgrammazione(anno, commessa)` e
+  `regolePredittivita(anno, commessa)` li usano quando ci sono (la data solo se e'
+  dentro quell'anno); senza, vale quello di prima: per il 2026 il 18/12/2026 e 13 t.
+  La data propria di un impianto (`data_fine`) vince su quella dell'anno.
 - **Tecnogum e Irigom (2026).** Tecnogum 2.295 t: primarie di Ecorecuperi (800 t),
   250 t da T-Cycle, il resto da Nappi Sud. Irigom 4.445 t: primarie di Smoco e
   Pneuservice (nel 2026 anche Emmesse, dopo l'incendio di Gatim di giugno), il
@@ -287,7 +320,7 @@ che l'utente ha dato, da non riderivare:
   o le regole dell'anno; 2026: Nappi Sud prima Tecnogum, poi Irigom) **non** vuol
   dire servirne uno e poi l'altro: ogni settimana lo stoccaggio li serve tutti, al
   primo va il numero di viaggi che gli fa raggiungere il target entro la fine della
-  programmazione (18/12/2026), agli altri quello che avanza, fino alla loro parte
+  programmazione (18/12/2026, o quella del contratto dell'anno), agli altri quello che avanza, fino alla loro parte
   e mai piu' della loro media settimanale arrotondata per eccesso (niente parte
   dell'anno concentrata in una settimana). Un impianto a fine programmazione non
   riceve piu' niente; il tetto e' il materiale del piazzale (giacenza + entrate al
@@ -314,7 +347,7 @@ che l'utente ha dato, da non riderivare:
   nel modulo Secondarie (consumano pero' il piazzale nell'ordine di arrivo).
   Quelle ACI, come Irigom verso Gatim, restano fuori comunque, perche' conta
   solo la rete.
-- **13 t a viaggio** nel 2026 (piu' formulari divisi per classe fanno lo stesso
+- **13 t a viaggio** nel 2026, o `CommessaEcotyre.kg_per_viaggio` dell'anno (piu' formulari divisi per classe fanno lo stesso
   viaggio). Un viaggio **fatto** e' un camion in un giorno sullo stesso percorso
   (`chiaveViaggio`).
 - **Il programma della settimana dopo** si fissa il **mercoledi' alle 8**, con un
@@ -670,16 +703,28 @@ utente. Chi legge «l'ultimo caricamento» esclude `errore` e `in_corso`.
 `src/components/dashboard/Cruscotto.jsx`. Un solo elenco, ordinato per gravita',
 di cio' che richiede attenzione, ogni voce col collegamento a dove si risolve.
 Legge **solo archivi piccoli** (alert, registro dei caricamenti, ordini aperti,
-documenti di fatturazione, prefatture, riepilogo della qualifica, target,
+documenti di fatturazione, prefatture, riepilogo della qualifica,
 richieste del consorzio): chi aggiunge un controllo non deve farle rileggere le
 primarie. Le anomalie di prezzo delle fatturazioni arrivano dal margine, che la
 pagina chiede dopo e solo per l'amministratore. Un controllo nuovo si aggiunge
 li', con un caso in `prove/cruscotto.mjs`.
 
-Il target annuo dell'impianto sta sia in Giacenze sia in Target & Status perche'
-servono a cose diverse, ma deve essere lo stesso numero: l'unico confronto e'
-`base44/shared/targetImpianti.ts` e una divergenza si dice sempre (Giacenze,
-proiezione, alert critico, dashboard).
+Il target annuo dell'impianto si scrive **solo in Target & Status**
+(`ImpiantoTargetSecondaria.target`, in kg, per anno) e le Giacenze lo leggono da
+li' (`targetImpiantoDellAnno`: il record attivo di esattamente quell'anno, nessun
+ripiego sugli anni prima). Il target delle primarie di un sito non si scrive: e' la
+somma dei target annui dei raccoglitori di quell'anno legati a quel sito
+(`targetPrimarieDelSito`, `TargetRaccoglitore.impianto`); per chi e' impianto e
+stoccaggio sta sulla riga dell'impianto, perche' il totale non lo conti due volte.
+I vecchi `GiacenzaSito.target_totale_t` e `target_primarie_t` restano nel database
+e non si scrivono piu' (in Giacenze si vedono in sola lettura): servono solo di
+**ripiego di transizione**, quando Target & Status non da' niente, con l'anomalia
+`target_da_portare`. Il pulsante "Porta in Target & Status i target scritti in
+Giacenze" (`portaTargetInTargetStatus`) crea i record che mancano, con
+`segue_predittivita: false`. Il vecchio confronto fra i due (divergenze, alert
+`target_impianto_divergente`, voce della dashboard) non c'e' piu':
+`checkTargetAlerts` chiude soltanto gli alert rimasti aperti. Tutto in
+`base44/shared/targetImpianti.ts` (`targetRigaGiacenze`).
 
 I contratti passano da generato a inviato a controfirmato, con la data di ogni
 passaggio: un contratto generato non e' un contratto fatto.

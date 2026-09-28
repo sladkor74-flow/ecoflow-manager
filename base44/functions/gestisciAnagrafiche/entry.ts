@@ -3,7 +3,9 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from '../../shared/fetchAll.ts';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
-// Gestisce le operazioni di scrittura su entità anagrafiche (Tariffa, Fornitore, FornitoreSecondaria, Servizio).
+// Gestisce le operazioni di scrittura su entità anagrafiche (Tariffa, Fornitore, Servizio).
+// FornitoreSecondaria non passa piu' di qui (27/09/2026): i collegamenti degli
+// stoccaggi sono dati dell'anno e si scrivono in Target & Status, con l'anno.
 // Solo l'amministratore può eseguire creazione/modifica/cancellazione.
 // Per Tariffa (create/update) applica validazione server-side:
 //   - campi obbligatori, chiave di unicità, sovrapposizione periodi, auto-chiusura rinegoziazione.
@@ -57,7 +59,7 @@ export default async function(req) {
     if (user.role !== 'admin') return rispostaSolaLettura();
     const { entita, operazione, id, dati } = await req.json();
 
-    const ENTITA_AMMESSE = ['Tariffa', 'Fornitore', 'FornitoreSecondaria', 'Servizio'];
+    const ENTITA_AMMESSE = ['Tariffa', 'Fornitore', 'Servizio'];
     const OPERAZIONI_AMMESSE = ['create', 'update', 'delete'];
 
     if (!ENTITA_AMMESSE.includes(entita)) {

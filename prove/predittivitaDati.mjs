@@ -8,7 +8,9 @@
 //     in proporzione a quello che ci ha portato nell'anno;
 //   - la giacenza di un piazzale parte dall'ancora dell'anno, e senza ancora si
 //     dice;
-//   - una fine della programmazione di un altro anno non vale.
+//   - una fine della programmazione di un altro anno non vale;
+//   - da Target & Status (27/09/2026): archivi interi, segue_predittivita, il
+//     contratto Ecotyre dell'anno con fine della programmazione e kg a viaggio.
 // Il motore: prove/predittivita.mjs. npm run prove
 import { leggiDatiPredittivita, annoDelRecord } from '../base44/shared/predittivitaDati.ts';
 
@@ -192,6 +194,33 @@ const minuscolo = { ...ARCHIVI, ImpiantoTargetSecondaria: ARCHIVI.ImpiantoTarget
 const conMinuscolo = await leggiDatiPredittivita(sdkFinto(minuscolo).base44, { anno: 2026, oggi: '2026-09-23' });
 const tgMinuscolo = conMinuscolo.ingresso.impianti.find(i => i.chiave === 'tecnogum');
 verifica('un nome scritto in minuscolo si mostra come nei formulari', tgMinuscolo && tgMinuscolo.nome !== 'tecnogum' && tgMinuscolo.nome.toLowerCase().includes('tecnogum'), J(tgMinuscolo));
+
+console.log('DA TARGET & STATUS (27/09/2026)');
+verifica('impianti e collegamenti si leggono interi, a pagine, e l\'anno lo decide annoDelRecord', J(filtriDi('ImpiantoTargetSecondaria')) === J([null]) && J(filtriDi('FornitoreSecondaria')) === J([null]), J(letture.filter(l => ['ImpiantoTargetSecondaria', 'FornitoreSecondaria'].includes(l.nome))));
+verifica('il contratto Ecotyre dell\'anno si legge', J(filtriDi('CommessaEcotyre')) === J([{ anno: 2026 }]), J(filtriDi('CommessaEcotyre')));
+verifica('l\'avviso della fine di un altro anno manda a Target & Status', fineAltroAnno.testo.includes('Target & Status') && !/Configurazione della Predittivit/.test(fineAltroAnno.testo), fineAltroAnno.testo);
+// Gatim, Green Tyre Project, T.R.S.: un target (lo legge Giacenze), ma la
+// predittivita' non li segue.
+const conNonSeguito = { ...ARCHIVI, ImpiantoTargetSecondaria: [...ARCHIVI.ImpiantoTargetSecondaria, { id: 'iGt', nome_impianto: 'GREEN TYRE PROJECT SRL', target: 2500000, anno: 2026, stato: 'attivo', segue_predittivita: false }, { id: 'iTr', nome_impianto: 'T.R.S. SRL', target: 300000, anno: 2026, stato: 'attivo', segue_predittivita: true }],
+  FornitoreSecondaria: [...ARCHIVI.FornitoreSecondaria, { id: 'fGt', nome: 'Deposito Verde', impianto_id: 'iGt', ruolo: 'stoccaggio', anno: 2026, stato: 'attivo' }] };
+const nonSeguito = await leggiDatiPredittivita(sdkFinto(conNonSeguito).base44, { anno: 2026, oggi: '2026-09-23' });
+verifica('segue_predittivita a false: fuori dagli impianti seguiti, e il suo stoccaggio non si segue', !nonSeguito.ingresso.impianti.some(i => i.chiave === 'green tyre project') && !nonSeguito.ingresso.stoccaggi.some(s => s.chiave === 'deposito verde'), J(nonSeguito.ingresso.impianti.map(i => i.chiave)));
+verifica('segue_predittivita a true (o che manca) si segue', nonSeguito.ingresso.impianti.some(i => i.chiave === 'trs') && nonSeguito.ingresso.impianti.some(i => i.chiave === 'tecnogum'), J(nonSeguito.ingresso.impianti.map(i => i.chiave)));
+// Il contratto dell'anno porta fine della programmazione e kg a viaggio.
+const conContratto = { ...ARCHIVI, CommessaEcotyre: [
+  { id: 'c26', anno: 2026, fine_programmazione: '2026-12-11', kg_per_viaggio: 14500, updated_date: '2026-09-01T10:00:00' },
+  { id: 'c26v', anno: 2026, fine_programmazione: '2026-12-01', kg_per_viaggio: 9000, updated_date: '2026-01-01T10:00:00' },
+  { id: 'c27', anno: 2027, fine_programmazione: '2027-12-10', kg_per_viaggio: 12000 },
+] };
+const dalContratto = await leggiDatiPredittivita(sdkFinto(conContratto).base44, { anno: 2026, oggi: '2026-09-23' });
+verifica('dal contratto dell\'anno (il piu\' recente): fine della programmazione e kg a viaggio', dalContratto.ingresso.fine === '2026-12-11' && dalContratto.ingresso.regole.kg_per_viaggio === 14500 && dalContratto.configurazione.commessa?.id === 'c26', J([dalContratto.ingresso.fine, dalContratto.ingresso.regole.kg_per_viaggio]));
+verifica('la fine scritta sull\'impianto vale ancora su quella del contratto', dalContratto.ingresso.impianti.find(i => i.chiave === 't-cycle').fine === '2026-11-30' && dalContratto.ingresso.impianti.find(i => i.chiave === 'tecnogum').fine === '2026-12-11');
+const del2027 = await leggiDatiPredittivita(sdkFinto(conContratto).base44, { anno: 2027, oggi: '2027-03-10' });
+verifica('un anno nuovo con il suo contratto: la fine e\' definita, niente avviso', del2027.ingresso.fine === '2027-12-10' && del2027.ingresso.regole.kg_per_viaggio === 12000 && !del2027.avvisi.some(a => a.tipo === 'fine_non_definita'), J([del2027.ingresso.fine, del2027.avvisi.map(a => a.tipo)]));
+verifica('senza contratto si usa quello di sempre', dati.configurazione.commessa === null && dati.ingresso.regole.kg_per_viaggio === 13000 && !dati.avvisi.some(a => a.tipo === 'commessa_non_letta'));
+const senzaArchivio = new Proxy({}, { get: (_t, nome) => (nome === 'CommessaEcotyre' ? undefined : entitaVere[nome]) });
+const contrattoNonLetto = await leggiDatiPredittivita({ asServiceRole: { entities: senzaArchivio } }, { anno: 2026, oggi: '2026-09-23' });
+verifica('se il contratto non si legge si va avanti, e lo si dice', contrattoNonLetto.ingresso.fine === '2026-12-18' && contrattoNonLetto.avvisi.some(a => a.tipo === 'commessa_non_letta'), J(contrattoNonLetto.avvisi.map(a => a.tipo)));
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

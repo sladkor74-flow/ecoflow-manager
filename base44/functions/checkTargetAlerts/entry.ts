@@ -1,6 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
-import { divergenzeTargetImpianti, testoDivergenza } from "../../shared/targetImpianti.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { PROV_TO_REGION, MESI, riepilogoDate, riepilogoDateVista } from "../../shared/raccoltoCalculator.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
@@ -452,30 +451,18 @@ export default async function(req) {
       }
     }
 
-    // I due target dell'impianto (Giacenze e Target & Status) devono coincidere:
-    // una divergenza diventa un alert critico, che si chiude da solo quando torna a posto.
-    let targetDivergenti = [];
+    // Fino al 27/09/2026 il target dell'impianto stava in Giacenze e in Target &
+    // Status, e se i due divergevano nasceva un alert. Ora si scrive solo in
+    // Target & Status e Giacenze lo legge da li': non c'e' piu' niente da
+    // confrontare. Qui si chiudono soltanto gli alert rimasti aperti (si chiudono,
+    // non si cancellano); non se ne aprono di nuovi.
     try {
-      const [siti, impiantiTarget] = await Promise.all([
-        fetchAll(base44.asServiceRole.entities.GiacenzaSito),
-        fetchAll(base44.asServiceRole.entities.ImpiantoTargetSecondaria),
-      ]);
-      targetDivergenti = divergenzeTargetImpianti(siti, impiantiTarget, annoCorrente);
-      if (creaAlerts) {
+      if (body.crea_alerts !== false && eAmministratore(user)) {
         const REGOLA = 'target_impianto_divergente';
         const aperti = (await fetchAll(base44.asServiceRole.entities.Alert, { modulo: 'giacenze', stato: 'aperto' })).filter(a => a.regola_id === REGOLA);
-        const attuali = new Set(targetDivergenti.map(d => `${d.impianto}|${annoCorrente}`));
-        for (const d of targetDivergenti) {
-          const recordId = `${d.impianto}|${annoCorrente}`;
-          if (aperti.some(a => a.record_id === recordId)) continue;
-          await base44.asServiceRole.entities.Alert.create({
-            titolo: `Target divergente: ${d.impianto}`, descrizione: testoDivergenza(d), severita: 'critico',
-            modulo: 'giacenze', entity_type: 'GiacenzaSito', record_id: recordId, regola_id: REGOLA, regola_nome: 'Target impianto uguale in Giacenze e in Target & Status', stato: 'aperto',
-          });
-          alertsCreati++;
-        }
         for (const a of aperti) {
-          if (!attuali.has(a.record_id)) await base44.asServiceRole.entities.Alert.update(a.id, { stato: 'risolto', risolto_note: `Chiuso automaticamente il ${oggi}: i due target sono tornati uguali` });
+          await base44.asServiceRole.entities.Alert.update(a.id, { stato: 'risolto', risolto_note: `Chiuso automaticamente il ${oggi}: il target dell'impianto ora si scrive solo in Target & Status` });
+          alertsChiusi++;
         }
       }
     } catch (_e) { /* il controllo dei target mensili non deve fallire per questo */ }
@@ -484,7 +471,6 @@ export default async function(req) {
       mese,
       anno,
       messaggio: principale.totale_target === 0 ? 'Nessun target mensile configurato per questo periodo' : undefined,
-      target_impianti_divergenti: targetDivergenti,
       is_mese_corrente: principale.isMeseCorrente,
       // false anche per un mese finito da poco: i suoi numeri sono ancora una proiezione
       dati_definitivi: principale.chiuso,

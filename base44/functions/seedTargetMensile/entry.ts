@@ -2,10 +2,12 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
+import { annoChiuso, annoCorrenteRoma } from "../../shared/annoTarget.ts";
 
 // Estrae i target mensili dal foglio STATUS di un file Excel Ecotyre
 // e li carica nell'entità TargetMensile.
-// Payload: { file_url }
+// Payload: { file_url, anno? } (senza anno, quello in corso in Italia).
+// Un anno chiuso si legge soltanto (27/09/2026): i suoi target non si sostituiscono.
 export default async function(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
@@ -15,6 +17,13 @@ export default async function(req) {
     const body = await req.json();
     const { file_url } = body;
     if (!file_url) return Response.json({ error: 'file_url obbligatorio' }, { status: 400 });
+    const ANNO = body.anno != null && body.anno !== '' ? Number(body.anno) : annoCorrenteRoma();
+    if (!Number.isInteger(ANNO) || ANNO < 2000 || ANNO > 2100) {
+      return Response.json({ error: "Anno non valido." }, { status: 400 });
+    }
+    if (annoChiuso(ANNO)) {
+      return Response.json({ error: `Il ${ANNO} e' chiuso: i suoi target si possono solo consultare.`, anno_chiuso: true }, { status: 400 });
+    }
 
     // 1. Scarica e parse il file Excel
     const fileRes = await fetch(file_url);
@@ -35,7 +44,6 @@ export default async function(req) {
       'LUG (T)': 'Luglio', 'AGO (T)': 'Agosto', 'SET (T)': 'Settembre',
       'OTT (T)': 'Ottobre', 'NOV (T)': 'Novembre', 'DIC (T)': 'Dicembre',
     };
-    const ANNO = new Date().getFullYear();
 
     // 3. Estrai record TargetMensile
     const records = [];

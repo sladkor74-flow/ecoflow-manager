@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -6,12 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Plus, History, Info, FileSpreadsheet } from 'lucide-react';
+import { Loader2, Plus, History, Info, FileSpreadsheet, Edit3, CheckCircle2 } from 'lucide-react';
 import { MESI, MESI_BREVI } from '@/lib/pfuConstants';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { tonnellate, leggiNumero, leggiStorico, conModifica, nomeUtente, chiaveNome, dataOra, REGIONI_COMMESSA } from '@/lib/target';
 import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 import ImportaReportGenerale from '@/components/target-status/ImportaReportGenerale';
+import { annoDelRecord, daConfermare } from '@/lib/annoTarget';
 
 
 // Target dei raccoglitori: l'unico punto in cui si scrivono.
@@ -20,6 +21,8 @@ import ImportaReportGenerale from '@/components/target-status/ImportaReportGener
 // annuo definito a inizio anno o alla contrattualizzazione e, mese per mese,
 // quanto gli si affida. Dashboard, alert, Verifiche e gli altri moduli leggono
 // questi valori: una modifica, anche a meta' mese, vale subito ovunque.
+// isAdmin arriva gia' falso per chi non e' amministratore e per un anno chiuso:
+// allora la griglia si legge soltanto.
 
 function Storico({ json, formato }) {
   const voci = leggiStorico(json);
@@ -36,8 +39,62 @@ function Storico({ json, formato }) {
   );
 }
 
-const formatoMese = (p) => (p.non_raccoglie ? 'non raccoglie' : `${tonnellate(p.target, 3)} t`);
-const formatoAnnuo = (p) => `${tonnellate(p.target_tonnellate, 3)} t${p.attivo_dal ? `, attivo dal ${p.attivo_dal.split('-').reverse().join('/')}` : ''}`;
+const conImpianto = (p) => (p.impianto !== undefined ? `, impianto ${p.impianto || 'non indicato'}` : '');
+const formatoMese = (p) => `${p.non_raccoglie ? 'non raccoglie' : `${tonnellate(p.target, 3)} t`}${conImpianto(p)}`;
+const formatoAnnuo = (p) => `${tonnellate(p.target_tonnellate, 3)} t${p.attivo_dal ? `, attivo dal ${p.attivo_dal.split('-').reverse().join('/')}` : ''}${conImpianto(p)}`;
+
+// I record di una riga: il target annuo e i mensili.
+const recordDellaRiga = (riga) => [riga.annuo, ...Object.values(riga.mesi)].filter(Boolean);
+const rigaDaConfermare = (riga) => recordDellaRiga(riga).some(daConfermare);
+
+/**
+ * L'impianto di destinazione di una riga, che si corregge: la somma dei target
+ * annui dei raccoglitori di un impianto fa il target delle primarie di quel sito
+ * in Giacenze (28/09/2026), e una riga senza impianto non conta per nessun sito.
+ */
+function CellaImpianto({ riga, isAdmin, impiantiSuggeriti, onSalva }) {
+  const [aperta, setAperta] = useState(false);
+  const [valore, setValore] = useState('');
+  const [salvando, setSalvando] = useState(false);
+  const [errore, setErrore] = useState('');
+  const apri = (v) => { setAperta(v); if (v) { setValore(riga.impianto || ''); setErrore(''); } };
+  const salva = async () => {
+    if (valore.trim() === (riga.impianto || '')) { setAperta(false); return; }
+    setSalvando(true);
+    try {
+      await onSalva(riga, valore.trim());
+      setAperta(false);
+    } catch (e) {
+      setErrore(e.message || String(e));
+    }
+    setSalvando(false);
+  };
+  const testo = riga.impianto ? `verso ${riga.impianto}` : 'impianto non indicato';
+  if (!isAdmin) return <div className={`text-[10px] font-normal ${riga.impianto ? 'text-muted-foreground' : 'text-amber-700'}`}>{testo}</div>;
+  return (
+    <Popover open={aperta} onOpenChange={apri}>
+      <PopoverTrigger asChild>
+        <button className={`text-[10px] font-normal inline-flex items-center gap-0.5 hover:underline ${riga.impianto ? 'text-muted-foreground' : 'text-amber-700'}`}>
+          {testo}<Edit3 className="w-2.5 h-2.5 opacity-50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72">
+        <div className="text-xs text-muted-foreground mb-2">{riga.nome}{riga.regione ? ` · ${riga.regione}` : ''}: impianto di destinazione</div>
+        <div className="space-y-2">
+          <Input autoFocus list="nomi-impianti-riga" value={valore} onChange={e => setValore(e.target.value)} placeholder="Nessuno" className="h-8"
+            onKeyDown={e => { if (e.key === 'Enter') salva(); }} />
+          <datalist id="nomi-impianti-riga">{impiantiSuggeriti.map(n => <option key={n} value={n} />)}</datalist>
+          <p className="text-[11px] text-muted-foreground">Si cambia sul target annuo e su tutti i mesi della riga. Il target annuo conta per le primarie di questo impianto in Giacenze.</p>
+          {errore && <p className="text-xs text-destructive">{errore}</p>}
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setAperta(false)}>Annulla</Button>
+            <Button size="sm" onClick={salva} disabled={salvando}>{salvando && <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />}Salva</Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 function CellaMese({ record, riga, mese, anno, isAdmin, onSalva }) {
   const [aperta, setAperta] = useState(false);
@@ -266,23 +323,34 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
   const [importa, setImporta] = useState(false);
   const [mostraVuote, setMostraVuote] = useState(false);
 
+  // Le letture si numerano: una superata da un'altra (l'anno e' cambiato) non
+  // tocca niente, cosi' le righe di un anno chiuso non restano a video,
+  // modificabili, sotto il titolo di un altro.
+  const ultimaLettura = useRef(0);
+  const [confermando, setConfermando] = useState(null);
+
   const carica = useCallback(async () => {
+    const n = ++ultimaLettura.current;
     setCaricando(true);
     try {
       const [a, m, forn, comm, racc] = await Promise.all([
         fetchAllClient(base44.entities.TargetRaccoglitore, { anno }),
         fetchAllClient(base44.entities.TargetMensile, { anno }),
-        base44.entities.FornitoreSecondaria.list('-created_date', 500).catch(() => []),
+        // tutti i collegamenti, poi quelli dell'anno: un record senza anno vale per il 2026
+        fetchAllClient(base44.entities.FornitoreSecondaria).catch(() => []),
         base44.entities.CommessaEcotyre.filter({ anno }).catch(() => []),
         base44.functions.invoke('computeRaccolto', { filters: { anno: [anno], canale: 'rete' } }).then(r => r.data || r).catch(() => ({})),
       ]);
+      if (n !== ultimaLettura.current) return;
       setAnnui(a);
       setMensili(m);
-      setQuoteImpianto(new Set(forn.filter(f => f.ruolo === 'doppio_ruolo' || f.ruolo === 'impianto').map(f => chiaveNome(f.nome))));
-      setCommessa(comm[0] || null);
+      setQuoteImpianto(new Set(forn.filter(f => annoDelRecord(f) === anno && (f.ruolo === 'doppio_ruolo' || f.ruolo === 'impianto')).map(f => chiaveNome(f.nome))));
+      // fra piu' commesse dello stesso anno vale la modificata per ultima, come nelle funzioni
+      setCommessa(comm.reduce((x, r) => (!x || String(r.updated_date || r.created_date || '') > String(x.updated_date || x.created_date || '') ? r : x), null));
       setRaccolto(racc.by_raccoglitore || []);
       setDateRete(racc.date_da_sistemare || null);
     } catch (e) {
+      if (n !== ultimaLettura.current) return;
       toast({ title: 'Caricamento non riuscito', description: e.message || String(e), variant: 'destructive' });
     }
     setCaricando(false);
@@ -385,6 +453,55 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     }
   };
 
+  // L'impianto di una riga: sul target annuo e su tutti i suoi mesi, con lo storico.
+  const salvaImpianto = async (riga, impianto) => {
+    const k = chiaveNome(impianto);
+    if (righe.elenco.some(r => r !== riga && r.chiave === riga.chiave && r.regione === riga.regione && r.impiantoChiave === k)) {
+      throw new Error(`${riga.nome}${riga.regione ? ` in ${riga.regione}` : ''}${impianto ? ` verso ${impianto}` : ' senza impianto'} c'è già: correggi quella riga.`);
+    }
+    const utente = nomeUtente(user);
+    const nota = `impianto: ${impianto || 'non indicato'}`;
+    const a = riga.annuo;
+    if (a) {
+      const storico_json = conModifica(a.storico_json, { utente, nota, prima: { target_tonnellate: a.target_tonnellate ?? null, attivo_dal: a.attivo_dal || '', impianto: a.impianto || '' } });
+      await base44.entities.TargetRaccoglitore.update(a.id, { impianto, storico_json });
+      setAnnui(prev => prev.map(x => (x.id === a.id ? { ...x, impianto, storico_json } : x)));
+    }
+    for (const m of Object.values(riga.mesi)) {
+      if (!m) continue;
+      const storico_json = conModifica(m.storico_json, { utente, nota, prima: { target: m.target ?? null, non_raccoglie: !!m.non_raccoglie, impianto: m.impianto || '' } });
+      await base44.entities.TargetMensile.update(m.id, { impianto, storico_json });
+      setMensili(prev => prev.map(x => (x.id === m.id ? { ...x, impianto, storico_json } : x)));
+    }
+  };
+
+  // Confermare una riga copiata dall'anno prima: una voce nello storico di ogni
+  // suo record, e la nota "da confermare" sparisce.
+  const confermaRighe = async (daFare) => {
+    const utente = nomeUtente(user);
+    setConfermando(daFare.length === 1 ? `${daFare[0].chiave}|${daFare[0].regione}|${daFare[0].impiantoChiave}` : 'tutte');
+    try {
+      for (const riga of daFare) {
+        const a = riga.annuo;
+        if (a && daConfermare(a)) {
+          const storico_json = conModifica(a.storico_json, { utente, nota: 'confermato', prima: { target_tonnellate: a.target_tonnellate ?? null, attivo_dal: a.attivo_dal || '' } });
+          await base44.entities.TargetRaccoglitore.update(a.id, { storico_json });
+          setAnnui(prev => prev.map(x => (x.id === a.id ? { ...x, storico_json } : x)));
+        }
+        for (const m of Object.values(riga.mesi)) {
+          if (!m || !daConfermare(m)) continue;
+          const storico_json = conModifica(m.storico_json, { utente, nota: 'confermato', prima: { target: m.target ?? null, non_raccoglie: !!m.non_raccoglie } });
+          await base44.entities.TargetMensile.update(m.id, { storico_json });
+          setMensili(prev => prev.map(x => (x.id === m.id ? { ...x, storico_json } : x)));
+        }
+      }
+      toast({ title: daFare.length === 1 ? 'Riga confermata' : `${daFare.length} righe confermate` });
+    } catch (e) {
+      toast({ title: 'Conferma non riuscita', description: e.message || String(e), variant: 'destructive' });
+    }
+    setConfermando(null);
+  };
+
   const creaRiga = async ({ raccoglitore, regione, impianto, target_tonnellate, attivo_dal }) => {
     if (righe.elenco.some(r => r.chiave === chiaveNome(raccoglitore) && r.regione === regione && r.impiantoChiave === chiaveNome(impianto))) {
       throw new Error(`${raccoglitore} in ${regione}${impianto ? ` verso ${impianto}` : ''} è già presente.`);
@@ -398,6 +515,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
 
   const nomiSuggeriti = useMemo(() => [...new Set(raccolto.map(r => r.raccoglitore).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'it')), [raccolto]);
   const impiantiSuggeriti = useMemo(() => [...new Set(righe.elenco.map(r => r.impianto).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'it')), [righe]);
+  const righeDaConfermare = useMemo(() => righe.elenco.filter(rigaDaConfermare), [righe]);
 
   const leggiLista = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
   const totaliMese = MESI.map(m => righe.elenco.reduce((s, r) => s + valoreMese(r.mesi[m]), 0));
@@ -422,8 +540,9 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <p className="text-sm text-muted-foreground max-w-3xl">
-          L'unico punto in cui si scrivono i target dei raccoglitori, in tonnellate, per regione. L'impianto di destinazione è facoltativo: un raccoglitore può
-          conferire a impianti diversi e l'impianto effettivo si legge a consuntivo nell'Andamento. Il target
+          L'unico punto in cui si scrivono i target dei raccoglitori, in tonnellate, per regione e impianto di destinazione. L'impianto conta: la somma dei
+          target annui dei raccoglitori di un impianto è il target delle primarie di quel sito in Giacenze, e una riga senza impianto non conta per nessun sito
+          (si corregge cliccando sotto il nome). Un raccoglitore che conferisce a più impianti ha una riga per impianto; l'impianto effettivo si legge a consuntivo nell'Andamento. Il target
           annuo si definisce a inizio anno o alla contrattualizzazione; a inizio mese si scrive quanto si affida. Clicca su una cella per modificarla: vale subito
           in dashboard, alert, Verifiche e negli altri moduli, e la modifica resta nello storico <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 align-middle" />.
         </p>
@@ -444,6 +563,20 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
       )}
 
       <RiepilogoDate canale="Rete" riepilogo={dateRete} esempi />
+
+      {righeDaConfermare.length > 0 && (
+        <div className="flex items-center justify-between gap-2 flex-wrap text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
+          <span>
+            {righeDaConfermare.length === 1 ? 'Una riga è copiata' : `${righeDaConfermare.length} righe sono copiate`} dal {anno - 1} e {righeDaConfermare.length === 1 ? 'è' : 'sono'} da confermare (segnate «da confermare»):
+            controlla i valori e conferma, o correggili. Una cella salvata conferma il suo valore.
+          </span>
+          {isAdmin && (
+            <Button size="sm" variant="outline" disabled={!!confermando} onClick={() => confermaRighe(righeDaConfermare)}>
+              {confermando === 'tutte' && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}Conferma tutte
+            </Button>
+          )}
+        </div>
+      )}
 
       {righe.doppioni.length > 0 && (
         <div className="flex items-start gap-2 text-xs text-amber-800"><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />Target mensili doppi sulla stessa riga, vale l'ultimo modificato: {righe.doppioni.slice(0, 5).join(', ')}{righe.doppioni.length > 5 ? '…' : ''}</div>
@@ -478,6 +611,17 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
                   <tr key={`${r.chiave}|${r.regione}|${r.impiantoChiave}`} className="border-t hover:bg-muted/20">
                     <td className="sticky left-0 z-10 bg-card px-3 py-1 font-medium pl-5">
                       {r.nome}
+                      {rigaDaConfermare(r) && (
+                        <span className="ml-1.5 inline-flex items-center gap-1 text-[10px] font-normal px-1 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                          da confermare
+                          {isAdmin && (
+                            <button type="button" title="Conferma i valori copiati" disabled={!!confermando} onClick={() => confermaRighe([r])} className="hover:text-emerald-700">
+                              {confermando === `${r.chiave}|${r.regione}|${r.impiantoChiave}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                            </button>
+                          )}
+                        </span>
+                      )}
+                      <CellaImpianto riga={r} isAdmin={isAdmin} impiantiSuggeriti={impiantiSuggeriti} onSalva={salvaImpianto} />
                       {r.annuo && r.annuo.attivo_dal && <div className="text-[10px] font-normal text-muted-foreground">attivo dal {r.annuo.attivo_dal.split('-').reverse().join('/')}</div>}
                     </td>
                     <td className="px-2 py-1 text-muted-foreground" title={r.regioneDerivata ? 'Regione ricavata dal raccolto dell\'anno' : undefined}>{r.regione || '—'}{r.regioneDerivata && r.regione ? '*' : ''}</td>
@@ -562,7 +706,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
 
       <NuovoRaccoglitore open={nuovo} onClose={() => setNuovo(false)} anno={anno} nomiSuggeriti={nomiSuggeriti} impiantiSuggeriti={impiantiSuggeriti} onCrea={creaRiga} />
 
-      <ImportaReportGenerale open={importa} onClose={() => setImporta(false)} anno={anno} annui={annui} mensili={mensili} user={user}
+      <ImportaReportGenerale open={importa && isAdmin} onClose={() => setImporta(false)} anno={anno} annui={annui} mensili={mensili} user={user} solaLettura={!isAdmin}
         onImportato={async () => { setImporta(false); await carica(); }} />
     </div>
   );

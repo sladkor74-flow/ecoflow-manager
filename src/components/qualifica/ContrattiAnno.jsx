@@ -312,7 +312,12 @@ function ProceduraContratto({ anno, soggetto, riga, modelli, onChiudi, onSalvato
                     <p className="text-[11px] text-muted-foreground">nel {riga.precedente.anno}: {String(proposta.vecchi[c.chiave])}</p>
                   )}
                   {c.chiave === 'TARGET_TON' && riga.target_t != null && (
-                    <p className="text-[11px] text-muted-foreground">da Target &amp; Status: {formatTonnellate(riga.target_t)} t</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      da Target &amp; Status: {formatTonnellate(riga.target_t)} t
+                      {riga.target_anno && Number(riga.target_anno) !== Number(anno) && (
+                        <span className="text-amber-700"> — è il target del {riga.target_anno}: quello del {anno} non è ancora scritto in Target &amp; Status. Controllalo prima di generare il contratto.</span>
+                      )}
+                    </p>
                   )}
                 </div>
               );

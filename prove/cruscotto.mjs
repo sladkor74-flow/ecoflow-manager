@@ -68,7 +68,7 @@ const mc = statoMesiAttiva(docsCanali, [], 2026, OGGI);
 verifica('rete elaborata e ACI mancante: elaborato, con i canali mancanti detti per nome', mc[1].elaborato && JSON.stringify(mc[1].canali_mancanti) === '["ACI","EXTRA_RACCOLTA"]' && mc[1].canali.RETE.stato === 'elaborata' && !mc[1].chiuso, JSON.stringify(mc[1]));
 verifica('rete e ACI chiuse, extra mancante: il mese NON e\' chiuso', !mc[3].chiuso && JSON.stringify(mc[3].canali_mancanti) === '["EXTRA_RACCOLTA"]', JSON.stringify(mc[3]));
 verifica('rete e ACI chiuse, extra approvata: non chiuso, niente canali mancanti', !mc[4].chiuso && mc[4].canali_mancanti.length === 0 && mc[4].canali.RETE.chiuso && !mc[4].canali.EXTRA_RACCOLTA.chiuso);
-const rc = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: [], alertAperti: [], uploadLogs: [], assegnatiRete: [], assegnatiAci: [], documenti: docsCanali, prefatture: [], riepilogoQualifica: null, giacenzeSito: [], impiantiTarget: [], richiesteEct: [] });
+const rc = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: [], alertAperti: [], uploadLogs: [], assegnatiRete: [], assegnatiAci: [], documenti: docsCanali, prefatture: [], riepilogoQualifica: null, richiesteEct: [] });
 const fatt = rc.da_gestire.filter(v => v.area === 'Fatturazione attiva');
 const vMancante = fatt.find(v => /con un canale non elaborato/.test(v.titolo));
 verifica('voce "mesi con un canale non elaborato": febbraio (ACI, extra) e aprile (extra)', vMancante && vMancante.titolo.startsWith('2 ') && /Febbraio: ACI, Extra raccolta/.test(vMancante.dettaglio) && /Aprile: Extra raccolta/.test(vMancante.dettaglio), fatt.map(v => `${v.titolo} [${v.dettaglio}]`).join(' | '));
@@ -80,7 +80,7 @@ verifica('prefattura chiesta solo per febbraio e giugno, non per aprile e maggio
 
 // Le richieste del consorzio si leggono col loro esito salvato: lo ricalcola sui
 // terminati ogni caricamento delle primarie (importaBlocco, ritiri_ect).
-const rEct = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: [], alertAperti: [], uploadLogs: [], assegnatiRete: [], assegnatiAci: [], documenti: MESI8(), prefatture: MESI8().map(d => ({ anno: 2026, mese: d.mese })), riepilogoQualifica: null, giacenzeSito: [], impiantiTarget: [],
+const rEct = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: [], alertAperti: [], uploadLogs: [], assegnatiRete: [], assegnatiAci: [], documenti: MESI8(), prefatture: MESI8().map(d => ({ anno: 2026, mese: d.mese })), riepilogoQualifica: null,
   richiesteEct: [{ esito: 'da_confermare', scadenza: '2026-09-11', evasione_rilevata_il: '2026-09-10' }, { scadenza: '2026-09-11' }, { scadenza: '2026-09-11', evaso_il: '2026-09-09' }] });
 const vEct = rEct.da_gestire.filter(v => v.area === 'Richieste ECT');
 verifica('ECT: ritirata e da spuntare non e\' oltre il termine; senza esito salvato lo si ricava dai campi', vEct.length === 2 && vEct.some(v => v.gravita === 'critico' && v.titolo.startsWith('1 ')) && vEct.some(v => v.gravita === 'info' && v.titolo.startsWith('2 ')), vEct.map(v => v.titolo).join(' | '));
@@ -94,17 +94,20 @@ const r = cruscotto({
   uploadLogs: logs, assegnatiRete: [{ id_ordine: 'C', ordine_immesso_il: '2025-09-23T22:00:00Z', ragione_sociale: 'Vecchio Srl' }], assegnatiAci: [],
   documenti: docs, prefatture: [{ anno: 2026, mese: 'Luglio' }],
   riepilogoQualifica: { scaduti: 2, non_conformi: 0, in_scadenza: 3, soggetti_critici: [{ nome: 'Alfa Srl' }], anomalie_catalogo: 1, anomalie_catalogo_testo: 'Patenti degli autisti' },
+  // Dal 27/09/2026 il target dell'impianto sta solo in Target & Status: due numeri
+  // diversi nei vecchi archivi non sono piu' una voce del cruscotto.
   giacenzeSito: [{ sito: 'TECNOGUM SRL', anno: 2026, tipo_destinazione: 'imp', target_totale_t: 2305 }], impiantiTarget: [{ nome_impianto: 'tecnogum', target: 2300000, stato: 'attivo' }],
   richiesteEct: [{ esito: 'aperta', scadenza: '2026-09-11' }, { esito: 'aperta', scadenza: '2026-10-15' }, { esito: 'da_confermare' }, { esito: 'evasa', scadenza: '2026-01-01' }],
 });
 const titoli = r.da_gestire.map(v => `${v.gravita}:${v.area}`);
 verifica('prima i critici', r.da_gestire[0].gravita === 'critico' && r.da_gestire.findIndex(v => v.gravita === 'info') > r.da_gestire.findIndex(v => v.gravita === 'attenzione'), titoli.join(' | '));
-verifica('alert critici, caricamento interrotto, qualifica scaduta, target divergente, ECT oltre il termine', ['Alert', 'Caricamento dati', 'Qualifica fornitori', 'Target', 'Richieste ECT'].every(a => r.da_gestire.some(v => v.gravita === 'critico' && v.area === a)), titoli.join(' | '));
+verifica('alert critici, caricamento interrotto, qualifica scaduta, ECT oltre il termine', ['Alert', 'Caricamento dati', 'Qualifica fornitori', 'Richieste ECT'].every(a => r.da_gestire.some(v => v.gravita === 'critico' && v.area === a)), titoli.join(' | '));
+verifica('nessuna voce sul target divergente: il target si scrive in un posto solo', !r.da_gestire.some(v => v.area === 'Target' || /Target divergente/.test(v.titolo)), titoli.join(' | '));
 verifica('dati vecchi (terziarie 25 giorni), mai caricato (pdr), arretrato oltre 60, mesi da elaborare', r.da_gestire.some(v => /terziarie: dati di 25 giorni/.test(v.titolo)) && r.da_gestire.some(v => /Mai caricato: pdr/.test(v.titolo)) && r.da_gestire.some(v => /Rete: 1 ordini aperti da oltre 60/.test(v.titolo)) && r.da_gestire.some(v => /6 mesi finiti non ancora elaborati/.test(v.titolo)), r.da_gestire.map(v => v.titolo).join(' | '));
 verifica('un documento del catalogo intestato a chi non ce, sulla dashboard', r.da_gestire.some(v => v.area === 'Qualifica fornitori' && v.gravita === 'critico' && /non verr. mai chiesto/.test(v.titolo) && v.dettaglio === 'Patenti degli autisti'), r.da_gestire.filter(v => v.area === 'Qualifica fornitori').map(v => v.titolo).join(' | '));
 verifica('ogni voce porta dove si risolve', r.da_gestire.every(v => v.link && v.link.startsWith('/')));
 verifica('una sola richiesta ECT oltre il termine (quella evasa e quella futura no)', r.da_gestire.find(v => v.area === 'Richieste ECT' && v.gravita === 'critico').titolo.startsWith('1 '));
-const pulito = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: ['primarie'], alertAperti: [], uploadLogs: [logs[0]], assegnatiRete: [], assegnatiAci: [], documenti: MESI8(), prefatture: MESI8().map(d => ({ anno: 2026, mese: d.mese })), riepilogoQualifica: null, giacenzeSito: [], impiantiTarget: [], richiesteEct: [] });
+const pulito = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: ['primarie'], alertAperti: [], uploadLogs: [logs[0]], assegnatiRete: [], assegnatiAci: [], documenti: MESI8(), prefatture: MESI8().map(d => ({ anno: 2026, mese: d.mese })), riepilogoQualifica: null, richiesteEct: [] });
 verifica('tutto a posto: elenco vuoto', pulito.da_gestire.length === 0, pulito.da_gestire.map(v => v.titolo).join(' | '));
 
 console.log('DATE OBBLIGATORIE (regola del 22/09/2026)');
@@ -117,7 +120,7 @@ const alertDate = [
   { severita: 'warning', modulo: 'extra_raccolta', canale: 'extra', regola_id: 'date_obbligatorie_extra', regola_nome: 'Ordini terminati con date obbligatorie mancanti o incoerenti', titolo: 'Extra raccolta: ordini con date da sistemare' },
   { severita: 'warning', modulo: 'primarie_rete', regola_id: 'r1', regola_nome: 'Ritardo SLA' },
 ];
-const rd = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: [], alertAperti: alertDate, uploadLogs: [], assegnatiRete: [], assegnatiAci: [], documenti: MESI8(), prefatture: MESI8().map(d => ({ anno: 2026, mese: d.mese })), riepilogoQualifica: null, giacenzeSito: [], impiantiTarget: [], richiesteEct: [] });
+const rd = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: [], alertAperti: alertDate, uploadLogs: [], assegnatiRete: [], assegnatiAci: [], documenti: MESI8(), prefatture: MESI8().map(d => ({ anno: 2026, mese: d.mese })), riepilogoQualifica: null, richiesteEct: [] });
 const vDate = rd.da_gestire.filter(v => v.area === 'Date obbligatorie');
 const vRete = vDate.find(v => v.link === '/primarie-rete');
 const vSec = vDate.find(v => v.link === '/secondarie');

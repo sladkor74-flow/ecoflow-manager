@@ -69,7 +69,7 @@ export function rispostaPredittivita({ dati, calcolo, anno, oggi, solaLettura, p
   const date = dateDaSistemareDiRete([...dati.ingresso.primarie, ...senzaFine.primarie], [...dati.ingresso.secondarie, ...senzaFine.secondarie], siti, anno, chiave);
   if (date.avviso) avvisi.push({ tipo: 'date_da_sistemare', testo: date.avviso });
   if (dati.programmati === null) avvisi.push({ tipo: 'programmi_non_letti', grave: true, testo: "Il programma già fissato non si è potuto leggere: per non sovrascriverlo, oggi non si può fissare niente. Riprova tra poco." });
-  if (!calcolo.regole_definite) avvisi.push({ tipo: 'regole_non_definite', testo: `Le regole della predittività del ${anno} (viaggio medio e priorità degli stoccaggi) non sono ancora state scritte: si usano quelle predefinite, 13 t a viaggio e priorità pari. Arrivano con il contratto dell'anno.` });
+  if (!calcolo.regole_definite) avvisi.push({ tipo: 'regole_non_definite', testo: `Le regole della predittività del ${anno} (viaggio medio e priorità degli stoccaggi) non sono ancora state scritte: si usano quelle predefinite, 13 t a viaggio e priorità pari. Si scrivono in Target & Status → Impianti e stoccaggi: il viaggio medio sul contratto Ecotyre dell'anno, la priorità su ogni collegamento di uno stoccaggio.` });
   if (dati.senza_fine === null) avvisi.push({ tipo: 'senza_fine_non_letti', testo: "I formulari terminati senza fine trasporto non si sono potuti leggere: se ce ne sono, non sono segnalati qui." });
 
   // --- il programma: quello calcolato, con accanto quello gia' fissato ---

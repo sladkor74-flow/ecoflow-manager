@@ -19,8 +19,9 @@ async function base64ToBlob(base64, mime) {
   return res.blob();
 }
 
-export async function exportExcel() {
-  const res = await base44.functions.invoke('exportStatusExcel', {});
+// L'anno e' quello scelto nella pagina: senza, il file sarebbe dell'anno in corso.
+export async function exportExcel(anno) {
+  const res = await base44.functions.invoke('exportStatusExcel', anno ? { anno: Number(anno) } : {});
   const blob = await base64ToBlob(res.data.file_base64, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   downloadBlob(blob, res.data.filename);
 }
