@@ -39,7 +39,8 @@ import { giacenzaPiazzale, piuGiorni } from "./predittivita.ts";
 export { annoDelRecord };
 
 const ruoloDi = (f) => f.ruolo || (String(f.tipo || '').toLowerCase().trim() === 'stoccaggio' ? 'stoccaggio' : 'raccoglitore');
-const eStoccaggio = (f) => ['stoccaggio', 'doppio_ruolo'].includes(ruoloDi(f));
+// raccoglitore_stoccaggio: raccoglie primarie nel proprio piazzale e spedisce secondarie (Nappi Sud)
+const eStoccaggio = (f) => ['stoccaggio', 'doppio_ruolo', 'raccoglitore_stoccaggio'].includes(ruoloDi(f));
 
 // Lo stato dei caricamenti che toccano gli archivi letti: un caricamento aperto
 // o concluso mentre si leggeva vuol dire numeri forse a meta'.
