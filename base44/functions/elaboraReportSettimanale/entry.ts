@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import {
-  caricaMovimenti, normalizzaRigheReport, CAMPI_REPORT, statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento,
+  caricaMovimenti, normalizzaRigheReport, riparaColonneData, CAMPI_REPORT, statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento,
 } from "../../shared/reportSettimanali.ts";
 import { valoreCampo, leggiCampo } from "../../shared/testoLungo.ts";
 import { calcolaEsito, salvaEsito } from "../../shared/esitoVerifica.ts";
@@ -61,6 +61,11 @@ const SCHEMA_TRASCRIZIONE = {
         type: 'object',
         properties: Object.fromEntries([
           ['riga', { type: 'integer' }],
+          // Da quale elenco del documento viene la riga: i carichi ricevuti e
+          // quelli spediti stanno in due tabelle con intestazioni diverse, e una
+          // tabella con la data sola non deve essere zittita dall'altra che la data
+          // del movimento ce l'ha (riparaDateRighe guarda tabella per tabella).
+          ['tabella', { type: 'string' }],
           ...CAMPI_REPORT.map(c => [c, { type: 'string' }]),
         ]),
       },
@@ -102,8 +107,15 @@ const GUIDA_CAMPI = [
   'fir: numero del formulario di identificazione rifiuto, detto anche FIR, formulario, n. formulario, numerazione fiscale, n. documento di trasporto.',
   'ordine: numero dell\'ordine o della richiesta di ritiro, come ET26149928 o SEC 26141285, detto anche n. ordine, ordine ET, ticket, n. bolla.',
   'peso: peso netto o peso effettivo o quantita\' in chilogrammi o tonnellate.',
-  'data_inizio: data di inizio trasporto, di partenza, di ritiro o di carico. Non la data del documento o di emissione del formulario.',
-  'data_fine: data di fine trasporto, di arrivo, di ingresso, di scarico o di registrazione del carico nel registro.',
+  // La data di una riga di questi file e' il giorno in cui il carico e' arrivato,
+  // cioe' la FINE del trasporto: nel linguaggio di un impianto o di uno stoccaggio
+  // "carico" e' quello che entra nel registro di carico e scarico, quindi "data
+  // carico" e "data uscita" sono la fine del trasporto, non l'inizio. Scritto
+  // "di carico" sotto data_inizio, l'agente classificava come inizio trasporto
+  // proprio la colonna che porta la fine, e la verifica delle uscite usciva piena
+  // di anomalie su date che nel report non c'erano (Nappi Sud, 28/09/2026).
+  'data_fine: data del carico, cioe\' quando il trasporto si conclude: data di arrivo, di ingresso, di scarico, di carico, di registrazione nel registro di carico e scarico. Se il file ha una sola colonna di data, di solito e\' questa.',
+  'data_inizio: data di inizio trasporto o di partenza del mezzo, da indicare SOLO se il file ha due colonne di data distinte, una per la partenza e una per l\'arrivo. Con una data sola non indicarla qui. Non la data del documento o di emissione del formulario.',
   'data: una sola data generica, solo se il file non distingue inizio e fine.',
   'produttore: ragione sociale del produttore o detentore del rifiuto, punto di raccolta, gommista, cliente.',
   'codice_pdr: codice numerico del punto di raccolta o del produttore.',
@@ -163,17 +175,16 @@ async function leggiTabelle(base44, tabelle, verifica) {
   for (const f of (Array.isArray(m.fogli) ? m.fogli : [])) {
     const nome = String(f.foglio || '').trim();
     const tabella = tabelle.find(t => t.nome === f.foglio) || tabelle.find(t => String(t.nome).trim() === nome);
-    const col = { ...(f.colonne || {}) };
+    let col = { ...(f.colonne || {}) };
     if (!tabella || scelti.some(s => s.tabella === tabella) || ((col.fir ?? -1) < 0 && (col.peso ?? -1) < 0)) continue;
     const intestazioni = (tabella.righe || [])[Math.max(0, (f.prima_riga_dati || 1) - 1)] || [];
     for (const c of CAMPI_NOME) if ((col[c] ?? -1) >= 0 && NON_NOMI.test(testoCella(intestazioni[col[c]]))) col[c] = -1;
-    // Una sola colonna di data indicata come inizio e fine: e' una data generica.
-    if ((col.data_inizio ?? -1) >= 0 && col.data_inizio === col.data_fine) {
-      col.data = col.data_inizio;
-      col.data_inizio = -1;
-      col.data_fine = -1;
-    }
-    scelti.push({ tabella, f, col, intestazioni });
+    // Le colonne delle date, riparate tabella per tabella: una data sola e' la
+    // data del movimento, cioe' la fine del trasporto, anche quando l'agente
+    // l'ha indicata come inizio (riparaColonneData).
+    const riparate = riparaColonneData(col);
+    col = riparate.col;
+    scelti.push({ tabella, f, col, intestazioni, notaDate: riparate.nota });
   }
   if (!m.riconosciuto || scelti.length === 0) {
     throw new Error('Nel file non ho trovato un elenco di carichi con formulario o peso' + (m.note ? ': ' + m.note : '.'));
@@ -181,7 +192,7 @@ async function leggiTabelle(base44, tabelle, verifica) {
 
   const normalizzate = [];
   const fogli = [];
-  for (const { tabella, f, col, intestazioni } of scelti) {
+  for (const { tabella, f, col, intestazioni, notaDate } of scelti) {
     const grezze = [];
     const righe = tabella.righe || [];
     for (let i = Math.max(0, f.prima_riga_dati || 0); i < righe.length; i++) {
@@ -191,14 +202,21 @@ async function leggiTabelle(base44, tabelle, verifica) {
       grezze.push(g);
     }
     const unita = f.unita_peso === 'kg' || f.unita_peso === 't' ? f.unita_peso : null;
-    const { righe: lette, unita: unitaUsata } = normalizzaRigheReport(grezze, unita);
+    const { righe: lette, unita: unitaUsata, date_da_inizio: dateDaInizio } = normalizzaRigheReport(grezze, unita, { colonne: { '': { inizio: (col.data_inizio ?? -1) >= 0, fine: (col.data_fine ?? -1) >= 0, generica: (col.data ?? -1) >= 0 } } });
     normalizzate.push(...lette);
+    // Come sono state lette le date, se non come l'agente le aveva indicate: si
+    // scrive accanto alle colonne, cosi' chi guarda la verifica lo vede.
+    const notaLetta = [
+      notaDate,
+      dateDaInizio ? `${dateDaInizio} righe portano la data solo nella colonna dell'inizio trasporto: letta come data del movimento, cioe' la fine del trasporto` : '',
+    ].filter(Boolean).join('; ');
     fogli.push({
       foglio: tabella.nome,
       contenuto: f.contenuto || '',
       prima_riga_dati: (tabella.riga_iniziale || 0) + (f.prima_riga_dati || 0) + 1,
       unita: unitaUsata,
       righe: lette.length,
+      ...(notaLetta ? { nota_date: notaLetta } : {}),
       colonne: Object.fromEntries(CAMPI_REPORT.filter(c => (col[c] ?? -1) >= 0).map(c => [c, testoCella(intestazioni[col[c]]) || `colonna ${col[c] + 1}`])),
     });
   }
@@ -231,6 +249,7 @@ async function leggiFile(base44, file, verifica) {
     '',
     'Campi di ogni riga:',
     '- riga: numero progressivo della riga nel documento',
+    '- tabella: il titolo dell\'elenco in cui la riga si trova, se il documento ha piu\' elenchi (per esempio "carichi ricevuti" e "carichi spediti", oppure "ingressi" e "uscite"). Con un elenco solo, lascialo vuoto.',
     ...GUIDA_CAMPI.map(g => '- ' + g),
     '',
     'unita_peso: kg oppure t.',
@@ -251,13 +270,21 @@ async function leggiFile(base44, file, verifica) {
   }
 
   const grezze = (letto.righe || []).map((r, i) => {
-    const g = { n: Number(r.riga) || i + 1 };
+    // La tabella di provenienza diventa il "foglio" della riga: e' la chiave con
+    // cui riparaDateRighe guarda una tabella per volta, e a video si legge come
+    // "carichi spediti, riga 4" invece che "riga 4".
+    const tabella = String(r.tabella ?? '').replace(/\s+/g, ' ').trim();
+    const g = { n: Number(r.riga) || i + 1, ...(tabella ? { foglio: tabella } : {}) };
     for (const c of CAMPI_REPORT) g[c] = r[c] ?? null;
     return g;
   });
   if (grezze.length === 0) throw new Error('Nel documento non ho trovato righe di carico' + (letto.note ? ': ' + letto.note : '.'));
-  const { righe, unita } = normalizzaRigheReport(grezze, letto.unita_peso);
-  return { righe, lettura: { modo: file.mime === 'immagine' ? 'immagine' : 'pdf', unita, note: letto.note || '', trascritto_da_agente: true } };
+  const { righe, unita, date_da_inizio: dateDaInizio } = normalizzaRigheReport(grezze, letto.unita_peso);
+  // Anche in una trascrizione la data di una riga e' la fine del trasporto: se
+  // l'agente l'ha messa fra le date di inizio, e' stata letta come data del
+  // movimento, e si dice.
+  const notaDate = dateDaInizio ? `${dateDaInizio} righe con la data solo come inizio trasporto: letta come data del movimento, cioe' la fine del trasporto` : '';
+  return { righe, lettura: { modo: file.mime === 'immagine' ? 'immagine' : 'pdf', unita, note: letto.note || '', ...(notaDate ? { nota_date: notaDate } : {}), trascritto_da_agente: true } };
 }
 
 export default async function(req) {
@@ -337,7 +364,7 @@ export default async function(req) {
       return Response.json({ error: messaggio, rinviato: true, caricamenti: durante }, { status: 409 });
     }
 
-    const esito = calcolaEsito(verifica, righe, letti.movimenti, letti.senza_fine);
+    const esito = calcolaEsito(verifica, righe, letti.movimenti, letti.senza_fine, lettura);
     await salvaEsito(base44, verifica, esito, conRitentativi);
 
     return Response.json({ ok: true, ...esito.riepilogo });

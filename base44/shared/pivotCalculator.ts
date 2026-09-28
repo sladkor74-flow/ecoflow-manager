@@ -53,8 +53,15 @@ function getRecordAnno(r) {
   return getAnnoFromDate(getDataFineTrasporto(r));
 }
 
+// Il mese si ricalcola sempre dalla data, come l'anno e la settimana qui sotto: il
+// campo mese_immissione arriva dalla colonna "Mese di immissione" del file del
+// portale, che ha una regola sua e non sempre coincide con la data (vedi AGENTS.md,
+// "il mese viene dalla data, non dal portale"), e su un record importato tempo
+// addietro puo' essere rimasto quello di allora. Oggi il ramo che lo preferiva non
+// scattava - vale solo sugli Assegnati, che quel campo non hanno - ma il giorno che
+// glielo aggiungessero la stessa tabella avrebbe le colonne prese dal portale e le
+// righe calcolate dalla data: due regole nello stesso posto.
 function getRecordMeseImmissione(r) {
-  if (r.mese_immissione && String(r.mese_immissione).trim()) return r.mese_immissione;
   return getMeseFromDate(getDataImmissione(r));
 }
 

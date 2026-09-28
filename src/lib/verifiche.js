@@ -222,14 +222,20 @@ export function rigaReport(e) {
   return e && e.foglio ? `${String(e.foglio).trim()}, riga ${e.n}` : `riga ${e && e.n}`;
 }
 
-/** Come e' stato letto un Excel: uno o piu' fogli con le rispettive colonne. */
+/**
+ * Come e' stato letto un Excel: uno o piu' fogli con le rispettive colonne.
+ * Se una colonna di data e' stata letta diversamente da come l'agente l'aveva
+ * indicata - una data sola e' sempre la data del movimento, cioe' la fine del
+ * trasporto - lo si dice accanto alle colonne (nota_date): una lettura che
+ * cambia le date non deve restare un fatto nascosto.
+ */
 export function descriviLettura(lettura) {
   const unita = (u) => (u === 't' ? 'tonnellate' : 'chilogrammi');
   const colonne = (c) => (c ? Object.entries(c).map(([k, x]) => `${k} = ${x}`).join(', ') : '');
   const fogli = Array.isArray(lettura.fogli) && lettura.fogli.length
     ? lettura.fogli
-    : [{ foglio: lettura.foglio, prima_riga_dati: lettura.prima_riga_dati, unita: lettura.unita, colonne: lettura.colonne }];
-  return fogli.map(f => `Foglio "${f.foglio}"${f.contenuto ? ` (${f.contenuto.replace(/_/g, ' ')})` : ''}, dati dalla riga ${f.prima_riga_dati}, pesi in ${unita(f.unita)}${f.colonne ? '. Colonne: ' + colonne(f.colonne) : ''}.`);
+    : [{ foglio: lettura.foglio, prima_riga_dati: lettura.prima_riga_dati, unita: lettura.unita, colonne: lettura.colonne, nota_date: lettura.nota_date }];
+  return fogli.map(f => `Foglio "${f.foglio}"${f.contenuto ? ` (${f.contenuto.replace(/_/g, ' ')})` : ''}, dati dalla riga ${f.prima_riga_dati}, pesi in ${unita(f.unita)}${f.colonne ? '. Colonne: ' + colonne(f.colonne) : ''}.${f.nota_date ? ` Date: ${f.nota_date}.` : ''}`);
 }
 
 export function segnalazioni(v) {
@@ -433,6 +439,11 @@ export function sintesiVerifica(v, esito) {
     mancanti, inPiu, senzaCanale, escluse, esiti,
     // le righe e i registrati assenti a cui manca una data obbligatoria
     conDate, mancantiConDate,
+    // Come sono state lette le date in QUESTO confronto, se non come il file le
+    // aveva indicate. La nota della lettura si scrive quando il file si legge; un
+    // riconfronto dopo un caricamento non rilegge il file ma puo' leggere le date
+    // diversamente, e allora questa e' l'unica che lo dice.
+    notaDate: String((esito && esito.nota_date) || ''),
   };
 }
 
@@ -529,7 +540,8 @@ export async function scaricaExcelVerifica(v) {
       ? `nessun file: l'impianto ha comunicato che non ci sono state movimentazioni${v.nota ? ` (${v.nota})` : ''}`
       : lettura.modo === 'excel'
       ? descriviLettura(lettura).join('\n')
-      : `${lettura.modo === 'pdf' ? 'PDF' : 'immagine'} trascritto dall'agente, pesi in ${lettura.unita === 't' ? 'tonnellate' : 'chilogrammi'}`],
+      : `${lettura.modo === 'pdf' ? 'PDF' : 'immagine'} trascritto dall'agente, pesi in ${lettura.unita === 't' ? 'tonnellate' : 'chilogrammi'}${lettura.nota_date ? `. Date: ${lettura.nota_date}` : ''}`],
+    ...(sintesi.notaDate ? [['Date di questo confronto', sintesi.notaDate]] : []),
     ['Righe non considerate', v.righe_escluse ? `${v.righe_escluse} (${formatKg(v.peso_escluse_kg || 0)} kg): carichi di altre settimane o di altri consorzi, elencati nel foglio "Non considerate"` : 'nessuna'],
     // Immissione, inizio e fine trasporto sono obbligatorie (22/09/2026): se a un
     // formulario registrato ne manca una si dice gia' nel riepilogo.

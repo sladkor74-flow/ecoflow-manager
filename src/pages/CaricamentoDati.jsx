@@ -123,7 +123,7 @@ export default function CaricamentoDati() {
   // caricamento aggiorna tutto.
   //
   // Due freni, che prima non c'erano:
-  //  - LI FA SOLO CHI PUO' CARICARE. I ricalcoli (quattro per le primarie, due
+  //  - LI FA SOLO CHI PUO' CARICARE. I ricalcoli (cinque per le primarie, due
   //    per le secondarie: l'elenco e' RICALCOLI) rileggono archivi interi
   //    e ci SCRIVONO (riepilogo della qualifica, verifiche dei report e
   //    quadrature FIR, ritiri ECT, evasione assegnati), e nessuna di quelle

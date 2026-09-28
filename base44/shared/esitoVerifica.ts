@@ -52,13 +52,17 @@ export async function conRitentativi(fn) {
  * senzaFine sono i terminati senza fine trasporto (caricaMovimenti): se non si
  * passano, valgono quelli letti insieme ai movimenti.
  */
-export function calcolaEsito(verifica, righe, movimenti, senzaFine = senzaFineDei(movimenti)) {
+export function calcolaEsito(verifica, righe, movimenti, senzaFine = senzaFineDei(movimenti), lettura = null) {
   const esito = verificaReport(righe, movimenti, {
     chiave: verifica.soggetto_chiave,
     nome: verifica.soggetto_nome,
     inizio: String(verifica.data_inizio).slice(0, 10),
     fine: String(verifica.data_fine).slice(0, 10),
     senzaFine,
+    // La lettura salvata dice quali colonne di data aveva il file: al riconfronto
+    // il file non si rilegge, e senza le colonne la data di una riga si
+    // indovinerebbe dalle righe stesse (vedi riparaDateRighe).
+    lettura,
   });
   return esito;
 }
@@ -74,8 +78,12 @@ export const daRiconfrontare = (v) => !!v && (v.stato === 'completata'
 
 // Il testo dell'esito cosi' come si salva: serve anche a capire se un nuovo
 // confronto cambia qualcosa rispetto a quello salvato.
+// nota_date entra nell'esito salvato: e' una lettura che cambia il significato di
+// una data, e va scritta dove la scheda la legge. Ci sta anche perche' cambiandola
+// l'esito risulta cambiato e si risalva, invece di restare la nota di ieri.
 const testoEsito = (esito) => JSON.stringify({
   esiti: esito.esiti, assenti: esito.assenti, escluse: esito.escluse, quadratura: esito.quadratura,
+  ...(esito.nota_date ? { nota_date: esito.nota_date, date_da_inizio: esito.date_da_inizio } : {}),
 });
 
 /**
@@ -168,14 +176,21 @@ export async function ricontrollaVerifiche(base44, verifiche, movimenti, { scriv
   const risultati = [];
   // Le righe e gli esiti salvati di tutte le verifiche, in blocco: una lettura
   // per verifica e per campo pesava sul limite di richieste della piattaforma.
-  await precaricaParti(base44, 'VerificaReport', verifiche.filter(daRiconfrontare), ['righe_report_json', 'esito_json']);
+  // Anche lettura_json: dice quali colonne di data aveva il file, e senza quelle la
+  // data di una riga si indovina. Non costa una richiesta in piu' - precaricaParti
+  // chiede i campi insieme, a gruppi di venti record.
+  await precaricaParti(base44, 'VerificaReport', verifiche.filter(daRiconfrontare), ['righe_report_json', 'esito_json', 'lettura_json']);
   for (const v of verifiche) {
     if (!daRiconfrontare(v)) continue;
     const dichiarazione = eDichiarazione(v);
     if (!dichiarazione && !v.righe_report_json) continue;
     try {
       const righe = dichiarazione ? [] : JSON.parse((await riprova(() => leggiCampo(base44, 'VerificaReport', v, 'righe_report_json'))) || '[]');
-      const esito = calcolaEsito(v, righe, movimenti, senzaFine);
+      let lettura = null;
+      // Una lettura che non si ricompone non ferma il riconfronto: si torna a
+      // decidere dalle righe, che e' quello che si faceva prima.
+      try { if (v.lettura_json) lettura = JSON.parse((await riprova(() => leggiCampo(base44, 'VerificaReport', v, 'lettura_json'))) || 'null'); } catch { /* decidono le righe */ }
+      const esito = calcolaEsito(v, righe, movimenti, senzaFine, lettura);
       // Un esito salvato che non si ricompone (parti doppie o mancanti) non e'
       // un errore della verifica: si riscrive, e valoreCampo cancella tutte le
       // parti del campo prima di rifarle. Lanciato, lasciava la verifica fra gli

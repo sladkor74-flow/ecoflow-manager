@@ -49,7 +49,43 @@
     },
     "riferimento_ordine": {
       "type": "string",
-      "description": "ID ordine Ecotyre correlato, se presente"
+      "description": "Uno o piu ID ordine Ecotyre da completare, separati da virgola: quando risultano tutti terminati (fine trasporto) il gestionale chiude l attivita da solo. Un ordine cancellato non la chiude: si segnala e decide l utente"
+    },
+    "ordini_totali": {
+      "type": "number",
+      "default": 0,
+      "description": "Quanti ID ordine sono scritti sull attivita"
+    },
+    "ordini_attesi": {
+      "type": "string",
+      "description": "Gli ID ordine che il gestionale sta guardando su questa attivita. Se cambiano si ricomincia a guardare, e quel giro non chiude niente"
+    },
+    "ordini_da_attendere": {
+      "type": "string",
+      "description": "Gli ordini che risultavano ancora aperti quando il gestionale ha cominciato a guardare: l attivita si chiude solo quando questi passano a terminato, cosi il passaggio si vede davvero. Vuoto vuol dire che non c e nessun passaggio da attendere, e la spunta la mette chi lavora"
+    },
+    "ordini_terminati": {
+      "type": "number",
+      "default": 0,
+      "description": "Quanti di quegli ordini risultano terminati con la fine trasporto: l attivita si chiude quando lo sono tutti"
+    },
+    "chiusa_dal_gestionale": {
+      "type": "boolean",
+      "default": false,
+      "description": "Vero quando l ha chiusa il controllo degli ordini, non una spunta a mano. Riaperta a mano resta vero, cosi il gestionale non la richiude"
+    },
+    "chiusa_dal_gestionale_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Giorno in cui il gestionale l ha chiusa"
+    },
+    "chiusura_nota": {
+      "type": "string",
+      "description": "Perche e quando si e chiusa: chiusa dal gestionale il GG/MM/AAAA, l ordine ET... risulta terminato"
+    },
+    "avviso_ordini": {
+      "type": "string",
+      "description": "Perche l attivita resta aperta anche se un suo ordine non e in corso: ordine cancellato, ordine eseguito a portale senza il clic su Chiudi, terminato senza la data di fine trasporto, ID che non si trova"
     }
   },
   "required": [

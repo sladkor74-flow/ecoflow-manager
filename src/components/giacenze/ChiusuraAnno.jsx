@@ -31,8 +31,25 @@ const VERDE = 'FF92D050', AZZURRO = 'FF99CCFF', GIALLO = 'FFFFFF00', ROSSO = 'FF
 const kg = (v) => (v === null || v === undefined || v === '' ? '—' : `${formatKg(v)} kg`);
 const nomeCanale = (c) => NOME_CANALE[c] || String(c || '').toLowerCase();
 
-/** I canali che il portale rileva: solo per questi una voce si puo' rettificare. */
+/**
+ * Se su una voce c'e' una decisione per classe da prendere. La stabilisce la
+ * funzione (decidibilePerClasse in base44/shared/chiusuraAnno.ts) e qui si legge,
+ * cosi' l'avviso in cima e il pulsante sulla riga non possono dire due cose
+ * diverse: succedeva, e l'avviso chiedeva decisioni anche sui movimenti degli
+ * impianti e sull'extra raccolta, dove non c'e' niente da premere.
+ */
+const decidibile = (v) => v.decidibile === true;
+
+/** I canali che il portale rileva. */
 const rettificabile = (v) => v.canale === 'RETE' || v.canale === 'ACI';
+
+/**
+ * Una voce senza classe: le terziarie, che escono verso le cementerie e non sono
+ * PFU divisi in P, M, G1 e G2 (regola dell'utente, 28/09/2026). La classe arriva
+ * vuota dalla funzione, e il controllo per classe non le riguarda: si elencano,
+ * non si decidono. Prima portavano una classe finta, 'ND'.
+ */
+const senzaClasse = (v) => !v.classe;
 
 /** Quanto pesa un gruppo di voci, un canale per volta: mai un totale solo. */
 function pesoInParole(perCanale) {
@@ -61,7 +78,7 @@ function Riquadro({ titolo, sottotitolo, icona: Icona, azione, children }) {
 // --- L'elenco di dicembre ---
 
 function VoceDicembre({ v, decisione, onDecidi }) {
-  const puo = rettificabile(v) && !!onDecidi;
+  const puo = decidibile(v) && !!onDecidi;
   const scelta = decisione || '';
   const classeDelPortale = scelta.startsWith('classe:') ? scelta.slice(7) : '';
   return (
@@ -70,7 +87,7 @@ function VoceDicembre({ v, decisione, onDecidi }) {
       <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground">{v.numero_fir || '—'}</td>
       <td className="px-2 py-1.5 whitespace-nowrap">{v.tipo}{v.verso === 'uscita' ? ' in uscita' : ' in entrata'}</td>
       <td className="px-2 py-1.5 whitespace-nowrap">{nomeCanale(v.canale)}</td>
-      <td className="px-2 py-1.5 whitespace-nowrap">{v.classe}</td>
+      <td className="px-2 py-1.5 whitespace-nowrap">{v.classe || <span className="text-muted-foreground italic">senza classe</span>}</td>
       <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{v.verso === 'uscita' ? '-' : '+'}{formatKg(v.kg)}</td>
       <td className="px-2 py-1.5 whitespace-nowrap">{giorno(v.finito_il)}</td>
       <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground">{v.chiuso_il ? giorno(v.chiuso_il) : 'non ancora'}</td>
@@ -78,7 +95,15 @@ function VoceDicembre({ v, decisione, onDecidi }) {
       <td className="px-2 py-1.5">
         {!puo ? (
           <span className="text-xs text-muted-foreground">
-            {rettificabile(v) ? 'da guardare' : 'fuori dal saldo per classe del portale'}
+            {/* Ogni motivo con le sue parole: sono quattro casi diversi, e
+                chiamarli tutti «da guardare» non dice niente a chi legge. */}
+            {senzaClasse(v)
+              ? 'non ha classe: il controllo per classe non la riguarda'
+              : v.ruolo === 'imp'
+                ? 'è di un impianto: del portale si sa il totale, non la ripartizione per classe'
+                : !rettificabile(v)
+                  ? 'fuori dal saldo per classe del portale'
+                  : 'da guardare'}
           </span>
         ) : (
           <div className="flex flex-wrap items-center gap-1">
@@ -129,15 +154,36 @@ function ElencoDicembre({ elenco, decisioni, onDecidi }) {
   return (
     <div className="space-y-3">
       <div className="border rounded-md p-2 bg-amber-50 border-amber-300 text-amber-900 text-xs">
-        <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="w-4 h-4 shrink-0" /> {elenco.n} movimenti finiti a dicembre e non ancora chiusi a portale</div>
-        <p className="mt-1">{pesoInParole(elenco.per_canale)}. Non stanno ne&apos; nella fotografia ne&apos; fra i movimenti dell&apos;anno nuovo: senza una decisione su ognuno si perdono.</p>
+        {/* L'avviso delle decisioni per classe compare solo se c'e' davvero
+            qualcosa da decidere per classe: con sole terziarie direbbe «zero». */}
+        {elenco.n_per_classe > 0 && (
+          <>
+            <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="w-4 h-4 shrink-0" /> {elenco.n_per_classe} movimenti finiti a dicembre e non ancora chiusi a portale</div>
+            <p className="mt-1">{pesoInParole(elenco.per_canale_per_classe)}. Non stanno ne&apos; nella fotografia ne&apos; fra i movimenti dell&apos;anno nuovo: senza una decisione su ognuno si perdono.</p>
+          </>
+        )}
+        {/* Quello su cui non si decide si dice col motivo vero, uno per uno: le
+            terziarie una classe non ce l'hanno (regola dell'utente, 28/09/2026),
+            degli impianti il portale ci da' il totale e non la ripartizione, e
+            l'extra raccolta a portale non c'e'. Chiedere una decisione dove la
+            pagina non offre niente da premere e' un avviso che non si chiude. */}
+        {elenco.n_senza_classe > 0 && (
+          <p className="mt-1">
+            Ci sono anche {elenco.n_senza_classe} movimenti su cui per classe non c&apos;e&apos; niente da decidere
+            ({pesoInParole(elenco.per_canale_senza_classe)}): {[
+              elenco.n_senza_classe_terziarie ? `${elenco.n_senza_classe_terziarie} terziarie, che escono verso le cementerie e una classe non ce l'hanno` : '',
+              elenco.n_senza_classe_impianti ? `${elenco.n_senza_classe_impianti} di impianti, di cui il portale ci dà il totale e non la ripartizione per classe` : '',
+              elenco.n_senza_classe_extra ? `${elenco.n_senza_classe_extra} di extra raccolta, che a portale non c'è` : '',
+            ].filter(Boolean).join('; ')}. Si elencano perche&apos; il file degli ordini non dichiarati del 31 dicembre non li conterra&apos; ancora.
+          </p>
+        )}
         {elenco.n_prima > 0 && (
           <p className="mt-1">Ci sono anche {elenco.n_prima} movimenti dell&apos;anno finiti prima di dicembre e ancora aperti ({pesoInParole(elenco.per_canale_prima)}): non si rettificano da qui, ma uno scarto che resta dopo la rettifica di dicembre di solito e&apos; loro.</p>
         )}
       </div>
       {elenco.siti.map(s => {
         const aperto = aperti[s.chiave] !== false;
-        const daDecidere = s.voci.filter(v => rettificabile(v) && !decisioni[v.chiave] && s.ruolo === 'stoc').length;
+        const daDecidere = s.voci.filter(v => decidibile(v) && !decisioni[v.chiave]).length;
         return (
           <div key={s.chiave} className="border rounded-md">
             <button type="button" className="w-full flex flex-wrap items-center justify-between gap-2 p-2 text-left hover:bg-muted/40"
@@ -382,6 +428,8 @@ export async function scaricaDossierChiusura(dossier) {
   voce('Fotografie gia\' salvate', dossier.riepilogo.piazzali_salvati);
   voce('Letture del portale mancanti', dossier.riepilogo.letture_mancanti);
   voce('Movimenti di dicembre in sospeso', dossier.riepilogo.voci_dicembre, pesoInParole(dossier.elenco_dicembre.per_canale));
+  voce('di cui con una classe, da decidere per classe', dossier.riepilogo.voci_per_classe, pesoInParole(dossier.elenco_dicembre.per_canale_per_classe));
+  voce('di cui senza classe (terziarie): si elencano, non si decidono', dossier.riepilogo.voci_senza_classe, "escono dall'impianto verso le cementerie e in un saldo per classe non ci sono");
   voce('di cui senza decisione', dossier.riepilogo.voci_da_decidere);
   voce('Aperti da prima di dicembre', dossier.riepilogo.voci_aperte_prima, pesoInParole(dossier.elenco_dicembre.per_canale_prima));
   voce('Impianti', dossier.riepilogo.impianti, `${dossier.riepilogo.impianti_letti} con la lettura del file degli ordini non dichiarati`);
@@ -402,6 +450,9 @@ export async function scaricaDossierChiusura(dossier) {
   e.columns = [{ width: 28 }, { width: 10 }, { width: 14 }, { width: 10 }, { width: 14 }, { width: 14 }, { width: 8 }, { width: 10 }, { width: 14 }, { width: 16 }, { width: 16 }, { width: 28 }, { width: 22 }, { width: 46 }];
   intesta(e, ['Sito', 'Ruolo', 'Movimento', 'Canale', 'ID ordine', 'Formulario', 'Classe', 'Verso', 'Peso (kg)', 'Fine trasporto', 'Chiuso a portale', 'Controparte', 'Decisione', 'Perche\'']);
   const decisioneDi = (v) => {
+    // Chi non ha classe non si decide per classe, qualunque sia il sito: le
+    // terziarie escono verso le cementerie e in un saldo per classe non ci sono.
+    if (senzaClasse(v)) return 'non ha classe';
     const c = v.ruolo === 'stoc' ? dossier.piazzali.find(p => p.sito === v.sito) : null;
     // Le voci di un impianto non si decidono: la sua giacenza non si legge per
     // classe, si chiede il file degli ordini non dichiarati.
@@ -415,7 +466,7 @@ export async function scaricaDossierChiusura(dossier) {
     return 'da decidere';
   };
   const scriviVoce = (ws, v, quando) => {
-    const riga = ws.addRow([v.nome, v.ruolo === 'stoc' ? 'piazzale' : 'impianto', v.tipo, nomeCanale(v.canale), v.id_ordine, v.numero_fir, v.classe,
+    const riga = ws.addRow([v.nome, v.ruolo === 'stoc' ? 'piazzale' : 'impianto', v.tipo, nomeCanale(v.canale), v.id_ordine, v.numero_fir, v.classe || 'senza classe',
       v.verso === 'uscita' ? 'uscita' : 'entrata', v.verso === 'uscita' ? -v.kg : v.kg, v.finito_il, v.chiuso_il || 'non ancora', v.controparte, quando, v.perche]);
     numeri(riga, [9]);
     if (quando === 'da decidere') riempi(riga.getCell(13), GIALLO);

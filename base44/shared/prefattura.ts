@@ -36,7 +36,17 @@ const INTESTAZIONI = [
   ['importo', /importo|imponibile|totale|valore|corrispettivo/i],
   ['prezzo', /prezzo|tariffa|€\s*\/\s*t|eur\s*\/\s*t/i],
   ['servizio', /servizio|prestazione|tipo/i],
-  ['data', /data|trasporto/i],
+  // La data della prefattura e' la FINE del trasporto: e' quella che colloca il
+  // movimento nel mese (regola 1), e da lei periodoPrefattura ricava il periodo del
+  // file. Cercarla con /data|trasporto/ prendeva la prima colonna da sinistra il cui
+  // titolo contenesse "data": oggi il tracciato ne ha una sola, "Data fine
+  // trasporto", ma basterebbe che il portale aggiungesse prima una "Data chiusura" o
+  // una "Data immissione" perche' il mese venisse preso da quella, e il caricamento
+  // rifiutasse la prefattura giusta dicendo che e' di un altro mese.
+  ['data', /fine.*trasporto|trasporto.*fine|scarico|arrivo/i],
+  // Se la fine trasporto non si riconosce, una colonna di data generica va bene -
+  // ma non la chiusura a portale, non l'immissione e non l'inizio del trasporto.
+  ['data', /data/i, /chiusur|chius|immissione|immesso|inizio|partenza|emissione|documento|fattura|scadenz/i],
 ];
 
 /** Un numero scritto all'italiana ("1.234,56"), all'inglese o gia' numero. null se non e' un numero. */
@@ -97,7 +107,10 @@ export function leggiTabellePrefattura(tabelle) {
       (t[i] || []).forEach((c, j) => {
         const testo = pulisci(c);
         if (!testo || comeNumero(testo) !== null) return;
-        for (const [chiave, re] of INTESTAZIONI) {
+        for (const [chiave, re, mai] of INTESTAZIONI) {
+          // `mai`: intestazioni che NON vanno prese con quella regola, per esempio
+          // una "Data chiusura" al posto della fine trasporto.
+          if (mai && mai.test(testo)) continue;
           if (trovate[chiave] === undefined && re.test(testo)) { trovate[chiave] = { j, testo }; break; }
         }
       });

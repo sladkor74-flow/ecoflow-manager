@@ -24,6 +24,7 @@ import {
   confrontoPiazzale, cosaChiedereAlPortale, leggiLetteraGiacenze,
   confrontoLettera, letteraDelPiazzale, preparaChiusura, vociDelSito,
 } from '../base44/shared/chiusuraAnno.ts';
+import { canaleEClasse, CLASSI_RILEVAZIONE } from '../base44/shared/giacenzaStoccaggi.ts';
 
 const qui = (p) => fileURLToPath(new URL(p, import.meta.url));
 
@@ -67,12 +68,23 @@ const MOVIMENTI = [
 ];
 // Un impianto: le terziarie di dicembre chiuse a febbraio. Le terziarie non
 // sono un canale - escono verso le cementerie e la giacenza di PFU non la
-// toccano - e stanno in un gruppo loro, come in Giacenze.
-const terziaria = { sito: 'innorec', nome: 'INNOREC SRL', ruolo: 'imp', tipo: 'terziaria', canale: GRUPPO_TERZIARIE, verso: 'uscita', classe: 'ND', controparte: 'Cementeria' };
+// toccano - e stanno in un gruppo loro, come in Giacenze. E non hanno CLASSE:
+// non sono PFU divisi in P, M, G1 e G2 (regola dell'utente, 28/09/2026).
+const terziaria = { sito: 'innorec', nome: 'INNOREC SRL', ruolo: 'imp', tipo: 'terziaria', canale: GRUPPO_TERZIARIE, verso: 'uscita', classe: '', controparte: 'Cementeria' };
 const TERZIARIE = [
   mov('TER25123000', 20000, g('2025-12-30'), g('2026-02-04'), terziaria),
   mov('TER25123100', 18000, g('2025-12-31'), g('2026-02-06'), terziaria),
 ];
+
+console.log('LE TERZIARIE NON HANNO CLASSE, E NON GLIENE SI DA\' UNA FINTA');
+verifica('la classe di una terziaria resta vuota', TERZIARIE.every(t => t.classe === ''), JSON.stringify(TERZIARIE.map(t => t.classe)));
+// Anche a chiederlo: chi passasse 'ND' non ottiene una classe, perche' 'ND' non
+// e' una classe, e' un "non lo so" che nel controllo per classe non c'entra.
+verifica('nemmeno passando ND si ottiene una classe',
+  mov('TER25123200', 1000, g('2025-12-30'), null, { ...terziaria, classe: 'ND' }).classe === '');
+// Un movimento di canale, invece, la classe la tiene: il controllo per classe
+// serve e resta.
+verifica('un movimento di rete la classe la tiene', mov('ET25122800', 8000, g('2025-12-28'), null, { classe: 'M' }).classe === 'M');
 
 console.log("L'ELENCO DI DICEMBRE: QUELLO CHE LA FOTOGRAFIA NON HA ANCORA VISTO");
 const elenco = elencoDicembre([...MOVIMENTI, ...TERZIARIE], 2025);
@@ -92,6 +104,36 @@ verifica('le tre secondarie del caso vero fanno 41.900 kg', rete.uscite === 3 &&
 verifica('l\'extra raccolta ha il suo totale, mai sommato alla rete', elenco.per_canale.EXTRA_RACCOLTA.n === 1 && elenco.per_canale.EXTRA_RACCOLTA.netto_kg === 2000);
 verifica('nessun totale fra i canali', !('totale' in elenco.per_canale) && !('netto_kg' in elenco.per_canale));
 verifica('i formulari si contano per numero, una volta sola', rete.formulari === 4, String(rete.formulari));
+
+console.log('L\'ELENCO SI DIVIDE: CHI HA UNA CLASSE E CHI NON NE HA');
+// Il controllo per classe riguarda solo chi una classe ce l'ha. Contarli insieme
+// faceva dire all'avviso che c'erano decisioni per classe da prendere anche sulle
+// terziarie (classe non ce l'hanno), sui movimenti degli impianti (di loro il
+// portale ci da' il totale, non la ripartizione per classe) e sull'extra raccolta
+// (a portale non c'e'): anomalie che non volevano dire niente, e che chi guardava
+// la pagina non poteva chiudere, perche' non c'era niente da premere.
+verifica('quattro voci da decidere, tre no', elenco.n_per_classe === 4 && elenco.n_senza_classe === 3 && elenco.n === 7,
+  JSON.stringify([elenco.n_per_classe, elenco.n_senza_classe, elenco.n]));
+verifica('le terziarie stanno fra quelle su cui non si decide', elenco.senza_classe.filter(v => v.tipo === 'terziaria').every(v => v.classe === '')
+  && elenco.n_senza_classe_terziarie === 2, JSON.stringify(elenco.senza_classe.map(v => [v.tipo, v.canale, v.ruolo])));
+verifica('e con loro l\'extra raccolta, che a portale non c\'e\'', elenco.n_senza_classe_extra === 1 && elenco.n_senza_classe_impianti === 0,
+  JSON.stringify([elenco.n_senza_classe_terziarie, elenco.n_senza_classe_impianti, elenco.n_senza_classe_extra]));
+verifica('ogni voce dice da se\' se una decisione esiste', elenco.voci.filter(v => v.decidibile).length === 4
+  && elenco.voci.filter(v => v.decidibile).every(v => v.ruolo !== 'imp' && !!v.classe), JSON.stringify(elenco.voci.map(v => [v.tipo, v.decidibile])));
+// Il caso piu' numeroso, e quello che nella pagina non offriva nessun pulsante: una
+// primaria di rete arrivata a un IMPIANTO, con la sua classe. Del portale si sa il
+// totale dell'impianto, non la ripartizione per classe, quindi non c'e' niente da
+// decidere per classe - e prima l'avviso la contava fra quelle da decidere.
+const conImpianto = elencoDicembre([...MOVIMENTI, ...TERZIARIE,
+  mov('ET25122700', 9000, g('2025-12-27'), null, { sito: 'gatim', nome: 'GATIM SRL', ruolo: 'imp', classe: 'P' }),
+], 2025);
+verifica('un movimento di un impianto, pur con la classe, non si decide per classe',
+  conImpianto.n_per_classe === 4 && conImpianto.n_senza_classe === 4 && conImpianto.n_senza_classe_impianti === 1,
+  JSON.stringify([conImpianto.n_per_classe, conImpianto.n_senza_classe, conImpianto.n_senza_classe_impianti]));
+verifica('e la sua voce lo dice da se\'', conImpianto.voci.find(v => v.id_ordine === 'ET25122700').decidibile === false);
+verifica('e non fra quelle da controllare per classe', !('TERZIARIE' in elenco.per_canale_per_classe), JSON.stringify(Object.keys(elenco.per_canale_per_classe)));
+verifica('il loro peso si dice comunque, nel loro gruppo', elenco.per_canale_senza_classe.TERZIARIE.n === 2 && elenco.per_canale_senza_classe.TERZIARIE.uscite_kg === 38000,
+  JSON.stringify(elenco.per_canale_senza_classe));
 
 console.log('APERTI DA PRIMA DI DICEMBRE: RARI, MA HANNO LO STESSO EFFETTO');
 verifica('il movimento del 27/11 ancora aperto si dice a parte', elenco.n_prima === 1 && elenco.aperti_prima[0].id_ordine === 'ET25112700');
@@ -188,6 +230,53 @@ verifica('una classe che resterebbe negativa blocca il salvataggio',
     decisioni: { [elencoStorto.voci[0].chiave]: 'rettifica' },
   }).blocchi.some(b => b.tipo === 'classe_negativa'));
 
+console.log('IL CONTROLLO PER CLASSE NON RIGUARDA CHI NON HA CLASSE');
+// Regola dell'utente, 28/09/2026: «togli le anomalie per classe, le terziarie
+// non hanno classe». Una terziaria si elenca, non si decide, e non produce
+// nessuna anomalia per classe - nemmeno quella del prodotto che non si riconosce.
+const soloTerziarie = elencoDicembre(TERZIARIE, 2025);
+const rettTerz = rettificaDicembre({ P: 30000, M: 10000 }, soloTerziarie.voci, {});
+verifica('una terziaria finisce fra quelle senza classe', rettTerz.senza_classe.length === 2, String(rettTerz.senza_classe.length));
+verifica('e non fra quelle da decidere', rettTerz.da_decidere.length === 0);
+verifica('ne\' fra le classi che non si riconoscono', rettTerz.non_applicabili.length === 0);
+verifica('ne\' fra l\'extra raccolta, che e\' un\'altra cosa', rettTerz.fuori_portale.length === 0);
+verifica('la lettura del portale non la tocca', rettTerz.classi.P === 30000 && rettTerz.classi.M === 10000 && CLASSI_RILEVAZIONE.every(c => rettTerz.differenza[c] === 0),
+  JSON.stringify(rettTerz.classi));
+// E il salvataggio non resta bloccato per colpa loro: non c'e' niente da decidere.
+const conTerziarie = confrontoPiazzale(
+  { chiave: 'innorec', nome: 'INNOREC SRL', rilevazioni: [], movimenti: [] },
+  { anno: 2025, lettura: { P: 1000 }, voci: soloTerziarie.voci },
+);
+verifica('e non bloccano il salvataggio di una fotografia', conTerziarie.pronto === true && conTerziarie.blocchi.length === 0,
+  JSON.stringify(conTerziarie.blocchi));
+// Il controllo per classe resta intero dove la classe esiste: una decisione
+// mancante su una voce di rete blocca ancora.
+verifica('mentre una voce di rete senza decisione blocca ancora',
+  confrontoPiazzale(piazzali[0], { anno: 2025, lettura: LETTURA, voci: nappi.voci }).blocchi.some(b => b.tipo === 'dicembre_da_decidere'));
+
+console.log('UNA CLASSE 9 NELL\'ARCHIVIO DELLA RETE E\' ACI (28/09/2026)');
+// Decide il materiale, non l'archivio in cui la riga e' finita. Prima la
+// chiusura la chiamava «rete, classe ACI»: nel confronto per classe comparivano
+// due righe 'ACI', una nel canale rete e una nel canale ACI, con due scarti
+// sulla stessa classe che non volevano dire niente.
+verifica('una primaria di classe 9 fra le primarie di rete: canale ACI, classe ACI',
+  JSON.stringify(canaleEClasse({ classe: 'PFU Autodemolizione', prodotto: '.class9' })) === JSON.stringify({ canale: 'ACI', classe: 'ACI' }));
+verifica('una primaria di rete resta rete', JSON.stringify(canaleEClasse({ classe: 'P - fino a 35 kg', prodotto: '.class1' })) === JSON.stringify({ canale: 'RETE', classe: 'P' }));
+verifica('e una secondaria che l\'archivio dice ACI e\' ACI', canaleEClasse({ classe: 'M', prodotto: '.class2' }, { aci: true }).classe === 'ACI');
+const ancoraAci = { sito: 'PIAZZALE ACI', data_rilevazione: '2024-12-31', class1_kg: 0, class2_kg: 0, class3_kg: 0, class4_kg: 0, class9_kg: 1000 };
+const movAci = [
+  // la riga vera: classe 9 nell'archivio della rete, scaricata in piazzale
+  mov('ET25040100', 640, g('2025-04-01'), g('2025-04-05'), { sito: 'aci', nome: 'PIAZZALE ACI', ...canaleEClasse({ classe: 'PFU Autodemolizione' }) }),
+];
+const piazzaleAci = { chiave: 'aci', nome: 'PIAZZALE ACI', rilevazioni: [ancoraAci], movimenti: movAci };
+const chiusuraAci = confrontoPiazzale(piazzaleAci, { anno: 2025, lettura: { P: 0, M: 0, G1: 0, G2: 0, ACI: 1640 }, voci: [] });
+const righeAci = chiusuraAci.attesa.filter(a => a.classe === 'ACI');
+verifica('nel confronto la classe ACI compare una volta sola, nel canale ACI',
+  righeAci.length === 1 && righeAci[0].canale === 'ACI', JSON.stringify(righeAci.map(a => [a.classe, a.canale])));
+verifica('e i chili della classe 9 ci sono dentro: 1.000 + 640 = 1.640', righeAci[0].atteso === 1640 && righeAci[0].ingressi_kg === 640, JSON.stringify(righeAci[0]));
+verifica('la lettura del portale quadra, senza scarti inventati',
+  chiusuraAci.verifica_lettura.scostano.length === 0 && chiusuraAci.pronto === true, JSON.stringify(chiusuraAci.verifica_lettura.scostano));
+
 console.log('LA LETTERA DELLE GIACENZE DI FINE ANNO, COM\'E\' DAVVERO');
 // Le righe sono quelle del file vero, "Giacenze Ecotyre al 31-12-2025.xlsx".
 const FOGLIO_STOCCAGGI = [
@@ -268,10 +357,27 @@ verifica('ogni piazzale si riconosce dalla sua chiave', dossier.piazzali[0].sito
 verifica('l\'elenco di dicembre e\' nel dossier', dossier.riepilogo.voci_dicembre === 7 && dossier.elenco_dicembre.siti.length === 2);
 verifica('l\'avviso dice quanto pesa, un canale per volta, e che cosa si rischia',
   dossier.avvisi.some(a => a.tipo === 'elenco_dicembre'
+    && a.n === 4
     && a.testo.includes('rete 4 per 33.900 kg netti')
-    && a.testo.includes('terziarie 2 per 38.000 kg netti')
     && a.testo.includes('si perdono')),
   JSON.stringify(dossier.avvisi.find(a => a.tipo === 'elenco_dicembre')));
+// L'avviso delle decisioni per classe nomina solo cio' su cui una decisione esiste:
+// non le terziarie (classe non ce l'hanno) e non l'extra raccolta (a portale non
+// c'e'), altrimenti chiederebbe di decidere dove non c'e' niente da premere.
+verifica('e non chiede decisioni per classe sulle terziarie',
+  !dossier.avvisi.find(a => a.tipo === 'elenco_dicembre').testo.includes('terziarie')
+  && !dossier.avvisi.find(a => a.tipo === 'elenco_dicembre').testo.includes('extra raccolta'),
+  dossier.avvisi.find(a => a.tipo === 'elenco_dicembre').testo);
+verifica('le terziarie si dicono comunque, nel loro avviso, col loro peso',
+  dossier.avvisi.some(a => a.tipo === 'dicembre_senza_classe'
+    && a.n === 3
+    && a.testo.includes('terziarie 2 per 38.000 kg netti')
+    && a.testo.includes('2 terziarie, che escono verso le cementerie')
+    && a.testo.includes('extra raccolta, che a portale non c')
+    && a.testo.includes('ordini non dichiarati')),
+  JSON.stringify(dossier.avvisi.find(a => a.tipo === 'dicembre_senza_classe')));
+verifica('il riepilogo le conta a parte', dossier.riepilogo.voci_per_classe === 4 && dossier.riepilogo.voci_senza_classe === 3 && dossier.riepilogo.voci_dicembre === 7,
+  JSON.stringify([dossier.riepilogo.voci_per_classe, dossier.riepilogo.voci_senza_classe]));
 verifica('la lettera di un altro 31 dicembre si segnala', dossier.avvisi.some(a => a.tipo === 'lettera_altro_anno' && a.testo.includes('2024-12-31')));
 verifica('gli impianti ci sono anche senza lettura', dossier.impianti.length === 2 && dossier.riepilogo.impianti_letti === 1);
 // Un impianto non piu' contrattualizzato svuota la giacenza dell'anno prima:
@@ -328,7 +434,9 @@ const testoDi = (foglio) => {
 const dicembre = testoDi('Elenco dicembre');
 verifica('l\'elenco di dicembre e\' nel file, riga per riga', dicembre.length === 11, String(dicembre.length));
 verifica('e porta la decisione presa su ognuna', dicembre.some(r => r.includes('SEC25121800') && r.includes('rettificata')));
-verifica('le terziarie di un impianto non si decidono da qui', dicembre.some(r => r.includes('TER25123000') && r.includes('riguarda un impianto')));
+verifica('le terziarie non si decidono per classe, e il file lo dice',
+  dicembre.some(r => r.includes('TER25123000') && r.includes('non ha classe') && r.includes('senza classe')),
+  JSON.stringify(dicembre.find(r => r.includes('TER25123000'))));
 verifica('i pesi sono kg interi, le uscite col meno', dicembre.some(r => r.includes('SEC25121800') && r.includes(-14000)));
 const scarti = testoDi('Letture e scarti');
 verifica('per ogni classe: attesa, letta, scarto e quello che si salva',

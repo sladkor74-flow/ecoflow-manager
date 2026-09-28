@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Loader2, Plus, Trash2, CheckSquare, Square, AlertCircle } from 'lucide-react';
+import { Loader2, Plus, Trash2, CheckSquare, Square, AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import RichiesteEct from '@/components/todo/RichiesteEct';
+import OrdiniAttivita from '@/components/todo/OrdiniAttivita';
 
 const PRIORITA = {
   urgente: { label: 'Urgente', color: 'bg-red-100 text-red-700 border-red-200' },
@@ -11,6 +12,10 @@ const PRIORITA = {
   media: { label: 'Media', color: 'bg-blue-100 text-blue-700 border-blue-200' },
   bassa: { label: 'Bassa', color: 'bg-gray-100 text-gray-700 border-gray-200' },
 };
+
+// Un giorno 'AAAA-MM-GG' scritto all'italiana, senza passare da new Date: la
+// data del ritiro e' un giorno, non un istante, e non deve scivolare di un fuso.
+const gg = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : '');
 
 const STATO = {
   aperto: { label: 'Aperto', color: 'bg-blue-50 text-blue-700' },
@@ -24,7 +29,10 @@ export default function TodoPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [filterStato, setFilterStato] = useState('aperto');
-  const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: '', priorita: 'media', data_scadenza: '' });
+  const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: '', priorita: 'media', data_scadenza: '', riferimento_ordine: '' });
+  // L'esito del controllo degli ordini: quali attivita' si sono chiuse da sole e
+  // quali restano aperte perche' c'e' qualcosa da guardare.
+  const [esitoOrdini, setEsitoOrdini] = useState(null);
   // Due elenchi diversi: le nostre attivita' e le richieste che arrivano dal
   // consorzio per email. Tenerle separate evita di mescolare cose che si
   // chiudono in modo diverso.
@@ -41,6 +49,24 @@ export default function TodoPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Un'attivita' con un ID ordine scritto sopra si chiude da sola quando quell'
+  // ordine risulta terminato: il controllo gira a ogni caricamento delle primarie
+  // (RICALCOLI in src/lib/importGrandeFile.js) e anche qui, all'apertura della
+  // pagina. Serve perche' se quel ricalcolo non e' partito - la scheda chiusa, la
+  // rete caduta - un'attivita' gia' fatta resterebbe aperta fino al caricamento
+  // dopo, e si starebbe dietro a un ritiro che c'e' gia'. Scrive, quindi solo per
+  // l'amministratore; se non risponde la pagina si apre comunque.
+  const controllaOrdini = useCallback(async () => {
+    if (!isAdmin) return;
+    try {
+      const res = await base44.functions.invoke('controllaTodoOrdini', {});
+      const dati = res.data || res;
+      setEsitoOrdini(dati);
+      if (dati.aggiornate > 0) await load();
+    } catch (e) { /* il controllo si rifa' da solo al prossimo caricamento */ }
+  }, [isAdmin, load]);
+  useEffect(() => { controllaOrdini(); }, [controllaOrdini]);
+
   const handleAdd = async () => {
     if (!form.titolo) return;
     try {
@@ -49,12 +75,30 @@ export default function TodoPage() {
         stato: 'aperto',
         data_ricezione: new Date().toISOString().split('T')[0],
       });
-      setForm({ titolo: '', descrizione: '', categoria: '', priorita: 'media', data_scadenza: '' });
+      setForm({ titolo: '', descrizione: '', categoria: '', priorita: 'media', data_scadenza: '', riferimento_ordine: '' });
       setShowForm(false);
       load();
+      // L'ordine scritto adesso puo' essere gia' terminato: si controlla subito,
+      // invece di aspettare il prossimo caricamento.
+      controllaOrdini();
     } catch (e) { alert(e.message); }
   };
 
+  // L'ID ordine si corregge anche dopo, sull'attivita' che c'e' gia'. Appena
+  // salvato si ricontrolla: se quell'ordine e' terminato l'attivita' si chiude
+  // da sola senza aspettare altro.
+  const salvaOrdine = async (todo, ordini) => {
+    try {
+      await base44.entities.Todo.update(todo.id, { riferimento_ordine: ordini });
+      await load();
+      await controllaOrdini();
+    } catch (e) { alert(e.message); }
+  };
+
+  // La spunta a mano cambia solo lo stato: la nota di una chiusura fatta dal
+  // gestionale resta scritta (non si cancella niente), e resta anche il segno
+  // chiusa_dal_gestionale, cosi' un'attivita' riaperta a mano non viene richiusa
+  // al controllo dopo - a decidere e' chi lavora.
   const toggleStato = async (todo) => {
     const next = todo.stato === 'completato' ? 'aperto' : 'completato';
     try {
@@ -118,6 +162,46 @@ export default function TodoPage() {
       {sezione === 'ect' && <RichiesteEct isAdmin={isAdmin} />}
 
       {sezione === 'attivita' && (<>
+      <p className="text-sm text-muted-foreground max-w-3xl">
+        Su ogni attività puoi indicare l&apos;<strong>ID ordine da completare</strong>: il gestionale guarda da sé quando quell&apos;ordine
+        passa da assegnato a terminato e solo allora segna l&apos;attività come completata, con la data della fine trasporto e il
+        motivo scritto sotto. Il passaggio deve avvenire <strong>da quando l&apos;attività c&apos;è</strong>: se l&apos;ordine risultava già
+        terminato quando l&apos;hai scritta, la chiusura automatica non scatta e la riga te lo dice, perché il lavoro di cui parla
+        l&apos;attività — un sollecito, una pratica, una fattura — quello nessuno l&apos;ha ancora fatto. Se l&apos;ordine risulta
+        <strong> cancellato</strong> l&apos;attività resta aperta e te lo dice: quel ritiro non si farà e la decisione è tua.
+        Il controllo si rifà a ogni caricamento delle primarie e ogni volta che apri questa pagina.
+      </p>
+
+      {/* Che cosa ha fatto il controllo degli ordini appena aperta la pagina. */}
+      {esitoOrdini && esitoOrdini.chiuse?.length > 0 && (
+        <div className="flex items-start gap-2 text-sm border border-green-200 bg-green-50 text-green-800 rounded-lg px-3 py-2">
+          <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>
+            {esitoOrdini.chiuse.length === 1
+              ? "Un'attività si è chiusa da sola, il suo ordine risulta terminato: "
+              : `${esitoOrdini.chiuse.length} attività si sono chiuse da sole, i loro ordini risultano terminati: `}
+            {esitoOrdini.chiuse.map(x => `${x.titolo} (${x.ordini}${x.ritiro ? `, ritiro del ${gg(x.ritiro)}` : ''})`).join('; ')}.
+          </span>
+        </div>
+      )}
+      {esitoOrdini && esitoOrdini.da_guardare?.length > 0 && (
+        <div className="space-y-1">
+          {/* Le prime cinque: le altre si leggono sulla loro riga, dove si agisce. */}
+          {esitoOrdini.da_guardare.slice(0, 5).map(x => (
+            <div key={x.id} className="flex items-start gap-2 text-sm border border-amber-200 bg-amber-50 text-amber-900 rounded-lg px-3 py-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span><strong>{x.titolo}</strong>: {x.avviso}</span>
+            </div>
+          ))}
+          {esitoOrdini.da_guardare.length > 5 && (
+            <p className="text-xs text-muted-foreground">Altre {esitoOrdini.da_guardare.length - 5} attività hanno qualcosa da guardare sull&apos;ordine: lo dice la loro riga.</p>
+          )}
+        </div>
+      )}
+      {esitoOrdini && esitoOrdini.rinviato && (
+        <p className="text-sm border rounded-lg px-3 py-2 bg-muted/40 text-muted-foreground">{esitoOrdini.avviso}</p>
+      )}
+
       {/* KPI filtri */}
       <div className="flex flex-wrap gap-2">
         <button onClick={() => setFilterStato('tutti')} className={`px-3 py-1.5 rounded-md text-sm border ${filterStato === 'tutti' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}>Tutti ({todos.length})</button>
@@ -151,6 +235,21 @@ export default function TodoPage() {
             <div>
               <label className="text-xs font-medium">Data Scadenza</label>
               <input type="date" value={form.data_scadenza} onChange={e => setForm({ ...form, data_scadenza: e.target.value })} className="w-full border rounded-md px-3 py-2 text-sm" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-xs font-medium">ID ordine da completare</label>
+              <input
+                value={form.riferimento_ordine}
+                onChange={e => setForm({ ...form, riferimento_ordine: e.target.value })}
+                className="w-full border rounded-md px-3 py-2 text-sm font-mono"
+                placeholder="ET26012345, ET26012346"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Quando l&apos;ordine passa da assegnato a terminato il gestionale segna l&apos;attività come completata da sé,
+                con la data della fine trasporto. Puoi metterne più di uno separati da virgola: si chiude quando sono terminati tutti.
+                Se un ordine risulta cancellato l&apos;attività resta aperta e te lo dice, perché quel ritiro non si farà. Un ordine
+                già terminato adesso non chiude niente: il passaggio si conta da quando l&apos;attività c&apos;è.
+              </p>
             </div>
           </div>
           <div className="flex gap-2">
@@ -186,8 +285,10 @@ export default function TodoPage() {
                   <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                     {todo.categoria && <span>Categoria: {todo.categoria}</span>}
                     {todo.data_scadenza && <span>Scadenza: {new Date(todo.data_scadenza).toLocaleDateString('it-IT')}</span>}
-                    {todo.riferimento_ordine && <span>Ordine: {todo.riferimento_ordine}</span>}
                   </div>
+                  {/* L'ordine da completare, a che punto e' e perche' si e' chiusa
+                      (o perche' non si chiude). */}
+                  <OrdiniAttivita todo={todo} isAdmin={isAdmin} onSalva={(ordini) => salvaOrdine(todo, ordini)} />
                 </div>
                 {isAdmin && <button onClick={() => handleDelete(todo)} className="p-2 rounded-md hover:bg-red-50 flex-shrink-0"><Trash2 className="w-4 h-4 text-red-500" /></button>}
               </div>

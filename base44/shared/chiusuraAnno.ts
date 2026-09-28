@@ -34,6 +34,7 @@ import { formatoKg } from "./formato.ts";
 import {
   CLASSI_RILEVAZIONE,
   ancoraDellAnno,
+  classePfu,
   classiDiRilevazione,
   momentoRilevazione,
   movimentoStoccaggio,
@@ -56,24 +57,24 @@ const CLASSI_DI_CANALE = { RETE: ['P', 'M', 'G1', 'G2'], ACI: ['ACI'] };
  */
 export const GRUPPO_TERZIARIE = 'TERZIARIE';
 
+/**
+ * I GRUPPI CHE NON HANNO CLASSE (regola dell'utente, 28/09/2026).
+ * Le terziarie escono dall'impianto verso le cementerie: non sono PFU divisi in
+ * P, M, G1 e G2, e una classe non ce l'hanno. Gliene veniva data una per forza
+ * ('ND') e finivano dentro il controllo per classe, che su di loro non vuol dire
+ * niente: parole dell'utente, «togli le anomalie per classe, le terziarie non
+ * hanno classe». Il controllo non si nasconde, si toglie dove non c'entra: per i
+ * PIAZZALI, dove la classe esiste davvero, resta tutto.
+ */
+export const senzaClasse = (canale) => canale === GRUPPO_TERZIARIE;
+
 const kg = (v) => Math.round(Number(v) || 0);
 const classiVuote = () => Object.fromEntries(CLASSI_RILEVAZIONE.map(c => [c, 0]));
 
-/**
- * La classe di un prodotto, come la scrive il portale: "P - fino a 35 kg",
- * ".class1", "PFU Autodemolizione". E' la stessa regola di calcolaGiacenze
- * (classeDa): sta qui perche' serve a chi prepara i movimenti della chiusura,
- * e andra' tenuta in un punto solo.
- */
-export function classePfu(...valori) {
-  const t = valori.map(v => String(v || '')).join(' ').toUpperCase();
-  if (/AUTODEMOL|\bACI\b|CLASS ?9/.test(t)) return 'ACI';
-  if (/CLASS ?3|\bG ?1\b/.test(t)) return 'G1';
-  if (/CLASS ?4|\bG ?2\b/.test(t)) return 'G2';
-  if (/CLASS ?2|(^|[^A-Z0-9])M([^A-Z0-9]|$)/.test(t)) return 'M';
-  if (/CLASS ?1|(^|[^A-Z0-9])P([^A-Z0-9]|$)/.test(t)) return 'P';
-  return 'ND';
-}
+// La classe di un prodotto si legge con classePfu, che sta in
+// shared/giacenzaStoccaggi.ts insieme al resto delle regole del piazzale: qui
+// c'era una seconda copia della stessa regola, e le due si erano scostate.
+export { classePfu };
 
 /**
  * Vero se una lettura c'e' davvero. Un campo lasciato vuoto non arriva dal
@@ -111,12 +112,28 @@ export function rilevazioneDaLettura(sito, giorno, lettura, extra = {}) {
  */
 export function movimentoChiusura(r, { sito = '', nome = '', ruolo = 'stoc', tipo = 'primaria', ...resto } = {}) {
   const m = movimentoStoccaggio(r, resto);
-  return { ...m, sito, nome: nome || sito, ruolo, tipo };
+  // Chi non ha classe non se ne prende una per forza: resta vuota, e chi
+  // controlla per classe lo vede e lo lascia stare.
+  const classe = senzaClasse(m.canale) ? '' : m.classe;
+  return { ...m, classe, sito, nome: nome || sito, ruolo, tipo };
 }
+
+/**
+ * Su questa voce si puo' prendere una DECISIONE PER CLASSE, oppure si elenca e basta.
+ *
+ * Si decide solo dove esiste un saldo per classe del portale da rettificare: su un
+ * PIAZZALE (di un impianto il portale ci da' il totale, non la ripartizione per
+ * classe), in un canale che il portale rileva (l'extra raccolta a portale non c'e')
+ * e con una classe (le terziarie escono verso le cementerie e in un saldo per classe
+ * non ci sono - regola dell'utente, 28/09/2026). La pagina offre il pulsante
+ * esattamente qui, e l'avviso deve contare esattamente questo: chiedere decisioni
+ * dove non c'e' niente da premere e' un avviso che non si puo' chiudere.
+ */
+export const decidibilePerClasse = (v) => !!v && v.ruolo !== 'imp' && !senzaClasse(v.canale) && !!CLASSI_DI_CANALE[v.canale];
 
 /** La chiave di una voce dell'elenco: e' su questa che si scrive la decisione. */
 export const chiaveVoce = (v) =>
-  [v.sito, v.ruolo, v.tipo, v.verso, v.id_ordine || v.numero_fir || 'senza-ordine', v.classe].join('|');
+  [v.sito, v.ruolo, v.tipo, v.verso, v.id_ordine || v.numero_fir || 'senza-ordine', v.classe || 'senza-classe'].join('|');
 
 /**
  * La chiave di un gruppo dell'elenco: sito e RUOLO.
@@ -171,6 +188,9 @@ export function elencoDicembre(movimenti, anno, { fotografiaDel = '' } = {}) {
     const voce = {
       ...m,
       chiave: chiaveVoce(m),
+      // Se su questa voce una decisione per classe esiste: lo legge l'avviso e lo
+      // legge la pagina, che cosi' non possono dire due cose diverse.
+      decidibile: decidibilePerClasse(m),
       perche: m.chiuso_il
         ? `finito il ${m.finito_il}, chiuso a portale il ${m.chiuso_il}: dopo la fotografia del ${foto}`
         : `finito il ${m.finito_il} e non ancora chiuso a portale`,
@@ -199,6 +219,22 @@ export function elencoDicembre(movimenti, anno, { fotografiaDel = '' } = {}) {
   for (const v of prima) riga(v).aperti_prima.push(v);
   for (const s of siti) { s.per_canale = sommaVoci(s.voci); s.per_canale_prima = sommaVoci(s.aperti_prima); }
 
+  // L'elenco si divide in due: quello su cui una decisione per classe si PUO'
+  // prendere, e quello che si elenca e basta. Tenerli insieme faceva dire
+  // all'avviso che servivano decisioni anche dove la pagina non offre niente da
+  // premere, e la frase «senza una decisione su ognuno si perdono» era falsa.
+  //
+  // Una decisione per classe esiste solo dove esiste un saldo per classe del
+  // portale da rettificare, cioe':
+  //  - su un PIAZZALE, perche' solo i piazzali partono da una lettura del portale
+  //    per classe (di un impianto si sa il totale, non la ripartizione);
+  //  - nei canali che il portale rileva, RETE e ACI: l'extra raccolta a portale
+  //    non c'e';
+  //  - e solo se la classe c'e': le terziarie escono verso le cementerie e in un
+  //    saldo per classe non ci sono (regola dell'utente, 28/09/2026).
+  const perClasse = voci.filter(v => v.decidibile);
+  const senzaLaClasse = voci.filter(v => !v.decidibile);
+
   return {
     anno,
     dal, al,
@@ -209,6 +245,17 @@ export function elencoDicembre(movimenti, anno, { fotografiaDel = '' } = {}) {
     // Quanto pesa l'elenco: un totale per canale, mai uno solo. E' il rischio
     // che si corre a non guardarlo.
     per_canale: sommaVoci(voci),
+    // Le voci che il controllo per classe riguarda, e le altre.
+    n_per_classe: perClasse.length,
+    per_canale_per_classe: sommaVoci(perClasse),
+    senza_classe: senzaLaClasse,
+    n_senza_classe: senzaLaClasse.length,
+    per_canale_senza_classe: sommaVoci(senzaLaClasse),
+    // Perche' su queste non si decide: sono tre motivi diversi, e dirli tutti e tre
+    // «movimenti senza classe» era falso per due terzi.
+    n_senza_classe_terziarie: senzaLaClasse.filter(v => senzaClasse(v.canale)).length,
+    n_senza_classe_impianti: senzaLaClasse.filter(v => !senzaClasse(v.canale) && v.ruolo === 'imp').length,
+    n_senza_classe_extra: senzaLaClasse.filter(v => !senzaClasse(v.canale) && v.ruolo !== 'imp' && !CLASSI_DI_CANALE[v.canale]).length,
     aperti_prima: prima,
     n_prima: prima.length,
     per_canale_prima: sommaVoci(prima),
@@ -245,9 +292,13 @@ export function classeDecisa(decisione) {
 export function rettificaDicembre(lettura, voci, decisioni = {}) {
   const partenza = classiDiLettura(lettura);
   const classi = { ...partenza };
-  const applicate = [], ignorate = [], da_decidere = [], fuori_portale = [], non_applicabili = [];
+  const applicate = [], ignorate = [], da_decidere = [], fuori_portale = [], non_applicabili = [], senza_classe = [];
 
   for (const v of voci || []) {
+    // Chi non ha classe sta fuori dal controllo per classe, prima di ogni altra
+    // cosa: le terziarie escono verso le cementerie e in un saldo per classe non
+    // ci sono. Si elencano, non si decidono e non producono nessuna anomalia.
+    if (senzaClasse(v.canale)) { senza_classe.push(v); continue; }
     // L'extra raccolta a portale non c'e': si elenca, non tocca nessuna lettura.
     if (!CLASSI_DI_CANALE[v.canale]) { fuori_portale.push(v); continue; }
     const scelta = String(decisioni[v.chiave] || '').trim();
@@ -267,7 +318,7 @@ export function rettificaDicembre(lettura, voci, decisioni = {}) {
 
   const differenza = {};
   for (const c of CLASSI_RILEVAZIONE) differenza[c] = classi[c] - partenza[c];
-  return { lettura: partenza, classi, differenza, applicate, ignorate, da_decidere, fuori_portale, non_applicabili };
+  return { lettura: partenza, classi, differenza, applicate, ignorate, da_decidere, fuori_portale, non_applicabili, senza_classe };
 }
 
 /** Le rilevazioni di un piazzale in ordine, dalla piu' vecchia alla piu' recente. */
@@ -625,8 +676,22 @@ export function preparaChiusura({
   const perCanaleInParole = (per) => Object.entries(per)
     .map(([canale, s]) => `${canale.replace(/_/g, ' ').toLowerCase()} ${s.n} per ${formatoKg(Math.abs(s.netto_kg))} kg netti`)
     .join('; ');
-  if (elenco.n) {
-    avvisi.push({ tipo: 'elenco_dicembre', n: elenco.n, testo: `Ci sono ${elenco.n} movimenti finiti a dicembre e non ancora chiusi a portale alla fotografia: ${perCanaleInParole(elenco.per_canale)}. Senza una decisione su ognuno non stanno ne' in questa fotografia ne' fra i movimenti dell'anno nuovo, e si perdono.` });
+  if (elenco.n_per_classe) {
+    avvisi.push({ tipo: 'elenco_dicembre', n: elenco.n_per_classe, testo: `Ci sono ${elenco.n_per_classe} movimenti finiti a dicembre e non ancora chiusi a portale alla fotografia: ${perCanaleInParole(elenco.per_canale_per_classe)}. Senza una decisione su ognuno non stanno ne' in questa fotografia ne' fra i movimenti dell'anno nuovo, e si perdono.` });
+  }
+  // Quello su cui non si decide si dice a parte, col motivo vero: non c'e' un
+  // pulsante da premere, quindi chiedere una decisione sarebbe un avviso che non si
+  // puo' chiudere.
+  if (elenco.n_senza_classe) {
+    const motivi = [
+      elenco.n_senza_classe_terziarie ? `${elenco.n_senza_classe_terziarie} terziarie, che escono verso le cementerie e una classe non ce l'hanno` : '',
+      elenco.n_senza_classe_impianti ? `${elenco.n_senza_classe_impianti} movimenti di impianti, di cui il portale ci da' il totale e non la ripartizione per classe` : '',
+      elenco.n_senza_classe_extra ? `${elenco.n_senza_classe_extra} di extra raccolta, che a portale non c'e'` : '',
+    ].filter(Boolean);
+    avvisi.push({
+      tipo: 'dicembre_senza_classe', n: elenco.n_senza_classe,
+      testo: `Ci sono anche ${elenco.n_senza_classe} movimenti finiti a dicembre e non ancora chiusi a portale su cui non c'e' una decisione per classe da prendere (${motivi.join('; ')}) per ${perCanaleInParole(elenco.per_canale_senza_classe)}. Si elencano perche' il file degli ordini non dichiarati del ${giorno} non li conterra' ancora.`,
+    });
   }
   if (elenco.n_prima) {
     avvisi.push({ tipo: 'aperti_prima_di_dicembre', n: elenco.n_prima, testo: `Ci sono anche ${elenco.n_prima} movimenti dell'anno finiti prima di dicembre e ancora aperti a portale alla fotografia (${perCanaleInParole(elenco.per_canale_prima)}): la fotografia non li contiene, e uno scarto che resta dopo la rettifica di dicembre di solito e' loro.` });
@@ -647,6 +712,9 @@ export function preparaChiusura({
       piazzali_salvati: confronti.filter(c => c.gia_salvata).length,
       letture_mancanti: confronti.filter(c => !c.lettura).length,
       voci_dicembre: elenco.n,
+      // Quante di quelle voci il controllo per classe le riguarda, e quante no.
+      voci_per_classe: elenco.n_per_classe,
+      voci_senza_classe: elenco.n_senza_classe,
       voci_aperte_prima: elenco.n_prima,
       voci_da_decidere: confronti.reduce((s, c) => s + c.rettifica.da_decidere.length, 0),
       impianti: impiantiConfronto.righe.length,

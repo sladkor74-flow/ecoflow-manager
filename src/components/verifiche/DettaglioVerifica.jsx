@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { Download, RefreshCw, Trash2, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, FileText } from 'lucide-react';
+import { Download, RefreshCw, Trash2, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, FileText, Info } from 'lucide-react';
 import { dataIt, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_ESITO, rigaReport, descriviLettura, sintesiVerifica, gravita, ordineRiga, noteDateAssente, canaleDelVerdetto } from '@/lib/verifiche';
 import { esportaEsitoVerificaPdf } from '@/lib/esitoVerificaPdf';
 import { formatKg, formatIntero, dataServer } from '@/lib/utils';
@@ -358,6 +358,17 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                     <span className="space-y-0.5">
                       {descriviLettura(lettura).map((testo, i) => <span key={i} className="block">{testo}</span>)}
                     </span>
+                  </div>
+                )}
+
+                {/* Una lettura che cambia il significato di una data non deve
+                    restare un fatto nascosto: la nota della lettura si scrive
+                    quando si legge il file, questa vale per ogni confronto,
+                    compresi quelli rifatti da soli dopo un caricamento. */}
+                {sintesi.notaDate && (
+                  <div className="text-xs text-muted-foreground flex items-start gap-1.5">
+                    <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    <span>Date di questo confronto: {sintesi.notaDate}.</span>
                   </div>
                 )}
 

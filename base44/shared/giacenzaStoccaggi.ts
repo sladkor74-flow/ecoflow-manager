@@ -22,6 +22,7 @@
 // dentro per un modulo e fuori per un altro.
 import { giornoRoma } from "./giornoItaliano.ts";
 import { formatoKg } from "./formato.ts";
+import { eAci } from "./canaleSecondaria.ts";
 
 /** Un valore di data in millisecondi, trattando come UTC cio' che non porta fuso. */
 export function istante(v) {
@@ -115,6 +116,51 @@ export const CLASSI_RILEVAZIONE = ['P', 'M', 'G1', 'G2', 'ACI'];
 /** I canali che il portale rileva, e le classi di ciascuno. L'extra raccolta a portale non c'e'. */
 const CLASSI_DI_CANALE = { RETE: ['P', 'M', 'G1', 'G2'], ACI: ['ACI'] };
 
+/**
+ * La classe di un prodotto, come la scrive il portale: "P - fino a 35 kg",
+ * ".class1", "PFU Autodemolizione". Sta qui, in un punto solo, perche' la
+ * usavano in tre: le Giacenze, la Chiusura d'anno e la Predittivita', e tre
+ * copie della stessa regola non restano uguali da sole.
+ * 'ND' vuol dire che il prodotto non si riconosce: non e' una classe, e' un
+ * "non lo so" che va detto invece di scaricare i chili su una classe a caso.
+ */
+export function classePfu(...valori) {
+  const t = valori.map(v => String(v || '')).join(' ').toUpperCase();
+  if (/AUTODEMOL|\bACI\b|CLASS ?9/.test(t)) return 'ACI';
+  if (/CLASS ?3|\bG ?1\b/.test(t)) return 'G1';
+  if (/CLASS ?4|\bG ?2\b/.test(t)) return 'G2';
+  if (/CLASS ?2|(^|[^A-Z0-9])M([^A-Z0-9]|$)/.test(t)) return 'M';
+  if (/CLASS ?1|(^|[^A-Z0-9])P([^A-Z0-9]|$)/.test(t)) return 'P';
+  return 'ND';
+}
+
+/**
+ * Il canale e la classe di un movimento di PFU, decisi dal MATERIALE e non
+ * dall'archivio in cui la riga e' finita: una primaria di CLASSE 9 che si trova
+ * fra le primarie di rete e' ACI (decisione dell'utente, 28/09/2026).
+ *
+ * Ne esce un invariante che serve a tutti i conti per classe: **canale ACI se e
+ * solo se classe ACI**. Senza di esso quei chili finivano in una casella che
+ * nessun conto legge - la classe ACI dentro il canale rete - e sparivano da
+ * tutte e due le giacenze; e nel confronto per classe comparivano due righe
+ * 'ACI', una per canale, con due scarti sulla stessa classe, nessuno dei due
+ * vero. Sono le "anomalie per classe che non vogliono dire niente".
+ *
+ * Chi decide che una riga e' ACI e' la regola di sempre, eAci di
+ * canaleSecondaria.ts - la stessa che usa canaleMovimento per i periodi e i
+ * canali - piu' la classe letta dal prodotto, perche' le due non si possono
+ * contraddire: una riga di classe ACI dentro il canale rete e' proprio cio' che
+ * va evitato.
+ *
+ * @param {object} r     il movimento (classe, prodotto, codice_prodotto)
+ * @param {object} opzioni { aci }: vero quando chi chiama lo sa gia' per altra via
+ */
+export function canaleEClasse(r, { aci = false } = {}) {
+  const classe = classePfu(r && r.classe, r && r.prodotto, r && r.codice_prodotto);
+  const eAciQui = !!aci || classe === 'ACI' || eAci(r);
+  return { canale: eAciQui ? 'ACI' : 'RETE', classe: eAciQui ? 'ACI' : classe };
+}
+
 /** I kg per classe di una rilevazione, interi: 1-4 la rete, la 9 l'ACI. */
 export function classiDiRilevazione(rec) {
   return {
@@ -131,12 +177,18 @@ export function classiDiRilevazione(rec) {
  * Il giorno e' sempre la FINE DEL TRASPORTO sul giorno italiano; la chiusura a
  * portale si porta dietro solo per raccontarla - non colloca niente, e' il
  * portale che chiude l'ordine giorni dopo il trasporto.
- * La classe la risolve chi chiama, con la regola dei prodotti che usa gia'.
+ * La classe la risolve chi chiama, con canaleEClasse.
+ * Si porta dietro anche il TICKET (numero_ordine_interno, colonna AL dei file
+ * del portale) e da quale archivio la riga viene: servono a chi apre un numero e
+ * vuole vedere gli ordini che lo compongono, dove il ticket accanto al peso e'
+ * quello che rende il conto leggibile invece che sospetto.
  */
-export function movimentoStoccaggio(r, { canale = 'RETE', verso = 'ingresso', classe = 'ND', controparte = '' } = {}) {
+export function movimentoStoccaggio(r, { canale = 'RETE', verso = 'ingresso', classe = 'ND', controparte = '', archivio = '' } = {}) {
   return {
     id_ordine: String((r && r.id_ordine) || '').trim(),
     numero_fir: (r && r.numero_fir) || '',
+    ticket: String((r && r.numero_ordine_interno) || '').trim(),
+    archivio,
     canale,
     verso: verso === 'uscita' ? 'uscita' : 'ingresso',
     classe: classe || 'ND',
@@ -144,6 +196,80 @@ export function movimentoStoccaggio(r, { canale = 'RETE', verso = 'ingresso', cl
     finito_il: giornoRoma(r && r.trasporto_finito_il),
     chiuso_il: giornoRoma(r && r.ordine_chiuso_il),
     controparte: String(controparte || '').replace(/\s+/g, ' ').trim(),
+  };
+}
+
+/**
+ * GLI ORDINI CHE FANNO LA GIACENZA DI UN CANALE IN UN PIAZZALE, UNO PER UNO
+ * (richiesta dell'utente, 28/09/2026, sull'ACI degli stoccaggi).
+ *
+ * La giacenza di un piazzale e' una somma algebrica: l'ancora dell'anno piu' i
+ * movimenti con fine trasporto successiva. Qui quella somma si apre, cosi' che
+ * chi guarda il numero possa vedere da dove viene: ogni movimento con il suo ID
+ * ordine, il suo TICKET, la data di fine trasporto, la controparte e i chili.
+ *
+ * Ogni riga dice da QUALE ARCHIVIO viene - terminati di rete, terminati ACI,
+ * secondarie, extra raccolta - altrimenti la si cercherebbe dove non e'. Il canale
+ * lo decide il materiale e non l'archivio (canaleEClasse), quindi una primaria di
+ * classe 9 sarebbe ACI anche se si trovasse nell'archivio della rete: oggi non
+ * capita, perche' il caricamento le smista col materiale e rifiuta il blocco che
+ * non torna (importaBlocco), ed e' una rete di sicurezza, non la provenienza
+ * normale. Dirla come normale manderebbe a cercare nei Terminati Rete righe che
+ * non ci sono.
+ *
+ * IL TOTALE NON SI AGGIUSTA. Deve tornare al chilo col numero della colonna; se
+ * non torna si dice lo scarto e basta, perche' vorrebbe dire che c'e' qualcosa
+ * da capire - un movimento che un conto vede e l'altro no - e un totale
+ * ritoccato per far quadrare la vista nasconderebbe proprio quello.
+ *
+ * Un movimento senza fine trasporto non sta in nessun giorno: fuori dal totale,
+ * contato a parte ed elencato, com'e' regola per le date obbligatorie.
+ *
+ * @param {array}  movimenti  i movimenti del piazzale (movimentoStoccaggio)
+ * @param {object} opzioni    { canale, ancora_del, ancora_kg, colonna_kg }
+ */
+export function ordiniDellaGiacenza(movimenti, { canale = 'ACI', ancora_del = '', ancora_kg = 0, colonna_kg = null } = {}) {
+  const interi = (v) => Math.round(Number(v) || 0);
+  const suoi = (movimenti || []).filter(m => m && m.canale === canale);
+  const senzaFine = suoi.filter(m => !m.finito_il);
+  // Contano quelli finiti DOPO il giorno dell'ancora: il giorno dell'ancora sta
+  // dentro la lettura, come in tutto il resto del gestionale. Senza il giorno
+  // dell'ancora non si conta niente, esattamente come fa la giacenza
+  // (dopoLaRilevazione, che il giorno lo pretende): se i due tagli dicessero cose
+  // diverse nascerebbe uno scarto che non esiste, con la frase «un movimento lo
+  // vede un conto e non l'altro» a indicare un guasto che non c'e'.
+  const dentro = suoi
+    .filter(m => m.finito_il && !!ancora_del && m.finito_il > ancora_del)
+    .sort((a, b) => a.finito_il.localeCompare(b.finito_il)
+      || String(a.id_ordine).localeCompare(String(b.id_ordine))
+      || String(a.numero_fir).localeCompare(String(b.numero_fir)));
+  let ingressi = 0, ingressiKg = 0, uscite = 0, usciteKg = 0;
+  for (const m of dentro) {
+    if (m.verso === 'uscita') { uscite++; usciteKg += interi(m.kg); }
+    else { ingressi++; ingressiKg += interi(m.kg); }
+  }
+  const ancora = interi(ancora_kg);
+  const totale = ancora + ingressiKg - usciteKg;
+  const colonna = colonna_kg === null || colonna_kg === undefined ? null : interi(colonna_kg);
+  return {
+    canale,
+    ancora_del,
+    ancora_kg: ancora,
+    ordini: dentro,
+    ingressi, ingressi_kg: ingressiKg,
+    uscite, uscite_kg: usciteKg,
+    totale_kg: totale,
+    colonna_kg: colonna,
+    scarto_kg: colonna === null ? null : colonna - totale,
+    torna: colonna === null ? null : colonna === totale,
+    senza_fine: senzaFine.length,
+    // Entrate e uscite separate: sommarle col segno piu' faceva dire «2 movimenti
+    // per 500 kg» dove c'erano 300 in entrata e 200 in uscita, cioe' 100 di saldo.
+    // Chili di verso diverso non si sommano, come i canali non si mescolano.
+    senza_fine_kg: senzaFine.reduce((s, m) => s + interi(m.kg), 0),
+    senza_fine_ingressi_kg: senzaFine.filter(m => m.verso !== 'uscita').reduce((s, m) => s + interi(m.kg), 0),
+    senza_fine_uscite_kg: senzaFine.filter(m => m.verso === 'uscita').reduce((s, m) => s + interi(m.kg), 0),
+    senza_fine_ordini: senzaFine,
   };
 }
 

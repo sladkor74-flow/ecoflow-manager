@@ -564,6 +564,35 @@ Il 21/09/2026 gli "scarti" di Green Tyre (24,56 t), Gatim (14,95 t) e T-Cycle
 (11,56 t) erano carichi caricati nel gestionale che la fotografia del 18/09 non
 conteneva ancora: con la regola 2 si aggiungono da soli.
 
+**Dove la regola 1 e' saltata tre volte, e come si e' chiusa.** Il 28/09/2026 una
+ricognizione su tutto il gestionale ha cercato ogni confronto che usasse l'inizio
+trasporto o la chiusura a portale al posto della fine. Il cuore condiviso era a
+posto (`movimenti.ts`, `filtroPeriodo.ts`, `raccoltoCalculator.ts`, le giacenze, la
+predittivita', la fatturazione): quello che sbagliava era **la lettura dei file
+esterni**, dove il nome della colonna non e' il nostro.
+
+- **Report settimanali.** Per un impianto o uno stoccaggio "data carico" e "data
+  ingresso" sono la FINE del trasporto - "carico" e' quello che entra nel loro
+  registro di carico e scarico - ma l'agente che mappa le colonne le classificava
+  come inizio trasporto, e nascevano anomalie su date che nel report non esistono.
+  Regola: **una tabella con una sola colonna di data ha la data del movimento**,
+  in qualunque casella sia arrivata (`riparaColonneData`, `riparaDateRighe` in
+  `base44/shared/reportSettimanali.ts`). A decidere e' la **colonna**, non le
+  righe: con due colonne vere e la casella dell'arrivo vuota, guardare le righe
+  faceva diventare la partenza la data del movimento. Al riconfronto le colonne si
+  leggono dalla lettura salvata (`colonneDateDellaLettura`), e quando una data si
+  legge diversamente si scrive (`nota_date` dell'esito, mostrata nella scheda e
+  nell'Excel).
+- **Prefattura Ecotyre.** La colonna della data si cercava con `/data|trasporto/` e
+  vinceva la prima da sinistra: una "Data chiusura" aggiunta dal portale avrebbe
+  fatto rifiutare la prefattura giusta («e' la prefattura di Agosto», sul file di
+  luglio). Ora si cerca la fine trasporto e si escludono chiusura, immissione e
+  inizio (`INTESTAZIONI` in `base44/shared/prefattura.ts`).
+- **Campi `mese`, `anno`, `settimane` dei record.** Si scrivono da `dataPeriodo` e
+  **non si rileggono mai** per decidere un periodo: si ricalcolano. L'unico punto
+  che preferiva il campo memorizzato (`mese_immissione` in `pivotCalculator.ts`) e'
+  stato tolto.
+
 ### Le date obbligatorie dei formulari (22/09/2026)
 
 Parole dell'utente: «le date immissione, inizio e fine trasporto sono
@@ -779,6 +808,42 @@ function vera e il modulo del browser con un SDK finto e i guasti in mezzo.
   che sta caricando adesso non e' un tentativo morto: glielo si dice subito,
   senza offrirgli niente da forzare.
 
+### Le attivita' della to-do list che si chiudono da sole (28/09/2026)
+
+`base44/shared/todoOrdini.ts` (specchio `src/lib/todoOrdini.js`), la function
+`controllaTodoOrdini`, quinto ricalcolo dopo le primarie.
+
+Sull'attivita' si scrive l'ID dell'ordine da completare. Parole dell'utente:
+«verifica quando essi passano dallo stato assegnato a quello di terminato e **solo
+allora** indicarli come completati».
+
+- **Il passaggio si deve VEDERE, non basta lo stato di adesso.** Il primo controllo
+  di un'attivita' scrive che cosa sta guardando (`ordini_attesi`) e quali di quegli
+  ordini sono ancora aperti (`ordini_da_attendere`), e **non chiude niente**. Si
+  chiude quando quegli ordini risultano terminati. Se l'ordine era **gia' terminato**
+  quando l'attivita' e' comparsa, nessun passaggio e' avvenuto: non si chiude mai da
+  sola, e `notaOrdini` lo dice in testo neutro. Serve perche' `riferimento_ordine`
+  esisteva da prima col significato di "ordine correlato": senza il passaggio, al
+  primo giro si sarebbero chiuse in blocco decine di attivita' vecchie - uscendo
+  dalla vista, che parte dalle aperte - con accanto un motivo vero in se' e falso
+  come spiegazione.
+- Il passaggio si **consuma** anche quando non porta a una chiusura (attivita' gia'
+  spuntata a mano): cosi' una riapertura a mano resta aperta. E chi e' stato chiuso
+  dal gestionale una volta non si richiude (`chiusa_dal_gestionale`): a decidere e'
+  chi lavora.
+- Un ordine **cancellato** non chiude niente e si segnala col motivo; un
+  **"eseguito"** si segnala sempre; un terminato **senza fine trasporto** non conta
+  (regola 1); una fine trasporto **nel futuro** non chiude niente.
+- Un ID che non si trova si dice con tutte le sue cause possibili (scritto male,
+  ordine non ancora caricato, codice che non e' un ordine): mandare a ricaricare un
+  file che c'e' gia' e' una bugia comoda. E se la domanda per numero d'ordine non
+  torna **niente** mentre gli ID ci sono, la function **rinvia** invece di scrivere
+  "non si trova" su ogni attivita'.
+- Il campo `riferimento_ordine` si riscrive solo se l'utente lo ha davvero
+  modificato: confrontare col testo normalizzato faceva diventare "da chiedere a
+  Ecotyre" in "DA, CHIEDERE, A, ECOTYRE" appena si apriva e si chiudeva la casella,
+  e di quel campo non c'e' storico.
+
 ### Come si legge un movimento: un punto solo
 
 `base44/shared/movimenti.ts` (specchio per le pagine: `src/lib/movimenti.js`).
@@ -798,7 +863,25 @@ li', e non riscrive la regola:
   un terminato senza fine trasporto. **Non** servono agli elenchi: restano solo
   per chi attribuisce apposta all'anno di immissione il conteggio dei senza fine
   (per esempio esportazioni, giacenze e qualifica: `grep annoOrdine` dice chi);
-- `canaleMovimento(r, archivio)`: rete, ACI (con `eAci`) o extra raccolta.
+- `canaleMovimento(r, archivio)`: rete, ACI (con `eAci`) o extra raccolta;
+- `eEseguito(r)`: il limbo del portale, dati tutti inseriti e Chiudi non premuto.
+  Non si somma ai terminati, si conta a parte e **si segnala**;
+- `eCancellato(r)` e `motivoCancellazione(r)`: lo stato si confronta per intero, e
+  il motivo si legge in un modo solo ("altro: pdr doppio" diventa "Pdr doppio"),
+  cosi' Evasione Assegnati e la to-do list non lo scrivono in due modi.
+
+Per la **classe e il canale insieme** c'e' `canaleEClasse(r, { aci })` in
+`base44/shared/giacenzaStoccaggi.ts`, con l'invariante **canale ACI se e solo se
+classe ACI**: usa lo stesso `eAci`, cosi' il canale resta quello canonico. Il canale
+lo decide il **materiale**, non l'archivio in cui la riga sta (decisione
+dell'utente, 28/09/2026): una primaria di classe 9 e' ACI anche se si trovasse nei
+Terminati Rete. Oggi non capita - `importaBlocco` rifiuta il blocco il cui archivio
+non torna con `archivioPrimaria` - quindi e' una **rete di sicurezza**, non la
+provenienza normale: non va raccontata a video come se lo fosse. E dove la regola
+vale, vale in **tutte** le colonne della stessa pagina: giacenza, conferito,
+residuo, percentuale del target e segnalazioni sulle date. La stessa riga che e' ACI
+in una colonna e rete in quella accanto e' un difetto, anche se i numeri sembrano
+plausibili.
 
 Anche «oggi» e' il giorno italiano (`oggiRoma()`), non `new Date()` del server.
 Gli specchi in `src/lib` devono restare identici agli originali: lo controlla

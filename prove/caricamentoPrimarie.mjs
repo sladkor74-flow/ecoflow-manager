@@ -1189,12 +1189,16 @@ registro = [];
 gancio = null;
 ricalcoliFinti = async () => ({ status: 200, data: {} });
 const esitiRicalcoli = await dopoCaricamento('primarie');
-// QUATTRO, NON CINQUE: la predittivita' e' stata tolta dai ricalcoli il
-// 26/09/2026. La pagina si ricalcola da sola a ogni apertura senza scrivere
+// CINQUE dal 28/09/2026, quando si e' aggiunto il controllo degli ordini della
+// to-do list (controllaTodoOrdini): un'attivita' con un ID ordine scritto sopra
+// si chiude da sola quando quell'ordine risulta terminato.
+// La predittivita' invece NON c'e', ed e' stata tolta dai ricalcoli il
+// 26/09/2026: la pagina si ricalcola da sola a ogni apertura senza scrivere
 // niente, e il programma della settimana si fissa il mercoledi' alle 8: rifarlo
 // a ogni caricamento cambierebbe il programmato, che deve restare quello deciso
 // per confrontarlo col fatto.
-verifica('i ricalcoli partono tutti e quattro', esitiRicalcoli.length === 4 && esitiRicalcoli.every(e => e.ok), JSON.stringify(esitiRicalcoli.map(e => [e.nome, e.ok])));
+verifica('i ricalcoli partono tutti e cinque', esitiRicalcoli.length === 5 && esitiRicalcoli.every(e => e.ok), JSON.stringify(esitiRicalcoli.map(e => [e.nome, e.ok])));
+verifica('fra loro c' + "'e' il controllo degli ordini della to-do list", registro.includes('ricalcolo controllaTodoOrdini'), JSON.stringify(registro.filter(r => r.startsWith('ricalcolo'))));
 verifica('e il registro se lo segna', String(ultimoLog().messaggio || '').includes(MODULI_AGGIORNATI), ultimoLog().messaggio);
 verifica('cosi' + "' la volta dopo non si ripetono", !(await ricalcoliDaRecuperare()).includes('primarie'), JSON.stringify(await ricalcoliDaRecuperare()));
 
@@ -1898,7 +1902,7 @@ verifica('e la riga sotto la scheda lo scrive', !!testoFermi && testoFermi.testo
 verifica('col motivo, una volta sola', !!testoFermi && testoFermi.testo.includes("il caricamento non e' riuscito del tutto"), testoFermi && testoFermi.testo);
 verifica('su un caricamento riuscito non si dice niente', ricalcoliFermi('secondarie', { esito: 'successo' }) === null);
 verifica('e dove non ci sono moduli collegati nemmeno', ricalcoliFermi('ordini_non_dichiarati', { esito: 'parziale' }) === null);
-verifica('per le primarie sono quattro', (ricalcoliFermi('primarie', { esito: 'parziale' }) || []).length === 4);
+verifica('per le primarie sono cinque', (ricalcoliFermi('primarie', { esito: 'parziale' }) || []).length === 5, JSON.stringify((ricalcoliFermi('primarie', { esito: 'parziale' }) || []).map(x => x.nome)));
 
 // ---------------------------------------------------------------------------
 console.log('(G13) LE FRASI SCRITTE PER LA FINESTRA ARRIVANO ALLA FINESTRA');

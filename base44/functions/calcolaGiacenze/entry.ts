@@ -6,7 +6,7 @@ import { annoRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, anomaliaRilevazione } from "../../shared/giacenzaStoccaggi.ts";
+import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, anomaliaRilevazione, classePfu, canaleEClasse, ordiniDellaGiacenza } from "../../shared/giacenzaStoccaggi.ts";
 import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine } from "../../shared/giacenzaPortale.ts";
 
 // Calcola la situazione delle giacenze di impianti e stoccaggi per l'anno richiesto.
@@ -100,15 +100,11 @@ export default async function(req) {
     // --- Classi dei PFU, come nel portale: P, M, G1, G2 e ACI (autodemolizione) ---
     // Il prodotto arriva come "P - fino a 35 kg", ".class1" o "PFU Autodemolizione".
     const CLASSI = ['P', 'M', 'G1', 'G2', 'ACI'];
-    function classeDa(...valori) {
-      const t = valori.map(v => String(v || '')).join(' ').toUpperCase();
-      if (/AUTODEMOL|\bACI\b|CLASS ?9/.test(t)) return 'ACI';
-      if (/CLASS ?3|\bG ?1\b/.test(t)) return 'G1';
-      if (/CLASS ?4|\bG ?2\b/.test(t)) return 'G2';
-      if (/CLASS ?2|(^|[^A-Z0-9])M([^A-Z0-9]|$)/.test(t)) return 'M';
-      if (/CLASS ?1|(^|[^A-Z0-9])P([^A-Z0-9]|$)/.test(t)) return 'P';
-      return 'ND';
-    }
+    // La regola delle classi sta in un punto solo, shared/giacenzaStoccaggi.ts:
+    // qui ce n'era una copia, e una copia della Chiusura d'anno, e le due si
+    // erano gia' scostate - una classe 9 nell'archivio di rete finiva in un
+    // canale per le Giacenze e in un altro per la Chiusura.
+    const classeDa = classePfu;
     const classiVuote = () => ({ P: 0, M: 0, G1: 0, G2: 0, ACI: 0, ND: 0 });
     // momentoRilevazione e dopoLaRilevazione stanno in shared/giacenzaStoccaggi.ts:
     // la regola della rilevazione e' una sola, per fine trasporto, e la usa anche
@@ -282,12 +278,14 @@ export default async function(req) {
     const saldoVuoto = () => ({ ingressi: classiVuote(), uscite: classiVuote(), nIngressi: 0, nUscite: 0 });
     const movStoc = new Map(); // ns -> { giorno, RETE, ACI }
     for (const [ns, partenza] of partenzaMap) movStoc.set(ns, { giorno: partenza.dataStr, RETE: saldoVuoto(), ACI: saldoVuoto() });
-    const contaMovimento = (r, ns, canale, verso) => {
+    // Il canale e la classe li decide chi chiama, con canaleEClasse: il canale
+    // ACI vale se e solo se la classe e' ACI, altrimenti i chili finiscono in
+    // una casella che nessuno legge. I kg sono interi, come ovunque.
+    const contaMovimento = (r, ns, canale, verso, classe) => {
       const m = movStoc.get(ns);
       if (!m || !dopoLaRilevazione(r, m.giorno)) return;
       const saldo = m[canale];
-      const kg = Number(r.peso_effettivo) || 0;
-      saldo[verso][canale === 'ACI' ? 'ACI' : classeDa(r.classe, r.prodotto)] += kg;
+      saldo[verso][classe] += Math.round(Number(r.peso_effettivo) || 0);
       if (verso === 'ingressi') saldo.nIngressi++; else saldo.nUscite++;
     };
     // Fin dove arrivano i movimenti caricati: l'ultima fine trasporto, giorno italiano.
@@ -297,13 +295,22 @@ export default async function(req) {
       const g = isTerminato(r) ? giornoRoma(r.trasporto_finito_il) : '';
       if (g && g > datiAggiornatiAl && g <= oggi) datiAggiornatiAl = g;
     }
-    for (const r of reteAll) if (isTerminato(r) && tipoStoc(r)) contaMovimento(r, norm(r.destinazione), 'RETE', 'ingressi');
-    for (const r of aciAll) if (isTerminato(r) && tipoStoc(r)) contaMovimento(r, norm(r.destinazione), 'ACI', 'ingressi');
+    // Una primaria di CLASSE 9 che sta nell'archivio della rete e' ACI: decide
+    // il materiale, non l'archivio (decisione dell'utente, 28/09/2026). Prima
+    // quei chili entravano nel saldo della rete sotto la classe ACI, che nessun
+    // conto legge: uscivano dalla giacenza dell'ACI senza entrare in quella
+    // della rete, cioe' sparivano.
+    for (const r of reteAll) {
+      if (!isTerminato(r) || !tipoStoc(r)) continue;
+      const { canale, classe } = canaleEClasse(r);
+      contaMovimento(r, norm(r.destinazione), canale, 'ingressi', classe);
+    }
+    for (const r of aciAll) if (isTerminato(r) && tipoStoc(r)) contaMovimento(r, norm(r.destinazione), 'ACI', 'ingressi', 'ACI');
     for (const r of secAll) {
       if (!isTerminato(r)) continue;
-      const canale = eAci(r) ? 'ACI' : 'RETE';
-      if (tipoStoc(r)) contaMovimento(r, norm(r.destinazione), canale, 'ingressi');
-      contaMovimento(r, norm(r.stoccaggio), canale, 'uscite');
+      const { canale, classe } = canaleEClasse(r, { aci: eAci(r) });
+      if (tipoStoc(r)) contaMovimento(r, norm(r.destinazione), canale, 'ingressi', classe);
+      contaMovimento(r, norm(r.stoccaggio), canale, 'uscite', classe);
     }
     // L'extra raccolta in piazzale, a parte: entrate e partenze dell'anno.
     const extraStoc = new Map(); // ns -> t
@@ -322,24 +329,30 @@ export default async function(req) {
     // ciascuno resta nel suo canale: rete, ACI ed extra raccolta non si mescolano.
     const daChi = (r) => r.trasportatore || r.ragione_sociale || '';
     const movArchivio = new Map(); // ns -> movimenti del piazzale
-    const raccogli = (r, ns, canale, verso, classe, controparte) => {
+    // L'archivio di provenienza si porta dietro: chi apre un numero e trova la
+    // riga deve sapere dove andarla a cercare - terminati di rete, terminati ACI,
+    // secondarie, extra raccolta.
+    const raccogli = (r, ns, canale, verso, classe, controparte, archivio) => {
       if (!ns) return;
       if (!movArchivio.has(ns)) movArchivio.set(ns, []);
-      movArchivio.get(ns).push(movimentoStoccaggio(r, { canale, verso, classe, controparte }));
+      movArchivio.get(ns).push(movimentoStoccaggio(r, { canale, verso, classe, controparte, archivio }));
     };
-    for (const r of reteAll) if (isTerminato(r) && tipoStoc(r)) raccogli(r, norm(r.destinazione), 'RETE', 'ingresso', classeDa(r.classe, r.prodotto), daChi(r));
-    for (const r of aciAll) if (isTerminato(r) && tipoStoc(r)) raccogli(r, norm(r.destinazione), 'ACI', 'ingresso', 'ACI', daChi(r));
+    for (const r of reteAll) {
+      if (!isTerminato(r) || !tipoStoc(r)) continue;
+      const { canale, classe } = canaleEClasse(r);
+      raccogli(r, norm(r.destinazione), canale, 'ingresso', classe, daChi(r), 'terminati_rete');
+    }
+    for (const r of aciAll) if (isTerminato(r) && tipoStoc(r)) raccogli(r, norm(r.destinazione), 'ACI', 'ingresso', 'ACI', daChi(r), 'terminati_aci');
     for (const r of secAll) {
       if (!isTerminato(r)) continue;
-      const canale = eAci(r) ? 'ACI' : 'RETE';
-      const classe = canale === 'ACI' ? 'ACI' : classeDa(r.classe, r.prodotto);
-      if (tipoStoc(r)) raccogli(r, norm(r.destinazione), canale, 'ingresso', classe, r.stoccaggio);
-      raccogli(r, norm(r.stoccaggio), canale, 'uscita', classe, r.destinazione);
+      const { canale, classe } = canaleEClasse(r, { aci: eAci(r) });
+      if (tipoStoc(r)) raccogli(r, norm(r.destinazione), canale, 'ingresso', classe, r.stoccaggio, 'secondarie');
+      raccogli(r, norm(r.stoccaggio), canale, 'uscita', classe, r.destinazione, 'secondarie');
     }
     for (const r of extraAll) {
       if (!isTerminato(r)) continue;
-      if (eSecondariaExtra(r)) raccogli(r, norm(r.stoccaggio), 'EXTRA_RACCOLTA', 'uscita', classeDa(r.classe, r.prodotto), r.destinazione);
-      else if (tipoStoc(r)) raccogli(r, norm(r.destinazione), 'EXTRA_RACCOLTA', 'ingresso', classeDa(r.classe, r.prodotto), daChi(r));
+      if (eSecondariaExtra(r)) raccogli(r, norm(r.stoccaggio), 'EXTRA_RACCOLTA', 'uscita', classeDa(r.classe, r.prodotto), r.destinazione, 'extra_raccolta');
+      else if (tipoStoc(r)) raccogli(r, norm(r.destinazione), 'EXTRA_RACCOLTA', 'ingresso', classeDa(r.classe, r.prodotto), daChi(r), 'extra_raccolta');
     }
 
     // === 1d. GIACENZA A PORTALE DEGLI IMPIANTI, AGGIORNATA AI CARICAMENTI ===
@@ -373,7 +386,10 @@ export default async function(req) {
       a.classi[classeDa(r.classe, r.prodotto)] += kg;
       a.n++;
     };
-    for (const r of reteAll) if (isTerminato(r) && !tipoStoc(r)) aggiungiNonNoto(r, 'primaria');
+    // La giacenza a portale di un impianto e' della RETE (il portale l'ACI degli
+    // impianti non la tiene per noi): una riga di classe 9 non ci entra, qualunque
+    // archivio la porti. Le secondarie ACI erano gia' escluse.
+    for (const r of reteAll) if (isTerminato(r) && !tipoStoc(r) && !eAci(r)) aggiungiNonNoto(r, 'primaria');
     for (const r of secAll) if (isTerminato(r) && !eAci(r)) aggiungiNonNoto(r, 'secondaria');
     const dichiaratoDopoMap = dichiaratoDopoLaFotografia(dichiarazioniSito, giornoFoto, norm); // ns -> kg
 
@@ -390,7 +406,9 @@ export default async function(req) {
     // si dice con i numeri, non si nasconde.
     const daSistemare = formulariDaSistemare({ anno: annoNum, chiaveDi: norm });
     const ruoloDest = (r) => (tipoStoc(r) ? 'stoc' : 'imp');
-    for (const r of reteAll) daSistemare.segna(r, { tipo: 'primaria', canale: 'RETE', ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: daChi(r) });
+    // Il canale della segnalazione e' quello del materiale: una classe 9 si segnala
+    // sotto ACI anche se sta nell'archivio della rete, come la conta la giacenza.
+    for (const r of reteAll) daSistemare.segna(r, { tipo: 'primaria', canale: eAci(r) ? 'ACI' : 'RETE', ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: daChi(r) });
     for (const r of aciAll) daSistemare.segna(r, { tipo: 'primaria', canale: 'ACI', ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: daChi(r) });
     for (const r of extraAll) {
       if (!eSecondariaExtra(r)) {
@@ -464,8 +482,15 @@ export default async function(req) {
       }
       return mappa;
     };
-    const confPrimMap = conferitoPer(reteAll);
-    const confAciMap = conferitoPer(aciAll);
+    // Il canale lo decide il MATERIALE, non l'archivio, anche qui: una primaria di
+    // classe 9 che si trovasse nell'archivio della rete sta nel conferito ACI, non
+    // in quello di rete. Altrimenti la stessa riga sarebbe ACI nella colonna della
+    // giacenza e rete nella colonna Conferito, nel residuo e nella percentuale del
+    // target - numeri su cui si decide quanto raccogliere - e la fatturazione, che
+    // usa canaleMovimento, la fatturerebbe ACI. E' lo stesso difetto gia' corretto
+    // qui sotto per le secondarie, che per le primarie era rimasto.
+    const confPrimMap = conferitoPer(reteAll.filter(r => !eAci(r)));
+    const confAciMap = conferitoPer([...aciAll, ...reteAll.filter(r => eAci(r))]);
     const confExtraMap = conferitoPer(extraAll);
 
     // Le secondarie di rete e quelle ACI viaggiano nello stesso archivio e si
@@ -583,6 +608,10 @@ export default async function(req) {
       // La riconciliazione del piazzale: l'estratto conto, lo storico delle
       // letture, com'e' adesso e se conviene rileggere (23/09/2026).
       let riconciliazione = null;
+      // Gli ordini che compongono la giacenza ACI del piazzale, uno per uno
+      // (richiesta dell'utente, 28/09/2026): si apre il numero della colonna e
+      // si vede da dove viene, ticket compreso.
+      let aci_dettaglio = null;
 
       if (td === 'stoc') {
         // in_attesa_dichiarazione_t: primarie arrivate allo stoccaggio che il file del
@@ -628,6 +657,15 @@ export default async function(req) {
           aggiornata_al = datiAggiornatiAl || null;
           giacenza_rete_t = kgDi(giacenza_classi_kg, false) / 1000;
           giacenza_aci_t = giacenza_classi_kg.ACI / 1000;
+          // Gli ordini dietro la colonna ACI: l'ancora per la classe 9 piu' i
+          // movimenti ACI finiti dopo, uno per uno. Il totale si confronta con
+          // la colonna e, se non torna, lo scarto si dice: non si aggiusta.
+          aci_dettaglio = ordiniDellaGiacenza(suoiMovimenti, {
+            canale: 'ACI',
+            ancora_del: partenza.dataStr,
+            ancora_kg: rilevazione_classi_kg.ACI,
+            colonna_kg: giacenza_classi_kg.ACI,
+          });
           // La colonna della giacenza a portale e' della rete: l'ACI sta nella sua colonna.
           giacenza_portale_t = giacenza_rete_t;
           data_rilevazione = rilev.dataStr;
@@ -765,6 +803,8 @@ export default async function(req) {
         saldo_movimenti_archivio,
         // La riconciliazione del piazzale, canale per canale.
         riconciliazione,
+        // Gli ordini che fanno la colonna ACI di un piazzale, uno per uno.
+        aci_dettaglio,
         aggiornata_al,
         data_rilevazione,
         rilevazione_obsoleta,

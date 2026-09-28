@@ -6,9 +6,9 @@ import { eAci } from "../../shared/canaleSecondaria.ts";
 import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { formatoKg } from "../../shared/formato.ts";
 import { utenteCorrente, rispostaSolaLettura } from "../../shared/permessi.ts";
-import { momentoRilevazione } from "../../shared/giacenzaStoccaggi.ts";
+import { momentoRilevazione, canaleEClasse, classePfu } from "../../shared/giacenzaStoccaggi.ts";
 import {
-  giornoChiusura, GRUPPO_TERZIARIE, classePfu, movimentoChiusura,
+  giornoChiusura, GRUPPO_TERZIARIE, movimentoChiusura,
   leggiLetteraGiacenze, preparaChiusura,
 } from "../../shared/chiusuraAnno.ts";
 
@@ -94,17 +94,23 @@ export default async function (req) {
       riga.movimenti.push(movimentoChiusura(r, { sito: ns, nome: riga.nome, ruolo, ...opzioni }));
     };
 
+    // Il canale lo decide il MATERIALE, non l'archivio in cui la riga e' finita:
+    // una primaria di classe 9 che sta fra le primarie di rete e' ACI (decisione
+    // dell'utente, 28/09/2026). La chiusura aveva una copia sua della regola e
+    // quei chili li chiamava rete di classe ACI: nel confronto per classe
+    // comparivano due righe 'ACI', una nel canale rete e una nel canale ACI, con
+    // due scarti sulla stessa classe che non volevano dire niente.
     for (const r of reteAll) {
+      const { canale, classe } = canaleEClasse(r);
       raccogli(r, r.destinazione, tipoStoc(r) ? 'stoc' : 'imp',
-        { tipo: 'primaria', canale: 'RETE', verso: 'ingresso', classe: classePfu(r.classe, r.prodotto), controparte: daChi(r) });
+        { tipo: 'primaria', canale, verso: 'ingresso', classe, controparte: daChi(r) });
     }
     for (const r of aciAll) {
       raccogli(r, r.destinazione, tipoStoc(r) ? 'stoc' : 'imp',
         { tipo: 'primaria', canale: 'ACI', verso: 'ingresso', classe: 'ACI', controparte: daChi(r) });
     }
     for (const r of secAll) {
-      const canale = eAci(r) ? 'ACI' : 'RETE';
-      const classe = canale === 'ACI' ? 'ACI' : classePfu(r.classe, r.prodotto);
+      const { canale, classe } = canaleEClasse(r, { aci: eAci(r) });
       raccogli(r, r.destinazione, tipoStoc(r) ? 'stoc' : 'imp',
         { tipo: 'secondaria', canale, verso: 'ingresso', classe, controparte: r.stoccaggio });
       // La partenza riguarda il piazzale che spedisce.
@@ -122,9 +128,12 @@ export default async function (req) {
     }
     // Le terziarie escono dall'impianto verso le cementerie: non sono un canale,
     // ma se il portale le chiude a febbraio la fotografia del 31/12 non le ha.
+    // NON hanno classe, e non gliene si da' una: il controllo per classe non le
+    // riguarda (regola dell'utente, 28/09/2026). Si elencano lo stesso, perche'
+    // il file degli ordini non dichiarati del 31/12 non le contiene ancora.
     for (const r of terzAll) {
       raccogli(r, r.unita_locale_origine || r.ragione_sociale, 'imp',
-        { tipo: 'terziaria', canale: GRUPPO_TERZIARIE, verso: 'uscita', classe: 'ND', controparte: r.destinazione });
+        { tipo: 'terziaria', canale: GRUPPO_TERZIARIE, verso: 'uscita', classe: '', controparte: r.destinazione });
     }
 
     // --- Piazzali e impianti ---

@@ -47,6 +47,33 @@ const per = periodoPrefattura(vero.righe);
 verifica('il mese si ricava dal file: luglio 2026 (seriali 46204 e 46234)', vero.righe[0].giorno === '2026-07-01' && vero.righe[1].giorno === '2026-07-31' && per.anno === 2026 && per.mese_idx === 6 && per.quota === 1);
 verifica('date scritte come testo', comeGiorno('31/07/2026') === '2026-07-31' && comeGiorno('2026-07-31T00:00:00Z') === '2026-07-31' && comeGiorno('n.d.') === '' && periodoPrefattura([{ giorno: '' }]) === null);
 
+// Il mese della prefattura viene dalla FINE del trasporto, mai dalla chiusura a
+// portale (regola 1). La colonna si cercava con "data" oppure "trasporto" e vinceva
+// la prima da sinistra: se il portale aggiungesse una "Data chiusura" prima, il mese
+// verrebbe da quella - e un giorno d'agosto farebbe rifiutare la prefattura di
+// luglio con «questo file e' la prefattura di Agosto 2026», sul file giusto.
+const conChiusura = leggiTabellePrefattura([{ nome: 'Worksheet', celle: [
+  ['Ordine', 'Data chiusura', 'Data fine trasporto', 'Numero FIR', 'Quantità (kg)', 'Prezzo Totale'],
+  ['ET26130005', '03/08/2026', '31/07/2026', 'LQQDP001408LD', 3840, 775.68],
+] }]);
+verifica('la data si prende dalla fine trasporto, non dalla chiusura a portale',
+  conChiusura.righe[0].giorno === '2026-07-31', JSON.stringify(conChiusura.righe[0]));
+verifica('e il mese della prefattura e\' luglio, non agosto',
+  periodoPrefattura(conChiusura.righe).mese_idx === 6, JSON.stringify(periodoPrefattura(conChiusura.righe)));
+// Senza la fine trasporto una data generica va bene, purche' non sia la chiusura ne'
+// l'immissione: meglio nessuna data che la data sbagliata.
+const soloChiusura = leggiTabellePrefattura([{ nome: 'W', celle: [
+  ['Ordine', 'Data chiusura', 'Numero FIR', 'Quantità (kg)', 'Prezzo Totale'],
+  ['ET26130005', '03/08/2026', 'LQQDP001408LD', 3840, 775.68],
+] }]);
+verifica('una prefattura con la sola data di chiusura non prende quel giorno',
+  soloChiusura.righe[0].giorno === '' && periodoPrefattura(soloChiusura.righe) === null, JSON.stringify(soloChiusura.righe[0]));
+const generica = leggiTabellePrefattura([{ nome: 'W', celle: [
+  ['Ordine', 'Data', 'Numero FIR', 'Quantità (kg)', 'Prezzo Totale'],
+  ['ET26130005', '31/07/2026', 'LQQDP001408LD', 3840, 775.68],
+] }]);
+verifica('una colonna "Data" senza altro si usa ancora', generica.righe[0].giorno === '2026-07-31', JSON.stringify(generica.righe[0]));
+
 console.log('CONFRONTO');
 const riga = (ordine, quantita, totale, altro = {}) => ({ ordine, numero_fir: 'F-' + ordine, quantita, totale, tariffa_valore: 202, ...altro });
 const vive = {

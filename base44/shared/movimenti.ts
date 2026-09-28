@@ -41,6 +41,26 @@ export const eTerminato = (r) => String((r && r.stato) || '').toLowerCase().trim
  */
 export const eEseguito = (r) => String((r && r.stato) || '').toLowerCase().trim() === 'eseguito';
 
+/**
+ * Un ordine che a portale e' stato CANCELLATO: quel ritiro non si fara' piu'. Lo
+ * stato si confronta per intero, non con un pezzo di parola: negli archivi lo
+ * stato e' uno dei tre che il portale scrive - terminato, cancellato, assegnato -
+ * piu' il limbo "eseguito", e un confronto largo prenderebbe domani uno stato
+ * nuovo che somiglia. E' la stessa regola di Evasione Assegnati.
+ */
+export const eCancellato = (r) => String((r && r.stato) || '').toLowerCase().trim() === 'cancellato';
+
+/**
+ * Il motivo della cancellazione come si legge a video: il portale scrive "altro:
+ * pdr doppio" e noi diciamo "Pdr doppio". Sta qui, con la regola dello stato,
+ * perche' lo stesso ordine cancellato non puo' comparire in due moduli con il
+ * motivo scritto in due modi: lo usano Evasione Assegnati e la to-do list.
+ */
+export function motivoCancellazione(r) {
+  const motivo = String((r && r.motivo_cancellazione) || '').replace(/^altro\s*:\s*/i, '').replace(/\s+/g, ' ').trim();
+  return motivo ? motivo[0].toUpperCase() + motivo.slice(1) : '';
+}
+
 /** Il giorno italiano in cui e' finito il trasporto, 'AAAA-MM-GG'. Stringa vuota se manca. */
 export const giornoMovimento = (r) => giornoRoma(r && r.trasporto_finito_il);
 

@@ -2405,7 +2405,7 @@ export const TIPI_LETTURA_BROWSER = ['dichiarazioni_trattamento', 'ordini_non_di
 // record: al primo errore metteva in "errore" una verifica conclusa, e una
 // quadratura senza righe salvate diventava "La lettura del file non e' riuscita".
 const RICALCOLI = {
-  primarie: ['evasioneAssegnati', 'ritiriEct', 'verifiche', 'qualifica'],
+  primarie: ['evasioneAssegnati', 'ritiriEct', 'todoOrdini', 'verifiche', 'qualifica'],
   secondarie: ['verifiche', 'qualifica'],
   extra_raccolta: ['verifiche', 'qualifica'],
 };
@@ -2413,6 +2413,7 @@ const RICALCOLI = {
 const NOMI_RICALCOLI = {
   evasioneAssegnati: 'evasione delle liste di assegnati',
   ritiriEct: 'ritiri delle richieste del consorzio',
+  todoOrdini: 'ordini da completare della to-do list',
   verifiche: 'verifiche dei report e quadrature FIR (anche nessuna movimentazione)',
   qualifica: 'qualifica fornitori',
   alertExtra: "alert delle date obbligatorie dell'extra raccolta",
@@ -2491,10 +2492,19 @@ function problemaRisposta(res) {
 // terminato senza fine trasporto: non si contano come ritirate (regola 1), ma
 // sollecitarle sarebbe sbagliato. E quali sono evase da ordini con un'altra data
 // obbligatoria da sistemare (regola dell'utente del 22/09/2026).
+//
+// Un ricalcolo che manda un avviso gia' scritto (campo "avviso") lo fa vedere
+// com'e': lo usa il controllo degli ordini della to-do list, che dice quali
+// attivita' si sono chiuse da sole e quali restano aperte perche' il loro ordine
+// risulta cancellato.
 function avvisoRisposta(res) {
   const dati = (res && res.data !== undefined ? res.data : res) || {};
   const lista = (campo) => (Array.isArray(dati[campo]) ? dati[campo] : []);
-  return [testoTerminatiSenzaFine(lista('terminati_senza_fine')), testoOrdiniDateDaSistemare(lista('ordini_con_date_da_sistemare'))].filter(Boolean).join(' ') || null;
+  return [
+    testoTerminatiSenzaFine(lista('terminati_senza_fine')),
+    testoOrdiniDateDaSistemare(lista('ordini_con_date_da_sistemare')),
+    String(dati.avviso || '').trim(),
+  ].filter(Boolean).join(' ') || null;
 }
 
 // Il messaggio di un ricalcolo rifiutato: quello della funzione, o i suoi primi errori.
@@ -2551,6 +2561,10 @@ export async function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
   const compiti = {
     evasioneAssegnati: () => base44.functions.invoke('controllaEvasioneAssegnati', {}),
     ritiriEct: () => base44.functions.invoke('importaBlocco', { azione: 'ritiri_ect', tipo_file: 'primarie' }),
+    // Le attivita' della to-do list con un ID ordine scritto sopra: quando
+    // quell'ordine risulta terminato l'attivita' si chiude da sola, e resta
+    // scritto perche' e quando (base44/shared/todoOrdini.ts).
+    todoOrdini: () => base44.functions.invoke('controllaTodoOrdini', {}),
     // Con i giorni toccati si rifanno anche le quadrature piu' vecchie di quelle settimane.
     verifiche: () => base44.functions.invoke('ricontrollaDichiarazioni', { giorni: giorniValidi }),
     // un anno alla volta anche qui, per la stessa ragione
@@ -2672,10 +2686,11 @@ export async function ricalcoliDaRecuperare() {
  * Sta qui e non dentro la pagina perche' e' una regola, non grafica, e le prove
  * la controllano. Due freni, che prima non c'erano:
  *
- *  - LI FA SOLO CHI PUO' CARICARE. I ricalcoli (quattro per le primarie, due per
+ *  - LI FA SOLO CHI PUO' CARICARE. I ricalcoli (cinque per le primarie, due per
  *    le secondarie: vedi RICALCOLI) rileggono archivi interi e
  *    ci SCRIVONO (riepilogo della qualifica, verifiche dei report e quadrature
- *    FIR, ritiri ECT, evasione assegnati), e nessuna di quelle funzioni guarda il
+ *    FIR, ritiri ECT, evasione assegnati, chiusura delle attivita' della to-do
+ *    list), e nessuna di quelle funzioni guarda il
  *    livello. La pagina dei caricamenti si apre a tutti: bastava che un collega
  *    in sola consultazione la aprisse per far riscrivere tutto, contro la regola
  *    dei permessi (gli altri consultano, esportano e aprono richieste). Senza un

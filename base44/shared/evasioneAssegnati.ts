@@ -49,7 +49,7 @@ import { formatoKgInTonnellate } from "./formato.ts";
 import { getRegioneFromProvincia } from "./dataEnrichment.ts";
 import { classeNormalizzata, nomiCoincidono, aggiungiGiorni, giorniTra, dataDaValore } from "./reportSettimanali.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
-import { giornoMovimento, testoDate } from "./movimenti.ts";
+import { giornoMovimento, testoDate, motivoCancellazione } from "./movimenti.ts";
 
 export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 const RE_ID_ORDINE = /^[A-Z]{2}[0-9]{6,10}$/;
@@ -179,10 +179,10 @@ export function normalizzaAssegnato(r, canale) {
   };
 }
 
-// Ordine cancellato sul portale, con il motivo della cancellazione.
+// Ordine cancellato sul portale, con il motivo della cancellazione (la regola del
+// motivo sta in movimenti.ts, insieme a quella dello stato: la usa anche la to-do list).
 export function normalizzaCancellato(r, canale) {
-  const motivo = String(r.motivo_cancellazione || '').replace(/^altro\s*:\s*/i, '').trim();
-  return { ...normalizzaAssegnato(r, canale), motivo: motivo ? motivo[0].toUpperCase() + motivo.slice(1) : '' };
+  return { ...normalizzaAssegnato(r, canale), motivo: motivoCancellazione(r) };
 }
 
 /**

@@ -13,7 +13,7 @@
 // giacenza - i file non partono da quando il piazzale era vuoto - ma un termine
 // di confronto, che dice da quando conta.
 // npm run prove
-import { movimentoStoccaggio, fraLeRilevazioni, verificaRilevazione, saldoMovimentiInArchivio, classiDiRilevazione, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, puntiDiPartenza, anomaliaRilevazione } from '../base44/shared/giacenzaStoccaggi.ts';
+import { movimentoStoccaggio, fraLeRilevazioni, verificaRilevazione, saldoMovimentiInArchivio, classiDiRilevazione, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, puntiDiPartenza, anomaliaRilevazione, classePfu, canaleEClasse, ordiniDellaGiacenza } from '../base44/shared/giacenzaStoccaggi.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -408,6 +408,94 @@ verifica('chiamata senza ancora, la verifica non ne inventa una', senzAncora.anc
 verifica('e il confronto con la precedente resta quello di sempre', senzAncora.quadra === false && senzAncora.scostano.sort().join() === 'M,P');
 verifica('i canali non si mescolano nemmeno nell\'ancora',
   ultima.ancora.canali.RETE.quadra === true && ultima.ancora.canali.ACI.quadra === true && !('totale' in ultima.ancora));
+
+console.log('LA CLASSE DI UN PRODOTTO, IN UN PUNTO SOLO');
+// La regola stava in tre copie - Giacenze, Chiusura d'anno, Predittivita' - e le
+// copie si erano scostate: una classe 9 nell'archivio di rete finiva in un canale
+// per un modulo e in un altro per l'altro.
+verifica('le classi del portale si leggono dal prodotto',
+  ['P - fino a 35 kg', 'M - fino a 155 kg', 'G1', 'G2', 'PFU Autodemolizione', 'Ciabattato']
+    .map(x => classePfu(x)).join() === 'P,M,G1,G2,ACI,ND',
+  ['P - fino a 35 kg', 'M - fino a 155 kg', 'G1', 'G2', 'PFU Autodemolizione', 'Ciabattato'].map(x => classePfu(x)).join());
+verifica('anche dal codice prodotto', classePfu('', '.class9') === 'ACI' && classePfu('', '.class1') === 'P');
+verifica('un prodotto che non si riconosce non si indovina', classePfu('qualcosa d\'altro') === 'ND');
+
+console.log('IL CANALE LO DECIDE IL MATERIALE, NON L\'ARCHIVIO (28/09/2026)');
+verifica('una classe 9 fra le primarie di rete e\' ACI',
+  JSON.stringify(canaleEClasse({ classe: 'PFU Autodemolizione', codice_prodotto: '.class9' })) === JSON.stringify({ canale: 'ACI', classe: 'ACI' }));
+verifica('una primaria di rete resta rete', JSON.stringify(canaleEClasse({ classe: 'M - fino a 155 kg' })) === JSON.stringify({ canale: 'RETE', classe: 'M' }));
+// L'invariante che fa tornare i conti per classe: canale ACI se e solo se classe ACI.
+for (const r of [{ classe: 'P' }, { classe: 'PFU Autodemolizione' }, { classe: 'Ciabattato' }]) {
+  for (const aci of [false, true]) {
+    const c = canaleEClasse(r, { aci });
+    verifica(`canale ACI se e solo se classe ACI (${JSON.stringify(r)}, aci=${aci})`, (c.canale === 'ACI') === (c.classe === 'ACI'), JSON.stringify(c));
+  }
+}
+
+console.log('GLI ORDINI CHE FANNO LA GIACENZA DI UN CANALE (28/09/2026)');
+// Richiesta dell'utente: aprire la giacenza ACI di un piazzale e vedere gli
+// ordini che la compongono, col ticket accanto al peso.
+const conTicket = movimentoStoccaggio(
+  { id_ordine: 'ET26000002', numero_fir: 'FIRACI9', numero_ordine_interno: '163142-85', peso_effettivo: 640, trasporto_finito_il: '2026-04-01T08:00:00Z' },
+  { canale: 'ACI', classe: 'ACI', controparte: 'Nappi Sud', archivio: 'terminati_rete' },
+);
+verifica('un movimento porta il ticket e da quale archivio viene',
+  conTicket.ticket === '163142-85' && conTicket.archivio === 'terminati_rete', JSON.stringify(conTicket));
+verifica('senza ticket il campo resta vuoto, non "undefined"', movimentoStoccaggio({ id_ordine: 'X' }, {}).ticket === '');
+
+const movAci = [
+  conTicket,
+  movimentoStoccaggio({ id_ordine: 'ET26000003', numero_fir: 'FIRACI1', numero_ordine_interno: '164000-11', peso_effettivo: 500, trasporto_finito_il: '2026-05-02T08:00:00Z' },
+    { canale: 'ACI', classe: 'ACI', controparte: 'Nappi Sud', archivio: 'terminati_aci' }),
+  movimentoStoccaggio({ id_ordine: 'SEC26000001', numero_fir: 'FIRSEC1', peso_effettivo: 300, trasporto_finito_il: '2026-06-05T08:00:00Z' },
+    { canale: 'ACI', verso: 'uscita', classe: 'ACI', controparte: 'IRIGOM SRL', archivio: 'secondarie' }),
+  // dentro l'ancora: il 31/12 sta nella lettura, non si conta due volte
+  movimentoStoccaggio({ id_ordine: 'ET25999000', peso_effettivo: 900, trasporto_finito_il: '2025-12-31T08:00:00Z' },
+    { canale: 'ACI', classe: 'ACI', archivio: 'terminati_aci' }),
+  // senza fine trasporto: fuori dal conto, e si dice
+  movimentoStoccaggio({ id_ordine: 'ET26000009', peso_effettivo: 200, trasporto_finito_il: null },
+    { canale: 'ACI', classe: 'ACI', archivio: 'terminati_rete' }),
+  // un movimento di rete: in un conto dell'ACI non c'entra
+  movimentoStoccaggio({ id_ordine: 'ET26000001', peso_effettivo: 5000, trasporto_finito_il: '2026-03-10T08:00:00Z' },
+    { canale: 'RETE', classe: 'P', archivio: 'terminati_rete' }),
+];
+const dettAci = ordiniDellaGiacenza(movAci, { canale: 'ACI', ancora_del: '2025-12-31', ancora_kg: 1000, colonna_kg: 1840 });
+verifica('solo i movimenti del canale, e solo quelli finiti dopo l\'ancora',
+  dettAci.ordini.map(o => o.id_ordine).join() === 'ET26000002,ET26000003,SEC26000001', dettAci.ordini.map(o => o.id_ordine).join());
+verifica('ancora 1.000 + entrate 1.140 - uscite 300 = 1.840',
+  dettAci.ancora_kg === 1000 && dettAci.ingressi_kg === 1140 && dettAci.uscite_kg === 300 && dettAci.totale_kg === 1840, JSON.stringify(dettAci.totale_kg));
+verifica('e torna al chilo col numero della colonna', dettAci.scarto_kg === 0 && dettAci.torna === true);
+verifica('chi non ha la fine trasporto resta fuori e si conta a parte',
+  dettAci.senza_fine === 1 && dettAci.senza_fine_kg === 200 && dettAci.senza_fine_ordini[0].id_ordine === 'ET26000009');
+verifica('la rete non entra in un conto dell\'ACI', !dettAci.ordini.some(o => o.canale === 'RETE'));
+// Se il numero della colonna e quello degli ordini non tornassero, il totale NON
+// si aggiusta: si dice lo scarto, perche' vuol dire che c'e' qualcosa da capire.
+const scartoAci = ordiniDellaGiacenza(movAci, { canale: 'ACI', ancora_del: '2025-12-31', ancora_kg: 1000, colonna_kg: 2000 });
+verifica('uno scarto si dice e non si aggiusta',
+  scartoAci.totale_kg === 1840 && scartoAci.colonna_kg === 2000 && scartoAci.scarto_kg === 160 && scartoAci.torna === false, JSON.stringify(scartoAci.scarto_kg));
+verifica('senza il numero della colonna non si inventa un verdetto',
+  ordiniDellaGiacenza(movAci, { canale: 'ACI', ancora_del: '2025-12-31', ancora_kg: 1000 }).torna === null);
+verifica('senza movimenti la giacenza e\' quella dell\'ancora',
+  ordiniDellaGiacenza([], { canale: 'ACI', ancora_del: '2025-12-31', ancora_kg: 1000, colonna_kg: 1000 }).totale_kg === 1000);
+
+// Senza il giorno dell'ancora non si conta niente, come fa la giacenza
+// (dopoLaRilevazione pretende il giorno): se i due tagli dicessero cose diverse
+// nascerebbe uno scarto che non esiste, con la frase «un movimento lo vede un conto
+// e non l'altro» a indicare un guasto che non c'e'.
+const senzaAncora = ordiniDellaGiacenza(movAci, { canale: 'ACI', ancora_del: '', ancora_kg: 1000, colonna_kg: 1000 });
+verifica('senza il giorno dell\'ancora nessun movimento entra, come nella giacenza',
+  senzaAncora.ordini.length === 0 && senzaAncora.totale_kg === 1000 && senzaAncora.torna === true,
+  JSON.stringify([senzaAncora.ordini.length, senzaAncora.totale_kg, senzaAncora.torna]));
+
+// I chili senza fine trasporto si dicono per verso: sommarli col segno piu' faceva
+// dire «2 movimenti per 500 kg» dove c'erano 300 in entrata e 200 in uscita.
+const senzaFineMisti = ordiniDellaGiacenza([
+  movimentoStoccaggio({ id_ordine: 'A1', peso_effettivo: 300, trasporto_finito_il: null }, { canale: 'ACI', verso: 'ingresso', classe: 'ACI' }),
+  movimentoStoccaggio({ id_ordine: 'A2', peso_effettivo: 200, trasporto_finito_il: null }, { canale: 'ACI', verso: 'uscita', classe: 'ACI' }),
+], { canale: 'ACI', ancora_del: '2025-12-31', ancora_kg: 0, colonna_kg: 0 });
+verifica('le entrate e le uscite senza fine trasporto si dicono separate',
+  senzaFineMisti.senza_fine === 2 && senzaFineMisti.senza_fine_ingressi_kg === 300 && senzaFineMisti.senza_fine_uscite_kg === 200,
+  JSON.stringify([senzaFineMisti.senza_fine, senzaFineMisti.senza_fine_ingressi_kg, senzaFineMisti.senza_fine_uscite_kg]));
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

@@ -16,10 +16,23 @@ export const TARIFFA_BASE_EXTRA_RACCOLTA = { 2026: 202 };
 /** La tariffa base (€/t) di un anno, oppure null. */
 export const tariffaBaseExtraRaccolta = (anno) => TARIFFA_BASE_EXTRA_RACCOLTA[Number(anno)] || null;
 
-/** L'anno di un intervento: la fine del trasporto; per uno ancora assegnato, la data della richiesta. */
+/**
+ * L'anno di un intervento: la fine del trasporto; per uno ancora ASSEGNATO, che un
+ * trasporto non l'ha fatto, la data della richiesta.
+ *
+ * Il ripiego vale solo per chi non e' terminato. Un terminato senza fine trasporto
+ * non sta in nessun anno (regola 1) e qui torna null: prendendo l'anno
+ * dell'immissione, una scheda vecchia terminata a cavallo d'anno prendeva la tariffa
+ * base dell'anno sbagliato, e il margine mostrato non era quello vero. Le tre date
+ * sono obbligatorie dal 22/09/2026 e le schede nuove ce l'hanno; quelle di prima si
+ * segnalano, non si indovinano.
+ */
 export function annoIntervento(r) {
-  const g = giornoRoma(r && r.trasporto_finito_il) || giornoRoma(r && r.ordine_immesso_il);
-  return g ? Number(g.slice(0, 4)) : null;
+  const fine = giornoRoma(r && r.trasporto_finito_il);
+  if (fine) return Number(fine.slice(0, 4));
+  if (String((r && r.stato) || '').toLowerCase().trim() === 'terminato') return null;
+  const immesso = giornoRoma(r && r.ordine_immesso_il);
+  return immesso ? Number(immesso.slice(0, 4)) : null;
 }
 
 const eSecondaria = (r) => String((r && r.tipo_movimento) || '').toLowerCase().trim() === 'secondaria';

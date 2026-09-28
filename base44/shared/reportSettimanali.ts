@@ -773,6 +773,54 @@ export function soggettiDellaSettimana({ movimenti, interni, anagrafica }, anno,
 export const CAMPI_REPORT = ['fir', 'ordine', 'peso', 'data_inizio', 'data_fine', 'data', 'produttore', 'codice_pdr', 'destinatario', 'trasportatore', 'intermediario', 'classe', 'targa'];
 
 /**
+ * Le colonne delle date indicate dall'agente che ha guardato il file, riparate.
+ *
+ * La data di una riga del report di un impianto o di uno stoccaggio e' il giorno
+ * in cui il carico e' arrivato, cioe' la FINE del trasporto: e' quella che
+ * colloca un movimento, in ogni canale e per ogni tipo di movimento (regola 1).
+ * Nelle tabelle delle uscite le intestazioni dicono pero' "data carico" o "data
+ * uscita" - per chi manda il report "carico" e' quello che entra nel suo registro
+ * di carico e scarico - e l'agente le classifica come inizio trasporto. Da quella
+ * sola colonna nascevano anomalie su date che nel report non esistono: un inizio
+ * trasporto "diverso" e una fine trasporto "assente" che il report invece scrive,
+ * mentre gli ingressi, con "data ingresso", risultavano a posto (incidente del
+ * report di Nappi Sud, 28/09/2026).
+ *
+ * Quindi: una sola colonna di data e' sempre la data del movimento, in qualunque
+ * casella l'agente l'abbia messa. L'inizio trasporto resta soltanto se il file ha
+ * davvero due colonne di data distinte. Le colonne cambiano da una tabella
+ * all'altra (ingressi e uscite hanno intestazioni diverse), percio' la
+ * riparazione si fa tabella per tabella.
+ *
+ * Torna { col, nota }: la nota dice che cosa e' stato letto diversamente da come
+ * l'agente l'aveva indicato, cosi' non succede in silenzio.
+ */
+export function riparaColonneData(colonne) {
+  const col = { ...(colonne || {}) };
+  const i = (k) => (col[k] ?? -1);
+  const note = [];
+  // La stessa colonna indicata come inizio e come fine: e' una data sola.
+  if (i('data_inizio') >= 0 && i('data_inizio') === i('data_fine')) {
+    col.data = i('data_inizio');
+    col.data_inizio = -1;
+    col.data_fine = -1;
+    note.push("la stessa colonna era indicata come inizio e come fine trasporto: e' una data sola, letta come data del movimento");
+  }
+  // Inizio trasporto e data generica sulla stessa colonna: resta la generica.
+  if (i('data_inizio') >= 0 && i('data_inizio') === i('data')) col.data_inizio = -1;
+  // Fine trasporto e data generica sulla stessa colonna: resta la fine.
+  if (i('data_fine') >= 0 && i('data_fine') === i('data')) col.data = -1;
+  // Una colonna di data sola, letta come inizio trasporto: e' la data del
+  // movimento, cioe' la fine del trasporto.
+  if (i('data_inizio') >= 0 && i('data_fine') < 0 && i('data') < 0) {
+    col.data = i('data_inizio');
+    col.data_inizio = -1;
+    note.push("la colonna della data e' una sola: letta come data del movimento, cioe' la fine del trasporto, non come inizio trasporto");
+  }
+  return { col, nota: note.join('; ') };
+}
+
+/**
  * Numero d'ordine confrontabile. "SEC 26141285" e "SEC26141285" sono lo stesso ordine,
  * e alcuni impianti scrivono nella stessa casella anche la classe ("ET26074218 P"):
  * si tiene il codice, cioe' il prefisso con il numero lungo.
@@ -801,8 +849,18 @@ export const classeDaOrdine = (v) => {
  * Il peso viene sempre espresso in chilogrammi interi, come nei formulari e nel
  * portale Ecotyre. Se l'unita' non e' nota si deduce dall'ordine di grandezza:
  * un carico di PFU pesa tonnellate, mai decine di migliaia di tonnellate.
+ *
+ * Torna anche date_da_inizio: quante righe portavano la data solo nella casella
+ * dell'inizio trasporto e sono state lette con quella data come data del
+ * movimento (la fine del trasporto). Chi chiama lo dice a chi legge la verifica,
+ * perche' una colonna letta diversamente da come l'agente l'aveva indicata non
+ * resti un fatto nascosto.
+ *
+ * `colonne` sono le colonne di data della tabella, quando si sanno (un Excel, dopo
+ * riparaColonneData): allora e' la colonna a decidere, e le righe non si toccano.
+ * Senza, come in un PDF trascritto, decidono le righe. Vedi riparaDateRighe.
  */
-export function normalizzaRigheReport(grezze, unitaIndicata) {
+export function normalizzaRigheReport(grezze, unitaIndicata, { colonne = null } = {}) {
   let unita = unitaIndicata === 'kg' || unitaIndicata === 't' ? unitaIndicata : null;
   if (!unita) {
     const valori = grezze.map(g => numeroDaValore(g.peso)).filter(n => n !== null && n > 0).sort((a, b) => a - b);
@@ -846,7 +904,89 @@ export function normalizzaRigheReport(grezze, unitaIndicata) {
       targa: String(g.targa ?? '').trim(),
     });
   }
-  return { righe, unita };
+  const riparate = riparaDateRighe(righe, { colonne });
+  return { righe: riparate.righe, unita, date_da_inizio: riparate.date_da_inizio };
+}
+
+/**
+ * Quali colonne di data ha ciascuna tabella, letto da una lettura salvata:
+ * `{ '<foglio>': { inizio, fine, generica } }`. Null quando non si sa, cioe' per un
+ * PDF o un'immagine trascritti dall'agente, che colonne non hanno.
+ *
+ * Le righe portano il nome del foglio solo quando i fogli sono piu' di uno
+ * (elaboraReportSettimanale): con un foglio solo la chiave e' la stringa vuota,
+ * come in riparaDateRighe.
+ */
+export function colonneDateDellaLettura(lettura) {
+  const l = lettura || {};
+  if (l.modo && l.modo !== 'excel') return null;
+  const quali = (colonne) => ({
+    inizio: !!(colonne && colonne.data_inizio),
+    fine: !!(colonne && colonne.data_fine),
+    generica: !!(colonne && colonne.data),
+  });
+  if (Array.isArray(l.fogli) && l.fogli.length) {
+    if (l.fogli.length === 1) return { '': quali(l.fogli[0].colonne) };
+    return Object.fromEntries(l.fogli.map(f => [String(f.foglio || ''), quali(f.colonne)]));
+  }
+  if (l.colonne) return { '': quali(l.colonne) };
+  return null;
+}
+
+/**
+ * Le righe di un report con la data della riga al posto giusto.
+ *
+ * Per chi manda il report la data di una riga e' il giorno in cui il carico e'
+ * arrivato, cioe' la fine del trasporto: e' l'unica data che colloca un movimento
+ * (regola 1). Quando una tabella ha UNA COLONNA DI DATA SOLA e l'agente l'ha messa
+ * fra le date di inizio, quella e' la data del movimento: l'intestazione ("data
+ * carico", "data uscita") l'ha solo fatta sembrare un inizio trasporto, perche' per
+ * chi manda il report "carico" e' quello che entra nel suo registro di carico e
+ * scarico. Cosi' il taglio alla settimana e l'abbinamento ritrovano la loro data, e
+ * il confronto non inventa un inizio trasporto diverso ne' una fine trasporto
+ * assente (incidente del report di Nappi Sud, 28/09/2026).
+ *
+ * IL CRITERIO E' LA COLONNA, NON IL FOGLIO. Con `colonne` si sa quali colonne di
+ * data ha ogni tabella e si ripara solo dove la fine trasporto e la data generica
+ * non esistono come colonna. Guardare invece se QUALCHE RIGA porta una data
+ * sbagliava da due parti: un file con due colonne vere e la casella dell'arrivo
+ * vuota su tutte le righe faceva diventare la partenza la data del movimento - e
+ * nasceva l'anomalia "Data diversa dalla fine trasporto" su una data che il report
+ * non dichiara come fine, o peggio la riga finiva fra le escluse di un'altra
+ * settimana; e ingressi e uscite nello stesso foglio (o in un PDF, che fogli non
+ * ha) si bloccavano a vicenda, lasciando le uscite senza data.
+ *
+ * Senza `colonne` - solo un PDF o un'immagine trascritti - non resta che guardare
+ * le righe, tabella per tabella se l'agente ha detto da quale tabella vengono.
+ *
+ * Non tocca le righe che arrivano - quelle da cambiare le riscrive - perche' le
+ * righe di una verifica salvata si rileggono cosi' come sono state salvate.
+ */
+export function riparaDateRighe(righe, { colonne = null } = {}) {
+  const lista = righe || [];
+  const perTabella = new Map();
+  for (const r of lista) {
+    const k = r && r.foglio ? String(r.foglio) : '';
+    if (!perTabella.has(k)) perTabella.set(k, []);
+    perTabella.get(k).push(r);
+  }
+  const daRiparare = new Set();
+  for (const [nome, dellaTabella] of perTabella) {
+    const col = colonne ? (colonne[nome] || colonne['']) : null;
+    if (col) {
+      // Si sa quali colonne ha: si ripara solo se la data del movimento non c'e'
+      // come colonna e l'unica data sta in quella dell'inizio trasporto.
+      if (!col.inizio || col.fine || col.generica) continue;
+    } else if (dellaTabella.some(r => r.fine || r.data)) {
+      continue;
+    }
+    for (const r of dellaTabella) if (r.inizio) daRiparare.add(r);
+  }
+  if (!daRiparare.size) return { righe: lista, date_da_inizio: 0 };
+  return {
+    righe: lista.map(r => (daRiparare.has(r) ? { ...r, data: r.inizio, inizio: null } : r)),
+    date_da_inizio: daRiparare.size,
+  };
 }
 
 // === verifica ===
@@ -917,6 +1057,16 @@ const altroCircuito = (intermediario) => !!intermediario && !/ecotyre/i.test(int
  * La conformita' e' piena solo senza anomalie e con formulari e pesi che
  * quadrano, per gli ingressi e per le uscite.
  *
+ * La data di una riga del report e' la FINE del trasporto, per tutti i canali e
+ * per tutti i tipi di movimento, ingressi e uscite: e' il giorno in cui il carico
+ * e' arrivato, l'unico che colloca un movimento (regola 1). Con l'inizio
+ * trasporto si confronta solo se il report ha davvero due colonne di data
+ * distinte e la riga le porta entrambe (inizioCerto); un file con una data sola la
+ * porta in 'data', qualunque intestazione abbia (riparaColonneData e
+ * normalizzaRigheReport). Prima le uscite, dove l'intestazione dice "data carico",
+ * finivano confrontate con l'inizio trasporto registrato e uscivano anomalie su
+ * date che nel report non esistono.
+ *
  * Immissione, inizio e fine trasporto sono obbligatorie nei formulari (regola
  * dell'utente del 22/09/2026). Una riga abbinata a un movimento a cui ne manca
  * una, o con le date incoerenti, porta l'anomalia "date" e conta nel verdetto
@@ -930,7 +1080,7 @@ const altroCircuito = (intermediario) => !!intermediario && !/ecotyre/i.test(int
  * stessa riga era diventata una rettifica a nostra cura, senza peso sul
  * verdetto: l'utente l'ha corretto lo stesso giorno.
  */
-export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, fine, senzaFine = senzaFineDei(movimenti) }) {
+export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, fine, senzaFine = senzaFineDei(movimenti), lettura = null }) {
   const relazione = (m) => relazioneConSito(m, chiave);
   const categoria = (m) => `${m.secondaria ? 'secondaria' : 'primaria'}-${relazione(m)}-${m.canale}`;
   // Una riga che il gestionale non collega al sito e' un'uscita se parte dal sito stesso.
@@ -959,7 +1109,27 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   const uscite = bacino.filter(m => nellaSettimana(m) && relazione(m) === 'uscita');
   const usati = new Map();
 
+  // La data di una riga del report: la fine del trasporto, cioe' il giorno in cui
+  // il carico e' arrivato, oppure l'unica data che la riga porta, che e' la stessa
+  // cosa (normalizzaRigheReport e riparaColonneData la mettono in 'data'). Mai
+  // l'inizio trasporto: non colloca niente, e una settimana tagliata su di lui
+  // butterebbe fuori righe regolari.
   const dataRiga = (r) => r.fine || r.data;
+  // L'inizio trasporto del report vale solo se la riga porta anche la data del
+  // movimento, cioe' se il file ha davvero due colonne di data distinte. Senza
+  // questa certezza non si confronta con l'inizio trasporto registrato e non si
+  // suggerisce di scriverlo: si suggerirebbe di mettere la fine del trasporto nel
+  // campo dell'inizio, e da un'anomalia inventata nascerebbe un dato sporco vero.
+  const inizioCerto = (r) => (dataRiga(r) && r.inizio ? r.inizio : null);
+  // Le righe di una verifica salvata prima di questa regola hanno la data nella
+  // casella dell'inizio trasporto (le uscite col solo "data carico"): la regola
+  // vale anche per loro, cosi' una verifica gia' fatta si rimette a posto al primo
+  // riconfronto dopo un caricamento (regola 2) invece di aspettare che qualcuno
+  // ricarichi il file. A decidere sono le colonne della lettura salvata, non le
+  // righe: con due colonne di data vere e la casella dell'arrivo vuota, guardare le
+  // righe avrebbe fatto diventare la partenza la data del movimento.
+  const riparate = riparaDateRighe(righeReport, { colonne: colonneDateDellaLettura(lettura) });
+  const righeLette = riparate.righe;
   const punteggio = (r, m) => {
     let p = 0;
     if (r.kg !== null) p += Math.min(Math.abs(r.kg - m.kg), 5000) / 10;
@@ -977,7 +1147,7 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   const escluse = [];
   const rif = (r) => (r.foglio ? `${String(r.foglio).trim()}, riga ${r.n}` : `riga ${r.n}`);
   const escludi = (r, motivo) => escluse.push({ n: r.n, foglio: r.foglio || '', fir: r.fir, ordine: r.ordine, kg: r.kg, data: dataRiga(r), produttore: r.produttore, destinatario: r.destinatario, motivo });
-  for (const r of righeReport) {
+  for (const r of righeLette) {
     let m = null;
     let modo = null;
 
@@ -1057,7 +1227,10 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
             date: voci,
           },
           discrepanze: [
-            ...messaggiDate(voci, { 'inizio trasporto': r.inizio, 'fine trasporto': r.fine || r.data }).map(messaggio => ({ campo: 'date', gravita: 'anomalia', messaggio })),
+            // La fine trasporto che manca, se il report la scrive, si suggerisce
+            // sempre: la data di una riga e' quella. L'inizio trasporto solo se
+            // il file ha due colonne di data (inizioCerto).
+            ...messaggiDate(voci, { 'inizio trasporto': inizioCerto(r), 'fine trasporto': dataReport }).map(messaggio => ({ campo: 'date', gravita: 'anomalia', messaggio })),
             ...altrove,
           ],
         });
@@ -1090,11 +1263,12 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     if (r.fine && r.fine !== m.fine) aggiungi('fine', `Data fine trasporto diversa: report ${it(r.fine)}, gestionale ${it(m.fine)}`);
     else if (!r.fine && r.data && r.data !== m.fine) aggiungi('fine', `Data diversa dalla fine trasporto: report ${it(r.data)}, gestionale ${it(m.fine)}`);
     else if (!r.fine && !r.data) aggiungi('fine', 'Data di fine trasporto assente nel report');
-    if (r.inizio && m.inizio && r.inizio !== m.inizio) aggiungi('inizio', `Data inizio trasporto diversa: report ${it(r.inizio)}, gestionale ${it(m.inizio)}`);
+    const inizioReport = inizioCerto(r);
+    if (inizioReport && m.inizio && inizioReport !== m.inizio) aggiungi('inizio', `Data inizio trasporto diversa: report ${it(inizioReport)}, gestionale ${it(m.inizio)}`);
     // Le date obbligatorie del formulario registrato: immissione e inizio del
     // trasporto (la fine c'e', altrimenti il movimento non si abbinava), e date
     // nell'ordine giusto. Mancano o non tornano: anomalia del canale.
-    for (const messaggio of messaggiDate(m.date, { 'inizio trasporto': r.inizio })) aggiungi('date', messaggio);
+    for (const messaggio of messaggiDate(m.date, { 'inizio trasporto': inizioReport })) aggiungi('date', messaggio);
     if (tipo && !nellaSettimana(m)) {
       aggiungi('fine', `Nel gestionale il trasporto si conclude il ${it(m.fine)}, nella settimana ${settimanaIso(m.fine).settimana} e non in quella verificata`);
     }
@@ -1200,6 +1374,15 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     assenti,
     escluse,
     quadratura,
+    // Quante righe hanno avuto la data letta dalla casella dell'inizio trasporto in
+    // questo confronto: e' una lettura che CAMBIA il significato di una data, e in
+    // un riconfronto (dove il file non si rilegge e la nota della lettura non si
+    // riscrive) resterebbe un fatto nascosto. Chi chiama la salva nell'esito e la
+    // scheda la mostra.
+    date_da_inizio: riparate.date_da_inizio,
+    nota_date: riparate.date_da_inizio
+      ? `${riparate.date_da_inizio} ${riparate.date_da_inizio === 1 ? 'riga porta' : 'righe portano'} la data solo nella colonna dell'inizio trasporto: letta come data del movimento, cioe' la fine del trasporto`
+      : '',
     riepilogo: {
       // Il verdetto unico resta solo per l'alert della dichiarazione di nessuna
       // movimentazione (smentita se lo e' in un canale qualsiasi): a video, nel
