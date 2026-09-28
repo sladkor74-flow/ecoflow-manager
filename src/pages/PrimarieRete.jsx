@@ -10,6 +10,7 @@ import RaccoglitoriMix from '@/components/primarie-rete/RaccoglitoriMix';
 import SlaMetrics from '@/components/primarie-rete/SlaMetrics';
 import PrimarieReteTable from '@/components/primarie-rete/PrimarieReteTable';
 import AvvisoDateDaSistemare from '@/components/primarie-rete/DateDaSistemare';
+import AvvisoEseguiti from '@/components/primarie-rete/AvvisoEseguiti';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdOrdine';
@@ -166,6 +167,14 @@ export default function PrimarieRete() {
           <button type="button" onClick={loadData} className="text-primary hover:underline font-medium">Riprova</button>
         </div>
       )}
+
+      {/* Gli ordini "eseguito" a portale: tutti i dati, ma nessuno ha premuto
+          Chiudi. Il gestionale conta solo i terminati, quindi spariscono in
+          silenzio da raccolto, giacenze, report, copertura del target e
+          fatturazione. Si contano a parte, non si sommano ai terminati e non
+          cambiano nessun conto. Si guarda tutto l'archivio di rete, non i
+          filtri: sono ordini che nessun filtro di periodo prende per forza. */}
+      {!loadingRecords && <AvvisoEseguiti righe={allRecords} canale="Rete" />}
 
       <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loadingRecords || !allRecords.length ? null : ordiniMostrati.length} />
 

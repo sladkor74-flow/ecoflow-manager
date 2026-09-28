@@ -638,10 +638,146 @@ trasporto** (l'immissione conta solo per gli assegnati, la chiusura mai):
   cancellato per errore. Si cancella per ID a blocchi, dopo una prova in sola
   lettura del filtro; senza niente da conservare resta il `deleteMany({})` di
   sempre. Esportare sempre dal 1/1 dell'anno scorso tiene piccoli i file.
+  Dal 28/09/2026 si conserva come un terminato anche un ordine in stato
+  **"eseguito"** assente dal file, e si segnala: e' una regola dell'utente,
+  spiegata nella sezione sul caricamento delle primarie. Vale per tutti gli
+  archivi che conservano lo storico, secondarie e terziarie comprese, perche'
+  `ordiniDaConservare` e' una sola. E lo
+  svuotamento selettivo smette prima dei dodici secondi dell'invocazione dicendo
+  dove e' arrivato, cosi' il caricamento lo riprende; quando il filtro per ID non
+  regge, all'azione `svuota` delle primarie risponde con un motivo invece di
+  lanciare, cosi' la frase "serve un caricamento completo, dal primo anno" arriva
+  intera a chi carica. Per secondarie e terziarie (`importEcotyreFile`) resta il
+  comportamento di prima: si ferma con un errore, che e' cio' che quel percorso
+  deve fare per non scrivere il file sopra un archivio non svuotato.
 - **Le date obbligatorie si controllano dall'anno scorso** (`dateDaControllare`
   e `primoAnnoControllato` in `base44/shared/movimenti.ts`): un terminato con la
   fine trasporto prima non si segnala piu', ovunque. Senza fine trasporto non ha
   anno, e si segnala sempre.
+
+### Il caricamento delle primarie: che cosa si crede e che cosa si ripara (28/09/2026)
+
+`src/lib/importGrandeFile.js` (il browser) con `base44/functions/importaBlocco/entry.ts`
+(il server). Le prove: `prove/caricamentoPrimarie.mjs`, che impacchetta la
+function vera e il modulo del browser con un SDK finto e i guasti in mezzo.
+
+- **Il verdetto si regge su cio' che la piattaforma ha CONFERMATO di aver
+  scritto, non su cio' che una lettura racconta.** Leggere di piu' non si vince
+  mai: una piattaforma indietro di qualche secondo da' due, tre, sei letture
+  uguali e tutte sbagliate, e "le righe non ci sono" e "la lettura e' indietro"
+  sono lo stesso numero. Una lettura serve a due cose sole: accorgersi che
+  qualcosa non torna e raccontare che cosa. Non decide.
+- **Si parte dalla BASE NOTA, non da zero.** L'archivio si porta allo storico
+  conservato - un numero e un elenco di ordini che la preparazione ha gia'
+  calcolato (`storicoConservato.ts`) - e si verifica che sia esattamente
+  quello; poi ogni blocco del file si scrive **al massimo una volta** e non si
+  riscrive mai. Quindi l'archivio non puo' avere piu' righe di **base + file**,
+  ne' in totale ne' per singolo ordine: dopo lo svuotamento in archivio ci sono
+  solo righe di ordini conservati, le scritture aggiungono solo righe del file, e
+  i due insiemi sono disgiunti per costruzione, perche' un ordine si conserva
+  soltanto se il file non lo contiene. Senza niente da conservare la base e'
+  zero e tutto torna alla frase di prima: "si svuota e si verifica a zero".
+- **Il confronto e' ordine per ordine, col dettaglio.** Il solo totale non basta:
+  un blocco entrato due volte (+200 righe) e uno mai arrivato (-200) si
+  compensano. Non si pretende un id_ordine per riga: lo stesso ordine sta in
+  archivio con piu' righe, una per classe. Il metro e' "quante righe deve avere
+  questo ordine", cioe' quelle del file **piu'** quelle dello storico.
+- **La riparazione e' idempotente**: per ogni ordine che non torna si TOLGONO le
+  sue righe e si RISCRIVONO quelle del file, cosi' comunque fosse messo
+  l'archivio quell'ordine finisce esatto e doppioni non se ne creano. Non esiste
+  una scrittura "aggiungi" cieca. Fra perdere righe e duplicarle si sceglie
+  sempre la prima: perdere e' rumoroso e si rimedia ricaricando, duplicare e'
+  silenzioso e i ricalcoli partono sopra i pesi doppi.
+- **Due regole che la riparazione non puo' violare.** (1) Si toccano **solo gli
+  ordini presenti nel file**: la riparazione si regge sul poter riscrivere cio'
+  che toglie, e di un ordine che il file non porta non c'e' niente da
+  riscrivere - togliere lo storico conservato vorrebbe dire perderlo per sempre.
+  Il freno e' nel browser e, come ultima rete, nell'azione `cancella_ordini`,
+  che rifiuta gli ID a cui il browser non dichiara nessuna riga nel file. Il
+  prezzo: una riga rimasta in archivio di un ordine che il file non contiene non
+  si toglie da sola, si dice, e si rimedia ricaricando lo stesso file. (2) Se un
+  ordine **conservato** risultasse con meno righe di quante la preparazione ne
+  aveva contate non si ripara: **si dice** (`avviso_storico_non_torna`), perche'
+  il file non le contiene e l'unico rimedio e' ricaricare l'export completo dal
+  primo anno. Quella frase si costruisce **dopo** che la lettura e' stata
+  giudicata, cioe' solo su una lettura buona: una lettura incoerente dice per
+  definizione meno righe di quante ne sono state confermate, ed e' proprio
+  quella che fa sembrare corti gli ordini conservati - la si usava per mandare a
+  esportare l'intero storico dal portale per un guasto che non esisteva. E
+  quell'ordine **non e' un "ordine mancante"**: esce una volta sola, col suo
+  rimedio, e l'archivio non si dichiara "non allineato col file" (`storico_perso`
+  si sottrae). Il caricamento resta **parziale** lo stesso e i ricalcoli non
+  partono.
+- **Lo svuotamento si riprende solo se sta andando avanti davvero.** Quando
+  l'invocazione finisce i dodici secondi la function dice dove e' arrivata e il
+  browser richiama, e una ripresa non consuma i tentativi. Ma
+  `cancellati_ordini` sono gli ID **passati** a `deleteMany`, non le righe
+  uscite: una piattaforma che accetta il filtro senza eseguirlo risponde bene lo
+  stesso, e con quel numero come prova il ciclo non finiva mai - la barra
+  scriveva "200 ordini tolti, si continua" all'infinito e l'unica via d'uscita
+  era chiudere la scheda, cioe' il gesto che lascia l'archivio svuotato a meta'.
+  Si pretende che le righe rimaste **scendano**, e le riprese hanno comunque un
+  tetto (`MAX_RIPRESE_SVUOTAMENTO`).
+- **"Nessun dato modificato" si dice del CARICAMENTO, non dell'invocazione.**
+  Gli archivi si svuotano e si riscrivono uno per volta: se il filtro per ID non
+  regge sul secondo, il primo e' gia' riscritto col file nuovo. Il server puo'
+  solo dire "io non ho toccato niente"; il browser tiene la bandierina del
+  caricamento intero e la finestra dice il verde solo quando e' vera. La
+  bandierina va guardata su **tutte** le porte da cui un errore puo' uscire, non
+  su una: per questo vive in `importaPrimarie`, che avvolge tutto il caricamento
+  e abbassa `dati_intatti` su qualunque errore esca da li'. Chiusa su una porta
+  sola restavano aperte le altre - lo svuotamento che non si ritenta, una
+  scrittura rifiutata, e soprattutto la **registrazione finale**, che si guasta a
+  caricamento completato e ad archivio interamente riscritto: un 401 (la sessione
+  scade, un caricamento dura minuti) bastava a far uscire il verde.
+- **Gli ID del file allo svuotamento si mandano SEMPRE, sugli archivi che hanno
+  uno storico** (`storico: true` in `ARCHIVI_PRIMARIE`, `ARCHIVI_CON_STORICO` di
+  la'). Senza ID la `svuota` fa il `deleteMany` di tutto: se la preparazione non
+  rispondesse i conservati - campo assente, oppure a zero - lo storico degli anni
+  prima sparirebbe, il caricamento chiuderebbe "successo" e nessuna frase lo
+  direbbe. Mandandoli sempre, la `svuota` **ricalcola per conto suo** che cosa
+  conservare (la seconda lettura di sicurezza voluta dall'utente) e una
+  preparazione muta diventa un guasto rumoroso. E un archivio con storico che
+  dopo lo svuotamento resta **senza nessuna riga** si dichiara: non si chiude
+  come riuscito e non si ritenta alla cieca, perche' quelle righe il file non le
+  contiene e l'unico rimedio e' un caricamento completo dal primo anno.
+- **Le pagine dell'archivio si leggono in ordine di `id` e si deduplicano**
+  (`pagineArchivio` in `importaBlocco/entry.ts`, regola di `shared/fetchAll.ts`):
+  `id_ordine` non e' unico, quindi non e' stabile fra una pagina e l'altra. Da
+  quella lettura esce il conto delle righe di ciascun ordine conservato, che fa
+  da metro a tutto il confronto finale.
+- **Lo stato "eseguito" e' un limbo, e si segnala** (`eEseguito` e
+  `riepilogoEseguiti` in `movimenti.ts`, `src/components/primarie-rete/AvvisoEseguiti.jsx`):
+  dati completi ma Chiudi non premuto a portale, quindi quell'ordine non entra in
+  nessun conto - raccolto, giacenze, report, target, fatturazione - e sparirebbe
+  in silenzio. Non si somma ai terminati: si conta a parte, un canale per volta.
+  **Un "eseguito" assente dal file si CONSERVA come un terminato, e si segnala**
+  (regola dell'utente, 28/09/2026: *"un ordine in stato eseguito va segnalato e
+  mantenuto, cosi' che al prossimo caricamento abbia un altro stato, terminato o
+  cancellato"*). E' uno stato **di passaggio** e si risolve da solo: al
+  caricamento dopo, se l'ordine rientra nell'export, il portale gli ha dato lo
+  stato definitivo e il file lo riscrive com'e' diventato; se e' immesso prima
+  dell'anno scorso l'export non lo porta, la riga resta "eseguito" e l'avviso
+  continua a farlo vedere - che e' il "mantenuto e segnalato" chiesto.
+  Trattarlo come un ordine mancante, invece, faceva
+  chiedere la forzatura e, forzando, CANCELLAVA proprio l'ordine che l'avviso
+  sugli eseguiti serve a far vedere. Conservarlo non basta: `ordiniDaConservare`
+  restituisce anche quanti sono (`eseguiti`), il numero arriva a
+  `storico_conservato` e al registro, e le frasi dicono "ordini terminati o
+  eseguiti" invece di chiamarli terminati. Senza quel conto un eseguito immesso
+  prima dell'anno scorso non comparirebbe da nessuna parte, perche'
+  `avviso_eseguiti` guarda il FILE. La regola vale anche per secondarie e
+  terziarie (`importEcotyreFile` chiama la stessa funzione).
+- **Un caricamento aggiorna i moduli solo se e' riuscito** (`moduliDaRicalcolare`),
+  e quando non partono si dice quali restano indietro (`ricalcoliFermi`). I
+  ricalcoli sono **quattro** per le primarie e **due** per le secondarie
+  (`RICALCOLI`): la predittivita' non c'e' piu' dal 26/09/2026, vedi la sua
+  sezione.
+- **Le due conferme sono separate** (`CONFERMA_ORDINI_MANCANTI` e
+  `CONFERMA_ARCHIVIO_RIMPICCIOLITO`) e si accumulano: possono scattare insieme, e
+  mandandone una sola il pulsante "Forza caricamento" girava in tondo. Un collega
+  che sta caricando adesso non e' un tentativo morto: glielo si dice subito,
+  senza offrirgli niente da forzare.
 
 ### Come si legge un movimento: un punto solo
 

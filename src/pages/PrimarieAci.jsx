@@ -11,6 +11,7 @@ import { formatNumber, formatIntero, fmtTon } from '@/lib/utils';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdOrdine';
 import AvvisoDateDaSistemare, { SegnoDate } from '@/components/primarie-rete/DateDaSistemare';
+import AvvisoEseguiti from '@/components/primarie-rete/AvvisoEseguiti';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -230,6 +231,11 @@ export default function PrimarieAci() {
         attivo={soloDate}
         onFiltra={vediDate}
       />
+      {/* Gli ordini "eseguito" a portale: tutti i dati, ma nessuno ha premuto
+          Chiudi. Non si sommano ai terminati e non cambiano nessun conto: si
+          contano a parte. Si guarda tutto l'archivio ACI, non i filtri: un
+          ordine senza fine trasporto non risponde a nessun filtro di periodo. */}
+      <AvvisoEseguiti righe={records} canale="ACI" />
 
       <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loading || !records.length ? null : dettaglio.length} />
 

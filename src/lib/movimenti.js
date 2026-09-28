@@ -31,6 +31,20 @@ export const MESI_MOVIMENTI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio
 
 export const eTerminato = (r) => String((r && r.stato) || '').toLowerCase().trim() === 'terminato';
 
+/**
+ * Un ordine che a portale e' in stato "eseguito": ha tutti i dati inseriti ma
+ * nessuno ha premuto il pulsante "chiudi". E' un limbo, e il gestionale conta
+ * solo i "terminato" (eTerminato): finche' resta cosi' quell'ordine non entra
+ * in nessun conto - raccolto, giacenze, report, copertura del target,
+ * fatturazione - e sparisce in silenzio. Sui dati veri (24/09/2026) ce n'era
+ * uno, ET26152600 da 3.620 kg, e mancava dal raccolto senza che nessuno lo
+ * dicesse.
+ *
+ * Non si somma ai terminati, che sarebbe un movimento inventato: si conta a
+ * parte e si segnala, finche' a portale non viene chiuso.
+ */
+export const eEseguito = (r) => String((r && r.stato) || '').toLowerCase().trim() === 'eseguito';
+
 /** Il giorno italiano in cui e' finito il trasporto, 'AAAA-MM-GG'. Stringa vuota se manca. */
 export const giornoMovimento = (r) => giornoRoma(r && r.trasporto_finito_il);
 
@@ -204,6 +218,34 @@ export const testoOrdine = (o) => [...new Set(o.righe.map(testoDate).filter(Bool
 
 /** Un ordine senza fine trasporto: non ha giorno, mese ne' anno, e nessun filtro di periodo lo prende. */
 export const ordineSenzaFine = (o) => o.righe.some(r => !giornoMovimento(r));
+
+/**
+ * Gli ORDINI distinti in stato "eseguito" fra le righe passate: quanti sono,
+ * quante righe portano e quanti kg effettivi. Conta ordini distinti come tutti
+ * gli altri riepiloghi (chiaveOrdine), mai righe: lo stesso ordine puo' averne
+ * piu' d'una. I kg sono interi, come ovunque nel gestionale.
+ *
+ * Un canale per volta: chi chiama passa le righe di un canale solo, rete o ACI,
+ * e i due numeri non si sommano (regola 3).
+ */
+export function riepilogoEseguiti(righe) {
+  const per = new Map();
+  (righe || []).forEach((r, i) => {
+    if (!eEseguito(r)) return;
+    const chiave = chiaveOrdine(r, i);
+    const gia = per.get(chiave) || { id_ordine: String((r && r.id_ordine) || '').trim(), numero_fir: String((r && r.numero_fir) || '').trim(), righe: 0, kg: 0 };
+    gia.righe += 1;
+    gia.kg += Number((r && r.peso_effettivo) || 0) || 0;
+    per.set(chiave, gia);
+  });
+  const ordini = [...per.values()].map(o => ({ ...o, kg: Math.round(o.kg) }));
+  return {
+    ordini: ordini.length,
+    righe: ordini.reduce((s, o) => s + o.righe, 0),
+    kg: ordini.reduce((s, o) => s + o.kg, 0),
+    esempi: ordini.slice(0, 50),
+  };
+}
 
 export const GIORNI_SCADENZA_ORDINE = 30;
 // i conti si fanno fra giorni di calendario a mezzanotte UTC: il cambio dell'ora

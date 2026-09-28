@@ -275,6 +275,18 @@ export async function statoCaricamenti(base44, tipi = TIPI_CARICAMENTO_MOVIMENTI
     concluso_il: istanteIso(r.updated_date) || istanteIso(r.created_date),
     nome_file: String(r.nome_file || '').trim(),
     utente: r.utente || '',
+    // Quanto c'era in archivio quando quel caricamento e' partito: per le
+    // primarie sono ORDINI distinti, per gli altri tipi sono le RIGHE
+    // dell'ultimo caricamento riuscito (il nome del campo dice "righe" per tutti
+    // e due, ed e' la ragione per cui questo commento esiste). Chi ne avvia un
+    // altro lo confronta con quello che trova adesso: se e' di meno, il
+    // caricamento di prima ha gia' svuotato qualche archivio e il controllo
+    // anti-regressione non ha piu' con che cosa accorgersi di un file monco.
+    righe_archivio_prima: typeof r.righe_archivio_prima === 'number' ? r.righe_archivio_prima : null,
+    // Una riga ancora "in_corso" che pero' dichiara di non essere riuscita: il
+    // caricamento e' finito senza scrivere niente e nessuno sta piu' scrivendo.
+    // Serve a distinguerla da un collega al lavoro in questo momento.
+    non_riuscito: String(r.messaggio || '').startsWith('Caricamento non riuscito'),
   });
 
   const ultimi = {};
@@ -321,9 +333,9 @@ export function caricamentiDuranteLettura(prima, dopo) {
 export function descriviCaricamento(a) {
   const chi = [a.utente, a.nome_file].filter(Boolean).join(', ');
   const cosa = `${String(a.tipo_file || '').replace(/_/g, ' ')}${a.data ? ` del ${it(a.data)}` : ''}${chi ? ` (${chi})` : ''}`;
-  if (a.concluso_durante_la_lettura) return `${cosa}: si è concluso mentre si leggevano gli archivi`;
-  if (a.esito === 'errore') return `${cosa}: non riuscito, l'archivio può essere incompleto e il caricamento va ripetuto`;
-  if (a.interrotto) return `${cosa}: risulta interrotto, l'archivio può essere incompleto e il caricamento va ripetuto`;
+  if (a.concluso_durante_la_lettura) return `${cosa}: si e' concluso mentre si leggevano gli archivi`;
+  if (a.esito === 'errore') return `${cosa}: non riuscito, l'archivio puo' essere incompleto e il caricamento va ripetuto`;
+  if (a.interrotto) return `${cosa}: risulta interrotto, l'archivio puo' essere incompleto e il caricamento va ripetuto`;
   return `${cosa}: non ancora concluso`;
 }
 
@@ -459,7 +471,15 @@ export function nomiCoincidono(a, b) {
 }
 
 const cifre = (v) => String(v ?? '').replace(/[^0-9]/g, '');
-const it = (d) => (d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) : '');
+
+/**
+ * Una data 'AAAA-MM-GG' scritta come la legge chi lavora: '21/09/2026'. Stringa
+ * vuota se la data non c'e'. Sta qui perche' i messaggi a video la vogliono
+ * tutti uguale: scritta a mano altrove usciva in formato macchina ("del
+ * 2026-09-23") proprio nelle frasi che si leggono dopo un guasto.
+ */
+export const dataItaliana = (d) => (d ? String(d).slice(8, 10) + '/' + String(d).slice(5, 7) + '/' + String(d).slice(0, 4) : '');
+const it = (d) => dataItaliana(d);
 const kgIt = (n) => formatoKg(n) + ' kg';
 
 // === movimenti del gestionale ===

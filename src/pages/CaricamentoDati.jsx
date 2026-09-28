@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle2, Clock } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
 import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
-import { importaGrandeFile, importaPrimarie, TIPI_LETTURA_BROWSER, dopoCaricamento, testoRicalcoli } from '@/lib/importGrandeFile';
+import { importaGrandeFile, importaPrimarie, TIPI_LETTURA_BROWSER, dopoCaricamento, testoRicalcoli, testoVerificaArchivio, testoEseguiti, ricalcoliDaRecuperare, recuperiDaFare, moduliDaRicalcolare, ricalcoliFermi, confermeAccumulate } from '@/lib/importGrandeFile';
 import { formatIntero, dataServer } from '@/lib/utils';
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
@@ -46,8 +46,20 @@ function testoAllineamento(allineamento) {
   return `Dichiarazioni mensili riconosciute come caricate a portale. ${perCanale.join('. ')}.`;
 }
 
+// I ricalcoli rimasti appesi si recuperano UNA VOLTA per sessione, non a ogni
+// apertura della pagina. Se una funzione e' rotta per un motivo stabile la nota
+// "moduli collegati aggiornati" non si scrive mai, e senza questo freno si
+// rifacevano piu' funzioni pesanti a ogni accesso, per ogni utente, contro un
+// limite di circa settanta richieste al minuto per tutta l'app. Sta fuori dal
+// componente apposta: deve sopravvivere a un rimontaggio della pagina, non a un
+// ricaricamento del browser.
+const recuperiGiaTentati = new Set();
+
 export default function CaricamentoDati() {
-  const { isAdmin, puoCaricare } = usePermessi();
+  // livello serve solo a far ripartire il recupero quando il permesso cambia:
+  // puoCaricare e' una funzione nuova a ogni disegno della pagina, e metterla
+  // fra le dipendenze avrebbe fatto rileggere il registro a ogni disegno.
+  const { isAdmin, puoCaricare, livello } = usePermessi();
   const [logs, setLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(true);
   const [uploading, setUploading] = useState(null);
@@ -56,14 +68,35 @@ export default function CaricamentoDati() {
   const [progresso, setProgresso] = useState({});
   const [ricalcoli, setRicalcoli] = useState({});
   const pendingFileUrlRef = useRef({});
+  // Le conferme gia' date per ogni tipo di file. I due controlli anti-regressione
+  // possono scattare insieme: mandandone una sola, l'ultima, ognuna spegneva un
+  // controllo e riaccendeva l'altro e il caricamento non passava mai piu'. Si
+  // azzerano quando si sceglie un file nuovo (una conferma data ieri non vale
+  // per il file di domani). La regola sta in confermeAccumulate, dove la
+  // controllano le prove.
+  const confermeDate = useRef({});
+  // Quali ricalcoli ha chiesto CHI STA CARICANDO: solo quelli tengono la pagina
+  // aperta con l'avviso "vuoi lasciare il sito?". Quelli di recupero partono da
+  // soli all'apertura e si rifanno la volta dopo: non devono fermare nessuno che
+  // sta solo passando di qui.
+  const ricalcoliMiei = useRef(new Set());
 
   // Ogni caricamento aggiorna tutto: i ricalcoli che dipendono dal file partono
   // in background (elenco unico in dopoCaricamento) e il loro esito resta sotto
   // la scheda, cosi' uno non riuscito si vede invece di restare fermo in silenzio.
-  // Un caricamento finito in errore ha lasciato l'archivio vuoto o a meta':
-  // ricalcolare su quello chiuderebbe controlli ancora veri.
-  const aggiornaModuli = (tipoKey, esito) => {
-    if (esito === 'errore') { setRicalcoli(prev => ({ ...prev, [tipoKey]: null })); return; }
+  //
+  // Si parte solo su un caricamento RIUSCITO: la regola sta in
+  // moduliDaRicalcolare (src/lib/importGrandeFile.js), dove la controllano le
+  // prove. Dopo una riparazione riuscita l'esito e' "successo" e i ricalcoli
+  // partono da soli: e' la seconda regola.
+  // E quando non partono si dice PERCHE' e quali moduli restano indietro
+  // (ricalcoliFermi): con setRicalcoli(null) non compariva niente, e dopo una
+  // secondaria chiusa parziale - basta una riga non entrata - verifiche,
+  // quadrature FIR e qualifica fornitori restavano fermi al
+  // caricamento di prima senza che nessuno lo dicesse.
+  const aggiornaModuli = (tipoKey, data) => {
+    if (!moduliDaRicalcolare(data)) { setRicalcoli(prev => ({ ...prev, [tipoKey]: ricalcoliFermi(tipoKey, data) })); return; }
+    ricalcoliMiei.current.add(tipoKey);
     setRicalcoli(prev => ({ ...prev, [tipoKey]: { in_corso: true } }));
     dopoCaricamento(tipoKey).then(esiti => setRicalcoli(prev => ({ ...prev, [tipoKey]: esiti })));
   };
@@ -81,10 +114,53 @@ export default function CaricamentoDati() {
 
   useEffect(() => { caricaLogs(); }, []);
 
+  // I ricalcoli rimasti appesi si rifanno da soli. Un caricamento riuscito puo'
+  // lasciarli indietro - la scheda chiusa a meta', la rete caduta, il browser
+  // spento - e l'unico modo di accorgersene era leggere il testo rosso sotto la
+  // scheda, che al prossimo accesso non c'e' piu'. Aprendo la pagina si guarda
+  // il registro: se l'ultimo caricamento di un tipo e' riuscito ma non porta la
+  // nota dei moduli aggiornati, si rifanno. E' la seconda regola assoluta: ogni
+  // caricamento aggiorna tutto.
+  //
+  // Due freni, che prima non c'erano:
+  //  - LI FA SOLO CHI PUO' CARICARE. I ricalcoli (quattro per le primarie, due
+  //    per le secondarie: l'elenco e' RICALCOLI) rileggono archivi interi
+  //    e ci SCRIVONO (riepilogo della qualifica, verifiche dei report e
+  //    quadrature FIR, ritiri ECT, evasione assegnati), e nessuna di quelle
+  //    funzioni guarda il livello: la pagina si apre a tutti, quindi bastava
+  //    che un collega in sola consultazione la aprisse per far riscrivere
+  //    tutto. Va contro la regola dei permessi: gli altri consultano.
+  //  - UNA VOLTA PER SESSIONE. Se un ricalcolo fallisce sempre, la nota non si
+  //    scrive mai e senza freno la raffica si ripeteva a ogni apertura.
+  useEffect(() => {
+    let vivo = true;
+    // Uno alla volta, come dentro dopoCaricamento: ognuno rilegge archivi interi
+    // e in parallelo la piattaforma respinge le richieste troppo ravvicinate.
+    (async () => {
+      if (!isAdmin && !TIPI_FILE.some(t => puoCaricare(t.key))) return;
+      const tipi = recuperiDaFare(await ricalcoliDaRecuperare(), {
+        puoFare: (tipo) => isAdmin || puoCaricare(tipo),
+        giaTentati: recuperiGiaTentati,
+      });
+      for (const tipo of tipi) {
+        if (!vivo) return;
+        recuperiGiaTentati.add(tipo);
+        setRicalcoli(prev => (prev[tipo] ? prev : { ...prev, [tipo]: { in_corso: true } }));
+        const esiti = await dopoCaricamento(tipo);
+        if (!vivo) return;
+        setRicalcoli(prev => ({ ...prev, [tipo]: esiti }));
+      }
+    })();
+    return () => { vivo = false; };
+  }, [isAdmin, livello]);
+
   // Durante un caricamento l'archivio viene riscritto: chiudere la pagina lo
-  // lascerebbe a meta'. Anche durante i ricalcoli: partono dal browser uno alla
-  // volta, e chiudendo la pagina quelli ancora da fare non partirebbero piu'.
-  const ricalcoliInCorso = Object.values(ricalcoli).some(r => r && r.in_corso);
+  // lascerebbe a meta'. Anche durante i ricalcoli di CHI HA CARICATO: partono
+  // dal browser uno alla volta, e chiudendo la pagina quelli ancora da fare non
+  // partirebbero piu'. Quelli di recupero no: partono da soli all'apertura e si
+  // rifanno la volta dopo, e chiedere "vuoi lasciare il sito?" a chi non ha
+  // chiesto niente non ha senso.
+  const ricalcoliInCorso = Object.entries(ricalcoli).some(([tipo, r]) => r && r.in_corso && ricalcoliMiei.current.has(tipo));
   useEffect(() => {
     if (!uploading && !ricalcoliInCorso) return undefined;
     const avviso = (e) => { e.preventDefault(); e.returnValue = ''; };
@@ -94,6 +170,9 @@ export default function CaricamentoDati() {
 
   const handleUpload = async (tipoKey, file, conferma_forzatura = false) => {
     if (!file) return;
+    // Un file scelto adesso comincia senza nessuna conferma alle spalle: quelle
+    // date per il file di prima non valgono per questo.
+    if (!conferma_forzatura) confermeDate.current[tipoKey] = [];
     setUploading(tipoKey);
     setRisultato(prev => ({ ...prev, [tipoKey]: null }));
     setRicalcoli(prev => ({ ...prev, [tipoKey]: null }));
@@ -108,7 +187,7 @@ export default function CaricamentoDati() {
           : await importaGrandeFile({ file, tipoFile: tipoKey, confermaForzatura: conferma_forzatura, onProgress });
         setProgresso(prev => ({ ...prev, [tipoKey]: null }));
         setRisultato(prev => ({ ...prev, [tipoKey]: { ok: true, data } }));
-        aggiornaModuli(tipoKey, data && data.esito);
+        aggiornaModuli(tipoKey, data);
         const warnings = extractUploadWarnings(data);
         if (warnings) setDialogState(warnings);
         caricaLogs();
@@ -129,7 +208,7 @@ export default function CaricamentoDati() {
       if (conferma_forzatura) params.conferma_forzatura = true;
       const res = await base44.functions.invoke(fnName, params);
       setRisultato(prev => ({ ...prev, [tipoKey]: { ok: true, data: res.data } }));
-      aggiornaModuli(tipoKey, res.data && res.data.esito);
+      aggiornaModuli(tipoKey, res.data);
       const warnings = extractUploadWarnings(res.data);
       if (warnings) setDialogState(warnings);
       caricaLogs();
@@ -137,7 +216,24 @@ export default function CaricamentoDati() {
       setProgresso(prev => ({ ...prev, [tipoKey]: null }));
       const errInfo = extractUploadError(e);
       setRisultato(prev => ({ ...prev, [tipoKey]: { ok: false, error: errInfo.error } }));
-      setDialogState({ ...errInfo, onForza: () => handleUpload(tipoKey, file, true) });
+      // Si conferma UN controllo per volta: il gettone dice quale. Con un flag
+      // unico, confermare "l'archivio si e' rimpicciolito" - che dopo un
+      // caricamento parziale capita a tutti - spegneva nello stesso tentativo
+      // anche il controllo degli ordini che sparirebbero.
+      //
+      // Le conferme si ACCUMULANO. I due controlli sono in fila e possono
+      // scattare insieme (un tentativo morto ha svuotato un archivio E nel file
+      // nuovo qualche ordine non c'e' piu'): mandandone una sola, l'ultima,
+      // ogni conferma spegneva un controllo e riaccendeva l'altro, e il
+      // pulsante "Forza caricamento" girava in tondo senza arrivare mai a
+      // destinazione - proprio nel caso per cui quel pulsante esiste.
+      setDialogState({
+        ...errInfo,
+        onForza: () => {
+          confermeDate.current[tipoKey] = confermeAccumulate(confermeDate.current[tipoKey], errInfo.conferma);
+          handleUpload(tipoKey, file, confermeDate.current[tipoKey]);
+        },
+      });
     }
     setUploading(null);
   };
@@ -223,16 +319,30 @@ export default function CaricamentoDati() {
                 </div>
               )}
 
+              {/* La spunta verde parla di un caricamento riuscito. Per un
+                  parziale restava verde coi numeri e l'allarme stava sotto in
+                  piccolo: adesso il colore dice subito com'e' andata. */}
               {res && res.ok && (
-                <div className="mt-3 flex items-start gap-2 text-sm text-green-700">
-                  <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <div className={`mt-3 flex items-start gap-2 text-sm ${res.data.esito && res.data.esito !== 'successo' ? 'text-amber-700' : 'text-green-700'}`}>
+                  {res.data.esito && res.data.esito !== 'successo'
+                    ? <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    : <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />}
                   <span>
                     {res.data.records_creati != null
                       ? `${formatIntero(res.data.records_creati)} target caricati (${formatIntero(res.data.raccoglitori)} raccoglitori)`
                       : (tipo.key === 'primarie' && res.data.primarie_rete_importati != null
                         ? `Rete: ${formatIntero(res.data.primarie_rete_importati)} · ACI: ${formatIntero(res.data.primarie_aci_importati)} · Ass. Rete: ${formatIntero(res.data.assegnati_importati)} · Ass. ACI: ${formatIntero(res.data.assegnati_aci_importati)}`
                         : `${formatIntero(res.data.righe_importate)} righe importate${res.data.righe_fallite > 0 ? ` (${formatIntero(res.data.righe_fallite)} fallite)` : ''}`)}
-                    {res.data.blocchi_ritentati > 0 ? ` · ${formatIntero(res.data.blocchi_ritentati)} blocchi ritentati` : ''}
+                    {/* Non "ritentati": un blocco non si riscrive mai. E
+                        nemmeno "confermati": sono i blocchi la cui scrittura NON
+                        ha risposto e che un conteggio ha dato per entrati, e un
+                        conteggio non conferma niente — due righe più sotto si
+                        leggeva che quelle righe non si erano potute confermare.
+                        "Dato per entrato" è come li chiama il codice, e dice il
+                        vero. */}
+                    {res.data.blocchi_confermati_dal_conteggio > 0
+                      ? ` · ${formatIntero(res.data.blocchi_confermati_dal_conteggio)} ${res.data.blocchi_confermati_dal_conteggio === 1 ? 'blocco dato per entrato' : 'blocchi dati per entrati'} dall'archivio`
+                      : ''}
                   </span>
                 </div>
               )}
@@ -240,10 +350,37 @@ export default function CaricamentoDati() {
               {res && res.ok && res.data.esito === 'errore' && (
                 // Nessuna riga entrata dopo lo svuotamento: il registro lo tiene aperto
                 // e i moduli collegati non si ricalcolano finche' non si ricarica.
+                //
+                // «L'ARCHIVIO E' VUOTO» SI DICE SOLO SE SI E' CONTATO. Le righe
+                // che il gestionale conta qui sono quelle che la piattaforma ha
+                // CONFERMATO di aver scritto, non quelle che stanno in archivio:
+                // se ogni risposta si perde e nessun conteggio risponde, quel
+                // numero e' zero e l'archivio puo' essere completo. Si leggeva
+                // «l'archivio e' vuoto» in rosso e, nella riga subito sotto,
+                // «480 righe sono rimaste in sospeso».
                 <p className="mt-1 text-xs text-red-700">
-                  Nessuna riga è entrata dopo lo svuotamento: l'archivio è vuoto e i moduli collegati non si aggiornano. Ricarica il file.
+                  {res.data.avviso_non_verificato
+                    ? "Il gestionale non è riuscito a confermare nessuna riga e non è riuscito a contare l'archivio: non si sa che cosa ci sia dentro e i moduli collegati non si aggiornano. Ricarica il file."
+                    : "Nessuna riga è entrata dopo lo svuotamento: l'archivio è vuoto e i moduli collegati non si aggiornano. Ricarica il file."}
                 </p>
               )}
+
+              {/* Righe entrate due volte, righe rimaste in sospeso o un archivio
+                  che non si e' riusciti a contare: si dice quante, quali e che
+                  cosa fare. */}
+              {(() => {
+                const r = res && res.ok ? testoVerificaArchivio(res.data) : null;
+                return r ? <p className={`mt-1 text-xs ${r.classe}`}>{r.testo}</p> : null;
+              })()}
+
+              {/* Gli ordini che a portale sono in stato "eseguito": hanno tutti
+                  i dati ma nessuno ha premuto Chiudi, e finche' restano cosi'
+                  non entrano in nessun conto. Contati a parte, rete e ACI
+                  separati, e non sommati ai terminati. */}
+              {(() => {
+                const t = res && res.ok ? testoEseguiti(res.data.avviso_eseguiti) : null;
+                return t ? <p className="mt-1 text-xs text-amber-700">{t}</p> : null;
+              })()}
 
               {res && res.ok && res.data.allineamento && (
                 // Il report delle dichiarazioni riconosce da solo i nostri mesi caricati a portale.
@@ -284,7 +421,14 @@ export default function CaricamentoDati() {
                   <th className="text-left px-4 py-3 font-medium">Tipo</th>
                   <th className="text-left px-4 py-3 font-medium">File</th>
                   <th className="text-left px-4 py-3 font-medium">Da</th>
-                  <th className="text-right px-4 py-3 font-medium">Righe</th>
+                  {/* Il numero e' quello delle righe del FILE entrate in
+                      archivio. Per le primarie sono i quattro archivi insieme,
+                      assegnati compresi: contando solo rete e ACI diceva
+                      10.817 su un file di 11.293 righe, e proprio quando si
+                      vuole capire se e' entrato tutto quel numero confondeva.
+                      La spiegazione vale per tutte le righe della tabella, che
+                      mostra anche secondarie, terziarie e dichiarazioni. */}
+                  <th className="text-right px-4 py-3 font-medium" title="Quante righe del file sono entrate in archivio (per le primarie, i quattro archivi insieme)">Righe entrate</th>
                   <th className="text-center px-4 py-3 font-medium">Esito</th>
                 </tr>
               </thead>

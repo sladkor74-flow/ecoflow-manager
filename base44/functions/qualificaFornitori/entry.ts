@@ -1,9 +1,10 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { individuaSoggetti, valutaSoggetto, oggiRoma, salvaRiepilogo, anomalieCatalogo } from "../../shared/qualificaFornitori.ts";
+import { individuaSoggetti, valutaSoggetto, oggiRoma, salvaRiepilogo, anomalieCatalogo, STATI_ALERT } from "../../shared/qualificaFornitori.ts";
 import { applicaControlloClasse } from "../../shared/classeAlbo.ts";
 import { daAnalizzare } from "../../shared/analisiDocumento.ts";
+import { statoCaricamenti, descriviCaricamento } from "../../shared/reportSettimanali.ts";
 
 // Situazione della qualifica fornitori per un anno.
 //
@@ -22,6 +23,36 @@ export default async function(req) {
     const body = await req.json().catch(() => ({}));
     const anno = Number(body.anno) || Number(oggiRoma().slice(0, 4));
     const oggi = oggiRoma();
+
+    // Gli attori dell'anno si individuano rileggendo primarie, secondarie ed
+    // extra raccolta: se uno di quegli archivi si sta riscrivendo, o un
+    // caricamento l'ha lasciato a meta', i soggetti letti adesso sarebbero
+    // sbagliati e il riepilogo li salverebbe cosi'. Era l'unico dei ricalcoli
+    // che non lo guardava, e scriveva su un archivio che il registro aveva
+    // appena dichiarato inaffidabile: e' la regola 2 al contrario.
+    //
+    // Si CALCOLA lo stesso e si risponde 200, SALTANDO IL SALVATAGGIO. Le
+    // altre funzioni che si rinviano rispondono 409 (analisiSettimanalePredittiva,
+    // ricontrollaDichiarazioni, controllaEvasioneAssegnati); questa e'
+    // diversa da tutte perche' e' l'unica che chiama anche una PAGINA, a ogni
+    // apertura (QualificaFornitori.jsx, PassivaQualifica.jsx). Col 409 la
+    // pagina restava una schermata d'errore finche' non si ricaricava il file -
+    // la notte delle 57 righe perse - e non si apriva piu'. Il ricalcolo dopo i
+    // caricamenti continua a dirsi "non aggiornato" perche' legge "rinviato".
+    //
+    // Chi chiama per aggiornare il RIEPILOGO SALVATO non deve insistere: il
+    // riepilogo resta quello di prima, quindi la condizione "e' piu' vecchio
+    // dell'ultimo caricamento" resta vera per sempre e la pagina rifarebbe il
+    // calcolo completo a ogni apertura. La regola sta in qualificaDaRifare
+    // (src/lib/importGrandeFile.js), dove la controllano le prove.
+    //
+    // Con i soggetti gia' in mano si rivalutano solo i documenti e gli archivi
+    // non si toccano: li' non si rinvia niente.
+    let rinviato = null;
+    if (!Array.isArray(body.soggetti)) {
+      const { in_corso } = await statoCaricamenti(base44);
+      if (in_corso.length) rinviato = in_corso;
+    }
 
     let soggetti = Array.isArray(body.soggetti) ? body.soggetti : null;
     let esclusi = Array.isArray(body.esclusi) ? body.esclusi : [];
@@ -51,10 +82,19 @@ export default async function(req) {
     // Documenti che l agente non ha mai letto, o che conviene rileggere: si
     // conta qui perche gli archivi sono gia in mano, senza una chiamata in piu.
     const daLeggere = daAnalizzare(documentiSalvati, catalogo, { adessoMs: Date.now(), massimo: 0 });
-    const alert = await salvaRiepilogo(base44, anno, valutati, anomalie);
+    // Con un caricamento aperto NON si salva: il riepilogo salvato lo leggono la
+    // dashboard, il menu e la fatturazione passiva, e scriverlo su archivi a
+    // meta' e' proprio cio' che la regola 2 vieta. I numeri a video si calcolano
+    // lo stesso, cosi' la pagina si apre e mostra la situazione.
+    const requisiti = valutati.flatMap(s => s.requisiti);
+    const alert = rinviato
+      ? {
+        alert_aperti: requisiti.filter(r => STATI_ALERT.includes(r.stato)).length,
+        soggetti_con_alert: valutati.filter(s => s.requisiti.some(r => STATI_ALERT.includes(r.stato))).length,
+      }
+      : await salvaRiepilogo(base44, anno, valutati, anomalie);
 
     const conta = (fn) => valutati.filter(fn).length;
-    const requisiti = valutati.flatMap(s => s.requisiti);
     const riepilogo = {
       soggetti: valutati.length,
       qualificati: conta(s => s.stato === 'qualificato' || s.stato === 'in_scadenza'),
@@ -73,7 +113,20 @@ export default async function(req) {
       mai_letti: daLeggere.filter(d => d.motivo === 'mai_letto').length,
     };
 
-    return Response.json({ anno, oggi, riepilogo, soggetti: valutati, esclusi, soggetti_da_date: soggettiDaDate, catalogo, anomalie, da_leggere: daLeggere.slice(0, 40) });
+    return Response.json({
+      anno, oggi, riepilogo, soggetti: valutati, esclusi,
+      soggetti_da_date: soggettiDaDate, catalogo, anomalie,
+      da_leggere: daLeggere.slice(0, 40),
+      // Calcolato ma non salvato: chi consulta vede la situazione, chi ricalcola
+      // sa che non e' aggiornata e si rifa' al prossimo caricamento concluso.
+      ...(rinviato ? {
+        rinviato: true,
+        riepilogo_salvato: false,
+        caricamenti_in_corso: rinviato,
+        avviso: `Qualifica non aggiornata: caricamento ${rinviato.map(descriviCaricamento).join('; ')}. `
+          + "I numeri sono calcolati adesso ma non sono stati salvati: si rifa' da sola al prossimo caricamento concluso.",
+      } : {}),
+    });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });
   }

@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Upload, Loader2, FileSpreadsheet, CheckCircle } from 'lucide-react';
 import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
-import { dopoCaricamento, testoRicalcoli } from '@/lib/importGrandeFile';
+import { dopoCaricamento, testoRicalcoli, moduliDaRicalcolare, ricalcoliFermi } from '@/lib/importGrandeFile';
 
 export default function SecondarieUpload({ onImported }) {
   const [uploading, setUploading] = useState(false);
@@ -40,11 +40,21 @@ export default function SecondarieUpload({ onImported }) {
       if (onImported) onImported();
       // Questo e' un secondo punto di caricamento delle secondarie: aggiorna gli
       // stessi moduli di Caricamento Dati (elenco unico in dopoCaricamento), non
-      // solo la matrice della pagina. Un esito "errore" ha lasciato l'archivio a
-      // meta' e non si ricalcola su quello.
-      if (res.data && res.data.esito !== 'errore') {
+      // solo la matrice della pagina. La regola di QUANDO si ricalcola e' una
+      // sola e sta in moduliDaRicalcolare: solo su un caricamento riuscito.
+      // Qui si guardava ancora il solo "errore", quindi dopo una secondaria
+      // chiusa parziale - archivio con righe di troppo, mancanti o non contato -
+      // i ricalcoli partivano lo stesso sopra dati inaffidabili (per le secondarie
+      // sono due: verifiche e qualifica).
+      // E quando non partono si dice PERCHE' e quali moduli restano indietro:
+      // una secondaria chiusa parziale - basta una riga non entrata - lasciava
+      // verifiche dei report, quadrature FIR e qualifica fornitori fermi al
+      // caricamento di prima, in silenzio.
+      if (moduliDaRicalcolare(res.data)) {
         setRicalcoli({ in_corso: true });
         dopoCaricamento('secondarie').then(setRicalcoli);
+      } else {
+        setRicalcoli(ricalcoliFermi('secondarie', res.data));
       }
     } catch (e) {
       const errInfo = extractUploadError(e);
@@ -79,12 +89,23 @@ export default function SecondarieUpload({ onImported }) {
         {uploading ? 'Importazione in corso...' : 'Seleziona file Excel/CSV'}
       </button>
 
-      {result && (
-        <div className="flex items-start gap-2 p-3 rounded-md bg-green-50 border border-green-200 text-sm">
-          <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+      {/* Il colore dice subito com'è andata: un caricamento chiuso "parziale"
+          non è "Importazione completata", e sotto c'è scritto che i moduli
+          collegati sono rimasti indietro. Verde e ambra come in Caricamento Dati. */}
+      {result && (() => {
+        const riuscito = !result.esito || result.esito === 'successo';
+        return (
+        <div className={`flex items-start gap-2 p-3 rounded-md text-sm ${riuscito ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-300'}`}>
+          <CheckCircle className={`w-4 h-4 mt-0.5 flex-shrink-0 ${riuscito ? 'text-green-600' : 'text-amber-600'}`} />
           <div>
-            <p className="font-medium text-green-900">Importazione completata</p>
-            <p className="text-green-800">
+            <p className={`font-medium ${riuscito ? 'text-green-900' : 'text-amber-900'}`}>
+              {/* Per le secondarie basta UNA riga non entrata perche' l'esito
+                  sia "parziale": l'archivio puo' tornare benissimo e mancare
+                  solo quella. Dire "l'archivio non torna con il file" era una
+                  cosa piu' grossa di quella successa. */}
+              {riuscito ? 'Importazione completata' : 'Importazione a metà: alcune righe non sono entrate'}
+            </p>
+            <p className={riuscito ? 'text-green-800' : 'text-amber-900'}>
               {result.righe_importate} righe importate su {result.righe_da_importare} da importare.
               {result.righe_fallite > 0 && ` · ${result.righe_fallite} fallite.`}
             </p>
@@ -94,7 +115,8 @@ export default function SecondarieUpload({ onImported }) {
             })()}
           </div>
         </div>
-      )}
+        );
+      })()}
       <UploadResultDialog state={dialogState} onClose={() => setDialogState(null)} />
     </div>
   );

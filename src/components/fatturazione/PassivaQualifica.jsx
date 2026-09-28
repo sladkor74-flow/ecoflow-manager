@@ -4,6 +4,7 @@ import { base44 } from '@/api/base44Client';
 import { ShieldAlert, ArrowRight } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { dataServer } from '@/lib/utils';
+import { qualificaDaRifare, segnaQualificaRinviata, avvisoQualificaRinviata } from '@/lib/importGrandeFile';
 
 // I caricamenti che portano soggetti nuovi da qualificare.
 const TIPI_CON_SOGGETTI = ['primarie', 'secondarie'];
@@ -15,6 +16,9 @@ const TIPI_CON_SOGGETTI = ['primarie', 'secondarie'];
 // blocco: decide l'amministratore.
 export default function PassivaQualifica({ result, anno }) {
   const [riepilogo, setRiepilogo] = useState(null);
+  // Quando la qualifica non ha potuto salvare: si dice, invece di mostrare i
+  // numeri di prima come se fossero freschi.
+  const [avviso, setAvviso] = useState(null);
 
   useEffect(() => {
     let vivo = true;
@@ -32,11 +36,31 @@ export default function PassivaQualifica({ result, anno }) {
           .filter(l => TIPI_CON_SOGGETTI.includes(l.tipo_file) && (l.esito === 'successo' || l.esito === 'parziale'))
           .reduce((m, l) => Math.max(m, (dataServer(l.updated_date || l.created_date) || new Date(0)).getTime()), 0);
         const aggiornato = r && r.aggiornato_il ? new Date(r.aggiornato_il).getTime() : 0;
-        if (ultimo > aggiornato) {
-          await base44.functions.invoke('qualificaFornitori', { anno: Number(anno) });
-          const nuovo = await leggi();
-          if (vivo) setRiepilogo(nuovo);
+        // Con un caricamento aperto o lasciato a meta' la qualifica CALCOLA ma
+        // NON SALVA (risponde "rinviato"): il riepilogo resta vecchio, la
+        // condizione resta vera e questa pagina rifaceva il calcolo completo -
+        // tutte le primarie, le secondarie e l'extra raccolta - a ogni
+        // apertura, per sempre, proprio quando l'app e' gia' affaticata. Dopo
+        // un "rinviato" non si insiste piu': si dice com'e' e si aspetta il
+        // caricamento concluso, che salva da solo. La regola sta in
+        // qualificaDaRifare, dove la controllano le prove.
+        if (!qualificaDaRifare(anno, { aggiornatoIl: aggiornato, ultimoCaricamento: ultimo })) {
+          // Gia' rinviata: non si richiama, ma la frase si rimostra. Senza,
+          // bastava cambiare pagina e tornare indietro perche' l'avviso
+          // sparisse e i numeri vecchi tornassero a sembrare freschi.
+          const gia = avvisoQualificaRinviata(anno, { ultimoCaricamento: ultimo });
+          if (vivo && gia) setAvviso(gia);
+          return;
         }
+        const res = await base44.functions.invoke('qualificaFornitori', { anno: Number(anno) });
+        const dati = (res && res.data) || {};
+        if (dati.rinviato) {
+          segnaQualificaRinviata(anno, { ultimoCaricamento: ultimo, avviso: dati.avviso || null });
+          if (vivo) setAvviso(dati.avviso || null);
+          return;
+        }
+        const nuovo = await leggi();
+        if (vivo) setRiepilogo(nuovo);
       } catch {
         // l'avviso resta quello del riepilogo gia' letto
       }
@@ -53,7 +77,12 @@ export default function PassivaQualifica({ result, anno }) {
   }, [result]);
 
   const critici = (riepilogo?.soggetti_critici || []).filter(s => inFattura.has(normalizzaRagioneSociale(s.nome)) || inFattura.has(s.chiave));
-  if (critici.length === 0) return null;
+  // Senza fornitori critici non c'e' niente da avvisare, ma se la qualifica non
+  // si e' potuta aggiornare va detto lo stesso: "nessun avviso" su numeri
+  // vecchi e' un silenzio che si scambia per una buona notizia.
+  if (critici.length === 0) {
+    return avviso ? <p className="text-xs text-amber-700">{avviso}</p> : null;
+  }
 
   return (
     <div className="border-2 border-amber-300 bg-amber-50 rounded-lg p-4">
@@ -70,6 +99,7 @@ export default function PassivaQualifica({ result, anno }) {
           </li>
         ))}
       </ul>
+      {avviso && <p className="text-xs text-amber-900/90 mt-2">{avviso}</p>}
       <p className="text-xs text-amber-900/70 mt-2">
         È un avviso prima del pagamento, non un blocco.{riepilogo?.aggiornato_il ? ` Situazione della qualifica al ${String(riepilogo.aggiornato_il).slice(0, 10).split('-').reverse().join('/')}.` : ''}{' '}
         <Link to="/qualifica-fornitori" className="text-primary hover:underline inline-flex items-center gap-0.5">Apri la qualifica <ArrowRight className="w-3 h-3" /></Link>
