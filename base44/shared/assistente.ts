@@ -281,6 +281,10 @@ export async function situazioneGestionale(base44, oggi) {
     // Il confronto col target lo fa calcolaGiacenze sulla sola giacenza di rete.
     const sopra = (giacenze.anomalie || []).filter(a => a.tipo === 'giacenza_sopra_target');
     if (sopra.length) righe.push(`Siti con giacenza RETE sopra il target: ${sopra.map(a => a.sito).join(', ')}.`);
+    // I target si scrivono solo in Target & Status (27/09/2026): uno ancora
+    // scritto nel vecchio campo di Giacenze vale finche' non lo si porta li'.
+    const daPortare = [...new Set((giacenze.anomalie || []).filter(a => a.tipo === 'target_da_portare').map(a => a.sito))];
+    if (daPortare.length) righe.push(`Target ancora scritti in Giacenze, da portare in Target & Status (scheda Impianti e stoccaggi); intanto valgono quelli: ${daPortare.join(', ')}.`);
   }
 
   // --- Alert e qualifica ---

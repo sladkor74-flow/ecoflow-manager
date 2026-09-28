@@ -14,6 +14,8 @@ import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 // mensile rete e ACI, quantita' per destinazione e target con prezzo per regione.
 // Si scrive una volta, o si importa dal foglio del contratto, e si aggiorna se
 // Ecotyre lo rivede. L'Andamento confronta il raccolto per regione con questi dati.
+// isAdmin arriva gia' falso per chi non e' amministratore e per un anno chiuso:
+// allora la commessa si legge soltanto.
 
 const testo = (v) => (v === null || v === undefined || v === '' ? '' : String(v).replace('.', ','));
 const leggiJson = (json, riserva) => { try { const v = JSON.parse(json || 'null'); return v ?? riserva; } catch { return riserva; } };
@@ -96,7 +98,10 @@ function Riquadro({ titolo, children, nota, classe = '' }) {
   );
 }
 
-export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
+// fra piu' commesse dello stesso anno vale la modificata per ultima, come nelle funzioni
+const piuRecente = (righe) => (righe || []).reduce((x, r) => (!x || String(r.updated_date || r.created_date || '') > String(x.updated_date || x.created_date || '') ? r : x), null);
+
+export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato }) {
   const { toast } = useToast();
   const inputFile = useRef(null);
   const [record, setRecord] = useState(null);
@@ -107,21 +112,33 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
   const [modificato, setModificato] = useState(false);
   const [nota, setNota] = useState('');
 
+  // Le letture si numerano: una superata da un'altra non tocca niente. Senza,
+  // cambiando anno in fretta poteva restare a video la commessa di un altro anno,
+  // e salvarla l'avrebbe spostata sull'anno mostrato.
+  const ultimaLettura = useRef(0);
   const carica = useCallback(async () => {
+    const n = ++ultimaLettura.current;
     setCaricando(true);
     try {
-      const r = (await base44.entities.CommessaEcotyre.filter({ anno }))[0] || null;
+      const r = piuRecente(await base44.entities.CommessaEcotyre.filter({ anno }));
+      if (n !== ultimaLettura.current) return;
+      if (r && Number(r.anno) !== Number(anno)) throw new Error(`la commessa letta non è del ${anno}`);
       setRecord(r);
       setDati(statoDaRecord(r));
       setModificato(false);
       setNota('');
     } catch (e) {
+      if (n !== ultimaLettura.current) return;
       toast({ title: 'Caricamento non riuscito', description: e.message || String(e), variant: 'destructive' });
     }
     setCaricando(false);
   }, [anno, toast]);
 
   useEffect(() => { carica(); }, [carica]);
+
+  // La pagina sa se ci sono modifiche non salvate, per chiedere prima di cambiare anno o scheda.
+  useEffect(() => { if (onModificato) onModificato(isAdmin && modificato); }, [onModificato, isAdmin, modificato]);
+  useEffect(() => () => { if (onModificato) onModificato(false); }, [onModificato]);
 
   // Chi chiude o ricarica la pagina con modifiche non salvate riceve un avviso.
   useEffect(() => {
@@ -212,6 +229,7 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
     try {
       if (record) {
         const prima = Object.fromEntries(Object.keys(valori).filter(k => k !== 'anno').map(k => [k, record[k] ?? null]));
+        if (Number(record.anno) !== Number(anno)) throw new Error(`a video c'è la commessa del ${record.anno}, non del ${anno}: ricarica la pagina`);
         await base44.entities.CommessaEcotyre.update(record.id, { ...valori, storico_json: conModifica(record.storico_json, { utente: nomeUtente(user), nota, prima }) });
       } else {
         await base44.entities.CommessaEcotyre.create({ ...valori, storico_json: conModifica('[]', { utente: nomeUtente(user), nota, prima: null }) });
@@ -236,7 +254,8 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <p className="text-sm text-muted-foreground max-w-3xl">
           Quanto richiede il contratto Ecotyre per il {anno}. Si importa dal foglio del contratto del file di gestione o si scrive a mano, e si aggiorna se Ecotyre
-          lo rivede: ogni salvataggio resta nello storico. L'Andamento confronta il raccolto per regione con questi valori.
+          lo rivede: ogni salvataggio resta nello storico. L'Andamento confronta il raccolto per regione con questi valori. La fine della programmazione e i
+          chili per viaggio dell'anno, che stanno anch'essi sulla commessa, si scrivono nella scheda Impianti e stoccaggi.
         </p>
         {isAdmin && (
           <>
@@ -251,7 +270,7 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user }) {
       {!record && !modificato && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">La commessa {anno} non è ancora stata inserita.</p>}
       {isAdmin && modificato && (
         <div className="flex items-center justify-between gap-3 flex-wrap text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
-          <span>I dati non sono ancora salvati: se esci o ricarichi la pagina senza salvare, si perdono.</span>
+          <span>I dati non sono ancora salvati: se esci, ricarichi la pagina o cambi anno o scheda senza salvare, si perdono.</span>
           <Button size="sm" onClick={salva} disabled={salvando}>{salvando && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}Salva ora</Button>
         </div>
       )}

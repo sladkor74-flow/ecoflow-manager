@@ -4,6 +4,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { individuaSoggetti } from "../../shared/qualificaFornitori.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { impiantiTargetDellAnno } from "../../shared/targetImpianti.ts";
+import { annoDelRecord } from "../../shared/annoTarget.ts";
 
 // La situazione contrattuale di un anno: chi va contrattualizzato, per cosa, e
 // a che punto e' ciascun contratto.
@@ -68,6 +69,8 @@ export default async function(req) {
     // chiusi restano attivi, e ogni anno se ne aggiunge uno. Vale quello
     // dell'anno chiesto, o se non c'e' ancora quello dell'ultimo anno scritto:
     // mai il primo trovato per nome, che poteva essere di due anni prima.
+    // Da quale anno viene lo dice target_anno, e la pagina lo scrive quando non
+    // e' quello chiesto (27/09/2026): il target si scrive in Target & Status.
     const impiantoPer = impiantiTargetDellAnno(impiantiTarget, annoNum);
 
     // I target per raccoglitore si sommano fra le regioni: il contratto e' uno solo.
@@ -108,6 +111,7 @@ export default async function(req) {
         const impianto = impiantoPer.get(s.chiave);
         const target = tipo.chiave === 'raccolta' ? (targetPer.get(s.chiave) || null)
           : (impianto && impianto.target ? Math.round(Number(impianto.target) / 1000) : null);
+        const target_anno = target === null ? null : (tipo.chiave === 'raccolta' ? annoNum : annoDelRecord(impianto));
 
         attesi++;
         if (contratto && contratto.stato === 'controfirmato') fatti++;
@@ -132,6 +136,7 @@ export default async function(req) {
           modello_id: modello ? modello.id : null,
           modello_nome: modello ? modello.nome : null,
           target_t: target,
+          target_anno,
         });
       }
       if (!suoi.length) continue;

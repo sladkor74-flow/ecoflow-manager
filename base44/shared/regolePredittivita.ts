@@ -34,8 +34,17 @@ const PER_ANNO = {
 /** L'anno a cui vale un record di configurazione: il suo, o il 2026 se non lo dice. */
 export const annoDelRecord = (r) => Number((r && r.anno) || 2026);
 
-/** Le regole dell'anno, con quelle predefinite dove l'anno non dice niente, e se l'anno e' stato definito. */
-export function regolePredittivita(anno) {
-  const a = PER_ANNO[Number(anno)] || null;
-  return { ...PREDEFINITE, ...(a || {}), definite: !!a, anno: Number(anno) };
+/**
+ * Le regole dell'anno, con quelle predefinite dove l'anno non dice niente, e se
+ * l'anno e' stato definito. commessa e' il CommessaEcotyre dell'anno, se c'e':
+ * dal 27/09/2026 i kg a viaggio si scrivono li', in Target & Status, e quando ci
+ * sono valgono piu' di quelli scritti qui.
+ */
+export function regolePredittivita(anno, commessa = null) {
+  const n = Number(anno);
+  const a = PER_ANNO[n] || null;
+  const delContratto = commessa && (!commessa.anno || Number(commessa.anno) === n) && Number(commessa.kg_per_viaggio) > 0
+    ? { kg_per_viaggio: Number(commessa.kg_per_viaggio) }
+    : null;
+  return { ...PREDEFINITE, ...(a || {}), ...(delContratto || {}), definite: !!(a || delContratto), anno: n };
 }

@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Loader2, CalendarCheck, Factory, Warehouse, CalendarRange, Settings, Bot, AlertTriangle, ChevronDown, ChevronRight, Lock, RefreshCw, FlaskConical } from 'lucide-react';
+import { Loader2, CalendarCheck, Factory, Warehouse, CalendarRange, Bot, AlertTriangle, ChevronDown, ChevronRight, Lock, RefreshCw, FlaskConical } from 'lucide-react';
 import ProgrammaSettimana from '@/components/predittivita/ProgrammaSettimana';
 import SchedaImpianti from '@/components/predittivita/SchedaImpianti';
 import SchedaStoccaggi from '@/components/predittivita/SchedaStoccaggi';
 import SchedaSettimane from '@/components/predittivita/SchedaSettimane';
 import SimulazioneViaggi from '@/components/predittivita/SimulazioneViaggi';
 import EsportaSituazione from '@/components/predittivita/EsportaSituazione';
-import PredittivitaImpiantiManager from '@/components/predittivita/PredittivitaImpiantiManager';
 import PredittivitaAgent from '@/components/predittivita/PredittivitaAgent';
 import { it, testoErrore, avvisiDaMostrare, Vuoto } from '@/components/predittivita/Comuni';
 import { usePermessi } from '@/lib/permessi';
@@ -21,6 +21,9 @@ import { oggiRoma } from '@/lib/giornoItaliano';
 // funzione calcolaPianificazioneSecondaria, da cui escono tutte le schede.
 // Il 1 gennaio la pagina mostra l'anno nuovo; gli anni chiusi si riaprono in
 // sola lettura scegliendo l'anno.
+// Impianti, stoccaggi e regole dell'anno si scrivono in Target & Status, scheda
+// Impianti e stoccaggi (27/09/2026): qui non c'e' piu' una scheda
+// Configurazione, e un vecchio collegamento ?tab=config porta la'.
 
 // L'anno in cui la predittivita' e' nata: prima non c'e' una configurazione.
 const PRIMO_ANNO = 2026;
@@ -31,6 +34,8 @@ const ATTESA_RICALCOLO_MS = 4000;
 const NOMI_TIPI = { primarie: 'primarie', primarie_rete: 'primarie di rete', secondarie: 'secondarie' };
 
 const annoCorrente = () => Number(oggiRoma().slice(0, 4));
+/** Dove si scrivono impianti e stoccaggi di un anno. */
+const indirizzoConfigurazione = (anno) => `/target-status?tab=impianti&anno=${anno}`;
 
 /** La risposta del calcolo, o null se non ha la forma attesa. */
 function rispostaValida(d) {
@@ -88,6 +93,15 @@ function Avvisi({ risposta, aperti }) {
 }
 
 export default function PredittivitaSecondarie() {
+  const [params] = useSearchParams();
+  if (params.get('tab') === 'config') {
+    const a = Number(params.get('anno'));
+    return <Navigate to={indirizzoConfigurazione(Number.isInteger(a) && a > 2000 ? a : annoCorrente())} replace />;
+  }
+  return <Predittivita />;
+}
+
+function Predittivita() {
   const { isAdmin } = usePermessi();
   const corrente = annoCorrente();
   const [anno, setAnno] = useState(corrente);
@@ -187,10 +201,9 @@ export default function PredittivitaSecondarie() {
   const anni = [];
   for (let a = corrente; a >= Math.min(PRIMO_ANNO, corrente); a--) anni.push(a);
   const chiuso = anno < corrente;
-  const schedaAttiva = !isAdmin && tab === 'config' ? 'programma' : tab;
 
   // Le quattro schede dei numeri: finche' il calcolo non c'e' si aspetta, o si
-  // dice perche' manca. Configurazione e Assistente restano usabili comunque.
+  // dice perche' manca. L'Assistente resta usabile comunque.
   const conDati = (Scheda) => {
     if (!risposta) {
       if (errore) {
@@ -198,14 +211,19 @@ export default function PredittivitaSecondarie() {
           <div className="text-center py-10 space-y-3 border rounded-lg">
             <p className="text-red-700 font-medium">Il calcolo non è riuscito: {errore}</p>
             <Button onClick={carica} disabled={ricalcolo}>{ricalcolo && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}Riprova</Button>
-            <p className="text-xs text-muted-foreground">Configurazione e Assistente funzionano lo stesso.</p>
+            <p className="text-xs text-muted-foreground">L&apos;Assistente funziona lo stesso.</p>
           </div>
         );
       }
       return <div className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin inline" /><p className="text-sm text-muted-foreground mt-2">Calcolo del {anno} in corso…</p></div>;
     }
     if (risposta.configurazione_vuota) {
-      return <Vuoto>Per il {risposta.anno} non ci sono impianti seguiti con un target.{isAdmin && !risposta.sola_lettura ? ' Aggiungili nella scheda Configurazione.' : ''}</Vuoto>;
+      return (
+        <Vuoto>
+          Per il {risposta.anno} non ci sono impianti seguiti con un target.
+          {isAdmin && !risposta.sola_lettura ? <> Aggiungili in <Link to={indirizzoConfigurazione(risposta.anno)} className="text-primary underline">Target &amp; Status → Impianti e stoccaggi</Link>.</> : ''}
+        </Vuoto>
+      );
     }
     return <Scheda risposta={risposta} onFissa={fissa} isAdmin={isAdmin} />;
   };
@@ -235,6 +253,11 @@ export default function PredittivitaSecondarie() {
             <RefreshCw className={`w-4 h-4 ${ricalcolo ? 'animate-spin' : ''}`} />
           </Button>
           <EsportaSituazione risposta={risposta} />
+          {isAdmin && (
+            <Button size="sm" variant="outline" asChild>
+              <Link to={indirizzoConfigurazione(anno)}><Factory className="w-4 h-4 mr-1.5" />Impianti e stoccaggi del {anno}</Link>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -268,14 +291,13 @@ export default function PredittivitaSecondarie() {
 
       <Avvisi risposta={risposta} aperti={Object.values(aperti)} />
 
-      <Tabs value={schedaAttiva} onValueChange={setTab}>
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="programma"><CalendarCheck className="w-4 h-4 mr-1.5" /> Programma della settimana</TabsTrigger>
           <TabsTrigger value="simulazione"><FlaskConical className="w-4 h-4 mr-1.5" /> Simulazione</TabsTrigger>
           <TabsTrigger value="impianti"><Factory className="w-4 h-4 mr-1.5" /> Impianti</TabsTrigger>
           <TabsTrigger value="stoccaggi"><Warehouse className="w-4 h-4 mr-1.5" /> Stoccaggi</TabsTrigger>
           <TabsTrigger value="settimane"><CalendarRange className="w-4 h-4 mr-1.5" /> Settimane</TabsTrigger>
-          {isAdmin && <TabsTrigger value="config"><Settings className="w-4 h-4 mr-1.5" /> Configurazione</TabsTrigger>}
           <TabsTrigger value="agente"><Bot className="w-4 h-4 mr-1.5" /> Assistente</TabsTrigger>
         </TabsList>
         {/* resta montata: i viaggi corretti a mano non si perdono passando a un'altra scheda */}
@@ -284,12 +306,6 @@ export default function PredittivitaSecondarie() {
         <TabsContent value="impianti" className="mt-4">{conDati(SchedaImpianti)}</TabsContent>
         <TabsContent value="stoccaggi" className="mt-4">{conDati(SchedaStoccaggi)}</TabsContent>
         <TabsContent value="settimane" className="mt-4">{conDati(SchedaSettimane)}</TabsContent>
-        {isAdmin && (
-          <TabsContent value="config" className="mt-4">
-            {/* una per anno: niente di un anno resta a video, modificabile, quando si passa a un altro */}
-            <PredittivitaImpiantiManager key={anno} anno={anno} solaLettura={chiuso} onReload={carica} />
-          </TabsContent>
-        )}
         <TabsContent value="agente" className="mt-4"><PredittivitaAgent /></TabsContent>
       </Tabs>
     </div>

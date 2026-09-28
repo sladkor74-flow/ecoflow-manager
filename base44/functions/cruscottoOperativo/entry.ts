@@ -21,7 +21,7 @@ export default async function(req) {
     const anno = Number(body.anno) || Number(oggi.slice(0, 4));
 
     const svc = base44.asServiceRole.entities;
-    const [alertAperti, uploadLogs, assegnatiRete, assegnatiAci, documenti, prefatture, riepiloghi, giacenzeSito, impiantiTarget, richiesteEct] = await Promise.all([
+    const [alertAperti, uploadLogs, assegnatiRete, assegnatiAci, documenti, prefatture, riepiloghi, richiesteEct] = await Promise.all([
       fetchAll(svc.Alert, { stato: 'aperto' }),
       svc.UploadLog.list('-created_date', 200),
       fetchAll(svc.Assegnato),
@@ -29,8 +29,6 @@ export default async function(req) {
       svc.DocumentoFatturazione.filter({ tipo: 'ATTIVA', anno }),
       svc.PrefatturaEcotyre.filter({ anno }).catch(() => []),
       svc.RiepilogoQualifica.filter({ anno }, '-created_date', 1).catch(() => []),
-      fetchAll(svc.GiacenzaSito),
-      fetchAll(svc.ImpiantoTargetSecondaria),
       fetchAll(svc.RichiestaEct, { anno }).catch(() => []),
     ]);
 
@@ -39,7 +37,7 @@ export default async function(req) {
       alertAperti, uploadLogs, assegnatiRete, assegnatiAci, documenti,
       // delle prefatture bastano mese e stato: le righe non servono qui
       prefatture: (prefatture || []).map(p => ({ anno: p.anno, mese: p.mese, superata: p.superata })),
-      riepilogoQualifica: riepiloghi[0] || null, giacenzeSito, impiantiTarget, richiesteEct,
+      riepilogoQualifica: riepiloghi[0] || null, richiesteEct,
     }));
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

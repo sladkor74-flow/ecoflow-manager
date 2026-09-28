@@ -42,6 +42,15 @@
       "type": "string",
       "description": "Tabella \"Target Ecotyre\" per regione con prezzo: [{ regione, target_t, prezzo }]"
     },
+    "fine_programmazione": {
+      "type": "string",
+      "format": "date",
+      "description": "Fino a quando si programmano le secondarie dell'anno (AAAA-MM-GG), per gli impianti senza una data loro (27/09/2026). Vuoto: il 18/12 per il 2026, il 31/12 con un avviso per gli altri anni (fineProgrammazione.ts)."
+    },
+    "kg_per_viaggio": {
+      "type": "number",
+      "description": "Quanto vale un viaggio di secondaria nei conti della predittivita' (kg), per quell'anno (27/09/2026). Vuoto: le regole dell'anno (regolePredittivita.ts), 13.000 kg per il 2026."
+    },
     "note": {
       "type": "string"
     },

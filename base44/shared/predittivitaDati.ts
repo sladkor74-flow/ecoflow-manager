@@ -17,6 +17,15 @@
 // La configurazione vale un anno (26/09/2026): impianti e stoccaggi seguiti
 // hanno il loro anno (un record senza anno vale per il 2026, l'anno in cui la
 // predittivita' e' nata), i target dei raccoglitori sono gia' per anno.
+//
+// Dal 27/09/2026 tutta la configurazione dell'anno si scrive in Target & Status
+// (scheda Impianti e stoccaggi) e qui si legge soltanto:
+// - impianti e collegamenti si leggono interi, a pagine, e si tiene l'anno con
+//   annoDelRecord (un filtro per anno perderebbe i record senza anno);
+// - un impianto con segue_predittivita a false ha un target (lo legge Giacenze)
+//   ma la predittivita' non lo segue;
+// - il contratto Ecotyre dell'anno (CommessaEcotyre) porta la fine della
+//   programmazione e i kg a viaggio, quando ci sono.
 import { fetchAll } from "./fetchAll.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
 import { normalizzaRagioneSociale as chiave } from "./normalizzaRagioneSociale.ts";
@@ -47,7 +56,9 @@ const TIPI_LETTI = ['primarie', 'primarie_rete', 'secondarie'];
 export async function leggiDatiPredittivita(base44, { anno, oggi }) {
   const e = base44.asServiceRole.entities;
   const annoN = Number(anno);
-  const regole = regolePredittivita(annoN);
+  // Le regole definitive si sanno dopo aver letto il contratto dell'anno; per la
+  // finestra dei movimenti bastano le settimane del ritmo, che non ci stanno.
+  const regoleBase = regolePredittivita(annoN);
   const avvisi = [];
 
   // La finestra dei movimenti: dal 1 gennaio, o da prima se il ritmo lo chiede.
@@ -56,15 +67,18 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
   // finestra del ritmo e' sempre coperta, anche con i dati in ritardo a inizio
   // anno. Sono una dozzina di settimane in piu', non gli anni passati.
   const inizioAnno = `${annoN}-01-01`;
-  const candidati = [inizioAnno, piuGiorni(oggi, -7 * (regole.settimane_ritmo + 2)), piuGiorni(inizioAnno, -7 * regole.settimane_ritmo - 1)];
+  const candidati = [inizioAnno, piuGiorni(oggi, -7 * (regoleBase.settimane_ritmo + 2)), piuGiorni(inizioAnno, -7 * regoleBase.settimane_ritmo - 1)];
   const dal = piuGiorni(candidati.reduce((a, b) => (b < a ? b : a)), -1);
   const filtroFinestra = { stato: 'terminato', trasporto_finito_il: { $gte: `${dal}T00:00:00` } };
   const filtroSenzaFine = { stato: 'terminato', trasporto_finito_il: null };
 
   const prima = await statoCaricamenti(base44, TIPI_LETTI).catch(() => null);
-  const [impiantiTutti, fornitoriTutti, targetRaccoglitori, primarie, secondarie, primarieSenzaFine, secondarieSenzaFine, rilevazioni, programmati] = await Promise.all([
-    e.ImpiantoTargetSecondaria.filter({ stato: 'attivo' }),
-    e.FornitoreSecondaria.filter({ stato: 'attivo' }),
+  const [impiantiTutti, fornitoriTutti, commesse, targetRaccoglitori, primarie, secondarie, primarieSenzaFine, secondarieSenzaFine, rilevazioni, programmati] = await Promise.all([
+    fetchAll(e.ImpiantoTargetSecondaria).then(rs => rs.filter(r => r.stato === 'attivo')),
+    fetchAll(e.FornitoreSecondaria).then(rs => rs.filter(r => r.stato === 'attivo')),
+    // Il contratto dell'anno: se non si legge si va avanti con le regole scritte
+    // nel codice, e lo si dice.
+    Promise.resolve().then(() => fetchAll(e.CommessaEcotyre, { anno: annoN })).catch(() => null),
     e.TargetRaccoglitore.filter({ anno: annoN }),
     fetchAll(e.PrimariaRete, filtroFinestra),
     fetchAll(e.Secondaria, filtroFinestra),
@@ -88,20 +102,30 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
   const primarieRete = primarie.filter(r => rete(r, 'PrimariaRete'));
   const secondarieRete = secondarie.filter(r => rete(r, 'Secondaria'));
 
+  // --- il contratto Ecotyre dell'anno: fine della programmazione e kg a viaggio ---
+  const recente = (r) => String((r && (r.updated_date || r.created_date)) || '');
+  const commessa = (commesse || []).filter(c => Number(c.anno) === annoN)
+    .reduce((a, c) => (!a || recente(c) > recente(a) ? c : a), null);
+  if (commesse === null) avvisi.push({ tipo: 'commessa_non_letta', testo: `Il contratto Ecotyre del ${annoN} non si è potuto leggere: fine della programmazione e kg a viaggio sono quelli predefiniti.` });
+  const regole = regolePredittivita(annoN, commessa);
+
   // --- gli impianti seguiti dell'anno ---
   const impiantiAnno = impiantiTutti.filter(i => annoDelRecord(i) === annoN);
-  const fine = fineProgrammazione(annoN);
-  if (!fine.definita) avvisi.push({ tipo: 'fine_non_definita', testo: avvisoFineProgrammazione(annoN) });
+  const fine = fineProgrammazione(annoN, commessa);
+  if (!fine.definita) avvisi.push({ tipo: 'fine_non_definita', testo: avvisoFineProgrammazione(annoN, commessa) });
   const impianti = [];
   const perId = new Map();
   for (const i of impiantiAnno) {
     const k = chiave(i.nome_impianto);
     if (!k) continue;
+    // Ha un target (Giacenze lo legge) ma la predittivita' non lo segue: Green
+    // Tyre Project, T.R.S., Gatim (utente, 27/09/2026).
+    if (i.segue_predittivita === false) continue;
     perId.set(i.id, k);
     // una data di fine di un altro anno non vale: vale quella dell'anno
     let fineImp = String(i.data_fine || '').slice(0, 10);
     if (fineImp && fineImp.slice(0, 4) !== String(annoN)) {
-      avvisi.push({ tipo: 'fine_di_un_altro_anno', impianto: i.nome_impianto, testo: `${i.nome_impianto} ha come fine della programmazione il ${fineImp.split('-').reverse().join('/')}, che non è del ${annoN}: si usa il ${fine.data.split('-').reverse().join('/')}. Correggila nella scheda Configurazione della Predittività Secondarie.` });
+      avvisi.push({ tipo: 'fine_di_un_altro_anno', impianto: i.nome_impianto, testo: `${i.nome_impianto} ha come fine della programmazione il ${fineImp.split('-').reverse().join('/')}, che non è del ${annoN}: si usa il ${fine.data.split('-').reverse().join('/')}. Correggila in Target & Status → Impianti e stoccaggi.` });
       fineImp = '';
     }
     impianti.push({ chiave: k, nome: i.nome_impianto, target_kg: Number(i.target) || 0, fine: fineImp || fine.data, id: i.id });
@@ -210,7 +234,7 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
       impianti, raccoglitori, stoccaggi: [...stoccaggi.values()],
       primarie: primarieRete, secondarie: secondarieRete,
     },
-    configurazione: { impianti: impiantiAnno, fornitori: fornitoriAnno, target_raccoglitori: targetRaccoglitori },
+    configurazione: { impianti: impiantiAnno, fornitori: fornitoriAnno, target_raccoglitori: targetRaccoglitori, commessa },
     // null: il programma fissato non si e' potuto leggere (non "non c'e'")
     programmati: programmati === null ? null : (programmati || []),
     senza_fine: primarieSenzaFine === null || secondarieSenzaFine === null ? null : { primarie: primarieSenzaFine.filter(r => rete(r, 'PrimariaRete')), secondarie: secondarieSenzaFine.filter(r => rete(r, 'Secondaria')) },

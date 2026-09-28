@@ -723,7 +723,7 @@ export const STRUMENTI = [
       // Le regole dell'anno non ancora scritte sono un avviso, come nella pagina.
       const avvisi = [...(d.avvisi || [])];
       if (d.regole_definite === false && !avvisi.some(a => a.tipo === 'regole_non_definite')) {
-        avvisi.push({ tipo: 'regole_non_definite', testo: `Per il ${d.anno || anno} le regole della predittivita' (quanto vale un viaggio, l'ordine degli impianti di uno stoccaggio) non sono ancora scritte: valgono quelle predefinite.` });
+        avvisi.push({ tipo: 'regole_non_definite', testo: `Per il ${d.anno || anno} le regole della predittivita' (quanto vale un viaggio, l'ordine degli impianti di uno stoccaggio) non sono ancora scritte: valgono quelle predefinite. Si scrivono in Target & Status, scheda Impianti e stoccaggi.` });
       }
       return {
         fonte: 'Predittivita delle secondarie, canale RETE',

@@ -19,12 +19,13 @@
     },
     "target_primarie_t": {
       "type": "number",
-      "default": 0
+      "default": 0,
+      "description": "SUPERATO (27/09/2026): non si scrive piu'. Il target delle primarie del sito e' la somma dei target annui dei raccoglitori di quell'anno legati al sito (TargetRaccoglitore, in Target & Status). Il vecchio valore resta e si usa solo come ripiego di transizione quando i raccoglitori non danno niente"
     },
     "target_totale_t": {
       "type": "number",
       "default": 0,
-      "description": "Comprensivo delle secondarie ricevute; vale zero per gli stoccaggi, che non ne hanno uno"
+      "description": "SUPERATO (27/09/2026): non si scrive piu'. Il target totale dell'impianto (comprensivo delle secondarie ricevute) si scrive in Target & Status (ImpiantoTargetSecondaria.target, in kg, per anno) e le Giacenze lo leggono da li'. Il vecchio valore resta e si usa solo come ripiego di transizione, con l'anomalia 'target_da_portare', finche' non e' portato in Target & Status (portaTargetInTargetStatus)"
     },
     "giacenza_riferimento_t": {
       "type": "number",

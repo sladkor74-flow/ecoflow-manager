@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { MESI, meseCorrente as getMeseCorrente } from '@/lib/pfuConstants';
@@ -11,7 +11,7 @@ import TargetChart from '@/components/target-status/TargetChart';
 import ExportButtons from '@/components/target-status/ExportButtons';
 import TargetRaccoglitoriGrid from '@/components/target-status/TargetRaccoglitoriGrid';
 import CommessaEcotyreForm from '@/components/target-status/CommessaEcotyreForm';
-import TargetAnnuali from '@/pages/TargetAnnuali';
+import ConfigurazioneImpianti from '@/components/target-status/ConfigurazioneImpianti';
 import ReportGenerale from '@/components/target-status/ReportGenerale';
 import CanaleAci from '@/components/target-status/CanaleAci';
 import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
@@ -20,8 +20,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/lib/AuthContext';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { fetchAllClient } from '@/lib/fetchAllClient';
-import { tonnellate, percentuale, ANNI_TARGET } from '@/lib/target';
-import { Loader2, RefreshCw, Filter, X } from 'lucide-react';
+import { tonnellate, percentuale, anniTarget } from '@/lib/target';
+import { annoDelRecord, annoCorrenteRoma, annoChiuso } from '@/lib/annoTarget';
+import { Loader2, RefreshCw, Filter, X, Lock } from 'lucide-react';
 
 // Target & Status: unico punto in cui si scrivono i target.
 // RETE, ACI ed Extra Raccolta sono canali indipendenti: i target si confrontano
@@ -30,11 +31,18 @@ import { Loader2, RefreshCw, Filter, X } from 'lucide-react';
 //   raccolto per regione confrontato con il contratto. Solo lettura.
 // - Target raccoglitori: annuo e mensile per raccoglitore, regione e impianto.
 // - Commessa Ecotyre: quanto richiede il contratto.
-// - Impianti e stoccaggi: target annuali degli impianti e plafond degli stoccaggi.
+// - Impianti e stoccaggi: impianti col target, stoccaggi con plafond e priorita',
+//   fine della programmazione e chili per viaggio dell'anno.
 // Tutti gli altri moduli leggono questi dati.
+//
+// Si lavora un anno alla volta, dal 2025 all'anno prossimo (27/09/2026). Un anno
+// chiuso (prima di quello in corso, a Roma) e' in sola lettura in tutte le
+// schede; chi non e' amministratore consulta soltanto.
 
 const TARGET_BY_YEAR = { 2025: 11200, 2026: 11550 };
 const SCHEDE = ['andamento', 'raccoglitori', 'commessa', 'impianti'];
+// fra piu' commesse dello stesso anno vale la modificata per ultima, come nelle funzioni
+const piuRecente = (righe) => (righe || []).reduce((x, r) => (!x || String(r.updated_date || r.created_date || '') > String(x.updated_date || x.created_date || '') ? r : x), null);
 const leggiLista = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
 
 // Raccolto per regione confrontato con il contratto: quanto ci si attende fino a
@@ -115,7 +123,23 @@ export default function TargetStatus() {
   const isAdmin = user?.role === 'admin';
   const [params, setParams] = useSearchParams();
   const scheda = SCHEDE.includes(params.get('tab')) ? params.get('tab') : 'andamento';
-  const [anno, setAnno] = useState(new Date().getFullYear());
+  const anni = useMemo(() => anniTarget(), []);
+  // L'anno si tiene nell'indirizzo (?anno=), cosi' un collegamento da un altro
+  // modulo apre l'anno giusto.
+  const annoIndirizzo = Number(params.get('anno'));
+  const anno = anni.includes(annoIndirizzo) ? annoIndirizzo : annoCorrenteRoma();
+  const chiuso = annoChiuso(anno);
+  const puoScrivere = isAdmin && !chiuso;
+  // La commessa si scrive tutta e si salva con un pulsante: chi cambia anno o
+  // scheda con modifiche non salvate le perderebbe, e allora glielo si chiede.
+  const [commessaModificata, setCommessaModificata] = useState(false);
+  const vaiA = (tab, a) => {
+    if (commessaModificata && (tab !== scheda || a !== anno)
+      && !window.confirm(`La commessa Ecotyre del ${anno} ha modifiche non salvate: se cambi ${a !== anno ? 'anno' : 'scheda'} si perdono. Vuoi continuare?`)) return;
+    if (tab !== scheda || a !== anno) setCommessaModificata(false);
+    setParams({ tab, anno: String(a) }, { replace: true });
+  };
+  const setAnno = (a) => vaiA(scheda, a);
   const [raccolto, setRaccolto] = useState(null);
   const [raccoltoAci, setRaccoltoAci] = useState(null);
   const [targets, setTargets] = useState([]);
@@ -125,9 +149,15 @@ export default function TargetStatus() {
   const [loading, setLoading] = useState(false);
   const [meseSelezionato, setMeseSelezionato] = useState(getMeseCorrente());
   const [filters, setFilters] = useState({ mese: [], regione: [], raccoglitore: [], impianto: [] });
+  // Le letture si numerano: una superata (l'anno o i filtri sono cambiati nel
+  // frattempo) non tocca niente, cosi' i target di un altro anno non restano a
+  // video e non si scrivono su quello sbagliato.
+  const ultimaLettura = useRef(0);
 
   const loadData = useCallback(async () => {
+    const n = ++ultimaLettura.current;
     setLoading(true);
+    setImpiantoTargets([]);
     try {
       const [raccoltoRes, aciRes, targetRes, annuiRes, commessaRes, impTargetRes] = await Promise.all([
         base44.functions.invoke('computeRaccolto', { filters: { ...filters, anno: [anno], canale: 'rete' } }),
@@ -137,13 +167,15 @@ export default function TargetStatus() {
         base44.entities.CommessaEcotyre.filter({ anno }).catch(() => []),
         fetchAllClient(base44.entities.ImpiantoTarget),
       ]);
+      if (n !== ultimaLettura.current) return;
       setRaccolto(raccoltoRes.data);
       setRaccoltoAci(aciRes ? aciRes.data : null);
       setTargets(targetRes);
       setAnnui(annuiRes);
-      setCommessa(commessaRes[0] || null);
-      setImpiantoTargets(impTargetRes.filter(t => !t.anno || Number(t.anno) === anno));
+      setCommessa(piuRecente(commessaRes));
+      setImpiantoTargets(impTargetRes.filter(t => annoDelRecord(t) === anno));
     } catch (e) {
+      if (n !== ultimaLettura.current) return;
       console.error(e);
     }
     setLoading(false);
@@ -241,7 +273,8 @@ export default function TargetStatus() {
   }, [mergedData, raccolto, filters, commessa, anno]);
 
   const saveImpiantoTarget = async (impianto, mese, value) => {
-    const existing = impiantoTargets.find(t => t.impianto === impianto && t.mese === mese);
+    if (!puoScrivere || loading) return;
+    const existing = impiantoTargets.find(t => t.impianto === impianto && t.mese === mese && annoDelRecord(t) === anno);
     if (existing) {
       await base44.entities.ImpiantoTarget.update(existing.id, { target: value });
       setImpiantoTargets(prev => prev.map(t => (t.id === existing.id ? { ...t, target: value } : t)));
@@ -263,20 +296,33 @@ export default function TargetStatus() {
         </div>
         <div className="flex items-center gap-2">
           <select value={anno} onChange={e => setAnno(Number(e.target.value))} className="border rounded-md px-3 py-2 text-sm bg-background" title="Anno">
-            {ANNI_TARGET.map(a => <option key={a} value={a}>{a}</option>)}
+            {anni.map(a => <option key={a} value={a}>{a}{annoChiuso(a) ? ' (chiuso)' : ''}</option>)}
           </select>
           {scheda === 'andamento' && (
             <>
               <button onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
                 <RefreshCw className="w-4 h-4" /> Aggiorna
               </button>
-              <ExportButtons onExcel={exportExcel} onPDF={() => exportPDF(kpis, mergedData, regioneData, impiantiData)} onPPT={() => exportPPT(kpis, mergedData, regioneData, impiantiData)} />
+              <ExportButtons onExcel={() => exportExcel(anno)} onPDF={() => exportPDF(kpis, mergedData, regioneData, impiantiData)} onPPT={() => exportPPT(kpis, mergedData, regioneData, impiantiData)} />
             </>
           )}
         </div>
       </div>
 
-      <Tabs value={scheda} onValueChange={v => setParams({ tab: v }, { replace: true })}>
+      {annoIndirizzo > 0 && !anni.includes(annoIndirizzo) && (
+        <div className="text-sm bg-amber-50 border border-amber-300 text-amber-900 rounded-lg px-3 py-2">
+          Il {annoIndirizzo} in Target &amp; Status non c&apos;è (gli anni vanno dal {anni[anni.length - 1]} al {anni[0]}): stai vedendo il {anno}.
+        </div>
+      )}
+
+      {chiuso && (
+        <div className="flex items-start gap-2 text-sm bg-muted border rounded-lg px-3 py-2">
+          <Lock className="w-4 h-4 mt-0.5 shrink-0" />
+          <span><strong>Anno chiuso: sola lettura.</strong> Il {anno} si consulta com&apos;è, in tutte le schede; niente si cancella.</span>
+        </div>
+      )}
+
+      <Tabs value={scheda} onValueChange={v => vaiA(v, anno)}>
         <TabsList>
           <TabsTrigger value="andamento">Andamento</TabsTrigger>
           <TabsTrigger value="raccoglitori">Target raccoglitori</TabsTrigger>
@@ -342,7 +388,7 @@ export default function TargetStatus() {
               </div>
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-3">Progressivo e avanzamento impianti</h2>
-                <ImpiantiTable data={impiantiData} onSaveTarget={saveImpiantoTarget} />
+                <ImpiantiTable data={impiantiData} onSaveTarget={saveImpiantoTarget} modificabile={puoScrivere} />
               </div>
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-1">Canale ACI</h2>
@@ -355,15 +401,16 @@ export default function TargetStatus() {
         </TabsContent>
 
         <TabsContent value="raccoglitori" className="mt-4">
-          {scheda === 'raccoglitori' && <TargetRaccoglitoriGrid anno={anno} isAdmin={isAdmin} user={user} />}
+          {scheda === 'raccoglitori' && <TargetRaccoglitoriGrid key={anno} anno={anno} isAdmin={puoScrivere} user={user} />}
         </TabsContent>
 
         <TabsContent value="commessa" className="mt-4">
-          {scheda === 'commessa' && <CommessaEcotyreForm anno={anno} isAdmin={isAdmin} user={user} />}
+          {scheda === 'commessa' && <CommessaEcotyreForm key={anno} anno={anno} isAdmin={puoScrivere} user={user} onModificato={setCommessaModificata} />}
         </TabsContent>
 
         <TabsContent value="impianti" className="mt-4">
-          {scheda === 'impianti' && <TargetAnnuali incorporato anno={anno} />}
+          {/* una per anno: niente di un anno resta a video, modificabile, quando si passa a un altro */}
+          {scheda === 'impianti' && <ConfigurazioneImpianti key={anno} anno={anno} solaLettura={!puoScrivere} user={user} />}
         </TabsContent>
       </Tabs>
     </div>

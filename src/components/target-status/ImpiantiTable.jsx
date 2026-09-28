@@ -3,7 +3,9 @@ import { MESI_BREVI } from '@/lib/pfuConstants';
 import EditableCell from './EditableCell';
 import { formatNumber } from '@/lib/utils';
 
-export default function ImpiantiTable({ data, onSaveTarget }) {
+// Il target mensile di un impianto si corregge solo se modificabile: amministratore
+// e anno aperto. Altrimenti si legge.
+export default function ImpiantiTable({ data, onSaveTarget, modificabile = false }) {
   return (
     <div className="border rounded-lg overflow-x-auto">
       <table className="text-xs whitespace-nowrap border-collapse">
@@ -37,7 +39,7 @@ export default function ImpiantiTable({ data, onSaveTarget }) {
               {r.mesi.map((m, j) => (
                 <React.Fragment key={j}>
                   <td className="px-1 py-1.5 text-right">
-                    <EditableCell value={m.target} onSave={(v) => onSaveTarget(r.impianto, m.mese, v)} />
+                    <EditableCell value={m.target} onSave={(v) => onSaveTarget(r.impianto, m.mese, v)} disabled={!modificabile} />
                   </td>
                   <td className="px-1 py-1.5 text-right tabular-nums">{formatNumber(m.raccolto)}</td>
                   <td className={`px-1 py-1.5 text-right tabular-nums ${m.delta > 0 ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50'}`}>

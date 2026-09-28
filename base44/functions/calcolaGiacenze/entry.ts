@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
-import { divergenzeTargetImpianti } from "../../shared/targetImpianti.ts";
+import { targetRigaGiacenze, testoTargetDaPortare } from "../../shared/targetImpianti.ts";
+import { recordDellAnno, annoChiuso } from "../../shared/annoTarget.ts";
 import { annoRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
@@ -33,7 +34,13 @@ import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, form
 // Dichiarazioni Impianti (shared/giacenzaPortale.ts): fotografia, piu' i carichi
 // di rete che il file non contiene, meno le dichiarazioni caricate dopo.
 //   PrimariaRete/Aci, ExtraRaccolta, Secondaria, Terziaria -> movimentazione (stato terminato, trasporto_finito_il nell'anno)
-//   GiacenzaSito -> target e tipologia trattamento
+//   GiacenzaSito -> elenco dei siti dell'anno e tipologia trattamento
+//   ImpiantoTargetSecondaria -> target dell'impianto, di esattamente quell'anno (Target & Status)
+//   TargetRaccoglitore -> target delle primarie del sito: somma dei raccoglitori legati al sito
+//
+// Dal 27/09/2026 i target si scrivono solo in Target & Status (decisione
+// dell'utente): Giacenze li legge da li'. Finche' un target e' scritto solo nel
+// vecchio campo di GiacenzaSito si usa quello, con l'anomalia 'target_da_portare'.
 //
 // RUOLO DEDOTTO DALL'ORDINE PRIMARIO:
 //   I report OrdineNonDichiarato e DichiarazioneTrattamento non contengono Tipo_Destinazione,
@@ -61,6 +68,7 @@ export default async function(req) {
     const { anno } = await req.json();
     if (!anno) return Response.json({ error: 'Anno obbligatorio' }, { status: 400 });
     const annoNum = Number(anno);
+    const annoTargetChiuso = annoChiuso(annoNum);
 
     const norm = normalizzaRagioneSociale;
     // Tonnellate arrotondate ai kg: la terza cifra decimale non si perde.
@@ -68,7 +76,9 @@ export default async function(req) {
     const tdNorm = (v) => String(v || '').toLowerCase().trim();
 
     // Carica tutte le sorgenti dati in parallelo
-    const [nonDichiarati, dichiarazioni, reteAll, aciAll, extraAll, secAll, terzAll, giacenzeSito, giacenzeStoccaggio, dichiarazioniSito] = await Promise.all([
+    // ImpiantoTargetSecondaria si legge tutto e si filtra con annoDelRecord: un
+    // record senza anno vale il 2026, e un filtro per anno lo perderebbe.
+    const [nonDichiarati, dichiarazioni, reteAll, aciAll, extraAll, secAll, terzAll, giacenzeSito, giacenzeStoccaggio, dichiarazioniSito, impiantiTarget, targetRaccoglitori] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.OrdineNonDichiarato),
       fetchAll(base44.asServiceRole.entities.DichiarazioneTrattamento),
       fetchAll(base44.asServiceRole.entities.PrimariaRete),
@@ -79,7 +89,13 @@ export default async function(req) {
       fetchAll(base44.asServiceRole.entities.GiacenzaSito, { anno: annoNum }),
       fetchAll(base44.asServiceRole.entities.GiacenzaStoccaggio),
       fetchAll(base44.asServiceRole.entities.DichiarazioneSito),
+      fetchAll(base44.asServiceRole.entities.ImpiantoTargetSecondaria),
+      fetchAll(base44.asServiceRole.entities.TargetRaccoglitore),
     ]);
+    // Gli impianti di Target & Status di quell'anno con un target: compaiono anche
+    // senza movimenti, come prima quelli con il target scritto in Giacenze.
+    const impiantiConTarget = recordDellAnno(impiantiTarget, annoNum)
+      .filter(r => r.stato !== 'non_attivo' && Number(r.target) > 0 && norm(r.nome_impianto));
 
     // --- Classi dei PFU, come nel portale: P, M, G1, G2 e ACI (autodemolizione) ---
     // Il prodotto arriva come "P - fino a 35 kg", ".class1" o "PFU Autodemolizione".
@@ -133,6 +149,7 @@ export default async function(req) {
     for (const r of terzAll) { registraNome(r.unita_locale_origine); registraNome(r.ragione_sociale); }
     for (const g of giacenzeSito) registraNome(g.sito);
     for (const r of giacenzeStoccaggio) registraNome(r.sito);
+    for (const r of impiantiConTarget) registraNome(r.nome_impianto);
 
     // === 0. MAPPA ORDINE -> TIPO_DESTINAZIONE (da PrimariaRete + PrimariaAci) ===
     const ordineTipoMap = new Map(); // id_ordine -> tipo_destinazione normalizzato
@@ -494,6 +511,7 @@ export default async function(req) {
     const rowKeys = new Set();
 
     for (const k of giacMapKeys) rowKeys.add(k);
+    for (const r of impiantiConTarget) rowKeys.add(norm(r.nome_impianto) + '|imp');
     for (const k of giacPortaleMap.keys()) rowKeys.add(k);
     for (const k of aggiuntiMap.keys()) rowKeys.add(k);
     // Un soggetto con un terminato da sistemare compare, anche se e' l'unica cosa che ha.
@@ -680,8 +698,17 @@ export default async function(req) {
       // conferimenti: sommarle agli ingressi contava ogni secondaria due volte.
       const conferito_t = conferito_primarie_t + secondarie_in_t;
 
-      const target_primarie_t = g?.target_primarie_t || 0;
-      const target_totale_t = g?.target_totale_t || 0;
+      // I target vengono da Target & Status (shared/targetImpianti.ts). Il target
+      // delle primarie e' del sito, non del ruolo: per chi e' impianto e
+      // stoccaggio va sulla riga dell'impianto, perche' il totale non lo conti due volte.
+      const tgt = targetRigaGiacenze({
+        sito: sitoNome, td, anno: annoNum, giacenzaSito: g,
+        impiantiTarget, raccoglitori: targetRaccoglitori,
+        primarieQui: td === 'imp' || !rowKeys.has(ns + '|imp'),
+        chiave: norm,
+      });
+      const target_primarie_t = tgt.target_primarie_t;
+      const target_totale_t = tgt.target_totale_t;
       const giacenza_riferimento_t = g?.giacenza_riferimento_t || 0;
       const tipologia_trattamento = g?.tipologia_trattamento || '';
 
@@ -712,7 +739,7 @@ export default async function(req) {
       const haAttivita = giacenza_portale_t > 0 || in_attesa_dichiarazione_t > 0
         || ordini_da_dichiarare > 0 || dichiarato_t > 0 || conferito_t > 0 || conferito_aci_t > 0 || conferito_extra_t > 0
         || dateRiga.length > 0;
-      if (!g && td === 'imp' && !haAttivita) continue;
+      if (!g && td === 'imp' && !haAttivita && !(target_totale_t > 0) && !(target_primarie_t > 0)) continue;
 
       if (senzaRilevazione) anomalie.push({ tipo: 'stoccaggio_senza_rilevazione', sito: sitoNome });
       // Una lettura che non torna con l'ancora dell'anno piu' i movimenti si
@@ -783,8 +810,17 @@ export default async function(req) {
       // Il target riguarda i soli impianti. Uno stoccaggio puo' legittimamente
       // esserne privo: quello di Irigom, per esempio, serve unicamente per gli
       // ACI, che un target non ce l'hanno.
-      if (!g && td === 'imp') {
+      // Un anno chiuso si legge soltanto (28/09/2026): li' vale il target scritto
+      // allora, e non si chiede di sistemare niente che non si puo' piu' sistemare.
+      if (td === 'imp' && !(target_totale_t > 0) && !annoTargetChiuso) {
         sitiSenzaTarget.add(sitoNome + ' (Impianto)');
+      }
+      if (tgt.da_portare.totale && !annoTargetChiuso) {
+        const cosa = tgt.da_portare.spento ? 'spento' : 'totale';
+        anomalie.push({ tipo: 'target_da_portare', sito: sitoNome, anno: annoNum, cosa: 'totale', spento: tgt.da_portare.spento, target_t: r2(target_totale_t), avviso: testoTargetDaPortare(cosa) });
+      }
+      if (tgt.da_portare.primarie && !annoTargetChiuso) {
+        anomalie.push({ tipo: 'target_da_portare', sito: sitoNome, anno: annoNum, cosa: 'primarie', target_t: r2(target_primarie_t), avviso: testoTargetDaPortare('primarie') });
       }
       const sommaDerivati = der.granulo + der.fibre + der.metallo + der.cippato + der.ciabattato;
       if (dichiarato_t > 0 && Math.abs(sommaDerivati - dichiarato_t) > 0.001) {
@@ -796,7 +832,7 @@ export default async function(req) {
           differenza_t: r2(dichiarato_t - sommaDerivati)
         });
       }
-      if (g && target_totale_t > 0 && giacenza_portale_t > target_totale_t) {
+      if (target_totale_t > 0 && giacenza_portale_t > target_totale_t) {
         anomalie.push({
           tipo: 'giacenza_sopra_target',
           sito: sitoNome,
@@ -829,12 +865,6 @@ export default async function(req) {
     // Stesso portale dei gruppi: un senza fine di un altro anno che il portale
     // conosce e' contato anche qui (22/09/2026).
     totali.date_da_sistemare = daSistemare.perCanale(portaleConosce);
-
-    // Il target dell'impianto scritto anche in Target & Status: se diverge si dice qui
-    const impiantiTarget = await fetchAll(base44.asServiceRole.entities.ImpiantoTargetSecondaria);
-    for (const d of divergenzeTargetImpianti(giacenzeSito, impiantiTarget, annoNum)) {
-      anomalie.push({ tipo: 'target_divergente', sito: d.impianto, giacenze_t: d.giacenze_t, target_status_t: d.target_status_t, differenza_t: d.differenza_t });
-    }
 
     return Response.json({ anno: annoNum, righe, totali, anomalie });
   } catch (error) {

@@ -6,10 +6,12 @@ import * as XLSX from 'npm:xlsx@0.18.5';
 import { computeRaccoltoData, MESI } from "../../shared/raccoltoCalculator.ts";
 import { aggregaTargetMensili, aggregaTargetAnnui } from "../../shared/targetRaccoglitori.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
+import { annoDelRecord } from "../../shared/annoTarget.ts";
 
 // Esporta i dati di Status & Target in un file Excel (3 fogli: Raccoglitori, Regioni, Impianti;
 // un quarto, Date da sistemare, quando qualche terminato di rete ne ha).
-// Payload: { anno? }
+// Payload: { anno? } (l'anno scelto in Target & Status; senza, quello in corso)
 // Ritorna: { file_base64, filename }
 export default async function(req) {
   try {
@@ -28,7 +30,10 @@ export default async function(req) {
     // 2. Leggi target dell'anno da Target & Status
     const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter({ anno }, '-created_date', 10000));
     const annui = aggregaTargetAnnui(await base44.asServiceRole.entities.TargetRaccoglitore.filter({ anno }, '-created_date', 5000));
-    const impiantoTargets = await base44.asServiceRole.entities.ImpiantoTarget.list('-created_date', 10000);
+    // I target mensili degli impianti: tutti, tenuti per anno con annoDelRecord
+    // (un record senza anno vale il 2026), cosi' un anno non prende quelli di un altro.
+    const impiantoTargets = (await fetchAll(base44.asServiceRole.entities.ImpiantoTarget))
+      .filter(t => annoDelRecord(t) === anno);
 
     // 3. Mappe target, per nome normalizzato e regione
     const targetMap = {};
@@ -111,7 +116,7 @@ export default async function(req) {
     return Response.json({
       file_base64: xlsxBase64,
       // il giorno italiano: fra mezzanotte e le due quello UTC e' ancora ieri
-      filename: `Status_Target_${oggiRoma()}.xlsx`
+      filename: `Status_Target_${anno}_${oggiRoma()}.xlsx`
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

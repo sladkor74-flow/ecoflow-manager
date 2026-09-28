@@ -10,7 +10,7 @@ const TIPO_LABEL = {
   ordine_senza_riscontro: 'Ordine senza riscontro',
   stoccaggio_senza_rilevazione: 'Stoccaggio senza rilevazione',
   giacenza_negativa: 'Giacenza negativa',
-  target_divergente: 'Target diverso da Target & Status',
+  target_da_portare: 'Target da portare in Target & Status',
   ordini_senza_fine_trasporto: 'Righe del file del portale senza fine trasporto',
   rilevazione_da_controllare: 'Rilevazione da controllare',
 };
@@ -88,9 +88,13 @@ export default function AnomalieAlert({ anomalie }) {
                 {a.sito && a.sito}
                 {a.tipo === 'coerenza_derivati' && ` — dichiarato ${t(a.dichiarato_t)} t, derivati ${t(a.somma_derivati_t)} t (diff. ${t(a.differenza_t)} t)`}
                 {a.tipo === 'giacenza_sopra_target' && ` — giacenza ${t(a.giacenza_portale_t)} t contro target ${t(a.target_totale_t)} t`}
-                {a.tipo === 'sito_senza_target' && ` — nessun record GiacenzaSito per l'anno ${a.anno}`}
+                {a.tipo === 'sito_senza_target' && ` — nessun target in Target & Status per il ${a.anno}: scrivilo in Target & Status → Impianti e stoccaggi`}
+                {a.tipo === 'target_da_portare' && (a.cosa === 'primarie'
+                  ? ` — il target delle primarie (${t(a.target_t)} t) è ancora scritto in Giacenze: scrivi in Target & Status i target dei raccoglitori che portano a questo sito, e da lì si calcola da solo`
+                  : a.spento
+                    ? ` — il target (${t(a.target_t)} t) è ancora scritto in Giacenze, perché in Target & Status l'impianto del ${a.anno} c'è ma non è attivo: riattivalo a mano in Target & Status → Impianti e stoccaggi e scrivi lì il target. Finché non lo fai si usa questo`
+                    : ` — il target (${t(a.target_t)} t) è ancora scritto in Giacenze: portalo in Target & Status → Impianti e stoccaggi. Finché non lo fai si usa questo`)}
                 {a.tipo === 'giacenza_negativa' && ` — classe ${a.classe}: ${formatKg(a.kg)} kg dall'ancora dell'anno piu' i movimenti successivi: mancano ingressi, o l'ancora ha i chili nella classe sbagliata`}
-                {a.tipo === 'target_divergente' && ` — qui ${t(a.giacenze_t)} t, in Target & Status ${t(a.target_status_t)} t (differenza ${t(a.differenza_t)} t): i due numeri devono essere uguali, correggi quello sbagliato`}
                 {a.tipo === 'stoccaggio_senza_rilevazione' && ` — il dato va letto dalla pagina Unita' Locali di Stoccaggio del portale`}
                 {a.tipo === 'ordini_senza_fine_trasporto' && testoSenzaFineFile(a)}
                 {a.tipo === 'rilevazione_da_controllare' && testoRilevazioneDaControllare(a)}

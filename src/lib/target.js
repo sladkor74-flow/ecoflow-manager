@@ -2,13 +2,22 @@
 
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { formatTonnellate, formatPercentuale, dataServer } from '@/lib/utils';
+import { annoCorrenteRoma } from '@/lib/annoTarget';
 
 export const REGIONI_COMMESSA = ['Campania', 'Puglia', 'Basilicata', 'Calabria', 'Sicilia'];
 
-export const ANNI_TARGET = (() => {
-  const oggi = new Date().getFullYear();
-  return [oggi - 1, oggi, oggi + 1];
-})();
+// Il primo anno che si scrive in Target & Status.
+export const PRIMO_ANNO_TARGET = 2025;
+
+// Gli anni che si scelgono in Target & Status: dal 2025 fino all'anno prossimo,
+// per preparare il nuovo anno prima che cominci. L'anno corrente e' quello di
+// Roma: il 31 dicembre sera il 2027 non e' ancora cominciato.
+export function anniTarget() {
+  const ultimo = annoCorrenteRoma() + 1;
+  const anni = [];
+  for (let a = ultimo; a >= PRIMO_ANNO_TARGET; a--) anni.push(a);
+  return anni;
+}
 
 // Tonnellate in italiano: due decimali, tre se i kg non sono tondi.
 export function tonnellate(v) {

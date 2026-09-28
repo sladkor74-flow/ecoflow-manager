@@ -4,8 +4,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel, AlertDialogFooter } from '@/components/ui/alert-dialog';
-import { RefreshCw, Download, Settings, Upload } from 'lucide-react';
+import { RefreshCw, Download, Settings } from 'lucide-react';
 import GiacenzeKpi from '@/components/giacenze/GiacenzeKpi';
 import AnomalieAlert from '@/components/giacenze/AnomalieAlert';
 import SituazioneTable from '@/components/giacenze/SituazioneTable';
@@ -26,9 +25,6 @@ export default function Giacenze() {
   const [tab, setTab] = useState('situazione');
   const [filtroSito, setFiltroSito] = useState('');
   const [showTargetManager, setShowTargetManager] = useState(false);
-  const [seedSimula, setSeedSimula] = useState(null);
-  const [seedConfirm, setSeedConfirm] = useState(false);
-  const [seeding, setSeeding] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -47,26 +43,6 @@ export default function Giacenze() {
   const vaiDaDichiarareConSito = (sito) => {
     setFiltroSito(sito);
     setTab('dichiarare');
-  };
-
-  const handleSeedSimula = async () => {
-    setSeeding(true);
-    try {
-      const res = await base44.functions.invoke('seedTargetSiti2026', { simula: true });
-      setSeedSimula(res.data);
-      setSeedConfirm(true);
-    } catch (e) { alert(e.message); }
-    setSeeding(false);
-  };
-
-  const handleSeedConfirm = async () => {
-    setSeeding(true);
-    try {
-      await base44.functions.invoke('seedTargetSiti2026', { simula: false });
-      setSeedConfirm(false);
-      await loadData();
-    } catch (e) { alert(e.message); }
-    setSeeding(false);
   };
 
   const handleExportAll = async () => {
@@ -136,10 +112,7 @@ export default function Giacenze() {
                 {isAdmin && (
                   <div className="flex flex-wrap gap-2">
                     <Button variant="outline" size="sm" onClick={() => setShowTargetManager(true)}>
-                      <Settings className="w-4 h-4 mr-1" /> Configura target
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={handleSeedSimula} disabled={seeding}>
-                      <Upload className="w-4 h-4 mr-1" /> Importa target 2026
+                      <Settings className="w-4 h-4 mr-1" /> Siti e target
                     </Button>
                   </div>
                 )}
@@ -181,31 +154,10 @@ export default function Giacenze() {
         onClose={() => setShowTargetManager(false)}
         anno={anno}
         destinazioni={destinazioni}
+        righe={data?.righe || []}
         onSaved={loadData}
       />
 
-      <AlertDialog open={seedConfirm} onOpenChange={setSeedConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Importa target 2026</AlertDialogTitle>
-            <AlertDialogDescription>
-              {seedSimula && (
-                <span>
-                  Verranno inseriti {seedSimula.da_creare} record GiacenzaSito per il 2026.
-                  {seedSimula.ignorati > 0 && ` (${seedSimula.ignorati} già presenti e saranno saltati).`}
-                  {' '}Confermi l'inserimento?
-                </span>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={seeding}>Annulla</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSeedConfirm} disabled={seeding}>
-              {seeding ? 'Inserimento...' : 'Conferma'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

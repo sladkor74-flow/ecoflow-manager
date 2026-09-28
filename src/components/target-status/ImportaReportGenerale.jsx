@@ -9,9 +9,10 @@ import { tonnellate, conModifica, nomeUtente, chiaveNome } from '@/lib/target';
 
 // Importa i target assegnati dei raccoglitori dal foglio "Report Generale" del file
 // di gestione: annuo e mesi, per impianto e regione. Prima mostra cosa cambierebbe;
-// si scrive solo cio' che si conferma. Nulla viene cancellato.
+// si scrive solo cio' che si conferma. Nulla viene cancellato. In sola lettura
+// (anno chiuso, o chi non e' amministratore) non si importa niente.
 
-export default function ImportaReportGenerale({ open, onClose, anno, annui, mensili, user, onImportato }) {
+export default function ImportaReportGenerale({ open, onClose, anno, annui, mensili, user, onImportato, solaLettura = false }) {
   const { toast } = useToast();
   const inputFile = useRef(null);
   const [lettura, setLettura] = useState(null);
@@ -40,6 +41,7 @@ export default function ImportaReportGenerale({ open, onClose, anno, annui, mens
   const annoDiverso = lettura && lettura.anno && lettura.anno !== anno;
 
   const importa = async () => {
+    if (solaLettura) return;
     const utente = nomeUtente(user);
     const nota = `importato da ${lettura.file} (Report Generale)`;
     let fatte = 0;
@@ -111,10 +113,11 @@ export default function ImportaReportGenerale({ open, onClose, anno, annui, mens
               <strong>{lettura.file}</strong>: {lettura.piano.length} righe di target, somma annua {tonnellate(lettura.somma)} t
               {lettura.totale !== null ? ` (totale del foglio ${tonnellate(lettura.totale)} t)` : ''}, mesi presenti: {lettura.mesiPresenti.join(', ') || 'nessuno'}.
             </p>
-            {(annoDiverso || lettura.avvisi.length > 0) && (
+            {(solaLettura || annoDiverso || lettura.avvisi.length > 0) && (
               <div className="flex items-start gap-2 text-sm border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2">
                 <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                 <div>
+                  {solaLettura && <p>Il {anno} è in sola lettura: non si importa niente.</p>}
                   {annoDiverso && <p>Il foglio riguarda il {lettura.anno}, ma stai importando nel {anno}: cambia l'anno in alto prima di importare.</p>}
                   {lettura.avvisi.map((a, i) => <p key={i}>{a}</p>)}
                 </div>
@@ -173,7 +176,7 @@ export default function ImportaReportGenerale({ open, onClose, anno, annui, mens
           {lettura && !avanzamento && <Button variant="ghost" onClick={() => setLettura(null)}>Scegli un altro file</Button>}
           <Button variant="ghost" onClick={chiudi} disabled={!!avanzamento}>Chiudi</Button>
           {lettura && (
-            <Button onClick={importa} disabled={!!avanzamento || operazioni === 0 || annoDiverso}>
+            <Button onClick={importa} disabled={!!avanzamento || operazioni === 0 || annoDiverso || solaLettura}>
               {avanzamento ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />{avanzamento.fatte} di {avanzamento.totale}</> : `Importa ${operazioni} valori`}
             </Button>
           )}
