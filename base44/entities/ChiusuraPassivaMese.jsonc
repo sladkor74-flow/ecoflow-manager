@@ -1,0 +1,38 @@
+{
+  "name": "ChiusuraPassivaMese",
+  "type": "object",
+  "description": "Il conto della fatturazione passiva di un mese e di un canale, CONGELATO alla chiusura (decisione dell utente, 29/09/2026). La passiva e un calcolo a richiesta e non si salva da nessuna parte: riaprendola domani puo dare un numero diverso, perche nel frattempo sono stati caricati ordini chiusi dopo o correzioni. Una fattura che arriva a novembre per settembre va confrontata col settembre di allora. Il confronto mostra comunque anche il ricalcolo di oggi e dice se e di quanto differisce: congelare senza dirlo nasconderebbe proprio i movimenti arrivati dopo",
+  "properties": {
+    "anno": { "type": "number" },
+    "mese": {
+      "type": "number",
+      "description": "Mese di competenza, 1-12"
+    },
+    "canale": {
+      "type": "string",
+      "enum": ["RETE", "ACI", "EXTRA_RACCOLTA"],
+      "description": "Un canale per volta: rete, ACI ed extra raccolta non si sommano mai"
+    },
+    "congelato_il": { "type": "string", "format": "date-time" },
+    "congelato_da": { "type": "string" },
+    "passiva_json": {
+      "type": "string",
+      "description": "Il conto com era quel giorno: raccoglitori, impianti e stoccaggi, trasporti di secondaria, totali e anomalie, cosi come calcolaPassivaMese li ha restituiti"
+    },
+    "totale_euro": {
+      "type": "number",
+      "description": "Il totale complessivo di quel canale al momento del congelamento, per vedere a colpo d occhio se il ricalcolo di oggi si e mosso"
+    },
+    "nota": {
+      "type": "string",
+      "description": "Perche e stato congelato in quel momento: di solito la chiusura del mese"
+    }
+  },
+  "required": ["anno", "mese", "canale"],
+  "rls": {
+    "read": true,
+    "create": { "user_condition": { "role": "admin" } },
+    "update": { "user_condition": { "role": "admin" } },
+    "delete": { "user_condition": { "role": "admin" } }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "name": "ConsuntivoFornitore",
+  "type": "object",
+  "description": "Il report definitivo con cui un fornitore chiude un mese, caricato dall amministratore e confrontato coi nostri movimenti e col costo che la fatturazione passiva gli riconosce (richiesta dell utente, 29/09/2026). E un report SUO, non una fattura: si confrontano righe, formulari e chili, e accanto si mette l importo previsto dalle tariffe. Un canale per volta, e un ruolo per volta: lo stesso soggetto che raccoglie e ha il piazzale manda due consuntivi, perche due sono le prestazioni che ci fattura",
+  "properties": {
+    "fornitore": {
+      "type": "string",
+      "description": "Nome del fornitore come lo conosciamo. Il confronto coi nomi del portale si fa normalizzato"
+    },
+    "ruolo": {
+      "type": "string",
+      "enum": ["raccoglitore", "impianto", "trasportatore"],
+      "description": "Con che cosa ci fattura: raccoglitore (le primarie che ha raccolto), impianto (tutto quello che gli e arrivato), trasportatore (le secondarie che ha portato). Decide su quali movimenti si verifica il consuntivo e in quale blocco della passiva si legge il costo"
+    },
+    "anno": { "type": "number" },
+    "mese": {
+      "type": "number",
+      "description": "Mese di competenza, 1-12. La competenza e la FINE del trasporto, mai la chiusura a portale"
+    },
+    "canale": {
+      "type": "string",
+      "enum": ["RETE", "ACI", "EXTRA_RACCOLTA"],
+      "description": "Rete, ACI ed extra raccolta non si sommano mai: un consuntivo vale per un canale solo"
+    },
+    "file_nome": {
+      "type": "string",
+      "description": "Nome del file caricato. Il file non si conserva: si leggono le righe nel browser e si salvano quelle"
+    },
+    "caricato_il": { "type": "string", "format": "date-time" },
+    "righe_json": {
+      "type": "string",
+      "description": "Le righe lette dal consuntivo: [{ numero_fir, id_ordine, kg, importo, giorno }]. Si conservano per poter rifare il confronto dopo un caricamento senza richiedere il file"
+    },
+    "esito_json": {
+      "type": "string",
+      "description": "L esito dell ultimo confronto: voci riga per riga, totali e verdetto"
+    },
+    "importo_consuntivo": {
+      "type": "number",
+      "description": "L importo totale scritto sul consuntivo, se c e. Senza, si verificano solo le quantita e l importo previsto resta informativo"
+    },
+    "confrontato_il": { "type": "string", "format": "date-time" },
+    "quadra": {
+      "type": "boolean",
+      "description": "Vero se ogni formulario torna e non ne avanza da nessuna delle due parti. E il verdetto dell ultimo confronto, che si rifa dopo ogni caricamento delle primarie"
+    },
+    "note": { "type": "string" }
+  },
+  "required": ["fornitore", "ruolo", "anno", "mese", "canale"],
+  "rls": {
+    "read": true,
+    "create": { "user_condition": { "role": "admin" } },
+    "update": { "user_condition": { "role": "admin" } },
+    "delete": { "user_condition": { "role": "admin" } }
+  }
+}

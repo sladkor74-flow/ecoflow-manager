@@ -4,6 +4,7 @@ import { Users } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import EvasioneAssegnati from '@/components/verifiche/EvasioneAssegnati';
 import AndamentoRaccoglitori from '@/components/verifiche-fornitori/AndamentoRaccoglitori';
+import Consuntivi from '@/components/verifiche-fornitori/Consuntivi';
 
 // VERIFICHE FORNITORI (richiesta dell'utente, 29/09/2026).
 //
@@ -42,12 +43,16 @@ export default function VerificheFornitori() {
         <TabsList>
           <TabsTrigger value="evasione">Evasione assegnati</TabsTrigger>
           <TabsTrigger value="andamento">Andamento e zone</TabsTrigger>
+          <TabsTrigger value="consuntivi">Consuntivi e costi</TabsTrigger>
         </TabsList>
         <TabsContent value="evasione" className="pt-4">
           <EvasioneAssegnati isAdmin={isAdmin} />
         </TabsContent>
         <TabsContent value="andamento" className="pt-4">
           <AndamentoRaccoglitori isAdmin={isAdmin} />
+        </TabsContent>
+        <TabsContent value="consuntivi" className="pt-4">
+          <Consuntivi isAdmin={isAdmin} />
         </TabsContent>
       </Tabs>
     </div>
