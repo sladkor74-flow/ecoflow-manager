@@ -51,3 +51,82 @@ export function normalizzaRagioneSociale(nome) {
   // Applica tabella alias esplicita
   return ALIAS_TO_CANONICAL[s] || s;
 }
+/**
+ * A quale nome dell'archivio si riferisce il nome scritto nella domanda.
+ *
+ * Serve a EcoTyna: l'utente scrive "Silvano", "Gatim", "eco gea", e in archivio
+ * ci sono "SILVANO RENATO", "GA.TIM. S.R.L.", "ECO.GEA SRL". Fino al 29/09/2026
+ * il filtro degli strumenti pretendeva il nome IDENTICO dopo la normalizzazione:
+ * fuori dalle dieci voci della tabella alias qui sopra, un nome abbreviato dava
+ * zero righe, e lo zero usciva come "ha raccolto 0,00 t" invece di "questo nome
+ * non lo trovo". Un numero sbagliato, non solo una risposta generica.
+ *
+ * Tre passi, dal piu' stretto al piu' largo, e ci si ferma al primo che trova
+ * qualcosa: nome uguale, abbreviazione (tutte le parole di peso di cio' che e'
+ * stato chiesto stanno nel nome d'archivio), contenimento.
+ *
+ * Se i nomi che corrispondono sono PIU' D'UNO non si sceglie: si dice che sono
+ * ambigui e si lascia decidere a chi ha fatto la domanda. Sommare due fornitori
+ * diversi in un numero solo e' il modo peggiore di sbagliare, perche' il numero
+ * sembra giusto.
+ *
+ * Restituisce { trovato, chiavi, nomi, alternative, come }.
+ * Funzione pura: le prove la chiamano senza toccare la piattaforma.
+ */
+export function risolviNome(nomiArchivio, chiesto) {
+  const cercato = normalizzaRagioneSociale(chiesto);
+  const vuoto = { trovato: false, chiavi: [], nomi: [], alternative: [], come: 'niente_da_cercare' };
+  if (!cercato) return vuoto;
+
+  // Un nome per chiave normalizzata: "EMMESSE SRL" e "Emmesse S.r.l." sono lo
+  // stesso fornitore, non due candidati.
+  const perChiave = new Map();
+  for (const n of nomiArchivio || []) {
+    const k = normalizzaRagioneSociale(n);
+    if (!k) continue;
+    if (!perChiave.has(k)) perChiave.set(k, String(n).trim());
+  }
+  const chiavi = [...perChiave.keys()];
+
+  const esito = (trovate, come) => ({
+    trovato: trovate.length === 1,
+    chiavi: trovate,
+    nomi: trovate.map(k => perChiave.get(k)),
+    alternative: trovate.length > 1 ? trovate.map(k => perChiave.get(k)) : [],
+    come: trovate.length === 1 ? come : 'ambiguo',
+  });
+
+  const uguali = chiavi.filter(k => k === cercato);
+  if (uguali.length) return esito(uguali, 'esatto');
+
+  // Sotto i tre caratteri non si cerca per somiglianza: "trs" starebbe dentro
+  // mezzo archivio e il risultato sarebbe un'ambiguita' inutile.
+  if (cercato.length < 3) return { ...vuoto, come: 'troppo corto', alternative: [] };
+
+  const parole = cercato.split(' ').filter(p => p.length > 2);
+  if (parole.length) {
+    const abbreviati = chiavi.filter(k => {
+      const suo = new Set(k.split(' '));
+      return parole.every(p => suo.has(p));
+    });
+    if (abbreviati.length) return esito(abbreviati, 'abbreviazione');
+  }
+
+  const contenuti = chiavi.filter(k => k.includes(cercato) || cercato.includes(k));
+  if (contenuti.length) return esito(contenuti, 'contenuto');
+
+  // Gli spazi non contano: la normalizzazione toglie i punti, e "ECO.GEA SRL"
+  // diventa "ecogea" mentre chi scrive batte "eco gea". Sono lo stesso nome.
+  const senzaSpazi = (v) => v.replace(/\s+/g, '');
+  const attaccato = senzaSpazi(cercato);
+  const uniti = chiavi.filter(k => senzaSpazi(k).includes(attaccato) || attaccato.includes(senzaSpazi(k)));
+  if (uniti.length) return esito(uniti, 'contenuto');
+
+  // Niente: si offre qualche nome che comincia uguale, per aiutare a riscrivere.
+  const inizio = cercato.slice(0, 3);
+  return {
+    trovato: false, chiavi: [], nomi: [],
+    alternative: chiavi.filter(k => k.startsWith(inizio)).slice(0, 8).map(k => perChiave.get(k)),
+    come: 'nessuno',
+  };
+}
