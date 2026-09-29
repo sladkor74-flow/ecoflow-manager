@@ -351,13 +351,14 @@ export function sintesiVerifica(v, esito) {
   const tipoRiga = (e) => e.tipo || e.tipo_presunto || 'ingresso';
   const somma = (lista, kg) => lista.reduce((t, x) => t + (Number(kg(x)) || 0), 0);
 
-  const quadratura = (esito.quadratura || [
-    { tipo: 'ingresso', nome: 'Ingressi', formulari_gestionale: v.ingressi_gestionale || 0, kg_gestionale: v.peso_ingressi_kg || 0 },
-    { tipo: 'uscita', nome: 'Uscite', formulari_gestionale: v.uscite_gestionale || 0, kg_gestionale: v.peso_uscite_kg || 0 },
-  ].map(q => {
-    const righe = esiti.filter(e => tipoRiga(e) === q.tipo);
-    return { ...q, formulari_report: righe.length, kg_report: somma(righe, e => e.report.kg) };
-  })).map(q => ({ ...q, quadra: q.formulari_report === q.formulari_gestionale && q.kg_report === q.kg_gestionale }));
+  // Senza la quadratura dell'esito non si inventa niente. Fino al 29/09/2026 qui
+  // c'era un ripiego su v.ingressi_gestionale e v.peso_ingressi_kg, campi che
+  // nell'entita' non esistono piu': valevano undefined, diventavano zero, e la
+  // verifica usciva "tutto quadra, zero formulari, zero chili" mentre in testa
+  // restava scritto "conformita' parziale". Su un documento che si manda
+  // all'impianto era una bugia coerente, che e' il peggio.
+  const quadratura = (esito.quadratura || [])
+    .map(q => ({ ...q, quadra: q.formulari_report === q.formulari_gestionale && q.kg_report === q.kg_gestionale }));
   // Tutte le movimentazioni previste (per il PDF) e quelle con almeno un formulario (per la pagina).
   const categorie = quadratura;
   const righeQuadratura = quadratura.filter(q => q.formulari_report || q.formulari_gestionale);
@@ -540,7 +541,12 @@ export async function scaricaExcelVerifica(v) {
       ? `nessun file: l'impianto ha comunicato che non ci sono state movimentazioni${v.nota ? ` (${v.nota})` : ''}`
       : lettura.modo === 'excel'
       ? descriviLettura(lettura).join('\n')
-      : `${lettura.modo === 'pdf' ? 'PDF' : 'immagine'} trascritto dall'agente, pesi in ${lettura.unita === 't' ? 'tonnellate' : 'chilogrammi'}${lettura.nota_date ? `. Date: ${lettura.nota_date}` : ''}`],
+      : lettura.modo === 'pdf' || lettura.modo === 'immagine'
+      ? `${lettura.modo === 'pdf' ? 'PDF' : 'immagine'} trascritto dall'agente, pesi in ${lettura.unita === 't' ? 'tonnellate' : 'chilogrammi'}${lettura.nota_date ? `. Date: ${lettura.nota_date}` : ''}`
+      // Senza la descrizione salvata non si indovina come e' stato letto il file:
+      // dirlo e' meglio che scrivere "immagine trascritta dall'agente" su un
+      // Excel, che e' quello che succedeva quando lettura_json mancava.
+      : 'non disponibile: di questa verifica restano i numeri di sintesi e la storia scritta'],
     ...(sintesi.notaDate ? [['Date di questo confronto', sintesi.notaDate]] : []),
     ['Righe non considerate', v.righe_escluse ? `${v.righe_escluse} (${formatKg(v.peso_escluse_kg || 0)} kg): carichi di altre settimane o di altri consorzi, elencati nel foglio "Non considerate"` : 'nessuna'],
     // Immissione, inizio e fine trasporto sono obbligatorie (22/09/2026): se a un
@@ -550,7 +556,9 @@ export async function scaricaExcelVerifica(v) {
       : []),
     ['Criteri', 'Ingressi confrontati con le primarie, uscite con le secondarie; peso al chilogrammo; data di verifica: fine trasporto'],
     ['Verifica eseguita il', v.verificata_il ? new Date(v.verificata_il).toLocaleString('it-IT') : ''],
-    ['Cancellazione dal gestionale', dataIt(v.scade_il)],
+    ['Dettaglio conservato fino al', v.alleggerito_il
+      ? `tolto il ${dataIt(v.alleggerito_il)}: di questa verifica restano i numeri di sintesi e la storia scritta`
+      : dataIt(v.scade_il)],
   ];
   for (const [k, val] of info) {
     const riga = r.addRow([k, val]);

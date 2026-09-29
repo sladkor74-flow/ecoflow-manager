@@ -3,7 +3,7 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { leggiListaDaFogli, arricchisciLista, indiceMese } from "../../shared/evasioneAssegnati.ts";
-import { caricaDati, cancellaVecchi, eseguiControlli } from "../../shared/evasioneAssegnatiDati.ts";
+import { caricaDati, alleggerisciVecchi, eseguiControlli } from "../../shared/evasioneAssegnatiDati.ts";
 import { valoreCampo, eliminaCampo } from "../../shared/testoLungo.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
@@ -56,7 +56,13 @@ export default async function(req) {
     const diRete = righe.filter(r => !r.canale || r.canale === 'rete');
     const quante = (stato) => diRete.filter(r => r.stato_al_caricamento === stato).length;
 
-    const { cancellati, mesi: mesiSvuotati } = await cancellaVecchi(base44, { finoAIndice: indiceMese(anno, mese), raccoglitoreChiave: raccoglitore_chiave });
+    // La lista dello stesso mese si sostituisce davvero; quelle dei mesi prima
+    // restano con la loro storia scritta, e perdono solo le righe (29/09/2026).
+    const { cancellati, alleggeriti, mesi: mesiSvuotati } = await alleggerisciVecchi(base44, {
+      finoAIndice: indiceMese(anno, mese),
+      raccoglitoreChiave: raccoglitore_chiave,
+      sostituisci: indiceMese(anno, mese),
+    });
 
     const listaCreata = await base44.asServiceRole.entities.ListaAssegnati.create({
       raccoglitore_chiave,
@@ -116,6 +122,7 @@ export default async function(req) {
       avvisi: lettura.avvisi,
       fogli: lettura.fogli,
       cancellati,
+      alleggeriti,
     });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });

@@ -132,8 +132,12 @@ export default async function(req) {
       intervallo,
       quadratura: q,
       esito,
-      // La conformita' e' per canale: rete, ACI ed extra raccolta non hanno un verdetto comune.
-      per_canale: esito ? (esito.per_canale || sintesiPerCanale(esito)) : null,
+      // La conformita' e' per canale: rete, ACI ed extra raccolta non hanno un
+      // verdetto comune. Di una quadratura alleggerita l'esito non c'e' piu', ma
+      // il verdetto e' anche un campo del record: si ripiega li', altrimenti la
+      // pagina direbbe "nessun flusso da confrontare" di una settimana che era
+      // stata quadrata per intero.
+      per_canale: esito ? (esito.per_canale || sintesiPerCanale(esito)) : ((q && q.per_canale && q.per_canale.length) ? q.per_canale : null),
       ricalcolo,
       caricamenti_in_corso: durante,
       gestionale: totali,

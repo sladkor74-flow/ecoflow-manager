@@ -1,35 +1,19 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
-import { fetchAll } from "../../shared/fetchAll.ts";
-import { oggiRoma } from "../../shared/reportSettimanali.ts";
-import { eliminaCampo } from "../../shared/testoLungo.ts";
-import { rispostaSolaLettura } from "../../shared/permessi.ts";
+import alleggerisciDocumenti from "../alleggerisciDocumenti/entry.ts";
 
-// Cancella le verifiche dei report settimanali arrivate al quarantesimo giorno
-// dal caricamento. Dopo la fatturazione quel lavoro non serve piu' e non va
-// conservato. I file caricati non vengono mai salvati, quindi con la verifica
-// sparisce tutto.
+// VECCHIO NOME della pulizia notturna, tenuto solo per non lasciare a vuoto un
+// lavoro pianificato che ancora lo chiami.
+//
+// Fino al 29/09/2026 questa funzione CANCELLAVA le verifiche dei report
+// settimanali arrivate al quarantesimo giorno: spariva il record intero, storia
+// compresa. L'utente ha chiesto il contrario - via il peso, resti la storia
+// scritta - e il lavoro adesso lo fa alleggerisciDocumenti, che oltre alle
+// verifiche si occupa di quadrature FIR, consuntivi, liste degli assegnati e
+// controlli dell'evasione.
+//
+// Qui non si cancella piu' niente: si passa la richiesta cosi' com'e'. Chiamarla
+// due volte nella stessa notte non fa danno, perche' la seconda non trova piu'
+// niente da togliere.
 
 export default async function(req) {
-  try {
-    const base44 = conLimiteRichieste(createClientFromRequest(req));
-    const user = await base44.auth.me();
-    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (user.role !== 'admin') return rispostaSolaLettura();
-
-    const oggi = oggiRoma();
-    const svc = base44.asServiceRole.entities;
-    const tutte = await fetchAll(svc.VerificaReport);
-    let cancellate = 0;
-    for (const v of tutte) {
-      if (v.scade_il && String(v.scade_il).slice(0, 10) <= oggi) {
-        await eliminaCampo(base44, 'VerificaReport', v.id);
-        await svc.VerificaReport.delete(v.id);
-        cancellate++;
-      }
-    }
-    return Response.json({ oggi, cancellate, rimaste: tutte.length - cancellate });
-  } catch (error) {
-    return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });
-  }
+  return alleggerisciDocumenti(req);
 }

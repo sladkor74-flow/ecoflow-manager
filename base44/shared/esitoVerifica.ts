@@ -73,7 +73,13 @@ export function calcolaEsito(verifica, righe, movimenti, senzaFine = senzaFineDe
  * stava riscrivendo, o non riuscito dopo la lettura. Il riconfronto dopo il
  * caricamento e all'apertura della settimana la completa senza rileggere il file.
  */
-export const daRiconfrontare = (v) => !!v && (v.stato === 'completata'
+// Una verifica ALLEGGERITA non si riconfronta mai piu': non ha piu' le righe del
+// report, e non e' solo che il confronto non si puo' rifare. Una dichiarazione di
+// nessuna movimentazione non ha righe per definizione, quindi senza questa
+// esclusione si riconfronterebbe eccome, e salvaEsito le riscriverebbe l'esito per
+// intero: il dettaglio che si era appena tolto tornerebbe in archivio, sopra un
+// record che resta segnato come alleggerito.
+export const daRiconfrontare = (v) => !!v && !v.alleggerito_il && (v.stato === 'completata'
   || (v.stato === 'errore' && (eDichiarazione(v) || !!v.righe_report_json)));
 
 // Il testo dell'esito cosi' come si salva: serve anche a capire se un nuovo

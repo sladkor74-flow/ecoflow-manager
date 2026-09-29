@@ -29,11 +29,11 @@
     "caricato_il": { "type": "string", "format": "date-time" },
     "righe_json": {
       "type": "string",
-      "description": "Le righe lette dal consuntivo: [{ numero_fir, id_ordine, kg, importo, giorno }]. Si conservano per poter rifare il confronto dopo un caricamento senza richiedere il file"
+      "description": "Le righe lette dal consuntivo: [{ numero_fir, id_ordine, kg, importo, giorno }]. Si conservano per poter rifare il confronto dopo un caricamento senza richiedere il file, e si tolgono al quarantesimo giorno dal caricamento: dopo resta la storia scritta"
     },
     "esito_json": {
       "type": "string",
-      "description": "L esito dell ultimo confronto: voci riga per riga, totali e verdetto"
+      "description": "L esito dell ultimo confronto: voci riga per riga, totali e verdetto. Si toglie al quarantesimo giorno dal caricamento, insieme alle righe: prima il verdetto viene riscritto in parole nella storia"
     },
     "importo_consuntivo": {
       "type": "number",
@@ -44,7 +44,16 @@
       "type": "boolean",
       "description": "Vero se ogni formulario torna e non ne avanza da nessuna delle due parti. E il verdetto dell ultimo confronto, che si rifa dopo ogni caricamento delle primarie"
     },
-    "note": { "type": "string" }
+    "note": { "type": "string" },
+    "storia": {
+      "type": "string",
+      "description": "La storia scritta del documento, in italiano: resta per sempre. Si scrive quando il dettaglio viene tolto, al quarantesimo giorno dal caricamento (base44/shared/conservazione.ts). E' un campo normale e non passa mai da valoreCampo: se sfondasse gli ottomila caratteri tornerebbe in ContenutoEsteso, cioe' il peso che si e' appena tolto"
+    },
+    "alleggerito_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Giorno in cui sono stati tolti le righe lette e il confronto riga per riga. Finche' e' vuoto il documento ha ancora tutto il suo dettaglio"
+    }
   },
   "required": ["fornitore", "ruolo", "anno", "mese", "canale"],
   "rls": {

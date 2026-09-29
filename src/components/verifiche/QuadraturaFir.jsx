@@ -6,6 +6,7 @@ import {
   ChevronLeft, ChevronRight, Upload, Loader2, FileText, AlertTriangle, CheckCircle2, Info, Trash2, RefreshCw, Eye, EyeOff,
 } from 'lucide-react';
 import { formatKg } from '@/lib/utils';
+import Storia from '@/components/shared/Storia';
 import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
 import {
   oggiRoma, aggiungiGiorni, settimanaIso, intervalloSettimana, settimaneNellAnno, descriviIntervallo, dataIt,
@@ -239,7 +240,11 @@ export default function QuadraturaFir({ isAdmin }) {
     const precedente = dati && dati.quadratura;
     let id;
     if (precedente) {
-      await base44.entities.QuadraturaFir.update(precedente.id, { ...campi, stato: 'in_lettura', errore: '', avviata_il: new Date().toISOString() });
+      // Ricaricando il file la quadratura torna intera: alleggerito_il e la storia
+      // vanno azzerati, altrimenti resterebbe segnata come alleggerita per sempre,
+      // i pulsanti resterebbero spenti e non le si toglierebbe mai piu' il
+      // dettaglio nuovo.
+      await base44.entities.QuadraturaFir.update(precedente.id, { ...campi, stato: 'in_lettura', errore: '', avviata_il: new Date().toISOString(), alleggerito_il: '', storia: '' });
       id = precedente.id;
     } else {
       const nuova = await base44.entities.QuadraturaFir.create({
@@ -269,7 +274,7 @@ export default function QuadraturaFir({ isAdmin }) {
       const payload = tipo === 'excel'
         ? { tabelle: await leggiPivotDaExcel(file) }
         : { file_uri: (await base44.integrations.Core.UploadPrivateFile({ file })).file_uri };
-      await elabora(payload, { file_nome: file.name, file_tipo: tipo });
+      await elabora(payload, { file_nome: file.name, file_tipo: tipo, ...(payload.file_uri ? { file_uri: payload.file_uri } : {}) });
       await carica(true);
     } catch (e) {
       const msg = (e && e.data && e.data.error) || (e && e.response && e.response.data && e.response.data.error) || e.message || String(e);
@@ -323,6 +328,10 @@ export default function QuadraturaFir({ isAdmin }) {
   };
 
   const q = dati && dati.quadratura;
+  // Al quarantesimo giorno la quadratura perde le righe lette e il confronto cella
+  // per cella: restano il verdetto per canale, che e' un campo del record, e la
+  // storia scritta.
+  const alleggerita = !!(q && q.alleggerito_il);
   const esito = dati && dati.esito;
   const perCanale = (dati && dati.per_canale) || [];
   const ricalcolo = (dati && dati.ricalcolo) || {};
@@ -372,8 +381,16 @@ export default function QuadraturaFir({ isAdmin }) {
           )}
           {q && q.stato === 'completata' && (
             <>
-              <Button variant="outline" onClick={scarica}><FileText className="w-4 h-4 mr-2" />Report PDF</Button>
-              {isAdmin && <Button variant="ghost" size="icon" title="Ripeti il confronto con i dati del gestionale di ora" disabled={occupato} onClick={ripeti}><RefreshCw className="w-4 h-4" /></Button>}
+              <Button variant="outline" onClick={scarica} disabled={alleggerita}
+                title={alleggerita ? 'Di questa quadratura resta la storia scritta: senza il confronto cella per cella il PDF sarebbe vuoto' : undefined}><FileText className="w-4 h-4 mr-2" />Report PDF</Button>
+              {isAdmin && (
+                <Button
+                  variant="ghost" size="icon"
+                  title={alleggerita ? 'Di questa quadratura resta la storia scritta: senza le righe lette il confronto non si può rifare' : 'Ripeti il confronto con i dati del gestionale di ora'}
+                  disabled={occupato || alleggerita}
+                  onClick={ripeti}
+                ><RefreshCw className="w-4 h-4" /></Button>
+              )}
             </>
           )}
           {q && isAdmin && <Button variant="ghost" size="icon" className="text-red-600" title="Elimina la quadratura" disabled={occupato} onClick={elimina}><Trash2 className="w-4 h-4" /></Button>}
@@ -386,8 +403,9 @@ export default function QuadraturaFir({ isAdmin }) {
           Carica la stampa settimanale del conteggio e della somma dei FIR: le due pivot di WINSINFO e del portale Ecotyre si confrontano fra loro
           e con il gestionale, che conta i formulari terminati con la fine trasporto dentro la settimana. Va bene il PDF, una foto o il file Excel
           da cui hai stampato. Il numero di settimana si legge dal titolo della stampa; se non c&apos;è, vale quello scelto qui sopra.
-          Rete, ACI ed extra raccolta restano separati e non si sommano mai fra loro. Nella quadratura restano soltanto i numeri letti e l&apos;esito;
-          un Excel si legge qui nel browser senza caricare niente, mentre un PDF o una foto vengono caricati nell&apos;archivio privato perché l&apos;agente li possa leggere.
+          Rete, ACI ed extra raccolta restano separati e non si sommano mai fra loro. Nella quadratura restano soltanto i numeri letti e l&apos;esito, e quaranta giorni dopo il caricamento
+          se ne vanno anche quelli: restano il verdetto per canale e la storia scritta, con gli scostamenti che non tornavano. La quadratura non si cancella da sola.
+          Un Excel si legge qui nel browser senza caricare niente, mentre un PDF o una foto vengono caricati nell&apos;archivio privato perché l&apos;agente li possa leggere, e cancellati subito dopo.
         </span>
       </div>
 
@@ -432,7 +450,8 @@ export default function QuadraturaFir({ isAdmin }) {
               ) : (
                 <div className="text-sm text-muted-foreground">Nel file e nel gestionale non c&apos;è nessun flusso da confrontare in questa settimana.</div>
               )}
-              {!q.lettura_verificata && (
+              {alleggerita && <Storia testo={q.storia} alleggeritoIl={q.alleggerito_il} cosa="quadratura" />}
+              {!alleggerita && !q.lettura_verificata && (
                 <div className="mt-2 text-sm text-amber-900 flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                   <span>La somma delle righe lette non torna con i totali stampati sul file: controlla la trascrizione sull&apos;originale prima di fidarti dell&apos;esito.</span>

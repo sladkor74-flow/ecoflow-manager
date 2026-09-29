@@ -28,7 +28,11 @@ import { unisciQuote, ticketDi } from "./formulari.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
 import { giornoMovimento, eTerminato, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate, ordiniDaSistemare, mancantiOrdine, incoerentiOrdine, testoOrdine } from "./movimenti.ts";
 
-export const GIORNI_CONSERVAZIONE = 40;
+// Quanto si conservano per intero i documenti dei fornitori. La regola vive in
+// conservazione.ts, insieme all'alleggerimento: qui si ri-esporta soltanto,
+// perche' questo file e' quello che le verifiche importano da sempre. Scritta
+// due volte, prima o poi una delle due resta indietro.
+export { GIORNI_CONSERVAZIONE } from "./conservazione.ts";
 
 // === date obbligatorie ===
 //

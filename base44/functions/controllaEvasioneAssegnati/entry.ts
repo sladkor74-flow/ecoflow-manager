@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { caricaDati, cancellaVecchi, eseguiControlli, indiceSicurezza } from "../../shared/evasioneAssegnatiDati.ts";
+import { caricaDati, alleggerisciVecchi, eseguiControlli, indiceSicurezza } from "../../shared/evasioneAssegnatiDati.ts";
 
 // Controlla l'evasione di tutte le liste di assegnati presenti.
 //
@@ -26,7 +26,10 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    await cancellaVecchi(base44, { finoAIndice: indiceSicurezza() });
+    // Alleggerire e' una scrittura: la fa solo chi puo' scrivere. Prima questa
+    // riga cancellava liste e controlli anche quando la pagina la apriva chi ha
+    // il solo permesso di consultare.
+    if (user.role === 'admin') await alleggerisciVecchi(base44, { finoAIndice: indiceSicurezza(), massimo: 15 });
 
     let liste = await fetchAll(base44.asServiceRole.entities.ListaAssegnati);
     if (body.raccoglitore_chiave) liste = liste.filter(l => l.raccoglitore_chiave === body.raccoglitore_chiave);

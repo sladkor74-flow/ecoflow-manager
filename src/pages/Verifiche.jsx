@@ -8,8 +8,11 @@ import QuadraturaFir from '@/components/verifiche/QuadraturaFir';
 import MatriceProvince from '@/components/verifiche/MatriceProvince';
 
 // Modulo Verifiche: controlli periodici sui dati che arrivano dai fornitori.
-// Ogni controllo e' una sezione; il lavoro che producono e' temporaneo e si
-// cancella da solo, a differenza di cio' che avviene negli altri moduli.
+// Ogni controllo e' una sezione. Il DETTAGLIO che producono e' temporaneo: al
+// quarantesimo giorno dal caricamento se ne vanno le righe lette e il confronto
+// riga per riga (base44/shared/conservazione.ts). La verifica invece resta, con i
+// suoi numeri di sintesi e una storia scritta: fino al 29/09/2026 si cancellava
+// tutta, e l'utente ha chiesto di tenere il contenuto.
 
 export default function Verifiche() {
   const { user } = useAuth();
@@ -23,7 +26,7 @@ export default function Verifiche() {
         </h1>
         <p className="text-muted-foreground mt-1 max-w-3xl">
           Controlli periodici sui dati inviati dai fornitori, confrontati con il gestionale.
-          Il lavoro prodotto qui è temporaneo e si cancella da solo quando non serve più.
+          Quaranta giorni dopo il caricamento a ogni verifica viene tolto il dettaglio riga per riga, per non appesantire l’archivio: restano i numeri di sintesi e una storia scritta, che non si cancella.
           Come <em>lavorano</em> i fornitori — l&apos;evasione delle richieste assegnate e l&apos;andamento della raccolta — sta in Verifiche Fornitori.
         </p>
       </div>

@@ -139,7 +139,14 @@ export function allegatiPerPrompt(allegati, letture) {
     a.note ? `Note di lettura: ${a.note}` : '',
     a.contenuto || '(contenuto non leggibile)',
   ].filter(Boolean).join('\n')).join('\n\n');
-  const daSalvare = conContenuto.map(a => ({ rif: a.rif, nome: a.nome, tipo: a.tipo, dimensione: a.dimensione, tipo_documento: a.tipo_documento, caricato: !!a.file_uri, estratto: testo(a.contenuto, MAX_ESTRATTO) }));
+  // file_rimasto c'e' solo quando la piattaforma non ha permesso di cancellare
+  // l'allegato dopo averlo letto: e' l'unico modo di ritrovarlo, e credere di
+  // aver liberato spazio senza averlo fatto e' peggio che saperlo.
+  const daSalvare = conContenuto.map(a => ({
+    rif: a.rif, nome: a.nome, tipo: a.tipo, dimensione: a.dimensione, tipo_documento: a.tipo_documento,
+    caricato: !!a.file_uri, estratto: testo(a.contenuto, MAX_ESTRATTO),
+    ...(a.file_rimasto ? { file_rimasto: a.file_rimasto, motivo_file_rimasto: a.motivo_file_rimasto || '' } : {}),
+  }));
   return { sezione, daSalvare };
 }
 

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Loader2, Star, Truck, History } from 'lucide-react';
+import Storia from '@/components/shared/Storia';
 import { MESI, STATI_RICHIESTA, GRAVITA, tonnellate, dataIt, dataOraIt } from '@/lib/evasioneAssegnati';
 import { formatKg, formatIntero } from '@/lib/utils';
 import { leggiCampo } from '@/lib/testoLungo';
@@ -205,6 +206,12 @@ export default function DettaglioEvasione({ riga, anno, mese, open, inRiscrittur
           </SheetDescription>
         </SheetHeader>
 
+        {riga.lista && riga.lista.alleggerito_il && (
+          <div className="mt-4">
+            <Storia testo={riga.lista.storia} alleggeritoIl={riga.lista.alleggerito_il} cosa="lista" />
+          </div>
+        )}
+
         <SezioneCanali riga={riga} anno={anno} mese={mese} inRiscrittura={inRiscrittura} />
 
         {!riga.lista ? null : caricando ? (
@@ -214,6 +221,12 @@ export default function DettaglioEvasione({ riga, anno, mese, open, inRiscrittur
         ) : (
           <div className="mt-6 space-y-6">
             <h4 className="font-semibold border-t pt-5">Lista della rete</h4>
+            {/* A un controllo superato da uno piu' recente, e a quelli dei mesi
+                ormai chiusi, viene tolto il dettaglio richiesta per richiesta:
+                senza questo riquadro la scheda si aprirebbe vuota e non si
+                capirebbe se il controllo non aveva trovato niente o se il dato
+                e' stato tolto. */}
+            {c.alleggerito_il && <Storia testo={c.storia} alleggeritoIl={c.alleggerito_il} cosa="controllo" />}
             {controlli.length > 1 && (
               <div className="flex items-center gap-2 flex-wrap text-xs">
                 <History className="w-3.5 h-3.5 text-muted-foreground" />

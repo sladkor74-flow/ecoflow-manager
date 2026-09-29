@@ -35,6 +35,10 @@ const CAMPI_RIEPILOGO = [
   'stato', 'avviata_il', 'errore', 'righe_report', 'conformi', 'con_discrepanze', 'non_trovate', 'duplicate',
   'assenti_nel_report', 'uscite_verificate', 'righe_escluse', 'conformita', 'anomalie', 'osservazioni', 'rettifiche',
   'date_da_sistemare', 'verificata_il', 'scade_il', 'created_date',
+  // Senza questi due l'elenco mostrerebbe una scadenza gia' passata invece di
+  // dire che il dettaglio e' stato tolto, e i pulsanti di esportazione non
+  // saprebbero di doversi spegnere.
+  'storia', 'alleggerito_il',
 ];
 
 export default async function(req) {
@@ -55,15 +59,13 @@ export default async function(req) {
     const svc = base44.asServiceRole.entities;
     const oggi = oggiRoma();
 
+    // Le verifiche scadute NON si cancellano piu' (richiesta dell'utente,
+    // 29/09/2026): al quarantesimo giorno perdono le righe lette e il confronto
+    // riga per riga, e restano con i loro numeri e la storia scritta. Se ne
+    // occupa la funzione alleggerisciDocumenti, ogni notte: aprire una settimana
+    // non deve piu' far sparire niente.
     const tutte = await fetchAll(svc.VerificaReport);
     let cancellate = 0;
-    for (const v of tutte) {
-      if (puoScrivere && v.scade_il && String(v.scade_il).slice(0, 10) <= oggi) {
-        await eliminaCampo(base44, 'VerificaReport', v.id);
-        await svc.VerificaReport.delete(v.id);
-        cancellate++;
-      }
-    }
 
     // Lo stato dei caricamenti si legge prima e dopo gli archivi: letto insieme
     // agli archivi, un caricamento partito mentre li si leggeva non si vedeva, e
@@ -74,8 +76,10 @@ export default async function(req) {
       .map(a => ({ ...a, descrizione: descriviCaricamento(a) }));
     const { inizio, fine, righe } = soggettiDellaSettimana(dati, anno, settimana);
 
+    // Anche una verifica alleggerita resta nell'elenco: e' la storia di quella
+    // settimana, e nasconderla equivarrebbe a cancellarla.
     const dellaSettimana = tutte
-      .filter(v => Number(v.anno) === anno && Number(v.settimana) === settimana && !(v.scade_il && String(v.scade_il).slice(0, 10) <= oggi))
+      .filter(v => Number(v.anno) === anno && Number(v.settimana) === settimana)
       .sort((a, b) => String(b.created_date || '').localeCompare(String(a.created_date || '')));
 
     // Un report puo' arrivare anche da un soggetto che nella settimana non ha

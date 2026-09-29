@@ -8,22 +8,22 @@
     },
     "do": [
       {
-        "cancella_verifiche_scadute": {
+        "alleggerisci_documenti": {
           "call": "invoke_backend_function",
           "with": {
-            "function_name": "pulisciVerificheReport",
+            "function_name": "alleggerisciDocumenti",
             "args": {}
           },
           "then": "end",
           "x-base44": {
-            "title": "Cancella le verifiche scadute",
-            "description": "Elimina le verifiche dei report settimanali arrivate al quarantesimo giorno dal caricamento"
+            "title": "Alleggerisce i documenti dei fornitori",
+            "description": "Ai documenti caricati da oltre quaranta giorni toglie le righe lette e il confronto riga per riga, e lascia i numeri di sintesi e la storia scritta"
           }
         }
       }
     ]
   },
-  "name": "Pulizia Verifiche Report",
+  "name": "Alleggerimento Documenti",
   "trigger": {
     "condition": null,
     "config": {
@@ -41,5 +41,5 @@
       "ends_after_count": null
     }
   },
-  "description": "Ogni notte alle 3:15 cancella le verifiche dei report settimanali caricate da quaranta giorni"
+  "description": "Ogni notte alle 3:15 toglie il dettaglio ai documenti dei fornitori caricati da oltre quaranta giorni: verifiche dei report settimanali, quadrature FIR, consuntivi, liste degli assegnati e controlli dell'evasione. Il record non si cancella: restano i numeri di sintesi e la storia scritta"
 }

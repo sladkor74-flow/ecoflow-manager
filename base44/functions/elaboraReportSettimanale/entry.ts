@@ -6,6 +6,7 @@ import {
 import { valoreCampo, leggiCampo } from "../../shared/testoLungo.ts";
 import { calcolaEsito, salvaEsito } from "../../shared/esitoVerifica.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
+import { cancellaFile } from "../../shared/fileArchivio.ts";
 
 // Legge il report settimanale di un impianto o di uno stoccaggio e lo confronta
 // con il gestionale: gli ingressi con le primarie, le uscite con le secondarie.
@@ -262,12 +263,13 @@ async function leggiFile(base44, file, verifica) {
   const risposta = await core.InvokeLLM({ prompt, file_urls: [signed_url], response_json_schema: SCHEMA_TRASCRIZIONE });
   const letto = typeof risposta === 'object' && risposta ? risposta : estraiJson(risposta);
 
-  // Il file era lì solo per essere letto: se la piattaforma lo consente, via.
-  for (const nome of ['DeleteFile', 'DeletePrivateFile', 'RemoveFile']) {
-    if (typeof core[nome] !== 'function') continue;
-    try { await core[nome]({ file_uri: file.file_uri }); } catch (_e) { /* resta in archivio */ }
-    break;
-  }
+  // Il file era lì solo per essere letto: via subito. Se la cancellazione non
+  // riesce, l'identificativo resta scritto sulla verifica (file_uri) e la pulizia
+  // notturna riprova: prima non era salvato da nessuna parte, quindi un file che
+  // non si riusciva a cancellare diventava un orfano che nessuno sapeva di avere.
+  const tolto = await cancellaFile(base44, file.file_uri);
+  await base44.asServiceRole.entities.VerificaReport.update(verifica.id, { file_uri: tolto.riuscita ? '' : file.file_uri })
+    .catch(() => { /* la lettura e' andata: il file si riprende la notte */ });
 
   const grezze = (letto.righe || []).map((r, i) => {
     // La tabella di provenienza diventa il "foglio" della riga: e' la chiave con

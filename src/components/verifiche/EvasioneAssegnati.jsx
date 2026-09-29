@@ -13,8 +13,10 @@ import { oggiRoma } from '@/lib/giornoItaliano';
 // Sezione 2 del modulo Verifiche: evasione delle liste di assegnati inviate ai
 // raccoglitori a inizio mese. A ogni caricamento delle primarie il gestionale
 // controlla cronologia, priorita', ordini fuori lista e fattibilita' rispetto al
-// target. Liste e controlli di un raccoglitore si cancellano quando si carica la
-// sua lista del mese successivo.
+// target. La lista di un raccoglitore viene sostituita quando se ne carica una
+// nuova per lo stesso mese; quelle dei mesi prima restano, e perdono solo il
+// dettaglio richiesta per richiesta (29/09/2026): la storia di come ha lavorato
+// resta scritta.
 //
 // Rete, ACI ed extra raccolta restano separati: lista, target e previsione
 // riguardano la rete; di ACI ed extra si vedono raccolto e richieste aperte.
@@ -86,6 +88,20 @@ function AlertBadge({ riga }) {
   if (!riga.controllo && !alert.length) return <span className="text-muted-foreground">—</span>;
   const alte = alert.filter(a => a.gravita === 'alta').length;
   const medie = alert.filter(a => a.gravita === 'media').length;
+  // A un controllo alleggerito le frasi delle segnalazioni sono state tolte, ma i
+  // contatori restano sul record: senza guardarli un mese con quattro
+  // segnalazioni alte si mostrerebbe verde, "In linea", che e' il contrario del
+  // vero. I numeri si mostrano in grigio, perche' del dettaglio resta la storia.
+  const c = riga.controllo;
+  if (c && c.alleggerito_il && !alert.length && (c.alert_alti > 0 || c.alert_totali > 0)) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums"
+        title="Al controllo è stato tolto il dettaglio: restano i contatori e la storia scritta">
+        {c.alert_alti > 0 ? `${c.alert_alti} alte` : ''}{c.alert_alti > 0 && c.alert_totali > c.alert_alti ? ' · ' : ''}
+        {c.alert_totali > c.alert_alti ? `${c.alert_totali - c.alert_alti} altre` : ''}
+      </span>
+    );
+  }
   if (!alte && !medie) return <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="w-3.5 h-3.5" />In linea</span>;
   return (
     <div className="flex gap-1">
@@ -379,7 +395,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
           Carica per ogni raccoglitore la lista inviata a inizio mese: uno o più file Excel insieme, con la colonna ID degli assegnati, con in giallo
           le prioritarie oppure in un file con PRIORITA' nel nome. Chi deve evadere lo decide la lista, anche se sul portale l'ordine è assegnato a un
           altro trasportatore. L'ordine si valuta per provincia: prima le prioritarie della lista, anche quando sono forzature chieste dal consorzio, poi con priorità assoluta le richieste immesse negli anni precedenti, poi per data di immissione. Il controllo si ripete da solo a ogni caricamento delle primarie, sulla data di fine trasporto: la chiusura sul portale non decide niente.
-          Target e "non raccoglie questo mese" si scrivono in Target & Status, scheda Target raccoglitori: se cambiano, il controllo si aggiorna da solo. Caricando la lista del mese successivo, quella precedente e i suoi controlli si cancellano.
+          Target e "non raccoglie questo mese" si scrivono in Target & Status, scheda Target raccoglitori: se cambiano, il controllo si aggiorna da solo. Caricando di nuovo la lista dello stesso mese, la precedente viene sostituita; le liste dei mesi passati restano con i loro numeri e una storia scritta, e perdono solo il dettaglio richiesta per richiesta.
           Lista, target e previsione riguardano la sola rete. ACI ed extra raccolta sono mostrati a parte: una richiesta ACI aperta o una richiesta
           di extra raccolta inserita come assegnata nel modulo Extra Raccolta genera un alert. Una richiesta resta assegnata finché non viene chiusa
           o cancellata sul portale: se è già stata ritirata ma non ancora chiusa risulta aperta, e gli alert chiedono di chiuderla. Un ordine terminato

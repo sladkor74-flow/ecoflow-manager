@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Loader2, Upload, Download, RefreshCw, Trash2, AlertTriangle, CheckCircle2, Snowflake } from 'lucide-react';
+import Storia from '@/components/shared/Storia';
 import { formatKg } from '@/lib/utils';
 import { tabelleDalFile, scaricaExcelConsuntivo } from '@/lib/consuntivoFornitoreFile';
 
@@ -199,10 +200,14 @@ export default function Consuntivi({ isAdmin }) {
                       : x.quadra === false
                         ? <span className="text-amber-800 inline-flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> da guardare</span>
                         : <span className="text-muted-foreground">non ancora confrontato</span>}
+                    {/* Senza questo un consuntivo alleggerito si vedeva in elenco
+                        identico a uno fresco. */}
+                    {x.alleggerito_il && <span className="ml-2 text-xs text-muted-foreground">· solo storia</span>}
                   </td>
                   <td className="px-2 py-1.5 whitespace-nowrap text-right">
-                    <Button size="sm" variant="outline" className="h-7 px-2 mr-1" onClick={() => apri(x)} disabled={!!occupato}>
-                      <RefreshCw className="w-3.5 h-3.5 mr-1" /> Confronta
+                    <Button size="sm" variant="outline" className="h-7 px-2 mr-1" onClick={() => apri(x)} disabled={!!occupato}
+                      title={x.alleggerito_il ? 'Di questo consuntivo resta la storia scritta: il confronto non si può rifare senza ricaricare il file' : undefined}>
+                      {x.alleggerito_il ? 'Storia' : <><RefreshCw className="w-3.5 h-3.5 mr-1" /> Confronta</>}
                     </Button>
                     {isAdmin && (
                       <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => elimina(x)} disabled={!!occupato}>
@@ -215,6 +220,13 @@ export default function Consuntivi({ isAdmin }) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Al quarantesimo giorno il consuntivo perde le righe lette e il confronto:
+          resta la storia scritta. Senza questo riquadro il clic su una riga vecchia
+          mostrava solo una fascia rossa d'errore. */}
+      {esito && esito.alleggerito && (
+        <Storia testo={esito.storia} alleggeritoIl={esito.consuntivo && esito.consuntivo.alleggerito_il} cosa="consuntivo" />
       )}
 
       {esito && c && (

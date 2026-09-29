@@ -30,7 +30,7 @@
     },
     "righe_json": {
       "type": "string",
-      "description": "Richieste della lista nell'ordine di evasione, completate con i dati del gestionale al momento del caricamento"
+      "description": "Richieste della lista nell'ordine di evasione, completate con i dati del gestionale al momento del caricamento. Si tolgono quando il mese e' chiuso da abbastanza tempo: la lista non si cancella piu', resta con la sua storia scritta"
     },
     "avvisi_json": {
       "type": "string",
@@ -41,6 +41,15 @@
     },
     "prioritarie": {
       "type": "number"
+    },
+    "storia": {
+      "type": "string",
+      "description": "La storia scritta del documento, in italiano: resta per sempre. Si scrive quando il dettaglio viene tolto, al quarantesimo giorno dal caricamento (base44/shared/conservazione.ts). E' un campo normale e non passa mai da valoreCampo: se sfondasse gli ottomila caratteri tornerebbe in ContenutoEsteso, cioe' il peso che si e' appena tolto"
+    },
+    "alleggerito_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Giorno in cui sono stati tolti le righe lette e il confronto riga per riga. Finche' e' vuoto il documento ha ancora tutto il suo dettaglio"
     }
   },
   "required": [

@@ -190,7 +190,7 @@ function RigaSoggetto({ riga, isAdmin, occupato, onCarica, onDichiara, onApri, o
         ) : <span className="text-muted-foreground text-sm">—</span>}
       </td>
       <td className="px-4 py-3"><Esito riga={riga} /></td>
-      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{v && v.scade_il ? dataIt(v.scade_il) : ''}</td>
+      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{v && v.alleggerito_il ? `tolto il ${dataIt(v.alleggerito_il)}` : v && v.scade_il ? dataIt(v.scade_il) : ''}</td>
       <td className="px-4 py-3">
         <div className="flex items-center justify-end gap-1">
           {isAdmin && (
@@ -209,8 +209,10 @@ function RigaSoggetto({ riga, isAdmin, occupato, onCarica, onDichiara, onApri, o
           {v && (
             <>
               <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Dettaglio" onClick={() => onApri(v.id)}><Eye className="w-4 h-4" /></Button>
-              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="PDF per l'impianto" disabled={v.stato !== 'completata'} onClick={() => onScarica(v.id, 'pdf')}><FileText className="w-4 h-4" /></Button>
-              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="Scarica Excel" disabled={v.stato !== 'completata'} onClick={() => onScarica(v.id)}><Download className="w-4 h-4" /></Button>
+              {/* Senza il dettaglio il documento uscirebbe con il verdetto giusto e
+                  zero formulari dentro: e' un foglio che va all'impianto. */}
+              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title={v.alleggerito_il ? "Di questa verifica resta la storia scritta: il dettaglio riga per riga non c'è più" : "PDF per l'impianto"} disabled={v.stato !== 'completata' || !!v.alleggerito_il} onClick={() => onScarica(v.id, 'pdf')}><FileText className="w-4 h-4" /></Button>
+              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title={v.alleggerito_il ? "Di questa verifica resta la storia scritta: il dettaglio riga per riga non c'è più" : 'Scarica Excel'} disabled={v.stato !== 'completata' || !!v.alleggerito_il} onClick={() => onScarica(v.id)}><Download className="w-4 h-4" /></Button>
               {isAdmin && <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-red-600 hover:text-red-700" title="Elimina" onClick={() => onElimina(riga)}><Trash2 className="w-4 h-4" /></Button>}
             </>
           )}
@@ -356,7 +358,7 @@ export default function ReportSettimanali({ isAdmin }) {
         await conRitentativi(() => eliminaParti('VerificaReport', precedenteVerifica.id));
         await conRitentativi(() => base44.entities.VerificaReport.delete(precedenteVerifica.id));
       } catch (e) {
-        toast({ title: 'La verifica precedente non è stata cancellata', description: 'Si cancellerà da sola alla scadenza. ' + (e.message || ''), variant: 'destructive' });
+        toast({ title: 'La verifica precedente non è stata cancellata', description: 'Resta in elenco accanto a questa: cancellala a mano. ' + (e.message || ''), variant: 'destructive' });
       }
     }
   };
@@ -399,6 +401,12 @@ export default function ReportSettimanali({ isAdmin }) {
       // Il file si apre qui, prima di creare la verifica: se non e' leggibile non
       // resta traccia di un tentativo fallito.
       const payload = {};
+      // Il file caricato si scrive sulla verifica: la funzione lo cancella appena
+      // l'ha letto e svuota il campo, ma se quella cancellazione non riesce
+      // l'identificativo resta li' e la pulizia notturna riprova. Prima non era
+      // salvato da nessuna parte, e un file che non si riusciva a cancellare
+      // diventava un orfano che nessuno sapeva piu' di avere.
+      let caricato = '';
       if (tipo === 'excel' || tipo === 'csv') {
         payload.tabelle = await leggiTabelleDaFile(file, { inizio: intervallo.inizio, fine: intervallo.fine });
         if (payload.tabelle.length === 0) throw new Error('Il file è vuoto.');
@@ -407,9 +415,10 @@ export default function ReportSettimanali({ isAdmin }) {
         // l'agente li legga da un link firmato, e poi si prova a cancellarli.
         const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
         payload.file = { file_uri, mime: tipo };
+        caricato = file_uri;
       }
 
-      await avviaVerifica(riga, { file_nome: file.name, file_tipo: tipo, stato: 'in_lettura' }, payload);
+      await avviaVerifica(riga, { file_nome: file.name, file_tipo: tipo, stato: 'in_lettura', ...(caricato ? { file_uri: caricato } : {}) }, payload);
       setOccupato(null);
       await carica(true);
     } catch (e) {
@@ -432,6 +441,7 @@ export default function ReportSettimanali({ isAdmin }) {
   const scarica = async (id, formato = 'excel') => {
     try {
       const v = await conCampiCompleti('VerificaReport', await base44.entities.VerificaReport.get(id), ['esito_json', 'lettura_json']);
+      if (v && v.alleggerito_il) throw new Error("Di questa verifica restano i numeri di sintesi e la storia scritta: il dettaglio riga per riga è stato tolto, e un PDF o un Excel senza righe direbbero il falso. Per riaverli va ricaricato il report.");
       if (formato === 'pdf') await esportaEsitoVerificaPdf(v);
       else await scaricaExcelVerifica(v);
     } catch (e) {
@@ -480,8 +490,9 @@ export default function ReportSettimanali({ isAdmin }) {
           Carica il report inviato da ciascun impianto o stoccaggio: Excel, CSV, PDF o immagine. Gli ingressi si confrontano con le primarie,
           le uscite con le secondarie; il peso al chilogrammo, la data su quella di fine trasporto. Immissione, inizio e fine trasporto sono
           obbligatorie: un formulario registrato a cui ne manca una, o con le date incoerenti, è un&apos;anomalia del suo canale. Nella verifica restano solo i dati letti
-          e l'esito, che si cancellano da soli {GIORNI_CONSERVAZIONE} giorni dopo il caricamento: un Excel si legge qui nel browser senza
-          caricare niente, un PDF o un'immagine vengono caricati nell'archivio privato perché l'agente li possa leggere.
+          e l'esito: {GIORNI_CONSERVAZIONE} giorni dopo il caricamento se ne vanno anche quelli e resta la storia scritta, cioè il verdetto,
+          i numeri per canale e che cosa non tornava. La verifica non si cancella più. Un Excel si legge qui nel browser senza caricare
+          niente, un PDF o un'immagine vengono caricati nell'archivio privato perché l'agente li possa leggere e cancellati subito dopo.
           Il confronto si rifà da solo sui movimenti di adesso dopo ogni caricamento di primarie e secondarie e a ogni apertura della settimana.
         </span>
       </div>
@@ -552,7 +563,7 @@ export default function ReportSettimanali({ isAdmin }) {
                 <th className="px-4 py-2.5 font-semibold">Uscite <span className="font-normal text-muted-foreground">per canale</span></th>
                 <th className="px-4 py-2.5 font-semibold">Report</th>
                 <th className="px-4 py-2.5 font-semibold">Esito</th>
-                <th className="px-4 py-2.5 font-semibold">Si cancella il</th>
+                <th className="px-4 py-2.5 font-semibold" title="Al quarantesimo giorno restano i numeri di sintesi e la storia scritta: se ne vanno le righe lette e il confronto riga per riga">Dettaglio fino al</th>
                 <th className="px-4 py-2.5" />
               </tr>
             </thead>

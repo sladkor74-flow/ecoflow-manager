@@ -7,6 +7,7 @@ import {
 import { ricontrollaVerifiche, conRitentativi, piuRecentiPerSoggetto, daRiconfrontare } from "../../shared/esitoVerifica.ts";
 import { caricaGestionale, rifaiQuadratura, TIPI_CARICAMENTO } from "../../shared/quadraturaFirDati.ts";
 import { precaricaParti } from "../../shared/testoLungo.ts";
+import { eAlleggerito } from "../../shared/conservazione.ts";
 
 // Dopo un caricamento di primarie o secondarie (lo lancia Caricamento Dati a
 // caricamento concluso) riconfronta con i nuovi dati tutto quello che il modulo
@@ -66,11 +67,13 @@ export default async function(req) {
     if (primaDegliArchivi.in_corso.length) return rinvio(primaDegliArchivi.in_corso);
 
     const oggi = oggiRoma();
-    const scaduta = (v) => !!v.scade_il && String(v.scade_il).slice(0, 10) <= oggi;
     const verifiche = piuRecentiPerSoggetto(await fetchAll(svc.VerificaReport))
       // anche le verifiche rinviate durante un caricamento, con le righe gia' lette:
-      // e' qui, a caricamento finito, che si completano
-      .filter(v => daRiconfrontare(v) && !scaduta(v));
+      // e' qui, a caricamento finito, che si completano.
+      // Una verifica alleggerita non ha piu' le righe del report: il confronto non
+      // si puo' rifare, e daRiconfrontare la lascia gia' fuori. Si dice lo stesso,
+      // perche' e' il motivo per cui da un certo giorno in poi non si aggiorna piu'.
+      .filter(v => daRiconfrontare(v) && !eAlleggerito(v));
     const dal = aggiungiGiorni(oggi, -GIORNI_CONSERVAZIONE);
     // Una scheda di extra raccolta scritta o corretta in ritardo porta i giorni di
     // fine trasporto toccati: si rifanno anche le quadrature, di qualunque eta',

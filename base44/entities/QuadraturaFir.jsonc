@@ -60,11 +60,11 @@
     },
     "righe_json": {
       "type": "string",
-      "description": "Righe lette dal file, normalizzate: bastano a ripetere il confronto senza rileggere il file"
+      "description": "Righe lette dal file, normalizzate: bastano a ripetere il confronto senza rileggere il file. Si tolgono al quarantesimo giorno dal caricamento, che e' anche il confine oltre il quale il confronto non si rifa' piu'"
     },
     "esito_json": {
       "type": "string",
-      "description": "Esito del confronto flusso per flusso e cella per cella, con la motivazione di ogni scostamento"
+      "description": "Esito del confronto flusso per flusso e cella per cella, con la motivazione di ogni scostamento. Si toglie al quarantesimo giorno dal caricamento: il verdetto per canale resta nei campi e gli scostamenti nella storia"
     },
     "tabelle": {
       "type": "number",
@@ -126,6 +126,19 @@
           }
         }
       }
+    },
+    "storia": {
+      "type": "string",
+      "description": "La storia scritta del documento, in italiano: resta per sempre. Si scrive quando il dettaglio viene tolto, al quarantesimo giorno dal caricamento (base44/shared/conservazione.ts). E' un campo normale e non passa mai da valoreCampo: se sfondasse gli ottomila caratteri tornerebbe in ContenutoEsteso, cioe' il peso che si e' appena tolto"
+    },
+    "alleggerito_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Giorno in cui sono stati tolti le righe lette e il confronto riga per riga. Finche' e' vuoto il documento ha ancora tutto il suo dettaglio"
+    },
+    "file_uri": {
+      "type": "string",
+      "description": "Il PDF o l'immagine caricati nell'archivio privato perche' l'agente li leggesse. Si cancella subito dopo la lettura e il campo torna vuoto: resta scritto solo se quella cancellazione non e' riuscita, cosi' la pulizia notturna puo' riprovare invece di lasciare in giro un file che nessuno sa piu' di avere"
     }
   },
   "required": [

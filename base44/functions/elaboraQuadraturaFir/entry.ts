@@ -8,6 +8,7 @@ import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from
 import { valoreCampo, leggiJson } from "../../shared/testoLungo.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { cancellaFile } from "../../shared/fileArchivio.ts";
+import { eAlleggerito } from "../../shared/conservazione.ts";
 
 // Legge la stampa settimanale del conteggio e della somma dei FIR e la confronta
 // con il gestionale.
@@ -159,6 +160,15 @@ export default async function(req) {
       letto = { settimana: null, anno: null, tabelle, note: '' };
       modo = 'excel';
     } else if (solo_confronto) {
+      // Una quadratura alleggerita non ha piu' le righe lette. Non e' un errore
+      // del documento e non va scritto sul record come tale: marcarla 'errore'
+      // farebbe sparire dalla pagina proprio la storia che si e' conservata.
+      if (eAlleggerito(q)) {
+        return Response.json({
+          error: `Di questa quadratura restano i numeri di sintesi e la storia scritta: il dettaglio e' stato tolto il ${String(q.alleggerito_il).slice(0, 10)}, quaranta giorni dopo il caricamento. Per rifare il confronto serve ricaricare il file.`,
+          alleggerita: true,
+        }, { status: 409 });
+      }
       letto = righeConservate(await leggiJson(base44, 'QuadraturaFir', q, 'righe_json', null));
       if (!letto) throw new Error('Non ci sono righe salvate: ricarica il file.');
     } else {
@@ -184,7 +194,15 @@ export default async function(req) {
         lettura.problemi.push('La rilettura non è riuscita: ' + (e && e.message ? e.message : e));
       }
     }
-    if (file_uri) cancellazione = (await cancellaFile(base44, file_uri)).come;
+    // Il file era li' solo per essere letto. Se la cancellazione non riesce,
+    // l'identificativo resta scritto sulla quadratura e la pulizia notturna
+    // riprova: senza, sarebbe un file che nessuno sa piu' di avere.
+    if (file_uri) {
+      const tolto = await cancellaFile(base44, file_uri);
+      cancellazione = tolto.come;
+      await base44.asServiceRole.entities.QuadraturaFir.update(quadratura_id, { file_uri: tolto.riuscita ? '' : file_uri })
+        .catch(() => { /* la lettura e' andata: il file si riprende la notte */ });
+    }
     // Ripetendo il confronto la lettura del file non cambia: restano i problemi
     // trovati quando e' stato letto (seconda lettura, righe riassegnate con i
     // subtotali), che le righe conservate da sole non raccontano piu', e la sua

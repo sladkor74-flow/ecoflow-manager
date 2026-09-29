@@ -65,11 +65,11 @@
     },
     "righe_report_json": {
       "type": "string",
-      "description": "Righe del report gia' normalizzate: servono a ripetere la verifica senza rileggere il file"
+      "description": "Righe del report gia' normalizzate: servono a ripetere la verifica senza rileggere il file. Si tolgono al quarantesimo giorno dal caricamento, e da li' in poi la verifica non si rifa' piu': resta l'ultimo esito, riassunto nella storia"
     },
     "esito_json": {
       "type": "string",
-      "description": "Esito riga per riga, con il tipo ingresso o uscita, e movimenti del gestionale assenti nel report"
+      "description": "Esito riga per riga, con il tipo ingresso o uscita, e movimenti del gestionale assenti nel report. Si toglie al quarantesimo giorno dal caricamento: quello che serve dopo (formulari e chili per canale, chi non tornava) finisce nella storia"
     },
     "righe_report": {
       "type": "number"
@@ -142,7 +142,20 @@
     "scade_il": {
       "type": "string",
       "format": "date",
-      "description": "Giorno in cui la verifica viene cancellata: quaranta giorni dopo il caricamento"
+      "description": "Giorno in cui alla verifica viene tolto il dettaglio: quaranta giorni dopo il caricamento. Il record NON si cancella piu' (richiesta dell'utente, 29/09/2026): restano i numeri di sintesi, il verdetto per canale e la storia scritta"
+    },
+    "storia": {
+      "type": "string",
+      "description": "La storia scritta del documento, in italiano: resta per sempre. Si scrive quando il dettaglio viene tolto, al quarantesimo giorno dal caricamento (base44/shared/conservazione.ts). E' un campo normale e non passa mai da valoreCampo: se sfondasse gli ottomila caratteri tornerebbe in ContenutoEsteso, cioe' il peso che si e' appena tolto"
+    },
+    "alleggerito_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Giorno in cui sono stati tolti le righe lette e il confronto riga per riga. Finche' e' vuoto il documento ha ancora tutto il suo dettaglio"
+    },
+    "file_uri": {
+      "type": "string",
+      "description": "Il PDF o l'immagine caricati nell'archivio privato perche' l'agente li leggesse. Si cancella subito dopo la lettura e il campo torna vuoto: resta scritto solo se quella cancellazione non e' riuscita, cosi' la pulizia notturna puo' riprovare invece di lasciare in giro un file che nessuno sa piu' di avere"
     }
   },
   "required": [

@@ -2,7 +2,8 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { soloAmministratore, utenteCorrente } from "../../shared/permessi.ts";
-import { valoreCampo, leggiCampo } from "../../shared/testoLungo.ts";
+import { eAlleggerito } from "../../shared/conservazione.ts";
+import { valoreCampo, leggiCampo, eliminaCampo } from "../../shared/testoLungo.ts";
 
 import { calcolaPassivaMese, MESI_PASSIVA } from "../../shared/passivaCalcolo.ts";
 import {
@@ -72,6 +73,10 @@ export default async function(req) {
       const guardia = await soloAmministratore(base44);
       if (guardia.errore) return guardia.errore;
       if (!body.id) return Response.json({ error: 'id obbligatorio' }, { status: 400 });
+      // Le parti del testo lungo si cancellano PRIMA del record: dopo, il filtro
+      // non avrebbe piu' un record a cui riferirsi e resterebbero in archivio
+      // senza padre, per sempre. Fino al 29/09/2026 qui mancava.
+      await eliminaCampo(base44, 'ConsuntivoFornitore', body.id).catch(() => {});
       await svc.ConsuntivoFornitore.delete(body.id);
       return Response.json({ ok: true });
     }
@@ -110,6 +115,19 @@ export default async function(req) {
       }
     } else if (record && record.righe_json) {
       righe = JSON.parse((await leggiCampo(base44, 'ConsuntivoFornitore', record, 'righe_json')) || '[]');
+    }
+    // Di un consuntivo alleggerito restano i numeri di sintesi e la storia
+    // scritta: si risponde con quella invece che con un errore rosso. Il
+    // confronto non si puo' rifare perche' le righe non ci sono piu', e il file
+    // non si conserva: per rifarlo va ricaricato.
+    if (!righe && record && eAlleggerito(record)) {
+      return Response.json({
+        consuntivo: record,
+        alleggerito: true,
+        storia: record.storia || '',
+        testo: record.storia || '',
+        confronto: null, costo: null, esito: null, congelato: null, note_lettura: [],
+      });
     }
     if (!righe) return Response.json({ error: 'Non ci sono righe da confrontare: carica il consuntivo.' }, { status: 400 });
 
@@ -177,7 +195,11 @@ export default async function(req) {
         quadra: esito.quadra_tutto,
         confrontato_il: new Date().toISOString(),
         ...(importoConsuntivo !== null ? { importo_consuntivo: importoConsuntivo } : {}),
-        ...(azione === 'carica' ? { file_nome: String(body.file_nome || ''), caricato_il: new Date().toISOString() } : {}),
+        // Ricaricando il file il consuntivo torna intero: alleggerito_il e la
+        // storia vanno azzerati, altrimenti il record resterebbe segnato come
+        // alleggerito e la pagina mostrerebbe la vecchia storia invece del
+        // confronto nuovo.
+        ...(azione === 'carica' ? { file_nome: String(body.file_nome || ''), caricato_il: new Date().toISOString(), alleggerito_il: '', storia: '' } : {}),
       };
       if (!record) record = await svc.ConsuntivoFornitore.create(campi);
       const id = record.id;

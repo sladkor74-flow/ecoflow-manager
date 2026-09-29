@@ -96,7 +96,16 @@
     },
     "esito_json": {
       "type": "string",
-      "description": "Stato di ogni richiesta, ordini evasi fuori lista, previsione e storia del raccoglitore"
+      "description": "Stato di ogni richiesta, ordini evasi fuori lista, previsione e storia del raccoglitore. Si toglie quando il controllo e' superato da uno piu' recente sulla stessa lista, o quando il mese e' chiuso da abbastanza tempo: restano i venti contatori e la storia scritta"
+    },
+    "storia": {
+      "type": "string",
+      "description": "La storia scritta del documento, in italiano: resta per sempre. Si scrive quando il dettaglio viene tolto, al quarantesimo giorno dal caricamento (base44/shared/conservazione.ts). E' un campo normale e non passa mai da valoreCampo: se sfondasse gli ottomila caratteri tornerebbe in ContenutoEsteso, cioe' il peso che si e' appena tolto"
+    },
+    "alleggerito_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Giorno in cui sono stati tolti le righe lette e il confronto riga per riga. Finche' e' vuoto il documento ha ancora tutto il suo dettaglio"
     }
   },
   "required": [

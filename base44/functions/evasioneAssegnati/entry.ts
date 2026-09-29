@@ -4,7 +4,8 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { raccoglitoriAttivi, situazioneCanali, MESI } from "../../shared/evasioneAssegnati.ts";
 import { targetMensiliAnno, targetRaccoglitoreMese } from "../../shared/targetRaccoglitori.ts";
 import { oggiRoma } from "../../shared/reportSettimanali.ts";
-import { caricaDati, cancellaVecchi, eseguiControlli, indiceSicurezza, ultimoCaricamentoPrimarie } from "../../shared/evasioneAssegnatiDati.ts";
+import { caricaDati, alleggerisciVecchi, eseguiControlli, indiceSicurezza, ultimoCaricamentoPrimarie } from "../../shared/evasioneAssegnatiDati.ts";
+import { eAlleggerito } from "../../shared/conservazione.ts";
 import { leggiJson } from "../../shared/testoLungo.ts";
 
 // Situazione dell'evasione degli assegnati per un mese.
@@ -21,6 +22,9 @@ const CAMPI_CONTROLLO = [
   'id', 'eseguito_il', 'primarie_caricate_il', 'dati_al', 'richieste', 'evase', 'evase_da_altri', 'aperte', 'prioritarie_aperte', 'arretrate_aperte',
   'fuori_ordine', 'trascurate', 'fuori_lista', 'non_piu_presenti', 'annullate', 'riassegnate', 'raccolto_kg', 'target_kg', 'proiezione_kg',
   'evadibili_ritmo', 'evadibili_target', 'alert_alti', 'alert_totali',
+  // Senza questi due la pagina non sa che al controllo e' stato tolto il
+  // dettaglio, e un mese con quattro segnalazioni alte si mostrerebbe verde.
+  'storia', 'alleggerito_il',
 ];
 
 export default async function(req) {
@@ -34,7 +38,9 @@ export default async function(req) {
     if (!anno || !mese) return Response.json({ error: 'anno e mese sono obbligatori' }, { status: 400 });
 
     const svc = base44.asServiceRole.entities;
-    await cancellaVecchi(base44, { finoAIndice: indiceSicurezza() });
+    // Alleggerire e' una scrittura: la fa solo chi puo' scrivere. Aprire la
+    // pagina per consultarla non deve toccare l'archivio.
+    if (user.role === 'admin') await alleggerisciVecchi(base44, { finoAIndice: indiceSicurezza(), massimo: 15 });
 
     const [dati, liste, targetAnno, primarieIl] = await Promise.all([
       caricaDati(base44),
@@ -53,8 +59,13 @@ export default async function(req) {
     // Chi non ha formulari terminati nell'anno non raccoglie: i suoi ordini
     // assegnati sul portale finiscono nelle liste di altri e si segnalano a parte.
     const attiviAnno = new Set(dati.terminati.filter(t => t.fine && t.fine.slice(0, 4) === String(anno)).map(t => t.chiaveTrasp));
+    // Una lista alleggerita non ha piu' le sue righe: quali ordini conteneva non
+    // si sa piu'. Trattarla come una lista vuota farebbe risultare "in nessuna
+    // lista caricata" ordini che invece c'erano, e aprirebbe un alert falso su
+    // ogni mese ormai archiviato.
+    const listeConRighe = listeMese.filter(l => !eAlleggerito(l) && String(l.righe_json || '').trim() !== '');
     const idsInListe = new Set();
-    for (const l of listeMese) for (const r of await leggiJson(base44, 'ListaAssegnati', l, 'righe_json')) idsInListe.add(r.id_ordine);
+    for (const l of listeConRighe) for (const r of await leggiJson(base44, 'ListaAssegnati', l, 'righe_json')) idsInListe.add(r.id_ordine);
     const senzaRaccolta = [];
     const raccoglitori = raccoglitoriAttivi(dati.terminati, dati.assegnati, dati.anagrafica, anno).filter(r => {
       if (attiviAnno.has(r.chiave) || listeMese.some(l => l.raccoglitore_chiave === r.chiave)) return true;
@@ -82,7 +93,7 @@ export default async function(req) {
       // Gli ordini degli anni precedenti hanno priorita' assoluta: se sul portale
       // sono assegnati a questo raccoglitore ma non stanno in nessuna lista del
       // mese, nessuno ha avuto l'indicazione di evaderli.
-      if (listeMese.length) {
+      if (listeConRighe.length) {
         const arretrati = dati.assegnati.filter(a => a.canale === 'rete' && a.chiaveTrasp === r.chiave && a.immesso && a.immesso < `${anno}-01-01` && !idsInListe.has(a.id_ordine));
         if (arretrati.length) {
           const n = arretrati.length;
@@ -112,6 +123,10 @@ export default async function(req) {
         alert_canali: alertCanali,
         lista: lista ? {
           id: lista.id, file_nomi: lista.file_nomi, caricata_il: lista.caricata_il, inviata_il: lista.inviata_il, richieste: lista.richieste, prioritarie: lista.prioritarie,
+          // Anche la lista ha la sua storia, quando le e' stato tolto il
+          // dettaglio: senza questi due campi resterebbe scritta in archivio e
+          // non la leggerebbe nessuno.
+          storia: lista.storia || '', alleggerito_il: lista.alleggerito_il || '',
           avvisi: await leggiJson(base44, 'ListaAssegnati', lista, 'avvisi_json'),
         } : null,
         controllo,

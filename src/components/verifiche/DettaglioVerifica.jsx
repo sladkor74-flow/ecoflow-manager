@@ -3,6 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
+import Storia from '@/components/shared/Storia';
 import { Download, RefreshCw, Trash2, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, FileText, Info } from 'lucide-react';
 import { dataIt, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_ESITO, rigaReport, descriviLettura, sintesiVerifica, gravita, ordineRiga, noteDateAssente, canaleDelVerdetto } from '@/lib/verifiche';
 import { esportaEsitoVerificaPdf } from '@/lib/esitoVerificaPdf';
@@ -104,7 +105,11 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
 
   const esito = v && v.esito_json ? JSON.parse(v.esito_json) : { esiti: [], assenti: [] };
   const escluse = esito.escluse || [];
-  const sintesi = v && v.stato === 'completata' ? sintesiVerifica(v, esito) : null;
+  // Al quarantesimo giorno la verifica perde le righe lette e il confronto riga
+  // per riga, e resta la storia scritta. Senza esito la sintesi non si calcola:
+  // uscirebbe "tutto quadra, zero formulari" accanto a "conformita' parziale".
+  const alleggerita = !!(v && v.alleggerito_il);
+  const sintesi = v && v.stato === 'completata' && !alleggerita ? sintesiVerifica(v, esito) : null;
   const lettura = v && v.lettura_json ? JSON.parse(v.lettura_json) : {};
   const daSistemare = esito.esiti.filter(e => e.esito !== 'conforme');
   const conformi = esito.esiti.filter(e => e.esito === 'conforme');
@@ -176,16 +181,23 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                 Settimana {v.settimana} · dal {dataIt(v.data_inizio)} al {dataIt(v.data_fine)} · {v.file_nome}
                 <br />
                 {v.verificata_il ? `Verificato il ${dataServer(v.verificata_il).toLocaleString('it-IT', { timeZone: 'Europe/Rome' })}` : ''}
-                {v.scade_il ? ` · si cancella il ${dataIt(v.scade_il)}` : ''}
+                {alleggerita
+                  ? ` · dettaglio tolto il ${dataIt(v.alleggerito_il)}`
+                  : v.scade_il ? ` · il dettaglio si toglie il ${dataIt(v.scade_il)}` : ''}
               </SheetDescription>
             </SheetHeader>
 
             <div className="flex flex-wrap gap-2 mt-4">
-              <Button size="sm" onClick={scaricaPdf} disabled={v.stato !== 'completata' || lavorando === 'pdf'}>
+              {/* Senza il dettaglio il PDF e l'Excel uscirebbero con il verdetto
+                  giusto e zero formulari dentro: un documento che va all'impianto
+                  non si stampa a meta'. */}
+              <Button size="sm" onClick={scaricaPdf} disabled={v.stato !== 'completata' || alleggerita || lavorando === 'pdf'}
+                title={alleggerita ? 'Di questa verifica resta la storia scritta: il dettaglio riga per riga non c\'è più' : undefined}>
                 {lavorando === 'pdf' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileText className="w-4 h-4 mr-1" />}
                 PDF per l'impianto
               </Button>
-              <Button size="sm" variant="outline" onClick={scarica} disabled={v.stato !== 'completata' || lavorando === 'excel'}>
+              <Button size="sm" variant="outline" onClick={scarica} disabled={v.stato !== 'completata' || alleggerita || lavorando === 'excel'}
+                title={alleggerita ? 'Di questa verifica resta la storia scritta: il dettaglio riga per riga non c\'è più' : undefined}>
                 {lavorando === 'excel' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
                 Excel
               </Button>
@@ -201,6 +213,12 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                 </>
               )}
             </div>
+
+            {alleggerita && (
+              <div className="mt-4">
+                <Storia testo={v.storia} alleggeritoIl={v.alleggerito_il} cosa="report" />
+              </div>
+            )}
 
             {analisiInCorso(v) && (
               <div className="mt-4 flex items-center gap-2 text-sm text-violet-700 border border-violet-200 bg-violet-50 rounded-lg px-3 py-2">
@@ -365,7 +383,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                     restare un fatto nascosto: la nota della lettura si scrive
                     quando si legge il file, questa vale per ogni confronto,
                     compresi quelli rifatti da soli dopo un caricamento. */}
-                {sintesi.notaDate && (
+                {sintesi && sintesi.notaDate && (
                   <div className="text-xs text-muted-foreground flex items-start gap-1.5">
                     <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                     <span>Date di questo confronto: {sintesi.notaDate}.</span>

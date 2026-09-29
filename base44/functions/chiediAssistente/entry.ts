@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
+import { cancellaFile } from "../../shared/fileArchivio.ts";
 import {
   BASE_CONOSCENZA, FONTI_UFFICIALI, VERIFICATO_IL, REGOLE_FONTI, testoConoscenza, vociApprovate,
   proponiNovita, proponiPrecisazioni, scartaSuperate,
@@ -140,8 +141,23 @@ export default async function(req) {
     let letture = [];
     if (caricati.length) {
       const urls = await Promise.all(caricati.map(a => core.CreateFileSignedUrl({ file_uri: a.file_uri, expires_in: 900 }).then(r => r.signed_url)));
-      const lettura = comeOggetto(await core.InvokeLLM({ prompt: istruzioniLettura(domanda, caricati), file_urls: urls, response_json_schema: SCHEMA_LETTURA_FILE }));
-      letture = Array.isArray(lettura.file) ? lettura.file : [];
+      try {
+        const lettura = comeOggetto(await core.InvokeLLM({ prompt: istruzioniLettura(domanda, caricati), file_urls: urls, response_json_schema: SCHEMA_LETTURA_FILE }));
+        letture = Array.isArray(lettura.file) ? lettura.file : [];
+      } finally {
+        // Il file era li' solo per essere letto, e l'entita' lo dichiara: "i file
+        // non si conservano". Fino al 29/09/2026 non veniva mai cancellato e
+        // nemmeno tentato, quindi ogni PDF allegato a una domanda restava in
+        // archivio per sempre, senza che nessun record ne sapesse l'identificativo.
+        // Si toglie anche quando la lettura non riesce: a maggior ragione.
+        //
+        // E se non si riesce a toglierlo lo si SCRIVE sull'allegato salvato:
+        // credere di aver liberato spazio senza averlo fatto e' peggio che saperlo.
+        for (const a of caricati) {
+          const tolto = await cancellaFile(base44, a.file_uri);
+          if (!tolto.riuscita) { a.file_rimasto = a.file_uri; a.motivo_file_rimasto = tolto.come; }
+        }
+      }
     }
     const { sezione: sezioneAllegati, daSalvare: allegatiSalvati } = allegatiPerPrompt(allegati, letture);
     // Nelle domande successive della stessa conversazione EcoTyna ritrova l'estratto dell'ultimo file allegato.

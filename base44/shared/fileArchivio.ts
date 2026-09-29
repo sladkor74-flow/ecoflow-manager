@@ -15,15 +15,19 @@ export async function cancellaFile(base44, fileUri) {
   const nomi = ['DeleteFile', 'DeletePrivateFile', 'RemoveFile'];
   const disponibili = nomi.filter(n => typeof core[n] === 'function');
   if (disponibili.length === 0) return { riuscita: false, come: 'la piattaforma non consente di cancellare i file' };
+  // Si provano TUTTI i nomi disponibili, non solo il primo: fino al 29/09/2026 qui
+  // c'era un return dentro il catch, cosi' bastava che il primo fallisse perche'
+  // gli altri non venissero mai tentati e il file restasse dov'era.
+  const motivi = [];
   for (const nome of disponibili) {
     try {
       await core[nome]({ file_uri: fileUri });
       return { riuscita: true, come: nome };
     } catch (e) {
-      return { riuscita: false, come: `${nome} non riuscita: ${e && e.message ? e.message : e}` };
+      motivi.push(`${nome}: ${e && e.message ? e.message : e}`);
     }
   }
-  return { riuscita: false, come: 'non supportata' };
+  return { riuscita: false, come: `nessuna cancellazione e' riuscita (${motivi.join('; ')})` };
 }
 
 /** Quanti giorni sono passati da una data ISO. */

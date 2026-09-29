@@ -1069,3 +1069,73 @@ sostituzione - che e' la storia del fornitore. Non e' automatico apposta:
 cancellare file e' una decisione, l'amministratore guarda prima l'elenco. Se la
 piattaforma non espone una cancellazione, la funzione si ferma al primo tentativo
 e lo dice, invece di svuotare `file_uri` lasciando i file dov'erano.
+
+### La conservazione dei documenti dei fornitori (29/09/2026)
+
+Richiesta dell'utente, testuale: *"quando carico i documenti dei fornitori, che
+siano report settimanali o mensili a consuntivo o gli ordini assegnati ad inizio
+mese, al fine di non appesantire il dominio, devono automaticamente cancellarsi
+dopo i famosi 40 giorni, ma deve restare il contenuto ovvero la storia scritta
+per poterne fruire in futuro"*.
+
+**I file non sono il problema.** Un Excel o un CSV si legge nel browser e sulla
+piattaforma non sale niente; solo un PDF o un'immagine vengono caricati perche'
+l'agente li legga, e si cancellano subito dopo la lettura. Quello che pesa e' il
+CONTENUTO: righe lette ed esiti riga per riga finiscono in `ContenutoEsteso` a
+pezzi da ottomila caratteri (`base44/shared/testoLungo.ts`).
+
+**La regola, una sola** (`base44/shared/conservazione.ts`): al quarantesimo
+giorno **dal caricamento** — non dalla competenza, o un consuntivo di settembre
+che arriva a novembre nascerebbe scaduto — di un documento se ne vanno le righe
+lette e il confronto riga per riga. **Il record non si cancella**: restano i suoi
+contatori, il verdetto per canale e una **storia scritta** in italiano di poche
+centinaia di caratteri. Prima di questa data le verifiche dei report settimanali
+si cancellavano per intero e le liste degli assegnati dopo due mesi: se ne andava
+proprio la storia che l'utente vuole tenere.
+
+- **A giorni** (`daAlleggerire` + `alleggerisciDocumenti`, workflow notturno alle
+  3:15): `VerificaReport`, `QuadraturaFir`, `ConsuntivoFornitore`.
+- **A mesi** (`alleggerisciVecchi` in `base44/shared/evasioneAssegnatiDati.ts`):
+  `ListaAssegnati` e `ControlloEvasione`, perche' il controllo dell'evasione
+  lavora ancora sulle liste del mese in corso e di quello prima. Due padroni
+  della stessa cancellazione sarebbero un bug: qui i quaranta giorni non si
+  aggiungono, si coordinano.
+- **Subito**, senza aspettare i quaranta giorni
+  (`alleggerisciControlliSuperati`): i `ControlloEvasione` **superati**. Ogni
+  caricamento delle primarie ne deposita uno nuovo per ogni lista, col dettaglio
+  di ogni richiesta: era la voce piu' pesante di tutto l'archivio. Di ogni lista
+  resta per esteso l'ultimo. Vale la regola generale del gestionale: vale il piu'
+  recente, il superato resta nello storico.
+
+**La storia sta in un campo normale** (`storia`), mai scritto con `valoreCampo`:
+sopra gli ottomila caratteri tornerebbe in `ContenutoEsteso`, cioe' il peso che
+si e' appena tolto. Per questo `tagliaStoria` taglia a 4000 e lo dice. La storia
+**non contiene costi**: il record lo legge chiunque (`rls read: true`) e la
+fatturazione passiva e' riservata all'amministratore, quindi `storiaConsuntivo`
+riporta chili e formulari ma non l'importo previsto ne' gli scarti in euro.
+Le storie non sommano mai i canali (regola 3) e i pesi seguono `formatoKg`.
+
+**Tre cose da non rompere:**
+
+1. **L'ordine di `togliIlDettaglio`**: prima si svuotano i campi e si scrive la
+   storia, poi si cancellano le parti in `ContenutoEsteso`, e il giorno
+   (`alleggerito_il`) si segna per ULTIMO. Al contrario, nel campo resterebbe il
+   segnaposto `@parti:N` senza le parti e `leggiCampo` lancerebbe: non un campo
+   vuoto, un campo rotto. Un alleggerimento interrotto si riconosce dai campi
+   vuoti con la storia scritta e senza il giorno, e `daAlleggerire` lo riprende:
+   senza quella ripresa le parti pesanti resterebbero in archivio per sempre,
+   perche' si cancellano per record e il record non le nomina piu'. Al secondo
+   passaggio la storia **non si riscrive**, o diventerebbe povera.
+2. **Un documento senza dettaglio non si riconfronta e non si esporta.**
+   `daRiconfrontare` esclude gli alleggeriti (una dichiarazione di nessuna
+   movimentazione non ha righe per definizione e senza quella esclusione si
+   rigonfierebbe), `senzaRighe` esclude le liste senza righe da `eseguiControlli`
+   e da `altreListe`, e i pulsanti PDF/Excel si spengono con una guardia anche
+   dentro `scarica`: un PDF che va all'impianto col verdetto giusto e zero
+   formulari dentro e' una bugia coerente, il peggio.
+3. **Il motivo si scrive vero.** `nota(oggi, motivo)`: quaranta giorni, mese
+   chiuso, lista piu' recente, superato dal controllo del giorno X. Scrivere
+   "caricato da oltre quaranta giorni" su un controllo superato in giornata
+   sarebbe una bugia che resta in archivio per sempre.
+
+Ricaricare il file azzera `alleggerito_il` e `storia`: il documento torna intero.

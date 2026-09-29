@@ -10,6 +10,7 @@ import { eAci } from "./canaleSecondaria.ts";
 import { normalizzaPrimaria, normalizzaAssegnato, normalizzaCancellato, controllaLista, indiceMese, MESI, VERSIONE_REGOLE } from "./evasioneAssegnati.ts";
 import { targetMensiliAnno, targetRaccoglitoreMese } from "./targetRaccoglitori.ts";
 import { valoreCampo, leggiJson, leggiCampo, eliminaCampo, precaricaParti } from "./testoLungo.ts";
+import { eAlleggerito, togliIlDettaglio, storiaLista, storiaControllo, MOTIVO_MESE, MOTIVO_LISTA_NUOVA, motivoSuperato } from "./conservazione.ts";
 
 const stato = (r) => String(r.stato || '').toLowerCase().trim();
 // Extra raccolta: solo le primarie, cioe' le raccolte presso un produttore. Le
@@ -20,6 +21,13 @@ const primariaExtra = (r) => String(r.tipo_movimento || 'primaria').toLowerCase(
 // di movimenti.ts): l'archivio ACI resta ACI, e un record ACI rimasto nell'archivio
 // della rete da un'importazione vecchia non entra nei conti della rete.
 const canalePrimaria = (r, archivioAci) => (archivioAci || eAci(r) ? 'aci' : 'rete');
+
+// Una lista senza righe non si controlla MAI. Non basta guardare alleggerito_il:
+// quello e' l'ultimo dei tre passi dell'alleggerimento, e fra lo svuotamento e il
+// giorno segnato la lista risulterebbe soltanto vuota. Controllarla darebbe un
+// controllo da zero richieste - "tutto evaso, nessun arretrato" - e sposterebbe
+// i suoi ordini fra i "fuori lista" degli altri raccoglitori del mese.
+const senzaRighe = (l) => !l || eAlleggerito(l) || String(l.righe_json || '').trim() === '';
 
 // === caricamenti delle primarie ===
 
@@ -133,30 +141,86 @@ export async function caricaDati(base44) {
 }
 
 /**
- * Cancella liste e controlli di mesi che non servono piu'.
- * Con raccoglitoreChiave cancella solo quelli di quel raccoglitore: e' il caso
- * del caricamento della lista di un nuovo mese. Senza, e' la rete di sicurezza
- * che elimina tutto cio' che e' piu' vecchio del mese precedente.
- * Restituisce quante righe ha cancellato e gli indici dei mesi che hanno perso
- * una lista: le richieste passate a quella, nelle liste degli altri raccoglitori
- * dello stesso mese, cambiano stato e quelle liste vanno ricontrollate.
+ * Toglie il dettaglio a liste e controlli dei mesi che non servono piu'.
+ *
+ * Prima del 29/09/2026 qui si CANCELLAVA: liste e controlli piu' vecchi del mese
+ * scorso sparivano, e con loro quante richieste c'erano, quante erano state
+ * evase, che cosa non era andato. L'utente ha chiesto il contrario: via il peso,
+ * resti la storia. Adesso il record resta con i suoi venti contatori e una storia
+ * scritta, e se ne vanno solo le righe della lista e il dettaglio richiesta per
+ * richiesta.
+ *
+ * Con raccoglitoreChiave lavora solo su quel raccoglitore: e' il caso del
+ * caricamento della lista di un nuovo mese. Senza, e' la rete di sicurezza che
+ * archivia tutto cio' che e' piu' vecchio del mese precedente.
+ *
+ * sostituisci e' l'indice del mese che va invece CANCELLATO davvero: la lista
+ * dello stesso mese dello stesso raccoglitore non e' storia, e' una sostituzione,
+ * e due liste per lo stesso mese si conterebbero due volte.
+ *
+ * Restituisce quanto ha alleggerito e cancellato, e gli indici dei mesi che hanno
+ * perso le righe di una lista: le richieste passate a quella, nelle liste degli
+ * altri raccoglitori dello stesso mese, cambiano stato e quelle liste vanno
+ * ricontrollate. Una lista alleggerita vale quanto una cancellata per il
+ * controllo, perche' senza righe non si puo' piu' controllare.
  */
-export async function cancellaVecchi(base44, { finoAIndice, raccoglitoreChiave = null }) {
+export async function alleggerisciVecchi(base44, { finoAIndice, raccoglitoreChiave = null, sostituisci = null, massimo = 200 }) {
   const svc = base44.asServiceRole.entities;
   const [liste, controlli] = await Promise.all([fetchAll(svc.ListaAssegnati), fetchAll(svc.ControlloEvasione)]);
-  const daCancellare = (x) => indiceMese(Number(x.anno), Number(x.mese)) <= finoAIndice
-    && (!raccoglitoreChiave || x.raccoglitore_chiave === raccoglitoreChiave);
-  let n = 0;
+  const oggi = oggiRoma();
+  const indice = (x) => indiceMese(Number(x.anno), Number(x.mese));
+  const suo = (x) => !raccoglitoreChiave || x.raccoglitore_chiave === raccoglitoreChiave;
+  // La lista dello STESSO mese dello stesso raccoglitore non e' storia, e' una
+  // sostituzione: due liste per lo stesso mese si conterebbero due volte in ogni
+  // conto del modulo. Quella si cancella ancora davvero.
+  const daSostituire = (x) => sostituisci !== null && suo(x) && indice(x) === sostituisci;
+  const daAlleggerire = (x) => suo(x) && indice(x) <= finoAIndice && !daSostituire(x) && !eAlleggerito(x);
+
+  // Con raccoglitoreChiave si sta caricando la lista di un mese nuovo: il motivo
+  // e' quello, non "il mese e' chiuso da tempo", che il 2 di ottobre sul mese di
+  // settembre sarebbe falso.
+  const motivo = raccoglitoreChiave ? MOTIVO_LISTA_NUOVA : MOTIVO_MESE;
+  let alleggeriti = 0, cancellati = 0, restano = 0;
   const mesi = new Set();
-  for (const c of controlli) if (daCancellare(c)) { await eliminaCampo(base44, 'ControlloEvasione', c.id); await svc.ControlloEvasione.delete(c.id); n++; }
-  for (const l of liste) {
-    if (!daCancellare(l)) continue;
-    await eliminaCampo(base44, 'ListaAssegnati', l.id);
-    await svc.ListaAssegnati.delete(l.id);
-    mesi.add(indiceMese(Number(l.anno), Number(l.mese)));
-    n++;
+  // Le sostituzioni si fanno sempre: sono correttezza, non manutenzione. Gli
+  // alleggerimenti hanno un tetto per giro, perche' la piattaforma conta 429
+  // richieste al minuto per tutta l'app e al primo giro dopo la pubblicazione ci
+  // possono essere mesi interi da archiviare. Quello che avanza si fa dopo.
+  for (const c of controlli) {
+    if (daSostituire(c)) { await eliminaCampo(base44, 'ControlloEvasione', c.id); await svc.ControlloEvasione.delete(c.id); cancellati++; continue; }
+    if (!daAlleggerire(c)) continue;
+    if (alleggeriti >= massimo) { restano++; continue; }
+    await alleggerisciControllo(base44, c, oggi, motivo);
+    alleggeriti++;
   }
-  return { cancellati: n, mesi: [...mesi] };
+  for (const l of liste) {
+    if (daSostituire(l)) {
+      await eliminaCampo(base44, 'ListaAssegnati', l.id);
+      await svc.ListaAssegnati.delete(l.id);
+      cancellati++;
+      mesi.add(indice(l));
+      continue;
+    }
+    if (!daAlleggerire(l)) continue;
+    if (alleggeriti >= massimo) { restano++; continue; }
+    let avvisi = [];
+    try { avvisi = await leggiJson(base44, 'ListaAssegnati', l, 'avvisi_json', []); } catch (_e) { avvisi = []; }
+    await togliIlDettaglio(base44, 'ListaAssegnati', l, storiaLista(l, avvisi), oggi, motivo);
+    alleggeriti++;
+    // Senza le righe la lista non si controlla piu': per il modulo vale quanto
+    // una lista cancellata, e il mese va ricontrollato come prima.
+    mesi.add(indice(l));
+  }
+  return { alleggeriti, cancellati, restano, mesi: [...mesi] };
+}
+
+/** Toglie a un controllo il dettaglio richiesta per richiesta, scrivendone la storia. */
+async function alleggerisciControllo(base44, c, oggi, motivo = MOTIVO_MESE) {
+  let alert = [];
+  let esito = null;
+  try { alert = await leggiJson(base44, 'ControlloEvasione', c, 'alert_json', []); } catch (_e) { alert = []; }
+  try { esito = await leggiJson(base44, 'ControlloEvasione', c, 'esito_json', null); } catch (_e) { esito = null; }
+  await togliIlDettaglio(base44, 'ControlloEvasione', c, storiaControllo(c, alert, esito), oggi, motivo);
 }
 
 export function indiceSicurezza() {
@@ -179,6 +243,10 @@ export function indiceSicurezza() {
 const CONTROLLI_DA_VERIFICARE_FINO_AL = Date.parse('2026-10-15T00:00:00Z');
 
 async function controlloSuperato(base44, c) {
+  // Un controllo alleggerito non ha piu' l'esito da leggere: giudicarlo superato
+  // lo farebbe rifare, e il rifacimento riscriverebbe tutto il dettaglio che si
+  // era appena tolto. L'alleggerimento si disferebbe da solo.
+  if (eAlleggerito(c)) return false;
   if (istante(c.eseguito_il) >= CONTROLLI_DA_VERIFICARE_FINO_AL) return false;
   try {
     const esito = JSON.parse(await leggiCampo(base44, 'ControlloEvasione', c, 'esito_json'));
@@ -251,11 +319,19 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
 
   for (const lista of liste) {
     try {
+      // Una lista alleggerita non ha piu' le sue righe: controllarla darebbe un
+      // controllo da zero richieste, tutto evaso, e sposterebbe i suoi ordini nel
+      // "fuori lista" degli altri raccoglitori. Vale quanto una lista cancellata:
+      // si salta, e quello che si sa di lei resta scritto nella sua storia.
+      if (senzaRighe(lista)) continue;
       const anno = Number(lista.anno), mese = Number(lista.mese);
       if (!targetPerAnno.has(anno)) targetPerAnno.set(anno, await targetMensiliAnno(base44, anno));
       const target = targetRaccoglitoreMese(targetPerAnno.get(anno), lista.raccoglitore_nome, MESI[mese - 1]);
       const targetKg = target && target.target_kg > 0 ? target.target_kg : null;
-      const listeMese = tutteLeListe.filter(x => Number(x.anno) === anno && Number(x.mese) === mese);
+      // Le liste alleggerite restano fuori anche da qui: senza righe il loro
+      // insieme di id sarebbe vuoto e i loro ordini finirebbero fra i "fuori
+      // lista" degli altri, che e' un numero falso.
+      const listeMese = tutteLeListe.filter(x => Number(x.anno) === anno && Number(x.mese) === mese && !senzaRighe(x));
       if (!forza) {
         const ultimo = ultimoPerLista.get(lista.id);
         if (!(await motivoRicontrollo(base44, ultimo, { targetKg, primarieIl, listeMese: [lista, ...listeMese] }))) continue;
@@ -310,4 +386,39 @@ export async function eseguiControlli(base44, { liste, dati, forza = false }) {
     throw new Error(`Controllo non riuscito su ${errori.length} ${errori.length === 1 ? 'lista' : 'liste'}: ${primi}`);
   }
   return eseguiti;
+}
+
+/**
+ * Toglie il dettaglio ai controlli SUPERATI: di ogni lista resta per esteso solo
+ * l'ultimo.
+ *
+ * Non ha niente a che fare coi quaranta giorni ed e' la voce che pesa di piu' in
+ * tutto l'archivio: eseguiControlli crea un controllo NUOVO a ogni caricamento
+ * delle primarie, per ogni lista, ciascuno col dettaglio di ogni richiesta. Dopo
+ * una settimana di caricamenti ce ne sono sette per lista e sei non li riapre
+ * piu' nessuno. Vale la regola di tutto il gestionale: vale il piu' recente, il
+ * superato resta nello storico - qui come storia scritta, coi suoi venti
+ * contatori che sono campi del record e non si toccano.
+ */
+export async function alleggerisciControlliSuperati(base44, { massimo = 60 } = {}) {
+  const svc = base44.asServiceRole.entities;
+  const tutti = await fetchAll(svc.ControlloEvasione);
+  const ultimo = new Map();
+  for (const c of tutti) {
+    const p = ultimo.get(c.lista_id);
+    if (!p || String(c.eseguito_il || '') > String(p.eseguito_il || '')) ultimo.set(c.lista_id, c);
+  }
+  const superati = tutti.filter(c => !eAlleggerito(c) && ultimo.get(c.lista_id) !== c
+    && (String(c.esito_json || '').trim() !== '' || String(c.alert_json || '').trim() !== ''));
+  const oggi = oggiRoma();
+  let alleggeriti = 0;
+  for (const c of superati.slice(0, Math.max(0, massimo))) {
+    // Il motivo e' quello vero: superato da uno piu' recente, non "caricato da
+    // oltre quaranta giorni", che qui sarebbe falso di quaranta giorni e
+    // resterebbe scritto nell'archivio per sempre.
+    const piuRecente = ultimo.get(c.lista_id);
+    await alleggerisciControllo(base44, c, oggi, motivoSuperato(piuRecente && piuRecente.eseguito_il));
+    alleggeriti++;
+  }
+  return { alleggeriti, restano: Math.max(0, superati.length - alleggeriti) };
 }
