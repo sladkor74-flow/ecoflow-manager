@@ -15,6 +15,8 @@ import { giornoRoma, oggiRoma } from '@/lib/giornoItaliano';
 import { giornoMovimento, giornoElenco, dateDaSistemare, testoDate, MESI_MOVIMENTI } from '@/lib/movimenti';
 import { dopoCaricamento, testoRicalcoli } from '@/lib/importGrandeFile';
 import AvvisoDateDaSistemare, { SegnoDate, NotaDate } from '@/components/primarie-rete/DateDaSistemare';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import ReportConferimenti from '@/components/report-conferimenti/ReportConferimenti';
 
 const ANNI = [2024, 2025, 2026];
 
@@ -487,6 +489,29 @@ export default function ExtraRaccolta() {
           </table>
         </div>
       )}
+
+      {/* I conferimenti di extra raccolta del mese, ripartiti sulle settimane che
+          lo coprono (richiesta dell'utente, 29/09/2026). Stesso motore delle
+          secondarie; qui primarie e secondarie stanno nello stesso archivio e si
+          distinguono dal tipo di movimento, quindi sono due schede. */}
+      <div className="bg-card border rounded-lg p-3 space-y-3">
+        <div>
+          <h2 className="text-lg font-heading font-semibold">Conferimenti per settimana</h2>
+          <p className="text-xs text-muted-foreground">I chili di extra raccolta del mese, settimana per settimana, con origine, destinazione, trasportatore e totali. L&apos;extra raccolta è un canale a sé: non si somma mai a rete e ACI.</p>
+        </div>
+        <Tabs defaultValue="primarie">
+          <TabsList>
+            <TabsTrigger value="primarie">Primarie</TabsTrigger>
+            <TabsTrigger value="secondarie">Secondarie</TabsTrigger>
+          </TabsList>
+          <TabsContent value="primarie" className="mt-3">
+            <ReportConferimenti canale="EXTRA_RACCOLTA" tipo="primaria" titolo="Conferimenti primarie extra raccolta" />
+          </TabsContent>
+          <TabsContent value="secondarie" className="mt-3">
+            <ReportConferimenti canale="EXTRA_RACCOLTA" tipo="secondaria" titolo="Conferimenti secondarie extra raccolta" />
+          </TabsContent>
+        </Tabs>
+      </div>
 
       <ExtraRaccoltaForm
         open={formOpen}

@@ -4,6 +4,7 @@ import { giornoRoma } from '@/lib/giornoItaliano';
 import { base44 } from '@/api/base44Client';
 import { Loader2, RefreshCw, Truck, Factory, Package, Filter, X } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import ReportConferimenti from '@/components/report-conferimenti/ReportConferimenti';
 import { useTableSort } from '@/hooks/useTableSort';
 import SortHeader from '@/components/shared/SortHeader';
 import MultiSelect from '@/components/shared/MultiSelect';
@@ -269,6 +270,7 @@ export default function PrimarieAci() {
           <TabsTrigger value="destinazioni">Per Destinazione</TabsTrigger>
           <TabsTrigger value="mese">Per Mese</TabsTrigger>
           <TabsTrigger value="dettaglio">Dettaglio Record ({formatNumber(dettaglio.length, { minimumFractionDigits: 0, maximumFractionDigits: 0 })})</TabsTrigger>
+          <TabsTrigger value="conferimenti">Conferimenti per settimana</TabsTrigger>
         </TabsList>
 
         <TabsContent value="destinazioni" className="mt-4">
@@ -321,6 +323,13 @@ export default function PrimarieAci() {
               </tbody>
             </table>
           </div>
+        </TabsContent>
+
+        {/* I conferimenti ACI del mese ripartiti sulle settimane che lo coprono
+            (richiesta dell utente, 29/09/2026): stesso motore delle secondarie, con
+            il canale ACI. */}
+        <TabsContent value="conferimenti" className="mt-4 space-y-3">
+          <ReportConferimenti canale="ACI" tipo="primaria" titolo="Conferimenti primarie ACI" />
         </TabsContent>
 
         <TabsContent value="dettaglio" className="mt-4">

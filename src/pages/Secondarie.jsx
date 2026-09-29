@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { eTerminato, giornoElenco, settimanaIso, dateDaSistemare, testoDate, MESI_MOVIMENTI } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
-import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Route } from 'lucide-react';
+import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Route, CalendarRange } from 'lucide-react';
 import AlertBadge from '@/components/alerts/AlertBadge';
 import SecondarieUpload from '@/components/secondarie/SecondarieUpload';
 import SecondarieKpi from '@/components/secondarie/SecondarieKpi';
 import TrattaMatrix from '@/components/secondarie/TrattaMatrix';
 import SecondarieTable from '@/components/secondarie/SecondarieTable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import ReportConferimenti from '@/components/report-conferimenti/ReportConferimenti';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
 import { fmtTon, formatIntero } from '@/lib/utils';
 import MultiSelect from '@/components/shared/MultiSelect';
@@ -275,6 +276,7 @@ export default function Secondarie() {
                 <TabsList>
                   <TabsTrigger value="matrix"><Route className="w-4 h-4 mr-1.5" /> Matrice per Tratta</TabsTrigger>
                   <TabsTrigger value="detail"><Table2 className="w-4 h-4 mr-1.5" /> Dettaglio Ordini</TabsTrigger>
+                  <TabsTrigger value="report"><CalendarRange className="w-4 h-4 mr-1.5" /> Report settimanale</TabsTrigger>
                 </TabsList>
                 <TabsContent value="matrix" className="space-y-3 mt-3">
                   <h2 className="text-lg font-heading font-semibold">Matrice Tratte {canale}: Origine → Destinazione</h2>
@@ -294,6 +296,13 @@ export default function Secondarie() {
                     )}
                   </h2>
                   <SecondarieTable records={records} loading={loadingRecords} emptyMessage={getEmptyMessage()} />
+                </TabsContent>
+                <TabsContent value="report" className="space-y-3 mt-3">
+                  {/* I conferimenti del mese ripartiti sulle settimane che lo
+                      coprono (richiesta dell utente, 29/09/2026). Il canale e quello
+                      aperto qui sopra: rete e ACI non si sommano mai. */}
+                  <h2 className="text-lg font-heading font-semibold">Conferimenti secondari {canale}, settimana per settimana</h2>
+                  <ReportConferimenti canale={canale === "ACI" ? "ACI" : "RETE"} tipo="secondaria" titolo="Conferimenti secondarie" />
                 </TabsContent>
               </Tabs>
             </div>
