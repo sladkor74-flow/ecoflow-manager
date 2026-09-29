@@ -21,6 +21,10 @@
 export function nuovaCache() {
   const inCorso = new Map();
   let risparmiate = 0;
+  // Si contano le letture PARTITE, non le chiavi rimaste nella mappa: una lettura
+  // che fallisce esce dalla mappa e al secondo giro riparte, e contando le chiavi
+  // il registro avrebbe detto "una lettura" dove ne erano state fatte due.
+  let partite = 0;
   return {
     /** Il risultato di fn per questa chiave, calcolato una volta sola. */
     leggi(chiave, fn) {
@@ -28,12 +32,13 @@ export function nuovaCache() {
       if (inCorso.has(k)) { risparmiate++; return inCorso.get(k); }
       // Se la lettura fallisce, la promessa rotta non resta in cache: la volta
       // dopo si riprova, invece di ereditare per sempre l'errore di adesso.
+      partite++;
       const p = Promise.resolve().then(fn).catch((e) => { inCorso.delete(k); throw e; });
       inCorso.set(k, p);
       return p;
     },
     /** Quante letture sono state fatte e quante risparmiate: si dice nel registro. */
-    conti: () => ({ letture: inCorso.size, risparmiate }),
+    conti: () => ({ letture: partite, risparmiate }),
   };
 }
 

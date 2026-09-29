@@ -64,6 +64,16 @@ console.log('UNA LETTURA CHE FALLISCE NON RESTA IN CACHE');
   verifica('la volta dopo si riprova invece di ereditare l errore', secondo[0] === 'ok', 'volte=' + volte);
 }
 
+console.log('IL CONTO DICE LE LETTURE PARTITE, NON LE CHIAVI RIMASTE');
+{
+  const cache = nuovaCache();
+  let volte = 0;
+  const ballerina = async () => { volte++; if (volte === 1) throw new Error('rate limit'); return ['ok']; };
+  try { await cache.leggi('k', ballerina); } catch { /* il primo giro fallisce */ }
+  await cache.leggi('k', ballerina);
+  verifica('due letture partite, due contate', cache.conti().letture === 2, JSON.stringify(cache.conti()));
+}
+
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');
 process.exit(ko ? 1 : 0);
