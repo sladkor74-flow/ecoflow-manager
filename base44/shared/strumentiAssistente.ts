@@ -22,6 +22,7 @@
 import { fetchAll } from "./fetchAll.ts";
 import { contaFormulari } from "./formulari.ts";
 import { normalizzaRagioneSociale, risolviNome } from "./normalizzaRagioneSociale.ts";
+import { chiaveLettura } from "./cacheLetture.ts";
 import { getRegioneFromProvincia } from "./dataEnrichment.ts";
 import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
@@ -120,10 +121,20 @@ function dateObbligatorie(righe, modulo = '') {
  * parte i terminati dello stesso luogo con le date obbligatorie da sistemare, di
  * qualunque periodo: chi non ha la fine trasporto il periodo non lo ha proprio.
  */
-async function movimenti(base44, { canale, anno, mese, mesi, provincia, regione, raccoglitore, destinazione }) {
+/**
+ * Un archivio, letto una volta sola per domanda quando c'e' la cache.
+ * Senza cache si comporta esattamente come prima: gli strumenti si possono
+ * ancora chiamare da soli, e le prove non hanno bisogno di niente in piu'.
+ */
+function leggiArchivio(ctx, svc, entita, filtro = null) {
+  const fn = () => fetchAll(svc[entita], filtro);
+  return ctx && typeof ctx.leggi === 'function' ? ctx.leggi(chiaveLettura(entita, filtro), fn) : fn();
+}
+
+async function movimenti(base44, { canale, anno, mese, mesi, provincia, regione, raccoglitore, destinazione }, ctx = null) {
   const svc = base44.asServiceRole.entities;
   const entita = canale === 'ACI' ? 'PrimariaAci' : canale === 'EXTRA_RACCOLTA' ? 'ExtraRaccolta' : 'PrimariaRete';
-  const tutte = await fetchAll(svc[entita], { stato: 'terminato' });
+  const tutte = await leggiArchivio(ctx, svc, entita, { stato: 'terminato' });
   const periodo = mesiChiesti(mese, mesi);
   const chiave = (v) => normalizzaRagioneSociale(v);
   // Il canale prima di tutto: i nomi da riconoscere sono quelli che compaiono in
@@ -417,14 +428,14 @@ export const STRUMENTI = [
       raggruppa: 'raccoglitore, provincia, regione, classe, destinazione o mese',
     },
     moduli: ['Terminati Rete', 'Terminati ACI', 'Extra Raccolta', 'Report Mensile'],
-    async esegui(base44, p) {
+    async esegui(base44, p, ctx) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       // Un canale non riconosciuto non deve passare in silenzio per la rete: si
       // prende la rete e lo si dice, perche' i tre canali non si sommano.
       const canale = canaleChiesto(p.canale) || 'RETE';
       const avvisoCanale = canaleChiesto(p.canale) ? ''
         : `${p.canale ? `"${p.canale}" non e' un canale` : 'Canale non indicato'}: questi sono i numeri della RETE. ACI ed extra raccolta non si sommano: per loro rifai la domanda col canale.`;
-      const { righe, date, soggetti, periodo } = await movimenti(base44, { ...p, anno, canale });
+      const { righe, date, soggetti, periodo } = await movimenti(base44, { ...p, anno, canale }, ctx);
       const campo = { raccoglitore: 'trasportatore', provincia: 'provincia', regione: 'regioni', classe: 'classe', destinazione: 'destinazione', mese: 'mese' }[p.raggruppa] || 'trasportatore';
       const totale = righe.reduce((s, r) => s + peso(r), 0);
       // Un mese che non esiste non deve passare in silenzio per "tutto l'anno".
@@ -491,12 +502,12 @@ export const STRUMENTI = [
     descrizione: 'Il target annuo di ciascun raccoglitore della rete e quanto ha fatto finora, con lo scostamento. I target sono solo di rete: l\'ACI non ne ha.',
     parametri: { anno: 'numero' },
     moduli: ['Target & Status'],
-    async esegui(base44, p) {
+    async esegui(base44, p, ctx) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       const svc = base44.asServiceRole.entities;
       const [target, { righe, date }] = await Promise.all([
         svc.TargetRaccoglitore.filter({ anno }, 'raccoglitore', 500),
-        movimenti(base44, { canale: 'RETE', anno }),
+        movimenti(base44, { canale: 'RETE', anno }, ctx),
       ]);
       // Il nome del target puo' essere l'abbreviazione di quello che scrive il
       // portale ("PNEUSERVICE SRL" per "PNEUSERVICE CONVERSANO SRL"): abbinando
@@ -1688,7 +1699,7 @@ export function catalogoStrumenti() {
  * risultato, perche' una risposta che dice "questo non sono riuscita a leggerlo"
  * e' utile, una che si interrompe no.
  */
-export async function eseguiStrumento(base44, nome, parametri = {}) {
+export async function eseguiStrumento(base44, nome, parametri = {}, ctx = null) {
   const s = STRUMENTI.find(x => x.nome === nome);
   if (!s) return { strumento: nome, errore: `Strumento sconosciuto: ${nome}` };
   let ultimo = null;
@@ -1697,7 +1708,7 @@ export async function eseguiStrumento(base44, nome, parametri = {}) {
   // domanda. Al secondo colpo di solito passa.
   for (let giro = 0; giro < 2; giro++) {
     try {
-      const esito = await s.esegui(base44, parametri || {});
+      const esito = await s.esegui(base44, parametri || {}, ctx);
       return { strumento: nome, parametri, ...esito };
     } catch (e) {
       ultimo = e && e.message ? e.message : String(e);

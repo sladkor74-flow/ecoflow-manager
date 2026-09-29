@@ -46,6 +46,10 @@ const CERTEZZA = {
 };
 
 const leggiFonti = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+// Gli strumenti sono stati un elenco e adesso sono un oggetto che porta anche
+// come e' stato deciso il piano e quante letture d'archivio si sono risparmiate:
+// i record di prima restano leggibili.
+const leggiStrumenti = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : (Array.isArray(v && v.strumenti) ? v.strumenti : []); } catch { return []; } };
 
 // Come si chiamano, in italiano, i posti dove EcoTyna va a prendere i numeri.
 const ETICHETTE_STRUMENTO = {
@@ -178,7 +182,7 @@ function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica }) {
   const certezza = CERTEZZA[d.certezza];
   const allegati = leggiFonti(d.allegati_json);
   const salvati = leggiFonti(d.file_generati_json);
-  const strumenti = leggiFonti(d.strumenti_json);
+  const strumenti = leggiStrumenti(d.strumenti_json);
   const mancanti = leggiFonti(d.dati_mancanti_json);
   const file = fileRecenti && fileRecenti.length ? fileRecenti : salvati;
   return (

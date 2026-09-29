@@ -7,6 +7,7 @@ import {
 } from "../../shared/baseConoscenza.ts";
 import { analizzaDomanda, situazioneGestionale } from "../../shared/assistente.ts";
 import { catalogoStrumenti, eseguiStrumento } from "../../shared/strumentiAssistente.ts";
+import { nuovaCache } from "../../shared/cacheLetture.ts";
 import { SCHEMA_PIANO, istruzioniPiano, strumentiDalPiano, testoDati, pianoDiretto } from "../../shared/pianoAssistente.ts";
 import { materialePertinente } from "../../shared/materialeCorso.ts";
 import { oggiRoma } from "../../shared/qualificaFornitori.ts";
@@ -197,6 +198,7 @@ export default async function(req) {
     let piano = null;
     let pianoRiuscito = false;
     let risultati = [];
+    let contiLetture = null;
     if (!quiz) {
       // LA SCORCIATOIA. Per la domanda piu' frequente - "quanto ha raccolto il
       // tale a agosto?" - il piano e' sempre lo stesso, e farlo decidere a un
@@ -228,10 +230,15 @@ export default async function(req) {
       const daFare = scelti.length ? scelti
         : (!pianoRiuscito && analisi.dati ? [{ nome: 'panoramica_commessa', parametri: {} }] : []);
       if (daFare.length) {
+        // Una cache per QUESTA domanda: gli strumenti partono insieme e spesso
+        // leggono gli stessi archivi. Senza, le primarie di rete si rileggono una
+        // volta per strumento, e sono decine di migliaia di righe.
+        const cache = nuovaCache();
         risultati = await Promise.all(daFare.map(async (x) => {
-          const esito = await eseguiStrumento(base44, x.nome, x.parametri || {});
+          const esito = await eseguiStrumento(base44, x.nome, x.parametri || {}, cache);
           return x.ignorati && x.ignorati.length ? { ...esito, parametri_ignorati: x.ignorati } : esito;
         }));
+        contiLetture = cache.conti();
       }
     }
 
@@ -363,7 +370,7 @@ export default async function(req) {
       risposta: String(esito.risposta || 'Non sono riuscito a formulare una risposta: riprova riformulando la domanda.'),
       fonti_json: JSON.stringify(fonti),
       certezza,
-      strumenti_json: risultati.length ? JSON.stringify(risultati.map(r => ({ strumento: r.strumento, parametri: r.parametri, fonte: r.fonte, periodo: r.periodo, dati_al: r.dati_al, errore: r.errore || '' }))) : undefined,
+      strumenti_json: risultati.length ? JSON.stringify({ strumenti: risultati.map(r => ({ strumento: r.strumento, parametri: r.parametri, fonte: r.fonte, periodo: r.periodo, dati_al: r.dati_al, errore: r.errore || '' })), piano: pianoRiuscito ? (piano && piano.strumenti && piano.strumenti[0] && /senza chiamare il modello/.test(String(piano.strumenti[0].perche || '')) ? 'scorciatoia' : 'pianificatore') : 'ripiego', letture: contiLetture }) : undefined,
       // Se il pianificatore ha guardato nel gestionale, la scheda lo dice, anche
       // se l'analisi iniziale della domanda non se n'era accorta.
       dati_gestionale: conDati > 0 || analisi.dati,
