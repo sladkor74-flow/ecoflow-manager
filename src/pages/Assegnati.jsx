@@ -179,7 +179,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2">
               <div className="col-span-full flex gap-2">
                 <input
                   type="text"
@@ -193,13 +193,13 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
                   <Search className="w-4 h-4" /> Cerca
                 </button>
               </div>
-              <MultiSelect allLabel="Tutti gli anni" options={(opts.anni || []).map(a => String(a))} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v }))} />
-              <MultiSelect allLabel="Tutti i mesi" options={opts.mesi || []} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
-              <MultiSelect allLabel="Tutte le regioni" options={opts.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
-              <MultiSelect allLabel="Tutte le province" options={opts.province || []} selected={filters.provincia} onChange={v => setFilters(p => ({ ...p, provincia: v }))} />
-              <MultiSelect allLabel="Tutti i partner" options={opts.partner || []} selected={filters.partner_operativo} onChange={v => setFilters(p => ({ ...p, partner_operativo: v }))} />
-              <MultiSelect allLabel="Tutti i trasportatori" options={opts.trasportatori || []} selected={filters.trasportatore} onChange={v => setFilters(p => ({ ...p, trasportatore: v }))} />
-              <MultiSelect allLabel="Tutte le classi" options={opts.classi || []} selected={filters.classe} onChange={v => setFilters(p => ({ ...p, classe: v }))} />
+              <MultiSelect allLabel="Tutti gli anni" breve="Anni" options={(opts.anni || []).map(a => String(a))} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v }))} />
+              <MultiSelect allLabel="Tutti i mesi" breve="Mesi" options={opts.mesi || []} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
+              <MultiSelect allLabel="Tutte le regioni" breve="Regioni" options={opts.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
+              <MultiSelect allLabel="Tutte le province" breve="Province" options={opts.province || []} selected={filters.provincia} onChange={v => setFilters(p => ({ ...p, provincia: v }))} />
+              <MultiSelect allLabel="Tutti i partner" breve="Partner" options={opts.partner || []} selected={filters.partner_operativo} onChange={v => setFilters(p => ({ ...p, partner_operativo: v }))} />
+              <MultiSelect allLabel="Tutti i trasportatori" breve="Trasportatori" options={opts.trasportatori || []} selected={filters.trasportatore} onChange={v => setFilters(p => ({ ...p, trasportatore: v }))} />
+              <MultiSelect allLabel="Tutte le classi" breve="Classi" options={opts.classi || []} selected={filters.classe} onChange={v => setFilters(p => ({ ...p, classe: v }))} />
             </div>
           </div>
 

@@ -243,25 +243,27 @@ export default function PrimarieAci() {
       {/* Filtri */}
       <div className="border rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri rapidi</span>
+          <div className="flex flex-wrap items-center gap-4">
+            <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri rapidi</span>
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer text-muted-foreground hover:text-foreground" title="Solo i terminati a cui manca l'immissione, l'inizio o la fine del trasporto, o con le date nell'ordine sbagliato">
+              <input type="checkbox" checked={soloDate} onChange={e => vediDate(e.target.checked)} /> Solo date da sistemare
+            </label>
+          </div>
           {(soloDate || filterMese.length > 0 || filterDestinazione.length > 0 || filterProvincia.length > 0 || filterTrasportatore.length > 0 || filterData || filterRegione.length > 0 || filterStato.length > 0 || filterAnno.length > 0) && (
             <button onClick={() => { setFilterMese([]); setFilterDestinazione([]); setFilterProvincia([]); setFilterTrasportatore([]); setFilterData(''); setFilterRegione([]); setFilterStato([]); setFilterAnno([]); setSoloDate(false); }} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
               <X className="w-3 h-3" /> Reset
             </button>
           )}
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          <MultiSelect allLabel="Tutte le regioni" options={regioni} selected={filterRegione} onChange={setFilterRegione} />
-          <MultiSelect allLabel="Tutti gli stati" options={stati} selected={filterStato} onChange={setFilterStato} />
-          <MultiSelect allLabel="Tutti i mesi" options={MESI} selected={filterMese} onChange={setFilterMese} />
-          <MultiSelect allLabel="Tutti gli anni" options={anni.map(String)} selected={filterAnno.map(String)} onChange={v => setFilterAnno(v.map(Number))} />
-          <MultiSelect allLabel="Tutte le destinazioni" options={destinazioni} selected={filterDestinazione} onChange={setFilterDestinazione} />
-          <MultiSelect allLabel="Tutte le province" options={province} selected={filterProvincia} onChange={setFilterProvincia} />
-          <MultiSelect allLabel="Tutti i trasportatori" options={trasportatori} selected={filterTrasportatore} onChange={setFilterTrasportatore} />
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-2">
+          <MultiSelect allLabel="Tutte le regioni" breve="Regioni" options={regioni} selected={filterRegione} onChange={setFilterRegione} />
+          <MultiSelect allLabel="Tutti gli stati" breve="Stati" options={stati} selected={filterStato} onChange={setFilterStato} />
+          <MultiSelect allLabel="Tutti i mesi" breve="Mesi" options={MESI} selected={filterMese} onChange={setFilterMese} />
+          <MultiSelect allLabel="Tutti gli anni" breve="Anni" options={anni.map(String)} selected={filterAnno.map(String)} onChange={v => setFilterAnno(v.map(Number))} />
+          <MultiSelect allLabel="Tutte le destinazioni" breve="Destinazioni" options={destinazioni} selected={filterDestinazione} onChange={setFilterDestinazione} />
+          <MultiSelect allLabel="Tutte le province" breve="Province" options={province} selected={filterProvincia} onChange={setFilterProvincia} />
+          <MultiSelect allLabel="Tutti i trasportatori" breve="Trasportatori" options={trasportatori} selected={filterTrasportatore} onChange={setFilterTrasportatore} />
           <input type="date" value={filterData} onChange={e => setFilterData(e.target.value)} className="border rounded-md px-3 py-2 text-sm" placeholder="Fine trasporto" title="Giorno di fine trasporto (per gli ordini non terminati, giorno di immissione)" aria-label="Giorno di fine trasporto" />
-          <label className="inline-flex items-center gap-2 border rounded-md px-3 py-2 text-sm cursor-pointer" title="Solo i terminati a cui manca l'immissione, l'inizio o la fine del trasporto, o con le date nell'ordine sbagliato">
-            <input type="checkbox" checked={soloDate} onChange={e => vediDate(e.target.checked)} /> Solo date da sistemare
-          </label>
         </div>
       </div>
 

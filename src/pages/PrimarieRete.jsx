@@ -59,7 +59,7 @@ export default function PrimarieRete() {
   // il filtro "Solo date da sistemare": non rilegge l'archivio ne' i riquadri
   const [soloDate, setSoloDate] = useState(false);
   const [loadingRecords, setLoadingRecords] = useState(false);
-  const [filters, setFilters] = useState({ regione: [], stato: [], data: '', mese: [], anno: [] });
+  const [filters, setFilters] = useState({ regione: [], stato: [], trasportatore: [], data: '', mese: [], anno: [] });
   const [cercaId, setCercaId] = useState('');
   const [scheda, setScheda] = useState('dettaglio');
 
@@ -101,6 +101,7 @@ export default function PrimarieRete() {
       // anche quando si guarda un mese: nessun filtro di periodo li prende.
       const passaAltri = (r) => {
         if (filters.regione.length > 0 && !filters.regione.includes((r.regione || '').trim())) return false;
+        if (filters.trasportatore.length > 0 && !filters.trasportatore.includes((r.trasportatore || '').trim())) return false;
         if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
         return true;
       };
@@ -138,6 +139,9 @@ export default function PrimarieRete() {
 
   const regioni = [...new Set(allRecords.map(r => (r.regione || '').trim()).filter(Boolean))].sort();
   const stati = [...new Set(allRecords.map(r => (r.stato || '').trim()).filter(Boolean))].sort();
+  // Il trasportatore e' il raccoglitore del formulario: filtrarci sopra e' il modo
+  // di vedere il lavoro di uno solo (richiesta dell'utente, 29/09/2026).
+  const trasportatori = [...new Set(allRecords.map(r => (r.trasportatore || '').trim()).filter(Boolean))].sort();
   const anni = [...new Set(allRecords.map(annoElenco).filter(Boolean))].sort((a, b) => b - a);
 
   const hasFilters = soloDate || Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
@@ -181,22 +185,25 @@ export default function PrimarieRete() {
       {/* Filtri rapidi per dettaglio ordini */}
       <div className="border rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri ordini</span>
+          <div className="flex flex-wrap items-center gap-4">
+            <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri ordini</span>
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer text-muted-foreground hover:text-foreground" title="Solo i terminati a cui manca l'immissione, l'inizio o la fine del trasporto, o con le date nell'ordine sbagliato">
+              <input type="checkbox" checked={soloDate} onChange={e => vediDate(e.target.checked)} /> Solo date da sistemare
+            </label>
+          </div>
           {hasFilters && (
             <button onClick={resetFilters} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
               <X className="w-3 h-3" /> Reset
             </button>
           )}
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
           <MultiSelect allLabel="Tutte le regioni" options={regioni} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
           <MultiSelect allLabel="Tutti gli stati" options={stati} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
+          <MultiSelect allLabel="Tutti i trasportatori" options={trasportatori} selected={filters.trasportatore} onChange={v => setFilters(p => ({ ...p, trasportatore: v }))} />
           <MultiSelect allLabel="Tutti i mesi" options={MESI} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
           <MultiSelect allLabel="Tutti gli anni" options={anni.map(String)} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v.map(Number) }))} />
           <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" title="Giorno di fine trasporto (per gli ordini non terminati, giorno di immissione)" aria-label="Giorno di fine trasporto" />
-          <label className="inline-flex items-center gap-2 border rounded-md px-3 py-2 text-sm cursor-pointer" title="Solo i terminati a cui manca l'immissione, l'inizio o la fine del trasporto, o con le date nell'ordine sbagliato">
-            <input type="checkbox" checked={soloDate} onChange={e => vediDate(e.target.checked)} /> Solo date da sistemare
-          </label>
         </div>
         {!loadingRecords && (
           <AvvisoDateDaSistemare

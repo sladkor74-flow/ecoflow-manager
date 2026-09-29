@@ -151,28 +151,30 @@ export default function Terziarie() {
       {/* Filters */}
       <div className="border rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri</span>
+          <div className="flex flex-wrap items-center gap-4">
+            <span className="text-sm font-medium inline-flex items-center gap-1.5"><Filter className="w-4 h-4" /> Filtri</span>
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer text-muted-foreground hover:text-foreground" title="Solo i terminati a cui manca l'immissione, l'inizio o la fine del trasporto, o con le date nell'ordine sbagliato">
+              <input type="checkbox" checked={!!filters.date_da_sistemare} onChange={e => vediDate(e.target.checked)} /> Solo date da sistemare
+            </label>
+          </div>
           {hasFilters && (
             <button onClick={resetFilters} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
               <X className="w-3 h-3" /> Reset
             </button>
           )}
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          <input type="text" value={searchIdOrdine} onChange={e => setSearchIdOrdine(e.target.value)} placeholder="Cerca ID ordine..." className="w-full border rounded-md px-3 py-2 text-sm" />
-          <MultiSelect allLabel="Tutte le regioni" options={filterOptions.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
-          <MultiSelect allLabel="Tutti gli stati" options={filterOptions.stati || []} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-6 min-[1600px]:grid-cols-11 gap-2 [&>input]:px-2 [&>*>button]:px-2">
+          <input type="text" value={searchIdOrdine} onChange={e => setSearchIdOrdine(e.target.value)} placeholder="ID ordine..." title="Cerca un ID ordine" className="w-full border rounded-md px-3 py-2 text-sm" />
+          <MultiSelect allLabel="Tutte le regioni" breve="Regioni" options={filterOptions.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
+          <MultiSelect allLabel="Tutti gli stati" breve="Stati" options={filterOptions.stati || []} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
           <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" title="Giorno di fine trasporto (per gli ordini non terminati, giorno di immissione)" aria-label="Giorno di fine trasporto" />
-          <MultiSelect allLabel="Tutti gli impianti" options={filterOptions.impianti || []} selected={filters.impianto} onChange={v => setFilters(p => ({ ...p, impianto: v }))} />
-          <MultiSelect allLabel="Tutte le destinazioni" options={filterOptions.destinazioni || []} selected={filters.destinazione} onChange={v => setFilters(p => ({ ...p, destinazione: v }))} />
-          <MultiSelect allLabel="Tutte le province" options={filterOptions.province || []} selected={filters.provincia} onChange={v => setFilters(p => ({ ...p, provincia: v }))} />
-          <MultiSelect allLabel="Tutti i mesi" options={MESI} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
-          <MultiSelect allLabel="Tutti i trasportatori" options={filterOptions.trasportatori || []} selected={filters.trasportatore} onChange={v => setFilters(p => ({ ...p, trasportatore: v }))} />
-          <MultiSelect allLabel="Tutti i materiali" options={MATERIALI} selected={filters.materiale} onChange={v => setFilters(p => ({ ...p, materiale: v }))} />
-          <MultiSelect allLabel="Tutti gli anni" options={(filterOptions.anni || []).map(a => String(a))} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v }))} />
-          <label className="inline-flex items-center gap-2 border rounded-md px-3 py-2 text-sm cursor-pointer" title="Solo i terminati a cui manca l'immissione, l'inizio o la fine del trasporto, o con le date nell'ordine sbagliato">
-            <input type="checkbox" checked={!!filters.date_da_sistemare} onChange={e => vediDate(e.target.checked)} /> Solo date da sistemare
-          </label>
+          <MultiSelect allLabel="Tutti gli impianti" breve="Impianti" options={filterOptions.impianti || []} selected={filters.impianto} onChange={v => setFilters(p => ({ ...p, impianto: v }))} />
+          <MultiSelect allLabel="Tutte le destinazioni" breve="Destinazioni" options={filterOptions.destinazioni || []} selected={filters.destinazione} onChange={v => setFilters(p => ({ ...p, destinazione: v }))} />
+          <MultiSelect allLabel="Tutte le province" breve="Province" options={filterOptions.province || []} selected={filters.provincia} onChange={v => setFilters(p => ({ ...p, provincia: v }))} />
+          <MultiSelect allLabel="Tutti i mesi" breve="Mesi" options={MESI} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
+          <MultiSelect allLabel="Tutti i trasportatori" breve="Trasportatori" options={filterOptions.trasportatori || []} selected={filters.trasportatore} onChange={v => setFilters(p => ({ ...p, trasportatore: v }))} />
+          <MultiSelect allLabel="Tutti i materiali" breve="Materiali" options={MATERIALI} selected={filters.materiale} onChange={v => setFilters(p => ({ ...p, materiale: v }))} />
+          <MultiSelect allLabel="Tutti gli anni" breve="Anni" options={(filterOptions.anni || []).map(a => String(a))} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v }))} />
         </div>
         <p className="text-xs text-muted-foreground">Giorno, mese e anno sono quelli della fine del trasporto; per un ordine non ancora trasportato, quelli dell&apos;immissione.</p>
         {!loading && (

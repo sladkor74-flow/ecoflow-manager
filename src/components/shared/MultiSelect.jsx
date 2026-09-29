@@ -1,7 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Check, X } from 'lucide-react';
 
-export default function MultiSelect({ label, allLabel, options, selected, onChange, className }) {
+// 'breve' e' l'etichetta corta da mostrare SUL PULSANTE quando non si filtra niente:
+// serve dove i filtri stanno tutti su un rigo solo e la colonna e' stretta, perche'
+// «Tutti i trasportatori» in 110 pixel diventa «Tutti i t...» e non si legge.
+// Dentro la tendina resta sempre allLabel per esteso, e il pulsante lo porta come
+// suggerimento: la voce che azzera il filtro deve restare chiara.
+export default function MultiSelect({ label, allLabel, breve, options, selected, onChange, className }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -22,7 +27,7 @@ export default function MultiSelect({ label, allLabel, options, selected, onChan
   };
 
   const displayLabel = selected.length === 0
-    ? allLabel
+    ? (breve || allLabel)
     : selected.length <= 2
       ? selected.join(', ')
       : `${selected.length} selezionati`;
@@ -32,6 +37,7 @@ export default function MultiSelect({ label, allLabel, options, selected, onChan
       <button
         type="button"
         onClick={() => setOpen(!open)}
+        title={allLabel}
         className={`w-full border-2 rounded-md px-3 py-2 text-sm text-left flex items-center justify-between bg-background hover:bg-muted/30 transition-colors ${selected.length > 0 ? 'border-primary' : 'border-input'}`}
       >
         <span className={`truncate ${selected.length > 0 ? 'text-primary font-medium' : ''}`}>{displayLabel}</span>
