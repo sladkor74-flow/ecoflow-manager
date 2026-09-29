@@ -30,9 +30,10 @@
         "assegnati",
         "verifiche",
         "giacenze",
-        "extra_raccolta"
+        "extra_raccolta",
+        "manutenzione"
       ],
-      "description": "Modulo in cui \u00e8 stata rilevata l'anomalia. extra_raccolta: le schede di Extra Raccolta, per ora con il solo controllo delle date obbligatorie"
+      "description": "Modulo in cui \u00e8 stata rilevata l'anomalia. extra_raccolta: le schede di Extra Raccolta, per ora con il solo controllo delle date obbligatorie. manutenzione: non riguarda i dati ma l'archivio, per esempio i file che la piattaforma non ha permesso di cancellare"
     },
     "entity_type": {
       "type": "string",

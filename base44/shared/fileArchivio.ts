@@ -147,6 +147,15 @@ export async function sostituisciFilePrecedenti(base44, { tipoFile, idCorrente, 
     });
     tolti++;
   }
+  // L'esito si DICE, non resta dentro la risposta di un caricamento che nessuno
+  // rilegge: e' cosi' che finora nessuno sapeva se i file si cancellassero
+  // davvero. Solo quando c'e' qualcosa da dire, per non aggiungere richieste a un
+  // caricamento che ne fa gia' tante.
+  if (nonRiusciti.length || tolti > 0) {
+    try {
+      await segnalaFileNonRimossi(base44, { supporto: supportoCancellazione(base44), nonRiusciti, oggi });
+    } catch (_e) { /* il caricamento e' andato: non lo si fa fallire per un alert */ }
+  }
   return { candidati: candidati.length, tolti, restano: Math.max(0, candidati.length - tolti), non_riusciti: nonRiusciti };
 }
 
@@ -231,4 +240,75 @@ export async function sostituisciFileArretrati(base44, { oggi, massimo = 40 }) {
     tipi: gruppi.map(g => ({ tipo_file: g.tipo_file, da_togliere: g.da_togliere.length, tenuto: g.tenuto.nome_file })),
     tolti, restano, non_riusciti: nonRiusciti,
   };
+}
+
+// === SI PUO' CANCELLARE, SI'  O NO? ===
+//
+// Il gestionale prova a togliere ogni file che non serve piu'. Ma nessuno sa se la
+// piattaforma lo consenta: non e' documentato, e cancellaFile prova i nomi noti.
+// Finche' l'esito resta dentro la risposta di una funzione, nessuno lo legge e si
+// crede di aver liberato spazio senza averlo fatto. Quindi si guarda, e si dice.
+
+/** Quali operazioni di cancellazione la piattaforma espone. Non cancella niente. */
+export function supportoCancellazione(base44) {
+  let core = null;
+  try { core = base44.asServiceRole.integrations.Core; } catch (_e) { core = null; }
+  const nomi = ['DeleteFile', 'DeletePrivateFile', 'RemoveFile'];
+  const operazioni = core ? nomi.filter(n => typeof core[n] === 'function') : [];
+  return { supportata: operazioni.length > 0, operazioni, provate: nomi };
+}
+
+const REGOLA_FILE = 'file_non_rimossi';
+
+/**
+ * Apre (o chiude) l'alert sui file che non si riesce a togliere.
+ *
+ * Un alert e' l'unico posto dove l'amministratore lo vede senza chiedere a
+ * nessuno: la risposta di una funzione pianificata non la legge mai. Si chiude da
+ * solo quando i file se ne vanno, come tutti gli altri alert del gestionale.
+ */
+export async function segnalaFileNonRimossi(base44, { supporto, nonRiusciti = [], oggi }) {
+  const Alert = base44.asServiceRole.entities.Alert;
+  const record_id = 'archivio-file';
+  const aperti = await Alert.filter({ regola_id: REGOLA_FILE, record_id, stato: 'aperto' }, 'id', 20);
+  const giorno = String(oggi || '').slice(0, 10).split('-').reverse().join('/');
+
+  if (supporto.supportata && nonRiusciti.length === 0) {
+    for (const a of aperti) {
+      await Alert.update(a.id, { stato: 'risolto', risolto_note: `Chiuso automaticamente il ${giorno}: i file si cancellano di nuovo.` });
+    }
+    return { alert: 'chiuso', quanti: aperti.length };
+  }
+
+  const elenco = nonRiusciti.slice(0, 15).map(n => `- ${n.nome_file || n.entita || n.id || 'file'}: ${n.motivo || 'motivo non riportato'}`);
+  if (nonRiusciti.length > elenco.length) elenco.push(`- e altri ${nonRiusciti.length - elenco.length}`);
+  const dati = {
+    titolo: supporto.supportata
+      ? `${nonRiusciti.length} ${nonRiusciti.length === 1 ? 'file non e\' stato' : 'file non sono stati'} rimossi dall'archivio`
+      : 'La piattaforma non consente di cancellare i file: l\'archivio non si puo\' alleggerire',
+    descrizione: [
+      supporto.supportata
+        ? `Il ${giorno} il gestionale ha provato a togliere dei file che non servono piu' e non ci e' riuscito.`
+        : `Il ${giorno} il gestionale ha cercato le operazioni per cancellare un file e non ne ha trovata nessuna (provate: ${supporto.provate.join(', ')}). Finche' resta cosi', nessun file caricato puo' essere rimosso: ne' i PDF dei report settimanali e delle quadrature, ne' gli allegati dell'assistente, ne' gli Excel del Caricamento Dati. I record e i dati non ne soffrono: cresce soltanto lo spazio occupato.`,
+      ...(elenco.length ? ['File rimasti:', ...elenco] : []),
+      supporto.supportata
+        ? 'Il gestionale riprova da solo alla prossima pulizia notturna. Se il motivo si ripete, va chiesto all\'assistenza della piattaforma.'
+        : 'Da chiedere all\'assistenza della piattaforma. In alternativa si puo\' evitare di far salire i file, leggendoli nel browser come si fa per le primarie.',
+    ].join('\n'),
+    severita: 'warning',
+    modulo: 'manutenzione',
+    entity_type: 'UploadLog',
+    record_id,
+    regola_id: REGOLA_FILE,
+    regola_nome: 'File che non si riesce a togliere dall\'archivio',
+    stato: 'aperto',
+    quanti: nonRiusciti.length,
+  };
+  if (aperti.length) {
+    await Alert.update(aperti[0].id, dati);
+    for (const a of aperti.slice(1)) await Alert.update(a.id, { stato: 'risolto', risolto_note: `Chiuso automaticamente il ${giorno}: doppione.` });
+    return { alert: 'aggiornato', quanti: nonRiusciti.length };
+  }
+  await Alert.create(dati);
+  return { alert: 'aperto', quanti: nonRiusciti.length };
 }

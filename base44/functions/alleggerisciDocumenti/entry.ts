@@ -4,7 +4,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { leggiJson } from "../../shared/testoLungo.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
-import { cancellaFile, sostituisciFileArretrati } from "../../shared/fileArchivio.ts";
+import { cancellaFile, sostituisciFileArretrati, supportoCancellazione, segnalaFileNonRimossi } from "../../shared/fileArchivio.ts";
 import {
   GIORNI_CONSERVAZIONE, daAlleggerire, togliIlDettaglio,
   storiaVerifica, storiaQuadratura, storiaConsuntivo,
@@ -62,7 +62,11 @@ export default async function(req) {
     const oggi = oggiRoma();
     const adessoMs = Date.now();
 
-    const esito = { oggi, giorni, alleggeriti: 0, restano: 0, archivi: [], file: { cancellati: 0, non_riusciti: [] }, senza_data: [] };
+    // Si guarda subito se la piattaforma sappia cancellare un file: e' la domanda
+    // a cui nessuno aveva risposta, e la risposta non deve restare dentro questa
+    // risposta HTTP, che nessuno legge (il lavoro e' pianificato).
+    const supporto = supportoCancellazione(base44);
+    const esito = { oggi, giorni, supporto_cancellazione: supporto, alleggeriti: 0, restano: 0, archivi: [], file: { cancellati: 0, non_riusciti: [] }, senza_data: [] };
     let restanti = massimo;
 
     for (const a of ARCHIVI) {
@@ -136,6 +140,17 @@ export default async function(req) {
         if (esito.file_caricamenti.non_riusciti.length) esito.file.non_riusciti.push(...esito.file_caricamenti.non_riusciti);
       } catch (e) {
         esito.file_caricamenti = { errore: e && e.message ? e.message : String(e) };
+      }
+    }
+
+    // L'esito dei file finisce in un ALERT, che e' l'unico posto dove
+    // l'amministratore lo vede senza chiedere niente a nessuno. Si chiude da solo
+    // quando i file tornano a cancellarsi.
+    if (!soloElenco) {
+      try {
+        esito.segnalazione = await segnalaFileNonRimossi(base44, { supporto, nonRiusciti: esito.file.non_riusciti, oggi });
+      } catch (e) {
+        esito.segnalazione = { errore: e && e.message ? e.message : String(e) };
       }
     }
 
