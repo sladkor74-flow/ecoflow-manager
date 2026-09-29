@@ -120,24 +120,28 @@ export async function situazioneGestionale(base44, oggi) {
   const [raccolto, raccoltoAci, extra, reteSenzaData, aciSenzaData, mensili, annui, commesse, controlli, alert, riepilogoQualifica, giacenze] = await Promise.all([
     provaA(() => computeRaccoltoData(base44, { anno: [anno], canale: 'rete' }), null, 'il raccolto della rete', guasti),
     provaA(() => computeRaccoltoData(base44, { anno: [anno], canale: 'aci' }), null, 'il raccolto ACI', guasti),
-    provaA(() => fetchAll(svc.ExtraRaccolta, { stato: 'terminato' }), []),
+    provaA(() => fetchAll(svc.ExtraRaccolta, { stato: 'terminato' }), [], "l'extra raccolta", guasti),
     // Il raccolto scarta i terminati senza fine trasporto: si chiedono a parte,
     // con un filtro sul campo vuoto, per poterli dire. null se l'archivio non
     // accetta il filtro: allora il conteggio non c'e', che non vuol dire zero.
-    provaA(() => fetchAll(svc.PrimariaRete, { trasporto_finito_il: null }), null),
-    provaA(() => fetchAll(svc.PrimariaAci, { trasporto_finito_il: null }), null),
-    provaA(() => fetchAll(svc.TargetMensile, { anno }), []),
-    provaA(() => fetchAll(svc.TargetRaccoglitore, { anno }), []),
-    provaA(() => svc.CommessaEcotyre.filter({ anno }), []),
-    provaA(() => fetchAll(svc.ControlloEvasione, { anno, mese: meseIdx + 1 }), []),
+    provaA(() => fetchAll(svc.PrimariaRete, { trasporto_finito_il: null }), null, 'i terminati di rete senza fine trasporto', guasti),
+    provaA(() => fetchAll(svc.PrimariaAci, { trasporto_finito_il: null }), null, 'i terminati ACI senza fine trasporto', guasti),
+    provaA(() => fetchAll(svc.TargetMensile, { anno }), [], 'i target mensili', guasti),
+    provaA(() => fetchAll(svc.TargetRaccoglitore, { anno }), [], 'i target dei raccoglitori', guasti),
+    provaA(() => svc.CommessaEcotyre.filter({ anno }), [], 'il contratto Ecotyre', guasti),
+    provaA(() => fetchAll(svc.ControlloEvasione, { anno, mese: meseIdx + 1 }), [], "i controlli dell'evasione", guasti),
     // Tutti gli alert aperti, non i primi duecento: il riepilogo diceva "200"
     // mentre lo strumento alert_aperti ne contava 54 o 340, e i due numeri non
     // coincidevano mai per il motivo sbagliato.
-    provaA(() => fetchAll(svc.Alert, { stato: 'aperto' }), []),
-    provaA(() => svc.RiepilogoQualifica.filter({ anno }, '-created_date', 1), []),
+    provaA(() => fetchAll(svc.Alert, { stato: 'aperto' }), [], 'gli alert aperti', guasti),
+    provaA(() => svc.RiepilogoQualifica.filter({ anno }, '-created_date', 1), [], 'il riepilogo della qualifica', guasti),
     provaA(async () => (await base44.functions.invoke('calcolaGiacenze', { anno })).data, null, 'le giacenze', guasti),
   ]);
 
+  // Una lettura non riuscita non e' un archivio vuoto: senza questa distinzione
+  // il riepilogo affermava "il contratto non e' stato inserito in Target & Status"
+  // quando invece la lettura era andata storta, e il modello lo ripeteva.
+  const nonLetto = (cosa) => guasti.some(g => g.startsWith(cosa + ':'));
   const righe = [
     `DATI DEL GESTIONALE al ${oggi} (anno ${anno}, mese in corso ${mese}). Raccolto = formulari terminati, per data di fine trasporto, in tonnellate.`,
     'RETE, ACI ed EXTRA RACCOLTA sono canali indipendenti: non vanno mai sommati e tutti i target (contratto, regioni, raccoglitori, impianti) riguardano solo la RETE. L\'ACI ha solo una previsione indicativa del suo contratto.',
@@ -161,7 +165,9 @@ export async function situazioneGestionale(base44, oggi) {
       righe.push(`- ${r.regione}: contratto ${t1(contratto)} t, raccolto ${senzaRaccolto ? 'n/d (lettura non riuscita)' : `${t1(fatto)} t (${contratto ? p1(fatto / contratto * 100) : '-'}%)`}, atteso a oggi ${t1(contratto * quota)} t, mese in corso ${senzaRaccolto ? 'n/d' : `${t1(racc?.mesi?.[mese])} t`}.`);
     }
   } else {
-    righe.push('Contratto Ecotyre dell\'anno non inserito in Target & Status.');
+    righe.push(nonLetto('il contratto Ecotyre')
+      ? 'Contratto Ecotyre dell\'anno: LETTURA NON RIUSCITA. Non si sa se sia inserito: non dire che manca.'
+      : 'Contratto Ecotyre dell\'anno non inserito in Target & Status.');
   }
   if (raccolto) {
     righe.push(`Raccolto RETE ${anno}: ${t1(raccolto.totale_raccolto)} t. Per mese: ${MESI.slice(0, meseIdx + 1).map(m => `${m} ${t1((raccolto.by_regione || []).reduce((s, r) => s + (r.mesi?.[m] || 0), 0))}`).join(', ')}.`);
@@ -243,7 +249,9 @@ export async function situazioneGestionale(base44, oggi) {
       righe.push(`- ${nome}${regioni.length ? ' (' + regioni.join(', ') + ')' : ''}: ${t1(annuo)} | ${raccolto ? t1(ytd) : 'n/d'} | ${nonRaccoglie ? 'non raccoglie' : t1(targetMese)} | ${raccolto ? t1(meseFatto) : 'n/d'}`);
     }
   } else {
-    righe.push('Target dei raccoglitori non inseriti in Target & Status per l\'anno.');
+    righe.push(nonLetto('i target dei raccoglitori')
+      ? 'Target dei raccoglitori: LETTURA NON RIUSCITA. Non si sa se siano inseriti: non dire che mancano.'
+      : 'Target dei raccoglitori non inseriti in Target & Status per l\'anno.');
   }
 
   // --- Evasione degli assegnati del mese ---

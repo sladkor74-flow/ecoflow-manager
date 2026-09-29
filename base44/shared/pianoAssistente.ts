@@ -208,8 +208,18 @@ export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
       // direzione, prestazione o stato di scadenza del documento", che non
       // c'entrava niente e sporcava una risposta giusta (visto in produzione il
       // 30/09/2026).
+      // Un filtro booleano non compare MAI alla lettera nella domanda - nessuno
+      // scrive "true" - e vogliono dire tutti "solo quelli con un problema": se
+      // lo strumento non sa filtrarci, buttarlo via in silenzio vuol dire
+      // presentare l'elenco intero come se fosse quello chiesto.
+      if (typeof v === 'boolean') { if (v) ignorati.push({ parametro: k, valore: 'si' }); continue; }
       const valore = String(v).toLowerCase().trim();
-      if (valore && valore.length > 1 && t.includes(valore)) ignorati.push({ parametro: k, valore: String(v) });
+      // Per radice, non per uguaglianza: chi scrive "Puglia" e chi scrive
+      // "pugliese" chiede la stessa cosa, e il pianificatore normalizza.
+      const radice = valore.slice(0, Math.min(5, valore.length));
+      if (valore.length > 1 && (t.includes(valore) || (radice.length > 2 && t.includes(radice)))) {
+        ignorati.push({ parametro: k, valore: String(v) });
+      }
     }
     if (ok.has('anno') && base.anno == null) base.anno = Number(per.anno) || annoOggi;
     if (ok.has('mese') && !base.mese && per.mese && !senzaMese) base.mese = per.mese;

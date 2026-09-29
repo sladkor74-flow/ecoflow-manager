@@ -372,6 +372,10 @@ export default async function(req) {
       // Se il pianificatore ha guardato nel gestionale, la scheda lo dice, anche
       // se l'analisi iniziale della domanda non se n'era accorta.
       dati_gestionale: conDati > 0 || analisi.dati,
+      // Quello che e' ACCADUTO, non quello che si era previsto alla creazione del
+      // record: con soloDati internet non viene interrogato, e il riquadro
+      // "Verificata sulle fonti" su una risposta senza fonti e' una bugia.
+      ricerca_online: analisi.norma && !soloDati,
       ambito: risultati.length && analisi.ambito === 'normativa' ? 'mista' : analisi.ambito,
       dati_mancanti_json: Array.isArray(esito.dati_mancanti) && esito.dati_mancanti.length ? JSON.stringify(esito.dati_mancanti) : undefined,
       allegati_json: allegati.length ? JSON.stringify(allegatiSalvati) : '',

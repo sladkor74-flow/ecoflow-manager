@@ -346,11 +346,23 @@ export default function ChatAssistente() {
   // Non si cancella niente di calcolato: le domande sono la cronologia di una
   // chiacchierata, non un dato della commessa.
   const eliminaConversazione = async (c) => {
-    const quante = c.domande.length;
-    if (!window.confirm(`Elimino questa conversazione con ${quante} ${quante === 1 ? 'domanda' : 'domande'}? Non si puo' annullare.`)) return;
     setEliminando(c.id);
     try {
-      for (const d of c.domande) {
+      // NON ci si fida dell'elenco in memoria: quello carica le ultime 500
+      // domande, e una conversazione aperta un mese fa e ripresa oggi ha le sue
+      // prime domande fuori da quella finestra. Cancellando solo quelle in mano
+      // resterebbero in archivio le piu' vecchie, con il testo e la risposta
+      // intera, sotto lo stesso titolo.
+      const tutte = [];
+      for (let skip = 0; skip < 5000; skip += 200) {
+        const pagina = await base44.entities.DomandaAssistente.filter({ conversazione_id: c.id }, 'created_date', 200, skip);
+        tutte.push(...pagina);
+        if (pagina.length < 200) break;
+      }
+      const daTogliere = tutte.length ? tutte : c.domande.filter(d => !String(d.id).startsWith('tmp-'));
+      const quante = daTogliere.length;
+      if (!window.confirm(`Elimino questa conversazione con ${quante} ${quante === 1 ? 'domanda' : 'domande'}? Non si puo' annullare.`)) { setEliminando(null); return; }
+      for (const d of daTogliere) {
         if (String(d.id).startsWith('tmp-')) continue;
         await eliminaParti('DomandaAssistente', d.id).catch(() => {});
         await base44.entities.DomandaAssistente.delete(d.id);
