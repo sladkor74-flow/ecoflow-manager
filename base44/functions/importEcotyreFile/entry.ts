@@ -1,5 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
+import { sostituisciFilePrecedenti } from "../../shared/fileArchivio.ts";
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
@@ -651,8 +653,25 @@ export default async function(req) {
         messaggio: `${NON_RIUSCITO}: nessuna riga scritta dopo lo svuotamento dell'archivio (${messaggio}${lastError ? ` - ultimo errore: ${lastError}` : ''}). L'archivio e' vuoto: ricarica il file.`,
       });
     } else if (rigaRegistro) await base44.asServiceRole.entities.UploadLog.update(rigaRegistro, registro);
-    else await base44.asServiceRole.entities.UploadLog.create(registro);
+    else rigaRegistro = (await base44.asServiceRole.entities.UploadLog.create(registro)).id;
+    const idRegistro = rigaRegistro;
     rigaRegistro = null;
+
+    // Il file di questo caricamento SOSTITUISCE quelli di prima dello stesso tipo
+    // (regola dell'utente, 29/09/2026): l'export del portale ripete ogni volta
+    // tutto e aggiunge poche righe, quindi tenere il precedente non serve. Solo
+    // se il caricamento e' riuscito al 100%: un parziale lascia stare i file di
+    // prima, perche' uno di quelli potrebbe essere ancora l'unico completo.
+    // Il record del registro resta: se ne va solo il file.
+    let fileSostituiti = null;
+    if (esito === 'successo') {
+      try {
+        fileSostituiti = await sostituisciFilePrecedenti(base44, { tipoFile: tipo_file, idCorrente: idRegistro, oggi: oggiRoma(), massimo: 10 });
+      } catch (e) {
+        // Il caricamento e' andato: non si fa fallire per una pulizia. Si dice.
+        fileSostituiti = { errore: e && e.message ? e.message : String(e) };
+      }
+    }
 
     return Response.json({
       tipo_file, entity: config.entity, foglio: sheetName,
@@ -670,6 +689,7 @@ export default async function(req) {
       storico_conservato: storico && storico.righe ? { dal_anno: storico.anno_inizio, righe: storico.righe } : null,
       forzato: !!conferma_forzatura,
       modalita,
+      file_sostituiti: fileSostituiti,
       durata_secondi
     });
   } catch (error) {

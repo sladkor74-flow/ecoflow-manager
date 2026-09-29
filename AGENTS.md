@@ -1139,3 +1139,49 @@ Le storie non sommano mai i canali (regola 3) e i pesi seguono `formatoKg`.
    sarebbe una bugia che resta in archivio per sempre.
 
 Ricaricare il file azzera `alleggerito_il` e `storia`: il documento torna intero.
+
+### I file del Caricamento Dati si sostituiscono (29/09/2026)
+
+Regola dell'utente: *"i file excel che carico nel modulo 'caricamento dati' si
+devono sostituire ogni volta che carico il successivo, sempre che sia stato
+caricato al 100%. non ha senso mantenere un file precedente che dice le stesse
+cose di quello successivo a cui aggiunge di volta in volta poche righe"*.
+
+Sono gli export del portale Ecotyre: ogni volta ripetono tutto e aggiungono le
+righe nuove. Finivano in area **pubblica** (`UploadFile`, non
+`UploadPrivateFile`) e il loro indirizzo restava per sempre in
+`UploadLog.file_url`, senza che nessuno li cancellasse mai: erano i file piu'
+grossi del gestionale.
+
+La regola sta in `base44/shared/fileArchivio.ts` (`fileDaSostituire`,
+`sostituisciFilePrecedenti`, `arretratiDaSostituire`,
+`sostituisciFileArretrati`):
+
+- **Al caricamento**, se l'esito e' `successo` (nessuna riga fallita), i
+  caricamenti precedenti dello stesso `tipo_file` perdono il file. Un esito
+  `parziale`, `errore` o `in_corso` non tocca niente: uno dei file di prima
+  potrebbe essere ancora l'unico completo. Agganciato in `importEcotyreFile` e
+  `importPdrFile`, con un tetto di 10 per caricamento.
+- **Ogni notte** (`alleggerisciDocumenti`) l'arretrato: per ogni tipo si tiene il
+  file del caricamento riuscito piu' recente e si tolgono gli altri, fino a 40
+  per giro. Serve perche' ci sono tipi che si caricano una volta al mese o meno, e
+  il loro file resterebbe ad aspettare il caricamento dopo.
+
+**Il record del registro non si tocca**: righe importate, righe in archivio
+prima, forzature, foglio riconosciuto e messaggio sono il controllo
+anti-regressione e la storia dei caricamenti. Se ne va solo `file_url`, e al
+messaggio si aggiunge la riga che dice quando e perche'.
+
+**La trappola**: un caricamento **forzato** riusa il file del tentativo che non
+era riuscito (`pendingFileUrlRef` in `src/pages/CaricamentoDati.jsx`), quindi due
+record del registro puntano allo stesso indirizzo. Cancellarlo perche' "e' del
+caricamento di prima" cancellerebbe il file del caricamento buono: per questo si
+decide prima quali indirizzi si TENGONO e solo dopo si toglie il resto, e lo
+stesso indirizzo non si cancella due volte.
+
+Primarie, dichiarazioni di trattamento e ordini non dichiarati non hanno questo
+problema: si leggono nel browser a blocchi e il file non sale mai
+(`TIPI_LETTURA_BROWSER` in `src/lib/importGrandeFile.js`). Il file delle
+richieste ECT invece saliva e il suo indirizzo non veniva salvato da nessuna
+parte: ora `importaRichiesteEct` lo cancella appena l'ha letto, perche' dopo
+nessuno saprebbe piu' che esiste.

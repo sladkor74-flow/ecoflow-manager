@@ -1,5 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
+import { sostituisciFilePrecedenti } from "../../shared/fileArchivio.ts";
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
@@ -198,18 +200,31 @@ export default async function(req) {
     }
 
     const esito = failed === 0 ? 'successo' : (imported > 0 ? 'parziale' : 'errore');
-    await base44.asServiceRole.entities.UploadLog.create({
+    const riga = await base44.asServiceRole.entities.UploadLog.create({
       tipo_file: 'pdr', nome_file, file_url,
       righe_importate: imported, righe_fallite: failed, esito,
       messaggio: `${imported} PDR importati su ${records.length} totali (foglio: ${sheetName})`,
       foglio_usato: sheetName, forzato: !!conferma_forzatura
     });
 
+    // L'anagrafica dei PDR che arriva adesso sostituisce quella di prima: il file
+    // vecchio dice le stesse cose piu' poche righe (regola dell'utente,
+    // 29/09/2026). Solo se e' entrata ogni riga; il record del registro resta.
+    let fileSostituiti = null;
+    if (esito === 'successo') {
+      try {
+        fileSostituiti = await sostituisciFilePrecedenti(base44, { tipoFile: 'pdr', idCorrente: riga.id, oggi: oggiRoma(), massimo: 10 });
+      } catch (e) {
+        fileSostituiti = { errore: e && e.message ? e.message : String(e) };
+      }
+    }
+
     return Response.json({
       tipo_file: 'pdr', foglio: sheetName,
       righe_lette: rows.length - 1, righe_mappate: records.length,
       righe_importate: imported, righe_fallite: failed, esito, lastError,
-      forzato: !!conferma_forzatura
+      forzato: !!conferma_forzatura,
+      file_sostituiti: fileSostituiti
     });
   } catch (error) {
     try {

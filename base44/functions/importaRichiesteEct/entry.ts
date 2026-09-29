@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
+import { cancellaFile } from "../../shared/fileArchivio.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { leggiFoglio, riconosciOrdine, scadenzaDaNota, statoRichiesta, listaOrdini, evasioneOrdini, abbinaRichieste, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare } from "../../shared/richiesteEct.ts";
@@ -161,8 +162,14 @@ export default async function(req) {
     const ritrovate = new Set(abbinate.filter(Boolean).map(e => e.id));
     const orfane = esistenti.filter(e => !ritrovate.has(e.id)).length;
 
+    // Il file era li' solo per essere letto e nessun record ne conserva
+    // l'indirizzo: se non si cancella adesso non lo cancella piu' nessuno, perche'
+    // non si saprebbe nemmeno che esiste (regola dell'utente sui file, 29/09/2026).
+    const fileTolto = await cancellaFile(base44, file_url);
+
     return Response.json({
       ok: true, anno: annoNum, righe_lette: righe.length,
+      file_tolto: fileTolto.riuscita ? true : fileTolto.come,
       creati, aggiornati, invariati, orfane, spostate,
       riconosciuti: righe.filter(r => riconosciOrdine(r, ordini).id_ordine_stato === 'trovato').length,
       da_confermare: daConfermare,

@@ -4,7 +4,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { leggiJson } from "../../shared/testoLungo.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
-import { cancellaFile } from "../../shared/fileArchivio.ts";
+import { cancellaFile, sostituisciFileArretrati } from "../../shared/fileArchivio.ts";
 import {
   GIORNI_CONSERVAZIONE, daAlleggerire, togliIlDettaglio,
   storiaVerifica, storiaQuadratura, storiaConsuntivo,
@@ -120,6 +120,23 @@ export default async function(req) {
         entita: 'ControlloEvasione', nome: 'controlli dell\'evasione superati da uno piu\' recente',
         da_alleggerire: superati.alleggeriti + superati.restano, alleggeriti: superati.alleggeriti, superati: true,
       });
+    }
+
+    // L'ARRETRATO DEI FILE DEL CARICAMENTO DATI. Il file di un caricamento viene
+    // sostituito da quello dopo (regola dell'utente, 29/09/2026), ma solo quando
+    // quel tipo di dato si ricarica: ci sono tipi che si caricano una volta al
+    // mese o meno, e i file di prima resterebbero li' ad aspettare. Qui si
+    // rimedia, tenendo per ogni tipo il file del caricamento riuscito piu'
+    // recente. I record del registro non si toccano: e' il controllo
+    // anti-regressione e la storia dei caricamenti.
+    if (!soloElenco) {
+      try {
+        esito.file_caricamenti = await sostituisciFileArretrati(base44, { oggi, massimo: 40 });
+        esito.file.cancellati += esito.file_caricamenti.tolti;
+        if (esito.file_caricamenti.non_riusciti.length) esito.file.non_riusciti.push(...esito.file_caricamenti.non_riusciti);
+      } catch (e) {
+        esito.file_caricamenti = { errore: e && e.message ? e.message : String(e) };
+      }
     }
 
     return Response.json(esito);

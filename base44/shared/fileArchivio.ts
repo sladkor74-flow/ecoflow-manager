@@ -63,3 +63,172 @@ export function daAlleggerire(documenti, opzioni) {
   }
   return scelti.sort((a, b) => b.giorni - a.giorni);
 }
+
+// === I FILE DEL CARICAMENTO DATI ===
+//
+// Regola dell'utente (29/09/2026): "i file excel che carico nel modulo
+// 'caricamento dati' si devono sostituire ogni volta che carico il successivo,
+// sempre che sia stato caricato al 100%. non ha senso mantenere un file
+// precedente che dice le stesse cose di quello successivo a cui aggiunge di volta
+// in volta poche righe".
+//
+// Sono i file piu' grossi del gestionale: gli export del portale Ecotyre, che
+// ogni volta ripetono tutto e aggiungono le righe nuove. Finivano in area
+// PUBBLICA e il loro indirizzo restava per sempre nel registro dei caricamenti,
+// senza che nessuno li cancellasse mai.
+//
+// IL RECORD DEL REGISTRO NON SI TOCCA: righe importate, righe in archivio prima,
+// forzature, foglio riconosciuto e messaggio sono il controllo anti-regressione e
+// la storia dei caricamenti. Se ne va solo il file.
+//
+// "Al 100%" vuol dire esito 'successo', cioe' nessuna riga fallita: un
+// caricamento parziale o interrotto lascia stare i file di prima, perche' quello
+// di prima potrebbe essere ancora l'unico completo.
+
+/**
+ * I caricamenti precedenti dello stesso tipo che possono perdere il file: tutti
+ * tranne quello appena concluso. Dal piu' vecchio, cosi' un tetto per volta
+ * smaltisce prima l'arretrato.
+ *
+ * Funzione pura: le prove la chiamano senza toccare la piattaforma.
+ */
+export function fileDaSostituire(registro, { tipoFile, idCorrente, fileCorrente = '' }) {
+  // Lo STESSO file di quello appena caricato non si tocca. Un caricamento forzato
+  // riusa il file del tentativo che non era riuscito (pendingFileUrlRef in
+  // CaricamentoDati.jsx), quindi il tentativo vecchio e quello nuovo puntano allo
+  // stesso indirizzo: cancellarlo perche' "e' del caricamento di prima" vorrebbe
+  // dire cancellare il file del caricamento buono.
+  const corrente = String(fileCorrente || '').trim();
+  return (registro || [])
+    .filter(l => l && l.id && l.id !== idCorrente
+      && String(l.tipo_file || '') === String(tipoFile)
+      && String(l.file_url || '').trim() !== ''
+      && String(l.file_url || '').trim() !== corrente)
+    .map(l => ({
+      id: l.id,
+      file_url: String(l.file_url).trim(),
+      nome_file: String(l.nome_file || ''),
+      quando: String(l.created_date || ''),
+    }))
+    .sort((a, b) => String(a.quando).localeCompare(String(b.quando)));
+}
+
+/**
+ * Toglie il file ai caricamenti precedenti dello stesso tipo. Si chiama solo dopo
+ * un caricamento riuscito al 100%.
+ *
+ * Se la piattaforma non consente di cancellare, l'indirizzo resta scritto nel
+ * registro e si riprovera' al caricamento dopo: meglio saperlo che credere di
+ * aver liberato spazio senza averlo fatto.
+ */
+export async function sostituisciFilePrecedenti(base44, { tipoFile, idCorrente, oggi, massimo = 40 }) {
+  const Log = base44.asServiceRole.entities.UploadLog;
+  // Qui si e' appena finito un caricamento: si guardano i piu' recenti di quel
+  // tipo, non tutto il registro dall'inizio dei tempi. Dopo la prima pulizia con
+  // un file resta un caricamento solo per tipo, e l'arretrato piu' vecchio lo
+  // smaltisce comunque il lavoro notturno (sostituisciFileArretrati).
+  const registro = await Log.filter({ tipo_file: tipoFile }, '-created_date', 500);
+  const corrente = registro.find(l => l.id === idCorrente);
+  const candidati = fileDaSostituire(registro, { tipoFile, idCorrente, fileCorrente: corrente ? corrente.file_url : '' });
+  let tolti = 0;
+  const nonRiusciti = [];
+  const gia = new Set();
+  for (const c of candidati.slice(0, Math.max(0, massimo))) {
+    if (!gia.has(c.file_url)) {
+      const esito = await cancellaFile(base44, c.file_url);
+      if (!esito.riuscita) { nonRiusciti.push({ id: c.id, nome_file: c.nome_file, motivo: esito.come }); continue; }
+      gia.add(c.file_url);
+    }
+    const vecchio = registro.find(l => l.id === c.id);
+    const nota = `File rimosso il ${String(oggi || '').slice(0, 10)}: sostituito da un caricamento piu' recente dello stesso tipo, che contiene le stesse righe e le nuove.`;
+    await Log.update(c.id, {
+      file_url: '',
+      messaggio: [String((vecchio && vecchio.messaggio) || '').trim(), nota].filter(Boolean).join(' | '),
+    });
+    tolti++;
+  }
+  return { candidati: candidati.length, tolti, restano: Math.max(0, candidati.length - tolti), non_riusciti: nonRiusciti };
+}
+
+/**
+ * L'ARRETRATO: i file dei caricamenti di prima, tipo per tipo.
+ *
+ * sostituisciFilePrecedenti lavora quando arriva un caricamento nuovo. Ma i file
+ * caricati fino a ieri restano dov'e' finche' quel tipo di dato non si ricarica,
+ * e ce ne sono di tipi che si caricano una volta al mese o meno. Questa dice, per
+ * ogni tipo, quale file tenere e quali togliere.
+ *
+ * Si tiene il file del caricamento RIUSCITO AL 100% piu' recente. Se di quel tipo
+ * non ce n'e' nessuno riuscito, si tiene il piu' recente che abbia un file e
+ * basta: togliere l'ultimo superstite di una serie di caricamenti andati male
+ * vorrebbe dire restare senza niente.
+ *
+ * Funzione pura: le prove la chiamano senza toccare la piattaforma.
+ */
+export function arretratiDaSostituire(registro) {
+  const perTipo = new Map();
+  for (const l of registro || []) {
+    if (!l || !l.id || String(l.file_url || '').trim() === '') continue;
+    const tipo = String(l.tipo_file || '');
+    if (!perTipo.has(tipo)) perTipo.set(tipo, []);
+    perTipo.get(tipo).push(l);
+  }
+  // Prima si decide che cosa si TIENE, in tutti i tipi, e poi si toglie: due
+  // caricamenti possono puntare allo stesso file (una forzatura riusa quello del
+  // tentativo fallito), e togliere "il vecchio" cancellerebbe il file del nuovo.
+  const tenuti = new Map();
+  const quando = (l) => String(l.created_date || '');
+  for (const [tipo, righe] of perTipo) {
+    const ordinate = [...righe].sort((a, b) => quando(b).localeCompare(quando(a)));
+    tenuti.set(tipo, ordinate.find(l => String(l.esito || '') === 'successo') || ordinate[0]);
+  }
+  const urlTenuti = new Set([...tenuti.values()].map(l => String(l.file_url).trim()));
+  const gruppi = [];
+  for (const [tipo, righe] of perTipo) {
+    const ordinate = [...righe].sort((a, b) => quando(b).localeCompare(quando(a)));
+    const tenuto = tenuti.get(tipo);
+    const daTogliere = ordinate
+      .filter(l => l.id !== tenuto.id && !urlTenuti.has(String(l.file_url).trim()))
+      .map(l => ({ id: l.id, file_url: String(l.file_url).trim(), nome_file: String(l.nome_file || ''), quando: quando(l), esito: String(l.esito || '') }));
+    if (daTogliere.length) gruppi.push({ tipo_file: tipo, tenuto: { id: tenuto.id, nome_file: String(tenuto.nome_file || ''), esito: String(tenuto.esito || '') }, da_togliere: daTogliere });
+  }
+  return gruppi.sort((a, b) => b.da_togliere.length - a.da_togliere.length);
+}
+
+/** Toglie i file dell'arretrato, tipo per tipo. Con un tetto per giro. */
+export async function sostituisciFileArretrati(base44, { oggi, massimo = 40 }) {
+  const Log = base44.asServiceRole.entities.UploadLog;
+  const registro = [];
+  for (let skip = 0; skip < 50000; skip += 1000) {
+    const pagina = await Log.filter({}, 'id', 1000, skip);
+    registro.push(...pagina);
+    if (pagina.length < 1000) break;
+  }
+  const gruppi = arretratiDaSostituire(registro);
+  let tolti = 0;
+  let restano = 0;
+  const nonRiusciti = [];
+  // Lo stesso indirizzo puo' comparire su piu' record: si cancella una volta.
+  const gia = new Set();
+  for (const g of gruppi) {
+    for (const c of g.da_togliere) {
+      if (tolti >= massimo) { restano++; continue; }
+      if (!gia.has(c.file_url)) {
+        const esito = await cancellaFile(base44, c.file_url);
+        if (!esito.riuscita) { nonRiusciti.push({ tipo_file: g.tipo_file, nome_file: c.nome_file, motivo: esito.come }); continue; }
+        gia.add(c.file_url);
+      }
+      const vecchio = registro.find(l => l.id === c.id);
+      const nota = `File rimosso il ${String(oggi || '').slice(0, 10)}: sostituito dal caricamento piu' recente dello stesso tipo, che contiene le stesse righe e le nuove.`;
+      await Log.update(c.id, {
+        file_url: '',
+        messaggio: [String((vecchio && vecchio.messaggio) || '').trim(), nota].filter(Boolean).join(' | '),
+      });
+      tolti++;
+    }
+  }
+  return {
+    tipi: gruppi.map(g => ({ tipo_file: g.tipo_file, da_togliere: g.da_togliere.length, tenuto: g.tenuto.nome_file })),
+    tolti, restano, non_riusciti: nonRiusciti,
+  };
+}
