@@ -5,7 +5,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ClipboardCheck } from 'lucide-react';
 import ReportSettimanali from '@/components/verifiche/ReportSettimanali';
 import QuadraturaFir from '@/components/verifiche/QuadraturaFir';
-import EvasioneAssegnati from '@/components/verifiche/EvasioneAssegnati';
 import MatriceProvince from '@/components/verifiche/MatriceProvince';
 
 // Modulo Verifiche: controlli periodici sui dati che arrivano dai fornitori.
@@ -23,8 +22,9 @@ export default function Verifiche() {
           <ClipboardCheck className="w-7 h-7 text-primary" /> Verifiche
         </h1>
         <p className="text-muted-foreground mt-1 max-w-3xl">
-          Controlli periodici sui dati inviati dai fornitori e sull'andamento della commessa, confrontati con il gestionale.
+          Controlli periodici sui dati inviati dai fornitori, confrontati con il gestionale.
           Il lavoro prodotto qui è temporaneo e si cancella da solo quando non serve più.
+          Come <em>lavorano</em> i fornitori — l&apos;evasione delle richieste assegnate e l&apos;andamento della raccolta — sta in Verifiche Fornitori.
         </p>
       </div>
 
@@ -32,7 +32,6 @@ export default function Verifiche() {
         <TabsList>
           <TabsTrigger value="report-settimanali">Report settimanali</TabsTrigger>
           <TabsTrigger value="quadratura-fir">Quadratura FIR</TabsTrigger>
-          <TabsTrigger value="evasione-assegnati">Evasione assegnati</TabsTrigger>
           <TabsTrigger value="raccolto-province">Raccolto per provincia</TabsTrigger>
           <TabsTrigger value="ritiri-province">Ritiri per provincia</TabsTrigger>
           <TabsTrigger value="rotte">Rotte</TabsTrigger>
@@ -42,9 +41,6 @@ export default function Verifiche() {
         </TabsContent>
         <TabsContent value="quadratura-fir" className="pt-4">
           <QuadraturaFir isAdmin={isAdmin} />
-        </TabsContent>
-        <TabsContent value="evasione-assegnati" className="pt-4">
-          <EvasioneAssegnati isAdmin={isAdmin} />
         </TabsContent>
         <TabsContent value="raccolto-province" className="pt-4">
           <MatriceProvince tipo="peso" />

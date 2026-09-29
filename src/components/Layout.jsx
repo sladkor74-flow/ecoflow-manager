@@ -32,6 +32,7 @@ const NAV_ITEMS = [
 { label: 'Dichiarazioni RENTRI', path: '/dichiarazioni-rentri', icon: FileBadge },
 { label: 'Dichiarazioni Impianti', path: '/dichiarazioni-impianti', icon: Boxes },
 { label: 'Verifiche', path: '/verifiche', icon: ClipboardCheck },
+{ label: 'Verifiche Fornitori', path: '/verifiche-fornitori', icon: Users },
 { label: 'Assistente', path: '/assistente', icon: Sparkles },
 { label: 'Predittività Secondarie', path: '/predittivita-secondarie', icon: LineChart },
 { label: 'To-Do List', path: '/todo', icon: CheckSquare },

@@ -1,0 +1,50 @@
+{
+  "name": "ZonaRaccoglitore",
+  "type": "object",
+  "description": "La zona di competenza di un raccoglitore in un anno: le province in cui gli compete raccogliere. Decisione dell'utente del 29/09/2026: la zona si DICHIARA, non si deduce da dove ha raccolto, perche' un perimetro dedotto renderebbe impossibile per costruzione accorgersi che qualcuno ha lavorato fuori perimetro. Finche' la zona non e' scritta, il gestionale mostra dove ha raccolto e non dice niente sul fuori zona",
+  "properties": {
+    "raccoglitore": {
+      "type": "string",
+      "description": "Nome del raccoglitore, come in Target & Status. Il confronto coi nomi del portale si fa normalizzato (normalizzaRagioneSociale)"
+    },
+    "anno": {
+      "type": "number",
+      "description": "Anno a cui vale la zona: le zone cambiano con i contratti, e quella dell anno scorso non giudica l anno in corso"
+    },
+    "province": {
+      "type": "string",
+      "description": "Le sigle delle province di competenza, separate come viene: SA, NA; CE. Si leggono con provinceDiZona (base44/shared/andamentoRaccoglitori.ts). Piu righe per lo stesso raccoglitore si uniscono"
+    },
+    "note": {
+      "type": "string",
+      "description": "Perche la zona e questa: un accordo, una esclusiva, una sovrapposizione voluta con un altro raccoglitore"
+    },
+    "proposta": {
+      "type": "boolean",
+      "default": false,
+      "description": "Vero se le province sono state proposte dal gestionale a partire da dove ha raccolto, e nessuno le ha ancora confermate. Una zona proposta si mostra come tale: non e una dichiarazione finche l utente non la conferma"
+    }
+  },
+  "required": [
+    "raccoglitore",
+    "anno"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

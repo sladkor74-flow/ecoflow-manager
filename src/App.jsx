@@ -30,6 +30,7 @@ import Pdr from '@/pages/Pdr';
 import Giacenze from '@/pages/Giacenze';
 import QualificaFornitori from '@/pages/QualificaFornitori';
 import Verifiche from '@/pages/Verifiche';
+import VerificheFornitori from '@/pages/VerificheFornitori';
 import Richieste from '@/pages/Richieste';
 import Utenti from '@/pages/Utenti';
 import Omologhe from '@/pages/Omologhe';
@@ -83,6 +84,7 @@ const AuthenticatedApp = () => {
           <Route path="/assistente" element={<PageErrorBoundary><Assistente /></PageErrorBoundary>} />
           <Route path="/report" element={<PageErrorBoundary><Report /></PageErrorBoundary>} />
           <Route path="/verifiche" element={<PageErrorBoundary><Verifiche /></PageErrorBoundary>} />
+          <Route path="/verifiche-fornitori" element={<PageErrorBoundary><VerificheFornitori /></PageErrorBoundary>} />
           <Route path="/predittivita-secondarie" element={<PredittivitaSecondarie />} />
           <Route path="/primarie-aci" element={<PrimarieAci />} />
           <Route path="/todo" element={<TodoPage />} />
