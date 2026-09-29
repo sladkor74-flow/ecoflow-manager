@@ -89,7 +89,7 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
 
   // --- Foglio 4: Target ---
   // Target, residuo e copertura solo sul canale RETE; ACI ed Extra a parte.
-  const tarHeaders = ['Sito', 'Ruolo', 'Target primarie (t)', 'Target totale (t)', 'Primarie RETE (t)', 'Secondarie netto (t)', 'Secondarie in (t)', 'Secondarie out (t)', 'Terziarie (t)', 'Conferito RETE (t)', 'Residuo (t)', 'Copertura RETE (%)', 'ACI, fuori target (t)', 'Extra Raccolta, fuori target (t)'];
+  const tarHeaders = ['Sito', 'Ruolo', 'Target primarie (t)', 'Target totale (t)', 'Primarie RETE (t)', 'Secondarie netto (t)', 'Secondarie in (t)', 'Secondarie out (t)', 'Terziarie (t)', 'Conferito RETE (t)', 'Residuo (t) = Target totale - Conferito RETE', 'Copertura RETE (%) = Primarie RETE / Target totale', 'ACI, fuori target (t)', 'Extra Raccolta, fuori target (t)'];
   const tarRows = data.righe.map(r => [
     r.sito,
     r.tipo_destinazione === 'imp' ? 'Impianto' : 'Stoccaggio',
@@ -106,7 +106,8 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
     r.conferito_aci_t || 0,
     r.conferito_extra_t || 0,
   ]);
-  const residuoTot = data.totali.target_totale_t > 0 ? data.totali.target_totale_t - data.totali.conferito_primarie_t : '';
+  // Come nelle righe: target totale meno tutto quello che e' arrivato (conferito_t).
+  const residuoTot = data.totali.target_totale_t > 0 ? data.totali.target_totale_t - data.totali.conferito_t : '';
   const copTot = data.totali.target_totale_t > 0 ? (data.totali.conferito_primarie_t / data.totali.target_totale_t * 100) : '';
   tarRows.push(['TOTALE', '', data.totali.target_primarie_t, data.totali.target_totale_t || '', data.totali.conferito_primarie_t, data.totali.secondarie_nette_t, data.totali.secondarie_in_t, data.totali.secondarie_out_t, data.totali.terziarie_t, data.totali.conferito_t, residuoTot, copTot, data.totali.conferito_aci_t || 0, data.totali.conferito_extra_t || 0]);
   const ws4 = XLSX.utils.aoa_to_sheet([tarHeaders, ...tarRows]);

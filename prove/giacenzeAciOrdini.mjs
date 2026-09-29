@@ -202,6 +202,54 @@ verifica('i 7.000 kg di classe 9 non entrano nella giacenza di rete a portale di
 verifica('e nemmeno nel suo conferito di rete', (irigom.conferito_primarie_t || 0) === 0,
   JSON.stringify([irigom.conferito_primarie_t, irigom.conferito_aci_t]));
 
+console.log('IL RESIDUO SI MISURA SU TUTTO QUELLO CHE E\' ARRIVATO (29/09/2026)');
+// Il target totale di un impianto comprende gia' cio' che gli arriva in secondaria
+// dai piazzali, quindi il residuo sottrae il Conferito RETE - primarie piu'
+// secondarie in ingresso - e non le sole primarie. Sottraendo le sole primarie
+// usciva piu' alto del vero (sui dati veri: Irigom 1.798,70 t invece di 1.067,04).
+// La COPERTURA invece resta sulle primarie: e' il target di raccolta, e le
+// secondarie sono materiale gia' raccolto che si sposta.
+con('GiacenzaSito', [
+  { sito: PIAZZALE, tipo_destinazione: 'stoc', anno: 2026 },
+  { sito: ALTRO, tipo_destinazione: 'stoc', anno: 2026 },
+  { sito: 'IRIGOM SRL', tipo_destinazione: 'imp', anno: 2026, target_totale_t: 100, target_primarie_t: 60 },
+]);
+con('PrimariaRete', [
+  ...ARCHIVI.PrimariaRete.map(({ id: _id, ...r }) => r),
+  // 40 t di primarie arrivate all'impianto
+  {
+    id_ordine: 'ET26000030', numero_fir: 'FIRIMP1', classe: 'P - fino a 35 kg', prodotto: '.class1',
+    destinazione: 'IRIGOM SRL', tipo_destinazione: 'imp', stato: 'terminato', peso_effettivo: 40000,
+    trasporto_finito_il: g('2026-08-01'), ordine_chiuso_il: g('2026-08-05'), trasportatore: 'C.L. Service',
+  },
+]);
+con('Secondaria', [
+  ...ARCHIVI.Secondaria.map(({ id: _id, ...r }) => r),
+  // 25 t di secondarie di rete arrivate allo stesso impianto dal piazzale
+  {
+    id_ordine: 'SEC26000030', numero_fir: 'FIRSEC30', classe: 'P - fino a 35 kg', prodotto: '.class1',
+    stoccaggio: PIAZZALE, destinazione: 'IRIGOM SRL', tipo_destinazione: 'imp',
+    stato: 'terminato', peso_effettivo: 25000, trasporto_finito_il: g('2026-08-10'),
+  },
+]);
+const esitoRes = await calcolaGiacenze({ anno: 2026 });
+const imp = (esitoRes.righe || []).find(r => r.sito === 'IRIGOM SRL' && r.tipo_destinazione === 'imp') || {};
+// Le secondarie di rete in ingresso sono 25 t piu' i 500 kg che arrivano dall'altro
+// piazzale; i 300 kg di ACI restano fuori, perche' i canali non si mescolano.
+verifica('il conferito e\' primarie piu\' secondarie di RETE in ingresso, ACI escluso',
+  imp.conferito_primarie_t === 40 && imp.secondarie_in_t === 25.5 && imp.conferito_t === 65.5,
+  JSON.stringify([imp.conferito_primarie_t, imp.secondarie_in_t, imp.conferito_t]));
+verifica('il residuo sottrae tutto quello che e\' arrivato: 100 - 65,5 = 34,5', imp.residuo_t === 34.5,
+  JSON.stringify([imp.target_totale_t, imp.conferito_t, imp.residuo_t]));
+verifica('e non le sole primarie, che darebbero 60', imp.residuo_t !== 60, String(imp.residuo_t));
+verifica('la copertura resta sulla raccolta, cioe\' le primarie: 40 su 100', Math.round(imp.percentuale_target) === 40,
+  String(imp.percentuale_target));
+verifica('il target delle primarie si mostra ma nel residuo non entra', imp.target_primarie_t === 60
+  && imp.residuo_t === imp.target_totale_t - imp.conferito_t, JSON.stringify([imp.target_primarie_t, imp.residuo_t]));
+// Un piazzale non ha target totale: niente residuo, e non lo si inventa dalle primarie.
+const piazz = (esitoRes.righe || []).find(r => r.sito === PIAZZALE && r.tipo_destinazione === 'stoc') || {};
+verifica('un piazzale senza target totale non ha residuo', piazz.residuo_t === null, String(piazz.residuo_t));
+
 console.log('PER I PIAZZALI IL CONTROLLO PER CLASSE RESTA');
 const negative = (esito.anomalie || []).filter(a => a.tipo === 'giacenza_negativa');
 verifica('una classe sotto zero su un piazzale e\' ancora un\'anomalia per classe',

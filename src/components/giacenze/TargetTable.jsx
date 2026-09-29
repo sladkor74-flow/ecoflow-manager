@@ -32,8 +32,26 @@ export default function TargetTable({ righe, totali }) {
               <th className="px-2 py-2 font-semibold text-right">Secondarie</th>
               <th className="px-2 py-2 font-semibold text-right">Terziarie</th>
               <th className="px-2 py-2 font-semibold text-right">Conferito RETE</th>
-              <th className="px-2 py-2 font-semibold text-right">Residuo</th>
-              <th className="px-2 py-2 font-semibold">Copertura RETE</th>
+              <th className="px-2 py-2 font-semibold text-right">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="cursor-help underline decoration-dotted">Residuo</span>
+                    </TooltipTrigger>
+                    <TooltipContent>Target totale meno il Conferito RETE: quanto manca perché al sito arrivi il suo target. Il target totale comprende già le secondarie che arrivano dai piazzali, quindi si sottrae tutto quello che è arrivato</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </th>
+              <th className="px-2 py-2 font-semibold">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="cursor-help underline decoration-dotted">Copertura RETE</span>
+                    </TooltipTrigger>
+                    <TooltipContent>Primarie RETE sul target totale: quanto del target di raccolta è stato raccolto. Qui le secondarie non entrano, perché sono materiale già raccolto che si sposta</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </th>
               <th className="px-2 py-2 font-semibold text-right border-l">ACI</th>
               <th className="px-2 py-2 font-semibold text-right">Extra Raccolta</th>
             </tr>
@@ -101,7 +119,9 @@ export default function TargetTable({ righe, totali }) {
               <td className="px-2 py-2 text-right">{fmt(totali.secondarie_nette_t)} t</td>
               <td className="px-2 py-2 text-right">{fmt(totali.terziarie_t)} t</td>
               <td className="px-2 py-2 text-right">{fmt(totali.conferito_t)} t</td>
-              <td className="px-2 py-2 text-right">{dashIfZero(totali.target_totale_t > 0 ? totali.target_totale_t - totali.conferito_primarie_t : null)}</td>
+              {/* Come nelle righe: il residuo e' il target totale meno tutto quello
+                  che e' arrivato, primarie e secondarie in ingresso. */}
+              <td className="px-2 py-2 text-right">{dashIfZero(totali.target_totale_t > 0 ? totali.target_totale_t - totali.conferito_t : null)}</td>
               <td className="px-2 py-2 text-right">{fmtPct(totali.target_totale_t > 0 ? (totali.conferito_primarie_t / totali.target_totale_t * 100) : null)}</td>
               <td className="px-2 py-2 text-right border-l">{dashIfZero(totali.conferito_aci_t)}</td>
               <td className="px-2 py-2 text-right">{dashIfZero(totali.conferito_extra_t)}</td>
@@ -111,6 +131,13 @@ export default function TargetTable({ righe, totali }) {
       </div>
       <p className="px-3 py-2 text-xs text-muted-foreground border-t">
         Target, residuo e copertura si misurano solo sul canale RETE. ACI ed Extra Raccolta sono canali indipendenti: il loro conferito è indicato a parte e non entra nel target.
+        {' '}<strong>Residuo e copertura rispondono a due domande diverse, e non sono l&apos;uno il complemento dell&apos;altra.</strong> Il
+        residuo è <em>Target totale − Conferito RETE</em>: quanto manca perché al sito arrivi il suo target, e il target totale di un
+        impianto comprende già le secondarie che gli arrivano dai piazzali. La copertura è <em>Primarie RETE ÷ Target totale</em>:
+        quanto del target di raccolta è stato raccolto, e lì le secondarie non entrano, perché sono materiale già raccolto che si
+        sposta da un piazzale a un impianto e contarlo due volte gonfierebbe la raccolta.
+        {' '}La colonna <em>Target primarie</em> è la somma dei target dei raccoglitori legati al sito: si mostra per sapere da dove
+        arriva il target, e nel residuo non entra, perché è già dentro il Target totale.
       </p>
     </div>
   );

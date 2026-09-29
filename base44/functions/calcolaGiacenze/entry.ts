@@ -750,11 +750,24 @@ export default async function(req) {
       const giacenza_riferimento_t = g?.giacenza_riferimento_t || 0;
       const tipologia_trattamento = g?.tipologia_trattamento || '';
 
-      // Il target Ecotyre e' un target di raccolta, quindi si misura sulle
-      // primarie. Le secondarie sono materiale gia' raccolto che si sposta da uno
-      // stoccaggio a un impianto: metterle al numeratore farebbe contare due volte
-      // lo stesso pneumatico, una all'atto della raccolta e una al trasferimento.
-      const residuo_t = target_totale_t > 0 ? target_totale_t - conferito_primarie_t : null;
+      // RESIDUO E COPERTURA RISPONDONO A DUE DOMANDE DIVERSE, e per questo si
+      // calcolano su due basi diverse. Sono affiancate nella stessa tabella: la
+      // nota sotto la tabella lo dice, altrimenti sembrano due versioni dello
+      // stesso numero che non tornano.
+      //
+      // RESIDUO: quanto manca perche' a quel sito arrivi il suo target. Il target
+      // totale di un impianto comprende gia' cio' che gli arriva in secondaria dai
+      // piazzali (Irigom 4.445 t contro 3.400 t di sole primarie), quindi si
+      // sottrae tutto quello che e' ARRIVATO - primarie piu' secondarie in
+      // ingresso, cioe' conferito_t. Sottraendo le sole primarie il residuo usciva
+      // piu' alto del vero: per Irigom 1.798,70 t invece di 1.067,04 t (decisione
+      // dell'utente, 29/09/2026).
+      const residuo_t = target_totale_t > 0 ? target_totale_t - conferito_t : null;
+      // COPERTURA: quanto del target di RACCOLTA Ecotyre e' stato raccolto, e la
+      // raccolta sono le primarie. Le secondarie sono materiale gia' raccolto che
+      // si sposta da uno stoccaggio a un impianto: contarle qui farebbe contare due
+      // volte lo stesso pneumatico, una quando si raccoglie e una quando si
+      // trasferisce. Percio' questa resta sulle primarie.
       const percentuale_target = target_totale_t > 0 ? (conferito_primarie_t / target_totale_t) * 100 : null;
 
       // Un impianto senza target compare solo se nell'anno ha davvero qualcosa:
