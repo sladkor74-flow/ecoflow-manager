@@ -23,13 +23,18 @@ const ESITI = {
 
 // Lo stato di ogni singolo ordine di una richiesta, com'e' stato rilevato
 // all'ultimo caricamento delle primarie.
+// La targhetta porta il MINIMO che si legge a colpo d'occhio - un segno e, per chi
+// e' stato ritirato, il giorno - e la frase intera sta nel suggerimento. Mettendo
+// la frase nella targhetta ("non si trova fra gli ordini caricati"), una richiesta
+// con cinque ordini faceva una riga lunghissima che spingeva la tabella fuori
+// dallo schermo: la spiegazione va data a chi la cerca, non a tutta la colonna.
 const STATO_ORDINE = {
-  terminato: { testo: 'ritirato', classe: 'bg-emerald-100 text-emerald-900' },
-  assegnato: { testo: 'da ritirare', classe: 'bg-amber-100 text-amber-900' },
-  eseguito: { testo: 'eseguito a portale, Chiudi non premuto', classe: 'bg-amber-100 text-amber-900' },
-  senza_data: { testo: 'terminato senza la data di fine trasporto', classe: 'bg-amber-100 text-amber-900' },
-  cancellato: { testo: 'cancellato', classe: 'bg-slate-200 text-slate-700' },
-  sconosciuto: { testo: 'non si trova fra gli ordini caricati', classe: 'bg-slate-100 text-slate-600' },
+  terminato: { segno: '✓', breve: '', testo: 'ritirato', classe: 'bg-emerald-100 text-emerald-900' },
+  assegnato: { segno: '•', breve: 'da ritirare', testo: 'ancora assegnato: il ritiro non e\' stato fatto', classe: 'bg-amber-100 text-amber-900' },
+  eseguito: { segno: '•', breve: 'eseguito', testo: 'eseguito a portale: i dati ci sono tutti ma nessuno ha premuto Chiudi', classe: 'bg-amber-100 text-amber-900' },
+  senza_data: { segno: '•', breve: 'senza data', testo: 'terminato a portale ma senza la data di fine trasporto: il ritiro non si conta finche\' la data non arriva', classe: 'bg-amber-100 text-amber-900' },
+  cancellato: { segno: '✕', breve: 'cancellato', testo: 'cancellato a portale: quel ritiro non si fara\'', classe: 'bg-slate-200 text-slate-700' },
+  sconosciuto: { segno: '?', breve: '', testo: 'non si trova fra gli ordini caricati: puo\' essere un ID scritto male o un ordine non ancora caricato dal portale', classe: 'bg-slate-100 text-slate-600' },
 };
 
 function DettaglioOrdini({ richiesta, ids }) {
@@ -38,14 +43,15 @@ function DettaglioOrdini({ richiesta, ids }) {
   if (!stati.length) return null;
   const perId = new Map(stati.map(s => [s.id_ordine, s]));
   return (
-    <span className="block mt-0.5">
+    <span className="flex flex-wrap gap-1 mt-1">
       {ids.map(id => {
         const s = perId.get(id);
         const d = STATO_ORDINE[s && s.stato] || STATO_ORDINE.sconosciuto;
+        const coda = s && s.stato === 'terminato' ? gg(s.giorno) : d.breve;
         return (
-          <span key={id} className={`inline-block mr-1 mb-0.5 px-1.5 py-0.5 rounded text-[10px] ${d.classe}`}
+          <span key={id} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap ${d.classe}`}
             title={`${id}: ${d.testo}${s && s.giorno ? `, fine trasporto ${gg(s.giorno)}` : ''}${s && s.motivo ? ` (${s.motivo})` : ''}`}>
-            <span className="font-mono">{id}</span> · {s && s.stato === 'terminato' ? gg(s.giorno) : d.testo}
+            <span>{d.segno}</span><span className="font-mono">{id}</span>{coda ? <span>{coda}</span> : null}
           </span>
         );
       })}
@@ -340,7 +346,10 @@ export default function RichiesteEct({ isAdmin }) {
                     </td>
                     <td className="px-2 py-2">{r.provincia || '—'}</td>
                     <td className="px-2 py-2">{r.classe || '—'}</td>
-                    <td className="px-2 py-2 whitespace-nowrap">
+                    {/* La colonna ha una larghezza sua e il contenuto va a capo:
+                        senza un limite, una richiesta con cinque ordini allargava la
+                        tabella finche' le altre colonne uscivano dallo schermo. */}
+                    <td className="px-2 py-2 max-w-[280px]">
                       {modifica && modifica.id === r.id ? (
                         <input
                           autoFocus
@@ -359,7 +368,14 @@ export default function RichiesteEct({ isAdmin }) {
                           title={isAdmin ? 'Scrivi o correggi gli ID ordine: puoi metterne più di uno, separati da virgola' : ''}
                           className={`text-left ${isAdmin ? 'hover:underline' : 'cursor-default'}`}
                         >
-                          {ids.length ? <span className="font-mono text-xs">{ids.join(', ')}</span> : <span className="text-amber-700 text-xs">da trovare</span>}
+                          {/* Con piu' di un ordine l'elenco per esteso non serve:
+                              sotto ci sono le targhette, una per ordine, che dicono
+                              anche a che punto sono. Qui basta quanti sono. */}
+                          {ids.length === 0
+                            ? <span className="text-amber-700 text-xs">da trovare</span>
+                            : ids.length === 1
+                              ? <span className="font-mono text-xs">{ids[0]}</span>
+                              : <span className="text-xs text-muted-foreground">{ids.length} ordini</span>}
                         </button>
                       )}
                       {/* Con piu' ordini sulla stessa richiesta, "2 su 3" dice
