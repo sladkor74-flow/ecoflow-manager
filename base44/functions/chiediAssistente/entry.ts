@@ -7,7 +7,7 @@ import {
 } from "../../shared/baseConoscenza.ts";
 import { analizzaDomanda, situazioneGestionale } from "../../shared/assistente.ts";
 import { catalogoStrumenti, eseguiStrumento } from "../../shared/strumentiAssistente.ts";
-import { SCHEMA_PIANO, istruzioniPiano, strumentiDalPiano, testoDati } from "../../shared/pianoAssistente.ts";
+import { SCHEMA_PIANO, istruzioniPiano, strumentiDalPiano, testoDati, pianoDiretto } from "../../shared/pianoAssistente.ts";
 import { materialePertinente } from "../../shared/materialeCorso.ts";
 import { oggiRoma } from "../../shared/qualificaFornitori.ts";
 import {
@@ -198,14 +198,28 @@ export default async function(req) {
     let pianoRiuscito = false;
     let risultati = [];
     if (!quiz) {
-      try {
-        const p = comeOggetto(await base44.asServiceRole.integrations.Core.InvokeLLM({
-          prompt: istruzioniPiano(catalogoStrumenti(), domanda, oggi, precedenti.slice(-3)),
-          response_json_schema: SCHEMA_PIANO,
-        }));
-        if (p && Array.isArray(p.strumenti)) { piano = p; pianoRiuscito = true; }
-      } catch (e) {
-        piano = null;
+      // LA SCORCIATOIA. Per la domanda piu' frequente - "quanto ha raccolto il
+      // tale a agosto?" - il piano e' sempre lo stesso, e farlo decidere a un
+      // modello e' una chiamata intera di attesa per niente. Se la forma non e'
+      // esattamente quella, pianoDiretto restituisce null e si fa come prima.
+      // Vale anche dentro una conversazione: pianoDiretto scatta solo su domande
+      // che si reggono da sole (verbo, soggetto, periodo scritti per esteso). Un
+      // seguito come "e a settembre?" non le somiglia e va dal pianificatore, che
+      // e' l'unico a vedere le domande di prima.
+      const diretto = pianoDiretto(domanda, oggi);
+      if (diretto) {
+        piano = { strumenti: diretto, serve_normativa: false };
+        pianoRiuscito = true;
+      } else {
+        try {
+          const p = comeOggetto(await base44.asServiceRole.integrations.Core.InvokeLLM({
+            prompt: istruzioniPiano(catalogoStrumenti(), domanda, oggi, precedenti.slice(-3)),
+            response_json_schema: SCHEMA_PIANO,
+          }));
+          if (p && Array.isArray(p.strumenti)) { piano = p; pianoRiuscito = true; }
+        } catch (e) {
+          piano = null;
+        }
       }
       const scelti = strumentiDalPiano(piano, catalogoStrumenti(), oggi, domanda);
       // Se la scelta non riesce del tutto si torna al riepilogo generale, che e'
