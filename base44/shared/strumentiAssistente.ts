@@ -439,6 +439,31 @@ export const STRUMENTI = [
         ? `"${e.chiesto}" non basta a capire di chi si parla: in archivio ci sono ${e.alternative.join(', ')}. Rifai la domanda con il nome per esteso: sono soggetti diversi e non si sommano.`
         : `"${e.chiesto}" non risulta fra i ${ruolo === 'raccoglitore' ? 'raccoglitori' : 'siti di destinazione'} del canale ${canale}${e.alternative.length ? `. Forse intendevi: ${e.alternative.join(', ')}` : ''}.`)).join(' ');
       const calcolabile = nonRisolti.length === 0;
+      // UN NOME CHE QUI NON C'E' PUO' ESSERCI ALTROVE. L'anagrafica dei fornitori
+      // e' una tabella piccola e dice che cosa fa un soggetto: meglio rispondere
+      // "Silvano Renato trasporta le secondarie, non raccoglie" che "non risulta
+      // fra i raccoglitori", che manda l'utente a sbattere (visto in produzione il
+      // 30/09/2026: ha rifatto la domanda due volte con lo stesso esito).
+      let inAnagrafica = '';
+      if (nonRisolti.length) {
+        try {
+          const fornitori = await fetchAll(base44.asServiceRole.entities.Fornitore, { stato: 'attivo' });
+          const nomi = fornitori.map(x => x.ragione_sociale);
+          inAnagrafica = nonRisolti.map(([, e]) => {
+            const f = risolviNome(nomi, e.chiesto);
+            if (!f.trovato) return '';
+            const rec = fornitori.find(x => normalizzaRagioneSociale(x.ragione_sociale) === f.chiavi[0]);
+            if (!rec) return '';
+            const ruoli = [
+              rec.ruolo_raccolta ? 'raccoglie le primarie' : '',
+              rec.ruolo_trasporto_secondaria ? 'trasporta le secondarie' : '',
+              rec.ruolo_stoccaggio ? 'ha uno stoccaggio' : '',
+              rec.ruolo_trattamento ? 'tratta il materiale' : '',
+            ].filter(Boolean);
+            return `"${e.chiesto}" in anagrafica e' ${rec.ragione_sociale}${ruoli.length ? `, e ${ruoli.join(', ')}` : ', senza nessun ruolo indicato'}. Fra i raccoglitori delle primarie del canale ${canale} non compare: o non raccoglie, o raccoglie in un altro canale.`;
+          }).filter(Boolean).join(' ');
+        } catch (_e) { /* l'anagrafica aiuta, non e' indispensabile */ }
+      }
       const risolti = Object.entries(soggetti).filter(([, e]) => e.trovato)
         .map(([ruolo, e]) => `${ruolo}: ${e.nomi[0]}${e.come === 'esatto' ? '' : ` (scritto "${e.chiesto}")`}`);
       return {
@@ -451,6 +476,7 @@ export const STRUMENTI = [
           tonnellate: calcolabile ? t3(totale) : null,
           ...(risolti.length ? { soggetto_riconosciuto: risolti.join('; ') } : {}),
           ...(avvisoSoggetto ? { avviso_soggetto: avvisoSoggetto, numero_non_calcolabile: 'Non scrivere nessun numero per questo soggetto: non e\' zero, e\' che non si sa di chi si parla.' } : {}),
+          ...(inAnagrafica ? { in_anagrafica: inAnagrafica } : {}),
           ...(avvisoCanale ? { avviso_canale: avvisoCanale } : {}),
           ...(date ? { date_obbligatorie_da_sistemare: date } : {}),
           ...(avvisoPeriodo ? { avviso_periodo: avvisoPeriodo } : {}),

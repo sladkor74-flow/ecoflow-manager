@@ -199,8 +199,17 @@ export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
       // proprio si segnala, perche' buttarlo via in silenzio vuol dire
       // rispondere su tutto quando era stato chiesto su uno.
       const alias = (SINONIMI_PARAMETRI[k] || []).find(a => ok.has(a) && base[a] === undefined);
-      if (alias) base[alias] = v;
-      else ignorati.push({ parametro: k, valore: String(v) });
+      if (alias) { base[alias] = v; continue; }
+      // Si segnala solo un filtro che l'utente ha DAVVERO chiesto, cioe' il cui
+      // valore compare nella domanda. Lo schema del piano dichiara l'unione dei
+      // parametri di tutti gli strumenti, e il pianificatore ne riempie anche di
+      // estranei: senza questo controllo, a "quanto ha raccolto Nappi Sud ad
+      // agosto?" si attaccava in coda "il numero non e' filtrato per tipologia,
+      // direzione, prestazione o stato di scadenza del documento", che non
+      // c'entrava niente e sporcava una risposta giusta (visto in produzione il
+      // 30/09/2026).
+      const valore = String(v).toLowerCase().trim();
+      if (valore && valore.length > 1 && t.includes(valore)) ignorati.push({ parametro: k, valore: String(v) });
     }
     if (ok.has('anno') && base.anno == null) base.anno = Number(per.anno) || annoOggi;
     if (ok.has('mese') && !base.mese && per.mese && !senzaMese) base.mese = per.mese;
