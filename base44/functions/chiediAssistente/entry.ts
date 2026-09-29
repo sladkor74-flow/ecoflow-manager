@@ -314,6 +314,10 @@ export default async function(req) {
       ...(storia ? ['', 'CONVERSAZIONE PRECEDENTE', storia] : []),
       ...(!allegati.length && ultimiAllegati ? ['', 'FILE ALLEGATI IN PRECEDENZA IN QUESTA CONVERSAZIONE (estratto)', ultimiAllegati.map(a => `[${a.rif || ''}] ${a.nome}\n${a.estratto || ''}`).join('\n\n')] : []),
       ...(allegati.length ? ['', 'ALLEGATI (file inviati con questa domanda)', sezioneAllegati] : []),
+      // Quando la scelta degli strumenti non riesce, i dati qui sotto sono il
+      // riepilogo generale e non la ricerca puntuale che la domanda chiedeva:
+      // senza dirlo, la risposta esce sicura di se' e generica.
+      ...(!quiz && !pianoRiuscito ? ["AVVISO: la scelta degli strumenti non e' riuscita, quindi qui sotto trovi il riepilogo generale della commessa e non la ricerca puntuale che la domanda chiedeva. Se il numero preciso che serviva non c'e' nel riepilogo, dillo e invita a ripetere la domanda: non rispondere con il numero piu' simile che trovi."] : []),
       ...(risultati.length ? ['', testoDati(risultati)] : []),
       ...(dati ? ['', dati] : []),
       '',

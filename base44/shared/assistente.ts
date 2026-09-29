@@ -67,8 +67,15 @@ function targetDelPortaleLocale(nomiTarget, nomePortale) {
   return nomiTarget.find(n => normalizzaRagioneSociale(n) === b) ?? nomiTarget.find(n => stessoRaccoglitore(n, nomePortale)) ?? null;
 }
 
-async function provaA(fn, ripiego) {
-  try { return await fn(); } catch (_e) { return ripiego; }
+async function provaA(fn, ripiego, cosa = '', guasti = null) {
+  try { return await fn(); } catch (e) {
+    // UNA LETTURA CHE NON RIESCE VA DETTA. Prima l'eccezione veniva inghiottita e
+    // il ripiego era null: con il raccolto a null il riepilogo scriveva "raccolto
+    // 0,00 t (0%)" per ogni regione e per ogni raccoglitore, e il modello leggeva
+    // zeri legittimi e annunciava che non avevamo raccolto niente.
+    if (cosa && guasti) guasti.push(`${cosa}: ${e && e.message ? e.message : e}`);
+    return ripiego;
+  }
 }
 
 /**
@@ -107,9 +114,12 @@ export async function situazioneGestionale(base44, oggi) {
   const mese = MESI[meseIdx];
   const svc = base44.asServiceRole.entities;
 
+  // Le letture che non riescono: si raccolgono e si dicono in cima, perche' un
+  // riepilogo pieno di zeri senza spiegazione si legge come un dato.
+  const guasti = [];
   const [raccolto, raccoltoAci, extra, reteSenzaData, aciSenzaData, mensili, annui, commesse, controlli, alert, riepilogoQualifica, giacenze] = await Promise.all([
-    provaA(() => computeRaccoltoData(base44, { anno: [anno], canale: 'rete' }), null),
-    provaA(() => computeRaccoltoData(base44, { anno: [anno], canale: 'aci' }), null),
+    provaA(() => computeRaccoltoData(base44, { anno: [anno], canale: 'rete' }), null, 'il raccolto della rete', guasti),
+    provaA(() => computeRaccoltoData(base44, { anno: [anno], canale: 'aci' }), null, 'il raccolto ACI', guasti),
     provaA(() => fetchAll(svc.ExtraRaccolta, { stato: 'terminato' }), []),
     // Il raccolto scarta i terminati senza fine trasporto: si chiedono a parte,
     // con un filtro sul campo vuoto, per poterli dire. null se l'archivio non
@@ -125,7 +135,7 @@ export async function situazioneGestionale(base44, oggi) {
     // coincidevano mai per il motivo sbagliato.
     provaA(() => fetchAll(svc.Alert, { stato: 'aperto' }), []),
     provaA(() => svc.RiepilogoQualifica.filter({ anno }, '-created_date', 1), []),
-    provaA(async () => (await base44.functions.invoke('calcolaGiacenze', { anno })).data, null),
+    provaA(async () => (await base44.functions.invoke('calcolaGiacenze', { anno })).data, null, 'le giacenze', guasti),
   ]);
 
   const righe = [
@@ -146,8 +156,9 @@ export async function situazioneGestionale(base44, oggi) {
     for (const r of leggiLista(commessa.regioni_json)) {
       const racc = perRegione.get(String(r.regione).toLowerCase());
       const contratto = Number(r.target_t) || 0;
-      const fatto = racc ? racc.totale : 0;
-      righe.push(`- ${r.regione}: contratto ${t1(contratto)} t, raccolto ${t1(fatto)} t (${contratto ? p1(fatto / contratto * 100) : '-'}%), atteso a oggi ${t1(contratto * quota)} t, mese in corso ${t1(racc?.mesi?.[mese])} t.`);
+      const fatto = racc ? racc.totale : null;
+      const senzaRaccolto = !raccolto;
+      righe.push(`- ${r.regione}: contratto ${t1(contratto)} t, raccolto ${senzaRaccolto ? 'n/d (lettura non riuscita)' : `${t1(fatto)} t (${contratto ? p1(fatto / contratto * 100) : '-'}%)`}, atteso a oggi ${t1(contratto * quota)} t, mese in corso ${senzaRaccolto ? 'n/d' : `${t1(racc?.mesi?.[mese])} t`}.`);
     }
   } else {
     righe.push('Contratto Ecotyre dell\'anno non inserito in Target & Status.');
@@ -229,7 +240,7 @@ export async function situazioneGestionale(base44, oggi) {
       const ytd = suoi.reduce((s, r) => s + r.totale, 0);
       const meseFatto = suoi.reduce((s, r) => s + (r.mesi?.[mese] || 0), 0);
       const regioni = [...new Set(annui.filter(r => normalizzaRagioneSociale(r.raccoglitore) === k).map(r => r.regione).filter(Boolean))];
-      righe.push(`- ${nome}${regioni.length ? ' (' + regioni.join(', ') + ')' : ''}: ${t1(annuo)} | ${t1(ytd)} | ${nonRaccoglie ? 'non raccoglie' : t1(targetMese)} | ${t1(meseFatto)}`);
+      righe.push(`- ${nome}${regioni.length ? ' (' + regioni.join(', ') + ')' : ''}: ${t1(annuo)} | ${raccolto ? t1(ytd) : 'n/d'} | ${nonRaccoglie ? 'non raccoglie' : t1(targetMese)} | ${raccolto ? t1(meseFatto) : 'n/d'}`);
     }
   } else {
     righe.push('Target dei raccoglitori non inseriti in Target & Status per l\'anno.');
@@ -297,5 +308,10 @@ export async function situazioneGestionale(base44, oggi) {
     righe.push(`Qualifica fornitori ${anno}: ${rq.alert_aperti ?? 0} alert su ${rq.soggetti_con_alert ?? 0} soggetti; documenti scaduti ${rq.scaduti ?? 0}, non conformi ${rq.non_conformi ?? 0}, mancanti ${rq.mancanti ?? 0}, in scadenza ${rq.in_scadenza ?? 0}, da verificare ${rq.da_verificare ?? 0}.`);
   }
 
+  // I guasti in CIMA, non in fondo: se una lettura non e' riuscita, tutto quello
+  // che segue va letto sapendolo, e un avviso in coda arriva troppo tardi.
+  if (guasti.length) {
+    righe.unshift(`ATTENZIONE, LETTURE NON RIUSCITE: ${guasti.join('; ')}. I numeri che dipendono da queste letture NON ci sono: dove sotto trovi "n/d" o uno zero non e' un dato, e' un dato mancante. Dillo nella risposta e non ricavare niente da quei numeri.`, '');
+  }
   return righe.join('\n');
 }
