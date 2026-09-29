@@ -1185,3 +1185,58 @@ problema: si leggono nel browser a blocchi e il file non sale mai
 richieste ECT invece saliva e il suo indirizzo non veniva salvato da nessuna
 parte: ora `importaRichiesteEct` lo cancella appena l'ha letto, perche' dopo
 nessuno saprebbe piu' che esiste.
+
+### EcoTyna: le domande sui dati non sono domande di norma (29/09/2026)
+
+L'utente si era lamentato: *"ogni volta che chiedo qualcosa ad Ecotyna riguardo la
+commessa non mi risponde in maniera puntuale ... ma e' generica e mi invia link
+presi online"*. Le cause erano quattro, tutte nel modo in cui l'assistente era
+istruita, e sono state misurate sul codice:
+
+1. **La ricerca online non si decide a parole chiave.** `PAROLE_NORMA`
+   (`base44/shared/assistente.ts`) contiene il vocabolario del mestiere
+   (*formulari, classe, trasporto, registro, serve, posso*) e frammenti che si
+   incastrano dentro altre parole (*cer* in "cerca", *adr* in "quadratura"), e la
+   regola `norma: norma || !dati` accendeva la ricerca ogni volta che non
+   riconosceva una parola-dati. Adesso decide il pianificatore con
+   **`serve_normativa`** (`base44/shared/pianoAssistente.ts`): se ha preso i
+   numeri dagli strumenti e dice che la norma non c'entra, non si cerca online e
+   non si caricano le schede del corso RT. Il campo **non e' obbligatorio e la
+   mancanza vale "serve"**: si sbaglia dal lato delle fonti, perche' una risposta
+   normativa senza fonti e' un danno e un link di troppo su un numero e' un
+   fastidio.
+2. **Lo schema senza fonti.** Su una domanda sui dati si usa
+   `SCHEMA_RISPOSTA_DATI`, che non ha i campi `fonti` e `novita_normative`: un
+   campo che c'e' il modello lo riempie, e riempirlo lo porta nel registro del
+   consulente che cita invece che del responsabile tecnico che risponde. E' l'unico
+   modo di spegnere i link alla radice.
+3. **Il prompt a due voci.** Con `soloDati` escono `REGOLE_FONTI`, la regola del
+   controllo online, quella su Normattiva e quella sul corso RT, ed entrano cinque
+   righe (D, D-bis, D-ter, D-quater) su come si risponde a un numero: il numero
+   nella prima riga con la sua etichetta (soggetto, canale, periodo), niente
+   premesse, niente consigli non chiesti. **Le regole che tengono onesti i numeri
+   restano tutte**: i canali che non si sommano, il periodo attaccato
+   all'etichetta, gli elenchi che non si contano a occhio, le date obbligatorie.
+4. **Il nome del fornitore.** `risolviNome`
+   (`base44/shared/normalizzaRagioneSociale.ts`) riconosce il nome scritto come
+   capita: uguale, abbreviazione, contenimento, e il confronto senza spazi perche'
+   togliendo i punti "ECO.GEA" diventa "ecogea". Prima il filtro dentro
+   `movimenti()` pretendeva il nome identico e "Silvano" contro "SILVANO RENATO"
+   dava **zero righe, che uscivano come "ha raccolto 0,00 t"**. Se i nomi che
+   corrispondono sono piu' d'uno **non si sceglie**: si dichiara l'ambiguita' e si
+   chiede il nome per esteso, perche' in archivio ci sono davvero SILVANO RENATO e
+   SILVANO TRASPORTI SRL, e sommarli darebbe un numero che sembra giusto.
+
+**Due regole da non perdere:**
+
+- **Zero non e' "non lo so".** Quando uno strumento non risolve un soggetto,
+  `tonnellate` e `formulari` sono `null`, arriva `avviso_soggetto` e il prompt
+  vieta di scrivere un numero per quel soggetto. Lo stesso vale per il riepilogo:
+  `provaA` registra le letture non riuscite in `guasti`, che finiscono **in cima**
+  al testo, e dove il dato manca si scrive `n/d`, non `0,00 t`.
+- **Un intervallo di mesi si apre tutto.** `mesiChiesti`
+  (`base44/shared/strumentiAssistente.ts`) legge elenchi e intervalli: "da marzo a
+  maggio" sono tre mesi, non due. Un intervallo a cavallo del capodanno non si
+  indovina - invertirlo darebbe undici mesi al posto di tre - e si dice che non si
+  e' capito. Prima "nei mesi di luglio e agosto" diventava in silenzio tutto
+  l'anno.
