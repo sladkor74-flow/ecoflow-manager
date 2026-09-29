@@ -8,7 +8,7 @@ import {
 import { analizzaDomanda, situazioneGestionale } from "../../shared/assistente.ts";
 import { catalogoStrumenti, eseguiStrumento } from "../../shared/strumentiAssistente.ts";
 import { nuovaCache } from "../../shared/cacheLetture.ts";
-import { SCHEMA_PIANO, istruzioniPiano, strumentiDalPiano, testoDati, pianoDiretto } from "../../shared/pianoAssistente.ts";
+import { SCHEMA_PIANO, istruzioniPiano, strumentiDalPiano, testoDati } from "../../shared/pianoAssistente.ts";
 import { materialePertinente } from "../../shared/materialeCorso.ts";
 import { oggiRoma } from "../../shared/qualificaFornitori.ts";
 import {
@@ -200,28 +200,26 @@ export default async function(req) {
     let risultati = [];
     let contiLetture = null;
     if (!quiz) {
-      // LA SCORCIATOIA. Per la domanda piu' frequente - "quanto ha raccolto il
-      // tale a agosto?" - il piano e' sempre lo stesso, e farlo decidere a un
-      // modello e' una chiamata intera di attesa per niente. Se la forma non e'
-      // esattamente quella, pianoDiretto restituisce null e si fa come prima.
-      // Vale anche dentro una conversazione: pianoDiretto scatta solo su domande
-      // che si reggono da sole (verbo, soggetto, periodo scritti per esteso). Un
-      // seguito come "e a settembre?" non le somiglia e va dal pianificatore, che
-      // e' l'unico a vedere le domande di prima.
-      const diretto = pianoDiretto(domanda, oggi);
-      if (diretto) {
-        piano = { strumenti: diretto, serve_normativa: false };
-        pianoRiuscito = true;
-      } else {
-        try {
-          const p = comeOggetto(await base44.asServiceRole.integrations.Core.InvokeLLM({
-            prompt: istruzioniPiano(catalogoStrumenti(), domanda, oggi, precedenti.slice(-3)),
-            response_json_schema: SCHEMA_PIANO,
-          }));
-          if (p && Array.isArray(p.strumenti)) { piano = p; pianoRiuscito = true; }
-        } catch (e) {
-          piano = null;
-        }
+      // QUI C'ERA UNA SCORCIATOIA, ed e' stata tolta il 30/09/2026, poche ore
+      // dopo averla scritta. Riconosceva la domanda canonica sul raccolto e
+      // saltava questa chiamata al modello: una chiamata risparmiata su due.
+      // Una revisione avversariale le ha trovato nove difetti gravi, tutti dello
+      // stesso tipo - un pezzo della domanda che si perde per strada e un numero
+      // che esce piu' grande o piu' piccolo del vero senza che nessuno lo dica -
+      // piu' un ciclo infinito su "quanto abbiamo raccolto da marzo a maggio?".
+      //
+      // Il pianificatore costa una chiamata e capisce l'italiano; una regex che
+      // prova a capirlo indovina, e su un numero indovinare non si puo'. Se un
+      // giorno la scorciatoia torna, dovra' avere una grammatica stretta e le sue
+      // prove per ogni forma che accetta, non solo per quelle che rifiuta.
+      try {
+        const p = comeOggetto(await base44.asServiceRole.integrations.Core.InvokeLLM({
+          prompt: istruzioniPiano(catalogoStrumenti(), domanda, oggi, precedenti.slice(-3)),
+          response_json_schema: SCHEMA_PIANO,
+        }));
+        if (p && Array.isArray(p.strumenti)) { piano = p; pianoRiuscito = true; }
+      } catch (e) {
+        piano = null;
       }
       const scelti = strumentiDalPiano(piano, catalogoStrumenti(), oggi, domanda);
       // Se la scelta non riesce del tutto si torna al riepilogo generale, che e'

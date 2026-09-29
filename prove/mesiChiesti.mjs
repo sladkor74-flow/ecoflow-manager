@@ -38,6 +38,16 @@ verifica('un mese buono e uno finto: si tiene il buono e si dice l altro',
   nomi('Agosto e pippo') === 'Agosto' && ign('Agosto e pippo') === 'pippo');
 verifica('un numero non e un mese', mesiChiesti('8').indici.size === 0 && ign('8') === '8');
 
+console.log('IN ITALIANO DAVANTI A VOCALE SI SCRIVE AD');
+verifica('da gennaio ad agosto sono otto mesi', mesiChiesti('da gennaio ad agosto').indici.size === 8, nomi('da gennaio ad agosto'));
+verifica('da luglio ad ottobre sono quattro', mesiChiesti('da luglio ad ottobre').indici.size === 4);
+verifica('fino ad aprile parte da gennaio', nomi('da gennaio fino ad aprile') === 'Gennaio|Febbraio|Marzo|Aprile');
+
+console.log('DUE MESI ATTACCATI DA UNA PAROLA CHE NON SI CAPISCE');
+verifica('non si indovina se e elenco o intervallo', mesiChiesti('marzo oppure maggio').indici.size === 0, nomi('marzo oppure maggio'));
+verifica('e si dice che non si e capito', ign('marzo oppure maggio').includes('marzo'));
+verifica('ma un elenco vero resta un elenco', nomi('marzo, maggio') === 'Marzo|Maggio');
+
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');
 process.exit(ko ? 1 : 0);

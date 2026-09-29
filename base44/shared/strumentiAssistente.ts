@@ -206,7 +206,10 @@ export function mesiChiesti(mese, mesi) {
     // UN INTERVALLO SI APRE TUTTO. "da marzo a maggio" sono tre mesi, non due:
     // prendere solo gli estremi darebbe un numero piu' piccolo del vero senza
     // dirlo. Per questo "a" e "-" non si trattano come separatori di elenco.
-    const range = t.match(/^(?:dal?\s+)?([a-zA-Zàèéìòù]+)\s*(?:-|–|—|→|>|\bal?\b|\bfino\s+a\b)\s*([a-zA-Zàèéìòù]+)$/i);
+    // "ad" davanti a vocale: "da gennaio ad agosto" e' un intervallo di otto mesi.
+    // Senza riconoscerlo diventava l'elenco [Gennaio, Agosto], cioe' due mesi al
+    // posto di otto, e nessun avviso lo diceva.
+    const range = t.match(/^(?:dal?\s+)?([a-zA-Zàèéìòù]+)\s*(?:-|–|—|→|>|\ba\b|\bad\b|\bal\b|\bfino\s+ad?\b)\s*([a-zA-Zàèéìòù]+)$/i);
     if (range) {
       const da = indiceDi(range[1]);
       const al = indiceDi(range[2]);
@@ -221,6 +224,13 @@ export function mesiChiesti(mese, mesi) {
     }
     // Altrimenti e' un elenco: "luglio e agosto", "luglio, agosto".
     const pezzi = t.split(/\s*(?:,|;|\/|\be\b|\bed\b)\s*/i).map(p => p.trim()).filter(Boolean);
+    // Due mesi attaccati da una parola che non e' un separatore d'elenco ne' un
+    // estremo d'intervallo riconosciuto: non si indovina quale dei due significati
+    // fosse, perche' i due danno numeri diversissimi. Si dice che non si e' capito.
+    if (pezzi.length === 1 && (t.match(new RegExp(`\\b(?:${MESI.map(m => m.toLowerCase()).join('|')})\\b`, 'gi')) || []).length > 1) {
+      ignorati.push(t);
+      return;
+    }
     for (const p of pezzi) {
       const i = indiceDi(p);
       if (i < 0) ignorati.push(p);
