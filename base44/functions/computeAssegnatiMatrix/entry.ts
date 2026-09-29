@@ -104,6 +104,9 @@ export default async function(req) {
       regioni: [...new Set(all.map(r => r.regione).filter(Boolean))].sort(),
       province: [...new Set(all.map(r => (r.provincia || '').toUpperCase().trim()).filter(Boolean))].sort(),
       partner: [...new Set(all.map(r => (r.partner_operativo || '').trim()).filter(Boolean))].sort(),
+      // Il trasportatore: e' chi andra' a ritirare, e filtrarci sopra e' il modo
+      // di vedere la coda di un raccoglitore (richiesta dell'utente, 29/09/2026).
+      trasportatori: [...new Set(all.map(r => (r.trasportatore || '').trim()).filter(Boolean))].sort(),
       classi: [...new Set(all.map(r => r.classe).filter(Boolean))].sort(),
     };
 

@@ -76,10 +76,29 @@ export function andamentoRaccoglitori(primarieRete, {
   zone = [],
   targetPerMese = () => null,
   nomi = new Map(),
+  conTarget = [],
 } = {}) {
   const annoNum = Number(anno);
   const zonaDi = zonePerRaccoglitore(zone, annoNum);
   const perRacc = new Map();
+  const senzaData = [];
+
+  const nuovo = (chiave, nome) => ({
+    chiave,
+    nome: pulisci(nomi.get(chiave)) || nome,
+    mesi: MESI_MOVIMENTI.map(() => ({ kg: 0, ritiri: 0 })),
+    province: new Map(),
+    kg: 0,
+    ritiri: 0,
+  });
+
+  // CHI HA UN TARGET COMPARE ANCHE SE NON HA RACCOLTO NIENTE. In un modulo che
+  // serve a vedere chi sta rispettando il target, chi e' fermo a zero era l'unico a
+  // sparire, perche' le righe nascevano solo scorrendo i movimenti.
+  for (const t of conTarget || []) {
+    const chiave = normalizzaRagioneSociale(t.nome || t.raccoglitore || '');
+    if (chiave && !perRacc.has(chiave)) perRacc.set(chiave, nuovo(chiave, pulisci(t.nome || t.raccoglitore)));
+  }
 
   for (const r of primarieRete || []) {
     if (!eTerminato(r)) continue;
@@ -87,19 +106,15 @@ export function andamentoRaccoglitori(primarieRete, {
     // (decisione dell'utente, 28/09/2026): qui si guarda solo la rete.
     if (canaleMovimento(r, 'PrimariaRete') !== 'RETE') continue;
     const giorno = giornoMovimento(r);
-    if (!giorno || giorno.slice(0, 4) !== String(annoNum)) continue;
+    // Un terminato senza fine trasporto non sta in nessun mese (regola 1): resta
+    // fuori dal conto, ma si conta e si dice, altrimenti sparirebbe e basta.
+    if (!giorno) { senzaData.push(r); continue; }
+    if (giorno.slice(0, 4) !== String(annoNum)) continue;
     const nome = pulisci(r.trasportatore);
     const chiave = normalizzaRagioneSociale(nome);
     if (!chiave) continue;
     if (!perRacc.has(chiave)) {
-      perRacc.set(chiave, {
-        chiave,
-        nome: pulisci(nomi.get(chiave)) || nome,
-        mesi: MESI_MOVIMENTI.map(() => ({ kg: 0, ritiri: 0 })),
-        province: new Map(),
-        kg: 0,
-        ritiri: 0,
-      });
+      perRacc.set(chiave, nuovo(chiave, nome));
     }
     const racc = perRacc.get(chiave);
     const meseIdx = Number(giorno.slice(5, 7)) - 1;
@@ -138,17 +153,29 @@ export function andamentoRaccoglitori(primarieRete, {
         copertura: targetKg ? Math.round((m.kg / targetKg) * 1000) / 10 : null,
       };
     });
-    const targetAnno = mesi.reduce((s, m) => (m.target_kg === null ? s : s + m.target_kg), 0);
-    const conTarget = mesi.some(m => m.target_kg !== null);
+    // LO SCARTO DELL'ANNO CONFRONTA COSE CONFRONTABILI. Il target dell'anno e' la
+    // somma dei soli mesi che un target ce l'hanno, quindi anche i chili devono
+    // essere quelli di QUEI mesi: sommando tutti e dodici, un raccoglitore con il
+    // target scritto solo da gennaio a giugno risultava al 200% pur avendo fatto
+    // esattamente il suo, e nessuna cella spiegava quel numero. Lo stesso valeva per
+    // un mese segnato "non raccoglie" in cui pero' si e' raccolto.
+    const mesiConTarget = mesi.filter(m => m.target_kg !== null);
+    const haTarget = mesiConTarget.length > 0;
+    const targetAnno = mesiConTarget.reduce((s, m) => s + m.target_kg, 0);
+    const kgConTarget = mesiConTarget.reduce((s, m) => s + m.kg, 0);
     return {
       chiave: racc.chiave,
       nome: racc.nome,
       mesi,
       kg: racc.kg,
       ritiri: racc.ritiri,
-      target_anno_kg: conTarget ? targetAnno : null,
-      scarto_anno_kg: conTarget ? racc.kg - targetAnno : null,
-      copertura_anno: conTarget && targetAnno ? Math.round((racc.kg / targetAnno) * 1000) / 10 : null,
+      target_anno_kg: haTarget ? targetAnno : null,
+      // I mesi su cui il confronto si regge: se non sono dodici va detto, perche'
+      // "scarto dell'anno" e "scarto dei mesi con un target" sono due cose diverse.
+      mesi_con_target: mesiConTarget.length,
+      kg_nei_mesi_con_target: haTarget ? kgConTarget : null,
+      scarto_anno_kg: haTarget ? kgConTarget - targetAnno : null,
+      copertura_anno: haTarget && targetAnno ? Math.round((kgConTarget / targetAnno) * 1000) / 10 : null,
       province,
       zona_dichiarata: dichiarata,
       zona_province: zona ? zona.province : [],
@@ -167,6 +194,10 @@ export function andamentoRaccoglitori(primarieRete, {
     // non puo' dire niente sul fuori zona, e va detto invece di tacere.
     con_zona: righe.filter(r => r.zona_dichiarata).length,
     senza_zona: righe.filter(r => !r.zona_dichiarata).map(r => r.nome),
+    // I terminati senza fine trasporto: fuori dal conto (regola 1), contati e detti.
+    senza_data: senzaData.length,
+    senza_data_kg: senzaData.reduce((s, r) => s + kg(r.peso_effettivo), 0),
+    senza_data_ordini: senzaData.slice(0, 15).map(r => pulisci(r.id_ordine) || pulisci(r.numero_fir)).filter(Boolean),
   };
 }
 

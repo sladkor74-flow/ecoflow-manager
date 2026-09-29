@@ -214,14 +214,20 @@ export function cruscotto(dati) {
   // sulla fine trasporto e senza mai cancellare un ritiro gia' rilevato. Qui non
   // si rifa': vorrebbe dire rileggere le primarie, e il cruscotto legge solo
   // archivi piccoli.
-  let ectScadute = 0, ectDaConfermare = 0;
+  // Dal 29/09/2026 una richiesta i cui ordini risultano tutti terminati si chiude
+  // DA SOLA. La voce che diceva "aspettano la tua spunta" non spariva pero' senza
+  // perdere una cosa vera: a quelle richieste bisogna ancora RISPONDERE al
+  // consorzio, che scrive per email. Cambia il significato della spunta - non piu'
+  // "ho verificato" ma "ho risposto" - e la voce resta.
+  let ectScadute = 0, ectDaRispondere = 0;
   for (const r of dati.richiesteEct || []) {
     const esito = r.esito || statoRichiesta(r);
-    if (esito === 'da_confermare') ectDaConfermare++;
+    // 'da_confermare' resta per le richieste salvate prima di quella data.
+    if (esito === 'da_confermare' || (esito === 'evasa' && !r.evasione_confermata)) ectDaRispondere++;
     else if (esito === 'aperta' && r.scadenza && String(r.scadenza).slice(0, 10) < oggi) ectScadute++;
   }
   if (ectScadute) voce('Richieste ECT', 'critico', `${ectScadute} richieste del consorzio oltre il termine`, 'Ritiri chiesti per email da Ecotyre e non ancora evasi alla data indicata.', '/todo');
-  if (ectDaConfermare) voce('Richieste ECT', 'info', `${ectDaConfermare} richieste risultano ritirate e aspettano la tua spunta`, '', '/todo');
+  if (ectDaRispondere) voce('Richieste ECT', 'info', `${ectDaRispondere} richieste si sono chiuse da sole e aspettano la risposta al consorzio`, 'Gli ordini risultano tutti ritirati: la richiesta e\' evasa, resta da rispondere alla mail e spuntarla.', '/todo');
 
   voci.sort((a, b) => GRAVITA[a.gravita] - GRAVITA[b.gravita] || a.area.localeCompare(b.area, 'it'));
   return { oggi, anno: Number(anno), da_gestire: voci, alert, caricamenti, arretrato, mesi_attiva: mesiAttiva };

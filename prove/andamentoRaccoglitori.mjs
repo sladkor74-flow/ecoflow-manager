@@ -80,6 +80,46 @@ verifica('il target dell\'anno e\' la somma dei mesi che ne hanno uno',
   conTarget.righe[0].target_anno_kg === 10000 && conTarget.righe[0].scarto_anno_kg === -2000, J([conTarget.righe[0].target_anno_kg, conTarget.righe[0].scarto_anno_kg]));
 verifica('senza nessun target l\'anno non ha uno scarto', a.righe[0].target_anno_kg === null && a.righe[0].scarto_anno_kg === null);
 
+console.log('LO SCARTO DELL\'ANNO CONFRONTA COSE CONFRONTABILI');
+// Il difetto trovato in revisione: il target dell'anno somma i soli mesi che ne
+// hanno uno, ma i chili erano quelli di tutti e dodici. Un raccoglitore col target
+// scritto solo da gennaio a giugno, che lo rispetta ogni mese, risultava al 200%.
+const dodiciMesi = [];
+for (let m = 1; m <= 12; m++) dodiciMesi.push(rit('ET' + m, { trasporto_finito_il: g(`2026-${String(m).padStart(2, '0')}-10`), peso_effettivo: 10000 }));
+const mezzoAnno = andamentoRaccoglitori(dodiciMesi, { anno: 2026, targetPerMese: (_c, i) => (i < 6 ? 10000 : null) });
+const rm = mezzoAnno.righe[0];
+verifica('i chili dell\'anno restano tutti', rm.kg === 120000, String(rm.kg));
+verifica('ma lo scarto confronta i soli mesi che un target ce l\'hanno: 60.000 contro 60.000',
+  rm.target_anno_kg === 60000 && rm.kg_nei_mesi_con_target === 60000 && rm.scarto_anno_kg === 0, J([rm.target_anno_kg, rm.kg_nei_mesi_con_target, rm.scarto_anno_kg]));
+verifica('e la copertura e\' 100%, non 200%', rm.copertura_anno === 100, String(rm.copertura_anno));
+verifica('e si dice su quanti mesi si regge il confronto', rm.mesi_con_target === 6, String(rm.mesi_con_target));
+// Un mese "non raccoglie" in cui pero' si e' raccolto: la cella e' neutra, e anche
+// l'anno non deve dichiarare uno scarto che nessuna cella spiega.
+const nonRaccoglie = andamentoRaccoglitori(dodiciMesi, { anno: 2026, targetPerMese: (_c, i) => (i === 7 ? null : 10000) });
+verifica('un mese senza target non gonfia lo scarto dell\'anno',
+  nonRaccoglie.righe[0].scarto_anno_kg === 0 && nonRaccoglie.righe[0].mesi_con_target === 11, J([nonRaccoglie.righe[0].scarto_anno_kg, nonRaccoglie.righe[0].mesi_con_target]));
+
+console.log('CHI HA UN TARGET COMPARE ANCHE SE NON HA RACCOLTO NIENTE');
+// In un modulo che serve a vedere chi rispetta il target, chi e' fermo a zero era
+// l'unico a sparire: le righe nascevano solo scorrendo i movimenti.
+const conFermo = andamentoRaccoglitori([rit('ET1', { peso_effettivo: 5000 })], {
+  anno: 2026,
+  conTarget: [{ nome: 'C.L. SERVICE S.R.L.' }, { nome: 'EMMESSE SRL' }],
+  targetPerMese: (_c, i, nome) => (i === 1 && nome === 'EMMESSE SRL' ? 80000 : null),
+});
+const fermo = conFermo.righe.find(r => r.nome === 'EMMESSE SRL');
+verifica('chi ha un target e zero chili c\'e\'', !!fermo && fermo.kg === 0, J(conFermo.righe.map(r => [r.nome, r.kg])));
+verifica('e il suo scarto lo dice tutto', fermo && fermo.scarto_anno_kg === -80000, J(fermo && fermo.scarto_anno_kg));
+
+console.log('I TERMINATI SENZA FINE TRASPORTO SI DICONO');
+const conSenzaData = andamentoRaccoglitori([
+  rit('ET1', { peso_effettivo: 5000 }),
+  rit('ET9', { trasporto_finito_il: null, peso_effettivo: 4000 }),
+], { anno: 2026 });
+verifica('non entrano nel conto', conSenzaData.totale_kg === 5000, String(conSenzaData.totale_kg));
+verifica('ma si contano e si nominano', conSenzaData.senza_data === 1 && conSenzaData.senza_data_kg === 4000
+  && conSenzaData.senza_data_ordini.includes('ET9'), J([conSenzaData.senza_data, conSenzaData.senza_data_ordini]));
+
 console.log('LE ZONE: DICHIARATE, NON DEDOTTE');
 const movimenti = [
   rit('ET1', { provincia: 'SA', peso_effettivo: 10000 }),

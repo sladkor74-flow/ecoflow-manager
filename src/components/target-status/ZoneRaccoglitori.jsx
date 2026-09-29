@@ -3,6 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Loader2, Save, Trash2, MapPin, Lightbulb, AlertTriangle } from 'lucide-react';
 import { formatKg } from '@/lib/utils';
+import { chiaveNome } from '@/lib/target';
 
 // LE ZONE DI COMPETENZA DEI RACCOGLITORI, anno per anno.
 //
@@ -51,7 +52,22 @@ export default function ZoneRaccoglitori({ isAdmin }) {
 
   useEffect(() => { carica(); }, [carica]);
 
-  const zonaDi = (nome) => zone.find(z => (z.raccoglitore || '').trim().toLowerCase() === (nome || '').trim().toLowerCase()) || null;
+  // LA STESSA CHIAVE DEL MOTORE. Confrontare i nomi con un toLowerCase mentre il
+  // motore li normalizza con normalizzaRagioneSociale voleva dire che la pagina ne
+  // vedeva una e il modulo ne univa due: premendo il cestino l'admin credeva di
+  // aver tolto la zona, e Verifiche Fornitori continuava a giudicare con la riga
+  // superstite, marcando come fuori zona dei chili che fuori zona non erano.
+  const righeZonaDi = (nome) => {
+    const k = chiaveNome(nome);
+    return k ? zone.filter(z => chiaveNome(z.raccoglitore) === k) : [];
+  };
+  const zonaDi = (nome) => righeZonaDi(nome)[0] || null;
+  // Le province che il modulo applica davvero: l'unione di tutte le righe, come fa
+  // zonePerRaccoglitore. Se le righe sono piu' di una, la casella lo deve dire.
+  // Il testo grezzo di tutte le righe, unito: a interpretarlo resta il motore
+  // (provinceDiZona), cosi' la regola di che cosa e' una provincia non ha una
+  // seconda copia qui che puo' scostarsi.
+  const provinceApplicate = (nome) => righeZonaDi(nome).map(z => String(z.province || '').trim()).filter(Boolean).join(', ');
   const propostaDi = (nome) => (dati && dati.proposte || []).find(p => p.raccoglitore === nome) || null;
 
   const salva = async (riga, province, proposta = false) => {
@@ -59,10 +75,15 @@ export default function ZoneRaccoglitori({ isAdmin }) {
     setSalvando(riga.nome);
     setErrore('');
     try {
-      const esistente = zonaDi(riga.nome);
+      const esistenti = righeZonaDi(riga.nome);
       const campi = { raccoglitore: riga.nome, anno, province, proposta };
-      if (esistente) await base44.entities.ZonaRaccoglitore.update(esistente.id, campi);
-      else await base44.entities.ZonaRaccoglitore.create(campi);
+      if (esistenti.length) {
+        await base44.entities.ZonaRaccoglitore.update(esistenti[0].id, campi);
+        // Le righe in piu' dello stesso raccoglitore si tolgono: il motore le
+        // unirebbe, e quello che si legge nella casella non sarebbe quello che il
+        // modulo applica.
+        for (const z of esistenti.slice(1)) await base44.entities.ZonaRaccoglitore.delete(z.id);
+      } else await base44.entities.ZonaRaccoglitore.create(campi);
       await carica();
     } catch (e) {
       setErrore(e && e.message ? e.message : String(e));
@@ -72,11 +93,13 @@ export default function ZoneRaccoglitori({ isAdmin }) {
   };
 
   const cancella = async (riga) => {
-    const esistente = zonaDi(riga.nome);
-    if (!isAdmin || !esistente) return;
+    const esistenti = righeZonaDi(riga.nome);
+    if (!isAdmin || !esistenti.length) return;
     setSalvando(riga.nome);
     try {
-      await base44.entities.ZonaRaccoglitore.delete(esistente.id);
+      // TUTTE le righe di quel raccoglitore: cancellandone una sola, il modulo
+      // continuava a giudicarlo con quella rimasta.
+      for (const z of esistenti) await base44.entities.ZonaRaccoglitore.delete(z.id);
       await carica();
     } catch (e) {
       setErrore(e && e.message ? e.message : String(e));
@@ -130,7 +153,12 @@ export default function ZoneRaccoglitori({ isAdmin }) {
               <tbody>
                 {righe.map(r => {
                   const z = zonaDi(r.nome);
-                  const valore = bozze[r.nome] !== undefined ? bozze[r.nome] : (z ? z.province || '' : '');
+                  // Quello che si legge nella casella e' quello che il modulo
+                  // APPLICA: con due righe per lo stesso raccoglitore, mostrarne una
+                  // sola faceva credere che la zona fosse meta' di quella vera.
+                  const applicate = provinceApplicate(r.nome);
+                  const altreRighe = righeZonaDi(r.nome).length;
+                  const valore = bozze[r.nome] !== undefined ? bozze[r.nome] : applicate;
                   const proposta = propostaDi(r.nome);
                   const inCorso = salvando === r.nome;
                   return (
@@ -154,6 +182,9 @@ export default function ZoneRaccoglitori({ isAdmin }) {
                           placeholder={isAdmin ? 'SA, NA, CE' : 'non scritta'}
                           className="border rounded px-2 py-1 text-sm font-mono w-48 disabled:bg-muted/40"
                         />
+                        {altreRighe > 1 && (
+                          <span className="block text-[11px] text-amber-800 mt-0.5">Questo raccoglitore ha {altreRighe} righe di zona: il modulo le unisce, e salvando qui restera' una riga sola.</span>
+                        )}
                         {z && z.proposta && (
                           <span className="block text-[11px] text-amber-800 mt-0.5">proposta dal gestionale, da confermare</span>
                         )}

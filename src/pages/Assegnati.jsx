@@ -17,7 +17,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
   const [loading, setLoading] = useState(true);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [filters, setFilters] = useState({ anno: [], mese: [], regione: [], provincia: [], partner_operativo: [], classe: [], stato: [], data: '', ragione_sociale: '' });
+  const [filters, setFilters] = useState({ anno: [], mese: [], regione: [], provincia: [], partner_operativo: [], trasportatore: [], classe: [], stato: [], data: '', ragione_sociale: '' });
   const [ragioneSocialeInput, setRagioneSocialeInput] = useState('');
   const [viewMode, setViewMode] = useState('matrix');
   const [cercaId, setCercaId] = useState('');
@@ -67,6 +67,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
     if (filters.regione.length > 0 && !filters.regione.includes(r.regione)) return false;
     if (filters.provincia.length > 0 && !filters.provincia.includes((r.provincia || '').toUpperCase().trim())) return false;
     if (filters.partner_operativo.length > 0 && !filters.partner_operativo.includes((r.partner_operativo || '').trim())) return false;
+    if (filters.trasportatore.length > 0 && !filters.trasportatore.includes((r.trasportatore || '').trim())) return false;
     if (filters.classe.length > 0 && !filters.classe.includes(r.classe)) return false;
     if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
     if (filters.data) {
@@ -138,7 +139,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
 
   const hasFilters = Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
   const hasFiltriCoda = Object.entries(filters).some(([k, v]) => k !== 'ragione_sociale' && (Array.isArray(v) ? v.length > 0 : v));
-  const resetFilters = () => { setFilters({ anno: [], mese: [], regione: [], provincia: [], partner_operativo: [], classe: [], stato: [], data: '', ragione_sociale: '' }); setRagioneSocialeInput(''); };
+  const resetFilters = () => { setFilters({ anno: [], mese: [], regione: [], provincia: [], partner_operativo: [], trasportatore: [], classe: [], stato: [], data: '', ragione_sociale: '' }); setRagioneSocialeInput(''); };
   const opts = data?.filterOptions || {};
 
   return (
@@ -178,7 +179,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
               <div className="col-span-full flex gap-2">
                 <input
                   type="text"
@@ -197,6 +198,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
               <MultiSelect allLabel="Tutte le regioni" options={opts.regioni || []} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
               <MultiSelect allLabel="Tutte le province" options={opts.province || []} selected={filters.provincia} onChange={v => setFilters(p => ({ ...p, provincia: v }))} />
               <MultiSelect allLabel="Tutti i partner" options={opts.partner || []} selected={filters.partner_operativo} onChange={v => setFilters(p => ({ ...p, partner_operativo: v }))} />
+              <MultiSelect allLabel="Tutti i trasportatori" options={opts.trasportatori || []} selected={filters.trasportatore} onChange={v => setFilters(p => ({ ...p, trasportatore: v }))} />
               <MultiSelect allLabel="Tutte le classi" options={opts.classi || []} selected={filters.classe} onChange={v => setFilters(p => ({ ...p, classe: v }))} />
             </div>
           </div>

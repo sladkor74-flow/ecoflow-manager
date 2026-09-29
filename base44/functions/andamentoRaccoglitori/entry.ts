@@ -47,10 +47,24 @@ export default async function(req) {
       if (k && !nomi.has(k)) nomi.set(k, f.ragione_sociale);
     }
 
+    // CHI HA UN TARGET DEVE COMPARIRE anche se non ha raccolto niente: in un modulo
+    // che serve a vedere chi sta rispettando il target, chi e' fermo a zero e'
+    // l'unico che non deve sparire.
+    const conTargetScritto = [...new Set((targetMensili || []).map(t => String(t.raccoglitore || '').trim()).filter(Boolean))]
+      .map(nome => ({ nome }));
+
+    // Un target scritto con un nome ABBREVIATO si riconosce per contenuto, e puo'
+    // quindi valere per piu' soggetti del portale: allora lo stesso target
+    // risulterebbe assegnato per intero a ciascuno, e la somma dei target mostrati
+    // sarebbe il doppio di quelli scritti. Si tiene il conto di chi consuma quale
+    // record, e quelli consumati piu' di una volta si dicono.
+    const consumiPerRecord = new Map();
+
     const conTarget = andamentoRaccoglitori(primarieRete, {
       anno,
       zone: zoneTutte,
       nomi,
+      conTarget: conTargetScritto,
       // Il target di Target & Status e' scritto col nome del raccoglitore, spesso
       // abbreviato: targetRaccoglitoreMese lo riconosce per contenuto, quindi
       // serve il nome e non la chiave normalizzata. Un raccoglitore segnato
@@ -58,10 +72,22 @@ export default async function(req) {
       // risulterebbe inadempiente per un mese in cui non doveva raccogliere.
       targetPerMese: (_chiave, meseIdx, nome) => {
         if (!nome) return null;
-        const t = targetRaccoglitoreMese(targetMensili, nome, MESI_MOVIMENTI[meseIdx]);
-        return t && !t.non_raccoglie ? t.target_kg : null;
+        const mese = MESI_MOVIMENTI[meseIdx];
+        const t = targetRaccoglitoreMese(targetMensili, nome, mese);
+        if (!t || t.non_raccoglie) return null;
+        for (const r of t.regioni || []) {
+          const k = `${normalizzaRagioneSociale(nome)}|${r.regione}|${mese}`;
+          const chiaveRecord = `${r.regione}|${mese}|${r.target_t}`;
+          if (!consumiPerRecord.has(chiaveRecord)) consumiPerRecord.set(chiaveRecord, new Set());
+          consumiPerRecord.get(chiaveRecord).add(k.split('|')[0]);
+        }
+        return t.target_kg;
       },
     });
+
+    const targetAmbigui = [...consumiPerRecord.entries()]
+      .filter(([, chi]) => chi.size > 1)
+      .map(([record, chi]) => ({ record, raccoglitori: [...chi] }));
 
     return Response.json({
       andamento: conTarget,
@@ -71,6 +97,9 @@ export default async function(req) {
       // raccolto fuori zona», che e' proprio la cosa che serve.
       proposte: conTarget.righe.filter(r => !r.zona_dichiarata).map(r => proponiZona(r)),
       zone_scritte: zoneTutte.filter(z => Number(z.anno) === anno).length,
+      // Lo stesso target valso per piu' soggetti: i numeri di quelle righe non sono
+      // affidabili, e tacerlo li farebbe leggere come buoni.
+      target_ambigui: targetAmbigui,
     });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });

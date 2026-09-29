@@ -179,15 +179,57 @@ export function riconosciOrdine(richiesta, ordini) {
 }
 
 /**
- * Stato della richiesta. L'evasione trovata fra i terminati non chiude la
- * richiesta: la propone, perche' la spunta la mette l'utente, che poi risponde
- * alla mail del consorzio.
+ * Stato della richiesta.
+ *
+ * L'EVASIONE SI CHIUDE DA SOLA quando tutti gli ordini della richiesta risultano
+ * terminati (richiesta dell'utente, 29/09/2026: «rendi anche la sezione richieste
+ * ECT automatica in base all'evasione degli ordini indicati, cosi' come fatto nella
+ * sezione attivita'»). Prima si fermava a "da spuntare" e aspettava una conferma a
+ * mano: una richiesta ritirata restava aperta finche' qualcuno non se ne accorgeva.
+ *
+ * Come per le attivita' della to-do list, resta scritto CHE COSA l'ha chiusa: una
+ * richiesta chiusa dal gestionale si distingue sempre da una spuntata a mano
+ * (evasione_confermata), e chi la riapre a mano - togliendo la data rilevata o
+ * annullandola - non se la vede richiudere.
+ *
+ * Una richiesta ANNULLATA resta annullata: quel ritiro non si fara', e un ordine
+ * terminato per caso su un altro conto non la riapre.
  */
 export function statoRichiesta(r) {
   if (r.motivo_annullamento) return 'annullata';
   if (r.evasione_confermata) return 'evasa';
-  if (r.evaso_il || r.evasione_rilevata_il) return 'da_confermare';
+  // La data di evasione viene dal foglio del consorzio o dai nostri terminati: in
+  // tutti e due i casi il ritiro c'e' stato, e la richiesta e' evasa.
+  if (r.evaso_il || r.evasione_rilevata_il) return 'evasa';
   return 'aperta';
+}
+
+/**
+ * A CHE PUNTO SONO GLI ORDINI di una richiesta, uno per uno: quali sono ancora
+ * assegnati e quali terminati (richiesta dell'utente, 29/09/2026). Con piu' ordini
+ * sulla stessa richiesta e' l'unico modo di sapere che cosa manca: "2 su 3" dice
+ * quanti, non quali.
+ *
+ * Gli stati sono quelli del portale, piu' il limbo "eseguito" (dati inseriti ma
+ * Chiudi non premuto) che va sempre segnalato, e "senza data" per un terminato a
+ * cui manca la fine trasporto - che non conta come ritirato (regola 1) ma c'e'.
+ */
+export function statoOrdiniRichiesta(ids, stato) {
+  const { terminati, senzaFine, cancellati, eseguiti, presenti } = stato || {};
+  return (ids || []).map(id => {
+    if (terminati && terminati.has(id)) return { id_ordine: id, stato: 'terminato', giorno: terminati.get(id) };
+    if (cancellati && cancellati.has(id)) return { id_ordine: id, stato: 'cancellato', motivo: cancellati.get(id) || '' };
+    if (eseguiti && eseguiti.has(id)) return { id_ordine: id, stato: 'eseguito', giorno: '' };
+    if (senzaFine && senzaFine.has(id)) return { id_ordine: id, stato: 'senza_data', giorno: '' };
+    if (presenti && presenti.has(id)) return { id_ordine: id, stato: 'assegnato', giorno: '' };
+    return { id_ordine: id, stato: 'sconosciuto', giorno: '' };
+  });
+}
+
+/** "2 ordini su 3 ritirati": a che punto e' una richiesta con piu' ordini. */
+export function testoAvanzamentoRichiesta(evasi, totali) {
+  if (!totali || totali < 2) return '';
+  return `${evasi} ${evasi === 1 ? 'ordine' : 'ordini'} su ${totali} ${evasi === 1 ? 'ritirato' : 'ritirati'}`;
 }
 
 /**

@@ -81,10 +81,14 @@
       "format": "date",
       "description": "Data di fine trasporto trovata fra i terminati: e la proposta di evasione da confermare"
     },
+    "ordini_stato_json": {
+      "type": "string",
+      "description": "A che punto sono i suoi ordini, uno per uno: [{ id_ordine, stato, giorno }] con stato terminato, eseguito, cancellato, assegnato, senza_data o sconosciuto. Con piu ordini sulla stessa richiesta serve a sapere QUALI mancano, non solo quanti"
+    },
     "evasione_confermata": {
       "type": "boolean",
       "default": false,
-      "description": "Vero quando l evasione e stata controllata e spuntata: da quel momento si puo rispondere alla mail del consorzio"
+      "description": "Vero quando l evasione e stata spuntata A MANO. Dal 29/09/2026 una richiesta i cui ordini risultano tutti terminati si chiude DA SOLA (esito evasa) senza aspettare la spunta: questo campo distingue le due cose, come chiusa_dal_gestionale per le attivita della to-do list"
     },
     "evasione_confermata_il": {
       "type": "string",

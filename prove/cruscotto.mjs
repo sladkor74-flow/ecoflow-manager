@@ -83,7 +83,19 @@ verifica('prefattura chiesta solo per febbraio e giugno, non per aprile e maggio
 const rEct = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: [], alertAperti: [], uploadLogs: [], assegnatiRete: [], assegnatiAci: [], documenti: MESI8(), prefatture: MESI8().map(d => ({ anno: 2026, mese: d.mese })), riepilogoQualifica: null,
   richiesteEct: [{ esito: 'da_confermare', scadenza: '2026-09-11', evasione_rilevata_il: '2026-09-10' }, { scadenza: '2026-09-11' }, { scadenza: '2026-09-11', evaso_il: '2026-09-09' }] });
 const vEct = rEct.da_gestire.filter(v => v.area === 'Richieste ECT');
-verifica('ECT: ritirata e da spuntare non e\' oltre il termine; senza esito salvato lo si ricava dai campi', vEct.length === 2 && vEct.some(v => v.gravita === 'critico' && v.titolo.startsWith('1 ')) && vEct.some(v => v.gravita === 'info' && v.titolo.startsWith('2 ')), vEct.map(v => v.titolo).join(' | '));
+// Dal 29/09/2026 una richiesta coi suoi ordini tutti terminati si chiude da sola:
+// la voce non dice piu' "aspettano la tua spunta" ma "aspettano la risposta al
+// consorzio", che e' la cosa che resta davvero da fare. Le tre righe qui sopra: una
+// vecchia 'da_confermare', una aperta e scaduta, una con la data di evasione dal
+// foglio del consorzio (che adesso vale evasa).
+verifica('ECT: chi e\' stato ritirato non e\' oltre il termine, e resta da rispondere al consorzio',
+  vEct.length === 2 && vEct.some(v => v.gravita === 'critico' && v.titolo.startsWith('1 '))
+  && vEct.some(v => v.gravita === 'info' && v.titolo.startsWith('2 ') && /risposta al consorzio/.test(v.titolo)),
+  vEct.map(v => v.titolo).join(' | '));
+// Una richiesta gia' spuntata non torna a chiedere una risposta.
+const rEctSpuntata = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: [], alertAperti: [], uploadLogs: [], assegnatiRete: [], assegnatiAci: [], documenti: MESI8(), prefatture: MESI8().map(d => ({ anno: 2026, mese: d.mese })), riepilogoQualifica: null,
+  richiesteEct: [{ esito: 'evasa', evasione_rilevata_il: '2026-09-10', evasione_confermata: true }] });
+verifica('e una gia\' spuntata non chiede piu\' niente', rEctSpuntata.da_gestire.filter(v => v.area === 'Richieste ECT').length === 0);
 
 verifica('i codici delle regole si leggono come parole, le sigle restano maiuscole', nomeRegola('REGOLA_RITARDO_SLA') === 'Ritardo SLA' && nomeRegola('REGOLA_MIX_CLASSI_CONSORZIALE') === 'Mix classi consorziale' && nomeRegola('Conferimento fuori rotta') === 'Conferimento fuori rotta');
 

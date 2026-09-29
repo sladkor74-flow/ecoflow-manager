@@ -7,7 +7,8 @@ import { ARCHIVI_PRIMARIE, DATE_PRIMARIE, archivioPrimaria, dataPrimaria, record
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 import { fetchAll, RIGHE_PER_PAGINA, ultimaPagina } from "../../shared/fetchAll.ts";
 import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
-import { evasioneOrdini, listaOrdini, statoRichiesta, riconosciOrdine, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare } from "../../shared/richiesteEct.ts";
+import { evasioneOrdini, listaOrdini, statoRichiesta, riconosciOrdine, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare, statoOrdiniRichiesta } from "../../shared/richiesteEct.ts";
+import { statoOrdini } from "../../shared/todoOrdini.ts";
 import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { statoCaricamenti, dataItaliana } from "../../shared/reportSettimanali.ts";
 import { annoDelloStorico, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from "../../shared/storicoConservato.ts";
@@ -484,6 +485,10 @@ async function riconosciRitiriEct(base44) {
   ]);
   const ordini = [...assRete, ...assAci, ...rete, ...aci];
   const { terminati, senzaFine, daSistemare } = ritiriTerminati([...rete, ...aci]);
+  // Lo stato di ogni ordine - terminato, eseguito, cancellato, assegnato - con la
+  // stessa funzione che usa la to-do list: due moduli non possono dire due cose
+  // diverse sullo stesso ordine.
+  const statoTuttiGliOrdini = statoOrdini([...rete, ...aci], [...assRete, ...assAci]);
   const presenti = new Set(ordini.map(o => String(o.id_ordine || '').trim()).filter(Boolean));
 
   let aggiornate = 0;
@@ -499,12 +504,16 @@ async function riconosciRitiriEct(base44) {
     campi.ordini_evasi = ev.evasi;
     campi.evasione_rilevata_il = dataRitiro(r.evasione_rilevata_il, ids, ev, terminati, presenti);
     campi.esito = statoRichiesta({ ...r, ...campi });
+    // A che punto sono i suoi ordini, uno per uno: con piu' ordini sulla stessa
+    // richiesta, '2 su 3' dice quanti e non quali.
+    campi.ordini_stato_json = JSON.stringify(statoOrdiniRichiesta(ids, statoTuttiGliOrdini));
     const senzaData = ids.filter(id => senzaFine.has(id));
     if (campi.esito === 'aperta' && senzaData.length) terminatiSenzaFine.push({ pdr: r.pdr_nome, id_ordine: senzaData.join(', ') });
     conDate.push(...ordiniConDateDaSistemare(r.pdr_nome, ids, terminati, daSistemare));
     if (!Object.keys(campi).some(k => String(r[k] ?? '') !== String(campi[k] ?? ''))) continue;
     // chi diventa "ritirata, da spuntare" adesso va detto: e' la riga su cui rispondere al consorzio
-    if (campi.esito === 'da_confermare' && r.esito !== 'da_confermare') daConfermare.push({ pdr: r.pdr_nome, id_ordine: ids.join(', '), evasa_il: campi.evasione_rilevata_il });
+    // Chi si e' chiusa da sola adesso va detta: e' la riga su cui rispondere al consorzio.
+    if (campi.esito === 'evasa' && r.esito !== 'evasa') daConfermare.push({ pdr: r.pdr_nome, id_ordine: ids.join(', '), evasa_il: campi.evasione_rilevata_il });
     await svc.RichiestaEct.update(r.id, campi);
     aggiornate++;
   }

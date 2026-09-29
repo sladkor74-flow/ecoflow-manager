@@ -32,6 +32,17 @@ import {
 
 const nomeMeseDi = (mese) => Object.keys(MESI_PASSIVA).find(k => MESI_PASSIVA[k] === mese - 1 && k.length > 3) || String(mese);
 
+/** I soli archivi dei movimenti: bastano a confrontare le quantita'. */
+async function archiviMovimenti(svc) {
+  const [primarieRete, primarieAci, secondarie, extraRaccolta] = await Promise.all([
+    fetchAll(svc.PrimariaRete),
+    fetchAll(svc.PrimariaAci),
+    fetchAll(svc.Secondaria),
+    fetchAll(svc.ExtraRaccolta),
+  ]);
+  return { primarieRete, primarieAci, secondarie, extraRaccolta };
+}
+
 async function contoPassiva(svc, anno, mese, canale) {
   const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll] = await Promise.all([
     fetchAll(svc.PrimariaRete),
@@ -98,12 +109,22 @@ export default async function(req) {
     }
     if (!righe) return Response.json({ error: 'Non ci sono righe da confrontare: carica il consuntivo.' }, { status: 400 });
 
-    const { passiva, archivi } = await contoPassiva(svc, anno, mese, canale);
+    // I COSTI SONO RISERVATI ALL'AMMINISTRATORE, come tutta la fatturazione passiva
+    // (calcolaPassiva risponde 403 a chi non lo e'). A chi non lo e' si mostra il
+    // confronto sulle QUANTITA', che e' un controllo sui dati e non un dato
+    // riservato, e non si calcola nemmeno la passiva: sarebbero sei archivi interi
+    // letti per un numero che poi va nascosto.
+    const puoVedereICosti = user.role === 'admin';
+    const { passiva, archivi } = puoVedereICosti
+      ? await contoPassiva(svc, anno, mese, canale)
+      : { passiva: null, archivi: await archiviMovimenti(svc) };
     const movimenti = movimentiDelFornitore(archivi, { fornitore, ruolo, anno, mese, canale });
     // Un chilo di tolleranza: i pesi si scrivono interi, e un arrotondamento nel
     // foglio del fornitore non e' una difformita'.
     const confronto = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1 });
-    const costo = costoAttesoDallaPassiva(passiva, fornitore, ruolo);
+    const costo = puoVedereICosti
+      ? costoAttesoDallaPassiva(passiva, fornitore, ruolo)
+      : { trovato: false, riservato: true, motivo: "L'importo previsto viene dalla fatturazione passiva, che e' riservata all'amministratore. Il confronto sulle quantita' - formulari e chili - lo vedi per intero." };
     const importoConsuntivo = body.importo_consuntivo !== undefined && body.importo_consuntivo !== null
       ? Number(body.importo_consuntivo)
       : (record && record.importo_consuntivo !== undefined && record.importo_consuntivo !== null ? Number(record.importo_consuntivo) : null);
@@ -111,8 +132,9 @@ export default async function(req) {
 
     // Il conto congelato di quel mese, se c'e': si dice anche se il ricalcolo di
     // oggi si e' mosso, altrimenti congelare nasconderebbe i movimenti arrivati dopo.
+    // Anche il conto congelato contiene importi: si legge solo per l'amministratore.
     let congelato = null;
-    const congelati = await svc.ChiusuraPassivaMese.filter({ anno, mese, canale }, '-congelato_il', 1);
+    const congelati = puoVedereICosti ? await svc.ChiusuraPassivaMese.filter({ anno, mese, canale }, '-congelato_il', 1) : [];
     if (congelati && congelati.length) {
       const c = congelati[0];
       let contoAllora = null;

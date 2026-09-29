@@ -111,6 +111,32 @@ export default function AndamentoRaccoglitori({ isAdmin }) {
         </div>
       )}
 
+      {/* I terminati senza fine trasporto non stanno in nessun mese (regola 1):
+          restano fuori dal conto, e vanno detti invece di sparire. */}
+      {a && a.senza_data > 0 && (
+        <div className="flex items-start gap-2 text-sm border border-amber-200 bg-amber-50 text-amber-900 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>
+            Restano fuori {a.senza_data} {a.senza_data === 1 ? 'ritiro terminato' : 'ritiri terminati'} senza la data di fine trasporto,
+            per {formatKg(a.senza_data_kg)} kg ({a.senza_data_ordini.join(', ')}{a.senza_data > a.senza_data_ordini.length ? ` e altri ${a.senza_data - a.senza_data_ordini.length}` : ''}):
+            senza quella data non stanno in nessun mese, e non si può dire di chi sia il raccolto.
+          </span>
+        </div>
+      )}
+
+      {/* Lo stesso target valso per più soggetti: quei numeri non sono affidabili. */}
+      {dati && dati.target_ambigui && dati.target_ambigui.length > 0 && (
+        <div className="flex items-start gap-2 text-sm border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>
+            {dati.target_ambigui.length === 1 ? 'Un target di Target & Status vale' : `${dati.target_ambigui.length} target di Target & Status valgono`} per
+            più di un raccoglitore, perché il nome scritto lì è un&apos;abbreviazione che ne abbraccia più di uno
+            ({dati.target_ambigui.slice(0, 3).map(t => t.raccoglitori.join(' e ')).join('; ')}). Il target risulta assegnato per intero a ciascuno:
+            <strong> quelle righe non sono affidabili</strong> finché il nome in Target &amp; Status non viene scritto per esteso.
+          </span>
+        </div>
+      )}
+
       {a && a.righe.length === 0 && !caricando && <p className="text-sm text-muted-foreground">Nessuna raccolta di rete nel {anno}.</p>}
 
       {a && a.righe.length > 0 && vista === 'raccoglitori' && (
@@ -133,8 +159,18 @@ export default function AndamentoRaccoglitori({ isAdmin }) {
                     <td className="px-2 py-1.5 font-medium whitespace-nowrap">{r.nome}</td>
                     {r.mesi.map((m, i) => <Cella key={i} m={m} />)}
                     <td className="px-2 py-1.5 text-right tabular-nums font-medium border-l">{formatKg(r.kg)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{r.target_anno_kg === null ? '—' : formatKg(r.target_anno_kg)}</td>
-                    <td className={`px-2 py-1.5 text-right tabular-nums ${r.scarto_anno_kg === null ? 'text-muted-foreground' : r.scarto_anno_kg >= 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground"
+                      title={r.target_anno_kg === null ? 'nessun target scritto per questo raccoglitore' : `somma dei ${r.mesi_con_target} mesi che hanno un target scritto`}>
+                      {r.target_anno_kg === null ? '—' : formatKg(r.target_anno_kg)}
+                      {r.target_anno_kg !== null && r.mesi_con_target < 12 && (
+                        <span className="block text-[10px]">su {r.mesi_con_target} {r.mesi_con_target === 1 ? 'mese' : 'mesi'}</span>
+                      )}
+                    </td>
+                    {/* Lo scarto confronta i chili DEI MESI CHE HANNO UN TARGET con
+                        quei target: sommare dodici mesi di chili contro sei mesi di
+                        target darebbe un numero che nessuna cella spiega. */}
+                    <td className={`px-2 py-1.5 text-right tabular-nums ${r.scarto_anno_kg === null ? 'text-muted-foreground' : r.scarto_anno_kg >= 0 ? 'text-emerald-700' : 'text-amber-700'}`}
+                      title={r.scarto_anno_kg === null ? '' : `${formatKg(r.kg_nei_mesi_con_target)} kg raccolti nei ${r.mesi_con_target} mesi con un target, contro ${formatKg(r.target_anno_kg)} kg di target`}>
                       {r.scarto_anno_kg === null ? '—' : `${r.scarto_anno_kg > 0 ? '+' : ''}${formatKg(r.scarto_anno_kg)}`}
                     </td>
                     <td className="px-2 py-1.5 text-xs">
@@ -164,7 +200,7 @@ export default function AndamentoRaccoglitori({ isAdmin }) {
           </div>
           <p className="px-3 py-2 text-xs text-muted-foreground border-t">
             {formatTonnellate(a.totale_kg / 1000)} t di rete nel {a.anno}, per fine trasporto. ACI ed extra raccolta hanno i loro conti e non si sommano qui.
-            Il colore di un mese confronta col target di Target &amp; Status: dove un target non c&apos;è, il numero resta neutro, perché uno scarto senza target sarebbe un giudizio inventato.
+            Il colore di un mese confronta col target di Target &amp; Status: dove un target non c&apos;è, il numero resta neutro, perché uno scarto senza target sarebbe un giudizio inventato. Lo scarto dell&apos;anno confronta i chili dei SOLI mesi che un target ce l&apos;hanno con quei target: passa col mouse sul numero per vedere su quanti mesi si regge.
             Una provincia in ambra è fuori dalla zona di competenza scritta.
           </p>
         </div>

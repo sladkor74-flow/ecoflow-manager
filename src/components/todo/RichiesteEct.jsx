@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Loader2, CheckSquare, Square, AlertTriangle, Mail, Search, Upload } from 'lucide-react';
-import { giorniAllaScadenza, statoRichiesta, listaOrdini, testoTerminatiSenzaFine, testoOrdiniDateDaSistemare } from '@/lib/richiesteEct';
+import { giorniAllaScadenza, statoRichiesta, listaOrdini, testoTerminatiSenzaFine, testoOrdiniDateDaSistemare, testoAvanzamentoRichiesta } from '@/lib/richiesteEct';
 
 // Richieste del consorzio arrivate via email: ci chiedono di anticipare certi
 // ritiri. L'ID ordine non sta nella richiesta e lo riconosce il gestionale fra
@@ -13,10 +13,45 @@ const gg = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : '
 
 const ESITI = {
   aperta: { nome: 'In attesa del ritiro', classe: 'bg-amber-50 text-amber-800 border-amber-200' },
+  // Resta per le richieste salvate prima del 29/09/2026, quando l'evasione si
+  // spuntava a mano: da allora una richiesta i cui ordini sono tutti terminati si
+  // chiude da sola.
   da_confermare: { nome: 'Ritiro fatto, da spuntare', classe: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
   evasa: { nome: 'Evasa', classe: 'bg-emerald-600 text-white border-emerald-700' },
   annullata: { nome: 'Annullata', classe: 'bg-slate-100 text-slate-700 border-slate-200' },
 };
+
+// Lo stato di ogni singolo ordine di una richiesta, com'e' stato rilevato
+// all'ultimo caricamento delle primarie.
+const STATO_ORDINE = {
+  terminato: { testo: 'ritirato', classe: 'bg-emerald-100 text-emerald-900' },
+  assegnato: { testo: 'da ritirare', classe: 'bg-amber-100 text-amber-900' },
+  eseguito: { testo: 'eseguito a portale, Chiudi non premuto', classe: 'bg-amber-100 text-amber-900' },
+  senza_data: { testo: 'terminato senza la data di fine trasporto', classe: 'bg-amber-100 text-amber-900' },
+  cancellato: { testo: 'cancellato', classe: 'bg-slate-200 text-slate-700' },
+  sconosciuto: { testo: 'non si trova fra gli ordini caricati', classe: 'bg-slate-100 text-slate-600' },
+};
+
+function DettaglioOrdini({ richiesta, ids }) {
+  let stati = [];
+  try { stati = richiesta.ordini_stato_json ? JSON.parse(richiesta.ordini_stato_json) : []; } catch { stati = []; }
+  if (!stati.length) return null;
+  const perId = new Map(stati.map(s => [s.id_ordine, s]));
+  return (
+    <span className="block mt-0.5">
+      {ids.map(id => {
+        const s = perId.get(id);
+        const d = STATO_ORDINE[s && s.stato] || STATO_ORDINE.sconosciuto;
+        return (
+          <span key={id} className={`inline-block mr-1 mb-0.5 px-1.5 py-0.5 rounded text-[10px] ${d.classe}`}
+            title={`${id}: ${d.testo}${s && s.giorno ? `, fine trasporto ${gg(s.giorno)}` : ''}${s && s.motivo ? ` (${s.motivo})` : ''}`}>
+            <span className="font-mono">{id}</span> · {s && s.stato === 'terminato' ? gg(s.giorno) : d.testo}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
 
 function Scadenza({ r }) {
   if (!r.scadenza) return <span className="text-muted-foreground">—</span>;
@@ -327,11 +362,16 @@ export default function RichiesteEct({ isAdmin }) {
                           {ids.length ? <span className="font-mono text-xs">{ids.join(', ')}</span> : <span className="text-amber-700 text-xs">da trovare</span>}
                         </button>
                       )}
+                      {/* Con piu' ordini sulla stessa richiesta, "2 su 3" dice
+                          quanti e non QUALI: qui si vede ordine per ordine chi e'
+                          ancora assegnato e chi e' stato ritirato (richiesta
+                          dell'utente, 29/09/2026). */}
                       {ids.length > 1 && (
                         <span className="block text-[11px] text-muted-foreground">
-                          {ids.length} ordini{r.ordini_evasi ? `, ${r.ordini_evasi} ritirat${r.ordini_evasi === 1 ? 'o' : 'i'}` : ''}
+                          {testoAvanzamentoRichiesta(r.ordini_evasi || 0, r.ordini_totali || ids.length) || `${ids.length} ordini`}
                         </span>
                       )}
+                      {ids.length > 1 && <DettaglioOrdini richiesta={r} ids={ids} />}
                       {r.id_ordine_stato === 'ambiguo' && !r.id_ordine_manuale && (
                         <span className="block text-[11px] text-amber-700">
                           più ordini possibili:{' '}
