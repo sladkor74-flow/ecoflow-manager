@@ -219,7 +219,7 @@ export default function Consuntivi({ isAdmin }) {
 
       {esito && c && (
         <div className="bg-card border rounded-lg overflow-hidden">
-          <div className={`px-3 py-2 text-sm font-semibold flex items-center justify-between gap-2 ${c.quadra && v.quadra_con_passiva !== false ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
+          <div className={`px-3 py-2 text-sm font-semibold flex items-center justify-between gap-2 ${v.quadra_tutto ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
             <span className="flex items-center gap-2">
               {c.quadra && v.quadra_con_passiva !== false ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
               {esito.testo}
@@ -244,12 +244,15 @@ export default function Consuntivi({ isAdmin }) {
             </div>
           </div>
 
+          {v.non_controllato && v.non_controllato.length > 0 && (
+            <p className="px-3 py-2 text-xs text-amber-900 bg-amber-50 border-b">Non si e&apos; potuto controllare: {v.non_controllato.join('; ')}. Un controllo mancato non e&apos; un controllo passato.</p>
+          )}
           {esito.costo && !esito.costo.trovato && (
             <p className="px-3 py-2 text-xs text-amber-900 bg-amber-50 border-b">{esito.costo.motivo}</p>
           )}
           {esito.congelato && (
             <p className="px-3 py-2 text-xs text-muted-foreground border-b">
-              Il conto della passiva di questo mese è stato congelato il {String(esito.congelato.congelato_il).slice(0, 10).split('-').reverse().join('/')}
+              Il confronto usa il conto della passiva <strong>congelato</strong> il {String(esito.congelato.congelato_il).slice(0, 10).split('-').reverse().join('/')}
               {esito.congelato.congelato_da ? ` da ${esito.congelato.congelato_da}` : ''}: allora erano {esito.congelato.importo_allora === null ? '—' : `${esito.congelato.importo_allora} €`},
               ricalcolandolo oggi sono {esito.congelato.importo_oggi === null ? '—' : `${esito.congelato.importo_oggi} €`}.
               {esito.congelato.cambiato ? ' Si è mosso: prima di pagare va capito perché — di solito sono ordini chiusi dopo la chiusura del mese.' : ' Non si è mosso.'}
@@ -281,8 +284,10 @@ export default function Consuntivi({ isAdmin }) {
           </div>
           <p className="px-3 py-2 text-xs text-muted-foreground border-t">
             È un report del fornitore, non una fattura: non c&apos;è IVA e non c&apos;è imponibile. Dal conto della fatturazione passiva restano
-            fuori <strong>per costruzione</strong> le terziarie, gli oneri fissi dell&apos;extra raccolta e il trasporto delle secondarie di extra
-            raccolta: una differenza su quelle voci non è una difformità.
+            fuori <strong>per costruzione</strong> le terziarie — che la passiva non legge affatto — e gli oneri fissi dell&apos;extra raccolta
+            (pulizia e costi aggiuntivi), che escono solo come segnalazione: una differenza su quelle voci non è una difformità.
+            {' '}Le <strong>secondarie di extra raccolta</strong> invece <em>sono</em> nel conto, pagate come raccolta a chi le trasporta,
+            e qui sono contate come tali: la nota di prima diceva il contrario, ed era falsa.
           </p>
         </div>
       )}

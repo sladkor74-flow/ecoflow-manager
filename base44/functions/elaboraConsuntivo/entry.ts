@@ -3,10 +3,10 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { soloAmministratore, utenteCorrente } from "../../shared/permessi.ts";
 import { valoreCampo, leggiCampo } from "../../shared/testoLungo.ts";
-import { leggiTabellePrefattura } from "../../shared/prefattura.ts";
+
 import { calcolaPassivaMese, MESI_PASSIVA } from "../../shared/passivaCalcolo.ts";
 import {
-  movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva,
+  movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, leggiRigheConsuntivo,
   esitoConsuntivo, testoEsitoConsuntivo,
 } from "../../shared/consuntivoFornitore.ts";
 
@@ -91,16 +91,20 @@ export default async function(req) {
     if (!['raccoglitore', 'impianto', 'trasportatore'].includes(ruolo)) return Response.json({ error: 'Ruolo non valido' }, { status: 400 });
 
     // Le righe: quelle appena lette dal file, oppure quelle gia' salvate.
+    // Il lettore e' quello del CONSUNTIVO, non quello della prefattura: un report di
+    // un fornitore porta i formulari e puo' non avere nessun numero d'ordine, e
+    // pretenderlo voleva dire non riuscire a caricare il documento tipico.
     let righe = null;
+    let noteLettura = [];
     if (azione === 'carica') {
       const guardia = await soloAmministratore(base44);
       if (guardia.errore) return guardia.errore;
-      const lette = leggiTabellePrefattura(body.tabelle || []);
-      righe = (lette.righe || []).map(r => ({
-        numero_fir: r.numero_fir || '', id_ordine: r.id_ordine || '',
-        kg: Number(r.kg) || 0, importo: r.importo === null || r.importo === undefined ? null : Number(r.importo),
-        giorno: r.giorno || '',
-      }));
+      const lette = leggiRigheConsuntivo(body.tabelle || []);
+      righe = lette.righe;
+      noteLettura = [
+        ...(lette.note || []),
+        ...(lette.colonne || []).map(c => `Foglio "${c.foglio}": ${Object.entries(c.colonne).map(([k, v]) => `${k} = ${v}`).join(', ')}.`),
+      ];
       if (!righe.length) {
         return Response.json({ error: `Nel file non ho trovato righe con un formulario o un numero d'ordine${lette.note && lette.note.length ? ': ' + lette.note.join('; ') : '.'}` }, { status: 400 });
       }
@@ -118,45 +122,59 @@ export default async function(req) {
     const { passiva, archivi } = puoVedereICosti
       ? await contoPassiva(svc, anno, mese, canale)
       : { passiva: null, archivi: await archiviMovimenti(svc) };
-    const movimenti = movimentiDelFornitore(archivi, { fornitore, ruolo, anno, mese, canale });
+    // I fornitori servono a sapere CHI FATTURA per chi: senza, un subfornitore e il
+    // suo principale risultano due soggetti diversi qui e uno solo nella passiva.
+    const fornitoriTutti = await fetchAll(svc.Fornitore, { stato: 'attivo' });
+    const movimenti = movimentiDelFornitore(archivi, { fornitore, ruolo, anno, mese, canale, fornitori: fornitoriTutti });
     // Un chilo di tolleranza: i pesi si scrivono interi, e un arrotondamento nel
     // foglio del fornitore non e' una difformita'.
     const confronto = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1 });
-    const costo = puoVedereICosti
+    const costoOggi = puoVedereICosti
       ? costoAttesoDallaPassiva(passiva, fornitore, ruolo)
       : { trovato: false, riservato: true, motivo: "L'importo previsto viene dalla fatturazione passiva, che e' riservata all'amministratore. Il confronto sulle quantita' - formulari e chili - lo vedi per intero." };
-    const importoConsuntivo = body.importo_consuntivo !== undefined && body.importo_consuntivo !== null
-      ? Number(body.importo_consuntivo)
-      : (record && record.importo_consuntivo !== undefined && record.importo_consuntivo !== null ? Number(record.importo_consuntivo) : null);
-    const esito = esitoConsuntivo({ confronto, costo, importo_consuntivo: importoConsuntivo });
 
-    // Il conto congelato di quel mese, se c'e': si dice anche se il ricalcolo di
-    // oggi si e' mosso, altrimenti congelare nasconderebbe i movimenti arrivati dopo.
-    // Anche il conto congelato contiene importi: si legge solo per l'amministratore.
+    // IL CONTO CONGELATO E' LA BASE DEL CONFRONTO, quando c'e' (decisione
+    // dell'utente): un consuntivo che arriva a novembre per settembre va confrontato
+    // col settembre di allora, non con settembre ricalcolato oggi. La prima stesura
+    // lo leggeva ma poi confrontava comunque col ricalcolo di oggi, cioe' faceva
+    // l'opposto di quello che era stato deciso.
+    //
+    // Congelare non vuol dire nascondere: il ricalcolo di oggi si mostra accanto, e
+    // se si e' mosso lo si dice.
     let congelato = null;
+    let costo = costoOggi;
     const congelati = puoVedereICosti ? await svc.ChiusuraPassivaMese.filter({ anno, mese, canale }, '-congelato_il', 1) : [];
     if (congelati && congelati.length) {
       const c = congelati[0];
       let contoAllora = null;
       try { contoAllora = JSON.parse((await leggiCampo(base44, 'ChiusuraPassivaMese', c, 'passiva_json')) || 'null'); } catch { /* resta il conto di oggi */ }
       const costoAllora = contoAllora ? costoAttesoDallaPassiva(contoAllora, fornitore, ruolo) : null;
+      if (costoAllora) costo = costoAllora;
       congelato = {
         congelato_il: c.congelato_il,
         congelato_da: c.congelato_da || '',
+        usato_per_il_confronto: !!costoAllora,
         importo_allora: costoAllora && costoAllora.trovato ? costoAllora.importo : null,
-        importo_oggi: costo && costo.trovato ? costo.importo : null,
-        cambiato: !!(costoAllora && costoAllora.trovato && costo && costo.trovato && Math.round(costoAllora.importo * 100) !== Math.round(costo.importo * 100)),
+        importo_oggi: costoOggi && costoOggi.trovato ? costoOggi.importo : null,
+        cambiato: !!(costoAllora && costoAllora.trovato && costoOggi && costoOggi.trovato
+          && Math.round(costoAllora.importo * 100) !== Math.round(costoOggi.importo * 100)),
       };
     }
 
-    const esitoCompleto = { confronto, costo, esito, congelato, testo: testoEsitoConsuntivo(confronto, esito) };
+    const importoConsuntivo = body.importo_consuntivo !== undefined && body.importo_consuntivo !== null
+      ? Number(body.importo_consuntivo)
+      : (record && record.importo_consuntivo !== undefined && record.importo_consuntivo !== null ? Number(record.importo_consuntivo) : null);
+    const esito = esitoConsuntivo({ confronto, costo, importo_consuntivo: importoConsuntivo });
+
+    const esitoCompleto = { confronto, costo, esito, congelato, note_lettura: noteLettura, testo: testoEsitoConsuntivo(confronto, esito) };
 
     // Si salva solo se c'e' un record e chi chiede e' l'amministratore: a tutti gli
     // altri il confronto si mostra e basta.
     if (user.role === 'admin') {
       const campi = {
         fornitore, ruolo, anno, mese, canale,
-        quadra: confronto.quadra && esito.quadra_con_passiva !== false,
+        // Verde solo se torna tutto quello che si e' potuto controllare.
+        quadra: esito.quadra_tutto,
         confrontato_il: new Date().toISOString(),
         ...(importoConsuntivo !== null ? { importo_consuntivo: importoConsuntivo } : {}),
         ...(azione === 'carica' ? { file_nome: String(body.file_nome || ''), caricato_il: new Date().toISOString() } : {}),

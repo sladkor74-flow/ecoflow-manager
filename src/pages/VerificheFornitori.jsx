@@ -43,12 +43,7 @@ export default function VerificheFornitori() {
         <TabsList>
           <TabsTrigger value="evasione">Evasione assegnati</TabsTrigger>
           <TabsTrigger value="andamento">Andamento e zone</TabsTrigger>
-          {/* IN LAVORAZIONE, non raggiungibile (29/09/2026). La revisione ha
-              trovato che il lettore del consuntivo pretende gli ID ordine del
-              portale - mentre il report di un fornitore porta i formulari - e che
-              il verdetto usciva verde anche con gli importi diversi. Finche' non e'
-              rifatto, la scheda resta fuori: una sezione che risponde male sui soldi
-              e' peggio di una sezione che non c'e'. Il codice resta qui sotto. */}
+          <TabsTrigger value="consuntivi">Consuntivi e costi</TabsTrigger>
         </TabsList>
         <TabsContent value="evasione" className="pt-4">
           <EvasioneAssegnati isAdmin={isAdmin} />
@@ -56,11 +51,9 @@ export default function VerificheFornitori() {
         <TabsContent value="andamento" className="pt-4">
           <AndamentoRaccoglitori isAdmin={isAdmin} />
         </TabsContent>
-        {false && (
-          <TabsContent value="consuntivi" className="pt-4">
-            <Consuntivi isAdmin={isAdmin} />
-          </TabsContent>
-        )}
+        <TabsContent value="consuntivi" className="pt-4">
+          <Consuntivi isAdmin={isAdmin} />
+        </TabsContent>
       </Tabs>
     </div>
   );

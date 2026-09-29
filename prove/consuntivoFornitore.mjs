@@ -10,7 +10,7 @@
 // periodo e' la fine trasporto, le quote dello stesso formulario si sommano prima
 // del confronto, e quello che manca da una parte o dall'altra si dice.
 // npm run prove
-import { movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, esitoConsuntivo, testoEsitoConsuntivo, chiaveRiga } from '../base44/shared/consuntivoFornitore.ts';
+import { movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, esitoConsuntivo, testoEsitoConsuntivo, chiaveRiga, leggiRigheConsuntivo } from '../base44/shared/consuntivoFornitore.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -77,7 +77,7 @@ const pesoDiverso = confrontaConsuntivo([{ numero_fir: 'FIRET1', kg: 5400 }, { n
 verifica('un peso diverso si dice, col suo scarto', pesoDiverso.quadra === false && pesoDiverso.peso_diverso === 1
   && pesoDiverso.voci[0].scarto_kg === 400, J(pesoDiverso.voci[0]));
 
-const luiInPiu = confrontaConsuntivo([{ numero_fir: 'FIRET1', kg: 5000 }, { numero_fir: 'FIRET2', kg: 3000 }, { numero_fir: 'FIRX', kg: 2000 }], suoi);
+const luiInPiu = confrontaConsuntivo([{ numero_fir: 'FIRET1', kg: 5000 }, { numero_fir: 'FIRET2', kg: 3000 }, { numero_fir: 'FIRX99', kg: 2000 }], suoi);
 verifica('un formulario che ci fattura e noi non abbiamo si dice', luiInPiu.solo_consuntivo === 1
   && luiInPiu.kg_solo_consuntivo === 2000, J(luiInPiu.voci.find(v => v.esito === 'solo_consuntivo')));
 const noiInPiu = confrontaConsuntivo([{ numero_fir: 'FIRET1', kg: 5000 }], suoi);
@@ -138,6 +138,98 @@ verifica('senza importo nel consuntivo non si giudica l\'importo',
   esitoConsuntivo({ confronto: tuttoBene, costo }).quadra_importo === null);
 const interno = costoAttesoDallaPassiva({ raccoglitori: [{ fornitore: 'SMOCO SRL', totale_tonnellate: 8, totale_euro: 0, interno: true, righe: [] }] }, 'SMOCO SRL', 'raccoglitore');
 verifica('un fornitore interno si riconosce', esitoConsuntivo({ confronto: tuttoBene, costo: interno }).interno === true);
+
+console.log('IL LETTORE: UN CONSUNTIVO NON E\' UNA PREFATTURA');
+// Il caso che la prima stesura non riusciva nemmeno a caricare: formulario e chili,
+// senza nessun numero d'ordine. E' il documento tipico di un raccoglitore.
+const soloFir = leggiRigheConsuntivo([{ nome: 'Riepilogo Settembre', celle: [
+  ['Formulario', 'Data scarico', 'Peso kg'],
+  ['RGYTR000021AA', '10/09/2026', 5000],
+  ['RGYTR000022AA', '15/09/2026', 3000],
+] }]);
+verifica('un consuntivo con formulario e chili si legge', soloFir.righe.length === 2
+  && soloFir.righe[0].numero_fir === 'RGYTR000021AA' && soloFir.righe[0].kg === 5000, J(soloFir.righe));
+verifica('e si dice quali colonne sono state riconosciute', soloFir.colonne.length === 1
+  && soloFir.colonne[0].colonne.numero_fir === 'Formulario', J(soloFir.colonne));
+// Anche senza intestazioni utili, dalla forma dei valori.
+const senzaTeste = leggiRigheConsuntivo([{ nome: 'F1', celle: [
+  ['RGYTR000021AA', 5000], ['RGYTR000022AA', 3000],
+] }]);
+verifica('senza intestazioni si riconosce dalla forma dei valori', senzaTeste.righe.length === 2
+  && senzaTeste.righe[0].kg === 5000, J(senzaTeste.righe));
+// I pesi in tonnellate si riconoscono dall'ordine di grandezza.
+const inTonnellate = leggiRigheConsuntivo([{ nome: 'T', celle: [['Formulario', 'Peso t'], ['RGYTR000021AA', 5.4]] }]);
+verifica('un peso in tonnellate diventa chili', inTonnellate.righe[0].kg === 5400, String(inTonnellate.righe[0].kg));
+// Le righe non abbinabili si dicono, non spariscono in silenzio.
+const conScarti = leggiRigheConsuntivo([{ nome: 'S', celle: [
+  ['Formulario', 'Peso kg'], ['RGYTR000021AA', 5000], ['TOTALE', 5000],
+] }]);
+verifica('una riga senza formulario si conta e si dice', conScarti.righe.length === 1
+  && conScarti.scartate === 1 && conScarti.note.some(n => /non avevano/.test(n)), J([conScarti.scartate, conScarti.note]));
+
+console.log('SI ABBINA SUL FORMULARIO O SULL\'ORDINE, NON SU UNO SOLO');
+// Il difetto: i nostri movimenti hanno sempre il formulario, il consuntivo a volte
+// solo l'ordine. Le due chiavi non si incontravano mai e usciva il 100% di
+// difformita', con gli stessi chili accusati due volte in versi opposti.
+const perOrdine = confrontaConsuntivo([
+  { id_ordine: 'ET26091175', kg: 1960 },
+  { id_ordine: 'ET26102183', kg: 1500 },
+], ripartito);
+verifica('un consuntivo che porta gli ORDINI si abbina ai nostri movimenti',
+  perOrdine.quadra === true && perOrdine.uguali === 1 && perOrdine.solo_consuntivo === 0 && perOrdine.solo_gestionale === 0,
+  J([perOrdine.uguali, perOrdine.solo_consuntivo, perOrdine.solo_gestionale]));
+verifica('e i chili tornano: 1.960 + 1.500 = 3.460', perOrdine.voci[0].kg_consuntivo === 3460 && perOrdine.voci[0].kg_gestionale === 3460, J(perOrdine.voci[0]));
+
+console.log('I SUBFORNITORI: CHI FATTURA, NON CHI HA LAVORATO');
+// La passiva accorpa le tonnellate del subfornitore al principale. Senza fare lo
+// stesso, al principale si metteva accanto ai suoi soli chili l'importo di tutto il
+// gruppo, e il subfornitore usciva "a posto" senza nessun costo da opporgli.
+const FORNITORI = [
+  { ragione_sociale: 'GREEN TYRE PROJECT SRL' },
+  { ragione_sociale: 'TORRES GIOVANNI', fattura_tramite_nome: 'GREEN TYRE PROJECT SRL' },
+];
+const conSub = {
+  primarieRete: [
+    prim('ET10', { trasportatore: 'GREEN TYRE PROJECT SRL', numero_fir: 'FIRGTP1', peso_effettivo: 10000 }),
+    prim('ET11', { trasportatore: 'TORRES GIOVANNI', numero_fir: 'FIRTOR1', peso_effettivo: 4000 }),
+  ],
+  primarieAci: [], secondarie: [], extraRaccolta: [],
+};
+const delGruppo = movimentiDelFornitore(conSub, { ...P, fornitore: 'GREEN TYRE PROJECT SRL', ruolo: 'raccoglitore', fornitori: FORNITORI });
+verifica('i movimenti del principale comprendono quelli del subfornitore', delGruppo.length === 2
+  && delGruppo.reduce((s, r) => s + r.peso_effettivo, 0) === 14000, J(delGruppo.map(r => [r.id_ordine, r.trasportatore])));
+verifica('e chiedendo il subfornitore si ottiene lo stesso gruppo, che e\' chi fattura',
+  movimentiDelFornitore(conSub, { ...P, fornitore: 'TORRES GIOVANNI', ruolo: 'raccoglitore', fornitori: FORNITORI }).length === 2);
+const consGruppo = confrontaConsuntivo([{ numero_fir: 'FIRGTP1', kg: 10000 }, { numero_fir: 'FIRTOR1', kg: 4000 }], delGruppo);
+verifica('e il consuntivo del principale, che li fattura tutti e due, quadra', consGruppo.quadra === true, J(consGruppo.voci.map(v => [v.chiave, v.esito])));
+
+console.log('EXTRA RACCOLTA: LE SECONDARIE SONO PAGATE COME RACCOLTA');
+// La passiva le conta fra le raccolte del trasportatore; escluderle metteva accanto
+// a sei tonnellate l'importo di quindici, con una spiegazione inventata.
+const extraArchivi = {
+  primarieRete: [], primarieAci: [], secondarie: [],
+  extraRaccolta: [
+    { id_ordine: 'EX1', numero_fir: 'FIREX1', stato: 'terminato', trasportatore: 'EMMESSE SRL', peso_effettivo: 10000, trasporto_finito_il: g('2026-09-10') },
+    { id_ordine: 'EX2', numero_fir: 'FIREX2', stato: 'terminato', tipo_movimento: 'secondaria', trasportatore: 'EMMESSE SRL', peso_effettivo: 4000, trasporto_finito_il: g('2026-09-12') },
+  ],
+};
+const extraRacc = movimentiDelFornitore(extraArchivi, { anno: 2026, mese: 9, canale: 'EXTRA_RACCOLTA', fornitore: 'EMMESSE SRL', ruolo: 'raccoglitore' });
+verifica('anche la secondaria di extra raccolta sta fra le sue raccolte', extraRacc.length === 2
+  && extraRacc.reduce((s, r) => s + r.peso_effettivo, 0) === 14000, J(extraRacc.map(r => r.id_ordine)));
+verifica('e non sta fra i trasporti di secondaria, dove la passiva non la paga',
+  movimentiDelFornitore(extraArchivi, { anno: 2026, mese: 9, canale: 'EXTRA_RACCOLTA', fornitore: 'EMMESSE SRL', ruolo: 'trasportatore' }).length === 0);
+
+console.log('IL VERDETTO NON E\' VERDE SE I SOLDI NON TORNANO');
+const soldiStorti = esitoConsuntivo({ confronto: tuttoBene, costo, importo_consuntivo: 900 });
+verifica('chili perfetti ma 260 euro di differenza: NON quadra', soldiStorti.quadra_tutto === false
+  && soldiStorti.quadra_quantita === true, J([soldiStorti.quadra_tutto, soldiStorti.scarto_importo]));
+const senzaCosto = esitoConsuntivo({ confronto: tuttoBene, costo: { trovato: false, motivo: 'niente' } });
+verifica('e nemmeno quando un costo da opporre non esiste affatto', senzaCosto.quadra_tutto === false, J(senzaCosto));
+verifica('ma si dice che cosa non si e\' potuto controllare, invece di tacere',
+  senzaCosto.non_controllato.length === 2 && /il costo previsto/.test(senzaCosto.non_controllato[0]), J(senzaCosto.non_controllato));
+verifica('quando torna tutto, quadra', esitoConsuntivo({ confronto: tuttoBene, costo, importo_consuntivo: 640 }).quadra_tutto === true);
+verifica('e senza importo sul consuntivo il verdetto resta buono sui chili',
+  esitoConsuntivo({ confronto: tuttoBene, costo }).quadra_tutto === true);
 
 console.log('IL TESTO CHE SI LEGGE');
 verifica('quando quadra lo dice in parole', /corrisponde ai nostri movimenti/.test(testoEsitoConsuntivo(tuttoBene, buono)));
