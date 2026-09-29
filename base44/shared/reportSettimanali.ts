@@ -920,11 +920,21 @@ export function normalizzaRigheReport(grezze, unitaIndicata, { colonne = null } 
 export function colonneDateDellaLettura(lettura) {
   const l = lettura || {};
   if (l.modo && l.modo !== 'excel') return null;
-  const quali = (colonne) => ({
-    inizio: !!(colonne && colonne.data_inizio),
-    fine: !!(colonne && colonne.data_fine),
-    generica: !!(colonne && colonne.data),
-  });
+  const quali = (colonne) => {
+    const c = colonne || {};
+    return {
+      inizio: !!c.data_inizio,
+      fine: !!c.data_fine,
+      generica: !!c.data,
+      // L'inizio trasporto preso dalla STESSA colonna della data del movimento:
+      // allora non e' un inizio trasporto, e' la stessa data letta due volte.
+      // Capita quando l'agente indica l'unica colonna del file ("DATA") sia come
+      // inizio sia come data generica: riparaColonneData lo sistema quando il file
+      // si legge, ma le verifiche salvate prima portano tutte e due le caselle
+      // piene, e il confronto inventava «Data inizio trasporto diversa».
+      inizio_condivisa: !!c.data_inizio && (c.data_inizio === c.data || c.data_inizio === c.data_fine),
+    };
+  };
   if (Array.isArray(l.fogli) && l.fogli.length) {
     if (l.fogli.length === 1) return { '': quali(l.fogli[0].colonne) };
     return Object.fromEntries(l.fogli.map(f => [String(f.foglio || ''), quali(f.colonne)]));
@@ -970,22 +980,39 @@ export function riparaDateRighe(righe, { colonne = null } = {}) {
     if (!perTabella.has(k)) perTabella.set(k, []);
     perTabella.get(k).push(r);
   }
-  const daRiparare = new Set();
+  const daRiparare = new Set();   // la data sta solo nella casella dell'inizio
+  const inizioDaTogliere = new Set(); // l'inizio e' la data del movimento letta due volte
   for (const [nome, dellaTabella] of perTabella) {
     const col = colonne ? (colonne[nome] || colonne['']) : null;
     if (col) {
+      // L'inizio trasporto preso dalla stessa colonna della data del movimento non
+      // dice niente sull'inizio: si toglie, cosi' non si confronta e non si
+      // suggerisce. La data del movimento resta dov'e'.
+      if (col.inizio_condivisa) {
+        for (const r of dellaTabella) if (r.inizio) inizioDaTogliere.add(r);
+        continue;
+      }
       // Si sa quali colonne ha: si ripara solo se la data del movimento non c'e'
       // come colonna e l'unica data sta in quella dell'inizio trasporto.
       if (!col.inizio || col.fine || col.generica) continue;
-    } else if (dellaTabella.some(r => r.fine || r.data)) {
-      continue;
+    } else {
+      // Colonne ignote (un PDF trascritto, o una lettura vecchia): se una riga ha
+      // l'inizio trasporto UGUALE alla data del movimento, e' la stessa data
+      // arrivata in due caselle, non un inizio da confrontare.
+      for (const r of dellaTabella) if (r.inizio && r.inizio === (r.fine || r.data)) inizioDaTogliere.add(r);
+      if (dellaTabella.some(r => r.fine || r.data)) continue;
     }
     for (const r of dellaTabella) if (r.inizio) daRiparare.add(r);
   }
-  if (!daRiparare.size) return { righe: lista, date_da_inizio: 0 };
+  if (!daRiparare.size && !inizioDaTogliere.size) return { righe: lista, date_da_inizio: 0, inizio_tolto: 0 };
   return {
-    righe: lista.map(r => (daRiparare.has(r) ? { ...r, data: r.inizio, inizio: null } : r)),
+    righe: lista.map(r => {
+      if (daRiparare.has(r)) return { ...r, data: r.inizio, inizio: null };
+      if (inizioDaTogliere.has(r)) return { ...r, inizio: null };
+      return r;
+    }),
     date_da_inizio: daRiparare.size,
+    inizio_tolto: inizioDaTogliere.size,
   };
 }
 
@@ -1380,9 +1407,15 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     // riscrive) resterebbe un fatto nascosto. Chi chiama la salva nell'esito e la
     // scheda la mostra.
     date_da_inizio: riparate.date_da_inizio,
-    nota_date: riparate.date_da_inizio
-      ? `${riparate.date_da_inizio} ${riparate.date_da_inizio === 1 ? 'riga porta' : 'righe portano'} la data solo nella colonna dell'inizio trasporto: letta come data del movimento, cioe' la fine del trasporto`
-      : '',
+    inizio_tolto: riparate.inizio_tolto,
+    nota_date: [
+      riparate.date_da_inizio
+        ? `${riparate.date_da_inizio} ${riparate.date_da_inizio === 1 ? 'riga porta' : 'righe portano'} la data solo nella colonna dell'inizio trasporto: letta come data del movimento, cioe' la fine del trasporto`
+        : '',
+      riparate.inizio_tolto
+        ? `${riparate.inizio_tolto} ${riparate.inizio_tolto === 1 ? 'riga ha' : 'righe hanno'} l'inizio trasporto nella stessa colonna della data del movimento: e' la stessa data letta due volte, non un inizio trasporto, e non si confronta`
+        : '',
+    ].filter(Boolean).join('; '),
     riepilogo: {
       // Il verdetto unico resta solo per l'alert della dichiarazione di nessuna
       // movimentazione (smentita se lo e' in un canale qualsiasi): a video, nel

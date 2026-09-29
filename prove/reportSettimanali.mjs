@@ -326,11 +326,11 @@ verifica('con la colonna della data sola, la riga dell\'uscita ritrova la sua da
 
 // Le colonne si leggono dalla lettura salvata: al riconfronto il file non si
 // rilegge, ma la lettura dice che colonne aveva.
-verifica('dalla lettura di un Excel con un foglio solo', JSON.stringify(colonneDateDellaLettura({ modo: 'excel', colonne: { fir: 'FIR', data_inizio: 'Data carico' } }))
-  === JSON.stringify({ '': { inizio: true, fine: false, generica: false } }), JSON.stringify(colonneDateDellaLettura({ modo: 'excel', colonne: { fir: 'FIR', data_inizio: 'Data carico' } })));
-verifica('dalla lettura di un Excel con due fogli, uno per uno', JSON.stringify(colonneDateDellaLettura({
-  modo: 'excel', fogli: [{ foglio: 'INGRESSI', colonne: { data_fine: 'Data ingresso' } }, { foglio: 'USCITE', colonne: { data_inizio: 'Data carico' } }],
-})) === JSON.stringify({ INGRESSI: { inizio: false, fine: true, generica: false }, USCITE: { inizio: true, fine: false, generica: false } }));
+const unFoglio = colonneDateDellaLettura({ modo: 'excel', colonne: { fir: 'FIR', data_inizio: 'Data carico' } })[''];
+verifica('dalla lettura di un Excel con un foglio solo', unFoglio.inizio === true && unFoglio.fine === false && unFoglio.generica === false && unFoglio.inizio_condivisa === false, JSON.stringify(unFoglio));
+const dueFogli = colonneDateDellaLettura({ modo: 'excel', fogli: [{ foglio: 'INGRESSI', colonne: { data_fine: 'Data ingresso' } }, { foglio: 'USCITE', colonne: { data_inizio: 'Data carico' } }] });
+verifica('dalla lettura di un Excel con due fogli, uno per uno', dueFogli.INGRESSI.fine === true && dueFogli.INGRESSI.inizio === false
+  && dueFogli.USCITE.inizio === true && dueFogli.USCITE.fine === false, JSON.stringify(dueFogli));
 verifica('da un PDF trascritto non si sa niente: decidono le righe', colonneDateDellaLettura({ modo: 'pdf', unita: 'kg' }) === null
   && colonneDateDellaLettura(null) === null);
 const esitoSalvataConLettura = verificaReport(salvate, uscite.movimenti, {
@@ -339,6 +339,42 @@ const esitoSalvataConLettura = verificaReport(salvate, uscite.movimenti, {
 });
 verifica('una verifica salvata si rimette a posto con le colonne del suo file',
   esitoSalvataConLettura.esiti.find(e => e.foglio === 'USCITE').esito === 'conforme', JSON.stringify(esitoSalvataConLettura.esiti.map(e => [e.foglio, e.esito])));
+
+// IL CASO VERO DI NAPPI SUD, trovato a video il 29/09/2026 sulla verifica della
+// settimana 39. Il report ha UNA sola colonna, intestata "DATA", e l'agente
+// l'aveva indicata sia come data_inizio sia come data generica: le righe salvate
+// portano la stessa data in tutte e due le caselle. La data del movimento c'era,
+// quindi la settimana si tagliava bene, ma l'inizio veniva preso per buono e
+// confrontato, e uscivano tre anomalie inventate:
+//   "Data inizio trasporto diversa: report 21/09/2026, gestionale 19/09/2026"
+// su una data che il report non dichiara affatto come inizio trasporto.
+const unaColonnaSola = [
+  { n: 2, foglio: '', fir: 'RGYTR000021AA', firN: 'RGYTR000021AA', ordine: '', kg: 12000, inizio: '2026-09-10', fine: null, data: '2026-09-10',
+    produttore: '', codice_pdr: '', destinatario: '', trasportatore: '', intermediario: '', classe: null, classe_testo: '', targa: '' },
+];
+const letturaUnaColonna = { modo: 'excel', colonne: { fir: 'NUM. DI FORMULARIO', data_inizio: 'DATA', data: 'DATA' } };
+const colUnaColonna = colonneDateDellaLettura(letturaUnaColonna);
+verifica('la lettura dice che inizio e data del movimento sono la stessa colonna',
+  colUnaColonna[''].inizio_condivisa === true, JSON.stringify(colUnaColonna));
+const ripUna = riparaDateRighe(unaColonnaSola, { colonne: colUnaColonna });
+verifica('quell\'inizio si toglie: e\' la stessa data letta due volte',
+  ripUna.inizio_tolto === 1 && ripUna.righe[0].inizio === null && ripUna.righe[0].data === '2026-09-10', JSON.stringify(ripUna.righe[0]));
+verifica('e le righe salvate non si toccano', unaColonnaSola[0].inizio === '2026-09-10');
+const esitoUnaColonna = verificaReport(unaColonnaSola, uscite.movimenti, { ...settimana37, lettura: letturaUnaColonna });
+const dUna = esitoUnaColonna.esiti[0].discrepanze || [];
+verifica('niente piu\' "Data inizio trasporto diversa" su una data che il report non dichiara',
+  !dUna.some(d => /inizio trasporto diversa/i.test(d.messaggio)), JSON.stringify(dUna));
+verifica('e la riga resta conforme, con la sua data al posto giusto',
+  esitoUnaColonna.esiti[0].esito === 'conforme', JSON.stringify(esitoUnaColonna.esiti[0].discrepanze));
+verifica('la lettura diversa si dice', /letta due volte/.test(esitoUnaColonna.nota_date), esitoUnaColonna.nota_date);
+// Senza sapere le colonne (un PDF trascritto) la stessa cosa si riconosce dalla
+// riga: inizio uguale alla data del movimento non e' un inizio trasporto.
+const senzaColonne = riparaDateRighe(unaColonnaSola);
+verifica('e si riconosce anche senza le colonne, dalla riga', senzaColonne.inizio_tolto === 1 && senzaColonne.righe[0].inizio === null, JSON.stringify(senzaColonne.righe[0]));
+// Con due colonne vere e date diverse il controllo sull'inizio resta: e' un
+// confronto che serve, e non va spento per prudenza.
+verifica('con due colonne e date diverse l\'inizio si confronta ancora',
+  esitoDue.esiti[0].discrepanze.some(d => d.campo === 'inizio'), JSON.stringify(esitoDue.esiti[0].discrepanze));
 
 // E la lettura diversa non resta nascosta: in un riconfronto il file non si
 // rilegge, quindi la nota della lettura non si riscrive. Questa e' l'unica che lo dice.
