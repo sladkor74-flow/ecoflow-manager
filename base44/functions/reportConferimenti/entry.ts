@@ -2,7 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
-import { reportConferimenti, quadraturaPassiva } from "../../shared/reportConferimenti.ts";
+import { reportConferimenti, quadraturaPassiva, motivoNonApplicabile } from "../../shared/reportConferimenti.ts";
 import { calcolaPassivaMese, MESI_PASSIVA } from "../../shared/passivaCalcolo.ts";
 import { eSecondariaExtra } from "../../shared/attivaCalcolo.ts";
 
@@ -22,9 +22,14 @@ import { eSecondariaExtra } from "../../shared/attivaCalcolo.ts";
 // Risposte: 200 con { report, quadratura }; 401 a chi non e' entrato;
 // 400 se mancano i parametri o non si riconoscono.
 
+// L'archivio si passa sempre a canaleMovimento, e non e' un dettaglio: per
+// 'PrimariaAci' il canale e' ACI perche' la riga sta in quell'archivio, mentre con
+// l'archivio vuoto il canale lo deciderebbe la sola classe del prodotto, e una
+// riga dell'archivio ACI senza classe risulterebbe di RETE - sparendo dal report
+// dell'ACI senza che nessuno lo dica. E' la regola 3 al contrario.
 const ARCHIVI = {
-  'RETE|primaria': { entita: 'PrimariaRete', archivio: '' },
-  'ACI|primaria': { entita: 'PrimariaAci', archivio: '' },
+  'RETE|primaria': { entita: 'PrimariaRete', archivio: 'PrimariaRete' },
+  'ACI|primaria': { entita: 'PrimariaAci', archivio: 'PrimariaAci' },
   'RETE|secondaria': { entita: 'Secondaria', archivio: 'Secondaria' },
   'ACI|secondaria': { entita: 'Secondaria', archivio: 'Secondaria' },
   'EXTRA_RACCOLTA|primaria': { entita: 'ExtraRaccolta', archivio: 'ExtraRaccolta' },
@@ -57,16 +62,29 @@ export default async function(req) {
 
     const report = reportConferimenti(records, { anno, mese, canale, archivio: scelta.archivio, tipo, filtro });
 
-    let quadratura = { disponibile: false, motivo: 'Chiedi la quadratura per confrontare questi chili con la fatturazione passiva.' };
-    if (body.con_passiva) {
+    // La quadratura per tratta ha senso solo dove la passiva raggruppa per tratta:
+    // le secondarie di rete e ACI. Altrove si dice perche' non si puo' fare, e non
+    // si legge NIENTE: leggere sei archivi interi per restituire una frase fissa
+    // sarebbe spendere il limite di richieste della piattaforma per niente.
+    const nonApplicabile = motivoNonApplicabile(report);
+    let quadratura = nonApplicabile
+      ? { disponibile: false, applicabile: false, motivo: nonApplicabile }
+      : { disponibile: false, motivo: 'Chiedi la quadratura per confrontare questi chili con la fatturazione passiva.' };
+
+    if (body.con_passiva && !nonApplicabile) {
       if (!eAmministratore(user)) {
         quadratura = { disponibile: false, motivo: 'La quadratura con la fatturazione passiva e\' riservata all\'amministratore, perche\' contiene i costi. I chili del report li vedi comunque.' };
       } else {
+        // L'archivio del report e' gia' in mano: si passa quello invece di
+        // rileggerlo, altrimenti la stessa entita' si legge due volte nella stessa
+        // invocazione.
+        const gia = { [scelta.entita]: records };
+        const leggi = (nome) => (gia[nome] ? Promise.resolve(gia[nome]) : fetchAll(svc[nome]));
         const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll] = await Promise.all([
-          fetchAll(svc.PrimariaRete),
-          fetchAll(svc.PrimariaAci),
-          fetchAll(svc.Secondaria),
-          fetchAll(svc.ExtraRaccolta),
+          leggi('PrimariaRete'),
+          leggi('PrimariaAci'),
+          leggi('Secondaria'),
+          leggi('ExtraRaccolta'),
           fetchAll(svc.Tariffa, { direzione: 'PASSIVA' }),
           fetchAll(svc.Fornitore, { stato: 'attivo' }),
         ]);

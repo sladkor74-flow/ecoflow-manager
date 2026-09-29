@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Loader2, Download, Scale, AlertTriangle, CheckCircle2, CalendarX } from 'lucide-react';
@@ -29,27 +29,40 @@ export default function ReportConferimenti({ canale, tipo = 'secondaria', titolo
   const [caricando, setCaricando] = useState(false);
   const [errore, setErrore] = useState('');
   const [quadrando, setQuadrando] = useState(false);
+  // VALE SOLO L'ULTIMA RICHIESTA. Il componente non si rimonta quando cambia il
+  // canale (in Secondarie e' un prop, e la scheda Rete/ACI sta fuori): senza
+  // questo contatore, una risposta della rete arrivata in ritardo finiva sotto
+  // l'intestazione ACI. E la quadratura, che legge sei archivi ed e' lenta, poteva
+  // atterrare dopo un cambio di mese e rimettere a video il mese prima. E' lo
+  // stesso difetto che la pagina Secondarie aveva gia' risolto cosi'.
+  const ultima = useRef(0);
 
   const carica = useCallback(async (conPassiva = false) => {
+    const n = ++ultima.current;
     conPassiva ? setQuadrando(true) : setCaricando(true);
     setErrore('');
     try {
       const r = await base44.functions.invoke('reportConferimenti', { anno, mese, canale, tipo, con_passiva: conPassiva });
+      if (n !== ultima.current) return;
       const corpo = (r && r.data) || r;
       if (!corpo || corpo.error) throw new Error((corpo && corpo.error) || 'Il report non e\' arrivato.');
       setDati(corpo);
     } catch (e) {
+      if (n !== ultima.current) return;
       setErrore(e && e.message ? e.message : String(e));
     } finally {
-      setCaricando(false);
-      setQuadrando(false);
+      if (n === ultima.current) { setCaricando(false); setQuadrando(false); }
     }
   }, [anno, mese, canale, tipo]);
 
-  useEffect(() => { carica(false); }, [carica]);
+  // I numeri vecchi spariscono PRIMA di chiedere i nuovi: mostrare i chili della
+  // rete sotto il titolo dell'ACI, o quelli di agosto sotto il selettore di
+  // settembre, sarebbe una bugia che dura quanto la chiamata.
+  useEffect(() => { setDati(null); carica(false); }, [carica]);
 
   const report = dati && dati.report;
   const quadratura = dati && dati.quadratura;
+  const quadraturaPossibile = !quadratura || quadratura.applicabile !== false;
   const anni = [oggi.getFullYear() + 1, oggi.getFullYear(), oggi.getFullYear() - 1, oggi.getFullYear() - 2];
 
   return (
@@ -70,10 +83,16 @@ export default function ReportConferimenti({ canale, tipo = 'secondaria', titolo
         <Button variant="outline" size="sm" onClick={() => carica(false)} disabled={caricando}>
           {caricando ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : null} Aggiorna
         </Button>
-        <Button variant="outline" size="sm" onClick={() => carica(true)} disabled={quadrando || caricando}
-          title="Confronta questi chili con quelli che la fatturazione passiva paga sulle stesse tratte. Legge sei archivi, quindi si chiede quando serve">
-          {quadrando ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Scale className="w-4 h-4 mr-1.5" />} Quadra con la passiva
-        </Button>
+        {/* Il pulsante c'e' solo dove la quadratura per tratta si puo' davvero
+            fare: sulle primarie e sull'extra raccolta la passiva raggruppa in un
+            altro modo, e offrirlo lo stesso avrebbe fatto leggere sei archivi per
+            dire una frase. Il perche' si legge sotto la tabella. */}
+        {quadraturaPossibile && (
+          <Button variant="outline" size="sm" onClick={() => carica(true)} disabled={quadrando || caricando}
+            title="Confronta questi chili con quelli che la fatturazione passiva paga sulle stesse tratte. Legge sei archivi, quindi si chiede quando serve">
+            {quadrando ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Scale className="w-4 h-4 mr-1.5" />} Quadra con la passiva
+          </Button>
+        )}
         {report && report.righe.length > 0 && (
           <Button variant="outline" size="sm" onClick={() => scaricaExcelConferimenti(report, quadratura, titolo)}>
             <Download className="w-4 h-4 mr-1.5" /> Esporta Excel
@@ -93,6 +112,20 @@ export default function ReportConferimenti({ canale, tipo = 'secondaria', titolo
         <p className="text-sm text-muted-foreground">
           Nessun conferimento {canale === 'EXTRA_RACCOLTA' ? 'di extra raccolta' : `di ${canale === 'ACI' ? 'ACI' : 'rete'}`} con la fine trasporto in {MESI[mese - 1]} {anno}.
         </p>
+      )}
+
+      {/* I terminati senza la data si segnalano SEMPRE (regola dell'utente,
+          22/09/2026): stava dentro il blocco della tabella, e in un mese senza
+          conferimenti spariva - proprio quando e' l'unica cosa da dire. */}
+      {report && report.senza_fine > 0 && (
+        <div className="flex items-start gap-2 text-sm border border-amber-200 bg-amber-50 text-amber-900 rounded-lg px-3 py-2">
+          <CalendarX className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>
+            Restano fuori {report.senza_fine} {report.senza_fine === 1 ? 'movimento terminato' : 'movimenti terminati'} senza la data di fine trasporto,
+            per {formatKg(report.senza_fine_kg)} kg ({report.senza_fine_ordini.join(', ')}{report.senza_fine > report.senza_fine_ordini.length ? ` e altri ${report.senza_fine - report.senza_fine_ordini.length}` : ''}):
+            senza quella data non stanno in nessuna settimana, e la data va inserita a portale.
+          </span>
+        </div>
       )}
 
       {report && report.righe.length > 0 && (
@@ -169,17 +202,6 @@ export default function ReportConferimenti({ canale, tipo = 'secondaria', titolo
               </table>
             </div>
           </div>
-
-          {report.senza_fine > 0 && (
-            <div className="flex items-start gap-2 text-sm border border-amber-200 bg-amber-50 text-amber-900 rounded-lg px-3 py-2">
-              <CalendarX className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>
-                Restano fuori {report.senza_fine} {report.senza_fine === 1 ? 'movimento terminato' : 'movimenti terminati'} senza la data di fine trasporto,
-                per {formatKg(report.senza_fine_kg)} kg ({report.senza_fine_ordini.join(', ')}{report.senza_fine > report.senza_fine_ordini.length ? ' e altri' : ''}):
-                senza quella data non stanno in nessuna settimana, e la data va inserita a portale.
-              </span>
-            </div>
-          )}
 
           {quadratura && quadratura.disponibile && (
             <div className={`border rounded-lg overflow-hidden ${quadratura.quadra ? 'border-emerald-200' : 'border-amber-300'}`}>

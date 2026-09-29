@@ -51,12 +51,52 @@ const ottobre = reportConferimenti([sec('SEC3', { trasporto_finito_il: g('2026-1
   { anno: 2026, mese: 9, canale: 'RETE', archivio: 'Secondaria', tipo: 'secondaria' });
 verifica('un carico del 1 ottobre non entra nel report di settembre', ottobre.totale_kg === 0 && ottobre.righe.length === 0, String(ottobre.totale_kg));
 
-console.log('UN TERMINATO SENZA FINE TRASPORTO RESTA FUORI, E SI DICE');
-const senzaData = reportConferimenti([sec('SEC1'), sec('SEC9', { trasporto_finito_il: null })],
+console.log('UN TERMINATO SENZA FINE TRASPORTO RESTA FUORI, E SI DICE — MA SOLO NEL SUO MESE');
+const senzaData = reportConferimenti([sec('SEC1'), sec('SEC9', { trasporto_finito_il: null, ordine_immesso_il: g('2026-09-02') })],
   { anno: 2026, mese: 9, canale: 'RETE', archivio: 'Secondaria', tipo: 'secondaria' });
 verifica('non entra nel totale', senzaData.totale_kg === 10000, String(senzaData.totale_kg));
 verifica('ma si conta e si nomina', senzaData.senza_fine === 1 && senzaData.senza_fine_kg === 10000
   && senzaData.senza_fine_ordini.includes('SEC9'), J([senzaData.senza_fine, senzaData.senza_fine_ordini]));
+// Il difetto che i revisori hanno trovato: senza la finestra del periodo, un
+// terminato senza data del 2024 compariva identico sotto OGNI mese di OGNI anno,
+// gonfiando l'avviso e nascondendo i mancanti veri. La finestra la decide
+// dateDaSegnalare di filtroPeriodo.ts, la stessa della fatturazione passiva.
+const vecchio = sec('VECCHIO', { trasporto_finito_il: null, ordine_immesso_il: g('2024-03-01'), trasporto_iniziato_il: g('2024-03-02') });
+const conVecchio = (mese) => reportConferimenti([sec('SEC1'), vecchio],
+  { anno: 2026, mese, canale: 'RETE', archivio: 'Secondaria', tipo: 'secondaria' });
+verifica('un terminato senza data del 2024 non compare nei mesi del 2026',
+  conVecchio(9).senza_fine === 0 && conVecchio(1).senza_fine === 0 && conVecchio(6).senza_fine === 0,
+  J([conVecchio(1).senza_fine, conVecchio(6).senza_fine, conVecchio(9).senza_fine]));
+verifica('e nemmeno i suoi chili entrano nell\'avviso', conVecchio(9).senza_fine_kg === 0, String(conVecchio(9).senza_fine_kg));
+// Ma nel mese in cui poteva essere ritirato si', altrimenti sparirebbe e basta.
+const suoMese = reportConferimenti([vecchio], { anno: 2024, mese: 3, canale: 'RETE', archivio: 'Secondaria', tipo: 'secondaria' });
+verifica('nel suo mese invece si segnala', suoMese.senza_fine === 1 && suoMese.senza_fine_ordini.includes('VECCHIO'), J(suoMese.senza_fine_ordini));
+
+console.log('I FORMULARI SI CONTANO PER NUMERO, NON PER ORDINE');
+// Il caso vero scritto in AGENTS.md: lo stesso formulario ripartito su due ordini.
+// In fattura conta la somma dei pesi, ma i formulari sono UNO: la stampa del
+// portale lo elenca una volta, e questo report va letto accanto a quella.
+const ripartito = reportConferimenti([
+  sec('ET26091175', { numero_fir: 'RGYTR022620TW', peso_effettivo: 1960, trasporto_finito_il: g('2026-09-09') }),
+  sec('ET26102183', { numero_fir: 'RGYTR022620TW', peso_effettivo: 1500, trasporto_finito_il: g('2026-09-09') }),
+], { anno: 2026, mese: 9, canale: 'RETE', archivio: 'Secondaria', tipo: 'secondaria' });
+verifica('i chili si sommano: 3.460', ripartito.totale_kg === 3460, String(ripartito.totale_kg));
+verifica('ma il formulario e\' UNO', ripartito.righe[0].formulari === 1 && ripartito.totale_formulari === 1,
+  J([ripartito.righe[0].formulari, ripartito.totale_formulari]));
+verifica('e anche per destinazione e\' uno', ripartito.per_destinazione[0].formulari === 1, J(ripartito.per_destinazione));
+// Il verso opposto: due formulari diversi sullo stesso ordine sono due documenti.
+const dueFir = reportConferimenti([
+  sec('ET26091175', { numero_fir: 'FIRA', peso_effettivo: 1000, trasporto_finito_il: g('2026-09-09') }),
+  sec('ET26091175', { numero_fir: 'FIRB', peso_effettivo: 1000, trasporto_finito_il: g('2026-09-09') }),
+], { anno: 2026, mese: 9, canale: 'RETE', archivio: 'Secondaria', tipo: 'secondaria' });
+verifica('due formulari diversi sullo stesso ordine sono due', dueFir.righe[0].formulari === 2, String(dueFir.righe[0].formulari));
+// Lo stesso formulario su due tratte e' comunque un documento solo nel totale.
+const dueTratte = reportConferimenti([
+  sec('ET1', { numero_fir: 'FIRX', peso_effettivo: 1000, trasporto_finito_il: g('2026-09-09') }),
+  sec('ET2', { numero_fir: 'FIRX', peso_effettivo: 1000, trasporto_finito_il: g('2026-09-09'), trasportatore: 'EMMESSE SRL' }),
+], { anno: 2026, mese: 9, canale: 'RETE', archivio: 'Secondaria', tipo: 'secondaria' });
+verifica('lo stesso formulario su due tratte resta un formulario nel totale',
+  dueTratte.righe.length === 2 && dueTratte.totale_formulari === 1, J([dueTratte.righe.length, dueTratte.totale_formulari]));
 verifica('un non terminato non c\'entra niente', reportConferimenti([sec('SEC8', { stato: 'assegnato' })],
   { anno: 2026, mese: 9, canale: 'RETE', archivio: 'Secondaria', tipo: 'secondaria' }).totale_kg === 0);
 
@@ -139,9 +179,39 @@ verifica('una tratta che sta solo nella passiva si dice', qi.voci.some(v => v.so
 
 verifica('senza il conto della passiva non si inventa un verdetto',
   quadraturaPassiva(tante, null).disponibile === false);
+
+console.log('DOVE LA QUADRATURA NON SI PUO\' FARE, SI DICE PERCHE\' (e non si grida al lupo)');
+// Per le primarie la passiva raggruppa per provincia, tariffa e destinazione: un
+// confronto per tratta direbbe differenze che non esistono.
+const qPrim = quadraturaPassiva(prim, passiva);
 verifica('per le primarie si dice che il confronto per tratta non ha senso, invece di farlo male',
-  quadraturaPassiva(prim, passiva).solo_totale === true && quadraturaPassiva(prim, passiva).disponibile === false,
-  J(quadraturaPassiva(prim, passiva)));
+  qPrim.applicabile === false && qPrim.disponibile === false && /raggruppa per provincia/.test(qPrim.motivo), J(qPrim));
+verifica('e nessuna tratta viene dichiarata fuori posto', !qPrim.voci && qPrim.quadra === undefined, J(qPrim));
+// L'extra raccolta non ha proprio un blocco trasporti nella passiva: il costo del
+// trasporto di una secondaria di extra raccolta si scrive sull'intervento.
+const extra = reportConferimenti([
+  { id_ordine: 'EXT1', stato: 'terminato', tipo_movimento: 'secondaria', stoccaggio: 'NAPPI SUD SRL', destinazione: 'IRIGOM SRL', trasportatore: 'TRANSAR SRL', peso_effettivo: 12000, trasporto_finito_il: g('2026-09-10') },
+], { anno: 2026, mese: 9, canale: 'EXTRA_RACCOLTA', archivio: 'ExtraRaccolta', tipo: 'secondaria' });
+verifica('il report dell\'extra raccolta sta in piedi', extra.totale_kg === 12000, String(extra.totale_kg));
+const qExtra = quadraturaPassiva(extra, { trasporti_secondaria: [] });
+verifica('per le secondarie di extra raccolta la quadratura si dichiara non applicabile',
+  qExtra.applicabile === false && /non ha un blocco trasporti/.test(qExtra.motivo), J(qExtra));
+verifica('e NON si dice che le tratte non quadrano: non e\' uno scarto',
+  qExtra.quadra === undefined && !qExtra.voci, J(qExtra));
+verifica('lo dice anche senza avere in mano il conto della passiva, cosi\' non lo si legge per niente',
+  quadraturaPassiva(extra, null).applicabile === false);
+
+console.log('I CHILI SI SOMMANO GREZZI E SI ARROTONDANO UNA VOLTA SOLA');
+// Quattro carichi da 10.000,5 kg: arrotondando riga per riga facevano 40.004,
+// mentre la passiva - che somma e poi arrotonda - dice 40.002. Lo scarto non
+// esisteva, lo creava l'arrotondamento.
+const decimali = reportConferimenti([1, 2, 3, 4].map(i => sec('D' + i, { peso_effettivo: 10000.5, trasporto_finito_il: g('2026-09-10') })),
+  { anno: 2026, mese: 9, canale: 'RETE', archivio: 'Secondaria', tipo: 'secondaria' });
+verifica('quattro carichi da 10.000,5 kg fanno 40.002, non 40.004', decimali.totale_kg === 40002 && decimali.righe[0].kg === 40002, String(decimali.totale_kg));
+const qDec = quadraturaPassiva(decimali, { trasporti_secondaria: [{ fornitore: 'TRANSAR SRL', righe: [
+  { stoccaggio: 'NAPPI SUD SRL', destinazione: 'IRIGOM SRL', trasportatore: 'TRANSAR SRL', tonnellate: 40.002, importo: 2800, unita_misura: '€/t' },
+] }] });
+verifica('e con la passiva quadrano', qDec.quadra === true, J(qDec.voci));
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);
