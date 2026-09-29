@@ -12,6 +12,7 @@ import ExportButtons from '@/components/target-status/ExportButtons';
 import TargetRaccoglitoriGrid from '@/components/target-status/TargetRaccoglitoriGrid';
 import CommessaEcotyreForm from '@/components/target-status/CommessaEcotyreForm';
 import ConfigurazioneImpianti from '@/components/target-status/ConfigurazioneImpianti';
+import ZoneRaccoglitori from '@/components/target-status/ZoneRaccoglitori';
 import ReportGenerale from '@/components/target-status/ReportGenerale';
 import CanaleAci from '@/components/target-status/CanaleAci';
 import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
@@ -328,6 +329,7 @@ export default function TargetStatus() {
           <TabsTrigger value="raccoglitori">Target raccoglitori</TabsTrigger>
           <TabsTrigger value="commessa">Commessa Ecotyre</TabsTrigger>
           <TabsTrigger value="impianti">Impianti e stoccaggi</TabsTrigger>
+          <TabsTrigger value="zone">Zone dei raccoglitori</TabsTrigger>
         </TabsList>
 
         <TabsContent value="andamento" className="mt-4 space-y-6">
@@ -411,6 +413,12 @@ export default function TargetStatus() {
         <TabsContent value="impianti" className="mt-4">
           {/* una per anno: niente di un anno resta a video, modificabile, quando si passa a un altro */}
           {scheda === 'impianti' && <ConfigurazioneImpianti key={anno} anno={anno} solaLettura={!puoScrivere} user={user} />}
+        </TabsContent>
+
+        {/* Le zone di competenza stanno qui, con gli altri perimetri della commessa
+            (decisione dell'utente, 29/09/2026): a leggerle e' Verifiche Fornitori. */}
+        <TabsContent value="zone" className="mt-4">
+          {scheda === 'zone' && <ZoneRaccoglitori isAdmin={puoScrivere} />}
         </TabsContent>
       </Tabs>
     </div>
