@@ -130,8 +130,9 @@ export default function AndamentoRaccoglitori({ isAdmin }) {
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
           <span>
             {dati.target_ambigui.length === 1 ? 'Un target di Target & Status vale' : `${dati.target_ambigui.length} target di Target & Status valgono`} per
-            più di un raccoglitore, perché il nome scritto lì è un&apos;abbreviazione che ne abbraccia più di uno
-            ({dati.target_ambigui.slice(0, 3).map(t => t.raccoglitori.join(' e ')).join('; ')}). Il target risulta assegnato per intero a ciascuno:
+            più di un raccoglitore, perché il nome scritto lì è un&apos;abbreviazione che ne abbraccia più di uno:
+            {' '}{dati.target_ambigui.slice(0, 3).map(t => `«${t.target}» vale per ${t.raccoglitori.join(' e ')}`).join('; ')}
+            {dati.target_ambigui.length > 3 ? ` e altri ${dati.target_ambigui.length - 3}` : ''}. Il target risulta assegnato per intero a ciascuno:
             <strong> quelle righe non sono affidabili</strong> finché il nome in Target &amp; Status non viene scritto per esteso.
           </span>
         </div>

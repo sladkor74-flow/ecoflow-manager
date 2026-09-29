@@ -2,7 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { andamentoRaccoglitori, andamentoPerZona, proponiZona } from "../../shared/andamentoRaccoglitori.ts";
-import { targetMensiliAnno, targetRaccoglitoreMese } from "../../shared/targetRaccoglitori.ts";
+import { targetMensiliAnno, targetRaccoglitoreMese, recordDelRaccoglitore } from "../../shared/targetRaccoglitori.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { MESI_MOVIMENTI } from "../../shared/movimenti.ts";
 
@@ -29,6 +29,7 @@ export default async function(req) {
     const body = await req.json().catch(() => ({}));
     const anno = Number(body.anno) || Number(String(new Date().toISOString()).slice(0, 4));
     const svc = base44.asServiceRole.entities;
+    const pulisciNome = (v) => String(v ?? '').replace(/s+/g, ' ').trim();
 
     const [primarieRete, zoneTutte, fornitori] = await Promise.all([
       fetchAll(svc.PrimariaRete),
@@ -56,9 +57,14 @@ export default async function(req) {
     // Un target scritto con un nome ABBREVIATO si riconosce per contenuto, e puo'
     // quindi valere per piu' soggetti del portale: allora lo stesso target
     // risulterebbe assegnato per intero a ciascuno, e la somma dei target mostrati
-    // sarebbe il doppio di quelli scritti. Si tiene il conto di chi consuma quale
-    // record, e quelli consumati piu' di una volta si dicono.
-    const consumiPerRecord = new Map();
+    // sarebbe il doppio di quelli scritti.
+    //
+    // L'IDENTITA' DI UN TARGET E' IL NOME SOTTO CUI E' SCRITTO, non il suo valore:
+    // la prima stesura usava regione|mese|tonnellate, e due target DIVERSI con lo
+    // stesso valore nella stessa regione collidevano, facendo gridare al lupo su
+    // nomi che non c'entrano niente l'uno con l'altro (sui dati veri: "emmesse e
+    // gatim", che non sono l'uno l'abbreviazione dell'altro).
+    const consumiPerNomeTarget = new Map();
 
     const conTarget = andamentoRaccoglitori(primarieRete, {
       anno,
@@ -75,19 +81,23 @@ export default async function(req) {
         const mese = MESI_MOVIMENTI[meseIdx];
         const t = targetRaccoglitoreMese(targetMensili, nome, mese);
         if (!t || t.non_raccoglie) return null;
-        for (const r of t.regioni || []) {
-          const k = `${normalizzaRagioneSociale(nome)}|${r.regione}|${mese}`;
-          const chiaveRecord = `${r.regione}|${mese}|${r.target_t}`;
-          if (!consumiPerRecord.has(chiaveRecord)) consumiPerRecord.set(chiaveRecord, new Set());
-          consumiPerRecord.get(chiaveRecord).add(k.split('|')[0]);
+        // Quali righe di Target & Status hanno alimentato questo raccoglitore: si
+        // guarda il NOME sotto cui sono scritte, che e' la loro identita'.
+        for (const rec of recordDelRaccoglitore(targetMensili.filter(x => x.mese === mese), nome)) {
+          const nomeTarget = pulisciNome(rec.raccoglitore);
+          if (!nomeTarget) continue;
+          if (!consumiPerNomeTarget.has(nomeTarget)) consumiPerNomeTarget.set(nomeTarget, new Set());
+          consumiPerNomeTarget.get(nomeTarget).add(nome);
         }
         return t.target_kg;
       },
     });
 
-    const targetAmbigui = [...consumiPerRecord.entries()]
+    // Ambiguo solo quando lo STESSO nome di target ha alimentato piu' soggetti
+    // diversi del portale: quello e' il caso in cui i chili si contano due volte.
+    const targetAmbigui = [...consumiPerNomeTarget.entries()]
       .filter(([, chi]) => chi.size > 1)
-      .map(([record, chi]) => ({ record, raccoglitori: [...chi] }));
+      .map(([nomeTarget, chi]) => ({ target: nomeTarget, raccoglitori: [...chi] }));
 
     return Response.json({
       andamento: conTarget,
