@@ -37,7 +37,10 @@ const SINONIMI_PARAMETRI = {
 const PARAMETRI = {
   anno: { type: 'integer' },
   mese: { type: 'string' },
-  mese_da: { type: 'integer' },
+  // Piu' mesi in una domanda sola: "nei mesi di luglio e agosto", "da marzo a
+  // maggio". Prima c'era mese_da, che nessuno strumento accettava e che finiva
+  // sempre fra i parametri ignorati.
+  mesi: { type: 'array', items: { type: 'string' } },
   settimana: { type: 'integer' },
   canale: { type: 'string', enum: CANALI },
   raggruppa: { type: 'string', enum: ['raccoglitore', 'provincia', 'regione', 'classe', 'destinazione', 'mese'] },
@@ -73,6 +76,7 @@ export const SCHEMA_PIANO = {
       properties: {
         anno: { type: 'integer' },
         mese: { type: 'string' },
+        mesi: { type: 'array', items: { type: 'string' } },
         settimana: { type: 'integer' },
         descrizione: { type: 'string' },
       },
@@ -95,6 +99,15 @@ export const SCHEMA_PIANO = {
       },
     },
     tabella_utile: { type: 'boolean' },
+    // Se per rispondere serve la NORMA, oltre ai numeri. Da questo dipende se si
+    // cerca online, se si caricano le schede del corso e se la risposta porta
+    // l'apparato delle fonti: una domanda sui dati non ne ha bisogno, e con la
+    // ricerca online accesa usciva generica e piena di link.
+    //
+    // Non e' obbligatorio, e la mancanza vale come "serve": si sbaglia dal lato
+    // delle fonti, perche' una risposta normativa senza fonti e' molto peggio di
+    // una risposta sui dati con un link di troppo.
+    serve_normativa: { type: 'boolean' },
     ragionamento: { type: 'string' },
   },
   required: ['strumenti'],
@@ -114,11 +127,13 @@ export function istruzioniPiano(catalogo, domanda, oggi, storia = []) {
     'Regole:',
     '- Scegli il numero piu' + '̀ piccolo di strumenti che basta a rispondere. Se ne serve uno solo, uno solo.',
     '- COMPILA SEMPRE I PARAMETRI. Sono la parte piu\' importante del tuo lavoro: uno strumento senza parametri risponde sull\'anno intero e su tutta la rete, e quasi mai e\' la domanda. Se la domanda dice un mese, metti mese; se dice una settimana, metti settimana; se nomina un raccoglitore, un impianto, un fornitore o un produttore, mettilo nel parametro giusto. Riempi anche periodo, cosi\' resta scritto di che cosa si parla.',
+    '- Se la domanda parla di PIU\' MESI ("luglio e agosto", "da marzo a maggio", "nel primo trimestre") scrivili tutti in mesi, uno per voce, con il nome per esteso: un intervallo va aperto mese per mese. Per un mese solo usa mese. Non scrivere mai un intervallo dentro mese: verrebbe letto come un mese che non esiste.',
     '- Il canale va sempre deciso: RETE, ACI ed EXTRA RACCOLTA sono commesse indipendenti e non si sommano mai. Se la domanda non lo dice e parla di raccolta, e\' RETE; se parla di autodemolizione o ACI, e\' ACI. Se la domanda chiede "in tutto", "complessivamente" o riguarda piu\' canali, metti in canali tutti quelli che servono: lo strumento verra\' eseguito una volta per canale e i numeri resteranno distinti.',
     '- I target sono solo della rete: per l\'ACI non esistono.',
     '- Per "quanto abbiamo raccolto" usa raccolto, non report_mensile: raccolto da il totale e il dettaglio di un canale e di un periodo. Usa report_mensile solo se la domanda chiede proprio le pivot del Report Mensile o il confronto fra i mesi.',
     '- Se la domanda cita un numero di formulario o un ID ordine, usa cerca_movimento.',
     '- Se la domanda non riguarda i dati del gestionale ma una norma, una procedura o il corso, lascia strumenti vuoto.',
+    '- serve_normativa: metti falso quando la domanda chiede SOLO numeri o stato dei nostri dati ("quanto ha raccolto", "quanti ordini sono aperti", "come e\' andata la quadratura", "chi e\' sotto target"): la risposta sara\' il numero e non serve ne\' cercare online ne\' citare norme. Metti vero quando c\'entra una regola, un obbligo, una scadenza di legge, una sanzione, una procedura del portale o il corso per responsabile tecnico, anche se la domanda chiede anche dei numeri. Nel dubbio metti vero: una risposta normativa senza fonti e\' un danno, un link di troppo su un numero e\' un fastidio.',
     '- Non inventare parametri che non esistono nello strumento.',
     '- tabella_utile: vero se la risposta sara\' un elenco che conviene consegnare anche come file.',
     '',
@@ -189,7 +204,10 @@ export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
     }
     if (ok.has('anno') && base.anno == null) base.anno = Number(per.anno) || annoOggi;
     if (ok.has('mese') && !base.mese && per.mese && !senzaMese) base.mese = per.mese;
-    if (senzaMese) delete base.mese;
+    // Anche i mesi multipli viaggiano dal periodo allo strumento, e se la domanda
+    // parla dell'anno se ne vanno insieme al mese singolo.
+    if (ok.has('mesi') && !base.mesi && Array.isArray(per.mesi) && per.mesi.length && !senzaMese) base.mesi = per.mesi;
+    if (senzaMese) { delete base.mese; delete base.mesi; }
     if (ok.has('settimana') && base.settimana == null && per.settimana) base.settimana = Number(per.settimana);
     // Il canale, che in fatturazione e tariffe si chiama tipologia.
     const campoCanale = ok.has('canale') ? 'canale' : (ok.has(SINONIMI_CANALE[nome] || '') ? SINONIMI_CANALE[nome] : '');

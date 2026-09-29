@@ -21,7 +21,7 @@
 
 import { fetchAll } from "./fetchAll.ts";
 import { contaFormulari } from "./formulari.ts";
-import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
+import { normalizzaRagioneSociale, risolviNome } from "./normalizzaRagioneSociale.ts";
 import { getRegioneFromProvincia } from "./dataEnrichment.ts";
 import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
@@ -120,32 +120,105 @@ function dateObbligatorie(righe, modulo = '') {
  * parte i terminati dello stesso luogo con le date obbligatorie da sistemare, di
  * qualunque periodo: chi non ha la fine trasporto il periodo non lo ha proprio.
  */
-async function movimenti(base44, { canale, anno, mese, provincia, regione, raccoglitore, destinazione }) {
+async function movimenti(base44, { canale, anno, mese, mesi, provincia, regione, raccoglitore, destinazione }) {
   const svc = base44.asServiceRole.entities;
   const entita = canale === 'ACI' ? 'PrimariaAci' : canale === 'EXTRA_RACCOLTA' ? 'ExtraRaccolta' : 'PrimariaRete';
   const tutte = await fetchAll(svc[entita], { stato: 'terminato' });
-  const meseIdx = mese ? MESI.findIndex(m => m.toLowerCase() === String(mese).toLowerCase()) : -1;
+  const periodo = mesiChiesti(mese, mesi);
   const chiave = (v) => normalizzaRagioneSociale(v);
-  const delLuogo = tutte.filter(r => {
+  // Il canale prima di tutto: i nomi da riconoscere sono quelli che compaiono in
+  // QUESTO archivio, non in tutti.
+  const delCanale = tutte.filter(r => {
     if (!terminato(r)) return false;
     // Nell'extra raccolta lo stesso archivio tiene la raccolta dal produttore e
     // i trasferimenti successivi: il raccolto sono solo le primarie, altrimenti
     // il materiale si conta due volte, una quando arriva e una quando si sposta.
     if (canale === 'EXTRA_RACCOLTA' && String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'primaria') return false;
+    return true;
+  });
+
+  // IL NOME SCRITTO NELLA DOMANDA CONTRO IL NOME IN ARCHIVIO. Fino al 29/09/2026
+  // qui c'era un confronto secco fra nomi normalizzati: "Silvano" contro
+  // "SILVANO RENATO" dava zero righe, e lo zero usciva come "ha raccolto 0,00 t".
+  // Adesso il nome si riconosce, e quando non si riconosce - o quando e' ambiguo,
+  // perche' in archivio ci sono due fornitori che ci somigliano - non si filtra
+  // per un nome inventato: si restituisce l'esito, e chi chiama lo DICE.
+  const soggetti = {};
+  const chiaviDi = (campo, chiesto) => {
+    if (!chiesto) return null;
+    const esito = risolviNome(delCanale.map(r => r[campo]), chiesto);
+    soggetti[campo === 'trasportatore' ? 'raccoglitore' : 'destinazione'] = { chiesto: String(chiesto), ...esito };
+    return new Set(esito.trovato ? esito.chiavi : []);
+  };
+  const chiaviRacc = chiaviDi('trasportatore', raccoglitore);
+  const chiaviDest = chiaviDi('destinazione', destinazione);
+
+  const delLuogo = delCanale.filter(r => {
     if (provincia && String(r.provincia || '').toUpperCase() !== String(provincia).toUpperCase()) return false;
     if (regione && normalizzaRagioneSociale(r.regioni || r.regione || getRegioneFromProvincia(r.provincia)) !== normalizzaRagioneSociale(regione)) return false;
-    if (raccoglitore && chiave(r.trasportatore) !== chiave(raccoglitore)) return false;
-    if (destinazione && chiave(r.destinazione) !== chiave(destinazione)) return false;
+    if (chiaviRacc && !chiaviRacc.has(chiave(r.trasportatore))) return false;
+    if (chiaviDest && !chiaviDest.has(chiave(r.destinazione))) return false;
     return true;
   });
   const righe = delLuogo.filter(r => {
     const m = meseDi(r.trasporto_finito_il, anno);
     if (m < 0) return false;
-    if (meseIdx >= 0 && m !== meseIdx) return false;
+    if (periodo.indici.size && !periodo.indici.has(m)) return false;
     return true;
   });
   const modulo = canale === 'ACI' ? 'primarie ACI' : canale === 'EXTRA_RACCOLTA' ? 'extra raccolta, raccolte' : 'primarie di rete';
-  return { righe, date: dateObbligatorie(delLuogo, modulo) };
+  return { righe, date: dateObbligatorie(delLuogo, modulo), soggetti, periodo };
+}
+
+/**
+ * Quali mesi chiede la domanda: uno, piu' d'uno, o nessuno (e allora e' l'anno).
+ *
+ * Il pianificatore scrive il mese in tutti i modi in cui lo dice la domanda:
+ * "agosto", ["luglio","agosto"], "luglio e agosto", "luglio-agosto". Fino al
+ * 29/09/2026 ne veniva riconosciuto uno solo, e "nei mesi di luglio e agosto"
+ * diventava in silenzio tutto l'anno: il numero era piu' grande del vero e
+ * nessuno lo diceva.
+ *
+ * Restituisce { indici: Set, nomi: [], ignorati: [] }: gli indici per filtrare, i
+ * nomi per scrivere il periodo, e cio' che non si e' capito, perche' va detto.
+ *
+ * Funzione pura: le prove la chiamano senza toccare la piattaforma.
+ */
+export function mesiChiesti(mese, mesi) {
+  const indiceDi = (t) => MESI.findIndex(m => m.toLowerCase() === String(t || '').trim().toLowerCase());
+  const indici = new Set();
+  const ignorati = [];
+
+  const leggi = (testo) => {
+    const t = String(testo ?? '').trim();
+    if (!t) return;
+    // UN INTERVALLO SI APRE TUTTO. "da marzo a maggio" sono tre mesi, non due:
+    // prendere solo gli estremi darebbe un numero piu' piccolo del vero senza
+    // dirlo. Per questo "a" e "-" non si trattano come separatori di elenco.
+    const range = t.match(/^(?:dal?\s+)?([a-zA-Zàèéìòù]+)\s*(?:-|–|—|→|>|\bal?\b|\bfino\s+a\b)\s*([a-zA-Zàèéìòù]+)$/i);
+    if (range) {
+      const da = indiceDi(range[1]);
+      const al = indiceDi(range[2]);
+      if (da >= 0 && al >= 0) {
+        // "da dicembre a febbraio" scavalca il capodanno, e qui si lavora su un
+        // anno solo: invertirlo darebbe da febbraio a dicembre, cioe' undici mesi
+        // al posto di tre. Non si indovina: si dice che non si e' capito.
+        if (da > al) { ignorati.push(t); return; }
+        for (let i = da; i <= al; i++) indici.add(i);
+        return;
+      }
+    }
+    // Altrimenti e' un elenco: "luglio e agosto", "luglio, agosto".
+    const pezzi = t.split(/\s*(?:,|;|\/|\be\b|\bed\b)\s*/i).map(p => p.trim()).filter(Boolean);
+    for (const p of pezzi) {
+      const i = indiceDi(p);
+      if (i < 0) ignorati.push(p);
+      else indici.add(i);
+    }
+  };
+
+  for (const v of [...(Array.isArray(mesi) ? mesi : [mesi]), ...(Array.isArray(mese) ? mese : [mese])]) leggi(v);
+  return { indici, nomi: MESI.filter((_m, i) => indici.has(i)), ignorati };
 }
 
 /**
@@ -339,6 +412,7 @@ export const STRUMENTI = [
     descrizione: 'Quanto si e\' raccolto in un canale e in un periodo, con il dettaglio per raccoglitore, provincia, regione, classe o destinazione. Il canale va sempre indicato: rete, ACI ed extra raccolta non si sommano.',
     parametri: {
       canale: 'RETE, ACI o EXTRA_RACCOLTA, obbligatorio', anno: 'numero', mese: 'nome del mese, opzionale',
+      mesi: 'elenco di nomi di mese, per una domanda su piu\' mesi ("luglio e agosto", "da marzo a maggio": scrivili tutti)',
       provincia: 'sigla, opzionale', regione: 'opzionale', raccoglitore: 'opzionale', destinazione: 'opzionale',
       raggruppa: 'raccoglitore, provincia, regione, classe, destinazione o mese',
     },
@@ -350,23 +424,38 @@ export const STRUMENTI = [
       const canale = canaleChiesto(p.canale) || 'RETE';
       const avvisoCanale = canaleChiesto(p.canale) ? ''
         : `${p.canale ? `"${p.canale}" non e' un canale` : 'Canale non indicato'}: questi sono i numeri della RETE. ACI ed extra raccolta non si sommano: per loro rifai la domanda col canale.`;
-      // Un mese che non esiste non deve passare in silenzio per "tutto l'anno".
-      const meseValido = p.mese ? MESI.find(m => m.toLowerCase() === String(p.mese).toLowerCase()) : '';
-      const meseIgnorato = p.mese && !meseValido ? String(p.mese) : '';
-      const { righe, date } = await movimenti(base44, { ...p, mese: meseValido, anno, canale });
+      const { righe, date, soggetti, periodo } = await movimenti(base44, { ...p, anno, canale });
       const campo = { raccoglitore: 'trasportatore', provincia: 'provincia', regione: 'regioni', classe: 'classe', destinazione: 'destinazione', mese: 'mese' }[p.raggruppa] || 'trasportatore';
       const totale = righe.reduce((s, r) => s + peso(r), 0);
+      // Un mese che non esiste non deve passare in silenzio per "tutto l'anno".
+      const avvisoPeriodo = periodo.ignorati.length
+        ? `${periodo.ignorati.map(x => `"${x}"`).join(', ')} non ${periodo.ignorati.length === 1 ? 'e\' un mese' : 'sono mesi'}: ${periodo.nomi.length ? `ho preso ${periodo.nomi.join(', ')} ${anno}` : `ho preso tutto l'anno ${anno}`}.`
+        : '';
+      // UN NOME CHE NON SI RICONOSCE NON FA ZERO. Un soggetto chiesto e non
+      // trovato, o ambiguo, rende il numero non calcolabile: scrivere 0,00 t
+      // sarebbe una risposta falsa, e chi legge non ha modo di accorgersene.
+      const nonRisolti = Object.entries(soggetti).filter(([, e]) => !e.trovato);
+      const avvisoSoggetto = nonRisolti.map(([ruolo, e]) => (e.come === 'ambiguo'
+        ? `"${e.chiesto}" non basta a capire di chi si parla: in archivio ci sono ${e.alternative.join(', ')}. Rifai la domanda con il nome per esteso: sono soggetti diversi e non si sommano.`
+        : `"${e.chiesto}" non risulta fra i ${ruolo === 'raccoglitore' ? 'raccoglitori' : 'siti di destinazione'} del canale ${canale}${e.alternative.length ? `. Forse intendevi: ${e.alternative.join(', ')}` : ''}.`)).join(' ');
+      const calcolabile = nonRisolti.length === 0;
+      const risolti = Object.entries(soggetti).filter(([, e]) => e.trovato)
+        .map(([ruolo, e]) => `${ruolo}: ${e.nomi[0]}${e.come === 'esatto' ? '' : ` (scritto "${e.chiesto}")`}`);
       return {
         fonte: `Formulari terminati, canale ${canale}`,
-        periodo: meseValido ? `${meseValido} ${anno}` : `anno ${anno}`,
+        periodo: periodo.nomi.length ? `${periodo.nomi.join(', ')} ${anno}` : `anno ${anno}`,
         dati_al: oggiRoma(),
         dati: {
-          canale, formulari: contaFormulari(righe), tonnellate: t3(totale),
+          canale,
+          formulari: calcolabile ? contaFormulari(righe) : null,
+          tonnellate: calcolabile ? t3(totale) : null,
+          ...(risolti.length ? { soggetto_riconosciuto: risolti.join('; ') } : {}),
+          ...(avvisoSoggetto ? { avviso_soggetto: avvisoSoggetto, numero_non_calcolabile: 'Non scrivere nessun numero per questo soggetto: non e\' zero, e\' che non si sa di chi si parla.' } : {}),
           ...(avvisoCanale ? { avviso_canale: avvisoCanale } : {}),
           ...(date ? { date_obbligatorie_da_sistemare: date } : {}),
-          ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso tutto l'anno ${anno}.` } : {}),
+          ...(avvisoPeriodo ? { avviso_periodo: avvisoPeriodo } : {}),
           per: p.raggruppa || 'raccoglitore',
-          dettaglio: elenco(perChiave(righe, campo), 60),
+          dettaglio: calcolabile ? elenco(perChiave(righe, campo), 60) : { quanti: 0, mostrate: 0, righe: [] },
         },
       };
     },

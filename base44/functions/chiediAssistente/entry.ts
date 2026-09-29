@@ -86,6 +86,25 @@ const SCHEMA_RISPOSTA = {
   required: ['risposta'],
 };
 
+// LO SCHEMA DI UNA DOMANDA SUI DATI. Senza i campi fonti e novita_normative: e'
+// l'unico modo di spegnere i link alla radice, perche' un campo che c'e' il
+// modello lo riempie, e riempirlo lo porta nel registro del consulente che cita
+// invece che del responsabile tecnico che risponde (richiesta dell'utente,
+// 29/09/2026: "non mi risponde in maniera puntuale ... e mi invia link presi
+// online"). I moduli del gestionale interrogati restano registrati sotto la
+// risposta dalla chat, come sempre.
+const SCHEMA_RISPOSTA_DATI = {
+  type: 'object',
+  properties: {
+    risposta: SCHEMA_RISPOSTA.properties.risposta,
+    dati_mancanti: SCHEMA_RISPOSTA.properties.dati_mancanti,
+    certezza: SCHEMA_RISPOSTA.properties.certezza,
+    precisazioni_utente: SCHEMA_RISPOSTA.properties.precisazioni_utente,
+    file_da_creare: SCHEMA_RISPOSTA.properties.file_da_creare,
+  },
+  required: ['risposta'],
+};
+
 const comeOggetto = (v) => {
   if (v && typeof v === 'object') return v;
   try { return JSON.parse(String(v)); } catch { return { risposta: String(v || '') }; }
@@ -205,11 +224,21 @@ export default async function(req) {
     // Uno strumento che va in errore non consegna dati: se sono andati storti
     // tutti, la domanda resterebbe senza numeri anche potendo avere il riepilogo.
     const conDati = risultati.filter(r => !r.errore).length;
+    // SOLO DATI: la domanda ha avuto i suoi numeri dagli strumenti e il
+    // pianificatore ha detto che la norma non c'entra. Allora niente ricerca
+    // online, niente schede del corso, niente apparato delle fonti: la risposta
+    // e' il numero.
+    //
+    // Il campo serve_normativa non e' obbligatorio nello schema del piano: se
+    // manca, vale come "serve". Si sbaglia sempre dal lato delle fonti, perche'
+    // una risposta normativa senza fonti e' molto peggio di una risposta sui dati
+    // con un link di troppo.
+    const soloDati = conDati > 0 && !!piano && piano.serve_normativa === false;
     const [approvate, dati, corso] = await Promise.all([
       vociApprovate(base44),
       analisi.dati && !conDati ? situazioneGestionale(base44, oggi).catch(e => `Dati del gestionale non disponibili: ${e.message || e}`) : Promise.resolve(''),
       // Schede del corso RT pertinenti: solo per le domande sulle norme e per i quiz.
-      analisi.norma ? materialePertinente(base44, quiz ? `${quiz.domanda} ${(quiz.risposte || []).join(' ')}` : domanda).catch(() => ({ testo: '', fonti: [] })) : Promise.resolve({ testo: '', fonti: [] }),
+      analisi.norma && !soloDati ? materialePertinente(base44, quiz ? `${quiz.domanda} ${(quiz.risposte || []).join(' ')}` : domanda).catch(() => ({ testo: '', fonti: [] })) : Promise.resolve({ testo: '', fonti: [] }),
     ]);
 
     const storia = precedenti
@@ -225,11 +254,23 @@ export default async function(req) {
       '',
       `Data di oggi: ${oggi}. Utente: ${user.full_name || user.email || ''}.`,
       '',
-      REGOLE_FONTI,
+      ...(soloDati ? [] : [REGOLE_FONTI]),
       '',
       'REGOLE',
-      `1. Parti dalla base di conoscenza qui sotto, verificata alla data indicata voce per voce. Per le domande sulle norme controlla online sulle fonti ufficiali (${FONTI_UFFICIALI.join('; ')}) se ci sono novita' successive alla data della voce: se ne trovi una certa, applicala, dillo chiaramente nella risposta e riportala in novita_normative con voce_id della voce da aggiornare (vuoto se serve una voce nuova), data_norma (AAAA-MM-GG), fonte e testo_proposto, che deve essere il testo COMPLETO della voce aggiornata, conservando tutto cio' che resta valido. In novita_normative vanno solo norme nuove: mai riassunti, consigli, lettere o norme gia' citate nella voce.`,
-      '2. Ogni affermazione normativa deve avere una fonte precisa in fonti (norma e articolo, delibera, FAQ o sentenza) con la data di verifica. Non inventare numeri di articolo, date, importi o scadenze: se non sei sicuro dillo e spiega come verificarlo.',
+      ...(soloDati ? [
+        // COME SI RISPONDE A UNA DOMANDA SUI NUMERI (richiesta dell'utente,
+        // 29/09/2026: la voleva "abbastanza secca e specifica", da responsabile
+        // tecnico e non da consulente). Queste righe sostituiscono l'apparato
+        // delle fonti, che su una domanda sui dati non serve e allunga la
+        // risposta senza aggiungerci niente.
+        'Questa e\' una domanda sui DATI della commessa, non sulle norme: rispondi come un responsabile tecnico che ha i numeri davanti.',
+        'D. Il numero va nella PRIMA RIGA, con la sua etichetta: soggetto, canale e periodo. Esempio: "EMMESSE, rete, agosto 2026: 412,30 t in 58 formulari." Poi, solo se aggiungono qualcosa, due o tre righe di dettaglio. Niente premesse, niente "in base ai dati del gestionale", niente ripetizione della domanda.',
+        'D-bis. Non citare norme, non linkare siti e non consigliare di verificare su Normattiva: qui non c\'entrano. Se per rispondere servisse una norma, dillo in una riga e fermati.',
+        'D-ter. Se un dato porta avviso_soggetto o numero_non_calcolabile, NON scrivere nessun numero per quel soggetto: riporta l\'avviso come prima riga e chiedi il nome per esteso. Zero non e\' la risposta: la risposta e\' che non si sa di chi si parla.',
+        'D-quater. Non aggiungere consigli, piani d\'azione o raccomandazioni che non sono stati chiesti. Se l\'utente vuole sapere quanto ha raccolto un fornitore, vuole sapere quanto ha raccolto quel fornitore.',
+      ] : []),
+      ...(soloDati ? [] : [`1. Parti dalla base di conoscenza qui sotto, verificata alla data indicata voce per voce. Per le domande sulle norme controlla online sulle fonti ufficiali (${FONTI_UFFICIALI.join('; ')}) se ci sono novita' successive alla data della voce: se ne trovi una certa, applicala, dillo chiaramente nella risposta e riportala in novita_normative con voce_id della voce da aggiornare (vuoto se serve una voce nuova), data_norma (AAAA-MM-GG), fonte e testo_proposto, che deve essere il testo COMPLETO della voce aggiornata, conservando tutto cio' che resta valido. In novita_normative vanno solo norme nuove: mai riassunti, consigli, lettere o norme gia' citate nella voce.`]),
+      ...(soloDati ? [] : ['2. Ogni affermazione normativa deve avere una fonte precisa in fonti (norma e articolo, delibera, FAQ o sentenza) con la data di verifica. Non inventare numeri di articolo, date, importi o scadenze: se non sei sicuro dillo e spiega come verificarlo.']),
       '3. Per le domande sui dati usa solo i DATI DEL GESTIONALE forniti. Ogni numero che scrivi deve venire da li\', e accanto va detto da dove: lo strumento, il periodo e la data del dato. Se un dato manca dillo apertamente, mettilo in dati_mancanti con la sezione del gestionale dove si trova (Target & Status, Assegnati, Verifiche, Giacenze, Omologhe, Dichiarazioni RENTRI, Qualifica Fornitori, Fatturazione, Predittivita Secondarie (solo rete), To-Do List) e non stimarlo: una risposta che dice "questo non ce l\'ho" e\' utile, una che tira a indovinare no.',
       '3-ter. Rete, ACI ed extra raccolta sono commesse indipendenti: non sommarle mai in un unico numero e di\' sempre di quale canale stai parlando. I target sono solo della rete.',
       // Regola dell'utente del 22/09/2026: la predittivita' e' della rete e basta.
@@ -249,10 +290,10 @@ export default async function(req) {
       '3-quater. In fonti metti le norme e i documenti: i moduli del gestionale che hai interrogato sono gia\' registrati sotto la risposta, non ripeterli. Quando la risposta e\' un elenco lungo, chiudi offrendo di prepararlo in Excel o in PDF: il file si crea solo se l\'utente lo chiede.',
       '3-bis. Se nella domanda o nella conversazione l\'utente corregge una tua risposta o afferma una regola ("non e\' cosi\'", "da noi si fa cosi\'", "il decreto dice che..."), tienine conto subito nella risposta e riportala in precisazioni_utente: tipo regola_interna se e\' una regola dell\'azienda, faq se chiarisce come si applica una norma; testo chiaro e autosufficiente. Diventera\' una proposta da approvare. Mai per una semplice domanda e mai per cio\' che la base di conoscenza dice gia\': in quei casi precisazioni_utente resta vuoto. Se contrasta con una norma verificata, spiegalo con garbo citando la fonte.',
       '4. Le voci dell\'area gestionale sono regole della direzione SMOCO: applicale. Distingui sempre gli obblighi di legge dalle regole interne e dalla prassi.',
-      '5. Scrivi in italiano semplice e pratico, in markdown. Prima la risposta in una o due frasi, poi i dettagli utili; elenchi solo se aiutano; niente formule di cortesia ne\' ripetizioni della domanda.',
+      ...(soloDati ? [] : ['5. Scrivi in italiano semplice e pratico, in markdown. Prima la risposta in una o due frasi, poi i dettagli utili; elenchi solo se aiutano; niente formule di cortesia ne\' ripetizioni della domanda.']),
       '6. certezza: alta se la risposta poggia su norme verificate o su dati presenti; media se richiede interpretazione; bassa se mancano elementi, e in quel caso consiglia di confermare con il consulente ambientale o con l\'ente competente.',
-      '7. Per decisioni con conseguenze legali importanti ricorda di verificare il testo vigente su Normattiva.',
-      '8. Le schede del CORSO RT sono materiale didattico di qualche anno fa: usale per spiegare concetti e contesto, ma prevalgono sempre la base di conoscenza verificata e le norme vigenti. Se una scheda contrasta con la norma attuale segui la norma attuale e fai notare la differenza; se la usi citala in fonti come "Corso RT" con modulo e anno del materiale.',
+      ...(soloDati ? [] : ['7. Per decisioni con conseguenze legali importanti ricorda di verificare il testo vigente su Normattiva.']),
+      ...(soloDati ? [] : ['8. Le schede del CORSO RT sono materiale didattico di qualche anno fa: usale per spiegare concetti e contesto, ma prevalgono sempre la base di conoscenza verificata e le norme vigenti. Se una scheda contrasta con la norma attuale segui la norma attuale e fai notare la differenza; se la usi citala in fonti come "Corso RT" con modulo e anno del materiale.']),
       ...(quiz ? [
         '',
         'ESERCITAZIONE',
@@ -282,8 +323,12 @@ export default async function(req) {
 
     const esito = comeOggetto(await base44.asServiceRole.integrations.Core.InvokeLLM({
       prompt,
-      add_context_from_internet: analisi.norma,
-      response_json_schema: SCHEMA_RISPOSTA,
+      // La ricerca online era accesa da un elenco di parole che contiene il
+      // vocabolario del mestiere: "formulari", "classe", "trasporto", "serve".
+      // Una domanda sui numeri non ha bisogno di internet, e con internet
+      // acceso la risposta usciva generica e piena di link.
+      add_context_from_internet: analisi.norma && !soloDati,
+      response_json_schema: soloDati ? SCHEMA_RISPOSTA_DATI : SCHEMA_RISPOSTA,
     }));
 
     const fonti = (Array.isArray(esito.fonti) ? esito.fonti : [])
