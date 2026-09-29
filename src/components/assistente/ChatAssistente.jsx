@@ -12,7 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { dataOra, nomeUtente } from '@/lib/target';
-import { Send, Loader2, Plus, Search, ThumbsUp, ThumbsDown, Globe, Database, BookOpen, MessageSquare, AlertTriangle, RefreshCw, Volume2, VolumeX, Mic, MicOff, Square, Paperclip, X, Download, FileText } from 'lucide-react';
+import { eliminaParti } from '@/lib/testoLungo';
+import { Send, Loader2, Plus, Search, ThumbsUp, ThumbsDown, Globe, Database, BookOpen, MessageSquare, AlertTriangle, RefreshCw, Volume2, VolumeX, Mic, MicOff, Square, Paperclip, X, Download, FileText, Trash2 } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
 import { dataServer } from '@/lib/utils';
 import { ACCETTATI, MAX_ALLEGATI, leggiAllegato, scaricaFileEcoTyna, nomeFile, ETICHETTE_FORMATO } from '@/lib/fileEcoTyna';
@@ -286,6 +287,7 @@ export default function ChatAssistente() {
   const [invio, setInvio] = useState(false);
   const [cerca, setCerca] = useState('');
   const [valuta, setValuta] = useState(null);
+  const [eliminando, setEliminando] = useState(null);
   const fine = useRef(null);
   const voce = useVoce();
   const ascolto = useAscolto((t, definitivo) => { setTesto(t); if (definitivo) setTesto(t.trim()); });
@@ -333,6 +335,32 @@ export default function ChatAssistente() {
     }
   }, []);
   useEffect(() => { carica(); }, [carica]);
+
+  // Cancellare una vecchia chat (richiesta dell'utente, 30/09/2026). Una
+  // conversazione e' un gruppo di domande con lo stesso conversazione_id: si
+  // cancellano tutte, e con loro le parti di testo lungo se ce ne fossero.
+  // Non si cancella niente di calcolato: le domande sono la cronologia di una
+  // chiacchierata, non un dato della commessa.
+  const eliminaConversazione = async (c) => {
+    const quante = c.domande.length;
+    if (!window.confirm(`Elimino questa conversazione con ${quante} ${quante === 1 ? 'domanda' : 'domande'}? Non si puo' annullare.`)) return;
+    setEliminando(c.id);
+    try {
+      for (const d of c.domande) {
+        if (String(d.id).startsWith('tmp-')) continue;
+        await eliminaParti('DomandaAssistente', d.id).catch(() => {});
+        await base44.entities.DomandaAssistente.delete(d.id);
+      }
+      if (attiva === c.id) setAttiva(null);
+      await carica();
+      toast({ title: 'Conversazione eliminata' });
+    } catch (e) {
+      toast({ title: 'Non sono riuscito a eliminarla', description: e.message || String(e), variant: 'destructive' });
+      await carica();
+    } finally {
+      setEliminando(null);
+    }
+  };
 
   const conversazioni = useMemo(() => {
     const mappa = new Map();
@@ -429,18 +457,33 @@ export default function ChatAssistente() {
         ) : (
           <div className="space-y-1 max-h-72 lg:max-h-none overflow-y-auto">
             {conversazioni.map(c => (
-              <button
+              <div
                 key={c.id}
-                type="button"
-                onClick={() => setAttiva(c.id)}
-                className={`w-full text-left rounded-lg px-2.5 py-2 text-sm hover:bg-muted ${attiva === c.id ? 'bg-muted font-medium' : ''}`}
+                className={`group relative rounded-lg hover:bg-muted ${attiva === c.id ? 'bg-muted' : ''}`}
               >
-                <span className="flex items-start gap-2">
-                  <MessageSquare className="w-3.5 h-3.5 mt-0.5 shrink-0 text-muted-foreground" />
-                  <span className="line-clamp-2">{c.titolo}</span>
-                </span>
-                <span className="block pl-5 text-xs text-muted-foreground">{dataOra(c.ultima)} · {c.domande.length} {c.domande.length === 1 ? 'domanda' : 'domande'}</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setAttiva(c.id)}
+                  className={`w-full text-left px-2.5 py-2 pr-9 text-sm ${attiva === c.id ? 'font-medium' : ''}`}
+                >
+                  <span className="flex items-start gap-2">
+                    <MessageSquare className="w-3.5 h-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+                    <span className="line-clamp-2">{c.titolo}</span>
+                  </span>
+                  <span className="block pl-5 text-xs text-muted-foreground">{dataOra(c.ultima)} · {c.domande.length} {c.domande.length === 1 ? 'domanda' : 'domande'}</span>
+                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    title="Elimina questa conversazione"
+                    disabled={eliminando === c.id}
+                    onClick={() => eliminaConversazione(c)}
+                    className="absolute top-1.5 right-1.5 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-red-600 hover:bg-background"
+                  >
+                    {eliminando === c.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         )}
