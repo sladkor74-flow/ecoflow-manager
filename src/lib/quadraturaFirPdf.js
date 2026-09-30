@@ -229,7 +229,7 @@ export async function esportaQuadraturaFirPdf(q, esito, lettura) {
 
   // --- totali per flusso ---
   sezione('Totali per flusso',
-    'Ogni canale per conto suo: rete, ACI ed extra raccolta hanno contratti, tariffe e obiettivi diversi e non si sommano fra loro. Il gestionale conta i formulari terminati con la fine trasporto dentro la settimana e il peso effettivo.');
+    'Ogni canale per conto suo: rete e ACI hanno contratti, tariffe e obiettivi diversi e non si sommano fra loro. Il gestionale conta i formulari terminati con la fine trasporto dentro la settimana e il peso effettivo.');
   tabella([
     { titolo: 'Flusso', peso: 26 }, { titolo: 'Canale', peso: 14 },
     { titolo: 'WINSINFO\nFIR · kg', peso: 15, allinea: 'right' },

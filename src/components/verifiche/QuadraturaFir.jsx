@@ -583,8 +583,11 @@ export default function QuadraturaFir({ isAdmin }) {
         <span>
           Carica la stampa settimanale del conteggio e della somma dei FIR: le due pivot di WINSINFO e del portale Ecotyre si confrontano fra loro
           e con il gestionale, che conta i formulari terminati con la fine trasporto dentro la settimana. Va bene il PDF, una foto o il file Excel
-          da cui hai stampato. Il numero di settimana si legge dal titolo della stampa; se non c&apos;è, vale quello scelto qui sopra.
-          Rete, ACI ed extra raccolta restano separati e non si sommano mai fra loro. Nella quadratura restano soltanto i numeri letti e l&apos;esito, e quaranta giorni dopo il caricamento
+          da cui hai stampato. La settimana è quella scelta qui sopra: se sulla stampa ne è scritta un&apos;altra, il confronto te lo dice.
+          Si quadrano quattro flussi — primarie e secondarie, di rete e di ACI — e i due canali restano separati e non si sommano mai fra loro.
+          L&apos;extra raccolta non è in questa stampa: è solo di rete, la guarda il gestionale da sé e la dice solo se quella settimana ha movimenti terminati.
+          Se una pivot viene attribuita al flusso sbagliato, la correggi nel menù sotto l&apos;esito e rifai il confronto.
+          Nella quadratura restano soltanto i numeri letti e l&apos;esito, e quaranta giorni dopo il caricamento
           se ne vanno anche quelli: restano il verdetto per canale e la storia scritta, con gli scostamenti che non tornavano. La quadratura non si cancella da sola.
           Un Excel si legge qui nel browser senza caricare niente, mentre un PDF o una foto vengono caricati nell&apos;archivio privato perché l&apos;agente li possa leggere, e cancellati subito dopo.
         </span>
