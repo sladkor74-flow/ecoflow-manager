@@ -1240,3 +1240,16 @@ istruita, e sono state misurate sul codice:
   indovina - invertirlo darebbe undici mesi al posto di tre - e si dice che non si
   e' capito. Prima "nei mesi di luglio e agosto" diventava in silenzio tutto
   l'anno.
+- **La riserva degli "eseguito" si dice sempre.** `movimenti()` legge i terminati
+  e, con una lettura sua, gli ordini in stato "eseguito" dello stesso canale,
+  luogo e periodo: `riservaEseguiti` li restituisce in `riserva_eseguiti` e la
+  regola **D-quinquies** del prompt obbliga a dirli in una riga dopo il numero.
+  **Non si sommano al totale** (il raccolto sono i terminati) **e non si
+  tacciono**: un ordine nel limbo e' materiale davvero ritirato, e il 24/09/2026
+  ne bastava uno per far dire 8.164,18 t dove il file diceva 8.167,80. Se quella
+  seconda lettura non riesce, il totale si dice comunque e la riserva si dichiara
+  `lettura_non_riuscita`: e' il totale che non deve mai mentire. I nomi dei
+  raccoglitori si riconoscono sui terminati **e** sugli "eseguito", altrimenti a
+  chi ha solo ordini nel limbo si risponderebbe "non risulta fra i raccoglitori".
+  Vale anche per `target_raccoglitori`, dove la riserva fa sembrare un
+  raccoglitore piu' indietro di quanto sia. Prove in `prove/riservaEseguiti.mjs`.

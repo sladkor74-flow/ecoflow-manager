@@ -26,7 +26,7 @@ import { chiaveLettura } from "./cacheLetture.ts";
 import { getRegioneFromProvincia } from "./dataEnrichment.ts";
 import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
-import { eTerminato, giornoMovimento } from "./movimenti.ts";
+import { eTerminato, eEseguito, giornoMovimento, riepilogoEseguiti } from "./movimenti.ts";
 import { PIVOT_DEFS, calcolaPivot, MESI } from "./reportMensile.ts";
 import { caricaGestionale, caricamentiAperti, contaDistinti } from "./quadraturaFirDati.ts";
 import { intervalloSettimana, settimanaIso, statoCaricamenti, riepilogoVociDate, voceDate } from "./reportSettimanali.ts";
@@ -117,9 +117,50 @@ function dateObbligatorie(righe, modulo = '') {
 }
 
 /**
+ * LA RISERVA DEGLI ORDINI IN STATO "ESEGUITO".
+ *
+ * A portale un ordine "eseguito" ha tutti i dati inseriti - pesi, formulario,
+ * date - ma nessuno ha premuto il pulsante Chiudi. Parole dell'utente
+ * (24/09/2026): "e' una sorta di limbo che va attenzionata con un warning".
+ *
+ * Il gestionale conta solo i terminati, e fino al 30/09/2026 EcoTyna faceva
+ * altrettanto: un ordine nel limbo abbassava il totale IN SILENZIO. E' accaduto
+ * davvero: il 24/09/2026 il raccolto rete dava 8.164,18 t contro le 8.167,80 t
+ * del file, e mancava un ordine solo (ET26152600, 3.620 kg).
+ *
+ * Non si somma e non si tace: si dice a parte. Sommarla romperebbe la regola
+ * per cui il raccolto sono i terminati, tacerla darebbe un numero piu' basso
+ * del vero senza che nessuno possa accorgersene.
+ *
+ * Un canale per volta, come tutto il resto (regola 3: rete, ACI ed extra
+ * raccolta non si mescolano).
+ */
+function riservaEseguiti(nelPeriodo, senzaFine, nonLetta) {
+  if (nonLetta) {
+    return { lettura_non_riuscita: 'Gli ordini in stato "eseguito" non si sono potuti leggere: non si sa se ci sia una riserva. Il totale puo\' essere piu\' basso del vero. Dillo.' };
+  }
+  const dentro = riepilogoEseguiti(nelPeriodo);
+  const fuori = riepilogoEseguiti(senzaFine);
+  if (!dentro.ordini && !fuori.ordini) return null;
+  return {
+    ...(dentro.ordini ? {
+      ordini: dentro.ordini,
+      formulari: contaFormulari(nelPeriodo),
+      tonnellate: t3(dentro.kg),
+      esempi: dentro.esempi.slice(0, 10).map(o => ({ id_ordine: o.id_ordine, numero_fir: o.numero_fir, tonnellate: t3(o.kg) })),
+    } : {}),
+    ...(fuori.ordini ? { senza_fine_trasporto: { ordini: fuori.ordini, tonnellate: t3(fuori.kg) } } : {}),
+    nota: 'ORDINI IN STATO "ESEGUITO": hanno tutti i dati inseriti ma a portale nessuno ha premuto il pulsante Chiudi, quindi non sono nel totale qui sopra. NON sommarli al totale e NON tacerli: e\' materiale davvero ritirato che oggi non si conta. Si risolvono da soli al prossimo caricamento, quando il portale da\' loro lo stato definitivo (terminato o cancellato). Quelli senza fine trasporto non stanno in nessun mese: si contano a parte perche\' potrebbero appartenere al periodo chiesto.',
+  };
+}
+
+/**
  * Le primarie o le extra di un canale, filtrate per periodo e per luogo, e a
  * parte i terminati dello stesso luogo con le date obbligatorie da sistemare, di
  * qualunque periodo: chi non ha la fine trasporto il periodo non lo ha proprio.
+ *
+ * Oltre alle righe, la riserva degli ordini in stato "eseguito" dello stesso
+ * canale, luogo e periodo: mai sommata, mai taciuta (riservaEseguiti qui sopra).
  */
 /**
  * Un archivio, letto una volta sola per domanda quando c'e' la cache.
@@ -134,19 +175,26 @@ function leggiArchivio(ctx, svc, entita, filtro = null) {
 async function movimenti(base44, { canale, anno, mese, mesi, provincia, regione, raccoglitore, destinazione }, ctx = null) {
   const svc = base44.asServiceRole.entities;
   const entita = canale === 'ACI' ? 'PrimariaAci' : canale === 'EXTRA_RACCOLTA' ? 'ExtraRaccolta' : 'PrimariaRete';
-  const tutte = await leggiArchivio(ctx, svc, entita, { stato: 'terminato' });
+  // I terminati sono il raccolto. Gli "eseguito" sono il limbo del portale e si
+  // leggono a parte, con una lettura sua: sono pochissimi (una pagina sola), e
+  // leggere l'archivio senza filtro per poi dividerli qui vorrebbe dire tirarsi
+  // dentro anche gli assegnati e i cancellati, che sono la maggior parte.
+  // Se questa seconda lettura non riesce, il raccolto si dice comunque e la
+  // riserva si dichiara non letta: e' il totale che non deve mai mentire.
+  const [tutte, tuttiEseguiti] = await Promise.all([
+    leggiArchivio(ctx, svc, entita, { stato: 'terminato' }),
+    leggiArchivio(ctx, svc, entita, { stato: 'eseguito' }).catch(() => null),
+  ]);
   const periodo = mesiChiesti(mese, mesi);
   const chiave = (v) => normalizzaRagioneSociale(v);
+  // Nell'extra raccolta lo stesso archivio tiene la raccolta dal produttore e
+  // i trasferimenti successivi: il raccolto sono solo le primarie, altrimenti
+  // il materiale si conta due volte, una quando arriva e una quando si sposta.
+  const soloPrimarie = (r) => canale !== 'EXTRA_RACCOLTA' || String(r.tipo_movimento || 'primaria').toLowerCase().trim() === 'primaria';
   // Il canale prima di tutto: i nomi da riconoscere sono quelli che compaiono in
   // QUESTO archivio, non in tutti.
-  const delCanale = tutte.filter(r => {
-    if (!terminato(r)) return false;
-    // Nell'extra raccolta lo stesso archivio tiene la raccolta dal produttore e
-    // i trasferimenti successivi: il raccolto sono solo le primarie, altrimenti
-    // il materiale si conta due volte, una quando arriva e una quando si sposta.
-    if (canale === 'EXTRA_RACCOLTA' && String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'primaria') return false;
-    return true;
-  });
+  const delCanale = tutte.filter(r => terminato(r) && soloPrimarie(r));
+  const eseguitiCanale = (tuttiEseguiti || []).filter(r => eEseguito(r) && soloPrimarie(r));
 
   // IL NOME SCRITTO NELLA DOMANDA CONTRO IL NOME IN ARCHIVIO. Fino al 29/09/2026
   // qui c'era un confronto secco fra nomi normalizzati: "Silvano" contro
@@ -155,30 +203,46 @@ async function movimenti(base44, { canale, anno, mese, mesi, provincia, regione,
   // perche' in archivio ci sono due fornitori che ci somigliano - non si filtra
   // per un nome inventato: si restituisce l'esito, e chi chiama lo DICE.
   const soggetti = {};
+  // I nomi si riconoscono sui terminati E sugli "eseguito": un raccoglitore che
+  // nel periodo chiesto ha soltanto ordini nel limbo esiste, e rispondergli "non
+  // risulta fra i raccoglitori" sarebbe falso. Cosi' il suo raccolto risulta
+  // zero con la riserva scritta accanto, che e' esattamente la verita'.
+  const perNomi = delCanale.concat(eseguitiCanale);
   const chiaviDi = (campo, chiesto) => {
     if (!chiesto) return null;
-    const esito = risolviNome(delCanale.map(r => r[campo]), chiesto);
+    const esito = risolviNome(perNomi.map(r => r[campo]), chiesto);
     soggetti[campo === 'trasportatore' ? 'raccoglitore' : 'destinazione'] = { chiesto: String(chiesto), ...esito };
     return new Set(esito.trovato ? esito.chiavi : []);
   };
   const chiaviRacc = chiaviDi('trasportatore', raccoglitore);
   const chiaviDest = chiaviDi('destinazione', destinazione);
 
-  const delLuogo = delCanale.filter(r => {
+  const stessoLuogo = (r) => {
     if (provincia && String(r.provincia || '').toUpperCase() !== String(provincia).toUpperCase()) return false;
     if (regione && normalizzaRagioneSociale(r.regioni || r.regione || getRegioneFromProvincia(r.provincia)) !== normalizzaRagioneSociale(regione)) return false;
     if (chiaviRacc && !chiaviRacc.has(chiave(r.trasportatore))) return false;
     if (chiaviDest && !chiaviDest.has(chiave(r.destinazione))) return false;
     return true;
-  });
-  const righe = delLuogo.filter(r => {
+  };
+  const nelPeriodo = (r) => {
     const m = meseDi(r.trasporto_finito_il, anno);
     if (m < 0) return false;
     if (periodo.indici.size && !periodo.indici.has(m)) return false;
     return true;
-  });
+  };
+  const delLuogo = delCanale.filter(stessoLuogo);
+  const righe = delLuogo.filter(nelPeriodo);
+  // La riserva segue gli stessi filtri del totale: stesso canale, stesso luogo,
+  // stesso periodo. Una riserva di tutta la rete accanto al raccolto di un
+  // fornitore solo sarebbe un numero che non c'entra niente.
+  const eseguitiLuogo = eseguitiCanale.filter(stessoLuogo);
+  const riserva = riservaEseguiti(
+    eseguitiLuogo.filter(nelPeriodo),
+    eseguitiLuogo.filter(r => !giornoMovimento(r)),
+    tuttiEseguiti === null,
+  );
   const modulo = canale === 'ACI' ? 'primarie ACI' : canale === 'EXTRA_RACCOLTA' ? 'extra raccolta, raccolte' : 'primarie di rete';
-  return { righe, date: dateObbligatorie(delLuogo, modulo), soggetti, periodo };
+  return { righe, date: dateObbligatorie(delLuogo, modulo), soggetti, periodo, riserva };
 }
 
 /**
@@ -445,7 +509,7 @@ export const STRUMENTI = [
       const canale = canaleChiesto(p.canale) || 'RETE';
       const avvisoCanale = canaleChiesto(p.canale) ? ''
         : `${p.canale ? `"${p.canale}" non e' un canale` : 'Canale non indicato'}: questi sono i numeri della RETE. ACI ed extra raccolta non si sommano: per loro rifai la domanda col canale.`;
-      const { righe, date, soggetti, periodo } = await movimenti(base44, { ...p, anno, canale }, ctx);
+      const { righe, date, soggetti, periodo, riserva } = await movimenti(base44, { ...p, anno, canale }, ctx);
       const campo = { raccoglitore: 'trasportatore', provincia: 'provincia', regione: 'regioni', classe: 'classe', destinazione: 'destinazione', mese: 'mese' }[p.raggruppa] || 'trasportatore';
       const totale = righe.reduce((s, r) => s + peso(r), 0);
       // Un mese che non esiste non deve passare in silenzio per "tutto l'anno".
@@ -495,6 +559,7 @@ export const STRUMENTI = [
           canale,
           formulari: calcolabile ? contaFormulari(righe) : null,
           tonnellate: calcolabile ? t3(totale) : null,
+          ...(riserva ? { riserva_eseguiti: riserva } : {}),
           ...(risolti.length ? { soggetto_riconosciuto: risolti.join('; ') } : {}),
           ...(avvisoSoggetto ? { avviso_soggetto: avvisoSoggetto, numero_non_calcolabile: 'Non scrivere nessun numero per questo soggetto: non e\' zero, e\' che non si sa di chi si parla.' } : {}),
           ...(inAnagrafica ? { in_anagrafica: inAnagrafica } : {}),
@@ -515,7 +580,7 @@ export const STRUMENTI = [
     async esegui(base44, p, ctx) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       const svc = base44.asServiceRole.entities;
-      const [target, { righe, date }] = await Promise.all([
+      const [target, { righe, date, riserva }] = await Promise.all([
         svc.TargetRaccoglitore.filter({ anno }, 'raccoglitore', 500),
         movimenti(base44, { canale: 'RETE', anno }, ctx),
       ]);
@@ -558,6 +623,9 @@ export const STRUMENTI = [
           raccoglitori: dettaglio,
           target_totale_t: Math.round(dettaglio.reduce((s, x) => s + x.target_t, 0) * 100) / 100,
           fatto_totale_t: Math.round(dettaglio.reduce((s, x) => s + x.fatto_t, 0) * 100) / 100,
+          // La copertura del target si legge sui terminati: un ordine nel limbo
+          // "eseguito" fa sembrare un raccoglitore piu' indietro di quanto sia.
+          ...(riserva ? { riserva_eseguiti: riserva } : {}),
           ...(senzaTarget.size ? { raccolto_senza_target: [...senzaTarget.entries()].map(([nome, kg]) => ({ raccoglitore: nome, tonnellate: t3(kg) })).sort((a, b) => b.tonnellate - a.tonnellate) } : {}),
           ...(date ? { date_obbligatorie_da_sistemare: date } : {}),
         },
