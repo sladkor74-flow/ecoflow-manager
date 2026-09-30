@@ -1366,3 +1366,18 @@ se sul file non c'e', non si dice niente. Resta il controllo che conta, cioe' il
 file che dichiara una settimana **diversa** da quella aperta.
 
 Prove in `prove/quadraturaFirFlussi.mjs`.
+
+#### La parola "gestionale" sulla stampa non siamo noi
+
+Precisato dall'utente il 30/09/2026: quando una pivot della stampa e' intitolata
+**"GESTIONALE ECT ACI"**, quel "gestionale" e' il **file Excel** di chi manda il
+foglio (`Gestione Ecotyre 2026`), lo strumento su cui loro confrontano il portale
+con quello che estraggono da WINSINFO. Non e' questo gestionale.
+
+Quindi `"GESTIONALE ECT ACI"` e `"PORTALE ECT SEC"` sono **la stessa fonte**: il
+portale Ecotyre. Le fonti restano tre - WINSINFO, il portale, noi - e la terza
+non compare mai fra le intestazioni della stampa, perche' la calcoliamo qui.
+
+Scrivendo testi che l'utente legge, non chiamare mai "il gestionale" una fonte
+esterna: si dice "il portale", "WINSINFO", oppure "il file Excel di chi manda la
+stampa".

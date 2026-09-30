@@ -100,7 +100,7 @@ const PROMPT = [
   '- Prima di rispondere controlla due conti, e se non tornano rileggi: le righe di ogni gruppo devono sommare il subtotale del suo impianto, e tutte le righe insieme devono fare il totale complessivo.',
   '- Non sommare, non arrotondare e non correggere niente: copia i numeri come sono stampati, anche se non tornano.',
   '- Non inventare righe e non saltarne nessuna. Se una tabella e\' illeggibile, mettila con righe vuote e spiegalo in note.',
-  '- fonte: "winsinfo" per la pivot di SINISTRA di ogni blocco, "ecotyre" per quella di DESTRA. Vale la posizione, non l\'etichetta: la pivot di destra a volte e\' intitolata "GESTIONALE ECT ACI" ed e\' comunque quella che viene dal portale. Se l\'etichetta dice chiaramente WINSINFO o WIN SINFO, e\' winsinfo.',
+  '- fonte: "winsinfo" per la pivot di SINISTRA di ogni blocco, "ecotyre" per quella di DESTRA. Vale la posizione, non l\'etichetta. La pivot di destra a volte e\' intitolata "PORTALE ECOTYRE" o "PORTALE ECT SEC" e a volte "GESTIONALE ECT ACI": sono la stessa cosa, cioe\' i dati del portale Ecotyre riportati nel file Excel di chi manda la stampa. "GESTIONALE" in quel foglio e\' quel file Excel, non un terzo programma. Se l\'etichetta dice chiaramente WINSINFO o WIN SINFO, e\' winsinfo.',
   '- titolo: l\'intestazione scritta sopra la tabella, copiata esattamente come e\'.',
   '- canale: "RETE" oppure "ACI". E\' ACI quando l\'intestazione nomina ACI o l\'autodemolizione; altrimenti e\' RETE. Nella stampa non c\'e\' mai l\'extra raccolta: se trovi un blocco di extra raccolta, non metterlo fra le tabelle e scrivilo in note.',
   '- tipo: "secondarie" quando l\'intestazione dice SEC, SEC-ACI o SECONDARIE; "primarie" negli altri casi.',

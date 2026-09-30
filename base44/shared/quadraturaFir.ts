@@ -116,6 +116,14 @@ export const fuoriPerimetro = (titolo) => /EXTRA/.test(String(titolo || '').toUp
  * SINFO", "PORTALE ECOTYRE", "WINSINFO ECT SEC-ACI", "GESTIONALE ECT ACI".
  * WINSINFO si guarda per primo, perche' "WINSINFO ECT SEC-ACI" contiene anche
  * "ECT" e altrimenti passerebbe per il portale.
+ *
+ * ATTENZIONE ALLA PAROLA "GESTIONALE". Sulla stampa NON vuol dire questo
+ * gestionale: vuol dire il file Excel di chi manda il foglio (Gestione Ecotyre
+ * 2026), dove i dati del portale Ecotyre sono gia' riportati. Precisato
+ * dall'utente il 30/09/2026. Percio' "GESTIONALE ECT ACI" e "PORTALE ECT SEC"
+ * sono la stessa fonte: il portale. Le fonti restano tre - WINSINFO, il portale
+ * e questo gestionale - e la terza non compare mai fra le intestazioni della
+ * stampa, perche' la calcoliamo noi.
  */
 export function fonteDaTitolo(titolo) {
   const t = String(titolo || '').toUpperCase();
