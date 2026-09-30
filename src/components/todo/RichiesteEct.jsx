@@ -124,8 +124,12 @@ export default function RichiesteEct({ isAdmin }) {
     setErrore('');
     setEsitoImport(null);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      const res = await base44.functions.invoke('importaRichiesteEct', { file_url });
+      // Il foglio delle richieste porta nomi di produttori e indirizzi: sale in
+      // area PRIVATA. Si apre solo con un link firmato che scade, l'indirizzo non
+      // lo conserva nessun record e finita la lettura quel file non è più
+      // raggiungibile. Vedi base44/shared/fileScaricabile.ts.
+      const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
+      const res = await base44.functions.invoke('importaRichiesteEct', { file_uri });
       setEsitoImport(res.data);
       await carica();
     } catch (e) {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle2, Clock, AlertTriangle, Download } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
 import { importaGrandeFile, importaPrimarie, TIPI_LETTURA_BROWSER, dopoCaricamento, testoRicalcoli, testoVerificaArchivio, testoEseguiti, ricalcoliDaRecuperare, recuperiDaFare, moduliDaRicalcolare, ricalcoliFermi, confermeAccumulate } from '@/lib/importGrandeFile';
 import { formatIntero, dataServer } from '@/lib/utils';
@@ -67,7 +68,7 @@ export default function CaricamentoDati() {
   const [dialogState, setDialogState] = useState(null);
   const [progresso, setProgresso] = useState({});
   const [ricalcoli, setRicalcoli] = useState({});
-  const pendingFileUrlRef = useRef({});
+  const pendingFileUriRef = useRef({});
   // Le conferme gia' date per ogni tipo di file. I due controlli anti-regressione
   // possono scattare insieme: mandandone una sola, l'ultima, ognuna spegneva un
   // controllo e riaccendeva l'altro e il caricamento non passava mai piu'. Si
@@ -99,6 +100,27 @@ export default function CaricamentoDati() {
     ricalcoliMiei.current.add(tipoKey);
     setRicalcoli(prev => ({ ...prev, [tipoKey]: { in_corso: true } }));
     dopoCaricamento(tipoKey).then(esiti => setRicalcoli(prev => ({ ...prev, [tipoKey]: esiti })));
+  };
+
+  // L'inventario dei file: si scarica come CSV e si allega alla richiesta di
+  // rimozione. Il nome dice il giorno, perche' l'elenco cambia a ogni caricamento.
+  const [inventario, setInventario] = useState(false);
+  const scaricaInventario = async () => {
+    setInventario(true);
+    try {
+      const res = await base44.functions.invoke('inventarioFile', {});
+      const csv = (res.data && res.data.csv) || '';
+      // Il BOM serve a Excel per leggere le lettere accentate.
+      const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `file-caricati-${dataServer(new Date())}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      setDialogState(extractUploadError(e));
+    }
+    setInventario(false);
   };
 
   const caricaLogs = async () => {
@@ -195,16 +217,19 @@ export default function CaricamentoDati() {
         return;
       }
 
-      let fileUrl;
-      if (conferma_forzatura && pendingFileUrlRef.current[tipoKey]) {
-        fileUrl = pendingFileUrlRef.current[tipoKey];
+      // Gli export del portale sono documenti aziendali - fornitori, pesi,
+      // formulari, indirizzi - e salgono in area PRIVATA: si aprono solo con un
+      // link firmato che scade. Vedi base44/shared/fileScaricabile.ts.
+      let fileUri;
+      if (conferma_forzatura && pendingFileUriRef.current[tipoKey]) {
+        fileUri = pendingFileUriRef.current[tipoKey];
       } else {
-        const { file_url } = await base44.integrations.Core.UploadFile({ file });
-        fileUrl = file_url;
-        pendingFileUrlRef.current[tipoKey] = fileUrl;
+        const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
+        fileUri = file_uri;
+        pendingFileUriRef.current[tipoKey] = fileUri;
       }
       const fnName = 'importEcotyreFile';
-      const params = { file_url: fileUrl, tipo_file: tipoKey, nome_file: file.name, replace_existing: true };
+      const params = { file_uri: fileUri, tipo_file: tipoKey, nome_file: file.name, replace_existing: true };
       if (conferma_forzatura) params.conferma_forzatura = true;
       const res = await base44.functions.invoke(fnName, params);
       setRisultato(prev => ({ ...prev, [tipoKey]: { ok: true, data: res.data } }));
@@ -402,7 +427,20 @@ export default function CaricamentoDati() {
 
       {/* Log upload */}
       <div>
-        <h2 className="text-xl font-heading font-semibold mb-4">Storico Caricamenti</h2>
+        <div className="flex items-end justify-between gap-3 mb-4 flex-wrap">
+          <h2 className="text-xl font-heading font-semibold">Storico Caricamenti</h2>
+          {/* L'INVENTARIO DEI FILE. La piattaforma non sa cancellare un file e non
+              mostra da nessuna parte quali file tenga: l'unico modo per farne
+              rimuovere uno e' chiederlo indicando quale, e questo elenco e' quella
+              lista. I riferimenti dei file pubblici sono indirizzi che funzionano
+              per chiunque li abbia, quindi il pulsante e' del solo amministratore. */}
+          {isAdmin && (
+            <Button variant="outline" size="sm" onClick={scaricaInventario} disabled={inventario}>
+              {inventario ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Download className="w-4 h-4 mr-1.5" />}
+              Elenco dei file caricati
+            </Button>
+          )}
+        </div>
         {loadingLogs ? (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <Loader2 className="w-5 h-5 animate-spin mr-2" /> Caricamento...

@@ -10,7 +10,7 @@ export default function SecondarieUpload({ onImported }) {
   const [ricalcoli, setRicalcoli] = useState(null);
   const [dialogState, setDialogState] = useState(null);
   const inputRef = useRef(null);
-  const pendingFileUrlRef = useRef(null);
+  const pendingFileUriRef = useRef(null);
 
   const handleFile = async (file, conferma_forzatura = false) => {
     if (!file) return;
@@ -18,16 +18,18 @@ export default function SecondarieUpload({ onImported }) {
     setResult(null);
     setRicalcoli(null);
     try {
-      let fileUrl;
-      if (conferma_forzatura && pendingFileUrlRef.current) {
-        fileUrl = pendingFileUrlRef.current;
+      // Documento aziendale: sale in area PRIVATA, si apre solo con un link
+      // firmato che scade. Vedi base44/shared/fileScaricabile.ts.
+      let fileUri;
+      if (conferma_forzatura && pendingFileUriRef.current) {
+        fileUri = pendingFileUriRef.current;
       } else {
-        const { file_url } = await base44.integrations.Core.UploadFile({ file });
-        fileUrl = file_url;
-        pendingFileUrlRef.current = fileUrl;
+        const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
+        fileUri = file_uri;
+        pendingFileUriRef.current = fileUri;
       }
       const params = {
-        file_url: fileUrl,
+        file_uri: fileUri,
         tipo_file: 'secondarie',
         nome_file: file.name,
         replace_existing: true,

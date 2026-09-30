@@ -10,6 +10,7 @@ import { FILE_SIGNATURES, checkSignature, detectType, mappaColonne } from "../..
 import { CAMPI_ASSEGNATO, DATE_PRIMARIE, archivioPrimaria, dataPrimaria } from "../../shared/primarie.ts";
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 import { annoRoma } from "../../shared/giornoItaliano.ts";
+import { urlScaricabile, riferimentoDaSalvare } from "../../shared/fileScaricabile.ts";
 import { annoDelloStorico, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from "../../shared/storicoConservato.ts";
 
 // Le dichiarazioni riconosciute, un canale per volta: nel registro non si sommano.
@@ -28,7 +29,7 @@ const perCanale = (righe) => [['RETE', 'rete'], ['ACI', 'ACI'], ['EXTRA_RACCOLTA
 // 7. SOLO ORA: riga "in_corso" nel registro, poi deleteMany + bulkCreate
 // 8. la riga del registro prende l'esito; se dopo lo svuotamento non e' entrato
 //    niente, o arriva un errore, resta "in_corso" col solo messaggio cambiato
-// Payload: { file_url, tipo_file, nome_file, periodo_riferimento?, replace_existing?, conferma_forzatura? }
+// Payload: { file_uri (privato) oppure file_url (pubblico, storico), tipo_file, nome_file, periodo_riferimento?, replace_existing?, conferma_forzatura? }
 
 const CHUNK = 250;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -58,7 +59,7 @@ const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
 const NON_RIUSCITO = 'Caricamento non riuscito';
 const chi = (user) => (user && (user.full_name || user.email)) || '';
 
-async function apriCaricamento(base44, user, tipo_file, nome_file, file_url, prima) {
+async function apriCaricamento(base44, user, tipo_file, nome_file, rif, prima) {
   const Log = base44.asServiceRole.entities.UploadLog;
   const aperti = await Log.filter({ tipo_file, esito: 'in_corso' }, '-created_date', 20);
   const adesso = Date.now();
@@ -72,7 +73,7 @@ async function apriCaricamento(base44, user, tipo_file, nome_file, file_url, pri
     await Log.update(l.id, { esito: 'errore', messaggio: fallito ? `${l.messaggio} E' stato ricaricato dopo.` : `Caricamento interrotto: avviato da ${l.utente || 'sconosciuto'} e mai concluso. L'archivio poteva essere incompleto; e' stato ricaricato dopo.` });
   }
   const riga = await Log.create({
-    tipo_file, nome_file: nome_file || 'N/D', file_url, esito: 'in_corso', utente: chi(user),
+    tipo_file, nome_file: nome_file || 'N/D', ...riferimentoDaSalvare(rif), esito: 'in_corso', utente: chi(user),
     righe_importate: 0, righe_fallite: 0,
     righe_archivio_prima: typeof prima === 'number' ? prima : undefined,
     messaggio: 'Caricamento in corso: archivio in riscrittura.',
@@ -134,7 +135,7 @@ async function scaricaFile(url, tentativi = 3) {
 }
 
 export default async function(req) {
-  let tipo_file = null, nome_file = 'N/D', file_url = null;
+  let tipo_file = null, nome_file = 'N/D', file_url = null, file_uri = null;
   let fase = 'avvio';
   let user = null;
   // la riga "in_corso" del registro, da chiudere con l'esito o con l'errore
@@ -154,6 +155,7 @@ export default async function(req) {
     if (!puoCaricare(livello, tipo_file)) return rispostaCaricamentoNegato(livello, tipo_file);
     nome_file = body.nome_file || 'N/D';
     file_url = body.file_url;
+    file_uri = body.file_uri;
     const { periodo_riferimento, conferma_forzatura, replace_existing } = body;
 
     // Calcola modalita': sostituzione integrale o aggiunta additiva.
@@ -162,8 +164,8 @@ export default async function(req) {
     const sostituisci = ['primarie', 'secondarie', 'terziarie', 'dichiarazioni_trattamento', 'ordini_non_dichiarati'].includes(tipo_file) ? true : replace_existing !== false;
     const modalita = sostituisci ? 'sostituzione' : 'aggiunta';
 
-    if (!file_url || !tipo_file) {
-      return Response.json({ error: 'file_url e tipo_file sono obbligatori', dati_intatti: true }, { status: 400 });
+    if ((!file_url && !file_uri) || !tipo_file) {
+      return Response.json({ error: 'file_uri (o file_url) e tipo_file sono obbligatori', dati_intatti: true }, { status: 400 });
     }
 
     // === Punto 6: rifiuta "assegnati" ===
@@ -189,7 +191,10 @@ export default async function(req) {
 
     // === 1. Scarica e parse il file Excel ===
     fase = 'download del file';
-    const fileRes = await scaricaFile(file_url);
+    // Gli export del portale sono documenti aziendali e da oggi salgono privati:
+    // si aprono solo con un link firmato che scade. I caricamenti vecchi hanno
+    // ancora un file_url pubblico e si devono poter ancora rileggere.
+    const fileRes = await scaricaFile(await urlScaricabile(base44, { file_uri, file_url }));
     if (!fileRes.ok) {
       const quale = [fileRes.status || null, fileRes.statusText || null].filter(Boolean).join(' ');
       return Response.json({
@@ -251,7 +256,7 @@ export default async function(req) {
         }
         await base44.asServiceRole.entities.UploadLog.create({
           utente: (user && (user.full_name || user.email)) || '',
-          tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          tipo_file, nome_file, ...riferimentoDaSalvare({ file_uri, file_url }), righe_importate: 0, righe_fallite: 0,
           esito: 'errore', messaggio: errResp.error + (tipo_rilevato ? ' - ' + errResp.tipo_rilevato : ''),
           periodo_riferimento: periodo_riferimento || ''
         });
@@ -268,7 +273,7 @@ export default async function(req) {
         };
         await base44.asServiceRole.entities.UploadLog.create({
           utente: (user && (user.full_name || user.email)) || '',
-          tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          tipo_file, nome_file, ...riferimentoDaSalvare({ file_uri, file_url }), righe_importate: 0, righe_fallite: 0,
           esito: 'errore', messaggio: errResp.dettaglio,
           periodo_riferimento: periodo_riferimento || ''
         });
@@ -332,7 +337,7 @@ export default async function(req) {
         const errResp = { error: "Il file non contiene alcun ordine terminato: sembra una selezione filtrata (es. soli assegnati), non l'export completo delle primarie." };
         await base44.asServiceRole.entities.UploadLog.create({
           utente: (user && (user.full_name || user.email)) || '',
-          tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          tipo_file, nome_file, ...riferimentoDaSalvare({ file_uri, file_url }), righe_importate: 0, righe_fallite: 0,
           esito: 'errore', messaggio: errResp.error,
           periodo_riferimento: periodo_riferimento || '', foglio_usato: sheetName
         });
@@ -345,7 +350,7 @@ export default async function(req) {
       const errResp = { error: 'Nessuna riga valida trovata nel file' };
       await base44.asServiceRole.entities.UploadLog.create({
           utente: (user && (user.full_name || user.email)) || '',
-        tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+        tipo_file, nome_file, ...riferimentoDaSalvare({ file_uri, file_url }), righe_importate: 0, righe_fallite: 0,
         esito: 'errore', messaggio: errResp.error,
         periodo_riferimento: periodo_riferimento || '', foglio_usato: sheetName
       });
@@ -448,7 +453,7 @@ export default async function(req) {
         };
         await base44.asServiceRole.entities.UploadLog.create({
           utente: (user && (user.full_name || user.email)) || '',
-          tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          tipo_file, nome_file, ...riferimentoDaSalvare({ file_uri, file_url }), righe_importate: 0, righe_fallite: 0,
           esito: 'errore', messaggio: `${errResp.error} (${mancanti.length} ordini mancanti su ${existingIds.size} in archivio)`,
           periodo_riferimento: periodo_riferimento || '', foglio_usato: sheetName,
           righe_archivio_prima: existingIds.size, forzato: false
@@ -503,7 +508,7 @@ export default async function(req) {
         };
         await base44.asServiceRole.entities.UploadLog.create({
           utente: (user && (user.full_name || user.email)) || '',
-          tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          tipo_file, nome_file, ...riferimentoDaSalvare({ file_uri, file_url }), righe_importate: 0, righe_fallite: 0,
           esito: 'errore', messaggio: `${errResp.error} (${mancanti.length} dichiarazioni mancanti su ${existingKeys.size} in archivio)`,
           periodo_riferimento: periodo_riferimento || '', foglio_usato: sheetName,
           righe_archivio_prima: existingKeys.size, forzato: false
@@ -514,7 +519,7 @@ export default async function(req) {
 
     // === 7. SOLO ORA: riga "in_corso" nel registro, cancellazione e import ===
     fase = 'apertura del registro';
-    const aperto = await apriCaricamento(base44, user, tipo_file, nome_file, file_url, righe_archivio_prima);
+    const aperto = await apriCaricamento(base44, user, tipo_file, nome_file, { file_uri, file_url }, righe_archivio_prima);
     if (aperto.bloccato) return Response.json({ error: aperto.bloccato, dati_intatti: true }, { status: 409 });
     rigaRegistro = aperto.id;
 
@@ -642,7 +647,7 @@ export default async function(req) {
     // riga resta "in_corso" e cambia solo il messaggio (vedi NON_RIUSCITO).
     const registro = {
       utente: chi(user),
-      tipo_file, nome_file, file_url,
+      tipo_file, nome_file, ...riferimentoDaSalvare({ file_uri, file_url }),
       righe_importate: imported, righe_fallite: failed, esito,
       messaggio: messaggio + notaAllineamento, periodo_riferimento: periodo_riferimento || '',
       foglio_usato: sheetName, righe_archivio_prima, forzato: !!conferma_forzatura,
@@ -706,7 +711,7 @@ export default async function(req) {
         // Prima dello svuotamento: dati intatti, la riga si chiude in errore.
         const campi = {
           utente: chi(user),
-          tipo_file, nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          tipo_file, nome_file, ...riferimentoDaSalvare({ file_uri, file_url }), righe_importate: 0, righe_fallite: 0,
           esito: 'errore', messaggio: motivo,
           periodo_riferimento: ''
         };

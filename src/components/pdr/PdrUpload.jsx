@@ -7,22 +7,24 @@ export default function PdrUpload({ onImported }) {
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
   const [dialogState, setDialogState] = useState(null);
-  const pendingFileUrlRef = useRef(null);
+  const pendingFileUriRef = useRef(null);
 
   const handleUpload = async (file, conferma_forzatura = false) => {
     if (!file) return;
     setUploading(true);
     setResult(null);
     try {
-      let fileUrl;
-      if (conferma_forzatura && pendingFileUrlRef.current) {
-        fileUrl = pendingFileUrlRef.current;
+      // Documento aziendale: sale in area PRIVATA, si apre solo con un link
+      // firmato che scade. Vedi base44/shared/fileScaricabile.ts.
+      let fileUri;
+      if (conferma_forzatura && pendingFileUriRef.current) {
+        fileUri = pendingFileUriRef.current;
       } else {
-        const { file_url } = await base44.integrations.Core.UploadFile({ file });
-        fileUrl = file_url;
-        pendingFileUrlRef.current = fileUrl;
+        const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
+        fileUri = file_uri;
+        pendingFileUriRef.current = fileUri;
       }
-      const params = { file_url: fileUrl, nome_file: file.name, replace_existing: true };
+      const params = { file_uri: fileUri, nome_file: file.name, replace_existing: true };
       if (conferma_forzatura) params.conferma_forzatura = true;
       const res = await base44.functions.invoke('importPdrFile', params);
       setResult({ ok: true, data: res.data });

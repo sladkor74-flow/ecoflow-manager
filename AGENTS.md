@@ -1381,3 +1381,50 @@ non compare mai fra le intestazioni della stampa, perche' la calcoliamo qui.
 Scrivendo testi che l'utente legge, non chiamare mai "il gestionale" una fonte
 esterna: si dice "il portale", "WINSINFO", oppure "il file Excel di chi manda la
 stampa".
+
+### I documenti aziendali non salgono mai in area pubblica (30/09/2026)
+
+Regola dell'utente, testuale: *"fai in modo che documenti aziendali non girino per
+il web, questa cosa della sicurezza e della privacy e' molto importante, anzi
+stringente"*.
+
+**Il fatto tecnico, confermato dall'assistenza della piattaforma.** Le uniche
+integrazioni sui file sono `UploadFile`, `UploadPrivateFile`, `CreateFileSignedUrl`
+e `ExtractDataFromUploadedFile`: **nessuna cancella**, ne' dall'SDK ne' dal
+pannello. `DeleteFile`, `DeletePrivateFile` e `RemoveFile` **non sono endpoint**:
+`integrations.Core` accetta qualunque nome di metodo, per questo `typeof
+core.DeleteFile === 'function'` era vero e ogni chiamata tornava "Method Not
+Allowed". Non c'e' nessun limite di spazio per app; i limiti sono solo sul singolo
+file (50MB documenti, 100MB video).
+
+Quindi **un file pubblico e' una porta che si apre una volta e non si richiude
+piu'**: il suo `file_url` funziona per chiunque abbia il link, per sempre.
+
+**La regola.** Si carica solo con `UploadPrivateFile`. Un file privato non ha un
+indirizzo suo: si apre con un link firmato da `CreateFileSignedUrl` che scade (60
+– 3600 secondi). Chi deve leggerlo se lo fa firmare, legge, e il link muore da
+solo: non serve cancellare niente, ed e' per questo che e' la difesa giusta su una
+piattaforma che non sa cancellare.
+
+`base44/shared/fileScaricabile.ts` e' il passaggio obbligato: `urlScaricabile`
+firma un `file_uri` e lascia passare un `file_url` storico; `riferimentoDaSalvare`
+decide che cosa si scrive sul record. Le funzioni che scaricano - `importPdrFile`,
+`importEcotyreFile`, `importaRichiesteEct` - accettano `file_uri` e, solo per i
+caricamenti vecchi, `file_url`.
+
+**Convertiti il 30/09/2026** (erano gli ultimi quattro pubblici): `PdrUpload`,
+`SecondarieUpload`, `RichiesteEct`, `CaricamentoDati`. `prove/fileSemprePrivati.mjs`
+e' la guardia: fallisce se qualcuno rimette `UploadFile` da qualunque parte.
+
+**I file caricati PRIMA restano pubblici e non si possono richiamare.** L'unico
+rimedio e' farli rimuovere a mano dal team della piattaforma, e per chiederlo
+servono i loro identificativi: li produce la funzione `inventarioFile`
+(`base44/shared/inventarioFile.ts`), scaricabile in CSV dal pulsante "Elenco dei
+file caricati" in Caricamento Dati, solo amministratore. I pubblici escono per
+primi perche' sono quelli che scottano.
+
+**Niente password sui file.** Valutata e scartata: una password che l'app conosce
+non e' un segreto dall'app, e una che deve digitare una persona rompe ogni lettura
+automatica (pulizia notturna, riconfronto di una quadratura, allegati
+dell'assistente). La difesa vera e' il link firmato che scade piu' il permesso di
+chi lo puo' far firmare.

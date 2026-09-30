@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { sostituisciFilePrecedenti } from "../../shared/fileArchivio.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
+import { urlScaricabile, riferimentoDaSalvare } from "../../shared/fileScaricabile.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
@@ -9,19 +10,25 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 // Il file ha colonne con nomi duplicati (CAP, Comune, Prov., ecc. compaiono due volte),
 // quindi si usa sheet_to_json con header:1 (array di array) e mappatura per indice colonna.
 // Flusso: scarica -> valida intestazioni -> mappa -> controllo zero righe -> anti-regressione -> delete+import.
-// Payload: { file_url, nome_file, replace_existing?, conferma_forzatura? }
+// Payload: { file_uri (privato, da UploadPrivateFile) oppure file_url (pubblico,
+// storico), nome_file, replace_existing?, conferma_forzatura? }
 export default async function(req) {
-  let nome_file = 'N/D', file_url = null;
+  let nome_file = 'N/D', file_url = null, file_uri = null;
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return rispostaSolaLettura();
     const body = await req.json();
-    const { file_url: fu, nome_file: nf, replace_existing, conferma_forzatura } = body;
+    const { file_url: fu, file_uri: fi, nome_file: nf, replace_existing, conferma_forzatura } = body;
     file_url = fu;
+    file_uri = fi;
     nome_file = nf || 'N/D';
-    if (!file_url) return Response.json({ error: 'file_url obbligatorio' }, { status: 400 });
+    if (!file_url && !file_uri) return Response.json({ error: 'file_uri o file_url obbligatorio' }, { status: 400 });
+    // L'elenco dei punti di raccolta e' un documento aziendale: ragioni sociali,
+    // indirizzi, partite IVA. Adesso sale privato e si apre solo con un link
+    // firmato che scade; i caricamenti vecchi hanno ancora un file_url pubblico.
+    const daScaricare = await urlScaricabile(base44, { file_uri, file_url });
 
     // Mappatura indice colonna (0-based) -> campo entità
     const COL_MAP = {
@@ -69,7 +76,7 @@ export default async function(req) {
     };
 
     // === 1. Scarica e parse il file ===
-    const fileRes = await fetch(file_url).catch(() => ({ ok: false, status: 0 }));
+    const fileRes = await fetch(daScaricare).catch(() => ({ ok: false, status: 0 }));
     if (!fileRes.ok) return Response.json({ error: `Impossibile scaricare il file appena caricato${fileRes.status ? ` (${fileRes.status})` : ''}. Riprova il caricamento.`, dati_intatti: true }, { status: 502 });
     const ab = await fileRes.arrayBuffer();
     const wb = XLSX.read(ab, { type: 'array', cellDates: true });
@@ -95,7 +102,7 @@ export default async function(req) {
         fogli_trovati: wb.SheetNames
       };
       await base44.asServiceRole.entities.UploadLog.create({
-        tipo_file: 'pdr', nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+        tipo_file: 'pdr', nome_file, ...riferimentoDaSalvare({ file_uri, file_url }), righe_importate: 0, righe_fallite: 0,
         esito: 'errore', messaggio: errResp.error + ' - ' + errResp.dettaglio
       });
       return Response.json(errResp, { status: 400 });
@@ -132,7 +139,7 @@ export default async function(req) {
     if (records.length === 0) {
       const errResp = { error: 'Nessuna riga valida trovata nel file' };
       await base44.asServiceRole.entities.UploadLog.create({
-        tipo_file: 'pdr', nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+        tipo_file: 'pdr', nome_file, ...riferimentoDaSalvare({ file_uri, file_url }), righe_importate: 0, righe_fallite: 0,
         esito: 'errore', messaggio: errResp.error, foglio_usato: sheetName
       });
       return Response.json(errResp, { status: 400 });
@@ -165,7 +172,7 @@ export default async function(req) {
           richiede_conferma: true
         };
         await base44.asServiceRole.entities.UploadLog.create({
-          tipo_file: 'pdr', nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+          tipo_file: 'pdr', nome_file, ...riferimentoDaSalvare({ file_uri, file_url }), righe_importate: 0, righe_fallite: 0,
           esito: 'errore', messaggio: `${errResp.error} (${mancanti.length} PDR mancanti su ${existingIds.size} in archivio)`,
           foglio_usato: sheetName, righe_archivio_prima: existingIds.size, forzato: false
         });
@@ -201,7 +208,7 @@ export default async function(req) {
 
     const esito = failed === 0 ? 'successo' : (imported > 0 ? 'parziale' : 'errore');
     const riga = await base44.asServiceRole.entities.UploadLog.create({
-      tipo_file: 'pdr', nome_file, file_url,
+      tipo_file: 'pdr', nome_file, ...riferimentoDaSalvare({ file_uri, file_url }),
       righe_importate: imported, righe_fallite: failed, esito,
       messaggio: `${imported} PDR importati su ${records.length} totali (foglio: ${sheetName})`,
       foglio_usato: sheetName, forzato: !!conferma_forzatura
@@ -230,7 +237,7 @@ export default async function(req) {
     try {
       const base44 = conLimiteRichieste(createClientFromRequest(req));
       await base44.asServiceRole.entities.UploadLog.create({
-        tipo_file: 'pdr', nome_file, file_url, righe_importate: 0, righe_fallite: 0,
+        tipo_file: 'pdr', nome_file, ...riferimentoDaSalvare({ file_uri, file_url }), righe_importate: 0, righe_fallite: 0,
         esito: 'errore', messaggio: error.message || 'Errore imprevisto'
       });
     } catch (_) {}

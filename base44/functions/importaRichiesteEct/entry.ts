@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { cancellaFile } from "../../shared/fileArchivio.ts";
+import { urlScaricabile } from "../../shared/fileScaricabile.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { leggiFoglio, riconosciOrdine, scadenzaDaNota, statoRichiesta, listaOrdini, evasioneOrdini, abbinaRichieste, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare } from "../../shared/richiesteEct.ts";
@@ -29,10 +30,15 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return Response.json({ error: 'Solo l amministratore puo caricare le richieste' }, { status: 403 });
 
-    const { file_url, anno } = await req.json().catch(() => ({}));
-    if (!file_url) return Response.json({ error: 'file_url obbligatorio' }, { status: 400 });
+    const { file_url, file_uri, anno } = await req.json().catch(() => ({}));
+    if (!file_url && !file_uri) return Response.json({ error: 'file_uri o file_url obbligatorio' }, { status: 400 });
 
-    const risposta = await fetch(file_url);
+    // Il foglio delle richieste porta nomi di produttori, indirizzi e date: e' un
+    // documento aziendale e adesso sale privato. Si apre con un link firmato che
+    // basta per questa lettura e poi scade da solo, e l'indirizzo non lo conserva
+    // nessun record: finita la lettura, quel file non e' piu' raggiungibile
+    // dall'app in nessun modo.
+    const risposta = await fetch(await urlScaricabile(base44, { file_uri, file_url }, 600));
     if (!risposta.ok) return Response.json({ error: 'Il file non si riesce a leggere: ' + risposta.status }, { status: 400 });
     const dati = new Uint8Array(await risposta.arrayBuffer());
     const wb = XLSX.read(dati, { type: 'array', cellDates: true, sheets: [FOGLIO] });
@@ -163,9 +169,11 @@ export default async function(req) {
     const orfane = esistenti.filter(e => !ritrovate.has(e.id)).length;
 
     // Il file era li' solo per essere letto e nessun record ne conserva
-    // l'indirizzo: se non si cancella adesso non lo cancella piu' nessuno, perche'
-    // non si saprebbe nemmeno che esiste (regola dell'utente sui file, 29/09/2026).
-    const fileTolto = await cancellaFile(base44, file_url);
+    // l'indirizzo. La piattaforma non sa cancellare (confermato dalla sua
+    // assistenza il 30/09/2026), quindi il tentativo si fa solo sui file vecchi,
+    // quelli pubblici: per un file privato il link firmato e' gia' scaduto e
+    // l'indirizzo non lo conosce piu' nessuno, che e' la stessa cosa.
+    const fileTolto = file_uri ? { riuscita: false, come: 'file privato: il link firmato è scaduto e l\'indirizzo non è stato conservato' } : await cancellaFile(base44, file_url);
 
     return Response.json({
       ok: true, anno: annoNum, righe_lette: righe.length,

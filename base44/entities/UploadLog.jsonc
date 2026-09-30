@@ -26,7 +26,12 @@
       "type": "string"
     },
     "file_url": {
-      "type": "string"
+      "type": "string",
+      "description": "Solo per i caricamenti fino al 30/09/2026: quei file erano pubblici e il link funziona per chiunque ce l'abbia. Sui caricamenti nuovi resta vuoto"
+    },
+    "file_uri": {
+      "type": "string",
+      "description": "Il file caricato in area privata: si apre solo con un link firmato che scade. E' cosi' per tutti i caricamenti dal 30/09/2026"
     },
     "righe_importate": {
       "type": "number"
