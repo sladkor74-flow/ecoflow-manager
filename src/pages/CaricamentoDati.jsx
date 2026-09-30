@@ -114,7 +114,11 @@ export default function CaricamentoDati() {
       const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `file-caricati-${dataServer(new Date())}.csv`;
+      // Il giorno in cifre, non l'ora lunga del browser: dataServer restituisce
+      // un oggetto Date, e interpolato dava "Wed Sep 30 2026 20_54_16 GMT+0200
+      // (Ora legale dell'Europa centrale)" dentro il nome del file.
+      const oggi = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
+      a.download = `file-caricati-${oggi}.csv`;
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e) {

@@ -52,34 +52,56 @@ const csvCampo = (v) => {
 };
 
 /**
- * L'inventario in CSV, i pubblici per primi perche' sono quelli che scottano.
- * Separatore virgola: e' un file che si manda all'assistenza, non si apre in
- * Excel italiano.
+ * UN FILE PER RIGA, NON UN RECORD PER RIGA.
+ *
+ * Lo stesso file puo' essere puntato da piu' record: un caricamento forzato riusa
+ * il file del tentativo fallito, e nel registro restano due righe con lo stesso
+ * indirizzo. Sul file vero dell'utente, 72 record puntavano a 53 file. Chiedere
+ * la rimozione di "72 file" a chi deve rimuoverli a mano e' un modo per farsi
+ * dire che il conto non torna: si chiede la rimozione dei file, e si dice quanti
+ * record li usavano.
  */
-export function csvInventario(voci) {
-  const ordinate = [...(voci || [])].sort((a, b) => {
+export function perFile(voci) {
+  const per = new Map();
+  for (const v of voci || []) {
+    const k = v.riferimento;
+    if (!per.has(k)) per.set(k, { ...v, record: 1, id: [v.id] });
+    else { const g = per.get(k); g.record += 1; g.id.push(v.id); }
+  }
+  return [...per.values()].sort((a, b) => {
     if (a.genere !== b.genere) return a.genere === 'pubblico' ? -1 : 1;
     return String(a.caricato_il).localeCompare(String(b.caricato_il)) || String(a.entita).localeCompare(String(b.entita));
   });
-  const righe = [['genere', 'riferimento', 'archivio', 'id_record', 'cosa', 'descrizione', 'caricato_il'].join(',')];
-  for (const v of ordinate) {
-    righe.push([v.genere, v.riferimento, v.entita, v.id, v.cosa, v.descrizione, v.caricato_il].map(csvCampo).join(','));
+}
+
+/**
+ * L'inventario in CSV, un file per riga e i pubblici per primi, perche' sono
+ * quelli che scottano: il loro indirizzo funziona per chiunque ce l'abbia.
+ * Separatore virgola: e' un file che si manda all'assistenza della piattaforma,
+ * non si apre in Excel italiano.
+ */
+export function csvInventario(voci) {
+  const righe = [['genere', 'riferimento', 'archivio', 'cosa', 'descrizione', 'caricato_il', 'record_che_lo_usano'].join(',')];
+  for (const v of perFile(voci)) {
+    righe.push([v.genere, v.riferimento, v.entita, v.cosa, v.descrizione, v.caricato_il, v.record].map(csvCampo).join(','));
   }
   return righe.join('\n');
 }
 
-/** Quanti sono, divisi per genere: la riga di riepilogo da dire all'assistenza. */
+/** Quanti sono: i FILE distinti, e a parte i record che li puntano. */
 export function contaInventario(voci) {
   const xs = voci || [];
-  const pubblici = xs.filter(v => v.genere === 'pubblico');
+  const file = perFile(xs);
+  const pubblici = file.filter(v => v.genere === 'pubblico');
   return {
-    totale: xs.length,
+    file: file.length,
     pubblici: pubblici.length,
-    privati: xs.length - pubblici.length,
-    per_archivio: [...new Set(xs.map(v => v.entita))].map(e => ({
+    privati: file.length - pubblici.length,
+    record: xs.length,
+    per_archivio: [...new Set(file.map(v => v.entita))].map(e => ({
       entita: e,
-      quanti: xs.filter(v => v.entita === e).length,
-      pubblici: xs.filter(v => v.entita === e && v.genere === 'pubblico').length,
+      quanti: file.filter(v => v.entita === e).length,
+      pubblici: file.filter(v => v.entita === e && v.genere === 'pubblico').length,
     })).sort((a, b) => b.quanti - a.quanti),
   };
 }
