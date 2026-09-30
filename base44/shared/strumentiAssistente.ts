@@ -142,6 +142,19 @@ function riservaEseguiti(nelPeriodo, senzaFine, nonLetta) {
   const dentro = riepilogoEseguiti(nelPeriodo);
   const fuori = riepilogoEseguiti(senzaFine);
   if (!dentro.ordini && !fuori.ordini) return null;
+  // DI CHI E' LA RISERVA. Quando la domanda non era su un raccoglitore solo -
+  // il raccolto di tutta la rete, la copertura dei target - una riserva senza
+  // nome non dice a chi telefonare. Si mette solo se i nomi sono piu' d'uno:
+  // con uno solo lo si e' gia' detto nella domanda.
+  const per = new Map();
+  for (const r of nelPeriodo.concat(senzaFine)) {
+    const nome = String((r && r.trasportatore) || 'N/D').trim() || 'N/D';
+    if (!per.has(nome)) per.set(nome, []);
+    per.get(nome).push(r);
+  }
+  const perRaccoglitore = [...per.entries()]
+    .map(([raccoglitore, righe]) => { const x = riepilogoEseguiti(righe); return { raccoglitore, ordini: x.ordini, tonnellate: t3(x.kg) }; })
+    .sort((a, b) => b.tonnellate - a.tonnellate);
   return {
     ...(dentro.ordini ? {
       ordini: dentro.ordini,
@@ -150,6 +163,8 @@ function riservaEseguiti(nelPeriodo, senzaFine, nonLetta) {
       esempi: dentro.esempi.slice(0, 10).map(o => ({ id_ordine: o.id_ordine, numero_fir: o.numero_fir, tonnellate: t3(o.kg) })),
     } : {}),
     ...(fuori.ordini ? { senza_fine_trasporto: { ordini: fuori.ordini, tonnellate: t3(fuori.kg) } } : {}),
+    ...(perRaccoglitore.length > 1 ? { per_raccoglitore: perRaccoglitore.slice(0, 20) } : {}),
+    ...(perRaccoglitore.length > 20 ? { elenco_tagliato: `Qui ci sono i 20 raccoglitori piu' grossi dei ${perRaccoglitore.length} che hanno ordini nel limbo: le righe non fanno il totale, il totale e' "ordini" e "tonnellate".` } : {}),
     nota: 'ORDINI IN STATO "ESEGUITO": hanno tutti i dati inseriti ma a portale nessuno ha premuto il pulsante Chiudi, quindi non sono nel totale qui sopra. NON sommarli al totale e NON tacerli: e\' materiale davvero ritirato che oggi non si conta. Si risolvono da soli al prossimo caricamento, quando il portale da\' loro lo stato definitivo (terminato o cancellato). Quelli senza fine trasporto non stanno in nessun mese: si contano a parte perche\' potrebbero appartenere al periodo chiesto.',
   };
 }

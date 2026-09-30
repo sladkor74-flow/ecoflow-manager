@@ -149,6 +149,38 @@ console.log('LA RISERVA E DI CHI SI CHIEDE, NON DI TUTTA LA RETE');
   verifica('la provincia filtra anche la riserva', prov.riserva_eseguiti.tonnellate === 12.62, JSON.stringify(prov.riserva_eseguiti));
 }
 
+console.log('LA RISERVA DICE DI CHI E, QUANDO SONO PIU D UNO');
+{
+  const archivi = {
+    PrimariaRete: [
+      term('EMMESSE', 10000, '2026-08-10'),
+      eseg('EMMESSE', 3620, '2026-08-18'),
+      eseg('NAPPI SUD', 9000, '2026-08-19'),
+      eseg('NAPPI SUD', 1000, ''),
+    ],
+  };
+  const d = await raccolto(archivi, { canale: 'RETE', anno: 2026, mese: 'agosto' });
+  const per = d.riserva_eseguiti.per_raccoglitore;
+  verifica('due raccoglitori', per.length === 2, JSON.stringify(per));
+  verifica('il piu grosso per primo', per[0].raccoglitore === 'NAPPI SUD' && per[0].tonnellate === 10, JSON.stringify(per));
+  verifica('e anche quello senza fine trasporto e attribuito', per[0].ordini === 2, JSON.stringify(per));
+  verifica("l'altro c e", per[1].raccoglitore === 'EMMESSE' && per[1].tonnellate === 3.62, JSON.stringify(per));
+  verifica('nessun elenco tagliato', d.riserva_eseguiti.elenco_tagliato === undefined);
+  // Chiedendo un raccoglitore solo il nome e' gia' nella domanda: non si ripete.
+  const uno = await raccolto(archivi, { canale: 'RETE', anno: 2026, mese: 'agosto', raccoglitore: 'Emmesse' });
+  verifica('con un raccoglitore solo non si ripete il nome', uno.riserva_eseguiti.per_raccoglitore === undefined, JSON.stringify(uno.riserva_eseguiti));
+}
+
+console.log('UN ELENCO TAGLIATO SI DICHIARA');
+{
+  const molti = [];
+  for (let i = 0; i < 25; i++) molti.push(eseg('RACC' + String(i).padStart(2, '0'), 1000 * (i + 1), '2026-08-18'));
+  const d = await raccolto({ PrimariaRete: [term('EMMESSE', 10000, '2026-08-10'), ...molti] }, { canale: 'RETE', anno: 2026, mese: 'agosto' });
+  verifica('il totale della riserva e di tutti e 25', d.riserva_eseguiti.ordini === 25, JSON.stringify(d.riserva_eseguiti.ordini));
+  verifica('le righe mostrate sono 20', d.riserva_eseguiti.per_raccoglitore.length === 20);
+  verifica('e si dice che non fanno il totale', /non fanno il totale/.test(d.riserva_eseguiti.elenco_tagliato || ''), d.riserva_eseguiti.elenco_tagliato);
+}
+
 console.log('UN RACCOGLITORE CHE HA SOLO ORDINI NEL LIMBO ESISTE');
 {
   const archivi = {
