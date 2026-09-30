@@ -10,7 +10,7 @@
 // periodo e' la fine trasporto, le quote dello stesso formulario si sommano prima
 // del confronto, e quello che manca da una parte o dall'altra si dice.
 // npm run prove
-import { movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, esitoConsuntivo, testoEsitoConsuntivo, chiaveRiga, leggiRigheConsuntivo } from '../base44/shared/consuntivoFornitore.ts';
+import { movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, esitoConsuntivo, testoEsitoConsuntivo, chiaveRiga, leggiRigheConsuntivo, pareOrdine, periodoSospetto, righeCheParonoTotali } from '../base44/shared/consuntivoFornitore.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -237,6 +237,89 @@ verifica('e quando no, dice che cosa non torna',
   /non corrisponde/.test(testoEsitoConsuntivo(luiInPiu, esitoConsuntivo({ confronto: luiInPiu, costo })))
   && /che noi non abbiamo/.test(testoEsitoConsuntivo(luiInPiu, esitoConsuntivo({ confronto: luiInPiu, costo }))),
   testoEsitoConsuntivo(luiInPiu, esitoConsuntivo({ confronto: luiInPiu, costo })));
+
+// === IL CONSUNTIVO DI LOGISTICA & PNEUMATICI, 30/09/2026 ===
+//
+// Segnalazione dell'utente: "mi hai riportato un insieme di non conformita' senza
+// senso come se non avessi per niente compreso il file del fornitore". Dal report
+// del confronto si vede che cosa il gestionale aveva creduto di leggere: fra i
+// "carichi che il fornitore ci fattura" c'erano l'intestazione di una colonna, una
+// sigla di provincia, un pezzo di ragione sociale e due righe di totale.
+//
+// Queste prove riproducono quelle righe esatte.
+console.log('UNA PAROLA NON E\' UN NUMERO D\'ORDINE');
+verifica('una sigla di provincia non e un ordine', pareOrdine('AV') === '');
+verifica('un pezzo di ragione sociale non e un ordine', pareOrdine('NAPPI') === '');
+verifica("l'intestazione di una colonna non e un ordine", pareOrdine("PR (PROVINCIA UNITA' LOCALE PRODUTTORE)") === '');
+verifica('una parola qualunque non e un ordine', pareOrdine('TOTALE') === '' && pareOrdine('Fornitore') === '');
+verifica('un ordine vero lo e', pareOrdine('ET26125844') === 'ET26125844');
+verifica('e lo e anche scritto male', pareOrdine(' et 26.125844 ') === 'ET26125844');
+verifica('un numero corto ma con cifre resta un ordine', pareOrdine('0068') === '0068');
+verifica('due caratteri no', pareOrdine('A1') === '');
+
+console.log('LE RIGHE DI INTESTAZIONE NON DIVENTANO CARICHI');
+{
+  // Il foglio come lo legge il gestionale quando NON trova l'intestazione: le
+  // prime righe sono titoli e metadati, poi i carichi veri.
+  const celle = [
+    ['Consuntivo mensile', null, null],
+    ['Fornitore', 'LOGISTICA & PNEUMATICI SRL', null],
+    ["PR (PROVINCIA UNITA' LOCALE PRODUTTORE)", 'NAPPI', 'AV'],
+    ['RTXZV001717KH', 'ET26125844', 3700],
+    ['RTXZV001718KR', 'ET26112026', 3540],
+  ];
+  const lette = leggiRigheConsuntivo([{ nome: 'Foglio1', celle }]);
+  const chiavi = lette.righe.map(r => chiaveRiga(r));
+  verifica('i due carichi veri ci sono', chiavi.includes('FIR:RTXZV001717KH') && chiavi.includes('FIR:RTXZV001718KR'), J(chiavi));
+  verifica("l'intestazione non e diventata un carico", !chiavi.some(k => /PROVINCIA/.test(k)), J(chiavi));
+  verifica('ne la ragione sociale', !chiavi.some(k => /NAPPI/.test(k)), J(chiavi));
+  verifica('e le righe scartate si contano', lette.scartate >= 2, String(lette.scartate));
+  verifica('e si dice che l intestazione non si e trovata', lette.note.some(n => /non ho trovato la riga delle intestazioni/.test(n)), J(lette.note));
+}
+
+console.log('LE RIGHE DI TOTALE SI SEGNALANO, NON SI CANCELLANO');
+{
+  // I carichi veri di questo fornitore stanno fra 3.400 e 4.500 kg; il report ne
+  // aveva letti due da 35.620 e 89.180, che sommati fanno il totale del mese.
+  const movimenti = [
+    { numero_fir: 'RTXZV001717KH', id_ordine: 'ET26125844', peso_effettivo: 3700 },
+    { numero_fir: 'RTXZV001718KR', id_ordine: 'ET26112026', peso_effettivo: 4460 },
+  ];
+  const righe = [
+    { numero_fir: 'RTXZV001717KH', kg: 3700 },
+    { numero_fir: 'RTXZV001772FZ', kg: 35620 },
+    { numero_fir: 'RTXZV001845CB', kg: 89180 },
+  ];
+  const paiono = righeCheParonoTotali(righe, movimenti);
+  verifica('le due righe grosse si segnalano', paiono.length === 2, J(paiono));
+  verifica('e si dice qual e il nostro carico piu pesante', paiono[0].massimo_nostro === 4460, J(paiono[0]));
+  verifica('il carico vero non si segnala', !paiono.some(p => /001717/.test(p.chiave)), J(paiono));
+  // Non si cancellano: su un documento che autorizza una fattura non si butta
+  // via niente in silenzio.
+  verifica('le righe restano tutte', righe.length === 3);
+  verifica('senza nostri movimenti non si giudica', righeCheParonoTotali(righe, []).length === 0);
+}
+
+console.log('IL FILE DI UN ALTRO MESE SI DICE SUBITO');
+{
+  // Successo davvero: "LOG&PNEUM - settembre2026.xlsx" caricato nel consuntivo di
+  // agosto. Venti difformita' al posto di una riga.
+  const a = periodoSospetto({ nomeFile: 'LOG&PNEUM - settembre2026.xlsx', righe: [], anno: 2026, mese: 8 });
+  verifica('il nome del file lo tradisce', a && a.some(x => /nel nome c'è settembre/.test(x)), J(a));
+  verifica('e si dice che le difformita non vogliono dire niente', a.some(x => /non vuol dire niente/.test(x)), J(a));
+  verifica('col mese giusto non si dice niente', periodoSospetto({ nomeFile: 'LOG&PNEUM - settembre2026.xlsx', righe: [], anno: 2026, mese: 9 }) === null);
+  verifica('e senza nome di mese nemmeno', periodoSospetto({ nomeFile: 'consuntivo.xlsx', righe: [], anno: 2026, mese: 8 }) === null);
+}
+{
+  const righe = [{ giorno: '2026-09-03' }, { giorno: '2026-09-11' }, { giorno: '2026-09-28' }];
+  const a = periodoSospetto({ nomeFile: 'consuntivo.xlsx', righe, anno: 2026, mese: 8 });
+  verifica('le date delle righe lo tradiscono', a && a.some(x => /Nessuna delle 3 righe datate/.test(x)), J(a));
+  verifica('e dicono la piu vecchia', a.some(x => /03\/09\/2026/.test(x)), J(a));
+  const giuste = periodoSospetto({ nomeFile: 'consuntivo.xlsx', righe, anno: 2026, mese: 9 });
+  verifica('nel mese giusto tacciono', giuste === null, J(giuste));
+  const meta = periodoSospetto({ nomeFile: 'x.xlsx', righe: [{ giorno: '2026-08-30' }, { giorno: '2026-09-01' }, { giorno: '2026-09-02' }, { giorno: '2026-09-03' }], anno: 2026, mese: 8 });
+  verifica('poche dentro e molte fuori: si invita a controllare', meta && meta.some(x => /Solo 1 righe su 4/.test(x)), J(meta));
+}
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

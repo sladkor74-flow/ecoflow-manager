@@ -63,11 +63,31 @@ export const chiaveFir = (v) => {
  * opposti. Tenendole tutte e due, si abbinano le righe che parlano dello stesso
  * carico comunque siano scritte.
  */
+/**
+ * UN NUMERO D'ORDINE DEVE SOMIGLIARE A UN NUMERO D'ORDINE.
+ *
+ * comeOrdine si limita a togliere spazi e punti e a fare il maiuscolo: qualunque
+ * scritta, per lei, e' un numero d'ordine valido. In un consuntivo vero
+ * (LOGISTICA & PNEUMATICI, agosto 2026) questo ha fatto diventare "carichi che il
+ * fornitore ci fattura" l'intestazione di una colonna - "PR (PROVINCIA UNITA'
+ * LOCALE PRODUTTORE)" - la sigla di una provincia, "AV", e un pezzo di ragione
+ * sociale, "NAPPI". Venti difformita' inventate su un file che nessuno aveva
+ * letto male: le aveva lette il gestionale.
+ *
+ * Un ordine ha almeno una CIFRA e almeno quattro caratteri. Non si pretende il
+ * formato nostro (ET26125844), perche' il numero lo scrive il fornitore come
+ * vuole: si pretende solo che non sia una parola.
+ */
+export const pareOrdine = (v) => {
+  const t = comeOrdine(v);
+  return t.length >= 4 && /[0-9]/.test(t) ? t : '';
+};
+
 export function chiaviRiga(r) {
   const out = [];
   const fir = chiaveFir(r && (r.numero_fir || r.fir));
   if (fir) out.push(`FIR:${fir}`);
-  const ord = comeOrdine((r && (r.id_ordine || r.ordine)) || '');
+  const ord = pareOrdine((r && (r.id_ordine || r.ordine)) || '');
   if (ord) out.push(`ORD:${ord}`);
   return out;
 }
@@ -159,12 +179,21 @@ export function leggiRigheConsuntivo(tabelle) {
       colonne: Object.fromEntries(Object.entries(col).map(([k, v]) => [k, v.testo])),
     });
 
+    // SE L'INTESTAZIONE NON SI E' TROVATA, TUTTO IL RESTO E' UN INDOVINELLO.
+    // Senza riga d'intestazione si legge il foglio dalla prima riga e si tirano a
+    // indovinare le colonne dalla forma dei valori: e' cosi' che i titoli delle
+    // colonne sono finiti fra i carichi. Va detto, perche' cambia quanto ci si
+    // puo' fidare di tutto quello che viene dopo.
+    if (iTesta < 0) {
+      note.push(`Foglio "${nome}": non ho trovato la riga delle intestazioni, quindi ho riconosciuto le colonne dalla forma dei valori. Controlla qui sotto quali ho usato: se ho sbagliato colonna, l'esito non vale niente.`);
+    }
+
     const prendi = (r, c) => (c && c.j >= 0 ? r[c.j] : null);
     for (const r of corpo) {
       const riga = r || [];
       const fir = pulisci(prendi(riga, col.numero_fir));
       const ord = pulisci(prendi(riga, col.id_ordine));
-      if (!chiaveFir(fir) && !comeOrdine(ord)) { if (riga.some(c => pulisci(c))) scartate++; continue; }
+      if (!chiaveFir(fir) && !pareOrdine(ord)) { if (riga.some(c => pulisci(c))) scartate++; continue; }
       const kgLetti = comeNumero(prendi(riga, col.kg));
       // Un peso in tonnellate si riconosce dall'ordine di grandezza: un carico di
       // PFU pesa migliaia di chili, non tre.
@@ -179,8 +208,84 @@ export function leggiRigheConsuntivo(tabelle) {
     }
   }
 
-  if (scartate) note.push(`${scartate} righe non avevano ne' un formulario ne' un numero d'ordine: non si possono abbinare e non sono state lette.`);
+  if (scartate) note.push(`${scartate} righe non avevano ne' un formulario ne' un numero d'ordine leggibile: non si possono abbinare e non sono state lette.`);
   return { righe, note, colonne: colonneLette, scartate };
+}
+
+/**
+ * LE RIGHE DI TOTALE NON SONO CARICHI.
+ *
+ * Quasi tutti i consuntivi finiscono con i totali (parole dell'utente,
+ * 30/09/2026: "riga per riga ovvero formulario per formulario e poi i totali alla
+ * fine come sono quasi tutti i report che mi inviano"). Se una riga di totale
+ * porta anche un numero di formulario - capita, e' l'ultimo della lista - diventa
+ * un carico da decine di tonnellate che noi non abbiamo. Nel consuntivo di
+ * LOGISTICA & PNEUMATICI sono uscite due righe cosi', da 35.620 e 89.180 kg,
+ * mentre i carichi veri di quel fornitore stanno fra 3.400 e 4.500 kg.
+ *
+ * Non si cancellano: si SEGNALANO. Cancellare una riga perche' e' grossa vorrebbe
+ * dire poter perdere un carico vero e grosso, e su un documento che autorizza una
+ * fattura non si butta via niente in silenzio.
+ *
+ * Il metro e' il carico piu' pesante che abbiamo NOI in quel mese: un totale sta
+ * sopra la somma di piu' carichi, un carico singolo no. Senza nostri movimenti
+ * non si giudica: non si avrebbe nessun metro.
+ */
+export function righeCheParonoTotali(righe, movimenti, { volte = 3 } = {}) {
+  const nostri = (movimenti || []).map(m => Math.abs(Number(m.peso_effettivo) || 0)).filter(k => k > 0);
+  if (!nostri.length) return [];
+  const massimo = Math.max(...nostri);
+  const soglia = massimo * volte;
+  return (righe || [])
+    .filter(r => r && Number(r.kg) > soglia)
+    .map(r => ({ chiave: chiaveRiga(r) || pulisci(r.id_ordine), kg: Math.round(Number(r.kg)), massimo_nostro: Math.round(massimo) }));
+}
+
+const MESI_NOME = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+
+/**
+ * IL FILE PARLA DI UN ALTRO MESE?
+ *
+ * Successo davvero il 30/09/2026: "LOG&PNEUM - settembre2026.xlsx" caricato nel
+ * consuntivo di AGOSTO. I nostri movimenti erano agosto, il file era settembre, e
+ * naturalmente non si abbinava niente. Il gestionale aveva il nome del file sotto
+ * gli occhi e ha risposto elencando venti difformita', invece di dire la cosa
+ * semplice: stai confrontando due mesi diversi.
+ *
+ * Si guardano due indizi, e nessuno dei due blocca: dicono soltanto di guardare.
+ *   - il NOME del file, se contiene un nome di mese diverso da quello scelto;
+ *   - le DATE delle righe, se la maggior parte cade fuori dal mese.
+ *
+ * Non si blocca perche' un consuntivo puo' legittimamente chiamarsi come il mese
+ * in cui e' stato emesso e riferirsi a quello prima. Ma dirlo cambia tutto: e' la
+ * differenza fra venti righe da controllare a mano e una riga da leggere.
+ */
+export function periodoSospetto({ nomeFile = '', righe = [], anno, mese }) {
+  const meseNum = Number(mese);
+  const annoNum = Number(anno);
+  if (!(meseNum >= 1 && meseNum <= 12)) return null;
+  const atteso = MESI_NOME[meseNum - 1];
+  const avvisi = [];
+
+  const nome = String(nomeFile || '').toLowerCase();
+  const nelNome = MESI_NOME.findIndex(m => nome.includes(m));
+  if (nelNome >= 0 && nelNome !== meseNum - 1) {
+    avvisi.push(`Il file si chiama "${nomeFile}" e nel nome c'è ${MESI_NOME[nelNome]}, ma stai verificando ${atteso} ${annoNum}. Se è il file sbagliato, qualunque difformità qui sotto non vuol dire niente.`);
+  }
+
+  // Le date delle righe, quando il consuntivo ne porta.
+  const giorni = (righe || []).map(r => String((r && r.giorno) || '')).filter(g => /^\d{4}-\d{2}-\d{2}$/.test(g));
+  if (giorni.length >= 3) {
+    const dentro = giorni.filter(g => Number(g.slice(0, 4)) === annoNum && Number(g.slice(5, 7)) === meseNum).length;
+    if (dentro === 0) {
+      const primo = giorni.slice().sort()[0];
+      avvisi.push(`Nessuna delle ${giorni.length} righe datate del consuntivo cade in ${atteso} ${annoNum}: la più vecchia è del ${primo.slice(8, 10)}/${primo.slice(5, 7)}/${primo.slice(0, 4)}. Con ogni probabilità è il file di un altro mese.`);
+    } else if (dentro < giorni.length / 2) {
+      avvisi.push(`Solo ${dentro} righe su ${giorni.length} cadono in ${atteso} ${annoNum}: controlla che sia il file giusto.`);
+    }
+  }
+
+  return avvisi.length ? avvisi : null;
 }
 
 /** Lo stesso soggetto, scritto come viene. */

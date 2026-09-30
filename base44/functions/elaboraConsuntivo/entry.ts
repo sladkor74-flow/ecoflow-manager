@@ -8,6 +8,7 @@ import { valoreCampo, leggiCampo, eliminaCampo } from "../../shared/testoLungo.t
 import { calcolaPassivaMese, MESI_PASSIVA } from "../../shared/passivaCalcolo.ts";
 import {
   movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, leggiRigheConsuntivo,
+  periodoSospetto, righeCheParonoTotali,
   esitoConsuntivo, testoEsitoConsuntivo,
 } from "../../shared/consuntivoFornitore.ts";
 
@@ -147,6 +148,24 @@ export default async function(req) {
     // Un chilo di tolleranza: i pesi si scrivono interi, e un arrotondamento nel
     // foglio del fornitore non e' una difformita'.
     const confronto = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1 });
+
+    // DUE DOMANDE DA FARE PRIMA DI ELENCARE LE DIFFORMITA'.
+    //
+    // 1. E' il file del mese giusto? Il 30/09/2026 "LOG&PNEUM - settembre2026.xlsx"
+    //    e' stato caricato nel consuntivo di agosto: niente si abbinava, e il
+    //    gestionale ha risposto con venti difformita' invece che con una riga.
+    // 2. Qualcuna di quelle righe e' un totale? Quasi tutti i consuntivi finiscono
+    //    con i totali, e un totale scambiato per carico vale decine di tonnellate
+    //    che "il fornitore ci fattura e noi non abbiamo".
+    const avvisiPeriodo = periodoSospetto({
+      nomeFile: (record && record.file_nome) || body.file_nome || '',
+      righe, anno, mese,
+    }) || [];
+    const paiono = righeCheParonoTotali(righe, movimenti);
+    if (paiono.length) {
+      avvisiPeriodo.push(`${paiono.length === 1 ? 'Una riga del consuntivo pesa' : `${paiono.length} righe del consuntivo pesano`} molto piu' di qualunque carico che abbiamo noi in questo mese (il piu' pesante e' ${paiono[0].massimo_nostro} kg): ${paiono.slice(0, 5).map(p => `${p.chiave || 'senza numero'} ${p.kg} kg`).join('; ')}. Di solito sono le righe dei totali in fondo al foglio, contate per errore come carichi.`);
+    }
+    if (avvisiPeriodo.length) noteLettura = [...avvisiPeriodo, ...noteLettura];
     const costoOggi = puoVedereICosti
       ? costoAttesoDallaPassiva(passiva, fornitore, ruolo)
       : { trovato: false, riservato: true, motivo: "L'importo previsto viene dalla fatturazione passiva, che e' riservata all'amministratore. Il confronto sulle quantita' - formulari e chili - lo vedi per intero." };
