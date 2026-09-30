@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle2, Clock, AlertTriangle, Download } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle2, Clock, AlertTriangle, Download, ShieldOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
 import { importaGrandeFile, importaPrimarie, TIPI_LETTURA_BROWSER, dopoCaricamento, testoRicalcoli, testoVerificaArchivio, testoEseguiti, ricalcoliDaRecuperare, recuperiDaFare, moduliDaRicalcolare, ricalcoliFermi, confermeAccumulate } from '@/lib/importGrandeFile';
@@ -125,6 +125,34 @@ export default function CaricamentoDati() {
       setDialogState(extractUploadError(e));
     }
     setInventario(false);
+  };
+
+  // Toglie dai record gli indirizzi dei file pubblici. Non si torna indietro, e
+  // l'ordine conta: quei campi sono l'unico elenco dei file da far rimuovere,
+  // quindi prima si scarica l'inventario e lo si manda. Per questo si chiede
+  // prima quanti sono e poi si conferma, invece di fare e basta.
+  const [scollega, setScollega] = useState(false);
+  const scollegaPubblici = async () => {
+    setScollega(true);
+    try {
+      const conto = await base44.functions.invoke('scollegaFilePubblici', {});
+      const d = conto.data || {};
+      if (!d.record) {
+        window.alert('Nessun link pubblico è rimasto scritto nei record: non c\'è niente da togliere.');
+      } else if (window.confirm(
+        `Sto per togliere dai record ${d.record} riferimenti a ${d.file} file pubblici.\n\n`
+        + 'Il file NON viene cancellato: la piattaforma non sa farlo. Quello che cambia è che il gestionale smette di dire dove si trova, e il registro dei caricamenti lo legge qualunque utente collegato.\n\n'
+        + 'ATTENZIONE: questi campi sono l\'unico posto dove quegli indirizzi sono scritti. Se non hai ancora scaricato l\'elenco e mandato il file al team della piattaforma, fallo prima: dopo non sapremo più quali file far rimuovere.\n\n'
+        + 'Procedo?')) {
+        const res = await base44.functions.invoke('scollegaFilePubblici', { conferma: true });
+        const e = res.data || {};
+        window.alert(`Tolti ${e.svuotati} riferimenti.${e.non_svuotati ? `\n\nNon riusciti: ${e.non_svuotati.length}` : ''}`);
+        caricaLogs();
+      }
+    } catch (e) {
+      setDialogState(extractUploadError(e));
+    }
+    setScollega(false);
   };
 
   const caricaLogs = async () => {
@@ -439,10 +467,22 @@ export default function CaricamentoDati() {
               lista. I riferimenti dei file pubblici sono indirizzi che funzionano
               per chiunque li abbia, quindi il pulsante e' del solo amministratore. */}
           {isAdmin && (
-            <Button variant="outline" size="sm" onClick={scaricaInventario} disabled={inventario}>
-              {inventario ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Download className="w-4 h-4 mr-1.5" />}
-              Elenco dei file caricati
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button variant="outline" size="sm" onClick={scaricaInventario} disabled={inventario}>
+                {inventario ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Download className="w-4 h-4 mr-1.5" />}
+                Elenco dei file caricati
+              </Button>
+              {/* I file saliti prima del 30/09/2026 sono pubblici: il loro
+                  indirizzo funziona per chiunque ce l'abbia e la piattaforma non
+                  sa cancellarli. Quegli indirizzi stanno scritti nei record, e il
+                  registro dei caricamenti lo legge qualunque utente collegato.
+                  Questo li toglie: il file resta sul loro storage, ma il
+                  gestionale smette di dire a chiunque dove si trova. */}
+              <Button variant="outline" size="sm" onClick={scollegaPubblici} disabled={scollega}>
+                {scollega ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <ShieldOff className="w-4 h-4 mr-1.5" />}
+                Togli i link pubblici dai record
+              </Button>
+            </div>
           )}
         </div>
         {loadingLogs ? (

@@ -4,7 +4,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { leggiJson } from "../../shared/testoLungo.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
-import { cancellaFile, sostituisciFileArretrati, supportoCancellazione, segnalaFileNonRimossi } from "../../shared/fileArchivio.ts";
+import { cancellaFile, sostituisciFileArretrati, STATO_CANCELLAZIONE, segnalaFileNonRimossi } from "../../shared/fileArchivio.ts";
 import {
   GIORNI_CONSERVAZIONE, daAlleggerire, togliIlDettaglio,
   storiaVerifica, storiaQuadratura, storiaConsuntivo,
@@ -65,7 +65,7 @@ export default async function(req) {
     // Si guarda subito se la piattaforma sappia cancellare un file: e' la domanda
     // a cui nessuno aveva risposta, e la risposta non deve restare dentro questa
     // risposta HTTP, che nessuno legge (il lavoro e' pianificato).
-    const supporto = supportoCancellazione(base44);
+    const supporto = STATO_CANCELLAZIONE;
     const esito = { oggi, giorni, supporto_cancellazione: supporto, alleggeriti: 0, restano: 0, archivi: [], file: { cancellati: 0, bloccati: 0, non_riusciti: [] }, senza_data: [] };
     let restanti = massimo;
     // Appena la piattaforma rifiuta l'operazione si smette di chiamarla: verificato
@@ -162,7 +162,7 @@ export default async function(req) {
     // quando i file tornano a cancellarsi.
     if (!soloElenco) {
       try {
-        esito.segnalazione = await segnalaFileNonRimossi(base44, { supporto, nonRiusciti: esito.file.non_riusciti, bloccati: esito.file.bloccati, oggi });
+        esito.segnalazione = await segnalaFileNonRimossi(base44, { nonRiusciti: esito.file.non_riusciti, bloccati: esito.file.bloccati, oggi });
       } catch (e) {
         esito.segnalazione = { errore: e && e.message ? e.message : String(e) };
       }

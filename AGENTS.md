@@ -1428,3 +1428,54 @@ non e' un segreto dall'app, e una che deve digitare una persona rompe ogni lettu
 automatica (pulizia notturna, riconfronto di una quadratura, allegati
 dell'assistente). La difesa vera e' il link firmato che scade piu' il permesso di
 chi lo puo' far firmare.
+
+#### Cancellare un file non si puo': non si prova nemmeno piu'
+
+`cancellaFile` non chiama piu' niente e restituisce **sempre** `riuscita: false`.
+Non e' pigrizia: ogni tentativo costava **tre richieste a vuoto per file** contro
+il limite al minuto di tutta l'app - nove a ogni domanda con allegati fatta a
+EcoTyna, sei a ogni caricamento, tre a ogni quadratura - e non poteva riuscire.
+Il vecchio tentativo resta come `provaACancellare`, che non chiama nessuno, per
+il giorno in cui la piattaforma aggiungesse davvero l'operazione.
+
+**Il punto da non toccare mai**: sette punti del gestionale decidono su quel
+`riuscita` se svuotare il riferimento al file sul record. Se `cancellaFile`
+dicesse "riuscita" senza che il file sia sparito, il record perderebbe
+l'indirizzo di un file che resta vivo e raggiungibile da chiunque abbia il link:
+quel file non si potrebbe piu' nemmeno **far rimuovere**, perche' non sapremmo
+piu' quale chiedere. E' il danno peggiore possibile in questa storia, e si evita
+in un punto solo.
+
+`supportoCancellazione` e' stato tolto. Decideva con `typeof core.DeleteFile ===
+'function'`, che e' **sempre vero**: il modulo `integrations` dell'SDK e' un
+Proxy che per qualunque nome restituisce una funzione che fa una POST a
+`/integration-endpoints/Core/<nome>`. Non era un rilevamento, era una costante
+travestita da rilevamento, e da li' nasceva un alert che diceva all'utente "le
+funzioni ci sono ma vengono rifiutate" e gli consigliava di **farsele abilitare**.
+Al suo posto c'e' `STATO_CANCELLAZIONE`, che e' un fatto scritto.
+
+**L'alert ha un testo solo, e vero.** Niente ritentativo notturno promesso,
+niente cancellazione da farsi abilitare, niente pulsante da cercare in un
+pannello che non ce l'ha, niente spazio che cresce verso un limite che non
+esiste. Dice: la piattaforma non sa cancellare, i dati e la storia scritta sono
+al loro posto, **i file pubblici vanno fatti rimuovere per primi**, l'elenco si
+scarica da Caricamento Dati, e l'avviso **non si chiude da solo** perche' solo
+una persona sa quando il team li ha rimossi.
+
+#### I link pubblici non restano scritti nei record
+
+`UploadLog` ha `rls.read: true` - serve, otto pagine ci si agganciano per
+accorgersi di un caricamento nuovo - quindi **qualunque utente collegato** poteva
+leggere il registro e trovarci l'indirizzo pubblico di `GESTIONEECOTYRE2026.xlsx`
+e di ogni export del portale. Restringere la lettura avrebbe rotto
+l'aggiornamento automatico di quelle pagine; la via chirurgica e' svuotare il
+campo, che e' il rimedio che descrive l'assistenza ("removing it from your
+records hides it in your app").
+
+Lo fa `scollegaFilePubblici`, pulsante "Togli i link pubblici dai record" in
+Caricamento Dati, solo amministratore. **Non e' reversibile e l'ordine conta**:
+quei campi sono l'unico posto dove quegli indirizzi sono scritti, quindi prima si
+scarica l'inventario e lo si manda al team della piattaforma. Per questo la
+funzione senza `conferma: true` si limita a contare, e se un archivio non si
+riesce a leggere non tocca niente: svuotarne una parte lascerebbe gli altri link
+in giro senza dirlo.
