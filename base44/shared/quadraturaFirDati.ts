@@ -49,9 +49,24 @@ export const FLUSSI_DATI = [
   { chiave: 'rete_secondarie', entita: 'Secondaria', movimento: null, canale: 'RETE', caricamenti: ['secondarie'] },
   { chiave: 'aci_primarie', entita: 'PrimariaAci', movimento: null, caricamenti: ['primarie_aci', 'primarie'] },
   { chiave: 'aci_secondarie', entita: 'Secondaria', movimento: null, canale: 'ACI', caricamenti: ['secondarie'] },
-  { chiave: 'extra_primarie', entita: 'ExtraRaccolta', movimento: 'primaria', caricamenti: ['extra_raccolta'] },
-  { chiave: 'extra_secondarie', entita: 'ExtraRaccolta', movimento: 'secondaria', caricamenti: ['extra_raccolta'] },
+  // L'EXTRA RACCOLTA NON SI QUADRA CON LA STAMPA, MA NON SI IGNORA.
+  //
+  // Nella stampa che l'utente riceve non c'e' nessun blocco di extra raccolta: i
+  // flussi da confrontare sono quattro (FLUSSI in quadraturaFir.ts). Ma l'extra
+  // raccolta esiste, ed e' il gestionale a doverla guardare da solo - parole
+  // dell'utente, 30/09/2026: "l'extra raccolta e' solo rete, mai aci, ma c'e'
+  // solo se la vedi come terminata nel modulo dell'extra raccolta, sempre in
+  // quella specifica settimana, altrimenti non c'e', ma questa e' una verifica
+  // che devi fare tu".
+  //
+  // Quindi si legge, non entra in nessun confronto a tre fonti e non tocca la
+  // conformita'; si dice in una riga, e SOLO quando quella settimana ha davvero
+  // movimenti terminati. Il canale e' sempre RETE: l'ACI qui non esiste.
+  { chiave: 'extra_rete', entita: 'ExtraRaccolta', movimento: 'primaria', caricamenti: ['extra_raccolta'], informativo: true },
 ];
+
+/** Le chiavi che entrano nel confronto a tre fonti: le informative restano fuori. */
+export const FLUSSI_CONFRONTATI = FLUSSI_DATI.filter(f => !f.informativo).map(f => f.chiave);
 
 function utc(ymd) {
   return new Date(Date.UTC(+ymd.slice(0, 4), +ymd.slice(5, 7) - 1, +ymd.slice(8, 10)));
@@ -333,7 +348,10 @@ export function caricamentiAperti(gestionale) {
 
 // === conformita' per canale ===
 
-export const CANALI_QUADRATURA = ['RETE', 'ACI', 'EXTRA RACCOLTA'];
+// I canali che la stampa quadra: due. L'extra raccolta si dice a parte
+// (osservazioneExtraRaccolta) e non ha una conformita', perche' non ha una
+// seconda fonte con cui confrontarsi.
+export const CANALI_QUADRATURA = ['RETE', 'ACI'];
 
 /**
  * La conformita' della settimana canale per canale. sintesi() ne da' una sola
@@ -380,11 +398,18 @@ const descriviConDate = (x) => (x.fir ? `FIR ${x.fir}` : 'formulario senza numer
  *   - i formulari della settimana senza immissione o senza inizio del
  *     trasporto, o con date incoerenti, si contano (la fine c'e'), e si dicono.
  */
-export function osservazioniDate(gestionale) {
+export function osservazioniDate(gestionale, chiavi = null) {
   const out = [];
   for (const chiave of ORDINE_FLUSSI) {
     const dati = gestionale && gestionale[chiave];
     if (!dati) continue;
+    // SOLO I FLUSSI CHE QUESTA SETTIMANA RIGUARDA. I terminati senza fine
+    // trasporto si leggono su tutto l'archivio - non stanno in nessuna settimana,
+    // e' il senso della regola - ma dirli per un flusso che nella settimana non ha
+    // nessun movimento e non compare nel file vuol dire far parlare la settimana
+    // di roba che non contiene: e' cosi' che un ordine del 2024 faceva comparire
+    // l'extra raccolta in una stampa che non ne ha nessun blocco.
+    if (chiavi && !chiavi.includes(chiave)) continue;
     const nome = `${FLUSSI[chiave].titolo} · ${FLUSSI[chiave].canale}`;
     const sf = dati.senza_fine;
     if (sf === null) {
@@ -418,9 +443,27 @@ export const osservazioniSenzaFine = osservazioniDate;
  * Il confronto di una settimana, con dentro la conformita' canale per canale e
  * le osservazioni sulle date obbligatorie dei formulari.
  */
+/**
+ * L'extra raccolta della settimana: una riga sola, e solo se c'e' davvero.
+ *
+ * Non si quadra con la stampa (non ne ha un blocco) e non ha una conformita': e'
+ * un controllo che fa il gestionale da solo. Solo RETE, mai ACI.
+ */
+export function osservazioneExtraRaccolta(gestionale) {
+  const dati = gestionale && gestionale.extra_rete;
+  if (!dati || !dati.totale || !dati.totale.n) return [];
+  const kg = new Intl.NumberFormat('it-IT').format(Math.round(dati.totale.kg));
+  const n = dati.totale.n;
+  return [`Extra raccolta · RETE: in questa settimana il gestionale ha ${n === 1 ? 'un formulario terminato' : n + ' formulari terminati'} per ${kg} kg. L'extra raccolta non è nella stampa e non si quadra con WINSINFO: è un controllo a sé, e l'ACI qui non esiste.`];
+}
+
 export function confrontaSettimana(lettura, gestionale, periodo) {
   const esito = confronta(lettura, gestionale, periodo);
-  esito.osservazioni.push(...osservazioniDate(gestionale));
+  // Le stesse chiavi che confronta() ha montato: le osservazioni parlano di
+  // quello che questa settimana contiene, non di tutto l'archivio.
+  const chiavi = (esito.flussi || []).map(f => f.chiave);
+  esito.osservazioni.push(...osservazioniDate(gestionale, chiavi));
+  esito.osservazioni.push(...osservazioneExtraRaccolta(gestionale));
   esito.per_canale = sintesiPerCanale(esito, lettura);
   return esito;
 }
@@ -440,7 +483,9 @@ export function righeDaConservare(lettura) {
   return {
     settimana: lettura.settimana_indicata, anno: lettura.anno_indicato, note: lettura.note,
     tabelle: lettura.tabelle.map(t => ({
-      titolo: t.titolo, fonte: t.fonte, righe: t.righe.map(riga), subtotali: (t.subtotali || []).map(subtotale),
+      // Il flusso si conserva: se l'utente lo ha scelto a mano, ripetere il
+      // confronto non deve tornare a indovinarlo dal titolo.
+      titolo: t.titolo, fonte: t.fonte, flusso: t.flusso, righe: t.righe.map(riga), subtotali: (t.subtotali || []).map(subtotale),
       totale_conteggio: t.stampato.n, totale_kg: t.stampato.kg,
     })),
   };

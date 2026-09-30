@@ -28,35 +28,115 @@ export const FONTI = [
 
 export const NOME_FONTE = { winsinfo: 'WINSINFO', ecotyre: 'portale Ecotyre', gestionale: 'gestionale' };
 
-// I flussi che il file puo' contenere, nell'ordine in cui vanno letti e mostrati.
+// I QUATTRO flussi della quadratura, nell'ordine in cui vanno letti e mostrati.
 // "entita" e' il nome dell'entita' del gestionale da cui si prendono i movimenti.
 // Le secondarie di rete e quelle ACI stanno nello stesso archivio, come nel file
 // del portale, e si dividono per classe: vedi shared/canaleSecondaria.ts.
+//
+// SONO QUATTRO, NON SEI. Regola dell'utente (30/09/2026, testuale): "le verifiche
+// sono solo di questo tipo che ti elenco, sempre in riferimento alla specifica
+// settimana, solo negli stati terminati: a) primarie rete b) primarie aci
+// c) secondarie rete d) secondarie aci". L'extra raccolta non si quadra con
+// WINSINFO, e finche' e' stata in questa tabella il modulo apriva un flusso di
+// extra raccolta ogni volta che il gestionale ne aveva un movimento nella
+// settimana, anche quando nella stampa quella sezione non esisteva: l'utente se
+// la ritrovava nell'esito e non capiva di che cosa gli si stesse parlando.
 export const FLUSSI = {
   rete_primarie: { titolo: 'Raccolta rete', canale: 'RETE', entita: 'PrimariaRete', nota_file: 'primarie rete' },
   rete_secondarie: { titolo: 'Secondarie rete', canale: 'RETE', entita: 'Secondaria', nota_file: 'secondarie' },
   aci_primarie: { titolo: 'Raccolta ACI', canale: 'ACI', entita: 'PrimariaAci', nota_file: 'primarie ACI' },
   aci_secondarie: { titolo: 'Secondarie ACI', canale: 'ACI', entita: 'Secondaria', nota_file: 'secondarie' },
-  extra_primarie: { titolo: 'Extra raccolta', canale: 'EXTRA RACCOLTA', entita: 'ExtraRaccolta', nota_file: 'extra raccolta' },
-  extra_secondarie: { titolo: 'Secondarie di extra raccolta', canale: 'EXTRA RACCOLTA', entita: 'ExtraRaccolta', nota_file: 'extra raccolta' },
 };
 
-export const ORDINE_FLUSSI = ['rete_primarie', 'rete_secondarie', 'aci_primarie', 'aci_secondarie', 'extra_primarie', 'extra_secondarie'];
+export const ORDINE_FLUSSI = ['rete_primarie', 'rete_secondarie', 'aci_primarie', 'aci_secondarie'];
 
-/** Il flusso a cui appartiene una tabella, dal titolo stampato sopra di essa. */
+/** Vero se la chiave e' uno dei quattro flussi della quadratura. */
+export const eFlusso = (k) => Object.prototype.hasOwnProperty.call(FLUSSI, String(k || ''));
+
+/**
+ * IL FLUSSO DAL TITOLO: UNA PROPOSTA, NON UNA SENTENZA.
+ *
+ * Le intestazioni non le scrive l'utente, le riceve (parole sue, 30/09/2026:
+ * "non le faccio io, a me tocca riceverle e controllarle"), quindi indovinare
+ * dal testo e' una scommessa che prima o poi si perde. Qui si fa la proposta
+ * migliore possibile e la pagina la fa confermare: chi decide e' l'utente.
+ *
+ * Due cose sono cambiate il 30/09/2026, dopo la settimana 39.
+ *
+ * 1. LA SECONDARIETA' SI DECIDE PRIMA DEL CANALE. Prima il canale veniva letto
+ *    per primo e "WINSINFO ECT SEC-ACI" - le secondarie ACI - finiva fra le
+ *    PRIMARIE ACI, dove si scontrava con la tabella delle primarie ACI vere.
+ * 2. SI RICONOSCE "SEC". Il vocabolario cercava "SECOND": "WIN SEC" e "PORTALE
+ *    ECT SEC" non erano niente, e le secondarie di rete restavano fuori dal
+ *    confronto senza che nessuno lo dicesse.
+ */
 export function flussoDaTitolo(titolo) {
   const t = String(titolo || '').toUpperCase();
-  const secondarie = /SECOND/.test(t);
-  if (/EXTRA/.test(t)) return secondarie ? 'extra_secondarie' : 'extra_primarie';
-  if (/\bACI\b|AUTODEMOLIZ/.test(t)) return secondarie ? 'aci_secondarie' : 'aci_primarie';
+  // "SEC" da solo o seguito da un trattino ("SEC-ACI"), oppure "SECONDARI*".
+  // \bSEC\b non prende "SECONDARIE", che non ha confine di parola dopo SEC.
+  // L'extra raccolta esce subito, prima di tutto: "EXTRA RACCOLTA" contiene la
+  // parola RACCOLTA e senza questa riga finirebbe fra le primarie di rete, che e'
+  // peggio che non capirla (i canali non si mescolano mai, regola 3).
+  if (fuoriPerimetro(t)) return null;
+  const secondarie = /\bSECOND|\bSEC\b|\bSEC[-\s]/.test(t);
+  const aci = /\bACI\b|AUTODEMOLIZ/.test(t);
+  if (aci) return secondarie ? 'aci_secondarie' : 'aci_primarie';
   if (secondarie) return 'rete_secondarie';
-  if (/RACCOLTA|PRIMARI/.test(t)) return 'rete_primarie';
+  if (/RACCOLTA|PRIMARI|\bRETE\b/.test(t)) return 'rete_primarie';
   return null;
 }
 
-/** Il numero di settimana scritto nel titolo, per esempio "SETT. 37". */
+/**
+ * Il flusso da due campi espliciti invece che dal titolo: e' quello che si
+ * chiede all'agente che trascrive la scansione, perche' "di che canale e'" e
+ * "primarie o secondarie" sono due domande a cui si risponde guardando la
+ * pagina, mentre "come si chiama il flusso" e' un indovinello sul testo.
+ */
+export function flussoDaCanaleTipo(canale, tipo) {
+  const c = String(canale || '').toUpperCase().trim();
+  const t = String(tipo || '').toLowerCase().trim();
+  const sec = t.startsWith('second');
+  const pri = t.startsWith('primari');
+  if (!sec && !pri) return null;
+  if (c === 'ACI') return sec ? 'aci_secondarie' : 'aci_primarie';
+  if (c === 'RETE') return sec ? 'rete_secondarie' : 'rete_primarie';
+  return null;
+}
+
+/**
+ * Vero se il titolo dice "extra raccolta", che nella quadratura non c'entra.
+ * Non e' un titolo incomprensibile: e' fuori perimetro, e va detto cosi'.
+ */
+export const fuoriPerimetro = (titolo) => /EXTRA/.test(String(titolo || '').toUpperCase());
+
+/**
+ * La fonte dal titolo, quando la tabella non la porta scritta a parte.
+ *
+ * Nella stampa che l'utente riceve il titolo E' l'etichetta della fonte: "WIN
+ * SINFO", "PORTALE ECOTYRE", "WINSINFO ECT SEC-ACI", "GESTIONALE ECT ACI".
+ * WINSINFO si guarda per primo, perche' "WINSINFO ECT SEC-ACI" contiene anche
+ * "ECT" e altrimenti passerebbe per il portale.
+ */
+export function fonteDaTitolo(titolo) {
+  const t = String(titolo || '').toUpperCase();
+  if (/WIN\s*SINFO|\bWINS/.test(t)) return 'winsinfo';
+  if (/PORTALE|ECOTYRE|\bECT\b|GESTIONALE/.test(t)) return 'ecotyre';
+  return null;
+}
+
+/**
+ * Il numero di settimana scritto nel titolo: "SETT. 37", "SETTIMANA 37",
+ * "Nr. Settimana 39" e anche "W 39", che e' come sta scritto nel riquadro giallo
+ * sotto ogni blocco della stampa che l'utente riceve.
+ *
+ * La settimana la sceglie l'utente caricando la stampa nella settimana giusta:
+ * questa serve solo al controllo che conta, cioe' accorgersi quando il file dice
+ * una settimana DIVERSA da quella aperta, perche' allora i numeri non sono
+ * confrontabili. Senza riconoscere "W 39" quel controllo non scattava mai.
+ */
 export function settimanaDaTitolo(titolo) {
   const m = String(titolo || '').match(/SETT[.\s]*(?:IMANA)?[.\s]*(\d{1,2})\b/i)
+    || String(titolo || '').match(/\bW\.?\s*(\d{1,2})\b/i)
     || String(titolo || '').match(/\bS(?:ETT)?\.?\s*(\d{1,2})\b/i);
   const n = m ? Number(m[1]) : 0;
   return n >= 1 && n <= 53 ? n : null;
@@ -209,13 +289,22 @@ export function normalizzaLettura(letto) {
 
   for (const t of (letto && Array.isArray(letto.tabelle) ? letto.tabelle : [])) {
     const titolo = testo(t.titolo);
-    const fonte = /wins/i.test(String(t.fonte)) ? 'winsinfo' : /ecotyre|portale/i.test(String(t.fonte)) ? 'ecotyre' : null;
+    // La fonte scritta a parte vale piu' del titolo; senza quella si legge il
+    // titolo, che nella stampa ricevuta E' l'etichetta della fonte.
+    const fonteScritta = /wins/i.test(String(t.fonte)) ? 'winsinfo' : /ecotyre|portale/i.test(String(t.fonte)) ? 'ecotyre' : null;
+    const fonte = fonteScritta || fonteDaTitolo(titolo);
+    // IL FLUSSO SCELTO DALL'UTENTE VINCE SU QUALUNQUE INDOVINELLO SUL TESTO.
+    // Sotto di lui viene quello che l'agente ha LETTO sulla pagina (canale e
+    // tipo, due domande semplici), e solo per ultimo la proposta dal titolo.
+    const scelto = eFlusso(t.flusso) ? String(t.flusso) : null;
+    const letto = flussoDaCanaleTipo(t.canale, t.tipo);
     const righe = (Array.isArray(t.righe) ? t.righe : [])
       .map(r => ({ impianto: testo(r.impianto), trasportatore: testo(r.trasportatore), n: Math.round(numero(r.conteggio)), kg: numero(r.kg) }))
       .filter(r => r.impianto && (r.n > 0 || r.kg > 0));
     if (!righe.length) continue;
 
-    const flusso = flussoDaTitolo(titolo);
+    const proposto = letto || flussoDaTitolo(titolo);
+    const flusso = scelto || proposto;
     if (!settimanaFile) settimanaFile = settimanaDaTitolo(titolo);
 
     const somma = righe.reduce((s, r) => ({ n: s.n + r.n, kg: s.kg + r.kg }), { n: 0, kg: 0 });
@@ -260,11 +349,15 @@ export function normalizzaLettura(letto) {
         problemi.push(`${titolo || 'tabella senza titolo'} · ${NOME_FONTE[fonte] || 'fonte non indicata'}: le righe lette fanno ${somma.n} formulari e ${formatoKg(somma.kg)} kg, il totale stampato sul file ${stampato.n} e ${formatoKg(stampato.kg)} kg. La trascrizione va controllata sull'originale.`);
       }
     }
-    if (!fonte) problemi.push(`${titolo || 'tabella senza titolo'}: non si capisce se la tabella è di WINSINFO o del portale.`);
-    if (!flusso) problemi.push(`"${titolo}": non si capisce a quale flusso si riferisce la tabella (raccolta rete, secondarie, ACI o extra raccolta).`);
+    if (!fonte) problemi.push(`${titolo || 'tabella senza titolo'}: non si capisce se la tabella è di WINSINFO o del portale. Scegli la fonte accanto alla tabella.`);
+    if (!flusso) {
+      problemi.push(fuoriPerimetro(titolo)
+        ? `"${titolo}": l'extra raccolta non fa parte della quadratura FIR, che confronta primarie e secondarie di rete e di ACI. La tabella è rimasta fuori dal confronto.`
+        : `"${titolo || 'tabella senza titolo'}": non si capisce a quale dei quattro flussi appartiene (primarie rete, secondarie rete, primarie ACI, secondarie ACI). Scegli il flusso accanto alla tabella.`);
+    }
 
     tabelle.push({
-      titolo, fonte, flusso, righe, somma, stampato, unita, ricostruita, subtotali,
+      titolo, fonte, flusso, proposto, flusso_scelto: !!scelto, righe, somma, stampato, unita, ricostruita, subtotali,
       // quadra_totali riguarda il totale complessivo, quadra anche i subtotali di gruppo
       quadra_totali: quadraConteggio && quadraPeso,
       quadra: quadraConteggio && quadraPeso,
@@ -284,13 +377,55 @@ export function normalizzaLettura(letto) {
     }
   }
 
+  // DUE TABELLE SULLO STESSO FLUSSO E SULLA STESSA FONTE NON SI SCELGONO: SI DICONO.
+  //
+  // Fino al 30/09/2026 il confronto prendeva la prima con un find() e la seconda
+  // spariva senza una riga. Nella settimana 39 e' successo davvero: "WINSINFO ECT
+  // SEC-ACI" e "WINSINFO ECT ACI" finivano tutte e due su aci_primarie, le
+  // secondarie ACI venivano confrontate con le primarie ACI del gestionale - uno
+  // scostamento inventato - e le primarie ACI vere non venivano confrontate
+  // affatto. Sommarle non e' una via d'uscita: due tabelle possono essere due
+  // pezzi dello stesso flusso oppure la stessa cosa contata due volte, e
+  // indovinare quale delle due vuol dire scrivere un numero a caso.
+  const perChiave = new Map();
+  for (const t of tabelle) {
+    if (!t.flusso || !t.fonte) continue;
+    const k = `${t.flusso}|${t.fonte}`;
+    if (!perChiave.has(k)) perChiave.set(k, []);
+    perChiave.get(k).push(t);
+  }
+  for (const [k, gruppo] of perChiave) {
+    if (gruppo.length < 2) continue;
+    const [flusso, fonte] = k.split('|');
+    for (const t of gruppo) t.doppia = true;
+    const nomi = gruppo.map(t => `"${t.titolo || 'senza titolo'}"`).join(', ');
+    problemi.push(`${FLUSSI[flusso].titolo} · ${NOME_FONTE[fonte]}: ci sono ${gruppo.length} tabelle assegnate allo stesso flusso e alla stessa fonte (${nomi}). Il confronto di questo flusso non si fa: correggi il flusso di ciascuna accanto alla tabella, perché tenerne una sola o sommarle darebbe un numero sbagliato senza dirlo.`);
+  }
+
+  // TRE COSE DIVERSE, TRE ESITI DIVERSI.
+  //
+  // "verificata" era un flag solo, e valeva "le somme tornano E si e' capita la
+  // fonte E si e' capito il flusso". La pagina, vedendolo falso, scriveva sempre
+  // la stessa frase: "la somma delle righe lette non torna con i totali stampati
+  // sul file: controlla la trascrizione sull'originale". Nella settimana 39 le
+  // somme tornavano tutte al chilo e il motivo vero era un titolo non
+  // riconosciuto: al'utente si dava la colpa di una trascrizione sbagliata che
+  // era invece esatta. Adesso i tre esiti viaggiano separati e ognuno ha la sua
+  // frase.
+  const totaliQuadrano = tabelle.length > 0 && tabelle.every(t => t.quadra);
+  const fontiRiconosciute = tabelle.length > 0 && tabelle.every(t => t.fonte);
+  const flussiRiconosciuti = tabelle.length > 0 && tabelle.every(t => t.flusso && !t.doppia);
+
   return {
     settimana_indicata: settimanaFile,
     anno_indicato: annoFile,
     tabelle,
     problemi,
     note: testo(letto && letto.note),
-    verificata: tabelle.length > 0 && tabelle.every(t => t.quadra && t.fonte && t.flusso),
+    totali_quadrano: totaliQuadrano,
+    fonti_riconosciute: fontiRiconosciute,
+    flussi_riconosciuti: flussiRiconosciuti,
+    verificata: totaliQuadrano && fontiRiconosciute && flussiRiconosciuti,
   };
 }
 
@@ -458,10 +593,17 @@ export function confronta(lettura, gestionale, periodo) {
 
   for (const chiave of chiavi) {
     const def = FLUSSI[chiave];
-    const tab = {
-      winsinfo: lettura.tabelle.find(t => t.flusso === chiave && t.fonte === 'winsinfo') || null,
-      ecotyre: lettura.tabelle.find(t => t.flusso === chiave && t.fonte === 'ecotyre') || null,
+    // Una tabella per fonte, o nessuna: con due non si sceglie (vedi
+    // normalizzaLettura), perche' scegliere vuol dire buttarne una in silenzio.
+    const delFlusso = (fonte) => lettura.tabelle.filter(t => t.flusso === chiave && t.fonte === fonte);
+    const doppie = [];
+    const unaSola = (fonte) => {
+      const trovate = delFlusso(fonte);
+      if (trovate.length === 1) return trovate[0];
+      if (trovate.length > 1) doppie.push({ fonte, quante: trovate.length });
+      return null;
     };
+    const tab = { winsinfo: unaSola('winsinfo'), ecotyre: unaSola('ecotyre') };
     const dati = gestionale[chiave] || {};
     const confrontabile = !!def.entita;
     const nelFile = !!(tab.winsinfo || tab.ecotyre);
@@ -536,7 +678,9 @@ export function confronta(lettura, gestionale, periodo) {
     const note = [];
     if (!confrontabile) {
       note.push('Il gestionale non registra questo flusso: il confronto si limita a WINSINFO e al portale.');
-    } else if (!nelFile) {
+    } else if (!nelFile && !doppie.length) {
+      // Con le doppie le tabelle ci sono eccome: e' che non si sa quale sia questo
+      // flusso, e lo dice la nota apposta. Dire "non c'e' nessuna tabella" sarebbe falso.
       note.push(`Nel file non c'è nessuna tabella di questo flusso, mentre il gestionale ha ${fir(totali.gestionale.n)} per ${formatoKg(totali.gestionale.kg)} kg nella settimana.`);
     } else if (totali.gestionale.n === 0) {
       note.push(`Nel gestionale non risulta nessun movimento di questo flusso nella settimana: o il file delle ${def.nota_file} non è ancora stato caricato, o a portale quei formulari cadono in un'altra settimana.`);
@@ -548,10 +692,16 @@ export function confronta(lettura, gestionale, periodo) {
     if (nelFile && !tab.winsinfo) mancanti.push('WINSINFO');
     if (nelFile && !tab.ecotyre) mancanti.push('portale Ecotyre');
     for (const m of mancanti) note.push(`Nel file manca la tabella di ${m} per questo flusso: senza le due fonti il confronto è incompleto.`);
+    for (const d of doppie) note.push(`Nel file ci sono ${d.quante} tabelle di ${NOME_FONTE[d.fonte]} assegnate a questo flusso. Finché non se ne indica una sola il confronto non si fa: tenerne una a caso darebbe un numero sbagliato senza dirlo. Correggi il flusso accanto alle tabelle.`);
 
     const conDate = confrontabile ? (dati.date_da_sistemare || []) : [];
     flussi.push({
       chiave, titolo: def.titolo, canale: def.canale, confrontabile, nel_file: nelFile,
+      // Un flusso che la stampa non copre non e' un flusso "da sistemare": le sue
+      // celle non sono scostamenti, sono righe che nessuno ha ancora confrontato.
+      // Contarle fra gli incongruenti faceva dire "N righe da sistemare" a un
+      // canale il cui unico problema era una tabella non riconosciuta.
+      fuori_stampa: confrontabile && !nelFile,
       fonti: attese, totali, celle: elenco, note, tabelle_mancanti: mancanti,
       // solo se ce ne sono: un esito salvato a posto resta identico e non si riscrive
       ...(conDate.length ? { date_da_sistemare: conDate } : {}),
@@ -567,32 +717,62 @@ export function confronta(lettura, gestionale, periodo) {
   if (settimanaDiscorde) {
     osservazioni.push(`Sul file è scritta la settimana ${lettura.settimana_indicata}, la verifica è sulla ${periodo.settimana}: scegli la settimana giusta e ripeti il confronto, perché così i numeri non sono confrontabili.`);
   }
-  if (!lettura.settimana_indicata) {
-    osservazioni.push(`Sul file non è indicato il numero di settimana: si è usata la ${periodo.settimana}, scelta a mano.`);
+  // Se sul file la settimana non c'e' non si dice niente: la sceglie l'utente
+  // caricando la stampa nella settimana giusta, ed e' lui la fonte di quel dato
+  // (parole sue, 30/09/2026: "anche se il numero della settimana non c'è nel
+  // foglio che mi arriva poco importa, sarò io a caricartelo nella settimana
+  // giusta"). Resta il controllo che conta: se il file DICE una settimana diversa
+  // da quella aperta, i numeri non sono confrontabili e si avvisa.
+  // LE TABELLE SENZA FLUSSO PORTANO I LORO NUMERI CON SÉ.
+  //
+  // Prima sparivano con un filter(Boolean) e restava solo "non si capisce a quale
+  // flusso si riferisce". Intanto il flusso corrispondente diceva "Manca nel
+  // file": due affermazioni opposte sugli stessi formulari, e l'utente in mezzo.
+  // Adesso si dice che cosa si è letto, quanto fa, e che aspetta solo di essere
+  // assegnato.
+  for (const t of lettura.tabelle.filter(x => !x.flusso)) {
+    osservazioni.push(`«${t.titolo || 'tabella senza titolo'}»${t.fonte ? ' · ' + NOME_FONTE[t.fonte] : ''}: ${fir(t.somma.n)} per ${formatoKg(t.somma.kg)} kg letti${t.quadra ? ' e quadranti con i totali stampati' : ''}, ma non ancora attribuiti a nessuno dei quattro flussi. Scegli il flusso accanto alla tabella: finché resta così questi formulari non entrano in nessun confronto.`);
   }
   for (const p of lettura.problemi) osservazioni.push(p);
 
-  return { flussi, osservazioni, lettura_verificata: !!lettura.verificata, settimana_discorde: settimanaDiscorde, periodo };
+  return {
+    flussi, osservazioni, lettura_verificata: !!lettura.verificata,
+    // I tre esiti separati viaggiano nell'esito salvato: la pagina deve poter dire
+    // il motivo VERO per cui la lettura non e' confermata, invece di accusare
+    // sempre la trascrizione.
+    totali_quadrano: lettura.totali_quadrano !== false,
+    fonti_riconosciute: lettura.fonti_riconosciute !== false,
+    flussi_riconosciuti: lettura.flussi_riconosciuti !== false,
+    settimana_discorde: settimanaDiscorde, periodo,
+  };
 }
 
 /** I numeri di testa: quante celle quadrano, quante no, quante vanno guardate. */
 export function sintesi(esito) {
   let celle = 0, congruenti = 0, incongruenti = 0, nonConfrontabili = 0, tabelleMancanti = 0;
+  let fuoriStampa = 0, flussiFuoriStampa = 0;
   let osservazioni = (esito.osservazioni || []).length;
   for (const f of esito.flussi || []) {
     if (!f.confrontabile) nonConfrontabili++;
     tabelleMancanti += (f.tabelle_mancanti || []).length;
+    if (f.fuori_stampa) flussiFuoriStampa++;
     for (const c of f.celle) {
       celle++;
-      if (c.verdetto === 'congruente') { congruenti++; if (c.osservazione) osservazioni++; } else incongruenti++;
+      if (c.verdetto === 'congruente') { congruenti++; if (c.osservazione) osservazioni++; }
+      // Le righe di un flusso che la stampa non copre non sono scostamenti: non
+      // si sa ancora niente di loro, e chiamarle "da sistemare" e' un'accusa.
+      else if (f.fuori_stampa) fuoriStampa++;
+      else incongruenti++;
     }
   }
   // La quadratura e' piena solo se le tre fonti coincidono su tutto, la
   // trascrizione e' confermata dai totali stampati, la settimana e' quella
   // giusta e nel file non manca nessuna delle due tabelle attese.
-  const piena = incongruenti === 0 && esito.lettura_verificata && !esito.settimana_discorde && tabelleMancanti === 0;
+  const piena = incongruenti === 0 && fuoriStampa === 0 && esito.lettura_verificata && !esito.settimana_discorde && tabelleMancanti === 0;
   return {
     celle, congruenti, incongruenti, osservazioni, non_confrontabili: nonConfrontabili,
+    // le righe che la stampa non copre, dette a parte: non sono scostamenti
+    ...(fuoriStampa ? { fuori_stampa: fuoriStampa, flussi_fuori_stampa: flussiFuoriStampa } : {}),
     conformita: piena ? 'piena' : 'parziale',
   };
 }

@@ -121,7 +121,9 @@ verifica('senza fine trasporto: anche la data a stringa vuota e quella illeggibi
 // ripassa sugli esiti salvati prima. La libreria importa gli alias @: qui si
 // sostituiscono.
 const sorgente = readFileSync(new URL('../src/lib/quadraturaFir.js', import.meta.url), 'utf8')
-  .replace("import { formatKg, formatTonnellate } from '@/lib/utils';", 'const formatKg = (x) => String(x); const formatTonnellate = (x) => String(x);');
+  .replace("import { formatKg, formatTonnellate } from '@/lib/utils';", 'const formatKg = (x) => String(x); const formatTonnellate = (x) => String(x);')
+  // la lettura delle pivot sta in un modulo suo, provato da prove/quadraturaFirFlussi.mjs
+  .replace("import { leggiPivotDaGriglia } from '@/lib/pivotQuadratura';", 'const leggiPivotDaGriglia = () => [];');
 const pagine = await import('data:text/javascript;base64,' + Buffer.from(sorgente).toString('base64'));
 const quote = ripartiti.map(r => ({ fir: r.numero_fir, ordine: r.id_ordine, kg: r.peso_effettivo, date: 'manca la data di inizio trasporto' }));
 verifica('pagine e backend raggruppano allo stesso modo', JSON.stringify(pagine.formulariConDate(quote)) === JSON.stringify(formulariConDate(quote))

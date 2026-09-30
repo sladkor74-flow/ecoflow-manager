@@ -64,12 +64,17 @@ const SCHEMA_LETTURA = {
         properties: {
           titolo: { type: 'string' },
           fonte: { type: 'string', enum: ['winsinfo', 'ecotyre'] },
+          // Il canale e il tipo si CHIEDONO, non si deducono dal titolo: sono due
+          // domande a cui si risponde guardando la pagina. Le intestazioni della
+          // stampa le scrive chi la manda, non l'utente, e cambiano.
+          canale: { type: 'string', enum: ['RETE', 'ACI'] },
+          tipo: { type: 'string', enum: ['primarie', 'secondarie'] },
           righe: { type: 'array', items: SCHEMA_RIGA },
           subtotali: { type: 'array', items: SCHEMA_SUBTOTALE },
           totale_conteggio: { type: 'integer' },
           totale_kg: { type: 'number' },
         },
-        required: ['titolo', 'fonte', 'righe', 'totale_conteggio', 'totale_kg'],
+        required: ['titolo', 'fonte', 'canale', 'tipo', 'righe', 'totale_conteggio', 'totale_kg'],
       },
     },
     note: { type: 'string' },
@@ -78,9 +83,10 @@ const SCHEMA_LETTURA = {
 };
 
 const PROMPT = [
-  'Il documento allegato e\' la stampa settimanale con cui una societa\' di raccolta di pneumatici fuori uso controlla i propri formulari di identificazione del rifiuto (FIR).',
-  'Contiene una o piu\' sezioni, ognuna con un titolo come "RACCOLTA ECOTYRE SETT. 37", "SECONDARIE ECOTYRE SETT. 37", "ACI SETT. 37" oppure "EXTRA RACCOLTA".',
-  'In ogni sezione ci sono due tabelle pivot con la stessa forma, una etichettata WINSINFO e una etichettata ECOTYRE: sono le due fonti da confrontare.',
+  'Il documento allegato e\' la stampa settimanale con cui una societa\' di raccolta di pneumatici fuori uso controlla i propri formulari di identificazione del rifiuto (FIR). E\' una scansione.',
+  'Contiene fino a QUATTRO blocchi, e in ogni blocco due tabelle pivot affiancate con la stessa forma: a SINISTRA quella di WINSINFO (il programma dei trasporti), a DESTRA quella che viene dal portale Ecotyre. Sono le due fonti indipendenti da confrontare.',
+  'Le intestazioni sopra le pivot le scrive chi manda la stampa e cambiano di settimana in settimana. Esempi visti davvero: "WIN SINFO", "PORTALE ECOTYRE", "WIN SEC", "PORTALE ECT SEC", "WINSINFO ECT SEC-ACI", "GESTIONALE ECT ACI", "WINSINFO ECT ACI". "SEC" vuol dire secondarie, "ECT" vuol dire Ecotyre. NON fidarti delle intestazioni per capire di che cosa parla una tabella: copiale e basta, e guarda la pagina.',
+  'Sotto ogni blocco c\'e\' un riquadro, spesso giallo, con il numero della settimana scritto come "W 39".',
   'Ogni tabella ha una sola colonna di etichette, con due livelli: la riga dell\'impianto di destinazione, in grassetto e non rientrata, e sotto di essa le righe dei suoi trasportatori, rientrate. La riga dell\'impianto porta gia\' il subtotale del gruppo, cioe\' la somma delle righe rientrate che la seguono. Poi ci sono due colonne di numeri: il conteggio dei formulari e la somma dei chilogrammi.',
   '',
   'Trascrivi ogni tabella. Per ogni tabella:',
@@ -94,12 +100,14 @@ const PROMPT = [
   '- Prima di rispondere controlla due conti, e se non tornano rileggi: le righe di ogni gruppo devono sommare il subtotale del suo impianto, e tutte le righe insieme devono fare il totale complessivo.',
   '- Non sommare, non arrotondare e non correggere niente: copia i numeri come sono stampati, anche se non tornano.',
   '- Non inventare righe e non saltarne nessuna. Se una tabella e\' illeggibile, mettila con righe vuote e spiegalo in note.',
-  '- fonte: "winsinfo" oppure "ecotyre", secondo l\'etichetta sopra la tabella.',
-  '- titolo: il titolo della sezione a cui la tabella appartiene, copiato come e\' scritto.',
-  '- settimana: il numero di settimana scritto nei titoli, se c\'e\'; altrimenti lascialo nullo.',
+  '- fonte: "winsinfo" per la pivot di SINISTRA di ogni blocco, "ecotyre" per quella di DESTRA. Vale la posizione, non l\'etichetta: la pivot di destra a volte e\' intitolata "GESTIONALE ECT ACI" ed e\' comunque quella che viene dal portale. Se l\'etichetta dice chiaramente WINSINFO o WIN SINFO, e\' winsinfo.',
+  '- titolo: l\'intestazione scritta sopra la tabella, copiata esattamente come e\'.',
+  '- canale: "RETE" oppure "ACI". E\' ACI quando l\'intestazione nomina ACI o l\'autodemolizione; altrimenti e\' RETE. Nella stampa non c\'e\' mai l\'extra raccolta: se trovi un blocco di extra raccolta, non metterlo fra le tabelle e scrivilo in note.',
+  '- tipo: "secondarie" quando l\'intestazione dice SEC, SEC-ACI o SECONDARIE; "primarie" negli altri casi.',
+  '- settimana: il numero scritto nel riquadro sotto il blocco: da "W 39" prendi 39. Se non c\'e\' da nessuna parte, lascialo nullo.',
   '',
   'Rispondi solo con un oggetto JSON cosi\' fatto:',
-  '{"settimana": 37, "anno": null, "tabelle": [{"titolo": "RACCOLTA ECOTYRE SETT. 37", "fonte": "winsinfo", "righe": [{"impianto": "", "trasportatore": "", "conteggio": 0, "kg": 0}], "subtotali": [{"impianto": "", "conteggio": 0, "kg": 0}], "totale_conteggio": 0, "totale_kg": 0}], "note": ""}',
+  '{"settimana": 39, "anno": null, "tabelle": [{"titolo": "WINSINFO ECT SEC-ACI", "fonte": "winsinfo", "canale": "ACI", "tipo": "secondarie", "righe": [{"impianto": "", "trasportatore": "", "conteggio": 0, "kg": 0}], "subtotali": [{"impianto": "", "conteggio": 0, "kg": 0}], "totale_conteggio": 0, "totale_kg": 0}], "note": ""}',
 ].join('\n');
 
 function comeOggetto(v) {
@@ -139,7 +147,11 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (!eAmministratore(user)) return rispostaSolaLettura();
 
-    const { quadratura_id, file_uri, tabelle, solo_confronto } = await req.json();
+    // settimana_file, anno_file e note arrivano quando la pagina rimanda le
+    // tabelle gia' lette con il flusso corretto a mano: senza di loro la
+    // settimana letta sul file andrebbe persa a ogni correzione, e l'esito
+    // direbbe "sul file non è indicato il numero di settimana".
+    const { quadratura_id, file_uri, tabelle, solo_confronto, settimana_file, anno_file, note } = await req.json();
     if (!quadratura_id) return Response.json({ error: 'quadratura_id obbligatorio' }, { status: 400 });
     quadraturaId = quadratura_id;
 
@@ -157,7 +169,7 @@ export default async function(req) {
       modo = 'agente';
       letture = 1;
     } else if (Array.isArray(tabelle)) {
-      letto = { settimana: null, anno: null, tabelle, note: '' };
+      letto = { settimana: settimana_file ?? null, anno: anno_file ?? null, tabelle, note: note || '' };
       modo = 'excel';
     } else if (solo_confronto) {
       // Una quadratura alleggerita non ha piu' le righe lette. Non e' un errore

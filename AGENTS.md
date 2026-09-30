@@ -1288,3 +1288,81 @@ istruita, e sono state misurate sul codice:
   chi ha solo ordini nel limbo si risponderebbe "non risulta fra i raccoglitori".
   Vale anche per `target_raccoglitori`, dove la riserva fa sembrare un
   raccoglitore piu' indietro di quanto sia. Prove in `prove/riservaEseguiti.mjs`.
+
+### La Quadratura FIR: il flusso non si indovina dal titolo (30/09/2026)
+
+Segnalazione dell'utente sulla settimana 39: *"mi hai restituito l'ok per le
+primarie ma non per le secondarie ne' rete ne' aci, inoltre mi parli di extra
+raccolta che non esiste... tutto e' caricato correttamente nel gestionale e se
+faccio i calcoli sul mio vecchio file excel tutto corrisponde"*. Aveva ragione su
+tutta la linea: i numeri erano giusti in ogni passaggio.
+
+**SONO QUATTRO FLUSSI, NON SEI.** Regola sua, testuale: *"le verifiche sono solo
+di questo tipo che ti elenco, sempre in riferimento alla specifica settimana,
+solo negli stati terminati: a) primarie rete b) primarie aci c) secondarie rete
+d) secondarie aci"*. `FLUSSI` e `ORDINE_FLUSSI` in `quadraturaFir.ts` sono quei
+quattro. L'extra raccolta non si quadra con WINSINFO: e' **solo rete, mai ACI**,
+e c'e' solo se in quella settimana il modulo Extra Raccolta ha movimenti
+terminati. Si legge come flusso `informativo` in `FLUSSI_DATI`, non entra in
+nessun confronto a tre fonti, non tocca la conformita' e si dice in una riga
+(`osservazioneExtraRaccolta`) **solo quando c'e' davvero**.
+
+**LE INTESTAZIONI LE RICEVE, NON LE SCRIVE.** Parole sue: *"non le faccio io, a
+me tocca riceverle e controllarle"*. Quindi il flusso **non si deduce dal testo**:
+si propone e si fa confermare. Nella pagina ogni tabella letta ha due menu, fonte
+e flusso, sempre visibili e gia' compilati (scelta sua), e un pulsante che rifa'
+il confronto. `normalizzaLettura` accetta un `flusso` esplicito che vince su
+tutto; sotto viene quello che l'agente ha **letto** (`canale` + `tipo`, due
+domande semplici invece di un indovinello sul titolo), e solo per ultimo
+`flussoDaTitolo`. Il flusso scelto si conserva in `righe_json`, cosi' rifare il
+confronto non torna a indovinare.
+
+**I due difetti che hanno rotto la settimana 39:**
+
+1. **La secondarieta' si decide PRIMA del canale.** Il canale veniva letto per
+   primo e `"WINSINFO ECT SEC-ACI"` - le secondarie ACI - finiva fra le
+   **primarie ACI**, dove si scontrava con le primarie ACI vere.
+2. **Il vocabolario cercava `SECOND`.** La stampa scrive `SEC`: `"WIN SEC"` e
+   `"PORTALE ECT SEC"` non erano niente, e le secondarie di rete restavano fuori
+   dal confronto. Ora `\bSEC\b` e `\bSEC[-\s]` valgono secondarie, e
+   `fuoriPerimetro` esce per primo perche' "EXTRA RACCOLTA" contiene RACCOLTA e
+   finirebbe fra le primarie di rete.
+
+**NIENTE SPARISCE IN SILENZIO.** `confronta` prendeva le tabelle con un `find`:
+due tabelle sullo stesso flusso e sulla stessa fonte e la seconda spariva senza
+una riga. Ora si contano, si marcano `doppia`, il flusso **non si confronta** e lo
+si dice: sommarle o tenerne una a caso darebbe un numero sbagliato senza dirlo.
+Le tabelle **senza** flusso portano i loro numeri nelle osservazioni ("3
+formulari per 42.480 kg letti e quadranti, ma non ancora attribuiti"), invece di
+sparire mentre il flusso corrispondente dichiarava "Manca nel file": erano due
+affermazioni opposte sugli stessi formulari.
+
+**TRE ESITI, TRE FRASI.** `lettura.verificata` era un flag solo e la pagina
+scriveva sempre *"la somma delle righe lette non torna con i totali stampati"*,
+anche quando le somme tornavano al chilo e il motivo era un titolo non
+riconosciuto: si accusava una trascrizione esatta. Ora viaggiano separati
+`totali_quadrano`, `fonti_riconosciute`, `flussi_riconosciuti`, e
+`motivoLetturaNonConfermata` sceglie la frase giusta.
+
+**UN FLUSSO CHE LA STAMPA NON COPRE NON E' "DA SISTEMARE".** Le sue celle
+finivano fra gli `incongruenti` e il canale diceva "N righe da sistemare" per un
+confronto che non era mai stato fatto. Ora il flusso porta `fuori_stampa` e le sue
+righe si contano a parte.
+
+**IL LETTORE EXCEL** sta in `src/lib/pivotQuadratura.js`, senza dipendenze dal
+browser perche' le prove lo possano chiamare. Due cose che non fa piu': prendere
+ogni pivot che trova (sul file vero dell'utente ne leggeva **undici** su sei
+fogli - giacenze, terziarie, richieste da evadere - e una pivot di chili per
+classe usciva come "12920 formulari"; ora una pivot della quadratura deve avere
+due misure, un **conteggio** e un **peso**), e rubare il titolo alla pivot del
+vicino (le pivot settimanali non hanno titolo, hanno "Nr. Settimana | 39": il
+lettore pescava `RACCOLTA` da un'altra colonna e lo stesso titolo finiva sulle
+primarie **e** sulle secondarie, che poi si scontravano). Sul file vero: da 11
+tabelle a 2, quelle giuste.
+
+**LA SETTIMANA LA SCEGLIE L'UTENTE.** *"Anche se il numero della settimana non
+c'e' nel foglio poco importa, saro' io a caricartelo nella settimana giusta"*:
+se sul file non c'e', non si dice niente. Resta il controllo che conta, cioe' il
+file che dichiara una settimana **diversa** da quella aperta.
+
+Prove in `prove/quadraturaFirFlussi.mjs`.

@@ -31,6 +31,22 @@ const LIMITE = 5 * 1024 * 1024;
 
 const NOME_CANALE = { RETE: 'Rete', ACI: 'ACI', 'EXTRA RACCOLTA': 'Extra raccolta' };
 
+// I QUATTRO FLUSSI CHE SI QUADRANO, come li ha elencati l'utente il 30/09/2026:
+// "le verifiche sono solo di questo tipo... solo negli stati terminati:
+// a) primarie rete b) primarie aci c) secondarie rete d) secondarie aci".
+const FLUSSI_SCELTA = [
+  { valore: 'rete_primarie', nome: 'Primarie rete' },
+  { valore: 'rete_secondarie', nome: 'Secondarie rete' },
+  { valore: 'aci_primarie', nome: 'Primarie ACI' },
+  { valore: 'aci_secondarie', nome: 'Secondarie ACI' },
+];
+const FONTI_SCELTA = [
+  { valore: 'winsinfo', nome: 'WINSINFO' },
+  { valore: 'ecotyre', nome: 'Portale Ecotyre' },
+];
+
+const SELECT = 'h-8 rounded-md border border-input bg-background px-2 text-sm';
+
 // I caricamenti aperti come li descrive il server: tipo, giorno, chi, file, e se
 // risulta interrotto (allora va ripetuto) o si e' concluso durante la lettura.
 const descriviInCorso = (elenco) => elenco
@@ -48,8 +64,117 @@ function Pallino({ c }) {
 function verdettoCanale(c) {
   if (c.conformita === 'piena') return 'Le tre fonti quadrano';
   if (c.incongruenti > 0) return `${c.incongruenti} ${c.incongruenti === 1 ? 'riga da sistemare' : 'righe da sistemare'}`;
-  if (!c.lettura_verificata) return 'Le righe quadrano, ma la trascrizione va controllata';
+  // Righe che la stampa non copre: non sono scostamenti, e chiamarle "da
+  // sistemare" era un'accusa a dei formulari di cui non si sa ancora niente.
+  if (c.fuori_stampa > 0) return `${c.fuori_stampa} ${c.fuori_stampa === 1 ? 'riga non confrontata' : 'righe non confrontate'}: manca la tabella nel file`;
+  if (!c.lettura_verificata) return 'Le righe quadrano, ma una tabella non è stata attribuita';
   return 'Le righe quadrano, ma il confronto è incompleto: vedi le note';
+}
+
+/**
+ * Perche' la lettura del file non e' confermata. Sono tre cose diverse - le
+ * somme, la fonte, il flusso - e vanno dette per quello che sono: accusare la
+ * trascrizione quando i totali tornavano al chilo mandava l'utente a ricontrollare
+ * un originale che era giusto.
+ */
+function motivoLetturaNonConfermata(esito) {
+  const e = esito || {};
+  if (e.totali_quadrano === false) {
+    return 'La somma delle righe lette non torna con i totali stampati sul file: controlla la trascrizione sull\'originale prima di fidarti dell\'esito.';
+  }
+  const parti = [];
+  if (e.flussi_riconosciuti === false) parti.push('di una tabella non si sa a quale flusso appartiene, o due tabelle sono finite sullo stesso');
+  if (e.fonti_riconosciute === false) parti.push('di una tabella non si sa se è di WINSINFO o del portale');
+  if (!parti.length) return 'La lettura del file non è confermata: vedi le note qui sotto.';
+  return `I numeri letti tornano con i totali stampati sul file, ma ${parti.join(' e ')}. Assegna le tabelle qui sotto e rifai il confronto: finché restano così, quei formulari non entrano in nessun confronto.`;
+}
+
+/**
+ * LE TABELLE LETTE, E A QUALE FLUSSO VANNO.
+ *
+ * Il modulo capiva il flusso dal testo scritto sopra la pivot. Ma le intestazioni
+ * le scrive chi manda la stampa - parole dell'utente, 30/09/2026: "non le faccio
+ * io, a me tocca riceverle e controllarle" - e nella settimana 39 la scommessa si
+ * e' persa: "WIN SEC" non era niente, "WINSINFO ECT SEC-ACI" e' finita fra le
+ * primarie ACI, e due pivot sullo stesso flusso ne hanno fatta sparire una.
+ *
+ * Adesso la proposta automatica resta, ma si vede e si corregge: il menu c'e'
+ * sempre e arriva gia' compilato (scelta dell'utente). Qualunque cosa ci sia
+ * scritto sopra la pivot, la quadratura viene giusta.
+ */
+function AssegnaTabelle({ tabelle, onCambia, onRifai, occupato }) {
+  if (!tabelle || !tabelle.length) return null;
+  const mancanti = tabelle.filter(t => !t.flusso || !t.fonte).length;
+  const doppie = new Set();
+  const visti = new Set();
+  for (const t of tabelle) {
+    if (!t.flusso || !t.fonte) continue;
+    const k = `${t.flusso}|${t.fonte}`;
+    if (visti.has(k)) doppie.add(k); else visti.add(k);
+  }
+  return (
+    <div className="rounded-lg border px-4 py-3 bg-card space-y-2">
+      <div className="text-sm font-medium">Le tabelle lette dal file, e a quale flusso appartengono</div>
+      <div className="text-sm text-muted-foreground">
+        La proposta viene dall&apos;intestazione stampata sopra la pivot. Le intestazioni cambiano di settimana in settimana: se una proposta è sbagliata, correggila qui e rifai il confronto.
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-xs text-muted-foreground">
+            <tr className="text-left">
+              <th className="py-1 pr-3 font-medium">Intestazione sul file</th>
+              <th className="py-1 pr-3 font-medium">Fonte</th>
+              <th className="py-1 pr-3 font-medium">Flusso</th>
+              <th className="py-1 pr-3 font-medium text-right">Formulari</th>
+              <th className="py-1 font-medium text-right">Chili</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tabelle.map((t, i) => {
+              const doppia = t.flusso && t.fonte && doppie.has(`${t.flusso}|${t.fonte}`);
+              return (
+                <tr key={i} className={`border-t ${doppia ? 'bg-amber-50' : ''}`}>
+                  <td className="py-1.5 pr-3">
+                    {t.titolo || <span className="text-muted-foreground italic">senza intestazione</span>}
+                    {t.foglio ? <span className="text-xs text-muted-foreground"> · {t.foglio}</span> : null}
+                  </td>
+                  <td className="py-1.5 pr-3">
+                    <select className={SELECT} value={t.fonte || ''} disabled={occupato} onChange={(e) => onCambia(i, { fonte: e.target.value })}>
+                      <option value="">— da scegliere —</option>
+                      {FONTI_SCELTA.map(f => <option key={f.valore} value={f.valore}>{f.nome}</option>)}
+                    </select>
+                  </td>
+                  <td className="py-1.5 pr-3">
+                    <select className={SELECT} value={t.flusso || ''} disabled={occupato} onChange={(e) => onCambia(i, { flusso: e.target.value })}>
+                      <option value="">— da scegliere —</option>
+                      {FLUSSI_SCELTA.map(f => <option key={f.valore} value={f.valore}>{f.nome}</option>)}
+                    </select>
+                  </td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{t.totale_conteggio}</td>
+                  <td className="py-1.5 text-right tabular-nums">{formatKg(t.totale_kg)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {(mancanti > 0 || doppie.size > 0) && (
+        <div className="text-sm text-amber-900 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>
+            {mancanti > 0 && `${mancanti === 1 ? 'Una tabella è' : `${mancanti} tabelle sono`} senza flusso o senza fonte: i suoi formulari non entrano in nessun confronto. `}
+            {doppie.size > 0 && 'Due tabelle hanno lo stesso flusso e la stessa fonte: quel flusso non si confronta finché non le distingui.'}
+          </span>
+        </div>
+      )}
+      <div className="flex justify-end">
+        <Button size="sm" onClick={onRifai} disabled={occupato}>
+          {occupato ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1.5" />}
+          Rifai il confronto con queste assegnazioni
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function EsitoCanale({ c }) {
@@ -208,6 +333,11 @@ export default function QuadraturaFir({ isAdmin }) {
   const [occupato, setOccupato] = useState(false);
   const [errore, setErrore] = useState(null);
   const [tutte, setTutte] = useState(false);
+  // Le tabelle lette dal file con la loro assegnazione, per il menu dei flussi.
+  const [assegna, setAssegna] = useState(null);
+  // La settimana e l'anno letti sul file: si rimandano con le tabelle, altrimenti
+  // a ogni correzione l'esito direbbe che sul file la settimana non c'è.
+  const [assegnaMeta, setAssegnaMeta] = useState(null);
   const input = useRef(null);
   const intervallo = intervalloSettimana(anno, settimana);
 
@@ -293,6 +423,57 @@ export default function QuadraturaFir({ isAdmin }) {
     } catch (e) {
       const msg = (e && e.data && e.data.error) || e.message || String(e);
       setErrore(msg);
+    }
+    setOccupato(false);
+  };
+
+  // Le righe lette e la loro assegnazione stanno in due campi lunghi del record,
+  // che la pagina non carica con l'elenco: si leggono quando servono, cioe' quando
+  // c'e' una quadratura completata di cui si puo' ancora correggere il flusso.
+  // Di una alleggerita non restano piu' le righe: solo la storia scritta.
+  const q0 = dati && dati.quadratura;
+  const idQuadratura = q0 && q0.stato === 'completata' && !q0.alleggerito_il ? q0.id : null;
+  useEffect(() => {
+    let vivo = true;
+    if (!idQuadratura) { setAssegna(null); setAssegnaMeta(null); return () => { vivo = false; }; }
+    (async () => {
+      try {
+        const piena = await conCampiCompleti('QuadraturaFir', await base44.entities.QuadraturaFir.get(idQuadratura), ['righe_json', 'lettura_json']);
+        const righe = piena.righe_json ? JSON.parse(piena.righe_json) : null;
+        const lettura = piena.lettura_json ? JSON.parse(piena.lettura_json) : null;
+        if (!vivo || !righe || !Array.isArray(righe.tabelle)) { if (vivo) { setAssegna(null); setAssegnaMeta(null); } return; }
+        setAssegnaMeta({ settimana: righe.settimana ?? null, anno: righe.anno ?? null, note: righe.note || '' });
+        // Le due liste sono nello stesso ordine: righe_json porta i numeri,
+        // lettura_json l'assegnazione che il server ha calcolato.
+        setAssegna(righe.tabelle.map((t, i) => {
+          const l = lettura && Array.isArray(lettura.tabelle) ? lettura.tabelle[i] : null;
+          return { ...t, fonte: t.fonte || (l && l.fonte) || '', flusso: t.flusso || (l && l.flusso) || '' };
+        }));
+      } catch { if (vivo) setAssegna(null); }
+    })();
+    return () => { vivo = false; };
+  }, [idQuadratura]);
+
+  const cambiaAssegnazione = (i, patch) => {
+    setAssegna(prima => (prima || []).map((t, j) => (j === i ? { ...t, ...patch } : t)));
+  };
+
+  // Si rimanda tutto al server come se fosse una lettura nuova, con il flusso e la
+  // fonte scelti: il confronto si rifa' e l'esito si salva.
+  const rifaiConAssegnazioni = async () => {
+    setOccupato(true);
+    setErrore(null);
+    try {
+      await base44.functions.invoke('elaboraQuadraturaFir', {
+        quadratura_id: dati.quadratura.id,
+        tabelle: assegna,
+        settimana_file: assegnaMeta ? assegnaMeta.settimana : null,
+        anno_file: assegnaMeta ? assegnaMeta.anno : null,
+        note: assegnaMeta ? assegnaMeta.note : '',
+      });
+      await carica(true);
+    } catch (e) {
+      toast({ title: 'Confronto non riuscito', description: e.message || String(e), variant: 'destructive' });
     }
     setOccupato(false);
   };
@@ -451,10 +632,15 @@ export default function QuadraturaFir({ isAdmin }) {
                 <div className="text-sm text-muted-foreground">Nel file e nel gestionale non c&apos;è nessun flusso da confrontare in questa settimana.</div>
               )}
               {alleggerita && <Storia testo={q.storia} alleggeritoIl={q.alleggerito_il} cosa="quadratura" />}
+              {/* TRE MOTIVI DIVERSI, TRE FRASI DIVERSE. Qui c'era una frase sola,
+                  "la somma delle righe lette non torna con i totali stampati", e
+                  la si leggeva anche quando le somme tornavano tutte al chilo e il
+                  motivo vero era un'intestazione non riconosciuta: si dava la
+                  colpa a una trascrizione che era esatta. */}
               {!alleggerita && !q.lettura_verificata && (
                 <div className="mt-2 text-sm text-amber-900 flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                  <span>La somma delle righe lette non torna con i totali stampati sul file: controlla la trascrizione sull&apos;originale prima di fidarti dell&apos;esito.</span>
+                  <span>{motivoLetturaNonConfermata(esito)}</span>
                 </div>
               )}
               {esito && esito.osservazioni && esito.osservazioni.length > 0 && (
@@ -463,6 +649,10 @@ export default function QuadraturaFir({ isAdmin }) {
                 </ul>
               )}
             </div>
+          )}
+
+          {!alleggerita && (
+            <AssegnaTabelle tabelle={assegna} onCambia={cambiaAssegnazione} onRifai={rifaiConAssegnazioni} occupato={occupato} />
           )}
 
           {esito && esito.flussi && esito.flussi.length > 0 ? (
