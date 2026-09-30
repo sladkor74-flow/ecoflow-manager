@@ -1,6 +1,9 @@
 // Prova della manutenzione dell'archivio (base44/shared/fileArchivio.ts): quali
 // documenti sostituiti possono perdere il file. npm run prove
-import { daAlleggerire, giorniDa, fileDaSostituire, arretratiDaSostituire } from '../base44/shared/fileArchivio.ts';
+import {
+  daAlleggerire, giorniDa, fileDaSostituire, arretratiDaSostituire,
+  cancellaFile, cancellazioneNegata, sostituisciFilePrecedenti, segnalaFileNonRimossi,
+} from '../base44/shared/fileArchivio.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -88,6 +91,120 @@ verifica('quello davvero vecchio si cancella', dopoForzatura.map(x => x.id).join
 const arrForzatura = arretratiDaSostituire(conForzatura);
 verifica("nell'arretrato l'indirizzo tenuto non si tocca mai", !arrForzatura[0].da_togliere.some(x => x.file_url === 'uguale'), JSON.stringify(arrForzatura[0].da_togliere.map(x => x.id)));
 verifica('e il piu vecchio se ne va', arrForzatura[0].da_togliere.map(x => x.id).join() === 'f0');
+
+// === UN RIFIUTO DELL'OPERAZIONE NON E' UN FALLIMENTO DEL FILE ===
+//
+// Verificato in produzione il 30/09/2026: le tre operazioni esistono e ognuna
+// risponde "Method Not Allowed". L'alert diceva "59 file non sono stati rimossi
+// ... il gestionale riprova da solo alla prossima pulizia notturna": prometteva
+// un ritentativo che non puo' riuscire, e lo ripeteva su ogni file.
+console.log('QUANDO LA PIATTAFORMA RIFIUTA L OPERAZIONE');
+
+const nega = (messaggio) => async () => { throw new Error(messaggio); };
+const baseFinta = (operazioni) => ({ asServiceRole: { integrations: { Core: operazioni } } });
+
+{
+  const tutte = { DeleteFile: nega('Method Not Allowed'), DeletePrivateFile: nega('Method Not Allowed'), RemoveFile: nega('Method Not Allowed') };
+  const e = await cancellaFile(baseFinta(tutte), 'file://x');
+  verifica('non riuscita', e.riuscita === false);
+  verifica('e si sa che il rifiuto e dell operazione', e.negata === true, JSON.stringify(e));
+}
+{
+  // Un motivo che riguarda il file, non l'operazione: domani puo' riuscire, e si riprova.
+  const misto = { DeleteFile: nega('Method Not Allowed'), DeletePrivateFile: nega('404 file not found'), RemoveFile: nega('Method Not Allowed') };
+  const e = await cancellaFile(baseFinta(misto), 'file://x');
+  verifica('basta un motivo di altro genere per restare prudenti', e.negata === false, JSON.stringify(e));
+}
+{
+  const e = await cancellaFile(baseFinta({}), 'file://x');
+  verifica('se le operazioni non ci sono proprio, e negata', e.negata === true, JSON.stringify(e));
+}
+{
+  const e = await cancellaFile(baseFinta({ DeleteFile: async () => ({ ok: true }) }), 'file://x');
+  verifica('e quando riesce, riesce', e.riuscita === true && e.come === 'DeleteFile');
+}
+{
+  const e = await cancellaFile(baseFinta({}), '');
+  verifica('senza file non si dichiara niente sulla piattaforma', e.riuscita === false && e.negata === false, JSON.stringify(e));
+}
+
+verifica('nessun fallimento, nessun rifiuto', cancellazioneNegata([]) === false);
+verifica('tutti negati: negata', cancellazioneNegata([{ negata: true }, { negata: true }]) === true);
+verifica('uno di altro genere: si riprova', cancellazioneNegata([{ negata: true }, { negata: false }]) === false);
+verifica('senza il campo non si conclude niente', cancellazioneNegata([{ motivo: 'boh' }]) === false);
+
+console.log('SI SMETTE DI PROVARE, E SI CONTANO I FILE CHE RESTANO');
+{
+  // Cinque caricamenti vecchi dello stesso tipo. Prima si provavano tutti e
+  // cinque: quindici richieste a vuoto contro il limite al minuto dell'app.
+  let chiamate = 0;
+  const core = { DeleteFile: async () => { chiamate++; throw new Error('Method Not Allowed'); } };
+  const righe = [];
+  for (let i = 0; i < 5; i++) righe.push({ id: 'v' + i, tipo_file: 'secondarie', file_url: 'u' + i, nome_file: 'SECONDARIE.xlsx', esito: 'successo', created_date: `2026-09-0${i + 1}T08:00:00Z` });
+  righe.push({ id: 'nuovo', tipo_file: 'secondarie', file_url: 'ultimo', nome_file: 'SECONDARIE.xlsx', esito: 'successo', created_date: '2026-09-29T08:00:00Z' });
+  const alert = [];
+  const base = {
+    asServiceRole: {
+      integrations: { Core: core },
+      entities: {
+        UploadLog: { filter: async () => righe, update: async () => { throw new Error('non si deve arrivare a togliere il file dal registro'); } },
+        Alert: { filter: async () => [], create: async (d) => { alert.push(d); return d; }, update: async () => {} },
+      },
+    },
+  };
+  const esito = await sostituisciFilePrecedenti(base, { tipoFile: 'secondarie', idCorrente: 'nuovo', oggi: '2026-09-30' });
+  verifica('si prova una volta sola, non cinque', chiamate === 1, 'chiamate=' + chiamate);
+  verifica('niente tolto', esito.tolti === 0);
+  verifica('e si dice che restano tutti e cinque', esito.restano === 5, JSON.stringify(esito));
+  verifica('il rifiuto e dichiarato', esito.negata === true);
+  verifica("l'alert e stato aperto", alert.length === 1, JSON.stringify(alert.length));
+  verifica('con il numero vero, non con quello dei tentativi', alert[0].quanti === 5, JSON.stringify(alert[0].quanti));
+  verifica('e dice che la piattaforma rifiuta', /rifiuta di cancellare i file/.test(alert[0].titolo), alert[0].titolo);
+  verifica('e quali funzioni ha provato', /le funzioni ci sono \(DeleteFile\)/.test(alert[0].descrizione), alert[0].descrizione.slice(0, 260));
+  verifica('non promette un ritentativo che non puo riuscire', !/riprova da solo/.test(alert[0].descrizione));
+  verifica("dice di chiedere all'assistenza", /assistenza della piattaforma/.test(alert[0].descrizione));
+  verifica('e rassicura sulla storia scritta, che non dipende dai file', /40 giorni continua a funzionare/.test(alert[0].descrizione), alert[0].descrizione.slice(0, 400));
+}
+
+console.log('UN GUASTO DI PASSAGGIO INVECE SI RIPROVA');
+{
+  let chiamate = 0;
+  const core = { DeleteFile: async () => { chiamate++; throw new Error('504 gateway timeout'); } };
+  const righe = [
+    { id: 'v0', tipo_file: 'status', file_url: 'a', nome_file: 'S.xlsx', esito: 'successo', created_date: '2026-09-01T08:00:00Z' },
+    { id: 'v1', tipo_file: 'status', file_url: 'b', nome_file: 'S.xlsx', esito: 'successo', created_date: '2026-09-02T08:00:00Z' },
+    { id: 'nuovo', tipo_file: 'status', file_url: 'c', nome_file: 'S.xlsx', esito: 'successo', created_date: '2026-09-29T08:00:00Z' },
+  ];
+  const alert = [];
+  const base = {
+    asServiceRole: {
+      integrations: { Core: core },
+      entities: {
+        UploadLog: { filter: async () => righe, update: async () => {} },
+        Alert: { filter: async () => [], create: async (d) => { alert.push(d); return d; }, update: async () => {} },
+      },
+    },
+  };
+  const esito = await sostituisciFilePrecedenti(base, { tipoFile: 'status', idCorrente: 'nuovo', oggi: '2026-09-30' });
+  verifica('si provano tutti, perche il prossimo puo riuscire', chiamate === 2, 'chiamate=' + chiamate);
+  verifica('nessun rifiuto dell operazione', esito.negata === false);
+  verifica('e l alert promette la pulizia notturna', /riprova da solo/.test(alert[0].descrizione), alert[0].descrizione.slice(0, 200));
+}
+
+console.log('QUANDO I FILE TORNANO A CANCELLARSI, L AVVISO SI CHIUDE');
+{
+  const chiusi = [];
+  const base = {
+    asServiceRole: {
+      entities: {
+        Alert: { filter: async () => [{ id: 'a1' }], create: async () => {}, update: async (id, d) => { chiusi.push({ id, ...d }); } },
+      },
+    },
+  };
+  const esito = await segnalaFileNonRimossi(base, { supporto: { supportata: true, operazioni: ['DeleteFile'], provate: ['DeleteFile'] }, nonRiusciti: [], oggi: '2026-10-05' });
+  verifica('chiuso', esito.alert === 'chiuso' && chiusi.length === 1, JSON.stringify(esito));
+  verifica('con il motivo scritto', /i file si cancellano di nuovo/.test(chiusi[0].risolto_note), chiusi[0].risolto_note);
+}
 
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');

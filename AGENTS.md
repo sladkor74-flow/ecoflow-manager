@@ -1186,6 +1186,41 @@ richieste ECT invece saliva e il suo indirizzo non veniva salvato da nessuna
 parte: ora `importaRichiesteEct` lo cancella appena l'ha letto, perche' dopo
 nessuno saprebbe piu' che esiste.
 
+#### Verificato il 30/09/2026: la piattaforma NON cancella i file
+
+Letto nell'alert del gestionale (Alert & Engine → `archivio-file`): le tre
+operazioni esistono nell'SDK e **ognuna risponde `Method Not Allowed`**. 59 file
+sono rimasti. Quindi:
+
+- **La sostituzione dei file non puo' funzionare** finche' la piattaforma non
+  abilita la cancellazione. Il record del registro perde `file_url` solo se il
+  file se ne va davvero, quindi non si e' creata nessuna bugia: l'archivio dice
+  il vero, e' lo spazio che non si libera.
+- **Il rifiuto dell'operazione e' diverso dal fallimento di un file**, e si
+  distinguono: `cancellaFile` restituisce `negata` quando **tutte** le operazioni
+  disponibili sono state rifiutate in quanto operazioni (`Method Not Allowed`,
+  `501`, `not supported`), e basta **un** fallimento di altro genere perche' si
+  resti prudenti e si riprovi. Smettere per sbaglio vorrebbe dire non cancellare
+  mai piu'.
+- **Quando il rifiuto e' dell'operazione si smette al primo tentativo**, in tutti
+  e tre i punti che cancellano (i documenti a 40 giorni, la sostituzione al
+  caricamento, l'arretrato notturno). Ripeterlo su ogni file costava tre
+  richieste a vuoto per file - con 59 file, 177 richieste contro il limite al
+  minuto di **tutta** l'app - e l'esito non cambiava.
+- **L'alert ha tre frasi, non due**: operazioni assenti, operazioni rifiutate,
+  fallimenti di passaggio. Prima il caso vero cadeva nel terzo e l'avviso diceva
+  *"il gestionale riprova da solo alla prossima pulizia notturna"*, cioe'
+  prometteva un ritentativo che non puo' riuscire. Il numero nel titolo e' quello
+  dei file che **restano** (`bloccati`), non quello dei tentativi fatti:
+  smettendo al primo, i tentativi sono uno.
+
+**L'alleggerimento a 40 giorni continua a funzionare**, perche' li' se ne va il
+TESTO (i campi pesanti e le parti in `ContenutoEsteso`), non il file: verificato a
+video il 30/09/2026, la colonna "Dettaglio fino al" delle Verifiche dice 07/11 e
+08/11 e le pagine Verifiche e Verifiche Fornitori funzionano. Il peso vero erano
+quei testi e gli Excel del portale; i file allegati sono un extra che non dipende
+da noi. Da chiedere all'assistenza della piattaforma.
+
 ### EcoTyna: le domande sui dati non sono domande di norma (29/09/2026)
 
 L'utente si era lamentato: *"ogni volta che chiedo qualcosa ad Ecotyna riguardo la

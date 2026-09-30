@@ -5,16 +5,27 @@
 // riuscita. Se nessuno esiste il file resta dov'e' e chi chiama lo scrive: e'
 // meglio saperlo che credere di aver liberato spazio senza averlo fatto.
 
+// UN RIFIUTO DELL'OPERAZIONE NON E' UN FALLIMENTO DEL FILE.
+//
+// Verificato in produzione il 30/09/2026: le operazioni esistono nell'SDK, ma
+// ogni chiamata torna "Method Not Allowed". Sono due cose diverse e vanno dette
+// diversamente: un file che non se ne va per un motivo suo domani se ne andra',
+// un'operazione rifiutata dara' lo stesso esito su ogni file, sempre. Sapere
+// quale dei due casi e' quello vero decide se riprovare o smettere.
+const OPERAZIONE_NEGATA = /method not allowed|not implemented|not supported|not permitted|non consentit|\b405\b|\b501\b/i;
+
 /**
- * Prova a cancellare un file. Restituisce { riuscita, come }:
- * come e' il nome dell'operazione che ha funzionato, oppure il motivo.
+ * Prova a cancellare un file. Restituisce { riuscita, come, negata }:
+ * come e' il nome dell'operazione che ha funzionato, oppure il motivo; negata
+ * dice che la piattaforma ha rifiutato l'operazione in quanto operazione, e
+ * allora riprovare non serve.
  */
 export async function cancellaFile(base44, fileUri) {
-  if (!fileUri) return { riuscita: false, come: 'nessun file' };
+  if (!fileUri) return { riuscita: false, come: 'nessun file', negata: false };
   const core = base44.asServiceRole.integrations.Core;
   const nomi = ['DeleteFile', 'DeletePrivateFile', 'RemoveFile'];
   const disponibili = nomi.filter(n => typeof core[n] === 'function');
-  if (disponibili.length === 0) return { riuscita: false, come: 'la piattaforma non consente di cancellare i file' };
+  if (disponibili.length === 0) return { riuscita: false, come: 'la piattaforma non consente di cancellare i file', negata: true };
   // Si provano TUTTI i nomi disponibili, non solo il primo: fino al 29/09/2026 qui
   // c'era un return dentro il catch, cosi' bastava che il primo fallisse perche'
   // gli altri non venissero mai tentati e il file restasse dov'era.
@@ -27,7 +38,23 @@ export async function cancellaFile(base44, fileUri) {
       motivi.push(`${nome}: ${e && e.message ? e.message : e}`);
     }
   }
-  return { riuscita: false, come: `nessuna cancellazione e' riuscita (${motivi.join('; ')})` };
+  // Negata solo se TUTTE le operazioni disponibili sono state rifiutate in quanto
+  // operazioni. Se una ha fallito per un motivo suo - il file non c'e' piu', la
+  // rete - la piattaforma la consente e domani puo' riuscire: si resta prudenti e
+  // si riprova, perche' smettere per sbaglio vorrebbe dire non cancellare mai piu'.
+  return { riuscita: false, come: `nessuna cancellazione e' riuscita (${motivi.join('; ')})`, negata: motivi.every(m => OPERAZIONE_NEGATA.test(m)) };
+}
+
+/**
+ * Vero quando la piattaforma rifiuta l'OPERAZIONE, non il singolo file: allora
+ * riprovare non serve e l'alert deve dire questo, non "riprovo stanotte".
+ * Basta un fallimento di altro genere perche' si torni a considerarla consentita.
+ *
+ * Funzione pura: le prove la chiamano senza toccare la piattaforma.
+ */
+export function cancellazioneNegata(nonRiusciti) {
+  const xs = nonRiusciti || [];
+  return xs.length > 0 && xs.every(n => n && n.negata === true);
 }
 
 /** Quanti giorni sono passati da una data ISO. */
@@ -133,10 +160,21 @@ export async function sostituisciFilePrecedenti(base44, { tipoFile, idCorrente, 
   let tolti = 0;
   const nonRiusciti = [];
   const gia = new Set();
-  for (const c of candidati.slice(0, Math.max(0, massimo))) {
+  // SMETTERE DI PROVARE QUANDO IL RIFIUTO E' DELL'OPERAZIONE. Ritentarla su ogni
+  // file costa tre richieste a vuoto per file: con cinquanta file sono
+  // centocinquanta richieste contro il limite al minuto di TUTTA l'app
+  // (limiteRichieste.ts), e l'esito non cambia di una virgola.
+  let negata = false;
+  const lista = candidati.slice(0, Math.max(0, massimo));
+  for (const c of lista) {
+    if (negata) break;
     if (!gia.has(c.file_url)) {
       const esito = await cancellaFile(base44, c.file_url);
-      if (!esito.riuscita) { nonRiusciti.push({ id: c.id, nome_file: c.nome_file, motivo: esito.come }); continue; }
+      if (!esito.riuscita) {
+        nonRiusciti.push({ id: c.id, nome_file: c.nome_file, motivo: esito.come, negata: !!esito.negata });
+        if (esito.negata) negata = true;
+        continue;
+      }
       gia.add(c.file_url);
     }
     const vecchio = registro.find(l => l.id === c.id);
@@ -151,12 +189,13 @@ export async function sostituisciFilePrecedenti(base44, { tipoFile, idCorrente, 
   // rilegge: e' cosi' che finora nessuno sapeva se i file si cancellassero
   // davvero. Solo quando c'e' qualcosa da dire, per non aggiungere richieste a un
   // caricamento che ne fa gia' tante.
+  const restano = Math.max(0, candidati.length - tolti);
   if (nonRiusciti.length || tolti > 0) {
     try {
-      await segnalaFileNonRimossi(base44, { supporto: supportoCancellazione(base44), nonRiusciti, oggi });
+      await segnalaFileNonRimossi(base44, { supporto: supportoCancellazione(base44), nonRiusciti, bloccati: restano, oggi });
     } catch (_e) { /* il caricamento e' andato: non lo si fa fallire per un alert */ }
   }
-  return { candidati: candidati.length, tolti, restano: Math.max(0, candidati.length - tolti), non_riusciti: nonRiusciti };
+  return { candidati: candidati.length, tolti, restano, non_riusciti: nonRiusciti, negata };
 }
 
 /**
@@ -219,12 +258,23 @@ export async function sostituisciFileArretrati(base44, { oggi, massimo = 40 }) {
   const nonRiusciti = [];
   // Lo stesso indirizzo puo' comparire su piu' record: si cancella una volta.
   const gia = new Set();
+  // Come sopra: se la piattaforma rifiuta l'operazione si smette, invece di
+  // ripeterla a vuoto su tutto l'arretrato.
+  let negata = false;
   for (const g of gruppi) {
     for (const c of g.da_togliere) {
+      if (negata) { restano++; continue; }
       if (tolti >= massimo) { restano++; continue; }
       if (!gia.has(c.file_url)) {
         const esito = await cancellaFile(base44, c.file_url);
-        if (!esito.riuscita) { nonRiusciti.push({ tipo_file: g.tipo_file, nome_file: c.nome_file, motivo: esito.come }); continue; }
+        if (!esito.riuscita) {
+          nonRiusciti.push({ tipo_file: g.tipo_file, nome_file: c.nome_file, motivo: esito.come, negata: !!esito.negata });
+          if (esito.negata) negata = true;
+          // Un file che non se ne va resta li': prima non veniva contato, e
+          // "restano" diceva solo quelli rinviati per il tetto.
+          restano++;
+          continue;
+        }
         gia.add(c.file_url);
       }
       const vecchio = registro.find(l => l.id === c.id);
@@ -238,7 +288,7 @@ export async function sostituisciFileArretrati(base44, { oggi, massimo = 40 }) {
   }
   return {
     tipi: gruppi.map(g => ({ tipo_file: g.tipo_file, da_togliere: g.da_togliere.length, tenuto: g.tenuto.nome_file })),
-    tolti, restano, non_riusciti: nonRiusciti,
+    tolti, restano, non_riusciti: nonRiusciti, negata,
   };
 }
 
@@ -267,13 +317,25 @@ const REGOLA_FILE = 'file_non_rimossi';
  * nessuno: la risposta di una funzione pianificata non la legge mai. Si chiude da
  * solo quando i file se ne vanno, come tutti gli altri alert del gestionale.
  */
-export async function segnalaFileNonRimossi(base44, { supporto, nonRiusciti = [], oggi }) {
+export async function segnalaFileNonRimossi(base44, { supporto, nonRiusciti = [], bloccati = null, oggi }) {
   const Alert = base44.asServiceRole.entities.Alert;
   const record_id = 'archivio-file';
   const aperti = await Alert.filter({ regola_id: REGOLA_FILE, record_id, stato: 'aperto' }, 'id', 20);
   const giorno = String(oggi || '').slice(0, 10).split('-').reverse().join('/');
+  // TRE CASI, TRE FRASI DIVERSE. Fino al 30/09/2026 ce n'erano due, e il caso
+  // vero - le operazioni ci sono ma la piattaforma le rifiuta - cadeva nel primo:
+  // l'alert diceva "59 file non sono stati rimossi... il gestionale riprova da
+  // solo alla prossima pulizia notturna", cioe' prometteva un ritentativo che non
+  // puo' riuscire. Chi legge deve sapere se aspettare o se chiedere.
+  const assenti = !supporto.supportata;
+  const negata = cancellazioneNegata(nonRiusciti);
+  const consentita = !assenti && !negata;
+  // Quanti file restano li': i falliti sono quelli provati, e da quando si smette
+  // al primo rifiuto dell'operazione sono uno o due. Il numero vero lo sa chi
+  // chiama, e se non lo dice si contano i falliti.
+  const quanti = bloccati == null ? nonRiusciti.length : Math.max(Number(bloccati) || 0, nonRiusciti.length);
 
-  if (supporto.supportata && nonRiusciti.length === 0) {
+  if (consentita && nonRiusciti.length === 0) {
     for (const a of aperti) {
       await Alert.update(a.id, { stato: 'risolto', risolto_note: `Chiuso automaticamente il ${giorno}: i file si cancellano di nuovo.` });
     }
@@ -283,17 +345,23 @@ export async function segnalaFileNonRimossi(base44, { supporto, nonRiusciti = []
   const elenco = nonRiusciti.slice(0, 15).map(n => `- ${n.nome_file || n.entita || n.id || 'file'}: ${n.motivo || 'motivo non riportato'}`);
   if (nonRiusciti.length > elenco.length) elenco.push(`- e altri ${nonRiusciti.length - elenco.length}`);
   const dati = {
-    titolo: supporto.supportata
-      ? `${nonRiusciti.length} ${nonRiusciti.length === 1 ? 'file non e\' stato' : 'file non sono stati'} rimossi dall'archivio`
-      : 'La piattaforma non consente di cancellare i file: l\'archivio non si puo\' alleggerire',
+    titolo: consentita
+      ? `${quanti} ${quanti === 1 ? 'file non e\' stato' : 'file non sono stati'} rimossi dall'archivio`
+      : negata
+        ? `La piattaforma rifiuta di cancellare i file: ${quanti} restano nell'archivio`
+        : 'La piattaforma non consente di cancellare i file: l\'archivio non si puo\' alleggerire',
     descrizione: [
-      supporto.supportata
+      consentita
         ? `Il ${giorno} il gestionale ha provato a togliere dei file che non servono piu' e non ci e' riuscito.`
-        : `Il ${giorno} il gestionale ha cercato le operazioni per cancellare un file e non ne ha trovata nessuna (provate: ${supporto.provate.join(', ')}). Finche' resta cosi', nessun file caricato puo' essere rimosso: ne' i PDF dei report settimanali e delle quadrature, ne' gli allegati dell'assistente, ne' gli Excel del Caricamento Dati. I record e i dati non ne soffrono: cresce soltanto lo spazio occupato.`,
-      ...(elenco.length ? ['File rimasti:', ...elenco] : []),
-      supporto.supportata
+        : negata
+          ? `Il ${giorno} il gestionale ha provato a togliere i file che non servono piu' e la piattaforma ha rifiutato l'operazione: le funzioni ci sono (${(supporto.operazioni || []).join(', ')}) ma ogni chiamata torna indietro col rifiuto. Non e' un problema di un file: riprovare da' lo stesso esito su tutti, quindi il gestionale ha smesso dopo il primo tentativo invece di ripeterlo a vuoto su ogni file. I record, i dati e la storia scritta non ne soffrono - l'alleggerimento dei documenti a 40 giorni continua a funzionare, perche' li' se ne va il testo, non il file - cresce soltanto lo spazio occupato dai file caricati.`
+          : `Il ${giorno} il gestionale ha cercato le operazioni per cancellare un file e non ne ha trovata nessuna (provate: ${(supporto.provate || []).join(', ')}). Finche' resta cosi', nessun file caricato puo' essere rimosso: ne' i PDF dei report settimanali e delle quadrature, ne' gli allegati dell'assistente, ne' gli Excel del Caricamento Dati. I record e i dati non ne soffrono: cresce soltanto lo spazio occupato.`,
+      ...(elenco.length ? [negata ? 'Il rifiuto, per esteso:' : 'File rimasti:', ...elenco] : []),
+      consentita
         ? 'Il gestionale riprova da solo alla prossima pulizia notturna. Se il motivo si ripete, va chiesto all\'assistenza della piattaforma.'
-        : 'Da chiedere all\'assistenza della piattaforma. In alternativa si puo\' evitare di far salire i file, leggendoli nel browser come si fa per le primarie.',
+        : negata
+          ? 'Va chiesto all\'assistenza della piattaforma se la cancellazione dei file si possa abilitare. Nel frattempo i file vecchi restano dove sono e vanno eventualmente rimossi a mano dall\'area file della piattaforma; per non farne salire di nuovi si possono leggere nel browser, come si fa per le primarie. Appena la cancellazione funziona, questo avviso si chiude da solo.'
+          : 'Da chiedere all\'assistenza della piattaforma. In alternativa si puo\' evitare di far salire i file, leggendoli nel browser come si fa per le primarie.',
     ].join('\n'),
     severita: 'warning',
     modulo: 'manutenzione',
@@ -302,13 +370,13 @@ export async function segnalaFileNonRimossi(base44, { supporto, nonRiusciti = []
     regola_id: REGOLA_FILE,
     regola_nome: 'File che non si riesce a togliere dall\'archivio',
     stato: 'aperto',
-    quanti: nonRiusciti.length,
+    quanti,
   };
   if (aperti.length) {
     await Alert.update(aperti[0].id, dati);
     for (const a of aperti.slice(1)) await Alert.update(a.id, { stato: 'risolto', risolto_note: `Chiuso automaticamente il ${giorno}: doppione.` });
-    return { alert: 'aggiornato', quanti: nonRiusciti.length };
+    return { alert: 'aggiornato', quanti, negata };
   }
   await Alert.create(dati);
-  return { alert: 'aperto', quanti: nonRiusciti.length };
+  return { alert: 'aperto', quanti, negata };
 }

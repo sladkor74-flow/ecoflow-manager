@@ -66,8 +66,14 @@ export default async function(req) {
     // a cui nessuno aveva risposta, e la risposta non deve restare dentro questa
     // risposta HTTP, che nessuno legge (il lavoro e' pianificato).
     const supporto = supportoCancellazione(base44);
-    const esito = { oggi, giorni, supporto_cancellazione: supporto, alleggeriti: 0, restano: 0, archivi: [], file: { cancellati: 0, non_riusciti: [] }, senza_data: [] };
+    const esito = { oggi, giorni, supporto_cancellazione: supporto, alleggeriti: 0, restano: 0, archivi: [], file: { cancellati: 0, bloccati: 0, non_riusciti: [] }, senza_data: [] };
     let restanti = massimo;
+    // Appena la piattaforma rifiuta l'operazione si smette di chiamarla: verificato
+    // il 30/09/2026, le funzioni ci sono ma rispondono "Method Not Allowed", e
+    // tre richieste a vuoto per ogni documento sono richieste rubate al limite al
+    // minuto di tutta l'app. L'alleggerimento del TESTO va avanti comunque: e' li'
+    // che sta il peso, e il file e' un extra che non dipende da noi.
+    let negataFile = false;
 
     for (const a of ARCHIVI) {
       const tutti = await fetchAll(svc[a.entita]);
@@ -92,9 +98,16 @@ export default async function(req) {
         // Il file rimasto nell'archivio privato: si riprova a toglierlo, e se la
         // piattaforma non lo consente lo si scrive invece di crederlo fatto.
         if (s.file_uri) {
-          const tolto = await cancellaFile(base44, s.file_uri);
-          if (tolto.riuscita) { await svc[a.entita].update(record.id, { file_uri: '' }); esito.file.cancellati++; }
-          else esito.file.non_riusciti.push({ entita: a.entita, id: record.id, motivo: tolto.come });
+          if (negataFile) esito.file.bloccati++;
+          else {
+            const tolto = await cancellaFile(base44, s.file_uri);
+            if (tolto.riuscita) { await svc[a.entita].update(record.id, { file_uri: '' }); esito.file.cancellati++; }
+            else {
+              esito.file.non_riusciti.push({ entita: a.entita, id: record.id, motivo: tolto.come, negata: !!tolto.negata });
+              esito.file.bloccati++;
+              if (tolto.negata) negataFile = true;
+            }
+          }
         }
         fatti.push({ id: record.id, giorni: s.giorni, senza_esito: !letto, ripreso: !!s.ripreso });
         esito.alleggeriti++;
@@ -137,6 +150,7 @@ export default async function(req) {
       try {
         esito.file_caricamenti = await sostituisciFileArretrati(base44, { oggi, massimo: 40 });
         esito.file.cancellati += esito.file_caricamenti.tolti;
+        esito.file.bloccati += esito.file_caricamenti.restano;
         if (esito.file_caricamenti.non_riusciti.length) esito.file.non_riusciti.push(...esito.file_caricamenti.non_riusciti);
       } catch (e) {
         esito.file_caricamenti = { errore: e && e.message ? e.message : String(e) };
@@ -148,7 +162,7 @@ export default async function(req) {
     // quando i file tornano a cancellarsi.
     if (!soloElenco) {
       try {
-        esito.segnalazione = await segnalaFileNonRimossi(base44, { supporto, nonRiusciti: esito.file.non_riusciti, oggi });
+        esito.segnalazione = await segnalaFileNonRimossi(base44, { supporto, nonRiusciti: esito.file.non_riusciti, bloccati: esito.file.bloccati, oggi });
       } catch (e) {
         esito.segnalazione = { errore: e && e.message ? e.message : String(e) };
       }
