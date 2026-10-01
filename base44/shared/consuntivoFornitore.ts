@@ -49,7 +49,15 @@ export const RUOLI_CONSUNTIVO = [
  */
 export const chiaveFir = (v) => {
   const t = pulisci(v).toUpperCase().replace(/[^A-Z0-9]/g, '');
-  return /[0-9]/.test(t) ? t : '';
+  if (!/[0-9]/.test(t)) return '';
+  // E NON BASTA UNA CIFRA. Nel consuntivo di LOGISTICA & PNEUMATICI, in fondo al
+  // foglio, c'e' una tabella coi costi per zona e le tariffe al chilo: 0,068 -
+  // 0,071 - 0,072. Normalizzate diventavano "0068", "0071", "0072", e il
+  // gestionale le presentava come tre formulari che il fornitore ci fatturava e
+  // noi non avevamo. Un formulario ha delle LETTERE (RTXZV001718KR,
+  // HTQKS000785VB); se e' tutto cifre, ne ha almeno otto.
+  if (/[A-Z]/.test(t)) return t.length >= 4 ? t : '';
+  return t.length >= 8 ? t : '';
 };
 
 /**
@@ -95,16 +103,66 @@ export function chiaviRiga(r) {
 /** La chiave principale di una riga, per darle un nome a video. */
 export const chiaveRiga = (r) => chiaviRiga(r)[0] || '';
 
-// Le intestazioni con cui si riconoscono le colonne di un consuntivo. Non si
-// pretende nessuna colonna: un report di un raccoglitore puo' avere solo il
-// formulario e i chili, ed e' il caso normale.
-const INTESTAZIONI_CONSUNTIVO = [
-  ['numero_fir', /\bfir\b|formulario|f\.?i\.?r\.?|documento/i],
-  ['id_ordine', /ordine|ticket|\bordn?\b/i],
-  ['kg', /peso|\bkg\b|quantit|q\.?t[aà]|tonnell/i],
-  ['giorno', /data|giorno/i],
-  ['importo', /importo|imponibile|totale|corrispettivo|valore|euro|€/i],
-];
+// QUANTO UN'INTESTAZIONE SOMIGLIA A OGNI COLONNA CHE CI SERVE.
+//
+// Prima era un elenco di regex e vinceva LA PRIMA che corrispondeva. Su 75
+// consuntivi veri dei fornitori (cartella FATTURAZIONE, 2026) quella regola
+// sbagliava su nove file di GATIM e TRS: la loro colonna si chiama
+//   "Data Doc. (Data Documento)"
+// e la regex del formulario cercava anche "documento", quindi la DATA veniva
+// presa come numero di formulario. Il formulario vero, nella colonna
+// "Rif.Docum. (Riferimento Documento)", restava fuori. Risultato: ogni riga con
+// una chiave inventata, nessun abbinamento, consuntivo tutto in difformita'.
+//
+// Adesso ogni intestazione prende un punteggio per ogni colonna e vince il
+// punteggio piu' alto, non l'ordine della lista. Cosi' "Data Documento" e' una
+// DATA (10) prima che un documento (4), e "Rif.Docum." e' un formulario (8)
+// prima che niente. Non si pretende nessuna colonna: un report di un
+// raccoglitore puo' avere solo il formulario e i chili, ed e' il caso normale.
+const PUNTEGGI_INTESTAZIONE = {
+  // "Num.Fiscale (Numerazione Fiscale)" e' come GATIM chiama il formulario nel suo
+  // export: i valori sono formulari veri (HTQKS000785VB). Nessuno lo avrebbe
+  // indovinato leggendo solo la parola.
+  numero_fir: [[/formulario|\bfir\b|num\.?\s*fiscale|numerazione\s*fiscale/i, 10], [/rif\.?\s*docum/i, 8], [/\bddt\b/i, 6], [/documento/i, 4]],
+  id_ordine: [[/\bordine\b|n\.?\s*ordine/i, 10], [/ticket/i, 8], [/\bordn?\b/i, 6]],
+  kg: [[/p\.?\s*netto|peso\s*netto|netto\s*in\s*kg/i, 10], [/\bpeso\b|\bkg\b|tonnell/i, 8], [/quantit|q\.?t[aà]/i, 4]],
+  giorno: [[/\bdata\b|\bdt\b|giorno/i, 10]],
+  // "Totale" non c'e' apposta: una colonna che si chiama cosi' puo' essere un
+  // totale di chili come di euro, e un importo sbagliato e' peggio di un importo
+  // mancante (il verdetto dice "non si e' potuto controllare l'importo").
+  importo: [[/importo|imponibile|corrispettivo/i, 10], [/\bvalore\b|\beuro\b|€/i, 6]],
+};
+
+const CAMPI_INTESTAZIONE = ['numero_fir', 'id_ordine', 'kg', 'giorno', 'importo'];
+
+/** Quanto questa intestazione somiglia a quella colonna. 0 = per niente. */
+export function punteggioIntestazione(campo, testo) {
+  let max = 0;
+  for (const [re, p] of (PUNTEGGI_INTESTAZIONE[campo] || [])) if (re.test(testo)) max = Math.max(max, p);
+  return max;
+}
+
+/**
+ * Le colonne riconosciute in una riga di intestazioni: ogni cella va alla colonna
+ * a cui somiglia di piu', e di ogni colonna si tiene la cella che le somiglia di
+ * piu'. A pari punteggio vince quella piu' a sinistra.
+ */
+export function colonneDaIntestazioni(celle) {
+  const scelte = {};
+  (celle || []).forEach((c, j) => {
+    const testo = pulisci(c);
+    if (!testo || comeNumero(testo) !== null) return;
+    let campoMigliore = '', punti = 0;
+    for (const campo of CAMPI_INTESTAZIONE) {
+      const p = punteggioIntestazione(campo, testo);
+      if (p > punti) { punti = p; campoMigliore = campo; }
+    }
+    if (!campoMigliore) return;
+    const gia = scelte[campoMigliore];
+    if (!gia || punti > gia.punti) scelte[campoMigliore] = { j, testo, punti };
+  });
+  return scelte;
+}
 
 // Un formulario: lettere e cifre, almeno otto, con almeno una cifra. Serve a
 // riconoscere la colonna quando le intestazioni non aiutano.
@@ -127,20 +185,16 @@ export function leggiRigheConsuntivo(tabelle) {
   const note = [];
   const colonneLette = [];
   let scartate = 0;
+  // L'imponibile che il fornitore si aspetta, dal riquadro dei costi in fondo.
+  let importoTotale = null;
 
   for (const { nome, celle } of tabelle || []) {
     const t = celle || [];
+    if (importoTotale === null) { const tot = importoTotaleDalFoglio(t); if (tot) importoTotale = tot; }
     let iTesta = -1;
     let col = {};
     for (let i = 0; i < Math.min(40, t.length); i++) {
-      const trovate = {};
-      (t[i] || []).forEach((c, j) => {
-        const testo = pulisci(c);
-        if (!testo || comeNumero(testo) !== null) return;
-        for (const [chiave, re] of INTESTAZIONI_CONSUNTIVO) {
-          if (trovate[chiave] === undefined && re.test(testo)) { trovate[chiave] = { j, testo }; break; }
-        }
-      });
+      const trovate = colonneDaIntestazioni(t[i]);
       // Basta il formulario, o l'ordine, piu' qualcosa che somigli a un peso.
       if ((trovate.numero_fir || trovate.id_ordine) && trovate.kg) { iTesta = i; col = trovate; break; }
     }
@@ -179,6 +233,33 @@ export function leggiRigheConsuntivo(tabelle) {
       colonne: Object.fromEntries(Object.entries(col).map(([k, v]) => [k, v.testo])),
     });
 
+    // LE INTESTAZIONI PROPONGONO, I VALORI DECIDONO.
+    //
+    // Un'intestazione la scrive una persona e puo' chiamarsi come le pare: il
+    // formulario di GATIM sta sotto "Num.Fiscale (Numerazione Fiscale)", quello di
+    // TECNOGUM sotto "Rif.Docum.", quello di NAPPI sotto "NUM. DI FORMULARIO". Un
+    // vocabolario non bastera' mai. I VALORI invece hanno una forma riconoscibile:
+    // un formulario e' una sigla di lettere e cifre. Quindi, trovata la colonna
+    // dall'intestazione, si guarda se dentro ci sono davvero dei formulari; se un'
+    // altra colonna ne ha molti di piu', si cambia idea e si dice perche'.
+    const colonnaPiuFormulari = () => {
+      const conta = new Map();
+      for (const r of corpo) (r || []).forEach((c, j) => { if (PARE_FIR(c)) conta.set(j, (conta.get(j) || 0) + 1); });
+      const migliore = [...conta.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
+      return migliore ? { j: migliore[0], quanti: migliore[1] } : null;
+    };
+    if (col.numero_fir) {
+      const scelta = col.numero_fir.j;
+      const quantiScelti = corpo.reduce((s, r) => s + (PARE_FIR((r || [])[scelta]) ? 1 : 0), 0);
+      const meglio = colonnaPiuFormulari();
+      // Si cambia solo se l'altra ne ha almeno il doppio e almeno tre: una
+      // differenza piccola puo' essere una colonna con qualche cella vuota.
+      if (meglio && meglio.j !== scelta && meglio.quanti >= 3 && meglio.quanti >= quantiScelti * 2) {
+        note.push(`Foglio "${nome}": l'intestazione "${col.numero_fir.testo}" diceva di essere la colonna dei formulari, ma dentro ne ha ${quantiScelti}; la colonna accanto ne ha ${meglio.quanti}, e ho usato quella. Controlla che sia giusta.`);
+        col.numero_fir = { j: meglio.j, testo: `(scelta dai valori, l'intestazione diceva "${col.numero_fir.testo}")`, punti: 0 };
+      }
+    }
+
     // SE L'INTESTAZIONE NON SI E' TROVATA, TUTTO IL RESTO E' UN INDOVINELLO.
     // Senza riga d'intestazione si legge il foglio dalla prima riga e si tirano a
     // indovinare le colonne dalla forma dei valori: e' cosi' che i titoli delle
@@ -209,7 +290,46 @@ export function leggiRigheConsuntivo(tabelle) {
   }
 
   if (scartate) note.push(`${scartate} righe non avevano ne' un formulario ne' un numero d'ordine leggibile: non si possono abbinare e non sono state lette.`);
-  return { righe, note, colonne: colonneLette, scartate };
+  return { righe, note, colonne: colonneLette, scartate, importo_totale: importoTotale };
+}
+
+/**
+ * L'IMPONIBILE CHE IL FORNITORE SI ASPETTA, DALLA TABELLA IN FONDO AL FOGLIO.
+ *
+ * Quasi tutti i consuntivi, dopo le righe, portano un riquadro con i costi: zona
+ * di trasporto, chili, tariffa al chilo, imponibile. Quello di LOGISTICA &
+ * PNEUMATICI di agosto 2026 finisce cosi':
+ *
+ *   ZONA DI TRASPORTO | KG TOTALI | TARIFFA AL KG | IMPONIBILE | TOTALE IVATO
+ *   NAPOLI/SALERNO    |    30.860 |         0,068 |   2.098,48 |     2.560,15
+ *   CASERTA           |    14.760 |         0,072 |   1.062,72 |     1.296,52
+ *   TOTALI            |    45.620 |               |   3.161,20 |     3.856,66
+ *
+ * Quei 3.161,20 sono il numero da confrontare con l'importo che il gestionale
+ * calcola dalle tariffe (e che per quel mese faceva 3.161,20 al centesimo). Senza
+ * leggerlo, il verdetto diceva "non si e' potuto controllare l'importo" su un
+ * documento che l'importo ce l'aveva scritto in fondo.
+ *
+ * Si cerca una riga che dica TOTALE/TOTALI e si prende il numero che sta sotto la
+ * colonna dell'imponibile, non quello dell'IVA: l'IVA qui non c'entra, il
+ * consuntivo non e' una fattura. Se non si trova niente, null.
+ */
+export function importoTotaleDalFoglio(celle) {
+  const t = celle || [];
+  for (let i = t.length - 1; i >= 0; i--) {
+    const riga = t[i] || [];
+    const haTotale = riga.some(c => /^totali?$/i.test(pulisci(c)));
+    if (!haTotale) continue;
+    // L'intestazione del riquadro sta nelle righe appena sopra.
+    for (let k = i - 1; k >= Math.max(0, i - 8); k--) {
+      const testa = t[k] || [];
+      const j = testa.findIndex(c => /imponibile|^importo$/i.test(pulisci(c)));
+      if (j < 0) continue;
+      const n = comeNumero(riga[j]);
+      if (n !== null && n > 0) return { importo: n, riga: i + 1, colonna: pulisci(testa[j]) };
+    }
+  }
+  return null;
 }
 
 /**

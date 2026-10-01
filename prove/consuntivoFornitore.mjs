@@ -10,7 +10,7 @@
 // periodo e' la fine trasporto, le quote dello stesso formulario si sommano prima
 // del confronto, e quello che manca da una parte o dall'altra si dice.
 // npm run prove
-import { movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, esitoConsuntivo, testoEsitoConsuntivo, chiaveRiga, leggiRigheConsuntivo, pareOrdine, periodoSospetto, righeCheParonoTotali } from '../base44/shared/consuntivoFornitore.ts';
+import { movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, esitoConsuntivo, testoEsitoConsuntivo, chiaveRiga, chiaveFir, leggiRigheConsuntivo, pareOrdine, periodoSospetto, righeCheParonoTotali, colonneDaIntestazioni, importoTotaleDalFoglio } from '../base44/shared/consuntivoFornitore.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -319,6 +319,98 @@ console.log('IL FILE DI UN ALTRO MESE SI DICE SUBITO');
   verifica('nel mese giusto tacciono', giuste === null, J(giuste));
   const meta = periodoSospetto({ nomeFile: 'x.xlsx', righe: [{ giorno: '2026-08-30' }, { giorno: '2026-09-01' }, { giorno: '2026-09-02' }, { giorno: '2026-09-03' }], anno: 2026, mese: 8 });
   verifica('poche dentro e molte fuori: si invita a controllare', meta && meta.some(x => /Solo 1 righe su 4/.test(x)), J(meta));
+}
+
+// === I FORMATI VERI DEI FORNITORI (75 file, 2026) ===
+//
+// Studiati il 01/10/2026 sulla cartella RETE/FATTURAZIONE: ogni fornitore
+// intitola le colonne a modo suo, e un vocabolario di parole non bastera' mai.
+// Quello che non cambia e' la FORMA dei valori.
+console.log('LE INTESTAZIONI PROPONGONO, I VALORI DECIDONO');
+{
+  // GATIM e TRS: la colonna del formulario si chiama "Num.Fiscale (Numerazione
+  // Fiscale)" e accanto c'e' "Data Doc. (Data Documento)". La vecchia regola del
+  // formulario cercava la parola "documento" e prendeva LA DATA: nove file di
+  // aprile, maggio, giugno e luglio leggevano una data al posto del formulario.
+  const celle = [
+    ['Data Reg. (Data Registrazione)', 'Data Doc. (Data Documento)', 'Num.Fiscale (Numerazione Fiscale)', 'P.Netto (Peso Netto Rifiuto in Kg)'],
+    ['2026-05-07', '2026-05-06', 'HTQKS000785VB', 4590],
+    ['2026-05-08', '2026-05-06', 'HTQKS000788LC', 4650],
+  ];
+  const col = colonneDaIntestazioni(celle[0]);
+  verifica('"Data Documento" e una DATA, non un formulario', col.giorno && /^Data/.test(col.giorno.testo), J(col.giorno));
+  verifica('il formulario e "Num.Fiscale"', col.numero_fir && /Num\.Fiscale/.test(col.numero_fir.testo), J(col.numero_fir));
+  verifica('e il peso e "P.Netto"', col.kg && /P\.Netto/.test(col.kg.testo), J(col.kg));
+  const lette = leggiRigheConsuntivo([{ nome: 'Foglio1', celle }]);
+  verifica('si leggono i due carichi coi formulari veri', lette.righe.length === 2
+    && lette.righe[0].numero_fir === 'HTQKS000785VB' && lette.righe[1].kg === 4650, J(lette.righe));
+  verifica("e l'intestazione si e trovata", !lette.note.some(n => /non ho trovato la riga delle intestazioni/.test(n)), J(lette.note));
+}
+{
+  // Il principio: se l'intestazione dice una cosa e i valori un'altra, vincono i
+  // valori. Serve per i fornitori futuri, che chiameranno le colonne come vogliono.
+  const celle = [
+    ['Documento', 'Codice', 'Peso'],
+    ['12/08/2026', 'RTXZV001718KR', 3540],
+    ['13/08/2026', 'RTXZV001735JM', 3660],
+    ['14/08/2026', 'RTXZV001743PL', 3840],
+  ];
+  const lette = leggiRigheConsuntivo([{ nome: 'X', celle }]);
+  verifica('si usa la colonna che ha davvero i formulari', lette.righe.length === 3
+    && lette.righe.every(r => /^RTXZV/.test(r.numero_fir)), J(lette.righe.map(r => r.numero_fir)));
+  verifica('e si dice che si e cambiata idea', lette.note.some(n => /ho usato quella/.test(n)), J(lette.note));
+}
+
+console.log('LE TARIFFE IN FONDO AL FOGLIO NON SONO FORMULARI');
+{
+  // Il caso che ha fatto esplodere il consuntivo di LOGISTICA & PNEUMATICI: sotto
+  // le righe c'e' il riquadro dei costi per zona, con le tariffe al chilo 0,068 -
+  // 0,071 - 0,072. Normalizzate diventavano "0068", "0071", "0072" e uscivano
+  // come tre formulari che il fornitore ci fatturava.
+  verifica('una tariffa non e un formulario', chiaveFir(0.068) === '' && chiaveFir('0,071') === '' && chiaveFir('0.072') === '');
+  verifica('un formulario vero lo e', chiaveFir('RTXZV001718KR') === 'RTXZV001718KR');
+  verifica('e anche scritto spaziato', chiaveFir('RG YTR-0226') === 'RGYTR0226');
+  verifica('una sigla senza cifre no', chiaveFir('TOTALE') === '' && chiaveFir('NAPPI') === '');
+  verifica('un formulario tutto cifre deve essere lungo', chiaveFir('12345678') === '12345678' && chiaveFir('1234') === '');
+}
+{
+  // Il foglio di LOGISTICA & PNEUMATICI di agosto 2026, ridotto all'osso: le
+  // righe, l'etichetta di mezzo, e il riquadro dei costi per zona.
+  const celle = [
+    ['Ragione Sociale Produttore', "Pr (Provincia Unita' Locale Produttore)", 'Data Doc. (Data Documento)', 'Num.Fiscale (Numerazione Fiscale)', 'Rif.Docum. (Riferimento Documento)', 'P.Netto'],
+    ['C GOMME SRL', 'NA', '2026-08-03', 'RTXZV001718KR', 'ET26112026', 3540],
+    ['CORSO PNEUS SRLS', 'NA', '2026-08-03', 'RTXZV001735JM', 'ET26127995', 3660],
+    [null, 'NAPPI', null, null, null, null],
+    [],
+    [null, null, null, 'ZONA DI TRASPORTO', 'KG TOTALI', 'TARIFFA AL KG', 'IMPONIBILE', 'TOTALE IVATO'],
+    [null, null, null, 'NAPOLI/SALERNO', 30860, 0.068, 2098.48, 2560.1456],
+    [null, null, null, 'AVELLINO', 0, 0.071, 0, 0],
+    [null, null, null, 'CASERTA', 14760, 0.072, 1062.72, 1296.5184],
+    [null, null, null, 'TOTALI', 45620, null, 3161.2, 3856.66],
+  ];
+  const lette = leggiRigheConsuntivo([{ nome: 'Foglio1', celle }]);
+  const chiavi = lette.righe.map(r => r.numero_fir);
+  verifica('solo i due carichi veri', lette.righe.length === 2, J(chiavi));
+  verifica('le tariffe non sono diventate formulari', !chiavi.some(k => /^0,?0[67]/.test(k)), J(chiavi));
+  verifica("l'etichetta NAPPI non e diventata un carico", !chiavi.includes('NAPPI'), J(chiavi));
+  verifica("l'intestazione della provincia nemmeno", !chiavi.some(k => /PROVINCIA/i.test(k)), J(chiavi));
+
+  // E l'imponibile dichiarato dal fornitore si legge: era proprio il numero che
+  // il gestionale diceva di non poter controllare.
+  const tot = importoTotaleDalFoglio(celle);
+  verifica("l'imponibile si legge dalla riga dei totali", tot && tot.importo === 3161.2, J(tot));
+  verifica('e si dice da quale colonna', tot.colonna === 'IMPONIBILE', J(tot));
+  verifica('non si prende il totale IVATO', tot.importo !== 3856.66);
+  verifica('e arriva anche da leggiRigheConsuntivo', lette.importo_totale && lette.importo_totale.importo === 3161.2, J(lette.importo_totale));
+}
+{
+  // Senza riquadro dei costi non si inventa niente.
+  const celle = [
+    ['N. Formulario', 'Kg'],
+    ['RTXZV001718KR', 3540],
+  ];
+  verifica('senza totali, nessun importo', importoTotaleDalFoglio(celle) === null);
+  verifica('e il verdetto lo dira', leggiRigheConsuntivo([{ nome: 'X', celle }]).importo_totale === null);
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

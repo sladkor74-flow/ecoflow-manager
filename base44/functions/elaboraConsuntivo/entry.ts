@@ -102,6 +102,7 @@ export default async function(req) {
     // pretenderlo voleva dire non riuscire a caricare il documento tipico.
     let righe = null;
     let noteLettura = [];
+    let importoDalFoglio = null;
     if (azione === 'carica') {
       const guardia = await soloAmministratore(base44);
       if (guardia.errore) return guardia.errore;
@@ -111,6 +112,13 @@ export default async function(req) {
         ...(lette.note || []),
         ...(lette.colonne || []).map(c => `Foglio "${c.foglio}": ${Object.entries(c.colonne).map(([k, v]) => `${k} = ${v}`).join(', ')}.`),
       ];
+      // L'imponibile che il fornitore si aspetta, dal riquadro dei costi in fondo
+      // al foglio: senza leggerlo il verdetto diceva "non si e' potuto controllare
+      // l'importo" su un documento che l'importo ce l'aveva scritto.
+      if (lette.importo_totale) {
+        importoDalFoglio = lette.importo_totale.importo;
+        noteLettura.push(`Imponibile dichiarato dal fornitore: ${importoDalFoglio} euro, letto dalla colonna "${lette.importo_totale.colonna}" della riga dei totali (riga ${lette.importo_totale.riga}).`);
+      }
       if (!righe.length) {
         return Response.json({ error: `Nel file non ho trovato righe con un formulario o un numero d'ordine${lette.note && lette.note.length ? ': ' + lette.note.join('; ') : '.'}` }, { status: 400 });
       }
@@ -200,7 +208,7 @@ export default async function(req) {
 
     const importoConsuntivo = body.importo_consuntivo !== undefined && body.importo_consuntivo !== null
       ? Number(body.importo_consuntivo)
-      : (record && record.importo_consuntivo !== undefined && record.importo_consuntivo !== null ? Number(record.importo_consuntivo) : null);
+      : (record && record.importo_consuntivo !== undefined && record.importo_consuntivo !== null ? Number(record.importo_consuntivo) : importoDalFoglio);
     const esito = esitoConsuntivo({ confronto, costo, importo_consuntivo: importoConsuntivo });
 
     const esitoCompleto = { confronto, costo, esito, congelato, note_lettura: noteLettura, testo: testoEsitoConsuntivo(confronto, esito) };
