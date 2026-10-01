@@ -58,6 +58,23 @@ export function scaricaExcelConsuntivo(consuntivo, esito) {
       ['Importo ricalcolato oggi', congelato.importo_oggi === null ? '' : congelato.importo_oggi],
       ['Si e\' mosso', congelato.cambiato ? 'si, e va capito perche' : 'no']);
   }
+  // In testa alle note, i carichi di altri mesi che nel gestionale non
+  // risultano: non sono chili di questo mese, ma hanno una scadenza (01/10/2026).
+  const arretrati = (confronto.arretrati || []).filter(Boolean);
+  if (arretrati.length) {
+    info.push([], ['DA REGISTRARE: carichi di altri mesi che non risultano', `${arretrati.length} (${confronto.kg_arretrati || 0} kg). Non entrano nei conti di questo mese. Il termine per la registrazione e\' di dieci giorni dalla data di partenza, domeniche escluse.`]);
+    for (const a of arretrati) {
+      info.push([a.numero_fir || a.id_ordine || 'senza numero',
+        `${a.kg} kg del ${a.giorno ? String(a.giorno).slice(8, 10) + '/' + String(a.giorno).slice(5, 7) + '/' + String(a.giorno).slice(0, 4) : 'data non leggibile'}${a.termine && a.termine.scadenza ? `, da registrare entro il ${String(a.termine.scadenza).slice(8, 10)}/${String(a.termine.scadenza).slice(5, 7)}/${String(a.termine.scadenza).slice(0, 4)}` : ''}`]);
+    }
+  }
+  // Come e' stato letto il file: quali colonne, quali fogli saltati e perche'.
+  // Senza queste righe un numero sbagliato non si spiega piu'.
+  const note = (esito.note_lettura || []).filter(Boolean);
+  if (note.length) {
+    info.push([], ['Come e\' stato letto il file', note[0]]);
+    for (const n of note.slice(1)) info.push(['', n]);
+  }
   info.push([], ['Nota', 'E\' un report del fornitore, non una fattura: non c\'e\' IVA e non c\'e\' imponibile. Dal conto della passiva restano fuori per costruzione le terziarie, gli oneri fissi dell\'extra raccolta e il trasporto delle secondarie di extra raccolta.']);
 
   const ws = XLSX.utils.aoa_to_sheet(info);

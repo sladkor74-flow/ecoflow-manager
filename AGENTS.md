@@ -593,6 +593,59 @@ esterni**, dove il nome della colonna non e' il nostro.
   che preferiva il campo memorizzato (`mese_immissione` in `pivotCalculator.ts`) e'
   stato tolto.
 
+### Una riga di un altro periodo si verifica sempre (01/10/2026)
+
+Il fatto: Nappi Sud non aveva messo nel report della sua settimana una richiesta
+terminata del 14 settembre — non ce l'aveva mandata e non l'aveva annotata nel
+suo Excel — e il confronto di quella settimana usciva **perfetto**. La riga e'
+comparsa nel report della settimana dopo, dove il gestionale la scartava come
+«fuori dalla settimana verificata» senza dire niente, in grigio, in fondo, fra
+le righe non considerate. Quando se n'e' accorto l'ufficio registrazioni il
+**termine di dieci giorni dalla data di partenza** era passato, e l'utente si e'
+preso un richiamo per non averlo segnalato.
+
+Parole dell'utente: «tutte le volte che io carico una verifica settimanale ma
+compaiono nell'elenco anche formulari afferenti a settimane precedenti, tu debba
+verificare anch'esse pur se non appartenenti alla specifica settimana in esame e
+rilevare tutte queste anomalie».
+
+La regola vale **in ogni confronto**, settimanale e mensile:
+
+- una riga di un altro periodo **non si scarta mai**. Si confronta, e porta
+  `fuori_settimana { anno, settimana, arretrata }` nei report settimanali
+  (`verificaReport` in `base44/shared/reportSettimanali.ts`), o finisce negli
+  `arretrati` del consuntivo (`confrontaConsuntivo` in
+  `base44/shared/consuntivoFornitore.ts`). Resta fuori solo una riga **senza
+  formulario**, su cui non c'e' niente da registrare;
+- la settimana di una riga abbinata e' quella del **movimento registrato**, non
+  quella che il report scrive: se il report sbaglia la data ma il carico e' della
+  settimana verificata, la riga resta nella quadratura;
+- resta **fuori dalla quadratura** del periodo verificato, dove il gestionale non
+  la colloca (regola 1). Se report e gestionale dicono la stessa settimana e'
+  soltanto un carico vecchio, quindi un'**osservazione** — altrimenti ogni report
+  cumulativo del mese uscirebbe «parziale» per le sue righe a posto. Se le due
+  settimane non coincidono, una delle due date e' sbagliata: **anomalia**;
+- un formulario si cerca su **tutti** i movimenti, non solo nei ventuno giorni
+  intorno alla settimana: di un carico registrato a luglio il gestionale diceva
+  «non presente nel gestionale», che e' una bugia facile da credere;
+- **il termine di registrazione** sta in `base44/shared/termineRegistrazione.ts`
+  (specchio `src/lib/termineRegistrazione.js`): dieci giorni dalla data di
+  partenza, **domeniche escluse**, il giorno della partenza non si conta. Ogni
+  formulario che nel gestionale non risulta porta la sua `scadenza`, in qualunque
+  settimana. Nell'esito salvato non si scrive **niente che dipenda da oggi**:
+  «scaduto da quanto» lo calcolano la scheda e il PDF con `statoTermine`, o ogni
+  verifica risulterebbe cambiata ogni giorno e si riscriverebbe da sola;
+- si vede: alert **critico** nel modulo Verifiche (`REGOLA_ARRETRATI` in
+  `esitoVerifica.ts`, si chiude da solo quando risultano registrati), in testa
+  alla scheda, in una sezione del PDF prima della quadratura, nel foglio Excel
+  «Settimane precedenti», con una pastiglia rossa nell'elenco delle settimane
+  (`arretrati_da_registrare`, `settimane_arretrate`), e nella **storia scritta**,
+  formulario per formulario, perche' al quarantesimo giorno il dettaglio se ne va;
+- dai **registri di carico e scarico** si leggono anche i trenta giorni prima
+  della settimana (`GIORNI_ARRETRATI_DAL_REGISTRO` in `src/lib/verifiche.js`):
+  col filtro alla settimana esatta un carico rimasto indietro non arrivava
+  nemmeno al confronto.
+
 ### Le date obbligatorie dei formulari (22/09/2026)
 
 Parole dell'utente: «le date immissione, inizio e fine trasporto sono

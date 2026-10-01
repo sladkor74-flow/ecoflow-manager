@@ -256,6 +256,24 @@ export default function Consuntivi({ isAdmin }) {
             </div>
           </div>
 
+          {/* LE NOTE DELLA LETTURA, CHE PRIMA NON SI VEDEVANO.
+              Quali colonne si sono usate, quali fogli non si sono potuti
+              leggere e perche', le righe che paiono totali, il sospetto sul mese
+              sbagliato, e in testa i carichi di altri mesi che nel gestionale
+              non risultano. Erano tutte calcolate e finivano solo
+              nell'esito_json: una spiegazione che resta in un JSON non ha
+              spiegato niente a nessuno. Col rosso quando c'e' qualcosa da
+              registrare, perche' quello non e' una nota, e' una scadenza. */}
+          {esito.note_lettura && esito.note_lettura.length > 0 && (
+            <ul className={`px-3 py-2 text-xs border-b space-y-1 ${c.arretrati_da_registrare ? 'bg-red-100 text-red-900' : 'bg-amber-50 text-amber-900'}`}>
+              {esito.note_lettura.map((n, i) => (
+                <li key={i} className="flex items-start gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span className={c.arretrati_da_registrare && i === 0 ? 'font-semibold' : ''}>{n}</span>
+                </li>
+              ))}
+            </ul>
+          )}
           {v.non_controllato && v.non_controllato.length > 0 && (
             <p className="px-3 py-2 text-xs text-amber-900 bg-amber-50 border-b">Non si e&apos; potuto controllare: {v.non_controllato.join('; ')}. Un controllo mancato non e&apos; un controllo passato.</p>
           )}

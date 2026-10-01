@@ -30,6 +30,8 @@ import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { comeOrdine, comeNumero, comeGiorno } from "./prefattura.ts";
 import { mappaFatturazione, fatturaA } from "./subfornitori.ts";
 import { eAci } from "./canaleSecondaria.ts";
+import { termineDi, testoScadenza, GIORNI_TERMINE_REGISTRAZIONE } from "./termineRegistrazione.ts";
+import { formatoKg } from "./formato.ts";
 
 const kgTondi = (v) => Math.round(Number(v) || 0);
 const pulisci = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
@@ -124,7 +126,11 @@ const PUNTEGGI_INTESTAZIONE = {
   // "Num.Fiscale (Numerazione Fiscale)" e' come GATIM chiama il formulario nel suo
   // export: i valori sono formulari veri (HTQKS000785VB). Nessuno lo avrebbe
   // indovinato leggendo solo la parola.
-  numero_fir: [[/formulario|\bfir\b|num\.?\s*fiscale|numerazione\s*fiscale/i, 10], [/rif\.?\s*docum/i, 8], [/\bddt\b/i, 6], [/documento/i, 4]],
+  // "Blocco/Serie" e' come ECOLOGICAL SYSTEMS chiama il formulario nel suo
+  // riepilogo: il blocco e la serie SONO la numerazione del formulario, e nella
+  // colonna ci sono formulari veri (SNTXP015456TF). Vale meno di "formulario"
+  // scritto per nome, e se i valori dicono un'altra cosa si cambia idea.
+  numero_fir: [[/formulario|\bfir\b|num\.?\s*fiscale|numerazione\s*fiscale/i, 10], [/rif\.?\s*docum/i, 8], [/\bddt\b|blocco|\bserie\b/i, 6], [/documento/i, 4]],
   id_ordine: [[/\bordine\b|n\.?\s*ordine/i, 10], [/ticket/i, 8], [/\bordn?\b/i, 6]],
   kg: [[/p\.?\s*netto|peso\s*netto|netto\s*in\s*kg/i, 10], [/\bpeso\b|\bkg\b|tonnell/i, 8], [/quantit|q\.?t[aà]/i, 4]],
   giorno: [[/\bdata\b|\bdt\b|giorno/i, 10]],
@@ -553,7 +559,31 @@ export function movimentiDelFornitore(archivi, { fornitore, ruolo, anno, mese, c
  *
  * Una tolleranza sui chili si passa da fuori: qui non si decide quanto e' "uguale".
  */
-export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg = 0, canale = '', nome_file = '', anno = null, mese = null } = {}) {
+/**
+ * TUTTE LE CHIAVI CHE IL GESTIONALE CONOSCE: formulari e numeri d'ordine di
+ * qualunque mese, canale e stato.
+ *
+ * Serve a una cosa sola: distinguere una riga di un altro mese che nel gestionale
+ * c'e' - e quindi e' solo di un altro mese - da una che non c'e' per niente.
+ * La seconda e' un carico mai registrato, e il termine per registrarlo (dieci
+ * giorni dalla partenza, domeniche escluse) e' probabilmente passato.
+ *
+ * Qualunque stato, anche "eseguito" o "in corso": la domanda non e' se il
+ * carico sia chiuso, e' se il formulario esista da qualche parte da noi. Non
+ * costa richieste alla piattaforma: gli archivi sono gia' in memoria.
+ */
+export function chiaviDelGestionale(archivi) {
+  const noti = new Set();
+  const a = archivi || {};
+  for (const righe of [a.primarieRete, a.primarieAci, a.secondarie, a.extraRaccolta]) {
+    for (const r of righe || []) {
+      for (const k of chiaviRiga({ numero_fir: chiaveFormulario(r), id_ordine: r.id_ordine })) noti.add(k);
+    }
+  }
+  return noti;
+}
+
+export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg = 0, canale = '', nome_file = '', anno = null, mese = null, formulari_noti = null } = {}) {
   // LE RIGHE DI UN ALTRO MESE NON SI CONFRONTANO.
   //
   // IRIGOM manda il registro di carico e scarico dell'ANNO: 3.026 righe per
@@ -574,6 +604,31 @@ export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg 
       else dentro.push(r);
     }
     righeConsuntivo = dentro;
+  }
+
+  // MA UNA RIGA DI UN ALTRO MESE CHE NEL GESTIONALE NON C'E' NON SI METTE DA
+  // PARTE IN SILENZIO.
+  //
+  // E' la stessa cosa che il 01/10/2026 e' costata un richiamo in ufficio sul
+  // report settimanale: un carico che il fornitore non ci aveva mandato, comparso
+  // in un elenco successivo, scartato perche' "di un altro periodo" mentre il
+  // termine per registrarlo scadeva. Nel consuntivo di settembre di NAPPI SUD ce
+  // n'e' uno del 13 luglio, senza numero d'ordine. Se nel gestionale il
+  // formulario c'e', la riga e' soltanto di un altro mese e non si dice niente.
+  const arretrati = [];
+  if (fuoriPeriodo.length && formulari_noti) {
+    for (const r of fuoriPeriodo) {
+      const chiavi = chiaviRiga(r);
+      if (!chiavi.length || chiavi.some(k => formulari_noti.has(k))) continue;
+      const g = String((r && r.giorno) || '');
+      arretrati.push({
+        numero_fir: pulisci(r && r.numero_fir),
+        id_ordine: pulisci(r && r.id_ordine),
+        kg: Math.round(Number(r && r.kg) || 0),
+        giorno: g,
+        termine: termineDi(g, 'report_arrivo'),
+      });
+    }
   }
   // Ogni gruppo tiene TUTTE le sue chiavi - formulario e ordine - cosi' una riga
   // del consuntivo che porta solo l'ordine trova lo stesso il nostro movimento, che
@@ -687,6 +742,12 @@ export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg 
     // Le righe di un altro mese: fuori dal confronto, mai fra le difformita'.
     fuori_periodo: fuoriPeriodo.length,
     kg_fuori_periodo: kgTondi(fuoriPeriodo.reduce((s, r) => s + (Number(r.kg) || 0), 0)),
+    // Quelle di un altro mese che nel gestionale non risultano per niente: da
+    // registrare, con il termine. Non toccano il verdetto del mese - non sono
+    // chili di questo mese - ma non si tacciono.
+    arretrati,
+    arretrati_da_registrare: arretrati.length,
+    kg_arretrati: kgTondi(arretrati.reduce((s, r) => s + (Number(r.kg) || 0), 0)),
     canali_altrui: [...new Set(voci.filter(v => v.esito === 'altro_canale').map(v => v.canale_riga))],
     // Le righe del consuntivo senza formulario e senza ordine: non si possono
     // abbinare a niente, e tacerle le farebbe sparire dal conto.
@@ -699,6 +760,22 @@ export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg 
     // Quadra quando ogni formulario torna e non ne avanza da nessuna delle due parti.
     quadra: conta('peso_diverso') === 0 && conta('solo_consuntivo') === 0 && conta('solo_gestionale') === 0 && !senzaChiave,
   };
+}
+
+/**
+ * L'avviso dei carichi di altri mesi che nel gestionale non risultano, in
+ * parole, pronto da mettere in testa alle note del confronto. '' se non ce ne
+ * sono. Nel testo non c'e' niente che dipenda da oggi: solo la scadenza.
+ */
+export function avvisoArretrati(confronto) {
+  const righe = (confronto && confronto.arretrati) || [];
+  if (!righe.length) return '';
+  const it = (g) => (/^\d{4}-\d{2}-\d{2}$/.test(String(g)) ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : 'data non leggibile');
+  const elenco = righe.slice(0, 10).map(a =>
+    `${a.numero_fir || a.id_ordine || 'senza numero'} del ${it(a.giorno)}, ${formatoKg(a.kg)} kg${a.termine ? ` (${testoScadenza(a.termine.scadenza)})` : ''}`);
+  if (righe.length > elenco.length) elenco.push(`e altri ${righe.length - elenco.length}`);
+  return `${righe.length === 1 ? 'Un carico di un altro mese compare in questo consuntivo e nel gestionale non risulta' : `${righe.length} carichi di altri mesi compaiono in questo consuntivo e nel gestionale non risultano`}: ${elenco.join('; ')}. `
+    + `Non entrano nei conti di questo mese, ma vanno caricati a portale e segnalati all'ufficio registrazioni: il termine e' di ${GIORNI_TERMINE_REGISTRAZIONE} giorni dalla data di partenza, domeniche escluse.`;
 }
 
 /**

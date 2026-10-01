@@ -403,6 +403,15 @@ export function storiaConsuntivo(c, esitoCompleto = null) {
   if (r.importo_consuntivo !== undefined && r.importo_consuntivo !== null && r.importo_consuntivo !== '') {
     righe.push(`Importo scritto sul consuntivo: ${Number(r.importo_consuntivo).toFixed(2)} euro.`);
   }
+  // I carichi di altri mesi che nel gestionale non risultavano: a quaranta
+  // giorni il dettaglio se ne va, e questa riga e' tutto quello che resta di un
+  // carico mai registrato (01/10/2026).
+  const arretrati = (conf.arretrati || []).filter(Boolean);
+  if (arretrati.length) {
+    righe.push(`Carichi di altri mesi che nel gestionale non risultavano: ${arretrati.length} — ` + elenco(arretrati.map(a =>
+      `${testo(a.numero_fir) || testo(a.id_ordine) || 'senza numero'}${a.giorno ? ` del ${it(String(a.giorno))}` : ''}, ${formatoKg(numero(a.kg))} kg${a.termine && a.termine.scadenza ? `, termine di registrazione ${it(String(a.termine.scadenza))}` : ''}`
+    ), 20).join('; ') + '.');
+  }
   const nonControllato = ((e.esito || {}).non_controllato) || [];
   if (nonControllato.length) righe.push(`Non si e' potuto controllare: ${nonControllato.map(testo).filter(Boolean).join('; ')}.`);
   if (testo(r.note)) righe.push(`Note: ${testo(r.note)}.`);

@@ -10,7 +10,7 @@
 // periodo e' la fine trasporto, le quote dello stesso formulario si sommano prima
 // del confronto, e quello che manca da una parte o dall'altra si dice.
 // npm run prove
-import { movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, esitoConsuntivo, testoEsitoConsuntivo, chiaveRiga, chiaveFir, leggiRigheConsuntivo, pareOrdine, periodoSospetto, righeCheParonoTotali, colonneDaIntestazioni, importoTotaleDalFoglio, canaleDaClasse, canaleDellaRiga } from '../base44/shared/consuntivoFornitore.ts';
+import { movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, esitoConsuntivo, testoEsitoConsuntivo, chiaveRiga, chiaveFir, leggiRigheConsuntivo, pareOrdine, periodoSospetto, righeCheParonoTotali, colonneDaIntestazioni, importoTotaleDalFoglio, canaleDaClasse, canaleDellaRiga, chiaviDelGestionale, avvisoArretrati } from '../base44/shared/consuntivoFornitore.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -546,6 +546,60 @@ console.log('UNA RIGA DI UN ALTRO CANALE NON E\' UNA DIFFORMITA\'');
   const righe = [{ numero_fir: 'RTXZV009999ZZ', kg: 3000, classe: 'P' }];
   const c = confrontaConsuntivo(righe, [], { tolleranza_kg: 1, canale: 'RETE' });
   verifica('una riga di rete che non abbiamo resta una difformita', c.solo_consuntivo === 1 && c.altro_canale === 0, J(c.voci));
+}
+
+// === UNA RIGA DI UN ALTRO MESE CHE NEL GESTIONALE NON C'E' ===
+//
+// La stessa cosa che il 01/10/2026 e' costata un richiamo in ufficio sul report
+// settimanale. Nel consuntivo di settembre di NAPPI SUD c'era un carico del 13
+// luglio, senza numero d'ordine: senza questo controllo si metteva da parte in
+// silenzio come "riga di un altro mese", che e' vero e non basta.
+console.log('\nUN CARICO DI UN ALTRO MESE CHE NEL GESTIONALE NON RISULTA');
+{
+  const archivi = {
+    primarieRete: [{ numero_fir: 'RGYTR027030CR', id_ordine: 'ET26134560' }],
+    primarieAci: [], secondarie: [], extraRaccolta: [{ numero_fir: 'XRIF0001', id_ordine: '' }],
+  };
+  const noti = chiaviDelGestionale(archivi);
+  verifica('le chiavi del gestionale prendono formulari e ordini di ogni archivio e stato',
+    noti.has('FIR:RGYTR027030CR') && noti.has('ORD:ET26134560') && noti.size === 3, J([...noti]));
+
+  const righe = [
+    // di settembre e nostra: si confronta normalmente
+    { numero_fir: 'BSDCL001000AA', kg: 3000, giorno: '2026-09-10' },
+    // di agosto ma registrata: solo di un altro mese, non si dice niente
+    { numero_fir: 'RGYTR027030CR', kg: 1680, giorno: '2026-08-31' },
+    // di luglio e mai registrata: e' questa
+    { numero_fir: 'RGYTR027595LQ', kg: 800, giorno: '2026-07-13', id_ordine: 'ET' },
+  ];
+  const movimenti = [{ numero_fir: 'BSDCL001000AA', id_ordine: 'ET26150000', peso_effettivo: 3000 }];
+  const c = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1, anno: 2026, mese: 9, formulari_noti: noti });
+  verifica('le due righe di altri mesi restano fuori dal confronto', c.fuori_periodo === 2 && c.kg_fuori_periodo === 2480, J({ f: c.fuori_periodo, kg: c.kg_fuori_periodo }));
+  verifica('il mese quadra lo stesso: non sono chili di questo mese', c.quadra === true && c.uguali === 1, J({ q: c.quadra, u: c.uguali }));
+  verifica('ma quella mai registrata si dice, una sola', c.arretrati_da_registrare === 1 && c.kg_arretrati === 800
+    && c.arretrati[0].numero_fir === 'RGYTR027595LQ' && c.arretrati[0].giorno === '2026-07-13', J(c.arretrati));
+  // 13/07/2026 e' un lunedi': dieci giorni utili, domenica 19 fuori, termine il 24.
+  verifica('col suo termine di registrazione', c.arretrati[0].termine && c.arretrati[0].termine.scadenza === '2026-07-24'
+    && c.arretrati[0].termine.partenza_da === 'report_arrivo', J(c.arretrati[0].termine));
+  const avviso = avvisoArretrati(c);
+  verifica('e l\'avviso lo scrive in italiano, col termine e senza niente che invecchi',
+    /Un carico di un altro mese compare in questo consuntivo e nel gestionale non risulta/.test(avviso)
+    && /RGYTR027595LQ del 13\/07\/2026, 800 kg \(termine di registrazione: 24\/07\/2026\)/.test(avviso)
+    && /dieci giorni|10 giorni/.test(avviso) && !/scaduto da/.test(avviso), avviso);
+
+  // Senza le chiavi del gestionale il controllo non si fa: meglio niente che
+  // dire "mai registrato" di un carico che non si e' potuto cercare.
+  const senza = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1, anno: 2026, mese: 9 });
+  verifica('senza le chiavi non si accusa nessuno', senza.arretrati_da_registrare === 0 && senza.fuori_periodo === 2, J(senza.arretrati));
+  verifica('e senza arretrati l\'avviso e\' vuoto', avvisoArretrati(senza) === '' && avvisoArretrati(null) === '');
+}
+{
+  // "Blocco/Serie" e' come ECOLOGICAL SYSTEMS chiama il formulario.
+  const col = colonneDaIntestazioni(['N.', 'Blocco/Serie', 'Tipo', 'Produttore', 'Peso']);
+  verifica('la colonna "Blocco/Serie" e\' il formulario', col.numero_fir && col.numero_fir.j === 1 && col.kg && col.kg.j === 4, J(col));
+  // Ma "formulario" scritto per nome vince sempre su "blocco".
+  const col2 = colonneDaIntestazioni(['Blocco/Serie', 'Num. di formulario', 'Peso netto']);
+  verifica('e "formulario" scritto per nome vince su "blocco"', col2.numero_fir.j === 1, J(col2));
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
