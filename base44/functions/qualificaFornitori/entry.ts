@@ -5,6 +5,7 @@ import { individuaSoggetti, valutaSoggetto, oggiRoma, salvaRiepilogo, anomalieCa
 import { applicaControlloClasse } from "../../shared/classeAlbo.ts";
 import { daAnalizzare } from "../../shared/analisiDocumento.ts";
 import { statoCaricamenti, descriviCaricamento } from "../../shared/reportSettimanali.ts";
+import { eAmministratore } from "../../shared/permessi.ts";
 
 // Situazione della qualifica fornitori per un anno.
 //
@@ -48,17 +49,32 @@ export default async function(req) {
     //
     // Con i soggetti gia' in mano si rivalutano solo i documenti e gli archivi
     // non si toccano: li' non si rinvia niente.
+    // L'ELENCO DEI SOGGETTI SI ACCETTA SOLO DA CHI PUO' SCRIVERE (02/10/2026).
+    //
+    // L'aggiornamento rapido rimanda indietro i soggetti gia' noti per non
+    // rileggere gli archivi. Ma quell'elenco finiva dritto nel riepilogo
+    // salvato, e il riepilogo lo legge la fatturazione passiva per avvisare,
+    // prima di pagare, chi ha documenti scaduti o non conformi: chiamando la
+    // funzione con "soggetti: []" il riepilogo usciva con zero soggetti critici
+    // e zero alert, e nessuno se ne accorgeva. Bastava essere collegati.
+    //
+    // Non si chiude la strada - serve, ed e' quella usata dopo un caricamento o
+    // una correzione - si chiude a chi non puo' scrivere: a lui i soggetti si
+    // ricalcolano dagli archivi, piu' lento ma vero. Un amministratore puo' gia'
+    // scrivere quello che vuole: da lui l'elenco si accetta com'e'.
+    const daCorpo = Array.isArray(body.soggetti) && eAmministratore(user);
+
     let rinviato = null;
-    if (!Array.isArray(body.soggetti)) {
+    if (!daCorpo) {
       const { in_corso } = await statoCaricamenti(base44);
       if (in_corso.length) rinviato = in_corso;
     }
 
-    let soggetti = Array.isArray(body.soggetti) ? body.soggetti : null;
-    let esclusi = Array.isArray(body.esclusi) ? body.esclusi : [];
+    let soggetti = daCorpo ? body.soggetti : null;
+    let esclusi = daCorpo && Array.isArray(body.esclusi) ? body.esclusi : [];
     // Chi compare nell'anno solo in terminati senza fine trasporto (22/09/2026):
     // come gli esclusi, la pagina lo rimanda indietro nell'aggiornamento rapido.
-    let soggettiDaDate = Array.isArray(body.soggetti_da_date) ? body.soggetti_da_date : [];
+    let soggettiDaDate = daCorpo && Array.isArray(body.soggetti_da_date) ? body.soggetti_da_date : [];
     if (!soggetti) {
       const esito = await individuaSoggetti(base44, anno);
       soggetti = esito.soggetti;

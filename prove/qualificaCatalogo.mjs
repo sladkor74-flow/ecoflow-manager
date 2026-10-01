@@ -5,6 +5,7 @@ import {
   soggettiDelTipo, richiestoA, valutaSoggetto, eventiDaSegnalare, anomalieCatalogo,
 } from '../base44/shared/qualificaFornitori.ts';
 import { problemaTipoSbagliato } from '../base44/shared/tipiDocumento.ts';
+import { readFileSync } from 'node:fs';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -76,6 +77,32 @@ verifica('il fornitore che nel 2026 non risulta viene segnalato col nome', error
 verifica('una voce disattivata non produce errori', !an.some(a => a.tipo_id === 't6'));
 verifica('ruoli e fornitori insieme: si avvisa che i ruoli non contano', an.some(a => a.tipo_id === 't3' && a.gravita === 'attenzione'));
 verifica('le voci a posto non producono niente', !an.some(a => a.tipo_id === 't1' || a.tipo_id === 't2'));
+
+// IL RIEPILOGO SALVATO NON SI COSTRUISCE SU UN ELENCO ARRIVATO DAL CORPO.
+//
+// Trovato il 02/10/2026 setacciando le funzioni. L'aggiornamento rapido rimanda
+// indietro i soggetti gia' noti per non rileggere gli archivi, ma quell'elenco
+// finiva dritto nel riepilogo salvato - e il riepilogo lo legge la fatturazione
+// passiva per avvisare, prima di pagare, chi ha documenti scaduti. Chiamando la
+// funzione con "soggetti: []" il riepilogo usciva con zero soggetti critici.
+// Bastava essere collegati.
+console.log('\nI SOGGETTI DAL CORPO VALGONO SOLO PER CHI PUO\' SCRIVERE');
+{
+  const sorgente = readFileSync(new URL('../base44/functions/qualificaFornitori/entry.ts', import.meta.url), 'utf8');
+  verifica('l\'elenco dal corpo si accetta solo dall\'amministratore',
+    /const daCorpo = Array\.isArray\(body\.soggetti\) && eAmministratore\(user\)/.test(sorgente), 'manca il controllo su chi manda i soggetti');
+  verifica('e la guardia e\' quella condivisa', /import \{ eAmministratore \} from "\.\.\/\.\.\/shared\/permessi\.ts"/.test(sorgente));
+  // Anche gli esclusi e i soggetti senza fine trasporto arrivano dalla stessa
+  // strada: se si fidasse di quelli, il conto tornerebbe falsato lo stesso.
+  verifica('vale anche per gli esclusi e per i soggetti senza data',
+    /esclusi = daCorpo && Array\.isArray\(body\.esclusi\)/.test(sorgente)
+    && /soggettiDaDate = daCorpo && Array\.isArray\(body\.soggetti_da_date\)/.test(sorgente), 'esclusi o soggetti_da_date si fidano ancora del corpo');
+  // Chi non puo' scrivere non resta fuori: i soggetti glieli ricalcola il
+  // server, piu' lento ma vero. E il controllo dei caricamenti aperti (regola 2)
+  // torna a valere per lui, perche' quella strada rilegge gli archivi.
+  verifica('a chi non e\' amministratore i soggetti si ricalcolano', /let soggetti = daCorpo \? body\.soggetti : null/.test(sorgente));
+  verifica('e il controllo dei caricamenti aperti vale per quella strada', /if \(!daCorpo\) \{/.test(sorgente));
+}
 
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');
