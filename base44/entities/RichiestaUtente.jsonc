@@ -79,8 +79,19 @@
     "descrizione"
   ],
   "rls": {
-    "read": true,
-    "create": true,
+    "create": null,
+    "read": {
+      "$or": [
+        {
+          "data.richiedente_email": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
     "update": {
       "user_condition": {
         "role": "admin"

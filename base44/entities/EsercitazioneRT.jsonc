@@ -4,12 +4,19 @@
   "properties": {
     "tipo": {
       "type": "string",
-      "enum": ["simulazione", "allenamento", "ripasso"],
+      "enum": [
+        "simulazione",
+        "allenamento",
+        "ripasso"
+      ],
       "default": "simulazione"
     },
     "verifica": {
       "type": "string",
-      "enum": ["iniziale", "aggiornamento"]
+      "enum": [
+        "iniziale",
+        "aggiornamento"
+      ]
     },
     "modulo": {
       "type": "string",
@@ -64,13 +71,29 @@
     }
   },
   "rls": {
-    "read": true,
-    "create": true,
-    "update": true,
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "created_by_id": "{{user.id}}"
+    },
     "delete": {
       "user_condition": {
         "role": "admin"
       }
     }
-  }
+  },
+  "required": []
 }
