@@ -513,6 +513,25 @@ quella prova.
   quello che il portale decurta e che `agganciaDichiarazioni` riconosce con 2 kg
   di tolleranza; nella nota c'e' `[extra compresa: N kg]`. L'extra ha la sua
   DichiarazioneSito sul mese del formulario.
+- **Il portale puo' avere una dichiarazione che il gestionale non ha**
+  (01/10/2026). L'aggancio parte dalle NOSTRE righe mensili e cerca il peso nel
+  report del portale: se la nostra riga non c'e' - l'utente ha dichiarato a
+  portale senza prima scriverla qui - non c'e' niente da agganciare, e quel
+  caricamento finiva fra l'«arretrato dell'anno prima», che era falso, e la
+  pagina non mostrava l'arretrato affatto. E' costato un «questo lo trovo molto
+  strano» sul quantitativo di agosto di Green Tyre Project. Adesso
+  `caricamentiPortale` tiene **di che mese sono gli ordini che il caricamento
+  chiude** (fine trasporto), `confrontaConIlPortale` separa le **dichiarazioni da
+  inserire** (ordini dell'anno verificato) dall'arretrato vero (anni
+  precedenti), e `riepilogoDichiarazioni` le calcola a ogni apertura della
+  pagina, dove stanno in testa in rosso. Il mese e' un'inferenza, quindi si
+  **propone**: i valori li scrive l'utente.
+- **Quanto resta da dichiarare di un mese sono gli INGRESSI del mese in quell'
+  impianto** (regola dell'utente, 01/10/2026), meno il dichiarato di quel mese:
+  `da_dichiarare_kg` nei flussi di `riepilogoDichiarazioni`. Prima lo diceva solo
+  la fotografia del portale (`non_dichiarato_kg`), che e' di un giorno preciso e
+  puo' essere vecchia di settimane: un mese appena conferito usciva a zero e la
+  riga dell'impianto **spariva** dal riepilogo. La fotografia resta un riscontro.
 - **Ogni mese** (procedura dell'utente, 22/09/2026). L'utente aggiorna il
   registro di Irigom e lo dice; **l'agente lo legge e riferisce**: quanti e quali
   formulari di ferro valgono (colore della cella e nota, con il motivo di ognuno),
@@ -645,6 +664,40 @@ La regola vale **in ogni confronto**, settimanale e mensile:
   della settimana (`GIORNI_ARRETRATI_DAL_REGISTRO` in `src/lib/verifiche.js`):
   col filtro alla settimana esatta un carico rimasto indietro non arrivava
   nemmeno al confronto.
+
+### Un numero sbagliato di una lettera non e' due difformita' (01/10/2026)
+
+Parole dell'utente: «verifica tutte le informazioni contenute in ogni rigo e poi
+confrontale con il nostro gestionale; le cose importanti su cui decidere sono il
+numero del formulario, l'id ordine, ma chi ci invia il report puo' anche
+sbagliare, ad esempio scambiando una lettera o una cifra, pertanto tu fai i
+paragoni con piu' informazioni della stessa riga».
+
+Un identificativo sbagliato di un carattere, confrontato da solo, non produce un
+errore ma **due**: «questo ce lo fattura e noi non l'abbiamo» e «questo l'abbiamo
+noi e lui non lo riporta». Due accuse al posto di una frase, su un documento che
+autorizza una fattura.
+
+- Un numero quasi uguale **non basta**, e un peso uguale **non basta**: si abbina
+  quando il numero e' quasi uguale (formulario entro 2 caratteri, ID ordine entro
+  1) **e almeno un'altra informazione della riga lo conferma** - peso, data,
+  classe, produttore, destinatario, trasportatore. Senza conferme la riga resta
+  una difformita': meglio una difformita' da guardare che un abbinamento
+  inventato. Si dice sempre da che cosa lo si e' riconosciuto.
+- Anche una riga abbinata dal numero **esatto** si controlla in tutto: l'ID
+  ordine e la data sbagliati si dicono comunque.
+- **I nomi non fanno difformita'**: la stessa ditta si scrive in dieci modi, e un
+  elenco di grafie seppellirebbe le differenze vere. Servono a riconoscere e a
+  spiegare. La **classe** si segnala solo se cambia canale (9 = ACI), perche' e'
+  quella che cambia il prezzo.
+- `base44/shared/numeroFir.ts`: `normalizzaFir`, `FORMATO_FIR`, `distanzaFir` e
+  `descriviDifferenzaFir`, che spiega l'errore in italiano («"B" al posto di "P"
+  in posizione 13», «caratteri invertiti», «probabile scambio fra caratteri
+  simili»). Lo usano le verifiche settimanali (`verificaReport`) e i consuntivi
+  (`confrontaConsuntivo`): una regola sola, in un posto solo.
+- I chili tornano, quindi la quadratura delle quantita' resta buona, **ma il
+  verdetto non e' verde**: il riquadro non puo' dirsi a posto mentre sotto c'e'
+  scritto che due numeri sono sbagliati.
 
 ### Le date obbligatorie dei formulari (22/09/2026)
 
