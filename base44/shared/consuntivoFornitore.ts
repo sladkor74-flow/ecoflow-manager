@@ -168,7 +168,17 @@ export function colonneDaIntestazioni(celle) {
 
 // Un formulario: lettere e cifre, almeno otto, con almeno una cifra. Serve a
 // riconoscere la colonna quando le intestazioni non aiutano.
-const PARE_FIR = (v) => { const t = chiaveFir(v); return t.length >= 8 && /[0-9]/.test(t) && /[A-Z]/.test(t); };
+// Un formulario e' un CODICE: lettere e cifre attaccate, almeno otto. Il limite
+// sugli spazi serve a non prendere per formulario una frase che ne ha la forma:
+// "GIAC 31 LUGLIO 2026", nel foglio delle giacenze di NAPPI, normalizzata fa
+// "GIAC31LUGLIO2026" - sedici caratteri, lettere e cifre - e passava. Un codice
+// al massimo e' spezzato in due ("RG YTR-0226"), non in quattro.
+const PARE_FIR = (v) => {
+  const grezzo = pulisci(v);
+  if ((grezzo.match(/\s/g) || []).length > 1) return false;
+  const t = chiaveFir(grezzo);
+  return t.length >= 8 && /[0-9]/.test(t) && /[A-Z]/.test(t);
+};
 
 /**
  * LE RIGHE DI UN CONSUNTIVO, lette da un foglio.
@@ -202,38 +212,27 @@ export function leggiRigheConsuntivo(tabelle) {
     }
 
     const corpo = iTesta >= 0 ? t.slice(iTesta + 1) : t;
-    // Se le intestazioni non bastano, si guarda la forma dei valori: la colonna coi
-    // piu' valori che paiono formulari, e quella coi piu' numeri che paiono chili.
-    if (!col.numero_fir && !col.id_ordine) {
-      const contaFir = new Map(), contaOrd = new Map();
-      for (const r of corpo) (r || []).forEach((c, j) => {
-        if (PARE_FIR(c)) contaFir.set(j, (contaFir.get(j) || 0) + 1);
-        if (comeOrdine(c)) contaOrd.set(j, (contaOrd.get(j) || 0) + 1);
-      });
-      const meglio = (m) => [...m.entries()].sort((a, b) => b[1] - a[1])[0];
-      const f = meglio(contaFir), o = meglio(contaOrd);
-      if (f) col.numero_fir = { j: f[0], testo: '(riconosciuta dai valori)' };
-      if (o && (!f || o[0] !== f[0])) col.id_ordine = { j: o[0], testo: '(riconosciuta dai valori)' };
-      if (!col.kg) {
-        const contaNum = new Map();
-        for (const r of corpo) (r || []).forEach((c, j) => {
-          if (j === (col.numero_fir && col.numero_fir.j) || j === (col.id_ordine && col.id_ordine.j)) return;
-          const n = comeNumero(c);
-          if (n !== null && n > 0) contaNum.set(j, (contaNum.get(j) || 0) + 1);
-        });
-        const k = meglio(contaNum);
-        if (k) col.kg = { j: k[0], testo: '(riconosciuta dai valori)' };
-      }
-    }
 
-    if (!col.numero_fir && !col.id_ordine) {
-      note.push(`Foglio "${nome}": non ho trovato nessuna colonna con i formulari o i numeri d'ordine, saltato.`);
+    // SENZA LA RIGA DELLE INTESTAZIONI NON SI LEGGE. PUNTO.
+    //
+    // Il formulario, dalla forma, si riconosce: e' una sigla di lettere e cifre.
+    // IL PESO NO: qualunque colonna di numeri somiglia a un peso, e sbagliarla
+    // non da' un errore, da' un numero. Misurato sui consuntivi veri, indovinando
+    // uscivano 323.051.160 kg da un registro di carico e scarico di IRIGOM,
+    // 3.744.000 da ECORECUPERI e 1.834.000 da TRS: tonnellate che non esistono,
+    // presentate con la stessa faccia di quelle giuste. Su un documento che
+    // autorizza una fattura, un numero sbagliato che sembra buono e' il danno
+    // peggiore possibile.
+    //
+    // Quindi si dice che non si sa leggere, e si dice che cosa fare. Una frase
+    // che ammette di non capire e' piu' utile di una tabella inventata.
+    if (iTesta < 0) {
+      const haFormulari = corpo.some(r => (r || []).some(c => PARE_FIR(c)));
+      note.push(haFormulari
+        ? `Foglio "${nome}": ci sono dei formulari ma non riconosco la riga delle intestazioni, quindi non so quale colonna sia il peso. Non l'ho letto: indovinare la colonna dei chili vorrebbe dire scrivere numeri sbagliati con l'aria di essere giusti. Serve un foglio con le intestazioni (per esempio "N. FORMULARIO" e "KG"), oppure dimmi tu quali colonne sono.`
+        : `Foglio "${nome}": non ci sono formulari, quindi non e' un elenco di carichi (sara' un riepilogo, le giacenze o i totali). Saltato.`);
       continue;
     }
-    colonneLette.push({
-      foglio: nome,
-      colonne: Object.fromEntries(Object.entries(col).map(([k, v]) => [k, v.testo])),
-    });
 
     // LE INTESTAZIONI PROPONGONO, I VALORI DECIDONO.
     //
@@ -262,14 +261,13 @@ export function leggiRigheConsuntivo(tabelle) {
       }
     }
 
-    // SE L'INTESTAZIONE NON SI E' TROVATA, TUTTO IL RESTO E' UN INDOVINELLO.
-    // Senza riga d'intestazione si legge il foglio dalla prima riga e si tirano a
-    // indovinare le colonne dalla forma dei valori: e' cosi' che i titoli delle
-    // colonne sono finiti fra i carichi. Va detto, perche' cambia quanto ci si
-    // puo' fidare di tutto quello che viene dopo.
-    if (iTesta < 0) {
-      note.push(`Foglio "${nome}": non ho trovato la riga delle intestazioni, quindi ho riconosciuto le colonne dalla forma dei valori. Controlla qui sotto quali ho usato: se ho sbagliato colonna, l'esito non vale niente.`);
-    }
+    // Quali colonne si sono usate si DICE sempre: e' il controllo che permette
+    // all'utente di accorgersi in un secondo se il gestionale ha preso la colonna
+    // sbagliata, invece di scoprirlo dai numeri.
+    colonneLette.push({
+      foglio: nome,
+      colonne: Object.fromEntries(Object.entries(col).map(([k, v]) => [k, v.testo])),
+    });
 
     const prendi = (r, c) => (c && c.j >= 0 ? r[c.j] : null);
     for (const r of corpo) {
@@ -555,7 +553,28 @@ export function movimentiDelFornitore(archivi, { fornitore, ruolo, anno, mese, c
  *
  * Una tolleranza sui chili si passa da fuori: qui non si decide quanto e' "uguale".
  */
-export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg = 0, canale = '', nome_file = '' } = {}) {
+export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg = 0, canale = '', nome_file = '', anno = null, mese = null } = {}) {
+  // LE RIGHE DI UN ALTRO MESE NON SI CONFRONTANO.
+  //
+  // IRIGOM manda il registro di carico e scarico dell'ANNO: 3.026 righe per
+  // 15.298 tonnellate. Letto per intero contro i movimenti di un mese solo,
+  // darebbe migliaia di "carichi che ci fattura e noi non abbiamo" - e sono
+  // semplicemente gli altri undici mesi. Si tengono da parte e si dicono.
+  //
+  // Solo le righe con una data LEGGIBILE: una riga senza data non si sa di che
+  // mese sia, e buttarla fuori sarebbe peggio che confrontarla.
+  const annoNum = Number(anno), meseNum = Number(mese);
+  const filtraPeriodo = annoNum > 0 && meseNum >= 1 && meseNum <= 12;
+  const fuoriPeriodo = [];
+  if (filtraPeriodo) {
+    const dentro = [];
+    for (const r of righeConsuntivo || []) {
+      const g = String((r && r.giorno) || '');
+      if (/^\d{4}-\d{2}-\d{2}$/.test(g) && !(Number(g.slice(0, 4)) === annoNum && Number(g.slice(5, 7)) === meseNum)) fuoriPeriodo.push(r);
+      else dentro.push(r);
+    }
+    righeConsuntivo = dentro;
+  }
   // Ogni gruppo tiene TUTTE le sue chiavi - formulario e ordine - cosi' una riga
   // del consuntivo che porta solo l'ordine trova lo stesso il nostro movimento, che
   // il formulario ce l'ha sempre.
@@ -665,6 +684,9 @@ export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg 
     // Le righe di un altro canale: contate a parte, mai fra le difformita'.
     altro_canale: conta('altro_canale'),
     kg_altro_canale: kgDi('altro_canale', 'kg_consuntivo'),
+    // Le righe di un altro mese: fuori dal confronto, mai fra le difformita'.
+    fuori_periodo: fuoriPeriodo.length,
+    kg_fuori_periodo: kgTondi(fuoriPeriodo.reduce((s, r) => s + (Number(r.kg) || 0), 0)),
     canali_altrui: [...new Set(voci.filter(v => v.esito === 'altro_canale').map(v => v.canale_riga))],
     // Le righe del consuntivo senza formulario e senza ordine: non si possono
     // abbinare a niente, e tacerle le farebbe sparire dal conto.
@@ -771,6 +793,9 @@ export function testoEsitoConsuntivo(confronto, esito) {
     if (confronto.solo_gestionale) q.push(`${confronto.solo_gestionale} che abbiamo noi e il consuntivo non riporta (${confronto.kg_solo_gestionale} kg)`);
     if (confronto.senza_chiave) q.push(`${confronto.senza_chiave} righe senza formulario ne' ordine, che non si possono abbinare`);
     parti.push(`Il consuntivo non corrisponde: ${q.join(', ')}.`);
+  }
+  if (confronto.fuori_periodo) {
+    parti.push(`${confronto.fuori_periodo === 1 ? 'Una riga del consuntivo è' : `${confronto.fuori_periodo} righe del consuntivo sono`} di un altro mese (${confronto.kg_fuori_periodo} kg): restano fuori dal confronto, e non sono una difformità. Succede con i registri che coprono tutto l'anno.`);
   }
   // Le righe di un altro canale si dicono SEMPRE, anche quando tutto il resto
   // quadra: se nessuno apre l'altro canale, quelle righe non le controlla nessuno.

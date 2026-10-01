@@ -160,6 +160,9 @@ export default async function(req) {
       // Il canale che si sta verificando e il nome del file: servono a riconoscere
       // le righe che appartengono a un ALTRO canale e a non accusarle.
       canale, nome_file: (record && record.file_nome) || body.file_nome || '',
+      // Le righe di un altro mese restano fuori: IRIGOM manda il registro
+      // dell'anno intero, e confrontarlo tutto darebbe migliaia di finte difformita'.
+      anno, mese,
     });
 
     // DUE DOMANDE DA FARE PRIMA DI ELENCARE LE DIFFORMITA'.

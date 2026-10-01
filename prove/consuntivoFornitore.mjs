@@ -151,12 +151,16 @@ verifica('un consuntivo con formulario e chili si legge', soloFir.righe.length =
   && soloFir.righe[0].numero_fir === 'RGYTR000021AA' && soloFir.righe[0].kg === 5000, J(soloFir.righe));
 verifica('e si dice quali colonne sono state riconosciute', soloFir.colonne.length === 1
   && soloFir.colonne[0].colonne.numero_fir === 'Formulario', J(soloFir.colonne));
-// Anche senza intestazioni utili, dalla forma dei valori.
+// SENZA INTESTAZIONI NON SI LEGGE, e si dice perche'. Fino al 01/10/2026 le
+// colonne si indovinavano dalla forma dei valori: il formulario si riconosce,
+// ma il PESO no - qualunque colonna di numeri gli somiglia. Misurato sui
+// consuntivi veri, indovinando uscivano 323.051.160 kg dal registro di IRIGOM.
 const senzaTeste = leggiRigheConsuntivo([{ nome: 'F1', celle: [
   ['RGYTR000021AA', 5000], ['RGYTR000022AA', 3000],
 ] }]);
-verifica('senza intestazioni si riconosce dalla forma dei valori', senzaTeste.righe.length === 2
-  && senzaTeste.righe[0].kg === 5000, J(senzaTeste.righe));
+verifica('senza intestazioni non si legge niente', senzaTeste.righe.length === 0, J(senzaTeste.righe));
+verifica('e si dice che il peso non si sa quale sia', senzaTeste.note.some(n => /non so quale colonna sia il peso/.test(n)), J(senzaTeste.note));
+verifica('e si dice che cosa serve', senzaTeste.note.some(n => /Serve un foglio con le intestazioni/.test(n)), J(senzaTeste.note));
 // I pesi in tonnellate si riconoscono dall'ordine di grandezza.
 const inTonnellate = leggiRigheConsuntivo([{ nome: 'T', celle: [['Formulario', 'Peso t'], ['RGYTR000021AA', 5.4]] }]);
 verifica('un peso in tonnellate diventa chili', inTonnellate.righe[0].kg === 5400, String(inTonnellate.righe[0].kg));
@@ -259,8 +263,10 @@ verifica('due caratteri no', pareOrdine('A1') === '');
 
 console.log('LE RIGHE DI INTESTAZIONE NON DIVENTANO CARICHI');
 {
-  // Il foglio come lo legge il gestionale quando NON trova l'intestazione: le
-  // prime righe sono titoli e metadati, poi i carichi veri.
+  // Il foglio come il gestionale lo leggeva quando NON trovava l'intestazione:
+  // titoli e metadati diventavano carichi. Adesso un foglio senza intestazione
+  // non si legge affatto, ed e' la difesa definitiva: non c'e' nessuna riga
+  // inventata perche' non c'e' nessuna riga.
   const celle = [
     ['Consuntivo mensile', null, null],
     ['Fornitore', 'LOGISTICA & PNEUMATICI SRL', null],
@@ -269,12 +275,68 @@ console.log('LE RIGHE DI INTESTAZIONE NON DIVENTANO CARICHI');
     ['RTXZV001718KR', 'ET26112026', 3540],
   ];
   const lette = leggiRigheConsuntivo([{ nome: 'Foglio1', celle }]);
-  const chiavi = lette.righe.map(r => chiaveRiga(r));
-  verifica('i due carichi veri ci sono', chiavi.includes('FIR:RTXZV001717KH') && chiavi.includes('FIR:RTXZV001718KR'), J(chiavi));
-  verifica("l'intestazione non e diventata un carico", !chiavi.some(k => /PROVINCIA/.test(k)), J(chiavi));
-  verifica('ne la ragione sociale', !chiavi.some(k => /NAPPI/.test(k)), J(chiavi));
-  verifica('e le righe scartate si contano', lette.scartate >= 2, String(lette.scartate));
-  verifica('e si dice che l intestazione non si e trovata', lette.note.some(n => /non ho trovato la riga delle intestazioni/.test(n)), J(lette.note));
+  verifica('niente si legge, quindi niente si inventa', lette.righe.length === 0, J(lette.righe));
+  verifica("l'intestazione non e diventata un carico", !lette.righe.some(r => /PROVINCIA/i.test(r.numero_fir + r.id_ordine)));
+  verifica('e si dice che i formulari ci sono ma il peso no', lette.note.some(n => /ci sono dei formulari ma non riconosco la riga delle intestazioni/.test(n)), J(lette.note));
+}
+{
+  // Lo stesso foglio CON la sua intestazione: si legge tutto.
+  const celle = [
+    ['Consuntivo mensile', null, null, null],
+    ['N. FORMULARIO', 'ORDINE ET', 'NETTO IN KG', 'CLASSE'],
+    ['RTXZV001717KH', 'ET26125844', 3700, 'P'],
+    ['RTXZV001718KR', 'ET26112026', 3540, 'P'],
+  ];
+  const lette = leggiRigheConsuntivo([{ nome: 'Foglio1', celle }]);
+  verifica('con le intestazioni si legge tutto', lette.righe.length === 2 && lette.righe[0].kg === 3700, J(lette.righe));
+  verifica("e il titolo sopra non e un carico", !lette.righe.some(r => /Consuntivo/i.test(r.numero_fir)));
+  verifica('e la classe arriva', lette.righe.every(r => r.classe === 'P'), J(lette.righe.map(r => r.classe)));
+}
+{
+  // Il foglio GIACENZA di NAPPI: nessun formulario, e si dice che non e' un
+  // elenco di carichi invece di inventarne.
+  const celle = [
+    [null, null, null, null, 'GIAC 31 LUGLIO 2026', null, 'GIACENZA FINALE'],
+    ['TOT GOMMISTI', -38480, 'KG', null, 51800, 'TOT.'],
+    ['classe 1', -17080, 'KG', null, 32900, 'CLS 1', 15820],
+  ];
+  const lette = leggiRigheConsuntivo([{ nome: 'GIACENZA', celle }]);
+  verifica('le giacenze non diventano carichi', lette.righe.length === 0, J(lette.righe));
+  verifica('e si dice che non e un elenco di carichi', lette.note.some(n => /non e' un elenco di carichi/.test(n)), J(lette.note));
+}
+
+console.log('LE RIGHE DI UN ALTRO MESE RESTANO FUORI');
+{
+  // IRIGOM manda il registro di carico e scarico dell'ANNO: 3.026 righe per
+  // 15.298 tonnellate. Confrontato tutto contro un mese solo darebbe migliaia di
+  // finte difformita', che sono semplicemente gli altri undici mesi.
+  const movimenti = [{ numero_fir: 'RTXZV001718KR', id_ordine: 'ET26112026', peso_effettivo: 3540 }];
+  const righe = [
+    { numero_fir: 'RTXZV001718KR', kg: 3540, giorno: '2026-08-03' },
+    { numero_fir: 'AAAAA000001AA', kg: 9000, giorno: '2026-03-14' },
+    { numero_fir: 'AAAAA000002AA', kg: 8000, giorno: '2026-04-02' },
+  ];
+  const c = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1, anno: 2026, mese: 8 });
+  verifica('la riga del mese quadra', c.uguali === 1, J(c.voci));
+  verifica('le altre due restano fuori', c.fuori_periodo === 2 && c.kg_fuori_periodo === 17000, J(c));
+  verifica('e non sono difformita', c.solo_consuntivo === 0, J(c.voci));
+  verifica('il consuntivo quadra', c.quadra === true, J(c));
+  const testo = testoEsitoConsuntivo(c, esitoConsuntivo({ confronto: c, costo: null }));
+  verifica('e il testo lo spiega', /2 righe del consuntivo sono di un altro mese/.test(testo), testo);
+  verifica('dicendo che succede coi registri annuali', /registri che coprono tutto l'anno/.test(testo), testo);
+}
+{
+  // Una riga senza data non si sa di che mese sia: resta nel confronto, perche'
+  // buttarla fuori sarebbe peggio che confrontarla.
+  const righe = [{ numero_fir: 'AAAAA000003AA', kg: 1000, giorno: '' }];
+  const c = confrontaConsuntivo(righe, [], { tolleranza_kg: 1, anno: 2026, mese: 8 });
+  verifica('senza data si confronta comunque', c.fuori_periodo === 0 && c.solo_consuntivo === 1, J(c));
+}
+{
+  // Senza anno e mese non si filtra niente: il confronto resta quello di prima.
+  const righe = [{ numero_fir: 'AAAAA000004AA', kg: 1000, giorno: '2026-03-01' }];
+  const c = confrontaConsuntivo(righe, [], { tolleranza_kg: 1 });
+  verifica('senza periodo non si filtra', c.fuori_periodo === 0 && c.solo_consuntivo === 1, J(c));
 }
 
 console.log('LE RIGHE DI TOTALE SI SEGNALANO, NON SI CANCELLANO');
