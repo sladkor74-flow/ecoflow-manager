@@ -23,7 +23,13 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
   // vuote. Gli ACI di Irigom, per esempio, ripartono come secondarie ed e' chi li
   // lavora a dichiararli.
   const tutte = dati.siti.filter(s => s.tipo_destinazione !== 'stoc').flatMap(s => s.flussi.map(f => ({ sito: s, flusso: f })));
-  const righe = tutte.filter(({ flusso }) => flusso.dichiarato_totale_t > 0 || flusso.mesi.some(m => m.non_dichiarato_kg > 0));
+  // Una riga si mostra anche quando nel mese sono ARRIVATI dei carichi e non
+  // sono ancora dichiarati, non solo quando lo dice la fotografia del portale:
+  // la fotografia e' di un giorno preciso e puo' essere vecchia di settimane, e
+  // un impianto che ha ricevuto a settembre spariva dal riepilogo invece di
+  // comparire con «da chiedere» (regola dell'utente, 01/10/2026).
+  const righe = tutte.filter(({ flusso }) => flusso.dichiarato_totale_t > 0
+    || flusso.mesi.some(m => m.non_dichiarato_kg > 0 || m.da_dichiarare_kg > 0));
   const nascoste = tutte.length - righe.length;
   // I formulari arrivati agli impianti senza fine trasporto non sono in nessuna
   // casella: si dice quanti e quanto pesano, canale per canale, mai sommati
@@ -78,7 +84,10 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                 </td>
                 {flusso.mesi.map(m => (
                   <td key={m.mese} className="px-0.5 py-1">
-                    <CellaMese mese={m} soloLettura={soloLettura} attesa={flusso.canale === 'RETE' && sito.dichiara_rete !== false && m.non_dichiarato_kg > 0} dove={{ canale: flusso.canale, dichiara_rete: sito.dichiara_rete }} onApri={() => onApri(sito, flusso, m)} />
+                    {/* Una dichiarazione la si aspetta se qualcosa e' arrivato
+                        e non e' ancora dichiarato: lo dicono i nostri ingressi
+                        (da_dichiarare_kg), non solo la fotografia del portale. */}
+                    <CellaMese mese={m} soloLettura={soloLettura} attesa={flusso.canale === 'RETE' && sito.dichiara_rete !== false && (m.da_dichiarare_kg > 0 || m.non_dichiarato_kg > 0)} dove={{ canale: flusso.canale, dichiara_rete: sito.dichiara_rete }} onApri={() => onApri(sito, flusso, m)} />
                   </td>
                 ))}
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatTonnellate(flusso.dichiarato_caricato_t)}</td>

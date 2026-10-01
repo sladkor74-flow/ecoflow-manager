@@ -28,6 +28,7 @@ import { unisciQuote, ticketDi } from "./formulari.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
 import { giornoMovimento, eTerminato, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate, ordiniDaSistemare, mancantiOrdine, incoerentiOrdine, testoOrdine } from "./movimenti.ts";
 import { termineDi, testoConteggio } from "./termineRegistrazione.ts";
+import { normalizzaFir, FORMATO_FIR, distanzaFir as distanza, descriviDifferenzaFir } from "./numeroFir.ts";
 
 // Quanto si conservano per intero i documenti dei fornitori. La regola vive in
 // conservazione.ts, insieme all'alleggerimento: qui si ri-esporta soltanto,
@@ -387,68 +388,11 @@ export function numeroDaValore(v, unita) {
   return isFinite(n) ? n : null;
 }
 
-// === formulari ===
-
-export function normalizzaFir(v) {
-  return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-}
-
-// Distanza di Damerau-Levenshtein ristretta, con uscita anticipata oltre il limite.
-function distanza(a, b, limite) {
-  if (Math.abs(a.length - b.length) > limite) return limite + 1;
-  const d = [];
-  for (let i = 0; i <= a.length; i++) { d.push(new Array(b.length + 1).fill(0)); d[i][0] = i; }
-  for (let j = 0; j <= b.length; j++) d[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    let minimoRiga = Infinity;
-    for (let j = 1; j <= b.length; j++) {
-      const costo = a[i - 1] === b[j - 1] ? 0 : 1;
-      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + costo);
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
-      minimoRiga = Math.min(minimoRiga, d[i][j]);
-    }
-    if (minimoRiga > limite) return limite + 1;
-  }
-  return d[a.length][b.length];
-}
-
-// Numero dei formulari vidimati: 5 lettere, 6 cifre, 2 lettere (es. RGYTR027030CR).
-const FORMATO_FIR = /^[A-Z]{5}\d{6}[A-Z]{2}$/;
-
-const SOMIGLIANTI = { O: '0', '0': 'O', I: '1', '1': 'I', S: '5', '5': 'S', B: '8', '8': 'B', Z: '2', '2': 'Z' };
-
-// Spiega in italiano in cosa differisce il formulario del report da quello del
-// gestionale: e' il dettaglio da comunicare al fornitore.
-export function descriviDifferenzaFir(report, gestionale) {
-  const a = normalizzaFir(report), b = normalizzaFir(gestionale);
-  const pos = (i) => `in posizione ${i + 1}`;
-  if (a.length === b.length + 1) {
-    let i = 0;
-    while (i < b.length && a[i] === b[i]) i++;
-    if (a.slice(i + 1) === b.slice(i)) return `carattere in piu' "${a[i]}" ${pos(i)}`;
-  }
-  if (a.length + 1 === b.length) {
-    let i = 0;
-    while (i < a.length && a[i] === b[i]) i++;
-    if (a.slice(i) === b.slice(i + 1)) return `manca il carattere "${b[i]}" ${pos(i)}`;
-  }
-  if (a.length === b.length) {
-    const diversi = [];
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diversi.push(i);
-    if (diversi.length === 1) {
-      const i = diversi[0];
-      const nota = SOMIGLIANTI[a[i]] === b[i] ? ', probabile scambio fra caratteri simili' : '';
-      return `"${a[i]}" al posto di "${b[i]}" ${pos(i)}${nota}`;
-    }
-    if (diversi.length === 2 && diversi[1] === diversi[0] + 1 && a[diversi[0]] === b[diversi[1]] && a[diversi[1]] === b[diversi[0]]) {
-      return `caratteri "${a[diversi[0]]}${a[diversi[1]]}" invertiti ${pos(diversi[0])}`;
-    }
-  }
-  const n = distanza(a, b, 5);
-  return n <= 5 ? `${n} caratteri diversi` : 'numero diverso';
-}
-
 // === confronto dei campi ===
+//
+// Il numero di un formulario - come si normalizza, quanto due numeri sono
+// lontani, in che cosa differiscono - sta in numeroFir.ts: la stessa regola
+// serve ai consuntivi mensili (01/10/2026).
 
 export function classeNormalizzata(v) {
   const s = String(v || '').trim().toUpperCase();

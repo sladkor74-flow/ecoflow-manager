@@ -97,7 +97,9 @@ export function scaricaExcelConsuntivo(consuntivo, esito) {
   XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), 'Riepilogo');
 
   const wsR = XLSX.utils.aoa_to_sheet([
-    ['Formulario o ordine', 'Esito', 'kg nel consuntivo', 'kg nei nostri movimenti', 'Scarto kg', 'ID ordine'],
+    // Le ultime due colonne dicono i numeri scritti male e come si e' capito di
+    // che carico si trattava (01/10/2026).
+    ['Formulario o ordine', 'Esito', 'kg nel consuntivo', 'kg nei nostri movimenti', 'Scarto kg', 'ID ordine', 'Errori nei dati del consuntivo', 'Riconosciuto da'],
     ...confronto.voci.map(v => [
       String(v.chiave).replace(/^(FIR|ORD):/, ''),
       ESITI[v.esito] || v.esito,
@@ -105,9 +107,11 @@ export function scaricaExcelConsuntivo(consuntivo, esito) {
       v.kg_gestionale === null ? '' : v.kg_gestionale,
       v.scarto_kg === null ? '' : v.scarto_kg,
       v.id_ordine || '',
+      (v.differenze || []).map(d => d.testo).join('\n'),
+      (v.riconosciuto_da || []).join(', '),
     ]),
   ]);
-  wsR['!cols'] = [{ wch: 24 }, { wch: 34 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 16 }];
+  wsR['!cols'] = [{ wch: 24 }, { wch: 34 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 70 }, { wch: 34 }];
   XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, wsR), 'Riga per riga');
 
   const nome = `Consuntivo ${consuntivo.fornitore} ${NOME_CANALE[consuntivo.canale]} ${MESI[consuntivo.mese - 1]} ${consuntivo.anno}`.replace(/[\\/:*?"<>|]/g, '-');

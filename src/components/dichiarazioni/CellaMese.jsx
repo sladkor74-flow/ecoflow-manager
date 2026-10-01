@@ -28,10 +28,15 @@ export default function CellaMese({ mese, onApri, soloLettura, attesa = true, do
             : manca ? 'bg-amber-50 hover:bg-amber-100 text-amber-900'
           : 'hover:bg-muted';
   const daStoccaggi = (mese.da_stoccaggi || []).map(s => `${kg(s.kg)} kg da ${s.stoccaggio}`).join(', ');
+  // Quanto resta da dichiarare di quel mese: gli ingressi del mese in quell'
+  // impianto meno il dichiarato. E' il numero che l'utente cerca quando apre la
+  // pagina (01/10/2026), e sulla casella si legge senza aprirla.
+  const resta = Number(mese.da_dichiarare_kg) || 0;
   const titolo = [
     `${mese.mese}`,
     conferito ? `arrivati ${kg(conferito)} kg${daStoccaggi ? ` (in secondaria: ${daStoccaggi})` : ''}` : 'nessun conferimento',
     d && d.quantita_kg > 0 ? `dichiarati ${kg(d.quantita_kg)} kg` : '',
+    resta > 0 ? `ancora da dichiarare ${kg(resta)} kg` : '',
     STATI[stato].nome,
     soloLettura ? '' : 'clicca per aprire',
   ].filter(Boolean).join(' · ');
@@ -44,7 +49,9 @@ export default function CellaMese({ mese, onApri, soloLettura, attesa = true, do
       className={`w-full rounded-md border px-1.5 py-1 text-center transition-colors ${fondo} ${soloLettura ? 'cursor-default' : ''}`}
     >
       <span className="block text-[11px] leading-tight tabular-nums font-medium">
-        {d && d.quantita_kg ? kg(d.quantita_kg) : manca ? '—' : ''}
+        {/* Dove manca la dichiarazione si scrive QUANTO manca, non un trattino:
+            era il numero che non si vedeva da nessuna parte (01/10/2026). */}
+        {d && d.quantita_kg ? kg(d.quantita_kg) : manca ? (resta > 0 ? kg(resta) : '—') : ''}
       </span>
       <span className="flex items-center justify-center gap-1 text-[9px] leading-tight opacity-80">
         {stato === 'caricata' && <><Check className="w-3 h-3" /> portale</>}

@@ -7,7 +7,7 @@ import { Loader2, RefreshCw, AlertTriangle, CheckCircle2, FileSpreadsheet, Link2
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import { formatTonnellate, formatKg, formatIntero } from '@/lib/utils';
-import { CANALI } from '@/lib/dichiarazioniImpianti';
+import { CANALI, MESI } from '@/lib/dichiarazioniImpianti';
 import Riepilogo from '@/components/dichiarazioni/Riepilogo';
 import SezioneImpianto from '@/components/dichiarazioni/SezioneImpianto';
 import Quadratura from '@/components/dichiarazioni/Quadratura';
@@ -153,11 +153,47 @@ export default function DichiarazioniImpianti() {
           {esitoAllineamento.aggiornate?.length
             ? <p><strong>{esitoAllineamento.aggiornate.length}</strong> {esitoAllineamento.aggiornate.length === 1 ? 'dichiarazione riconosciuta' : 'dichiarazioni riconosciute'} fra quelle caricate a portale: {esitoAllineamento.aggiornate.map(a => `${a.sito} ${a.mese}${a.canale && a.canale !== 'RETE' ? ` ${a.canale}` : ''} (${a.caricata_il.split('-').reverse().join('/')})`).join(', ')}.</p>
             : <p>Nessuna novita': quello che risulta caricato a portale era gia' segnato.</p>}
+          {esitoAllineamento.da_inserire?.length > 0 && (
+            <p className="text-red-800 mt-1">
+              Il portale ha {esitoAllineamento.da_inserire.length === 1 ? 'una dichiarazione' : `${esitoAllineamento.da_inserire.length} dichiarazioni`} che qui non {esitoAllineamento.da_inserire.length === 1 ? 'c’è' : 'ci sono'}: {esitoAllineamento.da_inserire.map(v => `${v.sito}${v.canale !== 'RETE' ? ` ${v.canale}` : ''} ${formatKg(v.kg)} kg${v.mesi.length ? ` (ordini di ${v.mesi.map(m => MESI[Number(m.mese.slice(5, 7)) - 1]).join(', ')})` : ''}`).join('; ')}.
+            </p>
+          )}
           {esitoAllineamento.non_trovate?.filter(n => n.era_segnata).length > 0 && (
             <p className="text-amber-700 mt-1">
               Segnate come caricate ma non trovate nel report del portale: {esitoAllineamento.non_trovate.filter(n => n.era_segnata).map(n => `${n.sito} ${n.mese}${n.canale && n.canale !== 'RETE' ? ` ${n.canale}` : ''}`).join(', ')}.
             </p>
           )}
+        </div>
+      )}
+
+      {/* LE DICHIARAZIONI CHE IL PORTALE HA E IL GESTIONALE NO.
+          Il 01/10/2026 l'utente ha dichiarato a portale il quantitativo di
+          agosto di un impianto e il gestionale non se n'e' accorto: quel
+          caricamento finiva fra "l'arretrato dell'anno prima" e l'arretrato non
+          si vedeva da nessuna parte. Sta in testa alla pagina, sempre, non solo
+          dopo aver premuto «Allinea dal portale». */}
+      {dati && (dati.dichiarazioni_da_inserire || []).length > 0 && (
+        <div className="text-sm border border-red-300 bg-red-100 text-red-900 rounded-lg px-3 py-2 space-y-1">
+          <p className="font-semibold flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            {dati.dichiarazioni_da_inserire.length === 1
+              ? 'Il portale riporta una dichiarazione che nel gestionale non c’è'
+              : `Il portale riporta ${dati.dichiarazioni_da_inserire.length} dichiarazioni che nel gestionale non ci sono`}
+          </p>
+          <ul className="space-y-1 pl-6">
+            {dati.dichiarazioni_da_inserire.map((v, i) => (
+              <li key={i}>
+                <strong>{v.sito}</strong>{v.canale !== 'RETE' ? ` · ${v.canale}` : ''}: {formatKg(v.kg)} kg
+                {v.caricamenti.length === 1
+                  ? ` caricati a portale il ${String(v.caricamenti[0].data).split('-').reverse().join('/')}`
+                  : ` in ${v.caricamenti.length} caricamenti (${v.caricamenti.map(c => String(c.data).split('-').reverse().join('/')).join(', ')})`}
+                {v.mesi.length
+                  ? ` — ${v.mesi.length === 1 ? 'chiude ordini di' : 'chiude ordini di'} ${v.mesi.map(m => `${MESI[Number(m.mese.slice(5, 7)) - 1]} ${m.mese.slice(0, 4)} (${formatKg(m.kg)} kg)`).join(', ')}`
+                  : ' — i suoi ordini non hanno una data di fine trasporto, quindi il mese non si sa'}
+                . {v.motivo}: va inserita nel mese giusto, qui sotto.
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

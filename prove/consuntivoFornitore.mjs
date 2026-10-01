@@ -691,6 +691,92 @@ console.log('\nUNA DATA DI UN ALTRO MESE SU UN CARICO DI QUESTO MESE');
   verifica('e "formulario" scritto per nome vince su "blocco"', col2.numero_fir.j === 1, J(col2));
 }
 
+// === CHI SBAGLIA UNA LETTERA NEL NUMERO ===
+//
+// Richiesta dell'utente (01/10/2026): «chi ci invia il report puo' anche
+// sbagliare, ad esempio scambiando una lettera o una cifra, pertanto tu fai i
+// paragoni con piu' informazioni della stessa riga». Un carattere sbagliato
+// produceva DUE difformita' false invece di una frase.
+console.log('\nUN NUMERO SCRITTO MALE NON E\' DUE DIFFORMITA\'');
+const nostro = (fir, ordine, kg, giorno, campi = {}) => ({
+  numero_fir: fir, id_ordine: ordine, peso_effettivo: kg, stato: 'terminato',
+  trasporto_finito_il: `${giorno}T09:00:00Z`, produttore: 'MELENCHI SRL', destinazione: 'TECNOGUM SRL', trasportatore: 'ECORECUPERI SRL', classe: 'P', ...campi,
+});
+{
+  // Una lettera sbagliata nel formulario, tutto il resto identico.
+  const movimenti = [nostro('LQQDP001425TP', 'ET26150000', 10120, '2026-09-01')];
+  const righe = [{ numero_fir: 'LQQDP001425TB', kg: 10120, giorno: '2026-09-01', classe: 'P', produttore: 'Melenchi S.r.l.' }];
+  const c = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1, anno: 2026, mese: 9 });
+  verifica('il carico si riconosce: una voce, non due', c.voci.length === 1 && c.uguali === 1
+    && c.solo_consuntivo === 0 && c.solo_gestionale === 0, J(c.voci));
+  verifica('e si dice che il formulario e sbagliato, e in che cosa', c.con_differenze === 1
+    && /Formulario errato/.test(c.voci[0].differenze[0].testo)
+    && /"B" al posto di "P" in posizione 13/.test(c.voci[0].differenze[0].testo), J(c.voci[0].differenze));
+  verifica('dicendo da che cosa lo si e riconosciuto', (c.voci[0].riconosciuto_da || []).includes('stesso peso')
+    && c.voci[0].riconosciuto_da.includes('stessa data'), J(c.voci[0].riconosciuto_da));
+  verifica('i chili tornano: la quadratura delle quantita resta buona', c.quadra === true && c.totale_consuntivo_kg === 10120, J({ q: c.quadra, kg: c.totale_consuntivo_kg }));
+  const v = esitoConsuntivo({ confronto: c, costo: { trovato: true, tonnellate: 10.12, importo: 100 }, importo_consuntivo: 100 });
+  verifica('ma il verdetto non e verde: un numero sbagliato e un errore del documento', v.quadra_tutto === false, J({ t: v.quadra_tutto }));
+  verifica('e il testo lo spiega', /riconosciuto nonostante un numero scritto in modo diverso/.test(testoEsitoConsuntivo(c, v))
+    && /il numero sul consuntivo va corretto/.test(testoEsitoConsuntivo(c, v)), testoEsitoConsuntivo(c, v));
+}
+{
+  // Una cifra sbagliata nell'ID ordine, col formulario assente: il peso e la
+  // data confermano.
+  const movimenti = [nostro('LQQDP001425TP', 'ET26150000', 10120, '2026-09-01')];
+  const righe = [{ id_ordine: 'ET26150009', kg: 10120, giorno: '2026-09-01' }];
+  const c = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1 });
+  verifica('anche l ID ordine quasi uguale si riconosce', c.uguali === 1 && c.con_differenze === 1, J(c.voci));
+  verifica('e si dice che l ordine e sbagliato', c.voci[0].differenze.some(d => d.campo === 'id_ordine' && /ID ordine errato/.test(d.testo))
+    && c.voci[0].differenze.some(d => d.campo === 'numero_fir' && /assente nel consuntivo/.test(d.testo)), J(c.voci[0].differenze));
+}
+{
+  // UN NUMERO QUASI UGUALE DA SOLO NON BASTA. Niente peso uguale, niente data,
+  // niente nomi: resta una difformita' da guardare.
+  const movimenti = [nostro('LQQDP001425TP', 'ET26150000', 10120, '2026-09-01', { produttore: '', destinazione: '', trasportatore: '', classe: '' })];
+  const righe = [{ numero_fir: 'LQQDP001425TB', kg: 4000 }];
+  const c = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1 });
+  verifica('senza nessuna conferma non si abbina niente', c.con_differenze === 0 && c.solo_consuntivo === 1 && c.solo_gestionale === 1, J(c.voci));
+}
+{
+  // E un numero DIVERSO non si abbina nemmeno col peso uguale: due carichi dello
+  // stesso peso nello stesso giorno esistono.
+  const movimenti = [nostro('LQQDP001425TP', 'ET26150000', 10120, '2026-09-01')];
+  const righe = [{ numero_fir: 'ZZZZZ999999ZZ', kg: 10120, giorno: '2026-09-01' }];
+  const c = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1 });
+  verifica('un numero del tutto diverso resta una difformita', c.con_differenze === 0 && c.solo_consuntivo === 1 && c.solo_gestionale === 1, J(c.voci));
+}
+{
+  // ANCHE UNA RIGA COL FORMULARIO ESATTO si controlla in tutti i suoi dati:
+  // l'ID ordine e la data possono essere sbagliati comunque.
+  const movimenti = [nostro('LQQDP001425TP', 'ET26150000', 10120, '2026-09-10')];
+  const righe = [{ numero_fir: 'LQQDP001425TP', id_ordine: 'ET26150009', kg: 10120, giorno: '2026-09-12', classe: 'P' }];
+  const c = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1, anno: 2026, mese: 9 });
+  verifica('abbinata dal formulario esatto, con i chili che tornano', c.uguali === 1 && c.quadra === true, J(c.voci));
+  verifica('ma l ordine e la data sbagliati si dicono', c.con_differenze === 1
+    && c.voci[0].differenze.some(d => d.campo === 'id_ordine' && /ID ordine errato/.test(d.testo))
+    && c.voci[0].differenze.some(d => d.campo === 'giorno' && /nel consuntivo 12\/09\/2026, da noi il trasporto si conclude il 10\/09\/2026/.test(d.testo)), J(c.voci[0].differenze));
+  verifica('e non si lamenta dei nomi scritti in modo diverso', !c.voci[0].differenze.some(d => /produttore|trasportatore|destinatario/.test(d.campo)), J(c.voci[0].differenze));
+}
+{
+  // La classe si dice solo se cambia il canale: e' quella che cambia il prezzo.
+  const movimenti = [nostro('LQQDP001425TP', 'ET1', 10120, '2026-09-10', { classe: '1' })];
+  const uguale = confrontaConsuntivo([{ numero_fir: 'LQQDP001425TP', kg: 10120, giorno: '2026-09-10', classe: 'P' }], movimenti, { tolleranza_kg: 1 });
+  verifica('classe "P" e classe "1" sono lo stesso canale: niente da dire', uguale.con_differenze === 0, J(uguale.voci[0]));
+  const aci = confrontaConsuntivo([{ numero_fir: 'LQQDP001425TP', kg: 10120, giorno: '2026-09-10', classe: '9' }], movimenti, { tolleranza_kg: 1 });
+  verifica('classe 9 contro una classe di rete si dice', aci.con_differenze === 1
+    && /Classe di un altro canale/.test(aci.voci[0].differenze[0].testo), J(aci.voci[0].differenze));
+}
+{
+  // Il formulario giusto vince sempre sul quasi giusto: prima il giro esatto.
+  const movimenti = [nostro('LQQDP001425TP', 'ET1', 10120, '2026-09-01'), nostro('LQQDP001425TB', 'ET2', 10120, '2026-09-01')];
+  const righe = [{ numero_fir: 'LQQDP001425TB', kg: 10120, giorno: '2026-09-01' }];
+  const c = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1 });
+  const abbinata = c.voci.find(v => v.kg_consuntivo !== null);
+  verifica('si abbina a quello col numero identico, non al quasi uguale', abbinata.chiave === 'FIR:LQQDP001425TB'
+    && c.con_differenze === 0 && c.solo_gestionale === 1, J(c.voci));
+}
+
 // === UNA STAMPA INCOLLATA IN EXCEL (ECORECUPERI) ===
 //
 // Non e' un foglio di calcolo: ogni riga e' una stringa sola con le colonne

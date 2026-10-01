@@ -300,9 +300,20 @@ export default function Consuntivi({ isAdmin }) {
               </thead>
               <tbody>
                 {c.voci.map((x, i) => (
-                  <tr key={i} className={`border-t ${x.esito === 'uguale' ? '' : 'bg-amber-50'}`}>
+                  <tr key={i} className={`border-t ${x.esito === 'uguale' ? ((x.differenze || []).length ? 'bg-amber-50/60' : '') : 'bg-amber-50'}`}>
                     <td className="px-2 py-1 font-mono">{String(x.chiave).replace(/^(FIR|ORD):/, '')}</td>
-                    <td className="px-2 py-1">{x.esito === 'uguale' ? 'torna' : x.esito === 'peso_diverso' ? 'peso diverso' : x.esito === 'solo_consuntivo' ? 'ce lo fattura e noi non l\'abbiamo' : 'l\'abbiamo noi e non lo riporta'}</td>
+                    <td className="px-2 py-1">
+                      {x.esito === 'uguale' ? 'torna' : x.esito === 'peso_diverso' ? 'peso diverso' : x.esito === 'solo_consuntivo' ? 'ce lo fattura e noi non l\'abbiamo' : 'l\'abbiamo noi e non lo riporta'}
+                      {/* In che cosa consiste l'errore, quando il carico si è
+                          riconosciuto nonostante un numero scritto male: è
+                          quello che si comunica al fornitore (01/10/2026). */}
+                      {(x.differenze || []).map((d, k) => (
+                        <span key={k} className="block text-[11px] text-amber-800">{d.testo}</span>
+                      ))}
+                      {(x.riconosciuto_da || []).length > 0 && (
+                        <span className="block text-[11px] text-muted-foreground">riconosciuto da: {x.riconosciuto_da.join(', ')}</span>
+                      )}
+                    </td>
                     <td className="px-2 py-1 text-right tabular-nums">{x.kg_consuntivo === null ? '—' : formatKg(x.kg_consuntivo)}</td>
                     <td className="px-2 py-1 text-right tabular-nums">{x.kg_gestionale === null ? '—' : formatKg(x.kg_gestionale)}</td>
                     <td className="px-2 py-1 text-right tabular-nums">{x.scarto_kg === null ? '—' : `${x.scarto_kg > 0 ? '+' : ''}${formatKg(x.scarto_kg)}`}</td>

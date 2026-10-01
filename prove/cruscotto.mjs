@@ -3,7 +3,7 @@
 // dichiarazioni riconosciute a portale (base44/shared/agganciaDichiarazioni.ts),
 // da cui dipendono la quadratura e i mesi "caricati". npm run prove
 import { cruscotto, etaArretrato, statoCaricamenti, statoMesiAttiva, nomeRegola } from '../base44/shared/cruscotto.ts';
-import { caricamentiPortale, allineaDalPortale } from '../base44/shared/agganciaDichiarazioni.ts';
+import { caricamentiPortale, allineaDalPortale, confrontaConIlPortale } from '../base44/shared/agganciaDichiarazioni.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -184,6 +184,57 @@ scritte = [];
 esito = await allineaDalPortale(svcFinto(scritte), 2026, aprileAci.map(r => ({ ...r, destinazione: 'GATIM SRL', destinazione_secondaria: '' })), nostreAprile());
 const ap = scritte.find(s => s.id === 'ap'), as = scritte.find(s => s.id === 'as');
 verifica('ACI classificata diversamente dal portale: riconosciuta sulla somma del mese, materiali divisi', esito.aggiornate.length === 2 && esito.arretrato.length === 0 && ap && as && ap.caricata_il === '2026-05-12' && ap.granulo_kg + as.granulo_kg === 22000 && ap.granulo_kg === Math.round(22000 * 8200 / 22540), JSON.stringify({ esito, scritte }));
+
+// === UNA DICHIARAZIONE CHE IL PORTALE HA E IL GESTIONALE NO ===
+//
+// Il 01/10/2026 l'utente ha dichiarato a portale il quantitativo di agosto
+// raccolto da Green Tyre Project e il gestionale non se n'e' accorto: senza una
+// nostra riga mensile con lo stesso peso non c'era niente da agganciare, e quel
+// caricamento finiva fra "l'arretrato dell'anno prima" - una motivazione falsa -
+// che la pagina non mostrava affatto. Ora si guarda di che mese sono gli ordini
+// che il caricamento chiude.
+console.log('UNA DICHIARAZIONE CHE IL PORTALE HA E IL GESTIONALE NO');
+const gtp = [
+  { data_dichiarazione: '2026-10-01T08:00:00Z', fine_trasporto: '2026-08-12T10:00:00Z', destinazione: 'GREEN TYRE PROJECT SRL', prodotto: 'G1 - pneumatici', peso_associato_kg: 18400, granulo_kg: 15000 },
+  { data_dichiarazione: '2026-10-01T08:00:00Z', fine_trasporto: '2026-08-27T10:00:00Z', destinazione: 'GREEN TYRE PROJECT SRL', prodotto: 'G1 - pneumatici', peso_associato_kg: 6200, granulo_kg: 5000 },
+];
+{
+  const e = confrontaConIlPortale(gtp, 2026, []);
+  verifica('non e\' piu\' arretrato: e\' una dichiarazione da inserire', e.arretrato.length === 0 && e.da_inserire.length === 1, JSON.stringify(e));
+  const v = e.da_inserire[0];
+  verifica('col sito, il canale, i chili e il giorno del caricamento', v.sito === 'GREEN TYRE PROJECT SRL' && v.canale === 'RETE'
+    && v.kg === 24600 && v.quanti === 1 && v.caricamenti[0].data === '2026-10-01', JSON.stringify(v));
+  verifica('e DI CHE MESE sono gli ordini che chiude: agosto, tutti', v.mesi.length === 1 && v.mesi[0].mese === '2026-08' && v.mesi[0].kg === 24600, JSON.stringify(v.mesi));
+  verifica('dicendo perche\' non si e\' trovato', /nessuna dichiarazione di rete di questo impianto/.test(v.motivo), v.motivo);
+}
+{
+  // Con la nostra riga di agosto giusta si aggancia e non resta niente da inserire.
+  const e = confrontaConIlPortale(gtp, 2026, [{ id: 'g8', sito: 'Green Tyre Project srl', canale: 'RETE', mese: 'Agosto', quantita_kg: 24600 }]);
+  verifica('con la nostra riga di agosto si aggancia', e.trovati.length === 1 && e.da_inserire.length === 0 && e.arretrato.length === 0
+    && e.trovati[0].caricata_il === '2026-10-01' && e.trovati[0].materiali.granulo_kg === 20000, JSON.stringify(e));
+}
+{
+  // Un caricamento che chiude ordini dell'anno prima e' arretrato per davvero.
+  const vecchio = gtp.map(r => ({ ...r, fine_trasporto: '2025-11-20T10:00:00Z' }));
+  const e = confrontaConIlPortale(vecchio, 2026, []);
+  verifica('l\'arretrato vero resta arretrato', e.da_inserire.length === 0 && e.arretrato.length === 1
+    && /ordini degli anni precedenti/.test(e.arretrato[0].motivo), JSON.stringify(e.arretrato));
+}
+{
+  // Un caricamento di un impianto che ha altre dichiarazioni ma nessuna con
+  // quel peso: anche quello e' da inserire, non arretrato.
+  const e = confrontaConIlPortale(gtp, 2026, [{ id: 'g7', sito: 'Green Tyre Project srl', canale: 'RETE', mese: 'Luglio', quantita_kg: 9000 }]);
+  verifica('nessun nostro mese con quel peso: da inserire, non arretrato', e.da_inserire.length === 1 && e.arretrato.length === 0
+    && /nessun nostro mese ha questo peso/.test(e.da_inserire[0].motivo), JSON.stringify(e.da_inserire));
+  verifica('e il nostro luglio resta fra i mesi non trovati a portale', e.non_trovate.length === 1 && e.non_trovate[0].mese === 'Luglio', JSON.stringify(e.non_trovate));
+}
+{
+  // I mesi degli ordini chiusi si tengono anche unendo i caricamenti dello
+  // stesso giorno (ACI, dove le provenienze si sommano).
+  const c = caricamentiPortale(gtp, 2026, 'RETE').get('GREEN TYRE PROJECT SRL');
+  verifica('un caricamento porta i mesi dei suoi ordini e la provenienza', c.length === 1 && c[0].mesi.length === 1
+    && c[0].mesi[0].mese === '2026-08' && c[0].provenienze.join() === 'primaria', JSON.stringify(c));
+}
 
 function MESI8() { return ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto'].map(m => ({ tipo: 'ATTIVA', anno: 2026, mese: m, stato: 'chiusa' })); }
 

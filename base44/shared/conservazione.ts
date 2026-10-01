@@ -403,6 +403,14 @@ export function storiaConsuntivo(c, esitoCompleto = null) {
   if (r.importo_consuntivo !== undefined && r.importo_consuntivo !== null && r.importo_consuntivo !== '') {
     righe.push(`Importo scritto sul consuntivo: ${Number(r.importo_consuntivo).toFixed(2)} euro.`);
   }
+  // I numeri scritti male: il carico si e' riconosciuto dalle altre informazioni
+  // della riga, e l'errore del documento resta scritto (01/10/2026).
+  const conDifferenze = (conf.differenze || []).filter(Boolean);
+  if (conDifferenze.length) {
+    righe.push(`Carichi riconosciuti nonostante un numero scritto male: ${conDifferenze.length} — ` + elenco(conDifferenze.map(d =>
+      (d.differenze || []).map(x => testo(x.testo)).filter(Boolean).join('; ') || testo(d.chiave)
+    ), 20).join('. ') + '.');
+  }
   // Le date sbagliate: un carico di questo mese scritto con la data di un altro
   // mese. E' un errore del file del fornitore e resta scritto (01/10/2026).
   const sbagliate = (conf.date_sbagliate || []).filter(Boolean);

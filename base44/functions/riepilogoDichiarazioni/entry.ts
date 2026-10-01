@@ -8,6 +8,7 @@ import { eTerminato, periodoMovimento } from "../../shared/movimenti.ts";
 import { MESI, operazioneDa, quadratura } from "../../shared/dichiarazioniImpianti.ts";
 import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese } from "../../shared/giacenzaPortale.ts";
 import { puntiDiPartenza, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
+import { confrontaConIlPortale } from "../../shared/agganciaDichiarazioni.ts";
 
 // Dichiarazioni degli impianti, mese per mese, con la quadratura delle giacenze.
 //
@@ -88,7 +89,17 @@ export default async function(req) {
     // compare qui, quindi una differenza non e' per forza un mese sfuggito. Solo
     // rete: se nel report comparisse una riga ACI, resta fuori.
     const dichiaratoPortale = new Map();
+    // Le righe che servono a confrontare i caricamenti del portale con le nostre
+    // dichiarazioni mensili: si tengono mentre si scorre, perche' il report non
+    // si rilegge due volte (confrontaConIlPortale lavora su queste sole colonne).
+    const righeDichiarazione = [];
     await perPagina(svc.DichiarazioneTrattamento, null, (r) => {
+      righeDichiarazione.push({
+        data_dichiarazione: r.data_dichiarazione, fine_trasporto: r.fine_trasporto, prodotto: r.prodotto,
+        destinazione: r.destinazione, destinazione_secondaria: r.destinazione_secondaria,
+        peso_associato_kg: r.peso_associato_kg,
+        granulo_kg: r.granulo_kg, fibre_kg: r.fibre_kg, metallo_kg: r.metallo_kg, cippato_kg: r.cippato_kg, ciabattato_kg: r.ciabattato_kg,
+      });
       // Il portale lo conosce ma non lo conta piu' in giacenza: per chi non ha
       // la fine trasporto la differenza si dice (22/09/2026).
       portaleConosce.segna(r, 'dichiarazioni');
@@ -359,6 +370,15 @@ export default async function(req) {
             diretto_kg: totale - daStoc.reduce((s, x) => s + x.kg, 0),
             da_stoccaggi: daStoc,
             non_dichiarato_kg: canale === 'RETE' ? Math.round(nonDichiaratoNel(ns, i)) : 0,
+            // QUANTO RESTA DA DICHIARARE DI QUEL MESE: gli ingressi del mese in
+            // quell'impianto, meno quello che per quel mese e' dichiarato
+            // (regola dell'utente, 01/10/2026: «le quantita' di settembre ancora
+            // da dichiarare sono gli ingressi del mese in quello specifico
+            // impianto»). Prima lo diceva solo la fotografia del portale
+            // (non_dichiarato_kg), che e' di un giorno preciso e puo' essere
+            // vecchia di settimane: un mese appena conferito ci risultava a zero
+            // e la riga dell'impianto spariva dal riepilogo.
+            da_dichiarare_kg: Math.max(0, totale - Math.round(Number((perDich.get(chiave) || {}).quantita_kg) || 0)),
             dichiarazione: dichiarazioneDi(perDich.get(chiave) || null),
           };
         });
@@ -366,6 +386,7 @@ export default async function(req) {
           canale, provenienza, operazione,
           mesi,
           conferito_t: t3(mesi.reduce((s, m) => s + m.conferito_kg, 0) / 1000),
+          da_dichiarare_t: t3(mesi.reduce((s, m) => s + m.da_dichiarare_kg, 0) / 1000),
           da_stoccaggi_t: t3(mesi.reduce((s, m) => s + m.da_stoccaggi.reduce((x, y) => x + y.kg, 0), 0) / 1000),
           dichiarato_caricato_t: t3(mesi.reduce((s, m) => s + (m.dichiarazione && m.dichiarazione.caricata_inviata ? m.dichiarazione.quantita_kg : 0), 0) / 1000),
           dichiarato_totale_t: t3(mesi.reduce((s, m) => s + (m.dichiarazione ? m.dichiarazione.quantita_kg : 0), 0) / 1000),
@@ -587,9 +608,19 @@ export default async function(req) {
       date_da_sistemare: daSistemare.perCanale(portaleConosce),
     };
 
+    // LE DICHIARAZIONI CHE IL PORTALE HA E IL GESTIONALE NO.
+    //
+    // Si calcola a ogni apertura della pagina, non solo quando qualcuno preme
+    // «Allinea dal portale»: il 01/10/2026 l'utente ha dichiarato a portale il
+    // quantitativo di agosto di un impianto e il gestionale non se n'e'
+    // accorto, perche' quel caricamento finiva fra l'arretrato e l'arretrato non
+    // si vedeva da nessuna parte.
+    const daInserire = confrontaConIlPortale(righeDichiarazione, annoNum, dichiarazioni).da_inserire;
+
     return Response.json({
       anno: annoNum, mesi: MESI, siti, stoccaggi, totali,
       foto_portale_il: fotoPortale,
+      dichiarazioni_da_inserire: daInserire,
       // Fin dove arrivano i movimenti caricati (fine trasporto): se e' dopo la
       // fotografia, la giacenza a portale e' stata aggiornata con quello che manca.
       movimenti_fino_al: movimentiFinoAl,

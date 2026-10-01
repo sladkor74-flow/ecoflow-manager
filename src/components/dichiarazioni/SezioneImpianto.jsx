@@ -78,6 +78,7 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                     <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap">Arrivato (kg)</th>
                     {conStoccaggi && <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap">di cui da stoccaggi</th>}
                     <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap">Dichiarato (kg)</th>
+                    <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap" title="Gli ingressi del mese in questo impianto meno quello che per quel mese risulta dichiarato">Ancora da dichiarare (kg)</th>
                     {materiali.map(m => <th key={m.chiave} className="text-right px-2 py-1.5 font-semibold whitespace-nowrap">{m.nome} (kg)</th>)}
                     <th className="text-left px-2 py-1.5 font-semibold whitespace-nowrap">Stato</th>
                     <th className="px-2 py-1.5" />
@@ -98,6 +99,7 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                           </td>
                         )}
                         <td className="px-2 py-1.5 text-right tabular-nums font-medium">{kg(d && d.quantita_kg)}</td>
+                        <td className={`px-2 py-1.5 text-right tabular-nums ${m.da_dichiarare_kg > 0 ? "text-amber-800 font-medium" : "text-muted-foreground"}`}>{m.da_dichiarare_kg > 0 ? kg(m.da_dichiarare_kg) : "—"}</td>
                         {materiali.map(x => <td key={x.chiave} className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{kg(d && d[x.chiave])}</td>)}
                         <td className="px-2 py-1.5">
                           {stato === 'caricata' ? <span className="text-emerald-700">caricata a portale</span>

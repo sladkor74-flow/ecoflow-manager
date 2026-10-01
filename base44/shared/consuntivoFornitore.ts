@@ -32,6 +32,7 @@ import { mappaFatturazione, fatturaA } from "./subfornitori.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { termineDi, testoScadenza, GIORNI_TERMINE_REGISTRAZIONE } from "./termineRegistrazione.ts";
 import { formatoKg } from "./formato.ts";
+import { distanzaFir, descriviDifferenzaFir } from "./numeroFir.ts";
 
 const kgTondi = (v) => Math.round(Number(v) || 0);
 const pulisci = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
@@ -141,9 +142,17 @@ const PUNTEGGI_INTESTAZIONE = {
   // totale di chili come di euro, e un importo sbagliato e' peggio di un importo
   // mancante (il verdetto dice "non si e' potuto controllare l'importo").
   importo: [[/importo|imponibile|corrispettivo/i, 10], [/\bvalore\b|\beuro\b|€/i, 6]],
+  // I NOMI DELLA RIGA: non decidono mai un abbinamento da soli, ma confermano
+  // quello che il formulario e il peso suggeriscono, e soprattutto permettono di
+  // DIRE in che cosa consiste l'errore (richiesta dell'utente, 01/10/2026:
+  // «fai i paragoni con piu' informazioni della stessa riga»). Letti male
+  // possono solo far mancare una conferma, non inventare un abbinamento.
+  produttore: [[/produttore|punto\s*di\s*raccolta|\bpdr\b/i, 10], [/cliente|detentore/i, 6]],
+  destinatario: [[/destinatario|destinazione|impianto\s*di/i, 10], [/\bimpianto\b|smaltitore|recuperatore/i, 6]],
+  trasportatore: [[/trasportatore|vettore/i, 10]],
 };
 
-const CAMPI_INTESTAZIONE = ['numero_fir', 'id_ordine', 'kg', 'giorno', 'classe', 'importo'];
+const CAMPI_INTESTAZIONE = ['numero_fir', 'id_ordine', 'kg', 'giorno', 'classe', 'importo', 'produttore', 'destinatario', 'trasportatore'];
 
 /** Quanto questa intestazione somiglia a quella colonna. 0 = per niente. */
 export function punteggioIntestazione(campo, testo) {
@@ -386,6 +395,11 @@ export function leggiRigheConsuntivo(tabelle) {
         importo: col.importo ? comeNumero(prendi(riga, col.importo)) : null,
         giorno: col.giorno ? comeGiorno(prendi(riga, col.giorno)) : '',
         classe: col.classe ? pulisci(prendi(riga, col.classe)) : '',
+        // Gli altri dati della riga: servono a confermare un abbinamento
+        // incerto e a dire in che cosa consiste l'errore (01/10/2026).
+        produttore: col.produttore ? pulisci(prendi(riga, col.produttore)) : '',
+        destinatario: col.destinatario ? pulisci(prendi(riga, col.destinatario)) : '',
+        trasportatore: col.trasportatore ? pulisci(prendi(riga, col.trasportatore)) : '',
       });
     }
   }
@@ -815,6 +829,124 @@ export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg 
     }
   }
 
+  // === IL SECONDO GIRO: CHI SCRIVE IL NUMERO CON UNA LETTERA SBAGLIATA ===
+  //
+  // Richiesta dell'utente (01/10/2026): «le cose importanti su cui decidere sono
+  // il numero del formulario, l'id ordine, ma chi ci invia il report puo' anche
+  // sbagliare, ad esempio scambiando una lettera o una cifra, pertanto tu fai i
+  // paragoni con piu' informazioni della stessa riga e confrontale con il
+  // gestionale e ti risulta piu' semplice capire di cosa si tratta e in cosa
+  // consiste l'eventuale errore».
+  //
+  // Un carattere sbagliato, da solo, produceva DUE difformita' false: «questo lo
+  // fattura e noi non l'abbiamo» e «questo l'abbiamo noi e lui non lo riporta».
+  // Due accuse al posto di una frase.
+  //
+  // La regola: un numero quasi uguale non basta, e un peso uguale non basta. Si
+  // abbina quando il numero e' quasi uguale E almeno un'altra informazione della
+  // riga lo conferma - il peso, la data, la classe, i nomi. Se le conferme non
+  // ci sono, la riga resta una difformita': meglio una difformita' da guardare
+  // che un abbinamento inventato.
+  const DISTANZA_FIR = 2;
+  const DISTANZA_ORDINE = 1;
+  const tolleranza = Math.max(Number(tolleranza_kg) || 0, 1);
+  const nome1 = (v) => normalizzaRagioneSociale(v || '');
+  const datiLoro = (g) => {
+    const r = g.righe[0] || {};
+    return {
+      fir: chiaveFir(r.numero_fir), scritto: pulisci(r.numero_fir), ordine: pareOrdine(r.id_ordine), ordineScritto: pulisci(r.id_ordine),
+      giorno: String(r.giorno || ''), kg: g.kg, classe: pulisci(r.classe),
+      produttore: pulisci(r.produttore), destinatario: pulisci(r.destinatario), trasportatore: pulisci(r.trasportatore),
+    };
+  };
+  const datiNostri = (g) => {
+    const r = g.righe[0] || {};
+    return {
+      fir: chiaveFir(r.numero_fir), scritto: pulisci(r.numero_fir), ordine: pareOrdine(r.id_ordine), ordineScritto: pulisci(r.id_ordine),
+      giorno: giornoMovimento(r) || '', kg: g.kg, classe: pulisci(r.classe || r.prodotto),
+      produttore: pulisci(r.produttore || r.ragione_sociale || r.stoccaggio), destinatario: pulisci(r.destinazione), trasportatore: pulisci(r.trasportatore),
+    };
+  };
+  const giorniTra = (a, b) => (a && b ? Math.abs(Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400000)) : null);
+  // Che cosa, della riga, dice che sono lo stesso carico.
+  const confronta = (a, b) => {
+    const distFir = a.fir && b.fir ? distanzaFir(a.fir, b.fir, DISTANZA_FIR) : DISTANZA_FIR + 1;
+    const distOrdine = a.ordine && b.ordine ? distanzaFir(a.ordine, b.ordine, DISTANZA_ORDINE) : DISTANZA_ORDINE + 1;
+    const giorni = giorniTra(a.giorno, b.giorno);
+    const nomi = ['produttore', 'destinatario', 'trasportatore']
+      .filter(c => a[c] && b[c] && nome1(a[c]) === nome1(b[c]));
+    const prove = [];
+    if (Math.abs(a.kg - b.kg) <= tolleranza) prove.push('stesso peso');
+    if (giorni === 0) prove.push('stessa data');
+    else if (giorni === 1) prove.push('data a un giorno di distanza');
+    if (a.classe && b.classe && canaleDaClasse(a.classe) && canaleDaClasse(a.classe) === canaleDaClasse(b.classe)) prove.push('stessa classe');
+    for (const c of nomi) prove.push(`stesso ${c}`);
+    return { distFir, distOrdine, giorni, prove, nomi };
+  };
+  /**
+   * In che cosa i dati della riga non coincidono coi nostri, per un carico che
+   * e' lo stesso. Vale sia per le righe abbinate dal numero esatto - dove
+   * l'ordine o la data possono essere sbagliati comunque - sia per quelle
+   * riconosciute dalle altre informazioni.
+   *
+   * I NOMI NON ENTRANO QUI. La stessa ditta si scrive in dieci modi, e un
+   * elenco di «produttore diverso: "Melenchi S.r.l." invece di "MELENCHI SRL"»
+   * seppellirebbe le differenze vere. I nomi servono a riconoscere il carico
+   * (le conferme) e a spiegare, non a fare difformita'.
+   */
+  const differenzeFra = (a, b) => {
+    const out = [];
+    if (a.fir && b.fir && a.fir !== b.fir) {
+      out.push({ campo: 'numero_fir', consuntivo: a.scritto, gestionale: b.scritto, testo: `Formulario errato: ${descriviDifferenzaFir(a.fir, b.fir)}. Nel consuntivo e' ${a.scritto}, nel gestionale ${b.scritto}` });
+    } else if (!a.fir && b.fir) {
+      out.push({ campo: 'numero_fir', consuntivo: '', gestionale: b.scritto, testo: `Formulario assente nel consuntivo: nel gestionale e' ${b.scritto}` });
+    }
+    if (a.ordine && b.ordine && a.ordine !== b.ordine) {
+      out.push({ campo: 'id_ordine', consuntivo: a.ordineScritto, gestionale: b.ordineScritto, testo: `ID ordine errato: ${descriviDifferenzaFir(a.ordine, b.ordine)}. Nel consuntivo e' ${a.ordineScritto}, nel gestionale ${b.ordineScritto}` });
+    }
+    if (a.giorno && b.giorno && a.giorno !== b.giorno) {
+      out.push({ campo: 'giorno', consuntivo: a.giorno, gestionale: b.giorno, testo: `Data diversa: nel consuntivo ${giornoIt(a.giorno)}, da noi il trasporto si conclude il ${giornoIt(b.giorno)}` });
+    }
+    // La classe si segnala solo quando cambia il canale: e' quello che cambia il
+    // prezzo. Una classe scritta "1" invece di "P" e' la stessa cosa.
+    const canaleA = canaleDaClasse(a.classe), canaleB = canaleDaClasse(b.classe);
+    if (canaleA && canaleB && canaleA !== canaleB) {
+      out.push({ campo: 'classe', consuntivo: a.classe, gestionale: b.classe, testo: `Classe di un altro canale: nel consuntivo ${a.classe} (${canaleA}), nel gestionale ${b.classe} (${canaleB})` });
+    }
+    return out;
+  };
+
+  const nostriPresi = new Set(loroPerNostro.keys());
+  const avanzoNostri = nostri.gruppi.filter(n => !nostriPresi.has(n));
+  const riconoscimentoPerNostro = new Map();
+  if (avanzoNostri.length) {
+    for (const l of loro.gruppi) {
+      if (loroAbbinati.has(l)) continue;
+      const a = datiLoro(l);
+      if (!a.fir && !a.ordine) continue;
+      let scelto = null, migliore = Infinity, come = null;
+      for (const n of avanzoNostri) {
+        if (nostriPresi.has(n)) continue;
+        const b = datiNostri(n);
+        const c = confronta(a, b);
+        const numeroQuasi = c.distFir <= DISTANZA_FIR || c.distOrdine <= DISTANZA_ORDINE;
+        if (!numeroQuasi || c.prove.length < 1) continue;
+        // Il numero quasi uguale piu' almeno una conferma: due indizi, non uno.
+        const punti = c.distFir * 10 + Math.min(c.distOrdine, DISTANZA_ORDINE + 1) * 8
+          + Math.min(Math.abs(a.kg - b.kg), 5000) / 500 + (c.giorni === null ? 3 : Math.min(c.giorni, 10)) - c.prove.length;
+        if (punti < migliore) { migliore = punti; scelto = n; come = { ...c, nostri: b }; }
+      }
+      if (!scelto) continue;
+      nostriPresi.add(scelto);
+      loroAbbinati.add(l);
+      if (!loroPerNostro.has(scelto)) loroPerNostro.set(scelto, []);
+      loroPerNostro.get(scelto).push(l);
+      // Da che cosa lo si e' riconosciuto: va detto, perche' un abbinamento
+      // fatto su una somiglianza va potuto controllare.
+      riconoscimentoPerNostro.set(scelto, { prove: come.prove, scritto: a.scritto || a.ordineScritto });
+    }
+  }
+
   const voci = [];
   for (const n of nostri.gruppi) {
     const suoi = loroPerNostro.get(n) || [];
@@ -827,12 +959,19 @@ export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg 
     }
     const kgLoro = kgTondi(suoi.reduce((s, l) => s + l.kg, 0));
     const scarto = kgLoro - n.kg;
+    // OGNI RIGA ABBINATA SI CONTROLLA IN TUTTI I SUOI DATI, non solo nei chili
+    // (richiesta dell'utente, 01/10/2026): anche una riga col formulario esatto
+    // puo' portare un ID ordine o una data sbagliati, e prima nessuno lo diceva.
+    const differenze = differenzeFra(datiLoro(suoi[0]), datiNostri(n));
+    const ric = riconoscimentoPerNostro.get(n);
     voci.push({
       chiave: nome(n),
       esito: Math.abs(scarto) <= tolleranza_kg ? 'uguale' : 'peso_diverso',
       kg_consuntivo: kgLoro, kg_gestionale: n.kg, scarto_kg: scarto,
       righe_consuntivo: suoi.reduce((s, l) => s + l.righe.length, 0), righe_gestionale: n.righe.length,
       id_ordine: pulisci(n.righe[0] && n.righe[0].id_ordine),
+      ...(differenze.length ? { differenze } : {}),
+      ...(ric ? { riconosciuto_da: ric.prove, scritto_nel_consuntivo: ric.scritto } : {}),
     });
   }
   // UNA RIGA DI UN ALTRO CANALE NON E' UNA DIFFORMITA'.
@@ -867,6 +1006,11 @@ export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg 
     voci: voci.sort((a, b) => (Math.abs(b.scarto_kg || 0) - Math.abs(a.scarto_kg || 0)) || String(a.chiave).localeCompare(String(b.chiave))),
     uguali: conta('uguale'),
     peso_diverso: conta('peso_diverso'),
+    // I carichi riconosciuti nonostante un numero scritto male: i chili tornano,
+    // ma nel file del fornitore c'e' un errore da correggere (01/10/2026).
+    con_differenze: voci.filter(v => (v.differenze || []).length).length,
+    differenze: voci.filter(v => (v.differenze || []).length)
+      .map(v => ({ chiave: v.chiave, scritto_nel_consuntivo: v.scritto_nel_consuntivo, riconosciuto_da: v.riconosciuto_da, differenze: v.differenze })),
     solo_consuntivo: conta('solo_consuntivo'),
     solo_gestionale: conta('solo_gestionale'),
     kg_solo_consuntivo: kgDi('solo_consuntivo', 'kg_consuntivo'),
@@ -1044,7 +1188,11 @@ export function esitoConsuntivo({ confronto, costo, importo_consuntivo = null, t
       && quadraPassiva === true
       && (quadraImporto === null || quadraImporto === true)
       && !confronto.date_sbagliate_quante
-      && !(confronto.fuori_periodo && !confronto.registro_di_piu_mesi),
+      && !(confronto.fuori_periodo && !confronto.registro_di_piu_mesi)
+      // Un formulario o un ID ordine scritto male e' un errore del documento,
+      // anche se i chili tornano: il riquadro non puo' dirsi verde mentre sotto
+      // c'e' scritto che due numeri sono sbagliati (01/10/2026).
+      && !confronto.con_differenze,
     // Che cosa NON si e' potuto controllare: dirlo e' diverso dal dire che va bene.
     non_controllato: [
       !costo || !costo.trovato ? 'il costo previsto (la fatturazione passiva non ha una riga per questo fornitore in questo ruolo)' : '',
@@ -1064,6 +1212,13 @@ export function testoEsitoConsuntivo(confronto, esito) {
     if (confronto.solo_gestionale) q.push(`${confronto.solo_gestionale} che abbiamo noi e il consuntivo non riporta (${confronto.kg_solo_gestionale} kg)`);
     if (confronto.senza_chiave) q.push(`${confronto.senza_chiave} righe senza formulario ne' ordine, che non si possono abbinare`);
     parti.push(`Il consuntivo non corrisponde: ${q.join(', ')}.`);
+  }
+  // I CARICHI RICONOSCIUTI NONOSTANTE UN NUMERO SCRITTO MALE: i chili tornano, e
+  // la riga non e' una difformita' - ma il numero sul documento del fornitore e'
+  // sbagliato, e si dice quale e in che cosa (01/10/2026).
+  if (confronto.con_differenze) {
+    const n = confronto.con_differenze;
+    parti.push(`${n === 1 ? 'Un carico è stato riconosciuto' : `${n} carichi sono stati riconosciuti`} nonostante un numero scritto in modo diverso, confrontando le altre informazioni della riga: ${(confronto.differenze || []).slice(0, 5).map(d => `${(d.differenze[0] || {}).testo || d.chiave}${d.riconosciuto_da && d.riconosciuto_da.length ? ` (riconosciuto da: ${d.riconosciuto_da.join(', ')})` : ''}`).join('; ')}. I chili tornano, ma il numero sul consuntivo va corretto.`);
   }
   // LA DATA DI UN MESE CHE NON C'ENTRA E' UN ERRORE, e si dice subito dopo la
   // quadratura (utente, 01/10/2026). Prima quelle righe finivano nel mucchio

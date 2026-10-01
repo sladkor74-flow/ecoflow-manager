@@ -62,7 +62,7 @@ export const provenienzaRigaPortale = (r) => (String(r.destinazione_secondaria |
  * quella provenienza, per lo stesso motivo.
  */
 export function caricamentiPortale(righe, anno, canale = '', provenienza = '') {
-  const per = new Map(); // impianto -> Map(data -> { kg, materiali })
+  const per = new Map(); // impianto -> Map(data -> { kg, materiali, mesi, provenienze })
   for (const r of righe) {
     if (canale && canaleRigaPortale(r) !== canale) continue;
     if (provenienza && provenienzaRigaPortale(r) !== provenienza) continue;
@@ -72,15 +72,32 @@ export function caricamentiPortale(righe, anno, canale = '', provenienza = '') {
     if (!sito) continue;
     if (!per.has(sito)) per.set(sito, new Map());
     const perGiorno = per.get(sito);
-    if (!perGiorno.has(data)) perGiorno.set(data, { data, kg: 0, materiali: {} });
+    if (!perGiorno.has(data)) perGiorno.set(data, { data, kg: 0, materiali: {}, mesi: new Map(), provenienze: new Set() });
     const c = perGiorno.get(data);
     c.kg += num(r.peso_associato_kg);
     for (const [dal, al] of MATERIALI_PORTALE) c.materiali[al] = (c.materiali[al] || 0) + num(r[dal]);
+    // DI CHE MESE SONO GLI ORDINI CHE QUESTO CARICAMENTO CHIUDE.
+    //
+    // Il portale aggancia le quantita' agli ordini piu' vecchi aperti, quindi un
+    // caricamento di ottobre puo' chiudere ordini di agosto. Il mese e' quello
+    // della FINE TRASPORTO (regola 1), e serve a capire che cosa e' stato
+    // dichiarato quando nel gestionale quel mese non c'e': senza, un caricamento
+    // che non trova un nostro mese finiva archiviato come arretrato dell'anno
+    // prima, e nessuno lo vedeva (01/10/2026).
+    const mese = giorno(r.fine_trasporto).slice(0, 7);
+    if (mese) c.mesi.set(mese, (c.mesi.get(mese) || 0) + num(r.peso_associato_kg));
+    c.provenienze.add(provenienzaRigaPortale(r));
   }
   const esito = new Map();
   for (const [sito, perGiorno] of per) {
     esito.set(sito, [...perGiorno.values()]
-      .map(c => ({ data: c.data, kg: Math.round(c.kg), materiali: Object.fromEntries(Object.entries(c.materiali).map(([k, v]) => [k, Math.round(v)])) }))
+      .map(c => ({
+        data: c.data,
+        kg: Math.round(c.kg),
+        materiali: Object.fromEntries(Object.entries(c.materiali).map(([k, v]) => [k, Math.round(v)])),
+        mesi: [...c.mesi.entries()].map(([mese, kg]) => ({ mese, kg: Math.round(kg) })).sort((a, b) => a.mese.localeCompare(b.mese)),
+        provenienze: [...c.provenienze].sort(),
+      }))
       .sort((a, b) => a.data.localeCompare(b.data)));
   }
   return esito;
@@ -125,13 +142,26 @@ export function agganciaMesi(nostre, caricamenti) {
 /** Piu' elenchi di caricamenti dello stesso impianto, sommati giorno per giorno. */
 function unisciPerGiorno(...liste) {
   const per = new Map();
+  const mesi = new Map();       // data -> Map(mese -> kg)
+  const provenienze = new Map(); // data -> Set
   for (const c of liste.flat()) {
-    if (!per.has(c.data)) per.set(c.data, { data: c.data, kg: 0, materiali: {} });
+    if (!per.has(c.data)) { per.set(c.data, { data: c.data, kg: 0, materiali: {} }); mesi.set(c.data, new Map()); provenienze.set(c.data, new Set()); }
     const t = per.get(c.data);
     t.kg += c.kg;
     for (const [k, v] of Object.entries(c.materiali || {})) t.materiali[k] = (t.materiali[k] || 0) + v;
+    // I mesi degli ordini chiusi e la provenienza non si perdono unendo: sono
+    // quello che permette di dire di che mese e' una dichiarazione che il
+    // gestionale non ha.
+    for (const m of c.mesi || []) mesi.get(c.data).set(m.mese, (mesi.get(c.data).get(m.mese) || 0) + m.kg);
+    for (const p of c.provenienze || []) provenienze.get(c.data).add(p);
   }
-  return [...per.values()].sort((a, b) => a.data.localeCompare(b.data));
+  return [...per.values()]
+    .map(t => ({
+      ...t,
+      mesi: [...mesi.get(t.data).entries()].map(([mese, kg]) => ({ mese, kg })).sort((a, b) => a.mese.localeCompare(b.mese)),
+      provenienze: [...provenienze.get(t.data)].sort(),
+    }))
+    .sort((a, b) => a.data.localeCompare(b.data));
 }
 
 /** I materiali di un caricamento divisi fra piu' nostre righe, in proporzione ai chili; l'ultima prende il resto. */
@@ -222,16 +252,51 @@ function perChiave(caricamenti) {
  * dice e basta. Ogni voce dell'esito porta canale e provenienza, cosi' "Gatim
  * Aprile" due volte si legge come le due righe ACI che e'.
  */
-export async function allineaDalPortale(svc, anno, righePortale = null, nostreRighe = null) {
+/**
+ * IL CONFRONTO COL PORTALE, senza scrivere niente: serve sia all'allineamento
+ * sia alla pagina, che deve poter mostrare quello che manca anche prima che
+ * qualcuno prema «Allinea».
+ *
+ * Torna { trovati, non_trovate, da_inserire, arretrato }.
+ *
+ * DA_INSERIRE E' LA NOVITA' DEL 01/10/2026. Un caricamento del portale che non
+ * trova un nostro mese finiva tutto fra l'arretrato dell'anno prima, con una
+ * motivazione che spesso era falsa, e la pagina non mostrava l'arretrato: il
+ * 01/10/2026 l'utente ha dichiarato a portale il quantitativo di agosto di un
+ * impianto e il gestionale non se n'e' accorto. Adesso si guarda DI CHE MESE
+ * sono gli ordini che il caricamento chiude: se sono dell'anno verificato, non
+ * e' arretrato, e' una dichiarazione che nel gestionale non c'e' e va inserita -
+ * con il mese scritto accanto, per non doverlo indovinare.
+ */
+export function confrontaConIlPortale(righe, anno, nostre) {
   const annoNum = Number(anno);
-  const righe = righePortale || await fetchAll(svc.DichiarazioneTrattamento, null, 'id');
-  // Tutte le pagine: una lettura da 500 righe, con quindici impianti, dodici mesi
-  // e fino a quattro flussi ciascuno, poteva lasciare fuori dichiarazioni vere.
-  const nostre = nostreRighe || await fetchAll(svc.DichiarazioneSito, { anno: annoNum }, 'id');
-
-  const aggiornate = [];
+  const trovati = [];
   const nonTrovate = [];
+  const daInserire = [];
   const arretrato = [];
+
+  const voce = (sito, canale, caricamenti, motivo) => {
+    const mesi = new Map();
+    for (const c of caricamenti) for (const m of c.mesi || []) mesi.set(m.mese, (mesi.get(m.mese) || 0) + m.kg);
+    return {
+      sito, canale, motivo,
+      quanti: caricamenti.length,
+      caricamenti: caricamenti.map(c => ({ data: c.data, kg: Math.round(c.kg), mesi: c.mesi || [], provenienze: c.provenienze || [] })),
+      kg: Math.round(caricamenti.reduce((s, c) => s + c.kg, 0)),
+      mesi: [...mesi.entries()].map(([mese, kg]) => ({ mese, kg: Math.round(kg) })).sort((a, b) => a.mese.localeCompare(b.mese)),
+    };
+  };
+  // Un caricamento che chiude ordini dell'anno verificato (o di cui non si sa
+  // il mese, perche' tacere e' peggio) e' una dichiarazione da inserire; quello
+  // che chiude solo ordini degli anni prima e' l'arretrato, e li' e' giusto che
+  // non trovi niente.
+  const classifica = (sito, canale, caricamenti, motivo) => {
+    const diQuestAnno = caricamenti.filter(c => !(c.mesi || []).length || (c.mesi || []).some(m => m.mese.startsWith(String(annoNum))));
+    const diPrima = caricamenti.filter(c => !diQuestAnno.includes(c));
+    if (diQuestAnno.length) daInserire.push(voce(sito, canale, diQuestAnno, motivo));
+    if (diPrima.length) arretrato.push(voce(sito, canale, diPrima, 'chiude ordini degli anni precedenti: e\' l\'arretrato, ed e\' giusto che non trovi un nostro mese'));
+  };
+
   for (const canale of ['RETE', 'ACI']) {
     const perSito = perChiave(caricamentiPortale(righe, annoNum, canale));
     const perProvenienza = canale === 'ACI'
@@ -239,22 +304,38 @@ export async function allineaDalPortale(svc, anno, righePortale = null, nostreRi
       : null;
 
     for (const [k, { nome, lista }] of perSito) {
-      const mie = nostre.filter(d => chiave(d.sito) === k && (d.canale || 'RETE') === canale);
-      if (!mie.length) { arretrato.push({ sito: nome, canale, caricamenti: lista.length, kg: lista.reduce((s, c) => s + c.kg, 0), motivo: `nessuna nostra dichiarazione ${canale === 'ACI' ? 'ACI' : 'di rete'} per questo impianto` }); continue; }
-      const { trovati, senzaRiscontro, avanzi } = perProvenienza
+      const mie = (nostre || []).filter(d => chiave(d.sito) === k && (d.canale || 'RETE') === canale);
+      if (!mie.length) {
+        classifica(nome, canale, lista, `nel gestionale non c'e' nessuna dichiarazione ${canale === 'ACI' ? 'ACI' : 'di rete'} di questo impianto`);
+        continue;
+      }
+      const esito = perProvenienza
         ? agganciaAci(mie, perProvenienza.primaria.get(k)?.lista, perProvenienza.secondaria.get(k)?.lista)
         : agganciaMesi(mie, lista);
-      for (const t of trovati) {
-        const d = t.dichiarazione;
-        const campi = { caricata_inviata: true, caricata_il: t.caricata_il, ...t.materiali };
-        const cambia = Object.entries(campi).some(([c, v]) => (c === 'caricata_inviata' ? !d[c] : Math.round(num(d[c])) !== Math.round(num(v))));
-        if (!cambia) continue;
-        await svc.DichiarazioneSito.update(d.id, campi);
-        aggiornate.push({ sito: nome, canale, provenienza: d.provenienza || '', mese: d.mese, kg: Math.round(num(d.quantita_kg)), caricata_il: t.caricata_il, riprese: t.date.length, gia_segnata: !!d.caricata_inviata, ...(t.insieme ? { insieme_all_altra_provenienza: true } : {}) });
-      }
-      for (const n of senzaRiscontro) nonTrovate.push({ sito: nome, canale, provenienza: n.provenienza || '', mese: n.mese, kg: Math.round(num(n.quantita_kg)), era_segnata: !!n.caricata_inviata });
-      if (avanzi.length) arretrato.push({ sito: nome, canale, caricamenti: avanzi.length, kg: avanzi.reduce((s, c) => s + c.kg, 0), motivo: 'caricamenti senza un nostro mese: arretrato dell\'anno prima' });
+      for (const t of esito.trovati) trovati.push({ ...t, sito: nome, canale });
+      for (const n of esito.senzaRiscontro) nonTrovate.push({ sito: nome, canale, provenienza: n.provenienza || '', mese: n.mese, kg: Math.round(num(n.quantita_kg)), era_segnata: !!n.caricata_inviata });
+      if (esito.avanzi.length) classifica(nome, canale, esito.avanzi, 'nessun nostro mese ha questo peso');
     }
   }
-  return { anno: annoNum, aggiornate, non_trovate: nonTrovate, arretrato };
+  return { trovati, non_trovate: nonTrovate, da_inserire: daInserire, arretrato };
+}
+
+export async function allineaDalPortale(svc, anno, righePortale = null, nostreRighe = null) {
+  const annoNum = Number(anno);
+  const righe = righePortale || await fetchAll(svc.DichiarazioneTrattamento, null, 'id');
+  // Tutte le pagine: una lettura da 500 righe, con quindici impianti, dodici mesi
+  // e fino a quattro flussi ciascuno, poteva lasciare fuori dichiarazioni vere.
+  const nostre = nostreRighe || await fetchAll(svc.DichiarazioneSito, { anno: annoNum }, 'id');
+
+  const esito = confrontaConIlPortale(righe, annoNum, nostre);
+  const aggiornate = [];
+  for (const t of esito.trovati) {
+    const d = t.dichiarazione;
+    const campi = { caricata_inviata: true, caricata_il: t.caricata_il, ...t.materiali };
+    const cambia = Object.entries(campi).some(([c, v]) => (c === 'caricata_inviata' ? !d[c] : Math.round(num(d[c])) !== Math.round(num(v))));
+    if (!cambia) continue;
+    await svc.DichiarazioneSito.update(d.id, campi);
+    aggiornate.push({ sito: t.sito, canale: t.canale, provenienza: d.provenienza || '', mese: d.mese, kg: Math.round(num(d.quantita_kg)), caricata_il: t.caricata_il, riprese: t.date.length, gia_segnata: !!d.caricata_inviata, ...(t.insieme ? { insieme_all_altra_provenienza: true } : {}) });
+  }
+  return { anno: annoNum, aggiornate, non_trovate: esito.non_trovate, arretrato: esito.arretrato, da_inserire: esito.da_inserire };
 }
