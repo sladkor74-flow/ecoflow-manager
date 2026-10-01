@@ -3,6 +3,39 @@ import { eAci } from "./canaleSecondaria.ts";
 // ordini assegnati o no, classe ACI (PFU Autodemolizione) o rete. La regola e' una
 // sola per l'importazione lato server e per quella a blocchi letta nel browser.
 
+// === SOLO QUELLO CHE E' NOSTRO ===
+//
+// Regola dell'utente, 02/10/2026: «usa solo cio' che ha come partner operativo
+// Smoco». Non e' un dettaglio di questa analisi: gli export del portale sono di
+// Ecotyre, non nostri, e dentro ci sono anche gli ordini degli altri operatori.
+// Nei due file esportati quel giorno: 2.925 righe di dichiarazioni e 151 ordini
+// non dichiarati (604 tonnellate) di Baucina, Corgom, Chiarcosso, Trieco e
+// Cumiana. Caricati senza filtro finivano nei NOSTRI archivi.
+//
+// Il 02/10/2026 non facevano danno ai conti del 2026 - le 1.206 tonnellate di
+// Baucina su Irigom hanno tutte fine trasporto negli anni prima, e i non
+// dichiarati altrui vanno su Corgom, che non e' un nostro impianto - ma e'
+// questione di tempo: basta un totale che non filtri l'anno, o un impianto in
+// comune, e quei chili diventano nostri.
+//
+// Si scarta solo chi ha un partner operativo scritto e DIVERSO dal nostro: una
+// riga senza quel campo non si butta, perche' non tutti gli export ce l'hanno e
+// buttarla vorrebbe dire perdere dati veri.
+export const NOSTRO_PARTNER = /smoco/i;
+
+/**
+ * Le righe del nostro partner operativo: { righe, scartate }.
+ * scartate sono quelle di un altro operatore, da dire a chi carica.
+ */
+export function soloNostroPartner(righe) {
+  const altrui = (r) => {
+    const p = String((r && r.partner_operativo) || '').trim();
+    return !!p && !NOSTRO_PARTNER.test(p);
+  };
+  const nostre = (righe || []).filter(r => !altrui(r));
+  return { righe: nostre, scartate: (righe || []).length - nostre.length };
+}
+
 export const ARCHIVI_PRIMARIE = ['PrimariaRete', 'PrimariaAci', 'Assegnato', 'AssegnatoAci'];
 
 // Colonne del file che portano una data: immissione, inizio e fine trasporto

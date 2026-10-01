@@ -7,7 +7,7 @@ import * as XLSX from 'npm:xlsx@0.18.5';
 import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
 import { enrichRecords } from "../../shared/dataEnrichment.ts";
 import { FILE_SIGNATURES, checkSignature, detectType, mappaColonne } from "../../shared/fileSignatures.ts";
-import { CAMPI_ASSEGNATO, DATE_PRIMARIE, archivioPrimaria, dataPrimaria } from "../../shared/primarie.ts";
+import { CAMPI_ASSEGNATO, DATE_PRIMARIE, archivioPrimaria, dataPrimaria, soloNostroPartner } from "../../shared/primarie.ts";
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 import { annoRoma } from "../../shared/giornoItaliano.ts";
 import { urlScaricabile, riferimentoDaSalvare, riferimentoDalCorpo } from "../../shared/fileScaricabile.ts";
@@ -309,7 +309,7 @@ export default async function(req) {
     // un'intestazione con uno spazio in coda (fileSignatures.mappaColonne).
     const colMap = mappaColonne(config.columns, leggiIntestazioni(ws));
     const keyField = config.keyField || 'id_ordine';
-    const mapped = rawRows.map(row => {
+    let mapped = rawRows.map(row => {
       const obj = {};
       for (const [excelCol, entityField] of Object.entries(colMap)) {
         let val = row[excelCol];
@@ -338,6 +338,14 @@ export default async function(req) {
       }
       return obj;
     }).filter(r => r[keyField] && (!config.statoFilter || (r.stato || '').toLowerCase().trim() === config.statoFilter));
+
+    // SOLO LE RIGHE DEL NOSTRO PARTNER OPERATIVO (regola dell'utente, 02/10/2026).
+    // Gli export del portale sono di Ecotyre e contengono anche gli ordini degli
+    // altri operatori: senza questo filtro finivano nei nostri archivi. Quante se
+    // ne sono scartate si dice a chi carica, perche' un filtro silenzioso che
+    // toglie righe e' indistinguibile da un file incompleto.
+    const altroPartner = soloNostroPartner(mapped);
+    mapped = altroPartner.righe;
 
     // 3b. Enrichment
     // I due report del portale non necessitano di enrichment: i campi calcolati (mese,
@@ -698,6 +706,8 @@ export default async function(req) {
       tipo_file, entity: config.entity, foglio: sheetName,
       righe_lette: rawRows.length, righe_mappate: mapped.length, righe_da_importare: totaleDaImportare,
       righe_importate: imported, righe_fallite: failed, esito, lastError,
+      // Le righe di un altro operatore trovate nel file: scartate, e dette.
+      ...(altroPartner.scartate ? { righe_di_altri_partner: altroPartner.scartate } : {}),
       assegnati_importati, assegnati_falliti,
       assegnati_aci_importati, assegnati_aci_falliti,
       primarie_rete_importati, primarie_rete_falliti,

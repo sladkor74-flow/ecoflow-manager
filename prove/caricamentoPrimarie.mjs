@@ -3356,5 +3356,40 @@ verifica('e le righe dello storico sono tutte ancora in archivio',
 verifica('ma se lo storico e\' perso davvero l\'allarme esce lo stesso', String(storicoSpazzato.message).includes("Lo storico conservato non c'e' piu'"), storicoSpazzato.message);
 
 // ---------------------------------------------------------------------------
+// SOLO QUELLO CHE E' NOSTRO (regola dell'utente, 02/10/2026).
+//
+// Gli export del portale sono di Ecotyre, non nostri: dentro ci sono anche gli
+// ordini degli altri operatori. Nei due file del 02/10/2026 c'erano 2.925 righe
+// di dichiarazioni e 151 ordini non dichiarati (604 tonnellate) di Baucina,
+// Corgom, Chiarcosso, Trieco e Cumiana. Caricati senza filtro, finivano nei
+// nostri archivi: 1.605 di quelle righe stavano su IRIGOM, che e' un impianto
+// nostro, per 1.206 tonnellate.
+console.log('\nSOLO LE RIGHE DEL NOSTRO PARTNER OPERATIVO');
+{
+  const { soloNostroPartner } = await import('../base44/shared/primarie.ts');
+  const righe = [
+    { id_ordine: 'A', partner_operativo: 'SMOCO Srl' },
+    { id_ordine: 'B', partner_operativo: 'Baucina Recycling Tyres Srl' },
+    { id_ordine: 'C', partner_operativo: '' },
+    { id_ordine: 'D' },
+    { id_ordine: 'E', partner_operativo: 'smoco srl' },
+    { id_ordine: 'F', partner_operativo: 'CORGOM S.r.l' },
+  ];
+  const e = soloNostroPartner(righe);
+  verifica('le righe di un altro operatore si scartano', e.scartate === 2
+    && !e.righe.some(r => r.id_ordine === 'B' || r.id_ordine === 'F'), JSON.stringify(e.righe.map(r => r.id_ordine)));
+  verifica('le nostre restano, comunque sia scritto il nome', e.righe.some(r => r.id_ordine === 'A') && e.righe.some(r => r.id_ordine === 'E'));
+  // Una riga senza quel campo NON si butta: non tutti gli export ce l'hanno, e
+  // buttarla vorrebbe dire perdere dati veri.
+  verifica('una riga senza partner operativo non si butta', e.righe.some(r => r.id_ordine === 'C') && e.righe.some(r => r.id_ordine === 'D'));
+  verifica('senza righe non scarta niente', soloNostroPartner([]).scartate === 0 && soloNostroPartner(null).righe.length === 0);
+  // Quante se ne sono scartate si dice a chi carica: un filtro silenzioso che
+  // toglie righe e' indistinguibile da un file incompleto.
+  const sorgente = readFileSync(qui('../base44/functions/importEcotyreFile/entry.ts'), 'utf8');
+  verifica('il caricamento applica il filtro', /soloNostroPartner\(mapped\)/.test(sorgente));
+  verifica('e dice quante righe ha scartato', /righe_di_altri_partner/.test(sorgente));
+}
+
+// ---------------------------------------------------------------------------
 console.log(`\n${ok} prove superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);
