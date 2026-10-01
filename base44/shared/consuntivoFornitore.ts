@@ -29,6 +29,7 @@ import { contaFormulari, chiaveFormulario } from "./formulari.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { comeOrdine, comeNumero, comeGiorno } from "./prefattura.ts";
 import { mappaFatturazione, fatturaA } from "./subfornitori.ts";
+import { eAci } from "./canaleSecondaria.ts";
 
 const kgTondi = (v) => Math.round(Number(v) || 0);
 const pulisci = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
@@ -127,13 +128,14 @@ const PUNTEGGI_INTESTAZIONE = {
   id_ordine: [[/\bordine\b|n\.?\s*ordine/i, 10], [/ticket/i, 8], [/\bordn?\b/i, 6]],
   kg: [[/p\.?\s*netto|peso\s*netto|netto\s*in\s*kg/i, 10], [/\bpeso\b|\bkg\b|tonnell/i, 8], [/quantit|q\.?t[aà]/i, 4]],
   giorno: [[/\bdata\b|\bdt\b|giorno/i, 10]],
+  classe: [[/^classe|classe\s*pfu|codice.?prodotto/i, 10], [/\bprodotto\b|\bcl\.|tipo\s*pfu/i, 6]],
   // "Totale" non c'e' apposta: una colonna che si chiama cosi' puo' essere un
   // totale di chili come di euro, e un importo sbagliato e' peggio di un importo
   // mancante (il verdetto dice "non si e' potuto controllare l'importo").
   importo: [[/importo|imponibile|corrispettivo/i, 10], [/\bvalore\b|\beuro\b|€/i, 6]],
 };
 
-const CAMPI_INTESTAZIONE = ['numero_fir', 'id_ordine', 'kg', 'giorno', 'importo'];
+const CAMPI_INTESTAZIONE = ['numero_fir', 'id_ordine', 'kg', 'giorno', 'classe', 'importo'];
 
 /** Quanto questa intestazione somiglia a quella colonna. 0 = per niente. */
 export function punteggioIntestazione(campo, testo) {
@@ -285,12 +287,67 @@ export function leggiRigheConsuntivo(tabelle) {
         kg: Math.round(kg),
         importo: col.importo ? comeNumero(prendi(riga, col.importo)) : null,
         giorno: col.giorno ? comeGiorno(prendi(riga, col.giorno)) : '',
+        classe: col.classe ? pulisci(prendi(riga, col.classe)) : '',
       });
     }
   }
 
   if (scartate) note.push(`${scartate} righe non avevano ne' un formulario ne' un numero d'ordine leggibile: non si possono abbinare e non sono state lette.`);
   return { righe, note, colonne: colonneLette, scartate, importo_totale: importoTotale };
+}
+
+/**
+ * IL CANALE DI UNA RIGA, DALLA CLASSE CHE IL FORNITORE SCRIVE ACCANTO.
+ *
+ * Regola dell'utente (01/10/2026): "se la classe e' '9 - pfu autodemolizione'
+ * allora trattasi di aci, le altre classi sono rete... non sussiste mai
+ * l'equivoco se analizzi i dati corrispondenti". Verificato su tutti gli
+ * archivi: TERMINATI RETE ha solo .class1 (P), .class2 (M), .class3 (G1),
+ * .class4 (G2) e MAI la 9; TERMINATI ACI ha solo .class9. Lo stesso per le
+ * secondarie.
+ *
+ * Esiste gia' eAci in canaleSecondaria.ts e fa questo lavoro sui NOSTRI record,
+ * dove la classe e' scritta ".class9" o "PFU Autodemolizione". Nei fogli dei
+ * fornitori, invece, la classe e' spesso un "9" secco - misurato su 42 dei 75
+ * consuntivi veri - e quella regex, che cerca "class 9", non lo riconoscerebbe.
+ * Questa funzione e' il ponte fra le due scritture, e si appoggia a eAci per
+ * tutte le forme che eAci gia' conosce.
+ *
+ * Stringa vuota quando la classe non dice niente: "PLASMIX FINE" e' un prodotto
+ * di trattamento, non una classe di PFU, e uno "0" non vuol dire nulla.
+ * Vuoto NON significa rete: significa che non si sa, ed e' diverso.
+ */
+export function canaleDaClasse(valore) {
+  const t = pulisci(valore).toUpperCase();
+  if (!t) return '';
+  if (eAci({ classe: t })) return 'ACI';
+  // Il "9" secco, o "9 - PFU Autodemolizione", o ".class9".
+  if (/^0*9$|^0*9\s*[-–]|^\.?CLASS\s*0*9$/.test(t)) return 'ACI';
+  if (/^(P|M|G1|G2)$/.test(t) || /^0*[1-4]$/.test(t) || /^\.?CLASS\s*0*[1-4]$/.test(t)) return 'RETE';
+  return '';
+}
+
+/**
+ * IL CANALE DI UNA RIGA DEL CONSUNTIVO, e da che cosa lo si e' capito.
+ *
+ * In ordine di affidabilita':
+ *   1. il MOVIMENTO abbinato. Il formulario e l'ID ordine sono unici fra i
+ *      canali - verificato: zero numeri in comune fra i 2.971 movimenti di rete
+ *      e i 45 ACI - quindi se la riga si abbina, il canale e' certo.
+ *   2. la CLASSE scritta sulla riga, quando il foglio ha quella colonna.
+ *   3. il NOME DEL FILE, quando dice ACI: GATIM manda due file separati,
+ *      "circuito ACI" e "circuito gommisti", e per lui e' l'unico indizio.
+ *      E' un indizio debole e va detto che viene da li'.
+ *
+ * Niente di tutto questo: canale vuoto. Di solito e' extra raccolta, che il
+ * portale non alimenta e che l'utente inserisce a mano nel suo modulo.
+ */
+export function canaleDellaRiga(riga, movimento, nomeFile = '') {
+  if (movimento) return { canale: canaleMovimento(movimento, movimento.__archivio || ''), come: 'movimento' };
+  const daClasse = canaleDaClasse(riga && riga.classe);
+  if (daClasse) return { canale: daClasse, come: 'classe' };
+  if (/autodemoliz|\baci\b/i.test(String(nomeFile || ''))) return { canale: 'ACI', come: 'nome_file' };
+  return { canale: '', come: '' };
 }
 
 /**
@@ -498,7 +555,7 @@ export function movimentiDelFornitore(archivi, { fornitore, ruolo, anno, mese, c
  *
  * Una tolleranza sui chili si passa da fuori: qui non si decide quanto e' "uguale".
  */
-export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg = 0 } = {}) {
+export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg = 0, canale = '', nome_file = '' } = {}) {
   // Ogni gruppo tiene TUTTE le sue chiavi - formulario e ordine - cosi' una riga
   // del consuntivo che porta solo l'ordine trova lo stesso il nostro movimento, che
   // il formulario ce l'ha sempre.
@@ -569,9 +626,27 @@ export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg 
       id_ordine: pulisci(n.righe[0] && n.righe[0].id_ordine),
     });
   }
+  // UNA RIGA DI UN ALTRO CANALE NON E' UNA DIFFORMITA'.
+  //
+  // Un consuntivo puo' portare tutti e tre i canali (utente, 01/10/2026), ma
+  // questo confronto ne guarda uno. Una riga di ACI dentro un consuntivo di rete
+  // non si abbina a nessun nostro movimento di rete - giustamente - e finiva fra
+  // i "carichi che il fornitore ci fattura e noi non abbiamo": un'accusa a un
+  // documento corretto. Il canale della riga si legge dalla classe che il
+  // fornitore scrive accanto: 9 e' autodemolizione, le altre sono rete.
+  //
+  // Non si tacciono: si mettono da parte e si DICE di aprire anche l'altro
+  // canale, altrimenti quelle righe non le controllerebbe nessuno.
   for (const l of loro.gruppi) {
     if (loroAbbinati.has(l)) continue;
-    voci.push({ chiave: nome(l), esito: 'solo_consuntivo', kg_consuntivo: l.kg, kg_gestionale: null, scarto_kg: null, righe_consuntivo: l.righe.length });
+    const suo = canaleDellaRiga(l.righe[0], null, nome_file);
+    const altroCanale = !!(canale && suo.canale && suo.canale !== String(canale).toUpperCase());
+    voci.push({
+      chiave: nome(l),
+      esito: altroCanale ? 'altro_canale' : 'solo_consuntivo',
+      kg_consuntivo: l.kg, kg_gestionale: null, scarto_kg: null, righe_consuntivo: l.righe.length,
+      ...(suo.canale ? { canale_riga: suo.canale, canale_da: suo.come } : {}),
+    });
   }
 
   const conta = (e) => voci.filter(v => v.esito === e).length;
@@ -587,6 +662,10 @@ export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg 
     solo_gestionale: conta('solo_gestionale'),
     kg_solo_consuntivo: kgDi('solo_consuntivo', 'kg_consuntivo'),
     kg_solo_gestionale: kgDi('solo_gestionale', 'kg_gestionale'),
+    // Le righe di un altro canale: contate a parte, mai fra le difformita'.
+    altro_canale: conta('altro_canale'),
+    kg_altro_canale: kgDi('altro_canale', 'kg_consuntivo'),
+    canali_altrui: [...new Set(voci.filter(v => v.esito === 'altro_canale').map(v => v.canale_riga))],
     // Le righe del consuntivo senza formulario e senza ordine: non si possono
     // abbinare a niente, e tacerle le farebbe sparire dal conto.
     senza_chiave: senzaChiave ? senzaChiave.righe.length : 0,
@@ -692,6 +771,12 @@ export function testoEsitoConsuntivo(confronto, esito) {
     if (confronto.solo_gestionale) q.push(`${confronto.solo_gestionale} che abbiamo noi e il consuntivo non riporta (${confronto.kg_solo_gestionale} kg)`);
     if (confronto.senza_chiave) q.push(`${confronto.senza_chiave} righe senza formulario ne' ordine, che non si possono abbinare`);
     parti.push(`Il consuntivo non corrisponde: ${q.join(', ')}.`);
+  }
+  // Le righe di un altro canale si dicono SEMPRE, anche quando tutto il resto
+  // quadra: se nessuno apre l'altro canale, quelle righe non le controlla nessuno.
+  if (confronto.altro_canale) {
+    const quali = (confronto.canali_altrui || []).join(' e ') || 'un altro canale';
+    parti.push(`${confronto.altro_canale === 1 ? 'Una riga del consuntivo è' : `${confronto.altro_canale} righe del consuntivo sono`} di ${quali} (${confronto.kg_altro_canale} kg): qui non si contano, e non sono una difformità. Apri anche il consuntivo di ${quali} per questo fornitore, altrimenti quelle righe non le verifica nessuno.`);
   }
   if (esito.quadra_con_passiva === false) {
     parti.push(`I chili che la fatturazione passiva conta per questo fornitore sono ${Math.abs(esito.scarto_passiva_kg)} kg ${esito.scarto_passiva_kg > 0 ? 'in meno' : 'in piu'}' dei nostri movimenti del mese: di solito vuol dire che una tratta non ha una tariffa, o che una riga sta in un altro blocco.`);

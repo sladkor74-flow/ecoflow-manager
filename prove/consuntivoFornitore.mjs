@@ -10,7 +10,7 @@
 // periodo e' la fine trasporto, le quote dello stesso formulario si sommano prima
 // del confronto, e quello che manca da una parte o dall'altra si dice.
 // npm run prove
-import { movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, esitoConsuntivo, testoEsitoConsuntivo, chiaveRiga, chiaveFir, leggiRigheConsuntivo, pareOrdine, periodoSospetto, righeCheParonoTotali, colonneDaIntestazioni, importoTotaleDalFoglio } from '../base44/shared/consuntivoFornitore.ts';
+import { movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, esitoConsuntivo, testoEsitoConsuntivo, chiaveRiga, chiaveFir, leggiRigheConsuntivo, pareOrdine, periodoSospetto, righeCheParonoTotali, colonneDaIntestazioni, importoTotaleDalFoglio, canaleDaClasse, canaleDellaRiga } from '../base44/shared/consuntivoFornitore.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -411,6 +411,79 @@ console.log('LE TARIFFE IN FONDO AL FOGLIO NON SONO FORMULARI');
   ];
   verifica('senza totali, nessun importo', importoTotaleDalFoglio(celle) === null);
   verifica('e il verdetto lo dira', leggiRigheConsuntivo([{ nome: 'X', celle }]).importo_totale === null);
+}
+
+console.log('IL CANALE DI UNA RIGA LO DICE LA CLASSE');
+{
+  // Regola dell'utente (01/10/2026): classe 9 = autodemolizione = ACI, le altre
+  // sono rete. Verificata su tutti gli archivi: TERMINATI RETE non ha mai la 9,
+  // TERMINATI ACI non ha mai altro. Nei fogli dei fornitori la classe e' spesso
+  // un "9" secco, che eAci da sola non riconoscerebbe.
+  for (const v of ['9', '.class9', '9 - PFU Autodemolizione', 'PFU Autodemolizione', '09']) {
+    verifica(`"${v}" e ACI`, canaleDaClasse(v) === 'ACI', canaleDaClasse(v));
+  }
+  for (const v of ['P', 'M', 'G1', 'G2', '1', '2', '3', '4', '.class1', '.class4']) {
+    verifica(`"${v}" e rete`, canaleDaClasse(v) === 'RETE', canaleDaClasse(v));
+  }
+  // Vuoto non vuol dire rete: vuol dire che non si sa, ed e' diverso.
+  for (const v of ['PLASMIX FINE', '0', '', 'CLASSE', 'IMPONIBILE']) {
+    verifica(`"${v}" non dice niente`, canaleDaClasse(v) === '', canaleDaClasse(v));
+  }
+}
+
+console.log('IL CANALE: PRIMA IL MOVIMENTO, POI LA CLASSE, POI IL NOME DEL FILE');
+{
+  // 1. Il movimento abbinato e' la fonte certa: formulari e ordini non si
+  //    ripetono fra i canali (zero numeri in comune fra 2.971 movimenti di rete
+  //    e 45 ACI).
+  const mov = { classe: 'P', __archivio: 'PrimariaAci' };
+  verifica('il movimento vince su tutto', canaleDellaRiga({ classe: '9' }, mov, 'ACI.xlsx').canale === 'ACI');
+  verifica('e si dice da dove viene', canaleDellaRiga({ classe: '9' }, mov, '').come === 'movimento');
+  // 2. Senza movimento, la classe della riga.
+  const daClasse = canaleDellaRiga({ classe: '9' }, null, 'GOMMISTI.xlsx');
+  verifica('senza movimento vale la classe', daClasse.canale === 'ACI' && daClasse.come === 'classe', J(daClasse));
+  // 3. Senza nemmeno la classe, il nome del file: GATIM manda due file separati.
+  const daNome = canaleDellaRiga({ classe: '' }, null, 'GATIM - Gennaio circuito ACI.xlsx');
+  verifica('poi il nome del file', daNome.canale === 'ACI' && daNome.come === 'nome_file', J(daNome));
+  verifica('"circuito gommisti" non e ACI', canaleDellaRiga({ classe: '' }, null, 'GATIM - Gennaio circuito gommisti.xlsx').canale === '');
+  verifica('e senza indizi non si inventa', canaleDellaRiga({ classe: '' }, null, 'consuntivo.xlsx').canale === '');
+}
+
+console.log('UNA RIGA DI UN ALTRO CANALE NON E\' UNA DIFFORMITA\'');
+{
+  // Il consuntivo di rete di un fornitore che nello stesso foglio mette anche
+  // una riga ACI. Prima quella riga usciva come "ce lo fattura e noi non
+  // l'abbiamo": un'accusa a un documento corretto.
+  const movimenti = [{ numero_fir: 'RTXZV001718KR', id_ordine: 'ET26112026', peso_effettivo: 3540 }];
+  const righe = [
+    { numero_fir: 'RTXZV001718KR', kg: 3540, classe: 'P' },
+    { numero_fir: 'BSDCL001462BJ', kg: 2100, classe: '9' },
+  ];
+  const c = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1, canale: 'RETE' });
+  verifica('la riga di rete quadra', c.uguali === 1, J(c.voci));
+  verifica('quella ACI non e fra le difformita', c.solo_consuntivo === 0, J(c.voci));
+  verifica('sta nel suo riquadro', c.altro_canale === 1 && c.kg_altro_canale === 2100, J(c));
+  verifica('e si dice quale canale', c.canali_altrui.join() === 'ACI', J(c.canali_altrui));
+  const voce = c.voci.find(v => v.esito === 'altro_canale');
+  verifica('con la provenienza del giudizio', voce.canale_riga === 'ACI' && voce.canale_da === 'classe', J(voce));
+  // Il testo lo dice SEMPRE, anche se il resto quadra: altrimenti quelle righe
+  // non le controllerebbe nessuno.
+  const testo = testoEsitoConsuntivo(c, esitoConsuntivo({ confronto: c, costo: null }));
+  verifica('il testo invita ad aprire l altro canale', /Apri anche il consuntivo di ACI/.test(testo), testo);
+  verifica('e dice che non e una difformita', /non sono una difformità|non è una difformità/.test(testo), testo);
+}
+{
+  // Senza canale indicato non si marca niente: il confronto resta quello di prima.
+  const movimenti = [];
+  const righe = [{ numero_fir: 'BSDCL001462BJ', kg: 2100, classe: '9' }];
+  const c = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1 });
+  verifica('senza canale la riga resta una difformita', c.solo_consuntivo === 1 && c.altro_canale === 0, J(c.voci));
+}
+{
+  // Stesso canale: la riga e' una difformita' vera e tale resta.
+  const righe = [{ numero_fir: 'RTXZV009999ZZ', kg: 3000, classe: 'P' }];
+  const c = confrontaConsuntivo(righe, [], { tolleranza_kg: 1, canale: 'RETE' });
+  verifica('una riga di rete che non abbiamo resta una difformita', c.solo_consuntivo === 1 && c.altro_canale === 0, J(c.voci));
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

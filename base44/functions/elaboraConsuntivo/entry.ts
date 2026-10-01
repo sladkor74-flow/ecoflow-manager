@@ -155,7 +155,12 @@ export default async function(req) {
     const movimenti = movimentiDelFornitore(archivi, { fornitore, ruolo, anno, mese, canale, fornitori: fornitoriTutti });
     // Un chilo di tolleranza: i pesi si scrivono interi, e un arrotondamento nel
     // foglio del fornitore non e' una difformita'.
-    const confronto = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1 });
+    const confronto = confrontaConsuntivo(righe, movimenti, {
+      tolleranza_kg: 1,
+      // Il canale che si sta verificando e il nome del file: servono a riconoscere
+      // le righe che appartengono a un ALTRO canale e a non accusarle.
+      canale, nome_file: (record && record.file_nome) || body.file_nome || '',
+    });
 
     // DUE DOMANDE DA FARE PRIMA DI ELENCARE LE DIFFORMITA'.
     //
