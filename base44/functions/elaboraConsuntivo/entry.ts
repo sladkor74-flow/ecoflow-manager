@@ -10,7 +10,7 @@ import {
   movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, leggiRigheConsuntivo,
   periodoSospetto, righeCheParonoTotali,
   esitoConsuntivo, testoEsitoConsuntivo,
-  chiaviDelGestionale, avvisoArretrati,
+  chiaviDelGestionale, avvisiDate,
 } from "../../shared/consuntivoFornitore.ts";
 
 // IL CONSUNTIVO DI CHIUSURA MESE DI UN FORNITORE: si legge, si confronta, si salva.
@@ -187,11 +187,12 @@ export default async function(req) {
     if (paiono.length) {
       avvisiPeriodo.push(`${paiono.length === 1 ? 'Una riga del consuntivo pesa' : `${paiono.length} righe del consuntivo pesano`} molto piu' di qualunque carico che abbiamo noi in questo mese (il piu' pesante e' ${paiono[0].massimo_nostro} kg): ${paiono.slice(0, 5).map(p => `${p.chiave || 'senza numero'} ${p.kg} kg`).join('; ')}. Di solito sono le righe dei totali in fondo al foglio, contate per errore come carichi.`);
     }
-    // Per primo, prima di ogni altra nota: un carico di un mese precedente che
-    // nel gestionale non risulta. Nel consuntivo di settembre di NAPPI SUD ce
-    // n'era uno del 13 luglio, senza numero d'ordine.
-    const arretrati = avvisoArretrati(confronto);
-    if (arretrati) avvisiPeriodo.unshift(arretrati);
+    // Per primi, prima di ogni altra nota: gli errori sulle date. Una data di un
+    // mese che non c'entra e' un errore del file (utente, 01/10/2026); un carico
+    // che da noi non risulta ha un termine che corre; una riga che e' davvero di
+    // un altro mese va nel consuntivo del suo mese. Nel consuntivo di settembre
+    // di NAPPI SUD c'era un carico scritto 13 luglio.
+    avvisiPeriodo.unshift(...avvisiDate(confronto));
     if (avvisiPeriodo.length) noteLettura = [...avvisiPeriodo, ...noteLettura];
     const costoOggi = puoVedereICosti
       ? costoAttesoDallaPassiva(passiva, fornitore, ruolo)

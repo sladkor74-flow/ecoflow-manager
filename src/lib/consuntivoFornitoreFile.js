@@ -58,8 +58,23 @@ export function scaricaExcelConsuntivo(consuntivo, esito) {
       ['Importo ricalcolato oggi', congelato.importo_oggi === null ? '' : congelato.importo_oggi],
       ['Si e\' mosso', congelato.cambiato ? 'si, e va capito perche' : 'no']);
   }
-  // In testa alle note, i carichi di altri mesi che nel gestionale non
-  // risultano: non sono chili di questo mese, ma hanno una scadenza (01/10/2026).
+  // Gli errori sulle date, in testa alle note. Una data di un mese che non
+  // c'entra e' un errore del file del fornitore (01/10/2026).
+  const gg = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d)) ? `${String(d).slice(8, 10)}/${String(d).slice(5, 7)}/${String(d).slice(0, 4)}` : '');
+  const sbagliate = (confronto.date_sbagliate || []).filter(Boolean);
+  if (sbagliate.length) {
+    info.push([], ['DATA SBAGLIATA: carichi di questo mese con la data di un altro', `${sbagliate.length}. Restano nel confronto perche' i chili sono di questo mese, ma la data sul consuntivo va corretta.`]);
+    for (const a of sbagliate) {
+      info.push([a.numero_fir || a.id_ordine || 'senza numero', `${a.kg} kg: sul consuntivo ${gg(a.giorno)}, da noi il trasporto si conclude il ${gg(a.nostro_giorno)}`]);
+    }
+  }
+  const altriMesi = (confronto.altri_mesi || []).filter(Boolean);
+  if (altriMesi.length && !confronto.registro_di_piu_mesi) {
+    info.push([], ['Righe di un altro mese', `${altriMesi.length}: anche da noi quei carichi si concludono in un altro mese, quindi vanno nel consuntivo del loro mese. Se quel mese e' stato fatturato, attenzione a non pagarle due volte.`]);
+    for (const a of altriMesi) info.push([a.numero_fir || a.id_ordine || 'senza numero', `${a.kg} kg del ${gg(a.giorno)}`]);
+  }
+  // I carichi di altri mesi che nel gestionale non risultano: non sono chili di
+  // questo mese, ma hanno una scadenza (01/10/2026).
   const arretrati = (confronto.arretrati || []).filter(Boolean);
   if (arretrati.length) {
     info.push([], ['DA REGISTRARE: carichi di altri mesi che non risultano', `${arretrati.length} (${confronto.kg_arretrati || 0} kg). Non entrano nei conti di questo mese. Il termine per la registrazione e\' di dieci giorni dalla data di partenza, domeniche escluse.`]);

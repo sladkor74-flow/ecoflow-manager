@@ -49,12 +49,30 @@ function eGiallo(argb) {
   return r >= 230 && g >= 150 && b <= 210 && r - b >= 45;
 }
 
-function valoreCella(v) {
+// IL GIORNO DI UNA CELLA EXCEL NON HA UN FUSO, MA LE DUE LIBRERIE NON SONO
+// D'ACCORDO SU DOVE METTERLO.
+//
+// Un file .xlsx si legge con exceljs, che di «14/07/2026» fa mezzanotte UTC.
+// Tutti gli altri formati - .xls, .ods, .csv - si leggono con l'altra libreria,
+// che della stessa cella fa mezzanotte LOCALE, cioe' le 22:00 UTC del giorno
+// prima. Prendere sempre la parte UTC, come si faceva, sposta quelli della
+// seconda strada INDIETRO DI UN GIORNO: dall'Italia siamo sempre avanti su UTC.
+//
+// Non e' un dettaglio: un carico del 1 settembre letto 31 agosto cambia mese, e
+// in un consuntivo di settembre diventa «riga di un altro mese». Si guarda
+// dove cade la mezzanotte e si legge il giorno di conseguenza - vale in
+// qualunque fuso, perche' una delle due e' sempre mezzanotte esatta.
+export function giornoDaExcel(d) {
+  if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export function valoreCella(v) {
   if (v === null || v === undefined) return null;
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (v instanceof Date) return giornoDaExcel(v);
   if (typeof v === 'object') {
     if (v.richText) return v.richText.map(t => t.text).join('');
-    if (v.result !== undefined) return v.result instanceof Date ? v.result.toISOString().slice(0, 10) : v.result;
+    if (v.result !== undefined) return v.result instanceof Date ? giornoDaExcel(v.result) : v.result;
     if (v.text !== undefined) return v.text;
     return null;
   }

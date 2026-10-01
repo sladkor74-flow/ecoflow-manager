@@ -35,6 +35,8 @@ import { formatoKg } from "./formato.ts";
 
 const kgTondi = (v) => Math.round(Number(v) || 0);
 const pulisci = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+/** 'AAAA-MM-GG' come lo legge una persona: 13/07/2026. */
+const giornoIt = (g) => (/^\d{4}-\d{2}-\d{2}$/.test(String(g)) ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : 'data non leggibile');
 const centesimi = (v) => Math.round((Number(v) || 0) * 100);
 
 /** I ruoli con cui un fornitore ci fattura, e che cosa si guarda per ciascuno. */
@@ -198,6 +200,88 @@ const PARE_FIR = (v) => {
  * dalla forma dei valori. Quello che NON si e' riusciti a leggere si dice: una riga
  * saltata in silenzio sono chili che spariscono.
  */
+// === UNA STAMPA INCOLLATA IN EXCEL ===
+//
+// ECORECUPERI non manda un foglio di calcolo: manda la sua stampa «Elenco
+// Movimenti», dove ogni riga e' una stringa sola con le colonne allineate a
+// spazi. Il formulario e la data stanno dentro la stessa stringa del produttore,
+// e il peso sta su un'altra riga dello stesso blocco:
+//
+//   002453            000156   TECNOGUM S.R.L.                        10.120
+//   900000            ECORECUPERI SRL
+//   MELENCHI S.R.L.                     LQQDP001425TP   01-09-2026   160103
+//
+// Qui non si indovina niente - e' la regola che ha retto il resto del lettore.
+// Si riconoscono due forme precise e si pretende che stiano insieme: la riga del
+// carico deve portare un formulario nel formato regolare (cinque lettere, sei
+// cifre, due lettere) e una data; la riga del peso deve cominciare con un codice
+// di sei cifre e finire con un numero. Fra le due non ci puo' essere un altro
+// carico, e lo stesso peso non si usa due volte. Se una di queste cose non
+// torna, quel carico si dice illeggibile invece di prendergli un numero da
+// un'altra riga.
+const STAMPA_FIR = /([A-Z]{5}\d{6}[A-Z]{2})/;
+const STAMPA_DATA = /(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/;
+const STAMPA_CODICE = /^\d{6}\b/;
+// Quante righe si guarda indietro per trovare il peso: nel blocco ce ne stanno
+// due (il codice dell'intermediario e, sulla prima pagina, l'intestazione).
+const STAMPA_INDIETRO = 5;
+// Sotto i tre carichi non e' una stampa di movimenti: e' un foglio qualunque in
+// cui per caso compare un codice, e leggerlo sarebbe esattamente l'indovinello
+// che si e' tolto.
+const STAMPA_MINIMO = 3;
+
+/**
+ * I carichi di una stampa incollata in Excel: { righe, note }, oppure null se il
+ * foglio non ha quella forma. Non legge mai per approssimazione: quello che non
+ * riconosce lo dice.
+ */
+export function righeDaStampa(celle, nome = '') {
+  const testo = (celle || []).map(r => (r || []).map(c => pulisci(c)).filter(Boolean).join('  ').trim());
+  const eCarico = (s) => STAMPA_FIR.test(s) && STAMPA_DATA.test(s);
+  const pesoDi = (s) => {
+    if (!STAMPA_CODICE.test(s) || eCarico(s)) return null;
+    const n = comeNumero(String(s).split(/\s+/).pop());
+    return n !== null && n > 0 ? Math.round(n) : null;
+  };
+  const carichi = testo.map((s, i) => (eCarico(s) ? i : -1)).filter(i => i >= 0);
+  if (carichi.length < STAMPA_MINIMO) return null;
+
+  const righe = [];
+  const senzaPeso = [];
+  const usati = new Set();
+  for (const i of carichi) {
+    const s = testo[i];
+    const fir = s.match(STAMPA_FIR)[1];
+    const giorno = comeGiorno(s.match(STAMPA_DATA)[0]);
+    const produttore = pulisci(s.slice(0, s.indexOf(fir)));
+    let kg = null;
+    for (let k = i - 1; k >= 0 && k >= i - STAMPA_INDIETRO; k--) {
+      // Arrivati al carico precedente si smette: il suo peso e' suo.
+      if (eCarico(testo[k])) break;
+      const p = pesoDi(testo[k]);
+      if (p === null) continue;
+      // Un peso gia' assegnato non si riusa: vorrebbe dire che il blocco non e'
+      // come credevamo, e allora e' meglio dirlo.
+      if (usati.has(k)) break;
+      kg = p;
+      usati.add(k);
+      break;
+    }
+    if (kg === null) { senzaPeso.push(fir); continue; }
+    righe.push({ numero_fir: fir, id_ordine: '', kg, importo: null, giorno, classe: '', produttore });
+  }
+  if (!righe.length) return null;
+
+  const note = [`Foglio "${nome}": non e' un foglio di calcolo, e' una stampa incollata in Excel. Ho letto ${righe.length} ${righe.length === 1 ? 'carico' : 'carichi'} prendendo formulario e data dalla riga del carico e il peso dalla riga del codice sopra di lui.`];
+  if (senzaPeso.length) {
+    const quali = `${senzaPeso.slice(0, 5).join(', ')}${senzaPeso.length > 5 ? ', e altri' : ''}`;
+    note.push(senzaPeso.length === 1
+      ? `Foglio "${nome}": un carico non ha un peso riconoscibile nel suo blocco e non l'ho letto (${quali}): meglio dirlo che prendergli un numero da un'altra riga.`
+      : `Foglio "${nome}": ${senzaPeso.length} carichi non hanno un peso riconoscibile nel loro blocco e non li ho letti (${quali}): meglio dirlo che prendergli un numero da un'altra riga.`);
+  }
+  return { righe, note };
+}
+
 export function leggiRigheConsuntivo(tabelle) {
   const righe = [];
   const note = [];
@@ -233,6 +317,16 @@ export function leggiRigheConsuntivo(tabelle) {
     // Quindi si dice che non si sa leggere, e si dice che cosa fare. Una frase
     // che ammette di non capire e' piu' utile di una tabella inventata.
     if (iTesta < 0) {
+      // Prima di arrendersi: puo' essere una stampa incollata in Excel, dove le
+      // colonne non esistono e le intestazioni non ci sono per definizione
+      // (ECORECUPERI). Si riconosce dalla forma delle righe, non si indovina.
+      const stampa = righeDaStampa(t, nome);
+      if (stampa) {
+        righe.push(...stampa.righe);
+        note.push(...stampa.note);
+        colonneLette.push({ foglio: nome, colonne: { numero_fir: '(stampa: formulario nella riga del carico)', giorno: '(stampa: data nella riga del carico)', kg: '(stampa: peso nella riga del codice sopra)' } });
+        continue;
+      }
       const haFormulari = corpo.some(r => (r || []).some(c => PARE_FIR(c)));
       note.push(haFormulari
         ? `Foglio "${nome}": ci sono dei formulari ma non riconosco la riga delle intestazioni, quindi non so quale colonna sia il peso. Non l'ho letto: indovinare la colonna dei chili vorrebbe dire scrivere numeri sbagliati con l'aria di essere giusti. Serve un foglio con le intestazioni (per esempio "N. FORMULARIO" e "KG"), oppure dimmi tu quali colonne sono.`
@@ -560,28 +654,43 @@ export function movimentiDelFornitore(archivi, { fornitore, ruolo, anno, mese, c
  * Una tolleranza sui chili si passa da fuori: qui non si decide quanto e' "uguale".
  */
 /**
- * TUTTE LE CHIAVI CHE IL GESTIONALE CONOSCE: formulari e numeri d'ordine di
+ * TUTTE LE CHIAVI CHE IL GESTIONALE CONOSCE, con le date dei nostri movimenti:
+ * una Map `chiave -> { giorni: [...] }` su formulari e numeri d'ordine di
  * qualunque mese, canale e stato.
  *
- * Serve a una cosa sola: distinguere una riga di un altro mese che nel gestionale
- * c'e' - e quindi e' solo di un altro mese - da una che non c'e' per niente.
- * La seconda e' un carico mai registrato, e il termine per registrarlo (dieci
- * giorni dalla partenza, domeniche escluse) e' probabilmente passato.
+ * Serve a distinguere tre cose che sembrano la stessa:
+ * - un carico che da noi NON c'e' per niente: mai registrato, e il termine per
+ *   registrarlo (dieci giorni dalla partenza, domeniche escluse) corre;
+ * - un carico che da noi c'e' e si conclude in un altro mese: la riga e'
+ *   davvero di un altro mese;
+ * - un carico che da noi si conclude NEL mese verificato: allora la data
+ *   scritta sul consuntivo e' sbagliata, ed e' un errore del file.
  *
- * Qualunque stato, anche "eseguito" o "in corso": la domanda non e' se il
- * carico sia chiuso, e' se il formulario esista da qualche parte da noi. Non
- * costa richieste alla piattaforma: gli archivi sono gia' in memoria.
+ * Qualunque stato, anche "eseguito" o "in corso": la domanda non e' se il carico
+ * sia chiuso, e' se il formulario esista da qualche parte da noi. Non costa
+ * richieste alla piattaforma: gli archivi sono gia' in memoria.
  */
 export function chiaviDelGestionale(archivi) {
-  const noti = new Set();
+  const noti = new Map();
   const a = archivi || {};
   for (const righe of [a.primarieRete, a.primarieAci, a.secondarie, a.extraRaccolta]) {
     for (const r of righe || []) {
-      for (const k of chiaviRiga({ numero_fir: chiaveFormulario(r), id_ordine: r.id_ordine })) noti.add(k);
+      const giorno = giornoMovimento(r) || '';
+      for (const k of chiaviRiga({ numero_fir: chiaveFormulario(r), id_ordine: r.id_ordine })) {
+        if (!noti.has(k)) noti.set(k, { giorni: [] });
+        if (giorno && !noti.get(k).giorni.includes(giorno)) noti.get(k).giorni.push(giorno);
+      }
     }
   }
   return noti;
 }
+
+// Da quanti mesi diversi un file e' un REGISTRO e non il consuntivo di un mese.
+// IRIGOM manda il registro di carico e scarico dell'anno: dodici mesi, e le righe
+// degli altri mesi sono la natura del documento, non un errore. Un consuntivo di
+// settembre porta settembre e qualche sbavatura a cavallo del mese: tre mesi al
+// massimo. Da quattro in su si smette di chiamarli errori.
+const MESI_DA_REGISTRO = 4;
 
 export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg = 0, canale = '', nome_file = '', anno = null, mese = null, formulari_noti = null } = {}) {
   // LE RIGHE DI UN ALTRO MESE NON SI CONFRONTANO.
@@ -595,41 +704,67 @@ export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg 
   // mese sia, e buttarla fuori sarebbe peggio che confrontarla.
   const annoNum = Number(anno), meseNum = Number(mese);
   const filtraPeriodo = annoNum > 0 && meseNum >= 1 && meseNum <= 12;
+  const noti = formulari_noti && typeof formulari_noti.get === 'function' ? formulari_noti : null;
   const fuoriPeriodo = [];
+  // UNA DATA DI UN ALTRO MESE SU UN CARICO DI QUESTO MESE E' UN ERRORE DEL FILE.
+  //
+  // Parole dell'utente (01/10/2026): «non e' concepibile scrivere una data di
+  // registrazione formulario di verifica del mese, indipendentemente dalla
+  // settimana, con un mese che non c'entra niente: deve essere evidenziato come
+  // errore». Nel consuntivo di settembre di NAPPI SUD un carico porta il 13
+  // luglio: il formulario e' di settembre, la data e' sbagliata. Messo da parte
+  // come "riga di un altro mese", quel carico sparirebbe dal confronto e i suoi
+  // chili mancherebbero dalla parte del fornitore, inventando una difformita'
+  // altrove.
+  const dateSbagliate = [];   // il nostro movimento e' DI questo mese: la data e' sbagliata
+  const altriMesi = [];       // il nostro movimento e' davvero di un altro mese
+  const arretrati = [];       // da noi non risulta per niente
+  // Quanti mesi diversi porta il file: da quattro in su e' un registro, e le
+  // righe degli altri mesi non sono errori.
+  const mesiNelFile = new Set();
+  for (const r of righeConsuntivo || []) {
+    const g = String((r && r.giorno) || '');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(g)) mesiNelFile.add(g.slice(0, 7));
+  }
+  const registroDiPiuMesi = mesiNelFile.size >= MESI_DA_REGISTRO;
+
   if (filtraPeriodo) {
+    const delMese = (g) => Number(g.slice(0, 4)) === annoNum && Number(g.slice(5, 7)) === meseNum;
+    const nostriGiorni = (chiavi) => {
+      const out = [];
+      for (const k of chiavi) for (const g of ((noti && noti.get(k)) || { giorni: [] }).giorni) if (!out.includes(g)) out.push(g);
+      return out;
+    };
+    const voce = (r, g, nostro) => ({
+      numero_fir: pulisci(r && r.numero_fir),
+      id_ordine: pulisci(r && r.id_ordine),
+      kg: Math.round(Number(r && r.kg) || 0),
+      giorno: g,
+      mese: g.slice(0, 7),
+      ...(nostro ? { nostro_giorno: nostro } : {}),
+    });
     const dentro = [];
     for (const r of righeConsuntivo || []) {
       const g = String((r && r.giorno) || '');
-      if (/^\d{4}-\d{2}-\d{2}$/.test(g) && !(Number(g.slice(0, 4)) === annoNum && Number(g.slice(5, 7)) === meseNum)) fuoriPeriodo.push(r);
-      else dentro.push(r);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(g) || delMese(g)) { dentro.push(r); continue; }
+      const chiavi = chiaviRiga(r);
+      const nostre = noti && chiavi.length ? nostriGiorni(chiavi) : [];
+      const nostroNelMese = nostre.find(delMese);
+      if (nostroNelMese) {
+        // Il carico e' di questo mese: la riga rientra nel confronto, e la data
+        // sbagliata si segnala. Toglierla farebbe mancare i suoi chili.
+        dateSbagliate.push(voce(r, g, nostroNelMese));
+        dentro.push(r);
+        continue;
+      }
+      fuoriPeriodo.push(r);
+      if (!noti || !chiavi.length) continue;
+      if (!chiavi.some(k => noti.has(k))) arretrati.push({ ...voce(r, g), termine: termineDi(g, 'report_arrivo') });
+      else altriMesi.push(voce(r, g, nostre[0] || ''));
     }
     righeConsuntivo = dentro;
   }
 
-  // MA UNA RIGA DI UN ALTRO MESE CHE NEL GESTIONALE NON C'E' NON SI METTE DA
-  // PARTE IN SILENZIO.
-  //
-  // E' la stessa cosa che il 01/10/2026 e' costata un richiamo in ufficio sul
-  // report settimanale: un carico che il fornitore non ci aveva mandato, comparso
-  // in un elenco successivo, scartato perche' "di un altro periodo" mentre il
-  // termine per registrarlo scadeva. Nel consuntivo di settembre di NAPPI SUD ce
-  // n'e' uno del 13 luglio, senza numero d'ordine. Se nel gestionale il
-  // formulario c'e', la riga e' soltanto di un altro mese e non si dice niente.
-  const arretrati = [];
-  if (fuoriPeriodo.length && formulari_noti) {
-    for (const r of fuoriPeriodo) {
-      const chiavi = chiaviRiga(r);
-      if (!chiavi.length || chiavi.some(k => formulari_noti.has(k))) continue;
-      const g = String((r && r.giorno) || '');
-      arretrati.push({
-        numero_fir: pulisci(r && r.numero_fir),
-        id_ordine: pulisci(r && r.id_ordine),
-        kg: Math.round(Number(r && r.kg) || 0),
-        giorno: g,
-        termine: termineDi(g, 'report_arrivo'),
-      });
-    }
-  }
   // Ogni gruppo tiene TUTTE le sue chiavi - formulario e ordine - cosi' una riga
   // del consuntivo che porta solo l'ordine trova lo stesso il nostro movimento, che
   // il formulario ce l'ha sempre.
@@ -748,6 +883,16 @@ export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg 
     arretrati,
     arretrati_da_registrare: arretrati.length,
     kg_arretrati: kgTondi(arretrati.reduce((s, r) => s + (Number(r.kg) || 0), 0)),
+    // LA DATA SBAGLIATA: il carico e' di questo mese e il consuntivo scrive un
+    // altro mese. La riga resta nel confronto, l'errore si dice.
+    date_sbagliate: dateSbagliate,
+    date_sbagliate_quante: dateSbagliate.length,
+    // Le righe che sono davvero di un altro mese: un errore di composizione del
+    // file, a meno che il file sia il registro di piu' mesi.
+    altri_mesi: altriMesi,
+    altri_mesi_quante: altriMesi.length,
+    registro_di_piu_mesi: registroDiPiuMesi,
+    mesi_nel_file: [...mesiNelFile].sort(),
     canali_altrui: [...new Set(voci.filter(v => v.esito === 'altro_canale').map(v => v.canale_riga))],
     // Le righe del consuntivo senza formulario e senza ordine: non si possono
     // abbinare a niente, e tacerle le farebbe sparire dal conto.
@@ -770,12 +915,53 @@ export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg 
 export function avvisoArretrati(confronto) {
   const righe = (confronto && confronto.arretrati) || [];
   if (!righe.length) return '';
-  const it = (g) => (/^\d{4}-\d{2}-\d{2}$/.test(String(g)) ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : 'data non leggibile');
   const elenco = righe.slice(0, 10).map(a =>
-    `${a.numero_fir || a.id_ordine || 'senza numero'} del ${it(a.giorno)}, ${formatoKg(a.kg)} kg${a.termine ? ` (${testoScadenza(a.termine.scadenza)})` : ''}`);
+    `${a.numero_fir || a.id_ordine || 'senza numero'} del ${giornoIt(a.giorno)}, ${formatoKg(a.kg)} kg${a.termine ? ` (${testoScadenza(a.termine.scadenza)})` : ''}`);
   if (righe.length > elenco.length) elenco.push(`e altri ${righe.length - elenco.length}`);
   return `${righe.length === 1 ? 'Un carico di un altro mese compare in questo consuntivo e nel gestionale non risulta' : `${righe.length} carichi di altri mesi compaiono in questo consuntivo e nel gestionale non risultano`}: ${elenco.join('; ')}. `
     + `Non entrano nei conti di questo mese, ma vanno caricati a portale e segnalati all'ufficio registrazioni: il termine e' di ${GIORNI_TERMINE_REGISTRAZIONE} giorni dalla data di partenza, domeniche escluse.`;
+}
+
+/**
+ * GLI AVVISI SULLE DATE, in ordine di gravita', pronti da mettere in testa alle
+ * note del confronto:
+ *
+ * 1. la data sbagliata - il carico e' di questo mese e il consuntivo ne scrive
+ *    un altro: e' un errore del file, e va corretto la' (utente, 01/10/2026);
+ * 2. i carichi che da noi non risultano, col termine di registrazione;
+ * 3. le righe che sono davvero di un altro mese: o la data e' sbagliata, o
+ *    quelle righe vanno nel consuntivo del loro mese - e se quel mese e' stato
+ *    fatturato, c'e' il rischio di pagarle due volte. A meno che il file sia il
+ *    registro di piu' mesi, e allora e' la sua natura e si dice cosi'.
+ */
+export function avvisiDate(confronto) {
+  const c = confronto || {};
+  const avvisi = [];
+
+  const sbagliate = c.date_sbagliate || [];
+  if (sbagliate.length) {
+    const elenco = sbagliate.slice(0, 10).map(a =>
+      `${a.numero_fir || a.id_ordine || 'senza numero'}, ${formatoKg(a.kg)} kg: il consuntivo scrive ${giornoIt(a.giorno)}, da noi il trasporto si conclude il ${giornoIt(a.nostro_giorno)}`);
+    if (sbagliate.length > elenco.length) elenco.push(`e altri ${sbagliate.length - elenco.length}`);
+    avvisi.push(`DATA SBAGLIATA su ${sbagliate.length === 1 ? 'un carico' : `${sbagliate.length} carichi`}: ${elenco.join('; ')}. `
+      + `${sbagliate.length === 1 ? 'Il carico e\' di questo mese e resta' : 'I carichi sono di questo mese e restano'} nel confronto, ma sul consuntivo ${sbagliate.length === 1 ? 'porta' : 'portano'} la data di un mese che non c'entra: va corretta nel file del fornitore.`);
+  }
+
+  const arretrati = avvisoArretrati(c);
+  if (arretrati) avvisi.push(arretrati);
+
+  const altri = c.altri_mesi || [];
+  if (altri.length) {
+    if (c.registro_di_piu_mesi) {
+      avvisi.push(`Il file copre ${(c.mesi_nel_file || []).length} mesi diversi: e' un registro, non il consuntivo di un mese solo. Le ${altri.length} righe degli altri mesi restano fuori dal confronto, e non sono una difformita'.`);
+    } else {
+      const elenco = altri.slice(0, 10).map(a => `${a.numero_fir || a.id_ordine || 'senza numero'} del ${giornoIt(a.giorno)}, ${formatoKg(a.kg)} kg`);
+      if (altri.length > elenco.length) elenco.push(`e altre ${altri.length - elenco.length}`);
+      avvisi.push(`${altri.length === 1 ? 'Una riga appartiene' : `${altri.length} righe appartengono`} a un altro mese, e anche da noi ${altri.length === 1 ? 'quel carico si conclude' : 'quei carichi si concludono'} in un altro mese: ${elenco.join('; ')}. `
+        + `Un consuntivo del mese deve portare i carichi del mese: ${altri.length === 1 ? 'quella riga va' : 'quelle righe vanno'} nel consuntivo del ${altri.length === 1 ? 'suo' : 'loro'} mese. Se quel mese e' stato fatturato, attenzione a non pagarle due volte.`);
+    }
+  }
+  return avvisi;
 }
 
 /**
@@ -848,9 +1034,17 @@ export function esitoConsuntivo({ confronto, costo, importo_consuntivo = null, t
     // buono, perche' null non e' false: era il caso del subfornitore e del
     // trasportatore di extra raccolta, dichiarati a posto senza che il gestionale
     // avesse un solo euro da opporre.
+    // Una data di un mese che non c'entra e' un errore del documento, non una
+    // nota a margine: il riquadro non puo' restare verde con scritto dentro che
+    // c'e' un errore (utente, 01/10/2026). Vale anche per le righe che sono
+    // davvero di un altro mese, perche' in un consuntivo del mese non ci vanno e
+    // se il loro mese e' stato fatturato si rischia di pagarle due volte. Un
+    // registro di piu' mesi e' un'altra cosa: quelle righe sono la sua natura.
     quadra_tutto: confronto.quadra
       && quadraPassiva === true
-      && (quadraImporto === null || quadraImporto === true),
+      && (quadraImporto === null || quadraImporto === true)
+      && !confronto.date_sbagliate_quante
+      && !(confronto.fuori_periodo && !confronto.registro_di_piu_mesi),
     // Che cosa NON si e' potuto controllare: dirlo e' diverso dal dire che va bene.
     non_controllato: [
       !costo || !costo.trovato ? 'il costo previsto (la fatturazione passiva non ha una riga per questo fornitore in questo ruolo)' : '',
@@ -871,8 +1065,18 @@ export function testoEsitoConsuntivo(confronto, esito) {
     if (confronto.senza_chiave) q.push(`${confronto.senza_chiave} righe senza formulario ne' ordine, che non si possono abbinare`);
     parti.push(`Il consuntivo non corrisponde: ${q.join(', ')}.`);
   }
+  // LA DATA DI UN MESE CHE NON C'ENTRA E' UN ERRORE, e si dice subito dopo la
+  // quadratura (utente, 01/10/2026). Prima quelle righe finivano nel mucchio
+  // delle "righe di un altro mese: non sono una difformità", che per un carico
+  // di questo mese con la data scritta male e' falso.
+  if (confronto.date_sbagliate_quante) {
+    const n = confronto.date_sbagliate_quante;
+    parti.push(`${n === 1 ? 'Un carico porta la data di un altro mese' : `${n} carichi portano la data di un altro mese`}, ma ${n === 1 ? 'si conclude' : 'si concludono'} in questo: ${(confronto.date_sbagliate || []).slice(0, 5).map(a => `${a.numero_fir || a.id_ordine} scritto ${giornoIt(a.giorno)} invece di ${giornoIt(a.nostro_giorno)}`).join('; ')}. È un errore del file del fornitore e va corretto.`);
+  }
   if (confronto.fuori_periodo) {
-    parti.push(`${confronto.fuori_periodo === 1 ? 'Una riga del consuntivo è' : `${confronto.fuori_periodo} righe del consuntivo sono`} di un altro mese (${confronto.kg_fuori_periodo} kg): restano fuori dal confronto, e non sono una difformità. Succede con i registri che coprono tutto l'anno.`);
+    parti.push(confronto.registro_di_piu_mesi
+      ? `${confronto.fuori_periodo === 1 ? 'Una riga del consuntivo è' : `${confronto.fuori_periodo} righe del consuntivo sono`} di un altro mese (${confronto.kg_fuori_periodo} kg): il file copre ${(confronto.mesi_nel_file || []).length} mesi, è un registro, e quelle righe restano fuori dal confronto senza essere una difformità.`
+      : `${confronto.fuori_periodo === 1 ? 'Una riga del consuntivo è' : `${confronto.fuori_periodo} righe del consuntivo sono`} di un altro mese (${confronto.kg_fuori_periodo} kg) e restano fuori dal confronto: un consuntivo del mese deve portare i carichi del mese, quindi vanno chiarite col fornitore prima di pagarle — anche per non pagarle due volte se il loro mese è già stato fatturato.`);
   }
   // Le righe di un altro canale si dicono SEMPRE, anche quando tutto il resto
   // quadra: se nessuno apre l'altro canale, quelle righe non le controlla nessuno.

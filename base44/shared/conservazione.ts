@@ -403,6 +403,14 @@ export function storiaConsuntivo(c, esitoCompleto = null) {
   if (r.importo_consuntivo !== undefined && r.importo_consuntivo !== null && r.importo_consuntivo !== '') {
     righe.push(`Importo scritto sul consuntivo: ${Number(r.importo_consuntivo).toFixed(2)} euro.`);
   }
+  // Le date sbagliate: un carico di questo mese scritto con la data di un altro
+  // mese. E' un errore del file del fornitore e resta scritto (01/10/2026).
+  const sbagliate = (conf.date_sbagliate || []).filter(Boolean);
+  if (sbagliate.length) {
+    righe.push(`Carichi di questo mese con la data di un altro mese: ${sbagliate.length} — ` + elenco(sbagliate.map(a =>
+      `${testo(a.numero_fir) || testo(a.id_ordine) || 'senza numero'}, ${formatoKg(numero(a.kg))} kg, scritto ${it(String(a.giorno))} invece di ${it(String(a.nostro_giorno))}`
+    ), 20).join('; ') + '.');
+  }
   // I carichi di altri mesi che nel gestionale non risultavano: a quaranta
   // giorni il dettaglio se ne va, e questa riga e' tutto quello che resta di un
   // carico mai registrato (01/10/2026).

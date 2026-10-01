@@ -10,7 +10,7 @@
 // periodo e' la fine trasporto, le quote dello stesso formulario si sommano prima
 // del confronto, e quello che manca da una parte o dall'altra si dice.
 // npm run prove
-import { movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, esitoConsuntivo, testoEsitoConsuntivo, chiaveRiga, chiaveFir, leggiRigheConsuntivo, pareOrdine, periodoSospetto, righeCheParonoTotali, colonneDaIntestazioni, importoTotaleDalFoglio, canaleDaClasse, canaleDellaRiga, chiaviDelGestionale, avvisoArretrati } from '../base44/shared/consuntivoFornitore.ts';
+import { movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, esitoConsuntivo, testoEsitoConsuntivo, chiaveRiga, chiaveFir, leggiRigheConsuntivo, pareOrdine, periodoSospetto, righeCheParonoTotali, colonneDaIntestazioni, importoTotaleDalFoglio, canaleDaClasse, canaleDellaRiga, chiaviDelGestionale, avvisoArretrati, avvisiDate, righeDaStampa } from '../base44/shared/consuntivoFornitore.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -323,7 +323,13 @@ console.log('LE RIGHE DI UN ALTRO MESE RESTANO FUORI');
   verifica('il consuntivo quadra', c.quadra === true, J(c));
   const testo = testoEsitoConsuntivo(c, esitoConsuntivo({ confronto: c, costo: null }));
   verifica('e il testo lo spiega', /2 righe del consuntivo sono di un altro mese/.test(testo), testo);
-  verifica('dicendo che succede coi registri annuali', /registri che coprono tutto l'anno/.test(testo), testo);
+  // Tre mesi non fanno un registro: in un consuntivo del mese quelle due righe
+  // vanno chiarite, non archiviate come normali (utente, 01/10/2026). Senza le
+  // chiavi del gestionale non si puo' dire di piu': non si sa se da noi quei
+  // carichi ci sono, quindi non si accusa nessuno di non averli registrati.
+  verifica('dicendo che in un consuntivo del mese vanno chiarite', /vanno chiarite col fornitore prima di pagarle/.test(testo), testo);
+  verifica('senza le chiavi del gestionale non si distingue di piu', c.date_sbagliate_quante === 0
+    && c.arretrati_da_registrare === 0 && c.altri_mesi_quante === 0 && c.registro_di_piu_mesi === false, J({ s: c.date_sbagliate_quante, a: c.arretrati_da_registrare, m: c.altri_mesi_quante }));
 }
 {
   // Una riga senza data non si sa di che mese sia: resta nel confronto, perche'
@@ -593,6 +599,89 @@ console.log('\nUN CARICO DI UN ALTRO MESE CHE NEL GESTIONALE NON RISULTA');
   verifica('senza le chiavi non si accusa nessuno', senza.arretrati_da_registrare === 0 && senza.fuori_periodo === 2, J(senza.arretrati));
   verifica('e senza arretrati l\'avviso e\' vuoto', avvisoArretrati(senza) === '' && avvisoArretrati(null) === '');
 }
+// === LA DATA DI UN MESE CHE NON C'ENTRA E' UN ERRORE ===
+//
+// Parole dell'utente (01/10/2026): «non e' concepibile scrivere una data di
+// registrazione formulario di verifica del mese, indipendentemente dalla
+// settimana, con un mese che non c'entra niente: deve essere evidenziato come
+// errore». L'errore di NAPPI era di aver scritto luglio su un carico di
+// settembre. Le tre cose che prima sembravano la stessa:
+//   a) il carico da noi si conclude NEL mese: la data e' sbagliata, e la riga
+//      deve restare nel confronto o i suoi chili mancano;
+//   b) da noi non risulta per niente: mai registrato, col termine che corre;
+//   c) da noi si conclude davvero in un altro mese: va nel consuntivo di quel
+//      mese, e se quel mese e' fatturato si rischia di pagarlo due volte.
+console.log('\nUNA DATA DI UN ALTRO MESE SU UN CARICO DI QUESTO MESE');
+{
+  const mov = (fir, ordine, giorno, kg) => ({ numero_fir: fir, id_ordine: ordine, stato: 'terminato', peso_effettivo: kg, trasporto_finito_il: `${giorno}T09:00:00Z` });
+  const archivi = {
+    primarieRete: [
+      mov('BSDCL001000AA', 'ET26150000', '2026-09-10', 3000),
+      // il carico che NAPPI ha scritto 13 luglio: da noi e' del 29 settembre
+      mov('RGYTR027595LQ', 'ET26150001', '2026-09-29', 800),
+      // questo invece e' davvero di agosto
+      mov('RGYTR027030CR', 'ET26134560', '2026-08-31', 1680),
+    ],
+    primarieAci: [], secondarie: [], extraRaccolta: [],
+  };
+  const noti = chiaviDelGestionale(archivi);
+  verifica('le chiavi portano anche le date dei nostri movimenti', noti.get('FIR:RGYTR027595LQ').giorni[0] === '2026-09-29'
+    && noti.get('FIR:RGYTR027030CR').giorni[0] === '2026-08-31', J([...noti]));
+
+  const righe = [
+    { numero_fir: 'BSDCL001000AA', kg: 3000, giorno: '2026-09-10' },
+    { numero_fir: 'RGYTR027595LQ', kg: 800, giorno: '2026-07-13', id_ordine: 'ET' },  // data sbagliata
+    { numero_fir: 'RGYTR027030CR', kg: 1680, giorno: '2026-08-31' },                   // davvero di agosto
+    { numero_fir: 'HTQKS009999ZZ', kg: 500, giorno: '2026-07-20' },                    // mai registrato
+  ];
+  const movimenti = [
+    { numero_fir: 'BSDCL001000AA', id_ordine: 'ET26150000', peso_effettivo: 3000 },
+    { numero_fir: 'RGYTR027595LQ', id_ordine: 'ET26150001', peso_effettivo: 800 },
+  ];
+  const c = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1, anno: 2026, mese: 9, formulari_noti: noti });
+
+  verifica('la data sbagliata si segnala, una sola', c.date_sbagliate_quante === 1
+    && c.date_sbagliate[0].numero_fir === 'RGYTR027595LQ' && c.date_sbagliate[0].giorno === '2026-07-13'
+    && c.date_sbagliate[0].nostro_giorno === '2026-09-29', J(c.date_sbagliate));
+  verifica('e la sua riga RESTA nel confronto, coi suoi chili', c.uguali === 2 && c.totale_consuntivo_kg === 3800
+    && c.solo_gestionale === 0, J({ u: c.uguali, kg: c.totale_consuntivo_kg, sg: c.solo_gestionale }));
+  verifica('la riga davvero di agosto resta fuori e si dice a parte', c.altri_mesi_quante === 1
+    && c.altri_mesi[0].numero_fir === 'RGYTR027030CR' && c.altri_mesi[0].nostro_giorno === '2026-08-31', J(c.altri_mesi));
+  verifica('quella mai registrata resta fra gli arretrati', c.arretrati_da_registrare === 1
+    && c.arretrati[0].numero_fir === 'HTQKS009999ZZ' && c.arretrati[0].termine.scadenza === '2026-07-31', J(c.arretrati));
+  verifica('fuori dal confronto ce ne restano due, non tre', c.fuori_periodo === 2 && c.kg_fuori_periodo === 2180, J({ f: c.fuori_periodo, kg: c.kg_fuori_periodo }));
+  verifica('tre mesi non sono un registro', c.registro_di_piu_mesi === false && c.mesi_nel_file.length === 3, J(c.mesi_nel_file));
+
+  const avvisi = avvisiDate(c);
+  verifica('l\'avviso della data sbagliata viene per primo e dice i due giorni',
+    /^DATA SBAGLIATA su un carico/.test(avvisi[0]) && /scrive 13\/07\/2026, da noi il trasporto si conclude il 29\/09\/2026/.test(avvisi[0])
+    && /va corretta nel file del fornitore/.test(avvisi[0]), avvisi[0]);
+  verifica('poi quello del carico mai registrato', /nel gestionale non risulta/.test(avvisi[1]) && /HTQKS009999ZZ/.test(avvisi[1]), avvisi[1]);
+  verifica('poi la riga dell\'altro mese, col rischio di pagarla due volte',
+    /appartiene a un altro mese/.test(avvisi[2]) && /non pagarle due volte/.test(avvisi[2]), avvisi[2]);
+
+  // Il riquadro non puo' restare verde con scritto dentro che c'e' un errore.
+  const v = esitoConsuntivo({ confronto: c, costo: { trovato: true, tonnellate: 3.8, importo: 100 }, importo_consuntivo: 100 });
+  verifica('il verdetto NON e\' verde: una data sbagliata e\' un errore', v.quadra_quantita === true && v.quadra_tutto === false, J({ q: v.quadra_quantita, t: v.quadra_tutto }));
+  const testo = testoEsitoConsuntivo(c, v);
+  verifica('e il testo lo dice: scritto 13/07 invece di 29/09', /scritto 13\/07\/2026 invece di 29\/09\/2026/.test(testo)
+    && /errore del file del fornitore/.test(testo), testo);
+  verifica('e non chiama "non una difformità" le righe di un altro mese di un consuntivo del mese',
+    !/non sono una difformità. Succede con i registri/.test(testo) && /non pagarle due volte/.test(testo), testo);
+}
+{
+  // IL REGISTRO DELL'ANNO E' UN'ALTRA COSA. IRIGOM manda tutti i mesi: quelle
+  // righe sono la natura del documento, non un errore, e il verdetto resta verde.
+  const righe = [];
+  for (let m = 1; m <= 12; m++) righe.push({ numero_fir: `BSDCL00100${m}AA`, kg: 1000, giorno: `2026-${String(m).padStart(2, '0')}-10` });
+  const movimenti = [{ numero_fir: 'BSDCL001006AA', id_ordine: 'ET1', peso_effettivo: 1000 }];
+  const archivi = { primarieRete: righe.map((r, i) => ({ numero_fir: r.numero_fir, id_ordine: `ET${i}`, stato: 'terminato', peso_effettivo: 1000, trasporto_finito_il: `${r.giorno}T09:00:00Z` })), primarieAci: [], secondarie: [], extraRaccolta: [] };
+  const c = confrontaConsuntivo(righe, movimenti, { tolleranza_kg: 1, anno: 2026, mese: 6, formulari_noti: chiaviDelGestionale(archivi) });
+  verifica('dodici mesi sono un registro', c.registro_di_piu_mesi === true && c.fuori_periodo === 11 && c.altri_mesi_quante === 11, J({ r: c.registro_di_piu_mesi, f: c.fuori_periodo }));
+  verifica('nessuna data sbagliata e nessun arretrato', c.date_sbagliate_quante === 0 && c.arretrati_da_registrare === 0);
+  verifica('e il registro non toglie il verde', esitoConsuntivo({ confronto: c, costo: { trovato: true, tonnellate: 1, importo: 50 }, importo_consuntivo: 50 }).quadra_tutto === true);
+  verifica('l\'avviso dice che e\' un registro, non un errore', /e\' un registro, non il consuntivo di un mese solo/.test(avvisiDate(c).join(' ')), J(avvisiDate(c)));
+}
 {
   // "Blocco/Serie" e' come ECOLOGICAL SYSTEMS chiama il formulario.
   const col = colonneDaIntestazioni(['N.', 'Blocco/Serie', 'Tipo', 'Produttore', 'Peso']);
@@ -600,6 +689,65 @@ console.log('\nUN CARICO DI UN ALTRO MESE CHE NEL GESTIONALE NON RISULTA');
   // Ma "formulario" scritto per nome vince sempre su "blocco".
   const col2 = colonneDaIntestazioni(['Blocco/Serie', 'Num. di formulario', 'Peso netto']);
   verifica('e "formulario" scritto per nome vince su "blocco"', col2.numero_fir.j === 1, J(col2));
+}
+
+// === UNA STAMPA INCOLLATA IN EXCEL (ECORECUPERI) ===
+//
+// Non e' un foglio di calcolo: ogni riga e' una stringa sola con le colonne
+// allineate a spazi, il formulario e la data dentro la stringa del produttore e
+// il peso su un'altra riga del blocco. Qui si prova che il peso viene dal blocco
+// giusto e che quando non c'e' non si prende da un'altra riga: e' la regola che
+// ha retto tutto il resto del lettore.
+console.log('\nUNA STAMPA INCOLLATA IN EXCEL');
+const STAMPA = [
+  ['Elenco Movimenti', '', '', 'Pagina           1'],
+  [''],
+  ['Codice       Produttore                      Codice     Smaltitore / Trasportatore        Data Reg.      C.E.R.'],
+  ['002453                                       000156     TECNOGUM S.R.L.                        10.120'],
+  ['900000              ECORECUPERI SRL'],
+  ['Data D. / Nr.doc                             Peso (Kg)'],
+  ['MELENCHI S.R.L.                              LQQDP001425TP      01-09-2026      160103'],
+  ['002453                                       000156     TECNOGUM S.R.L.                           820'],
+  ['900000              ECORECUPERI SRL'],
+  ['MELENCHI S.R.L.                              LQQDP001424GB      01-09-2026      160103'],
+  ['002721                                       000156     TECNOGUM S.R.L.                         2.400'],
+  ['900000              ECORECUPERI SRL'],
+  ['GUIDA GOMME DI GUIDA VINCENZO                LQQDP001470KG      04-09-2026      160103'],
+  [''],
+  ['', '', 'Mov.', '', 'Colli', 'MC', 'Kg'],
+  ['', 'Totali Gener.'],
+];
+{
+  const s = righeDaStampa(STAMPA, 'Sheet1');
+  verifica('legge i tre carichi della stampa', s && s.righe.length === 3, J(s && s.righe));
+  verifica('e ogni peso viene dal suo blocco, non da quello accanto',
+    s.righe[0].numero_fir === 'LQQDP001425TP' && s.righe[0].kg === 10120
+    && s.righe[1].numero_fir === 'LQQDP001424GB' && s.righe[1].kg === 820
+    && s.righe[2].numero_fir === 'LQQDP001470KG' && s.righe[2].kg === 2400, J(s.righe.map(r => [r.numero_fir, r.kg])));
+  verifica('con la data e il produttore letti dalla stessa riga', s.righe[0].giorno === '2026-09-01'
+    && s.righe[0].produttore === 'MELENCHI S.R.L.' && s.righe[2].giorno === '2026-09-04', J(s.righe[0]));
+  verifica('il totale non diventa un carico, e l\'intestazione nemmeno', s.righe.every(r => r.kg > 0 && r.kg < 20000));
+  verifica('e dice come ha letto', s.note.some(n => /e' una stampa incollata in Excel/.test(n)), J(s.note));
+}
+{
+  // Al secondo carico si toglie la riga del peso: non deve prendere quello del
+  // primo. Un peso di un altro carico e' esattamente il numero sbagliato con
+  // l'aria di essere giusto.
+  const senzaPeso = STAMPA.filter((r, i) => i !== 7);
+  const s = righeDaStampa(senzaPeso, 'Sheet1');
+  verifica('un carico senza il suo peso non si legge', s.righe.length === 2
+    && !s.righe.some(r => r.numero_fir === 'LQQDP001424GB'), J(s.righe.map(r => [r.numero_fir, r.kg])));
+  verifica('e non prende il peso del carico precedente', !s.righe.some(r => r.kg === 10120 && r.numero_fir !== 'LQQDP001425TP'), J(s.righe));
+  verifica('lo dice, col numero del formulario', s.note.some(n => /non ha un peso riconoscibile/.test(n) && /LQQDP001424GB/.test(n)), J(s.note));
+}
+{
+  verifica('un foglio che non e\' una stampa di movimenti torna null', righeDaStampa([['Data', 'FIR', 'Kg'], ['01/09/2026', 'LQQDP001425TP', 1000]], 'x') === null);
+  verifica('e due soli carichi non bastano a chiamarla stampa', righeDaStampa(STAMPA.slice(0, 11), 'x') === null, J(righeDaStampa(STAMPA.slice(0, 11), 'x')));
+  // Dentro il lettore vero: senza intestazioni, prima di arrendersi, prova la stampa.
+  const lette = leggiRigheConsuntivo([{ nome: 'Sheet1', celle: STAMPA }]);
+  verifica('leggiRigheConsuntivo la riconosce da sola', lette.righe.length === 3 && lette.scartate === 0
+    && lette.colonne[0].colonne.kg === '(stampa: peso nella riga del codice sopra)', J({ r: lette.righe.length, c: lette.colonne }));
+  verifica('e non dice piu\' "non riconosco la riga delle intestazioni"', !lette.note.some(n => /non riconosco la riga delle intestazioni/.test(n)), J(lette.note));
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
