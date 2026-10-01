@@ -109,7 +109,10 @@ verifica('la riga non entra nella quadratura, nemmeno fra i non registrati', esi
 // dice "tutto a posto". La libreria importa gli alias @: qui si sostituiscono.
 const sorgenteVerifiche = readFileSync(new URL('../src/lib/verifiche.js', import.meta.url), 'utf8')
   .replace("import { formatTonnellate, formatKg, formatIntero, dataServer } from '@/lib/utils';",
-    'const formatTonnellate = (x) => String(x); const formatKg = (x) => String(x); const formatIntero = (x) => String(x); const dataServer = (x) => x;');
+    'const formatTonnellate = (x) => String(x); const formatKg = (x) => String(x); const formatIntero = (x) => String(x); const dataServer = (x) => x;')
+  // Il termine di registrazione e' quello vero: e' una regola, non un formato.
+  .replace("import { statoTermine, testoTermine } from '@/lib/termineRegistrazione';",
+    `import { statoTermine, testoTermine } from ${JSON.stringify(new URL('../src/lib/termineRegistrazione.js', import.meta.url).href)};`);
 const specchio = await import('data:text/javascript;base64,' + Buffer.from(sorgenteVerifiche).toString('base64'));
 const pcSpecchio = specchio.conformitaPerCanale(esitoAltrove);
 verifica('specchio: stesso verdetto per canale', JSON.stringify(pcSpecchio) === JSON.stringify(esitoAltrove.riepilogo.per_canale), JSON.stringify(pcSpecchio));
@@ -214,8 +217,20 @@ verifica('l\'uscita con la sola "data carico" e\' conforme: quella data vale com
   && u2.tipo === 'uscita' && u2.categoria === 'secondaria-uscita-rete', JSON.stringify(u2 && { esito: u2.esito, discrepanze: u2.discrepanze }));
 verifica('nessuna anomalia su un inizio trasporto che nel report non c\'e\'', !discrepanzeUscite.some(d => /inizio trasporto diversa/i.test(d.messaggio)), JSON.stringify(discrepanzeUscite));
 verifica('nessuna "fine trasporto assente" su un report che la data la scrive', !discrepanzeUscite.some(d => /fine trasporto assente/i.test(d.messaggio)), JSON.stringify(discrepanzeUscite));
-verifica('la riga della settimana dopo si esclude, non diventa un\'anomalia', esitoUscite.escluse.length === 1 && esitoUscite.escluse[0].n === 3
-  && /settimana 38/.test(esitoUscite.escluse[0].motivo) && esitoUscite.escluse[0].data === '2026-09-16', JSON.stringify(esitoUscite.escluse));
+// Una riga di un'altra settimana non si scarta piu': si verifica (01/10/2026).
+// Questa e' registrata e il report dice la stessa settimana del gestionale: e'
+// solo un carico di un'altra settimana, non un dato sbagliato. Se diventasse
+// un'anomalia, ogni report cumulativo del mese uscirebbe "parziale".
+const u3 = esitoUscite.esiti.find(e => e.n === 3);
+verifica('la riga della settimana dopo si verifica, non si scarta', esitoUscite.escluse.length === 0 && !!u3
+  && !!u3.fuori_settimana && u3.fuori_settimana.settimana === 38 && u3.fuori_settimana.arretrata === false,
+JSON.stringify({ escluse: esitoUscite.escluse, u3: u3 && u3.fuori_settimana }));
+verifica('e dice di quale settimana e\', come osservazione e non come anomalia', u3 && !u3.anomalia
+  && (u3.discrepanze || []).some(d => d.gravita === 'osservazione' && /Carico della settimana 38, non di quella verificata/.test(d.messaggio)),
+JSON.stringify(u3 && u3.discrepanze));
+verifica('il riepilogo la conta fuori settimana, e niente da registrare', esitoUscite.riepilogo.fuori_settimana === 1
+  && esitoUscite.riepilogo.arretrati_da_registrare === 0 && esitoUscite.riepilogo.settimane_arretrate === '',
+JSON.stringify({ f: esitoUscite.riepilogo.fuori_settimana, a: esitoUscite.riepilogo.arretrati_da_registrare, s: esitoUscite.riepilogo.settimane_arretrate }));
 const qUscite = esitoUscite.quadratura.find(x => x.chiave === 'secondaria-uscita-rete');
 verifica('la quadratura delle uscite torna: un formulario, i suoi chili', qUscite.formulari_report === 1 && qUscite.formulari_gestionale === 1
   && qUscite.kg_report === 12000 && qUscite.kg_gestionale === 12000, JSON.stringify(qUscite));

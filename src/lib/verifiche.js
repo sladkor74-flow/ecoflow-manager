@@ -2,6 +2,7 @@
 // esportazione in Excel dell'esito.
 
 import { formatTonnellate, formatKg, formatIntero, dataServer } from '@/lib/utils';
+import { statoTermine, testoTermine } from '@/lib/termineRegistrazione';
 
 export const GIORNI_CONSERVAZIONE = 40;
 
@@ -141,18 +142,32 @@ function reportDaRegistro(XLSX, wb, periodo) {
   return null;
 }
 
+// Quanti giorni prima della settimana si prendono da un registro di carico e
+// scarico. Un registro contiene l'anno intero: senza un limite ogni verifica
+// settimanale ne leggerebbe millecinquecento righe. Ma il limite non puo' essere
+// la settimana esatta, o un carico rimasto indietro - quello che e' costato un
+// richiamo in ufficio il 01/10/2026 - resterebbe fuori dal file prima ancora che
+// il gestionale possa guardarlo. Trenta giorni: il termine di registrazione e' di
+// dieci, e oltre il mese non si rincorre piu' niente.
+export const GIORNI_ARRETRATI_DAL_REGISTRO = 30;
+
 // Apre un Excel o un CSV nel browser. Il file non viene caricato da nessuna
 // parte: al backend arrivano solo le celle. periodo { inizio, fine } serve per i
-// registri di carico e scarico, da cui si prende la sola settimana verificata.
+// registri di carico e scarico, da cui si prende la settimana verificata piu' i
+// trenta giorni prima, per i carichi rimasti indietro.
 export async function leggiTabelleDaFile(file, periodo = null) {
   const XLSX = await import('xlsx');
   const buffer = await file.arrayBuffer();
   const csv = tipoDiFile(file) === 'csv';
   // Solo i valori: senza testo formattato, HTML e formule un file grande si apre molto prima.
   const wb = XLSX.read(buffer, { type: 'array', cellDates: false, raw: csv, cellText: false, cellHTML: false, cellFormula: false });
-  const registro = csv ? null : reportDaRegistro(XLSX, wb, periodo);
+  // I trenta giorni prima della settimana entrano nel perimetro del registro: le
+  // righe di settimane precedenti le verifica il confronto, che dice quali non
+  // risultano registrate e con quale termine (reportSettimanali.ts).
+  const perimetro = periodo ? { inizio: aggiungiGiorni(periodo.inizio, -GIORNI_ARRETRATI_DAL_REGISTRO), fine: periodo.fine } : null;
+  const registro = csv ? null : reportDaRegistro(XLSX, wb, perimetro);
   if (registro) {
-    if (registro.righe.length < 2) throw new Error(`Il file è un registro di carico e scarico, ma non contiene carichi Ecotyre o ACI${periodo ? ` tra il ${periodo.inizio} e il ${periodo.fine}` : ''}.`);
+    if (registro.righe.length < 2) throw new Error(`Il file è un registro di carico e scarico, ma non contiene carichi Ecotyre o ACI${perimetro ? ` tra il ${perimetro.inizio} e il ${perimetro.fine}` : ''}.`);
     const { registro: _registro, ...tabella } = registro;
     return [tabella];
   }
@@ -343,6 +358,14 @@ export function conformitaPerCanale(esito) {
   }).filter(Boolean);
 }
 
+/** "alla settimana 38", "alle settimane 37 e 38": si attacca a "appartengono". */
+export function settimaneDi(righe) {
+  const n = [...new Set((righe || []).map(x => x.settimana).filter(Boolean))].sort((a, b) => a - b);
+  if (!n.length) return "a un'altra settimana";
+  if (n.length === 1) return `alla settimana ${n[0]}`;
+  return `alle settimane ${n.slice(0, -1).join(', ')} e ${n[n.length - 1]}`;
+}
+
 export function sintesiVerifica(v, esito) {
   const esiti = esito.esiti || [];
   const assenti = esito.assenti || [];
@@ -394,6 +417,29 @@ export function sintesiVerifica(v, esito) {
     }
   }
   const inPiu = esiti.filter(e => e.esito === 'non_trovata');
+  // Le righe che appartengono a un'altra settimana, verificate comunque
+  // (01/10/2026), e quelle che nel gestionale non risultano con il loro termine
+  // di registrazione. Un formulario di una settimana precedente che non risulta
+  // e' la cosa piu' urgente che una verifica possa dire: il report della sua
+  // settimana non lo conteneva, quindi nessuno l'ha mai visto, e il termine
+  // scade mentre nessuno lo guarda.
+  //
+  // Quanto resta si conta adesso, non nell'esito salvato: la' c'e' solo la
+  // scadenza, che non cambia piu'. Salvare "scaduto da 4 giorni" farebbe
+  // risultare cambiato ogni esito ogni giorno.
+  const giornoOggi = oggiRoma();
+  const conTermine = (e) => ({
+    esito: e,
+    settimana: e.fuori_settimana ? e.fuori_settimana.settimana : null,
+    arretrata: !!(e.fuori_settimana && e.fuori_settimana.arretrata),
+    termine: e.termine || null,
+    stato: e.termine ? statoTermine(e.termine.scadenza, giornoOggi) : null,
+    testoTermine: e.termine ? testoTermine(e.termine.scadenza, giornoOggi) : '',
+  });
+  const fuoriSettimana = esiti.filter(e => e.fuori_settimana).map(conTermine);
+  const daRegistrare = esiti.filter(e => e.esito === 'non_trovata' && e.termine).map(conTermine);
+  const arretratiDaRegistrare = fuoriSettimana.filter(x => x.esito.esito === 'non_trovata');
+  const oltreIlTermine = daRegistrare.filter(x => x.stato && x.stato.stato === 'scaduto');
   // Le altre righe del report con un'anomalia che restano senza canale: formulari
   // che nel gestionale non riguardano l'impianto (o loro duplicati), con le date
   // a posto. Il verdetto per canale non le vede, quindi il "tutto a posto" le
@@ -420,6 +466,8 @@ export function sintesiVerifica(v, esito) {
     { nome: 'Classe dei PFU', n: conta(['classe']) },
     { nome: 'Formulari registrati assenti nel report', n: mancanti.length },
     { nome: 'Formulari del report non registrati', n: inPiu.length },
+    { nome: 'Formulari di settimane precedenti non registrati', n: arretratiDaRegistrare.length },
+    { nome: 'Termini di registrazione superati (dieci giorni dalla partenza, domeniche escluse)', n: oltreIlTermine.length },
     { nome: 'Righe duplicate o di altri impianti', n: voci.anomalia.filter(x => x.etichetta === 'Riga duplicata' || x.etichetta === 'Formulario di un altro impianto').length },
   ].map(c => (c.ok === undefined ? { ...c, ok: c.n === 0, dettaglio: c.n ? `${c.n} ${c.n === 1 ? 'anomalia' : 'anomalie'}` : 'nessuna anomalia' } : c));
 
@@ -438,6 +486,9 @@ export function sintesiVerifica(v, esito) {
     piena: perCanale.length && v.file_tipo !== 'dichiarazione' ? perCanale.every(c => c.conformita === 'piena') && !inPiu.length && !senzaCanale.length : conformita === 'piena',
     anomalie: voci.anomalia, osservazioni: voci.osservazione, rettifiche: voci.rettifica,
     mancanti, inPiu, senzaCanale, escluse, esiti,
+    // Righe di altre settimane, formulari da registrare col loro termine, e
+    // quelli il cui termine e' superato: la scheda e il PDF li mettono in testa.
+    fuoriSettimana, daRegistrare, arretratiDaRegistrare, oltreIlTermine,
     // le righe e i registrati assenti a cui manca una data obbligatoria
     conDate, mancantiConDate,
     // Come sono state lette le date in QUESTO confronto, se non come il file le
@@ -535,6 +586,13 @@ export async function scaricaExcelVerifica(v) {
       : sintesi.perCanale.map(c => [`Esito ${c.nome.toLowerCase() === 'aci' ? 'ACI' : c.nome.toLowerCase()}`, c.conformita === 'piena' ? 'Conformità piena' : `Conformità parziale · ${c.anomalie} ${c.anomalie === 1 ? 'anomalia' : 'anomalie'}`])),
     ...(!sintesi.dichiarazione && sintesi.inPiu.length ? [['Formulari del report non registrati', `${sintesi.inPiu.length}, senza canale: il gestionale non li conosce`]] : []),
     ...(!sintesi.dichiarazione && sintesi.senzaCanale.length ? [['Formulari di altri impianti', `${sintesi.senzaCanale.length} ${sintesi.senzaCanale.length === 1 ? 'riga' : 'righe'} del report con formulari che nel gestionale non riguardano l'impianto: fuori dal verdetto dei canali, da verificare`]] : []),
+    // In testa, prima di tutto il resto: i carichi di settimane precedenti che
+    // nel gestionale non risultano. Sono quelli che nessuno ha mai visto, perche'
+    // il report della loro settimana non li conteneva (01/10/2026).
+    ...(sintesi.arretratiDaRegistrare.length ? [['Carichi di settimane precedenti da registrare',
+      `${sintesi.arretratiDaRegistrare.length} ${sintesi.arretratiDaRegistrare.length === 1 ? 'formulario compare' : 'formulari compaiono'} in questo report ma ${sintesi.arretratiDaRegistrare.length === 1 ? 'appartiene' : 'appartengono'} ${settimaneDi(sintesi.arretratiDaRegistrare)} e nel gestionale non ${sintesi.arretratiDaRegistrare.length === 1 ? 'risulta' : 'risultano'}: il report di quella settimana non ${sintesi.arretratiDaRegistrare.length === 1 ? 'lo conteneva' : 'li conteneva'}. ${sintesi.arretratiDaRegistrare.map(x => `${x.esito.report.fir || 'senza formulario'} del ${dataIt((x.termine && x.termine.partenza) || x.esito.report.fine || x.esito.report.data)} (${x.testoTermine})`).join('; ')}`]] : []),
+    ...(sintesi.oltreIlTermine.length ? [['Termini di registrazione superati',
+      `${sintesi.oltreIlTermine.length}: il termine è di dieci giorni dalla data di partenza, domeniche escluse. Da segnalare all'ufficio registrazioni`]] : []),
     ['Settimana', `${v.settimana} del ${v.anno}, dal ${dataIt(v.data_inizio)} al ${dataIt(v.data_fine)}, secondo la data di fine trasporto`],
     ['File verificato', v.file_nome],
     ['Lettura del file', lettura.modo === 'dichiarazione'
@@ -548,7 +606,9 @@ export async function scaricaExcelVerifica(v) {
       // Excel, che e' quello che succedeva quando lettura_json mancava.
       : 'non disponibile: di questa verifica restano i numeri di sintesi e la storia scritta'],
     ...(sintesi.notaDate ? [['Date di questo confronto', sintesi.notaDate]] : []),
-    ['Righe non considerate', v.righe_escluse ? `${v.righe_escluse} (${formatKg(v.peso_escluse_kg || 0)} kg): carichi di altre settimane o di altri consorzi, elencati nel foglio "Non considerate"` : 'nessuna'],
+    ['Righe non considerate', v.righe_escluse ? `${v.righe_escluse} (${formatKg(v.peso_escluse_kg || 0)} kg): carichi di altri consorzi e righe senza formulario, elencati nel foglio "Non considerate". I carichi di altre settimane non si escludono: si verificano` : 'nessuna'],
+    ...(sintesi.fuoriSettimana.length ? [['Carichi di altre settimane',
+      `${sintesi.fuoriSettimana.length} ${sintesi.fuoriSettimana.length === 1 ? 'riga' : 'righe'} di questo report ${sintesi.fuoriSettimana.length === 1 ? 'appartiene' : 'appartengono'} ${settimaneDi(sintesi.fuoriSettimana)}: ${sintesi.fuoriSettimana.length === 1 ? 'verificata' : 'verificate'} comunque, ma fuori dalla quadratura della settimana, dove il gestionale non ${sintesi.fuoriSettimana.length === 1 ? 'la colloca' : 'le colloca'}`]] : []),
     // Immissione, inizio e fine trasporto sono obbligatorie (22/09/2026): se a un
     // formulario registrato ne manca una si dice gia' nel riepilogo.
     ...(sintesi.conDate.length || sintesi.mancantiConDate.length
@@ -686,6 +746,33 @@ export async function scaricaExcelVerifica(v) {
     const riga = a.addRow([nomeTipo(m.tipo), m.fir, m.kg, dataIt(m.fine), dataIt(m.inizio), m.produttore, m.destinatario, m.trasportatore, m.classe || '', m.fonte, m.ordine,
       m.date ? `${nota}. ${m.date_testo || 'Date obbligatorie mancanti o incoerenti: vanno inserite o corrette'}` : nota]);
     riga.eachCell({ includeEmpty: true }, (c, i) => { c.border = bordi; c.fill = riempi(COLORI.rosso); if (i === 3) c.numFmt = '#,##0'; if (i === 12) c.alignment = { wrapText: true, vertical: 'top' }; });
+  }
+
+  // --- Settimane precedenti ---
+  // Le righe che appartengono a un'altra settimana, con quelle da registrare in
+  // rosso: il foglio c'e' solo se ce ne sono. Prima queste righe finivano fra le
+  // "Non considerate", in grigio, in fondo, e nessuno le leggeva (01/10/2026).
+  if (sintesi.fuoriSettimana.length) {
+    const s = wb.addWorksheet('Settimane precedenti', { views: [{ state: 'frozen', ySplit: 1 }] });
+    const colFuori = [['Riga report', 14], ['Settimana', 11], ['FIR', 18], ['Peso (kg)', 12], ['Data report', 12], ['Nel gestionale', 14], ['Termine registrazione', 18], ['Da fare', 70]];
+    s.columns = colFuori.map(([, w]) => ({ width: w }));
+    intestazione(s, colFuori.map(([t]) => t));
+    for (const x of sintesi.fuoriSettimana) {
+      const e = x.esito;
+      const rep = e.report || {};
+      const grave = e.esito === 'non_trovata';
+      const daFare = grave
+        ? `Da caricare a portale e da segnalare all'ufficio registrazioni: il report della settimana ${x.settimana} non lo conteneva${x.testoTermine ? `. ${x.testoTermine.charAt(0).toUpperCase() + x.testoTermine.slice(1)}` : ''}`
+        : `Registrato, trasporto concluso il ${dataIt(e.gestionale && e.gestionale.fine)}: carico della settimana ${x.settimana}, verificato qui e contato nella sua settimana`;
+      const riga = s.addRow([e.foglio ? rigaReport(e) : e.n, x.settimana ?? '', rep.fir || '', rep.kg ?? '',
+        dataIt(rep.fine || rep.data), grave ? 'NO' : 'sì', x.termine ? dataIt(x.termine.scadenza) : '', daFare]);
+      riga.eachCell({ includeEmpty: true }, (c, i) => {
+        c.border = bordi;
+        c.fill = riempi(grave ? COLORI.rosso : COLORI.grigio);
+        if (i === 4) c.numFmt = '#,##0';
+        if (i === 8) c.alignment = { wrapText: true, vertical: 'top' };
+      });
+    }
   }
 
   // --- Righe non considerate ---

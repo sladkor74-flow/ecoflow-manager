@@ -347,6 +347,54 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                   </div>
                 )}
 
+                {/* Un carico di una settimana precedente comparso solo adesso
+                    nel report, e che nel gestionale non risulta: il report
+                    della sua settimana non lo conteneva, quindi nessuno l'ha
+                    mai visto, e il termine per registrarlo - dieci giorni dalla
+                    partenza, domeniche escluse - scade. E' la cosa piu' urgente
+                    che una verifica possa dire (regola dell'utente del
+                    01/10/2026) e sta in testa a tutto il resto. */}
+                {sintesi && sintesi.fuoriSettimana.length > 0 && (
+                  <div className={`flex items-start gap-2 text-sm rounded-lg px-3 py-2 border ${sintesi.arretratiDaRegistrare.length ? 'text-red-900 border-red-300 bg-red-100' : 'text-amber-900 border-amber-200 bg-amber-50'}`}>
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <div className="space-y-1">
+                      <div className="font-semibold">
+                        {sintesi.arretratiDaRegistrare.length
+                          ? (sintesi.arretratiDaRegistrare.length === 1
+                            ? 'Un carico di una settimana precedente non risulta nel gestionale: il report di quella settimana non lo conteneva'
+                            : `${sintesi.arretratiDaRegistrare.length} carichi di settimane precedenti non risultano nel gestionale: i report di quelle settimane non li contenevano`)
+                          : (sintesi.fuoriSettimana.length === 1
+                            ? 'Una riga del report appartiene a un\'altra settimana: verificata comunque, e risulta registrata'
+                            : `${sintesi.fuoriSettimana.length} righe del report appartengono ad altre settimane: verificate comunque, e risultano registrate`)}
+                      </div>
+                      {/* Si elencano quelli da registrare. I registrati si
+                          contano in una riga: un registro di carico e scarico
+                          ne porta trenta giorni, e un elenco lunghissimo di
+                          righe a posto nasconderebbe quelle che contano. */}
+                      <ul className="space-y-0.5">
+                        {(sintesi.arretratiDaRegistrare.length ? sintesi.arretratiDaRegistrare : sintesi.fuoriSettimana).slice(0, 20).map((x, i) => (
+                          <li key={i}>
+                            Settimana {x.settimana}: <span className="font-mono">{x.esito.report.fir || 'riga senza formulario'}</span>
+                            {x.esito.report.kg != null ? `, ${formatKg(x.esito.report.kg)} kg` : ''} del {dataIt(x.esito.report.fine || x.esito.report.data)} —{' '}
+                            {x.esito.esito === 'non_trovata'
+                              ? <span className="font-semibold">da caricare a portale{x.testoTermine ? `, ${x.testoTermine}` : ''}</span>
+                              : <span>registrato, contato nella settimana {x.settimana}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                      {sintesi.arretratiDaRegistrare.length > 0 && (
+                        <div>
+                          Da caricare a portale e da segnalare all&apos;ufficio registrazioni: il termine è di dieci giorni dalla data di partenza, domeniche escluse. È stato aperto un alert nel modulo Verifiche.
+                          {sintesi.fuoriSettimana.length > sintesi.arretratiDaRegistrare.length && ` Altre ${sintesi.fuoriSettimana.length - sintesi.arretratiDaRegistrare.length} righe di settimane precedenti risultano registrate: verificate e contate nella loro settimana.`}
+                        </div>
+                      )}
+                      {!sintesi.arretratiDaRegistrare.length && sintesi.fuoriSettimana.length > 20 && (
+                        <div>E altre {sintesi.fuoriSettimana.length - 20} righe di settimane precedenti, tutte registrate. L&apos;elenco completo è nel foglio «Settimane precedenti» dell&apos;Excel.</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Immissione, inizio e fine trasporto sono obbligatorie nei
                     formulari (regola del 22/09/2026): a chi ne manca una, o ha
                     le date incoerenti, e' un'anomalia del suo canale. */}
@@ -448,7 +496,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
                 {escluse.length > 0 && (
                   <section>
                     <button onClick={() => setMostraEscluse(x => !x)} className="text-sm text-primary hover:underline">
-                      {mostraEscluse ? 'Nascondi' : 'Mostra'} le {escluse.length} righe non considerate: altre settimane o altri consorzi
+                      {mostraEscluse ? 'Nascondi' : 'Mostra'} le {escluse.length} righe non considerate: altri consorzi o righe senza formulario
                     </button>
                     {mostraEscluse && (
                       <div className="border rounded-lg divide-y bg-card mt-2">

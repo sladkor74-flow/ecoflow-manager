@@ -19,6 +19,7 @@ const SPECCHI = [
   ['base44/shared/simulazioneViaggi.ts', 'src/lib/simulazioneViaggi.js'],
   ['base44/shared/limiteRichieste.ts', 'src/lib/limiteRichieste.js'],
   ['base44/shared/annoTarget.ts', 'src/lib/annoTarget.js'],
+  ['base44/shared/termineRegistrazione.ts', 'src/lib/termineRegistrazione.js'],
 ];
 
 // il corpo: via i ritorni a capo di Windows, le righe di import e il commento di testa

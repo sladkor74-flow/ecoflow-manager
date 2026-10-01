@@ -212,6 +212,25 @@ export function storiaVerifica(v, esito = null) {
       return `${chi}${messaggi ? `: ${messaggi}` : ` (${testo(x.esito)})`}`;
     }), 20).join('. ') + '.');
   }
+  // I carichi di settimane precedenti comparsi in questo report, e quali non
+  // erano registrati quando si e' verificato. A quaranta giorni il dettaglio se
+  // ne va, e questa riga e' tutto quello che resta di una cosa che aveva un
+  // termine: va scritta per nome, formulario per formulario (01/10/2026).
+  const altreSettimane = (e.esiti || []).filter(x => x && x.fuori_settimana);
+  if (altreSettimane.length) {
+    const daRegistrare = altreSettimane.filter(x => x.esito === 'non_trovata');
+    righe.push(`Carichi di altre settimane comparsi in questo report: ${altreSettimane.length}`
+      + (daRegistrare.length ? `, di cui ${daRegistrare.length} non ${daRegistrare.length === 1 ? 'registrato' : 'registrati'} al momento della verifica` : '')
+      + ' — ' + elenco(altreSettimane.map(x => {
+        const rep = x.report || {};
+        const quando = (x.termine && x.termine.partenza) || rep.fine || rep.data || '';
+        const come = x.esito === 'non_trovata'
+          ? `non registrato${x.termine && x.termine.scadenza ? `, termine di registrazione ${it(String(x.termine.scadenza))}` : ''}`
+          : 'registrato';
+        return `${testo(rep.fir) || `riga ${x.n}`}${quando ? ` del ${it(String(quando))}` : ''}, settimana ${numero(x.fuori_settimana.settimana)}: ${come}`;
+      }), 20).join('; ') + '.');
+  }
+
   const assenti = e.assenti || [];
   if (assenti.length) {
     righe.push('Registrati nel gestionale e assenti dal report — ' + elenco(assenti.map(a =>

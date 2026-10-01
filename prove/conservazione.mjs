@@ -96,6 +96,31 @@ verifica('dice i formulari assenti dal report', sv.includes('FIRAAA009') && sv.i
 verifica('dice che le uscite non erano nel report', sv.includes('soli ingressi'));
 verifica('dice le righe escluse con il peso', sv.includes('12.400'));
 verifica('senza esito scrive lo stesso quello che sa', storiaVerifica(v, null).includes('conformita\' parziale'));
+
+// A quaranta giorni il dettaglio se ne va: di un carico di una settimana
+// precedente non registrato, che aveva un termine, deve restare scritto tutto
+// (01/10/2026).
+const svArretrati = storiaVerifica(v, {
+  ...esitoV,
+  esiti: [
+    ...esitoV.esiti,
+    {
+      n: 12, anomalia: true, esito: 'non_trovata', report: { fir: 'HTQKS004521ZT', kg: 7400, fine: '2026-09-14' },
+      fuori_settimana: { anno: 2026, settimana: 38, arretrata: true },
+      termine: { partenza: '2026-09-14', partenza_da: 'report_arrivo', scadenza: '2026-09-25', giorni: 10 },
+      discrepanze: [{ messaggio: 'Formulario non presente nel gestionale, ed e\' della settimana 38' }],
+    },
+    {
+      n: 13, anomalia: false, esito: 'discrepanze', report: { fir: 'RGYTR000028AA', kg: 9000, fine: '2026-07-10' },
+      fuori_settimana: { anno: 2026, settimana: 28, arretrata: true }, discrepanze: [],
+    },
+  ],
+});
+verifica('la storia dice i carichi di altre settimane, quanti e quali', svArretrati.includes('Carichi di altre settimane comparsi in questo report: 2')
+  && svArretrati.includes('HTQKS004521ZT del 14/09/2026, settimana 38') && svArretrati.includes('RGYTR000028AA del 10/07/2026, settimana 28'), svArretrati);
+verifica('e di quello non registrato dice il termine, che era il fatto grave', svArretrati.includes('di cui 1 non registrato al momento della verifica')
+  && svArretrati.includes('non registrato, termine di registrazione 25/09/2026') && svArretrati.includes('settimana 28: registrato'), svArretrati);
+verifica('senza carichi di altre settimane non ne parla', !storiaVerifica(v, esitoV).includes('Carichi di altre settimane'));
 verifica('una dichiarazione si racconta come tale',
   storiaVerifica({ ...v, file_tipo: 'dichiarazione', nota: 'email del 28/09' }, null).includes('dichiarata nessuna movimentazione'));
 verifica('la storia sta in un campo, non in ContenutoEsteso', sv.length <= LUNGHEZZA_STORIA);

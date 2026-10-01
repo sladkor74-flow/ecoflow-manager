@@ -130,7 +130,19 @@
     },
     "righe_escluse": {
       "type": "number",
-      "description": "Righe del report non considerate: carichi di altre settimane o di altri consorzi"
+      "description": "Righe del report non considerate: carichi di altri consorzi e righe senza formulario. I carichi di altre settimane NON si escludono piu' (01/10/2026): si verificano e si contano in fuori_settimana"
+    },
+    "fuori_settimana": {
+      "type": "number",
+      "description": "Righe del report che appartengono a un'altra settimana e che vengono verificate comunque (regola dell'utente del 01/10/2026): un carico rimasto fuori dal report della sua settimana si vede solo cosi'"
+    },
+    "arretrati_da_registrare": {
+      "type": "number",
+      "description": "Formulari di settimane precedenti che nel gestionale non risultano: vanno caricati a portale, e il termine di registrazione (dieci giorni dalla partenza, domeniche escluse) potrebbe essere scaduto. E' la mancanza piu' grave che una verifica possa trovare"
+    },
+    "settimane_arretrate": {
+      "type": "string",
+      "description": "Le settimane precedenti a cui appartengono le righe comparse in questo report, per esempio \"37, 38\""
     },
     "peso_escluse_kg": {
       "type": "number"

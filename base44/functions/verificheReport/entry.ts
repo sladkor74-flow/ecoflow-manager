@@ -35,6 +35,9 @@ const CAMPI_RIEPILOGO = [
   'stato', 'avviata_il', 'errore', 'righe_report', 'conformi', 'con_discrepanze', 'non_trovate', 'duplicate',
   'assenti_nel_report', 'uscite_verificate', 'righe_escluse', 'conformita', 'anomalie', 'osservazioni', 'rettifiche',
   'date_da_sistemare', 'verificata_il', 'scade_il', 'created_date',
+  // Le righe di settimane precedenti e quelle da registrare: l'elenco le mostra
+  // senza aprire la verifica, perche' sono quelle da non lasciare la' (01/10/2026).
+  'fuori_settimana', 'arretrati_da_registrare', 'settimane_arretrate',
   // Senza questi due l'elenco mostrerebbe una scadenza gia' passata invece di
   // dire che il dettaglio e' stato tolto, e i pulsanti di esportazione non
   // saprebbero di doversi spegnere.

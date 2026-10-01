@@ -27,6 +27,7 @@ import { eAci } from "./canaleSecondaria.ts";
 import { unisciQuote, ticketDi } from "./formulari.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
 import { giornoMovimento, eTerminato, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate, ordiniDaSistemare, mancantiOrdine, incoerentiOrdine, testoOrdine } from "./movimenti.ts";
+import { termineDi, testoConteggio } from "./termineRegistrazione.ts";
 
 // Quanto si conservano per intero i documenti dei fornitori. La regola vive in
 // conservazione.ts, insieme all'alleggerimento: qui si ri-esporta soltanto,
@@ -1110,6 +1111,26 @@ const altroCircuito = (intermediario) => !!intermediario && !/ecotyre/i.test(int
  * trasporto non si conta in nessun periodo, ma si segnala). Il 22/09/2026 la
  * stessa riga era diventata una rettifica a nostra cura, senza peso sul
  * verdetto: l'utente l'ha corretto lo stesso giorno.
+ *
+ * UNA RIGA DI UN'ALTRA SETTIMANA SI VERIFICA COMUNQUE (regola dell'utente del
+ * 01/10/2026). Prima si scartava, perche' "sara' verificata con la sua
+ * settimana": ma se il report di quella settimana non la conteneva - un carico
+ * che il fornitore non ci ha mandato e non ha annotato - quella verifica non
+ * l'ha mai vista, e scartandola di nuovo non la vede nessuno mai piu'. E'
+ * accaduto con Nappi Sud: una richiesta terminata del 14 settembre, assente dal
+ * report della sua settimana, e' comparsa in quello della settimana dopo, dove
+ * il gestionale l'ha messa fra le righe non considerate senza dire niente. Il
+ * termine per registrarla era passato da giorni.
+ *
+ * Quindi: la riga si confronta, e porta fuori_settimana { anno, settimana,
+ * arretrata }. Resta fuori dalla quadratura della settimana verificata, dove il
+ * gestionale non la colloca (regola 1), e la settimana di una riga abbinata e'
+ * quella del movimento registrato, non quella che il report scrive. Se le due
+ * settimane coincidono e' solo un carico di un'altra settimana, un'osservazione;
+ * se non coincidono, una delle due date e' sbagliata, e resta un'anomalia. Una
+ * riga di un'altra settimana che nel gestionale NON risulta porta anche termine
+ * { partenza, partenza_da, scadenza }: entro quando va registrata, dieci giorni
+ * dalla partenza con le domeniche escluse (termineRegistrazione.ts).
  */
 export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, fine, senzaFine = senzaFineDei(movimenti), lettura = null }) {
   const relazione = (m) => relazioneConSito(m, chiave);
@@ -1126,6 +1147,18 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     if (!m.firN) continue;
     if (!perFir.has(m.firN)) perFir.set(m.firN, []);
     perFir.get(m.firN).push(m);
+  }
+  // Lo stesso su TUTTI i movimenti, non solo sulla fascia di giorni intorno alla
+  // settimana: una riga di una settimana lontana - i report cumulativi del mese,
+  // o un carico rimasto indietro - va riconosciuta comunque, altrimenti di un
+  // formulario che nel gestionale c'e' si direbbe che non c'e'. Qui vale solo il
+  // formulario identico: cercare un peso uguale in tutto l'anno abbinerebbe
+  // carichi che non c'entrano niente.
+  const perFirTutti = new Map();
+  for (const m of movimenti) {
+    if (!m.firN) continue;
+    if (!perFirTutti.has(m.firN)) perFirTutti.set(m.firN, []);
+    perFirTutti.get(m.firN).push(m);
   }
   // I terminati senza fine trasporto, per formulario.
   const senzaFinePerFir = new Map();
@@ -1173,8 +1206,10 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   const migliore = (r, lista) => lista.reduce((best, m) => (best === null || punteggio(r, m) < punteggio(r, best) ? m : best), null);
 
   const esiti = [];
-  // Righe che non riguardano la verifica: carichi di altre settimane nei report
-  // cumulativi del mese e carichi di altri circuiti (per esempio Ecopneus).
+  // Righe che non riguardano la verifica: carichi di altri circuiti (per esempio
+  // Ecopneus) e righe di un'altra settimana senza formulario, su cui non c'e'
+  // niente da registrare. I carichi di altre settimane col loro formulario non
+  // si escludono piu' (01/10/2026): si verificano.
   const escluse = [];
   const rif = (r) => (r.foglio ? `${String(r.foglio).trim()}, riga ${r.n}` : `riga ${r.n}`);
   const escludi = (r, motivo) => escluse.push({ n: r.n, foglio: r.foglio || '', fir: r.fir, ordine: r.ordine, kg: r.kg, data: dataRiga(r), produttore: r.produttore, destinatario: r.destinatario, motivo });
@@ -1184,6 +1219,11 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
 
     if (r.firN && perFir.has(r.firN)) {
       m = migliore(r, perFir.get(r.firN));
+      modo = 'fir';
+    } else if (r.firN && perFirTutti.has(r.firN)) {
+      // Fuori dalla fascia di giorni intorno alla settimana, ma registrato: si
+      // dice di quale settimana e', non che non esiste.
+      m = migliore(r, perFirTutti.get(r.firN));
       modo = 'fir';
     }
 
@@ -1225,12 +1265,26 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     };
 
     const dataReport = dataRiga(r);
-    const fuoriSettimana = !!dataReport && (dataReport < inizio || dataReport > fine);
+    const altraSettimana = !!dataReport && (dataReport < inizio || dataReport > fine);
+    // A quale settimana la riga appartiene davvero, e se e' una settimana
+    // precedente: una riga arretrata e' quella che il report della sua settimana
+    // non conteneva, ed e' la piu' pericolosa di tutte.
+    const suaSettimana = altraSettimana ? settimanaIso(dataReport) : null;
+    const fuori = suaSettimana
+      ? { fuori_settimana: { anno: suaSettimana.anno, settimana: suaSettimana.settimana, arretrata: dataReport < inizio } }
+      : {};
     const foglio = r.foglio ? { foglio: String(r.foglio).trim() } : {};
 
     if (!m) {
       if (altroCircuito(r.intermediario)) { escludi(r, `Carico di un altro circuito: intermediario ${r.intermediario}`); continue; }
-      if (fuoriSettimana) { escludi(r, `Data ${it(dataReport)}, fuori dalla settimana verificata`); continue; }
+      // Una riga di un'altra settimana che nel gestionale non risulta NON si
+      // scarta piu' (regola dell'utente del 01/10/2026). Era il difetto che e'
+      // costato un richiamo in ufficio: il carico che Nappi Sud aveva omesso dal
+      // report della sua settimana e' comparso in quello della settimana dopo, e
+      // il gestionale lo metteva fra le righe non considerate senza dire niente,
+      // mentre il termine per registrarlo scadeva. Senza formulario non c'e'
+      // niente da registrare ne' da chiedere: quella sola resta fuori.
+      if (altraSettimana && !r.firN) { escludi(r, `Data ${it(dataReport)}, fuori dalla settimana verificata e senza formulario`); continue; }
       if (senzaData) {
         // Formulario registrato ma senza fine trasporto, che e' una data
         // obbligatoria: e' un'anomalia e conta nel verdetto del suo canale
@@ -1247,7 +1301,7 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
         // righe abbinate: e' un'altra anomalia, oltre alla data che manca.
         const altrove = tipoS ? [] : [{ campo: 'destinatario', gravita: 'anomalia', messaggio: `Nel gestionale questo formulario non riguarda ${nome}: va da ${s.produttore || 'produttore non indicato'} a ${s.destinatario}` }];
         esiti.push({
-          n: r.n, ...foglio, tipo: tipoS,
+          n: r.n, ...foglio, ...fuori, tipo: tipoS,
           ...(tipoS ? { categoria: categoria(s) } : { tipo_presunto: tipoPresunto(r), categoria: 'non_registrati' }),
           esito: 'discrepanze', anomalia: true, senza_fine_trasporto: true, report,
           gestionale: {
@@ -1268,15 +1322,46 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
         continue;
       }
       // Senza formulario nel gestionale resta il numero d'ordine del report, l'unico riferimento.
-      esiti.push({ n: r.n, ...foglio, tipo: null, tipo_presunto: tipoPresunto(r), categoria: 'non_registrati', esito: 'non_trovata', anomalia: true, report, gestionale: null, discrepanze: [{ campo: 'fir', gravita: 'anomalia', messaggio: r.firN ? 'Formulario non presente nel gestionale' : 'Riga senza formulario, non abbinabile a nessun movimento' }] });
+      // Di un formulario che nel gestionale non c'e' si dice anche entro quando
+      // va registrato: dieci giorni dalla partenza, domeniche escluse. La
+      // partenza e' quella del report se il file ha due colonne di data;
+      // altrimenti si conta dalla data che la riga porta, che e' l'arrivo, e il
+      // termine vero scade prima (termineRegistrazione.ts lo scrive in
+      // partenza_da). Nella scadenza non c'e' niente che dipenda da oggi: "da
+      // quanto e' scaduto" lo calcolano la scheda e il PDF, altrimenti ogni
+      // esito risulterebbe cambiato ogni giorno.
+      const termine = r.firN ? (termineDi(inizioCerto(r), 'report') || termineDi(dataReport, 'report_arrivo')) : null;
+      const diQuale = suaSettimana ? `, ed e' della settimana ${suaSettimana.settimana}` : '';
+      const entro = termine ? `: da registrare entro il ${it(termine.scadenza)} (${testoConteggio(termine)})` : '';
+      esiti.push({
+        n: r.n, ...foglio, ...fuori, tipo: null, tipo_presunto: tipoPresunto(r), categoria: 'non_registrati',
+        esito: 'non_trovata', anomalia: true, report, gestionale: null,
+        ...(termine ? { termine } : {}),
+        discrepanze: [{
+          campo: 'fir',
+          gravita: 'anomalia',
+          messaggio: r.firN
+            ? `Formulario non presente nel gestionale${diQuale}${entro}`
+            : 'Riga senza formulario, non abbinabile a nessun movimento',
+        }],
+      });
       continue;
     }
-    // Report e gestionale concordano su un'altra settimana: la riga sara' verificata con quella.
-    if (fuoriSettimana && !nellaSettimana(m)) {
-      escludi(r, `Carico della settimana ${settimanaIso(m.fine).settimana}: nel gestionale il trasporto si conclude il ${it(m.fine)}`);
-      continue;
-    }
-
+    // Una riga che riguarda un'altra settimana si verifica qui, adesso. Fino al
+    // 01/10/2026 si scartava, con la ragione che "sara' verificata con quella
+    // settimana": ma se il report di quella settimana non la conteneva, quella
+    // verifica non l'ha mai vista, e nessuno se ne accorge piu'. Resta fuori
+    // dalla quadratura della settimana - un movimento si colloca sulla fine del
+    // trasporto, regola 1 - e si dice a parte.
+    //
+    // Per una riga abbinata la settimana e' quella del movimento registrato, non
+    // quella che il report scrive: se il report sbaglia la data ma il carico e'
+    // della settimana verificata, la riga deve restare nella quadratura, o il
+    // conto dei formulari non torna per una data scritta male.
+    const suaMov = nellaSettimana(m) ? null : settimanaIso(m.fine);
+    const fuoriMov = suaMov
+      ? { fuori_settimana: { anno: suaMov.anno, settimana: suaMov.settimana, arretrata: m.fine < inizio } }
+      : {};
     const tipo = relazione(m);
     const discrepanze = [];
     const aggiungi = (campo, messaggio, gravita = 'anomalia') => discrepanze.push({ campo, gravita, messaggio });
@@ -1300,8 +1385,17 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     // trasporto (la fine c'e', altrimenti il movimento non si abbinava), e date
     // nell'ordine giusto. Mancano o non tornano: anomalia del canale.
     for (const messaggio of messaggiDate(m.date, { 'inizio trasporto': inizioReport })) aggiungi('date', messaggio);
-    if (tipo && !nellaSettimana(m)) {
-      aggiungi('fine', `Nel gestionale il trasporto si conclude il ${it(m.fine)}, nella settimana ${settimanaIso(m.fine).settimana} e non in quella verificata`);
+    if (tipo && suaMov) {
+      // Se report e gestionale dicono la stessa settimana, la riga e' soltanto
+      // di un'altra settimana: non c'e' un dato sbagliato, e farne un'anomalia
+      // renderebbe "parziale" ogni report cumulativo del mese per le sue righe
+      // vecchie. Si verifica e si dice, come osservazione. Se invece le due
+      // settimane non coincidono, una delle due date e' sbagliata: anomalia.
+      const concordano = !!suaSettimana && suaSettimana.anno === suaMov.anno && suaSettimana.settimana === suaMov.settimana;
+      aggiungi('fine', concordano
+        ? `Carico della settimana ${suaMov.settimana}, non di quella verificata: nel gestionale risulta registrato, trasporto concluso il ${it(m.fine)}`
+        : `Nel gestionale il trasporto si conclude il ${it(m.fine)}, nella settimana ${suaMov.settimana} e non in quella verificata`,
+      concordano ? 'osservazione' : 'anomalia');
     }
 
     if (r.codice_pdr && cifre(r.codice_pdr) && m.codice_pdr && cifre(r.codice_pdr) !== cifre(m.codice_pdr)) {
@@ -1352,11 +1446,11 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
 
     const presunto = tipo ? { categoria: categoria(m) } : { tipo_presunto: tipoPresunto(r), categoria: 'non_registrati' };
     if (usati.has(m.id)) {
-      esiti.push({ n: r.n, ...foglio, tipo, ...presunto, esito: 'duplicata', anomalia: true, report, gestionale, discrepanze: [{ campo: 'fir', gravita: 'anomalia', messaggio: `Riga duplicata: lo stesso movimento e' gia' riportato (${usati.get(m.id)})` }, ...discrepanze] });
+      esiti.push({ n: r.n, ...foglio, ...fuoriMov, tipo, ...presunto, esito: 'duplicata', anomalia: true, report, gestionale, discrepanze: [{ campo: 'fir', gravita: 'anomalia', messaggio: `Riga duplicata: lo stesso movimento e' gia' riportato (${usati.get(m.id)})` }, ...discrepanze] });
       continue;
     }
     usati.set(m.id, rif(r));
-    esiti.push({ n: r.n, ...foglio, tipo, ...presunto, esito: discrepanze.length ? 'discrepanze' : 'conforme', anomalia: discrepanze.some(d => d.gravita === 'anomalia'), report, gestionale, discrepanze });
+    esiti.push({ n: r.n, ...foglio, ...fuoriMov, tipo, ...presunto, esito: discrepanze.length ? 'discrepanze' : 'conforme', anomalia: discrepanze.some(d => d.gravita === 'anomalia'), report, gestionale, discrepanze });
   }
 
   // Il report deve contenere tutte le movimentazioni: ingressi e uscite, di ogni canale.
@@ -1381,19 +1475,33 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   // verdetto del canale come anomalia della riga.
   const somma = (lista, kg) => lista.reduce((t, x) => t + (kg(x) || 0), 0);
   const registrati = [...ingressi, ...uscite];
+  // Le righe di un'altra settimana non entrano nella quadratura della settimana
+  // verificata: un movimento si colloca sulla fine del trasporto (regola 1), e
+  // contate qui farebbero risultare "non quadra" un report che quadra. Si
+  // contano a parte, nel riepilogo, e ognuna dice che cosa le manca.
+  const dellaSettimana = (e) => !e.senza_fine_trasporto && !e.fuori_settimana;
   const quadratura = [
     ...CATEGORIE_MOVIMENTO.map(c => {
-      const righe = esiti.filter(e => e.categoria === c.chiave && !e.senza_fine_trasporto);
+      const righe = esiti.filter(e => e.categoria === c.chiave && dellaSettimana(e));
       const mov = registrati.filter(m => categoria(m) === c.chiave);
       return { ...c, formulari_report: righe.length, kg_report: somma(righe, e => e.report.kg), formulari_gestionale: mov.length, kg_gestionale: somma(mov, m => m.kg) };
     }),
     (() => {
-      const righe = esiti.filter(e => e.categoria === 'non_registrati' && !e.senza_fine_trasporto);
+      const righe = esiti.filter(e => e.categoria === 'non_registrati' && dellaSettimana(e));
       return { chiave: 'non_registrati', tipo: null, nome: 'Formulari del report non registrati per l\'impianto', formulari_report: righe.length, kg_report: somma(righe, e => e.report.kg), formulari_gestionale: 0, kg_gestionale: 0 };
     })(),
   ];
   const quadra = quadratura.every(q => q.formulari_report === q.formulari_gestionale && q.kg_report === q.kg_gestionale);
   const anomalie = esiti.filter(e => e.anomalia).length + assenti.length;
+
+  // Le righe di altre settimane comparse in questo report, e fra queste quelle
+  // che nel gestionale non risultano: sono la mancanza piu' grave che una
+  // verifica possa trovare, perche' il termine per registrarle sta scadendo
+  // mentre nessuno le guarda (regola dell'utente del 01/10/2026).
+  const altreSettimane = esiti.filter(e => e.fuori_settimana);
+  const daRegistrare = altreSettimane.filter(e => e.esito === 'non_trovata');
+  const settimaneArretrate = [...new Set(altreSettimane.filter(e => e.fuori_settimana.arretrata)
+    .map(e => e.fuori_settimana.settimana))].sort((x, y) => x - y);
 
   const conta = (e) => esiti.filter(x => x.esito === e).length;
   // Nel riepilogo non ci sono piu' ingressi, uscite e pesi complessivi: sommavano
@@ -1441,6 +1549,11 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       uscite_verificate: usciteVerificate,
       righe_escluse: escluse.length,
       peso_escluse_kg: escluse.reduce((t, e) => t + (e.kg || 0), 0),
+      // Righe di altre settimane verificate comunque, quante di loro nel
+      // gestionale non risultano, e di quali settimane precedenti si tratta.
+      fuori_settimana: altreSettimane.length,
+      arretrati_da_registrare: daRegistrare.length,
+      settimane_arretrate: settimaneArretrate.join(', '),
     },
   };
 }

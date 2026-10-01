@@ -184,6 +184,12 @@ export async function esportaEsitoVerificaPdf(v) {
       'Il report non corrisponde pienamente ai formulari registrati.',
       ...s.perCanale.filter(c => c.conformita !== 'piena').map(c => `${c.nome}: ${c.anomalie} ${c.anomalie === 1 ? 'anomalia da verificare' : 'anomalie da verificare'}${c.assenti ? `, di cui ${c.assenti} ${c.assenti === 1 ? 'formulario mancante' : 'formulari mancanti'}` : ''}.`),
       s.inPiu.length ? `${s.inPiu.length} ${s.inPiu.length === 1 ? 'formulario del report non risulta registrato' : 'formulari del report non risultano registrati'}.` : '',
+      // Fra i formulari non registrati, quelli di una settimana precedente si
+      // dicono subito: il report della loro settimana non li conteneva, quindi
+      // nessuno li ha mai visti, e il termine per registrarli corre (01/10/2026).
+      s.arretratiDaRegistrare && s.arretratiDaRegistrare.length
+        ? `${s.arretratiDaRegistrare.length === 1 ? 'Uno di essi appartiene a una settimana precedente' : `${s.arretratiDaRegistrare.length} di essi appartengono a settimane precedenti`} e ${s.arretratiDaRegistrare.length === 1 ? 'compare' : 'compaiono'} solo in questo report.`
+        : '',
       s.senzaCanale && s.senzaCanale.length ? `${s.senzaCanale.length} ${s.senzaCanale.length === 1 ? 'riga del report riporta un formulario registrato che non riguarda il vostro impianto' : 'righe del report riportano formulari registrati che non riguardano il vostro impianto'}.` : '',
       'Il dettaglio è riportato di seguito.',
     ].filter(Boolean).join(' ')
@@ -203,6 +209,45 @@ export async function esportaEsitoVerificaPdf(v) {
   }
   testo(lineeSotto, M + 8, y + 18, { dim: 8.5, colore: C.testo });
   y += hEsito + 6;
+
+  // --- Carichi di settimane precedenti ---
+  // Prima di tutto il resto, perche' e' la cosa che non si deve poter non
+  // vedere: un carico di una settimana passata, comparso solo adesso nel
+  // report, che fra i dati registrati non c'e'. Prima finiva in fondo, in
+  // grigio, fra le righe non considerate (01/10/2026).
+  const altreSettimane = s.fuoriSettimana || [];
+  const arretrati = s.arretratiDaRegistrare || [];
+  // Si elencano quelli su cui c'e' da fare qualcosa: i registrati si contano in
+  // una riga, perche' un registro di carico e scarico ne porta trenta giorni e
+  // un elenco lunghissimo di righe a posto nasconderebbe le due che contano.
+  const registratiAltrove = altreSettimane.filter(x => x.esito.esito !== 'non_trovata');
+  const daElencare = arretrati.length ? arretrati : registratiAltrove.slice(0, 12);
+  if (altreSettimane.length) {
+    sezione('Carichi di settimane precedenti', [
+      arretrati.length
+        ? `${arretrati.length === 1 ? 'Un carico di una settimana precedente compare in questo report e non risulta' : `${arretrati.length} carichi di settimane precedenti compaiono in questo report e non risultano`} fra i formulari registrati: ${arretrati.length === 1 ? 'il report della sua settimana non lo conteneva, quindi non è mai stato verificato' : 'i report delle loro settimane non li contenevano, quindi non sono mai stati verificati'}. La registrazione di un formulario ha un termine di dieci giorni dalla data di partenza, domeniche escluse: vi chiediamo di inviarci subito la documentazione di questi carichi.`
+        : '',
+      registratiAltrove.length
+        ? `${registratiAltrove.length === 1 ? 'Un\'altra riga appartiene' : `Altre ${registratiAltrove.length} righe appartengono`} a settimane precedenti e ${registratiAltrove.length === 1 ? 'risulta regolarmente registrata' : 'risultano regolarmente registrate'}: ${registratiAltrove.length === 1 ? 'verificata' : 'verificate'} qui, ma ${registratiAltrove.length === 1 ? 'contata' : 'contate'} nella loro settimana, perché un carico si colloca sulla data di fine trasporto.`
+        : '',
+    ].filter(Boolean).join(' '));
+    tabella([
+      { titolo: 'Riga del report', peso: 1.1 }, { titolo: 'Settimana', peso: 0.8, allinea: 'center' },
+      { titolo: 'Formulario e ordine', peso: 1.4 }, { titolo: 'Data', peso: 0.8 },
+      { titolo: 'Peso (kg)', peso: 0.85, allinea: 'right' }, { titolo: 'Registrato', peso: 0.8, allinea: 'center' },
+      { titolo: 'Termine di registrazione', peso: 1.45 },
+    ], daElencare.map(x => {
+      const e = x.esito;
+      const grave = e.esito === 'non_trovata';
+      return {
+        celle: [cap(rigaReport(e)), x.settimana != null ? String(x.settimana) : '', firConOrdine(e),
+          dataIt(e.report.fine || e.report.data), e.report.kg != null ? formatKg(e.report.kg) : '',
+          grave ? 'NO' : 'sì', x.testoTermine ? cap(x.testoTermine) : ''],
+        colori: [C.grigio, grave ? C.rosso : C.grigio, grave ? C.rosso : null, null, null, grave ? C.rosso : C.verde, grave ? C.rosso : C.grigio],
+        grassetti: [false, true, true, false, true, true, false],
+      };
+    }));
+  }
 
   // --- Quadratura ---
   // Un formulario registrato senza data di fine trasporto non sta in nessuna
@@ -318,7 +363,7 @@ export async function esportaEsitoVerificaPdf(v) {
   }
 
   if (s.escluse.length) {
-    sezione('Righe del report non considerate', 'Carichi di altre settimane, presenti nei report cumulativi, o di altri circuiti: saranno verificati con la loro settimana o non riguardano la commessa.');
+    sezione('Righe del report non considerate', 'Carichi di altri circuiti, che non riguardano la commessa, e righe senza numero di formulario. I carichi di altre settimane sono invece verificati, nella sezione "Carichi di settimane precedenti".');
     tabella([{ titolo: 'Riga del report', peso: 1.1 }, { titolo: 'Formulario e ordine', peso: 1.4 }, { titolo: 'Data', peso: 0.8 }, { titolo: 'Peso (kg)', peso: 0.85, allinea: 'right' }, { titolo: 'Motivo', peso: 3.2 }],
       s.escluse.map(e => ({ celle: [cap(rigaReport(e)), firConOrdine(e, e.fir), dataIt(e.data), e.kg != null ? formatKg(e.kg) : '', testoPerImpianto(e.motivo)], colori: [C.grigio, C.grigio, C.grigio, C.grigio, C.grigio] })));
   }

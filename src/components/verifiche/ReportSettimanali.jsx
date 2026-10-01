@@ -135,6 +135,15 @@ function Esito({ riga }) {
             <AlertTriangle className="w-3 h-3" />{v.non_trovate} non registrati
           </span>
         )}
+        {/* Carichi di settimane precedenti che nel gestionale non risultano:
+            nell'elenco si vedono senza aprire la verifica, perche' sono quelli
+            da registrare subito (01/10/2026). */}
+        {(v.arretrati_da_registrare || 0) > 0 && (
+          <span title={`Carichi di ${v.settimane_arretrate ? `settimane precedenti (${v.settimane_arretrate})` : 'settimane precedenti'} che nel gestionale non risultano: il report di quella settimana non li conteneva, e il termine per registrarli - dieci giorni dalla partenza, domeniche escluse - corre`}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-red-300 bg-red-100 text-red-900 text-xs font-semibold">
+            <AlertTriangle className="w-3 h-3" />{v.arretrati_da_registrare} di settimane precedenti da registrare
+          </span>
+        )}
         {/* Gia' contati fra le anomalie del loro canale: qui si dice perche'. */}
         {(v.date_da_sistemare || 0) > 0 && (
           <span title="Formulari registrati senza una data obbligatoria (immissione, inizio o fine trasporto) o con date incoerenti: la data va inserita o corretta" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-800 text-xs">
