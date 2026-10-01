@@ -12,6 +12,7 @@
 // carico" delle uscite veniva letta come inizio trasporto e la verifica usciva
 // piena di anomalie su date che nel report non c'erano. npm run prove
 import { readFileSync } from 'node:fs';
+import { caricaLibPagine } from './dati/libPagine.mjs';
 import { caricaMovimenti, verificaReport, conformitaPerCanale, canaleDelVerdetto, normalizzaRigheReport, riparaColonneData, riparaDateRighe, colonneDateDellaLettura, riepilogoVociDate, datePerCanale, messaggiDate } from '../base44/shared/reportSettimanali.ts';
 import { ricontrollaVerifiche } from '../base44/shared/esitoVerifica.ts';
 
@@ -107,13 +108,7 @@ verifica('la riga non entra nella quadratura, nemmeno fra i non registrati', esi
 
 // Lo specchio delle pagine (src/lib/verifiche.js) da' lo stesso verdetto e non
 // dice "tutto a posto". La libreria importa gli alias @: qui si sostituiscono.
-const sorgenteVerifiche = readFileSync(new URL('../src/lib/verifiche.js', import.meta.url), 'utf8')
-  .replace("import { formatTonnellate, formatKg, formatIntero, dataServer } from '@/lib/utils';",
-    'const formatTonnellate = (x) => String(x); const formatKg = (x) => String(x); const formatIntero = (x) => String(x); const dataServer = (x) => x;')
-  // Il termine di registrazione e' quello vero: e' una regola, non un formato.
-  .replace("import { statoTermine, testoTermine } from '@/lib/termineRegistrazione';",
-    `import { statoTermine, testoTermine } from ${JSON.stringify(new URL('../src/lib/termineRegistrazione.js', import.meta.url).href)};`);
-const specchio = await import('data:text/javascript;base64,' + Buffer.from(sorgenteVerifiche).toString('base64'));
+const specchio = await caricaLibPagine('lib/verifiche');
 const pcSpecchio = specchio.conformitaPerCanale(esitoAltrove);
 verifica('specchio: stesso verdetto per canale', JSON.stringify(pcSpecchio) === JSON.stringify(esitoAltrove.riepilogo.per_canale), JSON.stringify(pcSpecchio));
 const sintesiAltrove = specchio.sintesiVerifica({ file_tipo: 'excel' }, esitoAltrove);

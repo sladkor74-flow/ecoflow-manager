@@ -17,14 +17,9 @@
 // Il fuso si fissa prima di tutto il resto, altrimenti la stessa cella darebbe
 // un giorno diverso su ogni macchina. npm run prove
 process.env.TZ = 'Europe/Rome';
-import { readFileSync } from 'node:fs';
+import { caricaLibPagine } from './dati/libPagine.mjs';
 
-// La libreria delle pagine importa gli alias @: qui si sostituiscono, come in
-// reportSettimanali.mjs.
-const sorgente = readFileSync(new URL('../src/lib/evasioneAssegnati.js', import.meta.url), 'utf8')
-  .replace("import { formatTonnellate, dataServer } from '@/lib/utils';", 'const formatTonnellate = (x) => String(x); const dataServer = (x) => x;')
-  .replace("import { giornoRoma } from '@/lib/giornoItaliano';", `import { giornoRoma } from ${JSON.stringify(new URL('../src/lib/giornoItaliano.js', import.meta.url).href)};`);
-const { giornoDaExcel, valoreCella } = await import('data:text/javascript;base64,' + Buffer.from(sorgente).toString('base64'));
+const { giornoDaExcel, valoreCella } = await caricaLibPagine('lib/evasioneAssegnati');
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };

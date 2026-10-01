@@ -4,6 +4,7 @@
 
 import { formatTonnellate, dataServer } from '@/lib/utils';
 import { giornoRoma } from '@/lib/giornoItaliano';
+import { leggiCartella } from '@/lib/fogliDiCalcolo';
 
 export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -103,10 +104,12 @@ async function fogliDaXlsx(file) {
 }
 
 // I formati diversi da xlsx si leggono senza colori: la priorita' vale solo se
-// scritta nella riga.
-async function fogliSenzaColori(file) {
+// scritta nella riga. Gli .ods passano da leggiCartella, che ripara le celle in
+// errore per cui il lettore rifiutava il file intero (01/10/2026).
+async function fogliSenzaColori(file, note = []) {
   const XLSX = await import('xlsx');
-  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+  const { wb, nota } = leggiCartella(XLSX, await file.arrayBuffer(), { cellDates: true });
+  if (nota) note.push(nota);
   return wb.SheetNames.map(nome => {
     const ws = wb.Sheets[nome];
     const range = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s: { r: 0 } };
@@ -118,14 +121,17 @@ async function fogliSenzaColori(file) {
 
 export async function leggiFogliLista(files) {
   const fogli = [];
+  // Quello che si e' dovuto aggiustare per aprire il file: si porta fuori, non
+  // si aggiusta di nascosto (01/10/2026).
+  const note = [];
   let senzaColori = false;
   for (const file of files) {
     if (/\.xlsx$|\.xlsm$/i.test(file.name)) {
       fogli.push(...await fogliDaXlsx(file));
     } else {
       senzaColori = true;
-      fogli.push(...await fogliSenzaColori(file));
+      fogli.push(...await fogliSenzaColori(file, note));
     }
   }
-  return { fogli, senzaColori };
+  return { fogli, senzaColori, note };
 }

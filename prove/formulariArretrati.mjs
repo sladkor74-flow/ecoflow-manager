@@ -16,7 +16,7 @@
 // contrario, che e' la ragione per cui prima si scartava: un report cumulativo
 // del mese, con le sue righe vecchie tutte registrate, resta conforme.
 // npm run prove
-import { readFileSync } from 'node:fs';
+import { caricaLibPagine } from './dati/libPagine.mjs';
 import { caricaMovimenti, verificaReport, normalizzaRigheReport } from '../base44/shared/reportSettimanali.ts';
 import { arretratiDaSegnalare, salvaEsito, REGOLA_ARRETRATI } from '../base44/shared/esitoVerifica.ts';
 import {
@@ -196,12 +196,7 @@ verifica('quando non resta niente da registrare l\'alert si chiude da solo', !!c
 // Lo specchio delle pagine: la scheda, il PDF e l'Excel leggono da qui, e se la
 // sintesi non vedesse gli arretrati il gestionale li saprebbe senza dirli.
 console.log('\nLA SINTESI CHE LEGGONO LA SCHEDA, IL PDF E L\'EXCEL');
-const sorgente = readFileSync(new URL('../src/lib/verifiche.js', import.meta.url), 'utf8')
-  .replace("import { formatTonnellate, formatKg, formatIntero, dataServer } from '@/lib/utils';",
-    'const formatTonnellate = (x) => String(x); const formatKg = (x) => String(x); const formatIntero = (x) => String(x); const dataServer = (x) => x;')
-  .replace("import { statoTermine, testoTermine } from '@/lib/termineRegistrazione';",
-    `import { statoTermine, testoTermine } from ${JSON.stringify(new URL('../src/lib/termineRegistrazione.js', import.meta.url).href)};`);
-const pagine = await import('data:text/javascript;base64,' + Buffer.from(sorgente).toString('base64'));
+const pagine = await caricaLibPagine('lib/verifiche');
 const s = pagine.sintesiVerifica({ file_tipo: 'excel' }, esito);
 verifica('la sintesi tira fuori la riga arretrata da registrare', s.fuoriSettimana.length === 1 && s.arretratiDaRegistrare.length === 1
   && s.arretratiDaRegistrare[0].settimana === 38 && s.arretratiDaRegistrare[0].arretrata === true,

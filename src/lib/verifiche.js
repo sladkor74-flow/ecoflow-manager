@@ -3,6 +3,7 @@
 
 import { formatTonnellate, formatKg, formatIntero, dataServer } from '@/lib/utils';
 import { statoTermine, testoTermine } from '@/lib/termineRegistrazione';
+import { leggiCartella } from '@/lib/fogliDiCalcolo';
 
 export const GIORNI_CONSERVAZIONE = 40;
 
@@ -159,8 +160,10 @@ export async function leggiTabelleDaFile(file, periodo = null) {
   const XLSX = await import('xlsx');
   const buffer = await file.arrayBuffer();
   const csv = tipoDiFile(file) === 'csv';
-  // Solo i valori: senza testo formattato, HTML e formule un file grande si apre molto prima.
-  const wb = XLSX.read(buffer, { type: 'array', cellDates: false, raw: csv, cellText: false, cellHTML: false, cellFormula: false });
+  // Solo i valori: senza testo formattato, HTML e formule un file grande si apre
+  // molto prima. Gli .ods con celle in errore si aprono solo riparandoli, e
+  // leggiCartella lo fa dicendolo invece di rifiutare il file (01/10/2026).
+  const { wb, nota } = leggiCartella(XLSX, buffer, { cellDates: false, raw: csv, cellText: false, cellHTML: false, cellFormula: false });
   // I trenta giorni prima della settimana entrano nel perimetro del registro: le
   // righe di settimane precedenti le verifica il confronto, che dice quali non
   // risultano registrate e con quale termine (reportSettimanali.ts).
@@ -169,7 +172,7 @@ export async function leggiTabelleDaFile(file, periodo = null) {
   if (registro) {
     if (registro.righe.length < 2) throw new Error(`Il file è un registro di carico e scarico, ma non contiene carichi Ecotyre o ACI${perimetro ? ` tra il ${perimetro.inizio} e il ${perimetro.fine}` : ''}.`);
     const { registro: _registro, ...tabella } = registro;
-    return [tabella];
+    return { tabelle: [tabella], note: nota ? [nota] : [] };
   }
   const tabelle = [];
   for (const nome of wb.SheetNames) {
@@ -185,7 +188,7 @@ export async function leggiTabelleDaFile(file, periodo = null) {
       tabelle.push({ nome: k === 0 ? nome : `${nome} (tabella ${k + 1})`, riga_iniziale: range.s.r + da, righe: righe.slice(da, Math.min(a, da + 5000)) });
     });
   }
-  return tabelle;
+  return { tabelle, note: nota ? [nota] : [] };
 }
 
 // Un foglio puo' contenere piu' tabelle una sotto l'altra, per esempio gli ingressi

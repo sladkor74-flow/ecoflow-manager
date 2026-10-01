@@ -417,7 +417,12 @@ export default function ReportSettimanali({ isAdmin }) {
       // diventava un orfano che nessuno sapeva piu' di avere.
       let caricato = '';
       if (tipo === 'excel' || tipo === 'csv') {
-        payload.tabelle = await leggiTabelleDaFile(file, { inizio: intervallo.inizio, fine: intervallo.fine });
+        // note_file: quello che si e' dovuto aggiustare per aprire il file (un
+        // .ods con celle in errore si apre solo riparandolo), perche' la
+        // verifica lo scriva fra le note della lettura (01/10/2026).
+        const letto = await leggiTabelleDaFile(file, { inizio: intervallo.inizio, fine: intervallo.fine });
+        payload.tabelle = letto.tabelle;
+        if (letto.note.length) payload.note_file = letto.note;
         if (payload.tabelle.length === 0) throw new Error('Il file è vuoto.');
       } else {
         // Un PDF o un'immagine il codice non li sa leggere: si caricano perché

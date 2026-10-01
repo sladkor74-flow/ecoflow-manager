@@ -10,10 +10,17 @@ const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Lug
 const NOME_CANALE = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 const NOME_RUOLO = { raccoglitore: 'Raccoglitore', impianto: 'Impianto o stoccaggio', trasportatore: 'Trasportatore di secondarie' };
 
-/** Le tabelle di un file, nella forma che il lettore condiviso si aspetta. */
+/**
+ * Le tabelle di un file, nella forma che il lettore condiviso si aspetta, piu'
+ * quello che si e' dovuto aggiustare per aprirlo: un .ods con celle in errore
+ * si apre solo riparandolo, e il confronto lo deve dire (01/10/2026).
+ */
 export async function tabelleDalFile(file) {
-  const { fogli } = await leggiFogliLista([file]);
-  return fogli.map(f => ({ nome: f.nome, celle: f.righe.map(r => r.c) }));
+  const { fogli, note } = await leggiFogliLista([file]);
+  return {
+    tabelle: fogli.map(f => ({ nome: f.nome, celle: f.righe.map(r => r.c) })),
+    note: note || [],
+  };
 }
 
 const ESITI = {

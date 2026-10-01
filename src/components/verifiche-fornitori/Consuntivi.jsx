@@ -76,10 +76,10 @@ export default function Consuntivi({ isAdmin }) {
     if (!/\.(xlsx|xlsm|xls|csv)$/i.test(file.name)) { setErrore('Il consuntivo si carica in Excel o CSV.'); return; }
     setOccupato('carica');
     try {
-      const tabelle = await tabelleDalFile(file);
+      const { tabelle, note } = await tabelleDalFile(file);
       await chiama({
         azione: 'carica', fornitore: fornitore.trim(), ruolo, anno, mese, canale,
-        file_nome: file.name, tabelle,
+        file_nome: file.name, tabelle, note_file: note,
         importo_consuntivo: importo.trim() === '' ? null : Number(String(importo).replace(',', '.')),
       }, 'carica');
     } catch (e) {

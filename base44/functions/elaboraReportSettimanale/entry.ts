@@ -329,6 +329,13 @@ export default async function(req) {
         : leggiFile(base44, body.file, verifica)));
       righe = esito.righe;
       lettura = esito.lettura;
+      // Quello che il browser ha dovuto aggiustare per aprire il file (un .ods
+      // con celle in errore si apre solo riparandolo) va nelle note della
+      // lettura: la scheda le mostra, e un file aggiustato di nascosto e' un
+      // file di cui non si sa piu' niente (01/10/2026).
+      const noteFile = (Array.isArray(body.note_file) ? body.note_file : [])
+        .filter(n => typeof n === 'string' && n).map(n => String(n).slice(0, 500));
+      if (noteFile.length) lettura = { ...lettura, note: [...noteFile, lettura.note || ''].filter(Boolean).join(' ') };
       if (righe.length === 0) throw new Error('Il report non contiene righe con formulario o peso.');
       // Un report lungo supera la dimensione di un campo: si salva diviso in parti.
       await svc.VerificaReport.update(verificaId, {

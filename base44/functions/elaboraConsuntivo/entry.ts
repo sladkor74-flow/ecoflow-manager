@@ -110,6 +110,9 @@ export default async function(req) {
       const lette = leggiRigheConsuntivo(body.tabelle || []);
       righe = lette.righe;
       noteLettura = [
+        // Che cosa si e' dovuto aggiustare per aprire il file (un .ods con celle
+        // in errore si apre solo riparandolo): lo dice il browser, che lo apre.
+        ...(Array.isArray(body.note_file) ? body.note_file.filter(n => typeof n === 'string' && n).map(n => String(n).slice(0, 500)) : []),
         ...(lette.note || []),
         ...(lette.colonne || []).map(c => `Foglio "${c.foglio}": ${Object.entries(c.colonne).map(([k, v]) => `${k} = ${v}`).join(', ')}.`),
       ];
