@@ -29,6 +29,75 @@ const testo = (v) => String(v ?? '').trim();
 /** Vero se questo riferimento e' un file privato (si apre solo firmato). */
 export const ePrivato = (rif) => !!testo(rif && rif.file_uri);
 
+// === DA DOVE UNA FUNZIONE PUO' SCARICARE, E DA DOVE NO ===
+//
+// Trovato dalla scansione di sicurezza della piattaforma il 02/10/2026, gravita'
+// alta: importEcotyreFile prendeva file_url dal CORPO della richiesta e lo
+// passava a fetch senza guardarlo. Due danni, non uno.
+//
+// Il primo: il server scaricava qualunque indirizzo gli si dicesse, compresi
+// quelli che dal browser non si raggiungono - servizi interni, indirizzi di
+// metadati della macchina. E' una SSRF, e la poteva fare un utente di livello
+// operatore_base, cioe' il livello di lavoro normale, non un amministratore.
+//
+// Il secondo e' peggio per noi: quella funzione scrive negli archivi con
+// asServiceRole. Un operatore poteva ospitare lui un Excel con la firma giusta,
+// passarne l'indirizzo con conferma_forzatura, e farsi riscrivere i TERMINATI
+// RETE e ACI con le righe che voleva. Cioe' i dati su cui si fatturano i
+// fornitori e si fanno le dichiarazioni al consorzio.
+//
+// Un indirizzo pubblico vero di questa app ha una forma sola, verificata su un
+// elenco reale di file caricati:
+//   https://media.base44.com/files/public/<idApplicazione>/<impronta>_<nome>
+// Tutto il resto non e' un file nostro, e non si scarica.
+//
+// new URL() fa il lavoro difficile: normalizza i percorsi (quindi "..\.." non
+// scappa da /files/public/) e legge l'host vero, non quello che sembra - cosi'
+// "https://media.base44.com@altro.sito/x" risulta per quello che e', un
+// indirizzo di altro.sito.
+export const ORIGINE_FILE_PUBBLICI = 'https://media.base44.com';
+const PERCORSO_FILE_PUBBLICI = '/files/public/';
+
+/**
+ * Vero se questo indirizzo e' un file dell'area pubblica della piattaforma, cioe'
+ * uno dei nostri caricamenti vecchi. Falso per tutto il resto, compreso quello
+ * che gli somiglia.
+ */
+export function eIndirizzoDiArchivio(url) {
+  const s = testo(url);
+  if (!s) return false;
+  let u;
+  try { u = new URL(s); } catch { return false; }
+  if (u.protocol !== 'https:') return false;
+  if (u.origin !== ORIGINE_FILE_PUBBLICI) return false;
+  return u.pathname.startsWith(PERCORSO_FILE_PUBBLICI);
+}
+
+/** Perche' quell'indirizzo non si scarica, da scrivere nella risposta. */
+export const MOTIVO_INDIRIZZO = 'L\'indirizzo del file non e\' quello di un file caricato in questa applicazione.'
+  + ' Un caricamento nuovo passa per il file privato (file_uri) e si apre con un link firmato:'
+  + ' un indirizzo qualunque non si scarica, perche\' il server non deve andare dove gli si dice di andare.';
+
+/**
+ * IL FILE DI UNA RICHIESTA SI PRENDE SOLO COME file_uri.
+ *
+ * Un indirizzo non si accetta da chi chiama: e' la falla che la scansione ha
+ * trovato il 02/10/2026, e la strada per chiuderla e' libera, perche' TUTTI i
+ * punti di caricamento del gestionale mandano gia' soltanto file_uri - il
+ * Caricamento Dati, le secondarie, i PDR e le richieste ECT (verificato uno per
+ * uno). Un file_url nel corpo oggi non arriva da nessuna parte: se arriva, non
+ * viene da noi.
+ *
+ * Torna { rif, errore }: se errore non e' null, chi chiama risponde e si ferma.
+ */
+export function riferimentoDalCorpo(body) {
+  const uri = testo(body && body.file_uri);
+  if (uri) return { rif: { file_uri: uri, file_url: '' }, errore: null };
+  const url = testo(body && body.file_url);
+  if (url) return { rif: null, errore: MOTIVO_INDIRIZZO };
+  return { rif: null, errore: '' };
+}
+
 /**
  * L'indirizzo da cui scaricare, a partire da { file_uri } (privato, si firma) o
  * da { file_url } (pubblico, storico). Stringa vuota se non c'e' ne' l'uno ne'
@@ -40,7 +109,14 @@ export const ePrivato = (rif) => !!testo(rif && rif.file_uri);
  */
 export async function urlScaricabile(base44, rif, secondi = 3600) {
   const uri = testo(rif && rif.file_uri);
-  if (!uri) return testo(rif && rif.file_url);
+  if (!uri) {
+    // Un file_url si accetta solo se e' davvero un file della nostra area
+    // pubblica. Vale per i caricamenti vecchi, che si devono poter ancora
+    // rileggere; qualunque altro indirizzo torna vuoto, e chi chiama lo tratta
+    // come "file mancante" (02/10/2026).
+    const url = testo(rif && rif.file_url);
+    return eIndirizzoDiArchivio(url) ? url : '';
+  }
   const core = base44.asServiceRole.integrations.Core;
   const { signed_url } = await core.CreateFileSignedUrl({ file_uri: uri, expires_in: secondi });
   return testo(signed_url);

@@ -10,7 +10,7 @@ import { FILE_SIGNATURES, checkSignature, detectType, mappaColonne } from "../..
 import { CAMPI_ASSEGNATO, DATE_PRIMARIE, archivioPrimaria, dataPrimaria } from "../../shared/primarie.ts";
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 import { annoRoma } from "../../shared/giornoItaliano.ts";
-import { urlScaricabile, riferimentoDaSalvare } from "../../shared/fileScaricabile.ts";
+import { urlScaricabile, riferimentoDaSalvare, riferimentoDalCorpo } from "../../shared/fileScaricabile.ts";
 import { annoDelloStorico, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from "../../shared/storicoConservato.ts";
 
 // Le dichiarazioni riconosciute, un canale per volta: nel registro non si sommano.
@@ -29,7 +29,7 @@ const perCanale = (righe) => [['RETE', 'rete'], ['ACI', 'ACI'], ['EXTRA_RACCOLTA
 // 7. SOLO ORA: riga "in_corso" nel registro, poi deleteMany + bulkCreate
 // 8. la riga del registro prende l'esito; se dopo lo svuotamento non e' entrato
 //    niente, o arriva un errore, resta "in_corso" col solo messaggio cambiato
-// Payload: { file_uri (privato) oppure file_url (pubblico, storico), tipo_file, nome_file, periodo_riferimento?, replace_existing?, conferma_forzatura? }
+// Payload: { file_uri (privato; un file_url nel corpo non si accetta piu', 02/10/2026), tipo_file, nome_file, periodo_riferimento?, replace_existing?, conferma_forzatura? }
 
 const CHUNK = 250;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -154,8 +154,24 @@ export default async function(req) {
     const livello = await livelloDi(base44, user);
     if (!puoCaricare(livello, tipo_file)) return rispostaCaricamentoNegato(livello, tipo_file);
     nome_file = body.nome_file || 'N/D';
-    file_url = body.file_url;
-    file_uri = body.file_uri;
+    // IL FILE SI PRENDE SOLO COME file_uri (02/10/2026).
+    //
+    // Prima questa riga leggeva anche file_url dal corpo e lo passava a fetch
+    // senza guardarlo: la scansione di sicurezza l'ha segnalata come gravita'
+    // alta, e aveva ragione due volte. Il server andava a scaricare qualunque
+    // indirizzo gli si dicesse - anche uno interno, che dal browser non si
+    // raggiunge - e lo poteva fare un utente di livello operatore_base, cioe'
+    // il livello di lavoro normale. Peggio: questa funzione scrive negli
+    // archivi con asServiceRole, quindi un operatore poteva ospitare lui un
+    // Excel con la firma giusta e farsi riscrivere i TERMINATI RETE e ACI con
+    // le righe che voleva - i dati su cui si fatturano i fornitori.
+    //
+    // Chiuderlo non rompe niente: tutti i punti di caricamento del gestionale
+    // mandano gia' soltanto file_uri.
+    const dalCorpo = riferimentoDalCorpo(body);
+    if (dalCorpo.errore) return Response.json({ error: dalCorpo.errore, dati_intatti: true }, { status: 400 });
+    file_uri = dalCorpo.rif ? dalCorpo.rif.file_uri : null;
+    file_url = null;
     const { periodo_riferimento, conferma_forzatura, replace_existing } = body;
 
     // Calcola modalita': sostituzione integrale o aggiunta additiva.
@@ -165,7 +181,7 @@ export default async function(req) {
     const modalita = sostituisci ? 'sostituzione' : 'aggiunta';
 
     if ((!file_url && !file_uri) || !tipo_file) {
-      return Response.json({ error: 'file_uri (o file_url) e tipo_file sono obbligatori', dati_intatti: true }, { status: 400 });
+      return Response.json({ error: 'file_uri e tipo_file sono obbligatori', dati_intatti: true }, { status: 400 });
     }
 
     // === Punto 6: rifiuta "assegnati" ===

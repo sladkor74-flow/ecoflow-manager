@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
+import { eIndirizzoDiArchivio, MOTIVO_INDIRIZZO } from "../../shared/fileScaricabile.ts";
 import { annoChiuso, annoCorrenteRoma } from "../../shared/annoTarget.ts";
 
 // Estrae i target mensili dal foglio STATUS di un file Excel Ecotyre
@@ -17,6 +18,19 @@ export default async function(req) {
     const body = await req.json();
     const { file_url } = body;
     if (!file_url) return Response.json({ error: 'file_url obbligatorio' }, { status: 400 });
+    // L'INDIRIZZO DEVE ESSERE DI UN FILE DI QUESTA APPLICAZIONE (02/10/2026).
+    //
+    // Questa funzione e' l'unica che fa fetch di un indirizzo preso dal corpo
+    // senza passare dal nocciolo condiviso, e per questo era sfuggita alla
+    // guardia di prove/fileSemprePrivati.mjs. E' riservata all'amministratore,
+    // quindi la gravita' e' minore, ma un account compromesso faceva fare al
+    // server una richiesta a un indirizzo qualunque - anche interno, che dal
+    // browser non si raggiunge.
+    //
+    // Nel repo NESSUNO la chiama: probabilmente e' superata da
+    // portaTargetInTargetStatus. Finche' resta, almeno non scarica piu' dove le
+    // si dice.
+    if (!eIndirizzoDiArchivio(file_url)) return Response.json({ error: MOTIVO_INDIRIZZO }, { status: 400 });
     const ANNO = body.anno != null && body.anno !== '' ? Number(body.anno) : annoCorrenteRoma();
     if (!Number.isInteger(ANNO) || ANNO < 2000 || ANNO > 2100) {
       return Response.json({ error: "Anno non valido." }, { status: 400 });

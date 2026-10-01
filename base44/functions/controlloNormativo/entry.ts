@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
+import { soloAmministratore } from "../../shared/permessi.ts";
 import {
   AREE_NORMATIVE, BASE_CONOSCENZA, FONTI_UFFICIALI, REGOLE_FONTI, vociApprovate, voceAttuale, proponiNovita, scartaSuperate,
 } from "../../shared/baseConoscenza.ts";
@@ -57,11 +58,29 @@ export default async function(req) {
   let controlloId = null;
   try {
     base44 = conLimiteRichieste(createClientFromRequest(req));
-    const user = await base44.auth.me();
-    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    // L'AMMINISTRATORE SERVE SU ENTRAMBE LE STRADE, NON SOLO SU QUELLA MANUALE.
+    //
+    // Trovato dalla scansione di sicurezza il 02/10/2026: il controllo del ruolo
+    // era legato a `manuale`, quindi la strada automatica - quella che parte col
+    // corpo vuoto - la poteva far partire qualunque utente collegato. E quella
+    // strada fa cinque chiamate al modello di linguaggio (una per area
+    // normativa, con la ricerca su internet accesa), crea fino a venticinque
+    // proposte e manda un'email a TUTTI gli amministratori. Un utente di sola
+    // lettura poteva bruciare token e intasare la posta a comando.
+    //
+    // Pretenderlo sempre non spegne la pianificazione del primo del mese: i
+    // lavori programmati girano come amministratore, e lo dimostrano gli altri
+    // cinque che chiamano funzioni che a un non amministratore rispondono 403 -
+    // l'alleggerimento delle 3:15, il presidio delle 6:40, il corso RT,
+    // il materiale del corso, il motore degli alert - e che funzionano.
+    //
+    // soloAmministratore passa da utenteCorrente, che fa auth.me().catch: una
+    // chiamata senza utente riceve un 401 pulito invece del 500 di prima.
+    const { errore } = await soloAmministratore(base44);
+    if (errore) return errore;
     const body = await req.json().catch(() => ({}));
+    // Resta per scrivere nel record da dove e' partito il giro (avviato_da).
     const manuale = body.manuale === true;
-    if (manuale && user.role !== 'admin') return Response.json({ error: 'Forbidden: richiesto ruolo admin' }, { status: 403 });
 
     const svc = base44.asServiceRole.entities;
     const oggi = oggiRoma();

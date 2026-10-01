@@ -16,7 +16,22 @@ export default async function(req) {
 
     const body = await req.json();
     const filters = body.filters || {};
+    // L'ARCHIVIO SI SCEGLIE DA UNA LISTA CHIUSA, NON DAL CORPO DELLA RICHIESTA.
+    //
+    // Trovato dalla scansione di sicurezza il 02/10/2026: questa funzione legge
+    // con asServiceRole l'archivio che il chiamante nomina, dopo il solo
+    // controllo del login. Chiunque fosse collegato - anche un utente di sola
+    // lettura - poteva chiedere ChiusuraPassivaMese o ConsuntivoFornitore e
+    // riavere i costi dei fornitori, che sono riservati all'amministratore.
+    // asServiceRole serve e resta (la matrice guarda tutto l'archivio, non i
+    // record di chi chiede), ma l'archivio non lo decide piu' chi chiama: la
+    // pagina Assegnati passa 'Assegnato' o 'AssegnatoAci', e non esiste nessun
+    // altro chiamante.
+    const ENTITA_AMMESSE = ['Assegnato', 'AssegnatoAci'];
     const entityName = body.entity || 'Assegnato';
+    if (!ENTITA_AMMESSE.includes(entityName)) {
+      return Response.json({ error: `Archivio non ammesso. Valori validi: ${ENTITA_AMMESSE.join(', ')}` }, { status: 400 });
+    }
 
     const all = await fetchAll(base44.asServiceRole.entities[entityName]);
 

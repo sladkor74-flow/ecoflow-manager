@@ -2,7 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { sostituisciFilePrecedenti } from "../../shared/fileArchivio.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
-import { urlScaricabile, riferimentoDaSalvare } from "../../shared/fileScaricabile.ts";
+import { urlScaricabile, riferimentoDaSalvare, riferimentoDalCorpo } from "../../shared/fileScaricabile.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
@@ -20,11 +20,15 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return rispostaSolaLettura();
     const body = await req.json();
-    const { file_url: fu, file_uri: fi, nome_file: nf, replace_existing, conferma_forzatura } = body;
-    file_url = fu;
-    file_uri = fi;
+    const { nome_file: nf, replace_existing, conferma_forzatura } = body;
+    // Il file si prende solo come file_uri: un indirizzo non si accetta da chi
+    // chiama (02/10/2026, come in importEcotyreFile).
+    const dalCorpo = riferimentoDalCorpo(body);
+    if (dalCorpo.errore) return Response.json({ error: dalCorpo.errore }, { status: 400 });
+    file_uri = dalCorpo.rif ? dalCorpo.rif.file_uri : null;
+    file_url = null;
     nome_file = nf || 'N/D';
-    if (!file_url && !file_uri) return Response.json({ error: 'file_uri o file_url obbligatorio' }, { status: 400 });
+    if (!file_uri) return Response.json({ error: 'file_uri obbligatorio' }, { status: 400 });
     // L'elenco dei punti di raccolta e' un documento aziendale: ragioni sociali,
     // indirizzi, partite IVA. Adesso sale privato e si apre solo con un link
     // firmato che scade; i caricamenti vecchi hanno ancora un file_url pubblico.

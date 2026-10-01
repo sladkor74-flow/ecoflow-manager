@@ -8,6 +8,7 @@ import { ricontrollaVerifiche, conRitentativi, piuRecentiPerSoggetto, daRiconfro
 import { caricaGestionale, rifaiQuadratura, TIPI_CARICAMENTO } from "../../shared/quadraturaFirDati.ts";
 import { precaricaParti } from "../../shared/testoLungo.ts";
 import { eAlleggerito } from "../../shared/conservazione.ts";
+import { livelloDi, puoCaricare } from "../../shared/livelli.ts";
 
 // Dopo un caricamento di primarie o secondarie (lo lancia Caricamento Dati a
 // caricamento concluso) riconfronta con i nuovi dati tutto quello che il modulo
@@ -54,6 +55,26 @@ export default async function(req) {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
+    // CHI PUO' RISCRIVERE LE VERIFICHE E LE QUADRATURE (02/10/2026).
+    //
+    // Questa funzione passava scrivi: true fisso, e in cima c'era solo il
+    // controllo del login: qualunque utente collegato, anche di sola lettura,
+    // poteva far riscrivere gli esiti delle verifiche settimanali, gli alert e
+    // le quadrature FIR - e l'elenco dei giorni, che arriva dal corpo della
+    // richiesta, decideva anche QUALI settimane riscrivere.
+    //
+    // Che fosse una dimenticanza e non una scelta lo dicono le altre due
+    // funzioni che chiamano le STESSE funzioni condivise: verificheReport e
+    // quadraturaFir passano entrambe scrivi: eAmministratore(user). Due su tre
+    // lo facevano, la terza no.
+    //
+    // Qui pero' non si pretende l'amministratore: il riconfronto dopo un
+    // caricamento e' legittimo per chi quel caricamento lo fa, e le primarie le
+    // carica anche l'operatore base (regola 2: ogni caricamento aggiorna tutto).
+    // Il permesso giusto e' quello: chi puo' caricare puo' far riconfrontare,
+    // chi consulta vede il risultato a schermo e non lo salva.
+    const puoScrivere = puoCaricare(await livelloDi(base44, user), 'primarie');
+
     const rinvio = (caricamenti) => Response.json({
       error: `Riconfronto delle verifiche settimanali rinviato. Caricamento ${caricamenti.map(descriviCaricamento).join('; ')}. `
         + 'Si rifà da solo al prossimo caricamento concluso e all\'apertura della settimana.',
@@ -95,7 +116,7 @@ export default async function(req) {
     const durante = caricamentiDuranteLettura(primaDegliArchivi, dopo);
     if (durante.length) return rinvio(durante);
 
-    const esiti = await ricontrollaVerifiche(base44, verifiche, movimenti, { scrivi: true, riprova: conRitentativi });
+    const esiti = await ricontrollaVerifiche(base44, verifiche, movimenti, { scrivi: puoScrivere, riprova: conRitentativi });
 
     let quadratureAggiornate = 0;
     const errori = esiti.filter(r => r.errore).map(r => ({ verifica: r.id, errore: r.errore }));
@@ -105,7 +126,7 @@ export default async function(req) {
       try {
         // Gli archivi sono gia' in memoria: ogni settimana si conta li', senza rileggerli.
         const gestionale = await caricaGestionale(base44, { inizio: q.data_inizio, fine: q.data_fine }, null, { archivi, caricamenti: dopo });
-        const r = await conRitentativi(() => rifaiQuadratura(base44, q, gestionale, { scrivi: true }));
+        const r = await conRitentativi(() => rifaiQuadratura(base44, q, gestionale, { scrivi: puoScrivere }));
         if (r && r.salvato) quadratureAggiornate++;
       } catch (e) {
         errori.push({ quadratura: q.id, errore: e && e.message ? e.message : String(e) });

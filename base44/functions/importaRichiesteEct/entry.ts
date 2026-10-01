@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { cancellaFile } from "../../shared/fileArchivio.ts";
-import { urlScaricabile } from "../../shared/fileScaricabile.ts";
+import { urlScaricabile, riferimentoDalCorpo } from "../../shared/fileScaricabile.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { leggiFoglio, riconosciOrdine, scadenzaDaNota, statoRichiesta, listaOrdini, evasioneOrdini, abbinaRichieste, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare } from "../../shared/richiesteEct.ts";
@@ -20,7 +20,7 @@ import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
 // (abbinaRichieste), non dal numero di riga del foglio: ordinare il foglio o
 // inserirci una riga non deve spostare le spunte su altre richieste.
 //
-// Payload: { file_url, anno? }
+// Payload: { file_uri, anno? }
 const FOGLIO = 'Richieste ECT';
 
 export default async function(req) {
@@ -30,8 +30,17 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return Response.json({ error: 'Solo l amministratore puo caricare le richieste' }, { status: 403 });
 
-    const { file_url, file_uri, anno } = await req.json().catch(() => ({}));
-    if (!file_url && !file_uri) return Response.json({ error: 'file_uri o file_url obbligatorio' }, { status: 400 });
+    const corpo = await req.json().catch(() => ({}));
+    const { anno } = corpo;
+    // Il file si prende solo come file_uri: un indirizzo non si accetta da chi
+    // chiama (02/10/2026, come in importEcotyreFile). Qui il fetch era nudo:
+    // un indirizzo rifiutato dava un 500 senza spiegazione, adesso un 400 che
+    // dice perche.
+    const dalCorpo = riferimentoDalCorpo(corpo);
+    if (dalCorpo.errore) return Response.json({ error: dalCorpo.errore }, { status: 400 });
+    const file_uri = dalCorpo.rif ? dalCorpo.rif.file_uri : null;
+    const file_url = null;
+    if (!file_uri) return Response.json({ error: 'file_uri obbligatorio' }, { status: 400 });
 
     // Il foglio delle richieste porta nomi di produttori, indirizzi e date: e' un
     // documento aziendale e adesso sale privato. Si apre con un link firmato che

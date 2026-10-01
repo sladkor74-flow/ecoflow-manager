@@ -16,8 +16,27 @@ export default async function(req) {
 
     const body = await req.json();
     const filters = body.filters || {};
+    // L'ARCHIVIO E LA MODALITA' SI SCELGONO DA UNA LISTA CHIUSA (02/10/2026).
+    //
+    // Era lo stesso difetto di computeAssegnatiMatrix, con l'aggravante che qui
+    // il risultato torna come file Excel: chiunque fosse collegato poteva
+    // nominare ChiusuraPassivaMese o ConsuntivoFornitore e scaricarsi i costi
+    // dei fornitori, riservati all'amministratore.
+    //
+    // NON si aggiunge il controllo dell'amministratore: consultare ed esportare
+    // e' quello che tutti possono fare (base44/shared/permessi.ts), e un 403 qui
+    // chiuderebbe le pagine Assegnati rete e ACI a chi le usa ogni giorno. Il
+    // difetto non era chi chiamava: era che decideva lui quale archivio leggere.
+    const ENTITA_AMMESSE = ['Assegnato', 'AssegnatoAci'];
+    const MODI_AMMESSI = ['detail', 'matrix'];
     const mode = body.mode || 'detail';
     const entityName = body.entity || 'Assegnato';
+    if (!ENTITA_AMMESSE.includes(entityName)) {
+      return Response.json({ error: `Archivio non ammesso. Valori validi: ${ENTITA_AMMESSE.join(', ')}` }, { status: 400 });
+    }
+    if (!MODI_AMMESSI.includes(mode)) {
+      return Response.json({ error: `Modalita' non ammessa. Valori validi: ${MODI_AMMESSI.join(', ')}` }, { status: 400 });
+    }
 
     const all = await fetchAll(base44.asServiceRole.entities[entityName]);
 

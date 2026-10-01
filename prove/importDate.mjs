@@ -136,8 +136,12 @@ function entita(nome) {
   };
 }
 const entities = new Proxy({}, { get: (_t, nome) => entita(nome) });
+// Un file privato si apre con un link firmato: dal 02/10/2026 le funzioni non
+// accettano piu' un indirizzo preso dal corpo della richiesta, quindi anche
+// questa prova passa per file_uri e si fa firmare l'indirizzo.
+const Core = { CreateFileSignedUrl: async ({ file_uri }) => ({ signed_url: 'prova://' + file_uri }) };
 export function createClientFromRequest() {
-  return { auth: { me: async () => ({ role: 'admin', email: 'prova', full_name: 'Prova' }) }, asServiceRole: { entities }, entities };
+  return { auth: { me: async () => ({ role: 'admin', email: 'prova', full_name: 'Prova' }) }, asServiceRole: { entities, integrations: { Core } }, entities, integrations: { Core } };
 }`;
 const finti = {
   name: 'moduli-finti',
@@ -165,12 +169,12 @@ console.log('IMPORTAZIONE LATO SERVER (importEcotyreFile)');
 
 globalThis.__ARCHIVI = {};
 const bufferFile = fileExcel();
-globalThis.fetch = async (url) => (String(url) === 'prova://primarie.xlsx'
+globalThis.fetch = async (url) => (String(url) === 'prova://uri-primarie.xlsx'
   ? { ok: true, arrayBuffer: async () => bufferFile }
   : { ok: false, status: 404, statusText: 'non previsto' });
 
 const importaFile = await funzione('importEcotyreFile');
-const esito = await importaFile({ file_url: 'prova://primarie.xlsx', tipo_file: 'primarie', nome_file: 'primarie.xlsx' });
+const esito = await importaFile({ file_uri: 'uri-primarie.xlsx', tipo_file: 'primarie', nome_file: 'primarie.xlsx' });
 verifica('il file passa il controllo delle intestazioni', esito.status === 200, JSON.stringify(esito.body).slice(0, 300));
 
 const rete = archivio('PrimariaRete');

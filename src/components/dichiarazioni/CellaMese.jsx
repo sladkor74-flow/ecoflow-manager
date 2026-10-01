@@ -48,10 +48,17 @@ export default function CellaMese({ mese, onApri, soloLettura, attesa = true, do
       title={titolo}
       className={`w-full rounded-md border px-1.5 py-1 text-center transition-colors ${fondo} ${soloLettura ? 'cursor-default' : ''}`}
     >
+      {/* IL NUMERO GRANDE E' SEMPRE E SOLO IL DICHIARATO.
+          Il 01/10/2026 avevo messo qui anche quanto restava da dichiarare: nello
+          stesso posto, nello stesso formato, distinto solo dalla scritta
+          piccola. Il giorno dopo l'utente ha letto «105.740» nella casella di
+          settembre di un impianto che non aveva ancora dichiarato niente e ha
+          chiesto, giustamente, perche' risultasse gia' dichiarato in parte. Un
+          numero in questa casella ha sempre voluto dire «questo e' quanto
+          abbiamo dichiarato»: cambiarne il significato a meta' tabella non si
+          fa. Quanto manca si legge sotto, con scritto che manca. */}
       <span className="block text-[11px] leading-tight tabular-nums font-medium">
-        {/* Dove manca la dichiarazione si scrive QUANTO manca, non un trattino:
-            era il numero che non si vedeva da nessuna parte (01/10/2026). */}
-        {d && d.quantita_kg ? kg(d.quantita_kg) : manca ? (resta > 0 ? kg(resta) : '—') : ''}
+        {d && d.quantita_kg ? kg(d.quantita_kg) : manca ? '—' : ''}
       </span>
       <span className="flex items-center justify-center gap-1 text-[9px] leading-tight opacity-80">
         {stato === 'caricata' && <><Check className="w-3 h-3" /> portale</>}
@@ -59,7 +66,7 @@ export default function CellaMese({ mese, onApri, soloLettura, attesa = true, do
         {stato === 'inserita' && 'da segnare'}
         {stato === 'solo_metalli' && 'solo metalli'}
         {stato === 'non_dovuta' && <><Minus className="w-3 h-3" /> non dovuta</>}
-        {stato === 'nessuna' && (manca ? 'da chiedere' : '')}
+        {stato === 'nessuna' && (manca ? `da dichiarare ${kg(resta)}` : '')}
       </span>
     </button>
   );
