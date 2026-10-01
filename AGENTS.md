@@ -1529,6 +1529,26 @@ servono i loro identificativi: li produce la funzione `inventarioFile`
 file caricati" in Caricamento Dati, solo amministratore. I pubblici escono per
 primi perche' sono quelli che scottano.
 
+**OGNI RIGA DI QUELL'ELENCO E' UN FILE CHE UN RECORD STA USANDO**, perche'
+l'inventario nasce dai record. Il 02/10/2026 e' mancato poco che costasse caro:
+l'elenco e' stato mandato all'assistenza chiedendo la rimozione dei file, e
+dentro c'erano anche i **144 documenti di qualifica** dei fornitori (DURC,
+contratti, polizze, visure), i **4 modelli** con cui si generano le lettere e una
+stampa di quadratura. Li ha fermati l'assistenza, controllando lei: *«if we delete
+them, those records will stay in your app but their documents will no longer
+open»*. Da allora ogni riga del CSV porta la colonna **`azione`** - «DA FAR
+RIMUOVERE: indirizzo pubblico, prima togli il riferimento dal gestionale» oppure
+«NON RIMUOVERE: e' il documento che questo record sta usando» - e la funzione
+restituisce `richiesta`, la frase coi conti da scrivere insieme al file
+(`testoRichiesta`). Un elenco di file mandato senza dire che cosa farne si legge
+come una lista di cancellazioni.
+
+**Fatto il 02/10/2026.** L'assistenza ha rimosso dallo storage i **52 file
+pubblici** (compresi i due `GESTIONEECOTYRE2026.xlsx`) e svuotato la cache CDN: i
+loro indirizzi non caricano piu'. I riferimenti nei record erano gia' stati tolti
+prima con `scollegaFilePubblici` (72 riferimenti), che e' l'ordine giusto. I 149
+privati **non sono stati toccati, e non vanno toccati**.
+
 **Niente password sui file.** Valutata e scartata: una password che l'app conosce
 non e' un segreto dall'app, e una che deve digitare una persona rompe ogni lettura
 automatica (pulizia notturna, riconfronto di una quadratura, allegati

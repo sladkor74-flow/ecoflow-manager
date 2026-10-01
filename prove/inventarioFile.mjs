@@ -7,7 +7,7 @@
 // prova.
 //
 // npm run prove
-import { voceFile, perFile, csvInventario, contaInventario, ARCHIVI_CON_FILE } from '../base44/shared/inventarioFile.ts';
+import { voceFile, perFile, csvInventario, contaInventario, ARCHIVI_CON_FILE, testoRichiesta } from '../base44/shared/inventarioFile.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -66,8 +66,8 @@ console.log('I PUBBLICI ESCONO PER PRIMI: SONO QUELLI CHE SCOTTANO');
     voceFile(def, { id: 'p2', file_url: 'https://x/pubblico.xlsx', tipo_file: 'primarie', nome_file: 'PRIMARIE.xlsx', created_date: '2026-09-01T08:00:00Z' }),
   ];
   const righe = csvInventario(voci).split('\n');
-  verifica('intestazione giusta', righe[0] === 'genere,riferimento,archivio,cosa,descrizione,caricato_il,record_che_lo_usano', righe[0]);
-  verifica('il pubblico e la prima riga, anche se caricato dopo', righe[1].startsWith('pubblico,https://x/pubblico.xlsx'), righe[1]);
+  verifica('intestazione giusta, con la colonna che dice che cosa farne', righe[0] === 'genere,azione,riferimento,archivio,cosa,descrizione,caricato_il,record_che_lo_usano', righe[0]);
+  verifica('il pubblico e la prima riga, anche se caricato dopo', righe[1].startsWith('pubblico,DA FAR RIMUOVERE') && righe[1].includes('https://x/pubblico.xlsx'), righe[1]);
   verifica('il privato viene dopo', righe[2].startsWith('privato,'), righe[2]);
 }
 
@@ -76,7 +76,31 @@ console.log('IL CSV NON SI ROMPE CON LE VIRGOLE E LE VIRGOLETTE');
   const voci = [voceFile(def, { id: 'x', file_url: 'https://x/a.xlsx', tipo_file: 'primarie', nome_file: 'REPORT, "settembre".xlsx' })];
   const riga = csvInventario(voci).split('\n')[1];
   verifica('il campo con la virgola sta fra virgolette', /"primarie · REPORT, ""settembre"".xlsx"/.test(riga), riga);
-  verifica('e le colonne restano sette', riga.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).length === 7, riga);
+  verifica('e le colonne restano otto', riga.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).length === 8, riga);
+}
+
+// OGNI RIGA DI QUESTO ELENCO E' UN FILE IN USO, E DEVE DIRLO.
+//
+// Il 02/10/2026 e' mancato poco che costasse caro: l'elenco e' stato mandato
+// all'assistenza della piattaforma chiedendo la rimozione dei file, e dentro
+// c'erano anche i 144 documenti di qualifica dei fornitori, i 4 modelli delle
+// lettere e una stampa di quadratura. Li ha fermati l'assistenza.
+console.log('L\'ELENCO DICE CHE COSA FARNE, RIGA PER RIGA');
+{
+  const pubblico = voceFile(def, { id: 'p', file_url: 'https://x/a.xlsx', tipo_file: 'primarie', nome_file: 'A.xlsx' });
+  const privato = voceFile(def, { id: 'q', file_uri: 'uri-b', tipo_file: 'pdr', nome_file: 'B.xlsx' });
+  verifica('un file in uso lo dice', pubblico.in_uso === true && privato.in_uso === true);
+  verifica('il pubblico va fatto rimuovere, ma prima si toglie il riferimento',
+    /DA FAR RIMUOVERE/.test(pubblico.azione) && /Prima togli il riferimento/.test(pubblico.azione), pubblico.azione);
+  verifica('il privato NON va rimosso: e\' il documento di un record',
+    /^NON RIMUOVERE/.test(privato.azione) && /sta usando/.test(privato.azione), privato.azione);
+  const conta = contaInventario([pubblico, privato, privato]);
+  verifica('i conti dicono quanti sono in uso e quanti da far rimuovere',
+    conta.in_uso === 2 && conta.da_far_rimuovere === 1 && conta.pubblici === 1 && conta.privati === 1, JSON.stringify(conta));
+  const frase = testoRichiesta(conta);
+  verifica('e la frase per l\'assistenza dice entrambe le cose, coi numeri',
+    /Da rimuovere: 1 file con indirizzo pubblico/.test(frase) && /Da NON rimuovere: 1 file privati/.test(frase), frase);
+  verifica('senza pubblici lo dice e basta', /Non ci sono piu' file con indirizzo pubblico/.test(testoRichiesta({ pubblici: 0, privati: 3 })), testoRichiesta({ pubblici: 0, privati: 3 }));
 }
 
 console.log('SI GUARDANO TUTTI GLI ARCHIVI CHE TENGONO UN FILE');

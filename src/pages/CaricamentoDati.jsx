@@ -121,6 +121,19 @@ export default function CaricamentoDati() {
       a.download = `file-caricati-${oggi}.csv`;
       a.click();
       URL.revokeObjectURL(a.href);
+      // LA FRASE DA SCRIVERE NELLA RICHIESTA, insieme al file.
+      //
+      // Ogni riga di quell'elenco e' un file che un record sta usando: l'elenco
+      // nasce dai record. Mandato senza spiegarlo si legge come una lista di
+      // cancellazioni, e il 02/10/2026 e' mancato poco - dentro c'erano i 144
+      // documenti di qualifica dei fornitori, i modelli delle lettere e una
+      // stampa di quadratura. Li ha fermati l'assistenza, controllando lei.
+      const richiesta = (res.data && res.data.richiesta) || '';
+      if (richiesta) {
+        window.alert('Elenco scaricato.\n\nDa scrivere nella richiesta, insieme al file:\n\n'
+          + richiesta
+          + '\n\nOgni riga dell\'elenco è un file che un record sta usando, e la colonna "azione" lo dice riga per riga: senza quella frase l\'elenco si legge come una lista di cancellazioni.');
+      }
     } catch (e) {
       setDialogState(extractUploadError(e));
     }

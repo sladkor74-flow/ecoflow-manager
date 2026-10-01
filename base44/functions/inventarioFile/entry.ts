@@ -2,7 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
-import { ARCHIVI_CON_FILE, voceFile, csvInventario, contaInventario } from "../../shared/inventarioFile.ts";
+import { ARCHIVI_CON_FILE, voceFile, csvInventario, contaInventario, testoRichiesta } from "../../shared/inventarioFile.ts";
 
 // L'ELENCO DEI FILE CHE LA PIATTAFORMA TIENE PER NOI.
 //
@@ -41,10 +41,15 @@ export default async function(req) {
       }
     }
 
+    const conta = contaInventario(voci);
     return Response.json({
       ok: true,
-      conta: contaInventario(voci),
+      conta,
       ...(guasti.length ? { archivi_non_letti: guasti } : {}),
+      // La frase da scrivere nella richiesta, coi conti giusti: ogni file di
+      // questo elenco e' in uso da un record, e solo i pubblici vanno rimossi.
+      // Senza, l'elenco si legge come una lista di cancellazioni (02/10/2026).
+      richiesta: testoRichiesta(conta),
       csv: csvInventario(voci),
       voci,
     });

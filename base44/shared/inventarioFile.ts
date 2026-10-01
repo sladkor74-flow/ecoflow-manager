@@ -30,17 +30,44 @@ export const ARCHIVI_CON_FILE = [
 
 const testo = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 
+// OGNI RIGA DI QUESTO ELENCO E' UN FILE CHE UN RECORD STA USANDO.
+//
+// L'inventario si costruisce DAI RECORD: se un file e' qui, c'e' un record che
+// lo punta. Questo non e' un dettaglio tecnico, e' la cosa piu' importante del
+// file, e il 02/10/2026 e' mancato poco che costasse caro: l'elenco e' stato
+// mandato all'assistenza della piattaforma chiedendo la rimozione dei file, e
+// dentro c'erano anche i 144 documenti di qualifica dei fornitori (DURC,
+// contratti, polizze, visure), i 4 modelli con cui si generano le lettere e una
+// stampa di quadratura. Li ha fermati l'assistenza, controllando lei: «if we
+// delete them, those records will stay in your app but their documents will no
+// longer open».
+//
+// Quindi ogni riga dice che cosa farne, a parole, e il CSV porta quella colonna:
+//   pubblico - l'indirizzo funziona per chiunque ce l'abbia. Si fa rimuovere, ma
+//              PRIMA si toglie il riferimento dai record (scollegaFilePubblici),
+//              altrimenti il record resta a puntare un file che non c'e' piu'.
+//   privato  - si apre solo con un link firmato che scade: non e' esposto, ed e'
+//              il documento che quel record mostra. NON si fa rimuovere.
+export const AZIONE_PUBBLICO = 'DA FAR RIMUOVERE: indirizzo pubblico. Prima togli il riferimento dal gestionale';
+export const AZIONE_PRIVATO = 'NON RIMUOVERE: e\' il documento che questo record sta usando';
+export const azioneFile = (genere) => (genere === 'pubblico' ? AZIONE_PUBBLICO : AZIONE_PRIVATO);
+
 /** Una riga dell'inventario da un record. null se quel record non tiene nessun file. */
 export function voceFile(def, r) {
   const url = def.campoUrl ? testo(r[def.campoUrl]) : '';
   const uri = def.campoUri ? testo(r[def.campoUri]) : '';
   if (!url && !uri) return null;
+  const genere = url ? 'pubblico' : 'privato';
   return {
     entita: def.entita,
     id: testo(r.id),
     cosa: def.cosa,
     descrizione: testo(def.etichetta ? def.etichetta(r) : ''),
-    genere: url ? 'pubblico' : 'privato',
+    genere,
+    // In uso e' sempre vero: l'inventario nasce dai record. Si scrive comunque,
+    // perche' chi legge l'elenco non sa come e' stato costruito.
+    in_uso: true,
+    azione: azioneFile(genere),
     riferimento: url || uri,
     caricato_il: testo(r.created_date).slice(0, 10),
   };
@@ -81,11 +108,33 @@ export function perFile(voci) {
  * non si apre in Excel italiano.
  */
 export function csvInventario(voci) {
-  const righe = [['genere', 'riferimento', 'archivio', 'cosa', 'descrizione', 'caricato_il', 'record_che_lo_usano'].join(',')];
+  // La colonna "azione" sta per seconda, prima del riferimento: chi scorre
+  // l'elenco la incontra comunque, e nessuna riga puo' piu' essere letta come
+  // "questo file si puo' cancellare" quando invece un record lo sta usando.
+  const righe = [['genere', 'azione', 'riferimento', 'archivio', 'cosa', 'descrizione', 'caricato_il', 'record_che_lo_usano'].join(',')];
   for (const v of perFile(voci)) {
-    righe.push([v.genere, v.riferimento, v.entita, v.cosa, v.descrizione, v.caricato_il, v.record].map(csvCampo).join(','));
+    righe.push([v.genere, v.azione || azioneFile(v.genere), v.riferimento, v.entita, v.cosa, v.descrizione, v.caricato_il, v.record].map(csvCampo).join(','));
   }
   return righe.join('\n');
+}
+
+/**
+ * La frase da scrivere all'assistenza, con i conti giusti: che cosa chiedere di
+ * rimuovere e che cosa non deve essere toccato. Senza questa, l'elenco da solo
+ * si legge come una lista di cancellazioni (02/10/2026).
+ */
+export function testoRichiesta(conta) {
+  const c = conta || {};
+  const pubblici = Number(c.pubblici) || 0;
+  const privati = Number(c.privati) || 0;
+  return [
+    pubblici
+      ? `Da rimuovere: ${pubblici} file con indirizzo pubblico (colonna genere = pubblico), quelli caricati prima del passaggio a UploadPrivateFile.`
+      : 'Non ci sono piu\' file con indirizzo pubblico da rimuovere.',
+    privati
+      ? `Da NON rimuovere: ${privati} file privati. Sono i documenti che i record stanno usando - qualifiche, contratti, modelli, stampe - e si aprono solo con un link firmato che scade.`
+      : '',
+  ].filter(Boolean).join(' ');
 }
 
 /** Quanti sono: i FILE distinti, e a parte i record che li puntano. */
@@ -98,6 +147,11 @@ export function contaInventario(voci) {
     pubblici: pubblici.length,
     privati: file.length - pubblici.length,
     record: xs.length,
+    // Tutti i file dell'inventario sono in uso da un record: e' da li' che
+    // l'inventario nasce. Si dice, perche' e' la cosa che va capita prima di
+    // chiedere a qualcuno di cancellare qualcosa.
+    in_uso: file.length,
+    da_far_rimuovere: pubblici.length,
     per_archivio: [...new Set(file.map(v => v.entita))].map(e => ({
       entita: e,
       quanti: file.filter(v => v.entita === e).length,
