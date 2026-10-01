@@ -78,12 +78,36 @@
     "titolo",
     "descrizione"
   ],
+  // APRIRE UNA RICHIESTA E' L'UNICA SCRITTURA DI UN UTENTE NON AMMINISTRATORE.
+  //
+  // Il 01/10/2026 la scansione della piattaforma ha messo da sola "create": null
+  // (commit 35f1b3d). Qui la create e' esattamente la cosa che deve restare
+  // aperta: il form di src/pages/Richieste.jsx si disegna SOLO quando l'utente
+  // non e' amministratore, l'amministratore non ha nessun pulsante per creare
+  // una richiesta, e src/lib/permessi.js tiene RichiestaUtente fra le
+  // ENTITA_LIBERE proprio per lasciarla passare. Il gestionale dice a chi non
+  // puo' scrivere, in due punti del codice: "per un caricamento o una
+  // correzione apri una richiesta dal modulo Richieste". Con la create chiusa
+  // quella frase diventa un vicolo chiuso.
+  //
+  // "null" non e' nessuna delle due cose che servono: e' l'unico null in tutte
+  // le entita' e ogni altro divieto qui si scrive user_condition role admin.
+  //
+  // IL FILTRO IN LETTURA INVECE SI TIENE, perche' correggeva un difetto vero:
+  // con read: true il server mandava a ogni utente le richieste di tutti, e il
+  // "vedo solo le mie" era soltanto un filtro nel browser. Cambia la chiave:
+  // created_by_id lo riempie la piattaforma, mentre richiedente_email lo scrive
+  // il browser e ripiega sulla stringa vuota - una chiave di sicurezza non si
+  // prende da un campo che il client puo' lasciare vuoto. Via anche il prefisso
+  // "data.", che in tutte le entita' compare solo qui: lo stesso commit
+  // automatico ha scritto created_by_id nudo su EsercitazioneRT, e le due forme
+  // non possono essere giuste entrambe.
   "rls": {
-    "create": null,
+    "create": true,
     "read": {
       "$or": [
         {
-          "data.richiedente_email": "{{user.email}}"
+          "created_by_id": "{{user.id}}"
         },
         {
           "user_condition": {

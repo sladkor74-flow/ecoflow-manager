@@ -43,6 +43,76 @@ npx skills add base44/skills
   rileggono archivi interi a intervalli: si guarda lo stato di cio' che e' in
   corso, e si rilegge tutto solo quando cambia (`ReportSettimanali.jsx`).
 
+## Il nome: TreadRider
+
+Il gestionale si chiama **TreadRider** (una parola, T e R maiuscole), scelto
+dall'utente il 02/10/2026. Prima si chiamava "EcoFlow Manager". Battistrada
+(*tread*) piu' *Outrider*: chi corre sul battistrada. **Non** "TyreTreader", che
+era la prima idea: in inglese *treader* e' «chi calpesta», mentre «ricostruttore
+di pneumatici» e' *retreader* - e la ricostruzione e' l'altro capo della vita di
+una gomma, non il mestiere di SMOCO, che le manda a recupero.
+
+**Due cose da non confondere mai col nome del prodotto:** *EcoTyna* e'
+l'assistente dentro il gestionale, e *Ecotyre* e' il consorzio cliente.
+
+**Dove vive il nome.** Nel repo e' in tre posti e basta: il `<title>` e
+l'`apple-mobile-web-app-title` di `index.html`, e il metadato Autore dei file
+Excel esportati (`wb.creator`, quattro righe in `src/lib`). Le pagine non lo
+scrivono da nessuna parte.
+
+**Quello che dal repo NON si cambia.** Il nome con cui l'applicazione si installa
+su Android e su desktop, la sua descrizione e la sua icona vengono dal manifest
+che **la piattaforma genera dalle impostazioni dell'app** e serve su
+`/manifest.json` (che redirige a `/api/apps/manifests/<appId>/manifest.json`).
+Quel manifest non sta nel repo: `public/` non esiste. Il 02/10/2026 diceva
+ancora `"name": "EcoFlow Manager"`, con `theme_color` nero (il nostro verde e'
+`#059669`) e l'icona ospitata su un dominio della piattaforma. Si cambia nelle
+impostazioni dell'applicazione, non qui.
+
+**Una stringa interna che resta "ecoflow":** `Symbol.for('ecoflow.limiteRichieste')`
+in `base44/shared/limiteRichieste.ts` e nel suo specchio `src/lib/limiteRichieste.js`.
+Nessuno la legge, e due `Symbol.for` con chiavi diverse sono simboli diversi: se
+si cambiasse in un file solo tornerebbe il doppio avvolgimento del limite di
+richieste (una richiesta respinta ripartirebbe 36 volte invece di 6). Si cambiano
+insieme o non si toccano: non toccarle e' a rischio zero.
+
+## Quando la piattaforma modifica il codice da sola
+
+La scansione di sicurezza della piattaforma apre commit sul repo da sola, come
+`base44-builder[bot]`. **Vanno letti prima di pubblicare**, perche' tocca le
+regole RLS, cioe' il modello dei permessi, e un errore la' non si vede provando
+col proprio account di amministratore.
+
+Il 01/10/2026 (commit `35f1b3d`, «Apply RLS security recommendations») ha fatto
+tre cose su `RichiestaUtente` ed `EsercitazioneRT`, e solo due erano giuste:
+
+- **Giusta, tenuta:** il filtro in lettura. Con `read: true` il server mandava a
+  ogni utente i record di tutti, e il «vedo solo i miei» era soltanto un filtro
+  nel browser. Tenuto, con due correzioni: la chiave e' `created_by_id`, che
+  riempie la piattaforma, non `richiedente_email`, che scrive il browser e
+  ripiega sulla stringa vuota; e senza il prefisso `data.`, che in tutte le
+  entita' compariva solo la' - lo stesso commit ha scritto `created_by_id` nudo
+  su un'altra entita', quindi una delle due forme e' sbagliata.
+- **Sbagliata, respinta:** `"create": null` su `RichiestaUtente`. Aprire una
+  richiesta e' **l'unica scrittura di un utente non amministratore**: il form si
+  disegna solo quando non e' amministratore, l'amministratore non ha nessun
+  pulsante per creare una richiesta, e il gestionale dice a chi non puo'
+  scrivere «per un caricamento o una correzione apri una richiesta dal modulo
+  Richieste». Con la create chiusa quella frase e' un vicolo chiuso. `null` e'
+  anche l'unico in tutte le entita': qui un divieto si scrive
+  `user_condition role admin`.
+- **Inutile e rischiosa, respinta:** la condizione su `create` legata a
+  `created_by_id`. Non aggiunge difese - quel campo lo mette la piattaforma, non
+  il browser, quindi nessuno puo' intestare un record a un altro - e se il
+  motore la valuta sul payload, dove `created_by_id` non c'e' ancora, ogni
+  creazione fallisce. Su `EsercitazioneRT` voleva dire perdere la prova appena
+  svolta con un «Risultato non salvato».
+
+`prove/scrittureDegliUtenti.mjs` e' la guardia: fallisce se una scansione futura
+richiude quelle `create`, riapre le letture, scrive una regola come `null` o
+reintroduce il prefisso `data.`. **Qual e' la sintassi giusta del campo nelle
+condizioni RLS va chiesto al supporto, non indovinato.**
+
 ## Regole della commessa
 
 Regole di dominio che il codice deve rispettare sempre. Valgono per ogni nuovo

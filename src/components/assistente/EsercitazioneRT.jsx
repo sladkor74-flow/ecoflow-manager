@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { base44 } from '@/api/base44Client';
+import { usePermessi } from '@/lib/permessi';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -254,13 +255,29 @@ export default function EsercitazioneRT() {
   const [esiti, setEsiti] = useState([]);       // parti consegnate
   const [fase, setFase] = useState('scelta');
 
+  // «LE TUE ESERCITAZIONI» DEVE VOLER DIRE LE TUE, ANCHE PER L'AMMINISTRATORE.
+  //
+  // Questa lettura non filtrava per autore: prendeva le ultime 200 righe e le
+  // mostrava tutte. Per chi non e' amministratore il server adesso manda solo le
+  // sue (regola RLS, 01/10/2026), ma l'amministratore legge tutto - e nella SUA
+  // tabella entravano le prove degli altri, il contatore «simulazioni superate»
+  // le sommava e il ripasso degli errori gli riproponeva i quiz sbagliati da
+  // qualcun altro. Col tetto di 200 righe, le prove altrui gli spingevano fuori
+  // le proprie piu' vecchie.
+  //
+  // Si chiede direttamente all'archivio solo le proprie: created_by_id lo
+  // riempie la piattaforma, quindi e' l'autore vero. Senza l'utente non si
+  // legge niente: meglio una tabella vuota per un istante che lo storico di
+  // qualcun altro.
+  const { user } = usePermessi();
   const caricaStorico = useCallback(async () => {
+    if (!user || !user.id) return;
     try {
-      setStorico(await base44.entities.EsercitazioneRT.list('-created_date', 200));
+      setStorico(await base44.entities.EsercitazioneRT.filter({ created_by_id: user.id }, '-created_date', 200));
     } catch (e) {
       console.error(e);
     }
-  }, []);
+  }, [user]);
   useEffect(() => { caricaStorico(); }, [caricaStorico]);
 
   // Materie della banca scelta per l'allenamento

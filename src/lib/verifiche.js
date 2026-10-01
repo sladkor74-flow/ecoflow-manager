@@ -570,7 +570,7 @@ export async function scaricaExcelVerifica(v) {
   const sintesi = sintesiVerifica(v, esito);
   const nomeTipo = (t) => (t === 'uscita' ? 'Uscita' : t === 'ingresso' ? 'Ingresso' : 'Non pertinente');
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Gestionale PFU';
+  wb.creator = 'TreadRider — Gestionale PFU';
   wb.created = new Date();
 
   // --- Riepilogo ---

@@ -70,10 +70,24 @@
       "description": "[{ id, scelta, esatta }]: scelta e' il testo scelto, vuoto se omessa"
     }
   },
+  // L'esercitazione del corso RT e' l'altra scrittura di un utente non
+  // amministratore (src/lib/permessi.js, ENTITA_LIBERE), e il livello
+  // "consultazione" ha il permesso esplicito di usarla.
+  //
+  // Il filtro in lettura, messo dalla scansione della piattaforma il
+  // 01/10/2026, chiudeva una fuga vera: con read: true ogni utente vedeva nella
+  // tabella intitolata "Le tue esercitazioni" i punteggi degli altri, il
+  // contatore delle simulazioni superate li sommava, e il ripasso degli errori
+  // gli riproponeva i quiz sbagliati da qualcun altro. Si tiene.
+  //
+  // La condizione sulla CREATE invece si toglie: non protegge niente - l'app non
+  // scrive created_by_id, lo mette la piattaforma, quindi nessuno puo' intestare
+  // un'esercitazione a un altro - e rischia tutto, perche' se il motore valuta
+  // la condizione sul payload (dove created_by_id non c'e' ancora) ogni consegna
+  // fallisce e la prova appena svolta si perde con un "Risultato non salvato".
+  // Una condizione che non aggiunge difese e puo' far perdere dati non si tiene.
   "rls": {
-    "create": {
-      "created_by_id": "{{user.id}}"
-    },
+    "create": true,
     "read": {
       "$or": [
         {

@@ -312,7 +312,7 @@ export async function excelBlocco(dati) {
   const ExcelJS = modulo.default || modulo;
   const { righe, indice, tipi } = righeBlocco(dati);
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Gestionale PFU';
+  wb.creator = 'TreadRider — Gestionale PFU';
   wb.created = new Date();
   wb.calcProperties.fullCalcOnLoad = true; // le formule sono senza valore: le fa Excel
 

@@ -227,7 +227,7 @@ export async function excelDelMese({ pratica, contesto }) {
   const { anno, mese } = contesto;
   const partenza = contesto.nave && contesto.nave.partenza ? daIt(contesto.nave.partenza) : '';
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Gestionale PFU';
+  wb.creator = 'TreadRider — Gestionale PFU';
   wb.created = new Date();
   const ws = wb.addWorksheet(`${mese} ${anno}`.slice(0, 31));
   ws.columns = [16, 12, 16, 16, 18, 12, 16, 18, 12, 14, 12, 10, 10].map(width => ({ width }));

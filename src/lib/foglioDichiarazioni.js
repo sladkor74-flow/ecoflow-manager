@@ -382,7 +382,7 @@ export async function esportaFoglioDichiarazioni({ pratiche = [], dichiarazioni 
   }
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Gestionale PFU';
+  wb.creator = 'TreadRider — Gestionale PFU';
   wb.created = new Date();
   const ws = wb.addWorksheet('DICHIARAZIONI');
   // Le larghezze del foglio dell'utente: A e B per i nomi, poi le coppie
