@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, RefreshCw, AlertTriangle, CheckCircle2, FileSpreadsheet, Link2 } from 'lucide-react';
+import { Loader2, RefreshCw, AlertTriangle, CheckCircle2, FileSpreadsheet, Link2, Eraser } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import { formatTonnellate, formatKg, formatIntero } from '@/lib/utils';
@@ -99,6 +99,36 @@ export default function DichiarazioniImpianti() {
 
   // Le dichiarazioni caricate a portale si riconoscono dai pesi del report: questo
   // lo rifa' a comando, ma succede gia' da solo a ogni caricamento del report.
+  // TOGLIE CIO' CHE NON E' VERAMENTE DICHIARATO A PORTALE (utente, 02/10/2026:
+  // «non confondiamoci con cose che non esistono»). Si guarda prima e si
+  // cancella dopo, come per i link pubblici: una cancellazione non si annulla.
+  const [ripulisco, setRipulisco] = useState(false);
+  const ripulisci = async () => {
+    setRipulisco(true);
+    try {
+      const vista = await base44.functions.invoke('ripulisciDichiarazioni', { anno });
+      const d = vista.data || {};
+      if (!d.conta) {
+        window.alert("Non c\'e\' niente da togliere: ogni dichiarazione di quest\'anno e\' caricata a portale, ricevuta via email, oppure dice perche\' quel mese non ne ha una.");
+        return;
+      }
+      const elenco = d.togliere
+        .map(r => `· ${r.sito} — ${r.canale}${r.provenienza ? ' ' + r.provenienza : ''} — ${r.mese}: ${formatKg(r.quantita_kg)} kg`)
+        .join('\n');
+      const quante = d.conta === 1 ? 'una riga' : `${d.conta} righe`;
+      const domanda = `Sto per togliere ${quante} che a portale non sono mai state dichiarate:\n\n${elenco}\n\nRestano dove sono le dichiarazioni caricate a portale, quelle ricevute via email e i mesi con un motivo scritto.\n\nNon si torna indietro. Procedo?`;
+      if (!window.confirm(domanda)) return;
+      const res = await base44.functions.invoke('ripulisciDichiarazioni', { anno, conferma: true });
+      const e = res.data || {};
+      window.alert(`Tolte ${e.conta} righe.${e.errori ? `\n\nNon riuscite: ${e.errori.join("; ")}` : ''}`);
+      await carica();
+    } catch (e) {
+      setErrore(e?.response?.data?.error || e.message);
+    } finally {
+      setRipulisco(false);
+    }
+  };
+
   const allinea = async () => {
     setAllineo(true);
     setEsitoAllineamento(null);
@@ -137,6 +167,11 @@ export default function DichiarazioniImpianti() {
           {isAdmin && (
             <Button variant="outline" className="gap-1" onClick={allinea} disabled={allineo} title="Rilegge il report delle dichiarazioni di trattamento e segna quali mesi risultano caricati a portale, con la data e i materiali">
               {allineo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />} Allinea dal portale
+            </Button>
+          )}
+          {isAdmin && (
+            <Button variant="outline" className="gap-1" onClick={ripulisci} disabled={ripulisco || !dati} title="Toglie le righe che a portale non sono mai state dichiarate: i numeri seminati all'avvio, che in quantita portavano cio che restava DA dichiarare, e i record vuoti. Non tocca le dichiarazioni caricate, quelle ricevute via email e i mesi con un motivo scritto">
+              {ripulisco ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eraser className="w-4 h-4" />} Togli il non dichiarato
             </Button>
           )}
           <Button variant="outline" className="gap-1" disabled={!dati} onClick={() => esportaDichiarazioni(dati)}>

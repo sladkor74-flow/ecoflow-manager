@@ -105,31 +105,34 @@ console.log('LA FUNZIONE FA QUESTO, NON ALTRO');
     /da_dichiarare_t: t3\(mesi\.reduce\(\(s, m\) => s \+ m\.da_dichiarare_kg, 0\) \/ 1000\)/.test(s));
 }
 
-console.log('LA CASELLA LO DICE ANCHE QUANDO UNA DICHIARAZIONE C\'E\'');
+console.log('LA CASELLA: UN NUMERO SOLO, E IL COLORE DICE CHE COS E');
 {
-  // Con una dichiarazione in mano e non caricata lo stato e' 'inserita': fino al
-  // 02/10/2026 la scritta col numero mancante compariva solo dove di
-  // dichiarazioni non ce n'era nessuna, quindi proprio nei due casi segnalati
-  // restava invisibile.
+  // Il 02/10/2026 la casella era diventata illeggibile: il numero, la parola
+  // dello stato, e sotto quanto mancava. Tre scritte in settanta pixel, per
+  // dodici mesi e venti righe. Parole dell'utente: «ci devono solo essere in
+  // verde i dichiarati e in un altro colore cio' che manca con i numeri del
+  // mese... cosa sono tutte quelle scritte?».
   const c = sorgente('src/components/dichiarazioni/CellaMese.jsx');
-  verifica('il resto si legge anche dove la casella taceva',
-    /{resta > 0 && !manca && stato !== 'caricata' &&/.test(c));
-  // Sui canali diversi dalla rete "attesa" e' falsa, e con essa cadeva anche il
-  // numero: un mese di ACI arrivato e non dichiarato era una casella VUOTA,
-  // indistinguibile da un mese senza arrivi, mentre il totale di riga lo contava
-  // (utente, 02/10/2026: l'ACI di Tecnogum, quello di Emmesse su Gatim, quello
-  // arrivato a Gatim da Irigom, tutti di settembre).
-  verifica('e il numero non dipende piu dalla rete',
-    !/stato !== 'nessuna' && stato !== 'caricata'/.test(c));
-  // Ma dove la dichiarazione non e dovuta per accordo la casella tace: non e un
-  // arretrato, e il numero nuovo lo scriveva su ogni mese dell anno (Tecnogum).
-  verifica('dove non e dovuta la casella non scrive niente', c.includes("stato !== 'non_dovuta'"));
-  verifica('e su un mese gia caricato non si scrive niente', /stato !== 'caricata'/.test(c));
-  // IL NUMERO GRANDE RESTA IL DICHIARATO. Lezione del 01/10/2026: cambiare il
-  // significato di quel numero a meta' tabella e' proprio cio' che ha fatto
-  // nascere il reclamo.
-  verifica('il numero grande e sempre e solo il dichiarato',
-    /\{d && d\.quantita_kg \? kg\(d\.quantita_kg\) : manca \? '—' : ''\}/.test(c));
+  verifica('un numero solo', c.includes('{numero}') && !/da segnare|in mano|non dovuta/.test(c.split('return (')[1] || ''));
+  verifica('verde dove e caricato a portale, ambra dove manca',
+    c.includes("stato === 'caricata' ? 'bg-emerald-600") && c.includes("inAmbra ? 'bg-amber-50"));
+  verifica('e ambra vuol dire che resta qualcosa di dovuto',
+    c.includes("const inAmbra = resta > 0 && !nonDovuto && stato !== 'caricata'"));
+  // I mesi che non sono un arretrato non si colorano come tale: la rete non
+  // dovuta per accordo e i mesi di soli metalli, che si dichiarano con la
+  // prossima uscita di gomma.
+  verifica('non dovuta e soli metalli non sono un arretrato',
+    c.includes("const nonDovuto = stato === 'non_dovuta' || stato === 'solo_metalli'"));
+  // IL NUMERO NON CAMBIA SIGNIFICATO A META TABELLA (lezione del 01/10/2026):
+  // dove il mese e caricato il numero e il dichiarato, dove non lo e e quello
+  // che manca - e li il dichiarato non si scrive, perche non e mai arrivato.
+  verifica('dove e caricato il numero e il dichiarato',
+    c.includes("const numero = stato === 'caricata' ? dichiarato : (inAmbra ? kg(resta) : dichiarato)"));
+  // Nessun commento // dentro il JSX: in JSX si stampa a video, ed e' cosi' che
+  // il 02/10/2026 la parola NON DOVUTA e finita dentro ogni casella della
+  // tabella. Si guarda solo da 'return (' in giu.
+  const jsx = c.split('return (')[1] || '';
+  verifica('nessun commento // dentro il JSX', !new RegExp('^\\s*\\/\\/', 'm').test(jsx), 'un commento // in JSX si stampa a video');
 }
 
 console.log('LA COLONNA NUOVA DEL RIEPILOGO: E LA GIACENZA');

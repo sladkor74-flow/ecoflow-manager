@@ -1,7 +1,6 @@
 import React from 'react';
 import { statoDichiarazione, STATI } from '@/lib/dichiarazioniImpianti';
 import { formatKg } from '@/lib/utils';
-import { Check, Mail, Minus } from 'lucide-react';
 
 // Una casella del riepilogo: il colore dice se la dichiarazione c'è, il segno se
 // è caricata a portale. Stessa lettura del foglio di gestione, con le parole al
@@ -9,30 +8,40 @@ import { Check, Mail, Minus } from 'lucide-react';
 
 const kg = (v) => formatKg(v);
 
-export default function CellaMese({ mese, onApri, soloLettura, attesa = true, dove = {} }) {
+export default function CellaMese({ mese, onApri, soloLettura, dove = {} }) {
   const d = mese.dichiarazione;
   const conferito = mese.conferito_kg;
   // La rete non dovuta per accordo si scrive solo dove qualcosa e' arrivato:
   // sui mesi vuoti la casella resta vuota.
   let stato = statoDichiarazione(d, dove);
   if (stato === 'non_dovuta' && !(d && d.motivo_assenza) && !(conferito > 0)) stato = 'nessuna';
-  // "Da chiedere" ha senso solo dove una dichiarazione ci si aspetta davvero:
-  // sui canali diversi dalla rete non e' la regola. Gli stoccaggi qui non
-  // arrivano: non dichiarano.
-  const manca = !d && conferito > 0 && attesa && stato === 'nessuna';
-  const fondo = stato === 'caricata' ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-    : stato === 'ricevuta' ? 'bg-emerald-100 hover:bg-emerald-200'
-      : stato === 'inserita' ? 'bg-slate-100 hover:bg-slate-200'
-        : stato === 'solo_metalli' ? 'bg-sky-50 hover:bg-sky-100 text-sky-900'
-          : stato === 'non_dovuta' ? 'bg-slate-50 hover:bg-slate-100 text-slate-500'
-            : manca ? 'bg-amber-50 hover:bg-amber-100 text-amber-900'
-          : 'hover:bg-muted';
-  const daStoccaggi = (mese.da_stoccaggi || []).map(s => `${kg(s.kg)} kg da ${s.stoccaggio}`).join(', ');
   // Quanto resta da dichiarare A PORTALE di quel mese: gli ingressi del mese in
   // quell'impianto meno quello che per quel mese e' stato davvero caricato. Una
   // dichiarazione che c'e' ma non e' ancora a portale non decurta niente: lo dice
   // l'entita' stessa, e il 02/10/2026 non era cosi' che si contava.
   const resta = Number(mese.da_dichiarare_kg) || 0;
+  // Dove non si deve niente: la rete non dovuta per accordo e i mesi di soli
+  // metalli, che si dichiarano con la prossima uscita di gomma. Non sono un
+  // arretrato, e la casella non li conta come tale.
+  const nonDovuto = stato === 'non_dovuta' || stato === 'solo_metalli';
+  const inAmbra = resta > 0 && !nonDovuto && stato !== 'caricata';
+
+  // IL NUMERO DELLA CASELLA, uno solo. Caricato a portale: il dichiarato.
+  // Altrimenti, se resta qualcosa, quello che resta - ed e il numero che si
+  // cerca. Dove non si deve niente, il dichiarato se c'e' e nient'altro.
+  const dichiarato = d && Number(d.quantita_kg) > 0 ? kg(d.quantita_kg) : '';
+  const numero = stato === 'caricata' ? dichiarato : (inAmbra ? kg(resta) : dichiarato);
+
+  // DUE COLORI, NON SEI. Verde: il mese e caricato a portale, non manca niente.
+  // Ambra: manca qualcosa, e il numero dice quanto. Gli altri casi restano
+  // chiari, perche non sono un arretrato.
+  const fondo = stato === 'caricata' ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+    : inAmbra ? 'bg-amber-50 hover:bg-amber-100 text-amber-900'
+      : stato === 'solo_metalli' ? 'bg-sky-50 hover:bg-sky-100 text-sky-900'
+        : nonDovuto ? 'bg-slate-50 hover:bg-slate-100 text-slate-500'
+          : d ? 'bg-emerald-100 hover:bg-emerald-200'
+            : 'hover:bg-muted';
+  const daStoccaggi = (mese.da_stoccaggi || []).map(s => `${kg(s.kg)} kg da ${s.stoccaggio}`).join(', ');
   const titolo = [
     `${mese.mese}`,
     conferito ? `arrivati ${kg(conferito)} kg${daStoccaggi ? ` (in secondaria: ${daStoccaggi})` : ''}` : 'nessun conferimento',
@@ -49,51 +58,30 @@ export default function CellaMese({ mese, onApri, soloLettura, attesa = true, do
       title={titolo}
       className={`w-full rounded-md border px-1.5 py-1 text-center transition-colors ${fondo} ${soloLettura ? 'cursor-default' : ''}`}
     >
-      {/* IL NUMERO GRANDE E' SEMPRE E SOLO IL DICHIARATO.
-          Il 01/10/2026 avevo messo qui anche quanto restava da dichiarare: nello
-          stesso posto, nello stesso formato, distinto solo dalla scritta
-          piccola. Il giorno dopo l'utente ha letto «105.740» nella casella di
-          settembre di un impianto che non aveva ancora dichiarato niente e ha
-          chiesto, giustamente, perche' risultasse gia' dichiarato in parte. Un
-          numero in questa casella ha sempre voluto dire «questo e' quanto
-          abbiamo dichiarato»: cambiarne il significato a meta' tabella non si
-          fa. Quanto manca si legge sotto, con scritto che manca. */}
+      {/* UN NUMERO SOLO, E IL COLORE DICE CHE COS'E'.
+
+          Il 02/10/2026 questa casella era diventata illeggibile: il numero, poi
+          una riga con la parola dello stato, poi un'altra con quanto mancava. Tre
+          scritte in una casella larga settanta pixel, per dodici mesi e venti
+          righe. Parole dell'utente: «ci devono solo essere in verde i dichiarati e
+          in un altro colore cio' che manca con i numeri del mese... cosa sono
+          tutte quelle scritte?».
+
+          Quindi: un numero e basta. Verde, e' quello caricato a portale; ambra, e'
+          quello che manca. Le parole stanno nella legenda sopra la tabella, dove
+          si leggono una volta per tutte invece che in ogni casella, e il dettaglio
+          completo - arrivati, dichiarati, quanto resta - sta nel titolo che esce
+          passandoci sopra.
+
+          IL NUMERO NON CAMBIA SIGNIFICATO A META' TABELLA. Dove il mese e'
+          caricato a portale il numero e' il dichiarato, e il fondo e' verde pieno:
+          non c'e' niente che manca. Dove non lo e', il numero e' quello che manca
+          e il fondo non e' verde. La lezione del 01/10/2026 - l'utente che legge
+          «105.740» in un mese mai dichiarato - resta valida proprio cosi': quel
+          numero, oggi, in quella casella non ci va piu'. */}
       <span className="block text-[11px] leading-tight tabular-nums font-medium">
-        {d && d.quantita_kg ? kg(d.quantita_kg) : manca ? '—' : ''}
+        {numero}
       </span>
-      <span className="flex items-center justify-center gap-1 text-[9px] leading-tight opacity-80">
-        {stato === 'caricata' && <><Check className="w-3 h-3" /> portale</>}
-        {stato === 'ricevuta' && <><Mail className="w-3 h-3" /> in mano</>}
-        {stato === 'inserita' && 'da segnare'}
-        {stato === 'solo_metalli' && 'solo metalli'}
-        {stato === 'non_dovuta' && <><Minus className="w-3 h-3" /> non dovuta</>}
-        {stato === 'nessuna' && (manca ? `da dichiarare ${kg(resta)}` : '')}
-      </span>
-      {/* QUANTO RESTA, ANCHE DOVE LA CASELLA FINORA TACEVA.
-
-          Due buchi, tutti e due segnalati dall'utente il 02/10/2026.
-
-          Il primo: con una dichiarazione in mano e non ancora caricata a portale
-          lo stato e' 'da segnare', e il numero mancante si scriveva solo dove di
-          dichiarazioni non ce n'era nessuna. Su Green Tyre settembre la casella
-          diceva 105.740 e basta, mentre a portale erano da dichiarare 255.780.
-
-          Il secondo: sui canali diversi dalla rete 'attesa' e' falsa - una
-          dichiarazione mensile li' non e' la regola - e con essa cadeva anche il
-          numero. Risultato: un mese di ACI arrivato e non dichiarato era una
-          casella VUOTA, indistinguibile da un mese in cui non e' arrivato niente,
-          mentre il totale di riga lo contava. L'utente li ha trovati uno per uno:
-          l'ACI in secondaria di Tecnogum, quello di Emmesse su Gatim, quello
-          arrivato a Gatim da Irigom, tutti di settembre.
-
-          Qui non si CHIEDE una dichiarazione, si DICE quanto resta: niente ambra,
-          niente allarme, solo il numero. La richiesta resta dov'era, sulla rete. */}
-      // NON DOVUTA: la casella tace. Un impianto che sulla rete non ci deve la
-      // dichiarazione per accordo non ha un arretrato, e il 02/10/2026 il nuovo
-      // numero gliel'ha scritto su ogni mese dell'anno.
-      {resta > 0 && !manca && stato !== 'caricata' && stato !== 'non_dovuta' && (
-        <span className="block text-[9px] leading-tight opacity-80">manca {kg(resta)}</span>
-      )}
     </button>
   );
 }

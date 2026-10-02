@@ -6,7 +6,7 @@ import { Check, Mail, Minus } from 'lucide-react';
 
 // Riepilogo: una riga per impianto e canale, una colonna per mese.
 // Verde pieno = caricata a portale, verde chiaro = dichiarazione in mano,
-// ambra = conferimenti senza dichiarazione.
+// ambra = quello che manca a portale.
 //
 // Solo impianti: uno stoccaggio non tratta e non dichiara. Quello che spedisce
 // in secondaria sta sulla riga dell'impianto che lo riceve, nel mese in cui
@@ -125,7 +125,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                     {/* Una dichiarazione la si aspetta se qualcosa e' arrivato
                         e non e' ancora dichiarato: lo dicono i nostri ingressi
                         (da_dichiarare_kg), non solo la fotografia del portale. */}
-                    <CellaMese mese={m} soloLettura={soloLettura} attesa={flusso.canale === 'RETE' && sito.dichiara_rete !== false && (m.da_dichiarare_kg > 0 || m.non_dichiarato_kg > 0)} dove={{ canale: flusso.canale, dichiara_rete: sito.dichiara_rete }} onApri={() => onApri(sito, flusso, m)} />
+                    <CellaMese mese={m} soloLettura={soloLettura} dove={{ canale: flusso.canale, dichiara_rete: sito.dichiara_rete }} onApri={() => onApri(sito, flusso, m)} />
                   </td>
                 ))}
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatTonnellate(flusso.dichiarato_caricato_t)}</td>
