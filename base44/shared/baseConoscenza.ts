@@ -7,6 +7,8 @@
 //
 // Ultima verifica complessiva: 14 settembre 2026.
 
+import { fetchAll } from "./fetchAll.ts";
+
 export const VERIFICATO_IL = '2026-09-14';
 
 export const FONTI_UFFICIALI = [
@@ -281,8 +283,12 @@ export async function mettiDaParte(ent, voce, motivo: string, da = 'gestionale')
  */
 export async function scartaSuperate(base44) {
   const ent = base44.asServiceRole.entities.ConoscenzaAssistente;
+  // Le proposte si leggono tutte, a pagine (02/10/2026): con un tetto di 500 le
+  // proposte in attesa oltre il tetto non venivano mai confrontate, quindi una
+  // proposta superata restava in coda per sempre e l'amministratore la trovava
+  // davanti come se fosse ancora da decidere.
   const [proposte, approvate] = await Promise.all([
-    ent.filter({ stato: 'proposta' }, '-created_date', 500).catch(() => []),
+    fetchAll(ent, { stato: 'proposta' }, '-created_date').catch(() => []),
     vociApprovate(base44),
   ]);
   const valide = sostituzioniValide(approvate);
@@ -311,6 +317,20 @@ export async function scartaSuperate(base44) {
   let disattivate = 0;
   for (const v of approvate) {
     if (v.tipo !== 'aggiornamento_normativo' || !v.voce_id || !BASE_CONOSCENZA.some(b => b.id === v.voce_id)) continue;
+    // UNA VOCE SENZA TESTO NON E' UNA VOCE SUPERATA (02/10/2026).
+    //
+    // sostituzioniValide la esclude proprio perche' le manca il testo (!v.testo,
+    // poche righe sopra), quindi non entra mai in "valide" e il controllo qui
+    // sotto la trovava sempre da mettere da parte. La si disattivava con uno dei
+    // due motivi di questo ciclo - "superata dalla voce ... piu' recente" o
+    // "superata dall'aggiornamento ... verificato il ..." - e nessuno dei due e'
+    // il suo motivo vero: niente l'ha superata, non sostituisce nulla e
+    // testoConoscenza non la stampa comunque. Il motivo scritto nello storico e'
+    // l'unica spiegazione che l'amministratore legge mesi dopo: scriverne uno
+    // falso e' peggio che non scrivere niente. Il controllo e' identico a quello
+    // di sostituzioniValide di proposito: se un giorno uno dei due cambia, i due
+    // devono cambiare insieme.
+    if (!v.testo) continue;
     if (valide.get(v.voce_id) === v) continue;
     const attuale = voceAttuale(v.voce_id, approvate);
     const nuova = valide.get(v.voce_id);
@@ -375,8 +395,11 @@ export async function proponiNovita(base44, novita, { oggi, origine, approvate =
   const ent = base44.asServiceRole.entities.ConoscenzaAssistente;
   const buone = novitaAccettabili(novita, approvate, area).slice(0, 5);
   if (!buone.length) return [];
-  const inAttesa = await ent.filter({ stato: 'proposta' }, '-created_date', 500).catch(() => []);
+  // Tutte le proposte in attesa, a pagine: con il tetto di 500 una proposta
+  // oltre il tetto non si vedeva, e sulla stessa voce ne restavano due in coda.
+  let inAttesa = await fetchAll(ent, { stato: 'proposta' }, '-created_date').catch(() => []);
   const create = [];
+  const messeDaParte = new Set();
   for (const n of buone) {
     const voce = n.voce_id ? voceAttuale(String(n.voce_id), approvate) : null;
     const nuova = await ent.create({
@@ -394,14 +417,53 @@ export async function proponiNovita(base44, novita, { oggi, origine, approvate =
       origine,
       ...collegamenti,
     });
-    if (voce) {
-      for (const vecchia of inAttesa.filter(p => p.voce_id === voce.id)) {
-        if (vecchia.id !== nuova.id) await mettiDaParte(ent, vecchia, `superata dalla proposta piu' recente del ${oggi} sulla stessa voce ("${nuova.titolo || ''}")`);
-      }
+    if (!voce) { create.push(nuova); continue; }
+    // VALE IL PIU' RECENTE, ANCHE QUI (02/10/2026).
+    //
+    // Prima questo ciclo metteva da parte TUTTE le proposte in attesa su quella
+    // voce, senza guardare nemmeno una data, con il motivo "superata dalla
+    // proposta piu' recente": un'affermazione che nessuno verificava. Due danni
+    // veri, e piuRecente - la regola della direzione del 17/09/2026 - era gia'
+    // scritto qui sopra e scartaSuperate lo usa da sempre sullo stesso caso.
+    //
+    // Il primo, che si vede ogni giorno: inAttesa si legge UNA VOLTA prima del
+    // ciclo, quindi due novita' sulla stessa voce nello stesso giro non si
+    // vedevano fra loro e restavano in coda tutte e due. Da chiediAssistente
+    // non si notava perche' subito dopo gira scartaSuperate, che le confronta;
+    // da analisiDocumento.ts no, e la' le due proposte restavano davanti
+    // all'amministratore, una delle due gia' superata.
+    //
+    // Il secondo: se una proposta in attesa e' piu' recente della nuova (una
+    // riga ritoccata a mano dalla vista dati della piattaforma, che
+    // l'amministratore usa), finiva nello storico con scritto che era stata
+    // superata da qualcosa di piu' recente, mentre era il contrario.
+    //
+    // Si fa quello che fa scartaSuperate: fra le proposte in attesa sulla voce e
+    // quella appena creata resta la piu' recente, le altre vanno nello storico
+    // con il motivo. Cio' che e' finito nello storico non si annuncia come "da
+    // approvare" (chiediAssistente conta queste righe per dire "1 novita' da
+    // approvare"): anche una proposta creata un attimo prima in questo stesso
+    // giro, se e' la seconda a cedere il posto, esce dall'elenco che si torna.
+    //
+    // created_date: la riga che torna da create() lo ha, ma se la piattaforma un
+    // giorno non lo restituisse piuRecente, a pari data, confronterebbe '' con
+    // la data di una proposta vecchia e la nuova perderebbe sempre. Il momento
+    // della creazione lo conosciamo: si mette noi se manca.
+    const creata = { ...nuova, created_date: nuova.created_date || new Date().toISOString() };
+    const gruppo = [...inAttesa.filter(p => p.voce_id === voce.id && p.id !== nuova.id), creata];
+    const ultima = gruppo.reduce((a, b) => (piuRecente(b, a) ? b : a));
+    for (const p of gruppo) {
+      if (p === ultima) continue;
+      await mettiDaParte(ent, p, `superata dalla proposta piu' recente del ${dataVoce(ultima)} sulla stessa voce ("${ultima.titolo || ''}")`);
+      messeDaParte.add(p.id);
     }
+    // Sulla voce resta in attesa una proposta sola, la piu' recente: la novita'
+    // successiva dello stesso giro si confronta con lei, e nessuna riga finisce
+    // nello storico due volte.
+    inAttesa = [...inAttesa.filter(p => p.voce_id !== voce.id), ultima];
     create.push(nuova);
   }
-  return create;
+  return create.filter(n => !messeDaParte.has(n.id));
 }
 
 /**
@@ -409,7 +471,35 @@ export async function proponiNovita(base44, novita, { oggi, origine, approvate =
  * diventano proposte da approvare, cosi' la volta dopo la risposta e' giusta.
  */
 // Frasi con cui l'utente corregge o afferma una regola; una semplice domanda non basta.
-const CORREZIONE = /non [eè]\S? (cos[iì]|vero|corrett|giust)|sbagli|errat|invece|in realt[aà]|ti correggo|precis|ricorda|tieni presente|nota bene|da noi|la regola [eè]|il decreto dice|la norma dice|la legge dice|devi sapere|attenzione:|non hanno l'obbligo|non [eè]\S? obbligatori/i;
+//
+// IL CANCELLO ERA TROPPO LARGO (02/10/2026). Il commento diceva gia' "una
+// semplice domanda non basta", ma fra le alternative c'erano cinque sottostringhe
+// nude - sbagli, errat, invece, precis, ricorda - che si incastrano dentro
+// parole comuni e dentro domande normalissime:
+//
+//   "Ricordami quali sono i termini di registrazione"  -> ricorda
+//   "Invece per l'ACI come funziona?"                  -> invece
+//   "Mi dai una risposta piu' precisa sui target?"     -> precis
+//   "Ho sbagliato la risposta B, me la spieghi?"       -> sbagli
+//
+// Quello che ne nasce non e' solo rumore: una domanda apre la strada alle
+// proposte di precisazione, cioe' righe nuove in attesa nella base di
+// conoscenza, e proponiPrecisazioni e' l'unica delle tre strade che resta
+// aperta a tutti (scelta del 02/10/2026 sui permessi, commit 4841831). Adesso
+// ogni forma ha il suo confine di parola e vuole il contorno di una correzione
+// vera: non "ricorda" ma "ricorda che", non "precis" ma "precisazione" o "ti
+// preciso che", non "sbagli" ma "ti sbagli" / "e' sbagliato".
+//
+// "invece" e' uscito del tutto: da solo e' la parola con cui si cambia
+// argomento, non con cui si corregge, e la correzione che doveva prendere
+// ("non e' cosi', invece vale ...") la prendono gia' "non e' cosi'", "in
+// realta'" e "la regola e'".
+//
+// "da noi" resta larga di proposito: e' il modo in cui si annuncia una regola
+// di casa ("Da noi la quadratura si fa il lunedi'"), e stringerla perderebbe
+// proprio quelle. Si paga qualche domanda come "quanti formulari abbiamo da noi
+// in sospeso?", che al massimo propone una precisazione all'amministratore.
+const CORREZIONE = /non [eè]\S? (cos[iì]|vero|corrett|giust)|non [eè]\S? obbligatori|non hanno l'obbligo|\bti sbagli\b|\bhai sbagliato\b|[eè]'?\s+sbagliat|[eè]'?\s+errat|\bin realt[aà]\b|\bti correggo\b|\bprecisazione\b|\bti precis|\bprecis(o|iamo) che\b|\bricorda(ti)? che\b|\btieni presente\b|\bnota bene\b|\bda noi\b|la regola [eè]|il decreto dice|la norma dice|la legge dice|\bdevi sapere\b|attenzione:/i;
 
 const paroleLunghe = (t) => new Set(String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/[^a-z0-9]+/).filter(w => w.length >= 5));
 
@@ -425,8 +515,23 @@ export function giaNellaConoscenza(testo, approvate: VoceApprovata[] = []) {
   });
 }
 
-export async function proponiPrecisazioni(base44, precisazioni, { oggi, utente, domandaId, domanda = '', approvate = [] }: { oggi: string; utente?: string; domandaId?: string; domanda?: string; approvate?: VoceApprovata[] }) {
+export async function proponiPrecisazioni(base44, precisazioni, { oggi, utente, domandaId, domanda = '', approvate = [], quiz = false }: { oggi: string; utente?: string; domandaId?: string; domanda?: string; approvate?: VoceApprovata[]; quiz?: boolean }) {
   const ent = base44.asServiceRole.entities.ConoscenzaAssistente;
+  // NELLA STRADA QUIZ NON SI PROPONE NIENTE (02/10/2026).
+  //
+  // Nell'esercitazione RT la domanda non la scrive l'utente: la compone il
+  // frontend (src/components/assistente/EsercitazioneRT.jsx) attorno al testo
+  // ufficiale del quiz dell'Albo, "Spiegami questo quiz ...: <testo>", e
+  // l'utente non ha nemmeno un campo in cui scrivere. Quindi in quella strada
+  // una correzione dell'utente non puo' esistere, e cio' che fa scattare il
+  // cancello e' la lingua dell'Albo: sui 5.328 quiz delle nove banche dati, 10
+  // aprivano le precisazioni con la regex vecchia e 2 le aprono anche con
+  // quella nuova, perche' il quiz stesso dice "non e' corretta" o "non e'
+  // obbligatorio" ("Secondo il D.lgs. n. 81/2008, non e' obbligatorio elaborare
+  // il DUVRI"). Sono forme di correzione vere: strette meglio non si possono.
+  // Il punto e' che la correzione non e' dell'utente, quindi la strada si salta
+  // del tutto - e quei due quiz si possono riaprire quante volte si vuole.
+  if (quiz) return [];
   // Solo quando l'utente corregge o afferma qualcosa, e solo se non e' gia' nella base di conoscenza.
   if (!CORREZIONE.test(String(domanda))) return [];
   const lista = (Array.isArray(precisazioni) ? precisazioni : [])
@@ -458,7 +563,19 @@ const fontiDi = (v: VoceApprovata) => {
 /** Voci approvate e attive salvate nel gestionale; lista vuota se l'entita' non e' leggibile. */
 export async function vociApprovate(base44) {
   try {
-    const voci = await base44.asServiceRole.entities.ConoscenzaAssistente.filter({ stato: 'approvata' }, '-created_date', 500);
+    // SI LEGGE TUTTO L'ARCHIVIO, NON LE PRIME 500 (02/10/2026).
+    //
+    // Qui c'era un tetto di 500 righe senza paginazione, contro la regola del
+    // progetto sugli archivi grandi. Questa lista e' la base di conoscenza che
+    // entra in OGNI risposta di EcoTyna, nel controllo dei documenti di
+    // qualifica e nel controllo normativo mensile: oltre il tetto le voci
+    // approvate piu' vecchie - l'ordine era '-created_date', quindi proprio le
+    // prime regole scritte dalla direzione - uscivano in silenzio dalle
+    // risposte. Nessun errore a video: l'assistente rispondeva come se quella
+    // regola non fosse mai stata approvata. Il costo non cambia: le pagine di
+    // fetchAll sono da 5000 righe, quindi finche' le voci sono meno di 5000
+    // resta una richiesta sola, come prima.
+    const voci = await fetchAll(base44.asServiceRole.entities.ConoscenzaAssistente, { stato: 'approvata' }, '-created_date');
     return voci.filter(v => v.attiva !== false);
   } catch (_e) {
     return [];

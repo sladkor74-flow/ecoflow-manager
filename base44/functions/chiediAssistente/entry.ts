@@ -427,8 +427,11 @@ export default async function(req) {
     const puoScrivereConoscenza = eAmministratore(user);
     let precisazioni = [];
     let novita = [];
+    // quiz: nell'esercitazione la domanda la compone il frontend attorno al testo
+    // ufficiale del quiz dell'Albo, e l'utente non scrive niente: una sua
+    // correzione non puo' esistere (vedi proponiPrecisazioni, 02/10/2026).
     try {
-      precisazioni = await proponiPrecisazioni(base44, esito.precisazioni_utente, { oggi, utente: user.full_name || user.email, domandaId: recordId, domanda, approvate });
+      precisazioni = await proponiPrecisazioni(base44, esito.precisazioni_utente, { oggi, utente: user.full_name || user.email, domandaId: recordId, domanda, approvate, quiz: !!quiz });
     } catch (_e) { /* la risposta resta valida anche se la precisazione non si salva */ }
     if (puoScrivereConoscenza) {
       try {
