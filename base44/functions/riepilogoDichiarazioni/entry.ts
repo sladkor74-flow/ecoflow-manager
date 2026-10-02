@@ -259,13 +259,29 @@ export default async function(req) {
       const idRete = String(r.id_ordine || '').trim();
       const giornoRete = eTerminato(r) ? giornoRoma(r.trasporto_finito_il) : '';
       if (idRete && giornoRete) fineRete.set(idRete, giornoRete);
-      const c = primaria(r, 'RETE');
+      // IL CANALE LO DECIDE IL MATERIALE, NON L'ARCHIVIO IN CUI LA RIGA SI TROVA.
+      //
+      // E' la regola di tutto il gestionale (shared/canaleSecondaria.ts, eAci), e qui
+      // mancava: ogni riga di PrimariaRete veniva contata come rete, classe 9
+      // compresa. Le Giacenze invece guardano la classe. Una riga di ACI finita
+      // nell'archivio della rete era quindi ACI in un modulo e rete nell'altro, e i
+      // due moduli davano due giacenze diverse per lo stesso formulario.
+      //
+      // All'importazione le righe si smistano gia' per classe (shared/primarie.ts,
+      // archivioPrimaria), quindi oggi in archivio non dovrebbero essercene: questa
+      // e' la rete di sicurezza, perche' basta una riga per far divergere i due
+      // moduli senza che nessuno se ne accorga. I due devono dire gli stessi numeri
+      // su tutti e tre i canali (regola dell'utente, 03/10/2026).
+      const canaleRiga = eAci(r) ? 'ACI' : 'RETE';
+      const c = primaria(r, canaleRiga);
       if (!c) return;
       segnaFine(r);
-      reteTutte += peso(r);
+      if (canaleRiga === 'RETE') reteTutte += peso(r);
       if (c.ruolo === 'stoc') return;
-      aggiungi(c.ns, 'RETE', '', c.p.mese, peso(r));
-      segnaNonAncora(c.ns, r, 'primaria');
+      aggiungi(c.ns, canaleRiga, canaleRiga === 'ACI' ? 'primaria' : '', c.p.mese, peso(r));
+      // Il file degli ordini non dichiarati e' della RETE: una riga di classe 9 non
+      // si aggiunge alla fotografia del portale, come gia' fa calcolaGiacenze.
+      if (canaleRiga === 'RETE') segnaNonAncora(c.ns, r, 'primaria');
     });
     for (const r of aci) {
       const c = primaria(r, 'ACI');
