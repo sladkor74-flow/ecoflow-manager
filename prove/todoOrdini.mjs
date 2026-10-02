@@ -115,6 +115,22 @@ const cambiata = controlloAttivita(giroDopo(attesa, { ...primo.campi, ordini_att
 verifica('ID diversi: si riscrive che cosa si guarda e non si chiude', cambiata.chiusa === false
   && cambiata.campi.ordini_attesi === 'ET26000003' && cambiata.campi.ordini_da_attendere === '', J(cambiata.campi));
 
+// Ma gli STESSI ID riscritti in un altro ordine NON sono ID cambiati: conta quali
+// ordini sono, non come sono scritti. Difetto trovato il 02/10/2026: si
+// confrontavano le stringhe, cosi' "ET26000003, ET26000002" sembrava diverso da
+// "ET26000002, ET26000003", l'attivita' tornava al primo giro - che non chiude mai
+// - e restava aperta per sempre anche con tutti i suoi ordini terminati.
+const dueID = { titolo: 'Ritiri Verdi', riferimento_ordine: 'ET26000002, ET26000003', stato: 'aperto' };
+const d1 = controlloAttivita(dueID, stato, OGGI);
+const rovesciata = { ...dueID, ...d1.campi, riferimento_ordine: 'ET26000003, ET26000002' };
+const d2 = controlloAttivita(rovesciata, stato, OGGI);
+verifica('gli stessi ID in un altro ordine non riportano al primo giro',
+  d2.chiusa === false && d2.campi.ordini_da_attendere === undefined, J(d2.campi));
+const d3 = controlloAttivita(rovesciata, statoDopo, OGGI);
+verifica("e quando gli ordini sono terminati l'attivita' si chiude lo stesso",
+  d3.chiusa === true && d3.campi.stato === 'completato' && d3.campi.ordini_da_attendere === '', J(d3.campi));
+verifica("in ordini_attesi resta scritto l'ordine dell'utente", d3.campi.ordini_attesi === 'ET26000003, ET26000002', d3.campi.ordini_attesi);
+
 // ---------------------------------------------------------------------------
 console.log('PIU' + "' DI UN ORDINE: SI CHIUDE QUANDO SONO TERMINATI TUTTI");
 

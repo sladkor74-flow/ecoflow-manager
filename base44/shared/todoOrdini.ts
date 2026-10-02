@@ -122,6 +122,16 @@ export const attesiScritti = (ids) => (ids || []).join(', ');
 /** Gli ID ordine dentro un campo scritto da noi ("ET1, ET2"). */
 const attesiLetti = (v) => String(v ?? '').toUpperCase().split(/[^A-Z0-9]+/).filter(p => E_ORDINE.test(p));
 
+// Gli ID di un'attivita' si confrontano come INSIEME, non come stringa: conta
+// QUALI ordini sono, non in che ordine l'utente li ha scritti. Difetto trovato il
+// 02/10/2026: ordiniAttivita tiene gli ID nell'ordine in cui compaiono nel testo,
+// e riscrivere gli STESSI ordini al contrario ("ET2, ET1" dove c'era "ET1, ET2")
+// faceva sembrare l'attivita' mai controllata. Il primo giro non chiude mai, per
+// la regola dell'utente ("solo allora"), quindi l'attivita' restava aperta anche
+// con tutti i suoi ordini terminati. Quello che si SCRIVE in ordini_attesi resta
+// invece nell'ordine scritto dall'utente: a video quell'ordine ha il suo senso.
+const chiaveAttesi = (ids) => [...(ids || [])].sort().join(', ');
+
 /**
  * A che punto sono gli ordini di un'attivita': quali sono fatti, quali
  * cancellati, quali eseguiti, quali terminati senza la data e quali non si
@@ -228,7 +238,8 @@ export function notaOrdini(todo) {
  * COME SI VEDE IL PASSAGGIO. `ordini_attesi` sono gli ID che stiamo guardando,
  * `ordini_da_attendere` quelli che erano ancora aperti quando abbiamo cominciato:
  *
- *  - ID cambiati, o attivita' mai controllata: si scrive che cosa si guarda e che
+ *  - ID cambiati davvero - ordini diversi, non gli stessi riscritti in un altro
+ *    ordine - o attivita' mai controllata: si scrive che cosa si guarda e che
  *    cosa c'e' da attendere, e NON si chiude niente. E' il giro che GUARDA;
  *  - c'era qualcosa da attendere e adesso non resta nessun ordine aperto: il
  *    passaggio c'e' stato, e si chiude;
@@ -246,7 +257,7 @@ export function notaOrdini(todo) {
 export function controlloAttivita(todo, stato, oggi) {
   const esito = esitoAttivita(todo, stato);
   const attesi = attesiScritti(esito.ids);
-  const gliStessi = String(todo.ordini_attesi || '') === attesi;
+  const gliStessi = chiaveAttesi(attesiLetti(todo.ordini_attesi)) === chiaveAttesi(esito.ids);
   const daAttendere = attesiLetti(todo.ordini_da_attendere);
   const campi = {
     ordini_totali: esito.ids.length,
