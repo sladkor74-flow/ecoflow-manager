@@ -20,10 +20,18 @@ export default async function(req) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return Response.json({ error: 'Solo l\'amministratore puo\' allineare le dichiarazioni' }, { status: 403 });
 
-    const { anno } = await req.json().catch(() => ({}));
+    const body = await req.json().catch(() => ({}));
+    const anno = body.anno;
     if (!anno) return Response.json({ error: 'Anno obbligatorio' }, { status: 400 });
 
-    const esito = await allineaDalPortale(base44.asServiceRole.entities, Number(anno));
+    // I canali che si allineano. Senza indicazione tutti e due, com'e' sempre
+    // stato: e' la strada del pulsante. Il ricalcolo dopo un caricamento passa
+    // solo la rete, perche' l'ACI a portale non e' gestito e lo segna a mano
+    // l'amministratore (regola dell'utente, 02/10/2026).
+    const canali = Array.isArray(body.canali) && body.canali.length
+      ? body.canali.filter(c => c === 'RETE' || c === 'ACI')
+      : ['RETE', 'ACI'];
+    const esito = await allineaDalPortale(base44.asServiceRole.entities, Number(anno), null, null, canali);
     return Response.json({ ok: true, ...esito });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });

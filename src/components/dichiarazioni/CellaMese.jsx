@@ -91,7 +91,9 @@ export default function CellaMese({ mese, onApri, soloLettura, dove = {} }) {
         {numero}
       </span>
       {stato === 'solo_metalli' && (
-        <span className="block text-[9px] leading-tight opacity-80">solo metalli ferrosi</span>
+        <span className="block text-[9px] leading-tight opacity-80">
+          {ferro ? 'solo metalli ferrosi' : 'solo metalli: ferro da indicare'}
+        </span>
       )}
     </button>
   );

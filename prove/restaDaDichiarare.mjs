@@ -128,7 +128,8 @@ console.log('LA CASELLA: UN NUMERO SOLO, E IL COLORE DICE CHE COS E');
   // qualcosa e uscito, ed e ferro (utente, 02/10/2026).
   verifica('i mesi di solo ferro portano il ferro uscito',
     c.includes("const numero = stato === 'solo_metalli' ? ferro") && c.includes("Number(d.metalli_kg) > 0 ? kg(d.metalli_kg)"));
-  verifica('e lo dicono', c.includes('solo metalli ferrosi</span>'));
+  verifica('e lo dicono, e dicono anche quando il ferro non e indicato',
+    c.includes("solo metalli ferrosi") && c.includes("ferro da indicare"));
   // IL NUMERO NON CAMBIA SIGNIFICATO A META TABELLA (lezione del 01/10/2026):
   // dove il mese e caricato il numero e il dichiarato, dove non lo e e quello
   // che manca - e li il dichiarato non si scrive, perche non e mai arrivato.

@@ -268,7 +268,7 @@ function perChiave(caricamenti) {
  * e' arretrato, e' una dichiarazione che nel gestionale non c'e' e va inserita -
  * con il mese scritto accanto, per non doverlo indovinare.
  */
-export function confrontaConIlPortale(righe, anno, nostre) {
+export function confrontaConIlPortale(righe, anno, nostre, canali = ['RETE', 'ACI']) {
   const annoNum = Number(anno);
   const trovati = [];
   const nonTrovate = [];
@@ -297,7 +297,7 @@ export function confrontaConIlPortale(righe, anno, nostre) {
     if (diPrima.length) arretrato.push(voce(sito, canale, diPrima, 'chiude ordini degli anni precedenti: e\' l\'arretrato, ed e\' giusto che non trovi un nostro mese'));
   };
 
-  for (const canale of ['RETE', 'ACI']) {
+  for (const canale of canali) {
     const perSito = perChiave(caricamentiPortale(righe, annoNum, canale));
     const perProvenienza = canale === 'ACI'
       ? Object.fromEntries(PROVENIENZE_ACI.map(p => [p, perChiave(caricamentiPortale(righe, annoNum, 'ACI', p))]))
@@ -320,14 +320,24 @@ export function confrontaConIlPortale(righe, anno, nostre) {
   return { trovati, non_trovate: nonTrovate, da_inserire: daInserire, arretrato };
 }
 
-export async function allineaDalPortale(svc, anno, righePortale = null, nostreRighe = null) {
+/**
+ * CANALI: di suo li fa tutti e due, rete e ACI. Chi chiama puo' restringere.
+ *
+ * L'ACI non e' gestito a portale (regola dell'utente, 02/10/2026: «gli ACI non
+ * sono gestiti a portale e pertanto non si possono automatizzare, quindi
+ * tocchera' a me farlo a mano, e questo vale sia per l'ACI che per l'extra
+ * raccolta»). Il ricalcolo che parte da solo dopo un caricamento passa quindi
+ * solo la rete: l'ACI resta all'amministratore, dal pulsante. L'extra raccolta
+ * non entra qui in nessun caso, perche' a portale non c'e' affatto.
+ */
+export async function allineaDalPortale(svc, anno, righePortale = null, nostreRighe = null, canali = ['RETE', 'ACI']) {
   const annoNum = Number(anno);
   const righe = righePortale || await fetchAll(svc.DichiarazioneTrattamento, null, 'id');
   // Tutte le pagine: una lettura da 500 righe, con quindici impianti, dodici mesi
   // e fino a quattro flussi ciascuno, poteva lasciare fuori dichiarazioni vere.
   const nostre = nostreRighe || await fetchAll(svc.DichiarazioneSito, { anno: annoNum }, 'id');
 
-  const esito = confrontaConIlPortale(righe, annoNum, nostre);
+  const esito = confrontaConIlPortale(righe, annoNum, nostre, canali);
   const aggiornate = [];
   for (const t of esito.trovati) {
     const d = t.dichiarazione;
