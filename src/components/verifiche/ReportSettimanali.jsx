@@ -29,6 +29,7 @@ import {
   dataIt, tonnellate, tipoDiFile, leggiTabelleDaFile, segnalazioni, analisiInCorso, analisiInterrotta, scaricaExcelVerifica,
 } from '@/lib/verifiche';
 import { giornoRoma } from '@/lib/giornoItaliano';
+import { annotaPrimaDiCancellare } from '@/lib/fileDaRimuovere';
 // Gli istanti del server possono arrivare senza la Z: letti come ora locale, un
 // confronto salvato fra le 22 e mezzanotte UTC risultava del giorno prima.
 import { dataServer } from '@/lib/utils';
@@ -364,6 +365,10 @@ export default function ReportSettimanali({ isAdmin }) {
 
     if (precedenteVerifica) {
       try {
+        // Il file di una verifica si scrive nel registro PRIMA di cancellarla: la
+        // piattaforma non cancella i file e, sparito il record, non si saprebbe piu'
+        // quale chiedere di rimuovere (src/lib/fileDaRimuovere.js).
+        await annotaPrimaDiCancellare(base44.entities.FileDaRimuovere, 'VerificaReport', precedenteVerifica, oggiRoma());
         await conRitentativi(() => eliminaParti('VerificaReport', precedenteVerifica.id));
         await conRitentativi(() => base44.entities.VerificaReport.delete(precedenteVerifica.id));
       } catch (e) {
@@ -444,6 +449,7 @@ export default function ReportSettimanali({ isAdmin }) {
   const elimina = async (riga) => {
     if (!window.confirm(`Eliminare la verifica del report di ${riga.nome} per la settimana ${settimana}? L'operazione non si può annullare.`)) return;
     try {
+      await annotaPrimaDiCancellare(base44.entities.FileDaRimuovere, 'VerificaReport', riga.verifica, oggiRoma());
       await eliminaParti('VerificaReport', riga.verifica.id);
       await base44.entities.VerificaReport.delete(riga.verifica.id);
       await carica(true);

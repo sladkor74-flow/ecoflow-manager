@@ -9,6 +9,8 @@ import { dataIt, scaricaExcelVerifica, segnalazioni, analisiInCorso, ETICHETTE_E
 import { esportaEsitoVerificaPdf } from '@/lib/esitoVerificaPdf';
 import { formatKg, formatIntero, dataServer } from '@/lib/utils';
 import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
+import { annotaPrimaDiCancellare } from '@/lib/fileDaRimuovere';
+import { oggiRoma } from '@/lib/giornoItaliano';
 
 // Formulari, chili ed esiti si mostrano per movimentazione e canale: rete, ACI
 // ed extra raccolta non si sommano mai, nemmeno in una riga di totale o in una
@@ -138,6 +140,7 @@ export default function DettaglioVerifica({ verificaId, isAdmin, open, onClose, 
     if (!window.confirm(`Eliminare la verifica del report di ${v.soggetto_nome} per la settimana ${v.settimana}? L'operazione non si può annullare.`)) return;
     setLavorando('elimina');
     try {
+      await annotaPrimaDiCancellare(base44.entities.FileDaRimuovere, 'VerificaReport', v, oggiRoma());
       await eliminaParti('VerificaReport', v.id);
       await base44.entities.VerificaReport.delete(v.id);
       onModificata();

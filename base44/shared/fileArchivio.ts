@@ -340,8 +340,27 @@ export async function sostituisciFileArretrati(base44, { oggi, massimo = 40 }) {
 export const STATO_CANCELLAZIONE = {
   esiste: false,
   verificato_il: '2026-09-30',
+  // Richiesto di nuovo il 02/10/2026, chiedendo anche se la cancellazione
+  // esistesse a programma o in arrivo: "Nothing in the docs or the public
+  // roadmap mentions a delete endpoint for stored files, and I can't confirm
+  // one".
+  riconfermato_il: '2026-10-02',
   integrazioni_esistenti: ['UploadFile', 'UploadPrivateFile', 'CreateFileSignedUrl', 'ExtractDataFromUploadedFile'],
-  come_si_rimuove: 'chiedendolo al team della piattaforma, con l\'elenco prodotto da shared/inventarioFile.ts',
+  // La risposta del 02/10/2026 ha aggiunto i due pezzi che mancavano.
+  //
+  // Il primo: un file non scade mai da solo. «Stored files have no retention
+  // schedule: a file stays in storage after its record is deleted or replaced,
+  // until support removes it». Quindi cancellare un record non libera niente,
+  // e porta via l'unica cosa che sapevamo di quel file: il suo nome. Per
+  // questo ogni cancellazione lo scrive prima nel registro FileDaRimuovere
+  // (shared/fileDaRimuovere.ts), da cui l'inventario lo ripesca.
+  //
+  // Il secondo: la rimozione a richiesta e' una strada aperta, non un favore
+  // una volta sola. «We remove specific files on request. Send the file_uri
+  // values for private files or the full URLs for public ones, I list what I
+  // find under your app, and I delete only what you confirm».
+  conservazione: "nessuna: un file resta anche dopo che il suo record e' stato cancellato o sostituito",
+  come_si_rimuove: "chiedendolo al team della piattaforma, mandando il file_uri dei privati o l'indirizzo completo dei pubblici: l'elenco lo produce shared/inventarioFile.ts",
   limite_di_spazio: 'nessuno per app; solo sul singolo file (50MB documenti, 100MB video)',
 };
 

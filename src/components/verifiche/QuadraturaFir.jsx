@@ -8,6 +8,7 @@ import {
 import { formatKg } from '@/lib/utils';
 import Storia from '@/components/shared/Storia';
 import { conCampiCompleti, eliminaParti } from '@/lib/testoLungo';
+import { annotaPrimaDiCancellare } from '@/lib/fileDaRimuovere';
 import {
   oggiRoma, aggiungiGiorni, settimanaIso, intervalloSettimana, settimaneNellAnno, descriviIntervallo, dataIt,
 } from '@/lib/verifiche';
@@ -482,6 +483,7 @@ export default function QuadraturaFir({ isAdmin }) {
     if (!window.confirm(`Eliminare la quadratura della settimana ${settimana}? L'operazione non si può annullare.`)) return;
     setOccupato(true);
     try {
+      await annotaPrimaDiCancellare(base44.entities.FileDaRimuovere, 'QuadraturaFir', dati.quadratura, oggiRoma());
       await eliminaParti('QuadraturaFir', dati.quadratura.id);
       await base44.entities.QuadraturaFir.delete(dati.quadratura.id);
       await carica(true);

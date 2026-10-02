@@ -1,0 +1,89 @@
+{
+  "name": "FileDaRimuovere",
+  "type": "object",
+  "description": "I file che nessun record usa piu e che restano caricati sulla piattaforma. La piattaforma non cancella i file e non li elenca da nessuna parte: l inventario (shared/inventarioFile.ts) sa dire solo quelli che un record sta usando, perche nasce dai record. Quando un record che tiene un file viene cancellato, quel file resta caricato per sempre e non se ne sa piu nemmeno il nome: questo registro lo scrive PRIMA, cosi si puo chiedere all assistenza della piattaforma di rimuoverlo. La sua assistenza, 02/10/2026: i file non hanno nessuna scadenza e restano anche dopo che il record e stato cancellato o sostituito, e si rimuovono su richiesta mandando il file_uri dei privati o l indirizzo completo dei pubblici",
+  "properties": {
+    "riferimento": {
+      "type": "string",
+      "description": "Il file_uri se privato, l indirizzo completo se pubblico: e esattamente la stringa da mandare all assistenza"
+    },
+    "genere": {
+      "type": "string",
+      "enum": ["privato", "pubblico"],
+      "description": "Privato si apre solo con un link firmato che scade; pubblico ha un indirizzo che funziona per chiunque ce l abbia, e sono i primi da far rimuovere"
+    },
+    "entita": {
+      "type": "string",
+      "description": "L archivio da cui veniva il record cancellato, per esempio VerificaReport"
+    },
+    "record_id": {
+      "type": "string",
+      "description": "L id del record che non c e piu. Non serve a ritrovarlo, serve a capire da dove veniva se qualcuno lo chiede"
+    },
+    "cosa": {
+      "type": "string",
+      "description": "Che genere di file era, a parole: report settimanale di un fornitore, stampa della quadratura FIR"
+    },
+    "descrizione": {
+      "type": "string",
+      "description": "Di chi e di quando, a parole: NAPPI SUD - settimana 38/2026. Mesi dopo il record non esiste piu e il riferimento e solo una stringa"
+    },
+    "motivo": {
+      "type": "string",
+      "description": "Perche non serve piu: record cancellato, file sostituito"
+    },
+    "annotato_il": {
+      "type": "string",
+      "description": "Il giorno in cui si e smesso di usarlo, aaaa-mm-gg"
+    },
+    "stato": {
+      "type": "string",
+      "enum": ["da_chiedere", "chiesto", "rimosso"],
+      "default": "da_chiedere",
+      "description": "Dove sta la pratica: da_chiedere finche non si manda l elenco, chiesto dopo averlo mandato, rimosso quando l assistenza conferma. Non lo cambia nessun automatismo: la conferma la riceve una persona"
+    },
+    "chiesto_il": {
+      "type": "string",
+      "description": "Quando e stato messo in una richiesta all assistenza, aaaa-mm-gg"
+    },
+    "rimosso_il": {
+      "type": "string",
+      "description": "Quando l assistenza ha confermato la rimozione, aaaa-mm-gg"
+    },
+    "nota": {
+      "type": "string",
+      "description": "Riferimento della conversazione con l assistenza, o qualunque cosa serva ricordare"
+    }
+  },
+  // Solo l amministratore, in lettura compresa, e qui la lettura NON e true come
+  // negli altri archivi: questo registro e' un elenco di riferimenti a file, e un
+  // riferimento basta per farsi firmare un link e aprire il documento. Negli altri
+  // archivi la lettura e' aperta perche' chi consulta deve vedere i dati; qui non
+  // c'e' niente da consultare - e' una lista di pratiche aperte con l'assistenza
+  // della piattaforma, e la guarda solo chi le manda.
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  },
+  "required": [
+    "riferimento"
+  ]
+}

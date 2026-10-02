@@ -123,16 +123,20 @@ export default function CaricamentoDati() {
       URL.revokeObjectURL(a.href);
       // LA FRASE DA SCRIVERE NELLA RICHIESTA, insieme al file.
       //
-      // Ogni riga di quell'elenco e' un file che un record sta usando: l'elenco
-      // nasce dai record. Mandato senza spiegarlo si legge come una lista di
-      // cancellazioni, e il 02/10/2026 e' mancato poco - dentro c'erano i 144
-      // documenti di qualifica dei fornitori, i modelli delle lettere e una
-      // stampa di quadratura. Li ha fermati l'assistenza, controllando lei.
+      // Nell'elenco la colonna "azione" dice riga per riga che cosa farne, e non
+      // sono due casi ma tre: si fanno rimuovere i file con indirizzo pubblico e
+      // quelli che nessun record usa piu' (il registro FileDaRimuovere), mentre i
+      // documenti che i record stanno usando non si toccano.
+      //
+      // Mandato senza spiegarlo l'elenco si legge come una lista di cancellazioni,
+      // e il 02/10/2026 e' mancato poco: dentro c'erano i 144 documenti di qualifica
+      // dei fornitori, i modelli delle lettere e una stampa di quadratura. Li ha
+      // fermati l'assistenza, controllando lei.
       const richiesta = (res.data && res.data.richiesta) || '';
       if (richiesta) {
         window.alert('Elenco scaricato.\n\nDa scrivere nella richiesta, insieme al file:\n\n'
           + richiesta
-          + '\n\nOgni riga dell\'elenco è un file che un record sta usando, e la colonna "azione" lo dice riga per riga: senza quella frase l\'elenco si legge come una lista di cancellazioni.');
+          + "\n\nNell'elenco la colonna «azione» dice riga per riga che cosa farne: si fanno rimuovere i file con indirizzo pubblico e quelli che nessun record usa più. Tutto il resto sono documenti che i record stanno usando, e non si toccano.");
       }
     } catch (e) {
       setDialogState(extractUploadError(e));

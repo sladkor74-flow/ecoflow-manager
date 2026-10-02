@@ -7,6 +7,7 @@ import {
 import { eliminaCampo } from "../../shared/testoLungo.ts";
 import { ricontrollaVerifiche } from "../../shared/esitoVerifica.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
+import { annotaPrimaDiCancellare } from "../../shared/fileDaRimuovere.ts";
 
 // Situazione dei report settimanali per una settimana.
 //
@@ -93,6 +94,7 @@ export default async function(req) {
       if (!puoScrivere) continue;
       // Verifica sostituita che il browser non e' riuscito a cancellare: non serve piu'.
       try {
+        await annotaPrimaDiCancellare(svc.FileDaRimuovere, 'VerificaReport', v, oggiRoma());
         await eliminaCampo(base44, 'VerificaReport', v.id);
         await svc.VerificaReport.delete(v.id);
         cancellate++;
