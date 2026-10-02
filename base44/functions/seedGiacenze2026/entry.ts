@@ -19,6 +19,28 @@ const GIACENZE_2026 = [
   { sito: 'TECNOGUM SRL', tipo_destinazione: 'imp', target_primarie_t: 800, target_totale_t: 2295, giacenza_iniziale_t: 0, tipologia_trattamento: 'n.a.' },
 ];
 
+// ATTENZIONE A quantita_kg SULLE RIGHE CON caricata_inviata: false.
+//
+// Letto il 02/10/2026, partendo da una segnalazione dell'utente: nel riepilogo
+// GREEN TYRE risultava avere dichiarato 105.740 kg a settembre, mese in cui a
+// portale non ha dichiarato niente, e Gatim mostrava 17.940 kg invece dei
+// 122.170 che il portale aspetta.
+//
+// Le nove righe qui sotto con caricata_inviata: false portano in quantita_kg
+// numeri presi il 12/09/2026 che NON sono dichiarazioni fatte: sono il
+// quantitativo che a quella data restava DA dichiarare. quantita_kg pero' in
+// tutto il modulo vuol dire «quanto l'impianto ha dichiarato» - l'entita' lo
+// scrive, e la giacenza la decurta solo con caricata_inviata true.
+//
+// Il conto di cio' che resta da dichiarare adesso sottrae solo il CARICATO
+// (riepilogoDichiarazioni/entry.ts), quindi quei numeri non falsano piu' i
+// totali. Restano pero' scritti nei record, e nella casella del mese si leggono
+// come una dichiarazione in mano da segnare: vanno guardati uno per uno con
+// l'utente e tolti quelli che non corrispondono a una dichiarazione vera.
+//
+// Il seme e' idempotente e scrive solo i record mancanti: non li ricrea.
+// Chi aggiunge righe qui dentro scriva in quantita_kg SOLO cio' che e' stato
+// davvero dichiarato, e il resto lo lasci dire agli ingressi.
 const DICHIARAZIONI_2026 = [
   { sito: 'Gatim', operazione: 'R3', canale: 'RETE', provenienza: '', mese: 'Gennaio', quantita_kg: 78430, caricata_inviata: true },
   { sito: 'Gatim', operazione: 'R3', canale: 'RETE', provenienza: '', mese: 'Febbraio', quantita_kg: 74240, caricata_inviata: true },

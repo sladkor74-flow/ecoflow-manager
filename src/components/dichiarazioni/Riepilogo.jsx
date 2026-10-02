@@ -70,6 +70,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
               <th className="text-left px-3 py-2 font-semibold sticky left-0 bg-muted/50 min-w-[230px]">Impianto · canale</th>
               {MESI_BREVI.map(m => <th key={m} className="px-1 py-2 font-semibold text-center min-w-[74px]">{m}</th>)}
               <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Caricato (t)</th>
+              <th className="px-3 py-2 font-semibold text-right whitespace-nowrap" title="Gli ingressi dell anno su questa riga meno quello che e stato davvero caricato a portale. Le uscite di ferro non decurtano niente, perche si gestiscono fuori dal portale: restano qui dentro.">Da dichiarare (t)</th>
             </tr>
           </thead>
           <tbody>
@@ -91,10 +92,25 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                   </td>
                 ))}
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatTonnellate(flusso.dichiarato_caricato_t)}</td>
+                {/* QUANTO RESTA DA DICHIARARE, SU TUTTA LA RIGA (utente, 02/10/2026).
+                    Per chi fa solo R3 e la somma dei mesi non ancora dichiarati. Per chi
+                    fa anche R1 e CSS-c il conto e lo stesso, ed e giusto anche sul ferro:
+                    le uscite di ferro si gestiscono fuori dal portale, quindi non vengono
+                    mai caricate e non decurtano niente - restano qui dentro da se, senza
+                    bisogno di sommarle a parte.
+                    Dove la dichiarazione non e dovuta per accordo la colonna tace: non e
+                    un arretrato. */}
+                <td className="px-3 py-1.5 text-right tabular-nums font-medium">
+                  {flusso.canale === 'RETE' && sito.dichiara_rete === false
+                    ? <span className="text-muted-foreground">—</span>
+                    : flusso.da_dichiarare_t > 0
+                      ? <span className="text-amber-700">{formatTonnellate(flusso.da_dichiarare_t)}</span>
+                      : <span className="text-muted-foreground">—</span>}
+                </td>
               </tr>
             ))}
             {righe.length === 0 && (
-              <tr><td colSpan={14} className="text-center py-6 text-muted-foreground">Nessun impianto con movimenti o dichiarazioni per quest'anno.</td></tr>
+              <tr><td colSpan={15} className="text-center py-6 text-muted-foreground">Nessun impianto con movimenti o dichiarazioni per quest'anno.</td></tr>
             )}
           </tbody>
         </table>

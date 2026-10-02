@@ -363,6 +363,15 @@ export default async function(req) {
           const da = daStoccaggi.get(chiave);
           const daStoc = da ? [...da.entries()].map(([stoccaggio, kg]) => ({ stoccaggio, kg: Math.round(kg) })).sort((a, b) => b.kg - a.kg) : [];
           const totale = Math.round(conferito.get(chiave) || 0);
+          const dich = perDich.get(chiave) || {};
+          const dichiarata = Math.round(Number(dich.quantita_kg) || 0);
+          const caricatoAPortale = dich.caricata_inviata ? dichiarata : 0;
+          // Un mese segnato NON DOVUTA non si deve a nessuno: non entra in cio'
+          // che resta da dichiarare. SOLO METALLI invece si': a portale non si
+          // carica nulla e il ferro va con la prossima uscita di gomma, quindi
+          // quei chili restano da dichiarare (regola dell'utente sul ferro,
+          // 02/10/2026).
+          const nonDovuta = dich.motivo_assenza === 'non_dovuta';
           return {
             mese,
             conferito_kg: totale,
@@ -370,15 +379,36 @@ export default async function(req) {
             diretto_kg: totale - daStoc.reduce((s, x) => s + x.kg, 0),
             da_stoccaggi: daStoc,
             non_dichiarato_kg: canale === 'RETE' ? Math.round(nonDichiaratoNel(ns, i)) : 0,
-            // QUANTO RESTA DA DICHIARARE DI QUEL MESE: gli ingressi del mese in
-            // quell'impianto, meno quello che per quel mese e' dichiarato
-            // (regola dell'utente, 01/10/2026: «le quantita' di settembre ancora
-            // da dichiarare sono gli ingressi del mese in quello specifico
-            // impianto»). Prima lo diceva solo la fotografia del portale
-            // (non_dichiarato_kg), che e' di un giorno preciso e puo' essere
-            // vecchia di settimane: un mese appena conferito ci risultava a zero
-            // e la riga dell'impianto spariva dal riepilogo.
-            da_dichiarare_kg: Math.max(0, totale - Math.round(Number((perDich.get(chiave) || {}).quantita_kg) || 0)),
+            // QUANTO RESTA DA DICHIARARE A PORTALE, DI QUEL MESE.
+            //
+            // Gli ingressi del mese in quell'impianto, meno quello che per quel
+            // mese e' stato DAVVERO CARICATO A PORTALE (regola dell'utente,
+            // 01/10/2026: le quantita' ancora da dichiarare sono gli ingressi del
+            // mese in quello specifico impianto).
+            //
+            // SI SOTTRAE SOLO IL CARICATO, non tutto quello che e' scritto nel
+            // campo quantita'. Lo dice l'entita' stessa, su caricata_inviata:
+            // «Solo i mesi con questo flag true concorrono a decurtare la
+            // giacenza». Qui si sottraeva comunque, e il 02/10/2026 l'utente ha
+            // segnalato il risultato: su GREEN TYRE settembre - mese in cui a
+            // portale non e' stato dichiarato niente - il gestionale mostrava
+            // 105.740 kg come gia' dichiarati, e su Gatim settembre, invece dei
+            // 122.170 kg che il portale aspetta, ne mostrava 17.940.
+            //
+            // Quei numeri vengono dalle righe di DichiarazioneSito seminate il
+            // 12/09/2026 (seedGiacenze2026): per i mesi non ancora dichiarati
+            // portano in quantita_kg il quantitativo DA dichiarare a quella data,
+            // con caricata_inviata false. Scritte nel campo che tutto il modulo
+            // legge come «quanto l'impianto ha dichiarato».
+            //
+            // E risolve da se' la regola del ferro (utente, 02/10/2026): le uscite
+            // di ferro si gestiscono fuori dal portale, quindi non sono mai
+            // caricate, quindi non decurtano niente. Non c'e' da sommarle: basta
+            // non sottrarle.
+            da_dichiarare_kg: nonDovuta ? 0 : Math.max(0, totale - caricatoAPortale),
+            // La dichiarazione che c'e' ma non e' ancora a portale non si perde:
+            // e' un'altra cosa dal non averla, e la casella lo dice.
+            dichiarato_non_caricato_kg: dichiarata - caricatoAPortale,
             dichiarazione: dichiarazioneDi(perDich.get(chiave) || null),
           };
         });

@@ -28,15 +28,16 @@ export default function CellaMese({ mese, onApri, soloLettura, attesa = true, do
             : manca ? 'bg-amber-50 hover:bg-amber-100 text-amber-900'
           : 'hover:bg-muted';
   const daStoccaggi = (mese.da_stoccaggi || []).map(s => `${kg(s.kg)} kg da ${s.stoccaggio}`).join(', ');
-  // Quanto resta da dichiarare di quel mese: gli ingressi del mese in quell'
-  // impianto meno il dichiarato. E' il numero che l'utente cerca quando apre la
-  // pagina (01/10/2026), e sulla casella si legge senza aprirla.
+  // Quanto resta da dichiarare A PORTALE di quel mese: gli ingressi del mese in
+  // quell'impianto meno quello che per quel mese e' stato davvero caricato. Una
+  // dichiarazione che c'e' ma non e' ancora a portale non decurta niente: lo dice
+  // l'entita' stessa, e il 02/10/2026 non era cosi' che si contava.
   const resta = Number(mese.da_dichiarare_kg) || 0;
   const titolo = [
     `${mese.mese}`,
     conferito ? `arrivati ${kg(conferito)} kg${daStoccaggi ? ` (in secondaria: ${daStoccaggi})` : ''}` : 'nessun conferimento',
     d && d.quantita_kg > 0 ? `dichiarati ${kg(d.quantita_kg)} kg` : '',
-    resta > 0 ? `ancora da dichiarare ${kg(resta)} kg` : '',
+    resta > 0 ? `ancora da dichiarare a portale ${kg(resta)} kg` : '',
     STATI[stato].nome,
     soloLettura ? '' : 'clicca per aprire',
   ].filter(Boolean).join(' · ');
@@ -68,6 +69,15 @@ export default function CellaMese({ mese, onApri, soloLettura, attesa = true, do
         {stato === 'non_dovuta' && <><Minus className="w-3 h-3" /> non dovuta</>}
         {stato === 'nessuna' && (manca ? `da dichiarare ${kg(resta)}` : '')}
       </span>
+      {/* QUANTO RESTA, ANCHE QUANDO UNA DICHIARAZIONE C'E'.
+          Fino al 02/10/2026 il numero si leggeva solo nelle caselle senza
+          nessuna dichiarazione. Una dichiarazione in mano e non ancora caricata
+          a portale lasciava la casella con scritto 'da segnare' e basta, mentre
+          a portale quei chili erano ancora tutti da dichiarare: e' il caso su
+          cui l'utente ha segnalato GREEN TYRE e Gatim. */}
+      {resta > 0 && stato !== 'nessuna' && stato !== 'caricata' && (
+        <span className="block text-[9px] leading-tight opacity-80">manca {kg(resta)}</span>
+      )}
     </button>
   );
 }
