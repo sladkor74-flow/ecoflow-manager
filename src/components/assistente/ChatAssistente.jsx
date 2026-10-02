@@ -442,7 +442,12 @@ export default function ChatAssistente() {
       if (record) {
         if (res.data.file_generati?.length) setFileRecenti(f => ({ ...f, [record.id]: res.data.file_generati }));
         setAttiva(record.conversazione_id);
-        if (res.data.proposte) toast({ title: 'Possibile novità normativa', description: 'L\'Assistente ha proposto un aggiornamento della base di conoscenza: lo trovi nella scheda Base di conoscenza.' });
+        // La scheda Base di conoscenza si disegna solo per l'amministratore: a chi
+        // non la vede si diceva comunque di andarci (02/10/2026). E le due cose
+        // sono diverse: una novita' normativa la propone l'Assistente e la
+        // approva lui, una precisazione la manda l'utente e la valuta lui.
+        if (isAdmin && res.data.novita) toast({ title: "Possibile novità normativa", description: "L'Assistente ha proposto un aggiornamento della base di conoscenza: lo trovi nella scheda Base di conoscenza." });
+        else if (res.data.precisazioni) toast({ title: "Precisazione inviata", description: isAdmin ? "È in coda nella scheda Base di conoscenza, da approvare." : "La valuterà l'amministratore prima che entri nella base di conoscenza." });
       }
       await carica();
     } catch (e) {

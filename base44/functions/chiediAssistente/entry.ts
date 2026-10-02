@@ -11,6 +11,7 @@ import { nuovaCache } from "../../shared/cacheLetture.ts";
 import { SCHEMA_PIANO, istruzioniPiano, strumentiDalPiano, testoDati } from "../../shared/pianoAssistente.ts";
 import { materialePertinente } from "../../shared/materialeCorso.ts";
 import { oggiRoma } from "../../shared/qualificaFornitori.ts";
+import { eAmministratore } from "../../shared/permessi.ts";
 import {
   SCHEMA_FILE_DA_CREARE, SCHEMA_LETTURA_FILE, REGOLE_FILE, allegatiRicevuti, istruzioniLettura, allegatiPerPrompt, fileDaCreare,
 } from "../../shared/fileEcoTyna.ts";
@@ -134,10 +135,25 @@ export default async function(req) {
     }
 
     const svc = base44.asServiceRole.entities;
-    const conversazioneId = String(body.conversazione_id || '') || crypto.randomUUID();
-    const precedenti = body.conversazione_id
-      ? await svc.DomandaAssistente.filter({ conversazione_id: conversazioneId }, 'created_date', 50).catch(() => [])
+    // LA CONVERSAZIONE E' DI CHI L'HA APERTA (02/10/2026).
+    //
+    // conversazione_id arrivava dal corpo e si usava com'era: bastava conoscerne
+    // uno per infilarsi nel filo di un altro. Due danni. Il primo: le domande e
+    // le risposte precedenti di quel filo entrano nel prompt, quindi si leggono
+    // di rimbalzo nella risposta. Il secondo, peggiore: la domanda nuova resta
+    // attaccata a quel filo, e quando l'amministratore lo riprende si porta
+    // dentro il testo scritto da un altro.
+    //
+    // Un filo si riprende solo se e' il proprio. Se non lo e', non si risponde
+    // con un errore: se ne apre uno nuovo, perche' la domanda resta legittima.
+    const filoChiesto = String(body.conversazione_id || '');
+    let precedenti = filoChiesto
+      ? await svc.DomandaAssistente.filter({ conversazione_id: filoChiesto }, 'created_date', 50).catch(() => [])
       : [];
+    const mioFilo = !precedenti.length || eAmministratore(user)
+      || precedenti.every(p => !p.created_by_id || p.created_by_id === user.id);
+    if (!mioFilo) precedenti = [];
+    const conversazioneId = (mioFilo && filoChiesto) || crypto.randomUUID();
 
     const analisi = quiz ? { dati: false, norma: true, ambito: 'esercitazione' } : analizzaDomanda(domanda);
     const record = await svc.DomandaAssistente.create({
@@ -385,18 +401,44 @@ export default async function(req) {
       errore: '',
     });
 
-    // Novita' normative e precisazioni dell'utente: proposte da approvare nella base
-    // di conoscenza. Le novita' passano un filtro (norma nuova, data, testo completo)
-    // e una proposta nuova sulla stessa voce prende il posto di quella in attesa.
-    let proposte = 0;
+    // LE PROPOSTE SI APRONO, LA CONOSCENZA APPROVATA NON SI TOCCA (02/10/2026).
+    //
+    // Qui finivano insieme tre cose diverse, e una sola di esse e' davvero
+    // 'aprire una richiesta'.
+    //
+    // La PRECISAZIONE resta aperta a tutti, ed e' la scelta giusta: e' il
+    // meccanismo che la regola dell'utente descrive - chi non modifica apre una
+    // richiesta, e l'amministratore valuta. Nasce senza voce_id, quindi non
+    // scavalca niente e non tocca nessuna voce approvata: resta in coda finche'
+    // non la si approva.
+    //
+    // Le NOVITA' NORMATIVE no. Gli id delle voci stanno nel prompt, il modello
+    // riempie voce_id leggendo la domanda, e proponiNovita mette da parte le
+    // proposte in attesa su QUELLA voce: la vittima la sceglie chi scrive la
+    // domanda. Una proposta in attesa, magari dell'amministratore, sparirebbe
+    // perche' qualcuno ha fatto una domanda.
+    //
+    // scartaSuperate nemmeno: disattiva voci APPROVATE della base di conoscenza
+    // (attiva: false, con il motivo). E' l'archivio che l'RLS dichiara
+    // scrivibile solo dall'amministratore, e qui si passava col service role.
+    //
+    // I due try sono separati di proposito: se una delle due strade fallisce,
+    // l'altra deve comunque andare. Prima un catch solo le ingoiava tutte e due.
+    const puoScrivereConoscenza = eAmministratore(user);
+    let precisazioni = [];
+    let novita = [];
     try {
-      const novita = await proponiNovita(base44, (esito.novita_normative || []).slice(0, 3), { oggi, origine: 'domanda', approvate, collegamenti: { domanda_id: recordId } });
-      const precisazioni = await proponiPrecisazioni(base44, esito.precisazioni_utente, { oggi, utente: user.full_name || user.email, domandaId: recordId, domanda, approvate });
-      proposte = novita.length + precisazioni.length;
-      if (proposte) await scartaSuperate(base44);
-    } catch (_e) { /* la risposta resta valida anche se la proposta non si salva */ }
+      precisazioni = await proponiPrecisazioni(base44, esito.precisazioni_utente, { oggi, utente: user.full_name || user.email, domandaId: recordId, domanda, approvate });
+    } catch (_e) { /* la risposta resta valida anche se la precisazione non si salva */ }
+    if (puoScrivereConoscenza) {
+      try {
+        novita = await proponiNovita(base44, (esito.novita_normative || []).slice(0, 3), { oggi, origine: 'domanda', approvate, collegamenti: { domanda_id: recordId } });
+        if (novita.length || precisazioni.length) await scartaSuperate(base44);
+      } catch (_e) { /* idem */ }
+    }
+    const proposte = novita.length + precisazioni.length;
 
-    return Response.json({ ok: true, record: aggiornato || { ...record, risposta: esito.risposta, fonti_json: JSON.stringify(fonti), certezza, stato: 'completata' }, proposte, file_generati: fileGenerati });
+    return Response.json({ ok: true, record: aggiornato || { ...record, risposta: esito.risposta, fonti_json: JSON.stringify(fonti), certezza, stato: 'completata' }, proposte, precisazioni: precisazioni.length, novita: novita.length, file_generati: fileGenerati });
   } catch (error) {
     const messaggio = error && error.message ? error.message : String(error);
     if (base44 && recordId) {

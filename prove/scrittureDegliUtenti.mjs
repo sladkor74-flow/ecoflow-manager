@@ -75,12 +75,20 @@ for (const n of file) {
   // "create": null e simili: non esprimono ne' un permesso ne' un divieto. In
   // questo progetto un divieto si scrive user_condition role admin.
   for (const r of righe) if (/"(create|read|update|delete)"\s*:\s*null/.test(r)) nulli.push(`${n}: ${r.trim()}`);
-  // Il prefisso "data." nelle condizioni: comparso una volta sola, scritto
-  // dalla scansione automatica, e nello stesso commit lo stesso bot ha usato il
-  // nome nudo su un'altra entita'. Almeno una delle due forme e' sbagliata, e
-  // qual e' la giusta va chiesto al supporto, non indovinato. Finche' non si sa,
-  // non ne vogliamo in archivio: una condizione che non corrisponde a niente
-  // rende invisibili i propri record e il guasto non si vede dall'account
+  // Il prefisso "data." nelle condizioni. Comparso una volta sola, scritto dalla
+  // scansione automatica, e nello stesso commit lo stesso bot ha usato il nome
+  // nudo su un altra entita: almeno una delle due forme doveva essere sbagliata.
+  //
+  // RISPOSTA DELL'ASSISTENZA, 02/10/2026: sono valide tutt'e due, perche'
+  // indicano due generi di campo diversi. «A platform field such as created_by_id
+  // stays unprefixed, while a field you defined in the entity needs the data.
+  // prefix». Le nostre due condizioni sono su created_by_id, che e un campo della
+  // piattaforma: vanno senza prefisso, e stanno gia cosi.
+  //
+  // Il controllo resta, ma cambia significato: non e piu un dubbio, e il confine.
+  // Un "data." qui dentro vorrebbe dire che qualcuno ha messo una condizione su
+  // un campo nostro, e allora va guardata una per una, perche una condizione
+  // sbagliata rende invisibili i propri record senza che si veda dall account
   // dell'amministratore.
   for (const r of righe) if (/"data\.[a-z_]+"\s*:/.test(r)) conPrefisso.push(`${n}: ${r.trim()}`);
 }

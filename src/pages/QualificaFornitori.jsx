@@ -382,7 +382,11 @@ export default function QualificaFornitori() {
     try {
       const res = await base44.functions.invoke('controlloQualifiche', { anno, forza: true });
       const d = res.data || res;
-      if (d.inviata) toast({ title: 'Promemoria inviato', description: `Destinatari: ${d.destinatari.join(', ')}` });
+      // Un rinvio non e' un 'niente da inviare': i numeri a video sono di adesso
+      // ma non sono stati salvati e il promemoria non e' partito. Dirlo, invece di
+      // tranquillizzare.
+      if (d.rinviato) toast({ title: 'Controllo rinviato', description: d.avviso });
+      else if (d.inviata) toast({ title: 'Promemoria inviato', description: `Destinatari: ${d.destinatari.join(', ')}` });
       else toast({ title: 'Nessun promemoria da inviare', description: 'Non ci sono alert aperti.' });
       await aggiorna();
     } catch (e) {

@@ -25,6 +25,25 @@ export default async function(req) {
     const anno = Number(body.anno) || Number(oggiRoma().slice(0, 4));
     const oggi = oggiRoma();
 
+    // L'ANNO SI VALIDA, perche' e' la CHIAVE della riga di riepilogo che si
+    // riscrive (02/10/2026). Un anno non intero non trova nessuna riga e ne fa
+    // nascere una nuova, che nessun lettore andra' mai a cercare: il menu e la
+    // fatturazione passiva filtrano su Number(anno). Resterebbe li', in un
+    // archivio che l'RLS dichiara scrivibile solo dall'amministratore.
+    //
+    // Il riepilogo invece continua a salvarsi anche quando lo chiede chi
+    // consulta soltanto, ed e' una scelta: non e' un dato suo, e' una copia di
+    // un conto che il server rifa' dagli archivi, con i soggetti che non si
+    // accettano piu' dal corpo e con la regola 2 che lo ferma sugli archivi a
+    // meta'. Chiuderlo vorrebbe dire che a ogni apertura di pagina, per lui, il
+    // calcolo completo riparte da capo e non si ferma mai piu' - la pagina
+    // ricalcola finche' il riepilogo salvato e' piu' vecchio dell'ultimo
+    // caricamento - e sono letture di tutti gli archivi contro il limite al
+    // minuto di tutta l'app.
+    if (!Number.isInteger(anno) || anno < 2000) {
+      return Response.json({ error: 'Anno non valido.' }, { status: 400 });
+    }
+
     // Gli attori dell'anno si individuano rileggendo primarie, secondarie ed
     // extra raccolta: se uno di quegli archivi si sta riscrivendo, o un
     // caricamento l'ha lasciato a meta', i soggetti letti adesso sarebbero

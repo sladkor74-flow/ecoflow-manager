@@ -4,6 +4,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from "../../shared/reportSettimanali.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { ordiniAttivita, statoOrdini, controlloAttivita, testoControlloTodo } from "../../shared/todoOrdini.ts";
+import { eAmministratore } from "../../shared/permessi.ts";
 
 // Chiude le attivita' della to-do list il cui ordine e' stato ritirato.
 //
@@ -29,12 +30,25 @@ import { ordiniAttivita, statoOrdini, controlloAttivita, testoControlloTodo } fr
 // nessuna parte non si chiude niente e lo si dice (avviso_ordini): un ID scritto
 // male, o un file del portale non ancora caricato, si vede invece di sparire.
 //
-// Il livello non si guarda, come negli altri quattro ricalcoli dopo un
-// caricamento: le primarie le puo' caricare anche l'operatore base, e un
-// ricalcolo che gli rispondesse 403 resterebbe rosso per sempre e si
-// ritenterebbe a ogni apertura della pagina dei caricamenti. Non e' una
-// modifica di chi chiama, e' il gestionale che si riallinea. Il freno sta dove
-// deve stare: la pagina To-Do List lo chiama solo per l'amministratore.
+// CHI PUO' FAR CHIUDERE UN'ATTIVITA' (02/10/2026).
+//
+// Il controllo lo fa chiunque sia collegato, la SCRITTURA no. Prima non si
+// guardava il livello affatto, con una ragione buona: questo e' uno dei cinque
+// ricalcoli che partono dopo un caricamento delle primarie, le primarie le puo'
+// caricare anche l'operatore base, e un 403 avrebbe lasciato quel ricalcolo
+// rosso per sempre, ritentato a ogni apertura della pagina dei caricamenti.
+//
+// La ragione buona pero' chiedeva una cosa sola - non fallire - e se ne prendeva
+// un'altra: chiudere le attivita' per conto di chi non puo' modificare niente.
+// Quindi si fa come in qualificaFornitori: si CALCOLA sempre e si risponde 200,
+// ma si scrive solo se chi chiama e' l'amministratore. A lui le chiusure; agli
+// altri si dice che cosa si chiuderebbe (da_chiudere) e che non e' stato
+// salvato. Il caricamento di un operatore base non va in errore, e le attivita'
+// si chiudono alla prima apertura della pagina da parte dell'amministratore,
+// che e' l'unico a vederle.
+//
+// Il corpo della richiesta non si legge: chi chiama non sceglie niente, nemmeno
+// quali attivita' guardare. Lo decidono i dati, e una prova lo blocca.
 //
 // Risposte: 200 con { controllate, aggiornate, chiuse, da_guardare, avviso };
 // 401 a chi non e' entrato nel gestionale;
@@ -75,6 +89,7 @@ export default async function(req) {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me().catch(() => null);
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    const puoScrivere = eAmministratore(user);
     const svc = base44.asServiceRole.entities;
     const oggi = oggiRoma();
     const niente = { controllate: 0, aggiornate: 0, chiuse: [], da_guardare: [], avviso: '' };
@@ -122,12 +137,13 @@ export default async function(req) {
     const stato = statoOrdini(movimenti, assegnati);
     let aggiornate = 0;
     const chiuse = [];
+    const daChiudere = [];
     const daGuardare = [];
     const errori = [];
     for (const t of attivita) {
       const { esito, campi, chiusa } = controlloAttivita(t, stato, oggi);
       const cambiato = Object.keys(campi).some(k => String(t[k] ?? '') !== String(campi[k] ?? ''));
-      if (cambiato) {
+      if (cambiato && puoScrivere) {
         try {
           await svc.Todo.update(t.id, campi);
           aggiornate++;
@@ -136,8 +152,9 @@ export default async function(req) {
           continue;
         }
       }
-      // Una chiusura si racconta solo se e' stata salvata.
-      if (chiusa) chiuse.push({ id: t.id, titolo: t.titolo, ordini: esito.ids.join(', '), ritiro: esito.ultima });
+      // Una chiusura si racconta solo se e' stata salvata. A chi non puo'
+      // scrivere si dice che cosa si chiuderebbe, senza chiuderlo.
+      if (chiusa) (puoScrivere ? chiuse : daChiudere).push({ id: t.id, titolo: t.titolo, ordini: esito.ids.join(', '), ritiro: esito.ultima });
       if (campi.avviso_ordini) daGuardare.push({ id: t.id, titolo: t.titolo, avviso: campi.avviso_ordini });
     }
 
@@ -147,6 +164,14 @@ export default async function(req) {
       chiuse,
       da_guardare: daGuardare,
       avviso: testoControlloTodo(chiuse, daGuardare),
+      ...(puoScrivere ? {} : {
+        da_chiudere: daChiudere,
+        non_salvato: true,
+        sola_lettura: true,
+        avviso: daChiudere.length
+          ? `${daChiudere.length === 1 ? "Un'attivita' risulta" : daChiudere.length + ' attivita risultano'} da chiudere, ma le modifiche le fa l'amministratore: si chiudono alla sua prima apertura della To-Do List.`
+          : '',
+      }),
     };
     if (errori.length) return Response.json({ ...risposta, errori }, { status: 500 });
     return Response.json(risposta);
