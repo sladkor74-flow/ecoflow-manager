@@ -39,6 +39,24 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
   // Ogni formulario arriva a un impianto solo: sommarli per impianto non conta
   // nessuno due volte.
   const impianti = dati.siti.filter(s => s.tipo_destinazione !== 'stoc');
+  // GLI ORDINI IN LIMBO: "eseguito" a portale, e il pulsante Chiudi mai premuto.
+  //
+  // Hanno tutti i dati dentro - peso, formulario, date - ma finche' restano cosi'
+  // il gestionale non li conta da nessuna parte, perche' conta i terminati. Quei
+  // chili non sono in nessuna casella di questa tabella, e senza questo avviso il
+  // totale sembra completo: e' il modo peggiore di perdere un dato.
+  //
+  // Chiesto dall'utente il 02/10/2026 dopo il caso di Green Tyre: due ritiri di
+  // Torres del 30 settembre, 11.700 kg, che a portale non comparivano ne' fra i
+  // dichiarati ne' fra i non dichiarati, e la pagina mostrava meno del vero senza
+  // dire perche'.
+  const inLimbo = impianti.flatMap(s => (s.eseguiti || []).map(e => ({ sito: s.sito, chiave: s.chiave, ...e })));
+  const limboKg = inLimbo.reduce((t, e) => t + e.kg, 0);
+  const limboOrdini = inLimbo.reduce((t, e) => t + e.ordini, 0);
+  // Per riga: la casella non puo' dirlo da sola, perche' quei chili non stanno in
+  // nessun mese. Si dice sotto il nome dell'impianto, sul canale giusto.
+  const limboDi = (sito, canale) => inLimbo.find(e => e.chiave === sito.chiave && e.canale === canale);
+
   const fuoriDaiMesi = CANALI.map(c => {
     const gruppi = impianti.flatMap(s => (s.date_da_sistemare || []).filter(g => g.canale === c.chiave && g.ruolo !== 'stoc'));
     const quanti = (campo) => gruppi.reduce((tot, g) => tot + ((g.senza_fine && g.senza_fine[campo]) || 0), 0);
@@ -62,6 +80,25 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
           {fuoriDaiMesi.map(c => `${c.nome} ${c.n} (${formatKg(c.kg)} kg)`).join(' · ')}. Quali sono, nella scheda Impianti.
         </p>
       )}
+      {inLimbo.length > 0 && (
+        <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-1">
+          <p>
+            <strong>{limboOrdini === 1 ? "Un ordine è" : `${limboOrdini} ordini sono`} in stato «eseguito» a portale e non {limboOrdini === 1 ? "è stato chiuso" : "sono stati chiusi"}:</strong>{" "}
+            {formatKg(limboKg)} kg che non sono in nessuna casella di questa tabella, perché il gestionale conta i formulari chiusi.
+            Hanno già tutti i dati: manca solo il pulsante Chiudi, a portale. Finché resta così, quei chili non risultano né raccolti né da dichiarare.
+          </p>
+          <ul className="pl-4 list-disc">
+            {inLimbo.map(e => (
+              <li key={`${e.chiave}-${e.canale}`}>
+                <span className="font-medium">{e.sito}</span> · {(CANALI.find(c => c.chiave === e.canale) || { nome: e.canale }).nome} ·{" "}
+                {e.ordini === 1 ? "1 ordine" : `${e.ordini} ordini`} ({formatKg(e.kg)} kg)
+                {e.mesi.length ? ` · ${e.mesi.join(", ")}` : " · senza fine trasporto"}
+                {e.esempi.length ? <span className="text-amber-800">{" — "}{e.esempi.map(o => o.id_ordine || o.numero_fir).filter(Boolean).join(", ")}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="border rounded-xl bg-card" data-scorre-lato>
         <table className="w-full text-xs">
@@ -70,7 +107,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
               <th className="text-left px-3 py-2 font-semibold sticky left-0 bg-muted/50 min-w-[230px]">Impianto · canale</th>
               {MESI_BREVI.map(m => <th key={m} className="px-1 py-2 font-semibold text-center min-w-[74px]">{m}</th>)}
               <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Caricato (t)</th>
-              <th className="px-3 py-2 font-semibold text-right whitespace-nowrap" title="Gli ingressi dell anno su questa riga meno quello che e stato davvero caricato a portale. Le uscite di ferro non decurtano niente, perche si gestiscono fuori dal portale: restano qui dentro.">Da dichiarare (t)</th>
+              <th className="px-3 py-2 font-semibold text-right whitespace-nowrap" title="La giacenza di rete: quello che e arrivato, meno quello che e stato davvero caricato a portale. E il residuo da dichiarare, lo stesso numero della scheda Impianti. Dove l impianto dichiara mese per mese coincide con la somma dei mesi non dichiarati; dove dichiara quando il prodotto esce (R1, CSS-C) no, e vale la giacenza.">Da dichiarare (t)</th>
             </tr>
           </thead>
           <tbody>
@@ -92,20 +129,34 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                   </td>
                 ))}
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatTonnellate(flusso.dichiarato_caricato_t)}</td>
-                {/* QUANTO RESTA DA DICHIARARE, SU TUTTA LA RIGA (utente, 02/10/2026).
-                    Per chi fa solo R3 e la somma dei mesi non ancora dichiarati. Per chi
-                    fa anche R1 e CSS-c il conto e lo stesso, ed e giusto anche sul ferro:
-                    le uscite di ferro si gestiscono fuori dal portale, quindi non vengono
-                    mai caricate e non decurtano niente - restano qui dentro da se, senza
-                    bisogno di sommarle a parte.
-                    Dove la dichiarazione non e dovuta per accordo la colonna tace: non e
-                    un arretrato. */}
+                {/* QUANTO RESTA DA DICHIARARE, SU TUTTA LA RIGA.
+
+                    E LA GIACENZA, non la somma dei mesi non dichiarati. Le due cose
+                    coincidono dove l impianto dichiara mese per mese - Gatim 234,41,
+                    Green Tyre 260,20, gli stessi numeri - ma non dove dichiara quando
+                    il prodotto esce. Irigom e un R1: il mese in cui parte la nave
+                    dichiara piu di quanto gli e arrivato in quel mese, e sommando i
+                    mesi con il max a zero quell eccedenza si perdeva: usciva 1.301,08
+                    invece di 543,22. Parole dell utente, 02/10/2026: «il residuo da
+                    dichiarare di Irigom e pari alla sua giacenza», e «non devi sommare
+                    tutto quando le uscite sono di solo ferro perche quello poi va via
+                    con la nave successiva».
+
+                    La giacenza il gestionale la calcola gia e la confronta col portale
+                    (giacenza_calcolata_t, scheda Impianti): cosi le due schede dicono
+                    lo stesso numero. Vale per la rete, che e il canale che il portale
+                    tiene; sugli altri resta la somma dei mesi.
+
+                    Dove la dichiarazione non e dovuta per accordo la colonna tace: non
+                    e un arretrato. */}
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium">
-                  {flusso.canale === 'RETE' && sito.dichiara_rete === false
-                    ? <span className="text-muted-foreground">—</span>
-                    : flusso.da_dichiarare_t > 0
-                      ? <span className="text-amber-700">{formatTonnellate(flusso.da_dichiarare_t)}</span>
-                      : <span className="text-muted-foreground">—</span>}
+                  {(() => {
+                    if (flusso.canale === 'RETE' && sito.dichiara_rete === false) return <span className="text-muted-foreground">—</span>;
+                    const resta = flusso.canale === 'RETE' ? sito.giacenza_calcolata_t : flusso.da_dichiarare_t;
+                    return resta > 0
+                      ? <span className="text-amber-700">{formatTonnellate(resta)}</span>
+                      : <span className="text-muted-foreground">—</span>;
+                  })()}
                 </td>
               </tr>
             ))}

@@ -112,8 +112,18 @@ console.log('LA CASELLA LO DICE ANCHE QUANDO UNA DICHIARAZIONE C\'E\'');
   // dichiarazioni non ce n'era nessuna, quindi proprio nei due casi segnalati
   // restava invisibile.
   const c = sorgente('src/components/dichiarazioni/CellaMese.jsx');
-  verifica('il resto si legge fuori dallo stato nessuna',
-    /\{resta > 0 && stato !== 'nessuna' && stato !== 'caricata' &&/.test(c));
+  verifica('il resto si legge anche dove la casella taceva',
+    /{resta > 0 && !manca && stato !== 'caricata' &&/.test(c));
+  // Sui canali diversi dalla rete "attesa" e' falsa, e con essa cadeva anche il
+  // numero: un mese di ACI arrivato e non dichiarato era una casella VUOTA,
+  // indistinguibile da un mese senza arrivi, mentre il totale di riga lo contava
+  // (utente, 02/10/2026: l'ACI di Tecnogum, quello di Emmesse su Gatim, quello
+  // arrivato a Gatim da Irigom, tutti di settembre).
+  verifica('e il numero non dipende piu dalla rete',
+    !/stato !== 'nessuna' && stato !== 'caricata'/.test(c));
+  // Ma dove la dichiarazione non e dovuta per accordo la casella tace: non e un
+  // arretrato, e il numero nuovo lo scriveva su ogni mese dell anno (Tecnogum).
+  verifica('dove non e dovuta la casella non scrive niente', c.includes("stato !== 'non_dovuta'"));
   verifica('e su un mese gia caricato non si scrive niente', /stato !== 'caricata'/.test(c));
   // IL NUMERO GRANDE RESTA IL DICHIARATO. Lezione del 01/10/2026: cambiare il
   // significato di quel numero a meta' tabella e' proprio cio' che ha fatto
@@ -122,12 +132,17 @@ console.log('LA CASELLA LO DICE ANCHE QUANDO UNA DICHIARAZIONE C\'E\'');
     /\{d && d\.quantita_kg \? kg\(d\.quantita_kg\) : manca \? '—' : ''\}/.test(c));
 }
 
-console.log('LA COLONNA NUOVA DEL RIEPILOGO');
+console.log('LA COLONNA NUOVA DEL RIEPILOGO: E LA GIACENZA');
 {
   const r = sorgente('src/components/dichiarazioni/Riepilogo.jsx');
   verifica('la colonna c e', />Da dichiarare \(t\)<\/th>/.test(r));
-  verifica('e mostra il totale della riga', /formatTonnellate\(flusso\.da_dichiarare_t\)/.test(r));
-  // Dove la dichiarazione non e' dovuta per accordo (Tecnogum sulla rete) la
+  // E' LA GIACENZA, non la somma dei mesi. Coincidono dove l'impianto dichiara
+  // mese per mese (Gatim 234,41 e Green Tyre 260,20, identici) ma non dove
+  // dichiara quando il prodotto esce: Irigom e' un R1, il mese in cui parte la
+  // nave dichiara piu' di quanto gli e' arrivato, e sommando i mesi con il max a
+  // zero quell'eccedenza si perdeva - usciva 1.301,08 invece di 543,22.
+  verifica('per la rete mostra la giacenza calcolata',
+    r.includes("flusso.canale === 'RETE' ? sito.giacenza_calcolata_t : flusso.da_dichiarare_t"));
   // colonna deve tacere: altrimenti mostrerebbe come arretrato tutti gli
   // ingressi dell'anno di un impianto che non ci deve niente.
   verifica('dove la rete non e dovuta la colonna tace',

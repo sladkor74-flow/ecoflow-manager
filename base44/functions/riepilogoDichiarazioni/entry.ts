@@ -4,7 +4,7 @@ import { fetchAll, perPagina } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { giornoRoma } from "../../shared/giornoItaliano.ts";
-import { eTerminato, periodoMovimento } from "../../shared/movimenti.ts";
+import { eTerminato, eEseguito, periodoMovimento } from "../../shared/movimenti.ts";
 import { MESI, operazioneDa, quadratura } from "../../shared/dichiarazioniImpianti.ts";
 import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese } from "../../shared/giacenzaPortale.ts";
 import { puntiDiPartenza, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
@@ -195,6 +195,43 @@ export default async function(req) {
     // primaria: che fosse diretta a uno stoccaggio si sa da qui.
     const ordineTipo = new Map();
 
+    // IL LIMBO: GLI ORDINI "ESEGUITO" CHE NESSUNO HA CHIUSO A PORTALE.
+    //
+    // Un ordine eseguito ha tutti i dati dentro - peso, formulario, date - ma il
+    // pulsante Chiudi non e' stato premuto. Il gestionale conta solo i terminati,
+    // quindi quei chili non entrano in nessun conto: non nel raccolto, non nelle
+    // giacenze, non negli ingressi di questa pagina. Spariscono in silenzio, ed e'
+    // il modo peggiore di perdere un dato, perche' il totale sembra completo.
+    //
+    // Non si sommano ai terminati, che sarebbe inventare un movimento: si contano
+    // a parte e si DICONO, finche' a portale non vengono chiusi (regola scritta in
+    // shared/movimenti.ts, eEseguito). Qui si tengono per impianto e per canale,
+    // mai sommati fra canali, e con il mese quando la fine trasporto c'e' gia'.
+    //
+    // L'utente l'ha chiesto il 02/10/2026, dopo il caso di Green Tyre: due ritiri
+    // di Torres del 30 settembre, 11.700 kg, che a portale non comparivano ne' fra
+    // i dichiarati ne' fra i non dichiarati. La pagina mostrava meno del vero e non
+    // diceva perche'.
+    const limbo = new Map(); // ns|canale -> Map(ordine -> { id_ordine, numero_fir, kg, mese })
+    const segnaLimbo = (sito, canale, r) => {
+      const ns = norm(sito);
+      if (!ns || !eEseguito(r)) return;
+      const chiave = `${ns}|${canale}`;
+      if (!limbo.has(chiave)) limbo.set(chiave, new Map());
+      const per = limbo.get(chiave);
+      const id = String(r.id_ordine || '').trim();
+      // Senza numero d'ordine la riga vale da sola: due righe senza id non sono
+      // lo stesso ordine solo perche' gli manca lo stesso campo.
+      const k = id || `riga-${per.size + 1}`;
+      const gia = per.get(k) || { id_ordine: id, numero_fir: String(r.numero_fir || '').trim(), kg: 0, mese: '' };
+      gia.kg += peso(r);
+      // Il mese e' quello della fine trasporto, come ovunque (regola 1). Un
+      // eseguito di solito ce l'ha: e' il Chiudi che manca, non i dati.
+      const p = periodoMovimento(r);
+      if (p && p.anno === annoNum && !gia.mese) gia.mese = p.mese;
+      per.set(k, gia);
+    };
+
     // Una primaria (rete, ACI o extra raccolta): all'impianto o allo stoccaggio.
     const primaria = (r, canale) => {
       const ruolo = td(r.tipo_destinazione) || 'imp';
@@ -202,6 +239,7 @@ export default async function(req) {
       if (id && td(r.tipo_destinazione)) ordineTipo.set(id, ruolo);
       // Prima del periodo: un terminato senza fine trasporto qui sotto esce, ma si segnala.
       daSistemare.segna(r, { tipo: 'primaria', canale, ruolo, verso: 'arrivo', sito: r.destinazione, controparte: r.trasportatore || r.ragione_sociale });
+      segnaLimbo(r.destinazione, canale, r);
       if (!eTerminato(r) || !r.destinazione) return null;
       const ns = norm(r.destinazione);
       if (ruolo === 'stoc') movimentoDopo(ns, canale, r, peso(r) / 1000);
@@ -251,6 +289,7 @@ export default async function(req) {
       // segnala su tutti e due, e nel conteggio per canale vale uno.
       daSistemare.segna(r, { tipo: 'secondaria', canale, ruolo: 'imp', verso: 'arrivo', sito: r.destinazione, controparte: r.stoccaggio });
       daSistemare.segna(r, { tipo: 'secondaria', canale, ruolo: 'stoc', verso: 'partenza', sito: r.stoccaggio, controparte: r.destinazione });
+      segnaLimbo(r.destinazione, canale, r);
       if (!dest || !eTerminato(r)) return null;
       movimentoDopo(daStoc, canale, r, -peso(r) / 1000);
       const p = periodo(r);
@@ -424,6 +463,23 @@ export default async function(req) {
       });
     };
 
+    // Gli ordini in limbo di un impianto, canale per canale, dal piu' pesante.
+    // Mai sommati fra canali (regola 3): ogni voce dice il suo.
+    const eseguitiDi = (ns) => [...limbo.entries()]
+      .filter(([k]) => k.split('|')[0] === ns)
+      .map(([k, per]) => {
+        const ordini = [...per.values()].map(o => ({ ...o, kg: Math.round(o.kg) })).sort((a, b) => b.kg - a.kg);
+        return {
+          canale: k.split('|')[1],
+          ordini: ordini.length,
+          kg: ordini.reduce((s, o) => s + o.kg, 0),
+          mesi: [...new Set(ordini.map(o => o.mese).filter(Boolean))],
+          esempi: ordini.slice(0, 20),
+        };
+      })
+      .filter(x => x.ordini > 0)
+      .sort((a, b) => b.kg - a.kg);
+
     const giacenzeDi = (ns, ruolo) => giacenzeSito.filter(x => norm(x.sito) === ns && (td(x.tipo_destinazione) || 'imp') === ruolo);
     // La giacenza al 31/12 dell'anno prima e' della rete; quella ACI, dove c'e',
     // sta nel suo campo. Non si sommano.
@@ -512,6 +568,9 @@ export default async function(req) {
         // I terminati arrivati qui o partiti da qui con le date da sistemare, per
         // canale, con l'elenco degli ordini (regola dell'utente, 22/09/2026).
         date_da_sistemare: dateDi(ns, 'imp'),
+        // Gli ordini che a portale sono 'eseguito' e non chiusi: i loro chili non
+        // sono in nessuna casella, e la pagina lo deve dire.
+        eseguiti: eseguitiDi(ns),
         senza_fine_trasporto: dateRete ? dateRete.senza_fine : null,
         avviso_senza_fine: dateRete ? dateRete.avviso : '',
         // I carichi del file del portale senza un giorno di arrivo: nella giacenza a
@@ -521,7 +580,7 @@ export default async function(req) {
       return { ...sito, ...quadratura(sito) };
     }).filter(s => s.conferito_t || s.conferito_aci_t || s.conferito_extra_t || s.secondarie_in_t || s.secondarie_aci_in_t || s.secondarie_extra_in_t
       || s.dichiarato_totale_rete_t || s.flussi.some(f => f.dichiarato_totale_t) || s.giacenza_iniziale_t || s.giacenza_portale_t
-      || s.date_da_sistemare.length)
+      || s.date_da_sistemare.length || s.eseguiti.length)
       .sort((a, b) => (b.conferito_t + b.secondarie_in_t) - (a.conferito_t + a.secondarie_in_t) || a.sito.localeCompare(b.sito));
 
     // --- Gli stoccaggi: canale per canale ---

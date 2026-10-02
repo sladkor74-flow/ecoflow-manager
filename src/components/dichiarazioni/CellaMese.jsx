@@ -69,13 +69,29 @@ export default function CellaMese({ mese, onApri, soloLettura, attesa = true, do
         {stato === 'non_dovuta' && <><Minus className="w-3 h-3" /> non dovuta</>}
         {stato === 'nessuna' && (manca ? `da dichiarare ${kg(resta)}` : '')}
       </span>
-      {/* QUANTO RESTA, ANCHE QUANDO UNA DICHIARAZIONE C'E'.
-          Fino al 02/10/2026 il numero si leggeva solo nelle caselle senza
-          nessuna dichiarazione. Una dichiarazione in mano e non ancora caricata
-          a portale lasciava la casella con scritto 'da segnare' e basta, mentre
-          a portale quei chili erano ancora tutti da dichiarare: e' il caso su
-          cui l'utente ha segnalato GREEN TYRE e Gatim. */}
-      {resta > 0 && stato !== 'nessuna' && stato !== 'caricata' && (
+      {/* QUANTO RESTA, ANCHE DOVE LA CASELLA FINORA TACEVA.
+
+          Due buchi, tutti e due segnalati dall'utente il 02/10/2026.
+
+          Il primo: con una dichiarazione in mano e non ancora caricata a portale
+          lo stato e' 'da segnare', e il numero mancante si scriveva solo dove di
+          dichiarazioni non ce n'era nessuna. Su Green Tyre settembre la casella
+          diceva 105.740 e basta, mentre a portale erano da dichiarare 255.780.
+
+          Il secondo: sui canali diversi dalla rete 'attesa' e' falsa - una
+          dichiarazione mensile li' non e' la regola - e con essa cadeva anche il
+          numero. Risultato: un mese di ACI arrivato e non dichiarato era una
+          casella VUOTA, indistinguibile da un mese in cui non e' arrivato niente,
+          mentre il totale di riga lo contava. L'utente li ha trovati uno per uno:
+          l'ACI in secondaria di Tecnogum, quello di Emmesse su Gatim, quello
+          arrivato a Gatim da Irigom, tutti di settembre.
+
+          Qui non si CHIEDE una dichiarazione, si DICE quanto resta: niente ambra,
+          niente allarme, solo il numero. La richiesta resta dov'era, sulla rete. */}
+      // NON DOVUTA: la casella tace. Un impianto che sulla rete non ci deve la
+      // dichiarazione per accordo non ha un arretrato, e il 02/10/2026 il nuovo
+      // numero gliel'ha scritto su ogni mese dell'anno.
+      {resta > 0 && !manca && stato !== 'caricata' && stato !== 'non_dovuta' && (
         <span className="block text-[9px] leading-tight opacity-80">manca {kg(resta)}</span>
       )}
     </button>
