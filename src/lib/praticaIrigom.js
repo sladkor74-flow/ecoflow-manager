@@ -629,6 +629,22 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
   const reteDichiarata = cssc.totale_kg + terz.totale_kg + somma(soloFerro, 'totale_kg');
   const extraDichiarata = rigaExtra ? rigaExtra.totale_kg : 0;
   const ultima = righeTer[righeTer.length - 1] || null;
+  // UN MESE DI SOLI METALLI PORTA TUTTO IL FERRO DELLA COLONNA X.
+  //
+  // Regola dell'utente, 03/10/2026: «nel riepilogo metti tutta la quota di ferro
+  // uscita che leggi dalla tabella - quello e' tutto Ecotyre - quindi ad aprile
+  // metti 89.780 e a settembre metti 99.300, e tienilo come regola se dovesse
+  // succedere in futuro».
+  //
+  // Senza questo il ferro di quei mesi era ZERO, e la casella del riepilogo
+  // restava un'etichetta senza numero. Il conto dei materiali passa da
+  // soloFerro, che e' un array dichiarato e mai riempito: in un mese di soli
+  // metalli non ci sono ne' CSS-C ne' terziarie, quindi la somma era zero su
+  // zero. Il numero vero sta nel registro, colonna X del foglio Cons., ed e' lo
+  // stesso che gia' si confronta con i formulari del ferro poche righe sopra.
+  const soloMetalli = !posti.length && X > 0;
+  const ferroSoloMetalli = soloMetalli ? X : 0;
+
   return {
     vuoto,
     letture: { uscite, giacenza, scarto_kg: scarto, usata },
@@ -650,7 +666,7 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
     terziarie_da_aprire: righeTer.length,
     // Usciti solo metalli ferrosi, nessuna gomma e nessun CSS-C: il mese si segna
     // "solo metalli ferrosi" e a portale non si carica nulla.
-    solo_metalli: !posti.length && X > 0,
+    solo_metalli: soloMetalli,
     cssc,
     terziarie: terz,
     solo_ferro: soloFerro,
@@ -658,14 +674,14 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
     // I materiali della sola rete: cippato + metalli + CSS-C = rete_kg.
     materiali: {
       cippato_kg: terz.cippato_kg,
-      metalli_kg: cssc.ferro_kg + terz.ferro_kg + somma(soloFerro, 'ferro_kg'),
+      metalli_kg: cssc.ferro_kg + terz.ferro_kg + somma(soloFerro, 'ferro_kg') + ferroSoloMetalli,
       cssc_kg: cssc.cssc_kg,
     },
     // I materiali di tutte le chiusure a portale, extra compresa: cippato +
     // metalli + CSS-C = portale_kg. Vanno nella dichiarazione di rete del gestionale.
     materiali_portale: {
       cippato_kg: terz.cippato_kg + (rigaExtra ? rigaExtra.cippato_kg : 0),
-      metalli_kg: cssc.ferro_kg + terz.ferro_kg + somma(soloFerro, 'ferro_kg') + (rigaExtra ? rigaExtra.ferro_kg : 0),
+      metalli_kg: cssc.ferro_kg + terz.ferro_kg + somma(soloFerro, 'ferro_kg') + ferroSoloMetalli + (rigaExtra ? rigaExtra.ferro_kg : 0),
       cssc_kg: cssc.cssc_kg,
     },
     avvisi,

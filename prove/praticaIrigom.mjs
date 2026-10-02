@@ -227,6 +227,18 @@ verifica('e lo dice', soloCssc.avvisi.some(a => /restano in giacenza/.test(a)));
 const soloFerro = componiMese({ riga: { uscite_ferro_kg: 89780, giacenza_cippato_kg: 5000, giacenza_intero_kg: 1000 }, ferro: [{ destinatario: 'TRS', colore: 'FFC000', kg: 89780 }], lettura: 'uscite' });
 verifica('aprile: solo metalli, a portale non si carica nulla', soloFerro.rete_kg === 0 && soloFerro.avvisi.some(a => /solo metalli/.test(a)), String(soloFerro.rete_kg));
 verifica('aprile si segna come solo metalli ferrosi', soloFerro.solo_metalli === true && m.solo_metalli === false && soloCssc.solo_metalli === false);
+// E PORTA TUTTO IL FERRO DELLA COLONNA X. Regola dell'utente, 03/10/2026: «nel
+// riepilogo metti tutta la quota di ferro uscita che leggi dalla tabella - quello
+// e' tutto Ecotyre - quindi ad aprile metti 89.780 e a settembre metti 99.300, e
+// tienilo come regola se dovesse succedere in futuro». Prima era ZERO: in un mese
+// di soli metalli non ci sono ne' CSS-C ne' terziarie, e il terzo addendo del
+// conto (soloFerro) e' un array dichiarato e mai riempito. Nel riepilogo quei due
+// mesi erano un'etichetta senza numero.
+verifica('e porta tutto il ferro uscito nel mese, non zero',
+  soloFerro.materiali_portale.metalli_kg === 89780 && soloFerro.materiali.metalli_kg === 89780,
+  JSON.stringify({ portale: soloFerro.materiali_portale, rete: soloFerro.materiali }));
+// Un mese normale non cambia: li' il ferro e' quello attaccato alle chiusure.
+verifica('e un mese normale resta com era', m.materiali_portale.metalli_kg === m.materiali.metalli_kg + (m.extra ? m.extra.ferro_kg : 0));
 
 console.log('IL FERRO IN ECCESSO SI DIVIDE');
 // Due terziarie piene e due con posto: i 4.000 kg di ferro che le prime non
