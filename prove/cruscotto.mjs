@@ -159,7 +159,18 @@ let esito = await allineaDalPortale(svcFinto(scritte), 2026, righePortale, [
   { id: 'r5', sito: 'Gatim Srl', canale: 'RETE', mese: 'Maggio', quantita_kg: 71710 },
   { id: 'a5', sito: 'Gatim Srl', canale: 'ACI', mese: 'Maggio', quantita_kg: 7770 },
 ]);
-verifica('maggio rete e maggio ACI riconosciuti, niente arretrato', esito.aggiornate.length === 2 && esito.arretrato.length === 0 && esito.non_trovate.length === 0 && scritte.every(a => a.caricata_il === '2026-06-10'), JSON.stringify(esito));
+// L'ACI SI RICONOSCE MA NON SI SCRIVE (regola dell'utente, 02/10/2026).
+//
+// Il confronto con il portale resta su tutti e due i canali, perche' serve a
+// DIRE quali mesi il portale conosce. La scrittura no: fra i campi che si
+// salvano ci sono i materiali, e sull'ACI quelli li trascrive l'amministratore
+// dalle dichiarazioni cartacee che gli impianti mandano via email - «non c'e'
+// altro modo che sia io ad inserirli manualmente». Riscriverli coi numeri del
+// portale sarebbe una perdita, non un doppione.
+verifica("maggio: la rete si scrive, l'ACI si riconosce e si lascia stare",
+  esito.aggiornate.length === 1 && esito.aggiornate[0].canale === 'RETE'
+  && esito.arretrato.length === 0 && esito.non_trovate.length === 0
+  && scritte.length === 1 && scritte[0].caricata_il === '2026-06-10', JSON.stringify(esito));
 
 // L'ACI si dichiara per provenienza: Gatim aprile, primaria 8.200 e secondaria
 // 14.340, caricate lo stesso giorno (22.540 kg). La riga del report che e'
@@ -174,16 +185,29 @@ const nostreAprile = () => [
 ];
 scritte = [];
 esito = await allineaDalPortale(svcFinto(scritte), 2026, aprileAci, nostreAprile());
-verifica('ACI per provenienza: le due righe di aprile riconosciute, niente arretrato "dell\'anno prima"', esito.aggiornate.length === 2 && esito.non_trovate.length === 0 && esito.arretrato.length === 0
-  && scritte.find(s => s.id === 'ap').granulo_kg === 8000 && scritte.find(s => s.id === 'as').granulo_kg === 14000
-  && esito.aggiornate.every(a => a.canale === 'ACI' && a.provenienza), JSON.stringify(esito));
+verifica('ACI per provenienza: riconosciute senza arretrato, e nessuna riscritta',
+  esito.aggiornate.length === 0 && esito.non_trovate.length === 0 && esito.arretrato.length === 0
+  && scritte.length === 0, JSON.stringify({ esito, scritte }));
 // Se il portale non distingue come noi (tutto senza destinazione secondaria), il
 // mese si riconosce sommando le due provenienze, e i materiali si dividono in
 // proporzione ai chili.
 scritte = [];
 esito = await allineaDalPortale(svcFinto(scritte), 2026, aprileAci.map(r => ({ ...r, destinazione: 'GATIM SRL', destinazione_secondaria: '' })), nostreAprile());
 const ap = scritte.find(s => s.id === 'ap'), as = scritte.find(s => s.id === 'as');
-verifica('ACI classificata diversamente dal portale: riconosciuta sulla somma del mese, materiali divisi', esito.aggiornate.length === 2 && esito.arretrato.length === 0 && ap && as && ap.caricata_il === '2026-05-12' && ap.granulo_kg + as.granulo_kg === 22000 && ap.granulo_kg === Math.round(22000 * 8200 / 22540), JSON.stringify({ esito, scritte }));
+verifica('ACI classificata diversamente dal portale: si riconosce, e i materiali restano quelli scritti a mano',
+  esito.aggiornate.length === 0 && esito.arretrato.length === 0 && scritte.length === 0, JSON.stringify({ esito, scritte }));
+// E se un domani si volesse l'ACI, lo si deve chiedere per nome: allora si
+// riconosce sulla somma del mese e i materiali si dividono in proporzione ai
+// chili, che e' il comportamento costruito il 29/09/2026 e che resta li'.
+scritte = [];
+esito = await allineaDalPortale(svcFinto(scritte), 2026, aprileAci.map(r => ({ ...r, destinazione: 'GATIM SRL', destinazione_secondaria: '' })), nostreAprile(), ['RETE', 'ACI']);
+{
+  const ap = scritte.find(s => s.id === 'ap'), as = scritte.find(s => s.id === 'as');
+  verifica("chiedendolo per nome, l'ACI si allinea come prima",
+    esito.aggiornate.length === 2 && ap && as && ap.caricata_il === '2026-05-12'
+    && ap.granulo_kg + as.granulo_kg === 22000 && ap.granulo_kg === Math.round(22000 * 8200 / 22540),
+    JSON.stringify({ esito, scritte }));
+}
 
 // === UNA DICHIARAZIONE CHE IL PORTALE HA E IL GESTIONALE NO ===
 //

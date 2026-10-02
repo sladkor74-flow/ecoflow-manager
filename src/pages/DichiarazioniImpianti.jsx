@@ -165,7 +165,7 @@ export default function DichiarazioniImpianti() {
             {caricamento ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Aggiorna
           </Button>
           {isAdmin && (
-            <Button variant="outline" className="gap-1" onClick={allinea} disabled={allineo} title="Rilegge il report delle dichiarazioni di trattamento e segna quali mesi risultano caricati a portale, con la data e i materiali">
+            <Button variant="outline" className="gap-1" onClick={allinea} disabled={allineo} title="Rilegge il report delle dichiarazioni di trattamento e segna quali mesi della RETE risultano caricati a portale, con la data e i materiali. Parte da sola a ogni caricamento del report. L ACI e l extra raccolta non passano di qui: a portale non sono gestiti e li segni a mano">
               {allineo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />} Allinea dal portale
             </Button>
           )}

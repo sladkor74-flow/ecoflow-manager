@@ -2589,10 +2589,10 @@ export async function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
     // anni e l'allineamento lavora sull'anno che gli si dice.
     allineaDichiarazioni: async () => {
       const risposte = [];
-      // SOLO LA RETE. L'ACI e l'extra raccolta a portale non sono gestiti, quindi
-      // non si automatizzano dietro un caricamento: li segna a mano
-      // l'amministratore (regola dell'utente, 02/10/2026).
-      for (const anno of anni) risposte.push(await base44.functions.invoke('allineaDichiarazioni', { anno, canali: ['RETE'] }));
+      // L'allineamento tocca solo la rete, sempre: l'ACI lo segna a mano
+      // l'amministratore, trascrivendo le dichiarazioni cartacee degli impianti
+      // (regola dell'utente, 02/10/2026). Vedi allineaDalPortale.
+      for (const anno of anni) risposte.push(await base44.functions.invoke('allineaDichiarazioni', { anno }));
       return risposte;
     },
     alertExtra: () => base44.functions.invoke('runAlertEngine', { modulo: 'extra_raccolta' }),

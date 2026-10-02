@@ -321,25 +321,42 @@ export function confrontaConIlPortale(righe, anno, nostre, canali = ['RETE', 'AC
 }
 
 /**
- * CANALI: di suo li fa tutti e due, rete e ACI. Chi chiama puo' restringere.
+ * CANALI: SOLO LA RETE, e non e' una precauzione ma una regola dell'utente.
  *
- * L'ACI non e' gestito a portale (regola dell'utente, 02/10/2026: «gli ACI non
- * sono gestiti a portale e pertanto non si possono automatizzare, quindi
- * tocchera' a me farlo a mano, e questo vale sia per l'ACI che per l'extra
- * raccolta»). Il ricalcolo che parte da solo dopo un caricamento passa quindi
- * solo la rete: l'ACI resta all'amministratore, dal pulsante. L'extra raccolta
- * non entra qui in nessun caso, perche' a portale non c'e' affatto.
+ * 02/10/2026: «gli ACI non sono gestiti a portale e pertanto non si possono
+ * automatizzare, quindi tocchera' a me farlo a mano». E il giorno dopo il
+ * perche', che e' la parte che conta: le caselle ACI verdi le ha chiuse lui a
+ * mano, inserendo fibre tessili, metalli ferrosi e granulo letti dalle
+ * DICHIARAZIONI CARTACEE che gli impianti mandano via email.
+ *
+ * Qui sotto si vede perche' allora l'ACI non puo' passare di qui: fra i campi
+ * che si scrivono ci sono i MATERIALI (...t.materiali), quindi un allineamento
+ * sull'ACI sovrascriverebbe con i numeri del portale proprio quelli che lui ha
+ * trascritto dalla carta. Non e' un doppione: e' una perdita.
+ *
+ * L'extra raccolta non entra qui in nessun caso: a portale non c'e' affatto.
+ *
+ * Il parametro resta, cosi' chi un domani volesse l'ACI deve chiederlo per
+ * nome, e si vede nel codice chi lo fa.
  */
-export async function allineaDalPortale(svc, anno, righePortale = null, nostreRighe = null, canali = ['RETE', 'ACI']) {
+export async function allineaDalPortale(svc, anno, righePortale = null, nostreRighe = null, canaliDaScrivere = ['RETE']) {
   const annoNum = Number(anno);
   const righe = righePortale || await fetchAll(svc.DichiarazioneTrattamento, null, 'id');
   // Tutte le pagine: una lettura da 500 righe, con quindici impianti, dodici mesi
   // e fino a quattro flussi ciascuno, poteva lasciare fuori dichiarazioni vere.
   const nostre = nostreRighe || await fetchAll(svc.DichiarazioneSito, { anno: annoNum }, 'id');
 
-  const esito = confrontaConIlPortale(righe, annoNum, nostre, canali);
+  const esito = confrontaConIlPortale(righe, annoNum, nostre);
   const aggiornate = [];
+  // SI CONFRONTA TUTTO, SI SCRIVE SOLO DOVE E' LECITO. Il confronto sull'ACI
+  // serve e resta: dice quali mesi il portale conosce e quali no. Ma la
+  // SCRITTURA no, e il perche' si legge due righe sotto: fra i campi che si
+  // salvano ci sono i MATERIALI, e sull'ACI quelli li trascrive l'amministratore
+  // dalle dichiarazioni cartacee che gli impianti mandano via email. Riscriverli
+  // coi numeri del portale non e' un doppione, e' una perdita.
+  const scrivibile = (canale) => canaliDaScrivere.includes(canale);
   for (const t of esito.trovati) {
+    if (!scrivibile(t.canale)) continue;
     const d = t.dichiarazione;
     const campi = { caricata_inviata: true, caricata_il: t.caricata_il, ...t.materiali };
     const cambia = Object.entries(campi).some(([c, v]) => (c === 'caricata_inviata' ? !d[c] : Math.round(num(d[c])) !== Math.round(num(v))));
