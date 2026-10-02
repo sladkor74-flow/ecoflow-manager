@@ -32,6 +32,15 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
   }));
   // Senza dichiarazione e a posto lo stesso: non dovuta, o usciti solo metalli.
   const senza = !!dati.motivo_assenza;
+  // SOLI METALLI NON E' UN MESE SENZA MATERIALI.
+  //
+  // Un mese «non dovuta» non ha niente da dire: niente quantita', niente
+  // materiali. Un mese «solo metalli ferrosi» invece ha una cosa sola da dire, ed
+  // e' proprio un materiale: il ferro uscito. Qui venivano azzerati tutti e due
+  // allo stesso modo, quindi il ferro non si poteva nemmeno scrivere a mano -
+  // l'utente lo digitava e il salvataggio lo riportava a zero (03/10/2026:
+  // «permettimi di inserirlo a mano»).
+  const senzaMateriali = senza && dati.motivo_assenza !== 'solo_metalli';
   const [salvataggio, setSalvataggio] = useState(false);
   const imposta = (k, v) => setDati(x => ({ ...x, [k]: v }));
 
@@ -53,11 +62,13 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
     setSalvataggio(true);
     try {
       const campi = senza
-        // Un mese senza dichiarazione non ha quantita' ne' materiali e non si carica.
+        // Un mese senza dichiarazione non ha quantita' e non si carica. I materiali si
+        // azzerano solo se non c'e' niente da dire: su «solo metalli ferrosi» il ferro
+        // uscito resta, ed e' l'unica cosa vera di quel mese.
         ? {
           motivo_assenza: dati.motivo_assenza, note: dati.note, quantita_kg: 0,
           ricevuta_email: false, ricevuta_il: '', caricata_inviata: false, caricata_il: '',
-          ...Object.fromEntries(materiali.map(m => [m.chiave, 0])),
+          ...Object.fromEntries(materiali.map(m => [m.chiave, senzaMateriali ? 0 : numero(dati[m.chiave])])),
         }
         : {
           ...dati,
@@ -114,7 +125,10 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
             </div>
           </div>
 
-          {!senza && (<>
+          {/* I MATERIALI si scrivono anche su un mese di soli metalli: il ferro
+              uscito e' l'unica cosa vera di quel mese. La quantita' dichiarata e
+              le date no, perche' li' a portale non si carica niente. */}
+          {!senzaMateriali && (
           <div>
             <p className="text-sm font-medium mb-2">Quantità ricavate dalla lavorazione</p>
             <div className="grid gap-2 sm:grid-cols-2">
@@ -129,7 +143,9 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
               ))}
             </div>
           </div>
+          )}
 
+          {!senza && (<>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="rounded-lg border px-3 py-2">
               <span className="text-sm font-medium block mb-1">PFU dichiarati nel mese</span>

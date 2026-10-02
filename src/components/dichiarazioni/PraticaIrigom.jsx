@@ -531,7 +531,12 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
       // parte di extra e' scritta nella nota e dichiarata anche sul suo canale:
       // gestita fuori portale, quella riga la chiude a mano l'utente.
       const campiRete = {
-        quantita_kg: pratica.portale_kg, cippato_kg: pratica.materiali_portale.cippato_kg, metalli_kg: pratica.materiali_portale.metalli_kg, cssc_kg: pratica.materiali_portale.cssc_kg,
+        quantita_kg: pratica.portale_kg, cippato_kg: pratica.materiali_portale.cippato_kg, cssc_kg: pratica.materiali_portale.cssc_kg,
+        // IL FERRO DI UN MESE DI SOLI METALLI. A portale non si carica niente, quindi
+        // la quantita e zero e i materiali delle chiusure sono zero: il ferro uscito
+        // lo dice il registro (colonna X), e va scritto lo stesso, perche e la sola
+        // cosa vera di quel mese. Regola dell utente, 03/10/2026.
+        metalli_kg: pratica.solo_metalli ? pratica.ferro_uscito_kg : pratica.materiali_portale.metalli_kg,
         motivo_assenza: pratica.solo_metalli ? 'solo_metalli' : '',
         ricevuta_email: !pratica.solo_metalli, ricevuta_il: pratica.solo_metalli ? '' : ((reteEsistente && reteEsistente.ricevuta_il) || oggi),
         note: [reteEsistente && reteEsistente.note, reteEsistente && reteEsistente.quantita_kg ? `Prima: ${formatKg(reteEsistente.quantita_kg)} kg; aggiornata il ${dataIt(oggi)}${motivo ? ` perche' ${motivo}` : ''}.` : '', nota].filter(Boolean).join('\n'),

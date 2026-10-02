@@ -234,9 +234,17 @@ verifica('aprile si segna come solo metalli ferrosi', soloFerro.solo_metalli ===
 // di soli metalli non ci sono ne' CSS-C ne' terziarie, e il terzo addendo del
 // conto (soloFerro) e' un array dichiarato e mai riempito. Nel riepilogo quei due
 // mesi erano un'etichetta senza numero.
-verifica('e porta tutto il ferro uscito nel mese, non zero',
-  soloFerro.materiali_portale.metalli_kg === 89780 && soloFerro.materiali.metalli_kg === 89780,
-  JSON.stringify({ portale: soloFerro.materiali_portale, rete: soloFerro.materiali }));
+verifica('e dice tutto il ferro uscito nel mese, in un campo suo',
+  soloFerro.ferro_uscito_kg === 89780, JSON.stringify({ ferro: soloFerro.ferro_uscito_kg }));
+// I MATERIALI NON LO COMPRENDONO, e non e un dettaglio: cippato + metalli +
+// CSS-C deve fare rete_kg, e materiali_portale deve fare portale_kg. In un mese
+// di soli metalli quei totali sono zero, perche a portale non si carica niente:
+// mettendoci dentro il ferro le differenze diventavano negative (utente,
+// 03/10/2026: «rifacendo la pratica il ferro non esce e da valori negativi»).
+verifica('e i materiali restano a zero, altrimenti i conti vanno sotto zero',
+  soloFerro.materiali_portale.metalli_kg === 0 && soloFerro.rete_kg === 0
+  && soloFerro.materiali.cippato_kg + soloFerro.materiali.metalli_kg + soloFerro.materiali.cssc_kg === soloFerro.rete_kg,
+  JSON.stringify({ portale: soloFerro.materiali_portale, rete_kg: soloFerro.rete_kg }));
 // Un mese normale non cambia: li' il ferro e' quello attaccato alle chiusure.
 verifica('e un mese normale resta com era', m.materiali_portale.metalli_kg === m.materiali.metalli_kg + (m.extra ? m.extra.ferro_kg : 0));
 

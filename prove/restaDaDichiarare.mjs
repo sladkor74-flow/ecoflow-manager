@@ -114,8 +114,8 @@ console.log('LA CASELLA: UN NUMERO SOLO, E IL COLORE DICE CHE COS E');
   // mese... cosa sono tutte quelle scritte?».
   const c = sorgente('src/components/dichiarazioni/CellaMese.jsx');
   verifica('un numero solo', c.includes('{numero}') && !/da segnare|in mano|non dovuta/.test(c.split('return (')[1] || ''));
-  verifica('verde dove e caricato a portale, ambra dove manca',
-    c.includes("stato === 'caricata' ? 'bg-emerald-600") && c.includes("inAmbra ? 'bg-amber-50"));
+  verifica('verde dove e caricato a portale, arancione il ferro, chiaro cio che manca',
+    c.includes("stato === 'caricata' ? 'bg-emerald-600") && c.includes("stato === 'solo_metalli' ? 'bg-orange-300") && c.includes("inAmbra ? 'bg-amber-50"));
   verifica('e ambra vuol dire che resta qualcosa di dovuto',
     c.includes("const inAmbra = resta > 0 && !nonDovuto && stato !== 'caricata'"));
   // I mesi che non sono un arretrato non si colorano come tale: la rete non

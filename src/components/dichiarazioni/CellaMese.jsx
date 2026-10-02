@@ -39,12 +39,16 @@ export default function CellaMese({ mese, onApri, soloLettura, dove = {} }) {
   const numero = stato === 'solo_metalli' ? ferro
     : (stato === 'caricata' ? dichiarato : (inAmbra ? kg(resta) : dichiarato));
 
-  // DUE COLORI, NON SEI. Verde: il mese e caricato a portale, non manca niente.
-  // Ambra: manca qualcosa, e il numero dice quanto. Gli altri casi restano
-  // chiari, perche non sono un arretrato.
+  // I COLORI, E CHE COSA DICONO.
+  //
+  // Verde pieno: caricato a portale. ARANCIONE: i metalli ferrosi, che a portale
+  // non sono gestibili e si dichiarano al consorzio VIA EMAIL - sono dichiarati
+  // eccome, e il colore pieno lo dice (regola dell'utente, 03/10/2026: «usa
+  // colori piu' chiari solo per il non dichiarato»). Chiaro: quello che manca.
+  // Chiarissimo e spento: quello che non si deve.
   const fondo = stato === 'caricata' ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-    : inAmbra ? 'bg-amber-50 hover:bg-amber-100 text-amber-900'
-      : stato === 'solo_metalli' ? 'bg-sky-50 hover:bg-sky-100 text-sky-900'
+    : stato === 'solo_metalli' ? 'bg-orange-300 hover:bg-orange-400 text-orange-950'
+      : inAmbra ? 'bg-amber-50 hover:bg-amber-100 text-amber-900'
         : nonDovuto ? 'bg-slate-50 hover:bg-slate-100 text-slate-500'
           : d ? 'bg-emerald-100 hover:bg-emerald-200'
             : 'hover:bg-muted';

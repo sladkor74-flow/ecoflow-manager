@@ -20,6 +20,18 @@
 // Verificato sul file della settimana 37 del 2026: le uscite arancioni fanno,
 // mese per mese, esattamente la colonna "Uscite CSS-C" del foglio Cons.
 
+// IL GIORNO SI LEGGE A ROMA, NON SUL FUSO DI CHI GUARDA.
+//
+// Le date del registro arrivano da Excel come istanti della mezzanotte
+// italiana, cioe' 2026-03-31T22:00:00.000Z e' il 1 aprile. Con getDate() il
+// giorno viene dal fuso di chi apre il file: a Roma torna giusto, altrove no.
+// Sul registro del 2026 due righe cambiano MESE lette in UTC - quella del 1
+// aprile (2.660 kg di quota nostra) e quella del 1 settembre (3.040 kg) - e
+// senza di loro aprile e settembre non pareggiano piu' la colonna X del foglio
+// Cons. Finora ha funzionato solo perche' si legge nel browser, in Italia.
+const GIORNO_ROMA = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' });
+const giornoRoma = (d) => GIORNO_ROMA.format(d);
+
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
 // L'arancione di Excel e le sue sfumature piu' comuni.
@@ -86,13 +98,13 @@ function usciteCssc(XLSX, ws, anno) {
     if (!kg || typeof kg.v !== 'number' || !kg.v) continue;
     const data = ws['A' + (R + 1)];
     const d = data && data.v instanceof Date && !isNaN(data.v.getTime()) ? data.v : null;
-    if (!d || d.getFullYear() !== anno) continue;
+    if (!d || Number(giornoRoma(d).slice(0, 4)) !== anno) continue;
     const colore = (kg.s && kg.s.fgColor && kg.s.fgColor.rgb ? String(kg.s.fgColor.rgb) : '').toUpperCase().slice(-6);
     perColore[colore || 'nessuno'] = (perColore[colore || 'nessuno'] || 0) + Math.round(kg.v);
     righe.push({
       riga: R + 1,
-      data: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
-      mese: MESI[d.getMonth()],
+      data: giornoRoma(d),
+      mese: MESI[Number(giornoRoma(d).slice(5, 7)) - 1],
       ddt: testo(ws['AV' + (R + 1)]),
       lotto: testo(ws['AW' + (R + 1)]),
       kg: Math.round(kg.v),
@@ -105,7 +117,7 @@ function usciteCssc(XLSX, ws, anno) {
 
 const giornoDi = (c) => {
   const d = c && c.v instanceof Date && !isNaN(c.v.getTime()) ? c.v : null;
-  return d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : '';
+  return d ? giornoRoma(d) : '';
 };
 const riempimento = (c) => (c && c.s && c.s.fgColor && c.s.fgColor.rgb ? String(c.s.fgColor.rgb).toUpperCase().slice(-6) : '');
 // La nota di Excel sulla cella: e' li' che Irigom scrive come si divide un

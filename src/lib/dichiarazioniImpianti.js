@@ -60,7 +60,7 @@ export const MOTIVI_ASSENZA = {
   },
   solo_metalli: {
     nome: 'Solo metalli ferrosi',
-    spiega: 'Nel mese sono usciti solo metalli ferrosi e nessuna gomma: a portale non si carica nulla e il ferro si dichiara con la prossima uscita di gomma.',
+    spiega: 'Nel mese sono usciti solo metalli ferrosi e nessuna gomma: a portale non si caricano, non sono gestibili, e si dichiarano al consorzio via email. La casella porta i kg usciti dal registro.',
   },
 };
 
