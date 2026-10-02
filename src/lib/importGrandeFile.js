@@ -2408,6 +2408,13 @@ const RICALCOLI = {
   primarie: ['evasioneAssegnati', 'ritiriEct', 'todoOrdini', 'verifiche', 'qualifica'],
   secondarie: ['verifiche', 'qualifica'],
   extra_raccolta: ['verifiche', 'qualifica'],
+  // REGOLA 2: ogni caricamento aggiorna tutti i moduli. Il report delle
+  // dichiarazioni di trattamento dice quali mesi il portale ha davvero accettato,
+  // ed e' la sola cosa che segna una dichiarazione come caricata: finche' non si
+  // allineava da se', il modulo mostrava come arretrato un mese gia' dichiarato e
+  // bisognava ricordarsi di premere un pulsante. L'utente l'ha chiesto il
+  // 02/10/2026: «dovrebbe farlo in automatico quando carico quei due file».
+  dichiarazioni_trattamento: ['allineaDichiarazioni'],
 };
 
 const NOMI_RICALCOLI = {
@@ -2416,6 +2423,7 @@ const NOMI_RICALCOLI = {
   todoOrdini: 'ordini da completare della to-do list',
   verifiche: 'verifiche dei report e quadrature FIR (anche nessuna movimentazione)',
   qualifica: 'qualifica fornitori',
+  allineaDichiarazioni: 'dichiarazioni degli impianti caricate a portale',
   alertExtra: "alert delle date obbligatorie dell'extra raccolta",
 };
 
@@ -2577,6 +2585,13 @@ export async function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
     // la scrittura non riesce il workflow non parte: senza, l'alert delle date
     // obbligatorie dell'extra raccolta restava vecchio proprio per chi la data non
     // ce l'ha (22/09/2026). In quei casi il motore si lancia da qui, una volta.
+    // Un anno per volta, come la qualifica: il report puo' portare mesi di piu'
+    // anni e l'allineamento lavora sull'anno che gli si dice.
+    allineaDichiarazioni: async () => {
+      const risposte = [];
+      for (const anno of anni) risposte.push(await base44.functions.invoke('allineaDichiarazioni', { anno }));
+      return risposte;
+    },
     alertExtra: () => base44.functions.invoke('runAlertEngine', { modulo: 'extra_raccolta' }),
   };
   const daFare = tipoFile === 'extra_raccolta' && !registrata ? [...elenco, 'alertExtra'] : elenco;

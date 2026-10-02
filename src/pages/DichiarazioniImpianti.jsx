@@ -170,8 +170,8 @@ export default function DichiarazioniImpianti() {
             </Button>
           )}
           {isAdmin && (
-            <Button variant="outline" className="gap-1" onClick={ripulisci} disabled={ripulisco || !dati} title="Toglie le righe che a portale non sono mai state dichiarate: i numeri seminati all'avvio, che in quantita portavano cio che restava DA dichiarare, e i record vuoti. Non tocca le dichiarazioni caricate, quelle ricevute via email e i mesi con un motivo scritto">
-              {ripulisco ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eraser className="w-4 h-4" />} Togli il non dichiarato
+            <Button variant="outline" className="gap-1" onClick={ripulisci} disabled={ripulisco || !dati} title="Toglie i record che sembrano dichiarazioni ma non lo sono: i numeri scritti all avvio del gestionale, che in quantita portavano cio che restava DA dichiarare, e i record vuoti. Non tocca niente di vero: non le dichiarazioni caricate a portale, non quelle ricevute via email, non i mesi con un motivo scritto">
+              {ripulisco ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eraser className="w-4 h-4" />} Togli le dichiarazioni inesistenti
             </Button>
           )}
           <Button variant="outline" className="gap-1" disabled={!dati} onClick={() => esportaDichiarazioni(dati)}>

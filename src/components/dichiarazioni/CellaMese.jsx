@@ -30,7 +30,14 @@ export default function CellaMese({ mese, onApri, soloLettura, dove = {} }) {
   // Altrimenti, se resta qualcosa, quello che resta - ed e il numero che si
   // cerca. Dove non si deve niente, il dichiarato se c'e' e nient'altro.
   const dichiarato = d && Number(d.quantita_kg) > 0 ? kg(d.quantita_kg) : '';
-  const numero = stato === 'caricata' ? dichiarato : (inAmbra ? kg(resta) : dichiarato);
+  // I MESI DI SOLO FERRO PORTANO IL FERRO USCITO (utente, 02/10/2026). Erano
+  // caselle chiare e vuote: nessun numero, perche' la quantita' dichiarata e'
+  // zero - a portale quel mese non si carica nulla - e nessuna parola, dopo che
+  // le parole sono uscite dalle caselle. Ma qualcosa e' uscito eccome, ed e'
+  // ferro: si scrive quanto, e si dice che e' quello.
+  const ferro = d && Number(d.metalli_kg) > 0 ? kg(d.metalli_kg) : '';
+  const numero = stato === 'solo_metalli' ? ferro
+    : (stato === 'caricata' ? dichiarato : (inAmbra ? kg(resta) : dichiarato));
 
   // DUE COLORI, NON SEI. Verde: il mese e caricato a portale, non manca niente.
   // Ambra: manca qualcosa, e il numero dice quanto. Gli altri casi restano
@@ -46,6 +53,7 @@ export default function CellaMese({ mese, onApri, soloLettura, dove = {} }) {
     `${mese.mese}`,
     conferito ? `arrivati ${kg(conferito)} kg${daStoccaggi ? ` (in secondaria: ${daStoccaggi})` : ''}` : 'nessun conferimento',
     d && d.quantita_kg > 0 ? `dichiarati ${kg(d.quantita_kg)} kg` : '',
+    d && Number(d.metalli_kg) > 0 ? `metalli ferrosi usciti ${kg(d.metalli_kg)} kg` : '',
     resta > 0 ? `ancora da dichiarare a portale ${kg(resta)} kg` : '',
     STATI[stato].nome,
     soloLettura ? '' : 'clicca per aprire',
@@ -82,6 +90,9 @@ export default function CellaMese({ mese, onApri, soloLettura, dove = {} }) {
       <span className="block text-[11px] leading-tight tabular-nums font-medium">
         {numero}
       </span>
+      {stato === 'solo_metalli' && (
+        <span className="block text-[9px] leading-tight opacity-80">solo metalli ferrosi</span>
+      )}
     </button>
   );
 }
