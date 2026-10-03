@@ -83,6 +83,12 @@ const CAMPO_COSTO = {
   TRATTAMENTO: 'costo_trattamento_t',
   CONFERIMENTO_STOCCAGGIO: 'costo_stoccaggio_t',
 };
+/** La prestazione che si paga alla destinazione, dal suo tipo: impianto o stoccaggio. */
+function prestazioneDaTipo(tipoDestinazione) {
+  const t = String(tipoDestinazione || '').toLowerCase().trim();
+  return t === 'imp' ? 'TRATTAMENTO' : t === 'stoc' ? 'CONFERIMENTO_STOCCAGGIO' : '';
+}
+
 function tariffaDallIntervento(record, prestazione) {
   const valore = Number(record[CAMPO_COSTO[prestazione]] || 0);
   return {
@@ -442,7 +448,31 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       secondarieForBlock = secondarieF;
     } else {
       raccoglitoriSource = extraRaccoltaF;
-      impiantiRecords = extraRaccoltaF.map(r => ({ r, provenienza: 'extra' }));
+      // UN INTERVENTO PUO' PAGARE DUE COSE SULLO STESSO CARICO.
+      //
+      // Su un intervento di extra raccolta i costi li scrive l'utente a mano, e i
+      // campi sono tre: raccolta, stoccaggio e trattamento. Il blocco qui sotto
+      // decideva UNA sola prestazione guardando il tipo di destinazione - 'stoc'
+      // lo stoccaggio, 'imp' il trattamento - quindi se sull'intervento c'erano
+      // tutti e due i costi se ne pagava uno e l'altro spariva, senza nemmeno
+      // un'anomalia: su 10 tonnellate con stoccaggio 16 e trattamento 90, la
+      // passiva diceva 660 euro e il modulo dell'extra raccolta 1.560. Due
+      // moduli, due numeri, e nessuno dei due che lo dicesse (audit 03/10/2026).
+      //
+      // Adesso si paga quello che c'e' scritto: una riga per ogni costo
+      // valorizzato. Il soggetto e' la destinazione, che e' l'unico che
+      // l'intervento nomina; se il costo che si aggiunge non e' quello del suo
+      // ruolo - un trattamento pagato a uno stoccaggio - si fattura lo stesso ma
+      // si segnala, perche' quel soldo a qualcuno va e il gestionale non puo'
+      // indovinare a chi.
+      impiantiRecords = extraRaccoltaF.flatMap(r => {
+        const principale = prestazioneDaTipo(r.tipo_destinazione);
+        const base = { r, provenienza: 'extra' };
+        if (!principale) return [base];
+        const altra = principale === 'TRATTAMENTO' ? 'CONFERIMENTO_STOCCAGGIO' : 'TRATTAMENTO';
+        if (!(Number(r[CAMPO_COSTO[altra]] || 0) > 0)) return [base];
+        return [base, { r: { ...r, __prestazione: altra, __seconda_prestazione: true }, provenienza: 'extra' }];
+      });
       secondarieForBlock = [];
     }
 
@@ -791,7 +821,10 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
     // trattato da Gatim. Il "di cui" qui sotto tiene visibile chi ha portato cosa.
     for (const { r, provenienza } of impiantiRecords) {
       const tipoDest = String(r.tipo_destinazione || '').toLowerCase().trim();
-      const prestazione = tipoDest === 'imp' ? 'TRATTAMENTO' : tipoDest === 'stoc' ? 'CONFERIMENTO_STOCCAGGIO' : '';
+      // La seconda prestazione di un intervento di extra raccolta se la porta
+      // scritta addosso: il tipo di destinazione dice il ruolo del sito, non
+      // tutto quello che su quel carico si paga.
+      const prestazione = r.__prestazione || prestazioneDaTipo(tipoDest);
       if (!prestazione) {
         // Anomalia: tipo_destinazione assente o diverso
         anomalie.push({
@@ -827,9 +860,27 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       // la destinazione e' uno stoccaggio il sovracosto si paga comunque a lui,
       // perche' e' lui che quel costo lo ha sostenuto, e un intervento ha una
       // destinazione sola: non c'e' modo di pagarlo due volte.
-      const sovracostoImpianto = provenienza === 'extra'
+      // Sulla seconda riga dello stesso intervento no: il sovracosto e' un
+      // importo fisso dell'intervento, non della prestazione, e pagarlo su tutte
+      // e due le righe lo raddoppierebbe.
+      const sovracostoImpianto = provenienza === 'extra' && !r.__seconda_prestazione
         ? Number(r.sovracosto_pagato_impianto || 0)
         : 0;
+
+      // Un costo di trattamento scritto su un intervento che finisce in uno
+      // stoccaggio (o viceversa) si paga lo stesso - sparire non deve - ma al
+      // soggetto va detto, perche' l'intervento nomina una destinazione sola e
+      // chi fa l'altra lavorazione il gestionale non lo sa.
+      if (r.__seconda_prestazione) {
+        anomalie.push({
+          descrizione: `Extra raccolta: sull'intervento c'e' anche un costo di ${prestazione === 'TRATTAMENTO' ? 'trattamento' : 'stoccaggio'}, ma la destinazione ${String(r.destinazione || '—').trim()} e' ${tipoDest === 'stoc' ? 'uno stoccaggio' : 'un impianto'}. Si fattura a lei, perche' e' l'unico soggetto che l'intervento nomina: se quella lavorazione l'ha fatta un altro, va corretto.`,
+          fornitore: String(r.destinazione || '—').trim() || '—',
+          prestazione,
+          classe: String(r.classe || '—'),
+          ambito: `FIR ${r.numero_fir || '—'}`,
+          tonnellate: round3(Number(r.peso_effettivo || 0) / 1000),
+        });
+      }
 
       // Chi ha materialmente portato il carico: il raccoglitore per le primarie
       // e per l'extra raccolta, lo stoccaggio di partenza per le secondarie.

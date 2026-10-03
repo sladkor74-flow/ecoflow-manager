@@ -298,6 +298,76 @@ console.log('I CANALI RESTANO SEPARATI');
     res4.raccoglitori[0].righe[0].note === '' && res4.impianti_stoccaggi[0].righe[0].note === '');
 }
 
+// STOCCAGGIO E TRATTAMENTO SULLO STESSO CARICO: SI PAGANO TUTTI E DUE.
+//
+// Difetto alta dell'audit del 03/10/2026. Il blocco degli impianti sceglieva UNA
+// prestazione guardando il tipo di destinazione: 'stoc' lo stoccaggio, 'imp' il
+// trattamento. Se sull'intervento c'erano tutti e due i costi, se ne pagava uno
+// e l'altro spariva senza nemmeno un'anomalia. Il modulo dell'extra raccolta,
+// che li paga tutti e due (src/lib/extraRaccoltaCalc.js), diceva un altro
+// numero: due moduli, due totali, e nessuno dei due che lo dicesse.
+console.log('\nSTOCCAGGIO E TRATTAMENTO SULLO STESSO INTERVENTO');
+{
+  const dueCosti = (tipo) => calcolaPassivaMese({
+    primarieRete: [], primarieAci: [], secondarieAll: [],
+    extraRaccoltaAll: [intervento({
+      id: 'DUE', id_ordine: 'EX-DUE', numero_fir: 'D1', peso_effettivo: 10000,
+      trasportatore: 'ALFA SRL', destinazione: 'BETA IMPIANTI', tipo_destinazione: tipo,
+      costo_raccolta_t: 50, costo_stoccaggio_t: 16, costo_trattamento_t: 90,
+    })],
+    tariffeAll: [], fornitoriAll: fornitori,
+  }, 2026, MESE, 'Settembre', 'EXTRA_RACCOLTA');
+
+  const aStoccaggio = dueCosti('stoc');
+  const beta = aStoccaggio.impianti_stoccaggi.find(f => f.fornitore === 'BETA IMPIANTI');
+  verifica('la destinazione prende tutte e due le righe, stoccaggio e trattamento',
+    beta.righe.length === 2
+    && beta.righe.some(x => x.prestazione === 'CONFERIMENTO_STOCCAGGIO' && euro(x.importo) === euro(160))
+    && beta.righe.some(x => x.prestazione === 'TRATTAMENTO' && euro(x.importo) === euro(900)),
+    JSON.stringify(beta.righe.map(x => [x.prestazione, x.importo])));
+  verifica('nessuno dei due costi sparisce: 500 di raccolta piu\' 160 piu\' 900',
+    euro(aStoccaggio.totali.totale_complessivo) === euro(1560), String(aStoccaggio.totali.totale_complessivo));
+  verifica('e si dice che quel trattamento e\' finito addosso a uno stoccaggio',
+    aStoccaggio.anomalie.some(a => /anche un costo di trattamento/.test(a.descrizione) && a.fornitore === 'BETA IMPIANTI'),
+    JSON.stringify(aStoccaggio.anomalie.map(a => a.descrizione)));
+
+  // Lo stesso al contrario: destinazione impianto con anche il costo di stoccaggio.
+  const aImpianto = dueCosti('imp');
+  verifica('vale anche al contrario, e il totale e\' lo stesso',
+    euro(aImpianto.totali.totale_complessivo) === euro(1560)
+    && aImpianto.impianti_stoccaggi.find(f => f.fornitore === 'BETA IMPIANTI').righe.length === 2,
+    String(aImpianto.totali.totale_complessivo));
+
+  // IL SOVRACOSTO NON SI RADDOPPIA: e' un importo fisso dell'intervento, non
+  // della prestazione, e le righe adesso sono due.
+  const conSovracosto = calcolaPassivaMese({
+    primarieRete: [], primarieAci: [], secondarieAll: [],
+    extraRaccoltaAll: [intervento({
+      id: 'DUE2', id_ordine: 'EX-DUE2', numero_fir: 'D2', peso_effettivo: 10000,
+      trasportatore: 'ALFA SRL', destinazione: 'BETA IMPIANTI', tipo_destinazione: 'stoc',
+      costo_raccolta_t: 50, costo_stoccaggio_t: 16, costo_trattamento_t: 90,
+      sovracosto_pagato_impianto: 120,
+    })],
+    tariffeAll: [], fornitoriAll: fornitori,
+  }, 2026, MESE, 'Settembre', 'EXTRA_RACCOLTA');
+  verifica('il sovracosto dell\'impianto si paga una volta sola, non su tutte e due le righe',
+    euro(conSovracosto.totali.totale_complessivo) === euro(1680), String(conSovracosto.totali.totale_complessivo));
+
+  // Un intervento con un costo solo resta una riga sola, come prima.
+  const unoSolo = calcolaPassivaMese({
+    primarieRete: [], primarieAci: [], secondarieAll: [],
+    extraRaccoltaAll: [intervento({
+      id: 'UNO', id_ordine: 'EX-UNO', numero_fir: 'U1', peso_effettivo: 10000,
+      trasportatore: 'ALFA SRL', destinazione: 'BETA IMPIANTI', tipo_destinazione: 'imp',
+      costo_raccolta_t: 50, costo_trattamento_t: 90,
+    })],
+    tariffeAll: [], fornitoriAll: fornitori,
+  }, 2026, MESE, 'Settembre', 'EXTRA_RACCOLTA');
+  verifica('con un costo solo la riga resta una, e il conto e\' quello di prima',
+    unoSolo.impianti_stoccaggi.find(f => f.fornitore === 'BETA IMPIANTI').righe.length === 1
+    && euro(unoSolo.totali.totale_complessivo) === euro(1400), String(unoSolo.totali.totale_complessivo));
+}
+
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');
 process.exit(ko ? 1 : 0);
