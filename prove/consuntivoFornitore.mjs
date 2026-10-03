@@ -202,8 +202,22 @@ const conSub = {
 const delGruppo = movimentiDelFornitore(conSub, { ...P, fornitore: 'GREEN TYRE PROJECT SRL', ruolo: 'raccoglitore', fornitori: FORNITORI });
 verifica('i movimenti del principale comprendono quelli del subfornitore', delGruppo.length === 2
   && delGruppo.reduce((s, r) => s + r.peso_effettivo, 0) === 14000, J(delGruppo.map(r => [r.id_ordine, r.trasportatore])));
-verifica('e chiedendo il subfornitore si ottiene lo stesso gruppo, che e\' chi fattura',
-  movimentiDelFornitore(conSub, { ...P, fornitore: 'TORRES GIOVANNI', ruolo: 'raccoglitore', fornitori: FORNITORI }).length === 2);
+// MA IL CONTRARIO NO (audit del 03/10/2026). Fino a ieri questa prova pretendeva
+// che chiedendo il subfornitore si ottenesse tutto il gruppo, «che e' chi
+// fattura». E' il difetto: il consuntivo di Torres e' il SUO, con le sue quattro
+// tonnellate e i suoi formulari. Mettergli accanto i carichi di Green Tyre
+// riempiva di difformita' inventate un documento esatto, e soprattutto il
+// documento che gli si manda indietro portava formulari di un altro soggetto,
+// che non sono suoi e che lui non puo' nemmeno conoscere.
+// Il costo non ne soffre: lo cerca costoAttesoDallaPassiva per nome, e se per il
+// subfornitore non c'e' nessuna riga lo dice (quadra_con_passiva resta null, e
+// quadra_tutto non diventa verde).
+const soloSuoi = movimentiDelFornitore(conSub, { ...P, fornitore: 'TORRES GIOVANNI', ruolo: 'raccoglitore', fornitori: FORNITORI });
+verifica('ma chiedendo il subfornitore si ottengono solo i suoi carichi',
+  soloSuoi.length === 1 && soloSuoi[0].numero_fir === 'FIRTOR1' && soloSuoi[0].peso_effettivo === 4000,
+  J(soloSuoi.map(r => [r.id_ordine, r.trasportatore])));
+verifica('e il suo consuntivo, che e\' esatto, quadra invece di uscire tutto in difformita\'',
+  confrontaConsuntivo([{ numero_fir: 'FIRTOR1', kg: 4000 }], soloSuoi).quadra === true);
 const consGruppo = confrontaConsuntivo([{ numero_fir: 'FIRGTP1', kg: 10000 }, { numero_fir: 'FIRTOR1', kg: 4000 }], delGruppo);
 verifica('e il consuntivo del principale, che li fattura tutti e due, quadra', consGruppo.quadra === true, J(consGruppo.voci.map(v => [v.chiave, v.esito])));
 
@@ -835,6 +849,50 @@ const STAMPA = [
     && lette.colonne[0].colonne.kg === '(stampa: peso nella riga del codice sopra)', J({ r: lette.righe.length, c: lette.colonne }));
   verifica('e non dice piu\' "non riconosco la riga delle intestazioni"', !lette.note.some(n => /non riconosco la riga delle intestazioni/.test(n)), J(lette.note));
 }
+
+// IL GRUPPO DI FATTURAZIONE SI ALLARGA IN GIU', NON IN SU.
+//
+// Difetto dell'audit del 03/10/2026: si confrontava la chiave di fatturazione da
+// tutte e due le parti, quindi chiedendo il consuntivo di TORRES GIOVANNI (che
+// fattura tramite GREEN TYRE PROJECT) si prendevano anche i carichi di Green
+// Tyre. Il consuntivo di Torres, esatto, usciva pieno di difformita' inventate,
+// e il documento che gli si manda indietro portava i formulari di un altro
+// soggetto: cose che lui non puo' nemmeno conoscere.
+console.log('CATENE DI FATTURAZIONE E CASI DI CONFINE');
+const ANAGRAFICA_GRUPPO = [
+  { ragione_sociale: 'GREEN TYRE PROJECT SRL' },
+  { ragione_sociale: 'TORRES GIOVANNI', fattura_tramite_nome: 'GREEN TYRE PROJECT SRL' },
+  { ragione_sociale: 'SUB DI TORRES SRL', fattura_tramite_nome: 'TORRES GIOVANNI' },
+];
+const ARCHIVI_GRUPPO = {
+  primarieRete: [
+    prim('ETT1', { trasportatore: 'TORRES GIOVANNI', peso_effettivo: 4000 }),
+    prim('ETG1', { trasportatore: 'GREEN TYRE PROJECT SRL', peso_effettivo: 9000 }),
+    prim('ETG2', { trasportatore: 'Green Tyre Project S.r.l.', peso_effettivo: 7000 }),
+    prim('ETS1', { trasportatore: 'SUB DI TORRES SRL', peso_effettivo: 2000 }),
+  ],
+  primarieAci: [], secondarie: [], extraRaccolta: [],
+};
+const raccoltiDa = (fornitore) => movimentiDelFornitore(ARCHIVI_GRUPPO, { ...P, fornitore, ruolo: 'raccoglitore', fornitori: ANAGRAFICA_GRUPPO })
+  .map(r => r.id_ordine).sort().join(',');
+
+// La catena si risolve fino in fondo, e questo decide a chi appartengono i
+// carichi del sub del sub: SUB DI TORRES fattura tramite Torres, che fattura
+// tramite Green Tyre, quindi la fattura che li comprende e' quella di GREEN
+// TYRE. Torres non li fattura: li passa su. Percio' nel gruppo di Torres non ci
+// sono, e in quello di Green Tyre si'.
+verifica('il subfornitore risponde dei suoi carichi e di nessun altro',
+  raccoltiDa('TORRES GIOVANNI') === 'ETT1', raccoltiDa('TORRES GIOVANNI'));
+verifica('il principale risponde anche di chi fattura tramite lui, perche\' la sua fattura li comprende',
+  raccoltiDa('GREEN TYRE PROJECT SRL') === 'ETG1,ETG2,ETS1,ETT1', raccoltiDa('GREEN TYRE PROJECT SRL'));
+verifica('il sub del sub sta nel gruppo di chi fattura davvero, non di chi sta in mezzo',
+  raccoltiDa('SUB DI TORRES SRL') === 'ETS1', raccoltiDa('SUB DI TORRES SRL'));
+verifica('senza anagrafica dei fornitori ognuno risponde solo di se stesso',
+  movimentiDelFornitore(ARCHIVI_GRUPPO, { ...P, fornitore: 'TORRES GIOVANNI', ruolo: 'raccoglitore' }).map(r => r.id_ordine).join() === 'ETT1');
+verifica('il nome scritto in un altro modo resta lo stesso soggetto',
+  raccoltiDa('green tyre project s.r.l.') === 'ETG1,ETG2,ETS1,ETT1', raccoltiDa('green tyre project s.r.l.'));
+verifica('un fornitore che non c\'entra niente non prende i carichi di nessuno',
+  raccoltiDa('ALTRA DITTA SRL') === '', raccoltiDa('ALTRA DITTA SRL'));
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

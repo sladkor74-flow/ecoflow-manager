@@ -593,19 +593,36 @@ const stesso = (a, b) => {
 export function movimentiDelFornitore(archivi, { fornitore, ruolo, anno, mese, canale, fornitori = [] }) {
   const annoNum = Number(anno);
   const meseNum = Number(mese);
-  // CHI FATTURA, NON CHI HA MATERIALMENTE LAVORATO. La fatturazione passiva
-  // accorpa le tonnellate di un subfornitore al principale (mappaFatturazione):
-  // Torres Giovanni raccoglie col proprio nome e fattura tramite Green Tyre. Senza
-  // passare di qui, al principale si metteva accanto ai suoi soli chili l'importo
-  // di tutto il gruppo, e al subfornitore non si trovava nessun costo e il suo
-  // consuntivo usciva dichiarato a posto. I due moduli devono parlare dello stesso
-  // soggetto, o i numeri non sono confrontabili.
+  // IL GRUPPO SI ALLARGA IN GIU', NON IN SU.
+  //
+  // La fatturazione passiva accorpa le tonnellate di un subfornitore al
+  // principale: Torres Giovanni raccoglie col proprio nome e fattura tramite
+  // Green Tyre. Il principale, quindi, risponde anche dei carichi di chi fattura
+  // tramite lui: la sua fattura li comprende, e senza di loro accanto ai suoi
+  // soli chili ci sarebbe l'importo di tutto il gruppo.
+  //
+  // Il contrario no, ed e' il difetto chiuso qui (audit del 03/10/2026). Prima si
+  // confrontava la CHIAVE DI FATTURAZIONE da tutte e due le parti, cioe' Torres
+  // veniva sostituito da Green Tyre anche quando il consuntivo era il suo: nel
+  // documento di Torres finivano i formulari di Green Tyre, che non sono suoi e
+  // che lui non puo' nemmeno conoscere. Il suo consuntivo esatto - le sue quattro
+  // tonnellate, le sue righe - usciva pieno di difformita' inventate, e il
+  // documento che gli si manda indietro conteneva i carichi di un altro soggetto.
+  //
+  // Il costo non passa di qui: lo cerca costoAttesoDallaPassiva per nome, e se
+  // per il subfornitore non c'e' nessuna riga lo dice invece di tacere
+  // (quadra_con_passiva resta null e quadra_tutto non diventa mai verde).
   const mappa = mappaFatturazione(fornitori);
-  const chiFattura = (nome) => fatturaA(mappa, nome).chiave;
-  const cercato = chiFattura(fornitore) || normalizzaRagioneSociale(fornitore || '');
+  const proprio = normalizzaRagioneSociale(fornitore || '');
+  const coperti = new Set(proprio ? [proprio] : []);
+  for (const f of fornitori || []) {
+    const k = normalizzaRagioneSociale(f && f.ragione_sociale);
+    if (!k || k === proprio) continue;
+    if (proprio && fatturaA(mappa, f && f.ragione_sociale).chiave === proprio) coperti.add(k);
+  }
   const suo = (nome) => {
-    const k = chiFattura(nome) || normalizzaRagioneSociale(nome || '');
-    return !!k && !!cercato && k === cercato;
+    const k = normalizzaRagioneSociale(nome || '');
+    return !!k && coperti.has(k);
   };
   const delPeriodo = (r, archivio) => {
     if (!eTerminato(r)) return false;
