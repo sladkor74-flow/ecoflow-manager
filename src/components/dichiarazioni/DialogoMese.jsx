@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Loader2, AlertTriangle, Info, Check } from 'lucide-react';
 import { materialiDi, sommaMateriali, controlliDichiarazione, CANALI, MOTIVI_ASSENZA } from '@/lib/dichiarazioniImpianti';
 import { formatKg } from '@/lib/utils';
+import LetturaAci from '@/components/dichiarazioni/LetturaAci';
 
 // La dichiarazione di un mese: quanto ha dichiarato l'impianto, che cosa ne è
 // uscito, se il documento è in mano e se è stato caricato a portale.
@@ -55,6 +56,31 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
   const senzaMateriali = senza && dati.motivo_assenza !== 'solo_metalli';
   const [salvataggio, setSalvataggio] = useState(false);
   const imposta = (k, v) => setDati(x => ({ ...x, [k]: v }));
+
+  // LE DICHIARAZIONI LETTE DAI PDF SI PROPONGONO, E SI PUO' TORNARE INDIETRO.
+  //
+  // I quattro numeri letti sui documenti dell'impianto finiscono nelle caselle
+  // qui sotto, dove si correggono a mano come sempre: la lettura non salva
+  // niente. Prima di scriverli si tiene da parte quello che c'era, perche' una
+  // proposta che cancella un valore senza modo di rimetterlo e' peggio di
+  // nessuna proposta - e il valore di prima puo' essere quello giusto.
+  const campiDellaProposta = ['quantita_kg', ...materiali.map(m => m.chiave)];
+  const [primaDellaLettura, setPrimaDellaLettura] = useState(null);
+  // Quello che c'e' nelle caselle ADESSO: leggere i documenti dura qualche
+  // secondo, e in quei secondi l'utente puo' aver scritto a mano. Senza questo,
+  // «rimetti i valori di prima» rimetterebbe quelli di prima di quando ha
+  // allegato i PDF, cancellando quanto ha scritto nel frattempo.
+  const datiCorrenti = useRef(dati);
+  useEffect(() => { datiCorrenti.current = dati; }, [dati]);
+  const proponiDaiDocumenti = (valori) => {
+    setPrimaDellaLettura(p => p || Object.fromEntries(campiDellaProposta.map(k => [k, datiCorrenti.current[k]])));
+    setDati(x => ({ ...x, ...valori }));
+  };
+  const annullaProposta = () => {
+    if (!primaDellaLettura) return;
+    setDati(x => ({ ...x, ...primaDellaLettura }));
+    setPrimaDellaLettura(null);
+  };
 
   // Il totale segue i materiali finché chi compila non lo forza a mano.
   const totaleMateriali = useMemo(() => sommaMateriali(dati), [dati]);
@@ -141,6 +167,24 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
             </div>
           </div>
 
+          {/* LE DICHIARAZIONI DELL'IMPIANTO SI LEGGONO DAI PDF, sui canali
+              diversi dalla rete. ACI ed extra raccolta sono le dichiarazioni
+              che gli impianti mandano via email e che l'utente gira al
+              consorzio, perche' a portale non si gestiscono: sono documenti
+              loro, con quattro numeri da trascrivere. Quelle della rete le
+              prepariamo noi e qui non servirebbero a niente.
+              Un mese senza dichiarazione (non dovuta, soli metalli) non ha
+              documenti da leggere. */}
+          {!senza && (flusso.canale || 'RETE') !== 'RETE' && (
+            <LetturaAci
+              sito={sito} flusso={flusso} mese={mese} anno={anno}
+              caselle={materiali.map(m => m.chiave)}
+              applicata={!!primaDellaLettura}
+              onProponi={proponiDaiDocumenti}
+              onAnnulla={annullaProposta}
+            />
+          )}
+
           {/* I MATERIALI si scrivono anche su un mese di soli metalli: il ferro
               uscito e' l'unica cosa vera di quel mese. La quantita' dichiarata e
               le date no, perche' li' a portale non si carica niente. */}
@@ -187,10 +231,15 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
               </span>
               <span className="text-xs text-muted-foreground">Somma dei materiali: {kg(totaleMateriali)} kg</span>
               {/* Da dove viene il numero proposto: un numero che compare da solo, senza
-                  dire da dove arriva, non si controlla e non si corregge. */}
-              {proposta > 0 && (
-                <span className="text-xs text-muted-foreground block">Proposto dal conferito del mese: su questo canale si dichiara quello che è arrivato. Correggilo se l&apos;impianto ne dichiara un altro.</span>
-              )}
+                  dire da dove arriva, non si controlla e non si corregge. Quando i
+                  documenti dell'impianto sono stati letti la provenienza e' un'altra,
+                  e tenere la frase di prima vorrebbe dire attribuire al conferito un
+                  numero che viene dalle dichiarazioni. */}
+              {primaDellaLettura
+                ? <span className="text-xs text-muted-foreground block">Letto dalle dichiarazioni dell&apos;impianto allegate qui sopra. Correggilo se sul documento c&apos;è scritto altro.</span>
+                : proposta > 0 && (
+                  <span className="text-xs text-muted-foreground block">Proposto dal conferito del mese: su questo canale si dichiara quello che è arrivato. Correggilo se l&apos;impianto ne dichiara un altro.</span>
+                )}
             </label>
             <div className="space-y-2">
               <label className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
