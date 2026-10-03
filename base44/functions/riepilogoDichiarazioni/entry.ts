@@ -64,9 +64,18 @@ export default async function(req) {
     const CANALI_GIACENZA = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
 
     const svc = base44.asServiceRole.entities;
-    const [giacenzeSito, dichiarazioni, aci, extra, secondarie, terziarie, nonDichiarati, rilevazioni] = await Promise.all([
+    // Le dichiarazioni dell'anno prima servono a una cosa sola, ma importante:
+    // una dichiarazione di dicembre si carica a portale a gennaio, e una di un
+    // anno vecchio si puo' segnare caricata in qualunque momento. Se quel
+    // caricamento e' successivo alla fotografia degli ordini non dichiarati, il
+    // file conta ancora quei chili come giacenza e noi no: e' lo scarto che la
+    // pagina deve mostrare. Filtrando per anno quelle righe non si vedevano
+    // affatto, e questo modulo diceva un numero diverso dal modulo Giacenze, che
+    // le dichiarazioni le legge tutte (audit del 03/10/2026).
+    const [giacenzeSito, dichiarazioni, dichiarazioniPrima, aci, extra, secondarie, terziarie, nonDichiarati, rilevazioni] = await Promise.all([
       fetchAll(svc.GiacenzaSito, { anno: annoNum }),
       fetchAll(svc.DichiarazioneSito, { anno: annoNum }),
+      fetchAll(svc.DichiarazioneSito, { anno: annoNum - 1 }),
       fetchAll(svc.PrimariaAci),
       fetchAll(svc.ExtraRaccolta),
       fetchAll(svc.Secondaria),
@@ -522,7 +531,9 @@ export default async function(req) {
     const gruppoDate = (ns, ruolo, canale) => dateDi(ns, ruolo).find(g => g.canale === canale) || null;
 
     // --- Gli impianti ---
-    const dichiaratoDopo = dichiaratoDopoLaFotografia(dichiarazioni, fotoPortale, norm);
+    // Qui, e solo qui, entrano anche le dichiarazioni dell'anno prima: tutto il
+    // resto della pagina e' dell'anno scelto.
+    const dichiaratoDopo = dichiaratoDopoLaFotografia([...dichiarazioni, ...dichiarazioniPrima], fotoPortale, norm);
     const impianti = [...nomi.entries()].filter(([ns]) => (ruoliDi.get(ns) || new Set(['imp'])).has('imp')).map(([ns, nome]) => {
       const ruoli = [...(ruoliDi.get(ns) || new Set(['imp']))].sort();
       const g = giacenzeDi(ns, 'imp')[0] || giacenzeSito.find(x => norm(x.sito) === ns) || null;

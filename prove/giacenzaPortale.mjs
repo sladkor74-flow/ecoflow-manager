@@ -5,7 +5,7 @@
 // calcolata; se il portale lo conosce, nella sua giacenza c'e': la differenza si
 // dice. Rete, ACI ed extra raccolta restano su gruppi e conteggi separati.
 // npm run prove
-import { formulariDaSistemare, avvisoSenzaFine, ordiniNotiAlPortale, formulariDelFile, collocaFotografia, fotoAFineMese } from '../base44/shared/giacenzaPortale.ts';
+import { formulariDaSistemare, avvisoSenzaFine, ordiniNotiAlPortale, formulariDelFile, collocaFotografia, fotoAFineMese, dichiaratoDopoLaFotografia } from '../base44/shared/giacenzaPortale.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -229,6 +229,44 @@ verifica('fine agosto: 700 + 5.000 + 3.000', fm[7] === 8700, JSON.stringify(fm))
 verifica('fine settembre: piu\' gli 8.000 arrivati con la secondaria', fm[8] === 16700 && fm[11] === 16700, JSON.stringify(fm));
 verifica('i 21.000 kg senza giorno sono a portale ma in nessuna fine mese', Math.round(foto.portale.get('irigom') * 1000) - fm[11] === 21000);
 verifica('dodici numeri interi', fm.length === 12 && fm.every(Number.isInteger));
+
+// LE DICHIARAZIONI CARICATE DOPO LA FOTOGRAFIA, DI QUALUNQUE ANNO SIANO.
+//
+// Il file degli ordini non dichiarati e' una fotografia di un giorno. Una
+// dichiarazione segnata caricata a portale DOPO quel giorno il file la conta
+// ancora come giacenza e noi no: lo scarto si mostra. La funzione fa il conto su
+// quello che le si passa, e il modulo Dichiarazioni Impianti le passava le sole
+// righe dell'anno scelto: la dichiarazione di dicembre dell'anno prima, segnata
+// caricata a settembre, non si vedeva affatto, e la pagina diceva un numero
+// diverso dal modulo Giacenze, che le dichiarazioni le legge tutte
+// (audit del 03/10/2026).
+console.log('\nLE DICHIARAZIONI CARICATE DOPO LA FOTOGRAFIA');
+{
+  const FOTO = '2026-09-18';
+  const dich = (campi) => ({ sito: 'GATIM SRL', canale: 'RETE', caricata_inviata: true, ...campi });
+  const quest_anno = [dich({ anno: 2026, mese: 'Agosto', quantita_kg: 30000, caricata_il: '2026-09-25' })];
+  const anno_prima = [dich({ anno: 2025, mese: 'Dicembre', quantita_kg: 50000, caricata_il: '2026-09-25' })];
+  const chiave = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+  const soloQuestAnno = dichiaratoDopoLaFotografia(quest_anno, FOTO, chiave);
+  verifica('una dichiarazione di quest\'anno caricata dopo la fotografia si conta',
+    soloQuestAnno.get(chiave('GATIM SRL')) === 30000, JSON.stringify([...soloQuestAnno]));
+
+  const tutte = dichiaratoDopoLaFotografia([...quest_anno, ...anno_prima], FOTO, chiave);
+  verifica('e quella dell\'anno prima si somma, perche\' il caricamento e\' lo stesso giorno',
+    tutte.get(chiave('GATIM SRL')) === 80000, JSON.stringify([...tutte]));
+  verifica('passando le sole righe dell\'anno quei 50.000 kg sparivano',
+    soloQuestAnno.get(chiave('GATIM SRL')) !== tutte.get(chiave('GATIM SRL')));
+
+  // Quello che non cambia: prima della fotografia non si conta, e i canali
+  // diversi dalla rete non entrano in questo numero.
+  verifica('una dichiarazione caricata PRIMA della fotografia non si conta',
+    dichiaratoDopoLaFotografia([dich({ anno: 2025, mese: 'Dicembre', quantita_kg: 50000, caricata_il: '2026-09-10' })], FOTO, chiave).size === 0);
+  verifica('l\'ACI non entra in questo conto, che e\' di rete',
+    dichiaratoDopoLaFotografia([dich({ anno: 2025, mese: 'Dicembre', quantita_kg: 50000, caricata_il: '2026-09-25', canale: 'ACI' })], FOTO, chiave).size === 0);
+  verifica('senza fotografia non si conta niente',
+    dichiaratoDopoLaFotografia([...quest_anno, ...anno_prima], null, chiave).size === 0);
+}
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);
