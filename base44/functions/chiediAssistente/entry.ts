@@ -11,6 +11,7 @@ import { nuovaCache } from "../../shared/cacheLetture.ts";
 import { SCHEMA_PIANO, istruzioniPiano, strumentiDalPiano, testoDati } from "../../shared/pianoAssistente.ts";
 import { materialePertinente } from "../../shared/materialeCorso.ts";
 import { oggiRoma } from "../../shared/qualificaFornitori.ts";
+import { annotaFileDaRimuovere, voceDaRimuovere } from "../../shared/fileDaRimuovere.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
 import {
   SCHEMA_FILE_DA_CREARE, SCHEMA_LETTURA_FILE, REGOLE_FILE, allegatiRicevuti, istruzioniLettura, allegatiPerPrompt, fileDaCreare,
@@ -192,6 +193,22 @@ export default async function(req) {
         for (const a of caricati) {
           const tolto = await cancellaFile(base44, a.file_uri);
           if (!tolto.riuscita) { a.file_rimasto = a.file_uri; a.motivo_file_rimasto = tolto.come; }
+        }
+        // E quelli che restano si annotano nel registro dei file da rimuovere.
+        // Finora il loro indirizzo finiva solo dentro allegati_json della domanda,
+        // che e' un campo di testo: l'inventario dei file non lo legge, quindi
+        // quei PDF non comparivano in nessun elenco da mandare alla piattaforma e
+        // restavano caricati per sempre (audit del 03/10/2026).
+        const rimasti = caricati.filter(a => a.file_rimasto);
+        if (rimasti.length) {
+          await annotaFileDaRimuovere(base44.asServiceRole.entities.FileDaRimuovere, rimasti.map(a => voceDaRimuovere({
+            entita: 'DomandaAssistente',
+            record: { file_uri: a.file_rimasto },
+            motivo: 'allegato a una domanda di EcoTyna: letto e non piu\' usato',
+            cosa: 'Allegato a EcoTyna',
+            descrizione: a.nome || '',
+            oggi: oggiRoma(),
+          })));
         }
       }
     }

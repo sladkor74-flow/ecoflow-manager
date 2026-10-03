@@ -3,6 +3,7 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { ARCHIVI_CON_FILE, voceFile } from "../../shared/inventarioFile.ts";
+import { annotaFileDaRimuovere, voceDaRimuovere } from "../../shared/fileDaRimuovere.ts";
 
 // TOGLIE DAI RECORD I LINK DEI FILE PUBBLICI.
 //
@@ -75,6 +76,24 @@ export default async function(req) {
       });
     }
 
+    // PRIMA DI CANCELLARE L'INDIRIZZO, ANNOTARLO NEL REGISTRO.
+    //
+    // Lo dice la nota qui sopra: questi campi sono l'unico posto dove quegli
+    // indirizzi sono scritti. Svuotarli senza annotarli vuol dire che quei file
+    // restano in area pubblica per sempre e nessuno sa piu' quali chiedere di
+    // rimuovere: la piattaforma non sa cancellare, e il registro FileDaRimuovere
+    // esiste apposta per tenere l'elenco di quelli che nessun record usa piu'
+    // (audit del 03/10/2026).
+    const oggi = new Date().toISOString().slice(0, 10);
+    const annotati = await annotaFileDaRimuovere(svc.FileDaRimuovere, daFare.map(x => voceDaRimuovere({
+      entita: x.def.entita,
+      record: { id: x.id, file_url: x.riferimento },
+      motivo: 'riferimento pubblico scollegato dal record',
+      cosa: x.def.cosa || '',
+      descrizione: x.descrizione || '',
+      oggi,
+    })));
+
     let svuotati = 0;
     const falliti = [];
     for (const x of daFare) {
@@ -90,8 +109,10 @@ export default async function(req) {
       ok: true, eseguito: true,
       svuotati,
       per_archivio: riepilogo,
+      annotati_nel_registro: annotati.annotati,
+      ...(annotati.errore ? { registro_errore: annotati.errore } : {}),
       ...(falliti.length ? { non_svuotati: falliti } : {}),
-      nota: 'I link pubblici non sono più scritti in nessun record: il gestionale non li distribuisce più. I file restano sullo storage della piattaforma finché il suo team non li rimuove.',
+      nota: 'I link pubblici non sono più scritti in nessun record: il gestionale non li distribuisce più. Gli indirizzi restano nel registro dei file da rimuovere, che è l\'elenco da mandare al team della piattaforma. I file restano sullo storage finché non li rimuove lui.',
     });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });

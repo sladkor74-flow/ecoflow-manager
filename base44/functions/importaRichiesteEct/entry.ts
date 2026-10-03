@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { cancellaFile } from "../../shared/fileArchivio.ts";
+import { annotaFileDaRimuovere, voceDaRimuovere } from "../../shared/fileDaRimuovere.ts";
 import { urlScaricabile, riferimentoDalCorpo } from "../../shared/fileScaricabile.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { fetchAll } from "../../shared/fetchAll.ts";
@@ -184,9 +185,24 @@ export default async function(req) {
     // l'indirizzo non lo conosce piu' nessuno, che e' la stessa cosa.
     const fileTolto = file_uri ? { riuscita: false, come: 'file privato: il link firmato è scaduto e l\'indirizzo non è stato conservato' } : await cancellaFile(base44, file_url);
 
+    // IL FILE LETTO SI ANNOTA NEL REGISTRO. La piattaforma non sa cancellare:
+    // questo foglio e' salito in area privata, e' stato letto, e nessun record ne
+    // conserva l'indirizzo - quindi senza questa riga resterebbe caricato per
+    // sempre e nessuno saprebbe quale chiedere di rimuovere. Dodici caricamenti
+    // l'anno, uno al mese (audit del 03/10/2026).
+    const registro = await annotaFileDaRimuovere(base44.asServiceRole.entities.FileDaRimuovere, [voceDaRimuovere({
+      entita: 'RichiestaEct',
+      record: { file_uri, file_url },
+      motivo: 'foglio letto per il caricamento: nessun record ne conserva l\'indirizzo',
+      cosa: 'Foglio delle Richieste ECT',
+      descrizione: `Caricamento delle richieste ECT dell'anno ${annoNum}`,
+      oggi: oggiRoma(),
+    })]);
+
     return Response.json({
       ok: true, anno: annoNum, righe_lette: righe.length,
       file_tolto: fileTolto.riuscita ? true : fileTolto.come,
+      annotato_nel_registro: registro.annotati,
       creati, aggiornati, invariati, orfane, spostate,
       riconosciuti: righe.filter(r => riconosciOrdine(r, ordini).id_ordine_stato === 'trovato').length,
       da_confermare: daConfermare,
