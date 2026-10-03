@@ -71,9 +71,16 @@ export function calcExtraRaccolta(r) {
   const costoTrattamento = Number(r.costo_trattamento_t || 0);
   const costoPulizia = Number(r.costo_pulizia || 0);
   const costiAggiuntivi = Number(r.costi_aggiuntivi || 0);
+  // Il trasporto di un intervento si paga A VIAGGIO, non a tonnellata: e' un
+  // importo fisso come la pulizia. Il campo e' nato il 03/10/2026, perche' nel
+  // foglio dell'amministrazione la colonna «PREZZO (Euro/viaggio)» c'era e qui
+  // non c'era niente da scriverci: il trasporto non si pagava, e per una
+  // secondaria - un trasferimento da uno stoccaggio a un impianto, che non ha un
+  // costo di raccolta - non si pagava proprio nulla al trasportatore.
+  const costoTrasporto = Number(r.costo_trasporto_viaggio || 0);
 
   const costo_totale = Math.round(
-    (tonnellate * (costoRaccolta + costoStoccaggio + costoTrattamento) + costoPulizia + costiAggiuntivi) * 100
+    (tonnellate * (costoRaccolta + costoStoccaggio + costoTrattamento) + costoPulizia + costiAggiuntivi + costoTrasporto) * 100
   ) / 100;
 
   const margine = Math.round((ricavo - costo_totale) * 100) / 100;
@@ -93,13 +100,14 @@ export function aggregaPerProduttore(records) {
   const map = {};
   for (const r of records) {
     const p = r.produttore || '(senza produttore)';
-    if (!map[p]) map[p] = { costi_aggiuntivi: 0, raccolta: 0, stoccaggio: 0, trattamento: 0, pulizia: 0, costo_totale: 0, ricavi: 0, margine: 0 };
+    if (!map[p]) map[p] = { costi_aggiuntivi: 0, raccolta: 0, stoccaggio: 0, trattamento: 0, pulizia: 0, trasporto: 0, costo_totale: 0, ricavi: 0, margine: 0 };
     const c = calcExtraRaccolta(r);
     map[p].costi_aggiuntivi += Number(r.costi_aggiuntivi || 0);
     map[p].raccolta += c.tonnellate * Number(r.costo_raccolta_t || 0);
     map[p].stoccaggio += c.tonnellate * Number(r.costo_stoccaggio_t || 0);
     map[p].trattamento += c.tonnellate * Number(r.costo_trattamento_t || 0);
     map[p].pulizia += Number(r.costo_pulizia || 0);
+    map[p].trasporto += Number(r.costo_trasporto_viaggio || 0);
     map[p].costo_totale += c.costo_totale;
     map[p].ricavi += c.ricavo;
     map[p].margine += c.margine;

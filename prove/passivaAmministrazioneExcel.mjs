@@ -397,5 +397,73 @@ verifica('il foglio dell\'ACI e\' piatto come nell\'altro file', (() => {
   return righeCon(aci, 'EMMESSE SRLS').length === 0 && prima(aci, 'EMMESSE SRLS - (ACI)') > 0;
 })());
 
+console.log('\nL\'EXTRA RACCOLTA: IL DETTAGLIO DEGLI INTERVENTI');
+{
+  // Il canale dell'extra raccolta non ha voci a modello: ha interventi, ognuno
+  // coi suoi prezzi scritti a mano. Il foglio ha una tabella sola, e il totale
+  // del canale e' il totale di quella tabella.
+  const EXTRA = {
+    canale: 'EXTRA_RACCOLTA', nome_canale: 'EXTRA RACCOLTA', mese: 'Settembre', anno: 2026, stile: 'due_livelli',
+    raccoglitori: { titolo: 'RACCOGLITORI', righe: [], totale_t: 0, totale_euro: 0, non_previsti: [] },
+    impianti: { titolo: 'IMPIANTI \\ STOCCAGGI', righe: [], totale_t: 0, totale_euro: 0, non_previsti: [] },
+    trasporti: { righe: [], totale_t: 0, totale_euro: 0 },
+    extra: {
+      righe: [
+        {
+          numero_fir: 'LQQDP001501AB', ordine: 'ET26150001', produttore: 'COMUNE DI MARCIANISE',
+          trasportatore: 'LOGISTICA & PNEUMATICI SRL', destinatario: 'Irigom S.r.l.',
+          inizio: '2026-09-08', fine: '2026-09-10', cer: '160103',
+          kg: 18240, tonnellate: 18.24,
+          raccolta_t: 95, stoccaggio_t: 0, trattamento_t: 100, trasporto_viaggio: 400, oneri: 250,
+          totale: 4206.8, note: 'Pulizia del piazzale concordata', senza_costi: false,
+        },
+        {
+          numero_fir: 'SENZACOSTI01', ordine: 'ET26150003', produttore: 'ISOLA ECOLOGICA',
+          trasportatore: 'GATIM S.R.L.', destinatario: 'Gatim',
+          inizio: '2026-09-25', fine: '2026-09-26', cer: '160103',
+          kg: 3120, tonnellate: 3.12,
+          raccolta_t: 0, stoccaggio_t: 0, trattamento_t: 0, trasporto_viaggio: 0, oneri: 0,
+          totale: 0, note: '', senza_costi: true,
+        },
+      ],
+      totale_kg: 21360, totale_t: 21.36, totale_euro: 4206.8,
+      senza_costi: [{ numero_fir: 'SENZACOSTI01', produttore: 'ISOLA ECOLOGICA', destinatario: 'Gatim', kg: 3120 }],
+      senza_data: [{ numero_fir: 'SENZADATA01', ordine: 'ET26150009', produttore: 'COMUNE DI ESEMPIO', kg: 900 }],
+    },
+    totale_euro: 4206.8,
+  };
+  const bytes = await cartellaPassivaUnFoglio([EXTRA]);
+  const w = (await apri(bytes)).getWorksheet('PASSIVA');
+  const rTesta = primaChePorta(w, 'Nr. FIR');
+  verifica('la tabella degli interventi c e', rTesta > 0, String(rTesta));
+  const titoli = [];
+  for (let c = 1; c <= 17; c++) titoli.push(testo(w, rTesta, c));
+  verifica('le colonne sono quelle del foglio dell amministrazione',
+    titoli.slice(0, 16).join('|') === ['Nr. FIR', 'ORDINE ECOTYRE', 'PRODUTTORE', 'TRASPORTATORE', 'DESTINATARIO', 'DATA I.T.', 'DATA F.T.', 'CER', "QUANTITA' (kg)", 'PESO [t]', 'RACCOLTA [€\\t]', 'STOCCAGGIO [€\\t]', 'TRATTAMENTO [€\\t]', 'TRASPORTO [€\\viaggio]', 'ONERI FISSI [€]', 'TOTALE (Euro)'].join('|'),
+    titoli.join('|'));
+  const r1 = rTesta + 1;
+  verifica('le date si leggono come giorni italiani', testo(w, r1, 6) === '08/09/2026' && testo(w, r1, 7) === '10/09/2026',
+    `${testo(w, r1, 6)} ${testo(w, r1, 7)}`);
+  verifica('il peso c e in chili e in tonnellate', numero(w, r1, 9) === 18240 && numero(w, r1, 10) === 18.24,
+    `${numero(w, r1, 9)} ${numero(w, r1, 10)}`);
+  verifica('il trasporto a viaggio sta nella sua colonna', numero(w, r1, 14) === 400, String(numero(w, r1, 14)));
+  // IL CONTO: i tre prezzi a tonnellata per il peso, piu' il viaggio e gli oneri
+  // fissi, che sono importi e non si moltiplicano per niente.
+  verifica('il totale di riga e una formula che non moltiplica il viaggio',
+    formula(w, r1, 16) === `(K${r1}+L${r1}+M${r1})*J${r1}+N${r1}+O${r1}`, formula(w, r1, 16));
+  verifica('e fa il numero del modulo', numero(w, r1, 16) === 4206.8, String(numero(w, r1, 16)));
+  const rTot = prima(w, 'Totale extra raccolta');
+  verifica('i totali sommano le righe', righeSommate(formula(w, rTot, 16)).length === 2 && numero(w, rTot, 16) === 4206.8,
+    `${formula(w, rTot, 16)} = ${numero(w, rTot, 16)}`);
+  verifica('e il totale del canale e quello della tabella', numero(w, 3, 5) === 4206.8, String(numero(w, 3, 5)));
+  verifica('un intervento senza costi si segnala', primaChePorta(w, 'DA SISTEMARE: interventi chiusi senza nessun costo') > rTot);
+  verifica('e cosi un terminato senza fine trasporto', primaChePorta(w, 'DA SISTEMARE: interventi terminati senza data') > rTot);
+  verifica('la nota in fondo parla di interventi, non di voci a modello',
+    primaChePorta(w, 'L\'extra raccolta non ha voci a modello') > rTot);
+  verifica('e non si scrivono le cornici vuote degli altri due blocchi',
+    prima(w, 'RACCOGLITORI') === 0 && prima(w, 'IMPIANTI \\ STOCCAGGI') === 0,
+    `${prima(w, 'RACCOGLITORI')} ${prima(w, 'IMPIANTI \\ STOCCAGGI')}`);
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

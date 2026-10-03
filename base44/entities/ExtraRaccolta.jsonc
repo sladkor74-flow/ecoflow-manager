@@ -196,6 +196,11 @@
       "default": 0,
       "description": "Costo in euro per tonnellata da pagare all'impianto. Scritto a mano sull'intervento, come la raccolta"
     },
+    "costo_trasporto_viaggio": {
+      "type": "number",
+      "default": 0,
+      "description": "Costo in euro per il VIAGGIO da pagare al trasportatore di questo intervento, non a tonnellata. Lo scrive l amministratore sull intervento come gli altri costi. Serviva: nel foglio della fatturazione passiva dell amministrazione il blocco dell extra raccolta ha la colonna PREZZO (Euro/viaggio) e nel gestionale non c era nessun campo, quindi il trasporto di un intervento non si poteva scrivere e non si pagava - nemmeno quello delle secondarie, che sono trasferimenti da uno stoccaggio a un impianto e non hanno un costo di raccolta"
+    },
     "costo_pulizia": {
       "type": "number",
       "default": 0,

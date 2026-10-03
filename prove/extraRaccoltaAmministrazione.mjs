@@ -99,6 +99,28 @@ console.log('IL COSTO E QUELLO CHE DICE IL MODULO');
   verifica('i sovracosti attivi non entrano nel costo', b.righe[0].totale === soloCosti, JSON.stringify([b.righe[0].totale, soloCosti]));
 }
 
+console.log('IL TRASPORTO SI PAGA A VIAGGIO');
+{
+  // Campo nato il 03/10/2026: nel foglio dell'amministrazione la colonna «PREZZO
+  // (Euro/viaggio)» c'era e nel gestionale non c'era niente da scriverci, quindi
+  // il trasporto di un intervento non si pagava a nessuno.
+  const r = intervento({ peso_effettivo: 12400, costo_raccolta_t: 90, costo_trattamento_t: 100, costo_trasporto_viaggio: 400 });
+  const b = bloccoExtraRaccolta([r], 2026, 'Settembre');
+  verifica('il trasporto si vede nella sua colonna', b.righe[0].trasporto_viaggio === 400, String(b.righe[0].trasporto_viaggio));
+  // 12,4 t per 190 fa 2.356, piu' 400 di viaggio: 2.756. NON si moltiplica per
+  // il peso, altrimenti un viaggio da 400 euro ne costerebbe 4.960.
+  verifica('entra nel totale com e, non a tonnellata', b.righe[0].totale === 2756, String(b.righe[0].totale));
+  verifica('e il totale resta quello del modulo', b.righe[0].totale === calcExtraRaccolta(r).costo_totale);
+}
+{
+  // Una secondaria di extra raccolta non ha costo di raccolta: prima del campo
+  // nuovo al trasportatore non si pagava niente del tutto.
+  const r = intervento({ tipo_movimento: 'secondaria', stoccaggio: 'NAPPI SUD SRL', costo_raccolta_t: 0, costo_trattamento_t: 0, costo_stoccaggio_t: 0, costo_trasporto_viaggio: 350 });
+  const b = bloccoExtraRaccolta([r], 2026, 'Settembre');
+  verifica('una secondaria col solo trasporto si paga', b.righe[0].totale === 350, String(b.righe[0].totale));
+  verifica('e non e piu un intervento senza costi', b.senza_costi.length === 0, JSON.stringify(b.senza_costi));
+}
+
 console.log('QUELLO CHE VA SISTEMATO SI DICE');
 {
   const b = bloccoExtraRaccolta([

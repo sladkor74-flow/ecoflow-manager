@@ -98,6 +98,10 @@ export function bloccoExtraRaccolta(interventi, anno, mese) {
     const stoccaggio = Number(r.costo_stoccaggio_t) || 0;
     const trattamento = Number(r.costo_trattamento_t) || 0;
     const oneri = n2(Number(r.costo_pulizia || 0) + Number(r.costi_aggiuntivi || 0));
+    // Il trasporto si paga A VIAGGIO: e' un importo fisso, non un prezzo a
+    // tonnellata. Nel foglio dell'amministrazione e' la colonna «PREZZO
+    // (Euro/viaggio)», che fino al 03/10/2026 nel gestionale non aveva un campo.
+    const trasporto = n2(Number(r.costo_trasporto_viaggio || 0));
     return {
       numero_fir: testo(r.numero_fir) || '—',
       ordine: testo(r.id_ordine) || testo(r.numero_ordine_interno) || '—',
@@ -112,12 +116,13 @@ export function bloccoExtraRaccolta(interventi, anno, mese) {
       raccolta_t: raccolta,
       stoccaggio_t: stoccaggio,
       trattamento_t: trattamento,
+      trasporto_viaggio: trasporto,
       oneri,
       // Il totale e' quello del modulo, non un conto rifatto qui.
       totale: n2(c.costo_totale),
       secondaria: chiave(r.tipo_movimento) === 'secondaria',
       note: [testo(r.note_costi), testo(r.tipologia_trasporto)].filter(Boolean).join(' · '),
-      senza_costi: raccolta === 0 && stoccaggio === 0 && trattamento === 0 && oneri === 0,
+      senza_costi: raccolta === 0 && stoccaggio === 0 && trattamento === 0 && oneri === 0 && trasporto === 0,
     };
   });
   return {

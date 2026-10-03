@@ -868,15 +868,17 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
     // dichiarano, cosi' il totale della passiva non sembra sbagliato a chi
     // confronta i due moduli.
     if (tipologia === 'EXTRA_RACCOLTA') {
-      // Un intervento marcato come secondaria e' un trasferimento da uno
-      // stoccaggio a un impianto, non una raccolta: finirebbe fra i raccoglitori
-      // col nome del trasportatore e col costo di raccolta dell'intervento.
-      // Finche' l'extra raccolta non avra' un campo per il costo del trasporto,
-      // il gestionale lo dice invece di far finta di niente.
+      // Il trasporto di una secondaria di extra raccolta si paga a viaggio, col
+      // prezzo scritto sull'intervento. Se quel campo e' vuoto il trasferimento
+      // non si paga a nessuno: si dice, perche' un trasferimento gratis quasi
+      // sempre e' un campo rimasto da compilare. Prima dell'03/10/2026 il campo
+      // non esisteva affatto e l'anomalia era inevitabile.
       for (const rec of extraRaccoltaF) {
         if (String(rec.tipo_movimento || 'primaria').toLowerCase().trim() !== 'secondaria') continue;
+        if (Number(rec.costo_trasporto_viaggio || 0) > 0) continue;
+        if (isInterno(String(rec.trasportatore || '').trim())) continue;
         anomalie.push({
-          descrizione: `Extra raccolta: l'intervento ${rec.numero_fir || '—'} e' un trasferimento da ${rec.stoccaggio || '—'} a ${rec.destinazione || '—'}, ma viene conteggiato come raccolta di ${rec.trasportatore || '—'}. Il trasporto di una secondaria di extra raccolta va verificato a mano.`,
+          descrizione: `Extra raccolta: l'intervento ${rec.numero_fir || '—'} e' un trasferimento da ${rec.stoccaggio || '—'} a ${rec.destinazione || '—'} fatto da ${rec.trasportatore || '—'}, e sull'intervento il costo del trasporto a viaggio e' vuoto: il trasferimento non viene pagato a nessuno. Scrivilo sull'intervento.`,
           fornitore: rec.trasportatore || '—',
           prestazione: 'TRASPORTO_SECONDARIA',
           classe: String(rec.classe || '—'),
@@ -1151,6 +1153,50 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
               tonnellate: round3(scoperta.kg / 1000),
               importo: round2(scoperta.euro),
             } : null,
+          },
+        });
+      }
+    }
+
+    // ─── IL TRASPORTO DEGLI INTERVENTI DI EXTRA RACCOLTA ───
+    //
+    // Non passa dal blocco qui sopra, e di proposito: quello e' costruito sui
+    // viaggi misti fra rete e ACI - un camion che in un giorno porta formulari
+    // dei due canali - e l'extra raccolta non si mischia con nessuno. Qui un
+    // intervento e' un viaggio: ha il suo trasportatore, il suo prezzo a viaggio
+    // scritto sull'intervento e il suo importo, e si paga una volta.
+    //
+    // Il campo costo_trasporto_viaggio e' nato il 03/10/2026, su richiesta
+    // dell'utente: prima il trasporto di un intervento non si poteva scrivere e
+    // quindi non si pagava a nessuno - per una secondaria, che e' un
+    // trasferimento da uno stoccaggio a un impianto e non ha un costo di
+    // raccolta, non si pagava proprio niente al trasportatore, e il gestionale
+    // lo diceva come anomalia.
+    if (tipologia === 'EXTRA_RACCOLTA') {
+      for (const r of extraRaccoltaF) {
+        const prezzo = Number(r.costo_trasporto_viaggio || 0);
+        if (prezzo <= 0) continue;
+        const trasportatore = String(r.trasportatore || '').trim();
+        if (!trasportatore) continue;
+        const fatt = fatturaA(perFattura, trasportatore);
+        const interno = isInterno(fatt.nome);
+        const peso = Number(r.peso_effettivo || 0);
+        // La partenza: per una secondaria lo stoccaggio, per una primaria chi
+        // conferisce. Nel foglio dell'amministrazione e' la colonna PRODUTTORE.
+        const partenza = String(r.stoccaggio || r.produttore || r.ragione_sociale || r.punto_di_raccolta || '—').trim();
+        trasportiRows.push({
+          fornitore: fatt.nome, fornitore_norm: fatt.chiave, interno,
+          riga: {
+            stoccaggio: partenza,
+            destinazione: String(r.destinazione || '—').trim(),
+            trasportatore,
+            tonnellate: round3(peso / 1000),
+            viaggi: 1,
+            tariffa_valore: prezzo,
+            unita_misura: '€/viaggio',
+            // A se stessi non si fattura, come in tutti gli altri blocchi.
+            importo: interno ? 0 : round2(prezzo),
+            note: interno ? 'interno, non fatturato' : `intervento ${r.numero_fir || r.id_ordine || ''}`.trim(),
           },
         });
       }

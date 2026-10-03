@@ -68,7 +68,7 @@ const LARGHEZZA = LARGHEZZE.length;
 // foglio tutto suo si usano queste, che sono fatte per quelle colonne. Nel file
 // con tutti i canali insieme le colonne sono le stesse per tutti e il compromesso
 // e' inevitabile - e' cosi' anche nel foglio dell'amministrazione.
-const LARGHEZZE_EXTRA = [20, 18, 34, 28, 28, 13, 13, 11, 15, 12, 15, 16, 17, 15, 16, 40];
+const LARGHEZZE_EXTRA = [20, 18, 34, 28, 28, 13, 13, 11, 15, 12, 15, 16, 17, 18, 15, 16, 40];
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const n2 = (v) => Math.round(num(v) * 100) / 100;
@@ -408,6 +408,10 @@ const COLONNE_EXTRA = [
   { chiave: 'raccolta_t', titolo: 'RACCOLTA [€\\t]', numero: EURO },
   { chiave: 'stoccaggio_t', titolo: 'STOCCAGGIO [€\\t]', numero: EURO },
   { chiave: 'trattamento_t', titolo: 'TRATTAMENTO [€\\t]', numero: EURO },
+  // Il trasporto si paga a VIAGGIO: nel loro foglio e' la colonna «PREZZO
+  // (Euro/viaggio)» e sta accanto ai prezzi a tonnellata, ma non si moltiplica
+  // per il peso - entra nel totale com'e'.
+  { chiave: 'trasporto_viaggio', titolo: 'TRASPORTO [€\\viaggio]', numero: EURO },
   { chiave: 'oneri', titolo: 'ONERI FISSI [€]', numero: EURO },
   { chiave: 'totale', titolo: 'TOTALE (Euro)', numero: EURO },
   { chiave: 'note', titolo: 'Note' },
@@ -438,6 +442,7 @@ function scriviExtra(ws, r0, extra0) {
   const iRac = COLONNE_EXTRA.findIndex(c => c.chiave === 'raccolta_t') + 1;
   const iSto = COLONNE_EXTRA.findIndex(c => c.chiave === 'stoccaggio_t') + 1;
   const iTra = COLONNE_EXTRA.findIndex(c => c.chiave === 'trattamento_t') + 1;
+  const iVg = COLONNE_EXTRA.findIndex(c => c.chiave === 'trasporto_viaggio') + 1;
   const iOn = COLONNE_EXTRA.findIndex(c => c.chiave === 'oneri') + 1;
   const iKg = COLONNE_EXTRA.findIndex(c => c.chiave === 'kg') + 1;
   const iTot = COLONNE_EXTRA.findIndex(c => c.chiave === 'totale') + 1;
@@ -455,11 +460,12 @@ function scriviExtra(ws, r0, extra0) {
       else if (c.centro) scrivi(ws, r, i + 1, giornoIt(v), stile);
       else scrivi(ws, r, i + 1, testo(v), stile);
     });
-    // Il totale com'e' nel loro foglio: i tre costi a tonnellata per il peso, piu'
-    // gli oneri fissi. Scritto come formula, cosi' correggere un prezzo rifa' il
-    // conto; il numero che porta dentro e' quello del modulo Extra Raccolta.
+    // Il totale com'e' nel loro foglio: i tre costi a tonnellata per il peso,
+    // piu' il trasporto a viaggio e gli oneri fissi, che sono importi e non
+    // prezzi. Scritto come formula, cosi' correggere un prezzo rifa' il conto; il
+    // numero che porta dentro e' quello del modulo Extra Raccolta.
     scrivi(ws, r, iTot, {
-      formula: `(${lettera(iRac)}${r}+${lettera(iSto)}${r}+${lettera(iTra)}${r})*${lettera(iT)}${r}+${lettera(iOn)}${r}`,
+      formula: `(${lettera(iRac)}${r}+${lettera(iSto)}${r}+${lettera(iTra)}${r})*${lettera(iT)}${r}+${lettera(iVg)}${r}+${lettera(iOn)}${r}`,
       result: n2(x.totale),
     }, { ...st, allinea: 'right', fmt: EURO, grassetto: true });
     sommandi.push(r);

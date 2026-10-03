@@ -444,21 +444,25 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
     // Le colonne dei numeri stanno strette - «90,00» non ha bisogno di spazio -
     // perche' quello che serve largo sono i tre nomi: con colonne da venti
     // millimetri «COMUNE DI MARCIANISE» perdeva il cognome per strada.
-    const fisse = 22 + 17 + 17 + 19 + 21 + 22 + 18 + 23 + (conNote ? 24 : 0);
+    const fisse = 20 + 15 + 15 + 17 + 17 + 17 + 17 + 17 + 21 + (conNote ? 22 : 0);
     const nome = (L - fisse) / 3;
     const colonne = [
-      { chiave: 'fir', w: 22, titolo: ['Nr. FIR'], sx: true },
+      { chiave: 'fir', w: 20, titolo: ['Nr. FIR'], sx: true },
       { chiave: 'produttore', w: nome, titolo: ['PRODUTTORE'], sx: true },
       { chiave: 'trasportatore', w: nome, titolo: ['TRASPORTATORE'], sx: true },
       { chiave: 'destinatario', w: nome, titolo: ['DESTINATARIO'], sx: true },
-      { chiave: 'fine', w: 17, titolo: ['DATA', 'F.T.'] },
-      { chiave: 'tonnellate', w: 17, titolo: ['PESO', '[t]'] },
-      { chiave: 'raccolta', w: 19, titolo: ['RACCOLTA', '[€/t]'] },
-      { chiave: 'stoccaggio', w: 21, titolo: ['STOCCAGGIO', '[€/t]'] },
-      { chiave: 'trattamento', w: 22, titolo: ['TRATTAM.', '[€/t]'] },
-      { chiave: 'oneri', w: 18, titolo: ['ONERI', 'FISSI'] },
-      { chiave: 'totale', w: 23, titolo: ['TOTALE'] },
-      ...(conNote ? [{ chiave: 'note', w: 24, titolo: ['Note'], sx: true }] : []),
+      { chiave: 'fine', w: 15, titolo: ['DATA', 'F.T.'] },
+      { chiave: 'tonnellate', w: 15, titolo: ['PESO', '[t]'] },
+      { chiave: 'raccolta', w: 17, titolo: ['RACCOLTA', '[€/t]'] },
+      { chiave: 'stoccaggio', w: 17, titolo: ['STOCCAGG.', '[€/t]'] },
+      { chiave: 'trattamento', w: 17, titolo: ['TRATTAM.', '[€/t]'] },
+      // Il trasporto e' a VIAGGIO: non si moltiplica per il peso, entra nel
+      // totale com'e'. Il titolo lo dice, altrimenti in mezzo a tre prezzi a
+      // tonnellata si legge come il quarto.
+      { chiave: 'trasporto', w: 17, titolo: ['TRASPORTO', '[€/vg]'] },
+      { chiave: 'oneri', w: 17, titolo: ['ONERI', 'FISSI'] },
+      { chiave: 'totale', w: 21, titolo: ['TOTALE'] },
+      ...(conNote ? [{ chiave: 'note', w: 22, titolo: ['Note'], sx: true }] : []),
     ];
     dove = `${f.nome_canale} · INTERVENTI`;
     spazio(32);
@@ -484,6 +488,7 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
         raccolta: { testo: prezzo(r.raccolta_t), colore: r.raccolta_t ? C.testo : C.tenue },
         stoccaggio: { testo: prezzo(r.stoccaggio_t), colore: r.stoccaggio_t ? C.testo : C.tenue },
         trattamento: { testo: prezzo(r.trattamento_t), colore: r.trattamento_t ? C.testo : C.tenue },
+        trasporto: { testo: r.trasporto_viaggio ? euro(r.trasporto_viaggio) : '', colore: C.testo },
         oneri: { testo: r.oneri ? euro(r.oneri) : '', colore: C.testo },
         totale: { testo: euro(r.totale), grassetto: true, colore: r.senza_costi ? C.ambra : C.testo },
         note: { testo: r.note || '', colore: C.grigio },
