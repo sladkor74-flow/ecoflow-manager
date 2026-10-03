@@ -16,6 +16,7 @@ import { cartellaPassivaUnFoglio, cartellaPassivaPerCanale } from '@/lib/passiva
 import { esportaPassivaAmministrazionePdf } from '@/lib/passivaAmministrazionePdf';
 import { fogliDa, nomeFilePassiva } from '@/lib/passivaAmministrazione';
 import { modelloAmministrazione, quanteVociModello } from '@/lib/modelloPassivaAmministrazione';
+import { bloccoExtraRaccolta } from '@/lib/extraRaccoltaAmministrazione';
 import { scarica } from '@/lib/docxModello';
 import VociPassivaDialog from './VociPassivaDialog';
 
@@ -41,7 +42,13 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
   // calcolato, cosi' non si comincia da zero.
   const [ammLoading, setAmmLoading] = useState(false);
   const [vociAperte, setVociAperte] = useState(false);
-  const CANALI_AMM = ['RETE', 'ACI'];
+  // L'EXTRA RACCOLTA C'E', e ha un blocco tutto suo. L'utente, 03/10/2026: «nella
+  // fatturazione passiva tutto cio' che riguarda l'extra raccolta deve rientrare
+  // solo quando in quel determinato mese effettivamente sono stati chiusi quei
+  // movimenti e le info vanno riprese dal modulo 'extra raccolta', compresi i
+  // prezzi». Percio' per questo canale non si chiede niente al calcolo della
+  // passiva: le righe sono gli interventi del modulo, coi loro prezzi.
+  const CANALI_AMM = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
   const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   const esportaAmministrazione = async (come) => {
     setAmmLoading(true);
@@ -56,9 +63,19 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
       const tariffe = await base44.entities.Tariffa.filter({ direzione: 'PASSIVA', stato: 'attivo' }, '-created_date', 2000).catch(() => []);
       const per = {};
       for (const canale of CANALI_AMM) {
+        if (canale === 'EXTRA_RACCOLTA') {
+          // Il canale c'e' nel foglio, ma il suo contenuto non viene dal calcolo:
+          // viene dagli interventi. Un oggetto vuoto basta a tenerlo nell'elenco.
+          per[canale] = {};
+          continue;
+        }
         const res = await base44.functions.invoke('calcolaPassiva', { anno: periodo.anno, mese: periodo.mese, tipologia: canale });
         per[canale] = res.data || res;
       }
+      // Gli interventi: tutti, e il blocco si prende quelli terminati con la fine
+      // trasporto nel mese, col giorno italiano.
+      const interventi = await base44.entities.ExtraRaccolta.list('-created_date', 5000).catch(() => []);
+      const extra = bloccoExtraRaccolta(interventi, periodo.anno, periodo.mese);
       // Senza voci il foglio uscirebbe vuoto. Si propone il modello
       // dell'amministrazione - le sue righe e i suoi prezzi, quelli con cui
       // settembre 2026 torna al centesimo - e poi l'utente lo corregge dal
@@ -81,7 +98,7 @@ Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci 
         for (const v of proposta) await base44.entities.VocePassivaAmministrazione.create(v);
         voci.push(...proposta);
       }
-      const fogli = fogliDa(voci, per, periodo.mese, periodo.anno, tariffe);
+      const fogli = fogliDa(voci, per, periodo.mese, periodo.anno, tariffe, extra);
       if (come === 'pdf') {
         await esportaPassivaAmministrazionePdf(fogli, { anno: periodo.anno, mese: periodo.mese });
       } else {

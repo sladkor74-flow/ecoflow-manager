@@ -52,6 +52,9 @@ const EER_PFU = '160103';
 const t = (v) => formatTonnellate(v);
 const euro = (v) => `${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 const prezzo = (v) => formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Le date arrivano come aaaa-mm-gg, giorno italiano: si scrivono 10/09/2026 e
+// restano testo, per non rimettere in ballo i fusi orari su un documento.
+const giornoIt = (v) => (/^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(v).slice(0, 10).split('-').reverse().join('/') : String(v || ''));
 
 // Le intestazioni delle colonne del prezzo arrivano come le scrive
 // l'amministrazione, per esempio «Costo di Raccolta [€\t]»: l'unita' di misura va
@@ -136,7 +139,16 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
   // numero che nessuno deve usare.
   const riquadri = (f) => {
     const viaggi = f.trasporti.righe.length;
-    const voci = [
+    // L'extra raccolta non ha raccoglitori ne' impianti a modello: ha interventi,
+    // ognuno coi suoi prezzi. I riquadri dicono quelli.
+    const oneri = f.extra ? (f.extra.righe || []).reduce((s, r) => s + (Number(r.oneri) || 0), 0) : 0;
+    const quanti = f.extra ? (f.extra.righe || []).length : 0;
+    const voci = f.extra ? [
+      { etichetta: 'Interventi chiusi nel mese', valore: formatIntero(quanti), sotto: quanti === 1 ? 'un intervento' : 'interventi con la fine trasporto in questo mese', colore: C.blu },
+      { etichetta: 'Peso', valore: `${t(f.extra.totale_t)} t`, sotto: `${formatIntero(f.extra.totale_kg)} kg`, colore: C.viola },
+      { etichetta: 'Oneri fissi', valore: euro(oneri), sotto: 'pulizia e costi aggiuntivi degli interventi', colore: C.medio },
+      { etichetta: 'TOTALE EXTRA RACCOLTA', valore: euro(f.totale_euro), sotto: 'solo questo canale: non si somma agli altri', colore: C.scuro },
+    ] : [
       { etichetta: 'Raccoglitori', valore: euro(f.raccoglitori.totale_euro), sotto: `${t(f.raccoglitori.totale_t)} t raccolte`, colore: C.blu },
       { etichetta: 'Impianti \\ stoccaggi', valore: euro(f.impianti.totale_euro), sotto: `${t(f.impianti.totale_t)} t trattate o stoccate`, colore: C.viola },
       { etichetta: 'Trasporto secondarie', valore: euro(f.trasporti.totale_euro), sotto: `${t(f.trasporti.totale_t)} t · ${formatIntero(viaggi)} ${viaggi === 1 ? 'viaggio' : 'viaggi'}`, colore: C.medio },
@@ -419,6 +431,86 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
     y += 4;
   };
 
+  // L'EXTRA RACCOLTA: il dettaglio degli interventi chiusi nel mese.
+  //
+  // Non ha un modello di voci e non ci deve essere: ogni intervento fa storia a
+  // se', coi suoi prezzi scritti a mano sull'intervento prima di passarlo a
+  // terminato (utente, 03/10/2026). Sulla carta stanno le colonne che servono a
+  // capire e a pagare; l'ordine Ecotyre, il CER e la data di inizio trasporto
+  // stanno nel foglio Excel, e la legenda lo dice.
+  const tabellaExtra = (f) => {
+    const righe = (f.extra && f.extra.righe) || [];
+    const conNote = righe.some(r => r.note);
+    // Le colonne dei numeri stanno strette - «90,00» non ha bisogno di spazio -
+    // perche' quello che serve largo sono i tre nomi: con colonne da venti
+    // millimetri «COMUNE DI MARCIANISE» perdeva il cognome per strada.
+    const fisse = 22 + 17 + 17 + 19 + 21 + 22 + 18 + 23 + (conNote ? 24 : 0);
+    const nome = (L - fisse) / 3;
+    const colonne = [
+      { chiave: 'fir', w: 22, titolo: ['Nr. FIR'], sx: true },
+      { chiave: 'produttore', w: nome, titolo: ['PRODUTTORE'], sx: true },
+      { chiave: 'trasportatore', w: nome, titolo: ['TRASPORTATORE'], sx: true },
+      { chiave: 'destinatario', w: nome, titolo: ['DESTINATARIO'], sx: true },
+      { chiave: 'fine', w: 17, titolo: ['DATA', 'F.T.'] },
+      { chiave: 'tonnellate', w: 17, titolo: ['PESO', '[t]'] },
+      { chiave: 'raccolta', w: 19, titolo: ['RACCOLTA', '[€/t]'] },
+      { chiave: 'stoccaggio', w: 21, titolo: ['STOCCAGGIO', '[€/t]'] },
+      { chiave: 'trattamento', w: 22, titolo: ['TRATTAM.', '[€/t]'] },
+      { chiave: 'oneri', w: 18, titolo: ['ONERI', 'FISSI'] },
+      { chiave: 'totale', w: 23, titolo: ['TOTALE'] },
+      ...(conNote ? [{ chiave: 'note', w: 24, titolo: ['Note'], sx: true }] : []),
+    ];
+    dove = `${f.nome_canale} · INTERVENTI`;
+    spazio(32);
+    doc.setTextColor(...C.scuro);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.6);
+    doc.text('EXTRA RACCOLTA — interventi chiusi nel mese', M, y + 3.4);
+    doc.setFont('helvetica', 'normal');
+    y += 6;
+    intestazioneRipetuta = () => intestazioneTabella(colonne);
+    intestazioneTabella(colonne);
+    if (!righe.length) {
+      riga(colonne, { produttore: { testo: 'Nessun intervento di extra raccolta chiuso in questo mese.', colore: C.grigio } }, { h: 6.5 });
+    }
+    righe.forEach((r, i) => {
+      riga(colonne, {
+        fir: { testo: r.numero_fir },
+        produttore: { testo: r.produttore },
+        trasportatore: { testo: r.trasportatore },
+        destinatario: { testo: r.destinatario },
+        fine: { testo: giornoIt(r.fine), colore: C.grigio },
+        tonnellate: { testo: t(r.tonnellate), grassetto: r.tonnellate > 0 },
+        raccolta: { testo: prezzo(r.raccolta_t), colore: r.raccolta_t ? C.testo : C.tenue },
+        stoccaggio: { testo: prezzo(r.stoccaggio_t), colore: r.stoccaggio_t ? C.testo : C.tenue },
+        trattamento: { testo: prezzo(r.trattamento_t), colore: r.trattamento_t ? C.testo : C.tenue },
+        oneri: { testo: r.oneri ? euro(r.oneri) : '', colore: C.testo },
+        totale: { testo: euro(r.totale), grassetto: true, colore: r.senza_costi ? C.ambra : C.testo },
+        note: { testo: r.note || '', colore: C.grigio },
+      }, { sfondo: i % 2 ? C.zebra : null });
+    });
+    // L'etichetta del totale sta nella colonna del produttore, che e' larga: nella
+    // prima, quella del formulario, «Totale extra raccolta» ci veniva tagliato.
+    riga(colonne, {
+      produttore: { testo: 'Totale extra raccolta' },
+      tonnellate: { testo: t(f.extra.totale_t) },
+      totale: { testo: euro(f.extra.totale_euro) },
+    }, { sfondo: C.scuro, grassetto: true, colore: C.bianco, h: 7.5, senzaBordo: true });
+    y += 4;
+
+    // Quello che va sistemato prima di fatturare.
+    const frasi = [];
+    for (const x of (f.extra.senza_costi || [])) {
+      frasi.push(`${x.numero_fir} · ${x.produttore} → ${x.destinatario}, ${formatIntero(x.kg)} kg: nessun costo scritto sull'intervento, la passiva non paga niente.`);
+    }
+    for (const x of (f.extra.senza_data || [])) {
+      frasi.push(`${x.numero_fir} · ordine ${x.ordine} · ${x.produttore}, ${formatIntero(x.kg)} kg: terminato senza data di fine trasporto, non sta in nessun mese.`);
+    }
+    if (frasi.length) {
+      riquadroNota(frasi, { colore: C.ambra, sfondo: C.ambraChiaro, inchiostro: C.ambraScuro, titolo: 'Da sistemare nel modulo Extra Raccolta' });
+    }
+  };
+
   // QUELLO CHE AL MODELLO MANCA, in coda al suo blocco e in ambra.
   //
   // Le righe 'senza_voce' sono chili che il mese ha davvero avuto e che nessuna
@@ -509,6 +601,9 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
       'L\'EER 160103 è quello dei pneumatici fuori uso ed è lo stesso su tutte le righe. Le tonnellate sono i pesi effettivi del mese, con due decimali.',
       'RETE, ACI ed extra raccolta sono canali indipendenti e non si sommano mai fra loro: per questo ogni canale ha il suo totale e in fondo al documento non c\'è nessun totale generale.',
       'Le righe in ambra sono quello che al modello manca: finché restano, il foglio non sta fatturando tutto il mese.',
+      ...(elenco.some(f => f.extra) ? [
+        'L\'extra raccolta non ha voci fisse: ogni intervento fa storia a sé, coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull\'intervento prima di passarlo a terminato, più gli oneri fissi (pulizia e costi aggiuntivi). Entra nel mese in cui la fine trasporto è stata chiusa. Nel foglio Excel ci sono anche l\'ordine Ecotyre, il CER e la data di inizio trasporto.',
+      ] : []),
     ], { colore: C.medio, sfondo: C.zebra, inchiostro: C.testo, titolo: 'Come si legge questo documento' });
   };
 
@@ -522,6 +617,12 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
   for (const f of elenco) {
     titoloCanale(f);
     riquadri(f);
+    // L'extra raccolta ha un blocco solo, il dettaglio degli interventi: le
+    // cornici vuote degli altri due farebbero cercare numeri dove non ce ne sono.
+    if (f.extra) {
+      tabellaExtra(f);
+      continue;
+    }
     tabellaBlocco(f, f.raccoglitori);
     tabellaBlocco(f, f.impianti);
     tabellaTrasporto(f);

@@ -460,7 +460,7 @@ export function giornoDelMese(anno, mese) {
  * impianti_stoccaggi, trasporti_secondaria }. Il trasporto non ha voci fisse -
  * le righe sono i viaggi del mese - quindi si riporta com'e'.
  */
-export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe) {
+export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra) {
   const aci = canale === 'ACI';
   // Il giorno con cui si guarda il tariffario: il quindici del mese, che sta
   // dentro il mese qualunque sia e quindi prende le tariffe di quel mese anche
@@ -511,16 +511,25 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe) {
       totale_t: n3(trasporti.reduce((s, t) => s + t.tonnellate, 0)),
       totale_euro: totaleTrasporti,
     },
-    // Il numero in cima al foglio: i tre blocchi di QUESTO canale, mai di altri.
-    totale_euro: n2(raccoglitori.totale_euro + impianti.totale_euro + totaleTrasporti),
+    // L'EXTRA RACCOLTA NON HA VOCI FISSE: ogni intervento fa storia a se', coi
+    // suoi prezzi scritti a mano sull'intervento prima di passarlo a terminato.
+    // Il suo blocco e' il dettaglio degli interventi chiusi nel mese e lo
+    // costruisce src/lib/extraRaccoltaAmministrazione.js dal modulo Extra
+    // Raccolta, come ha chiesto l'utente il 03/10/2026; qui si riporta e basta,
+    // perche' questo file deve restare caricabile dalle prove senza tirarsi
+    // dietro mezzo gestionale.
+    extra: canale === 'EXTRA_RACCOLTA' ? (extra || null) : null,
+    // Il numero in cima al foglio: i blocchi di QUESTO canale, mai di altri.
+    totale_euro: n2(raccoglitori.totale_euro + impianti.totale_euro + totaleTrasporti
+      + (canale === 'EXTRA_RACCOLTA' && extra ? Number(extra.totale_euro) || 0 : 0)),
   };
 }
 
 /** I fogli dei canali chiesti, costruiti dalle voci e dalla passiva gia' calcolata. */
-export function fogliDa(voci, passivePerCanale, mese, anno, tariffe) {
+export function fogliDa(voci, passivePerCanale, mese, anno, tariffe, extra) {
   return Object.entries(passivePerCanale || {})
     .filter(([, p]) => p)
-    .map(([canale, p]) => foglioPassiva(voci, p, canale, mese, anno, tariffe));
+    .map(([canale, p]) => foglioPassiva(voci, p, canale, mese, anno, tariffe, extra));
 }
 
 export const nomeFilePassiva = (anno, mese, come, estensione) =>

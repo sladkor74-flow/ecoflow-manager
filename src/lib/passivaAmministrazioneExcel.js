@@ -61,8 +61,14 @@ const EER_PFU = 160103;
 // stesso foglio convivono tabelle diverse: la prima colonna tiene i nomi dei
 // fornitori, la seconda e la terza stanno larghe perche' nel trasporto portano
 // trasportatore e destinatario.
-const LARGHEZZE = [44, 22, 22, 15, 17, 15, 13, 17, 44];
+const LARGHEZZE = [44, 22, 22, 18, 18, 16, 14, 17, 40];
 const LARGHEZZA = LARGHEZZE.length;
+
+// L'extra raccolta ha una tabella sua, di sedici colonne: quando il canale ha un
+// foglio tutto suo si usano queste, che sono fatte per quelle colonne. Nel file
+// con tutti i canali insieme le colonne sono le stesse per tutti e il compromesso
+// e' inevitabile - e' cosi' anche nel foglio dell'amministrazione.
+const LARGHEZZE_EXTRA = [20, 18, 34, 28, 28, 13, 13, 11, 15, 12, 15, 16, 17, 15, 16, 40];
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const n2 = (v) => Math.round(num(v) * 100) / 100;
@@ -380,6 +386,132 @@ function scriviTrasporto(ws, r0, trasporti0, nomeCanale) {
   return { prossima: r + 1, cellaTotale: `H${r}` };
 }
 
+// L'EXTRA RACCOLTA: il dettaglio degli interventi chiusi nel mese.
+//
+// Qui non c'e' un modello di voci e non ci deve essere: ogni intervento fa storia
+// a se', coi suoi prezzi scritti sull'intervento prima di passarlo a terminato
+// (richiesta dell'utente, 03/10/2026: «le info vanno riprese dal modulo extra
+// raccolta, compresi i prezzi»). Le colonne sono quelle del foglio
+// dell'amministrazione, con l'ordine Ecotyre in piu' perche' li' manca e serve a
+// ritrovare l'intervento.
+const COLONNE_EXTRA = [
+  { chiave: 'numero_fir', titolo: 'Nr. FIR' },
+  { chiave: 'ordine', titolo: 'ORDINE ECOTYRE' },
+  { chiave: 'produttore', titolo: 'PRODUTTORE' },
+  { chiave: 'trasportatore', titolo: 'TRASPORTATORE' },
+  { chiave: 'destinatario', titolo: 'DESTINATARIO' },
+  { chiave: 'inizio', titolo: 'DATA I.T.', centro: true },
+  { chiave: 'fine', titolo: 'DATA F.T.', centro: true },
+  { chiave: 'cer', titolo: 'CER', centro: true },
+  { chiave: 'kg', titolo: "QUANTITA' (kg)", numero: INTERO },
+  { chiave: 'tonnellate', titolo: 'PESO [t]', numero: 'T' },
+  { chiave: 'raccolta_t', titolo: 'RACCOLTA [€\\t]', numero: EURO },
+  { chiave: 'stoccaggio_t', titolo: 'STOCCAGGIO [€\\t]', numero: EURO },
+  { chiave: 'trattamento_t', titolo: 'TRATTAMENTO [€\\t]', numero: EURO },
+  { chiave: 'oneri', titolo: 'ONERI FISSI [€]', numero: EURO },
+  { chiave: 'totale', titolo: 'TOTALE (Euro)', numero: EURO },
+  { chiave: 'note', titolo: 'Note' },
+];
+const LARGO_EXTRA = COLONNE_EXTRA.length;
+/** La data come si legge: 10/09/2026. Testo, non data, per non rimettere in ballo i fusi. */
+const giornoIt = (v) => (/^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(v).slice(0, 10).split('-').reverse().join('/') : testo(v));
+
+function scriviExtra(ws, r0, extra0) {
+  const extra = extra0 && typeof extra0 === 'object' ? extra0 : {};
+  const righe = elenco(extra.righe);
+  let r = r0;
+  const sp = { grassetto: true, sfondo: CHIARO, colore: SCURO, bordo: { top: { style: 'medium', color: { argb: MEDIO } } } };
+  stendi(ws, r, 1, LARGO_EXTRA, sp);
+  scrivi(ws, r, 1, 'EXTRA RACCOLTA — interventi chiusi nel mese', sp);
+  ws.mergeCells(r, 1, r, LARGO_EXTRA);
+  r++;
+
+  const testa = { sfondo: MEDIO, colore: BIANCO, grassetto: true, bordo: GRIGLIA, capo: true };
+  stendi(ws, r, 1, LARGO_EXTRA, testa);
+  COLONNE_EXTRA.forEach((c, i) => scrivi(ws, r, i + 1, c.titolo, { ...testa, allinea: c.numero ? 'right' : (c.centro ? 'center' : 'left') }));
+  ws.getRow(r).height = 30;
+  r++;
+
+  const sommandi = [];
+  let zebrata = false;
+  const iT = COLONNE_EXTRA.findIndex(c => c.chiave === 'tonnellate') + 1;
+  const iRac = COLONNE_EXTRA.findIndex(c => c.chiave === 'raccolta_t') + 1;
+  const iSto = COLONNE_EXTRA.findIndex(c => c.chiave === 'stoccaggio_t') + 1;
+  const iTra = COLONNE_EXTRA.findIndex(c => c.chiave === 'trattamento_t') + 1;
+  const iOn = COLONNE_EXTRA.findIndex(c => c.chiave === 'oneri') + 1;
+  const iKg = COLONNE_EXTRA.findIndex(c => c.chiave === 'kg') + 1;
+  const iTot = COLONNE_EXTRA.findIndex(c => c.chiave === 'totale') + 1;
+  for (const x of righe) {
+    if (!x) continue;
+    const st = { bordo: GRIGLIA, ...(zebrata ? { sfondo: ZEBRA } : {}) };
+    stendi(ws, r, 1, LARGO_EXTRA, st);
+    COLONNE_EXTRA.forEach((c, i) => {
+      if (c.chiave === 'totale') return;
+      const v = x[c.chiave];
+      const stile = { ...st, allinea: c.numero ? 'right' : (c.centro ? 'center' : 'left') };
+      if (c.chiave === 'note') scrivi(ws, r, i + 1, testo(v), { ...stile, corsivo: true, colore: TENUE });
+      else if (c.numero === 'T') scrivi(ws, r, i + 1, num(v), { ...stile, fmt: fmtT(v) });
+      else if (c.numero) scrivi(ws, r, i + 1, num(v), { ...stile, fmt: c.numero });
+      else if (c.centro) scrivi(ws, r, i + 1, giornoIt(v), stile);
+      else scrivi(ws, r, i + 1, testo(v), stile);
+    });
+    // Il totale com'e' nel loro foglio: i tre costi a tonnellata per il peso, piu'
+    // gli oneri fissi. Scritto come formula, cosi' correggere un prezzo rifa' il
+    // conto; il numero che porta dentro e' quello del modulo Extra Raccolta.
+    scrivi(ws, r, iTot, {
+      formula: `(${lettera(iRac)}${r}+${lettera(iSto)}${r}+${lettera(iTra)}${r})*${lettera(iT)}${r}+${lettera(iOn)}${r}`,
+      result: n2(x.totale),
+    }, { ...st, allinea: 'right', fmt: EURO, grassetto: true });
+    sommandi.push(r);
+    zebrata = !zebrata;
+    r++;
+  }
+  if (!sommandi.length) {
+    const st = { corsivo: true, colore: TENUE, bordo: GRIGLIA };
+    stendi(ws, r, 1, LARGO_EXTRA, st);
+    scrivi(ws, r, 1, 'Nessun intervento di extra raccolta chiuso in questo mese.', st);
+    r++;
+  }
+
+  const stT = { grassetto: true, sfondo: CHIARO, bordo: CHIUDE };
+  stendi(ws, r, 1, LARGO_EXTRA, stT);
+  scrivi(ws, r, 1, 'Totale extra raccolta', stT);
+  const sKg = somma(iKg, sommandi);
+  const sT = somma(iT, sommandi);
+  const sE = somma(iTot, sommandi);
+  scrivi(ws, r, iKg, sKg ? { formula: sKg, result: Math.round(num(extra.totale_kg)) } : Math.round(num(extra.totale_kg)), { ...stT, allinea: 'right', fmt: INTERO });
+  scrivi(ws, r, iT, sT ? { formula: sT, result: num(extra.totale_t) } : num(extra.totale_t), { ...stT, allinea: 'right', fmt: fmtT(extra.totale_t) });
+  scrivi(ws, r, iTot, sE ? { formula: sE, result: n2(extra.totale_euro) } : n2(extra.totale_euro), { ...stT, allinea: 'right', fmt: EURO });
+  const cellaTotale = `${lettera(iTot)}${r}`;
+  r++;
+
+  // Quello che va sistemato prima di fatturare: un intervento chiuso senza
+  // nessun costo scritto non si paga, e quasi sempre e' una dimenticanza; un
+  // terminato senza fine trasporto non sta in nessun mese.
+  const avvisa = (titolo, elenco2, come) => {
+    if (!elenco2.length) return;
+    r++;
+    const sa = { grassetto: true, colore: 'FFD97806', sfondo: 'FFFEF3C7', bordo: GRIGLIA };
+    stendi(ws, r, 1, LARGO_EXTRA, sa);
+    scrivi(ws, r, 1, titolo, sa);
+    ws.mergeCells(r, 1, r, LARGO_EXTRA);
+    r++;
+    for (const x of elenco2) {
+      const st = { bordo: GRIGLIA, colore: 'FF92400E' };
+      stendi(ws, r, 1, LARGO_EXTRA, st);
+      scrivi(ws, r, 1, come(x), st);
+      ws.mergeCells(r, 1, r, LARGO_EXTRA);
+      r++;
+    }
+  };
+  avvisa('DA SISTEMARE: interventi chiusi senza nessun costo scritto. La passiva non paga niente: scrivi i costi sull\'intervento.',
+    elenco(extra.senza_costi), (x) => `${x.numero_fir} · ${x.produttore} → ${x.destinatario} · ${Math.round(num(x.kg)).toLocaleString('it-IT')} kg`);
+  avvisa('DA SISTEMARE: interventi terminati senza data di fine trasporto. Non stanno in nessun mese e non si fatturano.',
+    elenco(extra.senza_data), (x) => `${x.numero_fir} · ordine ${x.ordine} · ${x.produttore} · ${Math.round(num(x.kg)).toLocaleString('it-IT')} kg`);
+
+  return { prossima: r + 1, cellaTotale };
+}
+
 /** Il periodo come si scrive nei titoli: «Settembre 2026». */
 const periodoDi = (f) => [testo(f && f.mese), f && f.anno ? String(f.anno) : ''].filter(Boolean).join(' ');
 
@@ -406,6 +538,15 @@ function scriviCanale(ws, r0, f) {
   ws.getRow(r0).height = 26;
   ws.mergeCells(r0, 1, r0, 4);
 
+  // L'EXTRA RACCOLTA ha un blocco solo, il dettaglio degli interventi: non ha
+  // voci fisse ne' trasporto delle secondarie, e scriverne le cornici vuote
+  // vorrebbe dire far cercare numeri dove non ce ne sono.
+  if (f.extra) {
+    const ex = scriviExtra(ws, r0 + 2, f.extra);
+    scrivi(ws, r0, 5, { formula: ex.cellaTotale, result: n2(f.totale_euro) }, { ...st, allinea: 'right', fmt: EURO });
+    return ex.prossima;
+  }
+
   let r = r0 + 2;
   const racc = scriviBlocco(ws, r, f.raccoglitori, { titolo: 'RACCOGLITORI', etichetta: 'Costo di Raccolta [€\\t]', stile });
   r = racc.prossima + 1;
@@ -419,12 +560,13 @@ function scriviCanale(ws, r0, f) {
 }
 
 /** Il titolo in cima al foglio: chi manda il documento e di che mese parla. */
-function titoloFoglio(ws, periodo) {
+function titoloFoglio(ws, periodo, largo) {
+  const quante = largo || LARGHEZZA;
   const st = { grassetto: true, corpo: 14, colore: SCURO };
-  stendi(ws, 1, 1, LARGHEZZA, st);
+  stendi(ws, 1, 1, quante, st);
   scrivi(ws, 1, 1, `SMOCO S.r.l. · Commessa Ecotyre · Fatturazione passiva${periodo ? ` — ${periodo}` : ''}`, st);
   ws.getRow(1).height = 22;
-  ws.mergeCells(1, 1, 1, LARGHEZZA);
+  ws.mergeCells(1, 1, 1, quante);
 }
 
 /**
@@ -432,9 +574,21 @@ function titoloFoglio(ws, periodo) {
  * voci a zero ci sono di proposito, e che i totali sono formule - cosi' nessuno
  * ricalcola a mano una colonna che si rifa' da se'.
  */
-function notaFinale(ws, r) {
+function notaFinale(ws, r, fogli) {
+  const quali = elenco(fogli);
+  // Il foglio della sola extra raccolta non ha voci a modello: la nota che parla
+  // di righe a zero li' non vuol dire niente, e una spiegazione che non c'entra
+  // fa dubitare anche di quelle giuste.
+  const soloExtra = quali.length > 0 && quali.every(f => f && f.extra);
+  const largo = soloExtra ? LARGHEZZE_EXTRA.length : LARGHEZZA;
   const st = { corsivo: true, colore: TENUE, capo: true };
-  stendi(ws, r, 1, LARGHEZZA, st);
+  stendi(ws, r, 1, largo, st);
+  if (soloExtra) {
+    scrivi(ws, r, 1, 'L\'extra raccolta non ha voci a modello: ogni intervento fa storia a se\', coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull\'intervento, piu\' gli oneri fissi (pulizia e costi aggiuntivi). Entra nel mese in cui e\' stata chiusa la fine trasporto. I totali sono formule: correggi un prezzo e si rifanno da soli. Tonnellate con due decimali (tre quando i chili non sono tondi), importi in euro, EER 160103 dei PFU. I canali non si sommano fra loro.', st);
+    ws.mergeCells(r, 1, r, largo);
+    ws.getRow(r).height = 30;
+    return;
+  }
   scrivi(ws, r, 1, 'Le voci del modello restano nel foglio anche a zero: il foglio e\' lo stesso ogni mese e un conferimento comparso dove prima non ce n\'erano si vede subito. I totali sono formule: correggi un prezzo e i totali si rifanno da soli. Tonnellate con due decimali (tre quando i chili non sono tondi), importi in euro, EER 160103 dei PFU. I canali non si sommano fra loro.', st);
   ws.mergeCells(r, 1, r, LARGHEZZA);
   ws.getRow(r).height = 30;
@@ -446,8 +600,8 @@ function notaFinale(ws, r) {
  * su una pagina, col numero di pagina in fondo, perche' un allegato di tre
  * fogli senza numeri non si rimette in ordine.
  */
-function impagina(ws) {
-  ws.columns = LARGHEZZE.map(width => ({ width }));
+function impagina(ws, larghezze) {
+  ws.columns = (larghezze || LARGHEZZE).map(width => ({ width }));
   perLaStampa(ws, { ripeti: 1 });
 }
 
@@ -474,7 +628,7 @@ export async function cartellaPassivaUnFoglio(fogli) {
   // nemmeno a vedersi devono sembrare la continuazione uno dell'altro.
   let r = 3;
   for (const f of quali) r = scriviCanale(ws, r, f) + 2;
-  notaFinale(ws, r);
+  notaFinale(ws, r, quali);
   return bytes(wb);
 }
 
@@ -492,9 +646,9 @@ export async function cartellaPassivaPerCanale(fogli) {
     const ws = wb.addWorksheet(nomeFoglio(f.nome_canale || f.canale), {
       views: [{ state: 'frozen', ySplit: 1, showGridLines: false }],
     });
-    impagina(ws);
-    titoloFoglio(ws, periodo);
-    notaFinale(ws, scriviCanale(ws, 3, f) + 1);
+    impagina(ws, f.extra ? LARGHEZZE_EXTRA : null);
+    titoloFoglio(ws, periodo, f.extra ? LARGHEZZE_EXTRA.length : LARGHEZZA);
+    notaFinale(ws, scriviCanale(ws, 3, f) + 1, [f]);
   }
   // Una cartella senza nemmeno un foglio di lavoro non si apre: se non c'e'
   // nessun canale si scrive un foglio che lo dice.

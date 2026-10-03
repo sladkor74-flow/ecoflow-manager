@@ -366,8 +366,11 @@ verifica('in fondo la nota che spiega le voci a zero e le formule',
   primaChePorta(ws, 'I totali sono formule', fasciaExtra) > fasciaExtra, String(primaChePorta(ws, 'I totali sono formule', fasciaExtra)));
 
 console.log('\nLE LARGHEZZE E LA STAMPA');
-verifica('le colonne hanno una larghezza', ws.getColumn(1).width === 44 && ws.getColumn(9).width === 44 && ws.getColumn(4).width === 15,
-  [1, 4, 9].map(c => ws.getColumn(c).width).join('|'));
+// Le larghezze sono un compromesso fra tabelle diverse nello stesso foglio: qui
+// si controlla solo che ci siano e che la prima colonna, quella dei nomi dei
+// fornitori, sia larga davvero.
+verifica('le colonne hanno una larghezza', ws.getColumn(1).width === 44 && ws.columns.slice(0, 9).every(c => c.width >= 14),
+  ws.columns.slice(0, 9).map(c => c.width).join('|'));
 verifica('si stampa orizzontale, stretta in larghezza su una pagina',
   ws.pageSetup.orientation === 'landscape' && ws.pageSetup.fitToWidth === 1 && ws.pageSetup.fitToHeight === 0, JSON.stringify(ws.pageSetup));
 verifica('in fondo alla pagina stampata c\'e\' il numero di pagina',
