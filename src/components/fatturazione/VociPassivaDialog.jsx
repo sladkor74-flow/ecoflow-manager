@@ -443,9 +443,12 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
           <DialogHeader>
             <DialogTitle>Voci del format amministrazione - passiva {annoNum}</DialogTitle>
             <DialogDescription>
-              Sotto ogni fornitore le sue righe col prezzo, che nel foglio si vedono sempre, anche a zero: cosi&apos; il
-              foglio e&apos; identico ogni mese e un conferimento nuovo si vede comparire. Le quantita&apos; non si
-              scrivono qui, le mette il gestionale dai movimenti del mese.
+              Sotto ogni fornitore le sue righe, che nel foglio si vedono sempre, anche a zero: cosi&apos; il foglio
+              e&apos; identico ogni mese e un conferimento nuovo si vede comparire. Qui si decidono i nomi delle righe
+              e come si riconoscono i movimenti di ciascuna. Le quantita&apos; le mette il gestionale dai movimenti del
+              mese, e <strong>il prezzo lo dice il tariffario</strong>: sulle righe con movimenti quello che il mese ha
+              applicato, sulle righe a zero la tariffa in vigore in quel mese. Il prezzo scritto qui sotto si usa
+              soltanto se il tariffario non dice niente, e in quel caso il foglio lo dichiara nelle note.
             </DialogDescription>
           </DialogHeader>
 
@@ -504,7 +507,9 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
                   <Input value={form.voce} onChange={e => setForm({ ...form, voce: e.target.value })} placeholder="Campania - SALERNO" />
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Prezzo</label>
+                  <label className="text-xs text-muted-foreground block mb-1" title="Il prezzo del foglio viene dal tariffario: questo si usa solo se il tariffario non dice niente per questa riga">
+                    Prezzo di riserva (il foglio usa il tariffario)
+                  </label>
                   <Input type="number" step="0.01" value={form.prezzo} onChange={e => setForm({ ...form, prezzo: Number(e.target.value) })} />
                 </div>
                 <div>
@@ -674,7 +679,7 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
                               <th className="text-left px-2 py-2 font-semibold">Soggetto</th>
                               <th className="text-left px-2 py-2 font-semibold">Voce</th>
                               <th className="text-left px-2 py-2 font-semibold">Prende</th>
-                              <th className="text-right px-2 py-2 font-semibold">Prezzo</th>
+                              <th className="text-right px-2 py-2 font-semibold" title="Prezzo di riserva: il foglio usa quello del tariffario, e questo solo se il tariffario non dice niente">Prezzo di riserva</th>
                               <th className="text-left px-2 py-2 font-semibold">Colonna</th>
                               <th className="text-right px-2 py-2 font-semibold">Ordine</th>
                               <th className="text-center px-2 py-2 font-semibold">Attiva</th>
