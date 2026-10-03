@@ -57,7 +57,14 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
       // dell'amministrazione - le sue righe e i suoi prezzi, quelli con cui
       // settembre 2026 torna al centesimo - e poi l'utente lo corregge dal
       // pulsante «Voci del foglio».
-      if (!voci.length) {
+      //
+      // Si contano le voci CON UN SOGGETTO, non tutte: in archivio sono rimaste
+      // quattro righe senza nome, nate da una proposta automatica sbagliata, e
+      // quelle non agganciano nessun movimento. Contandole, il gestionale
+      // avrebbe creduto di avere un modello e avrebbe scritto un foglio vuoto
+      // senza dire niente.
+      const utili = voci.filter(v => v && String(v.soggetto || '').trim());
+      if (!utili.length) {
         if (!window.confirm(`Il modello delle voci di ${periodo.anno} e' vuoto: il foglio uscirebbe senza righe.
 
 Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci - i fornitori, le loro righe e i prezzi del foglio di settembre 2026 - e restano tutte modificabili dal pulsante «Voci del foglio».`)) {
