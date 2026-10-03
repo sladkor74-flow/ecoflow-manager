@@ -152,7 +152,15 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium">
                   {(() => {
                     if (flusso.canale === 'RETE' && sito.dichiara_rete === false) return <span className="text-muted-foreground">—</span>;
-                    const resta = flusso.canale === 'RETE' ? sito.giacenza_calcolata_t : flusso.da_dichiarare_t;
+                    // LA GIACENZA DEL CANALE DI QUESTA RIGA, non piu' solo della rete.
+                    // Stessa formula per tutti e tre, mai sommati fra loro. Se per un
+                    // canale la giacenza non c'e' si ripiega sulla somma dei mesi, che e'
+                    // quello che si faceva prima dappertutto.
+                    const g = (sito.giacenze_canale || []).find(x => x.canale === flusso.canale);
+                    const resta = g ? g.giacenza_t : flusso.da_dichiarare_t;
+                    // Una giacenza sotto zero si mostra e si segnala: e' un errore da
+                    // correggere, non un numero da azzerare (utente, 03/10/2026).
+                    if (resta < 0) return <span className="text-red-600" title="Giacenza sotto zero: da correggere. Il dichiarato supera quello che risulta arrivato.">{formatTonnellate(resta)}</span>;
                     return resta > 0
                       ? <span className="text-amber-700">{formatTonnellate(resta)}</span>
                       : <span className="text-muted-foreground">—</span>;

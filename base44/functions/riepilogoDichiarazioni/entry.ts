@@ -60,6 +60,8 @@ export default async function(req) {
       return p && p.anno === annoNum ? p : null;
     };
     const CANALI_PORTALE = ['RETE', 'ACI'];
+    // I canali su cui si calcola una giacenza: tutti e tre, sempre separati.
+    const CANALI_GIACENZA = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
 
     const svc = base44.asServiceRole.entities;
     const [giacenzeSito, dichiarazioni, aci, extra, secondarie, terziarie, nonDichiarati, rilevazioni] = await Promise.all([
@@ -577,6 +579,34 @@ export default async function(req) {
         aggiunti_alla_foto_t: aggiuntiT,
         dichiarato_dopo_foto_t: dopoFoto,
         giacenza_portale_t: fotoT === null ? null : t3(fotoT + aggiuntiT - dopoFoto),
+        // LA GIACENZA DI TUTTI E TRE I CANALI, SEPARATE (03/10/2026).
+        //
+        // Stessa formula per tutti - apertura + entrato - dichiarato caricato -
+        // perche' i due moduli devono dire gli stessi numeri su tutti i canali e
+        // perche' la giacenza E' il residuo da dichiarare. I canali non si sommano
+        // mai: tre numeri, uno per riga del riepilogo.
+        //
+        // L'apertura esiste solo per rete e ACI (GiacenzaSito ha due campi, non
+        // tre): per l'extra raccolta si parte da zero, e va detto invece di farlo
+        // sembrare un saldo che viene da prima.
+        // Solo a portale la fotografia c'e': per ACI ed extra non si confronta
+        // niente, perche' a portale quei canali non sono gestiti.
+        giacenze_canale: CANALI_GIACENZA.map(canale => {
+          const apertura = canale === 'EXTRA_RACCOLTA' ? 0 : iniziale(ns, 'imp', canale);
+          const entrato = t3(kgInT(entrataImp, `${ns}|${canale}`) + kgInT(secIn, `${ns}|${canale}`));
+          const dichiarato = dichiaratoPerCanale(flussi, canale);
+          return {
+            canale,
+            apertura_t: apertura,
+            entrato_t: entrato,
+            dichiarato_caricato_t: dichiarato,
+            giacenza_t: t3(apertura + entrato - dichiarato),
+            // Una giacenza sotto zero non esiste: e' un errore da correggere, e si
+            // dice invece di azzerarla (regola dell'utente, 03/10/2026).
+            negativa: t3(apertura + entrato - dichiarato) < 0,
+            apertura_disponibile: canale !== 'EXTRA_RACCOLTA',
+          };
+        }),
         portale_fine_mese: senzaPortale ? [] : fineMese(ns),
         // La rilevazione del suo stoccaggio sta a parte (scheda Stoccaggi).
         rilevazione_stoccaggio: ruoli.includes('stoc') && rilevazione.has(ns) ? { RETE: t3(rilevazione.get(ns).RETE), ACI: t3(rilevazione.get(ns).ACI), data: rilevazione.get(ns).data } : null,

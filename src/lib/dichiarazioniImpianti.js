@@ -172,10 +172,40 @@ export const TOLLERANZA_QUADRATURA_T = 0.5;
  * - le terziarie non si tolgono: sono uscite di materiale gia' trasformato, che
  *   il portale ha gia' scalato con la dichiarazione.
  */
+// LA GIACENZA E' UNA SOLA FORMULA, E VALE PER TUTTI E TRE I CANALI.
+//
+// Fino al 03/10/2026 questa funzione leggeva dichiarato_caricato_rete_t: il
+// canale era cablato nel nome del campo, e cosi' la giacenza esisteva solo per
+// la rete. ACI ed extra raccolta non ne avevano una, in nessuno dei due moduli.
+//
+// Regola dell'utente, 03/10/2026: Giacenze e Dichiarazioni Impianti devono
+// essere allineati e congruenti su TUTTI E TRE I CANALI, perche' la giacenza e'
+// il residuo da dichiarare e senza non si sa che cosa dichiarare ne' si verifica
+// che la dichiarazione abbia decurtato.
+//
+// Che cosa decurta, canale per canale (parole sue, 03/10/2026):
+//   RETE   la dichiarazione caricata a portale;
+//   ACI    la secondaria che parte dallo stoccaggio E la dichiarazione
+//          dell'impianto che la tratta. Il primo giorno aveva detto solo la
+//          secondaria, per paura dei numeri negativi; poi: «fai decurtare anche
+//          l'impianto per l'ACI, prima dicevo di no perche' temevo i numeri
+//          negativi, ma se ritieni sia piu' lineare come discorso fallo». E' piu'
+//          lineare: cosi' i tre canali hanno la stessa formula, e un negativo non
+//          si nasconde piu' - si segnala, perche' e' un errore da correggere;
+//   EXTRA  la dichiarazione: «una volta dichiarata, non e' piu' in giacenza».
+//
+// I canali NON si sommano: una giacenza per canale, sempre separate.
+//
+// dichiarato_caricato_t e' il dichiarato DEL CANALE di quella riga. Il vecchio
+// dichiarato_caricato_rete_t resta accettato finche' tutti i chiamanti non sono
+// passati al campo neutro.
 export function quadratura(sito) {
+  const dichiarato = sito.dichiarato_caricato_t !== undefined && sito.dichiarato_caricato_t !== null
+    ? sito.dichiarato_caricato_t
+    : (sito.dichiarato_caricato_rete_t || 0);
   const calcolata = (sito.giacenza_iniziale_t || 0)
     + (sito.entrato_confronto_t || 0) - (sito.uscito_confronto_t || 0)
-    - (sito.dichiarato_caricato_rete_t || 0);
+    - (dichiarato || 0);
   const portale = sito.giacenza_portale_t;
   const scarto = portale === null || portale === undefined ? null : Math.round((calcolata - portale) * 1000) / 1000;
   return {

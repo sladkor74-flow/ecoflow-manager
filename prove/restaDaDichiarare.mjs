@@ -151,8 +151,13 @@ console.log('LA COLONNA NUOVA DEL RIEPILOGO: E LA GIACENZA');
   // dichiara quando il prodotto esce: Irigom e' un R1, il mese in cui parte la
   // nave dichiara piu' di quanto gli e' arrivato, e sommando i mesi con il max a
   // zero quell'eccedenza si perdeva - usciva 1.301,08 invece di 543,22.
-  verifica('per la rete mostra la giacenza calcolata',
-    r.includes("flusso.canale === 'RETE' ? sito.giacenza_calcolata_t : flusso.da_dichiarare_t"));
+  // LA GIACENZA DEL CANALE DI QUELLA RIGA, non piu solo della rete: i due moduli
+  // devono dire gli stessi numeri su tutti e tre i canali, e la giacenza E il
+  // residuo da dichiarare (utente, 03/10/2026). I canali restano separati.
+  verifica('ogni riga mostra la giacenza del suo canale',
+    r.includes("(sito.giacenze_canale || []).find(x => x.canale === flusso.canale)"));
+  // Sotto zero non si azzera: si mostra e si segnala.
+  verifica('una giacenza sotto zero si vede, in rosso', r.includes("if (resta < 0) return") && r.includes("text-red-600"));
   // colonna deve tacere: altrimenti mostrerebbe come arretrato tutti gli
   // ingressi dell'anno di un impianto che non ci deve niente.
   verifica('dove la rete non e dovuta la colonna tace',
