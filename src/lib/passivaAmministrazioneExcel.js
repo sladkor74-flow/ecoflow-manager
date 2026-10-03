@@ -375,8 +375,15 @@ function scriviTrasporto(ws, r0, trasporti0, nomeCanale) {
     scrivi(ws, r, 7, vgPagati || null, { ...st, allinea: 'center', fmt: vgInteri ? INTERO : FORMATI.decimale2 });
     // A tonnellata e' peso per costo, a viaggio e' costo per numero di viaggi:
     // la formula segue l'unita' di misura scritta sulla riga accanto.
-    scrivi(ws, r, 8, { formula: aViaggio ? `F${r}*G${r}` : `D${r}*F${r}`, result: n2(t.totale) },
-      { ...st, allinea: 'right', fmt: EURO });
+    //
+    // Su un trasporto interno no: li' il totale e' zero perche' non si fattura, e
+    // una formula prezzo per viaggi col risultato zero in memoria lo rimetterebbe
+    // a prezzo pieno al primo ricalcolo. Si scrive lo zero, e la nota della riga
+    // dice perche'.
+    scrivi(ws, r, 8, t.interno
+      ? 0
+      : { formula: aViaggio ? `F${r}*G${r}` : `D${r}*F${r}`, result: n2(t.totale) },
+    { ...st, allinea: 'right', fmt: EURO });
     scrivi(ws, r, 9, testo(t.note), { ...st, corsivo: true, colore: TENUE });
     sommandi.push(r);
     zebrata = !zebrata;

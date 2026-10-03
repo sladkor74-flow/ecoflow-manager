@@ -305,6 +305,23 @@ console.log('I VIAGGI MISTI SI PAGANO A QUOTA');
   }, 'RETE', 'Settembre');
   verifica('senza quota si pagano i viaggi contati', aTonnellata.trasporti.righe[0].viaggi_pagati === 2,
     JSON.stringify(aTonnellata.trasporti.righe[0]));
+
+  // UN TRASPORTO INTERNO NON SI FATTURA, e la riga deve dirlo: nel foglio il
+  // totale era una formula prezzo per viaggi col risultato zero in memoria, e al
+  // primo ricalcolo di Excel quel trasporto tornava a prezzo pieno dentro il
+  // totale del canale (audit del 03/10/2026).
+  const conInterno = foglioPassiva([], {
+    trasporti_secondaria: [{
+      fornitore: 'SMOCO S.R.L.', interno: true,
+      righe: [{ stoccaggio: 'NAPPI SUD SRL', destinazione: 'IRIGOM SRL', tonnellate: 20, viaggi: 1, tariffa_valore: 350, unita_misura: '€/viaggio', importo: 0, note: 'interno, non fatturato' }],
+    }],
+  }, 'RETE', 'Settembre');
+  verifica('la riga di un trasporto interno si riconosce, e il suo totale e\' zero',
+    conInterno.trasporti.righe[0].interno === true && conInterno.trasporti.righe[0].totale === 0
+    && conInterno.trasporti.totale_euro === 0, JSON.stringify(conInterno.trasporti.righe[0]));
+  verifica('il prezzo resta scritto, perche\' serve a leggere la riga',
+    conInterno.trasporti.righe[0].prezzo === 350 && /interno/.test(conInterno.trasporti.righe[0].note));
+  verifica('e un trasporto normale non risulta interno', !aTonnellata.trasporti.righe[0].interno);
 }
 
 console.log('');

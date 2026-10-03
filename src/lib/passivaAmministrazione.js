@@ -532,6 +532,12 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
     // stesso camion si pagava intero di qua e intero di la' (audit 03/10/2026).
     viaggi_pagati: viaggiPagati(t),
     totale: n2(t.importo),
+    // UN TRASPORTO INTERNO NON SI FATTURA. SMOCO trasporta da se' e la passiva lo
+    // mette a zero; nel foglio pero' restavano scritti il prezzo e i viaggi, e il
+    // totale era una FORMULA prezzo x viaggi col risultato zero in memoria. Basta
+    // che Excel ricalcoli - e ricalcola da solo appena si tocca una cella - e quel
+    // trasporto torna a 350 euro dentro il totale del canale (audit 03/10/2026).
+    interno: !!g.interno,
     note: testo(t.note),
   })));
   const totaleTrasporti = n2(trasporti.reduce((s, t) => s + t.totale, 0));

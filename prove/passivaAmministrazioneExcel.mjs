@@ -497,5 +497,34 @@ console.log('\nIL VIAGGIO MISTO NEL FOGLIO');
   verifica('e la nota dice com\'e\' fatto il conto', /viaggio misto/.test(testo(w, r, 9)), testo(w, r, 9));
 }
 
+// IL TRASPORTO INTERNO NON SI RIMETTE A PREZZO PIENO AL PRIMO RICALCOLO.
+//
+// Difetto media dell'audit del 03/10/2026: la cella del totale era una formula
+// prezzo per viaggi col risultato zero in memoria. Excel ricalcola da solo appena
+// si tocca il file, e quel trasporto - che non si fattura perche' SMOCO lo fa da
+// se' - tornava a 350 euro dentro il totale del canale.
+console.log('\nIL TRASPORTO INTERNO');
+{
+  const INTERNO = {
+    ...VUOTO, canale: 'RETE', nome_canale: 'RETE',
+    trasporti: {
+      righe: [{
+        produttore: 'NAPPI SUD SRL', trasportatore: 'SMOCO S.R.L.', destinatario: 'Irigom S.r.l.',
+        tonnellate: 20, unita_misura: 'euro_viaggio', prezzo: 350, viaggi: 1, viaggi_pagati: 1,
+        totale: 0, interno: true, note: 'interno, non fatturato',
+      }],
+      totale_t: 20, totale_euro: 0,
+    },
+    totale_euro: 0,
+  };
+  const w = (await apri(await cartellaPassivaUnFoglio([INTERNO]))).getWorksheet('PASSIVA');
+  const r = primaChePorta(w, 'TRASPORTO (secondarie RETE)') + 2;
+  verifica('il totale di un trasporto interno e\' uno zero scritto, non una formula',
+    formula(w, r, 8) === '' && numero(w, r, 8) === 0, `[${formula(w, r, 8)}] / ${val(w, r, 8)}`);
+  verifica('il prezzo e i viaggi restano scritti, perche\' servono a leggere la riga',
+    numero(w, r, 6) === 350 && numero(w, r, 7) === 1, `${val(w, r, 6)} ${val(w, r, 7)}`);
+  verifica('e la nota dice perche\' non si fattura', /interno/.test(testo(w, r, 9)), testo(w, r, 9));
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);
