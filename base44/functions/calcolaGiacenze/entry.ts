@@ -695,7 +695,19 @@ export default async function(req) {
         const fotoKg = (giacPortaleMap.get(key) || 0) * 1000;
         const agg = aggiuntiMap.get(key) || { kg: 0, classi: classiVuote(), n: 0 };
         const dopoKg = dichiaratoDopoMap.get(ns) || 0;
-        const totaleKg = Math.max(0, fotoKg + agg.kg - dopoKg);
+        // UNA GIACENZA NEGATIVA NON SI NASCONDE: E' UN ERRORE DA CORREGGERE.
+        //
+        // Qui c'era un Math.max(0, ...). Regola dell'utente, 03/10/2026: «come puo'
+        // essere negativa una giacenza? succede solo in caso di errore e deve essere
+        // corretto». Appunto: azzerandola, l'errore spariva dalla vista e restava nei
+        // dati. E il modulo Dichiarazioni il taglio non lo faceva, quindi gli stessi
+        // chili uscivano 0 in un modulo e negativi nell'altro - due moduli che devono
+        // dire gli stessi numeri.
+        //
+        // Succede quando il portale ha accettato piu' di quanto il gestionale gli
+        // attribuisce: una dichiarazione caricata su ordini che noi non abbiamo, o una
+        // fotografia vecchia. Si mostra com'e' e si segnala.
+        const totaleKg = fotoKg + agg.kg - dopoKg;
         giacenza_portale_t = totaleKg / 1000;
         giacenza_rete_t = giacenza_portale_t;
         // Per classe: fotografia e carichi aggiunti; le dichiarazioni caricate dopo,
@@ -803,6 +815,10 @@ export default async function(req) {
         sito: sitoNome,
         tipo_destinazione: td,
         giacenza_portale_t: r2(giacenza_portale_t),
+        // Una giacenza sotto zero non esiste: e' un errore, e va corretta. Si dice
+        // qui, cosi' la pagina la puo' mostrare come tale invece di stamparla e
+        // basta (regola dell'utente, 03/10/2026).
+        giacenza_negativa: giacenza_portale_t !== null && giacenza_portale_t < 0,
         giacenza_rete_t: giacenza_rete_t !== null ? r2(giacenza_rete_t) : null,
         giacenza_aci_t: giacenza_aci_t !== null ? r2(giacenza_aci_t) : null,
         giacenza_extra_t: giacenza_extra_t !== null ? r2(giacenza_extra_t) : null,

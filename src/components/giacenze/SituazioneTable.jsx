@@ -384,7 +384,16 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <div className="font-bold">{fmt(r.giacenza_portale_t)} t</div>
+                    {/* UNA GIACENZA SOTTO ZERO NON ESISTE. Regola dell'utente, 03/10/2026: «come
+                        puo' essere negativa una giacenza? succede solo in caso di errore e deve
+                        essere corretto». Prima si azzerava in silenzio e l'errore restava nei dati.
+                        Succede quando il portale ha accettato piu' di quanto gli attribuiamo: una
+                        dichiarazione caricata su ordini che noi non abbiamo, o una fotografia
+                        vecchia. */}
+                    <div className={`font-bold ${r.giacenza_negativa ? 'text-red-600' : ''}`}>{fmt(r.giacenza_portale_t)} t</div>
+                    {r.giacenza_negativa && (
+                      <div className="text-[10px] text-red-600 leading-tight">giacenza sotto zero: da correggere</div>
+                    )}
                     <div className="mt-1 h-1 bg-muted rounded-full overflow-hidden">
                       <div className="h-full bg-primary rounded-full" style={{ width: `${barWidth}%` }} />
                     </div>
