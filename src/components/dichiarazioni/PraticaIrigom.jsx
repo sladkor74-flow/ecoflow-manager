@@ -9,6 +9,7 @@ import { giornoRoma } from '@/lib/giornoItaliano';
 import { eTerminato, giornoMovimento, dateDaSistemare, testoDate } from '@/lib/movimenti';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { leggiRegistroIrigom } from '@/lib/registroIrigom';
+import { leggiCsvPortale, giacenzaCsvAlGiorno, riscontroGiacenza, nomeSitoPortale, ultimoGiornoDelMese } from '@/lib/giacenzaPortaleCsv';
 import { componiMese, ferroArretrato, dividiExtra, MESI, extraDaSalvare, extraGiaDichiarate, finestraExtra, extraDellePratiche, dichiarazioniExtra, testoExtraCompresa } from '@/lib/praticaIrigom';
 import { wordDelMese, excelDelMese, cartellaZip, dataIt, datiFileGestione } from '@/lib/documentiIrigom';
 import { scarica } from '@/lib/docxModello';
@@ -151,6 +152,9 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
   const { isAdmin } = usePermessi();
   const inputRegistro = useRef(null);
   const inputDocumenti = useRef(null);
+  // Il CSV della schermata «dichiarazione» del portale: un riscontro, e nient'altro.
+  const inputCsvPortale = useRef(null);
+  const [riscontro, setRiscontro] = useState(null);
   const [registro, setRegistro] = useState(null);
   const [caricando, setCaricando] = useState(false);
   const [errore, setErrore] = useState('');
@@ -259,6 +263,61 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
       && String(m.dichiarazione.caricata_il || '').slice(0, 10) > fotoPortaleIl ? m.dichiarazione.quantita_kg : 0), 0) : 0;
     return { kg: Math.max(0, pm.foto_kg + pm.aggiunti_kg - dopo), foto_kg: pm.foto_kg, aggiunti_kg: pm.aggiunti_kg, dopo_kg: dopo };
   }, [irigom, idx, fotoPortaleIl]);
+
+  // --- Il riscontro dal CSV del portale ---
+  //
+  // Il file lo legge il browser e non va in nessun archivio. Serve a confrontare,
+  // all'ULTIMO GIORNO DEL MESE DICHIARATO, quello che il portale ha con quello che
+  // il gestionale ha ricostruito dai movimenti: il numero della pratica resta
+  // quello del gestionale, lo scarto si dichiara (regola di AGENTS.md: la lettura
+  // del portale e' un riscontro, non la fonte del numero). Gli ordini arrivati
+  // dopo quel giorno si contano a parte, perche' non riguardano questo mese
+  // (precisazione dell'utente del 03/10/2026).
+  const ultimoGiorno = idx >= 0 ? ultimoGiornoDelMese(anno, idx + 1) : '';
+  const ultimoGiornoIt = ultimoGiorno ? dataIt(ultimoGiorno) : '';
+  // DEL FILE SI TIENE LA LETTURA, NON IL RISULTATO.
+  //
+  // Il conto si rifa' da solo a ogni cambio di mese, di anno o di giacenza del
+  // gestionale. Tenendo il risultato, il confronto restava congelato a quando il
+  // file era stato letto: cambiando anno - e la scheda non si smonta, quindi il
+  // mese e il file restano - la pagina mostrava lo stesso «la giacenza torna» in
+  // verde accanto a una data nuova, su un anno di cui il file non dice niente.
+  const leggiCsvRiscontro = async (file) => {
+    if (!file) return;
+    try {
+      setRiscontro({ lettura: leggiCsvPortale(await file.text()) });
+    } catch (e) {
+      setRiscontro({ errore: e && e.message ? e.message : String(e) });
+    }
+  };
+  const riscontroCsv = useMemo(() => {
+    if (!riscontro) return null;
+    if (riscontro.errore) return { errore: riscontro.errore };
+    if (!ultimoGiorno) return { errore: 'Scegli prima il mese.' };
+    const lettura = riscontro.lettura;
+    const nome = irigom ? irigom.sito : 'IRIGOM';
+    const g = giacenzaCsvAlGiorno(lettura, { sito: nome, giorno: ultimoGiorno, canale: 'RETE' });
+    const avvisi = [...lettura.avvisi];
+    // Fin dove arriva il file: l'export non porta la sua data, ma l'ultima fine
+    // trasporto dice fino a quando puo' sapere qualcosa. Senza questo controllo il
+    // file del 3 ottobre confermava in verde la giacenza «al 31/10», che non e'
+    // ancora successa.
+    const copre = !!lettura.ultimo_giorno && lettura.ultimo_giorno >= ultimoGiorno;
+    const suo = lettura.siti.some(s => s.sito_chiave === nomeSitoPortale(nome));
+    if (!suo) avvisi.push(`Il file non parla di ${nome}${lettura.siti.length ? `, ma di ${lettura.siti.map(s => s.sito).join(', ')}` : ''}: controlla di aver esportato l'impianto giusto.`);
+    else if (!copre) avvisi.push(`Il file arriva fino al ${dataIt(lettura.ultimo_giorno)}: non dice ancora tutto ${mese.toLowerCase()}, quindi non e' un riscontro di fine mese. Riesportalo quando il mese e' finito.`);
+    else if (!g.ordini) avvisi.push(`Il file non ha ordini di rete di ${nome} con fine trasporto entro il ${dataIt(ultimoGiorno)}: di quel mese a portale non resta niente da dichiarare.`);
+    if (g.altri_siti_kg) avvisi.push(`Nel file ci sono anche ${g.altri_siti.join(', ')} per ${formatKg(g.altri_siti_kg)} kg: non entrano in questo conto, che e' solo di ${nome}.`);
+    if (g.altro_canale_kg) avvisi.push(`Nel file ci sono ${formatKg(g.altro_canale_kg)} kg di ACI: restano fuori, perche' i canali non si sommano.`);
+    if (g.senza_data_kg) avvisi.push(`${formatKg(g.senza_data_kg)} kg del file non hanno la fine del trasporto: restano fuori dal conto di fine mese.`);
+    return {
+      kg: g.kg,
+      dopo_kg: g.dopo_kg,
+      copre,
+      avvisi,
+      confronto: portaleFineMese ? riscontroGiacenza(g.kg, portaleFineMese.kg) : null,
+    };
+  }, [riscontro, ultimoGiorno, mese, irigom, portaleFineMese]);
 
   // --- L'extra raccolta arrivata a Irigom e non ancora dichiarata ---
   const nsIrigom = irigom ? normalizzaRagioneSociale(irigom.sito) : 'irigom';
@@ -797,6 +856,37 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                     {fotoPortaleIl && fotoPortaleIl < `${anno}-${String(idx + 1).padStart(2, '0')}-31` && idx >= 0 && fotoPortaleIl.slice(0, 7) <= `${anno}-${String(idx + 1).padStart(2, '0')}` ? ' La fotografia del portale non arriva alla fine del mese: carica il file degli ordini non dichiarati di oggi.' : ''}
                   </p>
                 )}
+                {/* IL RISCONTRO DAL PORTALE: SI CONFRONTA, NON SI SOSTITUISCE.
+                    Il CSV della schermata «dichiarazione» porta la giacenza ordine per
+                    ordine con la fine del trasporto di ciascuno, che e' proprio quello
+                    che serve per dire quanto c'era all'ultimo giorno del mese. Ma il
+                    numero che la pratica usa resta quello del gestionale: la lettura del
+                    portale e' un riscontro, non la fonte del numero (AGENTS.md). Il file
+                    si legge qui nel browser e non entra in nessun archivio. */}
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <input ref={inputCsvPortale} type="file" accept=".csv,.txt" className="hidden"
+                    onChange={e => { leggiCsvRiscontro(e.target.files && e.target.files[0]); e.target.value = ''; }} />
+                  <Button type="button" variant="outline" size="sm" onClick={() => inputCsvPortale.current && inputCsvPortale.current.click()}>
+                    Riscontro dal portale (CSV)
+                  </Button>
+                  {!riscontroCsv && <span className="text-muted-foreground">la lista degli ordini dichiarabili, esportata dalla schermata delle dichiarazioni</span>}
+                  {riscontroCsv && riscontroCsv.errore && <span className="text-destructive">{riscontroCsv.errore}</span>}
+                  {riscontroCsv && !riscontroCsv.errore && (
+                    /* Il verde si accende solo se il file copre tutto il mese E i due numeri
+                       coincidono: un «torna» su un mese che il file non conosce ancora e' una
+                       conferma costruita sul niente. */
+                    <span className={riscontroCsv.copre && riscontroCsv.confronto && riscontroCsv.confronto.torna ? 'text-emerald-700' : 'text-amber-700'}>
+                      Il portale dice {t(riscontroCsv.kg)} t al {ultimoGiornoIt}
+                      {riscontroCsv.confronto
+                        ? riscontroCsv.confronto.torna
+                          ? riscontroCsv.copre ? ', come il gestionale: la giacenza torna.' : `, come il gestionale — ma il file non copre ancora tutto ${mese.toLowerCase()}.`
+                          : `, il gestionale ${t(riscontroCsv.confronto.gestionale_kg)} t: scarto ${riscontroCsv.confronto.scarto_kg > 0 ? '+' : ''}${formatKg(riscontroCsv.confronto.scarto_kg)} kg. La pratica usa il numero del gestionale; lo scarto va capito prima di caricare.`
+                        : '. Il gestionale non ha ancora la giacenza di questo mese: carica il file degli ordini non dichiarati.'}
+                      {riscontroCsv.dopo_kg ? ` Dopo il ${ultimoGiornoIt} sono arrivati altri ${t(riscontroCsv.dopo_kg)} t, che non riguardano questo mese.` : ''}
+                    </span>
+                  )}
+                </div>
+                {riscontroCsv && (riscontroCsv.avvisi || []).map((a, i) => <Avviso key={`csv${i}`} testo={a} />)}
                 {pratica.avvisi.map((a, i) => <Avviso key={i} testo={a} />)}
 
                 <div className="grid gap-3 lg:grid-cols-2">
