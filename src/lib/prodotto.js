@@ -17,12 +17,16 @@ export const PRODOTTO = 'TreadRider';
 /**
  * Il simbolo del marchio accanto al nome, chiesto dall'utente il 03/10/2026.
  *
- * Sta qui e non scritto dentro PRODOTTO perche' il nome serve anche dove un
- * simbolo non ci va: il metadato Autore di un file Excel, il titolo della
- * linguetta, una frase in mezzo a un testo. Si cambia qui - in '™', o in stringa
- * vuota - e cambia dove si vede.
+ * E' ™ e non ®: il ® indica un marchio REGISTRATO, e usarlo su un marchio che non
+ * lo e' ancora e' un'indicazione ingannevole che il codice della proprieta'
+ * industriale sanziona. Il ™ si puo' usare da subito, anche durante il deposito.
+ * Quando la registrazione ci sara', qui si scrive '®' e cambia dove si vede.
+ *
+ * Sta qui e non dentro PRODOTTO perche' il nome serve anche dove un simbolo non ci
+ * va: il metadato Autore di un file Excel, il titolo della linguetta, una frase in
+ * mezzo a un testo.
  */
-export const MARCHIO = '®';
+export const MARCHIO = '™';
 
 /** Che cosa fa, per chi: la riga sotto il nome. */
 export const SOTTOTITOLO = 'Gestionale PFU';
