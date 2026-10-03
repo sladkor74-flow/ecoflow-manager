@@ -92,11 +92,27 @@ export function bloccoDaPratica(pratica) {
   });
 }
 
-/** La pratica che vale per un mese: l'ultima versione non sostituita. */
+/**
+ * La pratica che vale per un mese: VALE LA REGISTRATA, NON LA PIU' RECENTE.
+ *
+ * Prima si prendeva la versione piu' alta fra quelle non sostituite, e quello
+ * stato nasce da un clic di tutti i giorni: riscaricare la cartella di un mese
+ * gia' registrato crea una versione nuova «in preparazione» coi numeri in corso.
+ * Da quel momento il foglio DICHIARAZIONI esportava la bozza - nel caso provato,
+ * 126.000 kg al posto dei 534.600 registrati di agosto - e quel foglio e' quello
+ * che si ricopia nel file di gestione e si rilegge a mesi di distanza, con la
+ * casella verde e il SI accanto, come se fosse il numero buono
+ * (audit del 03/10/2026).
+ *
+ * E' la stessa regola che il saldo del ferro aveva gia' (dellMese con
+ * soloRegistrate in praticaIrigom.js). La bozza vale solo se di quel mese non
+ * c'e' nessuna versione registrata: li' e' l'unica cosa che c'e'.
+ */
 function praticaDelMese(pratiche, anno, mese) {
-  return pratiche
+  const sue = pratiche
     .filter(p => p && Number(p.anno) === anno && p.mese === mese && p.stato !== 'sostituita')
-    .sort((a, b) => (b.versione || 1) - (a.versione || 1))[0] || null;
+    .sort((a, b) => (b.versione || 1) - (a.versione || 1));
+  return sue.find(p => p.stato === 'registrata') || sue[0] || null;
 }
 
 /** La dichiarazione che vale per un mese e un canale: prima quella caricata a portale. */

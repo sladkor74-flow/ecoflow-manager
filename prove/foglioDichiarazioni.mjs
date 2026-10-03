@@ -53,6 +53,21 @@ const pratiche = [
   // La versione vecchia di agosto: sostituita, non deve entrare nel foglio.
   pratica('Agosto', { ...agosto, cssc: { righe: [] }, terziarie: { righe: [] } }, { stato: 'sostituita', versione: 1, motivo_sostituzione: 'rifatta' }),
   pratica('Agosto', agosto, { versione: 2 }),
+  // LA BOZZA NON VINCE SULLA REGISTRATA (audit del 03/10/2026).
+  //
+  // Riscaricare la cartella di un mese gia' registrato crea una versione nuova
+  // «in preparazione» coi numeri in corso: e' un clic di tutti i giorni. Finche'
+  // si prendeva la versione piu' alta non sostituita, da quel momento il foglio
+  // esportava la bozza - qui 126.000 kg al posto dei 534.600 registrati - con la
+  // casella verde e il SI accanto, come se fosse il numero buono. E quel foglio
+  // si ricopia nel file di gestione e si rilegge a mesi di distanza.
+  // La riga di agosto del secondo foglio dice da quale versione viene: deve
+  // restare la 2, e i numeri devono restare quelli della 2.
+  pratica('Agosto', {
+    ferro: { tabella: [] },
+    cssc: { righe: [{ data: '2026-08-20', formulario: 'BOZZA1', cssc_kg: 100000, ferro_kg: 26000 }] },
+    terziarie: { righe: [] }, extra: null, portale_kg: 126000,
+  }, { stato: 'in_preparazione', versione: 3, registrata_il: '' }),
   // Una pratica di un altro anno: non c'entra.
   pratica('Maggio', giugno, { anno: 2025 }),
 ];
