@@ -24,7 +24,7 @@ export default function Register() {
     e.preventDefault();
     setError("");
     if (password !== confirmPassword) {
-      setError("Passwords do not match");
+      setError("Le password non coincidono");
       return;
     }
     setLoading(true);
@@ -32,7 +32,7 @@ export default function Register() {
       await base44.auth.register({ email, password });
       setShowOtp(true);
     } catch (err) {
-      setError(err.message || "Registration failed");
+      setError(err.message || "Registrazione non riuscita");
     } finally {
       setLoading(false);
     }
@@ -48,7 +48,7 @@ export default function Register() {
       }
       window.location.href = safeReturnTo();
     } catch (err) {
-      setError(err.message || "Invalid verification code");
+      setError(err.message || "Codice di verifica non valido");
     } finally {
       setLoading(false);
     }
@@ -59,11 +59,11 @@ export default function Register() {
     try {
       await base44.auth.resendOtp(email);
       toast({
-        title: "Code sent",
-        description: "Check your email for the new code.",
+        title: "Codice inviato",
+        description: "Controlla la tua email: trovi il nuovo codice.",
       });
     } catch (err) {
-      setError(err.message || "Failed to resend code");
+      setError(err.message || "Non è stato possibile inviare di nuovo il codice");
     }
   };
 
@@ -75,8 +75,8 @@ export default function Register() {
     return (
       <AuthLayout
         icon={Mail}
-        title="Verify your email"
-        subtitle={`We sent a code to ${email}`}
+        title="Verifica la tua email"
+        subtitle={`Abbiamo inviato un codice a ${email}`}
       >
         {error && (
           <div className="mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
@@ -109,16 +109,16 @@ export default function Register() {
           {loading ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Verifying...
+              Verifica in corso...
             </>
           ) : (
-            "Verify"
+            "Verifica"
           )}
         </Button>
         <p className="text-center text-sm text-muted-foreground mt-4">
-          Didn't receive the code?{" "}
+          Non hai ricevuto il codice?{" "}
           <button onClick={handleResend} className="text-primary font-medium hover:underline">
-            Resend
+            Invialo di nuovo
           </button>
         </p>
       </AuthLayout>
@@ -128,16 +128,16 @@ export default function Register() {
   return (
     <AuthLayout
       icon={UserPlus}
-      title="Create your account"
-      subtitle="Sign up to get started"
+      title="Crea il tuo account"
+      subtitle="Registrati per iniziare"
       footer={
         <>
-          Already have an account?{" "}
+          Hai già un account?{" "}
           <Link
             to={"/login" + (safeReturnTo() !== "/" ? "?returnTo=" + encodeURIComponent(safeReturnTo()) : "")}
             className="text-primary font-medium hover:underline"
           >
-            Log in
+            Accedi
           </Link>
         </>
       }
@@ -148,7 +148,7 @@ export default function Register() {
         onClick={handleGoogle}
       >
         <GoogleIcon className="w-5 h-5 mr-2" />
-        Continue with Google
+        Continua con Google
       </Button>
 
       <div className="relative mb-6">
@@ -156,7 +156,7 @@ export default function Register() {
           <div className="w-full border-t border-border" />
         </div>
         <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-card px-3 text-muted-foreground">or</span>
+          <span className="bg-card px-3 text-muted-foreground">oppure</span>
         </div>
       </div>
 
@@ -176,7 +176,7 @@ export default function Register() {
               type="email"
               autoComplete="email"
               autoFocus
-              placeholder="you@example.com"
+              placeholder="nome@esempio.it"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="pl-10 h-12"
@@ -201,7 +201,7 @@ export default function Register() {
           </div>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="confirm">Confirm Password</Label>
+          <Label htmlFor="confirm">Conferma password</Label>
           <div className="relative">
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
             <Input
@@ -220,10 +220,10 @@ export default function Register() {
           {loading ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Creating account...
+              Creazione account in corso...
             </>
           ) : (
-            "Create account"
+            "Crea account"
           )}
         </Button>
       </form>

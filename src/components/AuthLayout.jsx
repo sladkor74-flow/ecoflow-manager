@@ -6,8 +6,8 @@ export default function AuthLayout({ icon: Icon, title, subtitle, footer, childr
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-md">
         {/* IL NOME SULLA PORTA. Le schermate di accesso sono le prime che si
-            vedono, e l'unica cosa scritta era il titolo della pagina («Welcome
-            back»): il prodotto non si nominava. Il nome sta sopra il titolo,
+            vedono, e l'unica cosa scritta era il titolo della pagina: il prodotto non si
+            nominava. Il nome sta sopra il titolo,
             perche' chi arriva deve sapere dove sta entrando prima di sapere che
             cosa gli si chiede. */}
         <div className="text-center mb-10">
