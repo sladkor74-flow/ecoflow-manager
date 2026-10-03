@@ -3,6 +3,8 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Loader2, Download, FileSpreadsheet, FileDown, CheckCircle, AlertTriangle, ArrowRight } from 'lucide-react';
 import { exportFatturazioneAttiva, exportFatturazioneAttivaPdf, nomeFileAttiva } from '@/lib/fatturazioneExport';
+import { exportAmministrazioneAttiva, exportAmministrazioneAttivaPdf } from '@/lib/formatAmministrazioneExport';
+import { nomeFileAmministrazione } from '@/lib/formatAmministrazione';
 
 const TIPS = [
   { key: 'RETE', label: 'Rete' },
@@ -50,7 +52,20 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
   };
 
   // Excel o PDF: stesse colonne e stesse righe, un file per canale
+  // IL «FORMAT AMMINISTRAZIONE» E' IN AGGIUNTA, non al posto di niente: i due
+  // report di prima restano identici (richiesta dell'utente, 03/10/2026, «tutto
+  // cio' che c'e' poiche' funziona lo lasciamo com'e'»). Cambiano le colonne: sulla
+  // rete il prezzo al chilo e la regione in fondo, sull'ACI niente ticket e la riga
+  // SMOCO / ACI / mese sopra la tabella.
   const scrivi = async (tipologia, righe, formato) => {
+    if (formato === 'amm-pdf') {
+      await exportAmministrazioneAttivaPdf(tipologia, righe, periodo.anno, periodo.mese);
+      return nomeFileAmministrazione(tipologia, periodo.anno, periodo.mese, 'pdf');
+    }
+    if (formato === 'amm-excel') {
+      exportAmministrazioneAttiva(tipologia, righe, periodo.anno, periodo.mese);
+      return nomeFileAmministrazione(tipologia, periodo.anno, periodo.mese, 'xlsx');
+    }
     if (formato === 'pdf') await exportFatturazioneAttivaPdf(tipologia, righe, periodo.anno, periodo.mese);
     else exportFatturazioneAttiva(tipologia, righe, periodo.anno, periodo.mese);
     return nomeFileAttiva(tipologia, periodo.anno, periodo.mese, formato === 'pdf' ? 'pdf' : 'xlsx');
@@ -130,6 +145,17 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
                 <Button size="sm" variant="outline" onClick={() => esporta(t.key, 'pdf')} disabled={exporting || !data[t.key]?.documento}>
                   <FileDown className="w-4 h-4 mr-1.5" /> PDF
                 </Button>
+                {/* I due fogli come li vuole l'amministrazione, in aggiunta ai report
+                    di sopra (utente, 03/10/2026). L'extra raccolta per ora resta fuori:
+                    «quello extra raccolta per il momento lo tralasciamo». */}
+                {t.key !== 'EXTRA_RACCOLTA' && (<>
+                  <Button size="sm" variant="outline" onClick={() => esporta(t.key, 'amm-excel')} disabled={exporting || !data[t.key]?.documento} title="Il foglio nel formato dell amministrazione: sulla rete il prezzo al chilo e la regione, sull ACI senza ticket e con la riga di intestazione">
+                    <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Format amm.
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => esporta(t.key, 'amm-pdf')} disabled={exporting || !data[t.key]?.documento} title="Lo stesso foglio in PDF">
+                    <FileText className="w-4 h-4 mr-1.5" /> Format amm. PDF
+                  </Button>
+                </>)}
               </div>
             </div>
           ))}
