@@ -17,11 +17,17 @@
 // terziaria porta la sola parte di rete e l'extra ha la sua riga, con la stessa
 // terziaria, come nei documenti consegnati per agosto 2026. Il riepilogo dice in
 // una riga a parte il totale da caricare a portale (regola del 22/09/2026).
+//
+// Il foglio Controlli e' il perche' della pratica, e lo si rilegge a mesi di
+// distanza: ci sono dentro la lettura usata, l'arretrato di ferro dei mesi senza
+// nave e la prova della pratica - dopo il caricamento a portale deve restare
+// AD + AE della riga del mese (regola dell'utente del 03/10/2026).
 
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { MESI, MAX_PER_DICHIARAZIONE_KG, migliaia } from './praticaIrigom.js';
 
 const kg = (v) => migliaia(v);
+const intero = (v) => Math.round(Number(v) || 0);
 export const dataIt = (g) => (g ? String(g).slice(0, 10).split('-').reverse().join('/') : '');
 const scappa = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 export const meseAnno = (mese, anno) => `${mese} ${anno}`;
@@ -270,7 +276,12 @@ export async function excelDelMese({ pratica, contesto }) {
 
   // 2. CSS-C
   const CSSC = ['DDT', 'PESO', 'PESO USCITA', 'UNITÀ DI MISURA', 'DATA TRASPORTO', 'DATA CONFERIMENTO', '% CSS-C', '%FERRO', 'TOTALE (PFU)', 'TRATTAMENTO'];
-  intestazione(CSSC);
+  // La colonna che dice quanto resta al limite dei 38.000 kg di una
+  // dichiarazione: e' lo schema con cui si ripartisce il ferro (punti a) e c)
+  // della regola dell'utente del 03/10/2026), e si legge riga per riga sia sui
+  // DDT di CSS-C sia sulle terziarie.
+  const RESTA_38 = `RESTA AI ${kg(MAX_PER_DICHIARAZIONE_KG)} KG`;
+  intestazione([...CSSC, '', RESTA_38]);
   const primoCssc = r;
   for (const d of pratica.cssc.righe) {
     const riga = ws.getRow(r);
@@ -279,9 +290,12 @@ export async function excelDelMese({ pratica, contesto }) {
     riga.getCell(10).value = 'DA PFU';
     riga.getCell(11).value = { formula: `H${r}/I${r}`, result: d.totale_kg ? d.ferro_kg / d.totale_kg : 0 };
     riga.getCell(11).numFmt = '0.00%';
+    // Quanto resta ai 38.000 kg di questa dichiarazione: il ferro si ripartisce
+    // fin qui e non oltre (regola a) del 03/10/2026).
+    riga.getCell(12).value = { formula: `${MAX_PER_DICHIARAZIONE_KG}-I${r}`, result: MAX_PER_DICHIARAZIONE_KG - d.totale_kg };
     riga.getCell(5).numFmt = 'dd/mm/yyyy';
     riga.getCell(6).numFmt = 'dd/mm/yyyy';
-    numeri(riga, [2, 3, 7, 8, 9]);
+    numeri(riga, [2, 3, 7, 8, 9, 12]);
     r++;
   }
   const totCssc = ws.getRow(r++);
@@ -317,15 +331,31 @@ export async function excelDelMese({ pratica, contesto }) {
   riempi(ws.getCell(r, 1), giallo);
   ws.getCell(r, 1).font = { bold: true };
   r += 3;
-  intestazione([...TERZIARIE.intestazioni, '']);
+  intestazione([...TERZIARIE.intestazioni, RESTA_38]);
   const primaTer = r;
   for (const t of pratica.terziarie.righe) {
     const riga = ws.getRow(r);
     const data = comeData(partenza || t.data);
     riga.values = [t.terziaria || '', 'IRIGOM', t.trasportatore, t.destinatario, t.allegato, t.peso_allegato_kg, data, data, t.cippato_kg, t.ferro_kg];
     riga.getCell(11).value = { formula: `I${r}+J${r}`, result: t.totale_kg };
-    riga.getCell(12).value = { formula: `${MAX_PER_DICHIARAZIONE_KG}-K${r}`, result: MAX_PER_DICHIARAZIONE_KG - t.totale_kg };
-    riga.getCell(13).value = { formula: `J${r}/K${r}`, result: t.totale_kg ? t.ferro_kg / t.totale_kg : 0 };
+    // QUANTO RESTA AI 38.000 KG SI CONTA SUL PESO DI CHIUSURA, NON SULLA RETE.
+    //
+    // La colonna K e' la sola parte di rete: sull'ultima terziaria, quella che
+    // porta l'extra raccolta, la dichiarazione a portale si chiude col peso
+    // intero (rete + extra). Contando 38.000 - K il margine risultava piu' grande
+    // del vero esattamente dell'extra (460 kg ad agosto 2026), e chi ripartiva il
+    // ferro fin la' chiudeva la terziaria a 38.460 kg: il portale la rifiuta. Per
+    // questo l'extra compare come addendo scritto, e la percentuale di ferro si
+    // conta anch'essa su quello che si carica, ferro dell'extra compreso.
+    const extraRiga = intero(t.extra_kg);
+    const extraFerroRiga = extraRiga && pratica.extra ? intero(pratica.extra.ferro_kg) : 0;
+    riga.getCell(12).value = extraRiga
+      ? { formula: `${MAX_PER_DICHIARAZIONE_KG}-(K${r}+${extraRiga})`, result: t.residuo_kg }
+      : { formula: `${MAX_PER_DICHIARAZIONE_KG}-K${r}`, result: MAX_PER_DICHIARAZIONE_KG - t.totale_kg };
+    const caricato = t.totale_kg + extraRiga;
+    riga.getCell(13).value = extraRiga
+      ? { formula: `(J${r}+${extraFerroRiga})/(K${r}+${extraRiga})`, result: caricato ? (t.ferro_kg + extraFerroRiga) / caricato : 0 }
+      : { formula: `J${r}/K${r}`, result: t.totale_kg ? t.ferro_kg / t.totale_kg : 0 };
     riga.getCell(13).numFmt = '0.00%';
     riga.getCell(7).numFmt = 'dd/mm/yyyy';
     riga.getCell(8).numFmt = 'dd/mm/yyyy';
@@ -382,26 +412,89 @@ export async function excelDelMese({ pratica, contesto }) {
   const voce = (a, b, nota = '') => { const riga = c.addRow([a, b, nota]); if (typeof b === 'number') riga.getCell(2).numFmt = '#,##0'; return riga; };
   c.addRow([`Dichiarazioni Irigom · ${mese} ${anno}`]).font = { bold: true, size: 14 };
   c.addRow([]);
-  // Le voci seguono la regola del 22/09/2026: le due letture danno il totale da
+  // Le voci seguono la regola del 22/09/2026: le letture danno il totale da
   // caricare a portale, extra raccolta partita con la nave compresa, e se ne
-  // mostrano le due parti. Superato: "Deve restare a portale (cippato + interi),
-  // foglio Cons., colonne AA + AC" (regola del 19/09) e la giacenza che dava la
-  // sola rete.
+  // mostrano le due parti. Dal 03/10/2026 le letture sono tre, perche' il
+  // registro porta anche il ferro dei mesi senza nave, e in fondo c'e' la prova
+  // della pratica. Superato: "Deve restare a portale (cippato + interi), foglio
+  // Cons., colonne AA + AC" (regola del 19/09) e la giacenza che dava la sola rete.
   const l = pratica.letture;
-  voce('Lettura usata', l.usata === 'giacenza' ? 'giacenza a portale' : 'uscite del registro');
+  // La lettura usata puo' essere la giacenza a portale, le sole uscite del mese
+  // oppure il registro con l'arretrato di ferro (regola dell'utente del
+  // 03/10/2026): sono tre, non due, e chi rilegge deve sapere quale ha dichiarato.
+  const LETTURE = { giacenza: 'giacenza a portale', registro: 'registro con l\'arretrato di ferro', uscite: 'uscite del registro' };
+  voce('Lettura usata', LETTURE[l.usata] || 'uscite del registro');
   voce('Totale a portale secondo le uscite del registro', l.uscite.totale_kg, `foglio Cons., riga del mese, colonne V + X + Y: ciabattato + ferro + CSS-C usciti${pratica.extra_kg ? ', extra raccolta compresa' : ''}`);
+  // Il ferro dei mesi senza nave: e' uscito ed e' stato dichiarato al consorzio
+  // con la sua EER 19.12.02, ma a portale non e' mai arrivato perche' mancava la
+  // terziaria a cui attaccarlo. Senza queste righe il totale del registro
+  // sembrerebbe piu' grande delle uscite del mese senza un motivo scritto.
+  const reg = l.registro;
+  if (reg && reg.arretrato_kg > 0) {
+    const mesiArretrato = Array.isArray(reg.mesi_arretrato) ? reg.mesi_arretrato : [];
+    const daiMesi = mesiArretrato.length ? ` da ${mesiArretrato.join(', ').toLowerCase()}` : '';
+    voce('Totale a portale secondo il registro con l\'arretrato di ferro', reg.totale_kg,
+      `foglio Cons., riga del mese, colonne V + X + Y (${kg(reg.uscite_kg)} kg) piu' il ferro dei mesi senza nave mai arrivato a portale (${kg(reg.arretrato_kg)} kg)`);
+    voce('Arretrato di ferro', reg.arretrato_kg,
+      `uscito${daiMesi || ' nei mesi prima'} e mai dichiarato a portale: in quei mesi non e' partita la nave, quindi non c'era nessuna terziaria a cui attaccarlo`);
+    // QUESTA NOTA DICE QUELLO CHE A PORTALE ENTRA DAVVERO.
+    //
+    // Non il ferro che la lettura vorrebbe portare (da_portare_kg): col limite dei
+    // 38.000 kg per dichiarazione una parte resta fuori, e dichiarando le sole
+    // uscite del mese l'arretrato non entra per niente. Una nota che dicesse
+    // «arretrato compreso» farebbe credere, a chi rilegge il foglio a mesi di
+    // distanza, che quei chili sono stati caricati: da quel momento non si
+    // recuperano piu'. Si scrive quindi quanto ne portano le dichiarazioni
+    // (ripartito_kg), quanto arretrato si recupera e da quali mesi, e quanto resta
+    // indietro.
+    const f = pratica.ferro;
+    const recuperatiDa = (f.recuperati || []).length ? ` da ${f.recuperati.map(x => x.mese).join(', ').toLowerCase()}` : daiMesi;
+    voce('Ferro uscito nel mese (dichiarazione EER 19.12.02)', f.dichiarato_kg,
+      f.recupero_vero_kg > 0
+        ? `le dichiarazioni a portale ne portano ${kg(f.ripartito_kg)} kg: ${kg(f.recupero_vero_kg)} kg di arretrato recuperati${recuperatiDa}, che erano gia' stati dichiarati al consorzio quando il ferro e' uscito mentre a portale non ci erano arrivati${f.resta_indietro_kg > 0 ? `; altri ${kg(f.resta_indietro_kg)} kg restano indietro per la nave dopo` : ''}`
+        : `le dichiarazioni a portale ne portano ${kg(f.ripartito_kg)} kg: l'arretrato di ${kg(reg.arretrato_kg)} kg NON entra e resta da dichiarare, quindi la giacenza a portale non torna con AD + AE`);
+  }
   if (l.giacenza) {
     voce('Giacenza di rete a portale a fine mese', l.giacenza.portale_fine_mese_kg, 'per fine trasporto, aggiornata ai caricamenti');
     voce('Deve restare a portale (gomma AD + ferro AE, meno l\'extra ancora in impianto)', l.giacenza.resta_kg,
       `foglio Cons., riga del mese, colonne AD + AE${l.giacenza.extra_in_giacenza_kg ? `, meno ${kg(l.giacenza.extra_in_giacenza_kg)} kg di extra raccolta arrivata e ancora in impianto` : ''}`);
     voce('Totale a portale secondo la giacenza', l.giacenza.totale_kg, 'giacenza a portale meno quello che deve restarci');
-    voce('Scarto fra le due letture', l.scarto_kg, 'se non e\' zero va capito prima di caricare a portale');
+    // Lo scarto confronta la giacenza col registro, arretrato compreso: con le
+    // sole uscite del mese sarebbe grande quanto l'arretrato, e sembrerebbe un
+    // errore invece di essere il recupero del ferro rimasto indietro.
+    voce(reg && reg.arretrato_kg > 0 ? 'Scarto fra la giacenza e il registro con l\'arretrato' : 'Scarto fra le due letture', l.scarto_kg,
+      `se non e' zero va capito prima di caricare a portale${reg && reg.arretrato_kg > 0 ? `; contro le sole uscite del mese sarebbe ${kg(l.scarto_uscite_kg)} kg, perche' l'arretrato di ferro non e' fra le uscite di questo mese` : ''}`);
   }
   voce('Totale da dichiarare a portale (CSS-C + terziarie)', pratica.portale_kg, pratica.extra_kg ? 'ogni terziaria col peso con cui si chiude: l\'ultima porta anche l\'extra raccolta' : 'tutto di rete');
   if (pratica.extra_kg) {
     voce('di cui rete (CSS-C + terziarie senza l\'extra)', pratica.rete_kg, 'riga IRIGOM del riepilogo');
     voce('di cui extra raccolta', pratica.extra_kg, 'riga EXTRA RACCOLTA del riepilogo, a parte, sul mese del formulario: e\' gestita fuori portale e la chiude a mano l\'utente');
     if (chiusa) voce(`Chiusura a portale della terziaria ${chiusa.terziaria || `dell'allegato VII n. ${chiusa.allegato}`}`, chiusa.portale_kg, `${kg(chiusa.rete_kg)} di rete + ${kg(chiusa.extra_kg)} di extra raccolta`);
+  }
+  // LA PROVA DELLA PRATICA: dopo il caricamento a portale deve restare AD + AE
+  // della riga del mese (regola del 22/09/2026, ripetuta il 03/10/2026). E' il
+  // controllo che chiude il giro, e si rilegge a mesi di distanza: se non torna le
+  // tre celle sono gialle col numero in rosso, come la riga del totale a portale.
+  const v = pratica.verifica;
+  if (v) {
+    const prova = [
+      voce('Dopo il caricamento deve restare a portale', v.resta_a_portale_kg,
+        `gomma AD + ferro AE della riga del mese (${kg(v.deve_restare_kg)} kg)${v.extra_in_giacenza_kg ? `, meno ${kg(v.extra_in_giacenza_kg)} kg di extra raccolta arrivata e ancora in impianto` : ''}`),
+      voce('Dopo il caricamento resterebbe a portale', v.resta_dopo_kg,
+        'giacenza di rete a portale a fine mese meno quello che si carica con questa pratica'),
+      voce('Differenza', v.differenza_kg,
+        'deve essere zero: e\' la regola del 22/09/2026, dopo il caricamento a portale resta AD + AE'),
+    ];
+    if (!v.torna) {
+      for (const riga of prova) {
+        for (let k = 1; k <= 3; k++) {
+          const cella = riga.getCell(k);
+          riempi(cella, giallo);
+          bordi(cella);
+          cella.font = { bold: true, color: { argb: 'FFC00000' } };
+        }
+      }
+    }
   }
   voce('Terziarie da aprire a portale', pratica.terziarie_da_aprire);
   voce('Allegati VII scelti', pratica.allegati.scelti.map(a => a.numero).join(', '));

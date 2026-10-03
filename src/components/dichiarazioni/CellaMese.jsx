@@ -57,7 +57,14 @@ export default function CellaMese({ mese, onApri, soloLettura, dove = {} }) {
     `${mese.mese}`,
     conferito ? `arrivati ${kg(conferito)} kg${daStoccaggi ? ` (in secondaria: ${daStoccaggi})` : ''}` : 'nessun conferimento',
     d && d.quantita_kg > 0 ? `dichiarati ${kg(d.quantita_kg)} kg` : '',
-    d && Number(d.metalli_kg) > 0 ? `metalli ferrosi usciti ${kg(d.metalli_kg)} kg` : '',
+    // «usciti» solo in un mese di soli metalli, dove metalli_kg e' davvero il
+    // ferro uscito dal registro. Negli altri mesi e' il ferro DENTRO le
+    // dichiarazioni caricate a portale, e puo' essere piu' di quello uscito nel
+    // mese, perche' porta anche l'arretrato dei mesi senza nave: chiamarlo
+    // «uscito» faceva sembrare che dal registro fossero usciti chili che non
+    // c'erano, e sommando le caselle il totale annuo dell'EER 19.12.02 saliva.
+    d && Number(d.metalli_kg) > 0
+      ? `${stato === 'solo_metalli' ? 'metalli ferrosi usciti' : 'di cui metalli ferrosi'} ${kg(d.metalli_kg)} kg` : '',
     resta > 0 ? `ancora da dichiarare a portale ${kg(resta)} kg` : '',
     STATI[stato].nome,
     soloLettura ? '' : 'clicca per aprire',

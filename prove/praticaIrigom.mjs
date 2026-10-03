@@ -223,7 +223,7 @@ verifica('si rilegge, e vale l\'ultima', extraCompresaDaNota(`A portale 534.600 
 console.log('I MESI SENZA NAVE');
 const soloCssc = componiMese({ riga: { uscite_cssc_kg: 50000, uscite_ferro_kg: 84100, giacenza_cippato_kg: 1, giacenza_intero_kg: 0 }, ferro: [{ destinatario: 'TRS', colore: 'FFC000', kg: 84100 }], ddt: [{ ddt: '15', data: '2026-01-08', kg: 25000 }, { ddt: '22', data: '2026-01-13', kg: 25000 }], lettura: 'uscite' });
 verifica('il ferro che non entra nei DDT resta in giacenza: nessuna dichiarazione di soli metalli', soloCssc.solo_ferro.length === 0 && soloCssc.rete_kg === 50000 + 26000, `${soloCssc.solo_ferro.length} ${soloCssc.rete_kg}`);
-verifica('e lo dice', soloCssc.avvisi.some(a => /restano in giacenza/.test(a)));
+verifica('e lo dice', soloCssc.avvisi.some(a => /resta(no)? in giacenza/.test(a) && /38\.000 kg/.test(a)), JSON.stringify(soloCssc.avvisi));
 const soloFerro = componiMese({ riga: { uscite_ferro_kg: 89780, giacenza_cippato_kg: 5000, giacenza_intero_kg: 1000 }, ferro: [{ destinatario: 'TRS', colore: 'FFC000', kg: 89780 }], lettura: 'uscite' });
 verifica('aprile: solo metalli, a portale non si carica nulla', soloFerro.rete_kg === 0 && soloFerro.avvisi.some(a => /solo metalli/.test(a)), String(soloFerro.rete_kg));
 verifica('aprile si segna come solo metalli ferrosi', soloFerro.solo_metalli === true && m.solo_metalli === false && soloCssc.solo_metalli === false);

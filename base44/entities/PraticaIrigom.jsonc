@@ -34,9 +34,10 @@
       "type": "string",
       "enum": [
         "giacenza",
+        "registro",
         "uscite"
       ],
-      "description": "Giacenza: si dichiara quanto lascia a portale la giacenza di cippato e interi del registro (regola del 19/09/2026). Uscite: si dichiarano le uscite del mese del foglio Cons."
+      "description": "Giacenza: si dichiara quanto lascia a portale la giacenza di cippato e interi del registro (regola del 19/09/2026). Registro: si dichiarano le uscite del mese piu' il ferro che i mesi senza nave hanno lasciato indietro, mai caricato a portale (regola del 03/10/2026). Uscite: si dichiarano le uscite del mese del foglio Cons."
     },
     "portale_fine_mese_kg": {
       "type": "number",

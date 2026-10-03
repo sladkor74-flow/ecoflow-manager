@@ -9,7 +9,7 @@ import { giornoRoma } from '@/lib/giornoItaliano';
 import { eTerminato, giornoMovimento, dateDaSistemare, testoDate } from '@/lib/movimenti';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { leggiRegistroIrigom } from '@/lib/registroIrigom';
-import { componiMese, dividiExtra, MESI, extraDaSalvare, extraGiaDichiarate, finestraExtra, extraDellePratiche, dichiarazioniExtra, testoExtraCompresa } from '@/lib/praticaIrigom';
+import { componiMese, ferroArretrato, dividiExtra, MESI, extraDaSalvare, extraGiaDichiarate, finestraExtra, extraDellePratiche, dichiarazioniExtra, testoExtraCompresa } from '@/lib/praticaIrigom';
 import { wordDelMese, excelDelMese, cartellaZip, dataIt, datiFileGestione } from '@/lib/documentiIrigom';
 import { scarica } from '@/lib/docxModello';
 import { timbraPdf } from '@/lib/timbraPdf';
@@ -51,6 +51,43 @@ const diCuiExtra = (p) => (conExtra(p)
 const testoPortale = (p) => (!p.portale_kg ? 'A portale non si carica nulla.' : conExtra(p)
   ? `A portale ${formatKg(p.portale_kg)} kg, di cui ${formatKg(p.extra_kg)} kg di extra raccolta ${quale(p.chiusura_ultima_terziaria)}, chiusa a ${formatKg(p.chiusura_ultima_terziaria.portale_kg)} kg, dichiarata a parte sul canale extra raccolta; la parte di rete e' ${formatKg(p.rete_kg)} kg.`
   : `A portale ${formatKg(p.portale_kg)} kg, tutti di rete.`);
+/**
+ * Il ferro rimasto indietro, in parole (regola dell'utente del 03/10/2026):
+ * quali mesi lo hanno lasciato, quanto, e perche' a portale non e' ancora
+ * arrivato. '' quando non c'e' arretrato.
+ */
+function testoArretrato(arretrato, mese, portata) {
+  // Si parte da `componi`, i debiti ancora aperti: i suoi chili fanno esattamente
+  // arretrato_kg, lo stesso numero del riquadro qui sopra e dello Excel. Partendo
+  // dal dettaglio, che e' il conto mese per mese, questa frase diceva l'arretrato
+  // LORDO: un mese che aveva recuperato lasciava una riga negativa che il filtro
+  // buttava via, e la frase annunciava chili che il ferro di un altro mese aveva
+  // gia' portato a portale - fino a 99.300 kg di troppo, accanto al numero giusto.
+  const componi = ((arretrato && arretrato.componi) || []).filter(r => r.kg > 0);
+  if (!componi.length) return '';
+  const dettaglio = (arretrato && arretrato.dettaglio) || [];
+  const righe = componi.map(c => ({ ...c, ...(dettaglio.find(d => d.mese === c.mese) || {}) }));
+  const quali = componi.map(r => `${formatKg(r.kg)} kg di ${r.mese.toLowerCase()}`).join(', ');
+  // Perche' a portale non e' arrivato. Dire «senza una nave non c'e' la terziaria»
+  // su un mese in cui il ciabattato o il CSS-C erano usciti e' falso: le
+  // dichiarazioni c'erano, e il ferro non ci e' entrato tutto per il limite dei
+  // 38.000 kg - oppure quel mese e' stato caricato fuori dal gestionale.
+  const conNave = righe.filter(r => r.aveva_nave);
+  const perche = !conNave.length
+    ? "A portale non ne è andato niente: senza una nave non c'è la terziaria a cui attaccare il ferro, e aspetta la prossima."
+    : conNave.length === righe.length
+      ? 'A portale ne è andata solo una parte: le dichiarazioni di quei mesi non bastavano a portarlo tutto senza passare i 38.000 kg.'
+      : "A portale non è andato tutto: dove non è partita la nave non c'era la terziaria a cui attaccarlo, dove è partita le dichiarazioni non bastavano.";
+  // L'ultima frase dipende dalla lettura scelta: con le sole uscite del mese
+  // l'arretrato NON entra, e promettere che la giacenza torna con AD + AE
+  // contraddirebbe l'avviso che sta due righe sopra e il riquadro «A portale deve
+  // restare». L'utente decide su questa frase.
+  const chiusura = portata
+    ? `Quei chili si aggiungono alle uscite di ${String(mese || '').toLowerCase()}, così dopo il caricamento la giacenza a portale torna con la riga del mese: gomma AD + ferro AE.`
+    : `Con la lettura scelta quei chili NON si aggiungono alle uscite di ${String(mese || '').toLowerCase()}: restano da dichiarare, e dopo il caricamento la giacenza a portale non torna con gomma AD + ferro AE.`;
+  return `Ferro rimasto indietro: ${quali}. ${perche} ${chiusura}`;
+}
+
 /** Il totale a portale di una pratica salvata, da dati_json; null per quelle di prima del 22/09/2026, che non l'avevano. */
 function portaleSalvato(p) {
   try {
@@ -295,6 +332,13 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
   // --- La pratica ---
   const riga = registro && mese ? registro.mesi.find(m => m.mese === mese) : null;
   const terziarie = useMemo(() => [...new Set((terziarieTesto.toUpperCase().match(/TER\d{8}/g) || []))].sort(), [terziarieTesto]);
+  // Il ferro dei mesi prima che a portale non e' ancora arrivato (regola
+  // dell'utente del 03/10/2026): in un mese di soli metalli il ferro esce dal
+  // registro, ma senza nave non c'e' la terziaria a cui attaccarlo e si dichiara
+  // con la nave dopo. Solo le pratiche dell'anno in corso, non quelle dell'anno
+  // prima: la giacenza al 31/12 fa da ancora, quindi l'arretrato non si porta da
+  // un anno all'altro.
+  const arretrato = useMemo(() => (registro && mese ? ferroArretrato(registro.mesi, pratiche, { mese }) : null), [registro, pratiche, mese]);
   const pratica = useMemo(() => {
     if (!riga) return null;
     return componiMese({
@@ -306,9 +350,12 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
       // L'extra raccolta arrivata e non dichiarata con questa pratica e' ancora in
       // impianto: il registro la conta in giacenza, il portale di rete no.
       extraInGiacenzaKg: extraCandidati.filter(r => !sceltiExtra.has(r.id) && !dichiarataAMano(r)).reduce((s, r) => s + (Number(r.peso_effettivo) || 0), 0),
-      lettura, extra, terziarie,
+      lettura, extra, terziarie, arretrato,
     });
-  }, [riga, registro, mese, portaleFineMese, lettura, extra, terziarie, extraCandidati, sceltiExtra, dichiarataAMano]);
+  }, [riga, registro, mese, portaleFineMese, lettura, extra, terziarie, extraCandidati, sceltiExtra, dichiarataAMano, arretrato]);
+  // La frase si scrive dopo la pratica, perche' cambia con la lettura usata: con
+  // le sole uscite del mese l'arretrato resta fuori e la frase deve dirlo.
+  const fraseArretrato = testoArretrato(arretrato, mese, !!pratica && pratica.letture.usata !== 'uscite');
 
   // --- I documenti forniti ---
   const aggiungiDocumenti = (lista) => {
@@ -519,7 +566,7 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
       // rete (testoExtraCompresa, extraCompresaDaNota in src/lib/praticaIrigom.js).
       const nota = `${pratica.solo_metalli
         ? `Segnata nel gestionale il ${dataIt(oggi)} dal registro ${registro.file_nome}: nel mese sono usciti solo metalli ferrosi (${formatKg(riga.uscite_ferro_kg)} kg) e nessuna gomma. A portale non si carica nulla: il ferro si dichiara con la prossima uscita di gomma.`
-        : `Preparata nel gestionale il ${dataIt(oggi)} dal registro ${registro.file_nome}: ${pratica.terziarie.righe.length} terziarie${terziarie.length ? ` (${terziarie[0]} - ${terziarie[terziarie.length - 1]})` : ''}, ${pratica.cssc.righe.length} dichiarazioni di CSS-C${nave.nome ? `, nave ${nave.nome}` : ''}; lettura dalla ${pratica.letture.usata === 'giacenza' ? 'giacenza a portale' : 'uscite del registro'}. ${testoPortale(pratica)}`} ${testoExtraCompresa(pratica.solo_metalli ? 0 : pratica.extra_kg)}`;
+        : `Preparata nel gestionale il ${dataIt(oggi)} dal registro ${registro.file_nome}: ${pratica.terziarie.righe.length} terziarie${terziarie.length ? ` (${terziarie[0]} - ${terziarie[terziarie.length - 1]})` : ''}, ${pratica.cssc.righe.length} dichiarazioni di CSS-C${nave.nome ? `, nave ${nave.nome}` : ''}; lettura ${pratica.letture.usata === 'giacenza' ? 'dalla giacenza a portale' : pratica.letture.usata === 'registro' ? `dalle uscite del registro più il ferro rimasto indietro (${formatKg(pratica.letture.registro.arretrato_kg)} kg)` : 'dalle uscite del registro'}. ${testoPortale(pratica)}`} ${testoExtraCompresa(pratica.solo_metalli ? 0 : pratica.extra_kg)}`;
       // La dichiarazione di rete del mese: si aggiorna quella che c'e', con traccia di prima.
       const esistenti = await base44.entities.DichiarazioneSito.filter({ anno, mese });
       const suIrigom = (d) => normalizzaRagioneSociale(d.sito) === nsIrigom;
@@ -684,24 +731,64 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
             {!pratica.vuoto && (
               <>
                 <div className="flex gap-2 flex-wrap">
-                  {/* Le due letture danno il totale da caricare a portale, extra raccolta
-                      partita con la nave compresa (regola del 22/09/2026). */}
+                  {/* Le letture danno il totale da caricare a portale, extra raccolta
+                      partita con la nave compresa (regola del 22/09/2026). Quella del
+                      registro con l'arretrato compare solo quando del ferro e' rimasto
+                      indietro (regola del 03/10/2026): in un mese senza arretrato
+                      direbbe le stesse uscite due volte. */}
                   <button type="button" className="text-left" onClick={() => setLettura('uscite')}>
                     <Riquadro titolo="Uscite del registro" valore={`${t(pratica.letture.uscite.totale_kg)} t`} tono={pratica.letture.usata === 'uscite' ? 'scelto' : ''}
                       nota={`ciabattato ${t(riga.uscite_cippato_kg)} + ferro ${t(riga.uscite_ferro_kg)} + CSS-C ${t(riga.uscite_cssc_kg)}${pratica.letture.uscite.extra_kg ? `, extra raccolta compresa` : ''}`} />
                   </button>
+                  {/* Il riquadro si vede anche quando l'arretrato e' tornato a zero ma la
+                      lettura dal registro e' quella scelta: riaprendo una pratica salvata con
+                      quella lettura, dopo che il ferro arretrato era stato recuperato, nessuno
+                      dei riquadri risultava acceso e la pagina non diceva piu' da dove venisse
+                      il totale che si stava per caricare. */}
+                  {(pratica.letture.registro.arretrato_kg > 0 || pratica.letture.usata === 'registro') && (
+                    <button type="button" className="text-left" onClick={() => setLettura('registro')}>
+                      <Riquadro titolo="Registro con l'arretrato" valore={`${t(pratica.letture.registro.totale_kg)} t`} tono={pratica.letture.usata === 'registro' ? 'scelto' : ''}
+                        nota={pratica.letture.registro.arretrato_kg > 0
+                          ? `uscite del mese ${t(pratica.letture.registro.uscite_kg)} + ferro rimasto indietro ${t(pratica.letture.registro.arretrato_kg)}${pratica.letture.registro.mesi_arretrato.length ? ` da ${pratica.letture.registro.mesi_arretrato.join(', ').toLowerCase()}` : ''}`
+                          /* Con l'arretrato a zero non si puo' dire «nessun mese ha lasciato
+                             indietro del ferro»: puo' essere zero perche' il saldo non si puo'
+                             fare (nessuna pratica registrata dell'anno) o perche' i mesi prima
+                             dell'ancora restano fuori dalla finestra, e in quei casi il riquadro
+                             negava quello che l'avviso qui sotto dichiara di non sapere. */
+                          : !arretrato || !arretrato.dal_mese
+                            ? 'le uscite del mese: di quest\'anno non c\'è ancora nessuna pratica registrata, quindi il saldo del ferro non si può fare'
+                            : (arretrato.prima_del_gestionale || []).length
+                              ? `le uscite del mese: dai mesi registrati non resta indietro niente, ma di ${arretrato.prima_del_gestionale.join(', ').toLowerCase()} non si sa`
+                              : 'le uscite del mese: nessun mese prima ha lasciato indietro del ferro'} />
+                    </button>
+                  )}
                   <button type="button" className="text-left" disabled={!pratica.letture.giacenza} onClick={() => setLettura('giacenza')}>
                     <Riquadro titolo="Giacenza a portale a fine mese" tono={pratica.letture.usata === 'giacenza' ? 'scelto' : ''}
                       valore={pratica.letture.giacenza ? `${t(pratica.letture.giacenza.totale_kg)} t` : 'non disponibile'}
                       nota={pratica.letture.giacenza ? `${t(pratica.letture.giacenza.portale_fine_mese_kg)} a portale meno ${t(pratica.letture.giacenza.resta_kg)} che devono restare (gomma AD + ferro AE del registro)${pratica.letture.giacenza.extra_in_giacenza_kg ? ` (tolti ${t(pratica.letture.giacenza.extra_in_giacenza_kg)} di extra raccolta ancora in impianto)` : ''}` : 'serve il file degli ordini non dichiarati'} />
                   </button>
                   {pratica.letture.scarto_kg !== null && (
-                    <Riquadro titolo="Scarto fra le due letture" valore={`${pratica.letture.scarto_kg > 0 ? '+' : ''}${formatKg(pratica.letture.scarto_kg)} kg`}
-                      tono={Math.abs(pratica.letture.scarto_kg) > 500 ? 'attenzione' : ''} nota="va capito prima di caricare" />
+                    <Riquadro titolo={pratica.letture.registro.arretrato_kg > 0 ? 'Scarto giacenza e registro' : 'Scarto fra le due letture'}
+                      valore={`${pratica.letture.scarto_kg > 0 ? '+' : ''}${formatKg(pratica.letture.scarto_kg)} kg`}
+                      tono={Math.abs(pratica.letture.scarto_kg) > 500 ? 'attenzione' : ''}
+                      nota={pratica.letture.registro.arretrato_kg > 0
+                        ? `va capito prima di caricare; sulle sole uscite del mese sarebbe ${pratica.letture.scarto_uscite_kg > 0 ? '+' : ''}${formatKg(pratica.letture.scarto_uscite_kg)} kg`
+                        : 'va capito prima di caricare'} />
+                  )}
+                  {/* La prova che chiude il giro (regola dell'utente del 03/10/2026):
+                      dopo il caricamento a portale deve restare AD + AE della riga del
+                      mese, meno l'extra raccolta ancora in impianto. */}
+                  {pratica.verifica && (
+                    <Riquadro titolo="A portale deve restare" valore={`${t(pratica.verifica.resta_a_portale_kg)} t`}
+                      tono={pratica.verifica.torna ? '' : 'attenzione'}
+                      nota={`gomma AD + ferro AE della riga di ${mese.toLowerCase()}${pratica.verifica.extra_in_giacenza_kg ? `, meno ${t(pratica.verifica.extra_in_giacenza_kg)} di extra raccolta ancora in impianto` : ''}${pratica.verifica.torna ? '' : `; caricando questa pratica ne resterebbero ${t(pratica.verifica.resta_dopo_kg)}`}`} />
                   )}
                   <Riquadro titolo="Da dichiarare a portale" valore={`${t(pratica.portale_kg)} t`} tono="scelto"
                     nota={conExtra(pratica) ? `${formatKg(pratica.portale_kg)} kg, ${diCuiExtra(pratica)}` : `${formatKg(pratica.portale_kg)} kg, tutti di rete`} />
                 </div>
+                {pratica.letture.registro.arretrato_kg > 0 && fraseArretrato && (
+                  <p className="text-xs text-muted-foreground">{fraseArretrato}</p>
+                )}
                 {portaleFineMese && (
                   <p className="text-xs text-muted-foreground">
                     Giacenza di rete a portale al {`31/${String(idx + 1).padStart(2, '0')}`}, per fine trasporto: {t(portaleFineMese.foto_kg)} t dal file del portale
@@ -742,7 +829,15 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
                         <p className="font-semibold">Allegati VII scelti: {pratica.allegati.scelti.map(a => a.numero).join(', ')}</p>
                         <p className="text-muted-foreground">
                           La combinazione più vicina al ciabattato uscito, cercata fra {pratica.allegati.bacino === 'SMOCO' ? 'i soli allegati di SMOCO' : pratica.allegati.bacino === 'SMOCO e TRANSAR' ? 'gli allegati di SMOCO e TRANSAR, perché i soli SMOCO non bastavano' : pratica.allegati.bacino === 'tutti i trasportatori' ? 'tutti gli allegati, perché SMOCO e TRANSAR non bastavano' : 'gli allegati del mese'}:
-                          {' '}{formatKg(pratica.allegati.coperto_kg)} kg per {formatKg(riga.uscite_cippato_kg)} da coprire{pratica.allegati.scarto_kg > 0 ? `, ${formatKg(pratica.allegati.scarto_kg)} kg in più che restano fuori dall'ultima terziaria` : ', esatti'}.
+                          {/* Lo scarto puo' essere NEGATIVO: gli allegati del mese non coprono il
+                              ciabattato uscito. Prima cadeva sul ramo «esatti» e affermava che la
+                              copertura tornava, poche righe sotto il blocco rosso che dice il
+                              contrario. */}
+                          {' '}{formatKg(pratica.allegati.coperto_kg)} kg per {formatKg(riga.uscite_cippato_kg)} da coprire{pratica.allegati.scarto_kg > 0
+                            ? `, ${formatKg(pratica.allegati.scarto_kg)} kg in più che restano fuori dall'ultima terziaria`
+                            : pratica.allegati.scarto_kg < 0
+                              ? `, ${formatKg(-pratica.allegati.scarto_kg)} kg in meno: non bastano`
+                              : ', esatti'}.
                           {' '}Su {pratica.allegati.ordinati.length} allegati del mese.
                         </p>
                         <p className="text-sm pt-1 flex items-center gap-2 text-primary font-medium">
