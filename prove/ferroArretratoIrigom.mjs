@@ -446,6 +446,35 @@ const ottSenza = componiMese({ ...comune, arretrato: senzaPratica, lettura: 'reg
 verifica('e la pratica avverte che dichiararlo di nuovo lo porterebbe a portale due volte',
   ottSenza.avvisi.some(a => /nessuna pratica/.test(a) && /due volte/.test(a)), JSON.stringify(ottSenza.avvisi));
 
+console.log('IL SALDO SULLE CIFRE VERE DEL 2026, LETTE DAL REGISTRO');
+// Colonna X del foglio Cons. di «Irigom carico scarico 2026.xlsx», righe 86-94,
+// letta il 03/10/2026. Le pratiche nel gestionale partono da agosto: agosto ha
+// portato a portale tutto il suo ferro (il 31/08 il portale aveva 144.780 kg,
+// cioe' AD93 + AE93 al chilo), settembre e' stato un mese di soli metalli.
+const X_2026 = { Gennaio: 84100, Febbraio: 90360, Marzo: 113460, Aprile: 89780, Maggio: 102640, Giugno: 89580, Luglio: 126160, Agosto: 82500, Settembre: 99300 };
+const mesiVeri = MESI.map(m => ({ mese: m, uscite_ferro_kg: X_2026[m] || 0 }));
+const praticheVere = [
+  { anno: 2026, mese: 'Agosto', stato: 'registrata', versione: 1, metalli_kg: 82500, dati_json: JSON.stringify({ solo_metalli: false, materiali_portale: { metalli_kg: 82500 } }) },
+  { anno: 2026, mese: 'Settembre', stato: 'registrata', versione: 1, metalli_kg: 99300, dati_json: JSON.stringify({ solo_metalli: true, materiali_portale: { metalli_kg: 0 } }) },
+];
+const arrVero = ferroArretrato(mesiVeri, praticheVere, { mese: 'Ottobre' });
+verifica('a ottobre 2026 l\'arretrato e\' 99.300 kg, tutto di settembre',
+  arrVero.arretrato_kg === 99300 && arrVero.mesi.join() === 'Settembre' && arrVero.componi[0].kg === 99300, JSON.stringify([arrVero.arretrato_kg, arrVero.mesi]));
+verifica('il saldo parte da agosto e i sette mesi prima si dicono, non si contano',
+  arrVero.dal_mese === 'Agosto' && arrVero.prima_del_gestionale.length === 7 && arrVero.fuori_finestra_kg === 0, JSON.stringify([arrVero.dal_mese, arrVero.prima_del_gestionale]));
+// La somma di gennaio-luglio e' 696.080 kg: contarla sarebbe il numero mostruoso
+// che l'ancora esiste per evitare, e non sarebbe arretrato - al 31/08 il portale
+// era esattamente ad AD93 + AE93, quindi quel ferro era gia' stato dichiarato.
+verifica('senza l\'ancora si dichiarerebbero 696.080 kg di ferro in piu\'',
+  ferroArretrato(mesiVeri, [praticheVere[1]], { mese: 'Ottobre' }).arretrato_kg === 99300
+  && Object.entries(X_2026).filter(([m]) => MESI.indexOf(m) < MESI.indexOf('Agosto')).reduce((s, [, k]) => s + k, 0) === 696080);
+// Settembre senza pratica nel gestionale: l'arretrato resta 99.300, ma si segnala,
+// perche' se quella dichiarazione fosse stata caricata fuori dal gestionale quei
+// chili andrebbero a portale due volte.
+const senzaSettembre = ferroArretrato(mesiVeri, [praticheVere[0]], { mese: 'Ottobre' });
+verifica('finche\' settembre non e\' registrato, l\'arretrato c\'e\' ma si chiede di registrarlo',
+  senzaSettembre.arretrato_kg === 99300 && senzaSettembre.senza_pratica.join() === 'Settembre', JSON.stringify(senzaSettembre.senza_pratica));
+
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');
 process.exit(ko ? 1 : 0);
