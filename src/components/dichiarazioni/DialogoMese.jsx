@@ -20,8 +20,19 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
   const { toast } = useToast();
   const d = mese.dichiarazione;
   const materiali = materialiDi(flusso.operazione);
+  // SUI CANALI DIVERSI DALLA RETE SI DICHIARA QUELLO CHE E' ARRIVATO.
+  //
+  // ACI ed extra raccolta si dichiarano per intero, sul mese del formulario: in
+  // tutte le dichiarazioni del 2026 il dichiarato e' uguale al conferito, al chilo
+  // (Tecnogum, Gatim, Green Tyre, T.R.S., e l'extra raccolta di Irigom). La rete
+  // no: li' l'impianto dichiara quello che ha lavorato, che comprende la giacenza
+  // dei mesi prima. Quindi su un mese ancora da scrivere la quantita' si propone, e
+  // all'utente resta da ripartire i materiali - che e' l'unica cosa che il
+  // gestionale non puo' sapere. Un numero in meno da trascrivere e' un numero in
+  // meno da sbagliare, e la somma dei materiali ha gia' il suo controllo.
+  const proposta = !d && (flusso.canale || 'RETE') !== 'RETE' ? Math.round(Number(mese.conferito_kg) || 0) : 0;
   const [dati, setDati] = useState(() => ({
-    quantita_kg: d ? d.quantita_kg : 0,
+    quantita_kg: d ? d.quantita_kg : proposta,
     ricevuta_email: d ? d.ricevuta_email : false,
     ricevuta_il: (d && d.ricevuta_il) || '',
     caricata_inviata: d ? d.caricata_inviata : false,
@@ -175,6 +186,11 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
                 <span className="text-xs text-muted-foreground">kg</span>
               </span>
               <span className="text-xs text-muted-foreground">Somma dei materiali: {kg(totaleMateriali)} kg</span>
+              {/* Da dove viene il numero proposto: un numero che compare da solo, senza
+                  dire da dove arriva, non si controlla e non si corregge. */}
+              {proposta > 0 && (
+                <span className="text-xs text-muted-foreground block">Proposto dal conferito del mese: su questo canale si dichiara quello che è arrivato. Correggilo se l&apos;impianto ne dichiara un altro.</span>
+              )}
             </label>
             <div className="space-y-2">
               <label className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
