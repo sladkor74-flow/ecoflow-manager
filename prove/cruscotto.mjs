@@ -270,6 +270,46 @@ function MESI8() { return ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', '
 // caricamento riscriveva l'ACI coi numeri del portale e cancellava i materiali
 // trascritti a mano dalle dichiarazioni cartacee. Trovato dall'audit del
 // 03/10/2026, da due revisori per conto loro.
+// LA DICHIARAZIONE DI DICEMBRE SI CARICA A GENNAIO.
+//
+// Difetto alta dell'audit del 03/10/2026. L'anno di una riga del report si
+// prendeva dal giorno del CARICAMENTO: chiedendo il 2026 la riga del 07/01/2027
+// veniva scartata, e chiedendo il 2027 non trovava nessuna nostra riga, perche'
+// le nostre dichiarazioni di dicembre sono dell'anno 2026. Non si agganciava in
+// nessuno dei due anni e dicembre restava «da dichiarare» per sempre, senza un
+// avviso da nessuna parte. Il periodo di un movimento e' la fine del trasporto
+// (regola 1), e vale anche qui.
+console.log('LA DICHIARAZIONE DI DICEMBRE CARICATA A GENNAIO');
+const dicembre = [
+  { data_dichiarazione: '2027-01-07T09:00:00Z', fine_trasporto: '2026-12-18T00:00:00Z', destinazione: 'GREEN TYRE PROJECT SRL', prodotto: 'G1 - pneumatici', peso_associato_kg: 80000 },
+];
+const cDic = caricamentiPortale(dicembre, 2026, 'RETE').get('GREEN TYRE PROJECT SRL');
+verifica('il caricamento di gennaio sta nell\'anno degli ordini che chiude',
+  !!cDic && cDic.length === 1 && cDic[0].kg === 80000, JSON.stringify(cDic));
+verifica('ma il giorno resta quello vero del caricamento, che e\' la data da scrivere',
+  !!cDic && !!cDic[0] && cDic[0].data === '2027-01-07', JSON.stringify(cDic));
+// Nel 2027 la stessa riga si vede ancora - il caricamento e' di gennaio 2027 -
+// ma li' e' arretrato, perche' per il 2027 chiude ordini dell'anno prima: e'
+// esattamente quello che deve dire, invece di cercare un mese del 2027 che non
+// esiste.
+verifica('nel 2027 la stessa riga c\'e\', ma come arretrato',
+  confrontaConIlPortale(dicembre, 2027, []).arretrato.length === 1
+  && confrontaConIlPortale(dicembre, 2027, []).da_inserire.length === 0,
+  JSON.stringify(confrontaConIlPortale(dicembre, 2027, [])));
+scritte = [];
+esito = await allineaDalPortale(svcFinto(scritte), 2026, dicembre, [
+  { id: 'dic', sito: 'Green Tyre Project Srl', canale: 'RETE', mese: 'Dicembre', quantita_kg: 80000 },
+]);
+verifica('cosi\' dicembre si aggancia, e si segna caricata il 07/01/2027',
+  esito.aggiornate.length === 1 && scritte.length === 1 && scritte[0].id === 'dic' && scritte[0].caricata_il === '2027-01-07',
+  JSON.stringify({ esito, scritte }));
+verifica('e non resta ne\' fra le non trovate ne\' fra l\'arretrato',
+  esito.non_trovate.length === 0 && esito.arretrato.length === 0, JSON.stringify(esito));
+// Senza fine trasporto l'unica data e' quella del caricamento, e si usa quella.
+verifica('una riga senza fine trasporto resta nell\'anno in cui e\' stata caricata',
+  caricamentiPortale([{ data_dichiarazione: '2026-06-10T00:00:00Z', destinazione: 'GATIM SRL', prodotto: 'G1', peso_associato_kg: 1000 }], 2026, 'RETE').size === 1
+  && caricamentiPortale([{ data_dichiarazione: '2026-06-10T00:00:00Z', destinazione: 'GATIM SRL', prodotto: 'G1', peso_associato_kg: 1000 }], 2027, 'RETE').size === 0);
+
 console.log('CANALI CHE SI SCRIVONO');
 verifica('senza indicazione si scrive solo la rete',
   canaliDaScrivere(undefined).join() === 'RETE' && canaliDaScrivere(null).join() === 'RETE' && canaliDaScrivere([]).join() === 'RETE');

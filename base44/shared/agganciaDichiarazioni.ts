@@ -67,7 +67,32 @@ export function caricamentiPortale(righe, anno, canale = '', provenienza = '') {
     if (canale && canaleRigaPortale(r) !== canale) continue;
     if (provenienza && provenienzaRigaPortale(r) !== provenienza) continue;
     const data = giorno(r.data_dichiarazione);
-    if (!data || Number(data.slice(0, 4)) !== Number(anno)) continue;
+    if (!data) continue;
+    // DI CHE ANNO E' UNA RIGA: LO DICE LA FINE TRASPORTO, NON IL CARICAMENTO.
+    //
+    // E' la regola 1, e qui costava una dichiarazione intera. La dichiarazione di
+    // dicembre si carica a portale nei primi giorni di gennaio: con l'anno preso
+    // dal giorno del caricamento, chiedendo il 2026 quella riga veniva scartata
+    // (data 2027) e chiedendo il 2027 non trovava nessuna nostra riga, perche' le
+    // nostre dichiarazioni di quel mese sono dell'anno 2026. Non si agganciava
+    // mai, in nessuno dei due anni, e dicembre restava «da dichiarare» per
+    // sempre, senza un avviso da nessuna parte (audit del 03/10/2026).
+    //
+    // Una riga entra nell'anno che si sta guardando se ci sta col caricamento
+    // OPPURE con gli ordini che chiude. Non solo con gli ordini: un caricamento
+    // fatto quest'anno che chiude ordini dell'anno prima e' l'ARRETRATO, e deve
+    // restare visibile qui per essere riconosciuto come tale. Non solo col
+    // caricamento: e' il caso di dicembre.
+    //
+    // La riga di dicembre caricata a gennaio si vede quindi in tutti e due gli
+    // anni, e in tutti e due e' giusta: nel 2026 aggancia il nostro dicembre, nel
+    // 2027 risulta arretrato, perche' per il 2027 chiude ordini dell'anno prima.
+    // Il giorno resta quello vero del caricamento: e' la data che si scrive in
+    // caricata_il.
+    const periodo = giorno(r.fine_trasporto);
+    const suoAnno = Number(data.slice(0, 4)) === Number(anno)
+      || (!!periodo && Number(periodo.slice(0, 4)) === Number(anno));
+    if (!suoAnno) continue;
     const sito = String(r.destinazione_secondaria || '').trim() || String(r.destinazione || '').trim();
     if (!sito) continue;
     if (!per.has(sito)) per.set(sito, new Map());
