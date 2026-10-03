@@ -65,6 +65,35 @@ export function bloccoFoglio(f) {
   return righe;
 }
 
+// IL FOGLIO SI DEVE POTER LEGGERE E STAMPARE.
+//
+// L'utente, 03/10/2026: «il foglio excel dovrebbe essere un po' piu'
+// professionale». SheetJS nella versione che usiamo non sa scrivere i grassetti
+// ne' i colori, ma sa fare le tre cose che contano davvero su un foglio di
+// numeri: le LARGHEZZE delle colonne (altrimenti i nomi dei fornitori si
+// tagliano e gli euro diventano ####), il FORMATO dei numeri (migliaia e due
+// decimali, non 6064.240000000001) e il BLOCCO delle prime righe, cosi' le
+// intestazioni restano a video mentre si scorre.
+function impagina(XLSX, ws, quante) {
+  ws["!cols"] = [
+    { wch: 42 }, { wch: 12 }, { wch: 16 }, { wch: 10 }, { wch: 14 },
+    { wch: 16 }, { wch: 12 }, { wch: 14 },
+  ];
+  // Le colonne dei soldi e dei pesi: niente code di decimali.
+  const r = XLSX.utils.decode_range(ws["!ref"] || "A1");
+  for (let R = r.s.r; R <= r.e.r; R++) {
+    for (let C = r.s.c; C <= r.e.c; C++) {
+      const c = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+      if (!c || c.t !== 'n') continue;
+      // L'EER non e' un numero da formattare: e' un codice.
+      if (c.v === EER_PFU) { c.z = "0"; continue; }
+      c.z = Number.isInteger(c.v) ? "#,##0" : "#,##0.00";
+    }
+  }
+  if (quante) ws["!freeze"] = { xSplit: 0, ySplit: quante };
+  return ws;
+}
+
 export const nomeFilePassiva = (anno, mese, come, estensione) =>
   `Format_amministrazione_PASSIVA${come === 'canali' ? '_per_canale' : ''}_${mese}_${anno}.${estensione}`;
 
@@ -80,7 +109,7 @@ export function exportPassivaUnFoglio(fogli, anno, mese) {
   }
   const ws = XLSX.utils.aoa_to_sheet(righe);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), 'PASSIVA');
+  XLSX.utils.book_append_sheet(wb, impagina(XLSX, formattaPesi(XLSX, ws), 1), 'PASSIVA');
   XLSX.writeFile(wb, nomeFilePassiva(anno, mese, 'unico', 'xlsx'));
 }
 
@@ -89,7 +118,7 @@ export function exportPassivaPerCanale(fogli, anno, mese) {
   const wb = XLSX.utils.book_new();
   for (const f of fogli) {
     const ws = XLSX.utils.aoa_to_sheet(bloccoFoglio(f));
-    XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), (NOMI[f.canale] || f.canale).slice(0, 31));
+    XLSX.utils.book_append_sheet(wb, impagina(XLSX, formattaPesi(XLSX, ws), 1), (NOMI[f.canale] || f.canale).slice(0, 31));
   }
   XLSX.writeFile(wb, nomeFilePassiva(anno, mese, 'canali', 'xlsx'));
 }

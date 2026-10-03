@@ -141,6 +141,33 @@ export function bloccoPassiva(voci, dati, canale, blocco) {
 }
 
 /**
+ * LE RIGHE PIATTE DI UN BLOCCO, dalla forma che ha calcolaPassiva.
+ *
+ * calcolaPassiva raggruppa per fornitore: { fornitore, righe: [...], totale_* }.
+ * Qui serve una riga per volta, col nome del soggetto addosso, perche' il foglio
+ * dell'amministrazione mette il soggetto in grassetto e le sue voci sotto.
+ *
+ * Il 03/10/2026 questo adattatore non c'era e il foglio usciva TUTTO A ZERO coi
+ * nomi vuoti: cercavo r.soggetto su righe che si chiamano fornitore e tengono i
+ * numeri dentro righe[]. L'utente l'ha visto subito: «ci sono ancora errori».
+ *
+ * Un fornitore senza righe di dettaglio porta comunque il suo totale: meglio una
+ * riga sola che perderlo.
+ */
+export function righePiatte(gruppi) {
+  const out = [];
+  for (const g of gruppi || []) {
+    const dettaglio = g && Array.isArray(g.righe) ? g.righe : [];
+    if (dettaglio.length) {
+      for (const r of dettaglio) out.push({ soggetto: g.fornitore, ...r });
+    } else if (g) {
+      out.push({ soggetto: g.fornitore, tonnellate: g.totale_tonnellate, importo: g.totale_euro });
+    }
+  }
+  return out;
+}
+
+/**
  * Il foglio intero di un canale: i tre blocchi e il totale in cima, com'e' nel
  * file dell'amministrazione.
  *
@@ -149,18 +176,20 @@ export function bloccoPassiva(voci, dati, canale, blocco) {
  * le righe sono i viaggi del mese - quindi si riporta com'e'.
  */
 export function foglioPassiva(voci, passiva, canale, mese) {
-  const raccoglitori = bloccoPassiva(voci, (passiva && passiva.raccoglitori) || [], canale, 'raccoglitori');
-  const impianti = bloccoPassiva(voci, (passiva && passiva.impianti_stoccaggi) || [], canale, 'impianti');
-  const trasporti = ((passiva && passiva.trasporti_secondaria) || []).map(t => ({
-    produttore: testo(t.produttore || t.stoccaggio),
-    trasportatore: testo(t.trasportatore),
-    destinatario: testo(t.destinatario || t.destinazione),
+  const raccoglitori = bloccoPassiva(voci, righePiatte(passiva && passiva.raccoglitori), canale, 'raccoglitori');
+  const impianti = bloccoPassiva(voci, righePiatte(passiva && passiva.impianti_stoccaggi), canale, 'impianti');
+  // Il trasporto: il trasportatore e' il fornitore del gruppo, produttore e
+  // destinatario stanno sulla riga della tratta.
+  const trasporti = (passiva && passiva.trasporti_secondaria || []).flatMap(g => (g.righe || []).map(t => ({
+    produttore: testo(t.stoccaggio),
+    trasportatore: testo(g.fornitore),
+    destinatario: testo(t.destinazione),
     tonnellate: Math.round((Number(t.tonnellate) || 0) * 1000) / 1000,
     unita_misura: t.unita_misura || '',
     prezzo: Number(t.tariffa_valore) || 0,
     viaggi: Number(t.viaggi) || 0,
     totale: n2(t.importo),
-  }));
+  })));
   const totaleTrasporti = n2(trasporti.reduce((s, t) => s + t.totale, 0));
   return {
     canale,
@@ -184,18 +213,25 @@ export function foglioPassiva(voci, passiva, canale, mese) {
  */
 export function modelloDaPassiva(passiva, canale, anno) {
   const fuori = [];
-  const aggiungi = (blocco, righe) => {
-    const visti = new Map();
-    for (const r of righe || []) {
-      const k = chiave(r.soggetto);
-      if (!visti.has(k)) visti.set(k, { soggetto: testo(r.soggetto), prezzo: Number(r.tariffa_valore) || 0, unita: r.unita_misura === 'euro_viaggio' ? 'euro_viaggio' : 'euro_tonnellata' });
-    }
+  const aggiungi = (blocco, gruppi) => {
     let i = 0;
-    for (const v of visti.values()) {
-      fuori.push({ anno, canale, blocco, soggetto: v.soggetto, voce: '', prezzo: v.prezzo, unita_misura: v.unita, ordine: ++i * 10, attiva: true });
+    for (const g of gruppi || []) {
+      if (!g || !testo(g.fornitore)) continue;
+      // Il prezzo della prima riga del fornitore: e' un punto di partenza, non
+      // una verita'. Se il fornitore ha piu' tariffe le voci le separa l'utente.
+      const prima = (g.righe && g.righe[0]) || {};
+      fuori.push({
+        anno, canale, blocco,
+        soggetto: testo(g.fornitore),
+        voce: '',
+        prezzo: Number(prima.tariffa_valore) || 0,
+        unita_misura: String(prima.unita_misura || '').includes('viaggio') ? 'euro_viaggio' : 'euro_tonnellata',
+        ordine: ++i * 10,
+        attiva: true,
+      });
     }
   };
-  aggiungi('raccoglitori', (passiva && passiva.raccoglitori) || []);
-  aggiungi('impianti', (passiva && passiva.impianti_stoccaggi) || []);
+  aggiungi('raccoglitori', passiva && passiva.raccoglitori);
+  aggiungi('impianti', passiva && passiva.impianti_stoccaggi);
   return fuori;
 }

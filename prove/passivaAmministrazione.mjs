@@ -14,7 +14,7 @@
 // verificato a mano. npm run prove
 import { caricaLibPagine } from './dati/libPagine.mjs';
 
-const { importoVoce, vociOrdinate, tonnellateDellaVoce, bloccoPassiva, foglioPassiva, modelloDaPassiva } = await caricaLibPagine('lib/passivaAmministrazione');
+const { importoVoce, vociOrdinate, righePiatte, tonnellateDellaVoce, bloccoPassiva, foglioPassiva, modelloDaPassiva } = await caricaLibPagine('lib/passivaAmministrazione');
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -107,12 +107,30 @@ console.log('L ORDINE DEL FOGLIO');
   verifica('e le voci spente restano fuori', !v.some(x => x.soggetto === 'Z'));
 }
 
+console.log('LA FORMA VERA DI calcolaPassiva');
+{
+  // calcolaPassiva raggruppa per fornitore: { fornitore, righe: [...], totale_* }.
+  // Il 03/10/2026 il foglio e uscito TUTTO A ZERO coi nomi vuoti perche cercavo
+  // r.soggetto su righe che si chiamano fornitore e tengono i numeri dentro
+  // righe[]. L'utente: «ci sono ancora errori».
+  const gruppi = [
+    { fornitore: 'C.L. SERVICE S.R.L.', righe: [{ provincia: 'NAPOLI', tonnellate: 2.14, tariffa_valore: 71, importo: 151.94 }], totale_tonnellate: 2.14, totale_euro: 151.94 },
+    { fornitore: 'SENZA DETTAGLIO SRL', righe: [], totale_tonnellate: 9, totale_euro: 630 },
+  ];
+  const piatte = righePiatte(gruppi);
+  verifica('il nome del fornitore finisce su ogni riga', piatte[0].soggetto === 'C.L. SERVICE S.R.L.', JSON.stringify(piatte[0]));
+  verifica('e i numeri sono quelli della riga', piatte[0].tonnellate === 2.14);
+  verifica('un fornitore senza dettaglio non si perde', piatte.length === 2 && piatte[1].tonnellate === 9, String(piatte.length));
+  verifica('senza gruppi non si rompe niente', righePiatte(null).length === 0);
+}
+
 console.log('IL FOGLIO INTERO');
 {
+  // La forma e' quella vera di calcolaPassiva: gruppi con dentro le righe.
   const passiva = {
-    raccoglitori: [{ soggetto: 'A', tonnellate: 10 }],
-    impianti_stoccaggi: [{ soggetto: 'I', tonnellate: 20 }],
-    trasporti_secondaria: [{ produttore: 'P', trasportatore: 'T', destinatario: 'D', tonnellate: 5, viaggi: 2, tariffa_valore: 30, unita_misura: 'euro_tonnellata', importo: 150 }],
+    raccoglitori: [{ fornitore: 'A', righe: [{ tonnellate: 10 }], totale_tonnellate: 10, totale_euro: 700 }],
+    impianti_stoccaggi: [{ fornitore: 'I', righe: [{ tonnellate: 20 }], totale_tonnellate: 20, totale_euro: 2100 }],
+    trasporti_secondaria: [{ fornitore: 'T', righe: [{ stoccaggio: 'P', destinazione: 'D', tonnellate: 5, viaggi: 2, tariffa_valore: 30, unita_misura: 'euro_tonnellata', importo: 150 }] }],
   };
   const voci = [
     { canale: 'RETE', blocco: 'raccoglitori', soggetto: 'A', voce: '', prezzo: 70, ordine: 10 },
@@ -120,8 +138,13 @@ console.log('IL FOGLIO INTERO');
   ];
   const f = foglioPassiva(voci, passiva, 'RETE', 'Settembre');
   verifica('i tre blocchi ci sono', !!f.raccoglitori && !!f.impianti && !!f.trasporti);
-  verifica('il trasporto si riporta com e', f.trasporti.righe.length === 1 && f.trasporti.totale_euro === 150);
-  // Il totale in cima e' la somma dei tre blocchi DI QUESTO CANALE: 700 + 2100 + 150.
+  verifica('i raccoglitori prendono i loro chili', f.raccoglitori.totale_t === 10 && f.raccoglitori.totale_euro === 700, JSON.stringify(f.raccoglitori.totale_euro));
+  verifica('e gli impianti i loro', f.impianti.totale_euro === 2100, String(f.impianti.totale_euro));
+  verifica('il trasporto porta il trasportatore, il produttore e il destinatario',
+    f.trasporti.righe.length === 1 && f.trasporti.righe[0].trasportatore === 'T' && f.trasporti.righe[0].produttore === 'P' && f.trasporti.righe[0].destinatario === 'D',
+    JSON.stringify(f.trasporti.righe));
+  verifica('e il suo importo', f.trasporti.totale_euro === 150);
+  // Il totale in cima e la somma dei tre blocchi DI QUESTO CANALE: 700 + 2100 + 150.
   verifica('il totale in cima somma i tre blocchi', f.totale_euro === 2950, String(f.totale_euro));
   verifica('e il canale resta scritto', f.canale === 'RETE' && f.mese === 'Settembre');
 }
@@ -131,8 +154,8 @@ console.log('IL MODELLO PROPOSTO DA UN MESE GIA FATTO');
   // Serve a non far cominciare da un foglio vuoto: una voce per soggetto, col
   // prezzo che quel mese ha usato. E' un punto di partenza da correggere.
   const m = modelloDaPassiva({
-    raccoglitori: [{ soggetto: 'A', tariffa_valore: 70, unita_misura: 'euro_tonnellata' }, { soggetto: 'A', tariffa_valore: 70 }],
-    impianti_stoccaggi: [{ soggetto: 'I', tariffa_valore: 105 }],
+    raccoglitori: [{ fornitore: 'A', righe: [{ tariffa_valore: 70, unita_misura: 'euro_tonnellata' }] }],
+    impianti_stoccaggi: [{ fornitore: 'I', righe: [{ tariffa_valore: 105 }] }],
   }, 'RETE', 2026);
   verifica('un soggetto una voce, senza doppioni', m.length === 2, String(m.length));
   verifica('col suo blocco e il suo prezzo',
