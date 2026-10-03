@@ -1,0 +1,73 @@
+{
+  "name": "VocePassivaAmministrazione",
+  "type": "object",
+  "description": "Una riga del foglio della fatturazione passiva nel FORMAT AMMINISTRAZIONE. Il foglio dell amministrazione elenca, sotto ogni fornitore, voci fisse con il loro prezzo - Campania NAPOLI 68, Campania CASERTA 72, da secondaria classe P 90 - e le mostra SEMPRE, anche a zero: cosi il foglio e identico mese dopo mese e un conferimento nuovo si vede comparire. Scelta dell utente, 03/10/2026: modello fisso, e modificabile da lui quando cambia un accordo, senza passare dal codice. Le quantita le mette il gestionale dai movimenti del mese; qui stanno solo le voci e i prezzi",
+  "properties": {
+    "anno": { "type": "number" },
+    "canale": {
+      "type": "string",
+      "enum": ["RETE", "ACI", "EXTRA_RACCOLTA"],
+      "description": "Un canale per volta: rete, ACI ed extra raccolta non si sommano mai"
+    },
+    "blocco": {
+      "type": "string",
+      "enum": ["raccoglitori", "impianti"],
+      "description": "In quale delle due tabelle del foglio sta la voce. Il trasporto delle secondarie non ha voci fisse: le righe sono i viaggi del mese"
+    },
+    "soggetto": {
+      "type": "string",
+      "description": "Il fornitore o l impianto, come si scrive nel foglio: e la riga in grassetto che raggruppa le voci"
+    },
+    "voce": {
+      "type": "string",
+      "description": "La riga sotto il soggetto, come la scrive l amministrazione: Campania - NAPOLI, Calabria (conferimenti su Gatim), da secondaria classe P, classi G1. Vuota se il soggetto ha una riga sola"
+    },
+    "prezzo": {
+      "type": "number",
+      "description": "Il prezzo della voce, nell unita di misura sotto"
+    },
+    "unita_misura": {
+      "type": "string",
+      "enum": ["euro_tonnellata", "euro_viaggio"],
+      "default": "euro_tonnellata"
+    },
+    "ordine": {
+      "type": "number",
+      "description": "In che ordine compare nel foglio. A parita si ordina per nome"
+    },
+    "criterio_json": {
+      "type": "string",
+      "description": "Come si riconoscono i movimenti di questa voce: { regione, provincia, destinazione, classi, provenienza }. Serve al gestionale per sapere quali chili scrivere su questa riga e non su un altra dello stesso fornitore"
+    },
+    "attiva": { "type": "boolean", "default": true },
+    "note": { "type": "string" }
+  },
+  // Come ogni altro archivio: la lettura e aperta a chi consulta, la scrittura e
+  // dell'amministratore. Qui pero' la scrittura e' proprio il punto: l'utente ha
+  // chiesto di poter correggere le voci quando cambia un accordo, e lui e'
+  // l'amministratore.
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": true,
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  },
+  "required": [
+    "anno",
+    "canale",
+    "blocco",
+    "soggetto"
+  ]
+}
