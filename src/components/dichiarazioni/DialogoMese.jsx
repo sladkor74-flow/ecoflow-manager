@@ -26,6 +26,7 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
     ricevuta_il: (d && d.ricevuta_il) || '',
     caricata_inviata: d ? d.caricata_inviata : false,
     caricata_il: (d && d.caricata_il) || '',
+    inviata_consorzio_il: (d && d.inviata_consorzio_il) || '',
     note: (d && d.note) || '',
     motivo_assenza: (d && !(d.quantita_kg > 0) && d.motivo_assenza) || '',
     ...Object.fromEntries(materiali.map(m => [m.chiave, d ? d[m.chiave] || 0 : 0])),
@@ -66,7 +67,11 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
         // azzerano solo se non c'e' niente da dire: su «solo metalli ferrosi» il ferro
         // uscito resta, ed e' l'unica cosa vera di quel mese.
         ? {
+          // inviata_consorzio_il resta: e' la data dell'email al consorzio, e in un
+          // mese di soli metalli e' l'unica traccia che quel ferro e' stato
+          // dichiarato. Non si carica niente a portale, quindi caricata_* si azzera.
           motivo_assenza: dati.motivo_assenza, note: dati.note, quantita_kg: 0,
+          inviata_consorzio_il: dati.inviata_consorzio_il || '',
           ricevuta_email: false, ricevuta_il: '', caricata_inviata: false, caricata_il: '',
           ...Object.fromEntries(materiali.map(m => [m.chiave, senzaMateriali ? 0 : numero(dati[m.chiave])])),
         }
@@ -143,6 +148,22 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
               ))}
             </div>
           </div>
+          )}
+
+          {/* LA DATA DELL'EMAIL AL CONSORZIO, per i metalli ferrosi.
+              Le uscite di ferro a portale non si caricano: viaggiano dentro le
+              dichiarazioni di gomma, e in un mese di soli metalli non si carica
+              nulla. La dichiarazione EER 19.12.02 va al consorzio via email, e
+              finora di quell'invio non restava traccia da nessuna parte. Questa
+              data non decurta niente e non entra in nessun conto: e' l'evidenza,
+              e sta fuori dal blocco delle date perche' quello si vede solo nei
+              mesi con dichiarazione a portale. Richiesta dell'utente del 03/10/2026. */}
+          {!senzaMateriali && Number(String(dati.metalli_kg || '').replace(/[^\d-]/g, '')) > 0 && (
+            <label className="rounded-lg border px-3 py-2 block">
+              <span className="text-sm font-medium block mb-1">Dichiarazione dei metalli ferrosi mandata al consorzio</span>
+              <span className="text-[11px] text-muted-foreground block mb-1">Via email: a portale non si carica. Non decurta niente, resta come evidenza.</span>
+              <Input type="date" value={dati.inviata_consorzio_il || ''} onChange={e => imposta('inviata_consorzio_il', e.target.value)} />
+            </label>
           )}
 
           {!senza && (<>

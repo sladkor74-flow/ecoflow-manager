@@ -164,6 +164,7 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
   // cambio d'anno: l'extra arrivata a dicembre parte con la nave di gennaio.
   const [praticheAnnoPrima, setPraticheAnnoPrima] = useState([]);
   const [extraDichiarate, setExtraDichiarate] = useState([]);
+  const [dichiarazioniRete, setDichiarazioniRete] = useState([]);
   const [modelli, setModelli] = useState([]);
   const [extraArchivio, setExtraArchivio] = useState([]);
   const [lettura, setLettura] = useState('giacenza');
@@ -182,17 +183,22 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
       // trasporto restavano fuori proprio i terminati senza fine trasporto, che
       // vanno segnalati (regola del 22/09/2026).
       const annoPrima = Number(anno) - 1;
-      const [p, pPrima, m, e, dEx, dExPrima] = await Promise.all([
+      const [p, pPrima, m, e, dEx, dExPrima, dRete] = await Promise.all([
         base44.entities.PraticaIrigom.filter({ anno }),
         base44.entities.PraticaIrigom.filter({ anno: annoPrima }),
         base44.entities.ModelloDocumento.list(),
         fetchAllClient(base44.entities.ExtraRaccolta, null, '-trasporto_finito_il'),
         fetchAllClient(base44.entities.DichiarazioneSito, { anno, canale: 'EXTRA_RACCOLTA' }, 'id'),
         fetchAllClient(base44.entities.DichiarazioneSito, { anno: annoPrima, canale: 'EXTRA_RACCOLTA' }, 'id'),
+        // Le dichiarazioni di rete dell'anno: dicono quanto ferro ogni mese ha
+        // portato a portale anche dove non c'e' una pratica, perche' il mese e'
+        // stato segnato a mano (la casella arancione del riepilogo).
+        fetchAllClient(base44.entities.DichiarazioneSito, { anno, canale: 'RETE' }, 'id'),
       ]);
       setPratiche(p || []);
       setPraticheAnnoPrima(pPrima || []);
       setExtraDichiarate([...(dEx || []), ...(dExPrima || [])]);
+      setDichiarazioniRete(dRete || []);
       setModelli(m || []);
       setExtraArchivio(e || []);
     } catch (err) {
@@ -397,7 +403,13 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
   // con la nave dopo. Solo le pratiche dell'anno in corso, non quelle dell'anno
   // prima: la giacenza al 31/12 fa da ancora, quindi l'arretrato non si porta da
   // un anno all'altro.
-  const arretrato = useMemo(() => (registro && mese ? ferroArretrato(registro.mesi, pratiche, { mese }) : null), [registro, pratiche, mese]);
+  // Le dichiarazioni di rete di Irigom: la seconda fonte del saldo. Un mese
+  // segnato a mano - la casella arancione «solo metalli ferrosi, dichiarati al
+  // consorzio via email» - non ha una pratica, ma la sua dichiarazione dice
+  // quanto e' andato a portale (niente) ed e' una prova buona quanto l'altra.
+  const dichIrigom = useMemo(() => (dichiarazioniRete || [])
+    .filter(d => d && !d.provenienza && normalizzaRagioneSociale(d.sito) === nsIrigom), [dichiarazioniRete, nsIrigom]);
+  const arretrato = useMemo(() => (registro && mese ? ferroArretrato(registro.mesi, pratiche, { mese, dichiarazioni: dichIrigom }) : null), [registro, pratiche, mese, dichIrigom]);
   const pratica = useMemo(() => {
     if (!riga) return null;
     return componiMese({

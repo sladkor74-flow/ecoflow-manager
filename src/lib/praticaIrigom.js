@@ -431,12 +431,60 @@ const leggiDatiJson = (p) => {
  * era gestito al di fuori del portale ma che adesso contribuisce al totale dei
  * pfu», perche' dopo il caricamento la giacenza a portale deve essere AD + AE.
  *
- * @param {array}  mesi     le dodici righe del foglio Cons. [{ mese, uscite_ferro_kg }]
- * @param {array}  pratiche le PraticaIrigom dell'anno
- * @param {string} p.mese   il mese che si sta preparando: si guardano solo quelli prima
+ * DUE FONTI, NON UNA. Quanto ferro un mese ha portato a portale lo dice la sua
+ * pratica, ma le pratiche nel gestionale cominciano ad agosto 2026 e un mese puo'
+ * essere stato registrato a mano, senza pratica: nel riepilogo si vede lo stesso
+ * - ad aprile e a settembre 2026 la casella arancione «solo metalli ferrosi,
+ * dichiarati al consorzio via email» - e quella e' una prova buona quanto l'altra.
+ * Percio' si guarda prima la pratica e poi la DichiarazioneSito di rete del mese:
+ * con quantita' a zero (o motivo_assenza 'solo_metalli') a portale non e' andato
+ * niente, con una quantita' vera i metalli dentro la dichiarazione sono il ferro
+ * arrivato a portale. Un mese senza ne' l'una ne' l'altra si dice, non si indovina.
+ *
+ * @param {array}  mesi            le dodici righe del foglio Cons. [{ mese, uscite_ferro_kg }]
+ * @param {array}  pratiche        le PraticaIrigom dell'anno
+ * @param {string} p.mese          il mese che si sta preparando: si guardano solo quelli prima
+ * @param {array}  p.dichiarazioni le DichiarazioneSito di RETE di quel sito, gia' filtrate
  */
-export function ferroArretrato(mesi, pratiche, { mese } = {}) {
+export function ferroArretrato(mesi, pratiche, { mese, dichiarazioni = [] } = {}) {
   const fino = MESI.indexOf(mese);
+  const dichDelMese = (nome) => (dichiarazioni || []).find(d => d && d.mese === nome) || null;
+  /**
+   * Quanto ferro quel mese ha portato a portale, e da che cosa lo sappiamo.
+   * `noto` falso vuol dire che non si sa: non e' zero, e non si conta.
+   */
+  const quantoAPortale = (p, dati, bozza, d, uscito) => {
+    if (p && dati && dati.solo_metalli) return { kg: 0, noto: true, fonte: 'mese di soli metalli' };
+    if (p && dati && dati.materiali_portale && Number.isFinite(Number(dati.materiali_portale.metalli_kg))) {
+      return { kg: intero(dati.materiali_portale.metalli_kg), noto: true, fonte: 'dalla pratica' };
+    }
+    // Pratica di prima del 22/09/2026, senza materiali_portale: la sua riga porta
+    // i metalli della sola rete, e il ferro dell'extra raccolta - che a portale
+    // c'e' andato dentro l'ultima terziaria - sta nell'extra. Senza sommarlo
+    // diventava arretrato (120 kg su agosto 2026).
+    if (p) return { kg: intero(p.metalli_kg) + intero(leggiExtraJson(p).ferro_kg), noto: true, fonte: 'dalla riga della pratica' };
+    if (d) {
+      const quantita = intero(d.quantita_kg);
+      if (d.motivo_assenza === 'solo_metalli' || quantita === 0) {
+        return { kg: 0, noto: true, fonte: 'dichiarato al consorzio, a portale niente' };
+      }
+      // Una dichiarazione scritta ma non ancora caricata non ha portato niente a
+      // portale, e quando la caricherai ne portera': contarla adesso chiuderebbe
+      // un debito ancora aperto. Tutti gli altri lettori del gestionale guardano
+      // questo flag, e anche la giacenza di fine mese della pagina.
+      if (!d.caricata_inviata) return { kg: 0, noto: false, fonte: 'dichiarazione non ancora caricata a portale' };
+      const metalli = intero(d.metalli_kg);
+      if (metalli > 0) return { kg: metalli, noto: true, fonte: 'dalla dichiarazione del mese' };
+      // Una dichiarazione caricata a portale senza i metalli scritti: quanto ferro
+      // portasse non si sa. Dire zero farebbe nascere un arretrato che forse non
+      // c'e', e dichiararlo di nuovo lo porterebbe a portale due volte.
+      return { kg: 0, noto: false, fonte: 'dichiarazione senza i metalli scritti' };
+    }
+    if (bozza) return { kg: 0, noto: true, fonte: 'pratica da registrare' };
+    // Nessuna traccia: se in quel mese non e' uscito ferro non c'e' niente da
+    // sapere; se e' uscito, non si sa che fine abbia fatto.
+    return { kg: 0, noto: !uscito, fonte: uscito ? 'senza pratica e senza dichiarazione' : 'niente da dire' };
+  };
   // VALE LA VERSIONE REGISTRATA, NON LA PIU' RECENTE.
   //
   // Riscaricare la cartella di un mese gia' registrato apre una bozza (versione
@@ -456,48 +504,62 @@ export function ferroArretrato(mesi, pratiche, { mese } = {}) {
   // 696 tonnellate - e dichiarare a ottobre un numero mostruoso. Quei mesi sono
   // chiusi: quello che hanno lasciato indietro, se l'hanno fatto, sta gia' dentro
   // la giacenza del portale, che e' il riscontro dell'altra lettura.
-  // L'ancora e' il primo mese REGISTRATO: una bozza aperta su un mese vecchio -
-  // basta scaricarne la cartella - spostava l'ancora indietro e tirava dentro al
-  // saldo tutti i mesi che il gestionale non ha seguito.
-  const ancora = MESI.findIndex(nome => dellMese(nome, true));
-  const dettaglio = [];
-  const prima = [];
-  const daCapire = [];
+  // DA DOVE PARTE IL SALDO: DOPO L'ULTIMO MESE CHE NON SI SA.
+  //
+  // Il conto del ferro e' una catena: ogni mese o lascia un debito o ne paga uno,
+  // e basta un anello mancante perche' tutto quello che sta prima diventi
+  // illeggibile. Un mese che non si sa non si puo' saltare tenendo quelli prima:
+  // saltandolo, i debiti dei mesi precedenti restano aperti anche quando e' stato
+  // proprio lui a pagarli, e si dichiarerebbero una seconda volta.
+  //
+  // Il caso vero, trovato in revisione il 03/10/2026: nell'archivio le
+  // dichiarazioni di rete di Irigom esistono da gennaio ma non dicono quanti
+  // metalli portavano. Facendo partire la finestra dalla prima dichiarazione, il
+  // saldo apriva i debiti di aprile e luglio - mesi di soli metalli - e nessuno
+  // li pagava, perche' maggio, che quel ferro l'aveva riportato con la nave,
+  // restava fuori per via dei metalli non scritti. L'arretrato di ottobre passava
+  // da 99.300 a 315.240 kg: 215.940 kg gia' a portale, pronti a essere dichiarati
+  // due volte. Ripartendo dopo l'ultimo mese illeggibile la catena e' intera, e
+  // quello che resta fuori si dice.
+  const letture = [];
   for (let i = 0; i < MESI.length; i++) {
     if (fino >= 0 && i >= fino) break;
     const nome = MESI[i];
     const riga = (mesi || []).find(m => m && m.mese === nome);
     const uscito = intero(riga && riga.uscite_ferro_kg);
-    if (ancora < 0 || i < ancora) { if (uscito) prima.push(nome); continue; }
     const p = dellMese(nome, true);
     const bozza = p ? null : dellMese(nome, false);
-    if (bozza) daCapire.push(nome);
+    const dich = p ? null : dichDelMese(nome);
     const dati = p ? leggiDatiJson(p) : null;
-    // Quanto ferro ha portato a portale la dichiarazione di quel mese. Non e'
-    // metalli_kg della DichiarazioneSito: in un mese di soli metalli quello vale
-    // tutta la colonna X (regola del 03/10/2026) mentre a portale non e' andato
-    // niente. Vale la pratica: i metalli dentro le chiusure a portale.
-    let aPortale = 0;
-    let fonte = bozza ? 'pratica da registrare' : 'senza pratica';
-    if (p && dati && dati.solo_metalli) fonte = 'mese di soli metalli';
-    else if (p && dati && dati.materiali_portale && Number.isFinite(Number(dati.materiali_portale.metalli_kg))) {
-      aPortale = intero(dati.materiali_portale.metalli_kg);
-      fonte = 'dalla pratica';
-    } else if (p) {
-      // Pratica di prima del 22/09/2026, senza materiali_portale: la sua riga
-      // porta i metalli della sola rete, e il ferro dell'extra raccolta - che a
-      // portale c'e' andato dentro l'ultima terziaria - sta nell'extra. Senza
-      // sommarlo diventava arretrato (120 kg su agosto 2026).
-      aPortale = intero(p.metalli_kg) + intero(leggiExtraJson(p).ferro_kg);
-      fonte = 'dalla riga della pratica';
-    }
-    if (!uscito && !aPortale) continue;
+    const letto = quantoAPortale(p, dati, bozza, dich, uscito);
     // Se nel mese e' uscito ciabattato o CSS-C, allora c'erano terziarie o DDT a
     // cui il ferro poteva essere attaccato: dire «mancava la terziaria» su quel
     // mese sarebbe falso, e il motivo va scritto in un altro modo.
     const avevaNave = intero(riga && riga.uscite_cippato_kg) > 0 || intero(riga && riga.uscite_cssc_kg) > 0;
-    dettaglio.push({ mese: nome, uscito_kg: uscito, a_portale_kg: aPortale, resta_kg: uscito - aPortale, fonte, aveva_nave: avevaNave });
+    letture.push({ nome, uscito, bozza: !!bozza && !dich, avevaNave, ...letto });
   }
+  // L'anello mancante piu' recente: la catena buona comincia subito dopo.
+  let inizio = 0;
+  for (let i = letture.length - 1; i >= 0; i--) {
+    if (!letture[i].noto) { inizio = i + 1; break; }
+  }
+  const dettaglio = [];
+  const prima = [];
+  const daCapire = [];
+  const nonSiSa = [];
+  const senzaNiente = [];
+  letture.forEach((l, i) => {
+    if (i < inizio) {
+      if (!l.uscito) return;
+      prima.push(l.nome);
+      if (l.fonte === 'senza pratica e senza dichiarazione') senzaNiente.push(l.nome);
+      else if (!l.noto) nonSiSa.push(l.nome);
+      return;
+    }
+    if (l.bozza) daCapire.push(l.nome);
+    if (!l.uscito && !l.kg) return;
+    dettaglio.push({ mese: l.nome, uscito_kg: l.uscito, a_portale_kg: l.kg, resta_kg: l.uscito - l.kg, fonte: l.fonte, aveva_nave: l.avevaNave });
+  });
   const uscito_kg = somma(dettaglio, 'uscito_kg');
   const a_portale_kg = somma(dettaglio, 'a_portale_kg');
 
@@ -535,9 +597,11 @@ export function ferroArretrato(mesi, pratiche, { mese } = {}) {
     uscito_kg,
     a_portale_kg,
     dettaglio,
-    // il primo mese seguito dal gestionale, e quelli di prima che restano fuori
-    // dal saldo perche' non si sa cosa abbiano dichiarato
-    dal_mese: ancora >= 0 ? MESI[ancora] : '',
+    // il primo mese della catena buona, e quelli di prima che restano fuori dal
+    // saldo perche' non si sa quanto ferro abbiano portato a portale
+    // il primo mese che il saldo conta davvero, non il primo della finestra: i mesi
+    // senza niente da dire non sono un inizio
+    dal_mese: dettaglio.length ? dettaglio[0].mese : '',
     prima_del_gestionale: prima,
     // I mesi che devono ancora del ferro, coi chili che restano aperti: la somma
     // fa esattamente arretrato_kg. Chi scrive la frase che spiega l'arretrato
@@ -549,12 +613,16 @@ export function ferroArretrato(mesi, pratiche, { mese } = {}) {
     fuori_finestra_kg: fuoriFinestra,
     // un mese preparato e non registrato non si sa se e' andato a portale: lo si dice
     da_capire: daCapire,
-    // I mesi dentro la finestra di cui nel gestionale non c'e' nessuna pratica: il
-    // saldo conta il loro ferro come arretrato, ma se la dichiarazione di quel mese
-    // e' stata caricata a portale fuori dal gestionale quel ferro non e' arretrato
-    // e dichiararlo di nuovo lo porterebbe a portale due volte. Si segnalano quelli
-    // in cui era uscito anche ciabattato o CSS-C: li' una dichiarazione c'era.
-    senza_pratica: dettaglio.filter(r => r.fonte === 'senza pratica' && r.resta_kg > 0).map(r => r.mese),
+    // I mesi dentro la finestra di cui il gestionale non ha ne' una pratica ne' una
+    // dichiarazione: il saldo conta il loro ferro come arretrato, ma se quella
+    // dichiarazione e' stata caricata a portale fuori dal gestionale quel ferro non
+    // e' arretrato, e dichiararlo di nuovo lo porterebbe a portale due volte.
+    senza_pratica: senzaNiente,
+    // Mesi con una dichiarazione che non dice quanti metalli portava, o non ancora
+    // caricata a portale: quel ferro non si sa dove sia finito, e la catena del
+    // saldo si spezza li'. Restano fuori invece di valere zero - uno zero inventato
+    // qui diventa un arretrato che forse non esiste, da dichiarare due volte.
+    non_si_sa: nonSiSa,
   };
 }
 
@@ -731,9 +799,9 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
   }
   if (usata === 'registro' && arretrato && typeof arretrato === 'object') {
     if (!arretrato.dal_mese) {
-      avvisi.push('Di quest\'anno non c\'e\' ancora nessuna pratica registrata, quindi il saldo del ferro non si puo\' fare: questa lettura porta le sole uscite del mese. Se qualche mese ha lasciato indietro del ferro, lo sa solo la giacenza a portale.');
+      avvisi.push('Il saldo del ferro non si puo\' fare: di nessun mese di quest\'anno il gestionale sa quanto ne sia arrivato a portale. Questa lettura porta le sole uscite del mese, e se qualche mese ha lasciato indietro del ferro lo sa solo la giacenza a portale.');
     } else if (Array.isArray(arretrato.prima_del_gestionale) && arretrato.prima_del_gestionale.length) {
-      avvisi.push(`Il saldo del ferro parte da ${String(arretrato.dal_mese).toLowerCase()}, il primo mese registrato nel gestionale: di ${arretrato.prima_del_gestionale.join(', ').toLowerCase()} non si sa quanto ferro sia arrivato a portale, quindi questa lettura vale solo se quei mesi erano in pari. Il riscontro e' la giacenza a portale, che li porta comunque dentro.`);
+      avvisi.push(`Il saldo del ferro parte da ${String(arretrato.dal_mese).toLowerCase()}: di ${arretrato.prima_del_gestionale.join(', ').toLowerCase()} non si sa quanto ferro sia arrivato a portale, quindi quei mesi restano fuori e questa lettura vale solo se erano in pari. Il riscontro e' la giacenza a portale, che li porta comunque dentro.`);
     }
   }
   if (arretrato && Array.isArray(arretrato.da_capire) && arretrato.da_capire.length) {
@@ -755,7 +823,10 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
     avvisi.push('A gennaio il saldo del ferro riparte da zero: il registro e\' quello dell\'anno nuovo e del dicembre prima non si legge nulla. Se a dicembre non e\' partita la nave, quel ferro non e\' in questa lettura e resta da dichiarare: serve la giacenza a portale di fine mese.');
   }
   if (usata !== 'giacenza' && arretrato && Array.isArray(arretrato.senza_pratica) && arretrato.senza_pratica.length) {
-    avvisi.push(`Di ${arretrato.senza_pratica.join(', ').toLowerCase()} nel gestionale non c'e' nessuna pratica, quindi il saldo conta tutto il loro ferro come arretrato. Se quelle dichiarazioni sono state caricate a portale fuori dal gestionale, quel ferro non e' arretrato e dichiararlo qui lo porterebbe a portale due volte: registra quei mesi prima di usare questa lettura.`);
+    avvisi.push(`Di ${arretrato.senza_pratica.join(', ').toLowerCase()} il gestionale non ha ne' una pratica ne' una dichiarazione: li' il conto del ferro si ferma, e tutto quello che viene prima resta fuori dal saldo. Non li conto come arretrato - se quelle dichiarazioni sono state caricate a portale fuori dal gestionale, dichiararle qui le porterebbe a portale due volte. Registra quei mesi e il saldo si allunga all'indietro.`);
+  }
+  if (usata !== 'giacenza' && arretrato && Array.isArray(arretrato.non_si_sa) && arretrato.non_si_sa.length) {
+    avvisi.push(`Di ${arretrato.non_si_sa.join(', ').toLowerCase()} la dichiarazione c'e' ma non dice quanti metalli ferrosi portava, o non e' ancora caricata a portale: li' il conto del ferro si ferma, perche' un mese saltato non paga i debiti dei mesi prima e li lascerebbe aperti anche se e' stato lui a chiuderli. Scrivi i metalli su quelle dichiarazioni e il saldo si allunga all'indietro.`);
   }
 
   // Il ferro e' la parte che si aggiusta: CSS-C e ciabattato sono fatti

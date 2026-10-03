@@ -65,6 +65,10 @@ export default function CellaMese({ mese, onApri, soloLettura, dove = {} }) {
     // c'erano, e sommando le caselle il totale annuo dell'EER 19.12.02 saliva.
     d && Number(d.metalli_kg) > 0
       ? `${stato === 'solo_metalli' ? 'metalli ferrosi usciti' : 'di cui metalli ferrosi'} ${kg(d.metalli_kg)} kg` : '',
+    // Quando l'email al consorzio e' partita: a portale il ferro non si carica, e
+    // senza questa data di quell'invio non restava traccia da nessuna parte.
+    d && Number(d.metalli_kg) > 0 && d.inviata_consorzio_il
+      ? `al consorzio il ${String(d.inviata_consorzio_il).slice(0, 10).split('-').reverse().join('/')}` : '',
     resta > 0 ? `ancora da dichiarare a portale ${kg(resta)} kg` : '',
     STATI[stato].nome,
     soloLettura ? '' : 'clicca per aprire',

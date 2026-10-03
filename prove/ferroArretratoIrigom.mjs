@@ -123,12 +123,16 @@ const quadra = ferroArretrato(unMese('Agosto', 82500), [praticaRegistrata('Agost
 verifica('un mese che ha portato a portale tutto il suo ferro non lascia niente',
   quadra.arretrato_kg === 0 && quadra.mesi.length === 0, JSON.stringify(quadra.dettaglio));
 
-// Il saldo parte dal primo mese che il gestionale ha seguito: un buco DOPO
-// quello e' un mese che non ha dichiarato niente a portale.
+// UN MESE DI CUI NON SI SA NIENTE SPEZZA LA CATENA, E IL SALDO RIPARTE DOPO.
+// Il conto del ferro e' una catena: ogni mese lascia un debito o ne paga uno, e
+// saltandone uno i debiti di prima restano aperti anche quando e' stato proprio
+// lui a pagarli. Meglio non dire un numero che dirne uno piu' grande del vero:
+// dichiararlo due volte a portale e' il danno che non si recupera.
 const dueMesi = (ferroAgosto, ferroSettembre) => [{ mese: 'Agosto', uscite_ferro_kg: ferroAgosto }, { mese: 'Settembre', uscite_ferro_kg: ferroSettembre }];
 const conBuco = ferroArretrato(dueMesi(82500, 99300), [praticaRegistrata('Agosto', 82500)], { mese: 'Ottobre' });
-verifica('un mese senza pratica, dopo il primo mese seguito, lascia indietro tutto',
-  conBuco.arretrato_kg === 99300 && conBuco.dettaglio[1].fonte === 'senza pratica' && conBuco.dettaglio[1].resta_kg === 99300, JSON.stringify(conBuco.dettaglio));
+verifica('un mese senza nessuna traccia spezza la catena: il saldo non indovina, e dice quale mese',
+  conBuco.arretrato_kg === 0 && conBuco.dettaglio.length === 0
+  && conBuco.senza_pratica.join() === 'Settembre' && conBuco.prima_del_gestionale.join('|') === 'Agosto|Settembre', JSON.stringify(conBuco));
 
 // Una bozza non e' una dichiarazione: quel mese conta per intero nell'arretrato e
 // si dice. Ci vuole un mese registrato prima, che faccia da ancora.
@@ -141,11 +145,13 @@ verifica('una pratica preparata e non registrata non conta come portata a portal
   daRegistrare.arretrato_kg === 82500 && daRegistrare.dettaglio[1].a_portale_kg === 0
   && daRegistrare.dettaglio[1].fonte === 'pratica da registrare' && daRegistrare.da_capire.join() === 'Agosto', JSON.stringify(daRegistrare));
 verifica('un mese registrato non finisce fra quelli da capire', conPratica.da_capire.length === 0);
-// Senza nessun mese registrato il saldo non parte: non si sa niente, e si dice
-// che non si sa invece di dichiarare un numero.
+// Una bozza non spezza la catena: dice una cosa precisa, cioe' che quel mese non
+// e' ancora stato dichiarato, quindi il suo ferro e' arretrato. Si segnala, perche'
+// finche' resta bozza quei chili non sono andati da nessuna parte.
 const soloBozze = ferroArretrato(unMese('Agosto', 82500), [{ ...praticaRegistrata('Agosto', 82500), stato: 'in_preparazione' }], { mese: 'Settembre' });
-verifica('senza nessuna pratica registrata il saldo non parte',
-  soloBozze.arretrato_kg === 0 && soloBozze.dal_mese === '' && soloBozze.prima_del_gestionale.join() === 'Agosto', JSON.stringify(soloBozze));
+verifica('una bozza non spezza la catena: il suo ferro e\' arretrato, e si dice di registrarla',
+  soloBozze.arretrato_kg === 82500 && soloBozze.da_capire.join() === 'Agosto'
+  && soloBozze.dettaglio[0].fonte === 'pratica da registrare', JSON.stringify(soloBozze));
 
 // LE DUE TRAPPOLE DEL PULSANTE «SCARICA LA CARTELLA», che apre una bozza nuova
 // accanto a quella registrata. Prima: il ferro di un mese registrato tornava
@@ -198,8 +204,9 @@ const soloSostituita = ferroArretrato(dueMesi(82500, 99300), [
   praticaRegistrata('Agosto', 82500),
   { ...praticaRegistrata('Settembre', 99300), stato: 'sostituita' },
 ], { mese: 'Ottobre' });
-verifica('se di un mese resta solo una pratica sostituita e\' come non averla',
-  soloSostituita.arretrato_kg === 99300 && soloSostituita.dettaglio[1].fonte === 'senza pratica', JSON.stringify(soloSostituita.dettaglio));
+verifica('se di un mese resta solo una pratica sostituita e\' come non averla, e la catena si spezza li\'',
+  soloSostituita.arretrato_kg === 0 && soloSostituita.senza_pratica.join() === 'Settembre'
+  && soloSostituita.dettaglio.length === 0, JSON.stringify(soloSostituita));
 const versioneAlta = ferroArretrato(unMese('Agosto', 82500), [
   { ...praticaRegistrata('Agosto', 70000), versione: 1 },
   { ...praticaRegistrata('Agosto', 82500), versione: 3 },
@@ -434,17 +441,19 @@ const gennaio = componiMese({
 });
 verifica('a gennaio si dice che del dicembre prima non si legge nulla',
   gennaio.avvisi.some(a => /A gennaio il saldo del ferro riparte da zero/.test(a) && /dicembre/.test(a)), JSON.stringify(gennaio.avvisi));
-// Un mese dentro la finestra senza nessuna pratica: il saldo conta tutto il suo
-// ferro come arretrato, ma se quella dichiarazione e' stata caricata a portale
-// fuori dal gestionale, dichiararlo di nuovo lo porta a portale due volte.
+// Un mese senza nessuna traccia, e per giunta con la nave partita: li' una
+// dichiarazione a portale c'era quasi sicuramente, fatta fuori dal gestionale.
+// Il saldo non indovina: si ferma e lo dice, perche' contare il suo ferro come
+// arretrato significherebbe portarlo a portale una seconda volta.
 const senzaPratica = ferroArretrato(
   [{ mese: 'Agosto', uscite_ferro_kg: 82500 }, { mese: 'Settembre', uscite_cippato_kg: 310000, uscite_cssc_kg: 25000, uscite_ferro_kg: 99300 }],
   [praticaRegistrata('Agosto', 82500)], { mese: 'Ottobre' });
-verifica('un mese senza pratica si segnala, e si dice che la nave c\'era',
-  senzaPratica.senza_pratica.join() === 'Settembre' && senzaPratica.dettaglio[1].aveva_nave === true, JSON.stringify(senzaPratica.senza_pratica));
+verifica('un mese senza nessuna traccia ferma il saldo invece di inventare un arretrato',
+  senzaPratica.senza_pratica.join() === 'Settembre' && senzaPratica.arretrato_kg === 0
+  && senzaPratica.dettaglio.length === 0, JSON.stringify(senzaPratica));
 const ottSenza = componiMese({ ...comune, arretrato: senzaPratica, lettura: 'registro' });
 verifica('e la pratica avverte che dichiararlo di nuovo lo porterebbe a portale due volte',
-  ottSenza.avvisi.some(a => /nessuna pratica/.test(a) && /due volte/.test(a)), JSON.stringify(ottSenza.avvisi));
+  ottSenza.avvisi.some(a => /ne' una pratica ne' una dichiarazione/.test(a) && /due volte/.test(a)), JSON.stringify(ottSenza.avvisi));
 
 console.log('IL SALDO SULLE CIFRE VERE DEL 2026, LETTE DAL REGISTRO');
 // Colonna X del foglio Cons. di «Irigom carico scarico 2026.xlsx», righe 86-94,
@@ -468,12 +477,102 @@ verifica('il saldo parte da agosto e i sette mesi prima si dicono, non si contan
 verifica('senza l\'ancora si dichiarerebbero 696.080 kg di ferro in piu\'',
   ferroArretrato(mesiVeri, [praticheVere[1]], { mese: 'Ottobre' }).arretrato_kg === 99300
   && Object.entries(X_2026).filter(([m]) => MESI.indexOf(m) < MESI.indexOf('Agosto')).reduce((s, [, k]) => s + k, 0) === 696080);
-// Settembre senza pratica nel gestionale: l'arretrato resta 99.300, ma si segnala,
-// perche' se quella dichiarazione fosse stata caricata fuori dal gestionale quei
-// chili andrebbero a portale due volte.
+// Settembre senza nessuna traccia nel gestionale: il saldo si ferma li' e lo dice,
+// invece di proporre 99.300 kg che forse sono gia' a portale. E' la differenza fra
+// un numero prudente e uno comodo: la dichiarazione di settembre esiste davvero
+// (la casella arancione del riepilogo), e con quella il saldo torna a dire 99.300.
 const senzaSettembre = ferroArretrato(mesiVeri, [praticheVere[0]], { mese: 'Ottobre' });
-verifica('finche\' settembre non e\' registrato, l\'arretrato c\'e\' ma si chiede di registrarlo',
-  senzaSettembre.arretrato_kg === 99300 && senzaSettembre.senza_pratica.join() === 'Settembre', JSON.stringify(senzaSettembre.senza_pratica));
+verifica('senza traccia di settembre il saldo si ferma li\', e lo dice',
+  senzaSettembre.arretrato_kg === 0 && senzaSettembre.senza_pratica.includes('Settembre')
+  && senzaSettembre.dettaglio.length === 0, JSON.stringify([senzaSettembre.arretrato_kg, senzaSettembre.senza_pratica]));
+
+console.log('LA DICHIARAZIONE DEL MESE VALE QUANTO LA PRATICA');
+// Un mese puo' essere segnato a mano, senza pratica: nel riepilogo si vede la
+// casella arancione «solo metalli ferrosi, dichiarati al consorzio via email»
+// (settembre 2026). Quella e' una prova buona quanto la pratica, e il saldo la
+// legge: prima pretendeva la pratica e quel mese finiva fra quelli «senza», con
+// un avviso che chiedeva di registrarlo mentre era gia' a posto.
+const dichSoloMetalli = (mese, ferro) => ({ anno: 2026, mese, sito: 'Irigom S.r.l.', canale: 'RETE', quantita_kg: 0, metalli_kg: ferro, motivo_assenza: 'solo_metalli' });
+const dichCaricata = (mese, quantita, metalli) => ({ anno: 2026, mese, sito: 'Irigom S.r.l.', canale: 'RETE', quantita_kg: quantita, metalli_kg: metalli, motivo_assenza: '', caricata_inviata: true });
+const soloDich = ferroArretrato(dueMesi(82500, 99300), [praticaRegistrata('Agosto', 82500)], { mese: 'Ottobre', dichiarazioni: [dichSoloMetalli('Settembre', 99300)] });
+verifica('un mese di soli metalli segnato a mano lascia indietro il suo ferro, e non si chiede di registrarlo',
+  soloDich.arretrato_kg === 99300 && soloDich.dettaglio[1].fonte === 'dichiarato al consorzio, a portale niente'
+  && soloDich.senza_pratica.length === 0 && soloDich.non_si_sa.length === 0, JSON.stringify(soloDich.dettaglio[1]));
+const conDich = ferroArretrato(dueMesi(82500, 99300), [praticaRegistrata('Agosto', 82500)], { mese: 'Ottobre', dichiarazioni: [dichCaricata('Settembre', 300000, 60000)] });
+verifica('una dichiarazione caricata dice quanto ferro portava a portale',
+  conDich.arretrato_kg === 39300 && conDich.dettaglio[1].a_portale_kg === 60000
+  && conDich.dettaglio[1].fonte === 'dalla dichiarazione del mese', JSON.stringify(conDich.dettaglio[1]));
+// Una dichiarazione senza i metalli scritti non dice niente: contarla per zero
+// farebbe nascere un arretrato che forse non c'e'.
+const dichMuta = ferroArretrato(dueMesi(82500, 99300), [praticaRegistrata('Agosto', 82500)], { mese: 'Ottobre', dichiarazioni: [dichCaricata('Settembre', 300000, 0)] });
+verifica('una dichiarazione senza i metalli resta fuori dal saldo, e si dice',
+  dichMuta.arretrato_kg === 0 && dichMuta.non_si_sa.join() === 'Settembre'
+  && dichMuta.dettaglio.length === 0, JSON.stringify([dichMuta.arretrato_kg, dichMuta.non_si_sa]));
+const praticaOttobreMuta = componiMese({ ...comune, arretrato: dichMuta, lettura: 'registro' });
+verifica('e la pratica lo dice, invece di dichiarare un numero inventato',
+  praticaOttobreMuta.avvisi.some(a => /non dice quanti metalli/.test(a)), JSON.stringify(praticaOttobreMuta.avvisi));
+// Quando ci sono tutt'e due vince la pratica, che e' piu' precisa: i metalli
+// dentro le chiusure a portale, non quelli scritti sulla dichiarazione.
+const tutteDue = ferroArretrato(dueMesi(82500, 99300), [praticaRegistrata('Agosto', 82500), praticaSoloMetalli('Settembre')], { mese: 'Ottobre', dichiarazioni: [dichCaricata('Settembre', 300000, 60000)] });
+verifica('con pratica e dichiarazione insieme vince la pratica',
+  tutteDue.arretrato_kg === 99300 && tutteDue.dettaglio[1].fonte === 'mese di soli metalli', JSON.stringify(tutteDue.dettaglio[1]));
+// L'ancora puo' partire da un mese che ha solo la dichiarazione: prima pretendeva
+// una pratica, e i mesi segnati a mano restavano tutti fuori dalla finestra.
+const ancoraDaDich = ferroArretrato(
+  [{ mese: 'Luglio', uscite_ferro_kg: 126160 }, { mese: 'Agosto', uscite_ferro_kg: 82500 }, { mese: 'Settembre', uscite_ferro_kg: 99300 }],
+  [], { mese: 'Ottobre', dichiarazioni: [dichCaricata('Luglio', 400000, 126160), dichCaricata('Agosto', 500000, 82500), dichSoloMetalli('Settembre', 99300)] });
+verifica('il saldo puo\' partire da un mese che ha solo la dichiarazione',
+  ancoraDaDich.dal_mese === 'Luglio' && ancoraDaDich.arretrato_kg === 99300
+  && ancoraDaDich.prima_del_gestionale.length === 0 && ancoraDaDich.mesi.join() === 'Settembre', JSON.stringify([ancoraDaDich.dal_mese, ancoraDaDich.arretrato_kg]));
+
+console.log('LO SCENARIO VERO DI PRODUZIONE: LE DICHIARAZIONI COME STANNO NELL\'ARCHIVIO');
+// IL CASO CHE HA ROTTO TUTTO, TROVATO IN REVISIONE IL 03/10/2026.
+//
+// Nell'archivio le dichiarazioni di rete di Irigom esistono da gennaio
+// (base44/functions/seedGiacenze2026/entry.ts): caricate a portale, con la
+// quantita' ma SENZA i metalli. Aprile e settembre sono mesi di soli metalli, con
+// la casella arancione. Facendo partire il saldo dalla prima dichiarazione, il
+// conto apriva i debiti di aprile e luglio e nessuno li pagava, perche' maggio -
+// che quel ferro l'aveva riportato con la nave - restava fuori per via dei metalli
+// non scritti: l'arretrato di ottobre passava da 99.300 a 315.240 kg, cioe'
+// 215.940 kg gia' a portale pronti a essere dichiarati una seconda volta.
+//
+// Questa prova chiama ferroArretrato COME LO CHIAMA LA PAGINA, con le
+// dichiarazioni: prima girava senza, cioe' nell'unico modo in cui la pagina non lo
+// chiama mai, e sarebbe restata verde mentre il gestionale sbagliava.
+const dichReali = [
+  { mese: 'Gennaio', quantita_kg: 67180, caricata_inviata: true },
+  { mese: 'Febbraio', quantita_kg: 721660, caricata_inviata: true },
+  { mese: 'Marzo', quantita_kg: 262720, caricata_inviata: true },
+  { mese: 'Aprile', quantita_kg: 0, metalli_kg: 89780, motivo_assenza: 'solo_metalli' },
+  { mese: 'Maggio', quantita_kg: 744170, caricata_inviata: true },
+  { mese: 'Giugno', quantita_kg: 544610, caricata_inviata: true },
+  { mese: 'Luglio', quantita_kg: 402740, caricata_inviata: true },
+  { mese: 'Settembre', quantita_kg: 0, metalli_kg: 99300, motivo_assenza: 'solo_metalli' },
+].map(d => ({ anno: 2026, sito: 'Irigom S.r.l.', canale: 'RETE', provenienza: '', metalli_kg: 0, motivo_assenza: '', ...d }));
+const produzione = ferroArretrato(mesiVeri, [praticheVere[0]], { mese: 'Ottobre', dichiarazioni: dichReali });
+verifica('con le dichiarazioni vere l\'arretrato di ottobre resta 99.300 kg, tutto di settembre',
+  produzione.arretrato_kg === 99300 && produzione.mesi.join() === 'Settembre', JSON.stringify([produzione.arretrato_kg, produzione.mesi]));
+verifica('il saldo riparte da agosto, dopo l\'ultimo mese che non si sa',
+  produzione.dal_mese === 'Agosto' && produzione.non_si_sa.includes('Luglio'), JSON.stringify([produzione.dal_mese, produzione.non_si_sa]));
+verifica('aprile e luglio non aprono debiti: stanno prima dell\'ultimo anello rotto',
+  !produzione.mesi.includes('Aprile') && !produzione.mesi.includes('Luglio')
+  && produzione.arretrato_kg !== 315240, JSON.stringify(produzione.componi));
+// Scrivendo i metalli sulle dichiarazioni la catena si allunga all'indietro e il
+// saldo resta lo stesso: e' la prova che la prudenza non nasconde un arretrato vero.
+// Maggio porta anche il ferro di aprile, che a portale era rimasto indietro: e'
+// cosi' che va davvero, ed e' il recupero che il saldo deve riconoscere.
+const metalliVeri = { Gennaio: 84100, Febbraio: 90360, Marzo: 113460, Maggio: 192420, Giugno: 89580, Luglio: 126160 };
+const dichComplete = dichReali.map(d => (d.motivo_assenza ? d : { ...d, metalli_kg: metalliVeri[d.mese] || 0 }));
+const completo = ferroArretrato(mesiVeri, [praticheVere[0]], { mese: 'Ottobre', dichiarazioni: dichComplete });
+verifica('scrivendo i metalli su tutte le dichiarazioni il saldo si allunga e dice lo stesso numero',
+  completo.arretrato_kg === 99300 && completo.dal_mese === 'Gennaio' && completo.non_si_sa.length === 0, JSON.stringify([completo.arretrato_kg, completo.dal_mese]));
+// E la pratica di ottobre, con la lettura dal registro, dichiara quello che deve.
+const ottProduzione = componiMese({ ...comune, arretrato: produzione, lettura: 'registro' });
+verifica('la pratica di ottobre porta a portale 493.000 kg, non 708.940',
+  ottProduzione.letture.registro.totale_kg === 493000 && ottProduzione.portale_kg === 493000, String(ottProduzione.portale_kg));
+verifica('e dice quali mesi restano fuori dal saldo e perche\'',
+  ottProduzione.avvisi.some(a => /la dichiarazione c'e' ma non dice quanti metalli/.test(a) && /luglio/.test(a)), JSON.stringify(ottProduzione.avvisi));
 
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');

@@ -50,6 +50,11 @@
       "type": "string",
       "format": "date"
     },
+    "inviata_consorzio_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Quando la dichiarazione dei metalli ferrosi (EER 19.12.02) e' stata mandata al consorzio via email. Le uscite di ferro a portale non si caricano: viaggiano dentro le dichiarazioni di gomma, e nei mesi di soli metalli non si carica nulla. Questa data non decurta niente e non entra in nessun conto: e' l'evidenza di quando l'email e' partita"
+    },
     "ricevuta_email": {
       "type": "boolean",
       "default": false,
