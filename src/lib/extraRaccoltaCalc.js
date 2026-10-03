@@ -78,9 +78,18 @@ export function calcExtraRaccolta(r) {
   // secondaria - un trasferimento da uno stoccaggio a un impianto, che non ha un
   // costo di raccolta - non si pagava proprio nulla al trasportatore.
   const costoTrasporto = Number(r.costo_trasporto_viaggio || 0);
+  // I SOVRACOSTI DELLA PASSIVA HANNO UN PADRONE. L'utente, 03/10/2026: «il
+  // sovraccosto nella passiva puo' essere dovuto al raccoglitore (quando ad
+  // esempio ha dovuto sostenere costi imprevisti nella raccolta) o per l'impianto
+  // di conferimento che li deve lavorare». Sono importi fissi, come il trasporto:
+  // non si moltiplicano per le tonnellate. Da non confondere con i tre
+  // sovracosto_* qui sopra, che sono del RICAVO.
+  const sovraRaccoglitore = Number(r.sovracosto_pagato_raccoglitore || 0);
+  const sovraImpianto = Number(r.sovracosto_pagato_impianto || 0);
 
   const costo_totale = Math.round(
-    (tonnellate * (costoRaccolta + costoStoccaggio + costoTrattamento) + costoPulizia + costiAggiuntivi + costoTrasporto) * 100
+    (tonnellate * (costoRaccolta + costoStoccaggio + costoTrattamento)
+      + costoPulizia + costiAggiuntivi + costoTrasporto + sovraRaccoglitore + sovraImpianto) * 100
   ) / 100;
 
   const margine = Math.round((ricavo - costo_totale) * 100) / 100;
@@ -100,7 +109,7 @@ export function aggregaPerProduttore(records) {
   const map = {};
   for (const r of records) {
     const p = r.produttore || '(senza produttore)';
-    if (!map[p]) map[p] = { costi_aggiuntivi: 0, raccolta: 0, stoccaggio: 0, trattamento: 0, pulizia: 0, trasporto: 0, costo_totale: 0, ricavi: 0, margine: 0 };
+    if (!map[p]) map[p] = { costi_aggiuntivi: 0, raccolta: 0, stoccaggio: 0, trattamento: 0, pulizia: 0, trasporto: 0, sovracosto_raccoglitore: 0, sovracosto_impianto: 0, costo_totale: 0, ricavi: 0, margine: 0 };
     const c = calcExtraRaccolta(r);
     map[p].costi_aggiuntivi += Number(r.costi_aggiuntivi || 0);
     map[p].raccolta += c.tonnellate * Number(r.costo_raccolta_t || 0);
@@ -108,6 +117,8 @@ export function aggregaPerProduttore(records) {
     map[p].trattamento += c.tonnellate * Number(r.costo_trattamento_t || 0);
     map[p].pulizia += Number(r.costo_pulizia || 0);
     map[p].trasporto += Number(r.costo_trasporto_viaggio || 0);
+    map[p].sovracosto_raccoglitore += Number(r.sovracosto_pagato_raccoglitore || 0);
+    map[p].sovracosto_impianto += Number(r.sovracosto_pagato_impianto || 0);
     map[p].costo_totale += c.costo_totale;
     map[p].ricavi += c.ricavo;
     map[p].margine += c.margine;

@@ -201,15 +201,25 @@
       "default": 0,
       "description": "Costo in euro per il VIAGGIO da pagare al trasportatore di questo intervento, non a tonnellata. Lo scrive l amministratore sull intervento come gli altri costi. Serviva: nel foglio della fatturazione passiva dell amministrazione il blocco dell extra raccolta ha la colonna PREZZO (Euro/viaggio) e nel gestionale non c era nessun campo, quindi il trasporto di un intervento non si poteva scrivere e non si pagava - nemmeno quello delle secondarie, che sono trasferimenti da uno stoccaggio a un impianto e non hanno un costo di raccolta"
     },
+    "sovracosto_pagato_raccoglitore": {
+      "type": "number",
+      "default": 0,
+      "description": "SOVRACOSTO CHE SI PAGA AL RACCOGLITORE dell intervento, cioe al suo trasportatore: costi imprevisti che ha sostenuto nella raccolta. Importo fisso in euro, non a tonnellata. Precisazione dell utente del 03/10/2026: un sovracosto della passiva ha sempre un padrone, e e il raccoglitore o l impianto. Non confonderlo con sovracosto_raccolta, che invece si aggiunge a quello che si FATTURA a Ecotyre. La spiegazione in note_costi e obbligatoria: un costo imprevisto che finisce in fattura a un fornitore deve dire perche"
+    },
+    "sovracosto_pagato_impianto": {
+      "type": "number",
+      "default": 0,
+      "description": "SOVRACOSTO CHE SI PAGA ALL IMPIANTO di destinazione, quello che deve trattare o triturare: costi imprevisti del trattamento, per esempio la pulizia di PFU sporchi prima di triturarli (esempio dell utente, 03/10/2026). Importo fisso in euro, non a tonnellata. Non confonderlo con sovracosto_trattamento, che e del ricavo. La spiegazione in note_costi e obbligatoria"
+    },
     "costo_pulizia": {
       "type": "number",
       "default": 0,
-      "description": "Importo fisso in euro"
+      "description": "Importo fisso in euro. SENZA PADRONE: la fatturazione passiva non sa a chi fatturarlo e lo dichiara. Dal 03/10/2026, se quell onere spetta al raccoglitore o all impianto si scrive in sovracosto_pagato_raccoglitore o sovracosto_pagato_impianto, e allora la passiva lo paga. Resta per i dati degli interventi gia scritti"
     },
     "costi_aggiuntivi": {
       "type": "number",
       "default": 0,
-      "description": "Importo fisso in euro per oneri non riconducibili alle voci precedenti"
+      "description": "Importo fisso in euro per oneri non riconducibili alle voci precedenti. SENZA PADRONE, come costo_pulizia: la passiva lo dichiara e non lo fattura a nessuno"
     },
     "note_costi": {
       "type": "string",

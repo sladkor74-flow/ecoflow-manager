@@ -607,7 +607,7 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
       'RETE, ACI ed extra raccolta sono canali indipendenti e non si sommano mai fra loro: per questo ogni canale ha il suo totale e in fondo al documento non c\'è nessun totale generale.',
       'Le righe in ambra sono quello che al modello manca: finché restano, il foglio non sta fatturando tutto il mese.',
       ...(elenco.some(f => f.extra) ? [
-        'L\'extra raccolta non ha voci fisse: ogni intervento fa storia a sé, coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull\'intervento prima di passarlo a terminato, più il sovracosto, che è la pulizia e i costi aggiuntivi dell\'intervento. Entra nel mese in cui la fine trasporto è stata chiusa. Nel foglio Excel ci sono anche l\'ordine Ecotyre, il CER e la data di inizio trasporto.',
+        'L\'extra raccolta non ha voci fisse: ogni intervento fa storia a sé, coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull\'intervento prima di passarlo a terminato, più il sovracosto, che si paga al raccoglitore quando ha avuto costi imprevisti nella raccolta o all\'impianto quando li ha avuti nel trattamento: la nota di ogni riga dice a chi va. Entra nel mese in cui la fine trasporto è stata chiusa. Nel foglio Excel ci sono anche l\'ordine Ecotyre, il CER e la data di inizio trasporto.',
       ] : []),
     ], { colore: C.medio, sfondo: C.zebra, inchiostro: C.testo, titolo: 'Come si legge questo documento' });
   };

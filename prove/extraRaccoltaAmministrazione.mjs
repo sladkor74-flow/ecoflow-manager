@@ -121,6 +121,41 @@ console.log('IL TRASPORTO SI PAGA A VIAGGIO');
   verifica('e non e piu un intervento senza costi', b.senza_costi.length === 0, JSON.stringify(b.senza_costi));
 }
 
+console.log('IL SOVRACOSTO HA UN PADRONE');
+{
+  // Precisazione dell'utente, 03/10/2026: «il sovraccosto nella passiva puo'
+  // essere dovuto al raccoglitore (quando ad esempio ha dovuto sostenere costi
+  // imprevisti nella raccolta) o per l'impianto di conferimento che li deve
+  // lavorare». Nel foglio stanno in una colonna sola, com'e' nel loro file, e la
+  // nota dice a chi vanno: su una fattura serve sapere chi incassa.
+  const r = intervento({
+    peso_effettivo: 10000, costo_raccolta_t: 90, costo_trattamento_t: 100,
+    sovracosto_pagato_raccoglitore: 300, sovracosto_pagato_impianto: 150,
+    note_costi: 'Piazzale allagato, raccolta con mezzo piccolo; PFU sporchi da lavare',
+  });
+  const b = bloccoExtraRaccolta([r], 2026, 'Settembre');
+  const riga = b.righe[0];
+  verifica('i due sovracosti si vedono separati', riga.sovracosto_raccoglitore === 300 && riga.sovracosto_impianto === 150,
+    JSON.stringify([riga.sovracosto_raccoglitore, riga.sovracosto_impianto]));
+  verifica('e nella colonna del foglio stanno insieme', riga.oneri === 450, String(riga.oneri));
+  // 10 t per 190 fa 1.900, piu' 450 di sovracosti: 2.350. Gli importi fissi non
+  // si moltiplicano per il peso.
+  verifica('il totale li comprende una volta sola', riga.totale === 2350, String(riga.totale));
+  verifica('e resta quello del modulo', riga.totale === calcExtraRaccolta(r).costo_totale);
+  verifica('la nota dice a chi va il sovracosto',
+    /300,00 € al raccoglitore/.test(riga.note) && /150,00 € all'impianto/.test(riga.note), riga.note);
+  verifica('e riporta il perche scritto sull intervento', /Piazzale allagato/.test(riga.note));
+}
+{
+  // Pulizia e costi aggiuntivi restano senza padrone: entrano nel foglio, perche'
+  // si pagano, ma la nota dice che non si fatturano a nessuno - ed e' il motivo
+  // per cui conviene scriverli nel sovracosto giusto.
+  const b = bloccoExtraRaccolta([intervento({ costo_pulizia: 120, costi_aggiuntivi: 30 })], 2026, 'Settembre');
+  verifica('gli oneri senza padrone si sommano nella colonna', b.righe[0].oneri === 150 && b.righe[0].sovracosto_senza_padrone === 150,
+    JSON.stringify([b.righe[0].oneri, b.righe[0].sovracosto_senza_padrone]));
+  verifica('e la nota lo dice', /non si fatturano a nessuno/.test(b.righe[0].note), b.righe[0].note);
+}
+
 console.log('QUELLO CHE VA SISTEMATO SI DICE');
 {
   const b = bloccoExtraRaccolta([

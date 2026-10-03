@@ -40,6 +40,8 @@ const n2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 const n3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
 const testo = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 const chiave = (v) => testo(v).toLowerCase();
+/** Un importo come si scrive in una nota: 1.234,00 €. */
+const euroIt = (v) => `${(Number(v) || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 
 /** Il mese in numero, dal nome come lo scrive il gestionale. */
 export const indiceMese = (mese) => MESI.findIndex(m => chiave(m) === chiave(mese)) + 1;
@@ -97,7 +99,17 @@ export function bloccoExtraRaccolta(interventi, anno, mese) {
     const raccolta = Number(r.costo_raccolta_t) || 0;
     const stoccaggio = Number(r.costo_stoccaggio_t) || 0;
     const trattamento = Number(r.costo_trattamento_t) || 0;
-    const oneri = n2(Number(r.costo_pulizia || 0) + Number(r.costi_aggiuntivi || 0));
+    // LA COLONNA SOVRACOSTO del foglio dell'amministrazione: tutti gli importi
+    // fissi che si pagano su questo intervento. Due hanno un padrone - il
+    // raccoglitore e l'impianto, come ha precisato l'utente il 03/10/2026 - e la
+    // passiva li fattura a loro; la pulizia e i costi aggiuntivi, scritti sugli
+    // interventi di prima, un padrone non ce l'hanno e restano dichiarati.
+    // Nel foglio stanno in una colonna sola, com'e' nel loro file, e la nota dice
+    // a chi vanno: su una fattura serve sapere chi incassa quel sovracosto.
+    const sovraRaccoglitore = n2(Number(r.sovracosto_pagato_raccoglitore || 0));
+    const sovraImpianto = n2(Number(r.sovracosto_pagato_impianto || 0));
+    const senzaPadrone = n2(Number(r.costo_pulizia || 0) + Number(r.costi_aggiuntivi || 0));
+    const oneri = n2(sovraRaccoglitore + sovraImpianto + senzaPadrone);
     // Il trasporto si paga A VIAGGIO: e' un importo fisso, non un prezzo a
     // tonnellata. Nel foglio dell'amministrazione e' la colonna «PREZZO
     // (Euro/viaggio)», che fino al 03/10/2026 nel gestionale non aveva un campo.
@@ -118,10 +130,21 @@ export function bloccoExtraRaccolta(interventi, anno, mese) {
       trattamento_t: trattamento,
       trasporto_viaggio: trasporto,
       oneri,
+      sovracosto_raccoglitore: sovraRaccoglitore,
+      sovracosto_impianto: sovraImpianto,
+      sovracosto_senza_padrone: senzaPadrone,
       // Il totale e' quello del modulo, non un conto rifatto qui.
       totale: n2(c.costo_totale),
       secondaria: chiave(r.tipo_movimento) === 'secondaria',
-      note: [testo(r.note_costi), testo(r.tipologia_trasporto)].filter(Boolean).join(' · '),
+      note: [
+        // A chi va il sovracosto, prima di tutto il resto: e' la cosa che serve
+        // a chi deve fatturarlo.
+        sovraRaccoglitore ? `sovracosto ${euroIt(sovraRaccoglitore)} al raccoglitore` : '',
+        sovraImpianto ? `sovracosto ${euroIt(sovraImpianto)} all'impianto` : '',
+        senzaPadrone ? `${euroIt(senzaPadrone)} di pulizia e costi aggiuntivi, che non si fatturano a nessuno` : '',
+        testo(r.note_costi),
+        testo(r.tipologia_trasporto),
+      ].filter(Boolean).join(' · '),
       senza_costi: raccolta === 0 && stoccaggio === 0 && trattamento === 0 && oneri === 0 && trasporto === 0,
     };
   });

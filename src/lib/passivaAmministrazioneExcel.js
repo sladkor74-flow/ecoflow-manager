@@ -595,7 +595,7 @@ function notaFinale(ws, r, fogli) {
   const st = { corsivo: true, colore: TENUE, capo: true };
   stendi(ws, r, 1, largo, st);
   if (soloExtra) {
-    scrivi(ws, r, 1, 'L\'extra raccolta non ha voci a modello: ogni intervento fa storia a se\', coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull\'intervento, piu\' il sovracosto (pulizia e costi aggiuntivi dell\'intervento). Entra nel mese in cui e\' stata chiusa la fine trasporto. I totali sono formule: correggi un prezzo e si rifanno da soli. Tonnellate con due decimali (tre quando i chili non sono tondi), importi in euro, EER 160103 dei PFU. I canali non si sommano fra loro.', st);
+    scrivi(ws, r, 1, 'L\'extra raccolta non ha voci a modello: ogni intervento fa storia a se\', coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull\'intervento, piu\' il sovracosto, che si paga al raccoglitore o all\'impianto e la nota dice a chi (la pulizia e i costi aggiuntivi degli interventi di prima non hanno un padrone e non si fatturano a nessuno). Entra nel mese in cui e\' stata chiusa la fine trasporto. I totali sono formule: correggi un prezzo e si rifanno da soli. Tonnellate con due decimali (tre quando i chili non sono tondi), importi in euro, EER 160103 dei PFU. I canali non si sommano fra loro.', st);
     ws.mergeCells(r, 1, r, largo);
     ws.getRow(r).height = 30;
     return;
