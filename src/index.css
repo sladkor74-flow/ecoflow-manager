@@ -110,20 +110,25 @@
   }
 }
 
-/* Animazioni di EcoTyna, l'avatar dell'Assistente: respiro, battito di ciglia,
-   puntini mentre pensa e onda mentre ascolta. */
+/* Animazioni di EcoTyna, l'avatar dell'Assistente: il respiro, l'oscillazione
+   della testa, i puntini mentre pensa e l'onda mentre ascolta.
+   Tre tempi diversi e volutamente non multipli fra loro (4s, 7s, 1,2s): se due
+   movimenti vanno a tempo si vede subito il meccanismo, se vanno per conto loro
+   sembra una persona che sta ferma, non un'immagine ferma.
+   Il battito di ciglia e la bocca NON stanno qui: vengono dal componente, perche'
+   il battito deve essere irregolare e la bocca deve seguire le sillabe. */
 @keyframes eco-respiro { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-0.6px) scale(1.006); } }
-@keyframes eco-ciglia { 0%, 92%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
+@keyframes eco-oscilla { 0%, 100% { transform: rotate(-0.7deg) translateX(-0.3px); } 50% { transform: rotate(0.7deg) translateX(0.3px); } }
 @keyframes eco-punto { 0%, 100% { opacity: 0.25; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-2px); } }
 @keyframes eco-onda { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(1.25); opacity: 0; } }
 
 .eco-respiro { animation: eco-respiro 4s ease-in-out infinite; }
-.eco-occhi { animation: eco-ciglia 5.5s ease-in-out infinite; }
+.eco-oscilla { animation: eco-oscilla 7s ease-in-out infinite; }
 .eco-punto { animation: eco-punto 1.2s ease-in-out infinite; }
 .eco-onda { animation: eco-onda 1.6s ease-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
-  .eco-respiro, .eco-occhi, .eco-punto, .eco-onda { animation: none; }
+  .eco-respiro, .eco-oscilla, .eco-punto, .eco-onda { animation: none; }
 }
 
 /* === Tabelle larghe e lunghe ===

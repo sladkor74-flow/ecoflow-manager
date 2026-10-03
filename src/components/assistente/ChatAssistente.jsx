@@ -512,9 +512,15 @@ export default function ChatAssistente() {
 
       <section className="border rounded-xl bg-card flex flex-col lg:h-[calc(100vh-220px)]">
         <div className="border-b px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+          {/* `bocca` e' il riferimento alla forma della bocca in questo istante:
+              cambia ventidue volte al secondo, e passarlo come riferimento invece
+              che come stato fa ridisegnare solo l'avatar e non tutta la chat.
+              Con la voce accesa il viso si fa piu' grande: a 44 pixel il
+              movimento delle labbra non si vedeva. */}
           <EcoTyna
-            dimensione={voce.attiva ? 64 : 44}
+            dimensione={voce.attiva ? 80 : 52}
             stato={invio || inCorso ? 'pensa' : ascolto.inAscolto ? 'ascolta' : voce.stato}
+            bocca={voce.bocca}
           />
           <div className="flex items-center gap-2">
             {voce.attiva && voce.voci.length > 1 && (

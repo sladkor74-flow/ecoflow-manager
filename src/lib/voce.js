@@ -6,9 +6,24 @@
 // scelta resta su questo computer.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { traccia, visemaA, istanteDelCarattere, RIPOSO } from './visemi';
 
 const CHIAVE_ATTIVA = 'eco_voce_attiva';
 const CHIAVE_VOCE = 'eco_voce_nome';
+
+// Quanto spesso si guarda l'orario della bocca: 45 millesimi, cioe' ventidue
+// volte al secondo. Le forme durano dai 55 ai 115 millesimi, quindi nessuna
+// sfugge, e il disegno le raccorda con una transizione.
+const PASSO = 45;
+const VELOCITA = 1;
+
+const adesso = () =>
+  (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+
+// Qualche voce non manda l'avviso di parola (onboundary): se la traccia finisce
+// prima della voce vera, la bocca non si blocca chiusa mentre si sente ancora
+// parlare, ma tira avanti piano finche' la frase non e' finita per davvero.
+const tiraAvanti = (ms) => (Math.floor(ms / 170) % 2 ? 'A' : 'C');
 
 const leggiPreferenza = (chiave, predefinito) => {
   try { const v = localStorage.getItem(chiave); return v === null ? predefinito : v; } catch { return predefinito; }
@@ -44,8 +59,14 @@ export function testoDaLeggere(markdown) {
 }
 
 /**
- * Lettura ad alta voce con lo stato della bocca per l'avatar.
- * Ritorna { disponibile, attiva, accendi, voci, voce, scegliVoce, stato, intensita, parla, ferma }.
+ * Lettura ad alta voce con la bocca per l'avatar.
+ * Ritorna { disponibile, attiva, accendi, voci, voce, scegliVoce, stato, bocca, parla, ferma }.
+ *
+ * `bocca` e' un riferimento, non uno stato: dentro c'e' la forma della bocca in
+ * questo istante e cambia ventidue volte al secondo. Se fosse uno stato di React
+ * farebbe ridisegnare ventidue volte al secondo tutta la pagina della chat,
+ * elenco dei messaggi compreso; cosi' invece lo guarda solo l'avatar, che e'
+ * l'unico a cui serve.
  */
 export function useVoce() {
   const disponibile = typeof window !== 'undefined' && !!window.speechSynthesis;
@@ -53,8 +74,10 @@ export function useVoce() {
   const [voci, setVoci] = useState([]);
   const [nomeVoce, setNomeVoce] = useState(() => leggiPreferenza(CHIAVE_VOCE, ''));
   const [stato, setStato] = useState('ferma');
-  const [intensita, setIntensita] = useState(0);
+  const bocca = useRef(RIPOSO);
   const battito = useRef(null);
+  const avvio = useRef(0);
+  const scarto = useRef(0);
 
   useEffect(() => {
     if (!disponibile) return undefined;
@@ -64,16 +87,20 @@ export function useVoce() {
     return () => window.speechSynthesis.removeEventListener('voiceschanged', aggiorna);
   }, [disponibile]);
 
-  // La finestra che si chiude o la pagina che cambia non devono lasciare la voce accesa.
-  useEffect(() => () => { if (disponibile) window.speechSynthesis.cancel(); }, [disponibile]);
+  // La finestra che si chiude o la pagina che cambia non devono lasciare la voce
+  // accesa, ne' il battito della bocca a girare a vuoto.
+  useEffect(() => () => {
+    clearInterval(battito.current);
+    if (disponibile) window.speechSynthesis.cancel();
+  }, [disponibile]);
 
   const voce = voci.find(v => v.name === nomeVoce) || voci[0] || null;
 
   const ferma = useCallback(() => {
     if (disponibile) window.speechSynthesis.cancel();
     clearInterval(battito.current);
+    bocca.current = RIPOSO;
     setStato('ferma');
-    setIntensita(0);
   }, [disponibile]);
 
   const parla = useCallback((testo) => {
@@ -84,16 +111,39 @@ export function useVoce() {
     const frase = new SpeechSynthesisUtterance(pulito);
     frase.lang = 'it-IT';
     if (voce) frase.voice = voce;
-    frase.rate = 1;
+    frase.rate = VELOCITA;
     frase.pitch = 1.05;
+
+    // L'orario delle forme della bocca per questa frase: si prepara prima, cosi'
+    // mentre si parla c'e' solo da leggere l'ora.
+    const orario = traccia(pulito, { velocita: VELOCITA });
+
     frase.onstart = () => {
       setStato('parla');
-      // La bocca si muove a tempo: i confini di parola non arrivano su tutte le voci.
+      avvio.current = adesso();
+      scarto.current = 0;
       clearInterval(battito.current);
-      battito.current = setInterval(() => setIntensita(0.25 + Math.random() * 0.75), 110);
+      battito.current = setInterval(() => {
+        const ms = adesso() - avvio.current + scarto.current;
+        bocca.current = ms < orario.durata ? visemaA(orario, ms) : tiraAvanti(ms);
+      }, PASSO);
     };
-    frase.onboundary = () => setIntensita(0.35 + Math.random() * 0.65);
-    const chiudi = () => { clearInterval(battito.current); setStato('ferma'); setIntensita(0); };
+
+    // La voce dice a che parola e' arrivata: qui si sa dove dovrebbe essere la
+    // bocca e dove e', e la differenza si corregge in un colpo. Non e' un
+    // ritardo che si somma: ogni parola rifa' il conto da zero, quindi una
+    // risposta lunga non si sfasa, e non importa se la voce scelta legge piu'
+    // piano o piu' svelta di quanto si era stimato.
+    frase.onboundary = (e) => {
+      if (typeof e.charIndex !== 'number') return;
+      scarto.current = istanteDelCarattere(orario, e.charIndex) - (adesso() - avvio.current);
+    };
+
+    const chiudi = () => {
+      clearInterval(battito.current);
+      bocca.current = RIPOSO;
+      setStato('ferma');
+    };
     frase.onend = chiudi;
     frase.onerror = chiudi;
     window.speechSynthesis.speak(frase);
@@ -110,7 +160,7 @@ export function useVoce() {
     scriviPreferenza(CHIAVE_VOCE, nome);
   }, []);
 
-  return { disponibile, attiva, accendi, voci, voce, scegliVoce, stato, intensita, parla, ferma };
+  return { disponibile, attiva, accendi, voci, voce, scegliVoce, stato, bocca, parla, ferma };
 }
 
 /**
