@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle2, Clock, AlertTriangle, Download, ShieldOff } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle2, Clock, AlertTriangle, Download, ShieldOff, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
 import { importaGrandeFile, importaPrimarie, TIPI_LETTURA_BROWSER, dopoCaricamento, testoRicalcoli, testoVerificaArchivio, testoEseguiti, ricalcoliDaRecuperare, recuperiDaFare, moduliDaRicalcolare, ricalcoliFermi, confermeAccumulate } from '@/lib/importGrandeFile';
@@ -12,7 +12,11 @@ const TIPI_FILE = [
   { key: 'primarie', label: 'Primarie', desc: 'File unico delle primarie (un solo foglio con tutto). Suddivide automaticamente le righe in Primarie Rete, Primarie ACI, Assegnati Rete e Assegnati ACI in base a stato e classe.', colore: 'bg-green-50 border-green-200' },
   { key: 'secondarie', label: 'Secondarie', desc: 'Viaggi stoccaggio → impianto (foglio SECONDARIE)', colore: 'bg-purple-50 border-purple-200' },
   { key: 'terziarie', label: 'Terziarie', desc: 'Viaggi impianto → cementeria/impianto (foglio TERZIARIE)', colore: 'bg-pink-50 border-pink-200' },
-  { key: 'dichiarazioni_trattamento', label: 'Dichiarazioni Trattamento', desc: 'Report delle dichiarazioni di recupero con la ripartizione dei derivati: granulo, fibre, metallo, cippato, ciabattato', colore: 'bg-cyan-50 border-cyan-200' },
+  // Il report delle dichiarazioni dice anche quali nostri mesi il portale ha
+  // davvero accettato, e questo caricamento li segna da se': la descrizione lo
+  // scrive perche' nessuno vada a cercare un comando da premere, e dice che la
+  // cosa riguarda solo la rete (l'ACI a portale non e' gestito).
+  { key: 'dichiarazioni_trattamento', label: 'Dichiarazioni Trattamento', desc: 'Report delle dichiarazioni di recupero con la ripartizione dei derivati: granulo, fibre, metallo, cippato, ciabattato. Riconosce da sé quali mesi della rete risultano caricati a portale: l\'ACI e l\'extra raccolta a portale non sono gestiti e si segnano a mano in Dichiarazioni Impianti.', colore: 'bg-cyan-50 border-cyan-200' },
   { key: 'ordini_non_dichiarati', label: 'Ordini Non Dichiarati', desc: 'Ordini in attesa di dichiarazione di trattamento: determina la giacenza a portale di ciascun impianto', colore: 'bg-amber-50 border-amber-200' },
 ];
 
@@ -100,6 +104,41 @@ export default function CaricamentoDati() {
     ricalcoliMiei.current.add(tipoKey);
     setRicalcoli(prev => ({ ...prev, [tipoKey]: { in_corso: true } }));
     dopoCaricamento(tipoKey).then(esiti => setRicalcoli(prev => ({ ...prev, [tipoKey]: esiti })));
+  };
+
+  // IL RICONOSCIMENTO DELLE DICHIARAZIONI CARICATE A PORTALE SI RIPROVA DA QUI.
+  //
+  // Parte da solo a ogni caricamento del report delle dichiarazioni di
+  // trattamento (importaGrandeFile): se non riesce, il caricamento del file
+  // resta buono ma i mesi della rete restano segnati come non caricati, e la
+  // quadratura con il portale resta alta di un mese gia' dichiarato. Fino al
+  // 03/10/2026 il messaggio mandava a premere «Allinea dal portale» in
+  // Dichiarazioni Impianti: quel pulsante non c'e' piu' - l'utente: «allinea dal
+  // portale dovrebbe essere automatico e non capisco a cosa serva» - e il
+  // rimedio sta dove il passo e' fallito. Si chiama la stessa cosa che chiama
+  // l'automatismo, cosi' non esistono due strade che fanno la stessa cosa in
+  // modi diversi.
+  //
+  // Tocca solo la rete: l'ACI e l'extra raccolta a portale non sono gestiti e
+  // li segna a mano l'amministratore.
+  const [riallineo, setRiallineo] = useState(false);
+  const riallinea = async (tipoKey) => {
+    setRiallineo(true);
+    // L'esito prende il posto del messaggio d'errore, nello stesso punto: se
+    // riesce si legge che cosa ha riconosciuto, se non riesce si legge il nuovo
+    // motivo e il pulsante resta dov'e'.
+    const scrivi = (allineamento) => setRisultato(prev => (prev[tipoKey] && prev[tipoKey].ok
+      ? { ...prev, [tipoKey]: { ...prev[tipoKey], data: { ...prev[tipoKey].data, allineamento } } }
+      : prev));
+    try {
+      const res = await base44.functions.invoke('importaBlocco', { azione: 'allinea', tipo_file: 'dichiarazioni_trattamento' });
+      // Una risposta senza esito non e' una riuscita: far sparire il messaggio
+      // lascerebbe credere che i mesi siano stati riconosciuti.
+      scrivi((res.data || res).allineamento || { errore: 'la funzione ha risposto senza dire che cosa ha riconosciuto' });
+    } catch (e) {
+      scrivi({ errore: extractUploadError(e).error });
+    }
+    setRiallineo(false);
   };
 
   // L'inventario dei file: si scarica come CSV e si allega alla richiesta di
@@ -456,13 +495,27 @@ export default function CaricamentoDati() {
                 return t ? <p className="mt-1 text-xs text-amber-700">{t}</p> : null;
               })()}
 
+              {/* Il report delle dichiarazioni riconosce da solo i nostri mesi
+                  caricati a portale. Quando quel passo non riesce il rimedio sta
+                  qui, dove e' fallito (vedi riallinea): prima si leggeva «premi
+                  "Allinea dal portale" in Dichiarazioni Impianti», che mandava
+                  in un'altra pagina a cercare un pulsante. */}
               {res && res.ok && res.data.allineamento && (
-                // Il report delle dichiarazioni riconosce da solo i nostri mesi caricati a portale.
-                <p className={`mt-1 text-xs ${res.data.allineamento.errore ? 'text-amber-700' : 'text-muted-foreground'}`}>
-                  {res.data.allineamento.errore
-                    ? `Dichiarazioni mensili non riconosciute (${res.data.allineamento.errore}): premi «Allinea dal portale» in Dichiarazioni Impianti.`
-                    : testoAllineamento(res.data.allineamento)}
-                </p>
+                <div className={`mt-1 text-xs ${res.data.allineamento.errore ? 'text-amber-700' : 'text-muted-foreground'}`}>
+                  {res.data.allineamento.errore ? (
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span>
+                        Dichiarazioni mensili non riconosciute ({res.data.allineamento.errore}): il file è caricato,
+                        ma i mesi della rete restano segnati come non caricati a portale finché il riconoscimento non riesce.
+                      </span>
+                      {puoCaricare(tipo.key) && (
+                        <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={() => riallinea(tipo.key)} disabled={riallineo}>
+                          {riallineo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Riprova
+                        </Button>
+                      )}
+                    </div>
+                  ) : testoAllineamento(res.data.allineamento)}
+                </div>
               )}
 
               {(() => {

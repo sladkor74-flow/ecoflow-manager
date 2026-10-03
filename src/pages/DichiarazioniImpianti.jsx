@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, RefreshCw, AlertTriangle, CheckCircle2, FileSpreadsheet, Link2, Eraser } from 'lucide-react';
+import { Loader2, RefreshCw, AlertTriangle, CheckCircle2, FileSpreadsheet, Eraser } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import { formatTonnellate, formatKg, formatIntero } from '@/lib/utils';
@@ -77,8 +77,6 @@ export default function DichiarazioniImpianti() {
   const [caricamento, setCaricamento] = useState(true);
   const [errore, setErrore] = useState('');
   const [apertura, setApertura] = useState(null);
-  const [allineo, setAllineo] = useState(false);
-  const [esitoAllineamento, setEsitoAllineamento] = useState(null);
 
   // silenzioso: rilegge senza mostrare il caricamento (la seconda lettura dopo un salvataggio).
   const carica = useCallback(async ({ silenzioso = false } = {}) => {
@@ -97,8 +95,6 @@ export default function DichiarazioniImpianti() {
 
   const apri = (sito, flusso, mese) => { if (!soloLettura) setApertura({ sito, flusso, mese }); };
 
-  // Le dichiarazioni caricate a portale si riconoscono dai pesi del report: questo
-  // lo rifa' a comando, ma succede gia' da solo a ogni caricamento del report.
   // TOGLIE CIO' CHE NON E' VERAMENTE DICHIARATO A PORTALE (utente, 02/10/2026:
   // «non confondiamoci con cose che non esistono»). Si guarda prima e si
   // cancella dopo, come per i link pubblici: una cancellazione non si annulla.
@@ -129,19 +125,6 @@ export default function DichiarazioniImpianti() {
     }
   };
 
-  const allinea = async () => {
-    setAllineo(true);
-    setEsitoAllineamento(null);
-    try {
-      const res = await base44.functions.invoke('allineaDichiarazioni', { anno });
-      setEsitoAllineamento(res.data);
-      await carica();
-    } catch (e) {
-      setErrore(e?.response?.data?.error || e.message);
-    } finally {
-      setAllineo(false);
-    }
-  };
   const totali = dati ? dati.totali : null;
 
   return (
@@ -155,6 +138,20 @@ export default function DichiarazioniImpianti() {
             Gli stoccaggi non trattano e non dichiarano: quello che rimandano in secondaria lo dichiara l'impianto che lo riceve.
             Quando una dichiarazione viene caricata a portale, decurta la giacenza dell'impianto.
           </p>
+          {/* COME SI SA CHE UN MESE E' CARICATO A PORTALE: non lo si segna a mano
+              e non c'e' niente da premere qui. Lo riconosce il report delle
+              dichiarazioni di trattamento, che a ogni caricamento in Caricamento
+              Dati rilegge i pesi e segna i mesi della rete con la data e i
+              materiali. La domanda dell'utente, 03/10/2026: «allinea dal portale
+              dovrebbe essere automatico e non capisco a cosa serva, inoltre se
+              l'ACI non viene gestito a portale, beh....» - ed e' giusta due
+              volte, quindi la risposta sta scritta nella pagina. */}
+          <p className="text-sm text-muted-foreground max-w-3xl mt-2">
+            Quali mesi risultano caricati a portale lo riconosce da se&apos; il report delle dichiarazioni di trattamento, a ogni suo
+            caricamento in Caricamento Dati: qui non c&apos;e&apos; niente da premere. Riguarda solo la <strong>rete</strong>, perche&apos; a
+            portale si dichiara solo quella: l&apos;<strong>ACI</strong> e l&apos;<strong>extra raccolta</strong> a portale non sono
+            gestiti, quindi le loro dichiarazioni le scrive a mano l&apos;amministratore e nessun riconoscimento automatico le tocca.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Select value={String(anno)} onValueChange={v => setAnno(Number(v))}>
@@ -164,11 +161,6 @@ export default function DichiarazioniImpianti() {
           <Button variant="outline" className="gap-1" onClick={carica} disabled={caricamento}>
             {caricamento ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Aggiorna
           </Button>
-          {isAdmin && (
-            <Button variant="outline" className="gap-1" onClick={allinea} disabled={allineo} title="Rilegge il report delle dichiarazioni di trattamento e segna quali mesi della RETE risultano caricati a portale, con la data e i materiali. Parte da sola a ogni caricamento del report. L ACI e l extra raccolta non passano di qui: a portale non sono gestiti e li segni a mano">
-              {allineo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />} Allinea dal portale
-            </Button>
-          )}
           {isAdmin && (
             <Button variant="outline" className="gap-1" onClick={ripulisci} disabled={ripulisco || !dati} title="Toglie i record che sembrano dichiarazioni ma non lo sono: i numeri scritti all avvio del gestionale, che in quantita portavano cio che restava DA dichiarare, e i record vuoti. Non tocca niente di vero: non le dichiarazioni caricate a portale, non quelle ricevute via email, non i mesi con un motivo scritto">
               {ripulisco ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eraser className="w-4 h-4" />} Togli le dichiarazioni inesistenti
@@ -183,30 +175,21 @@ export default function DichiarazioniImpianti() {
       {soloLettura && <BannerSolaLettura cosa="le dichiarazioni degli impianti" />}
       {errore && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{errore}</p>}
 
-      {esitoAllineamento && (
-        <div className="text-sm border rounded-lg px-3 py-2 bg-muted/40">
-          {esitoAllineamento.aggiornate?.length
-            ? <p><strong>{esitoAllineamento.aggiornate.length}</strong> {esitoAllineamento.aggiornate.length === 1 ? 'dichiarazione riconosciuta' : 'dichiarazioni riconosciute'} fra quelle caricate a portale: {esitoAllineamento.aggiornate.map(a => `${a.sito} ${a.mese}${a.canale && a.canale !== 'RETE' ? ` ${a.canale}` : ''} (${a.caricata_il.split('-').reverse().join('/')})`).join(', ')}.</p>
-            : <p>Nessuna novita': quello che risulta caricato a portale era gia' segnato.</p>}
-          {esitoAllineamento.da_inserire?.length > 0 && (
-            <p className="text-red-800 mt-1">
-              Il portale ha {esitoAllineamento.da_inserire.length === 1 ? 'una dichiarazione' : `${esitoAllineamento.da_inserire.length} dichiarazioni`} che qui non {esitoAllineamento.da_inserire.length === 1 ? 'c’è' : 'ci sono'}: {esitoAllineamento.da_inserire.map(v => `${v.sito}${v.canale !== 'RETE' ? ` ${v.canale}` : ''} ${formatKg(v.kg)} kg${v.mesi.length ? ` (ordini di ${v.mesi.map(m => MESI[Number(m.mese.slice(5, 7)) - 1]).join(', ')})` : ''}`).join('; ')}.
-            </p>
-          )}
-          {esitoAllineamento.non_trovate?.filter(n => n.era_segnata).length > 0 && (
-            <p className="text-amber-700 mt-1">
-              Segnate come caricate ma non trovate nel report del portale: {esitoAllineamento.non_trovate.filter(n => n.era_segnata).map(n => `${n.sito} ${n.mese}${n.canale && n.canale !== 'RETE' ? ` ${n.canale}` : ''}`).join(', ')}.
-            </p>
-          )}
-        </div>
-      )}
-
       {/* LE DICHIARAZIONI CHE IL PORTALE HA E IL GESTIONALE NO.
           Il 01/10/2026 l'utente ha dichiarato a portale il quantitativo di
           agosto di un impianto e il gestionale non se n'e' accorto: quel
           caricamento finiva fra "l'arretrato dell'anno prima" e l'arretrato non
-          si vedeva da nessuna parte. Sta in testa alla pagina, sempre, non solo
-          dopo aver premuto «Allinea dal portale». */}
+          si vedeva da nessuna parte. Lo ricalcola riepilogoDichiarazioni a ogni
+          apertura della pagina e sta in testa, sempre: non dipende da nessun
+          comando da premere, e si vede anche in un giorno in cui non si e'
+          caricato niente.
+          QUI STAVA ANCHE L'ESITO DELL'ALLINEAMENTO - quante dichiarazioni erano
+          state riconosciute, quali restavano senza riscontro - e si vedeva solo
+          dopo aver premuto «Allinea dal portale». Quel pulsante non c'e' piu'
+          (il riconoscimento e' automatico, utente 03/10/2026), quindi quel
+          riquadro non si sarebbe piu' potuto riempire: l'esito si legge dove il
+          riconoscimento avviene, sotto la scheda del report in Caricamento
+          Dati. */}
       {dati && (dati.dichiarazioni_da_inserire || []).length > 0 && (
         <div className="text-sm border border-red-300 bg-red-100 text-red-900 rounded-lg px-3 py-2 space-y-1">
           <p className="font-semibold flex items-start gap-2">
