@@ -19,7 +19,7 @@ import {
   normalizzaLettura, confronta, sintesi, FLUSSI, ORDINE_FLUSSI,
 } from '../base44/shared/quadraturaFir.ts';
 import { leggiPivotDaGriglia } from '../src/lib/pivotQuadratura.js';
-import { caricaGestionale, confrontaSettimana, osservazioneExtraRaccolta, CANALI_QUADRATURA } from '../base44/shared/quadraturaFirDati.ts';
+import { caricaGestionale, confrontaSettimana, osservazioneExtraRaccolta, sintesiPerCanale, CANALI_QUADRATURA } from '../base44/shared/quadraturaFirDati.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -101,6 +101,28 @@ console.log('DUE TABELLE SULLO STESSO FLUSSO E SULLA STESSA FONTE NON SI SCELGON
   verifica('il flusso non prende nessuna delle due', !aci.totali.winsinfo, JSON.stringify(aci.totali));
   verifica('e lo spiega nella nota', aci.note.some(x => /2 tabelle di WINSINFO assegnate a questo flusso/.test(x)), aci.note.join(' | '));
   verifica('senza dire la bugia "non c e nessuna tabella"', !aci.note.some(x => /non c'è nessuna tabella di questo flusso/.test(x)), aci.note.join(' | '));
+  // E IL CANALE NON PUO' DIRSI VERIFICATO SU TABELLE CHE NESSUNO HA CONFRONTATO.
+  //
+  // Difetto media dell'audit del 03/10/2026: la sintesi per canale guardava solo
+  // le somme e la fonte, non il fatto che quelle tabelle fossero state ESCLUSE dal
+  // confronto perche' doppie. Il canale risultava «lettura verificata» e la
+  // conformita' poteva uscire piena su un confronto che non si e' fatto.
+  const perCanale = sintesiPerCanale(esito, lettura).find(c => c.canale === 'ACI');
+  verifica('il canale ACI non risulta verificato', !!perCanale && perCanale.lettura_verificata === false, JSON.stringify(perCanale));
+  verifica('e la sua conformita non e piena', !!perCanale && perCanale.conformita !== 'piena', JSON.stringify(perCanale && perCanale.conformita));
+}
+{
+  // Il controllo guarda le tabelle DEL CANALE, e solo quelle doppie: due tabelle
+  // di fonti diverse sullo stesso canale restano una lettura verificata.
+  const lettura = normalizzaLettura({ tabelle: [
+    tab('WINSINFO ECT ACI', 'winsinfo', 1, 2760),
+    tab('PORTALE ECOTYRE ACI', 'ecotyre', 1, 2760),
+  ] });
+  const esito = confronta(lettura, {}, { anno: 2026, settimana: 39, inizio: '2026-09-21', fine: '2026-09-27' });
+  const perCanale = sintesiPerCanale(esito, lettura).find(c => c.canale === 'ACI');
+  verifica('senza doppie il canale resta verificato',
+    !lettura.tabelle.some(t => t.doppia) && !!perCanale && perCanale.lettura_verificata === true,
+    JSON.stringify([lettura.tabelle.map(t => [t.flusso, t.fonte, !!t.doppia]), perCanale]));
 }
 
 console.log('LA SCELTA DELL UTENTE VINCE SUL TITOLO');

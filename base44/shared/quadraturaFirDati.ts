@@ -371,8 +371,18 @@ export function sintesiPerCanale(esito, lettura = null) {
   for (const canale of CANALI_QUADRATURA) {
     const flussi = ((esito && esito.flussi) || []).filter(f => f.canale === canale);
     if (!flussi.length) continue;
+    // UNA TABELLA ESCLUSA DAL CONFRONTO NON PUO' GARANTIRE IL SUO CANALE.
+    //
+    // Quando due tabelle finiscono sullo stesso flusso e sulla stessa fonte, il
+    // confronto di quel flusso NON si fa: tenerne una o sommarle darebbe un numero
+    // sbagliato senza dirlo, e quindi si fermano tutte e due (t.doppia). Qui pero'
+    // si guardavano solo le somme e la fonte: il canale risultava «lettura
+    // verificata» e la conformita' usciva PIENA su tabelle che nessuno aveva
+    // confrontato. E' il caso del blocco ACI con le quattro pivot assegnate tutte
+    // a «secondarie», l'equivoco di titolo che e' costato la settimana 39
+    // (audit del 03/10/2026).
     const letturaVerificata = tabelle
-      ? !senzaFlusso && tabelle.filter(t => FLUSSI[t.flusso] && FLUSSI[t.flusso].canale === canale).every(t => t.quadra && t.fonte)
+      ? !senzaFlusso && tabelle.filter(t => FLUSSI[t.flusso] && FLUSSI[t.flusso].canale === canale).every(t => t.quadra && t.fonte && !t.doppia)
       : !!esito.lettura_verificata;
     const s = sintesi({ flussi, osservazioni: [], lettura_verificata: letturaVerificata, settimana_discorde: esito.settimana_discorde });
     // I formulari del canale, contati nella settimana, con le date obbligatorie
