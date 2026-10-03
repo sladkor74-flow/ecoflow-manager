@@ -153,12 +153,26 @@ verifica('un ordine ripetuto si conta una volta sola, e si dice',
   doppio.righe.length === 143 && doppio.doppioni.length === 1 && doppio.avvisi.some(a => /ripetut/.test(a)) && kgDi(doppio) === 519920, JSON.stringify([doppio.righe.length, doppio.doppioni]));
 
 console.log('IL CSV E LA PRATICA: IL FERRO DI SETTEMBRE SI VEDE DA QUI');
-// Settembre 2026 e' stato un mese di soli metalli: 99.300 kg di ferro usciti,
-// nessuna nave, niente caricato a portale. Mettendo nella pratica la giacenza che
-// esce da QUESTO file e, come giacenza del registro, AD94 + AE94, la pratica deve
-// dire che a portale restano 99.300 kg di troppo: e' il ferro da recuperare a
-// ottobre. AD94 + AE94 = 420.620 e' l'ipotesi da verificare nel registro.
+// LA CATENA CHIUSA SU DUE FILE INDIPENDENTI, VERIFICATA IL 03/10/2026.
+//
+// Dal registro di Irigom («Irigom carico scarico 2026.xlsx», foglio Cons., riga
+// 94 = settembre): AD94 = 412.420 di gomma in impianto, AE94 = 8.200 di metalli
+// in giacenza, somma 420.620. Dal CSV del portale, che il registro non conosce:
+// 519.920 kg di giacenza al 30/09. La differenza fa 99.300, cioe' esattamente
+// X94, il ferro uscito a settembre - mese di soli metalli, nessuna nave, niente
+// caricato a portale. E' il ferro da recuperare a ottobre.
+//
+// E l'ancora del saldo non e' piu' un'ipotesi: al 31/08 il portale aveva 144.780
+// kg, cioe' AD93 + AE93 al chilo (144.780 + 0). Se qualche mese da gennaio a
+// luglio avesse lasciato indietro del ferro, a fine agosto il portale ne avrebbe
+// avuto di piu'. Quindi il conto del ferro era in pari al 31/08 e l'arretrato che
+// arriva a ottobre e' tutto e solo quello di settembre.
 const AD_AE_SETTEMBRE = 420620;
+const AD_AE_AGOSTO = 144780;
+verifica('al 31/08 il portale aveva esattamente AD93 + AE93: il conto del ferro era in pari',
+  kgDi(l, { sito: 'IRIGOM SRL', giorno: '2026-08-31' }) === AD_AE_AGOSTO);
+verifica('al 30/09 il portale supera AD94 + AE94 di 99.300 kg, il ferro di settembre',
+  g30.kg - AD_AE_SETTEMBRE === 99300, String(g30.kg - AD_AE_SETTEMBRE));
 const settembre = componiMese({
   riga: { mese: 'Settembre', uscite_cippato_kg: 0, uscite_ferro_kg: 99300, uscite_cssc_kg: 0, giacenza_totale_kg: AD_AE_SETTEMBRE, giacenza_ferro_kg: 0 },
   ferro: [{ destinatario: 'TRS', colore: 'FFC000', kg: 99300 }],
