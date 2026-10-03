@@ -412,7 +412,12 @@ const COLONNE_EXTRA = [
   // (Euro/viaggio)» e sta accanto ai prezzi a tonnellata, ma non si moltiplica
   // per il peso - entra nel totale com'e'.
   { chiave: 'trasporto_viaggio', titolo: 'TRASPORTO [€\\viaggio]', numero: EURO },
-  { chiave: 'oneri', titolo: 'ONERI FISSI [€]', numero: EURO },
+  // Nel loro foglio questa colonna si chiama SOVRACOSTO: si tiene il loro nome,
+  // perche' e' il foglio che riconoscono. Dentro ci sono la pulizia e i costi
+  // aggiuntivi dell'intervento, cioe' gli oneri che si PAGANO; i tre
+  // «sovracosto» della scheda (raccolta, trasporto, trattamento) sono un'altra
+  // cosa: si aggiungono a quello che si fattura a Ecotyre e stanno nel ricavo.
+  { chiave: 'oneri', titolo: 'SOVRACOSTO [€]', numero: EURO },
   { chiave: 'totale', titolo: 'TOTALE (Euro)', numero: EURO },
   { chiave: 'note', titolo: 'Note' },
 ];
@@ -590,7 +595,7 @@ function notaFinale(ws, r, fogli) {
   const st = { corsivo: true, colore: TENUE, capo: true };
   stendi(ws, r, 1, largo, st);
   if (soloExtra) {
-    scrivi(ws, r, 1, 'L\'extra raccolta non ha voci a modello: ogni intervento fa storia a se\', coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull\'intervento, piu\' gli oneri fissi (pulizia e costi aggiuntivi). Entra nel mese in cui e\' stata chiusa la fine trasporto. I totali sono formule: correggi un prezzo e si rifanno da soli. Tonnellate con due decimali (tre quando i chili non sono tondi), importi in euro, EER 160103 dei PFU. I canali non si sommano fra loro.', st);
+    scrivi(ws, r, 1, 'L\'extra raccolta non ha voci a modello: ogni intervento fa storia a se\', coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull\'intervento, piu\' il sovracosto (pulizia e costi aggiuntivi dell\'intervento). Entra nel mese in cui e\' stata chiusa la fine trasporto. I totali sono formule: correggi un prezzo e si rifanno da soli. Tonnellate con due decimali (tre quando i chili non sono tondi), importi in euro, EER 160103 dei PFU. I canali non si sommano fra loro.', st);
     ws.mergeCells(r, 1, r, largo);
     ws.getRow(r).height = 30;
     return;

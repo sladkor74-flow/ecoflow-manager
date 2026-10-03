@@ -71,27 +71,34 @@ export function exportExtraRaccoltaExcel(records, mese, anno) {
   wsData.push(['Totale imponibile', r2(totImponibileRighe + totSovraRaccolta + totSovraTrasporto + totSovraTrattamento)]);
 
   // === Area 3: analisi margine per produttore ===
+  // La voce «trasporto» e' il costo a viaggio degli interventi (campo
+  // costo_trasporto_viaggio, nato il 03/10/2026): sta fra le voci di costo e non
+  // nel riepilogo qui sopra, che somma i sovracosti del ricavo e finisce nel
+  // totale imponibile. Si somma tale e quale, come la pulizia e i costi
+  // aggiuntivi, perche' e' un importo fisso per intervento e non un prezzo a
+  // tonnellata; senza questa colonna le voci non facevano piu' il costo totale,
+  // che il trasporto lo comprende.
   wsData.push([]);
-  wsData.push(['PRODUTTORE', 'costi aggiuntivi', 'raccolta', 'stoccaggio', 'trattamento', 'pulizia', 'costo totale', 'ricavi', 'margine']);
+  wsData.push(['PRODUTTORE', 'costi aggiuntivi', 'raccolta', 'stoccaggio', 'trattamento', 'pulizia', 'trasporto', 'costo totale', 'ricavi', 'margine']);
 
   const byProd = aggregaPerProduttore(records);
-  let totCostiAgg = 0, totRaccolta = 0, totStoccaggio = 0, totTrattamento = 0, totPulizia = 0, totCosto = 0, totRicavi = 0, totMargine = 0;
+  let totCostiAgg = 0, totRaccolta = 0, totStoccaggio = 0, totTrattamento = 0, totPulizia = 0, totTrasporto = 0, totCosto = 0, totRicavi = 0, totMargine = 0;
 
   for (const [p, v] of Object.entries(byProd)) {
     wsData.push([
       p,
       r2(v.costi_aggiuntivi), r2(v.raccolta), r2(v.stoccaggio), r2(v.trattamento),
-      r2(v.pulizia), r2(v.costo_totale), r2(v.ricavi), r2(v.margine),
+      r2(v.pulizia), r2(v.trasporto), r2(v.costo_totale), r2(v.ricavi), r2(v.margine),
     ]);
     totCostiAgg += v.costi_aggiuntivi; totRaccolta += v.raccolta; totStoccaggio += v.stoccaggio;
-    totTrattamento += v.trattamento; totPulizia += v.pulizia; totCosto += v.costo_totale;
-    totRicavi += v.ricavi; totMargine += v.margine;
+    totTrattamento += v.trattamento; totPulizia += v.pulizia; totTrasporto += v.trasporto;
+    totCosto += v.costo_totale; totRicavi += v.ricavi; totMargine += v.margine;
   }
 
   wsData.push([
     'TOTALE',
     r2(totCostiAgg), r2(totRaccolta), r2(totStoccaggio), r2(totTrattamento),
-    r2(totPulizia), r2(totCosto), r2(totRicavi), r2(totMargine),
+    r2(totPulizia), r2(totTrasporto), r2(totCosto), r2(totRicavi), r2(totMargine),
   ]);
 
   const margPercTot = totRicavi !== 0 ? r2((totMargine / totRicavi) * 100) : 0;
@@ -179,32 +186,34 @@ export function exportExtraRaccoltaPDF(records, mese, anno) {
   doc.text('ANALISI MARGINE', 14, y); y += 5;
   doc.setFont(undefined, 'normal');
 
-  const H2 = ['PRODUTTORE', 'costi agg.', 'raccolta', 'stoccaggio', 'trattamento', 'pulizia', 'costo tot.', 'ricavi', 'margine'];
-  const W2 = [40, 24, 24, 24, 26, 20, 24, 24, 24];
+  // Le stesse voci del foglio Excel, trasporto compreso: il costo a viaggio degli
+  // interventi, che entra nel costo totale e quindi va mostrato anche qui.
+  const H2 = ['PRODUTTORE', 'costi agg.', 'raccolta', 'stoccaggio', 'trattamento', 'pulizia', 'trasporto', 'costo tot.', 'ricavi', 'margine'];
+  const W2 = [38, 23, 23, 23, 25, 20, 22, 23, 23, 23];
   x = 14;
   H2.forEach((h, i) => { doc.text(h, x, y); x += W2[i]; });
   y += 4.5;
 
   const byProd = aggregaPerProduttore(records);
-  let tCA = 0, tR = 0, tS = 0, tTr = 0, tP = 0, tCT = 0, tRi = 0, tM = 0;
+  let tCA = 0, tR = 0, tS = 0, tTr = 0, tP = 0, tTrasp = 0, tCT = 0, tRi = 0, tM = 0;
 
   for (const [p, v] of Object.entries(byProd)) {
     if (y > 195) { doc.addPage(); y = 15; }
     x = 14;
     const row = [
-      String(p).substring(0, 24),
+      String(p).substring(0, 22),
       r2(v.costi_aggiuntivi), r2(v.raccolta), r2(v.stoccaggio), r2(v.trattamento),
-      r2(v.pulizia), r2(v.costo_totale), r2(v.ricavi), r2(v.margine),
+      r2(v.pulizia), r2(v.trasporto), r2(v.costo_totale), r2(v.ricavi), r2(v.margine),
     ];
     row.forEach((cell, i) => { doc.text(String(cell), x, y); x += W2[i]; });
     y += 4.5;
     tCA += v.costi_aggiuntivi; tR += v.raccolta; tS += v.stoccaggio; tTr += v.trattamento;
-    tP += v.pulizia; tCT += v.costo_totale; tRi += v.ricavi; tM += v.margine;
+    tP += v.pulizia; tTrasp += v.trasporto; tCT += v.costo_totale; tRi += v.ricavi; tM += v.margine;
   }
 
   x = 14;
   doc.setFont(undefined, 'bold');
-  ['TOTALE', r2(tCA), r2(tR), r2(tS), r2(tTr), r2(tP), r2(tCT), r2(tRi), r2(tM)].forEach((cell, i) => {
+  ['TOTALE', r2(tCA), r2(tR), r2(tS), r2(tTr), r2(tP), r2(tTrasp), r2(tCT), r2(tRi), r2(tM)].forEach((cell, i) => {
     doc.text(String(cell), x, y); x += W2[i];
   });
   y += 6;

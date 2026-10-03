@@ -146,7 +146,7 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
     const voci = f.extra ? [
       { etichetta: 'Interventi chiusi nel mese', valore: formatIntero(quanti), sotto: quanti === 1 ? 'un intervento' : 'interventi con la fine trasporto in questo mese', colore: C.blu },
       { etichetta: 'Peso', valore: `${t(f.extra.totale_t)} t`, sotto: `${formatIntero(f.extra.totale_kg)} kg`, colore: C.viola },
-      { etichetta: 'Oneri fissi', valore: euro(oneri), sotto: 'pulizia e costi aggiuntivi degli interventi', colore: C.medio },
+      { etichetta: 'Sovracosto', valore: euro(oneri), sotto: 'pulizia e costi aggiuntivi degli interventi', colore: C.medio },
       { etichetta: 'TOTALE EXTRA RACCOLTA', valore: euro(f.totale_euro), sotto: 'solo questo canale: non si somma agli altri', colore: C.scuro },
     ] : [
       { etichetta: 'Raccoglitori', valore: euro(f.raccoglitori.totale_euro), sotto: `${t(f.raccoglitori.totale_t)} t raccolte`, colore: C.blu },
@@ -460,7 +460,7 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
       // totale com'e'. Il titolo lo dice, altrimenti in mezzo a tre prezzi a
       // tonnellata si legge come il quarto.
       { chiave: 'trasporto', w: 17, titolo: ['TRASPORTO', '[€/vg]'] },
-      { chiave: 'oneri', w: 17, titolo: ['ONERI', 'FISSI'] },
+      { chiave: 'oneri', w: 17, titolo: ['SOVRA-', 'COSTO'] },
       { chiave: 'totale', w: 21, titolo: ['TOTALE'] },
       ...(conNote ? [{ chiave: 'note', w: 22, titolo: ['Note'], sx: true }] : []),
     ];
@@ -607,7 +607,7 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
       'RETE, ACI ed extra raccolta sono canali indipendenti e non si sommano mai fra loro: per questo ogni canale ha il suo totale e in fondo al documento non c\'è nessun totale generale.',
       'Le righe in ambra sono quello che al modello manca: finché restano, il foglio non sta fatturando tutto il mese.',
       ...(elenco.some(f => f.extra) ? [
-        'L\'extra raccolta non ha voci fisse: ogni intervento fa storia a sé, coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull\'intervento prima di passarlo a terminato, più gli oneri fissi (pulizia e costi aggiuntivi). Entra nel mese in cui la fine trasporto è stata chiusa. Nel foglio Excel ci sono anche l\'ordine Ecotyre, il CER e la data di inizio trasporto.',
+        'L\'extra raccolta non ha voci fisse: ogni intervento fa storia a sé, coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull\'intervento prima di passarlo a terminato, più il sovracosto, che è la pulizia e i costi aggiuntivi dell\'intervento. Entra nel mese in cui la fine trasporto è stata chiusa. Nel foglio Excel ci sono anche l\'ordine Ecotyre, il CER e la data di inizio trasporto.',
       ] : []),
     ], { colore: C.medio, sfondo: C.zebra, inchiostro: C.testo, titolo: 'Come si legge questo documento' });
   };

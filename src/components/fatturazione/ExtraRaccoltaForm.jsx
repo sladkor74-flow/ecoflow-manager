@@ -28,7 +28,7 @@ const EMPTY = {
   provincia: '', automezzo: '',
   cer: '160103', classe: '', peso_effettivo: '',
   prezzo_attivo_t: 0, sovracosto_raccolta: 0, sovracosto_trasporto: 0, sovracosto_trattamento: 0,
-  costo_raccolta_t: 0, costo_stoccaggio_t: 0, costo_trattamento_t: 0,
+  costo_raccolta_t: 0, costo_trasporto_viaggio: 0, costo_stoccaggio_t: 0, costo_trattamento_t: 0,
   costo_pulizia: 0, costi_aggiuntivi: 0, note_costi: '', note: '',
 };
 
@@ -390,7 +390,8 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
     }
     const p = { ...form, stato };
     ['peso_effettivo', 'prezzo_attivo_t', 'sovracosto_raccolta', 'sovracosto_trasporto', 'sovracosto_trattamento',
-     'costo_raccolta_t', 'costo_stoccaggio_t', 'costo_trattamento_t', 'costo_pulizia', 'costi_aggiuntivi'].forEach(k => {
+     'costo_raccolta_t', 'costo_trasporto_viaggio', 'costo_stoccaggio_t', 'costo_trattamento_t',
+     'costo_pulizia', 'costi_aggiuntivi'].forEach(k => {
       p[k] = Number(p[k]) || 0;
     });
     p.ordine_immesso_il = dataDaGiorno(form.ordine_immesso_il);
@@ -595,6 +596,20 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
                 {daDove('costo_raccolta_t')}
                 {raccoltaInterna && <p className="text-xs text-muted-foreground">trasportatore interno: non fatturato</p>}
               </div>
+              {/* L'altro costo del trasportatore, accanto a quello di raccolta: il
+                  viaggio di questo intervento. E' un importo fisso in euro, non un
+                  prezzo a tonnellata, perche' un intervento di extra raccolta e' un
+                  viaggio solo e si paga una volta - come la colonna «PREZZO
+                  (Euro/viaggio)» del foglio dell'amministrazione, che prima nel
+                  gestionale non aveva nessun campo. Nessuna tariffa lo propone:
+                  non c'e' un listino a viaggio per l'extra raccolta, lo scrive
+                  l'amministratore insieme agli altri costi. */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Costo trasporto (€/viaggio)</Label>
+                <Input type="number" className="h-9 text-sm" value={form.costo_trasporto_viaggio} onChange={e => set('costo_trasporto_viaggio', e.target.value)} />
+                <p className="text-xs text-muted-foreground">Importo fisso per il viaggio, non a tonnellata</p>
+                {raccoltaInterna && <p className="text-xs text-muted-foreground">trasportatore interno: non fatturato</p>}
+              </div>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Costo stoccaggio (€/t)</Label>
                 <Input type="number" className="h-9 text-sm" value={form.costo_stoccaggio_t} onChange={e => scriviCosto('costo_stoccaggio_t', e.target.value)} />
@@ -606,7 +621,7 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
                 {daDove('costo_trattamento_t')}
               </div>
               <p className="md:col-span-4 text-xs text-muted-foreground">
-                I costi di raccolta, stoccaggio e trattamento sono quelli scritti qui, e la fatturazione passiva paga questi. Il modulo li propone solo dalle tariffe di extra raccolta del fornitore e solo nei campi vuoti; va scritto tutto prima di passare l'intervento a terminato.
+                I costi di raccolta, trasporto, stoccaggio e trattamento sono quelli scritti qui, e la fatturazione passiva paga questi. Il modulo propone solo i costi a tonnellata, dalle tariffe di extra raccolta del fornitore e solo nei campi vuoti; il costo del trasporto a viaggio si scrive sempre a mano, perché un listino a viaggio per l&apos;extra raccolta non c&apos;è. Va scritto tutto prima di passare l&apos;intervento a terminato.
               </p>
               <NumField label="Costo pulizia (€)" k="costo_pulizia" />
               <NumField label="Costi aggiuntivi (€)" k="costi_aggiuntivi" />

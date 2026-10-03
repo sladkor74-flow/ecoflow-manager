@@ -439,7 +439,7 @@ console.log('\nL\'EXTRA RACCOLTA: IL DETTAGLIO DEGLI INTERVENTI');
   const titoli = [];
   for (let c = 1; c <= 17; c++) titoli.push(testo(w, rTesta, c));
   verifica('le colonne sono quelle del foglio dell amministrazione',
-    titoli.slice(0, 16).join('|') === ['Nr. FIR', 'ORDINE ECOTYRE', 'PRODUTTORE', 'TRASPORTATORE', 'DESTINATARIO', 'DATA I.T.', 'DATA F.T.', 'CER', "QUANTITA' (kg)", 'PESO [t]', 'RACCOLTA [€\\t]', 'STOCCAGGIO [€\\t]', 'TRATTAMENTO [€\\t]', 'TRASPORTO [€\\viaggio]', 'ONERI FISSI [€]', 'TOTALE (Euro)'].join('|'),
+    titoli.slice(0, 16).join('|') === ['Nr. FIR', 'ORDINE ECOTYRE', 'PRODUTTORE', 'TRASPORTATORE', 'DESTINATARIO', 'DATA I.T.', 'DATA F.T.', 'CER', "QUANTITA' (kg)", 'PESO [t]', 'RACCOLTA [€\\t]', 'STOCCAGGIO [€\\t]', 'TRATTAMENTO [€\\t]', 'TRASPORTO [€\\viaggio]', 'SOVRACOSTO [€]', 'TOTALE (Euro)'].join('|'),
     titoli.join('|'));
   const r1 = rTesta + 1;
   verifica('le date si leggono come giorni italiani', testo(w, r1, 6) === '08/09/2026' && testo(w, r1, 7) === '10/09/2026',
