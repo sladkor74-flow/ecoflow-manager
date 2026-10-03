@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
-import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
+import { allineaDalPortale, canaliDaScrivere } from "../../shared/agganciaDichiarazioni.ts";
 
 // Riconosce nelle nostre dichiarazioni mensili quelle gia' caricate a portale.
 //
@@ -24,13 +24,12 @@ export default async function(req) {
     const anno = body.anno;
     if (!anno) return Response.json({ error: 'Anno obbligatorio' }, { status: 400 });
 
-    // I canali che si allineano. Senza indicazione tutti e due, com'e' sempre
-    // stato: e' la strada del pulsante. Il ricalcolo dopo un caricamento passa
-    // solo la rete, perche' l'ACI a portale non e' gestito e lo segna a mano
-    // l'amministratore (regola dell'utente, 02/10/2026).
-    const canali = Array.isArray(body.canali) && body.canali.length
-      ? body.canali.filter(c => c === 'RETE' || c === 'ACI')
-      : ['RETE', 'ACI'];
+    // I canali che si allineano: senza indicazione solo la rete. L'ACI a portale
+    // non e' gestito e i suoi materiali li trascrive a mano l'amministratore
+    // dalle dichiarazioni cartacee (regola dell'utente, 02/10/2026), quindi
+    // riscriverli coi numeri del portale e' una perdita. La decisione sta in
+    // canaliDaScrivere, nella libreria, dove la prova la puo' guardare.
+    const canali = canaliDaScrivere(body.canali);
     const esito = await allineaDalPortale(base44.asServiceRole.entities, Number(anno), null, null, canali);
     return Response.json({ ok: true, ...esito });
   } catch (error) {

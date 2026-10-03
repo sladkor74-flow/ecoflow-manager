@@ -339,6 +339,25 @@ export function confrontaConIlPortale(righe, anno, nostre, canali = ['RETE', 'AC
  * Il parametro resta, cosi' chi un domani volesse l'ACI deve chiederlo per
  * nome, e si vede nel codice chi lo fa.
  */
+/**
+ * Quali canali si possono SCRIVERE, dato quello che ha chiesto chi chiama.
+ *
+ * Sta qui, e non dentro la funzione che riceve la richiesta, per un motivo
+ * preciso: la funzione aveva il valore di partenza opposto a questo - rete E
+ * ACI - e il caricamento dei dati la chiamava senza dire niente. Risultato: ogni
+ * caricamento riscriveva l'ACI coi numeri del portale e cancellava i materiali
+ * che l'amministratore aveva trascritto a mano dalle dichiarazioni cartacee.
+ * Il commento diceva «e' la strada del pulsante», ma quel pulsante non c'e' piu'
+ * dal 03/10/2026 («Via il pulsante Allinea dal portale: lo fa gia' da solo»), e
+ * la regola resta quella del 02/10/2026: l'ACI si riconosce e non si scrive.
+ *
+ * Adesso la decisione e' una sola, qui, e la prova la guarda.
+ */
+export function canaliDaScrivere(canali) {
+  const chiesti = Array.isArray(canali) ? canali.filter(c => c === 'RETE' || c === 'ACI') : [];
+  return chiesti.length ? chiesti : ['RETE'];
+}
+
 export async function allineaDalPortale(svc, anno, righePortale = null, nostreRighe = null, canaliDaScrivere = ['RETE']) {
   const annoNum = Number(anno);
   const righe = righePortale || await fetchAll(svc.DichiarazioneTrattamento, null, 'id');

@@ -3,7 +3,7 @@
 // dichiarazioni riconosciute a portale (base44/shared/agganciaDichiarazioni.ts),
 // da cui dipendono la quadratura e i mesi "caricati". npm run prove
 import { cruscotto, etaArretrato, statoCaricamenti, statoMesiAttiva, nomeRegola } from '../base44/shared/cruscotto.ts';
-import { caricamentiPortale, allineaDalPortale, confrontaConIlPortale } from '../base44/shared/agganciaDichiarazioni.ts';
+import { caricamentiPortale, allineaDalPortale, confrontaConIlPortale, canaliDaScrivere } from '../base44/shared/agganciaDichiarazioni.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -261,6 +261,24 @@ const gtp = [
 }
 
 function MESI8() { return ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto'].map(m => ({ tipo: 'ATTIVA', anno: 2026, mese: m, stato: 'chiusa' })); }
+
+// CHI NON DICE NIENTE ALLINEA SOLO LA RETE.
+//
+// La libreria lo faceva gia', ma la funzione allineaDichiarazioni ribaltava quel
+// valore - rete E ACI - e il caricamento dei dati la chiama senza dire niente
+// (src/lib/importGrandeFile.js, passo 'allineaDichiarazioni'). Cosi' ogni
+// caricamento riscriveva l'ACI coi numeri del portale e cancellava i materiali
+// trascritti a mano dalle dichiarazioni cartacee. Trovato dall'audit del
+// 03/10/2026, da due revisori per conto loro.
+console.log('CANALI CHE SI SCRIVONO');
+verifica('senza indicazione si scrive solo la rete',
+  canaliDaScrivere(undefined).join() === 'RETE' && canaliDaScrivere(null).join() === 'RETE' && canaliDaScrivere([]).join() === 'RETE');
+verifica("l'ACI si scrive solo chiedendolo per nome",
+  canaliDaScrivere(['ACI']).join() === 'ACI' && canaliDaScrivere(['RETE', 'ACI']).join() === 'RETE,ACI');
+verifica('un canale che non esiste non apre la scrittura a niente',
+  canaliDaScrivere(['EXTRA_RACCOLTA']).join() === 'RETE' && canaliDaScrivere(['ACI', 'EXTRA_RACCOLTA']).join() === 'ACI');
+verifica('un valore che non e\' un elenco vale come niente detto',
+  canaliDaScrivere('ACI').join() === 'RETE' && canaliDaScrivere({ ACI: true }).join() === 'RETE');
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);
