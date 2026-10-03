@@ -13,6 +13,7 @@ const TIPO_LABEL = {
   target_da_portare: 'Target da portare in Target & Status',
   ordini_senza_fine_trasporto: 'Righe del file del portale senza fine trasporto',
   rilevazione_da_controllare: 'Rilevazione da controllare',
+  senza_tipo_destinazione: 'Righe senza tipo di destinazione',
 };
 
 // Un giorno 'AAAA-MM-GG' come lo si legge.
@@ -96,6 +97,7 @@ export default function AnomalieAlert({ anomalie }) {
                     : ` — il target (${t(a.target_t)} t) è ancora scritto in Giacenze: portalo in Target & Status → Impianti e stoccaggi. Finché non lo fai si usa questo`)}
                 {a.tipo === 'giacenza_negativa' && ` — classe ${a.classe}: ${formatKg(a.kg)} kg dall'ancora dell'anno piu' i movimenti successivi: mancano ingressi, o l'ancora ha i chili nella classe sbagliata`}
                 {a.tipo === 'stoccaggio_senza_rilevazione' && ` — il dato va letto dalla pagina Unita' Locali di Stoccaggio del portale`}
+                {a.tipo === 'senza_tipo_destinazione' && ` — ${a.n} ${a.n === 1 ? 'riga' : 'righe'} per ${formatKg(a.kg)} kg senza Tipo_Destinazione nel file del portale: contate come impianto, ma il campo va sistemato`}
                 {a.tipo === 'ordini_senza_fine_trasporto' && testoSenzaFineFile(a)}
                 {a.tipo === 'rilevazione_da_controllare' && testoRilevazioneDaControllare(a)}
               </span>

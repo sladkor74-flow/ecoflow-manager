@@ -490,13 +490,32 @@ export default async function(req) {
     // === 3. MOVIMENTAZIONE ANNO CORRENTE (per conferito, stato terminato + trasporto_finito_il nell'anno) ===
     // RETE, ACI ed EXTRA RACCOLTA sono canali indipendenti: il conferito di ciascuno
     // resta separato e il target Ecotyre del sito si misura solo sulla RETE.
+    // UNA RIGA SENZA TIPO DI DESTINAZIONE NON SPARISCE DAI CONTI.
+    //
+    // Qui si scartava, e quei chili non comparivano in nessun conferito: non nel
+    // riquadro, non nel residuo, e nemmeno nella giacenza, che dal conferito
+    // dipende. Venti tonnellate arrivate a un impianto senza quel campo nel file
+    // del portale facevano una giacenza di venti tonnellate piu' bassa del vero,
+    // senza che niente lo dicesse (audit del 03/10/2026).
+    //
+    // Il resto di questo file, quando il tipo non si sa, lo tratta come impianto
+    // e lo segnala (attribuisci, ruoloDest): qui si fa lo stesso. Meglio il
+    // numero giusto con un avviso che un numero sbagliato in silenzio.
+    const senzaTipo = new Map(); // ns -> { n, kg }
     const conferitoPer = (records) => {
       const mappa = new Map(); // ns|td -> t
       for (const r of records) {
         if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
         const nd = norm(r.destinazione);
-        const td = tdNorm(r.tipo_destinazione);
-        if (!nd || !td) continue;
+        if (!nd) continue;
+        let td = tdNorm(r.tipo_destinazione);
+        if (!td) {
+          td = 'imp';
+          const s = senzaTipo.get(nd) || { n: 0, kg: 0 };
+          s.n++;
+          s.kg += Number(r.peso_effettivo) || 0;
+          senzaTipo.set(nd, s);
+        }
         const k = nd + '|' + td;
         mappa.set(k, (mappa.get(k) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
       }
@@ -512,14 +531,35 @@ export default async function(req) {
     const confPrimMap = conferitoPer(reteAll.filter(r => !eAci(r)));
     const confAciMap = conferitoPer([...aciAll, ...reteAll.filter(r => eAci(r))]);
     const confExtraMap = conferitoPer(extraAll);
+    for (const [ns, s] of senzaTipo) {
+      anomalie.push({
+        tipo: 'senza_tipo_destinazione',
+        sito: nomiSito.get(ns) || ns,
+        n: s.n,
+        kg: Math.round(s.kg),
+      });
+    }
 
     // Le secondarie di rete e quelle ACI viaggiano nello stesso archivio e si
     // distinguono dalla classe. Vanno tenute separate: la colonna "Conferito
     // RETE" sommava anche le secondarie ACI, e su un impianto che riceve
     // entrambe il numero era piu' alto del vero.
-    const secInMap = new Map();     // ns -> t di rete in ingresso
+    // L'INGRESSO SI SEGNA SUL RUOLO CHE RICEVE, NON SOLO SUL SITO.
+    //
+    // Una secondaria puo' finire al piazzale di un sito invece che al suo
+    // impianto: la destinazione e' la stessa ditta, ma il tipo di destinazione
+    // dice 'stoc'. Indicizzando per solo nome, quei chili arrivavano anche alla
+    // riga impianto - e li' entrano nella giacenza ACI e nel conferito - mentre
+    // il materiale era gia' contato nella giacenza del piazzale, dove sta
+    // davvero. Su Irigom, che e' insieme impianto e piazzale, lo stesso viaggio
+    // si contava due volte (audit del 03/10/2026).
+    //
+    // Adesso la chiave degli ingressi porta il ruolo di chi riceve, come gia'
+    // faceva il resto del file (ruoloDest). Le uscite restano per nome: una
+    // secondaria parte sempre da un piazzale.
+    const secInMap = new Map();     // ns|ruolo -> t di rete in ingresso
     const secOutMap = new Map();    // ns -> t di rete in uscita
-    const secAciInMap = new Map();  // ns -> t ACI in ingresso
+    const secAciInMap = new Map();  // ns|ruolo -> t ACI in ingresso
     const secAciOutMap = new Map(); // ns -> t ACI in uscita
     for (const r of secAll) {
       if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
@@ -528,7 +568,8 @@ export default async function(req) {
       const nd = norm(r.destinazione);
       if (nd) {
         const m = aci ? secAciInMap : secInMap;
-        m.set(nd, (m.get(nd) || 0) + t);
+        const k = nd + '|' + (tipoStoc(r) ? 'stoc' : 'imp');
+        m.set(k, (m.get(k) || 0) + t);
       }
       const ns = norm(r.stoccaggio);
       if (ns) {
@@ -564,14 +605,15 @@ export default async function(req) {
     for (const ns of stocRilevMap.keys()) rowKeys.add(ns + '|stoc');
     for (const k of dichiaratoMap.keys()) rowKeys.add(k);
     for (const k of confPrimMap.keys()) rowKeys.add(k);
-    // Per le mappe per-ns dell'anno corrente (secInMap, secOutMap, terzMap): risolvi il td
+    // Per le mappe per-ns dell'anno corrente (secOutMap, terzMap): risolvi il td
     function resolveTds(ns) {
       const tds = [...giacMapKeys].filter(k => k.startsWith(ns + '|')).map(k => k.split('|')[1]);
       return tds.length > 0 ? tds : ['imp'];
     }
-    for (const ns of secInMap.keys()) {
-      for (const td of resolveTds(ns)) rowKeys.add(ns + '|' + td);
-    }
+    // Gli ingressi delle secondarie hanno gia' la chiave completa: il ruolo lo
+    // dice il tipo di destinazione del viaggio, non c'e' niente da risolvere.
+    for (const k of secInMap.keys()) rowKeys.add(k);
+    for (const k of secAciInMap.keys()) rowKeys.add(k);
     for (const ns of secOutMap.keys()) {
       // secondarie_out riguarda lo stoccaggio
       const tds = resolveTds(ns);
@@ -756,10 +798,13 @@ export default async function(req) {
       // faceva contare lo stesso viaggio due volte su chi, come Irigom, e' insieme
       // impianto e stoccaggio. Le terziarie, uscite verso le cementerie, partono
       // sempre da un impianto.
-      const secondarie_in_t = td === 'imp' ? (secInMap.get(ns) || 0) : 0;
+      // Gli ingressi sono gia' divisi per ruolo di chi riceve: una secondaria
+      // finita al piazzale sta sulla riga del piazzale e non su quella
+      // dell'impianto, dove il materiale non e' mai arrivato.
+      const secondarie_in_t = secInMap.get(key) || 0;
       const secondarie_out_t = td === 'stoc' ? (secOutMap.get(ns) || 0) : 0;
       // Le secondarie ACI restano a parte: non entrano nel conferito di rete.
-      const secondarie_aci_in_t = td === 'imp' ? (secAciInMap.get(ns) || 0) : 0;
+      const secondarie_aci_in_t = secAciInMap.get(key) || 0;
       const secondarie_aci_out_t = td === 'stoc' ? (secAciOutMap.get(ns) || 0) : 0;
       const secondarie_nette_t = secondarie_in_t - secondarie_out_t;
       const terziarie_t = td === 'imp' ? (terzMap.get(ns) || 0) : 0;
