@@ -59,6 +59,17 @@ const FORME = {
   U: { x: 0.58, y: 0.66 },
 };
 
+/** Che cosa sta facendo, detto in italiano. Sta qui perche' lo dicono in due:
+ *  l'avatar sotto al nome e l'intestazione della chat, e devono dire lo stesso. */
+export function comeSta(stato) {
+  switch (stato) {
+    case 'parla': return 'sta parlando…';
+    case 'ascolta': return 'ti ascolto…';
+    case 'pensa': return 'sto pensando…';
+    default: return 'assistente della commessa';
+  }
+}
+
 const PASSO = 45;              // ogni quanto si guarda la forma della bocca
 const BATTITO_MIN = 2200;      // il battito di ciglia non e' un orologio:
 const BATTITO_MAX = 6000;      // ogni volta aspetta un tempo diverso
@@ -359,9 +370,7 @@ export default function EcoTyna({ stato = 'ferma', bocca = null, dimensione = 96
       {nome && (
         <div className="leading-tight min-w-0">
           <div className="font-heading font-semibold">EcoTyna</div>
-          <div className="text-xs text-muted-foreground">
-            {parla ? 'sta parlando…' : stato === 'ascolta' ? 'ti ascolto…' : stato === 'pensa' ? 'sto pensando…' : 'assistente della commessa'}
-          </div>
+          <div className="text-xs text-muted-foreground">{comeSta(stato)}</div>
         </div>
       )}
     </div>

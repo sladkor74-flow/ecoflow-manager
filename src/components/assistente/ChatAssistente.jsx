@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import EcoTyna from '@/components/assistente/EcoTyna';
+import { comeSta } from '@/components/assistente/EcoTyna';
+import EcoTynaAngolo from '@/components/assistente/EcoTynaAngolo';
 import { useVoce, useAscolto } from '@/lib/voce';
 import ReactMarkdown from 'react-markdown';
 import { base44 } from '@/api/base44Client';
@@ -410,6 +411,10 @@ export default function ChatAssistente() {
   // Se la connessione cade mentre l'Assistente lavora, la risposta arriva comunque:
   // si ricontrolla finche' ci sono domande in corso da meno di cinque minuti.
   const inCorso = messaggi.some(d => d.stato === 'in_corso' && Date.now() - dataServer(d.created_date).getTime() < 5 * 60 * 1000);
+
+  // Che cosa sta facendo EcoTyna, in un posto solo: lo dicono l'intestazione e
+  // l'angolino, e devono dire la stessa cosa nello stesso momento.
+  const comeStaOra = invio || inCorso ? 'pensa' : ascolto.inAscolto ? 'ascolta' : voce.stato;
   useEffect(() => {
     if (!inCorso || invio) return;
     const t = setInterval(carica, 5000);
@@ -512,16 +517,13 @@ export default function ChatAssistente() {
 
       <section className="border rounded-xl bg-card flex flex-col lg:h-[calc(100vh-220px)]">
         <div className="border-b px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
-          {/* `bocca` e' il riferimento alla forma della bocca in questo istante:
-              cambia ventidue volte al secondo, e passarlo come riferimento invece
-              che come stato fa ridisegnare solo l'avatar e non tutta la chat.
-              Con la voce accesa il viso si fa piu' grande: a 44 pixel il
-              movimento delle labbra non si vedeva. */}
-          <EcoTyna
-            dimensione={voce.attiva ? 80 : 52}
-            stato={invio || inCorso ? 'pensa' : ascolto.inAscolto ? 'ascolta' : voce.stato}
-            bocca={voce.bocca}
-          />
+          {/* Nell'intestazione resta solo il nome e che cosa sta facendo: la
+              faccia si e' spostata nell'angolo in fondo (EcoTynaAngolo), dove si
+              fa avanti quando e' interpellata e si ritira quando non serve. */}
+          <div className="flex items-baseline gap-2 min-w-0">
+            <span className="font-heading font-semibold">EcoTyna</span>
+            <span className="text-xs text-muted-foreground truncate">{comeSta(comeStaOra)}</span>
+          </div>
           <div className="flex items-center gap-2">
             {voce.attiva && voce.voci.length > 1 && (
               <select
@@ -577,6 +579,9 @@ export default function ChatAssistente() {
             <p className="text-xs text-muted-foreground flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" /> Aggiorno appena la risposta è pronta…</p>
           )}
           <div ref={fine} />
+          {/* EcoTyna sta qui, in fondo all'elenco: appiccicata al bordo basso
+              mentre si scorre, mai davanti al riquadro dove si scrive. */}
+          <EcoTynaAngolo stato={comeStaOra} bocca={voce.bocca} />
         </div>
         {(coda.length > 0 || leggendo) && (
           <div className="border-t px-3 pt-2 flex flex-wrap gap-1.5">
