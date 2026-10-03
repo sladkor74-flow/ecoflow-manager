@@ -14,6 +14,16 @@
 /** Il nome del prodotto, da solo: intestazioni, schermate di accesso. */
 export const PRODOTTO = 'TreadRider';
 
+/**
+ * Il simbolo del marchio accanto al nome, chiesto dall'utente il 03/10/2026.
+ *
+ * Sta qui e non scritto dentro PRODOTTO perche' il nome serve anche dove un
+ * simbolo non ci va: il metadato Autore di un file Excel, il titolo della
+ * linguetta, una frase in mezzo a un testo. Si cambia qui - in '™', o in stringa
+ * vuota - e cambia dove si vede.
+ */
+export const MARCHIO = '®';
+
 /** Che cosa fa, per chi: la riga sotto il nome. */
 export const SOTTOTITOLO = 'Gestionale PFU';
 

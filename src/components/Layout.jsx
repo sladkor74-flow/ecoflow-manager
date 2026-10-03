@@ -9,7 +9,7 @@ import {
 'lucide-react';
 import { caricaLivello, proteggiScritture } from '@/lib/permessi';
 import { osservaTabelle } from '@/lib/tabelleScorrevoli';
-import { PRODOTTO, SOTTOTITOLO, COMMESSA } from '@/lib/prodotto';
+import { PRODOTTO, MARCHIO, SOTTOTITOLO, COMMESSA } from '@/lib/prodotto';
 
 const NAV_ITEMS = [
 { label: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -117,8 +117,15 @@ export default function Layout() {
                 l'intestazione diceva solo che cosa fa il programma: un prodotto
                 che non si nomina da nessuna parte e' come se non ci fosse. Sotto
                 resta a che cosa serve, che e' l'informazione utile a chi lavora. */}
-            <h1 className="font-heading font-bold text-sidebar-foreground leading-tight text-lg">{PRODOTTO}</h1>
-            <p className="text-xs text-sidebar-foreground/60">{SOTTOTITOLO} · {COMMESSA}</p>
+            {/* Tre righe, come le ha volute l'utente: il nome col marchio, che cosa
+                fa, di chi e' la commessa. Il simbolo si scrive piu' piccolo e in
+                alto - e' un segno, non una parola - e le tre righe stanno strette
+                (leading-tight) per non far crescere l'intestazione. */}
+            <h1 className="font-heading font-bold text-sidebar-foreground leading-tight text-lg">
+              {PRODOTTO}<sup className="text-[0.55em] align-super ml-px font-semibold">{MARCHIO}</sup>
+            </h1>
+            <p className="text-xs text-sidebar-foreground/70 leading-tight">{SOTTOTITOLO}</p>
+            <p className="text-[11px] text-sidebar-foreground/50 leading-tight">{COMMESSA}</p>
           </div>
         </div>
 
@@ -184,7 +191,9 @@ export default function Layout() {
           </button>
           <div className="flex items-center gap-2">
             <Recycle className="w-5 h-5 text-primary" />
-            <span className="font-heading font-bold">{PRODOTTO}</span>
+            {/* Sul telefono la barra e' una riga sola: il marchio sta col nome, il
+                resto compare solo se c'e' spazio. */}
+            <span className="font-heading font-bold">{PRODOTTO}<sup className="text-[0.55em] align-super ml-px">{MARCHIO}</sup></span>
             <span className="text-xs text-muted-foreground hidden sm:inline">{SOTTOTITOLO}</span>
           </div>
         </header>
