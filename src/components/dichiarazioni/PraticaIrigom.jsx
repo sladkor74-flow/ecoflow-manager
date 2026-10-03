@@ -409,7 +409,13 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
   // quanto e' andato a portale (niente) ed e' una prova buona quanto l'altra.
   const dichIrigom = useMemo(() => (dichiarazioniRete || [])
     .filter(d => d && !d.provenienza && normalizzaRagioneSociale(d.sito) === nsIrigom), [dichiarazioniRete, nsIrigom]);
-  const arretrato = useMemo(() => (registro && mese ? ferroArretrato(registro.mesi, pratiche, { mese, dichiarazioni: dichIrigom }) : null), [registro, pratiche, mese, dichIrigom]);
+  // L'extra raccolta dichiarata da Irigom nell'anno: a portale non esiste, quindi
+  // esce dentro l'ultima terziaria di un mese successivo, e il mese in cui e'
+  // arrivata dichiara quei chili in meno. Senza saperlo il saldo li chiamerebbe
+  // ferro arretrato (luglio 2026: 460 kg) e li farebbe dichiarare due volte.
+  const extraIrigom = useMemo(() => (extraDichiarate || [])
+    .filter(x => x && Number(x.anno) === Number(anno) && normalizzaRagioneSociale(x.sito) === nsIrigom), [extraDichiarate, anno, nsIrigom]);
+  const arretrato = useMemo(() => (registro && mese ? ferroArretrato(registro.mesi, pratiche, { mese, dichiarazioni: dichIrigom, extra: extraIrigom }) : null), [registro, pratiche, mese, dichIrigom, extraIrigom]);
   const pratica = useMemo(() => {
     if (!riga) return null;
     return componiMese({

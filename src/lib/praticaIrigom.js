@@ -441,14 +441,31 @@ const leggiDatiJson = (p) => {
  * niente, con una quantita' vera i metalli dentro la dichiarazione sono il ferro
  * arrivato a portale. Un mese senza ne' l'una ne' l'altra si dice, non si indovina.
  *
+ * L'EXTRA RACCOLTA NON E' FERRO RIMASTO INDIETRO. A portale l'extra raccolta non
+ * esiste: l'unico modo di farla decurtare e' assimilarla all'ULTIMA TERZIARIA,
+ * che si chiude col peso intero. Percio' quando si prepara il mese in cui l'extra
+ * e' arrivata la si mette da parte - e il mese dichiara quei chili in meno - e
+ * esce dopo, dentro la terziaria di un mese successivo. La divisione fra
+ * ciabattato e ferro che si legge nel prospetto Excel serve solo alla
+ * dichiarazione da mandare al consorzio via email, non al portale.
+ * Luglio 2026: 460 kg entrati a luglio, usciti ad agosto con l'ultima terziaria,
+ * e i metalli di luglio scritti 460 kg sotto la colonna X del registro. Senza
+ * saperlo, il saldo li chiamava ferro arretrato e a ottobre ne avrebbe dichiarati
+ * 460 di troppo. Regola dell'utente del 03/10/2026, e **sara' sempre cosi' finche'
+ * il portale non gestira' l'extra raccolta**.
+ *
  * @param {array}  mesi            le dodici righe del foglio Cons. [{ mese, uscite_ferro_kg }]
  * @param {array}  pratiche        le PraticaIrigom dell'anno
  * @param {string} p.mese          il mese che si sta preparando: si guardano solo quelli prima
  * @param {array}  p.dichiarazioni le DichiarazioneSito di RETE di quel sito, gia' filtrate
+ * @param {array}  p.extra         le DichiarazioneSito di EXTRA_RACCOLTA dello stesso sito
  */
-export function ferroArretrato(mesi, pratiche, { mese, dichiarazioni = [] } = {}) {
+export function ferroArretrato(mesi, pratiche, { mese, dichiarazioni = [], extra = [] } = {}) {
   const fino = MESI.indexOf(mese);
   const dichDelMese = (nome) => (dichiarazioni || []).find(d => d && d.mese === nome) || null;
+  const extraDelMese = (nome) => (extra || [])
+    .filter(d => d && d.mese === nome)
+    .reduce((s, d) => s + intero(d.quantita_kg), 0);
   /**
    * Quanto ferro quel mese ha portato a portale, e da che cosa lo sappiamo.
    * `noto` falso vuol dire che non si sa: non e' zero, e non si conta.
@@ -536,7 +553,7 @@ export function ferroArretrato(mesi, pratiche, { mese, dichiarazioni = [] } = {}
     // cui il ferro poteva essere attaccato: dire «mancava la terziaria» su quel
     // mese sarebbe falso, e il motivo va scritto in un altro modo.
     const avevaNave = intero(riga && riga.uscite_cippato_kg) > 0 || intero(riga && riga.uscite_cssc_kg) > 0;
-    letture.push({ nome, uscito, bozza: !!bozza && !dich, avevaNave, ...letto });
+    letture.push({ nome, uscito, bozza: !!bozza && !dich, avevaNave, extra_mese_kg: extraDelMese(nome), ...letto });
   }
   // L'anello mancante piu' recente: la catena buona comincia subito dopo.
   let inizio = 0;
@@ -548,6 +565,7 @@ export function ferroArretrato(mesi, pratiche, { mese, dichiarazioni = [] } = {}
   const daCapire = [];
   const nonSiSa = [];
   const senzaNiente = [];
+  const extraFuori = [];
   letture.forEach((l, i) => {
     if (i < inizio) {
       if (!l.uscito) return;
@@ -557,8 +575,26 @@ export function ferroArretrato(mesi, pratiche, { mese, dichiarazioni = [] } = {}
       return;
     }
     if (l.bozza) daCapire.push(l.nome);
-    if (!l.uscito && !l.kg) return;
-    dettaglio.push({ mese: l.nome, uscito_kg: l.uscito, a_portale_kg: l.kg, resta_kg: l.uscito - l.kg, fonte: l.fonte, aveva_nave: l.avevaNave });
+    if (!l.uscito && !l.extra_mese_kg && !l.kg) return;
+    // L'EXTRA RACCOLTA MESSA DA PARTE NON E' FERRO RIMASTO INDIETRO.
+    //
+    // Il mese in cui l'extra e' arrivata dichiara quei chili in meno, perche' a
+    // portale escono dopo, dentro l'ultima terziaria di un mese successivo: e'
+    // l'unico modo di farli decurtare, visto che a portale l'extra raccolta non
+    // esiste. Quella parte del buco non e' ferro che aspetta la nave, e
+    // dichiararla di nuovo la porterebbe a portale due volte.
+    const buco = l.uscito - l.kg;
+    const extraMese = Math.min(Math.max(0, buco), l.extra_mese_kg);
+    if (extraMese > 0) extraFuori.push({ mese: l.nome, kg: extraMese });
+    dettaglio.push({
+      mese: l.nome,
+      uscito_kg: l.uscito,
+      a_portale_kg: l.kg,
+      extra_raccolta_kg: extraMese,
+      resta_kg: buco - extraMese,
+      fonte: l.fonte,
+      aveva_nave: l.avevaNave,
+    });
   });
   const uscito_kg = somma(dettaglio, 'uscito_kg');
   const a_portale_kg = somma(dettaglio, 'a_portale_kg');
@@ -623,6 +659,10 @@ export function ferroArretrato(mesi, pratiche, { mese, dichiarazioni = [] } = {}
     // saldo si spezza li'. Restano fuori invece di valere zero - uno zero inventato
     // qui diventa un arretrato che forse non esiste, da dichiarare due volte.
     non_si_sa: nonSiSa,
+    // L'extra raccolta che quei mesi hanno messo da parte, uscita dopo con una
+    // terziaria: non e' ferro rimasto indietro e non si dichiara di nuovo.
+    extra_raccolta: extraFuori,
+    extra_raccolta_kg: somma(extraFuori, 'kg'),
   };
 }
 
@@ -806,6 +846,13 @@ export function componiMese({ riga, ferro = [], allegati = [], ddt = [], portale
   }
   if (arretrato && Array.isArray(arretrato.da_capire) && arretrato.da_capire.length) {
     avvisi.push(`Nell'arretrato di ferro ${arretrato.da_capire.join(', ').toLowerCase()} conta per intero: la pratica di quel mese e' preparata ma non registrata, quindi a portale non ci e' andato niente. Registrala, altrimenti quel ferro si dichiara qui e poi una seconda volta col suo mese.`);
+  }
+  // L'extra raccolta messa da parte si dice, perche' e' la cosa che piu' facilmente
+  // si ridichiara: guardando il registro quei chili sembrano ferro che a portale
+  // non e' arrivato, e invece sono usciti dopo, dentro una terziaria.
+  if (arretrato && arretrato.extra_raccolta_kg > 0) {
+    const mesiExtra = (arretrato.extra_raccolta || []).map(e => `${mig(e.kg)} kg di ${String(e.mese).toLowerCase()}`).join(', ');
+    avvisi.push(`Non conto come ferro rimasto indietro ${mesiExtra}: e' extra raccolta, che a portale non esiste e che quei mesi hanno messo da parte per farla uscire dentro l'ultima terziaria di un mese dopo. E' gia' dichiarata, e dichiararla di nuovo la porterebbe a portale due volte.`);
   }
   if (arretrato && arretrato.fuori_finestra_kg > 0) {
     avvisi.push(`Una pratica dei mesi scorsi ha portato a portale ${mig(arretrato.fuori_finestra_kg)} kg di ferro in piu' di quello uscito, e il saldo non sa a quale mese appartengano: vengono da prima di ${String(arretrato.dal_mese || "quando il gestionale ha preso in mano Irigom").toLowerCase()} o dall'anno scorso. Non li ho sottratti all'arretrato di questo mese: il riscontro e' la giacenza a portale.`);

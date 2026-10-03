@@ -574,6 +574,61 @@ verifica('la pratica di ottobre porta a portale 493.000 kg, non 708.940',
 verifica('e dice quali mesi restano fuori dal saldo e perche\'',
   ottProduzione.avvisi.some(a => /la dichiarazione c'e' ma non dice quanti metalli/.test(a) && /luglio/.test(a)), JSON.stringify(ottProduzione.avvisi));
 
+console.log('L\'EXTRA RACCOLTA MESSA DA PARTE NON E\' FERRO RIMASTO INDIETRO');
+// REGOLA DELL'UTENTE, 03/10/2026, E SARA' SEMPRE COSI' FINCHE' IL PORTALE NON
+// GESTIRA' L'EXTRA RACCOLTA.
+//
+// A portale l'extra raccolta non esiste: l'unico modo di farla decurtare e'
+// assimilarla all'ULTIMA TERZIARIA, che si chiude col peso intero. Quindi il mese
+// in cui l'extra arriva dichiara quei chili in meno, e quei chili escono dopo. La
+// divisione fra ciabattato e ferro del prospetto Excel serve solo alla
+// dichiarazione da mandare al consorzio via email.
+//
+// Luglio 2026, il caso vero: 460 kg entrati a luglio e usciti ad agosto con
+// l'ultima terziaria. I metalli di luglio sono scritti 125.700 contro i 126.160
+// della colonna X, ed e' esattamente quel mettere da parte. Senza questa regola il
+// saldo chiamava quei 460 kg «ferro rimasto indietro» e a ottobre se ne sarebbero
+// dichiarati 460 di troppo.
+const dichIrigom2026 = [
+  { mese: 'Gennaio', quantita_kg: 67180, metalli_kg: 17180, caricata_inviata: true },
+  { mese: 'Febbraio', quantita_kg: 721660, metalli_kg: 210960, caricata_inviata: true },
+  { mese: 'Marzo', quantita_kg: 262720, metalli_kg: 62720, caricata_inviata: true },
+  { mese: 'Aprile', quantita_kg: 0, metalli_kg: 89780, motivo_assenza: 'solo_metalli' },
+  { mese: 'Maggio', quantita_kg: 744170, metalli_kg: 291750, caricata_inviata: true },
+  { mese: 'Giugno', quantita_kg: 544610, metalli_kg: 161410, caricata_inviata: true },
+  { mese: 'Luglio', quantita_kg: 402740, metalli_kg: 125700, caricata_inviata: true },
+  { mese: 'Agosto', quantita_kg: 534600, metalli_kg: 82500, caricata_inviata: true },
+  { mese: 'Settembre', quantita_kg: 0, metalli_kg: 99300, motivo_assenza: 'solo_metalli' },
+].map(d => ({ anno: 2026, sito: 'Irigom S.r.l.', canale: 'RETE', provenienza: '', motivo_assenza: '', ...d }));
+const extraIrigom2026 = [{ anno: 2026, mese: 'Luglio', sito: 'Irigom S.r.l.', canale: 'EXTRA_RACCOLTA', quantita_kg: 460, caricata_inviata: true }];
+const senzaRegola = ferroArretrato(mesiVeri, [], { mese: 'Ottobre', dichiarazioni: dichIrigom2026 });
+verifica('senza la regola luglio sembra lasciare indietro 460 kg di ferro',
+  senzaRegola.arretrato_kg === 99760 && senzaRegola.mesi.join() === 'Luglio,Settembre', JSON.stringify([senzaRegola.arretrato_kg, senzaRegola.mesi]));
+const conRegola = ferroArretrato(mesiVeri, [], { mese: 'Ottobre', dichiarazioni: dichIrigom2026, extra: extraIrigom2026 });
+verifica('con l\'extra raccolta l\'arretrato di ottobre e\' 99.300 kg, tutto di settembre',
+  conRegola.arretrato_kg === 99300 && conRegola.mesi.join() === 'Settembre', JSON.stringify([conRegola.arretrato_kg, conRegola.mesi]));
+verifica('luglio quadra, e si vede che i 460 kg sono extra raccolta',
+  conRegola.dettaglio.find(r => r.mese === 'Luglio').resta_kg === 0
+  && conRegola.dettaglio.find(r => r.mese === 'Luglio').extra_raccolta_kg === 460
+  && conRegola.extra_raccolta_kg === 460, JSON.stringify(conRegola.dettaglio.find(r => r.mese === 'Luglio')));
+// L'extra non puo' coprire piu' del buco: se un mese lascia indietro del ferro
+// vero, quello resta arretrato anche se nello stesso mese c'era dell'extra.
+const buco = ferroArretrato(
+  [{ mese: 'Agosto', uscite_ferro_kg: 82500 }, { mese: 'Settembre', uscite_ferro_kg: 99300 }],
+  [], {
+    mese: 'Ottobre',
+    dichiarazioni: [{ anno: 2026, mese: 'Agosto', sito: 'Irigom S.r.l.', canale: 'RETE', quantita_kg: 500000, metalli_kg: 70000, caricata_inviata: true },
+      { anno: 2026, mese: 'Settembre', sito: 'Irigom S.r.l.', canale: 'RETE', quantita_kg: 0, metalli_kg: 99300, motivo_assenza: 'solo_metalli' }],
+    extra: [{ anno: 2026, mese: 'Agosto', sito: 'Irigom S.r.l.', canale: 'EXTRA_RACCOLTA', quantita_kg: 460 }],
+  });
+verifica('l\'extra copre solo la sua parte: il ferro vero resta arretrato',
+  buco.dettaglio[0].extra_raccolta_kg === 460 && buco.dettaglio[0].resta_kg === 12040
+  && buco.arretrato_kg === 111340, JSON.stringify(buco.dettaglio[0]));
+// E la pratica lo dice, perche' e' la cosa che piu' facilmente si ridichiara.
+const ottExtra = componiMese({ ...comune, arretrato: conRegola, lettura: 'registro' });
+verifica('la pratica dice che quei chili sono extra raccolta, non ferro',
+  ottExtra.avvisi.some(a => /460 kg di luglio/.test(a) && /extra raccolta/.test(a) && /due volte/.test(a)), JSON.stringify(ottExtra.avvisi));
+
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');
 process.exit(ko ? 1 : 0);
