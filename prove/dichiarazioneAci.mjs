@@ -272,6 +272,25 @@ verifica('il doppione si segna sul documento e si spiega col ticket',
 const storto = unisciLetture([GATIM_1, { ...GATIM_1, file: '162529-54 (1).pdf', ordine: '003 ' + (GATIM_1.ordine || ''), formulario: 'HTQK5000856WL' }]);
 verifica('un doppione con ordine o formulario letti diversamente si prende lo stesso',
   storto.quantita_kg === 3930 && storto.documenti[1].doppione === true, JSON.stringify([storto.quantita_kg, storto.problemi]));
+// IL CASO DI MEZZO: STESSO FORMULARIO, I TICKET SOLO SU UNO DEI DUE.
+//
+// Difetto media dell'audit del 03/10/2026. Il doppione si riconosce dai ticket, e
+// quando mancano a tutti e due dal formulario. Restava fuori lo stesso PDF
+// allegato due volte su cui la seconda lettura non riporta i ticket: le due
+// chiavi sono diverse, nessuno dei due e' doppione, e i chili si sommano - il
+// doppio esatto, senza una parola. Doppione non si puo' dichiararlo (potrebbero
+// essere due quote vere), ma in silenzio non deve passare.
+const senzaTicket = unisciLetture([GATIM_1, { ...GATIM_1, file: 'HTQKS000856WL (1).pdf', ticket_aci: [] }]);
+verifica('lo stesso formulario con i ticket su uno solo dei due si segnala',
+  senzaTicket.problemi.some(p => /compare su 2 documenti/.test(p) && /il mese risulta doppio/.test(p)),
+  JSON.stringify(senzaTicket.problemi));
+verifica('e il totale raddoppiato si vede, invece di passare per buono',
+  senzaTicket.quantita_kg === 3930 * 2, String(senzaTicket.quantita_kg));
+verifica('ma due documenti che portano tutti e due i loro ticket non si segnalano,'
+  + ' perche\' i ticket li distinguono',
+  !unisciLetture([GATIM_1, { ...GATIM_1, file: 'altra-quota.pdf', ticket_aci: ['777777-77'] }])
+    .problemi.some(p => /il mese risulta doppio/.test(p)));
+
 // E un ticket che compare su due documenti che NON sono lo stesso documento si
 // dice: o uno e' letto male, o non e' di questo mese.
 const ticketMisto = unisciLetture([GATIM_1, { ...GATIM_1, file: 'altro.pdf', formulario: 'ALTRO000001XX', ticket_aci: [...(GATIM_1.ticket_aci || []), '999999-99'] }]);

@@ -399,6 +399,32 @@ export function unisciLetture(letture) {
     }
     visti.set(chiave, d.file);
   }
+  // LO STESSO FORMULARIO SU DUE DOCUMENTI, CON I TICKET SOLO SU UNO.
+  //
+  // Il doppione si riconosce dai ticket, e quando mancano da tutti e due si
+  // riconosce dal formulario. Restava fuori il caso di mezzo: lo stesso PDF
+  // allegato due volte - arrivato due volte via email, o salvato come «... (1)»
+  // - su cui la seconda lettura non riporta i ticket. Le due chiavi sono diverse,
+  // quindi nessuno dei due e' doppione e i chili si sommano: 24.560 kg al posto
+  // di 12.280, il doppio esatto, senza una parola (audit del 03/10/2026).
+  //
+  // Doppione non si puo' dichiararlo: potrebbero essere due quote dello stesso
+  // formulario su due ordini diversi, che e' normale e si somma davvero. Quello
+  // che si puo' fare e' non lasciarlo passare in silenzio.
+  const perFormulario = new Map();
+  for (const d of documenti) {
+    if (d.doppione) continue;
+    const f = chiaveFir(d.formulario);
+    if (!f) continue;
+    if (!perFormulario.has(f)) perFormulario.set(f, []);
+    perFormulario.get(f).push(d);
+  }
+  for (const [, lista] of perFormulario) {
+    // Se tutti portano i ticket, i ticket li distinguono: sono due quote vere.
+    if (lista.length < 2 || lista.every(d => (d.ticket_aci || []).length)) continue;
+    problemi.push(`Il formulario ${lista[0].formulario} compare su ${lista.length} documenti (${lista.map(d => `«${d.file}»`).join(', ')}) e su almeno uno non si leggono i ticket ACI: i chili di tutti e ${lista.length === 2 ? 'due' : lista.length} sono nel totale. Se e' lo stesso documento letto due volte, il mese risulta doppio: guardali prima di salvare.`);
+  }
+
   // Due documenti che CONDIVIDONO qualche ticket ma non tutti non si sommano e non
   // si scartano: non si sa che cosa siano, e lo si dice. Un ticket ripetuto fra
   // documenti diversi e' sempre qualcosa da guardare prima di salvare.
