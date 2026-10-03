@@ -63,7 +63,7 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
       return nomeFileAmministrazione(tipologia, periodo.anno, periodo.mese, 'pdf');
     }
     if (formato === 'amm-excel') {
-      exportAmministrazioneAttiva(tipologia, righe, periodo.anno, periodo.mese);
+      await exportAmministrazioneAttiva(tipologia, righe, periodo.anno, periodo.mese);
       return nomeFileAmministrazione(tipologia, periodo.anno, periodo.mese, 'xlsx');
     }
     if (formato === 'pdf') await exportFatturazioneAttivaPdf(tipologia, righe, periodo.anno, periodo.mese);

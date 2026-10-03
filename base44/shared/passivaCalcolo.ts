@@ -569,7 +569,7 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         const key = `${trasKey}|${provincia}|${destinazione}|${tk}`;
         if (!raccPerGroup.has(key)) {
           raccPerGroup.set(key, {
-            trasportatore, trasKey, provincia, destinazione, interno,
+            trasportatore, trasKey, provincia, destinazione, regione, interno,
             tariffa, peso_kg: 0, viaggiSet: new Set(), classi_set: new Set(), diCui: new Map(),
           });
         }
@@ -594,6 +594,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         fornitore: g.trasportatore, fornitore_norm: g.trasKey, interno: g.interno, di_cui: elencoDiCuiConViaggi(g.diCui),
         riga: {
           provincia: g.provincia || '—', destinazione: g.destinazione || '—',
+          // La regione del ritiro serve al «format amministrazione»: nel foglio
+          // dell'amministrazione le righe dei raccoglitori sono divise per
+          // regione (Nappi Sud Campania 58, Basilicata 58) e senza questo campo
+          // quei chili non trovavano la loro riga.
+          regione: g.regione || '—',
           classe: Array.from(g.classi_set).join(', ') || '—',
           tonnellate: round3(tonnellate), viaggi: g.viaggiSet.size,
           tariffa_valore: valore, unita_misura: um,

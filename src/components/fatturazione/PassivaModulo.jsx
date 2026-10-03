@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Calculator, CheckCircle2, XCircle, ExternalLink, FileSpreadsheet, FileDown, ClipboardList } from 'lucide-react';
+import { Loader2, Calculator, CheckCircle2, XCircle, ExternalLink, FileSpreadsheet, FileDown, ClipboardList, ListPlus } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
 import PassivaRaccoglitoriTable from './PassivaRaccoglitoriTable';
 import PassivaImpiantiTable from './PassivaImpiantiTable';
@@ -12,8 +12,12 @@ import PassivaAnomalie from './PassivaAnomalie';
 import PassivaFormulariRipartiti from './PassivaFormulariRipartiti';
 import PassivaQualifica from './PassivaQualifica';
 import { exportFatturazionePassiva, exportFatturazionePassivaPdf } from '@/lib/passivaExport';
-import { exportPassivaUnFoglio, exportPassivaPerCanale, exportPassivaPdf, fogliDa } from '@/lib/passivaAmministrazioneExport';
-import { modelloDaPassiva } from '@/lib/passivaAmministrazione';
+import { cartellaPassivaUnFoglio, cartellaPassivaPerCanale } from '@/lib/passivaAmministrazioneExcel';
+import { esportaPassivaAmministrazionePdf } from '@/lib/passivaAmministrazionePdf';
+import { fogliDa, nomeFilePassiva } from '@/lib/passivaAmministrazione';
+import { modelloAmministrazione, quanteVociModello } from '@/lib/modelloPassivaAmministrazione';
+import { scarica } from '@/lib/docxModello';
+import VociPassivaDialog from './VociPassivaDialog';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const ANNI = [2024, 2025, 2026];
@@ -36,7 +40,9 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
   // non si esporta un foglio vuoto - si propone di crearlo dal mese appena
   // calcolato, cosi' non si comincia da zero.
   const [ammLoading, setAmmLoading] = useState(false);
+  const [vociAperte, setVociAperte] = useState(false);
   const CANALI_AMM = ['RETE', 'ACI'];
+  const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   const esportaAmministrazione = async (come) => {
     setAmmLoading(true);
     setError('');
@@ -47,21 +53,28 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
         const res = await base44.functions.invoke('calcolaPassiva', { anno: periodo.anno, mese: periodo.mese, tipologia: canale });
         per[canale] = res.data || res;
       }
+      // Senza voci il foglio uscirebbe vuoto. Si propone il modello
+      // dell'amministrazione - le sue righe e i suoi prezzi, quelli con cui
+      // settembre 2026 torna al centesimo - e poi l'utente lo corregge dal
+      // pulsante «Voci del foglio».
       if (!voci.length) {
-        const proposta = CANALI_AMM.flatMap(c => modelloDaPassiva(per[c], c, periodo.anno));
-        if (!window.confirm(`Il modello delle voci e' vuoto: il foglio uscirebbe senza righe.
+        if (!window.confirm(`Il modello delle voci di ${periodo.anno} e' vuoto: il foglio uscirebbe senza righe.
 
-Lo creo adesso da ${periodo.mese} ${periodo.anno}? Sono ${proposta.length} voci, una per soggetto, col prezzo che questo mese ha usato. Poi le correggi tu.`)) {
+Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci - i fornitori, le loro righe e i prezzi del foglio di settembre 2026 - e restano tutte modificabili dal pulsante «Voci del foglio».`)) {
           setAmmLoading(false);
           return;
         }
+        const proposta = modelloAmministrazione(periodo.anno);
         for (const v of proposta) await base44.entities.VocePassivaAmministrazione.create(v);
         voci.push(...proposta);
       }
-      const fogli = fogliDa(voci, per, periodo.mese);
-      if (come === 'pdf') await exportPassivaPdf(fogli, periodo.anno, periodo.mese);
-      else if (come === 'canali') exportPassivaPerCanale(fogli, periodo.anno, periodo.mese);
-      else exportPassivaUnFoglio(fogli, periodo.anno, periodo.mese);
+      const fogli = fogliDa(voci, per, periodo.mese, periodo.anno);
+      if (come === 'pdf') {
+        await esportaPassivaAmministrazionePdf(fogli, { anno: periodo.anno, mese: periodo.mese });
+      } else {
+        const bytes = come === 'canali' ? await cartellaPassivaPerCanale(fogli) : await cartellaPassivaUnFoglio(fogli);
+        scarica(new Blob([bytes], { type: XLSX_MIME }), nomeFilePassiva(periodo.anno, periodo.mese, come === 'canali' ? 'canali' : 'unico', 'xlsx'));
+      }
     } catch (e) {
       setError(e?.response?.data?.error || e.message || 'Esportazione non riuscita');
     }
@@ -127,6 +140,12 @@ Lo creo adesso da ${periodo.mese} ${periodo.anno}? Sono ${proposta.length} voci,
         <Button variant="outline" disabled={ammLoading || loading} title="Lo stesso foglio in PDF"
           onClick={() => esportaAmministrazione('pdf')}>
           <FileDown className="w-4 h-4 mr-1.5" /> Format amm. PDF
+        </Button>
+        {/* Le voci sono il modello fisso del foglio: i fornitori, le loro righe e i
+            prezzi. Si correggono qui, senza passare dal codice. */}
+        <Button variant="ghost" disabled={ammLoading || loading} title="I fornitori, le loro righe e i prezzi con cui si compone il foglio dell amministrazione"
+          onClick={() => setVociAperte(true)}>
+          <ListPlus className="w-4 h-4 mr-1.5" /> Voci del foglio
         </Button>
         {tipologia === 'EXTRA_RACCOLTA' && (
           <Link to="/extra-raccolta" className="ml-auto text-sm text-primary hover:underline inline-flex items-center gap-1">
@@ -200,6 +219,9 @@ Lo creo adesso da ${periodo.mese} ${periodo.anno}? Sono ${proposta.length} voci,
           </div>
         </>
       )}
+
+      {/* Le voci del format amministrazione: il modello fisso del foglio */}
+      <VociPassivaDialog aperto={vociAperte} chiudi={() => setVociAperte(false)} anno={periodo.anno} />
     </div>
   );
 }

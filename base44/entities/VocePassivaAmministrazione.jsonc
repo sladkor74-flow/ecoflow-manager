@@ -31,13 +31,18 @@
       "enum": ["euro_tonnellata", "euro_viaggio"],
       "default": "euro_tonnellata"
     },
+    "colonna_prezzo": {
+      "type": "string",
+      "enum": ["", "stoccaggio", "trattamento"],
+      "description": "Solo per gli IMPIANTI dell ACI, dove il foglio dell amministrazione ha DUE colonne di prezzo: dice in quale delle due va scritto il prezzo di questa voce. Lo stesso impianto puo fare stoccaggio o trattamento a prezzi diversi, e la fattura li distingue. Vuoto in tutti gli altri blocchi, che hanno una colonna sola"
+    },
     "ordine": {
       "type": "number",
       "description": "In che ordine compare nel foglio. A parita si ordina per nome"
     },
     "criterio_json": {
       "type": "string",
-      "description": "Come si riconoscono i movimenti di questa voce: { regione, provincia, destinazione, classi, provenienza }. Serve al gestionale per sapere quali chili scrivere su questa riga e non su un altra dello stesso fornitore"
+      "description": "Come si riconoscono i movimenti di questa voce: { regione, provincia, destinazione, provenienza, prestazione, classi }. Serve al gestionale per sapere quali chili scrivere su questa riga e non su un altra dello stesso fornitore. Ogni movimento va a UNA sola voce, la prima che lo riconosce nell ordine del foglio; la voce senza criterio prende quello che resta, ed e la riga unica dei fornitori con un prezzo solo. Si scrive solo dove il prezzo cambia: su un fornitore con una riga sola un criterio sbagliato farebbe sparire i chili dal foglio"
     },
     "attiva": { "type": "boolean", "default": true },
     "note": { "type": "string" }

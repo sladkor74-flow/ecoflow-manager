@@ -14,7 +14,7 @@
 // verificato a mano. npm run prove
 import { caricaLibPagine } from './dati/libPagine.mjs';
 
-const { importoVoce, vociOrdinate, righePiatte, tonnellateDellaVoce, bloccoPassiva, foglioPassiva, modelloDaPassiva } = await caricaLibPagine('lib/passivaAmministrazione');
+const { importoVoce, vociOrdinate, righePiatte, assegnaRighe, rigaDellaVoce, bloccoPassiva, foglioPassiva, modelloDaPassiva } = await caricaLibPagine('lib/passivaAmministrazione');
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -53,30 +53,86 @@ console.log('LE VOCI SI VEDONO SEMPRE, ANCHE A ZERO');
   verifica('e il blocco somma i soggetti', b.totale_t === 124.8 && b.totale_euro === 8628.88, JSON.stringify(b.totale_euro));
 }
 
-console.log('A CIASCUNA VOCE I SUOI CHILI');
+console.log('A CIASCUNA VOCE I SUOI CHILI, UNA VOLTA SOLA');
 {
-  // Due voci dello stesso fornitore, distinte dalla provincia: i chili non si
-  // devono sommare su tutte e due.
+  // I chili si ASSEGNANO: ogni movimento va a una voce sola, la prima che lo
+  // riconosce. Prima si filtrava - ogni voce guardava tutte le righe del
+  // fornitore - e una voce senza criterio riprendeva anche i chili che le altre
+  // avevano gia' preso: il totale del fornitore usciva doppio.
+  const voce = (criterio) => ({ soggetto: 'X', criterio_json: criterio ? JSON.stringify(criterio) : '' });
   const righe = [
-    { soggetto: 'X', provincia: 'NAPOLI', tonnellate: 10 },
-    { soggetto: 'X', provincia: 'CASERTA', tonnellate: 4 },
+    { soggetto: 'X', provincia: 'NA', tonnellate: 10 },
+    { soggetto: 'X', provincia: 'CE', tonnellate: 4 },
   ];
-  verifica('la voce di Napoli prende solo Napoli',
-    tonnellateDellaVoce({ criterio_json: JSON.stringify({ provincia: 'NAPOLI' }) }, righe).tonnellate === 10);
-  verifica('e quella di Caserta solo Caserta',
-    tonnellateDellaVoce({ criterio_json: JSON.stringify({ provincia: 'CASERTA' }) }, righe).tonnellate === 4);
-  // Senza criterio la voce prende tutto il soggetto: e' il caso dei fornitori con
-  // una riga sola, che nel foglio dell'amministrazione sono la maggior parte.
-  verifica('senza criterio prende tutto', tonnellateDellaVoce({}, righe).tonnellate === 14);
-  // Un criterio scritto male non deve far sparire i chili in silenzio: non
-  // combacia, e la voce resta a zero - si vede.
-  verifica('un criterio che non combacia lascia la voce a zero',
-    tonnellateDellaVoce({ criterio_json: JSON.stringify({ provincia: 'BARI' }) }, righe).tonnellate === 0);
-  verifica('e un criterio illeggibile non butta via niente',
-    tonnellateDellaVoce({ criterio_json: '{rotto' }, righe).tonnellate === 14);
-  // Le classi: una riga ne puo' portare piu' d'una.
+  {
+    const napoli = voce({ provincia: 'NA' }), caserta = voce({ provincia: 'CE' });
+    const { quote, fuori } = assegnaRighe([napoli, caserta], righe);
+    verifica('la voce di Napoli prende solo Napoli', quote.get(napoli).tonnellate === 10);
+    verifica('e quella di Caserta solo Caserta', quote.get(caserta).tonnellate === 4);
+    verifica('e niente resta fuori', fuori.length === 0);
+  }
+  {
+    // E' il caso di T-CYCLE: tre voci sulle classi e una, «STOCK (fatturato)»,
+    // senza criterio. Quella senza criterio prende SOLO quello che resta.
+    const classi = voce({ classi: ['P', 'M'] }), resto = voce(null);
+    const { quote } = assegnaRighe([classi, resto], [
+      { soggetto: 'X', classe: 'P, M', tonnellate: 124.8 },
+      { soggetto: 'X', classe: '—', tonnellate: 3 },
+    ]);
+    verifica('la voce sulle classi prende i suoi', quote.get(classi).tonnellate === 124.8, String(quote.get(classi).tonnellate));
+    verifica('e quella senza criterio solo il resto, non tutto', quote.get(resto).tonnellate === 3, String(quote.get(resto).tonnellate));
+  }
+  {
+    // Un criterio che non combacia lascia la voce a zero - e i chili non
+    // spariscono: senza una voce che li prenda restano fuori e si dichiarano.
+    const bari = voce({ provincia: 'BA' });
+    const { quote, fuori } = assegnaRighe([bari], righe);
+    verifica('un criterio che non combacia lascia la voce a zero', quote.get(bari).tonnellate === 0);
+    verifica('e i chili senza voce restano fuori, non sparisco', fuori.length === 2);
+  }
+  {
+    // Un criterio illeggibile non e' un criterio: la voce prende quello che resta.
+    const rotta = { soggetto: 'X', criterio_json: '{rotto' };
+    const { quote } = assegnaRighe([rotta], righe);
+    verifica('un criterio illeggibile non butta via niente', quote.get(rotta).tonnellate === 14);
+  }
+  // Le classi: una riga ne puo' portare piu' d'una, e basta che ne combaci una.
   verifica('le classi si confrontano una per una',
-    tonnellateDellaVoce({ criterio_json: JSON.stringify({ classi: ['G2'] }) }, [{ classe: 'P, M', tonnellate: 5 }, { classe: 'G2', tonnellate: 3 }]).tonnellate === 3);
+    rigaDellaVoce({ classi: ['G2'] }, { classe: 'G2' }) && !rigaDellaVoce({ classi: ['G2'] }, { classe: 'P, M' }));
+  verifica('una riga con due classi combacia con la voce che ne chiede una',
+    rigaDellaVoce({ classi: ['P', 'M'] }, { classe: 'P, M' }));
+  // La prestazione, negli impianti: stoccaggio e trattamento si scrivono in due
+  // modi e devono combaciare entrambi.
+  verifica('stoccaggio combacia con CONFERIMENTO_STOCCAGGIO',
+    rigaDellaVoce({ prestazione: 'stoccaggio' }, { prestazione: 'CONFERIMENTO_STOCCAGGIO' }));
+  verifica('e non col trattamento',
+    !rigaDellaVoce({ prestazione: 'stoccaggio' }, { prestazione: 'TRATTAMENTO' }));
+  // La destinazione e' una ragione sociale: «Gatim» nel foglio e «GATIM S.R.L.»
+  // nei movimenti sono la stessa cosa.
+  verifica('la destinazione si riconosce anche scritta in un altro modo',
+    rigaDellaVoce({ destinazione: 'Gatim' }, { destinazione: 'GATIM S.R.L.' }));
+  verifica('ma non si confonde con un altro impianto',
+    !rigaDellaVoce({ destinazione: 'Gatim' }, { destinazione: 'Irigom S.r.l.' }));
+  // La regione, se sulla riga non c'e', si ricava dalla provincia.
+  verifica('la regione si ricava dalla sigla della provincia',
+    rigaDellaVoce({ regione: 'Campania' }, { provincia: 'NA' }));
+}
+
+console.log('I CHILI CHE NESSUNA VOCE PRENDE SI SCRIVONO');
+{
+  // Un chilo che sparisce dal foglio e' un chilo che non si fattura: la riga
+  // «senza voce» esiste per non farlo sparire in silenzio.
+  const b = bloccoPassiva([
+    { canale: 'RETE', blocco: 'impianti', soggetto: 'IMPIANTO X', voce: 'classi P+M', prezzo: 90, ordine: 10, criterio_json: JSON.stringify({ classi: ['P', 'M'] }) },
+  ], [
+    { soggetto: 'IMPIANTO X', classe: 'P, M', tonnellate: 10 },
+    { soggetto: 'IMPIANTO X', classe: 'G2', tonnellate: 2 },
+  ], 'RETE', 'impianti');
+  const senza = b.righe.find(r => r.tipo === 'senza_voce');
+  verifica('la riga senza voce c e', !!senza && senza.tonnellate === 2, JSON.stringify(senza));
+  verifica('e dice di che si tratta', senza && /G2/.test(senza.dettaglio), senza && senza.dettaglio);
+  verifica('il totale del soggetto li comprende', b.righe[0].tonnellate === 12, String(b.righe[0].tonnellate));
+  verifica('ma non si fatturano a un prezzo inventato', b.totale_euro === 900, String(b.totale_euro));
 }
 
 console.log('CHI HA MOVIMENTI MA NON E NEL MODELLO SI DICE');
