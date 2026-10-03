@@ -263,6 +263,50 @@ console.log('IL MODELLO PROPOSTO DA UN MESE GIA FATTO');
   verifica('e con l anno e il canale giusti', m.every(v => v.anno === 2026 && v.canale === 'RETE'));
 }
 
+// I VIAGGI CHE SI PAGANO NON SONO SEMPRE QUELLI CONTATI.
+//
+// Difetto alta dell'audit del 03/10/2026. Una tratta a 300 euro a viaggio, tre
+// camion nel mese: due di soli formulari di rete e uno misto, 6.000 kg di rete e
+// 4.000 di ACI. La passiva paga 2,6 viaggi alla rete (780 €) e 0,4 all'ACI
+// (120 €): in tutto 900, cioe' i tre viaggi. Il foglio invece moltiplicava il
+// prezzo per i viaggi CONTATI - 3 di qua e 1 di la' - e lo stesso camion si
+// pagava intero su tutti e due i canali: 1.200 € per tre viaggi.
+console.log('I VIAGGI MISTI SI PAGANO A QUOTA');
+{
+  const tratta = (canale, viaggi, quota, tonnellate, importo) => ({
+    fornitore: 'TRASP SRL',
+    righe: [{
+      stoccaggio: 'NAPPI SUD SRL', destinazione: 'IRIGOM SRL', trasportatore: 'TRASP SRL',
+      tonnellate, viaggi, viaggi_quota: quota, tariffa_valore: 300, unita_misura: '€/viaggio',
+      importo, note: `${canale}: due viaggi interi e uno misto`,
+    }],
+  });
+  const rete = foglioPassiva([], { trasporti_secondaria: [tratta('RETE', 3, 2.6, 26, 780)] }, 'RETE', 'Settembre');
+  const aci = foglioPassiva([], { trasporti_secondaria: [tratta('ACI', 1, 0.4, 4, 120)] }, 'ACI', 'Settembre');
+  verifica('la riga porta sia i viaggi contati sia quelli pagati',
+    rete.trasporti.righe[0].viaggi === 3 && rete.trasporti.righe[0].viaggi_pagati === 2.6,
+    JSON.stringify(rete.trasporti.righe[0]));
+  verifica('e sull\'altro canale la quota e\' il resto',
+    aci.trasporti.righe[0].viaggi === 1 && aci.trasporti.righe[0].viaggi_pagati === 0.4,
+    JSON.stringify(aci.trasporti.righe[0]));
+  // E' questo che chiude il conto: prezzo per viaggi pagati fa l'importo della
+  // passiva, mentre prezzo per viaggi contati farebbe 900 e 300.
+  verifica('prezzo per viaggi pagati da\' l\'importo della passiva, su tutti e due i canali',
+    300 * rete.trasporti.righe[0].viaggi_pagati === rete.trasporti.totale_euro
+    && 300 * aci.trasporti.righe[0].viaggi_pagati === aci.trasporti.totale_euro,
+    JSON.stringify([rete.trasporti.totale_euro, aci.trasporti.totale_euro]));
+  verifica('i due canali insieme pagano i tre viaggi veri, non quattro',
+    rete.trasporti.totale_euro + aci.trasporti.totale_euro === 900,
+    String(rete.trasporti.totale_euro + aci.trasporti.totale_euro));
+  // Dove la quota non c'e' (tariffa a tonnellata, o riga che non viene dal
+  // trasporto) si pagano i viaggi contati, come prima.
+  const aTonnellata = foglioPassiva([], {
+    trasporti_secondaria: [{ fornitore: 'T', righe: [{ stoccaggio: 'P', destinazione: 'D', tonnellate: 5, viaggi: 2, tariffa_valore: 30, unita_misura: 'euro_tonnellata', importo: 150 }] }],
+  }, 'RETE', 'Settembre');
+  verifica('senza quota si pagano i viaggi contati', aTonnellata.trasporti.righe[0].viaggi_pagati === 2,
+    JSON.stringify(aTonnellata.trasporti.righe[0]));
+}
+
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');
 process.exit(ko ? 1 : 0);

@@ -363,7 +363,16 @@ function scriviTrasporto(ws, r0, trasporti0, nomeCanale) {
     scrivi(ws, r, 4, num(t.tonnellate), { ...st, allinea: 'right', fmt: fmtT(t.tonnellate) });
     scrivi(ws, r, 5, aViaggio ? '€\\vg' : '€\\t', { ...st, allinea: 'center' });
     scrivi(ws, r, 6, num(t.prezzo), { ...st, allinea: 'right', fmt: EURO });
-    scrivi(ws, r, 7, Math.round(num(t.viaggi)) || null, { ...st, allinea: 'center', fmt: INTERO });
+    // I VIAGGI CHE SI PAGANO, NON QUELLI CONTATI. Un viaggio misto porta
+    // formulari di tutti e due i canali e ognuno ne paga la sua quota di chili:
+    // due viaggi interi piu' un misto al 60% sono tre viaggi contati e 2,6
+    // pagati. Qui c'era il numero contato, moltiplicato per il prezzo: lo stesso
+    // camion si pagava intero di qua e intero di la' (audit del 03/10/2026).
+    // La nota della riga, che viene dalla passiva, dice gia' com'e' fatto il
+    // conto («2 viaggi interi a 300 € e 1 viaggio misto... 2,6 viaggi»).
+    const vgPagati = t.viaggi_pagati === undefined || t.viaggi_pagati === null ? num(t.viaggi) : num(t.viaggi_pagati);
+    const vgInteri = Math.abs(vgPagati - Math.round(vgPagati)) < 0.005;
+    scrivi(ws, r, 7, vgPagati || null, { ...st, allinea: 'center', fmt: vgInteri ? INTERO : FORMATI.decimale2 });
     // A tonnellata e' peso per costo, a viaggio e' costo per numero di viaggi:
     // la formula segue l'unita' di misura scritta sulla riga accanto.
     scrivi(ws, r, 8, { formula: aViaggio ? `F${r}*G${r}` : `D${r}*F${r}`, result: n2(t.totale) },

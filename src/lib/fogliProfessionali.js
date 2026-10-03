@@ -44,6 +44,9 @@ export const FORMATI = {
   euro: '#,##0.00 "€"',
   prezzo: '#,##0.0000 "€"',
   intero: '#,##0',
+  // Un numero con due decimali che non e' ne' peso ne' denaro: per esempio i
+  // viaggi pagati, che su un viaggio misto sono una quota (2,6) e non un intero.
+  decimale2: '#,##0.00',
   codice: '0',
   data: 'dd/mm/yyyy',
 };

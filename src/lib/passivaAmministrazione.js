@@ -54,6 +54,20 @@ const nome = (v) => normalizzaRagioneSociale(testo(v));
 
 export const EER_PFU = 160103;
 
+/**
+ * I viaggi che si PAGANO su una riga della passiva.
+ *
+ * Su una tratta a viaggio, un viaggio misto porta formulari di tutti e due i
+ * canali e ciascun canale ne paga solo la sua quota di chili: la passiva la
+ * calcola in viaggi_quota. Dove la quota non c'e' (tariffa a tonnellata, o riga
+ * che non viene dal trasporto) si pagano i viaggi contati.
+ */
+export function viaggiPagati(r) {
+  const quota = r && r.viaggi_quota;
+  if (quota === null || quota === undefined) return Number(r && r.viaggi) || 0;
+  return Number(quota) || 0;
+}
+
 /** Il totale di una riga: a tonnellata o a viaggio, come dice l'unita'. */
 export function importoVoce(prezzo, unita, tonnellate, viaggi) {
   const p = Number(prezzo) || 0;
@@ -300,7 +314,7 @@ export function prezzoDellaVoce(voce, righe, tariffe, canale, blocco, giorno) {
 export function assegnaRighe(vociSoggetto, righeSoggetto) {
   const conCriterio = vociSoggetto.map(v => ({ voce: v, criterio: criterioDi(v) })).filter(x => x.criterio);
   const senzaCriterio = vociSoggetto.find(v => !criterioDi(v)) || null;
-  const quote = new Map(vociSoggetto.map(v => [v, { tonnellate: 0, viaggi: 0, righe: [] }]));
+  const quote = new Map(vociSoggetto.map(v => [v, { tonnellate: 0, viaggi: 0, viaggi_pagati: 0, righe: [] }]));
   const fuori = [];
   for (const r of righeSoggetto || []) {
     const trovata = conCriterio.find(x => rigaDellaVoce(x.criterio, r));
@@ -309,6 +323,7 @@ export function assegnaRighe(vociSoggetto, righeSoggetto) {
     const q = quote.get(dove);
     q.tonnellate += Number(r.tonnellate) || 0;
     q.viaggi += Number(r.viaggi) || 0;
+    q.viaggi_pagati += viaggiPagati(r);
     // Le righe si tengono, non si contano soltanto: da loro si legge la tariffa
     // che il mese ha applicato davvero.
     q.righe.push(r);
@@ -388,7 +403,7 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno) {
       if (oltre > 0) {
         avvisi.push(`Di cui ${oltre.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € di sovracosto per costi imprevisti, oltre la tariffa per il peso${motivi.length ? `: ${motivi.join(' / ')}` : '.'}`);
       }
-      const base = p.importo !== undefined ? p.importo : importoVoce(p.prezzo, p.unita_misura, q.tonnellate, q.viaggi);
+      const base = p.importo !== undefined ? p.importo : importoVoce(p.prezzo, p.unita_misura, q.tonnellate, q.viaggi_pagati);
       const totale = n2(base + oltre);
       // Quando il prezzo viene dai movimenti, l'importo del foglio deve fare
       // esattamente quello che ha calcolato la passiva: se non torna, lo si dice
@@ -405,6 +420,7 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno) {
         voce: testo(v.voce),
         tonnellate: q.tonnellate,
         viaggi: q.viaggi,
+        viaggi_pagati: n2(q.viaggi_pagati),
         prezzo: p.prezzo,
         unita_misura: p.unita_misura,
         fonte_prezzo: p.fonte,
@@ -509,6 +525,12 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
     unita_misura: t.unita_misura === '€/viaggio' ? 'euro_viaggio' : 'euro_tonnellata',
     prezzo: Number(t.tariffa_valore) || 0,
     viaggi: Number(t.viaggi) || 0,
+    // I VIAGGI CONTATI NON SONO SEMPRE QUELLI CHE SI PAGANO. Un viaggio misto
+    // porta formulari di tutti e due i canali e ogni canale ne paga la sua quota:
+    // due viaggi interi piu' un misto al 60% fanno TRE viaggi contati e 2,6
+    // pagati. Il foglio moltiplicava il prezzo per i viaggi contati, quindi lo
+    // stesso camion si pagava intero di qua e intero di la' (audit 03/10/2026).
+    viaggi_pagati: viaggiPagati(t),
     totale: n2(t.importo),
     note: testo(t.note),
   })));

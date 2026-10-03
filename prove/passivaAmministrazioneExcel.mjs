@@ -465,5 +465,37 @@ console.log('\nL\'EXTRA RACCOLTA: IL DETTAGLIO DEGLI INTERVENTI');
     `${prima(w, 'RACCOGLITORI')} ${prima(w, 'IMPIANTI \\ STOCCAGGI')}`);
 }
 
+// IL VIAGGIO MISTO: NELLA COLONNA DEI VIAGGI CI VA LA QUOTA CHE SI PAGA.
+//
+// Difetto alta dell'audit del 03/10/2026: la colonna portava i viaggi CONTATI e
+// la formula li moltiplicava per il prezzo, quindi un camion che porta formulari
+// di tutti e due i canali si pagava intero di qua e intero di la'. Qui si
+// rilegge il foglio generato: 2,6 nella colonna e 780 nel totale, non 3 e 900.
+console.log('\nIL VIAGGIO MISTO NEL FOGLIO');
+{
+  const MISTO = {
+    ...VUOTO, canale: 'RETE', nome_canale: 'RETE',
+    trasporti: {
+      righe: [{
+        produttore: 'NAPPI SUD SRL', trasportatore: 'TRASP SRL', destinatario: 'Irigom S.r.l.',
+        tonnellate: 26, unita_misura: 'euro_viaggio', prezzo: 300,
+        viaggi: 3, viaggi_pagati: 2.6, totale: 780,
+        note: '2 viaggi interi a 300 € e 1 viaggio misto con l\'ACI: 2,6 viaggi, 780,00 €',
+      }],
+      totale_t: 26, totale_euro: 780,
+    },
+    totale_euro: 780,
+  };
+  const w = (await apri(await cartellaPassivaUnFoglio([MISTO]))).getWorksheet('PASSIVA');
+  const r = primaChePorta(w, 'TRASPORTO (secondarie RETE)') + 2;
+  verifica('nella colonna dei viaggi c\'e\' la quota pagata, non i viaggi contati',
+    numero(w, r, 7) === 2.6, String(numero(w, r, 7)));
+  verifica('e si vede coi decimali, altrimenti 2,6 si leggerebbe 3',
+    w.getCell(r, 7).numFmt === '#,##0.00', String(w.getCell(r, 7).numFmt));
+  verifica('cosi\' prezzo per viaggi fa l\'importo della passiva',
+    formula(w, r, 8) === `F${r}*G${r}` && numero(w, r, 8) === 780, `${formula(w, r, 8)} = ${val(w, r, 8)}`);
+  verifica('e la nota dice com\'e\' fatto il conto', /viaggio misto/.test(testo(w, r, 9)), testo(w, r, 9));
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);
