@@ -100,7 +100,17 @@ export default async function(req) {
     // fine trasporto toccati: si rifanno anche le quadrature, di qualunque eta',
     // delle settimane che li contengono.
     const corpo = await req.json().catch(() => ({}));
-    const giorni = Array.isArray(corpo && corpo.giorni) ? corpo.giorni.map(g => String(g).slice(0, 10)).filter(g => /^\d{4}-\d{2}-\d{2}$/.test(g)) : [];
+    // I GIORNI ARRIVANO DAL CORPO DELLA RICHIESTA: CHI NON E' AMMINISTRATORE NON
+    // PUO' RIAPRIRE QUALUNQUE SETTIMANA.
+    //
+    // La lista serve a rifare le quadrature vecchie quando una scheda di extra
+    // raccolta si corregge in ritardo, e quella e' roba da amministratore. Per
+    // chi carica e basta, il riconfronto resta quello del suo caricamento: le
+    // settimane dentro la finestra di conservazione, come se la lista non
+    // l'avesse mandata (audit del 03/10/2026, sul livello che dichiarava di non
+    // poter toccare verifiche e alert).
+    const tuttiIGiorni = Array.isArray(corpo && corpo.giorni) ? corpo.giorni.map(g => String(g).slice(0, 10)).filter(g => /^\d{4}-\d{2}-\d{2}$/.test(g)) : [];
+    const giorni = user.role === 'admin' ? tuttiIGiorni : tuttiIGiorni.filter(g => g >= aggiungiGiorni(oggi, -GIORNI_CONSERVAZIONE));
     const contiene = (q) => giorni.some(g => g >= String(q.data_inizio || '').slice(0, 10) && g <= String(q.data_fine || '').slice(0, 10));
     const quadrature = (await fetchAll(svc.QuadraturaFir, { stato: 'completata' }))
       .filter(q => q.righe_json && (String(q.data_fine || '').slice(0, 10) >= dal || contiene(q)));
