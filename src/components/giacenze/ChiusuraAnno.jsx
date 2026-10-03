@@ -7,6 +7,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { RefreshCw, Download, Save, Upload, AlertTriangle, CheckCircle2, Camera, ClipboardList, ChevronDown, ChevronRight, Info, Anchor } from 'lucide-react';
 import { formatKg } from '@/lib/utils';
 import { giorno, kgSegno } from '@/components/giacenze/ControlloRilevazione';
+import { AUTORE_FILE } from '@/lib/prodotto';
 
 // La chiusura dell'anno, da una schermata sola.
 //
@@ -404,7 +405,7 @@ export async function scaricaDossierChiusura(dossier) {
   const modulo = await import('exceljs');
   const ExcelJS = modulo.default || modulo;
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Gestionale PFU';
+  wb.creator = AUTORE_FILE;
   wb.created = new Date();
 
   const riempi = (c, argb) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } }; };

@@ -4,6 +4,7 @@
 import { formatTonnellate, formatKg, formatIntero, dataServer } from '@/lib/utils';
 import { statoTermine, testoTermine } from '@/lib/termineRegistrazione';
 import { leggiCartella } from '@/lib/fogliDiCalcolo';
+import { AUTORE_FILE } from './prodotto.js';
 
 export const GIORNI_CONSERVAZIONE = 40;
 
@@ -570,7 +571,7 @@ export async function scaricaExcelVerifica(v) {
   const sintesi = sintesiVerifica(v, esito);
   const nomeTipo = (t) => (t === 'uscita' ? 'Uscita' : t === 'ingresso' ? 'Ingresso' : 'Non pertinente');
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'TreadRider — Gestionale PFU';
+  wb.creator = AUTORE_FILE;
   wb.created = new Date();
 
   // --- Riepilogo ---

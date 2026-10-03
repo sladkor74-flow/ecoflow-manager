@@ -27,6 +27,7 @@
 import { MESI, migliaia, extraPerMese, extraCompresaDaNota } from './praticaIrigom.js';
 import { datiFileGestione, dataIt } from './documentiIrigom.js';
 import { righeBlocco } from './bloccoGestione.js';
+import { AUTORE_FILE } from './prodotto.js';
 
 const kg = (v) => migliaia(v);
 const intero = (n) => Math.round(Number(n) || 0);
@@ -382,7 +383,7 @@ export async function esportaFoglioDichiarazioni({ pratiche = [], dichiarazioni 
   }
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'TreadRider — Gestionale PFU';
+  wb.creator = AUTORE_FILE;
   wb.created = new Date();
   const ws = wb.addWorksheet('DICHIARAZIONI');
   // Le larghezze del foglio dell'utente: A e B per i nomi, poi le coppie

@@ -25,6 +25,7 @@
 
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { MESI, MAX_PER_DICHIARAZIONE_KG, migliaia } from './praticaIrigom.js';
+import { AUTORE_FILE } from './prodotto.js';
 
 const kg = (v) => migliaia(v);
 const intero = (v) => Math.round(Number(v) || 0);
@@ -233,7 +234,7 @@ export async function excelDelMese({ pratica, contesto }) {
   const { anno, mese } = contesto;
   const partenza = contesto.nave && contesto.nave.partenza ? daIt(contesto.nave.partenza) : '';
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'TreadRider — Gestionale PFU';
+  wb.creator = AUTORE_FILE;
   wb.created = new Date();
   const ws = wb.addWorksheet(`${mese} ${anno}`.slice(0, 31));
   ws.columns = [16, 12, 16, 16, 18, 12, 16, 18, 12, 14, 12, 10, 10].map(width => ({ width }));

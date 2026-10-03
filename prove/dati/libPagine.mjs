@@ -12,6 +12,12 @@
 import { readFileSync } from 'node:fs';
 
 const ALIAS = /from\s+'@\/([A-Za-z0-9_/-]+)'/g;
+// Il modulo si carica da un indirizzo `data:`, che non ha una cartella: dentro di
+// lui un import RELATIVO non si risolve, e il messaggio non dice nemmeno quale
+// libreria lo contiene. Succedeva lo stesso guaio degli alias, che questo file
+// esiste per evitare: bastava aggiungere `./prodotto.js` a src/lib/verifiche.js
+// per rompere due prove che non c'entravano niente. Si riscrivono anche quelli.
+const RELATIVO = /from\s+'(\.\.?\/[A-Za-z0-9_./-]+)'/g;
 
 // Qualche libreria delle pagine guarda il browser appena viene caricata
 // (src/lib/utils.js: isIframe legge window.self). Nelle prove non c'e' un
@@ -28,5 +34,6 @@ export function caricaLibPagine(percorso, sostituzioni = []) {
   let sorgente = readFileSync(file, 'utf8');
   for (const [da, a] of sostituzioni) sorgente = sorgente.replace(da, a);
   sorgente = sorgente.replace(ALIAS, (_m, nome) => `from ${JSON.stringify(new URL(`../../src/${nome}.js`, import.meta.url).href)}`);
+  sorgente = sorgente.replace(RELATIVO, (_m, rel) => `from ${JSON.stringify(new URL(rel, file).href)}`);
   return import('data:text/javascript;base64,' + Buffer.from(sorgente).toString('base64'));
 }

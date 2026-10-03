@@ -1,3 +1,4 @@
+import { AUTORE_FILE } from './prodotto.js';
 // IL CORREDO DEI FOGLI EXCEL CHE SI MANDANO FUORI.
 //
 // L'utente, 03/10/2026: «quando dico professionale intendo quello che hai gia'
@@ -52,7 +53,7 @@ export async function nuovaCartella() {
   const modulo = await import('exceljs');
   const ExcelJS = modulo.default || modulo;
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'TreadRider — Gestionale PFU';
+  wb.creator = AUTORE_FILE;
   wb.created = new Date();
   return { ExcelJS, wb };
 }

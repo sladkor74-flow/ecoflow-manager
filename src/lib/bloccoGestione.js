@@ -1,3 +1,4 @@
+import { AUTORE_FILE } from './prodotto.js';
 // Il blocco del mese per il foglio DICHIARAZIONI del file di gestione,
 // pronto da incollare (22/09/2026).
 //
@@ -312,7 +313,7 @@ export async function excelBlocco(dati) {
   const ExcelJS = modulo.default || modulo;
   const { righe, indice, tipi } = righeBlocco(dati);
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'TreadRider — Gestionale PFU';
+  wb.creator = AUTORE_FILE;
   wb.created = new Date();
   wb.calcProperties.fullCalcOnLoad = true; // le formule sono senza valore: le fa Excel
 

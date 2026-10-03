@@ -55,10 +55,21 @@ una gomma, non il mestiere di SMOCO, che le manda a recupero.
 **Due cose da non confondere mai col nome del prodotto:** *EcoTyna* e'
 l'assistente dentro il gestionale, e *Ecotyre* e' il consorzio cliente.
 
-**Dove vive il nome.** Nel repo e' in tre posti e basta: il `<title>` e
-l'`apple-mobile-web-app-title` di `index.html`, e il metadato Autore dei file
-Excel esportati (`wb.creator`, quattro righe in `src/lib`). Le pagine non lo
-scrivono da nessuna parte.
+**Dove vive il nome.** In un posto solo: `src/lib/prodotto.js` (`PRODOTTO`,
+`SOTTOTITOLO`, `COMMESSA`, `AUTORE_FILE`). Da li' lo prendono l'intestazione del
+menu, le schermate di accesso e il metadato Autore dei sei file Excel che si
+mandano fuori. Resta fuori solo il `<title>` e l'`apple-mobile-web-app-title` di
+`index.html`, perche' l'HTML non importa moduli.
+
+Fino al 03/10/2026 il nome stava scritto a mano in nove punti e **le pagine non lo
+scrivevano affatto**: si vedeva solo nella linguetta del browser, l'autore di un
+Excel diceva ancora il nome vecchio, e l'utente ha detto «in pratica e' come se non
+ci fosse». Se serve cambiarlo, o aggiungerci un marchio, si cambia li'.
+
+**Nelle librerie di `src/lib` gli import sono RELATIVI** (`./prodotto.js`), non con
+l'alias `@/`: le prove caricano un modulo da un indirizzo `data:` e ne riscrivono
+gli import, e il caricatore (`prove/dati/libPagine.mjs`) risolve sia gli alias sia
+i relativi. Dentro i componenti l'alias va bene, perche' li' ci pensa Vite.
 
 **Quello che dal repo NON si cambia.** Il nome con cui l'applicazione si installa
 su Android e su desktop, la sua descrizione e la sua icona vengono dal manifest

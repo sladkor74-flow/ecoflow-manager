@@ -9,6 +9,7 @@ import {
 'lucide-react';
 import { caricaLivello, proteggiScritture } from '@/lib/permessi';
 import { osservaTabelle } from '@/lib/tabelleScorrevoli';
+import { PRODOTTO, SOTTOTITOLO, COMMESSA } from '@/lib/prodotto';
 
 const NAV_ITEMS = [
 { label: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -111,8 +112,13 @@ export default function Layout() {
         <div className="flex items-center gap-2 px-5 py-5 border-b border-sidebar-border">
           <Recycle className="w-7 h-7 text-sidebar-primary" />
           <div>
-            <h1 className="font-heading font-bold text-sidebar-foreground leading-tight text-lg">Gestionale PFU</h1>
-            <p className="text-xs text-sidebar-foreground/60">Smoco · Ecotyre</p>
+            {/* IL NOME DEL PRODOTTO STA QUI, non solo nella linguetta del browser.
+                Fino al 03/10/2026 le pagine non lo scrivevano da nessuna parte e
+                l'intestazione diceva solo che cosa fa il programma: un prodotto
+                che non si nomina da nessuna parte e' come se non ci fosse. Sotto
+                resta a che cosa serve, che e' l'informazione utile a chi lavora. */}
+            <h1 className="font-heading font-bold text-sidebar-foreground leading-tight text-lg">{PRODOTTO}</h1>
+            <p className="text-xs text-sidebar-foreground/60">{SOTTOTITOLO} · {COMMESSA}</p>
           </div>
         </div>
 
@@ -178,7 +184,8 @@ export default function Layout() {
           </button>
           <div className="flex items-center gap-2">
             <Recycle className="w-5 h-5 text-primary" />
-            <span className="font-heading font-bold">Gestionale PFU</span>
+            <span className="font-heading font-bold">{PRODOTTO}</span>
+            <span className="text-xs text-muted-foreground hidden sm:inline">{SOTTOTITOLO}</span>
           </div>
         </header>
 
