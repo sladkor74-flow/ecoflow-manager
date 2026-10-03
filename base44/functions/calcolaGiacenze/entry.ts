@@ -441,6 +441,26 @@ export default async function(req) {
     for (const gruppi of datePerRiga.values()) gruppi.sort((a, b) => ORDINE_GRUPPI.indexOf(a.canale) - ORDINE_GRUPPI.indexOf(b.canale));
 
     // === 2. DICHIARATO (DichiarazioneTrattamento, per ns|td) ===
+    // IL DICHIARATO PER CANALE, DALLE NOSTRE RIGHE MENSILI.
+    //
+    // dichiaratoMap qui sotto viene dal report del portale e l'ACI lo scarta: a
+    // portale l'ACI non e' gestito e l'extra raccolta non c'e' affatto. Per quei
+    // due canali il dichiarato lo sa solo DichiarazioneSito, cioe' le righe che
+    // l'amministratore segna a mano trascrivendo le dichiarazioni cartacee.
+    //
+    // E' la stessa sorgente che usa il modulo Dichiarazioni Impianti: i due moduli
+    // devono dire gli stessi numeri su tutti e tre i canali (regola dell'utente,
+    // 03/10/2026). Conta solo quello che e' segnato come caricato, come li'.
+    const dichiaratoCanaleMap = new Map(); // ns|canale -> t
+    for (const d of dichiarazioniSito) {
+      if (Number(d.anno) !== annoNum || !d.caricata_inviata) continue;
+      const ns = norm(d.sito);
+      if (!ns) continue;
+      const canale = d.canale || 'RETE';
+      const k = ns + '|' + canale;
+      dichiaratoCanaleMap.set(k, (dichiaratoCanaleMap.get(k) || 0) + (Number(d.quantita_kg) || 0) / 1000);
+    }
+
     // Anno di competenza: quello della fine del trasporto dell'ordine, mai della
     // chiusura a portale. Solo rete: una riga ACI non entra.
     const dichiaratoMap = new Map();   // ns|td -> t (anno corrente)
@@ -743,6 +763,27 @@ export default async function(req) {
       const secondarie_aci_out_t = td === 'stoc' ? (secAciOutMap.get(ns) || 0) : 0;
       const secondarie_nette_t = secondarie_in_t - secondarie_out_t;
       const terziarie_t = td === 'imp' ? (terzMap.get(ns) || 0) : 0;
+
+      // LA GIACENZA DI ACI ED EXTRA RACCOLTA, anche per gli impianti.
+      //
+      // Prima restavano vuote: la colonna ACI di un impianto diceva 0, che non
+      // voleva dire zero, voleva dire "non calcolata", e l'extra raccolta non
+      // compariva affatto. «Anche ACI ed extra raccolta devono essere indicati nei
+      // due moduli affinche' tutto sia a vista e si possa procedere con le
+      // dichiarazioni e il decurtamento dalle giacenze» (utente, 03/10/2026).
+      //
+      // Stessa formula del modulo Dichiarazioni, perche' i due devono coincidere:
+      // apertura + entrato - dichiarato. Per l'ACI entra la primaria e la
+      // secondaria che arriva; l'apertura e' giacenza_riferimento_aci_t. Per l'extra
+      // raccolta l'apertura non esiste - GiacenzaSito ha due campi, non tre - e si
+      // parte da zero.
+      //
+      // Un negativo non si azzera: e' un errore da correggere e si deve vedere.
+      if (td === 'imp') {
+        const aperturaAci = Number(g?.giacenza_riferimento_aci_t) || 0;
+        giacenza_aci_t = aperturaAci + conferito_aci_t + secondarie_aci_in_t - (dichiaratoCanaleMap.get(ns + '|ACI') || 0);
+        giacenza_extra_t = conferito_extra_t - (dichiaratoCanaleMap.get(ns + '|EXTRA_RACCOLTA') || 0);
+      }
 
       // Conferito e' cio' che il sito ha ricevuto. Le uscite non sono
       // conferimenti: sommarle agli ingressi contava ogni secondaria due volte.

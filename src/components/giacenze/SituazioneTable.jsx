@@ -346,6 +346,12 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
               <th className="px-3 py-2 font-semibold" rowSpan={2}>Sito</th>
               <th className="px-3 py-2 font-semibold" rowSpan={2}>Ruolo</th>
               <th className="px-3 py-2 font-semibold text-right" rowSpan={2} title="Rete: per gli impianti la fotografia del portale aggiornata ai caricamenti, per gli stoccaggi la rilevazione per classe aggiornata con i movimenti. L'ACI e' nella sua colonna e non si somma">Giacenza rete a portale</th>
+              {/* I TRE CANALI, TUTTI E TRE A VISTA E MAI SOMMATI. Prima la colonna ACI
+                  di un impianto diceva 0, che non voleva dire zero ma «non calcolata», e
+                  l'extra raccolta si leggeva solo passandoci sopra col mouse. Regola
+                  dell'utente, 03/10/2026. */}
+              <th className="px-3 py-2 font-semibold text-right" rowSpan={2} title="ACI: per gli impianti apertura piu quello che arriva in primaria e in secondaria, meno il dichiarato; per gli stoccaggi la rilevazione di classe 9 aggiornata coi movimenti. A portale l ACI non e gestito: non si confronta con la fotografia">Giacenza ACI</th>
+              <th className="px-3 py-2 font-semibold text-right" rowSpan={2} title="Extra raccolta: quello che e arrivato meno quello che e stato dichiarato. A portale non esiste, e non ha una giacenza di apertura: ogni anno riparte da zero">Extra raccolta</th>
               <th className="px-3 pt-2 pb-0 font-semibold text-center border-l" colSpan={CLASSI.length}>Giacenza per classe (kg)</th>
               <th className="px-3 py-2 font-semibold text-right border-l" rowSpan={2}>In attesa di dichiarazione</th>
               <th className="px-3 py-2 font-semibold text-right" rowSpan={2}>Ordini da dichiarare</th>
@@ -401,6 +407,16 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                     {r.tipo_destinazione === 'stoc' && <SaldoArchivio r={r} />}
                     {r.tipo_destinazione === 'imp' && <DettaglioImpianto r={r} />}
                   </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {r.giacenza_aci_t === null || r.giacenza_aci_t === undefined
+                      ? <span className="text-muted-foreground">—</span>
+                      : <span className={r.giacenza_aci_t < 0 ? 'text-red-600' : ''}>{fmt(r.giacenza_aci_t)} t</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {r.giacenza_extra_t === null || r.giacenza_extra_t === undefined
+                      ? <span className="text-muted-foreground">—</span>
+                      : <span className={r.giacenza_extra_t < 0 ? 'text-red-600' : ''}>{fmt(r.giacenza_extra_t)} t</span>}
+                  </td>
                   {CLASSI.map((c, k) => {
                     const v = kg(r, c.chiave);
                     // Sulla classe 9 di un piazzale si puo' aprire l'elenco degli
@@ -453,7 +469,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                   <tr className="border-t bg-muted/20">
                     {/* Sette colonne oltre alle classi: sito, ruolo, giacenza rete,
                         in attesa, ordini da dichiarare, dichiarato e tipologia. */}
-                    <td colSpan={7 + CLASSI.length} className="p-0"><DettaglioAci r={r} /></td>
+                    <td colSpan={9 + CLASSI.length} className="p-0"><DettaglioAci r={r} /></td>
                   </tr>
                 )}
                 </React.Fragment>
@@ -465,6 +481,9 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
               <td className="px-3 py-2">TOTALE</td>
               <td className="px-3 py-2"></td>
               <td className="px-3 py-2 text-right">{fmt(totali.giacenza_portale_t)} t</td>
+              {/* I totali dei tre canali restano separati: non si sommano mai. */}
+              <td className="px-3 py-2 text-right">{fmt(totali.giacenza_aci_t)} t</td>
+              <td className="px-3 py-2 text-right">{fmt(totali.giacenza_extra_t)} t</td>
               {CLASSI.map((c, k) => (
                 <td key={c.chiave} className={`px-3 py-2 text-right tabular-nums ${k === 0 ? 'border-l' : ''}`}>
                   {totali.giacenza_classi_kg ? formatKg(totali.giacenza_classi_kg[c.chiave] || 0) : '—'}
