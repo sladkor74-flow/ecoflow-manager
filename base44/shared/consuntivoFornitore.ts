@@ -152,10 +152,32 @@ const PUNTEGGI_INTESTAZIONE = {
   trasportatore: [[/trasportatore|vettore/i, 10]],
 };
 
+// QUELLO CHE UN'INTESTAZIONE NON PUO' ESSERE, per quanto le somigli.
+//
+// Il punteggio da solo non basta quando due colonne pretendono la stessa parola.
+// «Data chiusura ordine» prendeva 10 come id_ordine (c'e' scritto ordine) e 10
+// come giorno (c'e' scritto data): a pari merito vinceva id_ordine, perche' viene
+// prima nell'elenco dei campi. Risultato: tutte le righe chiuse lo stesso giorno
+// si ritrovavano la STESSA chiave d'ordine e si fondevano in una voce sola. Su un
+// consuntivo che quadrava al chilo usciva un peso raddoppiato e un formulario
+// dichiarato mancante (audit del 03/10/2026).
+//
+// E non e' nemmeno il giorno del movimento: la chiusura dell'ordine, l'immissione
+// e l'emissione non sono la fine del trasporto, che e' il periodo di un movimento
+// (regola 1). Una colonna cosi' non serve a niente di quello che cerchiamo, e la
+// cosa giusta e' lasciarla stare. E' la stessa esclusione di prefattura.ts, per
+// lo stesso motivo.
+const ESCLUSIONI_INTESTAZIONE = {
+  id_ordine: /\bdata\b|\bdt\b|\bgiorno\b|scadenz/i,
+  giorno: /chiusur|\bchius|immissione|immesso|emissione|scadenz/i,
+};
+
 const CAMPI_INTESTAZIONE = ['numero_fir', 'id_ordine', 'kg', 'giorno', 'classe', 'importo', 'produttore', 'destinatario', 'trasportatore'];
 
 /** Quanto questa intestazione somiglia a quella colonna. 0 = per niente. */
 export function punteggioIntestazione(campo, testo) {
+  const vietata = ESCLUSIONI_INTESTAZIONE[campo];
+  if (vietata && vietata.test(testo)) return 0;
   let max = 0;
   for (const [re, p] of (PUNTEGGI_INTESTAZIONE[campo] || [])) if (re.test(testo)) max = Math.max(max, p);
   return max;

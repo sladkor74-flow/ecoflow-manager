@@ -429,6 +429,51 @@ console.log('LE INTESTAZIONI PROPONGONO, I VALORI DECIDONO');
   verifica("e l'intestazione si e trovata", !lette.note.some(n => /non ho trovato la riga delle intestazioni/.test(n)), J(lette.note));
 }
 {
+  // UNA COLONNA DI DATE NON E' UN NUMERO D'ORDINE (audit del 03/10/2026).
+  //
+  // «Data chiusura ordine» prendeva 10 come id_ordine (c'e' scritto ordine) e 10
+  // come giorno (c'e' scritto data), e a pari merito vinceva id_ordine. Tutte le
+  // righe chiuse lo stesso giorno finivano con la stessa chiave e si fondevano in
+  // una voce sola: su un consuntivo che quadra al chilo usciva un peso
+  // raddoppiato e un formulario dichiarato mancante.
+  const celle = [
+    ['N. FORMULARIO', 'Data chiusura ordine', 'KG'],
+    ['RGYTR000001AA', '05/10/2026', 4000],
+    ['RGYTR000002AA', '05/10/2026', 3500],
+    ['RGYTR000003AA', '06/10/2026', 4500],
+  ];
+  const col = colonneDaIntestazioni(celle[0]);
+  verifica('«Data chiusura ordine» non e\' un numero d\'ordine', !col.id_ordine, J(col.id_ordine));
+  verifica('e non e\' nemmeno il giorno del movimento, perche\' la chiusura non e\' la fine del trasporto',
+    !col.giorno, J(col.giorno));
+  verifica('il formulario e il peso si riconoscono lo stesso',
+    !!col.numero_fir && !!col.kg, J({ fir: col.numero_fir, kg: col.kg }));
+  const lette = leggiRigheConsuntivo([{ nome: 'Foglio1', celle }]);
+  verifica('i tre carichi restano tre e non si fondono in uno',
+    lette.righe.length === 3 && lette.righe.every(r => !r.id_ordine), J(lette.righe));
+  const nostri = [
+    { numero_fir: 'RGYTR000001AA', id_ordine: 'ET26001', peso_effettivo: 4000, stato: 'terminato' },
+    { numero_fir: 'RGYTR000002AA', id_ordine: 'ET26002', peso_effettivo: 3500, stato: 'terminato' },
+    { numero_fir: 'RGYTR000003AA', id_ordine: 'ET26003', peso_effettivo: 4500, stato: 'terminato' },
+  ];
+  const conf = confrontaConsuntivo(lette.righe, nostri);
+  verifica('e il consuntivo, che quadra al chilo, viene dichiarato quadrato',
+    conf.quadra === true && conf.uguali === 3 && conf.totale_consuntivo_kg === 12000 && conf.totale_gestionale_kg === 12000,
+    J([conf.quadra, conf.uguali, conf.peso_diverso, conf.solo_consuntivo, conf.solo_gestionale]));
+}
+{
+  // Ma una colonna d'ordine vera resta un ordine, e una data vera resta una data:
+  // l'esclusione non deve mangiarsi i casi normali.
+  const col = colonneDaIntestazioni(['N. Ordine', 'Data fine trasporto', 'Formulario', 'Kg']);
+  verifica('«N. Ordine» e\' l\'ordine e «Data fine trasporto» e\' il giorno',
+    col.id_ordine && /Ordine/.test(col.id_ordine.testo) && col.giorno && /fine trasporto/.test(col.giorno.testo),
+    J({ ord: col.id_ordine, gio: col.giorno }));
+  const conTicket = colonneDaIntestazioni(['Ticket', 'Data', 'Peso']);
+  verifica('«Ticket» resta un ordine e «Data» da sola resta un giorno',
+    conTicket.id_ordine && /Ticket/.test(conTicket.id_ordine.testo) && conTicket.giorno && /Data/.test(conTicket.giorno.testo),
+    J({ ord: conTicket.id_ordine, gio: conTicket.giorno }));
+}
+{
   // Il principio: se l'intestazione dice una cosa e i valori un'altra, vincono i
   // valori. Serve per i fornitori futuri, che chiameranno le colonne come vogliono.
   const celle = [
