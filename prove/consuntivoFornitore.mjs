@@ -903,6 +903,44 @@ const STAMPA = [
 // Tyre. Il consuntivo di Torres, esatto, usciva pieno di difformita' inventate,
 // e il documento che gli si manda indietro portava i formulari di un altro
 // soggetto: cose che lui non puo' nemmeno conoscere.
+// UNA DATA DIVERSA DI UN GIORNO NON E' UN NUMERO SBAGLIATO.
+//
+// Difetto media dell'audit del 03/10/2026. Il fornitore scrive la data del suo
+// documento - spesso la partenza - e noi registriamo la fine del trasporto: su un
+// carico partito il 9 e arrivato il 10 le due date non coincidono e nessuno ha
+// sbagliato niente. Contandola fra le difformita', un consuntivo esatto al chilo
+// usciva «non conforme» con scritto che c'e' un numero errato che non c'e'.
+console.log('LA DATA DEL FORNITORE E LA NOSTRA FINE TRASPORTO');
+{
+  const nostri = [
+    { numero_fir: 'RGYTR000001AA', id_ordine: 'ET26001', peso_effettivo: 4000, stato: 'terminato', trasporto_finito_il: '2026-09-10T00:00:00Z' },
+    { numero_fir: 'RGYTR000002AA', id_ordine: 'ET26002', peso_effettivo: 3500, stato: 'terminato', trasporto_finito_il: '2026-09-11T00:00:00Z' },
+  ];
+  const suo = [
+    { numero_fir: 'RGYTR000001AA', kg: 4000, giorno: '2026-09-09' },
+    { numero_fir: 'RGYTR000002AA', kg: 3500, giorno: '2026-09-11' },
+  ];
+  const c = confrontaConsuntivo(suo, nostri);
+  verifica('i chili tornano e il consuntivo quadra', c.quadra === true && c.uguali === 2, J([c.quadra, c.uguali]));
+  verifica('la data diversa non si conta fra le difformita\'', c.con_differenze === 0, J(c.differenze));
+  verifica('ma si dice lo stesso, in un elenco suo', c.con_date_diverse === 1
+    && /Data diversa/.test(((c.date_diverse[0] || {}).differenze[0] || {}).testo || ''), J(c.date_diverse));
+  const e = esitoConsuntivo({ confronto: c, costo: { trovato: true, tonnellate: 7.5, importo: 500, righe: [] }, importo_consuntivo: 500 });
+  verifica('e il verdetto resta verde: non c\'e\' niente da correggere',
+    e.quadra_tutto === true, J([e.quadra_tutto, e.quadra_quantita, e.quadra_con_passiva, e.quadra_importo]));
+  const t = testoEsitoConsuntivo(c, e);
+  verifica('il testo lo spiega invece di accusare un numero sbagliato',
+    /data diversa dalla nostra/i.test(t) && !/numero scritto in modo diverso/.test(t), t);
+  // Un numero davvero sbagliato continua a valere come prima.
+  const conFirStorto = confrontaConsuntivo(
+    [{ numero_fir: 'RGYTR000001AA', id_ordine: 'ET26999', kg: 4000, giorno: '2026-09-10' }],
+    [nostri[0]]);
+  verifica('un ID ordine sbagliato resta una difformita\'',
+    conFirStorto.con_differenze === 1 && conFirStorto.con_date_diverse === 0, J(conFirStorto.differenze));
+  verifica('e tiene il verdetto fuori dal verde',
+    esitoConsuntivo({ confronto: conFirStorto, costo: { trovato: true, tonnellate: 4, importo: 100, righe: [] }, importo_consuntivo: 100 }).quadra_tutto === false);
+}
+
 console.log('CATENE DI FATTURAZIONE E CASI DI CONFINE');
 const ANAGRAFICA_GRUPPO = [
   { ragione_sociale: 'GREEN TYRE PROJECT SRL' },

@@ -1047,9 +1047,21 @@ export function confrontaConsuntivo(righeConsuntivo, movimenti, { tolleranza_kg 
     peso_diverso: conta('peso_diverso'),
     // I carichi riconosciuti nonostante un numero scritto male: i chili tornano,
     // ma nel file del fornitore c'e' un errore da correggere (01/10/2026).
-    con_differenze: voci.filter(v => (v.differenze || []).length).length,
-    differenze: voci.filter(v => (v.differenze || []).length)
-      .map(v => ({ chiave: v.chiave, scritto_nel_consuntivo: v.scritto_nel_consuntivo, riconosciuto_da: v.riconosciuto_da, differenze: v.differenze })),
+    //
+    // UNA DATA DIVERSA DI UN GIORNO NON E' UN NUMERO SBAGLIATO. Il fornitore
+    // scrive la data del suo documento - spesso la partenza - e noi registriamo
+    // la fine del trasporto: su un carico partito il 9 e arrivato il 10 le due
+    // date non coincidono e nessuno ha sbagliato niente. Contandola fra le
+    // difformita', un consuntivo esatto al chilo usciva «non conforme» con
+    // scritto che c'e' un numero errato che non c'e' (audit del 03/10/2026).
+    // La si dice lo stesso - serve, ed e' la regola dei confronti con piu'
+    // informazioni - ma in un elenco suo, e non fa diventare rosso il verdetto.
+    con_differenze: voci.filter(v => (v.differenze || []).some(d => d.campo !== 'giorno')).length,
+    differenze: voci.filter(v => (v.differenze || []).some(d => d.campo !== 'giorno'))
+      .map(v => ({ chiave: v.chiave, scritto_nel_consuntivo: v.scritto_nel_consuntivo, riconosciuto_da: v.riconosciuto_da, differenze: v.differenze.filter(d => d.campo !== 'giorno') })),
+    con_date_diverse: voci.filter(v => (v.differenze || []).some(d => d.campo === 'giorno')).length,
+    date_diverse: voci.filter(v => (v.differenze || []).some(d => d.campo === 'giorno'))
+      .map(v => ({ chiave: v.chiave, differenze: v.differenze.filter(d => d.campo === 'giorno') })),
     solo_consuntivo: conta('solo_consuntivo'),
     solo_gestionale: conta('solo_gestionale'),
     kg_solo_consuntivo: kgDi('solo_consuntivo', 'kg_consuntivo'),
@@ -1258,6 +1270,15 @@ export function testoEsitoConsuntivo(confronto, esito) {
   if (confronto.con_differenze) {
     const n = confronto.con_differenze;
     parti.push(`${n === 1 ? 'Un carico è stato riconosciuto' : `${n} carichi sono stati riconosciuti`} nonostante un numero scritto in modo diverso, confrontando le altre informazioni della riga: ${(confronto.differenze || []).slice(0, 5).map(d => `${(d.differenze[0] || {}).testo || d.chiave}${d.riconosciuto_da && d.riconosciuto_da.length ? ` (riconosciuto da: ${d.riconosciuto_da.join(', ')})` : ''}`).join('; ')}. I chili tornano, ma il numero sul consuntivo va corretto.`);
+  }
+  // UNA DATA DIVERSA DENTRO LO STESSO MESE SI DICE, MA NON E' UN ERRORE. Il
+  // fornitore scrive la data del suo documento, noi la fine del trasporto: su un
+  // carico partito il 9 e arrivato il 10 le due date non coincidono e nessuno ha
+  // sbagliato niente. Si dice perche' serve a leggere la riga, non perche' ci sia
+  // qualcosa da correggere (audit del 03/10/2026).
+  if (confronto.con_date_diverse) {
+    const n = confronto.con_date_diverse;
+    parti.push(`${n === 1 ? 'Un carico porta una data diversa dalla nostra' : `${n} carichi portano una data diversa dalla nostra`}, sempre dentro il mese: ${(confronto.date_diverse || []).slice(0, 5).map(d => (d.differenze[0] || {}).testo || d.chiave).join('; ')}. Non è una difformità: il fornitore scrive la data del suo documento, noi la fine del trasporto.`);
   }
   // LA DATA DI UN MESE CHE NON C'ENTRA E' UN ERRORE, e si dice subito dopo la
   // quadratura (utente, 01/10/2026). Prima quelle righe finivano nel mucchio
