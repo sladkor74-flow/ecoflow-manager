@@ -9,12 +9,20 @@ import { Loader2, AlertTriangle, Info, Check } from 'lucide-react';
 import { materialiDi, sommaMateriali, controlliDichiarazione, CANALI, MOTIVI_ASSENZA } from '@/lib/dichiarazioniImpianti';
 import { formatKg } from '@/lib/utils';
 import LetturaAci from '@/components/dichiarazioni/LetturaAci';
+import { numeroKg } from '@/lib/dichiarazioneAci';
 
 // La dichiarazione di un mese: quanto ha dichiarato l'impianto, che cosa ne è
 // uscito, se il documento è in mano e se è stato caricato a portale.
 
 const kg = (v) => formatKg(v);
-const numero = (v) => { const n = Number(String(v).replace(/\./g, '').replace(',', '.')); return Number.isFinite(n) ? n : 0; };
+// I CHILI SCRITTI A MANO SI LEGGONO COME QUELLI LETTI DAI PDF.
+//
+// Qui c'era una regola tutta sua: via i punti, la virgola a decimale. Quindi
+// «13.640» faceva 13.640 kg ma «13,640» faceva 13,64 - mille volte meno - e
+// nessuno se ne accorgeva, perche' il numero lo si scrive copiandolo dalla
+// dichiarazione e la dichiarazione lo scrive all'italiana in tutti e due i modi.
+// E' la stessa trappola gia' chiusa nel lettore dei PDF ACI (audit 03/10/2026):
+// ora la regola e' una sola, numeroKg, e sta in un posto solo.
 const oggi = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
 
 export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalvato }) {
@@ -110,15 +118,15 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
           motivo_assenza: dati.motivo_assenza, note: dati.note, quantita_kg: 0,
           inviata_consorzio_il: dati.inviata_consorzio_il || '',
           ricevuta_email: false, ricevuta_il: '', caricata_inviata: false, caricata_il: '',
-          ...Object.fromEntries(materiali.map(m => [m.chiave, senzaMateriali ? 0 : numero(dati[m.chiave])])),
+          ...Object.fromEntries(materiali.map(m => [m.chiave, senzaMateriali ? 0 : numeroKg(dati[m.chiave])])),
         }
         : {
           ...dati,
           motivo_assenza: '',
-          quantita_kg: numero(dati.quantita_kg),
+          quantita_kg: numeroKg(dati.quantita_kg),
           ricevuta_il: dati.ricevuta_email ? (dati.ricevuta_il || oggi()) : '',
           caricata_il: dati.caricata_inviata ? (dati.caricata_il || oggi()) : '',
-          ...Object.fromEntries(materiali.map(m => [m.chiave, numero(dati[m.chiave])])),
+          ...Object.fromEntries(materiali.map(m => [m.chiave, numeroKg(dati[m.chiave])])),
         };
       if (d && d.id) await base44.entities.DichiarazioneSito.update(d.id, campi);
       else {

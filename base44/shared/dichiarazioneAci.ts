@@ -100,7 +100,7 @@ const testo = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 // La regola: un punto o una virgola seguiti da ESATTAMENTE tre cifre separano le
 // migliaia. Su una dichiarazione in chili "qualcosa,640" non e' mai un decimale, e
 // i decimali veri (",5") restano decimali.
-function numeroKg(v) {
+export function numeroKg(v) {
   if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v) : 0;
   const s = String(v ?? '').replace(/[^0-9,.-]/g, '')
     .replace(/[.,](?=\d{3}(?:\D|$))/g, '')

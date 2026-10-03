@@ -18,7 +18,7 @@
 // Niente rete: si prova la logica pura, mai il modello.
 // npm run prove
 import {
-  controllaLettura, unisciLetture, riscontroConferito, periodoLettura, ticketAci, stessoImpianto, SCHEMA_LETTURA,
+  controllaLettura, unisciLetture, riscontroConferito, periodoLettura, ticketAci, stessoImpianto, SCHEMA_LETTURA, numeroKg,
 } from '../base44/shared/dichiarazioneAci.ts';
 
 let ok = 0, ko = 0;
@@ -370,6 +370,30 @@ const mesiDiversi = unisciLetture([GATIM_1, { ...GATIM_1, file: 'altro.pdf', for
 verifica('con mesi diversi il totale si dichiara non sommato',
   mesiDiversi.sommato === false && mesiDiversi.quantita_kg === 0, JSON.stringify([mesiDiversi.sommato, mesiDiversi.gruppi.length]));
 verifica('con un mese solo il totale e\' sommato', unisciLetture([GATIM_1]).sommato === true);
+
+// LA STESSA REGOLA VALE PER I CHILI SCRITTI A MANO.
+//
+// numeroKg adesso e' esportata perche' la usa anche la casella del dialogo del
+// mese (src/components/dichiarazioni/DialogoMese.jsx), che fino al 04/10/2026
+// aveva una regola tutta sua: via i punti, la virgola a decimale. Cosi' «13.640»
+// faceva 13.640 kg e «13,640» faceva 13,64 - mille volte meno - sulla stessa
+// casella, a seconda di come il numero era scritto sulla dichiarazione da cui lo
+// si copia. Una dichiarazione da 13.640 kg risultava dichiarata per 14.
+console.log('I CHILI, COMUNQUE SIANO SCRITTI');
+verifica('il punto delle migliaia', numeroKg('13.640') === 13640 && numeroKg('1.234.567') === 1234567);
+verifica('e la virgola delle migliaia, che e\' il caso che costava mille volte',
+  numeroKg('13,640') === 13640, String(numeroKg('13,640')));
+verifica('un decimale vero resta un decimale, e i chili sono interi',
+  numeroKg('13,5') === 14 && numeroKg('13.5') === 14 && numeroKg('12,4') === 12,
+  JSON.stringify([numeroKg('13,5'), numeroKg('13.5'), numeroKg('12,4')]));
+verifica('un numero senza separatori non cambia', numeroKg('13640') === 13640 && numeroKg(13640) === 13640);
+verifica('i chili scritti con l\'unita\' o con gli spazi si leggono lo stesso',
+  numeroKg('13.640 kg') === 13640 && numeroKg(' 13.640 ') === 13640, String(numeroKg('13.640 kg')));
+verifica('il vuoto e le parole valgono zero, non NaN',
+  numeroKg('') === 0 && numeroKg(null) === 0 && numeroKg(undefined) === 0 && numeroKg('abc') === 0);
+verifica('tre cifre dopo la virgola in mezzo al numero sono migliaia, non decimali',
+  numeroKg('1,234,567') === 1234567 && numeroKg('1.234,56') === 1235,
+  JSON.stringify([numeroKg('1,234,567'), numeroKg('1.234,56')]));
 
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');
