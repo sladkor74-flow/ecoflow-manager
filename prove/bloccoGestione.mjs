@@ -38,6 +38,22 @@ verifica('diciassette terziarie', righe.slice(primaTer - 1, indice.totale_terzia
 verifica('la prima come nel file', testo(primaTer, 0) === 'TER26153987' && cella(primaTer, 4) === 1 && cella(primaTer, 5) === 25880 && cella(primaTer, 8) === 25880 && cella(primaTer, 9) === 4850);
 verifica('le formule della prima riga', testo(primaTer, 10) === `=I${primaTer}+J${primaTer}` && testo(primaTer, 11) === `=38000-K${primaTer}` && testo(primaTer, 12) === `=J${primaTer}/K${primaTer}`);
 verifica('l\'ultima terziaria e\' quella parziale con l\'extra', testo(indice.totale_terziarie - 1, 0) === 'TER26154141' && cella(indice.totale_terziarie - 1, 8) === 15100);
+// QUANTO RESTA AI 38.000 KG SI CONTA SUL PESO DI CHIUSURA (audit del 03/10/2026).
+//
+// L'ultima terziaria porta anche l'extra raccolta, e a portale la dichiarazione
+// si chiude col peso intero. Contando 38.000 meno la sola rete il margine usciva
+// piu' grande del vero esattamente dell'extra - 460 kg ad agosto 2026 - e chi
+// ripartiva il ferro fin la' chiudeva la terziaria a 38.460 kg, che il portale
+// rifiuta. Il riepilogo Excel della pratica lo faceva gia' bene, questo blocco no,
+// e sono gli stessi numeri in due documenti che si leggono insieme.
+const ultimaTer = indice.totale_terziarie - 1;
+verifica('sull\'ultima terziaria il margine toglie anche l\'extra raccolta',
+  testo(ultimaTer, 11) === `=38000-(K${ultimaTer}+460)`, testo(ultimaTer, 11));
+verifica('e la percentuale di ferro si conta su quello che si carica, ferro dell\'extra compreso',
+  testo(ultimaTer, 12) === `=(J${ultimaTer}+120)/(K${ultimaTer}+460)`, testo(ultimaTer, 12));
+verifica('le altre terziarie restano come prima, perche\' l\'extra sta in una sola',
+  testo(ultimaTer - 1, 11) === `=38000-K${ultimaTer - 1}` && testo(ultimaTer - 1, 12) === `=J${ultimaTer - 1}/K${ultimaTer - 1}`,
+  testo(ultimaTer - 1, 11));
 verifica('i totali delle terziarie sommano le loro righe', testo(indice.totale_terziarie, 10) === `=SUM(K${primaTer}:K${indice.totale_terziarie - 1})`);
 const cippato = righe.slice(primaTer - 1, indice.totale_terziarie - 1).reduce((s, r) => s + r[8], 0);
 const ferro = righe.slice(primaTer - 1, indice.totale_terziarie - 1).reduce((s, r) => s + r[9], 0);

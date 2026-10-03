@@ -116,11 +116,35 @@ export function righeBlocco(dati) {
     vuota(); vuota();
     metti(['ORDINE TERZIARIA', 'PRODUTTORE', 'TRASPORTATORE', 'DESTINATARIO', 'Nr. ALLEGATO VII', 'PESO [Kg]', 'DATA TRASPORTO', 'DATA CONFERIMENTO', 'CIPP / CIAB', 'EER 19.12.02', 'TOTALE'], 'testa_ter');
     const primaTer = numero() + 1;
+    // QUANTO RESTA AI 38.000 KG SI CONTA SUL PESO DI CHIUSURA, NON SULLA RETE.
+    //
+    // La colonna K e' la sola parte di rete. L'ultima terziaria pero' porta anche
+    // l'extra raccolta - a portale non e' gestita e si assimila li' - e la
+    // dichiarazione si chiude col peso intero. Contando 38.000 - K il margine
+    // risultava piu' grande del vero esattamente dell'extra (460 kg ad agosto
+    // 2026), e chi ripartiva il ferro fin la' chiudeva la terziaria a 38.460 kg:
+    // il portale la rifiuta. Il riepilogo Excel della pratica lo aveva gia'
+    // corretto (documentiIrigom.js), questo blocco no, e sono gli stessi numeri
+    // in due documenti (audit del 03/10/2026).
+    //
+    // La riga che porta l'extra si riconosce dalla terziaria o dall'allegato, che
+    // sono i due campi con cui l'extra dice dov'e' stata assimilata.
+    const extraQui = (t) => {
+      const e = dati.extra;
+      if (!e) return 0;
+      const stessaTerziaria = String(t.terziaria || '').trim() && String(t.terziaria || '').trim() === String(e.terziaria || '').trim();
+      const stessoAllegato = intero(t.allegato) > 0 && intero(t.allegato) === intero(e.allegato);
+      return stessaTerziaria || stessoAllegato ? intero(e.totale_kg) : 0;
+    };
     for (const t of dati.terziarie) {
       const r = numero() + 1;
       const g = cellaData(dati.partenza || t.data);
+      const ex = extraQui(t);
+      const exFerro = ex ? intero(dati.extra.ferro_kg) : 0;
       metti([String(t.terziaria || ''), 'IRIGOM', String(t.trasportatore || ''), String(t.destinatario || ''), intero(t.allegato), intero(t.peso_allegato_kg), g, g,
-        intero(t.cippato_kg), intero(t.ferro_kg), formula(`I${r}+J${r}`), formula(`38000-K${r}`), formula(`J${r}/K${r}`, '0.00%')], 'ter');
+        intero(t.cippato_kg), intero(t.ferro_kg), formula(`I${r}+J${r}`),
+        ex ? formula(`38000-(K${r}+${ex})`) : formula(`38000-K${r}`),
+        ex ? formula(`(J${r}+${exFerro})/(K${r}+${ex})`, '0.00%') : formula(`J${r}/K${r}`, '0.00%')], 'ter');
     }
     const ultimaTer = numero();
     metti([null, null, null, null, null, formula(`SUM(F${primaTer}:F${ultimaTer})`), null, null,
