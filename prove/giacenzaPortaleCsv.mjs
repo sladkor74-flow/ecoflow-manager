@@ -65,6 +65,12 @@ console.log('IL FILE VERO DI IRIGOM, 03/10/2026');
 const l = leggiCsvPortale(testo);
 verifica('143 ordini, nessun doppione e nessuna riga da sistemare', l.righe.length === 143 && l.doppioni.length === 0 && l.senza_data.length === 0 && l.senza_classe.length === 0 && l.senza_peso.length === 0 && l.negativi.length === 0, `${l.righe.length} ${JSON.stringify(l.avvisi)}`);
 verifica('nessun avviso: il file e\' pulito', l.avvisi.length === 0 && l.filtro_kg === 0, JSON.stringify(l.avvisi));
+// Il file di prova deve avere i pesi col PUNTO DELLE MIGLIAIA, come li scrive il
+// portale all'italiana ('3.340'): e' il formato che l'utente usa dal 03/10/2026.
+// Senza questo controllo, un file di prova rigenerato coi pesi nudi lascerebbe
+// scoperta la lettura all'italiana senza che nessuna prova se ne accorga.
+const conPunto = linee.slice(1).filter(r => /\d\.\d{3}/.test(r.split(';')[10])).length;
+verifica('il file di prova e\' davvero in formato italiano', conPunto === 132, `${conPunto} pesi col punto su 143`);
 verifica('un solo sito, Irigom', l.siti.length === 1 && l.siti[0].sito_chiave === 'irigom', JSON.stringify(l.siti.map(s => s.sito_chiave)));
 verifica('tutto rete, nessuna ACI: i canali non si mescolano', l.siti[0].rete_kg === 543220 && l.siti[0].aci_kg === 0 && l.siti[0].senza_canale_kg === 0, JSON.stringify(l.siti[0]));
 verifica('il file arriva fino al 1 ottobre', l.primo_giorno === '2026-08-24' && l.ultimo_giorno === '2026-10-01', `${l.primo_giorno} ${l.ultimo_giorno}`);
@@ -119,10 +125,12 @@ const negativo = conRighe(righe => righe.map((r, i) => (i === 0 ? r.replace(';10
 verifica('un peso negativo si segnala', negativo.negativi.length === 1 && negativo.avvisi.some(a => /negativo/.test(a)), JSON.stringify(negativo.avvisi));
 // Il filtro della schermata del portale viaggia dentro l'export: con quello
 // acceso il file e' solo una parte della giacenza.
-const filtrato = conRighe(righe => righe.filter(r => {
-  const c = r.split(';');
-  return Number(c[10]) >= 5000;
-}).map(r => { const c = r.split(';'); c[4] = '5000'; return c.join(';'); }));
+// Il peso si legge con numeroDa, non con Number: nel file vero e' '3.340', e
+// Number lo prende per 3,34. Scritte con Number, due prove qui sotto passavano
+// solo finche' l'export aveva i pesi senza il punto delle migliaia.
+const pesoDi = (riga) => numeroDa(riga.split(';')[10]) || 0;
+const filtrato = conRighe(righe => righe.filter(r => pesoDi(r) >= 5000)
+  .map(r => { const c = r.split(';'); c[4] = '5.000'; return c.join(';'); }));
 verifica('un export fatto col filtro acceso si riconosce e si dice',
   filtrato.filtro_kg === 5000 && filtrato.avvisi.some(a => /senza quel filtro/.test(a)) && kgDi(filtrato) === 198700, `${filtrato.filtro_kg} ${kgDi(filtrato)}`);
 
@@ -141,12 +149,17 @@ verifica('un campo quotato porta dentro il separatore e le virgolette doppie',
 // Lo stesso file salvato in inglese: separatore virgola, migliaia con la virgola.
 const inglese = [linee[0].split(';').join(','), ...linee.slice(1).map(r => {
   const c = r.split(';');
-  c[10] = '"' + Number(c[10]).toLocaleString('en-US') + '"';
+  c[10] = '"' + pesoDi(r).toLocaleString('en-US') + '"';
   return c.join(',');
 })].join('\n');
 const li = leggiCsvPortale(inglese);
 verifica('un file salvato in inglese da\' gli stessi chili, non mille volte meno',
   li.righe.length === 143 && kgDi(li) === 519920 && li.senza_peso.length === 0, `${li.righe.length} ${kgDi(li)}`);
+// E lo stesso file coi pesi senza il punto delle migliaia, com'erano nel primo
+// export del portale ('3340' invece di '3.340'): i due si leggono uguale.
+const senzaPunti = conRighe(righe => righe.map(r => { const c = r.split(';'); c[10] = String(pesoDi(r)); return c.join(';'); }));
+verifica('coi pesi senza il punto delle migliaia i chili sono gli stessi',
+  senzaPunti.righe.length === 143 && kgDi(senzaPunti) === 519920 && senzaPunti.senza_peso.length === 0, String(kgDi(senzaPunti)));
 // Un ordine ripetuto (due pagine del portale che si sovrappongono) non si conta due volte.
 const doppio = conRighe(righe => [...righe, righe[0]]);
 verifica('un ordine ripetuto si conta una volta sola, e si dice',
