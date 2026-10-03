@@ -3,6 +3,9 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import { formatNumber, formatTonnellate, formatIntero, formatKg } from '@/lib/utils';
+// I nomi dei canali sono quelli del modulo Dichiarazioni Impianti: le righe per
+// canale di qui e quelle del riepilogo delle dichiarazioni devono chiamarsi uguale.
+import { CANALI } from '@/lib/dichiarazioniImpianti';
 import { riassuntoGruppo } from '@/components/giacenze/DateDaSistemare';
 
 function fmt(n, dec = 2) {
@@ -80,14 +83,23 @@ function fmtDataOra(d) {
   return `${x.toLocaleDateString('it-IT')} ${x.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
-// Come si arriva alla giacenza di uno stoccaggio: l'ancora dell'anno, ingressi e
-// uscite finiti dopo, un canale per volta; l'ultima lettura e' il riscontro
-// (24/09/2026). L'extra raccolta, che a portale non c'e', a parte.
-function DettaglioStoccaggio({ r }) {
+// Come si arriva alla giacenza di uno stoccaggio, UN CANALE PER VOLTA: l'ancora
+// dell'anno, piu' gli ingressi e meno le uscite di quel canale finiti dopo;
+// l'ultima lettura del portale e' il riscontro (24/09/2026). Sta sotto la
+// giacenza del canale, perche' il conto e' suo: rete e ACI non si sommano, e
+// l'extra raccolta, che a portale non c'e', non ha ne' ancora ne' lettura.
+function DettaglioStoccaggio({ r, canale }) {
   const d = r.dopo_rilevazione;
   if (!d) return null;
-  const kgRil = (soloAci) => Object.entries(r.rilevazione_classi_kg || {}).reduce((s, [c, v]) => s + ((c === 'ACI') === soloAci ? v : 0), 0);
-  const mov = (m) => (m && (m.ingressi || m.uscite) ? ` · +${m.ingressi} −${m.uscite}` : '');
+  const soloAci = canale === 'ACI';
+  // I movimenti del canale della riga e i chili da cui parte: la classe 9 e'
+  // l'ACI, le altre quattro sono rete.
+  const suoi = soloAci ? d.aci : d.rete;
+  if (!suoi) return null;
+  const ancoraKg = Object.entries(r.rilevazione_classi_kg || {}).reduce((s, [c, v]) => s + ((c === 'ACI') === soloAci ? v : 0), 0);
+  const nome = soloAci ? 'ACI' : 'Rete';
+  const classi = soloAci ? 'classe 9' : 'classi P, M, G1, G2';
+  const mov = suoi.ingressi || suoi.uscite ? ` · +${suoi.ingressi} −${suoi.uscite}` : '';
   return (
     <TooltipProvider>
       <Tooltip>
@@ -96,17 +108,16 @@ function DettaglioStoccaggio({ r }) {
             {r.rilevazione_obsoleta && <AlertTriangle className="w-3 h-3" />}
             <span className="underline decoration-dotted underline-offset-2">
               {d.ultima_lettura && d.ultima_lettura !== d.dal
-                ? <>dall&apos;ancora del {fmtDate(d.dal)}{mov(d.rete)} · letto il {fmtDate(r.data_rilevazione)}</>
-                : <>dalla lettura del {fmtDate(d.dal)}{mov(d.rete)}</>}
+                ? <>dall&apos;ancora del {fmtDate(d.dal)}{mov} · letto il {fmtDate(r.data_rilevazione)}</>
+                : <>dalla lettura del {fmtDate(d.dal)}{mov}</>}
             </span>
           </div>
         </TooltipTrigger>
         <TooltipContent className="max-w-sm text-xs space-y-1">
-          <div>Ancora dell&apos;anno, la rilevazione del {fmtDate(d.dal)}: rete {formatKg(kgRil(false))} kg (classi P, M, G1, G2), ACI {formatKg(kgRil(true))} kg (classe 9).</div>
-          <div>Rete, finiti dopo l&apos;ancora: {d.rete.ingressi} ingressi per {formatKg(d.rete.ingressi_kg)} kg, {d.rete.uscite} uscite per {formatKg(d.rete.uscite_kg)} kg.</div>
-          <div>ACI, finiti dopo l&apos;ancora: {d.aci.ingressi} ingressi per {formatKg(d.aci.ingressi_kg)} kg, {d.aci.uscite} uscite per {formatKg(d.aci.uscite_kg)} kg.</div>
+          <div>Ancora dell&apos;anno, la rilevazione del {fmtDate(d.dal)}: {nome} {formatKg(ancoraKg)} kg ({classi}).</div>
+          <div>{nome}, finiti dopo l&apos;ancora: {suoi.ingressi} ingressi per {formatKg(suoi.ingressi_kg)} kg, {suoi.uscite} uscite per {formatKg(suoi.uscite_kg)} kg.</div>
+          <div>L&apos;altro canale ha la sua riga, con il suo conto: i due non si sommano.</div>
           {d.ultima_lettura && d.ultima_lettura !== d.dal && <div>L&apos;ultima lettura del portale, del {fmtDate(d.ultima_lettura)}, e&apos; il riscontro: si confronta con questo numero nella riconciliazione del piazzale, ma non lo cambia.</div>}
-          {r.giacenza_extra_t ? <div>Extra raccolta in piazzale, fuori portale: {fmt(r.giacenza_extra_t)} t.</div> : null}
           <div>Movimenti caricati fino al {fmtDate(r.aggiornata_al)}, per fine trasporto. {r.rilevazione_obsoleta ? RILEVAZ_OBSOLETA_TOOLTIP : ''}</div>
         </TooltipContent>
       </Tooltip>
@@ -114,32 +125,29 @@ function DettaglioStoccaggio({ r }) {
   );
 }
 
-// La somma dei soli movimenti in archivio, accanto alla giacenza del piazzale.
-// Si mostra per quello che e': da quando conta, quanti movimenti sono, e se esce
-// sotto zero si dice perche' invece di farla passare per una giacenza. La rete
-// sta sulla riga, ACI ed extra raccolta nel dettaglio: i canali non si sommano.
-function SaldoArchivio({ r }) {
-  const rete = riassuntoArchivio(r.saldo_movimenti_archivio, 'RETE');
-  if (!rete) return null;
-  const aci = riassuntoArchivio(r.saldo_movimenti_archivio, 'ACI');
-  const extra = riassuntoArchivio(r.saldo_movimenti_archivio, 'EXTRA_RACCOLTA');
+// La somma dei soli movimenti in archivio del canale, sotto la sua giacenza. Si
+// mostra per quello che e': da quando conta, quanti movimenti sono, e se esce
+// sotto zero si dice perche' invece di farla passare per una giacenza. Una riga
+// per canale: prima la rete stava sulla riga e gli altri due si leggevano solo
+// passando col mouse sul suo tooltip.
+function SaldoArchivio({ r, canale }) {
+  const a = riassuntoArchivio(r.saldo_movimenti_archivio, canale);
+  if (!a) return null;
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className={`mt-0.5 text-[11px] flex items-center justify-end gap-1 cursor-help ${rete.negativo ? 'text-amber-700' : 'text-muted-foreground'}`}>
-            {rete.negativo && <AlertTriangle className="w-3 h-3 shrink-0" />}
-            <span className="underline decoration-dotted underline-offset-2">{rete.riga}</span>
+          <div className={`mt-0.5 text-[11px] flex items-center justify-end gap-1 cursor-help ${a.negativo ? 'text-amber-700' : 'text-muted-foreground'}`}>
+            {a.negativo && <AlertTriangle className="w-3 h-3 shrink-0" />}
+            <span className="underline decoration-dotted underline-offset-2">{a.riga}</span>
           </div>
         </TooltipTrigger>
         <TooltipContent className="max-w-sm text-xs space-y-1">
-          <div className="font-semibold">Non e&apos; una giacenza: e&apos; la somma dei soli movimenti che il gestionale ha in archivio.</div>
-          <div>{rete.avvertenza}</div>
-          <div>Rete: {rete.dettaglio}</div>
-          {aci && <div>ACI, che non si somma alla rete: {formatTonnellate(aci.t)} t dal {fmtGiorno(aci.dal)}. {aci.dettaglio}</div>}
-          {extra && <div>Extra raccolta, a parte anch&apos;essa: {formatTonnellate(extra.t)} t dal {fmtGiorno(extra.dal)}. {extra.dettaglio}</div>}
-          {rete.senza_fine > 0 && <div>{formatIntero(rete.senza_fine)} movimenti di rete sono fuori da questa somma perche&apos; non hanno la fine trasporto: senza quella data non si collocano in nessun giorno.</div>}
-          <div>La giacenza vera resta quella sopra: l&apos;ancora dell&apos;anno piu&apos; i movimenti finiti dopo. Questa somma serve a vedere quanto manca all&apos;appello e da quando.</div>
+          <div className="font-semibold">Non e&apos; una giacenza: e&apos; la somma dei soli movimenti che il gestionale ha in archivio su questo canale.</div>
+          <div>{a.avvertenza}</div>
+          <div>{a.dettaglio}</div>
+          {a.senza_fine > 0 && <div>{formatIntero(a.senza_fine)} movimenti sono fuori da questa somma perche&apos; non hanno la fine trasporto: senza quella data non si collocano in nessun giorno.</div>}
+          <div>La giacenza vera resta quella sopra: l&apos;ancora dell&apos;anno piu&apos; i movimenti finiti dopo. Questa somma serve a vedere quanto manca all&apos;appello e da quando. Gli altri canali hanno le loro righe e non si sommano a questa.</div>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -227,7 +235,7 @@ const NOME_ARCHIVIO = {
 
 /**
  * GLI ORDINI DIETRO LA GIACENZA ACI DI UN PIAZZALE (richiesta dell'utente,
- * 28/09/2026): si apre il numero della colonna e si vedono le righe che lo
+ * 28/09/2026): si apre il numero della riga ACI e si vedono le righe che lo
  * compongono, una per una, col ticket accanto al peso.
  *
  * Buona parte di esse sta nei TERMINATI RETE: una primaria di classe 9 che si
@@ -235,7 +243,7 @@ const NOME_ARCHIVIO = {
  * l'archivio (decisione dell'utente, 28/09/2026). Per questo ogni riga dice da
  * quale archivio viene.
  *
- * Il totale deve tornare al chilo col numero della colonna. Se non torna, qui
+ * Il totale deve tornare al chilo col numero della riga ACI. Se non torna, qui
  * non si aggiusta niente: si dice lo scarto, perche' vuol dire che c'e' qualcosa
  * da capire.
  */
@@ -302,13 +310,13 @@ function DettaglioAci({ r }) {
         <div className="flex items-start gap-1 text-amber-700">
           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
           <span>
-            La colonna dice {formatKg(d.colonna_kg)} kg e questi ordini ne fanno {formatKg(d.totale_kg)}: {kgSegnoLocale(d.scarto_kg)} kg
+            La riga ACI dice {formatKg(d.colonna_kg)} kg e questi ordini ne fanno {formatKg(d.totale_kg)}: {kgSegnoLocale(d.scarto_kg)} kg
             di scarto. Il totale non si aggiusta per far quadrare la vista: uno scarto vuol dire che un movimento lo vede
             un conto e non l&apos;altro, e va capito. Il riscontro da guardare e&apos; l&apos;estratto conto del piazzale, nella scheda Stoccaggi.
           </span>
         </div>
       ) : (
-        <div className="text-emerald-700">Torna al chilo con la colonna: {formatKg(d.colonna_kg)} kg.</div>
+        <div className="text-emerald-700">Torna al chilo con la riga ACI: {formatKg(d.colonna_kg)} kg.</div>
       )}
       {d.senza_fine > 0 && (
         <div className="flex items-start gap-1 text-amber-700">
@@ -330,9 +338,119 @@ function DettaglioAci({ r }) {
   );
 }
 
+/**
+ * UNA RIGA PER CANALE, NON TRE COLONNE AFFIANCATE.
+ *
+ * Regola dell'utente, 03/10/2026: «ok riga per canale nelle giacenze», dopo aver
+ * chiesto il giorno prima «aggiungi altre righe se necessario cosi' come nel
+ * riepilogo dichiarazioni anche nelle giacenze». Rete, ACI ed extra raccolta
+ * stavano in tre colonne vicine: schiacciati in orizzontale si leggevano male e
+ * l'occhio li sommava, che e' esattamente quello che non deve succedere.
+ *
+ * Adesso ogni sito ha la sua riga - il nome, il ruolo, la rilevazione per classe
+ * del piazzale e la tipologia di trattamento, che non dipendono dal canale - e
+ * sotto una riga per ciascun canale, con la sua giacenza e i numeri che sono
+ * suoi. Le tre righe si vedono sempre, come si vedevano sempre le tre colonne:
+ * una riga che dice «niente» e' un'informazione, mentre un canale che non
+ * comparisse si direbbe dimenticato.
+ *
+ * I nomi dei canali vengono da dichiarazioniImpianti, gli stessi del riepilogo
+ * delle dichiarazioni: i due moduli devono dire le stesse cose, a partire da come
+ * chiamano le righe.
+ */
+
+// Dove un numero non e' del canale la cella resta vuota e il titolo dice perche'.
+// Ripetere li' il numero della rete vorrebbe dire far sommare due canali
+// all'occhio, e inventarne uno sarebbe peggio ancora.
+const SENZA_IN_ATTESA = "Il materiale in attesa di dichiarazione lo dice il file degli ordini non dichiarati del portale, che e' della rete: su questo canale non c'e' un dato, e il numero della rete non si ripete perche' i canali non si sommano.";
+const SENZA_ORDINI = "Gli ordini da dichiarare si contano sul file degli ordini non dichiarati del portale, che e' della rete: su questo canale non ce n'e' nessuno da contare.";
+const SENZA_DICHIARATO = "Il dichiarato dell'anno: per la rete viene dal report del portale, per ACI ed extra raccolta dalle righe mensili trascritte dall'amministratore nel modulo Dichiarazioni Impianti - le stesse che decurtano la giacenza. Un trattino vuol dire che il dato non c'e' ancora, non che e' zero.";
+
+// Che cosa sa dire ogni canale: da dove prende la sua giacenza e quali degli
+// altri numeri sono suoi. Quelli che non ha restano a null, e la cella lo spiega.
+const DETTAGLI_CANALE = {
+  RETE: {
+    nota: 'a portale: la fotografia degli ordini non dichiarati per gli impianti, la rilevazione del piazzale per gli stoccaggi',
+    giacenza: (x) => x.giacenza_portale_t,
+    // Per la rete il conto manda gia' detto se e' sotto zero; sugli altri due
+    // canali lo dice il numero, come faceva la colonna di prima.
+    negativa: (x) => !!x.giacenza_negativa,
+    senza_giacenza: "La giacenza di rete di un piazzale parte dalla rilevazione della pagina Unita' Locali di Stoccaggio: senza un punto di partenza non si calcola, e non vuol dire zero.",
+    // La barra mette a confronto i piazzali fra loro, e il confronto e' della rete.
+    barra: true,
+    // La fotografia del portale, per gli impianti, e' della rete anche lei: il
+    // file degli ordini non dichiarati l'ACI non lo tiene.
+    fotografia: true,
+    // Rete e ACI partono dalla rilevazione del portale e quel conto si puo'
+    // mostrare; l'extra raccolta a portale non c'e' e una rilevazione non l'ha.
+    rilevazione: true,
+    in_attesa: (x) => x.in_attesa_dichiarazione_t,
+    ordini: (x) => x.ordini_da_dichiarare,
+    dichiarato: (x) => x.dichiarato_t,
+  },
+  ACI: {
+    nota: "a portale l'ACI non e' gestito: non si confronta con la fotografia",
+    giacenza: (x) => x.giacenza_aci_t,
+    senza_giacenza: "La giacenza ACI di un piazzale parte dalla rilevazione della classe 9: senza una rilevazione non ha un punto di partenza e non si calcola. Non vuol dire zero.",
+    rilevazione: true,
+    in_attesa: null,
+    ordini: null,
+    dichiarato: (x) => x.dichiarato_aci_t,
+  },
+  EXTRA_RACCOLTA: {
+    nota: "a portale non esiste e non ha una giacenza di apertura: ogni anno riparte da zero",
+    giacenza: (x) => x.giacenza_extra_t,
+    senza_giacenza: "Su questo sito l'extra raccolta non ha movimenti nell'anno: non c'e' un numero da mostrare, e uno zero farebbe pensare a un piazzale svuotato.",
+    in_attesa: null,
+    ordini: null,
+    dichiarato: (x) => x.dichiarato_extra_t,
+  },
+};
+
+// Le righe dei canali, nell'ordine del riepilogo delle dichiarazioni. Un canale
+// che qui non sapessimo leggere resta fuori invece di far cadere la pagina.
+const CANALI_RIGHE = CANALI.filter(c => DETTAGLI_CANALE[c.chiave]).map(c => ({ ...c, ...DETTAGLI_CANALE[c.chiave] }));
+
+// Le colonne della tabella, per le righe che la attraversano tutta: sito, ruolo,
+// giacenza, le classi, in attesa, ordini da dichiarare, dichiarato nell'anno e
+// tipologia di trattamento.
+const COLONNE = 7 + CLASSI.length;
+
+const TITOLO_GIACENZA = "La giacenza del canale della riga. Per gli impianti e' l'apertura piu' quello che e' arrivato meno il dichiarato caricato; per gli stoccaggi la rilevazione del piazzale aggiornata con i movimenti finiti dopo, sempre per fine trasporto. Rete, ACI ed extra raccolta hanno una riga ciascuno e non si sommano mai.";
+const TITOLO_CLASSI = "La rilevazione per classe del piazzale, in kg come nel portale: e' il materiale a terra, non dipende dal canale e per questo sta sulla riga del sito. P, M, G1 e G2 sono rete, la classe 9 e' l'ACI.";
+const TITOLO_SENZA_TOTALE_SITO = "Rete, ACI ed extra raccolta hanno una riga ciascuno, qui sotto: un totale di sito non esiste, perche' i canali non si sommano.";
+
+/**
+ * La giacenza di un canale, com'e'.
+ *
+ * UNA GIACENZA SOTTO ZERO NON SI AZZERA E NON SI NASCONDE: «come puo' essere
+ * negativa una giacenza? succede solo in caso di errore e deve essere corretto»
+ * (utente, 03/10/2026). Appunto: resta rossa e detta, perche' sparendo dalla
+ * vista l'errore resterebbe nei dati. Succede quando il portale ha accettato piu'
+ * di quanto il gestionale gli attribuisce - una dichiarazione caricata su ordini
+ * che non abbiamo, o una fotografia vecchia.
+ *
+ * Quando il canale non ha un numero la cella non dice zero, che sarebbe un'altra
+ * cosa: dice perche' non ce l'ha.
+ */
+function ValoreGiacenza({ valore, negativa, perche }) {
+  if (valore === null || valore === undefined) {
+    return <span className="font-normal text-muted-foreground cursor-help" title={perche}>—</span>;
+  }
+  const sottoZero = negativa || valore < 0;
+  return (
+    <>
+      <div className={`font-bold ${sottoZero ? 'text-red-600' : ''}`}>{fmt(valore)} t</div>
+      {sottoZero && (
+        <div className="text-[10px] font-normal text-red-600 leading-tight">giacenza sotto zero: da correggere</div>
+      )}
+    </>
+  );
+}
+
 export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
   // Quale piazzale ha il dettaglio dell'ACI aperto: uno per volta, e si apre
-  // sulla riga, come il resto del modulo, senza inventare una pagina.
+  // sulla sua riga ACI, come il resto del modulo, senza inventare una pagina.
   const [aciAperto, setAciAperto] = useState('');
   const maxGiacenza = Math.max(...righe.map(r => r.giacenza_portale_t || 0), 0.01);
   const kg = (r, c) => (r.giacenza_classi_kg ? r.giacenza_classi_kg[c] || 0 : null);
@@ -343,19 +461,16 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
         <table className="w-full text-sm">
           <thead className="bg-muted/50">
             <tr className="text-left">
-              <th className="px-3 py-2 font-semibold" rowSpan={2}>Sito</th>
+              <th className="px-3 py-2 font-semibold" rowSpan={2}>Sito · canale</th>
               <th className="px-3 py-2 font-semibold" rowSpan={2}>Ruolo</th>
-              <th className="px-3 py-2 font-semibold text-right" rowSpan={2} title="Rete: per gli impianti la fotografia del portale aggiornata ai caricamenti, per gli stoccaggi la rilevazione per classe aggiornata con i movimenti. L'ACI e' nella sua colonna e non si somma">Giacenza rete a portale</th>
-              {/* I TRE CANALI, TUTTI E TRE A VISTA E MAI SOMMATI. Prima la colonna ACI
-                  di un impianto diceva 0, che non voleva dire zero ma «non calcolata», e
-                  l'extra raccolta si leggeva solo passandoci sopra col mouse. Regola
-                  dell'utente, 03/10/2026. */}
-              <th className="px-3 py-2 font-semibold text-right" rowSpan={2} title="ACI: per gli impianti apertura piu quello che arriva in primaria e in secondaria, meno il dichiarato; per gli stoccaggi la rilevazione di classe 9 aggiornata coi movimenti. A portale l ACI non e gestito: non si confronta con la fotografia">Giacenza ACI</th>
-              <th className="px-3 py-2 font-semibold text-right" rowSpan={2} title="Extra raccolta: quello che e arrivato meno quello che e stato dichiarato. A portale non esiste, e non ha una giacenza di apertura: ogni anno riparte da zero">Extra raccolta</th>
-              <th className="px-3 pt-2 pb-0 font-semibold text-center border-l" colSpan={CLASSI.length}>Giacenza per classe (kg)</th>
+              {/* I TRE CANALI, UNO PER RIGA E MAI SOMMATI: la colonna della
+                  giacenza e' una sola, e quale canale sia lo dice la riga.
+                  Affiancate, le tre colonne di prima si sommavano con l'occhio. */}
+              <th className="px-3 py-2 font-semibold text-right" rowSpan={2} title={TITOLO_GIACENZA}>Giacenza</th>
+              <th className="px-3 pt-2 pb-0 font-semibold text-center border-l" colSpan={CLASSI.length} title={TITOLO_CLASSI}>Giacenza per classe (kg)</th>
               <th className="px-3 py-2 font-semibold text-right border-l" rowSpan={2}>In attesa di dichiarazione</th>
               <th className="px-3 py-2 font-semibold text-right" rowSpan={2}>Ordini da dichiarare</th>
-              <th className="px-3 py-2 font-semibold text-right" rowSpan={2}>Dichiarato nell'anno</th>
+              <th className="px-3 py-2 font-semibold text-right" rowSpan={2}>Dichiarato nell&apos;anno</th>
               <th className="px-3 py-2 font-semibold" rowSpan={2}>Tipologia trattamento</th>
             </tr>
             <tr>
@@ -378,8 +493,12 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
               const apertoAci = apribileAci && aciAperto === chiave;
               return (
                 <React.Fragment key={chiave}>
-                <tr className="border-t hover:bg-muted/30">
-                  <td className="px-3 py-2">{r.sito}<DateRiga r={r} /></td>
+                {/* La riga del sito: il nome, il ruolo, la rilevazione per classe
+                    del piazzale e la tipologia di trattamento. Niente di tutto
+                    questo dipende dal canale, e i numeri dei canali stanno nelle
+                    righe sotto, una per canale. */}
+                <tr className="border-t-2 bg-muted/20">
+                  <td className="px-3 py-2 font-medium">{r.sito}<DateRiga r={r} /></td>
                   <td className="px-3 py-2">
                     <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
                       r.tipo_destinazione === 'imp'
@@ -389,124 +508,178 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                       {r.tipo_destinazione === 'imp' ? 'Impianto' : 'Stoccaggio'}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-right">
-                    {/* UNA GIACENZA SOTTO ZERO NON ESISTE. Regola dell'utente, 03/10/2026: «come
-                        puo' essere negativa una giacenza? succede solo in caso di errore e deve
-                        essere corretto». Prima si azzerava in silenzio e l'errore restava nei dati.
-                        Succede quando il portale ha accettato piu' di quanto gli attribuiamo: una
-                        dichiarazione caricata su ordini che noi non abbiamo, o una fotografia
-                        vecchia. */}
-                    <div className={`font-bold ${r.giacenza_negativa ? 'text-red-600' : ''}`}>{fmt(r.giacenza_portale_t)} t</div>
-                    {r.giacenza_negativa && (
-                      <div className="text-[10px] text-red-600 leading-tight">giacenza sotto zero: da correggere</div>
-                    )}
-                    <div className="mt-1 h-1 bg-muted rounded-full overflow-hidden">
-                      <div className="h-full bg-primary rounded-full" style={{ width: `${barWidth}%` }} />
-                    </div>
-                    {r.tipo_destinazione === 'stoc' && r.data_rilevazione && <DettaglioStoccaggio r={r} />}
-                    {r.tipo_destinazione === 'stoc' && <SaldoArchivio r={r} />}
-                    {r.tipo_destinazione === 'imp' && <DettaglioImpianto r={r} />}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {r.giacenza_aci_t === null || r.giacenza_aci_t === undefined
-                      ? <span className="text-muted-foreground">—</span>
-                      : <span className={r.giacenza_aci_t < 0 ? 'text-red-600' : ''}>{fmt(r.giacenza_aci_t)} t</span>}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {r.giacenza_extra_t === null || r.giacenza_extra_t === undefined
-                      ? <span className="text-muted-foreground">—</span>
-                      : <span className={r.giacenza_extra_t < 0 ? 'text-red-600' : ''}>{fmt(r.giacenza_extra_t)} t</span>}
-                  </td>
+                  <td className="px-3 py-2 text-right text-[11px] text-muted-foreground cursor-help" title={TITOLO_SENZA_TOTALE_SITO}>per canale, qui sotto</td>
                   {CLASSI.map((c, k) => {
                     const v = kg(r, c.chiave);
-                    // Sulla classe 9 di un piazzale si puo' aprire l'elenco degli
-                    // ordini che fanno quel numero (richiesta dell'utente,
-                    // 28/09/2026): il numero resta com'e', sotto si apre il perche'.
-                    const conOrdini = c.chiave === 'ACI' && apribileAci;
                     return (
                       <td key={c.chiave} className={`px-3 py-2 text-right tabular-nums ${k === 0 ? 'border-l' : ''} ${v < 0 ? 'text-red-600 font-semibold' : v ? '' : 'text-muted-foreground'}`}>
                         {v == null ? '—' : v < 0 ? <ClasseNegativa r={r} classe={c} valore={v} /> : formatKg(v)}
-                        {conOrdini && (
-                          <button
-                            type="button"
-                            className="mt-0.5 flex items-center gap-0.5 ml-auto text-[11px] text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2"
-                            onClick={() => setAciAperto(apertoAci ? '' : chiave)}
-                            title="Gli ordini che compongono questa giacenza ACI, uno per uno: ancora dell'anno piu' gli ingressi meno le uscite, per fine trasporto"
-                          >
-                            {apertoAci ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                            {formatIntero(r.aci_dettaglio.ordini.length)} {r.aci_dettaglio.ordini.length === 1 ? 'ordine' : 'ordini'}
-                          </button>
-                        )}
                       </td>
                     );
                   })}
-                  <td className={`px-3 py-2 text-right border-l ${r.in_attesa_dichiarazione_t > 0.01 ? 'text-amber-600' : ''}`}>
-                    {r.in_attesa_dichiarazione_t > 0.01 ? (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="cursor-help underline decoration-dotted underline-offset-2">{fmt(r.in_attesa_dichiarazione_t)} t</span>
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-xs text-xs">{IN_ATTESA_TOOLTIP}</TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    ) : <span className="text-muted-foreground">—</span>}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7"
-                      onClick={() => onVaiDaDichiarare(r.sito)}
-                    >
-                      {formatIntero(r.ordini_da_dichiarare || 0)}
-                    </Button>
-                  </td>
-                  <td className="px-3 py-2 text-right">{fmt(r.dichiarato_t)} t</td>
+                  <td className="px-3 py-2 border-l"></td>
+                  <td className="px-3 py-2"></td>
+                  <td className="px-3 py-2"></td>
                   <td className="px-3 py-2 text-muted-foreground">{r.tipologia_trattamento || '—'}</td>
                 </tr>
-                {apertoAci && (
-                  <tr className="border-t bg-muted/20">
-                    {/* Sette colonne oltre alle classi: sito, ruolo, giacenza rete,
-                        in attesa, ordini da dichiarare, dichiarato e tipologia. */}
-                    <td colSpan={9 + CLASSI.length} className="p-0"><DettaglioAci r={r} /></td>
-                  </tr>
-                )}
+                {CANALI_RIGHE.map(c => {
+                  // I numeri del canale, letti una volta sola. Quelli che il
+                  // canale non ha restano null: la cella dice perche' invece di
+                  // mostrare uno zero o il numero di un altro canale.
+                  const giacenza = c.giacenza(r);
+                  const inAttesa = c.in_attesa ? c.in_attesa(r) : null;
+                  const ordini = c.ordini ? c.ordini(r) : null;
+                  const dichiarato = c.dichiarato ? c.dichiarato(r) : null;
+                  return (
+                    <React.Fragment key={c.chiave}>
+                      <tr className="border-t hover:bg-muted/30">
+                        <td className="px-3 py-2 pl-8">
+                          <span className="font-medium">{c.nome}</span>
+                          <span className="block text-[11px] text-muted-foreground leading-tight">{c.nota}</span>
+                        </td>
+                        <td className="px-3 py-2"></td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          <ValoreGiacenza valore={giacenza} negativa={c.negativa ? c.negativa(r) : false} perche={c.senza_giacenza} />
+                          {c.barra && (
+                            <div className="mt-1 h-1 bg-muted rounded-full overflow-hidden">
+                              <div className="h-full bg-primary rounded-full" style={{ width: `${barWidth}%` }} />
+                            </div>
+                          )}
+                          {/* Sulla riga ACI di un piazzale si apre l'elenco degli
+                              ordini che fanno quel numero (richiesta dell'utente,
+                              28/09/2026): il numero resta com'e', sotto si apre il
+                              perche'. Prima il pulsante stava sulla classe 9, che
+                              e' lo stesso conto: la classe 9 del piazzale e' l'ACI. */}
+                          {c.chiave === 'ACI' && apribileAci && (
+                            <button
+                              type="button"
+                              className="mt-0.5 flex items-center gap-0.5 ml-auto text-[11px] text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2"
+                              onClick={() => setAciAperto(apertoAci ? '' : chiave)}
+                              title="Gli ordini che compongono questa giacenza ACI, uno per uno: ancora dell'anno piu' gli ingressi meno le uscite, per fine trasporto"
+                            >
+                              {apertoAci ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                              {formatIntero(r.aci_dettaglio.ordini.length)} {r.aci_dettaglio.ordini.length === 1 ? 'ordine' : 'ordini'}
+                            </button>
+                          )}
+                          {r.tipo_destinazione === 'stoc' && r.data_rilevazione && c.rilevazione && <DettaglioStoccaggio r={r} canale={c.chiave} />}
+                          {r.tipo_destinazione === 'stoc' && <SaldoArchivio r={r} canale={c.chiave} />}
+                          {r.tipo_destinazione === 'imp' && c.fotografia && <DettaglioImpianto r={r} />}
+                        </td>
+                        {/* Le classi sono del piazzale e stanno sulla riga del
+                            sito: qui non si ripetono. */}
+                        <td className="px-3 py-2 border-l" colSpan={CLASSI.length}></td>
+                        <td className={`px-3 py-2 text-right border-l ${inAttesa > 0.01 ? 'text-amber-600' : ''}`}>
+                          {inAttesa === null ? (
+                            <span className="text-muted-foreground cursor-help" title={SENZA_IN_ATTESA}>—</span>
+                          ) : inAttesa > 0.01 ? (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="cursor-help underline decoration-dotted underline-offset-2">{fmt(inAttesa)} t</span>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs text-xs">{IN_ATTESA_TOOLTIP}</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          ) : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {ordini === null ? (
+                            <span className="text-muted-foreground cursor-help" title={SENZA_ORDINI}>—</span>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7"
+                              onClick={() => onVaiDaDichiarare(r.sito)}
+                            >
+                              {formatIntero(ordini || 0)}
+                            </Button>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {dichiarato === null
+                            ? <span className="text-muted-foreground cursor-help" title={SENZA_DICHIARATO}>—</span>
+                            : <>{fmt(dichiarato)} t</>}
+                        </td>
+                        <td className="px-3 py-2"></td>
+                      </tr>
+                      {c.chiave === 'ACI' && apertoAci && (
+                        <tr className="border-t bg-muted/20">
+                          <td colSpan={COLONNE} className="p-0"><DettaglioAci r={r} /></td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
                 </React.Fragment>
               );
             })}
           </tbody>
+          {/* I TOTALI RESTANO PER CANALE, MAI SOMMATI FRA CANALI: la riga TOTALE
+              tiene le classi, che sono del piazzale, e sotto c'e' un totale per
+              ogni canale, come nelle righe dei siti. Sono gli stessi numeri che
+              il conto manda, letti con le stesse funzioni delle righe. */}
           <tfoot className="bg-muted/50 font-bold border-t-2">
             <tr>
               <td className="px-3 py-2">TOTALE</td>
               <td className="px-3 py-2"></td>
-              <td className="px-3 py-2 text-right">{fmt(totali.giacenza_portale_t)} t</td>
-              {/* I totali dei tre canali restano separati: non si sommano mai. */}
-              <td className="px-3 py-2 text-right">{fmt(totali.giacenza_aci_t)} t</td>
-              <td className="px-3 py-2 text-right">{fmt(totali.giacenza_extra_t)} t</td>
+              <td className="px-3 py-2 text-right text-[11px] font-normal text-muted-foreground cursor-help" title={TITOLO_SENZA_TOTALE_SITO}>per canale, qui sotto</td>
               {CLASSI.map((c, k) => (
                 <td key={c.chiave} className={`px-3 py-2 text-right tabular-nums ${k === 0 ? 'border-l' : ''}`}>
                   {totali.giacenza_classi_kg ? formatKg(totali.giacenza_classi_kg[c.chiave] || 0) : '—'}
                 </td>
               ))}
-              <td className="px-3 py-2 text-right border-l">{fmt(totali.in_attesa_dichiarazione_t)} t</td>
-              <td className="px-3 py-2 text-right">{formatIntero(totali.ordini_da_dichiarare || 0)}</td>
-              <td className="px-3 py-2 text-right">{fmt(totali.dichiarato_t)} t</td>
+              <td className="px-3 py-2 border-l"></td>
+              <td className="px-3 py-2"></td>
+              <td className="px-3 py-2"></td>
               <td className="px-3 py-2"></td>
             </tr>
+            {CANALI_RIGHE.map(c => {
+              const inAttesa = c.in_attesa ? c.in_attesa(totali) : null;
+              const ordini = c.ordini ? c.ordini(totali) : null;
+              const dichiarato = c.dichiarato ? c.dichiarato(totali) : null;
+              return (
+                <tr key={c.chiave} className="border-t">
+                  <td className="px-3 py-2 pl-8">TOTALE {c.nome}</td>
+                  <td className="px-3 py-2"></td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {/* Il totale di un canale non ha la bandierina del conto: se
+                        esce sotto zero lo dice il numero, e va guardato. */}
+                    <ValoreGiacenza valore={c.giacenza(totali)} negativa={false} perche={c.senza_giacenza} />
+                  </td>
+                  <td className="px-3 py-2 border-l" colSpan={CLASSI.length}></td>
+                  <td className="px-3 py-2 text-right">
+                    {inAttesa === null
+                      ? <span className="font-normal text-muted-foreground cursor-help" title={SENZA_IN_ATTESA}>—</span>
+                      : <>{fmt(inAttesa)} t</>}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {ordini === null
+                      ? <span className="font-normal text-muted-foreground cursor-help" title={SENZA_ORDINI}>—</span>
+                      : formatIntero(ordini || 0)}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {dichiarato === null
+                      ? <span className="font-normal text-muted-foreground cursor-help" title={SENZA_DICHIARATO}>—</span>
+                      : <>{fmt(dichiarato)} t</>}
+                  </td>
+                  <td className="px-3 py-2"></td>
+                </tr>
+              );
+            })}
           </tfoot>
         </table>
       </div>
       <p className="px-3 py-2 text-xs text-muted-foreground italic">
-        La giacenza a portale e' della rete, per classe come nel portale; l'ACI sta nella sua colonna e l'extra raccolta, che a portale non c'e', nel dettaglio dello stoccaggio: i canali non si sommano. Per gli impianti e' il peso degli ordini non ancora dichiarati del file del portale, aggiornato a ogni caricamento con i carichi che il file non contiene ancora e le dichiarazioni caricate dopo. Per gli stoccaggi e' il saldo rilevato dalla pagina Unita' Locali di Stoccaggio, aggiornato con gli ingressi e le uscite finiti dopo la rilevazione: passa col mouse sulla data per il dettaglio. Tutto per fine del trasporto: un terminato senza fine trasporto non si colloca in nessun periodo e non entra ne' fra i carichi aggiunti alla fotografia ne' fra i movimenti dopo la rilevazione finche' la data non arriva, mentre il portale, se lo conosce, lo conta; la riga del sito lo segnala, con le altre date obbligatorie che mancano. La colonna In attesa di dichiarazione indica invece materiale gia' partito da uno stoccaggio verso un impianto, che il portale continua ad attribuire allo stoccaggio finche' il destinatario non presenta la dichiarazione: non e' giacenza.
+        Ogni sito ha una riga per canale - rete, ACI ed extra raccolta - e i tre numeri non si sommano mai, nemmeno come totale di controllo: un totale di sito non esiste. Le colonne per classe sono la rilevazione del piazzale e stanno sulla riga del sito, perche&apos; il materiale a terra non si divide per canale: P, M, G1 e G2 sono rete, la classe 9 e&apos; l&apos;ACI. Per gli impianti la giacenza di rete e&apos; il peso degli ordini non ancora dichiarati del file del portale, aggiornato a ogni caricamento con i carichi che il file non contiene ancora e le dichiarazioni caricate dopo. Per gli stoccaggi e&apos; il saldo rilevato dalla pagina Unita&apos; Locali di Stoccaggio, aggiornato con gli ingressi e le uscite finiti dopo la rilevazione: passa col mouse sulla data per il dettaglio. Tutto per fine del trasporto: un terminato senza fine trasporto non si colloca in nessun periodo e non entra ne&apos; fra i carichi aggiunti alla fotografia ne&apos; fra i movimenti dopo la rilevazione finche&apos; la data non arriva, mentre il portale, se lo conosce, lo conta; la riga del sito lo segnala, con le altre date obbligatorie che mancano. La colonna In attesa di dichiarazione indica invece materiale gia&apos; partito da uno stoccaggio verso un impianto, che il portale continua ad attribuire allo stoccaggio finche&apos; il destinatario non presenta la dichiarazione: non e&apos; giacenza, ed e&apos; un conto della sola rete, perche&apos; il file del portale e&apos; quello.
       </p>
       <p className="px-3 pb-2 text-xs text-muted-foreground italic">
-        La fotografia e' il punto di partenza, e i movimenti si sommano da li': la rilevazione per gli stoccaggi, il file del portale per gli impianti. Ne discende una cosa che conviene sapere prima di cercare l'errore altrove: <strong>una fotografia sbagliata non si corregge ricaricando i file</strong>, perche' i caricamenti aggiungono movimenti ma non riscrivono il punto di partenza. Il 16/09/2026 una rilevazione con 6.160 kg nella classe sbagliata teneva una classe sotto zero, col totale giusto: si e' rimessa a posto rileggendo il portale e inserendo una rilevazione nuova. Per questo ogni rilevazione, appena inserita, si confronta con la precedente piu' i movimenti del periodo, e nella scheda Stoccaggi la colonna Controllo dice se una classe si scosta. Accanto alla giacenza di un piazzale c'e' anche la somma dei soli movimenti in archivio: non e' una giacenza - vale dal primo movimento caricato, non da quando il piazzale era vuoto, e su chi ha l'archivio piu' vecchio esce sotto zero - ma serve a vedere a colpo d'occhio quanto manca all'appello e da quando.
+        La fotografia e&apos; il punto di partenza, e i movimenti si sommano da li&apos;: la rilevazione per gli stoccaggi, il file del portale per gli impianti. Ne discende una cosa che conviene sapere prima di cercare l&apos;errore altrove: <strong>una fotografia sbagliata non si corregge ricaricando i file</strong>, perche&apos; i caricamenti aggiungono movimenti ma non riscrivono il punto di partenza. Il 16/09/2026 una rilevazione con 6.160 kg nella classe sbagliata teneva una classe sotto zero, col totale giusto: si e&apos; rimessa a posto rileggendo il portale e inserendo una rilevazione nuova. Per questo ogni rilevazione, appena inserita, si confronta con la precedente piu&apos; i movimenti del periodo, e nella scheda Stoccaggi la colonna Controllo dice se una classe si scosta. Sotto la giacenza di ogni canale c&apos;e&apos; anche la somma dei soli movimenti in archivio di quel canale: non e&apos; una giacenza - vale dal primo movimento caricato, non da quando il piazzale era vuoto, e su chi ha l&apos;archivio piu&apos; vecchio esce sotto zero - ma serve a vedere a colpo d&apos;occhio quanto manca all&apos;appello e da quando.
       </p>
       {/* Richiesta dell'utente, 28/09/2026: aprire la giacenza ACI di un piazzale
           e vedere gli ordini che la compongono. */}
       <p className="px-3 pb-2 text-xs text-muted-foreground italic">
-        Sulla classe 9 di un piazzale si apre l&apos;elenco degli ordini che fanno quel numero: l&apos;ancora dell&apos;anno piu&apos; gli ingressi e le uscite di ACI finiti dopo, ognuno con archivio di provenienza, ID ordine, ticket (il Numero_Ordine_Interno), fine trasporto, controparte e chili. Il canale lo decide il materiale e non l&apos;archivio, quindi <strong>una primaria di classe 9 e&apos; ACI anche se si trovasse nei Terminati Rete</strong> - oggi il caricamento le smista col materiale, percio&apos; e&apos; una rete di sicurezza e non la regola di tutti i giorni. Il totale deve tornare al chilo con la colonna; se non tornasse, lo scarto si dice e non si aggiusta, perche&apos; vorrebbe dire che c&apos;e&apos; qualcosa da capire.
+        Sulla riga ACI di un piazzale si apre l&apos;elenco degli ordini che fanno quel numero: l&apos;ancora dell&apos;anno piu&apos; gli ingressi e le uscite di ACI finiti dopo, ognuno con archivio di provenienza, ID ordine, ticket (il Numero_Ordine_Interno), fine trasporto, controparte e chili. Il canale lo decide il materiale e non l&apos;archivio, quindi <strong>una primaria di classe 9 e&apos; ACI anche se si trovasse nei Terminati Rete</strong> - oggi il caricamento le smista col materiale, percio&apos; e&apos; una rete di sicurezza e non la regola di tutti i giorni. Il totale deve tornare al chilo con la giacenza della riga ACI; se non tornasse, lo scarto si dice e non si aggiusta, perche&apos; vorrebbe dire che c&apos;e&apos; qualcosa da capire.
       </p>
     </div>
   );

@@ -882,6 +882,13 @@ export default async function(req) {
         ordini_da_dichiarare,
         arretrato_per_anno,
         dichiarato_t: r2(dichiarato_t),
+        // IL DICHIARATO DEGLI ALTRI DUE CANALI, cosi' la riga si spiega da se':
+        // la giacenza ACI e' apertura piu' entrato meno questo numero, ed e'
+        // esattamente quello che il modulo Dichiarazioni mostra come caricato.
+        // Senza questi due campi, nelle righe per canale delle giacenze le celle
+        // del dichiarato restavano vuote e il conto non si poteva rifare a occhio.
+        dichiarato_aci_t: r2(dichiaratoCanaleMap.get(ns + '|ACI') || 0),
+        dichiarato_extra_t: r2(dichiaratoCanaleMap.get(ns + '|EXTRA_RACCOLTA') || 0),
         granulo_t: r2(der.granulo),
         fibre_t: r2(der.fibre),
         metallo_t: r2(der.metallo),
@@ -962,7 +969,7 @@ export default async function(req) {
     const numCols = [
       // Un totale per canale: la giacenza a portale e' della rete, ACI ed extra a parte.
       'giacenza_portale_t', 'giacenza_aci_t', 'giacenza_extra_t', 'in_attesa_dichiarazione_t',
-      'dichiarato_t', 'granulo_t', 'fibre_t', 'metallo_t', 'cippato_t', 'ciabattato_t',
+      'dichiarato_t', 'dichiarato_aci_t', 'dichiarato_extra_t', 'granulo_t', 'fibre_t', 'metallo_t', 'cippato_t', 'ciabattato_t',
       'conferito_primarie_t', 'conferito_aci_t', 'conferito_extra_t', 'secondarie_in_t', 'secondarie_out_t', 'secondarie_nette_t', 'terziarie_t',
       'conferito_t', 'target_primarie_t', 'target_totale_t', 'giacenza_riferimento_t'
     ];
