@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Calculator, CheckCircle2, XCircle, ExternalLink, FileSpreadsheet, FileDown } from 'lucide-react';
+import { Loader2, Calculator, CheckCircle2, XCircle, ExternalLink, FileSpreadsheet, FileDown, ClipboardList } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
 import PassivaRaccoglitoriTable from './PassivaRaccoglitoriTable';
 import PassivaImpiantiTable from './PassivaImpiantiTable';
@@ -12,6 +12,8 @@ import PassivaAnomalie from './PassivaAnomalie';
 import PassivaFormulariRipartiti from './PassivaFormulariRipartiti';
 import PassivaQualifica from './PassivaQualifica';
 import { exportFatturazionePassiva, exportFatturazionePassivaPdf } from '@/lib/passivaExport';
+import { exportPassivaUnFoglio, exportPassivaPerCanale, exportPassivaPdf, fogliDa } from '@/lib/passivaAmministrazioneExport';
+import { modelloDaPassiva } from '@/lib/passivaAmministrazione';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const ANNI = [2024, 2025, 2026];
@@ -22,6 +24,49 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // IL «FORMAT AMMINISTRAZIONE» DELLA PASSIVA.
+  //
+  // Il foglio dell'amministrazione tiene i canali INSIEME, uno sotto l'altro,
+  // mentre questo modulo ne calcola uno per volta: qui si calcolano i canali che
+  // servono e si compone il foglio. L'extra raccolta resta fuori per ora, come ha
+  // detto l'utente il 03/10/2026.
+  //
+  // Le VOCI sono il modello fisso che l'utente corregge: se non ce n'e' nessuna
+  // non si esporta un foglio vuoto - si propone di crearlo dal mese appena
+  // calcolato, cosi' non si comincia da zero.
+  const [ammLoading, setAmmLoading] = useState(false);
+  const CANALI_AMM = ['RETE', 'ACI'];
+  const esportaAmministrazione = async (come) => {
+    setAmmLoading(true);
+    setError('');
+    try {
+      const voci = await base44.entities.VocePassivaAmministrazione.filter({ anno: periodo.anno }, 'ordine', 1000).catch(() => []);
+      const per = {};
+      for (const canale of CANALI_AMM) {
+        const res = await base44.functions.invoke('calcolaPassiva', { anno: periodo.anno, mese: periodo.mese, tipologia: canale });
+        per[canale] = res.data || res;
+      }
+      if (!voci.length) {
+        const proposta = CANALI_AMM.flatMap(c => modelloDaPassiva(per[c], c, periodo.anno));
+        if (!window.confirm(`Il modello delle voci e' vuoto: il foglio uscirebbe senza righe.
+
+Lo creo adesso da ${periodo.mese} ${periodo.anno}? Sono ${proposta.length} voci, una per soggetto, col prezzo che questo mese ha usato. Poi le correggi tu.`)) {
+          setAmmLoading(false);
+          return;
+        }
+        for (const v of proposta) await base44.entities.VocePassivaAmministrazione.create(v);
+        voci.push(...proposta);
+      }
+      const fogli = fogliDa(voci, per, periodo.mese);
+      if (come === 'pdf') await exportPassivaPdf(fogli, periodo.anno, periodo.mese);
+      else if (come === 'canali') exportPassivaPerCanale(fogli, periodo.anno, periodo.mese);
+      else exportPassivaUnFoglio(fogli, periodo.anno, periodo.mese);
+    } catch (e) {
+      setError(e?.response?.data?.error || e.message || 'Esportazione non riuscita');
+    }
+    setAmmLoading(false);
+  };
 
   const calcola = async () => {
     setLoading(true);
@@ -68,6 +113,20 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
         <Button variant="outline" disabled={!result || loading} title={!result ? 'Prima calcola il mese' : ''}
           onClick={async () => { try { await exportFatturazionePassivaPdf(result); } catch (e) { setError(e.message || 'Esportazione non riuscita'); } }}>
           <FileDown className="w-4 h-4 mr-1.5" /> {TIPOLABEL[tipologia]} in PDF
+        </Button>
+        {/* IL FORMAT AMMINISTRAZIONE, in aggiunta ai due report di sopra. Calcola da
+            se' i canali che gli servono, perche' il foglio li tiene insieme. */}
+        <Button variant="outline" disabled={ammLoading || loading} title="Il foglio come lo vuole l amministrazione: i canali uno sotto l altro, in un foglio solo"
+          onClick={() => esportaAmministrazione('unico')}>
+          {ammLoading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <ClipboardList className="w-4 h-4 mr-1.5" />} Format amm. (un foglio)
+        </Button>
+        <Button variant="outline" disabled={ammLoading || loading} title="Lo stesso contenuto, un foglio per canale nella stessa cartella di lavoro"
+          onClick={() => esportaAmministrazione('canali')}>
+          <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Format amm. (per canale)
+        </Button>
+        <Button variant="outline" disabled={ammLoading || loading} title="Lo stesso foglio in PDF"
+          onClick={() => esportaAmministrazione('pdf')}>
+          <FileDown className="w-4 h-4 mr-1.5" /> Format amm. PDF
         </Button>
         {tipologia === 'EXTRA_RACCOLTA' && (
           <Link to="/extra-raccolta" className="ml-auto text-sm text-primary hover:underline inline-flex items-center gap-1">
