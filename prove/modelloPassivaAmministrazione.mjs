@@ -227,14 +227,51 @@ console.log('IL PREZZO VIENE DAL TARIFFARIO, NON DAL FOGLIO');
   // Una tariffa scaduta a giugno non vale a settembre: si torna al modello.
   const avellino = conTariffario.raccoglitori.righe.find(r => r.tipo === 'voce' && /AVELLINO/.test(r.voce));
   verifica('una tariffa scaduta non si usa', avellino.fonte_prezzo === 'modello', avellino.fonte_prezzo);
-  // 4. Senza niente da nessuna parte si usa il prezzo della voce, e si dichiara.
+  // 4. Il calcolo dice «senza tariffa»: nel tariffario manca davvero. Si usa il
+  // prezzo della voce e si dichiara, perche' questo si' va sistemato.
   const senza = {
-    raccoglitori: [g('GATIM S.R.L.', [racc({ tonnellate: 10, regione: 'Calabria' })])],
+    raccoglitori: [g('GATIM S.R.L.', [racc({ tonnellate: 10, regione: 'Calabria', note: 'senza tariffa' })])],
     impianti_stoccaggi: [], trasporti_secondaria: [],
   };
   const v4 = foglioPassiva(voci, senza, 'RETE', 'Settembre', 2026).raccoglitori.righe.find(r => r.tipo === 'voce' && r.soggetto === 'GATIM S.R.L.');
   verifica('senza tariffa si usa il prezzo del modello', v4.prezzo === 70 && v4.fonte_prezzo === 'modello', JSON.stringify([v4.prezzo, v4.fonte_prezzo]));
   verifica('e il foglio lo dichiara nelle note', /tariffario/i.test(v4.note), v4.note);
+  // 4-bis. LE TRE RAGIONI PER CUI UN IMPORTO E' ZERO SONO DIVERSE E NON SI
+  // CONFONDONO. Un avviso che grida al torto fa smettere di guardare gli avvisi.
+  {
+    // Interno: l'ha fatto SMOCO, a se stessi non si fattura. Niente da sistemare.
+    const interno = {
+      raccoglitori: [{ fornitore: 'SMOCO S.R.L.', interno: true, righe: [racc({ tonnellate: 22.54, regione: 'Basilicata', note: 'interno, non fatturato' })] }],
+      impianti_stoccaggi: [], trasporti_secondaria: [],
+    };
+    const vi = foglioPassiva(voci, interno, 'RETE', 'Settembre', 2026, TARIFFE).raccoglitori.righe
+      .find(r => r.tipo === 'voce' && r.soggetto === 'SMOCO S.R.L.' && /Basilicata/.test(r.voce));
+    verifica('una riga interna non chiede di controllare il tariffario',
+      vi.fonte_prezzo === 'interno' && vi.totale === 0 && !/tariffario/i.test(vi.note),
+      JSON.stringify([vi.fonte_prezzo, vi.totale, vi.note]));
+    // Compreso: il trattamento sta dentro il prezzo unico della raccolta. Qui non
+    // si fattura, altrimenti si paga due volte.
+    const compreso = {
+      raccoglitori: [], trasporti_secondaria: [],
+      impianti_stoccaggi: [g('T.R.S. SRL', [imp({ tonnellate: 8, provenienza: 'secondaria', note: 'compreso nel prezzo unico della raccolta' })])],
+    };
+    const vc = foglioPassiva(voci, compreso, 'RETE', 'Settembre', 2026, TARIFFE).impianti.righe
+      .find(r => r.tipo === 'voce' && r.soggetto === 'T.R.S. SRL');
+    verifica('un trattamento compreso nella raccolta resta a zero',
+      vc.fonte_prezzo === 'compreso' && vc.totale === 0, JSON.stringify([vc.fonte_prezzo, vc.totale]));
+    verifica('e il foglio dice perche', /due volte/.test(vc.note), vc.note);
+    // Una tariffa che vale davvero zero (Tecnogum sulla rete) e' un prezzo, non
+    // una mancanza: si usa e non si avvisa.
+    const zero = {
+      raccoglitori: [], trasporti_secondaria: [],
+      impianti_stoccaggi: [g('TECNOGUM SRL', [imp({ tonnellate: 101.63, provenienza: 'primaria', tariffa_valore: 0, note: '' })])],
+    };
+    const vz = foglioPassiva(voci, zero, 'RETE', 'Settembre', 2026, TARIFFE).impianti.righe
+      .find(r => r.tipo === 'voce' && /da primaria/.test(r.voce));
+    verifica('una tariffa di zero e un prezzo, non una mancanza',
+      vz.fonte_prezzo === 'movimenti' && vz.prezzo === 0 && !/tariffario/i.test(vz.note),
+      JSON.stringify([vz.fonte_prezzo, vz.prezzo, vz.note]));
+  }
   // 5. Due tariffe diverse sulla stessa voce: il prezzo non si scrive, l'importo
   // e' quello calcolato riga per riga.
   const miste = {

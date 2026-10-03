@@ -165,6 +165,12 @@ const PRESTAZIONI_BLOCCO = {
   impianti: ['TRATTAMENTO', 'CONFERIMENTO_STOCCAGGIO'],
 };
 
+// Che cosa dice il calcolo della passiva su una riga, letto dalla sua nota:
+// sono le tre ragioni per cui un importo puo' essere zero.
+const rigaInterna = (r) => /interno/i.test(String(r && r.note || '')) || (r && r.interno === true);
+const rigaCompresa = (r) => /compreso/i.test(String(r && r.note || '')) || (r && r.compreso_nella_raccolta === true);
+const rigaSenzaTariffa = (r) => /senza tariffa/i.test(String(r && r.note || ''));
+
 /** Vero se la tariffa e' valida nel giorno dato (vuoto = sempre). */
 function tariffaInVigore(t, giorno) {
   if (!giorno) return true;
@@ -228,11 +234,25 @@ function prezzoDaTariffa(valore, unita) {
  * quando le righe della voce hanno tariffe diverse fra loro.
  */
 export function prezzoDellaVoce(voce, righe, tariffe, canale, blocco, giorno) {
-  const conTariffa = (righe || []).filter(r => (Number(r.tariffa_valore) || 0) > 0);
-  if (conTariffa.length) {
-    const distinte = [...new Set(conTariffa.map(r => `${Number(r.tariffa_valore)}|${r.unita_misura || ''}`))];
+  const tutte = righe || [];
+  // Il calcolo della passiva scrive sulla riga perche' un importo e' zero, e
+  // sono tre cose diverse che non si possono confondere:
+  //   INTERNO           l'ha fatto SMOCO: a se stessi non si fattura;
+  //   COMPRESO          il trattamento e' dentro il prezzo unico della raccolta
+  //                     (Green Tyre sull'ACI, 225 euro): fatturarlo di nuovo
+  //                     vorrebbe dire pagarlo due volte;
+  //   SENZA TARIFFA     nel tariffario manca, e questo si' va sistemato.
+  // Prima dicevo «controlla il tariffario» anche sulle righe di SMOCO, che sono
+  // giuste: un avviso che grida al torto fa smettere di guardare gli avvisi.
+  // Una riga «porta una tariffa» solo se il campo c'e' davvero: le righe di
+  // riepilogo di un fornitore senza dettaglio non ce l'hanno, e prenderle per
+  // tariffe da zero euro vorrebbe dire azzerargli la fattura.
+  const applicate = tutte.filter(r => r && r.tariffa_valore !== undefined && r.tariffa_valore !== null
+    && !rigaInterna(r) && !rigaCompresa(r) && !rigaSenzaTariffa(r));
+  if (applicate.length) {
+    const distinte = [...new Set(applicate.map(r => `${Number(r.tariffa_valore) || 0}|${r.unita_misura || ''}`))];
     if (distinte.length === 1) {
-      return { ...prezzoDaTariffa(conTariffa[0].tariffa_valore, conTariffa[0].unita_misura), fonte: 'movimenti' };
+      return { ...prezzoDaTariffa(applicate[0].tariffa_valore, applicate[0].unita_misura), fonte: 'movimenti' };
     }
     // Tariffe diverse sulla stessa voce: il prezzo non si puo' scrivere in una
     // cella, ma l'importo e' quello che il calcolo ha fatto, riga per riga.
@@ -240,7 +260,17 @@ export function prezzoDellaVoce(voce, righe, tariffe, canale, blocco, giorno) {
       prezzo: null,
       unita_misura: 'euro_tonnellata',
       fonte: 'vari',
-      importo: n2(conTariffa.reduce((s, r) => s + (Number(r.importo) || 0), 0)),
+      importo: n2(applicate.reduce((s, r) => s + (Number(r.importo) || 0), 0)),
+    };
+  }
+  // Niente da fatturare per come e' fatto l'accordo: il prezzo e' zero e non si
+  // va a cercare altrove, altrimenti il tariffario o il modello rimetterebbero
+  // in fattura quello che il calcolo ha deciso di non pagare.
+  if (tutte.length && tutte.every(r => rigaInterna(r) || rigaCompresa(r))) {
+    return {
+      prezzo: 0,
+      unita_misura: 'euro_tonnellata',
+      fonte: tutte.some(rigaCompresa) ? 'compreso' : 'interno',
     };
   }
   const t = tariffaDellaVoce(tariffe, voce, canale, blocco, giorno);
@@ -334,8 +364,10 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno) {
       // Quando il prezzo non viene ne' dai movimenti ne' dal tariffario, il
       // foglio lo dichiara: un numero senza una fonte, su una fattura, va detto.
       const avvisi = [testo(v.note)];
-      if (p.fonte === 'modello' && q.righe.length) {
-        avvisi.push('Il calcolo non ha trovato tariffa per questi movimenti: prezzo preso dal modello. Controlla il tariffario.');
+      if (p.fonte === 'modello' && q.righe.some(rigaSenzaTariffa)) {
+        avvisi.push('Nel tariffario non c\'e\' la tariffa per questi movimenti: il prezzo arriva dal modello. Da sistemare nel tariffario.');
+      } else if (p.fonte === 'compreso') {
+        avvisi.push('Compreso nel prezzo unico della raccolta: qui non si fattura, altrimenti si paga due volte.');
       } else if (p.fonte === 'vari') {
         avvisi.push(`Tariffe diverse sulla stessa voce (${q.righe.length} righe): l'importo e' quello calcolato riga per riga. Se vanno distinte, aggiungi una voce.`);
       }
@@ -399,10 +431,12 @@ export function righePiatte(gruppi) {
   const out = [];
   for (const g of gruppi || []) {
     const dettaglio = g && Array.isArray(g.righe) ? g.righe : [];
+    // `interno` sta sul gruppo, non sulle righe: senza portarlo giu', le righe di
+    // SMOCO sembrerebbero righe a cui manca la tariffa.
     if (dettaglio.length) {
-      for (const r of dettaglio) out.push({ soggetto: g.fornitore, ...r });
+      for (const r of dettaglio) out.push({ soggetto: g.fornitore, interno: g.interno === true, ...r });
     } else if (g) {
-      out.push({ soggetto: g.fornitore, tonnellate: g.totale_tonnellate, importo: g.totale_euro });
+      out.push({ soggetto: g.fornitore, interno: g.interno === true, tonnellate: g.totale_tonnellate, importo: g.totale_euro });
     }
   }
   return out;
