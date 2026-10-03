@@ -284,7 +284,13 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
   // perche' lo stesso impianto puo' fare l'uno o l'altro a prezzi diversi e la
   // fattura li distingue.
   const cellePrezzo = (blocco, r) => {
-    const cella = { testo: prezzo(r.prezzo), colore: r.prezzo ? C.testo : C.tenue };
+    // Un prezzo solo non sempre c'e': quando le righe di una voce hanno tariffe
+    // diverse fra loro si scrive «vari» e l'importo resta quello calcolato riga
+    // per riga, che e' l'unico numero vero.
+    const noto = r.prezzo !== null && r.prezzo !== undefined;
+    const cella = noto
+      ? { testo: prezzo(r.prezzo), colore: r.prezzo ? C.testo : C.tenue }
+      : { testo: 'vari', colore: C.ambra };
     if (!blocco.due_prezzi) return { prezzo1: cella };
     return r.colonna_prezzo === 'trattamento' ? { prezzo2: cella } : { prezzo1: cella };
   };

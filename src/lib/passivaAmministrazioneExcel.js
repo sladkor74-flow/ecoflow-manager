@@ -242,17 +242,22 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
     stendi(ws, r, 1, ultima, st);
     scrivi(ws, r, col.nome, nome, { ...st, rientro: stile === 'piatto' ? 0 : 2 });
     scrivi(ws, r, col.tonn, num(riga.tonnellate), { ...st, allinea: 'right', fmt: fmtT(riga.tonnellate) });
-    scrivi(ws, r, colPrezzo, num(riga.prezzo), { ...st, allinea: 'right', fmt: EURO });
+    // Un prezzo solo non sempre c'e': quando le righe della voce hanno tariffe
+    // diverse fra loro, la cella del prezzo resta vuota e l'importo si scrive
+    // come numero, non come formula - una formula su una cella vuota, appena
+    // Excel ricalcola, azzererebbe la riga.
+    const prezzoNoto = riga.prezzo !== null && riga.prezzo !== undefined;
+    scrivi(ws, r, colPrezzo, prezzoNoto ? num(riga.prezzo) : '', { ...st, allinea: 'right', fmt: EURO });
     if (stile === 'piatto') scrivi(ws, r, col.eer, EER_PFU, { ...st, allinea: 'center', fmt: COD });
     // Il prezzo a viaggio non ha una colonna dei viaggi in questa tabella: la
     // formula si tiene dentro il numero dei viaggi e la nota lo dice, cosi'
     // correggere il prezzo rifa' il totale anche qui.
-    scrivi(ws, r, col.totale, {
+    scrivi(ws, r, col.totale, prezzoNoto ? {
       formula: aViaggio
         ? `${lettera(colPrezzo)}${r}*${viaggi}`
         : `${lettera(col.tonn)}${r}*${lettera(colPrezzo)}${r}`,
       result: n2(riga.totale),
-    }, { ...st, allinea: 'right', fmt: EURO });
+    } : n2(riga.totale), { ...st, allinea: 'right', fmt: EURO });
     scrivi(ws, r, col.note, [
       aViaggio ? `prezzo a viaggio, ${viaggi} ${viaggi === 1 ? 'viaggio' : 'viaggi'}` : '',
       testo(riga.note),

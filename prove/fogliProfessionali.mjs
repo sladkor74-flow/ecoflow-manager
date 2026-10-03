@@ -83,10 +83,19 @@ console.log('IL FOGLIO DELLA RETE');
   verifica('le righe si alternano', colore(ws.getRow(5).getCell(1)) === 'FFF8FBFC', colore(ws.getRow(5).getCell(1)));
 
   // I totali in fondo, sotto le loro colonne.
+  // IL TOTALE DI RIGA E' UNA FORMULA, come nel loro foglio: sulla rete il prezzo
+  // e' al chilo, quindi chili per prezzo.
+  const formula = (c) => (c.value && typeof c.value === 'object' ? c.value.formula : null);
+  const risultato = (c) => (c.value && typeof c.value === 'object' ? c.value.result : c.value);
+  verifica('il totale di riga e chili per prezzo', formula(ws.getRow(4).getCell(9)) === 'G4*H4', String(formula(ws.getRow(4).getCell(9))));
+  verifica('e fa il numero giusto', risultato(ws.getRow(4).getCell(9)) === 391.88, String(risultato(ws.getRow(4).getCell(9))));
+
   const tot = ws.getRow(6);
   verifica('la riga dei totali ha l etichetta', String(tot.getCell(1).value) === 'TOTALE', String(tot.getCell(1).value));
-  verifica('i chili totali stanno sotto i chili', tot.getCell(7).value === 12060, String(tot.getCell(7).value));
-  verifica('e gli euro sotto gli euro', tot.getCell(9).value === 2436.12, String(tot.getCell(9).value));
+  verifica('i chili totali sono una somma delle righe', formula(tot.getCell(7)) === 'SUM(G4:G5)' && risultato(tot.getCell(7)) === 12060,
+    JSON.stringify([formula(tot.getCell(7)), risultato(tot.getCell(7))]));
+  verifica('e gli euro pure', formula(tot.getCell(9)) === 'SUM(I4:I5)' && risultato(tot.getCell(9)) === 2436.12,
+    JSON.stringify([formula(tot.getCell(9)), risultato(tot.getCell(9))]));
   verifica('ed e in grassetto, con il bordo doppio sopra',
     tot.getCell(1).font.bold === true && tot.getCell(1).border.top.style === 'double',
     JSON.stringify(tot.getCell(1).border));
@@ -110,8 +119,14 @@ console.log('IL FOGLIO DELL ACI');
     JSON.stringify([ws.getRow(4).getCell(10).value, ws.getRow(4).getCell(10).numFmt]));
   // LE NOTE RESTANO VUOTE: le scrive l'amministrazione a mano.
   verifica('la colonna delle note resta vuota', !ws.getRow(4).getCell(12).value && !ws.getRow(5).getCell(12).value);
-  verifica('i totali ci sono', ws.getRow(6).getCell(9).value === 5960 && ws.getRow(6).getCell(11).value === 1392.2,
-    JSON.stringify([ws.getRow(6).getCell(9).value, ws.getRow(6).getCell(11).value]));
+  const risultato = (c) => (c.value && typeof c.value === 'object' ? c.value.result : c.value);
+  const formula = (c) => (c.value && typeof c.value === 'object' ? c.value.formula : null);
+  verifica('i totali ci sono', risultato(ws.getRow(6).getCell(9)) === 5960 && risultato(ws.getRow(6).getCell(11)) === 1392.2,
+    JSON.stringify([risultato(ws.getRow(6).getCell(9)), risultato(ws.getRow(6).getCell(11))]));
+  // Sull'ACI il prezzo e' a TONNELLATA: i chili si dividono per mille, altrimenti
+  // una riga da 2.140 kg a 240 euro la tonnellata uscirebbe a mezzo milione.
+  verifica('il totale di riga divide i chili per mille', formula(ws.getRow(4).getCell(11)) === 'I4/1000*J4', String(formula(ws.getRow(4).getCell(11))));
+  verifica('e fa 513,60 euro', risultato(ws.getRow(4).getCell(11)) === 513.6, String(risultato(ws.getRow(4).getCell(11))));
 }
 
 console.log('SENZA RIGHE NON SI ROMPE NIENTE');

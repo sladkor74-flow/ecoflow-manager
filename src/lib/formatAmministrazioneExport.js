@@ -48,8 +48,27 @@ export async function exportAmministrazioneAttiva(tipologia, righe, anno, mese) 
     else if (c.tipo === 'euro') formati[i + 1] = /Euro\/Kg/i.test(c.titolo) ? FORMATI.prezzo : FORMATI.euro;
     else if (c.tipo === 't') formati[i + 1] = FORMATI.tonnellate;
   });
+  // IL TOTALE DI RIGA E' UNA FORMULA, com'e' nel loro foglio (I2=G2*H2): se
+  // l'amministrazione corregge un prezzo, l'importo si rifa' da solo. Il conto
+  // cambia con l'unita' di misura: sulla rete il prezzo e' al chilo e si
+  // moltiplica per i chili, sull'ACI e' a tonnellata e i chili si dividono per
+  // mille. Sono le due unita' che i loro due fogli usano davvero.
+  const lettera = (i) => ws.getColumn(i).letter;
+  const colKg = t.iKg + 1;
+  const colPrezzo = t.iTotale;
+  const colTotale = t.iTotale + 1;
+  const alChilo = /Euro\/Kg/i.test(t.colonne[t.iTotale - 1].titolo);
+  const prima = 4;
   t.righe.forEach((r, i) => {
-    formatta(rigaDettaglio(ws, r, { sfondo: i % 2 ? COLORI.zebra : null, quante }), formati);
+    const n = prima + i;
+    const valori = r.slice();
+    valori[t.iTotale] = {
+      formula: alChilo
+        ? `${lettera(colKg)}${n}*${lettera(colPrezzo)}${n}`
+        : `${lettera(colKg)}${n}/1000*${lettera(colPrezzo)}${n}`,
+      result: Number(r[t.iTotale]) || 0,
+    };
+    formatta(rigaDettaglio(ws, valori, { sfondo: i % 2 ? COLORI.zebra : null, quante }), formati);
   });
 
   // I totali: nel foglio vero non hanno etichetta, i due numeri stanno sotto le
@@ -57,8 +76,14 @@ export async function exportAmministrazioneAttiva(tipologia, righe, anno, mese) 
   // senza nome, su un documento che si manda, si legge male.
   const totali = new Array(quante).fill('');
   totali[0] = 'TOTALE';
-  totali[t.iKg] = t.totale_kg;
-  totali[t.iTotale] = t.totale_euro;
+  if (t.righe.length) {
+    const ultima = prima + t.righe.length - 1;
+    totali[t.iKg] = { formula: `SUM(${lettera(colKg)}${prima}:${lettera(colKg)}${ultima})`, result: t.totale_kg };
+    totali[t.iTotale] = { formula: `SUM(${lettera(colTotale)}${prima}:${lettera(colTotale)}${ultima})`, result: t.totale_euro };
+  } else {
+    totali[t.iKg] = 0;
+    totali[t.iTotale] = 0;
+  }
   formatta(rigaTotale(ws, totali, quante), formati);
 
   bloccaRighe(ws, 3);

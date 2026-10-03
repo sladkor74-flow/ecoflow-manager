@@ -48,6 +48,12 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
     setError('');
     try {
       const voci = await base44.entities.VocePassivaAmministrazione.filter({ anno: periodo.anno }, 'ordine', 1000).catch(() => []);
+      // IL PREZZO VIENE DAL TARIFFARIO, non da quello che e' scritto sulla voce:
+      // «gli altri prezzi li dovresti gia' avere nel tariffario 2026 anche perche'
+      // hai letto tutti i loro contratti» (utente, 03/10/2026). Sulle righe con
+      // movimenti il prezzo e' quello che il calcolo ha applicato; sulle righe a
+      // zero si legge la tariffa in vigore quel mese, e quella sta qui.
+      const tariffe = await base44.entities.Tariffa.filter({ direzione: 'PASSIVA', stato: 'attivo' }, '-created_date', 2000).catch(() => []);
       const per = {};
       for (const canale of CANALI_AMM) {
         const res = await base44.functions.invoke('calcolaPassiva', { anno: periodo.anno, mese: periodo.mese, tipologia: canale });
@@ -75,7 +81,7 @@ Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci 
         for (const v of proposta) await base44.entities.VocePassivaAmministrazione.create(v);
         voci.push(...proposta);
       }
-      const fogli = fogliDa(voci, per, periodo.mese, periodo.anno);
+      const fogli = fogliDa(voci, per, periodo.mese, periodo.anno, tariffe);
       if (come === 'pdf') {
         await esportaPassivaAmministrazionePdf(fogli, { anno: periodo.anno, mese: periodo.mese });
       } else {

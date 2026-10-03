@@ -21,15 +21,23 @@
 // prove/modelloPassivaAmministrazione.mjs ricostruisce quei quattro numeri dalle
 // tonnellate vere del mese: se un prezzo qui dentro cambia, la prova lo dice.
 //
-// I PREZZI SONO QUELLI CHE IL FOGLIO DI SETTEMBRE 2026 HA USATO. Non sono i
-// contratti: i contratti in cartella non sempre coincidono con quello che si
-// paga, e un prezzo che non torna si chiede, non si fattura. L'utente li
-// corregge dalla pagina delle voci quando cambia un accordo - e a inizio anno
-// vanno riguardati tutti.
+// I PREZZI QUI DENTRO SONO L'ULTIMA RISORSA, NON LA FONTE.
+//
+// La fonte e' il TARIFFARIO, dove stanno i prezzi dei contratti 2026. Il foglio
+// prende il prezzo che il mese ha applicato davvero sui movimenti e, per le righe
+// a zero, quello che il tariffario dice in quel mese (prezzoDellaVoce in
+// passivaAmministrazione.js). I numeri scritti qui si usano soltanto quando ne' i
+// movimenti ne' il tariffario dicono niente, e in quel caso il foglio lo dichiara
+// nella colonna delle note: un prezzo senza una fonte, su una fattura, va detto.
+// Sono quelli che il foglio dell'amministrazione ha usato a settembre 2026, e
+// servono da riscontro.
+//
+// L'utente, 03/10/2026: «gli altri prezzi li dovresti gia' avere nel tariffario
+// 2026 anche perche' hai letto tutti i loro contratti».
 
 const criterio = (c) => (c && Object.keys(c).length ? JSON.stringify(c) : '');
 
-// [soggetto, voce, prezzo, criterio, nota, colonna_prezzo]
+// [soggetto, voce, prezzo, criterio, nota, colonna_prezzo, unita_misura]
 //
 // Il soggetto e' scritto come lo scrive il gestionale negli archivi, non come lo
 // scrive l'amministrazione: e' il nome su cui si agganciano i movimenti. Il
@@ -47,7 +55,11 @@ const criterio = (c) => (c && Object.keys(c).length ? JSON.stringify(c) : '');
 // di Gatim - e in quell'ordine: la prima riga che riconosce il movimento se lo
 // prende.
 const RETE_RACCOGLITORI = [
-  ['ECO.GEA SRL', 'Campania', 0, null, 'Nel foglio di settembre il prezzo non c\'e\': da scrivere quando torna a conferire.'],
+  // ECO.GEA e' una tantum: nel 2026 un ritiro solo, a giugno, e si paga a
+  // VIAGGIO, non a tonnellata (detto dall'utente il 03/10/2026). Il prezzo lo
+  // dice il tariffario quando il movimento c'e'; qui la riga serve a tenerla nel
+  // foglio anche nei mesi in cui non ha portato niente.
+  ['ECO.GEA SRL', 'Campania', 0, null, 'Una tantum: nel 2026 un solo ritiro, a giugno, pagato a viaggio.', '', 'euro_viaggio'],
   ['C.L. SERVICE S.R.L.', 'Campania', 71, null],
   ['ECOLOGICAL SYSTEMS SRL', 'Basilicata', 75, null],
   ['Ecorecuperi Srl', 'Campania', 72, null],
@@ -141,7 +153,7 @@ export function modelloAmministrazione(anno) {
   const out = [];
   for (const [canale, blocco, righe] of BLOCCHI) {
     let i = 0;
-    for (const [soggetto, voce, prezzo, crit, nota, colonna] of righe) {
+    for (const [soggetto, voce, prezzo, crit, nota, colonna, unita] of righe) {
       out.push({
         anno: Number(anno),
         canale,
@@ -149,7 +161,7 @@ export function modelloAmministrazione(anno) {
         soggetto,
         voce: voce || '',
         prezzo: Number(prezzo) || 0,
-        unita_misura: 'euro_tonnellata',
+        unita_misura: unita || 'euro_tonnellata',
         colonna_prezzo: colonna || '',
         ordine: ++i * 10,
         criterio_json: criterio(crit),

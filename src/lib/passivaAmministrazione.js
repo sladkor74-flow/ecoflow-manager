@@ -140,6 +140,118 @@ export function rigaDellaVoce(criterio, r) {
   return true;
 }
 
+// IL PREZZO NON STA SCRITTO NEL FOGLIO: STA NEL TARIFFARIO.
+//
+// L'utente, 03/10/2026: «gli altri prezzi li dovresti gia' avere nel tariffario
+// 2026 anche perche' hai letto tutti i loro contratti». Giusto: un prezzo
+// ricopiato in due posti e' un prezzo che prima o poi diverge, e il numero che
+// fa fede e' quello che il gestionale applica davvero quando calcola la passiva.
+//
+// Percio' il prezzo di una voce si cerca in quest'ordine:
+//   1. QUELLO CHE IL MESE HA APPLICATO: la tariffa che sta sulle righe dei
+//      movimenti. Cosi' il foglio dice esattamente quello che dice il modulo
+//      della fatturazione passiva a video - non possono divergere.
+//   2. IL TARIFFARIO: per le righe a zero, dove movimenti non ce ne sono, si
+//      legge la tariffa in vigore in quel mese.
+//   3. IL PREZZO SCRITTO SULLA VOCE: solo se le altre due non dicono niente, e
+//      in quel caso il foglio lo dichiara nella colonna delle note.
+//
+// Le unita' di misura del tariffario sono tre. Il foglio ha una colonna sola di
+// prezzo, quindi: euro a tonnellata e euro al chilo diventano entrambi un prezzo
+// a tonnellata (0,090 euro/kg sono 90 euro/t) e il conto torna uguale; euro a
+// viaggio resta a viaggio e si moltiplica per i viaggi.
+const PRESTAZIONI_BLOCCO = {
+  raccoglitori: ['RACCOLTA'],
+  impianti: ['TRATTAMENTO', 'CONFERIMENTO_STOCCAGGIO'],
+};
+
+/** Vero se la tariffa e' valida nel giorno dato (vuoto = sempre). */
+function tariffaInVigore(t, giorno) {
+  if (!giorno) return true;
+  const inizio = String(t.data_inizio_validita || '').slice(0, 10);
+  if (inizio && inizio > giorno) return false;
+  const fine = String(t.data_fine_validita || '').slice(0, 10);
+  if (fine && fine < giorno) return false;
+  return true;
+}
+
+/**
+ * La tariffa del tariffario che spetta a una voce: stesso fornitore, stessa
+ * prestazione, stesso canale, e i criteri della voce.
+ *
+ * Fra piu' tariffe possibili vince la piu' specifica, con la stessa scala che usa
+ * il calcolo della passiva: destinazione, poi provincia, poi regione, poi quella
+ * generica. Se restano in ballo due tariffe diverse non si indovina: si lascia
+ * decidere al prezzo scritto sulla voce e il foglio lo dice.
+ */
+export function tariffaDellaVoce(tariffe, voce, canale, blocco, giorno) {
+  const soggetto = nome(voce && voce.soggetto);
+  if (!soggetto) return null;
+  const criterio = criterioDi(voce) || {};
+  const prestazioni = criterio.prestazione
+    ? [prestazioneChiave(criterio.prestazione)]
+    : (PRESTAZIONI_BLOCCO[blocco] || []);
+  const candidate = (tariffe || []).filter(t => t
+    && String(t.direzione || 'PASSIVA') === 'PASSIVA'
+    && String(t.stato || 'attivo') !== 'non_attivo'
+    && nome(t.fornitore_nome) === soggetto
+    && prestazioni.includes(String(t.prestazione || ''))
+    && ['TUTTE', canale].includes(String(t.tipologia || 'TUTTE'))
+    && tariffaInVigore(t, giorno)
+    // La classe: una tariffa senza classe vale per tutte; con la classe vale solo
+    // se e' una di quelle che la voce raccoglie.
+    && (!testo(t.classe_materiale) || !Array.isArray(criterio.classi) || !criterio.classi.length
+      || criterio.classi.some(c => chiave(c) === chiave(t.classe_materiale)))
+    && (!testo(t.destinazione) || (criterio.destinazione && nome(t.destinazione) === nome(criterio.destinazione)))
+    && (!testo(t.provincia) || (criterio.provincia && chiave(t.provincia) === chiave(criterio.provincia)))
+    && (!testo(t.regione) || (criterio.regione && chiave(t.regione) === chiave(criterio.regione))));
+  if (!candidate.length) return null;
+  const peso = (t) => (testo(t.destinazione) ? 8 : 0) + (testo(t.provincia) ? 4 : 0)
+    + (testo(t.regione) ? 2 : 0) + (testo(t.classe_materiale) ? 1 : 0);
+  const migliori = candidate.filter(t => peso(t) === Math.max(...candidate.map(peso)));
+  const valori = [...new Set(migliori.map(t => `${Number(t.valore) || 0}|${t.unita_misura || ''}`))];
+  return valori.length === 1 ? migliori[0] : null;
+}
+
+/** Il prezzo a tonnellata (o a viaggio) e l'unita' del foglio, da una tariffa. */
+function prezzoDaTariffa(valore, unita) {
+  const v = Number(valore) || 0;
+  if (unita === '€/viaggio' || unita === 'euro_viaggio') return { prezzo: v, unita_misura: 'euro_viaggio' };
+  // 0,090 euro al chilo sono 90 euro a tonnellata: il foglio ha una colonna sola.
+  if (unita === '€/kg') return { prezzo: Math.round(v * 1000 * 10000) / 10000, unita_misura: 'euro_tonnellata' };
+  return { prezzo: v, unita_misura: 'euro_tonnellata' };
+}
+
+/**
+ * Il prezzo di una voce e da dove viene. Torna { prezzo, unita_misura, fonte,
+ * importo } - `importo` solo quando il prezzo non basta a spiegarlo, cioe'
+ * quando le righe della voce hanno tariffe diverse fra loro.
+ */
+export function prezzoDellaVoce(voce, righe, tariffe, canale, blocco, giorno) {
+  const conTariffa = (righe || []).filter(r => (Number(r.tariffa_valore) || 0) > 0);
+  if (conTariffa.length) {
+    const distinte = [...new Set(conTariffa.map(r => `${Number(r.tariffa_valore)}|${r.unita_misura || ''}`))];
+    if (distinte.length === 1) {
+      return { ...prezzoDaTariffa(conTariffa[0].tariffa_valore, conTariffa[0].unita_misura), fonte: 'movimenti' };
+    }
+    // Tariffe diverse sulla stessa voce: il prezzo non si puo' scrivere in una
+    // cella, ma l'importo e' quello che il calcolo ha fatto, riga per riga.
+    return {
+      prezzo: null,
+      unita_misura: 'euro_tonnellata',
+      fonte: 'vari',
+      importo: n2(conTariffa.reduce((s, r) => s + (Number(r.importo) || 0), 0)),
+    };
+  }
+  const t = tariffaDellaVoce(tariffe, voce, canale, blocco, giorno);
+  if (t) return { ...prezzoDaTariffa(t.valore, t.unita_misura), fonte: 'tariffario' };
+  return {
+    prezzo: Number(voce.prezzo) || 0,
+    unita_misura: voce.unita_misura || 'euro_tonnellata',
+    fonte: 'modello',
+  };
+}
+
 /**
  * I CHILI DEL MESE SI ASSEGNANO, NON SI FILTRANO.
  *
@@ -158,7 +270,7 @@ export function rigaDellaVoce(criterio, r) {
 export function assegnaRighe(vociSoggetto, righeSoggetto) {
   const conCriterio = vociSoggetto.map(v => ({ voce: v, criterio: criterioDi(v) })).filter(x => x.criterio);
   const senzaCriterio = vociSoggetto.find(v => !criterioDi(v)) || null;
-  const quote = new Map(vociSoggetto.map(v => [v, { tonnellate: 0, viaggi: 0, righe: 0 }]));
+  const quote = new Map(vociSoggetto.map(v => [v, { tonnellate: 0, viaggi: 0, righe: [] }]));
   const fuori = [];
   for (const r of righeSoggetto || []) {
     const trovata = conCriterio.find(x => rigaDellaVoce(x.criterio, r));
@@ -167,7 +279,9 @@ export function assegnaRighe(vociSoggetto, righeSoggetto) {
     const q = quote.get(dove);
     q.tonnellate += Number(r.tonnellate) || 0;
     q.viaggi += Number(r.viaggi) || 0;
-    q.righe += 1;
+    // Le righe si tengono, non si contano soltanto: da loro si legge la tariffa
+    // che il mese ha applicato davvero.
+    q.righe.push(r);
   }
   for (const q of quote.values()) q.tonnellate = n3(q.tonnellate);
   return { quote, fuori };
@@ -196,7 +310,7 @@ export function descriviFuori(righe) {
  * voce nel modello: non si buttano via e non si inventano prezzi - si elencano,
  * perche' e' il segnale che il modello va aggiornato.
  */
-export function bloccoPassiva(voci, dati, canale, blocco) {
+export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno) {
   const scelte = vociOrdinate(voci, canale, blocco);
   const perSoggetto = new Map();
   for (const r of dati || []) {
@@ -216,19 +330,29 @@ export function bloccoPassiva(voci, dati, canale, blocco) {
     const { quote, fuori } = assegnaRighe(sue, righeSoggetto);
     const dettaglio = sue.map(v => {
       const q = quote.get(v);
+      const p = prezzoDellaVoce(v, q.righe, tariffe, canale, blocco, giorno);
+      // Quando il prezzo non viene ne' dai movimenti ne' dal tariffario, il
+      // foglio lo dichiara: un numero senza una fonte, su una fattura, va detto.
+      const avvisi = [testo(v.note)];
+      if (p.fonte === 'modello' && q.righe.length) {
+        avvisi.push('Il calcolo non ha trovato tariffa per questi movimenti: prezzo preso dal modello. Controlla il tariffario.');
+      } else if (p.fonte === 'vari') {
+        avvisi.push(`Tariffe diverse sulla stessa voce (${q.righe.length} righe): l'importo e' quello calcolato riga per riga. Se vanno distinte, aggiungi una voce.`);
+      }
       return {
         tipo: 'voce',
         soggetto,
         voce: testo(v.voce),
         tonnellate: q.tonnellate,
         viaggi: q.viaggi,
-        prezzo: Number(v.prezzo) || 0,
-        unita_misura: v.unita_misura || 'euro_tonnellata',
+        prezzo: p.prezzo,
+        unita_misura: p.unita_misura,
+        fonte_prezzo: p.fonte,
         // Negli impianti dell'ACI il foglio ha due colonne di prezzo: la voce
         // dice in quale delle due sta il suo.
         colonna_prezzo: testo(v.colonna_prezzo),
-        totale: importoVoce(v.prezzo, v.unita_misura, q.tonnellate, q.viaggi),
-        note: testo(v.note),
+        totale: p.importo !== undefined ? p.importo : importoVoce(p.prezzo, p.unita_misura, q.tonnellate, q.viaggi),
+        note: avvisi.filter(Boolean).join(' '),
       };
     });
     const tFuori = n3(fuori.reduce((s, r) => s + (Number(r.tonnellate) || 0), 0));
@@ -285,6 +409,14 @@ export function righePiatte(gruppi) {
 }
 
 const NOMI = { RETE: 'RETE', ACI: 'ACI', EXTRA_RACCOLTA: 'EXTRA RACCOLTA' };
+const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+
+/** Il quindici del mese in aaaa-mm-gg, per leggere il tariffario di quel mese. */
+export function giornoDelMese(anno, mese) {
+  const i = MESI.findIndex(m => chiave(m) === chiave(mese));
+  if (!anno || i < 0) return '';
+  return `${anno}-${String(i + 1).padStart(2, '0')}-15`;
+}
 
 /**
  * Il foglio intero di un canale: i tre blocchi e il totale in cima, com'e' nel
@@ -294,10 +426,14 @@ const NOMI = { RETE: 'RETE', ACI: 'ACI', EXTRA_RACCOLTA: 'EXTRA RACCOLTA' };
  * impianti_stoccaggi, trasporti_secondaria }. Il trasporto non ha voci fisse -
  * le righe sono i viaggi del mese - quindi si riporta com'e'.
  */
-export function foglioPassiva(voci, passiva, canale, mese, anno) {
+export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe) {
   const aci = canale === 'ACI';
-  const raccoglitori = bloccoPassiva(voci, righePiatte(passiva && passiva.raccoglitori), canale, 'raccoglitori');
-  const impianti = bloccoPassiva(voci, righePiatte(passiva && passiva.impianti_stoccaggi), canale, 'impianti');
+  // Il giorno con cui si guarda il tariffario: il quindici del mese, che sta
+  // dentro il mese qualunque sia e quindi prende le tariffe di quel mese anche
+  // quando un accordo e' cambiato il primo o l'ultimo giorno.
+  const giorno = giornoDelMese(anno, mese);
+  const raccoglitori = bloccoPassiva(voci, righePiatte(passiva && passiva.raccoglitori), canale, 'raccoglitori', tariffe, giorno);
+  const impianti = bloccoPassiva(voci, righePiatte(passiva && passiva.impianti_stoccaggi), canale, 'impianti', tariffe, giorno);
   // Il trasporto: il trasportatore e' il fornitore del gruppo, produttore e
   // destinatario stanno sulla riga della tratta.
   const trasporti = (passiva && passiva.trasporti_secondaria || []).flatMap(g => (g.righe || []).map(t => ({
@@ -347,10 +483,10 @@ export function foglioPassiva(voci, passiva, canale, mese, anno) {
 }
 
 /** I fogli dei canali chiesti, costruiti dalle voci e dalla passiva gia' calcolata. */
-export function fogliDa(voci, passivePerCanale, mese, anno) {
+export function fogliDa(voci, passivePerCanale, mese, anno, tariffe) {
   return Object.entries(passivePerCanale || {})
     .filter(([, p]) => p)
-    .map(([canale, p]) => foglioPassiva(voci, p, canale, mese, anno));
+    .map(([canale, p]) => foglioPassiva(voci, p, canale, mese, anno, tariffe));
 }
 
 export const nomeFilePassiva = (anno, mese, come, estensione) =>
