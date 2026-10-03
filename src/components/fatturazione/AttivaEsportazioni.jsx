@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
-import { Loader2, Download, FileSpreadsheet, FileDown, CheckCircle, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Loader2, Download, FileSpreadsheet, FileDown, FileText, CheckCircle, AlertTriangle, ArrowRight } from 'lucide-react';
 import { exportFatturazioneAttiva, exportFatturazioneAttivaPdf, nomeFileAttiva } from '@/lib/fatturazioneExport';
 import { exportAmministrazioneAttiva, exportAmministrazioneAttivaPdf } from '@/lib/formatAmministrazioneExport';
 import { nomeFileAmministrazione } from '@/lib/formatAmministrazione';

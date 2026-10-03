@@ -39,6 +39,14 @@ export default [
       "no-unused-vars": "off",
       "react/jsx-uses-vars": "error",
       "react/jsx-uses-react": "error",
+      // UN COMPONENTE USATO E MAI IMPORTATO NON DEVE ARRIVARE A VIDEO.
+      //
+      // Il 03/10/2026 ho scritto <FileText /> in AttivaEsportazioni.jsx senza
+      // importarlo: eslint non diceva niente, la build riusciva, e a video il
+      // riquadro dell'esportazione spariva - l'utente: «non ho visto i pulsanti di
+      // esportazione in quella attiva». Un identificatore inesistente dentro il JSX
+      // e' un errore di compilazione mancato, e si deve vedere prima di pubblicare.
+      "react/jsx-no-undef": "error",
       "unused-imports/no-unused-imports": "error",
       "unused-imports/no-unused-vars": [
         "warn",
