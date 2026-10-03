@@ -118,6 +118,50 @@ console.log('A CIASCUNA VOCE I SUOI CHILI, UNA VOLTA SOLA');
     rigaDellaVoce({ regione: 'Campania' }, { provincia: 'NA' }));
 }
 
+console.log('IL SOVRACOSTO STA DENTRO L IMPORTO');
+{
+  // Un sovracosto di un intervento di extra raccolta si paga al raccoglitore o
+  // all'impianto, e il calcolo lo somma all'importo della riga FUORI dalla
+  // moltiplicazione tariffa per peso. Il foglio rifa' l'importo da prezzo per
+  // tonnellate: senza aggiungerlo, una riga che nella passiva vale 620 euro nel
+  // foglio ne valeva 500.
+  const b = bloccoPassiva([
+    { canale: 'EXTRA_RACCOLTA', blocco: 'raccoglitori', soggetto: 'LOGISTICA & PNEUMATICI SRL', voce: '', prezzo: 0, ordine: 10 },
+  ], [
+    { soggetto: 'LOGISTICA & PNEUMATICI SRL', tonnellate: 10, tariffa_valore: 50, unita_misura: '€/t', importo: 620, sovracosto_euro: 120, sovracosto_motivo: 'Piazzale allagato', note: '' },
+  ], 'EXTRA_RACCOLTA', 'raccoglitori');
+  const voce = b.righe.find(r => r.tipo === 'voce');
+  verifica('il prezzo resta quello applicato', voce.prezzo === 50 && voce.fonte_prezzo === 'movimenti', JSON.stringify([voce.prezzo, voce.fonte_prezzo]));
+  verifica('l importo comprende il sovracosto', voce.totale === 620, String(voce.totale));
+  verifica('e si sa quanto non viene dalla moltiplicazione', voce.oltre_tariffa === 120, String(voce.oltre_tariffa));
+  verifica('la nota dice che e un sovracosto e perche', /sovracosto/.test(voce.note) && /Piazzale allagato/.test(voce.note), voce.note);
+  verifica('e il totale della passiva torna, quindi non si avvisa di differenze', !/differenza/.test(voce.note), voce.note);
+}
+{
+  // Con tariffe diverse sulla stessa voce l'importo e' gia' la somma di quelli
+  // calcolati, sovracosto compreso: aggiungerlo di nuovo sarebbe pagarlo due volte.
+  const b = bloccoPassiva([
+    { canale: 'EXTRA_RACCOLTA', blocco: 'raccoglitori', soggetto: 'X', voce: '', prezzo: 0, ordine: 10 },
+  ], [
+    { soggetto: 'X', tonnellate: 10, tariffa_valore: 50, unita_misura: '€/t', importo: 620, sovracosto_euro: 120 },
+    { soggetto: 'X', tonnellate: 5, tariffa_valore: 70, unita_misura: '€/t', importo: 350 },
+  ], 'EXTRA_RACCOLTA', 'raccoglitori');
+  const voce = b.righe.find(r => r.tipo === 'voce');
+  verifica('il sovracosto non si conta due volte', voce.totale === 970 && voce.oltre_tariffa === 0,
+    JSON.stringify([voce.totale, voce.oltre_tariffa]));
+}
+{
+  // Se il foglio e la passiva non dicono lo stesso numero, si dice: due numeri
+  // diversi in due pagine sono la cosa che fa perdere fiducia nel gestionale.
+  const b = bloccoPassiva([
+    { canale: 'RETE', blocco: 'raccoglitori', soggetto: 'X', voce: '', prezzo: 0, ordine: 10 },
+  ], [
+    { soggetto: 'X', tonnellate: 10, tariffa_valore: 50, unita_misura: '€/t', importo: 999, note: '' },
+  ], 'RETE', 'raccoglitori');
+  const voce = b.righe.find(r => r.tipo === 'voce');
+  verifica('una differenza col calcolo si dichiara', /999,00/.test(voce.note), voce.note);
+}
+
 console.log('I CHILI CHE NESSUNA VOCE PRENDE SI SCRIVONO');
 {
   // Un chilo che sparisce dal foglio e' un chilo che non si fattura: la riga

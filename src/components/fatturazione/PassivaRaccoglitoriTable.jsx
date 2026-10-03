@@ -36,12 +36,23 @@ export default function PassivaRaccoglitoriTable({ data }) {
                       {r.tariffa_valore ? `${formatNumber(r.tariffa_valore)} ${r.unita_misura}` : '—'}
                       {r.tariffa_criterio === 'destinazione' && <span className="ml-1 text-[10px] font-normal text-primary" title="Tariffa specifica per questa destinazione, come da contratto">per dest.</span>}
                     </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatNumber(r.importo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums font-medium">
+                      {formatNumber(r.importo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {/* Con un sovracosto l'importo non e' piu' tariffa per peso: si
+                          dice quanto di quell'importo e' sovracosto, altrimenti la
+                          moltiplicazione che si vede accanto sembra sbagliata. */}
+                      {r.sovracosto_euro > 0 && (
+                        <div className="text-[10px] font-normal text-muted-foreground">
+                          di cui {formatNumber(r.sovracosto_euro, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € di sovracosto
+                        </div>
+                      )}
+                    </td>
                     <td className="px-3 py-1.5 text-xs text-muted-foreground">
                       {r.provincia !== '—' && `Prov: ${r.provincia} `}
                       {r.destinazione !== '—' && `Dest: ${r.destinazione} `}
                       {r.classe !== '—' && `Classe: ${r.classe}`}
-                      {r.note && <span className="text-destructive"> {r.note}</span>}
+                      {r.note && <span className={r.nota_informativa ? '' : 'text-destructive'}> {r.note}</span>}
+                      {r.sovracosto_motivo && <span className="block">Motivo del sovracosto: {r.sovracosto_motivo}</span>}
                     </td>
                   </tr>
                 ))}

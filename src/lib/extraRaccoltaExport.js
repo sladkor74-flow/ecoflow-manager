@@ -78,27 +78,41 @@ export function exportExtraRaccoltaExcel(records, mese, anno) {
   // aggiuntivi, perche' e' un importo fisso per intervento e non un prezzo a
   // tonnellata; senza questa colonna le voci non facevano piu' il costo totale,
   // che il trasporto lo comprende.
+  // Le due voci «sovracosto raccoglitore» e «sovracosto impianto» (campi
+  // sovracosto_pagato_raccoglitore e sovracosto_pagato_impianto, nati il
+  // 03/10/2026 con la precisazione dell'utente) stanno qui per lo stesso motivo:
+  // sono soldi che SMOCO PAGA, al raccoglitore per i costi imprevisti della
+  // raccolta o all'impianto per quelli del trattamento, e il costo totale li
+  // comprende. Si sommano tali e quali, come la pulizia e il trasporto, perche'
+  // sono importi fissi per intervento e non prezzi a tonnellata. Nel riepilogo
+  // dell'Area 2 non ci vanno mai: quello somma i tre sovracosti del RICAVO e
+  // finisce nel totale imponibile della fatturazione attiva, e un costo che
+  // paghiamo noi lo gonfierebbe.
   wsData.push([]);
-  wsData.push(['PRODUTTORE', 'costi aggiuntivi', 'raccolta', 'stoccaggio', 'trattamento', 'pulizia', 'trasporto', 'costo totale', 'ricavi', 'margine']);
+  wsData.push(['PRODUTTORE', 'costi aggiuntivi', 'raccolta', 'stoccaggio', 'trattamento', 'pulizia', 'trasporto', 'sovracosto raccoglitore', 'sovracosto impianto', 'costo totale', 'ricavi', 'margine']);
 
   const byProd = aggregaPerProduttore(records);
-  let totCostiAgg = 0, totRaccolta = 0, totStoccaggio = 0, totTrattamento = 0, totPulizia = 0, totTrasporto = 0, totCosto = 0, totRicavi = 0, totMargine = 0;
+  let totCostiAgg = 0, totRaccolta = 0, totStoccaggio = 0, totTrattamento = 0, totPulizia = 0, totTrasporto = 0;
+  let totSovraRaccoglitore = 0, totSovraImpianto = 0, totCosto = 0, totRicavi = 0, totMargine = 0;
 
   for (const [p, v] of Object.entries(byProd)) {
     wsData.push([
       p,
       r2(v.costi_aggiuntivi), r2(v.raccolta), r2(v.stoccaggio), r2(v.trattamento),
-      r2(v.pulizia), r2(v.trasporto), r2(v.costo_totale), r2(v.ricavi), r2(v.margine),
+      r2(v.pulizia), r2(v.trasporto), r2(v.sovracosto_raccoglitore), r2(v.sovracosto_impianto),
+      r2(v.costo_totale), r2(v.ricavi), r2(v.margine),
     ]);
     totCostiAgg += v.costi_aggiuntivi; totRaccolta += v.raccolta; totStoccaggio += v.stoccaggio;
     totTrattamento += v.trattamento; totPulizia += v.pulizia; totTrasporto += v.trasporto;
+    totSovraRaccoglitore += v.sovracosto_raccoglitore; totSovraImpianto += v.sovracosto_impianto;
     totCosto += v.costo_totale; totRicavi += v.ricavi; totMargine += v.margine;
   }
 
   wsData.push([
     'TOTALE',
     r2(totCostiAgg), r2(totRaccolta), r2(totStoccaggio), r2(totTrattamento),
-    r2(totPulizia), r2(totTrasporto), r2(totCosto), r2(totRicavi), r2(totMargine),
+    r2(totPulizia), r2(totTrasporto), r2(totSovraRaccoglitore), r2(totSovraImpianto),
+    r2(totCosto), r2(totRicavi), r2(totMargine),
   ]);
 
   const margPercTot = totRicavi !== 0 ? r2((totMargine / totRicavi) * 100) : 0;
@@ -186,34 +200,41 @@ export function exportExtraRaccoltaPDF(records, mese, anno) {
   doc.text('ANALISI MARGINE', 14, y); y += 5;
   doc.setFont(undefined, 'normal');
 
-  // Le stesse voci del foglio Excel, trasporto compreso: il costo a viaggio degli
-  // interventi, che entra nel costo totale e quindi va mostrato anche qui.
-  const H2 = ['PRODUTTORE', 'costi agg.', 'raccolta', 'stoccaggio', 'trattamento', 'pulizia', 'trasporto', 'costo tot.', 'ricavi', 'margine'];
-  const W2 = [38, 23, 23, 23, 25, 20, 22, 23, 23, 23];
+  // Le stesse voci del foglio Excel: il trasporto a viaggio e i due sovracosti
+  // pagati, al raccoglitore e all'impianto, entrano tutti nel costo totale e
+  // quindi vanno mostrati anche qui. Le larghezze sono state strette per far
+  // posto alle due colonne nuove, come si e' fatto per il trasporto: le
+  // intestazioni sono abbreviate ma dicono chi incassa il sovracosto, perche'
+  // «sovr. raccogl.» e «sovr. impianto» non si confondano con i sovracosti del
+  // ricavo, che qui non ci sono.
+  const H2 = ['PRODUTTORE', 'costi agg.', 'raccolta', 'stoccaggio', 'trattamento', 'pulizia', 'trasporto', 'sovr. raccogl.', 'sovr. impianto', 'costo tot.', 'ricavi', 'margine'];
+  const W2 = [32, 19, 19, 19, 21, 17, 19, 23, 23, 20, 19, 19];
   x = 14;
   H2.forEach((h, i) => { doc.text(h, x, y); x += W2[i]; });
   y += 4.5;
 
   const byProd = aggregaPerProduttore(records);
-  let tCA = 0, tR = 0, tS = 0, tTr = 0, tP = 0, tTrasp = 0, tCT = 0, tRi = 0, tM = 0;
+  let tCA = 0, tR = 0, tS = 0, tTr = 0, tP = 0, tTrasp = 0, tSRac = 0, tSImp = 0, tCT = 0, tRi = 0, tM = 0;
 
   for (const [p, v] of Object.entries(byProd)) {
     if (y > 195) { doc.addPage(); y = 15; }
     x = 14;
     const row = [
-      String(p).substring(0, 22),
+      String(p).substring(0, 20),
       r2(v.costi_aggiuntivi), r2(v.raccolta), r2(v.stoccaggio), r2(v.trattamento),
-      r2(v.pulizia), r2(v.trasporto), r2(v.costo_totale), r2(v.ricavi), r2(v.margine),
+      r2(v.pulizia), r2(v.trasporto), r2(v.sovracosto_raccoglitore), r2(v.sovracosto_impianto),
+      r2(v.costo_totale), r2(v.ricavi), r2(v.margine),
     ];
     row.forEach((cell, i) => { doc.text(String(cell), x, y); x += W2[i]; });
     y += 4.5;
     tCA += v.costi_aggiuntivi; tR += v.raccolta; tS += v.stoccaggio; tTr += v.trattamento;
-    tP += v.pulizia; tTrasp += v.trasporto; tCT += v.costo_totale; tRi += v.ricavi; tM += v.margine;
+    tP += v.pulizia; tTrasp += v.trasporto; tSRac += v.sovracosto_raccoglitore; tSImp += v.sovracosto_impianto;
+    tCT += v.costo_totale; tRi += v.ricavi; tM += v.margine;
   }
 
   x = 14;
   doc.setFont(undefined, 'bold');
-  ['TOTALE', r2(tCA), r2(tR), r2(tS), r2(tTr), r2(tP), r2(tTrasp), r2(tCT), r2(tRi), r2(tM)].forEach((cell, i) => {
+  ['TOTALE', r2(tCA), r2(tR), r2(tS), r2(tTr), r2(tP), r2(tTrasp), r2(tSRac), r2(tSImp), r2(tCT), r2(tRi), r2(tM)].forEach((cell, i) => {
     doc.text(String(cell), x, y); x += W2[i];
   });
   y += 6;

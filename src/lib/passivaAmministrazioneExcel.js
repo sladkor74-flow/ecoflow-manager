@@ -258,10 +258,16 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
     // Il prezzo a viaggio non ha una colonna dei viaggi in questa tabella: la
     // formula si tiene dentro il numero dei viaggi e la nota lo dice, cosi'
     // correggere il prezzo rifa' il totale anche qui.
+    // E se nell'importo c'e' un sovracosto - costi imprevisti che si pagano al
+    // raccoglitore o all'impianto, fuori dalla moltiplicazione - la formula se lo
+    // porta dietro come addendo: cosi' il conto si legge per intero, e correggere
+    // il prezzo rifa' il totale senza perdere quei soldi.
+    const oltre = n2(riga.oltre_tariffa);
+    const coda = oltre > 0 ? `+${oltre}` : '';
     scrivi(ws, r, col.totale, prezzoNoto ? {
       formula: aViaggio
-        ? `${lettera(colPrezzo)}${r}*${viaggi}`
-        : `${lettera(col.tonn)}${r}*${lettera(colPrezzo)}${r}`,
+        ? `${lettera(colPrezzo)}${r}*${viaggi}${coda}`
+        : `${lettera(col.tonn)}${r}*${lettera(colPrezzo)}${r}${coda}`,
       result: n2(riga.totale),
     } : n2(riga.totale), { ...st, allinea: 'right', fmt: EURO });
     scrivi(ws, r, col.note, [

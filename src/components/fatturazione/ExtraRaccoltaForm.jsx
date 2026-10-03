@@ -20,6 +20,19 @@ const CLASSI = ['P', 'M', 'G1', 'G2'];
 const CAMPO_COSTO = { RACCOLTA: 'costo_raccolta_t', TRATTAMENTO: 'costo_trattamento_t', CONFERIMENTO_STOCCAGGIO: 'costo_stoccaggio_t' };
 const CAMPI_COSTO = Object.values(CAMPO_COSTO);
 
+// I costi che non si spiegano da soli e pretendono le note. Gli oneri senza
+// padrone, che la fatturazione passiva non sa a chi fatturare, e i due
+// sovracosti pagati, che nascono sempre da un imprevisto: l'utente, 03/10/2026,
+// dice che il raccoglitore «ha dovuto sostenere costi imprevisti nella raccolta
+// per diverse ragioni» e che l'impianto ha «costi non previsti sostenuti per la
+// pulizia di pfu sporchi prima del trattamento». Quelle ragioni e quei motivi
+// finiscono nelle note del foglio dell'amministrazione, percio' vanno scritti
+// qui: un costo imprevisto che si fattura a un fornitore deve dire perche'. Il
+// costo del trasporto a viaggio non entra in questo elenco, perche' e' una voce
+// normale dell'intervento e non un imprevisto.
+const CAMPI_DA_SPIEGARE = ['costo_pulizia', 'costi_aggiuntivi', 'sovracosto_pagato_raccoglitore', 'sovracosto_pagato_impianto'];
+const serveNoteCosti = (f) => CAMPI_DA_SPIEGARE.some(k => Number(f[k]) > 0);
+
 const EMPTY = {
   stato: 'assegnato', ordine_immesso_il: '',
   numero_fir: '', tipologia_trasporto: '', tipo_movimento: 'primaria', stoccaggio: '',
@@ -29,6 +42,7 @@ const EMPTY = {
   cer: '160103', classe: '', peso_effettivo: '',
   prezzo_attivo_t: 0, sovracosto_raccolta: 0, sovracosto_trasporto: 0, sovracosto_trattamento: 0,
   costo_raccolta_t: 0, costo_trasporto_viaggio: 0, costo_stoccaggio_t: 0, costo_trattamento_t: 0,
+  sovracosto_pagato_raccoglitore: 0, sovracosto_pagato_impianto: 0,
   costo_pulizia: 0, costi_aggiuntivi: 0, note_costi: '', note: '',
 };
 
@@ -372,8 +386,8 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
     } else if (form.peso_effettivo !== '' && form.peso_effettivo !== null && Number(form.peso_effettivo) < 0) {
       e.peso_effettivo = 'Non negativo';
     }
-    if ((Number(form.costo_pulizia) > 0 || Number(form.costi_aggiuntivi) > 0) && !form.note_costi)
-      e.note_costi = 'Obbligatorio quando costo pulizia o costi aggiuntivi > 0';
+    if (serveNoteCosti(form) && !form.note_costi)
+      e.note_costi = 'Obbligatorio quando c\'è un sovracosto pagato al raccoglitore o all\'impianto, un costo di pulizia o costi aggiuntivi: scrivi perché quel costo c\'è';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -391,6 +405,7 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
     const p = { ...form, stato };
     ['peso_effettivo', 'prezzo_attivo_t', 'sovracosto_raccolta', 'sovracosto_trasporto', 'sovracosto_trattamento',
      'costo_raccolta_t', 'costo_trasporto_viaggio', 'costo_stoccaggio_t', 'costo_trattamento_t',
+     'sovracosto_pagato_raccoglitore', 'sovracosto_pagato_impianto',
      'costo_pulizia', 'costi_aggiuntivi'].forEach(k => {
       p[k] = Number(p[k]) || 0;
     });
@@ -581,6 +596,23 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
           {/* GRUPPO Prezzi e costi */}
           <fieldset className="border rounded-lg p-3">
             <legend className="text-sm font-semibold px-1">Prezzi e costi</legend>
+
+            {/* I DUE INSIEMI DI SOVRACOSTI VANNO TENUTI SEPARATI A VISTA. Nella
+                scheda ci sono tre sovracosti che si aggiungono a quello che SMOCO
+                FATTURA a Ecotyre (sono ricavo) e due sovracosti che SMOCO PAGA a
+                un fornitore (sono costo, e sono nati con la precisazione
+                dell'utente del 03/10/2026). I nomi si somigliano troppo: scritto
+                nel posto sbagliato, lo stesso importo sposta il margine del doppio
+                e nella direzione opposta. Percio' il gruppo e' diviso in tre
+                blocchi con un titolino - entrate, uscite, oneri senza padrone - e
+                ogni sovracosto dice sotto a chi si paga. La regola per
+                riconoscerli: i sovracosti del ricavo portano il nome della
+                PRESTAZIONE (raccolta, trasporto, trattamento), quelli pagati il
+                nome di CHI LI INCASSA (il raccoglitore, l'impianto). */}
+            <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-success">Entrate: quello che SMOCO fattura a Ecotyre</p>
+            <p className="text-xs text-muted-foreground">
+              I tre sovracosti di questo blocco portano il nome della prestazione e si aggiungono al ricavo della fattura attiva: non si pagano a nessun fornitore.
+            </p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Prezzo attivo (€/t)</Label>
@@ -590,6 +622,16 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
               <NumField label="Sovracosto raccolta (€)" k="sovracosto_raccolta" />
               <NumField label="Sovracosto trasporto (€)" k="sovracosto_trasporto" />
               <NumField label="Sovracosto trattamento (€)" k="sovracosto_trattamento" />
+            </div>
+
+            <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-destructive">Uscite: quello che SMOCO paga ai fornitori</p>
+            <p className="text-xs text-muted-foreground">
+              I due sovracosti di questo blocco portano il nome di chi li incassa — il raccoglitore o l&apos;impianto — e la fatturazione passiva li paga a quel fornitore: sono costo, non ricavo.
+            </p>
+            {/* Prima riga le tre voci del trasportatore, seconda riga le due della
+                destinazione: ogni sovracosto pagato sta accanto alle voci dello
+                stesso fornitore, cosi' si vede subito chi lo incassa. */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-2">
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Costo raccolta (€/t)</Label>
                 <Input type="number" className="h-9 text-sm" value={form.costo_raccolta_t} onChange={e => scriviCosto('costo_raccolta_t', e.target.value)} />
@@ -610,6 +652,20 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
                 <p className="text-xs text-muted-foreground">Importo fisso per il viaggio, non a tonnellata</p>
                 {raccoltaInterna && <p className="text-xs text-muted-foreground">trasportatore interno: non fatturato</p>}
               </div>
+              {/* Il sovracosto che si paga al RACCOGLITORE, cioe' al trasportatore
+                  dell'intervento: i costi imprevisti che ha sostenuto nella
+                  raccolta. L'utente, 03/10/2026: «quando ad esempio ha dovuto
+                  sostenere costi imprevisti nella raccolta per diverse ragioni».
+                  Nessuna tariffa lo propone - un imprevisto non sta in nessun
+                  listino - e la nota sotto dice a chi si paga, perche' il nome da
+                  solo si confonde con «Sovracosto raccolta» del blocco delle
+                  entrate. */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Sovracosto raccoglitore (€)</Label>
+                <Input type="number" className="h-9 text-sm" value={form.sovracosto_pagato_raccoglitore} onChange={e => set('sovracosto_pagato_raccoglitore', e.target.value)} />
+                <p className="text-xs text-muted-foreground">Si paga al raccoglitore, cioè al trasportatore: importo fisso, non a tonnellata</p>
+                {raccoltaInterna && <p className="text-xs text-muted-foreground">trasportatore interno: non fatturato</p>}
+              </div>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Costo stoccaggio (€/t)</Label>
                 <Input type="number" className="h-9 text-sm" value={form.costo_stoccaggio_t} onChange={e => scriviCosto('costo_stoccaggio_t', e.target.value)} />
@@ -620,17 +676,46 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
                 <Input type="number" className="h-9 text-sm" value={form.costo_trattamento_t} onChange={e => scriviCosto('costo_trattamento_t', e.target.value)} />
                 {daDove('costo_trattamento_t')}
               </div>
-              <p className="md:col-span-4 text-xs text-muted-foreground">
-                I costi di raccolta, trasporto, stoccaggio e trattamento sono quelli scritti qui, e la fatturazione passiva paga questi. Il modulo propone solo i costi a tonnellata, dalle tariffe di extra raccolta del fornitore e solo nei campi vuoti; il costo del trasporto a viaggio si scrive sempre a mano, perché un listino a viaggio per l&apos;extra raccolta non c&apos;è. Va scritto tutto prima di passare l&apos;intervento a terminato.
-              </p>
+              {/* Il sovracosto che si paga all'IMPIANTO di destinazione, quello che
+                  deve lavorare i PFU. L'utente, 03/10/2026: «per l'impianto di
+                  conferimento che li deve lavorare (trattare\triturare) per
+                  diversi motivi (ad esempio costi non previsti sostenuti per la
+                  pulizia di pfu sporchi prima del trattamento)». Sta accanto al
+                  costo di trattamento perche' lo incassa lo stesso fornitore, e la
+                  nota lo distingue da «Sovracosto trattamento» del blocco delle
+                  entrate. */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Sovracosto impianto (€)</Label>
+                <Input type="number" className="h-9 text-sm" value={form.sovracosto_pagato_impianto} onChange={e => set('sovracosto_pagato_impianto', e.target.value)} />
+                <p className="text-xs text-muted-foreground">Si paga all&apos;impianto di destinazione, che deve trattare o triturare: importo fisso, non a tonnellata</p>
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              I costi di raccolta, trasporto, stoccaggio e trattamento sono quelli scritti qui, e la fatturazione passiva paga questi. Il modulo propone solo i costi a tonnellata, dalle tariffe di extra raccolta del fornitore e solo nei campi vuoti; il costo del trasporto a viaggio e i due sovracosti si scrivono sempre a mano, perché un listino a viaggio per l&apos;extra raccolta non c&apos;è e un imprevisto non sta in nessuna tariffa. Va scritto tutto prima di passare l&apos;intervento a terminato.
+            </p>
+
+            <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Oneri senza un fornitore a cui fatturarli</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
               <NumField label="Costo pulizia (€)" k="costo_pulizia" />
               <NumField label="Costi aggiuntivi (€)" k="costi_aggiuntivi" />
-              <div className="space-y-1 md:col-span-2">
-                <Label className="text-xs text-muted-foreground">Note costi {(Number(form.costo_pulizia) > 0 || Number(form.costi_aggiuntivi) > 0) ? '*' : ''}</Label>
+            </div>
+            {/* Questi due campi restano come erano: sono i dati degli interventi
+                passati e non si toccano. Non hanno un padrone, e la fatturazione
+                passiva continua a dichiararli senza pagarli a nessuno. Dal
+                03/10/2026 un onere che spetta al raccoglitore o all'impianto ha il
+                suo posto nel sovracosto giusto, e allora la passiva lo paga. */}
+            <p className="mt-2 text-xs text-muted-foreground">
+              Sono oneri che non si attribuiscono a nessun fornitore: la fatturazione passiva non sa a chi fatturarli e lo segnala senza pagarli. Se quell&apos;onere spetta al raccoglitore o all&apos;impianto, va scritto nel sovracosto giusto del blocco delle uscite, e allora la passiva lo paga al fornitore.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Note costi {serveNoteCosti(form) ? '*' : ''}</Label>
                 <Input className="h-9 text-sm" value={form.note_costi} onChange={e => set('note_costi', e.target.value)} />
                 {errors.note_costi && <p className="text-xs text-destructive">{errors.note_costi}</p>}
+                <p className="text-xs text-muted-foreground">Perché quel costo c&apos;è: obbligatorio per i due sovracosti pagati, la pulizia e i costi aggiuntivi. Finisce nelle note del foglio dell&apos;amministrazione</p>
               </div>
-              <div className="space-y-1 md:col-span-2">
+              <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Note</Label>
                 <Input className="h-9 text-sm" value={form.note} onChange={e => set('note', e.target.value)} />
               </div>

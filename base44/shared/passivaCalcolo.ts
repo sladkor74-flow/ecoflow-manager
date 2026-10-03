@@ -243,6 +243,80 @@ function euroTesto(v) {
 }
 const numTesto = (v) => String(round2(v)).replace('.', ',');
 
+// ─── I SOVRACOSTI DI UN INTERVENTO DI EXTRA RACCOLTA ───
+//
+// L'utente, 03/10/2026: «il sovraccosto nella passiva puo' essere dovuto al
+// raccoglitore (quando ad esempio ha dovuto sostenere costi imprevisti nella
+// raccolta per diverse ragioni) o per l'impianto di conferimento che li deve
+// lavorare (trattare/triturare) per diversi motivi (ad esempio costi non
+// previsti sostenuti per la pulizia di pfu sporchi prima del trattamento)».
+//
+// Un sovracosto della passiva quindi non e' un onere che non appartiene a
+// nessuno: ha un padrone, ed e' il raccoglitore dell'intervento oppure
+// l'impianto di destinazione che deve lavorare quelle gomme. Si somma
+// all'importo della riga di quel fornitore e si paga a lui. E' un importo
+// fisso per intervento, come il costo del trasporto a viaggio: non si
+// moltiplica per le tonnellate.
+//
+// Senza padrone restano soltanto i due campi vecchi, costo_pulizia e
+// costi_aggiuntivi, che la passiva continua a dichiarare come anomalia.
+function segnaSovracosto(g, euro, rec) {
+  if (!(Number(euro) > 0)) return;
+  g.sovracostoEuro += Number(euro);
+  // Un gruppo di righe puo' raccogliere piu' interventi: si tengono tutti,
+  // perche' chi guarda la fatturazione deve poter risalire a quale intervento
+  // ha portato il sovracosto, e non deve trovarne uno solo al posto di tre.
+  g.sovracostoInterventi.push(String(rec.numero_fir || rec.id_ordine || '—'));
+  const motivo = String(rec.note_costi || '').trim();
+  if (motivo) g.sovracostoMotivi.add(motivo);
+}
+
+// La frase che spiega la differenza fra la moltiplicazione che si vede
+// (tariffa per peso) e l'importo della riga. Senza di lei l'importo non
+// tornerebbe con il conto mostrato, ed e' il genere di cosa che fa perdere
+// fiducia anche in tutti gli altri numeri.
+//
+// Il motivo scritto sull'intervento (note_costi) non entra in questa frase ma
+// in un campo suo: e' testo libero, e il «format amministrazione» legge la
+// nota di una riga cercandoci delle parole (interno, compreso, senza tariffa)
+// per sapere perche' un importo e' zero. Un motivo che contenesse una di
+// quelle parole farebbe scambiare una riga pagata per una riga da non pagare.
+function notaSovracosto(g, cosa) {
+  if (!(g.sovracostoEuro > 0)) return '';
+  const quali = [...new Set(g.sovracostoInterventi)];
+  const dove = quali.length === 1 ? `intervento ${quali[0]}` : `interventi ${quali.join(', ')}`;
+  if (g.interno) return `nemmeno i ${euroTesto(g.sovracostoEuro)} € di sovracosto ${cosa} (${dove}) si pagano`;
+  return `oltre la tariffa per il peso, ${euroTesto(g.sovracostoEuro)} € di sovracosto per costi imprevisti ${cosa} (${dove})`;
+}
+
+// Il sovracosto che la riga ha dentro l'importo, come campo suo, piu' il
+// motivo scritto sull'intervento. A se stessi non si fattura: di un fornitore
+// interno il sovracosto non si paga, e il campo dice zero come l'importo.
+function campiSovracosto(g) {
+  return {
+    sovracosto_euro: g.interno ? 0 : round2(g.sovracostoEuro),
+    sovracosto_motivo: g.sovracostoEuro > 0 ? [...g.sovracostoMotivi].join(' / ') : '',
+  };
+}
+
+// La nota di una riga, e se e' soltanto un'informazione. Il problema (interno,
+// compreso nella raccolta, senza tariffa) resta la prima cosa che si legge e la
+// frase del sovracosto si aggiunge dopo; nota_informativa dice alla tabella di
+// non colorarla come un errore, come fa gia' il blocco delle secondarie. Un
+// sovracosto pagato non e' un problema, e un avviso rosso che grida al torto fa
+// smettere di guardare gli avvisi.
+function noteRiga(problema, nota) {
+  return {
+    note: [problema, nota].filter(Boolean).join('. '),
+    nota_informativa: !problema && !!nota,
+  };
+}
+
+// I tre campi con cui un gruppo di righe tiene il conto dei sovracosti dei
+// suoi interventi. Stanno in tutti i gruppi, anche in quelli di rete e di ACI,
+// dove restano a zero: un canale che non ha interventi non ha sovracosti.
+const CONTO_SOVRACOSTI = () => ({ sovracostoEuro: 0, sovracostoInterventi: [], sovracostoMotivi: new Set() });
+
 export const MESI_PASSIVA = MESI_MAP;
 
 /**
@@ -514,6 +588,14 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       const peso = Number(r.peso_effettivo || 0);
       const viaggioKey = chiaveViaggio(r);
       const interno = isInterno(trasportatore);
+      // IL SOVRACOSTO CHE SPETTA AL RACCOGLITORE: i costi imprevisti che ha
+      // sostenuto nella raccolta si pagano a lui, cioe' al trasportatore
+      // dell'intervento, e passano dalla catena dei subfornitori come tutto il
+      // resto del calcolo (fatturaA, qui sopra). Solo l'extra raccolta ce l'ha:
+      // sulla rete e sull'ACI un intervento non esiste e il campo nemmeno.
+      const sovracostoRaccoglitore = tipologia === 'EXTRA_RACCOLTA'
+        ? Number(r.sovracosto_pagato_raccoglitore || 0)
+        : 0;
 
       const tariffa = tipologia === 'EXTRA_RACCOLTA'
         ? tariffaDallIntervento(r, 'RACCOLTA')
@@ -555,9 +637,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           raccPerTras.set(trasKey, {
             trasportatore, trasKey, interno,
             peso_kg: 0, viaggiSet: new Set(), perTariffa: new Map(), diCui: new Map(),
+            ...CONTO_SOVRACOSTI(),
           });
         }
         const g = raccPerTras.get(trasKey);
+        segnaSovracosto(g, sovracostoRaccoglitore, r);
         g.peso_kg += peso;
         g.viaggiSet.add(viaggioKey);
         if (fatt.subfornitore) segnaDiCui(g.diCui, fatt.subfornitore, peso, viaggioKey);
@@ -571,9 +655,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           raccPerGroup.set(key, {
             trasportatore, trasKey, provincia, destinazione, regione, interno,
             tariffa, peso_kg: 0, viaggiSet: new Set(), classi_set: new Set(), diCui: new Map(),
+            ...CONTO_SOVRACOSTI(),
           });
         }
         const g = raccPerGroup.get(key);
+        segnaSovracosto(g, sovracostoRaccoglitore, r);
         g.peso_kg += peso;
         g.viaggiSet.add(viaggioKey);
         if (classe) g.classi_set.add(classe);
@@ -590,6 +676,10 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       const valore = g.tariffa ? g.tariffa.valore : 0;
       let importo = 0;
       if (g.tariffa && !g.interno) importo = calcImporto(um, valore, g.peso_kg, g.viaggiSet.size);
+      // Il sovracosto degli interventi del gruppo si aggiunge qui, una volta
+      // sola: segnaSovracosto lo ha sommato intervento per intervento, e un
+      // intervento cade in un gruppo solo, quindi niente doppio conteggio.
+      if (!g.interno) importo += g.sovracostoEuro;
       raccoglitoriRows.push({
         fornitore: g.trasportatore, fornitore_norm: g.trasKey, interno: g.interno, di_cui: elencoDiCuiConViaggi(g.diCui),
         riga: {
@@ -607,7 +697,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           // destinazione e si sta applicando invece quello generico.
           tariffa_criterio: g.tariffa ? (g.tariffa.criterio || 'generica') : '',
           importo: round2(importo),
-          note: g.interno ? 'interno, non fatturato' : (!g.tariffa ? 'senza tariffa' : ''),
+          ...campiSovracosto(g),
+          ...noteRiga(
+            g.interno ? 'interno, non fatturato' : (!g.tariffa ? 'senza tariffa' : ''),
+            notaSovracosto(g, 'della raccolta'),
+          ),
         },
       });
     }
@@ -621,6 +715,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         viaggiFatturati += pt.viaggiSet.size;
         um = pt.tariffa.unita_misura; valore = pt.tariffa.valore;
       }
+      // Come sopra, e fuori dal giro delle tariffe: il sovracosto non e' un
+      // prezzo che si moltiplica, e' un importo fisso che si somma una volta.
+      if (!g.interno) importo += g.sovracostoEuro;
       // I viaggi a video sono quelli fatturati, altrimenti la moltiplicazione
       // mostrata non tornerebbe con l'importo. Se sono piu' dei viaggi
       // distinti, lo stesso camion dello stesso giorno e' finito sotto due
@@ -643,7 +740,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           tonnellate: round3(tonnellate), viaggi,
           tariffa_valore: valore, unita_misura: um,
           importo: round2(importo),
-          note: g.interno ? 'interno, non fatturato' : '',
+          ...campiSovracosto(g),
+          ...noteRiga(
+            g.interno ? 'interno, non fatturato' : '',
+            notaSovracosto(g, 'della raccolta'),
+          ),
         },
       });
     }
@@ -719,6 +820,16 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       const peso = Number(r.peso_effettivo || 0);
       const viaggioKey = chiaveViaggio(r);
       const interno = isInterno(destinazione);
+      // IL SOVRACOSTO CHE SPETTA ALL'IMPIANTO: i costi imprevisti del
+      // trattamento - l'esempio dell'utente e' la pulizia di PFU sporchi prima
+      // di triturarli - si pagano a chi ha ricevuto il carico, cioe' alla
+      // destinazione dell'intervento. Normalmente e' l'impianto che tratta; se
+      // la destinazione e' uno stoccaggio il sovracosto si paga comunque a lui,
+      // perche' e' lui che quel costo lo ha sostenuto, e un intervento ha una
+      // destinazione sola: non c'e' modo di pagarlo due volte.
+      const sovracostoImpianto = provenienza === 'extra'
+        ? Number(r.sovracosto_pagato_impianto || 0)
+        : 0;
 
       // Chi ha materialmente portato il carico: il raccoglitore per le primarie
       // e per l'extra raccolta, lo stoccaggio di partenza per le secondarie.
@@ -779,9 +890,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           impPerDest.set(dkey, {
             destinazione, destKey, interno, tariffa, compresoNellaRaccolta,
             peso_kg: 0, viaggiSet: new Set(), diCui: new Map(),
+            ...CONTO_SOVRACOSTI(),
           });
         }
         const g = impPerDest.get(dkey);
+        segnaSovracosto(g, sovracostoImpianto, r);
         g.peso_kg += peso;
         g.viaggiSet.add(viaggioKey);
         segnaDiCui(g.diCui, conferente, peso, viaggioKey);
@@ -791,9 +904,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           impPerGroup.set(key, {
             destinazione, destKey, prestazione, classe, provenienza, interno,
             tariffa, compresoNellaRaccolta, peso_kg: 0, viaggiSet: new Set(), diCui: new Map(),
+            ...CONTO_SOVRACOSTI(),
           });
         }
         const g = impPerGroup.get(key);
+        segnaSovracosto(g, sovracostoImpianto, r);
         g.peso_kg += peso;
         g.viaggiSet.add(viaggioKey);
         segnaDiCui(g.diCui, conferente, peso, viaggioKey);
@@ -807,6 +922,12 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       const valore = g.tariffa ? g.tariffa.valore : 0;
       let importo = 0;
       if (g.tariffa && !g.interno) importo = calcImporto(um, valore, g.peso_kg, g.viaggiSet.size);
+      // Il sovracosto, una volta sola come per i raccoglitori. Si paga anche
+      // quando sull'intervento il costo del trattamento e' zero: il sovracosto
+      // non e' un prezzo del trattamento, e' un costo imprevisto che si
+      // aggiunge a quel prezzo qualunque esso sia.
+      if (!g.interno) importo += g.sovracostoEuro;
+      const cosaSovra = g.prestazione === 'CONFERIMENTO_STOCCAGGIO' ? 'dello stoccaggio' : 'del trattamento';
       impiantiRows.push({
         fornitore: g.destinazione, fornitore_norm: g.destKey, interno: g.interno,
         riga: {
@@ -816,9 +937,13 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           importo: round2(importo),
           compreso_nella_raccolta: !!g.compresoNellaRaccolta,
           di_cui: elencoDiCui(g.diCui),
-          note: g.interno ? 'interno, non fatturato'
-            : g.compresoNellaRaccolta ? 'compreso nel prezzo unico della raccolta'
-            : (!g.tariffa ? 'senza tariffa' : ''),
+          ...campiSovracosto(g),
+          ...noteRiga(
+            g.interno ? 'interno, non fatturato'
+              : g.compresoNellaRaccolta ? 'compreso nel prezzo unico della raccolta'
+              : (!g.tariffa ? 'senza tariffa' : ''),
+            notaSovracosto(g, cosaSovra),
+          ),
         },
       });
     }
@@ -828,6 +953,10 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       const valore = g.tariffa ? g.tariffa.valore : 0;
       let importo = 0;
       if (g.tariffa && !g.interno) importo = calcImporto(um, valore, g.peso_kg, g.viaggiSet.size);
+      // Anche qui il sovracosto e' un importo fisso: si somma una volta, non
+      // si moltiplica per i viaggi.
+      if (!g.interno) importo += g.sovracostoEuro;
+      const cosaSovra = (g.tariffa && g.tariffa.prestazione) === 'CONFERIMENTO_STOCCAGGIO' ? 'dello stoccaggio' : 'del trattamento';
       impiantiRows.push({
         fornitore: g.destinazione, fornitore_norm: g.destKey, interno: g.interno,
         riga: {
@@ -838,9 +967,13 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           importo: round2(importo),
           compreso_nella_raccolta: !!g.compresoNellaRaccolta,
           di_cui: elencoDiCui(g.diCui),
-          note: g.interno ? 'interno, non fatturato'
-            : g.compresoNellaRaccolta ? 'compreso nel prezzo unico della raccolta'
-            : (!g.tariffa ? 'senza tariffa' : ''),
+          ...campiSovracosto(g),
+          ...noteRiga(
+            g.interno ? 'interno, non fatturato'
+              : g.compresoNellaRaccolta ? 'compreso nel prezzo unico della raccolta'
+              : (!g.tariffa ? 'senza tariffa' : ''),
+            notaSovracosto(g, cosaSovra),
+          ),
         },
       });
     }
@@ -862,11 +995,14 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       ...f, totale_tonnellate: round3(f.totale_tonnellate), totale_euro: round2(f.totale_euro),
     })).sort((a, b) => b.totale_euro - a.totale_euro);
 
-    // La pulizia e gli oneri aggiuntivi di un intervento sono importi fissi che
-    // non appartengono a un fornitore: il modulo Extra Raccolta li somma nel
-    // costo dell'intervento, qui non si possono mettere in fattura a nessuno. Si
+    // La pulizia e i costi aggiuntivi sono i due campi vecchi, e dal 03/10/2026
+    // sono gli unici oneri di un intervento rimasti senza padrone: il modulo
+    // Extra Raccolta li somma nel costo, e qui non si sa a chi fatturarli. Si
     // dichiarano, cosi' il totale della passiva non sembra sbagliato a chi
-    // confronta i due moduli.
+    // confronta i due moduli, e l'anomalia dice anche il rimedio - se quell'onere
+    // spetta al raccoglitore o all'impianto si scrive nel sovracosto di quel
+    // fornitore, e allora la passiva lo paga per davvero. I due sovracosti non
+    // sono piu' un'anomalia: sono righe pagate, nei due blocchi qui sopra.
     if (tipologia === 'EXTRA_RACCOLTA') {
       // Il trasporto di una secondaria di extra raccolta si paga a viaggio, col
       // prezzo scritto sull'intervento. Se quel campo e' vuoto il trasferimento
@@ -886,11 +1022,41 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           tonnellate: round3(Number(rec.peso_effettivo || 0) / 1000),
         });
       }
+      // Un sovracosto si paga a qualcuno: se sull'intervento manca il
+      // raccoglitore, o manca la destinazione, quella riga non viene costruita e
+      // il sovracosto non entrerebbe in nessuna fattura. Si dice, perche' un
+      // importo scritto e poi scomparso dai conti e' peggio di un importo che
+      // non c'e': nessuno lo va a cercare.
+      for (const rec of extraRaccoltaF) {
+        const sovraRacc = Number(rec.sovracosto_pagato_raccoglitore || 0);
+        if (sovraRacc > 0 && !String(rec.trasportatore || '').trim()) {
+          anomalie.push({
+            descrizione: `Extra raccolta: l'intervento ${rec.numero_fir || '—'} ha ${euroTesto(sovraRacc)} euro di sovracosto da pagare al raccoglitore, ma sull'intervento il raccoglitore non c'e': quel sovracosto non viene pagato a nessuno. Scrivi chi ha raccolto.`,
+            fornitore: '—',
+            prestazione: 'SOVRACOSTO RACCOGLITORE',
+            classe: String(rec.classe || '—'),
+            ambito: `FIR ${rec.numero_fir || '—'}`,
+            tonnellate: 0,
+          });
+        }
+        const sovraImp = Number(rec.sovracosto_pagato_impianto || 0);
+        const tipoDestSovra = String(rec.tipo_destinazione || '').toLowerCase().trim();
+        if (sovraImp > 0 && (!String(rec.destinazione || '').trim() || (tipoDestSovra !== 'imp' && tipoDestSovra !== 'stoc'))) {
+          anomalie.push({
+            descrizione: `Extra raccolta: l'intervento ${rec.numero_fir || '—'} ha ${euroTesto(sovraImp)} euro di sovracosto da pagare all'impianto, ma la destinazione dell'intervento manca oppure non dice se e' un impianto o uno stoccaggio: quel sovracosto non viene pagato a nessuno. Sistema la destinazione dell'intervento.`,
+            fornitore: rec.destinazione || '—',
+            prestazione: 'SOVRACOSTO IMPIANTO',
+            classe: String(rec.classe || '—'),
+            ambito: `FIR ${rec.numero_fir || '—'}`,
+            tonnellate: 0,
+          });
+        }
+      }
       for (const rec of extraRaccoltaF) {
         const fissi = Number(rec.costo_pulizia || 0) + Number(rec.costi_aggiuntivi || 0);
         if (fissi <= 0) continue;
         anomalie.push({
-          descrizione: `Extra raccolta: l'intervento ${rec.numero_fir || '—'} ha ${round2(fissi)} euro di oneri fissi (pulizia e costi aggiuntivi) che il modulo Extra Raccolta conta nel costo ma qui non sono attribuiti a nessun fornitore. ${rec.note_costi || ''}`.trim(),
+          descrizione: `Extra raccolta: l'intervento ${rec.numero_fir || '—'} ha ${euroTesto(fissi)} euro fra pulizia e costi aggiuntivi, che il modulo Extra Raccolta conta nel costo dell'intervento e qui non si fatturano a nessuno: quei due campi non dicono di chi sia l'onere. Se l'ha sostenuto il raccoglitore scrivilo nel sovracosto pagato al raccoglitore, se l'ha sostenuto l'impianto che deve trattare scrivilo nel sovracosto pagato all'impianto: allora la passiva lo paga a lui. ${rec.note_costi || ''}`.trim(),
           fornitore: rec.destinazione || '—',
           prestazione: 'ONERI INTERVENTO',
           classe: String(rec.classe || '—'),

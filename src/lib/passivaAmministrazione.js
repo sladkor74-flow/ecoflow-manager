@@ -371,6 +371,34 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno) {
       } else if (p.fonte === 'vari') {
         avvisi.push(`Tariffe diverse sulla stessa voce (${q.righe.length} righe): l'importo e' quello calcolato riga per riga. Se vanno distinte, aggiungi una voce.`);
       }
+      // IL SOVRACOSTO STA DENTRO L'IMPORTO, NON DENTRO IL PREZZO.
+      //
+      // Un sovracosto di un intervento di extra raccolta si paga al raccoglitore
+      // o all'impianto (precisazione dell'utente, 03/10/2026) e il calcolo lo
+      // somma all'importo della sua riga, fuori dalla moltiplicazione tariffa per
+      // peso. Qui l'importo di una voce si rifa' da prezzo per tonnellate: senza
+      // aggiungerlo, una riga che nella fatturazione passiva vale 620 euro nel
+      // foglio ne valeva 500, e i due moduli devono dire gli stessi numeri.
+      //
+      // Quando le righe hanno tariffe diverse fra loro l'importo e' gia' la somma
+      // di quelli calcolati, sovracosto compreso: aggiungerlo di nuovo sarebbe
+      // pagarlo due volte.
+      const oltre = p.fonte === 'vari' ? 0 : n2(q.righe.reduce((s, r) => s + (Number(r.sovracosto_euro) || 0), 0));
+      const motivi = [...new Set(q.righe.map(r => testo(r.sovracosto_motivo)).filter(Boolean))];
+      if (oltre > 0) {
+        avvisi.push(`Di cui ${oltre.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € di sovracosto per costi imprevisti, oltre la tariffa per il peso${motivi.length ? `: ${motivi.join(' / ')}` : '.'}`);
+      }
+      const base = p.importo !== undefined ? p.importo : importoVoce(p.prezzo, p.unita_misura, q.tonnellate, q.viaggi);
+      const totale = n2(base + oltre);
+      // Quando il prezzo viene dai movimenti, l'importo del foglio deve fare
+      // esattamente quello che ha calcolato la passiva: se non torna, lo si dice
+      // invece di lasciare due numeri diversi in due pagine.
+      if (p.fonte === 'movimenti' && q.righe.length) {
+        const calcolato = n2(q.righe.reduce((s, r) => s + (Number(r.importo) || 0), 0));
+        if (Math.abs(calcolato - totale) > 0.01) {
+          avvisi.push(`La fatturazione passiva per questa voce calcola ${calcolato.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €: la differenza va guardata.`);
+        }
+      }
       return {
         tipo: 'voce',
         soggetto,
@@ -380,10 +408,13 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno) {
         prezzo: p.prezzo,
         unita_misura: p.unita_misura,
         fonte_prezzo: p.fonte,
+        // Quanto dell'importo non viene dalla moltiplicazione: lo scrittore del
+        // foglio lo aggiunge alla formula, cosi' il conto si legge per intero.
+        oltre_tariffa: oltre,
         // Negli impianti dell'ACI il foglio ha due colonne di prezzo: la voce
         // dice in quale delle due sta il suo.
         colonna_prezzo: testo(v.colonna_prezzo),
-        totale: p.importo !== undefined ? p.importo : importoVoce(p.prezzo, p.unita_misura, q.tonnellate, q.viaggi),
+        totale,
         note: avvisi.filter(Boolean).join(' '),
       };
     });

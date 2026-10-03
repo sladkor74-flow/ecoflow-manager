@@ -49,7 +49,7 @@ export default function PassivaImpiantiTable({ data }) {
                             prezzo unico
                           </span>
                         )}
-                        {!r.compreso_nella_raccolta && r.note === 'senza tariffa' && (
+                        {!r.compreso_nella_raccolta && String(r.note || '').startsWith('senza tariffa') && (
                           <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
                             senza tariffa
                           </span>
@@ -65,6 +65,14 @@ export default function PassivaImpiantiTable({ data }) {
                         {r.compreso_nella_raccolta
                           ? <span className="text-xs font-normal text-muted-foreground">già nella raccolta</span>
                           : formatNumber(r.importo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {/* Il sovracosto dell'impianto sta dentro l'importo: senza
+                            questa riga la tariffa per le tonnellate non tornerebbe,
+                            e un importo che non torna fa dubitare di tutto il conto. */}
+                        {r.sovracosto_euro > 0 && (
+                          <div className="text-[10px] font-normal text-muted-foreground whitespace-normal">
+                            di cui {formatNumber(r.sovracosto_euro, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € di sovracosto per costi imprevisti{r.sovracosto_motivo ? `: ${r.sovracosto_motivo}` : ''}
+                          </div>
+                        )}
                       </td>
                     </tr>
                     {conferentiDaMostrare(r, f.fornitore).map((d, di) => (
