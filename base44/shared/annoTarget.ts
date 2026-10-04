@@ -55,13 +55,38 @@ export function targetImpiantoDellAnno(impiantiTarget, nomeSito, anno, chiave) {
  * dei raccoglitori di quell'anno legati a quel sito (TargetRaccoglitore.impianto).
  */
 export function targetPrimarieDelSito(raccoglitori, sito, anno, chiave) {
+  const q = targetPrimariePerRuolo(raccoglitori, sito, anno, chiave);
+  return Math.round((q.imp + q.stoc + q.senza) * 1000) / 1000;
+}
+
+/**
+ * Lo stesso, diviso per il RUOLO scritto sulla riga del target.
+ *
+ * Un sito puo' avere due ruoli - T-Cycle ha il capannone e il piazzale, e in
+ * Giacenze sono due righe - e il target puo' essere diverso sui due: l'utente,
+ * il 04/10/2026, «T-cycle va gestito come impianto per le 1050 t e come
+ * stoccaggio per le 250 t». Finche' il ruolo non si poteva scrivere, le due
+ * righe del target avevano lo stesso nome e si sommavano tutte sull'impianto.
+ *
+ * Le righe senza ruolo restano a parte: sono la stragrande maggioranza, e vanno
+ * dove andavano prima, cioe' sulla riga che porta le primarie del sito.
+ *
+ * @returns {{ imp: number, stoc: number, senza: number }}
+ */
+export function targetPrimariePerRuolo(raccoglitori, sito, anno, chiave) {
+  const vuoto = { imp: 0, stoc: 0, senza: 0 };
   const k = chiave(sito);
-  if (!k) return 0;
-  let t = 0;
+  if (!k) return vuoto;
+  const tondo = (v) => Math.round(v * 1000) / 1000;
   for (const r of recordDellAnno(raccoglitori, anno)) {
-    if (chiave(r.impianto) === k) t += Number(r.target_tonnellate) || 0;
+    if (chiave(r.impianto) !== k) continue;
+    const t = Number(r.target_tonnellate) || 0;
+    const ruolo = String(r.ruolo || '').toLowerCase().trim();
+    if (ruolo === 'stoccaggio' || ruolo === 'stoc') vuoto.stoc += t;
+    else if (ruolo === 'impianto' || ruolo === 'imp') vuoto.imp += t;
+    else vuoto.senza += t;
   }
-  return Math.round(t * 1000) / 1000;
+  return { imp: tondo(vuoto.imp), stoc: tondo(vuoto.stoc), senza: tondo(vuoto.senza) };
 }
 
 /** La nota che accompagna ogni record copiato. */

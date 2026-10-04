@@ -14,6 +14,11 @@
       "type": "string",
       "description": "Impianto di destinazione a cui e' legato il target (come nel Report Generale): un raccoglitore puo' avere piu' righe, una per impianto"
     },
+    "ruolo": {
+      "type": "string",
+      "enum": ["impianto", "stoccaggio"],
+      "description": "Dove arriva il materiale di questa riga quando il sito ha due ruoli: l'impianto o il suo piazzale. Vuoto = impianto, che e' il caso normale. Serve a chi, come T-Cycle, ha un target sul capannone e uno sul piazzale."
+    },
     "anno": {
       "type": "number",
       "description": "Anno di riferimento"

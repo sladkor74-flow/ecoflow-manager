@@ -55,21 +55,24 @@ const rigaDaConfermare = (riga) => recordDellaRiga(riga).some(daConfermare);
 function CellaImpianto({ riga, isAdmin, impiantiSuggeriti, onSalva }) {
   const [aperta, setAperta] = useState(false);
   const [valore, setValore] = useState('');
+  const [ruolo, setRuolo] = useState('');
   const [salvando, setSalvando] = useState(false);
   const [errore, setErrore] = useState('');
-  const apri = (v) => { setAperta(v); if (v) { setValore(riga.impianto || ''); setErrore(''); } };
+  const apri = (v) => { setAperta(v); if (v) { setValore(riga.impianto || ''); setRuolo(riga.ruolo || ''); setErrore(''); } };
   const salva = async () => {
-    if (valore.trim() === (riga.impianto || '')) { setAperta(false); return; }
+    if (valore.trim() === (riga.impianto || '') && ruolo === (riga.ruolo || '')) { setAperta(false); return; }
     setSalvando(true);
     try {
-      await onSalva(riga, valore.trim());
+      await onSalva(riga, valore.trim(), ruolo);
       setAperta(false);
     } catch (e) {
       setErrore(e.message || String(e));
     }
     setSalvando(false);
   };
-  const testo = riga.impianto ? `verso ${riga.impianto}` : 'impianto non indicato';
+  const testo = riga.impianto
+    ? `verso ${riga.impianto}${riga.ruolo === 'stoccaggio' ? ' · piazzale' : ''}`
+    : 'impianto non indicato';
   if (!isAdmin) return <div className={`text-[10px] font-normal ${riga.impianto ? 'text-muted-foreground' : 'text-amber-700'}`}>{testo}</div>;
   return (
     <Popover open={aperta} onOpenChange={apri}>
@@ -84,7 +87,22 @@ function CellaImpianto({ riga, isAdmin, impiantiSuggeriti, onSalva }) {
           <Input autoFocus list="nomi-impianti-riga" value={valore} onChange={e => setValore(e.target.value)} placeholder="Nessuno" className="h-8"
             onKeyDown={e => { if (e.key === 'Enter') salva(); }} />
           <datalist id="nomi-impianti-riga">{impiantiSuggeriti.map(n => <option key={n} value={n} />)}</datalist>
-          <p className="text-[11px] text-muted-foreground">Si cambia sul target annuo e su tutti i mesi della riga. Il target annuo conta per le primarie di questo impianto in Giacenze.</p>
+          {/* DOVE ARRIVA, quando il sito ha due ruoli. In Giacenze un sito come
+              T-Cycle ha due righe, il capannone e il piazzale, e il target puo'
+              essere diverso sulle due (utente, 04/10/2026: «impianto per le 1.050
+              t e stoccaggio per le 250»). Quasi tutte le righe non ne hanno
+              bisogno: lasciando «impianto» si comporta come ha sempre fatto. */}
+          <div className="flex gap-1">
+            {[['', 'Impianto'], ['stoccaggio', 'Piazzale']].map(([v, etichetta]) => (
+              <button
+                key={v || 'imp'}
+                type="button"
+                onClick={() => setRuolo(v)}
+                className={`flex-1 text-[11px] rounded-md border px-2 py-1 ${(ruolo === 'stoccaggio' ? 'stoccaggio' : '') === v ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'}`}
+              >{etichetta}</button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">Si cambia sul target annuo e su tutti i mesi della riga. Il target annuo conta per le primarie di questo sito in Giacenze, sulla riga del ruolo scelto.</p>
           {errore && <p className="text-xs text-destructive">{errore}</p>}
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="ghost" onClick={() => setAperta(false)}>Annulla</Button>
@@ -377,22 +395,25 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     // Le quote impianto dei doppio ruolo registrate come target annui non sono
     // raccoglitori, a meno che quel nome raccolga davvero.
     const quota = (nome) => quoteImpianto.has(chiaveNome(nome)) && !trasportatori.has(chiaveNome(nome)) && !conMensili.has(chiaveNome(nome));
-    const stessa = (r, nome, regione, impianto) => r.chiave === chiaveNome(nome) && r.regione === (regione || '') && r.impiantoChiave === chiaveNome(impianto || '');
+    // IL RUOLO FA PARTE DELL'IDENTITA' DI UNA RIGA (04/10/2026): un sito con due
+    // ruoli puo' avere due target diversi - T-Cycle, 1.050 sull'impianto e 250 sul
+    // piazzale - e senza il ruolo nella chiave le due righe si fonderebbero in una.
+    const stessa = (r, nome, regione, impianto, ruolo) => r.chiave === chiaveNome(nome) && r.regione === (regione || '') && r.impiantoChiave === chiaveNome(impianto || '') && (r.ruolo || '') === (ruolo || '');
     for (const a of annui) {
       if (quota(a.raccoglitore)) continue;
       const derivata = !a.regione;
       const regione = a.regione || (regionePrevalente.get(chiaveNome(a.raccoglitore)) || {}).regione || '';
-      elenco.push({ chiave: chiaveNome(a.raccoglitore), nome: a.raccoglitore, regione, regioneDerivata: derivata, impianto: a.impianto || '', impiantoChiave: chiaveNome(a.impianto || ''), annuo: a, mesi: {} });
+      elenco.push({ chiave: chiaveNome(a.raccoglitore), nome: a.raccoglitore, regione, regioneDerivata: derivata, impianto: a.impianto || '', impiantoChiave: chiaveNome(a.impianto || ''), ruolo: a.ruolo || '', annuo: a, mesi: {} });
     }
     const doppioni = [];
     for (const m of [...mensili].sort((x, y) => String(x.updated_date || '').localeCompare(String(y.updated_date || '')))) {
-      let riga = elenco.find(r => stessa(r, m.raccoglitore, m.regione, m.impianto));
+      let riga = elenco.find(r => stessa(r, m.raccoglitore, m.regione, m.impianto, m.ruolo));
       if (!riga) {
         riga = elenco.find(r => r.chiave === chiaveNome(m.raccoglitore) && r.regioneDerivata && !r.impianto && !m.impianto && !Object.keys(r.mesi).length);
         if (riga && m.regione) { riga.regione = m.regione; riga.regioneDerivata = false; }
       }
       if (!riga) {
-        riga = { chiave: chiaveNome(m.raccoglitore), nome: m.raccoglitore, regione: m.regione || '', regioneDerivata: false, impianto: m.impianto || '', impiantoChiave: chiaveNome(m.impianto || ''), annuo: null, mesi: {} };
+        riga = { chiave: chiaveNome(m.raccoglitore), nome: m.raccoglitore, regione: m.regione || '', regioneDerivata: false, impianto: m.impianto || '', impiantoChiave: chiaveNome(m.impianto || ''), ruolo: m.ruolo || '', annuo: null, mesi: {} };
         elenco.push(riga);
       }
       if (riga.mesi[m.mese]) doppioni.push(`${riga.nome} ${m.mese}`);
@@ -454,24 +475,27 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
   };
 
   // L'impianto di una riga: sul target annuo e su tutti i suoi mesi, con lo storico.
-  const salvaImpianto = async (riga, impianto) => {
+  const salvaImpianto = async (riga, impianto, ruolo = '') => {
     const k = chiaveNome(impianto);
-    if (righe.elenco.some(r => r !== riga && r.chiave === riga.chiave && r.regione === riga.regione && r.impiantoChiave === k)) {
-      throw new Error(`${riga.nome}${riga.regione ? ` in ${riga.regione}` : ''}${impianto ? ` verso ${impianto}` : ' senza impianto'} c'è già: correggi quella riga.`);
+    // Il ruolo fa parte dell'identita': due righe verso lo stesso sito, una per
+    // l'impianto e una per il piazzale, sono legittime e non sono un doppione.
+    const r2 = ruolo === 'stoccaggio' ? 'stoccaggio' : '';
+    if (righe.elenco.some(r => r !== riga && r.chiave === riga.chiave && r.regione === riga.regione && r.impiantoChiave === k && (r.ruolo || '') === r2)) {
+      throw new Error(`${riga.nome}${riga.regione ? ` in ${riga.regione}` : ''}${impianto ? ` verso ${impianto}${r2 ? ' (piazzale)' : ''}` : ' senza impianto'} c'è già: correggi quella riga.`);
     }
     const utente = nomeUtente(user);
-    const nota = `impianto: ${impianto || 'non indicato'}`;
+    const nota = `impianto: ${impianto || 'non indicato'}${r2 ? ' (piazzale)' : ''}`;
     const a = riga.annuo;
     if (a) {
       const storico_json = conModifica(a.storico_json, { utente, nota, prima: { target_tonnellate: a.target_tonnellate ?? null, attivo_dal: a.attivo_dal || '', impianto: a.impianto || '' } });
-      await base44.entities.TargetRaccoglitore.update(a.id, { impianto, storico_json });
-      setAnnui(prev => prev.map(x => (x.id === a.id ? { ...x, impianto, storico_json } : x)));
+      await base44.entities.TargetRaccoglitore.update(a.id, { impianto, ruolo: r2, storico_json });
+      setAnnui(prev => prev.map(x => (x.id === a.id ? { ...x, impianto, ruolo: r2, storico_json } : x)));
     }
     for (const m of Object.values(riga.mesi)) {
       if (!m) continue;
       const storico_json = conModifica(m.storico_json, { utente, nota, prima: { target: m.target ?? null, non_raccoglie: !!m.non_raccoglie, impianto: m.impianto || '' } });
-      await base44.entities.TargetMensile.update(m.id, { impianto, storico_json });
-      setMensili(prev => prev.map(x => (x.id === m.id ? { ...x, impianto, storico_json } : x)));
+      await base44.entities.TargetMensile.update(m.id, { impianto, ruolo: r2, storico_json });
+      setMensili(prev => prev.map(x => (x.id === m.id ? { ...x, impianto, ruolo: r2, storico_json } : x)));
     }
   };
 

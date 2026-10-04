@@ -11,7 +11,7 @@
 // contratti di un anno non ancora scritto.
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { annoDelRecord } from "./regolePredittivita.ts";
-import { targetImpiantoDellAnno, targetPrimarieDelSito, recordDellAnno } from "./annoTarget.ts";
+import { targetImpiantoDellAnno, targetPrimariePerRuolo, recordDellAnno } from "./annoTarget.ts";
 
 const attivo = (imp) => imp && (!imp.stato || imp.stato === 'attivo');
 
@@ -59,7 +59,7 @@ export function impiantiTargetDellAnno(impiantiTarget, anno) {
  *
  * @returns {{ target_totale_t: number, target_primarie_t: number, da_portare: { totale: boolean, primarie: boolean, spento: boolean }, record: object|null }}
  */
-export function targetRigaGiacenze({ sito, td, anno, giacenzaSito = null, impiantiTarget = [], raccoglitori = [], primarieQui = td === 'imp', chiave = normalizzaRagioneSociale }) {
+export function targetRigaGiacenze({ sito, td, anno, giacenzaSito = null, impiantiTarget = [], raccoglitori = [], primarieQui = td === 'imp', soloRuolo = false, chiave = normalizzaRagioneSociale }) {
   const da_portare = { totale: false, primarie: false, spento: false, primarie_senza_impianto: false };
   let target_totale_t = 0;
   let record = null;
@@ -78,8 +78,21 @@ export function targetRigaGiacenze({ sito, td, anno, giacenzaSito = null, impian
     }
   }
   let target_primarie_t = 0;
-  const somma = targetPrimarieDelSito(raccoglitori, sito, anno, chiave);
-  if (somma > 0) target_primarie_t = primarieQui ? somma : 0;
+  // IL RUOLO SCRITTO SULLA RIGA DECIDE SU QUALE DELLE DUE RIGHE DEL SITO VA.
+  //
+  // Un sito con due ruoli - il capannone e il piazzale - in Giacenze ha due
+  // righe, e il target puo' essere diverso sulle due. Le righe del target che il
+  // ruolo non ce l'hanno scritto (quasi tutte) vanno dove andavano prima: sulla
+  // riga che porta le primarie del sito, che e' l'impianto, o il piazzale se
+  // l'impianto non c'e'. Se poi di quel sito esiste una riga sola, quella prende
+  // tutto, ruoli compresi, perche' altrimenti un target resterebbe senza casa.
+  const q = targetPrimariePerRuolo(raccoglitori, sito, anno, chiave);
+  const somma = q.imp + q.stoc + q.senza;
+  if (somma > 0) {
+    const suo = td === 'stoc' ? q.stoc : q.imp;
+    const altro = td === 'stoc' ? q.imp : q.stoc;
+    target_primarie_t = Math.round((suo + (soloRuolo ? altro : 0) + (primarieQui ? q.senza : 0)) * 1000) / 1000;
+  }
   else if (Number(giacenzaSito?.target_primarie_t) > 0) {
     target_primarie_t = Number(giacenzaSito.target_primarie_t);
     da_portare.primarie = true;

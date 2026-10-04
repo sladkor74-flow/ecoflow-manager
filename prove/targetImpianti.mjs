@@ -77,6 +77,36 @@ verifica('il testo dell\'anomalia dice dove portarlo', /Target & Status/.test(te
 // quando quei target c'erano tutti - undicimilacinquecentocinquanta tonnellate,
 // per raccoglitore e per regione - e mancava solo il collegamento all'impianto.
 // L'utente e' andato a cercare un dato che aveva gia' scritto.
+// UN SITO CON DUE RUOLI PUO' AVERE DUE TARGET DIVERSI (04/10/2026).
+//
+// T-Cycle ha il capannone e il piazzale, e in Giacenze sono due righe: l'utente
+// vuole 1.050 t sull'impianto e 250 sul piazzale. Finche' il ruolo non si poteva
+// scrivere, le due righe del target avevano lo stesso nome del sito e si
+// sommavano tutte sulla riga dell'impianto: 1.300 di qua e zero di la'.
+console.log('IL TARGET DI UN SITO CON DUE RUOLI');
+{
+  const dueRuoli = [
+    { raccoglitore: 'Logistica', impianto: 'T-CYCLE INDUSTRIES SRL', ruolo: 'impianto', anno: 2026, target_tonnellate: 1050 },
+    { raccoglitore: 'C.L. Service', impianto: 'T-Cycle Industries Srl', ruolo: 'stoccaggio', anno: 2026, target_tonnellate: 250 },
+  ];
+  const r = (td, extra = {}) => targetRigaGiacenze({ sito: 'T-CYCLE INDUSTRIES SRL', td, anno: 2026, impiantiTarget: [], raccoglitori: dueRuoli, ...extra });
+  verifica('l\'impianto prende le sue 1.050 t', r('imp').target_primarie_t === 1050, JSON.stringify(r('imp')));
+  verifica('e il piazzale le sue 250', r('stoc', { primarieQui: false }).target_primarie_t === 250, JSON.stringify(r('stoc', { primarieQui: false })));
+  verifica('insieme fanno 1.300, e nessuna riga le conta tutte e due',
+    r('imp').target_primarie_t + r('stoc', { primarieQui: false }).target_primarie_t === 1300);
+  // Se di quel sito esistesse una riga sola, quella prende tutto: un target non
+  // puo' restare senza casa.
+  verifica('con una riga sola si prende tutto', r('imp', { soloRuolo: true }).target_primarie_t === 1300,
+    JSON.stringify(r('imp', { soloRuolo: true })));
+  // E le righe senza ruolo - quasi tutte - vanno dove andavano prima.
+  const misto = [...dueRuoli, { raccoglitore: 'Altro', impianto: 'T-CYCLE INDUSTRIES SRL', anno: 2026, target_tonnellate: 100 }];
+  verifica('una riga senza ruolo resta sull\'impianto',
+    targetRigaGiacenze({ sito: 'T-CYCLE INDUSTRIES SRL', td: 'imp', anno: 2026, raccoglitori: misto }).target_primarie_t === 1150
+    && targetRigaGiacenze({ sito: 'T-CYCLE INDUSTRIES SRL', td: 'stoc', anno: 2026, raccoglitori: misto, primarieQui: false }).target_primarie_t === 250);
+  verifica('e se l\'impianto non c\'e\', va sul piazzale',
+    targetRigaGiacenze({ sito: 'T-CYCLE INDUSTRIES SRL', td: 'stoc', anno: 2026, raccoglitori: misto, primarieQui: true, soloRuolo: true }).target_primarie_t === 1400);
+}
+
 console.log('QUALE DELLE DUE COSE MANCA');
 {
   // Gatim: raccoglitori dell'anno ce ne sono (Alfa, Beta, Gamma), ma nessuno

@@ -841,6 +841,9 @@ export default async function(req) {
         sito: sitoNome, td, anno: annoNum, giacenzaSito: g,
         impiantiTarget, raccoglitori: targetRaccoglitori,
         primarieQui: td === 'imp' || !rowKeys.has(ns + '|imp'),
+        // Se di questo sito c'e' una riga sola, quella prende anche i target
+        // scritti per l'altro ruolo: nessun target deve restare senza casa.
+        soloRuolo: !rowKeys.has(ns + '|' + (td === 'imp' ? 'stoc' : 'imp')),
         chiave: norm,
       });
       const target_primarie_t = tgt.target_primarie_t;

@@ -9,6 +9,11 @@
       "type": "string",
       "description": "Impianto di destinazione a cui e' legato il target (come nel Report Generale): un raccoglitore puo' avere piu' righe, una per impianto"
     },
+    "ruolo": {
+      "type": "string",
+      "enum": ["impianto", "stoccaggio"],
+      "description": "Come sulla riga annua: quando il sito ha due ruoli dice se questa riga e' dell'impianto o del suo piazzale. Vuoto = impianto."
+    },
     "raccoglitore": {
       "type": "string",
       "description": "Trasportatore / raccoglitore"
