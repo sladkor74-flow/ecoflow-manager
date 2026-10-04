@@ -982,7 +982,10 @@ export default async function(req) {
         anomalie.push({ tipo: 'target_da_portare', sito: sitoNome, anno: annoNum, cosa: 'totale', spento: tgt.da_portare.spento, target_t: r2(target_totale_t), avviso: testoTargetDaPortare(cosa) });
       }
       if (tgt.da_portare.primarie && !annoTargetChiuso) {
-        anomalie.push({ tipo: 'target_da_portare', sito: sitoNome, anno: annoNum, cosa: 'primarie', target_t: r2(target_primarie_t), avviso: testoTargetDaPortare('primarie') });
+        // Due situazioni diverse, due avvisi diversi: i target dei raccoglitori
+        // non ci sono affatto, oppure ci sono e nessuno e' legato a questo sito.
+        const cosaPrimarie = tgt.da_portare.primarie_senza_impianto ? 'primarie_senza_impianto' : 'primarie';
+        anomalie.push({ tipo: 'target_da_portare', sito: sitoNome, anno: annoNum, cosa: cosaPrimarie, target_t: r2(target_primarie_t), avviso: testoTargetDaPortare(cosaPrimarie) });
       }
       const sommaDerivati = der.granulo + der.fibre + der.metallo + der.cippato + der.ciabattato;
       if (dichiarato_t > 0 && Math.abs(sommaDerivati - dichiarato_t) > 0.001) {

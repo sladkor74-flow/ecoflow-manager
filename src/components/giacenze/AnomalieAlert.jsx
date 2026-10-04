@@ -90,9 +90,11 @@ export default function AnomalieAlert({ anomalie }) {
                 {a.tipo === 'coerenza_derivati' && ` — dichiarato ${t(a.dichiarato_t)} t, derivati ${t(a.somma_derivati_t)} t (diff. ${t(a.differenza_t)} t)`}
                 {a.tipo === 'giacenza_sopra_target' && ` — giacenza ${t(a.giacenza_portale_t)} t contro target ${t(a.target_totale_t)} t`}
                 {a.tipo === 'sito_senza_target' && ` — nessun target in Target & Status per il ${a.anno}: scrivilo in Target & Status → Impianti e stoccaggi`}
-                {a.tipo === 'target_da_portare' && (a.cosa === 'primarie'
-                  ? ` — il target delle primarie (${t(a.target_t)} t) è ancora scritto in Giacenze: scrivi in Target & Status i target dei raccoglitori che portano a questo sito, e da lì si calcola da solo`
-                  : a.spento
+                {a.tipo === 'target_da_portare' && (a.cosa === 'primarie_senza_impianto'
+                  ? ` — il target delle primarie (${t(a.target_t)} t) è ancora scritto in Giacenze. I target dei raccoglitori ci sono, ma nessuno è legato a questo sito: in Target & Status → Target raccoglitori scrivi l'impianto sulla riga di ogni raccoglitore che porta qui (una riga per impianto, se ne serve più d'uno). Da lì il target del sito si calcola da solo`
+                  : a.cosa === 'primarie'
+                    ? ` — il target delle primarie (${t(a.target_t)} t) è ancora scritto in Giacenze: per il ${a.anno} non c'è nessun target dei raccoglitori, scrivili in Target & Status → Target raccoglitori`
+                    : a.spento
                     ? ` — il target (${t(a.target_t)} t) è ancora scritto in Giacenze, perché in Target & Status l'impianto del ${a.anno} c'è ma non è attivo: riattivalo a mano in Target & Status → Impianti e stoccaggi e scrivi lì il target. Finché non lo fai si usa questo`
                     : ` — il target (${t(a.target_t)} t) è ancora scritto in Giacenze: portalo in Target & Status → Impianti e stoccaggi. Finché non lo fai si usa questo`)}
                 {a.tipo === 'giacenza_negativa' && ` — classe ${a.classe}: ${formatKg(a.kg)} kg dall'ancora dell'anno piu' i movimenti successivi: mancano ingressi, o l'ancora ha i chili nella classe sbagliata`}

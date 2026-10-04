@@ -69,5 +69,37 @@ verifica('impianto spento in Target & Status con target in Giacenze: lo si dice'
 verifica('un sito senza nome non ha target', riga('', 'imp', 2026).target_totale_t === 0 && riga('', 'imp', 2026).target_primarie_t === 0);
 verifica('il testo dell\'anomalia dice dove portarlo', /Target & Status/.test(testoTargetDaPortare('totale')) && /ancora scritto in Giacenze/.test(testoTargetDaPortare('totale')) && /raccoglitori/.test(testoTargetDaPortare('primarie')));
 
+// DUE SITUAZIONI DIVERSE, DUE AVVISI DIVERSI (04/10/2026).
+//
+// Il target delle primarie di un sito e' la somma dei target dei raccoglitori
+// LEGATI a quel sito, cioe' delle righe che hanno scritto l'impianto. L'avviso
+// diceva sempre «scrivi i target dei raccoglitori in Target & Status», anche
+// quando quei target c'erano tutti - undicimilacinquecentocinquanta tonnellate,
+// per raccoglitore e per regione - e mancava solo il collegamento all'impianto.
+// L'utente e' andato a cercare un dato che aveva gia' scritto.
+console.log('QUALE DELLE DUE COSE MANCA');
+{
+  // Gatim: raccoglitori dell'anno ce ne sono (Alfa, Beta, Gamma), ma nessuno
+  // porta il nome di Gatim.
+  verifica('se i target ci sono ma nessuno e\' legato al sito, lo dice',
+    gatim.da_portare.primarie === true && gatim.da_portare.primarie_senza_impianto === true,
+    JSON.stringify(gatim.da_portare));
+  // Un anno in cui di target dei raccoglitori non ce n'e' nemmeno uno.
+  const vuoto = targetRigaGiacenze({
+    sito: 'Gatim', td: 'imp', anno: 2026, giacenzaSito: { target_primarie_t: 950 },
+    impiantiTarget: impianti, raccoglitori: [],
+  });
+  verifica('se non ce n\'e\' nessuno, e\' un altro avviso',
+    vuoto.da_portare.primarie === true && vuoto.da_portare.primarie_senza_impianto === false,
+    JSON.stringify(vuoto.da_portare));
+  verifica('e un sito che il collegamento ce l\'ha non ha nessuno dei due avvisi',
+    irigom.da_portare.primarie === false && irigom.da_portare.primarie_senza_impianto === false);
+  verifica('i due testi dicono due cose diverse, e quello nuovo nomina l\'impianto da scrivere',
+    /nessuno e' legato a questo sito/.test(testoTargetDaPortare('primarie_senza_impianto'))
+    && /scrivi l'impianto/.test(testoTargetDaPortare('primarie_senza_impianto'))
+    && /non c'e' nessun target dei raccoglitori/.test(testoTargetDaPortare('primarie')),
+    testoTargetDaPortare('primarie_senza_impianto'));
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

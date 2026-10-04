@@ -60,7 +60,7 @@ export function impiantiTargetDellAnno(impiantiTarget, anno) {
  * @returns {{ target_totale_t: number, target_primarie_t: number, da_portare: { totale: boolean, primarie: boolean, spento: boolean }, record: object|null }}
  */
 export function targetRigaGiacenze({ sito, td, anno, giacenzaSito = null, impiantiTarget = [], raccoglitori = [], primarieQui = td === 'imp', chiave = normalizzaRagioneSociale }) {
-  const da_portare = { totale: false, primarie: false, spento: false };
+  const da_portare = { totale: false, primarie: false, spento: false, primarie_senza_impianto: false };
   let target_totale_t = 0;
   let record = null;
   if (td === 'imp') {
@@ -80,13 +80,30 @@ export function targetRigaGiacenze({ sito, td, anno, giacenzaSito = null, impian
   let target_primarie_t = 0;
   const somma = targetPrimarieDelSito(raccoglitori, sito, anno, chiave);
   if (somma > 0) target_primarie_t = primarieQui ? somma : 0;
-  else if (Number(giacenzaSito?.target_primarie_t) > 0) { target_primarie_t = Number(giacenzaSito.target_primarie_t); da_portare.primarie = true; }
+  else if (Number(giacenzaSito?.target_primarie_t) > 0) {
+    target_primarie_t = Number(giacenzaSito.target_primarie_t);
+    da_portare.primarie = true;
+    // DIRE QUAL E' LA COSA CHE MANCA DAVVERO.
+    //
+    // Il target delle primarie di un sito e' la somma dei target dei raccoglitori
+    // LEGATI a quel sito, cioe' delle righe che hanno scritto l'impianto. Quando
+    // i target dei raccoglitori ci sono ma nessuno porta il nome di questo sito,
+    // l'avviso diceva «scrivi i target dei raccoglitori»: e l'utente li aveva
+    // gia' scritti tutti, 11.550 tonnellate, e non capiva che cosa gli si stesse
+    // chiedendo. Sono due situazioni diverse e vanno dette in due modi
+    // (04/10/2026, dopo che l'avviso ha mandato l'utente a cercare un dato che
+    // c'era gia').
+    da_portare.primarie_senza_impianto = recordDellAnno(raccoglitori, anno)
+      .some(r => Number(r.target_tonnellate) > 0);
+  }
   return { target_totale_t, target_primarie_t, da_portare, record };
 }
 
 /** Il testo dell'anomalia di un target ancora scritto solo in Giacenze. */
-export const testoTargetDaPortare = (cosa = 'totale') => (cosa === 'primarie'
-  ? "target delle primarie ancora scritto in Giacenze: scrivi i target dei raccoglitori in Target & Status"
-  : cosa === 'spento'
+export const testoTargetDaPortare = (cosa = 'totale') => (cosa === 'primarie_senza_impianto'
+  ? "target delle primarie ancora scritto in Giacenze: i target dei raccoglitori ci sono, ma nessuno e' legato a questo sito - scrivi l'impianto sulle loro righe in Target & Status"
+  : cosa === 'primarie'
+    ? "target delle primarie ancora scritto in Giacenze: per quest'anno non c'e' nessun target dei raccoglitori, scrivili in Target & Status"
+    : cosa === 'spento'
     ? "target ancora scritto in Giacenze: in Target & Status l'impianto c'e' ma non e' attivo, riattivalo a mano e scrivi li' il target"
     : "target ancora scritto in Giacenze: portalo in Target & Status");
