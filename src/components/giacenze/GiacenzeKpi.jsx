@@ -20,7 +20,11 @@ export default function GiacenzeKpi({ totali }) {
 
   const cards = [
     // Un canale per volta: la giacenza a portale e' della rete, l'ACI si scrive a parte.
-    { label: 'Giacenza rete a portale', value: fmt(totali.giacenza_portale_t), unit: 't', icon: Warehouse, color: 'text-primary', subtitle: totali.giacenza_aci_t ? `ACI negli stoccaggi ${fmt(totali.giacenza_aci_t)} t, a parte` : 'aggiornata a ogni caricamento' },
+    // L'ACI NON STA SOLO NEGLI STOCCAGGI. Il sottotitolo diceva «ACI negli
+    // stoccaggi»: e' il totale ACI di tutti i siti, e il 04/10/2026 quei 26,81 t
+    // stavano per intero su due IMPIANTI (Gatim 25,17 e Tecnogum 1,64). Chi lo
+    // leggeva andava a cercarli nei piazzali. Il numero era giusto, la parola no.
+    { label: 'Giacenza rete a portale', value: fmt(totali.giacenza_portale_t), unit: 't', icon: Warehouse, color: 'text-primary', subtitle: totali.giacenza_aci_t ? `ACI ${fmt(totali.giacenza_aci_t)} t, a parte: e' un altro canale` : 'aggiornata a ogni caricamento' },
     { label: 'Ordini da dichiarare', value: fmt(totali.ordini_da_dichiarare, 0), unit: '', icon: ClipboardList, color: 'text-amber-600' },
     { label: 'Dichiarato nell\'anno', value: fmt(totali.dichiarato_t), unit: 't', icon: FileCheck, color: 'text-success', subtitle: 'rete, per fine trasporto' },
     { label: 'Raccolto RETE nell\'anno', value: fmt(totali.conferito_primarie_t), unit: 't', icon: PackageOpen, color: 'text-accent', subtitle: `ACI ${fmt(totali.conferito_aci_t)} t · Extra ${fmt(totali.conferito_extra_t)} t, fuori target` },
