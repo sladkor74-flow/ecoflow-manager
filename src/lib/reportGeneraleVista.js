@@ -148,20 +148,23 @@ export const DA_ASSEGNARE = 'da assegnare';
  *    il 05/10/2026: «Emmesse per due mesi ha conferito su Irigom a causa
  *    dell'incendio in Gatim, ma da qui a fine anno conferira' sempre su Gatim».
  */
-export function impiantoDiRiferimento(r) {
-  const scritti = [...(r.scritti ? r.scritti.values() : [])]
-    .sort((a, b) => b.annuo - a.annuo || a.impianto.localeCompare(b.impianto, 'it'));
-  if (scritti.length) return scritti[0].impianto;
+export function riferimentoDellaRiga(r) {
+  const scritti = [...(r.scritti ? r.scritti.entries() : [])]
+    .sort((a, b) => b[1].annuo - a[1].annuo || a[1].impianto.localeCompare(b[1].impianto, 'it'));
+  if (scritti.length) return { k: scritti[0][0], impianto: scritti[0][1].impianto };
   for (let i = MESI.length - 1; i >= 0; i--) {
     let scelto = null;
-    for (const v of r.impianti.values()) {
+    for (const [k, v] of r.impianti) {
       const kg = v.mesi[i] || 0;
-      if (kg > 0 && (!scelto || kg > scelto.kg)) scelto = { impianto: v.impianto, kg };
+      if (kg > 0 && (!scelto || kg > scelto.kg)) scelto = { k, impianto: v.impianto, kg };
     }
-    if (scelto) return scelto.impianto;
+    if (scelto) return { k: scelto.k, impianto: scelto.impianto };
   }
-  return '';
+  return { k: '', impianto: '' };
 }
+
+/** Solo il nome dell'impianto di riferimento. */
+export const impiantoDiRiferimento = (r) => riferimentoDellaRiga(r).impianto;
 
 /**
  * IL TARGET DI UN MESE RIPARTITO FRA GLI IMPIANTI (05/10/2026).
@@ -189,29 +192,37 @@ export function impiantoDiRiferimento(r) {
  * @returns [{ impianto, target, raccolto, delta, stimato }]
  */
 export function impiantiDelMese(r, meseIdx, riferimento = null) {
-  const rif = riferimento === null ? impiantoDiRiferimento(r) : riferimento;
+  const rif = riferimento === null ? riferimentoDellaRiga(r) : riferimento;
   const target = r.mesi[meseIdx]?.target || 0;
   const raccolto = r.mesi[meseIdx]?.raccolto || 0;
   const voci = new Map();
-  const voce = (nome) => {
-    const k = nome || DA_ASSEGNARE;
-    if (!voci.has(k)) voci.set(k, { impianto: k, target: 0, raccolto: 0, stimato: false });
-    return voci.get(k);
+  // UN IMPIANTO SOLO, ANCHE SE SI CHIAMA IN DUE MODI (05/10/2026).
+  //
+  // Le voci si tengono per chiave normalizzata, non per come sono scritte: in
+  // Target & Status l'utente scrive «GATIM S.R.L.» e il portale dice «Gatim»,
+  // e tenendole per nome l'ammanco finiva su una seconda riga dello stesso
+  // impianto - due righe Gatim sotto lo stesso raccoglitore, una col raccolto e
+  // una col target. Il nome che si vede e' quello della prima voce, cioe' quello
+  // del portale quando il materiale e' arrivato davvero.
+  const voce = (k, nome) => {
+    const chiave = k || DA_ASSEGNARE;
+    if (!voci.has(chiave)) voci.set(chiave, { k: chiave, impianto: nome || DA_ASSEGNARE, target: 0, raccolto: 0, stimato: false });
+    return voci.get(chiave);
   };
-  for (const v of r.impianti.values()) {
+  for (const [k, v] of r.impianti) {
     const kg = v.mesi[meseIdx] || 0;
-    if (kg > 0) voce(v.impianto).raccolto = t3(kg);
+    if (kg > 0) voce(k, v.impianto).raccolto = t3(kg);
   }
   if (target > 0) {
     if (raccolto >= target) {
-      for (const [nome, q] of quoteKg(Math.round(target * 1000), [...voci.values()].map(v => [v.impianto, Math.round(v.raccolto * 1000)]))) {
-        voce(nome).target = q;
+      for (const [k, q] of quoteKg(Math.round(target * 1000), [...voci.values()].map(v => [v.k, Math.round(v.raccolto * 1000)]))) {
+        voci.get(k).target = q;
       }
     } else {
       for (const v of voci.values()) v.target = v.raccolto;
       const resto = t3(target - raccolto);
       if (resto > 0) {
-        const v = voce(rif);
+        const v = voce(rif.k, rif.impianto);
         v.target = t3(v.target + resto);
         v.stimato = true;
       }
@@ -228,15 +239,18 @@ export function impiantiDelMese(r, meseIdx, riferimento = null) {
  * stesso codice. stimato dice che almeno un mese e' una previsione.
  */
 export function impiantiDellAnno(r) {
-  const rif = impiantoDiRiferimento(r);
+  const rif = riferimentoDellaRiga(r);
   const mappa = new Map();
   MESI.forEach((m, i) => {
     for (const v of impiantiDelMese(r, i, rif)) {
-      if (!mappa.has(v.impianto)) mappa.set(v.impianto, { impianto: v.impianto, mesi: vuotiMesi(), stimato: false, annuo: 0 });
-      const x = mappa.get(v.impianto);
+      if (!mappa.has(v.k)) mappa.set(v.k, { k: v.k, impianto: v.impianto, mesi: vuotiMesi(), stimato: false, annuo: 0 });
+      const x = mappa.get(v.k);
       x.mesi[i].target = t3(x.mesi[i].target + v.target);
       x.mesi[i].raccolto = t3(x.mesi[i].raccolto + v.raccolto);
       x.annuo = t3(x.annuo + v.target);
+      // fra due modi di scrivere lo stesso impianto si mostra quello del portale,
+      // cioe' quello dei mesi in cui il materiale e' arrivato davvero
+      if (v.raccolto > 0) x.impianto = v.impianto;
       if (v.stimato) x.stimato = true;
     }
   });

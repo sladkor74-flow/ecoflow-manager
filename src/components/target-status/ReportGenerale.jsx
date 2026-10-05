@@ -119,7 +119,7 @@ export default function ReportGenerale({ anno, mensili, annui, raccolto, commess
     return (
       <div className="space-y-3">
         {barra}
-        <ReportGeneraleAnno anno={anno} gruppi={gruppi} righe={righe} dettaglio={dettaglio} vista={vista} />
+        <ReportGeneraleAnno anno={anno} gruppi={gruppi} righe={righe} dettaglio={dettaglio} vista={vista} meseInCorso={anno === oggi.getFullYear() ? oggi.getMonth() : -1} />
         {nota}
         {senzaTarget.length > 0 && <AvvisoSenzaTarget quante={senzaTarget.length} />}
       </div>

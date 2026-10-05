@@ -21,7 +21,7 @@ const num = (v) => (v === null || v === undefined || v === 0 ? '—' : tonnellat
 const coloreDelta = (v) => (v > 0.0005 ? 'text-red-700 bg-red-50' : v < -0.0005 ? 'text-emerald-800 bg-emerald-50' : 'text-muted-foreground');
 
 /** La striscia dei dodici mesi: una barra per mese, il target come tacca. */
-function Striscia({ totale, anno }) {
+function Striscia({ totale, anno, meseInCorso }) {
   const massimo = Math.max(...totale.mesi.map(m => Math.max(m.target, m.raccolto)), 1);
   return (
     <div className="border rounded-lg bg-card px-3 py-3">
@@ -50,6 +50,9 @@ function Striscia({ totale, anno }) {
               <div className={`text-[10px] tabular-nums px-1 rounded ${coloreDelta(delta)}`}>
                 {v.target || v.raccolto ? tonnellate(delta) : '—'}
               </div>
+              {/* Il mese in corso e' quasi tutto da fare: senza dirlo, il suo
+                  delta sembra un ammanco grande quanto il mese. */}
+              {i === meseInCorso && <div className="text-[9px] text-muted-foreground">in corso</div>}
             </div>
           );
         })}
@@ -95,13 +98,13 @@ function CelleAnno({ r, vista, forte }) {
   );
 }
 
-export default function ReportGeneraleAnno({ anno, gruppi, righe, dettaglio, vista }) {
+export default function ReportGeneraleAnno({ anno, gruppi, righe, dettaglio, vista, meseInCorso = -1 }) {
   const totale = sommaRighe(righe);
   const colonneMese = vista === 'tutto' ? 3 : vista === 'delta' ? 1 : 2;
 
   return (
     <div className="space-y-3">
-      <Striscia totale={totale} anno={anno} />
+      <Striscia totale={totale} anno={anno} meseInCorso={meseInCorso} />
       <div className="border rounded-lg overflow-x-auto bg-card">
         <table className="text-xs whitespace-nowrap border-collapse w-full">
           <thead className="bg-muted/60">
@@ -145,7 +148,7 @@ export default function ReportGeneraleAnno({ anno, gruppi, righe, dettaglio, vis
                       <CelleAnno r={r} vista={vista} />
                     </tr>
                     {dettaglio && impiantiDellAnno(r).map(i => (
-                      <tr key={`${r.kRaccoglitore}|${i.impianto}`} className="text-[11px] text-muted-foreground">
+                      <tr key={`${r.kRaccoglitore}|${i.k}`} className="text-[11px] text-muted-foreground">
                         <td className="px-2 py-0.5 pl-10">
                           → {i.impianto === DA_ASSEGNARE ? <span className="text-amber-700">quota da assegnare</span> : i.impianto}
                           {i.stimato && <span className="ml-1.5 text-[10px] text-amber-700" title="Il target di un mese senza conferimenti e' una previsione: e' dove questo raccoglitore porta oggi, non un impegno">previsto</span>}

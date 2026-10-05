@@ -6,11 +6,12 @@ import {
   valoriAnno, valoriMese, sommaRighe, DA_ASSEGNARE,
 } from '../src/lib/reportGeneraleVista.js';
 import { MESI } from '../src/lib/pfuConstants.js';
+// la stessa normalizzazione dei nomi che usa la pagina (chiaveNome in src/lib/target.js)
+import { normalizzaRagioneSociale as chiave } from '../base44/shared/normalizzaRagioneSociale.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
 
-const chiave = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const mesiRaccolto = (coppie) => Object.fromEntries(coppie.map(([m, v]) => [MESI[m], v]));
 // una riga di by_raccoglitore_impianto
 const conf = (raccoglitore, regione, impianto, coppie) => ({ raccoglitore, regione, impianto, mesi: mesiRaccolto(coppie) });
@@ -134,6 +135,28 @@ console.log('CHI DECIDE DOVE VA QUELLO CHE MANCA');
   verifica('chi non ha ne\' impianto scritto ne\' conferimenti ha una quota da assegnare, non un impianto inventato',
     impiantoDiRiferimento(senza) === '' && impiantiDelMese(senza, 0)[0]?.impianto === DA_ASSEGNARE,
     JSON.stringify(impiantiDelMese(senza, 0)));
+}
+
+console.log('LO STESSO IMPIANTO SCRITTO IN DUE MODI E\' UN IMPIANTO SOLO');
+{
+  // In Target & Status l'utente scrive «GATIM S.R.L.», il portale dice «Gatim».
+  // Tenendo le voci per nome, l'ammanco finiva su una seconda riga dello stesso
+  // impianto: due righe Gatim sotto lo stesso raccoglitore, una col raccolto e
+  // una col target (visto in pagina il 05/10/2026).
+  const r = unaRiga({
+    annui: [{ raccoglitore: 'Gatim S.r.l.', regione: 'Calabria', target_tonnellate: 900, impianto: 'GATIM S.R.L.' }],
+    mensili: [tm('Gatim S.r.l.', 'Calabria', 8, 75)],
+    raccolto: [conf('GATIM S.R.L.', 'Calabria', 'Gatim', [[8, 74.47]])],
+  });
+  const set = impiantiDelMese(r, 8);
+  verifica('una riga sola per l\'impianto, non due',
+    set.length === 1, JSON.stringify(set));
+  verifica('con il raccolto e l\'ammanco sulla stessa riga',
+    set[0]?.raccolto === 74.47 && set[0]?.target === 75 && set[0]?.delta === 0.53 && set[0]?.stimato === true,
+    JSON.stringify(set));
+  verifica('e si mostra il nome del portale, quello dei mesi in cui il materiale e\' arrivato',
+    impiantiDellAnno(r).length === 1 && impiantiDellAnno(r)[0].impianto === 'Gatim',
+    JSON.stringify(impiantiDellAnno(r).map(x => x.impianto)));
 }
 
 console.log('I CONTI DELLA TABELLA');
