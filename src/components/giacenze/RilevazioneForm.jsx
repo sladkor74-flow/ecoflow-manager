@@ -6,12 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
+import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 
 function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default function RilevazioneForm({ open, onClose, precompilato, sitiSuggeriti, onSaved }) {
+export default function RilevazioneForm({ open, onClose, precompilato, sitiSuggeriti, unitaPerSito, onSaved }) {
   const { toast } = useToast();
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
@@ -36,6 +37,25 @@ export default function RilevazioneForm({ open, onClose, precompilato, sitiSugge
   }, [open, precompilato]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // L'UNITA' LOCALE SI RIPRENDE DA SOLA (06/10/2026).
+  //
+  // L'identificativo, la descrizione, il comune e la provincia sono del sito, non
+  // della singola lettura, e l'utente li ha gia' scritti la prima volta. Scrivendo
+  // una rilevazione dal pulsante in alto restavano vuoti e la riga compariva senza
+  // nome, come se fosse un altro piazzale. Si riempiono appena si sceglie il sito,
+  // e solo se sono vuoti: quello che si scrive a mano non si tocca.
+  const scegliSito = (nome) => {
+    const nota = unitaPerSito?.get?.(normalizzaRagioneSociale(nome || ''));
+    setForm(f => ({
+      ...f,
+      sito: nome,
+      id_unita_stoccaggio: f.id_unita_stoccaggio !== '' && f.id_unita_stoccaggio != null ? f.id_unita_stoccaggio : (nota?.id_unita_stoccaggio ?? ''),
+      descrizione_unita: f.descrizione_unita || nota?.descrizione_unita || '',
+      comune: f.comune || nota?.comune || '',
+      provincia: f.provincia || nota?.provincia || '',
+    }));
+  };
 
   const handleSave = async () => {
     if (!form.sito || !form.data_rilevazione) {
@@ -80,7 +100,7 @@ export default function RilevazioneForm({ open, onClose, precompilato, sitiSugge
         <div className="grid grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto py-2">
           <div className="col-span-2">
             <Label>Sito</Label>
-            <Input list="siti-stoccaggio" value={form.sito || ''} onChange={e => set('sito', e.target.value)} placeholder="Seleziona o inserisci" />
+            <Input list="siti-stoccaggio" value={form.sito || ''} onChange={e => scegliSito(e.target.value)} placeholder="Seleziona o inserisci" />
             <datalist id="siti-stoccaggio">
               {sitiSuggeriti.map(s => <option key={s} value={s} />)}
             </datalist>

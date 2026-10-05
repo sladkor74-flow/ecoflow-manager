@@ -68,10 +68,29 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
     if (!grouped.has(ns)) grouped.set(ns, { record: r, all: [] });
     grouped.get(ns).all.push(r);
   }
+  // L'UNITA' LOCALE E' DEL SITO, NON DELLA SINGOLA LETTURA (06/10/2026).
+  //
+  // Una rilevazione scritta a mano dal pulsante in alto non porta con se'
+  // l'identificativo dell'unita', il comune e la provincia: l'utente li ha gia'
+  // scritti la prima volta e non ha motivo di riscriverli. Senza, la riga piu'
+  // recente compariva senza nome e il piazzale sembrava un altro. Qui si
+  // riprendono dalla lettura piu' recente dello stesso sito che li ha.
+  const conUnita = (record, tutte) => {
+    if (record.descrizione_unita || record.id_unita_stoccaggio) return record;
+    const nota = tutte.find(x => x.descrizione_unita || x.id_unita_stoccaggio);
+    return nota ? {
+      ...record,
+      descrizione_unita: record.descrizione_unita || nota.descrizione_unita,
+      id_unita_stoccaggio: record.id_unita_stoccaggio ?? nota.id_unita_stoccaggio,
+      comune: record.comune || nota.comune,
+      provincia: record.provincia || nota.provincia,
+      unita_ereditata: true,
+    } : record;
+  };
   const righe = [...grouped.values()]
     // Ogni riga si porta dietro l'intero storico del sito: serve per eliminarlo
     // per intero, visto che a video compare solo la rilevazione piu' recente.
-    .map(g => ({ ...g.record, tutteLeRilevazioni: g.all }))
+    .map(g => ({ ...conUnita(g.record, g.all), tutteLeRilevazioni: g.all }))
     .sort((a, b) => new Date(b.data_rilevazione).getTime() - new Date(a.data_rilevazione).getTime());
 
   // I formulari terminati con le date da sistemare di ciascuno stoccaggio, dal
@@ -144,6 +163,22 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
     ...stoccaggiFromCalcolo.map(s => s.sito).filter(Boolean),
     ...rilevazioni.map(r => r.sito).filter(Boolean),
   ])].sort();
+
+  // L'unita' locale gia' nota di ogni sito: il modulo la riprende da se' appena
+  // si sceglie il sito, cosi' una rilevazione scritta a mano non nasce senza
+  // nome (06/10/2026).
+  const unitaPerSito = useMemo(() => {
+    const per = new Map();
+    for (const r of rilevazioni) {
+      const ns = normalizzaRagioneSociale(r.sito);
+      if (per.has(ns) || !(r.descrizione_unita || r.id_unita_stoccaggio)) continue;
+      per.set(ns, {
+        id_unita_stoccaggio: r.id_unita_stoccaggio, descrizione_unita: r.descrizione_unita,
+        comune: r.comune, provincia: r.provincia,
+      });
+    }
+    return per;
+  }, [rilevazioni]);
 
   // Rimuove un'unita' locale dall'elenco cancellando tutte le sue rilevazioni.
   // Cancellare solo l'ultima farebbe riaffiorare la precedente, e il sito
@@ -328,6 +363,7 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
         onClose={() => setShowForm(false)}
         precompilato={precompilato}
         sitiSuggeriti={sitiSuggeriti}
+        unitaPerSito={unitaPerSito}
         // Una rilevazione nuova cambia la giacenza a portale dello stoccaggio: si
         // ricalcola la pagina (situazione, KPI, anomalie), non solo questo elenco,
         // come dopo Elimina e Importa. Dal ricalcolo arriva anche il controllo
