@@ -27,7 +27,7 @@ const MESI = [
 // prove/gruppiReportMensile.mjs (il 05/10/2026 una pivot nuova e' rimasta
 // invisibile per due ore proprio perche' era scritta solo di la').
 const GRUPPI = [
-  { chiave: 'rete', titolo: 'Rete', pivot: ['raccoltaAnno', 'raccolta', 'impianti', 'viaggiRete'] },
+  { chiave: 'rete', titolo: 'Rete', pivot: ['raccoltaAnno', 'impiantiAnno', 'raccolta', 'impianti', 'viaggiRete'] },
   { chiave: 'aci', titolo: 'ACI', pivot: ['aci', 'secondarieAci', 'viaggiSecondarieAci'] },
   { chiave: 'secondarie', titolo: 'Secondarie di rete', pivot: ['secondarie', 'viaggiSecondarie'] },
   { chiave: 'terziarie', titolo: 'Terziarie ed extra', pivot: ['terziarie', 'extra', 'extraSecondarie'] },
@@ -35,7 +35,7 @@ const GRUPPI = [
 
 // L'archivio e il canale di ogni pivot, per il riepilogo delle date da sistemare.
 const ARCHIVIO_PIVOT = {
-  raccoltaAnno: 'Primarie di rete', raccolta: 'Primarie di rete', impianti: 'Primarie di rete', viaggiRete: 'Primarie di rete',
+  raccoltaAnno: 'Primarie di rete', impiantiAnno: 'Primarie di rete', raccolta: 'Primarie di rete', impianti: 'Primarie di rete', viaggiRete: 'Primarie di rete',
   aci: 'Primarie ACI', secondarieAci: 'Secondarie ACI', viaggiSecondarieAci: 'Secondarie ACI',
   secondarie: 'Secondarie di rete', viaggiSecondarie: 'Secondarie di rete',
   terziarie: 'Terziarie', extra: 'Extra raccolta', extraSecondarie: 'Extra raccolta, trasferimenti',

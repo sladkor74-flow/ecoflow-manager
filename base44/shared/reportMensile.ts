@@ -92,6 +92,25 @@ export const PIVOT_DEFS = {
     colonna: 'Mese',
     misure: ['peso'],
   },
+  // LA STESSA COSA LETTA DALL'ALTRO CAPO (05/10/2026).
+  //
+  // La pivot qui sopra parte dal raccoglitore, e un impianto ci compare tante
+  // volte quanti sono i raccoglitori che lo riforniscono: Irigom, a ottobre, si
+  // legge 15,66 + 3,52 + 16,24, e il suo totale - 35,42 t, quello che dice la
+  // pivot Impianti - non si vede da nessuna parte. L'utente l'ha preso per una
+  // difformita' fra le pivot, e aveva ragione a non fidarsi: lo stesso numero
+  // deve potersi leggere da tutt'e due i capi.
+  impiantiAnno: {
+    titolo: 'Impianti dell\'anno, e chi li rifornisce',
+    nota: 'Lo stesso raccolto della pivot qui sopra, letto dall\'impianto: ogni destinazione ha una riga sola con i suoi dodici mesi, e sotto i raccoglitori che ce l\'hanno portato. Non c\'e\' nel foglio Excel.',
+    entita: 'PrimariaRete',
+    gruppo: 'rete',
+    periodo: 'anno',
+    canale: 'RETE',
+    righe: ['Destinazione', 'Tipo destinazione', 'Trasportatore'],
+    colonna: 'Mese',
+    misure: ['peso'],
+  },
   raccolta: {
     titolo: 'Raccolta',
     nota: 'Quanto ha raccolto ciascun raccoglitore, per regione e per classe.',
@@ -215,7 +234,7 @@ export const PIVOT_DEFS = {
 
 // Le schede del modulo e le pivot che ciascuna contiene, nell'ordine del foglio.
 export const GRUPPI = [
-  { chiave: 'rete', titolo: 'Rete', pivot: ['raccoltaAnno', 'raccolta', 'impianti', 'viaggiRete'] },
+  { chiave: 'rete', titolo: 'Rete', pivot: ['raccoltaAnno', 'impiantiAnno', 'raccolta', 'impianti', 'viaggiRete'] },
   { chiave: 'aci', titolo: 'ACI', pivot: ['aci', 'secondarieAci', 'viaggiSecondarieAci'] },
   { chiave: 'secondarie', titolo: 'Secondarie di rete', pivot: ['secondarie', 'viaggiSecondarie'] },
   { chiave: 'terziarie', titolo: 'Terziarie ed extra', pivot: ['terziarie', 'extra', 'extraSecondarie'] },
