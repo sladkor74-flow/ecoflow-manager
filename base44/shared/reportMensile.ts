@@ -1,5 +1,7 @@
-// Le otto pivot del foglio REPORT MENSILE del gestionale Excel, riprodotte con
-// le stesse righe, le stesse colonne e la stessa misura.
+// Le pivot del foglio REPORT MENSILE del gestionale Excel, riprodotte con le
+// stesse righe, le stesse colonne e la stessa misura, piu' una che il foglio non
+// ha: la raccolta dell'anno per raccoglitore e impianto (05/10/2026), chiesta
+// dall'utente per vedere l'andamento a colpo d'occhio.
 //
 // Nel foglio ogni pivot porta il proprio filtro di pagina. Quattro guardano un
 // singolo mese, quattro l'anno intero: la distinzione e' conservata nel campo
@@ -69,6 +71,24 @@ const ETICHETTE_MISURE = { peso: 'Peso [t]', conteggio: 'Viaggi' };
 // === definizioni delle pivot ===
 
 export const PIVOT_DEFS = {
+  // QUESTA NEL FOGLIO EXCEL NON C'E' (05/10/2026).
+  //
+  // L'ha chiesta l'utente: «mi serve una panoramica che mi spieghi subito a colpo
+  // d'occhio l'andamento della raccolta», con raccoglitori, impianti e regioni in
+  // un unico schema. E' la gemella della pivot ACI qui sotto - stesse righe,
+  // stesse colonne - sul canale rete, che il foglio Excel guardava solo un mese
+  // per volta e per classe. Niente target: qui si legge solo quello che e' stato
+  // raccolto davvero; target e delta stanno nel Report generale di Target & Status.
+  raccoltaAnno: {
+    titolo: 'Raccolta dell\'anno per raccoglitore e impianto',
+    nota: 'Tutto l\'anno in un colpo d\'occhio: quanto ha raccolto ogni raccoglitore, mese per mese, e a quale impianto l\'ha portato. Non c\'e\' nel foglio Excel: solo raccolta effettiva, senza target.',
+    entita: 'PrimariaRete',
+    gruppo: 'rete',
+    periodo: 'anno',
+    righe: ['Regione', 'Trasportatore', 'Destinazione'],
+    colonna: 'Mese',
+    misure: ['peso'],
+  },
   raccolta: {
     titolo: 'Raccolta',
     nota: 'Quanto ha raccolto ciascun raccoglitore, per regione e per classe.',
@@ -192,7 +212,7 @@ export const PIVOT_DEFS = {
 
 // Le schede del modulo e le pivot che ciascuna contiene, nell'ordine del foglio.
 export const GRUPPI = [
-  { chiave: 'rete', titolo: 'Rete', pivot: ['raccolta', 'impianti', 'viaggiRete'] },
+  { chiave: 'rete', titolo: 'Rete', pivot: ['raccoltaAnno', 'raccolta', 'impianti', 'viaggiRete'] },
   { chiave: 'aci', titolo: 'ACI', pivot: ['aci', 'secondarieAci', 'viaggiSecondarieAci'] },
   { chiave: 'secondarie', titolo: 'Secondarie di rete', pivot: ['secondarie', 'viaggiSecondarie'] },
   { chiave: 'terziarie', titolo: 'Terziarie ed extra', pivot: ['terziarie', 'extra', 'extraSecondarie'] },

@@ -160,8 +160,9 @@ export default function ReportMensile() {
         <div>
           <h1 className="text-2xl lg:text-3xl font-heading font-bold">Report Mensile</h1>
           <p className="text-muted-foreground mt-1">
-            Le stesse pivot del foglio Excel. Quattro guardano il mese scelto, quattro l'anno intero:
-            l'etichetta accanto a ogni titolo dice quale periodo sta leggendo.
+            Le stesse pivot del foglio Excel, più la raccolta dell'anno per raccoglitore e impianto, che il
+            foglio non ha. Alcune guardano il mese scelto, altre l'anno intero: l'etichetta accanto a ogni
+            titolo dice quale periodo sta leggendo.
           </p>
         </div>
         <div className="flex items-end gap-2 flex-wrap">
