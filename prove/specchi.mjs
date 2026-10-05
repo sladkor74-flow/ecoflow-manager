@@ -22,6 +22,7 @@ const SPECCHI = [
   ['base44/shared/termineRegistrazione.ts', 'src/lib/termineRegistrazione.js'],
   ['base44/shared/fileDaRimuovere.ts', 'src/lib/fileDaRimuovere.js'],
   ['base44/shared/dichiarazioneAci.ts', 'src/lib/dichiarazioneAci.js'],
+  ['base44/shared/ripartizioneTarget.ts', 'src/lib/ripartizioneTarget.js'],
 ];
 
 // il corpo: via i ritorni a capo di Windows, le righe di import e il commento di testa

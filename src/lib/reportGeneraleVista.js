@@ -12,6 +12,7 @@
 // Solo canale RETE: ACI ed Extra Raccolta sono canali indipendenti.
 
 import { MESI } from './pfuConstants.js';
+import { ripartisciQuota } from './ripartizioneTarget.js';
 
 const parole = (k) => k.split(' ').filter(p => p.length > 2);
 
@@ -29,24 +30,6 @@ const vuotiMesi = () => MESI.map(() => ({ target: 0, raccolto: 0 }));
 
 /** Tonnellate arrotondate al chilo. */
 const t3 = (v) => Math.round(v * 1000) / 1000;
-
-/**
- * Chili divisi in proporzione ai pesi col metodo del resto piu' grande: la somma
- * delle parti fa esattamente il totale. A pari resto decide il nome.
- */
-function quoteKg(kgTotali, pesi) {
-  const somma = pesi.reduce((s, [, p]) => s + p, 0);
-  if (!(somma > 0) || !(kgTotali > 0)) return [];
-  const parti = pesi.map(([k, p]) => {
-    const esatto = (kgTotali * p) / somma;
-    const giu = Math.floor(esatto);
-    return { k, kg: giu, resto: esatto - giu };
-  });
-  let restano = kgTotali - parti.reduce((s, p) => s + p.kg, 0);
-  const ordine = [...parti].sort((a, b) => (b.resto - a.resto) || (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
-  for (let i = 0; restano > 0; i = (i + 1) % ordine.length, restano--) ordine[i].kg++;
-  return parti.map(p => [p.k, p.kg / 1000]);
-}
 
 /**
  * mensili: TargetMensile; annui: TargetRaccoglitore; raccolto: by_raccoglitore_impianto
@@ -225,37 +208,20 @@ export function impiantiDelMese(r, meseIdx, riferimento = null) {
     const kg = v.mesi[meseIdx] || 0;
     if (kg > 0) voce(k, v.impianto).raccolto = t3(kg);
   }
-  // PRIMA QUELLO CHE L'UTENTE HA SCRITTO (05/10/2026).
-  //
-  // In Target & Status una riga di target e' per raccoglitore, regione E
-  // impianto: chi conferisce su due impianti ne ha due, con i loro target
-  // mensili. Quella e' la ripartizione decisa a mano e vale cosi' com'e', anche
-  // dove il materiale non e' ancora arrivato - li' un ammanco e' un ammanco
-  // vero, promesso. Il consuntivo decide soltanto la parte di target che nessuno
-  // ha attribuito a mano.
+  // La regola di che cosa va dove sta in un posto solo, condivisa con le Giacenze
+  // (src/lib/ripartizioneTarget.js, specchio di base44/shared): qui si
+  // preparano i suoi tre ingredienti - quello che l'utente ha scritto per questo
+  // mese, quello che e' arrivato, e dove va quello che non e' arrivato.
   const scritto = new Map();
   for (const [k, s] of (r.scritti || new Map())) {
     const q = s.mesi[meseIdx] || 0;
-    if (q > 0) { voce(k, s.impianto).target = q; scritto.set(k, q); }
+    if (q > 0) { voce(k, s.impianto); scritto.set(k, q); }
   }
-  const libero = t3(target - [...scritto.values()].reduce((s, q) => s + q, 0));
-  if (libero > 0) {
-    // il raccolto che il target scritto non copre gia'
-    const residuo = (v) => Math.max(0, t3(v.raccolto - (scritto.get(v.k) || 0)));
-    const totResiduo = t3([...voci.values()].reduce((s, v) => s + residuo(v), 0));
-    if (totResiduo >= libero) {
-      for (const [k, q] of quoteKg(Math.round(libero * 1000), [...voci.values()].map(v => [v.k, Math.round(residuo(v) * 1000)]))) {
-        voci.get(k).target = t3(voci.get(k).target + q);
-      }
-    } else {
-      for (const v of voci.values()) v.target = t3(v.target + residuo(v));
-      const resto = t3(libero - totResiduo);
-      if (resto > 0) {
-        const v = voce(rif.k, rif.impianto);
-        v.target = t3(v.target + resto);
-        v.stimato = true;
-      }
-    }
+  const arrivato = new Map([...voci.values()].map(v => [v.k, v.raccolto]));
+  for (const [k, q] of ripartisciQuota({ target, scritto, arrivato, riferimento: rif.k })) {
+    const v = k === rif.k ? voce(rif.k, rif.impianto) : voce(k, k);
+    v.target = q.target;
+    v.stimato = q.stimato;
   }
   return [...voci.values()]
     .map(v => ({ ...v, delta: t3(v.target - v.raccolto) }))

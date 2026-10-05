@@ -12,8 +12,12 @@
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { annoDelRecord } from "./regolePredittivita.ts";
 import { targetImpiantoDellAnno, targetPrimariePerRuolo, recordDellAnno } from "./annoTarget.ts";
+import { ripartisciQuota, normalizzaQuote } from "./ripartizioneTarget.ts";
 
 const attivo = (imp) => imp && (!imp.stato || imp.stato === 'attivo');
+
+/** I mesi come li scrive TargetMensile, in minuscolo. */
+const MESI_TARGET = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
 
 /**
  * Il record di Target & Status che vale per ogni impianto in un anno, per nome
@@ -36,27 +40,6 @@ export function impiantiTargetDellAnno(impiantiTarget, anno) {
       || (annoDelRecord(imp) === annoDelRecord(prima) && recente(imp) > recente(prima))) out.set(k, imp);
   }
   return out;
-}
-
-/**
- * I chili divisi in proporzione ai pesi col metodo del resto piu' grande: la
- * somma delle parti fa esattamente il totale, senza tonnellate perse per
- * arrotondamento. A pari resto decide il nome, cosi' lo stesso dato calcolato
- * due volte da' lo stesso risultato.
- */
-function quotePerResto(kgTotali, pesi) {
-  const voci = [...pesi.entries()];
-  const somma = voci.reduce((s, [, p]) => s + p, 0);
-  if (!(somma > 0) || !(kgTotali > 0)) return [];
-  const parti = voci.map(([k, p]) => {
-    const esatto = (kgTotali * p) / somma;
-    const giu = Math.floor(esatto);
-    return { k, kg: giu, resto: esatto - giu };
-  });
-  let restano = kgTotali - parti.reduce((s, p) => s + p.kg, 0);
-  const ordine = [...parti].sort((a, b) => (b.resto - a.resto) || (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
-  for (let i = 0; restano > 0; i = (i + 1) % ordine.length, restano--) ordine[i].kg++;
-  return parti.filter(p => p.kg > 0).map(p => [p.k, p.kg]);
 }
 
 /**
@@ -101,46 +84,114 @@ function quotePerResto(kgTotali, pesi) {
  *   dettaglio: la stessa chiave -> [{ raccoglitore, regione, t }];
  *   senzaStorico: le righe di target che non si sono potute ripartire.
  */
-export function ripartisciTargetPrimarie({ raccoglitori = [], conferiti = [], anno, chiave = normalizzaRagioneSociale }) {
+export function ripartisciTargetPrimarie({ raccoglitori = [], mensili = [], conferiti = [], anno, chiave = normalizzaRagioneSociale }) {
   const testo = (v) => String(v || '').trim().toLowerCase();
-  const storico = new Map();    // chiave del raccoglitore -> Map('sito|ruolo' -> kg)
-  const perRegione = new Map(); // 'chiave del raccoglitore|regione' -> idem
-  const segna = (mappa, k, dove, kg) => {
-    let m = mappa.get(k);
-    if (!m) { m = new Map(); mappa.set(k, m); }
-    m.set(dove, (m.get(dove) || 0) + kg);
+  const t3 = (v) => Math.round(v * 1000) / 1000;
+  const dove = (sito, ruolo) => chiave(sito) + '|' + (ruolo === 'stoc' || ruolo === 'stoccaggio' ? 'stoc' : 'imp');
+  const vuotoMesi = () => Array.from({ length: 12 }, () => new Map());
+  const segna = (m, k, t) => m.set(k, t3((m.get(k) || 0) + t));
+
+  // LO STORICO, INTERO E MESE PER MESE.
+  //
+  // Mese per mese perche' la regola guarda il mese: quello che e' arrivato a un
+  // sito a maggio spiega il target di maggio, non quello di ottobre. Intero per
+  // la parte di target annuo che nessun mese si e' preso.
+  const storico = new Map();     // chiave del raccoglitore -> { anno: Map, mesi: [12] Map } (tonnellate)
+  const perRegione = new Map();  // 'chiave del raccoglitore|regione' -> idem
+  const suo = (mappa, k) => {
+    let x = mappa.get(k);
+    if (!x) { x = { anno: new Map(), mesi: vuotoMesi() }; mappa.set(k, x); }
+    return x;
   };
   for (const c of conferiti || []) {
-    const kr = chiave(c.raccoglitore), ks = chiave(c.sito), kg = Number(c.kg) || 0;
-    if (!kr || !ks || !(kg > 0)) continue;
-    const dove = ks + '|' + (c.ruolo === 'stoc' ? 'stoc' : 'imp');
-    segna(storico, kr, dove, kg);
-    segna(perRegione, kr + '|' + testo(c.regione), dove, kg);
+    const kr = chiave(c.raccoglitore), ks = chiave(c.sito), t = (Number(c.kg) || 0) / 1000;
+    if (!kr || !ks || !(t > 0)) continue;
+    const k = dove(c.sito, c.ruolo);
+    const i = Number(c.mese);
+    for (const x of [suo(storico, kr), suo(perRegione, kr + '|' + testo(c.regione))]) {
+      segna(x.anno, k, t);
+      if (i >= 0 && i < 12) segna(x.mesi[i], k, t);
+    }
+  }
+
+  // I TARGET MENSILI, E L'IMPIANTO SCRITTO SULLE LORO RIGHE.
+  const mesiTarget = new Map(); // 'chiave del raccoglitore|regione' -> { tot: [12], scritto: [12] Map }
+  for (const m of recordDellAnno(mensili, anno)) {
+    const kr = chiave(m.raccoglitore);
+    if (!kr) continue;
+    const k = kr + '|' + testo(m.regione);
+    let x = mesiTarget.get(k);
+    if (!x) { x = { tot: Array.from({ length: 12 }, () => 0), scritto: vuotoMesi() }; mesiTarget.set(k, x); }
+    const i = MESI_TARGET.indexOf(testo(m.mese));
+    if (i < 0) continue;
+    const q = m.non_raccoglie ? 0 : Number(m.target) || 0;
+    if (!(q > 0)) continue;
+    x.tot[i] = t3(x.tot[i] + q);
+    if (chiave(m.impianto)) segna(x.scritto[i], dove(m.impianto, m.ruolo), q);
   }
 
   const per = new Map();
   const dettaglio = new Map();
   const senzaStorico = [];
   for (const r of recordDellAnno(raccoglitori, anno)) {
-    if (chiave(r.impianto)) continue; // scritto a mano: non si tocca
+    if (chiave(r.impianto)) continue; // scritto a mano sulla riga annua: non si tocca
     const kr = chiave(r.raccoglitore);
     const t = Number(r.target_tonnellate) || 0;
     if (!kr || !(t > 0)) continue;
     const reg = testo(r.regione);
-    const suo = (reg && perRegione.get(kr + '|' + reg)) || storico.get(kr) || null;
-    if (!suo || !suo.size) {
+    // la storia di quella regione se c'e', altrimenti tutta quella del raccoglitore
+    const sua = (reg && perRegione.get(kr + '|' + reg)) || storico.get(kr) || null;
+    const mesi = mesiTarget.get(kr + '|' + reg) || null;
+    const scrittoOvunque = mesi ? mesi.scritto.reduce((s, m) => s + m.size, 0) : 0;
+    if ((!sua || !sua.anno.size) && !scrittoOvunque) {
       senzaStorico.push({ raccoglitore: r.raccoglitore || '', regione: r.regione || '', target_t: t });
       continue;
     }
-    for (const [dove, kg] of quotePerResto(Math.round(t * 1000), suo)) {
-      per.set(dove, Math.round(((per.get(dove) || 0) + kg / 1000) * 1000) / 1000);
-      const d = dettaglio.get(dove) || [];
-      d.push({ raccoglitore: r.raccoglitore || '', regione: r.regione || '', t: kg / 1000 });
-      dettaglio.set(dove, d);
+    // dove va quello che non e' arrivato: l'impianto scritto sui mesi se c'e',
+    // altrimenti quello dell'ultimo mese in cui ha conferito
+    let rif = '';
+    if (mesi) {
+      const pesi = new Map();
+      for (const m of mesi.scritto) for (const [k, q] of m) segna(pesi, k, q);
+      for (const [k, q] of [...pesi].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))) { rif = k; break; }
+    }
+    if (!rif && sua) {
+      for (let i = 11; i >= 0 && !rif; i--) {
+        let max = 0;
+        for (const [k, q] of sua.mesi[i]) if (q > max) { max = q; rif = k; }
+      }
+      // se dei conferimenti non si sa il mese, vale il piu' grande dell'anno:
+      // meglio il sito dove porta di piu' che nessun sito
+      if (!rif) { let max = 0; for (const [k, q] of sua.anno) if (q > max) { max = q; rif = k; } }
+    }
+
+    // mese per mese, poi il target annuo che nessun mese si e' preso
+    const quote = new Map();
+    const aggiungi = (m) => { for (const [k, v] of m) { const x = quote.get(k) || { target: 0, stimato: false }; x.target = t3(x.target + v.target); x.stimato = x.stimato || v.stimato; quote.set(k, x); } };
+    let sommaMesi = 0;
+    if (mesi) {
+      for (let i = 0; i < 12; i++) {
+        if (!(mesi.tot[i] > 0)) continue;
+        sommaMesi = t3(sommaMesi + mesi.tot[i]);
+        aggiungi(ripartisciQuota({ target: mesi.tot[i], scritto: mesi.scritto[i], arrivato: (sua ? sua.mesi[i] : new Map()), riferimento: rif }));
+      }
+    }
+    const resto = t3(t - sommaMesi);
+    if (resto > 0) aggiungi(ripartisciQuota({ target: resto, arrivato: (sua ? sua.anno : new Map()), riferimento: rif }));
+
+    const finali = normalizzaQuote(quote, t);
+    for (const [k, v] of finali) {
+      // la quota senza posto non si butta in silenzio: la dice senzaStorico
+      if (!k) { senzaStorico.push({ raccoglitore: r.raccoglitore || '', regione: r.regione || '', target_t: v.target }); continue; }
+      per.set(k, t3((per.get(k) || 0) + v.target));
+      const d = dettaglio.get(k) || [];
+      d.push({ raccoglitore: r.raccoglitore || '', regione: r.regione || '', t: v.target, stimato: v.stimato });
+      dettaglio.set(k, d);
     }
   }
   return { per, dettaglio, senzaStorico };
 }
+
 
 /**
  * I due target di una riga di Giacenze (tonnellate), letti da Target & Status:

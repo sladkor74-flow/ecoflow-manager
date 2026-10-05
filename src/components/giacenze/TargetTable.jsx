@@ -20,13 +20,15 @@ function dashIfZero(v) {
 // LA QUOTA RIPARTITA SI DEVE POTER LEGGERE (05/10/2026).
 //
 // Un raccoglitore non conferisce a un impianto solo: il target delle righe che
-// l'impianto non ce l'hanno scritto si divide fra i siti dove ha portato le
-// primarie dell'anno, in proporzione ai chili. Il numero del target, da solo, non
+// l'impianto non ce l'hanno scritto si divide, mese per mese, fra i siti dove ha
+// portato le primarie - dove il materiale e' arrivato il target e' quello
+// arrivato, quello che manca va dove porta oggi (shared/ripartizioneTarget.ts,
+// la stessa regola del Report generale). Il numero del target, da solo, non
 // direbbe da dove arriva ne' perche' cambia quando si caricano nuovi dati.
 function testoRipartizione(r) {
   const chi = (r.target_primarie_ripartizione || [])
-    .map(x => `${x.raccoglitore}${x.regione ? ` (${x.regione})` : ''} ${fmt(x.t)} t`);
-  return `di cui ${fmt(r.target_primarie_ripartite_t)} t ripartite in automatico in base alle primarie che questi raccoglitori hanno portato qui nell'anno: ${chi.join('; ')}. Per deciderlo a mano, scrivi l'impianto sulla loro riga in Target & Status`;
+    .map(x => `${x.raccoglitore}${x.regione ? ` (${x.regione})` : ''} ${fmt(x.t)} t${x.previsto ? ' (in parte previsto)' : ''}`);
+  return `di cui ${fmt(r.target_primarie_ripartite_t)} t ripartite in automatico, mese per mese, in base alle primarie che questi raccoglitori hanno portato qui: ${chi.join('; ')}. «Previsto» e' la parte non ancora arrivata, messa dove quel raccoglitore porta oggi. Per deciderlo a mano, scrivi l'impianto sulla loro riga in Target & Status`;
 }
 
 export default function TargetTable({ righe, totali }) {

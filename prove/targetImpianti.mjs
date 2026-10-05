@@ -4,6 +4,7 @@
 import { impiantiTargetDellAnno, targetRigaGiacenze, testoTargetDaPortare, ripartisciTargetPrimarie } from '../base44/shared/targetImpianti.ts';
 import * as modulo from '../base44/shared/targetImpianti.ts';
 import { normalizzaRagioneSociale as kNome } from '../base44/shared/normalizzaRagioneSociale.ts';
+import { calcolaReportGenerale, impiantiDellAnno, impiantiDelMese } from '../src/lib/reportGeneraleVista.js';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -182,15 +183,30 @@ console.log('IL TARGET SI RIPARTISCE SULLO STORICO DEI CONFERIMENTI');
   verifica('la riga con l\'impianto scritto a mano resta dov\'e\': non si ripartisce',
     aMano.per.size === 0 && aMano.senzaStorico.length === 0, JSON.stringify([...aMano.per.entries()]));
 
-  // 4. Niente tonnellate perse per arrotondamento: 100 t su tre siti uguali.
+  // 4. Niente tonnellate perse per arrotondamento: 100 t su tre siti che hanno
+  // ricevuto in parti uguali piu' del target.
   const tre = rip(
     [{ raccoglitore: 'Alfa', anno: 2026, target_tonnellate: 100 }],
-    [conf('Alfa', 'Uno', 1000), conf('Alfa', 'Due', 1000), conf('Alfa', 'Tre', 1000)],
+    [conf('Alfa', 'Uno', 50000), conf('Alfa', 'Due', 50000), conf('Alfa', 'Tre', 50000)],
   );
   const treKg = [...tre.per.values()].map(v => Math.round(v * 1000));
   verifica('un target che non si divide: le parti fanno comunque esattamente il target, al chilo',
     treKg.reduce((s, v) => s + v, 0) === 100000 && treKg.filter(v => v === 33334).length === 1
     && treKg.filter(v => v === 33333).length === 2, JSON.stringify(treKg));
+
+  // 4b. QUELLO CHE NON E' ARRIVATO NON SI SPALMA (05/10/2026, allineamento con il
+  // Report generale): ogni sito tiene quello che ha ricevuto - li' il target e'
+  // quello, e il delta e' zero - e l'ammanco resta dove quel raccoglitore porta
+  // oggi. Prima si divideva tutto in proporzione, e un sito che aveva ricevuto
+  // dieci tonnellate si vedeva assegnare un target di sessanta.
+  const poco = rip(
+    [{ raccoglitore: 'Alfa', anno: 2026, target_tonnellate: 100 }],
+    [conf('Alfa', 'Uno', 10000, 'imp', 'Campania'), { ...conf('Alfa', 'Due', 20000), mese: 5 }],
+  );
+  verifica('quello che e\' arrivato resta dov\'e\' arrivato, e l\'ammanco va dove porta oggi',
+    quota(poco, 'Uno') === 10 && quota(poco, 'Due') === 90, JSON.stringify([...poco.per.entries()]));
+  verifica('e la somma fa sempre il target',
+    [...poco.per.values()].reduce((s, v) => s + v, 0) === 100);
 
   // 5. LA REGIONE, QUANDO LO STORICO CE L'HA. Nappi Sud ha una riga Campania e
   // una Basilicata (utente, 04/10/2026): ognuna va dove ha raccolto quella regione.
@@ -269,6 +285,91 @@ console.log('IL TARGET SI RIPARTISCE SULLO STORICO DEI CONFERIMENTI');
   // E senza ripartizione la riga si comporta come prima.
   verifica('senza ripartizione niente cambia: l\'avviso di prima e\' ancora li\'',
     targetRigaGiacenze({ sito: 'Gatim', td: 'imp', anno: 2026, giacenzaSito: { target_primarie_t: 950 }, raccoglitori, impiantiTarget: impianti }).da_portare.primarie === true);
+}
+
+// GIACENZE E REPORT GENERALE DEVONO DIRE LA STESSA COSA (05/10/2026).
+//
+// Chiesto dall'utente: «allinea anche le giacenze». I due moduli ripartiscono lo
+// stesso target fra gli stessi impianti, uno per l'anno e uno mese per mese: se
+// rispondono due cose diverse, il gestionale si contraddice da solo. Qui si fa
+// lo stesso scenario da tutt'e due le parti e si confrontano i numeri.
+console.log('LE GIACENZE E IL REPORT GENERALE RIPARTISCONO ALLO STESSO MODO');
+{
+  const MESI_NOMI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+  // L'incendio in Gatim: maggio e giugno su Irigom, luglio e agosto su Gatim,
+  // da settembre in poi ancora da fare. Target 10 t al mese, 60 t l'anno.
+  const mesiTarget = [4, 5, 6, 7, 8, 9].map(i => ({ raccoglitore: 'Emmesse Srls', regione: 'Calabria', mese: MESI_NOMI[i], anno: 2026, target: 10 }));
+  const annui = [{ raccoglitore: 'Emmesse Srls', regione: 'Calabria', anno: 2026, target_tonnellate: 60 }];
+  const viaggi = [
+    { raccoglitore: 'EMMESSE SRLS', regione: 'Calabria', sito: 'Irigom', ruolo: 'imp', mese: 4, kg: 10000 },
+    { raccoglitore: 'EMMESSE SRLS', regione: 'Calabria', sito: 'Irigom', ruolo: 'imp', mese: 5, kg: 6000 },
+    { raccoglitore: 'EMMESSE SRLS', regione: 'Calabria', sito: 'Gatim', ruolo: 'imp', mese: 6, kg: 10000 },
+    { raccoglitore: 'EMMESSE SRLS', regione: 'Calabria', sito: 'Gatim', ruolo: 'imp', mese: 7, kg: 8000 },
+  ];
+
+  // il lato Giacenze
+  const g = ripartisciTargetPrimarie({ raccoglitori: annui, mensili: mesiTarget, conferiti: viaggi, anno: 2026 });
+  const daGiacenze = new Map([...g.per].map(([k, v]) => [k.split('|')[0], v]));
+
+  // il lato Report generale (la pagina), con gli stessi dati
+  const righe = calcolaReportGenerale({
+    chiave: kNome,
+    annui,
+    mensili: mesiTarget,
+    raccolto: [
+      { raccoglitore: 'EMMESSE SRLS', regione: 'Calabria', impianto: 'Irigom', mesi: { Maggio: 10, Giugno: 6 } },
+      { raccoglitore: 'EMMESSE SRLS', regione: 'Calabria', impianto: 'Gatim', mesi: { Luglio: 10, Agosto: 8 } },
+    ],
+  });
+  const daPagina = new Map(impiantiDellAnno(righe[0]).map(i => [kNome(i.impianto), Math.round(i.mesi.reduce((s, m) => s + m.target, 0) * 1000) / 1000]));
+
+  verifica('i due moduli ripartiscono lo stesso target sugli stessi impianti',
+    JSON.stringify([...daGiacenze].sort()) === JSON.stringify([...daPagina].sort()),
+    JSON.stringify([[...daGiacenze], [...daPagina]]));
+  verifica('e il conto e\' quello della regola: a Irigom quello che e\' arrivato, il resto a Gatim',
+    daGiacenze.get('irigom') === 16 && daGiacenze.get('gatim') === 44,
+    JSON.stringify([...daGiacenze]));
+  verifica('la somma fa esattamente il target annuo',
+    [...daGiacenze.values()].reduce((s, v) => s + v, 0) === 60);
+
+  // IL CONTO E' MESE PER MESE, NON SULL'ANNO INTERO.
+  //
+  // Un mese in cui ha portato il triplo del suo target non copre il mese dopo in
+  // cui non ha portato niente: il target di quel mese e' arrivato tutto li', e
+  // quello del mese vuoto resta un ammanco dove porta oggi. Guardando l'anno
+  // intero - trenta tonnellate arrivate contro venti di target - i conti
+  // tornerebbero lo stesso, e la differenza non si vedrebbe.
+  const mesiDue = [{ raccoglitore: 'Beta', regione: 'Puglia', mese: 'Gennaio', anno: 2026, target: 10 },
+    { raccoglitore: 'Beta', regione: 'Puglia', mese: 'Febbraio', anno: 2026, target: 10 }];
+  const g2 = ripartisciTargetPrimarie({
+    raccoglitori: [{ raccoglitore: 'Beta', regione: 'Puglia', anno: 2026, target_tonnellate: 20 }],
+    mensili: mesiDue,
+    conferiti: [
+      { raccoglitore: 'Beta', regione: 'Puglia', sito: 'Tecnogum', ruolo: 'imp', mese: 0, kg: 30000 },
+      { raccoglitore: 'Beta', regione: 'Puglia', sito: 'Gatim', ruolo: 'imp', mese: 1, kg: 5000 },
+    ],
+    anno: 2026,
+  });
+  const righe2 = calcolaReportGenerale({
+    chiave: kNome, mensili: mesiDue,
+    annui: [{ raccoglitore: 'Beta', regione: 'Puglia', anno: 2026, target_tonnellate: 20 }],
+    raccolto: [
+      { raccoglitore: 'Beta', regione: 'Puglia', impianto: 'Tecnogum', mesi: { Gennaio: 30 } },
+      { raccoglitore: 'Beta', regione: 'Puglia', impianto: 'Gatim', mesi: { Febbraio: 5 } },
+    ],
+  });
+  // Mese per mese: gennaio e' tutto di Tecnogum (10, il suo target), febbraio e'
+  // di Gatim (5 arrivate piu' 5 che mancano, dove porta oggi). Guardando l'anno
+  // intero - 35 t arrivate contro 20 di target - uscirebbe 17,14 e 2,86.
+  verifica('il conto e\' mese per mese: dieci e dieci, non in proporzione ai chili dell\'anno',
+    g2.per.get('tecnogum|imp') === 10 && g2.per.get('gatim|imp') === 10, JSON.stringify([...g2.per]));
+  verifica('e il Report generale dice gli stessi due numeri',
+    impiantiDelMese(righe2[0], 0).find(v => v.impianto === 'Tecnogum')?.target === 10
+    && impiantiDelMese(righe2[0], 1).find(v => v.impianto === 'Gatim')?.target === 10,
+    JSON.stringify([impiantiDelMese(righe2[0], 0), impiantiDelMese(righe2[0], 1)]));
+  verifica('la parte che manca e\' segnata come previsione, quella arrivata no',
+    impiantiDelMese(righe2[0], 0)[0]?.stimato === false && impiantiDelMese(righe2[0], 1)[0]?.stimato === true,
+    JSON.stringify(impiantiDelMese(righe2[0], 1)));
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

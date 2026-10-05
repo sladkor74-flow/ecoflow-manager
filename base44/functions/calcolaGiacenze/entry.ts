@@ -79,7 +79,7 @@ export default async function(req) {
     // Carica tutte le sorgenti dati in parallelo
     // ImpiantoTargetSecondaria si legge tutto e si filtra con annoDelRecord: un
     // record senza anno vale il 2026, e un filtro per anno lo perderebbe.
-    const [nonDichiarati, dichiarazioni, reteAll, aciAll, extraAll, secAll, terzAll, giacenzeSito, giacenzeStoccaggio, dichiarazioniSito, impiantiTarget, targetRaccoglitori] = await Promise.all([
+    const [nonDichiarati, dichiarazioni, reteAll, aciAll, extraAll, secAll, terzAll, giacenzeSito, giacenzeStoccaggio, dichiarazioniSito, impiantiTarget, targetRaccoglitori, targetMensili] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.OrdineNonDichiarato),
       fetchAll(base44.asServiceRole.entities.DichiarazioneTrattamento),
       fetchAll(base44.asServiceRole.entities.PrimariaRete),
@@ -92,6 +92,9 @@ export default async function(req) {
       fetchAll(base44.asServiceRole.entities.DichiarazioneSito),
       fetchAll(base44.asServiceRole.entities.ImpiantoTargetSecondaria),
       fetchAll(base44.asServiceRole.entities.TargetRaccoglitore),
+      // i target mensili dicono di che mese e' quale pezzo di target, e su quale
+      // impianto l'utente lo ha scritto: li legge la ripartizione
+      fetchAll(base44.asServiceRole.entities.TargetMensile),
     ]);
     // Gli impianti di Target & Status di quell'anno con un target: compaiono anche
     // senza movimenti, come prima quelli con il target scritto in Giacenze.
@@ -560,16 +563,20 @@ export default async function(req) {
     const conferitiRaccoglitori = [];
     for (const r of reteAll) {
       if (eAci(r) || !isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
+      const g = giornoRoma(r.trasporto_finito_il);
       conferitiRaccoglitori.push({
         raccoglitore: r.trasportatore,
         regione: PROV_TO_REGION[String(r.provincia || '').toUpperCase().trim()] || r.regione || '',
         sito: r.destinazione,
         ruolo: tipoStoc(r) ? 'stoc' : 'imp',
+        // il mese e' quello della FINE DEL TRASPORTO, come ogni periodo qui dentro
+        mese: g ? Number(g.slice(5, 7)) - 1 : -1,
         kg: Number(r.peso_effettivo) || 0,
       });
     }
     const ripartite = ripartisciTargetPrimarie({
-      raccoglitori: targetRaccoglitori, conferiti: conferitiRaccoglitori, anno: annoNum, chiave: norm,
+      raccoglitori: targetRaccoglitori, mensili: targetMensili, conferiti: conferitiRaccoglitori,
+      anno: annoNum, chiave: norm,
     });
 
     // Le secondarie di rete e quelle ACI viaggiano nello stesso archivio e si
@@ -992,7 +999,7 @@ export default async function(req) {
         // viene dalla ripartizione sullo storico, e da chi: il numero da solo non
         // si capirebbe da dove arriva.
         target_primarie_ripartite_t: r2(tgt.target_primarie_ripartite_t),
-        target_primarie_ripartizione: tgt.ripartizione.map(x => ({ raccoglitore: x.raccoglitore, regione: x.regione, t: r2(x.t) })),
+        target_primarie_ripartizione: tgt.ripartizione.map(x => ({ raccoglitore: x.raccoglitore, regione: x.regione, t: r2(x.t), previsto: !!x.stimato })),
         target_totale_t: r2(target_totale_t),
         giacenza_riferimento_t: r2(giacenza_riferimento_t),
         tipologia_trattamento,
