@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { MESI } from '@/lib/pfuConstants';
 import { tonnellate, percentuale, chiaveNome } from '@/lib/target';
 import { calcolaReportGenerale, raggruppa, sommaRighe, valoriMese, impiantiMese, totaliPerImpianto } from '@/lib/reportGeneraleVista';
+import ReportGeneraleAnno from '@/components/target-status/ReportGeneraleAnno';
 
 // Report Generale: target assegnati contro raccolto RETE per regione e
 // raccoglitore. L'impianto di destinazione si legge a consuntivo: sotto ogni
@@ -27,6 +28,30 @@ function Celle({ v, forte }) {
   );
 }
 
+/** Un gruppetto di bottoni che si escludono, come una linguetta. */
+function Scelta({ valore, su, voci }) {
+  return (
+    <div className="inline-flex rounded-md border overflow-hidden">
+      {voci.map(([v, etichetta]) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => su(v)}
+          className={`px-2.5 py-1.5 text-xs ${valore === v ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+        >{etichetta}</button>
+      ))}
+    </div>
+  );
+}
+
+function AvvisoSenzaTarget({ quante }) {
+  return (
+    <p className="text-xs text-amber-800">
+      {quante} {quante === 1 ? 'riga ha' : 'righe hanno'} raccolto RETE in una regione dove il raccoglitore non ha target: controlla nella scheda Target raccoglitori se manca un target.
+    </p>
+  );
+}
+
 function RigheImpianti({ elenco, totaleMese }) {
   return elenco.map(i => (
     <tr key={i.impianto} className="text-xs text-muted-foreground">
@@ -45,6 +70,10 @@ export default function ReportGenerale({ anno, mensili, annui, raccolto, commess
   const oggi = new Date();
   const [meseIdx, setMeseIdx] = useState(anno === oggi.getFullYear() ? oggi.getMonth() : 11);
   const [dettaglio, setDettaglio] = useState(true);
+  // Si apre sull'anno intero: e' la panoramica che l'utente ha chiesto
+  // (05/10/2026), e il mese singolo resta a un clic di distanza.
+  const [periodo, setPeriodo] = useState('anno');
+  const [vista, setVista] = useState('tutto');
 
   const righe = useMemo(
     () => calcolaReportGenerale({ mensili, annui, raccolto: raccolto?.by_raccoglitore_impianto || [], chiave: chiaveNome }),
@@ -64,18 +93,43 @@ export default function ReportGenerale({ anno, mensili, annui, raccolto, commess
   const senzaTarget = righe.filter(r => !r.conTarget);
   const perImpianto = totaliPerImpianto(righe, meseIdx);
 
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="text-sm text-muted-foreground">Mese</label>
+  const barra = (
+    <div className="flex flex-wrap items-center gap-3">
+      <Scelta valore={periodo} su={setPeriodo} voci={[['anno', "Tutto l'anno"], ['mese', 'Un mese']]} />
+      {periodo === 'mese' ? (
         <select value={meseIdx} onChange={e => setMeseIdx(Number(e.target.value))} className="border rounded-md px-2 py-1.5 text-sm bg-background">
           {MESI.map((m, i) => <option key={m} value={i}>{m} {anno}</option>)}
         </select>
-        <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-          <input type="checkbox" checked={dettaglio} onChange={e => setDettaglio(e.target.checked)} /> Mostra il raccolto per impianto
-        </label>
-        <span className="text-xs text-muted-foreground">Raccolto RETE: formulari terminati per data di fine trasporto. Delta = target meno raccolto, rosso se manca raccolta.</span>
+      ) : (
+        <Scelta valore={vista} su={setVista} voci={[['tutto', 'Target, raccolto e delta'], ['raccolto', 'Solo raccolto'], ['delta', 'Solo delta']]} />
+      )}
+      <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <input type="checkbox" checked={dettaglio} onChange={e => setDettaglio(e.target.checked)} /> Mostra gli impianti
+      </label>
+    </div>
+  );
+  const nota = (
+    <p className="text-xs text-muted-foreground">
+      Raccolto RETE: formulari terminati per data di fine trasporto. Delta = target meno raccolto, rosso se manca raccolta.
+      {periodo === 'anno' && " Il target e' del raccoglitore in una regione: sulle righe degli impianti e' ripartito a consuntivo, cioe' dove il materiale e' arrivato il target e' quello arrivato e il delta e' zero; quello che manca resta all'impianto dove quel raccoglitore porta oggi, segnato «previsto» finche' il mese non e' stato fatto."}
+    </p>
+  );
+
+  if (periodo === 'anno') {
+    return (
+      <div className="space-y-3">
+        {barra}
+        <ReportGeneraleAnno anno={anno} gruppi={gruppi} righe={righe} dettaglio={dettaglio} vista={vista} />
+        {nota}
+        {senzaTarget.length > 0 && <AvvisoSenzaTarget quante={senzaTarget.length} />}
       </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {barra}
+      {nota}
       <div className="border rounded-lg overflow-x-auto bg-card">
         <table className="w-full text-sm">
           <thead className="bg-muted/60 text-left">
@@ -136,11 +190,7 @@ export default function ReportGenerale({ anno, mensili, annui, raccolto, commess
           </tbody>
         </table>
       </div>
-      {senzaTarget.length > 0 && (
-        <p className="text-xs text-amber-800">
-          {senzaTarget.length} {senzaTarget.length === 1 ? 'riga ha' : 'righe hanno'} raccolto RETE in una regione dove il raccoglitore non ha target: controlla nella scheda Target raccoglitori se manca un target.
-        </p>
-      )}
+      {senzaTarget.length > 0 && <AvvisoSenzaTarget quante={senzaTarget.length} />}
       {perImpianto.length > 0 && (
         <div className="border rounded-lg overflow-x-auto bg-card">
           <table className="w-full text-sm">

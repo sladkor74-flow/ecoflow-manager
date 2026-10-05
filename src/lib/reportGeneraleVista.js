@@ -11,7 +11,7 @@
 //
 // Solo canale RETE: ACI ed Extra Raccolta sono canali indipendenti.
 
-import { MESI } from '@/lib/pfuConstants';
+import { MESI } from './pfuConstants.js';
 
 const parole = (k) => k.split(' ').filter(p => p.length > 2);
 
@@ -27,6 +27,27 @@ export function stessoNome(chiaveTarget, chiavePortale) {
 
 const vuotiMesi = () => MESI.map(() => ({ target: 0, raccolto: 0 }));
 
+/** Tonnellate arrotondate al chilo. */
+const t3 = (v) => Math.round(v * 1000) / 1000;
+
+/**
+ * Chili divisi in proporzione ai pesi col metodo del resto piu' grande: la somma
+ * delle parti fa esattamente il totale. A pari resto decide il nome.
+ */
+function quoteKg(kgTotali, pesi) {
+  const somma = pesi.reduce((s, [, p]) => s + p, 0);
+  if (!(somma > 0) || !(kgTotali > 0)) return [];
+  const parti = pesi.map(([k, p]) => {
+    const esatto = (kgTotali * p) / somma;
+    const giu = Math.floor(esatto);
+    return { k, kg: giu, resto: esatto - giu };
+  });
+  let restano = kgTotali - parti.reduce((s, p) => s + p.kg, 0);
+  const ordine = [...parti].sort((a, b) => (b.resto - a.resto) || (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
+  for (let i = 0; restano > 0; i = (i + 1) % ordine.length, restano--) ordine[i].kg++;
+  return parti.map(p => [p.k, p.kg / 1000]);
+}
+
 /**
  * mensili: TargetMensile; annui: TargetRaccoglitore; raccolto: by_raccoglitore_impianto
  * del canale RETE; chiave: funzione di normalizzazione dei nomi.
@@ -39,16 +60,27 @@ export function calcolaReportGenerale({ mensili = [], annui = [], raccolto = [],
     if (!righe.has(k)) {
       righe.set(k, {
         regione: regione || '', raccoglitore: raccoglitore || '', kRaccoglitore: chiave(raccoglitore),
-        annuo: 0, conTarget: false, mesi: vuotiMesi(), impianti: new Map(),
+        annuo: 0, conTarget: false, mesi: vuotiMesi(), impianti: new Map(), scritti: new Map(),
       });
     }
     return righe.get(k);
+  };
+  // L'impianto scritto a mano sulla riga del target: non dice quanto, ma dice
+  // dove quel raccoglitore deve portare, ed e' l'unica cosa che lo dice prima che
+  // il materiale si muova (serve a impiantoDiRiferimento).
+  const segnaScritto = (r, nome, annuo) => {
+    const k = chiave(nome);
+    if (!k) return;
+    const x = r.scritti.get(k) || { impianto: nome, annuo: 0 };
+    x.annuo += annuo;
+    r.scritti.set(k, x);
   };
 
   for (const a of annui) {
     const r = riga(a.regione, a.raccoglitore);
     r.annuo += Number(a.target_tonnellate) || 0;
     r.conTarget = true;
+    segnaScritto(r, a.impianto, Number(a.target_tonnellate) || 0);
   }
   for (const t of mensili) {
     const i = MESI.indexOf(t.mese);
@@ -56,6 +88,7 @@ export function calcolaReportGenerale({ mensili = [], annui = [], raccolto = [],
     const r = riga(t.regione, t.raccoglitore);
     r.conTarget = true;
     if (!t.non_raccoglie) r.mesi[i].target += Number(t.target) || 0;
+    segnaScritto(r, t.impianto, 0);
   }
 
   const conTarget = [...righe.values()];
@@ -95,6 +128,138 @@ export function valoriMese(r, meseIdx) {
     progressivo,
     residuo: r.annuo - progressivo,
     percentualeAnnuo: r.annuo > 0 ? (progressivo / r.annuo) * 100 : null,
+  };
+}
+
+/** L'etichetta della quota che non si sa dove mettere. */
+export const DA_ASSEGNARE = 'da assegnare';
+
+/**
+ * L'IMPIANTO DI RIFERIMENTO DI UN RACCOGLITORE: dove porta, oggi.
+ *
+ * Serve a dire di chi e' il target che il raccoglitore non ha ancora raccolto -
+ * i mesi futuri, e la parte mancante di un mese chiuso. Si prende, in ordine:
+ * 1) l'impianto scritto a mano sulla sua riga in Target & Status, che e' una
+ *    decisione dell'utente e vince su tutto (se ne ha piu' d'uno, quello col
+ *    target annuo piu' alto);
+ * 2) altrimenti l'impianto dell'ULTIMO mese in cui ha conferito, non il piu'
+ *    grande dell'anno: un impianto fermo per un guasto o un incendio sposta i
+ *    conferimenti per qualche mese, e quando riapre e' li' che tornano. L'utente,
+ *    il 05/10/2026: «Emmesse per due mesi ha conferito su Irigom a causa
+ *    dell'incendio in Gatim, ma da qui a fine anno conferira' sempre su Gatim».
+ */
+export function impiantoDiRiferimento(r) {
+  const scritti = [...(r.scritti ? r.scritti.values() : [])]
+    .sort((a, b) => b.annuo - a.annuo || a.impianto.localeCompare(b.impianto, 'it'));
+  if (scritti.length) return scritti[0].impianto;
+  for (let i = MESI.length - 1; i >= 0; i--) {
+    let scelto = null;
+    for (const v of r.impianti.values()) {
+      const kg = v.mesi[i] || 0;
+      if (kg > 0 && (!scelto || kg > scelto.kg)) scelto = { impianto: v.impianto, kg };
+    }
+    if (scelto) return scelto.impianto;
+  }
+  return '';
+}
+
+/**
+ * IL TARGET DI UN MESE RIPARTITO FRA GLI IMPIANTI (05/10/2026).
+ *
+ * Il target e' del raccoglitore in una regione: un impianto non ha un target per
+ * raccoglitore, e inventarglielo dividendo a meta' farebbe comparire ammanchi che
+ * nessuno ha mai promesso. La regola, chiesta dall'utente:
+ *
+ * - DOVE IL MATERIALE E' ARRIVATO IL TARGET E' QUELLO CHE E' ARRIVATO, e il delta
+ *   torna a zero. «Emmesse per due mesi ha conferito su Irigom a causa
+ *   dell'incendio in Gatim [...] li' non c'e' un vero target, metti esattamente
+ *   quello che ha raccolto in quei due mesi e fai tornare a zero il delta».
+ * - QUELLO CHE MANCA RESTA UN AMMANCO, e va dove quel raccoglitore avrebbe
+ *   dovuto portarlo: l'impianto di riferimento. Se il mese e' andato come doveva,
+ *   di ammanco non ce n'e' e all'impianto di riferimento non si scrive niente.
+ * - SE HA RACCOLTO PIU' DEL TARGET il target si divide fra gli impianti che hanno
+ *   ricevuto, in proporzione ai chili: cosi' nessuno dei due mostra un ammanco e
+ *   il di piu' si vede dove e' davvero andato.
+ * - UN MESE ANCORA DA FARE e' tutto dell'impianto di riferimento: e' una
+ *   previsione, non un impegno, e chi legge lo deve sapere (campo stimato).
+ *
+ * La somma dei target degli impianti fa sempre il target del mese del
+ * raccoglitore, al chilo: la colonna torna.
+ *
+ * @returns [{ impianto, target, raccolto, delta, stimato }]
+ */
+export function impiantiDelMese(r, meseIdx, riferimento = null) {
+  const rif = riferimento === null ? impiantoDiRiferimento(r) : riferimento;
+  const target = r.mesi[meseIdx]?.target || 0;
+  const raccolto = r.mesi[meseIdx]?.raccolto || 0;
+  const voci = new Map();
+  const voce = (nome) => {
+    const k = nome || DA_ASSEGNARE;
+    if (!voci.has(k)) voci.set(k, { impianto: k, target: 0, raccolto: 0, stimato: false });
+    return voci.get(k);
+  };
+  for (const v of r.impianti.values()) {
+    const kg = v.mesi[meseIdx] || 0;
+    if (kg > 0) voce(v.impianto).raccolto = t3(kg);
+  }
+  if (target > 0) {
+    if (raccolto >= target) {
+      for (const [nome, q] of quoteKg(Math.round(target * 1000), [...voci.values()].map(v => [v.impianto, Math.round(v.raccolto * 1000)]))) {
+        voce(nome).target = q;
+      }
+    } else {
+      for (const v of voci.values()) v.target = v.raccolto;
+      const resto = t3(target - raccolto);
+      if (resto > 0) {
+        const v = voce(rif);
+        v.target = t3(v.target + resto);
+        v.stimato = true;
+      }
+    }
+  }
+  return [...voci.values()]
+    .map(v => ({ ...v, delta: t3(v.target - v.raccolto) }))
+    .sort((a, b) => b.raccolto - a.raccolto || b.target - a.target || a.impianto.localeCompare(b.impianto, 'it'));
+}
+
+/**
+ * Gli impianti di una riga con i dodici mesi, nella stessa forma di una riga
+ * (mesi[] di { target, raccolto }): cosi' la tabella dell'anno li disegna con lo
+ * stesso codice. stimato dice che almeno un mese e' una previsione.
+ */
+export function impiantiDellAnno(r) {
+  const rif = impiantoDiRiferimento(r);
+  const mappa = new Map();
+  MESI.forEach((m, i) => {
+    for (const v of impiantiDelMese(r, i, rif)) {
+      if (!mappa.has(v.impianto)) mappa.set(v.impianto, { impianto: v.impianto, mesi: vuotiMesi(), stimato: false, annuo: 0 });
+      const x = mappa.get(v.impianto);
+      x.mesi[i].target = t3(x.mesi[i].target + v.target);
+      x.mesi[i].raccolto = t3(x.mesi[i].raccolto + v.raccolto);
+      x.annuo = t3(x.annuo + v.target);
+      if (v.stimato) x.stimato = true;
+    }
+  });
+  return [...mappa.values()].sort((a, b) => {
+    const ra = a.mesi.reduce((s, m) => s + m.raccolto, 0), rb = b.mesi.reduce((s, m) => s + m.raccolto, 0);
+    return rb - ra || b.annuo - a.annuo || a.impianto.localeCompare(b.impianto, 'it');
+  });
+}
+
+/**
+ * I totali dell'anno di una riga: target dei dodici mesi, raccolto, delta e
+ * percentuale. La percentuale si misura sul target annuo quando c'e' (i mesi
+ * possono non sommare l'annuo: la colonna "Da ripartire" della griglia dei target
+ * dice proprio quanto manca), altrimenti sulla somma dei mesi.
+ */
+export function valoriAnno(r) {
+  const target = t3(r.mesi.reduce((s, m) => s + m.target, 0));
+  const raccolto = t3(r.mesi.reduce((s, m) => s + m.raccolto, 0));
+  const base = r.annuo > 0 ? r.annuo : target;
+  return {
+    annuo: r.annuo || 0, target, raccolto, delta: t3(target - raccolto),
+    residuo: base > 0 ? t3(base - raccolto) : null,
+    percentualeAnnuo: base > 0 ? (raccolto / base) * 100 : null,
   };
 }
 
