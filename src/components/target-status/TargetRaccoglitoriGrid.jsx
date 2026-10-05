@@ -427,9 +427,13 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     const quote = new Map();
     for (const [k, m] of somma) {
       const tot = [...m.values()].reduce((s, v) => s + v, 0);
-      quote.set(k, [...m.entries()]
+      const righe = [...m.entries()]
         .map(([impianto, t]) => ({ impianto, pct: Math.round((t / tot) * 100) }))
-        .sort((a, b) => b.pct - a.pct));
+        .sort((a, b) => b.pct - a.pct);
+      // le percentuali arrotondate devono fare cento: lo scarto lo porta la piu' grande
+      const scarto = 100 - righe.reduce((s, r) => s + r.pct, 0);
+      if (righe.length && scarto !== 0) righe[0].pct += scarto;
+      quote.set(k, righe);
     }
     return quote;
   }, [raccoltoImpianto]);
