@@ -26,9 +26,14 @@ export default async function(req) {
     const targetRecords = await base44.asServiceRole.entities.TargetRaccoglitore.filter(
       { anno: effectiveYear }, '-created_date', 1000
     );
+    // I target si SOMMANO: un raccoglitore ha una riga per regione e per
+    // impianto, e prendendo l'ultima si vedeva il target di una regione sola
+    // (06/10/2026). Il nome lo normalizza computeRaccoglitoriMixData, che e'
+    // dove si incontra con quello scritto nei file del portale.
     const targetsMap: Record<string, number> = {};
     for (const t of targetRecords) {
-      targetsMap[t.raccoglitore] = t.target_tonnellate || 0;
+      const nome = t.raccoglitore || '';
+      targetsMap[nome] = (targetsMap[nome] || 0) + (Number(t.target_tonnellate) || 0);
     }
 
     const records = await fetchAll(base44.asServiceRole.entities.PrimariaRete);

@@ -5,6 +5,9 @@
 import { PROV_TO_REGION, MESI, riepilogoDate, riepilogoDateVista } from "./raccoltoCalculator.ts";
 import { eTerminato, periodoMovimento, tempiRaccolta, dateIncoerenti } from "./movimenti.ts";
 import { oggiRoma, annoRoma } from "./giornoItaliano.ts";
+import { classePfu } from "./giacenzaStoccaggi.ts";
+import { eAci } from "./canaleSecondaria.ts";
+import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 
 export const TARGET_MIX_CLASSI: Record<string, number> = {
   P: 75,
@@ -109,9 +112,28 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
 }
 
 // --- 2. Mix Classi Raccoglitori ---
-// Vista A (% SUL RACCOLTO): (peso_classe / totale_pesi_raccoglitore) * 100
-// Vista B (% SUL TARGET):    (peso_classe / target_annuo_raccoglitore) * 100
-// Deviazione calcolata sulla Vista A rispetto ai target consorziali (P=75, M=20, G1=4, G2=1).
+//
+// Due domande diverse, una per vista (06/10/2026, su richiesta dell'utente:
+// «quanto di ciascuna classe, sia in termini % che come tonnellate, e' stato
+// raccolto rispettivamente rispetto al raccolto e rispetto al target annuale»):
+//
+// Vista A, % SUL RACCOLTO: che mix ha raccolto, cioe' peso della classe sul suo
+//   raccolto di rete. E' il numero che si confronta con i target consorziali
+//   (P=75, M=20, G1=4, G2=1) e da cui esce il delta, soglia ±5 punti.
+// Vista B, % SUL TARGET: quanto ha fatto del target DI QUELLA CLASSE, cioe'
+//   peso della classe sul target annuo del raccoglitore ripartito col mix
+//   consorziale (target × 75% per la P, × 20% per la M, e cosi' via).
+//
+// Prima la vista B divideva il peso di una classe per il target INTERO: con 1.000
+// t di target e 600 t di P diceva 60%, che non e' ne' la quota di P (75%) ne'
+// quanto di P e' stato fatto (600 su 750, cioe' l'80%). Un numero che non
+// rispondeva a nessuna domanda.
+//
+// E il target del raccoglitore si cercava per nome esatto: "SMOCO S.R.L." dei
+// file del portale non trovava "SMOCO S.r.l." dei target, e il piu' grande dei
+// raccoglitori risultava senza target, con tutta la vista B a zero. Inoltre chi
+// ha piu' righe di target - una per regione - ne vedeva contare una sola, perche'
+// la mappa si sovrascriveva invece di sommare.
 
 export function computeRaccoglitoriMixData(records, targetsMap: Record<string, number> = {}, filters: any = {}) {
   const toArray = (v: any) => Array.isArray(v) ? v : (v != null ? [v] : []);
@@ -152,8 +174,16 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
   const byRaccoglitore: Record<string, any> = {};
 
   for (const r of filtered) {
+    // IL CANALE LO DECIDE IL MATERIALE (regola dell'utente: rete, ACI ed extra
+    // raccolta non si sommano mai). Una riga di autodemolizione finita
+    // nell'archivio di rete non e' rete: starebbe nel totale del raccoglitore
+    // abbassando la quota di tutte le classi, senza comparire in nessuna.
+    if (eAci(r)) continue;
     const raccoglitore = (r.trasportatore || 'N/D').trim();
-    const classe = (r.classe || '').toUpperCase().trim();
+    // La classe si legge col prodotto, non col solo campo classe: quando quel
+    // campo e' vuoto il peso restava fuori da ogni classe ma dentro il totale, e
+    // il mix usciva piu' basso del vero su tutte e quattro.
+    const classe = classePfu(r.classe, r.prodotto);
     const peso = (r.peso_effettivo || 0) / 1000; // kg -> ton
 
     if (!byRaccoglitore[raccoglitore]) {
@@ -165,34 +195,52 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
     }
 
     byRaccoglitore[raccoglitore].totale_peso += peso;
-    if (classe && byRaccoglitore[raccoglitore].classi[classe] !== undefined) {
+    if (byRaccoglitore[raccoglitore].classi[classe] !== undefined) {
       byRaccoglitore[raccoglitore].classi[classe] += peso;
-    } else if (classe) {
+    } else {
+      // niente sparisce in silenzio: quello che non e' una classe di rete si
+      // vede, e il mix dice su che cosa e' calcolato
       byRaccoglitore[raccoglitore].classi.ALTRO += peso;
     }
   }
 
   const deviazioneThreshold = 5; // ±5% absolute deviation
 
+  // I target per raccoglitore, per nome normalizzato e SOMMATI: un raccoglitore
+  // puo' avere piu' righe di target, una per regione o per impianto.
+  const targetPer = new Map<string, number>();
+  for (const [nome, t] of Object.entries(targetsMap || {})) {
+    const k = normalizzaRagioneSociale(nome);
+    if (!k) continue;
+    targetPer.set(k, (targetPer.get(k) || 0) + (Number(t) || 0));
+  }
+
   const raccoglitoriArray = Object.values(byRaccoglitore).map((r: any) => {
     const totale = r.totale_peso;
-    const targetRaccoglitore = targetsMap[r.raccoglitore] || 0;
+    const targetRaccoglitore = targetPer.get(normalizzaRagioneSociale(r.raccoglitore)) || 0;
     const percentuali: Record<string, number> = {};
     const percentuali_target: Record<string, number> = {};
     const deviazioni: Record<string, number> = {};
+    // le tonnellate, che la percentuale da sola non dice
+    const tonnellate: Record<string, number> = {};
+    const target_classi: Record<string, number> = {};
 
     for (const [classe, targetPct] of Object.entries(TARGET_MIX_CLASSI)) {
       const pesoClasse = r.classi[classe] || 0;
       // Vista A: % sul raccolto del raccoglitore
       const pct = totale > 0 ? (pesoClasse / totale) * 100 : 0;
-      // Vista B: % sul target annuo assegnato al raccoglitore
-      const pctTarget = targetRaccoglitore > 0 ? (pesoClasse / targetRaccoglitore) * 100 : 0;
+      // Il target di QUELLA classe: il target annuo ripartito col mix consorziale
+      const targetClasse = (targetRaccoglitore * targetPct) / 100;
+      // Vista B: quanto ha fatto del target di quella classe
+      const pctTarget = targetClasse > 0 ? (pesoClasse / targetClasse) * 100 : 0;
       // Deviazione calcolata sulla Vista A rispetto al target consorziale
       const deviazione = pct - targetPct;
 
       percentuali[classe] = pct;
       percentuali_target[classe] = pctTarget;
       deviazioni[classe] = deviazione;
+      tonnellate[classe] = pesoClasse;
+      target_classi[classe] = targetClasse;
     }
 
     const deviazioni_significative = Object.entries(deviazioni)
@@ -210,6 +258,10 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
       percentuali,
       percentuali_target,
       deviazioni,
+      tonnellate,
+      target_classi,
+      // quello che non e' una classe di rete, se c'e': si vede invece di diluire
+      altro_t: r.classi.ALTRO || 0,
       deviazioni_significative,
       has_deviazione: deviazioni_significative.length > 0,
     };

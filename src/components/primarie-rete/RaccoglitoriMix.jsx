@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
-import { formatNumber } from '@/lib/utils';
+import { formatNumber, formatTonnellate } from '@/lib/utils';
 import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 
 const CLASSI = ['P', 'M', 'G1', 'G2'];
+
+// Tonnellate come ovunque: due decimali, tre se i chili non sono tondi.
+const fmtT = (v) => formatTonnellate(Number(v) || 0);
 
 export default function RaccoglitoriMix({ data }) {
   const [view, setView] = useState('raccolto'); // 'raccolto' | 'target'
@@ -59,6 +62,14 @@ export default function RaccoglitoriMix({ data }) {
           Totale target assegnati: {formatNumber(target_totale || 0)} ton
         </span>
       </div>
+      {/* CHE COSA DICE LA VISTA CHE SI STA GUARDANDO (06/10/2026). I due numeri
+          rispondono a due domande diverse e si somigliano troppo per lasciarlo
+          capire al lettore. */}
+      <p className="text-xs text-muted-foreground -mt-1">
+        {view === 'raccolto'
+          ? 'Quanto pesa ogni classe sul raccolto di rete del raccoglitore: è il suo mix, e si confronta con i target consorziali. Il Δ è la differenza in punti dal target della classe, segnalata oltre ±5.'
+          : 'Quanto ha fatto del target di quella classe: il suo target annuo ripartito col mix consorziale (75% alla P, 20% alla M, 4% alla G1, 1% alla G2). Il target è dell’anno intero: filtrando un mese o una regione la percentuale scende di conseguenza.'}
+      </p>
 
       {/* Table */}
       <div className="border rounded-lg overflow-x-auto">
@@ -91,15 +102,28 @@ export default function RaccoglitoriMix({ data }) {
                 <td className="px-3 py-2 text-right font-semibold">{formatNumber(r.totale_peso)}</td>
                 <td className="px-3 py-2 text-right text-muted-foreground">{formatNumber(r.target_raccoglitore || 0)}</td>
                 {CLASSI.map(c => {
-                  const val = view === 'raccolto' ? r.percentuali[c] : r.percentuali_target[c];
+                  const val = view === 'raccolto' ? r.percentuali[c] : (r.percentuali_target?.[c] ?? 0);
                   const dev = r.deviazioni[c];
                   const isDev = Math.abs(dev) > 5;
+                  const raccolte = r.tonnellate?.[c] ?? 0;
+                  const targetClasse = r.target_classi?.[c] ?? 0;
+                  // SENZA TARGET LA PERCENTUALE NON ESISTE, e uno zero si legge
+                  // come "non ha raccolto niente" (06/10/2026).
+                  const senzaTarget = view === 'target' && !(targetClasse > 0);
                   return (
                     <td
                       key={c}
                       className={`text-center px-3 py-2 ${isDev && view === 'raccolto' ? 'bg-amber-100 text-amber-800 font-medium border-2 border-amber-300' : ''}`}
                     >
-                      {formatNumber(val, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
+                      <div className="font-medium">{fmtT(raccolte)} t</div>
+                      {senzaTarget ? (
+                        <div className="text-xs text-muted-foreground mt-0.5" title="Questo raccoglitore non ha un target annuo in Target & Status">senza target</div>
+                      ) : (
+                        <div className="text-xs mt-0.5">
+                          {formatNumber(val, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
+                          {view === 'target' && <span className="text-muted-foreground"> di {fmtT(targetClasse)} t</span>}
+                        </div>
+                      )}
                       {isDev && view === 'raccolto' && (
                         <div className="text-xs text-amber-600 mt-0.5">
                           Δ{dev > 0 ? '+' : ''}{formatNumber(dev, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
