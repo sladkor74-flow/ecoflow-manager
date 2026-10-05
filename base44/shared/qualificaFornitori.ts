@@ -395,7 +395,18 @@ export function valutaSoggetto(soggetto, catalogo, documenti, oggi) {
       documento: doc ? {
         id: doc.id,
         file_nome: doc.file_nome,
-        file_uri: doc.file_uri,
+        // IL file_uri NON ESCE DAL SERVER (05/10/2026).
+        //
+        // Questo riepilogo lo chiede la pagina a ogni apertura e la funzione
+        // risponde a QUALUNQUE utente collegato: finche' qui c'era il file_uri,
+        // chiunque poteva farselo firmare e aprire il DURC, la polizza, la visura
+        // o le patenti degli autisti di un fornitore - documenti di terzi, con
+        // dati personali - mentre il pulsante «Apri» nella pagina si disegnava
+        // solo per l'amministratore. La firma non e' controllata contro l'utente
+        // ne' contro le regole RLS del record: lo ha scritto l'assistenza della
+        // piattaforma (vedi shared/fileRiservato.ts). Alla pagina basta sapere se
+        // il file c'e'; per aprirlo si passa dalla funzione apriFile.
+        ha_file: !!doc.file_uri,
         data_emissione: doc.data_emissione,
         data_scadenza: doc.data_scadenza,
         data_scadenza_manuale: doc.data_scadenza_manuale,

@@ -94,7 +94,28 @@
     "tipo_documento_id"
   ],
   "rls": {
-    "read": true,
+    // LA LETTURA E' DELL'AMMINISTRATORE (05/10/2026).
+    //
+    // Questi record portano il file_uri dei documenti dei fornitori - DURC,
+    // polizze, visure, patenti degli autisti, CQC: documenti di terzi, con dati
+    // personali di dipendenti di altre aziende. L'assistenza della piattaforma ha
+    // spiegato che un file_uri e' la chiave del file per qualunque utente
+    // collegato, perche' la firma non e' controllata ne' contro l'utente ne'
+    // contro queste regole ("Signing isn't checked against that user, or against
+    // the RLS of the record that holds the reference"). Con "read": true il
+    // documento lo apriva chiunque, mentre il pulsante «Apri» era disegnato per
+    // il solo amministratore.
+    //
+    // Chi non e' amministratore non perde niente a video: la pagina Qualifica
+    // Fornitori non legge questo archivio dal browser, legge il riepilogo della
+    // funzione qualificaFornitori, che gira con asServiceRole e non manda piu' il
+    // file_uri a nessuno. Le uniche letture dirette stanno dentro ai percorsi di
+    // caricamento e del catalogo, che sono gia' dell'amministratore.
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
     "create": {
       "user_condition": {
         "role": "admin"

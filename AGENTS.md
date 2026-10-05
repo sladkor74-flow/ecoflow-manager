@@ -1599,6 +1599,59 @@ decide che cosa si scrive sul record. Le funzioni che scaricano - `importPdrFile
 `importEcotyreFile`, `importaRichiesteEct` - accettano `file_uri` e, solo per i
 caricamenti vecchi, `file_url`.
 
+#### Il `file_uri` e' la chiave del documento: non si manda al browser (05/10/2026)
+
+**Precisazione dell'assistenza della piattaforma**, che corregge una cosa scritta
+come vera in tre posti di questo repository:
+
+> *«A file_uri works as a capability within your app. Any signed-in user of your
+> app who holds a private file_uri can call CreateFileSignedUrl with it and get a
+> working signed URL. Signing isn't checked against that user, or against the RLS
+> of the record that holds the reference. There's currently no setting that limits
+> CreateFileSignedUrl to asServiceRole calls from a backend function. Signed file
+> URLs keep working from the browser even with core integration protection turned
+> on.»*
+
+Quindi «privato» vuol dire **irraggiungibile da fuori**, non «al sicuro da tutti».
+Dentro l'applicazione un file vale quanto l'archivio che ne tiene il riferimento:
+chi legge il `file_uri` apre il file, e **nascondere il pulsante non e' un
+permesso**. La difesa verso l'esterno (nessun indirizzo, nulla da indovinare)
+resta intera ed e' la ragione per cui si carica solo con `UploadPrivateFile`.
+
+**Il danno che questo apriva, misurato sul codice.** La funzione
+`qualificaFornitori`, che la pagina chiama a ogni apertura e che risponde a
+qualunque utente collegato, mandava nel riepilogo il `file_uri` di ogni documento
+di qualifica. Nella pagina il pulsante «Apri» si disegna solo per
+l'amministratore, quindi l'intenzione era scritta - ma sono **DURC, polizze,
+visure, patenti degli autisti e CQC**, documenti di terzi con dati personali di
+dipendenti di altre aziende, e con quel valore in mano li apriva chiunque fosse
+collegato.
+
+**Come si fa adesso**, le prime due delle tre strade che l'assistenza indica:
+
+1. **Il riferimento non esce dal server.** `qualificaFornitori` manda `ha_file`
+   (c'e' / non c'e'), non il `file_uri`; `DocumentoQualifica` ha la **lettura
+   riservata all'amministratore** (la pagina non legge quell'archivio dal
+   browser: legge il riepilogo della funzione, che gira con `asServiceRole`).
+2. **Si apre dalla funzione `apriFile`**, che prende `{ entita, id }`, legge il
+   record con `asServiceRole`, controlla chi sta chiedendo e firma con scadenza
+   **300 secondi**. Non accetta indirizzi ne' `file_uri` dal corpo, come
+   `riferimentoDalCorpo`: il server non va dove gli si dice di andare.
+   Il permesso di ogni archivio sta in un posto solo,
+   `base44/shared/fileRiservato.ts` (`ARCHIVI_APRIBILI`), ed e' un **elenco**:
+   un archivio che nessun pulsante apre non ci sta, perche' una funzione che firma
+   qualunque campo di qualunque entita' sarebbe peggio del buco che chiude. Nel
+   browser si passa da `src/lib/apriFile.js`. Prove: `prove/fileRiservato.mjs`.
+
+**Quello che resta da decidere.** `UploadLog`, `VerificaReport`, `QuadraturaFir`,
+`ContrattoFornitore` e `ModelloContratto` tengono ancora il `file_uri` su record
+con `read: true`, quindi i loro file restano apribili da qualunque utente
+collegato. Per `UploadLog` la lettura aperta **serve** (otto pagine la usano per
+accorgersi di un caricamento nuovo), quindi la sola strada e' la terza
+dell'assistenza: spostare il riferimento in un archivio che solo
+l'amministratore legge, con la migrazione dei record che ce l'hanno adesso. E' una
+decisione sull'accesso, non una correzione: va chiesta prima di farla.
+
 **Convertiti il 30/09/2026** (erano gli ultimi quattro pubblici): `PdrUpload`,
 `SecondarieUpload`, `RichiesteEct`, `CaricamentoDati`. `prove/fileSemprePrivati.mjs`
 e' la guardia: fallisce se qualcuno rimette `UploadFile` da qualunque parte.
@@ -1633,8 +1686,10 @@ privati **non sono stati toccati, e non vanno toccati**.
 **Niente password sui file.** Valutata e scartata: una password che l'app conosce
 non e' un segreto dall'app, e una che deve digitare una persona rompe ogni lettura
 automatica (pulizia notturna, riconfronto di una quadratura, allegati
-dell'assistente). La difesa vera e' il link firmato che scade piu' il permesso di
-chi lo puo' far firmare.
+dell'assistente). La difesa vera e' il link firmato che scade, **piu' il
+riferimento che non arriva a chi non deve aprire quel documento**: il permesso di
+chi puo' far firmare la piattaforma non lo controlla (vedi sopra, 05/10/2026), lo
+controlla `apriFile`.
 
 #### Cancellare un file non si puo': non si prova nemmeno piu'
 

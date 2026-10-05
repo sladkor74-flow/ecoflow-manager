@@ -19,6 +19,19 @@
 // il link muore da solo. Non serve cancellare niente, ed e' esattamente per
 // questo che e' la difesa giusta su una piattaforma che non sa cancellare.
 //
+// PRIVATO VUOL DIRE "FUORI DALL'APP", NON "AL SICURO DA TUTTI" (05/10/2026).
+// L'assistenza della piattaforma ha precisato che la firma non e' controllata:
+// «Any signed-in user of your app who holds a private file_uri can call
+// CreateFileSignedUrl with it and get a working signed URL. Signing isn't checked
+// against that user, or against the RLS of the record that holds the reference».
+// Il file_uri e' quindi la chiave del documento per qualunque utente collegato, e
+// non esiste un'impostazione per riservare la firma al server. La difesa verso
+// l'esterno resta intera - un indirizzo non c'e' e non si puo' indovinare - ma
+// dentro l'app il file vale quanto l'archivio che ne tiene il riferimento: per
+// questo il file_uri non si manda al browser e i documenti riservati si aprono
+// dalla funzione apriFile. La regola, archivio per archivio, sta in
+// shared/fileRiservato.ts.
+//
 // I file caricati PRIMA di oggi restano pubblici e non si possono richiamare:
 // vanno fatti rimuovere a mano dal team della piattaforma. Finche' ci sono, i
 // loro record portano ancora un file_url, e questa funzione continua a

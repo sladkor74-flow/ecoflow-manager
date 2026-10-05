@@ -7,6 +7,7 @@ import {
   Upload, ExternalLink, RefreshCw, PencilLine, Loader2, AlertOctagon, AlertTriangle, Info, Copy, UserX,
 } from 'lucide-react';
 import { RUOLI, STATI_REQUISITO, STATI_SOGGETTO, dataIt, quandoScade, problemiDi } from '@/lib/qualifica';
+import { linkFile, motivoApertura } from '@/lib/apriFile';
 
 const ICONA_GRAVITA = {
   bloccante: { Icona: AlertOctagon, classe: 'text-red-600' },
@@ -143,9 +144,13 @@ function Requisito({ req, soggetto, isAdmin, occupato, onCarica, onApri, onAnali
           </Button>
           {doc && (
             <>
-              <Button size="sm" variant="ghost" className="h-7" onClick={() => onApri(doc)}>
-                <ExternalLink className="w-3 h-3 mr-1" /> Apri
-              </Button>
+              {/* Il file si apre solo se c'e' ancora: il dettaglio dei documenti
+                  si conserva quaranta giorni, dopo resta la storia scritta. */}
+              {doc.ha_file && (
+                <Button size="sm" variant="ghost" className="h-7" onClick={() => onApri(doc)}>
+                  <ExternalLink className="w-3 h-3 mr-1" /> Apri
+                </Button>
+              )}
               <Button size="sm" variant="ghost" className="h-7" disabled={inAnalisi || occupato} onClick={() => onAnalizza(doc.id)}>
                 <RefreshCw className="w-3 h-3 mr-1" /> Rianalizza
               </Button>
@@ -252,16 +257,26 @@ export default function SoggettoDettaglio({ soggetto, anno, isAdmin, open, onClo
     }
   };
 
+  // IL LINK LO CHIEDE IL SERVER (05/10/2026).
+  //
+  // Qui il browser firmava da solo, col file_uri che la funzione gli mandava nel
+  // riepilogo. L'assistenza della piattaforma ha spiegato che quella firma non e'
+  // controllata contro l'utente ne' contro le regole RLS del record: un file_uri
+  // e' la chiave del file per chiunque sia collegato. Questi sono DURC, polizze,
+  // visure e patenti degli autisti dei fornitori, e il pulsante era gia' riservato
+  // all'amministratore: adesso lo e' davvero, perche' il permesso lo controlla
+  // apriFile e il file_uri non arriva piu' nel browser.
+  //
   // La finestra si apre subito, prima di chiedere il link temporaneo: aprirla
   // dopo un'attesa la farebbe bloccare dal browser come popup.
   const apri = async (doc) => {
     const finestra = window.open('', '_blank');
     try {
-      const { signed_url } = await base44.integrations.Core.CreateFileSignedUrl({ file_uri: doc.file_uri, expires_in: 300 });
-      if (finestra) finestra.location.href = signed_url; else window.open(signed_url, '_blank');
+      const url = await linkFile('DocumentoQualifica', doc.id);
+      if (finestra) finestra.location.href = url; else window.open(url, '_blank');
     } catch (e) {
       if (finestra) finestra.close();
-      toast({ title: 'Impossibile aprire il documento', description: e.message || String(e), variant: 'destructive' });
+      toast({ title: 'Impossibile aprire il documento', description: motivoApertura(e), variant: 'destructive' });
     }
   };
 

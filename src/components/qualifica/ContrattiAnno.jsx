@@ -9,6 +9,7 @@ import {
   valoriProposti, completaDate, nomeFileContratto, dataIt,
 } from '@/lib/contrattiFornitori';
 import { leggiModello, generaDocx, scarica } from '@/lib/docxModello';
+import { linkFile } from '@/lib/apriFile';
 
 // I contratti dell'anno: chi va contrattualizzato, per cosa, e a che punto e'
 // ciascun contratto.
@@ -213,9 +214,10 @@ function ProceduraContratto({ anno, soggetto, riga, modelli, onChiudi, onSalvato
     setLavoro(true);
     setOccupato(true);
     try {
-      // Il modello si scarica dall'archivio privato con un link temporaneo.
-      const { signed_url } = await base44.integrations.Core.CreateFileSignedUrl({ file_uri: modello.file_uri, expires_in: 600 });
-      const risposta = await fetch(signed_url);
+      // Il modello si scarica con un link temporaneo che chiede il server: la
+      // firma dal browser non e' controllata contro chi la chiede (assistenza
+      // della piattaforma, 05/10/2026 - vedi src/lib/apriFile.js).
+      const risposta = await fetch(await linkFile('ModelloContratto', modello.id));
       if (!risposta.ok) throw new Error('Non riesco a scaricare il modello (' + risposta.status + ').');
       const blobModello = await risposta.blob();
       const letto = await leggiModello(blobModello);

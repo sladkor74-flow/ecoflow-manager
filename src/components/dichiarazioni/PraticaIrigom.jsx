@@ -18,6 +18,7 @@ import { excelBlocco } from '@/lib/bloccoGestione';
 import { scriviBloccoNelFile } from '@/lib/scriviBloccoGestione';
 import { esportaFoglioDichiarazioni } from '@/lib/foglioDichiarazioni';
 import { fileConversione } from '@/lib/convertiWordPdf';
+import { linkFile } from '@/lib/apriFile';
 import ModelliIrigom from '@/components/dichiarazioni/ModelliIrigom';
 
 // La pratica mensile delle dichiarazioni di Irigom, dentro il gestionale.
@@ -479,8 +480,10 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
     for (const [uso, chiave] of [['irigom_ferro', 'ferro'], ['irigom_nave', 'nave'], ['irigom_extra', 'extra'], ['irigom_cssc', 'cssc']]) {
       const m = modelli.find(x => x.uso === uso && x.attivo !== false);
       if (!m) continue;
-      const { signed_url } = await base44.integrations.Core.CreateFileSignedUrl({ file_uri: m.file_uri, expires_in: 600 });
-      const risposta = await fetch(signed_url);
+      // Il link lo chiede il server (05/10/2026): la firma dal browser non e'
+      // controllata contro chi la chiede. Vedi src/lib/apriFile.js. I modelli
+      // delle lettere li apre chiunque, come il pulsante della cartella del mese.
+      const risposta = await fetch(await linkFile('ModelloDocumento', m.id));
       if (!risposta.ok) throw new Error(`Non riesco a scaricare il modello "${m.nome}" (${risposta.status}).`);
       attivi[chiave] = new Uint8Array(await risposta.arrayBuffer());
     }

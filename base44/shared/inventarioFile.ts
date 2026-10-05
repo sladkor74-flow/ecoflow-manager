@@ -13,8 +13,15 @@
 //   pubblico (file_url)  - caricato fino al 30/09/2026 con UploadFile. L'indirizzo
 //                          funziona per chiunque ce l'abbia, per sempre. Sono
 //                          questi i file urgenti da far rimuovere.
-//   privato (file_uri)   - si apre solo con un link firmato che scade. Finche'
-//                          nessuno lo firma, e' gia' irraggiungibile.
+//   privato (file_uri)   - non ha un indirizzo suo: si apre solo con un link
+//                          firmato che scade. Da fuori dall'applicazione e'
+//                          irraggiungibile. DENTRO no: l'assistenza della
+//                          piattaforma (05/10/2026) ha precisato che la firma non
+//                          e' controllata contro l'utente ne' contro le regole RLS
+//                          del record, quindi chi legge il file_uri apre il file.
+//                          Per questo il file_uri non si manda al browser e i
+//                          documenti riservati passano dalla funzione apriFile
+//                          (shared/fileRiservato.ts).
 
 /** Dove stanno i riferimenti ai file, archivio per archivio. */
 export const ARCHIVI_CON_FILE = [
@@ -48,8 +55,11 @@ const testo = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 //              cancellato e il nome del file ce l'ha solo il registro
 //              FileDaRimuovere (shared/fileDaRimuovere.ts). Si fa rimuovere
 //              anche se privato, perche' non serve piu' a nessuno.
-//   privato  - si apre solo con un link firmato che scade: non e' esposto, ed e'
-//              il documento che quel record mostra. NON si fa rimuovere.
+//   privato  - si apre solo con un link firmato che scade: fuori dall'app non e'
+//              esposto, ed e' il documento che quel record mostra. NON si fa
+//              rimuovere. Dentro l'app, invece, lo apre chi legge il suo
+//              file_uri: non e' una ragione per rimuoverlo, e' la ragione per cui
+//              quel riferimento non va in mano a tutti (shared/fileRiservato.ts).
 //
 // LE DUE SORGENTI. Fino al 02/10/2026 l'inventario nasceva solo DAI RECORD: se
 // un file era qui, c'era un record che lo puntava. Era vero e insieme era il
