@@ -107,7 +107,11 @@ export default function PrimarieAci() {
     };
   }), [records]);
 
-  const destinazioni = [...new Set(records.map(r => r.destinazione).filter(Boolean))].sort();
+  // La destinazione si legge sempre senza gli spazi ai lati, come in ogni altro
+  // modulo che la guarda (secondarie, giacenze, passiva): un "Irigom " scritto con
+  // uno spazio in piu' a portale faceva due voci nella tendina, e scegliendone una
+  // gli ordini dell'altra restavano fuori senza dirlo (05/10/2026).
+  const destinazioni = [...new Set(records.map(r => (r.destinazione || '').trim()).filter(Boolean))].sort();
   const province = [...new Set(records.map(r => (r.provincia || '').trim()).filter(Boolean))].sort();
   const trasportatori = [...new Set(records.map(r => (r.trasportatore || '').trim()).filter(Boolean))].sort();
   const regioni = [...new Set(records.map(r => (r.regione || '').trim()).filter(Boolean))].sort();
@@ -119,7 +123,7 @@ export default function PrimarieAci() {
   // record. Servono separati per contare i terminati senza fine trasporto anche
   // quando si guarda un mese, che nessun filtro di periodo prende.
   const passaAltri = (r) => {
-    if (filterDestinazione.length > 0 && !filterDestinazione.includes(r.destinazione)) return false;
+    if (filterDestinazione.length > 0 && !filterDestinazione.includes((r.destinazione || '').trim())) return false;
     if (filterProvincia.length > 0 && !filterProvincia.includes((r.provincia || '').trim())) return false;
     if (filterTrasportatore.length > 0 && !filterTrasportatore.includes((r.trasportatore || '').trim())) return false;
     if (filterRegione.length > 0 && !filterRegione.includes((r.regione || '').trim())) return false;
@@ -161,7 +165,7 @@ export default function PrimarieAci() {
   // Aggregazione per destinazione
   const byDest = {};
   contati.forEach(r => {
-    const d = r.destinazione || 'N/D';
+    const d = (r.destinazione || '').trim() || 'N/D';
     if (!byDest[d]) byDest[d] = { count: 0, kg: 0 };
     byDest[d].count++;
     byDest[d].kg += r.peso_effettivo || 0;

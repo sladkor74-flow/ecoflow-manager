@@ -59,7 +59,7 @@ export default function PrimarieRete() {
   // il filtro "Solo date da sistemare": non rilegge l'archivio ne' i riquadri
   const [soloDate, setSoloDate] = useState(false);
   const [loadingRecords, setLoadingRecords] = useState(false);
-  const [filters, setFilters] = useState({ regione: [], stato: [], trasportatore: [], data: '', mese: [], anno: [] });
+  const [filters, setFilters] = useState({ regione: [], stato: [], trasportatore: [], destinazione: [], data: '', mese: [], anno: [] });
   const [cercaId, setCercaId] = useState('');
   const [scheda, setScheda] = useState('dettaglio');
 
@@ -102,6 +102,7 @@ export default function PrimarieRete() {
       const passaAltri = (r) => {
         if (filters.regione.length > 0 && !filters.regione.includes((r.regione || '').trim())) return false;
         if (filters.trasportatore.length > 0 && !filters.trasportatore.includes((r.trasportatore || '').trim())) return false;
+        if (filters.destinazione.length > 0 && !filters.destinazione.includes((r.destinazione || '').trim())) return false;
         if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
         return true;
       };
@@ -142,10 +143,19 @@ export default function PrimarieRete() {
   // Il trasportatore e' il raccoglitore del formulario: filtrarci sopra e' il modo
   // di vedere il lavoro di uno solo (richiesta dell'utente, 29/09/2026).
   const trasportatori = [...new Set(allRecords.map(r => (r.trasportatore || '').trim()).filter(Boolean))].sort();
+  // L'impianto di destinazione e' dove il raccoglitore conferisce, e un raccoglitore
+  // puo' conferire a piu' di uno (Emmesse va a Irigom e a Gatim): filtrarci sopra e'
+  // il modo di vedere i conferimenti di un impianto solo (richiesta dell'utente,
+  // 05/10/2026). Terminati ACI lo aveva gia', qui mancava.
+  const destinazioni = [...new Set(allRecords.map(r => (r.destinazione || '').trim()).filter(Boolean))].sort();
   const anni = [...new Set(allRecords.map(annoElenco).filter(Boolean))].sort((a, b) => b - a);
 
   const hasFilters = soloDate || Object.values(filters).some(v => Array.isArray(v) ? v.length > 0 : v);
-  const resetFilters = () => { setFilters({ regione: [], stato: [], data: '', mese: [], anno: [] }); setSoloDate(false); };
+  // Il Reset rimette OGNI filtro, elencati tutti: lasciandone fuori uno la chiave
+  // sparisce dall'oggetto e passaAltri leggeva .length di undefined, cosi' l'elenco
+  // restava quello di prima senza dire niente. Era il caso di trasportatore, aggiunto
+  // ai filtri ma non al Reset (trovato il 05/10/2026 aggiungendo la destinazione).
+  const resetFilters = () => { setFilters({ regione: [], stato: [], trasportatore: [], destinazione: [], data: '', mese: [], anno: [] }); setSoloDate(false); };
   const vediDate = (v) => { setSoloDate(v); if (v) setScheda('dettaglio'); };
 
   return (
@@ -197,12 +207,13 @@ export default function PrimarieRete() {
             </button>
           )}
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
-          <MultiSelect allLabel="Tutte le regioni" options={regioni} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
-          <MultiSelect allLabel="Tutti gli stati" options={stati} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
-          <MultiSelect allLabel="Tutti i trasportatori" options={trasportatori} selected={filters.trasportatore} onChange={v => setFilters(p => ({ ...p, trasportatore: v }))} />
-          <MultiSelect allLabel="Tutti i mesi" options={MESI} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
-          <MultiSelect allLabel="Tutti gli anni" options={anni.map(String)} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v.map(Number) }))} />
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-7 gap-2">
+          <MultiSelect allLabel="Tutte le regioni" breve="Regioni" options={regioni} selected={filters.regione} onChange={v => setFilters(p => ({ ...p, regione: v }))} />
+          <MultiSelect allLabel="Tutti gli stati" breve="Stati" options={stati} selected={filters.stato} onChange={v => setFilters(p => ({ ...p, stato: v }))} />
+          <MultiSelect allLabel="Tutti i trasportatori" breve="Trasportatori" options={trasportatori} selected={filters.trasportatore} onChange={v => setFilters(p => ({ ...p, trasportatore: v }))} />
+          <MultiSelect allLabel="Tutte le destinazioni" breve="Destinazioni" options={destinazioni} selected={filters.destinazione} onChange={v => setFilters(p => ({ ...p, destinazione: v }))} />
+          <MultiSelect allLabel="Tutti i mesi" breve="Mesi" options={MESI} selected={filters.mese} onChange={v => setFilters(p => ({ ...p, mese: v }))} />
+          <MultiSelect allLabel="Tutti gli anni" breve="Anni" options={anni.map(String)} selected={filters.anno.map(String)} onChange={v => setFilters(p => ({ ...p, anno: v.map(Number) }))} />
           <input type="date" value={filters.data} onChange={e => setFilters(p => ({ ...p, data: e.target.value }))} className="border rounded-md px-3 py-2 text-sm" title="Giorno di fine trasporto (per gli ordini non terminati, giorno di immissione)" aria-label="Giorno di fine trasporto" />
         </div>
         {!loadingRecords && (
