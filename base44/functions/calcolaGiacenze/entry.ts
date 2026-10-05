@@ -1,11 +1,12 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
-import { targetRigaGiacenze, testoTargetDaPortare } from "../../shared/targetImpianti.ts";
+import { targetRigaGiacenze, testoTargetDaPortare, ripartisciTargetPrimarie } from "../../shared/targetImpianti.ts";
 import { recordDellAnno, annoChiuso } from "../../shared/annoTarget.ts";
 import { annoRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
+import { PROV_TO_REGION } from "../../shared/raccoltoCalculator.ts";
 import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, anomaliaRilevazione, classePfu, canaleEClasse, ordiniDellaGiacenza } from "../../shared/giacenzaStoccaggi.ts";
 import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine } from "../../shared/giacenzaPortale.ts";
 
@@ -540,6 +541,37 @@ export default async function(req) {
       });
     }
 
+    // IL TARGET DI UN RACCOGLITORE SI RIPARTISCE SULLO STORICO (05/10/2026).
+    //
+    // Un raccoglitore non conferisce a un impianto solo, e in Target & Status non
+    // si poteva scrivere piu' di un impianto per riga senza decidere a mano
+    // quanto va a ciascuno: quei target restavano fuori da ogni sito. Qui si
+    // guarda dove quel raccoglitore ha davvero portato le primarie di rete
+    // dell'anno e si divide il suo target in proporzione ai chili - le righe con
+    // l'impianto scritto a mano non si toccano (shared/targetImpianti.ts).
+    //
+    // Si ricalcola a ogni caricamento, come tutto il resto di questa funzione:
+    // i conferimenti che arriveranno spostano le quote da soli.
+    //
+    // La regione si ricava dalla provincia del punto di raccolta, come fa il
+    // raccolto che l'utente vede in Target & Status (PROV_TO_REGION in
+    // raccoltoCalculator): le righe del target sono per raccoglitore e regione, e
+    // due modi diversi di dire la regione non si incontrerebbero mai.
+    const conferitiRaccoglitori = [];
+    for (const r of reteAll) {
+      if (eAci(r) || !isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
+      conferitiRaccoglitori.push({
+        raccoglitore: r.trasportatore,
+        regione: PROV_TO_REGION[String(r.provincia || '').toUpperCase().trim()] || r.regione || '',
+        sito: r.destinazione,
+        ruolo: tipoStoc(r) ? 'stoc' : 'imp',
+        kg: Number(r.peso_effettivo) || 0,
+      });
+    }
+    const ripartite = ripartisciTargetPrimarie({
+      raccoglitori: targetRaccoglitori, conferiti: conferitiRaccoglitori, anno: annoNum, chiave: norm,
+    });
+
     // Le secondarie di rete e quelle ACI viaggiano nello stesso archivio e si
     // distinguono dalla classe. Vanno tenute separate: la colonna "Conferito
     // RETE" sommava anche le secondarie ACI, e su un impianto che riceve
@@ -835,8 +867,10 @@ export default async function(req) {
       const conferito_t = conferito_primarie_t + secondarie_in_t;
 
       // I target vengono da Target & Status (shared/targetImpianti.ts). Il target
-      // delle primarie e' del sito, non del ruolo: per chi e' impianto e
-      // stoccaggio va sulla riga dell'impianto, perche' il totale non lo conti due volte.
+      // delle primarie dei raccoglitori che non dicono il ruolo e' del sito, non
+      // del ruolo: per chi e' impianto e stoccaggio va sulla riga dell'impianto,
+      // perche' il totale non lo conti due volte. Le quote ripartite sullo
+      // storico il ruolo ce l'hanno, perche' lo dice il viaggio.
       const tgt = targetRigaGiacenze({
         sito: sitoNome, td, anno: annoNum, giacenzaSito: g,
         impiantiTarget, raccoglitori: targetRaccoglitori,
@@ -844,6 +878,7 @@ export default async function(req) {
         // Se di questo sito c'e' una riga sola, quella prende anche i target
         // scritti per l'altro ruolo: nessun target deve restare senza casa.
         soloRuolo: !rowKeys.has(ns + '|' + (td === 'imp' ? 'stoc' : 'imp')),
+        ripartite,
         chiave: norm,
       });
       const target_primarie_t = tgt.target_primarie_t;
@@ -953,6 +988,11 @@ export default async function(req) {
         terziarie_t: r2(terziarie_t),
         conferito_t: r2(conferito_t),
         target_primarie_t: r2(target_primarie_t),
+        // Quanto del target delle primarie non l'ha scritto nessuno a mano ma
+        // viene dalla ripartizione sullo storico, e da chi: il numero da solo non
+        // si capirebbe da dove arriva.
+        target_primarie_ripartite_t: r2(tgt.target_primarie_ripartite_t),
+        target_primarie_ripartizione: tgt.ripartizione.map(x => ({ raccoglitore: x.raccoglitore, regione: x.regione, t: r2(x.t) })),
         target_totale_t: r2(target_totale_t),
         giacenza_riferimento_t: r2(giacenza_riferimento_t),
         tipologia_trattamento,
@@ -1012,6 +1052,22 @@ export default async function(req) {
 
     for (const s of sitiSenzaTarget) {
       anomalie.push({ tipo: 'sito_senza_target', sito: s, anno: annoNum });
+    }
+
+    // UN TARGET CHE NON STA SU NESSUN SITO VA DETTO.
+    //
+    // La ripartizione mette il target dove il raccoglitore ha portato: se non ha
+    // ancora portato niente e nessuno gli ha scritto l'impianto, quelle
+    // tonnellate non sono nel target di nessun sito, e il totale della colonna e'
+    // piu' basso del contratto senza che niente lo dica.
+    if (ripartite.senzaStorico.length > 0 && !annoTargetChiuso) {
+      anomalie.push({
+        tipo: 'target_raccoglitore_senza_sito',
+        anno: annoNum,
+        n: ripartite.senzaStorico.length,
+        target_t: r2(ripartite.senzaStorico.reduce((s, x) => s + x.target_t, 0)),
+        raccoglitori: ripartite.senzaStorico.map(x => ({ raccoglitore: x.raccoglitore, regione: x.regione, target_t: r2(x.target_t) })),
+      });
     }
 
     righe.sort((a, b) => b.giacenza_portale_t - a.giacenza_portale_t);

@@ -14,6 +14,7 @@ const TIPO_LABEL = {
   ordini_senza_fine_trasporto: 'Righe del file del portale senza fine trasporto',
   rilevazione_da_controllare: 'Rilevazione da controllare',
   senza_tipo_destinazione: 'Righe senza tipo di destinazione',
+  target_raccoglitore_senza_sito: 'Target di raccoglitori che non sta su nessun sito',
 };
 
 // Un giorno 'AAAA-MM-GG' come lo si legge.
@@ -49,6 +50,14 @@ function testoSenzaFineFile(a) {
   if (a.dal_gestionale) parti.push(`${a.dal_gestionale} con la fine trasporto presa dal formulario del gestionale`);
   if (a.n) parti.push(`${a.n}${a.kg ? ` (${formatKg(a.kg)} kg)` : ''} senza la data nemmeno nel gestionale: nella giacenza a portale ci sono, ma in nessun anno dell'arretrato`);
   return parti.join('; ');
+}
+
+// Il target di un raccoglitore si ripartisce fra i siti dove ha portato le
+// primarie dell'anno (05/10/2026): chi non ha ancora portato niente, e non ha
+// l'impianto scritto a mano, resta fuori dal target di ogni sito.
+function testoSenzaSito(a) {
+  const chi = (a.raccoglitori || []).map(r => `${r.raccoglitore}${r.regione ? ` (${r.regione})` : ''} ${t(r.target_t)} t`);
+  return `${a.n} ${a.n === 1 ? 'riga di target' : 'righe di target'} per ${t(a.target_t)} t non sta su nessun sito: nel ${a.anno} quei raccoglitori non hanno ancora conferito primarie e non hanno l'impianto scritto, quindi non c'è storico su cui ripartire. Appena conferiscono la ripartizione li sistema da sola; per anticiparla, scrivi l'impianto sulla loro riga in Target & Status → Target raccoglitori. ${chi.join('; ')}`;
 }
 
 export default function AnomalieAlert({ anomalie }) {
@@ -91,7 +100,7 @@ export default function AnomalieAlert({ anomalie }) {
                 {a.tipo === 'giacenza_sopra_target' && ` — giacenza ${t(a.giacenza_portale_t)} t contro target ${t(a.target_totale_t)} t`}
                 {a.tipo === 'sito_senza_target' && ` — nessun target in Target & Status per il ${a.anno}: scrivilo in Target & Status → Impianti e stoccaggi`}
                 {a.tipo === 'target_da_portare' && (a.cosa === 'primarie_senza_impianto'
-                  ? ` — il target delle primarie (${t(a.target_t)} t) è ancora scritto in Giacenze. I target dei raccoglitori ci sono, ma nessuno è legato a questo sito: in Target & Status → Target raccoglitori scrivi l'impianto sulla riga di ogni raccoglitore che porta qui (una riga per impianto, se ne serve più d'uno). Da lì il target del sito si calcola da solo`
+                  ? ` — il target delle primarie (${t(a.target_t)} t) è ancora scritto in Giacenze. I target dei raccoglitori ci sono, ma nessuno è legato a questo sito e nel ${a.anno} nessun raccoglitore senza impianto ci ha portato primarie, quindi non c'è niente da ripartire: in Target & Status → Target raccoglitori scrivi l'impianto sulla riga di ogni raccoglitore che porta qui. Da lì il target del sito si calcola da solo`
                   : a.cosa === 'primarie'
                     ? ` — il target delle primarie (${t(a.target_t)} t) è ancora scritto in Giacenze: per il ${a.anno} non c'è nessun target dei raccoglitori, scrivili in Target & Status → Target raccoglitori`
                     : a.spento
@@ -100,6 +109,7 @@ export default function AnomalieAlert({ anomalie }) {
                 {a.tipo === 'giacenza_negativa' && ` — classe ${a.classe}: ${formatKg(a.kg)} kg dall'ancora dell'anno piu' i movimenti successivi: mancano ingressi, o l'ancora ha i chili nella classe sbagliata`}
                 {a.tipo === 'stoccaggio_senza_rilevazione' && ` — il dato va letto dalla pagina Unita' Locali di Stoccaggio del portale`}
                 {a.tipo === 'senza_tipo_destinazione' && ` — ${a.n} ${a.n === 1 ? 'riga' : 'righe'} per ${formatKg(a.kg)} kg senza Tipo_Destinazione nel file del portale: contate come impianto, ma il campo va sistemato`}
+                {a.tipo === 'target_raccoglitore_senza_sito' && testoSenzaSito(a)}
                 {a.tipo === 'ordini_senza_fine_trasporto' && testoSenzaFineFile(a)}
                 {a.tipo === 'rilevazione_da_controllare' && testoRilevazioneDaControllare(a)}
               </span>

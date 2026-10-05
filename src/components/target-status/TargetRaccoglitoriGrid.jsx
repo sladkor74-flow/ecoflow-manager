@@ -50,9 +50,17 @@ const rigaDaConfermare = (riga) => recordDellaRiga(riga).some(daConfermare);
 /**
  * L'impianto di destinazione di una riga, che si corregge: la somma dei target
  * annui dei raccoglitori di un impianto fa il target delle primarie di quel sito
- * in Giacenze (28/09/2026), e una riga senza impianto non conta per nessun sito.
+ * in Giacenze (28/09/2026).
+ *
+ * UNA RIGA SENZA IMPIANTO NON E' PIU' UN BUCO (05/10/2026). Un raccoglitore non
+ * conferisce a un impianto solo, e scegliendone uno si sbagliava comunque: dal
+ * 05/10/2026 il target delle righe senza impianto Giacenze lo ripartisce da se'
+ * fra i siti dove quel raccoglitore ha portato le primarie dell'anno, in
+ * proporzione ai chili. Qui si dice come sta andando quella ripartizione, perche'
+ * l'avviso «impianto non indicato» faceva cercare un lavoro che non serve piu'.
+ * Scrivere l'impianto resta il modo di decidere a mano.
  */
-function CellaImpianto({ riga, isAdmin, impiantiSuggeriti, onSalva }) {
+function CellaImpianto({ riga, isAdmin, impiantiSuggeriti, onSalva, auto = [] }) {
   const [aperta, setAperta] = useState(false);
   const [valore, setValore] = useState('');
   const [ruolo, setRuolo] = useState('');
@@ -70,14 +78,20 @@ function CellaImpianto({ riga, isAdmin, impiantiSuggeriti, onSalva }) {
     }
     setSalvando(false);
   };
+  // Senza impianto scritto: come il gestionale lo sta ripartendo, se ha di che.
+  const quote = riga.impianto ? [] : auto;
   const testo = riga.impianto
     ? `verso ${riga.impianto}${riga.ruolo === 'stoccaggio' ? ' · piazzale' : ''}`
-    : 'impianto non indicato';
-  if (!isAdmin) return <div className={`text-[10px] font-normal ${riga.impianto ? 'text-muted-foreground' : 'text-amber-700'}`}>{testo}</div>;
+    : quote.length
+      ? `ripartito: ${quote.map(q => `${q.impianto} ${q.pct}%`).join(', ')}`
+      : 'impianto non indicato, e nessun conferimento su cui ripartirlo';
+  const grigio = !!riga.impianto || quote.length > 0;
+  const titolo = quote.length ? 'Ripartito in automatico sulle primarie che questo raccoglitore ha portato nell\'anno. Scrivi l\'impianto per deciderlo a mano' : undefined;
+  if (!isAdmin) return <div title={titolo} className={`text-[10px] font-normal ${grigio ? 'text-muted-foreground' : 'text-amber-700'}`}>{testo}</div>;
   return (
     <Popover open={aperta} onOpenChange={apri}>
       <PopoverTrigger asChild>
-        <button className={`text-[10px] font-normal inline-flex items-center gap-0.5 hover:underline ${riga.impianto ? 'text-muted-foreground' : 'text-amber-700'}`}>
+        <button title={titolo} className={`text-[10px] font-normal inline-flex items-center gap-0.5 text-left hover:underline ${grigio ? 'text-muted-foreground' : 'text-amber-700'}`}>
           {testo}<Edit3 className="w-2.5 h-2.5 opacity-50" />
         </button>
       </PopoverTrigger>
@@ -103,6 +117,14 @@ function CellaImpianto({ riga, isAdmin, impiantiSuggeriti, onSalva }) {
             ))}
           </div>
           <p className="text-[11px] text-muted-foreground">Si cambia sul target annuo e su tutti i mesi della riga. Il target annuo conta per le primarie di questo sito in Giacenze, sulla riga del ruolo scelto.</p>
+          {/* Lasciandolo vuoto non si perde niente: Giacenze ripartisce il target
+              fra i siti dove il raccoglitore ha portato, e la ripartizione si
+              aggiorna a ogni caricamento. Scriverlo serve a decidere a mano. */}
+          <p className="text-[11px] text-muted-foreground">
+            {quote.length
+              ? `Lasciandolo vuoto resta ripartito in automatico sui conferimenti dell'anno: ${quote.map(q => `${q.impianto} ${q.pct}%`).join(', ')}.`
+              : 'Lasciandolo vuoto il target si ripartisce in automatico fra i siti dove questo raccoglitore porta le primarie dell\'anno, in proporzione ai chili.'}
+          </p>
           {errore && <p className="text-xs text-destructive">{errore}</p>}
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="ghost" onClick={() => setAperta(false)}>Annulla</Button>
@@ -334,6 +356,9 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
   const [quoteImpianto, setQuoteImpianto] = useState(new Set());
   const [commessa, setCommessa] = useState(null);
   const [raccolto, setRaccolto] = useState([]);
+  // Il raccolto per raccoglitore, regione e impianto di destinazione: e' lo
+  // storico su cui Giacenze ripartisce il target delle righe senza impianto.
+  const [raccoltoImpianto, setRaccoltoImpianto] = useState([]);
   // I terminati di rete con le date obbligatorie da sistemare (regola del
   // 22/09/2026): chi non ha la fine trasporto non e' nel raccolto dei raccoglitori.
   const [dateRete, setDateRete] = useState(null);
@@ -366,6 +391,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
       // fra piu' commesse dello stesso anno vale la modificata per ultima, come nelle funzioni
       setCommessa(comm.reduce((x, r) => (!x || String(r.updated_date || r.created_date || '') > String(x.updated_date || x.created_date || '') ? r : x), null));
       setRaccolto(racc.by_raccoglitore || []);
+      setRaccoltoImpianto(racc.by_raccoglitore_impianto || []);
       setDateRete(racc.date_da_sistemare || null);
     } catch (e) {
       if (n !== ultimaLettura.current) return;
@@ -377,6 +403,38 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
   useEffect(() => { carica(); }, [carica]);
 
   const trasportatori = useMemo(() => new Set(raccolto.map(r => chiaveNome(r.raccoglitore))), [raccolto]);
+
+  // COME GIACENZE RIPARTISCE UNA RIGA SENZA IMPIANTO (05/10/2026).
+  //
+  // Le quote esatte, in tonnellate e per ruolo, le calcola Giacenze
+  // (shared/targetImpianti.ts, ripartisciTargetPrimarie): qui bastano le
+  // proporzioni, per far vedere dove va il target di una riga lasciata vuota.
+  // Per raccoglitore e regione quando quella regione ha raccolto, altrimenti per
+  // raccoglitore, com'e' il ripiego della ripartizione.
+  const ripartizioneAuto = useMemo(() => {
+    const somma = new Map(); // chiave -> Map(impianto -> t)
+    const segna = (k, impianto, t) => {
+      let m = somma.get(k);
+      if (!m) { m = new Map(); somma.set(k, m); }
+      m.set(impianto, (m.get(impianto) || 0) + t);
+    };
+    for (const r of raccoltoImpianto) {
+      const t = Number(r.totale) || 0;
+      if (!r.impianto || r.impianto === 'N/D' || !(t > 0)) continue;
+      segna(chiaveNome(r.raccoglitore), r.impianto, t);
+      segna(`${chiaveNome(r.raccoglitore)}|${r.regione || ''}`, r.impianto, t);
+    }
+    const quote = new Map();
+    for (const [k, m] of somma) {
+      const tot = [...m.values()].reduce((s, v) => s + v, 0);
+      quote.set(k, [...m.entries()]
+        .map(([impianto, t]) => ({ impianto, pct: Math.round((t / tot) * 100) }))
+        .sort((a, b) => b.pct - a.pct));
+    }
+    return quote;
+  }, [raccoltoImpianto]);
+  const autoDellaRiga = useCallback((riga) => (riga.regione && ripartizioneAuto.get(`${chiaveNome(riga.nome)}|${riga.regione}`))
+    || ripartizioneAuto.get(chiaveNome(riga.nome)) || [], [ripartizioneAuto]);
 
   // Regione prevalente di ogni raccoglitore nel raccolto dell'anno.
   const regionePrevalente = useMemo(() => {
@@ -645,7 +703,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
                           )}
                         </span>
                       )}
-                      <CellaImpianto riga={r} isAdmin={isAdmin} impiantiSuggeriti={impiantiSuggeriti} onSalva={salvaImpianto} />
+                      <CellaImpianto riga={r} isAdmin={isAdmin} impiantiSuggeriti={impiantiSuggeriti} onSalva={salvaImpianto} auto={autoDellaRiga(r)} />
                       {r.annuo && r.annuo.attivo_dal && <div className="text-[10px] font-normal text-muted-foreground">attivo dal {r.annuo.attivo_dal.split('-').reverse().join('/')}</div>}
                     </td>
                     <td className="px-2 py-1 text-muted-foreground" title={r.regioneDerivata ? 'Regione ricavata dal raccolto dell\'anno' : undefined}>{r.regione || '—'}{r.regioneDerivata && r.regione ? '*' : ''}</td>

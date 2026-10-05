@@ -17,6 +17,18 @@ function dashIfZero(v) {
   return fmt(v) + ' t';
 }
 
+// LA QUOTA RIPARTITA SI DEVE POTER LEGGERE (05/10/2026).
+//
+// Un raccoglitore non conferisce a un impianto solo: il target delle righe che
+// l'impianto non ce l'hanno scritto si divide fra i siti dove ha portato le
+// primarie dell'anno, in proporzione ai chili. Il numero del target, da solo, non
+// direbbe da dove arriva ne' perche' cambia quando si caricano nuovi dati.
+function testoRipartizione(r) {
+  const chi = (r.target_primarie_ripartizione || [])
+    .map(x => `${x.raccoglitore}${x.regione ? ` (${x.regione})` : ''} ${fmt(x.t)} t`);
+  return `di cui ${fmt(r.target_primarie_ripartite_t)} t ripartite in automatico in base alle primarie che questi raccoglitori hanno portato qui nell'anno: ${chi.join('; ')}. Per deciderlo a mano, scrivi l'impianto sulla loro riga in Target & Status`;
+}
+
 export default function TargetTable({ righe, totali }) {
   return (
     <div className="bg-card border rounded-lg overflow-hidden">
@@ -75,7 +87,20 @@ export default function TargetTable({ righe, totali }) {
                       {r.tipo_destinazione === 'imp' ? 'Impianto' : 'Stoccaggio'}
                     </span>
                   </td>
-                  <td className="px-2 py-2 text-right">{fmt(r.target_primarie_t)} t</td>
+                  <td className="px-2 py-2 text-right">
+                    {r.target_primarie_ripartite_t > 0 ? (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-help underline decoration-dotted">{fmt(r.target_primarie_t)} t</span>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-sm">{testoRipartizione(r)}</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : (
+                      <span>{fmt(r.target_primarie_t)} t</span>
+                    )}
+                  </td>
                   <td className="px-2 py-2 text-right">{dashIfZero(r.target_totale_t)}</td>
                   <td className="px-2 py-2 text-right">{fmt(r.conferito_primarie_t)} t</td>
                   <td className={`px-2 py-2 text-right ${secNet < 0 ? 'text-destructive' : ''}`}>

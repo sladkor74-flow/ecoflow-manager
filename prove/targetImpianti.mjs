@@ -1,8 +1,9 @@
 // Prova dei target degli impianti (base44/shared/targetImpianti.ts): la lettura
 // con il ripiego per i contratti, e i target delle righe di Giacenze letti da
 // Target & Status (27/09/2026). npm run prove
-import { impiantiTargetDellAnno, targetRigaGiacenze, testoTargetDaPortare } from '../base44/shared/targetImpianti.ts';
+import { impiantiTargetDellAnno, targetRigaGiacenze, testoTargetDaPortare, ripartisciTargetPrimarie } from '../base44/shared/targetImpianti.ts';
 import * as modulo from '../base44/shared/targetImpianti.ts';
+import { normalizzaRagioneSociale as kNome } from '../base44/shared/normalizzaRagioneSociale.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -129,6 +130,145 @@ console.log('QUALE DELLE DUE COSE MANCA');
     && /scrivi l'impianto/.test(testoTargetDaPortare('primarie_senza_impianto'))
     && /non c'e' nessun target dei raccoglitori/.test(testoTargetDaPortare('primarie')),
     testoTargetDaPortare('primarie_senza_impianto'));
+}
+
+// UN RACCOGLITORE NON CONFERISCE A UN IMPIANTO SOLO (05/10/2026).
+//
+// In Target & Status l'impianto si scrive sulla riga del raccoglitore, e Giacenze
+// somma i target legati al sito. Ma la storia del 2026 dice che gli stessi
+// raccoglitori hanno scaricato su piu' siti, e l'utente non poteva scegliere:
+// «non si puo' associare un solo impianto (o stoccaggio) ad un raccoglitore [...]
+// ripartisci tu gli impianti in base allo storico e ai quantitativi (sia quelli
+// gia' conferiti e automaticamente quelli che poi lo saranno da qui in poi)».
+// Quattro siti continuavano a dire «target ancora scritto in Giacenze» perche'
+// quei target non stavano su nessun sito.
+console.log('IL TARGET SI RIPARTISCE SULLO STORICO DEI CONFERIMENTI');
+{
+  const conf = (raccoglitore, sito, kg, ruolo = 'imp', regione = 'Campania') => ({ raccoglitore, sito, kg, ruolo, regione });
+  const rip = (raccoglitori, conferiti, anno = 2026) => ripartisciTargetPrimarie({ raccoglitori, conferiti, anno });
+  // la chiave dei nomi e' la stessa della funzione (normalizzaRagioneSociale)
+  const quota = (r, sito, ruolo = 'imp') => r.per.get(kNome(sito) + '|' + ruolo) || 0;
+
+  // 1. Il caso dell'utente: un raccoglitore, due impianti, nessuno scritto a mano.
+  const due = rip(
+    [{ raccoglitore: 'C.L. Service', regione: 'Campania', anno: 2026, target_tonnellate: 1000 }],
+    [conf('CL SERVICE SRL', 'GATIM SRL', 600000), conf('C.L. Service S.r.l.', 'Irigom', 400000)],
+  );
+  verifica('due impianti nello storico: il target si divide in proporzione ai chili',
+    quota(due, 'Gatim') === 600 && quota(due, 'IRIGOM SRL') === 400, JSON.stringify([...due.per.entries()]));
+  verifica('e la somma delle parti fa esattamente il target',
+    [...due.per.values()].reduce((s, v) => s + v, 0) === 1000);
+  verifica('il dettaglio dice da chi viene ogni quota',
+    due.dettaglio.get(kNome('Gatim') + '|imp')[0].raccoglitore === 'C.L. Service'
+    && due.dettaglio.get(kNome('Gatim') + '|imp')[0].t === 600, JSON.stringify([...due.dettaglio.entries()]));
+
+  // 2. Il ruolo lo dice il viaggio: Irigom riceve all'impianto, Nappi Sud al piazzale.
+  const ruoli = rip(
+    [{ raccoglitore: 'Smoco', anno: 2026, target_tonnellate: 300 }],
+    [conf('SMOCO SRL', 'Irigom', 200000, 'imp'), conf('SMOCO SRL', 'Nappi Sud', 100000, 'stoc')],
+  );
+  verifica('il ruolo della quota e\' quello del viaggio, non una scelta',
+    quota(ruoli, 'IRIGOM SRL', 'imp') === 200 && quota(ruoli, 'NAPPI SUD SRL', 'stoc') === 100
+    && quota(ruoli, 'NAPPI SUD SRL', 'imp') === 0, JSON.stringify([...ruoli.per.entries()]));
+
+  // 3. LA MANO DELL'UTENTE VINCE. Una riga con l'impianto scritto non si
+  // ripartisce: altrimenti le due righe di Emmesse, messe a mano sugli impianti
+  // di conferimento, verrebbero sovrascritte da una media, e non ci sarebbe piu'
+  // modo di correggere una ripartizione sbagliata.
+  const aMano = rip(
+    [{ raccoglitore: 'Emmesse', impianto: 'Gatim', anno: 2026, target_tonnellate: 500 }],
+    [conf('Emmesse', 'Gatim', 100000), conf('Emmesse', 'Irigom', 900000)],
+  );
+  verifica('la riga con l\'impianto scritto a mano resta dov\'e\': non si ripartisce',
+    aMano.per.size === 0 && aMano.senzaStorico.length === 0, JSON.stringify([...aMano.per.entries()]));
+
+  // 4. Niente tonnellate perse per arrotondamento: 100 t su tre siti uguali.
+  const tre = rip(
+    [{ raccoglitore: 'Alfa', anno: 2026, target_tonnellate: 100 }],
+    [conf('Alfa', 'Uno', 1000), conf('Alfa', 'Due', 1000), conf('Alfa', 'Tre', 1000)],
+  );
+  const treKg = [...tre.per.values()].map(v => Math.round(v * 1000));
+  verifica('un target che non si divide: le parti fanno comunque esattamente il target, al chilo',
+    treKg.reduce((s, v) => s + v, 0) === 100000 && treKg.filter(v => v === 33334).length === 1
+    && treKg.filter(v => v === 33333).length === 2, JSON.stringify(treKg));
+
+  // 5. LA REGIONE, QUANDO LO STORICO CE L'HA. Nappi Sud ha una riga Campania e
+  // una Basilicata (utente, 04/10/2026): ognuna va dove ha raccolto quella regione.
+  const perRegione = rip(
+    [
+      { raccoglitore: 'Nappi Sud', regione: 'Campania', anno: 2026, target_tonnellate: 800 },
+      { raccoglitore: 'Nappi Sud', regione: 'Basilicata', anno: 2026, target_tonnellate: 22.08 },
+    ],
+    [
+      conf('NAPPI SUD SRL', 'Nappi Sud', 500000, 'stoc', 'Campania'),
+      conf('NAPPI SUD SRL', 'Irigom', 50000, 'imp', 'Basilicata'),
+    ],
+  );
+  verifica('due righe, due regioni: ognuna va dove quella regione ha raccolto',
+    quota(perRegione, 'NAPPI SUD SRL', 'stoc') === 800 && quota(perRegione, 'Irigom') === 22.08,
+    JSON.stringify([...perRegione.per.entries()]));
+
+  // 6. Se di quella regione non c'e' storico si usa tutto quello del
+  // raccoglitore: meglio una ripartizione per nome che un target che non arriva
+  // da nessuna parte.
+  const ripiego = rip(
+    [{ raccoglitore: 'Gamma', regione: 'Sicilia', anno: 2026, target_tonnellate: 50 }],
+    [conf('Gamma', 'Gatim', 10000, 'imp', 'Puglia')],
+  );
+  verifica('regione senza storico: si ripartisce su tutto lo storico del raccoglitore',
+    quota(ripiego, 'Gatim') === 50, JSON.stringify([...ripiego.per.entries()]));
+
+  // 7. Un target che non sta su nessun sito va detto, non perso in silenzio.
+  const senza = rip(
+    [{ raccoglitore: 'Nuovo', anno: 2026, target_tonnellate: 120 }],
+    [conf('Altro', 'Gatim', 10000)],
+  );
+  verifica('chi non ha ancora conferito niente finisce in senzaStorico, con il suo target',
+    senza.per.size === 0 && senza.senzaStorico.length === 1 && senza.senzaStorico[0].target_t === 120,
+    JSON.stringify(senza.senzaStorico));
+  verifica('lo storico di un altro anno non conta',
+    rip([{ raccoglitore: 'Alfa', anno: 2027, target_tonnellate: 10 }], [conf('Alfa', 'Gatim', 1000)], 2026).per.size === 0);
+
+  // 8. LA RIGA DI GIACENZE. E' qui che le quattro anomalie si chiudono: il sito
+  // ha un target delle primarie anche se nessun raccoglitore gli e' stato legato
+  // a mano, e l'avviso «target ancora scritto in Giacenze» non ha piu' ragione.
+  console.log('LE QUOTE RIPARTITE ARRIVANO SULLA RIGA DI GIACENZE');
+  const ripartite = rip(
+    [{ raccoglitore: 'C.L. Service', anno: 2026, target_tonnellate: 1000 }],
+    [conf('C.L. Service', 'Gatim', 600000), conf('C.L. Service', 'T-Cycle', 400000, 'stoc')],
+  );
+  const rigaGatim = targetRigaGiacenze({
+    sito: 'GATIM SRL', td: 'imp', anno: 2026, giacenzaSito: { target_primarie_t: 950 },
+    impiantiTarget: [], raccoglitori: [{ raccoglitore: 'C.L. Service', anno: 2026, target_tonnellate: 1000 }],
+    ripartite,
+  });
+  verifica('il sito prende la sua quota ripartita e non ha piu\' l\'anomalia del target in Giacenze',
+    rigaGatim.target_primarie_t === 600 && rigaGatim.target_primarie_ripartite_t === 600
+    && rigaGatim.da_portare.primarie === false && rigaGatim.da_portare.primarie_senza_impianto === false,
+    JSON.stringify(rigaGatim));
+  verifica('e la riga dice da chi viene: un numero che cambia da solo si deve poter spiegare',
+    rigaGatim.ripartizione.length === 1 && rigaGatim.ripartizione[0].raccoglitore === 'C.L. Service',
+    JSON.stringify(rigaGatim.ripartizione));
+  // La quota con ruolo 'stoc' va sulla riga del piazzale, non su quella dell'impianto.
+  const tcImp = targetRigaGiacenze({ sito: 'T-Cycle', td: 'imp', anno: 2026, ripartite, raccoglitori: [] });
+  const tcStoc = targetRigaGiacenze({ sito: 'T-Cycle', td: 'stoc', anno: 2026, ripartite, raccoglitori: [], primarieQui: false, soloRuolo: false });
+  verifica('la quota di un viaggio al piazzale sta sulla riga del piazzale',
+    tcImp.target_primarie_t === 0 && tcStoc.target_primarie_t === 400, JSON.stringify([tcImp.target_primarie_t, tcStoc.target_primarie_t]));
+  verifica('e se di quel sito c\'e\' una riga sola, quella prende anche la quota dell\'altro ruolo',
+    targetRigaGiacenze({ sito: 'T-Cycle', td: 'imp', anno: 2026, ripartite, raccoglitori: [], soloRuolo: true }).target_primarie_t === 400);
+  // Esplicito e ripartito si sommano: sono raccoglitori diversi.
+  const misto = targetRigaGiacenze({
+    sito: 'Gatim', td: 'imp', anno: 2026, ripartite,
+    raccoglitori: [
+      { raccoglitore: 'Emmesse', impianto: 'GATIM SRL', anno: 2026, target_tonnellate: 250 },
+      { raccoglitore: 'C.L. Service', anno: 2026, target_tonnellate: 1000 },
+    ],
+  });
+  verifica('il target scritto a mano e quello ripartito si sommano, senza contare nessuno due volte',
+    misto.target_primarie_t === 850 && misto.target_primarie_ripartite_t === 600, JSON.stringify(misto));
+  // E senza ripartizione la riga si comporta come prima.
+  verifica('senza ripartizione niente cambia: l\'avviso di prima e\' ancora li\'',
+    targetRigaGiacenze({ sito: 'Gatim', td: 'imp', anno: 2026, giacenzaSito: { target_primarie_t: 950 }, raccoglitori, impiantiTarget: impianti }).da_portare.primarie === true);
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
