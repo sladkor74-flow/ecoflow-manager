@@ -68,11 +68,12 @@ export function calcolaReportGenerale({ mensili = [], annui = [], raccolto = [],
   // L'impianto scritto a mano sulla riga del target: non dice quanto, ma dice
   // dove quel raccoglitore deve portare, ed e' l'unica cosa che lo dice prima che
   // il materiale si muova (serve a impiantoDiRiferimento).
-  const segnaScritto = (r, nome, annuo) => {
+  const segnaScritto = (r, nome, annuo, meseIdx = -1, target = 0) => {
     const k = chiave(nome);
     if (!k) return;
-    const x = r.scritti.get(k) || { impianto: nome, annuo: 0 };
+    const x = r.scritti.get(k) || { impianto: nome, annuo: 0, mesi: MESI.map(() => 0) };
     x.annuo += annuo;
+    if (meseIdx >= 0) x.mesi[meseIdx] = t3(x.mesi[meseIdx] + target);
     r.scritti.set(k, x);
   };
 
@@ -87,8 +88,12 @@ export function calcolaReportGenerale({ mensili = [], annui = [], raccolto = [],
     if (i < 0) continue;
     const r = riga(t.regione, t.raccoglitore);
     r.conTarget = true;
-    if (!t.non_raccoglie) r.mesi[i].target += Number(t.target) || 0;
-    segnaScritto(r, t.impianto, 0);
+    const quanto = t.non_raccoglie ? 0 : Number(t.target) || 0;
+    r.mesi[i].target += quanto;
+    // Il target mensile scritto verso un impianto resta legato a quell'impianto:
+    // la griglia dei target salva una riga per raccoglitore, regione E impianto,
+    // ed e' la ripartizione decisa a mano, quella che vince su ogni consuntivo.
+    segnaScritto(r, t.impianto, 0, i, quanto);
   }
 
   const conTarget = [...righe.values()];
@@ -149,12 +154,20 @@ export const DA_ASSEGNARE = 'da assegnare';
  *    dell'incendio in Gatim, ma da qui a fine anno conferira' sempre su Gatim».
  */
 export function riferimentoDellaRiga(r) {
+  // Fra piu' impianti scritti a mano vale quello a cui l'utente ha dato di piu',
+  // annuo o sui mesi. Prima si guardava il solo target annuo, che per le righe
+  // mensili e' zero: con gli impianti scritti solo sui mesi - il caso di chi
+  // cambia destinazione in corso d'anno - a decidere finiva l'ordine alfabetico.
+  const peso = (s) => s.annuo + s.mesi.reduce((a, b) => a + b, 0);
   const scritti = [...(r.scritti ? r.scritti.entries() : [])]
-    .sort((a, b) => b[1].annuo - a[1].annuo || a[1].impianto.localeCompare(b[1].impianto, 'it'));
+    .sort((a, b) => peso(b[1]) - peso(a[1]) || a[1].impianto.localeCompare(b[1].impianto, 'it'));
   if (scritti.length) return { k: scritti[0][0], impianto: scritti[0][1].impianto };
   for (let i = MESI.length - 1; i >= 0; i--) {
     let scelto = null;
     for (const [k, v] of r.impianti) {
+      // 'N/D' e' la riga del portale senza destinazione: non e' un impianto, e
+      // scriverci sopra il target non raccolto direbbe una cosa falsa.
+      if (!k || k === 'nd' || v.impianto === 'N/D') continue;
       const kg = v.mesi[i] || 0;
       if (kg > 0 && (!scelto || kg > scelto.kg)) scelto = { k, impianto: v.impianto, kg };
     }
@@ -194,7 +207,6 @@ export const impiantoDiRiferimento = (r) => riferimentoDellaRiga(r).impianto;
 export function impiantiDelMese(r, meseIdx, riferimento = null) {
   const rif = riferimento === null ? riferimentoDellaRiga(r) : riferimento;
   const target = r.mesi[meseIdx]?.target || 0;
-  const raccolto = r.mesi[meseIdx]?.raccolto || 0;
   const voci = new Map();
   // UN IMPIANTO SOLO, ANCHE SE SI CHIAMA IN DUE MODI (05/10/2026).
   //
@@ -213,14 +225,31 @@ export function impiantiDelMese(r, meseIdx, riferimento = null) {
     const kg = v.mesi[meseIdx] || 0;
     if (kg > 0) voce(k, v.impianto).raccolto = t3(kg);
   }
-  if (target > 0) {
-    if (raccolto >= target) {
-      for (const [k, q] of quoteKg(Math.round(target * 1000), [...voci.values()].map(v => [v.k, Math.round(v.raccolto * 1000)]))) {
-        voci.get(k).target = q;
+  // PRIMA QUELLO CHE L'UTENTE HA SCRITTO (05/10/2026).
+  //
+  // In Target & Status una riga di target e' per raccoglitore, regione E
+  // impianto: chi conferisce su due impianti ne ha due, con i loro target
+  // mensili. Quella e' la ripartizione decisa a mano e vale cosi' com'e', anche
+  // dove il materiale non e' ancora arrivato - li' un ammanco e' un ammanco
+  // vero, promesso. Il consuntivo decide soltanto la parte di target che nessuno
+  // ha attribuito a mano.
+  const scritto = new Map();
+  for (const [k, s] of (r.scritti || new Map())) {
+    const q = s.mesi[meseIdx] || 0;
+    if (q > 0) { voce(k, s.impianto).target = q; scritto.set(k, q); }
+  }
+  const libero = t3(target - [...scritto.values()].reduce((s, q) => s + q, 0));
+  if (libero > 0) {
+    // il raccolto che il target scritto non copre gia'
+    const residuo = (v) => Math.max(0, t3(v.raccolto - (scritto.get(v.k) || 0)));
+    const totResiduo = t3([...voci.values()].reduce((s, v) => s + residuo(v), 0));
+    if (totResiduo >= libero) {
+      for (const [k, q] of quoteKg(Math.round(libero * 1000), [...voci.values()].map(v => [v.k, Math.round(residuo(v) * 1000)]))) {
+        voci.get(k).target = t3(voci.get(k).target + q);
       }
     } else {
-      for (const v of voci.values()) v.target = v.raccolto;
-      const resto = t3(target - raccolto);
+      for (const v of voci.values()) v.target = t3(v.target + residuo(v));
+      const resto = t3(libero - totResiduo);
       if (resto > 0) {
         const v = voce(rif.k, rif.impianto);
         v.target = t3(v.target + resto);
@@ -247,17 +276,18 @@ export function impiantiDellAnno(r) {
       const x = mappa.get(v.k);
       x.mesi[i].target = t3(x.mesi[i].target + v.target);
       x.mesi[i].raccolto = t3(x.mesi[i].raccolto + v.raccolto);
-      x.annuo = t3(x.annuo + v.target);
+      // annuo resta zero: un impianto non ha un target annuo suo, ha solo quello
+      // che gli arriva dalla ripartizione dei mesi
       // fra due modi di scrivere lo stesso impianto si mostra quello del portale,
       // cioe' quello dei mesi in cui il materiale e' arrivato davvero
       if (v.raccolto > 0) x.impianto = v.impianto;
       if (v.stimato) x.stimato = true;
     }
   });
-  return [...mappa.values()].sort((a, b) => {
-    const ra = a.mesi.reduce((s, m) => s + m.raccolto, 0), rb = b.mesi.reduce((s, m) => s + m.raccolto, 0);
-    return rb - ra || b.annuo - a.annuo || a.impianto.localeCompare(b.impianto, 'it');
-  });
+  const somma = (x, campo) => x.mesi.reduce((s, m) => s + m[campo], 0);
+  return [...mappa.values()].sort((a, b) => (somma(b, 'raccolto') - somma(a, 'raccolto'))
+    || (somma(b, 'target') - somma(a, 'target'))
+    || a.impianto.localeCompare(b.impianto, 'it'));
 }
 
 /**

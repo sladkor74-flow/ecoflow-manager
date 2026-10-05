@@ -42,8 +42,12 @@ function Striscia({ totale, anno, meseInCorso }) {
                   className={`absolute bottom-0 left-0 right-0 ${sotto ? 'bg-red-400' : v.raccolto > 0 ? 'bg-emerald-500' : ''}`}
                   style={{ height: `${hR}%` }}
                 />
+                {/* La tacca e' alta due pixel e si appoggia sotto la sua quota:
+                    messa esattamente a bottom 100% - il mese col target piu' alto
+                    della striscia, cioe' quello che piu' conta - finiva fuori dal
+                    riquadro e non si vedeva. */}
                 {v.target > 0 && (
-                  <div className="absolute left-0 right-0 border-t-2 border-foreground/70" style={{ bottom: `${hT}%` }} />
+                  <div className="absolute left-0 right-0 h-0.5 bg-foreground/70" style={{ bottom: `calc(${Math.min(hT, 100)}% - 2px)` }} />
                 )}
               </div>
               <div className="text-[10px] text-muted-foreground">{m}</div>
@@ -81,7 +85,13 @@ function CelleAnno({ r, vista, forte }) {
           </React.Fragment>
         );
       })}
-      <td className={`px-2 py-1 text-right tabular-nums border-l text-muted-foreground ${c}`}>{num(v.annuo || v.target)}</td>
+      {/* DUE TARGET DIVERSI, DUE COLONNE (05/10/2026). Il target annuo e' quello
+          del contratto del raccoglitore; la somma dei dodici mesi puo' essere piu'
+          bassa (e' il «Da ripartire» della griglia dei target). Il delta e' sulla
+          somma dei mesi, perche' e' la somma delle colonne qui a sinistra: messi
+          nella stessa terzina, 500,00 meno 382,22 non faceva il delta scritto. */}
+      <td className={`px-2 py-1 text-right tabular-nums border-l text-muted-foreground ${c}`}>{num(v.annuo)}</td>
+      <td className={`px-2 py-1 text-right tabular-nums text-muted-foreground ${c}`}>{num(v.target)}</td>
       <td className={`px-2 py-1 text-right tabular-nums ${c}`}>{num(v.raccolto)}</td>
       <td className={`px-2 py-1 text-right tabular-nums ${coloreDelta(v.delta)} ${c}`}>{v.target || v.raccolto ? tonnellate(v.delta) : '—'}</td>
       <td className={`px-2 py-1 ${c}`}>
@@ -100,7 +110,10 @@ function CelleAnno({ r, vista, forte }) {
 
 export default function ReportGeneraleAnno({ anno, gruppi, righe, dettaglio, vista, meseInCorso = -1 }) {
   const totale = sommaRighe(righe);
-  const colonneMese = vista === 'tutto' ? 3 : vista === 'delta' ? 1 : 2;
+  // Quante celle per mese: tre con tutto, una sola con «solo raccolto» e con
+  // «solo delta». Sbagliare questo numero non si vede dai conti ma manda fuori
+  // posto tutte le intestazioni dei mesi (05/10/2026).
+  const colonneMese = vista === 'tutto' ? 3 : 1;
 
   return (
     <div className="space-y-3">
@@ -113,7 +126,7 @@ export default function ReportGeneraleAnno({ anno, gruppi, righe, dettaglio, vis
               {MESI_BREVI.map((m, i) => (
                 <th key={m} className="px-1 py-1 text-center font-medium border-l" colSpan={colonneMese} title={`${MESI[i]} ${anno}`}>{m}</th>
               ))}
-              <th className="px-2 py-1 text-center font-medium border-l" colSpan={3}>Anno</th>
+              <th className="px-2 py-1 text-center font-medium border-l" colSpan={4}>Anno</th>
               <th className="px-2 py-1 text-center font-medium">% del target</th>
             </tr>
             <tr className="bg-muted/60 border-t">
@@ -125,9 +138,10 @@ export default function ReportGeneraleAnno({ anno, gruppi, righe, dettaglio, vis
                   {vista !== 'raccolto' && <th className={`px-1 py-0.5 text-right text-[10px] font-normal text-muted-foreground ${vista === 'delta' ? 'border-l' : ''}`}>Δ</th>}
                 </React.Fragment>
               ))}
-              <th className="px-2 py-0.5 text-right text-[10px] font-normal text-muted-foreground border-l">Target</th>
+              <th className="px-2 py-0.5 text-right text-[10px] font-normal text-muted-foreground border-l" title="Il target annuo del raccoglitore, dal contratto">Annuo</th>
+              <th className="px-2 py-0.5 text-right text-[10px] font-normal text-muted-foreground" title="La somma dei dodici target mensili: puo' essere piu' bassa del target annuo, se non e' tutto ripartito sui mesi">Mesi</th>
               <th className="px-2 py-0.5 text-right text-[10px] font-normal text-muted-foreground">Raccolto</th>
-              <th className="px-2 py-0.5 text-right text-[10px] font-normal text-muted-foreground">Δ</th>
+              <th className="px-2 py-0.5 text-right text-[10px] font-normal text-muted-foreground" title="Somma dei mesi meno raccolto">Δ</th>
               <th />
             </tr>
           </thead>

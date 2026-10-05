@@ -48,7 +48,10 @@ function anniDisponibili() {
 
 // Appiattisce le pivot di una scheda in un CSV leggibile da Excel:
 // punto e virgola come separatore, virgola come segno decimale.
-function componiCsv(pivots, gruppo, etichettaPeriodo) {
+// Ogni pivot porta il suo periodo, come in pagina: in una scheda ce ne sono di
+// mensili e di annuali, e scrivere il mese anche sopra una pivot dell'anno dice
+// una cosa falsa a chi legge il foglio senza averlo scaricato lui (05/10/2026).
+function componiCsv(pivots, gruppo, periodoDi) {
   const righe = [];
   const num = (v) => String(v == null ? 0 : v).replace('.', ',');
 
@@ -58,7 +61,7 @@ function componiCsv(pivots, gruppo, etichettaPeriodo) {
     const colonne = p.senzaColonne ? [] : p.colonne;
     const unaMisura = p.misure.length === 1;
 
-    righe.push([p.titolo, etichettaPeriodo]);
+    righe.push([p.titolo, periodoDi(p)]);
     righe.push([
       p.etichetteRiga.join(' > '),
       ...colonne.flatMap(c => p.misure.map((m, i) => (unaMisura ? c : c + ' ' + p.etichetteMisure[i]))),
@@ -147,7 +150,7 @@ export default function ReportMensile() {
   const etichettaAnno = `Anno ${anno}`;
 
   const scarica = () => {
-    const csv = componiCsv(pivots, gruppoAttivo, etichettaMese);
+    const csv = componiCsv(pivots, gruppoAttivo, (p) => (p.periodo === 'mese' ? etichettaMese : etichettaAnno));
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

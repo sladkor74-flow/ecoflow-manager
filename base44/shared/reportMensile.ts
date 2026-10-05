@@ -81,10 +81,13 @@ export const PIVOT_DEFS = {
   // raccolto davvero; target e delta stanno nel Report generale di Target & Status.
   raccoltaAnno: {
     titolo: 'Raccolta dell\'anno per raccoglitore e impianto',
-    nota: 'Tutto l\'anno in un colpo d\'occhio: quanto ha raccolto ogni raccoglitore, mese per mese, e a quale impianto l\'ha portato. Non c\'e\' nel foglio Excel: solo raccolta effettiva, senza target.',
+    nota: 'Tutto l\'anno in un colpo d\'occhio: quanto ha raccolto ogni raccoglitore, mese per mese, e a quale impianto l\'ha portato. Non c\'e\' nel foglio Excel: solo raccolta effettiva, senza target. Solo rete: qui le colonne sono i mesi, quindi una riga di autodemolizione finita in questo archivio si sommerebbe al totale di rete senza che si veda, e resta fuori.',
     entita: 'PrimariaRete',
     gruppo: 'rete',
     periodo: 'anno',
+    // Il canale lo decide il materiale, non l'archivio (regola dell'utente: rete,
+    // ACI ed extra raccolta non si sommano mai).
+    canale: 'RETE',
     righe: ['Regione', 'Trasportatore', 'Destinazione'],
     colonna: 'Mese',
     misure: ['peso'],

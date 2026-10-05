@@ -159,6 +159,95 @@ console.log('LO STESSO IMPIANTO SCRITTO IN DUE MODI E\' UN IMPIANTO SOLO');
     JSON.stringify(impiantiDellAnno(r).map(x => x.impianto)));
 }
 
+console.log('IL TARGET ANNUO E LA SOMMA DEI MESI SONO DUE NUMERI DIVERSI');
+{
+  // In pagina si leggeva «500,00 | 382,22 | 29,78»: il target annuo del contratto
+  // accanto a un delta calcolato sulla somma dei mesi, che e' 412. Sono due
+  // numeri diversi e vanno in due colonne diverse (05/10/2026).
+  const r = unaRiga({
+    annui: [{ raccoglitore: 'Ecological Systems', regione: 'Basilicata', target_tonnellate: 500 }],
+    mensili: [tm('Ecological Systems', 'Basilicata', 0, 200), tm('Ecological Systems', 'Basilicata', 1, 212)],
+    raccolto: [conf('Ecological Systems', 'Basilicata', 'T.R.S. Srl', [[0, 182.22], [1, 200]])],
+  });
+  const v = valoriAnno(r);
+  verifica('il target annuo e la somma dei mesi restano distinti',
+    v.annuo === 500 && v.target === 412, JSON.stringify(v));
+  verifica('e il delta e\' sulla somma dei mesi, cioe\' sulle colonne che si vedono',
+    v.delta === 29.78 && v.raccolto === 382.22, JSON.stringify(v));
+  verifica('la percentuale invece si misura sul target annuo del contratto',
+    Math.round(v.percentualeAnnuo * 10) / 10 === Math.round((382.22 / 500) * 1000) / 10, String(v.percentualeAnnuo));
+  // Un impianto non ha un target annuo suo: ha solo quello che gli arriva dai mesi.
+  const imp = impiantiDellAnno(r)[0];
+  verifica('un impianto non ha un target annuo suo',
+    valoriAnno(imp).annuo === 0 && valoriAnno(imp).target === 412, JSON.stringify(valoriAnno(imp)));
+}
+
+console.log('LA RIPARTIZIONE SCRITTA A MANO VINCE SUL CONSUNTIVO');
+{
+  // In Target & Status una riga di target e' per raccoglitore, regione E
+  // impianto: chi conferisce su due impianti ne ha due. Prima di tutto questo
+  // veniva sommato in una riga sola e l'ammanco finiva su un impianto solo,
+  // scelto dal codice: la ripartizione decisa dall'utente non arrivava in tabella.
+  const due = unaRiga({
+    annui: [
+      { raccoglitore: 'Emmesse Srls', regione: 'Calabria', impianto: 'Gatim', target_tonnellate: 60 },
+      { raccoglitore: 'Emmesse Srls', regione: 'Calabria', impianto: 'Irigom S.r.l.', target_tonnellate: 90 },
+    ],
+    mensili: [tm('Emmesse Srls', 'Calabria', 0, 10, 'Gatim'), tm('Emmesse Srls', 'Calabria', 0, 5, 'Irigom S.r.l.')],
+    raccolto: [],
+  });
+  const gen = impiantiDelMese(due, 0);
+  verifica('due impianti scritti a mano restano due, ognuno col suo target',
+    gen.length === 2 && gen.find(v => v.impianto === 'Gatim')?.target === 10
+    && gen.find(v => v.impianto === 'Irigom S.r.l.')?.target === 5, JSON.stringify(gen));
+  verifica('e nessuno dei due e\' una previsione: quei numeri li ha scritti l\'utente',
+    gen.every(v => !v.stimato), JSON.stringify(gen));
+
+  // Dove l'utente ha scritto il target, un ammanco e' un ammanco vero: non si
+  // azzera il delta come si fa con gli impianti dedotti dal consuntivo.
+  const conRaccolto = unaRiga({
+    mensili: [tm('Emmesse Srls', 'Calabria', 0, 10, 'Gatim')],
+    raccolto: [conf('Emmesse Srls', 'Calabria', 'Gatim', [[0, 6]])],
+  });
+  verifica('sull\'impianto scritto a mano il delta resta: 10 promesse, 6 arrivate',
+    impiantiDelMese(conRaccolto, 0)[0]?.target === 10 && impiantiDelMese(conRaccolto, 0)[0]?.delta === 4,
+    JSON.stringify(impiantiDelMese(conRaccolto, 0)));
+
+  // Scritto e non scritto convivono: il consuntivo decide solo la parte che
+  // nessuno ha attribuito a mano.
+  const misto = unaRiga({
+    mensili: [tm('Alfa', 'Puglia', 0, 10, 'Gatim'), tm('Alfa', 'Puglia', 0, 5)],
+    raccolto: [conf('Alfa', 'Puglia', 'Irigom', [[0, 6]])],
+  });
+  const m = impiantiDelMese(misto, 0);
+  verifica('il target scritto resta sul suo impianto e il resto segue il consuntivo',
+    m.find(v => v.impianto === 'Gatim')?.target === 10 && m.find(v => v.impianto === 'Irigom')?.target === 5,
+    JSON.stringify(m));
+  verifica('e la somma fa sempre il target del mese',
+    m.reduce((s, v) => s + v.target, 0) === 15);
+
+  // Fra piu' impianti scritti solo sui mesi, il riferimento e' quello a cui
+  // l'utente ha dato di piu', non il primo in ordine alfabetico: qui il piu'
+  // grande e' anche l'ultimo dell'alfabeto, altrimenti la prova passerebbe
+  // anche con la regola sbagliata.
+  const soloMesi = unaRiga({
+    mensili: [tm('Beta', 'Puglia', 0, 7, 'Zeta Srl'), tm('Beta', 'Puglia', 0, 3, 'Alfa Srl'), tm('Beta', 'Puglia', 1, 20)],
+    raccolto: [],
+  });
+  verifica('il riferimento e\' l\'impianto a cui l\'utente ha dato di piu\', non il primo dell\'alfabeto',
+    impiantoDiRiferimento(soloMesi) === 'Zeta Srl', impiantoDiRiferimento(soloMesi));
+
+  // Una riga del portale senza destinazione non e' un impianto: il target non
+  // raccolto non ci finisce sopra.
+  const nd = unaRiga({
+    mensili: [tm('Gamma', 'Sicilia', 5, 10)],
+    raccolto: [conf('Gamma', 'Sicilia', 'N/D', [[4, 3]])],
+  });
+  verifica('il target non raccolto non finisce su una riga senza destinazione',
+    impiantoDiRiferimento(nd) === '' && impiantiDelMese(nd, 5)[0]?.impianto === DA_ASSEGNARE,
+    JSON.stringify(impiantiDelMese(nd, 5)));
+}
+
 console.log('I CONTI DELLA TABELLA');
 {
   const righe = calcolaReportGenerale({
