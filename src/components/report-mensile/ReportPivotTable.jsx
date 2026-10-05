@@ -103,8 +103,14 @@ export default function ReportPivotTable({ pivot, periodo }) {
           <table className="w-full text-sm border-collapse">
             <thead className="bg-muted/60">
               <tr>
+                {/* LA COLONNA DICE TUTTI I SUOI LIVELLI (05/10/2026).
+                    Diceva solo il primo, e le righe rientrate sembravano la stessa
+                    cosa di quelle sopra: Irigom compare come raccoglitore in una
+                    pivot (4,22 t a ottobre) e come impianto di destinazione in
+                    un'altra (35,42 t), e letti come se fossero lo stesso numero
+                    sembravano due conti diversi della stessa cosa. */}
                 <th className="px-3 py-2 text-left font-semibold sticky left-0 bg-muted/60 min-w-[220px]">
-                  {pivot.etichetteRiga[0]}
+                  {pivot.etichetteRiga.join(' › ')}
                 </th>
                 {colonne.map(col => misure.map((m, i) => (
                   <th key={col + m} className="px-3 py-2 text-right font-semibold whitespace-nowrap">
@@ -127,6 +133,9 @@ export default function ReportPivotTable({ pivot, periodo }) {
                     <td
                       className="px-3 py-1.5 sticky left-0 bg-card"
                       style={{ paddingLeft: `${r.livello * 18 + 12}px` }}
+                      // che cosa e' questa riga: lo stesso nome puo' essere un
+                      // raccoglitore in un livello e un impianto in un altro
+                      title={pivot.etichetteRiga[r.livello] || undefined}
                     >
                       {apribile ? (
                         <button onClick={() => commuta(r.chiave)} className="inline-flex items-center gap-1 text-left hover:text-primary">
