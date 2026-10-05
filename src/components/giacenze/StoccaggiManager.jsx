@@ -83,6 +83,17 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
     if (s.date_da_sistemare && s.date_da_sistemare.length) datePerSito.set(normalizzaRagioneSociale(s.sito), s.date_da_sistemare);
   }
 
+  // La giacenza di oggi di ciascun piazzale, dal calcolo: e' un'altra cosa dalla
+  // lettura, e si mostra accanto a lei.
+  const giacenzaPerSito = useMemo(() => {
+    const per = new Map();
+    for (const s of stoccaggiFromCalcolo) per.set(normalizzaRagioneSociale(s.sito), s);
+    return per;
+  }, [stoccaggiFromCalcolo]);
+  // Quando la giacenza si e' mossa rispetto alla lettura, il numero si nota:
+  // vuol dire che dopo la fotografia e' entrato o uscito materiale.
+  const scostata = (oggi, letto) => oggi !== null && oggi !== undefined && Math.abs(Number(oggi) - Number(letto)) > 0.0005;
+
   // Il confronto fra la rilevazione piu' recente e quello che i movimenti
   // dicono, un piazzale per volta. Lo calcola calcolaGiacenze: qui si mostra.
   const verifichePerSito = useMemo(() => {
@@ -200,10 +211,23 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
+                {/* UNA LETTURA VECCHIA NON E' LA GIACENZA DI OGGI (06/10/2026).
+                    La tabella mostrava solo le fotografie, e la riga di Irigom -
+                    10.060 kg di autodemolizione letti il 13/09 - si leggeva come
+                    se quel materiale fosse ancora sul piazzale, mentre era gia'
+                    uscito in secondaria verso Gatim e la giacenza calcolata era
+                    zero. Ora le due cose stanno una accanto all'altra, e
+                    l'intestazione dice quale e' quale. */}
+                <tr className="text-left text-xs text-muted-foreground">
+                  <th className="px-3 py-1" colSpan={2} />
+                  <th className="px-3 py-1 font-medium border-l" colSpan={8}>Letto a portale quel giorno</th>
+                  <th className="px-3 py-1 font-medium border-l" colSpan={2}>Giacenza di oggi, calcolata</th>
+                  <th className="px-3 py-1" colSpan={3} />
+                </tr>
                 <tr className="text-left">
                   <th className="px-3 py-2 font-semibold">Unità</th>
                   <th className="px-3 py-2 font-semibold">Sito</th>
-                  <th className="px-3 py-2 font-semibold">Data rilevazione</th>
+                  <th className="px-3 py-2 font-semibold border-l">Data rilevazione</th>
                   <th className="px-3 py-2 font-semibold text-right">P (kg)</th>
                   <th className="px-3 py-2 font-semibold text-right">M (kg)</th>
                   <th className="px-3 py-2 font-semibold text-right">G1 (kg)</th>
@@ -211,6 +235,8 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
                   <th className="px-3 py-2 font-semibold text-right">ACI (kg)</th>
                   <th className="px-3 py-2 font-semibold text-right">Rete (t)</th>
                   <th className="px-3 py-2 font-semibold text-right">ACI (t)</th>
+                  <th className="px-3 py-2 font-semibold text-right border-l" title="La giacenza di adesso: la fotografia dell'ancora dell'anno piu' tutti i movimenti finiti dopo. Se e' piu' bassa della lettura, nel frattempo il materiale e' uscito">Rete (t)</th>
+                  <th className="px-3 py-2 font-semibold text-right" title="Canale ACI, mai sommato alla rete">ACI (t)</th>
                   <th className="px-3 py-2 font-semibold" title="La rilevazione a confronto con la precedente piu' i movimenti del periodo: se una classe si scosta lo dice qui">Controllo</th>
                   <th className="px-3 py-2 font-semibold" title="Da dove viene la giacenza di adesso: fotografia, ingressi e uscite dopo, e com'e' andata ogni lettura">Estratto conto</th>
                   <th className="px-3 py-2 font-semibold">Azioni</th>
@@ -225,6 +251,7 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
                   const rete = ['class1_kg', 'class2_kg', 'class3_kg', 'class4_kg'].reduce((s, c) => s + (Number(r[c]) || 0), 0);
                   const aci = Number(r.class9_kg) || 0;
                   const obs = isObsolete(r.data_rilevazione);
+                  const oggi = giacenzaPerSito.get(normalizzaRagioneSociale(r.sito));
                   return (
                     <tr key={r.id} className={`border-t hover:bg-muted/30 ${obs ? 'bg-amber-50' : ''}`}>
                       <td className="px-3 py-2">
@@ -243,7 +270,7 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
                           </div>
                         )}
                       </td>
-                      <td className="px-3 py-2">{fmtDate(r.data_rilevazione)}</td>
+                      <td className="px-3 py-2 border-l">{fmtDate(r.data_rilevazione)}</td>
                       <td className="px-3 py-2 text-right">{fmt(r.class1_kg, 0)}</td>
                       <td className="px-3 py-2 text-right">{fmt(r.class2_kg, 0)}</td>
                       <td className="px-3 py-2 text-right">{fmt(r.class3_kg, 0)}</td>
@@ -251,6 +278,12 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
                       <td className="px-3 py-2 text-right">{fmt(r.class9_kg, 0)}</td>
                       <td className="px-3 py-2 text-right font-medium">{fmt(rete / 1000)}</td>
                       <td className="px-3 py-2 text-right font-medium">{fmt(aci / 1000)}</td>
+                      <td className={`px-3 py-2 text-right font-medium border-l ${scostata(oggi?.giacenza_rete_t, rete / 1000) ? 'text-primary' : ''}`}>
+                        {oggi && oggi.giacenza_rete_t !== null && oggi.giacenza_rete_t !== undefined ? fmt(oggi.giacenza_rete_t) : '—'}
+                      </td>
+                      <td className={`px-3 py-2 text-right font-medium ${scostata(oggi?.giacenza_aci_t, aci / 1000) ? 'text-primary' : ''}`}>
+                        {oggi && oggi.giacenza_aci_t !== null && oggi.giacenza_aci_t !== undefined ? fmt(oggi.giacenza_aci_t) : '—'}
+                      </td>
                       <td className="px-3 py-2">
                         <EsitoRilevazione
                           verifica={verifichePerSito.get(normalizzaRagioneSociale(r.sito))}
@@ -282,7 +315,7 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
                   );
                 })}
                 {righe.length === 0 && (
-                  <tr><td colSpan={12} className="px-3 py-4 text-center text-muted-foreground">Nessuna rilevazione. Usa "Importa rilevazione iniziale" o "Aggiungi rilevazione".</td></tr>
+                  <tr><td colSpan={15} className="px-3 py-4 text-center text-muted-foreground">Nessuna rilevazione. Usa "Importa rilevazione iniziale" o "Aggiungi rilevazione".</td></tr>
                 )}
               </tbody>
             </table>

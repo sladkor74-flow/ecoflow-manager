@@ -136,6 +136,12 @@ export default function Giacenze() {
                   sito: r.sito,
                   date_da_sistemare: r.date_da_sistemare || [],
                   verifica_rilevazione: r.verifica_rilevazione || null,
+                  // La giacenza di OGGI, accanto alla fotografia del giorno in cui
+                  // e' stata letta: senza, una lettura vecchia si legge come la
+                  // giacenza di adesso (06/10/2026).
+                  giacenza_rete_t: r.giacenza_portale_t,
+                  giacenza_aci_t: r.giacenza_aci_t,
+                  aggiornata_al: r.aggiornata_al || null,
                   // l'estratto conto del piazzale, con lo storico delle letture
                   riconciliazione: r.riconciliazione || null,
                 }))}
