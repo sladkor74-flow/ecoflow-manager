@@ -185,6 +185,30 @@ verifica('al punto nuovo dello stesso soggetto si ricorda la decisione vecchia, 
 verifica('e la verifica dell\'altro punto resta com\'era, non viene superata',
   archivio('VerificaSedePdr').find(v => v.id === 'v10').superata !== true);
 
+console.log('IL RICALCOLO NON RICERCA NIENTE');
+// Quando il modo di confrontare gli indirizzi migliora, i controlli gia' fatti
+// restano con l'esito vecchio e chiedono attenzione per differenze che non sono
+// differenze. Il ricalcolo rifa' solo il confronto su quello che e' gia' scritto.
+globalThis.__ARCHIVI = {
+  Pdr: [], Assegnato: [], AssegnatoAci: [],
+  VerificaSedePdr: [
+    { id: 'r1', id_pdr: 1, ragione_sociale: 'MATESE GOMME', indirizzo_portale: 'VIA CANNETTO, SNC', comune_portale: 'Piedimonte Matese', indirizzo_trovato: 'Via Canneto, snc', comune_trovato: 'Piedimonte Matese', fonti: ['https://a.it/1'], citazione: 'Via Canneto snc', confidenza: 'media', esito: 'diverso', stato: 'da_decidere' },
+    { id: 'r2', id_pdr: 2, ragione_sociale: 'CANTAFIO', indirizzo_portale: 'CONTRADA GUGLIA', comune_portale: 'Cortale', indirizzo_trovato: 'Via Nazionale, 4', comune_trovato: 'Cortale', fonti: ['https://a.it/2'], citazione: 'Via Nazionale 4', confidenza: 'media', esito: 'diverso', stato: 'da_decidere' },
+    { id: 'r3', id_pdr: 3, ragione_sociale: 'DECISA', indirizzo_portale: 'VIA CANNETTO, SNC', comune_portale: 'X', indirizzo_trovato: 'Via Canneto, snc', comune_trovato: 'X', fonti: ['https://a.it/3'], citazione: 'Via Canneto', confidenza: 'media', esito: 'diverso', stato: 'corretto', indirizzo_per_formulario: 'Via Canneto, snc', deciso_da: 'admin' },
+    { id: 'r4', id_pdr: 4, ragione_sociale: 'VECCHIA', indirizzo_portale: 'VIA CANNETTO', comune_portale: 'X', indirizzo_trovato: 'Via Canneto', comune_trovato: 'X', fonti: [], esito: 'non_trovato', stato: 'da_decidere', superata: true },
+  ],
+};
+globalThis.__PROMPT = []; globalThis.__RUOLO = 'admin'; globalThis.__RISPOSTE = [];
+const ric = await chiama({ ricalcola: true });
+verifica('il ricalcolo non chiama nessuna ricerca', globalThis.__PROMPT.length === 0);
+verifica('«VIA CANNETTO» e «Via Canneto» smettono di essere una differenza',
+  ric.body.cambiate === 2 && archivio('VerificaSedePdr').find(v => v.id === 'r1').esito === 'coincide', JSON.stringify(ric.body));
+verifica('ma una differenza vera resta', archivio('VerificaSedePdr').find(v => v.id === 'r2').esito === 'diverso');
+verifica('e la decisione gia\' presa non si tocca',
+  archivio('VerificaSedePdr').find(v => v.id === 'r3').stato === 'corretto' && archivio('VerificaSedePdr').find(v => v.id === 'r3').indirizzo_per_formulario === 'Via Canneto, snc');
+verifica('le verifiche superate restano nello storico come sono',
+  archivio('VerificaSedePdr').find(v => v.id === 'r4').esito === 'non_trovato');
+
 console.log('IL GIRO SI FA A SCAGLIONI');
 prepara();
 globalThis.__RISPOSTE = [{ indirizzo: '', fonti: [], confidenza: 'bassa' }];

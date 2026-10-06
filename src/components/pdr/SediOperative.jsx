@@ -112,6 +112,22 @@ export default function SediOperative({ records, cercaIniziale = '' }) {
     setInCorso(null);
   };
 
+  // Il confronto fra due indirizzi migliora nel tempo (le abbreviazioni degli
+  // stradari, le iniziali puntate): qui si rifa' solo quello, su quello che e'
+  // gia' stato trovato. Nessuna ricerca, nessun costo, e le decisioni restano.
+  const riallinea = async () => {
+    setErrore(''); setInCorso({ fatti: 0, restanti: null });
+    try {
+      const res = await base44.functions.invoke('verificaSediPdr', { ricalcola: true });
+      const d = (res && res.data) || {};
+      ricarica();
+      setErrore(d.cambiate ? `Riallineati ${d.cambiate} controlli su ${d.ricalcolate}: non erano differenze vere.` : 'Nessun controllo da riallineare.');
+    } catch (e) {
+      setErrore(e?.response?.data?.error || e?.message || 'Riallineamento non riuscito');
+    }
+    setInCorso(null);
+  };
+
   const decidi = async (v, stato, extra = {}) => {
     setErrore('');
     try {
@@ -162,7 +178,10 @@ export default function SediOperative({ records, cercaIniziale = '' }) {
                 <Button variant="outline" onClick={() => { fermaRef.current = true; }}>Ferma</Button>
               </>
             ) : (
-              <Button onClick={avvia}><Search className="w-4 h-4 mr-1.5" /> Controlla in rete</Button>
+              <>
+                <Button variant="outline" onClick={riallinea} title="Rifà solo il confronto fra gli indirizzi già trovati, senza cercare niente in rete">Riallinea i controlli fatti</Button>
+                <Button onClick={avvia}><Search className="w-4 h-4 mr-1.5" /> Controlla in rete</Button>
+              </>
             )}
           </div>
         </div>

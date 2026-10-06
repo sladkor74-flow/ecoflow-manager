@@ -113,6 +113,35 @@ export default async function(req) {
     if (user.role !== 'admin') return rispostaSolaLettura();
 
     const body = await req.json().catch(() => ({}));
+
+    // RICALCOLO SENZA RICERCARE. Il modo di confrontare due indirizzi migliora -
+    // le abbreviazioni degli stradari, le iniziali puntate, una lettera di
+    // differenza - ma i controlli gia' fatti restano con l'esito del giorno in
+    // cui furono fatti, e continuano a chiedere attenzione per differenze che
+    // non sono differenze. Qui si rifa' solo il confronto, su quello che e' gia'
+    // scritto: nessuna ricerca in rete, nessun costo, e le decisioni gia' prese
+    // non si toccano.
+    if (body.ricalcola) {
+      const svcR = base44.asServiceRole.entities;
+      const vive = (await fetchAll(svcR.VerificaSedePdr, null, 'id')).filter(v => !v.superata);
+      const cambiate = [];
+      for (const v of vive) {
+        if (!v.indirizzo_trovato) continue;
+        const prima = v.esito;
+        const nuovo = esitoVerifica({
+          portale: { indirizzo: v.indirizzo_portale, comune: v.comune_portale },
+          risposta: {
+            indirizzo: v.indirizzo_trovato, cap: v.cap_trovato, comune: v.comune_trovato, provincia: v.provincia_trovato,
+            altre_sedi: v.altre_sedi, fonti: v.fonti, confidenza: v.confidenza, spiegazione: v.spiegazione,
+            citazione: v.citazione, ricerche_fatte: v.ricerche_fatte,
+          },
+        });
+        if (nuovo.esito === prima) continue;
+        await svcR.VerificaSedePdr.update(v.id, { esito: nuovo.esito });
+        cambiate.push({ id_pdr: v.id_pdr, ragione_sociale: v.ragione_sociale, da: prima, a: nuovo.esito, portale: v.indirizzo_portale, trovato: v.indirizzo_trovato });
+      }
+      return Response.json({ ricalcolate: vive.length, cambiate: cambiate.length, elenco: cambiate });
+    }
     const limite = Math.min(LIMITE_MASSIMO, Math.max(1, Number(body.limite) || LIMITE_PREDEFINITO));
     const giorniValidita = Math.max(1, Number(body.giorni_validita) || 180);
     const oggi = oggiRoma();
