@@ -5,6 +5,15 @@ import { normalizzaRagioneSociale } from '../../shared/normalizzaRagioneSociale.
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 
 const DATA_INIZIO = '2026-01-01';
+// IL CONTRATTO DI UN FORNITORE FINISCE CON L'ANNO (regola dell'utente, 06/10/2026).
+// I contratti con i fornitori sono annuali e SENZA TACITO RINNOVO: si
+// ripropongono ogni anno, e non e' detto che gli attori della commessa siano
+// sempre gli stessi. Un prezzo lasciato aperto avrebbe continuato a pagare il
+// fornitore al prezzo del 2026 anche a gennaio 2027, senza che niente lo
+// dicesse; con la scadenza, il movimento del 2027 resta senza tariffa e si
+// vede. I mesi gia' fatturati non cambiano: la validita' si confronta sul
+// giorno e copre tutto il 31 dicembre.
+const DATA_FINE = '2026-12-31';
 const NOTE = 'Inserita da seedTariffe2026 sulla base dei contratti 2026';
 
 const PREST_TO_RUOLO: Record<string, string> = {
@@ -260,6 +269,7 @@ export default async function(req: any) {
           unita_misura: t.unita_misura,
           valore: t.valore,
           data_inizio_validita: DATA_INIZIO,
+          data_fine_validita: DATA_FINE,
           stato: 'attivo',
           note: NOTE,
         };

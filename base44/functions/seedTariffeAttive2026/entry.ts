@@ -6,11 +6,21 @@ import { TARIFFA_BASE_EXTRA_RACCOLTA } from "../../shared/ecotyreTariffe.ts";
 
 const DATA_INIZIO = '2026-01-01';
 // LA TARIFFA DI UN ANNO FINISCE CON L'ANNO (decisione dell'utente, 06/10/2026).
-// Senza data di fine, al primo movimento del 2027 il gestionale avrebbe
-// continuato a fatturare il prezzo del 2026 senza dire niente: per la rete non
-// esiste un valore di ripiego, quindi un prezzo vecchio passa inosservato molto
-// piu' facilmente di un prezzo mancante.
+// Il contratto con Ecotyre, come quelli con i fornitori, e' annuale e SENZA
+// TACITO RINNOVO: va riproposto ogni anno, e non e' detto che gli attori della
+// commessa siano sempre gli stessi. Senza data di fine, al primo movimento del
+// 2027 il gestionale avrebbe continuato a fatturare il prezzo del 2026 senza
+// dire niente: per la rete non esiste un valore di ripiego, quindi un prezzo
+// vecchio passa inosservato molto piu' facilmente di un prezzo mancante.
 const DATA_FINE = '2026-12-31';
+
+// L'EXTRA RACCOLTA FA ECCEZIONE E RESTA APERTA (regola dell'utente, 06/10/2026).
+// Non e' una commessa annuale: sono prestazioni occasionali, una tantum, sui
+// Comuni che le chiedono dentro campagne che si rinnovano ogni anno (Puliamo il
+// Mondo, PFU Zero, Mare Vivo...). Il prezzo si concorda intervento per
+// intervento e lo scrive l'utente sull'intervento stesso; quella in tabella e'
+// solo la base di chi un prezzo scritto non ce l'ha.
+const TIPOLOGIE_SENZA_SCADENZA = ['EXTRA_RACCOLTA'];
 const NOTE = 'Inserita da seedTariffeAttive2026';
 
 interface TariffaAttivaSeed {
@@ -97,10 +107,10 @@ export default async function(req: any) {
           unita_misura: '€/t',
           valore: t.valore,
           data_inizio_validita: DATA_INIZIO,
-          data_fine_validita: DATA_FINE,
           stato: 'attivo',
           note: NOTE,
         };
+        if (!TIPOLOGIE_SENZA_SCADENZA.includes(t.tipologia)) data.data_fine_validita = DATA_FINE;
         if (t.regione) data.regione = t.regione;
 
         await base44.asServiceRole.entities.Tariffa.create(data);
