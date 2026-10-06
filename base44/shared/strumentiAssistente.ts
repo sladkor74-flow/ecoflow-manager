@@ -1757,12 +1757,27 @@ export const STRUMENTI = [
         if (tipologia && t.tipologia && String(t.tipologia).toUpperCase() !== tipologia && String(t.tipologia).toUpperCase() !== 'TUTTE') return false;
         return true;
       });
+      // Lo stato 'attivo' non vuol dire «vale oggi»: una tariffa chiusa resta
+      // attiva fino alla sua data di fine, perche' i mesi gia' fatturati con
+      // quel prezzo devono restare validi. Dal 06/10/2026 le tariffe di rete e
+      // ACI si chiudono al 31/12 dell'anno, quindi dal 1 gennaio l'assistente
+      // avrebbe chiamato «attive» sessantaquattro tariffe scadute: ogni riga si
+      // porta dietro il suo stato di validita'.
+      const oggi = oggiRoma();
+      const validitaOggi = (t) => {
+        const da = soloData(t.data_inizio_validita);
+        const a = soloData(t.data_fine_validita);
+        if (da && da > oggi) return 'non ancora in vigore';
+        if (a && a < oggi) return 'scaduta';
+        return 'vale oggi';
+      };
       return {
         fonte: 'Tariffe',
-        periodo: 'tariffe attive',
-        dati_al: oggiRoma(),
+        periodo: `tariffe in tabella, con la loro validita' al ${oggi}`,
+        dati_al: oggi,
         dati: {
           tariffe: elenco(righe.map(t => ({
+            stato_validita: validitaOggi(t),
             fornitore: t.fornitore_nome || t.cliente, prestazione: t.prestazione, direzione: t.direzione,
             tipologia: t.tipologia, servizio: t.servizio_nome, produttore: t.produttore, destinatario: t.destinatario || t.destinazione,
             regione: t.regione, provincia: t.provincia, classe: t.classe_materiale,

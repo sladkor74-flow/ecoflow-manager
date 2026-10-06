@@ -202,7 +202,11 @@ console.log('LA DICITURA E\' DICHIARATA, NON DEDOTTA');
 console.log('LE DIFESE DELLA TARIFFA UNICA');
 {
   const { controlliTariffaAttiva } = await import('../base44/shared/ecotyreTariffe.ts');
-  const unica = { id: 'u', tipologia: 'RETE', cliente_fornitore: 'ECOTYRE', valore: 202, unita_misura: '€/t', servizio_ecotyre: '', stato: 'attivo' };
+  // Il committente si chiama «cliente», come sull'entita' Tariffa e come lo
+  // scrive il seme: prima qui c'era «cliente_fornitore», un campo che non
+  // esiste, e la prova passava su un avviso che nella realta' non usciva mai
+  // (06/10/2026).
+  const unica = { id: 'u', tipologia: 'RETE', cliente: 'ECOTYRE', valore: 202, unita_misura: '€/t', servizio_ecotyre: '', stato: 'attivo' };
 
   // 1) l'unita' di misura sbagliata: gli stessi 202 in euro al chilo moltiplicano per mille
   const inKg = controlliTariffaAttiva({ tipologia: 'RETE', valore: 202, unita_misura: '€/kg' }, []);
@@ -214,7 +218,7 @@ console.log('LE DIFESE DELLA TARIFFA UNICA');
   verifica('la tariffa giusta non fa storie', controlliTariffaAttiva(unica, []).length === 0);
 
   // 2) una seconda tariffa dello stesso canale legata a una dicitura
-  const seconda = { tipologia: 'RETE', cliente_fornitore: 'ECOTYRE', valore: 8, unita_misura: '€/t', servizio_ecotyre: 'TRASP' };
+  const seconda = { tipologia: 'RETE', cliente: 'ECOTYRE', valore: 8, unita_misura: '€/t', servizio_ecotyre: 'TRASP' };
   const avvisi = controlliTariffaAttiva(seconda, [unica]);
   verifica('una seconda tariffa rete legata a una dicitura avvisa, e non ferma il salvataggio',
     avvisi.length === 1 && avvisi[0].gravita === 'avviso' && /precedenza/.test(avvisi[0].messaggio), JSON.stringify(avvisi));

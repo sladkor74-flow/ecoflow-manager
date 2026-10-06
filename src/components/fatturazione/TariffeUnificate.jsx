@@ -40,7 +40,10 @@ function chiaviTariffaCoincidenti(a, b) {
   const bAttiva = normVal(b.direzione) === 'ATTIVA';
   if (aAttiva || bAttiva) {
     if (aAttiva !== bAttiva) return false;
-    const campi = ['cliente', 'tipologia', 'classe_materiale', 'regione', 'eer_codice'];
+    // servizio_ecotyre fa parte della chiave anche qui, come in gestisciAnagrafiche:
+    // senza, una tariffa legata a una dicitura veniva segnata «Duplicata» di quella
+    // che vale per tutte, che e' una spiegazione falsa - il server la accetta.
+    const campi = ['cliente', 'tipologia', 'classe_materiale', 'regione', 'eer_codice', 'servizio_ecotyre'];
     for (const c of campi) { if (normVal(a[c]) !== normVal(b[c])) return false; }
     return true;
   }
@@ -204,7 +207,10 @@ export default function TariffeUnificate() {
   const reopenPeriod = async (t) => {
     if (!confirm('Riaprire questa tariffa? Verrà impostata come attiva senza data di fine.')) return;
     try {
-      await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: { data_fine_validita: undefined, stato: 'attivo' } });
+      // null cancella la data di fine; con undefined la chiave spariva nel JSON
+      // e il server la rifondeva dal record, cosi' «Riapri» non riapriva niente
+      // e nessuno lo diceva (06/10/2026).
+      await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: { data_fine_validita: null, stato: 'attivo' } });
       load();
     } catch (e) { alert(e?.response?.data?.error || e?.message); }
   };
@@ -354,7 +360,10 @@ export default function TariffeUnificate() {
                           {multiRuolo && <button onClick={() => openDuplicate(t)} className="p-1 hover:bg-muted rounded" title="Duplica per altra prestazione"><Copy className="w-3.5 h-3.5 text-primary" /></button>}
                           <button onClick={() => setStorico(t)} className="p-1 hover:bg-muted rounded" title="Storico"><History className="w-3.5 h-3.5 text-muted-foreground" /></button>
                           {aperta && <button onClick={() => closePeriod(t)} className="p-1 hover:bg-muted rounded" title="Chiudi periodo"><CalendarX className="w-3.5 h-3.5 text-amber-500" /></button>}
-                          {arch && <button onClick={() => reopenPeriod(t)} className="p-1 hover:bg-muted rounded" title="Riapri"><RotateCcw className="w-3.5 h-3.5 text-success" /></button>}
+                          {/* Si riapre anche una tariffa chiusa con una data futura: prima il
+                              pulsante compariva solo dal giorno dopo la scadenza, e una chiusura
+                              messa per sbaglio restava li' per mesi senza modo di toglierla. */}
+                          {(arch || !!t.data_fine_validita) && <button onClick={() => reopenPeriod(t)} className="p-1 hover:bg-muted rounded" title="Riapri"><RotateCcw className="w-3.5 h-3.5 text-success" /></button>}
                           <button onClick={() => setDeleteTarget(t)} className="p-1 hover:bg-destructive/10 rounded" title="Elimina tariffa"><Trash2 className="w-3.5 h-3.5 text-destructive" /></button>
                         </div>
                       </td>

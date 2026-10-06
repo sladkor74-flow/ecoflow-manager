@@ -17,7 +17,7 @@
 // altrimenti chiudendole si perderebbe l'ultimo giorno dell'anno. npm run prove
 import { readFileSync } from 'node:fs';
 import { sortTariffe, findTariffa, resolveTariffa } from '../base44/shared/ecotyreTariffe.ts';
-import { prezzoAttivoExtra } from '../base44/shared/attivaCalcolo.ts';
+import { prezzoAttivoExtra, calcolaRigheAttiva } from '../base44/shared/attivaCalcolo.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -81,6 +81,31 @@ verifica('un intervento del 2027 senza prezzo scritto trova ancora la base in ta
 const interventoConPrezzo = { ...interventoSenzaPrezzo, prezzo_attivo_t: 260 };
 verifica('e il prezzo concordato sull\'intervento vince comunque',
   prezzoAttivoExtra(interventoConPrezzo, tariffe, '', 2027).origine === 'intervento');
+
+console.log('MA DICE DI CHE ANNO E\' IL PREZZO CHE APPLICA');
+verifica('la riga sa che la tariffa e\' del 2026 e l\'intervento del 2027',
+  prezzo2027.anno_tariffa === 2026 && prezzo2027.altro_anno === true, JSON.stringify([prezzo2027.anno_tariffa, prezzo2027.altro_anno]));
+verifica('e la nota lo scrive, col periodo di validita\'',
+  /e' il prezzo del 2026, non del 2027/.test(prezzo2027.nota) && /valida dal 01\/01\/2026, senza scadenza/.test(prezzo2027.nota), prezzo2027.nota);
+const prezzo2026 = prezzoAttivoExtra({ ...interventoSenzaPrezzo, trasporto_finito_il: '2026-05-10T10:00:00.000Z' }, tariffe, '', 2026);
+verifica('mentre nel 2026 non c\'e' + ' niente da segnalare',
+  prezzo2026.altro_anno === false && !/ATTENZIONE/.test(prezzo2026.nota), prezzo2026.nota);
+
+// La stessa cosa come la vede chi guarda il riepilogo Ecotyre: un'anomalia.
+const grezze = [
+  { id: 'extra', direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA', cliente: 'ECOTYRE', valore: 202, unita_misura: '€/t', stato: 'attivo', data_inizio_validita: '2026-01-01' },
+];
+const intervento = (id, giorno) => ({ stato: 'terminato', cer: '160103', id, id_ordine: id, numero_fir: 'F' + id, classe: 'A', peso_effettivo: 500, trasporto_finito_il: giorno, prezzo_attivo_t: 0 });
+const marzo2027 = calcolaRigheAttiva({ reteAll: [], aciAll: [], extraAll: [intervento('EY1', '2027-03-02T10:00:00.000Z')], fornitori: [], tariffe: grezze, anno: 2027, mese: 'Marzo' });
+const riga27 = marzo2027.righe.EXTRA_RACCOLTA[0];
+verifica('nel 2027 l\'intervento senza prezzo esce comunque a 202 €/t: la tariffa e\' aperta per scelta',
+  riga27?.tariffa_valore === 202 && riga27?.totale === 101, JSON.stringify(riga27 && [riga27.tariffa_valore, riga27.totale]));
+verifica('ma il riepilogo porta l\'anomalia "prezzo di un altro anno"',
+  marzo2027.anomalie.some(a => a.tipo === 'prezzo_altro_anno' && /2026/.test(a.descrizione) && /2027/.test(a.descrizione)),
+  JSON.stringify(marzo2027.anomalie));
+const maggio2026 = calcolaRigheAttiva({ reteAll: [], aciAll: [], extraAll: [intervento('EX9', '2026-05-10T10:00:00.000Z')], fornitori: [], tariffe: grezze, anno: 2026, mese: 'Maggio' });
+verifica('nel 2026, con la tariffa del 2026, nessuna anomalia',
+  !maggio2026.anomalie.some(a => a.tipo === 'prezzo_altro_anno'), JSON.stringify(maggio2026.anomalie));
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

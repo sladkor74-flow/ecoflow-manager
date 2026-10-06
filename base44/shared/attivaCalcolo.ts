@@ -34,6 +34,12 @@ const SOVRACOSTI = [
 
 const r2 = (v) => Math.round(v * 100) / 100;
 
+// Una data come la legge chi la deve capire: 2026-12-31 -> 31/12/2026.
+const giornoItaliano = (g) => {
+  const s = String(g || '').slice(0, 10);
+  return s.length === 10 ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : s;
+};
+
 // Regione del ritiro: se il record non la riporta si ricava dalla provincia.
 // La tariffa continua a usare la regione del record.
 const regioneRitiro = (r) => r.regione || PROV_TO_REGION[String(r.provincia || '').toUpperCase().trim()] || '';
@@ -67,9 +73,24 @@ export function prezzoAttivoExtra(r, tariffeSorted, tipoServizio, anno) {
   const daTabella = resolveTariffa(tariffeSorted, 'EXTRA_RACCOLTA', r.classe, r.regione || '', r.cer, r.trasporto_finito_il, tipoServizio);
   if (daTabella && Number(daTabella.valore) > 0) {
     const unita = daTabella.unita_misura || '€/t';
+    // LA TARIFFA DELL'EXTRA RACCOLTA RESTA APERTA PER SCELTA (utente, 06/10/2026):
+    // sono prestazioni occasionali su campagne che si rinnovano ogni anno, e il
+    // prezzo si concorda intervento per intervento. Una tariffa senza scadenza
+    // pero' continua a valere anche l'anno dopo: la riga deve dire di che anno
+    // e' il prezzo che sta applicando, invece di spacciarlo per quello
+    // dell'anno in corso.
+    const dal = String(daTabella.data_inizio_validita || '').slice(0, 10);
+    const al = String(daTabella.data_fine_validita || '').slice(0, 10);
+    const annoTariffa = dal ? Number(dal.slice(0, 4)) : null;
+    const altroAnno = annoTariffa !== null && Number(anno) !== annoTariffa;
+    const periodo = dal
+      ? (al ? `valida dal ${giornoItaliano(dal)} al ${giornoItaliano(al)}` : `valida dal ${giornoItaliano(dal)}, senza scadenza`)
+      : (al ? `valida fino al ${giornoItaliano(al)}` : 'senza periodo di validita\'');
     return {
       origine: 'tabella', id: daTabella.id || 'tabella', valore: Number(daTabella.valore), unita, fattore: fattoreConv(daTabella),
-      nota: `Tariffa base Ecotyre ${anno}: ${daTabella.valore} ${unita}, dalla tabella delle tariffe attive (sull'intervento il prezzo non e' scritto)`,
+      anno_tariffa: annoTariffa, altro_anno: altroAnno,
+      nota: `Tariffa base Ecotyre ${annoTariffa || anno}: ${daTabella.valore} ${unita}, dalla tabella delle tariffe attive, ${periodo} (sull'intervento il prezzo non e' scritto)`
+        + (altroAnno ? `. ATTENZIONE: e' il prezzo del ${annoTariffa}, non del ${anno}` : ''),
       totale: (kg) => calcolaTotale(kg, daTabella),
     };
   }
@@ -182,6 +203,15 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
       anomalieMap.set(`extra0|${r.id}`, {
         tipo: 'prezzo_zero', tipologia: 'EXTRA_RACCOLTA', regione, classe: r.classe || '', eer_codice: r.cer || '', servizio_ecotyre: tipoServizio, tonnellate: kg / 1000,
         descrizione: `Extra raccolta ${r.id_ordine || r.numero_fir || ''}: sull'intervento il prezzo attivo e' zero e per il ${annoNum} non c'e' una tariffa base Ecotyre (ne' nella tabella delle tariffe attive ne' fra quelle note al gestionale). Scrivi il prezzo sull'intervento o aggiungi la tariffa EXTRA_RACCOLTA.`,
+      });
+    }
+    // Il prezzo c'e', ma viene da una tariffa di un altro anno rimasta aperta:
+    // in un intervento occasionale il prezzo si concorda di volta in volta,
+    // quindi non deve passare in silenzio solo perche' un numero c'era.
+    if (prezzo.altro_anno) {
+      anomalieMap.set(`extraAnno|${r.id}`, {
+        tipo: 'prezzo_altro_anno', tipologia: 'EXTRA_RACCOLTA', regione, classe: r.classe || '', eer_codice: r.cer || '', servizio_ecotyre: tipoServizio, tonnellate: kg / 1000,
+        descrizione: `Extra raccolta ${r.id_ordine || r.numero_fir || ''}: sull'intervento il prezzo non e' scritto, e quello applicato (${prezzo.valore} ${prezzo.unita}) viene dalla tariffa del ${prezzo.anno_tariffa}, rimasta aperta; l'intervento e' del ${annoNum}. Scrivi sull'intervento il prezzo concordato per questa campagna.`,
       });
     }
     righe.EXTRA_RACCOLTA.push({

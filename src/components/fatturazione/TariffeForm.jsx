@@ -19,6 +19,11 @@ function isArchiviata(t) {
   return false;
 }
 
+// Un campo lasciato vuoto nella modifica: null lo cancella sul record, undefined
+// no (JSON.stringify butta via le chiavi undefined e il server rifonde il
+// vecchio valore). Vale per le date e per ogni campo facoltativo.
+const svuota = (v) => (String(v ?? '').trim() === '' ? null : v);
+
 export default function TariffeForm({ open, onClose, onSaved, editing, duplicating, excludePrestazione, fornitori, province, destinazioniRaccolta, stoccaggi, destinazioniSecondaria, switchToRuoliTab }) {
   const [form, setForm] = useState({});
   const [multiClasse, setMultiClasse] = useState(false);
@@ -133,24 +138,29 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
       if (isEdit) {
         const updateData = { valore: Number(form.valore), unita_misura: form.unita_misura, note: form.note };
         if (!archiviata) {
-          updateData.data_inizio_validita = form.data_inizio_validita || undefined;
-          updateData.data_fine_validita = form.data_fine_validita || undefined;
+          // SVUOTARE UN CAMPO DEVE CANCELLARLO DAVVERO (06/10/2026). Con
+          // «undefined» la chiave spariva nel JSON della richiesta, e l'update
+          // la rifonde sul record esistente: il vecchio valore restava dov'era
+          // mentre la finestra diceva «Tariffa salvata». Cosi' una data di fine
+          // messa per sbaglio non si poteva piu' togliere.
+          updateData.data_inizio_validita = svuota(form.data_inizio_validita);
+          updateData.data_fine_validita = svuota(form.data_fine_validita);
           updateData.tipologia = form.tipologia;
-          updateData.classe_materiale = form.classe_materiale || undefined;
+          updateData.classe_materiale = svuota(form.classe_materiale);
           if (isAttiva) {
-            updateData.regione = form.regione || undefined;
-            updateData.eer_codice = form.eer_codice || undefined;
-            updateData.servizio_ecotyre = form.servizio_ecotyre || undefined;
+            updateData.regione = svuota(form.regione);
+            updateData.eer_codice = svuota(form.eer_codice);
+            updateData.servizio_ecotyre = svuota(form.servizio_ecotyre);
           } else {
             if (form.prestazione === 'RACCOLTA') {
-              updateData.provincia = form.provincia || undefined;
-              updateData.regione = form.regione || undefined;
-              updateData.destinazione = form.destinazione || undefined;
+              updateData.provincia = svuota(form.provincia);
+              updateData.regione = svuota(form.regione);
+              updateData.destinazione = svuota(form.destinazione);
               updateData.comprensiva_trattamento = !!form.comprensiva_trattamento;
             }
             if (form.prestazione === 'TRASPORTO_SECONDARIA') {
-              updateData.produttore = form.produttore || undefined;
-              updateData.destinatario = form.destinatario || undefined;
+              updateData.produttore = svuota(form.produttore);
+              updateData.destinatario = svuota(form.destinatario);
             }
           }
         }

@@ -102,8 +102,12 @@ export function controlliTariffaAttiva(nuova, esistenti = []) {
   }
 
   if (servizio) {
+    // Il committente sta nel campo «cliente»: cercarlo in «cliente_fornitore»,
+    // che sull'entita' Tariffa non esiste, rendeva questo avviso codice morto -
+    // e la prova non se ne accorgeva perche' usava lo stesso nome sbagliato
+    // (trovato dal controllo incrociato del 06/10/2026).
     const unica = (esistenti || []).find(t => normText(t.tipologia) === tipologia
-      && normText(t.cliente_fornitore) === 'ECOTYRE'
+      && normText(t.cliente) === 'ECOTYRE'
       && !String(t.servizio_ecotyre || '').trim()
       && t.id !== (nuova && nuova.id)
       && (t.stato === 'attivo' || !t.stato));
