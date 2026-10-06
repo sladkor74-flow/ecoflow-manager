@@ -119,10 +119,17 @@
       "description": "Sigla provincia specifica; vuoto = vale per tutta la regione"
     }
   },
+  // prestazione NON e' obbligatoria qui: vale solo per la fatturazione PASSIVA.
+  // Una tariffa ATTIVA non ha prestazione - lo dice il modulo stesso, e
+  // gestisciAnagrafiche la rifiuta se c'e'. Essendo obbligatoria sull'entita',
+  // ogni modifica di una tariffa attiva veniva respinta con «Error in field
+  // prestazione: Field required», e nessuna delle sette tariffe Ecotyre si
+  // poteva piu' toccare: ci siamo arrivati addosso provando a scrivere la
+  // scadenza del 31/12/2026 (06/10/2026). Chi la richiede per le passive e'
+  // gestisciAnagrafiche, che sa in quale direzione sta andando.
   "required": [
     "unita_misura",
-    "valore",
-    "prestazione"
+    "valore"
   ],
   "rls": {
     "read": true,
