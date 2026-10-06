@@ -62,6 +62,11 @@ verifica('«Zona Ind.» e «Z.I.», e una contrada scritta a orecchio, sono lo s
 verifica('«C/DA» e\' una contrada',
   confrontaIndirizzi('C/DA LECCO ZONA INDUSTRIALE SNC', 'Contrada Lecco Z.I. snc') === 'coincide',
   confrontaIndirizzi('C/DA LECCO ZONA INDUSTRIALE SNC', 'Contrada Lecco Z.I. snc'));
+// Una parola del portale puo' combaciare con due della rete: contarle invece di
+// guardare che cosa resta scoperto diceva «meta' strada» su un indirizzo coperto.
+verifica('«Via C. Cervito - zona ind.» e «Via Cervito 1» sono la stessa via',
+  confrontaIndirizzi('VIA C. CERVITO - ZONA IND.', 'Via Cervito 1') === 'coincide',
+  confrontaIndirizzi('VIA C. CERVITO - ZONA IND.', 'Via Cervito 1'));
 console.log('MA LE DIFFERENZE VERE RESTANO DIFFERENZE');
 verifica('una contrada e una via del paese sono due posti',
   confrontaIndirizzi('CONTRADA GUGLIA', 'Via Nazionale, 4') === 'diverso');

@@ -149,7 +149,12 @@ export function confrontaIndirizzi(portale, trovato) {
   const comuni = pa.filter(p => pb.some(q => parolaUguale(p, q)));
   if (!comuni.length) return 'diverso';
 
-  const tutteDiUno = comuni.length === pa.length || comuni.length === pb.length;
+  // La copertura si guarda da tutt'e due le parti, parola per parola, e non
+  // contando quante ne combaciano: «Via C. Cervito - zona ind.» ha due parole che
+  // combaciano con l'unica parola di «Via Cervito 1» (la C. puntata e il nome),
+  // e un conteggio direbbe due su una, cioe' niente di coperto. Quello che conta
+  // e' se tutte le parole di uno si ritrovano nell'altro.
+  const tutteDiUno = pa.every(p => pb.some(q => parolaUguale(p, q))) || pb.every(q => pa.some(p => parolaUguale(p, q)));
   if (tutteDiUno) return civiciCompatibili(numeroCivico(portale), numeroCivico(trovato)) ? 'coincide' : 'incerto';
   // Qualche parola in comune ma non tutte: meta' strada, la guarda una persona.
   return comuni.length * 2 >= Math.min(pa.length, pb.length) ? 'incerto' : 'diverso';
