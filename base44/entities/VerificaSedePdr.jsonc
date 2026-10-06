@@ -85,6 +85,14 @@
     "spiegazione": {
       "type": "string"
     },
+    "citazione": {
+      "type": "string",
+      "description": "La riga della fonte in cui l'indirizzo compare, copiata com'e': senza, una conferma che ripete l'indirizzo che abbiamo dato noi vale poco"
+    },
+    "ricerche_fatte": {
+      "type": "string",
+      "description": "Le ricerche provate, per capire se la sede non c'e' o se non si e' cercata bene"
+    },
     "verificato_il": {
       "type": "string",
       "format": "date"

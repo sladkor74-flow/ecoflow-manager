@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, MapPin, Eye } from 'lucide-react';
+import { Loader2, MapPin, Eye, Search } from 'lucide-react';
+import { base44 } from '@/api/base44Client';
 import { streetViewUrl, precisioneCoordinata } from '@/lib/geoLinks';
 import { useIndiceOmologhe } from '@/lib/omologheIndice';
 import BadgeOmologa from '@/components/shared/BadgeOmologa';
+import { useIndiceSedi, dimenticaIndiceSedi } from '@/lib/sediIndice';
+import BadgeSedeOperativa from '@/components/shared/BadgeSedeOperativa';
 import { formatIntero } from '@/lib/utils';
 
 // I punti di raccolta sono piu' di tremila: disegnarli tutti insieme pesa mezzo
@@ -13,6 +16,26 @@ const PASSO = 200;
 export default function PdrTable({ records, loading, onSelectPdr }) {
   const indiceOmologhe = useIndiceOmologhe();
   const [quante, setQuante] = useState(PASSO);
+  // La sede operativa si controlla UN PUNTO ALLA VOLTA, da qui: e' qui che si
+  // cerca il gommista del formulario che si sta preparando, e un giro su
+  // centinaia di punti non serve a chi ne ha in mano uno. Il controllo vale
+  // anche dopo un caricamento nuovo del file: e' agganciato all'ID del punto di
+  // raccolta, non alla riga dell'anagrafica, che il caricamento riscrive.
+  const [versioneSedi, setVersioneSedi] = useState(0);
+  const indiceSedi = useIndiceSedi(versioneSedi);
+  const [inCorso, setInCorso] = useState(null);
+  const [errore, setErrore] = useState('');
+  const controllaSede = async (r) => {
+    setErrore(''); setInCorso(r.id_pdr);
+    try {
+      await base44.functions.invoke('verificaSediPdr', { ids: [r.id_pdr], motivo: 'chiesto dall\'elenco dei punti di raccolta' });
+      dimenticaIndiceSedi();
+      setVersioneSedi(v => v + 1);
+    } catch (e) {
+      setErrore(e?.response?.data?.error || e?.message || 'Controllo non riuscito');
+    }
+    setInCorso(null);
+  };
   // cambiando filtro o ricerca si riparte dalle prime
   useEffect(() => { setQuante(PASSO); }, [records]);
   if (loading) {
@@ -31,14 +54,17 @@ export default function PdrTable({ records, loading, onSelectPdr }) {
     );
   }
   return (
+    <div className="space-y-2">
+    {errore && <p className="text-sm text-destructive">{errore}</p>}
     <div className="border rounded-lg overflow-hidden overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-muted">
           <tr>
-            <th className="px-2 py-2.5 w-20"></th>
+            <th className="px-2 py-2.5 w-28"></th>
             <th className="text-left px-3 py-2.5 font-medium">Cod. Esterno</th>
             <th className="text-left px-3 py-2.5 font-medium">Ragione Sociale</th>
             <th className="text-left px-3 py-2.5 font-medium" title="Omologa registrata per il punto di raccolta, con la sua scadenza">Omologa</th>
+            <th className="text-left px-3 py-2.5 font-medium" title="Sede operativa controllata in rete: sul formulario va quella, non la sede legale">Sede</th>
             <th className="text-left px-3 py-2.5 font-medium">Comune</th>
             <th className="text-left px-3 py-2.5 font-medium">Prov.</th>
             <th className="text-left px-3 py-2.5 font-medium">Cod. Fiscale</th>
@@ -91,6 +117,15 @@ export default function PdrTable({ records, loading, onSelectPdr }) {
                           <Eye className="w-4 h-4 text-primary" />
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => controllaSede(r)}
+                        disabled={inCorso != null}
+                        title="Controlla in rete la sede operativa di questo punto di raccolta"
+                        className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        {inCorso === r.id_pdr ? <Loader2 className="w-4 h-4 animate-spin text-primary" /> : <Search className="w-4 h-4 text-primary" />}
+                      </button>
                     </div>
                   );
                 })()}
@@ -98,6 +133,7 @@ export default function PdrTable({ records, loading, onSelectPdr }) {
               <td className="px-3 py-2 font-mono text-xs">{r.codice_esterno || '—'}</td>
               <td className="px-3 py-2 font-medium">{r.ragione_sociale || '—'}</td>
               <td className="px-3 py-2"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} nome={r.ragione_sociale} /></td>
+              <td className="px-3 py-2"><BadgeSedeOperativa indice={indiceSedi} idPdr={r.id_pdr} nome={r.ragione_sociale} /></td>
               <td className="px-3 py-2">{r.comune || '—'}</td>
               <td className="px-3 py-2">{r.provincia || '—'}</td>
               <td className="px-3 py-2 font-mono text-xs">{r.codice_fiscale || '—'}</td>
@@ -150,6 +186,7 @@ export default function PdrTable({ records, loading, onSelectPdr }) {
           <button type="button" onClick={() => setQuante(records.length)} className="text-primary hover:underline">Mostra tutti</button>
         </div>
       )}
+    </div>
     </div>
   );
 }

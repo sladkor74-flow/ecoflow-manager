@@ -148,6 +148,8 @@ export function esitoVerifica({ portale = {}, risposta = {} }) {
     indirizzo_trovato: '', cap_trovato: '', comune_trovato: '', provincia_trovato: '',
     altre_sedi: String(risposta.altre_sedi || '').slice(0, 1000),
     fonti, spiegazione: String(risposta.spiegazione || '').slice(0, 1000),
+    citazione: String(risposta.citazione || '').slice(0, 500),
+    ricerche_fatte: String(risposta.ricerche_fatte || '').slice(0, 500),
   };
   if (!indirizzoTrovato || !fonti.length) {
     return {
@@ -162,7 +164,13 @@ export function esitoVerifica({ portale = {}, risposta = {} }) {
 
   const confidenzaDetta = ['alta', 'media', 'bassa'].includes(String(risposta.confidenza)) ? String(risposta.confidenza) : 'media';
   // Una fonte sola non fa una certezza.
-  const confidenza = fonti.length === 1 && confidenzaDetta === 'alta' ? 'media' : confidenzaDetta;
+  let confidenza = fonti.length === 1 && confidenzaDetta === 'alta' ? 'media' : confidenzaDetta;
+  // L'ECO. Il rischio di una ricerca a cui si e' dato gia' l'indirizzo e' che lo
+  // ripeta: «confermo quello che mi hai detto». Quando l'indirizzo trovato e'
+  // identico a quello che gli abbiamo passato e non c'e' la riga della fonte in
+  // cui l'ha letto, la conferma vale poco e lo si dice.
+  const eco = !base.citazione && confrontaIndirizzi(portale.indirizzo, indirizzoTrovato) === 'coincide';
+  if (eco) confidenza = 'bassa';
 
   const trovato = {
     ...base,
@@ -171,6 +179,9 @@ export function esitoVerifica({ portale = {}, risposta = {} }) {
     comune_trovato: comuneTrovato.slice(0, 120),
     provincia_trovato: String(risposta.provincia || '').trim().toUpperCase().slice(0, 2),
     confidenza,
+    spiegazione: eco
+      ? (base.spiegazione + ' (La ricerca ripete l\'indirizzo che le abbiamo dato senza mostrare la riga in cui l\'ha letto: la conferma vale poco.)').trim()
+      : base.spiegazione,
   };
 
   if (comuneTrovato && !stessoComune(portale.comune, comuneTrovato)) {

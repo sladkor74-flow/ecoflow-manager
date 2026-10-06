@@ -62,12 +62,27 @@ const conFonti = esitoVerifica({
 });
 verifica('con due fonti e un indirizzo diverso, l\'esito e\' «diverso» e la confidenza resta alta',
   conFonti.esito === 'diverso' && conFonti.confidenza === 'alta' && conFonti.provincia_trovato === 'PZ' && conFonti.fonti.length === 2, JSON.stringify(conFonti));
+// La citazione c'e': cosi' si prova la regola della fonte unica e non quella
+// dell'eco, aggiunta dopo (la riga della fonte ora fa parte della risposta).
 const unaSola = esitoVerifica({
   portale: { indirizzo: 'Via Roma 1', comune: 'Nemoli' },
-  risposta: { indirizzo: 'Via Roma 1', comune: 'Nemoli', confidenza: 'alta', fonti: ['https://unsito.it/a'] },
+  risposta: { indirizzo: 'Via Roma 1', comune: 'Nemoli', confidenza: 'alta', fonti: ['https://unsito.it/a'], citazione: 'Gommista - Via Roma 1, Nemoli' },
 });
 verifica('una fonte sola non fa una certezza: al massimo media',
   unaSola.esito === 'coincide' && unaSola.confidenza === 'media', JSON.stringify(unaSola));
+// L'eco: a una ricerca a cui si e' dato l'indirizzo puo' venire facile ripeterlo.
+const eco = esitoVerifica({
+  portale: { indirizzo: 'Via Roma 1', comune: 'Nemoli' },
+  risposta: { indirizzo: 'Via Roma, 1', comune: 'Nemoli', confidenza: 'alta', fonti: ['https://a.it/1', 'https://b.it/2'] },
+});
+verifica('una conferma che ripete il nostro indirizzo senza citare la riga vale poco',
+  eco.esito === 'coincide' && eco.confidenza === 'bassa' && /ripete l'indirizzo/.test(eco.spiegazione), JSON.stringify(eco));
+const conCitazione = esitoVerifica({
+  portale: { indirizzo: 'Via Roma 1', comune: 'Nemoli' },
+  risposta: { indirizzo: 'Via Roma, 1', comune: 'Nemoli', confidenza: 'alta', fonti: ['https://a.it/1', 'https://b.it/2'], citazione: 'Gommista Rossi - Via Roma 1, 85040 Nemoli (PZ)', ricerche_fatte: 'gommista Nemoli' },
+});
+verifica('ma con la riga della fonte la conferma vale',
+  conCitazione.confidenza === 'alta' && conCitazione.citazione.length > 10 && conCitazione.ricerche_fatte === 'gommista Nemoli', JSON.stringify(conCitazione));
 const altroComune = esitoVerifica({
   portale: { indirizzo: 'Via Roma 1', comune: 'Nemoli' },
   risposta: { indirizzo: 'Via Roma 1', comune: 'Lagonegro', confidenza: 'alta', fonti: ['https://a.it/1', 'https://b.it/2'] },

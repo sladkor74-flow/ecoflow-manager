@@ -226,8 +226,10 @@ export default function SediOperative({ records, cercaIniziale = '' }) {
                     </td>
                     <td className="px-3 py-2">
                       <div>{unaRiga(v.indirizzo_trovato, v.cap_trovato, v.comune_trovato, v.provincia_trovato) || <span className="text-muted-foreground">—</span>}</div>
+                      {v.citazione && <div className="text-xs italic text-muted-foreground">«{v.citazione}»</div>}
                       {v.altre_sedi && <div className="text-xs text-muted-foreground whitespace-pre-line">altre sedi: {v.altre_sedi}</div>}
                       {v.spiegazione && <div className="text-xs text-muted-foreground">{v.spiegazione}</div>}
+                      {v.ricerche_fatte && <div className="text-xs text-muted-foreground whitespace-pre-line">ricerche provate: {v.ricerche_fatte}</div>}
                       {!!(v.fonti || []).length && (
                         <div className="flex flex-wrap gap-2 mt-1">
                           {(v.fonti || []).map((f, k) => (

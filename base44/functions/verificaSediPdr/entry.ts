@@ -33,6 +33,8 @@ const SCHEMA = {
     provincia: { type: 'string' },
     altre_sedi: { type: 'string', description: 'Le altre unita\' locali trovate, una per riga' },
     fonti: { type: 'array', items: { type: 'string' }, description: 'Gli indirizzi internet consultati' },
+    citazione: { type: 'string', description: 'La riga della fonte in cui l\'indirizzo compare, copiata com\'e\'' },
+    ricerche_fatte: { type: 'string', description: 'Le ricerche provate su google.it, una per riga' },
     confidenza: { type: 'string', enum: ['alta', 'media', 'bassa'] },
     spiegazione: { type: 'string' },
   },
@@ -68,6 +70,9 @@ function promptPer(p) {
   // e' un indizio che vale la pena dare a chi cerca. Da solo non e' un allarme:
   // per la maggior parte dei gommisti l'officina E' la sede legale.
   const comeLaSedeLegale = normalizzaIndirizzo(p.indirizzo_pdr) && normalizzaIndirizzo(p.indirizzo_pdr) === normalizzaIndirizzo(p.sede_legale);
+  // Il telefono non va nella risposta, ma e' una chiave di ricerca ottima: un
+  // numero ritrovato su una scheda dice che quella scheda e' davvero sua.
+  const telefono = String(p.tel_pdr || p.tel || '').trim();
   return [
     'Sei l\'addetto che prepara i formulari di identificazione del rifiuto (FIR) per un\'azienda italiana che ritira pneumatici fuori uso presso gommisti e autodemolitori.',
     'Sul formulario deve comparire la SEDE OPERATIVA del produttore - l\'unita\' locale dove si va davvero a ritirare: officina, piazzale, magazzino - e non la sede legale.',
@@ -81,13 +86,21 @@ function promptPer(p) {
     `- Indirizzo che risulta a noi, che potrebbe essere vecchio o essere la sede legale: ${portale}`,
     comeLaSedeLegale ? '- Attenzione: nei nostri dati questo indirizzo e\' scritto anche come sede legale, quindi potrebbe non essere mai stata registrata la sede operativa vera. Controlla con attenzione se l\'officina sta altrove.' : '',
     '',
-    'Regole, tutte importanti:',
-    '- Cerca schede dell\'attivita\' su mappe ed elenchi (mappe, pagine gialle, elenchi di aziende, registro imprese), il sito dell\'azienda, le sue pagine pubbliche.',
-    '- Riporta SOLO quello che hai letto su una fonte che citi: elenca gli indirizzi internet consultati. Senza una fonte consultabile lascia l\'indirizzo vuoto e le fonti vuote: dire «non si trova» e\' una risposta giusta, inventare no.',
+    'COME CERCARE. Cerca su google.it, in italiano, come farebbe una persona in Italia: e\' il motore che conosce i gommisti italiani. Prova piu\' ricerche, non una sola, per esempio:',
+    `  «${p.ragione_sociale || ''} ${p.comune_pdr || ''}», «${p.descrizione_pdr || p.ragione_sociale || ''} ${p.comune_pdr || ''}», «gommista ${p.comune_pdr || ''} ${p.provincia_pdr || ''}», «${p.ragione_sociale || ''} indirizzo»`,
+    p.partita_iva ? `  e anche la sola partita IVA: «${p.partita_iva}»` : '',
+    telefono ? `  e il numero di telefono: «${telefono}» (un numero ritrovato su una scheda e\' la prova migliore che si tratta di lui)` : '',
+    '- Guarda la SCHEDA DELL\'ATTIVITA\' SULLE MAPPE (Google Maps / profilo dell\'attivita\'): per un gommista e\' spesso l\'unica fonte che riporta l\'officina vera, e li\' l\'insegna puo\' essere diversa dalla ragione sociale.',
+    '- Guarda poi gli elenchi italiani (pagine gialle e bianche, elenchi di gommisti e centri di montaggio, i cerca-rivenditori dei produttori di pneumatici), il sito dell\'azienda e le sue pagine pubbliche.',
+    '- In «ricerche_fatte» scrivi le ricerche che hai provato, una per riga.',
+    '',
+    'REGOLE, tutte importanti:',
+    '- Riporta SOLO quello che hai letto su una fonte che citi: elenca gli indirizzi internet consultati e, in «citazione», copia la riga in cui l\'indirizzo compare. Senza una fonte consultabile lascia l\'indirizzo vuoto e le fonti vuote: dire «non si trova» e\' una risposta giusta, inventare no.',
     '- NON dedurre l\'indirizzo da quello che ti ho dato io e non correggerlo a mente: se la rete conferma lo stesso indirizzo, ripetilo citando dove l\'hai letto.',
     '- Se il soggetto ha piu\' unita\' locali, metti in «indirizzo» quella che fa officina o deposito nel comune indicato e le altre in «altre_sedi».',
-    '- Attenzione agli omonimi: lo stesso nome in un altro comune non e\' lo stesso soggetto. Se non sei sicuro che sia lui, confidenza «bassa» e scrivilo nella spiegazione.',
-    '- Serve solo l\'indirizzo: niente numeri di telefono, niente nomi di persone.',
+    '- ATTENZIONE AGLI OMONIMI: lo stesso nome in un\'altra provincia NON e\' lo stesso soggetto. Controlla sempre comune e provincia, e la partita IVA quando la fonte la riporta.',
+    '- Se trovi un indirizzo diverso ma non sei sicuro che sia lui, RIPORTALO LO STESSO con confidenza «bassa», spiegando il dubbio: lo guarda una persona. Un dubbio segnalato vale piu\' di un dato buttato via.',
+    '- Serve solo l\'indirizzo: niente numeri di telefono, niente nomi di persone nella risposta.',
     '- Scrivi la spiegazione in italiano, in una o due righe.',
   ].filter(Boolean).join('\n');
 }
