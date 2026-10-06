@@ -212,7 +212,7 @@ function Letture({ canale }) {
                 {l.classi.map(c => (
                   <tr key={`${l.del}|${c.classe}`} className="bg-amber-50/50">
                     <td />
-                    <td colSpan={3} className="px-2 pb-1.5 text-[11px] text-amber-900">{rigaClasse(c)}</td>
+                    <td colSpan={3} className="px-2 pb-1.5 text-[11px] text-amber-900">{rigaClasse(c, l.precedente_del)}</td>
                   </tr>
                 ))}
               </React.Fragment>
@@ -230,6 +230,9 @@ function Letture({ canale }) {
 // 3. Com'e' adesso: il verdetto dell'ultima lettura, e chi puo' spiegarlo.
 function Stato({ canale }) {
   const s = canale.stato;
+  // Da dove viene l'attesa scritta qui sotto: la lettura prima dell'ultima.
+  const precedenteDel = (canale.letture || []).find(l => l.ultima)?.precedente_del
+    || (canale.letture || [])[0]?.precedente_del || '';
   const { box, Icona } = STILE[s.esito] || STILE.senza_precedente;
   return (
     <div className={`border rounded-md p-3 space-y-2 ${box}`}>
@@ -249,7 +252,7 @@ function Stato({ canale }) {
       )}
       {s.classi.filter(c => c.scarto).map(c => (
         <div key={c.classe} className="bg-card/70 border rounded-md p-2 space-y-1 text-foreground">
-          <div className="text-xs font-medium">{rigaClasse(c)}</div>
+          <div className="text-xs font-medium">{rigaClasse(c, precedenteDel)}</div>
           {c.nota && <div className="text-[11px]">{c.nota}</div>}
           {c.candidati.length > 0 && (
             <div className="space-y-0.5">

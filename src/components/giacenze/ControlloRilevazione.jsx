@@ -142,9 +142,23 @@ export function riassuntoVerifica(v) {
   };
 }
 
-/** Una classe che si scosta, in una riga: attesa, letta, scarto. */
-export function rigaClasse(c) {
-  return `Classe ${c.classe}: attesa ${kgOppure(c.atteso)}, letta ${kgOppure(c.letto)}, scarto ${kgSegno(c.scarto)}.`;
+/**
+ * Una classe che si scosta, in una riga: che cosa si e' letto e che cosa ci si
+ * aspettava, dicendo SEMPRE da dove viene l'attesa.
+ *
+ * Una lettura ha due punti di partenza - quella prima di lei e l'ancora
+ * dell'anno - e le due attese possono essere diverse: sulla classe P di Nappi
+ * Sud l'avviso in cima a Giacenze diceva 19.120 kg e questo dettaglio 24.480,
+ * senza che si capisse che erano risposte a due domande diverse (06/10/2026).
+ * Quando ci sono tutt'e due si scrivono tutt'e due, ognuna col suo nome.
+ */
+export function rigaClasse(c, precedenteDel) {
+  const da = precedenteDel ? ` dalla lettura del ${giorno(precedenteDel)} piu' i movimenti del periodo` : '';
+  const base = `attesa ${kgOppure(c.atteso)}${da} (scarto ${kgSegno(c.scarto)})`;
+  const conAncora = c.atteso_ancora !== undefined && c.atteso_ancora !== null && c.ancora_del
+    ? `; attesa ${kgOppure(c.atteso_ancora)} dall'ancora del ${giorno(c.ancora_del)} piu' tutti i movimenti da allora (scarto ${kgSegno(c.scarto_ancora)})`
+    : '';
+  return `Classe ${c.classe}: letta ${kgOppure(c.letto)}; ${base}${conAncora}.`;
 }
 
 /** Da dove viene l'attesa: la rilevazione prima, piu' gli ingressi meno le uscite. */
@@ -286,7 +300,7 @@ export default function ControlloRilevazione({ open, onClose, sito, verifica }) 
 
           {r.scostano.map(c => (
             <div key={`dett|${c.canale}|${c.classe}`} className="border rounded-md p-3 space-y-1">
-              <div className="font-medium">{rigaClasse(c)}</div>
+              <div className="font-medium">{rigaClasse(c, verifica.precedente_del)}</div>
               <div className="text-xs text-muted-foreground">{dettaglioClasse(c, verifica.precedente_del)}</div>
               <div className="text-xs">{c.nota}</div>
               {c.candidati.length > 0 && (

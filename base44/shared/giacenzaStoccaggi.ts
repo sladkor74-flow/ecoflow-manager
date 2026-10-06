@@ -994,7 +994,20 @@ export function riconciliazionePiazzale(rilevazioni, movimenti, { oggi = '' } = 
       quadra: v.quadra,
       scostano: v.scostano,
       canali: v.canali,
-      classi: v.classi.filter(c => c.scarto),
+      // DUE PUNTI DI PARTENZA, DUE ATTESE, E VANNO DETTE TUTT'E DUE (06/10/2026).
+      //
+      // Una lettura si confronta con quella prima di lei e con l'ancora
+      // dell'anno, e le due attese possono essere diverse. L'avviso in cima a
+      // Giacenze citava quella dall'ancora, questo dettaglio quella dalla lettura
+      // precedente, e nessuno dei due diceva da dove veniva il suo numero: sulla
+      // classe P di Nappi Sud si leggevano 19.120 kg attesi in un posto e 24.480
+      // nell'altro. Ora ogni classe se le porta dietro tutt'e due.
+      classi: v.classi.filter(c => c.scarto).map(c => {
+        const a = ((v.ancora && v.ancora.classi) || []).find(x => x.classe === c.classe && x.canale === c.canale);
+        return a && !v.ancora.senza_ancora && !v.ancora.e_la_lettura
+          ? { ...c, atteso_ancora: a.atteso, scarto_ancora: a.scarto, ancora_del: v.ancora.del }
+          : c;
+      }),
       ancora: v.ancora,
       confermata_dall_ancora: v.confermata_dall_ancora,
       // Quanto leggeva quel giorno, un canale per volta: mai la somma dei due.

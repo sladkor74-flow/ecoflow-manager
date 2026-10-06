@@ -73,8 +73,29 @@ verifica('dice la cosa che indirizza la ricerca: il totale torna, la ripartizion
 
 const emme = r.scostano.find(c => c.classe === 'M');
 const pi = r.scostano.find(c => c.classe === 'P');
-verifica('la classe M: attesa 28.470, letta 22.310, 6.160 kg di scarto', rigaClasse(emme) === 'Classe M: attesa 28.470 kg, letta 22.310 kg, scarto -6.160 kg.', rigaClasse(emme));
-verifica('e la P lo stesso scarto dall\'altra parte, col segno', rigaClasse(pi) === 'Classe P: attesa 15.240 kg, letta 21.400 kg, scarto +6.160 kg.', rigaClasse(pi));
+// L'ATTESA DICE SEMPRE DA DOVE VIENE (06/10/2026).
+//
+// Una lettura ha due punti di partenza - quella prima di lei e l'ancora dell'anno
+// - e le due attese possono essere diverse: su Nappi Sud l'avviso in cima a
+// Giacenze diceva 19.120 kg attesi e il dettaglio 24.480, senza che si capisse
+// che erano risposte a due domande diverse. Chiesto dall'utente.
+verifica('la classe M: letta 22.310, attesa 28.470 dalla lettura prima, 6.160 kg di scarto',
+  rigaClasse(emme, storta.precedente_del) === "Classe M: letta 22.310 kg; attesa 28.470 kg dalla lettura del 13/09/2026 piu' i movimenti del periodo (scarto -6.160 kg).",
+  rigaClasse(emme, storta.precedente_del));
+verifica('e la P lo stesso scarto dall\'altra parte, col segno',
+  rigaClasse(pi, storta.precedente_del) === "Classe P: letta 21.400 kg; attesa 15.240 kg dalla lettura del 13/09/2026 piu' i movimenti del periodo (scarto +6.160 kg).",
+  rigaClasse(pi, storta.precedente_del));
+verifica('senza sapere da quale lettura, l\'attesa non millanta una provenienza',
+  rigaClasse(emme) === 'Classe M: letta 22.310 kg; attesa 28.470 kg (scarto -6.160 kg).', rigaClasse(emme));
+{
+  // Quando c'e' anche l'attesa dall'ancora si scrivono tutt'e due, ognuna col suo
+  // nome: sono i due numeri che si leggevano in due posti diversi della pagina.
+  const conAncora = { ...pi, atteso_ancora: 19120, scarto_ancora: 2620, ancora_del: '2025-12-31' };
+  const riga = rigaClasse(conAncora, storta.precedente_del);
+  verifica('con due punti di partenza si scrivono tutt\'e due le attese, ognuna col suo nome',
+    riga === "Classe P: letta 21.400 kg; attesa 15.240 kg dalla lettura del 13/09/2026 piu' i movimenti del periodo (scarto +6.160 kg); attesa 19.120 kg dall'ancora del 31/12/2025 piu' tutti i movimenti da allora (scarto +2.620 kg).",
+    riga);
+}
 verifica('da dove viene l\'attesa: la rilevazione prima, piu\' gli ingressi meno le uscite',
   dettaglioClasse(emme, storta.precedente_del) === "Il 13/09/2026 erano 19.449 kg; nel periodo 2 ingressi per 9.021 kg e 0 uscite per 0 kg.", dettaglioClasse(emme, storta.precedente_del));
 verifica('lo scarto della P viene da una sola uscita', dettaglioClasse(pi, storta.precedente_del).includes('1 uscita per 4.499 kg'), dettaglioClasse(pi, storta.precedente_del));

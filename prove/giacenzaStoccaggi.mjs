@@ -184,6 +184,25 @@ verifica('la prima non ha un punto di partenza: non si dice se tornava', ric.sto
 const sepolta = ric.storico.find(s => s.del === '2026-09-16');
 verifica('la lettura sbagliata del 16/09 resta visibile anche se ne sono arrivate altre dopo', sepolta.quadra === false && sepolta.canali.RETE.ripartizione_sbagliata === true, JSON.stringify(sepolta.canali.RETE));
 verifica('e si porta dietro le sue classi e i suoi candidati', sepolta.classi.length === 2 && sepolta.classi.every(c => c.candidati[0].id_ordine === 'ET26138377'), JSON.stringify(sepolta.classi.map(c => c.classe)));
+// DUE PUNTI DI PARTENZA, DUE ATTESE (06/10/2026). Ogni classe se le porta dietro
+// tutt'e due, perche' la pagina possa dire da dove viene ciascun numero: l'avviso
+// in cima a Giacenze cita quella dall'ancora, il dettaglio quella dalla lettura
+// precedente, e su Nappi Sud si leggevano 19.120 kg in un posto e 24.480
+// nell'altro senza che nessuno dei due dicesse da dove venisse.
+{
+  const p16 = sepolta.classi.find(c => c.classe === 'P');
+  verifica('ogni classe porta anche l\'attesa dall\'ancora, con il giorno dell\'ancora',
+    p16.ancora_del === '2026-09-13' && typeof p16.atteso_ancora === 'number' && typeof p16.scarto_ancora === 'number',
+    JSON.stringify({ atteso: p16.atteso, atteso_ancora: p16.atteso_ancora, ancora_del: p16.ancora_del }));
+  // Qui l'ancora e' proprio la lettura precedente, quindi le due attese
+  // coincidono: e' il caso normale, e il caso di Nappi Sud e' quello in cui no.
+  verifica('quando l\'ancora e\' la lettura prima, le due attese coincidono',
+    p16.atteso_ancora === p16.atteso && p16.scarto_ancora === p16.scarto);
+  // La prima lettura dell'anno e' l'ancora di se stessa: non ha un'attesa da
+  // confrontare e non se ne inventa una.
+  const prima = ric.storico[0];
+  verifica('la lettura che e\' l\'ancora non porta un\'attesa dall\'ancora', prima.classi.every(c => c.atteso_ancora === undefined));
+}
 verifica('l\'ultima invece tornava', ric.storico[2].quadra === true && ric.storico[2].ultima === true && ric.storico[2].classi.length === 0);
 verifica('le letture del canale vengono dalla piu\' recente', rete.letture.map(l => l.del).join(' ') === '2026-09-20 2026-09-16 2026-09-13', rete.letture.map(l => l.del).join(' '));
 verifica('ognuna dice quanto leggeva quel giorno, solo del suo canale', rete.letture[0].letto_kg === 49060 && rete.letture[1].letto_kg === 44060, JSON.stringify(rete.letture.map(l => l.letto_kg)));
