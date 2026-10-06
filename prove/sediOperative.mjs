@@ -12,7 +12,7 @@
 import {
   normalizzaIndirizzo, numeroCivico, confrontaIndirizzi, fontiValide, esitoVerifica,
   daVerificare, riportaDecisione, indirizzoPerFormulario, ultimaVerificaPerPdr,
-  chiaveSoggetto, verificaApplicabile, decisioneDiAltroPunto,
+  chiaveSoggetto, verificaApplicabile, decisioneDiAltroPunto, chiaviSoggetto, indicePerSoggetto,
 } from '../base44/shared/sediOperative.ts';
 
 let ok = 0, ko = 0;
@@ -197,6 +197,15 @@ const reiscritto = { id_pdr: 39180, ragione_sociale: 'Longo Pneumatici Snc', par
 const giaDeciso = decisioneDiAltroPunto(reiscritto, [vecchiaAltroSoggetto, { id_pdr: 500, partita_iva: '11111111111', stato: 'corretto' }]);
 verifica('la sede gia\' decisa per lo stesso soggetto su un altro punto si ritrova',
   giaDeciso && giaDeciso.id_pdr === 308, JSON.stringify(giaDeciso && giaDeciso.id_pdr));
+// E si ritrova anche partendo da un ordine, che la partita IVA non ce l'ha.
+const indiceSogg = indicePerSoggetto([vecchiaAltroSoggetto]);
+verifica('la sede decisa si indicizza sia per partita IVA sia per nome e comune',
+  indiceSogg.get('PIVA:03171111111') && indiceSogg.get('NOME:LONGOFRANCESCOFIGLISNC|LAMEZIATERME'),
+  JSON.stringify([...indiceSogg.keys()]));
+verifica('cosi\' un ordine, che la partita IVA non la porta, la ritrova lo stesso per nome e comune',
+  chiaviSoggetto({ ragione_sociale: 'LONGO FRANCESCO & FIGLI SNC', comune: 'Lamezia Terme' }).some(k => indiceSogg.has(k)));
+verifica('e una verifica non decisa non entra nell\'indice: non c\'e\' niente da ricordare',
+  indicePerSoggetto([{ ...vecchiaAltroSoggetto, stato: 'da_decidere' }]).size === 0);
 verifica('ma per il punto nuovo non c\'e\' nessuna verifica: si ricontrolla',
   daVerificare({ pdr: [reiscritto], idPdrConOrdini: [39180], verifiche: [vecchiaAltroSoggetto], oggi: '2026-10-06' })[0].motivo === 'mai controllato');
 

@@ -102,7 +102,7 @@ export default function AssegnatiTable({ records, loading, ragioneSocialeFilter,
                       <>
                         <td className="px-3 py-2"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} nome={r.ragione_sociale} /></td>
                         <td className="px-3 py-2"><BadgeRentri indice={indiceRentri} idPdr={r.id_pdr} nome={r.ragione_sociale} /></td>
-                        <td className="px-3 py-2"><BadgeSedeOperativa indice={indiceSedi} idPdr={r.id_pdr} nome={r.ragione_sociale} /></td>
+                        <td className="px-3 py-2"><BadgeSedeOperativa indice={indiceSedi} idPdr={r.id_pdr} nome={r.ragione_sociale} record={r} /></td>
                       </>
                     )}
                   </React.Fragment>

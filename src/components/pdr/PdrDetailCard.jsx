@@ -4,7 +4,7 @@ import { base44 } from '@/api/base44Client';
 import { streetViewUrl, satelliteUrl, addressSearchUrl, precisioneCoordinata } from '@/lib/geoLinks';
 import { useIndiceOmologhe } from '@/lib/omologheIndice';
 import BadgeOmologa from '@/components/shared/BadgeOmologa';
-import { useIndiceSedi, sedeDelPunto, dimenticaIndiceSedi } from '@/lib/sediIndice';
+import { useIndiceSedi, sedeDelPunto, sedeDecisaAltrove, dimenticaIndiceSedi } from '@/lib/sediIndice';
 import { indirizzoPerFormulario } from '@/lib/sediOperative';
 
 function DetailField({ label, value }) {
@@ -25,6 +25,9 @@ export default function PdrDetailCard({ r }) {
   const indiceSedi = useIndiceSedi(versioneSedi);
   const verificaSede = sedeDelPunto(indiceSedi, r.id_pdr);
   const perFormulario = indirizzoPerFormulario(r, verificaSede);
+  // Lo stesso gommista puo' essersi re-iscritto con un numero nuovo: la sede che
+  // avevi deciso sul punto vecchio non vale qui, ma devi saperlo.
+  const decisaAltrove = !verificaSede ? sedeDecisaAltrove(indiceSedi, r) : null;
   const controllaSede = async () => {
     setControllo('in corso');
     try {
@@ -94,6 +97,12 @@ export default function PdrDetailCard({ r }) {
           {[perFormulario.indirizzo, perFormulario.cap, perFormulario.comune, perFormulario.provincia].filter(Boolean).join(', ') || '—'}
         </p>
         <p className="text-xs text-muted-foreground">{perFormulario.nota}</p>
+        {decisaAltrove && (
+          <p className="text-xs text-sky-900">
+            Questo punto non è mai stato controllato, ma lo stesso soggetto ha già una sede decisa sul punto di raccolta {decisaAltrove.id_pdr}:{' '}
+            {[decisaAltrove.indirizzo_per_formulario || decisaAltrove.indirizzo_portale, decisaAltrove.comune_per_formulario || decisaAltrove.comune_portale].filter(Boolean).join(', ')}. È un altro punto: controlla questo prima di usarla.
+          </p>
+        )}
         {verificaSede && verificaSede.indirizzo_trovato && perFormulario.origine !== 'confermato' && (
           <p className="text-xs text-muted-foreground">
             In rete risulta: {[verificaSede.indirizzo_trovato, verificaSede.cap_trovato, verificaSede.comune_trovato, verificaSede.provincia_trovato].filter(Boolean).join(', ')}

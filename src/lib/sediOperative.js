@@ -230,6 +230,43 @@ export function chiaveSoggetto(r) {
   return nome ? 'NOME:' + nome + '|' + comune : '';
 }
 
+/**
+ * TUTTE le chiavi con cui si puo' riconoscere un soggetto, non solo la migliore.
+ * Serve a ritrovarlo fra fonti che portano dati diversi: l'anagrafica dei punti
+ * di raccolta ha la partita IVA, un ordine assegnato no, ma tutt'e due hanno
+ * nome e comune. Si usa per RITROVARE (una decisione presa altrove), mai per
+ * decidere se due record sono la stessa azienda: li' vale chiaveSoggetto, che
+ * sulla partita IVA non transige.
+ */
+export function chiaviSoggetto(r) {
+  if (!r) return [];
+  const chiavi = [];
+  const piva = String(r.partita_iva || '').toUpperCase().replace(/[^0-9A-Z]/g, '').replace(/^IT/, '');
+  if (piva.length >= 8) chiavi.push('PIVA:' + piva);
+  const nome = normalizzaSoggetto(r.ragione_sociale || r.descrizione_pdr);
+  const comune = normalizzaSoggetto(r.comune_pdr || r.comune_portale || r.comune);
+  if (nome) chiavi.push('NOME:' + nome + '|' + comune);
+  return chiavi;
+}
+
+/**
+ * L'ultima sede DECISA di ogni soggetto, da qualunque punto di raccolta venga.
+ * Quando un gommista si re-iscrive, il portale gli da' un id_pdr nuovo e il
+ * punto risulta mai controllato: senza questo, la sede che avevi gia' deciso non
+ * la ritroverebbe nessuno finche' non si rifa' il controllo.
+ */
+export function indicePerSoggetto(verifiche) {
+  const per = new Map();
+  for (const v of verifiche || []) {
+    if (!v || (v.stato !== 'corretto' && v.stato !== 'confermato_portale')) continue;
+    for (const k of chiaviSoggetto(v)) {
+      const gia = per.get(k);
+      if (!gia || giorno(v.deciso_il || v.verificato_il) > giorno(gia.deciso_il || gia.verificato_il)) per.set(k, v);
+    }
+  }
+  return per;
+}
+
 /** Un nome ridotto a lettere e cifre: «Eurogomme S.r.l.» -> EUROGOMMESRL. */
 export function normalizzaSoggetto(v) {
   return String(v == null ? '' : v).toUpperCase()

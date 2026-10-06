@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { sedeDelPunto } from '@/lib/sediIndice';
+import { sedeDelPunto, sedeDecisaAltrove } from '@/lib/sediIndice';
 import { normalizzaSoggetto } from '@/lib/sediOperative';
 
 // Segno della sede operativa accanto a un punto di raccolta: serve quando si
@@ -11,10 +11,25 @@ import { normalizzaSoggetto } from '@/lib/sediOperative';
 
 const unaRiga = (...parti) => parti.filter(p => String(p || '').trim()).join(', ');
 
-export default function BadgeSedeOperativa({ indice, idPdr, nome }) {
+export default function BadgeSedeOperativa({ indice, idPdr, nome, record }) {
   if (!indice) return <span className="text-muted-foreground text-xs">…</span>;
   if (indice.errore) return <span className="text-muted-foreground text-xs" title="Controlli delle sedi non disponibili">?</span>;
   const v = sedeDelPunto(indice, idPdr);
+  // IL GOMMISTA CHE SI RE-ISCRIVE. Il portale gli da' un numero nuovo e il punto
+  // risulta mai controllato, ma la sua sede era gia' stata decisa su un altro
+  // punto: dirlo qui evita di rifare il lavoro e di stampare l'indirizzo vecchio.
+  const altrove = sedeDecisaAltrove(indice, record || { id_pdr: idPdr, ragione_sociale: nome });
+  if (!v && altrove) {
+    const suo = [altrove.indirizzo_per_formulario || altrove.indirizzo_portale, altrove.comune_per_formulario || altrove.comune_portale].filter(Boolean).join(', ');
+    return (
+      <Link to={`/pdr?scheda=sedi${nome ? `&cerca=${encodeURIComponent(nome)}` : ''}`}>
+        <span className="inline-block px-1.5 py-0.5 rounded border text-xs whitespace-nowrap bg-sky-50 text-sky-900 border-sky-300"
+          title={`Questo punto non e' mai stato controllato, ma lo stesso soggetto ha gia' una sede decisa sul punto di raccolta ${altrove.id_pdr}: ${suo}. E' un altro punto: controlla questo prima di usarla.`}>
+          decisa altrove
+        </span>
+      </Link>
+    );
+  }
   if (!v) return <span className="text-muted-foreground text-xs" title="Sede operativa mai controllata">—</span>;
   // Un numero di punto di raccolta dice quale posto, non chi: se l'ordine e' di
   // un'altra azienda rispetto al controllo, quel controllo non parla di lui.
