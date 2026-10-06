@@ -8,8 +8,8 @@
 
 import { formatNumber, formatKg, formatTonnellate, formatIntero } from '@/lib/utils';
 
-const NUMERICI = new Set(['kg', 't', 'euro', 'prezzo', 'intero']);
-const FORMATO_EXCEL = { kg: '#,##0', t: '#,##0.00#', euro: '#,##0.00', prezzo: '#,##0.0000', intero: '#,##0', data: 'dd/mm/yyyy' };
+const NUMERICI = new Set(['kg', 't', 'euro', 'prezzo', 'intero', 'percentuale']);
+const FORMATO_EXCEL = { kg: '#,##0', t: '#,##0.00#', euro: '#,##0.00', prezzo: '#,##0.0000', intero: '#,##0', percentuale: '#,##0.0"%"', data: 'dd/mm/yyyy' };
 
 // Date del portale a mezzanotte UTC; quelle salvate a mezzanotte italiana (22 o 23
 // UTC) si riportano al giorno giusto.
@@ -29,6 +29,9 @@ function testoCella(valore, tipo) {
     case 'euro': return `${formatNumber(valore, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
     case 'prezzo': return `${formatNumber(valore, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} €`;
     case 'intero': return formatIntero(valore);
+    // Una percentuale non e' un euro: senza il suo tipo finiva in euro, come ogni
+    // numero senza tipo (06/10/2026).
+    case 'percentuale': return `${formatNumber(valore, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
     case 'data': { const d = comeData(valore); return d ? d.toLocaleDateString('it-IT', { timeZone: 'UTC' }) : '—'; }
     default: return String(valore);
   }

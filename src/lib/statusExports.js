@@ -1,5 +1,4 @@
 // Utility per esportazione Excel, PDF e PPT del modulo Status & Target.
-import { jsPDF } from 'jspdf';
 import pptxgen from 'pptxgenjs';
 import { base44 } from '@/api/base44Client';
 import { MESI } from './pfuConstants';
@@ -26,76 +25,63 @@ export async function exportExcel(anno) {
   downloadBlob(blob, res.data.filename);
 }
 
-export function exportPDF(kpis, mergedData, regioneData, impiantiData) {
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  const dateStr = new Date().toLocaleDateString('it-IT');
-
-  doc.setFontSize(16);
-  doc.text('Status & Target Management - PFU Ecotyre', 14, 15);
-  doc.setFontSize(9);
-  doc.text(`Data: ${dateStr}`, 14, 21);
-
-  // KPI
-  doc.setFontSize(11);
-  doc.text('KPI Riepilogativi', 14, 32);
-  doc.setFontSize(9);
-  const kpiLines = [
-    `Target Annuo Complessivo: ${formatTonnellate(kpis.targetAnnuoTotale)} t`,
-    `Totale Progressivo Raccolto: ${formatTonnellate(kpis.raccoltoTotale)} t`,
-    `Leftover Complessivo Annuo: ${formatTonnellate(kpis.leftoverTotale)} t`,
-    `Delta Mese In Corso: ${formatTonnellate(kpis.deltaMeseCorrente)} t`,
-  ];
-  kpiLines.forEach((line, i) => doc.text(line, 14, 39 + i * 5));
-
-  // Tabella Raccoglitori
-  doc.setFontSize(11);
-  doc.text('Target & Performance Raccoglitori', 14, 65);
-  doc.setFontSize(8);
-  doc.text('Regione', 14, 71);
-  doc.text('Raccoglitore', 50, 71);
-  doc.text('T.Annuo', 115, 71);
-  doc.text('Raccolto', 140, 71);
-  doc.text('Leftover', 165, 71);
-  let y = 76;
-  for (const r of mergedData) {
-    if (y > 200) { doc.addPage(); y = 15; }
-    doc.text(String(r.regione).substring(0, 22), 14, y);
-    doc.text(String(r.raccoglitore).substring(0, 28), 50, y);
-    doc.text(formatTonnellate(r.targetAnnuo), 115, y);
-    doc.text(formatTonnellate(r.raccoltoTotale), 140, y);
-    doc.text(formatTonnellate(r.leftover), 165, y);
-    y += 5;
-  }
-
-  // Tabella Regioni
-  doc.addPage();
-  doc.setFontSize(11);
-  doc.text('Target e Scostamento per Regione', 14, 15);
-  doc.setFontSize(8);
-  doc.text('Regione', 14, 21);
-  doc.text('Raccolto Totale [t]', 60, 21);
-  y = 26;
-  for (const r of regioneData) {
-    doc.text(String(r.regione).substring(0, 22), 14, y);
-    doc.text(formatTonnellate(r.totale), 60, y);
-    y += 5;
-  }
-
-  // Tabella Impianti
-  doc.setFontSize(11);
-  doc.text('Progressivo e Avanzamento Impianti', 14, 60);
-  doc.setFontSize(8);
-  doc.text('Impianto', 14, 66);
-  doc.text('Totale Conferito [t]', 80, 66);
-  y = 71;
-  for (const i of impiantiData) {
-    if (y > 200) break;
-    doc.text(String(i.impianto).substring(0, 30), 14, y);
-    doc.text(formatTonnellate(i.totale), 80, y);
-    y += 5;
-  }
-
-  doc.save(`Status_Target_${new Date().toISOString().slice(0, 10)}.pdf`);
+// IL PDF DI TARGET & STATUS, CON LA MACCHINA COMUNE (06/10/2026).
+//
+// Era scritto a coordinate fisse: il blocco degli impianti partiva a y=71 e si
+// fermava a `if (y > 200) break`, cioe' SCARTAVA IN SILENZIO gli impianti oltre
+// il ventiseiesimo; e la tabella delle regioni, senza nessun controllo di fine
+// pagina, finiva sopra il titolo degli impianti. Ora lo fa esportaSezioniPdf,
+// che cambia pagina da sola, ripete le intestazioni a ogni pagina e numera i
+// fogli, come gli altri PDF del gestionale.
+//
+// E le colonne dicono di quale canale sono: questi numeri sono di RETE (il
+// raccolto arriva da computeRaccolto con canale rete), non del totale conferito.
+export async function exportPDF(kpis, mergedData, regioneData, impiantiData, anno) {
+  const { esportaSezioniPdf } = await import('@/lib/esportaTabella');
+  const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
+  await esportaSezioniPdf({
+    nomeFile: `target-status-${anno || new Date().getFullYear()}`,
+    intestazione: 'SMOCO S.r.l.  ·  COMMESSA ECOTYRE',
+    titolo: 'Target & Status · Andamento',
+    sottotitolo: anno ? `Anno ${anno}` : '',
+    riepilogo: (kpis || []).map(k => ({
+      etichetta: k.etichetta || k.label || '',
+      valore: num(k.valore ?? k.value),
+      tipo: k.tipo || 't',
+    })),
+    sezioni: [
+      {
+        titolo: 'Target e raccolto per raccoglitore (RETE)',
+        colonne: [
+          { titolo: 'Regione', tipo: 'testo', peso: 1.2 },
+          { titolo: 'Raccoglitore', tipo: 'testo', peso: 2 },
+          { titolo: 'Target annuo', tipo: 't', peso: 1 },
+          { titolo: 'Raccolto RETE', tipo: 't', peso: 1 },
+          { titolo: 'Leftover', tipo: 't', peso: 1 },
+        ],
+        righe: (mergedData || []).map(r => ({
+          celle: [r.regione, r.raccoglitore, num(r.targetAnnuo), num(r.raccoltoTotale), num(r.leftover)],
+        })),
+      },
+      {
+        titolo: 'Raccolto RETE per regione',
+        colonne: [
+          { titolo: 'Regione', tipo: 'testo', peso: 2 },
+          { titolo: 'Raccolto RETE', tipo: 't', peso: 1 },
+        ],
+        righe: (regioneData || []).map(r => ({ celle: [r.regione, num(r.totale)] })),
+      },
+      {
+        titolo: 'Progressivo e avanzamento impianti (RETE)',
+        colonne: [
+          { titolo: 'Impianto', tipo: 'testo', peso: 2 },
+          { titolo: 'Conferito RETE', tipo: 't', peso: 1 },
+        ],
+        righe: (impiantiData || []).map(i => ({ celle: [i.impianto, num(i.totale)] })),
+      },
+    ],
+    note: ['Tutti i numeri sono del canale RETE: ACI ed extra raccolta sono canali a se, e non si sommano mai.'],
+  });
 }
 
 export async function exportPPT(kpis, mergedData, regioneData, impiantiData) {

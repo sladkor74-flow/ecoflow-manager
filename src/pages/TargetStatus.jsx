@@ -41,7 +41,9 @@ import { Loader2, RefreshCw, Filter, X, Lock } from 'lucide-react';
 // schede; chi non e' amministratore consulta soltanto.
 
 const TARGET_BY_YEAR = { 2025: 11200, 2026: 11550 };
-const SCHEDE = ['andamento', 'raccoglitori', 'commessa', 'impianti'];
+// 'zone' c'era come linguetta ma non in questo elenco: cliccandola la pagina
+// tornava sempre ad Andamento, e la scheda non si apriva (06/10/2026).
+const SCHEDE = ['andamento', 'raccoglitori', 'commessa', 'impianti', 'zone'];
 // fra piu' commesse dello stesso anno vale la modificata per ultima, come nelle funzioni
 const piuRecente = (righe) => (righe || []).reduce((x, r) => (!x || String(r.updated_date || r.created_date || '') > String(x.updated_date || x.created_date || '') ? r : x), null);
 const leggiLista = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
@@ -304,7 +306,7 @@ export default function TargetStatus() {
               <button onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
                 <RefreshCw className="w-4 h-4" /> Aggiorna
               </button>
-              <ExportButtons onExcel={() => exportExcel(anno)} onPDF={() => exportPDF(kpis, mergedData, regioneData, impiantiData)} onPPT={() => exportPPT(kpis, mergedData, regioneData, impiantiData)} />
+              <ExportButtons onExcel={() => exportExcel(anno)} onPDF={() => exportPDF(kpis, mergedData, regioneData, impiantiData, anno)} onPPT={() => exportPPT(kpis, mergedData, regioneData, impiantiData)} />
             </>
           )}
         </div>

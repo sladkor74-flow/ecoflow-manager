@@ -15,6 +15,8 @@ import TargetManager from '@/components/giacenze/TargetManager';
 import StoccaggiManager from '@/components/giacenze/StoccaggiManager';
 import ChiusuraAnno from '@/components/giacenze/ChiusuraAnno';
 import { exportGiacenzeAllExcel } from '@/lib/giacenzeExportAll';
+import EsportaPdf from '@/components/shared/EsportaPdf';
+import { situazionePdf, derivatiPdf, targetPdf } from '@/lib/giacenzePdf';
 
 export default function Giacenze() {
   const { user } = useAuth();
@@ -96,7 +98,10 @@ export default function Giacenze() {
             </TabsList>
 
             <TabsContent value="situazione">
-              <SituazioneTable righe={data.righe} totali={data.totali} onVaiDaDichiarare={vaiDaDichiarareConSito} />
+              <div className="space-y-3">
+                <div className="flex justify-end"><EsportaPdf sezioni={() => situazionePdf(anno, data.righe, data.totali)} /></div>
+                <SituazioneTable righe={data.righe} totali={data.totali} onVaiDaDichiarare={vaiDaDichiarareConSito} />
+              </div>
             </TabsContent>
 
             <TabsContent value="dichiarare">
@@ -104,18 +109,22 @@ export default function Giacenze() {
             </TabsContent>
 
             <TabsContent value="derivati">
-              <DerivatiTable righe={data.righe} totali={data.totali} />
+              <div className="space-y-3">
+                <div className="flex justify-end"><EsportaPdf sezioni={() => derivatiPdf(anno, data.righe, data.totali)} /></div>
+                <DerivatiTable righe={data.righe} totali={data.totali} />
+              </div>
             </TabsContent>
 
             <TabsContent value="target">
               <div className="space-y-3">
-                {isAdmin && (
-                  <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 justify-between items-center">
+                  {isAdmin ? (
                     <Button variant="outline" size="sm" onClick={() => setShowTargetManager(true)}>
                       <Settings className="w-4 h-4 mr-1" /> Siti e target
                     </Button>
-                  </div>
-                )}
+                  ) : <span />}
+                  <EsportaPdf sezioni={() => targetPdf(anno, data.righe, data.totali)} />
+                </div>
                 <TargetTable righe={data.righe} totali={data.totali} />
               </div>
             </TabsContent>

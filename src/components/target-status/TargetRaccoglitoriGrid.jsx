@@ -13,6 +13,8 @@ import { tonnellate, leggiNumero, leggiStorico, conModifica, nomeUtente, chiaveN
 import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 import ImportaReportGenerale from '@/components/target-status/ImportaReportGenerale';
 import { annoDelRecord, daConfermare } from '@/lib/annoTarget';
+import EsportaPdf from '@/components/shared/EsportaPdf';
+import { targetRaccoglitoriPdf } from '@/lib/giacenzePdf';
 
 
 // Target dei raccoglitori: l'unico punto in cui si scrivono.
@@ -632,13 +634,16 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
           annuo si definisce a inizio anno o alla contrattualizzazione; a inizio mese si scrive quanto si affida. Clicca su una cella per modificarla: vale subito
           in dashboard, alert, Verifiche e negli altri moduli, e la modifica resta nello storico <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 align-middle" />.
         </p>
-        {isAdmin && (
-          <div className="flex gap-2">
-
-            <Button size="sm" variant="outline" onClick={() => setImporta(true)}><FileSpreadsheet className="w-4 h-4 mr-1" />Importa dal Report Generale</Button>
-            <Button size="sm" variant="outline" onClick={() => setNuovo(true)}><Plus className="w-4 h-4 mr-1" />Aggiungi riga</Button>
-          </div>
-        )}
+        <div className="flex gap-2">
+          {/* La situazione di questa scheda com'e' adesso, in PDF (06/10/2026). */}
+          <EsportaPdf sezioni={() => targetRaccoglitoriPdf(anno, righe.elenco, autoDellaRiga)} disabilitato={caricando} />
+          {isAdmin && (
+            <>
+              <Button size="sm" variant="outline" onClick={() => setImporta(true)}><FileSpreadsheet className="w-4 h-4 mr-1" />Importa dal Report Generale</Button>
+              <Button size="sm" variant="outline" onClick={() => setNuovo(true)}><Plus className="w-4 h-4 mr-1" />Aggiungi riga</Button>
+            </>
+          )}
+        </div>
       </div>
 
       {righeVuote.length > 0 && (
