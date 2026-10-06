@@ -98,7 +98,7 @@ function dataRegistro(XLSX, v) {
 }
 
 /** Report della settimana ricavato da un registro di carico e scarico, o null se il file non lo e'. */
-function reportDaRegistro(XLSX, wb, periodo) {
+export function reportDaRegistro(XLSX, wb, periodo) {
   for (const nome of wb.SheetNames) {
     const ws = wb.Sheets[nome];
     if (!ws || !ws['!ref']) continue;
@@ -117,28 +117,53 @@ function reportDaRegistro(XLSX, wb, periodo) {
       const campata = (i) => { const prossimo = inizioGruppi.find(x => x > i); return [i, (prossimo ?? intest.length) - 1]; };
       const iEcotyre = gruppi.findIndex(g => /ecotyre/i.test(g));
       if (iEcotyre < 0) continue;
+      // ANCHE GLI SCARICHI, NON SOLO I CARICHI (06/10/2026).
+      //
+      // Si leggevano le sole colonne degli ingressi, e una riga che aveva i chili
+      // soltanto nella colonna delle uscite veniva scartata da «if (!pesi.length)
+      // continue». Cosi' la secondaria ACI Irigom -> Gatim del 29/09, 12.820 kg,
+      // che nel registro c'e' - foglio Dettaglio, gruppo ACI, colonna "Uscite" -
+      // risultava «registrata e assente nel report»: il gestionale dava per non
+      // fatta una movimentazione che era stata fatta davvero.
+      //
+      // Le colonne delle uscite si prendono solo DENTRO i gruppi Ecotyre e ACI:
+      // il registro ne ha tante altre (CER 160103, 191202, CSS-C, ferro) che non
+      // sono movimenti di PFU della commessa e non vanno confuse con questi.
+      // Che una riga sia un ingresso o un'uscita lo dicono poi produttore e
+      // destinatario, come per ogni altro report.
       const classi = [];
+      const uscite = [];
       const [e0, e1] = campata(iEcotyre);
-      for (let c = e0; c <= e1; c++) if (/^(P|M|G ?1|G ?2|G)$/i.test(intest[c])) classi.push({ c, classe: intest[c].replace(/\s+/g, '').toUpperCase() });
+      for (let c = e0; c <= e1; c++) {
+        if (/^(P|M|G ?1|G ?2|G)$/i.test(intest[c])) classi.push({ c, classe: intest[c].replace(/\s+/g, '').toUpperCase() });
+        else if (/uscit/i.test(intest[c])) uscite.push({ c, classe: '' });
+      }
       const iAci = gruppi.findIndex(g => /^aci$/i.test(g));
       if (iAci >= 0) {
         const [a0, a1] = campata(iAci);
-        for (let c = a0; c <= a1; c++) if (/ingress/i.test(intest[c])) { classi.push({ c, classe: 'ACI' }); break; }
+        let ingressoAci = false;
+        for (let c = a0; c <= a1; c++) {
+          if (!ingressoAci && /ingress/i.test(intest[c])) { classi.push({ c, classe: 'ACI' }); ingressoAci = true; }
+          else if (/uscit/i.test(intest[c])) uscite.push({ c, classe: 'ACI' });
+        }
       }
-      if (!classi.length) continue;
+      if (!classi.length && !uscite.length) continue;
 
       const uscita = [['Data (ingresso in impianto)', 'Nr. ordine o ticket', 'Produttore', 'Trasportatore', 'Destinatario', 'Intermediario', 'Nr. FIR', 'Classe', 'Peso netto (kg)']];
       for (let i = h + 1; i < righe.length; i++) {
         const r = righe[i] || [];
         const data = dataRegistro(XLSX, r[col.data]);
         if (!data || (periodo && (data < periodo.inizio || data > periodo.fine))) continue;
-        const pesi = classi.map(k => ({ ...k, kg: Number(r[k.c]) || 0 })).filter(k => k.kg > 0);
+        const pesiIngresso = classi.map(k => ({ ...k, kg: Number(r[k.c]) || 0 })).filter(k => k.kg > 0);
+        // Una riga di scarico ha i chili solo nella colonna delle uscite: prima
+        // veniva scartata e il movimento spariva dal report.
+        const pesi = pesiIngresso.length ? pesiIngresso : uscite.map(k => ({ ...k, kg: Number(r[k.c]) || 0 })).filter(k => k.kg > 0);
         if (!pesi.length) continue;
         const principale = pesi.reduce((a, b) => (b.kg > a.kg ? b : a));
         const valore = (k) => (col[k] >= 0 ? testoIntestazione(r[col[k]]) : '');
         uscita.push([data, valore('ticket'), valore('produttore'), valore('trasportatore'), valore('destinatario'), valore('intermediario'), valore('fir'), principale.classe, pesi.reduce((s, k) => s + k.kg, 0)]);
       }
-      return { nome: `${nome} (registro: carichi Ecotyre e ACI${periodo ? ` dal ${periodo.inizio} al ${periodo.fine}` : ''})`, riga_iniziale: 0, righe: uscita, registro: true };
+      return { nome: `${nome} (registro: carichi e scarichi Ecotyre e ACI${periodo ? ` dal ${periodo.inizio} al ${periodo.fine}` : ''})`, riga_iniziale: 0, righe: uscita, registro: true };
     }
   }
   return null;
