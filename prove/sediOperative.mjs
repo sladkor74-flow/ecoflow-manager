@@ -46,6 +46,35 @@ verifica('stessa via, civico lontano: incerto, lo guarda una persona',
 verifica('un indirizzo vuoto non e\' una differenza: e\' un incerto',
   confrontaIndirizzi('', 'Via Roma 1') === 'incerto' && confrontaIndirizzi('Via Roma 1', '') === 'incerto');
 
+// I casi veri del primo giro sul gestionale (06/10/2026, 153 punti controllati):
+// la rete scrive gli indirizzi per esteso e il portale li abbrevia, e prendere
+// per diverso quello che e' lo stesso posto riempie l'elenco di allarmi finti.
+console.log('LE ABBREVIAZIONI DEGLI STRADARI NON SONO DIFFERENZE');
+verifica('«f.Turati» e «Filippo Turati» sono la stessa via',
+  confrontaIndirizzi('Via f.Turati 2A/2B', 'Via Filippo Turati 2A-2B') === 'coincide',
+  confrontaIndirizzi('Via f.Turati 2A/2B', 'Via Filippo Turati 2A-2B'));
+verifica('«M. Buonarroti» e «Michelangelo Buonarroti» pure',
+  confrontaIndirizzi('VIA M. BUONARROTI SNC', 'Via Michelangelo Buonarroti SNC') === 'coincide',
+  confrontaIndirizzi('VIA M. BUONARROTI SNC', 'Via Michelangelo Buonarroti SNC'));
+verifica('«Zona Ind.» e «Z.I.», e una contrada scritta a orecchio, sono lo stesso posto',
+  confrontaIndirizzi('CONTRADA PINNELLA - ZONA IND. KM 1', 'Contrada Pinella Z.I. Km.1') === 'coincide',
+  confrontaIndirizzi('CONTRADA PINNELLA - ZONA IND. KM 1', 'Contrada Pinella Z.I. Km.1'));
+verifica('«C/DA» e\' una contrada',
+  confrontaIndirizzi('C/DA LECCO ZONA INDUSTRIALE SNC', 'Contrada Lecco Z.I. snc') === 'coincide',
+  confrontaIndirizzi('C/DA LECCO ZONA INDUSTRIALE SNC', 'Contrada Lecco Z.I. snc'));
+console.log('MA LE DIFFERENZE VERE RESTANO DIFFERENZE');
+verifica('una contrada e una via del paese sono due posti',
+  confrontaIndirizzi('CONTRADA GUGLIA', 'Via Nazionale, 4') === 'diverso');
+verifica('la zona PIP e una via del centro anche',
+  confrontaIndirizzi('ZONA PIP - LOC MASSA LOTTO, 9', 'VIA PANTAGLIONE 16') === 'diverso');
+verifica('e due vie con nomi diversi pure',
+  confrontaIndirizzi('Via Mons Onofrio Brindisi SNC', 'Via Francesco Protettì 62') === 'diverso');
+verifica('stessa via con il civico 113 contro il 115: incerto, lo guarda una persona',
+  confrontaIndirizzi('VIA SAN FRANCESCO DA PAOLA, 113', 'Via San Francesco Di Paola, 115') === 'incerto',
+  confrontaIndirizzi('VIA SAN FRANCESCO DA PAOLA, 113', 'Via San Francesco Di Paola, 115'));
+verifica('e «Roma» non diventa «Rosa» per una lettera',
+  confrontaIndirizzi('Via Roma 5', 'Via Rosa 5') === 'diverso', confrontaIndirizzi('Via Roma 5', 'Via Rosa 5'));
+
 console.log('SENZA FONTE NON E\' UN INDIRIZZO');
 verifica('una fonte vale solo se e\' un indirizzo internet',
   JSON.stringify(fontiValide(['https://www.paginegialle.it/x', 'me lo ricordo', '', 'http://sito.it/a'])) === JSON.stringify(['https://www.paginegialle.it/x', 'http://sito.it/a']),

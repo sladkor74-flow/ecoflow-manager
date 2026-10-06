@@ -44,6 +44,10 @@ const ABBREVIAZIONI = [
   [/\bFRAZ\.?(IONE)?\b/g, 'FRAZIONE'],
   [/\bZ\.?\s?I\.?(?=\s|$)/g, ' ZONA INDUSTRIALE '],
   [/\bKM\.?T?\b/g, 'KM'],
+  [/\bF\.?\s?LLI\b/g, 'FRATELLI'],
+  [/\bC\s?\/\s?DA\b/g, 'CONTRADA'],
+  [/\bIND\.?(LE)?\b|\bINDUSTR\b/g, 'INDUSTRIALE'],
+  [/\bANG\.?(OLO)?\b|\bAN\.(?=\s)/g, 'ANGOLO'],
 ];
 
 // Parole che in un indirizzo non distinguono niente: due indirizzi non si
@@ -93,6 +97,40 @@ function civiciCompatibili(a, b) {
   return !!ca && ca === cb;
 }
 
+// Distanza di una lettera fra due parole: serve a non prendere per due strade
+// diverse «Pinnella» e «Pinella», che sono la stessa contrada scritta a orecchio.
+function aUnaLettera(a, b) {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, differenze = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++differenze > 1) return false;
+    if (a.length > b.length) i++;
+    else if (b.length > a.length) j++;
+    else { i++; j++; }
+  }
+  return differenze + (a.length - i) + (b.length - j) <= 1;
+}
+
+/**
+ * Due parole di un indirizzo sono la stessa parola?
+ * Le insegne e gli stradari italiani abbreviano tutto: «M. Buonarroti» e
+ * «Michelangelo Buonarroti», «f.Turati» e «Filippo Turati», «Zona Ind.» e «Zona
+ * Industriale». Prendere per diverso quello che e' lo stesso posto riempie
+ * l'elenco di allarmi finti, e gli allarmi finti fanno smettere di guardare.
+ */
+export function parolaUguale(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // un'iniziale puntata: M. sta per Michelangelo
+  if (a.length === 1 || b.length === 1) return a[0] === b[0];
+  // un'abbreviazione: ANG per ANGOLO, IND per INDUSTRIALE
+  if (a.startsWith(b) || b.startsWith(a)) return true;
+  // una lettera di differenza, ma solo su parole lunghe: VIA ROMA e VIA ROSA no
+  if (Math.min(a.length, b.length) >= 5 && aUnaLettera(a, b)) return true;
+  return false;
+}
+
 /**
  * Due indirizzi a confronto: 'coincide' | 'incerto' | 'diverso'.
  * 'incerto' vuol dire che la via e' la stessa ma qualcosa non torna (il civico,
@@ -108,7 +146,7 @@ export function confrontaIndirizzi(portale, trovato) {
   const pa = paroleIndirizzo(portale).filter(p => !/^[0-9]/.test(p));
   const pb = paroleIndirizzo(trovato).filter(p => !/^[0-9]/.test(p));
   if (!pa.length || !pb.length) return 'incerto';
-  const comuni = pa.filter(p => pb.includes(p));
+  const comuni = pa.filter(p => pb.some(q => parolaUguale(p, q)));
   if (!comuni.length) return 'diverso';
 
   const tutteDiUno = comuni.length === pa.length || comuni.length === pb.length;
