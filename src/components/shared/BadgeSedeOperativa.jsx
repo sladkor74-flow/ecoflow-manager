@@ -1,0 +1,61 @@
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { sedeDelPunto } from '@/lib/sediIndice';
+
+// Segno della sede operativa accanto a un punto di raccolta: serve quando si
+// programma il ritiro, perche' sul formulario va la sede operativa e non la sede
+// legale. Il segno dice se quello che c'e' in anagrafica e' stato controllato
+// contro quello che si trova in rete, e se qualcuno ha deciso.
+// Non e' un giudizio sul produttore: e' lo stato di un controllo.
+
+const unaRiga = (...parti) => parti.filter(p => String(p || '').trim()).join(', ');
+
+export default function BadgeSedeOperativa({ indice, idPdr, nome }) {
+  if (!indice) return <span className="text-muted-foreground text-xs">…</span>;
+  if (indice.errore) return <span className="text-muted-foreground text-xs" title="Controlli delle sedi non disponibili">?</span>;
+  const v = sedeDelPunto(indice, idPdr);
+  if (!v) return <span className="text-muted-foreground text-xs" title="Sede operativa mai controllata">—</span>;
+
+  const indirizzoCorretto = unaRiga(v.indirizzo_per_formulario, v.cap_per_formulario, v.comune_per_formulario, v.provincia_per_formulario);
+  const trovato = unaRiga(v.indirizzo_trovato, v.cap_trovato, v.comune_trovato, v.provincia_trovato);
+  const portale = unaRiga(v.indirizzo_portale, v.cap_portale, v.comune_portale, v.provincia_portale);
+
+  let testo, classe, avvisa = false;
+  if (v.stato === 'corretto' && indirizzoCorretto) {
+    testo = 'sede corretta';
+    classe = 'bg-amber-50 text-amber-900 border-amber-300';
+  } else if (v.stato === 'confermato_portale') {
+    testo = 'sede ok';
+    classe = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+  } else if (v.stato === 'ignorato') {
+    testo = 'non controllare';
+    classe = 'bg-slate-50 text-slate-700 border-slate-200';
+  } else if (v.esito === 'diverso' || v.esito === 'incerto') {
+    testo = 'sede da decidere';
+    classe = 'bg-red-50 text-red-800 border-red-300';
+    avvisa = true;
+  } else if (v.esito === 'coincide') {
+    testo = 'sede ok';
+    classe = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+  } else {
+    testo = 'non trovata';
+    classe = 'bg-slate-50 text-slate-700 border-slate-200';
+  }
+
+  const spiega = [
+    `A portale: ${portale || 'non indicato'}.`,
+    trovato ? `In rete: ${trovato}.` : 'In rete non e\' stata trovata una sede consultabile.',
+    v.stato === 'corretto' ? `Sul formulario va: ${indirizzoCorretto}.` : null,
+    v.stato === 'confermato_portale' ? 'L\'indirizzo del portale e\' stato controllato e confermato.' : null,
+    avvisa ? 'Nessuno ha ancora deciso quale indirizzo vale: controlla prima di preparare il formulario.' : null,
+    `Controllato il ${String(v.verificato_il || '').slice(0, 10)}.`,
+  ].filter(Boolean).join(' ');
+
+  const contenuto = (
+    <span className={`inline-block px-1.5 py-0.5 rounded border text-xs whitespace-nowrap ${classe}`} title={spiega}>
+      {avvisa ? '≠ ' : ''}{testo}
+    </span>
+  );
+  if (!avvisa && v.stato !== 'corretto') return contenuto;
+  return <Link to={`/pdr?scheda=sedi${nome ? `&cerca=${encodeURIComponent(nome)}` : ''}`}>{contenuto}</Link>;
+}

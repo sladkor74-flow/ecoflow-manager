@@ -97,6 +97,25 @@ const rEctSpuntata = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiF
   richiesteEct: [{ esito: 'evasa', evasione_rilevata_il: '2026-09-10', evasione_confermata: true }] });
 verifica('e una gia\' spuntata non chiede piu\' niente', rEctSpuntata.da_gestire.filter(v => v.area === 'Richieste ECT').length === 0);
 
+// Le sedi operative: quando il controllo in rete trova un indirizzo diverso da
+// quello dell'anagrafica, il formulario si prepara su un dato di cui non ci si
+// fida finche' qualcuno non decide. Le decise e le superate non si contano.
+const rSedi = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: [], alertAperti: [], uploadLogs: [], assegnatiRete: [], assegnatiAci: [], documenti: MESI8(), prefatture: MESI8().map(d => ({ anno: 2026, mese: d.mese })), riepilogoQualifica: null, richiesteEct: [],
+  verificheSedi: [
+    { id_pdr: 1, ragione_sociale: 'EUROGOMME SRL', esito: 'diverso', stato: 'da_decidere' },
+    { id_pdr: 2, ragione_sociale: 'ALTRA GOMME', esito: 'incerto', stato: 'da_decidere' },
+    { id_pdr: 3, ragione_sociale: 'DECISA SRL', esito: 'diverso', stato: 'corretto' },
+    { id_pdr: 4, ragione_sociale: 'VECCHIA SRL', esito: 'diverso', stato: 'da_decidere', superata: true },
+    { id_pdr: 5, ragione_sociale: 'OK SRL', esito: 'coincide', stato: 'da_decidere' },
+  ] });
+const vSedi = rSedi.da_gestire.filter(v => v.area === 'Punti di raccolta');
+verifica('le sedi da decidere arrivano nel cruscotto, e solo quelle',
+  vSedi.length === 1 && /^2 sedi operative da decidere/.test(vSedi[0].titolo) && /EUROGOMME SRL/.test(vSedi[0].dettaglio) && !/DECISA|VECCHIA|OK SRL/.test(vSedi[0].dettaglio),
+  JSON.stringify(vSedi));
+verifica('e portano alla scheda giusta', vSedi.length === 1 && vSedi[0].link === '/pdr?scheda=sedi');
+const rSediOk = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: [], alertAperti: [], uploadLogs: [], assegnatiRete: [], assegnatiAci: [], documenti: MESI8(), prefatture: MESI8().map(d => ({ anno: 2026, mese: d.mese })), riepilogoQualifica: null, richiesteEct: [], verificheSedi: [{ id_pdr: 5, esito: 'coincide', stato: 'da_decidere' }] });
+verifica('se le sedi coincidono il cruscotto non dice niente', rSediOk.da_gestire.filter(v => v.area === 'Punti di raccolta').length === 0);
+
 verifica('i codici delle regole si leggono come parole, le sigle restano maiuscole', nomeRegola('REGOLA_RITARDO_SLA') === 'Ritardo SLA' && nomeRegola('REGOLA_MIX_CLASSI_CONSORZIALE') === 'Mix classi consorziale' && nomeRegola('Conferimento fuori rotta') === 'Conferimento fuori rotta');
 
 console.log('ELENCO UNICO');

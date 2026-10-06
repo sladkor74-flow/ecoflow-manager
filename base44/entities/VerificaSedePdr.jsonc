@@ -1,0 +1,160 @@
+{
+  "name": "VerificaSedePdr",
+  "type": "object",
+  // Il controllo della sede operativa di un punto di raccolta contro quello che
+  // si trova in rete. Sul formulario va la sede operativa (l'unita' locale),
+  // non la sede legale, e il portale non garantisce che quella scritta in
+  // anagrafica sia aggiornata.
+  //
+  // Sta in un'entita' sua e NON dentro Pdr perche' importPdrFile cancella e
+  // riscrive tutti i punti di raccolta a ogni caricamento: una correzione
+  // scritta li' sparirebbe col file del portale successivo.
+  "properties": {
+    "id_pdr": {
+      "type": "number",
+      "description": "ID Punto di Raccolta verificato"
+    },
+    "id_cliente": {
+      "type": "number"
+    },
+    "ragione_sociale": {
+      "type": "string"
+    },
+    "descrizione_pdr": {
+      "type": "string"
+    },
+    "partita_iva": {
+      "type": "string"
+    },
+    "indirizzo_portale": {
+      "type": "string",
+      "description": "Indirizzo del punto di raccolta come lo riportava il portale il giorno del controllo"
+    },
+    "cap_portale": {
+      "type": "string"
+    },
+    "comune_portale": {
+      "type": "string"
+    },
+    "provincia_portale": {
+      "type": "string"
+    },
+    "esito": {
+      "type": "string",
+      "enum": [
+        "coincide",
+        "incerto",
+        "diverso",
+        "non_trovato",
+        "errore"
+      ],
+      "description": "coincide: la rete conferma il portale. incerto: stessa via, qualcosa non torna. diverso: sede operativa diversa. non_trovato: nessuna fonte consultabile."
+    },
+    "indirizzo_trovato": {
+      "type": "string"
+    },
+    "cap_trovato": {
+      "type": "string"
+    },
+    "comune_trovato": {
+      "type": "string"
+    },
+    "provincia_trovato": {
+      "type": "string"
+    },
+    "altre_sedi": {
+      "type": "string",
+      "description": "Le altre unita' locali trovate, se il soggetto ne ha piu' d'una"
+    },
+    "fonti": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Gli indirizzi internet consultati: senza almeno uno l'esito e' non_trovato"
+    },
+    "confidenza": {
+      "type": "string",
+      "enum": [
+        "alta",
+        "media",
+        "bassa"
+      ],
+      "default": "media"
+    },
+    "spiegazione": {
+      "type": "string"
+    },
+    "verificato_il": {
+      "type": "string",
+      "format": "date"
+    },
+    "verificato_da": {
+      "type": "string"
+    },
+    "motivo_controllo": {
+      "type": "string",
+      "description": "Perche' e' finito nel giro di controlli: mai controllato, indirizzo cambiato a portale, controllo vecchio, richiesto a mano"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "da_decidere",
+        "confermato_portale",
+        "corretto",
+        "ignorato"
+      ],
+      "default": "da_decidere",
+      "description": "La decisione dell'amministratore: il gestionale non sceglie da solo quale indirizzo vale"
+    },
+    "indirizzo_per_formulario": {
+      "type": "string",
+      "description": "La sede operativa da scrivere sul formulario, quando lo stato e' corretto"
+    },
+    "cap_per_formulario": {
+      "type": "string"
+    },
+    "comune_per_formulario": {
+      "type": "string"
+    },
+    "provincia_per_formulario": {
+      "type": "string"
+    },
+    "deciso_il": {
+      "type": "string",
+      "format": "date"
+    },
+    "deciso_da": {
+      "type": "string"
+    },
+    "nota": {
+      "type": "string"
+    },
+    "superata": {
+      "type": "boolean",
+      "default": false,
+      "description": "Vale la verifica piu' recente; le precedenti restano come storico"
+    }
+  },
+  "required": [
+    "id_pdr"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

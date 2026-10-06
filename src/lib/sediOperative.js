@@ -1,0 +1,267 @@
+// Lo specchio per il browser di base44/shared/sediOperative.ts: la pagina dei
+// punti di raccolta deve dire la stessa cosa della funzione che fa il controllo.
+// Le due copie restano uguali perche' prove/specchi.mjs le confronta.
+const ABBREVIAZIONI = [
+  [/\bV\.?LE\b/g, 'VIALE'],
+  [/\bV\.?CO\b/g, 'VICOLO'],
+  [/\bC\.?SO\b/g, 'CORSO'],
+  [/\bC\.?(TR?)?DA\b/g, 'CONTRADA'],
+  [/\bP\.?ZZ?A\b|\bPIAZZ\b/g, 'PIAZZA'],
+  [/\bSTR\.?(ADA)?\b/g, 'STRADA'],
+  [/\bPROV\.?(LE|INC)?\b|\bPROVINCIALE\b/g, 'PROVINCIALE'],
+  [/\bNAZ\.?(LE)?\b|\bNAZIONALE\b/g, 'NAZIONALE'],
+  [/\bS\.?\s?S\.?(?=\s|$)|\bSTATALE\b/g, ' SS '],
+  [/\bS\.?\s?P\.?(?=\s*\d)/g, ' SP '],
+  [/\bLOC\.?(ALITA)?\b/g, 'LOCALITA'],
+  [/\bFRAZ\.?(IONE)?\b/g, 'FRAZIONE'],
+  [/\bZ\.?\s?I\.?(?=\s|$)/g, ' ZONA INDUSTRIALE '],
+  [/\bKM\.?T?\b/g, 'KM'],
+];
+
+// Parole che in un indirizzo non distinguono niente: due indirizzi non si
+// somigliano perche' sono tutt'e due in una «via».
+const GENERICHE = new Set(['VIA', 'VIALE', 'VICOLO', 'CORSO', 'CONTRADA', 'STRADA', 'PIAZZA', 'LOCALITA', 'FRAZIONE', 'SNC', 'S', 'N']);
+
+/** Un indirizzo ridotto alla sua forma confrontabile: maiuscolo, senza punteggiatura, con le abbreviazioni sciolte. */
+export function normalizzaIndirizzo(v) {
+  let s = String(v == null ? '' : v).toUpperCase();
+  s = s.replace(/[À-Å]/g, 'A').replace(/[È-Ë]/g, 'E').replace(/[Ì-Ï]/g, 'I').replace(/[Ò-Ö]/g, 'O').replace(/[Ù-Ü]/g, 'U');
+  s = s.replace(/['`‘’]/g, ' ');
+  for (const [cerca, sostituisci] of ABBREVIAZIONI) s = s.replace(cerca, sostituisci);
+  s = s.replace(/[^A-Z0-9/]+/g, ' ');
+  // «km 56,400» e «km 56400» sono lo stesso punto della statale: tolta la
+  // punteggiatura restano due numeri attaccati, che si riuniscono.
+  s = s.replace(/\s+/g, ' ').trim();
+  s = s.replace(/\bKM (\d+) (\d{3})\b/g, 'KM $1$2');
+  return s;
+}
+
+/** Le parole che distinguono un indirizzo da un altro. */
+export function paroleIndirizzo(v) {
+  return normalizzaIndirizzo(v).split(' ').filter(p => p && !GENERICHE.has(p));
+}
+
+/** Il numero civico scritto in fondo, se c'e': «VIA ROMA 111» -> «111», «VIA X SNC» -> «SNC». */
+export function numeroCivico(v) {
+  const parole = normalizzaIndirizzo(v).split(' ').filter(Boolean);
+  for (let i = parole.length - 1; i >= 0; i--) {
+    const p = parole[i];
+    if (p === 'SNC') return 'SNC';
+    if (/^[0-9]+(\/[0-9A-Z]+)?$/.test(p)) return p;
+  }
+  return '';
+}
+
+const soloCifre = (v) => String(v || '').replace(/[^0-9]/g, '');
+
+// Due civici sono compatibili se uno e' contenuto nell'altro: 8 e 8/10 sono la
+// stessa officina, 138 e 56400 no.
+function civiciCompatibili(a, b) {
+  if (!a || !b) return true;
+  if (a === b) return true;
+  if (a === 'SNC' || b === 'SNC') return true;
+  const ca = soloCifre(a.split('/')[0]);
+  const cb = soloCifre(b.split('/')[0]);
+  return !!ca && ca === cb;
+}
+
+/**
+ * Due indirizzi a confronto: 'coincide' | 'incerto' | 'diverso'.
+ * 'incerto' vuol dire che la via e' la stessa ma qualcosa non torna (il civico,
+ * una parola in piu'): va guardato da un occhio umano, non scartato.
+ */
+export function confrontaIndirizzi(portale, trovato) {
+  const a = normalizzaIndirizzo(portale);
+  const b = normalizzaIndirizzo(trovato);
+  if (!a || !b) return 'incerto';
+  if (a === b) return 'coincide';
+  if (a.includes(b) || b.includes(a)) return 'coincide';
+
+  const pa = paroleIndirizzo(portale).filter(p => !/^[0-9]/.test(p));
+  const pb = paroleIndirizzo(trovato).filter(p => !/^[0-9]/.test(p));
+  if (!pa.length || !pb.length) return 'incerto';
+  const comuni = pa.filter(p => pb.includes(p));
+  if (!comuni.length) return 'diverso';
+
+  const tutteDiUno = comuni.length === pa.length || comuni.length === pb.length;
+  if (tutteDiUno) return civiciCompatibili(numeroCivico(portale), numeroCivico(trovato)) ? 'coincide' : 'incerto';
+  // Qualche parola in comune ma non tutte: meta' strada, la guarda una persona.
+  return comuni.length * 2 >= Math.min(pa.length, pb.length) ? 'incerto' : 'diverso';
+}
+
+/** Comune uguale, a meno di maiuscole, accenti e punteggiatura. */
+export function stessoComune(a, b) {
+  const na = normalizzaIndirizzo(a);
+  const nb = normalizzaIndirizzo(b);
+  if (!na || !nb) return true;
+  return na === nb;
+}
+
+/** Una fonte vale solo se e' un indirizzo internet vero. */
+export function fontiValide(fonti) {
+  return (Array.isArray(fonti) ? fonti : [])
+    .map(f => String(f == null ? '' : (typeof f === 'object' ? (f.url || f.fonte || '') : f)).trim())
+    .filter(f => /^https?:\/\/[^\s]+\.[^\s]+/i.test(f))
+    .filter((f, i, tutte) => tutte.indexOf(f) === i)
+    .slice(0, 6);
+}
+
+/**
+ * L'esito di una verifica, a partire da quello che ha risposto la ricerca.
+ * Qui si fa l'unica cosa che conta davvero: senza una fonte vera non si scrive
+ * nessun indirizzo, e l'esito e' «non trovato». Un modello che risponde senza
+ * citare niente non e' una fonte: e' un'opinione.
+ */
+export function esitoVerifica({ portale = {}, risposta = {} }) {
+  const fonti = fontiValide(risposta.fonti);
+  const indirizzoTrovato = String(risposta.indirizzo || '').trim();
+  const comuneTrovato = String(risposta.comune || '').trim();
+  const base = {
+    indirizzo_trovato: '', cap_trovato: '', comune_trovato: '', provincia_trovato: '',
+    altre_sedi: String(risposta.altre_sedi || '').slice(0, 1000),
+    fonti, spiegazione: String(risposta.spiegazione || '').slice(0, 1000),
+  };
+  if (!indirizzoTrovato || !fonti.length) {
+    return {
+      ...base,
+      esito: 'non_trovato',
+      confidenza: 'bassa',
+      spiegazione: base.spiegazione || (indirizzoTrovato && !fonti.length
+        ? 'La ricerca ha proposto un indirizzo senza citare una fonte consultabile: non si tiene.'
+        : 'La ricerca non ha trovato una sede operativa di questo soggetto.'),
+    };
+  }
+
+  const confidenzaDetta = ['alta', 'media', 'bassa'].includes(String(risposta.confidenza)) ? String(risposta.confidenza) : 'media';
+  // Una fonte sola non fa una certezza.
+  const confidenza = fonti.length === 1 && confidenzaDetta === 'alta' ? 'media' : confidenzaDetta;
+
+  const trovato = {
+    ...base,
+    indirizzo_trovato: indirizzoTrovato.slice(0, 300),
+    cap_trovato: String(risposta.cap || '').trim().slice(0, 10),
+    comune_trovato: comuneTrovato.slice(0, 120),
+    provincia_trovato: String(risposta.provincia || '').trim().toUpperCase().slice(0, 2),
+    confidenza,
+  };
+
+  if (comuneTrovato && !stessoComune(portale.comune, comuneTrovato)) {
+    return { ...trovato, esito: 'diverso' };
+  }
+  return { ...trovato, esito: confrontaIndirizzi(portale.indirizzo, indirizzoTrovato) };
+}
+
+const giorno = (v) => String(v == null ? '' : v).slice(0, 10);
+
+function giorniFra(da, a) {
+  const d1 = Date.parse(giorno(da) + 'T00:00:00Z');
+  const d2 = Date.parse(giorno(a) + 'T00:00:00Z');
+  if (isNaN(d1) || isNaN(d2)) return Infinity;
+  return Math.round((d2 - d1) / 86400000);
+}
+
+/** L'ultima verifica di ogni punto di raccolta (quella non superata, o la piu' recente). */
+export function ultimaVerificaPerPdr(verifiche) {
+  const per = new Map();
+  for (const v of verifiche || []) {
+    if (v == null || v.id_pdr == null) continue;
+    const k = Number(v.id_pdr);
+    const prec = per.get(k);
+    if (!prec) { per.set(k, v); continue; }
+    if (giorno(v.verificato_il) >= giorno(prec.verificato_il)) per.set(k, v);
+  }
+  return per;
+}
+
+/**
+ * CHI SI CONTROLLA, E PERCHE' NON TUTTI. I punti di raccolta sono piu' di
+ * tremila, ma il formulario si prepara solo per quelli che hanno un ritiro:
+ * nell'anno in corso sono poche centinaia. Si controllano quelli, e di quelli
+ * solo chi non e' mai stato controllato, chi ha cambiato indirizzo a portale dopo
+ * l'ultimo controllo, e chi e' stato controllato troppo tempo fa.
+ *
+ * @returns [{ pdr, motivo }] in ordine di urgenza, al massimo `limite`.
+ */
+export function daVerificare({ pdr = [], idPdrConOrdini = [], verifiche = [], oggi = '', giorniValidita = 180, limite = 25, soloMaiVisti = false }) {
+  const serve = new Set((idPdrConOrdini || []).map(Number).filter(n => !isNaN(n)));
+  const ultime = ultimaVerificaPerPdr(verifiche);
+  const scelti = [];
+  for (const p of pdr) {
+    if (p == null || p.id_pdr == null) continue;
+    if (!serve.has(Number(p.id_pdr))) continue;
+    // Un punto di raccolta sospeso non riceve ritiri: non ci si fa un formulario.
+    if (String(p.sospeso || '').trim()) continue;
+    const u = ultime.get(Number(p.id_pdr));
+    if (!u) { scelti.push({ pdr: p, motivo: 'mai controllato', priorita: 0 }); continue; }
+    if (soloMaiVisti) continue;
+    if (normalizzaIndirizzo(u.indirizzo_portale) !== normalizzaIndirizzo(p.indirizzo_pdr)) {
+      scelti.push({ pdr: p, motivo: 'a portale l\'indirizzo e\' cambiato dopo l\'ultimo controllo', priorita: 1 });
+      continue;
+    }
+    if (giorniFra(u.verificato_il, oggi) > giorniValidita) {
+      scelti.push({ pdr: p, motivo: `controllato piu' di ${giorniValidita} giorni fa`, priorita: 2 });
+    }
+  }
+  scelti.sort((a, b) => a.priorita - b.priorita || String(a.pdr.ragione_sociale || '').localeCompare(String(b.pdr.ragione_sociale || '')));
+  return scelti.slice(0, Math.max(0, Number(limite) || 0)).map(({ pdr: p, motivo }) => ({ pdr: p, motivo }));
+}
+
+/**
+ * LA DECISIONE GIA' PRESA NON SI BUTTA VIA. Se l'amministratore aveva gia' detto
+ * quale indirizzo va sul formulario e da allora non e' cambiato niente - ne' il
+ * portale ne' quello che si trova in rete - la decisione si riporta sulla
+ * verifica nuova. Se invece qualcosa e' cambiato, torna da decidere, con scritto
+ * il perche': una decisione presa su dati diversi non vale piu'.
+ */
+export function riportaDecisione(nuova, precedente) {
+  const vuota = { stato: 'da_decidere', indirizzo_per_formulario: '', cap_per_formulario: '', comune_per_formulario: '', provincia_per_formulario: '', deciso_il: '', deciso_da: '', nota: '' };
+  if (!precedente || !['confermato_portale', 'corretto', 'ignorato'].includes(String(precedente.stato))) return vuota;
+  const portaleUguale = normalizzaIndirizzo(precedente.indirizzo_portale) === normalizzaIndirizzo(nuova.indirizzo_portale);
+  const reteUguale = normalizzaIndirizzo(precedente.indirizzo_trovato) === normalizzaIndirizzo(nuova.indirizzo_trovato);
+  if (portaleUguale && reteUguale) {
+    return {
+      stato: precedente.stato,
+      indirizzo_per_formulario: precedente.indirizzo_per_formulario || '',
+      cap_per_formulario: precedente.cap_per_formulario || '',
+      comune_per_formulario: precedente.comune_per_formulario || '',
+      provincia_per_formulario: precedente.provincia_per_formulario || '',
+      deciso_il: precedente.deciso_il || '',
+      deciso_da: precedente.deciso_da || '',
+      nota: precedente.nota || '',
+    };
+  }
+  const motivo = !portaleUguale
+    ? 'A portale l\'indirizzo e\' cambiato dopo la decisione precedente: va deciso di nuovo.'
+    : 'In rete adesso risulta un indirizzo diverso da quello su cui era stata presa la decisione: va deciso di nuovo.';
+  return { ...vuota, nota: motivo };
+}
+
+/** L'indirizzo che va scritto sul formulario, con il motivo di quella scelta. */
+export function indirizzoPerFormulario(pdrRecord, verifica) {
+  const portale = {
+    indirizzo: String((pdrRecord && pdrRecord.indirizzo_pdr) || ''),
+    cap: String((pdrRecord && pdrRecord.cap_pdr) || ''),
+    comune: String((pdrRecord && pdrRecord.comune_pdr) || ''),
+    provincia: String((pdrRecord && pdrRecord.provincia_pdr) || ''),
+    origine: 'portale',
+    nota: 'Indirizzo del punto di raccolta come lo riporta il portale.',
+  };
+  if (!verifica) return portale;
+  if (verifica.stato === 'corretto' && String(verifica.indirizzo_per_formulario || '').trim()) {
+    return {
+      indirizzo: verifica.indirizzo_per_formulario,
+      cap: verifica.cap_per_formulario || '',
+      comune: verifica.comune_per_formulario || '',
+      provincia: verifica.provincia_per_formulario || '',
+      origine: 'confermato',
+      nota: `Sede operativa confermata il ${giorno(verifica.deciso_il) || giorno(verifica.verificato_il)}${verifica.deciso_da ? ' da ' + verifica.deciso_da : ''}.`,
+    };
+  }
+  if (verifica.stato === 'confermato_portale') {
+    return { ...portale, origine: 'portale_confermato', nota: `Indirizzo del portale, controllato e confermato il ${giorno(verifica.deciso_il) || giorno(verifica.verificato_il)}.` };
+  }
+  if (verifica.esito === 'diverso' || verifica.esito === 'incerto') {
+    return { ...portale, origine: 'portale_da_controllare', nota: 'Attenzione: in rete risulta una sede operativa diversa, e nessuno ha ancora deciso quale vale.' };
+  }
+  return portale;
+}

@@ -1,8 +1,11 @@
-import React from 'react';
-import { Eye, Globe, MapPin } from 'lucide-react';
+import React, { useState } from 'react';
+import { Eye, Globe, MapPin, Search, Loader2, ExternalLink } from 'lucide-react';
+import { base44 } from '@/api/base44Client';
 import { streetViewUrl, satelliteUrl, addressSearchUrl, precisioneCoordinata } from '@/lib/geoLinks';
 import { useIndiceOmologhe } from '@/lib/omologheIndice';
 import BadgeOmologa from '@/components/shared/BadgeOmologa';
+import { useIndiceSedi, sedeDelPunto, dimenticaIndiceSedi } from '@/lib/sediIndice';
+import { indirizzoPerFormulario } from '@/lib/sediOperative';
 
 function DetailField({ label, value }) {
   return (
@@ -15,6 +18,24 @@ function DetailField({ label, value }) {
 
 export default function PdrDetailCard({ r }) {
   const indiceOmologhe = useIndiceOmologhe();
+  // La sede operativa: quella che va sul formulario. Si puo' controllare in rete
+  // questo punto da solo, senza aspettare il giro di tutti.
+  const [versioneSedi, setVersioneSedi] = useState(0);
+  const [controllo, setControllo] = useState('');
+  const indiceSedi = useIndiceSedi(versioneSedi);
+  const verificaSede = sedeDelPunto(indiceSedi, r.id_pdr);
+  const perFormulario = indirizzoPerFormulario(r, verificaSede);
+  const controllaSede = async () => {
+    setControllo('in corso');
+    try {
+      await base44.functions.invoke('verificaSediPdr', { ids: [r.id_pdr], motivo: 'chiesto dalla scheda del punto di raccolta' });
+      dimenticaIndiceSedi();
+      setVersioneSedi(v => v + 1);
+      setControllo('');
+    } catch (e) {
+      setControllo(e?.response?.data?.error || e?.message || 'Controllo non riuscito');
+    }
+  };
   const isSospeso = !!(r.sospeso && String(r.sospeso).trim() !== '');
   const tel = r.tel_pdr || r.tel || null;
   const email = r.email_pdr || r.email || null;
@@ -60,6 +81,35 @@ export default function PdrDetailCard({ r }) {
         <DetailField label="ID U/L RENTRi" value={r.rentri_id_ul} />
         <DetailField label="Coordinate" value={hasCoords ? `${r._lat}, ${r._lng}` : null} />
       </dl>
+      <div className="border-t pt-3 space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <dt className="text-xs text-muted-foreground">Sede operativa, quella che va sul formulario</dt>
+          <button onClick={controllaSede} disabled={controllo === 'in corso'}
+            className="inline-flex items-center gap-1.5 text-xs border rounded-md px-2 py-1 hover:bg-muted disabled:opacity-60">
+            {controllo === 'in corso' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+            {verificaSede ? 'Ricontrolla in rete' : 'Controlla in rete'}
+          </button>
+        </div>
+        <p className={`text-sm font-medium ${perFormulario.origine === 'portale_da_controllare' ? 'text-red-800' : ''}`}>
+          {[perFormulario.indirizzo, perFormulario.cap, perFormulario.comune, perFormulario.provincia].filter(Boolean).join(', ') || '—'}
+        </p>
+        <p className="text-xs text-muted-foreground">{perFormulario.nota}</p>
+        {verificaSede && verificaSede.indirizzo_trovato && perFormulario.origine !== 'confermato' && (
+          <p className="text-xs text-muted-foreground">
+            In rete risulta: {[verificaSede.indirizzo_trovato, verificaSede.cap_trovato, verificaSede.comune_trovato, verificaSede.provincia_trovato].filter(Boolean).join(', ')}
+          </p>
+        )}
+        {verificaSede && !!(verificaSede.fonti || []).length && (
+          <div className="flex flex-wrap gap-2">
+            {verificaSede.fonti.map((f, i) => (
+              <a key={i} href={f} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-primary underline">
+                <ExternalLink className="w-3 h-3" /> fonte {i + 1}
+              </a>
+            ))}
+          </div>
+        )}
+        {controllo && controllo !== 'in corso' && <p className="text-xs text-destructive">{controllo}</p>}
+      </div>
       {hasCoords && (() => {
         const prec = precisioneCoordinata(r.geo_approssimazione);
         const badgeClass = {

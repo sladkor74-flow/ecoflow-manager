@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { Filter, X, MapPin, Users, Download, Loader2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import PdrUpload from '@/components/pdr/PdrUpload';
 import PdrTable from '@/components/pdr/PdrTable';
 import PdrClientiTable from '@/components/pdr/PdrClientiTable';
+import SediOperative from '@/components/pdr/SediOperative';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
@@ -24,6 +26,16 @@ export default function Pdr() {
   const [precisionePdr, setPrecisionePdr] = useState('tutti');
   const [soloAutodemolitori, setSoloAutodemolitori] = useState(false);
   const [selectedPdrId, setSelectedPdrId] = useState(null);
+  // Dalla tabella degli ordini si arriva qui gia' sulla scheda giusta e con il
+  // nome cercato: «/pdr?scheda=sedi&cerca=EUROGOMME SRL».
+  const location = useLocation();
+  const [cercaDaLink, setCercaDaLink] = useState('');
+  useEffect(() => {
+    const q = new URLSearchParams(location.search || '');
+    const scheda = q.get('scheda');
+    if (scheda) setActiveTab(scheda);
+    setCercaDaLink(q.get('cerca') || '');
+  }, [location.search]);
 
   const handleSelectPdr = useCallback((id) => {
     setSelectedPdrId(id);
@@ -332,6 +344,7 @@ export default function Pdr() {
           <TabsTrigger value="pdr">Punti di raccolta</TabsTrigger>
           <TabsTrigger value="clienti">Clienti</TabsTrigger>
           <TabsTrigger value="mappa"><MapPin className="w-4 h-4 mr-1.5" /> Mappa</TabsTrigger>
+          <TabsTrigger value="sedi">Sedi operative</TabsTrigger>
         </TabsList>
         <TabsContent value="pdr">
           <PdrTable records={filtered} loading={loading} onSelectPdr={handleSelectPdr} />
@@ -343,6 +356,11 @@ export default function Pdr() {
           <React.Suspense fallback={<div className="flex items-center justify-center h-[400px]"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
             <PdrMap records={filtered} selectedPdrId={selectedPdrId} onSelect={handleSelectPdr} />
           </React.Suspense>
+        </TabsContent>
+        {/* Il controllo delle sedi lavora su TUTTA l'anagrafica, non sui filtri
+            della pagina: i punti da controllare li sceglie chi ha gli ordini. */}
+        <TabsContent value="sedi">
+          <SediOperative records={records} cercaIniziale={cercaDaLink} />
         </TabsContent>
       </Tabs>
     </div>

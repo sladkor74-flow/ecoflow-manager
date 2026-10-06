@@ -229,6 +229,20 @@ export function cruscotto(dati) {
   if (ectScadute) voce('Richieste ECT', 'critico', `${ectScadute} richieste del consorzio oltre il termine`, 'Ritiri chiesti per email da Ecotyre e non ancora evasi alla data indicata.', '/todo');
   if (ectDaRispondere) voce('Richieste ECT', 'info', `${ectDaRispondere} richieste si sono chiuse da sole e aspettano la risposta al consorzio`, 'Gli ordini risultano tutti ritirati: la richiesta e\' evasa, resta da rispondere alla mail e spuntarla.', '/todo');
 
+  // LE SEDI OPERATIVE DA DECIDERE. Sul formulario va la sede operativa, non la
+  // sede legale: quando il controllo in rete trova una sede diversa da quella
+  // dell'anagrafica, nessuno la cambia da solo, e finche' qualcuno non decide il
+  // formulario si prepara su un indirizzo di cui non ci si fida.
+  const sediDaDecidere = (dati.verificheSedi || []).filter(v => v && !v.superata && ['diverso', 'incerto'].includes(v.esito) && (v.stato || 'da_decidere') === 'da_decidere');
+  if (sediDaDecidere.length) {
+    const nomi = sediDaDecidere.slice(0, 4).map(v => v.ragione_sociale || v.descrizione_pdr || ('PDR ' + v.id_pdr)).join(', ');
+    const diverse = sediDaDecidere.filter(v => v.esito === 'diverso').length;
+    voce('Punti di raccolta', diverse ? 'attenzione' : 'info',
+      `${sediDaDecidere.length} ${sediDaDecidere.length === 1 ? 'sede operativa da decidere' : 'sedi operative da decidere'}`,
+      `${diverse ? diverse + ' con un indirizzo diverso da quello del portale. ' : ''}${nomi}`,
+      '/pdr?scheda=sedi');
+  }
+
   voci.sort((a, b) => GRAVITA[a.gravita] - GRAVITA[b.gravita] || a.area.localeCompare(b.area, 'it'));
   return { oggi, anno: Number(anno), da_gestire: voci, alert, caricamenti, arretrato, mesi_attiva: mesiAttiva };
 }
