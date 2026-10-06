@@ -719,7 +719,14 @@ export function soggettiDellaSettimana({ movimenti, interni, anagrafica }, anno,
 
 // === righe del report ===
 
-export const CAMPI_REPORT = ['fir', 'ordine', 'peso', 'data_inizio', 'data_fine', 'data', 'produttore', 'codice_pdr', 'destinatario', 'trasportatore', 'intermediario', 'classe', 'targa'];
+// peso_uscita: INGRESSI E USCITE NELLO STESSO FOGLIO, SU DUE COLONNE DIVERSE
+// (06/10/2026). Il registro di carico e scarico di Irigom tiene tutto nel foglio
+// "Dettaglio": la riga di un ingresso ha i chili nella colonna della classe, la
+// riga di un'uscita nella colonna "Uscite". Leggendo una colonna sola l'uscita
+// restava senza peso, non si agganciava al movimento registrato, e la verifica
+// diceva «registrato assente nel report» di una secondaria che nel report c'era
+// e che era stata fatta davvero - la ACI Irigom -> Gatim del 29/09, 12.820 kg.
+export const CAMPI_REPORT = ['fir', 'ordine', 'peso', 'peso_uscita', 'data_inizio', 'data_fine', 'data', 'produttore', 'codice_pdr', 'destinatario', 'trasportatore', 'intermediario', 'classe', 'targa'];
 
 /**
  * Le colonne delle date indicate dall'agente che ha guardato il file, riparate.
@@ -811,8 +818,14 @@ export const classeDaOrdine = (v) => {
  */
 export function normalizzaRigheReport(grezze, unitaIndicata, { colonne = null } = {}) {
   let unita = unitaIndicata === 'kg' || unitaIndicata === 't' ? unitaIndicata : null;
+  // Le due colonne del peso - quella degli ingressi e quella delle uscite - sono
+  // nella stessa unita': la mediana si misura su tutt'e due.
+  const pesoGrezzo = (g) => {
+    const dentro = numeroDaValore(g.peso);
+    return dentro !== null && dentro !== 0 ? dentro : numeroDaValore(g.peso_uscita);
+  };
   if (!unita) {
-    const valori = grezze.map(g => numeroDaValore(g.peso)).filter(n => n !== null && n > 0).sort((a, b) => a - b);
+    const valori = grezze.map(pesoGrezzo).filter(n => n !== null && n > 0).sort((a, b) => a - b);
     const mediana = valori.length ? valori[Math.floor(valori.length / 2)] : 0;
     unita = mediana > 0 && mediana < 100 ? 't' : 'kg';
   }
@@ -820,7 +833,11 @@ export function normalizzaRigheReport(grezze, unitaIndicata, { colonne = null } 
   for (const g of grezze) {
     const fir = String(g.fir ?? '').trim();
     const firN = normalizzaFir(fir);
-    const peso = numeroDaValore(g.peso, unita);
+    // Il peso della riga: quello della colonna degli ingressi, o - se li' non c'e'
+    // niente - quello della colonna delle uscite. Che poi sia un ingresso o
+    // un'uscita lo decide chi sono produttore e destinatario, come sempre.
+    const dentro = numeroDaValore(g.peso, unita);
+    const peso = dentro !== null && dentro !== 0 ? dentro : numeroDaValore(g.peso_uscita, unita);
     if (!firN && peso === null) continue;
     // Righe dei totali o dei subtotali: "TOT.", "TOTALE", "TOT. 32.780".
     if (!firN && /(^|[^A-Z])TOT(ALE|ALI)?([^A-Z]|$)/i.test(CAMPI_REPORT.map(c => g[c] ?? '').join(' '))) continue;

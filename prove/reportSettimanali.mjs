@@ -59,6 +59,36 @@ verifica('due righe dello stesso ordine sono un ordine solo, non due', rdDoppio.
   && rdDoppio.esempi[0].date === 'manca la data di fine trasporto; manca la data di inizio trasporto', JSON.stringify(rdDoppio));
 verifica('un formulario ripartito dice su quale ordine', messaggiDate([{ ordine: 'A', mancanti: ['inizio trasporto'], incoerenti: [] }, { ordine: 'B', mancanti: [], incoerenti: ['fine trasporto prima dell\'inizio'] }])[0].startsWith('Ordine A: Formulario registrato senza data di inizio trasporto'));
 
+// INGRESSI E USCITE NELLO STESSO FOGLIO, SU DUE COLONNE DI PESO (06/10/2026).
+//
+// Il registro di carico e scarico di Irigom tiene tutto nel foglio "Dettaglio":
+// la riga di un ingresso ha i chili nella colonna della sua classe, quella di
+// un'uscita nella colonna "Uscite". Leggendo una colonna sola l'uscita restava
+// senza peso, non si agganciava al movimento registrato, e la verifica diceva
+// «registrato assente nel report» di una secondaria che nel report c'era e che
+// era stata fatta davvero: la ACI Irigom -> Gatim del 29/09/2026, 12.820 kg.
+console.log('DUE COLONNE DI PESO: GLI INGRESSI DI QUA, LE USCITE DI LA\'');
+{
+  const { righe: due } = normalizzaRigheReport([
+    { n: 4197, fir: 'BSDCL002510QC', peso: 2620, peso_uscita: null, data_fine: '29/09/2026', produttore: 'LANEVE PNEUMATICI', destinatario: 'IRIGOM' },
+    { n: 4195, fir: 'CNDJM000375BJ', peso: null, peso_uscita: 12820, data_fine: '29/09/2026', produttore: 'IRIGOM', destinatario: 'GATIM', ordine: 'SEC26159929' },
+  ], 'kg');
+  verifica('l\'uscita non si perde: ha il suo peso dalla seconda colonna',
+    due.length === 2 && due.find(r => r.fir === 'CNDJM000375BJ')?.kg === 12820, JSON.stringify(due.map(r => [r.fir, r.kg])));
+  verifica('e l\'ingresso tiene il suo, dalla prima',
+    due.find(r => r.fir === 'BSDCL002510QC')?.kg === 2620);
+  verifica('chi e\' ingresso e chi uscita lo dicono produttore e destinatario, come sempre',
+    due.find(r => r.fir === 'CNDJM000375BJ')?.produttore === 'IRIGOM' && due.find(r => r.fir === 'CNDJM000375BJ')?.destinatario === 'GATIM');
+  // L'unita' si misura su tutt'e due le colonne: con le sole uscite in tonnellate
+  // non si deve scambiare il foglio per uno in chili.
+  const { righe: inT, unita } = normalizzaRigheReport([
+    { n: 2, fir: 'AAA000001AA', peso: null, peso_uscita: 12.82, data_fine: '29/09/2026' },
+    { n: 3, fir: 'AAA000002AA', peso: null, peso_uscita: 2.62, data_fine: '29/09/2026' },
+  ], null);
+  verifica('la mediana per capire kg o tonnellate guarda anche la colonna delle uscite',
+    unita === 't' && inT[0].kg === 12820, JSON.stringify([unita, inT.map(r => r.kg)]));
+}
+
 console.log('LA VERIFICA DEL REPORT');
 const { righe } = normalizzaRigheReport([
   { n: 2, fir: 'RGYTR000001AA', peso: 3000, data_fine: '08/09/2026' },

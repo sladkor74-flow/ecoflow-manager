@@ -107,7 +107,13 @@ const SCHEMA_MAPPATURA = {
 const GUIDA_CAMPI = [
   'fir: numero del formulario di identificazione rifiuto, detto anche FIR, formulario, n. formulario, numerazione fiscale, n. documento di trasporto.',
   'ordine: numero dell\'ordine o della richiesta di ritiro, come ET26149928 o SEC 26141285, detto anche n. ordine, ordine ET, ticket, n. bolla.',
-  'peso: peso netto o peso effettivo o quantita\' in chilogrammi o tonnellate.',
+  'peso: peso netto o peso effettivo o quantita\' in chilogrammi o tonnellate. Se il foglio tiene ingressi e uscite insieme con DUE colonne di peso, qui va quella degli ingressi.',
+  // Il registro di carico e scarico di un impianto tiene spesso tutto in un
+  // elenco solo, con il peso dell'ingresso in una colonna e quello dell'uscita in
+  // un'altra (Irigom, foglio "Dettaglio": colonna "Uscite" accanto alle colonne
+  // delle classi). Con una colonna sola le uscite restavano senza peso e la
+  // verifica le dava per non riportate (06/10/2026).
+  'peso_uscita: la seconda colonna del peso, SOLO se il foglio tiene ingressi e uscite nello stesso elenco e il peso di un\'uscita sta in una colonna diversa da quella dell\'ingresso (per esempio una colonna "Uscite" o "Uscita" accanto a quelle degli ingressi). Non indicarla se il peso e\' uno solo per tutte le righe.',
   // La data di una riga di questi file e' il giorno in cui il carico e' arrivato,
   // cioe' la FINE del trasporto: nel linguaggio di un impianto o di uno stoccaggio
   // "carico" e' quello che entra nel registro di carico e scarico, quindi "data
@@ -177,7 +183,7 @@ async function leggiTabelle(base44, tabelle, verifica) {
     const nome = String(f.foglio || '').trim();
     const tabella = tabelle.find(t => t.nome === f.foglio) || tabelle.find(t => String(t.nome).trim() === nome);
     let col = { ...(f.colonne || {}) };
-    if (!tabella || scelti.some(s => s.tabella === tabella) || ((col.fir ?? -1) < 0 && (col.peso ?? -1) < 0)) continue;
+    if (!tabella || scelti.some(s => s.tabella === tabella) || ((col.fir ?? -1) < 0 && (col.peso ?? -1) < 0 && (col.peso_uscita ?? -1) < 0)) continue;
     const intestazioni = (tabella.righe || [])[Math.max(0, (f.prima_riga_dati || 1) - 1)] || [];
     for (const c of CAMPI_NOME) if ((col[c] ?? -1) >= 0 && NON_NOMI.test(testoCella(intestazioni[col[c]]))) col[c] = -1;
     // Le colonne delle date, riparate tabella per tabella: una data sola e' la
