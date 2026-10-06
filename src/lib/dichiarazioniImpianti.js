@@ -65,6 +65,23 @@ export const MOTIVI_ASSENZA = {
 };
 
 /**
+ * QUANTO DI UN MESE E' STATO DAVVERO DICHIARATO A PORTALE.
+ *
+ * Solo le righe caricate contano: quantita_kg nudo, sulle righe seminate il
+ * 12/09/2026, contiene il quantitativo DA dichiarare, non il dichiarato - ed e'
+ * la trappola di ogni colonna «dichiarato» (prove/restaDaDichiarare.mjs). La
+ * funzione che calcola il riepilogo lo restituisce gia' pronto in caricato_kg;
+ * qui c'e' il ripiego per chi ha in mano un dato piu' vecchio, e soprattutto la
+ * regola scritta in un posto solo (06/10/2026).
+ */
+export function caricatoDelMese(m) {
+  if (!m) return 0;
+  if (typeof m.caricato_kg === 'number') return m.caricato_kg;
+  const d = m.dichiarazione;
+  return d && d.caricata_inviata ? Number(d.quantita_kg) || 0 : 0;
+}
+
+/**
  * Stato di una casella del riepilogo: come i colori del foglio di gestione.
  * `dove` ({ canale, dichiara_rete }) serve a riconoscere la rete non dovuta.
  */

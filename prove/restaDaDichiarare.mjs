@@ -165,6 +165,42 @@ console.log('LA COLONNA NUOVA DEL RIEPILOGO: E LA GIACENZA');
   verifica('e l intestazione della tabella resta allineata', /colSpan=\{15\}/.test(r));
 }
 
+// LA DOPPIA LINEA: DICHIARATO E CONFERITO (06/10/2026).
+//
+// Chiesto dall'utente: «una doppia linea per distinguere cio' che in quel mese e'
+// stato dichiarato e cio' che e' stato conferito». Il dichiarato di un mese e'
+// arretrato di giacenza piu' eventualmente parte del mese; il conferito dice se
+// di quel mese resta ancora qualcosa da dichiarare.
+console.log('LA DOPPIA LINEA DEL RIEPILOGO');
+{
+  const r = sorgente('src/components/dichiarazioni/Riepilogo.jsx');
+  verifica('sotto ogni riga c e quella del conferito', r.includes('conferito nel mese'));
+  verifica('e il delta col segno, che e la cosa da vedere a colpo d occhio',
+    r.includes("const delta = (m.conferito_kg || 0) - caricatoDelMese(m)"));
+  verifica('il mese che ha dichiarato piu di quanto gli e entrato si distingue da quello indietro',
+    r.includes("delta > 0 ? 'text-amber-700' : 'text-emerald-700'"));
+  // IL DICHIARATO E' SOLO IL CARICATO, anche qui: quantita_kg nudo, sulle righe
+  // seminate, e' il DA dichiarare.
+  const e = sorgente('src/lib/dichiarazioniExport.js');
+  verifica('il foglio Excel ha le stesse due righe dello schermo',
+    e.includes("'Dichiarato a portale'") && e.includes("'Conferito nel mese'"));
+  verifica('e non legge piu quantita_kg nudo come dichiarato',
+    !e.includes('m.dichiarazione ? m.dichiarazione.quantita_kg : null') && e.includes('caricatoDelMese(m)'));
+
+  // La regola del caricato sta in un posto solo, e vale anche senza il campo nuovo.
+  const d = sorgente('base44/shared/dichiarazioniImpianti.ts');
+  verifica('la regola del caricato e scritta una volta sola', /export function caricatoDelMese/.test(d));
+}
+{
+  const { caricatoDelMese } = await import('../src/lib/dichiarazioniImpianti.js');
+  verifica('il caricato di un mese e quello che il gestionale ha gia calcolato',
+    caricatoDelMese({ caricato_kg: 12000, dichiarazione: { quantita_kg: 99999, caricata_inviata: false } }) === 12000);
+  verifica('senza quel campo vale solo la dichiarazione caricata',
+    caricatoDelMese({ dichiarazione: { quantita_kg: 105740, caricata_inviata: false } }) === 0
+    && caricatoDelMese({ dichiarazione: { quantita_kg: 105740, caricata_inviata: true } }) === 105740);
+  verifica('e un mese senza niente vale zero', caricatoDelMese(null) === 0 && caricatoDelMese({}) === 0);
+}
+
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');
 process.exit(ko ? 1 : 0);

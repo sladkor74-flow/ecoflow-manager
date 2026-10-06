@@ -441,6 +441,16 @@ export default async function(req) {
           return {
             mese,
             conferito_kg: totale,
+            // QUANTO DI QUEL MESE E' STATO DAVVERO CARICATO A PORTALE.
+            //
+            // E' il dichiarato vero del mese - solo le righe con caricata_inviata
+            // - e serve a chi legge la tabella per mettere in fila le due cose:
+            // quello che si e' dichiarato e quello che e' entrato. Si calcolava
+            // gia' qui e si buttava via, e ogni pezzo di interfaccia se lo
+            // ricavava da se' dal flag, con il rischio di leggere quantita_kg
+            // nudo - che sulle righe seminate contiene il DA dichiarare, non il
+            // dichiarato (06/10/2026).
+            caricato_kg: caricatoAPortale,
             // Quanto e' arrivato direttamente e quanto dagli stoccaggi, in secondaria.
             diretto_kg: totale - daStoc.reduce((s, x) => s + x.kg, 0),
             da_stoccaggi: daStoc,

@@ -1,6 +1,6 @@
 // Esportazione delle dichiarazioni degli impianti: un foglio con il riepilogo
 // mese per mese, uno con il dettaglio dei materiali e uno con la quadratura.
-import { MESI, materialiDi, statoDichiarazione, CANALI } from '@/lib/dichiarazioniImpianti';
+import { MESI, materialiDi, statoDichiarazione, caricatoDelMese, CANALI } from '@/lib/dichiarazioniImpianti';
 import { INTESTAZIONE_DATE, righeExcelDate } from '@/components/giacenze/DateDaSistemare';
 
 const nomeCanale = (f) => {
@@ -14,14 +14,24 @@ export async function esportaDichiarazioni(dati) {
   const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
 
-  const riepilogo = [['Impianto', 'Canale', 'Operazione', ...MESI, 'Caricato (t)']];
+  // Due righe per flusso, come a video (06/10/2026): quello che in quel mese e'
+  // stato dichiarato a portale e quello che in quel mese e' entrato. Il
+  // dichiarato e' il solo caricato (caricatoDelMese): quantita_kg nudo, sulle
+  // righe seminate, contiene il DA dichiarare, e il foglio diceva il contrario
+  // dello schermo.
+  const riepilogo = [['Impianto', 'Canale', 'Operazione', 'Voce', ...MESI, 'Totale (t)']];
   const dettaglio = [['Impianto', 'Canale', 'Operazione', 'Mese', 'Conferito (kg)', 'Dichiarato (kg)', 'Granulo (kg)', 'Fibre (kg)', 'Metalli (kg)', 'Ciabattato (kg)', 'Cippato (kg)', 'CSS-C (kg)', 'Altro (kg)', 'Stato', 'Ricevuta il', 'Caricata il', 'Note']];
   for (const s of dati.siti.filter(x => x.tipo_destinazione !== 'stoc')) {
     for (const f of s.flussi) {
       riepilogo.push([
-        s.sito, nomeCanale(f), s.operazione || '',
-        ...f.mesi.map(m => (m.dichiarazione ? m.dichiarazione.quantita_kg : null)),
+        s.sito, nomeCanale(f), s.operazione || '', 'Dichiarato a portale',
+        ...f.mesi.map(m => caricatoDelMese(m) || null),
         f.dichiarato_caricato_t,
+      ]);
+      riepilogo.push([
+        s.sito, nomeCanale(f), s.operazione || '', 'Conferito nel mese',
+        ...f.mesi.map(m => m.conferito_kg || null),
+        f.conferito_t,
       ]);
       for (const m of f.mesi) {
         const d = m.dichiarazione;

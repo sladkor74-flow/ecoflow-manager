@@ -1,6 +1,6 @@
 import React from 'react';
 import CellaMese from '@/components/dichiarazioni/CellaMese';
-import { MESI_BREVI, CANALI, MOTIVI_ASSENZA } from '@/lib/dichiarazioniImpianti';
+import { MESI_BREVI, CANALI, MOTIVI_ASSENZA, caricatoDelMese } from '@/lib/dichiarazioniImpianti';
 import { formatTonnellate, formatKg } from '@/lib/utils';
 import { Check, Mail, Minus } from 'lucide-react';
 
@@ -112,8 +112,9 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
           </thead>
           <tbody>
             {righe.map(({ sito, flusso }, i) => (
-              <tr key={`${sito.chiave}-${flusso.canale}-${flusso.provenienza}`} className={`border-b ${i % 2 ? 'bg-muted/20' : ''}`}>
-                <td className="px-3 py-1.5 sticky left-0 bg-inherit">
+              <React.Fragment key={`${sito.chiave}-${flusso.canale}-${flusso.provenienza}`}>
+              <tr className={`${i % 2 ? 'bg-muted/20' : ''}`}>
+                <td className="px-3 pt-1.5 sticky left-0 bg-inherit">
                   <span className="font-medium">{sito.sito}</span>
                   <span className="block text-[11px] text-muted-foreground">
                     {nomeCanale(flusso)}{sito.operazione ? ` · ${sito.operazione}` : ''}
@@ -167,6 +168,41 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                   })()}
                 </td>
               </tr>
+              {/* LA SECONDA LINEA: QUELLO CHE E' ENTRATO IN QUEL MESE (06/10/2026).
+                  Chiesto dall'utente: «una doppia linea per distinguere cio' che in
+                  quel mese e' stato dichiarato e cio' che e' stato conferito». Il
+                  dichiarato di un mese contiene l'arretrato di giacenza e magari
+                  parte di quel mese; il conferito dice se di quel mese resta ancora
+                  qualcosa da dichiarare. Sotto ogni cifra, il delta col segno: in
+                  rosso quello che di quel mese manca ancora, in verde il mese che ha
+                  dichiarato piu' di quanto gli e' entrato, cioe' che ha smaltito
+                  arretrato. */}
+              <tr className={`border-b ${i % 2 ? 'bg-muted/20' : ''}`}>
+                <td className="px-3 pb-1.5 sticky left-0 bg-inherit text-[11px] text-muted-foreground">conferito nel mese</td>
+                {flusso.mesi.map(m => {
+                  const delta = (m.conferito_kg || 0) - caricatoDelMese(m);
+                  return (
+                    <td key={m.mese} className="px-1 pb-1.5 text-center tabular-nums text-[11px]">
+                      {m.conferito_kg > 0 ? (
+                        <>
+                          <span className="text-muted-foreground">{formatTonnellate(m.conferito_kg / 1000)}</span>
+                          {Math.abs(delta) >= 1 && (
+                            <span className={`block text-[10px] ${delta > 0 ? 'text-amber-700' : 'text-emerald-700'}`}
+                              title={delta > 0 ? 'Di questo mese resta ancora da dichiarare' : 'In questo mese si e’ dichiarato piu’ di quanto e’ entrato: e’ arretrato di giacenza'}>
+                              {delta > 0 ? '+' : ''}{formatTonnellate(delta / 1000)}
+                            </span>
+                          )}
+                        </>
+                      ) : <span className="text-muted-foreground/50">—</span>}
+                    </td>
+                  );
+                })}
+                <td className="px-3 pb-1.5 text-right tabular-nums text-[11px] text-muted-foreground" title="Tutto quello che e' entrato nell'anno su questa riga">
+                  {formatTonnellate(flusso.conferito_t)}
+                </td>
+                <td className="px-3 pb-1.5" />
+              </tr>
+              </React.Fragment>
             ))}
             {righe.length === 0 && (
               <tr><td colSpan={15} className="text-center py-6 text-muted-foreground">Nessun impianto con movimenti o dichiarazioni per quest'anno.</td></tr>
