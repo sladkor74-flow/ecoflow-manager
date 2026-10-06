@@ -151,6 +151,77 @@ export function esitoVerifica({ portale = {}, risposta = {} }) {
   return { ...trovato, esito: confrontaIndirizzi(portale.indirizzo, indirizzoTrovato) };
 }
 
+/**
+ * CHI E' IL SOGGETTO DI UN PUNTO DI RACCOLTA.
+ *
+ * Il caricamento del file cancella tutti i punti di raccolta e li riscrive: gli
+ * id della piattaforma cambiano, e l'unica chiave che sopravvive e' id_pdr, il
+ * numero del portale. Ma id_pdr dice QUALE POSTO, non CHI: un gommista che
+ * chiude e si re-iscrive prende un id_pdr nuovo, e niente vieta che un numero
+ * torni un giorno su un altro soggetto. Negli stessi dati del 06/10/2026 ci sono
+ * 181 partite IVA con piu' di un punto e 33 che cambiano anche ragione sociale
+ * (LONGO FRANCESCO & FIGLI SNC a Lamezia, id 308, e Longo Pneumatici Snc a
+ * Catanzaro, id 39180).
+ *
+ * Percio' una verifica vale finche' il punto e' dello stesso soggetto: la
+ * partita IVA se c'e', altrimenti ragione sociale e comune. Un controllo vecchio
+ * attaccato a un soggetto nuovo manderebbe sul formulario l'indirizzo di
+ * qualcun altro, ed e' il modo piu' silenzioso di sbagliare.
+ */
+export function chiaveSoggetto(r) {
+  if (!r) return '';
+  // «IT 01234567 891» e «01234567891» sono la stessa partita IVA; «Eurogomme
+  // S.r.l.» e «EUROGOMME SRL» lo stesso nome. Qui si toglie tutto cio' che non e'
+  // una lettera o una cifra, spazi compresi: per dire se due scritte parlano
+  // dello stesso soggetto non serve altro.
+  const piva = String(r.partita_iva || '').toUpperCase().replace(/[^0-9A-Z]/g, '').replace(/^IT/, '');
+  if (piva.length >= 8) return 'PIVA:' + piva;
+  const nome = normalizzaSoggetto(r.ragione_sociale || r.descrizione_pdr);
+  const comune = normalizzaSoggetto(r.comune_pdr || r.comune_portale || r.comune);
+  return nome ? 'NOME:' + nome + '|' + comune : '';
+}
+
+/** Un nome ridotto a lettere e cifre: «Eurogomme S.r.l.» -> EUROGOMMESRL. */
+export function normalizzaSoggetto(v) {
+  return String(v == null ? '' : v).toUpperCase()
+    .replace(/[À-Å]/g, 'A').replace(/[È-Ë]/g, 'E').replace(/[Ì-Ï]/g, 'I').replace(/[Ò-Ö]/g, 'O').replace(/[Ù-Ü]/g, 'U')
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+/**
+ * La verifica vale ancora per questo punto di raccolta?
+ * Quando non si riesce a dire chi sia il soggetto (niente partita IVA e niente
+ * nome) non si invalida niente: si sa di non sapere, e un dubbio non e' una prova.
+ */
+export function verificaApplicabile(verifica, pdrRecord) {
+  if (!verifica) return { vale: false, motivo: 'mai controllato' };
+  if (!pdrRecord) return { vale: true, motivo: '' };
+  const a = chiaveSoggetto(verifica);
+  const b = chiaveSoggetto(pdrRecord);
+  if (!a || !b || a === b) return { vale: true, motivo: '' };
+  return { vale: false, motivo: 'il punto di raccolta e\' passato a un altro soggetto dopo l\'ultimo controllo' };
+}
+
+/**
+ * La sede gia' decisa per lo STESSO soggetto su un altro punto di raccolta: serve
+ * quando un gommista si re-iscrive e il portale gli da' un numero nuovo. Non si
+ * applica da sola - e' un altro luogo, e potrebbe essere un'altra officina - ma
+ * si scrive accanto al controllo nuovo, cosi' chi decide sa che era gia' stato
+ * deciso una volta.
+ */
+export function decisioneDiAltroPunto(pdrRecord, verifiche) {
+  const chiave = chiaveSoggetto(pdrRecord);
+  if (!chiave || !pdrRecord) return null;
+  let migliore = null;
+  for (const v of verifiche || []) {
+    if (!v || Number(v.id_pdr) === Number(pdrRecord.id_pdr)) continue;
+    if (v.stato !== 'corretto' && v.stato !== 'confermato_portale') continue;
+    if (chiaveSoggetto(v) !== chiave) continue;
+    if (!migliore || giorno(v.deciso_il || v.verificato_il) > giorno(migliore.deciso_il || migliore.verificato_il)) migliore = v;
+  }
+  return migliore;
+}
+
 const giorno = (v) => String(v == null ? '' : v).slice(0, 10);
 
 function giorniFra(da, a) {
@@ -193,6 +264,10 @@ export function daVerificare({ pdr = [], idPdrConOrdini = [], verifiche = [], og
     if (String(p.sospeso || '').trim()) continue;
     const u = ultime.get(Number(p.id_pdr));
     if (!u) { scelti.push({ pdr: p, motivo: 'mai controllato', priorita: 0 }); continue; }
+    // Un punto che adesso e' di un altro soggetto va ricontrollato subito: il
+    // controllo vecchio parla di un'altra azienda.
+    const applicabile = verificaApplicabile(u, p);
+    if (!applicabile.vale) { scelti.push({ pdr: p, motivo: applicabile.motivo, priorita: 0 }); continue; }
     if (soloMaiVisti) continue;
     if (normalizzaIndirizzo(u.indirizzo_portale) !== normalizzaIndirizzo(p.indirizzo_pdr)) {
       scelti.push({ pdr: p, motivo: 'a portale l\'indirizzo e\' cambiato dopo l\'ultimo controllo', priorita: 1 });
@@ -247,6 +322,12 @@ export function indirizzoPerFormulario(pdrRecord, verifica) {
     nota: 'Indirizzo del punto di raccolta come lo riporta il portale.',
   };
   if (!verifica) return portale;
+  // Se il punto e' passato a un altro soggetto, il controllo precedente non vale
+  // piu': l'indirizzo confermato era di qualcun altro.
+  const applicabile = verificaApplicabile(verifica, pdrRecord);
+  if (!applicabile.vale) {
+    return { ...portale, origine: 'portale_soggetto_cambiato', nota: `Il controllo precedente era intestato a ${verifica.ragione_sociale || 'un altro soggetto'}: non vale piu' per questo punto, che va ricontrollato.` };
+  }
   if (verifica.stato === 'corretto' && String(verifica.indirizzo_per_formulario || '').trim()) {
     return {
       indirizzo: verifica.indirizzo_per_formulario,

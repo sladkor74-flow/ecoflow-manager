@@ -152,6 +152,39 @@ const nuovaM = righeM.find(v => v.id !== 'v1');
 verifica('e la decisione gia\' presa si riporta, perche\' non e\' cambiato niente',
   nuovaM.stato === 'confermato_portale' && nuovaM.deciso_da === 'admin' && nuovaM.motivo_controllo === 'chiesto dalla scheda', JSON.stringify(nuovaM));
 
+console.log('IL GOMMISTA CHE RINASCE CON UN\'ALTRA ANAGRAFICA');
+// Il punto 199 e' adesso di un'altra azienda: il controllo vecchio non vale, e
+// la sua decisione non deve passare a chi non c'entra niente.
+globalThis.__ARCHIVI = {
+  Pdr: [{ id: 'p9', id_pdr: 199, id_cliente: 900, ragione_sociale: 'NUOVA GOMME SRL', partita_iva: '09999999999', sede_legale: 'Via Nuova 7', indirizzo_pdr: 'Via Nuova 7', cap_pdr: '75012', comune_pdr: 'Bernalda', provincia_pdr: 'MT' }],
+  Assegnato: [{ id: 'a9', id_pdr: 199, anno: 2026 }], AssegnatoAci: [],
+  VerificaSedePdr: [{ id: 'v9', id_pdr: 199, ragione_sociale: 'Marciuliano Gomme snc', partita_iva: '01111111111', indirizzo_portale: 'V.le Berlinguer, 34', comune_portale: 'Bernalda', indirizzo_trovato: 'Viale Berlinguer 34', verificato_il: '2026-10-05', esito: 'coincide', stato: 'corretto', indirizzo_per_formulario: 'Viale Berlinguer 34', deciso_il: '2026-10-05', deciso_da: 'admin' }],
+};
+globalThis.__PROMPT = []; globalThis.__RUOLO = 'admin';
+globalThis.__RISPOSTE = [{ indirizzo: 'Via Nuova 7', comune: 'Bernalda', confidenza: 'media', fonti: ['https://elenco.example/nuova'] }];
+const rinato = await chiama({ anno: 2026, limite: 4 });
+const nuovaRiga = archivio('VerificaSedePdr').find(v => v.id !== 'v9');
+verifica('il punto passato a un altro soggetto si ricontrolla subito',
+  rinato.body.controllati === 1 && /altro soggetto/.test(rinato.body.verifiche[0].motivo), JSON.stringify(rinato.body.verifiche));
+verifica('e la decisione del soggetto di prima NON gli viene addosso',
+  nuovaRiga && nuovaRiga.stato === 'da_decidere' && !nuovaRiga.indirizzo_per_formulario, JSON.stringify(nuovaRiga));
+
+// Stesso soggetto, numero nuovo: la vecchia decisione si ritrova scritta accanto,
+// ma non si applica da sola.
+globalThis.__ARCHIVI = {
+  Pdr: [{ id: 'p10', id_pdr: 39180, id_cliente: 901, ragione_sociale: 'Longo Pneumatici Snc', partita_iva: '03171111111', indirizzo_pdr: 'Via Nuova 7', cap_pdr: '88100', comune_pdr: 'Catanzaro', provincia_pdr: 'CZ' }],
+  Assegnato: [{ id: 'a10', id_pdr: 39180, anno: 2026 }], AssegnatoAci: [],
+  VerificaSedePdr: [{ id: 'v10', id_pdr: 308, ragione_sociale: 'LONGO FRANCESCO & FIGLI SNC', partita_iva: '03171111111', indirizzo_portale: 'Via Vecchia 1', comune_portale: 'Lamezia Terme', verificato_il: '2026-04-01', esito: 'diverso', stato: 'corretto', indirizzo_per_formulario: 'Zona Industriale 9', comune_per_formulario: 'Lamezia Terme', deciso_il: '2026-04-02', deciso_da: 'admin' }],
+};
+globalThis.__PROMPT = []; globalThis.__RUOLO = 'admin';
+globalThis.__RISPOSTE = [{ indirizzo: 'Via Nuova 7', comune: 'Catanzaro', confidenza: 'media', fonti: ['https://elenco.example/longo'] }];
+await chiama({ anno: 2026, limite: 4 });
+const reiscritto = archivio('VerificaSedePdr').find(v => v.id_pdr === 39180);
+verifica('al punto nuovo dello stesso soggetto si ricorda la decisione vecchia, senza applicarla',
+  reiscritto && reiscritto.stato === 'da_decidere' && /punto di raccolta 308/.test(reiscritto.nota) && /Zona Industriale 9/.test(reiscritto.nota), JSON.stringify(reiscritto));
+verifica('e la verifica dell\'altro punto resta com\'era, non viene superata',
+  archivio('VerificaSedePdr').find(v => v.id === 'v10').superata !== true);
+
 console.log('IL GIRO SI FA A SCAGLIONI');
 prepara();
 globalThis.__RISPOSTE = [{ indirizzo: '', fonti: [], confidenza: 'bassa' }];

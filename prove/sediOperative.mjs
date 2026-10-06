@@ -12,6 +12,7 @@
 import {
   normalizzaIndirizzo, numeroCivico, confrontaIndirizzi, fontiValide, esitoVerifica,
   daVerificare, riportaDecisione, indirizzoPerFormulario, ultimaVerificaPerPdr,
+  chiaveSoggetto, verificaApplicabile, decisioneDiAltroPunto,
 } from '../base44/shared/sediOperative.ts';
 
 let ok = 0, ko = 0;
@@ -120,6 +121,40 @@ verifica('con una differenza non ancora decisa, il portale ma con l\'avvertiment
   indirizzoPerFormulario(record, { esito: 'diverso', stato: 'da_decidere' }).origine === 'portale_da_controllare');
 verifica('confermato il portale, lo dice e porta la data',
   /confermato il 2026-10-06/.test(indirizzoPerFormulario(record, { esito: 'coincide', stato: 'confermato_portale', deciso_il: '2026-10-06' }).nota));
+
+console.log('UN GOMMISTA CHE SPARISCE E RINASCE CON UN\'ALTRA ANAGRAFICA');
+// Il caricamento cancella e riscrive tutti i punti: l'unica chiave che
+// sopravvive e' id_pdr, che pero' dice quale posto, non chi. Negli stessi dati
+// del 06/10/2026: 181 partite IVA con piu' di un punto, 33 anche con ragione
+// sociale diversa.
+verifica('la partita IVA e\' la stessa anche scritta in un altro modo',
+  chiaveSoggetto({ partita_iva: 'IT 01234567 891' }) === chiaveSoggetto({ partita_iva: '01234567891' }),
+  chiaveSoggetto({ partita_iva: 'IT 01234567 891' }));
+verifica('senza partita IVA valgono nome e comune',
+  chiaveSoggetto({ ragione_sociale: 'Eurogomme S.r.l.', comune_pdr: 'Lavello' }) === chiaveSoggetto({ ragione_sociale: 'EUROGOMME SRL', comune_portale: 'LAVELLO' }));
+const vecchiaAltroSoggetto = { id_pdr: 308, ragione_sociale: 'LONGO FRANCESCO & FIGLI SNC', partita_iva: '03171111111', indirizzo_portale: 'Via Vecchia 1', comune_portale: 'Lamezia Terme', verificato_il: '2026-04-01', esito: 'coincide', stato: 'confermato_portale', deciso_il: '2026-04-01', deciso_da: 'admin' };
+const puntoRiusato = { id_pdr: 308, ragione_sociale: 'ALTRA GOMME SRL', partita_iva: '09999999999', indirizzo_pdr: 'Via Nuova 7', comune_pdr: 'Lamezia Terme' };
+verifica('un controllo intestato a un altro soggetto non vale piu\'',
+  verificaApplicabile(vecchiaAltroSoggetto, puntoRiusato).vale === false, JSON.stringify(verificaApplicabile(vecchiaAltroSoggetto, puntoRiusato)));
+verifica('ma se cambia solo il nome e la partita IVA e\' quella, vale',
+  verificaApplicabile(vecchiaAltroSoggetto, { id_pdr: 308, ragione_sociale: 'Longo Pneumatici Snc', partita_iva: '03171111111', comune_pdr: 'Catanzaro' }).vale === true);
+verifica('e quando non si riesce a dire chi sia, non si invalida niente',
+  verificaApplicabile({ id_pdr: 1 }, { id_pdr: 1 }).vale === true);
+// La difesa che conta: sul formulario non deve finire l'indirizzo di un altro.
+const perAltro = indirizzoPerFormulario(puntoRiusato, { ...vecchiaAltroSoggetto, stato: 'corretto', indirizzo_per_formulario: 'Zona Industriale 9' });
+verifica('l\'indirizzo confermato di un altro soggetto non va sul formulario',
+  perAltro.indirizzo === 'Via Nuova 7' && perAltro.origine === 'portale_soggetto_cambiato' && /LONGO/.test(perAltro.nota), JSON.stringify(perAltro));
+const tornaInCoda = daVerificare({ pdr: [puntoRiusato], idPdrConOrdini: [308], verifiche: [vecchiaAltroSoggetto], oggi: '2026-04-02', giorniValidita: 180 });
+verifica('e il punto torna subito fra quelli da controllare, col motivo scritto',
+  tornaInCoda.length === 1 && /altro soggetto/.test(tornaInCoda[0].motivo), JSON.stringify(tornaInCoda.map(s => s.motivo)));
+// Lo stesso gommista che si re-iscrive con un numero nuovo: la decisione vecchia
+// non si applica da sola, ma si ritrova.
+const reiscritto = { id_pdr: 39180, ragione_sociale: 'Longo Pneumatici Snc', partita_iva: '03171111111', indirizzo_pdr: 'Via Nuova 7', comune_pdr: 'Catanzaro' };
+const giaDeciso = decisioneDiAltroPunto(reiscritto, [vecchiaAltroSoggetto, { id_pdr: 500, partita_iva: '11111111111', stato: 'corretto' }]);
+verifica('la sede gia\' decisa per lo stesso soggetto su un altro punto si ritrova',
+  giaDeciso && giaDeciso.id_pdr === 308, JSON.stringify(giaDeciso && giaDeciso.id_pdr));
+verifica('ma per il punto nuovo non c\'e\' nessuna verifica: si ricontrolla',
+  daVerificare({ pdr: [reiscritto], idPdrConOrdini: [39180], verifiche: [vecchiaAltroSoggetto], oggi: '2026-10-06' })[0].motivo === 'mai controllato');
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

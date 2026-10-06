@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { sedeDelPunto } from '@/lib/sediIndice';
+import { normalizzaSoggetto } from '@/lib/sediOperative';
 
 // Segno della sede operativa accanto a un punto di raccolta: serve quando si
 // programma il ritiro, perche' sul formulario va la sede operativa e non la sede
@@ -15,6 +16,16 @@ export default function BadgeSedeOperativa({ indice, idPdr, nome }) {
   if (indice.errore) return <span className="text-muted-foreground text-xs" title="Controlli delle sedi non disponibili">?</span>;
   const v = sedeDelPunto(indice, idPdr);
   if (!v) return <span className="text-muted-foreground text-xs" title="Sede operativa mai controllata">—</span>;
+  // Un numero di punto di raccolta dice quale posto, non chi: se l'ordine e' di
+  // un'altra azienda rispetto al controllo, quel controllo non parla di lui.
+  if (nome && v.ragione_sociale && normalizzaSoggetto(nome) !== normalizzaSoggetto(v.ragione_sociale)) {
+    return (
+      <span className="inline-block px-1.5 py-0.5 rounded border text-xs whitespace-nowrap bg-amber-50 text-amber-900 border-amber-300"
+        title={`Il controllo della sede su questo punto di raccolta era intestato a ${v.ragione_sociale}: non vale per ${nome}, va rifatto.`}>
+        da rifare
+      </span>
+    );
+  }
 
   const indirizzoCorretto = unaRiga(v.indirizzo_per_formulario, v.cap_per_formulario, v.comune_per_formulario, v.provincia_per_formulario);
   const trovato = unaRiga(v.indirizzo_trovato, v.cap_trovato, v.comune_trovato, v.provincia_trovato);

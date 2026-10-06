@@ -3,7 +3,7 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from '../../shared/fetchAll.ts';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
-import { daVerificare, esitoVerifica, riportaDecisione, ultimaVerificaPerPdr, normalizzaIndirizzo } from "../../shared/sediOperative.ts";
+import { daVerificare, esitoVerifica, riportaDecisione, ultimaVerificaPerPdr, normalizzaIndirizzo, verificaApplicabile, decisioneDiAltroPunto } from "../../shared/sediOperative.ts";
 
 // CONTROLLA IN RETE LA SEDE OPERATIVA DEI PUNTI DI RACCOLTA.
 //
@@ -174,7 +174,23 @@ export default async function(req) {
         ...esito,
       };
       // Una decisione gia' presa su dati che non sono cambiati non si butta via.
-      Object.assign(nuova, riportaDecisione(nuova, ultime.get(Number(p.id_pdr))));
+      // Ma vale solo se il punto e' ancora dello stesso soggetto: un gommista che
+      // chiude e si re-iscrive prende un numero nuovo, e un numero vecchio puo'
+      // ritrovarsi addosso un'altra azienda.
+      const precedenteApplicabile = verificaApplicabile(ultime.get(Number(p.id_pdr)), p).vale
+        ? ultime.get(Number(p.id_pdr))
+        : null;
+      Object.assign(nuova, riportaDecisione(nuova, precedenteApplicabile));
+      // Se lo stesso soggetto aveva gia' una sede decisa su un ALTRO punto di
+      // raccolta - il caso della re-iscrizione - non si applica da sola, perche'
+      // e' un altro luogo: si scrive accanto, cosi' chi decide lo sa.
+      if (nuova.stato === 'da_decidere') {
+        const altrove = decisioneDiAltroPunto(p, verifiche);
+        if (altrove) {
+          const vecchio = [altrove.indirizzo_per_formulario || altrove.indirizzo_portale, altrove.cap_per_formulario || altrove.cap_portale, altrove.comune_per_formulario || altrove.comune_portale].filter(Boolean).join(', ');
+          nuova.nota = `Lo stesso soggetto aveva gia' una sede decisa sul punto di raccolta ${altrove.id_pdr}: ${vecchio} (deciso il ${String(altrove.deciso_il || altrove.verificato_il || '').slice(0, 10)}). E' un altro punto, quindi va deciso di nuovo.`;
+        }
+      }
 
       // La precedente resta come storico, ma marcata superata: vale la piu' recente.
       const precedente = ultime.get(Number(p.id_pdr));

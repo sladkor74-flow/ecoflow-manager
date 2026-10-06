@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2, Search, AlertTriangle, CheckCircle2, ExternalLink, Pencil, X } from 'lucide-react';
 import { useIndiceSedi, dimenticaIndiceSedi } from '@/lib/sediIndice';
+import { verificaApplicabile } from '@/lib/sediOperative';
 import { oggiRoma } from '@/lib/giornoItaliano';
 
 // LE SEDI OPERATIVE DEI PUNTI DI RACCOLTA, CONTROLLATE IN RETE.
@@ -30,6 +31,17 @@ const STATI = {
 };
 
 const unaRiga = (...parti) => parti.filter(p => String(p || '').trim()).join(', ');
+
+// Il caricamento del file cancella e riscrive tutti i punti di raccolta: un
+// gommista puo' sparire, oppure rinascere con un numero nuovo, e un numero vecchio
+// puo' ritrovarsi addosso un'altra azienda. Un controllo in uno di questi due
+// stati non e' una decisione da prendere: e' un controllo da rifare.
+function statoDelPunto(v, pdr) {
+  if (!pdr) return { ferma: true, testo: 'punto non più in anagrafica: il portale non lo riporta più' };
+  const a = verificaApplicabile(v, pdr);
+  if (!a.vale) return { ferma: true, testo: 'ora intestato a ' + (pdr.ragione_sociale || 'un altro soggetto') + ': il controllo va rifatto' };
+  return null;
+}
 
 export default function SediOperative({ records, cercaIniziale = '' }) {
   const [versione, setVersione] = useState(0);
@@ -59,9 +71,12 @@ export default function SediOperative({ records, cercaIniziale = '' }) {
   const righe = useMemo(() => {
     if (!indice || indice.errore) return [];
     const testo = cerca.trim().toLowerCase();
-    const tutte = [...indice.perPdr.values()].map(v => ({ v, pdr: perId.get(Number(v.id_pdr)) || null }));
+    const tutte = [...indice.perPdr.values()].map(v => {
+      const pdr = perId.get(Number(v.id_pdr)) || null;
+      return { v, pdr, fermo: statoDelPunto(v, pdr) };
+    });
     return tutte
-      .filter(({ v }) => (!soloDaGuardare || (['diverso', 'incerto'].includes(v.esito) && v.stato === 'da_decidere')))
+      .filter(({ v, fermo }) => (!soloDaGuardare || !!fermo || (['diverso', 'incerto'].includes(v.esito) && v.stato === 'da_decidere')))
       .filter(({ v }) => !testo || `${v.ragione_sociale} ${v.descrizione_pdr} ${v.comune_portale}`.toLowerCase().includes(testo))
       .sort((a, b) => (ESITI[a.v.esito]?.ordine ?? 9) - (ESITI[b.v.esito]?.ordine ?? 9)
         || String(a.v.ragione_sociale || '').localeCompare(String(b.v.ragione_sociale || '')));
@@ -70,12 +85,14 @@ export default function SediOperative({ records, cercaIniziale = '' }) {
   const conti = useMemo(() => {
     if (!indice || indice.errore) return null;
     const v = [...indice.perPdr.values()];
+    const vivo = (x) => !statoDelPunto(x, perId.get(Number(x.id_pdr)) || null);
     return {
       controllati: v.length,
-      daDecidere: v.filter(x => ['diverso', 'incerto'].includes(x.esito) && x.stato === 'da_decidere').length,
-      corretti: v.filter(x => x.stato === 'corretto').length,
+      daDecidere: v.filter(x => vivo(x) && ['diverso', 'incerto'].includes(x.esito) && x.stato === 'da_decidere').length,
+      corretti: v.filter(x => vivo(x) && x.stato === 'corretto').length,
+      daRifare: v.filter(x => !vivo(x)).length,
     };
-  }, [indice]);
+  }, [indice, perId]);
 
   const avvia = async () => {
     setErrore(''); fermaRef.current = false;
@@ -154,6 +171,7 @@ export default function SediOperative({ records, cercaIniziale = '' }) {
             <span><span className="font-medium">{conti.controllati}</span> punti controllati</span>
             <span className={conti.daDecidere ? 'text-red-800 font-medium' : ''}>{conti.daDecidere} da decidere</span>
             <span>{conti.corretti} con la sede corretta a mano</span>
+            {!!conti.daRifare && <span className="text-amber-800">{conti.daRifare} da rifare: il punto è cambiato o non c&apos;è più in anagrafica</span>}
           </div>
         )}
         {errore && <p className="text-sm text-destructive">{errore}</p>}
@@ -186,7 +204,7 @@ export default function SediOperative({ records, cercaIniziale = '' }) {
               </tr>
             </thead>
             <tbody>
-              {righe.map(({ v, pdr }, i) => {
+              {righe.map(({ v, pdr, fermo }, i) => {
                 const esito = ESITI[v.esito] || ESITI.errore;
                 const inModifica = modifica && modifica.id === v.id;
                 return (
@@ -197,6 +215,8 @@ export default function SediOperative({ records, cercaIniziale = '' }) {
                         {v.descrizione_pdr && v.descrizione_pdr !== v.ragione_sociale ? v.descrizione_pdr + ' · ' : ''}ID PDR {v.id_pdr}
                       </div>
                       <div className="text-xs text-muted-foreground">controllato il {String(v.verificato_il || '').slice(0, 10)} — {v.motivo_controllo || ''}</div>
+                      {fermo && <div className="text-xs text-amber-800 font-medium">{fermo.testo}</div>}
+                      {v.nota && <div className="text-xs text-muted-foreground">{v.nota}</div>}
                     </td>
                     <td className="px-3 py-2">
                       <div>{unaRiga(v.indirizzo_portale, v.cap_portale, v.comune_portale, v.provincia_portale)}</div>
@@ -223,7 +243,11 @@ export default function SediOperative({ records, cercaIniziale = '' }) {
                       <div className="text-xs text-muted-foreground mt-1">confidenza {v.confidenza || 'media'}</div>
                     </td>
                     <td className="px-2 py-2">
-                      {v.stato !== 'da_decidere' && !inModifica ? (
+                      {fermo ? (
+                        // Decidere su un controllo che parla di un altro soggetto, o di
+                        // un punto che non esiste piu', non vorrebbe dire niente.
+                        <span className="text-xs text-muted-foreground">niente da decidere: il controllo va rifatto</span>
+                      ) : v.stato !== 'da_decidere' && !inModifica ? (
                         <div className="space-y-1">
                           <div className="text-xs font-medium">{STATI[v.stato] || v.stato}</div>
                           {v.stato === 'corretto' && <div className="text-xs">{unaRiga(v.indirizzo_per_formulario, v.cap_per_formulario, v.comune_per_formulario, v.provincia_per_formulario)}</div>}
