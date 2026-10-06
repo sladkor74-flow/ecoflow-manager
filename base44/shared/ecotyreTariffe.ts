@@ -68,6 +68,55 @@ export function resolveTariffa(tariffeSorted, tipologia, classe, regione, eer, d
   return findTariffa(tariffeSorted, tipologia, 'ECOTYRE', classe, regione, eer, dataRiferimento, '');
 }
 
+/**
+ * I CONTROLLI SU UNA TARIFFA ATTIVA, prima che faccia danni (06/10/2026).
+ *
+ * Due modi di rompere la tariffa unica della commessa Ecotyre, tutt'e due
+ * silenziosi finche' non si guarda la fattura:
+ *
+ * 1) UNA SECONDA TARIFFA DELLO STESSO CANALE LEGATA AL SERVIZIO. resolveTariffa
+ *    prova prima quella col servizio esatto: una RETE/ECOTYRE «solo trasporto»
+ *    scavalcherebbe i 202 €/t di tutte le righe con quella dicitura, senza che
+ *    niente lo dica.
+ * 2) L'UNITA' DI MISURA SBAGLIATA. Gli stessi 202 salvati in €/kg moltiplicano
+ *    per mille: luglio 2026 farebbe 226.692.480 € invece di 226.692,49. Una
+ *    tariffa a tre cifre non e' un prezzo al chilo, e una sotto l'euro non e' un
+ *    prezzo alla tonnellata.
+ *
+ * @returns [{ gravita: 'errore'|'avviso', messaggio }]
+ */
+export function controlliTariffaAttiva(nuova, esistenti = []) {
+  const avvisi = [];
+  const valore = Number(nuova && nuova.valore) || 0;
+  const unita = String((nuova && nuova.unita_misura) || '').trim();
+  const tipologia = normText(nuova && nuova.tipologia);
+  const servizio = String((nuova && nuova.servizio_ecotyre) || '').trim();
+
+  if (valore > 0) {
+    if ((unita === '€/kg') && valore > 10) {
+      avvisi.push({ gravita: 'errore', messaggio: `${valore} €/kg sono ${valore * 1000} € a tonnellata: se il prezzo e' per tonnellata, cambia l'unita' di misura.` });
+    }
+    if ((unita === '€/ton' || unita === '€/t') && valore < 1) {
+      avvisi.push({ gravita: 'errore', messaggio: `${valore} €/t e' meno di un euro a tonnellata: se il prezzo e' per chilo, cambia l'unita' di misura.` });
+    }
+  }
+
+  if (servizio) {
+    const unica = (esistenti || []).find(t => normText(t.tipologia) === tipologia
+      && normText(t.cliente_fornitore) === 'ECOTYRE'
+      && !String(t.servizio_ecotyre || '').trim()
+      && t.id !== (nuova && nuova.id)
+      && (t.stato === 'attivo' || !t.stato));
+    if (unica) {
+      avvisi.push({
+        gravita: 'avviso',
+        messaggio: `Per ${tipologia} c'e' gia' una tariffa che vale per tutte le diciture (${unica.valore} ${unica.unita_misura || ''}). Questa, legata a «${servizio}», avrebbe la precedenza su quelle righe: alla commessa Ecotyre la tariffa e' unica, e una seconda tariffa per servizio la spezza.`,
+      });
+    }
+  }
+  return avvisi;
+}
+
 export function calcolaTotale(quantitaKg, tariffa) {
   if (!tariffa) return 0;
   const u = tariffa.unita_misura;

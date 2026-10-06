@@ -105,7 +105,21 @@ verifica('il canale dell\'ordine viene dal gestionale, nessun totale fra canali'
 const uguale = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo: 202 }], { RETE: [riga('ET26000001', 1000, 202)], ACI: [], EXTRA_RACCOLTA: [] });
 verifica('tutto uguale: coincide', uguale.coincide === true && uguale.differenze === 0);
 const serv = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo: 202, servizio: 'Trasp', numero_fir: 'fir-x' }], { RETE: [riga('ET26000001', 1000, 202, { servizio_ecotyre: 'TRASP_TRATT', numero_fir: 'FIR-Y' })], ACI: [], EXTRA_RACCOLTA: [] });
-verifica('tipo di servizio e formulario diversi: due differenze', serv.differenze === 2 && serv.canali[0].servizio_diverso[0].servizio_prefattura === 'TRASP' && serv.canali[0].fir_diverso[0].fir_gestionale === 'FIR-Y');
+// UNA DICITURA DIVERSA NON E' UNA DIFFERENZA DI FATTURAZIONE (06/10/2026).
+//
+// Prima contava come le altre, e l'avviso che ferma la mano prima di esportare
+// compariva su mesi che quadravano al centesimo: alla commessa Ecotyre la rete
+// si fattura con una tariffa unica, e «Trasp.» o «Trasp.+Tratt.» non cambiano il
+// prezzo. Nella prefattura di luglio 2026 le 410 righe di rete sono tutte a
+// 0,202 €/kg, comprese le 37 che il portale etichetta «Trasp». Resta scritta e
+// si vede, contata a parte.
+verifica('il formulario diverso e\' una differenza, la dicitura no',
+  serv.differenze === 1 && serv.diciture_diverse === 1
+  && serv.canali[0].servizio_diverso[0].servizio_prefattura === 'TRASP'
+  && serv.canali[0].fir_diverso[0].fir_gestionale === 'FIR-Y',
+  JSON.stringify({ differenze: serv.differenze, diciture: serv.diciture_diverse }));
+verifica('un mese che si distingue solo per la dicitura quadra',
+  confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo: 202, servizio: 'Trasp' }], { RETE: [riga('ET26000001', 1000, 202, { servizio_ecotyre: 'TRASP_TRATT' })], ACI: [], EXTRA_RACCOLTA: [] }).coincide === true);
 const conExtra = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo: 202 }], { RETE: [riga('ET26000001', 1000, 202)], ACI: [], EXTRA_RACCOLTA: [riga('BSDCL002230PQ', 460, 92.92)] });
 verifica('l\'extra raccolta non passa dalla prefattura: non e\' una differenza', conExtra.coincide === true && conExtra.canali[2].fuori_prefattura === true && conExtra.canali[2].solo_gestionale.length === 1);
 const conTer = confrontaPrefattura([{ id_ordine: 'ET26000001', kg: 1000, importo: 202 }, { id_ordine: 'TER26018323', kg: 27160, importo: 217.28, numero_fir: 'ALL700091/26' }, { id_ordine: 'TER26002903', kg: 27680, importo: 276.8 }],

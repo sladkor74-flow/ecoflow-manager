@@ -16,7 +16,8 @@ const messaggio = (e) => e?.response?.data?.error || e?.data?.error || e.message
 
 function Tabella({ titolo, spiega, colonne, righe, tono = 'amber' }) {
   if (!righe || righe.length === 0) return null;
-  const c = tono === 'red' ? 'border-red-200 bg-red-50/60' : tono === 'grigio' ? 'border-border bg-muted/30' : 'border-amber-200 bg-amber-50/60';
+  // 'sky': un'osservazione, non un errore - si vede ma non e' un allarme.
+  const c = tono === 'red' ? 'border-red-200 bg-red-50/60' : tono === 'grigio' ? 'border-border bg-muted/30' : tono === 'sky' ? 'border-sky-200 bg-sky-50/60' : 'border-amber-200 bg-amber-50/60';
   return (
     <div className={`border rounded-lg p-3 ${c}`}>
       <p className="text-sm font-semibold">{titolo} ({righe.length})</p>
@@ -188,7 +189,11 @@ export default function PrefatturaEcotyre({ periodo, isAdmin, onEsito }) {
               <Tabella titolo={`${NOMI[x.canale]}: peso diverso`}
                 righe={x.peso_diverso}
                 colonne={[{ t: 'ID ordine', v: r => r.id_ordine, m: true }, { t: 'Formulario', v: r => r.numero_fir || '—' }, { t: 'kg prefattura', v: r => kg(r.kg_prefattura), d: true }, { t: 'kg gestionale', v: r => kg(r.kg_gestionale), d: true }, { t: '€ prefattura', v: r => euro(r.importo_prefattura), d: true }, { t: '€ gestionale', v: r => euro(r.importo_gestionale), d: true }]} />
-              <Tabella titolo={`${NOMI[x.canale]}: tipo di servizio diverso`} spiega="Il tipo di servizio dipende dall'impianto di destinazione: Trasp quando il trattamento lo fattura Ecotyre, Trasp+Tratt negli altri casi."
+              {/* Una dicitura diversa non e' una differenza di fatturazione: a
+                  Ecotyre la rete si fattura con una tariffa unica, e il prezzo
+                  non cambia (06/10/2026). Si dice perche' racconta da chi il
+                  portale si aspetta il trattamento, e resta un'osservazione. */}
+              <Tabella tono="sky" titolo={`${NOMI[x.canale]}: dicitura diversa (non cambia la fatturazione)`} spiega="Il prezzo è lo stesso: alla commessa Ecotyre la rete si fattura con una tariffa unica. La dicitura dice solo da chi il portale si aspetta il trattamento."
                 righe={x.servizio_diverso}
                 colonne={[{ t: 'ID ordine', v: r => r.id_ordine, m: true }, { t: 'Formulario', v: r => r.numero_fir || '—' }, { t: 'Prefattura', v: r => SERVIZI[r.servizio_prefattura] || r.servizio_prefattura }, { t: 'Gestionale', v: r => SERVIZI[r.servizio_gestionale] || r.servizio_gestionale }, { t: 'kg', v: r => kg(r.kg), d: true }]} />
               <Tabella titolo={`${NOMI[x.canale]}: numero di formulario diverso`}

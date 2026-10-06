@@ -5,6 +5,12 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { TARIFFA_BASE_EXTRA_RACCOLTA } from "../../shared/ecotyreTariffe.ts";
 
 const DATA_INIZIO = '2026-01-01';
+// LA TARIFFA DI UN ANNO FINISCE CON L'ANNO (decisione dell'utente, 06/10/2026).
+// Senza data di fine, al primo movimento del 2027 il gestionale avrebbe
+// continuato a fatturare il prezzo del 2026 senza dire niente: per la rete non
+// esiste un valore di ripiego, quindi un prezzo vecchio passa inosservato molto
+// piu' facilmente di un prezzo mancante.
+const DATA_FINE = '2026-12-31';
 const NOTE = 'Inserita da seedTariffeAttive2026';
 
 interface TariffaAttivaSeed {
@@ -91,6 +97,7 @@ export default async function(req: any) {
           unita_misura: '€/t',
           valore: t.valore,
           data_inizio_validita: DATA_INIZIO,
+          data_fine_validita: DATA_FINE,
           stato: 'attivo',
           note: NOTE,
         };

@@ -19,7 +19,10 @@ const tariffe = [
   { id: 't-extra', direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA', cliente: 'ECOTYRE', valore: 202, unita_misura: '€/t', stato: 'attivo' },
   { id: 't-vecchia-spenta', direzione: 'ATTIVA', tipologia: 'RETE', cliente: 'ECOTYRE', classe_materiale: 'ZZ', valore: 1, unita_misura: '€/t', stato: 'non_attivo' },
 ];
-const fornitori = [{ ragione_sociale: 'IRIGOM SRL', trattamento_fatturato_da_ecotyre: true }, { ragione_sociale: 'TECNOGUM SRL' }];
+// La spunta sta su TECNOGUM, come nella realta': nella prefattura di luglio 2026
+// le 37 righe che il portale etichetta «Trasp» hanno tutte destinazione Tecnogum.
+// Prima la prova la metteva su Irigom, e insegnava la cosa sbagliata.
+const fornitori = [{ ragione_sociale: 'IRIGOM SRL' }, { ragione_sociale: 'TECNOGUM SRL', trattamento_fatturato_da_ecotyre: true }];
 const base = { stato: 'terminato', cer: '160103' };
 const reteAll = [
   { ...base, id: 'r1', id_ordine: 'ET1', numero_fir: 'F1', classe: 'A', peso_effettivo: 1000, trasporto_finito_il: '2026-06-30T00:00:00.000Z', destinazione: 'Irigom s.r.l.', provincia: 'NA' },
@@ -45,8 +48,8 @@ const extraAll = [
 const g = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: 2026, mese: 'Giugno' });
 console.log('GIUGNO');
 verifica('rete: 2 righe (no cancellato, no peso zero, no 1 luglio italiano)', g.righe.RETE.length === 2, JSON.stringify(g.righe.RETE.map(r => r.ordine)));
-verifica('rete r1: 1 t x 202 = 202', g.righe.RETE[0].totale === 202 && g.righe.RETE[0].servizio_ecotyre === 'TRASP' && g.righe.RETE[0].regione === 'Campania');
-verifica('rete r2: 2,5 t x 202 = 505', g.righe.RETE[1].totale === 505 && g.righe.RETE[1].servizio_ecotyre === 'TRASP_TRATT');
+verifica('rete r1: 202 euro, e la dicitura e quella predefinita', g.righe.RETE[0].totale === 202 && g.righe.RETE[0].servizio_ecotyre === 'TRASP_TRATT' && g.righe.RETE[0].regione === 'Campania');
+verifica('rete r2: 505 euro, e Tecnogum e il solo Trasp', g.righe.RETE[1].totale === 505 && g.righe.RETE[1].servizio_ecotyre === 'TRASP');
 const a1 = g.righe.ACI.find(r => r.ordine === 'EA1'), a2 = g.righe.ACI.find(r => r.ordine === 'EA2');
 verifica('aci a1: ultimo giorno della tariffa chiusa, 2 t x 700 = 1400', a1.totale === 1400 && a1.tariffa_id === 't-aci-1' && a1.ticket_n === '162399-21', JSON.stringify(a1));
 verifica('aci a2: Molise senza tariffa = errore, non verificato', a2.totale === 0 && a2.stato_validazione === 'errore');
@@ -176,6 +179,65 @@ const docs = [
   { id: 'd4', tipologia: 'RETE', stato: 'elaborata', data_elaborazione: '2026-09-15' },
 ];
 verifica('sceglie il piu\' recente non superato e non bozza', documentoValido(docs, 'RETE').id === 'd4' && documentoValido(docs, 'ACI') === null);
+
+// LA TARIFFA UNICA DELLA COMMESSA, E I DUE MODI DI ROMPERLA (06/10/2026).
+//
+// Alla commessa Ecotyre la rete si fattura con una tariffa sola - 202 euro a
+// tonnellata nel 2026 - e la dicitura normale e' trasporto piu' trattamento.
+// L'utente ha chiesto tre difese: la dicitura predefinita dichiarata, un avviso
+// sulla seconda tariffa legata a una dicitura, e un controllo sull'unita' di
+// misura.
+console.log('LA DICITURA E\' DICHIARATA, NON DEDOTTA');
+{
+  // Una destinazione che l'anagrafica non conosce non deve travestirsi da
+  // scelta: la dicitura resta quella predefinita, trasporto piu' trattamento.
+  const riga = { stato: 'terminato', cer: '160103', id: 'x1', id_ordine: 'ETX', numero_fir: 'FX', classe: 'A', peso_effettivo: 1000, trasporto_finito_il: '2026-06-15T00:00:00.000Z', destinazione: 'DITTA MAI VISTA SRL', provincia: 'NA' };
+  const senzaDest = { ...riga, id: 'x2', id_ordine: 'ETY', destinazione: '' };
+  const r = calcolaRigheAttiva({ reteAll: [riga, senzaDest], aciAll: [], extraAll: [], fornitori, tariffe, anno: 2026, mese: 'Giugno' });
+  verifica('una destinazione sconosciuta prende la dicitura predefinita',
+    r.righe.RETE.every(x => x.servizio_ecotyre === 'TRASP_TRATT'), JSON.stringify(r.righe.RETE.map(x => [x.ordine, x.servizio_ecotyre])));
+  verifica('e anche una riga senza destinazione', r.righe.RETE.length === 2);
+}
+
+console.log('LE DIFESE DELLA TARIFFA UNICA');
+{
+  const { controlliTariffaAttiva } = await import('../base44/shared/ecotyreTariffe.ts');
+  const unica = { id: 'u', tipologia: 'RETE', cliente_fornitore: 'ECOTYRE', valore: 202, unita_misura: '€/t', servizio_ecotyre: '', stato: 'attivo' };
+
+  // 1) l'unita' di misura sbagliata: gli stessi 202 in euro al chilo moltiplicano per mille
+  const inKg = controlliTariffaAttiva({ tipologia: 'RETE', valore: 202, unita_misura: '€/kg' }, []);
+  verifica('202 in euro al chilo e\' un errore, e si dice quanto farebbe',
+    inKg.some(c => c.gravita === 'errore' && /202000/.test(c.messaggio)), JSON.stringify(inKg));
+  const inT = controlliTariffaAttiva({ tipologia: 'RETE', valore: 0.202, unita_misura: '€/t' }, []);
+  verifica('e 0,202 alla tonnellata e\' l\'errore speculare',
+    inT.some(c => c.gravita === 'errore'), JSON.stringify(inT));
+  verifica('la tariffa giusta non fa storie', controlliTariffaAttiva(unica, []).length === 0);
+
+  // 2) una seconda tariffa dello stesso canale legata a una dicitura
+  const seconda = { tipologia: 'RETE', cliente_fornitore: 'ECOTYRE', valore: 8, unita_misura: '€/t', servizio_ecotyre: 'TRASP' };
+  const avvisi = controlliTariffaAttiva(seconda, [unica]);
+  verifica('una seconda tariffa rete legata a una dicitura avvisa, e non ferma il salvataggio',
+    avvisi.length === 1 && avvisi[0].gravita === 'avviso' && /precedenza/.test(avvisi[0].messaggio), JSON.stringify(avvisi));
+  verifica('senza la tariffa unica non c\'e\' niente da scavalcare, e nessun avviso',
+    controlliTariffaAttiva(seconda, []).length === 0);
+  verifica('e una tariffa di un altro canale non c\'entra',
+    controlliTariffaAttiva({ ...seconda, tipologia: 'ACI' }, [unica]).length === 0);
+}
+
+console.log('UNA DICITURA DIVERSA NON E\' UNA DIFFERENZA DI FATTURAZIONE');
+{
+  const { confrontaPrefattura } = await import('../base44/shared/prefattura.ts');
+  // Stesso ordine, stessi chili, stesso importo: cambia solo l'etichetta.
+  const righeGest = { RETE: [{ ordine: 'ET26000001', numero_fir: 'F1', quantita: 1000, totale: 202, tariffa_valore: 202, servizio_ecotyre: 'TRASP_TRATT' }] };
+  const prefattura = [{ id_ordine: 'ET26000001', numero_fir: 'F1', kg: 1000, importo: 202, servizio: 'Trasp' }];
+  const c = typeof confrontaPrefattura === 'function' ? confrontaPrefattura(prefattura, righeGest, {}) : null;
+  if (c) {
+    verifica('il mese quadra lo stesso: la dicitura non entra fra le differenze', c.differenze === 0, JSON.stringify({ differenze: c.differenze, diciture: c.diciture_diverse }));
+    verifica('ma la dicitura diversa si vede, contata a parte', c.diciture_diverse === 1, String(c.diciture_diverse));
+  } else {
+    verifica('confrontaPrefattura si puo\' chiamare dalla prova', false, 'firma diversa: la prova va adeguata');
+  }
+}
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from '../../shared/fetchAll.ts';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
+import { controlliTariffaAttiva } from "../../shared/ecotyreTariffe.ts";
 
 // Gestisce le operazioni di scrittura su entità anagrafiche (Tariffa, Fornitore, Servizio).
 // FornitoreSecondaria non passa piu' di qui (27/09/2026): i collegamenti degli
@@ -74,6 +75,8 @@ export default async function(req) {
 
     // === VALIDAZIONE TARIFFA (create e update) ===
     let tariffeChiuse = [];
+    // Gli avvisi che non fermano il salvataggio ma devono arrivare a chi salva.
+    const avvisiTariffa = [];
     if (entita === 'Tariffa' && (operazione === 'create' || operazione === 'update')) {
       let effettivi = dati || {};
 
@@ -159,6 +162,18 @@ export default async function(req) {
         }, { status: 409 });
       }
 
+      // f) I DUE MODI SILENZIOSI DI ROMPERE LA TARIFFA UNICA (06/10/2026):
+      // un'unita' di misura sbagliata, che moltiplica o divide per mille, e una
+      // seconda tariffa dello stesso canale legata a una dicitura, che
+      // scavalcherebbe quella che vale per tutte. Il primo e' un errore e ferma
+      // il salvataggio; il secondo e' un avviso che torna a chi salva.
+      if (isAttiva) {
+        const controlli = controlliTariffaAttiva(effettivi, esistenti);
+        const errore = controlli.find(c => c.gravita === 'errore');
+        if (errore) return Response.json({ error: errore.messaggio }, { status: 400 });
+        avvisiTariffa.push(...controlli.map(c => c.messaggio));
+      }
+
       // d) Chiudi le tariffe chiudibili (rinegoziazione prezzo)
       // La tariffa chiusa resta 'attivo': lo stato non_attivo vuol dire "non
       // deve valere mai", e usarlo qui cancellerebbe il prezzo da tutti i mesi
@@ -190,6 +205,10 @@ export default async function(req) {
     const response = { result };
     if (tariffeChiuse.length > 0) {
       response.tariffe_chiuse = tariffeChiuse;
+    }
+    // Gli avvisi non fermano il salvataggio, ma non si perdono per strada.
+    if (avvisiTariffa.length > 0) {
+      response.avvisi = avvisiTariffa;
     }
     return Response.json(response);
   } catch (error) {

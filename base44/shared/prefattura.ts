@@ -320,10 +320,24 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
         : `nel gestionale la fine trasporto è il ${a.giorno.split('-').reverse().join('/')}: un altro mese${a.date ? ` (e le date sono da sistemare: ${a.date})` : ''}`,
     });
   }
-  const differenze = soloPrefattura.length + canali.reduce((s, c) => s + (c.fuori_prefattura ? 0 : c.solo_gestionale.length) + c.peso_diverso.length + c.importo_diverso.length + c.servizio_diverso.length + c.fir_diverso.length, 0);
+  // UNA DICITURA DIVERSA NON E' UNA DIFFERENZA DI FATTURAZIONE (06/10/2026).
+  //
+  // Quello che deve quadrare sono i chili e gli importi. La dicitura - «Trasp.»
+  // o «Trasp.+Tratt.» - non cambia il prezzo: a Ecotyre la rete si fattura con
+  // una tariffa unica (202 €/t nel 2026), e nella prefattura di luglio tutte le
+  // 410 righe di rete sono a 0,202 €/kg, comprese le 37 che il portale etichetta
+  // «Trasp». Contandola fra le differenze, l'avviso che ferma la mano prima di
+  // esportare compariva su un mese che quadrava al centesimo.
+  //
+  // Resta scritta e si vede, perche' dice da chi il portale si aspetta il
+  // trattamento: e' un'osservazione, non un errore di fatturazione.
+  const differenze = soloPrefattura.length + canali.reduce((s, c) => s + (c.fuori_prefattura ? 0 : c.solo_gestionale.length) + c.peso_diverso.length + c.importo_diverso.length + c.fir_diverso.length, 0);
+  const diciture_diverse = canali.reduce((s, c) => s + c.servizio_diverso.length, 0);
   return {
     coincide: differenze === 0 && pre.size > 0,
     differenze,
+    // quante righe hanno solo la dicitura diversa: si dicono, non fermano niente
+    diciture_diverse,
     ordini_prefattura: pre.size,
     con_importi: conImporti, con_pesi: conPesi,
     canali, solo_prefattura: soloPrefattura, terziarie,

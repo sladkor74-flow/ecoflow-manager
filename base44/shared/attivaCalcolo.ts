@@ -93,11 +93,22 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
     const key = normalizzaRagioneSociale(f.ragione_sociale);
     if (key) fornitoreMap.set(key, f);
   }
-  // TRASP se l'impianto di destinazione ha il trattamento fatturato da Ecotyre
+  // LA DICITURA E' «TRASP.+TRATT.» PER REGOLA, NON PER MANCANZA DI DATI
+  // (decisione dell'utente, 06/10/2026).
+  //
+  // Alla commessa Ecotyre si fattura con una tariffa unica (202 €/t per la rete
+  // nel 2026) e la dicitura normale e' trasporto piu' trattamento: «Trasp.» vale
+  // solo dove il trattamento lo fattura Ecotyre, e oggi e' il caso di Tecnogum.
+  //
+  // Prima era una deduzione: TRASP_TRATT usciva sia quando l'impianto non aveva
+  // la spunta sia quando la destinazione era vuota o sconosciuta all'anagrafica -
+  // il valore giusto per il motivo sbagliato. Adesso il default e' dichiarato, e
+  // solo la spunta esplicita di un fornitore RICONOSCIUTO lo cambia: cosi' una
+  // destinazione che non si trova non si traveste da scelta.
+  const DICITURA_PREDEFINITA = 'TRASP_TRATT';
   const tipoServizioDi = (r) => {
-    if (!r.destinazione) return 'TRASP_TRATT';
-    const f = fornitoreMap.get(normalizzaRagioneSociale(r.destinazione));
-    return f && f.trattamento_fatturato_da_ecotyre === true ? 'TRASP' : 'TRASP_TRATT';
+    const f = r.destinazione ? fornitoreMap.get(normalizzaRagioneSociale(r.destinazione)) : null;
+    return f && f.trattamento_fatturato_da_ecotyre === true ? 'TRASP' : DICITURA_PREDEFINITA;
   };
 
   const tariffeSorted = sortTariffe(tariffeAttiveValide(tariffe));

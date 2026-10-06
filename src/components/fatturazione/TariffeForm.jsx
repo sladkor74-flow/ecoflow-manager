@@ -103,7 +103,15 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
   // prima: va detto, con la data e la cifra, perche' e' una decisione che vale
   // soldi e finora passava inosservata.
   const avvisaChiusure = (res) => {
+    // Gli avvisi del controllo: non fermano il salvataggio ma vanno letti - per
+    // esempio una seconda tariffa dello stesso canale legata a una dicitura, che
+    // scavalcherebbe quella unica della commessa (06/10/2026).
+    const avvisi = res?.data?.avvisi || [];
     const chiuse = res?.data?.tariffe_chiuse || [];
+    if (avvisi.length) {
+      setSuccess(`Tariffa salvata. ${avvisi.join(' ')}`);
+      if (chiuse.length === 0) return;
+    }
     if (chiuse.length === 0) return;
     const c = chiuse[0];
     const prezzo = c.valore !== undefined && c.valore !== null ? ` (${c.valore} ${c.unita_misura || ''})`.trimEnd() : '';
