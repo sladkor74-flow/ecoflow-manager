@@ -14,6 +14,7 @@ import { fmtTon, formatIntero } from '@/lib/utils';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { canaleDi } from '@/lib/canaleSecondaria';
+import AvvisoEseguiti from '@/components/primarie-rete/AvvisoEseguiti';
 
 // Rete e ACI stanno nello stesso archivio ma sono commesse separate: la pagina
 // ne guarda una alla volta, e si apre sulla rete. Il filtro partiva vuoto, con
@@ -47,6 +48,9 @@ function periodoDi(r) {
 export default function Secondarie() {
   const [data, setData] = useState(null);
   const [records, setRecords] = useState([]);
+  // Tutte le secondarie del canale aperto, senza gli altri filtri: servono
+  // all'avviso sugli "eseguito", che guarda l'archivio e non l'elenco filtrato.
+  const [delCanale, setDelCanale] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -81,6 +85,10 @@ export default function Secondarie() {
     try {
       const all = await fetchAllClient(base44.entities.Secondaria);
       const cerca = searchIdOrdine.toLowerCase().trim();
+      // Il canale si tiene a parte, e da solo: rete e ACI non si sommano mai
+      // (regola 3), e un "eseguito" non deve dipendere dai filtri di periodo -
+      // un ordine senza fine trasporto non risponde a nessuno di quelli.
+      const soloCanale = all.filter(r => filters.canale.length === 0 || filters.canale.includes(canaleRiga(r)));
       const righe = [];
       for (const r of all) {
         if (cerca && !(r.id_ordine || '').toLowerCase().includes(cerca)) continue;
@@ -124,7 +132,7 @@ export default function Secondarie() {
           date_da_sistemare: testoDate(r),
         });
       }
-      if (n === ultimoDettaglio.current) setRecords(righe);
+      if (n === ultimoDettaglio.current) { setRecords(righe); setDelCanale(soloCanale); }
     } catch (e) { console.error(e); }
     if (n === ultimoDettaglio.current) setLoadingRecords(false);
   }, [filters, searchIdOrdine]);
@@ -231,6 +239,14 @@ export default function Secondarie() {
         </Tabs>
         <p className="text-xs text-muted-foreground">Rete e ACI sono commesse separate: numeri, matrice, dettaglio ed Excel sono sempre di un canale solo.</p>
       </div>
+
+      {/* Gli ordini "eseguito" a portale: tutti i dati, ma nessuno ha premuto
+          Chiudi. Il gestionale conta solo i terminati, quindi spariscono in
+          silenzio da ogni conto. Vanno segnalati sempre, anche qui: fino
+          all'08/10/2026 l'avviso c'era solo sulle primarie, e una secondaria nel
+          limbo non si vedeva da nessuna parte. Si guarda tutto l'archivio del
+          canale, non l'elenco filtrato. */}
+      {!loadingRecords && <AvvisoEseguiti righe={delCanale} canale={canale} file="delle secondarie" />}
 
       {loading ? (
         <div className="flex items-center justify-center py-12 text-muted-foreground">

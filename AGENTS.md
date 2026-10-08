@@ -1542,8 +1542,16 @@ function vera e il modulo del browser con un SDK finto e i guasti in mezzo.
   `storico_conservato` e al registro, e le frasi dicono "ordini terminati o
   eseguiti" invece di chiamarli terminati. Senza quel conto un eseguito immesso
   prima dell'anno scorso non comparirebbe da nessuna parte, perche'
-  `avviso_eseguiti` guarda il FILE. La regola vale anche per secondarie e
-  terziarie (`importEcotyreFile` chiama la stessa funzione).
+  `avviso_eseguiti` guarda il FILE. **La regola vale anche per secondarie e
+  terziarie**, e fino all'08/10/2026 valeva solo a meta': `importEcotyreFile`
+  chiamava la stessa funzione ma prendeva solo ordini e righe, buttando via
+  `c.eseguiti`. Si conservavano e non li segnalava nessuno - il contrario di
+  "segnalato E mantenuto". Adesso il conto arriva fino alla finestra del
+  caricamento, e **l'avviso sta anche sulle pagine**: Secondarie (un canale per
+  volta, che e' la scheda aperta) e Terziarie (due avvisi, perche' li' il canale
+  lo decide il materiale e rete e ACI non si sommano mai). Senza quell'avviso una
+  secondaria nel limbo non si vedeva da nessuna parte. Guardia in
+  `prove/storicoConservato.mjs`.
 - **Un caricamento aggiorna i moduli solo se e' riuscito** (`moduliDaRicalcolare`),
   e quando non partono si dice quali restano indietro (`ricalcoliFermi`). I
   ricalcoli (`RICALCOLI` in `src/lib/importGrandeFile.js`) sono **cinque** per le

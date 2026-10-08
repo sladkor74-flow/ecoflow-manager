@@ -3,6 +3,7 @@
 // 2024: non sono mancanti e non si cancellano. L'anno e' sempre quello della
 // fine trasporto. npm run prove
 import { annoDelloStorico, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from '../base44/shared/storicoConservato.ts';
+import { readFileSync } from 'node:fs';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -123,6 +124,36 @@ verifica('col tempo finito si dice quanti ordini si sono tolti e che non e\' fin
 verifica('e le righe tolte sono tolte davvero: il giro dopo riprende da li\'', a6.righe.length === 251, String(a6.righe.length));
 const esito7 = await svuotaTranne(a6.ent, a6.righe, new Set(['V9']));
 verifica('richiamando si arriva in fondo', esito7.finito === true && a6.righe.length === 1 && a6.righe[0].id_ordine === 'V9');
+
+console.log('IL CONTO DEGLI ESEGUITI ARRIVA FINO A CHI LO DEVE MOSTRARE');
+{
+  // ordiniDaConservare li conta (qui sopra), ma contarli non serve a niente se
+  // poi il conto si perde per strada. Per le primarie arriva fino alla finestra
+  // del caricamento (importGrandeFile.js); per secondarie e terziarie,
+  // importEcotyreFile prendeva solo ordini e righe e buttava via c.eseguiti,
+  // quindi quegli ordini si conservavano ma non li segnalava nessuno - contro la
+  // regola dell'utente del 28/09/2026, "va segnalato E mantenuto". Trovato
+  // l'08/10/2026 verificando AGENTS.md contro il codice.
+  const sorgente = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
+  const f = sorgente('base44/functions/importEcotyreFile/entry.ts');
+  verifica('importEcotyreFile porta gli eseguiti nello storico', /eseguiti: c[.]eseguiti/.test(f));
+  verifica('e li manda nella risposta', /eseguiti: storico[.]eseguiti/.test(f));
+
+  // E le pagine: un "eseguito" che non e' nel file non lo vede nessuno se la
+  // pagina non lo dice. L'avviso guarda l'archivio, non l'elenco filtrato.
+  for (const [pagina, quanti] of [['src/pages/Secondarie.jsx', 1], ['src/pages/Terziarie.jsx', 2]]) {
+    const s = sorgente(pagina);
+    verifica(pagina + ': importa l avviso sugli eseguiti',
+      /import AvvisoEseguiti from/.test(s));
+    verifica(pagina + ': lo mostra, un canale per volta',
+      s.split('<AvvisoEseguiti ').length - 1 === quanti,
+      'trovati ' + (s.split('<AvvisoEseguiti ').length - 1) + ', attesi ' + quanti);
+  }
+  // Due avvisi sulle terziarie perche' il canale lo decide il materiale e rete e
+  // ACI non si sommano mai (regola 3); uno sulle secondarie, che hanno gia' la
+  // scheda del canale.
+  verifica('le terziarie dividono rete e ACI', /canaleDi\(r\) === 'ACI'/.test(sorgente('src/pages/Terziarie.jsx')));
+}
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

@@ -32,8 +32,12 @@ const MOSTRATI = 50;
 /**
  * L'avviso in testa a un elenco di terminati. righe: le righe dell'archivio di
  * QUEL canale (mai rete e ACI insieme); canale: 'Rete', 'ACI'.
+ *
+ * 'file' dice quale file si ricarica dopo aver chiuso gli ordini a portale: lo
+ * stesso avviso serve alle primarie, alle secondarie e alle terziarie, e mandare
+ * a ricaricare il file sbagliato e' un giro a vuoto (08/10/2026).
  */
-export default function AvvisoEseguiti({ righe, canale, className = '' }) {
+export default function AvvisoEseguiti({ righe, canale, file = 'delle primarie', className = '' }) {
   const { ordini: n, kg, esempi } = riepilogoEseguiti(righe);
   if (!n) return null;
   return (
@@ -44,7 +48,7 @@ export default function AvvisoEseguiti({ righe, canale, className = '' }) {
           <strong>{canale ? `${canale} · ` : ''}{formatIntero(n)} {n === 1 ? 'ordine ha' : 'ordini hanno'} tutti i dati ma a portale non è stato premuto Chiudi</strong>
           {kg ? ` (${formatIntero(kg)} kg)` : ''}: finché resta così non {n === 1 ? 'entra' : 'entrano'} in nessun conto —
           {' '}raccolto, giacenze, report, copertura del target e fatturazione.
-          {' '}Vanno chiusi a portale, poi si ricarica il file delle primarie.
+          {' '}Vanno chiusi a portale, poi si ricarica il file {file}.
         </p>
       </div>
       <details className="pl-6 text-xs">

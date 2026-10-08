@@ -10,6 +10,8 @@ import MultiSelect from '@/components/shared/MultiSelect';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { formatIntero } from '@/lib/utils';
 import AvvisoDateDaSistemare from '@/components/primarie-rete/DateDaSistemare';
+import AvvisoEseguiti from '@/components/primarie-rete/AvvisoEseguiti';
+import { canaleDi } from '@/lib/canaleSecondaria';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const MATERIALI = ['PFU SFUSO', 'CIAB/CIPP', 'FERRO'];
@@ -46,6 +48,10 @@ export default function Terziarie() {
   // Per le date da sistemare: i trasporti dell'elenco e i terminati senza fine
   // trasporto che rispondono ai filtri che non sono di periodo.
   const [perDate, setPerDate] = useState([]);
+  // Tutto l'archivio, senza filtri: serve all'avviso sugli "eseguito", che non
+  // dipende da nessun filtro di periodo (un ordine nel limbo puo' non avere la
+  // fine trasporto, e allora nessun periodo lo prende).
+  const [tutte, setTutte] = useState([]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -90,6 +96,7 @@ export default function Terziarie() {
       });
       setRecords(filtered);
       setPerDate(all.filter(r => passaAltri(r) && (passaPeriodo(r) || senzaFineTrasporto(r))));
+      setTutte(all);
     } catch (e) { console.error(e); }
     setLoading(false);
   }, [filters, searchIdOrdine]);
@@ -145,6 +152,19 @@ export default function Terziarie() {
           {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />} Esporta Excel
         </button>
       </div>
+
+      {/* Gli ordini "eseguito" a portale: tutti i dati, ma nessuno ha premuto
+          Chiudi, quindi non entrano in nessun conto e sparirebbero in silenzio.
+          Vanno segnalati sempre, anche qui: fino all'08/10/2026 l'avviso c'era
+          solo sulle primarie. Due avvisi separati, uno per canale: il canale di
+          una terziaria lo decide il materiale (classe 9 = ACI), e rete e ACI non
+          si sommano mai (regola 3). Ciascuno non compare se non ha niente da dire. */}
+      {!loading && (
+        <>
+          <AvvisoEseguiti righe={tutte.filter(r => canaleDi(r) !== 'ACI')} canale="Rete" file="delle terziarie" />
+          <AvvisoEseguiti righe={tutte.filter(r => canaleDi(r) === 'ACI')} canale="ACI" file="delle terziarie" />
+        </>
+      )}
 
       <TerziarieKpi kpi={kpi} />
 

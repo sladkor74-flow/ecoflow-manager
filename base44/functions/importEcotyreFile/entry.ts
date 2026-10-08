@@ -413,7 +413,7 @@ export default async function(req) {
     let avviso_date = null;
     // Lo storico conservato (storicoConservato.ts): per secondarie e terziarie,
     // i terminati con la fine trasporto prima dell'anno da cui comincia il file.
-    let storico = null; // { anno_inizio, archivio, ordini, righe }
+    let storico = null; // { anno_inizio, archivio, ordini, righe, eseguiti, lasciati }
 
     const antiRegressionTypes = ['primarie', 'secondarie', 'terziarie'];
     fase = 'controllo anti-regressione';
@@ -440,7 +440,13 @@ export default async function(req) {
           const idNelFile = new Set(enriched.filter(r => r[keyField]).map(r => String(r[keyField])));
           const c = ordiniDaConservare(archivio, idNelFile);
           const lasciati = cancellatiDaLasciare(archivio, annoInizio, idNelFile);
-          if (c.ordini.size || lasciati.size) storico = { anno_inizio: annoInizio, archivio, ordini: c.ordini, righe: c.righe, lasciati };
+          // Gli "eseguito" si portano dietro: ordiniDaConservare li conta a parte
+          // (c.eseguiti) e vanno DETTI, non solo conservati. L'avviso sugli
+          // eseguiti guarda il FILE, e questi nel file non ci sono: se non si
+          // dicono qui non si vedono da nessuna parte. Fino all'08/10/2026 qui si
+          // prendevano solo ordini e righe e il conto si perdeva, mentre per le
+          // primarie (importGrandeFile.js) arrivava fino alla finestra.
+          if (c.ordini.size || lasciati.size) storico = { anno_inizio: annoInizio, archivio, ordini: c.ordini, righe: c.righe, eseguiti: c.eseguiti, lasciati };
         } else {
           existingIds = await loadAllIds(config.entity);
         }
@@ -717,7 +723,9 @@ export default async function(req) {
       avviso_calo,
       allineamento,
       // I terminati degli anni prima del file, rimasti in archivio.
-      storico_conservato: storico && storico.righe ? { dal_anno: storico.anno_inizio, righe: storico.righe } : null,
+      storico_conservato: storico && storico.righe
+        ? { dal_anno: storico.anno_inizio, righe: storico.righe, eseguiti: storico.eseguiti }
+        : null,
       forzato: !!conferma_forzatura,
       modalita,
       file_sostituiti: fileSostituiti,
