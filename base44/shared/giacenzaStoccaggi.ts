@@ -338,6 +338,15 @@ function confrontoConBase(rilevazione, base, movimenti) {
     if (m.verso === 'uscita') { s.uscite++; s.uscite_kg += m.kg; } else { s.ingressi++; s.ingressi_kg += m.kg; }
   }
 
+  // I movimenti di una classe arrivati (o partiti) a ridosso della lettura e
+  // chiusi a portale dopo: la somma, non il singolo. Si calcola sul periodo
+  // intero e non sui candidati, che sono tagliati a MAX_CANDIDATI per non
+  // riempire la pagina: un taglio li' falserebbe la somma.
+  const sommaARidosso = (canale, classe, verso) => (periodo || [])
+    .filter(m => m.canale === canale && m.classe === classe && m.verso === verso
+      && aRidosso && m.finito_il >= aRidosso && m.chiuso_il && m.chiuso_il > del)
+    .reduce((acc, m) => ({ n: acc.n + 1, kg: acc.kg + m.kg }), { n: 0, kg: 0 });
+
   const candidatiPer = (canale, scarto) => {
     const peso = Math.abs(scarto);
     return periodo
@@ -391,7 +400,7 @@ function confrontoConBase(rilevazione, base, movimenti) {
         ingressi: s.ingressi, ingressi_kg: s.ingressi_kg,
         uscite: s.uscite, uscite_kg: s.uscite_kg,
         atteso, letto: valore, scarto,
-        candidati: [], spiegato: false, nota: '',
+        candidati: [], spiegato: false, spiegazione: '', nota: '',
       };
       if (scarto) {
         scostano.push(classe);
@@ -399,9 +408,38 @@ function confrontoConBase(rilevazione, base, movimenti) {
         if (scarto > 0) spostatiCanale += scarto;
         voce.candidati = candidatiPer(canale, scarto);
         const esatti = voce.candidati.filter(c => c.peso_esatto).length;
-        voce.spiegato = esatti > 0;
+        // LA SOMMA DI PIU' FORMULARI, NON UNO SOLO (05/10/2026, NAPPI SUD).
+        //
+        // Il giorno della lettura arrivano otto carichi, chiusi a portale il
+        // giorno dopo: quando il piazzale e' stato letto non erano ancora a
+        // terra, ma il conto li contava gia' dentro. Nessuno dei otto, da solo,
+        // faceva lo scarto - 9.580 kg di P e 11.480 di M - e la rilevazione
+        // restava «da controllare» per sempre. Sommati per classe lo fanno
+        // esattamente: P 820+820+4.540+3.400, M 6.560+160+1.760+3.000.
+        //
+        // Si guarda il verso giusto, perche' il segno dice che cosa cercare: se
+        // si e' letto MENO dell'atteso sono ingressi contati e non ancora
+        // scaricati; se si e' letto PIU', uscite contate e non ancora partite.
+        // E la somma deve tornare al chilo: un «quasi» non e' una spiegazione.
+        const gruppo = sommaARidosso(canale, classe, scarto < 0 ? 'ingresso' : 'uscita');
+        const gruppoSpiega = gruppo.n > 0 && gruppo.kg === Math.abs(scarto);
+        voce.spiegato = esatti > 0 || gruppoSpiega;
+        // DUE SPIEGAZIONI CHE NON SI SOMIGLIANO.
+        //
+        // 'tempi': i carichi sono giusti e la lettura e' giusta, non coincidono
+        // solo gli istanti - il piazzale e' stato letto prima che scaricassero.
+        // Non c'e' niente da correggere, e l'avviso in cima a Giacenze non deve
+        // suonare.
+        // 'peso': un peso che torna esatto di solito vuol dire un formulario
+        // finito nella CLASSE SBAGLIATA, che fa due scarti opposti (NAPPI SUD,
+        // 16/09/2026: P +6.160 e M -6.160). Li' qualcosa da correggere c'e'
+        // davvero, e l'avviso resta.
+        // Se tornano tutt'e due, vince la piu' prudente: resta un'anomalia.
+        voce.spiegazione = esatti > 0 ? 'peso' : (gruppoSpiega ? 'tempi' : '');
         voce.nota = esatti
           ? `Lo scarto e' esattamente il peso di ${esatti === 1 ? 'un formulario' : `${esatti} formulari`} del periodo.`
+          : gruppoSpiega
+            ? `Lo scarto e' esattamente la somma ${gruppo.n === 1 ? 'di un movimento' : `dei ${gruppo.n} movimenti`} di classe ${classe} ${scarto < 0 ? 'arrivati' : 'partiti'} a ridosso della lettura e chiusi a portale dopo: quando il piazzale e' stato letto ${scarto < 0 ? 'non erano ancora a terra' : 'erano ancora a terra'}.`
           : voce.candidati.length === 1
             ? "Nessun formulario, da solo, fa lo scarto; c'e' un movimento finito a ridosso della rilevazione e chiuso a portale dopo la lettura."
             : voce.candidati.length
@@ -662,7 +700,15 @@ export function anomaliaRilevazione(verifica) {
   if (!verifica) return null;
   const a = verifica.ancora;
   const conAncora = !!(a && !a.senza_ancora && !a.e_la_lettura);
-  const classi = (conAncora ? a.classi : verifica.classi).filter(c => c.scarto);
+  // Lo scarto spiegato DAGLI ISTANTI non e' una cosa da controllare: i carichi
+  // sono giusti e la lettura e' giusta, il piazzale e' solo stato letto prima
+  // che scaricassero (NAPPI SUD, 05/10/2026: otto formulari arrivati quel
+  // giorno e chiusi a portale il giorno dopo, 9.580 kg di P e 11.480 di M). La
+  // spiegazione resta scritta nella scheda Stoccaggi, ma non chiama nessuno.
+  // Lo scarto spiegato da un PESO che torna esatto resta un'anomalia: quasi
+  // sempre e' un formulario finito nella classe sbagliata, e li' c'e' qualcosa
+  // da correggere.
+  const classi = (conAncora ? a.classi : verifica.classi).filter(c => c.scarto && c.spiegazione !== 'tempi');
   if (!classi.length) return null;
   return {
     del: verifica.del,

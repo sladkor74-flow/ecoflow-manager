@@ -79,6 +79,48 @@ verifica('lo scarto si spiega, e lo si dice', di('M').spiegato === true && di('M
 verifica('lo stesso formulario spiega anche il +6.160 di P, ed e\' di classe M', di('P').candidati.length === 1 && di('P').candidati[0].id_ordine === 'ET26138377' && di('P').candidati[0].classe === 'M');
 verifica('chi non c\'entra resta fuori', !JSON.stringify(candM).includes('ET26137000') && !JSON.stringify(candM).includes('SEC00412'));
 
+// IL CASO DI NAPPI SUD DEL 05/10/2026: OTTO CARICHI ARRIVATI IL GIORNO DELLA
+// LETTURA E CHIUSI A PORTALE IL GIORNO DOPO. Nessuno dei otto, da solo, faceva
+// lo scarto - 9.580 kg di P e 11.480 di M - e la rilevazione restava «da
+// controllare» per sempre. Sommati per classe lo fanno esattamente: quando il
+// piazzale e' stato letto, quel materiale non era ancora a terra.
+console.log('PIU\' FORMULARI INSIEME FANNO LO SCARTO, E LO SPIEGANO');
+{
+  const prima = { sito: 'NAPPI SUD', data_rilevazione: '2026-09-23', class1_kg: 10000, class2_kg: 1000, class3_kg: 0, class4_kg: 0, class9_kg: 0 };
+  const dopo = { sito: 'NAPPI SUD', data_rilevazione: '2026-10-05', class1_kg: 10000, class2_kg: 1000, class3_kg: 0, class4_kg: 0, class9_kg: 0 };
+  const arrivi = [
+    m('ET26164944', 820, '2026-10-05T08:00:00Z', '2026-10-06T09:00:00Z'),
+    m('ET26147871', 820, '2026-10-05T08:30:00Z', '2026-10-06T09:00:00Z'),
+    m('ET26157608', 4540, '2026-10-05T09:00:00Z', '2026-10-06T09:00:00Z'),
+    m('ET26162904', 3400, '2026-10-05T09:30:00Z', '2026-10-06T09:00:00Z'),
+    m('ET26164729', 6560, '2026-10-05T08:00:00Z', '2026-10-06T09:00:00Z', { classe: 'M' }),
+    m('ET26153973', 160, '2026-10-05T08:30:00Z', '2026-10-06T09:00:00Z', { classe: 'M' }),
+    m('ET26161556', 1760, '2026-10-05T09:00:00Z', '2026-10-06T09:00:00Z', { classe: 'M' }),
+    m('ET26162915', 3000, '2026-10-05T09:30:00Z', '2026-10-06T09:00:00Z', { classe: 'M' }),
+  ];
+  const v = verificaRilevazione(dopo, prima, arrivi);
+  const cl = (c) => v.classi.find(x => x.classe === c);
+  verifica('lo scarto e\' tutto il peso di quello che non era ancora a terra',
+    cl('P').scarto === -9580 && cl('M').scarto === -11480, JSON.stringify([cl('P').scarto, cl('M').scarto]));
+  verifica('nessuno dei formulari, da solo, lo fa', !cl('P').candidati.some(c => c.peso_esatto) && !cl('M').candidati.some(c => c.peso_esatto));
+  verifica('ma la loro somma si\', e la classe risulta spiegata',
+    cl('P').spiegato === true && cl('M').spiegato === true, JSON.stringify([cl('P').nota, cl('M').nota]));
+  verifica('e si dice che e\' una questione di istanti, non di dati sbagliati',
+    cl('P').spiegazione === 'tempi' && /non erano ancora a terra/.test(cl('P').nota), cl('P').nota);
+  verifica('percio\' non e\' piu\' una rilevazione da controllare', anomaliaRilevazione(v) === null);
+  // La prudenza: se la somma non torna al chilo, non si spiega niente.
+  const quasi = verificaRilevazione({ ...dopo, class1_kg: 10000 - 100 }, prima, arrivi);
+  const clP = quasi.classi.find(x => x.classe === 'P');
+  verifica('una somma che non torna al chilo non spiega niente',
+    clP.spiegato === false && clP.spiegazione === '' && anomaliaRilevazione(quasi) !== null, JSON.stringify([clP.scarto, clP.spiegato]));
+  // E un carico chiuso a portale PRIMA della lettura non e' un indizio: a terra
+  // c'era davvero.
+  const chiusiPrima = arrivi.map(x => ({ ...x, chiuso_il: '2026-10-04' }));
+  const senzaIndizi = verificaRilevazione(dopo, prima, chiusiPrima);
+  verifica('se erano gia\' chiusi a portale prima della lettura, lo scarto resta da controllare',
+    senzaIndizi.classi.find(x => x.classe === 'P').spiegato === false && anomaliaRilevazione(senzaIndizi) !== null);
+}
+
 console.log('SE NON SI SPIEGA, SI DICE CHE NON SI SPIEGA');
 const storto = verificaRilevazione({ ...rilev16, class1_kg: 15240 + 777, class2_kg: 28470 }, rilev13, movimenti);
 const sp = storto.classi.find(x => x.classe === 'P');
