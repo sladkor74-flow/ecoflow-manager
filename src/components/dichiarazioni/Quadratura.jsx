@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { formatTonnellate, formatKg } from '@/lib/utils';
-import { notaDichiaratoPortale } from '@/lib/notaQuadratura';
+import { notaDichiaratoPortale, esitoQuadratura } from '@/lib/notaQuadratura';
 import { TOLLERANZA_QUADRATURA_T, CANALI } from '@/lib/dichiarazioniImpianti';
 import { CheckCircle2, AlertTriangle, PlusCircle } from 'lucide-react';
 import DateDaSistemare from '@/components/giacenze/DateDaSistemare';
@@ -166,9 +166,19 @@ export default function Quadratura({ dati }) {
                   <td className="px-2 py-1.5 text-right tabular-nums font-medium">{t(s.giacenza_portale_t)}</td>
                   <td className={`px-2 py-1.5 text-right tabular-nums font-medium ${s.quadra === false ? 'text-red-700' : ''}`}>{t(s.scarto_t)}</td>
                   <td className="px-3 py-1.5">
-                    {s.quadra === true && <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 className="w-3.5 h-3.5" /> quadra</span>}
-                    {s.quadra === false && <span className="inline-flex items-center gap-1 text-red-700"><AlertTriangle className="w-3.5 h-3.5" /> da verificare</span>}
-                    {s.quadra === null && <span className="text-muted-foreground" title="Questo sito non compare fra gli ordini non dichiarati del portale e non ha una rilevazione di giacenza: non c'è un valore da confrontare">nessun dato a portale</span>}
+                    {(() => {
+                      const e = esitoQuadratura(s);
+                      if (e.stato === 'quadra') return <span className="inline-flex items-center gap-1 text-emerald-700" title={e.spiega || undefined}><CheckCircle2 className="w-3.5 h-3.5" /> {e.testo}</span>;
+                      if (e.stato === 'verifica') return <span className="inline-flex items-center gap-1 text-red-700"><AlertTriangle className="w-3.5 h-3.5" /> {e.testo}</span>;
+                      // Non e' un allarme e non e' un vuoto: si legge come un'annotazione.
+                      if (e.stato === 'fuori') return (
+                        <span className="text-muted-foreground" title={e.spiega}>
+                          {e.testo}
+                          {s.entrato_confronto_t ? <span className="block text-[11px]">{t(s.entrato_confronto_t)} t entrate quest&apos;anno, tenute come storia</span> : null}
+                        </span>
+                      );
+                      return <span className="text-muted-foreground" title={e.spiega}>{e.testo}</span>;
+                    })()}
                     {!stoc && Math.abs((s.dichiarato_portale_t || 0) - (s.dichiarato_caricato_rete_t || 0)) > 0.5 && (
                       <span className="block text-[11px] text-amber-700" title="Il report del portale conta per ANNO DEL CARICO: una dichiarazione di quest'anno che ha smaltito materiale arrivato l'anno scorso finisce nell'anno scorso. La giacenza quadra lo stesso, perché lì i due lati usano lo stesso criterio.">
                         {notaDichiaratoPortale(s, t)}

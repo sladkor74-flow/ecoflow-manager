@@ -10,7 +10,7 @@
 // Nell'altro verso il discorso cambia del tutto: se il portale ne conta PIU' di
 // noi non e' una questione di anni, e' una dichiarazione che non abbiamo
 // registrato. La nota deve dire due cose diverse. npm run prove
-import { notaDichiaratoPortale } from '../src/lib/notaQuadratura.js';
+import { notaDichiaratoPortale, esitoQuadratura } from '../src/lib/notaQuadratura.js';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -28,6 +28,29 @@ verifica('non parla di anni: dice che manca una dichiarazione',
   /manca una dichiarazione/.test(mancante) && !/anno prima/.test(mancante), mancante);
 verifica('e la differenza la dice positiva, non con il meno davanti',
   /150,00/.test(mancante) && !/-150/.test(mancante), mancante);
+
+console.log('«NESSUN DATO A PORTALE» NASCONDEVA DUE SITUAZIONI IN ORDINE');
+// Tecnogum: non ci fattura il trattamento e dichiara in proprio, quindi quelle
+// tonnellate NON sono da dichiarare. Finche' l'accordo e' questo non e' un
+// ammanco, e la riga deve dirlo.
+const tecnogum = esitoQuadratura({ quadra: null, dichiara_rete: false, giacenza_calcolata_t: 1833.43, dichiarato_caricato_rete_t: 0, dichiarato_portale_t: 0 });
+verifica('chi non dichiara la rete per accordo lo dice, e dice che non sono da dichiarare',
+  tecnogum.stato === 'fuori' && /non da dichiarare/.test(tecnogum.testo) && /non sono da dichiarare/.test(tecnogum.spiega), JSON.stringify(tecnogum));
+verifica('e non e\' un allarme: non dice ne\' «quadra» ne\' «da verificare»',
+  tecnogum.stato !== 'quadra' && tecnogum.stato !== 'verifica');
+// T.R.S.: non compare fra i non dichiarati proprio perche' ha dichiarato tutto.
+const trs = esitoQuadratura({ quadra: null, dichiara_rete: true, giacenza_calcolata_t: 0, dichiarato_caricato_rete_t: 227.18, dichiarato_portale_t: 227.18 });
+verifica('chi ha dichiarato tutto quadra, e si legge',
+  trs.stato === 'quadra' && trs.testo === 'quadra: dichiarato tutto, niente in giacenza', JSON.stringify(trs));
+// Ma se il portale dice un numero diverso dal nostro, non si dichiara vittoria.
+const diverso = esitoQuadratura({ quadra: null, dichiara_rete: true, giacenza_calcolata_t: 0, dichiarato_caricato_rete_t: 227.18, dichiarato_portale_t: 180 });
+verifica('se il report non conferma le stesse tonnellate, resta «nessun dato a portale»',
+  diverso.stato === 'ignoto', JSON.stringify(diverso));
+// E con una giacenza ancora aperta non e' «tutto dichiarato».
+const conGiacenza = esitoQuadratura({ quadra: null, dichiara_rete: true, giacenza_calcolata_t: 120, dichiarato_caricato_rete_t: 227.18, dichiarato_portale_t: 227.18 });
+verifica('e nemmeno se in giacenza e\' rimasto qualcosa', conGiacenza.stato === 'ignoto', JSON.stringify(conGiacenza));
+verifica('chi quadra davvero continua a dire solo «quadra»',
+  esitoQuadratura({ quadra: true }).testo === 'quadra' && esitoQuadratura({ quadra: false }).testo === 'da verificare');
 
 console.log('I CASI STORTI NON FANNO SCRIVERE SCIOCCHEZZE');
 verifica('senza i numeri non si rompe', typeof notaDichiaratoPortale({}, fmt) === 'string' && typeof notaDichiaratoPortale(null, fmt) === 'string');
