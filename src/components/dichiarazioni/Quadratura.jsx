@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { formatTonnellate, formatKg } from '@/lib/utils';
+import { notaDichiaratoPortale } from '@/lib/notaQuadratura';
 import { TOLLERANZA_QUADRATURA_T, CANALI } from '@/lib/dichiarazioniImpianti';
 import { CheckCircle2, AlertTriangle, PlusCircle } from 'lucide-react';
 import DateDaSistemare from '@/components/giacenze/DateDaSistemare';
@@ -169,8 +170,8 @@ export default function Quadratura({ dati }) {
                     {s.quadra === false && <span className="inline-flex items-center gap-1 text-red-700"><AlertTriangle className="w-3.5 h-3.5" /> da verificare</span>}
                     {s.quadra === null && <span className="text-muted-foreground" title="Questo sito non compare fra gli ordini non dichiarati del portale e non ha una rilevazione di giacenza: non c'è un valore da confrontare">nessun dato a portale</span>}
                     {!stoc && Math.abs((s.dichiarato_portale_t || 0) - (s.dichiarato_caricato_rete_t || 0)) > 0.5 && (
-                      <span className="block text-[11px] text-amber-700" title="Quello che risulta dichiarato nel report del portale per i carichi dell'anno. Una dichiarazione che il portale ha agganciato a carichi dell'anno prima non compare qui: la differenza non è per forza un mese sfuggito.">
-                        nel report del portale risultano {t(s.dichiarato_portale_t)} t dichiarate
+                      <span className="block text-[11px] text-amber-700" title="Il report del portale conta per ANNO DEL CARICO: una dichiarazione di quest'anno che ha smaltito materiale arrivato l'anno scorso finisce nell'anno scorso. La giacenza quadra lo stesso, perché lì i due lati usano lo stesso criterio.">
+                        {notaDichiaratoPortale(s, t)}
                       </span>
                     )}
                     {!stoc && kgCerti(s) > 0 && s.scarto_t !== null && (
