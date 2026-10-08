@@ -41,11 +41,16 @@ export function esitoQuadratura(s) {
   if (!s) return muto;
   if (s.quadra === true) return { stato: 'quadra', testo: 'quadra', spiega: '' };
   if (s.quadra === false) return { stato: 'verifica', testo: 'da verificare', spiega: '' };
-  if (s.dichiara_rete === false) {
+  // SOLO LA RETE. L'accordo riguarda il canale rete - primarie e secondarie - e
+  // non tocca l'ACI, che Tecnogum dichiara e che noi paghiamo (precisazione
+  // dell'utente, 08/10/2026). Oggi le righe degli impianti sono tutte di rete,
+  // ma se un domani ne comparisse una ACI questa scritta direbbe una falsita'.
+  const eRete = !s.canale || String(s.canale).toUpperCase() === 'RETE';
+  if (s.dichiara_rete === false && eRete) {
     return {
       stato: 'fuori',
       testo: 'non da dichiarare, per accordo',
-      spiega: 'Per accordo questo impianto non ci fattura il trattamento e dichiara in proprio: queste tonnellate non sono da dichiarare. Restano registrate qui come storia di quello che è entrato, e a portale non risultano fra le cose da fare.',
+      spiega: 'Per accordo questo impianto non ci fattura il trattamento della rete e la dichiara in proprio: queste tonnellate di rete non sono da dichiarare. Restano registrate qui come storia di quello che è entrato, e a portale non risultano fra le cose da fare. L\'ACI non c\'entra: quello lo dichiara e lo paghiamo.',
     };
   }
   const calcolata = Number(s.giacenza_calcolata_t) || 0;

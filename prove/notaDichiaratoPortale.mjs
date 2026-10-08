@@ -38,6 +38,14 @@ verifica('chi non dichiara la rete per accordo lo dice, e dice che non sono da d
   tecnogum.stato === 'fuori' && /non da dichiarare/.test(tecnogum.testo) && /non sono da dichiarare/.test(tecnogum.spiega), JSON.stringify(tecnogum));
 verifica('e non e\' un allarme: non dice ne\' «quadra» ne\' «da verificare»',
   tecnogum.stato !== 'quadra' && tecnogum.stato !== 'verifica');
+// L'accordo vale SOLO per la rete: l'ACI Tecnogum lo dichiara e noi lo paghiamo
+// (precisazione dell'utente, 08/10/2026).
+verifica('la riga della rete lo dice anche quando il canale e\' scritto',
+  esitoQuadratura({ ...tecnogum, quadra: null, dichiara_rete: false, canale: 'RETE' }).stato === 'fuori');
+verifica('ma su una riga ACI quella scritta non esce: l\'accordo non riguarda l\'ACI',
+  esitoQuadratura({ quadra: null, dichiara_rete: false, canale: 'ACI', giacenza_calcolata_t: 10 }).stato === 'ignoto',
+  JSON.stringify(esitoQuadratura({ quadra: null, dichiara_rete: false, canale: 'ACI', giacenza_calcolata_t: 10 })));
+verifica('e la spiegazione dice esplicitamente che l\'ACI non c\'entra', /ACI non c'entra/.test(tecnogum.spiega), tecnogum.spiega);
 // T.R.S.: non compare fra i non dichiarati proprio perche' ha dichiarato tutto.
 const trs = esitoQuadratura({ quadra: null, dichiara_rete: true, giacenza_calcolata_t: 0, dichiarato_caricato_rete_t: 227.18, dichiarato_portale_t: 227.18 });
 verifica('chi ha dichiarato tutto quadra, e si legge',
