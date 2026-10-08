@@ -3,7 +3,8 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
-import { giornoRoma } from "../../shared/giornoItaliano.ts";
+import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
+import { annotaFileDaRimuovere, voceDaRimuovere } from "../../shared/fileDaRimuovere.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { calcolaRigheAttiva } from "../../shared/attivaCalcolo.ts";
 import { testoDate } from "../../shared/movimenti.ts";
@@ -38,6 +39,7 @@ export default async function(req) {
     const svc = base44.asServiceRole.entities;
     const core = base44.asServiceRole.integrations.Core;
 
+    let annotatiNelRegistro = 0;
     if (azione === 'carica') {
       if (user.role !== 'admin') return rispostaSolaLettura();
       const nome = String(nome_file || '');
@@ -81,11 +83,32 @@ export default async function(req) {
         // il giorno italiano: tagliare l'istante UTC, dopo la mezzanotte, scriveva il giorno prima
         await svc.PrefatturaEcotyre.update(p.id, { superata: true, motivo_superata: `Sostituita il ${giornoRoma(adesso)} dal file "${nome}" (${righe.length} righe), caricato da ${user.full_name || user.email}.` });
       }
-      // Il file serviva solo a essere letto: le righe sono salvate.
-      for (const n of (file_uri ? ['DeleteFile', 'DeletePrivateFile', 'RemoveFile'] : [])) {
-        if (typeof core[n] !== 'function') continue;
-        try { await core[n]({ file_uri }); break; } catch (_e) { /* resta nell'archivio privato */ }
-      }
+      // IL FILE LETTO SI ANNOTA NEL REGISTRO, e non si prova piu' a cancellarlo.
+      // Le righe sono salvate e il file serviva solo a essere letto: nessun
+      // record ne conserva l'indirizzo (PrefatturaEcotyre non ha campi file).
+      //
+      // Qui c'era un giro a mano su DeleteFile, DeletePrivateFile e RemoveFile,
+      // con la guardia `typeof core[n] !== 'function'` che NON scarta niente:
+      // integrations.Core e' un Proxy che per qualunque nome restituisce una
+      // funzione (lo stesso falso rilevamento per cui supportoCancellazione e'
+      // stato tolto da shared/fileArchivio.ts). Erano tre richieste a vuoto per
+      // ogni prefattura caricata, contro il limite al minuto di TUTTA l'app, e
+      // non potevano riuscire: la piattaforma non sa cancellare i file
+      // (confermato dalla sua assistenza il 30/09/2026).
+      //
+      // Senza l'annotazione quel file restava caricato per sempre e nessuno
+      // sapeva quale chiedere di far rimuovere, perche' non comparendo in nessun
+      // record non entrava nemmeno nell'inventario. Trovato l'08/10/2026
+      // verificando AGENTS.md contro il codice: era l'unico punto rimasto fuori.
+      const registro = await annotaFileDaRimuovere(svc.FileDaRimuovere, [voceDaRimuovere({
+        entita: 'PrefatturaEcotyre',
+        record: { file_uri },
+        motivo: 'foglio letto per il caricamento: nessun record ne conserva l\'indirizzo',
+        cosa: 'Prefattura del portale Ecotyre',
+        descrizione: `Prefattura di ${mese} ${annoNum} ("${nome}")`,
+        oggi: oggiRoma(),
+      })]);
+      annotatiNelRegistro = registro.annotati;
     } else if (azione !== 'confronta') {
       return Response.json({ error: 'Azione non riconosciuta' }, { status: 400 });
     }
@@ -134,6 +157,7 @@ export default async function(req) {
       prefattura: { ...meta, numero_righe: (prefattura.righe || []).length },
       confronto: confrontaPrefattura(prefattura.righe || [], righe, altrove),
       anomalie_date: anomalieDate,
+      annotato_nel_registro: annotatiNelRegistro,
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

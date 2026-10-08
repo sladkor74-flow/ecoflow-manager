@@ -1748,18 +1748,23 @@ che non puo' riuscire - "il gestionale riprova da solo alla prossima pulizia
 notturna" - e quella era la bugia peggiore, perche' faceva aspettare. Tutto
 superato da quando non si tenta piu'.)*
 
-**C'e' un QUARTO punto che ci prova ancora, e non passa da `cancellaFile`**
-(trovato l'08/10/2026, non ancora sistemato): `prefatturaEcotyre/entry.ts`, a ogni
-prefattura caricata, gira a mano sui tre nomi `DeleteFile`,
-`DeletePrivateFile` e `RemoveFile` con la guardia `typeof core[n] !== 'function'`,
-che **e' sempre vera** per il Proxy dell'SDK - lo stesso falso rilevamento per cui
-`supportoCancellazione` e' stato tolto. Sono tre richieste a vuoto per
+**C'era un QUARTO punto che ci provava, e non passava da `cancellaFile`**
+(trovato e chiuso l'08/10/2026): `prefatturaEcotyre/entry.ts`, a ogni prefattura
+caricata, girava a mano sui tre nomi `DeleteFile`, `DeletePrivateFile` e
+`RemoveFile` con la guardia `typeof core[n] !== 'function'`, che **e' sempre
+vera** per il Proxy dell'SDK - lo stesso falso rilevamento per cui
+`supportoCancellazione` e' stato tolto. Erano tre richieste a vuoto per
 caricamento, cioe' esattamente il costo che questa sezione dichiara eliminato. E
-c'e' di peggio: quel file non viene annotato in `FileDaRimuovere` e
-`PrefatturaEcotyre` non tiene campi file, quindi **non compare nell'inventario e
-non si potra' mai far rimuovere** - e' il danno che il paragrafo qui sopra dice di
-aver chiuso in un punto solo. Nessuna prova copre questo punto:
-`prove/fileArchivio.mjs` prova `cancellaFile` in isolamento.
+c'era di peggio: quel file non veniva annotato in `FileDaRimuovere`, e
+`PrefatturaEcotyre` non tiene campi file, quindi **non compariva nell'inventario e
+non si sarebbe potuto far rimuovere** - il danno che il paragrafo qui sopra dice
+di aver chiuso in un punto solo. Adesso il giro a mano non c'e' piu' e il foglio
+letto si annota nel registro (`annotaFileDaRimuovere`, come in
+`importaRichiesteEct`), quindi esce nell'inventario con «DA FAR RIMUOVERE: nessun
+record lo usa». **Due guardie in `prove/fileDaRimuovere.mjs`**: i tre nomi nel
+CODICE possono stare solo in `shared/fileArchivio.ts` (nei commenti dappertutto,
+o questa storia non si potrebbe scrivere), e le due funzioni che leggono un foglio
+e non ne conservano l'indirizzo devono annotarlo.
 
 **La sostituzione dei file percio' non puo' funzionare** finche' la piattaforma
 non abilita la cancellazione. Il record del registro perde `file_url` solo se il

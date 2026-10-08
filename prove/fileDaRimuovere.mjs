@@ -16,7 +16,8 @@ import {
   MOTIVO_RECORD_CANCELLATO, MOTIVO_FILE_SOSTITUITO,
 } from '../base44/shared/fileDaRimuovere.ts';
 import { ARCHIVI_CON_FILE } from '../base44/shared/inventarioFile.ts';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, sep } from 'node:path';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -203,6 +204,67 @@ console.log('OGNI PUNTO DI CANCELLAZIONE LO SCRIVE PRIMA');
   const sorgente = readFileSync(new URL('../base44/functions/inventarioFile/entry.ts', import.meta.url), 'utf8');
   verifica('l inventario legge il registro', /FileDaRimuovere/.test(sorgente) && /voceOrfana/.test(sorgente));
   verifica('e salta quelli gia rimossi', /=== 'rimosso'\) continue/.test(sorgente));
+}
+
+console.log('NESSUNO PROVA PIU' + "' A CANCELLARE UN FILE A MANO");
+{
+  // La piattaforma non sa cancellare i file: le tre operazioni esistono nell'SDK
+  // solo perche' integrations.Core e' un Proxy che per qualunque nome restituisce
+  // una funzione, e ognuna risponde Method Not Allowed (confermato dall'assistenza
+  // il 30/09/2026). Chi ci prova a mano paga TRE richieste a vuoto per file contro
+  // il limite al minuto di tutta l'app, e non puo' riuscire.
+  //
+  // Il solo posto dove quei nomi possono comparire nel CODICE e'
+  // shared/fileArchivio.ts, che li tiene dentro provaACancellare - il tentativo
+  // congelato, che non chiama nessuno - per il giorno in cui la piattaforma
+  // aggiungesse l'operazione. Nei commenti si possono nominare dappertutto,
+  // altrimenti la storia di un difetto non si potrebbe scrivere.
+  //
+  // L'08/10/2026 ce n'era ancora uno fuori, in prefatturaEcotyre/entry.ts, con la
+  // guardia "typeof core[n] !== 'function'" che non scarta niente: erano tre
+  // richieste a vuoto a ogni prefattura caricata. Questa e' la guardia perche' non
+  // torni.
+  const A_CAPO = String.fromCharCode(10);
+  const radice = new URL('..', import.meta.url).pathname.replace(/^[/]([A-Za-z]:)/, '$1');
+  const tuttiIFile = (cartella, out = []) => {
+    for (const voce of readdirSync(cartella)) {
+      if (voce === 'node_modules' || voce === '.git' || voce === 'dist') continue;
+      const percorso = join(cartella, voce);
+      if (statSync(percorso).isDirectory()) tuttiIFile(percorso, out);
+      else if (/[.](js|jsx|ts|tsx)$/.test(voce)) out.push(percorso);
+    }
+    return out;
+  };
+  const senzaCommenti = (testo) => testo.split(A_CAPO)
+    .filter(r => { const s = r.trim(); return !(s.startsWith('//') || s.startsWith('*') || s.startsWith('/*')); })
+    .join(A_CAPO);
+  const AMMESSO = 'base44/shared/fileArchivio.ts';
+  const NOMI = ['DeleteFile', 'DeletePrivateFile', 'RemoveFile'];
+  const colpevoli = [];
+  for (const f of [...tuttiIFile(join(radice, 'src')), ...tuttiIFile(join(radice, 'base44'))]) {
+    const rel = f.slice(radice.length).split(sep).join('/').replace(/^[/]/, '');
+    if (rel === AMMESSO) continue;
+    const codice = senzaCommenti(readFileSync(f, 'utf8'));
+    if (NOMI.some(n => codice.includes(n))) colpevoli.push(rel);
+  }
+  verifica('i nomi della cancellazione stanno nel codice solo di ' + AMMESSO, colpevoli.length === 0, colpevoli.join(', '));
+}
+
+console.log('IL FOGLIO LETTO E BUTTATO SI ANNOTA');
+{
+  // Due funzioni caricano un foglio in area privata, lo leggono e non ne
+  // conservano l'indirizzo su nessun record: senza l'annotazione quel file
+  // resterebbe sulla piattaforma per sempre e nessuno saprebbe quale chiedere di
+  // far rimuovere, perche' non comparendo in nessun record non entrerebbe
+  // nemmeno nell'inventario.
+  for (const percorso of ['base44/functions/importaRichiesteEct/entry.ts',
+                          'base44/functions/prefatturaEcotyre/entry.ts']) {
+    const sorgente = readFileSync(new URL('../' + percorso, import.meta.url), 'utf8');
+    const chiamate = sorgente.split('annotaFileDaRimuovere(').length - 1;
+    verifica(percorso + ': importa annotaFileDaRimuovere',
+      /import [{][^}]*annotaFileDaRimuovere[^}]*[}] from/.test(sorgente));
+    verifica(percorso + ': annota il file letto', chiamate === 1, 'chiamate trovate: ' + chiamate);
+  }
 }
 
 console.log('');
