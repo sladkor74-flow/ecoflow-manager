@@ -127,10 +127,13 @@ una prova che cerca `\n` dice che manca un controllo che invece c'e'.
 ### Il limite di richieste della piattaforma (22/09/2026)
 
 Le richieste agli archivi si contano **per tutta l'app insieme**, su un minuto;
-oltre, 429 "Rate limit exceeded". Ogni funzione avvolge il client con
+oltre, 429 "Rate limit exceeded". Ogni funzione che crea un client lo avvolge con
 `conLimiteRichieste(createClientFromRequest(req))`
 (`base44/shared/limiteRichieste.ts`, specchio in `src/lib`, usato anche da
-`src/api/base44Client.js`): una richiesta respinta si ripete dopo una pausa, le
+`src/api/base44Client.js`). Lo fanno 91 cartelle di `base44/functions` su 94; le
+tre fuori sono superate - `seedTargetSiti2026` crea il client nudo e risponde 410,
+`computeGiacenze` e `pulisciVerificheReport` non ne creano nessuno - e non sono il
+modello da copiare. Una richiesta respinta si ripete dopo una pausa, le
 chiamate a funzione solo su 429. Le letture intere passano da
 `fetchAll`/`perPagina`/`fetchAllClient`, a pagine da 5000 righe (il massimo che
 la piattaforma restituisce). Niente pagine che rileggono archivi interi a
@@ -261,10 +264,13 @@ una gomma, non il mestiere di SMOCO, che le manda a recupero.
 l'assistente dentro il gestionale, e *Ecotyre* e' il consorzio cliente.
 
 **Dove vive il nome.** In un posto solo: `src/lib/prodotto.js` (`PRODOTTO`,
-`SOTTOTITOLO`, `COMMESSA`, `AUTORE_FILE`). Da li' lo prendono l'intestazione del
-menu, le schermate di accesso e il metadato Autore dei sei file Excel che si
-mandano fuori. Resta fuori solo il `<title>` e l'`apple-mobile-web-app-title` di
-`index.html`, perche' l'HTML non importa moduli.
+`MARCHIO` - il simbolo del marchio accanto al nome dal 03/10/2026, non quello del
+marchio registrato finche' non lo e' -, `SOTTOTITOLO`, `COMMESSA`, `AUTORE_FILE`). Da li' lo prendono l'intestazione del
+menu, le schermate di accesso e il metadato Autore dei sei fogli fatti con exceljs
+(`wb.creator = AUTORE_FILE`). Restano fuori il `<title>` e
+l'`apple-mobile-web-app-title` di `index.html`, perche' l'HTML non importa moduli,
+e i tredici export fatti con SheetJS (`XLSX.writeFile`), che non scrive il metadato
+Autore: su 19 fogli che si scaricano il nome ne porta 6.
 
 Fino al 03/10/2026 il nome stava scritto a mano in nove punti e **le pagine non lo
 scrivevano affatto**: si vedeva solo nella linguetta del browser, l'autore di un
@@ -294,8 +300,11 @@ insieme o non si toccano: non toccarle e' a rischio zero.
 1. **Fine trasporto, MAI chiusura a portale.** In ogni modulo ogni ragionamento
    - periodo, tagli a una data, confronti con una fotografia del portale,
    ripieghi quando un campo manca - si fa sulla fine del trasporto.
-   `ordine_chiuso_il` / `data_chiusura` si possono mostrare, mai usare per
-   decidere.
+   `ordine_chiuso_il` e la `data_chiusura` **del portale** (OrdineNonDichiarato,
+   DichiarazioneTrattamento) si possono mostrare, mai usare per decidere. Non
+   c'entra `DocumentoFatturazione.data_chiusura`, che e' la chiusura di un nostro
+   periodo di fatturazione: quella il gestionale la scrive e la rilegge
+   (`cambiaStatoFatturazione`).
 2. **Ogni caricamento aggiorna tutto.** Un modulo fermo a una fotografia vecchia
    e' un difetto, non una spiegazione. La giacenza a portale di un impianto e'
    la fotografia degli ordini non dichiarati **piu'** i carichi che il
@@ -304,8 +313,11 @@ insieme o non si toccano: non toccarle e' a rischio zero.
    **meno** le dichiarazioni caricate dopo la fotografia. Quella di uno
    stoccaggio e' l'**ancora dell'anno** per classe piu' i movimenti finiti
    dopo; le letture successive sono il riscontro (`puntoDiPartenza` in
-   `base44/shared/giacenzaStoccaggi.ts`, usato da Giacenze, riconciliazione,
-   predittivita' e riepilogo delle dichiarazioni).
+   `base44/shared/giacenzaStoccaggi.ts`, usato da Giacenze, riconciliazione e
+   riepilogo delle dichiarazioni). La Predittivita' no: chiama `ancoraDellAnno`
+   dell'anno chiesto e, senza ancora, rinuncia al numero (avviso
+   `ancora_mancante`) invece di ripiegare sull'ultima lettura. E' voluto: non
+   va "allineata" a puntoDiPartenza.
 3. **Rete, ACI ed extra raccolta non si mescolano mai**: giacenze, dichiarazioni,
    totali, KPI. La rilevazione di uno stoccaggio si divide per classe (1-4 rete,
    9 ACI); `GiacenzaSito.giacenza_riferimento_t` e' la rete e
@@ -337,9 +349,13 @@ esterni**, dove il nome della colonna non e' il nostro.
 - **Prefattura Ecotyre.** La colonna della data si cercava con `/data|trasporto/` e
   vinceva la prima da sinistra: una "Data chiusura" aggiunta dal portale avrebbe
   fatto rifiutare la prefattura giusta («e' la prefattura di Agosto», sul file di
-  luglio). Ora si cerca la fine trasporto e si escludono chiusura, immissione e
-  inizio (`INTESTAZIONI` in `base44/shared/prefattura.ts`).
-- **Campi `mese`, `anno`, `settimane` dei record.** Si scrivono da `dataPeriodo` e
+  luglio). Ora si cerca la fine trasporto e si escludono chiusura, immissione, inizio,
+  partenza, emissione, documento, fattura e scadenza (`INTESTAZIONI` in
+  `base44/shared/prefattura.ts`): nemmeno una "Data documento" o una "Data
+  fattura" puo' vincere, il controllo c'e' gia'.
+- **Campi `mese`, `anno`, `settimane` dei record.** Li scrive `getDataRiferimento`:
+  `dataPeriodo` per i movimenti, `ordine_immesso_il` per gli **Assegnati**, che non
+  hanno un trasporto ma una data di immissione. E
   **non si rileggono mai** per decidere un periodo: si ricalcolano. L'unico punto
   che preferiva il campo memorizzato (`mese_immissione` in `pivotCalculator.ts`) e'
   stato tolto.
@@ -655,15 +671,21 @@ obbligatorie nei formulari, se non ci sono vanno segnalate e questo vale sempre
 dove ci sono ordini terminati non solo nei report settimanali». La regola sta in
 `base44/shared/movimenti.ts` (specchio `src/lib/movimenti.js`):
 `DATE_OBBLIGATORIE`, `dateMancanti`, `dateIncoerenti`, `dateDaSistemare`,
-`testoDate`. Non si riscrive. Quanti sono si conta in **ordini distinti**, mai in
+`testoDate`. Non si riscrive. Il «sempre» si ferma all'anno scorso
+(`dateDaControllare` e `primoAnnoControllato`: utente 25/09/2026, «tieni il 2024 e
+toglilo dagli avvisi»); senza fine trasporto non c'e' anno e si segnala sempre.
+Quanti sono si conta in **ordini distinti**, mai in
 righe (`chiaveOrdine`, `ordiniDaSistemare`, `mancantiOrdine`, `incoerentiOrdine`,
 `testoOrdine`, `ordineSenzaFine`, nello stesso file): lo stesso ordine sta in
 archivio con piu' righe - una per classe o per prodotto - e contarle tutte
 faceva uscire due numeri diversi per lo stesso insieme (23/09/2026).
 Un terminato senza fine trasporto resta fuori da
 ogni periodo, ma si segnala sempre dicendo quali date mancano; uno con la fine
-trasporto ma senza un'altra data, o con date nell'ordine sbagliato, si conta e si
-segnala lo stesso. Dove si vede:
+trasporto ma senza un'altra data, o con la fine prima dell'inizio, si conta e si
+segnala lo stesso. Quella e' l'unica incoerenza: un trasporto cominciato prima
+dell'immissione e' la regola a portale, dove l'immissione e' il giorno della
+registrazione, e segnalarlo voleva dire 941 avvisi incorreggibili (misurato il
+22/09/2026). Dove si vede:
 
 - **elenchi** (Terminati Rete e ACI, Secondarie, Terziarie, Extra Raccolta): segno
   sulla riga, avviso per canale, filtro "date da sistemare", colonna negli Excel
@@ -689,9 +711,12 @@ segnala lo stesso. Dove si vede:
 - **fatturazione** (anomalie per canale), **qualifica**, **richieste ECT**,
   **evasione assegnati**, **prefattura** ed **EcoTyna**.
 
-Chi la rete non la dichiara per accordo (`dichiara_rete` falso, oggi Tecnogum)
-non ha una giacenza di rete che il portale tenga per noi: i suoi carichi non si
-aggiungono alla fotografia come "non ancora nel file".
+Chi la rete non la dichiara per accordo (`dichiara_rete` falso in
+`GiacenzaSito`, oggi Tecnogum) non ha una giacenza di rete che il portale tenga
+per noi: i suoi carichi non si aggiungono alla fotografia come "non ancora nel
+file". Il taglio e' `nonDichiaraRete` in `calcolaGiacenze` e in
+`riepilogoDichiarazioni`, con la variante per le dichiarazioni in
+`base44/shared/dichiarazioniImpianti.ts`; in `giacenzaPortale.ts` non c'e'.
 
 ### Una riga di un altro periodo si verifica sempre (01/10/2026)
 
@@ -735,8 +760,10 @@ La regola vale **in ogni confronto**, settimanale e mensile:
   settimana. Nell'esito salvato non si scrive **niente che dipenda da oggi**:
   «scaduto da quanto» lo calcolano la scheda e il PDF con `statoTermine`, o ogni
   verifica risulterebbe cambiata ogni giorno e si riscriverebbe da sola;
-- si vede: alert **critico** nel modulo Verifiche (`REGOLA_ARRETRATI` in
-  `esitoVerifica.ts`, si chiude da solo quando risultano registrati), in testa
+- si vede: alert nel modulo Verifiche (`REGOLA_ARRETRATI` in
+  `esitoVerifica.ts`, si chiude da solo quando risultano registrati),
+  **critico** se almeno un termine e' scaduto o almeno un carico e' di una
+  settimana precedente, altrimenti **warning**, in testa
   alla scheda, in una sezione del PDF prima della quadratura, nel foglio Excel
   «Settimane precedenti», con una pastiglia rossa nell'elenco delle settimane
   (`arretrati_da_registrare`, `settimane_arretrate`), e nella **storia scritta**,
@@ -772,9 +799,10 @@ autorizza una fattura.
   spiegare. La **classe** si segnala solo se cambia canale (9 = ACI), perche' e'
   quella che cambia il prezzo.
 - `base44/shared/numeroFir.ts`: `normalizzaFir`, `FORMATO_FIR`, `distanzaFir` e
-  `descriviDifferenzaFir`, che spiega l'errore in italiano («"B" al posto di "P"
-  in posizione 13», «caratteri invertiti», «probabile scambio fra caratteri
-  simili»). Lo usano le verifiche settimanali (`verificaReport`) e i consuntivi
+  `descriviDifferenzaFir`, che spiega l'errore in italiano dicendo sempre quali
+  caratteri e in che posizione («"B" al posto di "P" in posizione 13»,
+  «caratteri "PB" invertiti in posizione 12»), con la coda «, probabile scambio
+  fra caratteri simili» quando i due caratteri si somigliano. Lo usano le verifiche settimanali (`verificaReport`) e i consuntivi
   (`confrontaConsuntivo`): una regola sola, in un posto solo.
 - I chili tornano, quindi la quadratura delle quantita' resta buona, **ma il
   verdetto non e' verde**: il riquadro non puo' dirsi a posto mentre sotto c'e'
@@ -812,7 +840,14 @@ la prossima uscita di gomma. Nessuno dei due e' un mancante.
 - Nel 2026 a Ecotyre si fattura a **202 euro la tonnellata** sulla **rete** e
   sull'**extra raccolta**; l'**ACI** ha le sue tariffe per regione. Nei report il
   prezzo si scrive a tonnellata (la prefattura del portale lo scrive al chilo,
-  0,202: e' lo stesso prezzo).
+  0,202: e' lo stesso prezzo). **Non e' una costante del gestionale**: per rete e
+  ACI la tariffa deve stare in tabella `Tariffa`, e senza quella la riga va a zero
+  euro in `errore` (`daTariffa` e `senzaTariffa` in `attivaCalcolo.ts`). I 202
+  scritti nel codice (`TARIFFA_BASE_EXTRA_RACCOLTA` in `ecotyreTariffe.ts`) sono
+  solo la base dell'extra raccolta 2026, e valgono solo per gli interventi senza
+  prezzo proprio. Le tariffe seminate da `seedTariffeAttive2026` chiudono il
+  **31/12/2026** - contratto annuale senza tacito rinnovo (06/10/2026) - tranne
+  l'extra raccolta, che resta aperta perche' sono campagne occasionali.
 - I report per l'amministrazione sono **tre, separati**: rete, ACI, extra
   raccolta. Le loro colonne non si toccano senza l'assenso dell'amministrazione.
 - La prefattura del portale copre **solo rete e ACI**. L'extra raccolta non e'
@@ -871,14 +906,19 @@ che l'utente ha dato, da non riderivare:
   rifiutano. Scrive solo l'amministratore (`soloAmministratore`).
 - **Chi la predittivita' segue**: solo gli impianti con un target e
   `segue_predittivita !== false` (se manca vale vero). Green Tyre Project, T.R.S.
-  e Gatim fanno R3: hanno solo il target, che le Giacenze leggono, e la
-  predittivita' non li segue (interruttore "Segui nella predittivita'"); con
-  loro non si seguono neanche i loro stoccaggi.
+  e Gatim hanno solo il target, che le Giacenze leggono, e la predittivita' non li
+  segue (interruttore "Segui nella predittivita'"); con loro non si seguono neanche
+  i loro stoccaggi. Il discriminante e' solo `segue_predittivita === false`
+  (`base44/shared/predittivitaDati.ts`), non l'operazione R3: 'R3' lo dichiarano
+  anche Tecnogum sull'ACI e Irigom sull'extra raccolta.
 - **Fine della programmazione e chili a viaggio** stanno sul contratto Ecotyre
   dell'anno (`CommessaEcotyre.fine_programmazione`, `kg_per_viaggio`, scritti in
   Impianti e stoccaggi). `fineProgrammazione(anno, commessa)` e
   `regolePredittivita(anno, commessa)` li usano quando ci sono (la data solo se e'
   dentro quell'anno); senza, vale quello di prima: per il 2026 il 18/12/2026 e 13 t.
+  Un anno senza contratto e senza riga in `fineProgrammazione.ts` ripiega sul 31
+  dicembre e lo dice all'utente con un avviso (`avvisoFineProgrammazione`, avviso
+  `fine_non_definita`): meglio un avviso che una data inventata.
   La data propria di un impianto (`data_fine`) vince su quella dell'anno.
 - **Tecnogum e Irigom (2026).** Tecnogum 2.295 t: primarie di Ecorecuperi (800 t),
   250 t da T-Cycle, il resto da Nappi Sud. Irigom 4.445 t: primarie di Smoco e
@@ -984,7 +1024,8 @@ quando l'amministrazione conferma che la fattura al cliente e' stata emessa ed e
 andata a buon fine. Il giorno della conferma (e il numero di fattura, se c'e')
 restano sul documento. L'esportazione fa avanzare lo stato solo da «approvata».
 
-**La prefattura del portale Ecotyre** (`base44/shared/prefattura.ts`, funzione
+**La prefattura del portale Ecotyre** (`base44/shared/prefattura.ts`,
+`confrontaPrefattura`; la function di piattaforma invocata dal browser e'
 `prefatturaEcotyre`, scheda «Prefattura Ecotyre»). Si carica in Excel o in PDF e
 si confronta ordine per ordine con le righe di `attivaCalcolo.ts`, PRIMA di
 esportare: solo in prefattura (con la ragione: altro mese, cancellato,
@@ -1007,7 +1048,8 @@ vero di luglio 2026: 416 righe, identiche all'Excel una per una.
 
 ### Il margine
 
-`base44/shared/margine.ts`, funzione `calcolaMargine`, scheda «Margine» della
+`base44/shared/margine.ts`, funzione `calcolaMargineAnno` (la chiama la function
+di piattaforma `calcolaMargine`), scheda «Margine» della
 fatturazione (solo admin). Ricavo attivo meno costo passivo, mese per mese e
 canale per canale, con una sola lettura degli archivi. **Non ha regole sue**: usa
 `attivaCalcolo.ts` e `passivaCalcolo.ts` (il calcolo della passiva, che la
@@ -1019,7 +1061,10 @@ possono riguardare tonnellate raccolte prima: il numero che conta e' l'anno.
 ### La pratica mensile di Irigom
 
 Le dichiarazioni di Irigom le prepariamo noi, nella scheda Irigom di
-Dichiarazioni Impianti (`PraticaIrigom.jsx`). Le regole stanno in
+Dichiarazioni Impianti (`PraticaIrigom.jsx`). Il registro di carico e scarico lo
+legge `src/lib/registroIrigom.js` (`leggiRegistroIrigom`): le lettere di colonna
+dei fogli Dettaglio e Cons., i colori e le note stanno la', non in
+praticaIrigom.js. Le regole stanno in
 `src/lib/praticaIrigom.js` e sono provate sul caso vero di agosto 2026
 (`prove/praticaIrigom.mjs`, dati in `prove/dati/`): toccarle vuol dire rifare
 quella prova.
@@ -1031,9 +1076,10 @@ quella prova.
 - **Allegati VII** (J numero, AL peso): si cerca la **combinazione con la somma
   piu' vicina al ciabattato uscito** (V), mai sotto se si puo', prima fra i soli
   **SMOCO**; se non bastano si aggiungono i **TRANSAR** e per ultimi gli altri
-  trasportatori (regola dell'utente del 22/09/2026, `combinazioneVicina` in
-  `src/lib/praticaIrigom.js`: tutte le somme possibili, poi si tolgono gli
-  allegati di coda che non servono, cosi' restano quelli di testa). Tante
+  trasportatori (regola dell'utente del 22/09/2026, `scegliAllegati` in
+  `src/lib/praticaIrigom.js`: la cascata dei tre bacini e' sua, e per ciascuno
+  chiama `combinazioneVicina`, che prova tutte le somme possibili e poi toglie
+  gli allegati di coda che non servono, cosi' restano quelli di testa). Tante
   terziarie quanti allegati; le TER in ordine crescente vanno agli allegati in
   ordine di scelta. Agosto 2026 e' stato dichiarato con la regola di prima - i
   primi dell'ordine finche' bastano - che resta come `criterio: 'ordine'` per
@@ -1115,8 +1161,10 @@ quella prova.
 - I Word nascono dai modelli in `ModelloDocumento` (docx con segnaposto; le
   tabelle con `tabellaWord`, lo stile di agosto). Il registro e i PDF si leggono
   nel browser e non si conservano: resta la `PraticaIrigom` con i numeri.
-- `docxModello.unisciRun` fonde solo run con lo stesso stile: fonderli tutti
-  faceva perdere grassetti e caratteri ai documenti generati.
+- `unisciRun` (interna a `src/lib/docxModello.js`, la chiama `leggiModello`)
+  fonde solo i run con lo stesso stile: fonderli tutti faceva perdere grassetti
+  e caratteri ai documenti generati. Dove un paragrafo resta con un segnaposto
+  spezzato, e solo li', `unisciRunTutti` li fonde tutti.
 
 ### La Quadratura FIR: il flusso non si indovina dal titolo (30/09/2026)
 
@@ -1161,8 +1209,9 @@ confronto non torna a indovinare.
 due tabelle sullo stesso flusso e sulla stessa fonte e la seconda spariva senza
 una riga. Ora si contano, si marcano `doppia`, il flusso **non si confronta** e lo
 si dice: sommarle o tenerne una a caso darebbe un numero sbagliato senza dirlo.
-Le tabelle **senza** flusso portano i loro numeri nelle osservazioni ("3
-formulari per 42.480 kg letti e quadranti, ma non ancora attribuiti"), invece di
+Le tabelle **senza** flusso portano i loro numeri nelle osservazioni ("«WIN
+SINFO»: 85 formulari per 263.780 kg letti e quadranti, ma non ancora
+attribuiti"), invece di
 sparire mentre il flusso corrispondente dichiarava "Manca nel file": erano due
 affermazioni opposte sugli stessi formulari.
 
@@ -1218,7 +1267,8 @@ stampa".
 di cio' che richiede attenzione, ogni voce col collegamento a dove si risolve.
 Legge **solo archivi piccoli** (alert, registro dei caricamenti, ordini aperti,
 documenti di fatturazione, prefatture, riepilogo della qualifica,
-richieste del consorzio): chi aggiunge un controllo non deve farle rileggere le
+richieste del consorzio, controlli delle sedi operative dei PDR
+`VerificaSedePdr`): chi aggiunge un controllo non deve farle rileggere le
 primarie. Le anomalie di prezzo delle fatturazioni arrivano dal margine, che la
 pagina chiede dopo e solo per l'amministratore. Un controllo nuovo si aggiunge
 li', con un caso in `prove/cruscotto.mjs`.
@@ -1226,7 +1276,9 @@ li', con un caso in `prove/cruscotto.mjs`.
 ### Le attivita' della to-do list che si chiudono da sole (28/09/2026)
 
 `base44/shared/todoOrdini.ts` (specchio `src/lib/todoOrdini.js`), la function
-`controllaTodoOrdini`, quinto ricalcolo dopo le primarie.
+`controllaTodoOrdini`, TERZO dei cinque ricalcoli dopo le primarie
+(`RICALCOLI` in `src/lib/importGrandeFile.js`: `evasioneAssegnati`, `ritiriEct`,
+`todoOrdini`, `verifiche`, `qualifica`, eseguiti in quest'ordine).
 
 Sull'attivita' si scrive l'ID dell'ordine da completare. Parole dell'utente:
 «verifica quando essi passano dallo stato assegnato a quello di terminato e **solo
@@ -1284,8 +1336,9 @@ istruita, e sono state misurate sul codice:
    consulente che cita invece che del responsabile tecnico che risponde. E' l'unico
    modo di spegnere i link alla radice.
 3. **Il prompt a due voci.** Con `soloDati` escono `REGOLE_FONTI`, la regola del
-   controllo online, quella su Normattiva e quella sul corso RT, ed entrano cinque
-   righe (D, D-bis, D-ter, D-quater) su come si risponde a un numero: il numero
+   controllo online, quella su Normattiva e quella sul corso RT, ed entrano sei
+   righe (l'inquadramento e le cinque regole da D a D-quinquies) su come si
+   risponde a un numero: il numero
    nella prima riga con la sua etichetta (soggetto, canale, periodo), niente
    premesse, niente consigli non chiesti. **Le regole che tengono onesti i numeri
    restano tutte**: i canali che non si sommano, il periodo attaccato
@@ -1413,7 +1466,10 @@ function vera e il modulo del browser con un SDK finto e i guasti in mezzo.
   che toglie, e di un ordine che il file non porta non c'e' niente da
   riscrivere - togliere lo storico conservato vorrebbe dire perderlo per sempre.
   Il freno e' nel browser e, come ultima rete, nell'azione `cancella_ordini`,
-  che rifiuta gli ID a cui il browser non dichiara nessuna riga nel file. Il
+  che non filtra gli ID buoni: se ne arriva uno a cui il browser non dichiara
+  nessuna riga nel file rifiuta la richiesta per intero, non tocca niente e
+  risponde 200 con `non_fatta` (senza il campo `nel_file` il controllo non si fa
+  affatto, per chi chiamava prima di questa rete). Il
   prezzo: una riga rimasta in archivio di un ordine che il file non contiene non
   si toglie da sola, si dice, e si rimedia ricaricando lo stesso file. (2) Se un
   ordine **conservato** risultasse con meno righe di quante la preparazione ne
@@ -1494,10 +1550,15 @@ function vera e il modulo del browser con un SDK finto e i guasti in mezzo.
   primarie - evasione degli assegnati, ritiri delle richieste del consorzio,
   ordini da completare della to-do list, verifiche e quadrature, qualifica
   fornitori - **due** per le secondarie e **due** per l'extra raccolta (verifiche
-  e qualifica), e **uno** per il report delle dichiarazioni di trattamento, che
+  e qualifica, piu' `alertExtra` - l'alert delle date obbligatorie - quando la
+  riga di registro non si e' potuta scrivere: quel terzo non compare in
+  `ricalcoliFermi`, che legge solo `RICALCOLI`), e **uno** per il report delle dichiarazioni di trattamento, che
   allinea le dichiarazioni caricate a portale: l'utente l'ha chiesto il
   02/10/2026, «dovrebbe farlo in automatico quando carico quei due file». La
-  predittivita' non c'e' piu' dal 26/09/2026, vedi la sua sezione. Erano quattro
+  predittivita' non ha piu' un ricalcolo qui dal 26/09/2026: la pagina si
+  ricalcola da sola a ogni apertura e il programma della settimana dopo si fissa
+  il mercoledi' alle 8 (`analisiSettimanalePredittiva`); il modulo c'e', vedi la
+  sua sezione. Erano quattro
   per le primarie finche' non si e' aggiunta la to-do list (28/09/2026): il
   numero scritto qui era rimasto indietro, verificato il 08/10/2026.
 - **Le due conferme sono separate** (`CONFERMA_ORDINI_MANCANTI` e
@@ -1512,7 +1573,14 @@ La preparazione di un caricamento apre una riga `in_corso` in `UploadLog` con
 l'utente; la registrazione finale la chiude. Una riga rimasta `in_corso` e' la
 traccia di un caricamento interrotto (archivio forse incompleto), e blocca per
 dieci minuti un secondo caricamento dello stesso archivio da parte di un altro
-utente. Chi legge «l'ultimo caricamento» esclude `errore` e `in_corso`.
+utente. **Fa eccezione** la riga il cui messaggio comincia con «Caricamento non
+riuscito» (`NON_RIUSCITO`): resta `in_corso` per non perdere la traccia, ma non
+blocca nessuno, perche' li' non sta scrivendo piu' nessuno (`apriCaricamento` in
+`importaBlocco` e in `importEcotyreFile`). Chi legge «l'ultimo caricamento» non
+usa un criterio solo: `statoCaricamenti` (`base44/shared/cruscotto.ts`) tiene solo
+l'esito `successo`, e scarta anche `parziale`; `reportSettimanali.ts` accetta un
+`parziale` che non sia una riscrittura e scarta quello che lo e'; `caricamentoAperto`
+(`src/lib/importGrandeFile.js`) prende la prima riga che non sia in `errore`.
 
 ### I file del Caricamento Dati si sostituiscono (29/09/2026)
 
@@ -1554,7 +1622,7 @@ anti-regressione e la storia dei caricamenti. Se ne va solo `file_url`, e al
 messaggio si aggiunge la riga che dice quando e perche'.
 
 **La trappola**: un caricamento **forzato** riusa il file del tentativo che non
-era riuscito (`pendingFileUrlRef` in `src/pages/CaricamentoDati.jsx`), quindi due
+era riuscito (`pendingFileUriRef` in `src/pages/CaricamentoDati.jsx`), quindi due
 record del registro puntano allo stesso indirizzo. Cancellarlo perche' "e' del
 caricamento di prima" cancellerebbe il file del caricamento buono: per questo si
 decide prima quali indirizzi si TENGONO e solo dopo si toglie il resto, e lo
@@ -1563,8 +1631,9 @@ stesso indirizzo non si cancella due volte.
 Primarie, dichiarazioni di trattamento e ordini non dichiarati non hanno questo
 problema: si leggono nel browser a blocchi e il file non sale mai
 (`TIPI_LETTURA_BROWSER` in `src/lib/importGrandeFile.js`). Il file delle
-richieste ECT invece saliva e il suo indirizzo non veniva salvato da nessuna
-parte: ora `importaRichiesteEct` lo cancella appena l'ha letto, perche' dopo
+richieste ECT invece sale e il suo indirizzo non lo conserva nessun record:
+`importaRichiesteEct` non prova piu' a cancellarlo - la piattaforma non cancella -
+e lo ANNOTA nel registro `FileDaRimuovere` (audit del 03/10/2026), altrimenti
 nessuno saprebbe piu' che esiste.
 
 ## I file, la privacy e i permessi
@@ -1631,12 +1700,17 @@ collegato.
 
 1. **Il riferimento non esce dal server.** `qualificaFornitori` manda `ha_file`
    (c'e' / non c'e'), non il `file_uri`; `DocumentoQualifica` ha la **lettura
-   riservata all'amministratore** (la pagina non legge quell'archivio dal
-   browser: legge il riepilogo della funzione, che gira con `asServiceRole`).
+   riservata all'amministratore** (chi non e' amministratore vede il riepilogo
+   della funzione, che gira con `asServiceRole`; le uniche letture dirette dal
+   browser stanno nel percorso di caricamento e in quello del catalogo, che sono
+   gia' dell'amministratore).
 2. **Si apre dalla funzione `apriFile`**, che prende `{ entita, id }`, legge il
    record con `asServiceRole`, controlla chi sta chiedendo e firma con scadenza
-   **300 secondi**. Non accetta indirizzi ne' `file_uri` dal corpo, come
-   `riferimentoDalCorpo`: il server non va dove gli si dice di andare.
+   **300 secondi**. Non accetta ne' indirizzi ne' `file_uri` dal corpo
+   (`controllaRichiesta`, `base44/shared/fileRiservato.ts:113`): il server non va
+   dove gli si dice di andare. Non e' la regola di `riferimentoDalCorpo`
+   (`base44/shared/fileScaricabile.ts:106-110`), che il `file_uri` dal corpo lo
+   ACCETTA - e' la sola strada dei caricamenti - e rifiuta solo l'indirizzo.
    Il permesso di ogni archivio sta in un posto solo,
    `base44/shared/fileRiservato.ts` (`ARCHIVI_APRIBILI`), ed e' un **elenco**:
    un archivio che nessun pulsante apre non ci sta, perche' una funzione che firma
@@ -1644,7 +1718,8 @@ collegato.
    browser si passa da `src/lib/apriFile.js`. Prove: `prove/fileRiservato.mjs`.
 
 **Quello che resta da decidere.** `UploadLog`, `VerificaReport`, `QuadraturaFir`,
-`ContrattoFornitore` e `ModelloContratto` tengono ancora il `file_uri` su record
+`ContrattoFornitore`, `ModelloContratto` e `ModelloDocumento` (per quest'ultimo
+l'apertura a tutti e' voluta, `chi: 'tutti'`) tengono ancora il `file_uri` su record
 con `read: true`, quindi i loro file restano apribili da qualunque utente
 collegato. Per `UploadLog` la lettura aperta **serve** (otto pagine la usano per
 accorgersi di un caricamento nuovo), quindi la sola strada e' la terza
@@ -1713,8 +1788,9 @@ operazioni disponibili sono state rifiutate in quanto operazioni (`Method Not
 Allowed`, `501`, `not supported`), mentre basta **un** fallimento di altro genere
 perche' si resti prudenti e si riprovi. Smettere per sbaglio vorrebbe dire non
 cancellare mai piu'. E quando il rifiuto e' dell'operazione si smette al primo
-tentativo, nei tre punti che passano da `cancellaFile` (i documenti a 40 giorni, la
-sostituzione al caricamento, l'arretrato notturno): ripeterlo su ogni file, con
+tentativo, nei quattro punti che passano da `cancellaFile` (i documenti a 40
+giorni, l'alleggerimento della qualifica, la sostituzione al caricamento,
+l'arretrato notturno): ripeterlo su ogni file, con
 59 file, erano 177 richieste contro il limite di **tutta** l'app, e l'esito non
 cambiava.
 
@@ -1789,9 +1865,11 @@ campo, che e' il rimedio che descrive l'assistenza ("removing it from your
 records hides it in your app").
 
 Lo fa `scollegaFilePubblici`, pulsante "Togli i link pubblici dai record" in
-Caricamento Dati, solo amministratore. **Non e' reversibile e l'ordine conta**:
-quei campi sono l'unico posto dove quegli indirizzi sono scritti, quindi prima si
-scarica l'inventario e lo si manda al team della piattaforma. Per questo la
+Caricamento Dati, solo amministratore. **Non e' reversibile**: il campo svuotato
+non torna. Gli indirizzi, invece, non si perdono: dall'audit del 03/10/2026 la
+funzione li annota nel registro `FileDaRimuovere` prima di svuotarli, e
+l'inventario li rilegge da li' come orfani, quindi l'elenco per il team della
+piattaforma si scarica anche dopo. Per questo la
 funzione senza `conferma: true` si limita a contare, e se un archivio non si
 riesce a leggere non tocca niente: svuotarne una parte lascerebbe gli altri link
 in giro senza dirlo.
@@ -1814,13 +1892,16 @@ pezzi da ottomila caratteri (`base44/shared/testoLungo.ts`).
 giorno **dal caricamento** — non dalla competenza, o un consuntivo di settembre
 che arriva a novembre nascerebbe scaduto — di un documento se ne vanno le righe
 lette e il confronto riga per riga. **Il record non si cancella**: restano i suoi
-contatori, il verdetto per canale e una **storia scritta** in italiano di poche
-centinaia di caratteri. Prima di questa data le verifiche dei report settimanali
+contatori, il verdetto per canale e una **storia scritta** in italiano di
+circa mille caratteri, al massimo 4300: `tagliaStoria` taglia a 4000 e `conNota`
+aggiunge in coda la nota (altri 300). Prima di questa data le verifiche dei report settimanali
 si cancellavano per intero e le liste degli assegnati dopo due mesi: se ne andava
 proprio la storia che l'utente vuole tenere.
 
-- **A giorni** (`daAlleggerire` + `alleggerisciDocumenti`, workflow notturno alle
-  3:15): `VerificaReport`, `QuadraturaFir`, `ConsuntivoFornitore`.
+- **A giorni** (`daAlleggerire` di `shared/conservazione.ts` - l'omonima di
+  `shared/fileArchivio.ts` e' quella dei tre anni della qualifica - piu'
+  `alleggerisciDocumenti`, workflow notturno alle 3:15): `VerificaReport`,
+  `QuadraturaFir`, `ConsuntivoFornitore`.
 - **A mesi** (`alleggerisciVecchi` in `base44/shared/evasioneAssegnatiDati.ts`):
   `ListaAssegnati` e `ControlloEvasione`, perche' il controllo dell'evasione
   lavora ancora sulle liste del mese in corso e di quello prima. Due padroni
@@ -1836,9 +1917,12 @@ proprio la storia che l'utente vuole tenere.
 **La storia sta in un campo normale** (`storia`), mai scritto con `valoreCampo`:
 sopra gli ottomila caratteri tornerebbe in `ContenutoEsteso`, cioe' il peso che
 si e' appena tolto. Per questo `tagliaStoria` taglia a 4000 e lo dice. La storia
-**non contiene costi**: il record lo legge chiunque (`rls read: true`) e la
-fatturazione passiva e' riservata all'amministratore, quindi `storiaConsuntivo`
-riporta chili e formulari ma non l'importo previsto ne' gli scarti in euro.
+**non contiene i NOSTRI costi**: il record lo legge chiunque (`rls read: true`) e
+la fatturazione passiva e' riservata all'amministratore, quindi `storiaConsuntivo`
+riporta chili e formulari ma non l'importo previsto ne' gli scarti in euro. L'unico
+euro che la storia dice e' `importo_consuntivo`, l'importo che il fornitore ha
+scritto sul proprio documento (`conservazione.ts`): e' un suo dato, non un nostro
+costo, ed e' voluto.
 Le storie non sommano mai i canali (regola 3) e i pesi seguono `formatoKg`.
 
 **Tre cose da non rompere:**

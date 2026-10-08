@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -7,6 +7,7 @@ import { RefreshCw, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { exportDaDichiarareExcel } from '@/lib/giacenzeDaDichiarareExport';
 import { formatKg, formatIntero } from '@/lib/utils';
 import { giornoRoma } from '@/lib/giornoItaliano';
+import { creaSequenza } from '@/lib/ultimaRichiesta';
 
 // I pesi di questa lista sono chilogrammi: sempre interi. Si scrivevano con
 // formatTonnellate, e un peso in kg usciva con i decimali delle tonnellate.
@@ -39,7 +40,10 @@ function fmtData(v) {
 const PAGE_SIZE = 100;
 
 export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSito }) {
-  const [sito, setSito] = useState('');
+  // Si nasce gia' col filtro che ci hanno passato: arrivando dal pulsante di un
+  // impianto nella scheda Situazione, la prima lettura deve essere la sua e non
+  // quella di tutti gli ordini.
+  const [sito, setSito] = useState(filtroSitoEsterno || '');
   const [provincia, setProvincia] = useState('');
   const [annoChiusura, setAnnoChiusura] = useState('');
   const [ricerca, setRicerca] = useState('');
@@ -48,6 +52,7 @@ export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSi
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [filterOptions, setFilterOptions] = useState({ siti_distinti: [], province_distinte: [], anni_distinti: [] });
+  const sequenza = useRef(creaSequenza()).current;
 
   // Sincronizza filtro esterno (dal pulsante nella scheda Situazione)
   useEffect(() => {
@@ -58,6 +63,11 @@ export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSi
   }, [filtroSitoEsterno]);
 
   const load = useCallback(async () => {
+    // Due letture possono essere in volo insieme - una senza filtro e una col
+    // filtro - e quella senza, piu' lenta perche' porta tutti gli ordini, torna
+    // per ultima e si prende lo schermo: il filtro resta scritto e sotto ci sono
+    // gli ordini di tutti gli impianti. Succedeva davvero (08/10/2026).
+    const mia = sequenza.inizia();
     setLoading(true);
     try {
       const payload = { limite: PAGE_SIZE, offset };
@@ -67,13 +77,14 @@ export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSi
       if (ricerca) payload.ricerca = ricerca;
       if (soloDate) payload.solo_date_da_sistemare = true;
       const res = await base44.functions.invoke('getOrdiniDaDichiarare', payload);
+      if (!sequenza.valida(mia)) return;
       setData(res.data);
       if (res.data.siti_distinti) setFilterOptions(res.data);
     } catch (e) {
       console.error(e);
     }
-    setLoading(false);
-  }, [sito, provincia, annoChiusura, ricerca, soloDate, offset]);
+    if (sequenza.valida(mia)) setLoading(false);
+  }, [sito, provincia, annoChiusura, ricerca, soloDate, offset, sequenza]);
 
   useEffect(() => { load(); }, [load]);
 
