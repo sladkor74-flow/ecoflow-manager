@@ -109,11 +109,14 @@ in `src/lib`. Le due copie devono restare identiche a meno dell'intestazione di
 commento e delle righe di `import`, e lo controlla `prove/specchi.mjs`. **Una
 modifica si fa uguale in tutti e due i file.**
 
-Nelle librerie di `src/lib` gli import sono **relativi** (`./prodotto.js`), non
-con l'alias `@/`: le prove caricano un modulo da un indirizzo `data:` e ne
-riscrivono gli import, e il caricatore (`prove/dati/libPagine.mjs`) risolve sia
-gli alias sia i relativi. Dentro i componenti l'alias va bene, perche' li' ci
-pensa Vite.
+**Gli import in `src/lib` vanno bene in tutte due le forme.** La convenzione e'
+l'alias `@/` (39 dei 92 file; 12 usano un relativo, fra cui i cinque che prendono
+`./prodotto.js`), e nessuna delle due rompe le prove: il caricatore
+`prove/dati/libPagine.mjs` carica il modulo da un indirizzo `data:` e **riscrive
+entrambe**. Fino all'08/10/2026 qui c'era scritto che gli import `src/lib` sono
+relativi «non con l'alias», che era falso e costava riscritture inutili: chi lo
+prendeva alla lettera doveva toccare 39 file per niente. Dentro i componenti
+l'alias va bene comunque, perche' li' ci pensa Vite.
 
 ### I fine-riga
 
@@ -214,7 +217,7 @@ tre cose su `RichiestaUtente` ed `EsercitazioneRT`, e solo due erano giuste:
   riempie la piattaforma, non `richiedente_email`, che scrive il browser e
   ripiega sulla stringa vuota; e senza il prefisso `data.`, che in tutte le
   entita' compariva solo la' - lo stesso commit ha scritto `created_by_id` nudo
-  su un'altra entita', quindi una delle due forme e' sbagliata.
+  su un'altra entita'.
 - **Sbagliata, respinta:** `"create": null` su `RichiestaUtente`. Aprire una
   richiesta e' **l'unica scrittura di un utente non amministratore**: il form si
   disegna solo quando non e' amministratore, l'amministratore non ha nessun
@@ -233,7 +236,17 @@ tre cose su `RichiestaUtente` ed `EsercitazioneRT`, e solo due erano giuste:
 `prove/scrittureDegliUtenti.mjs` e' la guardia: fallisce se una scansione futura
 richiude quelle `create`, riapre le letture, scrive una regola come `null` o
 reintroduce il prefisso `data.`. **Qual e' la sintassi giusta del campo nelle
-condizioni RLS va chiesto al supporto, non indovinato.**
+condizioni RLS l'ha detta l'assistenza il 02/10/2026, e non va piu' chiesta: sono
+valide tutte e due, perche' indicano due generi di campo diversi.** «A platform
+field such as created_by_id stays unprefixed, while a field you defined in the
+entity needs the data. prefix»: le nostre due condizioni sono su `created_by_id`,
+che e' un campo della piattaforma, quindi vanno senza prefisso e stanno gia'
+cosi'. Il controllo in `prove/scrittureDegliUtenti.mjs` resta, ma ha cambiato
+significato: non e' piu' un dubbio, e' il confine. Un `data.` li' dentro vuol dire
+che qualcuno ha messo una condizione su un campo **nostro**, e allora va guardata
+una per una. **E non si toglie un `data.` legittimo**: su un campo nostro quel
+prefisso serve, e senza, una condizione sbagliata rende invisibili i propri record
+al loro proprietario senza che si veda dall'account dell'amministratore.
 
 ### Il nome: TreadRider
 
@@ -257,11 +270,6 @@ Fino al 03/10/2026 il nome stava scritto a mano in nove punti e **le pagine non 
 scrivevano affatto**: si vedeva solo nella linguetta del browser, l'autore di un
 Excel diceva ancora il nome vecchio, e l'utente ha detto «in pratica e' come se non
 ci fosse». Se serve cambiarlo, o aggiungerci un marchio, si cambia li'.
-
-**Nelle librerie di `src/lib` gli import sono RELATIVI** (`./prodotto.js`), non con
-l'alias `@/`: le prove caricano un modulo da un indirizzo `data:` e ne riscrivono
-gli import, e il caricatore (`prove/dati/libPagine.mjs`) risolve sia gli alias sia
-i relativi. Dentro i componenti l'alias va bene, perche' li' ci pensa Vite.
 
 **Quello che dal repo NON si cambia.** Il nome con cui l'applicazione si installa
 su Android e su desktop, la sua descrizione e la sua icona vengono dal manifest
@@ -345,14 +353,23 @@ fine del trasporto, e i due non cadono nello stesso mese: contato sul 2026,
 96 primarie di rete su 2.827 (272,65 t), 2 ACI su 44, una secondaria e 65
 terziarie su 99 (2.198,64 t).
 
-Il punto vivo dove la regola e' incapsulata e' **`base44/shared/movimenti.ts`**
-(`giornoMovimento`, `periodoMovimento`, sul giorno italiano; specchio in
-`src/lib/movimenti.js`): vedi "Come si legge un movimento". La stessa regola sta
-scritta anche in `dataPeriodo` di `base44/shared/dataEnrichment.ts`, con i conti
-del 2026, ma **quella funzione non la importa piu' nessuno** (verificato il
-08/10/2026): se la regola cambia, il file da cambiare e' `movimenti.ts`. I campi
-memorizzati possono venire da importazioni vecchie, quando la data di riferimento
-era la chiusura: non fidarsene, ricalcolare.
+La regola vive in **due punti, che devono restare d'accordo** (verificato il
+08/10/2026):
+
+- **chi legge** la chiede a `base44/shared/movimenti.ts` (`giornoMovimento`,
+  `periodoMovimento`, sul giorno italiano; specchio in `src/lib/movimenti.js`):
+  vedi "Come si legge un movimento";
+- **chi scrive** passa da `dataPeriodo` di `base44/shared/dataEnrichment.ts`, che
+  nessuno importa per nome ma che e' chiamata la' dentro da `getDataRiferimento`
+  dentro `enrichRecord`/`enrichRecords`: e' il codice che riempie i campi `mese`,
+  `settimane` e `anno` sul record a ogni importazione (`importaBlocco` per le
+  primarie, `importEcotyreFile` per secondarie e terziarie).
+
+Percio' **se la regola cambia si cambiano tutti e due**: toccando solo
+`movimenti.ts` l'importazione continuerebbe a scrivere i periodi con la regola
+vecchia, e i due punti si separerebbero in silenzio. I campi memorizzati, dal
+loro lato, non decidono niente: possono venire da importazioni vecchie, quando la
+data di riferimento era la chiusura, quindi non ci si fida e si ricalcola.
 
 Non ci sono eccezioni, nemmeno per le giacenze. Il portale aggiorna il suo saldo
 quando chiude l'ordine, giorni dopo il trasporto, ma quella e' una sua abitudine
@@ -610,8 +627,17 @@ Il target annuo dell'impianto si scrive **solo in Target & Status**
 li' (`targetImpiantoDellAnno`: il record attivo di esattamente quell'anno, nessun
 ripiego sugli anni prima). Il target delle primarie di un sito non si scrive: e' la
 somma dei target annui dei raccoglitori di quell'anno legati a quel sito
-(`targetPrimarieDelSito`, `TargetRaccoglitore.impianto`); per chi e' impianto e
-stoccaggio sta sulla riga dell'impianto, perche' il totale non lo conti due volte.
+(`TargetRaccoglitore.impianto`), **piu' la quota che a quel sito arriva dalla
+ripartizione sullo storico dei conferimenti** (`ripartisciTargetPrimarie`). Le
+righe di target **senza ruolo** non dicono se portano all'impianto o allo
+stoccaggio: la loro somma va su una riga sola del sito, di norma quella
+dell'impianto, perche' il totale non lo conti due volte. Le righe che **il ruolo
+ce l'hanno** vanno sulla riga di quel ruolo (`TargetRaccoglitore.ruolo`,
+`targetPrimariePerRuolo` in `annoTarget.ts`): «T-cycle va gestito come impianto
+per le 1050 t e come stoccaggio per le 250 t» (utente, 04/10/2026), e le quote
+ripartite il ruolo ce l'hanno sempre, perche' lo dice il viaggio. Il conto sta in
+`targetImpianti.ts`; `targetPrimarieDelSito`, che questo file citava, in
+produzione non la chiama piu' nessuno (resta nello specchio e nelle prove).
 I vecchi `GiacenzaSito.target_totale_t` e `target_primarie_t` restano nel database
 e non si scrivono piu' (in Giacenze si vedono in sola lettura): servono solo di
 **ripiego di transizione**, quando Target & Status non da' niente, con l'anomalia
@@ -1019,14 +1045,24 @@ quella prova.
 - **Ripartizione**: ciabattato a peso pieno dell'allegato, l'ultima terziaria il
   resto; ferro uguale per tutte alle decine, l'ultima il resto; mai oltre 38.000
   kg per dichiarazione, sul peso con cui la dichiarazione si chiude a portale.
-- **Quanto** (22/09/2026): due letture del **totale da caricare a portale**,
-  sempre mostrate insieme. Uscite del registro V + X + Y (extra raccolta
-  compresa), oppure la giacenza: dopo la dichiarazione del mese M a portale deve
+- **Quanto** (22/09/2026, terza lettura aggiunta il 03/10/2026): **tre** letture
+  del **totale da caricare a portale**, sempre mostrate insieme
+  (`src/lib/praticaIrigom.js`). **Uscite**: V + X + Y del foglio Cons., tutto
+  cio' che e' uscito nel mese, extra raccolta compresa. **Registro**: le uscite
+  del mese **piu' il ferro che i mesi senza nave hanno lasciato indietro** e che a
+  portale non e' ancora stato dichiarato (regola dell'utente del 03/10/2026,
+  `ferroArretrato`, parametro `arretrato` di `componiMese`, prove in
+  `prove/ferroArretratoIrigom.mjs`). **Giacenza**: dopo la dichiarazione del mese M a portale deve
   restare **AD + AE della riga di M nel foglio Cons.** (gomma in impianto:
   cippato, SACI e interi; piu' ferro in giacenza) meno l'extra ancora in
   impianto. Totale a portale = giacenza di rete a portale a fine mese (per fine
   trasporto) - quello che deve restare. Il CSS-C in giacenza (Z) non resta: e'
   end of waste. Il ferro e' la parte che si aggiusta: totale a portale - V - Y.
+  Registro e giacenza sono due strade indipendenti per lo stesso numero, e **lo
+  scarto che la pagina mostra e' giacenza contro REGISTRO**, non contro le uscite:
+  il confronto con le sole uscite resta accanto (`scartoUscite`) ed e' un'altra
+  cosa. Se le due strade non danno lo stesso totale c'e' qualcosa da capire prima
+  di caricare.
 - **L'extra raccolta partita con la nave sta dentro l'ultima terziaria**
   (utente, 22/09/2026): a portale quella terziaria si chiude col peso intero,
   rete + extra (agosto 2026: 19.880 + 460 = 20.340, totale a portale 534.600).
@@ -1499,7 +1535,14 @@ La regola sta in `base44/shared/fileArchivio.ts` (`fileDaSostituire`,
   caricamenti precedenti dello stesso `tipo_file` perdono il file. Un esito
   `parziale`, `errore` o `in_corso` non tocca niente: uno dei file di prima
   potrebbe essere ancora l'unico completo. Agganciato in `importEcotyreFile` e
-  `importPdrFile`, con un tetto di 10 per caricamento.
+  `importPdrFile`, con un tetto di 10 per caricamento. **Oggi non trova nessun
+  candidato**, e non per la cancellazione: `fileDaSostituire` e
+  `arretratiDaSostituire` cercano i precedenti fra i record che hanno `file_url`
+  scritto, e dal passaggio all'area privata del 30/09/2026 quel campo resta
+  **sempre vuoto** (`riferimentoDaSalvare` scrive `file_url: ''` e salva
+  `file_uri`; lo dice anche la descrizione del campo in `UploadLog.jsonc`).
+  Riabilitare la cancellazione quindi non basterebbe: andrebbe esteso il filtro a
+  `file_uri`. Verificato l'08/10/2026.
 - **Ogni notte** (`alleggerisciDocumenti`) l'arretrato: per ogni tipo si tiene il
   file del caricamento riuscito piu' recente e si tolgono gli altri, fino a 40
   per giro. Serve perche' ci sono tipi che si caricano una volta al mese o meno, e
@@ -1620,16 +1663,20 @@ servono i loro identificativi: li produce la funzione `inventarioFile`
 file caricati" in Caricamento Dati, solo amministratore. I pubblici escono per
 primi perche' sono quelli che scottano.
 
-**OGNI RIGA DI QUELL'ELENCO E' UN FILE CHE UN RECORD STA USANDO**, perche'
-l'inventario nasce dai record. Il 02/10/2026 e' mancato poco che costasse caro:
+**UNA RIGA DI QUELL'ELENCO PUO' ESSERE UN FILE CHE UN RECORD STA USANDO**, e va
+letta prima di chiederne la rimozione. Dal 02/10/2026 l'inventario ha **due
+sorgenti**: i record, e il registro `FileDaRimuovere` dei file che nessun record
+usa piu' (`in_uso: false`). Il 02/10/2026 e' mancato poco che costasse caro:
 l'elenco e' stato mandato all'assistenza chiedendo la rimozione dei file, e
 dentro c'erano anche i **144 documenti di qualifica** dei fornitori (DURC,
 contratti, polizze, visure), i **4 modelli** con cui si generano le lettere e una
 stampa di quadratura. Li ha fermati l'assistenza, controllando lei: *«if we delete
 them, those records will stay in your app but their documents will no longer
 open»*. Da allora ogni riga del CSV porta la colonna **`azione`** - «DA FAR
-RIMUOVERE: indirizzo pubblico, prima togli il riferimento dal gestionale» oppure
-«NON RIMUOVERE: e' il documento che questo record sta usando» - e la funzione
+RIMUOVERE: indirizzo pubblico. Prima togli il riferimento dal gestionale», «NON
+RIMUOVERE: e' il documento che questo record sta usando» e, dal 02/10/2026, «DA
+FAR RIMUOVERE: nessun record lo usa» (`AZIONE_PUBBLICO`, `AZIONE_PRIVATO`,
+`AZIONE_ORFANO`: sono **tre**, non due) - e la funzione
 restituisce `richiesta`, la frase coi conti da scrivere insieme al file
 (`testoRichiesta`). Un elenco di file mandato senza dire che cosa farne si legge
 come una lista di cancellazioni.
@@ -1666,7 +1713,7 @@ operazioni disponibili sono state rifiutate in quanto operazioni (`Method Not
 Allowed`, `501`, `not supported`), mentre basta **un** fallimento di altro genere
 perche' si resti prudenti e si riprovi. Smettere per sbaglio vorrebbe dire non
 cancellare mai piu'. E quando il rifiuto e' dell'operazione si smette al primo
-tentativo, in tutti e tre i punti che cancellano (i documenti a 40 giorni, la
+tentativo, nei tre punti che passano da `cancellaFile` (i documenti a 40 giorni, la
 sostituzione al caricamento, l'arretrato notturno): ripeterlo su ogni file, con
 59 file, erano 177 richieste contro il limite di **tutta** l'app, e l'esito non
 cambiava.
@@ -1700,6 +1747,19 @@ Prima ancora il caso vero cadeva nel terzo e l'avviso prometteva un ritentativo
 che non puo' riuscire - "il gestionale riprova da solo alla prossima pulizia
 notturna" - e quella era la bugia peggiore, perche' faceva aspettare. Tutto
 superato da quando non si tenta piu'.)*
+
+**C'e' un QUARTO punto che ci prova ancora, e non passa da `cancellaFile`**
+(trovato l'08/10/2026, non ancora sistemato): `prefatturaEcotyre/entry.ts`, a ogni
+prefattura caricata, gira a mano sui tre nomi `DeleteFile`,
+`DeletePrivateFile` e `RemoveFile` con la guardia `typeof core[n] !== 'function'`,
+che **e' sempre vera** per il Proxy dell'SDK - lo stesso falso rilevamento per cui
+`supportoCancellazione` e' stato tolto. Sono tre richieste a vuoto per
+caricamento, cioe' esattamente il costo che questa sezione dichiara eliminato. E
+c'e' di peggio: quel file non viene annotato in `FileDaRimuovere` e
+`PrefatturaEcotyre` non tiene campi file, quindi **non compare nell'inventario e
+non si potra' mai far rimuovere** - e' il danno che il paragrafo qui sopra dice di
+aver chiuso in un punto solo. Nessuna prova copre questo punto:
+`prove/fileArchivio.mjs` prova `cancellaFile` in isolamento.
 
 **La sostituzione dei file percio' non puo' funzionare** finche' la piattaforma
 non abilita la cancellazione. Il record del registro perde `file_url` solo se il
