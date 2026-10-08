@@ -5,7 +5,7 @@
 // calcolata; se il portale lo conosce, nella sua giacenza c'e': la differenza si
 // dice. Rete, ACI ed extra raccolta restano su gruppi e conteggi separati.
 // npm run prove
-import { formulariDaSistemare, avvisoSenzaFine, ordiniNotiAlPortale, formulariDelFile, collocaFotografia, fotoAFineMese, dichiaratoDopoLaFotografia } from '../base44/shared/giacenzaPortale.ts';
+import { formulariDaSistemare, avvisoSenzaFine, ordiniNotiAlPortale, formulariDelFile, collocaFotografia, fotoAFineMese, dichiaratoDopoLaFotografia, nostraRiga } from '../base44/shared/giacenzaPortale.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -267,6 +267,19 @@ console.log('\nLE DICHIARAZIONI CARICATE DOPO LA FOTOGRAFIA');
   verifica('senza fotografia non si conta niente',
     dichiaratoDopoLaFotografia([...quest_anno, ...anno_prima], null, chiave).size === 0);
 }
+
+// Il report delle dichiarazioni che il portale esporta porta anche gli altri
+// partner operativi del consorzio, e a volte sulle NOSTRE destinazioni: nel file
+// dell'08/10/2026 ci sono 1.205,96 t di Baucina Recycling Tyres dichiarate su
+// Irigom fra il 2023 e il 2025. Sommate alle nostre gonfierebbero il «dichiarato
+// a portale» di un impianto e il confronto direbbe una differenza che non c'e'.
+console.log('DAL REPORT DEL PORTALE VALE SOLO QUELLO CHE E\' NOSTRO');
+verifica('una riga di SMOCO si tiene', nostraRiga({ partner_operativo: 'SMOCO Srl' }) === true);
+verifica('comunque sia scritta', nostraRiga({ partner_operativo: 'smoco s.r.l.' }) === true);
+verifica('la riga di un altro partner no', nostraRiga({ partner_operativo: 'Baucina Recycling Tyres Srl' }) === false);
+verifica('e nemmeno quella di un trasportatore terzo', nostraRiga({ partner_operativo: 'Autotrasporti Chiarcosso Srl' }) === false);
+verifica('una riga senza partner si tiene: i caricamenti vecchi non lo portavano',
+  nostraRiga({}) === true && nostraRiga({ partner_operativo: '  ' }) === true && nostraRiga(null) === true);
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

@@ -6,7 +6,7 @@ import { eAci } from "../../shared/canaleSecondaria.ts";
 import { giornoRoma } from "../../shared/giornoItaliano.ts";
 import { eTerminato, eEseguito, periodoMovimento } from "../../shared/movimenti.ts";
 import { MESI, operazioneDa, quadratura } from "../../shared/dichiarazioniImpianti.ts";
-import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese } from "../../shared/giacenzaPortale.ts";
+import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese, nostraRiga } from "../../shared/giacenzaPortale.ts";
 import { puntiDiPartenza, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 import { confrontaConIlPortale } from "../../shared/agganciaDichiarazioni.ts";
 
@@ -105,6 +105,13 @@ export default async function(req) {
     // si rilegge due volte (confrontaConIlPortale lavora su queste sole colonne).
     const righeDichiarazione = [];
     await perPagina(svc.DichiarazioneTrattamento, null, (r) => {
+      // Che il portale conosca quell'ordine e' un fatto, chiunque l'abbia
+      // dichiarato: si segna prima di qualunque filtro.
+      portaleConosce.segna(r, 'dichiarazioni');
+      // Il report porta anche le dichiarazioni di altri partner operativi, e a
+      // volte sulle nostre stesse destinazioni: non sono roba nostra e non vanno
+      // confrontate con le nostre dichiarazioni (utente, 08/10/2026).
+      if (!nostraRiga(r)) return;
       righeDichiarazione.push({
         data_dichiarazione: r.data_dichiarazione, fine_trasporto: r.fine_trasporto, prodotto: r.prodotto,
         destinazione: r.destinazione, destinazione_secondaria: r.destinazione_secondaria,
@@ -113,7 +120,6 @@ export default async function(req) {
       });
       // Il portale lo conosce ma non lo conta piu' in giacenza: per chi non ha
       // la fine trasporto la differenza si dice (22/09/2026).
-      portaleConosce.segna(r, 'dichiarazioni');
       if (eAci({ prodotto: r.prodotto }) || !giornoRoma(r.fine_trasporto).startsWith(String(annoNum))) return;
       const ns = norm(String(r.destinazione_secondaria || '').trim() || r.destinazione);
       if (!ns) return;

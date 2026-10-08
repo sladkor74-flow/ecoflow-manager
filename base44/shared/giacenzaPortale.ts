@@ -571,3 +571,24 @@ export function fotoAFineMese(collocata, ns, anno) {
     return Math.round(kg);
   });
 }
+
+/**
+ * DAL REPORT DEL PORTALE VALE SOLO QUELLO CHE E' NOSTRO (regola dell'utente,
+ * 08/10/2026: «dal file devi considerare solo cio' che afferisce a Smoco come
+ * partner operativo»).
+ *
+ * Il report delle dichiarazioni di trattamento che il portale esporta contiene
+ * anche le dichiarazioni di altri partner operativi del consorzio, e a volte
+ * sulle nostre stesse destinazioni: nel file dell'08/10/2026 ci sono 1.205,96 t
+ * di Baucina Recycling Tyres dichiarate su Irigom fra il 2023 e il 2025. Sommate
+ * alle nostre gonfierebbero di altrettanto il «dichiarato a portale» di un
+ * impianto, e il confronto con le nostre dichiarazioni direbbe una differenza
+ * che non esiste.
+ *
+ * Una riga senza partner scritto si tiene: i caricamenti vecchi non lo portavano,
+ * e scartarla toglierebbe un dato vero per un campo mancante.
+ */
+export function nostraRiga(r) {
+  const p = String((r && r.partner_operativo) || '').trim();
+  return !p || /smoco/i.test(p);
+}
