@@ -590,7 +590,8 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                               variant="outline"
                               size="sm"
                               className="h-7"
-                              onClick={() => onVaiDaDichiarare(r.sito)}
+                              /* il ruolo viaggia col nome: dal pulsante dell'impianto si aprono solo i suoi */
+                              onClick={() => onVaiDaDichiarare(r.sito, r.tipo_destinazione)}
                             >
                               {formatIntero(ordini || 0)}
                             </Button>

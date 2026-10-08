@@ -4,7 +4,7 @@ import { fetchAll, perPagina } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { giornoRoma, annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { formulariDelFile } from "../../shared/giacenzaPortale.ts";
+import { formulariDelFile, ruoloDellaRiga } from "../../shared/giacenzaPortale.ts";
 
 // Restituisce l'elenco paginato degli ordini in attesa di dichiarazione (OrdineNonDichiarato).
 // Payload: { sito, provincia, anno, ricerca, limite, offset, tutte } - tutti opzionali.
@@ -35,6 +35,7 @@ import { formulariDelFile } from "../../shared/giacenzaPortale.ts";
 //   anno     -> anno della fine trasporto (accetta ancora anno_chiusura dalle pagine vecchie)
 //   ricerca  -> corrispondenza parziale case-insensitive su numero_fir e ordine_primaria
 //   solo_date_da_sistemare -> solo le righe il cui formulario ha le date da sistemare
+//   ruolo    -> 'imp' (da dichiarare su quell'impianto) o 'stoc' (passati dal piazzale e gia' ripartiti)
 //
 // Restituisce: righe (paginate), totale_righe, totale_kg, siti_distinti, province_distinte, anni_distinti,
 // date_da_sistemare ({ n, kg, fuori_dai_mesi, fuori_dai_mesi_kg } delle righe filtrate),
@@ -90,6 +91,9 @@ export default async function(req) {
     const body = await req.json().catch(() => ({}));
     const { sito, provincia, ricerca, limite, offset } = body;
     const soloDate = !!body.solo_date_da_sistemare;
+    // 'imp' = i carichi che quell'impianto deve dichiarare; 'stoc' = quelli passati
+    // dal suo piazzale e gia' ripartiti, che dichiara chi li ha ricevuti.
+    const ruoloChiesto = ['imp', 'stoc'].includes(String(body.ruolo || '').trim().toLowerCase()) ? String(body.ruolo).trim().toLowerCase() : null;
     const anno = body.anno ?? body.anno_chiusura;
 
     const norm = normalizzaRagioneSociale;
@@ -137,8 +141,19 @@ export default async function(req) {
       if (p) idPrimarie.add(p);
       if (s) idSecondarie.add(s);
     }
+    // A CHE TITOLO IL CARICO STA SU QUEL SITO. Un'azienda puo' essere impianto e
+    // piazzale insieme: quello che e' passato dal piazzale ed e' ripartito in
+    // secondaria sta come giacenza su chi l'ha ricevuto, e lo dichiara lui. Il
+    // ruolo lo dice la primaria nel gestionale, e si legge qui senza una lettura
+    // in piu' (utente, 08/10/2026).
+    const tipoPrimaria = new Map();
     await Promise.all([
-      leggiOrdini(svc.PrimariaRete, [...idPrimarie], (r) => { formulari.segna(r, 'primaria'); }),
+      leggiOrdini(svc.PrimariaRete, [...idPrimarie], (r) => {
+        formulari.segna(r, 'primaria');
+        const id = String(r.id_ordine || '').trim();
+        const td = String(r.tipo_destinazione || '').trim().toLowerCase();
+        if (id && td) tipoPrimaria.set(id, td.startsWith('stoc') ? 'stoc' : 'imp');
+      }),
       // Le secondarie ACI non portano righe di questo file, che e' della rete.
       leggiOrdini(svc.Secondaria, [...idSecondarie], (r) => { if (!eAci(r)) formulari.segna(r, 'secondaria'); }),
     ]);
@@ -172,6 +187,9 @@ export default async function(req) {
       if (!passaFiltri(r)) continue;
       if (annoNum !== null && annoFine !== annoNum) continue;
       if (soloDate && !date.formulari.length) continue;
+      // Chiesto il ruolo, restano solo le righe di quel titolo: dal pulsante
+      // dell'impianto si vede quello che l'impianto deve dichiarare, e basta.
+      if (ruoloChiesto && ruoloDellaRiga(r, (id) => tipoPrimaria.get(id) || '') !== ruoloChiesto) continue;
       filtrate.push(r);
       dateFiltrate.set(r, date);
       if (!giornoRoma(r.fine_trasporto)) { senzaFineAPortale++; if (date.fine_dal_gestionale) senzaFineDalGestionale++; }

@@ -39,11 +39,13 @@ function fmtData(v) {
 
 const PAGE_SIZE = 100;
 
-export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSito }) {
+export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEsterno, onPulisciFiltroSito }) {
   // Si nasce gia' col filtro che ci hanno passato: arrivando dal pulsante di un
   // impianto nella scheda Situazione, la prima lettura deve essere la sua e non
   // quella di tutti gli ordini.
   const [sito, setSito] = useState(filtroSitoEsterno || '');
+  // 'imp' o 'stoc': arrivando dal pulsante di un sito si guarda un ruolo solo.
+  const [ruolo, setRuolo] = useState(filtroRuoloEsterno || '');
   const [provincia, setProvincia] = useState('');
   const [annoChiusura, setAnnoChiusura] = useState('');
   const [ricerca, setRicerca] = useState('');
@@ -58,9 +60,10 @@ export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSi
   useEffect(() => {
     if (filtroSitoEsterno) {
       setSito(filtroSitoEsterno);
+      setRuolo(filtroRuoloEsterno || '');
       setOffset(0);
     }
-  }, [filtroSitoEsterno]);
+  }, [filtroSitoEsterno, filtroRuoloEsterno]);
 
   const load = useCallback(async () => {
     // Due letture possono essere in volo insieme - una senza filtro e una col
@@ -76,6 +79,7 @@ export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSi
       if (annoChiusura) payload.anno = Number(annoChiusura);
       if (ricerca) payload.ricerca = ricerca;
       if (soloDate) payload.solo_date_da_sistemare = true;
+      if (ruolo) payload.ruolo = ruolo;
       const res = await base44.functions.invoke('getOrdiniDaDichiarare', payload);
       if (!sequenza.valida(mia)) return;
       setData(res.data);
@@ -84,15 +88,16 @@ export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSi
       console.error(e);
     }
     if (sequenza.valida(mia)) setLoading(false);
-  }, [sito, provincia, annoChiusura, ricerca, soloDate, offset, sequenza]);
+  }, [sito, provincia, annoChiusura, ricerca, soloDate, ruolo, offset, sequenza]);
 
   useEffect(() => { load(); }, [load]);
 
   // Reset offset quando cambiano i filtri
-  useEffect(() => { setOffset(0); }, [sito, provincia, annoChiusura, ricerca, soloDate]);
+  useEffect(() => { setOffset(0); }, [sito, provincia, annoChiusura, ricerca, soloDate, ruolo]);
 
   const handlePulisciSito = () => {
     setSito('');
+    setRuolo('');
     onPulisciFiltroSito();
   };
 
@@ -106,6 +111,10 @@ export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSi
       if (annoChiusura) payload.anno = Number(annoChiusura);
       if (ricerca) payload.ricerca = ricerca;
       if (soloDate) payload.solo_date_da_sistemare = true;
+      // L'esportazione porta esattamente quello che si vede: se si guardano i
+      // carichi da dichiarare di un impianto, nel file non finiscono quelli
+      // passati dal suo piazzale e gia' ripartiti (utente, 08/10/2026).
+      if (ruolo) payload.ruolo = ruolo;
       const res = await base44.functions.invoke('getOrdiniDaDichiarare', payload);
       exportDaDichiarareExcel(res.data.righe, res.data.totale_righe, res.data.totale_kg);
     } catch (e) {
@@ -165,19 +174,30 @@ export default function DaDichiarareTable({ filtroSitoEsterno, onPulisciFiltroSi
             className="h-9"
           />
         </div>
-        <label className="flex items-center gap-1.5 text-xs h-9" title="Solo gli ordini il cui formulario, nel gestionale, non ha tutte le date obbligatorie o le ha incoerenti">
+        <label className="flex items-center gap-1.5 text-xs h-9" title="Nel gestionale ogni formulario deve avere tre date: immissione, inizio e fine trasporto, in quest'ordine. Dove ne manca una, o sono incoerenti, il carico non si colloca in nessun mese e non entra in nessuna dichiarazione, mentre il portale lo conta nella sua giacenza. Questa spunta mostra solo quelli, per andarli a correggere.">
           <input type="checkbox" checked={soloDate} onChange={e => setSoloDate(e.target.checked)} />
-          Solo con le date da sistemare
+          Solo quelli col formulario da correggere
         </label>
         <Button variant="outline" size="sm" onClick={handleExport} disabled={loading}>
           <Download className="w-4 h-4 mr-1" /> Esporta Excel
         </Button>
         {sito && (
-          <Button variant="ghost" size="sm" onClick={handlePulisciSito}>
-            Pulisci sito
+          <Button variant="ghost" size="sm" onClick={handlePulisciSito} title="Torna a vedere tutti i siti. Non cancella niente.">
+            Mostra tutti i siti
           </Button>
         )}
       </div>
+      {/* Da dove si arriva conta: col ruolo scelto, il numero del pulsante nella
+          scheda Situazione e questo elenco dicono lo stesso. */}
+      {ruolo && (
+        <div className="text-xs text-muted-foreground">
+          {ruolo === 'imp'
+            ? <>Si vedono solo i carichi che <strong className="text-foreground">{sito}</strong> deve ancora dichiarare come impianto.</>
+            : <>Si vedono solo i carichi passati dal piazzale di <strong className="text-foreground">{sito}</strong> e già ripartiti in secondaria: stanno come giacenza sull&apos;impianto che li ha ricevuti, e li dichiara lui.</>}
+          {' '}
+          <button type="button" className="text-primary underline" onClick={() => setRuolo('')}>mostra tutti e due</button>
+        </div>
+      )}
 
       {/* Conteggio e peso totale */}
       <div className="flex items-center gap-4 text-sm text-muted-foreground">

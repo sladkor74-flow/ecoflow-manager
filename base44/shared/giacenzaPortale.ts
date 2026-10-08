@@ -507,6 +507,29 @@ export function formulariDelFile() {
  *   perGiorno     Map ns impianto -> Map giorno di arrivo -> kg
  *   senzaGiorno   Map ns impianto -> { n, kg, ordini } dei carichi senza un giorno di arrivo
  */
+/**
+ * A CHE TITOLO UNA RIGA DEL FILE STA SU QUEL SITO: 'imp' o 'stoc'.
+ *
+ * Il portale scrive un ordine non dichiarato sotto la destinazione dove il
+ * materiale e' arrivato, ma la stessa azienda puo' essere impianto e piazzale
+ * insieme (T-Cycle lo e'). Le due cose non si somigliano per niente:
+ *  - 'imp'  e' un carico che quell'impianto deve DICHIARARE;
+ *  - 'stoc' e' un carico passato dal piazzale e ripartito in secondaria verso un
+ *    altro impianto: sta come giacenza su chi l'ha ricevuto, e a dichiararlo
+ *    sara' lui. Il portale continua ad attribuirlo al piazzale finche'
+ *    l'impianto non dichiara (regola dell'utente, 08/10/2026).
+ * Se la riga porta gia' una destinazione secondaria, il portale l'ha attribuita
+ * all'impianto che l'ha ricevuta: li' non c'e' dubbio.
+ *
+ * E' la stessa regola che collocaFotografia usa per dividere la fotografia fra
+ * impianti e piazzali: sta scritta qui una volta sola perche' l'elenco «da
+ * dichiarare» e le giacenze non possano dare due numeri diversi.
+ */
+export function ruoloDellaRiga(r, ruoloPrimaria = () => '') {
+  if (String((r && r.destinazione_secondaria) || '').trim()) return 'imp';
+  return ruoloPrimaria(String((r && r.ordine_primaria) || '').trim()) === 'stoc' ? 'stoc' : 'imp';
+}
+
 export function collocaFotografia(nonDichiarati, { chiaveDi = (s) => String(s || '').trim().toLowerCase(), ruoloPrimaria = () => '', secondarie = [], finePrimaria = () => '' } = {}) {
   const somma = (mappa, chiave, valore) => mappa.set(chiave, (mappa.get(chiave) || 0) + valore);
   const fineSecondaria = new Map(); // id della secondaria -> giorno in cui e' arrivata all'impianto
@@ -525,7 +548,7 @@ export function collocaFotografia(nonDichiarati, { chiaveDi = (s) => String(s ||
     const sec = String(r.destinazione_secondaria || '').trim();
     const sito = sec || String(r.destinazione || '').trim();
     const idPrimaria = String(r.ordine_primaria || '').trim();
-    const ruolo = sec ? 'imp' : (ruoloPrimaria(idPrimaria) === 'stoc' ? 'stoc' : 'imp');
+    const ruolo = ruoloDellaRiga(r, ruoloPrimaria);
     const ns = chiaveDi(sito);
     // Il file degli ordini non dichiarati e' della rete: una riga ACI, se mai ci
     // fosse, non entra in una giacenza di rete.

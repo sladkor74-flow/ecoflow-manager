@@ -26,6 +26,8 @@ export default function Giacenze() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('situazione');
   const [filtroSito, setFiltroSito] = useState('');
+  // Un sito puo' essere impianto e piazzale insieme: il pulsante dice quale dei due.
+  const [filtroRuolo, setFiltroRuolo] = useState('');
   const [showTargetManager, setShowTargetManager] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -42,8 +44,9 @@ export default function Giacenze() {
 
   const destinazioni = data ? [...new Set(data.righe.map(r => r.sito))].sort() : [];
 
-  const vaiDaDichiarareConSito = (sito) => {
+  const vaiDaDichiarareConSito = (sito, ruolo) => {
     setFiltroSito(sito);
+    setFiltroRuolo(ruolo || '');
     setTab('dichiarare');
   };
 
@@ -105,7 +108,7 @@ export default function Giacenze() {
             </TabsContent>
 
             <TabsContent value="dichiarare">
-              <DaDichiarareTable filtroSitoEsterno={filtroSito} onPulisciFiltroSito={() => setFiltroSito('')} />
+              <DaDichiarareTable filtroSitoEsterno={filtroSito} filtroRuoloEsterno={filtroRuolo} onPulisciFiltroSito={() => { setFiltroSito(''); setFiltroRuolo(''); }} />
             </TabsContent>
 
             <TabsContent value="derivati">
