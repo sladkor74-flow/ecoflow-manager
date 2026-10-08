@@ -1,49 +1,241 @@
-# AGENTS.md
+# AGENTS.md — TreadRider
 
-## Project Context
+Le istruzioni del gestionale **TreadRider** di SMOCO, sulla piattaforma Base44.
+Qui dentro ci sono due cose, e conviene distinguerle: le **regole di dominio**,
+che il codice deve rispettare sempre, e il **fatto vero** da cui ciascuna nasce,
+con la data. Il fatto non e' un contorno: una regola senza il motivo diventa un
+ordine, e la volta dopo qualcuno la discute, o la ricava da zero e la scrive al
+contrario.
 
-This is a Base44 app repository. Treat it as user-owned application code, keep changes focused on the user's request, and preserve existing project conventions.
+Si legge cosi': **se una modifica viola una regola di questo file e' sbagliata
+anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
 
-Start with `README.md` for local setup, environment variables, and publish workflow.
+## Indice
 
-## Base44 References
+- **Come si lavora in questo repository**
+  - I quattro controlli, prima di ogni commit
+  - Lo stile dei commenti
+  - Commit e push
+  - Gli specchi: `base44/shared` e `src/lib`
+  - I fine-riga
+  - Il limite di richieste della piattaforma (22/09/2026)
+  - Base44: comandi, file e riferimenti
+  - Regole tecniche della piattaforma e delle pagine
+  - Quando la piattaforma modifica il codice da sola
+  - Il nome: TreadRider
+- **Le tre regole assolute**
+  - Le tre regole che l'utente non vuole ripetere (21/09/2026)
+  - Il periodo di un movimento e' la fine del trasporto
+  - Canali indipendenti
+  - Pesi
+  - Come si legge un movimento: un punto solo
+- **Regole della commessa**
+  - Chi conferisce dove
+  - Gli impianti che svuotano la giacenza dell'anno prima
+  - Su quali tonnellate si paga ciascuna prestazione
+  - Le due regole del portale sull'ACI
+  - Il target annuo di un impianto si scrive solo in Target & Status
+  - Le date obbligatorie dei formulari (22/09/2026)
+  - Una riga di un altro periodo si verifica sempre (01/10/2026)
+  - Un numero sbagliato di una lettera non e' due difformita' (01/10/2026)
+  - Le dichiarazioni e il mese di competenza
+  - Decisioni della direzione del 20/09/2026 sulla fatturazione attiva
+- **I moduli e i loro conti**
+  - La predittivita' delle secondarie: un anno, un motore (26/09/2026)
+  - La fatturazione attiva verso Ecotyre
+  - La prefattura del portale in PDF si legge dal suo testo
+  - Il margine
+  - La pratica mensile di Irigom
+  - La Quadratura FIR: il flusso non si indovina dal titolo (30/09/2026)
+    - La parola "gestionale" sulla stampa non siamo noi
+  - La dashboard e l'elenco unico delle cose da gestire
+  - Le attivita' della to-do list che si chiudono da sole (28/09/2026)
+  - EcoTyna: le domande sui dati non sono domande di norma (29/09/2026)
+- **I caricamenti, lo storico e il registro**
+  - Lo storico: si carica solo cio' che serve all'operativita' (25/09/2026)
+  - Il caricamento delle primarie: che cosa si crede e che cosa si ripara (28/09/2026)
+  - Il registro dei caricamenti
+  - I file del Caricamento Dati si sostituiscono (29/09/2026)
+- **I file, la privacy e i permessi**
+  - I documenti aziendali non salgono mai in area pubblica (30/09/2026)
+    - Il `file_uri` e' la chiave del documento: non si manda al browser (05/10/2026)
+    - La piattaforma non cancella i file, e non si prova nemmeno piu'
+    - I link pubblici non restano scritti nei record
+  - La conservazione dei documenti dei fornitori (29/09/2026)
+  - La qualifica dei fornitori
 
-- CLI overview: https://docs.base44.com/developers/references/cli/get-started/overview.md
-- Agent skills: https://docs.base44.com/developers/backend/overview/skills.md
+## Come si lavora in questo repository
 
-If your agent supports Agent Skills, install or update Base44 skills before Base44-specific work:
+### I quattro controlli, prima di ogni commit
+
+Devono passare tutti:
 
 ```bash
-npx skills add base44/skills
+npm run lint          # eslint . --quiet
+npm run prove         # node prove/esegui.mjs: tutte le prove, specchi compresi
+node prove/specchi.mjs
+npx vite build
 ```
 
-## Key Files
+C'e' anche `npm run typecheck` (`tsc -p ./jsconfig.json`), che non e' fra i
+quattro obbligatori. Le prove non sono di cortesia: molte leggono il **sorgente**
+e cadono se una regola scritta in un commento o in questo file se ne va - per
+esempio `prove/fileRiservato.mjs` verifica che AGENTS.md riporti ancora la
+precisazione dell'assistenza sul `file_uri`. Chi cambia una regola aggiunge un
+caso alla prova che la copre.
 
-- `src/`: frontend application source.
-- `src/api/base44Client.js`: frontend Base44 SDK client.
-- `vite.config.js`: Vite config and Base44 Vite plugin setup.
-- `.env.local`: local-only environment values; never commit secrets.
+### Lo stile dei commenti
 
-## Working Notes
+Commenti e messaggi in **italiano senza lettere accentate**: si scrive `e'` al
+posto di «è», `piu'` al posto di «più», `percio'` al posto di «perciò». Un
+commento dice **perche'** una cosa e' fatta cosi' e **il fatto vero da cui nasce
+la regola, con la data**, non che cosa fa la riga sotto: quello si legge dal
+codice. I testi che l'utente **vede a video** sono invece in italiano normale,
+con gli accenti.
 
-- Use `base44 dev` as the default local development command when you need the local Base44 backend. It can run the backend and frontend together.
-- When docs or code mention the frontend being started automatically, that usually means the Base44 project config includes `site.serveCommand`, for example `"serveCommand": "npm run dev"` in `base44/config.jsonc`.
-- Use `npm run dev` only for frontend-only work against the hosted Base44 backend.
-- Prefer the existing Base44 CLI workflow over adding new npm scripts for Base44-specific tasks.
-- Reuse the existing SDK client and Vite plugin patterns before adding new Base44 integration paths.
-- Run the relevant checks from `package.json` before finishing code changes.
-- **Limite di richieste della piattaforma** (22/09/2026): le richieste agli archivi
-  si contano per tutta l'app insieme, su un minuto; oltre, 429 "Rate limit
-  exceeded". Ogni funzione avvolge il client con
-  `conLimiteRichieste(createClientFromRequest(req))` (`base44/shared/limiteRichieste.ts`,
-  specchio in `src/lib`, usato anche da `src/api/base44Client.js`): una richiesta
-  respinta si ripete dopo una pausa, le chiamate a funzione solo su 429. Le
-  letture intere passano da `fetchAll`/`perPagina`/`fetchAllClient`, a pagine da
-  5000 righe (il massimo che la piattaforma restituisce). Niente pagine che
-  rileggono archivi interi a intervalli: si guarda lo stato di cio' che e' in
-  corso, e si rilegge tutto solo quando cambia (`ReportSettimanali.jsx`).
+All'utente si da' del **tu**.
 
-## Il nome: TreadRider
+### Commit e push
+
+Si lavora su `main`, si committa e si pusha; **la pubblicazione la fa l'utente**
+dalla piattaforma. Ogni commit finisce con la riga
+`Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
+
+### Gli specchi: `base44/shared` e `src/lib`
+
+Alcune regole servono sia alle funzioni di server sia alle pagine, e le pagine
+non possono importare da `base44/shared`: di quei moduli esiste uno **specchio**
+in `src/lib`. Le due copie devono restare identiche a meno dell'intestazione di
+commento e delle righe di `import`, e lo controlla `prove/specchi.mjs`. **Una
+modifica si fa uguale in tutti e due i file.**
+
+Nelle librerie di `src/lib` gli import sono **relativi** (`./prodotto.js`), non
+con l'alias `@/`: le prove caricano un modulo da un indirizzo `data:` e ne
+riscrivono gli import, e il caricatore (`prove/dati/libPagine.mjs`) risolve sia
+gli alias sia i relativi. Dentro i componenti l'alias va bene, perche' li' ci
+pensa Vite.
+
+### I fine-riga
+
+Questo file e i sorgenti stanno a **LF**. Modificare un file con uno strumento
+che converte a CRLF rompe le prove che cercano un passaggio esatto nel sorgente:
+una prova che cerca `\n` dice che manca un controllo che invece c'e'.
+
+### Il limite di richieste della piattaforma (22/09/2026)
+
+Le richieste agli archivi si contano **per tutta l'app insieme**, su un minuto;
+oltre, 429 "Rate limit exceeded". Ogni funzione avvolge il client con
+`conLimiteRichieste(createClientFromRequest(req))`
+(`base44/shared/limiteRichieste.ts`, specchio in `src/lib`, usato anche da
+`src/api/base44Client.js`): una richiesta respinta si ripete dopo una pausa, le
+chiamate a funzione solo su 429. Le letture intere passano da
+`fetchAll`/`perPagina`/`fetchAllClient`, a pagine da 5000 righe (il massimo che
+la piattaforma restituisce). Niente pagine che rileggono archivi interi a
+intervalli: si guarda lo stato di cio' che e' in corso, e si rilegge tutto solo
+quando cambia (`ReportSettimanali.jsx`).
+
+**Le pagine di un archivio si leggono in ordine di `id` e si deduplicano**
+(regola di `base44/shared/fetchAll.ts`): `id_ordine` non e' unico, quindi non e'
+stabile fra una pagina e l'altra, e oltre le mille righe i conti escono sbagliati
+senza dirlo.
+
+### Base44: comandi, file e riferimenti
+
+Questo e' un repository di un'app Base44: codice dell'utente, modifiche aderenti
+alla richiesta, convenzioni del progetto rispettate. `README.md` ha
+l'installazione locale, le variabili d'ambiente e il flusso di pubblicazione.
+
+- `base44 dev` e' il comando di sviluppo quando serve il backend Base44 locale:
+  manda su backend e frontend insieme. Quando documentazione o codice dicono che
+  il frontend parte da solo, di solito vuol dire che la configurazione del
+  progetto ha `site.serveCommand`, per esempio `"serveCommand": "npm run dev"` in
+  `base44/config.jsonc`.
+- `npm run dev` **solo** per lavorare sul frontend contro il backend ospitato.
+- `src/`: il frontend. `src/api/base44Client.js`: il client dell'SDK.
+  `vite.config.js`: Vite e il plugin Base44. `.env.local`: valori locali, i
+  segreti non si committano mai.
+- Per un lavoro specifico su Base44 si preferisce il flusso della CLI esistente
+  all'aggiunta di script npm nuovi, e si riusano il client dell'SDK e i modelli
+  del plugin Vite che ci sono gia', invece di aprire una strada nuova.
+- Riferimenti: [CLI](https://docs.base44.com/developers/references/cli/get-started/overview.md),
+  [Agent skills](https://docs.base44.com/developers/backend/overview/skills.md).
+  Se l'agente supporta le Agent Skills, prima di un lavoro specifico su Base44:
+  `npx skills add base44/skills`.
+
+### Regole tecniche della piattaforma e delle pagine
+
+Quattro cose che sono costate ciascuna un guasto vero.
+
+**Nello schema di un'entita' un elenco va dichiarato `"type": "array"`.** Scritto
+come `object` il server rifiuta il dato con `Error in field X: Input should be a
+valid dictionary` e la funzione risponde 500. E' successo per davvero: il
+registro delle esportazioni (`EsportazioneFatturazione.documento_ids`) non ha
+registrato niente dal giorno in cui e' nato, e nessuno se n'era accorto perche'
+il file veniva comunque prodotto. Quando si aggiunge un campo che conterra' un
+elenco lo si dichiara `array` con i suoi `items`, anche se per ora non ci scrive
+nessuno.
+
+**Produrre un file e registrarlo sono due passi distinti.** Il file e' gia' sul
+computer di chi esporta: se la registrazione non riesce non si dice
+"esportazione fallita", si dice che il file c'e' ma non e' finito nello storico.
+E non si usano le finestre di sistema (`alert`, `confirm`) per raccontarlo:
+bloccano la pagina, non si copiano e fanno sembrare rotto cio' che ha funzionato.
+
+**Nei PDF le intestazioni vanno a capo su due righe e le celle fino a tre.**
+Tagliare alla prima riga faceva sparire l'unita' di misura: "Prezzo Unitario
+(Euro/TON)" arrivava come "Prezzo Unitario" mentre nell'Excel c'era tutto. Vale
+per `esportaTabellaPdf` e per `esportaSezioniPdf`; la prova `prove/pdfTabella.mjs`
+rende il PDF in memoria e rilegge le scritte, cosi' il taglio non puo' tornare.
+
+**Quando una pagina carica piu' riquadri indipendenti si usa
+`Promise.allSettled`, non `Promise.all`.** Le funzioni che leggono gli archivi
+grandi ogni tanto cadono: su Terminati Rete bastava `computeRaccoglitoriMix` a
+500 per lasciare vuote anche la matrice per provincia, i tempi di evasione e gli
+alert. Chi non ha risposto si dice per nome, con "Riprova"; il resto resta a
+video.
+
+**Le tabelle larghe** tengono la barra di scorrimento orizzontale sempre a
+portata, l'intestazione e la prima colonna ferme; la regola e' globale, in
+`src/index.css`.
+
+### Quando la piattaforma modifica il codice da sola
+
+La scansione di sicurezza della piattaforma apre commit sul repo da sola, come
+`base44-builder[bot]`. **Vanno letti prima di pubblicare**, perche' tocca le
+regole RLS, cioe' il modello dei permessi, e un errore la' non si vede provando
+col proprio account di amministratore.
+
+Il 01/10/2026 (commit `35f1b3d`, «Apply RLS security recommendations») ha fatto
+tre cose su `RichiestaUtente` ed `EsercitazioneRT`, e solo due erano giuste:
+
+- **Giusta, tenuta:** il filtro in lettura. Con `read: true` il server mandava a
+  ogni utente i record di tutti, e il «vedo solo i miei» era soltanto un filtro
+  nel browser. Tenuto, con due correzioni: la chiave e' `created_by_id`, che
+  riempie la piattaforma, non `richiedente_email`, che scrive il browser e
+  ripiega sulla stringa vuota; e senza il prefisso `data.`, che in tutte le
+  entita' compariva solo la' - lo stesso commit ha scritto `created_by_id` nudo
+  su un'altra entita', quindi una delle due forme e' sbagliata.
+- **Sbagliata, respinta:** `"create": null` su `RichiestaUtente`. Aprire una
+  richiesta e' **l'unica scrittura di un utente non amministratore**: il form si
+  disegna solo quando non e' amministratore, l'amministratore non ha nessun
+  pulsante per creare una richiesta, e il gestionale dice a chi non puo'
+  scrivere «per un caricamento o una correzione apri una richiesta dal modulo
+  Richieste». Con la create chiusa quella frase e' un vicolo chiuso. `null` e'
+  anche l'unico in tutte le entita': qui un divieto si scrive
+  `user_condition role admin`.
+- **Inutile e rischiosa, respinta:** la condizione su `create` legata a
+  `created_by_id`. Non aggiunge difese - quel campo lo mette la piattaforma, non
+  il browser, quindi nessuno puo' intestare un record a un altro - e se il
+  motore la valuta sul payload, dove `created_by_id` non c'e' ancora, ogni
+  creazione fallisce. Su `EsercitazioneRT` voleva dire perdere la prova appena
+  svolta con un «Risultato non salvato».
+
+`prove/scrittureDegliUtenti.mjs` e' la guardia: fallisce se una scansione futura
+richiude quelle `create`, riapre le letture, scrive una regola come `null` o
+reintroduce il prefisso `data.`. **Qual e' la sintassi giusta del campo nelle
+condizioni RLS va chiesto al supporto, non indovinato.**
+
+### Il nome: TreadRider
 
 Il gestionale si chiama **TreadRider** (una parola, T e R maiuscole), scelto
 dall'utente il 02/10/2026. Prima si chiamava "EcoFlow Manager". Battistrada
@@ -87,48 +279,62 @@ si cambiasse in un file solo tornerebbe il doppio avvolgimento del limite di
 richieste (una richiesta respinta ripartirebbe 36 volte invece di 6). Si cambiano
 insieme o non si toccano: non toccarle e' a rischio zero.
 
-## Quando la piattaforma modifica il codice da sola
+## Le tre regole assolute
 
-La scansione di sicurezza della piattaforma apre commit sul repo da sola, come
-`base44-builder[bot]`. **Vanno letti prima di pubblicare**, perche' tocca le
-regole RLS, cioe' il modello dei permessi, e un errore la' non si vede provando
-col proprio account di amministratore.
+### Le tre regole che l'utente non vuole ripetere (21/09/2026)
 
-Il 01/10/2026 (commit `35f1b3d`, «Apply RLS security recommendations») ha fatto
-tre cose su `RichiestaUtente` ed `EsercitazioneRT`, e solo due erano giuste:
+1. **Fine trasporto, MAI chiusura a portale.** In ogni modulo ogni ragionamento
+   - periodo, tagli a una data, confronti con una fotografia del portale,
+   ripieghi quando un campo manca - si fa sulla fine del trasporto.
+   `ordine_chiuso_il` / `data_chiusura` si possono mostrare, mai usare per
+   decidere.
+2. **Ogni caricamento aggiorna tutto.** Un modulo fermo a una fotografia vecchia
+   e' un difetto, non una spiegazione. La giacenza a portale di un impianto e'
+   la fotografia degli ordini non dichiarati **piu'** i carichi che il
+   gestionale conosce e il file no (riconosciuti dal **numero d'ordine** negli
+   ordini non dichiarati e nel report delle dichiarazioni, mai dalla data)
+   **meno** le dichiarazioni caricate dopo la fotografia. Quella di uno
+   stoccaggio e' l'**ancora dell'anno** per classe piu' i movimenti finiti
+   dopo; le letture successive sono il riscontro (`puntoDiPartenza` in
+   `base44/shared/giacenzaStoccaggi.ts`, usato da Giacenze, riconciliazione,
+   predittivita' e riepilogo delle dichiarazioni).
+3. **Rete, ACI ed extra raccolta non si mescolano mai**: giacenze, dichiarazioni,
+   totali, KPI. La rilevazione di uno stoccaggio si divide per classe (1-4 rete,
+   9 ACI); `GiacenzaSito.giacenza_riferimento_t` e' la rete e
+   `giacenza_riferimento_aci_t` l'ACI; l'extra raccolta a portale non c'e'.
 
-- **Giusta, tenuta:** il filtro in lettura. Con `read: true` il server mandava a
-  ogni utente i record di tutti, e il «vedo solo i miei» era soltanto un filtro
-  nel browser. Tenuto, con due correzioni: la chiave e' `created_by_id`, che
-  riempie la piattaforma, non `richiedente_email`, che scrive il browser e
-  ripiega sulla stringa vuota; e senza il prefisso `data.`, che in tutte le
-  entita' compariva solo la' - lo stesso commit ha scritto `created_by_id` nudo
-  su un'altra entita', quindi una delle due forme e' sbagliata.
-- **Sbagliata, respinta:** `"create": null` su `RichiestaUtente`. Aprire una
-  richiesta e' **l'unica scrittura di un utente non amministratore**: il form si
-  disegna solo quando non e' amministratore, l'amministratore non ha nessun
-  pulsante per creare una richiesta, e il gestionale dice a chi non puo'
-  scrivere «per un caricamento o una correzione apri una richiesta dal modulo
-  Richieste». Con la create chiusa quella frase e' un vicolo chiuso. `null` e'
-  anche l'unico in tutte le entita': qui un divieto si scrive
-  `user_condition role admin`.
-- **Inutile e rischiosa, respinta:** la condizione su `create` legata a
-  `created_by_id`. Non aggiunge difese - quel campo lo mette la piattaforma, non
-  il browser, quindi nessuno puo' intestare un record a un altro - e se il
-  motore la valuta sul payload, dove `created_by_id` non c'e' ancora, ogni
-  creazione fallisce. Su `EsercitazioneRT` voleva dire perdere la prova appena
-  svolta con un «Risultato non salvato».
+Il 21/09/2026 gli "scarti" di Green Tyre (24,56 t), Gatim (14,95 t) e T-Cycle
+(11,56 t) erano carichi caricati nel gestionale che la fotografia del 18/09 non
+conteneva ancora: con la regola 2 si aggiungono da soli.
 
-`prove/scrittureDegliUtenti.mjs` e' la guardia: fallisce se una scansione futura
-richiude quelle `create`, riapre le letture, scrive una regola come `null` o
-reintroduce il prefisso `data.`. **Qual e' la sintassi giusta del campo nelle
-condizioni RLS va chiesto al supporto, non indovinato.**
+**Dove la regola 1 e' saltata tre volte, e come si e' chiusa.** Il 28/09/2026 una
+ricognizione su tutto il gestionale ha cercato ogni confronto che usasse l'inizio
+trasporto o la chiusura a portale al posto della fine. Il cuore condiviso era a
+posto (`movimenti.ts`, `filtroPeriodo.ts`, `raccoltoCalculator.ts`, le giacenze, la
+predittivita', la fatturazione): quello che sbagliava era **la lettura dei file
+esterni**, dove il nome della colonna non e' il nostro.
 
-## Regole della commessa
-
-Regole di dominio che il codice deve rispettare sempre. Valgono per ogni nuovo
-conto, filtro, export o assistente: se una modifica le viola, e' sbagliata anche
-quando "funziona".
+- **Report settimanali.** Per un impianto o uno stoccaggio "data carico" e "data
+  ingresso" sono la FINE del trasporto - "carico" e' quello che entra nel loro
+  registro di carico e scarico - ma l'agente che mappa le colonne le classificava
+  come inizio trasporto, e nascevano anomalie su date che nel report non esistono.
+  Regola: **una tabella con una sola colonna di data ha la data del movimento**,
+  in qualunque casella sia arrivata (`riparaColonneData`, `riparaDateRighe` in
+  `base44/shared/reportSettimanali.ts`). A decidere e' la **colonna**, non le
+  righe: con due colonne vere e la casella dell'arrivo vuota, guardare le righe
+  faceva diventare la partenza la data del movimento. Al riconfronto le colonne si
+  leggono dalla lettura salvata (`colonneDateDellaLettura`), e quando una data si
+  legge diversamente si scrive (`nota_date` dell'esito, mostrata nella scheda e
+  nell'Excel).
+- **Prefattura Ecotyre.** La colonna della data si cercava con `/data|trasporto/` e
+  vinceva la prima da sinistra: una "Data chiusura" aggiunta dal portale avrebbe
+  fatto rifiutare la prefattura giusta («e' la prefattura di Agosto», sul file di
+  luglio). Ora si cerca la fine trasporto e si escludono chiusura, immissione e
+  inizio (`INTESTAZIONI` in `base44/shared/prefattura.ts`).
+- **Campi `mese`, `anno`, `settimane` dei record.** Si scrivono da `dataPeriodo` e
+  **non si rileggono mai** per decidere un periodo: si ricalcolano. L'unico punto
+  che preferiva il campo memorizzato (`mese_immissione` in `pivotCalculator.ts`) e'
+  stato tolto.
 
 ### Il periodo di un movimento e' la fine del trasporto
 
@@ -139,9 +345,14 @@ fine del trasporto, e i due non cadono nello stesso mese: contato sul 2026,
 96 primarie di rete su 2.827 (272,65 t), 2 ACI su 44, una secondaria e 65
 terziarie su 99 (2.198,64 t).
 
-Usa `dataPeriodo(record)` da `base44/shared/dataEnrichment.ts`, che incapsula la
-regola. I campi memorizzati possono venire da importazioni vecchie, quando la
-data di riferimento era la chiusura: non fidarsene, ricalcolare.
+Il punto vivo dove la regola e' incapsulata e' **`base44/shared/movimenti.ts`**
+(`giornoMovimento`, `periodoMovimento`, sul giorno italiano; specchio in
+`src/lib/movimenti.js`): vedi "Come si legge un movimento". La stessa regola sta
+scritta anche in `dataPeriodo` di `base44/shared/dataEnrichment.ts`, con i conti
+del 2026, ma **quella funzione non la importa piu' nessuno** (verificato il
+08/10/2026): se la regola cambia, il file da cambiare e' `movimenti.ts`. I campi
+memorizzati possono venire da importazioni vecchie, quando la data di riferimento
+era la chiusura: non fidarsene, ricalcolare.
 
 Non ci sono eccezioni, nemmeno per le giacenze. Il portale aggiorna il suo saldo
 quando chiude l'ordine, giorni dopo il trasporto, ma quella e' una sua abitudine
@@ -208,16 +419,54 @@ Le valutazioni si fanno sul peso effettivo (`peso_effettivo`), mai sullo stimato
 Tonnellate con due decimali, tre se i kg non sono tondi; kg sempre interi;
 ovunque, export compresi.
 
-### Gli impianti che svuotano la giacenza dell'anno prima
+### Come si legge un movimento: un punto solo
 
-Un impianto puo' non essere piu' contrattualizzato nell'anno in corso e avere
-lo stesso movimentazioni e dichiarazioni: deve svuotare la giacenza dell'anno
-precedente, e lo fa con secondarie e terziarie (regola dell'utente, 23/09/2026).
-Nessun modulo che parla di giacenze, dichiarazioni, verifiche o fatturazione puo'
-escludere un sito perche' non ha un contratto quest'anno: si escludono solo dai
-target e dalla predittivita', che sono cose dell'anno in corso. Verificato il
-23/09/2026: INNOREC e PRT compaiono in Giacenze e in Dichiarazioni Impianti con
-le loro righe, pur senza target 2026.
+`base44/shared/movimenti.ts` (specchio per le pagine: `src/lib/movimenti.js`).
+Chi deve decidere se un movimento conta, in che mese e in che canale lo chiede
+li', e non riscrive la regola:
+
+- `eTerminato(r)`: conta solo un movimento terminato;
+- `periodoMovimento(r)`: giorno, anno, mese e settimana ISO dalla **fine del
+  trasporto sul giorno italiano**; `filtraMovimenti(records, { anno, mese, canale })`;
+- `giornoElenco / annoElenco / meseElenco`: per gli elenchi e i loro filtri di
+  giorno, mese e anno, che mostrano anche ordini senza trasporto. Un terminato
+  si colloca solo sulla fine trasporto; un ordine non terminato all'immissione.
+  Un **terminato senza fine trasporto** non ha giorno, mese ne' anno: nessun
+  filtro di periodo lo prende, e la pagina lo conta e lo segnala a parte. Mai la
+  chiusura a portale;
+- `giornoOrdine / annoOrdine / meseOrdine`: ripiegano sull'immissione anche per
+  un terminato senza fine trasporto. **Non** servono agli elenchi: restano solo
+  per chi attribuisce apposta all'anno di immissione il conteggio dei senza fine
+  (per esempio esportazioni, giacenze e qualifica: `grep annoOrdine` dice chi);
+- `canaleMovimento(r, archivio)`: rete, ACI (con `eAci`) o extra raccolta;
+- `eEseguito(r)`: il limbo del portale, dati tutti inseriti e Chiudi non premuto.
+  Non si somma ai terminati, si conta a parte e **si segnala**;
+- `eCancellato(r)` e `motivoCancellazione(r)`: lo stato si confronta per intero, e
+  il motivo si legge in un modo solo ("altro: pdr doppio" diventa "Pdr doppio"),
+  cosi' Evasione Assegnati e la to-do list non lo scrivono in due modi.
+
+Per la **classe e il canale insieme** c'e' `canaleEClasse(r, { aci })` in
+`base44/shared/giacenzaStoccaggi.ts`, con l'invariante **canale ACI se e solo se
+classe ACI**: usa lo stesso `eAci`, cosi' il canale resta quello canonico. Il canale
+lo decide il **materiale**, non l'archivio in cui la riga sta (decisione
+dell'utente, 28/09/2026): una primaria di classe 9 e' ACI anche se si trovasse nei
+Terminati Rete. Oggi non capita - `importaBlocco` rifiuta il blocco il cui archivio
+non torna con `archivioPrimaria` - quindi e' una **rete di sicurezza**, non la
+provenienza normale: non va raccontata a video come se lo fosse. E dove la regola
+vale, vale in **tutte** le colonne della stessa pagina: giacenza, conferito,
+residuo, percentuale del target e segnalazioni sulle date. La stessa riga che e' ACI
+in una colonna e rete in quella accanto e' un difetto, anche se i numeri sembrano
+plausibili.
+
+Anche «oggi» e' il giorno italiano (`oggiRoma()`), non `new Date()` del server.
+Gli specchi in `src/lib` devono restare identici agli originali: lo controlla
+`prove/specchi.mjs`. **Prima di spingere: `npm run lint` e `npm run prove`.**
+
+## Regole della commessa
+
+Regole di dominio che il codice deve rispettare sempre. Valgono per ogni nuovo
+conto, filtro, export o assistente: se una modifica le viola, e' sbagliata anche
+quando "funziona".
 
 ### Chi conferisce dove
 
@@ -236,6 +485,17 @@ destinazione sotto il 5% dei loro viaggi e sotto i cinque viaggi e' sospetta.
 
 Il controllo sta in `base44/shared/rotteConferimenti.ts`, legge le rotte dalla
 storia dell'anno e non ha bisogno che nessuno le scriva a mano.
+
+### Gli impianti che svuotano la giacenza dell'anno prima
+
+Un impianto puo' non essere piu' contrattualizzato nell'anno in corso e avere
+lo stesso movimentazioni e dichiarazioni: deve svuotare la giacenza dell'anno
+precedente, e lo fa con secondarie e terziarie (regola dell'utente, 23/09/2026).
+Nessun modulo che parla di giacenze, dichiarazioni, verifiche o fatturazione puo'
+escludere un sito perche' non ha un contratto quest'anno: si escludono solo dai
+target e dalla predittivita', che sono cose dell'anno in corso. Verificato il
+23/09/2026: INNOREC e PRT compaiono in Giacenze e in Dichiarazioni Impianti con
+le loro righe, pur senza target 2026.
 
 ### Su quali tonnellate si paga ciascuna prestazione
 
@@ -342,6 +602,207 @@ che riparte verso altri impianti seguiti (scelta confermata dall'utente il
 25/09/2026), in ordine di arrivo (27/09/2026): esce prima la giacenza del
 piazzale al 31/12 dell'anno prima, che non si toglie perche' non era nel gia'
 arrivato dell'anno, e solo dopo le primarie dell'anno, in ordine cronologico.
+
+### Il target annuo di un impianto si scrive solo in Target & Status
+
+Il target annuo dell'impianto si scrive **solo in Target & Status**
+(`ImpiantoTargetSecondaria.target`, in kg, per anno) e le Giacenze lo leggono da
+li' (`targetImpiantoDellAnno`: il record attivo di esattamente quell'anno, nessun
+ripiego sugli anni prima). Il target delle primarie di un sito non si scrive: e' la
+somma dei target annui dei raccoglitori di quell'anno legati a quel sito
+(`targetPrimarieDelSito`, `TargetRaccoglitore.impianto`); per chi e' impianto e
+stoccaggio sta sulla riga dell'impianto, perche' il totale non lo conti due volte.
+I vecchi `GiacenzaSito.target_totale_t` e `target_primarie_t` restano nel database
+e non si scrivono piu' (in Giacenze si vedono in sola lettura): servono solo di
+**ripiego di transizione**, quando Target & Status non da' niente, con l'anomalia
+`target_da_portare`. Il pulsante "Porta in Target & Status i target scritti in
+Giacenze" (`portaTargetInTargetStatus`) crea i record che mancano, con
+`segue_predittivita: false`. Il vecchio confronto fra i due (divergenze, alert
+`target_impianto_divergente`, voce della dashboard) non c'e' piu':
+`checkTargetAlerts` chiude soltanto gli alert rimasti aperti. Tutto in
+`base44/shared/targetImpianti.ts` (`targetRigaGiacenze`).
+
+### Le date obbligatorie dei formulari (22/09/2026)
+
+Parole dell'utente: «le date immissione, inizio e fine trasporto sono
+obbligatorie nei formulari, se non ci sono vanno segnalate e questo vale sempre
+dove ci sono ordini terminati non solo nei report settimanali». La regola sta in
+`base44/shared/movimenti.ts` (specchio `src/lib/movimenti.js`):
+`DATE_OBBLIGATORIE`, `dateMancanti`, `dateIncoerenti`, `dateDaSistemare`,
+`testoDate`. Non si riscrive. Quanti sono si conta in **ordini distinti**, mai in
+righe (`chiaveOrdine`, `ordiniDaSistemare`, `mancantiOrdine`, `incoerentiOrdine`,
+`testoOrdine`, `ordineSenzaFine`, nello stesso file): lo stesso ordine sta in
+archivio con piu' righe - una per classe o per prodotto - e contarle tutte
+faceva uscire due numeri diversi per lo stesso insieme (23/09/2026).
+Un terminato senza fine trasporto resta fuori da
+ogni periodo, ma si segnala sempre dicendo quali date mancano; uno con la fine
+trasporto ma senza un'altra data, o con date nell'ordine sbagliato, si conta e si
+segnala lo stesso. Dove si vede:
+
+- **elenchi** (Terminati Rete e ACI, Secondarie, Terziarie, Extra Raccolta): segno
+  sulla riga, avviso per canale, filtro "date da sistemare", colonna negli Excel
+  (componenti in `src/components/primarie-rete/DateDaSistemare.jsx`);
+- **conti**: le funzioni restituiscono `date_da_sistemare` per canale
+  (`riepilogoDate` e `riepilogoDateVista` in
+  `base44/shared/raccoltoCalculator.ts`: `{ totale, senza_fine_trasporto,
+  mancanti, incoerenti, esempi, testo }`), mostrato in Dashboard, matrice
+  province, report mensile, SLA e Target & Status. I report settimanali, le
+  rotte, gli alert ed EcoTyna usano `riepilogoVociDate` di
+  `base44/shared/reportSettimanali.ts`, che conta gli stessi ordini ma risponde
+  `{ ordini, senza_fine, esempi }`: due nomi diversi perche' chi le mostra ne
+  legge una sola forma;
+- **report settimanali**: un formulario registrato senza una data obbligatoria o
+  con date incoerenti e' un'**anomalia** del suo canale e conta nel verdetto
+  (`conformitaPerCanale`), non una rettifica a nostra cura;
+- **alert**: la regola "date obbligatorie" del motore degli alert, per modulo e
+  canale, si apre e si chiude da sola a ogni caricamento (anche delle schede di
+  extra raccolta) e compare nel cruscotto;
+- **giacenze e dichiarazioni**: per soggetto e canale (`formulariDaSistemare` in
+  `base44/shared/giacenzaPortale.ts`); senza fine trasporto un ordine non entra
+  nella giacenza calcolata, e se il portale lo conosce la differenza si dice;
+- **fatturazione** (anomalie per canale), **qualifica**, **richieste ECT**,
+  **evasione assegnati**, **prefattura** ed **EcoTyna**.
+
+Chi la rete non la dichiara per accordo (`dichiara_rete` falso, oggi Tecnogum)
+non ha una giacenza di rete che il portale tenga per noi: i suoi carichi non si
+aggiungono alla fotografia come "non ancora nel file".
+
+### Una riga di un altro periodo si verifica sempre (01/10/2026)
+
+Il fatto: Nappi Sud non aveva messo nel report della sua settimana una richiesta
+terminata del 14 settembre — non ce l'aveva mandata e non l'aveva annotata nel
+suo Excel — e il confronto di quella settimana usciva **perfetto**. La riga e'
+comparsa nel report della settimana dopo, dove il gestionale la scartava come
+«fuori dalla settimana verificata» senza dire niente, in grigio, in fondo, fra
+le righe non considerate. Quando se n'e' accorto l'ufficio registrazioni il
+**termine di dieci giorni dalla data di partenza** era passato, e l'utente si e'
+preso un richiamo per non averlo segnalato.
+
+Parole dell'utente: «tutte le volte che io carico una verifica settimanale ma
+compaiono nell'elenco anche formulari afferenti a settimane precedenti, tu debba
+verificare anch'esse pur se non appartenenti alla specifica settimana in esame e
+rilevare tutte queste anomalie».
+
+La regola vale **in ogni confronto**, settimanale e mensile:
+
+- una riga di un altro periodo **non si scarta mai**. Si confronta, e porta
+  `fuori_settimana { anno, settimana, arretrata }` nei report settimanali
+  (`verificaReport` in `base44/shared/reportSettimanali.ts`), o finisce negli
+  `arretrati` del consuntivo (`confrontaConsuntivo` in
+  `base44/shared/consuntivoFornitore.ts`). Resta fuori solo una riga **senza
+  formulario**, su cui non c'e' niente da registrare;
+- la settimana di una riga abbinata e' quella del **movimento registrato**, non
+  quella che il report scrive: se il report sbaglia la data ma il carico e' della
+  settimana verificata, la riga resta nella quadratura;
+- resta **fuori dalla quadratura** del periodo verificato, dove il gestionale non
+  la colloca (regola 1). Se report e gestionale dicono la stessa settimana e'
+  soltanto un carico vecchio, quindi un'**osservazione** — altrimenti ogni report
+  cumulativo del mese uscirebbe «parziale» per le sue righe a posto. Se le due
+  settimane non coincidono, una delle due date e' sbagliata: **anomalia**;
+- un formulario si cerca su **tutti** i movimenti, non solo nei ventuno giorni
+  intorno alla settimana: di un carico registrato a luglio il gestionale diceva
+  «non presente nel gestionale», che e' una bugia facile da credere;
+- **il termine di registrazione** sta in `base44/shared/termineRegistrazione.ts`
+  (specchio `src/lib/termineRegistrazione.js`): dieci giorni dalla data di
+  partenza, **domeniche escluse**, il giorno della partenza non si conta. Ogni
+  formulario che nel gestionale non risulta porta la sua `scadenza`, in qualunque
+  settimana. Nell'esito salvato non si scrive **niente che dipenda da oggi**:
+  «scaduto da quanto» lo calcolano la scheda e il PDF con `statoTermine`, o ogni
+  verifica risulterebbe cambiata ogni giorno e si riscriverebbe da sola;
+- si vede: alert **critico** nel modulo Verifiche (`REGOLA_ARRETRATI` in
+  `esitoVerifica.ts`, si chiude da solo quando risultano registrati), in testa
+  alla scheda, in una sezione del PDF prima della quadratura, nel foglio Excel
+  «Settimane precedenti», con una pastiglia rossa nell'elenco delle settimane
+  (`arretrati_da_registrare`, `settimane_arretrate`), e nella **storia scritta**,
+  formulario per formulario, perche' al quarantesimo giorno il dettaglio se ne va;
+- dai **registri di carico e scarico** si leggono anche i trenta giorni prima
+  della settimana (`GIORNI_ARRETRATI_DAL_REGISTRO` in `src/lib/verifiche.js`):
+  col filtro alla settimana esatta un carico rimasto indietro non arrivava
+  nemmeno al confronto.
+
+### Un numero sbagliato di una lettera non e' due difformita' (01/10/2026)
+
+Parole dell'utente: «verifica tutte le informazioni contenute in ogni rigo e poi
+confrontale con il nostro gestionale; le cose importanti su cui decidere sono il
+numero del formulario, l'id ordine, ma chi ci invia il report puo' anche
+sbagliare, ad esempio scambiando una lettera o una cifra, pertanto tu fai i
+paragoni con piu' informazioni della stessa riga».
+
+Un identificativo sbagliato di un carattere, confrontato da solo, non produce un
+errore ma **due**: «questo ce lo fattura e noi non l'abbiamo» e «questo l'abbiamo
+noi e lui non lo riporta». Due accuse al posto di una frase, su un documento che
+autorizza una fattura.
+
+- Un numero quasi uguale **non basta**, e un peso uguale **non basta**: si abbina
+  quando il numero e' quasi uguale (formulario entro 2 caratteri, ID ordine entro
+  1) **e almeno un'altra informazione della riga lo conferma** - peso, data,
+  classe, produttore, destinatario, trasportatore. Senza conferme la riga resta
+  una difformita': meglio una difformita' da guardare che un abbinamento
+  inventato. Si dice sempre da che cosa lo si e' riconosciuto.
+- Anche una riga abbinata dal numero **esatto** si controlla in tutto: l'ID
+  ordine e la data sbagliati si dicono comunque.
+- **I nomi non fanno difformita'**: la stessa ditta si scrive in dieci modi, e un
+  elenco di grafie seppellirebbe le differenze vere. Servono a riconoscere e a
+  spiegare. La **classe** si segnala solo se cambia canale (9 = ACI), perche' e'
+  quella che cambia il prezzo.
+- `base44/shared/numeroFir.ts`: `normalizzaFir`, `FORMATO_FIR`, `distanzaFir` e
+  `descriviDifferenzaFir`, che spiega l'errore in italiano («"B" al posto di "P"
+  in posizione 13», «caratteri invertiti», «probabile scambio fra caratteri
+  simili»). Lo usano le verifiche settimanali (`verificaReport`) e i consuntivi
+  (`confrontaConsuntivo`): una regola sola, in un posto solo.
+- I chili tornano, quindi la quadratura delle quantita' resta buona, **ma il
+  verdetto non e' verde**: il riquadro non puo' dirsi a posto mentre sotto c'e'
+  scritto che due numeri sono sbagliati.
+
+### Le dichiarazioni e il mese di competenza
+
+Le dichiarazioni si fanno a consuntivo: i PFU raccolti a luglio, lavorati e usciti
+dall'impianto ad agosto, si dichiarano a settembre. **Il rigo dell'extra raccolta
+sta sul mese del formulario** (fine trasporto), non su quello in cui la
+dichiarazione arriva: altrimenti la stessa raccolta compare due volte, un mese col
+conferito senza dichiarazione e un altro con la dichiarazione senza conferito.
+Quando e con quale dichiarazione e' stata fatta si scrive nella nota.
+
+**Gli stoccaggi non dichiarano** (regola dell'utente, 21/09/2026). Non trattano:
+ricevono i PFU e li rimandano in secondaria, e in quel viaggio sono il
+produttore. La dichiarazione si chiede all'impianto che li riceve, solo dopo il
+secondo viaggio, per rete, ACI ed extra raccolta. Nel modulo Dichiarazioni
+Impianti le secondarie stanno quindi sulla riga dell'impianto di destinazione,
+nel mese in cui arrivano e con scritto da quale stoccaggio; uno stoccaggio ha
+solo entrate, partenze e piazzale (scheda Stoccaggi). Chi e' insieme impianto e
+stoccaggio (Irigom, T-Cycle) si tiene diviso per `tipo_destinazione` del
+movimento: quello che arriva al suo stoccaggio non e' suo da dichiarare.
+
+**Un mese senza dichiarazione puo' essere a posto** (22/09/2026): si segna in
+`DichiarazioneSito.motivo_assenza`, con quantita' a zero. `non_dovuta` quando il
+trattamento di quel canale non e' a nostro carico (la rete di Tecnogum: vale
+anche senza segnarla, con `dichiara_rete` falso in Giacenze); `solo_metalli`
+quando dall'impianto sono usciti solo metalli ferrosi e nessuna gomma (Irigom,
+rete di aprile 2026): a portale non si carica nulla e il ferro si dichiara con
+la prossima uscita di gomma. Nessuno dei due e' un mancante.
+
+### Decisioni della direzione del 20/09/2026 sulla fatturazione attiva
+
+- Nel 2026 a Ecotyre si fattura a **202 euro la tonnellata** sulla **rete** e
+  sull'**extra raccolta**; l'**ACI** ha le sue tariffe per regione. Nei report il
+  prezzo si scrive a tonnellata (la prefattura del portale lo scrive al chilo,
+  0,202: e' lo stesso prezzo).
+- I report per l'amministrazione sono **tre, separati**: rete, ACI, extra
+  raccolta. Le loro colonne non si toccano senza l'assenso dell'amministrazione.
+- La prefattura del portale copre **solo rete e ACI**. L'extra raccolta non e'
+  gestita a portale: il suo report nasce da quello che si scrive a mano nel modulo
+  Extra Raccolta (formulario, prezzo, eventuali sovracosti di raccolta e di
+  lavorazione).
+- Le **terziarie** che il portale paga in prefattura (ordini TER, 8 euro/t con
+  allegato VII, 10 col formulario) restano **fuori** dalla fatturazione attiva:
+  nel confronto stanno in una sezione a parte, pronta per quando servira', e non
+  contano come differenza.
+- Il mese di una prefattura si ricava dal file (date di fine trasporto): caricata
+  sul mese sbagliato viene rifiutata.
+- La fine della programmazione delle secondarie al **18 dicembre vale solo per il
+  2026** (`base44/shared/fineProgrammazione.ts`): per gli altri anni va comunicata.
+
+## I moduli e i loro conti
 
 ### La predittivita' delle secondarie: un anno, un motore (26/09/2026)
 
@@ -508,6 +969,16 @@ colonne si riconoscono dai nomi e gli ordini dalla forma (`ET26084363`). Il PDF 
 legge dal suo testo (vedi piu' sotto), non con un agente. Una prefattura nuova non
 cancella la precedente: la segna superata.
 
+### La prefattura del portale in PDF si legge dal suo testo
+
+**La prefattura in PDF** non la legge un agente: con oltre quattrocento righe si
+rifiuta di restituirle tutte (provato il 20/09/2026). Il browser ne estrae il testo
+con pdf.js (`src/lib/pdfTesto.js`, caricata solo quando serve) e
+`leggiLineePdfPrefattura` lo legge riga per riga. Il PDF porta in testa il
+riepilogo stampato (ordini, chili, euro per classi 1-4 e classe 9) e il mese: se
+le righe lette non sommano quel riepilogo il caricamento viene rifiutato. Sul PDF
+vero di luglio 2026: 416 righe, identiche all'Excel una per una.
+
 ### Il margine
 
 `base44/shared/margine.ts`, funzione `calcolaMargine`, scheda «Margine» della
@@ -518,33 +989,6 @@ funzione `calcolaPassiva` si limita a chiamare), quindi i numeri sono gli stessi
 delle due fatturazioni al centesimo. Tre canali, tre margini, mai un totale. Il
 costo di un mese comprende stoccaggio, trattamento e secondarie di quel mese, che
 possono riguardare tonnellate raccolte prima: il numero che conta e' l'anno.
-
-### Le dichiarazioni e il mese di competenza
-
-Le dichiarazioni si fanno a consuntivo: i PFU raccolti a luglio, lavorati e usciti
-dall'impianto ad agosto, si dichiarano a settembre. **Il rigo dell'extra raccolta
-sta sul mese del formulario** (fine trasporto), non su quello in cui la
-dichiarazione arriva: altrimenti la stessa raccolta compare due volte, un mese col
-conferito senza dichiarazione e un altro con la dichiarazione senza conferito.
-Quando e con quale dichiarazione e' stata fatta si scrive nella nota.
-
-**Gli stoccaggi non dichiarano** (regola dell'utente, 21/09/2026). Non trattano:
-ricevono i PFU e li rimandano in secondaria, e in quel viaggio sono il
-produttore. La dichiarazione si chiede all'impianto che li riceve, solo dopo il
-secondo viaggio, per rete, ACI ed extra raccolta. Nel modulo Dichiarazioni
-Impianti le secondarie stanno quindi sulla riga dell'impianto di destinazione,
-nel mese in cui arrivano e con scritto da quale stoccaggio; uno stoccaggio ha
-solo entrate, partenze e piazzale (scheda Stoccaggi). Chi e' insieme impianto e
-stoccaggio (Irigom, T-Cycle) si tiene diviso per `tipo_destinazione` del
-movimento: quello che arriva al suo stoccaggio non e' suo da dichiarare.
-
-**Un mese senza dichiarazione puo' essere a posto** (22/09/2026): si segna in
-`DichiarazioneSito.motivo_assenza`, con quantita' a zero. `non_dovuta` quando il
-trattamento di quel canale non e' a nostro carico (la rete di Tecnogum: vale
-anche senza segnarla, con `dichiara_rete` falso in Giacenze); `solo_metalli`
-quando dall'impianto sono usciti solo metalli ferrosi e nessuna gomma (Irigom,
-rete di aprile 2026): a portale non si carica nulla e il ferro si dichiara con
-la prossima uscita di gomma. Nessuno dei due e' un mancante.
 
 ### La pratica mensile di Irigom
 
@@ -638,192 +1082,216 @@ quella prova.
 - `docxModello.unisciRun` fonde solo run con lo stesso stile: fonderli tutti
   faceva perdere grassetti e caratteri ai documenti generati.
 
-### Le tre regole che l'utente non vuole ripetere (21/09/2026)
+### La Quadratura FIR: il flusso non si indovina dal titolo (30/09/2026)
 
-1. **Fine trasporto, MAI chiusura a portale.** In ogni modulo ogni ragionamento
-   - periodo, tagli a una data, confronti con una fotografia del portale,
-   ripieghi quando un campo manca - si fa sulla fine del trasporto.
-   `ordine_chiuso_il` / `data_chiusura` si possono mostrare, mai usare per
-   decidere.
-2. **Ogni caricamento aggiorna tutto.** Un modulo fermo a una fotografia vecchia
-   e' un difetto, non una spiegazione. La giacenza a portale di un impianto e'
-   la fotografia degli ordini non dichiarati **piu'** i carichi che il
-   gestionale conosce e il file no (riconosciuti dal **numero d'ordine** negli
-   ordini non dichiarati e nel report delle dichiarazioni, mai dalla data)
-   **meno** le dichiarazioni caricate dopo la fotografia. Quella di uno
-   stoccaggio e' l'**ancora dell'anno** per classe piu' i movimenti finiti
-   dopo; le letture successive sono il riscontro (`puntoDiPartenza` in
-   `base44/shared/giacenzaStoccaggi.ts`, usato da Giacenze, riconciliazione,
-   predittivita' e riepilogo delle dichiarazioni).
-3. **Rete, ACI ed extra raccolta non si mescolano mai**: giacenze, dichiarazioni,
-   totali, KPI. La rilevazione di uno stoccaggio si divide per classe (1-4 rete,
-   9 ACI); `GiacenzaSito.giacenza_riferimento_t` e' la rete e
-   `giacenza_riferimento_aci_t` l'ACI; l'extra raccolta a portale non c'e'.
+Segnalazione dell'utente sulla settimana 39: *"mi hai restituito l'ok per le
+primarie ma non per le secondarie ne' rete ne' aci, inoltre mi parli di extra
+raccolta che non esiste... tutto e' caricato correttamente nel gestionale e se
+faccio i calcoli sul mio vecchio file excel tutto corrisponde"*. Aveva ragione su
+tutta la linea: i numeri erano giusti in ogni passaggio.
 
-Il 21/09/2026 gli "scarti" di Green Tyre (24,56 t), Gatim (14,95 t) e T-Cycle
-(11,56 t) erano carichi caricati nel gestionale che la fotografia del 18/09 non
-conteneva ancora: con la regola 2 si aggiungono da soli.
+**SONO QUATTRO FLUSSI, NON SEI.** Regola sua, testuale: *"le verifiche sono solo
+di questo tipo che ti elenco, sempre in riferimento alla specifica settimana,
+solo negli stati terminati: a) primarie rete b) primarie aci c) secondarie rete
+d) secondarie aci"*. `FLUSSI` e `ORDINE_FLUSSI` in `quadraturaFir.ts` sono quei
+quattro. L'extra raccolta non si quadra con WINSINFO: e' **solo rete, mai ACI**,
+e c'e' solo se in quella settimana il modulo Extra Raccolta ha movimenti
+terminati. Si legge come flusso `informativo` in `FLUSSI_DATI`, non entra in
+nessun confronto a tre fonti, non tocca la conformita' e si dice in una riga
+(`osservazioneExtraRaccolta`) **solo quando c'e' davvero**.
 
-**Dove la regola 1 e' saltata tre volte, e come si e' chiusa.** Il 28/09/2026 una
-ricognizione su tutto il gestionale ha cercato ogni confronto che usasse l'inizio
-trasporto o la chiusura a portale al posto della fine. Il cuore condiviso era a
-posto (`movimenti.ts`, `filtroPeriodo.ts`, `raccoltoCalculator.ts`, le giacenze, la
-predittivita', la fatturazione): quello che sbagliava era **la lettura dei file
-esterni**, dove il nome della colonna non e' il nostro.
+**LE INTESTAZIONI LE RICEVE, NON LE SCRIVE.** Parole sue: *"non le faccio io, a
+me tocca riceverle e controllarle"*. Quindi il flusso **non si deduce dal testo**:
+si propone e si fa confermare. Nella pagina ogni tabella letta ha due menu, fonte
+e flusso, sempre visibili e gia' compilati (scelta sua), e un pulsante che rifa'
+il confronto. `normalizzaLettura` accetta un `flusso` esplicito che vince su
+tutto; sotto viene quello che l'agente ha **letto** (`canale` + `tipo`, due
+domande semplici invece di un indovinello sul titolo), e solo per ultimo
+`flussoDaTitolo`. Il flusso scelto si conserva in `righe_json`, cosi' rifare il
+confronto non torna a indovinare.
 
-- **Report settimanali.** Per un impianto o uno stoccaggio "data carico" e "data
-  ingresso" sono la FINE del trasporto - "carico" e' quello che entra nel loro
-  registro di carico e scarico - ma l'agente che mappa le colonne le classificava
-  come inizio trasporto, e nascevano anomalie su date che nel report non esistono.
-  Regola: **una tabella con una sola colonna di data ha la data del movimento**,
-  in qualunque casella sia arrivata (`riparaColonneData`, `riparaDateRighe` in
-  `base44/shared/reportSettimanali.ts`). A decidere e' la **colonna**, non le
-  righe: con due colonne vere e la casella dell'arrivo vuota, guardare le righe
-  faceva diventare la partenza la data del movimento. Al riconfronto le colonne si
-  leggono dalla lettura salvata (`colonneDateDellaLettura`), e quando una data si
-  legge diversamente si scrive (`nota_date` dell'esito, mostrata nella scheda e
-  nell'Excel).
-- **Prefattura Ecotyre.** La colonna della data si cercava con `/data|trasporto/` e
-  vinceva la prima da sinistra: una "Data chiusura" aggiunta dal portale avrebbe
-  fatto rifiutare la prefattura giusta («e' la prefattura di Agosto», sul file di
-  luglio). Ora si cerca la fine trasporto e si escludono chiusura, immissione e
-  inizio (`INTESTAZIONI` in `base44/shared/prefattura.ts`).
-- **Campi `mese`, `anno`, `settimane` dei record.** Si scrivono da `dataPeriodo` e
-  **non si rileggono mai** per decidere un periodo: si ricalcolano. L'unico punto
-  che preferiva il campo memorizzato (`mese_immissione` in `pivotCalculator.ts`) e'
-  stato tolto.
+**I due difetti che hanno rotto la settimana 39:**
 
-### Una riga di un altro periodo si verifica sempre (01/10/2026)
+1. **La secondarieta' si decide PRIMA del canale.** Il canale veniva letto per
+   primo e `"WINSINFO ECT SEC-ACI"` - le secondarie ACI - finiva fra le
+   **primarie ACI**, dove si scontrava con le primarie ACI vere.
+2. **Il vocabolario cercava `SECOND`.** La stampa scrive `SEC`: `"WIN SEC"` e
+   `"PORTALE ECT SEC"` non erano niente, e le secondarie di rete restavano fuori
+   dal confronto. Ora `\bSEC\b` e `\bSEC[-\s]` valgono secondarie, e
+   `fuoriPerimetro` esce per primo perche' "EXTRA RACCOLTA" contiene RACCOLTA e
+   finirebbe fra le primarie di rete.
 
-Il fatto: Nappi Sud non aveva messo nel report della sua settimana una richiesta
-terminata del 14 settembre — non ce l'aveva mandata e non l'aveva annotata nel
-suo Excel — e il confronto di quella settimana usciva **perfetto**. La riga e'
-comparsa nel report della settimana dopo, dove il gestionale la scartava come
-«fuori dalla settimana verificata» senza dire niente, in grigio, in fondo, fra
-le righe non considerate. Quando se n'e' accorto l'ufficio registrazioni il
-**termine di dieci giorni dalla data di partenza** era passato, e l'utente si e'
-preso un richiamo per non averlo segnalato.
+**NIENTE SPARISCE IN SILENZIO.** `confronta` prendeva le tabelle con un `find`:
+due tabelle sullo stesso flusso e sulla stessa fonte e la seconda spariva senza
+una riga. Ora si contano, si marcano `doppia`, il flusso **non si confronta** e lo
+si dice: sommarle o tenerne una a caso darebbe un numero sbagliato senza dirlo.
+Le tabelle **senza** flusso portano i loro numeri nelle osservazioni ("3
+formulari per 42.480 kg letti e quadranti, ma non ancora attribuiti"), invece di
+sparire mentre il flusso corrispondente dichiarava "Manca nel file": erano due
+affermazioni opposte sugli stessi formulari.
 
-Parole dell'utente: «tutte le volte che io carico una verifica settimanale ma
-compaiono nell'elenco anche formulari afferenti a settimane precedenti, tu debba
-verificare anch'esse pur se non appartenenti alla specifica settimana in esame e
-rilevare tutte queste anomalie».
+**TRE ESITI, TRE FRASI.** `lettura.verificata` era un flag solo e la pagina
+scriveva sempre *"la somma delle righe lette non torna con i totali stampati"*,
+anche quando le somme tornavano al chilo e il motivo era un titolo non
+riconosciuto: si accusava una trascrizione esatta. Ora viaggiano separati
+`totali_quadrano`, `fonti_riconosciute`, `flussi_riconosciuti`, e
+`motivoLetturaNonConfermata` sceglie la frase giusta.
 
-La regola vale **in ogni confronto**, settimanale e mensile:
+**UN FLUSSO CHE LA STAMPA NON COPRE NON E' "DA SISTEMARE".** Le sue celle
+finivano fra gli `incongruenti` e il canale diceva "N righe da sistemare" per un
+confronto che non era mai stato fatto. Ora il flusso porta `fuori_stampa` e le sue
+righe si contano a parte.
 
-- una riga di un altro periodo **non si scarta mai**. Si confronta, e porta
-  `fuori_settimana { anno, settimana, arretrata }` nei report settimanali
-  (`verificaReport` in `base44/shared/reportSettimanali.ts`), o finisce negli
-  `arretrati` del consuntivo (`confrontaConsuntivo` in
-  `base44/shared/consuntivoFornitore.ts`). Resta fuori solo una riga **senza
-  formulario**, su cui non c'e' niente da registrare;
-- la settimana di una riga abbinata e' quella del **movimento registrato**, non
-  quella che il report scrive: se il report sbaglia la data ma il carico e' della
-  settimana verificata, la riga resta nella quadratura;
-- resta **fuori dalla quadratura** del periodo verificato, dove il gestionale non
-  la colloca (regola 1). Se report e gestionale dicono la stessa settimana e'
-  soltanto un carico vecchio, quindi un'**osservazione** — altrimenti ogni report
-  cumulativo del mese uscirebbe «parziale» per le sue righe a posto. Se le due
-  settimane non coincidono, una delle due date e' sbagliata: **anomalia**;
-- un formulario si cerca su **tutti** i movimenti, non solo nei ventuno giorni
-  intorno alla settimana: di un carico registrato a luglio il gestionale diceva
-  «non presente nel gestionale», che e' una bugia facile da credere;
-- **il termine di registrazione** sta in `base44/shared/termineRegistrazione.ts`
-  (specchio `src/lib/termineRegistrazione.js`): dieci giorni dalla data di
-  partenza, **domeniche escluse**, il giorno della partenza non si conta. Ogni
-  formulario che nel gestionale non risulta porta la sua `scadenza`, in qualunque
-  settimana. Nell'esito salvato non si scrive **niente che dipenda da oggi**:
-  «scaduto da quanto» lo calcolano la scheda e il PDF con `statoTermine`, o ogni
-  verifica risulterebbe cambiata ogni giorno e si riscriverebbe da sola;
-- si vede: alert **critico** nel modulo Verifiche (`REGOLA_ARRETRATI` in
-  `esitoVerifica.ts`, si chiude da solo quando risultano registrati), in testa
-  alla scheda, in una sezione del PDF prima della quadratura, nel foglio Excel
-  «Settimane precedenti», con una pastiglia rossa nell'elenco delle settimane
-  (`arretrati_da_registrare`, `settimane_arretrate`), e nella **storia scritta**,
-  formulario per formulario, perche' al quarantesimo giorno il dettaglio se ne va;
-- dai **registri di carico e scarico** si leggono anche i trenta giorni prima
-  della settimana (`GIORNI_ARRETRATI_DAL_REGISTRO` in `src/lib/verifiche.js`):
-  col filtro alla settimana esatta un carico rimasto indietro non arrivava
-  nemmeno al confronto.
+**IL LETTORE EXCEL** sta in `src/lib/pivotQuadratura.js`, senza dipendenze dal
+browser perche' le prove lo possano chiamare. Due cose che non fa piu': prendere
+ogni pivot che trova (sul file vero dell'utente ne leggeva **undici** su sei
+fogli - giacenze, terziarie, richieste da evadere - e una pivot di chili per
+classe usciva come "12920 formulari"; ora una pivot della quadratura deve avere
+due misure, un **conteggio** e un **peso**), e rubare il titolo alla pivot del
+vicino (le pivot settimanali non hanno titolo, hanno "Nr. Settimana | 39": il
+lettore pescava `RACCOLTA` da un'altra colonna e lo stesso titolo finiva sulle
+primarie **e** sulle secondarie, che poi si scontravano). Sul file vero: da 11
+tabelle a 2, quelle giuste.
 
-### Un numero sbagliato di una lettera non e' due difformita' (01/10/2026)
+**LA SETTIMANA LA SCEGLIE L'UTENTE.** *"Anche se il numero della settimana non
+c'e' nel foglio poco importa, saro' io a caricartelo nella settimana giusta"*:
+se sul file non c'e', non si dice niente. Resta il controllo che conta, cioe' il
+file che dichiara una settimana **diversa** da quella aperta.
 
-Parole dell'utente: «verifica tutte le informazioni contenute in ogni rigo e poi
-confrontale con il nostro gestionale; le cose importanti su cui decidere sono il
-numero del formulario, l'id ordine, ma chi ci invia il report puo' anche
-sbagliare, ad esempio scambiando una lettera o una cifra, pertanto tu fai i
-paragoni con piu' informazioni della stessa riga».
+Prove in `prove/quadraturaFirFlussi.mjs`.
 
-Un identificativo sbagliato di un carattere, confrontato da solo, non produce un
-errore ma **due**: «questo ce lo fattura e noi non l'abbiamo» e «questo l'abbiamo
-noi e lui non lo riporta». Due accuse al posto di una frase, su un documento che
-autorizza una fattura.
+#### La parola "gestionale" sulla stampa non siamo noi
 
-- Un numero quasi uguale **non basta**, e un peso uguale **non basta**: si abbina
-  quando il numero e' quasi uguale (formulario entro 2 caratteri, ID ordine entro
-  1) **e almeno un'altra informazione della riga lo conferma** - peso, data,
-  classe, produttore, destinatario, trasportatore. Senza conferme la riga resta
-  una difformita': meglio una difformita' da guardare che un abbinamento
-  inventato. Si dice sempre da che cosa lo si e' riconosciuto.
-- Anche una riga abbinata dal numero **esatto** si controlla in tutto: l'ID
-  ordine e la data sbagliati si dicono comunque.
-- **I nomi non fanno difformita'**: la stessa ditta si scrive in dieci modi, e un
-  elenco di grafie seppellirebbe le differenze vere. Servono a riconoscere e a
-  spiegare. La **classe** si segnala solo se cambia canale (9 = ACI), perche' e'
-  quella che cambia il prezzo.
-- `base44/shared/numeroFir.ts`: `normalizzaFir`, `FORMATO_FIR`, `distanzaFir` e
-  `descriviDifferenzaFir`, che spiega l'errore in italiano («"B" al posto di "P"
-  in posizione 13», «caratteri invertiti», «probabile scambio fra caratteri
-  simili»). Lo usano le verifiche settimanali (`verificaReport`) e i consuntivi
-  (`confrontaConsuntivo`): una regola sola, in un posto solo.
-- I chili tornano, quindi la quadratura delle quantita' resta buona, **ma il
-  verdetto non e' verde**: il riquadro non puo' dirsi a posto mentre sotto c'e'
-  scritto che due numeri sono sbagliati.
+Precisato dall'utente il 30/09/2026: quando una pivot della stampa e' intitolata
+**"GESTIONALE ECT ACI"**, quel "gestionale" e' il **file Excel** di chi manda il
+foglio (`Gestione Ecotyre 2026`), lo strumento su cui loro confrontano il portale
+con quello che estraggono da WINSINFO. Non e' questo gestionale.
 
-### Le date obbligatorie dei formulari (22/09/2026)
+Quindi `"GESTIONALE ECT ACI"` e `"PORTALE ECT SEC"` sono **la stessa fonte**: il
+portale Ecotyre. Le fonti restano tre - WINSINFO, il portale, noi - e la terza
+non compare mai fra le intestazioni della stampa, perche' la calcoliamo qui.
 
-Parole dell'utente: «le date immissione, inizio e fine trasporto sono
-obbligatorie nei formulari, se non ci sono vanno segnalate e questo vale sempre
-dove ci sono ordini terminati non solo nei report settimanali». La regola sta in
-`base44/shared/movimenti.ts` (specchio `src/lib/movimenti.js`):
-`DATE_OBBLIGATORIE`, `dateMancanti`, `dateIncoerenti`, `dateDaSistemare`,
-`testoDate`. Non si riscrive. Quanti sono si conta in **ordini distinti**, mai in
-righe (`chiaveOrdine`, `ordiniDaSistemare`, `mancantiOrdine`, `incoerentiOrdine`,
-`testoOrdine`, `ordineSenzaFine`, nello stesso file): lo stesso ordine sta in
-archivio con piu' righe - una per classe o per prodotto - e contarle tutte
-faceva uscire due numeri diversi per lo stesso insieme (23/09/2026).
-Un terminato senza fine trasporto resta fuori da
-ogni periodo, ma si segnala sempre dicendo quali date mancano; uno con la fine
-trasporto ma senza un'altra data, o con date nell'ordine sbagliato, si conta e si
-segnala lo stesso. Dove si vede:
+Scrivendo testi che l'utente legge, non chiamare mai "il gestionale" una fonte
+esterna: si dice "il portale", "WINSINFO", oppure "il file Excel di chi manda la
+stampa".
 
-- **elenchi** (Terminati Rete e ACI, Secondarie, Terziarie, Extra Raccolta): segno
-  sulla riga, avviso per canale, filtro "date da sistemare", colonna negli Excel
-  (componenti in `src/components/primarie-rete/DateDaSistemare.jsx`);
-- **conti**: le funzioni restituiscono `date_da_sistemare` per canale
-  (`riepilogoDate` e `riepilogoDateVista` in
-  `base44/shared/raccoltoCalculator.ts`: `{ totale, senza_fine_trasporto,
-  mancanti, incoerenti, esempi, testo }`), mostrato in Dashboard, matrice
-  province, report mensile, SLA e Target & Status. I report settimanali, le
-  rotte, gli alert ed EcoTyna usano `riepilogoVociDate` di
-  `base44/shared/reportSettimanali.ts`, che conta gli stessi ordini ma risponde
-  `{ ordini, senza_fine, esempi }`: due nomi diversi perche' chi le mostra ne
-  legge una sola forma;
-- **report settimanali**: un formulario registrato senza una data obbligatoria o
-  con date incoerenti e' un'**anomalia** del suo canale e conta nel verdetto
-  (`conformitaPerCanale`), non una rettifica a nostra cura;
-- **alert**: la regola "date obbligatorie" del motore degli alert, per modulo e
-  canale, si apre e si chiude da sola a ogni caricamento (anche delle schede di
-  extra raccolta) e compare nel cruscotto;
-- **giacenze e dichiarazioni**: per soggetto e canale (`formulariDaSistemare` in
-  `base44/shared/giacenzaPortale.ts`); senza fine trasporto un ordine non entra
-  nella giacenza calcolata, e se il portale lo conosce la differenza si dice;
-- **fatturazione** (anomalie per canale), **qualifica**, **richieste ECT**,
-  **evasione assegnati**, **prefattura** ed **EcoTyna**.
+### La dashboard e l'elenco unico delle cose da gestire
 
-Chi la rete non la dichiara per accordo (`dichiara_rete` falso, oggi Tecnogum)
-non ha una giacenza di rete che il portale tenga per noi: i suoi carichi non si
-aggiungono alla fotografia come "non ancora nel file".
+`base44/shared/cruscotto.ts`, funzione `cruscottoOperativo`, componente
+`src/components/dashboard/Cruscotto.jsx`. Un solo elenco, ordinato per gravita',
+di cio' che richiede attenzione, ogni voce col collegamento a dove si risolve.
+Legge **solo archivi piccoli** (alert, registro dei caricamenti, ordini aperti,
+documenti di fatturazione, prefatture, riepilogo della qualifica,
+richieste del consorzio): chi aggiunge un controllo non deve farle rileggere le
+primarie. Le anomalie di prezzo delle fatturazioni arrivano dal margine, che la
+pagina chiede dopo e solo per l'amministratore. Un controllo nuovo si aggiunge
+li', con un caso in `prove/cruscotto.mjs`.
+
+### Le attivita' della to-do list che si chiudono da sole (28/09/2026)
+
+`base44/shared/todoOrdini.ts` (specchio `src/lib/todoOrdini.js`), la function
+`controllaTodoOrdini`, quinto ricalcolo dopo le primarie.
+
+Sull'attivita' si scrive l'ID dell'ordine da completare. Parole dell'utente:
+«verifica quando essi passano dallo stato assegnato a quello di terminato e **solo
+allora** indicarli come completati».
+
+- **Il passaggio si deve VEDERE, non basta lo stato di adesso.** Il primo controllo
+  di un'attivita' scrive che cosa sta guardando (`ordini_attesi`) e quali di quegli
+  ordini sono ancora aperti (`ordini_da_attendere`), e **non chiude niente**. Si
+  chiude quando quegli ordini risultano terminati. Se l'ordine era **gia' terminato**
+  quando l'attivita' e' comparsa, nessun passaggio e' avvenuto: non si chiude mai da
+  sola, e `notaOrdini` lo dice in testo neutro. Serve perche' `riferimento_ordine`
+  esisteva da prima col significato di "ordine correlato": senza il passaggio, al
+  primo giro si sarebbero chiuse in blocco decine di attivita' vecchie - uscendo
+  dalla vista, che parte dalle aperte - con accanto un motivo vero in se' e falso
+  come spiegazione.
+- Il passaggio si **consuma** anche quando non porta a una chiusura (attivita' gia'
+  spuntata a mano): cosi' una riapertura a mano resta aperta. E chi e' stato chiuso
+  dal gestionale una volta non si richiude (`chiusa_dal_gestionale`): a decidere e'
+  chi lavora.
+- Un ordine **cancellato** non chiude niente e si segnala col motivo; un
+  **"eseguito"** si segnala sempre; un terminato **senza fine trasporto** non conta
+  (regola 1); una fine trasporto **nel futuro** non chiude niente.
+- Un ID che non si trova si dice con tutte le sue cause possibili (scritto male,
+  ordine non ancora caricato, codice che non e' un ordine): mandare a ricaricare un
+  file che c'e' gia' e' una bugia comoda. E se la domanda per numero d'ordine non
+  torna **niente** mentre gli ID ci sono, la function **rinvia** invece di scrivere
+  "non si trova" su ogni attivita'.
+- Il campo `riferimento_ordine` si riscrive solo se l'utente lo ha davvero
+  modificato: confrontare col testo normalizzato faceva diventare "da chiedere a
+  Ecotyre" in "DA, CHIEDERE, A, ECOTYRE" appena si apriva e si chiudeva la casella,
+  e di quel campo non c'e' storico.
+
+### EcoTyna: le domande sui dati non sono domande di norma (29/09/2026)
+
+L'utente si era lamentato: *"ogni volta che chiedo qualcosa ad Ecotyna riguardo la
+commessa non mi risponde in maniera puntuale ... ma e' generica e mi invia link
+presi online"*. Le cause erano quattro, tutte nel modo in cui l'assistente era
+istruita, e sono state misurate sul codice:
+
+1. **La ricerca online non si decide a parole chiave.** `PAROLE_NORMA`
+   (`base44/shared/assistente.ts`) contiene il vocabolario del mestiere
+   (*formulari, classe, trasporto, registro, serve, posso*) e frammenti che si
+   incastrano dentro altre parole (*cer* in "cerca", *adr* in "quadratura"), e la
+   regola `norma: norma || !dati` accendeva la ricerca ogni volta che non
+   riconosceva una parola-dati. Adesso decide il pianificatore con
+   **`serve_normativa`** (`base44/shared/pianoAssistente.ts`): se ha preso i
+   numeri dagli strumenti e dice che la norma non c'entra, non si cerca online e
+   non si caricano le schede del corso RT. Il campo **non e' obbligatorio e la
+   mancanza vale "serve"**: si sbaglia dal lato delle fonti, perche' una risposta
+   normativa senza fonti e' un danno e un link di troppo su un numero e' un
+   fastidio.
+2. **Lo schema senza fonti.** Su una domanda sui dati si usa
+   `SCHEMA_RISPOSTA_DATI`, che non ha i campi `fonti` e `novita_normative`: un
+   campo che c'e' il modello lo riempie, e riempirlo lo porta nel registro del
+   consulente che cita invece che del responsabile tecnico che risponde. E' l'unico
+   modo di spegnere i link alla radice.
+3. **Il prompt a due voci.** Con `soloDati` escono `REGOLE_FONTI`, la regola del
+   controllo online, quella su Normattiva e quella sul corso RT, ed entrano cinque
+   righe (D, D-bis, D-ter, D-quater) su come si risponde a un numero: il numero
+   nella prima riga con la sua etichetta (soggetto, canale, periodo), niente
+   premesse, niente consigli non chiesti. **Le regole che tengono onesti i numeri
+   restano tutte**: i canali che non si sommano, il periodo attaccato
+   all'etichetta, gli elenchi che non si contano a occhio, le date obbligatorie.
+4. **Il nome del fornitore.** `risolviNome`
+   (`base44/shared/normalizzaRagioneSociale.ts`) riconosce il nome scritto come
+   capita: uguale, abbreviazione, contenimento, e il confronto senza spazi perche'
+   togliendo i punti "ECO.GEA" diventa "ecogea". Prima il filtro dentro
+   `movimenti()` pretendeva il nome identico e "Silvano" contro "SILVANO RENATO"
+   dava **zero righe, che uscivano come "ha raccolto 0,00 t"**. Se i nomi che
+   corrispondono sono piu' d'uno **non si sceglie**: si dichiara l'ambiguita' e si
+   chiede il nome per esteso, perche' in archivio ci sono davvero SILVANO RENATO e
+   SILVANO TRASPORTI SRL, e sommarli darebbe un numero che sembra giusto.
+
+**Due regole da non perdere:**
+
+- **Zero non e' "non lo so".** Quando uno strumento non risolve un soggetto,
+  `tonnellate` e `formulari` sono `null`, arriva `avviso_soggetto` e il prompt
+  vieta di scrivere un numero per quel soggetto. Lo stesso vale per il riepilogo:
+  `provaA` registra le letture non riuscite in `guasti`, che finiscono **in cima**
+  al testo, e dove il dato manca si scrive `n/d`, non `0,00 t`.
+- **Un intervallo di mesi si apre tutto.** `mesiChiesti`
+  (`base44/shared/strumentiAssistente.ts`) legge elenchi e intervalli: "da marzo a
+  maggio" sono tre mesi, non due. Un intervallo a cavallo del capodanno non si
+  indovina - invertirlo darebbe undici mesi al posto di tre - e si dice che non si
+  e' capito. Prima "nei mesi di luglio e agosto" diventava in silenzio tutto
+  l'anno.
+- **La riserva degli "eseguito" si dice sempre.** `movimenti()` legge i terminati
+  e, con una lettura sua, gli ordini in stato "eseguito" dello stesso canale,
+  luogo e periodo: `riservaEseguiti` li restituisce in `riserva_eseguiti` e la
+  regola **D-quinquies** del prompt obbliga a dirli in una riga dopo il numero.
+  **Non si sommano al totale** (il raccolto sono i terminati) **e non si
+  tacciono**: un ordine nel limbo e' materiale davvero ritirato, e il 24/09/2026
+  ne bastava uno per far dire 8.164,18 t dove il file diceva 8.167,80. Se quella
+  seconda lettura non riesce, il totale si dice comunque e la riserva si dichiara
+  `lettura_non_riuscita`: e' il totale che non deve mai mentire. I nomi dei
+  raccoglitori si riconoscono sui terminati **e** sugli "eseguito", altrimenti a
+  chi ha solo ordini nel limbo si risponderebbe "non risulta fra i raccoglitori".
+  Vale anche per `target_raccoglitori`, dove la riserva fa sembrare un
+  raccoglitore piu' indietro di quanto sia. Prove in `prove/riservaEseguiti.mjs`.
+
+## I caricamenti, lo storico e il registro
 
 ### Lo storico: si carica solo cio' che serve all'operativita' (25/09/2026)
 
@@ -986,114 +1454,21 @@ function vera e il modulo del browser con un SDK finto e i guasti in mezzo.
   terziarie (`importEcotyreFile` chiama la stessa funzione).
 - **Un caricamento aggiorna i moduli solo se e' riuscito** (`moduliDaRicalcolare`),
   e quando non partono si dice quali restano indietro (`ricalcoliFermi`). I
-  ricalcoli sono **quattro** per le primarie e **due** per le secondarie
-  (`RICALCOLI`): la predittivita' non c'e' piu' dal 26/09/2026, vedi la sua
-  sezione.
+  ricalcoli (`RICALCOLI` in `src/lib/importGrandeFile.js`) sono **cinque** per le
+  primarie - evasione degli assegnati, ritiri delle richieste del consorzio,
+  ordini da completare della to-do list, verifiche e quadrature, qualifica
+  fornitori - **due** per le secondarie e **due** per l'extra raccolta (verifiche
+  e qualifica), e **uno** per il report delle dichiarazioni di trattamento, che
+  allinea le dichiarazioni caricate a portale: l'utente l'ha chiesto il
+  02/10/2026, «dovrebbe farlo in automatico quando carico quei due file». La
+  predittivita' non c'e' piu' dal 26/09/2026, vedi la sua sezione. Erano quattro
+  per le primarie finche' non si e' aggiunta la to-do list (28/09/2026): il
+  numero scritto qui era rimasto indietro, verificato il 08/10/2026.
 - **Le due conferme sono separate** (`CONFERMA_ORDINI_MANCANTI` e
   `CONFERMA_ARCHIVIO_RIMPICCIOLITO`) e si accumulano: possono scattare insieme, e
   mandandone una sola il pulsante "Forza caricamento" girava in tondo. Un collega
   che sta caricando adesso non e' un tentativo morto: glielo si dice subito,
   senza offrirgli niente da forzare.
-
-### Le attivita' della to-do list che si chiudono da sole (28/09/2026)
-
-`base44/shared/todoOrdini.ts` (specchio `src/lib/todoOrdini.js`), la function
-`controllaTodoOrdini`, quinto ricalcolo dopo le primarie.
-
-Sull'attivita' si scrive l'ID dell'ordine da completare. Parole dell'utente:
-«verifica quando essi passano dallo stato assegnato a quello di terminato e **solo
-allora** indicarli come completati».
-
-- **Il passaggio si deve VEDERE, non basta lo stato di adesso.** Il primo controllo
-  di un'attivita' scrive che cosa sta guardando (`ordini_attesi`) e quali di quegli
-  ordini sono ancora aperti (`ordini_da_attendere`), e **non chiude niente**. Si
-  chiude quando quegli ordini risultano terminati. Se l'ordine era **gia' terminato**
-  quando l'attivita' e' comparsa, nessun passaggio e' avvenuto: non si chiude mai da
-  sola, e `notaOrdini` lo dice in testo neutro. Serve perche' `riferimento_ordine`
-  esisteva da prima col significato di "ordine correlato": senza il passaggio, al
-  primo giro si sarebbero chiuse in blocco decine di attivita' vecchie - uscendo
-  dalla vista, che parte dalle aperte - con accanto un motivo vero in se' e falso
-  come spiegazione.
-- Il passaggio si **consuma** anche quando non porta a una chiusura (attivita' gia'
-  spuntata a mano): cosi' una riapertura a mano resta aperta. E chi e' stato chiuso
-  dal gestionale una volta non si richiude (`chiusa_dal_gestionale`): a decidere e'
-  chi lavora.
-- Un ordine **cancellato** non chiude niente e si segnala col motivo; un
-  **"eseguito"** si segnala sempre; un terminato **senza fine trasporto** non conta
-  (regola 1); una fine trasporto **nel futuro** non chiude niente.
-- Un ID che non si trova si dice con tutte le sue cause possibili (scritto male,
-  ordine non ancora caricato, codice che non e' un ordine): mandare a ricaricare un
-  file che c'e' gia' e' una bugia comoda. E se la domanda per numero d'ordine non
-  torna **niente** mentre gli ID ci sono, la function **rinvia** invece di scrivere
-  "non si trova" su ogni attivita'.
-- Il campo `riferimento_ordine` si riscrive solo se l'utente lo ha davvero
-  modificato: confrontare col testo normalizzato faceva diventare "da chiedere a
-  Ecotyre" in "DA, CHIEDERE, A, ECOTYRE" appena si apriva e si chiudeva la casella,
-  e di quel campo non c'e' storico.
-
-### Come si legge un movimento: un punto solo
-
-`base44/shared/movimenti.ts` (specchio per le pagine: `src/lib/movimenti.js`).
-Chi deve decidere se un movimento conta, in che mese e in che canale lo chiede
-li', e non riscrive la regola:
-
-- `eTerminato(r)`: conta solo un movimento terminato;
-- `periodoMovimento(r)`: giorno, anno, mese e settimana ISO dalla **fine del
-  trasporto sul giorno italiano**; `filtraMovimenti(records, { anno, mese, canale })`;
-- `giornoElenco / annoElenco / meseElenco`: per gli elenchi e i loro filtri di
-  giorno, mese e anno, che mostrano anche ordini senza trasporto. Un terminato
-  si colloca solo sulla fine trasporto; un ordine non terminato all'immissione.
-  Un **terminato senza fine trasporto** non ha giorno, mese ne' anno: nessun
-  filtro di periodo lo prende, e la pagina lo conta e lo segnala a parte. Mai la
-  chiusura a portale;
-- `giornoOrdine / annoOrdine / meseOrdine`: ripiegano sull'immissione anche per
-  un terminato senza fine trasporto. **Non** servono agli elenchi: restano solo
-  per chi attribuisce apposta all'anno di immissione il conteggio dei senza fine
-  (per esempio esportazioni, giacenze e qualifica: `grep annoOrdine` dice chi);
-- `canaleMovimento(r, archivio)`: rete, ACI (con `eAci`) o extra raccolta;
-- `eEseguito(r)`: il limbo del portale, dati tutti inseriti e Chiudi non premuto.
-  Non si somma ai terminati, si conta a parte e **si segnala**;
-- `eCancellato(r)` e `motivoCancellazione(r)`: lo stato si confronta per intero, e
-  il motivo si legge in un modo solo ("altro: pdr doppio" diventa "Pdr doppio"),
-  cosi' Evasione Assegnati e la to-do list non lo scrivono in due modi.
-
-Per la **classe e il canale insieme** c'e' `canaleEClasse(r, { aci })` in
-`base44/shared/giacenzaStoccaggi.ts`, con l'invariante **canale ACI se e solo se
-classe ACI**: usa lo stesso `eAci`, cosi' il canale resta quello canonico. Il canale
-lo decide il **materiale**, non l'archivio in cui la riga sta (decisione
-dell'utente, 28/09/2026): una primaria di classe 9 e' ACI anche se si trovasse nei
-Terminati Rete. Oggi non capita - `importaBlocco` rifiuta il blocco il cui archivio
-non torna con `archivioPrimaria` - quindi e' una **rete di sicurezza**, non la
-provenienza normale: non va raccontata a video come se lo fosse. E dove la regola
-vale, vale in **tutte** le colonne della stessa pagina: giacenza, conferito,
-residuo, percentuale del target e segnalazioni sulle date. La stessa riga che e' ACI
-in una colonna e rete in quella accanto e' un difetto, anche se i numeri sembrano
-plausibili.
-
-Anche «oggi» e' il giorno italiano (`oggiRoma()`), non `new Date()` del server.
-Gli specchi in `src/lib` devono restare identici agli originali: lo controlla
-`prove/specchi.mjs`. **Prima di spingere: `npm run lint` e `npm run prove`.**
-
-### Decisioni della direzione del 20/09/2026 sulla fatturazione attiva
-
-- Nel 2026 a Ecotyre si fattura a **202 euro la tonnellata** sulla **rete** e
-  sull'**extra raccolta**; l'**ACI** ha le sue tariffe per regione. Nei report il
-  prezzo si scrive a tonnellata (la prefattura del portale lo scrive al chilo,
-  0,202: e' lo stesso prezzo).
-- I report per l'amministrazione sono **tre, separati**: rete, ACI, extra
-  raccolta. Le loro colonne non si toccano senza l'assenso dell'amministrazione.
-- La prefattura del portale copre **solo rete e ACI**. L'extra raccolta non e'
-  gestita a portale: il suo report nasce da quello che si scrive a mano nel modulo
-  Extra Raccolta (formulario, prezzo, eventuali sovracosti di raccolta e di
-  lavorazione).
-- Le **terziarie** che il portale paga in prefattura (ordini TER, 8 euro/t con
-  allegato VII, 10 col formulario) restano **fuori** dalla fatturazione attiva:
-  nel confronto stanno in una sezione a parte, pronta per quando servira', e non
-  contano come differenza.
-- Il mese di una prefattura si ricava dal file (date di fine trasporto): caricata
-  sul mese sbagliato viene rifiutata.
-- La fine della programmazione delle secondarie al **18 dicembre vale solo per il
-  2026** (`base44/shared/fineProgrammazione.ts`): per gli altri anni va comunicata.
 
 ### Il registro dei caricamenti
 
@@ -1102,230 +1477,6 @@ l'utente; la registrazione finale la chiude. Una riga rimasta `in_corso` e' la
 traccia di un caricamento interrotto (archivio forse incompleto), e blocca per
 dieci minuti un secondo caricamento dello stesso archivio da parte di un altro
 utente. Chi legge «l'ultimo caricamento» esclude `errore` e `in_corso`.
-
-### La dashboard e l'elenco unico delle cose da gestire
-
-`base44/shared/cruscotto.ts`, funzione `cruscottoOperativo`, componente
-`src/components/dashboard/Cruscotto.jsx`. Un solo elenco, ordinato per gravita',
-di cio' che richiede attenzione, ogni voce col collegamento a dove si risolve.
-Legge **solo archivi piccoli** (alert, registro dei caricamenti, ordini aperti,
-documenti di fatturazione, prefatture, riepilogo della qualifica,
-richieste del consorzio): chi aggiunge un controllo non deve farle rileggere le
-primarie. Le anomalie di prezzo delle fatturazioni arrivano dal margine, che la
-pagina chiede dopo e solo per l'amministratore. Un controllo nuovo si aggiunge
-li', con un caso in `prove/cruscotto.mjs`.
-
-Il target annuo dell'impianto si scrive **solo in Target & Status**
-(`ImpiantoTargetSecondaria.target`, in kg, per anno) e le Giacenze lo leggono da
-li' (`targetImpiantoDellAnno`: il record attivo di esattamente quell'anno, nessun
-ripiego sugli anni prima). Il target delle primarie di un sito non si scrive: e' la
-somma dei target annui dei raccoglitori di quell'anno legati a quel sito
-(`targetPrimarieDelSito`, `TargetRaccoglitore.impianto`); per chi e' impianto e
-stoccaggio sta sulla riga dell'impianto, perche' il totale non lo conti due volte.
-I vecchi `GiacenzaSito.target_totale_t` e `target_primarie_t` restano nel database
-e non si scrivono piu' (in Giacenze si vedono in sola lettura): servono solo di
-**ripiego di transizione**, quando Target & Status non da' niente, con l'anomalia
-`target_da_portare`. Il pulsante "Porta in Target & Status i target scritti in
-Giacenze" (`portaTargetInTargetStatus`) crea i record che mancano, con
-`segue_predittivita: false`. Il vecchio confronto fra i due (divergenze, alert
-`target_impianto_divergente`, voce della dashboard) non c'e' piu':
-`checkTargetAlerts` chiude soltanto gli alert rimasti aperti. Tutto in
-`base44/shared/targetImpianti.ts` (`targetRigaGiacenze`).
-
-I contratti passano da generato a inviato a controfirmato, con la data di ogni
-passaggio: un contratto generato non e' un contratto fatto.
-
-**La prefattura in PDF** non la legge un agente: con oltre quattrocento righe si
-rifiuta di restituirle tutte (provato il 20/09/2026). Il browser ne estrae il testo
-con pdf.js (`src/lib/pdfTesto.js`, caricata solo quando serve) e
-`leggiLineePdfPrefattura` lo legge riga per riga. Il PDF porta in testa il
-riepilogo stampato (ordini, chili, euro per classi 1-4 e classe 9) e il mese: se
-le righe lette non sommano quel riepilogo il caricamento viene rifiutato. Sul PDF
-vero di luglio 2026: 416 righe, identiche all'Excel una per una.
-
-**Nello schema un elenco va dichiarato `"type": "array"`.** Scritto come `object`
-il server rifiuta il dato con `Error in field X: Input should be a valid
-dictionary` e la funzione risponde 500. E' successo per davvero: il registro delle
-esportazioni (`EsportazioneFatturazione.documento_ids`) non ha registrato niente
-dal giorno in cui e' nato, e nessuno se n'era accorto perche' il file veniva
-comunque prodotto. Quando si aggiunge un campo che conterra' un elenco lo si
-dichiara `array` con i suoi `items`, anche se per ora non ci scrive nessuno.
-
-**Produrre un file e registrarlo sono due passi distinti.** Il file e' gia' sul
-computer di chi esporta: se la registrazione non riesce non si dice
-"esportazione fallita", si dice che il file c'e' ma non e' finito nello storico.
-E non si usano le finestre di sistema (`alert`, `confirm`) per raccontarlo:
-bloccano la pagina, non si copiano e fanno sembrare rotto cio' che ha funzionato.
-
-**Nei PDF le intestazioni vanno a capo su due righe e le celle fino a tre.**
-Tagliare alla prima riga faceva sparire l'unita' di misura: "Prezzo Unitario
-(Euro/TON)" arrivava come "Prezzo Unitario" mentre nell'Excel c'era tutto. Vale
-per `esportaTabellaPdf` e per `esportaSezioniPdf`; la prova `prove/pdfTabella.mjs`
-rende il PDF in memoria e rilegge le scritte, cosi' il taglio non puo' tornare.
-
-**Quando una pagina carica piu' riquadri indipendenti si usa
-`Promise.allSettled`, non `Promise.all`.** Le funzioni che leggono gli archivi
-grandi ogni tanto cadono: su Terminati Rete bastava `computeRaccoglitoriMix` a
-500 per lasciare vuote anche la matrice per provincia, i tempi di evasione e gli
-alert. Chi non ha risposto si dice per nome, con "Riprova"; il resto resta a
-video.
-
-**Un documento della qualifica si chiede per ruolo oppure a fornitori indicati
-per nome, mai in tutti e due i modi.** Il catalogo nasceva solo per ruolo
-(raccolta, trasporto secondarie, impianto, stoccaggio, cliente): un documento che
-riguarda un fornitore solo — le patenti degli autisti, la CQC, un'autorizzazione
-particolare — andava messo su un ruolo intero e risultava mancante a tutti gli
-altri, sporcando gli alert. Ora `TipoDocumentoQualifica.solo_per_soggetti` porta
-l'elenco `[{ chiave, nome }]`: quando c'e', il documento vale SOLTANTO per quei
-fornitori e i ruoli non contano (`richiestoA` in `base44/shared/qualificaFornitori.ts`).
-La chiave e' la ragione sociale normalizzata, la stessa delle movimentazioni.
-Scadenze, mancanze e non conformita' passano dalla valutazione di sempre, quindi
-gli alert e l'email giornaliera li coprono senza modifiche.
-
-**Una voce intestata a un fornitore che nell'anno non risulta e' un errore
-silenzioso**: nessuno la chiederebbe mai e sembrerebbe tutto a posto.
-`anomalieCatalogo` la segnala, e la segnalazione arriva in tre posti: il riquadro
-rosso in cima al modulo, la dashboard (dal campo `anomalie_catalogo` del
-RiepilogoQualifica, senza rifare la valutazione) e l'email del controllo
-giornaliero, che parte anche quando non c'e' nessun'altra novita'.
-
-**Un DURC non e' una visura e non e' una White List.** Caricare un documento
-valido nella casella sbagliata e' l'errore piu' facile da fare e il piu' difficile
-da vedere. L'agente lo controlla gia', ma il suo e' un giudizio:
-`base44/shared/tipiDocumento.ts` e' la rete di sicurezza che non dipende dal
-modello. Riconosce la famiglia del documento dal nome della casella e dal tipo
-letto nel file, e segnala solo quando riconosce con certezza tutti e due e sono
-diversi. Se anche solo uno dei due non si riconosce non dice niente: meglio un
-controllo in meno che dichiarare sbagliato un documento giusto. Il confronto si
-rifa' anche dentro `statoRequisito`, cosi' vale per i documenti analizzati prima
-che il controllo esistesse, senza doverli rileggere con l'agente.
-
-**Quando il file non si legge si dice, e si dice cosa fare.** `problemiLettura`
-distingue tre casi: il modello dichiara il file illeggibile; il modello dice di
-averlo letto ma non ne ha tirato fuori un solo dato (scansione senza testo, file
-protetto, pagina bianca); il tipo non e' dichiarato. I primi due sono bloccanti,
-quindi il requisito diventa "non conforme" e finisce negli alert, nell'email
-giornaliera e nei conteggi della dashboard. Se invece e' l'analisi a fallire, il
-motivo viaggia insieme allo stato "da verificare" e arriva anche nell'email.
-
-**I 97 documenti caricati dall'archivio nel settembre 2026 non hanno
-`analisi_json`**: furono letti con l'OCR di Windows e scritti a mano, non
-dall'agente. Il controllo sul tipo quindi non li tocca (non c'e' una lettura da
-confrontare) e non produce falsi allarmi. Non si usa `sintesi` come ripiego a
-questo livello: quelle sintesi dicono "trovato nell'archivio contratti" e
-farebbero scattare la famiglia "contratto" su mezzo catalogo.
-
-**Il controllo giornaliero della qualifica non legge i documenti: li valuta.**
-E' la distinzione che ha tenuto nascosto per mesi un quadro falso. Il workflow
-`ControlloQualificaFornitori` (7:30, giorni feriali) ricalcola stati e scadenze e
-manda il promemoria, ma chi legge davvero i file e' l'agente, e l'agente lo
-chiama solo chi carica un documento. I novantasette documenti caricati
-dall'archivio risultavano "analizzati" senza che nessuno li avesse mai letti: il
-report li dava per buoni. Il presidio (`presidioQualifica`, workflow
-`PresidioDocumentiQualifica`, 6:40 dei giorni feriali, cinquanta minuti prima del
-promemoria) chiude il buco: prende fino a sei documenti per giro, nell'ordine in
-cui conviene guardarli - mai letti, letture fallite, letture interrotte da piu'
-di un quarto d'ora, documenti senza scadenza ricavata, letture piu' vecchie di
-sei mesi (`daAnalizzare` in `base44/shared/analisiDocumento.ts`). Non rilegge
-tutto ogni volta: un file non cambia, cambiano le norme e il tempo.
-
-**L'analisi di un documento sta in `base44/shared/analisiDocumento.ts`**, non
-dentro la sua funzione, perche' la usano in due: il pulsante del modulo e il
-presidio. Un documento si controlla allo stesso modo comunque lo si guardi. Chi
-analizza piu' documenti di fila passa `conoscenza` (le voci approvate lette una
-volta sola) invece di rileggerle a ogni giro.
-
-**La rianalisi dei 97 documenti, 21/09/2026**: 5 minuti a blocco di 48, due
-richieste in parallelo, zero errori, circa 194 chiamate al modello. Il piano
-builder ne rinnova 10.000 al mese: il costo di un controllo completo e' un giorno
-di consumo normale. Il quadro vero che ne e' uscito: nessun fornitore
-qualificato, 41 documenti scaduti, 56 mai ricevuti, 29 non conformi, e trentaquattro
-conferme manuali revocate perche' la lettura ha trovato problemi bloccanti.
-
-**Lo spazio dell'archivio: nel gestionale va solo cio' che scade e va
-controllato.** Il contratto firmato si', gli allegati no: standard operativi,
-disciplinari e descrizioni dei servizi non scadono e nessuno li verifica, quindi
-restano nel repository sul computer, dove si leggono quando servono. Per
-riferimento, il 21/09/2026 la cartella `CONTRATTI SUBFORNITORI` pesava 1,4 GB
-mentre i documenti caricati nel gestionale erano 99. Due presidi: al caricamento
-un file oltre 5 MB fa comparire un avviso (quasi sempre e' una scansione a colori
-ad alta risoluzione, che in scala di grigi a 200 dpi pesa un decimo e si legge
-uguale); e `alleggerisciQualifica` toglie il file ai documenti **sostituiti** da
-oltre tre anni, lasciando la scheda - sintesi, scadenza, problemi, motivo della
-sostituzione - che e' la storia del fornitore. Non e' automatico apposta:
-cancellare file e' una decisione, l'amministratore guarda prima l'elenco. Se la
-piattaforma non espone una cancellazione, la funzione si ferma al primo tentativo
-e lo dice, invece di svuotare `file_uri` lasciando i file dov'erano.
-
-### La conservazione dei documenti dei fornitori (29/09/2026)
-
-Richiesta dell'utente, testuale: *"quando carico i documenti dei fornitori, che
-siano report settimanali o mensili a consuntivo o gli ordini assegnati ad inizio
-mese, al fine di non appesantire il dominio, devono automaticamente cancellarsi
-dopo i famosi 40 giorni, ma deve restare il contenuto ovvero la storia scritta
-per poterne fruire in futuro"*.
-
-**I file non sono il problema.** Un Excel o un CSV si legge nel browser e sulla
-piattaforma non sale niente; solo un PDF o un'immagine vengono caricati perche'
-l'agente li legga, e si cancellano subito dopo la lettura. Quello che pesa e' il
-CONTENUTO: righe lette ed esiti riga per riga finiscono in `ContenutoEsteso` a
-pezzi da ottomila caratteri (`base44/shared/testoLungo.ts`).
-
-**La regola, una sola** (`base44/shared/conservazione.ts`): al quarantesimo
-giorno **dal caricamento** — non dalla competenza, o un consuntivo di settembre
-che arriva a novembre nascerebbe scaduto — di un documento se ne vanno le righe
-lette e il confronto riga per riga. **Il record non si cancella**: restano i suoi
-contatori, il verdetto per canale e una **storia scritta** in italiano di poche
-centinaia di caratteri. Prima di questa data le verifiche dei report settimanali
-si cancellavano per intero e le liste degli assegnati dopo due mesi: se ne andava
-proprio la storia che l'utente vuole tenere.
-
-- **A giorni** (`daAlleggerire` + `alleggerisciDocumenti`, workflow notturno alle
-  3:15): `VerificaReport`, `QuadraturaFir`, `ConsuntivoFornitore`.
-- **A mesi** (`alleggerisciVecchi` in `base44/shared/evasioneAssegnatiDati.ts`):
-  `ListaAssegnati` e `ControlloEvasione`, perche' il controllo dell'evasione
-  lavora ancora sulle liste del mese in corso e di quello prima. Due padroni
-  della stessa cancellazione sarebbero un bug: qui i quaranta giorni non si
-  aggiungono, si coordinano.
-- **Subito**, senza aspettare i quaranta giorni
-  (`alleggerisciControlliSuperati`): i `ControlloEvasione` **superati**. Ogni
-  caricamento delle primarie ne deposita uno nuovo per ogni lista, col dettaglio
-  di ogni richiesta: era la voce piu' pesante di tutto l'archivio. Di ogni lista
-  resta per esteso l'ultimo. Vale la regola generale del gestionale: vale il piu'
-  recente, il superato resta nello storico.
-
-**La storia sta in un campo normale** (`storia`), mai scritto con `valoreCampo`:
-sopra gli ottomila caratteri tornerebbe in `ContenutoEsteso`, cioe' il peso che
-si e' appena tolto. Per questo `tagliaStoria` taglia a 4000 e lo dice. La storia
-**non contiene costi**: il record lo legge chiunque (`rls read: true`) e la
-fatturazione passiva e' riservata all'amministratore, quindi `storiaConsuntivo`
-riporta chili e formulari ma non l'importo previsto ne' gli scarti in euro.
-Le storie non sommano mai i canali (regola 3) e i pesi seguono `formatoKg`.
-
-**Tre cose da non rompere:**
-
-1. **L'ordine di `togliIlDettaglio`**: prima si svuotano i campi e si scrive la
-   storia, poi si cancellano le parti in `ContenutoEsteso`, e il giorno
-   (`alleggerito_il`) si segna per ULTIMO. Al contrario, nel campo resterebbe il
-   segnaposto `@parti:N` senza le parti e `leggiCampo` lancerebbe: non un campo
-   vuoto, un campo rotto. Un alleggerimento interrotto si riconosce dai campi
-   vuoti con la storia scritta e senza il giorno, e `daAlleggerire` lo riprende:
-   senza quella ripresa le parti pesanti resterebbero in archivio per sempre,
-   perche' si cancellano per record e il record non le nomina piu'. Al secondo
-   passaggio la storia **non si riscrive**, o diventerebbe povera.
-2. **Un documento senza dettaglio non si riconfronta e non si esporta.**
-   `daRiconfrontare` esclude gli alleggeriti (una dichiarazione di nessuna
-   movimentazione non ha righe per definizione e senza quella esclusione si
-   rigonfierebbe), `senzaRighe` esclude le liste senza righe da `eseguiControlli`
-   e da `altreListe`, e i pulsanti PDF/Excel si spengono con una guardia anche
-   dentro `scarica`: un PDF che va all'impianto col verdetto giusto e zero
-   formulari dentro e' una bugia coerente, il peggio.
-3. **Il motivo si scrive vero.** `nota(oggi, motivo)`: quaranta giorni, mese
-   chiuso, lista piu' recente, superato dal controllo del giorno X. Scrivere
-   "caricato da oltre quaranta giorni" su un controllo superato in giornata
-   sarebbe una bugia che resta in archivio per sempre.
-
-Ricaricare il file azzera `alleggerito_il` e `storia`: il documento torna intero.
 
 ### I file del Caricamento Dati si sostituiscono (29/09/2026)
 
@@ -1373,201 +1524,7 @@ richieste ECT invece saliva e il suo indirizzo non veniva salvato da nessuna
 parte: ora `importaRichiesteEct` lo cancella appena l'ha letto, perche' dopo
 nessuno saprebbe piu' che esiste.
 
-#### Verificato il 30/09/2026: la piattaforma NON cancella i file
-
-Letto nell'alert del gestionale (Alert & Engine → `archivio-file`): le tre
-operazioni esistono nell'SDK e **ognuna risponde `Method Not Allowed`**. 59 file
-sono rimasti. Quindi:
-
-- **La sostituzione dei file non puo' funzionare** finche' la piattaforma non
-  abilita la cancellazione. Il record del registro perde `file_url` solo se il
-  file se ne va davvero, quindi non si e' creata nessuna bugia: l'archivio dice
-  il vero, e' lo spazio che non si libera.
-- **Il rifiuto dell'operazione e' diverso dal fallimento di un file**, e si
-  distinguono: `cancellaFile` restituisce `negata` quando **tutte** le operazioni
-  disponibili sono state rifiutate in quanto operazioni (`Method Not Allowed`,
-  `501`, `not supported`), e basta **un** fallimento di altro genere perche' si
-  resti prudenti e si riprovi. Smettere per sbaglio vorrebbe dire non cancellare
-  mai piu'.
-- **Quando il rifiuto e' dell'operazione si smette al primo tentativo**, in tutti
-  e tre i punti che cancellano (i documenti a 40 giorni, la sostituzione al
-  caricamento, l'arretrato notturno). Ripeterlo su ogni file costava tre
-  richieste a vuoto per file - con 59 file, 177 richieste contro il limite al
-  minuto di **tutta** l'app - e l'esito non cambiava.
-- **L'alert ha tre frasi, non due**: operazioni assenti, operazioni rifiutate,
-  fallimenti di passaggio. Prima il caso vero cadeva nel terzo e l'avviso diceva
-  *"il gestionale riprova da solo alla prossima pulizia notturna"*, cioe'
-  prometteva un ritentativo che non puo' riuscire. Il numero nel titolo e' quello
-  dei file che **restano** (`bloccati`), non quello dei tentativi fatti:
-  smettendo al primo, i tentativi sono uno.
-
-**L'alleggerimento a 40 giorni continua a funzionare**, perche' li' se ne va il
-TESTO (i campi pesanti e le parti in `ContenutoEsteso`), non il file: verificato a
-video il 30/09/2026, la colonna "Dettaglio fino al" delle Verifiche dice 07/11 e
-08/11 e le pagine Verifiche e Verifiche Fornitori funzionano. Il peso vero erano
-quei testi e gli Excel del portale; i file allegati sono un extra che non dipende
-da noi. Da chiedere all'assistenza della piattaforma.
-
-### EcoTyna: le domande sui dati non sono domande di norma (29/09/2026)
-
-L'utente si era lamentato: *"ogni volta che chiedo qualcosa ad Ecotyna riguardo la
-commessa non mi risponde in maniera puntuale ... ma e' generica e mi invia link
-presi online"*. Le cause erano quattro, tutte nel modo in cui l'assistente era
-istruita, e sono state misurate sul codice:
-
-1. **La ricerca online non si decide a parole chiave.** `PAROLE_NORMA`
-   (`base44/shared/assistente.ts`) contiene il vocabolario del mestiere
-   (*formulari, classe, trasporto, registro, serve, posso*) e frammenti che si
-   incastrano dentro altre parole (*cer* in "cerca", *adr* in "quadratura"), e la
-   regola `norma: norma || !dati` accendeva la ricerca ogni volta che non
-   riconosceva una parola-dati. Adesso decide il pianificatore con
-   **`serve_normativa`** (`base44/shared/pianoAssistente.ts`): se ha preso i
-   numeri dagli strumenti e dice che la norma non c'entra, non si cerca online e
-   non si caricano le schede del corso RT. Il campo **non e' obbligatorio e la
-   mancanza vale "serve"**: si sbaglia dal lato delle fonti, perche' una risposta
-   normativa senza fonti e' un danno e un link di troppo su un numero e' un
-   fastidio.
-2. **Lo schema senza fonti.** Su una domanda sui dati si usa
-   `SCHEMA_RISPOSTA_DATI`, che non ha i campi `fonti` e `novita_normative`: un
-   campo che c'e' il modello lo riempie, e riempirlo lo porta nel registro del
-   consulente che cita invece che del responsabile tecnico che risponde. E' l'unico
-   modo di spegnere i link alla radice.
-3. **Il prompt a due voci.** Con `soloDati` escono `REGOLE_FONTI`, la regola del
-   controllo online, quella su Normattiva e quella sul corso RT, ed entrano cinque
-   righe (D, D-bis, D-ter, D-quater) su come si risponde a un numero: il numero
-   nella prima riga con la sua etichetta (soggetto, canale, periodo), niente
-   premesse, niente consigli non chiesti. **Le regole che tengono onesti i numeri
-   restano tutte**: i canali che non si sommano, il periodo attaccato
-   all'etichetta, gli elenchi che non si contano a occhio, le date obbligatorie.
-4. **Il nome del fornitore.** `risolviNome`
-   (`base44/shared/normalizzaRagioneSociale.ts`) riconosce il nome scritto come
-   capita: uguale, abbreviazione, contenimento, e il confronto senza spazi perche'
-   togliendo i punti "ECO.GEA" diventa "ecogea". Prima il filtro dentro
-   `movimenti()` pretendeva il nome identico e "Silvano" contro "SILVANO RENATO"
-   dava **zero righe, che uscivano come "ha raccolto 0,00 t"**. Se i nomi che
-   corrispondono sono piu' d'uno **non si sceglie**: si dichiara l'ambiguita' e si
-   chiede il nome per esteso, perche' in archivio ci sono davvero SILVANO RENATO e
-   SILVANO TRASPORTI SRL, e sommarli darebbe un numero che sembra giusto.
-
-**Due regole da non perdere:**
-
-- **Zero non e' "non lo so".** Quando uno strumento non risolve un soggetto,
-  `tonnellate` e `formulari` sono `null`, arriva `avviso_soggetto` e il prompt
-  vieta di scrivere un numero per quel soggetto. Lo stesso vale per il riepilogo:
-  `provaA` registra le letture non riuscite in `guasti`, che finiscono **in cima**
-  al testo, e dove il dato manca si scrive `n/d`, non `0,00 t`.
-- **Un intervallo di mesi si apre tutto.** `mesiChiesti`
-  (`base44/shared/strumentiAssistente.ts`) legge elenchi e intervalli: "da marzo a
-  maggio" sono tre mesi, non due. Un intervallo a cavallo del capodanno non si
-  indovina - invertirlo darebbe undici mesi al posto di tre - e si dice che non si
-  e' capito. Prima "nei mesi di luglio e agosto" diventava in silenzio tutto
-  l'anno.
-- **La riserva degli "eseguito" si dice sempre.** `movimenti()` legge i terminati
-  e, con una lettura sua, gli ordini in stato "eseguito" dello stesso canale,
-  luogo e periodo: `riservaEseguiti` li restituisce in `riserva_eseguiti` e la
-  regola **D-quinquies** del prompt obbliga a dirli in una riga dopo il numero.
-  **Non si sommano al totale** (il raccolto sono i terminati) **e non si
-  tacciono**: un ordine nel limbo e' materiale davvero ritirato, e il 24/09/2026
-  ne bastava uno per far dire 8.164,18 t dove il file diceva 8.167,80. Se quella
-  seconda lettura non riesce, il totale si dice comunque e la riserva si dichiara
-  `lettura_non_riuscita`: e' il totale che non deve mai mentire. I nomi dei
-  raccoglitori si riconoscono sui terminati **e** sugli "eseguito", altrimenti a
-  chi ha solo ordini nel limbo si risponderebbe "non risulta fra i raccoglitori".
-  Vale anche per `target_raccoglitori`, dove la riserva fa sembrare un
-  raccoglitore piu' indietro di quanto sia. Prove in `prove/riservaEseguiti.mjs`.
-
-### La Quadratura FIR: il flusso non si indovina dal titolo (30/09/2026)
-
-Segnalazione dell'utente sulla settimana 39: *"mi hai restituito l'ok per le
-primarie ma non per le secondarie ne' rete ne' aci, inoltre mi parli di extra
-raccolta che non esiste... tutto e' caricato correttamente nel gestionale e se
-faccio i calcoli sul mio vecchio file excel tutto corrisponde"*. Aveva ragione su
-tutta la linea: i numeri erano giusti in ogni passaggio.
-
-**SONO QUATTRO FLUSSI, NON SEI.** Regola sua, testuale: *"le verifiche sono solo
-di questo tipo che ti elenco, sempre in riferimento alla specifica settimana,
-solo negli stati terminati: a) primarie rete b) primarie aci c) secondarie rete
-d) secondarie aci"*. `FLUSSI` e `ORDINE_FLUSSI` in `quadraturaFir.ts` sono quei
-quattro. L'extra raccolta non si quadra con WINSINFO: e' **solo rete, mai ACI**,
-e c'e' solo se in quella settimana il modulo Extra Raccolta ha movimenti
-terminati. Si legge come flusso `informativo` in `FLUSSI_DATI`, non entra in
-nessun confronto a tre fonti, non tocca la conformita' e si dice in una riga
-(`osservazioneExtraRaccolta`) **solo quando c'e' davvero**.
-
-**LE INTESTAZIONI LE RICEVE, NON LE SCRIVE.** Parole sue: *"non le faccio io, a
-me tocca riceverle e controllarle"*. Quindi il flusso **non si deduce dal testo**:
-si propone e si fa confermare. Nella pagina ogni tabella letta ha due menu, fonte
-e flusso, sempre visibili e gia' compilati (scelta sua), e un pulsante che rifa'
-il confronto. `normalizzaLettura` accetta un `flusso` esplicito che vince su
-tutto; sotto viene quello che l'agente ha **letto** (`canale` + `tipo`, due
-domande semplici invece di un indovinello sul titolo), e solo per ultimo
-`flussoDaTitolo`. Il flusso scelto si conserva in `righe_json`, cosi' rifare il
-confronto non torna a indovinare.
-
-**I due difetti che hanno rotto la settimana 39:**
-
-1. **La secondarieta' si decide PRIMA del canale.** Il canale veniva letto per
-   primo e `"WINSINFO ECT SEC-ACI"` - le secondarie ACI - finiva fra le
-   **primarie ACI**, dove si scontrava con le primarie ACI vere.
-2. **Il vocabolario cercava `SECOND`.** La stampa scrive `SEC`: `"WIN SEC"` e
-   `"PORTALE ECT SEC"` non erano niente, e le secondarie di rete restavano fuori
-   dal confronto. Ora `\bSEC\b` e `\bSEC[-\s]` valgono secondarie, e
-   `fuoriPerimetro` esce per primo perche' "EXTRA RACCOLTA" contiene RACCOLTA e
-   finirebbe fra le primarie di rete.
-
-**NIENTE SPARISCE IN SILENZIO.** `confronta` prendeva le tabelle con un `find`:
-due tabelle sullo stesso flusso e sulla stessa fonte e la seconda spariva senza
-una riga. Ora si contano, si marcano `doppia`, il flusso **non si confronta** e lo
-si dice: sommarle o tenerne una a caso darebbe un numero sbagliato senza dirlo.
-Le tabelle **senza** flusso portano i loro numeri nelle osservazioni ("3
-formulari per 42.480 kg letti e quadranti, ma non ancora attribuiti"), invece di
-sparire mentre il flusso corrispondente dichiarava "Manca nel file": erano due
-affermazioni opposte sugli stessi formulari.
-
-**TRE ESITI, TRE FRASI.** `lettura.verificata` era un flag solo e la pagina
-scriveva sempre *"la somma delle righe lette non torna con i totali stampati"*,
-anche quando le somme tornavano al chilo e il motivo era un titolo non
-riconosciuto: si accusava una trascrizione esatta. Ora viaggiano separati
-`totali_quadrano`, `fonti_riconosciute`, `flussi_riconosciuti`, e
-`motivoLetturaNonConfermata` sceglie la frase giusta.
-
-**UN FLUSSO CHE LA STAMPA NON COPRE NON E' "DA SISTEMARE".** Le sue celle
-finivano fra gli `incongruenti` e il canale diceva "N righe da sistemare" per un
-confronto che non era mai stato fatto. Ora il flusso porta `fuori_stampa` e le sue
-righe si contano a parte.
-
-**IL LETTORE EXCEL** sta in `src/lib/pivotQuadratura.js`, senza dipendenze dal
-browser perche' le prove lo possano chiamare. Due cose che non fa piu': prendere
-ogni pivot che trova (sul file vero dell'utente ne leggeva **undici** su sei
-fogli - giacenze, terziarie, richieste da evadere - e una pivot di chili per
-classe usciva come "12920 formulari"; ora una pivot della quadratura deve avere
-due misure, un **conteggio** e un **peso**), e rubare il titolo alla pivot del
-vicino (le pivot settimanali non hanno titolo, hanno "Nr. Settimana | 39": il
-lettore pescava `RACCOLTA` da un'altra colonna e lo stesso titolo finiva sulle
-primarie **e** sulle secondarie, che poi si scontravano). Sul file vero: da 11
-tabelle a 2, quelle giuste.
-
-**LA SETTIMANA LA SCEGLIE L'UTENTE.** *"Anche se il numero della settimana non
-c'e' nel foglio poco importa, saro' io a caricartelo nella settimana giusta"*:
-se sul file non c'e', non si dice niente. Resta il controllo che conta, cioe' il
-file che dichiara una settimana **diversa** da quella aperta.
-
-Prove in `prove/quadraturaFirFlussi.mjs`.
-
-#### La parola "gestionale" sulla stampa non siamo noi
-
-Precisato dall'utente il 30/09/2026: quando una pivot della stampa e' intitolata
-**"GESTIONALE ECT ACI"**, quel "gestionale" e' il **file Excel** di chi manda il
-foglio (`Gestione Ecotyre 2026`), lo strumento su cui loro confrontano il portale
-con quello che estraggono da WINSINFO. Non e' questo gestionale.
-
-Quindi `"GESTIONALE ECT ACI"` e `"PORTALE ECT SEC"` sono **la stessa fonte**: il
-portale Ecotyre. Le fonti restano tre - WINSINFO, il portale, noi - e la terza
-non compare mai fra le intestazioni della stampa, perche' la calcoliamo qui.
-
-Scrivendo testi che l'utente legge, non chiamare mai "il gestionale" una fonte
-esterna: si dice "il portale", "WINSINFO", oppure "il file Excel di chi manda la
-stampa".
+## I file, la privacy e i permessi
 
 ### I documenti aziendali non salgono mai in area pubblica (30/09/2026)
 
@@ -1691,14 +1648,28 @@ riferimento che non arriva a chi non deve aprire quel documento**: il permesso d
 chi puo' far firmare la piattaforma non lo controlla (vedi sopra, 05/10/2026), lo
 controlla `apriFile`.
 
-#### Cancellare un file non si puo': non si prova nemmeno piu'
+#### La piattaforma non cancella i file, e non si prova nemmeno piu'
 
-`cancellaFile` non chiama piu' niente e restituisce **sempre** `riuscita: false`.
-Non e' pigrizia: ogni tentativo costava **tre richieste a vuoto per file** contro
-il limite al minuto di tutta l'app - nove a ogni domanda con allegati fatta a
-EcoTyna, sei a ogni caricamento, tre a ogni quadratura - e non poteva riuscire.
-Il vecchio tentativo resta come `provaACancellare`, che non chiama nessuno, per
-il giorno in cui la piattaforma aggiungesse davvero l'operazione.
+Verificato il 30/09/2026 nell'alert del gestionale (Alert & Engine →
+`archivio-file`): le tre operazioni esistono nell'SDK e **ognuna risponde
+`Method Not Allowed`**. 59 file sono rimasti.
+
+`cancellaFile` percio' **non chiama piu' niente** e restituisce **sempre**
+`riuscita: false`. Non e' pigrizia: ogni tentativo costava **tre richieste a
+vuoto per file** contro il limite al minuto di tutta l'app - nove a ogni domanda
+con allegati fatta a EcoTyna, sei a ogni caricamento, tre a ogni quadratura - e
+non poteva riuscire. Il vecchio tentativo resta come `provaACancellare`, che non
+chiama nessuno, per il giorno in cui la piattaforma aggiungesse davvero
+l'operazione; li' dentro vive ancora la distinzione fra **il rifiuto
+dell'operazione e il fallimento di un file**: `negata` quando **tutte** le
+operazioni disponibili sono state rifiutate in quanto operazioni (`Method Not
+Allowed`, `501`, `not supported`), mentre basta **un** fallimento di altro genere
+perche' si resti prudenti e si riprovi. Smettere per sbaglio vorrebbe dire non
+cancellare mai piu'. E quando il rifiuto e' dell'operazione si smette al primo
+tentativo, in tutti e tre i punti che cancellano (i documenti a 40 giorni, la
+sostituzione al caricamento, l'arretrato notturno): ripeterlo su ogni file, con
+59 file, erano 177 richieste contro il limite di **tutta** l'app, e l'esito non
+cambiava.
 
 **Il punto da non toccare mai**: sette punti del gestionale decidono su quel
 `riuscita` se svuotare il riferimento al file sul record. Se `cancellaFile`
@@ -1722,7 +1693,25 @@ pannello che non ce l'ha, niente spazio che cresce verso un limite che non
 esiste. Dice: la piattaforma non sa cancellare, i dati e la storia scritta sono
 al loro posto, **i file pubblici vanno fatti rimuovere per primi**, l'elenco si
 scarica da Caricamento Dati, e l'avviso **non si chiude da solo** perche' solo
-una persona sa quando il team li ha rimossi.
+una persona sa quando il team li ha rimossi. *(Fino al 02/10/2026 le frasi erano
+tre - operazioni assenti, operazioni rifiutate, fallimenti di passaggio - e il
+numero nel titolo erano i file che restano, `bloccati`, non i tentativi fatti.
+Prima ancora il caso vero cadeva nel terzo e l'avviso prometteva un ritentativo
+che non puo' riuscire - "il gestionale riprova da solo alla prossima pulizia
+notturna" - e quella era la bugia peggiore, perche' faceva aspettare. Tutto
+superato da quando non si tenta piu'.)*
+
+**La sostituzione dei file percio' non puo' funzionare** finche' la piattaforma
+non abilita la cancellazione. Il record del registro perde `file_url` solo se il
+file se ne va davvero, quindi non si e' creata nessuna bugia: l'archivio dice il
+vero, e' lo spazio che non si libera.
+
+**L'alleggerimento a 40 giorni continua a funzionare**, perche' li' se ne va il
+TESTO (i campi pesanti e le parti in `ContenutoEsteso`), non il file: verificato a
+video il 30/09/2026, la colonna "Dettaglio fino al" delle Verifiche dice 07/11 e
+08/11 e le pagine Verifiche e Verifiche Fornitori funzionano. Il peso vero erano
+quei testi e gli Excel del portale; i file allegati sono un extra che non dipende
+da noi. Da chiedere all'assistenza della piattaforma.
 
 #### I link pubblici non restano scritti nei record
 
@@ -1741,3 +1730,165 @@ scarica l'inventario e lo si manda al team della piattaforma. Per questo la
 funzione senza `conferma: true` si limita a contare, e se un archivio non si
 riesce a leggere non tocca niente: svuotarne una parte lascerebbe gli altri link
 in giro senza dirlo.
+
+### La conservazione dei documenti dei fornitori (29/09/2026)
+
+Richiesta dell'utente, testuale: *"quando carico i documenti dei fornitori, che
+siano report settimanali o mensili a consuntivo o gli ordini assegnati ad inizio
+mese, al fine di non appesantire il dominio, devono automaticamente cancellarsi
+dopo i famosi 40 giorni, ma deve restare il contenuto ovvero la storia scritta
+per poterne fruire in futuro"*.
+
+**I file non sono il problema.** Un Excel o un CSV si legge nel browser e sulla
+piattaforma non sale niente; solo un PDF o un'immagine vengono caricati perche'
+l'agente li legga, e si cancellano subito dopo la lettura. Quello che pesa e' il
+CONTENUTO: righe lette ed esiti riga per riga finiscono in `ContenutoEsteso` a
+pezzi da ottomila caratteri (`base44/shared/testoLungo.ts`).
+
+**La regola, una sola** (`base44/shared/conservazione.ts`): al quarantesimo
+giorno **dal caricamento** — non dalla competenza, o un consuntivo di settembre
+che arriva a novembre nascerebbe scaduto — di un documento se ne vanno le righe
+lette e il confronto riga per riga. **Il record non si cancella**: restano i suoi
+contatori, il verdetto per canale e una **storia scritta** in italiano di poche
+centinaia di caratteri. Prima di questa data le verifiche dei report settimanali
+si cancellavano per intero e le liste degli assegnati dopo due mesi: se ne andava
+proprio la storia che l'utente vuole tenere.
+
+- **A giorni** (`daAlleggerire` + `alleggerisciDocumenti`, workflow notturno alle
+  3:15): `VerificaReport`, `QuadraturaFir`, `ConsuntivoFornitore`.
+- **A mesi** (`alleggerisciVecchi` in `base44/shared/evasioneAssegnatiDati.ts`):
+  `ListaAssegnati` e `ControlloEvasione`, perche' il controllo dell'evasione
+  lavora ancora sulle liste del mese in corso e di quello prima. Due padroni
+  della stessa cancellazione sarebbero un bug: qui i quaranta giorni non si
+  aggiungono, si coordinano.
+- **Subito**, senza aspettare i quaranta giorni
+  (`alleggerisciControlliSuperati`): i `ControlloEvasione` **superati**. Ogni
+  caricamento delle primarie ne deposita uno nuovo per ogni lista, col dettaglio
+  di ogni richiesta: era la voce piu' pesante di tutto l'archivio. Di ogni lista
+  resta per esteso l'ultimo. Vale la regola generale del gestionale: vale il piu'
+  recente, il superato resta nello storico.
+
+**La storia sta in un campo normale** (`storia`), mai scritto con `valoreCampo`:
+sopra gli ottomila caratteri tornerebbe in `ContenutoEsteso`, cioe' il peso che
+si e' appena tolto. Per questo `tagliaStoria` taglia a 4000 e lo dice. La storia
+**non contiene costi**: il record lo legge chiunque (`rls read: true`) e la
+fatturazione passiva e' riservata all'amministratore, quindi `storiaConsuntivo`
+riporta chili e formulari ma non l'importo previsto ne' gli scarti in euro.
+Le storie non sommano mai i canali (regola 3) e i pesi seguono `formatoKg`.
+
+**Tre cose da non rompere:**
+
+1. **L'ordine di `togliIlDettaglio`**: prima si svuotano i campi e si scrive la
+   storia, poi si cancellano le parti in `ContenutoEsteso`, e il giorno
+   (`alleggerito_il`) si segna per ULTIMO. Al contrario, nel campo resterebbe il
+   segnaposto `@parti:N` senza le parti e `leggiCampo` lancerebbe: non un campo
+   vuoto, un campo rotto. Un alleggerimento interrotto si riconosce dai campi
+   vuoti con la storia scritta e senza il giorno, e `daAlleggerire` lo riprende:
+   senza quella ripresa le parti pesanti resterebbero in archivio per sempre,
+   perche' si cancellano per record e il record non le nomina piu'. Al secondo
+   passaggio la storia **non si riscrive**, o diventerebbe povera.
+2. **Un documento senza dettaglio non si riconfronta e non si esporta.**
+   `daRiconfrontare` esclude gli alleggeriti (una dichiarazione di nessuna
+   movimentazione non ha righe per definizione e senza quella esclusione si
+   rigonfierebbe), `senzaRighe` esclude le liste senza righe da `eseguiControlli`
+   e da `altreListe`, e i pulsanti PDF/Excel si spengono con una guardia anche
+   dentro `scarica`: un PDF che va all'impianto col verdetto giusto e zero
+   formulari dentro e' una bugia coerente, il peggio.
+3. **Il motivo si scrive vero.** `nota(oggi, motivo)`: quaranta giorni, mese
+   chiuso, lista piu' recente, superato dal controllo del giorno X. Scrivere
+   "caricato da oltre quaranta giorni" su un controllo superato in giornata
+   sarebbe una bugia che resta in archivio per sempre.
+
+Ricaricare il file azzera `alleggerito_il` e `storia`: il documento torna intero.
+
+### La qualifica dei fornitori
+
+**Un documento della qualifica si chiede per ruolo oppure a fornitori indicati
+per nome, mai in tutti e due i modi.** Il catalogo nasceva solo per ruolo
+(raccolta, trasporto secondarie, impianto, stoccaggio, cliente): un documento che
+riguarda un fornitore solo — le patenti degli autisti, la CQC, un'autorizzazione
+particolare — andava messo su un ruolo intero e risultava mancante a tutti gli
+altri, sporcando gli alert. Ora `TipoDocumentoQualifica.solo_per_soggetti` porta
+l'elenco `[{ chiave, nome }]`: quando c'e', il documento vale SOLTANTO per quei
+fornitori e i ruoli non contano (`richiestoA` in `base44/shared/qualificaFornitori.ts`).
+La chiave e' la ragione sociale normalizzata, la stessa delle movimentazioni.
+Scadenze, mancanze e non conformita' passano dalla valutazione di sempre, quindi
+gli alert e l'email giornaliera li coprono senza modifiche.
+
+**Una voce intestata a un fornitore che nell'anno non risulta e' un errore
+silenzioso**: nessuno la chiederebbe mai e sembrerebbe tutto a posto.
+`anomalieCatalogo` la segnala, e la segnalazione arriva in tre posti: il riquadro
+rosso in cima al modulo, la dashboard (dal campo `anomalie_catalogo` del
+RiepilogoQualifica, senza rifare la valutazione) e l'email del controllo
+giornaliero, che parte anche quando non c'e' nessun'altra novita'.
+
+**Un DURC non e' una visura e non e' una White List.** Caricare un documento
+valido nella casella sbagliata e' l'errore piu' facile da fare e il piu' difficile
+da vedere. L'agente lo controlla gia', ma il suo e' un giudizio:
+`base44/shared/tipiDocumento.ts` e' la rete di sicurezza che non dipende dal
+modello. Riconosce la famiglia del documento dal nome della casella e dal tipo
+letto nel file, e segnala solo quando riconosce con certezza tutti e due e sono
+diversi. Se anche solo uno dei due non si riconosce non dice niente: meglio un
+controllo in meno che dichiarare sbagliato un documento giusto. Il confronto si
+rifa' anche dentro `statoRequisito`, cosi' vale per i documenti analizzati prima
+che il controllo esistesse, senza doverli rileggere con l'agente.
+
+**Quando il file non si legge si dice, e si dice cosa fare.** `problemiLettura`
+distingue tre casi: il modello dichiara il file illeggibile; il modello dice di
+averlo letto ma non ne ha tirato fuori un solo dato (scansione senza testo, file
+protetto, pagina bianca); il tipo non e' dichiarato. I primi due sono bloccanti,
+quindi il requisito diventa "non conforme" e finisce negli alert, nell'email
+giornaliera e nei conteggi della dashboard. Se invece e' l'analisi a fallire, il
+motivo viaggia insieme allo stato "da verificare" e arriva anche nell'email.
+
+**I 97 documenti caricati dall'archivio nel settembre 2026 non hanno
+`analisi_json`**: furono letti con l'OCR di Windows e scritti a mano, non
+dall'agente. Il controllo sul tipo quindi non li tocca (non c'e' una lettura da
+confrontare) e non produce falsi allarmi. Non si usa `sintesi` come ripiego a
+questo livello: quelle sintesi dicono "trovato nell'archivio contratti" e
+farebbero scattare la famiglia "contratto" su mezzo catalogo.
+
+**Il controllo giornaliero della qualifica non legge i documenti: li valuta.**
+E' la distinzione che ha tenuto nascosto per mesi un quadro falso. Il workflow
+`ControlloQualificaFornitori` (7:30, giorni feriali) ricalcola stati e scadenze e
+manda il promemoria, ma chi legge davvero i file e' l'agente, e l'agente lo
+chiama solo chi carica un documento. I novantasette documenti caricati
+dall'archivio risultavano "analizzati" senza che nessuno li avesse mai letti: il
+report li dava per buoni. Il presidio (`presidioQualifica`, workflow
+`PresidioDocumentiQualifica`, 6:40 dei giorni feriali, cinquanta minuti prima del
+promemoria) chiude il buco: prende fino a sei documenti per giro, nell'ordine in
+cui conviene guardarli - mai letti, letture fallite, letture interrotte da piu'
+di un quarto d'ora, documenti senza scadenza ricavata, letture piu' vecchie di
+sei mesi (`daAnalizzare` in `base44/shared/analisiDocumento.ts`). Non rilegge
+tutto ogni volta: un file non cambia, cambiano le norme e il tempo.
+
+**L'analisi di un documento sta in `base44/shared/analisiDocumento.ts`**, non
+dentro la sua funzione, perche' la usano in due: il pulsante del modulo e il
+presidio. Un documento si controlla allo stesso modo comunque lo si guardi. Chi
+analizza piu' documenti di fila passa `conoscenza` (le voci approvate lette una
+volta sola) invece di rileggerle a ogni giro.
+
+**La rianalisi dei 97 documenti, 21/09/2026**: 5 minuti a blocco di 48, due
+richieste in parallelo, zero errori, circa 194 chiamate al modello. Il piano
+builder ne rinnova 10.000 al mese: il costo di un controllo completo e' un giorno
+di consumo normale. Il quadro vero che ne e' uscito: nessun fornitore
+qualificato, 41 documenti scaduti, 56 mai ricevuti, 29 non conformi, e trentaquattro
+conferme manuali revocate perche' la lettura ha trovato problemi bloccanti.
+
+**Lo spazio dell'archivio: nel gestionale va solo cio' che scade e va
+controllato.** Il contratto firmato si', gli allegati no: standard operativi,
+disciplinari e descrizioni dei servizi non scadono e nessuno li verifica, quindi
+restano nel repository sul computer, dove si leggono quando servono. Per
+riferimento, il 21/09/2026 la cartella `CONTRATTI SUBFORNITORI` pesava 1,4 GB
+mentre i documenti caricati nel gestionale erano 99. Due presidi: al caricamento
+un file oltre 5 MB fa comparire un avviso (quasi sempre e' una scansione a colori
+ad alta risoluzione, che in scala di grigi a 200 dpi pesa un decimo e si legge
+uguale); e `alleggerisciQualifica` toglie il file ai documenti **sostituiti** da
+oltre tre anni, lasciando la scheda - sintesi, scadenza, problemi, motivo della
+sostituzione - che e' la storia del fornitore. Non e' automatico apposta:
+cancellare file e' una decisione, l'amministratore guarda prima l'elenco. Se la
+piattaforma non espone una cancellazione, la funzione si ferma al primo tentativo
+e lo dice, invece di svuotare `file_uri` lasciando i file dov'erano.
+
+**I contratti** passano da generato a inviato a controfirmato, con la data di ogni
+passaggio: un contratto generato non e' un contratto fatto.
