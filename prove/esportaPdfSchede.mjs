@@ -108,6 +108,16 @@ console.log('LA SCHEDA STOCCAGGI');
     a.sezioni[0].righe[1].celle[10] === null, String(a.sezioni[0].righe[1].celle[10]));
   verifica('l esito del controllo arriva a parole', a.sezioni[0].righe[0].celle[12] === 'Il controllo quadra.');
   verifica('un piazzale senza unita locale non inventa un nome', a.sezioni[0].righe[1].celle[0] === '');
+  // Una cella del PDF tiene tre righe e poi taglia: il verdetto sta in colonna,
+  // la frase intera in coda, cosi' non esce mozzata a meta' parola (09/10/2026).
+  const b = stoccaggiPdf(2026, piazzali, (r) => (r.sito === 'NAPPI SUD SRL'
+    ? { breve: 'Si scostano le classi P, M: P -12.700 kg · M -11.480 kg', lungo: 'Rilevazione del 05/10/2026, confrontata con quella del 23/09/2026 piu\' i movimenti del periodo: 2 classi leggono meno di quello che i movimenti dicono.' }
+    : { breve: 'Il controllo quadra', lungo: '' }));
+  verifica('in colonna va il verdetto corto', b.sezioni[0].righe[0].celle[12] === 'Si scostano le classi P, M: P -12.700 kg · M -11.480 kg');
+  verifica('e la frase intera finisce in coda, col nome del piazzale',
+    b.note.some(n => n.startsWith('NAPPI SUD SRL: Rilevazione del 05/10/2026')), JSON.stringify(b.note[0]));
+  verifica('chi non ha niente da raccontare non aggiunge una nota vuota',
+    !b.note.some(n => n.startsWith('T-CYCLE')));
 }
 
 console.log('LA SCHEDA CHIUSURA ANNO');
@@ -149,8 +159,14 @@ console.log('LA SCHEDA CHIUSURA ANNO');
   verifica('le voci di dicembre e quelle aperte da prima ci sono tutte, con la loro decisione',
     a.sezioni[3].righe.length === 2 && a.sezioni[3].righe[0].celle[11] === 'rettificata' && a.sezioni[3].righe[1].celle[11] === 'non si rettifica da qui');
   verifica('e si dice perche una voce e in elenco', /chiuso a portale dopo/.test(a.sezioni[3].righe[0].celle[12]));
+  // La riga di gruppo dice tutto nella PRIMA cella, che e' la piu' larga:
+  // messo nella seconda - la colonna «Classe» - «nessuna rilevazione
+  // precedente» usciva spezzato in «nessuna / rilevazio / ne prece».
   verifica('il confronto apre con la riga del piazzale e poi le classi',
     a.sezioni[4].righe[0].stile === 'gruppo' && a.sezioni[4].righe[1].celle[1] === 'P');
+  verifica('la riga del piazzale dice tutto nella prima cella, le altre sono vuote',
+    a.sezioni[4].righe[0].celle[0] === 'NAPPI SUD SRL — dal 30/11/2025'
+    && a.sezioni[4].righe[0].celle.slice(1).every(c => c === null), JSON.stringify(a.sezioni[4].righe[0].celle));
   verifica('gli avvisi del dossier finiscono nelle note', a.note.some(n => n === 'Una lettura manca'));
   verifica('un movimento non ancora chiuso a portale lo dice', a.sezioni[3].righe[0].celle[9] === 'non ancora');
 }

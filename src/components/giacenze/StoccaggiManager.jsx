@@ -7,7 +7,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import RilevazioneForm from './RilevazioneForm';
 import StoricoRilevazioni from './StoricoRilevazioni';
-import ControlloRilevazione, { EsitoRilevazione, riassuntoVerifica, giorno } from './ControlloRilevazione';
+import ControlloRilevazione, { EsitoRilevazione, riassuntoVerifica, giorno, kgSegno } from './ControlloRilevazione';
 import { EsitoRiconciliazione, RiconciliazioneDialog } from './Riconciliazione';
 import { formatNumber, formatTonnellate } from '@/lib/utils';
 import { riassuntoGruppo } from '@/components/giacenze/DateDaSistemare';
@@ -212,10 +212,14 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
         giacenza_aci_t: oggi.giacenza_aci_t ?? null,
       };
     });
+    // Due pezzi: il verdetto in colonna, la frase intera in coda al PDF. Una
+    // cella tiene tre righe e poi taglia, e la sintesi del controllo e' lunga.
     const esitoDi = (r) => {
       const v = verifichePerSito.get(normalizzaRagioneSociale(r.sito));
       const x = riassuntoVerifica(v);
-      return x ? `${x.titolo}. ${x.sintesi}` : 'nessun controllo: manca la rilevazione';
+      if (!x) return { breve: 'nessun controllo: manca la rilevazione', lungo: '' };
+      const classi = (x.scostano || []).map(c => `${c.classe} ${kgSegno(c.scarto)}`).join(' · ');
+      return { breve: classi ? `${x.titolo}: ${classi}` : x.titolo, lungo: x.sintesi };
     };
     // L'anno della scheda e' quello della rilevazione piu' recente: le giacenze
     // di un piazzale non hanno un anno loro, e scriverne uno sbagliato in

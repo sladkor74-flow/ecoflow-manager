@@ -116,17 +116,20 @@ export function daDichiararePdf(anno, dati, filtri = {}) {
       {
         titolo: 'Ordini, dal carico arrivato da piu’ tempo',
         colonne: [
-          { titolo: 'Ordine', tipo: 'testo', peso: 1.1 },
-          { titolo: 'FIR', tipo: 'testo', peso: 1.1 },
+          // Le larghezze nascono dai dati veri: un numero d'ordine sta in dieci
+          // caratteri, un FIR in tredici, e una colonna piu' stretta del suo
+          // contenuto lo manda a capo in mezzo alla parola.
+          { titolo: 'Ordine', tipo: 'testo', peso: 1.2 },
+          { titolo: 'FIR', tipo: 'testo', peso: 1.4 },
           { titolo: 'Fine trasporto', tipo: 'testo', peso: 0.9 },
-          { titolo: 'Giorni', tipo: 'intero', peso: 0.5 },
-          { titolo: 'Punto di raccolta', tipo: 'testo', peso: 2.2 },
+          { titolo: 'Attesa (gg)', tipo: 'intero', peso: 0.7 },
+          { titolo: 'Punto di raccolta', tipo: 'testo', peso: 2 },
           { titolo: 'Comune', tipo: 'testo', peso: 1.2 },
-          { titolo: 'Prov.', tipo: 'testo', peso: 0.4 },
+          { titolo: 'Pr.', tipo: 'testo', peso: 0.35 },
           { titolo: 'Prodotto', tipo: 'testo', peso: 0.7 },
           { titolo: 'Peso da dichiarare', tipo: 'kg', peso: 1 },
-          { titolo: 'Destinazione', tipo: 'testo', peso: 1.6 },
-          { titolo: 'Trasferito a', tipo: 'testo', peso: 1.3 },
+          { titolo: 'Destinazione', tipo: 'testo', peso: 1.4 },
+          { titolo: 'Trasferito a', tipo: 'testo', peso: 1.2 },
           { titolo: 'Formulario nel gestionale', tipo: 'testo', peso: 2 },
         ],
         righe: [
@@ -154,8 +157,18 @@ export function daDichiararePdf(anno, dati, filtri = {}) {
  * Scheda Stoccaggi: la lettura del portale di ogni piazzale accanto alla
  * giacenza di oggi. Sono due cose diverse e si mostrano affiancate: una lettura
  * vecchia non e' la giacenza di adesso (06/10/2026). Rete e ACI non si sommano.
+ *
+ * `esitoDi(r)` da' il controllo della rilevazione in due pezzi: `breve` sta
+ * nella colonna, `lungo` va in coda. Una cella del PDF tiene tre righe e poi
+ * taglia: la frase intera finiva mozzata a meta' parola, e un controllo che
+ * dice «confrontata con quella del 23/09/2026 piu' i movimenti del periodo: 2»
+ * e' peggio che non dirlo (09/10/2026).
  */
 export function stoccaggiPdf(anno, righe, esitoDi = () => '') {
+  const esito = (r) => {
+    const e = esitoDi(r);
+    return typeof e === 'string' ? { breve: e, lungo: '' } : (e || { breve: '', lungo: '' });
+  };
   const kgDi = (r, campi) => campi.reduce((s, c) => s + (Number(r[c]) || 0), 0);
   const reteDi = (r) => kgDi(r, ['class1_kg', 'class2_kg', 'class3_kg', 'class4_kg']) / 1000;
   const aciDi = (r) => (Number(r.class9_kg) || 0) / 1000;
@@ -183,7 +196,7 @@ export function stoccaggiPdf(anno, righe, esitoDi = () => '') {
         { titolo: 'Letto ACI (t)', tipo: 't', peso: 0.9 },
         { titolo: 'Oggi rete (t)', tipo: 't', peso: 0.9 },
         { titolo: 'Oggi ACI (t)', tipo: 't', peso: 0.9 },
-        { titolo: 'Controllo della rilevazione', tipo: 'testo', peso: 3 },
+        { titolo: 'Controllo della rilevazione', tipo: 'testo', peso: 2.2 },
       ],
       righe: righe.map(r => ({
         celle: [
@@ -192,11 +205,12 @@ export function stoccaggiPdf(anno, righe, esitoDi = () => '') {
           r.class1_kg, r.class2_kg, r.class3_kg, r.class4_kg, r.class9_kg,
           reteDi(r), aciDi(r),
           r.giacenza_rete_t, r.giacenza_aci_t,
-          esitoDi(r) || '',
+          esito(r).breve,
         ],
       })),
     }],
     note: [
+      ...righe.map(r => ({ r, e: esito(r) })).filter(x => x.e.lungo).map(x => `${x.r.sito}: ${x.e.lungo}`),
       'La lettura e’ la fotografia del portale di quel giorno; la giacenza di oggi e’ l’ancora dell’anno piu’ tutti i movimenti finiti dopo. Se la seconda e’ piu’ bassa, nel frattempo il materiale e’ uscito in secondaria.',
       'Rete (classi 1-4) e ACI (classe 9) non si sommano mai: sono due commesse diverse.',
       'Il saldo degli stoccaggi il portale lo mostra nella pagina Unita’ Locali di Stoccaggio, che non si esporta: questi valori si rilevano a mano quando lo si consulta.',
@@ -217,17 +231,13 @@ export function chiusuraAnnoPdf(dossier, { decisioneDi = () => '', pesoInParole 
     const attesaDi = (cl) => (c.attesa || []).find(a => a.classe === cl) || {};
     const lettaDi = (cl) => (c.verifica_lettura ? c.verifica_lettura.classi.find(x => x.classe === cl) : null);
     const salvataDi = (cl) => (c.verifica_da_salvare ? c.verifica_da_salvare.classi.find(x => x.classe === cl) : null);
-    // Undici celle quante le colonne: la riga del piazzale apre il gruppo e il
-    // resto resta vuoto.
-    confronti.push({
-      stile: 'gruppo',
-      celle: [
-        c.nome,
-        c.precedente_del ? `dalla rilevazione del ${giornoItaliano(c.precedente_del)}` : 'nessuna rilevazione precedente',
-        c.dicembre && c.dicembre.n ? `${c.dicembre.n} voci di dicembre` : null,
-        null, null, null, null, null, null, null, null,
-      ],
-    });
+    // Undici celle quante le colonne. Tutto quello che si dice del piazzale sta
+    // nella PRIMA cella, che e' la piu' larga: messo nella seconda, che e' la
+    // colonna «Classe», «nessuna rilevazione precedente» usciva spezzato in
+    // «nessuna / rilevazio / ne prece» (09/10/2026).
+    const quando = c.precedente_del ? `dal ${giornoItaliano(c.precedente_del)}` : 'senza rilevazione precedente';
+    const dicembre = c.dicembre && c.dicembre.n ? ` · ${c.dicembre.n} voci di dicembre` : '';
+    confronti.push({ stile: 'gruppo', celle: [`${c.nome} — ${quando}${dicembre}`, null, null, null, null, null, null, null, null, null, null] });
     for (const a of c.attesa || []) {
       const cl = a.classe;
       const letta = lettaDi(cl), salvata = salvataDi(cl), att = attesaDi(cl);
