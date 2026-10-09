@@ -449,6 +449,38 @@ pagare. Diverso e' lo scarto spiegato da un **peso che torna esatto**: quasi
 sempre e' un formulario finito nella classe sbagliata (NAPPI SUD 16/09, P +6.160
 e M -6.160), e li' c'e' qualcosa da correggere - l'anomalia **resta**.
 
+**LA CHIUSURA D'ANNO (scheda Giacenze > Chiusura anno,
+`shared/chiusuraAnno.ts`).** La fotografia del 31/12 e' il punto da cui ripartono
+le giacenze dell'anno dopo: si legge a portale il saldo per classe di ogni
+piazzale, lo si corregge con i movimenti di dicembre che il portale non aveva
+ancora chiuso, e si salva. Due regole, dal 09/10/2026 (il giorno in cui l'utente
+ha chiesto che al 31/12/2026 «tutto fili come un orologio»):
+
+- **La rettifica di dicembre la decide il gestionale, non si chiede di
+  confermarla.** Nell'elenco di dicembre ci finisce **solo** chi il portale non
+  aveva ancora chiuso alla fotografia (`elencoDicembre` scarta chi ha
+  `chiuso_il <= foto`): se il portale non l'aveva chiuso, nel saldo di quel
+  giorno non c'e', e va rettificato. Chiedere conferma voce per voce era chiedere
+  all'utente di ripetere quello che il portale ha gia' detto, e intanto la
+  fotografia restava bloccata - sulla chiusura 2025, quattro movimenti di Nappi
+  Sud chiusi tutti il 07/01/2026. La rettifica si applica, la riga dice
+  «decisa dal gestionale» con il motivo, e l'ultima parola resta all'utente
+  («gia' nella lettura», o la classe in cui il portale l'ha messo). Una decisione
+  che non si riconosce blocca ancora: non si tira a indovinare.
+- **In cima alla pagina sale solo quello che chiede qualcosa.** Terziarie
+  (una classe non ce l'hanno), movimenti di un impianto (del portale si sa il
+  totale, non la ripartizione per classe) ed extra raccolta (a portale non c'e')
+  **non possono cambiare** la fotografia dei piazzali: si elencano nella scheda,
+  accanto alle righe che raccontano, e non diventano un avviso. Erano tre
+  riquadri ambra ripetuti identici piu' sotto, e sulla chiusura 2025 erano 40
+  voci su 44: un avviso che non si puo' chiudere insegna a non guardare gli
+  avvisi. Gli avvisi portano un `livello` (`attenzione` o `informazione`).
+
+Per il 2025 manca l'anno prima: niente ancora del 31/12/2024 e niente movimenti
+2024, quindi i piazzali non hanno un punto di partenza e l'attesa non si calcola.
+Non e' un difetto, e si dice: dal 2026 l'ancora c'e' (la fotografia del
+31/12/2025) e il confronto torna intero.
+
 Un assegnato non e' un movimento: il suo periodo e' `ordine_immesso_il`.
 
 ### Canali indipendenti

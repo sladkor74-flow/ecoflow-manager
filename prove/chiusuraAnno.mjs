@@ -169,14 +169,29 @@ verifica('all\'impianto si chiede il file degli ordini non dichiarati', richiest
 verifica('accanto alla richiesta c\'e\' quanto pende di dicembre', richieste[0].dicembre.n === 5 && richieste[1].dicembre.n === 2);
 verifica('una lettura gia\' inserita si vede', cosaChiedereAlPortale({ anno: 2025, piazzali, impianti, letture: { 'nappi sud': { P: 1 } } })[0].stato === 'inserita');
 
-console.log('SENZA DECISIONI NON SI SALVA');
+console.log('LA RETTIFICA LA DECIDE IL GESTIONALE, NON SI CHIEDE DI CONFERMARLA');
+// Il fatto, 09/10/2026. Sulla chiusura 2025 l'utente trovava quattro voci «da
+// decidere» su Nappi Sud, tutte chiuse a portale il 07/01/2026: cioe' tutte
+// dopo la fotografia. Ma in questo elenco ci finisce SOLO chi il portale non
+// aveva ancora chiuso alla fotografia - e' il criterio con cui l'elenco si
+// costruisce - quindi nel saldo che si legge quel giorno non c'e' e va
+// rettificato. Chiederlo voce per voce era chiedere all'utente di ripetere
+// quello che il portale ha gia' detto, e intanto la fotografia restava bloccata.
+//
 // La lettura vera del portale al 31/12: le uscite non ancora scalate e
 // l'ingresso del 28/12 non ancora aggiunto.
 const LETTURA = { P: 75000, M: 40000, G1: 0, G2: 0, ACI: 0 };
 const nudo = confrontoPiazzale(piazzali[0], { anno: 2025, lettura: LETTURA, voci: nappi.voci, aperti_prima: nappi.aperti_prima });
-verifica('le voci senza decisione sono tutte li\'', nudo.rettifica.da_decidere.length === 4, String(nudo.rettifica.da_decidere.length));
+verifica('senza decisioni dell\'utente non resta niente da decidere', nudo.rettifica.da_decidere.length === 0, String(nudo.rettifica.da_decidere.length));
+verifica('le quattro voci sono rettificate, e si sa che l\'ha deciso il gestionale',
+  nudo.rettifica.applicate.length === 4 && nudo.rettifica.applicate.every(a => a.proposta === true && a.decisione === 'rettifica'),
+  JSON.stringify(nudo.rettifica.applicate.map(a => [a.id_ordine, a.decisione, a.proposta])));
 verifica('l\'extra raccolta non si decide: a portale non c\'e\'', nudo.rettifica.fuori_portale.length === 1 && nudo.rettifica.fuori_portale[0].canale === 'EXTRA_RACCOLTA');
-verifica('il salvataggio e\' bloccato, e si dice perche\'', nudo.pronto === false && nudo.blocchi.some(b => b.tipo === 'dicembre_da_decidere'));
+verifica('e la fotografia si puo\' salvare', nudo.pronto === true && nudo.blocchi.length === 0, JSON.stringify(nudo.blocchi));
+// Una decisione che non si capisce blocca ancora: non si tira a indovinare.
+const storta = confrontoPiazzale(piazzali[0], { anno: 2025, lettura: LETTURA, voci: nappi.voci, decisioni: { 'nappi sud|stoc|secondaria|uscita|SEC25121800|P': 'classe:ZZ' } });
+verifica('una decisione che non si riconosce resta da decidere e blocca',
+  storta.rettifica.da_decidere.length === 1 && storta.pronto === false && storta.blocchi.some(b => b.tipo === 'dicembre_da_decidere'));
 verifica('senza lettura del portale non si salva', confrontoPiazzale(piazzali[0], { anno: 2025, voci: nappi.voci }).blocchi.some(b => b.tipo === 'lettura_mancante'));
 // Un campo sfiorato e poi cancellato non arriva: senza questo controllo il
 // piazzale risulterebbe letto a zero e si salverebbe azzerato.
@@ -249,10 +264,10 @@ const conTerziarie = confrontoPiazzale(
 );
 verifica('e non bloccano il salvataggio di una fotografia', conTerziarie.pronto === true && conTerziarie.blocchi.length === 0,
   JSON.stringify(conTerziarie.blocchi));
-// Il controllo per classe resta intero dove la classe esiste: una decisione
-// mancante su una voce di rete blocca ancora.
-verifica('mentre una voce di rete senza decisione blocca ancora',
-  confrontoPiazzale(piazzali[0], { anno: 2025, lettura: LETTURA, voci: nappi.voci }).blocchi.some(b => b.tipo === 'dicembre_da_decidere'));
+// Il controllo per classe resta intero dove la classe esiste: una voce di rete
+// la rettifica la riceve, una terziaria no.
+verifica('mentre una voce di rete la rettifica la riceve',
+  confrontoPiazzale(piazzali[0], { anno: 2025, lettura: LETTURA, voci: nappi.voci }).rettifica.applicate.length === 4);
 
 console.log('UNA CLASSE 9 NELL\'ARCHIVIO DELLA RETE E\' ACI (28/09/2026)');
 // Decide il materiale, non l'archivio in cui la riga e' finita. Prima la
@@ -355,27 +370,37 @@ verifica('un piazzale pronto, nessuna voce da decidere', dossier.riepilogo.piazz
 // la pagina scriverebbe le letture su una casella che non esiste.
 verifica('ogni piazzale si riconosce dalla sua chiave', dossier.piazzali[0].sito === 'nappi sud' && dossier.elenco_dicembre.siti.some(s => s.sito === 'nappi sud'));
 verifica('l\'elenco di dicembre e\' nel dossier', dossier.riepilogo.voci_dicembre === 7 && dossier.elenco_dicembre.siti.length === 2);
-verifica('l\'avviso dice quanto pesa, un canale per volta, e che cosa si rischia',
-  dossier.avvisi.some(a => a.tipo === 'elenco_dicembre'
-    && a.n === 4
-    && a.testo.includes('rete 4 per 33.900 kg netti')
-    && a.testo.includes('si perdono')),
-  JSON.stringify(dossier.avvisi.find(a => a.tipo === 'elenco_dicembre')));
-// L'avviso delle decisioni per classe nomina solo cio' su cui una decisione esiste:
-// non le terziarie (classe non ce l'hanno) e non l'extra raccolta (a portale non
-// c'e'), altrimenti chiederebbe di decidere dove non c'e' niente da premere.
-verifica('e non chiede decisioni per classe sulle terziarie',
-  !dossier.avvisi.find(a => a.tipo === 'elenco_dicembre').testo.includes('terziarie')
-  && !dossier.avvisi.find(a => a.tipo === 'elenco_dicembre').testo.includes('extra raccolta'),
-  dossier.avvisi.find(a => a.tipo === 'elenco_dicembre').testo);
-verifica('le terziarie si dicono comunque, nel loro avviso, col loro peso',
-  dossier.avvisi.some(a => a.tipo === 'dicembre_senza_classe'
-    && a.n === 3
-    && a.testo.includes('terziarie 2 per 38.000 kg netti')
-    && a.testo.includes('2 terziarie, che escono verso le cementerie')
-    && a.testo.includes('extra raccolta, che a portale non c')
-    && a.testo.includes('ordini non dichiarati')),
-  JSON.stringify(dossier.avvisi.find(a => a.tipo === 'dicembre_senza_classe')));
+// IN CIMA SALE SOLO QUELLO CHE CHIEDE QUALCOSA (09/10/2026).
+//
+// Erano tre riquadri ambra, ripetuti identici dentro la scheda dell'elenco, e
+// due dei tre non chiedevano niente: le terziarie una classe non ce l'hanno e i
+// movimenti di un impianto nella fotografia dei piazzali non entrano, quindi non
+// c'era nessun pulsante da premere. Sulla chiusura 2025 erano 40 voci su 44. Un
+// avviso che non si puo' chiudere insegna a non guardare gli avvisi.
+verifica('niente avvisi in cima quando non c\'e' + String.fromCharCode(39) + ' niente da decidere',
+  dossier.avvisi.filter(a => a.tipo === 'elenco_dicembre').length === 0, JSON.stringify(dossier.avvisi.map(a => a.tipo)));
+verifica('e le terziarie non diventano un avviso che non si puo\' chiudere',
+  !dossier.avvisi.some(a => a.tipo === 'dicembre_senza_classe' || a.tipo === 'aperti_prima_di_dicembre'),
+  JSON.stringify(dossier.avvisi.map(a => a.tipo)));
+// Il racconto non si perde: resta nell'elenco, accanto alle righe che descrive.
+verifica('ma nell\'elenco ci sono, col loro peso e il loro motivo',
+  dossier.elenco_dicembre.n_senza_classe === 3
+  && dossier.elenco_dicembre.n_senza_classe_terziarie === 2
+  && dossier.elenco_dicembre.n_senza_classe_extra === 1
+  && Math.abs(dossier.elenco_dicembre.per_canale_senza_classe.TERZIARIE.netto_kg) === 38000,
+  JSON.stringify(dossier.elenco_dicembre.per_canale_senza_classe));
+// E quando una decisione davvero non si capisce, l'avviso c'e' e dice quante.
+{
+  const storto = preparaChiusura({
+    anno: 2025, piazzali, impianti,
+    letture: { 'nappi sud': LETTURA },
+    decisioni: { ...DECISIONI, 'nappi sud|stoc|secondaria|uscita|SEC25121800|P': 'classe:ZZ' },
+  });
+  verifica('quando una decisione non si capisce, l\'avviso c\'e\' e dice quante',
+    storto.riepilogo.voci_da_decidere === 1
+    && storto.avvisi.some(a => a.tipo === 'elenco_dicembre' && a.n === 1 && a.livello === 'attenzione' && a.testo.includes('si perdono')),
+    JSON.stringify(storto.avvisi.map(a => a.tipo + '/' + a.n)));
+}
 verifica('il riepilogo le conta a parte', dossier.riepilogo.voci_per_classe === 4 && dossier.riepilogo.voci_senza_classe === 3 && dossier.riepilogo.voci_dicembre === 7,
   JSON.stringify([dossier.riepilogo.voci_per_classe, dossier.riepilogo.voci_senza_classe]));
 verifica('la lettera di un altro 31 dicembre si segnala', dossier.avvisi.some(a => a.tipo === 'lettera_altro_anno' && a.testo.includes('2024-12-31')));

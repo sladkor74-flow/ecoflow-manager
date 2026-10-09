@@ -83,9 +83,15 @@ function Riquadro({ titolo, sottotitolo, icona: Icona, azione, children }) {
 function VoceDicembre({ v, decisione, onDecidi }) {
   const puo = decidibile(v) && !!onDecidi;
   const scelta = decisione || '';
+  // SENZA UNA SCELTA DELL'UTENTE VALE «DA RETTIFICARE», E NON E' UN'IPOTESI
+  // (09/10/2026): in questo elenco ci finisce solo chi il portale non aveva
+  // ancora chiuso alla fotografia, quindi nel saldo di quel giorno non c'e'.
+  // La riga lo dice - «decisa dal gestionale» - e i pulsanti restano.
+  const effettiva = scelta || (puo ? 'rettifica' : '');
+  const daGestionale = puo && !scelta;
   const classeDelPortale = scelta.startsWith('classe:') ? scelta.slice(7) : '';
   return (
-    <tr className={`border-t align-top ${puo && !scelta ? 'bg-amber-50' : ''}`}>
+    <tr className="border-t align-top">
       <td className="px-2 py-1.5 whitespace-nowrap font-medium">{v.id_ordine || '—'}</td>
       <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground">{v.numero_fir || '—'}</td>
       <td className="px-2 py-1.5 whitespace-nowrap">{v.tipo}{v.verso === 'uscita' ? ' in uscita' : ' in entrata'}</td>
@@ -110,9 +116,9 @@ function VoceDicembre({ v, decisione, onDecidi }) {
           </span>
         ) : (
           <div className="flex flex-wrap items-center gap-1">
-            <Button size="sm" variant={scelta === 'gia_nel_portale' ? 'default' : 'outline'} className="h-6 px-2 text-[11px]"
+            <Button size="sm" variant={effettiva === 'gia_nel_portale' ? 'default' : 'outline'} className="h-6 px-2 text-[11px]"
               onClick={() => onDecidi(v.chiave, 'gia_nel_portale')}>Gia&apos; nella lettura</Button>
-            <Button size="sm" variant={scelta === 'rettifica' ? 'default' : 'outline'} className="h-6 px-2 text-[11px]"
+            <Button size="sm" variant={effettiva === 'rettifica' ? 'default' : 'outline'} className="h-6 px-2 text-[11px]"
               onClick={() => onDecidi(v.chiave, 'rettifica')}>Da rettificare</Button>
             <select
               className="h-6 rounded border bg-background px-1 text-[11px]"
@@ -123,6 +129,11 @@ function VoceDicembre({ v, decisione, onDecidi }) {
               <option value="">in un&apos;altra classe…</option>
               {CLASSI.filter(c => c !== v.classe).map(c => <option key={c} value={c}>il portale lo ha in {c}</option>)}
             </select>
+            {daGestionale && (
+              <span className="text-[10px] text-muted-foreground w-full" title={v.perche || ''}>
+                decisa dal gestionale: il portale l&apos;ha chiusa dopo la fotografia
+              </span>
+            )}
           </div>
         )}
       </td>
@@ -149,44 +160,54 @@ function TabellaVoci({ voci, decisioni, onDecidi }) {
   );
 }
 
-function ElencoDicembre({ elenco, decisioni, onDecidi }) {
+function ElencoDicembre({ elenco, decisioni, onDecidi, daDecidere = 0 }) {
   const [aperti, setAperti] = useState({});
   if (!elenco || (!elenco.n && !elenco.n_prima)) {
     return <p className="text-xs text-muted-foreground">Nessun movimento di quest&apos;anno e&apos; rimasto aperto a portale alla data della fotografia: la lettura del 31 dicembre li contiene tutti.</p>;
   }
   return (
     <div className="space-y-3">
-      <div className="border rounded-md p-2 bg-amber-50 border-amber-300 text-amber-900 text-xs">
-        {/* L'avviso delle decisioni per classe compare solo se c'e' davvero
-            qualcosa da decidere per classe: con sole terziarie direbbe «zero». */}
+      {/* AMBRA SOLO DOVE C'E' DA FARE QUALCOSA (09/10/2026).
+
+          Questo riquadro era sempre ambra e diceva tre cose insieme, di cui due
+          senza nessun pulsante da premere: le terziarie una classe non ce
+          l'hanno (regola dell'utente, 28/09/2026), dei movimenti di un impianto
+          il portale ci da' il totale e non la ripartizione, e l'extra raccolta a
+          portale non c'e'. Sulla chiusura 2025 erano 40 voci su 44: un avviso
+          che non si puo' chiudere insegna a non guardare gli avvisi. */}
+      <div className={`border rounded-md p-2 text-xs ${daDecidere > 0 ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-muted/50'}`}>
         {elenco.n_per_classe > 0 && (
           <>
-            <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="w-4 h-4 shrink-0" /> {elenco.n_per_classe} movimenti finiti a dicembre e non ancora chiusi a portale</div>
-            <p className="mt-1">{pesoInParole(elenco.per_canale_per_classe)}. Non stanno ne&apos; nella fotografia ne&apos; fra i movimenti dell&apos;anno nuovo: senza una decisione su ognuno si perdono.</p>
+            <div className="flex items-center gap-2 font-semibold">
+              {daDecidere > 0 ? <AlertTriangle className="w-4 h-4 shrink-0" /> : <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-700" />}
+              {elenco.n_per_classe} movimenti finiti a dicembre e non ancora chiusi a portale
+            </div>
+            <p className="mt-1">
+              {pesoInParole(elenco.per_canale_per_classe)}.{' '}
+              {daDecidere > 0
+                ? <>Su {daDecidere} la decisione non e&apos; chiara: finche&apos; restano cosi&apos; non stanno ne&apos; nella fotografia ne&apos; fra i movimenti dell&apos;anno nuovo, e si perdono.</>
+                : <>Il portale non li aveva chiusi quando la fotografia e&apos; stata presa, quindi nel saldo che si legge quel giorno non ci sono: il gestionale li <strong>rettifica</strong>, e ogni riga lo dice. Se per qualcuno il portale ce l&apos;ha gia&apos;, cambialo li&apos;.</>}
+            </p>
           </>
         )}
-        {/* Quello su cui non si decide si dice col motivo vero, uno per uno: le
-            terziarie una classe non ce l'hanno (regola dell'utente, 28/09/2026),
-            degli impianti il portale ci da' il totale e non la ripartizione, e
-            l'extra raccolta a portale non c'e'. Chiedere una decisione dove la
-            pagina non offre niente da premere e' un avviso che non si chiude. */}
         {elenco.n_senza_classe > 0 && (
           <p className="mt-1">
-            Ci sono anche {elenco.n_senza_classe} movimenti su cui per classe non c&apos;e&apos; niente da decidere
-            ({pesoInParole(elenco.per_canale_senza_classe)}): {[
+            Altri {elenco.n_senza_classe} ({pesoInParole(elenco.per_canale_senza_classe)}) questa fotografia non la toccano e si elencano per memoria: {[
               elenco.n_senza_classe_terziarie ? `${elenco.n_senza_classe_terziarie} terziarie, che escono verso le cementerie e una classe non ce l'hanno` : '',
-              elenco.n_senza_classe_impianti ? `${elenco.n_senza_classe_impianti} di impianti, di cui il portale ci dà il totale e non la ripartizione per classe` : '',
-              elenco.n_senza_classe_extra ? `${elenco.n_senza_classe_extra} di extra raccolta, che a portale non c'è` : '',
-            ].filter(Boolean).join('; ')}. Si elencano perche&apos; il file degli ordini non dichiarati del 31 dicembre non li conterra&apos; ancora.
+              elenco.n_senza_classe_impianti ? `${elenco.n_senza_classe_impianti} di impianti, di cui il portale ci da' il totale e non la ripartizione per classe` : '',
+              elenco.n_senza_classe_extra ? `${elenco.n_senza_classe_extra} di extra raccolta, che a portale non c'e'` : '',
+            ].filter(Boolean).join('; ')}.
           </p>
         )}
         {elenco.n_prima > 0 && (
-          <p className="mt-1">Ci sono anche {elenco.n_prima} movimenti dell&apos;anno finiti prima di dicembre e ancora aperti ({pesoInParole(elenco.per_canale_prima)}): non si rettificano da qui, ma uno scarto che resta dopo la rettifica di dicembre di solito e&apos; loro.</p>
+          <p className="mt-1">Altri {elenco.n_prima} sono finiti prima di dicembre e a portale erano ancora aperti ({pesoInParole(elenco.per_canale_prima)}): non si rettificano da qui, ma uno scarto che resta dopo la rettifica di dicembre di solito e&apos; loro.</p>
         )}
       </div>
       {elenco.siti.map(s => {
         const aperto = aperti[s.chiave] !== false;
-        const daDecidere = s.voci.filter(v => decidibile(v) && !decisioni[v.chiave]).length;
+        // Quante di questo sito il gestionale rettifica da se': la riga lo dice,
+        // cosi' si sa che cosa succede senza aprire la tabella.
+        const rettificate = s.voci.filter(v => decidibile(v) && !decisioni[v.chiave]).length;
         return (
           <div key={s.chiave} className="border rounded-md">
             <button type="button" className="w-full flex flex-wrap items-center justify-between gap-2 p-2 text-left hover:bg-muted/40"
@@ -197,7 +218,7 @@ function ElencoDicembre({ elenco, decisioni, onDecidi }) {
               </span>
               <span className="text-xs text-muted-foreground">
                 {s.voci.length} di dicembre · {pesoInParole(s.per_canale)}
-                {daDecidere > 0 && <span className="ml-2 text-amber-700 font-medium">{daDecidere} da decidere</span>}
+                {rettificate > 0 && <span className="ml-2 text-emerald-700 font-medium">{rettificate} rettificate dal gestionale</span>}
               </span>
             </button>
             {aperto && (
@@ -410,7 +431,10 @@ export function decisioneDiVoce(dossier, v) {
   if (!c) return 'riguarda un impianto';
   if (c.rettifica.applicate.some(x => x.chiave === v.chiave)) {
     const a = c.rettifica.applicate.find(x => x.chiave === v.chiave);
-    return a.classe_del_portale ? `il portale lo ha in ${a.classe_del_portale}` : 'rettificata';
+    if (a.classe_del_portale) return `il portale lo ha in ${a.classe_del_portale}`;
+    // Chi l'ha decisa si dice: una rettifica che il gestionale applica da se'
+    // non deve passare per una scelta che qualcuno ha fatto (09/10/2026).
+    return a.proposta ? 'rettificata dal gestionale' : 'rettificata';
   }
   if (c.rettifica.ignorate.some(x => x.chiave === v.chiave)) return 'gia\' nella lettura';
   if (c.rettifica.fuori_portale.some(x => x.chiave === v.chiave)) return 'fuori dal portale';
@@ -690,10 +714,22 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
         </div>
       )}
 
+      {/* In cima sale solo quello che chiede qualcosa. Quello che si elenca e
+          basta - terziarie, movimenti di impianti, extra raccolta - resta nella
+          scheda dell'elenco, dove sta accanto alle righe che racconta: in cima
+          erano tre riquadri ambra ripetuti identici piu' sotto, e due dei tre
+          non si potevano chiudere perche' non c'era niente da premere
+          (09/10/2026). */}
       {(dossier.avvisi || []).map((a, i) => (
-        <div key={i} className="border rounded-md p-2 bg-amber-50 border-amber-300 text-amber-900 text-xs flex items-start gap-2">
-          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />{a.testo}
-        </div>
+        a.livello === 'informazione' ? (
+          <div key={i} className="border rounded-md p-2 bg-muted/50 text-xs flex items-start gap-2">
+            <Info className="w-4 h-4 shrink-0 mt-0.5 text-muted-foreground" />{a.testo}
+          </div>
+        ) : (
+          <div key={i} className="border rounded-md p-2 bg-amber-50 border-amber-300 text-amber-900 text-xs flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />{a.testo}
+          </div>
+        )
       ))}
 
       <Riquadro
@@ -701,7 +737,7 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
         icona={ClipboardList}
         sottotitolo="I movimenti finiti a dicembre che il portale non aveva ancora chiuso quando la fotografia e' stata presa. Il periodo di un movimento e' sempre la fine del trasporto: la chiusura a portale dice soltanto se la fotografia lo contiene gia'."
       >
-        <ElencoDicembre elenco={dossier.elenco_dicembre} decisioni={decisioni} onDecidi={decidi} />
+        <ElencoDicembre elenco={dossier.elenco_dicembre} decisioni={decisioni} onDecidi={decidi} daDecidere={dossier.riepilogo.voci_da_decidere} />
       </Riquadro>
 
       <Riquadro

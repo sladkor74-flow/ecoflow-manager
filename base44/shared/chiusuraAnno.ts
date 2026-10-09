@@ -30,7 +30,6 @@
 // voci si elencano ma non toccano nessuna lettura.
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { contaFormulari } from "./formulari.ts";
-import { formatoKg } from "./formato.ts";
 import {
   CLASSI_RILEVAZIONE,
   ancoraDellAnno,
@@ -301,8 +300,21 @@ export function rettificaDicembre(lettura, voci, decisioni = {}) {
     if (senzaClasse(v.canale)) { senza_classe.push(v); continue; }
     // L'extra raccolta a portale non c'e': si elenca, non tocca nessuna lettura.
     if (!CLASSI_DI_CANALE[v.canale]) { fuori_portale.push(v); continue; }
-    const scelta = String(decisioni[v.chiave] || '').trim();
-    if (!scelta) { da_decidere.push(v); continue; }
+    // LA DECISIONE PER DIFETTO E' RETTIFICARE, E NON E' UN'IPOTESI (09/10/2026).
+    //
+    // In questo elenco ci finisce solo chi il portale NON aveva ancora chiuso
+    // alla fotografia: e' il criterio con cui l'elenco si costruisce
+    // (elencoDicembre, `m.chiuso_il && m.chiuso_il <= foto` esce). Se il portale
+    // non l'aveva chiuso, nel saldo che si legge quel giorno non c'e': va
+    // rettificato. Chiedere all'utente di confermarlo voce per voce era
+    // chiedergli di ripetere quello che il portale ha gia' detto, e intanto la
+    // fotografia restava bloccata - su Nappi Sud, quattro movimenti di dicembre
+    // 2025 chiusi tutti il 07/01/2026.
+    //
+    // Resta sua l'ultima parola: «gia' nella lettura» se il portale quel saldo
+    // lo ricalcola all'indietro, o la classe in cui il portale l'ha messo.
+    const sceltaUtente = String(decisioni[v.chiave] || '').trim();
+    const scelta = sceltaUtente || 'rettifica';
     if (scelta === 'gia_nel_portale') { ignorate.push({ ...v, decisione: scelta }); continue; }
     const dove = classeDecisa(scelta);
     if (scelta !== 'rettifica' && !dove) { da_decidere.push(v); continue; }
@@ -313,7 +325,10 @@ export function rettificaDicembre(lettura, voci, decisioni = {}) {
     classi[v.classe] += segno * v.kg;
     // 'classe:X': il portale l'aveva messo in X, da li' si toglie.
     if (dove) classi[dove] -= segno * v.kg;
-    applicate.push({ ...v, decisione: scelta, classe_del_portale: dove || '', effetto_kg: segno * v.kg });
+    // `proposta`: l'ha decisa il gestionale, non l'utente. La pagina e i fogli
+    // lo dicono, cosi' una rettifica applicata da se' non passa per una scelta
+    // che qualcuno ha fatto.
+    applicate.push({ ...v, decisione: scelta, proposta: !sceltaUtente, classe_del_portale: dove || '', effetto_kg: segno * v.kg });
   }
 
   const differenza = {};
@@ -567,7 +582,7 @@ export function leggiLetteraGiacenze(fogli) {
           const cambiati = b.campi.filter(c => (prima[c] || 0) !== (v[c] || 0));
           if (cambiati.length) {
             avvisi.push({
-              tipo: 'blocchi_diversi', sito: v.nome, campi: cambiati,
+              tipo: 'blocchi_diversi', livello: 'attenzione', sito: v.nome, campi: cambiati,
               testo: `${v.nome} compare piu' volte nella lettera con numeri diversi (${cambiati.join(', ')}): vale l'ultima tabella.`,
             });
           }
@@ -580,7 +595,7 @@ export function leggiLetteraGiacenze(fogli) {
 
   const stoccaggi = unisci('stoccaggi');
   const impianti = unisci('impianti');
-  if (!blocchi.length) avvisi.push({ tipo: 'niente_da_leggere', testo: "Nel file non ho riconosciuto nessuna tabella: servono le intestazioni «GIACENZE IMPIANTI» o «GIACENZE STOCCAGGI»." });
+  if (!blocchi.length) avvisi.push({ tipo: 'niente_da_leggere', livello: 'attenzione', testo: "Nel file non ho riconosciuto nessuna tabella: servono le intestazioni «GIACENZE IMPIANTI» o «GIACENZE STOCCAGGI»." });
   return { al, blocchi: blocchi.length, stoccaggi, impianti, avvisi };
 }
 
@@ -615,7 +630,7 @@ export function confrontoLettera({ impianti = [], letture_impianti = {}, lettera
   const avvisi = [];
   for (const v of daLettera.values()) {
     if (visti.has(v.chiave)) continue;
-    avvisi.push({ tipo: 'solo_in_lettera', sito: v.nome, testo: `${v.nome} sta nella lettera ma non fra gli impianti del gestionale.` });
+    avvisi.push({ tipo: 'solo_in_lettera', livello: 'attenzione', sito: v.nome, testo: `${v.nome} sta nella lettera ma non fra gli impianti del gestionale.` });
   }
   return { righe, avvisi };
 }
@@ -671,30 +686,23 @@ export function preparaChiusura({
   // senza dirlo: e' successo davvero, il file si chiama 31-12-2025 e dentro
   // dichiara le giacenze al 31/12/2024.
   if (lettera && lettera.al && lettera.al !== giorno) {
-    avvisi.push({ tipo: 'lettera_altro_anno', testo: `La lettera dichiara le giacenze al ${lettera.al}, non al ${giorno}: controlla di aver caricato quella giusta.` });
+    avvisi.push({ tipo: 'lettera_altro_anno', livello: 'attenzione', testo: `La lettera dichiara le giacenze al ${lettera.al}, non al ${giorno}: controlla di aver caricato quella giusta.` });
   }
-  const perCanaleInParole = (per) => Object.entries(per)
-    .map(([canale, s]) => `${canale.replace(/_/g, ' ').toLowerCase()} ${s.n} per ${formatoKg(Math.abs(s.netto_kg))} kg netti`)
-    .join('; ');
-  if (elenco.n_per_classe) {
-    avvisi.push({ tipo: 'elenco_dicembre', n: elenco.n_per_classe, testo: `Ci sono ${elenco.n_per_classe} movimenti finiti a dicembre e non ancora chiusi a portale alla fotografia: ${perCanaleInParole(elenco.per_canale_per_classe)}. Senza una decisione su ognuno non stanno ne' in questa fotografia ne' fra i movimenti dell'anno nuovo, e si perdono.` });
-  }
-  // Quello su cui non si decide si dice a parte, col motivo vero: non c'e' un
-  // pulsante da premere, quindi chiedere una decisione sarebbe un avviso che non si
-  // puo' chiudere.
-  if (elenco.n_senza_classe) {
-    const motivi = [
-      elenco.n_senza_classe_terziarie ? `${elenco.n_senza_classe_terziarie} terziarie, che escono verso le cementerie e una classe non ce l'hanno` : '',
-      elenco.n_senza_classe_impianti ? `${elenco.n_senza_classe_impianti} movimenti di impianti, di cui il portale ci da' il totale e non la ripartizione per classe` : '',
-      elenco.n_senza_classe_extra ? `${elenco.n_senza_classe_extra} di extra raccolta, che a portale non c'e'` : '',
-    ].filter(Boolean);
+  // IN CIMA ALLA PAGINA SOLO QUELLO CHE CHIEDE QUALCOSA (09/10/2026).
+  //
+  // Erano tre riquadri ambra, ripetuti identici dentro la scheda dell'elenco, e
+  // due dei tre non chiedevano niente: le terziarie una classe non ce l'hanno e
+  // i movimenti degli impianti non entrano nella fotografia dei piazzali, quindi
+  // non c'e' nessun pulsante da premere e l'avviso non si poteva chiudere. Su
+  // 44 voci, 40 erano di questo tipo. Quello che si elenca e basta resta
+  // nell'elenco, dove sta accanto alle righe che racconta; qui sale solo quello
+  // che blocca la fotografia.
+  const daDecidere = confronti.reduce((s, c) => s + c.rettifica.da_decidere.length, 0);
+  if (daDecidere) {
     avvisi.push({
-      tipo: 'dicembre_senza_classe', n: elenco.n_senza_classe,
-      testo: `Ci sono anche ${elenco.n_senza_classe} movimenti finiti a dicembre e non ancora chiusi a portale su cui non c'e' una decisione per classe da prendere (${motivi.join('; ')}) per ${perCanaleInParole(elenco.per_canale_senza_classe)}. Si elencano perche' il file degli ordini non dichiarati del ${giorno} non li conterra' ancora.`,
+      tipo: 'elenco_dicembre', n: daDecidere, livello: 'attenzione',
+      testo: `Ci sono ${daDecidere} movimenti di dicembre su cui la decisione non e' chiara: finche' restano cosi' non stanno ne' in questa fotografia ne' fra i movimenti dell'anno nuovo, e si perdono.`,
     });
-  }
-  if (elenco.n_prima) {
-    avvisi.push({ tipo: 'aperti_prima_di_dicembre', n: elenco.n_prima, testo: `Ci sono anche ${elenco.n_prima} movimenti dell'anno finiti prima di dicembre e ancora aperti a portale alla fotografia (${perCanaleInParole(elenco.per_canale_prima)}): la fotografia non li contiene, e uno scarto che resta dopo la rettifica di dicembre di solito e' loro.` });
   }
 
   return {
