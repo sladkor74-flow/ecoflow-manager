@@ -235,19 +235,37 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                   questa riga e' la giacenza del canale, lo stesso numero della
                   colonna a destra e della quadratura col portale - prima no, e
                   quella era la confusione. */}
+              {/* Dove la rete non e' dovuta per accordo quello che resta e' giacenza
+                  e basta, non un arretrato: si scrive in grigio, come la colonna
+                  che tace. L'ambra qui farebbe sembrare un buco quello che un
+                  buco non e' (Tecnogum, 09/10/2026). */}
               <tr className={`border-b ${i % 2 ? 'bg-muted/20' : ''}`}>
-                <td className="px-3 pb-1.5 sticky left-0 bg-inherit text-[11px] text-muted-foreground">resta in giacenza</td>
-                {flusso.mesi.map(m => (
-                  <td key={m.mese} className="px-1 pb-1.5 text-center tabular-nums text-[11px]">
-                    {m.resta_kg > 0
-                      ? <span className="text-amber-700 font-medium" title={`Di ${m.mese} sono ancora in impianto ${formatKg(m.resta_kg)} kg`}>{formatTonnellate(m.resta_kg / 1000)}</span>
-                      : <span className="text-muted-foreground/50">—</span>}
-                  </td>
-                ))}
-                <td className="px-3 pb-1.5 text-right tabular-nums text-[11px] text-amber-700" title="La somma dei mesi: e' la giacenza del canale, lo stesso numero della colonna «Da dichiarare»">
-                  {formatTonnellate(flusso.resta_t)}
-                </td>
-                <td className="px-3 pb-1.5" />
+                {(() => {
+                  const nonDovuta = flusso.canale === 'RETE' && sito.dichiara_rete === false;
+                  const tono = nonDovuta ? 'text-muted-foreground' : 'text-amber-700 font-medium';
+                  const perche = nonDovuta
+                    ? 'è in impianto, ma di questo canale non ci deve dichiarazione: resta come storia'
+                    : 'sono ancora in impianto';
+                  return (
+                    <>
+                      <td className="px-3 pb-1.5 sticky left-0 bg-inherit text-[11px] text-muted-foreground">resta in giacenza</td>
+                      {flusso.mesi.map(m => (
+                        <td key={m.mese} className="px-1 pb-1.5 text-center tabular-nums text-[11px]">
+                          {m.resta_kg > 0
+                            ? <span className={tono} title={`Di ${m.mese} ${formatKg(m.resta_kg)} kg ${perche}`}>{formatTonnellate(m.resta_kg / 1000)}</span>
+                            : <span className="text-muted-foreground/50">—</span>}
+                        </td>
+                      ))}
+                      <td className={`px-3 pb-1.5 text-right tabular-nums text-[11px] ${nonDovuta ? 'text-muted-foreground' : 'text-amber-700'}`}
+                        title={nonDovuta
+                          ? 'La somma dei mesi: quello che è in impianto. Non è un arretrato: di questo canale non ci deve dichiarazione, per accordo'
+                          : 'La somma dei mesi: è la giacenza del canale, lo stesso numero della colonna «Da dichiarare»'}>
+                        {formatTonnellate(flusso.resta_t)}
+                      </td>
+                      <td className="px-3 pb-1.5" />
+                    </>
+                  );
+                })()}
               </tr>
               </React.Fragment>
             ))}
