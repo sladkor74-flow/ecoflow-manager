@@ -31,12 +31,27 @@ export default function Giacenze() {
   const [showTargetManager, setShowTargetManager] = useState(false);
   const [exporting, setExporting] = useState(false);
 
+  // PERCHE' NON HA RISPOSTO, E UN MODO PER RIPROVARE (09/10/2026).
+  //
+  // Il calcolo delle giacenze e' una funzione sola e lunga: ogni tanto non
+  // risponde - succede sempre subito dopo una pubblicazione, mentre la
+  // piattaforma rimette su le funzioni - e la pagina diceva «Errore nel
+  // caricamento.» e basta, senza il motivo e senza niente da premere. E' la
+  // regola della casa, scritta per i riquadri indipendenti e valida anche qui:
+  // chi non ha risposto si dice per nome, con «Riprova», e il resto resta a
+  // video.
+  const [errore, setErrore] = useState('');
+
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const res = await base44.functions.invoke('calcolaGiacenze', { anno });
       setData(res.data);
-    } catch (e) { console.error(e); }
+      setErrore('');
+    } catch (e) {
+      console.error(e);
+      setErrore(e?.response?.data?.error || e?.message || String(e));
+    }
     setLoading(false);
   }, [anno]);
 
@@ -84,6 +99,14 @@ export default function Giacenze() {
         <div className="flex justify-center py-12"><RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" /></div>
       ) : data ? (
         <>
+          {/* Un ricalcolo che non risponde non cancella quello che si ha davanti:
+              si dice che i numeri sono quelli di prima, e si puo' riprovare. */}
+          {errore && (
+            <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 text-xs flex flex-wrap items-center justify-between gap-2">
+              <span>L&apos;ultimo ricalcolo non ha risposto ({errore}): a video ci sono i numeri di prima.</span>
+              <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>Riprova</Button>
+            </div>
+          )}
           <GiacenzeKpi totali={data.totali} />
 
           {data.anomalie && data.anomalie.length > 0 && (
@@ -164,7 +187,15 @@ export default function Giacenze() {
           </Tabs>
         </>
       ) : (
-        <div className="text-center py-12 text-muted-foreground">Errore nel caricamento.</div>
+        <div className="text-center py-12 space-y-3">
+          <p className="text-muted-foreground">
+            Il calcolo delle giacenze non ha risposto{errore ? <>: <span className="text-foreground">{errore}</span></> : '.'}
+          </p>
+          <p className="text-xs text-muted-foreground">Capita subito dopo una pubblicazione, mentre le funzioni vengono rimesse su: di solito basta riprovare.</p>
+          <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
+            <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} /> Riprova
+          </Button>
+        </div>
       )}
 
       <TargetManager
