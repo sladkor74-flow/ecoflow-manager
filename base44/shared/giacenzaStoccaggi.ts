@@ -616,13 +616,28 @@ function confrontoConAncora(rilevazione, ancora, intermedie, movimenti) {
   }
   const nonTornano = inMezzo.filter(l => l.quadra === false);
 
+  // UNO SCARTO SPIEGATO DAGLI ISTANTI NON E' UNO SCARTO (09/10/2026).
+  //
+  // E' la stessa regola che l'08/10 ha tolto l'anomalia di NAPPI SUD, e qui
+  // mancava: con le due classi spiegate dai carichi arrivati il giorno della
+  // lettura e chiusi a portale il giorno dopo, l'avviso in cima taceva - giusto -
+  // mentre la scheda Stoccaggi scriveva «questa lettura non torna nemmeno con
+  // l'ancora». Due voci sullo stesso numero, che e' il difetto che si continua a
+  // pagare. I carichi sono giusti, la lettura e' giusta: non coincidono gli
+  // istanti, e la lettura e' confermata lo stesso - con il motivo scritto.
+  const soloTempi = c.quadra === false && (c.classi || []).every(x => !x.scarto || x.spiegazione === 'tempi');
+  const quadra = c.quadra === true || soloTempi;
+
   const daQuando = `l'ancora del ${annoDellaLettura(del)}, la lettura del ${giornoScritto(ancoraDel)} piu' tutti i movimenti da allora`;
   let nota;
-  if (c.quadra) {
+  if (quadra) {
     const chi = nonTornano.length
       ? ` A sbagliare ${nonTornano.length === 1 ? "e' la lettura" : 'sono le letture'} del ${nonTornano.map(l => giornoScritto(l.del)).join(' e del ')}.`
       : '';
-    nota = `Questa lettura torna con ${daQuando}: e' confermata.${chi}`;
+    const perTempi = soloTempi
+      ? ` ${(c.scostano || []).join(' e ')} ${(c.scostano || []).length === 1 ? 'si scosta' : 'si scostano'} solo per i tempi: i carichi arrivati quel giorno il portale li ha chiusi dopo, e la lettura e' stata presa prima che scaricassero.`
+      : '';
+    nota = `Questa lettura torna con ${daQuando}: e' confermata.${perTempi}${chi}`;
   } else {
     nota = `Questa lettura non torna nemmeno con ${daQuando}.`;
   }
@@ -631,7 +646,10 @@ function confrontoConAncora(rilevazione, ancora, intermedie, movimenti) {
     del: ancoraDel,
     senza_ancora: false,
     e_la_lettura: false,
-    quadra: c.quadra,
+    quadra,
+    // Torna, ma solo tenendo conto degli istanti: chi mostra il verdetto lo puo'
+    // dire invece di farlo passare per una quadratura secca.
+    solo_tempi: soloTempi,
     classi: c.classi,
     scostano: c.scostano,
     canali: c.canali,

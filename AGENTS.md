@@ -434,6 +434,21 @@ riallinea tutto da solo, che e' la seconda regola assoluta. Vale lo stesso
 ovunque ci sia una fotografia esterna da confrontare: la fotografia dice che cosa
 sapeva chi l'ha scattata, non che cosa e' successo.
 
+**Uno scarto spiegato dagli ISTANTI non e' uno scarto da inseguire**
+(08-09/10/2026, `spiegazione: 'tempi'` in `shared/giacenzaStoccaggi.ts`). NAPPI
+SUD, lettura del 05/10: otto carichi arrivati quel giorno che il portale ha
+chiuso il giorno dopo fanno lo scarto **esatto** (9.580 kg di P, 11.480 di M).
+Nessuno dei otto, da solo, lo faceva, e la rilevazione restava «da controllare»
+per sempre: si guarda la **somma** per classe e per verso, e solo se torna al
+chilo. I carichi sono giusti e la lettura e' giusta - il piazzale e' stato letto
+prima che scaricassero - quindi **l'anomalia non si alza, l'ancora conferma la
+lettura (`solo_tempi`) e la spiegazione resta scritta**. Le tre voci devono dire
+la stessa cosa: il 09/10 l'avviso in cima taceva mentre la scheda Stoccaggi
+scriveva «non torna nemmeno con l'ancora», ed e' il difetto che si continua a
+pagare. Diverso e' lo scarto spiegato da un **peso che torna esatto**: quasi
+sempre e' un formulario finito nella classe sbagliata (NAPPI SUD 16/09, P +6.160
+e M -6.160), e li' c'e' qualcosa da correggere - l'anomalia **resta**.
+
 Un assegnato non e' un movimento: il suo periodo e' `ordine_immesso_il`.
 
 ### Canali indipendenti

@@ -148,6 +148,35 @@ verifica('si dice da che cosa e\' confermata', rA.sintesi.includes("Torna pero' 
 verifica('e si dice quale lettura sbaglia e di quanto', rA.sintesi.includes("A sbagliare e' la lettura del 16/09/2026, di 6.160 kg fra P e M."), rA.sintesi);
 verifica('le classi che si scostano si mostrano lo stesso', rA.scostano.map(c => c.classe).sort().join() === 'M,P' && rA.sbagliano.map(l => l.del).join() === '2026-09-16');
 verifica('in due parole: confermata dall\'ancora', esitoBreve(confermata).testo === "confermata dall'ancora" && esitoBreve(confermata).stato === 'confermata_ancora');
+// --- LO SCARTO DI SOLI TEMPI SI DICE PER QUELLO CHE E' (09/10/2026) ---
+//
+// Su NAPPI SUD, lettura del 05/10: otto carichi arrivati quel giorno che il
+// portale ha chiuso il giorno dopo fanno lo scarto esatto. L'avviso in cima a
+// Giacenze taceva - giusto - e la scheda Stoccaggi scriveva «questa lettura non
+// torna nemmeno con l'ancora». Due voci sullo stesso numero. Nessuno ha
+// sbagliato: la lettura e' stata presa prima che scaricassero.
+console.log('LO SCARTO SPIEGATO DAGLI ISTANTI NON MANDA A CERCARE UN ERRORE');
+{
+  const ancora = { data_rilevazione: '2025-12-31', class1_kg: 10000, class2_kg: 1000, class3_kg: 0, class4_kg: 0, class9_kg: 0 };
+  const prima = { data_rilevazione: '2026-09-23', class1_kg: 10000, class2_kg: 1000, class3_kg: 0, class4_kg: 0, class9_kg: 0 };
+  const dopo = { data_rilevazione: '2026-10-05', class1_kg: 10000, class2_kg: 1000, class3_kg: 0, class4_kg: 0, class9_kg: 0 };
+  const arrivi = [
+    m('ET26164944', 820, '2026-10-05T08:00:00Z', '2026-10-06T09:00:00Z'),
+    m('ET26157608', 8760, '2026-10-05T09:00:00Z', '2026-10-06T09:00:00Z'),
+    m('ET26164729', 6560, '2026-10-05T08:00:00Z', '2026-10-06T09:00:00Z', { classe: 'M' }),
+    m('ET26161556', 4920, '2026-10-05T09:00:00Z', '2026-10-06T09:00:00Z', { classe: 'M' }),
+  ];
+  const tempi = verificaRilevazione(dopo, prima, arrivi, { ancora, intermedie: [prima] });
+  const rT = riassuntoVerifica(tempi);
+  verifica('il titolo dice che torna ed e\' questione di tempi', rT.stato === 'confermata_ancora' && rT.titolo === 'Torna: e\' questione di tempi', rT.titolo);
+  verifica('e la sintesi spiega che il piazzale e\' stato letto prima che scaricassero',
+    /letto prima che scaricassero/.test(rT.sintesi) && /non c'e' niente da correggere/.test(rT.sintesi), rT.sintesi);
+  verifica('non manda a cercare una lettura sbagliata che non c\'e\'',
+    !/A sbagliare/.test(rT.sintesi) && rT.sbagliano.length === 0, rT.sintesi);
+  verifica('le classi che si scostano si vedono lo stesso', rT.scostano.map(c => c.classe).sort().join() === 'M,P');
+  verifica('in due parole: torna, questione di tempi', esitoBreve(tempi).testo === 'torna: questione di tempi' && esitoBreve(tempi).stato === 'confermata_ancora');
+}
+
 // Il totale del canale torna: i chili non mancano, sono nella classe sbagliata.
 verifica('quanto sbaglia una lettura si dice per canale, mai sommando i canali',
   quantoSbaglia({ canali: { RETE: { quadra: false, ripartizione_sbagliata: true, spostati_kg: 6160, classi_che_scostano: ['P', 'M'], scarto_kg: 0 } } }) === '6.160 kg fra P e M');

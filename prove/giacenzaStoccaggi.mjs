@@ -119,6 +119,28 @@ console.log('PIU\' FORMULARI INSIEME FANNO LO SCARTO, E LO SPIEGANO');
   const senzaIndizi = verificaRilevazione(dopo, prima, chiusiPrima);
   verifica('se erano gia\' chiusi a portale prima della lettura, lo scarto resta da controllare',
     senzaIndizi.classi.find(x => x.classe === 'P').spiegato === false && anomaliaRilevazione(senzaIndizi) !== null);
+
+  // E LO DICE ANCHE L'ANCORA, CON LE STESSE PAROLE (09/10/2026).
+  //
+  // Il difetto: l'avviso in cima a Giacenze taceva - giusto - mentre la scheda
+  // Stoccaggi scriveva «questa lettura non torna nemmeno con l'ancora del 2026».
+  // Due voci sullo stesso numero. I carichi sono giusti e la lettura e' giusta:
+  // non coincidono gli istanti, e la lettura e' confermata lo stesso.
+  const ancora = { sito: 'NAPPI SUD', data_rilevazione: '2025-12-31', class1_kg: 10000, class2_kg: 1000, class3_kg: 0, class4_kg: 0, class9_kg: 0 };
+  const conAncora = verificaRilevazione(dopo, prima, arrivi, { ancora, intermedie: [prima] });
+  verifica('l\'ancora dice che la lettura torna, non che non torna',
+    conAncora.ancora.quadra === true && conAncora.confermata_dall_ancora === true, JSON.stringify(conAncora.ancora.nota));
+  verifica('e lo dice segnando che e\' per i tempi, non per una quadratura secca',
+    conAncora.ancora.solo_tempi === true && /solo per i tempi/.test(conAncora.ancora.nota), conAncora.ancora.nota);
+  verifica('la nota nomina le classi che si scostano', /P e M|P, M/.test(conAncora.ancora.nota), conAncora.ancora.nota);
+  verifica('e l\'avviso in cima resta zitto, come prima', anomaliaRilevazione(conAncora) === null);
+  // CONTRO-PROVA: basta una classe che i tempi non spiegano e l'ancora torna a
+  // dire che non torna.
+  const unaNonSpiegata = verificaRilevazione({ ...dopo, class3_kg: 500 }, prima, arrivi, { ancora, intermedie: [prima] });
+  verifica('con una classe che i tempi non spiegano l\'ancora non conferma piu\'',
+    unaNonSpiegata.ancora.quadra === false && unaNonSpiegata.ancora.solo_tempi === false
+    && /non torna nemmeno/.test(unaNonSpiegata.ancora.nota), unaNonSpiegata.ancora.nota);
+  verifica('e l\'avviso in cima torna a parlare', anomaliaRilevazione(unaNonSpiegata) !== null);
 }
 
 console.log('SE NON SI SPIEGA, SI DICE CHE NON SI SPIEGA');

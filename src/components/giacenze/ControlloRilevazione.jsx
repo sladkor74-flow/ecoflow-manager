@@ -113,6 +113,24 @@ export function riassuntoVerifica(v) {
   const dettaglioRipartizione = ripartizione.length
     ? ` ${ripartizione.length === 1 ? `Il totale ${ripartizione[0]} torna` : `I totali ${ripartizione.join(' e ')} tornano`}: a sbagliare e' la ripartizione fra le classi.`
     : '';
+  // SI SCOSTA, MA E' QUESTIONE DI ISTANTI (09/10/2026). I carichi arrivati il
+  // giorno della lettura che il portale ha chiuso il giorno dopo fanno lo scarto
+  // esatto: il piazzale e' stato letto prima che scaricassero. Nessuno ha
+  // sbagliato, e dirlo con le parole della lettura sbagliata - «a sbagliare e'
+  // una delle letture in mezzo» - manderebbe a cercare un errore che non c'e'.
+  if (v.ancora && v.ancora.solo_tempi && conAncora) {
+    const sbagliano = lettureCheSbagliano(v);
+    return {
+      stato: 'confermata_ancora',
+      titolo: 'Torna: e\' questione di tempi',
+      sintesi: `${contro}: ${scostano.length === 1 ? 'una classe legge un valore diverso' : `${scostano.length} classi leggono un valore diverso`} da quello atteso.`
+        + ` Con ${conAncora} torna, e lo scarto e' tutto nei carichi arrivati il giorno della lettura che il portale ha chiuso dopo: il piazzale e' stato letto prima che scaricassero, e non c'e' niente da correggere.`
+        + (sbagliano.length ? ` Resta da rifare ${sbagliano.length === 1 ? 'la lettura' : 'le letture'} ${chiSbaglia(sbagliano)}.` : ''),
+      scostano,
+      ripartizione,
+      sbagliano,
+    };
+  }
   // Si scosta dalla precedente ma torna con l'ancora dell'anno: e' giusta lei, e
   // a sbagliare e' una lettura in mezzo. E' il caso del 23/09 su NAPPI SUD.
   if (v.confermata_dall_ancora && conAncora) {
@@ -192,7 +210,11 @@ export function esitoBreve(v) {
   if (r.stato === 'senza_precedente') return { stato: 'senza_precedente', testo: 'prima rilevazione' };
   // Confermata dall'ancora: si scosta dalla precedente, ma e' la precedente a
   // sbagliare. Dire "si scosta" manderebbe a rileggere un piazzale appena letto.
-  if (r.stato === 'confermata_ancora') return { stato: 'confermata_ancora', testo: "confermata dall'ancora" };
+  if (r.stato === 'confermata_ancora') {
+    // Uno scarto di soli tempi si dice per quello che e': «confermata
+    // dall'ancora» e' vero ma fa pensare a una lettura in mezzo sbagliata.
+    return { stato: 'confermata_ancora', testo: v.ancora && v.ancora.solo_tempi ? 'torna: questione di tempi' : "confermata dall'ancora" };
+  }
   return { stato: 'scosta', testo: r.scostano.map(c => `${c.classe} ${kgSegno(c.scarto)}`).join(' · ') };
 }
 
