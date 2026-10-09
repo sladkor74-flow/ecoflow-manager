@@ -387,7 +387,12 @@ export function confrontoPiazzale(piazzale, { anno, fotografiaDel = '', lettura:
   const verifica_lettura = lettura ? verificaRilevazione(rilevazioneDaLettura(piazzale.nome, giorno, rett.lettura), precedente, movimenti, conAncora) : null;
   const verifica_da_salvare = lettura ? verificaRilevazione(rilevazioneDaLettura(piazzale.nome, giorno, rett.classi), precedente, movimenti, conAncora) : null;
 
-  const negative = CLASSI_RILEVAZIONE.filter(c => rett.classi[c] < 0);
+  // Una classe negativa si guarda solo DOVE UNA LETTURA C'E': rettificare un
+  // saldo che non si e' ancora letto parte da zero, e il meno viene da li', non
+  // da un piazzale in rosso. Senza questo, dal 09/10/2026 - da quando la
+  // rettifica si applica da se' - ogni piazzale non ancora letto si sarebbe
+  // portato dietro un secondo avviso che non voleva dire niente.
+  const negative = lettura ? CLASSI_RILEVAZIONE.filter(c => rett.classi[c] < 0) : [];
   const blocchi = [];
   if (!lettura) blocchi.push({ tipo: 'lettura_mancante', testo: `Manca la lettura del portale al ${giorno}: il saldo per classe della pagina Unita' Locali di Stoccaggio.` });
   if (rett.da_decidere.length) blocchi.push({ tipo: 'dicembre_da_decidere', n: rett.da_decidere.length, testo: `${rett.da_decidere.length === 1 ? "Una voce dell'elenco di dicembre e' senza decisione" : `${rett.da_decidere.length} voci dell'elenco di dicembre sono senza decisione`}: per ognuna va detto se la fotografia la contiene gia'.` });

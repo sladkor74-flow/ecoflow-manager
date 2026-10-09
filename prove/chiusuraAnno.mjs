@@ -215,6 +215,16 @@ verifica('la lettura del portale resta com\'era, accanto alla fotografia da salv
 verifica('ora si puo\' salvare', pieno.pronto === true && pieno.blocchi.length === 0);
 verifica('quello che gia\' c\'era nella fotografia non si tocca',
   confrontoPiazzale(piazzali[0], { anno: 2025, lettura: LETTURA, voci: nappi.voci, decisioni: { ...DECISIONI, 'nappi sud|stoc|primaria|ingresso|ET25122800|M': 'gia_nel_portale' } }).rettifica.classi.M === 26000);
+// Un piazzale non ancora letto non ha classi negative: la rettifica parte da
+// zero e il meno viene da li', non da un piazzale in rosso. Senza questa
+// prudenza, da quando la rettifica si applica da se' ogni piazzale non letto
+// si portava dietro un secondo avviso che non voleva dire niente (09/10/2026).
+const senzaLettura = confrontoPiazzale(piazzali[0], { anno: 2025, voci: nappi.voci });
+verifica('senza lettura non si inventano classi negative',
+  !senzaLettura.blocchi.some(b => b.tipo === 'classe_negativa')
+  && senzaLettura.blocchi.some(b => b.tipo === 'lettura_mancante'), JSON.stringify(senzaLettura.blocchi.map(b => b.tipo)));
+verifica('ma con una lettura che va sotto zero si dice',
+  confrontoPiazzale(piazzali[0], { anno: 2025, lettura: { P: 0, M: 0 }, voci: nappi.voci }).blocchi.some(b => b.tipo === 'classe_negativa'));
 
 console.log('IL CONFRONTO, CON LO STESSO CONTO DELLE RILEVAZIONI DI TUTTI I GIORNI');
 const attesaP = pieno.attesa.find(c => c.classe === 'P');
