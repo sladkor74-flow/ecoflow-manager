@@ -8,6 +8,8 @@ import { RefreshCw, Download, Save, Upload, AlertTriangle, CheckCircle2, Camera,
 import { formatKg } from '@/lib/utils';
 import { giorno, kgSegno } from '@/components/giacenze/ControlloRilevazione';
 import { AUTORE_FILE } from '@/lib/prodotto';
+import EsportaPdf from '@/components/shared/EsportaPdf';
+import { chiusuraAnnoPdf } from '@/lib/giacenzePdf';
 
 // La chiusura dell'anno, da una schermata sola.
 //
@@ -393,6 +395,28 @@ function Confronto({ c }) {
   );
 }
 
+/**
+ * CHE FINE HA FATTO UNA VOCE DI DICEMBRE, a parole. La regola sta qui una volta
+ * sola perche' il dossier Excel e il PDF della scheda non possano dire due cose
+ * diverse sulla stessa riga (09/10/2026).
+ */
+export function decisioneDiVoce(dossier, v) {
+  // Chi non ha classe non si decide per classe, qualunque sia il sito: le
+  // terziarie escono verso le cementerie e in un saldo per classe non ci sono.
+  if (senzaClasse(v)) return 'non ha classe';
+  const c = v.ruolo === 'stoc' ? dossier.piazzali.find(p => p.sito === v.sito) : null;
+  // Le voci di un impianto non si decidono: la sua giacenza non si legge per
+  // classe, si chiede il file degli ordini non dichiarati.
+  if (!c) return 'riguarda un impianto';
+  if (c.rettifica.applicate.some(x => x.chiave === v.chiave)) {
+    const a = c.rettifica.applicate.find(x => x.chiave === v.chiave);
+    return a.classe_del_portale ? `il portale lo ha in ${a.classe_del_portale}` : 'rettificata';
+  }
+  if (c.rettifica.ignorate.some(x => x.chiave === v.chiave)) return 'gia\' nella lettura';
+  if (c.rettifica.fuori_portale.some(x => x.chiave === v.chiave)) return 'fuori dal portale';
+  return 'da decidere';
+}
+
 // --- Il dossier Excel ---
 
 /**
@@ -450,22 +474,7 @@ export async function scaricaDossierChiusura(dossier) {
   const e = wb.addWorksheet('Elenco dicembre');
   e.columns = [{ width: 28 }, { width: 10 }, { width: 14 }, { width: 10 }, { width: 14 }, { width: 14 }, { width: 8 }, { width: 10 }, { width: 14 }, { width: 16 }, { width: 16 }, { width: 28 }, { width: 22 }, { width: 46 }];
   intesta(e, ['Sito', 'Ruolo', 'Movimento', 'Canale', 'ID ordine', 'Formulario', 'Classe', 'Verso', 'Peso (kg)', 'Fine trasporto', 'Chiuso a portale', 'Controparte', 'Decisione', 'Perche\'']);
-  const decisioneDi = (v) => {
-    // Chi non ha classe non si decide per classe, qualunque sia il sito: le
-    // terziarie escono verso le cementerie e in un saldo per classe non ci sono.
-    if (senzaClasse(v)) return 'non ha classe';
-    const c = v.ruolo === 'stoc' ? dossier.piazzali.find(p => p.sito === v.sito) : null;
-    // Le voci di un impianto non si decidono: la sua giacenza non si legge per
-    // classe, si chiede il file degli ordini non dichiarati.
-    if (!c) return 'riguarda un impianto';
-    if (c.rettifica.applicate.some(x => x.chiave === v.chiave)) {
-      const a = c.rettifica.applicate.find(x => x.chiave === v.chiave);
-      return a.classe_del_portale ? `il portale lo ha in ${a.classe_del_portale}` : 'rettificata';
-    }
-    if (c.rettifica.ignorate.some(x => x.chiave === v.chiave)) return 'gia\' nella lettura';
-    if (c.rettifica.fuori_portale.some(x => x.chiave === v.chiave)) return 'fuori dal portale';
-    return 'da decidere';
-  };
+  const decisioneDi = (v) => decisioneDiVoce(dossier, v);
   const scriviVoce = (ws, v, quando) => {
     const riga = ws.addRow([v.nome, v.ruolo === 'stoc' ? 'piazzale' : 'impianto', v.tipo, nomeCanale(v.canale), v.id_ordine, v.numero_fir, v.classe || 'senza classe',
       v.verso === 'uscita' ? 'uscita' : 'entrata', v.verso === 'uscita' ? -v.kg : v.kg, v.finito_il, v.chiuso_il || 'non ancora', v.controparte, quando, v.perche]);
@@ -659,6 +668,13 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
           <Button variant="outline" size="sm" onClick={() => scaricaDossierChiusura(dossier)} disabled={caricamento}>
             <Download className="w-4 h-4 mr-1" /> Scarica il dossier
           </Button>
+          {/* Il PDF della scheda com'e' adesso: le letture che si stanno
+              scrivendo ci sono gia' dentro, perche' il dossier le rifa' a ogni
+              «Aggiorna il confronto» (09/10/2026). */}
+          <EsportaPdf
+            disabilitato={caricamento}
+            sezioni={() => chiusuraAnnoPdf(dossier, { decisioneDi: (v) => decisioneDiVoce(dossier, v), pesoInParole, nomeCanale })}
+          />
           {isAdmin && (
             <Button size="sm" onClick={() => setConferma(true)} disabled={caricamento || inCorso === 'salva' || !pronti.length}>
               <Save className="w-4 h-4 mr-1" /> Salva {pronti.length ? `${pronti.length} ` : ''}fotografie

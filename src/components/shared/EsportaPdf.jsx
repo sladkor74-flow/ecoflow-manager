@@ -20,6 +20,10 @@ import { Loader2, FileDown } from 'lucide-react';
 // `sezioni` e' una funzione che costruisce gli argomenti al momento del clic
 // (nomeFile, titolo, sottotitolo, riepilogo, sezioni, note): si valuta li' per
 // prendere i dati come sono adesso, non come erano quando la pagina e' nata.
+// Puo' essere ASINCRONA (09/10/2026): la scheda «Da dichiarare» a video ha cento
+// righe per pagina, e nel PDF ci devono andare tutte - si vanno a prendere al
+// clic, come fa gia' l'export Excel. Senza l'await qui, la promessa finiva al
+// posto degli argomenti e il pulsante diceva «niente da esportare».
 export default function EsportaPdf({ sezioni, etichetta = 'Esporta PDF', disabilitato = false, className = '' }) {
   const { toast } = useToast();
   const [lavoro, setLavoro] = useState(false);
@@ -27,7 +31,7 @@ export default function EsportaPdf({ sezioni, etichetta = 'Esporta PDF', disabil
   const esporta = async () => {
     setLavoro(true);
     try {
-      const argomenti = typeof sezioni === 'function' ? sezioni() : sezioni;
+      const argomenti = await (typeof sezioni === 'function' ? sezioni() : sezioni);
       if (!argomenti || !(argomenti.sezioni || []).some(s => (s.righe || []).length)) {
         toast({ title: 'Niente da esportare', description: 'Questa scheda non ha righe da mettere nel PDF.' });
         setLavoro(false);

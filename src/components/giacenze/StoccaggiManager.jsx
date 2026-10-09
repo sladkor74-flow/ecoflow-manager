@@ -11,6 +11,8 @@ import ControlloRilevazione, { EsitoRilevazione, riassuntoVerifica, giorno } fro
 import { EsitoRiconciliazione, RiconciliazioneDialog } from './Riconciliazione';
 import { formatNumber, formatTonnellate } from '@/lib/utils';
 import { riassuntoGruppo } from '@/components/giacenze/DateDaSistemare';
+import EsportaPdf from '@/components/shared/EsportaPdf';
+import { stoccaggiPdf } from '@/lib/giacenzePdf';
 
 function fmt(n, dec = 2) {
   if (n == null || isNaN(n)) return '—';
@@ -197,6 +199,31 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
     setEliminando(false);
   };
 
+  // IL PDF DELLA SCHEDA (09/10/2026): la lettura del portale di ogni piazzale
+  // accanto alla giacenza di oggi, con l'esito del controllo a parole. Le due
+  // colonne restano distinte anche nel PDF, perche' una lettura vecchia non e'
+  // la giacenza di adesso.
+  const sezioniPdf = () => {
+    const perPdf = righe.map(r => {
+      const oggi = giacenzaPerSito.get(normalizzaRagioneSociale(r.sito)) || {};
+      return {
+        ...r,
+        giacenza_rete_t: oggi.giacenza_rete_t ?? null,
+        giacenza_aci_t: oggi.giacenza_aci_t ?? null,
+      };
+    });
+    const esitoDi = (r) => {
+      const v = verifichePerSito.get(normalizzaRagioneSociale(r.sito));
+      const x = riassuntoVerifica(v);
+      return x ? `${x.titolo}. ${x.sintesi}` : 'nessun controllo: manca la rilevazione';
+    };
+    // L'anno della scheda e' quello della rilevazione piu' recente: le giacenze
+    // di un piazzale non hanno un anno loro, e scriverne uno sbagliato in
+    // intestazione sarebbe peggio che prenderlo da qui.
+    const anno = Number(String(perPdf[0]?.data_rilevazione || '').slice(0, 4)) || new Date().getFullYear();
+    return stoccaggiPdf(anno, perPdf, esitoDi);
+  };
+
   const handleNuova = (record) => { setPrecompilato(record); setShowForm(true); };
   const handleAggiungi = () => { setPrecompilato(null); setShowForm(true); };
   const handleStorico = (record) => {
@@ -232,12 +259,16 @@ export default function StoccaggiManager({ stoccaggiFromCalcolo = [], isAdmin, o
         Il portale espone il saldo degli stoccaggi nella pagina Unita' Locali di Stoccaggio, che non e' esportabile. Rileva qui i valori per classe quando consulti il portale: il modulo usa sempre la rilevazione piu' recente di ciascun sito.
       </div>
 
-      {isAdmin && (
+      {/* Il PDF lo esporta chiunque guardi la scheda: consultare ed esportare non
+          e' modificare (regola dei permessi). I pulsanti che scrivono restano
+          all'amministratore. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={handleAggiungi}><Plus className="w-4 h-4 mr-1" /> Aggiungi rilevazione</Button>
-          <Button variant="outline" size="sm" onClick={handleSeedSimula} disabled={seeding}><Upload className="w-4 h-4 mr-1" /> Importa rilevazione iniziale</Button>
+          {isAdmin && <Button size="sm" onClick={handleAggiungi}><Plus className="w-4 h-4 mr-1" /> Aggiungi rilevazione</Button>}
+          {isAdmin && <Button variant="outline" size="sm" onClick={handleSeedSimula} disabled={seeding}><Upload className="w-4 h-4 mr-1" /> Importa rilevazione iniziale</Button>}
         </div>
-      )}
+        <EsportaPdf sezioni={sezioniPdf} disabilitato={loading} />
+      </div>
 
       {loading ? (
         <div className="text-center py-8 text-muted-foreground">Caricamento...</div>

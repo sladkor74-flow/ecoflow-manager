@@ -393,6 +393,10 @@ const senzaGrafica = {
   name: 'senza-grafica',
   setup(b) {
     b.onResolve({ filter: /^react(\/|$)|^lucide-react$|^@\/components\/ui\/|^@\/api\//, }, () => ({ path: 'vuoto', namespace: 'stub' }));
+    // Il pulsante del PDF e' grafica: il suo caricatore tira dentro jspdf e
+    // xlsx, che a questa prova - che scrive un .xlsx col solo exceljs - non
+    // servono, e che esbuild qui non saprebbe risolvere (09/10/2026).
+    b.onResolve({ filter: /^@\/components\/shared\// }, () => ({ path: 'vuoto', namespace: 'stub' }));
     b.onResolve({ filter: /^@\/lib\// }, (a) => ({ path: qui('../src/lib/' + a.path.replace('@/lib/', '') + '.js') }));
     b.onResolve({ filter: /^@\/components\/giacenze\// }, (a) => ({ path: qui('../src/components/giacenze/' + a.path.replace('@/components/giacenze/', '') + '.jsx') }));
     b.onResolve({ filter: /^exceljs$/ }, () => ({ path: pathToFileURL(qui('../node_modules/exceljs/dist/exceljs.js')).href, external: true }));

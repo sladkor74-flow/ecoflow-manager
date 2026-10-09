@@ -213,8 +213,13 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
  *
  * sezioni: [{ titolo, colonne: [{ titolo, tipo, peso }], righe: [{ celle: [...], stile?: 'gruppo'|'totale' }] }]
  * riepilogo: [{ etichetta, valore }] mostrato sotto la testata; note: [testo] in coda.
+ *
+ * titoloNote: il titolo del blocco in coda. Il default nasce dalla fatturazione
+ * («Anomalie da guardare prima di pagare») e li' va bene; nelle schede di
+ * Giacenze le note spiegano come si leggono i numeri e quel titolo diceva
+ * un'altra cosa (09/10/2026).
  */
-export async function esportaSezioniPdf({ nomeFile, intestazione, titolo, sottotitolo, sezioni, riepilogo, note }) {
+export async function esportaSezioniPdf({ nomeFile, intestazione, titolo, sottotitolo, sezioni, riepilogo, note, titoloNote = 'Anomalie da guardare prima di pagare' }) {
   const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
@@ -304,7 +309,7 @@ export async function esportaSezioniPdf({ nomeFile, intestazione, titolo, sottot
 
   if (note && note.length) {
     if (y + 12 > H - 12) nuovaPagina();
-    doc.setTextColor(...C.ambra); doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text('Anomalie da guardare prima di pagare', M, y + 4); y += 8;
+    doc.setTextColor(...C.ambra); doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text(perPdf(titoloNote), M, y + 4); y += 8;
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7.6); doc.setTextColor(...C.testo);
     for (const n of note) {
       const righe = doc.splitTextToSize(`•  ${perPdf(n)}`, W - 2 * M);

@@ -8,6 +8,8 @@ import { exportDaDichiarareExcel } from '@/lib/giacenzeDaDichiarareExport';
 import { formatKg, formatIntero } from '@/lib/utils';
 import { giornoRoma } from '@/lib/giornoItaliano';
 import { creaSequenza } from '@/lib/ultimaRichiesta';
+import EsportaPdf from '@/components/shared/EsportaPdf';
+import { daDichiararePdf } from '@/lib/giacenzePdf';
 
 // I pesi di questa lista sono chilogrammi: sempre interi. Si scrivevano con
 // formatTonnellate, e un peso in kg usciva con i decimali delle tonnellate.
@@ -110,25 +112,41 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
     onPulisciFiltroSito();
   };
 
+  // I filtri che si hanno davanti, come li vuole la funzione. Uno solo, perche'
+  // l'Excel e il PDF devono portare esattamente le stesse righe: se si guardano
+  // i carichi da dichiarare di un impianto, nel file non finiscono quelli
+  // passati dal suo piazzale e gia' ripartiti (utente, 08/10/2026).
+  const payloadFiltrato = useCallback((extra = {}) => {
+    const payload = { tutte: true, offset: 0, ...extra };
+    if (sito) payload.sito = sito;
+    if (provincia) payload.provincia = provincia;
+    if (annoChiusura) payload.anno = Number(annoChiusura);
+    if (ricerca) payload.ricerca = ricerca;
+    if (soloDate) payload.solo_date_da_sistemare = true;
+    if (ruolo) payload.ruolo = ruolo;
+    return payload;
+  }, [sito, provincia, annoChiusura, ricerca, soloDate, ruolo]);
+
   const handleExport = async () => {
     // Scarica tutto l'elenco filtrato (senza limite) per l'export
     try {
       // tutte: le righe non si tagliano a mille, come il totale.
-      const payload = { tutte: true, offset: 0 };
-      if (sito) payload.sito = sito;
-      if (provincia) payload.provincia = provincia;
-      if (annoChiusura) payload.anno = Number(annoChiusura);
-      if (ricerca) payload.ricerca = ricerca;
-      if (soloDate) payload.solo_date_da_sistemare = true;
-      // L'esportazione porta esattamente quello che si vede: se si guardano i
-      // carichi da dichiarare di un impianto, nel file non finiscono quelli
-      // passati dal suo piazzale e gia' ripartiti (utente, 08/10/2026).
-      if (ruolo) payload.ruolo = ruolo;
-      const res = await base44.functions.invoke('getOrdiniDaDichiarare', payload);
+      const res = await base44.functions.invoke('getOrdiniDaDichiarare', payloadFiltrato());
       exportDaDichiarareExcel(res.data.righe, res.data.totale_righe, res.data.totale_kg);
     } catch (e) {
       alert('Errore nell\'export: ' + e.message);
     }
+  };
+
+  // IL PDF DELLA SCHEDA (09/10/2026). Nel PDF vanno TUTTE le righe del filtro,
+  // non le cento della pagina: un totale sotto una tabella parziale e' la
+  // lettura che ha fatto credere che ottobre non fosse contato. Si vanno a
+  // prendere al clic, come fa l'Excel.
+  const sezioniPdf = async () => {
+    const res = await base44.functions.invoke('getOrdiniDaDichiarare', payloadFiltrato());
+    return daDichiararePdf(annoChiusura || new Date().getFullYear(), res.data, {
+      sito, ruolo, provincia, anno: annoChiusura, ricerca, solo_date: soloDate,
+    });
   };
 
   const righe = data?.righe || [];
@@ -191,6 +209,7 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
         <Button variant="outline" size="sm" onClick={handleExport} disabled={loading}>
           <Download className="w-4 h-4 mr-1" /> Esporta Excel
         </Button>
+        <EsportaPdf sezioni={sezioniPdf} disabilitato={loading} />
         {sito && (
           <Button variant="ghost" size="sm" onClick={handlePulisciSito} title="Torna a vedere tutti i siti. Non cancella niente.">
             Mostra tutti i siti

@@ -193,6 +193,24 @@ Tagliare alla prima riga faceva sparire l'unita' di misura: "Prezzo Unitario
 per `esportaTabellaPdf` e per `esportaSezioniPdf`; la prova `prove/pdfTabella.mjs`
 rende il PDF in memoria e rilegge le scritte, cosi' il taglio non puo' tornare.
 
+**Ogni sottosezione di Giacenze e di Target & Status ha il suo pulsante PDF**
+(regola dell'utente, 06/10/2026: «in tutte le loro sotto sezioni dovrebbe
+esserci un pulsante per esportare in pdf la situazione presente in ogni
+momento»). Il pulsante (`src/components/shared/EsportaPdf.jsx`) sta DENTRO la
+scheda, non in testa alla pagina, cosi' quello che esce e' quello che si ha
+davanti, coi filtri e l'anno di quel momento; le sezioni le costruisce
+`src/lib/giacenzePdf.js` e le disegna `esportaSezioniPdf`. Le sei schede di
+Giacenze sono tutte coperte dal 09/10/2026 (`prove/esportaPdfSchede.mjs` lo
+verifica scheda per scheda, cosi' una scheda nuova non nasce muta). Tre cose
+imparate quel giorno: la funzione delle sezioni **puo' essere asincrona** (quella
+di «Da dichiarare» va a prendersi TUTTE le righe del filtro, perche' un totale
+sotto una tabella di cento righe e' proprio l'inganno corretto in quei giorni);
+il titolo delle note in coda e' il parametro `titoloNote`, perche' il default
+nasce dalla fatturazione («Anomalie da guardare prima di pagare») e nelle
+giacenze diceva un'altra cosa; e una regola che serve a due esportazioni - com'e'
+finita una voce di dicembre - si scrive in un posto solo (`decisioneDiVoce`),
+altrimenti l'Excel e il PDF raccontano la stessa riga in due modi.
+
 **Quando una pagina carica piu' riquadri indipendenti si usa
 `Promise.allSettled`, non `Promise.all`.** Le funzioni che leggono gli archivi
 grandi ogni tanto cadono: su Terminati Rete bastava `computeRaccoglitoriMix` a
