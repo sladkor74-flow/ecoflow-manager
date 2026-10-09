@@ -96,7 +96,7 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
     if (totaleMateriali > 0 && Number(dati.quantita_kg) === 0) imposta('quantita_kg', totaleMateriali);
   }, [totaleMateriali]);
 
-  const controlli = controlliDichiarazione({ ...dati }, mese.conferito_kg, flusso.operazione, { tipo_destinazione: sito.tipo_destinazione, canale: flusso.canale, dichiara_rete: sito.dichiara_rete, non_dichiarato_kg: mese.non_dichiarato_kg });
+  const controlli = controlliDichiarazione({ ...dati }, mese.conferito_kg, flusso.operazione, { tipo_destinazione: sito.tipo_destinazione, canale: flusso.canale, dichiara_rete: sito.dichiara_rete, non_dichiarato_kg: mese.non_dichiarato_kg, resta_kg: mese.resta_kg });
   const canale = CANALI.find(c => c.chiave === flusso.canale);
   // I formulari di questo canale arrivati all'impianto senza fine trasporto: non
   // sono nell'arrivato di nessun mese, questo compreso, finche' la data non arriva
@@ -156,6 +156,25 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
               <span className="block mt-1">
                 di cui {kg(mese.diretto_kg)} kg in primaria e {mese.da_stoccaggi.map(s => `${kg(s.kg)} kg in secondaria da ${s.stoccaggio}`).join(', ')}:
                 lo stoccaggio non dichiara, la dichiarazione di quei PFU la fa questo impianto.
+              </span>
+            )}
+            {/* CHE FINE HANNO FATTO I PFU DI QUESTO MESE (09/10/2026).
+                Il portale aggancia le quantita' agli ordini piu' vecchi aperti:
+                i PFU di gennaio escono con la dichiarazione di marzo, e senza
+                dirlo qui il mese sembra non dichiarato. Il report del portale lo
+                dice ordine per ordine, e il gestionale lo riporta. */}
+            {mese.conferito_kg > 0 && (
+              <span className="block mt-1">
+                di quel materiale sono usciti <strong>{kg(mese.uscito_kg || 0)} kg</strong>
+                {mese.uscito_stimato ? ' (in parte ripartiti dal gestionale: il report del portale non ha ancora quella dichiarazione)' : ''}
+                {' '}e restano in giacenza <strong>{kg(mese.resta_kg || 0)} kg</strong>.
+              </span>
+            )}
+            {mese.copre && mese.copre.mesi && mese.copre.mesi.length > 0 && (
+              <span className="block mt-1">
+                La dichiarazione di questo mese è stata caricata a portale il{' '}
+                {String(mese.copre.giorno).split('-').reverse().join('/')} per {kg(mese.copre.kg)} kg e ha chiuso:{' '}
+                {mese.copre.mesi.map(x => `${x.mese} ${kg(x.kg)} kg`).join(', ')}.
               </span>
             )}
           </DialogDescription>

@@ -20,7 +20,7 @@ export async function esportaDichiarazioni(dati) {
   // righe seminate, contiene il DA dichiarare, e il foglio diceva il contrario
   // dello schermo.
   const riepilogo = [['Impianto', 'Canale', 'Operazione', 'Voce', ...MESI, 'Totale (t)']];
-  const dettaglio = [['Impianto', 'Canale', 'Operazione', 'Mese', 'Conferito (kg)', 'Dichiarato (kg)', 'Granulo (kg)', 'Fibre (kg)', 'Metalli (kg)', 'Ciabattato (kg)', 'Cippato (kg)', 'CSS-C (kg)', 'Altro (kg)', 'Stato', 'Ricevuta il', 'Caricata il', 'Note']];
+  const dettaglio = [['Impianto', 'Canale', 'Operazione', 'Mese', 'Conferito (kg)', 'Uscito (kg)', 'Resta in giacenza (kg)', 'Dichiarato (kg)', 'Granulo (kg)', 'Fibre (kg)', 'Metalli (kg)', 'Ciabattato (kg)', 'Cippato (kg)', 'CSS-C (kg)', 'Altro (kg)', 'Stato', 'Ricevuta il', 'Caricata il', 'Note']];
   for (const s of dati.siti.filter(x => x.tipo_destinazione !== 'stoc')) {
     for (const f of s.flussi) {
       riepilogo.push([
@@ -28,16 +28,33 @@ export async function esportaDichiarazioni(dati) {
         ...f.mesi.map(m => caricatoDelMese(m) || null),
         f.dichiarato_caricato_t,
       ]);
+      // LE QUATTRO VOCI DELLO SCHERMO (09/10/2026). «Dichiarato a portale» e' il
+      // caricamento fatto in quel mese - per un R1 il mese della nave - e porta
+      // via anche i mesi di prima; «Uscito» e' quanto dei carichi DI QUEL MESE e'
+      // andato, con qualunque dichiarazione; «Resta» e' il complemento, e la sua
+      // somma e' la giacenza. Senza le due voci nuove il foglio ripeteva il
+      // difetto corretto a video: i mesi non tornavano col totale.
+      riepilogo.push([
+        s.sito, nomeCanale(f), s.operazione || '', 'Uscito nel mese',
+        ...f.mesi.map(m => m.uscito_kg || null),
+        f.uscito_t,
+      ]);
       riepilogo.push([
         s.sito, nomeCanale(f), s.operazione || '', 'Conferito nel mese',
         ...f.mesi.map(m => m.conferito_kg || null),
         f.conferito_t,
+      ]);
+      riepilogo.push([
+        s.sito, nomeCanale(f), s.operazione || '', 'Resta in giacenza',
+        ...f.mesi.map(m => m.resta_kg || null),
+        f.resta_t,
       ]);
       for (const m of f.mesi) {
         const d = m.dichiarazione;
         if (!d && !m.conferito_kg) continue;
         dettaglio.push([
           s.sito, nomeCanale(f), s.operazione || '', m.mese, m.conferito_kg || null,
+          m.uscito_kg || null, m.resta_kg || null,
           d ? d.quantita_kg : null, d ? d.granulo_kg : null, d ? d.fibre_kg : null, d ? d.metalli_kg : null,
           d ? d.ciabattato_kg : null, d ? d.cippato_kg : null, d ? d.cssc_kg : null, d ? d.altro_kg : null,
           STATO_PAROLE[statoDichiarazione(d, { canale: f.canale, dichiara_rete: s.dichiara_rete })], (d && d.ricevuta_il) || '', (d && d.caricata_il) || '', (d && d.note) || '',

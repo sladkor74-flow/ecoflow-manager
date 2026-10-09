@@ -1134,11 +1134,50 @@ quella prova.
   pagina, dove stanno in testa in rosso. Il mese e' un'inferenza, quindi si
   **propone**: i valori li scrive l'utente.
 - **Quanto resta da dichiarare di un mese sono gli INGRESSI del mese in quell'
-  impianto** (regola dell'utente, 01/10/2026), meno il dichiarato di quel mese:
-  `da_dichiarare_kg` nei flussi di `riepilogoDichiarazioni`. Prima lo diceva solo
-  la fotografia del portale (`non_dichiarato_kg`), che e' di un giorno preciso e
-  puo' essere vecchia di settimane: un mese appena conferito usciva a zero e la
-  riga dell'impianto **spariva** dal riepilogo. La fotografia resta un riscontro.
+  impianto** (regola dell'utente, 01/10/2026), meno **quello che di quei carichi
+  e' uscito**: `da_dichiarare_kg` nei flussi di `riepilogoDichiarazioni`. Prima lo
+  diceva solo la fotografia del portale (`non_dichiarato_kg`), che e' di un giorno
+  preciso e puo' essere vecchia di settimane: un mese appena conferito usciva a
+  zero e la riga dell'impianto **spariva** dal riepilogo. La fotografia resta un
+  riscontro.
+- **Una dichiarazione non appartiene al suo mese: svuota i mesi di prima**
+  (regola dell'utente, 09/10/2026, `base44/shared/usciteDichiarate.ts`, prove in
+  `prove/usciteDichiarate.mjs`). Il portale aggancia le quantita' agli **ordini
+  piu' vecchi ancora aperti**, quindi la dichiarazione di marzo porta via gennaio,
+  febbraio e parte di marzo. Il dichiarato **di quel mese** quindi non e' quello
+  che di quel mese e' uscito, e sottraendolo li' le caselle contraddicevano la
+  colonna del totale: su T-Cycle 532,68 t contro 352,94. Parole sue: «tenerlo in
+  giallo potrebbe confondere... marcando in verde i quantitativi effettivamente
+  usciti e lasciando in basso la parte restante in giacenza oltre agli ingressi
+  del mese e colorare diversamente le celle in cui avviene il caricamento a
+  portale».
+  **Non si deduce, si legge**: il report delle dichiarazioni di trattamento ha una
+  riga per ORDINE (`peso_associato_kg`, `data_dichiarazione`) e dice quanto di ogni
+  mese di arrivo e' uscito e con quale caricamento. Due accortezze: solo le righe
+  con partner operativo SMOCO, e il mese di un carico passato da uno stoccaggio e'
+  quello in cui la **secondaria** e' arrivata all'impianto (senza, su Irigom tre
+  mesi uscivano negativi e il totale diceva 652,28 t invece di 637,44). Il conto si
+  chiude sulla **giacenza del canale**, che e' il numero certo: quello che il report
+  non ha ancora - una dichiarazione caricata dopo l'ultimo export - si ripartisce
+  dai mesi piu' vecchi e la casella lo segna come stimato (`~`). Dove invece il
+  portale ha agganciato piu' delle nostre dichiarazioni non si aggiusta niente: si
+  scrive (`uscito_oltre_kg`). **Il canale e' solo la rete**: per ACI ed extra
+  raccolta il portale non pubblica nessun aggancio.
+  Nel riepilogo ogni riga ha tre linee - uscito (verde pieno se tutto, chiaro se in
+  parte; **indaco** il mese in cui si e' caricato a portale), conferito nel mese,
+  resta in giacenza - e la somma della terza E' la colonna «Da dichiarare»: 352,94
+  su T-Cycle, 637,44 su Irigom, 321,70 su Green Tyre, 251,72 su Gatim, gli stessi
+  numeri del portale mese per mese.
+- **L'elenco degli ordini da dichiarare dice di quali mesi e'** (regola
+  dell'utente, 09/10/2026, `per_mese` in `getOrdiniDaDichiarare`, prove in
+  `prove/ordiniPerMese.mjs`). Il conto era giusto - su T-Cycle 114 ordini per
+  352.940 kg, esattamente la giacenza - ma l'elenco parte dal carico piu' vecchio
+  e mostra cento righe per pagina: la prima pagina finiva a settembre (318.460 kg)
+  e sotto c'era il totale di tutte (352.940). «Non compaiono poi in elenco gli
+  ingressi di ottobre e mi chiedo: come fai a trovarti con la giacenza attuale?».
+  I mesi si contano su **tutto l'elenco filtrato**, non sulla pagina, stanno sopra
+  la tabella e fanno da riscontro alla giacenza; il totale sotto le righe dice di
+  essere dell'elenco, e dove la pagina non basta si scrive anche il suo.
 - **Ogni mese** (procedura dell'utente, 22/09/2026). L'utente aggiorna il
   registro di Irigom e lo dice; **l'agente lo legge e riferisce**: quanti e quali
   formulari di ferro valgono (colore della cella e nota, con il motivo di ognuno),

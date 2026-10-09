@@ -103,7 +103,9 @@ export const STATI = {
   solo_metalli: { nome: 'Solo metalli ferrosi usciti: nessuna gomma da dichiarare, il ferro va con la prossima uscita di gomma', classe: 'bg-sky-50 text-sky-900' },
   inserita: { nome: 'Quantita\' inserita, documento non ancora segnato', classe: 'bg-slate-100' },
   ricevuta: { nome: 'Dichiarazione in mano, non ancora caricata a portale', classe: 'bg-emerald-100' },
-  caricata: { nome: 'Caricata a portale: decurta la giacenza', classe: 'bg-emerald-600 text-white' },
+  // Indaco, non verde: il verde dice che quei PFU sono usciti, l'indaco che
+  // qui si e' caricata la dichiarazione a portale (utente, 09/10/2026).
+  caricata: { nome: 'Caricata a portale: decurta la giacenza', classe: 'bg-indigo-600 text-white' },
 };
 
 const kg = (v) => Math.round(Number(v) || 0);
@@ -127,7 +129,14 @@ export function controlliDichiarazione(d, conferito, operazione, dove = {}) {
   // Se il portale non aspetta piu' niente per quel mese, la dichiarazione c'e'
   // stata: magari dentro quella del mese dopo, perche' il portale scala gli ordini
   // dal piu' vecchio. Non manca nulla e non si segnala.
-  const attesoAPortale = dove.non_dichiarato_kg === undefined || dove.non_dichiarato_kg > 0;
+  // Dal 09/10/2026 lo dice il conto del mese, non piu la sola fotografia: resta_kg
+  // e quello che di quel mese non e ancora uscito, e tiene conto delle
+  // dichiarazioni che hanno chiuso i suoi carichi anche se portano un altro mese
+  // (shared/usciteDichiarate.ts). La fotografia resta il ripiego per chi non lo
+  // passa.
+  const attesoAPortale = dove.resta_kg !== undefined && dove.resta_kg !== null
+    ? dove.resta_kg > 0
+    : (dove.non_dichiarato_kg === undefined || dove.non_dichiarato_kg > 0);
   // Un mese segnato come non dovuto o di soli metalli e' a posto cosi'.
   const giustificato = !!(d && d.motivo_assenza);
   if (!q && conferito > 0 && !stoccaggio && !nonDichiaraRete && attesoAPortale && !giustificato) {

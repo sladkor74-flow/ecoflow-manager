@@ -39,6 +39,15 @@ function fmtData(v) {
 
 const PAGE_SIZE = 100;
 
+// Il mese di un gruppo, come lo scrive il portale: 'AAAA-MM' -> 'Gen 2026'.
+// Senza fine trasporto il carico non si colloca in nessun mese, e si dice.
+const MESI_BREVI = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
+const nomeMese = (m) => {
+  if (!m) return 'senza data';
+  const i = Number(String(m).slice(5, 7)) - 1;
+  return `${MESI_BREVI[i] || m} ${String(m).slice(0, 4)}`;
+};
+
 export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEsterno, onPulisciFiltroSito }) {
   // Si nasce gia' col filtro che ci hanno passato: arrivando dal pulsante di un
   // impianto nella scheda Situazione, la prima lettura deve essere la sua e non
@@ -125,6 +134,7 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
   const righe = data?.righe || [];
   const totaleRighe = data?.totale_righe || 0;
   const totaleKg = data?.totale_kg || 0;
+  const perMese = data?.per_mese || [];
   const dateInfo = data?.date_da_sistemare || { n: 0 };
   const senzaFineAPortale = data?.senza_fine_a_portale || 0;
   const senzaFineDalGestionale = data?.senza_fine_dal_gestionale || 0;
@@ -200,11 +210,36 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
       )}
 
       {/* Conteggio e peso totale */}
-      <div className="flex items-center gap-4 text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
         <span><strong className="text-foreground">{formatIntero(totaleRighe)}</strong> ordini</span>
         <span><strong className="text-foreground">{kg(totaleKg)}</strong> kg totali</span>
+        {totaleRighe > righe.length && (
+          <span className="text-xs">
+            in tabella {righe.length === 0 ? 0 : offset + 1}–{offset + righe.length}: l&apos;elenco parte dal carico arrivato da più tempo, i mesi più recenti sono nelle pagine dopo
+          </span>
+        )}
         {loading && <RefreshCw className="w-4 h-4 animate-spin" />}
       </div>
+      {/* DI QUALI MESI SONO, SU TUTTO L'ELENCO (09/10/2026).
+          Chiesto dall'utente dopo aver guardato gli ordini da dichiarare di
+          T-Cycle: «non compaiono poi in elenco gli ingressi di ottobre e mi
+          chiedo: come fai a trovarti con la giacenza attuale se non consideri
+          anche quelli?». C'erano - 12 ordini, 29.060 kg - ma in fondo, dopo le
+          prime cento righe, e il totale sotto la tabella li contava senza che si
+          vedessero. Questa riga dice i mesi di TUTTO l'elenco filtrato: si legge
+          in un colpo d'occhio e fa da riscontro alla giacenza dell'impianto. */}
+      {perMese.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-muted-foreground">Di quali mesi:</span>
+          {perMese.map(m => (
+            <span key={m.mese || 'senza'} className="rounded-md border bg-card px-2 py-0.5 tabular-nums"
+              title={`${m.ordini} ${m.ordini === 1 ? 'ordine' : 'ordini'} per ${kg(m.kg)} kg${m.mese ? '' : ' senza fine trasporto: non si collocano in nessun mese'}`}>
+              <span className="font-medium">{nomeMese(m.mese)}</span>{' '}
+              <span className="text-muted-foreground">{formatIntero(m.ordini)} · {kg(m.kg)} kg</span>
+            </span>
+          ))}
+        </div>
+      )}
       {(dateInfo.n > 0 || senzaFineAPortale > 0) && (
         <div className="text-xs border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 space-y-0.5">
           {dateInfo.n > 0 && (
@@ -269,9 +304,21 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
               })}
             </tbody>
             {righe.length > 0 && (
+              /* IL TOTALE SOTTO LE RIGHE E' DI TUTTO L'ELENCO, NON DI QUESTA
+                 PAGINA, e finche' non lo diceva sembrava il totale delle cento
+                 righe davanti: e' la lettura che ha fatto pensare che ottobre non
+                 fosse contato (09/10/2026). Dove l'elenco non sta in una pagina
+                 si scrivono entrambi i numeri. */
               <tfoot className="bg-muted/50 font-bold border-t-2">
+                {totaleRighe > righe.length && (
+                  <tr className="font-normal text-muted-foreground">
+                    <td className="px-2 py-1.5" colSpan={7}>In questa pagina ({formatIntero(righe.length)} {righe.length === 1 ? 'ordine' : 'ordini'})</td>
+                    <td className="px-2 py-1.5 text-right">{kg(righe.reduce((s, r) => s + (r.peso_non_dichiarato_kg || 0), 0))} kg</td>
+                    <td className="px-2 py-1.5" colSpan={3}></td>
+                  </tr>
+                )}
                 <tr>
-                  <td className="px-2 py-2" colSpan={7}>TOTALE ({formatIntero(totaleRighe)} ordini)</td>
+                  <td className="px-2 py-2" colSpan={7}>TOTALE DELL&apos;ELENCO ({formatIntero(totaleRighe)} ordini)</td>
                   <td className="px-2 py-2 text-right">{kg(totaleKg)} kg</td>
                   <td className="px-2 py-2" colSpan={3}></td>
                 </tr>

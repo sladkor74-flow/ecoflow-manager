@@ -37,7 +37,9 @@ import { formulariDelFile, ruoloDellaRiga } from "../../shared/giacenzaPortale.t
 //   solo_date_da_sistemare -> solo le righe il cui formulario ha le date da sistemare
 //   ruolo    -> 'imp' (da dichiarare su quell'impianto) o 'stoc' (passati dal piazzale e gia' ripartiti)
 //
-// Restituisce: righe (paginate), totale_righe, totale_kg, siti_distinti, province_distinte, anni_distinti,
+// Restituisce: righe (paginate), totale_righe, totale_kg, per_mese (di quali mesi
+// sono gli ordini di tutto l'elenco filtrato, non della pagina: ordini e kg, con
+// mese vuoto per chi non ha la fine trasporto), siti_distinti, province_distinte, anni_distinti,
 // date_da_sistemare ({ n, kg, fuori_dai_mesi, fuori_dai_mesi_kg } delle righe filtrate),
 // senza_fine_a_portale (righe del file senza fine trasporto), senza_fine_dal_gestionale
 // (quante di quelle la prendono dalla primaria nel gestionale).
@@ -200,6 +202,35 @@ export default async function(req) {
 
     const totale_righe = filtrate.length;
     const totale_kg = filtrate.reduce((s, r) => s + (Number(r.peso_non_dichiarato_kg) || 0), 0);
+    // DI QUALI MESI SONO (regola dell'utente, 09/10/2026).
+    //
+    // Il fatto vero: «laddove c'e' il pulsante con gli ordini da dichiarare non
+    // compaiono poi in elenco gli ingressi di ottobre e mi chiedo: come fai a
+    // trovarti con la giacenza attuale se non consideri anche quelli?».
+    //
+    // Gli ordini c'erano - su T-Cycle 114 righe per 352.940 kg, esattamente la
+    // giacenza, ottobre compreso con 12 ordini e 29.060 kg - ma l'elenco e'
+    // ordinato dal carico piu' vecchio e mostra cento righe per pagina: la prima
+    // pagina finiva a settembre, e sotto c'era un totale (352.940 kg) che era di
+    // tutte le 114. Chi legge vede un totale che le righe davanti non fanno, e
+    // conclude che ottobre non e' contato.
+    //
+    // Il conto per mese si manda sempre, su tutto l'elenco filtrato e non sulla
+    // pagina: sta sopra la tabella, si legge in un colpo d'occhio e fa da
+    // riscontro alla giacenza. Un carico senza fine trasporto non ha mese e si
+    // conta a parte, perche' fingere un mese sarebbe peggio che dirlo.
+    const perMese = new Map();
+    for (const r of filtrate) {
+      const fine = fineDi(r, dateFiltrate.get(r));
+      const chiave = fine ? fine.slice(0, 7) : '';
+      if (!perMese.has(chiave)) perMese.set(chiave, { mese: chiave, ordini: 0, kg: 0 });
+      const x = perMese.get(chiave);
+      x.ordini++;
+      x.kg += Number(r.peso_non_dichiarato_kg) || 0;
+    }
+    const per_mese = [...perMese.values()]
+      .sort((a, b) => (a.mese || '9999-99').localeCompare(b.mese || '9999-99'))
+      .map(x => ({ ...x, kg: Math.round(x.kg) }));
     // Le righe filtrate col formulario da sistemare, e quelle che il gestionale non
     // colloca in nessun mese: un conteggio della rete, l'unico canale del file.
     const conDate = filtrate.filter(r => dateFiltrate.get(r).formulari.length);
@@ -241,6 +272,8 @@ export default async function(req) {
       totale_righe,
       // Chilogrammi interi.
       totale_kg: Math.round(totale_kg),
+      // Di quali mesi sono gli ordini dell'elenco filtrato, non della pagina.
+      per_mese,
       date_da_sistemare: { n: conDate.length, kg: kgDi(conDate), fuori_dai_mesi: fuori.length, fuori_dai_mesi_kg: kgDi(fuori) },
       // Righe del file senza fine trasporto, e quante la prendono dal gestionale.
       senza_fine_a_portale: senzaFineAPortale,

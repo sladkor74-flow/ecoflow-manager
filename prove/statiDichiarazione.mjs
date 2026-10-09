@@ -38,5 +38,23 @@ console.log('LA GIACENZA E UNA FORMULA SOLA, PER TUTTI E TRE I CANALI');
   verifica('una giacenza sotto zero resta negativa', quadratura({ ...base, dichiarato_caricato_t: 200 }).giacenza_calcolata_t === -90);
 }
 
+// «CONFERITI N KG E NESSUNA DICHIARAZIONE» NON SI DICE DI UN MESE GIA USCITO.
+//
+// Un mese senza dichiarazione scritta sopra puo' essere uscito tutto, perche' lo
+// ha portato via la dichiarazione di un mese dopo: su T-Cycle e' il caso di
+// gennaio, febbraio, aprile e maggio 2026. Dal 09/10/2026 l'avviso guarda quello
+// che di quel mese resta (resta_kg, shared/usciteDichiarate.ts) e non la sola
+// fotografia del portale, che e' di un giorno preciso.
+console.log('L AVVISO DEL MESE SENZA DICHIARAZIONE SEGUE CIO CHE RESTA');
+{
+  const manca = (dove) => controlliDichiarazione(null, 87740, 'R1', { canale: 'RETE', ...dove }).some(c => c.tipo === 'mancante');
+  verifica('gennaio di T-Cycle, uscito tutto con la nave di marzo: nessun avviso', !manca({ resta_kg: 0 }));
+  verifica('un mese che ha ancora qualcosa dentro: l avviso c e', manca({ resta_kg: 20620 }));
+  verifica('e senza quel dato si ripiega sulla fotografia, come prima',
+    !manca({ non_dichiarato_kg: 0 }) && manca({ non_dichiarato_kg: 41980 }) && manca({}));
+  verifica('cio che resta ha la precedenza sulla fotografia, che puo essere vecchia di settimane',
+    !manca({ resta_kg: 0, non_dichiarato_kg: 41980 }));
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

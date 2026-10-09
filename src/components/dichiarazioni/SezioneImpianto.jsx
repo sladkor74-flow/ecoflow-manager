@@ -67,7 +67,7 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
             <p className="px-4 pt-3 pb-1 text-sm font-medium">
               {canale ? canale.nome : flusso.canale}{flusso.provenienza ? ` · ${flusso.provenienza}` : ''}
               <span className="text-xs text-muted-foreground font-normal">
-                {' '}— arrivati {t(flusso.conferito_t)} t{conStoccaggi ? `, di cui ${t(flusso.da_stoccaggi_t)} t in secondaria dagli stoccaggi` : ''}, dichiarati e caricati {t(flusso.dichiarato_caricato_t)} t
+                {' '}— arrivati {t(flusso.conferito_t)} t{conStoccaggi ? `, di cui ${t(flusso.da_stoccaggi_t)} t in secondaria dagli stoccaggi` : ''}, dichiarati e caricati {t(flusso.dichiarato_caricato_t)} t, in giacenza {t(flusso.resta_t)} t
               </span>
             </p>
             <div data-scorre-lato>
@@ -77,8 +77,14 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                     <th className="text-left px-3 py-1.5 font-semibold min-w-[110px]">Mese</th>
                     <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap">Arrivato (kg)</th>
                     {conStoccaggi && <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap">di cui da stoccaggi</th>}
-                    <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap">Dichiarato (kg)</th>
-                    <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap" title="Gli ingressi del mese in questo impianto meno quello che per quel mese risulta dichiarato">Ancora da dichiarare (kg)</th>
+                    <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap" title="Quello che in questo mese è stato caricato a portale: per un impianto R1 è il mese della nave, e quel caricamento porta via anche i mesi di prima">Dichiarato (kg)</th>
+                    {/* USCITO E RESTA, non piu' il solo «ancora da dichiarare» calcolato
+                        mese per mese (09/10/2026). Di un mese esce quello che il portale
+                        ha agganciato ai SUOI carichi, anche con la dichiarazione di un mese
+                        dopo: le due colonne insieme fanno gli arrivi, e la somma di «resta»
+                        e' la giacenza. */}
+                    <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap" title="Di quello che è arrivato in questo mese, quanto è uscito: lo dice il report del portale, ordine per ordine, anche quando è uscito con la dichiarazione di un mese successivo">Uscito (kg)</th>
+                    <th className="text-right px-2 py-1.5 font-semibold whitespace-nowrap" title="Di quello che è arrivato in questo mese, quanto è ancora in impianto. La somma della colonna è la giacenza del canale">Resta in giacenza (kg)</th>
                     {materiali.map(m => <th key={m.chiave} className="text-right px-2 py-1.5 font-semibold whitespace-nowrap">{m.nome} (kg)</th>)}
                     <th className="text-left px-2 py-1.5 font-semibold whitespace-nowrap">Stato</th>
                     <th className="px-2 py-1.5" />
@@ -88,7 +94,7 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                   {mesiConDati.map(m => {
                     const d = m.dichiarazione;
                     const stato = statoDichiarazione(d, { canale: flusso.canale, dichiara_rete: sito.dichiara_rete });
-                    const avvisi = controlliDichiarazione(d, m.conferito_kg, sito.operazione, { tipo_destinazione: sito.tipo_destinazione, canale: flusso.canale, dichiara_rete: sito.dichiara_rete, non_dichiarato_kg: m.non_dichiarato_kg }).filter(c => c.livello === 'attenzione');
+                    const avvisi = controlliDichiarazione(d, m.conferito_kg, sito.operazione, { tipo_destinazione: sito.tipo_destinazione, canale: flusso.canale, dichiara_rete: sito.dichiara_rete, non_dichiarato_kg: m.non_dichiarato_kg, resta_kg: m.resta_kg }).filter(c => c.livello === 'attenzione');
                     return (
                       <tr key={m.mese} className="border-b last:border-b-0">
                         <td className="px-3 py-1.5 font-medium">{m.mese}</td>
@@ -99,6 +105,12 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                           </td>
                         )}
                         <td className="px-2 py-1.5 text-right tabular-nums font-medium">{kg(d && d.quantita_kg)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-emerald-700"
+                          title={m.copre && m.copre.mesi && m.copre.mesi.length
+                            ? `La dichiarazione caricata il ${String(m.copre.giorno).split('-').reverse().join('/')} ha chiuso: ${m.copre.mesi.map(x => `${x.mese} ${formatKg(x.kg)} kg`).join(', ')}`
+                            : (m.uscito_stimato ? 'Ripartito dal gestionale: il report del portale non ha ancora questa dichiarazione' : '')}>
+                          {m.uscito_kg > 0 ? `${m.uscito_stimato ? '~' : ''}${kg(m.uscito_kg)}` : '—'}
+                        </td>
                         <td className={`px-2 py-1.5 text-right tabular-nums ${m.da_dichiarare_kg > 0 ? "text-amber-800 font-medium" : "text-muted-foreground"}`}>{m.da_dichiarare_kg > 0 ? kg(m.da_dichiarare_kg) : "—"}</td>
                         {materiali.map(x => <td key={x.chiave} className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{kg(d && d[x.chiave])}</td>)}
                         <td className="px-2 py-1.5">

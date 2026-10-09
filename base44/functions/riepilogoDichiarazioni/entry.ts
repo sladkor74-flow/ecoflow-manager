@@ -9,6 +9,7 @@ import { MESI, operazioneDa, quadratura } from "../../shared/dichiarazioniImpian
 import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese, nostraRiga } from "../../shared/giacenzaPortale.ts";
 import { puntiDiPartenza, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 import { confrontaConIlPortale } from "../../shared/agganciaDichiarazioni.ts";
+import { raccoglitoreUscite, allineaAllaGiacenza, copertureDelCaricamento } from "../../shared/usciteDichiarate.ts";
 
 // Dichiarazioni degli impianti, mese per mese, con la quadratura delle giacenze.
 //
@@ -104,6 +105,20 @@ export default async function(req) {
     // dichiarazioni mensili: si tengono mentre si scorre, perche' il report non
     // si rilegge due volte (confrontaConIlPortale lavora su queste sole colonne).
     const righeDichiarazione = [];
+    // QUANTO DI OGNI MESE IL PORTALE HA GIA' PORTATO VIA (09/10/2026).
+    //
+    // Il report ha una riga per ordine, con il peso agganciato e il giorno del
+    // caricamento: da li' si sa quanto di ogni mese di ARRIVO e' uscito, senza
+    // dedurlo. Il mese di un carico passato da uno stoccaggio e' quello in cui la
+    // secondaria e' arrivata all'impianto, non la fine trasporto della primaria
+    // che il report scrive: la regola sta in shared/usciteDichiarate.ts.
+    const fineSecondarie = new Map();
+    for (const r of secondarie) {
+      const idSec = String(r.id_ordine || '').trim();
+      const g = giornoRoma(r.trasporto_finito_il);
+      if (idSec && g) fineSecondarie.set(idSec, g);
+    }
+    const uscite = raccoglitoreUscite({ chiaveDi: norm, fineSecondaria: (id) => fineSecondarie.get(id) || '', anno: annoNum });
     await perPagina(svc.DichiarazioneTrattamento, null, (r) => {
       // Che il portale conosca quell'ordine e' un fatto, chiunque l'abbia
       // dichiarato: si segna prima di qualunque filtro.
@@ -118,6 +133,9 @@ export default async function(req) {
         peso_associato_kg: r.peso_associato_kg,
         granulo_kg: r.granulo_kg, fibre_kg: r.fibre_kg, metallo_kg: r.metallo_kg, cippato_kg: r.cippato_kg, ciabattato_kg: r.ciabattato_kg,
       });
+      // Quanto di ogni mese di arrivo questa riga ha portato via: il raccoglitore
+      // tiene fuori da se' l'ACI e gli altri anni.
+      uscite.segna(r);
       // Il portale lo conosce ma non lo conta piu' in giacenza: per chi non ha
       // la fine trasporto la differenza si dice (22/09/2026).
       if (eAci({ prodotto: r.prodotto }) || !giornoRoma(r.fine_trasporto).startsWith(String(annoNum))) return;
@@ -430,7 +448,7 @@ export default async function(req) {
       if (!chiavi.size) chiavi.add('RETE|');
       return [...chiavi].sort().map(c => {
         const [canale, provenienza] = c.split('|');
-        const mesi = MESI.map((mese, i) => {
+        const grezzi = MESI.map((mese, i) => {
           const chiave = `${ns}|${canale}|${provenienza}|${mese}`;
           const da = daStoccaggi.get(chiave);
           const daStoc = da ? [...da.entries()].map(([stoccaggio, kg]) => ({ stoccaggio, kg: Math.round(kg) })).sort((a, b) => b.kg - a.kg) : [];
@@ -487,17 +505,76 @@ export default async function(req) {
             // di ferro si gestiscono fuori dal portale, quindi non sono mai
             // caricate, quindi non decurtano niente. Non c'e' da sommarle: basta
             // non sottrarle.
-            da_dichiarare_kg: nonDovuta ? 0 : Math.max(0, totale - caricatoAPortale),
+            //
+            // IL 09/10/2026 LA REGOLA SI E' FATTA PIU' PRECISA, non diversa. Gli
+            // ingressi del mese restano l'unita' di conto, ma il dichiarato da
+            // sottrarre non e' quello scritto su quel mese: e' quello che il
+            // portale ha agganciato a QUEI carichi, e che puo' essere arrivato con
+            // la dichiarazione di un mese dopo. Lo dice il report, ordine per
+            // ordine (shared/usciteDichiarate.ts), e si calcola sotto, quando i
+            // dodici mesi sono tutti in mano.
+            non_dovuta: nonDovuta,
             // La dichiarazione che c'e' ma non e' ancora a portale non si perde:
             // e' un'altra cosa dal non averla, e la casella lo dice.
             dichiarato_non_caricato_kg: dichiarata - caricatoAPortale,
             dichiarazione: dichiarazioneDi(perDich.get(chiave) || null),
           };
         });
+        // QUANTO DI OGNI MESE E' USCITO, E QUANTO NE RESTA.
+        //
+        // Il report del portale dice, mese di arrivo per mese di arrivo, quanto
+        // e' stato agganciato a una dichiarazione: e' un dato, non una stima. Il
+        // conto si chiude sulla giacenza del canale - apertura + entrato -
+        // dichiarato e caricato - che e' lo stesso numero della colonna «Da
+        // dichiarare» e della quadratura col portale: cosi' la riga non puo' piu'
+        // dire due cose diverse (il caso T-Cycle del 09/10/2026: 532,68 t nelle
+        // caselle contro 352,94 t nella colonna).
+        //
+        // Il report e' quello della RETE: per ACI ed extra raccolta non c'e'
+        // nessun aggancio pubblicato, e il mese parte dal suo dichiarato.
+        const reteDiretta = canale === 'RETE' && !provenienza;
+        const dalReport = reteDiretta ? uscite.per(ns) : null;
+        const semi = dalReport
+          ? dalReport.mesi
+          : grezzi.map(m => Math.min(m.conferito_kg, m.caricato_kg));
+        const aperturaKg = canale === 'EXTRA_RACCOLTA' ? 0 : Math.round(iniziale(ns, 'imp', canale) * 1000);
+        const conferitoKg = grezzi.reduce((s, m) => s + m.conferito_kg, 0);
+        const caricatoKg = grezzi.reduce((s, m) => s + m.caricato_kg, 0);
+        const allineato = allineaAllaGiacenza(
+          grezzi.map(m => m.conferito_kg),
+          semi,
+          reteDiretta ? aperturaKg + conferitoKg - caricatoKg : null,
+        );
+        const mesi = grezzi.map((m, i) => ({
+          ...m,
+          // Di questo mese e' uscito questo, con le dichiarazioni caricate a
+          // portale (anche quelle di un altro mese).
+          uscito_kg: allineato.uscito[i],
+          // E questo c'e' ancora: la parte di quel mese che e' giacenza.
+          resta_kg: allineato.resta[i],
+          // Una parte dell'uscito e' stata ripartita dal gestionale, perche' il
+          // report del portale non ha ancora quella dichiarazione: la casella lo
+          // dice invece di farlo passare per un dato letto.
+          uscito_stimato: allineato.stimato[i],
+          // Un mese non dovuto non resta da dichiarare a nessuno (utente, 02/10/2026).
+          da_dichiarare_kg: m.non_dovuta ? 0 : allineato.resta[i],
+          // Se in questo mese una dichiarazione e' stata caricata a portale:
+          // quali mesi ha portato via. E' il processo che l'utente vuole leggere
+          // («con la nave di marzo sono andati via gennaio, febbraio e parte di
+          // marzo», 09/10/2026).
+          copre: dalReport ? copertureDelCaricamento(dalReport.caricamenti, m.dichiarazione) : null,
+        }));
         return {
           canale, provenienza, operazione,
           mesi,
           conferito_t: t3(mesi.reduce((s, m) => s + m.conferito_kg, 0) / 1000),
+          uscito_t: t3(mesi.reduce((s, m) => s + m.uscito_kg, 0) / 1000),
+          resta_t: t3(mesi.reduce((s, m) => s + m.resta_kg, 0) / 1000),
+          // Il report dice agganciato piu' di quanto le nostre dichiarazioni
+          // caricate: il portale ha dichiarazioni che il gestionale non ha.
+          uscito_oltre_kg: allineato.oltre_kg,
+          // Quello che nessun mese riesce ad assorbire: se c'e', c'e' da capire.
+          uscito_non_allocato_kg: allineato.non_allocato_kg + allineato.fuori_mese_kg,
           da_dichiarare_t: t3(mesi.reduce((s, m) => s + m.da_dichiarare_kg, 0) / 1000),
           da_stoccaggi_t: t3(mesi.reduce((s, m) => s + m.da_stoccaggi.reduce((x, y) => x + y.kg, 0), 0) / 1000),
           dichiarato_caricato_t: t3(mesi.reduce((s, m) => s + (m.dichiarazione && m.dichiarazione.caricata_inviata ? m.dichiarazione.quantita_kg : 0), 0) / 1000),
