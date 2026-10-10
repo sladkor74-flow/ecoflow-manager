@@ -1848,6 +1848,13 @@ istruita, e sono state misurate sul codice:
   chi ha solo ordini nel limbo si risponderebbe "non risulta fra i raccoglitori".
   Vale anche per `target_raccoglitori`, dove la riserva fa sembrare un
   raccoglitore piu' indietro di quanto sia. Prove in `prove/riservaEseguiti.mjs`.
+- **I numeri si scrivono all'italiana** (utente, 10/10/2026). I dati arrivano al
+  modello come numeri informatici e a volte li ricopiava («1600.00 euro per 3.38
+  t»). La regola e' nelle istruzioni (3-duodecies) e la risposta passa da
+  `numeriAllItaliana` (`shared/formato.ts`), che converte SOLO l'inequivocabile:
+  un numero con un'unita' (t, kg, euro, €, %), col punto decimale e una o due
+  cifre, o con la virgola delle migliaia, o intero lungo. «3.385 t» resta com'e'
+  (tre o tremila?), e cosi' ore, date e numeri d'ordine. Prova: `prove/numeriEcotyna.mjs`.
 - **La fatturazione si calcola, non si legge** (audit del 10/10/2026). Lo
   strumento `fatturazione` fa lo stesso conto del modulo sui movimenti di oggi,
   attiva e passiva, col mese o senza: senza mese, mese per mese fino a quello in

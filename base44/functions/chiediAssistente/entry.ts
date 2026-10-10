@@ -6,6 +6,7 @@ import {
   proponiNovita, proponiPrecisazioni, scartaSuperate,
 } from "../../shared/baseConoscenza.ts";
 import { analizzaDomanda, situazioneGestionale } from "../../shared/assistente.ts";
+import { numeriAllItaliana } from "../../shared/formato.ts";
 import { catalogoStrumenti, eseguiStrumento } from "../../shared/strumentiAssistente.ts";
 import { nuovaCache } from "../../shared/cacheLetture.ts";
 import { SCHEMA_PIANO, istruzioniPiano, strumentiDalPiano, testoDati } from "../../shared/pianoAssistente.ts";
@@ -326,6 +327,10 @@ export default async function(req) {
       ...(soloDati ? [] : ['2. Ogni affermazione normativa deve avere una fonte precisa in fonti (norma e articolo, delibera, FAQ o sentenza) con la data di verifica. Non inventare numeri di articolo, date, importi o scadenze: se non sei sicuro dillo e spiega come verificarlo.']),
       '3. Per le domande sui dati usa solo i DATI DEL GESTIONALE forniti. Ogni numero che scrivi deve venire da li\', e accanto va detto da dove: lo strumento, il periodo e la data del dato. Se un dato manca dillo apertamente, mettilo in dati_mancanti con la sezione del gestionale dove si trova (Target & Status, Assegnati, Verifiche, Giacenze, Omologhe, Dichiarazioni RENTRI, Qualifica Fornitori, Fatturazione, Predittivita Secondarie (solo rete), To-Do List) e non stimarlo: una risposta che dice "questo non ce l\'ho" e\' utile, una che tira a indovinare no.',
       '3-ter. Rete, ACI ed extra raccolta sono commesse indipendenti: non sommarle mai in un unico numero e di\' sempre di quale canale stai parlando. I target sono solo della rete.',
+      // I NUMERI ALL'ITALIANA (utente, 10/10/2026: «sistema i numeri di EcoTyna»).
+      // I dati arrivano come numeri informatici e a volte si ricopiavano cosi':
+      // «1600.00 euro per 3.38 t». Dopo la risposta passa anche numeriAllItaliana.
+      '3-duodecies. I numeri si scrivono all\'italiana: punto per le migliaia e virgola per i decimali. Tonnellate con due decimali, tre se i chili non sono tondi (1.617,22 t; 3,385 t); chili interi (12.400 kg); euro con due decimali (1.600,00 euro); percentuali con la virgola (76,4%). Nei DATI qui sotto i numeri sono scritti all\'inglese, col punto decimale e senza migliaia (1600.5 vuol dire milleseicento virgola cinque): convertili sempre, non copiarli come sono.',
       // Regola dell'utente del 22/09/2026: la predittivita' e' della rete e basta.
       // Senza questa riga EcoTyna poteva "completare" la proiezione con numeri
       // ACI o di extra raccolta presi da altri strumenti.
@@ -399,7 +404,7 @@ export default async function(req) {
     const fileGenerati = fileDaCreare(esito.file_da_creare);
     const fileJson = JSON.stringify(fileGenerati);
     const aggiornato = await svc.DomandaAssistente.update(recordId, {
-      risposta: String(esito.risposta || 'Non sono riuscito a formulare una risposta: riprova riformulando la domanda.'),
+      risposta: numeriAllItaliana(String(esito.risposta || 'Non sono riuscito a formulare una risposta: riprova riformulando la domanda.')),
       fonti_json: JSON.stringify(fonti),
       certezza,
       strumenti_json: risultati.length ? JSON.stringify({ strumenti: risultati.map(r => ({ strumento: r.strumento, parametri: r.parametri, fonte: r.fonte, periodo: r.periodo, dati_al: r.dati_al, errore: r.errore || '' })), piano: pianoRiuscito ? (piano && piano.strumenti && piano.strumenti[0] && /senza chiamare il modello/.test(String(piano.strumenti[0].perche || '')) ? 'scorciatoia' : 'pianificatore') : 'ripiego', letture: contiLetture }) : undefined,
@@ -458,7 +463,7 @@ export default async function(req) {
     }
     const proposte = novita.length + precisazioni.length;
 
-    return Response.json({ ok: true, record: aggiornato || { ...record, risposta: esito.risposta, fonti_json: JSON.stringify(fonti), certezza, stato: 'completata' }, proposte, precisazioni: precisazioni.length, novita: novita.length, file_generati: fileGenerati });
+    return Response.json({ ok: true, record: aggiornato || { ...record, risposta: numeriAllItaliana(String(esito.risposta || '')), fonti_json: JSON.stringify(fonti), certezza, stato: 'completata' }, proposte, precisazioni: precisazioni.length, novita: novita.length, file_generati: fileGenerati });
   } catch (error) {
     const messaggio = error && error.message ? error.message : String(error);
     if (base44 && recordId) {
