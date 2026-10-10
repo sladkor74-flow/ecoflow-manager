@@ -190,6 +190,45 @@ export default function DichiarazioniImpianti() {
           riquadro non si sarebbe piu' potuto riempire: l'esito si legge dove il
           riconoscimento avviene, sotto la scheda del report in Caricamento
           Dati. */}
+      {/* LE DICHIARAZIONI IN DOPPIO, PRIMA DI TUTTO IL RESTO (10/10/2026).
+
+          Due righe sullo stesso sito, canale, provenienza e mese. La
+          piattaforma non ha vincoli di unicita', quindi finche' una gemella
+          resta i numeri dipendono da quale modulo si guarda: qui il riepilogo
+          ne tiene una sola - e la gemella non si vede nemmeno, quindi non si
+          puo' correggere da nessuna casella - mentre le giacenze le sommano e
+          decurtano il doppio.
+
+          Sta sopra all'avviso del portale perche' lo spiega: una gemella non
+          pareggia nessun caricamento, quindi si presenta travestita da «mese
+          che il portale non conosce» e manda a cercare un problema dove non
+          c'e'. L'extra raccolta non compare qui: a portale non e' gestita e due
+          campagne nello stesso mese sono due cose vere. */}
+      {dati && (dati.doppioni || []).length > 0 && (
+        <div className="text-sm border border-red-400 bg-red-200 text-red-950 rounded-lg px-3 py-2 space-y-1">
+          <p className="font-semibold flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            {dati.doppioni.length === 1
+              ? 'Una dichiarazione è scritta due volte'
+              : `${dati.doppioni.length} dichiarazioni sono scritte due volte`}
+          </p>
+          <ul className="space-y-1 pl-6">
+            {dati.doppioni.map((v, i) => (
+              <li key={i}>
+                <strong>{v.sito}</strong> · {v.mese}{v.canale !== 'RETE' ? ` · ${v.canale}` : ''}{v.provenienza ? ` · ${v.provenienza}` : ''}:
+                {' '}{v.quante} righe per {formatKg(v.kg)} kg in tutto, di cui {formatKg(v.kg_in_piu)} kg di troppo
+                {v.caricate ? `, ${v.caricate === 1 ? 'una caricata a portale' : `${v.caricate} caricate a portale`}` : ', nessuna caricata a portale'}.
+              </li>
+            ))}
+          </ul>
+          <p className="pl-6">
+            Il riepilogo qui sotto ne mostra una sola, quindi la casella del mese non basta a
+            sistemarle: va tolta la riga in piu'. Finche' ci sono, le giacenze di questi mesi
+            sono decurtate due volte.
+          </p>
+        </div>
+      )}
+
       {dati && (dati.dichiarazioni_da_inserire || []).length > 0 && (
         <div className="text-sm border border-red-300 bg-red-100 text-red-900 rounded-lg px-3 py-2 space-y-1">
           <p className="font-semibold flex items-start gap-2">

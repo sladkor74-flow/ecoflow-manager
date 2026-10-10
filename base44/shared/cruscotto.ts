@@ -12,6 +12,7 @@
 import { giornoRoma } from "./giornoItaliano.ts";
 import { statoRichiesta } from "./richiesteEct.ts";
 import { giorniFa } from "./indicatoriGiorno.ts";
+import { formatoKg } from "./formato.ts";
 
 export const MESI_CRUSCOTTO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 // I tre documenti di un mese della fatturazione attiva, uno per canale.
@@ -255,12 +256,36 @@ export function cruscotto(dati) {
   // il controllo ha smesso di girare lo si dice, perche' un guardiano che
   // dorme e un guardiano che non trova niente si assomigliano troppo.
   const fg = dati.fotografiaGiorno;
-  if (fg && fg.esito === 'da_guardare') {
-    const quali = (fg.scostamenti || []).slice(0, 3).map(x => x.sito).join(', ');
+  const ilGiorno = (g) => String(g || '').split('-').reverse().join('/');
+  // DUE COSE DIVERSE, DUE VOCI DIVERSE (10/10/2026).
+  //
+  // L'esito «da guardare» ha due cause: un impianto che si scosta dal portale e
+  // una dichiarazione in doppio. Finche' la voce era una sola, un doppione
+  // senza scostamenti avrebbe scritto «0 impianti non quadrano col portale»: un
+  // avviso a zero, come quello dei file - e un avviso che grida al lupo a zero
+  // e' il modo piu' sicuro di far ignorare quelli veri.
+  const scost = (fg && fg.scostamenti) || [];
+  if (scost.length) {
     voce('Giacenze', 'attenzione',
-      `${(fg.scostamenti || []).length === 1 ? 'Un impianto non quadra' : `${(fg.scostamenti || []).length} impianti non quadrano`} col portale`,
-      `${fg.nota} Controllo del ${String(fg.giorno).split('-').reverse().join('/')}.${quali ? '' : ''}`,
+      `${scost.length === 1 ? 'Un impianto non quadra' : `${scost.length} impianti non quadrano`} col portale`,
+      `${fg.nota} Controllo del ${ilGiorno(fg.giorno)}.`,
       '/giacenze');
+  }
+  // IL DOPPIONE SI PRESENTA COME DOPPIONE.
+  //
+  // Altrove si traveste: nel confronto col portale la gemella non pareggia
+  // nessun caricamento e finisce fra «i mesi che il portale non conosce», che
+  // manda a cercare un problema dove non c'e'. Qui si dice la cosa vera, e si
+  // dice dove: il mese e il canale, perche' si sistema in un posto solo.
+  const dopp = (fg && fg.doppioni) || [];
+  if (dopp.length) {
+    const kgInPiu = dopp.reduce((s, x) => s + (Number(x.kg_in_piu) || 0), 0);
+    voce('Dichiarazioni', 'critico',
+      `${dopp.length === 1 ? 'Una dichiarazione è doppia' : `${dopp.length} dichiarazioni sono doppie`}`,
+      `${dopp.slice(0, 3).map(x => `${x.sito} ${x.mese} ${x.canale === 'RETE' ? 'rete' : x.canale}`).join(', ')}`
+      + `${dopp.length > 3 ? ` e altre ${dopp.length - 3}` : ''}. Finche' ci sono, i numeri dipendono da quale modulo si guarda: il riepilogo ne tiene una sola, le giacenze le sommano`
+      + `${kgInPiu ? ` (${formatoKg(kgInPiu)} kg di troppo nelle giacenze)` : ''}. Controllo del ${ilGiorno(fg.giorno)}.`,
+      '/dichiarazioni-impianti');
   }
   const etaFoto = fg ? giorniFa(fg.giorno, oggi) : null;
   if (etaFoto !== null && etaFoto > 2) {

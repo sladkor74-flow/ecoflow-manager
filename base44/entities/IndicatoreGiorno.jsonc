@@ -53,6 +53,19 @@
     "scostamenti_json": {
       "type": "string",
       "description": "Gli impianti che non quadrano, in JSON: sito, scarto e di quanto. Vuoto quando tutto e' in linea"
+    },
+    // I DOPPIONI DELLE DICHIARAZIONI (10/10/2026).
+    //
+    // Due righe sullo stesso sito, canale, provenienza e mese. La piattaforma
+    // non ha vincoli di unicita', quindi l'unico presidio e' il codice - e
+    // finche' un doppione resta, i numeri dipendono da quale modulo si guarda:
+    // il riepilogo ne tiene una sola, le giacenze le sommano. Qui si scrive
+    // ogni notte, cosi' uno nato oggi si trova domattina e non a fine anno.
+    // L'extra raccolta resta fuori: a portale non e' gestita, sono campagne
+    // occasionali e nello stesso mese ce ne possono stare due.
+    "doppioni_json": {
+      "type": "string",
+      "description": "Le dichiarazioni in doppio, in JSON: sito, canale, provenienza, mese, quante e i chili in piu'. Extra raccolta esclusa, dove ripetersi e' legittimo"
     }
   },
   "required": [

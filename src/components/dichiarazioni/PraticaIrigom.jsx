@@ -14,6 +14,7 @@ import { componiMese, ferroArretrato, dividiExtra, MESI, extraDaSalvare, extraGi
 import { wordDelMese, excelDelMese, cartellaZip, dataIt, datiFileGestione } from '@/lib/documentiIrigom';
 import { scarica } from '@/lib/docxModello';
 import { timbraPdf } from '@/lib/timbraPdf';
+import { esitoScrittura } from '@/lib/dichiarazioniImpianti';
 import { excelBlocco } from '@/lib/bloccoGestione';
 import { scriviBloccoNelFile } from '@/lib/scriviBloccoGestione';
 import { esportaFoglioDichiarazioni } from '@/lib/foglioDichiarazioni';
@@ -648,9 +649,18 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
         ? `Segnata nel gestionale il ${dataIt(oggi)} dal registro ${registro.file_nome}: nel mese sono usciti solo metalli ferrosi (${formatKg(riga.uscite_ferro_kg)} kg) e nessuna gomma. A portale non si carica nulla: il ferro si dichiara con la prossima uscita di gomma.`
         : `Preparata nel gestionale il ${dataIt(oggi)} dal registro ${registro.file_nome}: ${pratica.terziarie.righe.length} terziarie${terziarie.length ? ` (${terziarie[0]} - ${terziarie[terziarie.length - 1]})` : ''}, ${pratica.cssc.righe.length} dichiarazioni di CSS-C${nave.nome ? `, nave ${nave.nome}` : ''}; lettura ${pratica.letture.usata === 'giacenza' ? 'dalla giacenza a portale' : pratica.letture.usata === 'registro' ? `dalle uscite del registro più il ferro rimasto indietro (${formatKg(pratica.letture.registro.arretrato_kg)} kg)` : 'dalle uscite del registro'}. ${testoPortale(pratica)}`} ${testoExtraCompresa(pratica.solo_metalli ? 0 : pratica.extra_kg)}`;
       // La dichiarazione di rete del mese: si aggiorna quella che c'e', con traccia di prima.
-      const esistenti = await base44.entities.DichiarazioneSito.filter({ anno, mese });
+      //
+      // SE NE TROVA DUE NON SI SCRIVE (10/10/2026). Prima si prendeva la prima
+      // trovata: la seconda restava indietro, invisibile nel riepilogo e sommata
+      // nelle giacenze. Prendere una gemella a caso e scriverci sopra avrebbe
+      // messo la pratica del mese dentro un dato che non torna.
+      const esistenti = await fetchAllClient(base44.entities.DichiarazioneSito, { anno, mese }, 'id');
       const suIrigom = (d) => normalizzaRagioneSociale(d.sito) === nsIrigom;
-      const reteEsistente = esistenti.find(d => suIrigom(d) && (d.canale || 'RETE') === 'RETE' && !d.provenienza);
+      const sitoIrigom = irigom ? irigom.sito : 'Irigom S.r.l.';
+      const esitoRete = esitoScrittura(esistenti, { sito: sitoIrigom, canale: 'RETE', provenienza: '', anno, mese }, { anno, chiaveDi: normalizzaRagioneSociale });
+      if (esitoRete.azione === 'rifiuta') throw new Error(esitoRete.motivo);
+      const reteEsistente = esitoRete.esistente
+        || esistenti.find(d => suIrigom(d) && (d.canale || 'RETE') === 'RETE' && !d.provenienza);
       // La quantita' e' il totale caricato a portale, extra raccolta dell'ultima
       // terziaria compresa, e cosi' i materiali (regola dell'utente del
       // 22/09/2026): e' quello che il portale decurta dalla giacenza di rete e che

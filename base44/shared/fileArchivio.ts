@@ -399,6 +399,27 @@ export async function segnalaFileNonRimossi(base44, { nonRiusciti = [], bloccati
   const quanti = bloccati == null ? nonRiusciti.length : Math.max(Number(bloccati) || 0, nonRiusciti.length);
   const pubblici = (nonRiusciti || []).filter(n => n && n.pubblico).length;
 
+  // UN AVVISO NON SI RISCRIVE A ZERO (10/10/2026).
+  //
+  // Questa funzione gira dopo ogni pulizia, e una pulizia che non trova niente
+  // da togliere non vuol dire che i file di prima se ne siano andati: la
+  // piattaforma non li cancella, quindi sono ancora li'. Riscrivere l'avviso con
+  // quanti = 0 gli faceva dire «0 file caricati restano sulla piattaforma:
+  // cancellarli non si puo'», una frase che si contraddice da sola, e per mesi
+  // e' stata in cima agli avvisi dell'amministratore.
+  //
+  // Un avviso che grida al lupo a zero e' il modo piu' sicuro di far ignorare
+  // quelli veri: il presidio vale quanto la fiducia che gli si da'.
+  //
+  // A zero: se non c'e' niente di aperto non si apre niente; se c'e', si lascia
+  // stare, perche' il conto lo abbassa solo chi ha visto i file andarsene - cioe'
+  // la persona che chiude l'avviso quando il team della piattaforma le conferma
+  // di averli rimossi.
+  if (!quanti) {
+    if (!aperti.length) return { alert: 'niente', quanti: 0, pubblici };
+    return { alert: 'lasciato', quanti: Number(aperti[0].quanti) || 0, pubblici };
+  }
+
   const elenco = nonRiusciti.slice(0, 15).map(n => `- ${n.nome_file || n.entita || n.id || 'file'}`);
   if (nonRiusciti.length > elenco.length) elenco.push(`- e altri ${nonRiusciti.length - elenco.length}`);
   const dati = {

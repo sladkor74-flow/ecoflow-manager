@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, X } from 'lucide-react';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
+import { chiaveDichiarazione, esitoScrittura } from '@/lib/dichiarazioniImpianti';
 import { formatTonnellate } from '@/lib/utils';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
@@ -40,17 +41,25 @@ export default function DichiarazioniGrid({ open, onClose, anno }) {
     return Array.from(map.values());
   }, [records, extraFlussi]);
 
+  // LA CELLA SI CERCA CON LA CHIAVE VERA, SENZA L'OPERAZIONE (10/10/2026).
+  //
+  // Qui c'era `r.operazione === flusso.operazione`, e l'operazione non fa parte
+  // dell'identita' di una dichiarazione: e' una proprieta' del sito (Irigom e
+  // T-Cycle fanno R1, gli altri R3). Il form di un flusso nuovo propone R3,
+  // quindi su Irigom la riga R1 di quel mese non si trovava piu' e la cella
+  // vuota ne creava una seconda sullo stesso mese.
   function getCell(flusso, mese) {
-    return records.find(r =>
-      normalizzaRagioneSociale(r.sito) === normalizzaRagioneSociale(flusso.sito) &&
-      r.operazione === flusso.operazione && r.canale === flusso.canale &&
-      (r.provenienza || '') === (flusso.provenienza || '') && r.mese === mese
-    );
+    const k = chiaveDichiarazione({ ...flusso, mese }, normalizzaRagioneSociale);
+    return records.find(r => chiaveDichiarazione(r, normalizzaRagioneSociale) === k);
   }
 
   const saveCell = async (flusso, mese, quantita, caricata) => {
     const existing = getCell(flusso, mese);
     try {
+      // La regola decide, come nel dialogo del mese: se ce ne sono gia' due non
+      // si scrive, perche' quale aggiornare non lo sa nessuno.
+      const esito = esitoScrittura(records, { ...flusso, anno, mese, id: existing && existing.id }, { anno, chiaveDi: normalizzaRagioneSociale });
+      if (esito.azione === 'rifiuta') { alert(esito.motivo); return; }
       if (existing) {
         await base44.entities.DichiarazioneSito.update(existing.id, { quantita_kg: quantita, caricata_inviata: caricata });
       } else {

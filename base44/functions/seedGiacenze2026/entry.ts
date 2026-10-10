@@ -3,6 +3,7 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
+import { chiaveDichiarazione } from "../../shared/dichiarazioniImpianti.ts";
 
 // Seed idempotente di GiacenzaSito e DichiarazioneSito per l'anno 2026.
 // Payload { simula: true } (default): restituisce il riepilogo senza scrivere.
@@ -108,10 +109,15 @@ export default async function(req) {
     ]);
 
     const giacKeys = new Set(existingGiac.map(g => norm(g.sito) + '|' + tdNorm(g.tipo_destinazione)));
-    const dichKeys = new Set(existingDich.map(d => norm(d.sito) + '|' + d.operazione + '|' + d.canale + '|' + (d.provenienza || '') + '|' + d.mese));
+    // LA CHIAVE SENZA L'OPERAZIONE (10/10/2026). Con l'operazione dentro, il
+    // seme non riconosceva una riga corretta a mano con l'altra operazione e la
+    // ricreava: due righe sullo stesso mese. L'operazione non fa parte
+    // dell'identita' di una dichiarazione, e' una proprieta' del sito.
+    const chiaveDi = (d) => chiaveDichiarazione(d, norm);
+    const dichKeys = new Set(existingDich.map(chiaveDi));
 
     const giacToCreate = GIACENZE_2026.filter(g => !giacKeys.has(norm(g.sito) + '|' + g.tipo_destinazione));
-    const dichToCreate = DICHIARAZIONI_2026.filter(d => !dichKeys.has(norm(d.sito) + '|' + d.operazione + '|' + d.canale + '|' + (d.provenienza || '') + '|' + d.mese));
+    const dichToCreate = DICHIARAZIONI_2026.filter(d => !dichKeys.has(chiaveDi({ ...d, anno: 2026 })));
 
     const summary = {
       giacenze_da_creare: giacToCreate.length,

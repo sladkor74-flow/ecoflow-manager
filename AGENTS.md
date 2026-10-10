@@ -28,6 +28,7 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - Il periodo di un movimento e' la fine del trasporto
   - Il guardiano notturno e la memoria dei numeri (10/10/2026)
   - Il dichiarato e' di chi tratta, non di chi stocca (10/10/2026)
+  - Una dichiarazione per mese, e un avviso non grida a zero (10/10/2026)
   - Canali indipendenti
   - Pesi
   - Come si legge un movimento: un punto solo
@@ -558,6 +559,64 @@ Due cose da portarsi via, piu' grandi di questo difetto.
 
 Vale la pena dirlo perche' e' il primo difetto trovato dal guardiano notturno, e
 non da una pagina aperta: e' esattamente il mestiere per cui e' stato scritto.
+
+### Una dichiarazione per mese, e un avviso non grida a zero (10/10/2026)
+
+**LA CHIAVE DI UNA DICHIARAZIONE MENSILE**: anno + sito normalizzato + canale +
+provenienza + mese. Cinque campi, e **l'operazione non c'entra** - R1 o R3 e' una
+proprieta' del sito (Irigom e T-Cycle fanno R1, gli altri R3), non un modo di
+distinguere due dichiarazioni dello stesso mese. La chiave non e' un'opinione:
+e' quella con cui il riepilogo aggancia le righe ai mesi, cioe' quella che decide
+che cosa l'utente vede. La regola sta in `shared/dichiarazioniImpianti.ts`
+(`chiaveDichiarazione`, `esitoScrittura`, `doppioniDichiarazioni`,
+`unisciDichiarazioni`), prove in `prove/unaDichiarazionePerMese.mjs`.
+
+**La piattaforma non ha vincoli di unicita' ne' indici**: l'unico presidio e' il
+codice. Quindi **chi scrive passa dalla regola, sempre** - il dialogo del mese, la
+griglia, la pratica di Irigom, il seme - e chi scrive rilegge prima di scrivere,
+perche' fidarsi di quello che la pagina aveva in mano quando l'hanno aperta e'
+bastato a generare gemelle: due schede aperte, un secondo clic, un allineamento
+girato nel frattempo.
+
+**COSA FA UNA GEMELLA, e perche' era invisibile.** I due moduli rispondono in modo
+opposto: il riepilogo ne tiene **una sola** (una Map per chiave) e quelle tonnellate
+spariscono dai conti; le giacenze le **sommano** e si contano due volte, con la
+giacenza decurtata il doppio. Lo stesso errore, un dato in meno da una parte e uno
+in piu' dall'altra. E siccome la gemella non compare nel riepilogo, **non era
+correggibile da nessuna casella**: la volta dopo il mese sembrava vuoto e si
+creava la terza riga.
+
+**L'EXTRA RACCOLTA E' L'ECCEZIONE** (utente, 10/10/2026): a portale non e' gestita,
+sono campagne occasionali e nello stesso mese ce ne possono stare due, quindi
+ripetersi e' legittimo. Ma allora chi legge le **deve sommare**: permettere la
+seconda riga senza sommarla vorrebbe dire perderla, e un dato perso e' peggio di un
+doppione perche' non lascia traccia. E **caricato vuol dire caricato**: sommare due
+campagne di cui una sola e' a portale e chiamare caricato il totale farebbe
+decurtare la giacenza di qualcosa che il portale non ha ancora visto, percio' i
+chili caricati si tengono a parte (`caricato_kg`, `kgCaricatiDi`).
+
+**UN DOPPIONE SI PRESENTA COME DOPPIONE.** Altrove si traveste: nel confronto col
+portale la gemella non pareggia nessun caricamento e finisce fra «i mesi che il
+portale non conosce», che manda a cercare un problema dove non e'. Il guardiano
+notturno li cerca ogni notte (`doppioni_json` nella fotografia del giorno), la
+dashboard li mette fra le cose da gestire col mese e il canale, e la pagina delle
+dichiarazioni li scrive sopra a tutto il resto.
+
+**E UN AVVISO NON GRIDA AL LUPO A ZERO.** Due casi trovati lo stesso giorno:
+
+- l'avviso dei file non rimossi veniva **riscritto a zero** da ogni pulizia che non
+  trovava niente da togliere, e diceva «0 file caricati restano sulla piattaforma:
+  cancellarli non si puo'» - una frase che si contraddice da sola, in cima agli
+  avvisi per settimane. Una pulizia senza niente da fare non vuol dire che i file
+  di prima se ne siano andati: il conto lo abbassa solo chi li ha visti andarsene.
+- la voce della dashboard del guardiano copriva due cause con una frase sola, e un
+  doppione senza scostamenti avrebbe scritto «**0 impianti** non quadrano col
+  portale» accanto a «tutti gli impianti quadrano (2)». Due cose diverse, due voci
+  diverse.
+
+**Il presidio vale quanto la fiducia che gli si da'**: un avviso che si accende a
+zero e' il modo piu' sicuro di far ignorare quelli veri, ed e' peggio di un avviso
+che non c'e', perche' costa attenzione ogni giorno senza dire niente.
 
 ### Canali indipendenti
 

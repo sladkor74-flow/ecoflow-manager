@@ -47,6 +47,166 @@ export function operazioneDa(tipologia) {
 export const materialiDi = (operazione) => MATERIALI.filter(m => m.operazioni.includes(operazione === 'R1' ? 'R1' : 'R3'));
 export const sommaMateriali = (d) => MATERIALI.reduce((s, m) => s + (Number(d && d[m.chiave]) || 0), 0);
 
+// UNA DICHIARAZIONE PER MESE, E L'ECCEZIONE DELL'EXTRA RACCOLTA (10/10/2026).
+//
+// LA CHIAVE. Una dichiarazione mensile e' identificata da sito (normalizzato),
+// canale, provenienza e mese, dentro l'anno. Non e' una chiave inventata qui:
+// e' quella con cui il riepilogo aggancia le righe ai mesi, cioe' quella che
+// decide che cosa l'utente vede.
+//
+// L'OPERAZIONE NON STA NELLA CHIAVE, e li' stava il buco. R1 o R3 e' una
+// proprieta' del sito - Irigom e T-Cycle fanno R1, gli altri R3 - non un modo
+// di distinguere due dichiarazioni dello stesso mese: nei dati veri nessun sito
+// usa due operazioni sullo stesso canale. La griglia pero' cercava la cella
+// ANCHE per operazione, e il form di un flusso nuovo propone R3: su Irigom, che
+// e' R1, la riga di quel mese non si trovava piu' e nasceva la gemella.
+//
+// E ANCHE IL NOME VA NORMALIZZATO: «Gatim» e «GATIM S.R.L.» sono lo stesso
+// soggetto. Cercare per stringa esatta e' il modo piu' facile di non trovare la
+// riga che c'e'.
+//
+// COSA FA UNA GEMELLA, se passa: i due moduli rispondono in modo OPPOSTO. Il
+// riepilogo ne tiene una sola (una Map per chiave: l'ultima sovrascrive la
+// prima) e quelle tonnellate SPARISCONO; le giacenze le sommano e quelle
+// tonnellate si contano DUE VOLTE, con la giacenza che scende. Lo stesso
+// errore, un dato in meno da una parte e uno in piu' dall'altra.
+//
+// L'EXTRA RACCOLTA E' L'ECCEZIONE, e l'ha detta l'utente (10/10/2026): a
+// portale non e' gestita e sono campagne occasionali, quindi nello stesso mese
+// ce ne possono stare due e ripetersi e' legittimo. Ma allora chi legge le DEVE
+// SOMMARE: permettere la seconda riga senza sommarla vorrebbe dire perderla, e
+// un dato perso e' peggio di un doppione, perche' non lascia traccia.
+export const CANALE_CON_RIPETIZIONI = 'EXTRA_RACCOLTA';
+
+/** Dove due righe nello stesso mese sono due cose vere, e non un errore. */
+export const ammetteRipetizioni = (canale) => String(canale || 'RETE') === CANALE_CON_RIPETIZIONI;
+
+/**
+ * La chiave di una dichiarazione mensile. `chiaveDi` normalizza la ragione
+ * sociale: si passa da fuori, come in tutto il resto del gestionale, perche' la
+ * normalizzazione non e' una regola delle dichiarazioni.
+ */
+export function chiaveDichiarazione(d, chiaveDi) {
+  const n = typeof chiaveDi === 'function' ? chiaveDi : ((s) => String(s || '').trim().toUpperCase());
+  return [n((d && d.sito) || ''), (d && d.canale) || 'RETE', (d && d.provenienza) || '', (d && d.mese) || ''].join('|');
+}
+
+/** Le righe di un anno che stanno sulla stessa chiave di `nuova`, esclusa se stessa. */
+export function righeSullaStessaChiave(righe, nuova, { anno, chiaveDi } = {}) {
+  const k = chiaveDichiarazione(nuova, chiaveDi);
+  const a = Number(anno) || Number(nuova && nuova.anno) || 0;
+  return (righe || []).filter(r => r
+    && (!a || Number(r.anno) === a)
+    && (!(nuova && nuova.id) || r.id !== nuova.id)
+    && chiaveDichiarazione(r, chiaveDi) === k);
+}
+
+/**
+ * SI PUO' SCRIVERE? Una risposta sola per tutti quelli che scrivono: la griglia
+ * del riepilogo, il dialogo del mese, la pratica di Irigom e l'inserimento
+ * automatico. Prima ognuno cercava la riga esistente a modo suo, e bastava che
+ * uno cercasse con una chiave diversa per far nascere la gemella.
+ *
+ * - `aggiorna`: la riga c'e'. Chi scrive intendeva «la dichiarazione di questo
+ *   mese e' questa», quindi si cambia quella e non se ne aggiunge una seconda.
+ * - `crea`: non c'e' niente, oppure e' extra raccolta e si e' chiesto
+ *   esplicitamente di aggiungere una campagna (`ripeti`).
+ * - `rifiuta`: ce ne sono GIA' due o piu'. Quale aggiornare non lo sa nessuno, e
+ *   sceglierne una a caso nasconderebbe il problema dentro un numero credibile:
+ *   si dice, e si lascia correggere.
+ */
+export function esitoScrittura(righe, nuova, { anno, chiaveDi, ripeti } = {}) {
+  const pari = righeSullaStessaChiave(righe, nuova, { anno, chiaveDi });
+  const canale = (nuova && nuova.canale) || 'RETE';
+  const quale = (CANALI.find(c => c.chiave === canale) || {}).nome || canale;
+  const dove = `${(nuova && nuova.sito) || ''} · ${(nuova && nuova.mese) || ''} · ${quale}`;
+  if (pari.length > 1) {
+    return {
+      azione: 'rifiuta', esistente: null, pari,
+      motivo: `Ci sono gia' ${pari.length} dichiarazioni per ${dove}: vanno sistemate prima, perche' quale aggiornare non lo decide il gestionale.`,
+    };
+  }
+  if (pari.length === 1 && !(ripeti && ammetteRipetizioni(nuova && nuova.canale))) {
+    return { azione: 'aggiorna', esistente: pari[0], pari, motivo: '' };
+  }
+  return { azione: 'crea', esistente: null, pari, motivo: '' };
+}
+
+/**
+ * I DOPPIONI CHE CI SONO GIA'. L'extra raccolta resta fuori: li' ripetersi e'
+ * legittimo. Ordinati dal piu' grosso, perche' se se ne sistema uno solo tanto
+ * vale che sia quello che sposta i conti.
+ */
+export function doppioniDichiarazioni(righe, { anno, chiaveDi } = {}) {
+  const a = Number(anno) || 0;
+  const per = new Map();
+  for (const r of righe || []) {
+    if (!r || (a && Number(r.anno) !== a)) continue;
+    if (ammetteRipetizioni(r.canale)) continue;
+    const k = chiaveDichiarazione(r, chiaveDi);
+    per.set(k, [...(per.get(k) || []), r]);
+  }
+  return [...per.entries()]
+    .filter(([, v]) => v.length > 1)
+    .map(([chiave, v]) => ({
+      chiave,
+      sito: v[0].sito || '', canale: v[0].canale || 'RETE',
+      provenienza: v[0].provenienza || '', mese: v[0].mese || '',
+      quante: v.length,
+      kg: v.reduce((s, x) => s + (Number(x.quantita_kg) || 0), 0),
+      kg_in_piu: v.slice(1).reduce((s, x) => s + (Number(x.quantita_kg) || 0), 0),
+      caricate: v.filter(x => x.caricata_inviata).length,
+      ids: v.map(x => x.id).filter(Boolean),
+    }))
+    .sort((x, y) => y.kg_in_piu - x.kg_in_piu);
+}
+
+/**
+ * DUE RIGHE SULLA STESSA CHIAVE, LETTE COME SI DEVE.
+ *
+ * Extra raccolta: si sommano, perche' due campagne nello stesso mese sono due
+ * cose vere. Gli altri canali: non si somma niente, perche' sommare un errore lo
+ * nasconderebbe dentro un numero credibile - si tiene la prima e si segna che ce
+ * n'e' un'altra, cosi' il modulo lo puo' dire.
+ *
+ * I chili caricati si tengono a parte (`caricato_kg`): sommare due campagne di
+ * cui una sola e' a portale e chiamare caricato il totale farebbe decurtare la
+ * giacenza di qualcosa che il portale non ha ancora visto.
+ */
+/**
+ * I CHILI CHE HANNO DECURTATO: solo quelli caricati a portale. Su una riga sola
+ * e' tutto o niente; su piu' campagne di extra raccolta unite e' la parte che a
+ * portale e' arrivata davvero, tenuta da parte da unisciDichiarazioni. Sommare
+ * due campagne e chiamare caricato il totale farebbe decurtare la giacenza di
+ * qualcosa che il portale non ha ancora visto.
+ */
+export function kgCaricatiDi(d) {
+  if (!d) return 0;
+  if (typeof d.caricato_kg === 'number') return d.caricato_kg;
+  return d.caricata_inviata ? (Number(d.quantita_kg) || 0) : 0;
+}
+export function unisciDichiarazioni(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const caricati = (x) => (x.caricata_inviata ? Number(x.quantita_kg) || 0 : 0);
+  const primi = typeof a.caricato_kg === 'number' ? a.caricato_kg : caricati(a);
+  if (!ammetteRipetizioni(a.canale || b.canale)) {
+    return { ...a, caricato_kg: primi, altre: [...(a.altre || []), b.id].filter(Boolean) };
+  }
+  const unita = {
+    ...a,
+    quantita_kg: (Number(a.quantita_kg) || 0) + (Number(b.quantita_kg) || 0),
+    caricato_kg: primi + caricati(b),
+    ripetizioni: (Number(a.ripetizioni) || 1) + 1,
+    // Caricata vuol dire caricata tutta: una campagna ancora da portare a
+    // portale non la rende caricata quella accanto.
+    caricata_inviata: !!a.caricata_inviata && !!b.caricata_inviata,
+    ricevuta_email: !!a.ricevuta_email && !!b.ricevuta_email,
+  };
+  for (const m of MATERIALI) unita[m.chiave] = (Number(a[m.chiave]) || 0) + (Number(b[m.chiave]) || 0);
+  return unita;
+}
+
 /**
  * Perche' un mese senza dichiarazione e' a posto lo stesso. Si segna sulla
  * dichiarazione del mese (motivo_assenza, con quantita' a zero); la rete di chi

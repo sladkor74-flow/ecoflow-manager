@@ -103,42 +103,68 @@ export function totaliGiorno(siti) {
 }
 
 /**
+ * LA RIGA DEI DOPPIONI, quando ce ne sono.
+ *
+ * Un doppione non e' uno scostamento e non si mescola con quelli: li' il
+ * portale e noi diciamo numeri diversi, qui siamo noi a dire due cose. E va
+ * detto come doppione, perche' altrove si presenta travestito - nel confronto
+ * col portale la gemella finisce fra «i mesi che il portale non conosce», che
+ * manda a cercare un problema dove non e'.
+ */
+export function notaDoppioni(doppioni) {
+  const d = doppioni || [];
+  if (!d.length) return '';
+  const primi = d.slice(0, 2).map(x => `${x.sito} ${x.mese} ${x.canale === 'ACI' ? `ACI ${x.provenienza || ''}`.trim() : x.canale === 'RETE' ? 'rete' : x.canale} (${x.quante})`);
+  const altri = d.length - primi.length;
+  return `${d.length === 1 ? 'Una dichiarazione è doppia' : `${d.length} dichiarazioni sono doppie`}: `
+    + primi.join(', ') + (altri > 0 ? ` e altre ${altri}` : '') + '.';
+}
+
+/**
  * L'ESITO IN UNA RIGA, come si legge la mattina.
  *
  * Non «3 anomalie»: i nomi e i numeri, perche' chi legge sappia subito se e'
  * roba sua. Oltre tre si contano gli altri, altrimenti la riga non e' piu' una
  * riga.
  */
-export function notaDelGiorno(fuori, quantiConfronto) {
+export function notaDelGiorno(fuori, quantiConfronto, doppioni) {
+  const dopp = notaDoppioni(doppioni);
   if (!fuori || !fuori.length) {
-    return quantiConfronto
+    const base = quantiConfronto
       ? `Tutti gli impianti con un confronto a portale quadrano (${quantiConfronto}).`
       : 'Nessun impianto ha un confronto col portale: niente da quadrare.';
+    return dopp ? `${base} ${dopp}` : base;
   }
   const primi = fuori.slice(0, 3).map(x => `${x.sito} ${x.scarto_t > 0 ? '+' : ''}${tt(x.scarto_t)} t`);
   const altri = fuori.length - primi.length;
-  return `${fuori.length === 1 ? 'Un impianto si scosta' : `${fuori.length} impianti si scostano`} dal portale: `
+  const base = `${fuori.length === 1 ? 'Un impianto si scosta' : `${fuori.length} impianti si scostano`} dal portale: `
     + primi.join(', ') + (altri > 0 ? ` e altri ${altri}` : '') + '.';
+  return dopp ? `${base} ${dopp}` : base;
 }
 
 /**
  * LA FOTOGRAFIA DEL GIORNO, pronta da scrivere.
  * `siti` sono quelli di riepilogoDichiarazioni, gia' calcolati.
  */
-export function fotografiaDelGiorno(siti, { giorno, anno } = {}) {
+export function fotografiaDelGiorno(siti, { giorno, anno, doppioni } = {}) {
   const voci = (siti || []).map(vociSito);
   // Il confronto col portale ce l'hanno gli impianti della rete: gli stoccaggi
   // hanno la loro rilevazione, che e' un'altra cosa e si controlla altrove.
   const conConfronto = voci.filter(v => v.ruolo === 'imp' && v.giacenza_portale_t !== null);
   const fuori = scostamenti(conConfronto);
+  const dopp = doppioni || [];
   return {
     giorno,
     anno: Number(anno),
-    esito: fuori.length ? 'da_guardare' : 'in_linea',
-    nota: notaDelGiorno(fuori, conConfronto.length),
+    // Un doppione fa «da guardare» quanto uno scostamento: finche' c'e', i
+    // numeri dipendono da quale modulo si guarda, e questo e' peggio di un
+    // numero fuori di mezza tonnellata, perche' non si vede da nessuna parte.
+    esito: (fuori.length || dopp.length) ? 'da_guardare' : 'in_linea',
+    nota: notaDelGiorno(fuori, conConfronto.length, dopp),
     siti_json: JSON.stringify(voci),
     totali_json: JSON.stringify(totaliGiorno(voci)),
     scostamenti_json: JSON.stringify(fuori),
+    doppioni_json: JSON.stringify(dopp),
   };
 }
 
@@ -154,6 +180,7 @@ export function leggiFotografia(r) {
     siti: apri(r.siti_json, []),
     totali: apri(r.totali_json, {}),
     scostamenti: apri(r.scostamenti_json, []),
+    doppioni: apri(r.doppioni_json, []),
   };
 }
 

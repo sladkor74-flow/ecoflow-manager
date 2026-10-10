@@ -6,7 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, AlertTriangle, Info, Check } from 'lucide-react';
-import { materialiDi, sommaMateriali, controlliDichiarazione, CANALI, MOTIVI_ASSENZA } from '@/lib/dichiarazioniImpianti';
+import { materialiDi, sommaMateriali, controlliDichiarazione, CANALI, MOTIVI_ASSENZA, esitoScrittura } from '@/lib/dichiarazioniImpianti';
+import { fetchAllClient } from '@/lib/fetchAllClient';
+import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { formatKg } from '@/lib/utils';
 import LetturaAci from '@/components/dichiarazioni/LetturaAci';
 import { numeroKg } from '@/lib/dichiarazioneAci';
@@ -128,13 +130,32 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
           caricata_il: dati.caricata_inviata ? (dati.caricata_il || oggi()) : '',
           ...Object.fromEntries(materiali.map(m => [m.chiave, numeroKg(dati[m.chiave])])),
         };
-      if (d && d.id) await base44.entities.DichiarazioneSito.update(d.id, campi);
-      else {
-        await base44.entities.DichiarazioneSito.create({
-          sito: sito.sito, operazione: flusso.operazione || 'R3', canale: flusso.canale,
-          provenienza: flusso.provenienza || '', anno, mese: mese.mese, ...campi,
-        });
+      // SI RILEGGE PRIMA DI SCRIVERE (10/10/2026).
+      //
+      // Prima si scriveva fidandosi di `d`, cioe' della casella che la pagina
+      // aveva in mano quando l'hanno aperta. Due schede aperte, un secondo clic
+      // prima del ricarico, o un allineamento girato nel frattempo, e `d` era
+      // nullo quando invece la riga c'era: nasceva la gemella. E una gemella nel
+      // riepilogo non si vede nemmeno (ne resta una sola per chiave), quindi la
+      // volta dopo la casella sembrava vuota di nuovo e si creava la terza.
+      //
+      // Chi salva qui intende «la dichiarazione di questo mese e' questa»: se la
+      // riga c'e' si cambia quella, non se ne aggiunge un'altra. Decide la regola
+      // (lib/dichiarazioniImpianti), la stessa per tutti quelli che scrivono.
+      const nuova = {
+        sito: sito.sito, operazione: flusso.operazione || 'R3', canale: flusso.canale,
+        provenienza: flusso.provenienza || '', anno, mese: mese.mese,
+      };
+      const presenti = await fetchAllClient(base44.entities.DichiarazioneSito, { anno, mese: mese.mese }, 'id');
+      const esito = esitoScrittura(presenti, { ...nuova, id: d && d.id }, { anno, chiaveDi: normalizzaRagioneSociale });
+      if (esito.azione === 'rifiuta') {
+        toast({ title: 'Ci sono due dichiarazioni per questo mese', description: esito.motivo, variant: 'destructive' });
+        setSalvataggio(false);
+        return;
       }
+      const bersaglio = (d && d.id) ? d : esito.esistente;
+      if (bersaglio && bersaglio.id) await base44.entities.DichiarazioneSito.update(bersaglio.id, campi);
+      else await base44.entities.DichiarazioneSito.create({ ...nuova, ...campi });
       toast({ title: 'Dichiarazione salvata', description: `${sito.sito} · ${mese.mese} ${anno}` });
       onSalvato();
     } catch (e) {

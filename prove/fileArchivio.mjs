@@ -202,6 +202,50 @@ console.log('L\'AVVISO DICE UNA COSA SOLA, E VERA');
   verifica('quello aperto viene riscritto', esito.alert === 'aggiornato' && aggiornati.length === 1 && /cancellarli non si puo/.test(aggiornati[0].titolo), JSON.stringify(esito));
 }
 
+console.log('UN AVVISO NON SI RISCRIVE A ZERO');
+{
+  // La pulizia gira ogni notte, e una notte senza niente da togliere non vuol
+  // dire che i file di prima se ne siano andati: la piattaforma non li cancella.
+  // L'avviso veniva riscritto con quanti = 0 e diceva «0 file caricati restano
+  // sulla piattaforma: cancellarli non si puo'», una frase che si contraddice da
+  // sola, ed e' stata in cima agli avvisi dell'amministratore per settimane.
+  {
+    const creati = [], aggiornati = [];
+    const base = { asServiceRole: { entities: { Alert: {
+      filter: async () => [{ id: 'a1', quanti: 59 }],
+      create: async (d) => { creati.push(d); },
+      update: async (id, d) => aggiornati.push({ id, ...d }),
+    } } } };
+    const esito = await segnalaFileNonRimossi(base, { nonRiusciti: [], bloccati: 0, oggi: '2026-10-10' });
+    verifica('a zero, un avviso aperto si lascia stare', esito.alert === 'lasciato', JSON.stringify(esito));
+    verifica('non si riscrive niente', aggiornati.length === 0 && creati.length === 0, JSON.stringify(aggiornati));
+    verifica('e il conto vero resta quello di prima, non zero', esito.quanti === 59, String(esito.quanti));
+  }
+  {
+    const creati = [];
+    const base = { asServiceRole: { entities: { Alert: {
+      filter: async () => [],
+      create: async (d) => { creati.push(d); },
+      update: async () => {},
+    } } } };
+    const esito = await segnalaFileNonRimossi(base, { nonRiusciti: [], bloccati: 0, oggi: '2026-10-10' });
+    verifica('a zero e senza niente aperto non si apre nessun avviso', esito.alert === 'niente' && creati.length === 0, JSON.stringify(esito));
+  }
+  {
+    // E quando i file ci sono davvero l'avviso si apre e si aggiorna come prima:
+    // la guardia a zero non deve aver spento il presidio.
+    const aggiornati = [];
+    const base = { asServiceRole: { entities: { Alert: {
+      filter: async () => [{ id: 'a1', quanti: 59 }],
+      create: async () => {},
+      update: async (id, d) => aggiornati.push({ id, ...d }),
+    } } } };
+    const esito = await segnalaFileNonRimossi(base, { nonRiusciti: [{ nome_file: 'x.xlsx' }], bloccati: 60, oggi: '2026-10-10' });
+    verifica('con i file veri si aggiorna, e col numero nuovo', esito.alert === 'aggiornato' && esito.quanti === 60 && aggiornati[0].quanti === 60, JSON.stringify(esito));
+    verifica('e il titolo non parte da zero', /60 file caricati restano/.test(aggiornati[0].titolo), aggiornati[0].titolo);
+  }
+}
+
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');
 process.exit(ko ? 1 : 0);

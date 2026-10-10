@@ -5,7 +5,7 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { eTerminato, eEseguito, periodoMovimento } from "../../shared/movimenti.ts";
-import { MESI, operazioneDa, quadratura } from "../../shared/dichiarazioniImpianti.ts";
+import { MESI, operazioneDa, quadratura, chiaveDichiarazione, unisciDichiarazioni, doppioniDichiarazioni, kgCaricatiDi } from "../../shared/dichiarazioniImpianti.ts";
 import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese, nostraRiga } from "../../shared/giacenzaPortale.ts";
 import { puntiDiPartenza, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 import { confrontaConIlPortale } from "../../shared/agganciaDichiarazioni.ts";
@@ -434,12 +434,27 @@ export default async function(req) {
     };
 
     // --- Dichiarazioni per sito, canale, provenienza e mese ---
+    //
+    // DUE RIGHE SULLA STESSA CHIAVE NON SI SOVRASCRIVONO PIU' (10/10/2026).
+    // Qui c'era una Map.set secca: l'ultima letta vinceva e la prima spariva
+    // dai conti senza una parola, mentre le giacenze invece la sommavano. Lo
+    // stesso dato, in meno da una parte e in piu' dall'altra.
+    //
+    // Ora decide la regola (shared/dichiarazioniImpianti.ts): l'extra raccolta
+    // si somma, perche' due campagne nello stesso mese sono due cose vere; gli
+    // altri canali no, perche' sommare un errore lo nasconderebbe dentro un
+    // numero credibile - si tiene la prima e si segna che ce n'e' un'altra.
     const perDich = new Map();
     for (const d of dichiarazioni) {
-      perDich.set(`${norm(d.sito)}|${d.canale || 'RETE'}|${d.provenienza || ''}|${d.mese}`, d);
+      const k = chiaveDichiarazione(d, norm);
+      perDich.set(k, unisciDichiarazioni(perDich.get(k), d));
       const ns = norm(d.sito);
       if (!nomi.has(ns)) { nomi.set(ns, d.sito); segnaRuolo(ns, 'imp'); }
     }
+    // I doppioni che ci sono GIA', quelli che nessun controllo vedeva: finche'
+    // restano, un mese di rete o di ACI ha due righe e i numeri dipendono da
+    // quale modulo si guarda. L'extra raccolta resta fuori: li' e' legittimo.
+    const doppioni = doppioniDichiarazioni(dichiarazioni, { anno: annoNum, chiaveDi: norm });
     const dichiarazioneDi = (d) => d && {
       id: d.id, quantita_kg: Number(d.quantita_kg) || 0, caricata_inviata: !!d.caricata_inviata, ricevuta_email: !!d.ricevuta_email,
       ricevuta_il: d.ricevuta_il || '', caricata_il: d.caricata_il || '', note: d.note || '', motivo_assenza: d.motivo_assenza || '',
@@ -588,7 +603,7 @@ export default async function(req) {
           uscito_non_allocato_kg: allineato.non_allocato_kg + allineato.fuori_mese_kg,
           da_dichiarare_t: t3(mesi.reduce((s, m) => s + m.da_dichiarare_kg, 0) / 1000),
           da_stoccaggi_t: t3(mesi.reduce((s, m) => s + m.da_stoccaggi.reduce((x, y) => x + y.kg, 0), 0) / 1000),
-          dichiarato_caricato_t: t3(mesi.reduce((s, m) => s + (m.dichiarazione && m.dichiarazione.caricata_inviata ? m.dichiarazione.quantita_kg : 0), 0) / 1000),
+          dichiarato_caricato_t: t3(mesi.reduce((s, m) => s + kgCaricatiDi(m.dichiarazione), 0) / 1000),
           dichiarato_totale_t: t3(mesi.reduce((s, m) => s + (m.dichiarazione ? m.dichiarazione.quantita_kg : 0), 0) / 1000),
         };
       });
@@ -874,7 +889,7 @@ export default async function(req) {
     let fotografia = null;
     if (registra) {
       const giorno = oggiRoma();
-      const riga = fotografiaDelGiorno(siti, { giorno, anno: annoNum });
+      const riga = fotografiaDelGiorno(siti, { giorno, anno: annoNum, doppioni });
       try {
         const gia = await svc.IndicatoreGiorno.filter({ giorno });
         if (gia && gia.length) {
@@ -892,7 +907,7 @@ export default async function(req) {
     }
 
     return Response.json({
-      anno: annoNum, mesi: MESI, siti, stoccaggi, totali, fotografia,
+      anno: annoNum, mesi: MESI, siti, stoccaggi, totali, fotografia, doppioni,
       foto_portale_il: fotoPortale,
       dichiarazioni_da_inserire: daInserire,
       // Fin dove arrivano i movimenti caricati (fine trasporto): se e' dopo la
