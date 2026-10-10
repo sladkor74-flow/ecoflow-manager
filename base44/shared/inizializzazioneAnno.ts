@@ -22,6 +22,7 @@
 // dagli archivi, non una scadenza scritta da qualche parte: cosi' resta vera
 // anche l'anno prossimo, quando nessuno si ricordera' di questo codice.
 import { conNotaCopia, daConfermare, senzaNotaCopia } from "./annoTarget.ts";
+import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 
 export const PRIMO_GIORNO = (anno) => `${Number(anno)}-01-01`;
 export const ULTIMO_GIORNO = (anno) => `${Number(anno)}-12-31`;
@@ -151,6 +152,28 @@ const voce = (chiave, titolo, perche, dove) => ({ chiave, titolo, perche, dove, 
 const conta = (righe, anno) => (righe || []).filter(r => Number(r && r.anno) === Number(anno)).length;
 
 /**
+ * QUALE ANNO NUOVO MOSTRARE IN DASHBOARD (revisione del 10/10/2026).
+ *
+ * La dashboard guardava sempre l'anno dopo quello di oggi: dal 1° gennaio 2027
+ * guardava il 2028, a 364 giorni, e taceva proprio quando le tariffe e le
+ * aperture del 2027 mancavano ancora. Il ramo «il 2027 e' gia' cominciato»,
+ * critico, non poteva scattare mai. A gennaio e febbraio si guarda prima
+ * l'anno appena cominciato, finche' gli manca qualcosa; poi l'anno dopo. La
+ * finestra di due mesi c'e' perche' un avviso che resta tutto l'anno non e'
+ * piu' un avviso.
+ * @param {object} args gli argomenti di listaAnno, con oggi; l'anno lo sceglie lei
+ */
+export function annoNuovoDaMostrare(args = {}) {
+  const oggi = String(args.oggi || '');
+  const annoOggi = Number(oggi.slice(0, 4));
+  if (Number(oggi.slice(5, 7)) <= 2) {
+    const corrente = listaAnno({ ...args, anno: annoOggi });
+    if (corrente.avvicinandosi) return corrente;
+  }
+  return listaAnno({ ...args, anno: annoOggi + 1 });
+}
+
+/**
  * LA LISTA DI CONTROLLO DELL'ANNO NUOVO.
  *
  * Sei voci, ognuna con il suo stato: `pronto` (non c'e' niente da fare),
@@ -227,7 +250,9 @@ export function listaAnno({
     const s = conta(giacenzeSito, annoNum);
     const tCopiati = (targetRaccoglitori || []).filter(r => Number(r && r.anno) === annoNum && daConfermare(r)).length;
     v.quante = t;
-    if (t && s && tCopiati === t) { v.stato = 'parziale'; v.dettaglio = `${t} target dei raccoglitori copiati dal ${annoNum - 1} e ${s} siti: i target vanno confermati sul contratto nuovo.`; }
+    // Basta un target ancora copiato perche' la voce resti gialla, come per le
+    // tariffe: prima diventava verde al primo confermato (revisione del 10/10/2026).
+    if (t && s && tCopiati > 0) { v.stato = 'parziale'; v.dettaglio = `${tCopiati} target dei raccoglitori su ${t} ancora copiati dal ${annoNum - 1}, e ${s} siti: i target vanno confermati sul contratto nuovo.`; }
     else if (t && s) { v.stato = 'pronto'; v.dettaglio = `${t} target dei raccoglitori e ${s} siti per il ${annoNum}.`; }
     else if (t || s) { v.stato = 'parziale'; v.dettaglio = `${t} target dei raccoglitori e ${s} siti: manca una delle due metà.`; }
     else { v.stato = 'manca'; v.dettaglio = `Il ${annoNum} non ha ancora né target né siti.`; }
@@ -262,9 +287,12 @@ export function listaAnno({
     const al = ULTIMO_GIORNO(annoNum - 1);
     const v = voce('aperture_impianti', `Aperture degli impianti al ${gg(al)}`, 'Ogni impianto riparte dal peso non dichiarato del 31 dicembre, rete e ACI: senza, il 2 gennaio la quadratura col portale salta su tutti gli impianti che hanno giacenza.', 'Giacenze > Chiusura anno');
     const eImp = (g) => !String((g && g.tipo_destinazione) || 'imp').toLowerCase().startsWith('stoc');
-    const attesi = [...new Set((giacenzeSito || []).filter(g => eImp(g) && Number(g.anno) === annoNum - 1).map(g => testo(g.sito)).filter(Boolean))];
+    // I siti si riconoscono per chiave, come nella chiusura che scrive le aperture:
+    // per testo, «Gatim» e «GATIM SRL» restavano due siti e la voce non si
+    // chiudeva mai (revisione del 10/10/2026).
+    const attesi = [...new Set((giacenzeSito || []).filter(g => eImp(g) && Number(g.anno) === annoNum - 1).map(g => normalizzaRagioneSociale(g.sito)).filter(Boolean))];
     const conApertura = new Set((giacenzeSito || []).filter(g => eImp(g) && Number(g.anno) === annoNum
-      && (giorno(g.apertura_del) === al || Number(g.giacenza_riferimento_t) > 0 || Number(g.giacenza_riferimento_aci_t) > 0)).map(g => testo(g.sito)));
+      && (giorno(g.apertura_del) === al || Number(g.giacenza_riferimento_t) > 0 || Number(g.giacenza_riferimento_aci_t) > 0)).map(g => normalizzaRagioneSociale(g.sito)));
     const fatte = attesi.filter(x => conApertura.has(x));
     v.quante = fatte.length;
     if (!attesi.length) { v.stato = 'pronto'; v.dettaglio = 'Nessun impianto da aprire.'; }

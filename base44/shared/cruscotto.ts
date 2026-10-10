@@ -313,7 +313,8 @@ export function cruscotto(dati) {
     voce('Nuovo anno', quando <= 0 && an.mancanti ? 'critico' : 'attenzione',
       `${an.anno}: ${cosa}`,
       `${tempo} ${(an.voci || []).filter(v => v.stato !== 'pronto').map(v => v.titolo).join(' \u00b7 ')}.`,
-      '/target-status?tab=nuovo-anno');
+      // La scheda prepara l'anno dopo quello scelto: per aprire il 2027 si sceglie il 2026.
+      `/target-status?tab=nuovo-anno&anno=${an.anno - 1}`);
   }
 
   voci.sort((a, b) => GRAVITA[a.gravita] - GRAVITA[b.gravita] || a.area.localeCompare(b.area, 'it'));

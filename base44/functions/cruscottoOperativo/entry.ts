@@ -4,7 +4,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { cruscotto } from "../../shared/cruscotto.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
-import { listaAnno } from "../../shared/inizializzazioneAnno.ts";
+import { annoNuovoDaMostrare } from "../../shared/inizializzazioneAnno.ts";
 import { leggiFotografia } from "../../shared/indicatoriGiorno.ts";
 
 // Il cruscotto della dashboard: l'elenco unico delle cose da gestire, l'arretrato
@@ -58,8 +58,10 @@ export default async function(req) {
       prefatture: (prefatture || []).map(p => ({ anno: p.anno, mese: p.mese, superata: p.superata })),
       riepilogoQualifica: riepiloghi[0] || null, richiesteEct, verificheSedi,
       fotografiaGiorno: leggiFotografia((ultimaFoto || [])[0] || null),
-      annoNuovo: listaAnno({
-        anno: anno + 1, tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore,
+      // Dal 1° gennaio, per due mesi, l'anno appena cominciato se gli manca qualcosa
+      // (annoNuovoDaMostrare): prima si guardava sempre l'anno dopo.
+      annoNuovo: annoNuovoDaMostrare({
+        tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore,
         rilevazioni: (rilevazioni || []).map(r => ({ ...r, sito: normalizzaRagioneSociale(r.sito) })),
         piazzali: [...new Set([
           ...(giacenzeSito || []).filter(g => String(g.tipo_destinazione || '').toLowerCase().startsWith('stoc')).map(g => normalizzaRagioneSociale(g.sito)),

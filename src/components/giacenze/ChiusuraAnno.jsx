@@ -699,7 +699,12 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
         title: salvati || aperture.length
           ? [salvati ? `${salvati} ${salvati === 1 ? 'fotografia salvata' : 'fotografie salvate'} al ${dossier.giorno}` : '', aperture.length ? `${aperture.length} ${aperture.length === 1 ? 'apertura scritta' : 'aperture scritte'} per il ${dati.aperture.anno}` : ''].filter(Boolean).join(' · ')
           : 'Niente salvato',
-        description: [saltati.length ? `Non salvate: ${saltati.map(s => `${s.sito} (${s.motivo})`).join(' · ')}` : '', apertureNo.length ? `Aperture non scritte: ${apertureNo.map(s => `${s.sito} (${s.motivo})`).join(' · ')}` : ''].filter(Boolean).join(' — ') || 'Da qui ripartiranno le giacenze dell\'anno dopo, piazzali e impianti.',
+        // Il testo dice quello che e' successo: «e impianti» solo se un'apertura si e'
+        // scritta davvero (revisione del 10/10/2026).
+        description: [saltati.length ? `Non salvate: ${saltati.map(s => `${s.sito} (${s.motivo})`).join(' · ')}` : '', apertureNo.length ? `Aperture non scritte: ${apertureNo.map(s => `${s.sito} (${s.motivo})`).join(' · ')}` : ''].filter(Boolean).join(' — ')
+          || (aperture.length && salvati ? 'Da qui ripartiranno le giacenze dell\'anno dopo, piazzali e impianti.'
+            : aperture.length ? 'Da qui ripartiranno gli impianti dell\'anno dopo.'
+            : 'Da qui ripartiranno le giacenze dei piazzali dell\'anno dopo: nessuna apertura di impianto scritta.'),
         variant: salvati || aperture.length ? undefined : 'destructive',
       });
       if (salvati || aperture.length) { onSaved?.(); await carica(); }
@@ -710,6 +715,14 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
   };
 
   const pronti = useMemo(() => (dossier ? dossier.piazzali.filter(p => p.pronto && (sostituisci || !p.gia_salvata)) : []), [dossier, sostituisci]);
+  // LE APERTURE SI SALVANO ANCHE DA SOLE (revisione del 10/10/2026). Il server le
+  // scrive a ogni salvataggio, ma il pulsante si accendeva solo con un piazzale
+  // pronto e non salvato: una lettura d'impianto arrivata dopo, o da correggere,
+  // non si poteva scrivere dalla pagina.
+  const apertureDaScrivere = (dossier && dossier.aperture && dossier.aperture.piano) || [];
+  const apertureDaCambiare = ((dossier && dossier.aperture && dossier.aperture.gia_scritte) || []).filter(x => /sostituzione/.test(String(x.motivo || '')));
+  const qualcosaDaSalvare = pronti.length > 0 || apertureDaScrivere.length > 0 || apertureDaCambiare.length > 0;
+  const cosaSiSalva = [pronti.length ? `${pronti.length} ${pronti.length === 1 ? 'fotografia' : 'fotografie'}` : '', apertureDaScrivere.length || apertureDaCambiare.length ? 'aperture' : ''].filter(Boolean).join(' e ');
 
   if (caricamento && !dossier) {
     return <div className="flex justify-center py-12"><RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
@@ -740,8 +753,9 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
             sezioni={() => chiusuraAnnoPdf(dossier, { decisioneDi: (v) => decisioneDiVoce(dossier, v), pesoInParole, nomeCanale })}
           />
           {isAdmin && (
-            <Button size="sm" onClick={() => setConferma(true)} disabled={caricamento || inCorso === 'salva' || !pronti.length}>
-              <Save className="w-4 h-4 mr-1" /> Salva {pronti.length ? `${pronti.length} ` : ''}fotografie
+            // Spento anche con letture cambiate e confronto vecchio: si salva quello che si vede.
+            <Button size="sm" onClick={() => setConferma(true)} disabled={caricamento || inCorso === 'salva' || daAggiornare || !qualcosaDaSalvare}>
+              <Save className="w-4 h-4 mr-1" /> Salva {cosaSiSalva || 'fotografie'}
             </Button>
           )}
         </div>
@@ -823,10 +837,10 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
       <AlertDialog open={conferma} onOpenChange={setConferma}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Salvare le fotografie del {giorno(dossier.giorno)}?</AlertDialogTitle>
+            <AlertDialogTitle>Salvare la chiusura del {giorno(dossier.giorno)}?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm">
-                <p>Da qui ripartiranno le giacenze del {dossier.anno + 1}. Si salvano {pronti.length} {pronti.length === 1 ? 'piazzale' : 'piazzali'}:</p>
+                <p>Da qui ripartiranno le giacenze del {dossier.anno + 1}. {pronti.length ? `Si salvano ${pronti.length} ${pronti.length === 1 ? 'piazzale' : 'piazzali'}:` : 'Nessuna fotografia di piazzale da salvare.'}</p>
                 <ul className="text-xs space-y-0.5 max-h-48 overflow-y-auto">
                   {pronti.map(p => (
                     <li key={p.sito}>
@@ -835,9 +849,15 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
                     </li>
                   ))}
                 </ul>
+                {apertureDaScrivere.length > 0 && (
+                  <p className="text-xs">Si scrivono le aperture del {dossier.anno + 1}: {apertureDaScrivere.map(x => `${x.sito} (rete ${formatKg(Math.round((Number(x.dati.giacenza_riferimento_t) || 0) * 1000))} kg${x.dati.giacenza_riferimento_aci_t !== undefined ? `, ACI ${formatKg(Math.round((Number(x.dati.giacenza_riferimento_aci_t) || 0) * 1000))} kg` : ''})`).join(' · ')}.</p>
+                )}
+                {apertureDaCambiare.length > 0 && (
+                  <p className="text-xs">Hanno gia&apos; un&apos;apertura e si cambiano solo con la sostituzione: {apertureDaCambiare.map(x => x.sito).join(' · ')}.</p>
+                )}
                 <label className="flex items-center gap-2 text-xs">
                   <input type="checkbox" checked={sostituisci} onChange={(e) => setSostituisci(e.target.checked)} />
-                  Rifai anche le fotografie gia&apos; salvate per questo 31 dicembre (il motivo resta scritto nella nota)
+                  Rifai anche le fotografie e le aperture gia&apos; salvate per questo 31 dicembre (il motivo resta scritto nella nota)
                 </label>
               </div>
             </AlertDialogDescription>
@@ -845,7 +865,7 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={inCorso === 'salva'}>Annulla</AlertDialogCancel>
             <AlertDialogAction onClick={(e) => { e.preventDefault(); salva(); }} disabled={inCorso === 'salva'}>
-              {inCorso === 'salva' ? 'Salvataggio…' : 'Salva le fotografie'}
+              {inCorso === 'salva' ? 'Salvataggio…' : `Salva ${cosaSiSalva || 'le fotografie'}`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

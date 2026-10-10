@@ -354,7 +354,7 @@ console.log('L ANNO NUOVO COMPARE DUE MESI PRIMA, E NON PRIMA');
   verifica('a quaranta giorni la voce c e', !!v, 'nessuna voce');
   verifica('e dice che cosa manca e che cosa va confermato', v && /2 cose mancano, 1 e da confermare/.test(v.titolo.replace('è','e')), v && v.titolo);
   verifica('con i giorni che restano e le voci aperte', v && /40 giorni al 1° gennaio/.test(v.dettaglio) && /Tariffe verso Ecotyre/.test(v.dettaglio) && !/Target e siti/.test(v.dettaglio), v && v.dettaglio);
-  verifica('e porta dritto alla scheda', v && v.link === '/target-status?tab=nuovo-anno');
+  verifica('e porta dritto alla scheda, sull\'anno giusto', v && v.link === '/target-status?tab=nuovo-anno&anno=2026', v && v.link);
   verifica('prima della finestra non si dice niente', vociDi(an({ avvicinandosi: false })).length === 0);
   verifica('senza l anno nuovo nemmeno', cruscotto(base).da_gestire.filter(x => x.area === 'Nuovo anno').length === 0);
   // A gennaio con qualcosa ancora mancante non e' piu' un promemoria: e' un guaio.
