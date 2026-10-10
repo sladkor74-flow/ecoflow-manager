@@ -1386,7 +1386,7 @@ export const STRUMENTI = [
   },
   {
     nome: 'caricamenti',
-    descrizione: 'Quando sono stati caricati per l\'ultima volta i file del gestionale: serve per sapere se un dato e\' aggiornato.',
+    descrizione: 'Quando sono stati caricati per l\'ultima volta i file del gestionale, e fino a che giorno arrivano i dati di ogni archivio (l\'ultima fine trasporto, la fotografia del portale, l\'ultima dichiarazione): serve per sapere se un dato e\' aggiornato.',
     parametri: {},
     moduli: ['Caricamento Dati'],
     async esegui(base44) {
@@ -1407,12 +1407,44 @@ export const STRUMENTI = [
         }
         if (!per.has(tipo)) per.set(tipo, { tipo, quando: soloData(l.created_date), file: l.nome_file, righe: l.righe_importate, esito: l.esito });
       }
+      // FINO A CHE GIORNO ARRIVANO I DATI (utente, 10/10/2026). Il giorno del
+      // caricamento non lo dice: un file caricato il 9 puo' fermarsi al 6. Per ogni
+      // archivio l'ultimo giorno che c'e' dentro, sul giorno italiano: per i
+      // movimenti l'ultima fine trasporto dei terminati, per il file dei non
+      // dichiarati il giorno della fotografia, per il report delle dichiarazioni
+      // l'ultima dichiarazione, per gli assegnati l'ultimo ordine immesso. Una
+      // lettura ordinata per archivio, di pochi record: non si legge l'archivio intero.
+      const svc = base44.asServiceRole.entities;
+      const ultimoGiorno = async (entita, campo, filtro = null) => {
+        try {
+          const righe = filtro ? await svc[entita].filter(filtro, `-${campo}`, 5) : await svc[entita].list(`-${campo}`, 5);
+          const giorni = (righe || []).map(r => r && r[campo]).filter(Boolean).map(v => giornoRoma(v) || String(v).slice(0, 10)).filter(Boolean).sort();
+          return giorni.length ? giorni[giorni.length - 1] : null;
+        } catch (_e) { return undefined; }
+      };
+      const ARCHIVI_FINO_AL = [
+        ['primarie di rete', 'PrimariaRete', 'trasporto_finito_il', 'ultima fine trasporto dei terminati', { stato: 'terminato' }],
+        ['primarie ACI', 'PrimariaAci', 'trasporto_finito_il', 'ultima fine trasporto dei terminati', { stato: 'terminato' }],
+        ['secondarie', 'Secondaria', 'trasporto_finito_il', 'ultima fine trasporto dei terminati', { stato: 'terminato' }],
+        ['terziarie', 'Terziaria', 'trasporto_finito_il', 'ultima fine trasporto dei terminati', { stato: 'terminato' }],
+        ['extra raccolta', 'ExtraRaccolta', 'trasporto_finito_il', 'ultima fine trasporto dei terminati', { stato: 'terminato' }],
+        ['ordini non dichiarati (fotografia del portale)', 'OrdineNonDichiarato', 'created_date', 'giorno della fotografia', null],
+        ['report delle dichiarazioni di trattamento', 'DichiarazioneTrattamento', 'data_dichiarazione', 'ultima dichiarazione', null],
+        ['assegnati di rete', 'Assegnato', 'ordine_immesso_il', 'ultimo ordine immesso', null],
+        ['assegnati ACI', 'AssegnatoAci', 'ordine_immesso_il', 'ultimo ordine immesso', null],
+      ];
+      const finoAl = await Promise.all(ARCHIVI_FINO_AL.map(async ([archivio, entita, campo, cosa, filtro]) => {
+        const giorno = await ultimoGiorno(entita, campo, filtro);
+        return { archivio, dati_fino_al: giorno === undefined ? null : giorno, cosa, ...(giorno === undefined ? { lettura_non_riuscita: true } : giorno === null ? { vuoto: true } : {}) };
+      }));
       return {
         fonte: 'Caricamento Dati',
         periodo: 'ultimi caricamenti riusciti',
         dati_al: oggiRoma(),
         dati: {
           caricamenti: [...per.values()].sort((a, b) => String(b.quando).localeCompare(String(a.quando))),
+          dati_fino_al: finoAl,
+          nota_fino_al: "Per i movimenti e' l'ultima fine trasporto presente nell'archivio: i dati arrivano almeno fino a quel giorno, e un giorno senza ritiri non si vede. Il giorno del caricamento e quello dei dati sono due cose diverse.",
           ...(falliti.size ? { tentativi_falliti_dopo_l_ultimo_riuscito: [...falliti.values()] } : {}),
         },
       };
