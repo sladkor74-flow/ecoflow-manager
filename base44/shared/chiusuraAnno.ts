@@ -36,6 +36,8 @@ import {
   ancoraDellAnno,
   classePfu,
   classiDiRilevazione,
+  kgAciDiRilevazione,
+  kgReteDiRilevazione,
   momentoRilevazione,
   movimentoStoccaggio,
   verificaRilevazione,
@@ -808,6 +810,72 @@ export function apertureDegliImpianti({ anno, impianti = [], letture_impianti = 
     }
   }
   return { anno: dopo, al, piano, senza_lettura: senzaLettura, gia_scritte: gia };
+}
+
+/**
+ * QUALI SITI ENTRANO NELLA CHIUSURA DELL'ANNO (10/10/2026).
+ *
+ * Un sito entra se nell'anno che si chiude ha un movimento, una rilevazione del
+ * piazzale o una riga di GiacenzaSito; oppure se non ha fatto niente ma la sua
+ * ultima rilevazione di prima aveva ancora PFU da smaltire, perche' quella
+ * giacenza c'e' ancora (la regola degli impianti che svuotano l'anno prima, 23/09).
+ *
+ * Prima i movimenti si prendevano «fino al 31/12» senza un inizio: gli archivi
+ * tengono anche il 2023-2025, e ogni sito passato di li' anni fa diventava un
+ * piazzale o un impianto a cui chiedere la lettura del 31/12. Sui dati del
+ * 10/10/2026 la chiusura del 2026 chiedeva i piazzali Ecorecuperi e Rpn e gli
+ * impianti New Deal, Corgom, A.L.F., MAJESTIQUE CARBON e AKCANSA, nessuno con un
+ * movimento nel 2026; e un piazzale senza lettura blocca il salvataggio.
+ * L'utente: «devi sempre considerare come partner operativo Smoco», e quei siti
+ * da anni non compaiono nei nostri ragionamenti.
+ *
+ * I movimenti degli anni prima restano a chi li usa (il saldo atteso parte
+ * dall'ultima rilevazione, che puo' essere dell'anno prima): qui decidono
+ * solo chi entra.
+ *
+ * @param {number} p.anno            l'anno che si chiude
+ * @param {Map}    p.giorniPerSito   'chiave|stoc' o 'chiave|imp' -> giorni (AAAA-MM-GG) di fine trasporto
+ * @param {array}  p.rilevazioni     le righe di GiacenzaStoccaggio, di tutti gli anni
+ * @param {array}  p.giacenzeSito    le righe di GiacenzaSito dell'anno che si chiude
+ * @param {function} p.chiave        il normalizzatore dei nomi
+ * @returns {{ piazzali: Set, impianti: Set }} le chiavi dei siti che entrano
+ */
+export function sitiDellaChiusura({ anno, giorniPerSito = new Map(), rilevazioni = [], giacenzeSito = [], chiave } = {}) {
+  const inizio = `${anno}-01-01`;
+  const al = giornoChiusura(anno);
+  const piazzali = new Set(), impianti = new Set();
+  for (const [k, giorni] of giorniPerSito) {
+    const [ns, ruolo] = String(k).split('|');
+    if (!ns || !(giorni || []).some(g => g >= inizio && g <= al)) continue;
+    (ruolo === 'imp' ? impianti : piazzali).add(ns);
+  }
+  // Le rilevazioni: quelle dell'anno contano tutte, anche a zero (un piazzale
+  // rilevato quest'anno e' un piazzale di quest'anno; uno che non c'entra si
+  // toglie da Giacenze > Stoccaggi, come PRT il 10/10/2026). Una senza data si
+  // tiene: meglio una lettura chiesta in piu' che una giacenza persa. Di quelle
+  // di prima conta solo l'ultima, e solo se ha ancora qualcosa.
+  const ultimaPrima = new Map();
+  for (const r of rilevazioni) {
+    const ns = chiave(r && r.sito);
+    if (!ns) continue;
+    const g = String((r && r.data_rilevazione) || '').slice(0, 10);
+    if (!g || (g >= inizio && g <= al)) { piazzali.add(ns); continue; }
+    if (g < inizio) {
+      const prima = ultimaPrima.get(ns);
+      if (!prima || g > String(prima.data_rilevazione || '').slice(0, 10)) ultimaPrima.set(ns, r);
+    }
+  }
+  for (const [ns, r] of ultimaPrima) {
+    if (kgReteDiRilevazione(r) + kgAciDiRilevazione(r) > 0) piazzali.add(ns);
+  }
+  // Il ruolo scritto nell'anagrafica dell'anno vale sempre.
+  for (const s of giacenzeSito) {
+    const ns = chiave(s && s.sito);
+    if (!ns) continue;
+    const ruolo = String((s && s.tipo_destinazione) || '').toLowerCase().trim();
+    (ruolo === 'stoc' ? piazzali : impianti).add(ns);
+  }
+  return { piazzali, impianti };
 }
 
 /** Una riga creata dalla chiusura conta come copia «da confermare»: la copia d'anno non si ferma. */

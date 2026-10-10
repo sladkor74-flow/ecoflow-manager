@@ -9,7 +9,7 @@ import { utenteCorrente, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { momentoRilevazione, canaleEClasse, classePfu } from "../../shared/giacenzaStoccaggi.ts";
 import {
   giornoChiusura, GRUPPO_TERZIARIE, movimentoChiusura,
-  leggiLetteraGiacenze, preparaChiusura, apertureDegliImpianti,
+  leggiLetteraGiacenze, preparaChiusura, apertureDegliImpianti, sitiDellaChiusura,
 } from "../../shared/chiusuraAnno.ts";
 
 // La chiusura dell'anno: prepara la fotografia del 31 dicembre da cui
@@ -84,6 +84,9 @@ export default async function (req) {
     // che si leggono in due modi diversi: i movimenti si tengono divisi per
     // ruolo, quello che arriva al suo piazzale non e' quello che ha in impianto.
     const perSito = new Map(); // 'chiave|ruolo' -> { chiave, nome, ruolo, movimenti }
+    // I giorni dei movimenti di ogni sito: chi entra nella chiusura lo decide
+    // l'anno che si chiude (sitiDellaChiusura), non tutta la storia.
+    const giorniPerSito = new Map();
     const daChi = (r) => r.trasportatore || r.ragione_sociale || '';
     const raccogli = (r, sito, ruolo, opzioni) => {
       const ns = norm(sito);
@@ -92,6 +95,8 @@ export default async function (req) {
       if (!g || g > al) return;
       const k = `${ns}|${ruolo}`;
       if (!perSito.has(k)) perSito.set(k, { chiave: ns, nome: nomeDi(ns), ruolo, movimenti: [] });
+      if (!giorniPerSito.has(k)) giorniPerSito.set(k, []);
+      giorniPerSito.get(k).push(g);
       const riga = perSito.get(k);
       riga.movimenti.push(movimentoChiusura(r, { sito: ns, nome: riga.nome, ruolo, ...opzioni }));
     };
@@ -141,7 +146,10 @@ export default async function (req) {
     // --- Piazzali e impianti ---
     // Un sito non si esclude mai perche' quest'anno non ha un contratto: se non
     // e' piu' contrattualizzato svuota lo stesso la giacenza dell'anno prima,
-    // con secondarie e terziarie (regola dell'utente, 23/09/2026).
+    // con secondarie e terziarie (regola dell'utente, 23/09/2026). Ma entra
+    // solo chi nell'anno che si chiude ha fatto qualcosa, o ha ancora giacenza
+    // da prima: chi e' passato di qui anni fa no (10/10/2026, sitiDellaChiusura).
+    const entrano = sitiDellaChiusura({ anno, giorniPerSito, rilevazioni, giacenzeSito, chiave: norm });
     const rilevPer = new Map(); // chiave -> rilevazioni
     for (const r of rilevazioni) {
       const ns = norm(r.sito);
@@ -149,31 +157,22 @@ export default async function (req) {
       if (!rilevPer.has(ns)) rilevPer.set(ns, []);
       rilevPer.get(ns).push(r);
     }
-    const ruoloDaGiacenzaSito = new Map(); // chiave -> insieme dei ruoli dichiarati
-    for (const g of giacenzeSito) {
-      const ns = norm(g.sito);
-      if (!ns) continue;
-      if (!ruoloDaGiacenzaSito.has(ns)) ruoloDaGiacenzaSito.set(ns, new Set());
-      ruoloDaGiacenzaSito.get(ns).add(tdNorm(g.tipo_destinazione) || 'imp');
-    }
 
-    const chiavi = new Set([
-      ...[...perSito.keys()].map(k => k.split('|')[0]),
-      ...rilevPer.keys(), ...ruoloDaGiacenzaSito.keys(),
-    ]);
+    const chiavi = new Set([...entrano.piazzali, ...entrano.impianti]);
     const piazzali = [], impianti = [];
     for (const ns of chiavi) {
       const comeStoc = perSito.get(`${ns}|stoc`);
       const comeImp = perSito.get(`${ns}|imp`);
-      const ruoli = ruoloDaGiacenzaSito.get(ns) || new Set();
       const nome = nomeDi(ns);
-      // E' un piazzale se lo dice l'anagrafica, se ha una rilevazione o se i
-      // movimenti gli arrivano come stoccaggio; e' un impianto se lo dice
-      // l'anagrafica o se ha movimenti da impianto. Puo' essere tutti e due.
-      if (ruoli.has('stoc') || rilevPer.has(ns) || comeStoc) {
+      // E' un piazzale se lo dice l'anagrafica dell'anno, se ha una rilevazione
+      // o se i movimenti dell'anno gli arrivano come stoccaggio; e' un impianto
+      // se lo dice l'anagrafica o se ha movimenti da impianto nell'anno. Puo'
+      // essere tutti e due. Lo decide sitiDellaChiusura; qui si portano dietro
+      // le rilevazioni e TUTTI i movimenti, anche di prima, per il saldo atteso.
+      if (entrano.piazzali.has(ns)) {
         piazzali.push({ chiave: ns, nome, rilevazioni: rilevPer.get(ns) || [], movimenti: comeStoc ? comeStoc.movimenti : [] });
       }
-      if (ruoli.has('imp') || comeImp) {
+      if (entrano.impianti.has(ns)) {
         impianti.push({ chiave: ns, nome, movimenti: comeImp ? comeImp.movimenti : [] });
       }
     }

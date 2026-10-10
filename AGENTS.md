@@ -525,6 +525,16 @@ piazzale, lo si corregge con i movimenti di dicembre che il portale non aveva
 ancora chiuso, e si salva. Due regole, dal 09/10/2026 (il giorno in cui l'utente
 ha chiesto che al 31/12/2026 «tutto fili come un orologio»):
 
+- **Entra solo chi ha fatto qualcosa nell'anno che si chiude** (10/10/2026,
+  `sitiDellaChiusura`): un movimento, una rilevazione o una riga di
+  GiacenzaSito dell'anno; oppure, fermo, un piazzale che all'ultima rilevazione
+  aveva ancora PFU. Gli archivi tengono anche il 2023-2025 e i movimenti si
+  prendevano «fino al 31/12» senza un inizio: la chiusura del 2026 chiedeva la
+  lettura a Ecorecuperi, Rpn, New Deal, Corgom, A.L.F., MAJESTIQUE e AKCANSA,
+  nessuno con un movimento SMOCO nel 2026, e un piazzale senza lettura blocca il
+  salvataggio. INNOREC resta: niente contratto, ma terziarie nel 2026. I
+  movimenti vecchi restano al saldo atteso, che parte dall'ultima rilevazione.
+
 - **La rettifica di dicembre la decide il gestionale, non si chiede di
   confermarla.** Nell'elenco di dicembre ci finisce **solo** chi il portale non
   aveva ancora chiuso alla fotografia (`elencoDicembre` scarta chi ha
