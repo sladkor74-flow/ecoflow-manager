@@ -237,7 +237,7 @@ export default function Consuntivi({ isAdmin }) {
               {esito.testo}
             </span>
             {aperto && (
-              <Button size="sm" variant="outline" className="h-7" onClick={() => scaricaExcelConsuntivo(aperto, esito)}>
+              <Button size="sm" variant="outline" className="h-7" onClick={async () => { try { await scaricaExcelConsuntivo(aperto, esito); } catch (e) { setErrore(e && e.message ? e.message : String(e)); } }}>
                 <Download className="w-3.5 h-3.5 mr-1" /> Esporta
               </Button>
             )}

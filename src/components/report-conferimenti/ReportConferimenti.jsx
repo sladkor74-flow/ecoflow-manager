@@ -94,7 +94,7 @@ export default function ReportConferimenti({ canale, tipo = 'secondaria', titolo
           </Button>
         )}
         {report && report.righe.length > 0 && (
-          <Button variant="outline" size="sm" onClick={() => scaricaExcelConferimenti(report, quadratura, titolo)}>
+          <Button variant="outline" size="sm" onClick={async () => { try { await scaricaExcelConferimenti(report, quadratura, titolo); } catch (e) { setErrore(e && e.message ? e.message : String(e)); } }}>
             <Download className="w-4 h-4 mr-1.5" /> Esporta Excel
           </Button>
         )}

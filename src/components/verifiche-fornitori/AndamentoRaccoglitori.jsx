@@ -83,7 +83,7 @@ export default function AndamentoRaccoglitori({ isAdmin }) {
           {caricando ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : null} Aggiorna
         </Button>
         {a && a.righe.length > 0 && (
-          <Button variant="outline" size="sm" onClick={() => scaricaExcelAndamento(a, zone)}>
+          <Button variant="outline" size="sm" onClick={async () => { try { await scaricaExcelAndamento(a, zone); } catch (e) { setErrore(e && e.message ? e.message : String(e)); } }}>
             <Download className="w-4 h-4 mr-1.5" /> Esporta Excel
           </Button>
         )}
