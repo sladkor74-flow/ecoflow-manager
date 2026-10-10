@@ -199,6 +199,17 @@ export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
     for (const [k, v] of Object.entries((x && x.parametri) || {})) {
       if (v === null || v === undefined || v === '') continue;
       if (ok.has(k)) { base[k] = v; continue; }
+      // Il canale ha due nomi: «canale» nella maggior parte degli strumenti,
+      // «tipologia» in fatturazione e tariffe. Scritto con l'altro nome arrivava
+      // giusto allo strumento (piu' sotto, dai canali del piano) ma finiva anche
+      // fra gli ignorati, e la risposta diceva «il numero non e' filtrato per
+      // canale» su un numero che lo era (visto in produzione il 10/10/2026,
+      // passiva di Green Tyre per la rete).
+      const nomeCanale = ok.has('canale') ? 'canale' : (ok.has(SINONIMI_CANALE[nome] || '') ? SINONIMI_CANALE[nome] : '');
+      if ((k === 'canale' || k === 'tipologia') && nomeCanale && CANALI.includes(String(v).toUpperCase().trim())) {
+        if (base[nomeCanale] === undefined) base[nomeCanale] = String(v).toUpperCase().trim();
+        continue;
+      }
       // Un filtro scritto con il nome vicino si recupera; uno che non esiste
       // proprio si segnala, perche' buttarlo via in silenzio vuol dire
       // rispondere su tutto quando era stato chiesto su uno.

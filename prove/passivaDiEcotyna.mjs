@@ -137,6 +137,17 @@ console.log("IL PIANIFICATORE: «DA GENNAIO A OGGI» E' L'ANNO FINO A OGGI");
   verifica('ottobre resta ottobre', b && b.parametri.mese === 'Ottobre', JSON.stringify(b && b.parametri));
   const [c] = strumentiDalPiano({ ...piano(''), strumenti: [{ nome: 'fatturazione', parametri: { tipo: 'PASSIVA', tipologia: 'RETE', mesi: ['Gennaio', 'Febbraio', 'Marzo'] } }] }, STRUMENTI, '2026-10-10', 'La passiva della rete da gennaio a marzo');
   verifica('da gennaio a marzo restano tre mesi, e lo strumento li riceve', c && Array.isArray(c.parametri.mesi) && c.parametri.mesi.length === 3, JSON.stringify(c && c.parametri));
+  // Visto in produzione il 10/10/2026, dopo il Publish: il pianificatore scriveva
+  // il canale come «canale», la fatturazione lo chiama «tipologia». Il canale
+  // arrivava giusto, ma restava fra gli ignorati e la risposta diceva «non e'
+  // filtrato per canale» su un numero della sola rete.
+  const conCanale = { strumenti: [{ nome: 'fatturazione', parametri: { tipo: 'PASSIVA', fornitore: 'Green Tyre', canale: 'RETE' } }], canali: ['RETE'], periodo: { anno: 2026 } };
+  const [d] = strumentiDalPiano(conCanale, STRUMENTI, '2026-10-10', 'Quanto dobbiamo a Green Tyre per la rete quest\'anno?');
+  verifica('il canale scritto «canale» arriva come tipologia', d && d.parametri.tipologia === 'RETE' && !('canale' in d.parametri), JSON.stringify(d && d.parametri));
+  verifica('e non finisce fra gli ignorati', d && (d.ignorati || []).length === 0, JSON.stringify(d && d.ignorati));
+  const conAci = { strumenti: [{ nome: 'fatturazione', parametri: { tipo: 'PASSIVA', canale: 'aci' } }], canali: [], periodo: { anno: 2026 } };
+  const [e] = strumentiDalPiano(conAci, STRUMENTI, '2026-10-10', "La passiva dell'ACI quest'anno");
+  verifica("scritto minuscolo vale lo stesso: l'ACI", e && e.parametri.tipologia === 'ACI' && (e.ignorati || []).length === 0, JSON.stringify(e));
 }
 
 console.log('LE DOMANDE STORTE');
