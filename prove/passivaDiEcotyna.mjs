@@ -273,5 +273,24 @@ console.log("UN FILTRO GIA' MESSO COL NOME VICINO NON E' UN FILTRO IGNORATO");
   verifica('due nomi diversi: il secondo resta un filtro ignorato, e si dice', d && (d.ignorati || []).some(i => i.parametro === 'fornitore'), JSON.stringify(d));
 }
 
+console.log("I FILTRI CHE UNO STRUMENTO FA GIA' DA SE' NON SONO IGNORATI");
+{
+  // Visti in produzione il 10/10/2026: «non filtrato per la prestazione (raccolta)»
+  // sul raccolto, e «lo strumento di giacenza non distingue per canale» sulle
+  // giacenze, che escono gia' separate per canale.
+  const { strumentiDalPiano } = await import(R + 'pianoAssistente.ts');
+  const { catalogoStrumenti } = await import(R + 'strumentiAssistente.ts');
+  const cat = catalogoStrumenti();
+  const uno = (nome, parametri, dom) => strumentiDalPiano({ strumenti: [{ nome, parametri }], canali: [], periodo: { anno: 2026 } }, cat, '2026-10-10', dom)[0];
+  const r = uno('raccolto', { canale: 'RETE', raccoglitore: 'Green Tyre', prestazione: 'RACCOLTA' }, 'Quante tonnellate ha raccolto Green Tyre per la rete a settembre 2026?');
+  verifica('il raccolto e\' sempre raccolta: niente «non filtrato per la prestazione»', r && (r.ignorati || []).length === 0, JSON.stringify(r && r.ignorati));
+  const t = uno('raccolto', { canale: 'RETE', prestazione: 'TRATTAMENTO' }, 'Quanto trattamento sulla rete?');
+  verifica('ma il trattamento chiesto al raccolto resta un filtro che non c\'e\'', t && (t.ignorati || []).some(i => i.parametro === 'prestazione'), JSON.stringify(t && t.ignorati));
+  const g = uno('giacenze', { sito: 'Nappi Sud', canale: 'RETE' }, 'Che giacenza per classe ha il piazzale di Nappi Sud, rete e ACI?');
+  verifica('le giacenze escono gia\' per canale: niente «non distingue per canale»', g && (g.ignorati || []).length === 0, JSON.stringify(g && g.ignorati));
+  const a = uno('target_raccoglitori', { canale: 'ACI' }, 'I target ACI dei raccoglitori');
+  verifica('i target ACI non esistono: quello si dice ancora', a && (a.ignorati || []).some(i => i.parametro === 'canale'), JSON.stringify(a && a.ignorati));
+}
+
 console.log(`\n${ok} superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

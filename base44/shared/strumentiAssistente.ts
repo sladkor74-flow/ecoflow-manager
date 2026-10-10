@@ -695,6 +695,10 @@ export const STRUMENTI = [
   },
   {
     nome: 'raccolto',
+    // FILTRI IMPLICITI (10/10/2026): quello che lo strumento fa gia' da se'. Il
+    // pianificatore li scriveva come parametri, finivano fra gli ignorati e la
+    // risposta diceva «non filtrato per ...» su un numero che lo era.
+    impliciti: { prestazione: ['RACCOLTA'] },
     descrizione: 'Quanto si e\' raccolto in un canale e in un periodo, con il dettaglio per raccoglitore, provincia, regione, classe o destinazione. Il canale va sempre indicato: rete, ACI ed extra raccolta non si sommano.',
     parametri: {
       canale: 'RETE, ACI o EXTRA_RACCOLTA, obbligatorio', anno: 'numero', mese: 'nome del mese, opzionale',
@@ -775,6 +779,11 @@ export const STRUMENTI = [
   },
   {
     nome: 'target_raccoglitori',
+    // FILTRI IMPLICITI (10/10/2026): quello che lo strumento fa gia' da se'. Il
+    // pianificatore li scriveva come parametri, finivano fra gli ignorati e la
+    // risposta diceva «non filtrato per ...» su un numero che lo era.
+    // I target sono solo della rete.
+    impliciti: { canale: ['RETE'], tipologia: ['RETE'] },
     descrizione: 'Il target annuo di ciascun raccoglitore della rete e quanto ha fatto finora, con lo scostamento. I target sono solo di rete: l\'ACI non ne ha.',
     parametri: { anno: 'numero' },
     moduli: ['Target & Status'],
@@ -967,6 +976,11 @@ export const STRUMENTI = [
   },
   {
     nome: 'proiezione_secondarie',
+    // FILTRI IMPLICITI (10/10/2026): quello che lo strumento fa gia' da se'. Il
+    // pianificatore li scriveva come parametri, finivano fra gli ignorati e la
+    // risposta diceva «non filtrato per ...» su un numero che lo era.
+    // La predittivita' e' solo della rete.
+    impliciti: { canale: ['RETE'], tipologia: ['RETE'] },
     descrizione: 'La predittivita\' delle secondarie dell\'anno in corso, la stessa del modulo: per ogni impianto seguito target, gia\' arrivato, quanto manca e se lo raggiunge con le due proiezioni affiancate: se i raccoglitori rispettano il target (quello che resta da raccogliere a ciascuno), su cui si programma, e al ritmo delle ultime settimane, per vedere se ci stanno arrivando; gli stoccaggi con giacenza, plafond e ordine di priorita\'; i viaggi da programmare la settimana dopo, stoccaggio per impianto; il programmato contro il fatto delle ultime settimane; fin dove arrivano i dati caricati. Solo rete: ACI ed extra raccolta non entrano nella predittivita\'.',
     parametri: { anno: "solo se l'utente chiede esplicitamente un anno gia' chiuso (si vede in sola lettura); altrimenti l'anno in corso" },
     moduli: ['Predittivita Secondarie'],
@@ -1406,6 +1420,11 @@ export const STRUMENTI = [
   },
   {
     nome: 'giacenze',
+    // FILTRI IMPLICITI (10/10/2026): quello che lo strumento fa gia' da se'. Il
+    // pianificatore li scriveva come parametri, finivano fra gli ignorati e la
+    // risposta diceva «non filtrato per ...» su un numero che lo era.
+    // Le giacenze escono gia' per canale, rete, ACI ed extra raccolta separate.
+    impliciti: { canale: '*', tipologia: '*' },
     descrizione: 'La giacenza di impianti e stoccaggi, un canale per volta (rete, ACI, extra raccolta), aggiornata a ogni caricamento: il materiale arrivato che non e\' ancora stato dichiarato, con target di rete, ordini da dichiarare e arretrato per anno. Usa lo stesso calcolo del modulo Giacenze, cosi\' i numeri sono quelli che si vedono a video.',
     parametri: { anno: 'numero', sito: 'nome dell\'impianto o dello stoccaggio, opzionale', tipo: 'impianto o stoccaggio, opzionale' },
     moduli: ['Giacenze'],
@@ -1976,6 +1995,7 @@ export function catalogoStrumenti() {
     descrizione: s.descrizione,
     parametri: s.parametri,
     moduli: s.moduli,
+    impliciti: s.impliciti || {},
   }));
 }
 

@@ -1860,6 +1860,10 @@ istruita, e sono state misurate sul codice:
   senza, resta com'e'. Ore, date e numeri d'ordine non si toccano. Prova:
   `prove/numeriEcotyna.mjs`. E un filtro gia' messo col nome vicino (Green Tyre
   come raccoglitore e come fornitore) non e' un filtro ignorato.
+  Nemmeno un filtro che lo strumento fa gia' da se' (`impliciti` nel catalogo:
+  il raccolto e' sempre raccolta, le giacenze escono per canale, target e
+  predittivita' sono solo rete): sulle risposte del 10/10 compariva «non filtrato
+  per la prestazione» e «non distingue per canale» su numeri giusti.
 - **La fatturazione si calcola, non si legge** (audit del 10/10/2026). Lo
   strumento `fatturazione` fa lo stesso conto del modulo sui movimenti di oggi,
   attiva e passiva, col mese o senza: senza mese, mese per mese fino a quello in

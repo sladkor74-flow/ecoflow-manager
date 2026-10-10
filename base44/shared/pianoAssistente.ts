@@ -160,6 +160,10 @@ export function istruzioniPiano(catalogo, domanda, oggi, storia = []) {
 export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
   const annoOggi = Number(String(oggi).slice(0, 4));
   const accetta = new Map(catalogo.map(s => [s.nome, new Set(Object.keys(s.parametri || {}))]));
+  // I filtri che uno strumento fa gia' da se' (impliciti nel catalogo): il raccolto
+  // e' sempre raccolta, le giacenze escono gia' per canale, target e predittivita'
+  // sono solo della rete. Scritti come parametri non sono filtri ignorati.
+  const impliciti = new Map(catalogo.map(s => [s.nome, s.impliciti || {}]));
   const per = (piano && piano.periodo) || {};
   let canali = Array.isArray(piano && piano.canali) ? [...new Set(piano.canali.filter(c => CANALI.includes(c)))] : [];
   // "Quanto abbiamo raccolto in tutto?" vuole tutti e tre i canali, ciascuno per
@@ -234,6 +238,8 @@ export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
       // scrive "true" - e vogliono dire tutti "solo quelli con un problema": se
       // lo strumento non sa filtrarci, buttarlo via in silenzio vuol dire
       // presentare l'elenco intero come se fosse quello chiesto.
+      const implicito = (impliciti.get(nome) || {})[k];
+      if (implicito === '*' || (Array.isArray(implicito) && implicito.some(x => String(x).toUpperCase() === String(v).toUpperCase().trim()))) continue;
       if (typeof v === 'boolean') { if (v) ignorati.push({ parametro: k, valore: 'si' }); continue; }
       const valore = String(v).toLowerCase().trim();
       // Per radice, non per uguaglianza: chi scrive "Puglia" e chi scrive
