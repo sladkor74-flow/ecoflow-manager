@@ -315,6 +315,42 @@ function LetturePiazzali({ piazzali, letture, onCambia }) {
   );
 }
 
+// LE APERTURE DELL'ANNO DOPO (10/10/2026). Le letture degli impianti non sono
+// piu' solo un confronto: salvando la chiusura diventano il punto da cui ogni
+// impianto riparte. Qui si vede prima che cosa si scrivera', e dopo che cosa si
+// e' scritto - con chi non ha ancora la lettura, che resterebbe a zero.
+function ApertureImpianti({ aperture }) {
+  if (!aperture) return null;
+  const t = (v) => (v === undefined || v === null ? '—' : `${Number(v).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t`);
+  const scritte = aperture.scritte || null;
+  const righe = scritte || (aperture.piano || []).map(x => ({ sito: x.sito, azione: x.azione, rete_t: x.dati.giacenza_riferimento_t, aci_t: x.dati.giacenza_riferimento_aci_t }));
+  const senza = aperture.senza_lettura || [];
+  const gia = aperture.gia_scritte || [];
+  if (!righe.length && !senza.length && !gia.length) return null;
+  return (
+    <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs space-y-1">
+      <p className="font-medium">
+        {scritte ? `Aperture del ${aperture.anno} scritte` : `All'anno ${aperture.anno} si scriveranno queste aperture`}
+        <span className="font-normal text-muted-foreground"> — il peso non dichiarato del {String(aperture.al || '').split('-').reverse().join('/')}, da cui ogni impianto riparte</span>
+      </p>
+      {righe.length > 0 && (
+        <ul className="pl-4 list-disc">
+          {righe.map(r => (
+            <li key={r.sito}>{r.sito}: rete {t(r.rete_t)}, ACI {t(r.aci_t)}{r.azione === 'crea' ? ' (riga nuova dell’anno)' : ''}</li>
+          ))}
+        </ul>
+      )}
+      {(aperture.non_scritte || []).map(x => <p key={x.sito} className="text-red-700">{x.sito}: {x.motivo}</p>)}
+      {gia.map(x => <p key={x.sito} className="text-muted-foreground">{x.sito}: {x.motivo}.</p>)}
+      {senza.length > 0 && (
+        <p className="text-amber-800">
+          Senza lettura, quindi senza apertura: {senza.join(', ')}. Ripartirebbero da zero mentre il portale si porta dietro la loro giacenza.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function LettureImpianti({ impianti, letture, onCambia }) {
   return (
     <div className="overflow-x-auto border rounded-md">
@@ -657,12 +693,16 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
       setConferma(false);
       const salvati = (dati.salvati || []).length;
       const saltati = dati.saltati || [];
+      const aperture = (dati.aperture && dati.aperture.scritte) || [];
+      const apertureNo = (dati.aperture && dati.aperture.non_scritte) || [];
       toast({
-        title: salvati ? `${salvati} ${salvati === 1 ? 'fotografia salvata' : 'fotografie salvate'} al ${dossier.giorno}` : 'Nessuna fotografia salvata',
-        description: saltati.length ? `Non salvate: ${saltati.map(s => `${s.sito} (${s.motivo})`).join(' · ')}` : 'Da qui ripartiranno le giacenze dell\'anno dopo.',
-        variant: salvati ? undefined : 'destructive',
+        title: salvati || aperture.length
+          ? [salvati ? `${salvati} ${salvati === 1 ? 'fotografia salvata' : 'fotografie salvate'} al ${dossier.giorno}` : '', aperture.length ? `${aperture.length} ${aperture.length === 1 ? 'apertura scritta' : 'aperture scritte'} per il ${dati.aperture.anno}` : ''].filter(Boolean).join(' · ')
+          : 'Niente salvato',
+        description: [saltati.length ? `Non salvate: ${saltati.map(s => `${s.sito} (${s.motivo})`).join(' · ')}` : '', apertureNo.length ? `Aperture non scritte: ${apertureNo.map(s => `${s.sito} (${s.motivo})`).join(' · ')}` : ''].filter(Boolean).join(' — ') || 'Da qui ripartiranno le giacenze dell\'anno dopo, piazzali e impianti.',
+        variant: salvati || aperture.length ? undefined : 'destructive',
       });
-      if (salvati) { onSaved?.(); await carica(); }
+      if (salvati || aperture.length) { onSaved?.(); await carica(); }
     } catch (e) {
       toast({ title: 'Non si e\' riusciti a salvare', description: e.message, variant: 'destructive' });
     }
@@ -752,6 +792,7 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
         <div className="space-y-3">
           <LetturePiazzali piazzali={dossier.piazzali} letture={letture} onCambia={cambiaLettura} />
           <LettureImpianti impianti={dossier.impianti} letture={lettureImpianti} onCambia={cambiaLetturaImpianto} />
+          <ApertureImpianti aperture={dossier.aperture} />
           <div className="flex flex-wrap items-center gap-2">
             <label className="inline-flex items-center gap-2 text-xs cursor-pointer">
               <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => { caricaLettera(e.target.files && e.target.files[0]); e.target.value = ''; }} />

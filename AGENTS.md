@@ -1113,8 +1113,9 @@ la prossima uscita di gomma. Nessuno dei due e' un mancante.
   come sulla passiva: al primo formulario di gennaio la fatturazione e'
   inservibile. `copiaAnnoTarget` portava avanti impianti, target, collegamenti,
   contratto ed elenco siti; **le tariffe no, e nessuno lo diceva**.
-  La scheda e' una lista di controllo di sei voci - tariffe attive, tariffe
+  La scheda e' una lista di controllo di sette voci - tariffe attive, tariffe
   passive, contratto Ecotyre, target e siti, fotografia dei piazzali al 31/12,
+  aperture degli impianti al 31/12 (dal 10/10/2026),
   contratti ai subfornitori - ognuna con il suo stato, il motivo per cui serve e
   dove si rimedia. **Si misura sui fatti**, non su una scadenza scritta nel
   codice: una tariffa «da rinnovare» e' una che copre il 31 dicembre e non copre
@@ -1130,6 +1131,38 @@ la prossima uscita di gomma. Nessuno dei due e' un mancante.
   pagina Unita' Locali mostra il saldo di adesso, non lo storico. Chi la chiede a
   gennaio legge un numero sbagliato e non se ne accorge - e' successo su sei
   piazzali del 2025, e quella lettura non torna piu'.
+
+  **LE APERTURE DEGLI IMPIANTI (audit del 10/10/2026).** La lista aveva sei voci
+  e nessuna guardava il punto da cui ogni IMPIANTO riparte: il peso non
+  dichiarato del 31 dicembre, rete e ACI. Non lo scriveva nessuno - la chiusura
+  chiedeva le due letture, le confrontava con la lettera di Ecotyre e le
+  buttava; la copia d'anno crea le righe senza apertura, apposta; restava un
+  campo a mano. Il 2 gennaio ogni impianto sarebbe ripartito da zero mentre il
+  portale si porta dietro la giacenza vera: con i numeri del 10/10, circa 1.617 t
+  di scarto su quattro impianti. Ora:
+  - **la chiusura, salvando, scrive le aperture** dell'anno dopo dalle letture
+    (`apertureDegliImpianti` in `shared/chiusuraAnno.ts`), con il giorno in
+    `GiacenzaSito.apertura_del`: uno zero letto e uno zero mai scritto hanno lo
+    stesso numero e conseguenze opposte, e la data li distingue. Si scrive solo
+    quello che e' stato letto, e un'apertura gia' scritta non si cambia senza
+    `sostituisci`;
+  - **se la riga dell'anno dopo non c'e', la crea come la copia d'anno**, con la
+    nota «copiato dal …, da confermare». Senza quella nota la copia d'anno la
+    scambia per un elenco gia' compilato a mano e salta TUTTI gli altri siti: i
+    piazzali resterebbero senza riga. La prova lo fa vedere (`prove/aperture2027.mjs`):
+    chiusura e copia funzionano in tutti e due gli ordini;
+  - **la lista ha la settima voce**, «Aperture degli impianti al 31/12».
+
+  Due voci della lista, scritte lo stesso giorno, mentivano. **«Target e siti»**
+  contava `ImpiantoTarget`, un archivio che non ha mai avuto una riga e che la
+  copia non scrive: sarebbe rimasta rossa per sempre. Ora conta i target annui
+  dei raccoglitori (`TargetRaccoglitore`), quelli che la copia scrive e la griglia
+  mostra. **«Contratto Ecotyre»** dava per pronto un contratto solo copiato, mentre
+  una tariffa nello stesso stato era gialla: ora e' «parziale» anche lui. E le
+  tariffe copiate **si confermano con un pulsante** (`preparaAnno`, azione
+  `conferma_tariffe`): prima la lista chiedeva di confermarle e l'unico modo era
+  cancellare la nota a mano, tariffa per tariffa. Sulla tariffa resta scritto chi
+  l'ha confermata e quando.
 - I report per l'amministrazione sono **tre, separati**: rete, ACI, extra
   raccolta. Le loro colonne non si toccano senza l'assenso dell'amministrazione.
 - La prefattura del portale copre **solo rete e ACI**. L'extra raccolta non e'

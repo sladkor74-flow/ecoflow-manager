@@ -30,6 +30,7 @@
 // voci si elencano ma non toccano nessuna lettura.
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { contaFormulari } from "./formulari.ts";
+import { notaCopia, daConfermare } from "./annoTarget.ts";
 import {
   CLASSI_RILEVAZIONE,
   ancoraDellAnno,
@@ -736,3 +737,78 @@ export function preparaChiusura({
     avvisi,
   };
 }
+
+/**
+ * LE APERTURE DEGLI IMPIANTI PER L'ANNO DOPO (10/10/2026).
+ *
+ * La chiusura chiedeva gia' a ogni impianto le due letture del 31 dicembre -
+ * il peso non dichiarato della rete e quello dell'ACI, dal file del portale
+ * scaricato quel giorno - e le confrontava con la lettera di Ecotyre. Poi le
+ * buttava. E nessun altro punto del gestionale le scriveva: la chiusura salvava
+ * solo i piazzali, la copia d'anno crea le righe dell'anno nuovo SENZA apertura
+ * (apposta: copiare quella del 2026 nel 2027 sarebbe sbagliato), e la lista
+ * dell'anno nuovo non la controllava. Restava un campo a mano in Giacenze.
+ *
+ * Il 2 gennaio ogni impianto sarebbe ripartito da zero mentre il portale si porta
+ * dietro la giacenza vera: con i numeri del 10/10/2026, circa 1.617 t di scarto
+ * su Irigom, T-Cycle, Green Tyre e Gatim, e il guardiano notturno che li segnala
+ * tutti dal primo giorno. L'audit del 10/10/2026 l'ha trovato prima di gennaio.
+ *
+ * La regola: si scrive solo quello che e' stato LETTO (mai un numero dedotto:
+ * la lettera e' un confronto, non una fonte), sulla riga dell'impianto dell'anno
+ * dopo. Se la riga non c'e' si crea come la creerebbe la copia d'anno - stessi
+ * campi, stessa nota «da confermare» - cosi' la copia, dopo, la riconosce come
+ * sua e completa gli altri siti invece di fermarsi. Un'apertura gia' scritta da
+ * una chiusura non si cambia senza `sostituisci`: e' il punto da cui riparte un
+ * anno intero.
+ *
+ * @param {object} p
+ * @param {number} p.anno              l'anno che si chiude
+ * @param {array}  p.impianti          gli impianti del dossier ({ chiave, nome })
+ * @param {object} p.letture_impianti  per chiave: { pfu_kg, aci_kg } letti al 31/12
+ * @param {array}  p.siti              le righe di GiacenzaSito (di tutti gli anni)
+ * @param {function} p.chiave          il normalizzatore dei nomi
+ * @param {boolean} p.sostituisci      riscrive un'apertura gia' scritta da una chiusura
+ */
+export function apertureDegliImpianti({ anno, impianti = [], letture_impianti = {}, siti = [], chiave, sostituisci = false } = {}) {
+  const a = Number(anno);
+  const dopo = a + 1;
+  const al = giornoChiusura(a);
+  const n = typeof chiave === 'function' ? chiave : ((v) => String(v || '').trim().toUpperCase());
+  const numero = (v) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+  const t3 = (v) => Math.round(v) / 1000;
+  const eImpianto = (s) => !String(s.tipo_destinazione || 'imp').toLowerCase().startsWith('stoc');
+  const rigaDi = (ns, an) => (siti || []).find(s => s && Number(s.anno) === an && eImpianto(s) && n(s.sito) === ns) || null;
+  const piano = [], senzaLettura = [], gia = [];
+  for (const i of impianti || []) {
+    const l = (letture_impianti || {})[i.chiave] || {};
+    const rete = numero(l.pfu_kg), aci = numero(l.aci_kg);
+    if (rete === null && aci === null) { senzaLettura.push(i.nome); continue; }
+    const dati = { apertura_del: al };
+    if (rete !== null) dati.giacenza_riferimento_t = t3(rete);
+    if (aci !== null) dati.giacenza_riferimento_aci_t = t3(aci);
+    const esistente = rigaDi(i.chiave, dopo);
+    if (esistente) {
+      const giaScritta = esistente.apertura_del === al;
+      const uguale = (dati.giacenza_riferimento_t === undefined || Number(esistente.giacenza_riferimento_t || 0) === dati.giacenza_riferimento_t)
+        && (dati.giacenza_riferimento_aci_t === undefined || Number(esistente.giacenza_riferimento_aci_t || 0) === dati.giacenza_riferimento_aci_t);
+      if (giaScritta && uguale) { gia.push({ sito: i.nome, motivo: 'gia\' scritta, uguale' }); continue; }
+      if (giaScritta && !sostituisci) { gia.push({ sito: i.nome, motivo: `c'e' gia' un'apertura del ${al}: per cambiarla serve la conferma di sostituzione` }); continue; }
+      piano.push({ azione: 'aggiorna', id: esistente.id, sito: i.nome, dati, prima: { rete_t: Number(esistente.giacenza_riferimento_t || 0), aci_t: Number(esistente.giacenza_riferimento_aci_t || 0) } });
+    } else {
+      const ora = rigaDi(i.chiave, a) || {};
+      const riga = {
+        sito: ora.sito || i.nome, tipo_destinazione: 'imp', anno: dopo,
+        dichiara_rete: ora.dichiara_rete, tipologia_trattamento: ora.tipologia_trattamento,
+        ...dati,
+        note: `${notaCopia(dopo)} · apertura dalla chiusura del ${al.split('-').reverse().join('/')}`,
+      };
+      for (const k of Object.keys(riga)) if (riga[k] === undefined) delete riga[k];
+      piano.push({ azione: 'crea', sito: i.nome, dati: riga });
+    }
+  }
+  return { anno: dopo, al, piano, senza_lettura: senzaLettura, gia_scritte: gia };
+}
+
+/** Una riga creata dalla chiusura conta come copia «da confermare»: la copia d'anno non si ferma. */
+export const rigaDellaChiusura = (r) => daConfermare(r) && /apertura dalla chiusura/.test(String((r && r.note) || ''));

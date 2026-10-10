@@ -9,7 +9,7 @@ import { utenteCorrente, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { momentoRilevazione, canaleEClasse, classePfu } from "../../shared/giacenzaStoccaggi.ts";
 import {
   giornoChiusura, GRUPPO_TERZIARIE, movimentoChiusura,
-  leggiLetteraGiacenze, preparaChiusura,
+  leggiLetteraGiacenze, preparaChiusura, apertureDegliImpianti,
 } from "../../shared/chiusuraAnno.ts";
 
 // La chiusura dell'anno: prepara la fotografia del 31 dicembre da cui
@@ -49,7 +49,7 @@ export default async function (req) {
     const tipoStoc = (r) => tdNorm(r.tipo_destinazione) === 'stoc';
     const eSecondariaExtra = (r) => String(r.tipo_movimento || '').toLowerCase().trim() === 'secondaria';
 
-    const [reteAll, aciAll, extraAll, secAll, terzAll, rilevazioni, giacenzeSito] = await Promise.all([
+    const [reteAll, aciAll, extraAll, secAll, terzAll, rilevazioni, giacenzeSito, sitiAnnoDopo] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.PrimariaRete),
       fetchAll(base44.asServiceRole.entities.PrimariaAci),
       fetchAll(base44.asServiceRole.entities.ExtraRaccolta),
@@ -57,6 +57,8 @@ export default async function (req) {
       fetchAll(base44.asServiceRole.entities.Terziaria),
       fetchAll(base44.asServiceRole.entities.GiacenzaStoccaggio),
       fetchAll(base44.asServiceRole.entities.GiacenzaSito, { anno }),
+      // Le righe dell'anno dopo: e' li' che vanno le aperture degli impianti.
+      fetchAll(base44.asServiceRole.entities.GiacenzaSito, { anno: anno + 1 }),
     ]);
 
     // --- I nomi da mostrare: la forma piu' completa fra quelle degli archivi ---
@@ -193,7 +195,17 @@ export default async function (req) {
       lettera,
     });
 
-    if (azione === 'prepara') return Response.json({ ...dossier, puo_salvare: puoScrivere });
+    // LE APERTURE DEGLI IMPIANTI DELL'ANNO DOPO (10/10/2026). Le letture del 31/12
+    // che la chiusura chiedeva e confrontava, e poi buttava, diventano il punto da
+    // cui ogni impianto riparte. Gia' nella preparazione si mostra che cosa si
+    // scrivera', cosi' chi salva lo vede prima. La regola sta in
+    // shared/chiusuraAnno.ts (apertureDegliImpianti), con le sue prove.
+    const aperture = apertureDegliImpianti({
+      anno, impianti: dossier.impianti || impianti, letture_impianti: body.letture_impianti || {},
+      siti: [...giacenzeSito, ...sitiAnnoDopo], chiave: norm, sostituisci: !!body.sostituisci,
+    });
+
+    if (azione === 'prepara') return Response.json({ ...dossier, aperture, puo_salvare: puoScrivere });
 
     // --- Il salvataggio della fotografia ---
     // Una rilevazione al 31/12 e' il punto di partenza dei calcoli dell'anno
@@ -252,7 +264,25 @@ export default async function (req) {
       }
     }
 
-    return Response.json({ ...dossier, puo_salvare: puoScrivere, salvati, saltati });
+    // --- Le aperture degli impianti: dopo i piazzali, con lo stesso salvataggio ---
+    // Chiudere l'anno e' un gesto solo: i piazzali e gli impianti ripartono dallo
+    // stesso 31 dicembre. Un'apertura che non si riesce a scrivere si dice, una per
+    // una, e il resto prosegue.
+    const apertureScritte = [], apertureNonScritte = [];
+    for (const x of aperture.piano) {
+      try {
+        if (x.azione === 'aggiorna') await base44.asServiceRole.entities.GiacenzaSito.update(x.id, x.dati);
+        else await base44.asServiceRole.entities.GiacenzaSito.create(x.dati);
+        apertureScritte.push({ sito: x.sito, azione: x.azione, rete_t: x.dati.giacenza_riferimento_t, aci_t: x.dati.giacenza_riferimento_aci_t });
+      } catch (e) {
+        apertureNonScritte.push({ sito: x.sito, motivo: `Non si e' riusciti a scrivere l'apertura: ${e && e.message ? e.message : e}` });
+      }
+    }
+
+    return Response.json({
+      ...dossier, puo_salvare: puoScrivere, salvati, saltati,
+      aperture: { ...aperture, scritte: apertureScritte, non_scritte: apertureNonScritte },
+    });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

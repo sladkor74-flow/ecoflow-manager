@@ -21,7 +21,7 @@
 // che cosa manca e dove si rimedia. La verifica e' una SOMMA DI FATTI letti
 // dagli archivi, non una scadenza scritta da qualche parte: cosi' resta vera
 // anche l'anno prossimo, quando nessuno si ricordera' di questo codice.
-import { conNotaCopia, daConfermare } from "./annoTarget.ts";
+import { conNotaCopia, daConfermare, senzaNotaCopia } from "./annoTarget.ts";
 
 export const PRIMO_GIORNO = (anno) => `${Number(anno)}-01-01`;
 export const ULTIMO_GIORNO = (anno) => `${Number(anno)}-12-31`;
@@ -118,6 +118,20 @@ export function copiaTariffa(t, anno) {
 }
 
 /** Le tariffe dell'anno nate da una copia e non ancora confermate. */
+/**
+ * LA CONFERMA DI UNA TARIFFA COPIATA (10/10/2026).
+ *
+ * La lista diceva «vanno confermate sul contratto» e non c'era un modo per farlo:
+ * bisognava aprire ogni tariffa e cancellare a mano la nota della copia. Qui la
+ * nota della copia se ne va e al suo posto resta scritto chi l'ha confermata e
+ * quando: il dubbio si chiude, ma non sparisce senza traccia.
+ */
+export function confermaTariffa(t, { il = '', da = '', anno = '' } = {}) {
+  const resto = senzaNotaCopia(t && t.note);
+  const traccia = `Confermata sul contratto ${anno} il ${String(il).slice(0, 10).split('-').reverse().join('/')}${da ? ` da ${da}` : ''}.`;
+  return { note: [resto, traccia].filter(Boolean).join(' · ') };
+}
+
 export function tariffeDaConfermare(tariffe, anno, direzione = '') {
   const dir = testo(direzione);
   return (tariffe || []).filter(t => (!dir || testo(t.direzione || 'PASSIVA') === dir)
@@ -147,7 +161,11 @@ export function listaAnno({
   anno,
   tariffe = [],
   giacenzeSito = [],
-  impiantiTarget = [],
+  // I target annui dei raccoglitori (TargetRaccoglitore): e' quello che la copia
+  // d'anno scrive e quello che la griglia di Target & Status mostra. Prima qui si
+  // contava ImpiantoTarget, che non ha mai avuto una riga: la voce sarebbe rimasta
+  // «manca» il 1° gennaio anche dopo la copia (audit del 10/10/2026).
+  targetRaccoglitori = [],
   commesse = [],
   contrattiFornitore = [],
   rilevazioni = [],
@@ -173,6 +191,8 @@ export function listaAnno({
     } else if (daConf.length) {
       v.stato = 'parziale';
       v.dettaglio = `${daConf.length} ${daConf.length === 1 ? 'tariffa copiata' : 'tariffe copiate'} dal ${annoNum - 1} con il prezzo dell'anno prima: vanno confermate sul contratto.`;
+      v.azione = 'conferma_tariffe';
+      v.direzione = dir;
     } else if (attive.length) {
       v.stato = 'pronto';
       v.dettaglio = `${attive.length} ${attive.length === 1 ? 'tariffa copre' : 'tariffe coprono'} il ${annoNum}.`;
@@ -188,20 +208,28 @@ export function listaAnno({
   {
     const v = voce('contratto_ecotyre', 'Contratto Ecotyre', 'Target annuo, regioni e prezzi dell’anno vengono da qui.', 'Target & Status > Commessa Ecotyre');
     const n = conta(commesse, annoNum);
-    v.stato = n ? 'pronto' : 'manca';
+    // Un contratto COPIATO dall'anno prima porta target e prezzi vecchi: va
+    // confermato sul contratto vero, come le tariffe. Prima la lista lo dava per
+    // pronto mentre una tariffa nello stesso stato era parziale (10/10/2026).
+    const copiati = (commesse || []).filter(c => Number(c && c.anno) === annoNum && daConfermare(c)).length;
+    v.stato = !n ? 'manca' : (copiati === n ? 'parziale' : 'pronto');
     v.quante = n;
-    v.dettaglio = n ? `Il contratto ${annoNum} c’e’.` : `Il ${annoNum} non ha ancora un contratto.`;
+    v.dettaglio = !n ? `Il ${annoNum} non ha ancora un contratto.`
+      : copiati === n ? `Il contratto ${annoNum} e’ copiato dal ${annoNum - 1}: target, regioni e prezzi vanno presi dal contratto nuovo e confermati.`
+      : `Il contratto ${annoNum} c’e’.`;
     voci.push(v);
   }
 
   // 4. Target e siti: lo sa fare copiaAnnoTarget, che non sovrascrive niente.
   {
-    const v = voce('target_e_siti', 'Target e siti', 'Senza i target mensili la copertura e la predittivita’ dell’anno non si calcolano.', 'Target & Status > Impianti > Copia dall’anno prima');
-    const t = conta(impiantiTarget, annoNum);
+    const v = voce('target_e_siti', 'Target e siti', 'Senza i target dei raccoglitori la copertura, gli avvisi e la predittivita’ dell’anno non si calcolano.', 'Target & Status > Impianti > Copia dall’anno prima');
+    const t = conta(targetRaccoglitori, annoNum);
     const s = conta(giacenzeSito, annoNum);
+    const tCopiati = (targetRaccoglitori || []).filter(r => Number(r && r.anno) === annoNum && daConfermare(r)).length;
     v.quante = t;
-    if (t && s) { v.stato = 'pronto'; v.dettaglio = `${t} target mensili e ${s} siti per il ${annoNum}.`; }
-    else if (t || s) { v.stato = 'parziale'; v.dettaglio = `${t} target mensili e ${s} siti: manca una delle due metà.`; }
+    if (t && s && tCopiati === t) { v.stato = 'parziale'; v.dettaglio = `${t} target dei raccoglitori copiati dal ${annoNum - 1} e ${s} siti: i target vanno confermati sul contratto nuovo.`; }
+    else if (t && s) { v.stato = 'pronto'; v.dettaglio = `${t} target dei raccoglitori e ${s} siti per il ${annoNum}.`; }
+    else if (t || s) { v.stato = 'parziale'; v.dettaglio = `${t} target dei raccoglitori e ${s} siti: manca una delle due metà.`; }
     else { v.stato = 'manca'; v.dettaglio = `Il ${annoNum} non ha ancora né target né siti.`; }
     voci.push(v);
   }
@@ -219,6 +247,30 @@ export function listaAnno({
     else if (!mancano.length) { v.stato = 'pronto'; v.dettaglio = `Tutti i ${attesi.length} piazzali hanno la lettura del ${gg(al)}.`; }
     else if (fatte.size) { v.stato = 'parziale'; v.dettaglio = `${fatte.size} piazzali su ${attesi.length} hanno la lettura del ${gg(al)}; mancano ${mancano.length}.`; }
     else { v.stato = 'manca'; v.dettaglio = `Nessuno dei ${attesi.length} piazzali ha la lettura del ${gg(al)}.`; }
+    voci.push(v);
+  }
+
+  // 5-bis. LE APERTURE DEGLI IMPIANTI (10/10/2026). La fotografia dei piazzali
+  //    c'era; quella degli impianti no, e nessuno la scriveva: il 2 gennaio ogni
+  //    impianto sarebbe ripartito da zero mentre il portale si porta dietro la sua
+  //    giacenza. Gli impianti attesi sono quelli dell'anno prima; un'apertura c'e'
+  //    se la riga dell'anno nuovo la porta, scritta dalla chiusura (apertura_del)
+  //    o messa a mano con un valore. Uno zero a mano non si distingue da un campo
+  //    vuoto, e per questo la strada e' la chiusura: lei scrive anche lo zero, e
+  //    dice di che giorno e'.
+  {
+    const al = ULTIMO_GIORNO(annoNum - 1);
+    const v = voce('aperture_impianti', `Aperture degli impianti al ${gg(al)}`, 'Ogni impianto riparte dal peso non dichiarato del 31 dicembre, rete e ACI: senza, il 2 gennaio la quadratura col portale salta su tutti gli impianti che hanno giacenza.', 'Giacenze > Chiusura anno');
+    const eImp = (g) => !String((g && g.tipo_destinazione) || 'imp').toLowerCase().startsWith('stoc');
+    const attesi = [...new Set((giacenzeSito || []).filter(g => eImp(g) && Number(g.anno) === annoNum - 1).map(g => testo(g.sito)).filter(Boolean))];
+    const conApertura = new Set((giacenzeSito || []).filter(g => eImp(g) && Number(g.anno) === annoNum
+      && (giorno(g.apertura_del) === al || Number(g.giacenza_riferimento_t) > 0 || Number(g.giacenza_riferimento_aci_t) > 0)).map(g => testo(g.sito)));
+    const fatte = attesi.filter(x => conApertura.has(x));
+    v.quante = fatte.length;
+    if (!attesi.length) { v.stato = 'pronto'; v.dettaglio = 'Nessun impianto da aprire.'; }
+    else if (fatte.length === attesi.length) { v.stato = 'pronto'; v.dettaglio = `Tutti i ${attesi.length} impianti hanno l’apertura del ${gg(al)}.`; }
+    else if (fatte.length) { v.stato = 'parziale'; v.dettaglio = `${fatte.length} impianti su ${attesi.length} hanno l’apertura del ${gg(al)}; mancano ${attesi.length - fatte.length}.`; }
+    else { v.stato = 'manca'; v.dettaglio = `Nessuno dei ${attesi.length} impianti ha l’apertura del ${gg(al)}.`; }
     voci.push(v);
   }
 

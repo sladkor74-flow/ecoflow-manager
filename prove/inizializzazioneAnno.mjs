@@ -90,9 +90,14 @@ console.log('LA COPIA: STESSA RIGA, ANNO NUOVO, PREZZO DA CONFERMARE');
 console.log('LA LISTA DI CONTROLLO DELL ANNO NUOVO');
 {
   // Il 2026 ha contratti e il 2027 no: e' la situazione vera di ottobre.
-  const vuoto = listaAnno({ anno: 2027, tariffe: TARIFFE_2026, contrattiFornitore: [{ anno: 2026 }, { anno: 2026 }], piazzali: ['irigom', 'nappi sud'], rilevazioni: [], oggi: '2026-10-10' });
-  verifica('sei voci', vuoto.voci.length === 6, String(vuoto.voci.length));
-  verifica('tutte da fare, e il conto lo dice', vuoto.mancanti === 6 && vuoto.pronte === 0 && vuoto.pronto === false);
+  // Le righe del 2026 ci sono, quelle del 2027 no: e' la situazione vera di ottobre.
+  const SITI_2026 = [{ anno: 2026, sito: 'Irigom S.r.l.', tipo_destinazione: 'imp' }, { anno: 2026, sito: 'NAPPI SUD SRL', tipo_destinazione: 'stoc' }];
+  const vuoto = listaAnno({ anno: 2027, tariffe: TARIFFE_2026, giacenzeSito: SITI_2026, contrattiFornitore: [{ anno: 2026 }, { anno: 2026 }], piazzali: ['irigom', 'nappi sud'], rilevazioni: [], oggi: '2026-10-10' });
+  // Sette dal 10/10/2026: la settima e' l'apertura degli impianti, che non
+  // c'era e che nessuno scriveva.
+  verifica('sette voci', vuoto.voci.length === 7, String(vuoto.voci.length));
+  verifica('tutte da fare, e il conto lo dice', vuoto.mancanti === 7 && vuoto.pronte === 0 && vuoto.pronto === false,
+    JSON.stringify(vuoto.voci.map(x => [x.chiave, x.stato])));
   const v = (k) => vuoto.voci.find(x => x.chiave === k);
   verifica('le tariffe attive dicono quante scadono e che il 2027 non ce le ha',
     v('tariffe_attive').stato === 'manca' && /4 tariffe scadono il 31\/12\/2026/.test(v('tariffe_attive').dettaglio), v('tariffe_attive').dettaglio);
@@ -117,7 +122,7 @@ console.log('LA LISTA DI CONTROLLO DELL ANNO NUOVO');
   const aPosto = listaAnno({
     anno: 2027, oggi: '2026-12-10',
     tariffe: TARIFFE_2026.map(x => ({ ...copiaTariffa(x, 2027), note: '' })),
-    giacenzeSito: [{ anno: 2027 }], impiantiTarget: [{ anno: 2027 }], commesse: [{ anno: 2027 }],
+    giacenzeSito: [{ anno: 2027 }], targetRaccoglitori: [{ anno: 2027 }], commesse: [{ anno: 2027 }],
     contrattiFornitore: [{ anno: 2027 }], piazzali: [], rilevazioni: [],
   });
   verifica('un anno gia pronto non compare in dashboard', aPosto.pronto === true && aPosto.avvicinandosi === false);
@@ -141,15 +146,18 @@ console.log('QUANDO L ANNO E PRONTO, LA LISTA TACE');
     anno: 2027,
     // Le tariffe copiate E confermate: nessuna nota di copia.
     tariffe: TARIFFE_2026.map(x => ({ ...copiaTariffa(x, 2027), note: '' })),
-    giacenzeSito: [{ anno: 2027, sito: 'Irigom', tipo_destinazione: 'imp' }],
-    impiantiTarget: [{ anno: 2027, impianto: 'Irigom', mese: 'Gennaio', target: 100 }],
+    giacenzeSito: [
+      { anno: 2026, sito: 'Irigom', tipo_destinazione: 'imp' },
+      { anno: 2027, sito: 'Irigom', tipo_destinazione: 'imp', apertura_del: '2026-12-31', giacenza_riferimento_t: 652.84 },
+    ],
+    targetRaccoglitori: [{ anno: 2027, raccoglitore: 'SMOCO S.r.l.', regione: 'Puglia', target_tonnellate: 1850 }],
     commesse: [{ anno: 2027, target_annuo_t: 11000 }],
     contrattiFornitore: [{ anno: 2027 }, { anno: 2027 }, { anno: 2026 }],
     piazzali: ['irigom'],
     rilevazioni: [{ sito: 'irigom', data_rilevazione: '2026-12-31' }],
     oggi: '2026-12-31',
   });
-  verifica('sei voci pronte e niente da fare', pronto.pronte === 6 && pronto.mancanti === 0 && pronto.pronto === true,
+  verifica('sette voci pronte e niente da fare', pronto.pronte === 7 && pronto.mancanti === 0 && pronto.pronto === true,
     JSON.stringify(pronto.voci.map(x => [x.chiave, x.stato])));
   verifica('e non e urgente, perche non manca niente', pronto.urgente === false);
 }
@@ -162,7 +170,9 @@ console.log('UN PREZZO COPIATO E NON CONFERMATO NON E «PRONTO»');
   const att = copiate.voci.find(x => x.chiave === 'tariffe_attive');
   verifica('resta giallo finche nessuno le ha confermate', att.stato === 'parziale', att.stato);
   verifica('e dice che portano il prezzo dell anno prima', /prezzo dell'anno prima/.test(att.dettaglio), att.dettaglio);
-  verifica('non offre piu di copiarle: sono gia li', att.azione === '');
+  // Dal 10/10/2026 la lista non si limita a dire «vanno confermate»: offre di
+  // farlo. Prima non c'era un modo, se non cancellare la nota a mano.
+  verifica('non offre piu di copiarle: offre di confermarle', att.azione === 'conferma_tariffe' && att.direzione === 'ATTIVA', JSON.stringify([att.azione, att.direzione]));
 }
 
 console.log('I GIORNI AL PRIMO GENNAIO');
@@ -175,8 +185,9 @@ console.log('LA FUNZIONE FA QUESTO, NON ALTRO');
 {
   const { readFileSync } = await import('node:fs');
   const f = readFileSync(new URL('../base44/functions/preparaAnno/entry.ts', import.meta.url), 'utf8');
-  verifica('la verifica la puo guardare chiunque, la copia solo l amministratore',
-    f.includes("if (azione === 'copia_tariffe' && !puoScrivere) return rispostaSolaLettura();"));
+  verifica('la verifica la puo guardare chiunque; copia e conferma solo l amministratore',
+    f.includes("if (azione !== 'verifica' && !puoScrivere) return rispostaSolaLettura();"));
+  verifica('e nessuna delle due su un anno chiuso', f.includes("if (azione !== 'verifica' && annoChiuso(anno)) {"));
   verifica('un anno gia chiuso non si prepara', f.includes('annoChiuso(anno)'));
   verifica('si puo simulare prima di scrivere', f.includes('if (simula)'));
   verifica('e dopo la copia la lista si rilegge, non si aggiusta a mano',

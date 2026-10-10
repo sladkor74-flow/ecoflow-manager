@@ -37,6 +37,16 @@
       "default": 0,
       "description": "Residuo ACI al 31 dicembre dell'anno precedente, dove c'e'. Rete e ACI non si sommano mai: ognuno ha la sua giacenza"
     },
+    // IL GIORNO DELL'APERTURA (10/10/2026). Le due giacenze di riferimento qui sopra
+    // le scrive la chiusura dell'anno prima, dalle letture del 31 dicembre: questo
+    // campo dice di che giorno sono. Serve a distinguere uno zero letto (l'impianto
+    // era vuoto) da uno zero mai scritto (nessuno ha chiuso l'anno), che hanno lo
+    // stesso numero e conseguenze opposte: la lista dell'anno nuovo lo legge.
+    "apertura_del": {
+      "type": "string",
+      "format": "date",
+      "description": "Il giorno delle letture da cui vengono le giacenze di riferimento (il 31/12 dell'anno prima), scritto dalla chiusura. Vuoto: l'apertura non e' stata scritta da una chiusura"
+    },
     "dichiara_rete": {
       "type": "boolean",
       "default": true,

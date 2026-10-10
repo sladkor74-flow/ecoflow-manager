@@ -25,7 +25,7 @@ export default async function(req) {
 
     const svc = base44.asServiceRole.entities;
     const [alertAperti, uploadLogs, assegnatiRete, assegnatiAci, documenti, prefatture, riepiloghi, richiesteEct, verificheSedi,
-      tariffe, giacenzeSito, impiantiTarget, commesse, contrattiFornitore, rilevazioni, ultimaFoto] = await Promise.all([
+      tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, rilevazioni, ultimaFoto] = await Promise.all([
       fetchAll(svc.Alert, { stato: 'aperto' }),
       svc.UploadLog.list('-created_date', 200),
       fetchAll(svc.Assegnato),
@@ -43,7 +43,7 @@ export default async function(req) {
       // e la regola decide da se' se valga la pena dirlo (listaAnno).
       fetchAll(svc.Tariffa).catch(() => []),
       fetchAll(svc.GiacenzaSito).catch(() => []),
-      fetchAll(svc.ImpiantoTarget).catch(() => []),
+      fetchAll(svc.TargetRaccoglitore).catch(() => []),
       fetchAll(svc.CommessaEcotyre).catch(() => []),
       fetchAll(svc.ContrattoFornitore).catch(() => []),
       fetchAll(svc.GiacenzaStoccaggio).catch(() => []),
@@ -59,7 +59,7 @@ export default async function(req) {
       riepilogoQualifica: riepiloghi[0] || null, richiesteEct, verificheSedi,
       fotografiaGiorno: leggiFotografia((ultimaFoto || [])[0] || null),
       annoNuovo: listaAnno({
-        anno: anno + 1, tariffe, giacenzeSito, impiantiTarget, commesse, contrattiFornitore,
+        anno: anno + 1, tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore,
         rilevazioni: (rilevazioni || []).map(r => ({ ...r, sito: normalizzaRagioneSociale(r.sito) })),
         piazzali: [...new Set([
           ...(giacenzeSito || []).filter(g => String(g.tipo_destinazione || '').toLowerCase().startsWith('stoc')).map(g => normalizzaRagioneSociale(g.sito)),

@@ -5,7 +5,7 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { utenteCorrente, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { annoChiuso, annoCorrenteRoma } from "../../shared/annoTarget.ts";
-import { listaAnno, tariffeDaRinnovare, copiaTariffa } from "../../shared/inizializzazioneAnno.ts";
+import { listaAnno, tariffeDaRinnovare, copiaTariffa, tariffeDaConfermare, confermaTariffa } from "../../shared/inizializzazioneAnno.ts";
 
 // L'ANNO NUOVO: CHE COSA GLI MANCA PER COMINCIARE, E QUELLO CHE SI PUO' FARE
 // DA QUI.
@@ -22,6 +22,13 @@ import { listaAnno, tariffeDaRinnovare, copiaTariffa } from "../../shared/inizia
 //                             confermare». Solo l'amministratore, mai su un anno
 //                             gia' chiuso, e non sovrascrive niente: si puo'
 //                             ripetere e completa quello che manca.
+//   'conferma_tariffe'        (10/10/2026) toglie la nota «da confermare» alle
+//                             tariffe copiate di una direzione, dopo che
+//                             l'amministratore le ha controllate sul contratto,
+//                             e lascia scritto chi e quando. Prima la lista
+//                             chiedeva di confermarle e non c'era un modo per
+//                             farlo: si cancellava la nota a mano, tariffa per
+//                             tariffa.
 //
 // La regola di che cosa serve a un anno sta tutta in
 // shared/inizializzazioneAnno.ts, con le sue prove: qui si leggono gli archivi
@@ -36,20 +43,22 @@ export default async function (req) {
 
     const body = await req.json().catch(() => ({}));
     const anno = Number(body.anno) || annoCorrenteRoma() + 1;
-    const azione = body.azione === 'copia_tariffe' ? 'copia_tariffe' : 'verifica';
+    const azione = ['copia_tariffe', 'conferma_tariffe'].includes(body.azione) ? body.azione : 'verifica';
     const simula = !!body.simula;
-    if (azione === 'copia_tariffe' && !puoScrivere) return rispostaSolaLettura();
+    if (azione !== 'verifica' && !puoScrivere) return rispostaSolaLettura();
     // Un anno gia' passato non si prepara: si e' gia' vissuto, e riaprirlo
     // vorrebbe dire scrivere tariffe su fatture gia' fatte.
-    if (azione === 'copia_tariffe' && annoChiuso(anno)) {
+    if (azione !== 'verifica' && annoChiuso(anno)) {
       return Response.json({ error: `Il ${anno} e' un anno chiuso: non si prepara.` }, { status: 400 });
     }
 
     const svc = base44.asServiceRole.entities;
-    const [tariffe, giacenzeSito, impiantiTarget, commesse, contrattiFornitore, rilevazioni] = await Promise.all([
+    const [tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, rilevazioni] = await Promise.all([
       fetchAll(svc.Tariffa),
       fetchAll(svc.GiacenzaSito),
-      fetchAll(svc.ImpiantoTarget),
+      // I target annui dei raccoglitori: e' quello che la copia d'anno scrive.
+      // Prima si leggeva ImpiantoTarget, che non ha mai avuto una riga.
+      fetchAll(svc.TargetRaccoglitore),
       fetchAll(svc.CommessaEcotyre),
       fetchAll(svc.ContrattoFornitore),
       fetchAll(svc.GiacenzaStoccaggio),
@@ -69,7 +78,7 @@ export default async function (req) {
       anno,
       tariffe,
       giacenzeSito,
-      impiantiTarget,
+      targetRaccoglitori,
       commesse,
       contrattiFornitore,
       rilevazioni: rilevazioni.map(r => ({ ...r, sito: norm(r.sito) })),
@@ -79,6 +88,29 @@ export default async function (req) {
 
     if (azione === 'verifica') {
       return Response.json({ ...lista(), puo_scrivere: !!puoScrivere, utente: user && user.email ? user.email : '' });
+    }
+
+    // --- La conferma delle tariffe copiate ---
+    if (azione === 'conferma_tariffe') {
+      const dir = String(body.direzione || '').toUpperCase();
+      if (!['ATTIVA', 'PASSIVA'].includes(dir)) return Response.json({ error: 'Direzione obbligatoria: ATTIVA o PASSIVA.' }, { status: 400 });
+      const daConf = tariffeDaConfermare(tariffe, anno, dir);
+      if (simula) return Response.json({ simulazione: true, anno, direzione: dir, quante: daConf.length });
+      const confermate = [], nonConfermate = [];
+      for (const t of daConf) {
+        try {
+          await svc.Tariffa.update(t.id, confermaTariffa(t, { il: oggiRoma(), da: user && user.email ? user.email : '', anno }));
+          confermate.push({ id: t.id, chi: t.fornitore_nome || t.cliente || '', valore: t.valore });
+        } catch (e) {
+          nonConfermate.push({ chi: t.fornitore_nome || t.cliente || '', motivo: e && e.message ? e.message : String(e) });
+        }
+      }
+      const tariffeDopo = await fetchAll(svc.Tariffa);
+      const dopo = listaAnno({
+        anno, tariffe: tariffeDopo, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore,
+        rilevazioni: rilevazioni.map(r => ({ ...r, sito: norm(r.sito) })), piazzali, oggi: oggiRoma(),
+      });
+      return Response.json({ ...dopo, confermate: confermate.length, non_confermate: nonConfermate, direzione: dir, puo_scrivere: true });
     }
 
     // --- La copia delle tariffe ---
@@ -112,7 +144,7 @@ export default async function (req) {
     // quella di prima con un conteggio appiccicato sopra.
     const tariffeDopo = await fetchAll(svc.Tariffa);
     const dopo = listaAnno({
-      anno, tariffe: tariffeDopo, giacenzeSito, impiantiTarget, commesse, contrattiFornitore,
+      anno, tariffe: tariffeDopo, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore,
       rilevazioni: rilevazioni.map(r => ({ ...r, sito: norm(r.sito) })), piazzali, oggi: oggiRoma(),
     });
     return Response.json({ ...dopo, creati: creati.length, falliti, dettaglio_creati: creati, puo_scrivere: true });

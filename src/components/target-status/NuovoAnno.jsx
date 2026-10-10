@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel, AlertDialogFooter } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/use-toast';
-import { RefreshCw, CheckCircle2, AlertTriangle, Circle, Copy } from 'lucide-react';
+import { RefreshCw, CheckCircle2, AlertTriangle, Circle, Copy, Check } from 'lucide-react';
 
 // L'ANNO NUOVO: CHE COSA GLI MANCA PER COMINCIARE.
 //
@@ -87,6 +87,30 @@ export default function NuovoAnno({ anno: annoCorrente }) {
     setInCorso('');
   };
 
+  // LA CONFERMA DELLE TARIFFE COPIATE (10/10/2026). La lista diceva «vanno
+  // confermate sul contratto» e non c'era un modo per farlo: si apriva ogni
+  // tariffa e si cancellava la nota a mano. Ora si confermano tutte quelle di una
+  // direzione, dopo averle controllate, e su ciascuna resta scritto chi e quando.
+  const confermaTariffe = async (direzione, quante) => {
+    const chi = direzione === 'ATTIVA' ? 'verso Ecotyre' : 'verso i fornitori';
+    if (!window.confirm(`Confermi le ${quante} tariffe ${chi} copiate dal ${anno - 1}?\n\nVuol dire che le hai controllate sul contratto ${anno}: il prezzo resta quello che c'e', la nota «da confermare» se ne va e resta scritto chi le ha confermate e quando.`)) return;
+    setInCorso('conferma-' + direzione);
+    try {
+      const res = await base44.functions.invoke('preparaAnno', { anno, azione: 'conferma_tariffe', direzione });
+      if (res.data && res.data.error) throw new Error(res.data.error);
+      setDati(res.data);
+      const non = (res.data.non_confermate || []).length;
+      toast({
+        title: `${res.data.confermate} ${res.data.confermate === 1 ? 'tariffa confermata' : 'tariffe confermate'} ${chi}`,
+        description: non ? `${non} non si sono potute confermare: ${res.data.non_confermate.map(f => `${f.chi} (${f.motivo})`).join(' · ')}` : `Su ciascuna resta scritto chi l'ha confermata e quando.`,
+        variant: non ? 'destructive' : undefined,
+      });
+    } catch (e) {
+      toast({ title: 'Non si e’ riusciti a confermare le tariffe', description: e?.response?.data?.error || e?.message, variant: 'destructive' });
+    }
+    setInCorso('');
+  };
+
   if (caricamento && !dati) {
     return <div className="flex justify-center py-12"><RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
   }
@@ -157,6 +181,11 @@ export default function NuovoAnno({ anno: annoCorrente }) {
                   <p className="text-[11px] text-muted-foreground mt-0.5">{v.perche}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1 shrink-0">
+                  {v.azione === 'conferma_tariffe' && dati.puo_scrivere && (
+                    <Button size="sm" variant="outline" onClick={() => confermaTariffe(v.direzione, v.quante)} disabled={!!inCorso}>
+                      <Check className="w-4 h-4 mr-1" /> {inCorso === 'conferma-' + v.direzione ? 'Conferma…' : 'Le ho controllate: conferma'}
+                    </Button>
+                  )}
                   {v.azione === 'copia_tariffe' && dati.puo_scrivere && (
                     <Button size="sm" variant="outline" onClick={simula} disabled={!!inCorso}>
                       <Copy className="w-4 h-4 mr-1" /> Prepara dal {dati.anno - 1}
