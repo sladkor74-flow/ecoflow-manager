@@ -56,7 +56,8 @@ export async function esportaDichiarazioni(dati) {
         if (!d && !m.conferito_kg) continue;
         dettaglio.push([
           s.sito, nomeCanale(f), s.operazione || '', m.mese, m.conferito_kg || null,
-          m.uscito_kg || null, m.resta_kg || null,
+          // La rete non dovuta per accordo non «resta»: come nel Riepilogo (10/10/2026).
+          m.uscito_kg || null, f.non_dovuta ? null : (m.resta_kg || null),
           d ? d.quantita_kg : null, d ? d.granulo_kg : null, d ? d.fibre_kg : null, d ? d.metalli_kg : null,
           d ? d.ciabattato_kg : null, d ? d.cippato_kg : null, d ? d.cssc_kg : null, d ? d.altro_kg : null,
           STATO_PAROLE[statoDichiarazione(d, { canale: f.canale, dichiara_rete: s.dichiara_rete })], (d && d.ricevuta_il) || '', (d && d.caricata_il) || '', (d && d.note) || '',

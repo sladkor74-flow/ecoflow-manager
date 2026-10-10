@@ -724,8 +724,10 @@ dire a uno dei due un numero diverso dall'altro rompe quella prova.
    la giacenza a portale di oggi. Il riepilogo leggeva solo l'anno e l'anno
    prima: a gennaio, guardando il 2026 per chiuderlo, i due moduli avrebbero
    detto numeri diversi.
-4. **Il filtro SMOCO sta in `caricamentiPortale`**, l'unico punto da cui passano
-   tutte le righe del report delle dichiarazioni. L'allineamento automatico -
+4. **Il filtro SMOCO (`nostraRiga`) va dovunque si legge il report delle
+   dichiarazioni**: in `caricamentiPortale`, nel riepilogo e, dalla revisione del
+   10/10/2026, anche nel dichiarato delle Giacenze, che non passava da nessuno
+   dei due e sommava Baucina nel 2024 e nel 2025. L'allineamento automatico -
    l'unico che SCRIVE «caricata» sulle nostre righe - lo saltava: 1.605 righe
    di Baucina hanno come destinazione secondaria Irigom, e una loro riga poteva
    pareggiare al chilo un nostro mese. La controprova lo fa vedere: un nostro
@@ -737,6 +739,15 @@ dire a uno dei due un numero diverso dall'altro rompe quella prova.
    riga TOTALE delle Giacenze diceva «residuo 800,21 t» invece di circa 2.730, e
    il PDF «Conferito RETE 10.744,79 t». Il totale del conferito e' quello delle
    primarie, come nel modulo Dichiarazioni. La prova ha un piazzale apposta.
+6. **I carichi che il file non ha ancora si cercano con una regola sola**
+   (`inizioAggiunti`, revisione del 10/10/2026): dall'inizio dell'anno della
+   fotografia, o dai 60 giorni prima se e' di inizio anno, e in avanti senza
+   limite, qualunque anno si guardi. Le Giacenze guardavano l'anno della
+   fotografia, le Dichiarazioni l'anno della pagina: a gennaio, chiudendo
+   dicembre, 11 t contro 11,5, e il vero era 14,5.
+7. **Il numero in testa alla pagina Dichiarazioni** (giacenza calcolata degli
+   impianti) **non comprende la rete di chi non la dichiara**, come lo storico:
+   prima ci finivano le 1.833,43 t di Tecnogum. Prova: `prove/dueModuliACavallo.mjs`.
 
 ### Canali indipendenti
 

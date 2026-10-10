@@ -6,7 +6,7 @@ import { eAci } from "../../shared/canaleSecondaria.ts";
 import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { eTerminato, eEseguito, periodoMovimento } from "../../shared/movimenti.ts";
 import { MESI, operazioneDa, quadratura, chiaveDichiarazione, unisciDichiarazioni, doppioniDichiarazioni, kgCaricatiDi } from "../../shared/dichiarazioniImpianti.ts";
-import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese, nostraRiga } from "../../shared/giacenzaPortale.ts";
+import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, inizioAggiunti, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese, nostraRiga } from "../../shared/giacenzaPortale.ts";
 import { puntiDiPartenza, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 import { confrontaConIlPortale } from "../../shared/agganciaDichiarazioni.ts";
 import { raccoglitoreUscite, allineaAllaGiacenza, copertureDelCaricamento } from "../../shared/usciteDichiarate.ts";
@@ -172,8 +172,11 @@ export default async function(req) {
     // giacenza di rete che il portale tenga per noi, e i suoi carichi non sono
     // 'non ancora nel file'.
     const nonDichiaraRete = new Set(giacenzeSito.filter(g => g.dichiara_rete === false).map(g => norm(g.sito)));
+    // Da quando: inizioAggiunti, la stessa regola delle Giacenze, e di qualunque
+    // anno - non solo di quello guardato (revisione del 10/10/2026).
     const segnaNonAncora = (ns, r, tipo) => {
-      if (!fotoPortale || noto(r, tipo) || nonDichiaraRete.has(ns)) return;
+      const gFine = giornoRoma(r.trasporto_finito_il);
+      if (!fotoPortale || !ns || !gFine || gFine < inizioAggiunti(fotoPortale) || noto(r, tipo) || nonDichiaraRete.has(ns)) return;
       if (!nonAncora.has(ns)) nonAncora.set(ns, []);
       nonAncora.get(ns).push({
         tipo, id_ordine: r.id_ordine || '', numero_fir: r.numero_fir || '',
@@ -327,15 +330,17 @@ export default async function(req) {
       // moduli senza che nessuno se ne accorga. I due devono dire gli stessi numeri
       // su tutti e tre i canali (regola dell'utente, 03/10/2026).
       const canaleRiga = eAci(r) ? 'ACI' : 'RETE';
+      // Il file degli ordini non dichiarati e' della RETE: una riga di classe 9 non
+      // si aggiunge alla fotografia del portale, come gia' fa calcolaGiacenze. Si
+      // segna prima del filtro dell'anno: un carico di dicembre arrivato dopo una
+      // fotografia di gennaio il file non ce l'ha, qualunque anno si guardi.
+      if (canaleRiga === 'RETE' && eTerminato(r) && r.destinazione && td(r.tipo_destinazione) !== 'stoc') segnaNonAncora(norm(r.destinazione), r, 'primaria');
       const c = primaria(r, canaleRiga);
       if (!c) return;
       segnaFine(r);
       if (canaleRiga === 'RETE') reteTutte += peso(r);
       if (c.ruolo === 'stoc') return;
       aggiungi(c.ns, canaleRiga, canaleRiga === 'ACI' ? 'primaria' : '', c.p.mese, peso(r));
-      // Il file degli ordini non dichiarati e' della RETE: una riga di classe 9 non
-      // si aggiunge alla fotografia del portale, come gia' fa calcolaGiacenze.
-      if (canaleRiga === 'RETE') segnaNonAncora(c.ns, r, 'primaria');
     });
     for (const r of aci) {
       const c = primaria(r, 'ACI');
@@ -380,8 +385,8 @@ export default async function(req) {
     };
     for (const r of secondarie) {
       if (eAci(r)) { secondaria(r, 'ACI', 'secondaria'); continue; }
-      const s = secondaria(r, 'RETE', '');
-      if (s) segnaNonAncora(s.dest, r, 'secondaria');
+      if (eTerminato(r) && r.destinazione) segnaNonAncora(norm(r.destinazione), r, 'secondaria');
+      secondaria(r, 'RETE', '');
     }
     for (const r of extra) {
       if (td(r.tipo_movimento) === 'secondaria') secondaria(r, 'EXTRA_RACCOLTA', '');
@@ -905,10 +910,13 @@ export default async function(req) {
       dichiarato_caricato_aci_t: perCanale('dichiarato_caricato_aci_t'),
       dichiarato_caricato_extra_t: perCanale('dichiarato_caricato_extra_t'),
       dichiarato_portale_t: perCanale('dichiarato_portale_t'),
-      // La giacenza degli impianti e' della rete: solo quella si somma qui.
-      giacenza_calcolata_t: t3(impianti.reduce((s, x) => s + x.giacenza_calcolata_t, 0)),
+      // La giacenza degli impianti e' della rete: solo quella si somma qui. E solo
+      // di chi la rete ce la dichiara: per Tecnogum era tutto l'arrivato, 1.833,43 t
+      // nel numero in testa alla pagina, mentre lo storico e le Giacenze dicono
+      // «—» (revisione del 10/10/2026).
+      giacenza_calcolata_t: t3(impianti.filter(x => x.dichiara_rete !== false).reduce((s, x) => s + x.giacenza_calcolata_t, 0)),
       // Solo gli impianti che a portale una giacenza ce l'hanno.
-      giacenza_calcolata_confrontabile_t: t3(impianti.filter(x => x.giacenza_portale_t !== null).reduce((s, x) => s + x.giacenza_calcolata_t, 0)),
+      giacenza_calcolata_confrontabile_t: t3(impianti.filter(x => x.dichiara_rete !== false && x.giacenza_portale_t !== null).reduce((s, x) => s + x.giacenza_calcolata_t, 0)),
       giacenza_portale_t: t3(impianti.reduce((s, x) => s + (x.giacenza_portale_t || 0), 0)),
       aggiunti_alla_foto_t: perCanale('aggiunti_alla_foto_t'),
       // I conteggi della quadratura, un canale per volta.

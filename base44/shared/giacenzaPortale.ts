@@ -148,6 +148,30 @@ export function aperturaNetta(riga, canale, dichiarazioniSito, chiaveDi) {
   return { lorda_t: t3(lorda), dichiarato_dopo_t: t3(kg / 1000), netta_t: t3(lorda - kg / 1000), senza_data: senzaData };
 }
 
+/**
+ * DA QUANDO SI CERCANO I CARICHI CHE IL FILE DEL PORTALE NON HA ANCORA (10/10/2026).
+ *
+ * Alla fotografia si aggiungono i carichi di rete arrivati che il file non
+ * contiene. Le Giacenze li prendevano solo dall'anno della fotografia, le
+ * Dichiarazioni solo dall'anno guardato: a cavallo d'anno i due moduli davano due
+ * giacenze a portale diverse e tutte e due sbagliate (fotografia del 02/01/2027,
+ * un carico del 29/12 e uno del 05/01: 11 t, 11,5 t, mentre il portale ne aveva
+ * 14,5). Trovato dalla revisione del 10/10/2026. Si prende dall'inizio
+ * dell'anno della fotografia, o dai 60 giorni prima se la fotografia e' di
+ * inizio anno; in avanti senza limite: un carico arrivato dopo la fotografia,
+ * di qualunque anno, il file non ce l'ha.
+ * @param {string} foto  il giorno della fotografia (AAAA-MM-GG)
+ * @returns {string} il primo giorno da guardare, o '' senza fotografia
+ */
+export function inizioAggiunti(foto) {
+  if (!foto) return '';
+  const inizioAnno = String(foto).slice(0, 4) + '-01-01';
+  const d = new Date(String(foto).slice(0, 10) + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() - 60);
+  const margine = d.toISOString().slice(0, 10);
+  return margine < inizioAnno ? margine : inizioAnno;
+}
+
 // --- I formulari terminati con le date da sistemare ---
 //
 // Immissione, inizio e fine trasporto sono obbligatorie (regola dell'utente,

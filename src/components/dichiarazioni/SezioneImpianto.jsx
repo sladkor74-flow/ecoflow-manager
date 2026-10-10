@@ -159,7 +159,9 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
         <span>Dichiarato e caricato, rete: <strong>{t(sito.dichiarato_caricato_rete_t)} t</strong></span>
         {sito.dichiarato_caricato_aci_t > 0 && <span>Dichiarato e caricato, ACI: <strong>{t(sito.dichiarato_caricato_aci_t)} t</strong></span>}
         {sito.dichiarato_caricato_extra_t > 0 && <span>Dichiarato, extra raccolta: <strong>{t(sito.dichiarato_caricato_extra_t)} t</strong></span>}
-        <span>Giacenza di rete che ne risulta: <strong>{t(sito.giacenza_calcolata_t)} t</strong></span>
+        <span>Giacenza di rete che ne risulta: <strong>{sito.dichiara_rete === false
+          ? <span className="cursor-help" title={"Per accordo questo impianto non ci dichiara la rete: il trattamento non e' a nostro carico, il portale non tiene per noi una giacenza di rete e niente resta da dichiarare. Quello che e' arrivato si vede nelle primarie qui sopra."}>—</span>
+          : `${t(sito.giacenza_calcolata_t)} t`}</strong></span>
         <span>Giacenza di rete a portale, aggiornata: <strong>{sito.giacenza_portale_t === null ? '—' : `${t(sito.giacenza_portale_t)} t`}</strong></span>
       </div>
     </div>

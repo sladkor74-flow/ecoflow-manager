@@ -8,7 +8,7 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { PROV_TO_REGION } from "../../shared/raccoltoCalculator.ts";
 import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, anomaliaRilevazione, classePfu, canaleEClasse, ordiniDellaGiacenza } from "../../shared/giacenzaStoccaggi.ts";
-import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, formulariDaSistemare, avvisoSenzaFine } from "../../shared/giacenzaPortale.ts";
+import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, inizioAggiunti, nostraRiga, formulariDaSistemare, avvisoSenzaFine } from "../../shared/giacenzaPortale.ts";
 
 // Calcola la situazione delle giacenze di impianti e stoccaggi per l'anno richiesto.
 //
@@ -141,7 +141,9 @@ export default async function(req) {
       if (!attuale || s.length > attuale.length) nomiSito.set(ns, s);
     }
     for (const r of nonDichiarati) { registraNome(r.destinazione); registraNome(r.destinazione_secondaria); }
-    for (const r of dichiarazioni) { registraNome(r.destinazione); registraNome(r.destinazione_secondaria); }
+    // Solo le righe nostre, con SMOCO partner operativo: i nomi degli impianti di
+    // un altro partner non devono diventare righe (revisione del 10/10/2026).
+    for (const r of dichiarazioni) { if (!nostraRiga(r)) continue; registraNome(r.destinazione); registraNome(r.destinazione_secondaria); }
     for (const r of reteAll) registraNome(r.destinazione);
     for (const r of aciAll) registraNome(r.destinazione);
     for (const r of extraAll) registraNome(r.destinazione);
@@ -362,14 +364,14 @@ export default async function(req) {
     // === 1d. GIACENZA A PORTALE DEGLI IMPIANTI, AGGIORNATA AI CARICAMENTI ===
     // Alla fotografia si aggiungono i carichi di rete arrivati all'impianto - in
     // primaria o in secondaria - che il file non contiene ancora, riconosciuti dal
-    // numero d'ordine. Si guardano quelli dell'anno della fotografia: il file del
-    // portale non ne contiene di piu' vecchi. Poi si tolgono le dichiarazioni di
-    // rete caricate a portale dopo la fotografia.
+    // numero d'ordine, da inizioAggiunti (l'anno della fotografia, o i 60 giorni
+    // prima a inizio anno) in avanti: la stessa regola del modulo Dichiarazioni.
+    // Poi si tolgono le dichiarazioni di rete caricate a portale dopo la fotografia.
     // Dal report delle dichiarazioni: il portale li conosce, ma nella sua
     // giacenza non li conta piu' (serve a dire la differenza per chi non ha la
     // fine trasporto, sezione 1e).
     for (const d of dichiarazioni) portaleConosce.segna(d, 'dichiarazioni');
-    const annoFoto = giornoFoto ? giornoFoto.slice(0, 4) : '';
+    const inizioFoto = inizioAggiunti(giornoFoto);
     const aggiuntiMap = new Map(); // ns|imp -> { kg, classi, n }
     // Chi la rete non la dichiara per accordo (dichiara_rete falso in Giacenze,
     // oggi Tecnogum: il trattamento non lo paghiamo noi) non ha una giacenza di
@@ -379,7 +381,7 @@ export default async function(req) {
     const nonDichiaraRete = new Set(giacenzeSito.filter(g => g.dichiara_rete === false).map(g => norm(g.sito)));
     const aggiungiNonNoto = (r, tipo) => {
       const g = giornoRoma(r.trasporto_finito_il);
-      if (!annoFoto || !g.startsWith(annoFoto) || portaleConosce.noto(r, tipo)) return;
+      if (!inizioFoto || !g || g < inizioFoto || portaleConosce.noto(r, tipo)) return;
       const ns = norm(r.destinazione);
       if (!ns || nonDichiaraRete.has(ns)) return;
       const key = ns + '|imp';
@@ -476,6 +478,10 @@ export default async function(req) {
     const derivatiMap = new Map();     // ns|td -> { granulo, fibre, metallo, cippato, ciabattato } (anno corrente)
 
     for (const d of dichiarazioni) {
+      // Solo SMOCO partner operativo, come nel modulo Dichiarazioni: le righe di
+      // Baucina con un nostro impianto come secondaria gonfiavano il dichiarato
+      // del 2024 e del 2025 (revisione del 10/10/2026).
+      if (!nostraRiga(d)) continue;
       if (eAci({ prodotto: d.prodotto })) continue;
       const { sito, td } = attribuisci(d);
       const ns = norm(sito);
