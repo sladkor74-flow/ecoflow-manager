@@ -304,6 +304,16 @@ console.log('IL PREZZO VIENE DAL TARIFFARIO, NON DAL FOGLIO');
     JSON.stringify([v7.unita_misura, v7.prezzo, v7.totale]));
 }
 
+// Green Tyre, G2 (utente, 10/10/2026): la RACCOLTA e' a 90 come le altre classi,
+// il TRATTAMENTO a 300. Il foglio di settembre scriveva 300 anche sulla raccolta:
+// un errore di copia, che nel modello faceva sembrare sbagliato il tariffario.
+{
+  const gt = (blocco, voce) => voci.find(v => v.canale === 'RETE' && v.blocco === blocco && v.soggetto === 'GREEN TYRE PROJECT SRL' && v.voce === voce);
+  const racc = gt('raccoglitori', 'Sicilia (G2)'), tratt = gt('impianti', '(G2)');
+  verifica('Green Tyre: la raccolta G2 a 90, come P, M e G1', racc && racc.prezzo === 90, racc && String(racc.prezzo));
+  verifica('Green Tyre: il trattamento G2 a 300', tratt && tratt.prezzo === 300, tratt && String(tratt.prezzo));
+}
+
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');
 process.exit(ko ? 1 : 0);

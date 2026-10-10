@@ -69,7 +69,11 @@ const RETE_RACCOGLITORI = [
   ['EMMESSE SRLS', 'Calabria (conferimenti su Irigom)', 90, { destinazione: 'Irigom' }],
   ['GATIM S.R.L.', 'Calabria', 70, null],
   ['GREEN TYRE PROJECT SRL', 'Sicilia (P+M+G1)', 90, { classi: ['P', 'M', 'G1'] }],
-  ['GREEN TYRE PROJECT SRL', 'Sicilia (G2)', 300, { classi: ['G2'] }],
+  // Raccolta G2 a 90 come le altre classi (contratto e foglio di luglio). Il
+  // foglio di settembre scriveva 300, che e' il prezzo del TRATTAMENTO G2 qui
+  // sotto: confermato dall'utente il 10/10/2026, 90 la raccolta e 300 il
+  // trattamento, per tutto il 2026.
+  ['GREEN TYRE PROJECT SRL', 'Sicilia (G2)', 90, { classi: ['G2'] }],
   ['LOGISTICA & PNEUMATICI SRL', 'Campania - NAPOLI', 68, { provincia: 'NA' }],
   ['LOGISTICA & PNEUMATICI SRL', 'Campania - SALERNO', 68, { provincia: 'SA' }],
   ['LOGISTICA & PNEUMATICI SRL', 'Campania - AVELLINO', 71, { provincia: 'AV' }],
