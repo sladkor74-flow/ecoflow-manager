@@ -12,9 +12,12 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 const DATA_RILEVAZIONE = '2026-09-13';
 
 // sito, id unita', descrizione, comune, provincia, class1, class2, class3, class4, class9 (kg)
+// PRT SRL (Stoc/PRT SRL, Sarno, unita' 30045) non c'e' piu': non e' contrattualizzato
+// nel 2026 e da anni non compare nei movimenti con SMOCO partner operativo
+// (utente, 10/10/2026). Era entrato da qui, con una rilevazione tutta a zero, e
+// finiva nelle Giacenze, nei piazzali della chiusura d'anno e nella lista del 2027.
 const RILEVAZIONI = [
   { sito: 'Nappi Sud Srl A Socio Unico', id_unita_stoccaggio: 30041, descrizione_unita: 'Stoc/NAPPI SUD SRL', comune: 'Battipaglia', provincia: 'SA', class1_kg: 19739, class2_kg: 19449, class3_kg: 350, class4_kg: 0, class9_kg: 0 },
-  { sito: 'PRT SRL', id_unita_stoccaggio: 30045, descrizione_unita: 'Stoc/PRT SRL', comune: 'Sarno', provincia: 'SA', class1_kg: 0, class2_kg: 0, class3_kg: 0, class4_kg: 0, class9_kg: 0 },
   { sito: 'Irigom S.r.l.', id_unita_stoccaggio: 38386, descrizione_unita: 'Stoc/Irigom S.r.l.', comune: 'Massafra', provincia: 'TA', class1_kg: 0, class2_kg: 0, class3_kg: 0, class4_kg: 0, class9_kg: 10060 },
   { sito: 'T-CYCLE INDUSTRIES SRL', id_unita_stoccaggio: 38490, descrizione_unita: 'Stoc/T-CYCLE INDUSTRIES SRL', comune: 'Teverola', provincia: 'CE', class1_kg: 0, class2_kg: 0, class3_kg: 0, class4_kg: 0, class9_kg: 0 },
   { sito: 'GATIM S.R.L.', id_unita_stoccaggio: 38492, descrizione_unita: 'Stoc/GATIM S.R.L.', comune: 'Lamezia Terme', provincia: 'CZ', class1_kg: 0, class2_kg: 0, class3_kg: 0, class4_kg: 0, class9_kg: 0 },

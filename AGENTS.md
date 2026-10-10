@@ -844,9 +844,19 @@ lo stesso movimentazioni e dichiarazioni: deve svuotare la giacenza dell'anno
 precedente, e lo fa con secondarie e terziarie (regola dell'utente, 23/09/2026).
 Nessun modulo che parla di giacenze, dichiarazioni, verifiche o fatturazione puo'
 escludere un sito perche' non ha un contratto quest'anno: si escludono solo dai
-target e dalla predittivita', che sono cose dell'anno in corso. Verificato il
-23/09/2026: INNOREC e PRT compaiono in Giacenze e in Dichiarazioni Impianti con
-le loro righe, pur senza target 2026.
+target e dalla predittivita', che sono cose dell'anno in corso.
+
+**La regola vale per chi ha movimenti NOSTRI**, cioe' con SMOCO partner
+operativo (utente, 10/10/2026: «considera sempre come partner operativo Smoco e
+non altri»). Il 23/09 qui si citavano INNOREC e PRT come esempi: PRT invece non
+compariva per dei movimenti, ma per una rilevazione del piazzale tutta a zero
+entrata col caricamento iniziale del 13/09 (`seedGiacenzeStoccaggio`), preso dal
+file del portale senza guardare il partner. Non e' contrattualizzato nel 2026 e da
+anni non ha movimenti con SMOCO: dal 10/10/2026 e' fuori. Un piazzale si toglie da
+Giacenze > Stoccaggi, «Elimina unita' locale», che cancella tutte le sue
+rilevazioni: e' da quelle che lo leggono le Giacenze, la chiusura d'anno (che
+altrimenti chiederebbe la sua lettura del 31/12 e gli creerebbe una riga
+dell'anno dopo) e la lista dell'anno nuovo.
 
 ### Su quali tonnellate si paga ciascuna prestazione
 
