@@ -4,6 +4,8 @@
 // e' zero. Separatore delle migliaia a punto e dei decimali a virgola, scritto a
 // mano per non dipendere dalle impostazioni locali dell'ambiente.
 
+import { giornoRoma } from "./giornoItaliano.ts";
+
 export function formatoTonnellate(v) {
   const n = Math.round((Number(v) || 0) * 1000) / 1000;
   // Un numero infinito - una divisione per zero a monte - non e' un peso: si
@@ -102,4 +104,28 @@ export function numeriDeiDati(...oggetti) {
   };
   for (const o of oggetti) visita(o);
   return valori;
+}
+
+/**
+ * LE DATE DI UN TESTO SCRITTO DA ECOTYNA, ALL'ITALIANA (utente, 10/10/2026: «sistema
+ * anche le date»). I dati portano le date come le salva il gestionale, 2026-10-05,
+ * e il modello a volte le ricopiava cosi'. Qui diventano 05/10/2026. Un istante con
+ * l'ora (2026-06-30T23:30:00Z) diventa il suo giorno italiano, come in tutto il
+ * gestionale (giornoRoma): a Roma quello e' gia' il 01/07/2026. Una data dentro un
+ * nome di file o un codice (report_2026-10-05.xlsx) non si tocca.
+ */
+export function dateAllItaliana(testo) {
+  const it = (g) => `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}`;
+  const valida = (a, m, g) => Number(m) >= 1 && Number(m) <= 12 && Number(g) >= 1 && Number(g) <= 31;
+  return String(testo ?? '').replace(/(?<![\w\-./])(\d{4})-(\d{2})-(\d{2})(T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?(?![\w\-])/g,
+    (m, a, mese, g, ora) => {
+      if (!valida(a, mese, g)) return m;
+      if (ora) { const giorno = giornoRoma(m); return giorno ? it(giorno) : m; }
+      return it(`${a}-${mese}-${g}`);
+    });
+}
+
+/** Il testo di una risposta, all'italiana: numeri e date. */
+export function testoAllItaliana(testo, valori = null) {
+  return dateAllItaliana(numeriAllItaliana(testo, valori));
 }

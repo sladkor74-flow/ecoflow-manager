@@ -11,7 +11,7 @@
 // (tre o tremila?) si decide coi numeri che EcoTyna ha ricevuto.
 // npm run prove
 import { readFileSync } from 'node:fs';
-import { numeriAllItaliana as f, numeriDeiDati } from '../base44/shared/formato.ts';
+import { numeriAllItaliana as f, numeriDeiDati, dateAllItaliana, testoAllItaliana } from '../base44/shared/formato.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -56,8 +56,34 @@ console.log('ECOTYNA LA USA');
 {
   const src = readFileSync(new URL('../base44/functions/chiediAssistente/entry.ts', import.meta.url), 'utf8');
   verifica('la regola e\' nelle istruzioni, coi tre decimali significativi', /3-duodecies\. I numeri si scrivono all\\'italiana: punto per le migliaia e virgola per i decimali, con fino a tre cifre decimali quando servono e sono significative/.test(src));
-  verifica('la risposta salvata passa dalla conversione, coi numeri dei dati', /risposta: numeriAllItaliana\(String\(esito\.risposta[^\n]*numeriDeiDati\(risultati\.map\(r => r\.dati\)\)\)/.test(src));
-  verifica('e anche quella restituita alla pagina', (src.match(/numeriAllItaliana\(String\(esito\.risposta[^\n]*numeriDeiDati\(risultati/g) || []).length === 2);
+  verifica('la regola delle date e\' nelle istruzioni', /3-terdecies\. Le date si scrivono all\\'italiana, giorno\/mese\/anno/.test(src));
+  verifica('la risposta salvata passa dalla conversione di numeri e date, coi numeri dei dati', /risposta: testoAllItaliana\(String\(esito\.risposta[^\n]*numeriDeiDati\(risultati\.map\(r => r\.dati\)\)\)/.test(src));
+  verifica('e anche quella restituita alla pagina', (src.match(/testoAllItaliana\(String\(esito\.risposta[^\n]*numeriDeiDati\(risultati/g) || []).length === 2);
+}
+
+console.log("LE DATE ALL'ITALIANA (utente, 10/10/2026: «sistema anche le date»)");
+{
+  const d = (dentro, atteso, nome) => verifica(`${nome}: «${dentro}» -> «${atteso}»`, dateAllItaliana(dentro) === atteso, `uscito «${dateAllItaliana(dentro)}»`);
+  d('aggiornata al 2026-10-05.', 'aggiornata al 05/10/2026.', 'la risposta vera del 10/10');
+  d('dal 2026-01-01 al 2026-12-31', 'dal 01/01/2026 al 31/12/2026', 'un intervallo');
+  d('fine trasporto 2026-06-30T23:30:00Z', 'fine trasporto 01/07/2026', "un istante: il giorno italiano, a Roma e' gia' luglio");
+  d('fine trasporto 2026-06-30T10:00:00.000Z', 'fine trasporto 30/06/2026', 'un istante di giorno');
+  d('il file report_2026-10-05.xlsx', 'il file report_2026-10-05.xlsx', 'nei nomi dei file non si tocca');
+  d('ET26-2026-10-05', 'ET26-2026-10-05', 'nei codici non si tocca');
+  d('2026-13-45', '2026-13-45', 'una data che non esiste non si inventa');
+  d('gia\' 05/10/2026', 'gia\' 05/10/2026', 'gia\' all\'italiana');
+  verifica('numeri e date insieme', testoAllItaliana('1600.00 euro al 2026-10-05') === '1.600,00 euro al 05/10/2026', testoAllItaliana('1600.00 euro al 2026-10-05'));
+}
+
+console.log("RAGGRUPPARE NON E' FILTRARE");
+{
+  // Visto in produzione il 10/10/2026: «lo strumento delle giacenze non permette di
+  // raggruppare per classe» su una risposta che le classi le dava.
+  const R = new URL('../base44/shared/', import.meta.url).href;
+  const { strumentiDalPiano } = await import(R + 'pianoAssistente.ts');
+  const { catalogoStrumenti } = await import(R + 'strumentiAssistente.ts');
+  const [g] = strumentiDalPiano({ strumenti: [{ nome: 'giacenze', parametri: { sito: 'Nappi Sud', raggruppa: 'classe' } }], canali: [], periodo: { anno: 2026 } }, catalogoStrumenti(), '2026-10-10', 'Che giacenza per classe ha il piazzale di Nappi Sud?');
+  verifica('il raggruppamento non finisce fra i filtri ignorati', g && (g.ignorati || []).length === 0, JSON.stringify(g && g.ignorati));
 }
 
 console.log(`\n${ok} superate, ${ko} fallite`);

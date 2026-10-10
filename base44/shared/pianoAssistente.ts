@@ -238,6 +238,10 @@ export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
       // scrive "true" - e vogliono dire tutti "solo quelli con un problema": se
       // lo strumento non sa filtrarci, buttarlo via in silenzio vuol dire
       // presentare l'elenco intero come se fosse quello chiesto.
+      // Raggruppare non e' filtrare: non cambia il numero, cambia come si legge.
+      // Sulle giacenze di Nappi Sud, divise per classe, la risposta diceva «non
+      // permette di raggruppare per classe» (visto in produzione il 10/10/2026).
+      if (k === 'raggruppa') continue;
       const implicito = (impliciti.get(nome) || {})[k];
       if (implicito === '*' || (Array.isArray(implicito) && implicito.some(x => String(x).toUpperCase() === String(v).toUpperCase().trim()))) continue;
       if (typeof v === 'boolean') { if (v) ignorati.push({ parametro: k, valore: 'si' }); continue; }

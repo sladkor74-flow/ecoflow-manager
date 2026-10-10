@@ -1864,6 +1864,11 @@ istruita, e sono state misurate sul codice:
   il raccolto e' sempre raccolta, le giacenze escono per canale, target e
   predittivita' sono solo rete): sulle risposte del 10/10 compariva «non filtrato
   per la prestazione» e «non distingue per canale» su numeri giusti.
+  E raggruppare non e' filtrare: `raggruppa` non finisce mai fra gli ignorati.
+- **Le date si scrivono gg/mm/aaaa** (utente, 10/10/2026). Regola 3-terdecies nelle
+  istruzioni e `dateAllItaliana` sulla risposta (`testoAllItaliana` fa numeri e
+  date): 2026-10-05 diventa 05/10/2026, un istante col suo orario diventa il
+  giorno italiano (giornoRoma), le date dentro nomi di file e codici restano.
 - **La fatturazione si calcola, non si legge** (audit del 10/10/2026). Lo
   strumento `fatturazione` fa lo stesso conto del modulo sui movimenti di oggi,
   attiva e passiva, col mese o senza: senza mese, mese per mese fino a quello in
