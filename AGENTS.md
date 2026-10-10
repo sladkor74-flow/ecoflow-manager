@@ -115,6 +115,15 @@ in `src/lib`. Le due copie devono restare identiche a meno dell'intestazione di
 commento e delle righe di `import`, e lo controlla `prove/specchi.mjs`. **Una
 modifica si fa uguale in tutti e due i file.**
 
+**Un gemello che la prova non conosce non e' uno specchio, e' una copia che
+aspetta di divergere.** Fino al 10/10/2026 quattro coppie erano fuori
+dall'elenco: i nomi (`normalizzaRagioneSociale.ts` e
+`normalizzaRagioneSocialeClient.js`, che era una copia a parte senza commenti),
+le regioni, il formato dei fogli e i subfornitori. Uguali per caso, quel giorno;
+e i nomi sono la chiave con cui pagine e funzioni riconoscono lo stesso
+fornitore. Ora sono nell'elenco. Chi crea un file in `src/lib` che ripete
+uno di `base44/shared` lo aggiunge a `SPECCHI` nello stesso commit.
+
 **Gli import in `src/lib` vanno bene in tutte due le forme.** La convenzione e'
 l'alias `@/` (39 dei 92 file; 12 usano un relativo, fra cui i cinque che prendono
 `./prodotto.js`), e nessuna delle due rompe le prove: il caricatore

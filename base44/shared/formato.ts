@@ -6,6 +6,11 @@
 
 export function formatoTonnellate(v) {
   const n = Math.round((Number(v) || 0) * 1000) / 1000;
+  // Un numero infinito - una divisione per zero a monte - non e' un peso: si
+  // scrive n/d. Prima toFixed dava "Infinity", senza virgola, e la riga dopo
+  // si fermava con un errore: e con lei l'alert o l'email che la usava
+  // (audit del 10/10/2026). Un valore mancante resta 0,00 come sempre.
+  if (!Number.isFinite(n)) return 'n/d';
   const [intero, decimali] = Math.abs(n).toFixed(3).split('.');
   const dec = decimali.endsWith('0') ? decimali.slice(0, 2) : decimali;
   return (n < 0 ? '-' : '') + intero.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + dec;
@@ -20,5 +25,6 @@ export const arrotondaTonnellate = (v) => Math.round((Number(v) || 0) * 1000) / 
 /** Chilogrammi: sempre interi, con il punto delle migliaia. */
 export function formatoKg(v) {
   const n = Math.round(Number(v) || 0);
+  if (!Number.isFinite(n)) return 'n/d';
   return (n < 0 ? '-' : '') + String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 }

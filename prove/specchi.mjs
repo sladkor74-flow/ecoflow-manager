@@ -24,6 +24,13 @@ const SPECCHI = [
   ['base44/shared/dichiarazioneAci.ts', 'src/lib/dichiarazioneAci.js'],
   ['base44/shared/ripartizioneTarget.ts', 'src/lib/ripartizioneTarget.js'],
   ['base44/shared/sediOperative.ts', 'src/lib/sediOperative.js'],
+  // Dal 10/10/2026 (audit di congruenza): erano gemelli senza nessuno che li
+  // confrontasse. I nomi soprattutto: le pagine e le funzioni riconoscono lo
+  // stesso fornitore solo se li normalizzano allo stesso modo.
+  ['base44/shared/normalizzaRagioneSociale.ts', 'src/lib/normalizzaRagioneSocialeClient.js'],
+  ['base44/shared/regioneMap.ts', 'src/lib/regioneMap.js'],
+  ['base44/shared/formatoExcel.ts', 'src/lib/formatoExcel.js'],
+  ['base44/shared/subfornitori.ts', 'src/lib/subfornitori.js'],
 ];
 
 // il corpo: via i ritorni a capo di Windows, le righe di import e il commento di testa

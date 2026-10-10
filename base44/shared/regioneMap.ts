@@ -1,7 +1,7 @@
 // Mappatura provincia -> regione (versione shared per backend functions).
 // Identica a src/lib/regioneMap.js (frontend) - mantenute separate per evitare
 // dipendenze cross-layer. Se si aggiunge una provincia, aggiornare entrambe.
-export const PROV_TO_REGION: Record<string, string> = {
+export const PROV_TO_REGION = {
   'AO': "Valle d'Aosta",
   'AL': 'Piemonte', 'AT': 'Piemonte', 'BI': 'Piemonte', 'CN': 'Piemonte', 'NO': 'Piemonte',
   'TO': 'Piemonte', 'VB': 'Piemonte', 'VC': 'Piemonte',
@@ -30,6 +30,6 @@ export const PROV_TO_REGION: Record<string, string> = {
   'CA': 'Sardegna', 'NU': 'Sardegna', 'OR': 'Sardegna', 'SS': 'Sardegna', 'SU': 'Sardegna', 'VS': 'Sardegna',
 };
 
-export function getRegioneFromProvincia(provincia: string): string {
+export function getRegioneFromProvincia(provincia) {
   return PROV_TO_REGION[(provincia || '').toUpperCase().trim()] || '';
 }
