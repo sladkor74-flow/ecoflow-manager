@@ -1228,6 +1228,16 @@ la prossima uscita di gomma. Nessuno dei due e' un mancante.
     stesso numero e conseguenze opposte, e la data li distingue. Si scrive solo
     quello che e' stato letto, e un'apertura gia' scritta non si cambia senza
     `sostituisci`;
+  - **l'apertura si LEGGE al netto di quello che si dichiara dopo** (revisione
+    del 10/10/2026, `aperturaNetta` in `shared/giacenzaPortale.ts`). La lettura
+    del 31/12 contiene novembre e dicembre non ancora dichiarati; quelle
+    dichiarazioni si caricano a gennaio ma sono dell'anno chiuso, e l'anno nuovo
+    sottrae solo le sue. Senza questo, la giacenza restava gonfiata tutto l'anno
+    (Dichiarazioni 8 t, portale 0) e l'ACI, che a portale non ha riscontro, in
+    tutti e due i moduli. La lettura resta scritta com'e'; Giacenze e
+    Dichiarazioni la usano al netto, e la scheda dell'impianto dice «letta X, di
+    cui dichiarate dopo Y». Un'apertura senza `apertura_del` (scritta a mano)
+    non e' una lettura e resta quella. Prova: `prove/aperturaNetta.mjs`;
   - **se la riga dell'anno dopo non c'e', la crea come la copia d'anno**, con la
     nota «copiato dal …, da confermare». Senza quella nota la copia d'anno la
     scambia per un elenco gia' compilato a mano e salta TUTTI gli altri siti: i

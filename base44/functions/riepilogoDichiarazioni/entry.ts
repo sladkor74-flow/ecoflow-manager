@@ -6,7 +6,7 @@ import { eAci } from "../../shared/canaleSecondaria.ts";
 import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { eTerminato, eEseguito, periodoMovimento } from "../../shared/movimenti.ts";
 import { MESI, operazioneDa, quadratura, chiaveDichiarazione, unisciDichiarazioni, doppioniDichiarazioni, kgCaricatiDi } from "../../shared/dichiarazioniImpianti.ts";
-import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese, nostraRiga } from "../../shared/giacenzaPortale.ts";
+import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese, nostraRiga } from "../../shared/giacenzaPortale.ts";
 import { puntiDiPartenza, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 import { confrontaConIlPortale } from "../../shared/agganciaDichiarazioni.ts";
 import { raccoglitoreUscite, allineaAllaGiacenza, copertureDelCaricamento } from "../../shared/usciteDichiarate.ts";
@@ -652,9 +652,18 @@ export default async function(req) {
 
     const giacenzeDi = (ns, ruolo) => giacenzeSito.filter(x => norm(x.sito) === ns && (td(x.tipo_destinazione) || 'imp') === ruolo);
     // La giacenza al 31/12 dell'anno prima e' della rete; quella ACI, dove c'e',
-    // sta nel suo campo. Non si sommano.
-    const iniziale = (ns, ruolo, canale) => t3(giacenzeDi(ns, ruolo)
-      .reduce((s, x) => s + (Number(canale === 'ACI' ? x.giacenza_riferimento_aci_t : x.giacenza_riferimento_t) || 0), 0));
+    // sta nel suo campo. Non si sommano. Un'apertura letta il 31/12 si prende al
+    // netto delle dichiarazioni dell'anno chiuso caricate dopo (aperturaNetta,
+    // 10/10/2026): lo stesso conto delle Giacenze.
+    const apertura = (ns, ruolo, canale) => {
+      const pezzi = giacenzeDi(ns, ruolo).map(x => aperturaNetta(x, canale, dichiarazioniTutte, norm));
+      return {
+        netta_t: t3(pezzi.reduce((s, x) => s + x.netta_t, 0)),
+        lorda_t: t3(pezzi.reduce((s, x) => s + x.lorda_t, 0)),
+        dichiarato_dopo_t: t3(pezzi.reduce((s, x) => s + x.dichiarato_dopo_t, 0)),
+      };
+    };
+    const iniziale = (ns, ruolo, canale) => apertura(ns, ruolo, canale).netta_t;
     const kgInT = (mappa, chiave) => t3((mappa.get(chiave) || 0) / 1000);
     const dichiaratoPerCanale = (flussi, canale, soloCaricate = true) => t3(flussi.filter(f => f.canale === canale)
       .reduce((s, f) => s + (soloCaricate ? f.dichiarato_caricato_t : f.dichiarato_totale_t), 0));
@@ -746,12 +755,15 @@ export default async function(req) {
         // Solo a portale la fotografia c'e': per ACI ed extra non si confronta
         // niente, perche' a portale quei canali non sono gestiti.
         giacenze_canale: CANALI_GIACENZA.map(canale => {
-          const apertura = canale === 'EXTRA_RACCOLTA' ? 0 : iniziale(ns, 'imp', canale);
+          const ap = canale === 'EXTRA_RACCOLTA' ? null : apertura(ns, 'imp', canale);
+          const apertura_ = ap ? ap.netta_t : 0;
           const entrato = t3(kgInT(entrataImp, `${ns}|${canale}`) + kgInT(secIn, `${ns}|${canale}`));
           const dichiarato = dichiaratoPerCanale(flussi, canale);
           return {
             canale,
-            apertura_t: apertura,
+            apertura_t: apertura_,
+            // Quanto della lettura del 31/12 si e' dichiarato dopo: si vede, non sparisce.
+            ...(ap && ap.dichiarato_dopo_t ? { apertura_letta_t: ap.lorda_t, dichiarato_dopo_apertura_t: ap.dichiarato_dopo_t } : {}),
             entrato_t: entrato,
             dichiarato_caricato_t: dichiarato,
             // LA RETE DI CHI NON LA DICHIARA NON HA UNA GIACENZA (utente, 10/10/2026:
@@ -762,10 +774,10 @@ export default async function(req) {
             ...(canale === 'RETE' && nonDichiaraRete.has(ns)
               ? { giacenza_t: null, negativa: false, non_dovuta: true, perche: "Per accordo questo impianto non ci dichiara la rete: il trattamento non e' a nostro carico, il portale non tiene per noi una giacenza di rete e niente resta da dichiarare. Quello che e' arrivato si vede, una giacenza da dichiarare non c'e'." }
               : {
-                giacenza_t: t3(apertura + entrato - dichiarato),
+                giacenza_t: t3(apertura_ + entrato - dichiarato),
                 // Una giacenza sotto zero non esiste: e' un errore da correggere, e si
                 // dice invece di azzerarla (regola dell'utente, 03/10/2026).
-                negativa: t3(apertura + entrato - dichiarato) < 0,
+                negativa: t3(apertura_ + entrato - dichiarato) < 0,
               }),
             apertura_disponibile: canale !== 'EXTRA_RACCOLTA',
           };
@@ -789,6 +801,9 @@ export default async function(req) {
       return { ...sito, ...quadratura(sito) };
     }).filter(s => s.conferito_t || s.conferito_aci_t || s.conferito_extra_t || s.secondarie_in_t || s.secondarie_aci_in_t || s.secondarie_extra_in_t
       || s.dichiarato_totale_rete_t || s.flussi.some(f => f.dichiarato_totale_t) || s.giacenza_iniziale_t || s.giacenza_portale_t
+      // Un'apertura conta anche se e' tutta dichiarata dopo (netta 0, letta 8) o se
+      // e' solo ACI: il sito ha una giacenza da cui l'anno parte, e si deve vedere.
+      || (s.giacenze_canale || []).some(c => c.apertura_t || c.apertura_letta_t)
       || s.date_da_sistemare.length || s.eseguiti.length)
       .sort((a, b) => (b.conferito_t + b.secondarie_in_t) - (a.conferito_t + a.secondarie_in_t) || a.sito.localeCompare(b.sito));
 

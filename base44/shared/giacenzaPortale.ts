@@ -105,6 +105,49 @@ export function dichiaratoDopoLaFotografia(dichiarazioniSito, foto, chiaveDi, pr
   return per;
 }
 
+/**
+ * L'APERTURA DI UN IMPIANTO, AL NETTO DI QUELLO CHE SI E' DICHIARATO DOPO (10/10/2026).
+ *
+ * La chiusura dell'anno scrive come apertura dell'anno dopo la lettura del
+ * 31/12: il peso non ancora dichiarato quel giorno (apertureDegliImpianti, che
+ * segna il giorno in apertura_del). Ma la dichiarazione del mese M si carica in
+ * M+1: quella di dicembre, e spesso quella di novembre, arrivano a gennaio. Sono
+ * DichiarazioneSito dell'anno che si e' chiuso, e l'anno nuovo sottrae solo le
+ * dichiarazioni dei suoi mesi: senza questo conto la giacenza restava gonfiata
+ * per tutto l'anno, il modulo Dichiarazioni diceva un numero e le Giacenze
+ * (che leggono il portale) un altro, e sull'ACI, che a portale non ha riscontro,
+ * nessuno se ne sarebbe accorto. Trovato dalla revisione del 10/10/2026.
+ *
+ * La lettura resta scritta com'e' - e' quello che il portale diceva quel giorno
+ * - e si toglie, leggendo, cio' che si e' caricato dopo per i mesi degli anni
+ * prima. Solo per le aperture con il giorno (apertura_del): una giacenza di
+ * riferimento scritta a mano non e' una lettura, e resta quella.
+ *
+ * @param {object} riga              la riga GiacenzaSito dell'anno
+ * @param {string} canale            'RETE' o 'ACI'
+ * @param {array}  dichiarazioniSito tutte le DichiarazioneSito, di tutti gli anni
+ * @param {function} chiaveDi        il normalizzatore dei nomi
+ * @returns {{ lorda_t, dichiarato_dopo_t, netta_t, senza_data }} senza_data: le
+ *   dichiarazioni caricate di cui non si sa il giorno, che non si sottraggono
+ */
+export function aperturaNetta(riga, canale, dichiarazioniSito, chiaveDi) {
+  const t3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
+  const lorda = Number(canale === 'ACI' ? riga && riga.giacenza_riferimento_aci_t : riga && riga.giacenza_riferimento_t) || 0;
+  const del_ = String((riga && riga.apertura_del) || '').slice(0, 10);
+  if (!del_) return { lorda_t: t3(lorda), dichiarato_dopo_t: 0, netta_t: t3(lorda), senza_data: 0 };
+  const ns = chiaveDi(riga.sito);
+  const anno = Number(riga.anno);
+  let kg = 0, senzaData = 0;
+  for (const d of dichiarazioniSito || []) {
+    if ((d.canale || 'RETE') !== canale || !d.caricata_inviata) continue;
+    if (!(Number(d.anno) < anno) || chiaveDi(d.sito) !== ns) continue;
+    const il = String(d.caricata_il || '').slice(0, 10);
+    if (!il) { senzaData++; continue; }
+    if (il > del_) kg += Number(d.quantita_kg) || 0;
+  }
+  return { lorda_t: t3(lorda), dichiarato_dopo_t: t3(kg / 1000), netta_t: t3(lorda - kg / 1000), senza_data: senzaData };
+}
+
 // --- I formulari terminati con le date da sistemare ---
 //
 // Immissione, inizio e fine trasporto sono obbligatorie (regola dell'utente,

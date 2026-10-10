@@ -140,6 +140,13 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
       })}
 
       <div className="px-4 py-3 bg-muted/20 text-xs grid gap-x-6 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
+        {/* L'apertura letta il 31/12 si prende al netto di quello che dell'anno chiuso si e'
+            dichiarato dopo (aperturaNetta, 10/10/2026): qui si dice da dove viene. */}
+        {(sito.giacenze_canale || []).filter(c => c.dichiarato_dopo_apertura_t).map(c => (
+          <span key={'ap-' + c.canale}>
+            Apertura {c.canale === 'ACI' ? 'ACI' : 'di rete'} letta al 31/12: {t(c.apertura_letta_t)} t, di cui dichiarate dopo {t(c.dichiarato_dopo_apertura_t)} t: <strong>{t(c.apertura_t)} t</strong>
+          </span>
+        ))}
         <span>Giacenza al 31/12 dell'anno prima: <strong>{t(sito.giacenza_iniziale_t)} t</strong></span>
         <span>Primarie di rete arrivate: <strong>{t(sito.conferito_t)} t</strong></span>
         {sito.secondarie_in_t > 0 && <span>Secondarie di rete dagli stoccaggi: <strong>{t(sito.secondarie_in_t)} t</strong></span>}

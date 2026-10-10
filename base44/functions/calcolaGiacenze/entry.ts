@@ -8,7 +8,7 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { PROV_TO_REGION } from "../../shared/raccoltoCalculator.ts";
 import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, anomaliaRilevazione, classePfu, canaleEClasse, ordiniDellaGiacenza } from "../../shared/giacenzaStoccaggi.ts";
-import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine } from "../../shared/giacenzaPortale.ts";
+import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, formulariDaSistemare, avvisoSenzaFine } from "../../shared/giacenzaPortale.ts";
 
 // Calcola la situazione delle giacenze di impianti e stoccaggi per l'anno richiesto.
 //
@@ -876,7 +876,9 @@ export default async function(req) {
       //
       // Un negativo non si azzera: e' un errore da correggere e si deve vedere.
       if (td === 'imp') {
-        const aperturaAci = Number(g?.giacenza_riferimento_aci_t) || 0;
+        // Al netto delle dichiarazioni dell'anno chiuso caricate dopo la lettura del
+        // 31/12 (aperturaNetta, 10/10/2026): lo stesso conto del modulo Dichiarazioni.
+        const aperturaAci = g ? aperturaNetta(g, 'ACI', dichiarazioniSito, norm).netta_t : 0;
         giacenza_aci_t = aperturaAci + conferito_aci_t + secondarie_aci_in_t - (dichiaratoCanaleMap.get(ns + '|ACI') || 0);
         giacenza_extra_t = conferito_extra_t - (dichiaratoCanaleMap.get(ns + '|EXTRA_RACCOLTA') || 0);
       }
@@ -902,7 +904,10 @@ export default async function(req) {
       });
       const target_primarie_t = tgt.target_primarie_t;
       const target_totale_t = tgt.target_totale_t;
-      const giacenza_riferimento_t = g?.giacenza_riferimento_t || 0;
+      // L'apertura di rete mostrata e' anche lei al netto (aperturaNetta): la colonna
+      // deve dire lo stesso numero che il modulo Dichiarazioni usa come apertura.
+      const aperturaRete = g ? aperturaNetta(g, 'RETE', dichiarazioniSito, norm) : null;
+      const giacenza_riferimento_t = aperturaRete ? aperturaRete.netta_t : 0;
       const tipologia_trattamento = g?.tipologia_trattamento || '';
 
       // RESIDUO E COPERTURA RISPONDONO A DUE DOMANDE DIVERSE, e per questo si
