@@ -424,15 +424,19 @@ export async function segnalaFileNonRimossi(base44, { nonRiusciti = [], bloccati
   const elenco = nonRiusciti.slice(0, 15).map(n => `- ${n.nome_file || n.entita || n.id || 'file'}`);
   if (nonRiusciti.length > elenco.length) elenco.push(`- e altri ${nonRiusciti.length - elenco.length}`);
   const dati = {
-    titolo: `${quanti} ${quanti === 1 ? 'file caricato resta' : 'file caricati restano'} sulla piattaforma: cancellarli non si puo'`,
+    // IL SINGOLARE SI VEDE SOLO QUANDO NE RESTA UNO, ed e' arrivato il
+    // 10/10/2026, quando l'inventario ne ha contato uno invece di decine: «1 file
+    // caricato resta sulla piattaforma: cancellarli non si puo'». Una riga sola
+    // che si contraddice a meta'.
+    titolo: `${quanti} ${quanti === 1 ? 'file caricato resta' : 'file caricati restano'} sulla piattaforma: ${quanti === 1 ? 'cancellarlo' : 'cancellarli'} non si puo'`,
     descrizione: [
-      `Al ${giorno} ${quanti === 1 ? 'c\'e\' un file' : `ci sono ${quanti} file`} che non serve piu' e che non si riesce a togliere. Non e' un guasto e non e' colpa di un caricamento: la piattaforma non ha nessuna operazione per cancellare un file, ne' da programma ne' dal suo pannello, e l'ha confermato la sua assistenza il 30/09/2026. Quello che sale, resta.`,
+      `${giorno ? `Al ${giorno} ` : ''}${quanti === 1 ? 'c\'e\' un file' : `ci sono ${quanti} file`} che non serve piu' e che non si riesce a togliere. Non e' un guasto e non e' colpa di un caricamento: la piattaforma non ha nessuna operazione per cancellare un file, ne' da programma ne' dal suo pannello, e l'ha confermato la sua assistenza il 30/09/2026. Quello che sale, resta.`,
       'I dati non ne soffrono: i record, i numeri e la storia scritta sono al loro posto, e l\'alleggerimento dei documenti a quaranta giorni continua a funzionare, perche\' li\' se ne va il testo e non il file. Non c\'e\' nemmeno un limite di spazio da temere: i limiti sono solo sulla dimensione del singolo file.',
       pubblici
         ? `Attenzione pero': ${pubblici === 1 ? 'uno di questi file e\' stato caricato' : `${pubblici} di questi file sono stati caricati`} in area pubblica, prima del 30/09/2026. Il loro indirizzo funziona per chiunque ce l'abbia e non si puo' revocare. Sono quelli da far rimuovere per primi.`
         : 'I file nuovi salgono in area privata: si aprono solo con un link firmato che scade in pochi minuti, quindi restano occupati ma non sono raggiungibili da nessuno.',
       ...(elenco.length ? ['Di che file si tratta:', ...elenco] : []),
-      'Che cosa si puo\' fare: farli rimuovere dal team della piattaforma, che e\' l\'unica strada che esiste. L\'elenco completo da mandargli si scarica dal pulsante "Elenco dei file caricati", in Caricamento Dati. Questo avviso non si chiude da solo: chiudilo tu quando te lo confermano.',
+      `Che cosa si puo' fare: ${quanti === 1 ? 'farlo' : 'farli'} rimuovere dal team della piattaforma, che e' l'unica strada che esiste. L'elenco completo da mandargli si scarica dal pulsante "Elenco dei file caricati", in Caricamento Dati. Questo avviso non si chiude da solo: chiudilo tu quando te lo confermano.`,
     ].join('\n'),
     severita: 'warning',
     modulo: 'manutenzione',

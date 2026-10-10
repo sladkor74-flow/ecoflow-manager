@@ -4,7 +4,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { ARCHIVI_CON_FILE, voceFile, voceOrfana, csvInventario, contaInventario, testoRichiesta } from "../../shared/inventarioFile.ts";
 import { avvisoFileDallInventario } from "../../shared/fileArchivio.ts";
-import { giornoRoma } from "../../shared/giornoItaliano.ts";
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 
 // L'ELENCO DEI FILE CHE LA PIATTAFORMA TIENE PER NOI.
 //
@@ -83,7 +83,7 @@ export default async function(req) {
     // servizio in meno, non uno in piu'.
     let avviso = null;
     try {
-      avviso = await avvisoFileDallInventario(base44, { conta, voci, oggi: giornoRoma() });
+      avviso = await avvisoFileDallInventario(base44, { conta, voci, oggi: oggiRoma() });
     } catch (e) {
       avviso = { errore: e && e.message ? e.message : String(e) };
     }

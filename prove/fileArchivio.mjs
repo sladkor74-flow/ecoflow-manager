@@ -200,7 +200,14 @@ console.log('L\'AVVISO DICE UNA COSA SOLA, E VERA');
   const aggiornati = [];
   const base = { asServiceRole: { entities: { Alert: { filter: async () => [{ id: 'a1' }], create: async () => {}, update: async (id, d) => aggiornati.push({ id, ...d }) } } } };
   const esito = await segnalaFileNonRimossi(base, { nonRiusciti: [{ nome_file: 'x.xlsx', pubblico: true }], bloccati: 1, oggi: '2026-10-05' });
-  verifica('quello aperto viene riscritto', esito.alert === 'aggiornato' && aggiornati.length === 1 && /cancellarli non si puo/.test(aggiornati[0].titolo), JSON.stringify(esito));
+  verifica('quello aperto viene riscritto', esito.alert === 'aggiornato' && aggiornati.length === 1 && /cancellarlo non si puo/.test(aggiornati[0].titolo), JSON.stringify(esito));
+  // IL SINGOLARE E IL PLURALE: con un solo file il titolo diceva «1 file caricato
+  // resta sulla piattaforma: CANCELLARLI non si puo'», una riga sola che si
+  // contraddice a meta'. Non si vedeva finche' i file erano decine, e il
+  // 10/10/2026 l'inventario ne ha contato uno.
+  verifica('con un solo file il titolo e\' tutto al singolare',
+    /^1 file caricato resta sulla piattaforma: cancellarlo non si puo/.test(aggiornati[0].titolo), aggiornati[0].titolo);
+  verifica('e anche il da fare', /farlo rimuovere dal team/.test(aggiornati[0].descrizione));
 }
 
 console.log('UN AVVISO NON SI RISCRIVE A ZERO');
@@ -247,6 +254,27 @@ console.log('UN AVVISO NON SI RISCRIVE A ZERO');
   }
 }
 
+console.log('LA DATA DELL\'AVVISO C\'E\' DAVVERO');
+{
+  // L'avviso ha detto «Al  c'e' un file che non serve piu'», con la data VUOTA:
+  // chi lo chiamava passava giornoRoma() invece di oggiRoma(), e giornoRoma(v)
+  // converte un istante dato - senza argomento torna stringa vuota. Nessun
+  // errore, nessuna prova rotta, solo una frase mutilata a video.
+  const apri = async (oggi) => {
+    const creati = [];
+    const base = { asServiceRole: { entities: { Alert: {
+      filter: async () => [], create: async (d) => { creati.push(d); }, update: async () => {},
+    } } } };
+    await segnalaFileNonRimossi(base, { nonRiusciti: [{ nome_file: 'x.pdf' }], bloccati: 1, oggi });
+    return creati[0];
+  };
+  const conData = await apri('2026-10-10');
+  verifica('la data si legge, in italiano', /Al 10\/10\/2026 c'e' un file/.test(conData.descrizione), conData.descrizione.slice(0, 90));
+  // E se la data non arriva, la frase comincia dal fatto invece che da «Al ».
+  const senzaData = await apri('');
+  verifica('senza data non si scrive una frase mutilata', !/Al\s\s/.test(senzaData.descrizione), senzaData.descrizione.slice(0, 90));
+  verifica('e il fatto si dice comunque', /^c'e' un file che non serve piu'/.test(senzaData.descrizione), senzaData.descrizione.slice(0, 90));
+}
 console.log('IL CONTO VIENE DALL\'INVENTARIO, NON DALLA PULIZIA');
 {
   // Il difetto di fondo: segnalaFileNonRimossi vede i file di UN giro di
