@@ -123,6 +123,33 @@ console.log('3. TECNOGUM NON ENTRA NEL NUMERO IN TESTA ALLA PAGINA');
   verifica('Tecnogum resta nell\'elenco, con la sua rete non dovuta', tec && tec.dichiara_rete === false, JSON.stringify(tec && { dichiara_rete: tec.dichiara_rete }));
 }
 
+console.log("3-bis. CON LA FOTOGRAFIA, CHI NON C'E' HA DICHIARATO TUTTO: ZERO, NON «—»");
+{
+  // Visto dal vivo il 10/10/2026 dopo il Publish: T.R.S., 227,18 t arrivate e
+  // 227,18 dichiarate, nel file dei non dichiarati non c'e'. Le Giacenze dicevano
+  // 0, le Dichiarazioni «—» e non facevano la quadratura.
+  vuoti();
+  const TRS = 'T.R.S. SRL', TEC = 'TECNOGUM SRL';
+  con('GiacenzaSito', [
+    { sito: ALFA, tipo_destinazione: 'imp', anno: 2026, dichiara_rete: true },
+    { sito: TRS, tipo_destinazione: 'imp', anno: 2026, dichiara_rete: true },
+    { sito: TEC, tipo_destinazione: 'imp', anno: 2026, dichiara_rete: false },
+  ]);
+  con('PrimariaRete', [primaria('ET26000001', ALFA, 8000, '2026-03-10'), primaria('ET26000002', TRS, 5000, '2026-03-11'), primaria('ET26000003', TEC, 7000, '2026-03-12')]);
+  con('DichiarazioneSito', [{ sito: TRS, anno: 2026, mese: 'Marzo', canale: 'RETE', provenienza: '', operazione: 'R3', quantita_kg: 5000, caricata_inviata: true, caricata_il: '2026-04-10' }]);
+  con('DichiarazioneTrattamento', [{ ordine_primaria: 'ET26000002', prodotto: '.class1', partner_operativo: 'SMOCO S.r.l.', destinazione: TRS, data_dichiarazione: '2026-04-10', fine_trasporto: '2026-03-11', peso_associato_kg: 5000, id_dichiarazione: 'D9' }]);
+  // Il file: solo ALFA ha ancora qualcosa da dichiarare.
+  con('OrdineNonDichiarato', [{ ordine_primaria: 'ET26000001', destinazione: ALFA, prodotto: '.class1', peso_non_dichiarato_kg: 8000, created_date: '2026-10-09T06:00:00Z', fine_trasporto: '2026-03-10' }]);
+  const G = await giacenze({ anno: 2026 });
+  const D = await riepilogo({ anno: 2026 });
+  const g = (s) => (G.righe || []).find(r => r.sito === s && r.tipo_destinazione === 'imp') || {};
+  const d = (s) => (D.siti || []).find(x => x.sito === s) || {};
+  verifica('T.R.S., tutto dichiarato: 0 a portale in tutti e due i moduli', g(TRS).giacenza_portale_t === 0 && d(TRS).giacenza_portale_t === 0, `Giacenze ${g(TRS).giacenza_portale_t}, Dichiarazioni ${d(TRS).giacenza_portale_t}`);
+  verifica('e la quadratura si fa, e torna', d(TRS).quadra === true, JSON.stringify({ calcolata: d(TRS).giacenza_calcolata_t, portale: d(TRS).giacenza_portale_t, quadra: d(TRS).quadra }));
+  verifica('Tecnogum resta «—» in tutti e due', g(TEC).giacenza_portale_t === null && d(TEC).giacenza_portale_t === null, `${g(TEC).giacenza_portale_t} / ${d(TEC).giacenza_portale_t}`);
+  verifica('ALFA come prima: 8 t', g(ALFA).giacenza_portale_t === 8 && d(ALFA).giacenza_portale_t === 8, `${g(ALFA).giacenza_portale_t} / ${d(ALFA).giacenza_portale_t}`);
+}
+
 console.log('4. LE PAGINE');
 {
   const ex = readFileSync(qui('../src/lib/dichiarazioniExport.js'), 'utf8');

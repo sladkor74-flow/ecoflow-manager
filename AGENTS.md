@@ -748,6 +748,11 @@ dire a uno dei due un numero diverso dall'altro rompe quella prova.
 7. **Il numero in testa alla pagina Dichiarazioni** (giacenza calcolata degli
    impianti) **non comprende la rete di chi non la dichiara**, come lo storico:
    prima ci finivano le 1.833,43 t di Tecnogum. Prova: `prove/dueModuliACavallo.mjs`.
+8. **Con la fotografia caricata, un impianto che non vi compare ha 0 a portale**,
+   non «—»: il file e' l'elenco completo dei nostri non dichiarati, e chi non c'e'
+   ha dichiarato tutto (T.R.S., 10/10/2026: Giacenze 0, Dichiarazioni «—» e niente
+   quadratura). «—» resta per chi il file non l'ha e per chi per accordo non
+   dichiara la rete.
 
 ### Canali indipendenti
 

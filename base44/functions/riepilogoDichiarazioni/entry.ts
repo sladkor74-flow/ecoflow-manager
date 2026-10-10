@@ -426,7 +426,6 @@ export default async function(req) {
     const portale = collocata.portale;           // ns impianto -> t
     const inAttesa = collocata.inAttesa;         // ns stoccaggio -> t gia' partite che il portale attribuisce ancora allo stoccaggio
     const attesaCoppia = collocata.attesaCoppia; // nsStoccaggio|nsImpianto -> t partite e non ancora dichiarate
-    const aPortale = collocata.aPortale;         // chi compare nella fotografia del portale
     // Ancora in attesa di dichiarazione, per mese di arrivo: il mese con il suo
     // anno, cosi' un carico di dicembre dell'anno prima non finisce nel dicembre
     // di quest'anno.
@@ -696,7 +695,13 @@ export default async function(req) {
       const g = giacenzeDi(ns, 'imp')[0] || giacenzeSito.find(x => norm(x.sito) === ns) || null;
       const operazione = operazioneDa(g && g.tipologia_trattamento);
       const flussi = flussiDi(ns, operazione);
-      const senzaPortale = !aPortale.has(ns);
+      // CON LA FOTOGRAFIA, CHI NON C'E' HA ZERO (10/10/2026). Il file degli ordini non
+      // dichiarati e' l'elenco completo dei nostri: un impianto che non ci compare
+      // ha dichiarato tutto. Qui diventava «—» e la quadratura non si faceva, mentre
+      // le Giacenze dicevano 0: T.R.S., 227,18 t arrivate e 227,18 dichiarate. Senza
+      // portale resta solo chi il file non l'ha caricato, o chi per accordo non
+      // dichiara la rete (Tecnogum), che ha il suo «—».
+      const senzaPortale = !fotoPortale || nonDichiaraRete.has(ns);
       const aggiunti = (nonAncora.get(ns) || []).sort((a, b) => a.fine_trasporto.localeCompare(b.fine_trasporto));
       const aggiuntiT = t3(aggiunti.reduce((s, x) => s + x.kg, 0) / 1000);
       // Le dichiarazioni di rete caricate a portale dopo la fotografia: il file le
