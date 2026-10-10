@@ -31,6 +31,7 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - Il guardiano notturno e la memoria dei numeri (10/10/2026)
   - Il dichiarato e' di chi tratta, non di chi stocca (10/10/2026)
   - Una dichiarazione per mese, e un avviso non grida a zero (10/10/2026)
+  - Giacenze e Dichiarazioni: lo stesso numero, controllato da una prova (10/10/2026)
   - Canali indipendenti
   - Pesi
   - Come si legge un movimento: un punto solo
@@ -673,6 +674,43 @@ dichiarazioni li scrive sopra a tutto il resto.
 **Il presidio vale quanto la fiducia che gli si da'**: un avviso che si accende a
 zero e' il modo piu' sicuro di far ignorare quelli veri, ed e' peggio di un avviso
 che non c'e', perche' costa attenzione ogni giorno senza dire niente.
+
+### Giacenze e Dichiarazioni: lo stesso numero, controllato da una prova (10/10/2026)
+
+La regola dell'utente del 03/10/2026 - i due moduli dicono gli stessi numeri su
+tutti e tre i canali - era scritta nei commenti e controllata a occhio. L'audit
+del 10/10/2026 la ha misurata sui dati veri (53 confronti su 54 uguali al
+centesimo) e ha trovato quattro modi in cui si rompeva senza che nessuna prova
+se ne accorgesse. Da oggi c'e' `prove/dueModuliStessiNumeri.mjs`, che fa
+**girare le due funzioni vere** (`calcolaGiacenze` e `riepilogoDichiarazioni`)
+sugli stessi archivi e le confronta canale per canale. Un cambiamento che fa
+dire a uno dei due un numero diverso dall'altro rompe quella prova.
+
+1. **La rete di chi non la dichiara non ha una giacenza** (decisione
+   dell'utente). Tecnogum: Giacenze diceva 0 («vuoto»), Dichiarazioni 1.833,43 t
+   (tutto quello che e' arrivato). Ora **«—» con il perche' in tutti e due**: il
+   trattamento non e' a nostro carico, il portale non tiene per noi una giacenza
+   di rete. Quello che e' arrivato si vede nel conferito. Ogni mese di rete di
+   un sito con `dichiara_rete` falso e' non dovuto, non solo quelli segnati a
+   mano (prima lo era solo gennaio). Lo storico del guardiano la tiene fuori: il
+   primo giorno era il 53% della giacenza di rete. E attenzione a `r2(null)`:
+   arrotonda a 0, e uno zero dice «vuoto» - la prova l'ha trovato nella
+   correzione stessa.
+2. **Piu' campagne di extra raccolta nello stesso mese**: `dichiarazioneDi` nel
+   riepilogo ricostruiva la dichiarazione campo per campo e perdeva `caricato_kg`,
+   `altre` e `ripetizioni`. Con una campagna caricata e una no, qui faceva 0
+   caricato e nelle giacenze il peso giusto.
+3. **Le dichiarazioni caricate dopo la fotografia si leggono di tutti gli anni**,
+   in tutti e due i moduli: una dichiarazione di due anni fa caricata oggi scala
+   la giacenza a portale di oggi. Il riepilogo leggeva solo l'anno e l'anno
+   prima: a gennaio, guardando il 2026 per chiuderlo, i due moduli avrebbero
+   detto numeri diversi.
+4. **Il filtro SMOCO sta in `caricamentiPortale`**, l'unico punto da cui passano
+   tutte le righe del report delle dichiarazioni. L'allineamento automatico -
+   l'unico che SCRIVE «caricata» sulle nostre righe - lo saltava: 1.605 righe
+   di Baucina hanno come destinazione secondaria Irigom, e una loro riga poteva
+   pareggiare al chilo un nostro mese. La controprova lo fa vedere: un nostro
+   luglio da 4.100 kg agganciato a un caricamento di Baucina.
 
 ### Canali indipendenti
 

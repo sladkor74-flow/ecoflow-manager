@@ -17,6 +17,7 @@ import { MESI } from "./dichiarazioniImpianti.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
 import { fetchAll } from "./fetchAll.ts";
+import { nostraRiga } from "./giacenzaPortale.ts";
 
 /** Dal nome del campo del portale a quello della nostra dichiarazione. */
 export const MATERIALI_PORTALE = [
@@ -64,6 +65,15 @@ export const provenienzaRigaPortale = (r) => (String(r.destinazione_secondaria |
 export function caricamentiPortale(righe, anno, canale = '', provenienza = '') {
   const per = new Map(); // impianto -> Map(data -> { kg, materiali, mesi, provenienze })
   for (const r of righe) {
+    // SOLO LE RIGHE DI SMOCO (audit del 10/10/2026). Il report del portale porta
+    // anche le dichiarazioni di altri partner operativi, a volte sulle nostre
+    // stesse destinazioni: 1.605 righe di Baucina passano da Irigom fra il 2023 e
+    // il 2025. Il riepilogo le toglieva prima di chiamare il confronto; l'allinea-
+    // mento automatico, che gira a ogni caricamento ed e' l'unico che SCRIVE
+    // «caricata» sulle nostre righe, no - una loro riga poteva pareggiare al chilo
+    // un nostro mese e segnarlo caricato. E' una regola fissa dell'utente: si
+    // filtra qui, cosi' vale per chiunque passi da questa funzione.
+    if (!nostraRiga(r)) continue;
     if (canale && canaleRigaPortale(r) !== canale) continue;
     if (provenienza && provenienzaRigaPortale(r) !== provenienza) continue;
     const data = giorno(r.data_dichiarazione);

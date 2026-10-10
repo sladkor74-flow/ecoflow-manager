@@ -67,7 +67,7 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
             <p className="px-4 pt-3 pb-1 text-sm font-medium">
               {canale ? canale.nome : flusso.canale}{flusso.provenienza ? ` · ${flusso.provenienza}` : ''}
               <span className="text-xs text-muted-foreground font-normal">
-                {' '}— arrivati {t(flusso.conferito_t)} t{conStoccaggi ? `, di cui ${t(flusso.da_stoccaggi_t)} t in secondaria dagli stoccaggi` : ''}, dichiarati e caricati {t(flusso.dichiarato_caricato_t)} t, in giacenza {t(flusso.resta_t)} t
+                {' '}— arrivati {t(flusso.conferito_t)} t{conStoccaggi ? `, di cui ${t(flusso.da_stoccaggi_t)} t in secondaria dagli stoccaggi` : ''}, dichiarati e caricati {t(flusso.dichiarato_caricato_t)} t, {flusso.non_dovuta ? 'giacenza: non dovuta per accordo' : `in giacenza ${t(flusso.resta_t)} t`}
               </span>
             </p>
             <div data-scorre-lato>

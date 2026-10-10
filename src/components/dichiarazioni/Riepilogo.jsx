@@ -197,7 +197,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                     e un arretrato. */}
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium">
                   {(() => {
-                    if (flusso.canale === 'RETE' && sito.dichiara_rete === false) return <span className="text-muted-foreground">—</span>;
+                    if (flusso.non_dovuta || (flusso.canale === 'RETE' && sito.dichiara_rete === false)) return <span className="text-muted-foreground cursor-help" title={"Per accordo questo impianto non ci dichiara la rete: il trattamento non e' a nostro carico, il portale non tiene per noi una giacenza di rete e niente resta da dichiarare. Quello che e' arrivato si vede nella riga del conferito."}>—</span>;
                     // Una giacenza sotto zero si mostra e si segnala: e' un errore da
                     // correggere, non un numero da azzerare (utente, 03/10/2026). La
                     // somma dei mesi non puo' andare sotto zero, quindi il negativo lo
@@ -241,7 +241,12 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                   buco non e' (Tecnogum, 09/10/2026). */}
               <tr className={`border-b ${i % 2 ? 'bg-muted/20' : ''}`}>
                 {(() => {
-                  const nonDovuta = flusso.canale === 'RETE' && sito.dichiara_rete === false;
+                  // LA RETE NON DOVUTA NON HA UNA GIACENZA (utente, 10/10/2026: «“—” con la
+                  // spiegazione, in tutti e due i moduli»). Qui si scrivevano in grigio i
+                  // resti di ogni mese e 1.833,43 t in fondo, mentre le Giacenze dicevano
+                  // 0: due numeri per la stessa cosa. Ora la riga tace col perche', e
+                  // quello che e' arrivato resta visibile nella riga del conferito.
+                  const nonDovuta = flusso.non_dovuta || (flusso.canale === 'RETE' && sito.dichiara_rete === false);
                   const tono = nonDovuta ? 'text-muted-foreground' : 'text-amber-700 font-medium';
                   const perche = nonDovuta
                     ? 'è in impianto, ma di questo canale non ci deve dichiarazione: resta come storia'
@@ -251,7 +256,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                       <td className="px-3 pb-1.5 sticky left-0 bg-inherit text-[11px] text-muted-foreground">resta in giacenza</td>
                       {flusso.mesi.map(m => (
                         <td key={m.mese} className="px-1 pb-1.5 text-center tabular-nums text-[11px]">
-                          {m.resta_kg > 0
+                          {m.resta_kg > 0 && !nonDovuta
                             ? <span className={tono} title={`Di ${m.mese} ${formatKg(m.resta_kg)} kg ${perche}`}>{formatTonnellate(m.resta_kg / 1000)}</span>
                             : <span className="text-muted-foreground/50">—</span>}
                         </td>
@@ -260,7 +265,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                         title={nonDovuta
                           ? 'La somma dei mesi: quello che è in impianto. Non è un arretrato: di questo canale non ci deve dichiarazione, per accordo'
                           : 'La somma dei mesi: è la giacenza del canale, lo stesso numero della colonna «Da dichiarare»'}>
-                        {formatTonnellate(flusso.resta_t)}
+                        {nonDovuta ? <span className="cursor-help" title={"Per accordo questo impianto non ci dichiara la rete: il trattamento non e' a nostro carico, il portale non tiene per noi una giacenza di rete e niente resta da dichiarare. Quello che e' arrivato si vede nella riga del conferito."}>—</span> : formatTonnellate(flusso.resta_t)}
                       </td>
                       <td className="px-3 pb-1.5" />
                     </>

@@ -182,9 +182,16 @@ console.log('LA COLONNA DEL RIEPILOGO: E LA SOMMA DELLA RIGA, CHE E LA GIACENZA'
     r.includes('resta in giacenza') && r.includes('conferito nel mese') && r.includes('m.resta_kg'));
   // Dove la rete non e' dovuta per accordo (Tecnogum) quello che resta e'
   // giacenza, non un arretrato: grigio come la colonna che tace, non ambra.
+  // Dal 10/10/2026 e' di piu': non si colora perche' non c'e' proprio un numero.
+  // «“—” con la spiegazione, in tutti e due i moduli» (utente): ne' i resti dei
+  // mesi ne' il totale, che prima diceva 1.833,43 t in grigio mentre le Giacenze
+  // dicevano 0. Il flusso lo dice da se' (non_dovuta), e vale anche il vecchio
+  // segno del sito.
   verifica('la giacenza di chi non ci deve la dichiarazione non si colora da arretrato',
-    r.includes("const nonDovuta = flusso.canale === 'RETE' && sito.dichiara_rete === false")
+    r.includes("const nonDovuta = flusso.non_dovuta || (flusso.canale === 'RETE' && sito.dichiara_rete === false)")
     && r.includes("const tono = nonDovuta ? 'text-muted-foreground' : 'text-amber-700 font-medium'"));
+  verifica('e non mostra un resto: ne\' mese per mese ne\' in fondo',
+    r.includes('{m.resta_kg > 0 && !nonDovuta') && r.includes('{nonDovuta ? <span className="cursor-help"'));
   // Sotto zero non si azzera: si mostra e si segnala. La somma dei mesi non va
   // sotto zero, quindi il negativo lo dice la giacenza del canale.
   verifica('una giacenza sotto zero si vede, in rosso',

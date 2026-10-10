@@ -84,10 +84,18 @@ export default async function(req) {
     // pagina deve mostrare. Filtrando per anno quelle righe non si vedevano
     // affatto, e questo modulo diceva un numero diverso dal modulo Giacenze, che
     // le dichiarazioni le legge tutte (audit del 03/10/2026).
-    const [giacenzeSito, dichiarazioni, dichiarazioniPrima, aci, extra, secondarie, terziarie, nonDichiarati, rilevazioni] = await Promise.all([
+    //
+    // E «tutte» vuol dire tutte (audit del 10/10/2026). Il 03/10 si era aggiunto
+    // l'anno prima, ma una dichiarazione di DUE anni fa caricata oggi scala la
+    // giacenza a portale di oggi esattamente come una di quest'anno, e le giacenze
+    // la contavano mentre qui no. E guardando un anno passato - a gennaio, quando
+    // si chiude il 2026 - le dichiarazioni dell'anno nuovo caricate dopo la
+    // fotografia entravano in un modulo e non nell'altro. Qui servono solo a
+    // questo conto, quindi si leggono tutte: l'archivio e' piccolo.
+    const [giacenzeSito, dichiarazioni, dichiarazioniTutte, aci, extra, secondarie, terziarie, nonDichiarati, rilevazioni] = await Promise.all([
       fetchAll(svc.GiacenzaSito, { anno: annoNum }),
       fetchAll(svc.DichiarazioneSito, { anno: annoNum }),
-      fetchAll(svc.DichiarazioneSito, { anno: annoNum - 1 }),
+      fetchAll(svc.DichiarazioneSito),
       fetchAll(svc.PrimariaAci),
       fetchAll(svc.ExtraRaccolta),
       fetchAll(svc.Secondaria),
@@ -460,6 +468,15 @@ export default async function(req) {
       ricevuta_il: d.ricevuta_il || '', caricata_il: d.caricata_il || '', note: d.note || '', motivo_assenza: d.motivo_assenza || '',
       granulo_kg: Number(d.granulo_kg) || 0, fibre_kg: Number(d.fibre_kg) || 0, metalli_kg: Number(d.metalli_kg) || 0,
       ciabattato_kg: Number(d.ciabattato_kg) || 0, cippato_kg: Number(d.cippato_kg) || 0, cssc_kg: Number(d.cssc_kg) || 0, altro_kg: Number(d.altro_kg) || 0,
+      // QUELLO CHE unisciDichiarazioni HA MESSO INSIEME NON SI PERDE QUI (audit del
+      // 10/10/2026). Questa funzione ricostruisce la dichiarazione campo per campo
+      // e lasciava fuori i tre che servono quando in un mese ci sono piu' righe:
+      // i chili davvero caricati di piu' campagne di extra raccolta (senza, una
+      // campagna caricata e una no davano 0 caricato qui e il peso giusto nelle
+      // giacenze), le gemelle di un doppione e quante campagne sono.
+      ...(typeof d.caricato_kg === 'number' ? { caricato_kg: d.caricato_kg } : {}),
+      ...(d.altre && d.altre.length ? { altre: d.altre } : {}),
+      ...(d.ripetizioni > 1 ? { ripetizioni: d.ripetizioni } : {}),
     };
     const flussiDi = (ns, operazione) => {
       const chiavi = new Set();
@@ -487,7 +504,11 @@ export default async function(req) {
           // carica nulla e il ferro va con la prossima uscita di gomma, quindi
           // quei chili restano da dichiarare (regola dell'utente sul ferro,
           // 02/10/2026).
-          const nonDovuta = dich.motivo_assenza === 'non_dovuta';
+          // E se il sito la rete non la dichiara per accordo (dichiara_rete falso,
+          // oggi Tecnogum), nessun mese di rete e' dovuto, segnato o no. Prima lo era
+          // solo gennaio, l'unico segnato a mano: la colonna diceva 1.833,43 t di
+          // resto e 1.710,51 da dichiarare sullo stesso flusso (audit 10/10/2026).
+          const nonDovuta = dich.motivo_assenza === 'non_dovuta' || (canale === 'RETE' && nonDichiaraRete.has(ns));
           return {
             mese,
             conferito_kg: totale,
@@ -592,6 +613,9 @@ export default async function(req) {
         }));
         return {
           canale, provenienza, operazione,
+          // Il flusso di rete di chi non la dichiara: si vede quello che arriva, ma
+          // un resto da dichiarare non esiste e la pagina scrive «—» col perche'.
+          non_dovuta: canale === 'RETE' && nonDichiaraRete.has(ns),
           mesi,
           conferito_t: t3(mesi.reduce((s, m) => s + m.conferito_kg, 0) / 1000),
           uscito_t: t3(mesi.reduce((s, m) => s + m.uscito_kg, 0) / 1000),
@@ -652,7 +676,7 @@ export default async function(req) {
     // --- Gli impianti ---
     // Qui, e solo qui, entrano anche le dichiarazioni dell'anno prima: tutto il
     // resto della pagina e' dell'anno scelto.
-    const dichiaratoDopo = dichiaratoDopoLaFotografia([...dichiarazioni, ...dichiarazioniPrima], fotoPortale, norm);
+    const dichiaratoDopo = dichiaratoDopoLaFotografia(dichiarazioniTutte, fotoPortale, norm);
     const impianti = [...nomi.entries()].filter(([ns]) => (ruoliDi.get(ns) || new Set(['imp'])).has('imp')).map(([ns, nome]) => {
       const ruoli = [...(ruoliDi.get(ns) || new Set(['imp']))].sort();
       const g = giacenzeDi(ns, 'imp')[0] || giacenzeSito.find(x => norm(x.sito) === ns) || null;
@@ -730,10 +754,19 @@ export default async function(req) {
             apertura_t: apertura,
             entrato_t: entrato,
             dichiarato_caricato_t: dichiarato,
-            giacenza_t: t3(apertura + entrato - dichiarato),
-            // Una giacenza sotto zero non esiste: e' un errore da correggere, e si
-            // dice invece di azzerarla (regola dell'utente, 03/10/2026).
-            negativa: t3(apertura + entrato - dichiarato) < 0,
+            // LA RETE DI CHI NON LA DICHIARA NON HA UNA GIACENZA (utente, 10/10/2026:
+            // «“—” con la spiegazione, in tutti e due i moduli»). Qui valeva 1.833,43 t
+            // - tutto quello che e' arrivato, perche' niente si dichiara - e nelle
+            // giacenze 0: due numeri per la stessa cosa, e il guardiano notturno
+            // sommava questo nello storico della rete, dove era il 53% del totale.
+            ...(canale === 'RETE' && nonDichiaraRete.has(ns)
+              ? { giacenza_t: null, negativa: false, non_dovuta: true, perche: "Per accordo questo impianto non ci dichiara la rete: il trattamento non e' a nostro carico, il portale non tiene per noi una giacenza di rete e niente resta da dichiarare. Quello che e' arrivato si vede, una giacenza da dichiarare non c'e'." }
+              : {
+                giacenza_t: t3(apertura + entrato - dichiarato),
+                // Una giacenza sotto zero non esiste: e' un errore da correggere, e si
+                // dice invece di azzerarla (regola dell'utente, 03/10/2026).
+                negativa: t3(apertura + entrato - dichiarato) < 0,
+              }),
             apertura_disponibile: canale !== 'EXTRA_RACCOLTA',
           };
         }),

@@ -826,6 +826,13 @@ export default async function(req) {
         const fattore = somma > 0 ? totaleKg / somma : 0;
         giacenza_classi_kg = Object.fromEntries(Object.entries(lordo).map(([c, v]) => [c, v * fattore]));
         fotografia = { del: giornoFoto || null, foto_t: fotoKg / 1000, aggiunti: agg.n, aggiunti_t: agg.kg / 1000, dichiarato_dopo_t: dopoKg / 1000, rete_non_dichiarata: nonDichiaraRete.has(ns) };
+        // LA RETE DI CHI NON LA DICHIARA NON HA UNA GIACENZA (utente, 10/10/2026:
+        // «“—” con la spiegazione, in tutti e due i moduli»). Qui diceva 0, che si
+        // legge «impianto vuoto»; le Dichiarazioni dicevano 1.833,43 t, cioe' tutto
+        // quello che e' arrivato. Nessuno dei due e' vero: per accordo il
+        // trattamento non e' a nostro carico e il portale non tiene per noi una
+        // giacenza di rete. Si scrive null, e la cella dice perche'.
+        if (nonDichiaraRete.has(ns)) { giacenza_portale_t = null; giacenza_rete_t = null; giacenza_classi_kg = null; }
         aggiornata_al = datiAggiornatiAl || giornoFoto || null;
       }
 
@@ -950,12 +957,15 @@ export default async function(req) {
       righe.push({
         sito: sitoNome,
         tipo_destinazione: td,
-        giacenza_portale_t: r2(giacenza_portale_t),
+        // null resta null: la rete di chi non la dichiara non ha una giacenza, e r2(null)
+        // la faceva diventare 0, cioe' «impianto vuoto» (10/10/2026).
+        giacenza_portale_t: giacenza_portale_t === null ? null : r2(giacenza_portale_t),
         // Una giacenza sotto zero non esiste: e' un errore, e va corretta. Si dice
         // qui, cosi' la pagina la puo' mostrare come tale invece di stamparla e
         // basta (regola dell'utente, 03/10/2026).
         giacenza_negativa: giacenza_portale_t !== null && giacenza_portale_t < 0,
         giacenza_rete_t: giacenza_rete_t !== null ? r2(giacenza_rete_t) : null,
+        rete_non_dovuta: td === 'imp' && nonDichiaraRete.has(ns),
         giacenza_aci_t: giacenza_aci_t !== null ? r2(giacenza_aci_t) : null,
         giacenza_extra_t: giacenza_extra_t !== null ? r2(giacenza_extra_t) : null,
         fotografia: fotografia && { ...fotografia, foto_t: r2(fotografia.foto_t), aggiunti_t: r2(fotografia.aggiunti_t), dichiarato_dopo_t: r2(fotografia.dichiarato_dopo_t) },

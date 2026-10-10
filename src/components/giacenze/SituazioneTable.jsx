@@ -422,6 +422,10 @@ const CANALI_RIGHE = CANALI.filter(c => DETTAGLI_CANALE[c.chiave]).map(c => ({ .
 // tipologia di trattamento.
 const COLONNE = 7 + CLASSI.length;
 
+// LA RETE DI CHI NON LA DICHIARA (utente, 10/10/2026): «—» con la spiegazione,
+// la stessa del modulo Dichiarazioni. Prima qui c'era 0, che si legge «vuoto».
+const RETE_NON_DOVUTA = "Per accordo questo impianto non ci dichiara la rete: il trattamento non e' a nostro carico, il portale non tiene per noi una giacenza di rete e niente resta da dichiarare. Quello che e' arrivato si vede nel conferito, una giacenza da dichiarare non c'e'.";
+
 const TITOLO_GIACENZA = "La giacenza del canale della riga. Per gli impianti e' l'apertura piu' quello che e' arrivato meno il dichiarato caricato; per gli stoccaggi la rilevazione del piazzale aggiornata con i movimenti finiti dopo, sempre per fine trasporto. Rete, ACI ed extra raccolta hanno una riga ciascuno e non si sommano mai.";
 const TITOLO_CLASSI = "La rilevazione per classe del piazzale, in kg come nel portale: e' il materiale a terra, non dipende dal canale e per questo sta sulla riga del sito. P, M, G1 e G2 sono rete, la classe 9 e' l'ACI.";
 const TITOLO_SENZA_TOTALE_SITO = "Rete, ACI ed extra raccolta hanno una riga ciascuno, qui sotto: un totale di sito non esiste, perche' i canali non si sommano.";
@@ -545,7 +549,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                         </td>
                         <td className="px-3 py-2"></td>
                         <td className="px-3 py-2 text-right tabular-nums">
-                          <ValoreGiacenza valore={giacenza} negativa={c.negativa ? c.negativa(r) : false} perche={c.senza_giacenza} />
+                          <ValoreGiacenza valore={giacenza} negativa={c.negativa ? c.negativa(r) : false} perche={c.chiave === 'RETE' && r.rete_non_dovuta ? RETE_NON_DOVUTA : c.senza_giacenza} />
                           {c.barra && (
                             <div className="mt-1 h-1 bg-muted rounded-full overflow-hidden">
                               <div className="h-full bg-primary rounded-full" style={{ width: `${barWidth}%` }} />

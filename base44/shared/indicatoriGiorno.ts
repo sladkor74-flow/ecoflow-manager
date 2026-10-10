@@ -43,9 +43,18 @@ const canaleDi = (f) => String((f && f.canale) || 'RETE');
 export function vociSito(sito) {
   const canali = {};
   for (const g of (sito && sito.giacenze_canale) || []) {
-    canali[g.canale] = { giacenza_t: t3(g.giacenza_t), entrato_t: t3(g.entrato_t), dichiarato_t: t3(g.dichiarato_caricato_t) };
+    // LA RETE NON DOVUTA NON E' UNA GIACENZA (10/10/2026). Chi la rete non la
+    // dichiara per accordo - oggi Tecnogum - ha giacenza «—», non 1.833,43 t: il
+    // primo giorno dello storico quel numero era il 53% del totale della rete, e
+    // la curva sarebbe nata falsata. Il null resta null (t3 lo farebbe zero, e uno
+    // zero direbbe «impianto vuoto»), e il materiale arrivato si tiene a parte.
+    canali[g.canale] = g.non_dovuta
+      ? { giacenza_t: null, non_dovuta: true, entrato_t: t3(g.entrato_t), dichiarato_t: t3(g.dichiarato_caricato_t) }
+      : { giacenza_t: t3(g.giacenza_t), entrato_t: t3(g.entrato_t), dichiarato_t: t3(g.dichiarato_caricato_t) };
   }
   for (const f of (sito && sito.flussi) || []) {
+    // Il resto di un flusso non dovuto non e' da dichiarare: non entra.
+    if (f && f.non_dovuta) continue;
     const c = canaleDi(f);
     if (!canali[c]) canali[c] = { giacenza_t: 0, entrato_t: 0, dichiarato_t: 0 };
     canali[c].resta_t = t3(num(canali[c].resta_t) + num(f.resta_t));
@@ -94,6 +103,13 @@ export function totaliGiorno(siti) {
   for (const s of siti || []) {
     for (const [canale, v] of Object.entries((s && s.canali) || {})) {
       if (!per[canale]) per[canale] = { giacenza_t: 0, entrato_t: 0, dichiarato_t: 0 };
+      // Il materiale di un canale non dovuto si conta a parte: e' arrivato davvero,
+      // ma non e' giacenza da dichiarare, e sommarlo all'entrato senza dirlo
+      // romperebbe il conto apertura + entrato - dichiarato del totale.
+      if (v.non_dovuta) {
+        per[canale].entrato_non_dovuto_t = t3(num(per[canale].entrato_non_dovuto_t) + num(v.entrato_t));
+        continue;
+      }
       per[canale].giacenza_t = t3(per[canale].giacenza_t + num(v.giacenza_t));
       per[canale].entrato_t = t3(per[canale].entrato_t + num(v.entrato_t));
       per[canale].dichiarato_t = t3(per[canale].dichiarato_t + num(v.dichiarato_t));

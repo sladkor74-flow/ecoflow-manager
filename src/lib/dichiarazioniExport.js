@@ -46,8 +46,10 @@ export async function esportaDichiarazioni(dati) {
       ]);
       riepilogo.push([
         s.sito, nomeCanale(f), s.operazione || '', 'Resta in giacenza',
-        ...f.mesi.map(m => m.resta_kg || null),
-        f.resta_t,
+        // La rete non dovuta per accordo non ha una giacenza (utente, 10/10/2026):
+        // il foglio dice quello che dice la pagina, non un numero che la pagina tace.
+        ...f.mesi.map(m => (f.non_dovuta ? null : m.resta_kg || null)),
+        f.non_dovuta ? 'non dovuta per accordo' : f.resta_t,
       ]);
       for (const m of f.mesi) {
         const d = m.dichiarazione;
