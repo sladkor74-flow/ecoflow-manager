@@ -160,5 +160,93 @@ console.log('LE DOMANDE STORTE');
   verifica('un tipo che non esiste non diventa «nessun importo»', strano.avviso && strano.avviso.includes('PASSIVA') && !strano.canali, JSON.stringify(strano));
 }
 
+// ===== Dalla revisione del 10/10/2026 =====
+// Da qui gli archivi si allargano: i conti di sopra sono gia' stati fatti.
+ARCHIVI.PrimariaRete.push(
+  prim('10', 2000, 1, { trasportatore: 'ECO.GEA SRL', provincia: 'NA' }),
+  prim('11', 1000, 1, { trasportatore: 'SILVANO RENATO', provincia: 'NA' }),
+  prim('12', 1000, 1, { trasportatore: 'SILVANO TRASPORTI SRL', provincia: 'NA' }),
+  prim('13', 3000, 2, { trasportatore: 'TORRES GIOVANNI', provincia: 'PA' }),
+  prim('14', 1500, 1, { trasporto_finito_il: null }),
+  prim('15', 1000, 1, { trasportatore: 'GAMMA NOPREZZO SRL', provincia: 'NA' }),
+  prim('16', 1000, 2, { trasportatore: 'GAMMA NOPREZZO SRL', provincia: 'NA' }),
+  prim('17', 500, 1, { trasportatore: 'GAMMA NOPREZZO SRL', provincia: 'NA', classe: 'C' }), // stesso mese, altra classe: un altro peso
+);
+ARCHIVI.Fornitore.push(
+  { ragione_sociale: 'ECO.GEA SRL', stato: 'attivo' },
+  { ragione_sociale: 'SILVANO RENATO', stato: 'attivo' },
+  { ragione_sociale: 'SILVANO TRASPORTI SRL', stato: 'attivo' },
+  { ragione_sociale: 'TORRES GIOVANNI', stato: 'attivo', fattura_tramite_nome: 'GREEN TYRE SRL' },
+  { ragione_sociale: 'GAMMA NOPREZZO SRL', stato: 'attivo' },
+);
+ARCHIVI.Tariffa.push(
+  { id: 'p5', direzione: 'PASSIVA', stato: 'attivo', prestazione: 'RACCOLTA', fornitore_nome: 'Eco.Gea Srl', tipologia: 'RETE', valore: 50, unita_misura: '€/t' },
+  { id: 'p6', direzione: 'PASSIVA', stato: 'attivo', prestazione: 'RACCOLTA', fornitore_nome: 'Silvano Renato', tipologia: 'RETE', valore: 40, unita_misura: '€/t' },
+  { id: 'p7', direzione: 'PASSIVA', stato: 'attivo', prestazione: 'RACCOLTA', fornitore_nome: 'Silvano Trasporti', tipologia: 'RETE', valore: 45, unita_misura: '€/t' },
+);
+
+console.log('IL FORNITORE SI RICONOSCE COME NEI MOVIMENTI');
+{
+  const eco = await chiedi({ anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', fornitore: 'eco gea' });
+  verifica('«eco gea» trova ECO.GEA SRL: 2 t a 50 = 100 euro, non 0', eco.canali && eco.canali[0].euro === 100 && eco.fornitore_riconosciuto === 'ECO.GEA SRL', JSON.stringify(eco).slice(0, 300));
+  const sil = await chiedi({ anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', fornitore: 'Silvano' });
+  verifica('«Silvano» sono due soggetti: nessun numero, e lo dice', sil.canali && sil.canali[0].euro === null && /SILVANO RENATO/.test(sil.avviso_fornitore || '') && /SILVANO TRASPORTI/.test(sil.avviso_fornitore || '') && sil.numero_non_calcolabile, JSON.stringify(sil).slice(0, 400));
+  const nessuno = await chiedi({ anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', fornitore: 'Pinco Pallino' });
+  verifica('un nome che non c\'e\': nessun numero, non 0 euro', nessuno.canali[0].euro === null && /non risulta/.test(nessuno.avviso_fornitore || ''), JSON.stringify(nessuno).slice(0, 300));
+  const torres = await chiedi({ anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', fornitore: 'Torres' });
+  const rt = torres.canali && torres.canali[0];
+  verifica('un subfornitore: la riga di chi lo fattura, e si dice che si paga a lui', rt && /GREEN TYRE SRL/.test(rt.avviso_fornitore || '') && rt.fornitori.righe.some(f => f.fornitore === 'GREEN TYRE SRL'), JSON.stringify(rt).slice(0, 400));
+  // Il mese singolo, stesso riconoscimento.
+  const finto2 = { ...finto, functions: { invoke: async (_n, corpo) => ({ data: calcolaPassivaMese(archiviModulo, ANNO, indiceMesePassiva(corpo.mese), corpo.mese, corpo.tipologia) }) } };
+  const mese = (await fatturazione.esegui(finto2, { anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mese: 'Gennaio', fornitore: 'Silvano' })).dati;
+  verifica('anche col mese: «Silvano» non da\' un numero', mese.totale_del_fornitore_euro === null && /SILVANO RENATO/.test(mese.avviso_fornitore || ''), JSON.stringify(mese).slice(0, 300));
+  const meseEco = (await fatturazione.esegui(finto2, { anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mese: 'Gennaio', fornitore: 'eco gea' })).dati;
+  verifica('anche col mese: «eco gea» trova i suoi 100 euro', meseEco.totale_del_fornitore_euro === 100, JSON.stringify(meseEco).slice(0, 300));
+}
+
+console.log("LE ANOMALIE DELL'ANNO, UNA VOLTA");
+{
+  const d = await chiedi({ anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE' });
+  const an = d.canali[0].anomalie.righe;
+  const senzaFine = an.filter(a => a.tipo === 'date_senza_fine');
+  verifica('il terminato senza fine trasporto si dice una volta, non una per mese', senzaFine.length === 1 && senzaFine[0].quanti === 1, JSON.stringify(senzaFine.map(a => [a.quanti, a.dal_mese])));
+  verifica('e dice che resta fuori dalla passiva, non dal margine', senzaFine[0] && /dalla passiva/.test(senzaFine[0].descrizione), senzaFine[0] && senzaFine[0].descrizione.slice(0, 160));
+  const gamma = an.filter(a => a.fornitore === 'GAMMA NOPREZZO SRL');
+  const classe = (c) => gamma.find(a => a.classe === c);
+  verifica('il fornitore senza tariffa: le tonnellate di tutti i mesi, non solo del primo (classe A: gennaio + febbraio = 2 t)', classe('A') && classe('A').tonnellate === 2 && classe('A').mesi.join() === 'Gennaio,Febbraio', JSON.stringify(gamma.map(a => [a.classe, a.tonnellate, a.mesi])));
+  verifica("e una classe diversa nello stesso mese e' un'altra anomalia, col suo peso (classe C: 0,5 t)", gamma.length === 2 && classe('C') && classe('C').tonnellate === 0.5, JSON.stringify(gamma.map(a => [a.classe, a.tonnellate, a.mesi])));
+}
+
+console.log("IL CONFRONTO CON L'ANNO SCORSO TIENE I SUOI MESI");
+{
+  const { strumentiDalPiano } = await import(R + 'pianoAssistente.ts');
+  const MESI10 = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre'];
+  const piano = { strumenti: [
+    { nome: 'raccolto', parametri: { canale: 'RETE', anno: 2026, mesi: MESI10 } },
+    { nome: 'raccolto', parametri: { canale: 'RETE', anno: 2025, mesi: MESI10 } },
+  ], canali: ['RETE'], periodo: { anno: 2026 } };
+  const s = strumentiDalPiano(piano, STRUMENTI, '2026-10-10', 'Quanto abbiamo raccolto da gennaio a oggi rispetto allo stesso periodo del 2025?');
+  const quest = s.find(x => x.parametri.anno === 2026), scorso = s.find(x => x.parametri.anno === 2025);
+  verifica("il 2026 «da gennaio a oggi»: l'anno fino a oggi, senza mesi", quest && !quest.parametri.mesi && !quest.parametri.mese, JSON.stringify(quest));
+  verifica('il 2025 tiene gennaio-ottobre: lo stesso periodo, non l\'anno intero', scorso && Array.isArray(scorso.parametri.mesi) && scorso.parametri.mesi.length === 10, JSON.stringify(scorso));
+}
+
+console.log('LE GIACENZE: TECNOGUM NON E\' UN IMPIANTO SENZA FILE');
+{
+  const giacenze = STRUMENTI.find(x => x.nome === 'giacenze');
+  const righe = [
+    { sito: 'TECNOGUM SRL', tipo_destinazione: 'imp', giacenza_rete_t: null, rete_non_dovuta: true, giacenza_aci_t: 0, fotografia: { del: '2026-10-03', foto_t: 0 } },
+    { sito: 'Irigom S.r.l.', tipo_destinazione: 'imp', giacenza_rete_t: 120.5, giacenza_aci_t: 3, fotografia: { del: '2026-10-03', foto_t: 120.5 } },
+    { sito: 'SENZA FILE SRL', tipo_destinazione: 'imp', giacenza_rete_t: 0, fotografia: { del: '' } },
+  ];
+  const fintoG = { asServiceRole: finto.asServiceRole, functions: { invoke: async () => ({ data: { righe, anomalie: [] } }) } };
+  const d = (await giacenze.esegui(fintoG, { anno: ANNO })).dati;
+  const rete = d.totali && d.totali.rete;
+  verifica('fra gli impianti senza file solo quello che il file non ce l\'ha', rete && JSON.stringify(rete.impianti_senza_file_del_portale_esclusi) === JSON.stringify(['SENZA FILE SRL']), JSON.stringify(rete));
+  verifica('Tecnogum detto a parte, per accordo', rete && JSON.stringify(rete.impianti_che_per_accordo_non_dichiarano_la_rete) === JSON.stringify(['TECNOGUM SRL']), JSON.stringify(rete));
+  const tec = d.siti.righe.find(r => r.sito === 'TECNOGUM SRL');
+  verifica('e la sua riga dice il perche\'', tec && tec.rete_non_dovuta === true && /accordo/.test(JSON.stringify(tec.calcolo)) && !('file_del_portale_del' in tec.calcolo), JSON.stringify(tec).slice(0, 300));
+}
+
 console.log(`\n${ok} superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

@@ -38,7 +38,8 @@ import { giorniAllaScadenza, fasciaScadenza } from "./omologhe.ts";
 import { statoRequisito } from "./qualificaFornitori.ts";
 import { calcolaRigheAttiva, riconciliaAttiva, documentoValido, eRigaACorpo, eSecondariaExtra, TIPOLOGIE_ATTIVA } from "./attivaCalcolo.ts";
 import { piuGiorni } from "./predittivita.ts";
-import { calcolaPassivaMese, indiceMesePassiva } from "./passivaCalcolo.ts";
+import { calcolaPassivaMese, indiceMesePassiva, movimentiDateDelCanale } from "./passivaCalcolo.ts";
+import { anomaliaSenzaFineAnno } from "./filtroPeriodo.ts";
 
 export { oggiRoma };
 
@@ -495,6 +496,45 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
 }
 
 /**
+ * IL FORNITORE CHIESTO, FRA I NOMI DELLA PASSIVA (revisione del 10/10/2026).
+ *
+ * Il nome si riconosce come nei movimenti (risolviNome): fra quelli che
+ * compaiono davvero nei conti, compresi i «di cui», e nell'anagrafica. Prima
+ * si filtrava con includes: «Eco Gea» non trovava ECO.GEA SRL e dava 0 euro,
+ * «Silvano» prendeva insieme SILVANO RENATO e SILVANO TRASPORTI, e nessuno dei
+ * due casi lo diceva. Un nome che non si riconosce, o che e' di piu' soggetti,
+ * non da' un numero: lo dice.
+ *
+ * @param {array} risultati  i conti di calcolaPassivaMese del periodo
+ * @param {string} chiesto   il nome scritto nella domanda
+ * @param {array} anagrafica le ragioni sociali dei fornitori
+ */
+function fornitoreDellaPassiva(risultati, chiesto, anagrafica = []) {
+  const nomi = [...anagrafica];
+  for (const d of risultati) for (const campo of ['raccoglitori', 'impianti_stoccaggi', 'trasporti_secondaria']) {
+    for (const f of d[campo] || []) { nomi.push(f.fornitore); for (const c of f.di_cui || []) nomi.push(c.fornitore); }
+  }
+  const esito = risolviNome(nomi, chiesto);
+  if (!esito.trovato) {
+    return {
+      trovato: false,
+      avviso: esito.come === 'ambiguo'
+        ? `"${chiesto}" non basta a capire di chi si parla: fra i fornitori ci sono ${esito.alternative.join(', ')}. Rifai la domanda con il nome per esteso: sono soggetti diversi e non si sommano.`
+        : `"${chiesto}" non risulta fra i fornitori della passiva${esito.alternative.length ? `. Forse intendevi: ${esito.alternative.join(', ')}` : ''}.`,
+    };
+  }
+  const chiavi = new Set(esito.chiavi);
+  const suo = (f) => chiavi.has(normalizzaRagioneSociale(f.fornitore));
+  return {
+    trovato: true,
+    nome: esito.nomi[0],
+    // La riga di chi lo fattura, se e' un subfornitore: si paga a quello.
+    tieni: (f) => suo(f) || (f.di_cui || []).some(c => chiavi.has(normalizzaRagioneSociale(c.fornitore))),
+    tramite: (f) => !suo(f),
+  };
+}
+
+/**
  * Quanto dobbiamo ai fornitori in un anno, calcolato sui dati di oggi con lo
  * stesso conto del modulo (passivaCalcolo.ts), mese per mese fino a quello in
  * corso. Senza il mese, prima, si leggevano le voci dei documenti salvati: della
@@ -521,7 +561,23 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
   // Piu' mesi chiesti («da marzo a maggio»): quelli, gia' aperti da mesiChiesti.
   // Senza, i mesi dell'anno fino a quello in corso.
   const mesi = mesiLista.length ? mesiLista : MESI.slice(0, ultimo + 1);
-  const k = fornitore ? normalizzaRagioneSociale(fornitore) : '';
+  const periodo = mesiLista.length ? `${mesiLista.join(', ')} ${anno}` : ultimo >= 0 ? `anno ${anno}, da ${MESI[0]} a ${MESI[ultimo]}` : `anno ${anno}`;
+  // Prima tutti i conti, poi il fornitore: il nome si riconosce fra quelli che ci
+  // sono davvero (fornitoreDellaPassiva).
+  const calcoli = new Map(canali.map(canale => [canale, mesi.map(mese => ({ mese, d: calcolaPassivaMese(archivi, anno, indiceMesePassiva(mese), mese, canale) }))]));
+  const forn = fornitore ? fornitoreDellaPassiva([...calcoli.values()].flat().map(x => x.d), fornitore, fornitoriAll.map(f => f.ragione_sociale)) : null;
+  if (forn && !forn.trovato) {
+    return {
+      fonte: `Fatturazione passiva, calcolata sui dati di oggi${chiesta ? `, canale ${chiesta}` : ', un canale per volta'}`,
+      periodo, dati_al: oggi,
+      dati: {
+        canali: canali.map(canale => ({ canale, euro: null })),
+        avviso_fornitore: forn.avviso,
+        numero_non_calcolabile: 'Non scrivere nessun numero per questo fornitore: non e\' zero, e\' che non si sa di chi si parla.',
+      },
+    };
+  }
+  const k = forn ? forn.nome : '';
   const r3 = (t) => Math.round((Number(t) || 0) * 1000) / 1000;
   const SEZIONI = [['raccolta', 'raccoglitori'], ['impianti e stoccaggi', 'impianti_stoccaggi'], ['trasporto di secondaria', 'trasporti_secondaria']];
 
@@ -529,13 +585,14 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
     const perFornitore = new Map();
     const anomalie = new Map();
     const perMese = [];
+    const pagatoA = new Set();
     const somma = { raccoglitori: 0, impianti_stoccaggi: 0, trasporti_secondaria: 0, tonnellate_raccolte: 0 };
-    for (const mese of mesi) {
-      const d = calcolaPassivaMese(archivi, anno, indiceMesePassiva(mese), mese, canale);
+    for (const { mese, d } of calcoli.get(canale)) {
       const delMese = { raccoglitori: 0, impianti_stoccaggi: 0, trasporti_secondaria: 0 };
       for (const [sezione, campo] of SEZIONI) {
         for (const f of d[campo] || []) {
-          if (k && !normalizzaRagioneSociale(f.fornitore).includes(k)) continue;
+          if (forn && !forn.tieni(f)) continue;
+          if (forn && forn.tramite(f)) pagatoA.add(f.fornitore);
           const chiave = `${sezione}|${normalizzaRagioneSociale(f.fornitore)}`;
           if (!perFornitore.has(chiave)) perFornitore.set(chiave, { sezione, fornitore: f.fornitore, interno: !!f.interno, tonnellate: 0, euro: 0, mesi: [], di_cui: new Map() });
           const x = perFornitore.get(chiave);
@@ -547,11 +604,21 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
           if (campo === 'raccoglitori') somma.tonnellate_raccolte += Number(f.totale_tonnellate) || 0;
         }
       }
-      // La stessa anomalia torna in tutti i mesi (una tariffa che manca, un
-      // ordine senza fine trasporto): si dice una volta, col primo mese.
+      // La stessa anomalia torna in tutti i mesi (una tariffa che manca): si dice
+      // una volta, coi mesi in cui c'e' e le tonnellate di tutti, non solo del
+      // primo. I terminati senza fine trasporto si dicono dopo, una volta per
+      // l'anno, come nel margine: la loro descrizione cambia col mese e qui
+      // tornavano una volta per ogni mese (revisione del 10/10/2026).
       for (const a of d.anomalie || []) {
-        const chiave = `${a.descrizione}|${a.fornitore}|${a.prestazione}|${a.ambito}`;
-        if (!anomalie.has(chiave)) anomalie.set(chiave, { dal_mese: mese, ...a });
+        if (a.tipo === 'date_senza_fine') continue;
+        // La classe sta nella chiave come nel modulo: due anomalie dello stesso mese
+        // che differiscono solo per classe sono due pesi, non uno.
+        const chiave = `${a.descrizione}|${a.fornitore}|${a.prestazione}|${a.classe}|${a.ambito}`;
+        const prima = anomalie.get(chiave);
+        if (!prima) { anomalie.set(chiave, { dal_mese: mese, mesi: [mese], ...a }); continue; }
+        if (!prima.mesi.includes(mese)) prima.mesi.push(mese);
+        prima.tonnellate = r3((Number(prima.tonnellate) || 0) + (Number(a.tonnellate) || 0));
+        prima.occorrenze = (Number(prima.occorrenze) || 1) + (Number(a.occorrenze) || 1);
       }
       for (const c of Object.keys(delMese)) somma[c] += delMese[c];
       const euroMese = delMese.raccoglitori + delMese.impianti_stoccaggi + delMese.trasporti_secondaria;
@@ -566,6 +633,15 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
           }),
         });
       }
+    }
+    const ultimoMese = Math.max(-1, ...mesi.map(m => MESI.indexOf(m)));
+    const senzaFine = anomaliaSenzaFineAnno(movimentiDateDelCanale(archivi, canale), anno, ultimoMese, canale);
+    if (senzaFine) {
+      anomalie.set('date_senza_fine', {
+        tipo: senzaFine.tipo, descrizione: String(senzaFine.descrizione).replace('e quindi dal margine', 'e quindi dalla passiva'),
+        fornitore: canale, prestazione: 'DATE FORMULARIO', classe: '—', ambito: `Canale ${canale}`,
+        tonnellate: r3(senzaFine.kg / 1000), quanti: senzaFine.quanti, ordini: senzaFine.ordini,
+      });
     }
     const fornitori = [...perFornitore.values()]
       .map(x => ({
@@ -583,16 +659,17 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
       fornitori: elenco(fornitori, 60),
       mesi: perMese,
       anomalie: elenco([...anomalie.values()], 20),
+      ...(pagatoA.size ? { avviso_fornitore: `${k} non fattura per conto suo: compare nei "di cui" di ${[...pagatoA].join(', ')}, a cui si paga. Gli euro qui sopra sono di ${[...pagatoA].join(', ')}; la parte di ${k} si legge in tonnellate nel "di cui".` } : {}),
     };
   });
 
   return {
     fonte: `Fatturazione passiva, calcolata sui dati di oggi${chiesta ? `, canale ${chiesta}` : ', un canale per volta'}`,
-    periodo: mesiLista.length ? `${mesiLista.join(', ')} ${anno}` : ultimo >= 0 ? `anno ${anno}, da ${MESI[0]} a ${MESI[ultimo]}` : `anno ${anno}`,
+    periodo,
     dati_al: oggi,
     dati: {
       canali: conti,
-      ...(k ? { fornitore_chiesto: fornitore } : {}),
+      ...(k ? { fornitore_chiesto: fornitore, fornitore_riconosciuto: k } : {}),
       ...(ultimo < 0 && !mesiLista.length ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
       ...(meseIgnorato ? { avviso_periodo: mesiLista.length ? `"${meseIgnorato}" non e' un mese: ho preso gli altri.` : `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
       ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: ci sono tutti e tre, separati.` } : {}),
@@ -1370,6 +1447,9 @@ export const STRUMENTI = [
         return {
           sito: r.sito, tipo: stoc ? 'stoccaggio' : 'impianto',
           giacenza_rete_t: calcolata ? (r.giacenza_rete_t ?? null) : null,
+          // Per accordo questo impianto non ci dichiara la rete (Tecnogum): il null
+          // non e' un file che manca (revisione del 10/10/2026).
+          ...(r.rete_non_dovuta ? { rete_non_dovuta: true } : {}),
           giacenza_aci_t: r.giacenza_aci_t ?? null,
           extra_raccolta_in_piazzale_t: r.giacenza_extra_t ?? null,
           // Da dove viene il numero, cosi' uno scarto col portale si spiega coi dati.
@@ -1386,6 +1466,8 @@ export const STRUMENTI = [
                 regola: "Giacenza = ancora dell'anno + movimenti con fine trasporto successiva. L'ultima lettura del portale e' un riscontro: se si scosta, lo scarto si spiega, il numero non cambia.",
               }
               : { avviso: 'Nessuna rilevazione del portale per questo stoccaggio: la giacenza non si puo\' calcolare.' })
+            : r.rete_non_dovuta
+              ? { rete_non_dovuta: "Per accordo questo impianto non ci dichiara la rete: il trattamento non e' a nostro carico e il portale non tiene per noi una giacenza di rete. Quello che e' arrivato si legge nel conferito; l'ACI si dichiara e ha la sua giacenza." }
             : (calcolata
               ? { file_del_portale_del: f.del, fotografia_t: f.foto_t, carichi_aggiunti: f.aggiunti, carichi_aggiunti_t: f.aggiunti_t, dichiarato_dopo_la_fotografia_t: f.dichiarato_dopo_t }
               : { avviso: 'Nessun file degli ordini non dichiarati caricato: senza la fotografia del portale la giacenza di rete dell\'impianto non si puo\' calcolare (non e\' zero). Va caricato il file.' }),
@@ -1425,7 +1507,8 @@ export const STRUMENTI = [
       // rilevazione manca sia alla rete sia all'ACI (le classi 1-4 e la 9 stanno
       // nella stessa rilevazione).
       const senzaRilevazione = stoccaggi.filter(r => r.giacenza_rete_t === null).map(r => r.sito);
-      const senzaFile = impianti.filter(r => r.giacenza_rete_t === null).map(r => r.sito);
+      const senzaFile = impianti.filter(r => r.giacenza_rete_t === null && !r.rete_non_dovuta).map(r => r.sito);
+      const reteNonDovuta = impianti.filter(r => r.rete_non_dovuta).map(r => r.sito);
       const totali = {
         perimetro: filtrato ? `solo ${utili.length === 1 ? 'il sito richiesto' : 'i siti richiesti'}` : 'tutti i siti',
         siti: utili.length,
@@ -1436,6 +1519,7 @@ export const STRUMENTI = [
           in_attesa_dichiarazione_t: somma(utili, 'in_attesa_dichiarazione_t'),
           ordini_da_dichiarare: utili.reduce((s, r) => s + (Number(r.ordini_da_dichiarare) || 0), 0),
           ...(senzaFile.length ? { impianti_senza_file_del_portale_esclusi: senzaFile } : {}),
+          ...(reteNonDovuta.length ? { impianti_che_per_accordo_non_dichiarano_la_rete: reteNonDovuta } : {}),
           ...(senzaRilevazione.length ? { stoccaggi_senza_rilevazione_esclusi: senzaRilevazione } : {}),
         },
         aci: {
@@ -1752,9 +1836,20 @@ export const STRUMENTI = [
         const nomeSecondarie = tipologia === 'EXTRA_RACCOLTA' ? 'trasferimenti' : 'secondarie';
         const sfPrimarie = dateObbligatorie(primarieCanale, `${nomePrimarie}, canale ${tipologia}`);
         const sfSecondarie = dateObbligatorie(secondarieCanale, `${nomeSecondarie}, canale ${tipologia}`);
-        const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
+        // Il fornitore si riconosce come nel conto dell'anno (fornitoreDellaPassiva).
+        const anagrafica = p.fornitore ? await fetchAll(svc.Fornitore, { stato: 'attivo' }).catch(() => []) : [];
+        const forn = p.fornitore ? fornitoreDellaPassiva([d], p.fornitore, anagrafica.map(f => f.ragione_sociale)) : null;
+        if (forn && !forn.trovato) {
+          return {
+            fonte: `Fatturazione passiva, canale ${tipologia}`,
+            periodo: `${meseChiesto} ${anno}`,
+            dati_al: oggiRoma(),
+            dati: { fornitori: null, totale_del_fornitore_euro: null, avviso_fornitore: forn.avviso, numero_non_calcolabile: 'Non scrivere nessun numero per questo fornitore: non e\' zero, e\' che non si sa di chi si parla.' },
+          };
+        }
+        const k = forn ? forn.nome : '';
         const sezione = (nome, gruppi) => (gruppi || [])
-          .filter(f => !k || normalizzaRagioneSociale(f.fornitore).includes(k))
+          .filter(f => !forn || forn.tieni(f))
           .map(f => ({
             sezione: nome, fornitore: f.fornitore, interno: !!f.interno,
             tonnellate: f.totale_tonnellate, euro: f.totale_euro,

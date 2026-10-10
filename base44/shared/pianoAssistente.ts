@@ -237,11 +237,16 @@ export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
       }
     }
     if (ok.has('anno') && base.anno == null) base.anno = Number(per.anno) || annoOggi;
-    if (ok.has('mese') && !base.mese && per.mese && !senzaMese) base.mese = per.mese;
+    // «Da gennaio a oggi» e «quest'anno» parlano dell'anno IN CORSO: a uno
+    // strumento chiesto per un anno passato (il confronto con lo stesso periodo
+    // dell'anno scorso) i mesi del pianificatore restano, altrimenti il 2025
+    // diventava l'anno intero contro il 2026 fino a oggi (revisione del 10/10/2026).
+    const senzaMeseQui = senzaMese && Number(base.anno || annoOggi) === annoOggi;
+    if (ok.has('mese') && !base.mese && per.mese && !senzaMeseQui) base.mese = per.mese;
     // Anche i mesi multipli viaggiano dal periodo allo strumento, e se la domanda
     // parla dell'anno se ne vanno insieme al mese singolo.
-    if (ok.has('mesi') && !base.mesi && Array.isArray(per.mesi) && per.mesi.length && !senzaMese) base.mesi = per.mesi;
-    if (senzaMese) { delete base.mese; delete base.mesi; }
+    if (ok.has('mesi') && !base.mesi && Array.isArray(per.mesi) && per.mesi.length && !senzaMeseQui) base.mesi = per.mesi;
+    if (senzaMeseQui) { delete base.mese; delete base.mesi; }
     if (ok.has('settimana') && base.settimana == null && per.settimana) base.settimana = Number(per.settimana);
     // Il canale, che in fatturazione e tariffe si chiama tipologia.
     const campoCanale = ok.has('canale') ? 'canale' : (ok.has(SINONIMI_CANALE[nome] || '') ? SINONIMI_CANALE[nome] : '');
