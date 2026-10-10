@@ -487,7 +487,8 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
       anomalie: elenco(anomalie, 30),
       ...(conDate.length ? { date_obbligatorie_da_sistemare: conDate.map(x => ({ canale: x.canale, ...x.date })) } : {}),
       ...(ultimo < 0 && !meseChiesto && !mesiLista.length ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
-      ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
+      // L'avviso dice il periodo che si e' preso davvero (revisione del 10/10/2026).
+      ...(meseIgnorato ? { avviso_periodo: meseChiesto || mesiLista.length ? `"${meseIgnorato}" non e' un mese: ho preso ${meseChiesto || mesiLista.join(', ')} ${anno}.` : `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
       ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: ci sono tutti e tre, separati.` } : {}),
       ...(fornitore ? { avviso_fornitore: 'Nell\'attiva il cliente e\' uno solo, Ecotyre: il filtro sul fornitore non si applica.' } : {}),
       nota: `Conto fatto adesso sui movimenti terminati, per fine trasporto, con le stesse righe dell'anteprima e di "Elabora Mese". Accanto a ogni mese c'e' il documento salvato: una differenza vuol dire che dopo l'elaborazione sono arrivati o cambiati dei movimenti, e il documento va aggiornato.${meseChiesto ? '' : ' Senza il mese il documento si confronta sul totale in euro e sul numero di righe: una riga cambiata di peso con lo stesso importo si vede solo chiedendo il mese, che confronta riga per riga.'} Rete, ACI ed extra raccolta non si sommano.`,
@@ -671,7 +672,7 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
       canali: conti,
       ...(k ? { fornitore_chiesto: fornitore, fornitore_riconosciuto: k } : {}),
       ...(ultimo < 0 && !mesiLista.length ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
-      ...(meseIgnorato ? { avviso_periodo: mesiLista.length ? `"${meseIgnorato}" non e' un mese: ho preso gli altri.` : `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
+      ...(meseIgnorato ? { avviso_periodo: mesiLista.length ? `"${meseIgnorato}" non e' un mese: ho preso ${mesiLista.join(', ')} ${anno}.` : `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
       ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: ci sono tutti e tre, separati.` } : {}),
       nota: 'Conto fatto adesso sui movimenti terminati, per fine trasporto, mese per mese, lo stesso del modulo Fatturazione passiva. Il mese in corso cambia a ogni caricamento. Un fornitore che ne fattura un altro porta il secondo in "di cui": si paga al primo. Le tonnellate di una sezione non si sommano a quelle di un\'altra: la raccolta e il trasporto di secondaria sono lo stesso materiale che si sposta.' + (chiesta ? ` Questo e' SOLO il canale ${chiesta}: e' gia' separato, ACI ed extra raccolta hanno il loro conto e qui non ci sono.` : ' Rete, ACI ed extra raccolta sono tre conti qui sopra, uno per canale: non si sommano.'),
     },
@@ -1887,6 +1888,8 @@ export const STRUMENTI = [
             ...(conteggioFatto ? {} : { avviso_date_obbligatorie: 'Non sono riuscita a leggere i terminati per contare quelli con date obbligatorie mancanti o incoerenti: se ce ne sono senza data di fine trasporto, il conto qui sopra li esclude.' }),
             ...(alertDate === null ? { avviso_alert_date: 'Non sono riuscita a leggere gli alert delle date obbligatorie: gli ordini a cui manca l\'immissione o l\'inizio del trasporto, o con date incoerenti, qui non ci sono. Si vedono in Alert & Controllo.' } : {}),
             ...(tipologiaChiesta ? {} : { avviso_canale: `${tipologiaIgnorata ? `"${tipologiaIgnorata}" non e' un canale` : 'Canale non indicato'}: questo e' il conto della RETE. ACI ed extra raccolta hanno il loro, e non si sommano.` }),
+            // Un mese scartato si dice anche qui, come nel raccolto (10/10/2026).
+            ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso ${meseChiesto} ${anno}.` } : {}),
             nota: 'Conto fatto adesso sui movimenti terminati del mese, lo stesso del modulo Fatturazione. Un fornitore che ne fattura un altro porta il secondo in "di cui": si paga al primo.',
           },
         };

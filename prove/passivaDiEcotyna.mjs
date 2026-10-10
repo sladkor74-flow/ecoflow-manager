@@ -248,5 +248,16 @@ console.log('LE GIACENZE: TECNOGUM NON E\' UN IMPIANTO SENZA FILE');
   verifica('e la sua riga dice il perche\'', tec && tec.rete_non_dovuta === true && /accordo/.test(JSON.stringify(tec.calcolo)) && !('file_del_portale_del' in tec.calcolo), JSON.stringify(tec).slice(0, 300));
 }
 
+console.log('UN MESE CHE NON E\' UN MESE, ACCANTO A MESI VERI: L\'AVVISO DICE COSA SI E\' PRESO');
+{
+  const conMese = { ...finto, functions: { invoke: async (_n, corpo) => ({ data: calcolaPassivaMese(archiviModulo, ANNO, indiceMesePassiva(corpo.mese), corpo.mese, corpo.tipologia) }) } };
+  const due = (await fatturazione.esegui(conMese, { anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mesi: ['Febbraio', 'Marzo', 'Marzolino'] })).dati;
+  verifica('passiva, due mesi e uno storto: «ho preso Febbraio, Marzo»', /Marzolino/.test(due.avviso_periodo || '') && /ho preso Febbraio, Marzo/.test(due.avviso_periodo || ''), due.avviso_periodo);
+  const uno = (await fatturazione.esegui(conMese, { anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mesi: ['Febbraio', 'Marzolino'] })).dati;
+  verifica('passiva, un mese e uno storto: il mese scartato si dice anche col mese solo', /Marzolino/.test(uno.avviso_periodo || '') && /ho preso Febbraio/.test(uno.avviso_periodo || ''), uno.avviso_periodo);
+  const attiva = (await fatturazione.esegui(conMese, { anno: ANNO, tipo: 'ATTIVA', tipologia: 'RETE', mesi: ['Febbraio', 'Marzo', 'Marzolino'] })).dati;
+  verifica("attiva, due mesi e uno storto: non dice «ho preso l'anno» se ha preso due mesi", /Marzolino/.test(attiva.avviso_periodo || '') && !/l'anno/.test(attiva.avviso_periodo || '') && /Febbraio, Marzo/.test(attiva.avviso_periodo || ''), attiva.avviso_periodo);
+}
+
 console.log(`\n${ok} superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);
