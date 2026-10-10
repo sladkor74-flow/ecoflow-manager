@@ -38,6 +38,7 @@ import { giorniAllaScadenza, fasciaScadenza } from "./omologhe.ts";
 import { statoRequisito } from "./qualificaFornitori.ts";
 import { calcolaRigheAttiva, riconciliaAttiva, documentoValido, eRigaACorpo, eSecondariaExtra, TIPOLOGIE_ATTIVA } from "./attivaCalcolo.ts";
 import { piuGiorni } from "./predittivita.ts";
+import { calcolaPassivaMese, indiceMesePassiva } from "./passivaCalcolo.ts";
 
 export { oggiRoma };
 
@@ -489,6 +490,111 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
       ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: ci sono tutti e tre, separati.` } : {}),
       ...(fornitore ? { avviso_fornitore: 'Nell\'attiva il cliente e\' uno solo, Ecotyre: il filtro sul fornitore non si applica.' } : {}),
       nota: `Conto fatto adesso sui movimenti terminati, per fine trasporto, con le stesse righe dell'anteprima e di "Elabora Mese". Accanto a ogni mese c'e' il documento salvato: una differenza vuol dire che dopo l'elaborazione sono arrivati o cambiati dei movimenti, e il documento va aggiornato.${meseChiesto ? '' : ' Senza il mese il documento si confronta sul totale in euro e sul numero di righe: una riga cambiata di peso con lo stesso importo si vede solo chiedendo il mese, che confronta riga per riga.'} Rete, ACI ed extra raccolta non si sommano.`,
+    },
+  };
+}
+
+/**
+ * Quanto dobbiamo ai fornitori in un anno, calcolato sui dati di oggi con lo
+ * stesso conto del modulo (passivaCalcolo.ts), mese per mese fino a quello in
+ * corso. Senza il mese, prima, si leggevano le voci dei documenti salvati: della
+ * passiva non ce n'e' nessuna, perche' il modulo calcola e non salva, ed EcoTyna
+ * rispondeva «nessun importo» a «quanto abbiamo pagato a Green Tyre quest'anno»
+ * (audit del 10/10/2026). Gli archivi si leggono una volta sola e il conto si
+ * ripete per ogni mese: chiamare dodici volte la funzione del modulo li
+ * rileggerebbe dodici volte. Rete, ACI ed extra raccolta: tre conti, nessun
+ * totale che li somma.
+ */
+async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, fornitore }) {
+  const svc = base44.asServiceRole.entities;
+  const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll] = await Promise.all([
+    fetchAll(svc.PrimariaRete), fetchAll(svc.PrimariaAci), fetchAll(svc.Secondaria), fetchAll(svc.ExtraRaccolta),
+    fetchAll(svc.Tariffa, { direzione: 'PASSIVA' }), fetchAll(svc.Fornitore, { stato: 'attivo' }),
+  ]);
+  const archivi = { primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll };
+  const chiesta = canaleChiesto(tipologia);
+  const canaleIgnorato = tipologia && !chiesta ? String(tipologia) : '';
+  const canali = ['RETE', 'ACI', 'EXTRA_RACCOLTA'].filter(c => !chiesta || c === chiesta);
+  const oggi = oggiRoma();
+  const annoOggi = Number(oggi.slice(0, 4));
+  const ultimo = anno < annoOggi ? 11 : anno === annoOggi ? Number(oggi.slice(5, 7)) - 1 : -1;
+  const mesi = MESI.slice(0, ultimo + 1);
+  const k = fornitore ? normalizzaRagioneSociale(fornitore) : '';
+  const r3 = (t) => Math.round((Number(t) || 0) * 1000) / 1000;
+  const SEZIONI = [['raccolta', 'raccoglitori'], ['impianti e stoccaggi', 'impianti_stoccaggi'], ['trasporto di secondaria', 'trasporti_secondaria']];
+
+  const conti = canali.map((canale) => {
+    const perFornitore = new Map();
+    const anomalie = new Map();
+    const perMese = [];
+    const somma = { raccoglitori: 0, impianti_stoccaggi: 0, trasporti_secondaria: 0, tonnellate_raccolte: 0 };
+    for (const mese of mesi) {
+      const d = calcolaPassivaMese(archivi, anno, indiceMesePassiva(mese), mese, canale);
+      const delMese = { raccoglitori: 0, impianti_stoccaggi: 0, trasporti_secondaria: 0 };
+      for (const [sezione, campo] of SEZIONI) {
+        for (const f of d[campo] || []) {
+          if (k && !normalizzaRagioneSociale(f.fornitore).includes(k)) continue;
+          const chiave = `${sezione}|${normalizzaRagioneSociale(f.fornitore)}`;
+          if (!perFornitore.has(chiave)) perFornitore.set(chiave, { sezione, fornitore: f.fornitore, interno: !!f.interno, tonnellate: 0, euro: 0, mesi: [], di_cui: new Map() });
+          const x = perFornitore.get(chiave);
+          x.tonnellate += Number(f.totale_tonnellate) || 0;
+          x.euro += Number(f.totale_euro) || 0;
+          x.mesi.push(mese);
+          for (const c of f.di_cui || []) x.di_cui.set(c.fornitore, (x.di_cui.get(c.fornitore) || 0) + (Number(c.tonnellate) || 0));
+          delMese[campo] += Number(f.totale_euro) || 0;
+          if (campo === 'raccoglitori') somma.tonnellate_raccolte += Number(f.totale_tonnellate) || 0;
+        }
+      }
+      // La stessa anomalia torna in tutti i mesi (una tariffa che manca, un
+      // ordine senza fine trasporto): si dice una volta, col primo mese.
+      for (const a of d.anomalie || []) {
+        const chiave = `${a.descrizione}|${a.fornitore}|${a.prestazione}|${a.ambito}`;
+        if (!anomalie.has(chiave)) anomalie.set(chiave, { dal_mese: mese, ...a });
+      }
+      for (const c of Object.keys(delMese)) somma[c] += delMese[c];
+      const euroMese = delMese.raccoglitori + delMese.impianti_stoccaggi + delMese.trasporti_secondaria;
+      // Col fornitore chiesto si dicono solo i suoi mesi; senza, tutti, anche a
+      // zero: un mese vuoto e' un'informazione.
+      if (!k || euroMese) {
+        perMese.push({
+          mese, euro: euro2(euroMese),
+          ...(k ? {} : {
+            raccoglitori_euro: euro2(delMese.raccoglitori), impianti_stoccaggi_euro: euro2(delMese.impianti_stoccaggi), trasporti_secondaria_euro: euro2(delMese.trasporti_secondaria),
+            ...(d.quadratura && !d.quadratura.coincidente ? { quadratura: d.quadratura } : {}),
+          }),
+        });
+      }
+    }
+    const fornitori = [...perFornitore.values()]
+      .map(x => ({
+        sezione: x.sezione, fornitore: x.fornitore, interno: x.interno, tonnellate: r3(x.tonnellate), euro: euro2(x.euro), mesi: x.mesi.length,
+        ...(x.di_cui.size ? { di_cui: [...x.di_cui.entries()].map(([nome, t]) => ({ fornitore: nome, tonnellate: r3(t) })) } : {}),
+      }))
+      .sort((a, b) => b.euro - a.euro);
+    return {
+      canale,
+      euro: euro2(somma.raccoglitori + somma.impianti_stoccaggi + somma.trasporti_secondaria),
+      ...(k ? {} : {
+        raccoglitori_euro: euro2(somma.raccoglitori), impianti_stoccaggi_euro: euro2(somma.impianti_stoccaggi), trasporti_secondaria_euro: euro2(somma.trasporti_secondaria),
+        tonnellate_raccolte: r3(somma.tonnellate_raccolte),
+      }),
+      fornitori: elenco(fornitori, 60),
+      mesi: perMese,
+      anomalie: elenco([...anomalie.values()], 20),
+    };
+  });
+
+  return {
+    fonte: `Fatturazione passiva, calcolata sui dati di oggi${chiesta ? `, canale ${chiesta}` : ', un canale per volta'}`,
+    periodo: ultimo >= 0 ? `anno ${anno}, da ${MESI[0]} a ${MESI[ultimo]}` : `anno ${anno}`,
+    dati_al: oggi,
+    dati: {
+      canali: conti,
+      ...(k ? { fornitore_chiesto: fornitore } : {}),
+      ...(ultimo < 0 ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
+      ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
+      ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: ci sono tutti e tre, separati.` } : {}),
+      nota: 'Conto fatto adesso sui movimenti terminati, per fine trasporto, mese per mese, lo stesso del modulo Fatturazione passiva. Il mese in corso cambia a ogni caricamento. Un fornitore che ne fattura un altro porta il secondo in "di cui": si paga al primo. Le tonnellate di una sezione non si sommano a quelle di un\'altra: la raccolta e il trasporto di secondaria sono lo stesso materiale che si sposta. Rete, ACI ed extra raccolta non si sommano.',
     },
   };
 }
@@ -1571,8 +1677,8 @@ export const STRUMENTI = [
   },
   {
     nome: 'fatturazione',
-    descrizione: 'Quanto dobbiamo pagare ai fornitori (passiva) e quanto ci spetta (attiva), per fornitore e per mese. Per la passiva con il mese indicato fa lo stesso conto del modulo, sui movimenti terminati; senza mese legge solo i documenti gia\' elaborati. L\'attiva si calcola sempre sui dati di oggi, mese per mese, e dice di quanto il documento salvato e\' indietro. I canali restano separati.',
-    parametri: { anno: 'numero', mese: 'nome del mese: indicalo sempre per la passiva', tipo: 'PASSIVA o ATTIVA', tipologia: 'RETE, ACI o EXTRA_RACCOLTA', fornitore: 'opzionale' },
+    descrizione: 'Quanto dobbiamo pagare ai fornitori (passiva) e quanto ci spetta (attiva), per fornitore e per mese. La passiva fa lo stesso conto del modulo sui movimenti terminati: col mese indicato quel mese, senza mese tutti i mesi dell\'anno fino a quello in corso, uno per uno. L\'attiva si calcola sempre sui dati di oggi, mese per mese, e dice di quanto il documento salvato e\' indietro. I canali restano separati.',
+    parametri: { anno: 'numero', mese: 'nome del mese, opzionale: senza, tutto l\'anno mese per mese', tipo: 'PASSIVA o ATTIVA', tipologia: 'RETE, ACI o EXTRA_RACCOLTA', fornitore: 'opzionale' },
     moduli: ['Fatturazione'],
     async esegui(base44, p) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
@@ -1692,49 +1798,15 @@ export const STRUMENTI = [
       // riconciliazione, EcoTyna no.
       if (tipo === 'ATTIVA') return await attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, tipologia: p.tipologia, fornitore: p.fornitore });
 
-      const filtro = { anno, tipo };
-      if (meseChiesto) filtro.mese = meseChiesto;
-      if (tipologiaChiesta) filtro.tipologia = tipologiaChiesta;
-      const voci = await fetchAll(svc.VoceFatturazione, filtro);
-      const nomeDi = (v) => v.fornitore_nome || 'N/D';
-      const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
-      const righe = k ? voci.filter(v => normalizzaRagioneSociale(nomeDi(v)).includes(k)) : voci;
-      const per = new Map();
-      for (const v of righe) {
-        const nome = nomeDi(v);
-        const key = `${nome}|${v.tipologia || ''}`;
-        if (!per.has(key)) per.set(key, { fornitore: nome, tipologia: v.tipologia, voci: 0, quantita: 0, totale_euro: 0, sospese: 0, da_controllare: 0, servizi: new Set() });
-        const x = per.get(key);
-        x.voci++;
-        x.quantita += Number(v.quantita) || 0;
-        if (!v.sospesa) x.totale_euro += Number(v.totale) || 0;
-        if (v.sospesa) x.sospese++;
-        if (v.stato_validazione && v.stato_validazione !== 'verificato') x.da_controllare++;
-        if (v.servizio_nome) x.servizi.add(v.servizio_nome);
-      }
-      const gruppi = [...per.values()].map(x => ({
-        fornitore: x.fornitore, tipologia: x.tipologia, voci: x.voci,
-        quantita: Math.round(x.quantita * 1000) / 1000,
-        totale_euro: Math.round(x.totale_euro * 100) / 100,
-        sospese: x.sospese, da_controllare: x.da_controllare, servizi: [...x.servizi].slice(0, 4),
-      })).sort((a, b) => b.totale_euro - a.totale_euro);
+      // La passiva senza mese: lo stesso conto, mese per mese (audit del
+      // 10/10/2026). Qui prima si leggevano le voci dei documenti salvati, e
+      // della passiva non ne esiste nessuna.
+      if (tipo === 'PASSIVA') return await passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia: p.tipologia, fornitore: p.fornitore });
       return {
-        fonte: `Fatturazione ${tipo}` + (tipologiaChiesta ? `, canale ${tipologiaChiesta}` : ', un canale per volta'),
+        fonte: 'Fatturazione',
         periodo: meseChiesto ? `${meseChiesto} ${anno}` : `anno ${anno}`,
         dati_al: oggiRoma(),
-        dati: {
-          // Un totale unico ha senso solo dentro un canale: senza filtro di
-          // tipologia sommerebbe rete, ACI ed extra raccolta in un numero solo,
-          // e questo vale per gli euro come per il numero delle voci.
-          ...(tipologiaChiesta
-            ? { voci: righe.length, totale_euro: Math.round(gruppi.reduce((s, g) => s + g.totale_euro, 0) * 100) / 100 }
-            : { totale_per_canale: Object.values(gruppi.reduce((acc, g) => { const c = g.tipologia || 'N/D'; if (!acc[c]) acc[c] = { canale: c, voci: 0, euro: 0 }; acc[c].voci += g.voci; acc[c].euro = Math.round((acc[c].euro + g.totale_euro) * 100) / 100; return acc; }, {})), nota_totale: 'Non c\'e\' un totale unico, ne\' di euro ne\' di voci: rete, ACI ed extra raccolta sono commesse indipendenti.' }),
-          ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso tutto l'anno ${anno}.` } : {}),
-          ...(tipologiaIgnorata ? { avviso_canale: `"${tipologiaIgnorata}" non e' un canale: qui sotto ci sono tutti e tre, un totale per canale.` } : {}),
-          canale: tipologiaChiesta || 'nessun filtro di canale: qui dentro ci sono rete, ACI ed extra raccolta, da tenere distinti',
-          gruppi: elenco(gruppi, 60),
-          nota: 'Qui ci sono solo le voci dei documenti gia\' elaborati e salvati: per sapere quanto si deve a un fornitore in un mese preciso rifai la domanda indicando il mese, cosi\' il conto si fa sui movimenti.',
-        },
+        dati: { avviso: `"${p.tipo}" non e' un tipo di fatturazione: si chiede PASSIVA (quanto dobbiamo ai fornitori) o ATTIVA (quanto ci spetta da Ecotyre).` },
       };
     },
   },

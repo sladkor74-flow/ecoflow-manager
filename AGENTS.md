@@ -1786,6 +1786,14 @@ istruita, e sono state misurate sul codice:
   chi ha solo ordini nel limbo si risponderebbe "non risulta fra i raccoglitori".
   Vale anche per `target_raccoglitori`, dove la riserva fa sembrare un
   raccoglitore piu' indietro di quanto sia. Prove in `prove/riservaEseguiti.mjs`.
+- **La fatturazione si calcola, non si legge** (audit del 10/10/2026). Lo
+  strumento `fatturazione` fa lo stesso conto del modulo sui movimenti di oggi,
+  attiva e passiva, col mese o senza: senza mese, mese per mese fino a quello in
+  corso, con gli archivi letti una volta (`passivaSuiDatiDiOggi`). Le voci dei
+  documenti salvati della passiva non esistono - il modulo calcola e non salva -
+  e leggendo quelle, a «quanto abbiamo pagato a Green Tyre quest'anno», EcoTyna
+  rispondeva «nessun importo». Il numero dell'anno e' lo stesso dei mesi del
+  modulo sommati e del costo del margine: `prove/passivaDiEcotyna.mjs`.
 
 ## I caricamenti, lo storico e il registro
 
