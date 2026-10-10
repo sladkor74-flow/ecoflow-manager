@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import { formattaPesi } from '@/lib/formatoExcel';
 import { giornoRoma } from '@/lib/giornoItaliano';
 import { testoFormulario, testoCollocato } from '@/lib/giacenzeDaDichiarareExport';
@@ -20,6 +19,8 @@ function fmtData(v) {
 
 // Export complessivo: un foglio per ciascuna delle quattro schede.
 export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
+  // xlsx pesa mezzo megabyte: si carica quando si esporta, non all'apertura.
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
 
   // --- Foglio 1: Situazione ---

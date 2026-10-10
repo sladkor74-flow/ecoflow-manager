@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import { formattaPesi } from '@/lib/formatoExcel';
 
 // L'Excel del report dei conferimenti: le settimane in colonna, le tratte in riga,
@@ -12,7 +11,9 @@ const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Lug
 const NOME_CANALE = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 const gg = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : '');
 
-export function scaricaExcelConferimenti(report, quadratura, titolo) {
+export async function scaricaExcelConferimenti(report, quadratura, titolo) {
+  // xlsx pesa mezzo megabyte: si carica quando si esporta, non all'apertura.
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
   const canale = NOME_CANALE[report.canale] || report.canale;
   const tipo = report.tipo === 'secondaria' ? 'Secondarie' : 'Primarie';

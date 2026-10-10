@@ -18,6 +18,7 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - Commit e push
   - Gli specchi: `base44/shared` e `src/lib`
   - I fine-riga
+  - Le librerie pesanti si caricano quando servono (10/10/2026)
   - Il limite di richieste della piattaforma (22/09/2026)
   - Base44: comandi, file e riferimenti
   - Regole tecniche della piattaforma e delle pagine
@@ -126,6 +127,33 @@ l'alias va bene comunque, perche' li' ci pensa Vite.
 Questo file e i sorgenti stanno a **LF**. Modificare un file con uno strumento
 che converte a CRLF rompe le prove che cercano un passaggio esatto nel sorgente:
 una prova che cerca `\n` dice che manca un controllo che invece c'e'.
+
+### Le librerie pesanti si caricano quando servono (10/10/2026)
+
+`xlsx` (430 kB) e `jspdf` (384 kB) **non si importano mai in testa a un file**:
+si prendono dentro la funzione che li usa, `const XLSX = await import('xlsx')` o
+`const { jsPDF } = await import('jspdf')`. Vale anche per `lib/esportaTabella.js`,
+che se li porta dietro tutti e due.
+
+**Basta un solo import statico per disfare il lavoro di tutti gli altri.** Il
+pacchetto e' uno: se un file qualsiasi importa `xlsx` in testa, `xlsx` entra nel
+chunk principale e i venti `await import` degli altri non servono piu' a niente.
+Fino al 10/10/2026 era cosi': venti file pigri e dodici statici, e tutto il peso
+si apriva con la prima pagina. Vite lo diceva a ogni build - «dynamic import will
+not move module into another chunk» - e quelle tre righe erano la cosa vera che
+aveva da dire.
+
+Il guadagno misurato: chunk principale da **4.100 a 3.268 kB**, cioe' da 1.213 a
+**940 kB gzip** alla prima apertura, con `xlsx` e `jspdf` in due chunk a parte che
+si scaricano solo quando si esporta.
+
+**Chi lo rende pigro deve guardare i chiamanti.** Una funzione che diventa
+asincrona rompe in silenzio un `try/catch` sincrono: l'errore non viene piu'
+preso e l'esportazione fallisce senza dire niente. Due chiamanti erano cosi'
+(`PassivaModulo`, `ReportSettimanale`: `onClick={() => { try { esporta(); } catch
+{...} }}`) e sono diventati `async` con l'`await` dentro. E dove il valore di
+ritorno serviva subito - `AttivaEsportazioni` registra nello storico il nome del
+file appena scritto - senza `await` la registrazione partiva prima del file.
 
 ### Il limite di richieste della piattaforma (22/09/2026)
 

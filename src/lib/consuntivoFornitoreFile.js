@@ -1,5 +1,4 @@
 import { leggiFogliLista } from '@/lib/evasioneAssegnati';
-import * as XLSX from 'xlsx';
 import { formattaPesi } from '@/lib/formatoExcel';
 
 // Il consuntivo di un fornitore si legge NEL BROWSER e il file non si conserva:
@@ -31,7 +30,9 @@ const ESITI = {
 };
 
 /** L'Excel del confronto, come per le verifiche settimanali. */
-export function scaricaExcelConsuntivo(consuntivo, esito) {
+export async function scaricaExcelConsuntivo(consuntivo, esito) {
+  // xlsx pesa mezzo megabyte: si carica quando si esporta, non all'apertura.
+  const XLSX = await import('xlsx');
   const { confronto, costo, esito: verdetto, congelato, testo } = esito;
   const wb = XLSX.utils.book_new();
 

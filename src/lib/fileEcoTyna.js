@@ -5,7 +5,6 @@
 // perche' solo il modello li sa leggere. I file preparati da EcoTyna si generano nel
 // browser quando si preme "Scarica": nel gestionale ne resta solo la descrizione.
 
-import { jsPDF } from 'jspdf';
 
 const MB = 1024 * 1024;
 export const MAX_ALLEGATI = 3;
@@ -400,7 +399,9 @@ function documentoWord(titolo, testo) {
 <style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt} h1{font-size:16pt} h2{font-size:13pt} h3{font-size:12pt} th{background:#eee}</style></head><body>${corpo}</body></html>`;
 }
 
-function documentoPdf(testo) {
+async function documentoPdf(testo) {
+  // jspdf si carica quando si stampa, non all'apertura della pagina.
+  const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const margine = 15;
   const larghezza = 210 - margine * 2;
@@ -474,7 +475,7 @@ export async function scaricaFileEcoTyna(spec, allegati = {}) {
   }
   const testo = spec.testo || '';
   if (formato === 'docx') { scarica(new Blob([documentoWord(nome, testo)], { type: 'application/msword' }), nome); return; }
-  if (formato === 'pdf') { documentoPdf(testo).save(nome); return; }
+  if (formato === 'pdf') { (await documentoPdf(testo)).save(nome); return; }
   scarica(new Blob(['﻿' + testo], { type: 'text/plain;charset=utf-8' }), nome);
 }
 

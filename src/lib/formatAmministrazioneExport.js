@@ -1,4 +1,3 @@
-import { esportaTabellaPdf } from '@/lib/esportaTabella';
 import { scarica } from '@/lib/docxModello';
 import { tabellaAmministrazione, nomeFileAmministrazione } from '@/lib/formatAmministrazione';
 import {
@@ -95,6 +94,8 @@ export async function exportAmministrazioneAttiva(tipologia, righe, anno, mese) 
 /** Lo stesso foglio in PDF: stesse colonne, stesse righe, stessi totali. */
 export async function exportAmministrazioneAttivaPdf(tipologia, righe, anno, mese) {
   const t = tabellaAmministrazione(tipologia, righe, anno, mese);
+  // esportaTabella si porta dietro jspdf e xlsx: pigro anche lui.
+  const { esportaTabellaPdf } = await import('@/lib/esportaTabella');
   await esportaTabellaPdf({
     nomeFile: nomeFileAmministrazione(tipologia, anno, mese, 'pdf').replace(/\.pdf$/, ''),
     intestazione: 'SMOCO S.r.l.  ·  COMMESSA ECOTYRE  ·  FORMAT AMMINISTRAZIONE',

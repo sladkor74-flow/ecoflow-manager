@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import { formattaPesi } from '@/lib/formatoExcel';
 import { oggiRoma } from '@/lib/giornoItaliano';
 
@@ -17,7 +16,9 @@ export const testoCollocato = (r) => (r.fuori_dai_mesi ? "no: manca la fine tras
 
 // Export dell'elenco ordini da dichiarare in Excel.
 // È la lista di lavoro da passare agli impianti.
-export function exportDaDichiarareExcel(righe, totaleRighe, totaleKg) {
+export async function exportDaDichiarareExcel(righe, totaleRighe, totaleKg) {
+  // xlsx pesa mezzo megabyte: si carica quando si esporta, non all'apertura.
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
 
   const headers = [

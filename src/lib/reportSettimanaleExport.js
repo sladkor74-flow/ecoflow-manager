@@ -4,7 +4,6 @@
 // legenda e numero di pagina. Con l'opzione impianti, sotto ogni raccoglitore gli
 // impianti di destinazione del mese e in coda il riepilogo per impianto.
 
-import { jsPDF } from 'jspdf';
 import { formatTonnellate, formatPercentuale } from '@/lib/utils';
 
 const C = {
@@ -46,7 +45,9 @@ export function frasiDateDaSistemare(report) {
   ].filter(Boolean);
 }
 
-export function esportaReportSettimanalePdf(report, gruppi, totale, { impianti = false } = {}) {
+export async function esportaReportSettimanalePdf(report, gruppi, totale, { impianti = false } = {}) {
+  // jspdf si carica quando si stampa, non all'apertura della pagina.
+  const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();

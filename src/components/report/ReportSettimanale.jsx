@@ -102,9 +102,9 @@ export default function ReportSettimanale() {
   const oggiIso = report?.oggi || '';
   const settimanaCorrente = report ? report.settimane.findIndex(s => s.dal <= oggiIso && oggiIso <= s.al) : -1;
 
-  const esporta = () => {
+  const esporta = async () => {
     try {
-      esportaReportSettimanalePdf(report, gruppi, totale, { impianti });
+      await esportaReportSettimanalePdf(report, gruppi, totale, { impianti });
     } catch (e) {
       toast({ title: 'Esportazione non riuscita', description: e.message, variant: 'destructive' });
     }

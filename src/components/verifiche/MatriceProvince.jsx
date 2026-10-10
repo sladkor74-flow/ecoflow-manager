@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, RefreshCw, FileSpreadsheet, FileText, Info, AlertTriangle } from 'lucide-react';
 import { formatKg, formatIntero, formatTonnellate } from '@/lib/utils';
-import { esportaTabellaExcel, esportaTabellaPdf } from '@/lib/esportaTabella';
 import { oggiRoma } from '@/lib/giornoItaliano';
 
 // Sezioni 3 e 4 del modulo Verifiche: la raccolta della RETE per provincia e mese,
@@ -138,6 +137,8 @@ export default function MatriceProvince({ tipo = 'peso' }) {
         // Anche nel file si dice chi e' rimasto fuori dai totali.
         + esclusi.map(e => ` · ${e}`).join('');
       const comuni = { nomeFile: titolo, colonne: colonneExport(), righe: dati.righe, totali: totaliExport() };
+      // esportaTabella si porta dietro jspdf e xlsx: si carica qui, al click.
+      const { esportaTabellaExcel, esportaTabellaPdf } = await import('@/lib/esportaTabella');
       if (formato === 'excel') await esportaTabellaExcel({ ...comuni, foglio: peso ? 'Raccolto' : 'Ritiri', titolo, sottotitolo });
       else await esportaTabellaPdf({ ...comuni, titolo, sottotitolo });
     } catch (e) {

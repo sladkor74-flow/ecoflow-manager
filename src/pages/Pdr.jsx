@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { Filter, X, MapPin, Users, Download, Loader2 } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import PdrUpload from '@/components/pdr/PdrUpload';
 import PdrTable from '@/components/pdr/PdrTable';
 import PdrClientiTable from '@/components/pdr/PdrClientiTable';
@@ -139,6 +138,8 @@ export default function Pdr() {
   const exportExcel = async () => {
     setExporting(true);
     try {
+      // xlsx pesa mezzo megabyte: si carica qui, non all'apertura della pagina.
+      const XLSX = await import('xlsx');
       const today = new Date().toISOString().slice(0, 10);
       const wb = XLSX.utils.book_new();
 

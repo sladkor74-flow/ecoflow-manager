@@ -1,6 +1,4 @@
-import * as XLSX from 'xlsx';
 import { formattaPesi } from '@/lib/formatoExcel';
-import { esportaTabellaPdf } from '@/lib/esportaTabella';
 
 // I report della fatturazione attiva per l'amministrazione: tre, separati (rete,
 // ACI, extra raccolta), in Excel e in PDF. Le colonne sono quelle chieste
@@ -64,7 +62,9 @@ export const nomeFileAttiva = (tipologia, anno, mese, estensione) => `Fatturazio
 
 // Excel nel formato del modello dell'amministrazione. Il totale sta sotto la colonna
 // del Prezzo Totale (nell'ACI finiva una colonna piu' in la', sotto le Note).
-export function exportFatturazioneAttiva(tipologia, righe, anno, mese) {
+export async function exportFatturazioneAttiva(tipologia, righe, anno, mese) {
+  // xlsx pesa mezzo megabyte: si carica quando si esporta, non all'apertura.
+  const XLSX = await import('xlsx');
   const t = tabellaAttiva(tipologia, righe, anno, mese);
   const ultima = new Array(t.colonne.length).fill('');
   ultima[t.iTotale - 1] = 'TOTALE';
@@ -78,6 +78,8 @@ export function exportFatturazioneAttiva(tipologia, righe, anno, mese) {
 // Lo stesso report in PDF: stesse colonne, stesse righe, stesso totale
 export async function exportFatturazioneAttivaPdf(tipologia, righe, anno, mese) {
   const t = tabellaAttiva(tipologia, righe, anno, mese);
+  // esportaTabella si porta dietro jspdf e xlsx: pigro anche lui.
+  const { esportaTabellaPdf } = await import('@/lib/esportaTabella');
   await esportaTabellaPdf({
     nomeFile: nomeFileAttiva(tipologia, anno, mese, 'pdf').replace(/\.pdf$/, ''),
     intestazione: 'SMOCO S.r.l.  ·  COMMESSA ECOTYRE  ·  FATTURAZIONE ATTIVA',

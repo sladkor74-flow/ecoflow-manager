@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 
 // L'export della fatturazione passiva: un file per canale (rete, ACI, extra
 // raccolta non si sommano mai), in Excel e in PDF, con i blocchi del modello
@@ -122,7 +121,9 @@ export function righePassiva(result, tipi = []) {
 
 const nomeFile = (result, estensione) => `Fatturazione_passiva_${result.tipologia}_${result.mese}_${result.anno}${estensione ? `.${estensione}` : ''}`;
 
-export function exportFatturazionePassiva(result) {
+export async function exportFatturazionePassiva(result) {
+  // xlsx pesa mezzo megabyte: si carica quando si esporta, non all'apertura.
+  const XLSX = await import('xlsx');
   const tipi = [];
   const ws = XLSX.utils.aoa_to_sheet(righePassiva(result, tipi));
   tipi.forEach((t, R) => {

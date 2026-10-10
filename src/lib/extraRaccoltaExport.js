@@ -1,7 +1,5 @@
 // Esportazione Excel e PDF per Extra Raccolta — formato amministrazione.
-import * as XLSX from 'xlsx';
 import { formattaPesi } from '@/lib/formatoExcel';
-import { jsPDF } from 'jspdf';
 import { totaleRiga, aggregaPerProduttore, prezzoAttivoExtra } from './extraRaccoltaCalc';
 
 // Il prezzo in colonna e' quello con cui la riga si fattura: il prezzo scritto
@@ -23,7 +21,9 @@ function toDate(v) {
   try { const d = new Date(v); return isNaN(d.getTime()) ? null : d; } catch { return null; }
 }
 
-export function exportExtraRaccoltaExcel(records, mese, anno) {
+export async function exportExtraRaccoltaExcel(records, mese, anno) {
+  // xlsx pesa mezzo megabyte: si carica quando si esporta, non all'apertura.
+  const XLSX = await import('xlsx');
   const sheetName = `${MESI_UPPER[mese] || String(mese).toUpperCase()} ${anno}`;
   const wsData = [];
 
@@ -135,7 +135,9 @@ export function exportExtraRaccoltaExcel(records, mese, anno) {
   XLSX.writeFile(wb, `SMOCO-Fatturazione EXTRA RACCOLTA ${mese} ${anno}.xlsx`);
 }
 
-export function exportExtraRaccoltaPDF(records, mese, anno) {
+export async function exportExtraRaccoltaPDF(records, mese, anno) {
+  // jspdf si carica quando si stampa, non all'apertura della pagina.
+  const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 
   doc.setFontSize(13);

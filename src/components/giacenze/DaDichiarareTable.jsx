@@ -132,7 +132,7 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
     try {
       // tutte: le righe non si tagliano a mille, come il totale.
       const res = await base44.functions.invoke('getOrdiniDaDichiarare', payloadFiltrato());
-      exportDaDichiarareExcel(res.data.righe, res.data.totale_righe, res.data.totale_kg);
+      await exportDaDichiarareExcel(res.data.righe, res.data.totale_righe, res.data.totale_kg);
     } catch (e) {
       alert('Errore nell\'export: ' + e.message);
     }

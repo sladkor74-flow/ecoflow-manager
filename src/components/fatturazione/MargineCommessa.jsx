@@ -5,7 +5,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, RefreshCw, FileSpreadsheet, AlertTriangle, Info } from 'lucide-react';
 import { formatTonnellate, formatNumber, formatPercentuale } from '@/lib/utils';
-import { esportaTabellaExcel } from '@/lib/esportaTabella';
 
 const NOMI = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 const ANNI = [2024, 2025, 2026];
@@ -51,6 +50,8 @@ export default function MargineCommessa() {
 
   const esporta = async (c) => {
     try {
+      // esportaTabella si porta dietro jspdf e xlsx: si carica qui, al click.
+      const { esportaTabellaExcel } = await import('@/lib/esportaTabella');
       await esportaTabellaExcel({
         nomeFile: `Margine ${NOMI[c.canale]} ${data.anno}`,
         foglio: NOMI[c.canale],

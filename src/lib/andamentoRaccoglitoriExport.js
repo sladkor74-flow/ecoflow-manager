@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import { formattaPesi } from '@/lib/formatoExcel';
 
 // L'Excel dell'andamento: un foglio per raccoglitore (mesi in colonna) e uno per
@@ -6,7 +5,9 @@ import { formattaPesi } from '@/lib/formatoExcel';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
-export function scaricaExcelAndamento(andamento, zone) {
+export async function scaricaExcelAndamento(andamento, zone) {
+  // xlsx pesa mezzo megabyte: si carica quando si esporta, non all'apertura.
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
 
   const testa = [

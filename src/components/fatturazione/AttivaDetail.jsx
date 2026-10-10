@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import RigaDetailModal from './RigaDetailModal';
 import { formatKg, formatNumber } from '@/lib/utils';
-import { esportaTabellaExcel, esportaTabellaPdf } from '@/lib/esportaTabella';
 
 const TIPS = [
   { key: 'RETE', label: 'Rete' },
@@ -66,6 +65,8 @@ export default function AttivaDetail({ data, loading, periodo }) {
         },
         colore: (r) => (r.sospesa ? 'ambra' : r.stato_validazione === 'errore' ? 'rosso' : null),
       };
+      // esportaTabella si porta dietro jspdf e xlsx: si carica qui, al click.
+      const { esportaTabellaExcel, esportaTabellaPdf } = await import('@/lib/esportaTabella');
       if (formato === 'excel') await esportaTabellaExcel(opzioni);
       else await esportaTabellaPdf(opzioni);
     } catch (e) {

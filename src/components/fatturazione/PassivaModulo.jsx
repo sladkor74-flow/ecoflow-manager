@@ -150,7 +150,7 @@ Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci 
         </Button>
         {/* Un file per canale, come nell'attiva: rete, ACI ed extra raccolta non si sommano */}
         <Button variant="outline" disabled={!result || loading} title={!result ? 'Prima calcola il mese' : ''}
-          onClick={() => { try { exportFatturazionePassiva(result); } catch (e) { setError(e.message || 'Esportazione non riuscita'); } }}>
+          onClick={async () => { try { await exportFatturazionePassiva(result); } catch (e) { setError(e.message || 'Esportazione non riuscita'); } }}>
           <FileSpreadsheet className="w-4 h-4 mr-1.5" /> {TIPOLABEL[tipologia]} in Excel
         </Button>
         <Button variant="outline" disabled={!result || loading} title={!result ? 'Prima calcola il mese' : ''}

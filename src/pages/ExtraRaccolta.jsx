@@ -234,16 +234,16 @@ export default function ExtraRaccolta() {
   };
 
   // Senza un anno scelto, quello di oggi in Italia.
-  const exportExcel = () => {
+  const exportExcel = async () => {
     const mese = filters.mese || 'Tutti';
     const anno = filters.anno || Number(oggiRoma().slice(0, 4));
-    exportExtraRaccoltaExcel(terminati, mese, anno);
+    await exportExtraRaccoltaExcel(terminati, mese, anno);
   };
 
-  const exportPDF = () => {
+  const exportPDF = async () => {
     const mese = filters.mese || 'Tutti';
     const anno = filters.anno || Number(oggiRoma().slice(0, 4));
-    exportExtraRaccoltaPDF(terminati, mese, anno);
+    await exportExtraRaccoltaPDF(terminati, mese, anno);
   };
 
   return (
