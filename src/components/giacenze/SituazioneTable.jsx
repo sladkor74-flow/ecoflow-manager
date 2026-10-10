@@ -365,6 +365,12 @@ function DettaglioAci({ r }) {
 const SENZA_IN_ATTESA = "Il materiale in attesa di dichiarazione lo dice il file degli ordini non dichiarati del portale, che e' della rete: su questo canale non c'e' un dato, e il numero della rete non si ripete perche' i canali non si sommano.";
 const SENZA_ORDINI = "Gli ordini da dichiarare si contano sul file degli ordini non dichiarati del portale, che e' della rete: su questo canale non ce n'e' nessuno da contare.";
 const SENZA_DICHIARATO = "Il dichiarato dell'anno: per la rete viene dal report del portale, per ACI ed extra raccolta dalle righe mensili trascritte dall'amministratore nel modulo Dichiarazioni Impianti - le stesse che decurtano la giacenza. Un trattino vuol dire che il dato non c'e' ancora, non che e' zero.";
+// UN PIAZZALE NON DICHIARA, e il trattino sulla sua riga non e' un'attesa.
+// Dichiara chi tratta: il materiale che sta a terra qui finisce nella
+// dichiarazione dell'impianto che lo lavorera', sulla riga dell'impianto.
+// Dire «il dato non c'e' ancora» farebbe aspettare un numero che non arriva.
+const SENZA_DICHIARATO_PIAZZALE = "Un piazzale non dichiara: la dichiarazione la fa l'impianto che tratta il materiale, e sta sulla sua riga. Qui non c'e' nessun numero da aspettare.";
+const percheSenzaDichiarato = (r, c) => (r && r.tipo_destinazione === 'stoc' && c.chiave !== 'RETE' ? SENZA_DICHIARATO_PIAZZALE : SENZA_DICHIARATO);
 
 // Che cosa sa dire ogni canale: da dove prende la sua giacenza e quali degli
 // altri numeri sono suoi. Quelli che non ha restano a null, e la cella lo spiega.
@@ -599,7 +605,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                         </td>
                         <td className="px-3 py-2 text-right">
                           {dichiarato === null
-                            ? <span className="text-muted-foreground cursor-help" title={SENZA_DICHIARATO}>—</span>
+                            ? <span className="text-muted-foreground cursor-help" title={percheSenzaDichiarato(r, c)}>—</span>
                             : <>{fmt(dichiarato)} t</>}
                         </td>
                         <td className="px-3 py-2"></td>

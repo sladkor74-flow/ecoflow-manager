@@ -26,6 +26,8 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
 - **Le tre regole assolute**
   - Le tre regole che l'utente non vuole ripetere (21/09/2026)
   - Il periodo di un movimento e' la fine del trasporto
+  - Il guardiano notturno e la memoria dei numeri (10/10/2026)
+  - Il dichiarato e' di chi tratta, non di chi stocca (10/10/2026)
   - Canali indipendenti
   - Pesi
   - Come si legge un movimento: un punto solo
@@ -521,6 +523,41 @@ un secondo formato qui dentro scriveva «1,200 t» dove tutto il resto dice
 «1,20 t», e l'ha trovato una prova.
 
 Un assegnato non e' un movimento: il suo periodo e' `ordine_immesso_il`.
+
+### Il dichiarato e' di chi tratta, non di chi stocca (10/10/2026)
+
+Una dichiarazione di trattamento e' del **soggetto**, e la mappa che la tiene
+ha per chiave `soggetto|canale`: il ruolo non c'entra. Ma nelle giacenze un
+soggetto che e' insieme impianto e piazzale - Gatim, Green Tyre, Irigom - ha
+**due righe**, e letta senza guardare il ruolo quella mappa rispondeva a tutt'e
+due. Risultato: «ACI dichiarato 115,54 t» sulla riga dello stoccaggio GATIM, che
+non dichiara niente, e nel totale quelle tonnellate contate due volte - ACI
+275,08 invece di 154,22, extra raccolta 1,72 invece di 0,86.
+
+**Chi tratta dichiara; chi stocca custodisce.** Il materiale che sta a terra in un
+piazzale finira' nella dichiarazione dell'impianto che lo lavorera', e li' deve
+comparire. Sulla riga del piazzale il dichiarato e' `null`, non zero: zero si
+leggerebbe «non ha ancora dichiarato», che e' un'attesa, e il trattino ha la sua
+spiegazione (`SENZA_DICHIARATO_PIAZZALE`).
+
+Due cose da portarsi via, piu' grandi di questo difetto.
+
+1. **Una mappa per soggetto letta su una riga per ruolo e' una trappola.** Qui il
+   calcolo della giacenza era protetto (`if (td === 'imp')`) e il campo accanto
+   no: la stessa mappa, due letture, una giusta e una sbagliata. Quando una
+   chiave e' piu' grossa della riga che la legge, va ristretta a ogni lettura.
+2. **Un numero sbagliato accanto a uno giusto e' il piu' difficile da vedere.**
+   La giacenza era esatta, quindi niente diventava negativo e nessun avviso
+   scattava; il conto a occhio - apertura + entrato - dichiarato - non tornava, e
+   chi guardava dava la colpa al conto invece che al numero. L'ha trovato il
+   **confronto fra due moduli** che devono dire la stessa cosa (regola
+   dell'utente, 03/10/2026): la fotografia del guardiano diceva 154,22 e la
+   Situazione delle giacenze 275,08. Prove in `prove/dichiaratoDiChiTratta.mjs`,
+   che fa girare la funzione vera e poi la rifa' girare con la protezione
+   togliendola, per vedere il doppio ricomparire.
+
+Vale la pena dirlo perche' e' il primo difetto trovato dal guardiano notturno, e
+non da una pagina aperta: e' esattamente il mestiere per cui e' stato scritto.
 
 ### Canali indipendenti
 

@@ -455,6 +455,11 @@ export default async function(req) {
     // E' la stessa sorgente che usa il modulo Dichiarazioni Impianti: i due moduli
     // devono dire gli stessi numeri su tutti e tre i canali (regola dell'utente,
     // 03/10/2026). Conta solo quello che e' segnato come caricato, come li'.
+    //
+    // La chiave e' soggetto|canale e il ruolo non c'entra: una dichiarazione e'
+    // del soggetto. Chi la legge deve ricordarsene, perche' un soggetto che e'
+    // impianto e piazzale ha due righe e la troverebbe su entrambe: va sulla riga
+    // dell'impianto, che e' chi tratta.
     const dichiaratoCanaleMap = new Map(); // ns|canale -> t
     for (const d of dichiarazioniSito) {
       if (Number(d.anno) !== annoNum || !d.caricata_inviata) continue;
@@ -977,8 +982,22 @@ export default async function(req) {
         // esattamente quello che il modulo Dichiarazioni mostra come caricato.
         // Senza questi due campi, nelle righe per canale delle giacenze le celle
         // del dichiarato restavano vuote e il conto non si poteva rifare a occhio.
-        dichiarato_aci_t: r2(dichiaratoCanaleMap.get(ns + '|ACI') || 0),
-        dichiarato_extra_t: r2(dichiaratoCanaleMap.get(ns + '|EXTRA_RACCOLTA') || 0),
+        //
+        // MA IL DICHIARATO E' DI CHI TRATTA, NON DI CHI STOCCA (10/10/2026).
+        //
+        // La mappa qui sopra e' per soggetto e canale e non conosce il ruolo.
+        // Letta anche sulla riga del piazzale faceva comparire «ACI dichiarato
+        // 115,54 t» sullo stoccaggio GATIM, che non dichiara niente, e nel totale
+        // quelle tonnellate si contavano due volte: 275,08 invece di 154,22, e
+        // l'extra raccolta 1,72 invece di 0,86. La giacenza era giusta, perche'
+        // quel calcolo era gia' protetto dal ruolo (if td === 'imp'): sbagliava
+        // solo il numero scritto accanto, e per questo l'errore stava in vista
+        // senza farsi vedere.
+        //
+        // Un piazzale non ha un dichiarato: null, cosi' la cella dice perche'
+        // invece di uno zero, che si leggerebbe «non ha ancora dichiarato».
+        dichiarato_aci_t: td === 'imp' ? r2(dichiaratoCanaleMap.get(ns + '|ACI') || 0) : null,
+        dichiarato_extra_t: td === 'imp' ? r2(dichiaratoCanaleMap.get(ns + '|EXTRA_RACCOLTA') || 0) : null,
         granulo_t: r2(der.granulo),
         fibre_t: r2(der.fibre),
         metallo_t: r2(der.metallo),
