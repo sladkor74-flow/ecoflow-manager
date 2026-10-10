@@ -266,6 +266,9 @@ export default async function(req) {
         // leggono gli stessi archivi. Senza, le primarie di rete si rileggono una
         // volta per strumento, e sono decine di migliaia di righe.
         const cache = nuovaCache();
+        // Chi chiede: i costi dei fornitori li vede solo l'amministratore, come
+        // nel modulo Fatturazione (COSTI_RISERVATI in strumentiAssistente.ts).
+        cache.amministratore = eAmministratore(user);
         risultati = await Promise.all(daFare.map(async (x) => {
           const esito = await eseguiStrumento(base44, x.nome, x.parametri || {}, cache);
           return x.ignorati && x.ignorati.length ? { ...esito, parametri_ignorati: x.ignorati } : esito;

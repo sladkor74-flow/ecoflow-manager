@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { anniDaScegliere } from '@/lib/periodoPagine';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -11,7 +12,7 @@ import RiepilogoEcotyre from './RiepilogoEcotyre';
 import AttivaAnomalie from './AttivaAnomalie';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
-const ANNI = [2024, 2025, 2026];
+const ANNI = anniDaScegliere();
 const STATI = {
   elaborata: 'bg-blue-100 text-blue-700', verificata: 'bg-green-100 text-green-700',
   approvata: 'bg-purple-100 text-purple-700', esportata: 'bg-cyan-100 text-cyan-700',

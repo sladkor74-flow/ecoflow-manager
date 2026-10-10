@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { anniDaScegliere } from '@/lib/periodoPagine';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -18,7 +19,7 @@ import AvvisoDateDaSistemare, { SegnoDate, NotaDate } from '@/components/primari
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ReportConferimenti from '@/components/report-conferimenti/ReportConferimenti';
 
-const ANNI = [2024, 2025, 2026];
+const ANNI = anniDaScegliere();
 
 // Dove si colloca una scheda, come in tutto il gestionale: un terminato sul giorno
 // italiano della fine trasporto, e se non ce l'ha non si colloca (niente ripiego

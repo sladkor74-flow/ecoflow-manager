@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { meseDiLavoro, MESI_PAGINE } from '@/lib/periodoPagine';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Loader2, Upload, Download, RefreshCw, Trash2, AlertTriangle, CheckCircle2, Snowflake } from 'lucide-react';
@@ -28,8 +29,10 @@ const RUOLI = [
 
 export default function Consuntivi({ isAdmin }) {
   const oggi = new Date();
-  const [anno, setAnno] = useState(oggi.getFullYear());
-  const [mese, setMese] = useState(oggi.getMonth() === 0 ? 12 : oggi.getMonth());
+  // Il mese finito per ultimo, sul calendario italiano: a gennaio e' il dicembre
+  // dell'anno prima, non il dicembre dell'anno nuovo (chiusura dell'audit, 11/10/2026).
+  const [anno, setAnno] = useState(() => meseDiLavoro().anno);
+  const [mese, setMese] = useState(() => MESI_PAGINE.indexOf(meseDiLavoro().mese) + 1);
   const [canale, setCanale] = useState('RETE');
   const [fornitore, setFornitore] = useState('');
   const [ruolo, setRuolo] = useState('raccoglitore');

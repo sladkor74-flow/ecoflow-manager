@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { annoDiOggi } from '@/lib/periodoPagine';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Loader2, Save, Trash2, MapPin, Lightbulb, AlertTriangle } from 'lucide-react';
@@ -19,7 +20,7 @@ import { chiaveNome } from '@/lib/target';
 // ritiri isolati: e' un punto di partenza da correggere, e resta marcata come
 // proposta finche' non la si conferma. Scrive solo l'amministratore.
 
-const ANNI = [new Date().getFullYear(), new Date().getFullYear() - 1];
+const ANNI = [annoDiOggi(), annoDiOggi() - 1];
 
 export default function ZoneRaccoglitori({ isAdmin }) {
   const [anno, setAnno] = useState(ANNI[0]);

@@ -11,6 +11,7 @@ import { puntiDiPartenza, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevaz
 import { confrontaConIlPortale } from "../../shared/agganciaDichiarazioni.ts";
 import { raccoglitoreUscite, allineaAllaGiacenza, copertureDelCaricamento } from "../../shared/usciteDichiarate.ts";
 import { fotografiaDelGiorno } from "../../shared/indicatoriGiorno.ts";
+import { eAmministratore } from "../../shared/permessi.ts";
 
 // Dichiarazioni degli impianti, mese per mese, con la quadratura delle giacenze.
 //
@@ -51,12 +52,16 @@ export default async function(req) {
     // rispondere, lascia scritta la fotografia del giorno: i numeri per sito e
     // l'esito della quadratura. La scrive solo il lavoro notturno, mai
     // l'apertura di una pagina, altrimenti ogni visita riscriverebbe la riga.
-    const registra = corpo.registra === true;
+    // Scrive solo l'amministratore (chiusura dell'audit, 11/10/2026): il lavoro
+    // notturno gira come lui, come il controllo delle qualifiche e gli avvisi dei
+    // target; chiunque altro chieda registra riceve la risposta senza scrivere.
+    const registraChiesto = corpo.registra === true;
+    const registra = registraChiesto && eAmministratore(user);
     // Il lavoro notturno non scrive l'anno negli argomenti: un anno cablato in
     // uno scheduler e' la trappola che scatta il 1° gennaio, quando nessuno si
     // ricorda di cambiarlo e il guardiano continua a controllare l'anno vecchio
     // senza dirlo. Chi chiede dalla pagina lo dice sempre, e allora vale il suo.
-    const annoNum = Number(anno) || (registra ? Number(oggiRoma().slice(0, 4)) : 0);
+    const annoNum = Number(anno) || (registraChiesto ? Number(oggiRoma().slice(0, 4)) : 0);
     if (!annoNum) return Response.json({ error: 'Anno obbligatorio' }, { status: 400 });
 
     const norm = normalizzaRagioneSociale;
@@ -948,7 +953,15 @@ export default async function(req) {
     // riscrive, non si aggiunge. Se non si riesce a scrivere la risposta esce
     // lo stesso - il guardiano e' un servizio in piu', non un ostacolo.
     let fotografia = null;
-    if (registra) {
+    // La riga di oggi e' dell'anno in corso: con un altro anno negli argomenti
+    // si sarebbe riscritta coi numeri di quell'anno, e lo storico avrebbe detto
+    // «com'era oggi» su un anno che oggi non si guarda.
+    const annoDiOggi = Number(oggiRoma().slice(0, 4));
+    if (registraChiesto && !registra) {
+      fotografia = { scritta: false, motivo: "la fotografia del giorno la scrive solo l'amministratore" };
+    } else if (registra && annoNum !== annoDiOggi) {
+      fotografia = { scritta: false, motivo: `la fotografia del giorno e' dell'anno in corso (${annoDiOggi}), non del ${annoNum}` };
+    } else if (registra) {
       const giorno = oggiRoma();
       const riga = fotografiaDelGiorno(siti, { giorno, anno: annoNum, doppioni });
       try {

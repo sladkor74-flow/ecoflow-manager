@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { anniDaScegliere, annoDiOggi } from '@/lib/periodoPagine';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -7,7 +8,7 @@ import { Loader2, RefreshCw, FileSpreadsheet, AlertTriangle, Info } from 'lucide
 import { formatTonnellate, formatNumber, formatPercentuale } from '@/lib/utils';
 
 const NOMI = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
-const ANNI = [2024, 2025, 2026];
+const ANNI = anniDaScegliere();
 const euro = (v) => (v === null || v === undefined ? '—' : formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const perc = (v) => (v === null || v === undefined ? '—' : `${formatPercentuale(v)}%`);
 
@@ -29,7 +30,7 @@ const COLONNE = [
 // Il margine della commessa: ricavo della fatturazione attiva meno costo della
 // passiva, per canale. Tre commesse, tre tabelle: non esiste un totale unico.
 export default function MargineCommessa() {
-  const [anno, setAnno] = useState(new Date().getFullYear());
+  const [anno, setAnno] = useState(annoDiOggi);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errore, setErrore] = useState('');

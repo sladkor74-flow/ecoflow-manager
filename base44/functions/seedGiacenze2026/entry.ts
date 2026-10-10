@@ -9,15 +9,19 @@ import { chiaveDichiarazione } from "../../shared/dichiarazioniImpianti.ts";
 // Payload { simula: true } (default): restituisce il riepilogo senza scrivere.
 // Payload { simula: false }: inserisce i record mancanti.
 // Richiede ruolo admin.
+// L'apertura sta in giacenza_riferimento_t, il campo dello schema (chiusura
+// dell'audit, 11/10/2026): il seme scriveva giacenza_iniziale_t, che GiacenzaSito
+// non ha, e una riga ricreata dal seme sarebbe nata con apertura zero. Irigom e
+// Nappi Sud oggi hanno 385,36 e 34,96 nel campo giusto.
 const GIACENZE_2026 = [
-  { sito: 'GREEN TYRE PROJECT SRL', tipo_destinazione: 'imp', target_primarie_t: 2500, target_totale_t: 2500, giacenza_iniziale_t: 0, tipologia_trattamento: 'EoW' },
-  { sito: 'Irigom S.r.l.', tipo_destinazione: 'imp', target_primarie_t: 3400, target_totale_t: 4445, giacenza_iniziale_t: 385.36, tipologia_trattamento: 'Frantumazione/R1' },
-  { sito: 'NAPPI SUD SRL', tipo_destinazione: 'stoc', target_primarie_t: 2295, target_totale_t: 0, giacenza_iniziale_t: 34.96, tipologia_trattamento: 'n.a.' },
-  { sito: 'T.R.S.  SRL', tipo_destinazione: 'imp', target_primarie_t: 300, target_totale_t: 300, giacenza_iniziale_t: 0, tipologia_trattamento: 'EoW' },
-  { sito: 'T-CYCLE INDUSTRIES SRL', tipo_destinazione: 'imp', target_primarie_t: 1050, target_totale_t: 1050, giacenza_iniziale_t: 0, tipologia_trattamento: 'Frantumazione/R1' },
-  { sito: 'T-CYCLE INDUSTRIES SRL', tipo_destinazione: 'stoc', target_primarie_t: 250, target_totale_t: 0, giacenza_iniziale_t: 0, tipologia_trattamento: 'n.a.' },
-  { sito: 'Gatim', tipo_destinazione: 'imp', target_primarie_t: 950, target_totale_t: 950, giacenza_iniziale_t: 0, tipologia_trattamento: 'EoW' },
-  { sito: 'TECNOGUM SRL', tipo_destinazione: 'imp', target_primarie_t: 800, target_totale_t: 2295, giacenza_iniziale_t: 0, tipologia_trattamento: 'n.a.' },
+  { sito: 'GREEN TYRE PROJECT SRL', tipo_destinazione: 'imp', target_primarie_t: 2500, target_totale_t: 2500, giacenza_riferimento_t: 0, tipologia_trattamento: 'EoW' },
+  { sito: 'Irigom S.r.l.', tipo_destinazione: 'imp', target_primarie_t: 3400, target_totale_t: 4445, giacenza_riferimento_t: 385.36, tipologia_trattamento: 'Frantumazione/R1' },
+  { sito: 'NAPPI SUD SRL', tipo_destinazione: 'stoc', target_primarie_t: 2295, target_totale_t: 0, giacenza_riferimento_t: 34.96, tipologia_trattamento: 'n.a.' },
+  { sito: 'T.R.S.  SRL', tipo_destinazione: 'imp', target_primarie_t: 300, target_totale_t: 300, giacenza_riferimento_t: 0, tipologia_trattamento: 'EoW' },
+  { sito: 'T-CYCLE INDUSTRIES SRL', tipo_destinazione: 'imp', target_primarie_t: 1050, target_totale_t: 1050, giacenza_riferimento_t: 0, tipologia_trattamento: 'Frantumazione/R1' },
+  { sito: 'T-CYCLE INDUSTRIES SRL', tipo_destinazione: 'stoc', target_primarie_t: 250, target_totale_t: 0, giacenza_riferimento_t: 0, tipologia_trattamento: 'n.a.' },
+  { sito: 'Gatim', tipo_destinazione: 'imp', target_primarie_t: 950, target_totale_t: 950, giacenza_riferimento_t: 0, tipologia_trattamento: 'EoW' },
+  { sito: 'TECNOGUM SRL', tipo_destinazione: 'imp', target_primarie_t: 800, target_totale_t: 2295, giacenza_riferimento_t: 0, tipologia_trattamento: 'n.a.' },
 ];
 
 // ATTENZIONE A quantita_kg SULLE RIGHE CON caricata_inviata: false.

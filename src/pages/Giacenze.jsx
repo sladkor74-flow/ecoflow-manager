@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { anniDaScegliere, annoDiOggi } from '@/lib/periodoPagine';
 import { base44 } from '@/api/base44Client';
 import { useAuth } from '@/lib/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -21,7 +22,7 @@ import { situazionePdf, derivatiPdf, targetPdf } from '@/lib/giacenzePdf';
 export default function Giacenze() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const [anno, setAnno] = useState(2026);
+  const [anno, setAnno] = useState(annoDiOggi);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('situazione');
@@ -84,7 +85,7 @@ export default function Giacenze() {
         <div className="flex flex-wrap items-center gap-2">
           <Select value={String(anno)} onValueChange={v => setAnno(Number(v))}>
             <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
-            <SelectContent>{[2024, 2025, 2026, 2027].map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}</SelectContent>
+            <SelectContent>{anniDaScegliere({ dopo: 1 }).map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}</SelectContent>
           </Select>
           <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
             <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} /> Ricalcola

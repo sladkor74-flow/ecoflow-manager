@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { meseDiLavoro } from '@/lib/periodoPagine';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { FileText, Users, DollarSign, History, TrendingUp, Scale } from 'lucide-react';
 import PassivaModulo from '@/components/fatturazione/PassivaModulo';
@@ -13,7 +14,7 @@ export default function Fatturazione() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [tab, setTab] = useState('passiva');
-  const [periodo, setPeriodo] = useState({ anno: 2026, mese: 'Luglio' });
+  const [periodo, setPeriodo] = useState(meseDiLavoro);
 
   const openPeriod = (anno, mese) => {
     setPeriodo({ anno, mese });

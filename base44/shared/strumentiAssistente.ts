@@ -681,6 +681,17 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
 
 // ─── il registro ───
 
+// I COSTI SONO DELL'AMMINISTRATORE (chiusura dell'audit, 11/10/2026). Dal 16/09
+// calcolaPassiva e calcolaMargine rispondono «sola lettura» a chi non e'
+// amministratore, e la scheda Tariffe & Anagrafiche e' sua. EcoTyna, su una
+// domanda di piu' mesi, faceva il conto della passiva da se', coi permessi del
+// servizio, e lo diceva a chiunque fosse collegato; lo strumento delle tariffe
+// dava anche i prezzi dei fornitori. Chi chiede lo porta il contesto della
+// domanda (chiediAssistente); senza contesto si nega, perche' un costo detto per
+// sbaglio non si ritira.
+export const COSTI_RISERVATI = "I costi dei fornitori (fatturazione passiva, tariffe passive e margine) sono riservati all'amministratore, come nel modulo Fatturazione: a chi non lo e' non si dicono.";
+export const vedeICosti = (ctx) => !!(ctx && ctx.amministratore === true);
+
 export const STRUMENTI = [
   {
     nome: 'panoramica_commessa',
@@ -1818,9 +1829,12 @@ export const STRUMENTI = [
     descrizione: 'Quanto dobbiamo pagare ai fornitori (passiva) e quanto ci spetta (attiva), per fornitore e per mese. La passiva fa lo stesso conto del modulo sui movimenti terminati: col mese indicato quel mese, senza mese tutti i mesi dell\'anno fino a quello in corso, uno per uno. L\'attiva si calcola sempre sui dati di oggi, mese per mese, e dice di quanto il documento salvato e\' indietro. I canali restano separati.',
     parametri: { anno: 'numero', mese: 'nome del mese, opzionale: senza, tutto l\'anno mese per mese', mesi: 'elenco di nomi di mese, per una domanda su piu\' mesi ("da marzo a maggio": scrivili tutti)', tipo: 'PASSIVA o ATTIVA', tipologia: 'RETE, ACI o EXTRA_RACCOLTA', fornitore: 'opzionale' },
     moduli: ['Fatturazione'],
-    async esegui(base44, p) {
+    async esegui(base44, p, ctx) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       const tipo = String(p.tipo || 'PASSIVA').toUpperCase();
+      if (tipo === 'PASSIVA' && !vedeICosti(ctx)) {
+        return { fonte: 'Fatturazione', periodo: `anno ${anno}`, dati_al: oggiRoma(), dati: { riservato: true, nota: COSTI_RISERVATI + " Si puo' chiedere l'attiva, cioe' quanto ci spetta da Ecotyre." } };
+      }
       const svc = base44.asServiceRole.entities;
 
       // Il mese si normalizza subito, prima di qualunque ramo: nei documenti
@@ -1971,11 +1985,18 @@ export const STRUMENTI = [
     descrizione: 'Le tariffe concordate con fornitori e clienti: quanto si paga o si incassa per raccolta, trasporto di secondaria, trattamento o conferimento, e per quale tratta.',
     parametri: { fornitore: 'opzionale', prestazione: 'RACCOLTA, TRASPORTO_SECONDARIA, TRATTAMENTO o CONFERIMENTO_STOCCAGGIO', direzione: 'PASSIVA o ATTIVA', tipologia: 'RETE, ACI, EXTRA_RACCOLTA o TUTTE' },
     moduli: ['Fatturazione', 'Tariffe'],
-    async esegui(base44, p) {
+    async esegui(base44, p, ctx) {
       const svc = base44.asServiceRole.entities;
       const filtro = { stato: 'attivo' };
       if (p.prestazione) filtro.prestazione = String(p.prestazione).toUpperCase();
       if (p.direzione) filtro.direzione = String(p.direzione).toUpperCase();
+      // Le tariffe passive sono i prezzi dei fornitori: costi. A chi non e'
+      // amministratore restano le attive, e si dice perche'.
+      const soloAttive = !vedeICosti(ctx);
+      if (soloAttive && filtro.direzione === 'PASSIVA') {
+        return { fonte: 'Tariffe', periodo: 'tariffe in tabella', dati_al: oggiRoma(), dati: { riservato: true, nota: COSTI_RISERVATI } };
+      }
+      if (soloAttive) filtro.direzione = 'ATTIVA';
       const tutte = await fetchAll(svc.Tariffa, filtro);
       const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
       // "TUTTE" e' una tipologia delle tariffe, non un canale: chiesta cosi', non filtra.
@@ -2014,6 +2035,7 @@ export const STRUMENTI = [
           })), 80),
           ...(p.tipologia && !tipologia && String(p.tipologia).toUpperCase().trim() !== 'TUTTE'
             ? { avviso_canale: `"${p.tipologia}" non e' un canale: qui ci sono le tariffe di tutti i canali, ciascuna col suo.` } : {}),
+          ...(soloAttive ? { nota_riservate: 'Qui ci sono solo le tariffe attive (quanto ci spetta). ' + COSTI_RISERVATI } : {}),
         },
       };
     },

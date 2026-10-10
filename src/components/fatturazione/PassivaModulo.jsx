@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { anniDaScegliere } from '@/lib/periodoPagine';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
@@ -21,7 +22,7 @@ import { scarica } from '@/lib/docxModello';
 import VociPassivaDialog from './VociPassivaDialog';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
-const ANNI = [2024, 2025, 2026];
+const ANNI = anniDaScegliere();
 
 const TIPOLABEL = { 'RETE': 'Rete', 'ACI': 'ACI', 'EXTRA_RACCOLTA': 'Extra Raccolta' };
 

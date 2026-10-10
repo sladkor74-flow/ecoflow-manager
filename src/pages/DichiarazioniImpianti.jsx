@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { anniDaScegliere, annoDiOggi } from '@/lib/periodoPagine';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -19,7 +20,7 @@ import { esportaDichiarazioni } from '@/lib/dichiarazioniExport';
 // Dichiarazioni degli impianti: che cosa ogni impianto ricava dai PFU che gli
 // conferiamo, mese per mese, e come questo decurta la giacenza a portale.
 
-const ANNI = [2026, 2025];
+const ANNI = anniDaScegliere({ dal: 2025 }).reverse();
 
 function Kpi({ titolo, valore, nota, tono }) {
   const colore = tono === 'buono' ? 'text-emerald-700' : tono === 'attenzione' ? 'text-amber-700' : tono === 'male' ? 'text-red-700' : '';
@@ -72,7 +73,7 @@ function DateInBreve({ conti }) {
 
 export default function DichiarazioniImpianti() {
   const { isAdmin, soloLettura } = usePermessi();
-  const [anno, setAnno] = useState(2026);
+  const [anno, setAnno] = useState(annoDiOggi);
   const [dati, setDati] = useState(null);
   const [caricamento, setCaricamento] = useState(true);
   const [errore, setErrore] = useState('');

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { meseDiLavoro } from '@/lib/periodoPagine';
 import { base44 } from '@/api/base44Client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { LayoutDashboard, Table, Download, FileCheck } from 'lucide-react';
@@ -9,7 +10,7 @@ import PrefatturaEcotyre from './PrefatturaEcotyre';
 
 export default function FatturazioneAttiva({ isAdmin, onVaiTariffe }) {
   const [tab, setTab] = useState('dashboard');
-  const [periodo, setPeriodo] = useState({ anno: 2026, mese: 'Luglio' });
+  const [periodo, setPeriodo] = useState(meseDiLavoro);
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
   const [elaborating, setElaborating] = useState(false);

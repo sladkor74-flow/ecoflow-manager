@@ -593,6 +593,25 @@ che la rifa' darebbe una terza risposta**. Quattro prudenze:
    stesso, ma non entrano nel verdetto.
 4. **Un guardiano che dorme e uno che non trova niente si assomigliano troppo**:
    se la fotografia piu' recente ha piu' di due giorni la dashboard lo dice.
+5. **Scrive solo l'amministratore, e solo l'anno in corso** (11/10/2026). Il
+   lavoro notturno gira come l'amministratore, come il controllo delle qualifiche
+   e gli avvisi dei target; un altro utente che passa `registra` riceve la
+   risposta con `fotografia.scritta: false` e il motivo. Con un anno diverso da
+   quello in corso la riga di oggi non si riscrive: avrebbe detto «com'era oggi»
+   coi numeri di un altro anno. Provato sulla funzione vera in
+   `prove/scrittureRiservate.mjs`.
+
+### Nessun anno scritto nelle pagine (11/10/2026)
+
+Gli anni e il mese da cui parte una pagina vengono dal giorno italiano,
+`src/lib/periodoPagine.js`: `anniDaScegliere({ dal, dopo })` per gli elenchi,
+`annoDiOggi` per l'anno su cui si apre, `meseDiLavoro()` per il mese (l'ultimo
+finito: a gennaio e' il dicembre dell'anno prima). Prima Dichiarazioni aveva
+`[2026, 2025]`, la fatturazione si apriva su «Luglio 2026» e passiva, attiva,
+margine ed extra raccolta avevano `[2024, 2025, 2026]`: dal 1° gennaio 2027 il
+2027 non si sarebbe potuto scegliere. `prove/anniDellePagine.mjs` scorre
+`src/pages` e `src/components` e fallisce su un `useState(2026)` o un elenco di
+anni scritto a mano.
 
 La tolleranza e' quella della quadratura (`TOLLERANZA_QUADRATURA_T`), una sola
 per tutto il gestionale, e le tonnellate si scrivono con `formatoTonnellate`:
@@ -2148,6 +2167,20 @@ e lo ANNOTA nel registro `FileDaRimuovere` (audit del 03/10/2026), altrimenti
 nessuno saprebbe piu' che esiste.
 
 ## I file, la privacy e i permessi
+
+### I costi dei fornitori sono dell'amministratore, anche in EcoTyna (11/10/2026)
+
+Dal 16/09 `calcolaPassiva` e `calcolaMargine` rispondono «sola lettura» a chi
+non e' amministratore, e la scheda Tariffe & Anagrafiche e' sua. EcoTyna, su una
+domanda di piu' mesi, faceva il conto della passiva da se' coi permessi del
+servizio e lo diceva a chiunque fosse collegato; lo strumento delle tariffe dava
+anche i prezzi dei fornitori. Ora `chiediAssistente` mette nel contesto della
+domanda chi chiede (`cache.amministratore`), e gli strumenti `fatturazione`
+(tipo PASSIVA) e `tariffe` (direzione PASSIVA) rispondono `riservato` con la
+frase `COSTI_RISERVATI`; senza direzione le tariffe restano le sole attive.
+**Senza contesto si nega**: un costo detto per sbaglio non si ritira. Uno
+strumento nuovo che legge costi, prezzi passivi o margini deve passare da
+`vedeICosti(ctx)`.
 
 ### I documenti aziendali non salgono mai in area pubblica (30/09/2026)
 

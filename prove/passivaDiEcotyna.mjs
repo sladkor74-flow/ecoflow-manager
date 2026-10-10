@@ -60,7 +60,9 @@ const finto = {
   functions: { invoke: async () => { throw new Error('senza mese non si chiama la funzione del modulo'); } },
 };
 const fatturazione = STRUMENTI.find(s => s.nome === 'fatturazione');
-const chiedi = async (p) => { letture = []; return (await fatturazione.esegui(finto, p)).dati; };
+// La passiva e' dell'amministratore (scrittureRiservate.mjs): qui si chiede come lui.
+const comeAmministratore = (b, p) => fatturazione.esegui(b, p, { amministratore: true });
+const chiedi = async (p) => { letture = []; return (await comeAmministratore(finto, p)).dati; };
 
 // Il conto del modulo, mese per mese, per confronto.
 const archiviModulo = {
@@ -198,9 +200,9 @@ console.log('IL FORNITORE SI RICONOSCE COME NEI MOVIMENTI');
   verifica('un subfornitore: la riga di chi lo fattura, e si dice che si paga a lui', rt && /GREEN TYRE SRL/.test(rt.avviso_fornitore || '') && rt.fornitori.righe.some(f => f.fornitore === 'GREEN TYRE SRL'), JSON.stringify(rt).slice(0, 400));
   // Il mese singolo, stesso riconoscimento.
   const finto2 = { ...finto, functions: { invoke: async (_n, corpo) => ({ data: calcolaPassivaMese(archiviModulo, ANNO, indiceMesePassiva(corpo.mese), corpo.mese, corpo.tipologia) }) } };
-  const mese = (await fatturazione.esegui(finto2, { anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mese: 'Gennaio', fornitore: 'Silvano' })).dati;
+  const mese = (await comeAmministratore(finto2, { anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mese: 'Gennaio', fornitore: 'Silvano' })).dati;
   verifica('anche col mese: «Silvano» non da\' un numero', mese.totale_del_fornitore_euro === null && /SILVANO RENATO/.test(mese.avviso_fornitore || ''), JSON.stringify(mese).slice(0, 300));
-  const meseEco = (await fatturazione.esegui(finto2, { anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mese: 'Gennaio', fornitore: 'eco gea' })).dati;
+  const meseEco = (await comeAmministratore(finto2, { anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mese: 'Gennaio', fornitore: 'eco gea' })).dati;
   verifica('anche col mese: «eco gea» trova i suoi 100 euro', meseEco.totale_del_fornitore_euro === 100, JSON.stringify(meseEco).slice(0, 300));
 }
 
@@ -251,11 +253,11 @@ console.log('LE GIACENZE: TECNOGUM NON E\' UN IMPIANTO SENZA FILE');
 console.log('UN MESE CHE NON E\' UN MESE, ACCANTO A MESI VERI: L\'AVVISO DICE COSA SI E\' PRESO');
 {
   const conMese = { ...finto, functions: { invoke: async (_n, corpo) => ({ data: calcolaPassivaMese(archiviModulo, ANNO, indiceMesePassiva(corpo.mese), corpo.mese, corpo.tipologia) }) } };
-  const due = (await fatturazione.esegui(conMese, { anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mesi: ['Febbraio', 'Marzo', 'Marzolino'] })).dati;
+  const due = (await comeAmministratore(conMese, { anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mesi: ['Febbraio', 'Marzo', 'Marzolino'] })).dati;
   verifica('passiva, due mesi e uno storto: «ho preso Febbraio, Marzo»', /Marzolino/.test(due.avviso_periodo || '') && /ho preso Febbraio, Marzo/.test(due.avviso_periodo || ''), due.avviso_periodo);
-  const uno = (await fatturazione.esegui(conMese, { anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mesi: ['Febbraio', 'Marzolino'] })).dati;
+  const uno = (await comeAmministratore(conMese, { anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mesi: ['Febbraio', 'Marzolino'] })).dati;
   verifica('passiva, un mese e uno storto: il mese scartato si dice anche col mese solo', /Marzolino/.test(uno.avviso_periodo || '') && /ho preso Febbraio/.test(uno.avviso_periodo || ''), uno.avviso_periodo);
-  const attiva = (await fatturazione.esegui(conMese, { anno: ANNO, tipo: 'ATTIVA', tipologia: 'RETE', mesi: ['Febbraio', 'Marzo', 'Marzolino'] })).dati;
+  const attiva = (await comeAmministratore(conMese, { anno: ANNO, tipo: 'ATTIVA', tipologia: 'RETE', mesi: ['Febbraio', 'Marzo', 'Marzolino'] })).dati;
   verifica("attiva, due mesi e uno storto: non dice «ho preso l'anno» se ha preso due mesi", /Marzolino/.test(attiva.avviso_periodo || '') && !/l'anno/.test(attiva.avviso_periodo || '') && /Febbraio, Marzo/.test(attiva.avviso_periodo || ''), attiva.avviso_periodo);
 }
 

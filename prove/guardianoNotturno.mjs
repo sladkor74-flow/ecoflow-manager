@@ -131,13 +131,15 @@ console.log('LE TRE PRUDENZE DELLA SCRITTURA');
 {
   const f = sorgente('base44/functions/riepilogoDichiarazioni/entry.ts');
   // 1. Una riga per GIORNO, non una per apertura di pagina.
-  verifica('scrive solo quando glielo si chiede', f.includes('const registra = corpo.registra === true;'));
+  verifica('scrive solo quando glielo si chiede', f.includes('const registraChiesto = corpo.registra === true;'));
+  // e solo l'amministratore, sull'anno in corso: si prova sulla funzione vera in scrittureRiservate.mjs
+  verifica("e solo se chi chiede e' l'amministratore", f.includes('const registra = registraChiesto && eAmministratore(user);'));
   verifica('e lo stesso giorno si riscrive, non si aggiunge',
     f.includes("const gia = await svc.IndicatoreGiorno.filter({ giorno });") && f.includes('await svc.IndicatoreGiorno.update(gia[0].id, riga);'));
   verifica('i doppioni nati prima si tolgono', f.includes('for (const d of gia.slice(1)) await svc.IndicatoreGiorno.delete(d.id)'));
   // 2. Nessun anno cablato: il 1° gennaio deve passare da se'.
   verifica('senza anno il lavoro notturno usa quello corrente',
-    f.includes("const annoNum = Number(anno) || (registra ? Number(oggiRoma().slice(0, 4)) : 0);"));
+    f.includes("const annoNum = Number(anno) || (registraChiesto ? Number(oggiRoma().slice(0, 4)) : 0);"));
   const w = sorgente('base44/workflows/GuardianoNotturno.jsonc');
   verifica('e nello scheduler non c e scritto nessun anno', !/"anno"\s*:/.test(w), w.slice(w.indexOf('args'), w.indexOf('args') + 80));
   verifica('gira ogni notte', /"cron_expression":\s*"0 5 \* \* \*"/.test(w));
