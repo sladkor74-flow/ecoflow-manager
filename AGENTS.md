@@ -1853,8 +1853,13 @@ istruita, e sono state misurate sul codice:
   t»). La regola e' nelle istruzioni (3-duodecies) e la risposta passa da
   `numeriAllItaliana` (`shared/formato.ts`), che converte SOLO l'inequivocabile:
   un numero con un'unita' (t, kg, euro, €, %), col punto decimale e una o due
-  cifre, o con la virgola delle migliaia, o intero lungo. «3.385 t» resta com'e'
-  (tre o tremila?), e cosi' ore, date e numeri d'ordine. Prova: `prove/numeriEcotyna.mjs`.
+  cifre (o quattro e piu'), o con la virgola delle migliaia, o intero lungo.
+  Decimali come vuole l'utente: fino a tre se servono e sono significativi,
+  tonnellate almeno due, euro sempre due, niente zeri inutili in coda. «3.385 t»
+  (tre o tremila?) si decide coi numeri che EcoTyna ha ricevuto (`numeriDeiDati`);
+  senza, resta com'e'. Ore, date e numeri d'ordine non si toccano. Prova:
+  `prove/numeriEcotyna.mjs`. E un filtro gia' messo col nome vicino (Green Tyre
+  come raccoglitore e come fornitore) non e' un filtro ignorato.
 - **La fatturazione si calcola, non si legge** (audit del 10/10/2026). Lo
   strumento `fatturazione` fa lo stesso conto del modulo sui movimenti di oggi,
   attiva e passiva, col mese o senza: senza mese, mese per mese fino a quello in

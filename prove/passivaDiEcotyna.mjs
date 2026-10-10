@@ -259,5 +259,19 @@ console.log('UN MESE CHE NON E\' UN MESE, ACCANTO A MESI VERI: L\'AVVISO DICE CO
   verifica("attiva, due mesi e uno storto: non dice «ho preso l'anno» se ha preso due mesi", /Marzolino/.test(attiva.avviso_periodo || '') && !/l'anno/.test(attiva.avviso_periodo || '') && /Febbraio, Marzo/.test(attiva.avviso_periodo || ''), attiva.avviso_periodo);
 }
 
+console.log("UN FILTRO GIA' MESSO COL NOME VICINO NON E' UN FILTRO IGNORATO");
+{
+  // Visto in produzione il 10/10/2026: il pianificatore scriveva «Green Tyre» sia
+  // come raccoglitore sia come fornitore; il raccolto filtrava sul primo e la
+  // risposta diceva «non filtrato per il fornitore» su 232,36 t di Green Tyre.
+  const { strumentiDalPiano } = await import(R + 'pianoAssistente.ts');
+  const piano = { strumenti: [{ nome: 'raccolto', parametri: { canale: 'RETE', mese: 'Settembre', raccoglitore: 'Green Tyre', fornitore: 'Green Tyre' } }], canali: ['RETE'], periodo: { anno: 2026, mese: 'Settembre' } };
+  const [s] = strumentiDalPiano(piano, STRUMENTI, '2026-10-10', 'Quante tonnellate ha raccolto Green Tyre a settembre?');
+  verifica('lo stesso nome due volte: filtrato, e niente ignorati', s && s.parametri.raccoglitore === 'Green Tyre' && (s.ignorati || []).length === 0, JSON.stringify(s));
+  const diverso = { ...piano, strumenti: [{ nome: 'raccolto', parametri: { canale: 'RETE', mese: 'Settembre', raccoglitore: 'Green Tyre', fornitore: 'Emmesse' } }] };
+  const [d] = strumentiDalPiano(diverso, STRUMENTI, '2026-10-10', 'Quante tonnellate hanno raccolto Green Tyre ed Emmesse a settembre?');
+  verifica('due nomi diversi: il secondo resta un filtro ignorato, e si dice', d && (d.ignorati || []).some(i => i.parametro === 'fornitore'), JSON.stringify(d));
+}
+
 console.log(`\n${ok} superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

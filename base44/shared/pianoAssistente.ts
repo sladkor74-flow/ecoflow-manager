@@ -213,6 +213,13 @@ export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
       // Un filtro scritto con il nome vicino si recupera; uno che non esiste
       // proprio si segnala, perche' buttarlo via in silenzio vuol dire
       // rispondere su tutto quando era stato chiesto su uno.
+      // Lo stesso filtro gia' messo col nome vicino non e' un filtro ignorato: il
+      // pianificatore scriveva «Green Tyre» sia come raccoglitore sia come fornitore,
+      // il raccolto filtrava sul primo e il secondo finiva fra gli ignorati, e la
+      // risposta diceva «non filtrato per il fornitore» su un numero filtrato
+      // (visto in produzione il 10/10/2026).
+      const uguale = (x, y) => String(x).toLowerCase().replace(/[^a-z0-9]/g, '') === String(y).toLowerCase().replace(/[^a-z0-9]/g, '');
+      if ((SINONIMI_PARAMETRI[k] || []).some(a => ok.has(a) && base[a] !== undefined && uguale(base[a], v))) continue;
       const alias = (SINONIMI_PARAMETRI[k] || []).find(a => ok.has(a) && base[a] === undefined);
       if (alias) { base[alias] = v; continue; }
       // Si segnala solo un filtro che l'utente ha DAVVERO chiesto, cioe' il cui
