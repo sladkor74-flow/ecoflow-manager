@@ -175,7 +175,11 @@ export function strumentiDalPiano(piano, catalogo, oggi, domanda = '') {
   // settembre a chi aveva chiesto l'anno.
   const chiedeAnno = /(quest'? ?anno|nell'anno|dell'anno|annual|da inizio anno|dall'inizio dell'anno|finora|fino a oggi|a oggi|year to date|ytd)/.test(t);
   const nominaMese = /(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre|questo mese|mese scorso|il mese)/.test(t);
-  const senzaMese = chiedeAnno && !nominaMese;
+  // «Da gennaio a oggi» nomina un mese ma chiede l'anno fino a oggi (visto in
+  // produzione il 10/10/2026: alla passiva di Green Tyre «da gennaio a oggi» il
+  // pianificatore metteva ottobre, e la risposta era un mese solo).
+  const daInizioAnno = /\bdal?\s+(?:1°?\s+|primo\s+)?gennaio\s+(?:a|ad|al|fino\s+ad?)\s+(?:oggi|adesso|ora)\b/.test(t);
+  const senzaMese = (chiedeAnno && !nominaMese) || daInizioAnno;
   const scelti = [];
   const sconosciuti = [];
   // Prima si scartano i nomi che non esistono, poi si conta fino a quattro:

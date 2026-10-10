@@ -112,6 +112,28 @@ console.log('SENZA IL CANALE: TRE CONTI, NESSUN TOTALE');
   verifica('nessun totale che somma i canali', !('euro' in d) && !('totale' in d) && !('totale_euro' in d));
 }
 
+console.log("PIU' MESI INSIEME");
+{
+  const due = await chiedi({ anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mesi: ['Febbraio', 'Marzo'] });
+  verifica('febbraio e marzo: 1.500 + 480 + 1.040 = 3.020 euro, solo quei due mesi', due.canali[0].euro === 3020 && due.canali[0].mesi.map(m => m.mese).join() === 'Febbraio,Marzo', JSON.stringify(due.canali[0].mesi));
+  const intervallo = await chiedi({ anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', fornitore: 'Green Tyre', mese: 'da gennaio a febbraio' });
+  verifica('un intervallo scritto nel mese si apre: gennaio e febbraio di Green Tyre, 4.500 euro', intervallo.canali[0].euro === 4500, JSON.stringify(intervallo.canali[0].mesi));
+}
+
+console.log("IL PIANIFICATORE: «DA GENNAIO A OGGI» E' L'ANNO FINO A OGGI");
+{
+  // Visto in produzione il 10/10/2026: il pianificatore metteva il mese in corso
+  // e la risposta diceva un mese solo, «il cumulativo non e' disponibile».
+  const { strumentiDalPiano } = await import(R + 'pianoAssistente.ts');
+  const piano = (mese) => ({ strumenti: [{ nome: 'fatturazione', parametri: { tipo: 'PASSIVA', fornitore: 'Green Tyre', tipologia: 'RETE', mese } }], periodo: { anno: 2026, mese } });
+  const [a] = strumentiDalPiano(piano('Ottobre'), STRUMENTI, '2026-10-10', 'Quanto abbiamo da pagare a Green Tyre per la rete nel 2026, da gennaio a oggi?');
+  verifica("da gennaio a oggi: nessun mese, quindi tutto l'anno", a && !a.parametri.mese && !a.parametri.mesi, JSON.stringify(a && a.parametri));
+  const [b] = strumentiDalPiano(piano('Ottobre'), STRUMENTI, '2026-10-10', 'Quanto dobbiamo a Green Tyre per ottobre?');
+  verifica('ottobre resta ottobre', b && b.parametri.mese === 'Ottobre', JSON.stringify(b && b.parametri));
+  const [c] = strumentiDalPiano({ ...piano(''), strumenti: [{ nome: 'fatturazione', parametri: { tipo: 'PASSIVA', tipologia: 'RETE', mesi: ['Gennaio', 'Febbraio', 'Marzo'] } }] }, STRUMENTI, '2026-10-10', 'La passiva della rete da gennaio a marzo');
+  verifica('da gennaio a marzo restano tre mesi, e lo strumento li riceve', c && Array.isArray(c.parametri.mesi) && c.parametri.mesi.length === 3, JSON.stringify(c && c.parametri));
+}
+
 console.log('LE DOMANDE STORTE');
 {
   const d = await chiedi({ anno: ANNO, tipo: 'PASSIVA', tipologia: 'RETE', mese: 'Marzolino' });

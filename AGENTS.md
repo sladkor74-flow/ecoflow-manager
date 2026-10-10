@@ -1803,6 +1803,11 @@ istruita, e sono state misurate sul codice:
   e leggendo quelle, a «quanto abbiamo pagato a Green Tyre quest'anno», EcoTyna
   rispondeva «nessun importo». Il numero dell'anno e' lo stesso dei mesi del
   modulo sommati e del costo del margine: `prove/passivaDiEcotyna.mjs`.
+  Accetta anche **piu' mesi** (`mesi`, letti con `mesiChiesti` come nel
+  raccolto), e il pianificatore legge **«da gennaio a oggi»** come l'anno fino a
+  oggi: nominava un mese, e la regola che toglie il mese alle domande sull'anno
+  non scattava. Visto in produzione il 10/10/2026, subito dopo la correzione:
+  ottobre al posto dell'anno, e «il cumulativo non e' disponibile».
 
 ## I caricamenti, lo storico e il registro
 

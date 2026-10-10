@@ -381,7 +381,7 @@ const euro2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
  * sull'anno si confrontano i totali, che bastano a dire quale mese e' indietro.
  * Rete, ACI ed extra raccolta: tre conti, nessun totale che li somma.
  */
-async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, tipologia, fornitore }) {
+async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, tipologia, fornitore, mesiLista = [] }) {
   const svc = base44.asServiceRole.entities;
   const [reteAll, aciAll, extraAll, fornitori, tariffe, documenti] = await Promise.all([
     fetchAll(svc.PrimariaRete), fetchAll(svc.PrimariaAci), fetchAll(svc.ExtraRaccolta),
@@ -405,7 +405,7 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
   const oggi = oggiRoma();
   const annoOggi = Number(oggi.slice(0, 4));
   const ultimo = anno < annoOggi ? 11 : anno === annoOggi ? Number(oggi.slice(5, 7)) - 1 : -1;
-  const mesi = meseChiesto ? [meseChiesto] : MESI.slice(0, ultimo + 1);
+  const mesi = meseChiesto ? [meseChiesto] : mesiLista.length ? mesiLista : MESI.slice(0, ultimo + 1);
 
   const perCanale = new Map(canali.map(c => [c, { canale: c, kg: 0, ordini: 0, euro: 0, senza_prezzo: 0, kg_senza_prezzo: 0, mesi: [] }]));
   const anomalie = [];
@@ -475,7 +475,7 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
 
   return {
     fonte: `Fatturazione attiva verso Ecotyre, calcolata sui dati di oggi${chiesta ? `, canale ${chiesta}` : ', un canale per volta'}`,
-    periodo: meseChiesto ? `${meseChiesto} ${anno}` : ultimo >= 0 ? `anno ${anno}, da ${MESI[0]} a ${MESI[ultimo]}` : `anno ${anno}`,
+    periodo: meseChiesto ? `${meseChiesto} ${anno}` : mesiLista.length ? `${mesiLista.join(', ')} ${anno}` : ultimo >= 0 ? `anno ${anno}, da ${MESI[0]} a ${MESI[ultimo]}` : `anno ${anno}`,
     dati_al: oggi,
     dati: {
       canali: [...perCanale.values()].map(x => ({
@@ -485,7 +485,7 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
       })),
       anomalie: elenco(anomalie, 30),
       ...(conDate.length ? { date_obbligatorie_da_sistemare: conDate.map(x => ({ canale: x.canale, ...x.date })) } : {}),
-      ...(ultimo < 0 && !meseChiesto ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
+      ...(ultimo < 0 && !meseChiesto && !mesiLista.length ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
       ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
       ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: ci sono tutti e tre, separati.` } : {}),
       ...(fornitore ? { avviso_fornitore: 'Nell\'attiva il cliente e\' uno solo, Ecotyre: il filtro sul fornitore non si applica.' } : {}),
@@ -505,7 +505,7 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
  * rileggerebbe dodici volte. Rete, ACI ed extra raccolta: tre conti, nessun
  * totale che li somma.
  */
-async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, fornitore }) {
+async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, fornitore, mesiLista = [] }) {
   const svc = base44.asServiceRole.entities;
   const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll] = await Promise.all([
     fetchAll(svc.PrimariaRete), fetchAll(svc.PrimariaAci), fetchAll(svc.Secondaria), fetchAll(svc.ExtraRaccolta),
@@ -518,7 +518,9 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
   const oggi = oggiRoma();
   const annoOggi = Number(oggi.slice(0, 4));
   const ultimo = anno < annoOggi ? 11 : anno === annoOggi ? Number(oggi.slice(5, 7)) - 1 : -1;
-  const mesi = MESI.slice(0, ultimo + 1);
+  // Piu' mesi chiesti («da marzo a maggio»): quelli, gia' aperti da mesiChiesti.
+  // Senza, i mesi dell'anno fino a quello in corso.
+  const mesi = mesiLista.length ? mesiLista : MESI.slice(0, ultimo + 1);
   const k = fornitore ? normalizzaRagioneSociale(fornitore) : '';
   const r3 = (t) => Math.round((Number(t) || 0) * 1000) / 1000;
   const SEZIONI = [['raccolta', 'raccoglitori'], ['impianti e stoccaggi', 'impianti_stoccaggi'], ['trasporto di secondaria', 'trasporti_secondaria']];
@@ -586,13 +588,13 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
 
   return {
     fonte: `Fatturazione passiva, calcolata sui dati di oggi${chiesta ? `, canale ${chiesta}` : ', un canale per volta'}`,
-    periodo: ultimo >= 0 ? `anno ${anno}, da ${MESI[0]} a ${MESI[ultimo]}` : `anno ${anno}`,
+    periodo: mesiLista.length ? `${mesiLista.join(', ')} ${anno}` : ultimo >= 0 ? `anno ${anno}, da ${MESI[0]} a ${MESI[ultimo]}` : `anno ${anno}`,
     dati_al: oggi,
     dati: {
       canali: conti,
       ...(k ? { fornitore_chiesto: fornitore } : {}),
-      ...(ultimo < 0 ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
-      ...(meseIgnorato ? { avviso_periodo: `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
+      ...(ultimo < 0 && !mesiLista.length ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
+      ...(meseIgnorato ? { avviso_periodo: mesiLista.length ? `"${meseIgnorato}" non e' un mese: ho preso gli altri.` : `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
       ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: ci sono tutti e tre, separati.` } : {}),
       nota: 'Conto fatto adesso sui movimenti terminati, per fine trasporto, mese per mese, lo stesso del modulo Fatturazione passiva. Il mese in corso cambia a ogni caricamento. Un fornitore che ne fattura un altro porta il secondo in "di cui": si paga al primo. Le tonnellate di una sezione non si sommano a quelle di un\'altra: la raccolta e il trasporto di secondaria sono lo stesso materiale che si sposta. Rete, ACI ed extra raccolta non si sommano.',
     },
@@ -1678,7 +1680,7 @@ export const STRUMENTI = [
   {
     nome: 'fatturazione',
     descrizione: 'Quanto dobbiamo pagare ai fornitori (passiva) e quanto ci spetta (attiva), per fornitore e per mese. La passiva fa lo stesso conto del modulo sui movimenti terminati: col mese indicato quel mese, senza mese tutti i mesi dell\'anno fino a quello in corso, uno per uno. L\'attiva si calcola sempre sui dati di oggi, mese per mese, e dice di quanto il documento salvato e\' indietro. I canali restano separati.',
-    parametri: { anno: 'numero', mese: 'nome del mese, opzionale: senza, tutto l\'anno mese per mese', tipo: 'PASSIVA o ATTIVA', tipologia: 'RETE, ACI o EXTRA_RACCOLTA', fornitore: 'opzionale' },
+    parametri: { anno: 'numero', mese: 'nome del mese, opzionale: senza, tutto l\'anno mese per mese', mesi: 'elenco di nomi di mese, per una domanda su piu\' mesi ("da marzo a maggio": scrivili tutti)', tipo: 'PASSIVA o ATTIVA', tipologia: 'RETE, ACI o EXTRA_RACCOLTA', fornitore: 'opzionale' },
     moduli: ['Fatturazione'],
     async esegui(base44, p) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
@@ -1688,8 +1690,13 @@ export const STRUMENTI = [
       // Il mese si normalizza subito, prima di qualunque ramo: nei documenti
       // salvati e' scritto con l'iniziale maiuscola, e un "marzo" minuscolo
       // passato al filtro non trovava niente e faceva dire "nessun importo".
-      const meseChiesto = p.mese ? MESI.find(m => m.toLowerCase() === String(p.mese).toLowerCase()) : '';
-      const meseIgnorato = p.mese && !meseChiesto ? String(p.mese) : '';
+      // Piu' mesi insieme si leggono come nel raccolto (mesiChiesti): «da marzo
+      // a maggio» sono tre mesi. Uno solo e' il mese chiesto, col suo conto di
+      // sempre; piu' d'uno vanno sommati mese per mese, nello stesso canale.
+      const periodoChiesto = mesiChiesti(p.mese, p.mesi);
+      const meseChiesto = periodoChiesto.nomi.length === 1 ? periodoChiesto.nomi[0] : '';
+      const mesiLista = periodoChiesto.nomi.length > 1 ? periodoChiesto.nomi : [];
+      const meseIgnorato = periodoChiesto.ignorati.join(', ');
 
       // La passiva di un mese si calcola, non si legge: le voci salvate esistono
       // solo dopo che qualcuno ha elaborato e salvato il documento, e chiedendo
@@ -1796,12 +1803,12 @@ export const STRUMENTI = [
       // col caricamento del 04/07 non esisteva per "quanto ci spetta a giugno"
       // finche' qualcuno non rielaborava il mese: la pagina lo vedeva con la
       // riconciliazione, EcoTyna no.
-      if (tipo === 'ATTIVA') return await attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, tipologia: p.tipologia, fornitore: p.fornitore });
+      if (tipo === 'ATTIVA') return await attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, tipologia: p.tipologia, fornitore: p.fornitore, mesiLista });
 
       // La passiva senza mese: lo stesso conto, mese per mese (audit del
       // 10/10/2026). Qui prima si leggevano le voci dei documenti salvati, e
       // della passiva non ne esiste nessuna.
-      if (tipo === 'PASSIVA') return await passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia: p.tipologia, fornitore: p.fornitore });
+      if (tipo === 'PASSIVA') return await passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia: p.tipologia, fornitore: p.fornitore, mesiLista });
       return {
         fonte: 'Fatturazione',
         periodo: meseChiesto ? `${meseChiesto} ${anno}` : `anno ${anno}`,
