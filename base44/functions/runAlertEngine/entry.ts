@@ -265,7 +265,7 @@ export default async function(req) {
     if (modulo === 'primarie_rete') {
       // Target dell'anno in corso, sommati per raccoglitore, regione e mese.
       const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter({ anno: Number(oggiRoma().slice(0, 4)) }, '-created_date', 5000));
-      newAlerts.push(...checkAggregateRules(records, regole, existingKeys, targets, attuali));
+      newAlerts.push(...checkAggregateRules(records, regole, existingKeys, targets, attuali, 'PrimariaRete', 'primarie_rete', '', tutti));
     } else if (modulo === 'secondarie') {
       // Le secondarie di rete e quelle ACI stanno nello stesso archivio: contarle
       // insieme farebbe un denominatore che non esiste in nessun altro modulo, e
@@ -540,7 +540,8 @@ function soloRotte(records, existingKeys, attuali, archivio, modulo, canale = ''
 }
 
 // --- Controlli aggregati per primarie_rete ---
-function checkAggregateRules(records, regole, existingKeys, targets = [], attuali = new Map(), archivio = 'PrimariaRete', modulo = 'primarie_rete', canale = '') {
+// storico: tutti i ritiri, anche degli anni prima, per le province a cavallo d'anno.
+function checkAggregateRules(records, regole, existingKeys, targets = [], attuali = new Map(), archivio = 'PrimariaRete', modulo = 'primarie_rete', canale = '', storico = records) {
   const alerts = [];
   // Ogni condizione trovata si segna col testo calcolato adesso, anche quando
   // l'alert c'e' gia' (per riscriverne il testo); si crea solo se la chiave non
@@ -583,7 +584,10 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
   // Regole province inattive (2 mesi consecutivi a zero)
   const regoleProvince = regole.filter(r => r.tipo_regola === 'province_inattive');
   if (regoleProvince.length > 0) {
-    const matrix = computeProvinceMatrixData(records);
+    // Tutti i ritiri, non solo quelli dell'anno: a gennaio e febbraio la funzione
+    // guarda anche novembre e dicembre dell'anno prima (la coppia a cavallo d'anno,
+    // revisione del 10/10/2026). I terminati e gli anni li sceglie lei.
+    const matrix = computeProvinceMatrixData(storico);
     for (const prov of matrix.province_with_zeros) {
       for (const regola of regoleProvince) {
         const key = `${prov.provincia}|||${regola.id}`;

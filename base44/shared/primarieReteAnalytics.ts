@@ -28,6 +28,9 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
   const byProvince: Record<string, any> = {};
   // i ritiri contati nella matrice, per le date da sistemare (in fondo)
   const contati = [];
+  // Novembre e dicembre dell'anno prima, per provincia: servono solo a gennaio e
+  // febbraio, per la coppia a cavallo d'anno (piu' sotto).
+  const codaAnnoPrima = new Map(); // provincia -> { regione, nov, dic }
 
   for (const r of records) {
     const provincia = (r.provincia || '').toUpperCase().trim();
@@ -38,6 +41,13 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
     // (base44/shared/movimenti.ts). Prima entravano anche i cancellati.
     if (!eTerminato(r)) continue;
     const periodo = periodoMovimento(r);
+    if (periodo && periodo.anno === currYear - 1) {
+      if (!codaAnnoPrima.has(provincia)) codaAnnoPrima.set(provincia, { regione, nov: 0, dic: 0 });
+      const coda = codaAnnoPrima.get(provincia);
+      if (periodo.mese_idx === 10) coda.nov++;
+      if (periodo.mese_idx === 11) coda.dic++;
+      continue;
+    }
     if (!periodo || periodo.anno !== currYear) continue;
 
     const mese = MESI[periodo.mese_idx];
@@ -102,7 +112,40 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
     byRegione[p.regione].push(p);
   }
 
-  const provinceWithZeros = provinceArray.filter(p => p.has_2_consecutive_zeros);
+  // LA COPPIA A CAVALLO D'ANNO (revisione del 10/10/2026). Contano solo i mesi
+  // finiti, e a gennaio dell'anno non ce n'e' nessuno: novembre e dicembre a zero
+  // non li segnalava piu' nessuno - a dicembre il mese non era finito, a gennaio
+  // l'anno era cambiato. Prima del 10/10 l'avviso nasceva il primo dicembre, da un
+  // mese cominciato da un giorno. A gennaio e febbraio si guardano anche novembre
+  // e dicembre dell'anno prima, per le province che l'anno prima lavoravano; una
+  // ferma da allora, senza ritiri quest'anno, non ha una riga nella tabella
+  // dell'anno ma va nell'avviso.
+  const fermeDallAnnoPrima = [];
+  if (currMonth <= 1) {
+    const prima = currYear - 1;
+    const nome = (i) => (i < 0 ? `${MESI[12 + i]} ${prima}` : MESI[i]);
+    const coppiaVuota = (coda, correnti) => {
+      const serie = [[-2, coda.nov], [-1, coda.dic], ...correnti.map((c, i) => [i, c])];
+      let coppia = null;
+      for (let i = 1; i < serie.length; i++) {
+        if (serie[i - 1][1] === 0 && serie[i][1] === 0) coppia = { start: nome(serie[i - 1][0]), end: nome(serie[i][0]) };
+      }
+      return coppia;
+    };
+    for (const p of provinceArray) {
+      const coda = codaAnnoPrima.get(p.provincia);
+      if (!coda) continue;
+      const coppia = coppiaVuota(coda, MESI.slice(0, currMonth).map(m => p.mesi[m]));
+      if (coppia) { p.has_2_consecutive_zeros = true; p.last_zero_pair = coppia; }
+    }
+    for (const [provincia, coda] of codaAnnoPrima) {
+      if (byProvince[provincia]) continue;
+      const coppia = coppiaVuota(coda, MESI.slice(0, currMonth).map(() => 0));
+      if (coppia) fermeDallAnnoPrima.push({ provincia, regione: coda.regione, has_2_consecutive_zeros: true, last_zero_pair: coppia, solo_anno_prima: true });
+    }
+  }
+
+  const provinceWithZeros = [...provinceArray.filter(p => p.has_2_consecutive_zeros), ...fermeDallAnnoPrima];
 
   return {
     province: provinceArray,

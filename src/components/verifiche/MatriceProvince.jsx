@@ -13,8 +13,10 @@ import { oggiRoma } from '@/lib/giornoItaliano';
 // tipo: 'peso' | 'ritiri'
 
 // Due mesi di fila senza ritiri in una provincia sono il primo segnale: al terzo
-// mese consecutivo il consorzio considera la provincia scoperta. I mesi non ancora
-// passati non contano, altrimenti da gennaio tutto l'anno sarebbe rosso.
+// mese consecutivo il consorzio considera la provincia scoperta. Contano solo i
+// mesi FINITI: quelli non ancora passati, altrimenti da gennaio tutto l'anno
+// sarebbe rosso, e nemmeno il mese in corso, che il primo del mese e' un mese di
+// un giorno (come nel motore di alert, revisione del 10/10/2026).
 function mesiSenzaRitiri(riga, mesiTrascorsi) {
   const serie = [];
   let inizio = null;
@@ -60,12 +62,13 @@ export default function MatriceProvince({ tipo = 'peso' }) {
   useEffect(() => { carica(); }, [carica]);
 
   const peso = tipo === 'peso';
-  // Nell'anno in corso valgono i mesi fino a quello corrente, come nel motore di
-  // alert. Anno e mese sono quelli di oggi in Italia, non dell'orologio del
-  // dispositivo: fra il 31/12 e l'1/1 e a cavallo di fine mese sbagliava di un mese.
+  // Nell'anno in corso valgono i mesi FINITI, come nel motore di alert: il mese in
+  // corso no. Prima qui contava anche lui, e Verifiche segnalava due mesi vuoti che
+  // il motore, da quando li ha tolti, non segnala (revisione del 10/10/2026). Anno e
+  // mese sono quelli di oggi in Italia, non dell'orologio del dispositivo.
   const oggi = oggiRoma();
   const annoOggi = Number(oggi.slice(0, 4));
-  const mesiTrascorsi = dati ? (dati.anno < annoOggi ? 12 : dati.anno === annoOggi ? Number(oggi.slice(5, 7)) : 0) : 0;
+  const mesiTrascorsi = dati ? (dati.anno < annoOggi ? 12 : dati.anno === annoOggi ? Number(oggi.slice(5, 7)) - 1 : 0) : 0;
   // Regola 1: chi resta fuori dalla matrice si conta e si dice, solo se c'e'.
   // I terminati senza fine trasporto sono di qualunque anno, i ritiri senza
   // provincia dell'anno mostrato.

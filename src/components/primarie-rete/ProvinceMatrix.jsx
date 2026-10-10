@@ -82,11 +82,13 @@ export default function ProvinceMatrix({ data }) {
                       )}
                     </td>
                     <td className="px-3 py-2 text-right font-semibold">{p.fir_total}</td>
+                    {/* Il mese in corso si mostra ma non si colora: non e' un mese
+                        vuoto, e' un mese non ancora finito (revisione del 10/10/2026). */}
                     {p.mesiValues.map(mv => (
                       <td
                         key={mv.mese}
                         className={`text-center px-2 py-2 ${
-                          mv.count === 0 && mv.passed
+                          mv.count === 0 && mv.passed && mv.mese !== current_month
                             ? 'bg-red-100 text-red-700 font-medium'
                             : mv.count > 0
                             ? ''

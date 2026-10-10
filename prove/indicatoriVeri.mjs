@@ -73,6 +73,44 @@ console.log('LE PROVINCE: IL MESE IN CORSO NON E\' UN MESE VUOTO');
   verifica('a gennaio nessuna provincia ha due mesi vuoti', g.province_with_zeros.length === 0);
 }
 
+console.log("LE PROVINCE A CAVALLO D'ANNO (revisione del 10/10/2026)");
+{
+  // Contando solo i mesi finiti, novembre e dicembre a zero non li segnalava piu'
+  // nessuno: a dicembre il mese non era finito, a gennaio l'anno era cambiato.
+  const anno = Number(oggiRoma().slice(0, 4)), prima = anno - 1;
+  const mm = (i) => String(i + 1).padStart(2, '0');
+  const rit = (prov, a, meseIdx) => ({ provincia: prov, stato: 'terminato', numero_fir: `F${prov}${a}${meseIdx}`, trasporto_finito_il: `${a}-${mm(meseIdx)}-10T09:00:00Z` });
+  const records = [
+    rit('TA', prima, 2), rit('TA', anno, 0),                    // lavorava a marzo, poi niente fino a gennaio
+    rit('LE', prima, 2), rit('LE', prima, 11), rit('LE', anno, 0), // a dicembre ha lavorato
+    rit('FG', prima, 4),                                         // ferma da maggio, quest'anno niente
+    rit('BR', prima, 10), rit('BR', anno, 1),                    // novembre si', dicembre e gennaio no, febbraio si'
+    rit('NUOVA', anno, 0),                                       // l'anno prima non c'era: niente da dire
+  ];
+  const gen = computeProvinceMatrixData(records, 0);
+  const pg = (x) => gen.province.find(q => q.provincia === x);
+  verifica("a gennaio: TA, ferma a novembre e dicembre dell'anno prima, si segnala", pg('TA') && pg('TA').has_2_consecutive_zeros && pg('TA').last_zero_pair.start === `Novembre ${prima}` && pg('TA').last_zero_pair.end === `Dicembre ${prima}`, JSON.stringify(pg('TA') && pg('TA').last_zero_pair));
+  verifica('LE, che a dicembre ha lavorato, no', pg('LE') && !pg('LE').has_2_consecutive_zeros);
+  verifica("una provincia nuova non si segnala per mesi in cui non c'era", pg('NUOVA') && !pg('NUOVA').has_2_consecutive_zeros);
+  const fg = gen.province_with_zeros.find(q => q.provincia === 'FG');
+  verifica("FG, ferma dall'anno prima e senza ritiri quest'anno: nell'avviso, non nella tabella", fg && fg.solo_anno_prima === true && !gen.province.some(q => q.provincia === 'FG'), JSON.stringify(gen.province_with_zeros.map(q => q.provincia)));
+  const feb = computeProvinceMatrixData(records, 1);
+  const br = feb.province.find(q => q.provincia === 'BR');
+  verifica('a febbraio: BR, dicembre e gennaio a zero, si segnala', br && br.has_2_consecutive_zeros && br.last_zero_pair.start === `Dicembre ${prima}` && br.last_zero_pair.end === 'Gennaio', JSON.stringify(br && br.last_zero_pair));
+  const apr = computeProvinceMatrixData([...records, rit('TA', anno, 1), rit('TA', anno, 2)], 3);
+  verifica("ad aprile l'anno prima non conta piu': TA ha lavorato gennaio-marzo, niente avviso", apr.province.find(q => q.provincia === 'TA') && !apr.province.find(q => q.provincia === 'TA').has_2_consecutive_zeros);
+}
+
+console.log('LE DUE PAGINE DELLE PROVINCE DICONO LO STESSO DEL MOTORE');
+{
+  const ver = readFileSync(new URL('../src/components/verifiche/MatriceProvince.jsx', import.meta.url), 'utf8');
+  verifica("Verifiche conta solo i mesi finiti, come il motore", ver.includes("dati.anno === annoOggi ? Number(oggi.slice(5, 7)) - 1 : 0"));
+  const pr = readFileSync(new URL('../src/components/primarie-rete/ProvinceMatrix.jsx', import.meta.url), 'utf8');
+  verifica('Primarie Rete non colora di rosso il mese in corso', pr.includes('mv.count === 0 && mv.passed && mv.mese !== current_month'));
+  const mo = readFileSync(new URL('../base44/functions/runAlertEngine/entry.ts', import.meta.url), 'utf8');
+  verifica("il motore di alert da' alla matrice anche l'anno prima, se no la coppia a cavallo d'anno non diventa mai un alert", mo.includes('computeProvinceMatrixData(storico)') && mo.includes("'primarie_rete', '', tutti))"));
+}
+
 console.log('I NOMI DEI RACCOGLITORI: SI TOLGONO GLI SPAZI, NON LE S');
 {
   const src = readFileSync(new URL('../base44/functions/andamentoRaccoglitori/entry.ts', import.meta.url), 'utf8');

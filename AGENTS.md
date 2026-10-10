@@ -831,6 +831,13 @@ luglio altrove (audit del 10/10/2026). Si usa `giornoRoma`. Nella stessa prova
 province contava **il mese in corso come un mese vuoto** (il primo del mese,
 due mesi senza raccolte per un mese cominciato da un giorno), e la regex dei
 nomi dei raccoglitori era `/s+/` e toglieva le lettere «s» invece degli spazi.
+Contando solo i mesi finiti, pero', la coppia **novembre-dicembre** non la vedeva
+piu' nessuno (a dicembre il mese non e' finito, a gennaio l'anno e' cambiato):
+a gennaio e febbraio la matrice guarda anche novembre e dicembre dell'anno prima,
+per le province che l'anno prima lavoravano, e il motore di alert le passa tutti
+i ritiri, non solo quelli dell'anno. La matrice di Verifiche conta anche lei solo
+i mesi finiti, e quella delle Primarie non colora di rosso il mese in corso
+(revisione del 10/10/2026).
 Gli specchi in `src/lib` devono restare identici agli originali: lo controlla
 `prove/specchi.mjs`. **Prima di spingere: `npm run lint` e `npm run prove`.**
 
