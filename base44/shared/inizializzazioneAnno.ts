@@ -228,9 +228,13 @@ export function listaAnno({
     const n = conta(contrattiFornitore, annoNum);
     const prima = conta(contrattiFornitore, annoNum - 1);
     v.quante = n;
-    if (n && prima && n >= prima) { v.stato = 'pronto'; v.dettaglio = `${n} contratti per il ${annoNum}.`; }
-    else if (n) { v.stato = 'parziale'; v.dettaglio = `${n} contratti per il ${annoNum}, contro ${prima} del ${annoNum - 1}.`; }
-    else { v.stato = 'manca'; v.dettaglio = `Nessun contratto per il ${annoNum}; nel ${annoNum - 1} erano ${prima}.`; }
+    // Il confronto con l'anno prima serve solo se l'anno prima ne aveva: dove non
+    // c'erano contratti non c'e' niente da rinnovare, e dirlo «parziale» sarebbe
+    // chiedere di completare una cosa che non esiste (10/10/2026).
+    if (!prima && !n) { v.stato = 'pronto'; v.dettaglio = `Nel ${annoNum - 1} non ce n'erano: niente da rinnovare.`; }
+    else if (!n) { v.stato = 'manca'; v.dettaglio = `Nessun contratto per il ${annoNum}; nel ${annoNum - 1} erano ${prima}.`; }
+    else if (!prima || n >= prima) { v.stato = 'pronto'; v.dettaglio = `${n} ${n === 1 ? 'contratto' : 'contratti'} per il ${annoNum}.`; }
+    else { v.stato = 'parziale'; v.dettaglio = `${n} ${n === 1 ? 'contratto' : 'contratti'} per il ${annoNum}, contro ${prima} del ${annoNum - 1}.`; }
     voci.push(v);
   }
 
@@ -248,5 +252,11 @@ export function listaAnno({
     // Si comincia a insistere a dicembre: prima e' presto, e un avviso dato
     // troppo presto si impara a ignorarlo.
     urgente: mancanti > 0 && giorni !== null && giorni <= 31,
+    // QUANDO VALE LA PENA DIRLO IN DASHBOARD: dal 1° novembre, cioe' due mesi
+    // prima, e finche' resta qualcosa da fare - anche a gennaio inoltrato, se
+    // le tariffe nuove non le ha ancora confermate nessuno. Fuori da questa
+    // finestra la dashboard tace: un avviso che sta li' tutto l'anno non e'
+    // un avviso, e' arredamento.
+    avvicinandosi: giorni !== null && giorni <= 61 && (mancanti > 0 || parziali > 0),
   };
 }

@@ -142,7 +142,10 @@ export function nomeRegola(v) {
  * L'elenco unico delle cose da gestire. Ogni voce: { area, gravita, titolo,
  * dettaglio, link }. dati: { oggi, adessoMs, anno, alertAperti, uploadLogs,
  * tipiFile, assegnatiRete, assegnatiAci, documenti, prefatture, riepilogoQualifica,
- * richiesteEct }.
+ * richiesteEct, verificheSedi, annoNuovo }.
+ *
+ * annoNuovo e' il risultato di listaAnno per l'anno dopo: decide da se' se
+ * valga la pena dirlo (avvicinandosi), e qui si scrive soltanto.
  */
 export function cruscotto(dati) {
   const { oggi, anno } = dati;
@@ -241,6 +244,28 @@ export function cruscotto(dati) {
       `${sediDaDecidere.length} ${sediDaDecidere.length === 1 ? 'sede operativa da decidere' : 'sedi operative da decidere'}`,
       `${diverse ? diverse + ' con un indirizzo diverso da quello del portale. ' : ''}${nomi}`,
       '/pdr?scheda=sedi');
+  }
+
+  // L'ANNO NUOVO, QUANDO COMINCIA AD AVVICINARSI (10/10/2026).
+  //
+  // Il contratto e' annuale senza tacito rinnovo: il 31 dicembre scade tutto,
+  // e dal 1° gennaio una riga senza tariffa vale zero euro e nasce in errore.
+  // La scheda che dice che cosa manca esiste, ma una scheda che nessuno apre
+  // non serve: da due mesi prima la cosa compare qui, dove si guarda ogni
+  // mattina. Quando decidere di parlare lo stabilisce listaAnno
+  // (shared/inizializzazioneAnno.ts): qui si scrive e basta.
+  const an = dati.annoNuovo;
+  if (an && an.avvicinandosi) {
+    const quando = an.giorni_al_primo_gennaio;
+    const cosa = [an.mancanti ? `${an.mancanti} ${an.mancanti === 1 ? 'cosa manca' : 'cose mancano'}` : '',
+      an.parziali ? `${an.parziali} ${an.parziali === 1 ? 'e' : 'sono'} da confermare` : ''].filter(Boolean).join(', ');
+    const tempo = quando > 0
+      ? `${quando} ${quando === 1 ? 'giorno' : 'giorni'} al 1° gennaio.`
+      : `Il ${an.anno} e' gia' cominciato.`;
+    voce('Nuovo anno', quando <= 0 && an.mancanti ? 'critico' : 'attenzione',
+      `${an.anno}: ${cosa}`,
+      `${tempo} ${(an.voci || []).filter(v => v.stato !== 'pronto').map(v => v.titolo).join(' \u00b7 ')}.`,
+      '/target-status?tab=nuovo-anno');
   }
 
   voci.sort((a, b) => GRAVITA[a.gravita] - GRAVITA[b.gravita] || a.area.localeCompare(b.area, 'it'));

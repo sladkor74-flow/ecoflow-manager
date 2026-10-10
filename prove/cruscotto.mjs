@@ -339,5 +339,30 @@ verifica('un canale che non esiste non apre la scrittura a niente',
 verifica('un valore che non e\' un elenco vale come niente detto',
   canaliDaScrivere('ACI').join() === 'RETE' && canaliDaScrivere({ ACI: true }).join() === 'RETE');
 
+console.log('L ANNO NUOVO COMPARE DUE MESI PRIMA, E NON PRIMA');
+{
+  // Il contratto e' annuale senza tacito rinnovo: dal 1° gennaio una riga
+  // senza tariffa vale zero euro. La scheda che lo dice esiste, ma una scheda
+  // che nessuno apre non serve: da due mesi prima la cosa compare qui, dove si
+  // guarda ogni mattina. Un avviso che sta li' tutto l'anno invece e' arredamento.
+  const base = { oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: [], alertAperti: [], uploadLogs: [],
+    assegnatiRete: [], assegnatiAci: [], documenti: [], prefatture: [], riepilogoQualifica: null, richiesteEct: [] };
+  const an = (p) => ({ anno: 2027, mancanti: 2, parziali: 1, giorni_al_primo_gennaio: 40, avvicinandosi: true,
+    voci: [{ titolo: 'Tariffe verso Ecotyre', stato: 'manca' }, { titolo: 'Contratto Ecotyre', stato: 'manca' }, { titolo: 'Target e siti', stato: 'pronto' }], ...p });
+  const vociDi = (annoNuovo) => cruscotto({ ...base, annoNuovo }).da_gestire.filter(v => v.area === 'Nuovo anno');
+  const v = vociDi(an({}))[0];
+  verifica('a quaranta giorni la voce c e', !!v, 'nessuna voce');
+  verifica('e dice che cosa manca e che cosa va confermato', v && /2 cose mancano, 1 e da confermare/.test(v.titolo.replace('è','e')), v && v.titolo);
+  verifica('con i giorni che restano e le voci aperte', v && /40 giorni al 1° gennaio/.test(v.dettaglio) && /Tariffe verso Ecotyre/.test(v.dettaglio) && !/Target e siti/.test(v.dettaglio), v && v.dettaglio);
+  verifica('e porta dritto alla scheda', v && v.link === '/target-status?tab=nuovo-anno');
+  verifica('prima della finestra non si dice niente', vociDi(an({ avvicinandosi: false })).length === 0);
+  verifica('senza l anno nuovo nemmeno', cruscotto(base).da_gestire.filter(x => x.area === 'Nuovo anno').length === 0);
+  // A gennaio con qualcosa ancora mancante non e' piu' un promemoria: e' un guaio.
+  const gen = vociDi(an({ giorni_al_primo_gennaio: -9 }))[0];
+  verifica('ad anno cominciato con qualcosa che manca diventa critico', gen && gen.gravita === 'critico', gen && gen.gravita);
+  verifica('e lo dice con le parole giuste', gen && /gia' cominciato/.test(gen.dettaglio), gen && gen.dettaglio);
+  verifica('se manca solo una conferma resta un avviso, non un guaio',
+    (vociDi(an({ giorni_al_primo_gennaio: -9, mancanti: 0 }))[0] || {}).gravita === 'attenzione');
+}
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

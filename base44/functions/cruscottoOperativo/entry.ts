@@ -3,6 +3,8 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { cruscotto } from "../../shared/cruscotto.ts";
+import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
+import { listaAnno } from "../../shared/inizializzazioneAnno.ts";
 
 // Il cruscotto della dashboard: l'elenco unico delle cose da gestire, l'arretrato
 // per canale, la freschezza dei dati, gli alert aperti, lo stato dei mesi della
@@ -21,7 +23,8 @@ export default async function(req) {
     const anno = Number(body.anno) || Number(oggi.slice(0, 4));
 
     const svc = base44.asServiceRole.entities;
-    const [alertAperti, uploadLogs, assegnatiRete, assegnatiAci, documenti, prefatture, riepiloghi, richiesteEct, verificheSedi] = await Promise.all([
+    const [alertAperti, uploadLogs, assegnatiRete, assegnatiAci, documenti, prefatture, riepiloghi, richiesteEct, verificheSedi,
+      tariffe, giacenzeSito, impiantiTarget, commesse, contrattiFornitore, rilevazioni] = await Promise.all([
       fetchAll(svc.Alert, { stato: 'aperto' }),
       svc.UploadLog.list('-created_date', 200),
       fetchAll(svc.Assegnato),
@@ -33,6 +36,16 @@ export default async function(req) {
       // I controlli delle sedi operative: poche centinaia di righe, una per
       // punto di raccolta con ordini. Serve sapere quante aspettano una decisione.
       fetchAll(svc.VerificaSedePdr, { superata: false }).catch(() => []),
+      // Che cosa manca all'anno dopo per cominciare. Sono sei archivi piccoli -
+      // tariffe, siti, target, commesse, contratti, rilevazioni: qualche
+      // centinaio di righe in tutto, meno di quanto questa funzione legge gia' -
+      // e la regola decide da se' se valga la pena dirlo (listaAnno).
+      fetchAll(svc.Tariffa).catch(() => []),
+      fetchAll(svc.GiacenzaSito).catch(() => []),
+      fetchAll(svc.ImpiantoTarget).catch(() => []),
+      fetchAll(svc.CommessaEcotyre).catch(() => []),
+      fetchAll(svc.ContrattoFornitore).catch(() => []),
+      fetchAll(svc.GiacenzaStoccaggio).catch(() => []),
     ]);
 
     return Response.json(cruscotto({
@@ -41,6 +54,15 @@ export default async function(req) {
       // delle prefatture bastano mese e stato: le righe non servono qui
       prefatture: (prefatture || []).map(p => ({ anno: p.anno, mese: p.mese, superata: p.superata })),
       riepilogoQualifica: riepiloghi[0] || null, richiesteEct, verificheSedi,
+      annoNuovo: listaAnno({
+        anno: anno + 1, tariffe, giacenzeSito, impiantiTarget, commesse, contrattiFornitore,
+        rilevazioni: (rilevazioni || []).map(r => ({ ...r, sito: normalizzaRagioneSociale(r.sito) })),
+        piazzali: [...new Set([
+          ...(giacenzeSito || []).filter(g => String(g.tipo_destinazione || '').toLowerCase().startsWith('stoc')).map(g => normalizzaRagioneSociale(g.sito)),
+          ...(rilevazioni || []).map(r => normalizzaRagioneSociale(r.sito)),
+        ].filter(Boolean))],
+        oggi,
+      }),
     }));
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

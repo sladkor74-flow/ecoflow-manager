@@ -89,7 +89,8 @@ console.log('LA COPIA: STESSA RIGA, ANNO NUOVO, PREZZO DA CONFERMARE');
 
 console.log('LA LISTA DI CONTROLLO DELL ANNO NUOVO');
 {
-  const vuoto = listaAnno({ anno: 2027, tariffe: TARIFFE_2026, piazzali: ['irigom', 'nappi sud'], rilevazioni: [], oggi: '2026-10-10' });
+  // Il 2026 ha contratti e il 2027 no: e' la situazione vera di ottobre.
+  const vuoto = listaAnno({ anno: 2027, tariffe: TARIFFE_2026, contrattiFornitore: [{ anno: 2026 }, { anno: 2026 }], piazzali: ['irigom', 'nappi sud'], rilevazioni: [], oggi: '2026-10-10' });
   verifica('sei voci', vuoto.voci.length === 6, String(vuoto.voci.length));
   verifica('tutte da fare, e il conto lo dice', vuoto.mancanti === 6 && vuoto.pronte === 0 && vuoto.pronto === false);
   const v = (k) => vuoto.voci.find(x => x.chiave === k);
@@ -105,6 +106,33 @@ console.log('LA LISTA DI CONTROLLO DELL ANNO NUOVO');
     vuoto.giorni_al_primo_gennaio === 83 && vuoto.urgente === false, String(vuoto.giorni_al_primo_gennaio));
   const dicembre = listaAnno({ anno: 2027, tariffe: TARIFFE_2026, piazzali: [], rilevazioni: [], oggi: '2026-12-05' });
   verifica('a dicembre diventa urgente', dicembre.urgente === true && dicembre.giorni_al_primo_gennaio === 27);
+  // LA FINESTRA DELLA DASHBOARD: due mesi prima, e finche' resta qualcosa da
+  // fare. Un avviso che sta li' tutto l'anno non e' un avviso, e' arredamento.
+  const quando = (oggi) => listaAnno({ anno: 2027, tariffe: TARIFFE_2026, piazzali: [], rilevazioni: [], oggi }).avvicinandosi;
+  verifica('in estate la dashboard tace', quando('2026-07-01') === false);
+  verifica('a ottobre ancora', quando('2026-10-10') === false);
+  verifica('dal 1° novembre parla', quando('2026-11-01') === true && quando('2026-10-31') === false);
+  verifica('e continua a parlare anche ad anno cominciato, finche manca qualcosa', quando('2027-02-10') === true);
+  // Ma se non manca niente tace comunque, anche in piena finestra.
+  const aPosto = listaAnno({
+    anno: 2027, oggi: '2026-12-10',
+    tariffe: TARIFFE_2026.map(x => ({ ...copiaTariffa(x, 2027), note: '' })),
+    giacenzeSito: [{ anno: 2027 }], impiantiTarget: [{ anno: 2027 }], commesse: [{ anno: 2027 }],
+    contrattiFornitore: [{ anno: 2027 }], piazzali: [], rilevazioni: [],
+  });
+  verifica('un anno gia pronto non compare in dashboard', aPosto.pronto === true && aPosto.avvicinandosi === false);
+  // Il difetto trovato dalla prova, 10/10/2026: dove l'anno prima non aveva
+  // contratti, averne uno nuovo risultava «parziale» - si chiedeva di completare
+  // una cosa che non esiste.
+  const senzaStorico = listaAnno({ anno: 2027, contrattiFornitore: [], tariffe: [], piazzali: [], rilevazioni: [], oggi: '2026-12-10' });
+  verifica('senza contratti ne prima ne dopo non c e niente da rinnovare',
+    senzaStorico.voci.find(v => v.chiave === 'contratti_fornitori').stato === 'pronto');
+  const soloQuestAnno = listaAnno({ anno: 2027, contrattiFornitore: [{ anno: 2027 }], tariffe: [], piazzali: [], rilevazioni: [], oggi: '2026-12-10' });
+  verifica('e un contratto nuovo senza storico e pronto, non parziale',
+    soloQuestAnno.voci.find(v => v.chiave === 'contratti_fornitori').stato === 'pronto');
+  const meno = listaAnno({ anno: 2027, contrattiFornitore: [{ anno: 2027 }, { anno: 2026 }, { anno: 2026 }], tariffe: [], piazzali: [], rilevazioni: [], oggi: '2026-12-10' });
+  verifica('ma uno su due rispetto all anno prima resta parziale',
+    meno.voci.find(v => v.chiave === 'contratti_fornitori').stato === 'parziale');
 }
 
 console.log('QUANDO L ANNO E PRONTO, LA LISTA TACE');
