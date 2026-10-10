@@ -596,7 +596,7 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
       ...(ultimo < 0 && !mesiLista.length ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
       ...(meseIgnorato ? { avviso_periodo: mesiLista.length ? `"${meseIgnorato}" non e' un mese: ho preso gli altri.` : `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
       ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: ci sono tutti e tre, separati.` } : {}),
-      nota: 'Conto fatto adesso sui movimenti terminati, per fine trasporto, mese per mese, lo stesso del modulo Fatturazione passiva. Il mese in corso cambia a ogni caricamento. Un fornitore che ne fattura un altro porta il secondo in "di cui": si paga al primo. Le tonnellate di una sezione non si sommano a quelle di un\'altra: la raccolta e il trasporto di secondaria sono lo stesso materiale che si sposta. Rete, ACI ed extra raccolta non si sommano.',
+      nota: 'Conto fatto adesso sui movimenti terminati, per fine trasporto, mese per mese, lo stesso del modulo Fatturazione passiva. Il mese in corso cambia a ogni caricamento. Un fornitore che ne fattura un altro porta il secondo in "di cui": si paga al primo. Le tonnellate di una sezione non si sommano a quelle di un\'altra: la raccolta e il trasporto di secondaria sono lo stesso materiale che si sposta.' + (chiesta ? ` Questo e' SOLO il canale ${chiesta}: e' gia' separato, ACI ed extra raccolta hanno il loro conto e qui non ci sono.` : ' Rete, ACI ed extra raccolta sono tre conti qui sopra, uno per canale: non si sommano.'),
     },
   };
 }

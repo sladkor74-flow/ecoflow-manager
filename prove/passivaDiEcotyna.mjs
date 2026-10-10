@@ -101,6 +101,10 @@ console.log('UN FORNITORE SOLO');
   verifica('solo i suoi euro: 4.500', rete.euro === 4500, String(rete.euro));
   verifica('solo lui fra i fornitori', rete.fornitori.quanti === 1 && rete.fornitori.righe[0].fornitore === 'GREEN TYRE SRL', JSON.stringify(rete.fornitori));
   verifica('e solo i suoi mesi: gennaio 3.000, febbraio 1.500', rete.mesi.length === 2 && rete.mesi[0].euro === 3000 && rete.mesi[1].euro === 1500, JSON.stringify(rete.mesi));
+  // Visto in produzione il 10/10/2026: col canale chiesto, la nota generica
+  // («rete, ACI ed extra raccolta non si sommano») faceva scrivere a EcoTyna che
+  // il conto «non distingue i canali». La nota dice qual e' il canale.
+  verifica("la nota dice che e' solo la rete", d.nota.includes('SOLO il canale RETE'), d.nota.slice(-160));
 }
 
 console.log('SENZA IL CANALE: TRE CONTI, NESSUN TOTALE');
@@ -110,6 +114,7 @@ console.log('SENZA IL CANALE: TRE CONTI, NESSUN TOTALE');
   const aci = d.canali.find(c => c.canale === 'ACI');
   verifica("l'ACI di Green Tyre: 2 t a 90 = 180 euro, separati dalla rete", aci.euro === 180, String(aci.euro));
   verifica('nessun totale che somma i canali', !('euro' in d) && !('totale' in d) && !('totale_euro' in d));
+  verifica('e la nota dice che sono tre conti', d.nota.includes('tre conti'), d.nota.slice(-160));
 }
 
 console.log("PIU' MESI INSIEME");
