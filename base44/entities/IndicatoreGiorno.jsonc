@@ -1,0 +1,81 @@
+{
+  "name": "IndicatoreGiorno",
+  "type": "object",
+  // LA FOTOGRAFIA DI UN GIORNO (10/10/2026).
+  //
+  // Il gestionale sa rispondere benissimo a «com'e' adesso» e non sa rispondere
+  // a «com'era a giugno» ne' a «dove sta andando»: ogni numero si ricalcola sul
+  // presente e non resta niente. Qui ogni notte si scrive una riga: i numeri del
+  // giorno e l'esito del controllo di coerenza.
+  //
+  // Serve a due cose diverse, e tutt'e due contano:
+  // - IL GUARDIANO: la quadratura di tutti gli impianti rifatta ogni notte, con
+  //   una riga di esito la mattina. Se qualcosa si scosta lo scopre il
+  //   gestionale, non il consorzio.
+  // - LO STORICO: una curva di dodici mesi invece di una tabella di oggi. Il suo
+  //   valore e' il tempo che accumula, quindi comincia presto anche se i grafici
+  //   arrivano dopo.
+  //
+  // Una riga per giorno: il giorno e' la chiave, e riscrivere lo stesso giorno
+  // aggiorna invece di aggiungere (un ricalcolo di mezzogiorno non deve creare
+  // una seconda fotografia dello stesso giorno).
+  "properties": {
+    "giorno": {
+      "type": "string",
+      "format": "date",
+      "description": "Il giorno italiano della fotografia, AAAA-MM-GG. Uno solo per giorno: si riscrive, non si aggiunge"
+    },
+    "anno": {
+      "type": "number",
+      "description": "L'anno a cui si riferiscono i numeri"
+    },
+    "esito": {
+      "type": "string",
+      "enum": [
+        "in_linea",
+        "da_guardare"
+      ],
+      "default": "in_linea",
+      "description": "in_linea: ogni impianto con un confronto a portale quadra. da_guardare: almeno uno si scosta oltre la tolleranza"
+    },
+    "nota": {
+      "type": "string",
+      "description": "L'esito in una riga, come si legge la mattina"
+    },
+    "siti_json": {
+      "type": "string",
+      "description": "I numeri per sito, in JSON: sito, ruolo, giacenza, portale, scarto, quadra, conferito, dichiarato. Un canale per volta, mai sommati"
+    },
+    "totali_json": {
+      "type": "string",
+      "description": "I totali del giorno, in JSON: conferito, dichiarato e giacenza per canale. RETE, ACI ed EXTRA_RACCOLTA restano separati"
+    },
+    "scostamenti_json": {
+      "type": "string",
+      "description": "Gli impianti che non quadrano, in JSON: sito, scarto e di quanto. Vuoto quando tutto e' in linea"
+    }
+  },
+  "required": [
+    "giorno"
+  ],
+  // La scrive solo la funzione notturna, con il ruolo di servizio: la leggono
+  // tutti, nessuno la modifica a mano.
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

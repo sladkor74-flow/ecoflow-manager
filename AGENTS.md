@@ -481,6 +481,45 @@ Per il 2025 manca l'anno prima: niente ancora del 31/12/2024 e niente movimenti
 Non e' un difetto, e si dice: dal 2026 l'ancora c'e' (la fotografia del
 31/12/2025) e il confronto torna intero.
 
+### Il guardiano notturno e la memoria dei numeri (10/10/2026)
+
+Ogni notte alle 5 (`base44/workflows/GuardianoNotturno.jsonc`) la quadratura di
+tutti gli impianti si rifa' da se' e lascia scritta una riga: l'entita'
+`IndicatoreGiorno`, **una per giorno**. Serve a due cose, e tutt'e due contano.
+
+- **Il guardiano.** Se un impianto si scosta dal portale lo si trova la mattina
+  in cima all'elenco delle cose da gestire, col nome e il numero - «T-CYCLE
+  INDUSTRIES SRL +1,20 t» - senza aprire nessuna pagina. Prima lo scopriva
+  l'utente aprendo un modulo, o non lo scopriva nessuno.
+- **La memoria.** Il gestionale sa rispondere a «come siamo adesso» e non sa
+  rispondere a «com'era a giugno»: ogni numero si ricalcola sul presente e non
+  resta niente. Dentro la stessa riga restano i numeri del giorno, per sito e
+  per canale. **Il valore di questa cosa e' il tempo che accumula**: si comincia
+  a scrivere molto prima di quando servira' leggere.
+
+La regola sta in `base44/shared/indicatoriGiorno.ts` (prove in
+`prove/guardianoNotturno.mjs`); a scrivere e' `riepilogoDichiarazioni` con
+`registra: true`, perche' la quadratura la calcola gia' lui e **un terzo posto
+che la rifa' darebbe una terza risposta**. Quattro prudenze:
+
+1. **Una riga per giorno, non una per apertura di pagina**: scrive solo con
+   `registra`, e lo stesso giorno si riscrive invece di aggiungersi.
+2. **Nessun anno cablato nello scheduler.** Il workflow non passa l'anno: con
+   `registra` vale quello corrente. Un anno scritto in uno scheduler e' la
+   trappola che scatta il 1° gennaio, quando il guardiano continua a
+   controllare l'anno vecchio senza dirlo.
+3. **Si guarda solo chi ha un confronto col portale**: gli impianti della rete.
+   Un piazzale ha la sua rilevazione, che e' un'altra cosa, e chi non ha
+   fotografia (Tecnogum) non si scosta da niente. I loro numeri si scrivono lo
+   stesso, ma non entrano nel verdetto.
+4. **Un guardiano che dorme e uno che non trova niente si assomigliano troppo**:
+   se la fotografia piu' recente ha piu' di due giorni la dashboard lo dice.
+
+La tolleranza e' quella della quadratura (`TOLLERANZA_QUADRATURA_T`), una sola
+per tutto il gestionale, e le tonnellate si scrivono con `formatoTonnellate`:
+un secondo formato qui dentro scriveva «1,200 t» dove tutto il resto dice
+«1,20 t», e l'ha trovato una prova.
+
 Un assegnato non e' un movimento: il suo periodo e' `ordine_immesso_il`.
 
 ### Canali indipendenti

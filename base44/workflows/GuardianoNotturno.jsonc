@@ -1,0 +1,47 @@
+{
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "guardiano_notturno",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "fotografia_del_giorno": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "riepilogoDichiarazioni",
+            "args": {
+              "registra": true
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "La quadratura di tutti gli impianti, e i numeri del giorno",
+            "description": "Rifa' la quadratura di ogni impianto contro il portale e lascia scritta la fotografia del giorno (IndicatoreGiorno): l'esito si legge la mattina in cima alla dashboard, e i numeri restano per l'andamento"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Guardiano Notturno",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 5 * * *",
+      "one_time_date": null,
+      "timezone": "Europe/Rome",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "description": "Ogni notte alle 5 rifa' la quadratura di tutti gli impianti contro il portale e scrive la fotografia del giorno: se qualcosa si e' scostato lo si trova la mattina nell'elenco delle cose da gestire, senza aprire nessuna pagina. La stessa riga conserva i numeri del giorno, cosi' fra sei mesi si puo' dire com'era a ottobre. Non porta scritto nessun anno: usa quello corrente, cosi' il 1° gennaio passa da se'"
+}

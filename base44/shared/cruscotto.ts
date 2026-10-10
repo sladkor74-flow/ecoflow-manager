@@ -11,6 +11,7 @@
 // restano separati anche qui.
 import { giornoRoma } from "./giornoItaliano.ts";
 import { statoRichiesta } from "./richiesteEct.ts";
+import { giorniFa } from "./indicatoriGiorno.ts";
 
 export const MESI_CRUSCOTTO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 // I tre documenti di un mese della fatturazione attiva, uno per canale.
@@ -142,7 +143,7 @@ export function nomeRegola(v) {
  * L'elenco unico delle cose da gestire. Ogni voce: { area, gravita, titolo,
  * dettaglio, link }. dati: { oggi, adessoMs, anno, alertAperti, uploadLogs,
  * tipiFile, assegnatiRete, assegnatiAci, documenti, prefatture, riepilogoQualifica,
- * richiesteEct, verificheSedi, annoNuovo }.
+ * richiesteEct, verificheSedi, annoNuovo, fotografiaGiorno }.
  *
  * annoNuovo e' il risultato di listaAnno per l'anno dopo: decide da se' se
  * valga la pena dirlo (avvicinandosi), e qui si scrive soltanto.
@@ -244,6 +245,28 @@ export function cruscotto(dati) {
       `${sediDaDecidere.length} ${sediDaDecidere.length === 1 ? 'sede operativa da decidere' : 'sedi operative da decidere'}`,
       `${diverse ? diverse + ' con un indirizzo diverso da quello del portale. ' : ''}${nomi}`,
       '/pdr?scheda=sedi');
+  }
+
+  // IL GUARDIANO NOTTURNO (10/10/2026).
+  //
+  // Ogni notte la quadratura di tutti gli impianti si rifa' da se' e lascia
+  // scritta una riga (IndicatoreGiorno). Qui si legge soltanto: se qualcosa
+  // si e' scostato lo si trova la mattina, senza aprire nessuna pagina. E se
+  // il controllo ha smesso di girare lo si dice, perche' un guardiano che
+  // dorme e un guardiano che non trova niente si assomigliano troppo.
+  const fg = dati.fotografiaGiorno;
+  if (fg && fg.esito === 'da_guardare') {
+    const quali = (fg.scostamenti || []).slice(0, 3).map(x => x.sito).join(', ');
+    voce('Giacenze', 'attenzione',
+      `${(fg.scostamenti || []).length === 1 ? 'Un impianto non quadra' : `${(fg.scostamenti || []).length} impianti non quadrano`} col portale`,
+      `${fg.nota} Controllo del ${String(fg.giorno).split('-').reverse().join('/')}.${quali ? '' : ''}`,
+      '/giacenze');
+  }
+  const etaFoto = fg ? giorniFa(fg.giorno, oggi) : null;
+  if (etaFoto !== null && etaFoto > 2) {
+    voce('Manutenzione', 'info', `Il controllo notturno non gira da ${etaFoto} giorni`,
+      `L'ultima verifica della quadratura e' del ${String(fg.giorno).split('-').reverse().join('/')}: finche' non riparte, uno scostamento nuovo non lo segnala nessuno.`,
+      '/giacenze');
   }
 
   // L'ANNO NUOVO, QUANDO COMINCIA AD AVVICINARSI (10/10/2026).

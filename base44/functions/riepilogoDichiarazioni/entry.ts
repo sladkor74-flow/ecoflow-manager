@@ -3,13 +3,14 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll, perPagina } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { giornoRoma } from "../../shared/giornoItaliano.ts";
+import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { eTerminato, eEseguito, periodoMovimento } from "../../shared/movimenti.ts";
 import { MESI, operazioneDa, quadratura } from "../../shared/dichiarazioniImpianti.ts";
 import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese, nostraRiga } from "../../shared/giacenzaPortale.ts";
 import { puntiDiPartenza, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
 import { confrontaConIlPortale } from "../../shared/agganciaDichiarazioni.ts";
 import { raccoglitoreUscite, allineaAllaGiacenza, copertureDelCaricamento } from "../../shared/usciteDichiarate.ts";
+import { fotografiaDelGiorno } from "../../shared/indicatoriGiorno.ts";
 
 // Dichiarazioni degli impianti, mese per mese, con la quadratura delle giacenze.
 //
@@ -44,9 +45,19 @@ export default async function(req) {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    const { anno } = await req.json().catch(() => ({}));
-    if (!anno) return Response.json({ error: 'Anno obbligatorio' }, { status: 400 });
-    const annoNum = Number(anno);
+    const corpo = await req.json().catch(() => ({}));
+    const { anno } = corpo;
+    // IL GUARDIANO NOTTURNO (10/10/2026). Con registra:true la funzione, oltre a
+    // rispondere, lascia scritta la fotografia del giorno: i numeri per sito e
+    // l'esito della quadratura. La scrive solo il lavoro notturno, mai
+    // l'apertura di una pagina, altrimenti ogni visita riscriverebbe la riga.
+    const registra = corpo.registra === true;
+    // Il lavoro notturno non scrive l'anno negli argomenti: un anno cablato in
+    // uno scheduler e' la trappola che scatta il 1° gennaio, quando nessuno si
+    // ricorda di cambiarlo e il guardiano continua a controllare l'anno vecchio
+    // senza dirlo. Chi chiede dalla pagina lo dice sempre, e allora vale il suo.
+    const annoNum = Number(anno) || (registra ? Number(oggiRoma().slice(0, 4)) : 0);
+    if (!annoNum) return Response.json({ error: 'Anno obbligatorio' }, { status: 400 });
 
     const norm = normalizzaRagioneSociale;
     const td = (v) => String(v || '').toLowerCase().trim();
@@ -856,8 +867,32 @@ export default async function(req) {
     // si vedeva da nessuna parte.
     const daInserire = confrontaConIlPortale(righeDichiarazione, annoNum, dichiarazioni).da_inserire;
 
+    // La fotografia del giorno: la quadratura rifatta stanotte, e i numeri che
+    // fra sei mesi diranno «com'era a ottobre». Una riga per giorno: si
+    // riscrive, non si aggiunge. Se non si riesce a scrivere la risposta esce
+    // lo stesso - il guardiano e' un servizio in piu', non un ostacolo.
+    let fotografia = null;
+    if (registra) {
+      const giorno = oggiRoma();
+      const riga = fotografiaDelGiorno(siti, { giorno, anno: annoNum });
+      try {
+        const gia = await svc.IndicatoreGiorno.filter({ giorno });
+        if (gia && gia.length) {
+          await svc.IndicatoreGiorno.update(gia[0].id, riga);
+          // Un giorno scritto due volte sarebbe due storie dello stesso giorno:
+          // i doppioni nati prima di questo controllo si tolgono.
+          for (const d of gia.slice(1)) await svc.IndicatoreGiorno.delete(d.id).catch(() => {});
+        } else {
+          await svc.IndicatoreGiorno.create(riga);
+        }
+        fotografia = { giorno: riga.giorno, esito: riga.esito, nota: riga.nota, scritta: true };
+      } catch (e) {
+        fotografia = { giorno, esito: riga.esito, nota: riga.nota, scritta: false, errore: e && e.message ? e.message : String(e) };
+      }
+    }
+
     return Response.json({
-      anno: annoNum, mesi: MESI, siti, stoccaggi, totali,
+      anno: annoNum, mesi: MESI, siti, stoccaggi, totali, fotografia,
       foto_portale_il: fotoPortale,
       dichiarazioni_da_inserire: daInserire,
       // Fin dove arrivano i movimenti caricati (fine trasporto): se e' dopo la
