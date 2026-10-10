@@ -1,3 +1,4 @@
+import { lazy } from 'react';
 import { Toaster } from "@/components/ui/toaster"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
@@ -8,34 +9,54 @@ import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ScrollToTop from './components/ScrollToTop';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import Layout from '@/components/Layout';
-import Dashboard from '@/pages/Dashboard';
-import CaricamentoDati from '@/pages/CaricamentoDati';
-import TargetStatus from '@/pages/TargetStatus';
-import Assistente from '@/pages/Assistente';
-import Report from '@/pages/Report';
-import ReportMensile from '@/pages/ReportMensile';
-import Terziarie from '@/pages/Terziarie';
-import ExtraRaccolta from '@/pages/ExtraRaccolta';
-import Assegnati from '@/pages/Assegnati';
-import AssegnatiAci from '@/pages/AssegnatiAci';
-import Secondarie from '@/pages/Secondarie';
-import AlertEngine from '@/pages/AlertEngine';
-import Fatturazione from '@/pages/Fatturazione';
-import PredittivitaSecondarie from '@/pages/PredittivitaSecondarie';
-import PrimarieRete from '@/pages/PrimarieRete';
-import PrimarieAci from '@/pages/PrimarieAci';
-import TodoPage from '@/pages/TodoPage';
 import PageErrorBoundary from '@/components/PageErrorBoundary';
-import Pdr from '@/pages/Pdr';
-import Giacenze from '@/pages/Giacenze';
-import QualificaFornitori from '@/pages/QualificaFornitori';
-import Verifiche from '@/pages/Verifiche';
-import VerificheFornitori from '@/pages/VerificheFornitori';
-import Richieste from '@/pages/Richieste';
-import Utenti from '@/pages/Utenti';
-import Omologhe from '@/pages/Omologhe';
-import DichiarazioniRentri from '@/pages/DichiarazioniRentri';
-import DichiarazioniImpianti from '@/pages/DichiarazioniImpianti';
+
+// LE PAGINE SI SCARICANO QUANDO SI APRONO (10/10/2026).
+//
+// Prima erano ventisette import statici: tutte le pagine del gestionale
+// finivano nello stesso pacchetto, e chi apriva la dashboard scaricava anche
+// la fatturazione, le omologhe e la qualifica fornitori. Il chunk principale
+// era 3,3 MB e la build lo diceva a ogni giro.
+//
+// Ora ogni pagina e' un file a parte, scaricato la prima volta che la si apre e
+// poi tenuto in cache dal browser. L'attesa e' il tempo di qualche decina di kB,
+// e intanto il menu resta a video: il Suspense sta dentro Layout, attorno
+// all'Outlet, non attorno a tutto - altrimenti a ogni cambio di pagina
+// scomparirebbe anche la barra laterale, che e' peggio di aspettare.
+//
+// Il guscio (Layout, ProtectedRoute, PageErrorBoundary, PageNotFound) resta
+// eager: serve subito, e scaricarlo a parte vorrebbe dire due viaggi invece di
+// uno.
+//
+// Una pagina aggiunta qui va aggiunta cosi', non con un import in testa:
+// prove/paginePigre.mjs non lo lascia passare.
+const Dashboard = lazy(() => import('@/pages/Dashboard'));
+const CaricamentoDati = lazy(() => import('@/pages/CaricamentoDati'));
+const TargetStatus = lazy(() => import('@/pages/TargetStatus'));
+const Assistente = lazy(() => import('@/pages/Assistente'));
+const Report = lazy(() => import('@/pages/Report'));
+const ReportMensile = lazy(() => import('@/pages/ReportMensile'));
+const Terziarie = lazy(() => import('@/pages/Terziarie'));
+const ExtraRaccolta = lazy(() => import('@/pages/ExtraRaccolta'));
+const Assegnati = lazy(() => import('@/pages/Assegnati'));
+const AssegnatiAci = lazy(() => import('@/pages/AssegnatiAci'));
+const Secondarie = lazy(() => import('@/pages/Secondarie'));
+const AlertEngine = lazy(() => import('@/pages/AlertEngine'));
+const Fatturazione = lazy(() => import('@/pages/Fatturazione'));
+const PredittivitaSecondarie = lazy(() => import('@/pages/PredittivitaSecondarie'));
+const PrimarieRete = lazy(() => import('@/pages/PrimarieRete'));
+const PrimarieAci = lazy(() => import('@/pages/PrimarieAci'));
+const TodoPage = lazy(() => import('@/pages/TodoPage'));
+const Pdr = lazy(() => import('@/pages/Pdr'));
+const Giacenze = lazy(() => import('@/pages/Giacenze'));
+const QualificaFornitori = lazy(() => import('@/pages/QualificaFornitori'));
+const Richieste = lazy(() => import('@/pages/Richieste'));
+const Utenti = lazy(() => import('@/pages/Utenti'));
+const Omologhe = lazy(() => import('@/pages/Omologhe'));
+const DichiarazioniRentri = lazy(() => import('@/pages/DichiarazioniRentri'));
+const DichiarazioniImpianti = lazy(() => import('@/pages/DichiarazioniImpianti'));
+const Verifiche = lazy(() => import('@/pages/Verifiche'));
+const VerificheFornitori = lazy(() => import('@/pages/VerificheFornitori'));
 // Add page imports here
 
 const AuthenticatedApp = () => {

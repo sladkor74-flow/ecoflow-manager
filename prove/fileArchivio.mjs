@@ -3,6 +3,7 @@
 import {
   daAlleggerire, giorniDa, fileDaSostituire, arretratiDaSostituire,
   cancellaFile, provaACancellare, cancellazioneNegata, sostituisciFilePrecedenti, segnalaFileNonRimossi,
+  avvisoFileDallInventario,
 } from '../base44/shared/fileArchivio.ts';
 
 let ok = 0, ko = 0;
@@ -243,6 +244,62 @@ console.log('UN AVVISO NON SI RISCRIVE A ZERO');
     const esito = await segnalaFileNonRimossi(base, { nonRiusciti: [{ nome_file: 'x.xlsx' }], bloccati: 60, oggi: '2026-10-10' });
     verifica('con i file veri si aggiorna, e col numero nuovo', esito.alert === 'aggiornato' && esito.quanti === 60 && aggiornati[0].quanti === 60, JSON.stringify(esito));
     verifica('e il titolo non parte da zero', /60 file caricati restano/.test(aggiornati[0].titolo), aggiornati[0].titolo);
+  }
+}
+
+console.log('IL CONTO VIENE DALL\'INVENTARIO, NON DALLA PULIZIA');
+{
+  // Il difetto di fondo: segnalaFileNonRimossi vede i file di UN giro di
+  // pulizia, e un giro che non trova niente non vuol dire che i file di prima
+  // se ne siano andati. L'inventario invece conta quello che esiste.
+  const voci = [
+    // Lo stesso file usato da DUE record: va chiesto una volta, non due.
+    { entita: 'DocumentoQualifica', id: 'r1', riferimento: 'https://pubblico/uno.pdf', genere: 'pubblico', in_uso: true, descrizione: 'uno.pdf', cosa: 'documento' },
+    { entita: 'DocumentoQualifica', id: 'r2', riferimento: 'https://pubblico/uno.pdf', genere: 'pubblico', in_uso: true, descrizione: 'uno.pdf', cosa: 'documento' },
+    // Un orfano privato: nessun record lo usa piu'.
+    { entita: 'FileDaRimuovere', id: 'o1', riferimento: 'uri://orfano', genere: 'privato', in_uso: false, descrizione: 'vecchio.xlsx', cosa: 'allegato' },
+    // Un privato IN USO: non si fa togliere, e chiederlo per sbaglio e' gia'
+    // successo il 02/10/2026 con i 144 documenti di qualifica.
+    { entita: 'Omologa', id: 'u1', riferimento: 'uri://in-uso', genere: 'privato', in_uso: true, descrizione: 'omologa.pdf', cosa: 'omologa' },
+  ];
+  {
+    const creati = [];
+    const base = { asServiceRole: { entities: { Alert: {
+      filter: async () => [],
+      create: async (d) => { creati.push(d); },
+      update: async () => {},
+    } } } };
+    const esito = await avvisoFileDallInventario(base, { conta: { da_far_rimuovere: 2 }, voci, oggi: '2026-10-10' });
+    verifica('apre l\'avviso col numero dell\'inventario', esito.alert === 'aperto' && esito.quanti === 2, JSON.stringify(esito));
+    verifica('e non dice zero', !/^0 file/.test(creati[0].titolo), creati[0].titolo);
+    verifica('lo stesso file di due record si chiede una volta', /2 file caricati restano/.test(creati[0].titolo), creati[0].titolo);
+    verifica('dice quale file pubblico viene per primo', /uno\.pdf/.test(creati[0].descrizione) && /da far rimuovere per primi/.test(creati[0].descrizione));
+    verifica('e nomina l\'orfano', /vecchio\.xlsx/.test(creati[0].descrizione), creati[0].descrizione.slice(0, 700));
+    verifica('ma NON il file che un record sta usando', !/omologa\.pdf/.test(creati[0].descrizione));
+  }
+  {
+    // Niente piu' da far rimuovere: l'avviso non ha piu' oggetto e si chiude.
+    // Tenerlo aperto a zero e' il difetto da cui siamo partiti.
+    const aggiornati = [];
+    const base = { asServiceRole: { entities: { Alert: {
+      filter: async () => [{ id: 'a1', quanti: 59 }],
+      create: async () => {},
+      update: async (id, d) => aggiornati.push({ id, ...d }),
+    } } } };
+    const soloInUso = voci.filter(v => v.genere !== 'pubblico' && v.in_uso !== false);
+    const esito = await avvisoFileDallInventario(base, { conta: { da_far_rimuovere: 0 }, voci: soloInUso, oggi: '2026-10-10' });
+    verifica('a zero l\'avviso si chiude', esito.alert === 'chiuso', JSON.stringify(esito));
+    verifica('e si dice perche\'', aggiornati[0].stato === 'risolto' && /non trova piu' nessun file/.test(aggiornati[0].risolto_note), JSON.stringify(aggiornati[0]));
+  }
+  {
+    const creati = [];
+    const base = { asServiceRole: { entities: { Alert: {
+      filter: async () => [],
+      create: async (d) => { creati.push(d); },
+      update: async () => {},
+    } } } };
+    const esito = await avvisoFileDallInventario(base, { conta: { da_far_rimuovere: 0 }, voci: [], oggi: '2026-10-10' });
+    verifica('e senza niente aperto non si apre niente', esito.alert === 'niente' && creati.length === 0, JSON.stringify(esito));
   }
 }
 

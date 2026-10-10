@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { base44 } from '@/api/base44Client';
@@ -199,7 +199,21 @@ export default function Layout() {
         </header>
 
         <main className="flex-1 overflow-y-auto">
-          <Outlet />
+          {/* L'ATTESA STA QUI, NON ATTORNO A TUTTO (10/10/2026).
+
+              Le pagine si scaricano quando si aprono (vedi App.jsx). Il
+              Suspense e' attorno all'Outlet e non attorno alle Routes, cosi'
+              mentre una pagina arriva restano a video la barra laterale e
+              l'intestazione: cambiare pagina non deve far sparire il
+              gestionale per mezzo secondo. Lo stesso cerchio che gira
+              dell'avvio, perche' chi guarda non deve imparare due attese. */}
+          <Suspense fallback={(
+            <div className="flex items-center justify-center py-24">
+              <div className="w-8 h-8 border-4 border-slate-200 border-t-slate-800 rounded-full animate-spin"></div>
+            </div>
+          )}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>);

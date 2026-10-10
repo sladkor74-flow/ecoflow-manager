@@ -3,6 +3,8 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { ARCHIVI_CON_FILE, voceFile, voceOrfana, csvInventario, contaInventario, testoRichiesta } from "../../shared/inventarioFile.ts";
+import { avvisoFileDallInventario } from "../../shared/fileArchivio.ts";
+import { giornoRoma } from "../../shared/giornoItaliano.ts";
 
 // L'ELENCO DEI FILE CHE LA PIATTAFORMA TIENE PER NOI.
 //
@@ -71,9 +73,25 @@ export default async function(req) {
     }
 
     const conta = contaInventario(voci);
+
+    // L'AVVISO SI RIFA' DA QUI (10/10/2026).
+    //
+    // Questo e' il posto che sa quanti file ci sono davvero: l'avviso lo deve
+    // leggere da qui e non dall'esito di una pulizia, che vede solo i file di
+    // quel giro. Se non si riesce, la risposta esce lo stesso: un inventario
+    // che non parte perche' non ha potuto riscrivere un avviso sarebbe un
+    // servizio in meno, non uno in piu'.
+    let avviso = null;
+    try {
+      avviso = await avvisoFileDallInventario(base44, { conta, voci, oggi: giornoRoma() });
+    } catch (e) {
+      avviso = { errore: e && e.message ? e.message : String(e) };
+    }
+
     return Response.json({
       ok: true,
       conta,
+      avviso,
       ...(guasti.length ? { archivi_non_letti: guasti } : {}),
       // La frase da scrivere nella richiesta, coi conti giusti: si fanno
       // rimuovere i file con indirizzo pubblico e quelli che nessun record usa

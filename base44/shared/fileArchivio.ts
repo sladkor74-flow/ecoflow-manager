@@ -1,3 +1,4 @@
+import { perFile } from "./inventarioFile.ts";
 // Togliere un file dall'archivio privato.
 //
 // La piattaforma non documenta un nome unico per questa operazione: si provano
@@ -449,4 +450,49 @@ export async function segnalaFileNonRimossi(base44, { nonRiusciti = [], bloccati
   }
   await Alert.create(dati);
   return { alert: 'aperto', quanti, pubblici };
+}
+
+/**
+ * L'AVVISO DEI FILE, RIFATTO DALL'INVENTARIO (10/10/2026).
+ *
+ * IL CONTO DEVE VENIRE DA QUELLO CHE C'E', non da quello che una pulizia ha
+ * provato a togliere: era quello il difetto di fondo. segnalaFileNonRimossi
+ * riceve i file di UN giro di pulizia, e un giro che non trova niente da
+ * togliere non vuol dire che i file di prima se ne siano andati - la
+ * piattaforma non li cancella, sono ancora li'. Cosi' l'avviso e' arrivato a
+ * dire «0 file caricati restano sulla piattaforma», che si contraddice da solo.
+ *
+ * L'inventario invece conta quello che esiste, archivio per archivio, piu' il
+ * registro dei file che nessun record usa. Da qui il numero e' vero.
+ *
+ * E conta la cosa giusta: NON tutti i file, ma quelli da far rimuovere - gli
+ * indirizzi pubblici e gli orfani. I documenti che i record stanno usando non
+ * si fanno togliere, e chiederlo per sbaglio e' gia' successo il 02/10/2026
+ * con i 144 documenti di qualifica.
+ *
+ * Se non c'e' piu' niente da far rimuovere l'avviso si chiude: non ha piu'
+ * oggetto, e tenerlo aperto a zero e' il difetto da cui siamo partiti.
+ */
+export async function avvisoFileDallInventario(base44, { conta, voci, oggi }) {
+  const Alert = base44.asServiceRole.entities.Alert;
+  const giorno = String(oggi || '').slice(0, 10).split('-').reverse().join('/');
+  // Un file per riga, non un record per riga: lo stesso file puo' essere usato
+  // da due record e non va chiesto due volte.
+  const file = perFile(voci || []).filter(v => v && (v.genere === 'pubblico' || v.in_uso === false));
+  const quanti = Number(conta && conta.da_far_rimuovere) || file.length;
+
+  if (!quanti) {
+    const aperti = await Alert.filter({ regola_id: REGOLA_FILE, record_id: 'archivio-file', stato: 'aperto' }, 'id', 20);
+    for (const a of aperti) {
+      await Alert.update(a.id, { stato: 'risolto', risolto_note: `Chiuso il ${giorno}: l'inventario non trova piu' nessun file da far rimuovere.` });
+    }
+    return { alert: aperti.length ? 'chiuso' : 'niente', quanti: 0, pubblici: 0 };
+  }
+
+  const nonRiusciti = file.map(v => ({
+    nome_file: v.descrizione || v.cosa || v.entita || '',
+    entita: v.entita,
+    pubblico: v.genere === 'pubblico',
+  }));
+  return segnalaFileNonRimossi(base44, { nonRiusciti, bloccati: quanti, oggi });
 }

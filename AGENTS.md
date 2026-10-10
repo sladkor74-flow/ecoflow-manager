@@ -19,6 +19,7 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - Gli specchi: `base44/shared` e `src/lib`
   - I fine-riga
   - Le librerie pesanti si caricano quando servono (10/10/2026)
+  - Le pagine si scaricano quando si aprono (10/10/2026)
   - Il limite di richieste della piattaforma (22/09/2026)
   - Base44: comandi, file e riferimenti
   - Regole tecniche della piattaforma e delle pagine
@@ -154,6 +155,33 @@ preso e l'esportazione fallisce senza dire niente. Due chiamanti erano cosi'
 {...} }}`) e sono diventati `async` con l'`await` dentro. E dove il valore di
 ritorno serviva subito - `AttivaEsportazioni` registra nello storico il nome del
 file appena scritto - senza `await` la registrazione partiva prima del file.
+
+### Le pagine si scaricano quando si aprono (10/10/2026)
+
+In `src/App.jsx` una pagina **non si importa in testa**: si dichiara pigra,
+`const Giacenze = lazy(() => import('@/pages/Giacenze'));`. Prima erano
+ventisette import statici e tutte le pagine finivano nello stesso pacchetto:
+chi apriva la dashboard scaricava anche la fatturazione, le omologhe e la
+qualifica fornitori.
+
+Il guadagno, misurato: pacchetto d'avvio da **3.268 a 454 kB**, e la prima
+apertura (avvio + dashboard) da **1.151 a 472 kB gzip, cioe' il 59% in meno**.
+
+**L'attesa sta attorno all'Outlet, dentro `Layout`, non attorno alle `Routes`.**
+Un Suspense attorno alle Routes farebbe sparire barra laterale e intestazione a
+ogni cambio di pagina: peggio che aspettare. Cosi' invece il guscio resta a
+video e cambia solo il contenuto. Il cerchio che gira e' lo stesso dell'avvio,
+perche' chi guarda non deve imparare due attese.
+
+Il guscio - `Layout`, `ProtectedRoute`, `PageErrorBoundary`, `PageNotFound` -
+resta eager: serve subito, e scaricarlo a parte vorrebbe dire due viaggi invece
+di uno.
+
+**Resta un avviso di build**, e resta per un motivo: tre chunk superano i 500 kB
+(`pdf.worker` 1.326, `exceljs` 940, la pagina `TargetStatus` 560) e sono tutti
+scaricati su richiesta, non all'avvio. Alzare `chunkSizeWarningLimit` per farlo
+tacere no: un presidio vale quanto la fiducia che gli si da', e un avviso
+addomesticato non avverte piu' di niente. Prove in `prove/paginePigre.mjs`.
 
 ### Il limite di richieste della piattaforma (22/09/2026)
 
