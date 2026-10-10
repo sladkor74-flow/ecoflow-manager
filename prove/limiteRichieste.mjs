@@ -1,7 +1,7 @@
 // Prova del ritentativo sul limite di richieste della piattaforma
 // (base44/shared/limiteRichieste.ts) e della fine lettura a pagine
 // (base44/shared/fetchAll.ts). npm run prove
-import { conLimiteRichieste, conPazienza, eLimiteRichieste } from '../base44/shared/limiteRichieste.ts';
+import { conLimiteRichieste, conPazienza, eLimiteRichieste, eNonServita } from '../base44/shared/limiteRichieste.ts';
 import { fetchAll, ultimaPagina } from '../base44/shared/fetchAll.ts';
 
 let ok = 0, ko = 0;
@@ -126,5 +126,45 @@ errore = null;
 try { await eliminaCampo(clientTesti, 'VerificaReport', '', null); } catch (e) { errore = e; }
 verifica('senza record non si cancella niente', errore && richiesteTesti.deleteMany === 1);
 
+console.log('\nQUANDO LA PIATTAFORMA NON SERVE LA RICHIESTA (503)');
+// Il fatto, 09/10/2026. Subito dopo una pubblicazione Giacenze e' morta due
+// volte con «Request failed with status code 503»: la piattaforma stava
+// rimettendo su le funzioni e non ha servito la chiamata. Non l'ha eseguita,
+// quindi ripeterla non puo' creare doppioni - esattamente come il 429.
+verifica('un 503 si riconosce', eNonServita({ status: 503 }) && eNonServita({ response: { status: 503 } }));
+verifica("il 429 resta un altro caso, e nessuno dei due e l altro",
+  !eNonServita({ status: 429 }) && !eLimiteRichieste({ status: 503 }));
+// 502 e 504 NO: vogliono dire che qualcosa in mezzo si e' arreso dopo aver
+// passato la richiesta, quindi la funzione puo' essere partita e puo' aver
+// gia' scritto. Ripeterla scriverebbe due volte.
+verifica('502, 504 e 500 non si ripetono: la funzione puo' + String.fromCharCode(39) + ' essere partita',
+  !eNonServita({ status: 502 }) && !eNonServita({ status: 504 }) && !eNonServita({ status: 500 }));
+{
+  let giri503 = 0;
+  let esito = 'mai tentata';
+  // Se il 503 smettesse di essere ritentato questa chiamata rilancerebbe: si
+  // raccoglie, cosi' la prova dice che cosa non va invece di morire.
+  try {
+    esito = await conPazienza(async () => {
+      giri503++;
+      if (giri503 < 3) throw Object.assign(new Error('Request failed with status code 503'), { status: 503 });
+      return 'servita';
+    }, { attese });
+  } catch (e) { esito = 'rilanciata: ' + e.message; }
+  verifica('una chiamata non servita si ripete finche' + String.fromCharCode(39) + ' passa', esito === 'servita' && giri503 === 3, 'giri=' + giri503);
+}
+{
+  // Anche sulle chiamate alle funzioni, dove si guarda solo lo stato: e' li'
+  // che il 503 si e' visto.
+  let giriFn = 0;
+  let errore503 = null;
+  try {
+    await conPazienza(async () => { giriFn++; throw Object.assign(new Error('Bad gateway'), { status: 502 }); }, { attese, soloStato: true });
+  } catch (e) { errore503 = e; }
+  verifica('un 502 passa subito, senza ripetere', !!errore503 && giriFn === 1, 'giri=' + giriFn);
+  let giriOk = 0;
+  const r = await conPazienza(async () => { giriOk++; if (giriOk < 2) throw Object.assign(new Error('no'), { status: 503 }); return 1; }, { attese, soloStato: true });
+  verifica('un 503 invece si ripete anche sulle funzioni', r === 1 && giriOk === 2);
+}
 console.log(`\n${ok} verifiche riuscite, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

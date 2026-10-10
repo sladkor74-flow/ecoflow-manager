@@ -12,8 +12,9 @@
 //
 // Vale per ogni lettura e scrittura degli archivi, con o senza asServiceRole, e
 // per le chiamate alle funzioni: queste si ripetono solo se la piattaforma le ha
-// respinte (stato 429), mai se la funzione chiamata ha risposto con un errore,
-// perche' potrebbe aver gia' scritto qualcosa.
+// respinte (stato 429) o non le ha servite affatto (stato 503), mai se la
+// funzione chiamata ha risposto con un errore, perche' potrebbe aver gia'
+// scritto qualcosa.
 
 const ATTESE_LIMITE = [2000, 5000, 10000, 20000, 30000];
 
@@ -29,6 +30,24 @@ export function eLimiteRichieste(e) {
 }
 
 /**
+ * LA PIATTAFORMA NON HA SERVITO LA RICHIESTA (503), quindi non l'ha eseguita:
+ * si ripete senza rischio di doppioni, esattamente come il 429.
+ *
+ * Succede dopo ogni pubblicazione, nei secondi in cui le funzioni vengono
+ * rimesse su, ed e' il momento preciso in cui si apre una pagina per vedere se
+ * la modifica e' andata a posto: il 09/10/2026 Giacenze e' morta due volte
+ * cosi', con «Request failed with status code 503».
+ *
+ * SOLO il 503. Un 502 o un 504 vogliono dire che qualcosa in mezzo si e'
+ * arreso DOPO aver passato la richiesta: la funzione puo' essere partita e
+ * puo' aver gia' scritto, e ripeterla scriverebbe due volte. Quelli si
+ * lasciano passare, come ogni errore che arriva da dentro la funzione.
+ */
+export function eNonServita(e) {
+  return statoDi(e) === 503;
+}
+
+/**
  * Esegue fn e la ripete se viene respinta per il limite di richieste.
  * soloStato: ripete solo su stato 429, non sul testo dell'errore (chiamate alle
  * funzioni, il cui messaggio puo' venire da dentro la funzione).
@@ -38,7 +57,7 @@ export async function conPazienza(fn, { attese = ATTESE_LIMITE, soloStato = fals
     try {
       return await fn();
     } catch (e) {
-      const respinta = soloStato ? statoDi(e) === 429 : eLimiteRichieste(e);
+      const respinta = (soloStato ? statoDi(e) === 429 : eLimiteRichieste(e)) || eNonServita(e);
       if (!respinta || i >= attese.length) throw e;
       // un po' di scarto, cosi' chi e' stato respinto insieme non riparte insieme
       await pausa(attese[i] + Math.floor(Math.random() * 1000));
