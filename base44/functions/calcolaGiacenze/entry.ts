@@ -1118,6 +1118,18 @@ export default async function(req) {
     ];
     const totali = {};
     for (const c of numCols) totali[c] = r2(righe.reduce((s, r) => s + (r[c] || 0), 0));
+    // IL CONFERITO DEL TOTALE CONTA OGNI CARICO UNA VOLTA (audit del 10/10/2026).
+    //
+    // Sulla riga di un sito il conferito e' giusto con le secondarie dentro: un
+    // impianto riceve anche quello che gli arriva dai piazzali, e il suo target lo
+    // comprende. Ma SOMMATO sulle righe contava due volte ogni PFU passato da un
+    // piazzale - una come primaria al piazzale, una come secondaria all'impianto:
+    // 10.744,79 t contro le 8.818,55 raccolte davvero. La riga TOTALE delle
+    // Giacenze diceva cosi' «76% raggiunto» e, nella cella accanto, «residuo
+    // 800,21 t» invece di circa 2.730; e l'intestazione del PDF scriveva
+    // «Conferito RETE 10.744,79 t». Il modulo Dichiarazioni, col nome uguale,
+    // diceva 8.818,55: ora lo dicono tutti e due.
+    totali.conferito_t = totali.conferito_primarie_t;
     totali.giacenza_classi_kg = classiVuote();
     for (const r of righe) for (const [c, v] of Object.entries(r.giacenza_classi_kg || {})) totali.giacenza_classi_kg[c] += v;
     totali.ordini_da_dichiarare = righe.reduce((s, r) => s + (r.ordini_da_dichiarare || 0), 0);

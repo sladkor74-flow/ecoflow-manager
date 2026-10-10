@@ -68,7 +68,13 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
 
     for (let i = 0; i < MESI.length; i++) {
       const mv = mesiValues[i];
-      if (!mv.passed) break;
+      // SOLO I MESI FINITI (audit del 10/10/2026). Il mese in corso entrava nel
+      // conto: il primo del mese, una provincia col mese prima a zero diventava
+      // «2 mesi consecutivi senza raccolte» per un mese cominciato da un giorno, e
+      // l'avviso si spegneva al primo ritiro. Un avviso che si accende e si spegne
+      // ogni mese sullo stesso dato si impara a ignorare. `passed` resta com'e':
+      // serve alla tabella per mostrare il mese in corso.
+      if (!mv.passed || mv.idx >= currMonth) break;
       if (mv.count === 0) {
         consecutiveZeros++;
         if (consecutiveZeros >= 2) {

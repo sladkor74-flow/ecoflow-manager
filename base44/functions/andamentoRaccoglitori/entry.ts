@@ -29,7 +29,10 @@ export default async function(req) {
     const body = await req.json().catch(() => ({}));
     const anno = Number(body.anno) || Number(String(new Date().toISOString()).slice(0, 4));
     const svc = base44.asServiceRole.entities;
-    const pulisciNome = (v) => String(v ?? '').replace(/s+/g, ' ').trim();
+    // Gli spazi, non la lettera «s» (audit del 10/10/2026): /s+/ trasformava «Emmesse
+    // Srl» in «Emme e Srl» nell'avviso dei target ambigui, e fondeva nomi diversi
+    // solo per una s.
+    const pulisciNome = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 
     const [primarieRete, zoneTutte, fornitori] = await Promise.all([
       fetchAll(svc.PrimariaRete),

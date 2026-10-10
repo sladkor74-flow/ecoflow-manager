@@ -91,17 +91,27 @@ const primaria = (id, dest, kg, giorno, extra = {}) => ({
   tipo_destinazione: 'imp', stato: 'terminato', peso_effettivo: kg, trasporto_finito_il: g(giorno), ordine_chiuso_il: g(giorno), ...extra,
 });
 
-for (const vuoto of ['DichiarazioneTrattamento', 'Secondaria', 'Terziaria', 'ImpiantoTargetSecondaria', 'TargetRaccoglitore',
+for (const vuoto of ['DichiarazioneTrattamento', 'Terziaria', 'ImpiantoTargetSecondaria', 'TargetRaccoglitore',
   'TargetMensile', 'GiacenzaStoccaggio', 'IndicatoreGiorno']) con(vuoto, []);
 
+// TRAPPOLA 5: un piazzale che manda all'impianto. La stessa tonnellata arriva
+// prima al piazzale (primaria) e poi all'impianto (secondaria): nel totale va
+// contata una volta sola.
+const BETA = 'BETA STOCCAGGI SRL';
 con('GiacenzaSito', [
   { sito: ALFA, tipo_destinazione: 'imp', anno: 2026, dichiara_rete: true, giacenza_riferimento_t: 10 },
   { sito: TECNO, tipo_destinazione: 'imp', anno: 2026, dichiara_rete: false },
+  { sito: BETA, tipo_destinazione: 'stoc', anno: 2026 },
 ]);
 con('PrimariaRete', [
   primaria('ET26000001', ALFA, 12000, '2026-03-10'),
   primaria('ET26000002', ALFA, 8000, '2026-09-20'),
   primaria('ET26000003', TECNO, 5000, '2026-04-15'),
+  primaria('ET26000004', BETA, 6000, '2026-02-10', { tipo_destinazione: 'stoc' }),
+]);
+con('Secondaria', [
+  { id_ordine: 'SEC26000001', numero_fir: 'FIRS1', classe: 'P - fino a 35 kg', prodotto: '.class1', stoccaggio: BETA, destinazione: ALFA,
+    tipo_destinazione: 'imp', stato: 'terminato', peso_effettivo: 6000, trasporto_finito_il: g('2026-02-25') },
 ]);
 con('PrimariaAci', [
   { ...primaria('ET26000010', ALFA, 2000, '2026-04-05'), classe: 'PFU Autodemolizione', prodotto: '.class9' },
@@ -183,6 +193,15 @@ console.log('TRAPPOLA 3: UNA DICHIARAZIONE DI DUE ANNI FA CARICATA DOPO LA FOTOG
   verifica('quindi la giacenza a portale e\' la stessa', t2(G.giacenza_portale_t) === t2(D.giacenza_portale_t), `${G.giacenza_portale_t} / ${D.giacenza_portale_t}`);
 }
 
+console.log('TRAPPOLA 5: IL CONFERITO DEL TOTALE CONTA OGNI CARICO UNA VOLTA');
+{
+  // Primarie: 12 + 8 + 5 + 6 = 31 t. La secondaria da BETA ad ALFA (6 t) sposta
+  // PFU gia' contati: non e' raccolta in piu'.
+  verifica('il totale delle Giacenze e\' la raccolta: 31 t, non 37', t2(r.g.totali.conferito_t) === 31, String(r.g.totali.conferito_t));
+  verifica('ed e\' lo stesso numero del modulo Dichiarazioni, che porta lo stesso nome', t2(r.g.totali.conferito_t) === t2(r.d.totali.conferito_t), `${r.g.totali.conferito_t} / ${r.d.totali.conferito_t}`);
+  verifica('mentre sulla riga dell\'impianto la secondaria c\'e\', e deve esserci', t2(rigaG(r, ALFA).conferito_t) === 26, String(rigaG(r, ALFA).conferito_t));
+}
+
 console.log('LE CONTROPROVE: COM\'ERA PRIMA');
 {
   // Trappola 3: il riepilogo leggeva solo l'anno e l'anno prima.
@@ -212,6 +231,15 @@ console.log('LE CONTROPROVE: COM\'ERA PRIMA');
   });
   const prima1 = await ESEGUI(giacenzeVecchie, riepilogoDichiarazioni);
   verifica('prima Tecnogum aveva 0 di giacenza nelle Giacenze: «vuoto»', rigaG(prima1, TECNO).giacenza_portale_t === 0, String(rigaG(prima1, TECNO).giacenza_portale_t));
+
+  // Trappola 5: il totale sommava le righe.
+  const giacenzeTotaleVecchio = await funzione('calcolaGiacenze', (path, s) => {
+    if (!/calcolaGiacenze/.test(path)) return null;
+    return s.replace('    totali.conferito_t = totali.conferito_primarie_t;', '');
+  });
+  const prima5 = await ESEGUI(giacenzeTotaleVecchio, riepilogoDichiarazioni);
+  verifica('prima il totale contava due volte la secondaria: 37 t contro 31', t2(prima5.g.totali.conferito_t) === 37 && t2(prima5.d.totali.conferito_t) === 31,
+    `${prima5.g.totali.conferito_t} / ${prima5.d.totali.conferito_t}`);
 }
 
 console.log('TRAPPOLA 4: UNA RIGA DEL PORTALE DI UN ALTRO PARTNER');

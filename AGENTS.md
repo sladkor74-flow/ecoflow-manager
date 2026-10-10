@@ -711,6 +711,13 @@ dire a uno dei due un numero diverso dall'altro rompe quella prova.
    di Baucina hanno come destinazione secondaria Irigom, e una loro riga poteva
    pareggiare al chilo un nostro mese. La controprova lo fa vedere: un nostro
    luglio da 4.100 kg agganciato a un caricamento di Baucina.
+5. **Il conferito della riga TOTALE conta ogni carico una volta.** Sulla riga
+   di un impianto il conferito comprende le secondarie arrivate dai piazzali, ed
+   e' giusto: il suo target le comprende. Sommato sulle righe contava due volte
+   ogni PFU passato da un piazzale (10.744,79 t contro 8.818,55 raccolte): la
+   riga TOTALE delle Giacenze diceva «residuo 800,21 t» invece di circa 2.730, e
+   il PDF «Conferito RETE 10.744,79 t». Il totale del conferito e' quello delle
+   primarie, come nel modulo Dichiarazioni. La prova ha un piazzale apposta.
 
 ### Canali indipendenti
 
@@ -786,6 +793,14 @@ in una colonna e rete in quella accanto e' un difetto, anche se i numeri sembran
 plausibili.
 
 Anche «oggi» e' il giorno italiano (`oggiRoma()`), non `new Date()` del server.
+E nessun modulo si fa una correzione sua del giorno: il report settimanale ne
+aveva una che riportava al giorno italiano solo le ore 22:00 e 23:00 tonde, e un
+trasporto finito alle 23:30 UTC del 30 giugno restava a giugno li' e andava a
+luglio altrove (audit del 10/10/2026). Si usa `giornoRoma`. Nella stessa prova
+(`prove/indicatoriVeri.mjs`) due avvisi che dicevano il falso: la matrice delle
+province contava **il mese in corso come un mese vuoto** (il primo del mese,
+due mesi senza raccolte per un mese cominciato da un giorno), e la regex dei
+nomi dei raccoglitori era `/s+/` e toglieva le lettere «s» invece degli spazi.
 Gli specchi in `src/lib` devono restare identici agli originali: lo controlla
 `prove/specchi.mjs`. **Prima di spingere: `npm run lint` e `npm run prove`.**
 

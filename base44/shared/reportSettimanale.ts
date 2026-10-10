@@ -15,6 +15,7 @@
 
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
+import { giornoRoma } from "./giornoItaliano.ts";
 
 const t3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
 const GIORNO = 86400000;
@@ -43,14 +44,19 @@ export function settimaneDelMese(anno, mese) {
   return out;
 }
 
-// Giorno di calendario della fine trasporto: le date del portale sono a mezzanotte
-// UTC; quelle salvate a mezzanotte italiana (22 o 23 UTC) si riportano al giorno giusto.
+// Giorno di calendario della fine trasporto: QUELLO ITALIANO, come in tutto il
+// resto del gestionale (giornoRoma). Qui c'era una correzione fatta a mano che
+// riportava al giorno giusto solo le ore 22:00 e 23:00 tonde: un fine trasporto
+// alle 23:30 UTC restava sul giorno UTC mentre a Roma e' gia' il giorno dopo -
+// 4.172 istanti del 2026 su 69.888 sarebbero finiti nel giorno sbagliato, e a
+// fine mese nel mese sbagliato (audit del 10/10/2026). Oggi il portale manda
+// solo date a mezzanotte e non succede; ma un movimento si legge in un punto
+// solo, e questo era un secondo punto. Il Date che torna e' la mezzanotte UTC
+// del giorno italiano, cosi' le letture getUTC* qui sotto restano quelle.
 function giornoFine(v) {
   if (!v) return null;
-  const d = new Date(v);
-  if (isNaN(d.getTime())) return null;
-  const italiana = (d.getUTCHours() === 22 || d.getUTCHours() === 23) && !d.getUTCMinutes() && !d.getUTCSeconds();
-  return italiana ? new Date(d.getTime() + 3 * 3600000) : d;
+  const g = giornoRoma(v);
+  return g ? new Date(`${g}T00:00:00Z`) : null;
 }
 
 function stessoNome(nomeTarget, nomePortale) {

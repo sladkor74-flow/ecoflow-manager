@@ -146,8 +146,11 @@ export default function TargetTable({ righe, totali }) {
               <td className="px-2 py-2 text-right">{fmt(totali.secondarie_nette_t)} t</td>
               <td className="px-2 py-2 text-right">{fmt(totali.terziarie_t)} t</td>
               <td className="px-2 py-2 text-right">{fmt(totali.conferito_t)} t</td>
-              {/* Come nelle righe: il residuo e' il target totale meno tutto quello
-                  che e' arrivato, primarie e secondarie in ingresso. */}
+              {/* Nel totale il conferito conta ogni carico UNA volta (10/10/2026): sulle
+                  righe un impianto riceve anche dai piazzali, ma sommando le righe ogni
+                  PFU passato da un piazzale si contava due volte, e il residuo diceva
+                  800 t con il 76% raggiunto. Ora conferito e residuo del totale sono
+                  quelli della commessa, gli stessi del modulo Dichiarazioni. */}
               <td className="px-2 py-2 text-right">{dashIfZero(totali.target_totale_t > 0 ? totali.target_totale_t - totali.conferito_t : null)}</td>
               <td className="px-2 py-2 text-right">{fmtPct(totali.target_totale_t > 0 ? (totali.conferito_primarie_t / totali.target_totale_t * 100) : null)}</td>
               <td className="px-2 py-2 text-right border-l">{dashIfZero(totali.conferito_aci_t)}</td>
