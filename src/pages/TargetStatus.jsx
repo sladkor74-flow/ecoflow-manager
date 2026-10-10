@@ -13,6 +13,7 @@ import TargetRaccoglitoriGrid from '@/components/target-status/TargetRaccoglitor
 import CommessaEcotyreForm from '@/components/target-status/CommessaEcotyreForm';
 import ConfigurazioneImpianti from '@/components/target-status/ConfigurazioneImpianti';
 import ZoneRaccoglitori from '@/components/target-status/ZoneRaccoglitori';
+import NuovoAnno from '@/components/target-status/NuovoAnno';
 import ReportGenerale from '@/components/target-status/ReportGenerale';
 import CanaleAci from '@/components/target-status/CanaleAci';
 import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
@@ -43,7 +44,7 @@ import { Loader2, RefreshCw, Filter, X, Lock } from 'lucide-react';
 const TARGET_BY_YEAR = { 2025: 11200, 2026: 11550 };
 // 'zone' c'era come linguetta ma non in questo elenco: cliccandola la pagina
 // tornava sempre ad Andamento, e la scheda non si apriva (06/10/2026).
-const SCHEDE = ['andamento', 'raccoglitori', 'commessa', 'impianti', 'zone'];
+const SCHEDE = ['andamento', 'raccoglitori', 'commessa', 'impianti', 'zone', 'nuovo-anno'];
 // fra piu' commesse dello stesso anno vale la modificata per ultima, come nelle funzioni
 const piuRecente = (righe) => (righe || []).reduce((x, r) => (!x || String(r.updated_date || r.created_date || '') > String(x.updated_date || x.created_date || '') ? r : x), null);
 const leggiLista = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
@@ -332,6 +333,10 @@ export default function TargetStatus() {
           <TabsTrigger value="commessa">Commessa Ecotyre</TabsTrigger>
           <TabsTrigger value="impianti">Impianti e stoccaggi</TabsTrigger>
           <TabsTrigger value="zone">Zone dei raccoglitori</TabsTrigger>
+          {/* L'anno nuovo: il contratto e le tariffe sono annuali senza tacito
+              rinnovo, e dal 1° gennaio una riga senza tariffa vale zero euro.
+              Sta qui perche' qui vive gia' la copia dell'anno (10/10/2026). */}
+          <TabsTrigger value="nuovo-anno">Nuovo anno</TabsTrigger>
         </TabsList>
 
         <TabsContent value="andamento" className="mt-4 space-y-6">
@@ -419,6 +424,10 @@ export default function TargetStatus() {
 
         {/* Le zone di competenza stanno qui, con gli altri perimetri della commessa
             (decisione dell'utente, 29/09/2026): a leggerle e' Verifiche Fornitori. */}
+        <TabsContent value="nuovo-anno" className="mt-4">
+          {scheda === 'nuovo-anno' && <NuovoAnno anno={anno} />}
+        </TabsContent>
+
         <TabsContent value="zone" className="mt-4">
           {scheda === 'zone' && <ZoneRaccoglitori isAdmin={puoScrivere} />}
         </TabsContent>

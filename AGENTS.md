@@ -913,6 +913,32 @@ la prossima uscita di gomma. Nessuno dei due e' un mancante.
   prezzo proprio. Le tariffe seminate da `seedTariffeAttive2026` chiudono il
   **31/12/2026** - contratto annuale senza tacito rinnovo (06/10/2026) - tranne
   l'extra raccolta, che resta aperta perche' sono campagne occasionali.
+- **L'ANNO NUOVO VA PREPARATO, E LE TARIFFE SONO LA VOCE CHE MORDE PER PRIMA**
+  (10/10/2026, `base44/shared/inizializzazioneAnno.ts`, funzione `preparaAnno`,
+  scheda Target & Status > **Nuovo anno**, prove in
+  `prove/inizializzazioneAnno.mjs`). Il contratto e' annuale senza tacito
+  rinnovo: il 31 dicembre scade tutto. Dal 1° gennaio una riga senza tariffa
+  vale **zero euro** e nasce con `stato_validazione: 'errore'`, sulla attiva
+  come sulla passiva: al primo formulario di gennaio la fatturazione e'
+  inservibile. `copiaAnnoTarget` portava avanti impianti, target, collegamenti,
+  contratto ed elenco siti; **le tariffe no, e nessuno lo diceva**.
+  La scheda e' una lista di controllo di sei voci - tariffe attive, tariffe
+  passive, contratto Ecotyre, target e siti, fotografia dei piazzali al 31/12,
+  contratti ai subfornitori - ognuna con il suo stato, il motivo per cui serve e
+  dove si rimedia. **Si misura sui fatti**, non su una scadenza scritta nel
+  codice: una tariffa «da rinnovare» e' una che copre il 31 dicembre e non copre
+  il 1° gennaio dopo, e la regola resta vera anche fra tre anni.
+  L'unica cosa che il gestionale fa da se' e' **preparare le tariffe**: stessa
+  riga, validita' sull'anno nuovo, **prezzo dell'anno prima** e la nota «copiato
+  dal {anno-1}, da confermare» (`conNotaCopia`, la stessa convenzione di
+  `copiaAnnoTarget`). Due prudenze che non si tolgono: non sovrascrive niente e
+  si puo' ripetere (chi ha gia' il suo seguito esce dall'elenco), e finche'
+  nessuno conferma **la voce resta gialla** - un prezzo vecchio che passa per
+  nuovo e' peggio di un prezzo che manca, perche' nessuno lo guarda piu'.
+  La fotografia dei piazzali al 31/12 si legge a portale **quel giorno**: la
+  pagina Unita' Locali mostra il saldo di adesso, non lo storico. Chi la chiede a
+  gennaio legge un numero sbagliato e non se ne accorge - e' successo su sei
+  piazzali del 2025, e quella lettura non torna piu'.
 - I report per l'amministrazione sono **tre, separati**: rete, ACI, extra
   raccolta. Le loro colonne non si toccano senza l'assenso dell'amministrazione.
 - La prefattura del portale copre **solo rete e ACI**. L'extra raccolta non e'
