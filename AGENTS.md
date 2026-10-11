@@ -909,7 +909,16 @@ dire a uno dei due un numero diverso dall'altro rompe quella prova.
     ripartire dal dichiarato del mese faceva uscire la stessa nave due volte,
     dalla casella e dal suo mese (600 t di riga contro 900 di giacenza,
     «dichiarati 300.000 kg in piu'»). `ha_anno` di `raccoglitoreUscite` resta
-    un'informazione e non sceglie piu' niente. Il conto si chiude sulla giacenza
+    un'informazione e non sceglie piu' niente. **L'eccesso della casella non
+    entra nei mesi** (visto in produzione l'11/10/2026, subito dopo la
+    pubblicazione): il report di Irigom aggancia alle dichiarazioni del 2026
+    circa 1.729 t arrivate nel 2025 contro un'apertura di 385,36 t, e l'eccesso,
+    trattato come un aggancio caduto nel mese sbagliato, svuotava gennaio,
+    febbraio e avanti: la colonna faceva 0 con un falso «652.840 kg dichiarati
+    in piu'», e lo stesso su Green Tyre, T-Cycle e Gatim. In
+    `allineaAllaGiacenza` quello che la casella non contiene resta fuori
+    (`prima.oltre_kg`, `agganciato_oltre_kg` nel riepilogo) e si dice; i mesi
+    dell'anno li svuotano solo i loro agganci. Il conto si chiude sulla giacenza
     anche per ACI ed extra raccolta, e il caricato del mese e' `kgCaricatiDi`,
     una regola sola (con due campagne extra, una caricata, la colonna diceva 0,5
     contro 0,2). Un canale con piu' righe (l'ACI primaria e secondaria) si

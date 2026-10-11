@@ -207,13 +207,22 @@ export function allineaAllaGiacenza(conferito, uscito, giacenzaKg = null, dallAn
   const resta = [];
   const stimato = [];
   let fuoriMese = 0;
+  // L'ECCESSO DELLA CASELLA DELL'ANNO PRIMA NON ENTRA NEI MESI (11/10/2026, visto
+  // in produzione). Il report di Irigom aggancia alle dichiarazioni del 2026 circa
+  // 1.729 t arrivate nel 2025, contro un'apertura di 385,36 t: l'eccesso, trattato
+  // come un aggancio caduto nel mese sbagliato, si spostava su gennaio, febbraio e
+  // avanti, tutti i mesi del 2026 risultavano dichiarati e la colonna faceva 0
+  // con un falso «652.840 kg dichiarati in piu'». Quegli agganci sono di carichi
+  // degli anni prima: oltre l'apertura non hanno niente da portare via in questo
+  // anno. Restano fuori e si dicono (prima.oltre_kg).
+  let oltrePrima = 0;
   // Posizione 0: dall'anno prima; posizioni 1-12: i mesi.
   const entra = [(dallAnnoPrima && dallAnnoPrima.conferito) || 0, ...Array.from({ length: 12 }, (_, i) => (conferito || [])[i])];
   const esce = [(dallAnnoPrima && dallAnnoPrima.uscito) || 0, ...Array.from({ length: 12 }, (_, i) => (uscito || [])[i])];
   for (let i = 0; i < 13; i++) {
     const c = Math.max(0, Math.round(Number(entra[i]) || 0));
     let q = Math.max(0, Math.round(Number(esce[i]) || 0));
-    if (q > c) { fuoriMese += q - c; q = c; }
+    if (q > c) { if (i === 0) oltrePrima += q - c; else fuoriMese += q - c; q = c; }
     u.push(q);
     resta.push(c - q);
     stimato.push(false);
@@ -232,7 +241,7 @@ export function allineaAllaGiacenza(conferito, uscito, giacenzaKg = null, dallAn
     resta: resta.slice(1),
     stimato: stimato.slice(1),
     // La casella dall'anno prima: entrata, uscita, quello che ne resta.
-    prima: { conferito: Math.max(0, Math.round(Number(entra[0]) || 0)), uscito: u[0], resta: resta[0], stimato: stimato[0] },
+    prima: { conferito: Math.max(0, Math.round(Number(entra[0]) || 0)), uscito: u[0], resta: resta[0], stimato: stimato[0], oltre_kg: oltrePrima },
     // Agganci che cadono in un mese in cui non e' arrivato tanto: quello che non
     // ha trovato posto nemmeno nei mesi prima.
     fuori_mese_kg: fuoriMeseResiduo,

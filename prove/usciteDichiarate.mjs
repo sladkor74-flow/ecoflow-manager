@@ -238,10 +238,25 @@ console.log("LA CASELLA DALL'ANNO PRIMA: LA SOMMA DELLA RIGA E' LA GIACENZA, ANC
   // caso di T-Cycle, che il 09/10 tornava al chilo.
   const tc = allineaAllaGiacenza(TC_CONFERITO, TC_USCITO, TC_GIACENZA, null);
   verifica('senza casella T-Cycle torna come prima, mese per mese', uguali(tc.resta, TC_PORTALE) && tc.prima.conferito === 0 && tc.prima.resta === 0);
-  // Il carico del 2025 uscito piu' dell'apertura netta: l'eccesso va sui carichi
-  // piu' vecchi, ma la riga fa sempre la giacenza.
+  // Il carico del 2025 uscito piu' dell'apertura netta: l'eccesso resta fuori dai
+  // mesi dell'anno (si dice in prima.oltre_kg), e la riga fa sempre la giacenza.
   const troppo = allineaAllaGiacenza([10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], zero, 12000, { conferito: 5000, uscito: 8000 });
   verifica('la riga fa la giacenza anche quando dal report esce piu dell apertura', somma(troppo.resta) + troppo.prima.resta === 12000, JSON.stringify(troppo));
+  verifica("e l'eccesso della casella si dice, senza diventare un avviso", troppo.prima.oltre_kg === 3000 && troppo.oltre_kg === 0, JSON.stringify(troppo.prima));
+
+  // IRIGOM, 2026, I NUMERI VERI DELL'11/10/2026 (visto in produzione dopo la
+  // pubblicazione). Apertura 385,36 t; il report aggancia alle dichiarazioni del
+  // 2026 circa 1.729 t arrivate nel 2025; dei carichi del 2026 ne aggancia 2.878 t;
+  // la giacenza del canale e' 652,84. L'eccesso della casella si spostava su
+  // gennaio, febbraio e avanti: tutti i mesi risultavano dichiarati, la colonna
+  // faceva 0 e la pagina diceva «652.840 kg dichiarati in piu'».
+  const IR_CONFERITO = [375000, 361880, 392740, 368000, 343780, 423780, 499540, 272380, 375140, 132920, 0, 0];
+  const IR_REPORT = [375000, 361880, 392740, 368000, 343780, 423780, 499540, 113280, 0, 0, 0, 0];
+  const ir = allineaAllaGiacenza(IR_CONFERITO, IR_REPORT, 652840, { conferito: 385360, uscito: 1729000 });
+  verifica('Irigom: la riga «Da dichiarare» fa la giacenza, 652,84 t', somma(ir.resta) + ir.prima.resta === 652840, JSON.stringify([somma(ir.resta), ir.prima]));
+  verifica('nessun falso «dichiarati in piu\'» e niente di non allocato', ir.oltre_kg === 0 && ir.non_allocato_kg === 0, JSON.stringify([ir.oltre_kg, ir.non_allocato_kg]));
+  verifica("la casella esce tutta (l'apertura e' gia' dichiarata) e l'eccesso degli anni prima si dice a parte", ir.prima.resta === 0 && ir.prima.oltre_kg === 1729000 - 385360, JSON.stringify(ir.prima));
+  verifica('settembre e ottobre restano da dichiarare: i mesi del 2026 non li svuotano gli arrivi del 2025', ir.resta[8] === 375140 && ir.resta[9] === 132920, JSON.stringify(ir.resta));
 }
 
 console.log("UN CANALE CON PIU' RIGHE SI CHIUDE SUL CANALE");

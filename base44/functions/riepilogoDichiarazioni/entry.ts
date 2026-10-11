@@ -799,6 +799,9 @@ export default async function(req) {
           uscito_kg: allineato.prima.uscito,
           resta_kg: allineato.prima.resta,
           uscito_stimato: allineato.prima.stimato,
+          // Quanto il report aggancia agli anni prima oltre l'apertura: non tocca i
+          // mesi dell'anno (allineaAllaGiacenza), si dice e basta.
+          agganciato_oltre_kg: allineato.prima.oltre_kg || 0,
           da_dichiarare_kg: nonDovutaFlusso ? 0 : allineato.prima.resta,
           letta_kg: casella.letta,
           dichiarato_dopo_kg: casella.dichiarato_dopo,
