@@ -214,5 +214,45 @@ verifica('e una verifica non decisa non entra nell\'indice: non c\'e\' niente da
 verifica('ma per il punto nuovo non c\'e\' nessuna verifica: si ricontrolla',
   daVerificare({ pdr: [reiscritto], idPdrConOrdini: [39180], verifiche: [vecchiaAltroSoggetto], oggi: '2026-10-06' })[0].motivo === 'mai controllato');
 
+console.log('LA PARTITA IVA ARRIVATA O SPARITA NON CAMBIA IL SOGGETTO');
+// Chiusura dell'audit, 11/10/2026. Si confrontava la chiave migliore di ciascun
+// lato: con la partita IVA da una parte sola, PIVA:... contro NOME:...|comune
+// erano sempre diverse, e lo stesso gommista, ricaricato col file dei PDR che
+// ora porta la partita IVA, perdeva il controllo gia' fatto. La partita IVA
+// decide solo quando c'e' da tutti e due i lati. Si prova sul modulo delle
+// funzioni e sullo specchio delle pagine (SediOperative.jsx lo usa).
+{
+  const server = await import('../base44/shared/sediOperative.ts');
+  const pagina = await import('../src/lib/sediOperative.js');
+  const controllo = { id_pdr: 308, ragione_sociale: 'EUROGOMME SRL', partita_iva: '', comune_portale: 'Bari', indirizzo_portale: 'Corso Vittorio Emanuele 138', esito: 'diverso', stato: 'corretto', indirizzo_per_formulario: 'S.S. 93 km 56,400', verificato_il: '2026-10-06', deciso_il: '2026-10-06' };
+  const conIva = { ...controllo, partita_iva: '01234567890' };
+  const casi = [
+    ['la partita IVA arrivata dopo, stesso nome e comune: vale', controllo, { id_pdr: 308, ragione_sociale: 'Eurogomme S.r.l.', partita_iva: '01234567890', comune_pdr: 'BARI' }, true],
+    ['la partita IVA sparita dopo, stesso nome e comune: vale', conIva, { id_pdr: 308, ragione_sociale: 'EUROGOMME SRL', partita_iva: '', comune_pdr: 'Bari' }, true],
+    ['la partita IVA arrivata dopo con un altro nome: non vale', controllo, { id_pdr: 308, ragione_sociale: 'PNEUS POINT SNC', partita_iva: '01234567890', comune_pdr: 'Bari' }, false],
+    ['partita IVA da tutti e due i lati e diversa, col nome uguale: non vale', conIva, { id_pdr: 308, ragione_sociale: 'EUROGOMME SRL', partita_iva: '09876543210', comune_pdr: 'Bari' }, false],
+    ['partita IVA da un lato e nessun nome dall\'altro: non si sa, non si invalida', { id_pdr: 308, partita_iva: '01234567890' }, { id_pdr: 308, ragione_sociale: 'EUROGOMME SRL', comune_pdr: 'Bari' }, true],
+  ];
+  for (const [nome, v, p, atteso] of casi) {
+    verifica('funzioni: ' + nome, server.verificaApplicabile(v, p).vale === atteso, JSON.stringify(server.verificaApplicabile(v, p)));
+    verifica('pagine: ' + nome, pagina.verificaApplicabile(v, p).vale === atteso, JSON.stringify(pagina.verificaApplicabile(v, p)));
+  }
+  verifica('stessoSoggetto dice null quando non si puo\' dire',
+    typeof server.stessoSoggetto === 'function' && server.stessoSoggetto({ partita_iva: '01234567890' }, { ragione_sociale: 'X' }) === null);
+  // L'effetto che si vedeva: la sede decisa resta sul formulario e il punto non
+  // torna fra quelli da controllare per «un altro soggetto».
+  const ricaricato = { id_pdr: 308, ragione_sociale: 'EUROGOMME SRL', partita_iva: '01234567890', comune_pdr: 'Bari', indirizzo_pdr: 'Corso Vittorio Emanuele 138' };
+  const perFir = server.indirizzoPerFormulario(ricaricato, controllo);
+  verifica('sul formulario resta la sede decisa', perFir.indirizzo === 'S.S. 93 km 56,400' && perFir.origine !== 'portale_soggetto_cambiato', JSON.stringify(perFir));
+  const coda = server.daVerificare({ pdr: [ricaricato], idPdrConOrdini: [308], verifiche: [controllo], oggi: '2026-10-11', giorniValidita: 180 });
+  verifica('e il punto non torna da controllare per «un altro soggetto»', !coda.some(s => /altro soggetto/.test(s.motivo || '')), JSON.stringify(coda.map(s => s.motivo)));
+  // Lo stesso gommista re-iscritto con un numero nuovo: la sede decisa si ritrova
+  // anche se la partita IVA c'e' solo sul punto nuovo.
+  const reiscrittoIva = { id_pdr: 41000, ragione_sociale: 'EUROGOMME SRL', partita_iva: '01234567890', comune_pdr: 'Bari' };
+  const altrove = server.decisioneDiAltroPunto(reiscrittoIva, [controllo]);
+  verifica('la decisione su un altro punto si ritrova anche con la partita IVA da un lato solo', altrove && altrove.id_pdr === 308, JSON.stringify(altrove && altrove.id_pdr));
+  verifica('ma non quella di un soggetto che non si sa dire', server.decisioneDiAltroPunto(reiscrittoIva, [{ id_pdr: 9, stato: 'corretto' }]) === null);
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

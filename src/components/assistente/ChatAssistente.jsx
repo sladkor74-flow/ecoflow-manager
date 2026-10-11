@@ -32,8 +32,11 @@ export const AREE = [
   { valore: 'gestionale', etichetta: 'Regole del gestionale' },
 ];
 
+// Fino all'11/10/2026 il primo esempio era «Dal 16 settembre un gommista con 6
+// dipendenti deve usare il FIR digitale?»: una domanda legata a una data ormai
+// passata, che proposta oggi suona come una novita' (chiusura dell'audit).
 const ESEMPI = [
-  'Dal 16 settembre un gommista con 6 dipendenti deve usare il FIR digitale?',
+  'Quanto resta da dichiarare agli impianti, canale per canale?',
   'Come stiamo con il contratto in Campania rispetto all\'atteso a oggi?',
   'Quali raccoglitori sono sotto target questo mese?',
   'Che cosa deve verificare il responsabile tecnico prima di affidare i PFU a un impianto?',
@@ -66,6 +69,7 @@ const ETICHETTE_STRUMENTO = {
   caricamenti: 'Ultimi caricamenti',
   giacenze: 'Giacenze',
   dichiarazioni_impianti: 'Dichiarazioni Impianti',
+  riepilogo_dichiarazioni: 'Dichiarazioni Impianti, da dichiarare e quadratura',
   omologhe: 'Omologhe',
   dichiarazioni_rentri: 'Dichiarazioni RENTRI',
   punti_di_raccolta: 'Anagrafica PDR',
@@ -114,7 +118,7 @@ function DialogValutazione({ domanda, modo, onClose, onSalvato }) {
         nota_valutazione: nota.trim(),
         conoscenza_id: conoscenzaId,
       });
-      toast({ title: salvaFaq ? 'Salvata nella base di conoscenza' : 'Valutazione salvata', description: salvaFaq ? 'L\'Assistente la userà nelle prossime risposte.' : undefined });
+      toast({ title: salvaFaq ? 'Salvata nella base di conoscenza' : 'Valutazione salvata', description: salvaFaq ? 'EcoTyna la userà nelle prossime risposte.' : undefined });
       onSalvato();
     } catch (e) {
       toast({ title: 'Salvataggio non riuscito', description: e.message, variant: 'destructive' });
@@ -130,8 +134,8 @@ function DialogValutazione({ domanda, modo, onClose, onSalvato }) {
           <DialogTitle>{modo === 'corretta' ? 'Risposta corretta' : 'Risposta da correggere'}</DialogTitle>
           <DialogDescription>
             {modo === 'corretta'
-              ? 'Salvala come FAQ: l\'Assistente la userà come riferimento nelle prossime risposte. Puoi ritoccare il testo prima di salvare.'
-              : 'Spiega cosa non va. Se scrivi la risposta giusta e la salvi come FAQ, l\'Assistente userà quella.'}
+              ? 'Salvala come FAQ: EcoTyna la userà come riferimento nelle prossime risposte. Puoi ritoccare il testo prima di salvare.'
+              : 'Spiega cosa non va. Se scrivi la risposta giusta e la salvi come FAQ, EcoTyna userà quella.'}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -282,7 +286,7 @@ function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica }) {
   );
 }
 
-export default function ChatAssistente() {
+export default function ChatAssistente({ domandaIniziale = '' } = {}) {
   const { isAdmin } = usePermessi();
   const { toast } = useToast();
   const [domande, setDomande] = useState([]);
@@ -296,6 +300,16 @@ export default function ChatAssistente() {
   const fine = useRef(null);
   const voce = useVoce();
   const ascolto = useAscolto((t, definitivo) => { setTesto(t); if (definitivo) setTesto(t.trim()); });
+  // UNA DOMANDA PREPARATA DA UN'ALTRA PAGINA (/assistente?domanda=..., chiusura
+  // dell'audit, 11/10/2026): si scrive nella casella di una domanda nuova e NON
+  // si invia. La manda chi legge, quando l'ha guardata e magari corretta: un
+  // collegamento non deve far partire da solo una domanda, con quello che costa.
+  useEffect(() => {
+    const q = String(domandaIniziale || '').trim();
+    if (!q) return;
+    setAttiva(null);
+    setTesto(q.slice(0, 4000));
+  }, [domandaIniziale]);
   const lette = useRef(new Set());
   // Allegati: letti nel browser appena scelti; le tabelle restano qui finche' la
   // pagina e' aperta, per preparare i file modificati senza caricarle sul dominio.
@@ -451,13 +465,13 @@ export default function ChatAssistente() {
         // non la vede si diceva comunque di andarci (02/10/2026). E le due cose
         // sono diverse: una novita' normativa la propone l'Assistente e la
         // approva lui, una precisazione la manda l'utente e la valuta lui.
-        if (isAdmin && res.data.novita) toast({ title: "Possibile novità normativa", description: "L'Assistente ha proposto un aggiornamento della base di conoscenza: lo trovi nella scheda Base di conoscenza." });
+        if (isAdmin && res.data.novita) toast({ title: "Possibile novità normativa", description: "EcoTyna ha proposto un aggiornamento della base di conoscenza: lo trovi nella scheda Base di conoscenza." });
         else if (res.data.precisazioni) toast({ title: "Precisazione inviata", description: isAdmin ? "È in coda nella scheda Base di conoscenza, da approvare." : "La valuterà l'amministratore prima che entri nella base di conoscenza." });
       }
       await carica();
     } catch (e) {
       const messaggio = e?.response?.data?.error || e.message;
-      toast({ title: 'L\'Assistente non ha risposto', description: messaggio, variant: 'destructive' });
+      toast({ title: 'EcoTyna non ha risposto', description: messaggio, variant: 'destructive' });
       await carica();
       if (!conversazione) setAttiva(null);
     } finally {
@@ -554,7 +568,7 @@ export default function ChatAssistente() {
           {!attiva ? (
             <div className="max-w-2xl mx-auto py-6 space-y-4">
               <div>
-                <p className="text-lg font-semibold">Chiedi all'Assistente</p>
+                <p className="text-lg font-semibold">Chiedi a EcoTyna</p>
                 <p className="text-sm text-muted-foreground">
                   Norme su PFU, rifiuti, RENTRI, Albo e responsabile tecnico, oppure i dati della commessa: target, raccolto, liste, giacenze e qualifica dei fornitori.
                   Ogni risposta cita le fonti e, per le norme, controlla online che non ci siano novità.

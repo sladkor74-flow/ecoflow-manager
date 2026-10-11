@@ -132,6 +132,10 @@ export function istruzioniPiano(catalogo, domanda, oggi, storia = []) {
     '- I target sono solo della rete: per l\'ACI non esistono.',
     '- Per "quanto abbiamo raccolto" usa raccolto, non report_mensile: raccolto da il totale e il dettaglio di un canale e di un periodo. Usa report_mensile solo se la domanda chiede proprio le pivot del Report Mensile o il confronto fra i mesi.',
     '- Se la domanda cita un numero di formulario o un ID ordine, usa cerca_movimento.',
+    // Chiusura dell'audit, 11/10/2026: lo strumento del riepilogo delle
+    // dichiarazioni e' nuovo, e senza questa riga il pianificatore continuava a
+    // rispondere a «quanto resta da dichiarare» con le sole giacenze.
+    '- Per "quanto resta da dichiarare" a un impianto, quali mesi sono ancora da dichiarare, se un impianto quadra col portale, le dichiarazioni doppie o quelle che il portale ha e il gestionale no, usa riepilogo_dichiarazioni, con sito se la domanda nomina un impianto: esce gia\' diviso per canale. Per la giacenza di un sito usa giacenze; per l\'elenco delle dichiarazioni mese per mese, con i materiali ricavati, dichiarazioni_impianti.',
     '- Se la domanda non riguarda i dati del gestionale ma una norma, una procedura o il corso, lascia strumenti vuoto.',
     '- serve_normativa: metti falso quando la domanda chiede SOLO numeri o stato dei nostri dati ("quanto ha raccolto", "quanti ordini sono aperti", "come e\' andata la quadratura", "chi e\' sotto target"): la risposta sara\' il numero e non serve ne\' cercare online ne\' citare norme. Metti vero quando c\'entra una regola, un obbligo, una scadenza di legge, una sanzione, una procedura del portale o il corso per responsabile tecnico, anche se la domanda chiede anche dei numeri. Nel dubbio metti vero: una risposta normativa senza fonti e\' un danno, un link di troppo su un numero e\' un fastidio.',
     '- Non inventare parametri che non esistono nello strumento.',

@@ -54,7 +54,8 @@ export const LIVELLI = {
     puo: [
       'Vede tutti i moduli e tutti i dati',
       'Esporta in Excel e in PDF quello che vede',
-      'Usa l\'Assistente e le esercitazioni del corso',
+      // L'assistente a video si chiama EcoTyna (chiusura dell'audit, 11/10/2026).
+      'Usa EcoTyna e le esercitazioni del corso',
       'Scarica i file che EcoTyna prepara (Excel, CSV, Word, PDF, testo)',
       'Apre richieste all\'amministratore',
     ],

@@ -23,7 +23,7 @@ import { fetchAll } from "./fetchAll.ts";
 import { contaFormulari } from "./formulari.ts";
 import { normalizzaRagioneSociale, risolviNome } from "./normalizzaRagioneSociale.ts";
 import { chiaveLettura } from "./cacheLetture.ts";
-import { getRegioneFromProvincia } from "./dataEnrichment.ts";
+import { regioneDi } from "./regioneMovimento.ts";
 import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { eTerminato, eEseguito, giornoMovimento, riepilogoEseguiti } from "./movimenti.ts";
@@ -33,15 +33,27 @@ import { intervalloSettimana, settimanaIso, statoCaricamenti, riepilogoVociDate,
 import { situazioneGestionale, terminatiSenzaFine } from "./assistente.ts";
 import { listaOrdini, statoRichiesta, evasioneOrdini } from "./richiesteEct.ts";
 import { targetDelPortale } from "./targetRaccoglitori.ts";
-import { statoDichiarazione, sommaMateriali } from "./dichiarazioniImpianti.ts";
+import { statoDichiarazione, sommaMateriali, leggiDichiarazioni, kgCaricatiDi } from "./dichiarazioniImpianti.ts";
 import { giorniAllaScadenza, fasciaScadenza } from "./omologhe.ts";
 import { statoRequisito } from "./qualificaFornitori.ts";
 import { calcolaRigheAttiva, riconciliaAttiva, documentoValido, eRigaACorpo, eSecondariaExtra, TIPOLOGIE_ATTIVA } from "./attivaCalcolo.ts";
 import { piuGiorni } from "./predittivita.ts";
 import { calcolaPassivaMese, indiceMesePassiva, movimentiDateDelCanale } from "./passivaCalcolo.ts";
 import { anomaliaSenzaFineAnno } from "./filtroPeriodo.ts";
+import { leggiRegistro, statoDelRegistro, avvisoCaricamento, nomeArchivio, RIGHE_REGISTRO } from "./registroCaricamenti.ts";
+import { datiFinoAl } from "./statoArchivi.ts";
+import { tariffaNonDisattivata, tariffaValeIl } from "./validitaTariffa.ts";
 
 export { oggiRoma };
+
+// I file del Caricamento Dati di cui EcoTyna dice l'ultimo caricamento: quelli
+// della dashboard (cruscottoOperativo) piu' le schede dell'extra raccolta, che
+// si registrano quando cambiano. Lo slot degli assegnati non c'e' piu' (arrivano
+// col file delle primarie); primarie_rete e primarie_aci non si caricano piu', ma
+// leggiRegistro li legge lo stesso perche' riscrivono gli archivi delle primarie:
+// servono a capire se un caricamento rimasto aperto e' stato superato (chiusura
+// dell'audit, 11/10/2026).
+const TIPI_DEI_CARICAMENTI = ['primarie', 'secondarie', 'terziarie', 'ordini_non_dichiarati', 'dichiarazioni_trattamento', 'pdr', 'extra_raccolta'];
 
 // Di una data conta il giorno italiano: la regola sta in shared/giornoItaliano.ts.
 const soloData = (v) => giornoRoma(v);
@@ -236,7 +248,7 @@ async function movimenti(base44, { canale, anno, mese, mesi, provincia, regione,
 
   const stessoLuogo = (r) => {
     if (provincia && String(r.provincia || '').toUpperCase() !== String(provincia).toUpperCase()) return false;
-    if (regione && normalizzaRagioneSociale(r.regioni || r.regione || getRegioneFromProvincia(r.provincia)) !== normalizzaRagioneSociale(regione)) return false;
+    if (regione && normalizzaRagioneSociale(regioneDi(r)) !== normalizzaRagioneSociale(regione)) return false;
     if (chiaviRacc && !chiaviRacc.has(chiave(r.trasportatore))) return false;
     if (chiaviDest && !chiaviDest.has(chiave(r.destinazione))) return false;
     return true;
@@ -349,10 +361,13 @@ const MESE_DA_DATA = (r) => {
   return d ? MESI[Number(d.slice(5, 7)) - 1] || 'N/D' : 'N/D';
 };
 
-// La regione di un movimento: la colonna del portale, il campo vecchio, e in
-// mancanza la provincia. Il filtro la cercava cosi' e il raggruppamento no, e
-// filtrando per Campania usciva un dettaglio con la riga "N/D".
-const REGIONE_DI = (r) => String(r.regioni || r.regione || getRegioneFromProvincia(r.provincia) || 'N/D').trim();
+// La regione di un movimento, la stessa per il filtro e per il raggruppamento:
+// prima erano due regole, e filtrando per Campania usciva un dettaglio con la riga
+// "N/D". Dal 11/10/2026 (chiusura dell'audit) e' quella di tutto il gestionale,
+// regioneDi: la provincia, poi la regione, e la colonna «Regioni» del file solo
+// se non c'e' altro. Letta per prima, quella colonna dava a EcoTyna una regione
+// diversa dalla Dashboard per lo stesso ritiro.
+const REGIONE_DI = (r) => regioneDi(r) || 'N/D';
 
 function perChiave(righe, campo) {
   const m = new Map();
@@ -1397,66 +1412,75 @@ export const STRUMENTI = [
   },
   {
     nome: 'caricamenti',
-    descrizione: 'Quando sono stati caricati per l\'ultima volta i file del gestionale, e fino a che giorno arrivano i dati di ogni archivio (l\'ultima fine trasporto, la fotografia del portale, l\'ultima dichiarazione): serve per sapere se un dato e\' aggiornato.',
+    descrizione: 'Quando sono stati caricati per l\'ultima volta i file del gestionale, e fino a che giorno arrivano i dati di ogni archivio (l\'ultima fine trasporto, la fotografia del portale, l\'ultima dichiarazione): serve per sapere se un dato e\' aggiornato. Dice anche i caricamenti in corso, interrotti o non riusciti, che rendono un archivio inaffidabile, con le stesse parole della dashboard.',
     parametri: {},
     moduli: ['Caricamento Dati'],
     async esegui(base44) {
-      // Sessanta righe non bastano a coprire tutti i tipi di file, e l'ultima
-      // riga di un tipo puo' essere un tentativo fallito: "caricato oggi" con
-      // dentro zero righe non e' un caricamento. Si tiene l'ultimo riuscito, e
-      // il tentativo fallito si dice a parte.
-      const log = await fetchAll(base44.asServiceRole.entities.UploadLog);
-      log.sort((a, b) => String(b.created_date || '').localeCompare(String(a.created_date || '')));
-      const per = new Map();
-      const falliti = new Map();
-      for (const l of log) {
-        const tipo = l.tipo_file || 'altro';
-        const fallito = String(l.esito || '').toLowerCase().includes('err');
-        if (fallito) {
-          if (!falliti.has(tipo) && !per.has(tipo)) falliti.set(tipo, { tipo, quando: soloData(l.created_date), file: l.nome_file, esito: l.esito });
-          continue;
-        }
-        if (!per.has(tipo)) per.set(tipo, { tipo, quando: soloData(l.created_date), file: l.nome_file, righe: l.righe_importate, esito: l.esito });
-      }
-      // FINO A CHE GIORNO ARRIVANO I DATI (utente, 10/10/2026). Il giorno del
-      // caricamento non lo dice: un file caricato il 9 puo' fermarsi al 6. Per ogni
-      // archivio l'ultimo giorno che c'e' dentro, sul giorno italiano: per i
-      // movimenti l'ultima fine trasporto dei terminati, per il file dei non
-      // dichiarati il giorno della fotografia, per il report delle dichiarazioni
-      // l'ultima dichiarazione, per gli assegnati l'ultimo ordine immesso. Una
-      // lettura ordinata per archivio, di pochi record: non si legge l'archivio intero.
+      // UNA REGOLA SOLA, QUELLA DELLA DASHBOARD (chiusura dell'audit, 11/10/2026).
+      //
+      // Qui c'era una quarta regola sullo stato di un archivio: si leggeva il
+      // registro intero e l'ultimo caricamento era la prima riga senza «err»
+      // nell'esito, quindi anche una riscrittura finita «parziale» o una riga
+      // ancora «in_corso». Sullo stesso registro - primarie riuscite il 05/10,
+      // riscrittura parziale il 09/10 - la dashboard diceva «caricate il 05/10,
+      // Caricamento non riuscito: ricarica il file» ed EcoTyna «primarie caricate
+      // il 09/10, esito parziale», senza nessun tentativo fallito.
+      //
+      // Ora il registro si legge come lo leggono la dashboard e i motori
+      // (leggiRegistro: le ultime righe di ogni tipo, una lettura sola) e si
+      // giudica con la loro regola (statoDelRegistro): l'ultimo caricamento e'
+      // l'ultimo riuscito, e quello che lascia un archivio inaffidabile - in
+      // corso, interrotto, non riuscito, se dopo di lui non ne e' riuscito un
+      // altro - si dice col testo della dashboard (avvisoCaricamento). Le righe
+      // passano sciolte, come le passa la dashboard: statoDelRegistro le rimette
+      // in ordine da se'. Un rifiuto a dati intatti (un file sbagliato scartato
+      // prima di toccare l'archivio) non rende l'archivio inaffidabile, e qui non
+      // si dice piu' come un «tentativo fallito».
+      //
+      // E il «fino al» di ogni archivio viene da datiFinoAl (statoArchivi.ts),
+      // la stessa lettura della dashboard: la copia che stava qui ne era l'origine
+      // e leggeva created_date senza rimettere la Z.
       const svc = base44.asServiceRole.entities;
-      const ultimoGiorno = async (entita, campo, filtro = null) => {
-        try {
-          const righe = filtro ? await svc[entita].filter(filtro, `-${campo}`, 5) : await svc[entita].list(`-${campo}`, 5);
-          const giorni = (righe || []).map(r => r && r[campo]).filter(Boolean).map(v => giornoRoma(v) || String(v).slice(0, 10)).filter(Boolean).sort();
-          return giorni.length ? giorni[giorni.length - 1] : null;
-        } catch (_e) { return undefined; }
-      };
-      const ARCHIVI_FINO_AL = [
-        ['primarie di rete', 'PrimariaRete', 'trasporto_finito_il', 'ultima fine trasporto dei terminati', { stato: 'terminato' }],
-        ['primarie ACI', 'PrimariaAci', 'trasporto_finito_il', 'ultima fine trasporto dei terminati', { stato: 'terminato' }],
-        ['secondarie', 'Secondaria', 'trasporto_finito_il', 'ultima fine trasporto dei terminati', { stato: 'terminato' }],
-        ['terziarie', 'Terziaria', 'trasporto_finito_il', 'ultima fine trasporto dei terminati', { stato: 'terminato' }],
-        ['extra raccolta', 'ExtraRaccolta', 'trasporto_finito_il', 'ultima fine trasporto dei terminati', { stato: 'terminato' }],
-        ['ordini non dichiarati (fotografia del portale)', 'OrdineNonDichiarato', 'created_date', 'giorno della fotografia', null],
-        ['report delle dichiarazioni di trattamento', 'DichiarazioneTrattamento', 'data_dichiarazione', 'ultima dichiarazione', null],
-        ['assegnati di rete', 'Assegnato', 'ordine_immesso_il', 'ultimo ordine immesso', null],
-        ['assegnati ACI', 'AssegnatoAci', 'ordine_immesso_il', 'ultimo ordine immesso', null],
-      ];
-      const finoAl = await Promise.all(ARCHIVI_FINO_AL.map(async ([archivio, entita, campo, cosa, filtro]) => {
-        const giorno = await ultimoGiorno(entita, campo, filtro);
-        return { archivio, dati_fino_al: giorno === undefined ? null : giorno, cosa, ...(giorno === undefined ? { lettura_non_riuscita: true } : giorno === null ? { vuoto: true } : {}) };
-      }));
+      const [perTipo, finoAl] = await Promise.all([
+        leggiRegistro(svc.UploadLog, TIPI_DEI_CARICAMENTI),
+        datiFinoAl(svc),
+      ]);
+      const righe = [...perTipo.values()].flat();
+      const stato = statoDelRegistro(righe, TIPI_DEI_CARICAMENTI);
+      const delTipo = (tipo) => righe.filter(r => r && r.tipo_file === tipo);
+      const caricamenti = Object.values(stato.ultimi).map((u) => {
+        const r = delTipo(u.tipo_file).find(x => x.id === u.id) || {};
+        return {
+          tipo: u.tipo_file, archivio: nomeArchivio(u.tipo_file), quando: u.data, file: u.nome_file,
+          righe: typeof r.righe_importate === 'number' ? r.righe_importate : null, esito: r.esito || null,
+        };
+      }).sort((a, b) => String(b.quando).localeCompare(String(a.quando)));
+      const inaffidabili = stato.in_corso.map((a) => {
+        const avviso = avvisoCaricamento(a);
+        return { tipo: a.tipo_file, archivio: nomeArchivio(a.tipo_file), quando: a.data, file: a.nome_file, stato: avviso.stato, titolo: avviso.titolo, dettaglio: avviso.dettaglio };
+      });
+      // Nel registro ci sono righe del tipo ma nessuna riuscita: «mai caricato» e
+      // «nessuno degli ultimi riuscito» sono due cose diverse, come in dashboard.
+      const senzaRiuscito = TIPI_DEI_CARICAMENTI.filter(t => !stato.ultimi[t] && delTipo(t).length).map((t) => {
+        const n = delTipo(t).length;
+        return {
+          tipo: t, archivio: nomeArchivio(t),
+          avviso: n >= RIGHE_REGISTRO ? `Nessuno degli ultimi ${n} caricamenti di questo file nel registro e' riuscito.` : 'Nel registro ci sono solo caricamenti di questo file non riusciti.',
+        };
+      });
       return {
         fonte: 'Caricamento Dati',
         periodo: 'ultimi caricamenti riusciti',
         dati_al: oggiRoma(),
         dati: {
-          caricamenti: [...per.values()].sort((a, b) => String(b.quando).localeCompare(String(a.quando))),
+          caricamenti,
+          ...(inaffidabili.length ? {
+            caricamenti_da_ripetere_o_in_corso: inaffidabili,
+            nota_caricamenti: "Un caricamento in corso, interrotto o non riuscito lascia l'archivio vuoto o a meta': finche' non si ricarica il file (o non finisce), i numeri che leggono quell'archivio non sono affidabili, e verifiche, alert e conti da salvare si rinviano. caricamenti dice l'ultimo caricamento riuscito: quello su cui i numeri erano completi.",
+          } : {}),
+          ...(senzaRiuscito.length ? { nessun_caricamento_riuscito: senzaRiuscito } : {}),
           dati_fino_al: finoAl,
           nota_fino_al: "Per i movimenti e' l'ultima fine trasporto presente nell'archivio: i dati arrivano almeno fino a quel giorno, e un giorno senza ritiri non si vede. Il giorno del caricamento e quello dei dati sono due cose diverse.",
-          ...(falliti.size ? { tentativi_falliti_dopo_l_ultimo_riuscito: [...falliti.values()] } : {}),
         },
       };
     },
@@ -1497,7 +1521,9 @@ export const STRUMENTI = [
       // giacenza_portale_t, e alla domanda "quanta giacenza ha Nappi Sud?" la
       // risposta comprendeva la classe 9. Il null vuol dire "non calcolata"
       // (uno stoccaggio senza rilevazione, un impianto senza il file degli
-      // ordini non dichiarati, l'ACI di un impianto), non zero.
+      // ordini non dichiarati, la rete di chi per accordo non ce la dichiara),
+      // non zero. L'ACI e l'extra raccolta di un impianto, dal 03/10/2026, si
+      // calcolano come nel modulo Dichiarazioni: apertura + entrato - dichiarato.
       // calcolaGiacenze usa per gli impianti la regola di Dichiarazioni Impianti
       // (shared/giacenzaPortale.ts), quindi i due moduli dicono lo stesso numero.
       // Senza il file, pero', l'impianto ha una fotografia col giorno vuoto e una
@@ -1514,7 +1540,9 @@ export const STRUMENTI = [
           // non e' un file che manca (revisione del 10/10/2026).
           ...(r.rete_non_dovuta ? { rete_non_dovuta: true } : {}),
           giacenza_aci_t: r.giacenza_aci_t ?? null,
-          extra_raccolta_in_piazzale_t: r.giacenza_extra_t ?? null,
+          // In uno stoccaggio e' l'extra raccolta in piazzale; in un impianto quella
+          // arrivata e non ancora dichiarata. Un campo solo, letto secondo il tipo.
+          giacenza_extra_raccolta_t: r.giacenza_extra_t ?? null,
           // Da dove viene il numero, cosi' uno scarto col portale si spiega coi dati.
           calcolo: stoc
             ? (r.data_rilevazione
@@ -1537,9 +1565,19 @@ export const STRUMENTI = [
           movimenti_caricati_fino_al: r.aggiornata_al || null,
           in_attesa_dichiarazione_t: r.in_attesa_dichiarazione_t, ordini_da_dichiarare: r.ordini_da_dichiarare,
           dichiarato_rete_t: r.dichiarato_t, conferito_primarie_rete_t: r.conferito_primarie_t, conferito_aci_t: r.conferito_aci_t,
+          // conferito_extra_t sono le sole primarie di extra raccolta: le secondarie
+          // di extra raccolta hanno i loro due campi, come rete e ACI (chiusura
+          // dell'audit, 11/10/2026). Senza, la giacenza extra di un impianto - primarie
+          // piu' secondarie in entrata, meno dichiarato - non si spiegava coi campi.
           conferito_extra_t: r.conferito_extra_t,
           secondarie_rete_in_t: r.secondarie_in_t, secondarie_rete_out_t: r.secondarie_out_t,
           secondarie_aci_in_t: r.secondarie_aci_in_t, secondarie_aci_out_t: r.secondarie_aci_out_t,
+          secondarie_extra_in_t: r.secondarie_extra_in_t ?? null, secondarie_extra_out_t: r.secondarie_extra_out_t ?? null,
+          // Il dichiarato caricato di ACI ed extra raccolta, quello che decurta la
+          // loro giacenza: senza, la giacenza ACI o extra di un impianto non si
+          // spiegava coi campi dello strumento (revisione finale, 11/10/2026). Sui
+          // piazzali il modulo non lo ha: resta null.
+          dichiarato_aci_t: r.dichiarato_aci_t ?? null, dichiarato_extra_t: r.dichiarato_extra_t ?? null,
           target_rete_t: r.target_totale_t, giacenza_riferimento_t: r.giacenza_riferimento_t,
           giacenza_classi_kg: calcolata ? r.giacenza_classi_kg : null,
           // I formulari terminati del soggetto con le date obbligatorie da
@@ -1585,12 +1623,22 @@ export const STRUMENTI = [
           ...(reteNonDovuta.length ? { impianti_che_per_accordo_non_dichiarano_la_rete: reteNonDovuta } : {}),
           ...(senzaRilevazione.length ? { stoccaggi_senza_rilevazione_esclusi: senzaRilevazione } : {}),
         },
+        // ACI ED EXTRA RACCOLTA, IMPIANTI E STOCCAGGI DIVISI (chiusura dell'audit,
+        // 11/10/2026). Qui si sommavano solo gli stoccaggi, mentre il riepilogo
+        // della commessa (assistente.ts) prendeva il totale del modulo, che dal
+        // 03/10 comprende anche gli impianti, e lo chiamava «ACI negli stoccaggi»:
+        // alla stessa domanda due numeri, e il primo con l'etichetta sbagliata.
+        // Ora tutti e due dicono impianti e stoccaggi, rifatti sulle righe.
         aci: {
+          giacenza_impianti_t: somma(impianti, 'giacenza_aci_t'),
           giacenza_stoccaggi_t: somma(stoccaggi, 'giacenza_aci_t'),
           ...(senzaRilevazione.length ? { stoccaggi_senza_rilevazione_esclusi: senzaRilevazione } : {}),
         },
-        extra_raccolta: { in_piazzale_t: somma(stoccaggi, 'extra_raccolta_in_piazzale_t') },
-        nota_totali: 'Tre canali, tre totali: rete, ACI ed extra raccolta non si sommano.',
+        extra_raccolta: {
+          impianti_t: somma(impianti, 'giacenza_extra_raccolta_t'),
+          in_piazzale_t: somma(stoccaggi, 'giacenza_extra_raccolta_t'),
+        },
+        nota_totali: 'Tre canali, tre totali: rete, ACI ed extra raccolta non si sommano. Dentro ACI ed extra raccolta impianti e stoccaggi sono due numeri: in un impianto e\' quello arrivato e non ancora dichiarato, in uno stoccaggio quello in piazzale.',
       };
       return {
         fonte: 'Giacenze, giacenza a portale per canale',
@@ -1600,7 +1648,7 @@ export const STRUMENTI = [
           siti: elenco(utili, 80), totali, anomalie: elenco(anomalie, 20),
           // Niente giustificazioni con la chiusura a portale: la giacenza segue i
           // caricamenti, e uno scarto e' un'anomalia da dire, non da spiegare via.
-          nota: "La giacenza segue i caricamenti e si legge per fine trasporto, un canale per volta. Impianti (rete): la fotografia del file degli ordini non dichiarati, piu' i carichi che il gestionale conosce e il file no (riconosciuti dal numero d'ordine), meno le dichiarazioni caricate a portale dopo la fotografia. Stoccaggi: la rilevazione del portale per classe (1-4 rete, 9 ACI) piu' ingressi e uscite con il trasporto finito dopo. L'extra raccolta a portale non c'e': e' il saldo del piazzale nell'anno. Se un numero non torna con il portale, dillo come anomalia da verificare (un file non ancora caricato, una rilevazione vecchia, una dichiarazione non registrata) e non spiegarlo con la data di chiusura dell'ordine a portale, che non decide niente.",
+          nota: "La giacenza segue i caricamenti e si legge per fine trasporto, un canale per volta. Impianti (rete): la fotografia del file degli ordini non dichiarati, piu' i carichi che il gestionale conosce e il file no (riconosciuti dal numero d'ordine), meno le dichiarazioni caricate a portale dopo la fotografia. Stoccaggi: la rilevazione del portale per classe (1-4 rete, 9 ACI) piu' ingressi e uscite con il trasporto finito dopo. L'extra raccolta a portale non c'e': in uno stoccaggio e' il saldo del piazzale nell'anno. Negli impianti ACI ed extra raccolta sono apertura + arrivato - dichiarato e caricato, lo stesso conto del modulo Dichiarazioni (per l'extra raccolta l'apertura non esiste e si parte da zero). Se un numero non torna con il portale, dillo come anomalia da verificare (un file non ancora caricato, una rilevazione vecchia, una dichiarazione non registrata) e non spiegarlo con la data di chiusura dell'ordine a portale, che non decide niente.",
         },
       };
     },
@@ -1619,7 +1667,17 @@ export const STRUMENTI = [
       // il filtro e lo si dice (il riepilogo resta comunque per sito e canale).
       const canale = canaleChiesto(p.canale);
       const canaleIgnorato = p.canale && !canale ? String(p.canale) : '';
-      const righe = dich.filter(d => {
+      // LE DICHIARAZIONI SI LEGGONO COME LE LEGGONO I DUE MODULI (chiusura
+      // dell'audit, 11/10/2026): leggiDichiarazioni di dichiarazioniImpianti.ts.
+      // Qui si sommava quantita_kg di tutte le righe: due righe di rete o di ACI
+      // sullo stesso mese (una gemella) si contavano due volte, mentre Giacenze e
+      // Dichiarazioni contano la prima e dicono il doppione; e il nome del sito
+      // non era normalizzato, quindi «Gatim» e «GATIM S.R.L.» erano due siti. Due
+      // campagne di extra raccolta nello stesso mese restano due cose vere e si
+      // sommano, col caricato tenuto a parte. Il caricato e' quello che decurta
+      // la giacenza: lo stesso numero che dicono gli altri due moduli.
+      const { perChiave } = leggiDichiarazioni(dich, { anno, chiaveDi: normalizzaRagioneSociale });
+      const righe = [...perChiave.values()].filter(d => {
         if (p.mese && String(d.mese || '').toLowerCase() !== String(p.mese).toLowerCase()) return false;
         if (k && normalizzaRagioneSociale(d.sito) !== k) return false;
         if (canale && String(d.canale || 'RETE').toUpperCase() !== canale) return false;
@@ -1627,7 +1685,10 @@ export const STRUMENTI = [
       }).map(d => ({
         sito: d.sito, canale: d.canale || 'RETE', operazione: d.operazione, provenienza: d.provenienza,
         mese: d.mese, quantita_kg: Math.round(Number(d.quantita_kg) || 0),
+        caricato_a_portale_kg: Math.round(kgCaricatiDi(d)),
         stato: statoDichiarazione(d), caricata_il: soloData(d.caricata_il),
+        ...((Number(d.ripetizioni) || 0) > 1 ? { campagne_di_extra_raccolta: Number(d.ripetizioni) } : {}),
+        ...((d.altre || []).length ? { doppione: `Sullo stesso mese ci sono ${d.altre.length + 1} righe: si conta la prima, come nelle Giacenze e nelle Dichiarazioni. Il doppione va tolto.` } : {}),
         materiali_kg: Math.round(sommaMateriali(d)),
         granulo_kg: Math.round(Number(d.granulo_kg) || 0), fibre_kg: Math.round(Number(d.fibre_kg) || 0),
         metalli_kg: Math.round(Number(d.metalli_kg) || 0), cippato_kg: Math.round(Number(d.cippato_kg) || 0),
@@ -1635,21 +1696,198 @@ export const STRUMENTI = [
       }));
       const perSito = new Map();
       for (const r of righe) {
-        const key = `${r.sito}|${r.canale}`;
-        if (!perSito.has(key)) perSito.set(key, { sito: r.sito, canale: r.canale, dichiarato_kg: 0, caricate: 0, da_caricare: 0 });
+        const key = `${normalizzaRagioneSociale(r.sito)}|${r.canale}`;
+        if (!perSito.has(key)) perSito.set(key, { sito: r.sito, canale: r.canale, dichiarato_kg: 0, caricato_a_portale_kg: 0, caricate: 0, da_caricare: 0, doppioni: 0 });
         const x = perSito.get(key);
         x.dichiarato_kg += r.quantita_kg;
+        x.caricato_a_portale_kg += r.caricato_a_portale_kg;
         if (r.stato === 'caricata') x.caricate++; else if (r.quantita_kg > 0) x.da_caricare++;
+        if (r.doppione) x.doppioni++;
       }
       return {
         fonte: 'Dichiarazioni Impianti',
         periodo: p.mese ? `${p.mese} ${anno}` : `anno ${anno}`,
         dati_al: oggiRoma(),
         dati: {
-          riepilogo: [...perSito.values()].map(x => ({ ...x, dichiarato_t: t3(x.dichiarato_kg) })).sort((a, b) => b.dichiarato_kg - a.dichiarato_kg),
+          riepilogo: [...perSito.values()].map(({ doppioni, ...x }) => ({
+            ...x, dichiarato_t: t3(x.dichiarato_kg), caricato_a_portale_t: t3(x.caricato_a_portale_kg),
+            ...(doppioni ? { mesi_con_doppione: doppioni } : {}),
+          })).sort((a, b) => b.dichiarato_kg - a.dichiarato_kg),
           dichiarazioni: elenco(righe, 80),
           ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: qui ci sono tutti e tre, ciascuno sulla sua riga e mai sommati.` } : {}),
-          nota: 'Una dichiarazione decurta la giacenza a portale solo quando risulta caricata.',
+          nota: "Una dichiarazione decurta la giacenza a portale solo quando risulta caricata: caricato_a_portale e' quello che decurta. Per ACI ed extra raccolta e' lo stesso numero del dichiarato delle Giacenze e di Dichiarazioni Impianti. Per la rete coincide col dichiarato caricato di Dichiarazioni Impianti, mentre il «dichiarato nell'anno» delle Giacenze viene dal report del portale ed e' contato per fine trasporto: i due possono differire (una nave che aggancia carichi dell'anno prima, un report scaricato prima del caricamento), e la differenza va detta, non nascosta. dichiarato e' la quantita' scritta, caricata o no. Due righe di rete o di ACI sullo stesso mese sono un doppione: si conta la prima e va detto; due campagne di extra raccolta nello stesso mese invece si sommano.",
+        },
+      };
+    },
+  },
+  {
+    // QUANTO RESTA DA DICHIARARE, COME LO DICE LA PAGINA (chiusura dell'audit,
+    // 11/10/2026). Nessuno strumento chiamava riepilogoDichiarazioni: alla domanda
+    // «quanto resta da dichiarare a T-Cycle?» EcoTyna rispondeva con la giacenza
+    // a portale delle Giacenze, che coincide con la colonna «Da dichiarare» quando
+    // la quadratura torna, ma non vedeva i mesi ancora aperti, la quadratura col
+    // portale, i doppioni ne' le dichiarazioni che il portale ha e noi no.
+    nome: 'riepilogo_dichiarazioni',
+    // Esce gia' per canale, un flusso per canale, come le giacenze: il canale non
+    // e' un parametro del pianificatore (con tre canali la funzione si chiamerebbe
+    // tre volte per dire tre volte la stessa cosa) e scritto nel piano non e' un
+    // filtro ignorato. Chi chiama lo strumento da se' puo' ancora passarlo.
+    impliciti: { canale: '*', tipologia: '*' },
+    descrizione: 'Quanto resta da dichiarare a ogni impianto, flusso per flusso (rete, ACI ed extra raccolta separati, gia\' divisi) e mese per mese, con la quadratura della giacenza col portale (scarto, quadra o no), le dichiarazioni doppie e quelle che il portale ha e il gestionale no. E\' il conto della pagina Dichiarazioni Impianti: usalo per «quanto resta da dichiarare a X», «quali mesi mancano da dichiarare», «quadra col portale?».',
+    parametri: { anno: 'numero', sito: 'nome dell\'impianto o dello stoccaggio, opzionale' },
+    moduli: ['Dichiarazioni Impianti'],
+    async esegui(base44, p, ctx = null) {
+      const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
+      // La funzione della pagina, col client di chi chiede, come lo strumento
+      // giacenze chiama calcolaGiacenze: due conti dello stesso numero sono un
+      // conto sbagliato di sicuro. Una volta sola per domanda, anche se piu'
+      // strumenti la chiedono: la funzione legge otto archivi.
+      const chiama = () => base44.functions.invoke('riepilogoDichiarazioni', { anno });
+      const res = await (ctx && typeof ctx.leggi === 'function' ? ctx.leggi(`funzione riepilogoDichiarazioni|anno=${anno}`, chiama) : chiama());
+      const d = (res && res.data) || res || {};
+      if (d.error) throw new Error(String(d.error));
+      // Un canale scritto male non svuota la risposta: si toglie il filtro e lo si dice.
+      const canale = canaleChiesto(p.canale);
+      const canaleIgnorato = p.canale && !canale ? String(p.canale) : '';
+      const delCanale = (c) => !canale || String(c || 'RETE').toUpperCase() === canale;
+      const tutti = Array.isArray(d.siti) ? d.siti : [];
+      let siti = tutti;
+      if (p.sito) {
+        // Il nome puo' arrivare accorciato ("Gatim" per "GATIM SRL"), come nelle giacenze.
+        const k = normalizzaRagioneSociale(p.sito);
+        const esatti = tutti.filter(s => normalizzaRagioneSociale(s.sito) === k);
+        siti = esatti.length ? esatti : tutti.filter(s => normalizzaRagioneSociale(s.sito).includes(k));
+      }
+      const chiaviSiti = new Set(siti.map(s => normalizzaRagioneSociale(s.sito)));
+      const delSito = (x) => !p.sito || chiaviSiti.has(normalizzaRagioneSociale(x.sito));
+      const NON_DOVUTA = "Per accordo questo impianto non ci dichiara la rete: niente resta da dichiarare. resta_t e' vuoto, non zero: si scrive «—» col perche'.";
+      // UN ANNO CHIUSO SI CONFRONTA CON LA LETTURA DEL 31/12 (chiusura dell'audit,
+      // 11/10/2026). La pagina lo dice con quadratura_anno_chiuso; qui ogni anno
+      // senza numero a portale diventava «senza la fotografia del portale», cioe'
+      // un file da caricare, e il 2025 usciva con la data della fotografia di oggi.
+      // Ora il perche' e' quello della pagina, e il giorno del numero a portale
+      // (portale_al: la fotografia, o il 31/12 dell'anno chiuso) viaggia col numero.
+      const quadratura = (s) => {
+        const chiuso = s.quadratura_anno_chiuso || null;
+        const delChiuso = chiuso ? { anno_chiuso: true, perche: chiuso.perche } : {};
+        if (s.giacenza_portale_t === null || s.giacenza_portale_t === undefined) {
+          return {
+            confrontabile: false, giacenza_calcolata_t: s.giacenza_calcolata_t ?? null,
+            ...delChiuso,
+            perche: s.dichiara_rete === false ? 'per accordo non ci dichiara la rete'
+              : chiuso ? chiuso.perche
+                : 'senza la fotografia del portale (file degli ordini non dichiarati o rilevazione) non c\'e\' un numero con cui confrontare',
+          };
+        }
+        return {
+          confrontabile: true, giacenza_calcolata_t: s.giacenza_calcolata_t, giacenza_portale_t: s.giacenza_portale_t, scarto_t: s.scarto_t, quadra: s.quadra,
+          ...(s.portale_al ? { portale_al: s.portale_al } : {}),
+          ...delChiuso,
+        };
+      };
+      const flusso = (f) => {
+        const nonDovuta = !!f.non_dovuta;
+        // LA CASELLA «DALL'ANNO PRIMA» IN TESTA AI MESI APERTI (chiusura dell'audit,
+        // 11/10/2026). resta_t comprende la giacenza portata dal 31/12, che non sta
+        // in nessun mese: senza questa voce i mesi aperti facevano 5 t contro un
+        // resto di 35, e le 30 t piu' vecchie - le prime che il portale aggancia -
+        // non comparivano da nessuna parte. Sta in testa perche' viene prima di
+        // gennaio; la sua apertura_t e' l'apertura netta, la stessa della giacenza.
+        const prima = !nonDovuta && f.dall_anno_prima && (Number(f.dall_anno_prima.da_dichiarare_kg) || 0) > 0 ? f.dall_anno_prima : null;
+        const casella = prima ? [{
+          mese: "dall'anno prima",
+          dall_anno_prima: true,
+          ...(prima.al ? { giacenza_al: prima.al } : {}),
+          da_dichiarare_t: t3(prima.da_dichiarare_kg),
+          apertura_t: t3(prima.conferito_kg),
+          ...((Number(prima.uscito_kg) || 0) > 0 ? { gia_uscito_t: t3(prima.uscito_kg) } : {}),
+          // La lettura del 31/12 e quello che dell'anno chiuso si e' dichiarato dopo:
+          // l'apertura netta si rifa' a occhio, come sulla pagina.
+          ...((Number(prima.dichiarato_dopo_kg) || 0) > 0 ? { letta_al_31_12_t: t3(prima.letta_kg), dichiarato_dopo_la_lettura_t: t3(prima.dichiarato_dopo_kg) } : {}),
+          ...(prima.uscito_stimato ? { uscito_ripartito_dal_gestionale: true } : {}),
+        }] : [];
+        // I mesi di arrivo che hanno ancora qualcosa da dichiarare, dal piu' vecchio:
+        // il portale aggancia le dichiarazioni a partire dal mese piu' vecchio.
+        const aperti = nonDovuta ? [] : [...casella, ...(f.mesi || []).filter(m => (Number(m.da_dichiarare_kg) || 0) > 0).map(m => ({
+          mese: m.mese,
+          da_dichiarare_t: t3(m.da_dichiarare_kg),
+          arrivato_t: t3(m.conferito_kg),
+          caricato_a_portale_t: t3(m.caricato_kg),
+          ...((Number(m.dichiarato_non_caricato_kg) || 0) > 0 ? { dichiarato_non_ancora_caricato_t: t3(m.dichiarato_non_caricato_kg) } : {}),
+          ...(m.uscito_stimato ? { uscito_ripartito_dal_gestionale: true } : {}),
+        }))];
+        return {
+          canale: f.canale,
+          ...(f.provenienza ? { provenienza: f.provenienza } : {}),
+          resta_t: nonDovuta ? null : (f.resta_t ?? null),
+          ...(nonDovuta ? { non_dovuta: NON_DOVUTA } : {}),
+          // Un mese segnato «non dovuta» resta nella giacenza ma non si deve a nessuno.
+          ...(!nonDovuta && f.da_dichiarare_t !== undefined && f.da_dichiarare_t !== f.resta_t ? { da_dichiarare_t: f.da_dichiarare_t, nota_da_dichiarare: 'Piu\' basso di resta_t perche\' qualche mese e\' segnato «non dovuta».' } : {}),
+          // L'apertura netta del flusso (la giacenza al 31/12 dell'anno prima): con
+          // arrivato e dichiarato fa resta_t, sommando i flussi dello stesso canale.
+          apertura_t: f.apertura_t ?? null,
+          arrivato_t: f.conferito_t ?? null,
+          dichiarato_e_caricato_t: f.dichiarato_caricato_t ?? null,
+          mesi_aperti: aperti,
+        };
+      };
+      const righe = siti.flatMap(s => {
+        if (s.tipo_destinazione === 'stoc') {
+          // Uno stoccaggio puro: una riga per canale (rete o ACI), con la sua quadratura.
+          if (!delCanale(s.canale)) return [];
+          return [{ sito: s.sito, tipo: 'stoccaggio', canale: s.canale, quadratura: quadratura(s), ...(s.rilevazione_il ? { rilevazione_del: s.rilevazione_il } : {}) }];
+        }
+        const flussi = (s.flussi || []).filter(f => delCanale(f.canale)).map(flusso);
+        if (canale && !flussi.length) return [];
+        return [{
+          sito: s.sito, tipo: 'impianto',
+          ...(s.anche_stoccaggio ? { anche_stoccaggio: true } : {}),
+          // La quadratura degli impianti e' della rete: la fotografia del portale c'e' solo li'.
+          ...(!canale || canale === 'RETE' ? { quadratura_rete: quadratura(s) } : {}),
+          flussi,
+        }];
+      });
+      // Il resto da dichiarare di ogni canale, sui siti rimasti: tre numeri, mai sommati.
+      const restaPerCanale = {};
+      for (const r of righe) for (const f of r.flussi || []) {
+        if (f.resta_t === null) continue;
+        restaPerCanale[f.canale] = Math.round(((restaPerCanale[f.canale] || 0) + f.resta_t) * 1000) / 1000;
+      }
+      const doppioni = (d.doppioni || []).filter(x => delSito(x) && delCanale(x.canale)).map(x => ({
+        sito: x.sito, canale: x.canale, ...(x.provenienza ? { provenienza: x.provenienza } : {}), mese: x.mese,
+        righe: x.quante, caricate: x.caricate, in_piu_t: t3(x.kg_in_piu),
+      }));
+      const daInserire = (d.dichiarazioni_da_inserire || []).filter(x => delSito(x) && delCanale(x.canale)).map(x => ({
+        sito: x.sito, canale: x.canale, motivo: x.motivo, caricamenti_a_portale: x.quanti, t: t3(x.kg),
+        mesi_degli_ordini: (x.mesi || []).map(m => ({ mese: m.mese, t: t3(m.kg) })),
+      }));
+      const tot = d.totali || {};
+      return {
+        fonte: 'Dichiarazioni Impianti, riepilogo e quadratura',
+        periodo: `anno ${anno}`,
+        dati_al: oggiRoma(),
+        dati: {
+          ...(p.sito && !siti.length ? { avviso_sito: `"${p.sito}" non risulta fra gli impianti e gli stoccaggi del riepilogo ${anno}: niente da dire su di lui, che non vuol dire zero.` } : {}),
+          ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: qui ci sono tutti e tre, ciascuno sul suo flusso e mai sommati.` } : {}),
+          siti: elenco(righe, 40),
+          resta_per_canale_t: restaPerCanale,
+          ...(p.sito ? {} : {
+            quadratura: {
+              rete_che_quadrano: tot.siti_che_quadrano ?? null, rete_da_quadrare: tot.siti_da_quadrare ?? null,
+              aci_che_quadrano: tot.aci_che_quadrano ?? null, aci_da_quadrare: tot.aci_da_quadrare ?? null,
+            },
+          }),
+          doppioni: elenco(doppioni, 20),
+          dichiarazioni_da_inserire: elenco(daInserire, 20),
+          // La fotografia di oggi non e' il numero a portale di un anno chiuso: li'
+          // vale la lettura del 31/12, e la data giusta e' quella (11/10/2026).
+          ...(d.anno_chiuso ? {
+            anno_chiuso: true,
+            portale_al: `${anno}-12-31`,
+            nota_anno_chiuso: `Il ${anno} e' chiuso: ogni quadratura si confronta con la lettura del portale del 31/12/${anno} salvata dalla chiusura dell'anno, non con il portale di oggi. Dove quella lettura non c'e', la quadratura manca e non e' un errore da verificare: il perche' di ogni sito lo dice.`,
+          } : { fotografia_del_portale_del: d.foto_portale_il || null }),
+          movimenti_fino_al: d.movimenti_fino_al || null,
+          nota: "Tre canali, mai sommati: per ogni impianto il resto da dichiarare della rete, dell'ACI e dell'extra raccolta sta sul suo flusso. resta_t e' il numero della colonna «Da dichiarare» della pagina. Si chiude sul canale, non sulla riga: la somma dei resta_t dei flussi di un canale e' la giacenza di quel canale, apertura_t + arrivato_t - dichiarato_e_caricato_t sommati sugli stessi flussi (l'ACI puo' avere due righe, primaria e secondaria: una riga da sola puo' non tornare, il canale si'). La giacenza di rete coincide con la giacenza a portale del modulo Giacenze quando la quadratura torna; se non torna, scarto_t dice di quanto e va detto come anomalia da verificare. mesi_aperti sono i mesi di arrivo che hanno ancora qualcosa da dichiarare, per fine trasporto, dal piu' vecchio: in testa c'e' la voce «dall'anno prima» (dall_anno_prima vero), la giacenza portata dal 31/12, che il portale aggancia per prima; la somma dei da_dichiarare_t di mesi_aperti fa resta_t (o da_dichiarare_t del flusso, se qualche mese e' segnato «non dovuta»). La quadratura col portale c'e' per la rete degli impianti e per rete e ACI degli stoccaggi; l'extra raccolta a portale non c'e'. portale_al e' il giorno del numero a portale. doppioni sono mesi con due righe di dichiarazione (l'extra raccolta no: li' ripetersi e' legittimo); dichiarazioni_da_inserire sono caricamenti del portale che nel gestionale non trovano una nostra dichiarazione e vanno inserite.",
         },
       };
     },
@@ -1987,7 +2225,11 @@ export const STRUMENTI = [
     moduli: ['Fatturazione', 'Tariffe'],
     async esegui(base44, p, ctx) {
       const svc = base44.asServiceRole.entities;
-      const filtro = { stato: 'attivo' };
+      // Si leggono tutte, non solo quelle con stato 'attivo' (chiusura dell'audit,
+      // 11/10/2026): lo stato vuoto e' 'attivo' (il valore predefinito dello
+      // schema) e con quel filtro spariva, e una tariffa disattivata va detta
+      // disattivata, non taciuta. Quando vale lo decide validitaTariffa.ts.
+      const filtro = {};
       if (p.prestazione) filtro.prestazione = String(p.prestazione).toUpperCase();
       if (p.direzione) filtro.direzione = String(p.direzione).toUpperCase();
       // Le tariffe passive sono i prezzi dei fornitori: costi. A chi non e'
@@ -1997,7 +2239,8 @@ export const STRUMENTI = [
         return { fonte: 'Tariffe', periodo: 'tariffe in tabella', dati_al: oggiRoma(), dati: { riservato: true, nota: COSTI_RISERVATI } };
       }
       if (soloAttive) filtro.direzione = 'ATTIVA';
-      const tutte = await fetchAll(svc.Tariffa, filtro);
+      // Senza nessun filtro si legge l'archivio intero con list, come altrove.
+      const tutte = await fetchAll(svc.Tariffa, Object.keys(filtro).length ? filtro : null);
       const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
       // "TUTTE" e' una tipologia delle tariffe, non un canale: chiesta cosi', non filtra.
       const tipologia = canaleChiesto(p.tipologia);
@@ -2012,21 +2255,30 @@ export const STRUMENTI = [
       // ACI si chiudono al 31/12 dell'anno, quindi dal 1 gennaio l'assistente
       // avrebbe chiamato «attive» sessantaquattro tariffe scadute: ogni riga si
       // porta dietro il suo stato di validita'.
+      //
+      // UNA REGOLA SOLA PER «VALE OGGI» (chiusura dell'audit, 11/10/2026): quella
+      // della fattura e della passiva, tariffaValeIl di validitaTariffa.ts. Qui
+      // una tariffa 'non_attivo' dentro le sue date risultava «vale oggi», mentre
+      // la fattura non la usa in nessun giorno: ora e' «disattivata, non vale mai».
+      // L'ordine mette prima quelle che valgono oggi: l'elenco e' tagliato a 80, e
+      // una disattivata non deve spingere fuori una tariffa buona.
       const oggi = oggiRoma();
+      const ORDINE_VALIDITA = ['vale oggi', 'non ancora in vigore', 'scaduta', 'disattivata, non vale mai'];
       const validitaOggi = (t) => {
-        const da = soloData(t.data_inizio_validita);
-        const a = soloData(t.data_fine_validita);
-        if (da && da > oggi) return 'non ancora in vigore';
-        if (a && a < oggi) return 'scaduta';
-        return 'vale oggi';
+        if (!tariffaNonDisattivata(t)) return 'disattivata, non vale mai';
+        if (tariffaValeIl(t, oggi)) return 'vale oggi';
+        const da = String(t.data_inizio_validita || '').slice(0, 10);
+        return da && da > oggi ? 'non ancora in vigore' : 'scaduta';
       };
+      const conValidita = righe.map(t => ({ t, v: validitaOggi(t) }))
+        .sort((a, b) => ORDINE_VALIDITA.indexOf(a.v) - ORDINE_VALIDITA.indexOf(b.v));
       return {
         fonte: 'Tariffe',
         periodo: `tariffe in tabella, con la loro validita' al ${oggi}`,
         dati_al: oggi,
         dati: {
-          tariffe: elenco(righe.map(t => ({
-            stato_validita: validitaOggi(t),
+          tariffe: elenco(conValidita.map(({ t, v }) => ({
+            stato_validita: v,
             fornitore: t.fornitore_nome || t.cliente, prestazione: t.prestazione, direzione: t.direzione,
             tipologia: t.tipologia, servizio: t.servizio_nome, produttore: t.produttore, destinatario: t.destinatario || t.destinazione,
             regione: t.regione, provincia: t.provincia, classe: t.classe_materiale,
@@ -2036,6 +2288,7 @@ export const STRUMENTI = [
           ...(p.tipologia && !tipologia && String(p.tipologia).toUpperCase().trim() !== 'TUTTE'
             ? { avviso_canale: `"${p.tipologia}" non e' un canale: qui ci sono le tariffe di tutti i canali, ciascuna col suo.` } : {}),
           ...(soloAttive ? { nota_riservate: 'Qui ci sono solo le tariffe attive (quanto ci spetta). ' + COSTI_RISERVATI } : {}),
+          nota_validita: "stato_validita dice se la tariffa vale oggi. «disattivata, non vale mai» e' una tariffa messa a non attiva: non vale in nessun giorno, nemmeno dentro le sue date, e non e' un prezzo da usare. Una tariffa rinegoziata invece resta attiva con la sua data di fine, e vale per i mesi gia' fatti: oggi e' «scaduta».",
         },
       };
     },

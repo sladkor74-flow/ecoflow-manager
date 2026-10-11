@@ -224,15 +224,28 @@ export function esitoVerifica({ portale = {}, risposta = {} }) {
  */
 export function chiaveSoggetto(r) {
   if (!r) return '';
-  // «IT 01234567 891» e «01234567891» sono la stessa partita IVA; «Eurogomme
-  // S.r.l.» e «EUROGOMME SRL» lo stesso nome. Qui si toglie tutto cio' che non e'
-  // una lettera o una cifra, spazi compresi: per dire se due scritte parlano
-  // dello stesso soggetto non serve altro.
-  const piva = String(r.partita_iva || '').toUpperCase().replace(/[^0-9A-Z]/g, '').replace(/^IT/, '');
-  if (piva.length >= 8) return 'PIVA:' + piva;
+  const piva = pivaDelSoggetto(r);
+  if (piva) return 'PIVA:' + piva;
+  const nome = nomeEComune(r);
+  return nome ? 'NOME:' + nome : '';
+}
+
+// «IT 01234567 891» e «01234567891» sono la stessa partita IVA; «Eurogomme
+// S.r.l.» e «EUROGOMME SRL» lo stesso nome. Qui si toglie tutto cio' che non e'
+// una lettera o una cifra, spazi compresi: per dire se due scritte parlano
+// dello stesso soggetto non serve altro. Vuota se manca, o se e' troppo corta
+// per essere una partita IVA.
+function pivaDelSoggetto(r) {
+  const piva = String((r && r.partita_iva) || '').toUpperCase().replace(/[^0-9A-Z]/g, '').replace(/^IT/, '');
+  return piva.length >= 8 ? piva : '';
+}
+
+// Ragione sociale e comune, come NOME|COMUNE; vuota senza un nome.
+function nomeEComune(r) {
+  if (!r) return '';
   const nome = normalizzaSoggetto(r.ragione_sociale || r.descrizione_pdr);
   const comune = normalizzaSoggetto(r.comune_pdr || r.comune_portale || r.comune);
-  return nome ? 'NOME:' + nome + '|' + comune : '';
+  return nome ? nome + '|' + comune : '';
 }
 
 /**
@@ -240,18 +253,44 @@ export function chiaveSoggetto(r) {
  * Serve a ritrovarlo fra fonti che portano dati diversi: l'anagrafica dei punti
  * di raccolta ha la partita IVA, un ordine assegnato no, ma tutt'e due hanno
  * nome e comune. Si usa per RITROVARE (una decisione presa altrove), mai per
- * decidere se due record sono la stessa azienda: li' vale chiaveSoggetto, che
- * sulla partita IVA non transige.
+ * decidere se due record sono la stessa azienda: li' vale stessoSoggetto, qui
+ * sotto.
  */
 export function chiaviSoggetto(r) {
   if (!r) return [];
   const chiavi = [];
-  const piva = String(r.partita_iva || '').toUpperCase().replace(/[^0-9A-Z]/g, '').replace(/^IT/, '');
-  if (piva.length >= 8) chiavi.push('PIVA:' + piva);
-  const nome = normalizzaSoggetto(r.ragione_sociale || r.descrizione_pdr);
-  const comune = normalizzaSoggetto(r.comune_pdr || r.comune_portale || r.comune);
-  if (nome) chiavi.push('NOME:' + nome + '|' + comune);
+  const piva = pivaDelSoggetto(r);
+  if (piva) chiavi.push('PIVA:' + piva);
+  const nome = nomeEComune(r);
+  if (nome) chiavi.push('NOME:' + nome);
   return chiavi;
+}
+
+/**
+ * DUE RECORD PARLANO DELLO STESSO SOGGETTO? (chiusura dell'audit, 11/10/2026)
+ *
+ * La regola e' quella di chiaveSoggetto: la partita IVA se c'e', altrimenti
+ * ragione sociale e comune. Ma «se c'e'» vuol dire da TUTTI E DUE i lati.
+ * Confrontando le due chiavi migliori, lo stesso gommista controllato quando il
+ * file dei PDR non portava la partita IVA, e ricaricato dopo con la partita IVA
+ * (NOME:EUROGOMMESRL|BARI contro PIVA:...), risultava passato a un altro
+ * soggetto: la pagina fermava il punto con «ora intestato a EUROGOMME SRL: il
+ * controllo va rifatto», cioe' allo stesso nome, e verificaSediPdr non
+ * riportava la decisione gia' presa. Lo stesso con la partita IVA sparita.
+ *
+ * Percio': quando la partita IVA c'e' da tutti e due i lati decide lei (stesso
+ * numero col nome cambiato e' lo stesso soggetto; numero diverso e' un altro,
+ * anche col nome uguale). Altrimenti nome e comune. Torna true o false, e null
+ * quando non si puo' dire: da un lato manca la partita IVA e da uno manca il nome.
+ */
+export function stessoSoggetto(a, b) {
+  const pa = pivaDelSoggetto(a);
+  const pb = pivaDelSoggetto(b);
+  if (pa && pb) return pa === pb;
+  const na = nomeEComune(a);
+  const nb = nomeEComune(b);
+  if (!na || !nb) return null;
+  return na === nb;
 }
 
 /**
@@ -287,9 +326,7 @@ export function normalizzaSoggetto(v) {
 export function verificaApplicabile(verifica, pdrRecord) {
   if (!verifica) return { vale: false, motivo: 'mai controllato' };
   if (!pdrRecord) return { vale: true, motivo: '' };
-  const a = chiaveSoggetto(verifica);
-  const b = chiaveSoggetto(pdrRecord);
-  if (!a || !b || a === b) return { vale: true, motivo: '' };
+  if (stessoSoggetto(verifica, pdrRecord) !== false) return { vale: true, motivo: '' };
   return { vale: false, motivo: 'il punto di raccolta e\' passato a un altro soggetto dopo l\'ultimo controllo' };
 }
 
@@ -307,7 +344,8 @@ export function decisioneDiAltroPunto(pdrRecord, verifiche) {
   for (const v of verifiche || []) {
     if (!v || Number(v.id_pdr) === Number(pdrRecord.id_pdr)) continue;
     if (v.stato !== 'corretto' && v.stato !== 'confermato_portale') continue;
-    if (chiaveSoggetto(v) !== chiave) continue;
+    // Per ritrovare serve la certezza: un soggetto che non si sa dire non e' lo stesso.
+    if (stessoSoggetto(v, pdrRecord) !== true) continue;
     if (!migliore || giorno(v.deciso_il || v.verificato_il) > giorno(migliore.deciso_il || migliore.verificato_il)) migliore = v;
   }
   return migliore;

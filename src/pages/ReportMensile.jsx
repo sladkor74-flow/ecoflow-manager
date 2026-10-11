@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, RefreshCw, Download, AlertCircle } from 'lucide-react';
 import ReportPivotTable from '@/components/report-mensile/ReportPivotTable';
 import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
+import { formatTonnellate, formatIntero } from '@/lib/utils';
 
 // Riproduce le otto pivot del foglio REPORT MENSILE del gestionale Excel.
 // Le definizioni vivono nel backend, in shared/reportMensile.ts: qui restano solo
@@ -53,7 +54,15 @@ function anniDisponibili() {
 // una cosa falsa a chi legge il foglio senza averlo scaricato lui (05/10/2026).
 function componiCsv(pivots, gruppo, periodoDi) {
   const righe = [];
-  const num = (v) => String(v == null ? 0 : v).replace('.', ',');
+  // I numeri come nel resto del gestionale (chiusura dell'audit, 11/10/2026): le
+  // tonnellate con due decimali, tre se i kg non sono tondi, e il punto delle
+  // migliaia; i viaggi interi. Prima un valore mancante diventava 0 e 12,30 t
+  // usciva «12,3». Una cella senza movimenti resta vuota, come nella pivot a
+  // video: vuota non vuol dire zero.
+  const num = (v, misura) => {
+    if (v === null || v === undefined || v === '') return '';
+    return misura === 'conteggio' ? formatIntero(v) : formatTonnellate(v);
+  };
 
   for (const k of gruppo.pivot) {
     const p = pivots[k];
@@ -74,8 +83,8 @@ function componiCsv(pivots, gruppo, periodoDi) {
         const etichetta = prefisso ? prefisso + ' > ' + f.etichetta : f.etichetta;
         righe.push([
           etichetta,
-          ...colonne.flatMap(c => p.misure.map(m => num(f.valori[c] ? f.valori[c][m] : 0))),
-          ...p.misure.map(m => num(f.totali[m])),
+          ...colonne.flatMap(c => p.misure.map(m => num(f.valori[c] ? f.valori[c][m] : null, m))),
+          ...p.misure.map(m => num(f.totali[m], m)),
         ]);
         visita(f, etichetta);
       }
@@ -84,8 +93,8 @@ function componiCsv(pivots, gruppo, periodoDi) {
 
     righe.push([
       'Totale complessivo',
-      ...colonne.flatMap(c => p.misure.map(m => num(p.radice.valori[c] ? p.radice.valori[c][m] : 0))),
-      ...p.misure.map(m => num(p.radice.totali[m])),
+      ...colonne.flatMap(c => p.misure.map(m => num(p.radice.valori[c] ? p.radice.valori[c][m] : null, m))),
+      ...p.misure.map(m => num(p.radice.totali[m], m)),
     ]);
     const d = p.date_da_sistemare;
     if (d && d.totale > 0) {

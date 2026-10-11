@@ -7,18 +7,22 @@
 // totali:  { etichetta, valori: { [indiceColonna]: numero } }
 
 import { formatNumber, formatKg, formatTonnellate, formatIntero } from '@/lib/utils';
+import { giornoRoma } from '@/lib/giornoItaliano';
 
 const NUMERICI = new Set(['kg', 't', 'euro', 'prezzo', 'intero', 'percentuale']);
 const FORMATO_EXCEL = { kg: '#,##0', t: '#,##0.00#', euro: '#,##0.00', prezzo: '#,##0.0000', intero: '#,##0', percentuale: '#,##0.0"%"', data: 'dd/mm/yyyy' };
 
-// Date del portale a mezzanotte UTC; quelle salvate a mezzanotte italiana (22 o 23
-// UTC) si riportano al giorno giusto.
+// IL GIORNO DI UNA DATA E' QUELLO ITALIANO, e lo dice giornoRoma (chiusura
+// dell'audit, 11/10/2026). Qui c'era una correzione fatta a mano che riportava al
+// giorno giusto solo le 22:00 e le 23:00 tonde: un trasporto finito alle 23:30 UTC
+// del 30 giugno, in Italia gia' il 1° luglio, nel file usciva al 30 giugno mentre
+// il resto del gestionale lo conta a luglio. Era la stessa trappola tolta dal
+// report settimanale il 10/10. La data esce come mezzanotte UTC del giorno
+// italiano: la cella dell'Excel e il testo del PDF, letto in UTC, dicono lo stesso
+// giorno.
 const comeData = (v) => {
-  if (!v) return null;
-  const d = v instanceof Date ? v : new Date(v);
-  if (isNaN(d.getTime())) return null;
-  const italiana = (d.getUTCHours() === 22 || d.getUTCHours() === 23) && !d.getUTCMinutes() && !d.getUTCSeconds();
-  return italiana ? new Date(d.getTime() + 3 * 3600000) : d;
+  const g = giornoRoma(v);
+  return g ? new Date(`${g}T00:00:00.000Z`) : null;
 };
 
 function testoCella(valore, tipo) {

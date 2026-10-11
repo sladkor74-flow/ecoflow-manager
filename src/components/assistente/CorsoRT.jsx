@@ -151,7 +151,7 @@ export default function CorsoRT() {
           <div>
             <p className="font-medium flex items-center gap-2"><BookOpen className="w-4 h-4 text-violet-600" /> Corso per responsabile tecnico gestione rifiuti</p>
             <p className="text-sm text-muted-foreground">
-              Dispense e videolezioni del corso diventano schede di studio, {PARTI_PER_ORA} parti ogni ora in background. L'Assistente usa le schede pertinenti alle domande, ma prevalgono sempre le norme vigenti: il materiale ha qualche anno.
+              Dispense e videolezioni del corso diventano schede di studio, {PARTI_PER_ORA} parti ogni ora in background. EcoTyna usa le schede pertinenti alle domande, ma prevalgono sempre le norme vigenti: il materiale ha qualche anno.
             </p>
           </div>
           {admin && (

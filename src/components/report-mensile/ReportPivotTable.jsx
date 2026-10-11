@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { ChevronRight, ChevronDown, Maximize2, Minimize2 } from 'lucide-react';
-import { formatNumber } from '@/lib/utils';
+import { formatNumber, formatTonnellate, formatIntero } from '@/lib/utils';
 
 // Resa di una pivot del Report Mensile.
 //
@@ -30,12 +30,12 @@ function tutteLeChiavi(nodo, chiavePadre = '', acc = []) {
   return acc;
 }
 
+// Il peso col formato di tutto il gestionale: due decimali, tre se i kg non sono
+// tondi (chiusura dell'audit, 11/10/2026). Con due decimali fissi 12.345 kg si
+// leggevano 12,35 t qui e 12,345 t altrove. I viaggi sono interi.
 function Numero({ valore, misura }) {
   if (valore == null || valore === 0) return <span className="text-muted-foreground/30">—</span>;
-  const opts = misura === 'conteggio'
-    ? { minimumFractionDigits: 0, maximumFractionDigits: 0 }
-    : { minimumFractionDigits: 2, maximumFractionDigits: 2 };
-  return <>{formatNumber(valore, opts)}</>;
+  return <>{misura === 'conteggio' ? formatIntero(valore) : formatTonnellate(valore)}</>;
 }
 
 export default function ReportPivotTable({ pivot, periodo }) {

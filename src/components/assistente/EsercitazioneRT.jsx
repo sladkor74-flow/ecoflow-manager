@@ -40,11 +40,11 @@ function Spiegazione({ quiz, scelta, onClose }) {
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-violet-600" /> Spiegazione dell'Assistente</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-violet-600" /> Spiegazione di EcoTyna</DialogTitle>
           <DialogDescription>{quiz.domanda}</DialogDescription>
         </DialogHeader>
         <p className="text-sm"><span className="font-medium text-emerald-700">Risposta esatta:</span> {quiz.esatta}</p>
-        {stato.caricamento && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> L'Assistente sta controllando le norme…</p>}
+        {stato.caricamento && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> EcoTyna sta controllando le norme…</p>}
         {stato.errore && <p className="text-sm text-red-600">{stato.errore}</p>}
         {stato.testo && <div className="prose prose-sm max-w-none"><ReactMarkdown>{stato.testo}</ReactMarkdown></div>}
         {!stato.caricamento && <p className="text-xs text-muted-foreground">La spiegazione resta anche nell'archivio delle domande. All'esame vale sempre la risposta della banca dati ufficiale.</p>}
@@ -462,7 +462,7 @@ export default function EsercitazioneRT() {
           {tipo === 'simulazione' && (verifica === 'iniziale'
             ? `Due prove da ${REGOLE.quiz} quiz, prima il modulo generale e poi quello specialistico, estratti rispettando il peso delle materie.`
             : `Una prova da ${REGOLE.quiz} quiz del modulo di aggiornamento, che comprende anche domande generali.`)}
-          {tipo === 'allenamento' && 'Nessun limite di tempo: dopo ogni risposta vedi subito se è giusta e puoi chiedere la spiegazione all\'Assistente.'}
+          {tipo === 'allenamento' && 'Nessun limite di tempo: dopo ogni risposta vedi subito se è giusta e puoi chiedere la spiegazione a EcoTyna.'}
           {tipo === 'ripasso' && 'I quiz sbagliati o saltati nelle esercitazioni precedenti, finché non li indovini.'}
         </p>
         <Button onClick={avvia} disabled={caricamento || (tipo === 'ripasso' && daRipassare.length === 0)} className="gap-2">

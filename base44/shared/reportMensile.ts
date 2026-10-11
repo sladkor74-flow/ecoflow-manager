@@ -12,7 +12,8 @@
 // mai dai campi mese o anno del record: quelli non distinguono le annualita' e
 // sommerebbero lo stesso mese di anni diversi.
 
-import { getClasseFromProdotto, getRegioneFromProvincia } from "./dataEnrichment.ts";
+import { getClasseFromProdotto } from "./dataEnrichment.ts";
+import { regioneDi } from "./regioneMovimento.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { meseToIndice } from "./filtroPeriodo.ts";
@@ -45,7 +46,11 @@ function eTerminato(r) {
 }
 
 const ESTRATTORI = {
-  'Regione': (r) => testo(r.regioni || r.regione || getRegioneFromProvincia(r.provincia)),
+  // La regione come la legge il resto del gestionale: prima la provincia, il
+  // campo «Regioni» del file solo se non c'e' altro (regioneMovimento.ts, chiusura
+  // dell'audit, 11/10/2026). Letto per primo, quel campo poteva mettere un ritiro
+  // in una regione qui e in un'altra nella Dashboard.
+  'Regione': (r) => testo(regioneDi(r)),
   'Trasportatore': (r) => testo(r.trasportatore),
   'Destinazione': (r) => testo(r.destinazione),
   'Tipo destinazione': (r) => {
@@ -252,8 +257,14 @@ function ordinaColonne(cols) {
   return cols.sort((a, b) => a.localeCompare(b, 'it'));
 }
 
+// AI CHILI, NON AI DIECI CHILI (chiusura dell'audit, 11/10/2026). Ogni valore e
+// ogni totale si arrotondava a due decimali: 12.345 kg diventavano 12,35 t qui e
+// 12,345 t in tutto il resto del gestionale, e la somma dei figli arrotondati
+// poteva non fare il totale. La regola dei pesi (AGENTS.md, «Pesi») vuole tre
+// decimali quando i kg non sono tondi: si tengono i kg interi, e la pagina li
+// scrive con formatTonnellate. I viaggi sono interi e restano tali.
 function arrotonda(n) {
-  return Math.round(n * 100) / 100;
+  return Math.round(n * 1000) / 1000;
 }
 
 // Costruisce un nodo per livello di riga, accumulando i valori per colonna.

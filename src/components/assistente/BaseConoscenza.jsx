@@ -98,7 +98,7 @@ function DialogVoce({ voce, onClose, onSalvato }) {
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{nuova ? 'Nuova voce' : 'Modifica voce'}</DialogTitle>
-          <DialogDescription>Le voci attive entrano in tutte le risposte dell'Assistente; quelle normative anche nel controllo dei documenti dei fornitori.</DialogDescription>
+          <DialogDescription>Le voci attive entrano in tutte le risposte di EcoTyna; quelle normative anche nel controllo dei documenti dei fornitori.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -308,7 +308,7 @@ export default function BaseConoscenza() {
         <div>
           <p className="font-medium flex items-center gap-2"><RefreshCw className="w-4 h-4" /> Controllo delle novità normative</p>
           <p className="text-sm text-muted-foreground">
-            Ogni primo del mese l'Assistente cerca sulle fonti ufficiali novità su PFU, rifiuti, Albo e RENTRI e le propone qui; se ne trova, gli amministratori ricevono un'email.
+            Ogni primo del mese EcoTyna cerca sulle fonti ufficiali novità su PFU, rifiuti, Albo e RENTRI e le propone qui; se ne trova, gli amministratori ricevono un'email.
           </p>
           {ultimo && (
             <p className="text-sm mt-1">

@@ -32,7 +32,9 @@ console.log("1. ECOTYNA: I COSTI LI VEDE L'AMMINISTRATORE");
   const finto = {
     asServiceRole: { entities: new Proxy({}, { get: (_t, nome) => ({
       filter: async (f) => { letture.push(String(nome)); return String(nome) === 'Tariffa' ? TARIFFE.filter(t => Object.entries(f || {}).every(([k, v]) => t[k] === v)) : []; },
-      list: async () => { letture.push(String(nome)); return []; },
+      // Le tariffe senza filtro si leggono con list (dall'11/10/2026 lo strumento non
+      // filtra piu' sullo stato: la validita' la decide validitaTariffa.ts).
+      list: async () => { letture.push(String(nome)); return String(nome) === 'Tariffa' ? TARIFFE : []; },
     }) }) },
     functions: { invoke: async (n) => { letture.push('funzione ' + n); return { data: {} }; } },
   };

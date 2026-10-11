@@ -21,6 +21,11 @@ const MODULI = [
   'Alert & Controllo', 'Fatturazione', 'Qualifica Fornitori', 'Verifiche', 'Assistente',
   'Predittività Secondarie', 'To-Do List', 'Altro',
 ];
+// Il valore 'Assistente' resta quello che si salva sulla richiesta (le richieste
+// gia' aperte lo portano); a video l'assistente si chiama EcoTyna (chiusura
+// dell'audit, 11/10/2026).
+const ETICHETTE_MODULI = { Assistente: 'EcoTyna' };
+const etichettaModulo = (m) => ETICHETTE_MODULI[m] || m;
 
 const TIPI = {
   caricamento: 'Caricare un file o dei dati',
@@ -157,7 +162,7 @@ export default function Richieste() {
               <label className="text-xs text-muted-foreground">Modulo</label>
               <Select value={form.modulo} onValueChange={(v) => setForm({ ...form, modulo: v })}>
                 <SelectTrigger><SelectValue placeholder="Scegli il modulo" /></SelectTrigger>
-                <SelectContent>{MODULI.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+                <SelectContent>{MODULI.map(m => <SelectItem key={m} value={m}>{etichettaModulo(m)}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div>
@@ -212,7 +217,7 @@ export default function Richieste() {
                 <Etichetta stato={r.stato} />
               </div>
               <div className="text-xs text-muted-foreground">
-                {[r.modulo, TIPI[r.tipo] || '', r.urgenza === 'alta' ? 'Urgente' : '', r.richiedente_nome, quando(r.inviata_il || r.created_date)]
+                {[etichettaModulo(r.modulo), TIPI[r.tipo] || '', r.urgenza === 'alta' ? 'Urgente' : '', r.richiedente_nome, quando(r.inviata_il || r.created_date)]
                   .filter(Boolean).join(' · ')}
               </div>
               <div className="text-sm whitespace-pre-wrap">{r.descrizione}</div>

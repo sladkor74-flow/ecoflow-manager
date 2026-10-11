@@ -19,6 +19,10 @@ const formatTonnellate = (v) => formatNumber(v, { minimumFractionDigits: 2, maxi
 `;
 const sorgente = readFileSync(new URL('src/lib/esportaTabella.js', radice), 'utf8')
   .replace("import { formatNumber, formatKg, formatTonnellate, formatIntero } from '@/lib/utils';", formati)
+  // Gli altri moduli di src/lib che esportaTabella importa con l'alias @ (dall'11/10/2026
+  // giornoItaliano, per il giorno italiano delle date) si caricano dal file vero: senza
+  // questa riga node non risolve l'alias e la prova crolla prima di qualunque verifica.
+  .replace(/from '@\/lib\/(\w+)';/g, (_, m) => `from '${new URL(`src/lib/${m}.js`, radice).href}';`)
   .replace(/await import\('jspdf'\)/g, `await import('${jspdf}').then(m => m.default || m)`)
   .replace(/await import\('xlsx'\)/g, 'null')
   // invece di scaricare il file si tiene il testo del documento
@@ -60,6 +64,8 @@ verifica("l'intestazione lunga va a capo, non viene tagliata", c_e('Prezzo Unita
 verifica('le altre intestazioni ci sono tutte', ['Ordine', 'Numero FIR', 'Prezzo Totale', 'Note'].every(t => c_e(t)));
 verifica('la nota lunga non si ferma alla prima riga', c_e('rientro a vuoto') && c_e('attesa in impianto'));
 verifica('i numeri sono in formato italiano', c_e('23.400') && c_e('4.726,80'));
+// la data passa da giornoRoma (11/10/2026): gg/mm/aaaa del giorno italiano
+verifica('la data esce gg/mm/aaaa', c_e('10/07/2026') && c_e('11/07/2026'), `— scritte: ${scritte.filter(s => /\d\d\/\d\d/.test(s)).join(' | ')}`);
 verifica('il totale viene scritto', c_e('Totale') && c_e('24.650') && c_e('4.979,30'));
 verifica('una pagina sola per due righe', (pdf.match(/\/Type\s*\/Page[^s]/g) || []).length === 1);
 
