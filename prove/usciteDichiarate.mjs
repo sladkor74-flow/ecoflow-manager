@@ -14,7 +14,7 @@
 // doppio: la somma di quello che resta deve fare la giacenza del canale E, mese
 // per mese, i chili che il file degli ordini non dichiarati aspetta ancora.
 // npm run prove
-import { meseArrivoDellaRiga, raccoglitoreUscite, allineaAllaGiacenza, copertureDelCaricamento } from '../base44/shared/usciteDichiarate.ts';
+import { meseArrivoDellaRiga, raccoglitoreUscite, allineaAllaGiacenza, chiudiFraIFlussi, copertureDelCaricamento } from '../base44/shared/usciteDichiarate.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -181,21 +181,97 @@ console.log('IL RACCOGLITORE: SOLO LA RETE, SOLO L ANNO CHIESTO, SOLO IL NOSTRO 
   u.segna({ destinazione: 'T-CYCLE INDUSTRIES SRL', fine_trasporto: '2026-01-20', data_dichiarazione: '2026-04-03', peso_associato_kg: 28340, prodotto: '.class1' });
   // Una classe 9 e' ACI: la giacenza di rete non la tocca.
   u.segna({ destinazione: 'T-CYCLE INDUSTRIES SRL', fine_trasporto: '2026-01-21', data_dichiarazione: '2026-04-03', peso_associato_kg: 9999, prodotto: '.class9' });
-  // Un ordine di un altro anno resta fuori dai dodici mesi.
+  // Un ordine di un altro anno resta fuori dai dodici mesi: dal 11/10/2026 va
+  // nella casella dall'anno prima, col giorno del suo caricamento.
   u.segna({ destinazione: 'T-CYCLE INDUSTRIES SRL', fine_trasporto: '2025-10-02', data_dichiarazione: '2026-01-15', peso_associato_kg: 88460, prodotto: '.class1' });
+  // E uno dell'anno dopo non c'entra per niente.
+  u.segna({ destinazione: 'T-CYCLE INDUSTRIES SRL', fine_trasporto: '2027-01-05', data_dichiarazione: '2027-02-15', peso_associato_kg: 777, prodotto: '.class1' });
   // Un carico passato dal piazzale: va sul mese della secondaria e sull'impianto
   // che l'ha ricevuta, non sullo stoccaggio.
   u.segna({ destinazione: 'NAPPI SUD SRL', destinazione_secondaria: 'Irigom S.r.l.', ordine_secondaria: 'SEC26001754', fine_trasporto: '2025-12-22', data_dichiarazione: '2026-02-11', peso_associato_kg: 14840, prodotto: '.class1' });
   const tc = u.per(norm('T-CYCLE INDUSTRIES SRL'));
   verifica('gennaio di T-Cycle porta i due agganci di rete, non l ACI e non il 2025',
     tc.mesi[0] === 31654 && somma(tc.mesi) === 31654, JSON.stringify(tc.mesi));
+  const del0304 = tc.caricamenti.find(c => c.giorno === '2026-04-03');
   verifica('e il caricamento del 03/04 e uno solo, col suo totale',
-    tc.caricamenti.length === 1 && tc.caricamenti[0].giorno === '2026-04-03' && tc.caricamenti[0].kg === 31654);
+    tc.caricamenti.filter(c => c.giorno === '2026-04-03').length === 1 && del0304.kg === 31654 && del0304.prima_kg === 0, JSON.stringify(tc.caricamenti));
+  // LA CASELLA DALL'ANNO PRIMA (11/10/2026): il carico del 2025 agganciato il
+  // 15/01/2026 e' apertura uscita, e il caricamento lo dice.
+  const del1501 = tc.caricamenti.find(c => c.giorno === '2026-01-15');
+  verifica('il carico del 2025 agganciato il 15/01 e apertura che esce, non un mese dell anno',
+    tc.ha_anno === true && !!del1501 && del1501.prima_kg === 88460 && somma(del1501.mesi) === 0, JSON.stringify(del1501));
+  verifica('e si conta solo se agganciato dopo la lettura del 31/12',
+    u.primaDopo(norm('T-CYCLE INDUSTRIES SRL'), '2025-12-31') === 88460 && u.primaDopo(norm('T-CYCLE INDUSTRIES SRL'), '2026-01-15') === 0);
+  verifica('il 2027 resta fuori da tutto', !tc.caricamenti.some(c => c.giorno === '2027-02-15') && somma(tc.mesi) === 31654);
   const ir = u.per(norm('Irigom S.r.l.'));
   verifica('la secondaria arrivata il 09/01 sta nel gennaio di Irigom',
     !!ir && ir.mesi[0] === 14840 && somma(ir.mesi) === 14840, JSON.stringify(ir && ir.mesi));
   verifica('e sullo stoccaggio non c e niente', u.per(norm('NAPPI SUD SRL')) === null);
   verifica('un impianto mai visto non da una riga vuota', u.per('CHISSACHI') === null);
+}
+
+console.log("LA CASELLA DALL'ANNO PRIMA: LA SOMMA DELLA RIGA E' LA GIACENZA, ANCHE A GENNAIO");
+{
+  // Il caso dell'audit (chiusura, 11/10/2026): Irigom a gennaio 2027, apertura
+  // di 600 t scritta dalla chiusura, 300 t arrivate, nessuna nave ancora. Senza
+  // la casella la riga diceva 300 contro una giacenza di 900, e la pagina
+  // «a portale risultano dichiarati 600.000 kg in piu'», che era falso.
+  const conferito = [300000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  const zero = new Array(12).fill(0);
+  const senza = allineaAllaGiacenza(conferito, zero, 900000);
+  verifica('controprova: senza la casella la riga dice 300 e accende il falso avviso',
+    somma(senza.resta) === 300000 && senza.oltre_kg === 600000, JSON.stringify([somma(senza.resta), senza.oltre_kg]));
+  const con = allineaAllaGiacenza(conferito, zero, 900000, { conferito: 600000, uscito: 0 });
+  verifica('con la casella la riga fa 900, la giacenza, e nessun avviso',
+    somma(con.resta) + con.prima.resta === 900000 && con.oltre_kg === 0 && con.non_allocato_kg === 0,
+    JSON.stringify([somma(con.resta), con.prima, con.oltre_kg]));
+  // Marzo: la nave porta via 650 t. Il portale aggancia dal piu' vecchio: tutta
+  // l'apertura (letta dal report: 600 t di carichi del 2026) e 50 t di gennaio.
+  const marzo = allineaAllaGiacenza(conferito, [50000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 250000, { conferito: 600000, uscito: 600000 });
+  verifica('la nave svuota prima la casella, poi gennaio', marzo.prima.resta === 0 && marzo.resta[0] === 250000 && !marzo.prima.stimato && !marzo.stimato[0]);
+  // Se il report non ha ancora la nave, il gestionale la ripartisce dal piu'
+  // vecchio, e la casella e' la prima a svuotarsi: segnata come stimata.
+  const stimata = allineaAllaGiacenza(conferito, zero, 250000, { conferito: 600000, uscito: 0 });
+  verifica('senza il report la nave svuota la casella e 50 t di gennaio, stimati',
+    stimata.prima.resta === 0 && stimata.prima.stimato && stimata.resta[0] === 250000 && stimata.stimato[0]);
+  // Senza casella i dodici mesi fanno esattamente quello che facevano: e' il
+  // caso di T-Cycle, che il 09/10 tornava al chilo.
+  const tc = allineaAllaGiacenza(TC_CONFERITO, TC_USCITO, TC_GIACENZA, null);
+  verifica('senza casella T-Cycle torna come prima, mese per mese', uguali(tc.resta, TC_PORTALE) && tc.prima.conferito === 0 && tc.prima.resta === 0);
+  // Il carico del 2025 uscito piu' dell'apertura netta: l'eccesso va sui carichi
+  // piu' vecchi, ma la riga fa sempre la giacenza.
+  const troppo = allineaAllaGiacenza([10000, 10000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], zero, 12000, { conferito: 5000, uscito: 8000 });
+  verifica('la riga fa la giacenza anche quando dal report esce piu dell apertura', somma(troppo.resta) + troppo.prima.resta === 12000, JSON.stringify(troppo));
+}
+
+console.log("UN CANALE CON PIU' RIGHE SI CHIUDE SUL CANALE");
+{
+  // L'ACI di un impianto: primaria con l'apertura (20 t) e 4 t arrivate in
+  // secondaria. La dichiarazione di 22 t e' scritta sulla riga della secondaria:
+  // quella riga ha in pancia 4 t, le altre 18 escono dalla casella della
+  // primaria. Giacenza del canale: 20 + 4 - 22 = 2.
+  const zero = new Array(12).fill(0);
+  const p = allineaAllaGiacenza(zero, zero, 20000, { conferito: 20000, uscito: 0 });
+  const s = allineaAllaGiacenza([0, 4000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 4000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 4000 - 22000);
+  verifica('controprova: riga per riga la secondaria non assorbe 18 t e la primaria tiene tutto',
+    s.non_allocato_kg === 18000 && p.prima.resta === 20000);
+  const [p2, s2] = chiudiFraIFlussi([p, s]);
+  verifica('sul canale le 18 t escono dalla casella dell altra riga, stimate',
+    p2.prima.resta === 2000 && p2.prima.stimato && s2.non_allocato_kg === 0, JSON.stringify([p2.prima, s2.non_allocato_kg]));
+  verifica('e la somma delle righe del canale e la giacenza del canale',
+    somma(p2.resta) + p2.prima.resta + somma(s2.resta) + s2.prima.resta === 2000);
+  verifica('gli originali non si toccano', p.prima.resta === 20000 && s.non_allocato_kg === 18000);
+  // Quello che nemmeno le altre righe assorbono resta non allocato, e si dice.
+  const [, s3] = chiudiFraIFlussi([allineaAllaGiacenza(zero, zero, 1000, { conferito: 1000, uscito: 0 }), s]);
+  verifica('quello che il canale non assorbe resta non allocato', s3.non_allocato_kg === 17000, String(s3.non_allocato_kg));
+}
+
+console.log('IL CARICAMENTO CHE HA CHIUSO ANCHE L APERTURA LO DICE');
+{
+  const c = [{ giorno: '2027-03-20', kg: 650000, prima_kg: 600000, mesi: [50000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }];
+  const x = copertureDelCaricamento(c, { caricata_inviata: true, caricata_il: '2027-03-20', quantita_kg: 650000 });
+  verifica("la nave di marzo ha chiuso prima l'anno prima, poi gennaio",
+    x && x.prima_kg === 600000 && x.mesi[0].mese === "dall'anno prima" && x.mesi[0].kg === 600000 && x.mesi[1].mese === 'Gennaio', JSON.stringify(x));
 }
 
 console.log('LA FUNZIONE E LE PAGINE USANO QUESTA REGOLA, NON UN ALTRA');
@@ -207,8 +283,10 @@ console.log('LA FUNZIONE E LE PAGINE USANO QUESTA REGOLA, NON UN ALTRA');
     f.includes('uscite.segna(r)') && f.includes('raccoglitoreUscite({ chiaveDi: norm'));
   verifica('e usa la fine trasporto della secondaria per i carichi passati dal piazzale',
     f.includes('fineSecondaria: (id) => fineSecondarie.get(id)'));
-  verifica('il conto si chiude sulla giacenza del canale',
-    /allineaAllaGiacenza\(\s*grezzi\.map\(m => m\.conferito_kg\),\s*semi,\s*reteDiretta \? aperturaKg \+ conferitoKg - caricatoKg : null,\s*\)/.test(f));
+  // Dal 11/10/2026 su tutti e tre i canali, con la casella dall'anno prima.
+  verifica('il conto si chiude sulla giacenza del canale, su ogni riga, con la casella dall anno prima',
+    /allineaAllaGiacenza\(\s*grezzi\.map\(m => m\.conferito_kg\),\s*semi,\s*aperturaKg \+ conferitoKg - caricatoKg,\s*casella \? \{ conferito: casella\.conferito, uscito: reteDiretta \? casella\.uscito : 0 \} : null,\s*\)/.test(f.replace(/\r/g, '')));
+  verifica('e un canale con piu righe si chiude sul canale', f.includes('chiudiFraIFlussi(suoi.map(x => x.allineato))'));
   verifica('quello che resta di un mese e il resto, non gli ingressi meno il dichiarato del mese',
     f.includes('da_dichiarare_kg: m.non_dovuta ? 0 : allineato.resta[i]')
     && !f.includes('da_dichiarare_kg: nonDovuta ? 0 : Math.max(0, totale - caricatoAPortale)'));

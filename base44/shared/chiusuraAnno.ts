@@ -42,6 +42,7 @@ import {
   movimentoStoccaggio,
   verificaRilevazione,
 } from "./giacenzaStoccaggi.ts";
+import { GRUPPO_TERZIARIE } from "./giacenzaPortale.ts";
 
 /** Il giorno da cui ripartira' l'anno dopo. */
 export const giornoChiusura = (anno) => `${anno}-12-31`;
@@ -56,8 +57,13 @@ const CLASSI_DI_CANALE = { RETE: ['P', 'M', 'G1', 'G2'], ACI: ['ACI'] };
  * Le terziarie non sono un canale: escono da un impianto verso le cementerie e
  * la giacenza di PFU non la toccano. Stanno in un gruppo loro, come in Giacenze,
  * cosi' il numero della rete resta quello della rete.
+ *
+ * Il nome del gruppo e' uno solo, quello di shared/giacenzaPortale.ts, che usano
+ * Giacenze, Dichiarazioni e ingressoMovimento: qui ce n'era una seconda copia,
+ * uguale per caso (revisione della chiusura dell'audit, 11/10/2026). Si
+ * riesporta, perche' la funzione della chiusura e le prove lo prendono da qui.
  */
-export const GRUPPO_TERZIARIE = 'TERZIARIE';
+export { GRUPPO_TERZIARIE };
 
 /**
  * I GRUPPI CHE NON HANNO CLASSE (regola dell'utente, 28/09/2026).

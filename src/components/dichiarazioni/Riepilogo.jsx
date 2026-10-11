@@ -29,6 +29,39 @@ const nomeCanale = (f) => {
   const c = CANALI.find(x => x.chiave === f.canale);
   return `${c ? c.nome : f.canale}${f.provenienza ? ` ${f.provenienza}` : ''}`;
 };
+const giornoIt = (g) => (g ? String(g).slice(0, 10).split('-').reverse().join('/') : '');
+
+// LA CASELLA «DALL'ANNO PRIMA» (chiusura dell'audit, 11/10/2026).
+//
+// La giacenza del canale comprende l'apertura - quello che il 31/12 restava da
+// dichiarare - ma l'apertura non stava in nessun mese: la riga sommava solo gli
+// arrivi dell'anno e, finche' l'apertura non era consumata (per Irigom fino alla
+// prima nave dell'anno), la colonna «Da dichiarare» diceva meno della giacenza e
+// sopra la tabella compariva «a portale risultano dichiarati ... in più», che era
+// falso. Ora l'apertura ha la sua casella in testa alla riga, prima di gennaio:
+// il portale aggancia dal carico più vecchio, quindi è la prima a svuotarsi. Gli
+// stessi colori dei mesi: verde quello che ne è uscito, ambra quello che resta.
+function CasellaAnnoPrima({ prima, anno }) {
+  if (!prima) return <span className="block text-center text-muted-foreground/50 text-[11px]">—</span>;
+  const uscito = prima.uscito_kg || 0;
+  const resta = prima.resta_kg || 0;
+  const circa = prima.uscito_stimato ? '~' : '';
+  const fondo = uscito > 0 && resta <= 0 ? 'bg-emerald-600 text-white'
+    : uscito > 0 ? 'bg-emerald-200 text-emerald-950'
+      : resta > 0 ? 'bg-amber-50 text-amber-900'
+        : '';
+  const titolo = [
+    `Dall'anno prima: giacenza da cui il ${anno} riparte, ${formatKg(prima.conferito_kg)} kg`,
+    prima.dichiarato_dopo_kg > 0 ? `(letti al ${giornoIt(prima.al)} ${formatKg(prima.letta_kg)} kg, meno ${formatKg(prima.dichiarato_dopo_kg)} kg dell'anno chiuso dichiarati dopo)` : (prima.al ? `(al ${giornoIt(prima.al)})` : ''),
+    `usciti ${formatKg(uscito)} kg${prima.uscito_stimato ? ' (in parte ripartiti dal gestionale: il report del portale non ha ancora quella dichiarazione)' : ''}`,
+    resta > 0 ? `restano in giacenza ${formatKg(resta)} kg` : 'niente più in giacenza dell\'anno prima',
+  ].filter(Boolean).join(' · ');
+  return (
+    <span title={titolo} className={`block w-full rounded-md border px-1.5 py-1 text-center text-[11px] leading-tight tabular-nums font-medium cursor-help ${fondo}`}>
+      {uscito > 0 ? `${circa}${formatKg(uscito)}` : resta > 0 ? formatKg(resta) : '—'}
+    </span>
+  );
+}
 
 export default function Riepilogo({ dati, onApri, soloLettura }) {
   // Un canale su cui l'impianto non ha mai dichiarato niente e su cui il portale
@@ -41,8 +74,12 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
   // la fotografia e' di un giorno preciso e puo' essere vecchia di settimane, e
   // un impianto che ha ricevuto a settembre spariva dal riepilogo invece di
   // comparire con «da chiedere» (regola dell'utente, 01/10/2026).
+  // E si mostra quando c'e' una giacenza dall'anno prima, anche se quest'anno
+  // non e' ancora arrivato niente: a gennaio e' l'unica cosa che c'e' (11/10/2026).
   const righe = tutte.filter(({ flusso }) => flusso.dichiarato_totale_t > 0
-    || flusso.mesi.some(m => m.non_dichiarato_kg > 0 || m.da_dichiarare_kg > 0 || m.uscito_kg > 0));
+    || flusso.mesi.some(m => m.non_dichiarato_kg > 0 || m.da_dichiarare_kg > 0 || m.uscito_kg > 0)
+    || (flusso.dall_anno_prima && (flusso.dall_anno_prima.resta_kg > 0 || flusso.dall_anno_prima.uscito_kg > 0)));
+  const annoPrima = (Number(dati.anno) || 0) - 1;
   // DOVE IL CONTO DEI MESI NON SI CHIUDE, SI DICE.
   //
   // Due casi, entrambi veri e nessuno dei due da nascondere: il portale ha
@@ -141,9 +178,10 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
           <thead>
             <tr className="border-b bg-muted/50">
               <th className="text-left px-3 py-2 font-semibold sticky left-0 bg-muted/50 min-w-[230px]">Impianto · canale</th>
+              <th className="px-1 py-2 font-semibold text-center min-w-[74px] whitespace-nowrap" title="La giacenza da cui l'anno riparte: quello che il 31/12 restava da dichiarare, al netto di quello che dell'anno chiuso si è dichiarato dopo. Il portale aggancia dal carico più vecchio, quindi è la prima casella a svuotarsi.">Dal {annoPrima || 'anno prima'}</th>
               {MESI_BREVI.map(m => <th key={m} className="px-1 py-2 font-semibold text-center min-w-[74px]">{m}</th>)}
               <th className="px-3 py-2 font-semibold text-right whitespace-nowrap">Caricato (t)</th>
-              <th className="px-3 py-2 font-semibold text-right whitespace-nowrap" title="La giacenza di rete: quello che e arrivato, meno quello che e stato davvero caricato a portale. E il residuo da dichiarare, lo stesso numero della scheda Impianti. Dove l impianto dichiara mese per mese coincide con la somma dei mesi non dichiarati; dove dichiara quando il prodotto esce (R1, CSS-C) no, e vale la giacenza.">Da dichiarare (t)</th>
+              <th className="px-3 py-2 font-semibold text-right whitespace-nowrap" title="La giacenza del canale: la giacenza dall'anno prima più quello che è arrivato, meno quello che è stato davvero caricato a portale. È il residuo da dichiarare, la somma della riga «resta in giacenza» qui sotto, casella dall'anno prima compresa: lo stesso numero della scheda Impianti e delle Giacenze.">Da dichiarare (t)</th>
             </tr>
           </thead>
           <tbody>
@@ -156,6 +194,9 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                     {nomeCanale(flusso)}{sito.operazione ? ` · ${sito.operazione}` : ''}
                     {flusso.da_stoccaggi_t > 0 ? ` · ${formatTonnellate(flusso.da_stoccaggi_t)} t da stoccaggi` : ''}
                   </span>
+                </td>
+                <td className="px-0.5 py-1">
+                  <CasellaAnnoPrima prima={flusso.dall_anno_prima} anno={dati.anno} />
                 </td>
                 {flusso.mesi.map(m => (
                   <td key={m.mese} className="px-0.5 py-1">
@@ -193,6 +234,12 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                     per un'altra strada e' la garanzia che la riga non possa piu'
                     smentirsi da sola, che era il difetto segnalato.
 
+                    DAL 11/10/2026 VALE SU TUTTI E TRE I CANALI E A GENNAIO. La somma
+                    comprende la casella dall'anno prima, e il conto si chiude sulla
+                    giacenza anche per ACI ed extra raccolta: prima un'apertura non
+                    ancora dichiarata mancava dalla colonna, e su ACI ed extra la
+                    colonna era la somma dei mesi e non la giacenza.
+
                     Dove la dichiarazione non e dovuta per accordo la colonna tace: non
                     e un arretrato. */}
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium">
@@ -216,6 +263,11 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                   quel mese e' stato dichiarato e cio' che e' stato conferito». */}
               <tr className={`${i % 2 ? 'bg-muted/20' : ''}`}>
                 <td className="px-3 py-0.5 sticky left-0 bg-inherit text-[11px] text-muted-foreground">conferito nel mese</td>
+                <td className="px-1 py-0.5 text-center tabular-nums text-[11px]" title="La giacenza da cui l'anno riparte (apertura netta)">
+                  {flusso.dall_anno_prima && flusso.dall_anno_prima.conferito_kg > 0
+                    ? <span className="text-muted-foreground">{formatTonnellate(flusso.dall_anno_prima.conferito_kg / 1000)}</span>
+                    : <span className="text-muted-foreground/50">—</span>}
+                </td>
                 {flusso.mesi.map(m => (
                   <td key={m.mese} className="px-1 py-0.5 text-center tabular-nums text-[11px]">
                     {m.conferito_kg > 0
@@ -254,6 +306,11 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                   return (
                     <>
                       <td className="px-3 pb-1.5 sticky left-0 bg-inherit text-[11px] text-muted-foreground">resta in giacenza</td>
+                      <td className="px-1 pb-1.5 text-center tabular-nums text-[11px]">
+                        {flusso.dall_anno_prima && flusso.dall_anno_prima.resta_kg > 0 && !nonDovuta
+                          ? <span className={tono} title={`Dall'anno prima ${formatKg(flusso.dall_anno_prima.resta_kg)} kg ${perche}`}>{formatTonnellate(flusso.dall_anno_prima.resta_kg / 1000)}</span>
+                          : <span className="text-muted-foreground/50">—</span>}
+                      </td>
                       {flusso.mesi.map(m => (
                         <td key={m.mese} className="px-1 pb-1.5 text-center tabular-nums text-[11px]">
                           {m.resta_kg > 0 && !nonDovuta
@@ -264,7 +321,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                       <td className={`px-3 pb-1.5 text-right tabular-nums text-[11px] ${nonDovuta ? 'text-muted-foreground' : 'text-amber-700'}`}
                         title={nonDovuta
                           ? 'La somma dei mesi: quello che è in impianto. Non è un arretrato: di questo canale non ci deve dichiarazione, per accordo'
-                          : 'La somma dei mesi: è la giacenza del canale, lo stesso numero della colonna «Da dichiarare»'}>
+                          : "La somma della riga, casella dall'anno prima compresa: è la giacenza del canale, lo stesso numero della colonna «Da dichiarare»"}>
                         {nonDovuta ? <span className="cursor-help" title={"Per accordo questo impianto non ci dichiara la rete: il trattamento non e' a nostro carico, il portale non tiene per noi una giacenza di rete e niente resta da dichiarare. Quello che e' arrivato si vede nella riga del conferito."}>—</span> : formatTonnellate(flusso.resta_t)}
                       </td>
                       <td className="px-3 pb-1.5" />
@@ -275,7 +332,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
               </React.Fragment>
             ))}
             {righe.length === 0 && (
-              <tr><td colSpan={15} className="text-center py-6 text-muted-foreground">Nessun impianto con movimenti o dichiarazioni per quest'anno.</td></tr>
+              <tr><td colSpan={16} className="text-center py-6 text-muted-foreground">Nessun impianto con movimenti o dichiarazioni per quest'anno.</td></tr>
             )}
           </tbody>
         </table>

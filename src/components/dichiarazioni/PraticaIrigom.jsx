@@ -10,7 +10,7 @@ import { eTerminato, giornoMovimento, dateDaSistemare, testoDate } from '@/lib/m
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { leggiRegistroIrigom } from '@/lib/registroIrigom';
 import { leggiCsvPortale, giacenzaCsvAlGiorno, riscontroGiacenza, nomeSitoPortale, ultimoGiornoDelMese } from '@/lib/giacenzaPortaleCsv';
-import { componiMese, ferroArretrato, dividiExtra, MESI, extraDaSalvare, extraGiaDichiarate, finestraExtra, extraDellePratiche, dichiarazioniExtra, testoExtraCompresa } from '@/lib/praticaIrigom';
+import { componiMese, ferroArretrato, dividiExtra, MESI, extraDaSalvare, extraGiaDichiarate, finestraExtra, extraDellePratiche, dichiarazioniExtra, testoExtraCompresa, rigaExtraDellaPratica, SEGNO_PRATICA_EXTRA } from '@/lib/praticaIrigom';
 import { wordDelMese, excelDelMese, cartellaZip, dataIt, datiFileGestione } from '@/lib/documentiIrigom';
 import { scarica } from '@/lib/docxModello';
 import { timbraPdf } from '@/lib/timbraPdf';
@@ -659,6 +659,18 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
       const sitoIrigom = irigom ? irigom.sito : 'Irigom S.r.l.';
       const esitoRete = esitoScrittura(esistenti, { sito: sitoIrigom, canale: 'RETE', provenienza: '', anno, mese }, { anno, chiaveDi: normalizzaRagioneSociale });
       if (esitoRete.azione === 'rifiuta') throw new Error(esitoRete.motivo);
+      // L'EXTRA RACCOLTA SI DECIDE PRIMA DI SCRIVERE (11/10/2026): su quale riga di
+      // ogni mese va la parte di questa pratica lo dice rigaExtraDellaPratica, che
+      // riconosce la riga della pratica dal suo segno e rifiuta se non si sa quale.
+      // Chiesto qui, prima della rete, una pratica non resta mai registrata a meta'.
+      const pianoExtra = [];
+      if (pratica.extra) {
+        for (const x of dichiarazioniExtra(pratica.extra, praticheDueAnni, { anno, mese })) {
+          const esitoExtra = rigaExtraDellaPratica(await base44.entities.DichiarazioneSito.filter({ anno: x.anno, mese: x.mese }), { suIrigom, anno: x.anno, mese: x.mese });
+          if (esitoExtra.azione === 'rifiuta') throw new Error(esitoExtra.motivo);
+          pianoExtra.push({ x, giaExtra: esitoExtra.esistente });
+        }
+      }
       const reteEsistente = esitoRete.esistente
         || esistenti.find(d => suIrigom(d) && (d.canale || 'RETE') === 'RETE' && !d.provenienza);
       // La quantita' e' il totale caricato a portale, extra raccolta dell'ultima
@@ -687,20 +699,18 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
       // altre pratiche registrate piu' la parte di questa (dichiarazioniExtra): si
       // scriveva la sola parte dell'ultima pratica e quella di prima spariva dal
       // numero. Il ferro si divide in proporzione al peso. Il valore di prima resta
-      // nella nota.
-      if (pratica.extra) {
-        for (const x of dichiarazioniExtra(pratica.extra, praticheDueAnni, { anno, mese })) {
-          const giaExtra = (await base44.entities.DichiarazioneSito.filter({ anno: x.anno, mese: x.mese })).find(d => suIrigom(d) && d.canale === 'EXTRA_RACCOLTA');
-          const prima = giaExtra && Number(giaExtra.quantita_kg) && Number(giaExtra.quantita_kg) !== x.quantita_kg
-            ? `Prima: ${formatKg(giaExtra.quantita_kg)} kg; aggiornata il ${dataIt(oggi)}${motivo ? ` perche' ${motivo}` : ''}.` : '';
-          const campiExtra = {
-            quantita_kg: x.quantita_kg, cippato_kg: x.cippato_kg, metalli_kg: x.metalli_kg, ricevuta_email: true, ricevuta_il: (giaExtra && giaExtra.ricevuta_il) || oggi,
-            note: [giaExtra && giaExtra.note, prima,
-              `Dichiarata con la pratica di ${mese} ${anno}, terziaria ${pratica.extra.terziaria || '—'} (allegato VII ${pratica.extra.allegato}): ${formatKg(x.questa_kg)} kg${x.altre_kg ? `, piu' ${formatKg(x.altre_kg)} kg dichiarati con altre pratiche` : ''}.`].filter(Boolean).join('\n'),
-          };
-          if (giaExtra) await base44.entities.DichiarazioneSito.update(giaExtra.id, campiExtra);
-          else await base44.entities.DichiarazioneSito.create({ sito: irigom ? irigom.sito : 'Irigom S.r.l.', operazione: 'R1', canale: 'EXTRA_RACCOLTA', provenienza: '', anno: x.anno, mese: x.mese, ...campiExtra });
-        }
+      // nella nota. La riga di ogni mese l'ha gia' scelta rigaExtraDellaPratica,
+      // qui sopra, prima di scrivere la rete.
+      for (const { x, giaExtra } of pianoExtra) {
+        const prima = giaExtra && Number(giaExtra.quantita_kg) && Number(giaExtra.quantita_kg) !== x.quantita_kg
+          ? `Prima: ${formatKg(giaExtra.quantita_kg)} kg; aggiornata il ${dataIt(oggi)}${motivo ? ` perche' ${motivo}` : ''}.` : '';
+        const campiExtra = {
+          quantita_kg: x.quantita_kg, cippato_kg: x.cippato_kg, metalli_kg: x.metalli_kg, ricevuta_email: true, ricevuta_il: (giaExtra && giaExtra.ricevuta_il) || oggi,
+          note: [giaExtra && giaExtra.note, prima,
+            `${SEGNO_PRATICA_EXTRA}${mese} ${anno}, terziaria ${pratica.extra.terziaria || '—'} (allegato VII ${pratica.extra.allegato}): ${formatKg(x.questa_kg)} kg${x.altre_kg ? `, piu' ${formatKg(x.altre_kg)} kg dichiarati con altre pratiche` : ''}.`].filter(Boolean).join('\n'),
+        };
+        if (giaExtra) await base44.entities.DichiarazioneSito.update(giaExtra.id, campiExtra);
+        else await base44.entities.DichiarazioneSito.create({ sito: irigom ? irigom.sito : 'Irigom S.r.l.', operazione: 'R1', canale: 'EXTRA_RACCOLTA', provenienza: '', anno: x.anno, mese: x.mese, ...campiExtra });
       }
       if (precedente) await base44.entities.PraticaIrigom.update(precedente.id, { stato: 'sostituita', motivo_sostituzione: motivo.trim() });
       await salvaBozza('registrata', {

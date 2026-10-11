@@ -31,6 +31,13 @@ function testoRipartizione(r) {
   return `di cui ${fmt(r.target_primarie_ripartite_t)} t ripartite in automatico, mese per mese, in base alle primarie che questi raccoglitori hanno portato qui: ${chi.join('; ')}. «Previsto» e' la parte non ancora arrivata, messa dove quel raccoglitore porta oggi. Per deciderlo a mano, scrivi l'impianto sulla loro riga in Target & Status`;
 }
 
+// ACI ED EXTRA RACCOLTA: LA RACCOLTA, CIOE' LE SOLE PRIMARIE (11/10/2026). La
+// colonna dell'extra contava anche i trasferimenti da un piazzale, e lo stesso
+// PFU entrava due volte: quando e' stato raccolto e quando si e' spostato. Ora
+// e' come l'ACI, e il totale e' quello della dashboard e della pagina Extra
+// Raccolta.
+const TITOLO_FUORI_TARGET = "Raccolto nell'anno, fuori target: le sole primarie arrivate qui. Un trasferimento da un piazzale non e' raccolta in piu' - lo stesso PFU si conterebbe due volte - e sta nella giacenza del canale.";
+
 export default function TargetTable({ righe, totali }) {
   return (
     <div className="bg-card border rounded-lg overflow-hidden">
@@ -66,8 +73,8 @@ export default function TargetTable({ righe, totali }) {
                   </Tooltip>
                 </TooltipProvider>
               </th>
-              <th className="px-2 py-2 font-semibold text-right border-l">ACI</th>
-              <th className="px-2 py-2 font-semibold text-right">Extra Raccolta</th>
+              <th className="px-2 py-2 font-semibold text-right border-l cursor-help" title={TITOLO_FUORI_TARGET}>ACI</th>
+              <th className="px-2 py-2 font-semibold text-right cursor-help" title={TITOLO_FUORI_TARGET}>Extra Raccolta</th>
             </tr>
           </thead>
           <tbody>

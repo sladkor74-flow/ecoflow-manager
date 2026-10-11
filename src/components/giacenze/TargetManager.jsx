@@ -23,6 +23,15 @@ function fmt(n) {
 // come li calcola calcolaGiacenze (righe), e si tiene l'elenco dei siti.
 const chiaveRiga = (sito, td) => `${String(sito || '').trim().toLowerCase()}|${td}`;
 
+// L'APERTURA SCRITTA DI UN PIAZZALE CONTA SOLO SE IL PIAZZALE NON HA LETTURE
+// (revisione della chiusura dell'audit, 11/10/2026). La giacenza di un piazzale
+// parte dall'ancora del portale - la rilevazione del 31/12 o la prima dell'anno -
+// e da li' parte anche la sua apertura, in Giacenze e in Dichiarazioni. Il campo
+// diceva «Giacenza di riferimento» e basta, e chi lo correggeva credeva di
+// cambiare un numero che invece non si muoveva. Ora l'etichetta lo dice, e
+// nell'elenco un piazzale con letture mostra l'apertura che vale davvero.
+const NOTA_APERTURA_PIAZZALE = "Conta solo per un piazzale senza nessuna rilevazione del portale: con una lettura l'apertura è l'ancora (la rilevazione del 31/12 dell'anno prima, o la prima dell'anno), portata al 31/12.";
+
 export default function TargetManager({ open, onClose, anno, destinazioni, righe = [], onSaved }) {
   const targetDi = new Map(righe.map(r => [chiaveRiga(r.sito, r.tipo_destinazione), r]));
   const tgt = (s) => targetDi.get(chiaveRiga(s.sito, s.tipo_destinazione)) || null;
@@ -121,7 +130,13 @@ export default function TargetManager({ open, onClose, anno, destinazioni, righe
                 <div className="h-9 px-3 flex items-center rounded-md border bg-muted/50 tabular-nums">{fmt(editing !== 'new' ? tgt(form)?.target_totale_t : null)}</div>
                 <Link to={indirizzoImpianti} className="text-[11px] text-primary hover:underline">Si scrive in Target & Status</Link>
               </div>
-              <div><label className="text-xs text-muted-foreground block mb-1">Giacenza di riferimento (t)</label><Input type="number" step="0.01" value={form.giacenza_riferimento_t || 0} onChange={e => setForm({ ...form, giacenza_riferimento_t: Number(e.target.value) })} /></div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  {form.tipo_destinazione === 'stoc' ? 'Apertura di rete (t), solo senza rilevazioni' : 'Giacenza di riferimento (t)'}
+                </label>
+                <Input type="number" step="0.01" value={form.giacenza_riferimento_t || 0} onChange={e => setForm({ ...form, giacenza_riferimento_t: Number(e.target.value) })} />
+                {form.tipo_destinazione === 'stoc' && <p className="text-[11px] text-muted-foreground mt-0.5">{NOTA_APERTURA_PIAZZALE}</p>}
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
@@ -174,7 +189,13 @@ export default function TargetManager({ open, onClose, anno, destinazioni, righe
                       <td className="px-2 py-1.5 text-center">{s.tipo_destinazione === 'imp' ? 'Impianto' : 'Stoccaggio'}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{fmt(tgt(s)?.target_primarie_t)}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{fmt(tgt(s)?.target_totale_t)}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">{fmt(s.giacenza_riferimento_t)}</td>
+                      {s.tipo_destinazione === 'stoc' && tgt(s)?.data_rilevazione ? (
+                        <td className="px-2 py-1.5 text-right tabular-nums" title={NOTA_APERTURA_PIAZZALE}>
+                          {fmt(tgt(s).giacenza_riferimento_t)} <span className="text-[10px] text-muted-foreground">dall&apos;ancora</span>
+                        </td>
+                      ) : (
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(s.giacenza_riferimento_t)}</td>
+                      )}
                       <td className="px-2 py-1.5">{s.tipologia_trattamento || '—'}</td>
                       <td className="px-2 py-1.5 max-w-[160px] truncate">{s.note || '—'}</td>
                       <td className="px-2 py-1.5">

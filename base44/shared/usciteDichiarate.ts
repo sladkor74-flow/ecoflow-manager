@@ -43,9 +43,23 @@
 // (allineaAllaGiacenza, campo `stimato`). Il numero certo contro cui si chiude il
 // conto e' la giacenza: apertura + entrato - dichiarato e caricato.
 //
-// Il canale e' solo la RETE: il report e' quello della rete, e per ACI ed extra
-// raccolta il portale non pubblica nessun aggancio. Li' il mese resta col suo
-// conto.
+// Il report e' solo della RETE: per ACI ed extra raccolta il portale non pubblica
+// nessun aggancio, e li' il mese parte dal suo dichiarato.
+//
+// LA CASELLA «DALL'ANNO PRIMA» (chiusura dell'audit, 11/10/2026). La giacenza
+// del canale comprende l'apertura - quello che il 31/12 restava da dichiarare -
+// ma l'apertura non sta in nessuno dei dodici mesi: le righe del report con
+// arrivo negli anni prima si buttavano, e la somma dei mesi era piu' bassa della
+// giacenza. Finche' l'apertura non era consumata - per Irigom fino alla prima
+// nave dell'anno - la colonna «Da dichiarare» diceva solo gli arrivi dell'anno e
+// la pagina scriveva «a portale risultano dichiarati 600.000 kg in piu'», che era
+// falso. Adesso in testa alla riga c'e' una tredicesima casella: entra
+// l'apertura netta, esce quello che il report aggancia a carichi degli anni
+// prima dopo la lettura del 31/12. Il portale aggancia dal piu' vecchio, quindi
+// e' la prima a svuotarsi; e la somma della riga e' la giacenza per
+// costruzione, su tutti e tre i canali. Il conto si chiude sulla giacenza anche
+// per ACI ed extra raccolta: senza report la parte di una dichiarazione che
+// supera il suo mese va sui carichi piu' vecchi, ed e' segnata come stimata.
 import { giornoRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { MESI } from "./dichiarazioniImpianti.ts";
@@ -72,10 +86,22 @@ export function meseArrivoDellaRiga(r, fineSecondaria = () => '') {
  *
  *   const u = raccoglitoreUscite({ chiaveDi: norm, fineSecondaria, anno: 2026 });
  *   for (const r of righe) u.segna(r);
- *   u.per(ns) -> { mesi: number[12], caricamenti: [{ giorno, kg, mesi: number[12] }] }
+ *   u.per(ns) -> { mesi: number[12], ha_anno, caricamenti: [{ giorno, kg, mesi: number[12], prima_kg }] }
+ *   u.primaDopo(ns, '2025-12-31') -> kg dei carichi degli anni prima agganciati dopo quel giorno
  *
  * Chi chiama ha gia' tenuto solo le righe nostre (nostraRiga): qui si scarta
  * l'ACI, perche' una giacenza di rete non la tocca.
+ *
+ * LE RIGHE DEGLI ANNI PRIMA NON SI BUTTANO PIU' (11/10/2026). Un carico arrivato
+ * prima dell'anno guardato e agganciato quest'anno e' l'apertura che esce: si
+ * tiene a parte, col giorno del caricamento, e va nella casella «dall'anno
+ * prima» (allineaAllaGiacenza). `ha_anno` dice se l'impianto ha anche agganci
+ * dell'anno. Non serve a scegliere da dove vengono i mesi: se il report conosce
+ * l'impianto, anche con le sole righe degli anni prima, i mesi sono i suoi
+ * (zero, se di quest'anno non e' uscito niente). Ripartire allora dal
+ * dichiarato del mese faceva uscire la stessa nave due volte, dalla casella e
+ * dal suo mese (revisione della chiusura dell'audit, 11/10/2026: le prime navi
+ * del 2027 di Irigom). Le righe degli anni dopo restano fuori.
  */
 export function raccoglitoreUscite({ chiaveDi = (s) => String(s || '').trim().toLowerCase(), fineSecondaria = () => '', anno = null } = {}) {
   const per = new Map();
@@ -87,31 +113,50 @@ export function raccoglitoreUscite({ chiaveDi = (s) => String(s || '').trim().to
       if (!ns) return;
       const giorno = meseArrivoDellaRiga(r, fineSecondaria);
       if (!giorno) return;
-      if (anno !== null && Number(giorno.slice(0, 4)) !== Number(anno)) return;
+      const annoArrivo = Number(giorno.slice(0, 4));
+      if (anno !== null && annoArrivo > Number(anno)) return;
+      const prima = anno !== null && annoArrivo < Number(anno);
       const i = Number(giorno.slice(5, 7)) - 1;
-      if (!(i >= 0 && i < 12)) return;
+      if (!prima && !(i >= 0 && i < 12)) return;
       const kg = Number(r.peso_associato_kg) || 0;
-      if (!per.has(ns)) per.set(ns, { mesi: new Array(12).fill(0), caricamenti: new Map() });
+      if (!per.has(ns)) per.set(ns, { mesi: new Array(12).fill(0), ha_anno: false, prima: new Map(), caricamenti: new Map() });
       const x = per.get(ns);
-      x.mesi[i] += kg;
       // Il giorno del caricamento: serve a dire quali mesi quella dichiarazione
-      // ha portato via, che e' il processo che l'utente vuole leggere.
+      // ha portato via, che e' il processo che l'utente vuole leggere, e per i
+      // carichi degli anni prima se l'aggancio e' venuto dopo la lettura del 31/12.
       const quando = giornoRoma(r.data_dichiarazione);
+      if (prima) x.prima.set(quando, (x.prima.get(quando) || 0) + kg);
+      else { x.mesi[i] += kg; x.ha_anno = true; }
       if (!quando) return;
-      if (!x.caricamenti.has(quando)) x.caricamenti.set(quando, { giorno: quando, kg: 0, mesi: new Array(12).fill(0) });
+      if (!x.caricamenti.has(quando)) x.caricamenti.set(quando, { giorno: quando, kg: 0, mesi: new Array(12).fill(0), prima_kg: 0 });
       const c = x.caricamenti.get(quando);
       c.kg += kg;
-      c.mesi[i] += kg;
+      if (prima) c.prima_kg += kg;
+      else c.mesi[i] += kg;
     },
     per(ns) {
       const x = per.get(ns);
       if (!x) return null;
       return {
         mesi: x.mesi.map(v => Math.round(v)),
+        ha_anno: x.ha_anno,
         caricamenti: [...x.caricamenti.values()]
-          .map(c => ({ giorno: c.giorno, kg: Math.round(c.kg), mesi: c.mesi.map(v => Math.round(v)) }))
+          .map(c => ({ giorno: c.giorno, kg: Math.round(c.kg), mesi: c.mesi.map(v => Math.round(v)), prima_kg: Math.round(c.prima_kg) }))
           .sort((a, b) => a.giorno.localeCompare(b.giorno)),
       };
+    },
+    /**
+     * Quanto dei carichi arrivati negli anni prima il report dice agganciato con
+     * caricamenti successivi a `dopo` ('AAAA-MM-GG', il giorno della lettura del
+     * 31/12): e' l'apertura che esce. Una riga senza giorno di caricamento non si
+     * sa se viene prima o dopo la lettura, e non si conta.
+     */
+    primaDopo(ns, dopo) {
+      const x = per.get(ns);
+      if (!x) return 0;
+      let kg = 0;
+      for (const [quando, v] of x.prima) if (quando && quando > String(dopo || '')) kg += v;
+      return Math.round(kg);
     },
   };
 }
@@ -149,17 +194,25 @@ function scalaDaiPiuVecchi(uscito, resta, stimato, quanto) {
  *    dichiarazioni: non si inventa niente, e la differenza si dice (`oltre_kg`).
  *    E' il caso noto delle dichiarazioni che il portale ha e il gestionale no.
  *
- * Senza `giacenzaKg` (null) si fa solo il punto 1: e' quello che serve ai canali
- * su cui il portale non pubblica nessun aggancio.
+ * Senza `giacenzaKg` (null) si fa solo il punto 1.
+ *
+ * `dallAnnoPrima` ({ conferito, uscito }, 11/10/2026) e' la casella in testa alla
+ * riga: l'apertura netta e quanto il report ne dice uscito. Sta prima di gennaio
+ * in tutti e tre gli aggiustamenti, perche' e' il carico piu' vecchio e il
+ * portale la svuota per prima. Senza, la casella vale zero e i dodici mesi
+ * fanno esattamente quello che facevano.
  */
-export function allineaAllaGiacenza(conferito, uscito, giacenzaKg = null) {
+export function allineaAllaGiacenza(conferito, uscito, giacenzaKg = null, dallAnnoPrima = null) {
   const u = [];
   const resta = [];
   const stimato = [];
   let fuoriMese = 0;
-  for (let i = 0; i < 12; i++) {
-    const c = Math.max(0, Math.round(Number((conferito || [])[i]) || 0));
-    let q = Math.max(0, Math.round(Number((uscito || [])[i]) || 0));
+  // Posizione 0: dall'anno prima; posizioni 1-12: i mesi.
+  const entra = [(dallAnnoPrima && dallAnnoPrima.conferito) || 0, ...Array.from({ length: 12 }, (_, i) => (conferito || [])[i])];
+  const esce = [(dallAnnoPrima && dallAnnoPrima.uscito) || 0, ...Array.from({ length: 12 }, (_, i) => (uscito || [])[i])];
+  for (let i = 0; i < 13; i++) {
+    const c = Math.max(0, Math.round(Number(entra[i]) || 0));
+    let q = Math.max(0, Math.round(Number(esce[i]) || 0));
     if (q > c) { fuoriMese += q - c; q = c; }
     u.push(q);
     resta.push(c - q);
@@ -175,9 +228,11 @@ export function allineaAllaGiacenza(conferito, uscito, giacenzaKg = null) {
     else if (scarto < 0) oltre = -scarto;
   }
   return {
-    uscito: u,
-    resta,
-    stimato,
+    uscito: u.slice(1),
+    resta: resta.slice(1),
+    stimato: stimato.slice(1),
+    // La casella dall'anno prima: entrata, uscita, quello che ne resta.
+    prima: { conferito: Math.max(0, Math.round(Number(entra[0]) || 0)), uscito: u[0], resta: resta[0], stimato: stimato[0] },
     // Agganci che cadono in un mese in cui non e' arrivato tanto: quello che non
     // ha trovato posto nemmeno nei mesi prima.
     fuori_mese_kg: fuoriMeseResiduo,
@@ -187,6 +242,45 @@ export function allineaAllaGiacenza(conferito, uscito, giacenzaKg = null) {
     // Il portale ha agganciato piu' di quanto le nostre dichiarazioni dicano.
     oltre_kg: oltre,
   };
+}
+
+/**
+ * UN CANALE CON PIU' RIGHE SI CHIUDE SUL CANALE (11/10/2026).
+ *
+ * L'ACI di un impianto ha due righe, primaria e secondaria, e ognuna si chiude
+ * sulla sua parte di giacenza. Ma la giacenza e' del canale: se la dichiarazione
+ * scritta su una riga supera quello che quella riga ha in pancia, l'eccesso
+ * (`non_allocato_kg`) esce dalle altre righe dello stesso canale, dal carico
+ * piu' vecchio - prima la casella dall'anno prima, poi gennaio di ogni riga, poi
+ * febbraio - ed e' segnato come stimato. Senza, la somma delle righe del canale
+ * restava sopra la giacenza del canale. Quello che nemmeno le altre righe
+ * assorbono resta non allocato, sulle righe che l'avevano, e si dice.
+ *
+ * Riceve gli esiti di allineaAllaGiacenza delle righe di un canale, in ordine, e
+ * ne restituisce delle copie.
+ */
+export function chiudiFraIFlussi(allineati) {
+  const elenco = (allineati || []).map(a => a && ({ ...a, uscito: [...a.uscito], resta: [...a.resta], stimato: [...a.stimato], prima: { ...a.prima } }));
+  const prima = elenco.map(a => (a ? a.non_allocato_kg : 0));
+  let da = prima.reduce((s, x) => s + x, 0);
+  if (!(da > 0) || elenco.filter(Boolean).length < 2) return elenco;
+  for (let p = -1; p < 12 && da > 0; p++) {
+    for (const a of elenco) {
+      if (!a || da <= 0) continue;
+      const q = Math.min(p < 0 ? a.prima.resta : a.resta[p], da);
+      if (q <= 0) continue;
+      if (p < 0) { a.prima.resta -= q; a.prima.uscito += q; a.prima.stimato = true; }
+      else { a.resta[p] -= q; a.uscito[p] += q; a.stimato[p] = true; }
+      da -= q;
+    }
+  }
+  elenco.forEach((a, i) => {
+    if (!a) return;
+    const x = Math.min(prima[i], da);
+    a.non_allocato_kg = x;
+    da -= x;
+  });
+  return elenco;
 }
 
 /**
@@ -211,9 +305,16 @@ export function copertureDelCaricamento(caricamenti, dichiarazione, tolleranzaKg
     if (pari.length === 1) c = pari[0];
   }
   if (!c) return null;
+  // I carichi degli anni prima che lo stesso caricamento ha chiuso vengono per
+  // primi, perche' sono i piu' vecchi (11/10/2026).
+  const prima = Math.round(Number(c.prima_kg) || 0);
   return {
     giorno: c.giorno,
     kg: c.kg,
-    mesi: c.mesi.map((kg, i) => ({ mese: MESI[i], kg })).filter(x => x.kg > 0),
+    prima_kg: prima,
+    mesi: [
+      ...(prima > 0 ? [{ mese: "dall'anno prima", kg: prima }] : []),
+      ...c.mesi.map((kg, i) => ({ mese: MESI[i], kg })).filter(x => x.kg > 0),
+    ],
   };
 }

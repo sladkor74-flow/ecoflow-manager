@@ -41,7 +41,12 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
         <div className="text-right text-sm">
           {sito.quadra === true && <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 className="w-4 h-4" /> giacenza in linea con il portale</span>}
           {sito.quadra === false && <span className="inline-flex items-center gap-1 text-red-700"><AlertTriangle className="w-4 h-4" /> scarto di {t(sito.scarto_t)} t sul portale</span>}
-          {sito.quadra === null && <span className="text-muted-foreground text-xs">giacenza a portale non disponibile</span>}
+          {/* Un anno chiuso si confronta con la lettura del 31/12 salvata dalla
+              chiusura, non col portale di oggi; senza quella lettura la
+              quadratura non si fa, e si dice perche' (11/10/2026). */}
+          {sito.quadra === null && (sito.quadratura_anno_chiuso && !sito.quadratura_anno_chiuso.lettura
+            ? <span className="text-muted-foreground text-xs cursor-help" title={sito.quadratura_anno_chiuso.perche}>anno chiuso: la quadratura col portale vale per l&apos;anno in corso</span>
+            : <span className="text-muted-foreground text-xs">giacenza a portale non disponibile</span>)}
         </div>
       </div>
 
@@ -60,14 +65,17 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
       {sito.flussi.map(flusso => {
         const canale = CANALI.find(c => c.chiave === flusso.canale);
         const mesiConDati = flusso.mesi.filter(m => m.conferito_kg > 0 || (m.dichiarazione && m.dichiarazione.quantita_kg > 0));
-        if (!mesiConDati.length) return null;
+        // La giacenza dall'anno prima e' una riga della tabella anche a gennaio,
+        // quando e' l'unica cosa che c'e' (11/10/2026).
+        const prima = flusso.dall_anno_prima && (flusso.dall_anno_prima.conferito_kg > 0 || flusso.dall_anno_prima.uscito_kg > 0) ? flusso.dall_anno_prima : null;
+        if (!mesiConDati.length && !prima) return null;
         const conStoccaggi = flusso.da_stoccaggi_t > 0;
         return (
           <div key={`${flusso.canale}-${flusso.provenienza}`} className="border-b last:border-b-0">
             <p className="px-4 pt-3 pb-1 text-sm font-medium">
               {canale ? canale.nome : flusso.canale}{flusso.provenienza ? ` · ${flusso.provenienza}` : ''}
               <span className="text-xs text-muted-foreground font-normal">
-                {' '}— arrivati {t(flusso.conferito_t)} t{conStoccaggi ? `, di cui ${t(flusso.da_stoccaggi_t)} t in secondaria dagli stoccaggi` : ''}, dichiarati e caricati {t(flusso.dichiarato_caricato_t)} t, {flusso.non_dovuta ? 'giacenza: non dovuta per accordo' : `in giacenza ${t(flusso.resta_t)} t`}
+                {' '}— {prima ? `dall'anno prima ${t(flusso.apertura_t)} t, ` : ''}arrivati {t(flusso.conferito_t)} t{conStoccaggi ? `, di cui ${t(flusso.da_stoccaggi_t)} t in secondaria dagli stoccaggi` : ''}, dichiarati e caricati {t(flusso.dichiarato_caricato_t)} t, {flusso.non_dovuta ? 'giacenza: non dovuta per accordo' : `in giacenza ${t(flusso.resta_t)} t`}
               </span>
             </p>
             <div data-scorre-lato>
@@ -91,6 +99,25 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                   </tr>
                 </thead>
                 <tbody>
+                  {prima && (
+                    <tr className="border-b bg-muted/10">
+                      <td className="px-3 py-1.5 font-medium" title="La giacenza da cui l'anno riparte: quello che il 31/12 restava da dichiarare, al netto di quello che dell'anno chiuso si è dichiarato dopo">Dall&apos;anno prima</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums"
+                        title={prima.dichiarato_dopo_kg > 0 ? `Letti al ${String(prima.al || '').split('-').reverse().join('/')} ${formatKg(prima.letta_kg)} kg, meno ${formatKg(prima.dichiarato_dopo_kg)} kg dell'anno chiuso dichiarati dopo` : ''}>
+                        {kg(prima.conferito_kg)}
+                      </td>
+                      {conStoccaggi && <td className="px-2 py-1.5" />}
+                      <td className="px-2 py-1.5" />
+                      <td className="px-2 py-1.5 text-right tabular-nums text-emerald-700"
+                        title={prima.uscito_stimato ? 'Ripartito dal gestionale: il report del portale non ha ancora questa dichiarazione' : 'Agganciato dal portale a carichi degli anni prima, dopo la lettura del 31/12'}>
+                        {prima.uscito_kg > 0 ? `${prima.uscito_stimato ? '~' : ''}${kg(prima.uscito_kg)}` : '—'}
+                      </td>
+                      <td className={`px-2 py-1.5 text-right tabular-nums ${prima.da_dichiarare_kg > 0 ? 'text-amber-800 font-medium' : 'text-muted-foreground'}`}>{prima.da_dichiarare_kg > 0 ? kg(prima.da_dichiarare_kg) : '—'}</td>
+                      {materiali.map(x => <td key={x.chiave} className="px-2 py-1.5" />)}
+                      <td className="px-2 py-1.5 text-muted-foreground">{prima.resta_kg > 0 ? 'in giacenza' : 'uscito tutto'}</td>
+                      <td className="px-2 py-1.5" />
+                    </tr>
+                  )}
                   {mesiConDati.map(m => {
                     const d = m.dichiarazione;
                     const stato = statoDichiarazione(d, { canale: flusso.canale, dichiara_rete: sito.dichiara_rete });
@@ -162,7 +189,11 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
         <span>Giacenza di rete che ne risulta: <strong>{sito.dichiara_rete === false
           ? <span className="cursor-help" title={"Per accordo questo impianto non ci dichiara la rete: il trattamento non e' a nostro carico, il portale non tiene per noi una giacenza di rete e niente resta da dichiarare. Quello che e' arrivato si vede nelle primarie qui sopra."}>—</span>
           : `${t(sito.giacenza_calcolata_t)} t`}</strong></span>
-        <span>Giacenza di rete a portale, aggiornata: <strong>{sito.giacenza_portale_t === null ? '—' : `${t(sito.giacenza_portale_t)} t`}</strong></span>
+        {/* Per un anno chiuso il numero a portale e' la lettura del 31/12 salvata
+            dalla chiusura, non il portale di oggi (11/10/2026). */}
+        {sito.quadratura_anno_chiuso
+          ? <span title={sito.quadratura_anno_chiuso.perche}>Giacenza di rete a portale, lettura del 31/12: <strong>{sito.giacenza_portale_t === null ? '— (non salvata dalla chiusura)' : `${t(sito.giacenza_portale_t)} t`}</strong></span>
+          : <span>Giacenza di rete a portale, aggiornata: <strong>{sito.giacenza_portale_t === null ? '—' : `${t(sito.giacenza_portale_t)} t`}</strong></span>}
       </div>
     </div>
   );

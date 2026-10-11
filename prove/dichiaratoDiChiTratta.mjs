@@ -198,10 +198,10 @@ verifica('i canali non si sommano: l\'ACI non e\' finito nella rete',
 
 console.log('LA CONTROPROVA: SENZA LA PROTEZIONE DEL RUOLO IL DOPPIO TORNA');
 const senzaRuolo = await funzione((s) => s
-  .split("dichiarato_aci_t: td === 'imp' ? r2(dichiaratoCanaleMap.get(ns + '|ACI') || 0) : null,")
-  .join("dichiarato_aci_t: r2(dichiaratoCanaleMap.get(ns + '|ACI') || 0),")
-  .split("dichiarato_extra_t: td === 'imp' ? r2(dichiaratoCanaleMap.get(ns + '|EXTRA_RACCOLTA') || 0) : null,")
-  .join("dichiarato_extra_t: r2(dichiaratoCanaleMap.get(ns + '|EXTRA_RACCOLTA') || 0),"));
+  .split("dichiarato_aci_t: td === 'imp' ? r2(dichiaratoCanale(ns, 'ACI')) : null,")
+  .join("dichiarato_aci_t: r2(dichiaratoCanale(ns, 'ACI')),")
+  .split("dichiarato_extra_t: td === 'imp' ? r2(dichiaratoCanale(ns, 'EXTRA_RACCOLTA')) : null,")
+  .join("dichiarato_extra_t: r2(dichiaratoCanale(ns, 'EXTRA_RACCOLTA')),"));
 const guasto = await senzaRuolo({ anno: 2026 });
 const stocGuasto = (guasto.righe || []).find(r => String(r.sito).toUpperCase().startsWith('GATIM') && r.tipo_destinazione === 'stoc');
 verifica('senza la protezione il piazzale si mette a dichiarare 115,54 t',

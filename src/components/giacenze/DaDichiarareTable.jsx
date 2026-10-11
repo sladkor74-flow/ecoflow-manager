@@ -7,6 +7,7 @@ import { RefreshCw, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { exportDaDichiarareExcel } from '@/lib/giacenzeDaDichiarareExport';
 import { formatKg, formatIntero } from '@/lib/utils';
 import { giornoRoma } from '@/lib/giornoItaliano';
+import { annoDiOggi } from '@/lib/periodoPagine';
 import { creaSequenza } from '@/lib/ultimaRichiesta';
 import EsportaPdf from '@/components/shared/EsportaPdf';
 import { daDichiararePdf } from '@/lib/giacenzePdf';
@@ -50,6 +51,48 @@ const nomeMese = (m) => {
   return `${MESI_BREVI[i] || m} ${String(m).slice(0, 4)}`;
 };
 
+// LA RIGA CHE TIENE INSIEME PULSANTE, ELENCO E GIACENZA (11/10/2026). Il pulsante
+// della scheda Situazione conta anche i carichi che il file del portale non ha
+// ancora, l'elenco qui sopra ha solo le righe del file: questa riga dice quanti
+// e quali sono, toglie le dichiarazioni caricate dopo la fotografia e arriva alla
+// giacenza delle Giacenze. Se qualcosa non torna, lo si vede qui e non a occhio.
+function Riconciliazione({ r, sito }) {
+  const [aperto, setAperto] = useState(false);
+  if (!r) return null;
+  if (r.errore) return <p className="text-xs text-amber-800">La riconciliazione con la giacenza non si è potuta calcolare: {r.errore}</p>;
+  if (r.senza_fotografia) return <p className="text-xs text-muted-foreground">Il file degli ordini non dichiarati non è caricato: la riconciliazione con la giacenza non si fa.</p>;
+  if (r.non_dovuta) return <p className="text-xs text-muted-foreground">Per accordo {sito} non ci dichiara la rete: il portale non tiene per noi una giacenza di rete, e non c&apos;è niente da riconciliare.</p>;
+  return (
+    <div className="text-xs border rounded-lg bg-card px-3 py-2 space-y-1">
+      <p>
+        <strong>Riconciliazione con la giacenza:</strong>{' '}
+        file del portale{r.foto_del ? ` del ${fmtData(r.foto_del)}` : ''} {formatIntero(r.file_ordini)} {r.file_ordini === 1 ? 'ordine' : 'ordini'}, {kg(r.file_kg)} kg
+        {' '}+ {formatIntero(r.aggiunti_n)} {r.aggiunti_n === 1 ? 'carico' : 'carichi'} non ancora nel file, {kg(r.aggiunti_kg)} kg
+        {' '}− dichiarato a portale dopo la fotografia, {kg(r.dichiarato_dopo_kg)} kg
+        {' '}= <strong className="tabular-nums">giacenza a portale {kg(r.giacenza_kg)} kg</strong>, lo stesso numero delle Giacenze.
+      </p>
+      <p className="text-muted-foreground">
+        Ordini: {formatIntero(r.file_ordini)} nel file + {formatIntero(r.aggiunti_n)} non ancora nel file = {formatIntero(r.ordini_pulsante)}, il numero del pulsante della scheda Situazione.
+        {r.aggiunti_n > 0 && <>{' '}<button type="button" className="text-primary underline" onClick={() => setAperto(v => !v)}>{aperto ? 'nascondi' : 'quali sono'}</button></>}
+      </p>
+      {aperto && r.aggiunti_n > 0 && (
+        <table className="text-[11px]">
+          <tbody>
+            {r.aggiunti.map(o => (
+              <tr key={`${o.tipo}-${o.id_ordine}-${o.numero_fir}`}>
+                <td className="pr-2 font-mono">{o.id_ordine}</td>
+                <td className="pr-2">{o.tipo === 'secondaria' ? `secondaria da ${o.da}` : o.da}</td>
+                <td className="pr-2">fine trasporto {fmtData(o.fine_trasporto)}</td>
+                <td className="text-right tabular-nums">{kg(o.kg)} kg</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEsterno, onPulisciFiltroSito }) {
   // Si nasce gia' col filtro che ci hanno passato: arrivando dal pulsante di un
   // impianto nella scheda Situazione, la prima lettura deve essere la sua e non
@@ -63,6 +106,9 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
   const [soloDate, setSoloDate] = useState(false);
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState(null);
+  // La riga di riconciliazione con la giacenza: si chiede solo arrivando dal
+  // pulsante di un impianto, senza altri filtri, e non cambia sfogliando le pagine.
+  const [riconciliazione, setRiconciliazione] = useState(null);
   const [loading, setLoading] = useState(false);
   const [filterOptions, setFilterOptions] = useState({ siti_distinti: [], province_distinte: [], anni_distinti: [] });
   const sequenza = useRef(creaSequenza()).current;
@@ -91,9 +137,16 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
       if (ricerca) payload.ricerca = ricerca;
       if (soloDate) payload.solo_date_da_sistemare = true;
       if (ruolo) payload.ruolo = ruolo;
+      // Il pulsante di un impianto e nessun altro filtro: l'elenco e' tutto quello
+      // che il portale aspetta da lui, e si chiede anche la riconciliazione con la
+      // giacenza (11/10/2026). Sfogliando le pagine si tiene quella che c'e'.
+      const daRiconciliare = !!sito && ruolo === 'imp' && !provincia && !annoChiusura && !ricerca && !soloDate;
+      if (daRiconciliare && offset === 0) payload.riconcilia = true;
       const res = await base44.functions.invoke('getOrdiniDaDichiarare', payload);
       if (!sequenza.valida(mia)) return;
       setData(res.data);
+      if (!daRiconciliare) setRiconciliazione(null);
+      else if (offset === 0) setRiconciliazione(res.data.riconciliazione || null);
       if (res.data.siti_distinti) setFilterOptions(res.data);
     } catch (e) {
       console.error(e);
@@ -142,9 +195,13 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
   // non le cento della pagina: un totale sotto una tabella parziale e' la
   // lettura che ha fatto credere che ottobre non fosse contato. Si vanno a
   // prendere al clic, come fa l'Excel.
+  // Senza un anno scelto, l'anno del PDF e' quello di oggi in Italia, non
+  // quello dell'orologio del dispositivo: un dispositivo con un altro fuso, a
+  // cavallo della mezzanotte del 31/12, scriveva un altro anno (revisione della
+  // chiusura dell'audit, 11/10/2026, la regola di src/lib/periodoPagine.js).
   const sezioniPdf = async () => {
     const res = await base44.functions.invoke('getOrdiniDaDichiarare', payloadFiltrato());
-    return daDichiararePdf(annoChiusura || new Date().getFullYear(), res.data, {
+    return daDichiararePdf(annoChiusura || annoDiOggi(), res.data, {
       sito, ruolo, provincia, anno: annoChiusura, ricerca, solo_date: soloDate,
     });
   };
@@ -216,8 +273,13 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
           </Button>
         )}
       </div>
-      {/* Da dove si arriva conta: col ruolo scelto, il numero del pulsante nella
-          scheda Situazione e questo elenco dicono lo stesso. */}
+      {/* Da dove si arriva conta: col ruolo scelto si vedono solo i carichi di quel
+          titolo. Il numero del pulsante nella scheda Situazione conta anche i
+          carichi che il file del portale non ha ancora: il pulsante e l'elenco
+          dicono lo stesso attraverso la riga di riconciliazione sotto la tabella,
+          che li mette insieme e arriva alla giacenza (11/10/2026). Prima questo
+          commento lo affermava e basta, ed era falso appena un carico arrivava
+          dopo l'ultimo file, cioe' quasi ogni settimana. */}
       {ruolo && (
         <div className="text-xs text-muted-foreground">
           {ruolo === 'imp'
@@ -346,6 +408,13 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
           </table>
         </div>
       </div>
+
+      {/* LA RIGA DI RICONCILIAZIONE (chiusura dell'audit, 11/10/2026).
+          Righe del file + carichi che il file non ha ancora - dichiarato dopo la
+          fotografia = la giacenza a portale, lo stesso numero delle Giacenze; e
+          righe + carichi = il numero del pulsante. Le regole sono quelle delle
+          Giacenze (base44/shared/riconciliazioneDaDichiarare.ts). */}
+      <Riconciliazione r={riconciliazione} sito={sito} />
 
       {/* Paginazione */}
       {totaleRighe > PAGE_SIZE && (

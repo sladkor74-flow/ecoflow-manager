@@ -5,13 +5,17 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { eTerminato, eEseguito, periodoMovimento } from "../../shared/movimenti.ts";
-import { MESI, operazioneDa, quadratura, chiaveDichiarazione, unisciDichiarazioni, doppioniDichiarazioni, kgCaricatiDi } from "../../shared/dichiarazioniImpianti.ts";
-import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, inizioAggiunti, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese, nostraRiga } from "../../shared/giacenzaPortale.ts";
-import { puntiDiPartenza, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevazione } from "../../shared/giacenzaStoccaggi.ts";
+import { MESI, operazioneDa, quadratura, leggiDichiarazioni, doppioniDichiarazioni, kgCaricatiDi } from "../../shared/dichiarazioniImpianti.ts";
+import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, formulariDaSistemare, avvisoSenzaFine, collocaFotografia, fotoAFineMese, nostraRiga } from "../../shared/giacenzaPortale.ts";
+import { puntiDiPartenza, ancoraDellAnno, dopoLaRilevazione, kgReteDiRilevazione, kgAciDiRilevazione, momentoRilevazione, PERCHE_PIAZZALE_SENZA_LETTURA, PERCHE_PIAZZALE_SENZA_INIZIO } from "../../shared/giacenzaStoccaggi.ts";
+import { ingressoMovimento, eSecondariaExtra } from "../../shared/ingressoMovimento.ts";
+import { carichiNonNelFile } from "../../shared/riconciliazioneDaDichiarare.ts";
 import { confrontaConIlPortale } from "../../shared/agganciaDichiarazioni.ts";
-import { raccoglitoreUscite, allineaAllaGiacenza, copertureDelCaricamento } from "../../shared/usciteDichiarate.ts";
+import { raccoglitoreUscite, allineaAllaGiacenza, chiudiFraIFlussi, copertureDelCaricamento } from "../../shared/usciteDichiarate.ts";
 import { fotografiaDelGiorno } from "../../shared/indicatoriGiorno.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
+import { TIPI_GIACENZE } from "../../shared/registroCaricamenti.ts";
+import { controlloCaricamenti } from "../../shared/statoArchivi.ts";
 
 // Dichiarazioni degli impianti, mese per mese, con la quadratura delle giacenze.
 //
@@ -79,6 +83,34 @@ export default async function(req) {
     const CANALI_PORTALE = ['RETE', 'ACI'];
     // I canali su cui si calcola una giacenza: tutti e tre, sempre separati.
     const CANALI_GIACENZA = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
+    // UN ANNO CHIUSO NON SI CONFRONTA COL PORTALE DI OGGI (chiusura dell'audit,
+    // 11/10/2026). La calcolata di un anno passato e' quella al 31/12, il
+    // portale di adesso no: chi guardava il 2026 a gennaio 2027 - la vista con
+    // cui si chiude l'anno - vedeva «da verificare» ogni impianto che dopo il
+    // 31/12 aveva ricevuto qualcosa. Per un anno chiuso il confronto si fa con la
+    // lettura del 31/12 che la chiusura ha salvato (l'apertura dell'anno dopo per
+    // gli impianti, la rilevazione del 31/12 per i piazzali); se non c'e', la
+    // quadratura non si fa e la pagina lo dice.
+    const annoDiOggi = Number(oggiRoma().slice(0, 4));
+    const annoChiuso = annoNum < annoDiOggi;
+    const fineAnno = `${annoNum}-12-31`;
+
+    // LA FOTOGRAFIA DEL GIORNO NON SI SCRIVE SU UN ARCHIVIO A META' (chiusura
+    // dell'audit, 11/10/2026). Mentre un file si riscrive, o dopo un caricamento
+    // interrotto o finito parziale, la quadratura di stanotte direbbe scostamenti
+    // che non ci sono - o non vedrebbe quelli veri - e lo storico terrebbe per
+    // sempre i numeri di un archivio a meta'. Il guardiano allora non scrive
+    // niente e risponde 409 «rinviato», col motivo: la riga di oggi manca, e la
+    // dashboard lo dice insieme al caricamento da ripetere. Oltre ai movimenti
+    // contano la fotografia del portale e il report delle dichiarazioni
+    // (TIPI_GIACENZE). Lo stato si legge prima e dopo aver letto gli archivi;
+    // vale solo per chi scrive la fotografia: la pagina legge come prima.
+    const scriveLaFotografia = registra && annoNum === annoDiOggi;
+    const controllo = scriveLaFotografia
+      ? await controlloCaricamenti(base44, 'la fotografia del giorno', TIPI_GIACENZE,
+        (motivo) => ({ fotografia: { scritta: false, rinviata: true, motivo } }))
+      : null;
+    if (controllo && controllo.rinvio) return controllo.rinvio;
 
     const svc = base44.asServiceRole.entities;
     // Le dichiarazioni dell'anno prima servono a una cosa sola, ma importante:
@@ -97,7 +129,7 @@ export default async function(req) {
     // si chiude il 2026 - le dichiarazioni dell'anno nuovo caricate dopo la
     // fotografia entravano in un modulo e non nell'altro. Qui servono solo a
     // questo conto, quindi si leggono tutte: l'archivio e' piccolo.
-    const [giacenzeSito, dichiarazioni, dichiarazioniTutte, aci, extra, secondarie, terziarie, nonDichiarati, rilevazioni] = await Promise.all([
+    const [giacenzeSito, dichiarazioni, dichiarazioniTutte, aci, extra, secondarie, terziarie, nonDichiarati, rilevazioni, giacenzeAnnoDopo] = await Promise.all([
       fetchAll(svc.GiacenzaSito, { anno: annoNum }),
       fetchAll(svc.DichiarazioneSito, { anno: annoNum }),
       fetchAll(svc.DichiarazioneSito),
@@ -107,6 +139,8 @@ export default async function(req) {
       fetchAll(svc.Terziaria),
       fetchAll(svc.OrdineNonDichiarato),
       fetchAll(svc.GiacenzaStoccaggio),
+      // Le aperture dell'anno dopo: per un anno chiuso sono la lettura del 31/12.
+      annoChiuso ? fetchAll(svc.GiacenzaSito, { anno: annoNum + 1 }) : Promise.resolve([]),
     ]);
 
     // --- La fotografia del portale ---
@@ -167,30 +201,30 @@ export default async function(req) {
       if (!ns) return;
       somma(dichiaratoPortale, ns, Number(r.peso_associato_kg) || 0);
     });
-    const noto = (r, tipo) => portaleConosce.noto(r, tipo);
+
     // I terminati con le date da sistemare, per soggetto e canale (22/09/2026).
     // Si segnano mentre si leggono gli archivi; se il portale li conosce lo si
     // chiede alla fine, quando fotografia e report sono letti tutti.
     const daSistemare = formulariDaSistemare({ anno: annoNum, chiaveDi: norm });
-    const nonAncora = new Map(); // ns impianto -> [{...}] carichi che la fotografia non contiene
     // Come in calcolaGiacenze: chi non dichiara la rete per accordo non ha una
     // giacenza di rete che il portale tenga per noi, e i suoi carichi non sono
     // 'non ancora nel file'.
     const nonDichiaraRete = new Set(giacenzeSito.filter(g => g.dichiara_rete === false).map(g => norm(g.sito)));
-    // Da quando: inizioAggiunti, la stessa regola delle Giacenze, e di qualunque
-    // anno - non solo di quello guardato (revisione del 10/10/2026).
-    const segnaNonAncora = (ns, r, tipo) => {
-      const gFine = giornoRoma(r.trasporto_finito_il);
-      if (!fotoPortale || !ns || !gFine || gFine < inizioAggiunti(fotoPortale) || noto(r, tipo) || nonDichiaraRete.has(ns)) return;
-      if (!nonAncora.has(ns)) nonAncora.set(ns, []);
-      nonAncora.get(ns).push({
-        tipo, id_ordine: r.id_ordine || '', numero_fir: r.numero_fir || '',
-        fine_trasporto: giornoRoma(r.trasporto_finito_il), kg: Math.round(peso(r)),
-        da: tipo === 'secondaria' ? (r.stoccaggio || '') : (r.trasportatore || ''),
-      });
-    };
+    // I CARICHI CHE LA FOTOGRAFIA NON CONTIENE: LA REGOLA E' UNA, IN
+    // shared/riconciliazioneDaDichiarare.ts (revisione della chiusura dell'audit,
+    // 11/10/2026). Da inizioAggiunti e di qualunque anno, non solo di quello
+    // guardato (revisione del 10/10/2026); solo la rete che arriva all'impianto;
+    // non di chi la rete non la dichiara. Qui era riscritta a mano, come nelle
+    // Giacenze e nell'elenco «Da dichiarare»: tre copie con lo stesso esito.
+    const nonAncora = carichiNonNelFile({ foto: fotoPortale, portaleConosce, chiaveDi: norm, nonDichiaraRete });
     let movimentiFinoAl = '';
     const segnaFine = (r) => { const g = giornoRoma(r.trasporto_finito_il); if (g > movimentiFinoAl) movimentiFinoAl = g; };
+    // DOVE ENTRA UN MOVIMENTO: chi lo riceve, con che ruolo, su che canale, e per
+    // una secondaria da quale piazzale parte. Lo dice shared/ingressoMovimento.ts,
+    // lo stesso file che chiedono le Giacenze (chiusura dell'audit, 11/10/2026):
+    // qui il tipo di destinazione delle secondarie non si guardava, e i due moduli
+    // mettevano lo stesso viaggio in due posti diversi (C2, C9).
+    const dove = (r, archivio) => ingressoMovimento(r, archivio, norm);
 
     // --- Chi riceve, per canale e mese: solo cio' che arriva a un impianto ---
     const conferito = new Map();   // ns|canale|provenienza|mese -> kg
@@ -209,7 +243,7 @@ export default async function(req) {
     const entrataStoc = new Map();  // primarie arrivate allo stoccaggio
     const secIn = new Map();        // secondarie arrivate all'impianto
     const secOut = new Map();       // secondarie partite dallo stoccaggio
-    const terz = new Map();         // terziarie in uscita (rete)
+    const terz = new Map();         // terziarie in uscita (non sono un canale)
     let reteTutte = 0;
 
     // --- Gli stoccaggi: entrate, partenze in secondaria e verso chi ---
@@ -235,12 +269,76 @@ export default async function(req) {
     for (const [ns, ril] of puntiDiPartenza(rilevazioni, norm)) {
       rilevazione.set(ns, { data: ril.data, RETE: kgReteDiRilevazione(ril.record) / 1000, ACI: kgAciDiRilevazione(ril.record) / 1000 });
     }
+    // UN ANNO CHIUSO PARTE DALLA SUA ANCORA, NON DA QUELLA DI OGGI (revisione
+    // della chiusura dell'audit, 11/10/2026). L'ancora di oggi e' quella
+    // dell'anno dell'ultima lettura: appena l'anno dopo ha una lettura, per il
+    // 2026 guardato a gennaio 2027 diventa la rilevazione del 31/12/2026, e
+    // portata indietro coi movimenti del 2026 faceva una giacenza di inizio anno
+    // costruita apposta per tornare con quella stessa rilevazione. Nappi Sud con
+    // 40 t al 31/12/2025, +25 e -10 nel 2026, 60 lette al 31/12/2026: la sera
+    // del 31/12 partiva da 40 e la calcolata (55) non quadrava, giusto; dopo una
+    // lettura del 15/01/2027 partiva da 45 e quadrava, e le 5 t che il
+    // gestionale non ha sparivano. Per un anno chiuso il confronto si fa
+    // davvero solo se la calcolata parte dall'ancora di quell'anno.
+    // L'anno in corso resta sull'ancora di oggi, quella del numero a portale e
+    // delle Giacenze: dal 1 gennaio alla prima lettura dell'anno nuovo e' ancora
+    // quella dell'anno prima, e partire dal 31/12 avrebbe fatto «da verificare»
+    // ogni piazzale che al 31/12 non tornava, con le Giacenze su un altro numero.
+    const ancoraChiuso = new Map(); // ns -> { data, RETE: t, ACI: t }
+    // UN ANNO CHIUSO NON SI APRE CON LA LETTURA CHE LO CHIUDE (revisione finale,
+    // 11/10/2026). Se un piazzale non ha letture dell'anno prima del 31/12,
+    // ancoraDellAnno restituiva proprio la rilevazione del 31/12: la giacenza di
+    // inizio anno si ricavava all'indietro dalla lettura con cui poi si confronta,
+    // e la quadratura diceva «quadra» per costruzione. E' il 2025 com'e' nei
+    // dati: la fotografia del 31/12/2024 non c'e'. Quella lettura si esclude; se
+    // non resta niente il piazzale non ha un punto di partenza suo per quell'anno
+    // (senzaAncoraChiuso), e il confronto non si fa, dicendolo.
+    const senzaAncoraChiuso = new Set();
+    if (annoChiuso) {
+      const letturePerSito = new Map();
+      for (const r of rilevazioni) {
+        const k = r && norm(r.sito);
+        if (!k) continue;
+        if (!letturePerSito.has(k)) letturePerSito.set(k, []);
+        letturePerSito.get(k).push(r);
+      }
+      for (const [ns, letture] of letturePerSito) {
+        const a = ancoraDellAnno(letture.filter(l => momentoRilevazione(l) !== fineAnno), annoNum);
+        if (a) ancoraChiuso.set(ns, { data: momentoRilevazione(a), RETE: kgReteDiRilevazione(a) / 1000, ACI: kgAciDiRilevazione(a) / 1000 });
+        else senzaAncoraChiuso.add(ns);
+      }
+    }
     const dopoRilevazione = new Map(); // ns|canale -> t (entrate meno partenze finite dopo la rilevazione)
     const movimentoDopo = (ns, canale, r, valore) => {
       // Senza fine trasporto non conta: non si sa se e' prima o dopo (e si segnala).
       const ril = rilevazione.get(ns);
       if (!ril || !dopoLaRilevazione(r, ril.data)) return;
       somma(dopoRilevazione, `${ns}|${canale}`, valore);
+    };
+    // IL PIAZZALE PARTE DALL'ANCORA, COME IL SUO NUMERO A PORTALE (chiusura
+    // dell'audit, 11/10/2026). La calcolata di un piazzale partiva dall'apertura
+    // scritta in GiacenzaSito, che nessuno scrive per l'anno nuovo (la chiusura
+    // salva la rilevazione del 31/12, non quel campo) e che per l'ACI non ha mai
+    // scritto nessuno; il numero a portale invece parte dall'ancora. Dal 2
+    // gennaio ogni piazzale sarebbe stato «da verificare» per tutto l'anno, di
+    // tutta la sua giacenza. Adesso la base e' una sola, l'ancora: la giacenza a
+    // inizio anno e' l'ancora portata al 31/12 dell'anno prima con i movimenti
+    // in mezzo, avanti o indietro. Qui si tengono, per piazzale e canale, tutti i
+    // movimenti con la fine trasporto, di qualunque anno.
+    const movPiazzale = new Map(); // ns|canale -> [{ giorno, kg }] (+ entrate, - partenze)
+    const segnaPiazzale = (ns, canale, r, kg) => {
+      const giorno = giornoRoma(r.trasporto_finito_il);
+      if (!ns || !giorno || !CANALI_PORTALE.includes(canale)) return;
+      const k = `${ns}|${canale}`;
+      if (!movPiazzale.has(k)) movPiazzale.set(k, []);
+      movPiazzale.get(k).push({ giorno, kg });
+    };
+    // Il saldo dei movimenti fra due giorni, estremo sinistro escluso: se `a` viene
+    // dopo `b` il conto va all'indietro, col segno cambiato.
+    const saldoFra = (ns, canale, a, b) => {
+      const lista = movPiazzale.get(`${ns}|${canale}`) || [];
+      if (a <= b) return lista.reduce((s, m) => s + (m.giorno > a && m.giorno <= b ? m.kg : 0), 0);
+      return -lista.reduce((s, m) => s + (m.giorno > b && m.giorno <= a ? m.kg : 0), 0);
     };
 
     // Chi sono i siti e con che ruolo si scopre dai formulari, una volta sola.
@@ -295,16 +393,20 @@ export default async function(req) {
     };
 
     // Una primaria (rete, ACI o extra raccolta): all'impianto o allo stoccaggio.
-    const primaria = (r, canale) => {
-      const ruolo = td(r.tipo_destinazione) || 'imp';
+    // Il canale lo decide il materiale e il ruolo il tipo di destinazione, con la
+    // risposta di ingressoMovimento: un formulario senza tipo e' dell'impianto.
+    const primaria = (r, archivio) => {
+      const d = dove(r, archivio);
+      const canale = d.canale;
+      const ruolo = d.arrivo ? d.arrivo.ruolo : 'imp';
       const id = String(r.id_ordine || '').trim();
-      if (id && td(r.tipo_destinazione)) ordineTipo.set(id, ruolo);
+      if (id && !d.senza_tipo) ordineTipo.set(id, ruolo);
       // Prima del periodo: un terminato senza fine trasporto qui sotto esce, ma si segnala.
       daSistemare.segna(r, { tipo: 'primaria', canale, ruolo, verso: 'arrivo', sito: r.destinazione, controparte: r.trasportatore || r.ragione_sociale });
       segnaLimbo(r.destinazione, canale, r);
-      if (!eTerminato(r) || !r.destinazione) return null;
-      const ns = norm(r.destinazione);
-      if (ruolo === 'stoc') movimentoDopo(ns, canale, r, peso(r) / 1000);
+      if (!eTerminato(r) || !d.arrivo) return null;
+      const ns = d.arrivo.chiave;
+      if (ruolo === 'stoc') { movimentoDopo(ns, canale, r, peso(r) / 1000); segnaPiazzale(ns, canale, r, peso(r)); }
       const p = periodo(r);
       if (!p) return null;
       conosci(ns, r.destinazione);
@@ -334,13 +436,14 @@ export default async function(req) {
       // e' la rete di sicurezza, perche' basta una riga per far divergere i due
       // moduli senza che nessuno se ne accorga. I due devono dire gli stessi numeri
       // su tutti e tre i canali (regola dell'utente, 03/10/2026).
-      const canaleRiga = eAci(r) ? 'ACI' : 'RETE';
+      const dr = dove(r, 'PrimariaRete');
+      const canaleRiga = dr.canale;
       // Il file degli ordini non dichiarati e' della RETE: una riga di classe 9 non
       // si aggiunge alla fotografia del portale, come gia' fa calcolaGiacenze. Si
       // segna prima del filtro dell'anno: un carico di dicembre arrivato dopo una
       // fotografia di gennaio il file non ce l'ha, qualunque anno si guardi.
-      if (canaleRiga === 'RETE' && eTerminato(r) && r.destinazione && td(r.tipo_destinazione) !== 'stoc') segnaNonAncora(norm(r.destinazione), r, 'primaria');
-      const c = primaria(r, canaleRiga);
+      nonAncora.segna(r, 'primaria');
+      const c = primaria(r, 'PrimariaRete');
       if (!c) return;
       segnaFine(r);
       if (canaleRiga === 'RETE') reteTutte += peso(r);
@@ -348,35 +451,53 @@ export default async function(req) {
       aggiungi(c.ns, canaleRiga, canaleRiga === 'ACI' ? 'primaria' : '', c.p.mese, peso(r));
     });
     for (const r of aci) {
-      const c = primaria(r, 'ACI');
+      const c = primaria(r, 'PrimariaAci');
       if (!c || c.ruolo === 'stoc') continue;
       aggiungi(c.ns, 'ACI', 'primaria', c.p.mese, peso(r));
     }
     for (const r of extra) {
-      if (td(r.tipo_movimento) === 'secondaria') continue; // piu' sotto, con le secondarie
-      const c = primaria(r, 'EXTRA_RACCOLTA');
+      if (eSecondariaExtra(r)) continue; // piu' sotto, con le secondarie
+      const c = primaria(r, 'ExtraRaccolta');
       if (!c || c.ruolo === 'stoc') continue;
       aggiungi(c.ns, 'EXTRA_RACCOLTA', '', c.p.mese, peso(r));
     }
 
-    // Una secondaria: lo stoccaggio e' il produttore, l'impianto che la riceve la
-    // dichiara. Le secondarie di rete e quelle ACI stanno nello stesso archivio e
-    // restano su canali separati.
-    const secondaria = (r, canale, provenienza) => {
-      const dest = norm(r.destinazione);
-      const daStoc = norm(r.stoccaggio);
-      // Lo stesso formulario arriva all'impianto e parte dallo stoccaggio: si
+    // Una secondaria: lo stoccaggio che la spedisce e' il produttore, e se arriva
+    // a un impianto e' l'impianto che la dichiara. Le secondarie di rete e quelle
+    // ACI stanno nello stesso archivio e restano su canali separati.
+    //
+    // UNA SECONDARIA ARRIVA DOVE DICE IL SUO TIPO DI DESTINAZIONE (chiusura
+    // dell'audit, 11/10/2026, C2 e C9). Qui il tipo non si guardava e ogni
+    // secondaria finiva sull'impianto. Una arrivata al PIAZZALE di un sito che e'
+    // anche impianto (come Irigom) stava sul piazzale nelle Giacenze e
+    // sull'impianto qui: lo stesso viaggio cambiava l'entrato della quadratura e
+    // la giacenza ACI dell'impianto. Una di extra raccolta arrivata a un piazzale
+    // puro faceva di quel piazzale un impianto che deve dichiarare. Ora entra nel
+    // piazzale che la riceve - nelle entrate del mese e fra i movimenti dopo la
+    // rilevazione - come una primaria arrivata li', e non nelle righe da
+    // dichiarare di nessuno: si dichiarera' quando ripartira' verso un impianto.
+    const secondaria = (r, archivio) => {
+      const d = dove(r, archivio);
+      const canale = d.canale;
+      const provenienza = canale === 'ACI' ? 'secondaria' : '';
+      const dest = d.arrivo ? d.arrivo.chiave : '';
+      const alPiazzale = !!(d.arrivo && d.arrivo.ruolo === 'stoc');
+      const daStoc = d.partenza ? d.partenza.chiave : '';
+      // Lo stesso formulario arriva a chi lo riceve e parte dallo stoccaggio: si
       // segnala su tutti e due, e nel conteggio per canale vale uno.
-      daSistemare.segna(r, { tipo: 'secondaria', canale, ruolo: 'imp', verso: 'arrivo', sito: r.destinazione, controparte: r.stoccaggio });
+      daSistemare.segna(r, { tipo: 'secondaria', canale, ruolo: alPiazzale ? 'stoc' : 'imp', verso: 'arrivo', sito: r.destinazione, controparte: r.stoccaggio });
       daSistemare.segna(r, { tipo: 'secondaria', canale, ruolo: 'stoc', verso: 'partenza', sito: r.stoccaggio, controparte: r.destinazione });
       segnaLimbo(r.destinazione, canale, r);
       if (!dest || !eTerminato(r)) return null;
       movimentoDopo(daStoc, canale, r, -peso(r) / 1000);
+      segnaPiazzale(daStoc, canale, r, -peso(r));
+      if (alPiazzale) { movimentoDopo(dest, canale, r, peso(r) / 1000); segnaPiazzale(dest, canale, r, peso(r)); }
       const p = periodo(r);
       if (!p) return null;
       conosci(dest, r.destinazione);
-      segnaRuolo(dest, 'imp');
-      somma(secIn, `${dest}|${canale}`, peso(r));
+      segnaRuolo(dest, alPiazzale ? 'stoc' : 'imp');
+      if (alPiazzale) canaleStoc(dest, canale).entrato[p.mese_idx] += peso(r);
+      else somma(secIn, `${dest}|${canale}`, peso(r));
       if (daStoc) {
         conosci(daStoc, r.stoccaggio);
         segnaRuolo(daStoc, 'stoc');
@@ -385,21 +506,29 @@ export default async function(req) {
         c.uscito[p.mese_idx] += peso(r);
         somma(c.verso, dest, peso(r));
       }
-      aggiungi(dest, canale, provenienza, p.mese, peso(r), r.stoccaggio || 'stoccaggio non indicato');
+      if (!alPiazzale) aggiungi(dest, canale, provenienza, p.mese, peso(r), r.stoccaggio || 'stoccaggio non indicato');
       return { dest, daStoc, p };
     };
     for (const r of secondarie) {
-      if (eAci(r)) { secondaria(r, 'ACI', 'secondaria'); continue; }
-      if (eTerminato(r) && r.destinazione) segnaNonAncora(norm(r.destinazione), r, 'secondaria');
-      secondaria(r, 'RETE', '');
+      // Nella giacenza a portale dell'impianto entra solo quello che arriva
+      // all'impianto: una secondaria al suo piazzale sta sul piazzale (C2), come
+      // nelle Giacenze. Lo decide carichiNonNelFile, con ingressoMovimento.
+      nonAncora.segna(r, 'secondaria');
+      secondaria(r, 'Secondaria');
     }
     for (const r of extra) {
-      if (td(r.tipo_movimento) === 'secondaria') secondaria(r, 'EXTRA_RACCOLTA', '');
+      if (eSecondariaExtra(r)) secondaria(r, 'ExtraRaccolta');
     }
+    // Le terziarie partono dall'impianto verso le cementerie: non sono un canale,
+    // e il loro gruppo fra le date da sistemare e' TERZIARIE. Qui si segnavano
+    // 'RETE' e finivano nel numero della rete, nel gruppo rete dell'impianto e
+    // nella quadratura, mentre le Giacenze le tenevano a parte (11/10/2026, C3 e
+    // C11): ora il gruppo lo decide formulariDaSistemare, per tutti e due.
     for (const r of terziarie) {
-      daSistemare.segna(r, { tipo: 'terziaria', canale: 'RETE', ruolo: 'imp', verso: 'partenza', sito: r.unita_locale_origine || r.ragione_sociale, controparte: r.destinazione });
-      if (!periodo(r)) continue;
-      somma(terz, norm(r.unita_locale_origine || r.ragione_sociale), peso(r));
+      const d = dove(r, 'Terziaria');
+      daSistemare.segna(r, { tipo: 'terziaria', canale: d.canale, ruolo: 'imp', verso: 'partenza', sito: d.partenza ? d.partenza.sito : '', controparte: r.destinazione });
+      if (!periodo(r) || !d.partenza) continue;
+      somma(terz, d.partenza.chiave, peso(r));
     }
 
     // Uno stoccaggio con una giacenza - rilevata a portale o di inizio anno - ha
@@ -445,7 +574,7 @@ export default async function(req) {
       const foto = fotoAFineMese(collocata, ns, annoNum);
       return MESI.map((mese, i) => {
         const fine = `${annoNum}-${String(i + 1).padStart(2, '0')}-31`;
-        const aggiunti = (nonAncora.get(ns) || []).filter(x => x.fine_trasporto && x.fine_trasporto <= fine).reduce((s, x) => s + x.kg, 0);
+        const aggiunti = nonAncora.di(ns).ordini.filter(x => x.fine_trasporto && x.fine_trasporto <= fine).reduce((s, x) => s + x.kg, 0);
         return { mese, foto_kg: foto[i], aggiunti_kg: Math.round(aggiunti) };
       });
     };
@@ -461,10 +590,12 @@ export default async function(req) {
     // si somma, perche' due campagne nello stesso mese sono due cose vere; gli
     // altri canali no, perche' sommare un errore lo nasconderebbe dentro un
     // numero credibile - si tiene la prima e si segna che ce n'e' un'altra.
-    const perDich = new Map();
+    //
+    // Dall'11/10/2026 le unisce leggiDichiarazioni, la stessa funzione con cui le
+    // Giacenze leggono il dichiarato per canale: una regola, scritta una volta,
+    // per i due moduli che devono dire gli stessi numeri (C4).
+    const perDich = leggiDichiarazioni(dichiarazioni, { anno: annoNum, chiaveDi: norm }).perChiave;
     for (const d of dichiarazioni) {
-      const k = chiaveDichiarazione(d, norm);
-      perDich.set(k, unisciDichiarazioni(perDich.get(k), d));
       const ns = norm(d.sito);
       if (!nomi.has(ns)) { nomi.set(ns, d.sito); segnaRuolo(ns, 'imp'); }
     }
@@ -497,8 +628,29 @@ export default async function(req) {
         const [sito, canale, provenienza] = k.split('|');
         if (sito === ns) chiavi.add(`${canale}|${provenienza}`);
       }
+      // LA CASELLA «DALL'ANNO PRIMA», per rete e ACI (11/10/2026). Entra
+      // l'apertura netta, la stessa della giacenza del canale; per la rete esce
+      // quello che il report aggancia a carichi degli anni prima con caricamenti
+      // venuti dopo la lettura del 31/12, tolte le dichiarazioni dell'anno chiuso
+      // caricate dopo quella lettura, che l'apertura netta ha gia' tolto.
+      // Sta sulla prima riga del canale; se il canale quest'anno non ha ancora
+      // una riga - a gennaio, prima di ogni arrivo - gliene si da' una, perche'
+      // la giacenza c'e' e la colonna la deve dire.
+      const caselle = new Map(); // canale -> { conferito, uscito, letta, dichiarato_dopo, al }
+      for (const canale of CANALI_PORTALE) {
+        const ap = apertura(ns, 'imp', canale);
+        const al = (giacenzeDi(ns, 'imp').map(x => String(x.apertura_del || '').slice(0, 10)).find(Boolean)) || `${annoNum - 1}-12-31`;
+        const dopoKg = Math.round(ap.dichiarato_dopo_t * 1000);
+        const usciti = canale === 'RETE' ? Math.max(0, uscite.primaDopo(ns, al) - dopoKg) : 0;
+        const casella = { conferito: Math.round(ap.netta_t * 1000), uscito: usciti, letta: Math.round(ap.lorda_t * 1000), dichiarato_dopo: dopoKg, al };
+        if (!casella.conferito && !casella.uscito) continue;
+        caselle.set(canale, casella);
+        if (![...chiavi].some(c => c.split('|')[0] === canale)) chiavi.add(canale === 'ACI' ? 'ACI|primaria' : 'RETE|');
+      }
       if (!chiavi.size) chiavi.add('RETE|');
-      return [...chiavi].sort().map(c => {
+      const ordinate = [...chiavi].sort();
+      const conCasella = new Set(CANALI_PORTALE.map(canale => ordinate.find(c => c.split('|')[0] === canale)).filter(Boolean));
+      const calcolati = ordinate.map(c => {
         const [canale, provenienza] = c.split('|');
         const grezzi = MESI.map((mese, i) => {
           const chiave = `${ns}|${canale}|${provenienza}|${mese}`;
@@ -507,7 +659,14 @@ export default async function(req) {
           const totale = Math.round(conferito.get(chiave) || 0);
           const dich = perDich.get(chiave) || {};
           const dichiarata = Math.round(Number(dich.quantita_kg) || 0);
-          const caricatoAPortale = dich.caricata_inviata ? dichiarata : 0;
+          // UNA REGOLA SOLA PER IL CARICATO (chiusura dell'audit, 11/10/2026).
+          // Qui si ricalcolava a mano - caricata_inviata ? quantita : 0 - e su due
+          // campagne di extra raccolta unite, una caricata e una no, il flag
+          // dell'unione e' falso: il mese diceva caricato 0 mentre caricato_kg
+          // diceva 300, e la colonna «Da dichiarare» contava come da dichiarare
+          // anche la campagna caricata. kgCaricatiDi e' la regola che usano le
+          // Giacenze e il dichiarato del flusso.
+          const caricatoAPortale = Math.round(kgCaricatiDi(dich));
           // Un mese segnato NON DOVUTA non si deve a nessuno: non entra in cio'
           // che resta da dichiarare. SOLO METALLI invece si': a portale non si
           // carica nulla e il ferro va con la prossima uscita di gomma, quindi
@@ -588,19 +747,64 @@ export default async function(req) {
         //
         // Il report e' quello della RETE: per ACI ed extra raccolta non c'e'
         // nessun aggancio pubblicato, e il mese parte dal suo dichiarato.
+        //
+        // DAL 11/10/2026 IL CONTO SI CHIUDE SULLA GIACENZA SU TUTTI E TRE I CANALI,
+        // con la casella dall'anno prima in testa. Prima solo la rete diretta lo
+        // faceva, e senza l'apertura: per ACI ed extra la colonna era la somma dei
+        // mesi e non la giacenza (due campagne extra, una caricata: 0,5 contro
+        // 0,2), e un'apertura ACI non stava in nessun mese.
         const reteDiretta = canale === 'RETE' && !provenienza;
         const dalReport = reteDiretta ? uscite.per(ns) : null;
+        // SE IL REPORT CONOSCE L'IMPIANTO, I MESI VENGONO DAL REPORT, ANCHE QUANDO
+        // HA SOLO AGGANCI A CARICHI DEGLI ANNI PRIMA (revisione della chiusura
+        // dell'audit, 11/10/2026). Le prime navi del 2027 di Irigom il portale le aggancia ai
+        // carichi di novembre e dicembre 2026: il report ha l'impianto solo con
+        // righe dell'anno prima, che escono dalla casella. Qui si ripartiva allora
+        // dal dichiarato del mese, e la stessa nave usciva due volte, dalla casella
+        // e dal suo mese: con 600 t di apertura e una nave di 300 t a febbraio la
+        // riga faceva 600 t contro una giacenza di 900, e la pagina scriveva «a
+        // portale risultano dichiarati 300.000 kg in piu'». Il report dice che di
+        // quest'anno non e' uscito ancora niente; quello che non ha ancora visto
+        // lo chiude la giacenza, dal carico piu' vecchio, come fa il portale.
         const semi = dalReport
           ? dalReport.mesi
           : grezzi.map(m => Math.min(m.conferito_kg, m.caricato_kg));
-        const aperturaKg = canale === 'EXTRA_RACCOLTA' ? 0 : Math.round(iniziale(ns, 'imp', canale) * 1000);
+        const casella = conCasella.has(c) ? caselle.get(canale) || null : null;
+        const aperturaKg = casella ? casella.conferito : 0;
         const conferitoKg = grezzi.reduce((s, m) => s + m.conferito_kg, 0);
         const caricatoKg = grezzi.reduce((s, m) => s + m.caricato_kg, 0);
         const allineato = allineaAllaGiacenza(
           grezzi.map(m => m.conferito_kg),
           semi,
-          reteDiretta ? aperturaKg + conferitoKg - caricatoKg : null,
+          aperturaKg + conferitoKg - caricatoKg,
+          casella ? { conferito: casella.conferito, uscito: reteDiretta ? casella.uscito : 0 } : null,
         );
+        return { c, canale, provenienza, grezzi, dalReport, casella, allineato };
+      });
+      // Un canale con piu' righe (l'ACI: primaria e secondaria) si chiude sul
+      // canale: quello che una riga non assorbe esce dalle altre (chiudiFraIFlussi).
+      for (const canale of CANALI_GIACENZA) {
+        const suoi = calcolati.filter(x => x.canale === canale);
+        if (suoi.length < 2) continue;
+        chiudiFraIFlussi(suoi.map(x => x.allineato)).forEach((a, i) => { suoi[i].allineato = a; });
+      }
+      return calcolati.map(({ canale, provenienza, grezzi, dalReport, casella, allineato }) => {
+        const nonDovutaFlusso = canale === 'RETE' && nonDichiaraRete.has(ns);
+        // La casella dall'anno prima, se la riga ce l'ha: quanto e' entrato
+        // (l'apertura netta), quanto ne e' uscito, quanto ne resta. La lettura del
+        // 31/12 e quello che dell'anno chiuso si e' dichiarato dopo si dicono,
+        // perche' l'apertura netta si possa rifare a occhio.
+        const prima = casella ? {
+          conferito_kg: allineato.prima.conferito,
+          uscito_kg: allineato.prima.uscito,
+          resta_kg: allineato.prima.resta,
+          uscito_stimato: allineato.prima.stimato,
+          da_dichiarare_kg: nonDovutaFlusso ? 0 : allineato.prima.resta,
+          letta_kg: casella.letta,
+          dichiarato_dopo_kg: casella.dichiarato_dopo,
+          al: casella.al,
+        } : null;
+        const restoPrima = prima ? prima.resta_kg : 0;
         const mesi = grezzi.map((m, i) => ({
           ...m,
           // Di questo mese e' uscito questo, con le dichiarazioni caricate a
@@ -624,17 +828,23 @@ export default async function(req) {
           canale, provenienza, operazione,
           // Il flusso di rete di chi non la dichiara: si vede quello che arriva, ma
           // un resto da dichiarare non esiste e la pagina scrive «—» col perche'.
-          non_dovuta: canale === 'RETE' && nonDichiaraRete.has(ns),
+          non_dovuta: nonDovutaFlusso,
+          // In testa alla riga, prima di gennaio: l'apertura e che fine ha fatto.
+          dall_anno_prima: prima,
           mesi,
+          // Quello che e' arrivato nell'anno; l'apertura sta a parte, qui accanto.
           conferito_t: t3(mesi.reduce((s, m) => s + m.conferito_kg, 0) / 1000),
-          uscito_t: t3(mesi.reduce((s, m) => s + m.uscito_kg, 0) / 1000),
-          resta_t: t3(mesi.reduce((s, m) => s + m.resta_kg, 0) / 1000),
+          apertura_t: t3((prima ? prima.conferito_kg : 0) / 1000),
+          uscito_t: t3((mesi.reduce((s, m) => s + m.uscito_kg, 0) + (prima ? prima.uscito_kg : 0)) / 1000),
+          // LA SOMMA DELLA RIGA, CASELLA DALL'ANNO PRIMA COMPRESA: e' la giacenza del
+          // canale per costruzione, ed e' il numero della colonna «Da dichiarare».
+          resta_t: t3((mesi.reduce((s, m) => s + m.resta_kg, 0) + restoPrima) / 1000),
           // Il report dice agganciato piu' di quanto le nostre dichiarazioni
           // caricate: il portale ha dichiarazioni che il gestionale non ha.
           uscito_oltre_kg: allineato.oltre_kg,
           // Quello che nessun mese riesce ad assorbire: se c'e', c'e' da capire.
           uscito_non_allocato_kg: allineato.non_allocato_kg + allineato.fuori_mese_kg,
-          da_dichiarare_t: t3(mesi.reduce((s, m) => s + m.da_dichiarare_kg, 0) / 1000),
+          da_dichiarare_t: t3((mesi.reduce((s, m) => s + m.da_dichiarare_kg, 0) + (prima ? prima.da_dichiarare_kg : 0)) / 1000),
           da_stoccaggi_t: t3(mesi.reduce((s, m) => s + m.da_stoccaggi.reduce((x, y) => x + y.kg, 0), 0) / 1000),
           dichiarato_caricato_t: t3(mesi.reduce((s, m) => s + kgCaricatiDi(m.dichiarazione), 0) / 1000),
           dichiarato_totale_t: t3(mesi.reduce((s, m) => s + (m.dichiarazione ? m.dichiarazione.quantita_kg : 0), 0) / 1000),
@@ -691,6 +901,40 @@ export default async function(req) {
     const dateDi = (ns, ruolo) => datePer.get(`${ns}|${ruolo}`) || [];
     const gruppoDate = (ns, ruolo, canale) => dateDi(ns, ruolo).find(g => g.canale === canale) || null;
 
+    // --- Il portale di un anno chiuso: la lettura del 31/12 (11/10/2026) ---
+    // Per un impianto e' l'apertura dell'anno dopo scritta dalla chiusura (col suo
+    // giorno, apertura_del): una giacenza di riferimento scritta a mano non e' una
+    // lettura. Si prende al netto delle dichiarazioni dell'anno chiuso caricate
+    // dopo quel giorno (aperturaNetta), perche' la calcolata dell'anno le toglie
+    // gia': la dichiarazione di dicembre si carica a gennaio.
+    const letturaDelTrentuno = (ns, canale) => {
+      const campo = canale === 'ACI' ? 'giacenza_riferimento_aci_t' : 'giacenza_riferimento_t';
+      const righe = giacenzeAnnoDopo.filter(x => norm(x.sito) === ns && (td(x.tipo_destinazione) || 'imp') === 'imp'
+        && String(x.apertura_del || '').slice(0, 10) === fineAnno && x[campo] !== undefined && x[campo] !== null && x[campo] !== '');
+      if (!righe.length) return null;
+      const pezzi = righe.map(x => aperturaNetta(x, canale, dichiarazioniTutte, norm));
+      return {
+        letta_t: t3(pezzi.reduce((s, x) => s + x.lorda_t, 0)),
+        dichiarato_dopo_t: t3(pezzi.reduce((s, x) => s + x.dichiarato_dopo_t, 0)),
+        netta_t: t3(pezzi.reduce((s, x) => s + x.netta_t, 0)),
+      };
+    };
+    // Per un piazzale e' la rilevazione del 31/12, quella che la chiusura salva:
+    // se ce n'e' piu' d'una vale l'ultima registrata, come ovunque.
+    const rilevazioneDelTrentuno = (ns) => rilevazioni
+      .filter(r => norm(r && r.sito) === ns && momentoRilevazione(r) === fineAnno)
+      .sort((a, b) => String(a.created_date || '').localeCompare(String(b.created_date || '')))
+      .pop() || null;
+    const quadraturaAnnoChiuso = (letta, senzaInizio = false) => ({
+      al: fineAnno,
+      lettura: !!letta,
+      perche: senzaInizio
+        ? `Il ${annoNum} e' chiuso: per confrontare la giacenza calcolata al 31/12 con la lettura del portale di quel giorno serve la giacenza di inizio anno, cioe' una lettura del 31/12/${annoNum - 1} o una fatta durante il ${annoNum}, e questo piazzale non ce l'ha. Il confronto non si puo' fare: non e' un errore da verificare.`
+        : letta
+        ? `Il ${annoNum} e' chiuso: la giacenza calcolata al 31/12 si confronta con la lettura del portale di quel giorno, salvata dalla chiusura dell'anno, non con il portale di oggi.`
+        : `Il ${annoNum} e' chiuso e la quadratura col portale vale per l'anno in corso: per un anno chiuso il confronto si fa con la lettura del 31/12/${annoNum}, che la chiusura dell'anno non ha salvato. Non e' un errore da verificare.`,
+    });
+
     // --- Gli impianti ---
     // Qui, e solo qui, entrano anche le dichiarazioni dell'anno prima: tutto il
     // resto della pagina e' dell'anno scelto.
@@ -707,12 +951,15 @@ export default async function(req) {
       // portale resta solo chi il file non l'ha caricato, o chi per accordo non
       // dichiara la rete (Tecnogum), che ha il suo «—».
       const senzaPortale = !fotoPortale || nonDichiaraRete.has(ns);
-      const aggiunti = (nonAncora.get(ns) || []).sort((a, b) => a.fine_trasporto.localeCompare(b.fine_trasporto));
+      const aggiunti = nonAncora.di(ns).ordini;
       const aggiuntiT = t3(aggiunti.reduce((s, x) => s + x.kg, 0) / 1000);
       // Le dichiarazioni di rete caricate a portale dopo la fotografia: il file le
       // conta ancora come giacenza, il gestionale no.
       const dopoFoto = t3((dichiaratoDopo.get(ns) || 0) / 1000);
       const fotoT = senzaPortale ? null : t3(portale.get(ns) || 0);
+      // Un anno chiuso: la lettura del 31/12 al posto del portale di oggi. Chi la
+      // rete non la dichiara non ha una giacenza da confrontare, chiuso o no.
+      const lettura31 = annoChiuso && !nonDichiaraRete.has(ns) ? letturaDelTrentuno(ns, 'RETE') : null;
       // La quadratura e' della rete: i terminati di rete arrivati senza fine
       // trasporto sono quelli che la giacenza calcolata non puo' contare.
       const dateRete = gruppoDate(ns, 'imp', 'RETE');
@@ -751,12 +998,19 @@ export default async function(req) {
         entrato_confronto_t: t3((kgInT(entrataImp, `${ns}|RETE`) + kgInT(secIn, `${ns}|RETE`))),
         uscito_confronto_t: 0,
         // La giacenza a portale: la fotografia, piu' i carichi che il file non
-        // contiene ancora, meno le dichiarazioni caricate dopo.
-        giacenza_portale_foto_t: fotoT,
-        aggiunti_alla_foto: aggiunti,
-        aggiunti_alla_foto_t: aggiuntiT,
-        dichiarato_dopo_foto_t: dopoFoto,
-        giacenza_portale_t: fotoT === null ? null : t3(fotoT + aggiuntiT - dopoFoto),
+        // contiene ancora, meno le dichiarazioni caricate dopo. Per un anno chiuso
+        // la lettura del 31/12, meno quello che dell'anno si e' dichiarato dopo:
+        // le stesse tre colonne, con quel giorno al posto della fotografia.
+        giacenza_portale_foto_t: annoChiuso ? (lettura31 ? lettura31.letta_t : null) : fotoT,
+        aggiunti_alla_foto: annoChiuso ? [] : aggiunti,
+        aggiunti_alla_foto_t: annoChiuso ? 0 : aggiuntiT,
+        dichiarato_dopo_foto_t: annoChiuso ? (lettura31 ? lettura31.dichiarato_dopo_t : 0) : dopoFoto,
+        giacenza_portale_t: annoChiuso
+          ? (lettura31 ? lettura31.netta_t : null)
+          : (fotoT === null ? null : t3(fotoT + aggiuntiT - dopoFoto)),
+        // Di che giorno e' il numero a portale: la fotografia, o il 31/12 di un anno chiuso.
+        portale_al: annoChiuso ? (lettura31 ? fineAnno : null) : (senzaPortale ? null : fotoPortale),
+        quadratura_anno_chiuso: annoChiuso && !nonDichiaraRete.has(ns) ? quadraturaAnnoChiuso(lettura31) : null,
         // LA GIACENZA DI TUTTI E TRE I CANALI, SEPARATE (03/10/2026).
         //
         // Stessa formula per tutti - apertura + entrato - dichiarato caricato -
@@ -831,19 +1085,39 @@ export default async function(req) {
         const c = canali.get(canale);
         const entrato = c.entrato.reduce((s, x) => s + x, 0);
         const uscito = c.uscito.reduce((s, x) => s + x, 0);
-        const inizio = canale === 'EXTRA_RACCOLTA' ? 0 : iniziale(ns, 'stoc', canale);
         // In piazzale: dalla rilevazione del portale piu' i movimenti finiti dopo,
         // quando c'e' (l'extra raccolta a portale non c'e'); se no dalla giacenza
         // di inizio anno piu' entrate meno partenze.
-        const daRilevazione = ril && ril.data && CANALI_PORTALE.includes(canale);
+        const daRilevazione = ril && ril.data && CANALI_PORTALE.includes(canale) && !senzaAncoraChiuso.has(ns);
+        // LA GIACENZA DI INIZIO ANNO DI UN PIAZZALE VIENE DALL'ANCORA (11/10/2026):
+        // l'ancora portata al 31/12 dell'anno prima coi movimenti che stanno in
+        // mezzo, in avanti o all'indietro. E' la stessa base del numero a portale,
+        // quindi calcolata e portale non possono piu' partire da due punti diversi.
+        // L'apertura scritta in GiacenzaSito resta solo per chi una rilevazione non
+        // ce l'ha.
+        // Per un anno chiuso la base e' l'ancora di quell'anno, se c'e' (vedi
+        // ancoraChiuso); se no l'ancora di oggi, portata indietro.
+        const base = (daRilevazione && ancoraChiuso.get(ns)) || ril;
+        const inizio = canale === 'EXTRA_RACCOLTA' ? 0
+          : daRilevazione ? t3((Math.round(base[canale] * 1000) + saldoFra(ns, canale, base.data, `${annoNum - 1}-12-31`)) / 1000)
+            : iniziale(ns, 'stoc', canale);
         return {
           canale,
           giacenza_iniziale_t: inizio,
           entrato_t: t3(entrato / 1000),
           uscito_t: t3(uscito / 1000),
           saldo_t: t3((entrato - uscito) / 1000),
-          in_piazzale_t: daRilevazione ? t3(ril[canale] + (dopoRilevazione.get(`${ns}|${canale}`) || 0)) : t3(inizio + (entrato - uscito) / 1000),
-          in_piazzale_da: daRilevazione ? 'rilevazione' : 'movimenti',
+          // UN PIAZZALE SENZA NESSUNA LETTURA NON HA UNA GIACENZA DI RETE NE' DI ACI
+          // (chiusura dell'audit, 11/10/2026, C15): qui era l'apertura scritta piu'
+          // il saldo dell'anno, nelle Giacenze 0, nella Predittivita' niente. La
+          // regola e' una: la giacenza di un piazzale parte da una lettura del
+          // portale, e senza resta null in tutti e due i moduli, col perche'.
+          // L'extra raccolta a portale non c'e' e una lettura non la puo' avere:
+          // resta entrate meno partenze dell'anno, come nelle Giacenze.
+          in_piazzale_t: daRilevazione ? t3(ril[canale] + (dopoRilevazione.get(`${ns}|${canale}`) || 0))
+            : CANALI_PORTALE.includes(canale) ? null : t3(inizio + (entrato - uscito) / 1000),
+          in_piazzale_da: daRilevazione ? 'rilevazione' : CANALI_PORTALE.includes(canale) ? 'senza_rilevazione' : 'movimenti',
+          ...(!daRilevazione && CANALI_PORTALE.includes(canale) ? { in_piazzale_perche: senzaAncoraChiuso.has(ns) ? PERCHE_PIAZZALE_SENZA_INIZIO(annoNum) : PERCHE_PIAZZALE_SENZA_LETTURA } : {}),
           mesi: MESI.map((mese, i) => ({ mese, entrato_kg: Math.round(c.entrato[i]), uscito_kg: Math.round(c.uscito[i]) })),
           verso: [...c.verso.entries()].map(([nsImp, kg]) => {
             const imp = impianto.get(nsImp);
@@ -888,6 +1162,12 @@ export default async function(req) {
       .filter(c => CANALI_PORTALE.includes(c.canale))
       .map(c => {
         const dateCanale = gruppoDate(s.chiave, 'stoc', c.canale);
+        // Un anno chiuso si confronta con la rilevazione del 31/12, non con il
+        // piazzale di oggi (11/10/2026).
+        // Senza una lettura che apra l'anno chiuso la calcolata non ha un punto di
+        // partenza suo: il confronto con il 31/12 non si fa, e si dice.
+        const senzaInizio = annoChiuso && senzaAncoraChiuso.has(s.chiave);
+        const ril31 = annoChiuso && !senzaInizio ? rilevazioneDelTrentuno(s.chiave) : null;
         const riga = {
           sito: s.sito,
           chiave: `${s.chiave}|${c.canale}`,
@@ -897,8 +1177,11 @@ export default async function(req) {
           entrato_confronto_t: c.entrato_t,
           uscito_confronto_t: c.uscito_t,
           dichiarato_caricato_rete_t: 0,
-          giacenza_portale_t: c.in_piazzale_da === 'rilevazione' ? c.in_piazzale_t : null,
-          rilevazione_il: s.rilevazione_il,
+          giacenza_portale_t: annoChiuso
+            ? (ril31 ? t3((c.canale === 'ACI' ? kgAciDiRilevazione(ril31) : kgReteDiRilevazione(ril31)) / 1000) : null)
+            : (c.in_piazzale_da === 'rilevazione' ? c.in_piazzale_t : null),
+          quadratura_anno_chiuso: annoChiuso ? quadraturaAnnoChiuso(ril31, senzaInizio) : null,
+          rilevazione_il: annoChiuso ? (ril31 ? fineAnno : '') : s.rilevazione_il,
           in_attesa_dichiarazione_t: c.canale === 'RETE' ? s.in_attesa_portale_t : 0,
           flussi: [],
           date_da_sistemare: dateCanale ? [dateCanale] : [],
@@ -955,13 +1238,14 @@ export default async function(req) {
     let fotografia = null;
     // La riga di oggi e' dell'anno in corso: con un altro anno negli argomenti
     // si sarebbe riscritta coi numeri di quell'anno, e lo storico avrebbe detto
-    // «com'era oggi» su un anno che oggi non si guarda.
-    const annoDiOggi = Number(oggiRoma().slice(0, 4));
+    // «com'era oggi» su un anno che oggi non si guarda (annoDiOggi, in testa).
     if (registraChiesto && !registra) {
       fotografia = { scritta: false, motivo: "la fotografia del giorno la scrive solo l'amministratore" };
     } else if (registra && annoNum !== annoDiOggi) {
       fotografia = { scritta: false, motivo: `la fotografia del giorno e' dell'anno in corso (${annoDiOggi}), non del ${annoNum}` };
     } else if (registra) {
+      const rinvio = await controllo.dopo();
+      if (rinvio) return rinvio;
       const giorno = oggiRoma();
       const riga = fotografiaDelGiorno(siti, { giorno, anno: annoNum, doppioni });
       try {
@@ -983,6 +1267,8 @@ export default async function(req) {
     return Response.json({
       anno: annoNum, mesi: MESI, siti, stoccaggi, totali, fotografia, doppioni,
       foto_portale_il: fotoPortale,
+      // Un anno chiuso si confronta con la lettura del 31/12, non col portale di oggi.
+      anno_chiuso: annoChiuso,
       dichiarazioni_da_inserire: daInserire,
       // Fin dove arrivano i movimenti caricati (fine trasporto): se e' dopo la
       // fotografia, la giacenza a portale e' stata aggiornata con quello che manca.

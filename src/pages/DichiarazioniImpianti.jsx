@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, RefreshCw, AlertTriangle, CheckCircle2, FileSpreadsheet, Eraser } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
+import AvvisoCaricamenti from '@/components/shared/AvvisoCaricamenti';
 import { formatTonnellate, formatKg, formatIntero } from '@/lib/utils';
 import { CANALI, MESI } from '@/lib/dichiarazioniImpianti';
 import Riepilogo from '@/components/dichiarazioni/Riepilogo';
@@ -47,9 +48,16 @@ const senzaFineInBreve = (c) => {
   return parti.length ? `, di cui senza fine trasporto ${parti.join(' e ')}` : '';
 };
 
+// LE TERZIARIE HANNO LA LORO VOCE (revisione della chiusura dell'audit,
+// 11/10/2026). Dal riepilogo arrivano nel gruppo TERZIARIE, non nella rete: non
+// sono un canale. Il riquadro pero' scorreva solo i tre canali, e una terziaria
+// con le date da sistemare spariva; se era l'unica, il riquadro non compariva
+// proprio. Ora ha la sua voce, a parte, come nelle Giacenze.
+const VOCI_DATE = [...CANALI, { chiave: 'TERZIARIE', nome: 'Terziarie, a parte' }];
+
 function DateInBreve({ conti }) {
   if (!conti) return null;
-  const voci = CANALI.map(c => ({ ...c, ...(conti[c.chiave] || { n: 0, senza_fine: 0 }) })).filter(c => c.n > 0);
+  const voci = VOCI_DATE.map(c => ({ ...c, ...(conti[c.chiave] || { n: 0, senza_fine: 0 }) })).filter(c => c.n > 0);
   if (!voci.length) return null;
   const senzaFine = voci.some(c => c.senza_fine > 0);
   return (
@@ -194,11 +202,14 @@ export default function DichiarazioniImpianti() {
       {/* LE DICHIARAZIONI IN DOPPIO, PRIMA DI TUTTO IL RESTO (10/10/2026).
 
           Due righe sullo stesso sito, canale, provenienza e mese. La
-          piattaforma non ha vincoli di unicita', quindi finche' una gemella
-          resta i numeri dipendono da quale modulo si guarda: qui il riepilogo
-          ne tiene una sola - e la gemella non si vede nemmeno, quindi non si
-          puo' correggere da nessuna casella - mentre le giacenze le sommano e
-          decurtano il doppio.
+          piattaforma non ha vincoli di unicita', e la gemella non si vede
+          nemmeno, quindi non si puo' correggere da nessuna casella. Dal
+          11/10/2026 (chiusura dell'audit, C4) i due moduli la leggono con la
+          stessa funzione e tengono la prima: prima le giacenze le sommavano e
+          decurtavano il doppio, e il testo qui sotto lo diceva ancora. Il
+          rischio adesso e' un altro: se la riga giusta e' la seconda, sbagliano
+          tutti e due. E le dichiarazioni caricate dopo l'ultimo file del
+          portale si tolgono tutte dalla giacenza a portale, gemelle comprese.
 
           Sta sopra all'avviso del portale perche' lo spiega: una gemella non
           pareggia nessun caricamento, quindi si presenta travestita da «mese
@@ -224,8 +235,10 @@ export default function DichiarazioniImpianti() {
           </ul>
           <p className="pl-6">
             Il riepilogo qui sotto ne mostra una sola, quindi la casella del mese non basta a
-            sistemarle: va tolta la riga in piu'. Finche' ci sono, le giacenze di questi mesi
-            sono decurtate due volte.
+            sistemarle: va tolta la riga in più. Finché ci sono, Giacenze e Dichiarazioni contano
+            la prima e ignorano l&apos;altra: se quella giusta è l&apos;altra, dichiarato e giacenza
+            sono sbagliati in tutti e due. E se sono state caricate a portale tutte e due dopo
+            l&apos;ultimo file degli ordini non dichiarati, la giacenza a portale le toglie tutte e due.
           </p>
         </div>
       )}
@@ -261,6 +274,9 @@ export default function DichiarazioniImpianti() {
 
       {dati && (
         <>
+          {/* Un archivio che si sta riscrivendo, o rimasto a meta', si dice sopra
+              i totali: la stessa regola della dashboard e dei motori (11/10/2026). */}
+          <AvvisoCaricamenti aggiorna={dati} />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {/* La rete: e' la rete che fa la giacenza a portale. ACI ed extra raccolta si scrivono a parte e non si sommano. */}
             <Kpi
@@ -276,15 +292,20 @@ export default function DichiarazioniImpianti() {
             <Kpi
               titolo="Rete: giacenza degli impianti"
               valore={`${formatTonnellate(totali.giacenza_calcolata_t)} t`}
-              nota={totali.giacenza_calcolata_confrontabile_t === totali.giacenza_calcolata_t
-                ? `a portale, aggiornata ai caricamenti: ${formatTonnellate(totali.giacenza_portale_t)} t`
-                : `di cui ${formatTonnellate(totali.giacenza_calcolata_confrontabile_t)} t confrontabili col portale, che aggiornato ne segna ${formatTonnellate(totali.giacenza_portale_t)} t`}
+              // Un anno chiuso si confronta con la lettura del 31/12, non col portale di oggi (11/10/2026).
+              nota={dati.anno_chiuso
+                ? `a portale, lettura del 31/12/${dati.anno} salvata dalla chiusura: ${formatTonnellate(totali.giacenza_portale_t)} t`
+                : totali.giacenza_calcolata_confrontabile_t === totali.giacenza_calcolata_t
+                  ? `a portale, aggiornata ai caricamenti: ${formatTonnellate(totali.giacenza_portale_t)} t`
+                  : `di cui ${formatTonnellate(totali.giacenza_calcolata_confrontabile_t)} t confrontabili col portale, che aggiornato ne segna ${formatTonnellate(totali.giacenza_portale_t)} t`}
             />
             <Kpi
-              titolo="Rete: quadratura con il portale"
+              titolo={dati.anno_chiuso ? 'Rete: quadratura con la lettura del 31/12' : 'Rete: quadratura con il portale'}
               valore={`${totali.siti_che_quadrano} su ${totali.siti_che_quadrano + totali.siti_da_quadrare}`}
               nota={[
-                totali.siti_da_quadrare ? `${totali.siti_da_quadrare} da verificare` : 'tutti in linea',
+                dati.anno_chiuso && !(totali.siti_che_quadrano + totali.siti_da_quadrare)
+                  ? `anno chiuso: senza la lettura del 31/12 salvata dalla chiusura la quadratura vale per l'anno in corso`
+                  : totali.siti_da_quadrare ? `${totali.siti_da_quadrare} da verificare` : 'tutti in linea',
                 (totali.aci_che_quadrano || 0) + (totali.aci_da_quadrare || 0) > 0
                   ? `ACI negli stoccaggi, a parte: ${totali.aci_che_quadrano} su ${totali.aci_che_quadrano + totali.aci_da_quadrare}` : '',
               ].filter(Boolean).join(' · ')}

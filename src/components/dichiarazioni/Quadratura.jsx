@@ -115,7 +115,18 @@ export default function Quadratura({ dati }) {
         caricamento: si aggiungono i carichi che il gestionale conosce e il file non contiene ancora - riconosciuti dal numero d&apos;ordine - e
         si tolgono le dichiarazioni caricate dopo{dati.movimenti_fino_al ? <>; i movimenti caricati arrivano al <strong>{giorno(dati.movimenti_fino_al)}</strong></> : ''}.
         {' '}Per gli stoccaggi la giacenza a portale è la rilevazione per classe - P, M, G1 e G2 per la rete, la classe 9 per l&apos;ACI - più i
-        movimenti finiti dopo. Tutto per fine del trasporto. In linea fino a {formatTonnellate(TOLLERANZA_QUADRATURA_T)} t di scarto.
+        movimenti finiti dopo, e la giacenza iniziale parte dalla stessa rilevazione, portata al 31/12 dell&apos;anno prima con i movimenti
+        che stanno in mezzo: una base sola. Tutto per fine del trasporto. In linea fino a {formatTonnellate(TOLLERANZA_QUADRATURA_T)} t di scarto.
+        {/* UN ANNO CHIUSO (11/10/2026): la calcolata e' quella al 31/12, e non si
+            confronta col portale di oggi ma con la lettura di quel giorno, salvata
+            dalla chiusura dell'anno. Senza quella lettura la quadratura non si fa. */}
+        {dati.anno_chiuso && (
+          <>
+            {' '}<strong>Il {dati.anno} è chiuso</strong>: la giacenza calcolata al 31/12 si confronta con la lettura del portale di quel giorno,
+            salvata dalla chiusura dell&apos;anno (per gli impianti al netto di quello che dell&apos;anno si è dichiarato dopo), non con il portale di
+            oggi. Dove quella lettura non c&apos;è la quadratura vale per l&apos;anno in corso, e la riga lo dice.
+          </>
+        )}
         {' '}Immissione, inizio e fine trasporto sono obbligatorie: un formulario terminato <strong>senza fine trasporto</strong> non si colloca
         in nessun mese, e quindi non entra nella giacenza calcolata finche&apos; la data non arriva. Il portale, se lo conosce, lo conta:
         la riga lo segnala con il peso, e dice quanto dello scarto viene da lì.
@@ -133,9 +144,9 @@ export default function Quadratura({ dati }) {
               <th className="text-right px-2 py-2 font-semibold">Uscito in secondaria</th>
               <th className="text-right px-2 py-2 font-semibold">Dichiarato caricato</th>
               <th className="text-right px-2 py-2 font-semibold">Giacenza calcolata</th>
-              <th className="text-right px-2 py-2 font-semibold" title="Il file degli ordini non dichiarati, o la rilevazione dello stoccaggio">A portale, fotografia</th>
+              <th className="text-right px-2 py-2 font-semibold" title={dati.anno_chiuso ? "Anno chiuso: la lettura del 31/12 salvata dalla chiusura dell'anno" : 'Il file degli ordini non dichiarati, o la rilevazione dello stoccaggio'}>{dati.anno_chiuso ? 'A portale, lettura del 31/12' : 'A portale, fotografia'}</th>
               <th className="text-right px-2 py-2 font-semibold" title="Carichi che il gestionale conosce e il file del portale non contiene ancora">+ non ancora nel file</th>
-              <th className="text-right px-2 py-2 font-semibold" title="Dichiarazioni caricate a portale dopo il giorno del file">− dichiarato dopo</th>
+              <th className="text-right px-2 py-2 font-semibold" title={dati.anno_chiuso ? "Dichiarazioni dell'anno chiuso caricate a portale dopo il 31/12: la lettura le contava ancora, la calcolata no" : 'Dichiarazioni caricate a portale dopo il giorno del file'}>− dichiarato dopo</th>
               <th className="text-right px-2 py-2 font-semibold">Giacenza a portale aggiornata</th>
               <th className="text-right px-2 py-2 font-semibold">Scarto</th>
               <th className="text-left px-3 py-2 font-semibold">Esito</th>
@@ -167,6 +178,12 @@ export default function Quadratura({ dati }) {
                   <td className={`px-2 py-1.5 text-right tabular-nums font-medium ${s.quadra === false ? 'text-red-700' : ''}`}>{t(s.scarto_t)}</td>
                   <td className="px-3 py-1.5">
                     {(() => {
+                      // Un anno chiuso senza la lettura del 31/12: non e' «da
+                      // verificare» e non e' un vuoto, e' un confronto che per un anno
+                      // passato non si fa col portale di oggi (11/10/2026).
+                      if (s.quadratura_anno_chiuso && !s.quadratura_anno_chiuso.lettura && s.quadra !== true && s.quadra !== false) {
+                        return <span className="text-muted-foreground cursor-help" title={s.quadratura_anno_chiuso.perche}>anno chiuso: vale per l&apos;anno in corso</span>;
+                      }
                       const e = esitoQuadratura(s);
                       if (e.stato === 'quadra') return <span className="inline-flex items-center gap-1 text-emerald-700" title={e.spiega || undefined}><CheckCircle2 className="w-3.5 h-3.5" /> {e.testo}</span>;
                       if (e.stato === 'verifica') return <span className="inline-flex items-center gap-1 text-red-700"><AlertTriangle className="w-3.5 h-3.5" /> {e.testo}</span>;

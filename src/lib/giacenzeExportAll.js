@@ -5,7 +5,8 @@ import { INTESTAZIONE_DATE, righeExcelDate } from '@/components/giacenze/DateDaS
 
 // I formulari con le date da sistemare di una riga, a parole e per canale (mai
 // sommati): "rete 3 (2 senza fine trasporto) · ACI 1".
-const NOMI_CANALE = { RETE: 'rete', ACI: 'ACI', EXTRA_RACCOLTA: 'extra raccolta' };
+// Le terziarie non sono un canale: hanno il loro gruppo, a parte (11/10/2026).
+const NOMI_CANALE = { RETE: 'rete', ACI: 'ACI', EXTRA_RACCOLTA: 'extra raccolta', TERZIARIE: 'terziarie, a parte' };
 const testoDateRiga = (r) => (r.date_da_sistemare || [])
   .map(g => `${NOMI_CANALE[g.canale] || g.canale} ${g.n}${g.senza_fine && g.senza_fine.n ? ` (${g.senza_fine.n} senza fine trasporto)` : ''}`).join(' · ');
 
@@ -90,7 +91,9 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
 
   // --- Foglio 4: Target ---
   // Target, residuo e copertura solo sul canale RETE; ACI ed Extra a parte.
-  const tarHeaders = ['Sito', 'Ruolo', 'Target primarie (t)', 'Target totale (t)', 'Primarie RETE (t)', 'Secondarie netto (t)', 'Secondarie in (t)', 'Secondarie out (t)', 'Terziarie (t)', 'Conferito RETE (t)', 'Residuo (t) = Target totale - Conferito RETE', 'Copertura RETE (%) = Primarie RETE / Target totale', 'ACI, fuori target (t)', 'Extra Raccolta, fuori target (t)'];
+  // ACI ed extra raccolta sono la raccolta, cioe' le sole primarie: un
+  // trasferimento da un piazzale non e' raccolta in piu' (11/10/2026).
+  const tarHeaders = ['Sito', 'Ruolo', 'Target primarie (t)', 'Target totale (t)', 'Primarie RETE (t)', 'Secondarie netto (t)', 'Secondarie in (t)', 'Secondarie out (t)', 'Terziarie (t)', 'Conferito RETE (t)', 'Residuo (t) = Target totale - Conferito RETE', 'Copertura RETE (%) = Primarie RETE / Target totale', 'ACI, solo primarie, fuori target (t)', 'Extra Raccolta, solo primarie, fuori target (t)'];
   const tarRows = data.righe.map(r => [
     r.sito,
     r.tipo_destinazione === 'imp' ? 'Impianto' : 'Stoccaggio',

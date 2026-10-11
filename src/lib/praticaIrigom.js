@@ -389,6 +389,57 @@ export function dichiarazioniExtra(extra, pratiche, { anno, mese }) {
   });
 }
 
+// LA RIGA DI EXTRA RACCOLTA E' QUELLA DELLA PRATICA (chiusura dell'audit, 11/10/2026).
+//
+// Per la rete, dal 10/10/2026, la pratica rifiuta quando trova due gemelle sullo
+// stesso mese (esitoScrittura). Per l'extra raccolta invece prendeva con un find
+// la prima riga EXTRA di Irigom del mese, nell'ordine in cui la piattaforma la
+// restituisce, e ci scriveva la parte di questa pratica piu' quelle delle altre.
+// Ma sull'extra due campagne nello stesso mese sono legittime: con A = 200 kg
+// scritti a mano e B = 300 kg scritti dalla pratica di luglio, la pratica di
+// agosto che porta 100 kg di luglio poteva finire su A - A 400, B 300, luglio
+// 700 invece di 600, e la campagna di A sparita dalla nota - o su B, giusto:
+// l'esito dipendeva dall'ordine.
+//
+// Adesso la pratica scrive solo sulla riga che riconosce come sua, dal segno che
+// mette in ogni sua nota fin dal primo giorno (SEGNO_PRATICA_EXTRA). Le righe
+// senza segno sono campagne scritte a mano, e non si toccano. Senza una riga sua:
+// se nel mese non c'e' niente la crea; se c'e' una riga sola, senza segno, e'
+// quella del mese e la aggiorna, come ha sempre fatto (e da quel momento porta il
+// segno); se ce ne sono piu' d'una, o due col segno, rifiuta e dice quali, come
+// per la rete. Il rifiuto va chiesto PRIMA di scrivere qualunque cosa, perche'
+// una pratica registrata a meta' sarebbe peggio di una che non parte.
+export const SEGNO_PRATICA_EXTRA = 'Dichiarata con la pratica di ';
+export const rigaScrittaDallaPratica = (d) => String((d && d.note) || '').includes(SEGNO_PRATICA_EXTRA);
+
+/**
+ * Su quale riga EXTRA_RACCOLTA di Irigom scrive la pratica, per un mese.
+ * @param {array} righe     le DichiarazioneSito di quel mese e anno (di tutti i siti)
+ * @param {object} p        { suIrigom(d), anno, mese }
+ * @returns {{ azione: 'aggiorna'|'crea'|'rifiuta', esistente, pari, motivo }}
+ */
+export function rigaExtraDellaPratica(righe, { suIrigom = () => true, anno = '', mese = '' } = {}) {
+  const extra = (righe || []).filter(d => d && suIrigom(d) && d.canale === 'EXTRA_RACCOLTA');
+  const sue = extra.filter(rigaScrittaDallaPratica);
+  const quali = (elenco) => elenco
+    .map(d => `${mig(d.quantita_kg)} kg${d.caricata_inviata ? ' caricati' : ''}${d.note ? ` («${String(d.note).split('\n').pop().slice(0, 80)}»)` : ''}`)
+    .join('; ');
+  const dove = `${mese} ${anno}`.trim();
+  if (sue.length === 1) return { azione: 'aggiorna', esistente: sue[0], pari: sue, motivo: '' };
+  if (sue.length > 1) {
+    return {
+      azione: 'rifiuta', esistente: null, pari: sue,
+      motivo: `Ci sono ${sue.length} righe di extra raccolta di Irigom per ${dove} scritte dalla pratica: ${quali(sue)}. Quale aggiornare non lo decide il gestionale: va tolta quella in piu', poi si registra di nuovo.`,
+    };
+  }
+  if (!extra.length) return { azione: 'crea', esistente: null, pari: [], motivo: '' };
+  if (extra.length === 1) return { azione: 'aggiorna', esistente: extra[0], pari: extra, motivo: '' };
+  return {
+    azione: 'rifiuta', esistente: null, pari: extra,
+    motivo: `Ci sono ${extra.length} righe di extra raccolta di Irigom per ${dove} e nessuna e' della pratica: ${quali(extra)}. Sono campagne scritte a mano, e su quale scrivere la parte di questa pratica non lo decide il gestionale: va sistemato il mese, poi si registra di nuovo.`,
+  };
+}
+
 // La dichiarazione di rete di Irigom vale il totale caricato a portale, extra
 // raccolta dell'ultima terziaria compresa (regola dell'utente del 22/09/2026).
 // Finche' DichiarazioneSito non ha un campo per dirlo, la sua nota porta sempre,

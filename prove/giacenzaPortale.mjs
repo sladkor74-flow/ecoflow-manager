@@ -152,21 +152,28 @@ verifica('ACI di un altro anno: il portale non si interroga, resta nel suo anno'
 console.log('ARRIVI E PARTENZE: MAI UN PESO CHE LI SOMMA');
 // Revisione del 22/09/2026: un arrivo da 10.000 kg e una terziaria da 25.000 kg
 // davano "2 senza fine trasporto (35.000 kg)" nella quadratura.
+// Dall'11/10/2026 una terziaria sta sempre nel gruppo TERZIARIE, anche se chi la
+// segna dice rete (chiusura dell'audit, C3 e C11): arrivo e terziaria non
+// stanno piu' nemmeno nello stesso gruppo, e i pesi restano divisi.
 const versi = formulariDaSistemare({ anno: 2026 });
 versi.segna({ ...completo, id_ordine: 'AR1', trasporto_finito_il: null, peso_effettivo: 10000 }, arrivo('Gatim'));
 versi.segna({ ...completo, id_ordine: 'TER1', trasporto_finito_il: null, peso_effettivo: 25000 }, { tipo: 'terziaria', canale: 'RETE', ruolo: 'imp', verso: 'partenza', sito: 'Gatim', controparte: 'Cementeria' });
 const secSF = { ...completo, id_ordine: 'SSF', trasporto_finito_il: null, peso_effettivo: 22000 };
 versi.segna(secSF, { tipo: 'secondaria', canale: 'RETE', ruolo: 'imp', verso: 'arrivo', sito: 'Irigom', controparte: 'Nappi Sud' });
 versi.segna(secSF, { tipo: 'secondaria', canale: 'RETE', ruolo: 'stoc', verso: 'partenza', sito: 'Nappi Sud', controparte: 'Irigom' });
-const gv = versi.gruppi().find(x => x.sito === 'Gatim');
-verifica('arrivi e partenze divisi, ciascuno col suo peso', gv.senza_fine.arrivi_n === 1 && gv.senza_fine.arrivi_kg === 10000 && gv.senza_fine.partenze_n === 1 && gv.senza_fine.partenze_kg === 25000, JSON.stringify(gv.senza_fine));
-verifica('nessun peso che somma arrivi e partenze', !('kg' in gv.senza_fine) && !('kg' in gv) && !JSON.stringify(gv).includes('35000'), JSON.stringify(gv));
-verifica('il conteggio dei formulari resta: 2 da sistemare', gv.senza_fine.n === 2 && gv.n === 2);
-const cv = versi.perCanale().RETE;
-verifica('per canale: la secondaria e\' un arrivo, una volta sola; la terziaria una partenza', cv.n === 3 && cv.arrivi_senza_fine === 2 && cv.arrivi_senza_fine_kg === 32000 && cv.partenze_senza_fine === 1 && cv.partenze_senza_fine_kg === 25000, JSON.stringify(cv));
-verifica('per canale: nessun peso che li somma', !('senza_fine_kg' in cv) && !JSON.stringify(cv).includes('57000'), JSON.stringify(cv));
-const avvV = avvisoSenzaFine(gv, 'quadratura');
-verifica('l\'avviso li scrive separati', avvV.includes('1 ordine arrivato (10.000 kg)') && avvV.includes('1 terziaria partita (25.000 kg)') && !avvV.includes('35.000'), avvV);
+const gv = versi.gruppi().find(x => x.sito === 'Gatim' && x.canale === 'RETE');
+const gt = versi.gruppi().find(x => x.sito === 'Gatim' && x.canale === 'TERZIARIE');
+verifica('arrivi e partenze divisi, ciascuno col suo peso e nel suo gruppo', gv.senza_fine.arrivi_n === 1 && gv.senza_fine.arrivi_kg === 10000 && gv.senza_fine.partenze_n === 0
+  && !!gt && gt.senza_fine.partenze_n === 1 && gt.senza_fine.partenze_kg === 25000 && gt.senza_fine.arrivi_n === 0, JSON.stringify([gv.senza_fine, gt && gt.senza_fine]));
+verifica('nessun peso che somma arrivi e partenze', !('kg' in gv.senza_fine) && !('kg' in gv) && !JSON.stringify([gv, gt]).includes('35000'), JSON.stringify([gv, gt]));
+verifica('il conteggio dei formulari: 1 di rete e 1 terziaria', gv.senza_fine.n === 1 && gv.n === 1 && gt.senza_fine.n === 1 && gt.n === 1);
+const pcv = versi.perCanale();
+const cv = pcv.RETE;
+verifica('per canale: la secondaria e\' un arrivo, una volta sola; la terziaria una partenza, nel suo gruppo', cv.n === 2 && cv.arrivi_senza_fine === 2 && cv.arrivi_senza_fine_kg === 32000 && cv.partenze_senza_fine === 0
+  && pcv.TERZIARIE && pcv.TERZIARIE.n === 1 && pcv.TERZIARIE.partenze_senza_fine === 1 && pcv.TERZIARIE.partenze_senza_fine_kg === 25000, JSON.stringify(pcv));
+verifica('per canale: nessun peso che li somma', !('senza_fine_kg' in cv) && !JSON.stringify(pcv).includes('57000'), JSON.stringify(pcv));
+const avvV = avvisoSenzaFine(gv, 'quadratura'), avvT = avvisoSenzaFine(gt, 'quadratura');
+verifica('gli avvisi li scrivono separati', avvV.includes('1 ordine arrivato (10.000 kg)') && avvT.includes('1 terziaria partita (25.000 kg)') && !avvV.includes('35.000') && !avvT.includes('35.000'), `${avvV} | ${avvT}`);
 
 console.log('LE TERZIARIE NON SONO UN CANALE');
 // Nelle Giacenze (calcolaGiacenze) le terziarie hanno il gruppo TERZIARIE: sono

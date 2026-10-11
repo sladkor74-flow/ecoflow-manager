@@ -59,11 +59,22 @@ function Scheda({ s }) {
         <div className="text-right text-sm space-y-0.5">
           {s.canali.map(c => (
             <p key={c.canale}>
-              In piazzale, {nomeCanale(c.canale).toLowerCase()}: <strong className="tabular-nums">{t(c.in_piazzale_t)} t</strong>
+              {/* Un piazzale senza nessuna rilevazione non ha una giacenza di rete
+                  ne' di ACI (11/10/2026): «—» col perche', come nelle Giacenze, e
+                  non uno zero, che vorrebbe dire piazzale vuoto. */}
+              In piazzale, {nomeCanale(c.canale).toLowerCase()}:{' '}
+              {c.in_piazzale_t === null || c.in_piazzale_t === undefined
+                ? <strong className="cursor-help" title={c.in_piazzale_perche || ''}>—</strong>
+                : <strong className="tabular-nums">{t(c.in_piazzale_t)} t</strong>}
               <span className="block text-[11px] text-muted-foreground">
+                {/* La giacenza di inizio anno di un piazzale con una rilevazione
+                    viene dalla stessa rilevazione (11/10/2026): si dice, perche' il
+                    numero si possa rifare. */}
                 {c.in_piazzale_da === 'rilevazione'
-                  ? `dalla rilevazione del ${giorno(s.rilevazione_il)}, più i movimenti finiti dopo`
-                  : `giacenza di inizio anno (${t(c.giacenza_iniziale_t)} t), più entrate meno partenze`}
+                  ? `dalla rilevazione del ${giorno(s.rilevazione_il)}, più i movimenti finiti dopo; a inizio anno ${t(c.giacenza_iniziale_t)} t, dalla stessa rilevazione`
+                  : c.in_piazzale_da === 'senza_rilevazione'
+                    ? 'nessuna rilevazione del portale: senza una lettura la giacenza non si calcola, e non vuol dire zero'
+                    : `giacenza di inizio anno (${t(c.giacenza_iniziale_t)} t), più entrate meno partenze`}
               </span>
             </p>
           ))}

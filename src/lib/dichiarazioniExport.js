@@ -7,6 +7,8 @@ const nomeCanale = (f) => {
   const c = CANALI.find(x => x.chiave === f.canale);
   return `${c ? c.nome : f.canale}${f.provenienza ? ` ${f.provenienza}` : ''}`;
 };
+// Il punto delle migliaia, all'italiana, nelle note scritte (11/10/2026).
+const mig = (v) => String(Math.round(Number(v) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 const STATO_PAROLE = { nessuna: '', non_dovuta: 'non dovuta', solo_metalli: 'solo metalli ferrosi', inserita: 'inserita', ricevuta: 'in mano', caricata: 'caricata a portale' };
 
 export async function esportaDichiarazioni(dati) {
@@ -19,12 +21,16 @@ export async function esportaDichiarazioni(dati) {
   // dichiarato e' il solo caricato (caricatoDelMese): quantita_kg nudo, sulle
   // righe seminate, contiene il DA dichiarare, e il foglio diceva il contrario
   // dello schermo.
-  const riepilogo = [['Impianto', 'Canale', 'Operazione', 'Voce', ...MESI, 'Totale (t)']];
+  // LA CASELLA DALL'ANNO PRIMA, come a video (11/10/2026): in testa alla riga,
+  // prima di gennaio. Senza, la somma dei mesi non faceva la giacenza finche'
+  // l'apertura non era consumata, e il foglio ripeteva il difetto corretto.
+  const riepilogo = [['Impianto', 'Canale', 'Operazione', 'Voce', "Dall'anno prima", ...MESI, 'Totale (t)']];
   const dettaglio = [['Impianto', 'Canale', 'Operazione', 'Mese', 'Conferito (kg)', 'Uscito (kg)', 'Resta in giacenza (kg)', 'Dichiarato (kg)', 'Granulo (kg)', 'Fibre (kg)', 'Metalli (kg)', 'Ciabattato (kg)', 'Cippato (kg)', 'CSS-C (kg)', 'Altro (kg)', 'Stato', 'Ricevuta il', 'Caricata il', 'Note']];
   for (const s of dati.siti.filter(x => x.tipo_destinazione !== 'stoc')) {
     for (const f of s.flussi) {
+      const prima = f.dall_anno_prima || null;
       riepilogo.push([
-        s.sito, nomeCanale(f), s.operazione || '', 'Dichiarato a portale',
+        s.sito, nomeCanale(f), s.operazione || '', 'Dichiarato a portale', null,
         ...f.mesi.map(m => caricatoDelMese(m) || null),
         f.dichiarato_caricato_t,
       ]);
@@ -35,12 +41,12 @@ export async function esportaDichiarazioni(dati) {
       // somma e' la giacenza. Senza le due voci nuove il foglio ripeteva il
       // difetto corretto a video: i mesi non tornavano col totale.
       riepilogo.push([
-        s.sito, nomeCanale(f), s.operazione || '', 'Uscito nel mese',
+        s.sito, nomeCanale(f), s.operazione || '', 'Uscito nel mese', prima ? prima.uscito_kg || null : null,
         ...f.mesi.map(m => m.uscito_kg || null),
         f.uscito_t,
       ]);
       riepilogo.push([
-        s.sito, nomeCanale(f), s.operazione || '', 'Conferito nel mese',
+        s.sito, nomeCanale(f), s.operazione || '', 'Conferito nel mese', prima ? prima.conferito_kg || null : null,
         ...f.mesi.map(m => m.conferito_kg || null),
         f.conferito_t,
       ]);
@@ -48,9 +54,18 @@ export async function esportaDichiarazioni(dati) {
         s.sito, nomeCanale(f), s.operazione || '', 'Resta in giacenza',
         // La rete non dovuta per accordo non ha una giacenza (utente, 10/10/2026):
         // il foglio dice quello che dice la pagina, non un numero che la pagina tace.
+        f.non_dovuta || !prima ? null : prima.resta_kg || null,
         ...f.mesi.map(m => (f.non_dovuta ? null : m.resta_kg || null)),
         f.non_dovuta ? 'non dovuta per accordo' : f.resta_t,
       ]);
+      if (prima && (prima.conferito_kg || prima.uscito_kg)) {
+        dettaglio.push([
+          s.sito, nomeCanale(f), s.operazione || '', "Dall'anno prima", prima.conferito_kg || null,
+          prima.uscito_kg || null, f.non_dovuta ? null : (prima.resta_kg || null),
+          null, null, null, null, null, null, null, null, '', '', '',
+          prima.dichiarato_dopo_kg ? `letti al ${String(prima.al || '').split('-').reverse().join('/')} ${mig(prima.letta_kg)} kg, meno ${mig(prima.dichiarato_dopo_kg)} kg dichiarati dopo` : '',
+        ]);
+      }
       for (const m of f.mesi) {
         const d = m.dichiarazione;
         if (!d && !m.conferito_kg) continue;
@@ -73,7 +88,9 @@ export async function esportaDichiarazioni(dati) {
   // file senza giorno di arrivo. E che cosa comporta, a parole. Arrivi e
   // partenze (terziarie per un impianto, secondarie per uno stoccaggio) hanno
   // colonne loro: un peso che li somma non vuol dire niente (22/09/2026).
-  const quadratura = [['Impianto', 'Ruolo', 'Canale', 'Giacenza iniziale (t)', 'Entrato (t)', 'Uscito in secondaria (t)', 'Dichiarato caricato (t)', 'Giacenza calcolata (t)', 'A portale, fotografia (t)', 'Non ancora nel file (t)', 'Dichiarato dopo la fotografia (t)', 'Giacenza a portale aggiornata (t)', 'Scarto (t)', 'Esito',
+  // Un anno chiuso si confronta con la lettura del 31/12 salvata dalla chiusura,
+  // non col portale di oggi (11/10/2026): la colonna lo dice.
+  const quadratura = [['Impianto', 'Ruolo', 'Canale', 'Giacenza iniziale (t)', 'Entrato (t)', 'Uscito in secondaria (t)', 'Dichiarato caricato (t)', 'Giacenza calcolata (t)', dati.anno_chiuso ? 'A portale, lettura del 31/12 (t)' : 'A portale, fotografia (t)', 'Non ancora nel file (t)', 'Dichiarato dopo la fotografia (t)', 'Giacenza a portale aggiornata (t)', 'Scarto (t)', 'Esito',
     'Arrivati senza fine trasporto', 'Arrivati senza fine trasporto (kg)', 'Partiti senza fine trasporto', 'Partiti senza fine trasporto (kg)',
     'Arrivati: fra i non dichiarati del portale (kg)', 'Arrivati: gia\' dichiarati a portale (kg)', 'Carichi del file senza giorno di arrivo (kg)', 'Formulari con le date da sistemare', 'Che cosa comporta']];
   for (const s of dati.siti) {
@@ -85,7 +102,8 @@ export async function esportaDichiarazioni(dati) {
       s.giacenza_iniziale_t, s.entrato_confronto_t, s.uscito_confronto_t || 0, stoc ? null : s.dichiarato_caricato_rete_t,
       s.giacenza_calcolata_t, stoc ? null : s.giacenza_portale_foto_t, stoc ? null : (s.aggiunti_alla_foto_t || 0), stoc ? null : (s.dichiarato_dopo_foto_t || 0),
       s.giacenza_portale_t, s.scarto_t,
-      s.quadra === true ? 'quadra' : s.quadra === false ? 'da verificare' : 'nessun dato a portale',
+      s.quadra === true ? 'quadra' : s.quadra === false ? 'da verificare'
+        : s.quadratura_anno_chiuso && !s.quadratura_anno_chiuso.lettura ? "anno chiuso: vale per l'anno in corso" : 'nessun dato a portale',
       // Fra i non dichiarati il portale li conta e la calcolata no; gia' dichiarati
       // pesano sulla calcolata solo se la dichiarazione e' registrata anche qui.
       sf ? sf.arrivi_n || 0 : 0, sf ? sf.arrivi_kg || 0 : 0, sf ? sf.partenze_n || 0 : 0, sf ? sf.partenze_kg || 0 : 0,
@@ -113,7 +131,12 @@ export async function esportaDichiarazioni(dati) {
   }
 
   // Gli stoccaggi non dichiarano: entrate, partenze in secondaria e verso chi.
-  const stoccaggi = [['Stoccaggio', 'Anche impianto', 'Canale', 'Entrati (t)', 'Ripartiti in secondaria (t)', 'Saldo dell\'anno (t)', 'Verso impianto', 'Partiti verso l\'impianto (t)', 'In attesa di dichiarazione a portale (t)', 'In piazzale, questo canale (t)']];
+  // UN PIAZZALE SENZA LETTURA NON HA UNA GIACENZA, E IL FOGLIO DICE PERCHE'
+  // (revisione della chiusura dell'audit, 11/10/2026). Dal riepilogo arriva null
+  // con il perche' accanto (in_piazzale_perche); qui la cella restava vuota e
+  // basta, e una cella vuota si legge «niente» o «non lo so». L'ultima colonna lo
+  // scrive, come la pagina.
+  const stoccaggi = [['Stoccaggio', 'Anche impianto', 'Canale', 'Entrati (t)', 'Ripartiti in secondaria (t)', 'Saldo dell\'anno (t)', 'Verso impianto', 'Partiti verso l\'impianto (t)', 'In attesa di dichiarazione a portale (t)', 'In piazzale, questo canale (t)', 'Perché manca la giacenza in piazzale']];
   for (const s of dati.stoccaggi || []) {
     for (const c of s.canali) {
       const verso = c.verso.length ? c.verso : [null];
@@ -122,6 +145,7 @@ export async function esportaDichiarazioni(dati) {
         i === 0 ? c.entrato_t : null, i === 0 ? c.uscito_t : null, i === 0 ? c.saldo_t : null,
         v ? v.impianto : '', v ? v.t : null, v && v.in_attesa_t !== null ? v.in_attesa_t : null,
         i === 0 ? c.in_piazzale_t : null,
+        i === 0 && (c.in_piazzale_t === null || c.in_piazzale_t === undefined) ? (c.in_piazzale_perche || '') : '',
       ]));
     }
   }
@@ -143,7 +167,10 @@ export async function esportaDichiarazioni(dati) {
   // Tonnellate con due decimali, tre se i kg non sono tondi (come formattaPesi);
   // chilogrammi interi. Con '#,##0.00' 12,345 t usciva 12,35.
   const t2 = '#,##0.00#';
-  aggiungi('Riepilogo', riepilogo, { ...Object.fromEntries(MESI.map((_, i) => [i + 3, '#,##0'])), [MESI.length + 3]: t2 });
+  // I kg dalla casella dall'anno prima (colonna 4) a dicembre, poi il totale in
+  // tonnellate. Gli indici partivano da 3, la colonna della voce: dicembre usciva
+  // in tonnellate e il totale senza formato (11/10/2026).
+  aggiungi('Riepilogo', riepilogo, { ...Object.fromEntries(Array.from({ length: MESI.length + 1 }, (_, i) => [i + 4, '#,##0'])), [MESI.length + 5]: t2 });
   aggiungi('Dettaglio', dettaglio, Object.fromEntries([4, 5, 6, 7, 8, 9, 10, 11, 12].map(i => [i, '#,##0'])));
   aggiungi('Quadratura', quadratura, { ...Object.fromEntries([3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(i => [i, t2])), ...Object.fromEntries([14, 15, 16, 17, 18, 19, 20, 21].map(i => [i, '#,##0'])) });
   aggiungi('Stoccaggi', stoccaggi, Object.fromEntries([3, 4, 5, 7, 8, 9].map(i => [i, t2])));

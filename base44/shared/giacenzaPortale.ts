@@ -198,6 +198,24 @@ export function inizioAggiunti(foto) {
 
 const ORDINE_CANALI = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
 
+// LE TERZIARIE HANNO UN GRUPPO LORO, E LO DECIDE QUESTO FILE (chiusura dell'audit,
+// 11/10/2026). Partono dall'impianto verso le cementerie: sono formulari
+// terminati, ma non un movimento di canale, e la giacenza di PFU non la toccano.
+// Il gruppo lo sceglieva chi chiamava: le Giacenze lo mettevano a parte dal
+// 23/09, il riepilogo delle dichiarazioni le segnava ancora 'RETE', e la stessa
+// terziaria contava come rete in un modulo e no nell'altro, anche nel riquadro
+// che dichiara di non mescolare mai i canali (audit del 10/10/2026, C3 e C11).
+// Ora segna() lo decide dal tipo: nessun chiamante lo puo' sbagliare.
+export const GRUPPO_TERZIARIE = 'TERZIARIE';
+// I gruppi di un soggetto: prima i canali nel loro ordine, le terziarie in coda.
+export const ORDINE_GRUPPI = [...ORDINE_CANALI, GRUPPO_TERZIARIE];
+
+// PERCHE' UN IMPIANTO NON HA UNA GIACENZA DI RETE A PORTALE, quando il file degli
+// ordini non dichiarati non e' mai stato caricato. Le Giacenze scrivevano 0 + 0 -
+// 0 come un numero, cioe' «impianto vuoto», mentre le Dichiarazioni dicevano
+// «—» (audit del 10/10/2026, C5b). Il testo e' uno, per i due moduli.
+export const PERCHE_SENZA_FOTOGRAFIA = "Il file degli ordini non dichiarati del portale non e' stato caricato: senza quella fotografia la giacenza di rete a portale non si calcola, e non vuol dire zero. Si carica da Caricamento Dati.";
+
 /**
  * Raccoglitore dei terminati con le date da sistemare.
  *   const f = formulariDaSistemare({ anno, chiaveDi });
@@ -206,6 +224,7 @@ const ORDINE_CANALI = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
  *   f.perCanale(portaleConosce) -> { RETE: {...}, ACI: {...}, EXTRA_RACCOLTA: {...} }
  * tipo: 'primaria' | 'secondaria' | 'terziaria'; ruolo: 'imp' | 'stoc';
  * verso: 'arrivo' (arriva al soggetto) | 'partenza' (parte dal soggetto).
+ * Una terziaria va sempre nel gruppo TERZIARIE, qualunque canale si passi.
  * `portaleConosce` e' ordiniNotiAlPortale() gia' riempito: dice quali dei
  * senza fine trasporto il portale conosce. L'extra raccolta a portale non c'e'.
  *
@@ -248,7 +267,7 @@ export function formulariDaSistemare({ anno = null, chiaveDi = (s) => String(s |
       const ns = chiaveDi(sito);
       if (!ns) return false;
       const ruolo = dove.ruolo === 'stoc' ? 'stoc' : 'imp';
-      const canale = dove.canale || 'RETE';
+      const canale = dove.tipo === 'terziaria' ? GRUPPO_TERZIARIE : (dove.canale || 'RETE');
       const k = `${ns}|${ruolo}|${canale}`;
       if (!per.has(k)) per.set(k, { sito, chiave: ns, ruolo, canale, ordini: new Map() });
       const g = per.get(k);
@@ -336,7 +355,7 @@ export function formulariDaSistemare({ anno = null, chiaveDi = (s) => String(s |
         });
       }
       return esito.sort((a, b) => (a.ruolo === b.ruolo ? 0 : a.ruolo === 'imp' ? -1 : 1)
-        || a.sito.localeCompare(b.sito) || ORDINE_CANALI.indexOf(a.canale) - ORDINE_CANALI.indexOf(b.canale));
+        || a.sito.localeCompare(b.sito) || ORDINE_GRUPPI.indexOf(a.canale) - ORDINE_GRUPPI.indexOf(b.canale));
     },
 
     /**

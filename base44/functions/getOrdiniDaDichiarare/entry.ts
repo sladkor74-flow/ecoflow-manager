@@ -4,7 +4,8 @@ import { fetchAll, perPagina } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { giornoRoma, annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { formulariDelFile, ruoloDellaRiga } from "../../shared/giacenzaPortale.ts";
+import { formulariDelFile, ruoloDellaRiga, giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, inizioAggiunti } from "../../shared/giacenzaPortale.ts";
+import { carichiNonNelFile, riconciliazioneDaDichiarare } from "../../shared/riconciliazioneDaDichiarare.ts";
 
 // Restituisce l'elenco paginato degli ordini in attesa di dichiarazione (OrdineNonDichiarato).
 // Payload: { sito, provincia, anno, ricerca, limite, offset, tutte } - tutti opzionali.
@@ -44,6 +45,11 @@ import { formulariDelFile, ruoloDellaRiga } from "../../shared/giacenzaPortale.t
 // senza_fine_a_portale (righe del file senza fine trasporto), senza_fine_dal_gestionale
 // (quante di quelle la prendono dalla primaria nel gestionale).
 //
+// Con riconcilia: true, un sito, ruolo 'imp' e nessun altro filtro - il caso del
+// pulsante della scheda Situazione - anche riconciliazione: righe del file +
+// carichi non ancora nel file - dichiarato dopo la fotografia = giacenza a
+// portale, e righe + carichi = il numero del pulsante (11/10/2026, vedi riconcilia).
+//
 // I formulari si leggono solo per gli ordini del file (22/09/2026). La scheda Da
 // dichiarare chiama questa funzione a ogni pagina, filtro o ricerca: leggere
 // tutta PrimariaRete (undici pagine da mille) e tutta Secondaria ogni volta la
@@ -55,14 +61,14 @@ import { formulariDelFile, ruoloDellaRiga } from "../../shared/giacenzaPortale.t
 const BLOCCO_ORDINI = 150;
 const BLOCCHI_INSIEME = 3;
 
-/** Legge i record di `entity` con id_ordine fra `ids`, a blocchi, e li passa a `fn`; quanti ne ha letti. */
-async function perOrdini(entity, ids, fn) {
+/** Legge i record di `entity` con `campo` (id_ordine se non si dice) fra `ids`, a blocchi, e li passa a `fn`; quanti ne ha letti. */
+async function perOrdini(entity, ids, fn, campo = 'id_ordine') {
   const blocchi = [];
   for (let i = 0; i < ids.length; i += BLOCCO_ORDINI) blocchi.push(ids.slice(i, i + BLOCCO_ORDINI));
   let letti = 0;
   for (let i = 0; i < blocchi.length; i += BLOCCHI_INSIEME) {
     const esiti = await Promise.all(blocchi.slice(i, i + BLOCCHI_INSIEME)
-      .map(blocco => fetchAll(entity, { id_ordine: { $in: blocco } }, 'id')));
+      .map(blocco => fetchAll(entity, { [campo]: { $in: blocco } }, 'id')));
     for (const righe of esiti) for (const r of righe) { letti++; fn(r); }
   }
   return letti;
@@ -82,6 +88,58 @@ async function leggiOrdini(entity, ids, fn) {
   if (letti) return;
   const voluti = new Set(ids);
   await perPagina(entity, null, (r) => { if (voluti.has(String(r.id_ordine || '').trim())) fn(r); });
+}
+
+/**
+ * LA RIGA DI RICONCILIAZIONE DI UN IMPIANTO (chiusura dell'audit, 11/10/2026).
+ *
+ * Righe del file + carichi che il file non ha ancora - dichiarato dopo la
+ * fotografia = la giacenza a portale, lo stesso numero delle Giacenze; e righe
+ * del file + carichi aggiunti = il numero del pulsante della scheda Situazione
+ * (shared/riconciliazioneDaDichiarare.ts). Si fa solo se la si chiede, e solo
+ * per un impianto senza altri filtri: e' il caso del pulsante, ed e' l'unico in
+ * cui l'elenco e' tutto quello che il portale aspetta da quell'impianto.
+ *
+ * Le letture sono piccole: primarie e secondarie dalla finestra dei carichi
+ * aggiunti in avanti (inizioAggiunti, un giorno di margine per il giorno
+ * italiano), il report delle dichiarazioni solo per i numeri d'ordine che il file
+ * non ha, e le dichiarazioni mensili, che sono poche.
+ */
+async function riconcilia(svc, { righeFile, sitoNorm, norm, fileOrdini, fileKg }) {
+  const foto = giornoFotografia(righeFile);
+  if (!foto) return { senza_fotografia: true };
+  const portaleConosce = ordiniNotiAlPortale();
+  for (const r of righeFile) portaleConosce.segna(r);
+  const inizio = inizioAggiunti(foto);
+  const d = new Date(`${inizio}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  const finestra = { stato: 'terminato', trasporto_finito_il: { $gte: `${d.toISOString().slice(0, 10)}T00:00:00` } };
+  const annoDiOggi = Number(oggiRoma().slice(0, 4));
+  const [primarie, secondarie, giacenzeSito, dichiarazioniSito] = await Promise.all([
+    fetchAll(svc.PrimariaRete, finestra),
+    fetchAll(svc.Secondaria, finestra),
+    fetchAll(svc.GiacenzaSito, { anno: annoDiOggi }),
+    fetchAll(svc.DichiarazioneSito),
+  ]);
+  // Chi la rete non la dichiara per accordo (oggi Tecnogum) non ha una giacenza
+  // di rete che il portale tenga per noi: non c'e' niente da riconciliare.
+  const nonDichiaraRete = new Set(giacenzeSito.filter(g => g.dichiara_rete === false).map(g => norm(g.sito)));
+  if (nonDichiaraRete.has(sitoNorm)) return { foto_del: foto, non_dovuta: true };
+  // Solo i carichi di questo impianto che il file non ha: quelli si cercano nel
+  // report, perche' un ordine gia' dichiarato il portale lo conosce.
+  const suoi = (r) => norm(r.destinazione) === sitoNorm;
+  const candidatePrimarie = primarie.filter(r => suoi(r) && !portaleConosce.noto(r, 'primaria'));
+  const candidateSecondarie = secondarie.filter(r => suoi(r) && !portaleConosce.noto(r, 'secondaria'));
+  const ids = (righe) => [...new Set(righe.map(r => String(r.id_ordine || '').trim()).filter(Boolean))];
+  await Promise.all([
+    perOrdini(svc.DichiarazioneTrattamento, ids(candidatePrimarie), (r) => portaleConosce.segna(r, 'dichiarazioni'), 'ordine_primaria'),
+    perOrdini(svc.DichiarazioneTrattamento, ids(candidateSecondarie), (r) => portaleConosce.segna(r, 'dichiarazioni'), 'ordine_secondaria'),
+  ]);
+  const carichi = carichiNonNelFile({ foto, portaleConosce, chiaveDi: norm, nonDichiaraRete });
+  for (const r of candidatePrimarie) carichi.segna(r, 'primaria');
+  for (const r of candidateSecondarie) carichi.segna(r, 'secondaria');
+  const dopo = dichiaratoDopoLaFotografia(dichiarazioniSito, foto, norm).get(sitoNorm) || 0;
+  return riconciliazioneDaDichiarare({ foto, fileOrdini, fileKg, aggiunti: carichi.di(sitoNorm), dichiaratoDopoKg: dopo });
 }
 
 export default async function(req) {
@@ -237,6 +295,18 @@ export default async function(req) {
     const fuori = filtrate.filter(r => dateFiltrate.get(r).fuori);
     const kgDi = (l) => Math.round(l.reduce((s, r) => s + (Number(r.peso_non_dichiarato_kg) || 0), 0));
     const pagina = tutte ? filtrate.slice(offsetNum) : filtrate.slice(offsetNum, offsetNum + limiteNum);
+    // La riga di riconciliazione, chiesta dal pulsante di un impianto: solo se
+    // l'elenco e' tutto quello che il portale aspetta da lui, cioe' senza altri
+    // filtri (11/10/2026). Se una lettura non riesce l'elenco esce lo stesso, e
+    // la riga dice perche' manca.
+    let riconciliazione = null;
+    if (body.riconcilia === true && sitoNorm && ruoloChiesto === 'imp' && !provUpper && annoNum === null && !ricercaLower && !soloDate) {
+      try {
+        riconciliazione = await riconcilia(svc, { righeFile, sitoNorm, norm, fileOrdini: totale_righe, fileKg: totale_kg });
+      } catch (e) {
+        riconciliazione = { errore: e && e.message ? e.message : String(e) };
+      }
+    }
 
     const righe = pagina.map(r => {
       const fine = fineDi(r, dateFiltrate.get(r));
@@ -274,6 +344,8 @@ export default async function(req) {
       totale_kg: Math.round(totale_kg),
       // Di quali mesi sono gli ordini dell'elenco filtrato, non della pagina.
       per_mese,
+      // File + carichi non ancora nel file - dichiarato dopo = giacenza (11/10/2026).
+      riconciliazione,
       date_da_sistemare: { n: conDate.length, kg: kgDi(conDate), fuori_dai_mesi: fuori.length, fuori_dai_mesi_kg: kgDi(fuori) },
       // Righe del file senza fine trasporto, e quante la prendono dal gestionale.
       senza_fine_a_portale: senzaFineAPortale,

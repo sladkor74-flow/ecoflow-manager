@@ -1,14 +1,16 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
-import { targetRigaGiacenze, testoTargetDaPortare, ripartisciTargetPrimarie } from "../../shared/targetImpianti.ts";
+import { targetRigaGiacenze, testoTargetDaPortare, ripartisciTargetPrimarie, conferitiPerRipartizione } from "../../shared/targetImpianti.ts";
 import { recordDellAnno, annoChiuso } from "../../shared/annoTarget.ts";
 import { annoRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { PROV_TO_REGION } from "../../shared/raccoltoCalculator.ts";
-import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, anomaliaRilevazione, classePfu, canaleEClasse, ordiniDellaGiacenza } from "../../shared/giacenzaStoccaggi.ts";
-import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, inizioAggiunti, nostraRiga, formulariDaSistemare, avvisoSenzaFine } from "../../shared/giacenzaPortale.ts";
+import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, anomaliaRilevazione, classePfu, canaleEClasse, ordiniDellaGiacenza, kgReteDiRilevazione, kgAciDiRilevazione, PERCHE_PIAZZALE_SENZA_LETTURA } from "../../shared/giacenzaStoccaggi.ts";
+import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, nostraRiga, formulariDaSistemare, avvisoSenzaFine, ORDINE_GRUPPI, PERCHE_SENZA_FOTOGRAFIA } from "../../shared/giacenzaPortale.ts";
+import { ingressoMovimento } from "../../shared/ingressoMovimento.ts";
+import { carichiNonNelFile } from "../../shared/riconciliazioneDaDichiarare.ts";
+import { leggiDichiarazioni } from "../../shared/dichiarazioniImpianti.ts";
 
 // Calcola la situazione delle giacenze di impianti e stoccaggi per l'anno richiesto.
 //
@@ -279,8 +281,12 @@ export default async function(req) {
     // finiti dopo, per fine trasporto (shared/giacenzaStoccaggi.ts). Rete, ACI ed
     // extra raccolta hanno ciascuno il suo saldo: la rilevazione ha le classi 1-4
     // per la rete e la 9 per l'ACI, l'extra raccolta a portale non c'e'.
-    const tipoStoc = (r) => tdNorm(r.tipo_destinazione) === 'stoc';
-    const eSecondariaExtra = (r) => String(r.tipo_movimento || '').toLowerCase().trim() === 'secondaria';
+    // DOVE ENTRA UN MOVIMENTO lo dice shared/ingressoMovimento.ts, lo stesso file
+    // che chiede il modulo Dichiarazioni (chiusura dell'audit, 11/10/2026): chi
+    // riceve, con che ruolo, su che canale, e per una secondaria da quale
+    // piazzale parte. Qui sotto non si decide piu' niente di tutto questo da se'.
+    const dove = (r, archivio) => ingressoMovimento(r, archivio, norm);
+    const alPiazzale = (d) => !!(d.arrivo && d.arrivo.ruolo === 'stoc');
     const saldoVuoto = () => ({ ingressi: classiVuote(), uscite: classiVuote(), nIngressi: 0, nUscite: 0 });
     const movStoc = new Map(); // ns -> { giorno, RETE, ACI }
     for (const [ns, partenza] of partenzaMap) movStoc.set(ns, { giorno: partenza.dataStr, RETE: saldoVuoto(), ACI: saldoVuoto() });
@@ -307,24 +313,33 @@ export default async function(req) {
     // conto legge: uscivano dalla giacenza dell'ACI senza entrare in quella
     // della rete, cioe' sparivano.
     for (const r of reteAll) {
-      if (!isTerminato(r) || !tipoStoc(r)) continue;
+      const d = dove(r, 'PrimariaRete');
+      if (!isTerminato(r) || !alPiazzale(d)) continue;
       const { canale, classe } = canaleEClasse(r);
-      contaMovimento(r, norm(r.destinazione), canale, 'ingressi', classe);
+      contaMovimento(r, d.arrivo.chiave, canale, 'ingressi', classe);
     }
-    for (const r of aciAll) if (isTerminato(r) && tipoStoc(r)) contaMovimento(r, norm(r.destinazione), 'ACI', 'ingressi', 'ACI');
+    for (const r of aciAll) { const d = dove(r, 'PrimariaAci'); if (isTerminato(r) && alPiazzale(d)) contaMovimento(r, d.arrivo.chiave, 'ACI', 'ingressi', 'ACI'); }
     for (const r of secAll) {
       if (!isTerminato(r)) continue;
+      const d = dove(r, 'Secondaria');
       const { canale, classe } = canaleEClasse(r, { aci: eAci(r) });
-      if (tipoStoc(r)) contaMovimento(r, norm(r.destinazione), canale, 'ingressi', classe);
-      contaMovimento(r, norm(r.stoccaggio), canale, 'uscite', classe);
+      if (alPiazzale(d)) contaMovimento(r, d.arrivo.chiave, canale, 'ingressi', classe);
+      if (d.partenza) contaMovimento(r, d.partenza.chiave, canale, 'uscite', classe);
     }
     // L'extra raccolta in piazzale, a parte: entrate e partenze dell'anno.
+    // UNA SECONDARIA DI EXTRA RACCOLTA PUO' ARRIVARE A UN PIAZZALE (chiusura
+    // dell'audit, 11/10/2026): qui toglieva dal piazzale che spedisce e non
+    // aggiungeva niente a quello che riceve, perche' il ramo del piazzale era
+    // solo delle primarie. Il piazzale che riceveva la contava nel conferito e
+    // non nella giacenza; e nelle Dichiarazioni diventava un impianto (C9). Ora
+    // entra dove dice il formulario, come una secondaria di rete.
     const extraStoc = new Map(); // ns -> t
     for (const r of extraAll) {
       if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
       const t = (Number(r.peso_effettivo) || 0) / 1000;
-      if (eSecondariaExtra(r)) { const ns = norm(r.stoccaggio); if (ns) extraStoc.set(ns, (extraStoc.get(ns) || 0) - t); }
-      else if (tipoStoc(r)) { const ns = norm(r.destinazione); if (ns) extraStoc.set(ns, (extraStoc.get(ns) || 0) + t); }
+      const d = dove(r, 'ExtraRaccolta');
+      if (d.partenza) extraStoc.set(d.partenza.chiave, (extraStoc.get(d.partenza.chiave) || 0) - t);
+      if (alPiazzale(d)) extraStoc.set(d.arrivo.chiave, (extraStoc.get(d.arrivo.chiave) || 0) + t);
     }
 
     // === 1c-bis. TUTTI I MOVIMENTI DEL PIAZZALE, IN FORMA COMPATTA ===
@@ -344,22 +359,58 @@ export default async function(req) {
       movArchivio.get(ns).push(movimentoStoccaggio(r, { canale, verso, classe, controparte, archivio }));
     };
     for (const r of reteAll) {
-      if (!isTerminato(r) || !tipoStoc(r)) continue;
+      const d = dove(r, 'PrimariaRete');
+      if (!isTerminato(r) || !alPiazzale(d)) continue;
       const { canale, classe } = canaleEClasse(r);
-      raccogli(r, norm(r.destinazione), canale, 'ingresso', classe, daChi(r), 'terminati_rete');
+      raccogli(r, d.arrivo.chiave, canale, 'ingresso', classe, daChi(r), 'terminati_rete');
     }
-    for (const r of aciAll) if (isTerminato(r) && tipoStoc(r)) raccogli(r, norm(r.destinazione), 'ACI', 'ingresso', 'ACI', daChi(r), 'terminati_aci');
+    for (const r of aciAll) { const d = dove(r, 'PrimariaAci'); if (isTerminato(r) && alPiazzale(d)) raccogli(r, d.arrivo.chiave, 'ACI', 'ingresso', 'ACI', daChi(r), 'terminati_aci'); }
     for (const r of secAll) {
       if (!isTerminato(r)) continue;
+      const d = dove(r, 'Secondaria');
       const { canale, classe } = canaleEClasse(r, { aci: eAci(r) });
-      if (tipoStoc(r)) raccogli(r, norm(r.destinazione), canale, 'ingresso', classe, r.stoccaggio, 'secondarie');
-      raccogli(r, norm(r.stoccaggio), canale, 'uscita', classe, r.destinazione, 'secondarie');
+      if (alPiazzale(d)) raccogli(r, d.arrivo.chiave, canale, 'ingresso', classe, r.stoccaggio, 'secondarie');
+      if (d.partenza) raccogli(r, d.partenza.chiave, canale, 'uscita', classe, r.destinazione, 'secondarie');
     }
+    // Anche qui una secondaria di extra raccolta entra nel piazzale che la
+    // riceve, oltre a uscire da quello che la spedisce (11/10/2026, C9).
     for (const r of extraAll) {
       if (!isTerminato(r)) continue;
-      if (eSecondariaExtra(r)) raccogli(r, norm(r.stoccaggio), 'EXTRA_RACCOLTA', 'uscita', classeDa(r.classe, r.prodotto), r.destinazione, 'extra_raccolta');
-      else if (tipoStoc(r)) raccogli(r, norm(r.destinazione), 'EXTRA_RACCOLTA', 'ingresso', classeDa(r.classe, r.prodotto), daChi(r), 'extra_raccolta');
+      const d = dove(r, 'ExtraRaccolta');
+      const classe = classeDa(r.classe, r.prodotto);
+      if (d.partenza) raccogli(r, d.partenza.chiave, 'EXTRA_RACCOLTA', 'uscita', classe, r.destinazione, 'extra_raccolta');
+      if (alPiazzale(d)) raccogli(r, d.arrivo.chiave, 'EXTRA_RACCOLTA', 'ingresso', classe, d.tipo === 'secondaria' ? r.stoccaggio : daChi(r), 'extra_raccolta');
     }
+
+    // L'APERTURA DI UN PIAZZALE CHE HA LETTURE VIENE DALL'ANCORA, COME NEL
+    // MODULO DICHIARAZIONI (revisione della chiusura dell'audit, 11/10/2026). La
+    // colonna dell'apertura dei piazzali leggeva il campo scritto in GiacenzaSito,
+    // che per l'anno nuovo nessuno scrive piu' (la chiusura salva la rilevazione
+    // del 31/12, non quel campo) e che il numero del piazzale non usa: il modulo
+    // Dichiarazioni partiva gia' dall'ancora portata al 31/12 dell'anno prima, coi
+    // movimenti in mezzo, in avanti o all'indietro. Ora i due moduli dicono la
+    // stessa apertura. Per un anno chiuso l'ancora e' quella di quell'anno, se
+    // c'e', come nel riepilogo. Il campo scritto resta per i piazzali senza
+    // nessuna lettura: null qui vuol dire «non ha letture».
+    const aperturaPiazzale = (ns, canale) => {
+      const partenza = partenzaMap.get(ns);
+      if (!partenza) return null;
+      // Per un anno chiuso la lettura del 31/12 lo chiude e non lo puo' aprire: senza
+      // un'altra lettura dell'anno l'apertura non si conosce (null), come nel
+      // riepilogo (senzaAncoraChiuso, revisione finale dell'11/10/2026).
+      const fineChiuso = `${annoNum}-12-31`;
+      const propria = annoTargetChiuso ? ancoraDellAnno((rilevPerStoc.get(ns) || []).filter(l => momentoRilevazione(l) !== fineChiuso), annoNum) : null;
+      if (annoTargetChiuso && !propria) return null;
+      const base = propria || partenza.record;
+      const da = momentoRilevazione(base);
+      const al = `${annoNum - 1}-12-31`;
+      // Il saldo fra i due giorni, estremo sinistro escluso; all'indietro col segno cambiato.
+      const [dopo, fino, segno] = da <= al ? [da, al, 1] : [al, da, -1];
+      const saldo = (movArchivio.get(ns) || []).reduce((s, m) => (m.canale === canale && m.finito_il > dopo && m.finito_il <= fino
+        ? s + (m.verso === 'uscita' ? -m.kg : m.kg) : s), 0);
+      const kg = canale === 'ACI' ? kgAciDiRilevazione(base) : kgReteDiRilevazione(base);
+      return Math.round(kg + segno * saldo) / 1000;
+    };
 
     // === 1d. GIACENZA A PORTALE DEGLI IMPIANTI, AGGIORNATA AI CARICAMENTI ===
     // Alla fotografia si aggiungono i carichi di rete arrivati all'impianto - in
@@ -371,7 +422,6 @@ export default async function(req) {
     // giacenza non li conta piu' (serve a dire la differenza per chi non ha la
     // fine trasporto, sezione 1e).
     for (const d of dichiarazioni) portaleConosce.segna(d, 'dichiarazioni');
-    const inizioFoto = inizioAggiunti(giornoFoto);
     const aggiuntiMap = new Map(); // ns|imp -> { kg, classi, n }
     // Chi la rete non la dichiara per accordo (dichiara_rete falso in Giacenze,
     // oggi Tecnogum: il trattamento non lo paghiamo noi) non ha una giacenza di
@@ -379,11 +429,18 @@ export default async function(req) {
     // file', non ci sono proprio. Aggiungerli faceva comparire a Tecnogum 1.706,76 t
     // a portale contro le 0 del file (22/09/2026).
     const nonDichiaraRete = new Set(giacenzeSito.filter(g => g.dichiara_rete === false).map(g => norm(g.sito)));
+    // QUALI CARICHI IL FILE NON HA ANCORA LO DECIDE UNA REGOLA SOLA (revisione
+    // della chiusura dell'audit, 11/10/2026): carichiNonNelFile, la stessa del
+    // riepilogo delle dichiarazioni e della riga di riconciliazione dell'elenco
+    // «Da dichiarare». Qui la si riscriveva - terminato, rete, arrivato
+    // all'impianto, da inizioAggiunti, ignoto al portale, non di chi la rete non
+    // la dichiara - e tre copie con lo stesso esito restano uguali solo finche'
+    // nessuno ne cambia una. Le classi dei carichi aggiunti servono solo qui, e
+    // si tengono qui, sulla stessa decisione.
+    const carichiNonNoti = carichiNonNelFile({ foto: giornoFoto, portaleConosce, chiaveDi: norm, nonDichiaraRete });
     const aggiungiNonNoto = (r, tipo) => {
-      const g = giornoRoma(r.trasporto_finito_il);
-      if (!inizioFoto || !g || g < inizioFoto || portaleConosce.noto(r, tipo)) return;
-      const ns = norm(r.destinazione);
-      if (!ns || nonDichiaraRete.has(ns)) return;
+      const ns = carichiNonNoti.segna(r, tipo);
+      if (!ns) return;
       const key = ns + '|imp';
       if (!aggiuntiMap.has(key)) aggiuntiMap.set(key, { kg: 0, classi: classiVuote(), n: 0 });
       const a = aggiuntiMap.get(key);
@@ -395,8 +452,14 @@ export default async function(req) {
     // La giacenza a portale di un impianto e' della RETE (il portale l'ACI degli
     // impianti non la tiene per noi): una riga di classe 9 non ci entra, qualunque
     // archivio la porti. Le secondarie ACI erano gia' escluse.
-    for (const r of reteAll) if (isTerminato(r) && !tipoStoc(r) && !eAci(r)) aggiungiNonNoto(r, 'primaria');
-    for (const r of secAll) if (isTerminato(r) && !eAci(r)) aggiungiNonNoto(r, 'secondaria');
+    // Una secondaria arrivata al PIAZZALE di un sito che e' anche impianto non e'
+    // un carico dell'impianto: sta nella giacenza del piazzale, coi movimenti dopo
+    // la rilevazione. Aggiunta anche qui, quei chili si contavano due volte - sul
+    // piazzale e nella giacenza a portale dell'impianto (chiusura dell'audit,
+    // 11/10/2026, C2). Il modulo Dichiarazioni fa lo stesso. Tutte e due le
+    // esclusioni ora le fa carichiNonNelFile, con ingressoMovimento.
+    for (const r of reteAll) aggiungiNonNoto(r, 'primaria');
+    for (const r of secAll) aggiungiNonNoto(r, 'secondaria');
     const dichiaratoDopoMap = dichiaratoDopoLaFotografia(dichiarazioniSito, giornoFoto, norm); // ns -> kg
 
     // === 1e. TERMINATI CON LE DATE DA SISTEMARE (regola dell'utente, 22/09/2026) ===
@@ -411,33 +474,23 @@ export default async function(req) {
     // nella giacenza a portale c'e' e il gestionale non lo colloca. La differenza
     // si dice con i numeri, non si nasconde.
     const daSistemare = formulariDaSistemare({ anno: annoNum, chiaveDi: norm });
-    const ruoloDest = (r) => (tipoStoc(r) ? 'stoc' : 'imp');
-    // Il canale della segnalazione e' quello del materiale: una classe 9 si segnala
-    // sotto ACI anche se sta nell'archivio della rete, come la conta la giacenza.
-    for (const r of reteAll) daSistemare.segna(r, { tipo: 'primaria', canale: eAci(r) ? 'ACI' : 'RETE', ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: daChi(r) });
-    for (const r of aciAll) daSistemare.segna(r, { tipo: 'primaria', canale: 'ACI', ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: daChi(r) });
-    for (const r of extraAll) {
-      if (!eSecondariaExtra(r)) {
-        daSistemare.segna(r, { tipo: 'primaria', canale: 'EXTRA_RACCOLTA', ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: daChi(r) });
-        continue;
-      }
-      daSistemare.segna(r, { tipo: 'secondaria', canale: 'EXTRA_RACCOLTA', ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: r.stoccaggio });
-      daSistemare.segna(r, { tipo: 'secondaria', canale: 'EXTRA_RACCOLTA', ruolo: 'stoc', verso: 'partenza', sito: r.stoccaggio, controparte: r.destinazione });
-    }
-    for (const r of secAll) {
-      const canale = eAci(r) ? 'ACI' : 'RETE';
-      daSistemare.segna(r, { tipo: 'secondaria', canale, ruolo: ruoloDest(r), verso: 'arrivo', sito: r.destinazione, controparte: r.stoccaggio });
-      daSistemare.segna(r, { tipo: 'secondaria', canale, ruolo: 'stoc', verso: 'partenza', sito: r.stoccaggio, controparte: r.destinazione });
-    }
-    // Le terziarie partono dall'impianto verso le cementerie: sono formulari
-    // terminati anche loro, ma NON sono un movimento di canale - la giacenza di
-    // PFU non la toccano. Segnate 'RETE' finivano nel numero della rete insieme a
-    // primarie e secondarie, in un riquadro che dichiara di non mescolare mai i
-    // canali: hanno un gruppo loro, e il numero della rete resta quello della rete.
-    const GRUPPO_TERZIARIE = 'TERZIARIE';
-    for (const r of terzAll) daSistemare.segna(r, { tipo: 'terziaria', canale: GRUPPO_TERZIARIE, ruolo: 'imp', verso: 'partenza', sito: r.unita_locale_origine || r.ragione_sociale, controparte: r.destinazione });
-    // I gruppi di un soggetto: prima i canali nel loro ordine, le terziarie in coda.
-    const ORDINE_GRUPPI = ['RETE', 'ACI', 'EXTRA_RACCOLTA', GRUPPO_TERZIARIE];
+    // Ogni formulario si segnala dove arriva e, se e' una secondaria o una
+    // terziaria, da dove parte. Chi, con che ruolo e su che canale lo dice
+    // ingressoMovimento, come per i conti: il canale e' quello del materiale (una
+    // classe 9 si segnala sotto ACI anche se sta nell'archivio della rete) e una
+    // secondaria arrivata a un piazzale si segnala sul piazzale. Le terziarie,
+    // che partono verso le cementerie e non sono un movimento di canale, hanno il
+    // gruppo TERZIARIE: lo decide formulariDaSistemare, non chi chiama.
+    const segnaDate = (r, archivio) => {
+      const d = dove(r, archivio);
+      if (d.arrivo) daSistemare.segna(r, { tipo: d.tipo, canale: d.canale, ruolo: d.arrivo.ruolo, verso: 'arrivo', sito: d.arrivo.sito, controparte: d.tipo === 'secondaria' ? r.stoccaggio : daChi(r) });
+      if (d.partenza) daSistemare.segna(r, { tipo: d.tipo, canale: d.canale, ruolo: d.partenza.ruolo, verso: 'partenza', sito: d.partenza.sito, controparte: r.destinazione });
+    };
+    for (const r of reteAll) segnaDate(r, 'PrimariaRete');
+    for (const r of aciAll) segnaDate(r, 'PrimariaAci');
+    for (const r of extraAll) segnaDate(r, 'ExtraRaccolta');
+    for (const r of secAll) segnaDate(r, 'Secondaria');
+    for (const r of terzAll) segnaDate(r, 'Terziaria');
     const datePerRiga = new Map(); // ns|td -> gruppi di quel soggetto, uno per canale piu' le terziarie
     for (const g of daSistemare.gruppi(portaleConosce)) {
       const k = g.chiave + '|' + g.ruolo;
@@ -462,15 +515,18 @@ export default async function(req) {
     // del soggetto. Chi la legge deve ricordarsene, perche' un soggetto che e'
     // impianto e piazzale ha due righe e la troverebbe su entrambe: va sulla riga
     // dell'impianto, che e' chi tratta.
-    const dichiaratoCanaleMap = new Map(); // ns|canale -> t
-    for (const d of dichiarazioniSito) {
-      if (Number(d.anno) !== annoNum || !d.caricata_inviata) continue;
-      const ns = norm(d.sito);
-      if (!ns) continue;
-      const canale = d.canale || 'RETE';
-      const k = ns + '|' + canale;
-      dichiaratoCanaleMap.set(k, (dichiaratoCanaleMap.get(k) || 0) + (Number(d.quantita_kg) || 0) / 1000);
-    }
+    //
+    // LETTE COME LE LEGGE IL RIEPILOGO, CON LA STESSA FUNZIONE (chiusura
+    // dell'audit, 11/10/2026, C4). Qui si sommavano tutte le righe caricate dello
+    // stesso soggetto e canale; il riepilogo le unisce mese per mese e di una
+    // gemella di rete o di ACI tiene la prima. Con due ACI di aprile da 2 t, tutte
+    // e due caricate, le Giacenze dicevano dichiarato 4 e giacenza 1, le
+    // Dichiarazioni 2 e 3. Ora i due moduli chiamano leggiDichiarazioni
+    // (shared/dichiarazioniImpianti.ts): la gemella resta un doppione da sistemare
+    // - il riepilogo la elenca - ma non sposta piu' i numeri da una parte sola.
+    // L'extra raccolta si somma, campagna per campagna, coi soli chili caricati.
+    const dichiarazioniLette = leggiDichiarazioni(dichiarazioniSito, { anno: annoNum, chiaveDi: norm });
+    const dichiaratoCanale = (ns, canale) => dichiarazioniLette.kgCaricati(ns, canale) / 1000; // t
 
     // Anno di competenza: quello della fine del trasporto dell'ordine, mai della
     // chiusura a portale. Solo rete: una riga ACI non entra.
@@ -514,25 +570,36 @@ export default async function(req) {
     // senza che niente lo dicesse (audit del 03/10/2026).
     //
     // Il resto di questo file, quando il tipo non si sa, lo tratta come impianto
-    // e lo segnala (attribuisci, ruoloDest): qui si fa lo stesso. Meglio il
+    // e lo segnala (attribuisci, ingressoMovimento): qui si fa lo stesso. Meglio il
     // numero giusto con un avviso che un numero sbagliato in silenzio.
+    //
+    // IL CONFERITO E' DELLE SOLE PRIMARIE, su tutti e tre i canali (chiusura
+    // dell'audit, 11/10/2026, R11). Chi riceve, con che ruolo e su che canale lo
+    // dice ingressoMovimento, come per il resto del file. Per l'extra raccolta qui
+    // entravano anche i trasferimenti da un piazzale (le secondarie di extra
+    // raccolta): ogni PFU passato da un piazzale si contava due volte - una quando
+    // e' stato raccolto, una quando si e' spostato - nella colonna «Extra», nel
+    // totale e nel riquadro «Extra … t, fuori target». 3 t raccolte facevano 4,5
+    // t, mentre la dashboard e la pagina Extra Raccolta dicevano 3. E' lo stesso
+    // difetto del totale della rete chiuso il 10/10, rimasto sull'extra. Le
+    // secondarie di extra hanno ora le loro colonne, come quelle ACI.
     const senzaTipo = new Map(); // ns -> { n, kg }
-    const conferitoPer = (records) => {
-      const mappa = new Map(); // ns|td -> t
-      for (const r of records) {
-        if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
-        const nd = norm(r.destinazione);
-        if (!nd) continue;
-        let td = tdNorm(r.tipo_destinazione);
-        if (!td) {
-          td = 'imp';
-          const s = senzaTipo.get(nd) || { n: 0, kg: 0 };
-          s.n++;
-          s.kg += Number(r.peso_effettivo) || 0;
-          senzaTipo.set(nd, s);
+    const conferitoPer = (canale, ...fonti) => { // fonti: [records, archivio]
+      const mappa = new Map(); // ns|ruolo -> t
+      for (const [records, archivio] of fonti) {
+        for (const r of records) {
+          if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
+          const d = dove(r, archivio);
+          if (d.tipo !== 'primaria' || d.canale !== canale || !d.arrivo) continue;
+          if (d.senza_tipo) {
+            const s = senzaTipo.get(d.arrivo.chiave) || { n: 0, kg: 0 };
+            s.n++;
+            s.kg += Number(r.peso_effettivo) || 0;
+            senzaTipo.set(d.arrivo.chiave, s);
+          }
+          const k = d.arrivo.chiave + '|' + d.arrivo.ruolo;
+          mappa.set(k, (mappa.get(k) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
         }
-        const k = nd + '|' + td;
-        mappa.set(k, (mappa.get(k) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
       }
       return mappa;
     };
@@ -543,9 +610,9 @@ export default async function(req) {
     // target - numeri su cui si decide quanto raccogliere - e la fatturazione, che
     // usa canaleMovimento, la fatturerebbe ACI. E' lo stesso difetto gia' corretto
     // qui sotto per le secondarie, che per le primarie era rimasto.
-    const confPrimMap = conferitoPer(reteAll.filter(r => !eAci(r)));
-    const confAciMap = conferitoPer([...aciAll, ...reteAll.filter(r => eAci(r))]);
-    const confExtraMap = conferitoPer(extraAll);
+    const confPrimMap = conferitoPer('RETE', [reteAll, 'PrimariaRete']);
+    const confAciMap = conferitoPer('ACI', [aciAll, 'PrimariaAci'], [reteAll, 'PrimariaRete']);
+    const confExtraMap = conferitoPer('EXTRA_RACCOLTA', [extraAll, 'ExtraRaccolta']);
     for (const [ns, s] of senzaTipo) {
       anomalie.push({
         tipo: 'senza_tipo_destinazione',
@@ -571,20 +638,14 @@ export default async function(req) {
     // raccolto che l'utente vede in Target & Status (PROV_TO_REGION in
     // raccoltoCalculator): le righe del target sono per raccoglitore e regione, e
     // due modi diversi di dire la regione non si incontrerebbero mai.
-    const conferitiRaccoglitori = [];
-    for (const r of reteAll) {
-      if (eAci(r) || !isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
-      const g = giornoRoma(r.trasporto_finito_il);
-      conferitiRaccoglitori.push({
-        raccoglitore: r.trasportatore,
-        regione: PROV_TO_REGION[String(r.provincia || '').toUpperCase().trim()] || r.regione || '',
-        sito: r.destinazione,
-        ruolo: tipoStoc(r) ? 'stoc' : 'imp',
-        // il mese e' quello della FINE DEL TRASPORTO, come ogni periodo qui dentro
-        mese: g ? Number(g.slice(5, 7)) - 1 : -1,
-        kg: Number(r.peso_effettivo) || 0,
-      });
-    }
+    //
+    // LE RIGHE SU CUI SI RIPARTISCE SONO QUELLE DELLA PREDITTIVITA' (revisione
+    // della chiusura dell'audit, 11/10/2026): conferitiPerRipartizione, in
+    // shared/targetImpianti.ts. Qui c'era un ciclo con le stesse regole - rete,
+    // terminate, fine trasporto nell'anno, regione dalla provincia, il mese della
+    // fine trasporto - scritto una seconda volta; e lo stesso target deve dare lo
+    // stesso sito nei due moduli (prove/stessoTargetStessoSito.mjs).
+    const conferitiRaccoglitori = conferitiPerRipartizione(reteAll, annoNum);
     const ripartite = ripartisciTargetPrimarie({
       raccoglitori: targetRaccoglitori, mensili: targetMensili, conferiti: conferitiRaccoglitori,
       anno: annoNum, chiave: norm,
@@ -605,35 +666,38 @@ export default async function(req) {
     // si contava due volte (audit del 03/10/2026).
     //
     // Adesso la chiave degli ingressi porta il ruolo di chi riceve, come gia'
-    // faceva il resto del file (ruoloDest). Le uscite restano per nome: una
-    // secondaria parte sempre da un piazzale.
-    const secInMap = new Map();     // ns|ruolo -> t di rete in ingresso
-    const secOutMap = new Map();    // ns -> t di rete in uscita
-    const secAciInMap = new Map();  // ns|ruolo -> t ACI in ingresso
-    const secAciOutMap = new Map(); // ns -> t ACI in uscita
-    for (const r of secAll) {
-      if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
+    // faceva il resto del file. Le uscite restano per nome: una secondaria parte
+    // sempre da un piazzale. Ruolo, canale e partenza li dice ingressoMovimento,
+    // la stessa risposta del modulo Dichiarazioni (11/10/2026, C2 e C9).
+    //
+    // Le secondarie di EXTRA RACCOLTA hanno le loro due colonne, come l'ACI
+    // (11/10/2026, R11): fuori dal conferito, che e' raccolta, e dentro la
+    // giacenza extra dell'impianto che le riceve, che quindi non cambia.
+    const secInMap = new Map();       // ns|ruolo -> t di rete in ingresso
+    const secOutMap = new Map();      // ns -> t di rete in uscita
+    const secAciInMap = new Map();    // ns|ruolo -> t ACI in ingresso
+    const secAciOutMap = new Map();   // ns -> t ACI in uscita
+    const secExtraInMap = new Map();  // ns|ruolo -> t di extra raccolta in ingresso
+    const secExtraOutMap = new Map(); // ns -> t di extra raccolta in uscita
+    const mappeSecondarie = { RETE: [secInMap, secOutMap], ACI: [secAciInMap, secAciOutMap], EXTRA_RACCOLTA: [secExtraInMap, secExtraOutMap] };
+    const contaSecondaria = (r, archivio) => {
+      if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) return;
+      const d = dove(r, archivio);
+      if (d.tipo !== 'secondaria') return;
       const t = (Number(r.peso_effettivo) || 0) / 1000;
-      const aci = eAci(r);
-      const nd = norm(r.destinazione);
-      if (nd) {
-        const m = aci ? secAciInMap : secInMap;
-        const k = nd + '|' + (tipoStoc(r) ? 'stoc' : 'imp');
-        m.set(k, (m.get(k) || 0) + t);
-      }
-      const ns = norm(r.stoccaggio);
-      if (ns) {
-        const m = aci ? secAciOutMap : secOutMap;
-        m.set(ns, (m.get(ns) || 0) + t);
-      }
-    }
+      const [mIn, mOut] = mappeSecondarie[d.canale];
+      if (d.arrivo) { const k = d.arrivo.chiave + '|' + d.arrivo.ruolo; mIn.set(k, (mIn.get(k) || 0) + t); }
+      if (d.partenza) mOut.set(d.partenza.chiave, (mOut.get(d.partenza.chiave) || 0) + t);
+    };
+    for (const r of secAll) contaSecondaria(r, 'Secondaria');
+    for (const r of extraAll) contaSecondaria(r, 'ExtraRaccolta');
 
     const terzMap = new Map(); // ns -> t
     for (const r of terzAll) {
       if (!isTerminato(r) || !inYear(r.trasporto_finito_il)) continue;
-      const no = norm(r.unita_locale_origine || r.ragione_sociale);
-      if (!no) continue;
-      terzMap.set(no, (terzMap.get(no) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
+      const d = dove(r, 'Terziaria');
+      if (!d.partenza) continue;
+      terzMap.set(d.partenza.chiave, (terzMap.get(d.partenza.chiave) || 0) + (Number(r.peso_effettivo) || 0) / 1000);
     }
 
     // === 3b. GIACENZASITO (serve per risolvere il td delle terziarie) ===
@@ -655,6 +719,11 @@ export default async function(req) {
     for (const ns of stocRilevMap.keys()) rowKeys.add(ns + '|stoc');
     for (const k of dichiaratoMap.keys()) rowKeys.add(k);
     for (const k of confPrimMap.keys()) rowKeys.add(k);
+    // Anche chi ha ricevuto solo ACI o solo extra raccolta: senza la sua riga
+    // quei chili non entravano nel totale, che deve fare la raccolta dell'anno
+    // come la dashboard e la pagina Extra Raccolta (11/10/2026, R11).
+    for (const k of confAciMap.keys()) rowKeys.add(k);
+    for (const k of confExtraMap.keys()) rowKeys.add(k);
     // Per le mappe per-ns dell'anno corrente (secOutMap, terzMap): risolvi il td
     function resolveTds(ns) {
       const tds = [...giacMapKeys].filter(k => k.startsWith(ns + '|')).map(k => k.split('|')[1]);
@@ -664,12 +733,16 @@ export default async function(req) {
     // dice il tipo di destinazione del viaggio, non c'e' niente da risolvere.
     for (const k of secInMap.keys()) rowKeys.add(k);
     for (const k of secAciInMap.keys()) rowKeys.add(k);
+    for (const k of secExtraInMap.keys()) rowKeys.add(k);
     for (const ns of secOutMap.keys()) {
       // secondarie_out riguarda lo stoccaggio
       const tds = resolveTds(ns);
       if (tds.includes('stoc')) rowKeys.add(ns + '|stoc');
       else rowKeys.add(ns + '|stoc');
     }
+    // Lo stesso per chi spedisce solo ACI o solo extra raccolta (11/10/2026): nelle
+    // Dichiarazioni quel piazzale c'e', con le sue partenze.
+    for (const ns of [...secAciOutMap.keys(), ...secExtraOutMap.keys()]) rowKeys.add(ns + '|stoc');
     for (const ns of terzMap.keys()) {
       for (const td of resolveTds(ns)) rowKeys.add(ns + '|' + td);
     }
@@ -724,6 +797,9 @@ export default async function(req) {
       // (richiesta dell'utente, 28/09/2026): si apre il numero della colonna e
       // si vede da dove viene, ticket compreso.
       let aci_dettaglio = null;
+      // Perche' la giacenza di rete non c'e', quando non c'e': la pagina lo dice al
+      // posto del numero (chiusura dell'audit, 11/10/2026, C5b e C15).
+      let perche_senza_giacenza = null;
 
       if (td === 'stoc') {
         // in_attesa_dichiarazione_t: primarie arrivate allo stoccaggio che il file del
@@ -797,7 +873,16 @@ export default async function(req) {
           const intermedie = iAncora >= 0 ? storico.slice(iAncora + 1, storico.length - 1) : [];
           verifica_rilevazione = verificaRilevazione(rilev.record, precedente, suoiMovimenti, { ancora, intermedie });
         } else {
-          giacenza_portale_t = 0;
+          // UN PIAZZALE SENZA NESSUNA LETTURA NON HA UNA GIACENZA (chiusura
+          // dell'audit, 11/10/2026, C15). Qui c'era 0, cioe' «piazzale vuoto»,
+          // accanto a un testo che diceva «non vuol dire zero» e che non si vedeva
+          // mai, perche' lo si mostra solo al posto di un numero che manca. Il
+          // modulo Dichiarazioni diceva l'apertura scritta piu' il saldo dell'anno:
+          // tre risposte alla stessa domanda. La giacenza di un piazzale parte da
+          // una lettura (regola della direzione, 24/09/2026): senza, null in tutti e
+          // due i moduli, col perche' (shared/giacenzaStoccaggi.ts).
+          giacenza_portale_t = null;
+          perche_senza_giacenza = PERCHE_PIAZZALE_SENZA_LETTURA;
           // L'anomalia si segnala solo se la riga sopravvive al filtro di
           // attivita' piu' sotto: non ha senso lamentare una rilevazione mancante
           // per un sito che nell'anno non e' nemmeno operativo.
@@ -839,12 +924,21 @@ export default async function(req) {
         // trattamento non e' a nostro carico e il portale non tiene per noi una
         // giacenza di rete. Si scrive null, e la cella dice perche'.
         if (nonDichiaraRete.has(ns)) { giacenza_portale_t = null; giacenza_rete_t = null; giacenza_classi_kg = null; }
+        // SENZA IL FILE DEL PORTALE LA GIACENZA DI RETE NON C'E' (chiusura
+        // dell'audit, 11/10/2026, C5b). Senza nessuna fotografia qui si faceva
+        // 0 + 0 - 0 e si scriveva 0, cioe' «impianto vuoto»; il modulo
+        // Dichiarazioni dice «—». Succede solo con l'archivio degli ordini non
+        // dichiarati vuoto, e allora non e' vuoto l'impianto: manca il dato.
+        // Per chi la rete non la dichiara il perche' e' quello, qui sopra.
+        if (!giornoFoto && !nonDichiaraRete.has(ns)) { giacenza_portale_t = null; giacenza_rete_t = null; giacenza_classi_kg = null; perche_senza_giacenza = PERCHE_SENZA_FOTOGRAFIA; }
         aggiornata_al = datiAggiornatiAl || giornoFoto || null;
       }
 
       const dichiarato_t = dichiaratoMap.get(key) || 0;
       const der = derivatiMap.get(key) || { granulo: 0, fibre: 0, metallo: 0, cippato: 0, ciabattato: 0 };
 
+      // Il conferito di ogni canale e' delle sole primarie: e' quello che e' stato
+      // raccolto e portato qui. Le secondarie hanno le loro colonne.
       const conferito_primarie_t = confPrimMap.get(key) || 0;
       const conferito_aci_t = confAciMap.get(key) || 0;
       const conferito_extra_t = confExtraMap.get(key) || 0;
@@ -863,6 +957,9 @@ export default async function(req) {
       // Le secondarie ACI restano a parte: non entrano nel conferito di rete.
       const secondarie_aci_in_t = secAciInMap.get(key) || 0;
       const secondarie_aci_out_t = td === 'stoc' ? (secAciOutMap.get(ns) || 0) : 0;
+      // E quelle di extra raccolta, allo stesso modo (11/10/2026, R11).
+      const secondarie_extra_in_t = secExtraInMap.get(key) || 0;
+      const secondarie_extra_out_t = td === 'stoc' ? (secExtraOutMap.get(ns) || 0) : 0;
       const secondarie_nette_t = secondarie_in_t - secondarie_out_t;
       const terziarie_t = td === 'imp' ? (terzMap.get(ns) || 0) : 0;
 
@@ -885,8 +982,10 @@ export default async function(req) {
         // Al netto delle dichiarazioni dell'anno chiuso caricate dopo la lettura del
         // 31/12 (aperturaNetta, 10/10/2026): lo stesso conto del modulo Dichiarazioni.
         const aperturaAci = g ? aperturaNetta(g, 'ACI', dichiarazioniSito, norm).netta_t : 0;
-        giacenza_aci_t = aperturaAci + conferito_aci_t + secondarie_aci_in_t - (dichiaratoCanaleMap.get(ns + '|ACI') || 0);
-        giacenza_extra_t = conferito_extra_t - (dichiaratoCanaleMap.get(ns + '|EXTRA_RACCOLTA') || 0);
+        giacenza_aci_t = aperturaAci + conferito_aci_t + secondarie_aci_in_t - dichiaratoCanale(ns, 'ACI');
+        // Le secondarie di extra arrivate qui entrano nella giacenza come quelle
+        // ACI: fuori dal conferito, la giacenza resta quella di prima.
+        giacenza_extra_t = conferito_extra_t + secondarie_extra_in_t - dichiaratoCanale(ns, 'EXTRA_RACCOLTA');
       }
 
       // Conferito e' cio' che il sito ha ricevuto. Le uscite non sono
@@ -912,8 +1011,11 @@ export default async function(req) {
       const target_totale_t = tgt.target_totale_t;
       // L'apertura di rete mostrata e' anche lei al netto (aperturaNetta): la colonna
       // deve dire lo stesso numero che il modulo Dichiarazioni usa come apertura.
+      // Per un piazzale con almeno una lettura e' l'ancora portata al 31/12
+      // (aperturaPiazzale): il campo scritto conta solo per chi letture non ne ha.
       const aperturaRete = g ? aperturaNetta(g, 'RETE', dichiarazioniSito, norm) : null;
-      const giacenza_riferimento_t = aperturaRete ? aperturaRete.netta_t : 0;
+      const aperturaLetta = td === 'stoc' ? aperturaPiazzale(ns, 'RETE') : null;
+      const giacenza_riferimento_t = aperturaLetta !== null ? aperturaLetta : aperturaRete ? aperturaRete.netta_t : 0;
       const tipologia_trattamento = g?.tipologia_trattamento || '';
 
       // RESIDUO E COPERTURA RISPONDONO A DUE DOMANDE DIVERSE, e per questo si
@@ -953,9 +1055,12 @@ export default async function(req) {
       // a zero.
       // I terminati con le date da sistemare di questo soggetto, un canale per volta.
       const dateRiga = datePerRiga.get(key) || [];
+      // Le secondarie di extra raccolta sono uscite dal conferito: chi riceve solo
+      // quelle resta in tabella come prima. E chi riceve solo secondarie ACI c'e'
+      // anche lui, come nelle Dichiarazioni (11/10/2026).
       const haAttivita = giacenza_portale_t > 0 || in_attesa_dichiarazione_t > 0
         || ordini_da_dichiarare > 0 || dichiarato_t > 0 || conferito_t > 0 || conferito_aci_t > 0 || conferito_extra_t > 0
-        || dateRiga.length > 0;
+        || secondarie_aci_in_t > 0 || secondarie_extra_in_t > 0 || dateRiga.length > 0;
       if (!g && td === 'imp' && !haAttivita && !(target_totale_t > 0) && !(target_primarie_t > 0)) continue;
 
       if (senzaRilevazione) anomalie.push({ tipo: 'stoccaggio_senza_rilevazione', sito: sitoNome });
@@ -979,6 +1084,10 @@ export default async function(req) {
         rete_non_dovuta: td === 'imp' && nonDichiaraRete.has(ns),
         giacenza_aci_t: giacenza_aci_t !== null ? r2(giacenza_aci_t) : null,
         giacenza_extra_t: giacenza_extra_t !== null ? r2(giacenza_extra_t) : null,
+        // Perche' la giacenza di rete e' null: il file del portale mai caricato
+        // (impianto) o nessuna rilevazione (piazzale). Per chi la rete non la
+        // dichiara il perche' lo dice rete_non_dovuta.
+        perche_senza_giacenza,
         fotografia: fotografia && { ...fotografia, foto_t: r2(fotografia.foto_t), aggiunti_t: r2(fotografia.aggiunti_t), dichiarato_dopo_t: r2(fotografia.dichiarato_dopo_t) },
         giacenza_classi_kg: giacenza_classi_kg ? Object.fromEntries(Object.entries(giacenza_classi_kg).map(([c, v]) => [c, Math.round(v)])) : null,
         rilevazione_classi_kg,
@@ -1017,8 +1126,8 @@ export default async function(req) {
         //
         // Un piazzale non ha un dichiarato: null, cosi' la cella dice perche'
         // invece di uno zero, che si leggerebbe «non ha ancora dichiarato».
-        dichiarato_aci_t: td === 'imp' ? r2(dichiaratoCanaleMap.get(ns + '|ACI') || 0) : null,
-        dichiarato_extra_t: td === 'imp' ? r2(dichiaratoCanaleMap.get(ns + '|EXTRA_RACCOLTA') || 0) : null,
+        dichiarato_aci_t: td === 'imp' ? r2(dichiaratoCanale(ns, 'ACI')) : null,
+        dichiarato_extra_t: td === 'imp' ? r2(dichiaratoCanale(ns, 'EXTRA_RACCOLTA')) : null,
         granulo_t: r2(der.granulo),
         fibre_t: r2(der.fibre),
         metallo_t: r2(der.metallo),
@@ -1032,6 +1141,8 @@ export default async function(req) {
         secondarie_nette_t: r2(secondarie_nette_t),
         secondarie_aci_in_t: r2(secondarie_aci_in_t),
         secondarie_aci_out_t: r2(secondarie_aci_out_t),
+        secondarie_extra_in_t: r2(secondarie_extra_in_t),
+        secondarie_extra_out_t: r2(secondarie_extra_out_t),
         terziarie_t: r2(terziarie_t),
         conferito_t: r2(conferito_t),
         target_primarie_t: r2(target_primarie_t),
@@ -1125,6 +1236,7 @@ export default async function(req) {
       'giacenza_portale_t', 'giacenza_aci_t', 'giacenza_extra_t', 'in_attesa_dichiarazione_t',
       'dichiarato_t', 'dichiarato_aci_t', 'dichiarato_extra_t', 'granulo_t', 'fibre_t', 'metallo_t', 'cippato_t', 'ciabattato_t',
       'conferito_primarie_t', 'conferito_aci_t', 'conferito_extra_t', 'secondarie_in_t', 'secondarie_out_t', 'secondarie_nette_t', 'terziarie_t',
+      'secondarie_aci_in_t', 'secondarie_aci_out_t', 'secondarie_extra_in_t', 'secondarie_extra_out_t',
       'conferito_t', 'target_primarie_t', 'target_totale_t', 'giacenza_riferimento_t'
     ];
     const totali = {};

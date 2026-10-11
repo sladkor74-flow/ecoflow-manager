@@ -70,6 +70,8 @@ export const sommaMateriali = (d) => MATERIALI.reduce((s, m) => s + (Number(d &&
 // prima) e quelle tonnellate SPARISCONO; le giacenze le sommano e quelle
 // tonnellate si contano DUE VOLTE, con la giacenza che scende. Lo stesso
 // errore, un dato in meno da una parte e uno in piu' dall'altra.
+// Dall'11/10/2026 i due moduli leggono con leggiDichiarazioni, qui sotto: la
+// gemella resta un doppione da sistemare, ma i numeri non si separano piu'.
 //
 // L'EXTRA RACCOLTA E' L'ECCEZIONE, e l'ha detta l'utente (10/10/2026): a
 // portale non e' gestita e sono campagne occasionali, quindi nello stesso mese
@@ -205,6 +207,44 @@ export function unisciDichiarazioni(a, b) {
   };
   for (const m of MATERIALI) unita[m.chiave] = (Number(a[m.chiave]) || 0) + (Number(b[m.chiave]) || 0);
   return unita;
+}
+
+/**
+ * LE DICHIARAZIONI MENSILI LETTE IN UN MODO SOLO (chiusura dell'audit, 11/10/2026).
+ *
+ * Il dichiarato caricato di un sito, canale per canale, si leggeva in due modi:
+ * il riepilogo univa le righe della stessa chiave con unisciDichiarazioni e
+ * contava kgCaricatiDi, quindi di una gemella di rete o di ACI teneva la prima;
+ * le Giacenze sommavano tutte le righe caricate. Con due ACI di aprile da 2 t,
+ * tutte e due caricate, le Giacenze dicevano dichiarato 4 e giacenza 1, le
+ * Dichiarazioni 2 e 3 (audit del 10/10/2026, C4): la regola «i due moduli dicono
+ * gli stessi numeri» teneva solo finche' una gemella non c'era. Ora i due moduli
+ * chiamano questa funzione, e la gemella si dice (doppioni) invece di spostare
+ * i numeri da una parte sola.
+ *
+ * @param {array} righe  record DichiarazioneSito
+ * @param {object} p     { anno, chiaveDi }: l'anno da tenere (0 o assente: tutte) e il normalizzatore dei nomi
+ * @returns {{ perChiave, caricati, kgCaricati }}
+ *   perChiave   Map chiaveDichiarazione -> la dichiarazione del mese, gia' unita
+ *   caricati    Map 'sito normalizzato|canale' -> kg caricati a portale
+ *   kgCaricati  (ns, canale) -> kg caricati a portale di quel sito su quel canale
+ */
+export function leggiDichiarazioni(righe, { anno, chiaveDi } = {}) {
+  const a = Number(anno) || 0;
+  const perChiave = new Map();
+  for (const r of righe || []) {
+    if (!r || (a && Number(r.anno) !== a)) continue;
+    const k = chiaveDichiarazione(r, chiaveDi);
+    perChiave.set(k, unisciDichiarazioni(perChiave.get(k), r));
+  }
+  const caricati = new Map();
+  for (const [k, d] of perChiave) {
+    const [ns, canale] = k.split('|');
+    if (!ns) continue;
+    const kc = `${ns}|${canale}`;
+    caricati.set(kc, (caricati.get(kc) || 0) + kgCaricatiDi(d));
+  }
+  return { perChiave, caricati, kgCaricati: (ns, canale) => caricati.get(`${ns}|${canale || 'RETE'}`) || 0 };
 }
 
 /**

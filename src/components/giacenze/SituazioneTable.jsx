@@ -549,7 +549,11 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                         </td>
                         <td className="px-3 py-2"></td>
                         <td className="px-3 py-2 text-right tabular-nums">
-                          <ValoreGiacenza valore={giacenza} negativa={c.negativa ? c.negativa(r) : false} perche={c.chiave === 'RETE' && r.rete_non_dovuta ? RETE_NON_DOVUTA : c.senza_giacenza} />
+                          {/* Il perche' di una giacenza di rete che manca lo manda il
+                              calcolo, riga per riga (11/10/2026): un impianto senza il
+                              file del portale e un piazzale senza lettura non sono la
+                              stessa cosa, e nessuno dei due e' uno zero. */}
+                          <ValoreGiacenza valore={giacenza} negativa={c.negativa ? c.negativa(r) : false} perche={c.chiave !== 'RETE' ? c.senza_giacenza : r.rete_non_dovuta ? RETE_NON_DOVUTA : (r.perche_senza_giacenza || c.senza_giacenza)} />
                           {c.barra && (
                             <div className="mt-1 h-1 bg-muted rounded-full overflow-hidden">
                               <div className="h-full bg-primary rounded-full" style={{ width: `${barWidth}%` }} />

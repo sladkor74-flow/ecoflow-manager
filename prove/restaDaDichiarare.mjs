@@ -98,8 +98,12 @@ console.log('IL FERRO, E I MESI CHE NON SI DEVONO');
 console.log('LA FUNZIONE FA QUESTO, NON ALTRO');
 {
   const s = sorgente('base44/functions/riepilogoDichiarazioni/entry.ts');
-  verifica('si tiene da parte solo cio che e caricato a portale',
-    /const caricatoAPortale = dich\.caricata_inviata \? dichiarata : 0;/.test(s));
+  // Dal 11/10/2026 con la regola di tutto il modulo, kgCaricatiDi: su due
+  // campagne di extra raccolta unite, una caricata e una no, il flag
+  // dell'unione e' falso e il conto a mano diceva caricato 0.
+  verifica('si tiene da parte solo cio che e caricato a portale, con la regola di tutto il modulo',
+    /const caricatoAPortale = Math\.round\(kgCaricatiDi\(dich\)\);/.test(s)
+    && !/const caricatoAPortale = dich\.caricata_inviata \? dichiarata : 0;/.test(s));
   verifica('e il conto del mese e quello che non gli e uscito',
     s.includes('da_dichiarare_kg: m.non_dovuta ? 0 : allineato.resta[i]'));
   verifica('il vecchio conto, che sottraeva tutto, non c e piu',
@@ -112,10 +116,11 @@ console.log('LA FUNZIONE FA QUESTO, NON ALTRO');
   verifica('la dichiarazione non caricata resta visibile a parte',
     /dichiarato_non_caricato_kg: dichiarata - caricatoAPortale/.test(s));
   verifica('solo metalli NON azzera il conto', !/solo_metalli.*\? 0/.test(s));
-  // Il totale di riga che la colonna mostra e' la somma dei mesi.
-  verifica('il totale della riga e la somma dei mesi',
-    /da_dichiarare_t: t3\(mesi\.reduce\(\(s, m\) => s \+ m\.da_dichiarare_kg, 0\) \/ 1000\)/.test(s)
-    && /resta_t: t3\(mesi\.reduce\(\(s, m\) => s \+ m\.resta_kg, 0\) \/ 1000\)/.test(s));
+  // Il totale di riga che la colonna mostra e' la somma dei mesi, e dal
+  // 11/10/2026 anche della casella dall'anno prima: e' la giacenza del canale.
+  verifica('il totale della riga e la somma dei mesi e della casella dall anno prima',
+    /da_dichiarare_t: t3\(\(mesi\.reduce\(\(s, m\) => s \+ m\.da_dichiarare_kg, 0\) \+ \(prima \? prima\.da_dichiarare_kg : 0\)\) \/ 1000\)/.test(s)
+    && /resta_t: t3\(\(mesi\.reduce\(\(s, m\) => s \+ m\.resta_kg, 0\) \+ restoPrima\) \/ 1000\)/.test(s));
 }
 
 console.log('LA CASELLA: UN NUMERO SOLO, E IL COLORE DICE CHE COS E');
@@ -200,7 +205,10 @@ console.log('LA COLONNA DEL RIEPILOGO: E LA SOMMA DELLA RIGA, CHE E LA GIACENZA'
   // ingressi dell'anno di un impianto che non ci deve niente.
   verifica('dove la rete non e dovuta la colonna tace',
     /flusso\.canale === 'RETE' && sito\.dichiara_rete === false/.test(r));
-  verifica('e l intestazione della tabella resta allineata', /colSpan=\{15\}/.test(r));
+  // Dal 11/10/2026 c'e' una colonna in piu', la casella dall'anno prima: 16.
+  verifica('e l intestazione della tabella resta allineata', /colSpan=\{16\}/.test(r));
+  verifica('la casella dall anno prima sta in testa alla riga, sulle tre linee',
+    r.includes('<CasellaAnnoPrima prima={flusso.dall_anno_prima}') && r.includes('flusso.dall_anno_prima.conferito_kg / 1000') && r.includes('flusso.dall_anno_prima.resta_kg / 1000'));
   // Dove il conto non si chiude si dice, invece di aggiustarlo in silenzio.
   verifica('le due differenze da capire sono scritte sopra la tabella',
     r.includes('uscito_oltre_kg') && r.includes('uscito_non_allocato_kg'));

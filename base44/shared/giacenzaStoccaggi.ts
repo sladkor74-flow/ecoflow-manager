@@ -559,6 +559,22 @@ export function puntiDiPartenza(rilevazioni, chiaveDi) {
   return esito;
 }
 
+// UN PIAZZALE SENZA NESSUNA LETTURA NON HA UNA GIACENZA, IN TUTTI E DUE I MODULI
+// (chiusura dell'audit, 11/10/2026). Alla stessa domanda c'erano tre risposte: le
+// Giacenze scrivevano 0, cioe' «piazzale vuoto», accanto a un testo che diceva
+// «non vuol dire zero»; le Dichiarazioni l'apertura scritta in GiacenzaSito piu'
+// il saldo dell'anno (53 t nell'esempio dell'audit); la Predittivita' rinunciava
+// (C15). La regola e' quella della direzione (24/09/2026): la giacenza di un
+// piazzale parte da una lettura del portale, e senza lettura non c'e'. Quindi
+// null in tutti e due, con questo perche'. Le entrate e le partenze dell'anno si
+// vedono lo stesso, e la quadratura del modulo Dichiarazioni la sua calcolata la
+// fa ancora dall'apertura scritta: e' il portale che manca, non i movimenti.
+export const PERCHE_PIAZZALE_SENZA_LETTURA = "Questo piazzale non ha nessuna rilevazione del portale: la sua giacenza parte da una lettura (la pagina Unita' Locali di Stoccaggio, o la rilevazione del 31/12 salvata dalla chiusura dell'anno) e senza non si calcola. Non vuol dire zero: le entrate e le partenze dell'anno si vedono lo stesso.";
+
+// Un anno chiuso in cui il piazzale non ha una lettura che lo apra: la lettura del
+// 31/12 lo chiude e non lo puo' aprire (revisione finale, 11/10/2026).
+export const PERCHE_PIAZZALE_SENZA_INIZIO = (anno) => `Il ${anno} e' chiuso e questo piazzale non ha una lettura che lo apra (il 31/12/${anno - 1} o una lettura fatta durante il ${anno}): la giacenza di inizio anno non si conosce, e la lettura del 31/12/${anno} non la puo' dare, perche' e' quella con cui si confronta. Non vuol dire zero.`;
+
 /** Di quanto sbaglia una lettura su un canale, in kg e con le classi. */
 function quantoSbaglia(canale) {
   if (!canale || canale.quadra !== false) return '';

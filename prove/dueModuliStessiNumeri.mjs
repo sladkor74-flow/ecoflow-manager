@@ -20,10 +20,23 @@
 // confrontano canale per canale. E' la regola trasformata in un controllo: da
 // oggi, un cambiamento che fa dire a uno dei due moduli un numero diverso
 // dall'altro rompe questa prova.
+//
+// CHIUSURA DELL'AUDIT, 11/10/2026: altre sei trappole (dalla 6 alla 11, in
+// fondo) e un confronto generale, sito per sito e canale per canale, su tutti
+// gli archivi della prova. E l'anno della prova e' l'anno in corso: con il 2026
+// scritto nei dati, dal 1° gennaio 2027 il riepilogo avrebbe trattato l'anno
+// come chiuso - confronto con la lettura del 31/12, non con la fotografia - e la
+// prova sarebbe caduta per una data, non per un difetto.
 // npm run prove
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { oggiRoma } from '../base44/shared/giornoItaliano.ts';
+import { normalizzaRagioneSociale } from '../base44/shared/normalizzaRagioneSociale.ts';
+// I due testi del perche' si leggono dai file che li scrivono: e' lo stesso testo per i due moduli.
+import * as giacenzaPortale from '../base44/shared/giacenzaPortale.ts';
+import * as giacenzaStoccaggi from '../base44/shared/giacenzaStoccaggi.ts';
 
 const qui = (p) => fileURLToPath(new URL(p, import.meta.url));
 
@@ -83,6 +96,9 @@ const funzione = async (nome, guasta = null) => {
 let seq = 0;
 const con = (nome, righe) => { ARCHIVI[nome] = righe.map(r => ({ id: 'r' + (++seq).toString().padStart(4, '0'), ...r })); };
 const g = (giorno) => `${giorno}T08:00:00Z`;
+// L'anno della prova e' quello in corso; `d('03-10')` e' il 10 marzo di quell'anno.
+const ANNO = Number(oggiRoma().slice(0, 4));
+const d = (meseGiorno) => `${ANNO}-${meseGiorno}`;
 const ALFA = 'ALFA RECYCLING SRL';
 const TECNO = 'TECNOGUM SRL';
 
@@ -99,44 +115,44 @@ for (const vuoto of ['DichiarazioneTrattamento', 'Terziaria', 'ImpiantoTargetSec
 // contata una volta sola.
 const BETA = 'BETA STOCCAGGI SRL';
 con('GiacenzaSito', [
-  { sito: ALFA, tipo_destinazione: 'imp', anno: 2026, dichiara_rete: true, giacenza_riferimento_t: 10 },
-  { sito: TECNO, tipo_destinazione: 'imp', anno: 2026, dichiara_rete: false },
-  { sito: BETA, tipo_destinazione: 'stoc', anno: 2026 },
+  { sito: ALFA, tipo_destinazione: 'imp', anno: ANNO, dichiara_rete: true, giacenza_riferimento_t: 10 },
+  { sito: TECNO, tipo_destinazione: 'imp', anno: ANNO, dichiara_rete: false },
+  { sito: BETA, tipo_destinazione: 'stoc', anno: ANNO },
 ]);
 con('PrimariaRete', [
-  primaria('ET26000001', ALFA, 12000, '2026-03-10'),
-  primaria('ET26000002', ALFA, 8000, '2026-09-20'),
-  primaria('ET26000003', TECNO, 5000, '2026-04-15'),
-  primaria('ET26000004', BETA, 6000, '2026-02-10', { tipo_destinazione: 'stoc' }),
+  primaria('ET26000001', ALFA, 12000, d('03-10')),
+  primaria('ET26000002', ALFA, 8000, d('09-20')),
+  primaria('ET26000003', TECNO, 5000, d('04-15')),
+  primaria('ET26000004', BETA, 6000, d('02-10'), { tipo_destinazione: 'stoc' }),
 ]);
 con('Secondaria', [
   { id_ordine: 'SEC26000001', numero_fir: 'FIRS1', classe: 'P - fino a 35 kg', prodotto: '.class1', stoccaggio: BETA, destinazione: ALFA,
-    tipo_destinazione: 'imp', stato: 'terminato', peso_effettivo: 6000, trasporto_finito_il: g('2026-02-25') },
+    tipo_destinazione: 'imp', stato: 'terminato', peso_effettivo: 6000, trasporto_finito_il: g(d('02-25')) },
 ]);
 con('PrimariaAci', [
-  { ...primaria('ET26000010', ALFA, 2000, '2026-04-05'), classe: 'PFU Autodemolizione', prodotto: '.class9' },
+  { ...primaria('ET26000010', ALFA, 2000, d('04-05')), classe: 'PFU Autodemolizione', prodotto: '.class9' },
 ]);
 // TRAPPOLA 2: due campagne di extra raccolta nello stesso mese.
 con('ExtraRaccolta', [
-  { ...primaria('PHX0001', ALFA, 300, '2026-05-10'), tipo_movimento: 'primaria' },
-  { ...primaria('PHX0002', ALFA, 200, '2026-05-22'), tipo_movimento: 'primaria' },
+  { ...primaria('PHX0001', ALFA, 300, d('05-10')), tipo_movimento: 'primaria' },
+  { ...primaria('PHX0002', ALFA, 200, d('05-22')), tipo_movimento: 'primaria' },
 ]);
 // La fotografia del portale: un file degli ordini non dichiarati del 1° ottobre.
 con('OrdineNonDichiarato', [
-  { ordine_primaria: 'ET26000002', destinazione: ALFA, prodotto: '.class1', peso_non_dichiarato_kg: 8000, created_date: '2026-10-01T06:00:00Z', fine_trasporto: '2026-09-20' },
+  { ordine_primaria: 'ET26000002', destinazione: ALFA, prodotto: '.class1', peso_non_dichiarato_kg: 8000, created_date: `${d('10-01')}T06:00:00Z`, fine_trasporto: d('09-20') },
 ]);
 con('DichiarazioneSito', [
-  { sito: ALFA, anno: 2026, mese: 'Marzo', canale: 'RETE', provenienza: '', operazione: 'R3', quantita_kg: 12000, caricata_inviata: true, caricata_il: '2026-04-10' },
-  { sito: ALFA, anno: 2026, mese: 'Aprile', canale: 'ACI', provenienza: 'primaria', operazione: 'R3', quantita_kg: 2000, caricata_inviata: true, caricata_il: '2026-05-10' },
+  { sito: ALFA, anno: ANNO, mese: 'Marzo', canale: 'RETE', provenienza: '', operazione: 'R3', quantita_kg: 12000, caricata_inviata: true, caricata_il: d('04-10') },
+  { sito: ALFA, anno: ANNO, mese: 'Aprile', canale: 'ACI', provenienza: 'primaria', operazione: 'R3', quantita_kg: 2000, caricata_inviata: true, caricata_il: d('05-10') },
   // TRAPPOLA 2: le due campagne, una caricata e una no.
-  { sito: ALFA, anno: 2026, mese: 'Maggio', canale: 'EXTRA_RACCOLTA', provenienza: '', operazione: 'R3', quantita_kg: 300, caricata_inviata: true, caricata_il: '2026-06-10' },
-  { sito: ALFA, anno: 2026, mese: 'Maggio', canale: 'EXTRA_RACCOLTA', provenienza: '', operazione: 'R3', quantita_kg: 200, caricata_inviata: false },
-  // TRAPPOLA 3: una dichiarazione del 2024 caricata dopo la fotografia del 2026.
-  { sito: ALFA, anno: 2024, mese: 'Dicembre', canale: 'RETE', provenienza: '', operazione: 'R3', quantita_kg: 1000, caricata_inviata: true, caricata_il: '2026-10-05' },
+  { sito: ALFA, anno: ANNO, mese: 'Maggio', canale: 'EXTRA_RACCOLTA', provenienza: '', operazione: 'R3', quantita_kg: 300, caricata_inviata: true, caricata_il: d('06-10') },
+  { sito: ALFA, anno: ANNO, mese: 'Maggio', canale: 'EXTRA_RACCOLTA', provenienza: '', operazione: 'R3', quantita_kg: 200, caricata_inviata: false },
+  // TRAPPOLA 3: una dichiarazione di due anni prima caricata dopo la fotografia.
+  { sito: ALFA, anno: ANNO - 2, mese: 'Dicembre', canale: 'RETE', provenienza: '', operazione: 'R3', quantita_kg: 1000, caricata_inviata: true, caricata_il: d('10-05') },
 ]);
 
 const ESEGUI = async (giacenze, riepilogo) => {
-  const [gg, dd] = await Promise.all([giacenze({ anno: 2026 }), riepilogo({ anno: 2026 })]);
+  const [gg, dd] = await Promise.all([giacenze({ anno: ANNO }), riepilogo({ anno: ANNO })]);
   return { g: gg, d: dd };
 };
 const rigaG = (r, sito) => (r.g.righe || []).find(x => x.sito === sito && x.tipo_destinazione === 'imp') || {};
@@ -158,7 +174,8 @@ console.log('UN IMPIANTO NORMALE: TRE CANALI, GLI STESSI NUMERI');
   verifica('ACI, entrato', t2((G.conferito_aci_t || 0) + (G.secondarie_aci_in_t || 0)) === t2(aci.entrato_t), `${G.conferito_aci_t} / ${aci.entrato_t}`);
   verifica('ACI, dichiarato', t2(G.dichiarato_aci_t) === t2(aci.dichiarato_caricato_t), `${G.dichiarato_aci_t} / ${aci.dichiarato_caricato_t}`);
   verifica('ACI, giacenza', t2(G.giacenza_aci_t) === t2(aci.giacenza_t), `${G.giacenza_aci_t} / ${aci.giacenza_t}`);
-  verifica('extra, entrato', t2(G.conferito_extra_t) === t2(extra.entrato_t), `${G.conferito_extra_t} / ${extra.entrato_t}`);
+  // Il conferito e' raccolta, le secondarie a parte: l'entrato e' la somma dei due (11/10/2026).
+  verifica('extra, entrato', t2((G.conferito_extra_t || 0) + (G.secondarie_extra_in_t || 0)) === t2(extra.entrato_t), `${G.conferito_extra_t} + ${G.secondarie_extra_in_t} / ${extra.entrato_t}`);
 }
 
 console.log('TRAPPOLA 2: DUE CAMPAGNE DI EXTRA RACCOLTA, UNA SOLA CARICATA');
@@ -267,6 +284,283 @@ console.log('TRAPPOLA 4: UNA RIGA DEL PORTALE DI UN ALTRO PARTNER');
   const agganciati = (esito.trovati || []).map(x => x.mese || (x.dichiarazione && x.dichiarazione.mese)).filter(Boolean);
   verifica('il nostro luglio NON si aggancia alla riga di un altro partner', !agganciati.includes('Luglio'), JSON.stringify(esito.trovati));
   verifica('e il maggio di SMOCO si', (esito.trovati || []).length >= 1, JSON.stringify(esito.trovati));
+}
+
+// ---------------------------------------------------------------------------
+// LE TRAPPOLE DELLA CHIUSURA DELL'AUDIT, 11/10/2026.
+//
+// Dove entra un movimento lo dice da quel giorno un file solo
+// (shared/ingressoMovimento.ts), chiesto da tutti e due i moduli, e le
+// dichiarazioni mensili si leggono con una funzione sola (leggiDichiarazioni).
+// Queste sono le trappole che li separavano, o li facevano sbagliare insieme:
+//   6. una secondaria arrivata al PIAZZALE di un sito che e' anche impianto: un
+//      modulo la metteva sul piazzale, l'altro sull'impianto (C2);
+//   7. una secondaria di extra raccolta arrivata a un piazzale puro: nelle
+//      Dichiarazioni il piazzale diventava un impianto che deve dichiarare, nelle
+//      Giacenze era nel conferito e non nella giacenza (C9);
+//   8. il conferito extra raccolta che contava anche i trasferimenti: 3 t
+//      raccolte e 4,5 nel riquadro, mentre la dashboard diceva 3 (R11);
+//   9. due dichiarazioni ACI gemelle, tutte e due caricate: sommate in un modulo,
+//      una sola nell'altro (C4);
+//  10. una terziaria con le date da sistemare: un gruppo a parte nelle Giacenze,
+//      rete nelle Dichiarazioni (C3, C11);
+//  11. un piazzale senza nessuna rilevazione e un impianto senza il file del
+//      portale: 0 in un modulo, un numero o «—» nell'altro (C15, C5b).
+// E il confronto generale: ogni impianto e ogni piazzale, canale per canale.
+// ---------------------------------------------------------------------------
+const chiave = normalizzaRagioneSociale;
+const { PERCHE_SENZA_FOTOGRAFIA } = giacenzaPortale;
+const { PERCHE_PIAZZALE_SENZA_LETTURA } = giacenzaStoccaggi;
+// Un perche' e' un testo vero: due campi che mancano tutti e due non sono lo stesso perche'.
+const stessoPerche = (a, b) => typeof b === 'string' && b.length > 20 && a === b;
+const vuoto = (v) => v === null || v === undefined;
+const uguali = (a, b) => (vuoto(a) ? vuoto(b) : !vuoto(b) && t2(a) === t2(b));
+
+/** I due moduli, sito per sito e canale per canale: gli stessi numeri, o nessun numero in tutti e due. */
+const confrontaTutto = (r, etichetta) => {
+  const impiantiD = new Map((r.d.siti || []).filter(s => s.tipo_destinazione !== 'stoc').map(s => [s.chiave, s]));
+  const stoccaggiD = new Map((r.d.stoccaggi || []).map(s => [s.chiave, s]));
+  let confronti = 0;
+  for (const G of r.g.righe || []) {
+    const k = chiave(G.sito);
+    if (G.tipo_destinazione === 'imp') {
+      const D = impiantiD.get(k);
+      if (!D) continue;
+      const c = (canale) => (D.giacenze_canale || []).find(x => x.canale === canale) || {};
+      const voci = [
+        ['rete, giacenza a portale', G.giacenza_portale_t, D.giacenza_portale_t],
+        ['rete, entrato', (G.conferito_primarie_t || 0) + (G.secondarie_in_t || 0), c('RETE').entrato_t],
+        ['ACI, entrato', (G.conferito_aci_t || 0) + (G.secondarie_aci_in_t || 0), c('ACI').entrato_t],
+        ['ACI, dichiarato', G.dichiarato_aci_t, c('ACI').dichiarato_caricato_t],
+        ['ACI, giacenza', G.giacenza_aci_t, c('ACI').giacenza_t],
+        ['extra, entrato', (G.conferito_extra_t || 0) + (G.secondarie_extra_in_t || 0), c('EXTRA_RACCOLTA').entrato_t],
+        ['extra, dichiarato', G.dichiarato_extra_t, c('EXTRA_RACCOLTA').dichiarato_caricato_t],
+        ['extra, giacenza', G.giacenza_extra_t, c('EXTRA_RACCOLTA').giacenza_t],
+      ];
+      for (const [nome, a, b] of voci) { confronti++; verifica(`${etichetta}: ${G.sito}, ${nome}`, uguali(a, b), `${a} / ${b}`); }
+    } else {
+      const D = stoccaggiD.get(k);
+      const c = (canale) => ((D && D.canali) || []).find(x => x.canale === canale) || null;
+      for (const [nome, a, canale] of [['rete', G.giacenza_rete_t, 'RETE'], ['ACI', G.giacenza_aci_t, 'ACI'], ['extra', G.giacenza_extra_t, 'EXTRA_RACCOLTA']]) {
+        const x = c(canale);
+        // Un canale senza movimenti ne' giacenza il riepilogo non lo elenca: vale zero, o niente.
+        const b = x ? x.in_piazzale_t : (vuoto(a) ? null : 0);
+        confronti++;
+        verifica(`${etichetta}: piazzale ${G.sito}, ${nome}`, uguali(a, b), `${a} / ${b}`);
+      }
+      // L'apertura di rete del piazzale: l'ancora portata al 31/12 se ha letture,
+      // il campo scritto se non ne ha, la stessa nei due moduli (11/10/2026).
+      if (c('RETE')) {
+        confronti++;
+        verifica(`${etichetta}: piazzale ${G.sito}, apertura di rete`, uguali(G.giacenza_riferimento_t, c('RETE').giacenza_iniziale_t), `${G.giacenza_riferimento_t} / ${c('RETE').giacenza_iniziale_t}`);
+      }
+    }
+  }
+  return confronti;
+};
+
+console.log('IL CONFRONTO GENERALE, SUGLI ARCHIVI DELLE TRAPPOLE 1-5');
+{
+  const n = confrontaTutto(r, 'trappole 1-5');
+  verifica('il confronto generale ha confrontato qualcosa', n >= 16, String(n));
+}
+
+// Gli archivi delle trappole 6-11. Le date ci sono tutte - immissione, inizio e
+// fine trasporto - tranne dove la trappola e' proprio la data che manca.
+const IRI = 'IRIGOM SRL';
+const NAP = 'NAPPI SUD SRL';
+const GAMMA = 'GAMMA STOCCAGGI SRL';
+const completa = (r) => ({ ordine_immesso_il: g(d('01-02')), trasporto_iniziato_il: r.trasporto_finito_il, ...r });
+const secondaria = (id, da, a, td, kg, giorno, extra = {}) => completa({
+  id_ordine: id, numero_fir: 'FIR' + id, classe: 'P - fino a 35 kg', prodotto: '.class1', stoccaggio: da, destinazione: a,
+  tipo_destinazione: td, stato: 'terminato', peso_effettivo: kg, trasporto_finito_il: g(giorno), ...extra,
+});
+const ACI = { classe: 'PFU Autodemolizione', prodotto: '.class9' };
+const archiviTrappole = ({ conFotografia = true } = {}) => {
+  con('GiacenzaSito', [
+    { sito: IRI, tipo_destinazione: 'imp', anno: ANNO, dichiara_rete: true },
+    { sito: IRI, tipo_destinazione: 'stoc', anno: ANNO },
+    { sito: NAP, tipo_destinazione: 'stoc', anno: ANNO },
+    { sito: ALFA, tipo_destinazione: 'imp', anno: ANNO, dichiara_rete: true },
+    { sito: BETA, tipo_destinazione: 'stoc', anno: ANNO },
+    // TRAPPOLA 11: un piazzale con un'apertura scritta a mano e nessuna lettura.
+    { sito: GAMMA, tipo_destinazione: 'stoc', anno: ANNO, giacenza_riferimento_t: 50 },
+  ]);
+  // Le ancore del 31/12 dell'anno prima: Irigom e BETA vuoti, Nappi con 20 t di rete e 5 di ACI.
+  const ancora = (sito, rete, aci) => ({ sito, data_rilevazione: `${ANNO - 1}-12-31`, class1_kg: rete, class2_kg: 0, class3_kg: 0, class4_kg: 0, class9_kg: aci, created_date: `${d('01-02')}T08:00:00Z` });
+  con('GiacenzaStoccaggio', [ancora(IRI, 0, 0), ancora(NAP, 20000, 5000), ancora(BETA, 0, 0)]);
+  con('PrimariaRete', [
+    completa(primaria('ET27000001', IRI, 10000, d('02-10'))),
+    completa(primaria('ET27000002', NAP, 8000, d('02-12'), { tipo_destinazione: 'stoc' })),
+    completa(primaria('ET27000003', GAMMA, 3000, d('02-14'), { tipo_destinazione: 'stoc' })),
+  ]);
+  con('Secondaria', [
+    // TRAPPOLA 6: rete e ACI da Nappi al PIAZZALE di Irigom, che e' anche impianto.
+    secondaria('SEC27000001', NAP, IRI, 'stoc', 5000, d('03-10')),
+    secondaria('SEC27000002', NAP, IRI, 'stoc', 2000, d('03-12'), ACI),
+    // E una di rete all'impianto, come sempre.
+    secondaria('SEC27000003', NAP, IRI, 'imp', 4000, d('04-10')),
+  ]);
+  con('PrimariaAci', [{ ...completa(primaria('ET27000010', ALFA, 5000, d('04-05'))), ...ACI }]);
+  con('ExtraRaccolta', [
+    // TRAPPOLA 8: 3 t raccolte al piazzale di Nappi e 0,4 all'impianto: 3,4 t di raccolta.
+    { ...completa(primaria('PHX7001', NAP, 3000, d('05-10'), { tipo_destinazione: 'stoc' })), tipo_movimento: 'primaria' },
+    { ...completa(primaria('PHX7002', ALFA, 400, d('05-11'))), tipo_movimento: 'primaria' },
+    // Poi 1 t da Nappi all'impianto ALFA, e (TRAPPOLA 7) 0,5 t al piazzale puro BETA.
+    { ...secondaria('PHX7003', NAP, ALFA, 'imp', 1000, d('05-20')), tipo_movimento: 'secondaria' },
+    { ...secondaria('PHX7004', NAP, BETA, 'stoc', 500, d('05-22')), tipo_movimento: 'secondaria' },
+  ]);
+  // TRAPPOLA 10: due terziarie partite da ALFA, una senza la data di inizio
+  // trasporto e una senza nessuna data di trasporto.
+  con('Terziaria', [
+    { id_ordine: 'TER27000001', numero_fir: 'FT1', unita_locale_origine: ALFA, ragione_sociale: ALFA, destinazione: 'CEMENTERIA SPA',
+      stato: 'terminato', peso_effettivo: 25000, ordine_immesso_il: g(d('03-01')), trasporto_iniziato_il: null, trasporto_finito_il: g(d('03-05')) },
+    { id_ordine: 'TER27000002', numero_fir: 'FT2', unita_locale_origine: ALFA, ragione_sociale: ALFA, destinazione: 'CEMENTERIA SPA',
+      stato: 'terminato', peso_effettivo: 24000, ordine_immesso_il: g(d('03-02')), trasporto_iniziato_il: null, trasporto_finito_il: null },
+  ]);
+  // La fotografia del 1° ottobre: 8 t dell'ET27000001 ancora da dichiarare.
+  con('OrdineNonDichiarato', conFotografia ? [
+    { ordine_primaria: 'ET27000001', destinazione: IRI, prodotto: '.class1', peso_non_dichiarato_kg: 8000, created_date: `${d('10-01')}T06:00:00Z`, fine_trasporto: d('02-10') },
+  ] : []);
+  con('DichiarazioneSito', [
+    // TRAPPOLA 9: due ACI di aprile da 2 t, tutte e due caricate, col nome scritto in due modi.
+    { sito: ALFA, anno: ANNO, mese: 'Aprile', canale: 'ACI', provenienza: 'primaria', operazione: 'R3', quantita_kg: 2000, caricata_inviata: true, caricata_il: d('05-10') },
+    { sito: 'Alfa Recycling S.r.l.', anno: ANNO, mese: 'Aprile', canale: 'ACI', provenienza: 'primaria', operazione: 'R3', quantita_kg: 2000, caricata_inviata: true, caricata_il: d('05-11') },
+  ]);
+};
+archiviTrappole();
+const t6 = await ESEGUI(calcolaGiacenze, riepilogoDichiarazioni);
+verifica('trappole 6-11: le Giacenze rispondono', !t6.g.error, JSON.stringify(t6.g.error));
+verifica('trappole 6-11: le Dichiarazioni rispondono', !t6.d.error, JSON.stringify(t6.d.error));
+const rigaR = (r, sito, td) => (r.g.righe || []).find(x => x.sito === sito && x.tipo_destinazione === td) || {};
+const stocD = (r, sito, c) => (((r.d.stoccaggi || []).find(x => x.sito === sito) || {}).canali || []).find(x => x.canale === c) || {};
+
+console.log('TRAPPOLA 6: UNA SECONDARIA AL PIAZZALE DI UN SITO CHE E\' ANCHE IMPIANTO');
+{
+  const Gi = rigaR(t6, IRI, 'imp'), Gs = rigaR(t6, IRI, 'stoc'), Di = sitoD(t6, IRI);
+  verifica('Giacenze: l\'impianto riceve solo la secondaria arrivata all\'impianto, 4 t, e niente ACI', t2(Gi.secondarie_in_t) === 4 && t2(Gi.secondarie_aci_in_t) === 0, `${Gi.secondarie_in_t} / ${Gi.secondarie_aci_in_t}`);
+  verifica('Dichiarazioni: lo stesso, non 9 t e 2 di ACI', t2(Di.secondarie_in_t) === 4 && t2(Di.secondarie_aci_in_t) === 0, `${Di.secondarie_in_t} / ${Di.secondarie_aci_in_t}`);
+  verifica('quindi l\'entrato della quadratura e\' 14 t, non 19', t2(Di.entrato_confronto_t) === 14, String(Di.entrato_confronto_t));
+  verifica('e la giacenza ACI dell\'impianto e\' 0 in tutti e due', t2(Gi.giacenza_aci_t) === 0 && t2(canaleD(t6, IRI, 'ACI').giacenza_t || 0) === 0, `${Gi.giacenza_aci_t} / ${canaleD(t6, IRI, 'ACI').giacenza_t}`);
+  verifica('il piazzale di Irigom: 5 t di rete e 2 di ACI nelle Giacenze', t2(Gs.giacenza_rete_t) === 5 && t2(Gs.giacenza_aci_t) === 2, `${Gs.giacenza_rete_t} / ${Gs.giacenza_aci_t}`);
+  verifica('e nelle Dichiarazioni, dove prima il piazzale non esisteva', t2(stocD(t6, IRI, 'RETE').in_piazzale_t) === 5 && t2(stocD(t6, IRI, 'ACI').in_piazzale_t) === 2,
+    `${stocD(t6, IRI, 'RETE').in_piazzale_t} / ${stocD(t6, IRI, 'ACI').in_piazzale_t}`);
+  // La giacenza a portale dell'impianto: la fotografia (8 t) piu' i carichi che il
+  // file non ha. La secondaria all'impianto (4 t) si', quella al piazzale no.
+  verifica('la giacenza a portale dell\'impianto non conta la secondaria finita al piazzale: 12 t, non 17', t2(Gi.giacenza_portale_t) === 12 && t2(Di.giacenza_portale_t) === 12, `${Gi.giacenza_portale_t} / ${Di.giacenza_portale_t}`);
+  verifica('il piazzale che spedisce torna in tutti e due: 19 t di rete, 3 di ACI',
+    t2(rigaR(t6, NAP, 'stoc').giacenza_rete_t) === 19 && t2(stocD(t6, NAP, 'RETE').in_piazzale_t) === 19 && t2(rigaR(t6, NAP, 'stoc').giacenza_aci_t) === 3 && t2(stocD(t6, NAP, 'ACI').in_piazzale_t) === 3,
+    `${rigaR(t6, NAP, 'stoc').giacenza_rete_t} ${stocD(t6, NAP, 'RETE').in_piazzale_t} ${rigaR(t6, NAP, 'stoc').giacenza_aci_t} ${stocD(t6, NAP, 'ACI').in_piazzale_t}`);
+}
+
+console.log('TRAPPOLA 7: UNA SECONDARIA DI EXTRA RACCOLTA A UN PIAZZALE PURO');
+{
+  const Gb = rigaR(t6, BETA, 'stoc');
+  verifica('nelle Dichiarazioni BETA non e\' un impianto che deve dichiarare', !(t6.d.siti || []).some(s => s.sito === BETA && s.tipo_destinazione !== 'stoc'));
+  verifica('e il suo piazzale ha 0,5 t di extra raccolta', t2(stocD(t6, BETA, 'EXTRA_RACCOLTA').in_piazzale_t) === 0.5, JSON.stringify(stocD(t6, BETA, 'EXTRA_RACCOLTA').in_piazzale_t));
+  verifica('nelle Giacenze le 0,5 t sono nella giacenza extra del piazzale, non nel suo conferito', t2(Gb.giacenza_extra_t) === 0.5 && t2(Gb.conferito_extra_t) === 0 && t2(Gb.secondarie_extra_in_t) === 0.5,
+    `${Gb.giacenza_extra_t} / ${Gb.conferito_extra_t} / ${Gb.secondarie_extra_in_t}`);
+  verifica('il piazzale che spedisce: 3 - 1 - 0,5 = 1,5 t in tutti e due', t2(rigaR(t6, NAP, 'stoc').giacenza_extra_t) === 1.5 && t2(stocD(t6, NAP, 'EXTRA_RACCOLTA').in_piazzale_t) === 1.5,
+    `${rigaR(t6, NAP, 'stoc').giacenza_extra_t} / ${stocD(t6, NAP, 'EXTRA_RACCOLTA').in_piazzale_t}`);
+}
+
+console.log('TRAPPOLA 8: IL CONFERITO EXTRA E\' LA RACCOLTA, NON I TRASFERIMENTI');
+{
+  const Ga = rigaR(t6, ALFA, 'imp');
+  verifica('il totale delle Giacenze e\' la raccolta extra: 3,4 t, non 4,9', t2(t6.g.totali.conferito_extra_t) === 3.4, String(t6.g.totali.conferito_extra_t));
+  const dashboard = await funzione('getDashboardRaccolta');
+  const dash = await dashboard({ anno: ANNO });
+  verifica('lo stesso numero della dashboard', !dash.error && t2(dash.kpi && dash.kpi.raccolto_extra_anno) === t2(t6.g.totali.conferito_extra_t),
+    `${dash.kpi && dash.kpi.raccolto_extra_anno} / ${t6.g.totali.conferito_extra_t}`);
+  verifica('l\'impianto: 0,4 t raccolte e 1 t arrivata dal piazzale, a parte', t2(Ga.conferito_extra_t) === 0.4 && t2(Ga.secondarie_extra_in_t) === 1, `${Ga.conferito_extra_t} / ${Ga.secondarie_extra_in_t}`);
+  verifica('la sua giacenza extra non cambia: 1,4 t, come nelle Dichiarazioni', t2(Ga.giacenza_extra_t) === 1.4 && t2(canaleD(t6, ALFA, 'EXTRA_RACCOLTA').giacenza_t) === 1.4,
+    `${Ga.giacenza_extra_t} / ${canaleD(t6, ALFA, 'EXTRA_RACCOLTA').giacenza_t}`);
+}
+
+console.log('TRAPPOLA 9: DUE DICHIARAZIONI ACI GEMELLE, TUTTE E DUE CARICATE');
+{
+  const Ga = rigaR(t6, ALFA, 'imp'), aci = canaleD(t6, ALFA, 'ACI');
+  verifica('le Giacenze leggono una dichiarazione sola: 2 t, non 4', t2(Ga.dichiarato_aci_t) === 2, String(Ga.dichiarato_aci_t));
+  verifica('come le Dichiarazioni', t2(aci.dichiarato_caricato_t) === 2, String(aci.dichiarato_caricato_t));
+  verifica('quindi la giacenza ACI e\' 3 t in tutti e due, non 1 da una parte', t2(Ga.giacenza_aci_t) === 3 && t2(aci.giacenza_t) === 3, `${Ga.giacenza_aci_t} / ${aci.giacenza_t}`);
+  verifica('e la gemella non si nasconde: e\' fra i doppioni', (t6.d.doppioni || []).length === 1 && t6.d.doppioni[0].mese === 'Aprile' && t6.d.doppioni[0].canale === 'ACI', JSON.stringify(t6.d.doppioni));
+}
+
+console.log('TRAPPOLA 10: UNA TERZIARIA CON LE DATE DA SISTEMARE');
+{
+  const dg = t6.g.totali.date_da_sistemare || {}, dd = t6.d.totali.date_da_sistemare || {};
+  const n = (x, c) => (x[c] ? x[c].n : 0);
+  verifica('le Giacenze: nessun formulario di rete, due terziarie a parte', n(dg, 'RETE') === 0 && n(dg, 'TERZIARIE') === 2, JSON.stringify(dg));
+  verifica('le Dichiarazioni lo stesso, non due partenze di rete', n(dd, 'RETE') === 0 && n(dd, 'TERZIARIE') === 2, JSON.stringify(dd));
+  verifica('quella senza fine trasporto e\' una partenza senza fine, nel gruppo delle terziarie, in tutti e due',
+    dg.TERZIARIE && dg.TERZIARIE.partenze_senza_fine === 1 && dg.TERZIARIE.partenze_senza_fine_kg === 24000 && dd.TERZIARIE && dd.TERZIARIE.partenze_senza_fine === 1 && dd.TERZIARIE.partenze_senza_fine_kg === 24000,
+    JSON.stringify([dg.TERZIARIE, dd.TERZIARIE]));
+  const gruppi = (sitoD(t6, ALFA).date_da_sistemare || []).map(x => x.canale);
+  verifica('e sull\'impianto il gruppo e\' quello delle terziarie', gruppi.length === 1 && gruppi[0] === 'TERZIARIE', JSON.stringify(gruppi));
+  verifica('le terziarie in uscita dell\'anno sono quelle con la fine trasporto: 25 t in tutti e due', t2(rigaR(t6, ALFA, 'imp').terziarie_t) === 25 && t2(sitoD(t6, ALFA).terziarie_out_t) === 25,
+    `${rigaR(t6, ALFA, 'imp').terziarie_t} / ${sitoD(t6, ALFA).terziarie_out_t}`);
+}
+
+console.log('TRAPPOLA 11: SENZA LETTURA O SENZA FILE, NESSUN NUMERO');
+{
+  const Gg = rigaR(t6, GAMMA, 'stoc'), rete = stocD(t6, GAMMA, 'RETE');
+  verifica('Giacenze: il piazzale senza rilevazione non ha una giacenza, non 0', Gg.giacenza_portale_t === null && Gg.giacenza_rete_t === null, `${Gg.giacenza_portale_t} / ${Gg.giacenza_rete_t}`);
+  verifica('e dice perche\'', stessoPerche(Gg.perche_senza_giacenza, PERCHE_PIAZZALE_SENZA_LETTURA), String(Gg.perche_senza_giacenza));
+  verifica('Dichiarazioni: nemmeno qui, non 53 t', rete.in_piazzale_t === null && stessoPerche(rete.in_piazzale_perche, PERCHE_PIAZZALE_SENZA_LETTURA), JSON.stringify([rete.in_piazzale_t, rete.in_piazzale_perche]));
+  verifica('ma entrate e apertura scritta si vedono', t2(rete.entrato_t) === 3 && t2(rete.giacenza_iniziale_t) === 50, `${rete.entrato_t} / ${rete.giacenza_iniziale_t}`);
+  verifica('l\'anomalia resta', (t6.g.anomalie || []).some(a => a.tipo === 'stoccaggio_senza_rilevazione' && a.sito === GAMMA));
+  verifica('un impianto con la fotografia non ha un perche\'', rigaR(t6, IRI, 'imp').perche_senza_giacenza === null);
+}
+{
+  archiviTrappole({ conFotografia: false });
+  const s = await ESEGUI(calcolaGiacenze, riepilogoDichiarazioni);
+  const Gi = rigaR(s, IRI, 'imp');
+  verifica('senza il file del portale l\'impianto non ha una giacenza di rete: «—», non 0', Gi.giacenza_portale_t === null && Gi.giacenza_rete_t === null, `${Gi.giacenza_portale_t} / ${Gi.giacenza_rete_t}`);
+  verifica('col perche\', lo stesso testo per i due moduli', stessoPerche(Gi.perche_senza_giacenza, PERCHE_SENZA_FOTOGRAFIA), String(Gi.perche_senza_giacenza));
+  verifica('e le Dichiarazioni dicono «—» anche loro', sitoD(s, IRI).giacenza_portale_t === null, String(sitoD(s, IRI).giacenza_portale_t));
+  confrontaTutto(s, 'senza fotografia');
+}
+
+console.log('LE PAGINE: DOVE IL NUMERO NON C\'E\', «—» COL PERCHE\'');
+{
+  // Un null che la pagina stampa come 0 e' lo stesso errore di prima, spostato
+  // di un passo (la lezione di Tecnogum). Le pagine si leggono senza i ritorni a
+  // capo di Windows: i file dell'albero di lavoro possono essere CRLF.
+  const pagina = (p) => readFileSync(qui(p), 'utf8').replace(/\r/g, '');
+  const situazione = pagina('../src/components/giacenze/SituazioneTable.jsx');
+  verifica('Giacenze: la cella della rete usa il perche\' che manda il calcolo', /r\.perche_senza_giacenza/.test(situazione));
+  const stoccaggi = pagina('../src/components/dichiarazioni/Stoccaggi.jsx');
+  verifica('Dichiarazioni: il piazzale senza lettura mostra «—» col perche\', non 0', /c\.in_piazzale_t === null/.test(stoccaggi) && /c\.in_piazzale_perche/.test(stoccaggi));
+  const esporta = pagina('../src/lib/giacenzeExportAll.js');
+  verifica('l\'export delle Giacenze chiama le terziarie col loro nome, a parte', /TERZIARIE: 'terziarie, a parte'/.test(esporta));
+}
+
+console.log('IL CONFRONTO GENERALE, SUGLI ARCHIVI DELLE TRAPPOLE 6-11');
+{
+  const n = confrontaTutto(t6, 'trappole 6-11');
+  verifica('il confronto generale ha confrontato qualcosa', n >= 20, String(n));
+}
+
+// LA COLONNA «DA DICHIARARE» E' LA GIACENZA DEL CANALE, SU TUTTI E TRE
+// (revisione della chiusura dell'audit, 11/10/2026). La somma di una riga del
+// riepilogo - la casella dall'anno prima piu' i dodici mesi, per ogni flusso
+// del canale - e' il numero che la quadratura confronta col portale e che le
+// Giacenze mostrano. Era scritto nei commenti e controllato solo dalla prova del
+// 2 gennaio: prima dell'audit ALFA diceva 14 t di riga contro 24 di giacenza
+// sulla rete, e 0,5 contro 0,2 sull'extra raccolta. Qui su tutti e due gli
+// archivi, ogni impianto e ogni canale che una giacenza ce l'ha.
+console.log("LA COLONNA «DA DICHIARARE» E' LA GIACENZA DEL CANALE, SU TUTTI E TRE");
+for (const [nome, x] of [['trappole 1-5', r], ['trappole 6-11', t6]]) {
+  let n = 0;
+  for (const s of (x.d.siti || []).filter(y => y.tipo_destinazione !== 'stoc')) {
+    for (const c of s.giacenze_canale || []) {
+      if (c.giacenza_t === null || c.giacenza_t === undefined) continue;
+      const somma = (s.flussi || []).filter(f => f.canale === c.canale).reduce((t, f) => t + f.resta_t, 0);
+      verifica(`${nome} · ${s.sito} · ${c.canale}: la somma della riga «Da dichiarare» e' la giacenza del canale`, t2(somma) === t2(c.giacenza_t), `${somma} / ${c.giacenza_t}`);
+      n++;
+    }
+  }
+  verifica(`${nome}: la verifica ha confrontato qualcosa`, n >= 3, String(n));
 }
 
 console.log(`\n${ok} verifiche passate, ${ko} fallite`);

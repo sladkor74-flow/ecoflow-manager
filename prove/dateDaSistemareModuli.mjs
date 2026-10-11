@@ -5,8 +5,11 @@
 // qualifica (qualificaFornitori.ts), l'evasione degli assegnati per canale
 // (evasioneAssegnati.ts), lo strumento giacenze di EcoTyna
 // (strumentiAssistente.ts) e le frasi del report settimanale, a video e nel PDF
-// (reportSettimanaleExport.js). npm run prove
+// (reportSettimanaleExport.js). E, dall'11/10/2026, il gruppo delle terziarie,
+// che decide formulariDaSistemare e non chi la chiama (giacenzaPortale.ts).
+// npm run prove
 import { readFileSync } from 'node:fs';
+import { formulariDaSistemare } from '../base44/shared/giacenzaPortale.ts';
 import { individuaSoggetti } from '../base44/shared/qualificaFornitori.ts';
 import { normalizzaPrimaria, situazioneCanali } from '../base44/shared/evasioneAssegnati.ts';
 import { eseguiStrumento } from '../base44/shared/strumentiAssistente.ts';
@@ -97,6 +100,26 @@ const frasi = frasiDateDaSistemare({ nome_mese: 'Settembre', date_da_sistemare: 
 } });
 verifica('una frase per i senza fine, fuori da ogni settimana, e una per il mese', frasi.length === 2 && frasi[0].includes('non contati in nessuna settimana: 3 ordini (ET1 (FIR F1): manca la data di fine trasporto; e altri 2)') && frasi[1].startsWith('Di Settembre') && frasi[1].includes('1 ordine (ET2: manca'), JSON.stringify(frasi));
 verifica('niente da dire: nessuna frase', frasiDateDaSistemare({}).length === 0 && frasiDateDaSistemare(null).length === 0);
+
+console.log('LE TERZIARIE HANNO IL LORO GRUPPO, CHIUNQUE LE SEGNI (11/10/2026)');
+{
+  // Il riepilogo delle dichiarazioni segnava le terziarie 'RETE' e le Giacenze a
+  // parte: lo stesso formulario era rete in un modulo e no nell'altro, anche nel
+  // riquadro che dice di non mescolare mai i canali (audit del 10/10/2026, C3 e
+  // C11). Ora il gruppo lo decide formulariDaSistemare dal tipo del movimento.
+  const GRUPPO_TERZIARIE = 'TERZIARIE';
+  const f = formulariDaSistemare({ anno: 2026 });
+  const ter = { id_ordine: 'TER1', numero_fir: 'FT1', stato: 'terminato', peso_effettivo: 25000, ordine_immesso_il: '2026-03-01T08:00:00Z', trasporto_iniziato_il: null, trasporto_finito_il: '2026-03-05T08:00:00Z' };
+  const prim = { id_ordine: 'ET1', numero_fir: 'F1', stato: 'terminato', peso_effettivo: 8000, ordine_immesso_il: '2026-03-01T08:00:00Z', trasporto_iniziato_il: null, trasporto_finito_il: '2026-03-06T08:00:00Z' };
+  // Chi chiama sbaglia apposta il canale della terziaria: deve contare il tipo.
+  f.segna(ter, { tipo: 'terziaria', canale: 'RETE', ruolo: 'imp', verso: 'partenza', sito: 'ALFA SRL', controparte: 'CEMENTERIA SPA' });
+  f.segna(prim, { tipo: 'primaria', canale: 'RETE', ruolo: 'imp', verso: 'arrivo', sito: 'ALFA SRL', controparte: 'RACC SRL' });
+  const pc = f.perCanale(null);
+  verifica('la rete conta la sua primaria, e la terziaria no', pc.RETE.n === 1 && pc.RETE.partenze_senza_fine === 0, JSON.stringify(pc.RETE));
+  verifica('la terziaria sta nel suo gruppo, anche se chi la segna dice rete', pc[GRUPPO_TERZIARIE] && pc[GRUPPO_TERZIARIE].n === 1, JSON.stringify(pc));
+  const gruppi = f.gruppi(null).map(x => x.canale);
+  verifica('sul soggetto: prima la rete, poi le terziarie a parte', gruppi.join() === `RETE,${GRUPPO_TERZIARIE}`, gruppi.join());
+}
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);
