@@ -93,6 +93,28 @@ node prove/specchi.mjs
 npx vite build
 ```
 
+**Il quinto: Giacenze e Dichiarazioni sui dati veri** (11/10/2026).
+`prove/datiVeri.mjs` gira con `npm run prove`, ma va guardato a parte, perche' e'
+quello che le prove costruite non sanno fare. Regola dell'utente, testuale:
+*«dichiarazioni e giacenze sono cose fondamentali e devono quadrare sempre come
+un orologio svizzero»*. Fa girare `calcolaGiacenze` e `riepilogoDichiarazioni`
+veri sulla copia degli archivi veri in `../dati-veri/`, fuori dal repository,
+quindi non va su GitHub. L'orologio e' fermo al momento della lettura, e il
+controllo pretende tre cose per ogni impianto e canale:
+- Giacenze = Dichiarazioni;
+- la riga «Da dichiarare» = la giacenza, senza «dichiarati in piu'» inventati;
+- gli stessi numeri che il sito diceva allora.
+
+Lo stesso giorno una correzione verde su tutte le prove costruite aveva rotto sul
+sito la colonna di quattro impianti: con quel codice questo controllo fallisce
+proprio su quei quattro. Se una modifica sposta i numeri apposta, il controllo
+fallisce finche' non si scarica una copia nuova dopo la pubblicazione. La
+procedura, in sola lettura, sta in `../dati-veri/LEGGIMI.md`. Senza la copia la
+prova si salta e lo dice. Quando l'albero di lavoro ha lavori a meta', si lancia
+su una copia pulita di HEAD (`git archive HEAD base44 prove`). **Dopo ogni
+pubblicazione che tocca questi due moduli, gli stessi tre controlli si rifanno
+sul sito.**
+
 C'e' anche `npm run typecheck` (`tsc -p ./jsconfig.json`), che non e' fra i
 quattro obbligatori. Le prove non sono di cortesia: molte leggono il **sorgente**
 e cadono se una regola scritta in un commento o in questo file se ne va - per
