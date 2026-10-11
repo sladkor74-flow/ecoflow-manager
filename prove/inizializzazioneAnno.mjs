@@ -24,7 +24,10 @@ const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; cons
 const t = (p) => ({ unita_misura: '€/t', stato: 'attivo', data_inizio_validita: '2026-01-01', data_fine_validita: '2026-12-31', ...p });
 const TARIFFE_2026 = [
   t({ direzione: 'ATTIVA', tipologia: 'RETE', cliente: 'Ecotyre Scrl', servizio_ecotyre: 'TRASP_TRATT', valore: 202 }),
-  t({ direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA', cliente: 'Ecotyre Scrl', valore: 202 }),
+  // L'extra raccolta col committente come lo scrive il seme, 'ECOTYRE': la voce
+  // della sua base la cerca con la regola della fattura, e la fattura una
+  // tariffa intestata a un altro nome non la trova (11/10/2026).
+  t({ direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA', cliente: 'ECOTYRE', valore: 202 }),
   t({ direzione: 'ATTIVA', tipologia: 'ACI', cliente: 'Ecotyre Scrl', regione: 'Campania', valore: 95 }),
   t({ direzione: 'ATTIVA', tipologia: 'ACI', cliente: 'Ecotyre Scrl', regione: 'Puglia', valore: 88 }),
   t({ direzione: 'PASSIVA', tipologia: 'RETE', prestazione: 'RACCOLTA', fornitore_nome: 'Emmesse', destinazione: 'Gatim', valore: 72 }),
@@ -94,9 +97,10 @@ console.log('LA LISTA DI CONTROLLO DELL ANNO NUOVO');
   const SITI_2026 = [{ anno: 2026, sito: 'Irigom S.r.l.', tipo_destinazione: 'imp' }, { anno: 2026, sito: 'NAPPI SUD SRL', tipo_destinazione: 'stoc' }];
   const vuoto = listaAnno({ anno: 2027, tariffe: TARIFFE_2026, giacenzeSito: SITI_2026, contrattiFornitore: [{ anno: 2026 }, { anno: 2026 }], piazzali: ['irigom', 'nappi sud'], rilevazioni: [], oggi: '2026-10-10' });
   // Sette dal 10/10/2026: la settima e' l'apertura degli impianti, che non
-  // c'era e che nessuno scriveva.
-  verifica('sette voci', vuoto.voci.length === 7, String(vuoto.voci.length));
-  verifica('tutte da fare, e il conto lo dice', vuoto.mancanti === 7 && vuoto.pronte === 0 && vuoto.pronto === false,
+  // c'era e che nessuno scriveva. Otto dall'11/10/2026: l'ottava e' la base
+  // dell'extra raccolta dell'anno nuovo.
+  verifica('otto voci', vuoto.voci.length === 8, String(vuoto.voci.length));
+  verifica('tutte da fare, e il conto lo dice', vuoto.mancanti === 8 && vuoto.pronte === 0 && vuoto.pronto === false,
     JSON.stringify(vuoto.voci.map(x => [x.chiave, x.stato])));
   const v = (k) => vuoto.voci.find(x => x.chiave === k);
   verifica('le tariffe attive dicono quante scadono e che il 2027 non ce le ha',
@@ -157,7 +161,7 @@ console.log('QUANDO L ANNO E PRONTO, LA LISTA TACE');
     rilevazioni: [{ sito: 'irigom', data_rilevazione: '2026-12-31' }],
     oggi: '2026-12-31',
   });
-  verifica('sette voci pronte e niente da fare', pronto.pronte === 7 && pronto.mancanti === 0 && pronto.pronto === true,
+  verifica('otto voci pronte e niente da fare', pronto.pronte === 8 && pronto.mancanti === 0 && pronto.pronto === true,
     JSON.stringify(pronto.voci.map(x => [x.chiave, x.stato])));
   verifica('e non e urgente, perche non manca niente', pronto.urgente === false);
 }
@@ -173,6 +177,35 @@ console.log('UN PREZZO COPIATO E NON CONFERMATO NON E «PRONTO»');
   // Dal 10/10/2026 la lista non si limita a dire «vanno confermate»: offre di
   // farlo. Prima non c'era un modo, se non cancellare la nota a mano.
   verifica('non offre piu di copiarle: offre di confermarle', att.azione === 'conferma_tariffe' && att.direzione === 'ATTIVA', JSON.stringify([att.azione, att.direzione]));
+}
+
+console.log('LA BASE DELL EXTRA RACCOLTA DELL ANNO NUOVO');
+{
+  // Chiusura dell'audit, 11/10/2026. La tariffa EXTRA_RACCOLTA resta aperta per
+  // scelta, quindi la voce delle tariffe attive la vede coperta anche nel 2027 e
+  // tace; ma la fattura, dal 1° gennaio, applica a un intervento senza prezzo il
+  // prezzo del 2026 con l'avviso «prezzo di un altro anno». La voce si misura con
+  // la stessa funzione della fattura.
+  const aperta = { direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA', cliente: 'ECOTYRE', valore: 202, unita_misura: '€/t', stato: 'attivo', data_inizio_validita: '2026-01-01' };
+  const base = (tariffe, anno = 2027) => listaAnno({ anno, tariffe, piazzali: [], rilevazioni: [], oggi: '2026-12-01' }).voci.find(x => x.chiave === 'base_extra_raccolta') || { stato: 'assente', dettaglio: '' };
+  const vecchia = base([aperta]);
+  verifica('con la sola tariffa del 2026 rimasta aperta la voce e gialla', vecchia.stato === 'parziale', JSON.stringify(vecchia));
+  verifica('e dice che e il prezzo del 2026, con l avviso della fattura',
+    vecchia.dettaglio.includes('tariffa del 2026 (202 €/t)') && /prezzo di un altro anno/.test(vecchia.dettaglio), vecchia.dettaglio);
+  // Il caso della chiusura: il 2027 con una tariffa diversa da 202. Scritta dalle
+  // anagrafiche, la tariffa nuova chiude da sola quella aperta al giorno prima
+  // (gestisciAnagrafiche, rinegoziazione): le due non valgono mai insieme.
+  const chiusa = { ...aperta, data_fine_validita: '2026-12-31' };
+  const nuova = base([chiusa, { ...aperta, valore: 210, data_inizio_validita: '2027-01-01' }]);
+  verifica('con la tariffa del 2027 a 210 euro e pronta, e dice 210', nuova.stato === 'pronto' && nuova.dettaglio.includes('210 €/t'), JSON.stringify(nuova));
+  const copiata = base([chiusa, { ...aperta, valore: 202, data_inizio_validita: '2027-01-01', id: 'c27', note: 'copiato dal 2026, da confermare' }]);
+  verifica('una base del 2027 copiata e non confermata resta gialla', copiata.stato === 'parziale' && /confermata/.test(copiata.dettaglio), JSON.stringify(copiata));
+  const niente = base([{ ...aperta, data_fine_validita: '2026-12-31' }]);
+  verifica('senza tariffa e senza base scritta nel gestionale manca: si fatturerebbe a zero', niente.stato === 'manca' && /zero euro/.test(niente.dettaglio), JSON.stringify(niente));
+  verifica('il 2026 ha la sua base, dalla tabella', base([aperta], 2026).stato === 'pronto');
+  verifica('e anche senza tabella, dalla base scritta nel gestionale', base([], 2026).stato === 'pronto' && /scritta nel gestionale/.test(base([], 2026).dettaglio));
+  verifica('una tariffa passiva di extra raccolta non e una base attiva',
+    base([{ ...aperta, direzione: 'PASSIVA', data_inizio_validita: '2027-01-01' }]).stato === 'manca');
 }
 
 console.log('I GIORNI AL PRIMO GENNAIO');
@@ -212,6 +245,142 @@ console.log('LA SCHEDA C E, E NON DECIDE NIENTE DA SOLA');
     /da confermare/.test(c) && /prezzo vero arriva dal contratto nuovo/.test(c));
   verifica('anche questa scheda dice perche non ha risposto e offre Riprova',
     c.includes('non ha risposto') && c.includes('Riprova'));
+}
+// LE DUE GRAFIE DI GATIM (chiusura dell'audit, 11/10/2026). In anagrafica ci
+// sono «GATIM» e «GATIM S.R.L.»: il prezzo 2026 sta sulla seconda, quello del
+// 2027 l'amministratore lo scrive scegliendo la prima. Per la passiva sono lo
+// stesso fornitore (nome normalizzato); per chiaveTariffa erano due, e «Prepara
+// le tariffe» copiava il 105 del 2026 accanto al 110 scritto a mano - e la
+// passiva pagava la copia, la piu' recente.
+console.log("LE DUE GRAFIE DI GATIM E LA COPIA D'ANNO");
+{
+  const { pianoCopiaTariffe } = await import('../base44/shared/inizializzazioneAnno.ts');
+  const { readFileSync } = await import('node:fs');
+  const gatim = (p) => ({ direzione: 'PASSIVA', tipologia: 'RETE', prestazione: 'TRATTAMENTO', unita_misura: '€/t', stato: 'attivo', ...p });
+  const g26 = gatim({ id: 'g26', fornitore_id: 'idB', fornitore_nome: 'GATIM S.R.L.', valore: 105, data_inizio_validita: '2026-01-01', data_fine_validita: '2026-12-31' });
+  const g27 = gatim({ id: 'g27', fornitore_id: 'idA', fornitore_nome: 'GATIM', valore: 110, data_inizio_validita: '2027-01-01', data_fine_validita: '2027-12-31' });
+  verifica('chiaveTariffa: le due grafie sono la stessa tariffa, come per la passiva', chiaveTariffa(g26) === chiaveTariffa(g27), `${chiaveTariffa(g26)} / ${chiaveTariffa(g27)}`);
+  verifica('anche produttore, destinatario e destinazione si confrontano normalizzati',
+    chiaveTariffa(gatim({ prestazione: 'TRASPORTO_SECONDARIA', fornitore_nome: 'Transar srl', produttore: 'Nappi Sud Srl A Socio Unico', destinatario: 'Irigom S.r.l.' }))
+      === chiaveTariffa(gatim({ prestazione: 'TRASPORTO_SECONDARIA', fornitore_nome: 'TRANSAR SRL', produttore: 'NAPPI SUD SRL', destinatario: 'IRIGOM SRL' })));
+  verifica('col 110 scritto a mano su «GATIM», il 105 di «GATIM S.R.L.» non e\' da rinnovare', tariffeDaRinnovare([g26, g27], 2027, 'PASSIVA').length === 0, JSON.stringify(tariffeDaRinnovare([g26, g27], 2027, 'PASSIVA')));
+  const piano = pianoCopiaTariffe([g26, g27], 2027, ['PASSIVA']);
+  verifica('e la copia non lo crea', piano.da_creare.length === 0, JSON.stringify(piano));
+
+  // Il prezzo nuovo che parte da marzo: gennaio e febbraio restano scoperti, la
+  // tariffa e' da rinnovare, ma la copia (1/1-31/12) si sovrapporrebbe a quella
+  // scritta. Passa dagli stessi controlli di chi salva a mano: non si crea, e si
+  // dice con chi si scontra.
+  const daMarzo = { ...g27, data_inizio_validita: '2027-03-01' };
+  const p2 = pianoCopiaTariffe([g26, daMarzo], 2027, ['PASSIVA']);
+  verifica('il prezzo nuovo da marzo: il 105 e\' da rinnovare (gennaio e febbraio sono scoperti)', tariffeDaRinnovare([g26, daMarzo], 2027, 'PASSIVA').length === 1);
+  verifica('ma la copia si scontra con la tariffa scritta e non si crea', p2.da_creare.length === 0 && p2.scartate.length === 1, JSON.stringify(p2));
+  verifica('e il motivo dice con chi, all\'italiana', /GATIM 110/.test(p2.scartate[0] && p2.scartate[0].motivo || '') && /01\/03\/2027/.test(p2.scartate[0] && p2.scartate[0].motivo || ''), JSON.stringify(p2.scartate));
+
+  // Senza niente di scritto la copia si fa, una volta sola anche se le righe del
+  // 2026 erano due doppioni
+  const doppione = { ...g26, id: 'g26b' };
+  const p3 = pianoCopiaTariffe([g26, doppione], 2027, ['PASSIVA']);
+  verifica('senza il prezzo nuovo la copia si fa, una volta sola', p3.da_creare.length === 1 && p3.da_creare[0].copia.data_inizio_validita === '2027-01-01' && p3.scartate.length === 0, JSON.stringify(p3));
+
+  const src = readFileSync(new URL('../base44/functions/preparaAnno/entry.ts', import.meta.url), 'utf8').replace(/\r/g, '');
+  verifica('preparaAnno copia secondo il piano e restituisce le scartate', /pianoCopiaTariffe\(tariffe, anno, direzioni\)/.test(src) && /svc\.Tariffa\.create\(x\.copia\)/.test(src) && /falliti, scartate,/.test(src));
+}
+
+// UNA TUTTE COPRE RETE E ACI, COME NEI CONFLITTI; E LE COPIE SCARTATE SI DICONO
+// (chiusura dell'audit, 11/10/2026, revisione dei soldi). La tratta TRANSAR
+// del 2026 scritta RETE a 400, quella del 2027 gia' scritta a mano come TUTTE a
+// 420: la lista diceva «manca», il pulsante preparava 0 tariffe (la copia si
+// scontrava ed era scartata) e la scheda non diceva perche'. La voce restava
+// «manca» per sempre, e dal 1° gennaio rossa nel cruscotto.
+console.log('UNA TUTTE COPRE RETE E ACI, E LE COPIE SCARTATE SI DICONO');
+{
+  const { pianoCopiaTariffe, tariffaCopertaNelNuovoAnno } = await import('../base44/shared/inizializzazioneAnno.ts');
+  const { readFileSync } = await import('node:fs');
+  const tratta = (p) => ({ direzione: 'PASSIVA', prestazione: 'TRASPORTO_SECONDARIA', fornitore_nome: 'TRANSAR SRL', fornitore_id: 'f-transar', produttore: 'NAPPI SUD SRL', destinatario: 'Irigom S.r.l.', unita_misura: '€/viaggio', stato: 'attivo', ...p });
+  const del26 = (tipologia, valore) => tratta({ id: `t26${tipologia}`, tipologia, valore, data_inizio_validita: '2026-01-01', data_fine_validita: '2026-12-31' });
+  const del27 = (tipologia, valore) => tratta({ id: `t27${tipologia}`, tipologia, valore, data_inizio_validita: '2027-01-01', data_fine_validita: '2027-12-31' });
+  const voce = (tariffe) => listaAnno({ anno: 2027, tariffe, oggi: '2026-11-15' }).voci.find(v => v.chiave === 'tariffe_passive');
+
+  const caso1 = [del26('RETE', 400), del27('TUTTE', 420)];
+  verifica('la RETE del 2026 e\' coperta dalla TUTTE del 2027: niente da rinnovare', tariffeDaRinnovare(caso1, 2027, 'PASSIVA').length === 0, JSON.stringify(tariffeDaRinnovare(caso1, 2027, 'PASSIVA')));
+  verifica('e la lista non dice «manca» (prima: manca, con «Prepara le tariffe» che ne preparava 0)', voce(caso1).stato !== 'manca' && voce(caso1).azione !== 'copia_tariffe', JSON.stringify(voce(caso1)));
+  const p1 = pianoCopiaTariffe(caso1, 2027, ['PASSIVA']);
+  verifica('e la copia non c\'e\' da fare, ne\' da scartare', p1.da_creare.length === 0 && p1.scartate.length === 0, JSON.stringify(p1));
+  verifica('anche l\'ACI del 2026 e\' coperta dalla TUTTE', tariffaCopertaNelNuovoAnno(del26('ACI', 380), [del27('TUTTE', 420)]));
+
+  const caso2 = [del26('TUTTE', 400), del27('RETE', 420)];
+  verifica('una TUTTE del 2026 con la sola RETE nel 2027 resta da rinnovare: l\'ACI il prezzo non ce l\'ha', tariffeDaRinnovare(caso2, 2027, 'PASSIVA').length === 1 && voce(caso2).stato === 'manca');
+  const p2 = pianoCopiaTariffe(caso2, 2027, ['PASSIVA']);
+  verifica('la copia si scontra con la RETE del 2027 e si scarta, col motivo', p2.da_creare.length === 0 && p2.scartate.length === 1 && /TRANSAR SRL 420/.test(p2.scartate[0].motivo), JSON.stringify(p2.scartate));
+  verifica('e il prezzo nel motivo e\' all\'italiana: «420,00 €/viaggio», «1.234,50»', /TRANSAR SRL 420,00 €\/viaggio/.test(p2.scartate[0].motivo)
+    && /1\.234,50/.test(pianoCopiaTariffe([del26('RETE', 400), { ...del27('RETE', 1234.5), data_inizio_validita: '2027-03-01' }], 2027, ['PASSIVA']).scartate[0].motivo), p2.scartate[0].motivo);
+  const caso3 = [del26('TUTTE', 400), del27('RETE', 420), del27('ACI', 390)];
+  verifica('con la RETE e l\'ACI del 2027 la TUTTE del 2026 e\' coperta', tariffeDaRinnovare(caso3, 2027, 'PASSIVA').length === 0);
+  const caso4 = [del26('RETE', 400), del27('ACI', 390)];
+  verifica('un\'ACI non copre la RETE: da rinnovare, e la copia si fa', tariffeDaRinnovare(caso4, 2027, 'PASSIVA').length === 1 && pianoCopiaTariffe(caso4, 2027, ['PASSIVA']).da_creare.length === 1);
+  const altroFornitore = [del26('RETE', 400), { ...del27('TUTTE', 420), fornitore_nome: 'ALTRO TRASPORTATORE', fornitore_id: 'f-altro' }];
+  verifica('la TUTTE di un altro fornitore non copre niente', tariffeDaRinnovare(altroFornitore, 2027, 'PASSIVA').length === 1);
+  const disattivata = [del26('RETE', 400), { ...del27('TUTTE', 420), stato: 'non_attivo' }];
+  verifica('una TUTTE disattivata non copre niente', tariffeDaRinnovare(disattivata, 2027, 'PASSIVA').length === 1);
+
+  // L'attiva: la stessa chiave dei conflitti delle attive. Il 2027 scritto a
+  // mano al chilo (0,21 €/kg) e' la stessa tariffa del 202 €/t del 2026: la copia
+  // si scarterebbe, quindi non e' da rinnovare.
+  const attiva = (p) => ({ direzione: 'ATTIVA', tipologia: 'RETE', cliente: 'ECOTYRE', regione: 'Campania', stato: 'attivo', ...p });
+  const caso5 = [attiva({ id: 'a26', valore: 202, unita_misura: '€/t', data_inizio_validita: '2026-01-01', data_fine_validita: '2026-12-31' }),
+    attiva({ id: 'a27', valore: 0.21, unita_misura: '€/kg', data_inizio_validita: '2027-01-01', data_fine_validita: '2027-12-31' })];
+  verifica('attiva: la tariffa del 2027 in un\'altra unita\' copre quella del 2026', tariffeDaRinnovare(caso5, 2027, 'ATTIVA').length === 0
+    && pianoCopiaTariffe(caso5, 2027, ['ATTIVA']).scartate.length === 0, JSON.stringify(pianoCopiaTariffe(caso5, 2027, ['ATTIVA'])));
+
+  const scheda = readFileSync(new URL('../src/components/target-status/NuovoAnno.jsx', import.meta.url), 'utf8').replace(/\r/g, '');
+  verifica('la scheda mostra le scartate nella conferma', /conferma\?\.scartate\?\.length > 0/.test(scheda) && /conferma\.scartate\.map\(/.test(scheda));
+  verifica('e nel messaggio finale, col motivo', /const scartate = res\.data\.scartate \|\| \[\]/.test(scheda) && /scartate\.map\(testoScartata\)/.test(scheda) && /s\.motivo/.test(scheda));
+  verifica('e con zero tariffe da copiare non propone «Prepara»', /conferma\?\.quante > 0 && \(\s*<AlertDialogAction/.test(scheda));
+}
+
+// LA FUNZIONE, CON UN ARCHIVIO FINTO: le scartate arrivano a chi preme, in
+// simulazione e dopo la copia, con quanto serve a riconoscerle.
+console.log('PREPARAANNO RESTITUISCE LE SCARTATE');
+{
+  const { build } = await import('esbuild');
+  const { fileURLToPath } = await import('node:url');
+  const SDK_FINTO = `
+const entita = (nome) => ({
+  list: async (_o, _l, skip) => (skip ? [] : (globalThis.__ARCHIVI[nome] || [])),
+  filter: async (_f, _o, _l, skip) => (skip ? [] : (globalThis.__ARCHIVI[nome] || [])),
+  create: async (r) => { globalThis.__SCRITTE.push('create ' + nome); return { id: 'n', ...r }; },
+  update: async () => { globalThis.__SCRITTE.push('update ' + nome); return {}; },
+});
+const entities = new Proxy({}, { get: (_t, nome) => entita(String(nome)) });
+export function createClientFromRequest() {
+  return { auth: { me: async () => ({ role: 'admin', email: 'prova' }) }, asServiceRole: { entities }, entities };
+}`;
+  const pacchetto = await build({
+    entryPoints: [fileURLToPath(new URL('../base44/functions/preparaAnno/entry.ts', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', logLevel: 'silent',
+    plugins: [{ name: 'sdk-finto', setup(b) {
+      b.onResolve({ filter: /^npm:@base44\/sdk/ }, () => ({ path: 'sdk', namespace: 'sdk-finto' }));
+      b.onLoad({ filter: /.*/, namespace: 'sdk-finto' }, () => ({ contents: SDK_FINTO, loader: 'js' }));
+    } }],
+  });
+  const modulo = await import('data:text/javascript;base64,' + Buffer.from(pacchetto.outputFiles[0].text).toString('base64'));
+  const tratta = { direzione: 'PASSIVA', prestazione: 'TRASPORTO_SECONDARIA', fornitore_nome: 'TRANSAR SRL', fornitore_id: 'f-transar', produttore: 'NAPPI SUD SRL', destinatario: 'Irigom S.r.l.', unita_misura: '€/viaggio', stato: 'attivo' };
+  const anno = Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome', year: 'numeric' }).format(new Date())) + 1;
+  globalThis.__ARCHIVI = { Tariffa: [
+    { ...tratta, id: 'vecchia', tipologia: 'TUTTE', valore: 400, data_inizio_validita: `${anno - 1}-01-01`, data_fine_validita: `${anno - 1}-12-31` },
+    { ...tratta, id: 'nuova', tipologia: 'RETE', valore: 420, data_inizio_validita: `${anno}-01-01`, data_fine_validita: `${anno}-12-31` },
+  ] };
+  const chiama = async (corpo) => {
+    globalThis.__SCRITTE = [];
+    const r = await modulo.default({ json: async () => corpo });
+    return { stato: r.status, j: await r.json(), scritte: globalThis.__SCRITTE };
+  };
+  const sim = await chiama({ anno, azione: 'copia_tariffe', simula: true });
+  verifica('in simulazione: 0 da copiare e una scartata, con tipologia e motivo', sim.stato === 200 && sim.j.quante === 0 && sim.j.scartate.length === 1
+    && sim.j.scartate[0].tipologia === 'TUTTE' && sim.j.scartate[0].chi === 'TRANSAR SRL' && /si sovrappone/.test(sim.j.scartate[0].motivo), JSON.stringify(sim.j).slice(0, 400));
+  const vera = await chiama({ anno, azione: 'copia_tariffe' });
+  verifica('dopo la copia: niente scritto, e la scartata torna col motivo', vera.stato === 200 && vera.scritte.length === 0 && vera.j.creati === 0 && vera.j.scartate.length === 1, JSON.stringify({ s: vera.stato, w: vera.scritte, c: vera.j.creati, sc: vera.j.scartate }));
 }
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');

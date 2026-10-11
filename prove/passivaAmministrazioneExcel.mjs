@@ -250,7 +250,7 @@ verifica('le voci senza conferimenti sono scritte comunque, a zero',
   numero(ws, rLog + 2, 2) === 0 && numero(ws, rLog + 2, 3) === 68 && numero(ws, rLog + 3, 3) === 71,
   [2, 3].map(i => `${testo(ws, rLog + i, 1)}=${val(ws, rLog + i, 2)}`).join(' '));
 verifica('il totale di una voce e\' peso per prezzo',
-  formula(ws, rLog + 1, 5) === `B${rLog + 1}*C${rLog + 1}` && numero(ws, rLog + 1, 5) === 6064.24,
+  formula(ws, rLog + 1, 5) === `ROUND(B${rLog + 1}*C${rLog + 1},2)` && numero(ws, rLog + 1, 5) === 6064.24,
   `${formula(ws, rLog + 1, 5)} = ${val(ws, rLog + 1, 5)}`);
 verifica('il totale del fornitore e\' la somma delle sue quattro voci',
   (righeSommate(formula(ws, rLog, 5)) || []).join(',') === [rLog + 1, rLog + 2, rLog + 3, rLog + 4].join(',') && numero(ws, rLog, 5) === 8628.88,
@@ -309,11 +309,11 @@ console.log('\nIL TRASPORTO DELLE SECONDARIE');
   const t = primaChePorta(ws, 'TRASPORTO (secondarie RETE)', fasciaRete, fasciaAci);
   const primaRiga = t + 2;
   verifica('a tonnellata il totale e\' peso per costo',
-    formula(ws, primaRiga, 8) === `D${primaRiga}*F${primaRiga}` && numero(ws, primaRiga, 8) === 3048 && testo(ws, primaRiga, 5) === '€\\t',
+    formula(ws, primaRiga, 8) === `ROUND(D${primaRiga}*F${primaRiga},2)` && numero(ws, primaRiga, 8) === 3048 && testo(ws, primaRiga, 5) === '€\\t',
     `${formula(ws, primaRiga, 8)} = ${val(ws, primaRiga, 8)}`);
   const rViaggio = primaRiga + 3;
   verifica('a viaggio il totale e\' costo per numero di viaggi',
-    formula(ws, rViaggio, 8) === `F${rViaggio}*G${rViaggio}` && numero(ws, rViaggio, 8) === 300 && testo(ws, rViaggio, 5) === '€\\vg',
+    formula(ws, rViaggio, 8) === `ROUND(F${rViaggio}*G${rViaggio},2)` && numero(ws, rViaggio, 8) === 300 && testo(ws, rViaggio, 5) === '€\\vg',
     `${formula(ws, rViaggio, 8)} = ${val(ws, rViaggio, 8)}`);
   const rTot = prima(ws, 'Totale trasporto', t, fasciaAci);
   verifica('il totale del trasporto somma i viaggi scritti sopra',
@@ -350,11 +350,11 @@ const rTratt = testaImpAci + 2;
 verifica('lo stoccaggio scrive il prezzo nella sua colonna e lascia vuota l\'altra',
   numero(ws, rStocc, 3) === 18 && val(ws, rStocc, 4) === null, `${val(ws, rStocc, 3)} / ${val(ws, rStocc, 4)}`);
 verifica('e il suo totale moltiplica quella colonna',
-  formula(ws, rStocc, 5) === `B${rStocc}*C${rStocc}` && numero(ws, rStocc, 5) === 360, `${formula(ws, rStocc, 5)} = ${val(ws, rStocc, 5)}`);
+  formula(ws, rStocc, 5) === `ROUND(B${rStocc}*C${rStocc},2)` && numero(ws, rStocc, 5) === 360, `${formula(ws, rStocc, 5)} = ${val(ws, rStocc, 5)}`);
 verifica('il trattamento scrive il prezzo nella colonna del trattamento',
   numero(ws, rTratt, 4) === 95 && val(ws, rTratt, 3) === null, `${val(ws, rTratt, 3)} / ${val(ws, rTratt, 4)}`);
 verifica('e il suo totale moltiplica la colonna del trattamento',
-  formula(ws, rTratt, 5) === `B${rTratt}*D${rTratt}` && numero(ws, rTratt, 5) === 1268.25, `${formula(ws, rTratt, 5)} = ${val(ws, rTratt, 5)}`);
+  formula(ws, rTratt, 5) === `ROUND(B${rTratt}*D${rTratt},2)` && numero(ws, rTratt, 5) === 1268.25, `${formula(ws, rTratt, 5)} = ${val(ws, rTratt, 5)}`);
 verifica('con due prezzi l\'EER scivola nella sesta colonna',
   numero(ws, rStocc, 6) === 160103 && numero(ws, rTratt, 6) === 160103, `${val(ws, rStocc, 6)} ${val(ws, rTratt, 6)}`);
 
@@ -428,7 +428,10 @@ console.log('\nL\'EXTRA RACCOLTA: IL DETTAGLIO DEGLI INTERVENTI');
       ],
       totale_kg: 21360, totale_t: 21.36, totale_euro: 4206.8,
       senza_costi: [{ numero_fir: 'SENZACOSTI01', produttore: 'ISOLA ECOLOGICA', destinatario: 'Gatim', kg: 3120 }],
-      senza_data: [{ numero_fir: 'SENZADATA01', ordine: 'ET26150009', produttore: 'COMUNE DI ESEMPIO', kg: 900 }],
+      senza_data: [
+        { numero_fir: 'SENZADATA01', ordine: 'ET26150009', produttore: 'COMUNE DI ESEMPIO', kg: 900 },
+        { numero_fir: 'SENZADATA02', ordine: 'ET26150010', produttore: 'COMUNE DI PROVA', kg: null },
+      ],
     },
     totale_euro: 4206.8,
   };
@@ -447,10 +450,12 @@ console.log('\nL\'EXTRA RACCOLTA: IL DETTAGLIO DEGLI INTERVENTI');
   verifica('il peso c e in chili e in tonnellate', numero(w, r1, 9) === 18240 && numero(w, r1, 10) === 18.24,
     `${numero(w, r1, 9)} ${numero(w, r1, 10)}`);
   verifica('il trasporto a viaggio sta nella sua colonna', numero(w, r1, 14) === 400, String(numero(w, r1, 14)));
-  // IL CONTO: i tre prezzi a tonnellata per il peso, piu' il viaggio e gli oneri
-  // fissi, che sono importi e non si moltiplicano per niente.
-  verifica('il totale di riga e una formula che non moltiplica il viaggio',
-    formula(w, r1, 16) === `(K${r1}+L${r1}+M${r1})*J${r1}+N${r1}+O${r1}`, formula(w, r1, 16));
+  // IL CONTO: i tre prezzi a tonnellata per il peso, ciascuno al centesimo come
+  // li paga la passiva (11/10/2026), piu' il viaggio e gli oneri fissi, che sono
+  // importi e non si moltiplicano per niente. Prima era (K+L+M)*J+N+O, senza
+  // arrotondare: ricalcolando, Excel non diceva il centesimo della passiva.
+  verifica('il totale di riga e una formula che arrotonda ogni costo e non moltiplica il viaggio',
+    formula(w, r1, 16) === `ROUND(K${r1}*J${r1},2)+ROUND(L${r1}*J${r1},2)+ROUND(M${r1}*J${r1},2)+N${r1}+O${r1}`, formula(w, r1, 16));
   verifica('e fa il numero del modulo', numero(w, r1, 16) === 4206.8, String(numero(w, r1, 16)));
   const rTot = prima(w, 'Totale extra raccolta');
   verifica('i totali sommano le righe', righeSommate(formula(w, rTot, 16)).length === 2 && numero(w, rTot, 16) === 4206.8,
@@ -463,6 +468,51 @@ console.log('\nL\'EXTRA RACCOLTA: IL DETTAGLIO DEGLI INTERVENTI');
   verifica('e non si scrivono le cornici vuote degli altri due blocchi',
     prima(w, 'RACCOGLITORI') === 0 && prima(w, 'IMPIANTI \\ STOCCAGGI') === 0,
     `${prima(w, 'RACCOGLITORI')} ${prima(w, 'IMPIANTI \\ STOCCAGGI')}`);
+  // UN PESO CHE MANCA NON E' ZERO (chiusura dell'audit, 11/10/2026). Il terminato
+  // senza fine trasporto non ha chili: la riga del «da sistemare» li scriveva 0.
+  const rigaSenzaData = testo(w, primaChePorta(w, 'SENZADATA02', rTot), 1);
+  verifica('il terminato senza fine trasporto senza peso dice «— kg», non «0 kg»',
+    /— kg/.test(rigaSenzaData) && !/ 0 kg/.test(rigaSenzaData), rigaSenzaData);
+  const rigaSenzaCosti = testo(w, primaChePorta(w, 'SENZACOSTI01 ·', rTot), 1);
+  verifica('e i chili con il punto delle migliaia: «3.120 kg» (toLocaleString scriveva 3120)', /3\.120 kg/.test(rigaSenzaCosti), rigaSenzaCosti);
+}
+
+// UN TERMINATO SENZA PESO EFFETTIVO NEL FOGLIO (chiusura dell'audit, 11/10/2026).
+// La riga c'e' - i suoi importi fissi si pagano - ma senza chili: prima i chili
+// uscivano 0 (num(null)), e la sezione «da sistemare» non lo diceva.
+console.log('\nL\'EXTRA RACCOLTA: UN INTERVENTO SENZA PESO');
+{
+  const SENZA_PESO = {
+    canale: 'EXTRA_RACCOLTA', nome_canale: 'EXTRA RACCOLTA', mese: 'Settembre', anno: 2026, stile: 'due_livelli',
+    raccoglitori: { titolo: 'RACCOGLITORI', righe: [], totale_t: 0, totale_euro: 0, non_previsti: [] },
+    impianti: { titolo: 'IMPIANTI \\ STOCCAGGI', righe: [], totale_t: 0, totale_euro: 0, non_previsti: [] },
+    trasporti: { righe: [], totale_t: 0, totale_euro: 0 },
+    extra: {
+      righe: [
+        {
+          numero_fir: 'FIR-OLD', ordine: 'ER-OLD', produttore: 'COMUNE DI ESEMPIO',
+          trasportatore: 'LOGISTICA & PNEUMATICI SRL', destinatario: 'Irigom S.r.l.',
+          inizio: '2026-09-10', fine: '2026-09-10', cer: '160103',
+          kg: null, tonnellate: 0, senza_peso: true,
+          raccolta_t: 90, stoccaggio_t: 0, trattamento_t: 100, trasporto_viaggio: 120, oneri: 0,
+          totale: 120, note: 'PESO EFFETTIVO MANCANTE', senza_costi: false,
+        },
+      ],
+      totale_kg: 0, totale_t: 0, totale_euro: 120,
+      senza_costi: [],
+      senza_peso: [{ numero_fir: 'FIR-OLD', ordine: 'ER-OLD', produttore: 'COMUNE DI ESEMPIO', kg: null, avviso: 'Extra raccolta FIR-OLD: terminato senza peso effettivo. Non entra nella fattura a Ecotyre.' }],
+      senza_data: [],
+    },
+    totale_euro: 120,
+  };
+  const w = (await apri(await cartellaPassivaUnFoglio([SENZA_PESO]))).getWorksheet('PASSIVA');
+  const r1 = primaChePorta(w, 'Nr. FIR') + 1;
+  verifica('i chili che mancano si scrivono «—», non 0', testo(w, r1, 9) === '—', JSON.stringify(w.getCell(r1, 9).value));
+  verifica('le tonnellate restano vuote (la formula le moltiplica: vuote valgono zero)', w.getCell(r1, 10).value === null || w.getCell(r1, 10).value === undefined, JSON.stringify(w.getCell(r1, 10).value));
+  verifica('e il totale resta il viaggio, come in passiva: 120', numero(w, r1, 16) === 120, String(numero(w, r1, 16)));
+  const rAvviso = primaChePorta(w, 'DA SISTEMARE: interventi terminati senza peso effettivo');
+  verifica('la sezione «da sistemare» del peso mancante c\'e\'', rAvviso > r1, String(rAvviso));
+  verifica('e dice l\'intervento con la frase della fattura', /FIR-OLD/.test(testo(w, rAvviso + 1, 1)) && /senza peso effettivo/.test(testo(w, rAvviso + 1, 1)), testo(w, rAvviso + 1, 1));
 }
 
 // IL VIAGGIO MISTO: NELLA COLONNA DEI VIAGGI CI VA LA QUOTA CHE SI PAGA.
@@ -493,7 +543,7 @@ console.log('\nIL VIAGGIO MISTO NEL FOGLIO');
   verifica('e si vede coi decimali, altrimenti 2,6 si leggerebbe 3',
     w.getCell(r, 7).numFmt === '#,##0.00', String(w.getCell(r, 7).numFmt));
   verifica('cosi\' prezzo per viaggi fa l\'importo della passiva',
-    formula(w, r, 8) === `F${r}*G${r}` && numero(w, r, 8) === 780, `${formula(w, r, 8)} = ${val(w, r, 8)}`);
+    formula(w, r, 8) === `ROUND(F${r}*G${r},2)` && numero(w, r, 8) === 780, `${formula(w, r, 8)} = ${val(w, r, 8)}`);
   verifica('e la nota dice com\'e\' fatto il conto', /viaggio misto/.test(testo(w, r, 9)), testo(w, r, 9));
 }
 

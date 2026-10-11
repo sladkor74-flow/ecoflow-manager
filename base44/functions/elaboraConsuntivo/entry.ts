@@ -4,6 +4,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { soloAmministratore, utenteCorrente } from "../../shared/permessi.ts";
 import { eAlleggerito } from "../../shared/conservazione.ts";
 import { valoreCampo, leggiCampo, eliminaCampo } from "../../shared/testoLungo.ts";
+import { giornoRoma } from "../../shared/giornoItaliano.ts";
 
 import { calcolaPassivaMese, MESI_PASSIVA } from "../../shared/passivaCalcolo.ts";
 import {
@@ -11,6 +12,7 @@ import {
   periodoSospetto, righeCheParonoTotali,
   esitoConsuntivo, testoEsitoConsuntivo,
   chiaviDelGestionale, avvisiDate,
+  consuntivoGiaCaricato, notaSostituzione,
 } from "../../shared/consuntivoFornitore.ts";
 
 // IL CONSUNTIVO DI CHIUSURA MESE DI UN FORNITORE: si legge, si confronta, si salva.
@@ -20,7 +22,13 @@ import {
 // il confronto si puo' rifare dopo ogni caricamento senza richiedere il file.
 //
 // Tre azioni:
-//   'carica'   righe nuove da un file: si salvano e si confronta;
+//   'carica'   righe nuove da un file: si salvano e si confronta. Se per lo
+//              stesso fornitore (nome normalizzato), ruolo, mese e canale c'e'
+//              gia' un consuntivo, lo si SOSTITUISCE, ma solo con
+//              `sostituisci: true`: senza, si risponde 409 con quello che c'e'
+//              e la pagina chiede conferma (chiusura dell'audit, 11/10/2026:
+//              prima ne nasceva un secondo, e l'elenco dava due esiti per la
+//              stessa cosa). Il caricamento sostituito resta scritto nelle note;
 //   'confronta' si rifa' il confronto su righe gia' salvate (dopo un caricamento);
 //   'elimina'  via il consuntivo.
 //
@@ -104,9 +112,33 @@ export default async function(req) {
     let righe = null;
     let noteLettura = [];
     let importoDalFoglio = null;
+    // Il consuntivo che questo caricamento sostituisce, se c'e'.
+    let sostituito = null;
     if (azione === 'carica') {
       const guardia = await soloAmministratore(base44);
       if (guardia.errore) return guardia.errore;
+      if (!record) {
+        const { precedente, altri } = consuntivoGiaCaricato(
+          await fetchAll(svc.ConsuntivoFornitore, { anno, mese, canale }),
+          { fornitore, ruolo, anno, mese, canale },
+        );
+        if (precedente && body.sostituisci !== true) {
+          const quando = giornoRoma(precedente.caricato_il || precedente.created_date).split('-').reverse().join('/');
+          return Response.json({
+            error: `C'e' gia' il consuntivo di ${precedente.fornitore} come ${ruolo} per ${nomeMeseDi(mese)} ${anno} (${canale.replace('_', ' ')})${quando ? `, caricato il ${quando}` : ''}${precedente.file_nome ? ` dal file «${precedente.file_nome}»` : ''}. Per sostituirlo conferma il caricamento: quello di prima resta scritto nelle note.`,
+            da_confermare: true,
+            esistente: {
+              id: precedente.id, fornitore: precedente.fornitore, file_nome: precedente.file_nome || '',
+              caricato_il: precedente.caricato_il || '', quadra: precedente.quadra ?? null,
+            },
+            doppioni_vecchi: altri.length,
+          }, { status: 409 });
+        }
+        if (precedente) record = precedente;
+      }
+      // Ricaricare un consuntivo gia' salvato (trovato per chiave o aperto per
+      // id) e' sempre una sostituzione: quello di prima si racconta nelle note.
+      if (record) sostituito = record;
       const lette = leggiRigheConsuntivo(body.tabelle || []);
       righe = lette.righe;
       noteLettura = [
@@ -143,6 +175,9 @@ export default async function(req) {
       });
     }
     if (!righe) return Response.json({ error: 'Non ci sono righe da confrontare: carica il consuntivo.' }, { status: 400 });
+    // Il nome del file: su un caricamento quello nuovo, anche quando sostituisce
+    // un consuntivo che ne aveva un altro.
+    const nomeFile = azione === 'carica' ? String(body.file_nome || '') : ((record && record.file_nome) || body.file_nome || '');
 
     // I COSTI SONO RISERVATI ALL'AMMINISTRATORE, come tutta la fatturazione passiva
     // (calcolaPassiva risponde 403 a chi non lo e'). A chi non lo e' si mostra il
@@ -163,7 +198,7 @@ export default async function(req) {
       tolleranza_kg: 1,
       // Il canale che si sta verificando e il nome del file: servono a riconoscere
       // le righe che appartengono a un ALTRO canale e a non accusarle.
-      canale, nome_file: (record && record.file_nome) || body.file_nome || '',
+      canale, nome_file: nomeFile,
       // Le righe di un altro mese restano fuori: IRIGOM manda il registro
       // dell'anno intero, e confrontarlo tutto darebbe migliaia di finte difformita'.
       anno, mese,
@@ -183,7 +218,7 @@ export default async function(req) {
     //    con i totali, e un totale scambiato per carico vale decine di tonnellate
     //    che "il fornitore ci fattura e noi non abbiamo".
     const avvisiPeriodo = periodoSospetto({
-      nomeFile: (record && record.file_nome) || body.file_nome || '',
+      nomeFile,
       righe, anno, mese,
     }) || [];
     const paiono = righeCheParonoTotali(righe, movimenti);
@@ -229,9 +264,13 @@ export default async function(req) {
       };
     }
 
+    // Su un caricamento l'importo e' quello scritto adesso o quello del file
+    // nuovo: quello del consuntivo sostituito non vale piu' (resta nelle note).
+    const importoSalvato = azione !== 'carica' && record && record.importo_consuntivo !== undefined && record.importo_consuntivo !== null
+      ? Number(record.importo_consuntivo) : null;
     const importoConsuntivo = body.importo_consuntivo !== undefined && body.importo_consuntivo !== null
       ? Number(body.importo_consuntivo)
-      : (record && record.importo_consuntivo !== undefined && record.importo_consuntivo !== null ? Number(record.importo_consuntivo) : importoDalFoglio);
+      : (importoSalvato !== null ? importoSalvato : importoDalFoglio);
     const esito = esitoConsuntivo({ confronto, costo, importo_consuntivo: importoConsuntivo });
 
     const esitoCompleto = { confronto, costo, esito, congelato, note_lettura: noteLettura, testo: testoEsitoConsuntivo(confronto, esito) };
@@ -244,12 +283,17 @@ export default async function(req) {
         // Verde solo se torna tutto quello che si e' potuto controllare.
         quadra: esito.quadra_tutto,
         confrontato_il: new Date().toISOString(),
-        ...(importoConsuntivo !== null ? { importo_consuntivo: importoConsuntivo } : {}),
+        // sostituendo, l'importo del caricamento di prima non resta appeso
+        ...(importoConsuntivo !== null ? { importo_consuntivo: importoConsuntivo } : (sostituito ? { importo_consuntivo: null } : {})),
         // Ricaricando il file il consuntivo torna intero: alleggerito_il e la
         // storia vanno azzerati, altrimenti il record resterebbe segnato come
         // alleggerito e la pagina mostrerebbe la vecchia storia invece del
         // confronto nuovo.
         ...(azione === 'carica' ? { file_nome: String(body.file_nome || ''), caricato_il: new Date().toISOString(), alleggerito_il: '', storia: '' } : {}),
+        // Il caricamento sostituito: quando, quale file, com'era andato (e la sua
+        // storia, se era gia' alleggerito). Sta nelle note, che la storia del
+        // quarantesimo giorno riporta.
+        ...(sostituito ? { note: notaSostituzione(sostituito, new Date().toISOString()) } : {}),
       };
       if (!record) record = await svc.ConsuntivoFornitore.create(campi);
       const id = record.id;

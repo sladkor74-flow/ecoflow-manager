@@ -1,12 +1,18 @@
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { formatNumber } from '@/lib/utils';
+import { chiaveMatch, chiaveMatchAttiva } from '@/lib/conflittiTariffa';
 
+// Lo storico di una tariffa sono le tariffe con la sua stessa chiave, la chiave
+// del server (src/lib/conflittiTariffa.js, chiusura dell'audit 11/10/2026): lo
+// stesso fornitore scritto in due modi («GATIM» e «GATIM S.R.L.») ha uno storico
+// solo, come per la passiva. Prima si confrontava fornitore_id e i prezzi del
+// 2026 e del 2027 di Gatim finivano in due storici diversi.
 function sameKey(a, b) {
   const norm = v => String(v || '').trim().toUpperCase();
-  const campi = ['fornitore_id', 'direzione', 'tipologia', 'prestazione', 'classe_materiale', 'provincia', 'regione', 'destinazione', 'produttore', 'destinatario'];
-  for (const c of campi) { if (norm(a[c]) !== norm(b[c])) return false; }
-  return true;
+  const attiva = (t) => norm(t.direzione) === 'ATTIVA';
+  if (attiva(a) !== attiva(b)) return false;
+  return attiva(a) ? chiaveMatchAttiva(a, b) : chiaveMatch(a, b);
 }
 
 export default function TariffeStorico({ tariffa, tariffe, onClose }) {

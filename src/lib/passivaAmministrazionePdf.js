@@ -484,7 +484,8 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
         trasportatore: { testo: r.trasportatore },
         destinatario: { testo: r.destinatario },
         fine: { testo: giornoIt(r.fine), colore: C.grigio },
-        tonnellate: { testo: t(r.tonnellate), grassetto: r.tonnellate > 0 },
+        // Un peso che manca non e' zero (11/10/2026): «—», come nella pagina.
+        tonnellate: r.senza_peso ? { testo: '—', colore: C.ambra } : { testo: t(r.tonnellate), grassetto: r.tonnellate > 0 },
         raccolta: { testo: prezzo(r.raccolta_t), colore: r.raccolta_t ? C.testo : C.tenue },
         stoccaggio: { testo: prezzo(r.stoccaggio_t), colore: r.stoccaggio_t ? C.testo : C.tenue },
         trattamento: { testo: prezzo(r.trattamento_t), colore: r.trattamento_t ? C.testo : C.tenue },
@@ -505,11 +506,18 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
 
     // Quello che va sistemato prima di fatturare.
     const frasi = [];
+    // Un peso che manca si scrive «— kg», non 0 (11/10/2026).
+    const kg = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '— kg' : `${formatIntero(v)} kg`);
     for (const x of (f.extra.senza_costi || [])) {
-      frasi.push(`${x.numero_fir} · ${x.produttore} → ${x.destinatario}, ${formatIntero(x.kg)} kg: nessun costo scritto sull'intervento, la passiva non paga niente.`);
+      frasi.push(`${x.numero_fir} · ${x.produttore} → ${x.destinatario}, ${kg(x.kg)}: nessun costo scritto sull'intervento, la passiva non paga niente.`);
+    }
+    // I terminati senza peso effettivo, con la frase della fattura e della
+    // passiva (chiusura dell'audit, 11/10/2026): nel blocco stanno senza chili.
+    for (const x of (f.extra.senza_peso || [])) {
+      frasi.push(`${x.numero_fir} · ordine ${x.ordine} · ${x.produttore}: ${x.avviso || 'terminato senza peso effettivo.'}`);
     }
     for (const x of (f.extra.senza_data || [])) {
-      frasi.push(`${x.numero_fir} · ordine ${x.ordine} · ${x.produttore}, ${formatIntero(x.kg)} kg: terminato senza data di fine trasporto, non sta in nessun mese.`);
+      frasi.push(`${x.numero_fir} · ordine ${x.ordine} · ${x.produttore}, ${kg(x.kg)}: terminato senza data di fine trasporto, non sta in nessun mese.`);
     }
     if (frasi.length) {
       riquadroNota(frasi, { colore: C.ambra, sfondo: C.ambraChiaro, inchiostro: C.ambraScuro, titolo: 'Da sistemare nel modulo Extra Raccolta' });

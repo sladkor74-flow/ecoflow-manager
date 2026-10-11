@@ -11,7 +11,15 @@
 //   ricavo della pagina e quello della fattura devono essere lo stesso numero.
 //   Se il prezzo scritto e' zero o manca vale la tariffa base Ecotyre (regola
 //   dell'utente del 22/09/2026: «sempre 202 €/t nel 2026»): quella della tabella
-//   delle tariffe attive, altrimenti quella dell'anno in ecotyreTariffe.ts;
+//   delle tariffe attive, altrimenti quella dell'anno in ecotyreTariffe.ts. Il
+//   prezzo lo sceglie prezzoAttivoExtra di ecotyreTariffe.ts, che ha uno
+//   specchio per le pagine: la pagina Extra Raccolta usa la stessa funzione
+//   (chiusura dell'audit, 11/10/2026);
+// - un terminato di extra raccolta senza peso effettivo non si fattura e si
+//   segnala, con la frase di avvisoPesoMancante (11/10/2026): prima si scartava
+//   in silenzio;
+// - chi fattura e' SMOCO (FATTURANTE_ATTIVA): i fornitori fatturano a SMOCO, e
+//   SMOCO fa a Ecotyre una fattura per canale;
 // - le secondarie di extra raccolta non si fatturano: il ricavo sta sulla
 //   raccolta, il trasferimento dallo stoccaggio all'impianto e' un costo;
 // - una riga senza prezzo non e' "verificata": e' un errore da risolvere;
@@ -19,9 +27,13 @@
 //   canale, e cosi' un terminato del mese con altre date mancanti o incoerenti
 //   (regola dell'utente del 22/09/2026, anomalieDateFormulari).
 import { filtraPeriodo, meseToIndice, anomalieDateFormulari } from "./filtroPeriodo.ts";
-import { sortTariffe, resolveTariffa, calcolaTotale, fattoreConv, tariffaBaseExtraRaccolta } from "./ecotyreTariffe.ts";
-import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
+import {
+  sortTariffe, resolveTariffa, calcolaTotale, fattoreConv, prezzoAttivoExtra, tariffeAttiveValide,
+  eSecondariaExtra, servizioEcotyre, FATTURANTE_ATTIVA, avvisoPesoMancante,
+  unitaAttivaRiconosciuta, unitaSconosciuta,
+} from "./ecotyreTariffe.ts";
 import { PROV_TO_REGION } from "./raccoltoCalculator.ts";
+import { disattivateNelPeriodo } from "./validitaTariffa.ts";
 
 export const TIPOLOGIE_ATTIVA = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
 export const UNITA_A_CORPO = '€ a corpo';
@@ -34,72 +46,19 @@ const SOVRACOSTI = [
 
 const r2 = (v) => Math.round(v * 100) / 100;
 
-// Una data come la legge chi la deve capire: 2026-12-31 -> 31/12/2026.
-const giornoItaliano = (g) => {
-  const s = String(g || '').slice(0, 10);
-  return s.length === 10 ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : s;
-};
-
 // Regione del ritiro: se il record non la riporta si ricava dalla provincia.
 // La tariffa continua a usare la regione del record.
 const regioneRitiro = (r) => r.regione || PROV_TO_REGION[String(r.provincia || '').toUpperCase().trim()] || '';
 
-// Le tariffe che valgono per almeno un periodo: una tariffa rinegoziata resta
-// buona per i mesi prima del cambio (decide la finestra di validita', non lo stato).
-export const tariffeAttiveValide = (tariffe) => (tariffe || []).filter(t => t.stato === 'attivo' || !!t.data_fine_validita);
-
-export const eSecondariaExtra = (r) => String(r.tipo_movimento || '').toLowerCase().trim() === 'secondaria';
+// Le tariffe valide, la secondaria dell'extra raccolta e il prezzo attivo
+// dell'extra raccolta stanno in ecotyreTariffe.ts dall'11/10/2026, perche' la
+// pagina Extra Raccolta li usa dallo specchio: qui si riesportano per chi li
+// importava da questo file.
+export { tariffeAttiveValide, eSecondariaExtra, prezzoAttivoExtra };
 
 // Una riga a corpo (sovracosto) non e' un movimento: non porta chili e non si
 // conta fra gli ordini.
 export const eRigaACorpo = (riga) => riga.unita_misura === UNITA_A_CORPO;
-
-/**
- * Il prezzo attivo di un intervento di extra raccolta e da dove viene:
- * { origine: 'intervento' | 'tabella' | 'base' | '', id, valore, unita, fattore, nota, totale(kg) }.
- * 1) il prezzo scritto sull'intervento, se e' maggiore di zero;
- * 2) altrimenti la tariffa ATTIVA EXTRA_RACCOLTA valida alla fine del trasporto;
- * 3) altrimenti la base dell'anno (ecotyreTariffe.ts: 202 €/t nel 2026);
- * 4) altrimenti niente: valore 0, e la riga e' un errore.
- * Prima un intervento a zero restava a zero "da controllare": dal 22/09/2026 lo
- * zero non e' piu' una scelta, e' un prezzo non scritto.
- */
-export function prezzoAttivoExtra(r, tariffeSorted, tipoServizio, anno) {
-  const aTonnellata = (valore) => (kg) => (kg / 1000) * valore;
-  const scritto = Number(r.prezzo_attivo_t || 0);
-  if (scritto > 0) {
-    return { origine: 'intervento', id: 'intervento', valore: scritto, unita: '€/t', fattore: 1000, nota: 'Prezzo scritto sull\'intervento', totale: aTonnellata(scritto) };
-  }
-  const daTabella = resolveTariffa(tariffeSorted, 'EXTRA_RACCOLTA', r.classe, r.regione || '', r.cer, r.trasporto_finito_il, tipoServizio);
-  if (daTabella && Number(daTabella.valore) > 0) {
-    const unita = daTabella.unita_misura || '€/t';
-    // LA TARIFFA DELL'EXTRA RACCOLTA RESTA APERTA PER SCELTA (utente, 06/10/2026):
-    // sono prestazioni occasionali su campagne che si rinnovano ogni anno, e il
-    // prezzo si concorda intervento per intervento. Una tariffa senza scadenza
-    // pero' continua a valere anche l'anno dopo: la riga deve dire di che anno
-    // e' il prezzo che sta applicando, invece di spacciarlo per quello
-    // dell'anno in corso.
-    const dal = String(daTabella.data_inizio_validita || '').slice(0, 10);
-    const al = String(daTabella.data_fine_validita || '').slice(0, 10);
-    const annoTariffa = dal ? Number(dal.slice(0, 4)) : null;
-    const altroAnno = annoTariffa !== null && Number(anno) !== annoTariffa;
-    const periodo = dal
-      ? (al ? `valida dal ${giornoItaliano(dal)} al ${giornoItaliano(al)}` : `valida dal ${giornoItaliano(dal)}, senza scadenza`)
-      : (al ? `valida fino al ${giornoItaliano(al)}` : 'senza periodo di validita\'');
-    return {
-      origine: 'tabella', id: daTabella.id || 'tabella', valore: Number(daTabella.valore), unita, fattore: fattoreConv(daTabella),
-      anno_tariffa: annoTariffa, altro_anno: altroAnno,
-      nota: `Tariffa base Ecotyre ${annoTariffa || anno}: ${daTabella.valore} ${unita}, dalla tabella delle tariffe attive, ${periodo} (sull'intervento il prezzo non e' scritto)`
-        + (altroAnno ? `. ATTENZIONE: e' il prezzo del ${annoTariffa}, non del ${anno}` : ''),
-      totale: (kg) => calcolaTotale(kg, daTabella),
-    };
-  }
-  const baseAnno = tariffaBaseExtraRaccolta(anno);
-  if (baseAnno) {
-    return { origine: 'base', id: `base-${anno}`, valore: baseAnno, unita: '€/t', fattore: 1000, nota: `Tariffa base Ecotyre ${anno}: ${baseAnno} €/t (sull'intervento il prezzo non e' scritto)`, totale: aTonnellata(baseAnno) };
-  }
-  return { origine: '', id: 'intervento', valore: 0, unita: '€/t', fattore: 1000, nota: 'Prezzo attivo a zero sull\'intervento e nessuna tariffa base per l\'anno: riga a zero euro', totale: () => 0 };
-}
 
 export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno, mese }) {
   const annoNum = Number(anno);
@@ -109,28 +68,12 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
   const extra = extraPeriodo.filter(r => !eSecondariaExtra(r));
   const extraSecondarieEscluse = extraPeriodo.length - extra.length;
 
-  const fornitoreMap = new Map();
-  for (const f of fornitori || []) {
-    const key = normalizzaRagioneSociale(f.ragione_sociale);
-    if (key) fornitoreMap.set(key, f);
-  }
   // LA DICITURA E' «TRASP.+TRATT.» PER REGOLA, NON PER MANCANZA DI DATI
-  // (decisione dell'utente, 06/10/2026).
-  //
-  // Alla commessa Ecotyre si fattura con una tariffa unica (202 €/t per la rete
-  // nel 2026) e la dicitura normale e' trasporto piu' trattamento: «Trasp.» vale
-  // solo dove il trattamento lo fattura Ecotyre, e oggi e' il caso di Tecnogum.
-  //
-  // Prima era una deduzione: TRASP_TRATT usciva sia quando l'impianto non aveva
-  // la spunta sia quando la destinazione era vuota o sconosciuta all'anagrafica -
-  // il valore giusto per il motivo sbagliato. Adesso il default e' dichiarato, e
-  // solo la spunta esplicita di un fornitore RICONOSCIUTO lo cambia: cosi' una
-  // destinazione che non si trova non si traveste da scelta.
-  const DICITURA_PREDEFINITA = 'TRASP_TRATT';
-  const tipoServizioDi = (r) => {
-    const f = r.destinazione ? fornitoreMap.get(normalizzaRagioneSociale(r.destinazione)) : null;
-    return f && f.trattamento_fatturato_da_ecotyre === true ? 'TRASP' : DICITURA_PREDEFINITA;
-  };
+  // (decisione dell'utente, 06/10/2026): «Trasp.» solo con la spunta esplicita
+  // di un fornitore riconosciuto. La regola e il suo perche' stanno in
+  // servizioEcotyre (ecotyreTariffe.ts), che la pagina Extra Raccolta usa per
+  // scegliere la stessa tariffa dell'extra raccolta.
+  const tipoServizioDi = servizioEcotyre(fornitori);
 
   const tariffeSorted = sortTariffe(tariffeAttiveValide(tariffe));
 
@@ -146,11 +89,22 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
     desc += `, servizio ${servizio}`;
     anomalieMap.set(key, { tipo: 'senza_tariffa', tipologia, regione: regione || '', classe: classe || '', eer_codice: eer || '', servizio_ecotyre: servizio || '', tonnellate: tonn, descrizione: desc });
   };
+  // La tariffa c'e' ma la sua unita' non si sa leggere: una voce per tariffa,
+  // con le tonnellate di tutte le righe rimaste a zero per colpa sua.
+  const unitaNonLetta = (tipologia, regione, classe, eer, servizio, kg, tariffa) => {
+    const key = `unita|${tariffa.id || ''}|${tipologia}|${tariffa.unita_misura || ''}`;
+    const tonn = kg / 1000;
+    if (anomalieMap.has(key)) { anomalieMap.get(key).tonnellate += tonn; return; }
+    anomalieMap.set(key, {
+      tipo: 'unita_sconosciuta', tipologia, regione: regione || '', classe: classe || '', eer_codice: eer || '', servizio_ecotyre: servizio || '', tonnellate: tonn,
+      descrizione: `Tariffa attiva ${tipologia} ${tariffa.valore} ${tariffa.unita_misura || ''}`.trimEnd() + `: ${unitaSconosciuta(tariffa.unita_misura)}.`,
+    });
+  };
 
   const comune = (r, tipologia, tipoServizio, origine) => ({
     tipologia, tipo: 'ATTIVA',
     servizio_ecotyre: tipoServizio,
-    fatturante: 'ECOTYRE',
+    fatturante: FATTURANTE_ATTIVA,
     ordine: r.id_ordine || '',
     data_fine_trasporto: r.trasporto_finito_il || null,
     numero_fir: r.numero_fir || '',
@@ -165,6 +119,11 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
     const tipoServizio = tipoServizioDi(r);
     const tariffa = resolveTariffa(tariffeSorted, tipologia, r.classe, regioneTariffa, r.cer, r.trasporto_finito_il, tipoServizio);
     if (!tariffa) senzaTariffa(tipologia, regioneTariffa, r.classe, r.cer, tipoServizio, kg);
+    // UN'UNITA' CHE NON SI SA LEGGERE NON E' UN PREZZO AL CHILO (chiusura
+    // dell'audit, 11/10/2026): calcolaTotale ci moltiplicava i chili, mille volte
+    // il dovuto e senza un avviso. Ora la riga vale zero, e' in errore e lo dice.
+    const unitaIgnota = !!tariffa && !unitaAttivaRiconosciuta(tariffa.unita_misura);
+    if (unitaIgnota) unitaNonLetta(tipologia, regioneTariffa, r.classe, r.cer, tipoServizio, kg, tariffa);
     return {
       ...comune(r, tipologia, tipoServizio, origine), ...altro,
       regione: regioneRiga,
@@ -174,8 +133,9 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
       unita_prezzo: tariffa?.unita_misura || '€/t',
       fattore_conversione: fattoreConv(tariffa),
       totale: r2(calcolaTotale(kg, tariffa)),
-      stato_validazione: tariffa ? 'verificato' : 'errore',
-      note: tariffa ? '' : 'Nessuna tariffa attiva applicabile: riga a zero euro',
+      stato_validazione: tariffa && !unitaIgnota ? 'verificato' : 'errore',
+      note: !tariffa ? 'Nessuna tariffa attiva applicabile: riga a zero euro'
+        : unitaIgnota ? unitaSconosciuta(tariffa.unita_misura) : '',
     };
   };
 
@@ -191,11 +151,21 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
   }
 
   for (const r of extra) {
-    const kg = r.peso_effettivo || 0;
-    if (kg === 0) continue;
+    const kg = Number(r.peso_effettivo) > 0 ? Number(r.peso_effettivo) : 0;
     const tipoServizio = tipoServizioDi(r);
-    const base = comune(r, 'EXTRA_RACCOLTA', tipoServizio, 'EXTRA_RACCOLTA');
     const regione = regioneRitiro(r);
+    if (!kg) {
+      // Un terminato del mese senza peso effettivo non si fattura, ma non si
+      // scarta piu' in silenzio (11/10/2026): si dice, con la stessa frase della
+      // pagina Extra Raccolta. La quantita' ritirata non lo sostituisce.
+      anomalieMap.set(`extraPeso|${r.id}`, {
+        tipo: 'peso_mancante', tipologia: 'EXTRA_RACCOLTA', regione, classe: r.classe || '', eer_codice: r.cer || '', servizio_ecotyre: tipoServizio, tonnellate: 0,
+        quanti: 1, ordini: [{ ordine: r.id_ordine || '', numero_fir: r.numero_fir || '' }],
+        descrizione: avvisoPesoMancante(r),
+      });
+      continue;
+    }
+    const base = comune(r, 'EXTRA_RACCOLTA', tipoServizio, 'EXTRA_RACCOLTA');
     const prezzo = prezzoAttivoExtra(r, tariffeSorted, tipoServizio, annoNum);
     if (!prezzo.valore) {
       // Niente prezzo sull'intervento e nessuna base per l'anno: e' un errore,
@@ -214,13 +184,18 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
         descrizione: `Extra raccolta ${r.id_ordine || r.numero_fir || ''}: sull'intervento il prezzo non e' scritto, e quello applicato (${prezzo.valore} ${prezzo.unita}) viene dalla tariffa del ${prezzo.anno_tariffa}, rimasta aperta; l'intervento e' del ${annoNum}. Scrivi sull'intervento il prezzo concordato per questa campagna.`,
       });
     }
+    // La tariffa della tabella con un'unita' che non si sa leggere: la riga
+    // vale zero, e si dice come per la rete e l'ACI (11/10/2026).
+    if (prezzo.unita_sconosciuta) {
+      unitaNonLetta('EXTRA_RACCOLTA', regione, r.classe, r.cer, tipoServizio, kg, { id: prezzo.id, valore: prezzo.valore, unita_misura: (tariffeSorted.find(t => t.id === prezzo.id) || {}).unita_misura });
+    }
     righe.EXTRA_RACCOLTA.push({
       ...base, regione,
       quantita: kg, unita_quantita: 'kg',
       tariffa_id: prezzo.id, tariffa_valore: prezzo.valore,
       unita_misura: prezzo.unita, unita_prezzo: prezzo.unita, fattore_conversione: prezzo.fattore,
       totale: r2(prezzo.totale(kg)),
-      stato_validazione: prezzo.valore ? 'verificato' : 'errore', note: prezzo.nota,
+      stato_validazione: prezzo.valore && !prezzo.unita_sconosciuta ? 'verificato' : 'errore', note: prezzo.nota,
     });
     for (const [campo, etichetta] of SOVRACOSTI) {
       const importo = Number(r[campo] || 0);
@@ -238,6 +213,20 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
   }
 
   const anomalie = Array.from(anomalieMap.values()).map(a => ({ ...a, tonnellate: r2(a.tonnellate) }));
+  // UNA TARIFFA 'non_attivo' NON VALE MAI (regola unica di validitaTariffa.ts,
+  // 11/10/2026). Fino a quel giorno qui valeva nella sua finestra se aveva una
+  // data di fine, e nel foglio dell'amministrazione no. Se una cosi' tocca il
+  // mese, si dice: il prezzo non deve sparire in silenzio.
+  {
+    const mm = String(meseToIndice(mese) + 1).padStart(2, '0');
+    for (const t of disattivateNelPeriodo(tariffe, `${annoNum}-${mm}-01`, `${annoNum}-${mm}-31`)) {
+      if (String(t.direzione || '').toUpperCase() !== 'ATTIVA' || !TIPOLOGIE_ATTIVA.includes(t.tipologia)) continue;
+      anomalie.push({
+        tipo: 'tariffa_disattivata', tipologia: t.tipologia, regione: t.regione || '', classe: t.classe_materiale || '', eer_codice: t.eer_codice || '', servizio_ecotyre: t.servizio_ecotyre || '', tonnellate: 0,
+        descrizione: `Tariffa attiva ${t.tipologia} ${t.valore} ${t.unita_misura || ''}`.trimEnd() + ` 'non attiva' con la validita' fino al ${String(t.data_fine_validita).slice(0, 10).split('-').reverse().join('/')}: una tariffa non attiva non vale mai, nemmeno nella sua finestra. Se deve valere per questo mese, rimettila attiva dall'elenco delle tariffe.`,
+      });
+    }
+  }
   if (extraSecondarieEscluse > 0) {
     anomalie.push({
       tipo: 'informazione', tipologia: 'EXTRA_RACCOLTA', regione: '', classe: '', eer_codice: '', servizio_ecotyre: '', tonnellate: 0,

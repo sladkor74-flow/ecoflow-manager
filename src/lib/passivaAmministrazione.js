@@ -35,6 +35,7 @@
 
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
+import { tariffaValeIl, tariffaNonDisattivata } from '@/lib/validitaTariffa';
 
 const n2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 const n3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
@@ -63,9 +64,40 @@ export const EER_PFU = 160103;
  * che non viene dal trasporto) si pagano i viaggi contati.
  */
 export function viaggiPagati(r) {
+  // La quota NON arrotondata, quando la passiva la da' (11/10/2026): il foglio
+  // Excel la moltiplica per il prezzo con =ROUND(F*G;2) e rifa' l'importo della
+  // passiva al centesimo. Con la quota arrotondata a due decimali la riga di
+  // rete di 707,69 diventava 708,00 al primo ricalcolo.
+  const esatta = r && r.viaggi_quota_esatta;
+  if (esatta !== null && esatta !== undefined && Number.isFinite(Number(esatta))) return Number(esatta);
   const quota = r && r.viaggi_quota;
   if (quota === null || quota === undefined) return Number(r && r.viaggi) || 0;
   return Number(quota) || 0;
+}
+
+/**
+ * I VIAGGI PAGATI DI UNA RIGA DEL TRASPORTO A VIAGGIO: l'importo della passiva
+ * diviso il prezzo (chiusura dell'audit, 11/10/2026).
+ *
+ * Il foglio Excel rifa' il totale con =ROUND(F*G;2). Con la quota dei chili in G
+ * la riga di rete tornava, ma quella ACI no: la passiva paga all'ACI il resto
+ * dei viaggi misti (i viaggi veri meno la rete arrotondata), e al mezzo
+ * centesimo il resto non e' il prezzo per la quota arrotondato. Tratta a 300
+ * €/viaggio, un viaggio di sola ACI e uno misto con 14.500 kg di rete e 1.500 di
+ * ACI: la passiva paga 328,12, G valeva 1,09375 e Excel ricalcolando faceva
+ * 328,13, cioe' 600,01 per due viaggi da 300. Con importo diviso prezzo G e'
+ * 1,0937333: si legge 1,09 come prima, Excel rifa' 328,12 sempre, e le righe di
+ * rete e ACI della stessa tratta sommano i viaggi veri. La quota dei chili resta
+ * scritta nella nota della riga. Su una riga interna (importo zero perche' non si
+ * fattura) o senza prezzo restano i viaggi di viaggiPagati.
+ */
+export function viaggiPagatiTrasporto(t, gruppo = null) {
+  const aViaggio = String((t && t.unita_misura) || '').trim() === '€/viaggio';
+  const prezzo = Number(t && t.tariffa_valore);
+  const importo = Number(t && t.importo);
+  const interno = !!(gruppo && gruppo.interno);
+  if (aViaggio && !interno && Number.isFinite(prezzo) && prezzo > 0 && Number.isFinite(importo) && importo > 0) return importo / prezzo;
+  return viaggiPagati(t);
 }
 
 /** Il totale di una riga: a tonnellata o a viaggio, come dice l'unita'. */
@@ -183,17 +215,20 @@ const PRESTAZIONI_BLOCCO = {
 // sono le tre ragioni per cui un importo puo' essere zero.
 const rigaInterna = (r) => /interno/i.test(String(r && r.note || '')) || (r && r.interno === true);
 const rigaCompresa = (r) => /compreso/i.test(String(r && r.note || '')) || (r && r.compreso_nella_raccolta === true);
-const rigaSenzaTariffa = (r) => /senza tariffa/i.test(String(r && r.note || ''));
+// Una riga con un'unita' di misura che la passiva non sa leggere vale zero come
+// una senza tariffa (11/10/2026): il suo prezzo non e' un prezzo da scrivere.
+const rigaSenzaTariffa = (r) => /senza tariffa|sconosciuta/i.test(String(r && r.note || ''));
 
-/** Vero se la tariffa e' valida nel giorno dato (vuoto = sempre). */
-function tariffaInVigore(t, giorno) {
-  if (!giorno) return true;
-  const inizio = String(t.data_inizio_validita || '').slice(0, 10);
-  if (inizio && inizio > giorno) return false;
-  const fine = String(t.data_fine_validita || '').slice(0, 10);
-  if (fine && fine < giorno) return false;
-  return true;
-}
+// Le unita' del tariffario che il foglio sa trasformare in una colonna di prezzo.
+const UNITA_TARIFFARIO = ['€/t', '€/kg', '€/viaggio'];
+
+/**
+ * Vero se la tariffa vale nel giorno dato. E' la regola unica della fattura,
+ * della passiva e della lista dell'anno nuovo (validitaTariffa, 11/10/2026): una
+ * tariffa 'non_attivo' non vale mai. Senza un giorno (il mese non si e' potuto
+ * leggere) conta solo lo stato, come prima.
+ */
+const tariffaInVigore = (t, giorno) => (giorno ? tariffaValeIl(t, giorno) : tariffaNonDisattivata(t));
 
 /**
  * La tariffa del tariffario che spetta a una voce: stesso fornitore, stessa
@@ -213,7 +248,7 @@ export function tariffaDellaVoce(tariffe, voce, canale, blocco, giorno) {
     : (PRESTAZIONI_BLOCCO[blocco] || []);
   const candidate = (tariffe || []).filter(t => t
     && String(t.direzione || 'PASSIVA') === 'PASSIVA'
-    && String(t.stato || 'attivo') !== 'non_attivo'
+    && UNITA_TARIFFARIO.includes(String(t.unita_misura || '').trim())
     && nome(t.fornitore_nome) === soggetto
     && prestazioni.includes(String(t.prestazione || ''))
     && ['TUTTE', canale].includes(String(t.tipologia || 'TUTTE'))
@@ -232,6 +267,11 @@ export function tariffaDellaVoce(tariffe, voce, canale, blocco, giorno) {
   const valori = [...new Set(migliori.map(t => `${Number(t.valore) || 0}|${t.unita_misura || ''}`))];
   return valori.length === 1 ? migliori[0] : null;
 }
+
+/** Il prezzo di una riga di trasporto della passiva: zero se la sua unita' non si sa leggere. */
+const prezzoTrasporto = (t) => (UNITA_TARIFFARIO.includes(String((t && t.unita_misura) || '').trim())
+  ? prezzoDaTariffa(t.tariffa_valore, t.unita_misura)
+  : { prezzo: 0, unita_misura: 'euro_tonnellata' });
 
 /** Il prezzo a tonnellata (o a viaggio) e l'unita' del foglio, da una tariffa. */
 function prezzoDaTariffa(valore, unita) {
@@ -310,14 +350,39 @@ export function prezzoDellaVoce(voce, righe, tariffe, canale, blocco, giorno) {
  * righe del fornitore e la voce senza criterio riprendeva anche i chili delle
  * altre tre: il totale del fornitore usciva doppio. Assegnando, la somma delle
  * voci fa sempre esattamente il totale del fornitore nel mese.
+ *
+ * QUALE VOCE, QUANDO DUE LA RICONOSCONO (chiusura dell'audit, 11/10/2026). Una
+ * raccolta di Logistica da Napoli scaricata a Nappi Sud la riconoscono sia
+ * «Campania - NAPOLI» (provincia NA, 68) sia «conferiti c/o Nappi Sud»
+ * (destinazione, 71). La passiva sceglie il prezzo con la cascata destinazione,
+ * provincia, regione, e la paga 71; il foglio la dava alla prima voce in ordine
+ * di stampa, NAPOLI, con prezzo 71 - o «vari» se nel mese c'erano anche righe a
+ * 68 - e lasciava a zero la voce di Nappi Sud. Ora, se la riga dice quale
+ * tariffa la passiva ha scelto (tariffa_id) e una delle voci che la riconoscono
+ * ha proprio quella tariffa (tariffaDi, cioe' tariffaDellaVoce), la riga va li'.
+ * Altrimenti, come prima, alla prima nell'ordine del foglio.
+ *
+ * @param tariffaDi facoltativo: voce -> la tariffa del tariffario che le spetta
  */
-export function assegnaRighe(vociSoggetto, righeSoggetto) {
+export function assegnaRighe(vociSoggetto, righeSoggetto, tariffaDi = null) {
   const conCriterio = vociSoggetto.map(v => ({ voce: v, criterio: criterioDi(v) })).filter(x => x.criterio);
   const senzaCriterio = vociSoggetto.find(v => !criterioDi(v)) || null;
   const quote = new Map(vociSoggetto.map(v => [v, { tonnellate: 0, viaggi: 0, viaggi_pagati: 0, righe: [] }]));
   const fuori = [];
+  // La tariffa di ogni voce si cerca una volta sola, e solo se serve.
+  const idVoce = new Map();
+  const idDi = (v) => {
+    if (!idVoce.has(v)) {
+      const t = tariffaDi ? tariffaDi(v) : null;
+      idVoce.set(v, t && t.id ? String(t.id) : '');
+    }
+    return idVoce.get(v);
+  };
   for (const r of righeSoggetto || []) {
-    const trovata = conCriterio.find(x => rigaDellaVoce(x.criterio, r));
+    const candidate = conCriterio.filter(x => rigaDellaVoce(x.criterio, r));
+    const tid = String((r && r.tariffa_id) || '');
+    const perTariffa = tid && candidate.length > 1 ? candidate.find(x => idDi(x.voce) === tid) : null;
+    const trovata = perTariffa || candidate[0];
     const dove = trovata ? trovata.voce : senzaCriterio;
     if (!dove) { fuori.push(r); continue; }
     const q = quote.get(dove);
@@ -372,7 +437,7 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno) {
     const sue = scelte.filter(v => testo(v.soggetto) === soggetto);
     const righeSoggetto = perSoggetto.get(nome(soggetto)) || [];
     soggettiUsati.add(nome(soggetto));
-    const { quote, fuori } = assegnaRighe(sue, righeSoggetto);
+    const { quote, fuori } = assegnaRighe(sue, righeSoggetto, (v) => tariffaDellaVoce(tariffe, v, canale, blocco, giorno));
     const dettaglio = sue.map(v => {
       const q = quote.get(v);
       const p = prezzoDellaVoce(v, q.righe, tariffe, canale, blocco, giorno);
@@ -408,10 +473,24 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno) {
       // Quando il prezzo viene dai movimenti, l'importo del foglio deve fare
       // esattamente quello che ha calcolato la passiva: se non torna, lo si dice
       // invece di lasciare due numeri diversi in due pagine.
+      //
+      // ANCHE UN CENTESIMO (chiusura dell'audit, 11/10/2026). La soglia era
+      // «oltre 0,01 €», e una differenza di un centesimo esatto passava muta: la
+      // passiva arrotonda per provincia e destinazione, il foglio per voce, e
+      // due primarie da 1.003 kg a 68 €/t fanno 136,40 da una parte e 136,41
+      // dall'altra. Quale delle due grane sia quella della fattura del fornitore
+      // il file di settembre non lo dice (pesi a 10 kg e prezzi interi: le grane
+      // danno lo stesso centesimo), quindi non si sceglie: si avvisa. E quando
+      // la differenza e' un centesimo si dice che e' l'arrotondamento, perche'
+      // chi legge non vada a cercare un prezzo sbagliato che non c'e'.
       if (p.fonte === 'movimenti' && q.righe.length) {
         const calcolato = n2(q.righe.reduce((s, r) => s + (Number(r.importo) || 0), 0));
-        if (Math.abs(calcolato - totale) > 0.01) {
-          avvisi.push(`La fatturazione passiva per questa voce calcola ${calcolato.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €: la differenza va guardata.`);
+        const scarto = Math.abs(calcolato - totale);
+        if (scarto > 0.005) {
+          const euro = calcolato.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' });
+          avvisi.push(scarto < 0.015
+            ? `La fatturazione passiva per questa voce calcola ${euro} €: e' un centesimo di arrotondamento, perche' la passiva arrotonda riga per riga (provincia e destinazione) e il foglio sulla voce intera.`
+            : `La fatturazione passiva per questa voce calcola ${euro} €: la differenza va guardata.`);
         }
       }
       return {
@@ -522,15 +601,21 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
     trasportatore: testo(g.fornitore),
     destinatario: testo(t.destinazione),
     tonnellate: n3(t.tonnellate),
-    unita_misura: t.unita_misura === '€/viaggio' ? 'euro_viaggio' : 'euro_tonnellata',
-    prezzo: Number(t.tariffa_valore) || 0,
+    // Un prezzo al chilo diventa un prezzo a tonnellata, come nelle voci
+    // (11/10/2026): la colonna e' «€\t» e la formula e' peso per costo, quindi
+    // 0,03 €/kg scritti cosi' com'erano facevano un trasporto mille volte piu'
+    // piccolo al primo ricalcolo. Un'unita' che la passiva non sa leggere fa una
+    // riga a zero, detta nella nota: il prezzo resta zero anche qui, altrimenti
+    // la formula del foglio Excel, ricalcolando, la rimetterebbe a prezzo pieno.
+    unita_misura: prezzoTrasporto(t).unita_misura,
+    prezzo: prezzoTrasporto(t).prezzo,
     viaggi: Number(t.viaggi) || 0,
     // I VIAGGI CONTATI NON SONO SEMPRE QUELLI CHE SI PAGANO. Un viaggio misto
     // porta formulari di tutti e due i canali e ogni canale ne paga la sua quota:
     // due viaggi interi piu' un misto al 60% fanno TRE viaggi contati e 2,6
     // pagati. Il foglio moltiplicava il prezzo per i viaggi contati, quindi lo
     // stesso camion si pagava intero di qua e intero di la' (audit 03/10/2026).
-    viaggi_pagati: viaggiPagati(t),
+    viaggi_pagati: viaggiPagatiTrasporto(t, g),
     totale: n2(t.importo),
     // UN TRASPORTO INTERNO NON SI FATTURA. SMOCO trasporta da se' e la passiva lo
     // mette a zero; nel foglio pero' restavano scritti il prezzo e i viaggi, e il
@@ -579,8 +664,16 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
     // dietro mezzo gestionale.
     extra: canale === 'EXTRA_RACCOLTA' ? (extra || null) : null,
     // Il numero in cima al foglio: i blocchi di QUESTO canale, mai di altri.
-    totale_euro: n2(raccoglitori.totale_euro + impianti.totale_euro + totaleTrasporti
-      + (canale === 'EXTRA_RACCOLTA' && extra ? Number(extra.totale_euro) || 0 : 0)),
+    // Per l'extra raccolta il blocco degli interventi ha gia' dentro il trasporto
+    // a viaggio di ciascuno (colonna TRASPORTO), e la passiva mette lo stesso
+    // viaggio fra i trasporti: sommarli contava il viaggio due volte, e il PDF
+    // scriveva in testa 786,74 su una tabella che chiude a 636,74 (revisione
+    // finale, 11/10/2026). Il totale del canale e' quello del blocco, che e'
+    // anche l'unico che il PDF disegna e quello a cui punta la cella in cima
+    // dell'Excel.
+    totale_euro: canale === 'EXTRA_RACCOLTA' && extra
+      ? n2(Number(extra.totale_euro) || 0)
+      : n2(raccoglitori.totale_euro + impianti.totale_euro + totaleTrasporti),
   };
 }
 
@@ -610,12 +703,15 @@ export function modelloDaPassiva(passiva, canale, anno) {
       // Il prezzo della prima riga del fornitore: e' un punto di partenza, non
       // una verita'. Se il fornitore ha piu' tariffe le voci le separa l'utente.
       const prima = (g.righe && g.righe[0]) || {};
+      // Il prezzo nell'unita' del foglio: 0,090 €/kg sono 90 €/t (11/10/2026;
+      // prima si copiava il valore grezzo e lo si diceva a tonnellata).
+      const pz = prezzoDaTariffa(prima.tariffa_valore, prima.unita_misura);
       fuori.push({
         anno, canale, blocco,
         soggetto: testo(g.fornitore),
         voce: '',
-        prezzo: Number(prima.tariffa_valore) || 0,
-        unita_misura: String(prima.unita_misura || '').includes('viaggio') ? 'euro_viaggio' : 'euro_tonnellata',
+        prezzo: pz.prezzo,
+        unita_misura: String(prima.unita_misura || '').includes('viaggio') ? 'euro_viaggio' : pz.unita_misura,
         ordine: ++i * 10,
         attiva: true,
         note: `Proposta dal calcolo di ${canale} ${anno}: controlla prezzo e voci.`,

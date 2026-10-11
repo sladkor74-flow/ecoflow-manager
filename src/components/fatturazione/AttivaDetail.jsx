@@ -4,7 +4,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import RigaDetailModal from './RigaDetailModal';
-import { formatKg, formatNumber } from '@/lib/utils';
+import { formatKg } from '@/lib/utils';
+import { euro, prezzoUnitario } from '@/lib/formatoSoldi';
 
 const TIPS = [
   { key: 'RETE', label: 'Rete' },
@@ -14,7 +15,9 @@ const TIPS = [
 const NOMI = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta', anomalie: 'Anomalie e sospesi' };
 
 const statoRiga = (r) => (r.sospesa ? 'sospesa' : r.stato_validazione === 'errore' ? 'errore' : 'ok');
-const euro = (v) => `€ ${formatNumber(v || 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Gli importi e i prezzi vengono da formatoSoldi (chiusura dell'audit,
+// 11/10/2026): qui un totale che mancava diventava «€ 0,00», e il prezzo usciva
+// sempre a quattro decimali («€ 202,0000»).
 
 // Colonne del dettaglio, uguali a video e nelle esportazioni. La regione e' quella
 // del punto di raccolta in cui e' avvenuto il ritiro.
@@ -119,7 +122,7 @@ export default function AttivaDetail({ data, loading, periodo }) {
                 <td className="px-2 py-1.5">{r.regione || <span className="text-muted-foreground">—</span>}</td>
                 <td className="px-2 py-1.5">{r.classe || '-'}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatKg(r.quantita)} kg</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">€ {formatNumber(r.tariffa_valore || 0, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{prezzoUnitario(r.tariffa_valore)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums font-medium">{euro(r.totale)}</td>
                 <td className="text-center px-2 py-1.5">
                   {r.sospesa ? <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">sospesa</span>

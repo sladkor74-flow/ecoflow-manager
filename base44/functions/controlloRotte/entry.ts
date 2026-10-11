@@ -5,6 +5,7 @@ import { eAci } from "../../shared/canaleSecondaria.ts";
 import { rotte, conferimentiSospetti, quoteDaStoccaggio, tariffeDaVerificare } from "../../shared/rotteConferimenti.ts";
 import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { riepilogoVociDate } from "../../shared/reportSettimanali.ts";
+import { tariffeNonDisattivate } from "../../shared/validitaTariffa.ts";
 
 // Chi conferisce dove, e i formulari che sembrano chiusi sulla destinazione
 // sbagliata.
@@ -33,14 +34,21 @@ export default async function(req) {
     const terminato = (r) => String(r.stato || '').toLowerCase().trim() === 'terminato';
     const dellAnno = (r) => terminato(r) && annoRoma(r.trasporto_finito_il) === anno;
 
-    const [tariffe, rete, aciPrim, secondarie, extra, terziarie] = await Promise.all([
-      fetchAll(svc.Tariffa, { stato: 'attivo' }),
+    // LE TARIFFE SI LEGGONO TUTTE, E SI TOLGONO SOLO LE DISATTIVATE (chiusura
+    // dell'audit, 11/10/2026). Il filtro { stato: 'attivo' } dell'archivio perdeva
+    // le tariffe con lo stato vuoto, che per la fatturazione valgono come attive
+    // (tariffaNonDisattivata di validitaTariffa.ts): un raccoglitore con la sua
+    // tariffa per destinazione scritta senza stato risultava pagato alla generica,
+    // o senza tariffa, e l'avviso «tariffe da verificare» diceva una cosa falsa.
+    const [tutteLeTariffe, rete, aciPrim, secondarie, extra, terziarie] = await Promise.all([
+      fetchAll(svc.Tariffa),
       fetchAll(svc.PrimariaRete, { stato: 'terminato' }),
       fetchAll(svc.PrimariaAci, { stato: 'terminato' }),
       fetchAll(svc.Secondaria, { stato: 'terminato' }),
       fetchAll(svc.ExtraRaccolta, { stato: 'terminato' }),
       fetchAll(svc.Terziaria, { stato: 'terminato' }),
     ]);
+    const tariffe = tariffeNonDisattivate(tutteLeTariffe);
 
     const secAnno = secondarie.filter(dellAnno);
     const raccoltaExtra = (r) => String(r.tipo_movimento || 'primaria').toLowerCase().trim() !== 'secondaria';

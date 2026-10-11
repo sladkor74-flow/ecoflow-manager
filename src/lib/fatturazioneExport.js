@@ -1,4 +1,5 @@
 import { formattaPesi } from '@/lib/formatoExcel';
+import { prezzoATonnellata } from './ecotyreTariffe.js';
 
 // I report della fatturazione attiva per l'amministrazione: tre, separati (rete,
 // ACI, extra raccolta), in Excel e in PDF. Le colonne sono quelle chieste
@@ -13,9 +14,25 @@ const tipoServizio = (r) => (r.servizio_ecotyre === 'TRASP' ? 'Trasp.' : 'Trasp.
 // si fattura a 202 euro la tonnellata su rete ed extra raccolta, e l'ACI ha le sue
 // tariffe per regione (la prefattura del portale lo esprime al chilo, 0,202: e' lo
 // stesso prezzo, e il confronto con la prefattura lo sa).
+//
+// A TONNELLATA DAVVERO (chiusura dell'audit, 11/10/2026): qui si stampava il
+// valore della tariffa com'era, e una tariffa scritta in €/kg (0,202) usciva
+// 0,202 sotto «Euro/TON». Ora il prezzo passa da prezzoATonnellata di
+// ecotyreTariffe.js con l'unita' della riga; una riga che non si paga a peso
+// resta senza prezzo a tonnellata, non a zero.
+const prezzoTon = (r) => prezzoATonnellata(r.tariffa_valore, r.unita_prezzo || r.unita_misura);
 
 const giorno = (v) => (v ? new Date(v).toLocaleDateString('it-IT') : '');
 const NOMI = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
+
+// IL FATTURANTE E' SMOCO, SEMPRE (chiusura dell'audit, 11/10/2026). La colonna
+// stampava il campo della riga, e il calcolo dell'attiva ci scriveva 'ECOTYRE':
+// il cliente al posto di chi emette la fattura. I fornitori fatturano a SMOCO, e
+// SMOCO fa a Ecotyre una fattura per canale; il foglio ACI dell'amministrazione
+// ha «SMOCO Srl» su ogni riga. E' FATTURANTE_ATTIVA di ecotyreTariffe.js, scritto
+// qui come costante: prove/fatturanteAttiva.mjs controlla che siano uguali. Le
+// righe gia' salvate non si riscrivono: si stampa il soggetto.
+const FATTURANTE = 'SMOCO Srl';
 
 /**
  * La tabella di un canale: { foglio, colonne: [{ titolo, tipo, peso }], righe: [[...]],
@@ -33,7 +50,7 @@ export function tabellaAttiva(tipologia, righe, anno, mese) {
         { titolo: 'Data Fine Trasporto', tipo: 'testo', peso: 1.1 }, { titolo: 'Numero FIR', tipo: 'testo', peso: 1.3 }, { titolo: 'Classe', tipo: 'testo', peso: 0.7 },
         { titolo: 'Quantità (kg)', tipo: 'kg', peso: 0.9 }, { titolo: 'Prezzo Unitario (Euro/TON)', tipo: 'euro', peso: 1.2 }, { titolo: 'Prezzo Totale', tipo: 'euro', peso: 1 },
       ],
-      righe: valide.map(r => [periodo, tipoServizio(r), r.ordine || '', giorno(r.data_fine_trasporto), r.numero_fir || '', r.classe || '', r.quantita || 0, r.tariffa_valore || 0, r.totale || 0]),
+      righe: valide.map(r => [periodo, tipoServizio(r), r.ordine || '', giorno(r.data_fine_trasporto), r.numero_fir || '', r.classe || '', r.quantita || 0, prezzoTon(r), r.totale || 0]),
     };
   }
   if (tipologia === 'ACI') {
@@ -45,7 +62,7 @@ export function tabellaAttiva(tipologia, righe, anno, mese) {
         { titolo: 'Classe', tipo: 'testo', peso: 1.1 }, { titolo: 'Quantità (kg)', tipo: 'kg', peso: 0.8 }, { titolo: 'Prezzo Unitario (Euro/TON)', tipo: 'euro', peso: 1.1 }, { titolo: 'Prezzo Totale', tipo: 'euro', peso: 0.9 },
         { titolo: 'Note', tipo: 'testo', peso: 1.4 },
       ],
-      righe: valide.map(r => [r.regione || '', r.fatturante || '', periodo, tipoServizio(r), r.ticket_n || '', r.ordine || '', giorno(r.data_fine_trasporto), r.numero_fir || '', r.classe || '', r.quantita || 0, r.tariffa_valore || 0, r.totale || 0, r.note || '']),
+      righe: valide.map(r => [r.regione || '', FATTURANTE, periodo, tipoServizio(r), r.ticket_n || '', r.ordine || '', giorno(r.data_fine_trasporto), r.numero_fir || '', r.classe || '', r.quantita || 0, prezzoTon(r), r.totale || 0, r.note || '']),
     };
   }
   return {

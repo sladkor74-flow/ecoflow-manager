@@ -5,7 +5,7 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { utenteCorrente, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { annoChiuso, annoCorrenteRoma } from "../../shared/annoTarget.ts";
-import { listaAnno, tariffeDaRinnovare, copiaTariffa, tariffeDaConfermare, confermaTariffa } from "../../shared/inizializzazioneAnno.ts";
+import { listaAnno, pianoCopiaTariffe, tariffeDaConfermare, confermaTariffa } from "../../shared/inizializzazioneAnno.ts";
 
 // L'ANNO NUOVO: CHE COSA GLI MANCA PER COMINCIARE, E QUELLO CHE SI PUO' FARE
 // DA QUI.
@@ -114,8 +114,20 @@ export default async function (req) {
     }
 
     // --- La copia delle tariffe ---
+    // Passa dagli stessi controlli dei conflitti di chi salva a mano
+    // (pianoCopiaTariffe, 11/10/2026): una copia che si sovrappone a una tariffa
+    // gia' scritta per l'anno nuovo non si crea, e si dice con quale si scontra.
     const direzioni = ['ATTIVA', 'PASSIVA'].filter(d => !body.direzione || String(body.direzione).toUpperCase() === d);
-    const daFare = direzioni.flatMap(d => tariffeDaRinnovare(tariffe, anno, d).map(t => ({ direzione: d, tariffa: t })));
+    const piano = pianoCopiaTariffe(tariffe, anno, direzioni);
+    const daFare = piano.da_creare;
+    const chi = (t) => t.fornitore_nome || t.cliente || '';
+    // Le copie scartate tornano con quanto serve a riconoscerle nella finestra di
+    // conferma e nel messaggio finale (NuovoAnno.jsx, 11/10/2026): chi, quale
+    // tipologia e prestazione, il prezzo dell'anno prima e il motivo.
+    const scartate = piano.scartate.map(x => ({
+      direzione: x.direzione, chi: chi(x.tariffa), tipologia: x.tariffa.tipologia || '', prestazione: x.tariffa.prestazione || '',
+      valore: x.tariffa.valore, unita_misura: x.tariffa.unita_misura || '', motivo: x.motivo,
+    }));
     if (simula) {
       return Response.json({
         simulazione: true,
@@ -124,9 +136,10 @@ export default async function (req) {
         per_direzione: Object.fromEntries(direzioni.map(d => [d, daFare.filter(x => x.direzione === d).length])),
         esempi: daFare.slice(0, 10).map(x => ({
           direzione: x.direzione, tipologia: x.tariffa.tipologia || '', prestazione: x.tariffa.prestazione || '',
-          chi: x.tariffa.fornitore_nome || x.tariffa.cliente || '', regione: x.tariffa.regione || '',
+          chi: chi(x.tariffa), regione: x.tariffa.regione || '',
           valore: x.tariffa.valore, unita_misura: x.tariffa.unita_misura || '',
         })),
+        scartate,
       });
     }
 
@@ -134,10 +147,10 @@ export default async function (req) {
     const falliti = [];
     for (const x of daFare) {
       try {
-        const r = await svc.Tariffa.create(copiaTariffa(x.tariffa, anno));
-        creati.push({ id: r && r.id, direzione: x.direzione, chi: x.tariffa.fornitore_nome || x.tariffa.cliente || '', valore: x.tariffa.valore });
+        const r = await svc.Tariffa.create(x.copia);
+        creati.push({ id: r && r.id, direzione: x.direzione, chi: chi(x.tariffa), valore: x.tariffa.valore });
       } catch (e) {
-        falliti.push({ direzione: x.direzione, chi: x.tariffa.fornitore_nome || x.tariffa.cliente || '', motivo: e && e.message ? e.message : String(e) });
+        falliti.push({ direzione: x.direzione, chi: chi(x.tariffa), motivo: e && e.message ? e.message : String(e) });
       }
     }
     // Si rilegge: la lista che torna deve essere quella di DOPO la copia, non
@@ -147,7 +160,9 @@ export default async function (req) {
       anno, tariffe: tariffeDopo, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore,
       rilevazioni: rilevazioni.map(r => ({ ...r, sito: norm(r.sito) })), piazzali, oggi: oggiRoma(),
     });
-    return Response.json({ ...dopo, creati: creati.length, falliti, dettaglio_creati: creati, puo_scrivere: true });
+    // Le copie non create perche' si scontravano con una tariffa gia' scritta:
+    // tornano a chi ha premuto il pulsante, con il motivo.
+    return Response.json({ ...dopo, creati: creati.length, falliti, scartate, dettaglio_creati: creati, puo_scrivere: true });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

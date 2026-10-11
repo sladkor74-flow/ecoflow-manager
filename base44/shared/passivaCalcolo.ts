@@ -13,6 +13,8 @@ import { giornoRoma, annoRoma, meseRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { chiaveFormulario, raggruppaPerFormulario, ordineDi, ticketDi } from "./formulari.ts";
 import { anomalieDateFormulari } from "./filtroPeriodo.ts";
+import { tariffaValeIl, tariffaNonDisattivata, disattivateNelPeriodo } from "./validitaTariffa.ts";
+import { unitaSconosciuta, avvisoPesoMancante, arrotondaAlCentesimo } from "./ecotyreTariffe.ts";
 
 const NOMI_CANALE = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 
@@ -35,15 +37,17 @@ function round3(n) { return Math.round((n + Number.EPSILON) * 1000) / 1000; }
 
 // Il giorno di una data e' quello italiano, non quello del fuso del server:
 // un trasporto finito alle 23 del 31 agosto e' di agosto, non di settembre.
-function tariffaValidaPerData(t, dataIso) {
-  const giorno = giornoRoma(dataIso);
-  if (!giorno) return false;
-  const inizio = String(t.data_inizio_validita || '').slice(0, 10);
-  if (inizio && inizio > giorno) return false;
-  const fine = String(t.data_fine_validita || '').slice(0, 10);
-  if (fine && fine < giorno) return false;
-  return true;
-}
+// Dall'11/10/2026 la regola e' una sola per fattura, passiva, foglio e lista
+// dell'anno nuovo (validitaTariffa.ts): una tariffa 'non_attivo' non vale mai.
+const tariffaValidaPerData = (t, dataIso) => tariffaValeIl(t, dataIso);
+
+// LE UNITA' CHE LA PASSIVA SA LEGGERE (chiusura dell'audit, 11/10/2026). Fuori
+// da queste calcImporto restituiva zero e la tariffa risultava trovata: niente
+// «senza tariffa», niente anomalia, una riga pagata zero in silenzio. Lo zero
+// resta - un prezzo non si indovina - ma adesso si dice, sulla riga e fra le
+// anomalie, con la stessa frase della fattura attiva.
+const UNITA_PASSIVE = ['€/t', '€/kg', '€/viaggio'];
+const unitaPassivaLetta = (um) => UNITA_PASSIVE.includes(String(um || '').trim());
 
 // L'ACI si riconosce con la regola condivisa (base44/shared/canaleSecondaria.ts),
 // non con una copia piu' debole: quella guardava solo classe e prodotto e si
@@ -235,6 +239,42 @@ export function quoteViaggioMisto(valore, kgRete, kgAci, formulariRete = 0, form
   return { RETE: rete, ACI: round2(valore - rete), quota_rete: quotaRete, quota_aci: 1 - quotaRete };
 }
 
+/**
+ * QUANTO PAGA UN CANALE SU UNA TRATTA A VIAGGIO IN UN MESE (chiusura
+ * dell'audit, 11/10/2026).
+ *
+ * Prima ogni viaggio misto si arrotondava per conto suo e alla riga si dava la
+ * quota di viaggi arrotondata a due decimali; il foglio Excel moltiplicava il
+ * prezzo per quella quota, e appena Excel ricalcolava la riga di rete passava da
+ * 707,69 a 708,00 e quella ACI da 92,31 a 92,00 (400 €/viaggio, un viaggio di
+ * sola rete e uno misto con 10.000 kg di rete e 3.000 di ACI). Adesso
+ * l'arrotondamento e' UNO per tratta: la rete paga round2(valore x (viaggi
+ * interi + somma delle sue quote)), che e' esattamente =ROUND(F*G;2) del foglio
+ * con la quota non arrotondata in G; l'ACI paga i suoi viaggi interi piu' il
+ * resto dei misti, cosi' sui misti i due canali fanno sempre i viaggi veri.
+ * Sulla riga ACI, al mezzo centesimo, il resto non e' =ROUND(F*quota;2): per
+ * questo il foglio scrive in G i viaggi PAGATI, importo diviso prezzo
+ * (foglioPassiva in src/lib/passivaAmministrazione.js, 11/10/2026).
+ *
+ * @param misti i viaggi misti della tratta: [{ kgRete, kgAci, nRete, nAci }]
+ * @param aci vero per la quota ACI, falso per quella di rete
+ * @returns { importo, parte_misti, quota_misti, quota_esatta }: quota_misti e
+ *   quota_esatta (interi + quota_misti) NON arrotondate.
+ */
+export function importoTrattaAViaggio(valore, viaggiInteri, misti, aci) {
+  const elenco = misti || [];
+  const quotaRete = elenco.reduce((s, v) => s + quoteViaggioMisto(valore, v.kgRete, v.kgAci, v.nRete, v.nAci).quota_rete, 0);
+  const n = elenco.length;
+  const reteMisti = round2(valore * quotaRete);
+  const quotaMisti = aci ? n - quotaRete : quotaRete;
+  return {
+    importo: aci ? round2(valore * (viaggiInteri + n) - reteMisti) : round2(valore * (viaggiInteri + quotaRete)),
+    parte_misti: aci ? round2(valore * n - reteMisti) : reteMisti,
+    quota_misti: quotaMisti,
+    quota_esatta: viaggiInteri + quotaMisti,
+  };
+}
+
 // Numeri scritti dentro una nota: all'italiana, tonnellate con due decimali (tre
 // se i chili non sono tondi), euro con due.
 const migliaiaIt = (s) => s.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
@@ -321,7 +361,29 @@ function noteRiga(problema, nota) {
 // I tre campi con cui un gruppo di righe tiene il conto dei sovracosti dei
 // suoi interventi. Stanno in tutti i gruppi, anche in quelli di rete e di ACI,
 // dove restano a zero: un canale che non ha interventi non ha sovracosti.
-const CONTO_SOVRACOSTI = () => ({ sovracostoEuro: 0, sovracostoInterventi: [], sovracostoMotivi: new Set() });
+const CONTO_SOVRACOSTI = () => ({ sovracostoEuro: 0, sovracostoInterventi: [], sovracostoMotivi: new Set(), importoInterventi: 0 });
+
+// L'EXTRA RACCOLTA SI PAGA INTERVENTO PER INTERVENTO (chiusura dell'audit,
+// 11/10/2026). Ogni intervento fa storia a se': ha i suoi prezzi scritti a mano,
+// e il foglio dell'amministrazione e la pagina dell'extra raccolta lo contano su
+// una riga sua, arrotondata al centesimo. La passiva invece sommava i chili degli
+// interventi con lo stesso fornitore, provincia, destinazione e prezzo e
+// arrotondava una volta sola: quattro interventi da 2.216, 2.631, 4.387 e 5.153
+// kg a 95 euro di trattamento facevano 1.366,77 per gruppo e 1.366,78 per
+// intervento. Qui ogni intervento porta il suo importo gia' al centesimo, e la
+// riga ne e' la somma: e' la grana della fattura di chi ha fatto l'intervento.
+// Rete e ACI restano per gruppo (provincia, destinazione e tariffa): la grana
+// delle voci dell'amministrazione non si puo' rifare senza le voci, e il foglio
+// avvisa gia' di ogni centesimo di differenza (passivaAmministrazione.js).
+// Il centesimo e' quello di Excel (arrotondaAlCentesimo, chiusura dell'audit,
+// 11/10/2026): la pagina dell'extra raccolta arrotonda allo stesso modo ogni
+// costo di un intervento, e il foglio dell'amministrazione lo rifa' con
+// =ROUND(prezzo*peso;2) per costo. Con round2 103 kg a 85 €/t facevano 8,75 qui e
+// 8,76 nel foglio ricalcolato.
+function segnaImportoIntervento(g, tariffa, interno, peso, viaggioKey) {
+  if (!tariffa || interno) return;
+  g.importoInterventi += arrotondaAlCentesimo(calcImporto(tariffa.unita_misura, tariffa.valore, peso, viaggioKey ? 1 : 0));
+}
 
 export const MESI_PASSIVA = MESI_MAP;
 
@@ -356,8 +418,25 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
 
     // Tariffe con prestazione vuota → anomalia
     const anomalie = [];
+
+    // Una tariffa trovata con un'unita' che la passiva non sa leggere: la riga
+    // resta a zero, ma lo si dice (chiusura dell'audit, 11/10/2026). Le voci
+    // uguali si fondono in fondo, sommando le tonnellate.
+    const unitaIgnota = (tariffa, fornitore, prestazione, classe, kg) => {
+      if (!tariffa || unitaPassivaLetta(tariffa.unita_misura)) return false;
+      anomalie.push({
+        tipo: 'unita_sconosciuta',
+        descrizione: `${fornitore || '—'}, tariffa ${prestazione} ${tariffa.valore} ${String(tariffa.unita_misura || '').trim()}`.trimEnd() + `: ${unitaSconosciuta(tariffa.unita_misura)}.`,
+        fornitore: fornitore || '—',
+        prestazione,
+        classe: classe || '—',
+        ambito: `Tariffa ${tariffa.id || '—'}`,
+        tonnellate: round3(kg / 1000),
+      });
+      return true;
+    };
     for (const t of tariffeAll) {
-      if (t.stato !== 'attivo') continue;
+      if (!tariffaNonDisattivata(t)) continue;
       if (isEmpty(t.prestazione)) {
         anomalie.push({
           descrizione: `Tariffa senza prestazione assegnata (ID ${t.id}) — fornitore: ${t.fornitore_nome || '—'}`,
@@ -369,16 +448,32 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         });
       }
     }
-      // Le tariffe si leggono tutte, non solo quelle attive. Quando un prezzo
-      // viene rinegoziato, la tariffa vecchia viene chiusa con una data di fine
-      // e messa a non_attivo: se si leggessero solo le attive, tutti i mesi
-      // prima del cambio resterebbero senza prezzo e finirebbero a zero. A
-      // decidere se una tariffa vale per un movimento e' la sua finestra di
-      // validita', non il suo stato. Resta fuori solo la tariffa disattivata
-      // senza data di fine: quella non e' una rinegoziazione, e' una tariffa
-      // che non deve valere mai.
-      const valeAlmenoUnPeriodo = (t) => t.stato === 'attivo' || !!t.data_fine_validita;
-    const tariffe = tariffeAll.filter(t => !isEmpty(t.prestazione) && valeAlmenoUnPeriodo(t));
+    // Quando un prezzo viene rinegoziato, la tariffa vecchia si chiude con una
+    // data di fine e resta 'attivo' (gestisciAnagrafiche, dal 19/09/2026): a
+    // decidere se vale per un movimento e' la sua finestra di validita'. Lo stato
+    // 'non_attivo' vuol dire «non deve valere mai», e dall'11/10/2026 resta fuori
+    // anche con una data di fine: prima qui valeva e nel foglio
+    // dell'amministrazione no. La regola e' una, in validitaTariffa.ts.
+    const tariffe = tariffeAll.filter(t => !isEmpty(t.prestazione) && tariffaNonDisattivata(t));
+    // Una tariffa disattivata con la data di fine dentro questo mese prima
+    // valeva, adesso no: si dice, perche' un prezzo non sparisca in silenzio.
+    {
+      const mm = String(meseNum + 1).padStart(2, '0');
+      for (const t of disattivateNelPeriodo(tariffeAll, `${annoNum}-${mm}-01`, `${annoNum}-${mm}-31`)) {
+        // solo le passive (il margine passa anche le attive, che una prestazione non ce l'hanno)
+        if (isEmpty(t.prestazione) || String(t.direzione || 'PASSIVA').toUpperCase() !== 'PASSIVA') continue;
+        if (t.tipologia !== tipologia && !(t.tipologia === 'TUTTE' && tipologia !== 'EXTRA_RACCOLTA')) continue;
+        anomalie.push({
+          tipo: 'tariffa_disattivata',
+          descrizione: `${t.fornitore_nome || '—'}: la tariffa ${t.prestazione || '—'} ${t.valore} ${t.unita_misura || ''} e' 'non attiva' ma ha la validita' fino al ${String(t.data_fine_validita).slice(0, 10).split('-').reverse().join('/')}. Una tariffa non attiva non vale mai, nemmeno nella sua finestra (dall'11/10/2026): se deve valere per questo mese, rimettila attiva dall'elenco delle tariffe.`,
+          fornitore: t.fornitore_nome || '—',
+          prestazione: t.prestazione || '—',
+          classe: t.classe_materiale || '—',
+          ambito: `Tariffa ${t.id || '—'}`,
+          tonnellate: 0,
+        });
+      }
+    }
 
     // Il prezzo unico e una tariffa di trattamento per lo stesso fornitore e lo
     // stesso canale non possono convivere: si pagherebbe due volte lo stesso
@@ -690,6 +785,7 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         }
         const g = raccPerGroup.get(key);
         segnaSovracosto(g, sovracostoRaccoglitore, r);
+        if (tipologia === 'EXTRA_RACCOLTA') segnaImportoIntervento(g, tariffa, interno, peso, viaggioKey);
         g.peso_kg += peso;
         g.viaggiSet.add(viaggioKey);
         if (classe) g.classi_set.add(classe);
@@ -705,7 +801,10 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       const um = g.tariffa ? g.tariffa.unita_misura : '';
       const valore = g.tariffa ? g.tariffa.valore : 0;
       let importo = 0;
-      if (g.tariffa && !g.interno) importo = calcImporto(um, valore, g.peso_kg, g.viaggiSet.size);
+      if (g.tariffa && !g.interno) {
+        importo = tipologia === 'EXTRA_RACCOLTA' ? g.importoInterventi : calcImporto(um, valore, g.peso_kg, g.viaggiSet.size);
+      }
+      const ignota = !g.interno && unitaIgnota(g.tariffa, g.trasportatore, 'RACCOLTA', Array.from(g.classi_set).join(', '), g.peso_kg);
       // Il sovracosto degli interventi del gruppo si aggiunge qui, una volta
       // sola: segnaSovracosto lo ha sommato intervento per intervento, e un
       // intervento cade in un gruppo solo, quindi niente doppio conteggio.
@@ -713,6 +812,10 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       raccoglitoriRows.push({
         fornitore: g.trasportatore, fornitore_norm: g.trasKey, interno: g.interno, di_cui: elencoDiCuiConViaggi(g.diCui),
         riga: {
+          // La tariffa che il calcolo ha scelto davvero (11/10/2026): il foglio
+          // dell'amministrazione la usa per mettere la riga sotto la voce giusta,
+          // invece che sotto la prima voce che la riconosce.
+          tariffa_id: g.tariffa ? (g.tariffa.id || '') : '',
           provincia: g.provincia || '—', destinazione: g.destinazione || '—',
           // La regione del ritiro serve al «format amministrazione»: nel foglio
           // dell'amministrazione le righe dei raccoglitori sono divise per
@@ -729,7 +832,7 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           importo: round2(importo),
           ...campiSovracosto(g),
           ...noteRiga(
-            g.interno ? 'interno, non fatturato' : (!g.tariffa ? 'senza tariffa' : ''),
+            g.interno ? 'interno, non fatturato' : (!g.tariffa ? 'senza tariffa' : ignota ? unitaSconosciuta(um) : ''),
             notaSovracosto(g, 'della raccolta'),
           ),
         },
@@ -739,7 +842,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
     for (const g of raccPerTras.values()) {
       const tonnellate = g.peso_kg / 1000;
       let importo = 0, um = '', valore = 0, viaggiFatturati = 0;
+      const idTariffe = new Set();
       for (const pt of g.perTariffa.values()) {
+        if (pt.tariffa) idTariffe.add(pt.tariffa.id || '');
         if (!pt.tariffa || g.interno) continue;
         importo += calcImporto(pt.tariffa.unita_misura, pt.tariffa.valore, pt.peso_kg, pt.viaggiSet.size);
         viaggiFatturati += pt.viaggiSet.size;
@@ -766,6 +871,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       raccoglitoriRows.push({
         fornitore: g.trasportatore, fornitore_norm: g.trasKey, interno: g.interno, di_cui: elencoDiCuiConViaggi(g.diCui),
         riga: {
+          // la tariffa scelta, se e' una sola: con due tariffe a viaggio il
+          // foglio si regola sui criteri delle voci, come prima
+          tariffa_id: idTariffe.size === 1 ? [...idTariffe][0] : '',
           provincia: '—', destinazione: '—', classe: '—',
           tonnellate: round3(tonnellate), viaggi,
           tariffa_valore: valore, unita_misura: um,
@@ -960,6 +1068,7 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         }
         const g = impPerGroup.get(key);
         segnaSovracosto(g, sovracostoImpianto, r);
+        if (provenienza === 'extra') segnaImportoIntervento(g, tariffa, interno, peso, viaggioKey);
         g.peso_kg += peso;
         g.viaggiSet.add(viaggioKey);
         segnaDiCui(g.diCui, conferente, peso, viaggioKey);
@@ -972,7 +1081,10 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       const um = g.tariffa ? g.tariffa.unita_misura : '';
       const valore = g.tariffa ? g.tariffa.valore : 0;
       let importo = 0;
-      if (g.tariffa && !g.interno) importo = calcImporto(um, valore, g.peso_kg, g.viaggiSet.size);
+      if (g.tariffa && !g.interno) {
+        importo = g.provenienza === 'extra' ? g.importoInterventi : calcImporto(um, valore, g.peso_kg, g.viaggiSet.size);
+      }
+      const ignota = !g.interno && unitaIgnota(g.tariffa, g.destinazione, g.prestazione, g.classe, g.peso_kg);
       // Il sovracosto, una volta sola come per i raccoglitori. Si paga anche
       // quando sull'intervento il costo del trattamento e' zero: il sovracosto
       // non e' un prezzo del trattamento, e' un costo imprevisto che si
@@ -982,6 +1094,7 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       impiantiRows.push({
         fornitore: g.destinazione, fornitore_norm: g.destKey, interno: g.interno,
         riga: {
+          tariffa_id: g.tariffa ? (g.tariffa.id || '') : '',
           prestazione: g.prestazione, classe: g.classe || '—', provenienza: g.provenienza,
           tonnellate: round3(tonnellate), viaggi: g.viaggiSet.size,
           tariffa_valore: valore, unita_misura: um,
@@ -992,7 +1105,7 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           ...noteRiga(
             g.interno ? 'interno, non fatturato'
               : g.compresoNellaRaccolta ? 'compreso nel prezzo unico della raccolta'
-              : (!g.tariffa ? 'senza tariffa' : ''),
+              : (!g.tariffa ? 'senza tariffa' : ignota ? unitaSconosciuta(um) : ''),
             notaSovracosto(g, cosaSovra),
           ),
         },
@@ -1011,6 +1124,7 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       impiantiRows.push({
         fornitore: g.destinazione, fornitore_norm: g.destKey, interno: g.interno,
         riga: {
+          tariffa_id: g.tariffa ? (g.tariffa.id || '') : '',
           prestazione: g.tariffa ? g.tariffa.prestazione : '—',
           classe: '—', provenienza: '—',
           tonnellate: round3(tonnellate), viaggi: g.viaggiSet.size,
@@ -1055,6 +1169,25 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
     // fornitore, e allora la passiva lo paga per davvero. I due sovracosti non
     // sono piu' un'anomalia: sono righe pagate, nei due blocchi qui sopra.
     if (tipologia === 'EXTRA_RACCOLTA') {
+      // UN TERMINATO SENZA PESO EFFETTIVO SI DICE ANCHE QUI (chiusura dell'audit,
+      // 11/10/2026). La fattura lo lascia fuori con l'avviso, la pagina e il foglio
+      // dell'amministrazione lo mostrano senza chili; la passiva lo contava a zero
+      // chili e pagava solo i suoi importi fissi senza dire niente, e chi guardava
+      // solo la passiva non sapeva che i costi a tonnellata mancavano. La frase e'
+      // la stessa della fattura e della pagina (avvisoPesoMancante). I numeri non
+      // cambiano: la quantita' ritirata non sostituisce il peso.
+      for (const rec of extraRaccoltaF) {
+        if (Number(rec.peso_effettivo) > 0) continue;
+        anomalie.push({
+          tipo: 'peso_mancante',
+          descrizione: avvisoPesoMancante(rec),
+          fornitore: rec.trasportatore || '—',
+          prestazione: 'PESO EFFETTIVO',
+          classe: String(rec.classe || '—'),
+          ambito: `FIR ${rec.numero_fir || '—'}`,
+          tonnellate: 0,
+        });
+      }
       // Il trasporto di una secondaria di extra raccolta si paga a viaggio, col
       // prezzo scritto sull'intervento. Se quel campo e' vuoto il trasferimento
       // non si paga a nessuno: si dice, perche' un trasferimento gratis quasi
@@ -1280,26 +1413,33 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         let note = '';
         let notaInformativa = false;
         let viaggiQuota = viaggiConFormulari;
+        // La quota di viaggi NON arrotondata, solo a viaggio: e' quella che il
+        // foglio Excel moltiplica per il prezzo (=ROUND(F*G;2)) per rifare
+        // l'importo di questa riga al centesimo.
+        let viaggiQuotaEsatta = null;
         if (interno) {
           importo = 0;
           note = 'interno, non fatturato';
         } else if (um === '€/viaggio') {
-          // I viaggi interi si pagano per intero; di ogni viaggio misto questo
-          // canale paga la sua quota dei chili (quoteViaggioMisto).
-          let parteMisti = 0, quotaMisti = 0;
-          for (const v of misti) {
-            const q = quoteViaggioMisto(valore, v.kgRete, v.kgAci, v.nRete, v.nAci);
-            parteMisti += aciQui ? q.ACI : q.RETE;
-            quotaMisti += aciQui ? q.quota_aci : q.quota_rete;
-            if (!tariffaAltro(v)) {
-              scoperta.n++;
-              scoperta.kg += kgAltro(v);
-              scoperta.quota += aciQui ? q.quota_rete : q.quota_aci;
-              scoperta.euro += aciQui ? q.RETE : q.ACI;
-            }
+          // I viaggi interi si pagano per intero; dei viaggi misti questo canale
+          // paga la sua quota dei chili, arrotondata UNA volta per tratta
+          // (importoTrattaAViaggio): la rete al centesimo, l'ACI per differenza.
+          const conto = importoTrattaAViaggio(valore, viaggiInteri, misti, aciQui);
+          const parteMisti = conto.parte_misti;
+          const quotaMisti = conto.quota_misti;
+          const senzaAltro = misti.filter(v => !tariffaAltro(v));
+          if (senzaAltro.length) {
+            // La quota dell'altro canale sui misti che lui non paga, alla stessa
+            // grana: un arrotondamento per tratta, non uno per viaggio.
+            const altro = importoTrattaAViaggio(valore, 0, senzaAltro, !aciQui);
+            scoperta.n = senzaAltro.length;
+            scoperta.kg = senzaAltro.reduce((s, v) => s + kgAltro(v), 0);
+            scoperta.quota = altro.quota_misti;
+            scoperta.euro = altro.parte_misti;
           }
-          importo = viaggiInteri * valore + parteMisti;
+          importo = conto.importo;
           viaggiQuota = round2(viaggiInteri + quotaMisti);
+          viaggiQuotaEsatta = conto.quota_esatta;
           if (misti.length) {
             const n = misti.length;
             const interi = viaggiInteri
@@ -1335,6 +1475,10 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
             note = `di cui ${n} ${n === 1 ? 'viaggio misto' : 'viaggi misti'} ${conAltro}: a ${um === '€/t' ? 'tonnellata' : 'chilo'} ogni canale paga i suoi chili.${scoperta.n ? ` ${restoMisti(n, false)}` : ''}`;
             notaInformativa = scoperta.n === 0;
           }
+        } else if (pt.tariffa) {
+          // Un'unita' che la passiva non sa leggere: zero, ma detto (11/10/2026).
+          unitaIgnota(pt.tariffa, fatturante, 'TRASPORTO_SECONDARIA', '—', tonnellateCanale * 1000);
+          note = unitaSconosciuta(um);
         }
 
         // Le tonnellate della riga sono sempre e solo quelle del canale che si
@@ -1356,7 +1500,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
             viaggi_interi: viaggiInteri,
             viaggi_misti: misti.length,
             viaggi_quota: viaggiQuota,
+            // la stessa quota senza arrotondare, per la formula del foglio Excel;
+            // null dove non si paga a viaggio (11/10/2026)
+            viaggi_quota_esatta: viaggiQuotaEsatta,
             viaggi_totali_tratta: viaggiTotali,
+            tariffa_id: pt.tariffa ? (pt.tariffa.id || '') : '',
             tariffa_valore: valore, unita_misura: um,
             importo: round2(importo), viaggio_misto: viaggioMisto, note,
             nota_informativa: notaInformativa,

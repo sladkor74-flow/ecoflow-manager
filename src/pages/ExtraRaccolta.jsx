@@ -7,7 +7,7 @@ import { Loader2, Plus, Pencil, Trash2, Copy, FileSpreadsheet, FileText, AlertTr
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import { MESI } from '@/lib/pfuConstants';
-import { calcExtraRaccolta } from '@/lib/extraRaccoltaCalc';
+import { calcExtraRaccolta, contestoPrezzi, avvisoPesoMancante } from '@/lib/extraRaccoltaCalc';
 import { formatNumber, formatTonnellate, formatKg } from '@/lib/utils';
 import { exportExtraRaccoltaExcel, exportExtraRaccoltaPDF } from '@/lib/extraRaccoltaExport';
 import ExtraRaccoltaForm from '@/components/fatturazione/ExtraRaccoltaForm';
@@ -71,6 +71,13 @@ export default function ExtraRaccolta() {
   const [formOpen, setFormOpen] = useState(false);
   const [formInitial, setFormInitial] = useState(null);
   const [ricalcoli, setRicalcoli] = useState(null);
+  // Le tariffe attive dell'extra raccolta e i fornitori che cambiano la dicitura:
+  // il prezzo di un intervento senza prezzo scritto si sceglie con quelle, come
+  // in fattura (chiusura dell'audit, 11/10/2026). Si leggono una volta: sono
+  // poche righe, e la scheda le riceve da qui invece di rileggerle.
+  const [tariffeAttive, setTariffeAttive] = useState([]);
+  const [fornitoriDicitura, setFornitoriDicitura] = useState([]);
+  const [tariffeNonLette, setTariffeNonLette] = useState(false);
   const coda = useRef(null);
   if (!coda.current) coda.current = nuovaCoda();
 
@@ -118,6 +125,33 @@ export default function ExtraRaccolta() {
   };
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      // Senza le tariffe la pagina sa solo il prezzo scritto e la base
+      // dell'anno, e senza i fornitori non sa la dicitura: lo dice, invece di
+      // mostrare un ricavo che la fattura potrebbe non avere. Le due letture
+      // sono separate, perche' una che non risponde non si porti via l'altra.
+      try {
+        // Tutte le EXTRA_RACCOLTA attive, anche non_attivo con una data di fine:
+        // la fattura le considera (tariffeAttiveValide), e un filtro sullo stato
+        // qui farebbe scegliere un altro prezzo.
+        const t = await base44.entities.Tariffa.filter({ direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA' }, '-created_date', 500);
+        if (vivo) setTariffeAttive(t || []);
+      } catch {
+        if (vivo) setTariffeNonLette(true);
+      }
+      try {
+        const f = await base44.entities.Fornitore.filter({ trattamento_fatturato_da_ecotyre: true }, 'ragione_sociale', 500);
+        if (vivo) setFornitoriDicitura(f || []);
+      } catch {
+        if (vivo) setTariffeNonLette(true);
+      }
+    })();
+    return () => { vivo = false; };
+  }, []);
+  const contesto = useMemo(() => contestoPrezzi(tariffeAttive, fornitoriDicitura), [tariffeAttive, fornitoriDicitura]);
 
   // I filtri si dividono in due, come negli altri elenchi: quelli di periodo
   // leggono giornoElenco, gli altri la scheda. Separati, per contare le date da
@@ -168,7 +202,7 @@ export default function ExtraRaccolta() {
   const kpi = useMemo(() => {
     let kg = 0, ricavi = 0, costi = 0, margine = 0;
     for (const r of terminati) {
-      const c = calcExtraRaccolta(r);
+      const c = calcExtraRaccolta(r, contesto);
       if (!eSecondaria(r)) kg += Number(r.peso_effettivo) || 0;
       ricavi += c.ricavo;
       costi += c.costo_totale;
@@ -176,7 +210,15 @@ export default function ExtraRaccolta() {
     }
     const margine_perc = ricavi !== 0 ? (margine / ricavi * 100) : 0;
     return { tonnellate: kg / 1000, ricavi, costi, margine, margine_perc };
-  }, [terminati]);
+  }, [terminati, contesto]);
+
+  // QUELLO CHE LA FATTURA SEGNALA, LA PAGINA LO DICE UGUALE (11/10/2026).
+  // Un terminato senza peso effettivo non si fattura e non si valuta: prima qui
+  // si prendeva la quantita' ritirata al suo posto. E un intervento senza prezzo
+  // scritto che prende il prezzo di una tariffa di un altro anno, rimasta aperta,
+  // in fattura esce con l'avviso «prezzo di un altro anno»: qui lo stesso.
+  const senzaPeso = useMemo(() => terminati.filter(r => calcExtraRaccolta(r, contesto).senza_peso), [terminati, contesto]);
+  const prezzoAltroAnno = useMemo(() => terminati.filter(r => { const c = calcExtraRaccolta(r, contesto); return c.fatturato && c.prezzo.altro_anno; }), [terminati, contesto]);
 
   const trasportatori = useMemo(() => [...new Set(records.map(r => r.trasportatore).filter(Boolean))].sort(), [records]);
   const destinatari = useMemo(() => [...new Set(records.map(r => r.destinazione).filter(Boolean))].sort(), [records]);
@@ -234,17 +276,20 @@ export default function ExtraRaccolta() {
     load();
   };
 
-  // Senza un anno scelto, quello di oggi in Italia.
+  // Senza un anno scelto, quello di oggi in Italia. I file ricevono le tariffe
+  // che la pagina ha letto (contesto): senza, conoscevano solo il prezzo scritto
+  // e la base dell'anno, e con la tabella a un altro valore dicevano un prezzo
+  // diverso da pagina e fattura (chiusura dell'audit, 11/10/2026).
   const exportExcel = async () => {
     const mese = filters.mese || 'Tutti';
     const anno = filters.anno || Number(oggiRoma().slice(0, 4));
-    await exportExtraRaccoltaExcel(terminati, mese, anno);
+    await exportExtraRaccoltaExcel(terminati, mese, anno, contesto);
   };
 
   const exportPDF = async () => {
     const mese = filters.mese || 'Tutti';
     const anno = filters.anno || Number(oggiRoma().slice(0, 4));
-    await exportExtraRaccoltaPDF(terminati, mese, anno);
+    await exportExtraRaccoltaPDF(terminati, mese, anno, contesto);
   };
 
   return (
@@ -278,6 +323,36 @@ export default function ExtraRaccolta() {
           attivo={filters.date === 'da_sistemare'}
           onFiltra={(v) => setFilters({ ...filters, date: v ? 'da_sistemare' : '' })}
         />
+      )}
+
+      {senzaPeso.length > 0 && (
+        <div className="flex items-start gap-3 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div className="flex-1 space-y-1">
+            <p>
+              <strong>{senzaPeso.length} {senzaPeso.length === 1 ? 'intervento terminato è' : 'interventi terminati sono'} senza peso effettivo</strong>:
+              {senzaPeso.length === 1 ? ' non entra' : ' non entrano'} nella fattura a Ecotyre e i costi a tonnellata valgono zero, come in fattura e in passiva, finché il peso non si scrive sull&apos;intervento. La quantità ritirata non lo sostituisce.
+            </p>
+            <ul className="text-xs list-disc pl-4">
+              {senzaPeso.slice(0, 5).map(r => <li key={r.id}>{avvisoPesoMancante(r)}</li>)}
+              {senzaPeso.length > 5 && <li>e altri {senzaPeso.length - 5}.</li>}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {prezzoAltroAnno.length > 0 && (
+        <div className="flex items-start gap-3 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <p>
+            <strong>{prezzoAltroAnno.length} {prezzoAltroAnno.length === 1 ? 'intervento senza prezzo scritto prende' : 'interventi senza prezzo scritto prendono'} il prezzo di un altro anno</strong>,
+            da una tariffa di extra raccolta rimasta aperta: in fattura {prezzoAltroAnno.length === 1 ? 'esce' : 'escono'} con lo stesso avviso. Scrivi sull&apos;intervento il prezzo concordato per la campagna.
+          </p>
+        </div>
+      )}
+
+      {tariffeNonLette && (
+        <p className="text-xs text-amber-700">Le tariffe attive dell&apos;extra raccolta o i fornitori non si sono potuti leggere: i ricavi degli interventi senza prezzo scritto usano solo la base dell&apos;anno, e possono non essere quelli della fattura. Ricarica la pagina.</p>
       )}
 
       {senzaStato.length > 0 && (
@@ -442,10 +517,13 @@ export default function ExtraRaccolta() {
             </thead>
             <tbody>
               {filtered.map(r => {
-                const c = calcExtraRaccolta(r);
+                const c = calcExtraRaccolta(r, contesto);
                 const stato = statoExtra(r);
                 const conta = stato === 'terminato';
                 const euro = (v) => (conta ? `€ ${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—');
+                // Il ricavo che la fattura non ha non si scrive come un incasso:
+                // una secondaria non si fattura, un terminato senza peso nemmeno.
+                const perche = eSecondaria(r) ? 'Una secondaria non si fattura a Ecotyre: il ricavo sta sulla raccolta.' : avvisoPesoMancante(r);
                 const date = testoDate(r);
                 return (
                   <tr key={r.id} className={`border-t hover:bg-muted/20 ${date ? 'bg-amber-50/60' : ''}`}>
@@ -468,8 +546,18 @@ export default function ExtraRaccolta() {
                     <td className="px-3 py-2 text-xs">{r.destinazione || '-'}</td>
                     <td className="px-3 py-2 text-xs">{r.tipologia_trasporto || '-'}</td>
                     <td className="px-3 py-2">{r.classe || '-'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{r.peso_effettivo ? formatKg(r.peso_effettivo) : '-'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{euro(c.ricavo)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {!c.senza_peso ? formatKg(c.kg)
+                        : conta ? <span className="text-amber-700 font-medium" title={avvisoPesoMancante(r)}>manca</span> : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {conta && !c.fatturato
+                        ? <span className="text-muted-foreground" title={perche}>—</span>
+                        : <>
+                          {conta && c.prezzo.altro_anno && <span className="text-amber-700 font-medium mr-1" title={c.prezzo.nota}>!</span>}
+                          {euro(c.ricavo)}
+                        </>}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums">{euro(c.costo_totale)}</td>
                     <td className={`px-3 py-2 text-right tabular-nums font-medium ${!conta ? 'text-muted-foreground' : c.margine >= 0 ? 'text-success' : 'text-destructive'}`}>
                       {euro(c.margine)}
@@ -516,6 +604,7 @@ export default function ExtraRaccolta() {
 
       <ExtraRaccoltaForm
         open={formOpen}
+        contesto={contesto}
         initial={formInitial}
         onSave={save}
         onCancel={() => { setFormOpen(false); setFormInitial(null); }}

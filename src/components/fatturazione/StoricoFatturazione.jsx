@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileText, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
+import { euro } from '@/lib/formatoSoldi';
+import { giornoRoma } from '@/lib/giornoItaliano';
+
+// Importi e date all'italiana (chiusura dell'audit, 11/10/2026): il totale si
+// scriveva «€ 372976.50», e zero quando mancava; le date col fuso del
+// dispositivo e senza lo zero davanti (1/9/2026). Ora «€ 372.976,50» o «—», e
+// il giorno italiano in gg/mm/aaaa.
+const giornoIt = (v) => { const g = giornoRoma(v); return g ? g.split('-').reverse().join('/') : '-'; };
 
 const STATI = {
   bozza: 'bg-gray-100 text-gray-700',
@@ -34,9 +42,9 @@ function Tabella({ docs, onOpen, superati }) {
                 <td className="text-center px-3 py-2"><span className={`text-xs px-2 py-0.5 rounded ${STATI[d.stato] || ''}`}>{d.stato}</span></td>
                 <td className="px-3 py-2 text-right">{d.numero_fornitori || 0}</td>
                 <td className="px-3 py-2 text-right">{d.numero_voci || 0}</td>
-                <td className="px-3 py-2 text-right font-medium">€ {(d.totale || 0).toFixed(2)}</td>
-                <td className="px-3 py-2 text-xs">{d.data_elaborazione ? new Date(d.data_elaborazione).toLocaleDateString('it-IT') : '-'}</td>
-                <td className="px-3 py-2 text-xs">{d.data_chiusura ? new Date(d.data_chiusura).toLocaleDateString('it-IT') : '-'}</td>
+                <td className="px-3 py-2 text-right font-medium tabular-nums">{euro(d.totale)}</td>
+                <td className="px-3 py-2 text-xs">{giornoIt(d.data_elaborazione)}</td>
+                <td className="px-3 py-2 text-xs">{giornoIt(d.data_chiusura)}</td>
                 <td className="text-right px-3 py-2">
                   <button onClick={() => onOpen(d.anno, d.mese)} className="text-blue-600 hover:underline text-xs">
                     <FileText className="w-4 h-4 inline" /> {superati ? 'Ricalcola' : 'Apri'}

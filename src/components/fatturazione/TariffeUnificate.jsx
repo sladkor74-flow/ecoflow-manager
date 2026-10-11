@@ -6,6 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Plus, Pencil, Copy, History, CalendarX, RotateCcw, Download, Trash2 } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
 import { fetchAllClient } from '@/lib/fetchAllClient';
+import { chiaveMatch, chiaveMatchAttiva, periodiSovrapposti } from '@/lib/conflittiTariffa';
+import { tariffaNonDisattivata } from '@/lib/validitaTariffa';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import TariffeRuoliFornitori from './TariffeRuoliFornitori';
 import TariffeForm from './TariffeForm';
@@ -35,36 +37,28 @@ function getAmbito(t) {
   return '—';
 }
 function normVal(v) { return String(v || '').trim().toUpperCase(); }
+// LA STESSA CHIAVE DEL SERVER (chiusura dell'audit, 11/10/2026): le regole sono
+// quelle di gestisciAnagrafiche, nello specchio src/lib/conflittiTariffa.js.
+// Prima qui si confrontava fornitore_id, e due prezzi di Gatim per lo stesso
+// periodo - uno su «GATIM», uno su «GATIM S.R.L.» - non risultavano doppi,
+// mentre la passiva, che sceglie per nome normalizzato, ne pagava uno a caso.
+// servizio_ecotyre fa parte della chiave delle attive, come nel server: senza,
+// una tariffa legata a una dicitura veniva segnata «Duplicata» di quella che
+// vale per tutte, che e' una spiegazione falsa.
 function chiaviTariffaCoincidenti(a, b) {
   const aAttiva = normVal(a.direzione) === 'ATTIVA';
   const bAttiva = normVal(b.direzione) === 'ATTIVA';
-  if (aAttiva || bAttiva) {
-    if (aAttiva !== bAttiva) return false;
-    // servizio_ecotyre fa parte della chiave anche qui, come in gestisciAnagrafiche:
-    // senza, una tariffa legata a una dicitura veniva segnata «Duplicata» di quella
-    // che vale per tutte, che e' una spiegazione falsa - il server la accetta.
-    const campi = ['cliente', 'tipologia', 'classe_materiale', 'regione', 'eer_codice', 'servizio_ecotyre'];
-    for (const c of campi) { if (normVal(a[c]) !== normVal(b[c])) return false; }
-    return true;
-  }
-  const campi = ['fornitore_id', 'direzione', 'tipologia', 'prestazione', 'classe_materiale', 'provincia', 'regione', 'destinazione', 'produttore', 'destinatario'];
-  for (const c of campi) { if (normVal(a[c]) !== normVal(b[c])) return false; }
-  return true;
-}
-function periodiSovrappostiClient(inizio1, fine1, inizio2, fine2) {
-  const i1 = inizio1 ? new Date(inizio1).getTime() : 0;
-  const f1 = fine1 ? new Date(fine1).getTime() : Infinity;
-  const i2 = inizio2 ? new Date(inizio2).getTime() : 0;
-  const f2 = fine2 ? new Date(fine2).getTime() : Infinity;
-  return i1 <= f2 && i2 <= f1;
+  if (aAttiva !== bAttiva) return false;
+  return aAttiva ? chiaveMatchAttiva(a, b) : chiaveMatch(a, b);
 }
 function calcolaDuplicate(tariffe) {
-  const attive = tariffe.filter(t => normVal(t.stato) === 'ATTIVO');
+  // le disattivate no: non valgono mai (validitaTariffa); lo stato vuoto e' 'attivo'
+  const attive = tariffe.filter(tariffaNonDisattivata);
   const dupIds = new Set();
   for (let i = 0; i < attive.length; i++) {
     for (let j = i + 1; j < attive.length; j++) {
       if (chiaviTariffaCoincidenti(attive[i], attive[j]) &&
-          periodiSovrappostiClient(attive[i].data_inizio_validita, attive[i].data_fine_validita, attive[j].data_inizio_validita, attive[j].data_fine_validita)) {
+          periodiSovrapposti(attive[i].data_inizio_validita, attive[i].data_fine_validita, attive[j].data_inizio_validita, attive[j].data_fine_validita)) {
         dupIds.add(attive[i].id);
         dupIds.add(attive[j].id);
       }

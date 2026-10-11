@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -10,18 +11,30 @@ export default function FornitoriManager() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ ragione_sociale: '', tipo: 'trasportatore', piva: '', regione: '' });
+  const [errore, setErrore] = useState('');
 
+  // Tutta l'anagrafica, non le prime 500 righe (chiusura dell'audit, 11/10/2026).
   const load = async () => {
     setLoading(true);
-    try { setFornitori(await base44.entities.Fornitore.list('-created_date', 500)); } catch (e) {}
+    try { setFornitori(await fetchAllClient(base44.entities.Fornitore, null, '-created_date')); } catch (e) {}
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
 
+  // IL NOME GIA' PRESENTE SI DICE (chiusura dell'audit, 11/10/2026): dall'11/10
+  // gestisciAnagrafiche rifiuta un fornitore il cui nome normalizzato c'e' gia'
+  // («GATIM S.R.L.» e «GATIM» sono lo stesso), e qui il rifiuto si mostrava come
+  // niente - il modulo si chiudeva lo stesso e il fornitore non c'era.
   const add = async () => {
     if (!form.ragione_sociale) return;
-    await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Fornitore', operazione: 'create', dati: { ...form, stato: 'attivo' } });
+    setErrore('');
+    try {
+      await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Fornitore', operazione: 'create', dati: { ...form, stato: 'attivo' } });
+    } catch (e) {
+      setErrore(e?.response?.data?.error || e?.message || 'Il fornitore non si è potuto salvare.');
+      return;
+    }
     setForm({ ragione_sociale: '', tipo: 'trasportatore', piva: '', regione: '' });
     setShowForm(false); load();
   };
@@ -60,6 +73,7 @@ export default function FornitoriManager() {
             <Input placeholder="P.IVA" value={form.piva} onChange={e => setForm({ ...form, piva: e.target.value })} />
             <Input placeholder="Regione" value={form.regione} onChange={e => setForm({ ...form, regione: e.target.value })} />
           </div>
+          {errore && <div className="text-sm text-destructive">{errore}</div>}
           <Button size="sm" onClick={add}>Salva</Button>
         </div>
       )}

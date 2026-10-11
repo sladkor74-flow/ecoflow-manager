@@ -80,11 +80,14 @@ verifica('nell\'export la nota breve del misto: quanti viaggi si pagano davvero'
 verifica('il viaggio misto non e\' piu\' un\'anomalia', !vRete.anomalie.some(a => /misto/i.test(a.descrizione)) && !vAci.anomalie.some(a => /misto/i.test(a.descrizione)), JSON.stringify(vRete.anomalie.map(a => a.descrizione)));
 const vSoloMisto = calcolaPassivaMese({ ...datiMisti, secondarieAll: secondarieMiste.slice(0, 2) }, 2026, 5, 'Giugno', 'ACI');
 verifica('un canale che ha solo la sua quota di un misto: niente "zero viaggi", paga la quota', vSoloMisto.trasporti_secondaria[0].righe[0].importo === 90 && /nessun viaggio di soli formulari ACI/.test(vSoloMisto.trasporti_secondaria[0].righe[0].note));
-// tre viaggi misti da un terzo: le quote arrotondate sommano comunque l'importo
+// tre viaggi misti da un terzo: le quote sommano comunque l'importo. Dall'11/10/2026
+// l'arrotondamento e' uno per tratta (importoTrattaAViaggio), non uno per viaggio:
+// un terzo per tre viaggi e' un viaggio intero, 100 euro, e non 3 x 33,33 = 99,99.
+// E' il numero che il foglio Excel rifa' con =ROUND(F*G;2).
 const terzi = [1, 2, 3].flatMap(g => [sec(`r${g}`, 1000, `2026-06-1${g}T00:00:00Z`, 'CC333CC', false), sec(`a${g}`, 2000, `2026-06-1${g}T00:00:00Z`, 'CC333CC', true)]);
 const tR = calcolaPassivaMese({ ...datiMisti, secondarieAll: terzi, tariffeAll: [{ ...datiMisti.tariffeAll[0], valore: 100 }] }, 2026, 5, 'Giugno', 'RETE').trasporti_secondaria[0].righe[0];
 const tA = calcolaPassivaMese({ ...datiMisti, secondarieAll: terzi, tariffeAll: [{ ...datiMisti.tariffeAll[0], valore: 100 }] }, 2026, 5, 'Giugno', 'ACI').trasporti_secondaria[0].righe[0];
-verifica('tre misti da 100 euro divisi a un terzo: 99,99 + 200,01 = 300', tR.importo === 99.99 && tA.importo === 200.01, `${tR.importo} + ${tA.importo}`);
+verifica('tre misti da 100 euro divisi a un terzo: 100,00 + 200,00 = 300', tR.importo === 100 && tA.importo === 200, `${tR.importo} + ${tA.importo}`);
 const aTon = calcolaPassivaMese({ ...datiMisti, tariffeAll: [{ ...datiMisti.tariffeAll[0], valore: 20, unita_misura: '€/t' }] }, 2026, 5, 'Giugno', 'ACI').trasporti_secondaria[0].righe[0];
 verifica('a tonnellata ogni canale paga i suoi chili: 7 t x 20 = 140, con la nota informativa', aTon.importo === 140 && aTon.nota_informativa === true && /ogni canale paga i suoi chili/.test(aTon.note), JSON.stringify(aTon));
 

@@ -30,9 +30,16 @@
 // elenca fra le voci attive). Gli oneri che si PAGANO sono la pulizia e i costi
 // aggiuntivi, e sono quelli che il foglio mette nella colonna degli oneri fissi.
 // Se un domani un sovracosto va anche pagato, serve dirlo: non si indovina.
+//
+// I CHILI SONO IL PESO EFFETTIVO, E BASTA (chiusura dell'audit, 11/10/2026).
+// Qui si ripiegava sulla quantita' ritirata, come nella pagina: un terminato
+// senza peso effettivo usciva nel foglio con un peso che la passiva non conta e
+// la fattura non fattura. Ora la riga resta - i suoi importi fissi si pagano
+// lo stesso, come nella passiva - ma senza chili, con la nota che lo dice, e
+// l'intervento torna anche nell'elenco `senza_peso`: va sistemato, non stimato.
 
 import { giornoRoma } from '@/lib/giornoItaliano';
-import { calcExtraRaccolta } from '@/lib/extraRaccoltaCalc';
+import { calcExtraRaccolta, avvisoPesoMancante } from '@/lib/extraRaccoltaCalc';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -87,7 +94,7 @@ export function produttoreDi(r) {
  * IL BLOCCO DELL'EXTRA RACCOLTA: una riga per intervento chiuso nel mese, con i
  * suoi prezzi e il suo totale.
  *
- * Torna { righe, totale_kg, totale_t, totale_euro, senza_costi, senza_data }.
+ * Torna { righe, totale_kg, totale_t, totale_euro, senza_costi, senza_peso, senza_data }.
  * `senza_costi` sono gli interventi chiusi su cui nessun costo e' stato scritto:
  * la passiva non pagherebbe niente, e un intervento gratis e' quasi sempre una
  * dimenticanza. Si dicono, non si inventano i prezzi.
@@ -123,8 +130,9 @@ export function bloccoExtraRaccolta(interventi, anno, mese) {
       inizio: giornoRoma(r.trasporto_iniziato_il) || '',
       fine: giornoRoma(r.trasporto_finito_il) || '',
       cer: testo(r.cer) || '',
-      kg: Math.round(Number(r.peso_effettivo || r.quantita_ritirata || 0)),
+      kg: c.senza_peso ? null : Math.round(c.kg),
       tonnellate: n3(c.tonnellate),
+      senza_peso: c.senza_peso,
       raccolta_t: raccolta,
       stoccaggio_t: stoccaggio,
       trattamento_t: trattamento,
@@ -139,6 +147,7 @@ export function bloccoExtraRaccolta(interventi, anno, mese) {
       note: [
         // A chi va il sovracosto, prima di tutto il resto: e' la cosa che serve
         // a chi deve fatturarlo.
+        c.senza_peso ? "PESO EFFETTIVO MANCANTE: i costi a tonnellata valgono zero finché non si scrive sull'intervento" : '',
         sovraRaccoglitore ? `sovracosto ${euroIt(sovraRaccoglitore)} al raccoglitore` : '',
         sovraImpianto ? `sovracosto ${euroIt(sovraImpianto)} all'impianto` : '',
         senzaPadrone ? `${euroIt(senzaPadrone)} di pulizia e costi aggiuntivi, che non si fatturano a nessuno` : '',
@@ -150,17 +159,26 @@ export function bloccoExtraRaccolta(interventi, anno, mese) {
   });
   return {
     righe,
-    totale_kg: righe.reduce((s, r) => s + r.kg, 0),
+    totale_kg: righe.reduce((s, r) => s + (r.kg || 0), 0),
     totale_t: n3(righe.reduce((s, r) => s + r.tonnellate, 0)),
     totale_euro: n2(righe.reduce((s, r) => s + r.totale, 0)),
     senza_costi: righe.filter(r => r.senza_costi && r.kg > 0),
+    // I terminati del mese senza peso effettivo: nel foglio ci sono, senza chili,
+    // e qui si elencano con la frase che dicono anche fattura e pagina.
+    senza_peso: dentro.filter(r => calcExtraRaccolta(r).senza_peso).map(r => ({
+      numero_fir: testo(r.numero_fir) || '—',
+      ordine: testo(r.id_ordine) || '—',
+      produttore: produttoreDi(r),
+      kg: null,
+      avviso: avvisoPesoMancante(r),
+    })),
     // I terminati senza fine trasporto: non stanno in nessun mese, e vanno
     // sistemati prima di fatturare.
     senza_data: senza_data.map(r => ({
       numero_fir: testo(r.numero_fir) || '—',
       ordine: testo(r.id_ordine) || '—',
       produttore: produttoreDi(r),
-      kg: Math.round(Number(r.peso_effettivo || r.quantita_ritirata || 0)),
+      kg: Number(r.peso_effettivo) > 0 ? Math.round(Number(r.peso_effettivo)) : null,
     })),
   };
 }

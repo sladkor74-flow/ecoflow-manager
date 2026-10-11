@@ -11,6 +11,7 @@
 
 import { MESI } from '@/lib/pfuConstants';
 import { dateMancanti, dateIncoerenti } from '@/lib/movimenti';
+import { giornoRoma } from '@/lib/giornoItaliano';
 
 export const STATI_EXTRA = {
   assegnato: { etichetta: 'Assegnato', classe: 'bg-sky-50 text-sky-800 border-sky-200' },
@@ -34,14 +35,20 @@ export const datiChiusuraCompleti = (r) => {
   return dateMancanti(comeTerminato).length === 0 && dateIncoerenti(comeTerminato).length === 0;
 };
 
-const mezzanotteItaliana = (d) => (d.getUTCHours() === 22 || d.getUTCHours() === 23) && !d.getUTCMinutes() && !d.getUTCSeconds() && !d.getUTCMilliseconds();
-
-// Giorno di calendario (aaaa-mm-gg) di una data salvata.
+// Giorno di calendario (aaaa-mm-gg) di una data salvata: il giorno italiano,
+// quello che leggono fattura, passiva, giacenze e ogni altro modulo.
+//
+// UNA REGOLA SOLA PER IL GIORNO (chiusura dell'audit, 11/10/2026). Qui la
+// correzione era rifatta a mano: le 22 o le 23 UTC esatte si spostavano avanti
+// di tre ore, tutto il resto si leggeva in UTC. Una mezzanotte italiana la
+// riconosceva, ma sbagliava due casi: le 22:00 UTC d'inverno, che in Italia
+// sono ancora le 23 dello stesso giorno, finivano al giorno dopo; e un'ora vera
+// fra le 22 e mezzanotte UTC d'estate, che in Italia e' gia' il giorno dopo,
+// restava indietro. La scheda mostrava cosi' un giorno diverso da quello con cui
+// il resto del gestionale colloca l'intervento - e a fine mese, un mese diverso.
+// giornoRoma fa la stessa cosa per tutti.
 export function giornoDaData(v) {
-  if (!v) return '';
-  const d = new Date(v);
-  if (isNaN(d.getTime())) return '';
-  return (mezzanotteItaliana(d) ? new Date(d.getTime() + 3 * 3600000) : d).toISOString().slice(0, 10);
+  return giornoRoma(v);
 }
 
 // Data da salvare per un giorno di calendario (aaaa-mm-gg).

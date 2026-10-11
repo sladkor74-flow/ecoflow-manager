@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Save, ChevronLeft } from 'lucide-react';
-import { calcExtraRaccolta, tariffaBaseExtraRaccolta, annoIntervento } from '@/lib/extraRaccoltaCalc';
+import { calcExtraRaccolta, prezzoAttivoExtra, annoIntervento, avvisoPesoMancante, tariffaPassivaProposta } from '@/lib/extraRaccoltaCalc';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 import { PROV_TO_REGION } from '@/lib/regioneMap';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { formatNumber } from '@/lib/utils';
@@ -94,7 +95,14 @@ function ComboSelect({ value, onChange, options, placeholder }) {
 // l'anno di oggi in Italia.
 const annoProposta = (f) => annoIntervento(f) || Number(oggiRoma().slice(0, 4));
 
-export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
+// La data su cui si guarda la validita' di una tariffa: la fine del trasporto,
+// poi la richiesta, poi oggi in Italia (una scheda nuova non ha ancora date).
+const giornoProposta = (f) => f.trasporto_finito_il || f.ordine_immesso_il || oggiRoma();
+
+// `contesto` sono le tariffe attive e i fornitori che la pagina ha letto
+// (contestoPrezzi): il prezzo proposto e l'avviso sotto il campo vengono dalla
+// stessa funzione della fattura (chiusura dell'audit, 11/10/2026).
+export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, contesto }) {
   const [form, setForm] = useState({ ...EMPTY });
   const [fornitori, setFornitori] = useState([]);
   const [tariffe, setTariffe] = useState([]);
@@ -118,8 +126,11 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
         setFornitori(f);
       } catch {}
       try {
-        // solo le tariffe passive dell'extra raccolta: la rete non si usa mai al loro posto
-        const t = await base44.entities.Tariffa.filter({ direzione: 'PASSIVA', tipologia: 'EXTRA_RACCOLTA', stato: 'attivo' }, '-created_date', 2000);
+        // solo le tariffe passive dell'extra raccolta: la rete non si usa mai al
+        // loro posto. Tutte, a pagine, senza filtro sullo stato (11/10/2026): il
+        // filtro { stato: 'attivo' } perdeva le tariffe con lo stato vuoto, che
+        // per la passiva valgono; le disattivate le scarta tariffaValeIl.
+        const t = await fetchAllClient(base44.entities.Tariffa, { direzione: 'PASSIVA', tipologia: 'EXTRA_RACCOLTA' }, '-created_date');
         setTariffe(t);
       } catch {}
       // Tutte le province italiane: leggerle dalle primarie ne caricava solo una parte.
@@ -131,17 +142,25 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
     })();
   }, []);
 
+  // Il prezzo che la fattura applicherebbe se sulla scheda non ci fosse un prezzo
+  // scritto: prezzoAttivoExtra, la stessa funzione, con le tariffe della pagina.
+  const prezzoSenzaScritto = (f) => prezzoAttivoExtra({ ...f, prezzo_attivo_t: 0 }, contesto, giornoProposta(f), annoProposta(f));
+
   // La tariffa base del prezzo attivo (202 €/t nel 2026, regola dell'utente del
-  // 22/09/2026) si propone quando il prezzo e' vuoto, o si riallinea quando era
-  // stata proposta e cambiano le date o il movimento. Un prezzo scritto
+  // 22/09/2026; dall'11/10/2026 prima quella della tabella delle tariffe attive,
+  // come in fattura) si propone quando il prezzo e' vuoto, o si riallinea quando
+  // era stata proposta e cambiano le date o il movimento. Un prezzo scritto
   // dall'utente non si tocca. Le secondarie non si fatturano: niente base.
+  // Non si propone il prezzo di un ALTRO anno, da una tariffa rimasta aperta:
+  // scritto sulla scheda diventerebbe un prezzo concordato e l'avviso della
+  // fattura sparirebbe; lo si dice sotto il campo. Ne' un prezzo in un'altra
+  // unita', che in un campo a tonnellata sarebbe sbagliato.
   // Restituisce { prezzo, anno } da scrivere, oppure null se non si tocca niente.
   const propostaPrezzo = (f, propostoPrima) => {
     const vuoto = !(Number(f.prezzo_attivo_t) > 0);
     if (!vuoto && !propostoPrima) return null;
-    const anno = annoProposta(f);
-    const base = f.tipo_movimento === 'secondaria' ? null : tariffaBaseExtraRaccolta(anno);
-    if (base) return { prezzo: base, anno };
+    const p = prezzoSenzaScritto(f);
+    if (p.base && !p.altro_anno && p.fattore === 1000) return { prezzo: p.valore, anno: p.anno_tariffa || p.anno };
     return propostoPrima ? { prezzo: 0, anno: null } : null;
   };
   const rivediPrezzo = (nuovi) => {
@@ -241,45 +260,11 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
     // Va scritto esplicitamente, altrimenti resterebbe il costo proposto per il
     // trasportatore scelto prima e la passiva lo conterebbe.
     if (prestazione === 'RACCOLTA' && forn.interno) { scrivi(0, null); return; }
-    // La validita' si guarda sul giorno di fine trasporto; per un intervento
-    // ancora assegnato, che non ce l'ha, su oggi in Italia (non sul giorno UTC).
-    const data = f.trasporto_finito_il || oggiRoma();
-    const valida = (t) => {
-      const suo = t.fornitore_id === forn.id || normalizzaRagioneSociale(t.fornitore_nome) === normalizzaRagioneSociale(forn.ragione_sociale);
-      if (!suo || t.prestazione !== prestazione || t.direzione !== 'PASSIVA' || t.stato !== 'attivo') return false;
-      if (t.tipologia !== 'EXTRA_RACCOLTA') return false;
-      const inizio = String(t.data_inizio_validita || '').slice(0, 10);
-      const fine = String(t.data_fine_validita || '').slice(0, 10);
-      if (inizio && data < inizio) return false;
-      if (fine && data > fine) return false;
-      if (t.classe_materiale && t.classe_materiale !== f.classe) return false;
-      return true;
-    };
-    const vuoto = (s) => !String(s || '').trim();
-    const maiuscolo = (s) => String(s || '').trim().toUpperCase();
-    const perClasse = (c) => c.find(t => t.classe_materiale) || c[0] || null;
-    // La scelta di passivaCalcolo: per la raccolta la cascata di
-    // findTariffaRaccolta - destinazione, provincia, regione, generica. Prendere
-    // la prima tariffa del fornitore precompilava, per Emmesse, i 72 euro di
-    // Gatim su un ritiro scaricato a Irigom, che ne costa 90. Per impianti e
-    // stoccaggi, come findTariffaImpianto, conta solo la classe. A parita' di
-    // livello vince quella per classe sulla generica.
-    const scegli = () => {
-      const c = tariffe.filter(valida);
-      if (prestazione !== 'RACCOLTA') return perClasse(c);
-      const dest = vuoto(f.destinazione) ? '' : normalizzaRagioneSociale(f.destinazione);
-      const prov = maiuscolo(f.provincia);
-      const reg = maiuscolo(PROV_TO_REGION[prov]);
-      const livelli = [
-        dest ? c.filter(t => !vuoto(t.destinazione) && normalizzaRagioneSociale(t.destinazione) === dest) : [],
-        prov ? c.filter(t => vuoto(t.destinazione) && maiuscolo(t.provincia) === prov) : [],
-        reg ? c.filter(t => vuoto(t.destinazione) && vuoto(t.provincia) && maiuscolo(t.regione) === reg) : [],
-        c.filter(t => vuoto(t.destinazione) && vuoto(t.provincia) && vuoto(t.regione)),
-      ];
-      for (const l of livelli) { const m = perClasse(l); if (m) return m; }
-      return null;
-    };
-    const candidate = scegli();
+    // La tariffa si sceglie come la sceglie la passiva, e vale come in
+    // fatturazione: sul giorno italiano di fine trasporto, o di oggi per un
+    // intervento ancora assegnato, e una tariffa con lo stato vuoto conta come
+    // attiva (tariffaPassivaProposta di extraRaccoltaCalc.js, 11/10/2026).
+    const candidate = tariffaPassivaProposta(tariffe, forn, prestazione, f, oggiRoma());
     if (candidate) scrivi(candidate.valore, 'contratto');
     else libera();
   };
@@ -426,19 +411,30 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
     ? <p className="text-xs text-success">dalla tariffa di extra raccolta del fornitore</p>
     : null);
 
-  const calc = calcExtraRaccolta(form);
+  const calc = calcExtraRaccolta(form, contesto);
 
-  // Sotto il prezzo attivo: da dove viene, lo stesso che dira' la fattura.
+  // Sotto il prezzo attivo: da dove viene, lo stesso che dira' la fattura, con lo
+  // stesso avviso quando il prezzo e' di un altro anno.
   const annoPrezzo = annoProposta(form);
-  const baseAnno = secondaria ? null : tariffaBaseExtraRaccolta(annoPrezzo);
+  const senzaScritto = prezzoSenzaScritto(form);
   let testoPrezzo = null;
   if (prezzoBase !== null) testoPrezzo = <p className="text-xs text-success">tariffa base Ecotyre {prezzoBase}: {formatNumber(Number(form.prezzo_attivo_t) || 0)} €/t</p>;
   else if (secondaria) testoPrezzo = <p className="text-xs text-muted-foreground">una secondaria non si fattura a Ecotyre: il ricavo sta sulla raccolta</p>;
   else if (!(Number(form.prezzo_attivo_t) > 0)) {
-    testoPrezzo = baseAnno
-      ? <p className="text-xs text-muted-foreground">vuoto: in fattura vale la tariffa base Ecotyre {annoPrezzo} ({formatNumber(baseAnno)} €/t)</p>
-      : <p className="text-xs text-amber-700">per il {annoPrezzo} non c&apos;è una tariffa base Ecotyre: scrivi il prezzo</p>;
+    if (senzaScritto.altro_anno) {
+      testoPrezzo = <p className="text-xs text-amber-700" title={senzaScritto.nota}>vuoto: in fattura vale la tariffa del {senzaScritto.anno_tariffa} ({formatNumber(senzaScritto.valore)} {senzaScritto.unita}), rimasta aperta: è il prezzo del {senzaScritto.anno_tariffa}, non del {annoPrezzo}. Scrivi il prezzo concordato per questa campagna.</p>;
+    } else if (senzaScritto.valore) {
+      testoPrezzo = <p className="text-xs text-muted-foreground" title={senzaScritto.nota}>vuoto: in fattura vale la tariffa base Ecotyre {senzaScritto.anno_tariffa || annoPrezzo} ({formatNumber(senzaScritto.valore)} {senzaScritto.unita})</p>;
+    } else {
+      testoPrezzo = <p className="text-xs text-amber-700">per il {annoPrezzo} non c&apos;è una tariffa base Ecotyre: scrivi il prezzo</p>;
+    }
   }
+  // Il ricavo del riepilogo e' quello della fattura: una secondaria e un
+  // intervento senza peso effettivo non si fatturano, e lo si dice invece di
+  // scrivere zero euro.
+  const ricavoNonFatturato = !calc.fatturato
+    ? (secondaria ? 'una secondaria non si fattura a Ecotyre' : 'manca il peso effettivo: senza, non si fattura')
+    : '';
 
   const NumField = ({ label, k }) => (
     <div className="space-y-1">
@@ -726,7 +722,9 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel }) {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 border-2 rounded-lg bg-muted/30">
             <div>
               <div className="text-xs text-muted-foreground">Ricavo</div>
-              <div className="text-base font-bold tabular-nums">€ {formatNumber(calc.ricavo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              {ricavoNonFatturato
+                ? <div className="text-base font-bold tabular-nums text-muted-foreground" title={secondaria ? '' : avvisoPesoMancante(form)}>—<span className="block text-[11px] font-normal">{ricavoNonFatturato}</span></div>
+                : <div className="text-base font-bold tabular-nums">€ {formatNumber(calc.ricavo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
             </div>
             <div>
               <div className="text-xs text-muted-foreground">Costo totale</div>

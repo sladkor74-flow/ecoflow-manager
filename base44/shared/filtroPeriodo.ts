@@ -1,5 +1,5 @@
 import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
-import { eTerminato, giornoMovimento, dateDaSistemare, testoDate, GIORNI_SCADENZA_ORDINE } from "./movimenti.ts";
+import { eTerminato, giornoMovimento, dateDaSistemare, testoDate, GIORNI_SCADENZA_ORDINE, chiaveOrdine } from "./movimenti.ts";
 
 // Filtro periodo condiviso per fatturazione attiva, passiva e anteprima Ecotyre.
 // Regola: stato="terminato" + trasporto_finito_il cade in anno/mese.
@@ -123,26 +123,54 @@ const voceDate = (r) => ({
   problema: testoDate(r),
 });
 
+// UN ORDINE E' UNA VOCE, ANCHE SE IN ARCHIVIO HA PIU' RIGHE (chiusura
+// dell'audit, 11/10/2026). Lo stesso ordine sta in archivio con una riga per
+// classe o per prodotto: la fatturazione contava le righe, e un ordine con la P
+// e la M senza inizio trasporto diceva «2 terminati con le date da sistemare»
+// dove gli elenchi, il raccolto, le Giacenze e le Dichiarazioni ne contano uno
+// (ordiniDaSistemare e chiaveOrdine di movimenti.ts). Le righe dello stesso
+// ordine si fondono: i chili si sommano, i formulari e i problemi si dicono una
+// volta ciascuno, e `righe` dice quante erano.
+function perOrdine(coppie) {
+  const ordini = new Map();
+  for (const { r, i } of coppie) {
+    const k = chiaveOrdine(r, i);
+    const v = voceDate(r);
+    const prima = ordini.get(k);
+    if (!prima) { ordini.set(k, { ...v, firs: v.numero_fir ? [v.numero_fir] : [], problemi: v.problema ? [v.problema] : [], righe: 1 }); continue; }
+    prima.kg += v.kg;
+    prima.righe += 1;
+    if (v.numero_fir && !prima.firs.includes(v.numero_fir)) prima.firs.push(v.numero_fir);
+    if (v.problema && !prima.problemi.includes(v.problema)) prima.problemi.push(v.problema);
+    if (!prima.immesso_il && v.immesso_il) prima.immesso_il = v.immesso_il;
+  }
+  return [...ordini.values()].map(({ firs, problemi, ...v }) => ({ ...v, numero_fir: firs.join(', '), problema: problemi.join('; ') }));
+}
+
 /**
- * I terminati di UN canale con le date da segnalare nella fatturazione di un
- * mese: { senza_fine: [...], da_sistemare: [...] }. Ogni voce e'
- * { id, ordine, numero_fir, kg, immesso_il ('AAAA-MM-GG' o ''), problema }.
+ * Gli ORDINI di UN canale con le date da segnalare nella fatturazione di un
+ * mese: { senza_fine: [...], da_sistemare: [...] }. Ogni voce e' un ordine
+ * (chiaveOrdine), con le sue righe fuse:
+ * { id, ordine, numero_fir, kg, immesso_il ('AAAA-MM-GG' o ''), problema, righe }.
  * meseIdx e' l'indice 0-11.
  */
 export function dateDaSegnalare(records, anno, meseIdx) {
   const annoNum = Number(anno);
   const esito = { senza_fine: [], da_sistemare: [] };
   if (!(meseIdx >= 0 && meseIdx <= 11) || isNaN(annoNum)) return esito;
-  for (const r of records || []) {
-    if (!eTerminato(r)) continue;
+  const senzaFine = [], daSistemare = [];
+  (records || []).forEach((r, i) => {
+    if (!eTerminato(r)) return;
     const fine = giornoMovimento(r);
     if (!fine) {
-      if (senzaFineNelMese(r, annoNum, meseIdx)) esito.senza_fine.push(voceDate(r));
-      continue;
+      if (senzaFineNelMese(r, annoNum, meseIdx)) senzaFine.push({ r, i });
+      return;
     }
-    if (Number(fine.slice(0, 4)) !== annoNum || Number(fine.slice(5, 7)) - 1 !== meseIdx) continue;
-    if (dateDaSistemare(r)) esito.da_sistemare.push(voceDate(r));
-  }
+    if (Number(fine.slice(0, 4)) !== annoNum || Number(fine.slice(5, 7)) - 1 !== meseIdx) return;
+    if (dateDaSistemare(r)) daSistemare.push({ r, i });
+  });
+  esito.senza_fine = perOrdine(senzaFine);
+  esito.da_sistemare = perOrdine(daSistemare);
   return esito;
 }
 
@@ -200,13 +228,16 @@ export function anomaliaSenzaFineAnno(records, anno, finoAlMese, canale) {
   const annoNum = Number(anno);
   const ultimo = Math.min(11, Number(finoAlMese));
   if (!(ultimo >= 0) || isNaN(annoNum)) return null;
-  const voci = [];
-  for (const r of records || []) {
-    if (!eTerminato(r) || giornoMovimento(r)) continue;
+  // Per ordine, come dateDaSegnalare (11/10/2026): un ordine con due righe senza
+  // fine trasporto e' un terminato, non due.
+  const coppie = [];
+  (records || []).forEach((r, i) => {
+    if (!eTerminato(r) || giornoMovimento(r)) return;
     for (let m = 0; m <= ultimo; m++) {
-      if (senzaFineNelMese(r, annoNum, m)) { voci.push(voceDate(r)); break; }
+      if (senzaFineNelMese(r, annoNum, m)) { coppie.push({ r, i }); break; }
     }
-  }
+  });
+  const voci = perOrdine(coppie);
   if (!voci.length) return null;
   const n = voci.length;
   const nome = NOME_CANALE_DATE[canale] || String(canale || '').toLowerCase();

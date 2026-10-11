@@ -13,8 +13,11 @@ const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; cons
 
 const tariffe = [
   { id: 't-rete', direzione: 'ATTIVA', tipologia: 'RETE', cliente: 'ECOTYRE', valore: 202, unita_misura: '€/t', stato: 'attivo', data_inizio_validita: '2026-01-01' },
-  // tariffa ACI rinegoziata: 700 fino al 30 giugno, 750 dal 1 luglio
-  { id: 't-aci-1', direzione: 'ATTIVA', tipologia: 'ACI', cliente: 'ECOTYRE', regione: 'Campania', valore: 700, unita_misura: '€/t', stato: 'non_attivo', data_inizio_validita: '2026-01-01', data_fine_validita: '2026-06-30' },
+  // tariffa ACI rinegoziata: 700 fino al 30 giugno, 750 dal 1 luglio. La vecchia
+  // resta 'attivo' con la data di fine, come la scrive gestisciAnagrafiche dal
+  // 19/09/2026: dall'11/10/2026 una 'non_attivo' non vale mai, nemmeno nella sua
+  // finestra (validitaTariffa.ts; quel caso lo prova prove/validitaTariffa.mjs).
+  { id: 't-aci-1', direzione: 'ATTIVA', tipologia: 'ACI', cliente: 'ECOTYRE', regione: 'Campania', valore: 700, unita_misura: '€/t', stato: 'attivo', data_inizio_validita: '2026-01-01', data_fine_validita: '2026-06-30' },
   { id: 't-aci-2', direzione: 'ATTIVA', tipologia: 'ACI', cliente: 'ECOTYRE', regione: 'Campania', valore: 750, unita_misura: '€/t', stato: 'attivo', data_inizio_validita: '2026-07-01' },
   { id: 't-extra', direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA', cliente: 'ECOTYRE', valore: 202, unita_misura: '€/t', stato: 'attivo' },
   { id: 't-vecchia-spenta', direzione: 'ATTIVA', tipologia: 'RETE', cliente: 'ECOTYRE', classe_materiale: 'ZZ', valore: 1, unita_misura: '€/t', stato: 'non_attivo' },
@@ -78,7 +81,9 @@ verifica('senza tabella: il prezzo scritto vince sulla base (x1 a 350)', gb.righ
 const extra2027 = [{ ...base, id: 'y1', id_ordine: 'EY1', numero_fir: 'FY1', classe: 'A', peso_effettivo: 500, ordine_immesso_il: '2027-03-01T00:00:00.000Z', trasporto_iniziato_il: '2027-03-02T00:00:00.000Z', trasporto_finito_il: '2027-03-02T00:00:00.000Z', prezzo_attivo_t: 0 }];
 const g27 = calcolaRigheAttiva({ reteAll: [], aciAll: [], extraAll: extra2027, fornitori, tariffe: senzaTabella, anno: 2027, mese: 'Marzo' });
 verifica('2027 senza base: riga in errore a zero e anomalia "prezzo zero"', g27.righe.EXTRA_RACCOLTA[0].stato_validazione === 'errore' && g27.righe.EXTRA_RACCOLTA[0].totale === 0 && g27.anomalie.some(a => a.tipo === 'prezzo_zero' && /2027/.test(a.descrizione)), JSON.stringify(g27));
-// la copia per il browser (modulo Extra Raccolta) dice lo stesso numero
+// lo specchio per il browser (src/lib/ecotyreTariffe.js, dall'11/10/2026: prima era
+// una copia della sola costante in extraRaccoltaCalc.js) dice lo stesso numero;
+// il confronto completo fra pagina e fattura sta in prove/prezzoExtraRaccolta.mjs
 verifica('base uguale nel gestionale e nella pagina Extra Raccolta', JSON.stringify(TARIFFA_BASE_EXTRA_RACCOLTA) === JSON.stringify(BASE_PAGINA) && tariffaBaseExtraRaccolta(2026) === 202 && tariffaBaseExtraRaccolta(2027) === null, JSON.stringify([TARIFFA_BASE_EXTRA_RACCOLTA, BASE_PAGINA]));
 verifica('la pagina Extra Raccolta usa la base dove la fattura la usa', prezzoAttivoPagina(extraAll[3]).valore === 202 && prezzoAttivoPagina(extraAll[3]).base === true && prezzoAttivoPagina(extraAll[0]).valore === 350 && prezzoAttivoPagina({ ...extraAll[3], tipo_movimento: 'secondaria' }).valore === 0);
 const sorgenteSeed = readFileSync(new URL('../base44/functions/seedTariffeAttive2026/entry.ts', import.meta.url), 'utf8');

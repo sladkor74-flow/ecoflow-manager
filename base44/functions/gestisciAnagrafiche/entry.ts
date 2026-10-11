@@ -2,7 +2,9 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.44';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from '../../shared/fetchAll.ts';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
-import { controlliTariffaAttiva } from "../../shared/ecotyreTariffe.ts";
+import { controlliTariffaAttiva, controlliUnitaTariffa } from "../../shared/ecotyreTariffe.ts";
+import { conflittiTariffa, periodoTariffa } from "../../shared/conflittiTariffa.ts";
+import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 
 // Gestisce le operazioni di scrittura su entità anagrafiche (Tariffa, Fornitore, Servizio).
 // FornitoreSecondaria non passa piu' di qui (27/09/2026): i collegamenti degli
@@ -10,46 +12,31 @@ import { controlliTariffaAttiva } from "../../shared/ecotyreTariffe.ts";
 // Solo l'amministratore può eseguire creazione/modifica/cancellazione.
 // Per Tariffa (create/update) applica validazione server-side:
 //   - campi obbligatori, chiave di unicità, sovrapposizione periodi, auto-chiusura rinegoziazione.
+// Le regole dei conflitti stanno in shared/conflittiTariffa.ts dall'11/10/2026,
+// perche' le usa anche la copia d'anno (preparaAnno).
 // Payload: { entita, operazione, id?, dati? }
 function norm(v) {
   return String(v || '').trim().toUpperCase();
 }
 
-// Due tipologie sono in conflitto se uguali, o una è TUTTE e l'altra RETE/ACI
-function tipologiaMatch(t1, t2) {
-  const a = norm(t1);
-  const b = norm(t2);
-  if (a === b) return true;
-  if (a === 'TUTTE' && (b === 'RETE' || b === 'ACI')) return true;
-  if (b === 'TUTTE' && (a === 'RETE' || a === 'ACI')) return true;
-  return false;
-}
-
-// Due chiavi tariffa coincidono (tutti i campi testuali + tipologia con TUTTE)
-function chiaveMatch(t1, t2) {
-  const campi = ['fornitore_id', 'direzione', 'prestazione', 'classe_materiale', 'provincia', 'regione', 'destinazione', 'produttore', 'destinatario'];
-  for (const c of campi) {
-    if (norm(t1[c]) !== norm(t2[c])) return false;
-  }
-  return tipologiaMatch(t1.tipologia, t2.tipologia);
-}
-
-// Chiave per tariffe attive: cliente, tipologia, classe_materiale, regione, eer_codice
-function chiaveMatchAttiva(t1, t2) {
-  const campi = ['cliente', 'tipologia', 'classe_materiale', 'regione', 'eer_codice', 'servizio_ecotyre'];
-  for (const c of campi) {
-    if (norm(t1[c]) !== norm(t2[c])) return false;
-  }
-  return true;
-}
-
-// Due periodi si sovrappongono (fine assente = periodo aperto = infinito)
-function periodiSovrapposti(inizio1, fine1, inizio2, fine2) {
-  const i1 = inizio1 ? new Date(inizio1).getTime() : 0;
-  const f1 = fine1 ? new Date(fine1).getTime() : Infinity;
-  const i2 = inizio2 ? new Date(inizio2).getTime() : 0;
-  const f2 = fine2 ? new Date(fine2).getTime() : Infinity;
-  return i1 <= f2 && i2 <= f1;
+// UN FORNITORE (O UN SERVIZIO) NON SI SCRIVE DUE VOLTE (chiusura dell'audit,
+// 11/10/2026). Le tariffe avevano il controllo dei doppioni, l'anagrafica no: in
+// archivio ci sono «GATIM» e «GATIM S.R.L.», che per la passiva, la qualifica e
+// i report sono lo stesso soggetto (normalizzaRagioneSociale li fa uguali) e
+// che ognuno legge come vuole - resta il record letto per ultimo. Il menu delle
+// tariffe propone due GATIM, ed e' da li' che e' nato il doppione delle tariffe
+// del 2027. Qui si rifiuta il nome nuovo, o il nome cambiato, che coincide con
+// uno che c'e' gia'; il doppione esistente lo toglie l'amministratore dalla
+// pagina, tenendo il record a cui puntano le tariffe. Una modifica che lascia il
+// nome com'e' (i ruoli, lo stato, il «fattura tramite») passa sempre: finche' il
+// doppione c'e', rifiutarla vorrebbe dire non poter piu' toccare nessuno dei due.
+const CAMPO_NOME = { Fornitore: 'ragione_sociale', Servizio: 'nome' };
+const chiaveNome = (nome) => normalizzaRagioneSociale(String(nome || ''));
+async function nomeGiaPresente(base44, entita, nome, idEscluso = null) {
+  const chiave = chiaveNome(nome);
+  if (!chiave) return null;
+  const tutti = await fetchAll(base44.asServiceRole.entities[entita]);
+  return tutti.find(x => x && x.id !== idEscluso && chiaveNome(x[CAMPO_NOME[entita]]) === chiave) || null;
 }
 
 export default async function(req) {
@@ -128,31 +115,21 @@ export default async function(req) {
         return Response.json({ error: 'La tipologia TUTTE è ammessa solo per il trasporto delle secondarie.' }, { status: 400 });
       }
 
-      // b-e) Verifica conflitti (chiave distinta per direzione)
+      // b-e) Verifica conflitti (chiave distinta per direzione). Le passive si
+      // leggono tutte, non solo quelle dello stesso fornitore_id: lo stesso
+      // fornitore scritto in due modi (due righe in anagrafica) e' lo stesso
+      // fornitore anche qui, come per la passiva (conflittiTariffa.ts, 11/10/2026).
+      // Le passive si leggono senza filtro sulla direzione: una tariffa salvata
+      // prima che il campo esistesse non ce l'ha scritto, ed e' passiva.
       const esistenti = isAttiva
         ? await fetchAll(base44.asServiceRole.entities.Tariffa, { direzione: 'ATTIVA' })
-        : await fetchAll(base44.asServiceRole.entities.Tariffa, { fornitore_id: effettivi.fornitore_id });
-      const conflitti = [];
-      const chiudibili = [];
-      for (const t of esistenti) {
-        if (operazione === 'update' && t.id === id) continue;
-        if (norm(t.stato) !== 'ATTIVO') continue;
-        const chiaveOk = isAttiva ? chiaveMatchAttiva(effettivi, t) : chiaveMatch(effettivi, t);
-        if (!chiaveOk) continue;
-        if (!periodiSovrapposti(inizio, fine, t.data_inizio_validita, t.data_fine_validita)) continue;
-        // Caso d: chiudibile se senza data fine, nuova inizio > esistente inizio
-        const tFine = t.data_fine_validita;
-        const tInizio = t.data_inizio_validita;
-        if (!tFine && inizio && new Date(inizio) > new Date(tInizio || 0)) {
-          chiudibili.push(t);
-        } else {
-          conflitti.push(t);
-        }
-      }
+        : (await fetchAll(base44.asServiceRole.entities.Tariffa)).filter(t => norm(t.direzione || 'PASSIVA') === 'PASSIVA');
+      // Caso d: chiudibile se senza data fine e la nuova comincia dopo.
+      const { conflitti, chiudibili } = conflittiTariffa(effettivi, esistenti, operazione === 'update' ? id : null);
 
       if (conflitti.length > 0) {
         const c = conflitti[0];
-        const periodo = `${c.data_inizio_validita || 'n.d.'} → ${c.data_fine_validita || 'aperto'}`;
+        const periodo = periodoTariffa(c);
         const desc = isAttiva
           ? `cliente: ${c.cliente}, tipologia: ${c.tipologia}, regione: ${c.regione || 'tutte'}`
           : `${c.fornitore_nome} (prestazione: ${c.prestazione})`;
@@ -167,12 +144,12 @@ export default async function(req) {
       // seconda tariffa dello stesso canale legata a una dicitura, che
       // scavalcherebbe quella che vale per tutte. Il primo e' un errore e ferma
       // il salvataggio; il secondo e' un avviso che torna a chi salva.
-      if (isAttiva) {
-        const controlli = controlliTariffaAttiva(effettivi, esistenti);
-        const errore = controlli.find(c => c.gravita === 'errore');
-        if (errore) return Response.json({ error: errore.messaggio }, { status: 400 });
-        avvisiTariffa.push(...controlli.map(c => c.messaggio));
-      }
+      // L'unita' di misura si controlla anche sulle passive (11/10/2026): 90 €/kg
+      // si salvava, e nel foglio dell'amministrazione diventava 90.000 €/t.
+      const controlli = isAttiva ? controlliTariffaAttiva(effettivi, esistenti) : controlliUnitaTariffa(effettivi);
+      const errore = controlli.find(c => c.gravita === 'errore');
+      if (errore) return Response.json({ error: errore.messaggio }, { status: 400 });
+      avvisiTariffa.push(...controlli.map(c => c.messaggio));
 
       // d) Chiudi le tariffe chiudibili (rinegoziazione prezzo)
       // La tariffa chiusa resta 'attivo': lo stato non_attivo vuol dire "non
@@ -189,6 +166,32 @@ export default async function(req) {
           id: t.id, fornitore_nome: t.fornitore_nome,
           data_fine_validita: dataFine, valore: t.valore, unita_misura: t.unita_misura,
         });
+      }
+    }
+
+    // Il nome di un fornitore o di un servizio: nuovo, o cambiato, non deve
+    // coincidere con uno che c'e' gia'.
+    if ((entita === 'Fornitore' || entita === 'Servizio') && (operazione === 'create' || operazione === 'update')) {
+      const campo = CAMPO_NOME[entita];
+      const nome = dati && dati[campo];
+      if (operazione === 'create' && !String(nome || '').trim()) {
+        return Response.json({ error: `Il ${entita === 'Fornitore' ? 'fornitore' : 'servizio'} ha bisogno di un nome.` }, { status: 400 });
+      }
+      // Su una modifica si controlla solo se il nome cambia davvero.
+      let cambiaNome = nome !== undefined;
+      if (cambiaNome && operazione === 'update') {
+        const prima = await base44.asServiceRole.entities[entita].get(id).catch(() => null);
+        cambiaNome = !prima || chiaveNome(prima[campo]) !== chiaveNome(nome);
+      }
+      if (cambiaNome) {
+        const gia = await nomeGiaPresente(base44, entita, nome, operazione === 'update' ? id : null);
+        if (gia) {
+          const chi = String(gia[campo] || '').trim();
+          return Response.json({
+            error: `«${String(nome).trim()}» e «${chi}» sono lo stesso ${entita === 'Fornitore' ? 'fornitore' : 'servizio'} per il gestionale (stesso nome normalizzato): usa quello che c'e' gia', o correggi il suo nome.`,
+            doppione: { id: gia.id, nome: chi, stato: gia.stato || '' },
+          }, { status: 409 });
+        }
       }
     }
 

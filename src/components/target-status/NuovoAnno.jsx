@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel, AlertDialogFooter } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { RefreshCw, CheckCircle2, AlertTriangle, Circle, Copy, Check } from 'lucide-react';
+import { formatNumber } from '@/lib/utils';
 
 // L'ANNO NUOVO: CHE COSA GLI MANCA PER COMINCIARE.
 //
@@ -28,6 +29,19 @@ const STILE = {
   parziale: { fondo: 'border-amber-300 bg-amber-50', testo: 'text-amber-900', Icona: AlertTriangle },
   manca: { fondo: 'border-amber-300 bg-amber-50', testo: 'text-amber-900', Icona: AlertTriangle },
 };
+
+// LE COPIE CHE NON SI FANNO SI DICONO (chiusura dell'audit, 11/10/2026).
+// preparaAnno passa ogni copia dai controlli dei conflitti, e quella che si
+// scontra con una tariffa gia' scritta per l'anno nuovo non la crea: la rimanda
+// in `scartate`, col motivo. Questa scheda non la leggeva, e chi premeva
+// «Prepara» vedeva «Preparare 0 tariffe?» e poi «0 tariffe preparate», senza
+// sapere perche'. Ora le scartate stanno nella conferma e nel messaggio finale.
+const testoScartata = (s) => [
+  s.chi || s.tipologia || 'tariffa',
+  s.direzione ? String(s.direzione).toLowerCase() : '',
+  s.tipologia || '',
+  s.prestazione ? String(s.prestazione).toLowerCase() : '',
+].filter(Boolean).join(' · ') + `: ${s.motivo || 'non si copia'}`;
 
 export default function NuovoAnno({ anno: annoCorrente }) {
   const { toast } = useToast();
@@ -74,11 +88,17 @@ export default function NuovoAnno({ anno: annoCorrente }) {
       setDati(res.data);
       setConferma(null);
       const falliti = (res.data.falliti || []).length;
+      const scartate = res.data.scartate || [];
+      const parti = [
+        falliti ? `${falliti} non si sono potute scrivere: ${res.data.falliti.map(f => `${f.chi} (${f.motivo})`).join(' · ')}` : '',
+        scartate.length
+          ? `${scartate.length} non ${scartate.length === 1 ? 'si è copiata' : 'si sono copiate'} perché si scontrano con una tariffa già scritta per il ${anno}: ${scartate.map(testoScartata).join(' · ')}`
+          : '',
+        res.data.creati > 0 && !falliti ? 'Portano il prezzo dell’anno prima e la nota «da confermare»: vanno controllate sul contratto.' : '',
+      ].filter(Boolean);
       toast({
         title: `${res.data.creati} ${res.data.creati === 1 ? 'tariffa preparata' : 'tariffe preparate'} per il ${anno}`,
-        description: falliti
-          ? `${falliti} non si sono potute scrivere: ${res.data.falliti.map(f => `${f.chi} (${f.motivo})`).join(' · ')}`
-          : 'Portano il prezzo dell’anno prima e la nota «da confermare»: vanno controllate sul contratto.',
+        description: parti.join(' — '),
         variant: falliti ? 'destructive' : undefined,
       });
     } catch (e) {
@@ -208,35 +228,57 @@ export default function NuovoAnno({ anno: annoCorrente }) {
       <AlertDialog open={!!conferma} onOpenChange={(v) => !v && setConferma(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Preparare {conferma?.quante} tariffe per il {anno}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {conferma?.quante > 0
+                ? `Preparare ${conferma.quante} ${conferma.quante === 1 ? 'tariffa' : 'tariffe'} per il ${anno}?`
+                : `Nessuna tariffa da copiare per il ${anno}`}
+            </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm">
-                <p>
-                  Si copiano dal {anno - 1} con lo stesso prezzo e la validità spostata a tutto il {anno}. Nessuna riga
-                  esistente viene toccata, e l&apos;operazione si può ripetere: completa quello che manca e basta.
-                </p>
+                {conferma?.quante > 0 && (
+                  <p>
+                    Si copiano dal {anno - 1} con lo stesso prezzo e la validità spostata a tutto il {anno}. Nessuna riga
+                    esistente viene toccata, e l&apos;operazione si può ripetere: completa quello che manca e basta.
+                  </p>
+                )}
+                {conferma?.scartate?.length > 0 && (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-amber-900">
+                    <p className="text-xs font-medium">
+                      {conferma.scartate.length === 1 ? 'Una tariffa non si copia' : `${conferma.scartate.length} tariffe non si copiano`}: si
+                      scontrano con una tariffa già scritta per il {anno}. Quale delle due vale lo dice il contratto: correggi
+                      dalle tariffe quella sbagliata.
+                    </p>
+                    <ul className="text-xs space-y-0.5 mt-1 max-h-40 overflow-y-auto">
+                      {conferma.scartate.map((s, i) => <li key={i}>{testoScartata(s)}</li>)}
+                    </ul>
+                  </div>
+                )}
                 {conferma?.esempi?.length > 0 && (
                   <ul className="text-xs space-y-0.5 max-h-48 overflow-y-auto">
                     {conferma.esempi.map((e, i) => (
                       <li key={i}>
                         <span className="font-medium">{e.chi || e.tipologia}</span> · {e.direzione.toLowerCase()} · {e.tipologia}
-                        {e.prestazione ? ` · ${e.prestazione.toLowerCase()}` : ''}{e.regione ? ` · ${e.regione}` : ''} · {e.valore} {e.unita_misura}
+                        {e.prestazione ? ` · ${e.prestazione.toLowerCase()}` : ''}{e.regione ? ` · ${e.regione}` : ''} · {formatNumber(e.valore, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} {e.unita_misura}
                       </li>
                     ))}
                     {conferma.quante > conferma.esempi.length && <li className="text-muted-foreground">e altre {conferma.quante - conferma.esempi.length}.</li>}
                   </ul>
                 )}
-                <p className="text-xs text-amber-800">
-                  Nascono tutte segnate «da confermare»: il prezzo è quello vecchio finché non lo si verifica sul contratto {anno}.
-                </p>
+                {conferma?.quante > 0 && (
+                  <p className="text-xs text-amber-800">
+                    Nascono tutte segnate «da confermare»: il prezzo è quello vecchio finché non lo si verifica sul contratto {anno}.
+                  </p>
+                )}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={inCorso === 'copia'}>Annulla</AlertDialogCancel>
-            <AlertDialogAction onClick={(e) => { e.preventDefault(); copia(); }} disabled={inCorso === 'copia'}>
-              {inCorso === 'copia' ? 'Preparazione…' : 'Prepara le tariffe'}
-            </AlertDialogAction>
+            <AlertDialogCancel disabled={inCorso === 'copia'}>{conferma?.quante > 0 ? 'Annulla' : 'Chiudi'}</AlertDialogCancel>
+            {conferma?.quante > 0 && (
+              <AlertDialogAction onClick={(e) => { e.preventDefault(); copia(); }} disabled={inCorso === 'copia'}>
+                {inCorso === 'copia' ? 'Preparazione…' : 'Prepara le tariffe'}
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

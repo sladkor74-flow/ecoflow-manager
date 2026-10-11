@@ -121,8 +121,12 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
   const senzaTariffa = tutte.filter(a => !a.tipo || a.tipo === 'senza_tariffa');
   const altre = tutte.filter(a => a.tipo && a.tipo !== 'senza_tariffa');
   // un prezzo che manca, uno preso dall'anno sbagliato o delle date da sistemare
-  // si guardano; il resto e' informazione
-  const daGuardare = (a) => a.tipo === 'prezzo_zero' || a.tipo === 'prezzo_altro_anno' || String(a.tipo || '').startsWith('date_');
+  // si guardano; il resto e' informazione. Dall'11/10/2026 anche un terminato
+  // senza peso effettivo (fuori dalla fattura finche' il peso non si scrive) e le
+  // righe messe a zero da un'unita' di misura sconosciuta o da una tariffa
+  // disattivata: uscivano in grigio, come se fossero un'informazione.
+  const DA_GUARDARE = ['prezzo_zero', 'prezzo_altro_anno', 'peso_mancante', 'unita_sconosciuta', 'tariffa_disattivata'];
+  const daGuardare = (a) => DA_GUARDARE.includes(a.tipo) || String(a.tipo || '').startsWith('date_');
   // Le tonnellate senza prezzo si contano per canale: una somma unica di rete,
   // ACI ed extra raccolta non appartiene a nessuna commessa.
   const canaleDi = (a) => String(a.tipologia || 'N/D').toUpperCase();

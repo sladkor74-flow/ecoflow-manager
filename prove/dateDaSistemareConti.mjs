@@ -110,5 +110,31 @@ verifica('raccolto: senza fine trasporto fuori dal totale ma nel riepilogo, con 
 const tutti = await computeRaccoltoData(finto(Array.from({ length: 15 }, (_, i) => ({ ...senzaFine, id_ordine: `X${i}` }))), { anno: [ANNO] }, { esempiDate: Infinity });
 verifica('chi scrive un file li vuole tutti', tutti.date_da_sistemare.esempi.length === 15);
 
+// LA FATTURAZIONE CONTA ORDINI, COME GLI ELENCHI (R26, chiusura dell'audit,
+// 11/10/2026). dateDaSegnalare (filtroPeriodo.ts), da cui escono le anomalie
+// delle date nella fatturazione attiva e passiva, contava una voce per riga: un
+// ordine con la P e la M senza inizio trasporto diceva «2 terminati con le
+// date da sistemare» dove elenchi, raccolto, Giacenze e Dichiarazioni dicono 1.
+console.log('LA FATTURAZIONE CONTA GLI ORDINI');
+{
+  const { dateDaSegnalare, anomalieDateFormulari, anomaliaSenzaFineAnno } = await import('../base44/shared/filtroPeriodo.ts');
+  const { ordiniDaSistemare } = await import('../base44/shared/movimenti.ts');
+  const ordine = { stato: 'terminato', id_ordine: 'ET26000123', numero_fir: 'FIRX', ordine_immesso_il: '2026-05-02T00:00:00Z', trasporto_iniziato_il: null, trasporto_finito_il: '2026-05-10T00:00:00Z', destinazione: 'ALFA SRL' };
+  const righe = [{ ...ordine, id: 'a', classe: 'P', peso_effettivo: 3000 }, { ...ordine, id: 'b', classe: 'M', peso_effettivo: 2000 }];
+  const d = dateDaSegnalare(righe, 2026, 4);
+  verifica('un ordine con due righe senza inizio trasporto e\' UN terminato da sistemare, come negli elenchi', d.da_sistemare.length === 1 && ordiniDaSistemare(righe).length === 1, JSON.stringify(d));
+  verifica('con i chili delle due righe e il formulario una volta', d.da_sistemare[0].kg === 5000 && d.da_sistemare[0].righe === 2 && d.da_sistemare[0].numero_fir === 'FIRX', JSON.stringify(d.da_sistemare[0]));
+  const a = anomalieDateFormulari(righe, 2026, 4, 'RETE').find(x => x.tipo === 'date_da_sistemare');
+  verifica('l\'anomalia della fatturazione dice «Un terminato», 5.000 kg', a && a.quanti === 1 && a.kg === 5000 && /^Un terminato/.test(a.descrizione), JSON.stringify(a));
+  // due ordini diversi restano due
+  const altro = { ...ordine, id: 'c', id_ordine: 'ET26000999', numero_fir: 'FIRY', classe: 'P', peso_effettivo: 1000 };
+  verifica('due ordini diversi restano due', dateDaSegnalare([...righe, altro], 2026, 4).da_sistemare.length === 2);
+  // i senza fine trasporto, mese per mese e per l'anno intero del margine
+  const senza = righe.map(r => ({ ...r, trasporto_iniziato_il: '2026-05-03T00:00:00Z', trasporto_finito_il: null }));
+  verifica('senza fine trasporto: un ordine, non due', dateDaSegnalare(senza, 2026, 4).senza_fine.length === 1, JSON.stringify(dateDaSegnalare(senza, 2026, 4).senza_fine));
+  const anno = anomaliaSenzaFineAnno(senza, 2026, 11, 'RETE');
+  verifica('e cosi\' nel conto dell\'anno del margine', anno && anno.quanti === 1 && anno.kg === 5000, JSON.stringify(anno));
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

@@ -53,6 +53,12 @@ console.log('ACI: IL FOGLIO DI SETTEMBRE, AL CENTESIMO');
   verifica('il prezzo e a tonnellata e segue la regione',
     t.righe[0][9] === 240 && t.righe[1][9] === 230, JSON.stringify([t.righe[0][9], t.righe[1][9]]));
   verifica('il fatturante, se non detto, e SMOCO Srl', t.righe[0][1] === 'SMOCO Srl');
+  // La riga com'e' salvata davvero porta 'ECOTYRE', il nome che il calcolo
+  // dell'attiva ci scriveva fino all'11/10/2026: prima questa prova usava una
+  // riga senza fatturante, che nella realta' non esiste, e il foglio stampava
+  // ECOTYRE senza che niente lo dicesse. Chi emette la fattura e' SMOCO.
+  const salvate = tabellaAmministrazione('ACI', ACI_SETTEMBRE.map(r => ({ ...r, fatturante: 'ECOTYRE' })), 2026, 'Settembre');
+  verifica('anche sulle righe salvate con ECOTYRE il fatturante e SMOCO Srl', salvate.righe.every(r => r[1] === 'SMOCO Srl'), JSON.stringify(salvate.righe.map(r => r[1])));
   verifica('il periodo e scritto come nel file', t.righe[0][2] === '2026 Settembre', t.righe[0][2]);
 }
 

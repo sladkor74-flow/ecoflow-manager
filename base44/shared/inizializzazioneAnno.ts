@@ -23,6 +23,9 @@
 // anche l'anno prossimo, quando nessuno si ricordera' di questo codice.
 import { conNotaCopia, daConfermare, senzaNotaCopia } from "./annoTarget.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
+import { prezzoAttivoExtra, sortTariffe, tariffeAttiveValide, DICITURA_PREDEFINITA } from "./ecotyreTariffe.ts";
+import { tariffaValeIl } from "./validitaTariffa.ts";
+import { conflittiTariffa, periodoTariffa, chiaveMatch, chiaveMatchAttiva } from "./conflittiTariffa.ts";
 
 export const PRIMO_GIORNO = (anno) => `${Number(anno)}-01-01`;
 export const ULTIMO_GIORNO = (anno) => `${Number(anno)}-12-31`;
@@ -31,20 +34,31 @@ const giorno = (v) => String(v || '').slice(0, 10);
 const testo = (v) => String(v === undefined || v === null ? '' : v).trim().toLowerCase();
 // Le date si scrivono all'italiana ovunque si leggano: 31/12/2026, non 2026-12-31.
 const gg = (v) => (giorno(v) ? giorno(v).split('-').reverse().join('/') : '');
+// Un prezzo in una frase, all'italiana: 420,00; 0,202 al chilo con i suoi
+// decimali (11/10/2026: il motivo di una copia scartata ora arriva a video).
+const prezzoIt = (v) => {
+  const n = Number(v);
+  if (v === null || v === undefined || v === '' || !Number.isFinite(n)) return '—';
+  let [i, d] = Math.abs(n).toFixed(4).split('.');
+  d = d.replace(/0+$/, '').padEnd(2, '0');
+  return `${n < 0 ? '-' : ''}${i.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${d}`;
+};
 
 /**
  * Una tariffa copre quel giorno? Senza data di inizio vale da sempre, senza
- * data di fine vale per sempre: e' cosi' che le legge la fatturazione.
+ * data di fine vale per sempre: e' cosi' che le legge la fatturazione. Dall'11/10/2026
+ * e' letteralmente la regola della fatturazione (tariffaValeIl di
+ * validitaTariffa.ts): prima qui si pretendeva lo stato 'attivo' e la fattura
+ * teneva anche una 'non_attivo' con la data di fine, cioe' una tariffa poteva
+ * fatturare fino al 31/12 e non risultare da rinnovare.
  */
 export function copreIlGiorno(t, quando) {
-  if (!t) return false;
-  if (String(t.stato || 'attivo') !== 'attivo') return false;
-  const da = giorno(t.data_inizio_validita);
-  const a = giorno(t.data_fine_validita);
-  if (da && da > quando) return false;
-  if (a && a < quando) return false;
-  return true;
+  return tariffaValeIl(t, quando);
 }
+
+// Un nome di fornitore, di stoccaggio o di impianto si confronta come la
+// passiva lo confronta per scegliere la tariffa: normalizzato.
+const ragione = (v) => normalizzaRagioneSociale(String(v === undefined || v === null ? '' : v));
 
 /**
  * CHE COSA RENDE DUE TARIFFE «LA STESSA RIGA IN DUE ANNI».
@@ -52,13 +66,21 @@ export function copreIlGiorno(t, quando) {
  * Tutto quello che la fatturazione usa per scegliere una tariffa, e nient'altro:
  * il VALORE no - e' proprio quello che cambia da un anno all'altro - e le date
  * nemmeno. Due righe con questa chiave uguale sono la stessa tariffa rinnovata.
+ *
+ * I NOMI SI CONFRONTANO COME LI CONFRONTA LA PASSIVA (chiusura dell'audit,
+ * 11/10/2026). Il fornitore, il produttore, il destinatario e la destinazione
+ * erano solo in minuscolo, mentre la passiva li normalizza: «GATIM S.R.L.» del
+ * 2026 e «GATIM» del 2027 scritto a mano erano due tariffe qui e una sola per la
+ * passiva. «Prepara le tariffe» copiava allora il prezzo del 2026 accanto a
+ * quello nuovo, e la passiva pagava la copia (la piu' recente) invece del
+ * prezzo scritto dall'amministratore.
  */
 export function chiaveTariffa(t) {
   return [
     testo(t && t.direzione) || 'passiva',
     testo(t && t.tipologia),
     testo(t && t.prestazione),
-    testo(t && t.fornitore_nome),
+    ragione(t && t.fornitore_nome),
     testo(t && t.cliente),
     testo(t && t.servizio_nome),
     testo(t && t.servizio_ecotyre),
@@ -66,30 +88,70 @@ export function chiaveTariffa(t) {
     testo(t && t.provincia),
     testo(t && t.classe_materiale),
     testo(t && t.eer_codice),
-    testo(t && t.destinazione),
-    testo(t && t.produttore),
-    testo(t && t.destinatario),
+    ragione(t && t.destinazione),
+    ragione(t && t.produttore),
+    ragione(t && t.destinatario),
     testo(t && t.unita_misura),
   ].join('|');
+}
+
+/**
+ * L'ANNO NUOVO HA GIA' LA SUA TARIFFA? La stessa idea di «stessa tariffa» dei
+ * conflitti (conflittiTariffa.ts), con una tipologia TUTTE che copre RETE e ACI
+ * (chiusura dell'audit, 11/10/2026).
+ *
+ * Qui contava solo la chiave piena (chiaveTariffa), dove TUTTE e RETE sono due
+ * tariffe diverse, mentre la copia d'anno passa dai controlli dei conflitti,
+ * dove TUTTE copre RETE: con la tratta TRANSAR del 2026 scritta RETE a 400 e
+ * quella del 2027 gia' scritta a mano come TUTTE a 420, la lista diceva «manca:
+ * 1 tariffa scade il 31/12/2026», il pulsante preparava 0 tariffe (la copia si
+ * scontrava con quella del 2027 ed era scartata) e la voce restava «manca» per
+ * sempre, dal 1° gennaio in rosso nel cruscotto, anche se la passiva il prezzo
+ * lo trovava. Ora la vecchia e' coperta se l'anno nuovo ha la stessa chiave
+ * piena, oppure una tariffa con cui la copia si scontrerebbe: per le passive
+ * stesso fornitore, prestazione, ambito e una tipologia che la copre (la stessa,
+ * o TUTTE per RETE e ACI); per le attive la chiave delle attive. Una vecchia
+ * TUTTE e' coperta da una TUTTE, o da una RETE e da una ACI insieme: con la sola
+ * RETE l'ACI del nuovo anno il prezzo non ce l'ha, e la voce resta da fare.
+ */
+const tipologiaNorm = (v) => String(v || '').trim().toUpperCase();
+const copreLaTipologia = (nuova, vecchia) => {
+  const n = tipologiaNorm(nuova);
+  const v = tipologiaNorm(vecchia);
+  return n === v || (n === 'TUTTE' && (v === 'RETE' || v === 'ACI'));
+};
+export function tariffaCopertaNelNuovoAnno(vecchia, nuove) {
+  const elenco = nuove || [];
+  const chiave = chiaveTariffa(vecchia);
+  if (elenco.some(s => chiaveTariffa(s) === chiave)) return true;
+  const direzione = testo((vecchia && vecchia.direzione) || 'PASSIVA');
+  const stessaDirezione = elenco.filter(s => testo((s && s.direzione) || 'PASSIVA') === direzione);
+  if (direzione === 'attiva') return stessaDirezione.some(s => chiaveMatchAttiva(vecchia, s));
+  // stessa chiave dei conflitti, tipologia a parte: la si guarda qui sotto
+  const stessoAmbito = stessaDirezione.filter(s => chiaveMatch({ ...vecchia, tipologia: '' }, { ...s, tipologia: '' }));
+  const coperta = (tipologia) => stessoAmbito.some(s => copreLaTipologia(s.tipologia, tipologia));
+  if (tipologiaNorm(vecchia && vecchia.tipologia) === 'TUTTE') return coperta('TUTTE') || (coperta('RETE') && coperta('ACI'));
+  return coperta(vecchia && vecchia.tipologia);
 }
 
 /**
  * Le tariffe che scadono con l'anno vecchio e che l'anno nuovo non ha.
  * Si guarda chi copre il 31 dicembre e non copre il 1° gennaio dopo: e' il
  * buco, e si misura sui fatti invece che su una data scritta nel codice.
+ * «Non ha» vuol dire nessuna tariffa del 1° gennaio che la copra
+ * (tariffaCopertaNelNuovoAnno): la stessa idea della copia d'anno.
  */
 export function tariffeDaRinnovare(tariffe, anno, direzione = '') {
   const prima = ULTIMO_GIORNO(Number(anno) - 1);
   const dopo = PRIMO_GIORNO(anno);
   const dir = testo(direzione);
   const scelte = (tariffe || []).filter(t => !dir || testo(t.direzione || 'PASSIVA') === dir);
-  const coperte = new Set();
-  for (const t of scelte) if (copreIlGiorno(t, dopo)) coperte.add(chiaveTariffa(t));
+  const nuove = scelte.filter(t => copreIlGiorno(t, dopo));
   const per = new Map();
   for (const t of scelte) {
     if (!copreIlGiorno(t, prima)) continue;
     const k = chiaveTariffa(t);
-    if (coperte.has(k) || per.has(k)) continue;
+    if (per.has(k) || tariffaCopertaNelNuovoAnno(t, nuove)) continue;
     per.set(k, t);
   }
   return [...per.values()];
@@ -116,6 +178,44 @@ export function copiaTariffa(t, anno) {
   nuova.stato = 'attivo';
   nuova.note = conNotaCopia(t && t.note, anno);
   return nuova;
+}
+
+/**
+ * IL PIANO DELLA COPIA D'ANNO, PASSATO DAGLI STESSI CONTROLLI DI CHI SALVA A
+ * MANO (chiusura dell'audit, 11/10/2026).
+ *
+ * preparaAnno creava le copie con un create diretto, senza i controlli dei
+ * conflitti di gestisciAnagrafiche: una copia poteva affiancarsi a una tariffa
+ * dello stesso fornitore gia' scritta per l'anno nuovo, e la passiva - due
+ * tariffe ugualmente specifiche - pagava la prima che trovava. Qui ogni copia
+ * si confronta con le tariffe che ci sono e con le copie gia' decise
+ * (conflittiTariffa): quella che si sovrappone a qualcosa non si crea, e si
+ * dice con chi si scontra, perche' quale delle due vale lo decide chi conosce
+ * il contratto.
+ *
+ * @returns { da_creare: [{ direzione, tariffa, copia }], scartate: [{ direzione, tariffa, contro, motivo }] }
+ */
+export function pianoCopiaTariffe(tariffe, anno, direzioni = ['ATTIVA', 'PASSIVA']) {
+  const visti = [...(tariffe || [])];
+  const da_creare = [];
+  const scartate = [];
+  for (const direzione of direzioni) {
+    for (const t of tariffeDaRinnovare(tariffe, anno, direzione)) {
+      const copia = copiaTariffa(t, anno);
+      const { conflitti, chiudibili } = conflittiTariffa(copia, visti);
+      const contro = conflitti[0] || chiudibili[0];
+      if (contro) {
+        scartate.push({
+          direzione, tariffa: t, contro,
+          motivo: `si sovrappone alla tariffa ${contro.fornitore_nome || contro.cliente || '—'} ${prezzoIt(contro.valore)} ${contro.unita_misura || ''} (${periodoTariffa(contro)}): non si copia, controlla sul contratto quale delle due vale`.replace(/\s+\(/, ' ('),
+        });
+        continue;
+      }
+      da_creare.push({ direzione, tariffa: t, copia });
+      visti.push(copia);
+    }
+  }
+  return { da_creare, scartate };
 }
 
 /** Le tariffe dell'anno nate da una copia e non ancora confermate. */
@@ -176,7 +276,7 @@ export function annoNuovoDaMostrare(args = {}) {
 /**
  * LA LISTA DI CONTROLLO DELL'ANNO NUOVO.
  *
- * Sei voci, ognuna con il suo stato: `pronto` (non c'e' niente da fare),
+ * Otto voci, ognuna con il suo stato: `pronto` (non c'e' niente da fare),
  * `parziale` (c'e' qualcosa ma va confermato o completato), `manca`.
  * `azione` dice che cosa il gestionale sa fare da solo; `dove` dove si fa a mano.
  */
@@ -224,6 +324,42 @@ export function listaAnno({
       v.dettaglio = `Nessuna tariffa copre il ${annoNum}, e nemmeno il ${annoNum - 1} ne aveva: vanno scritte dal contratto.`;
     }
     v.quante = mancano.length || daConf.length || attive.length;
+    voci.push(v);
+  }
+
+  // 2-bis. LA BASE DELL'EXTRA RACCOLTA DELL'ANNO NUOVO (chiusura dell'audit,
+  //    11/10/2026). La tariffa EXTRA_RACCOLTA resta aperta per scelta (campagne
+  //    occasionali, prezzo concordato intervento per intervento), quindi la voce
+  //    delle tariffe attive la vede «coperta» anche nell'anno dopo e tace. Ma un
+  //    intervento senza prezzo scritto, dal 1° gennaio, si fattura col prezzo
+  //    dell'anno prima e l'avviso «prezzo di un altro anno», oppure - se la
+  //    tariffa non c'e' piu' e il gestionale non ha una base per quell'anno - a
+  //    zero euro in errore. Si misura con la stessa funzione della fattura,
+  //    prezzoAttivoExtra, sul 1° gennaio: la base e' quella che la fattura
+  //    userebbe, non una lettura a parte delle tariffe.
+  {
+    const v = voce('base_extra_raccolta', `Base extra raccolta del ${annoNum}`, 'È il prezzo con cui si fattura a Ecotyre un intervento di extra raccolta che non ha un prezzo scritto: senza la base dell’anno nuovo esce col prezzo dell’anno prima, o a zero euro in errore.', 'Fatturazione > Anagrafiche > Tariffe');
+    const attiveTutte = (tariffe || []).filter(t => testo(t.direzione || 'PASSIVA') === 'attiva');
+    const p = prezzoAttivoExtra({ prezzo_attivo_t: 0 }, sortTariffe(tariffeAttiveValide(attiveTutte)), DICITURA_PREDEFINITA, annoNum, PRIMO_GIORNO(annoNum));
+    const tariffa = p.origine === 'tabella' ? attiveTutte.find(t => t.id && t.id === p.id) : null;
+    const prezzo = `${p.valore} ${p.unita}`;
+    v.quante = p.valore ? 1 : 0;
+    if (p.origine === 'tabella' && p.altro_anno) {
+      v.stato = 'parziale';
+      v.dettaglio = `La base è la tariffa del ${p.anno_tariffa} (${prezzo}), rimasta aperta: nel ${annoNum} un intervento senza prezzo scritto si fattura a quel prezzo, con l’avviso «prezzo di un altro anno». Scrivi la tariffa EXTRA_RACCOLTA del ${annoNum}, oppure il prezzo su ogni intervento.`;
+    } else if (p.origine === 'tabella' && tariffa && daConfermare(tariffa)) {
+      v.stato = 'parziale';
+      v.dettaglio = `La base del ${annoNum} (${prezzo}) è copiata dall’anno prima: va confermata sul contratto.`;
+    } else if (p.origine === 'tabella') {
+      v.stato = 'pronto';
+      v.dettaglio = `La base del ${annoNum} è ${prezzo}, dalla tabella delle tariffe attive.`;
+    } else if (p.origine === 'base') {
+      v.stato = 'pronto';
+      v.dettaglio = `La base del ${annoNum} è ${prezzo}, scritta nel gestionale.`;
+    } else {
+      v.stato = 'manca';
+      v.dettaglio = `Nel ${annoNum} non c’è una base: un intervento senza prezzo scritto si fattura a zero euro, in errore. Scrivi la tariffa EXTRA_RACCOLTA del ${annoNum}, oppure il prezzo su ogni intervento.`;
+    }
     voci.push(v);
   }
 

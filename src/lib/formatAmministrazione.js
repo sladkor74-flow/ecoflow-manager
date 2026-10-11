@@ -30,12 +30,25 @@
 // ordini, 1.120.240 kg e 226.288,48 euro; l'ACI 6 ordini, 18.890 kg e 4.410,10
 // euro. prove/formatAmministrazione.mjs tiene quei numeri.
 
+// Import relativo con l'estensione: questo file lo carica anche
+// formatAmministrazioneExport, e nelle prove arriva in node come file vero.
+import { FATTURANTE_ATTIVA, prezzoATonnellata } from './ecotyreTariffe.js';
+
 const tipoServizio = (r) => (r.servizio_ecotyre === 'TRASP' ? 'Trasp.' : 'Trasp.+Tratt.');
 const giorno = (v) => (v ? new Date(v).toLocaleDateString('it-IT') : '');
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
 /** Il prezzo al chilo da quello a tonnellata: 202 €/t sono 0,202 €/kg. */
 export const euroAlChilo = (euroTonnellata) => Math.round((Number(euroTonnellata) || 0) / 1000 * 100000) / 100000;
+
+/**
+ * Il prezzo di una riga a tonnellata, con l'unita' della riga (chiusura
+ * dell'audit, 11/10/2026): prima si stampava il valore della tariffa com'era, e
+ * una tariffa in €/kg (0,202) usciva 0,202 sotto «Euro/TON» nel foglio ACI e
+ * 0,0002 al chilo in quello della rete. null se la riga non si paga a peso.
+ */
+const prezzoTon = (r) => prezzoATonnellata(r.tariffa_valore, r.unita_prezzo || r.unita_misura);
+const prezzoKg = (r) => { const t = prezzoTon(r); return t === null ? null : euroAlChilo(t); };
 
 /**
  * La tabella del mese nel formato dell'amministrazione.
@@ -70,9 +83,15 @@ export function tabellaAmministrazione(tipologia, righe, anno, mese) {
         { titolo: 'Note', tipo: 'testo', peso: 1.6 },
       ],
       righe: valide.map(r => [
-        r.regione || '', r.fatturante || 'SMOCO Srl', `${anno} ${mese}`, tipoServizio(r),
+        // IL FATTURANTE E' SMOCO, SEMPRE (chiusura dell'audit, 11/10/2026). Qui si
+        // stampava il campo della riga, e il calcolo dell'attiva ci scriveva
+        // 'ECOTYRE': il foglio diceva il cliente al posto di chi emette la
+        // fattura. Il file dell'amministrazione ha «SMOCO Srl» su ogni riga da
+        // gennaio a settembre 2026, e i fornitori fatturano a SMOCO, che fattura a
+        // Ecotyre. Le righe gia' salvate non si toccano: si stampa il soggetto.
+        r.regione || '', FATTURANTE_ATTIVA, `${anno} ${mese}`, tipoServizio(r),
         r.ordine || '', giorno(r.data_fine_trasporto), r.numero_fir || '', r.classe || '',
-        Number(r.quantita) || 0, Number(r.tariffa_valore) || 0, r2(r.totale),
+        Number(r.quantita) || 0, prezzoTon(r), r2(r.totale),
         // Vuota di proposito: la scrive l'amministrazione a mano.
         '',
       ]),
@@ -101,7 +120,7 @@ export function tabellaAmministrazione(tipologia, righe, anno, mese) {
     righe: valide.map(r => [
       periodo, tipoServizio(r), r.ordine || '', giorno(r.data_fine_trasporto),
       r.numero_fir || '', r.classe || '', Number(r.quantita) || 0,
-      euroAlChilo(r.tariffa_valore), r2(r.totale), r.regione || '',
+      prezzoKg(r), r2(r.totale), r.regione || '',
     ]),
   };
 }

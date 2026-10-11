@@ -33,6 +33,7 @@ import { eAci } from "./canaleSecondaria.ts";
 import { termineDi, testoScadenza, GIORNI_TERMINE_REGISTRAZIONE } from "./termineRegistrazione.ts";
 import { formatoKg } from "./formato.ts";
 import { distanzaFir, descriviDifferenzaFir } from "./numeroFir.ts";
+import { giornoRoma } from "./giornoItaliano.ts";
 
 const kgTondi = (v) => Math.round(Number(v) || 0);
 const pulisci = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
@@ -1312,4 +1313,63 @@ export function testoEsitoConsuntivo(confronto, esito) {
     parti.push(`Non si e' potuto controllare: ${esito.non_controllato.join('; ')}.`);
   }
   return parti.join(' ');
+}
+
+// UN CONSUNTIVO SOLO PER FORNITORE, RUOLO, MESE E CANALE (chiusura dell'audit,
+// 11/10/2026). Ricaricare il file corretto di un fornitore per lo stesso mese
+// ne creava un secondo: in elenco due righe dello stesso fornitore e mese, la
+// vecchia ancora rossa e la nuova verde, cioe' due esiti per la stessa cosa; e
+// con il nome scritto in un altro modo («Gatim» e «GATIM S.R.L.») sembravano due
+// fornitori. Il conto il nome lo normalizzava gia' (movimentiDelFornitore): ora
+// anche l'identita' del record. Il caricamento nuovo SOSTITUISCE quello di
+// prima, dopo una conferma, e quello di prima resta raccontato nelle note.
+
+/** La chiave di un consuntivo: nome normalizzato, ruolo, anno, mese e canale. */
+export const chiaveConsuntivo = (c) => [
+  normalizzaRagioneSociale(String((c && c.fornitore) || '')),
+  String((c && c.ruolo) || '').trim().toLowerCase(),
+  Number(c && c.anno) || 0,
+  Number(c && c.mese) || 0,
+  String((c && c.canale) || '').trim().toUpperCase(),
+].join('|');
+
+/**
+ * Fra i consuntivi gia' salvati, quello che un caricamento nuovo sostituisce: il
+ * piu' recente con la stessa chiave. `altri` sono i doppioni nati prima di
+ * questo controllo, che restano dove sono finche' qualcuno non li elimina.
+ */
+export function consuntivoGiaCaricato(esistenti, nuovo) {
+  const k = chiaveConsuntivo(nuovo);
+  const quando = (c) => String((c && (c.caricato_il || c.created_date)) || '');
+  const stessi = (esistenti || []).filter(c => c && c.id && chiaveConsuntivo(c) === k)
+    .sort((a, b) => quando(b).localeCompare(quando(a)));
+  return { precedente: stessi[0] || null, altri: stessi.slice(1) };
+}
+
+// il giorno italiano di un istante (caricato_il e' un istante, non un giorno)
+const istanteIt = (v) => { const g = giornoRoma(v); return g ? g.split('-').reverse().join('/') : ''; };
+// euro all'italiana, col punto delle migliaia anche sotto i diecimila (1.234,50)
+const euroIt = (v) => Number(v).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' });
+
+/**
+ * La nota che racconta il caricamento sostituito: quando, quale file, com'era
+ * andato il confronto e l'importo scritto; se di quel caricamento restava solo
+ * la storia (era gia' alleggerito), anche la storia. Le note di prima seguono.
+ * Al quarantesimo giorno la storia del consuntivo nuovo riporta le note
+ * (storiaConsuntivo), quindi anche questa riga resta.
+ */
+export function notaSostituzione(prima, quando) {
+  const p = prima || {};
+  let nota = `Sostituisce il caricamento del ${istanteIt(p.caricato_il || p.created_date) || 'giorno non scritto'}`;
+  if (String(p.file_nome || '').trim()) nota += ` (file «${String(p.file_nome).trim()}»)`;
+  if (p.quadra === true) nota += ', che corrispondeva ai nostri movimenti';
+  else if (p.quadra === false) nota += ', che NON corrispondeva ai nostri movimenti';
+  if (p.importo_consuntivo !== undefined && p.importo_consuntivo !== null && p.importo_consuntivo !== '' && Number.isFinite(Number(p.importo_consuntivo))) {
+    nota += `, importo scritto ${euroIt(p.importo_consuntivo)} euro`;
+  }
+  nota += quando ? `; sostituito il ${istanteIt(quando)}.` : '.';
+  const storia = String(p.storia || '').replace(/\s+/g, ' ').trim();
+  if (storia) nota += ` Di quel caricamento restava la storia: «${storia.length > 1500 ? storia.slice(0, 1500) + '…' : storia}»`;
+  const notePrima = String(p.note || '').trim();
+  return notePrima ? `${nota} ${notePrima}` : nota;
 }

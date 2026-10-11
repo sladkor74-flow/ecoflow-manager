@@ -74,6 +74,14 @@ const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const n2 = (v) => Math.round(num(v) * 100) / 100;
 const testo = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 const elenco = (v) => (Array.isArray(v) ? v : []);
+/**
+ * I chili dentro una frase, all'italiana: «2.216 kg». Un peso che manca si scrive
+ * «— kg», non 0 (11/10/2026); toLocaleString in italiano non separa le
+ * migliaia dei numeri a quattro cifre, quindi il punto si mette a mano.
+ */
+const kgTesto = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v))
+  ? '— kg'
+  : `${String(Math.round(Number(v))).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} kg`);
 /** Il formato delle tonnellate: tre decimali solo se i chili non sono tondi. */
 const fmtT = (v) => (Math.round(num(v) * 1000) % 10 === 0 ? TONN : TONN3);
 /** La lettera di una colonna, per scrivere le formule. */
@@ -262,12 +270,18 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
     // raccoglitore o all'impianto, fuori dalla moltiplicazione - la formula se lo
     // porta dietro come addendo: cosi' il conto si legge per intero, e correggere
     // il prezzo rifa' il totale senza perdere quei soldi.
+    //
+    // IL PRODOTTO SI ARROTONDA AL CENTESIMO NELLA FORMULA (chiusura dell'audit,
+    // 11/10/2026): il foglio, e quindi il PDF, arrotonda ogni voce, mentre una
+    // formula nuda teneva i millesimi e la somma del fornitore, al primo
+    // ricalcolo, poteva uscire di un centesimo diversa dal PDF (due voci da
+    // 1,003 t a 68 €/t: 68,20 + 68,20 nel PDF, 136,41 nell'Excel).
     const oltre = n2(riga.oltre_tariffa);
     const coda = oltre > 0 ? `+${oltre}` : '';
     scrivi(ws, r, col.totale, prezzoNoto ? {
       formula: aViaggio
-        ? `${lettera(colPrezzo)}${r}*${viaggi}${coda}`
-        : `${lettera(col.tonn)}${r}*${lettera(colPrezzo)}${r}${coda}`,
+        ? `ROUND(${lettera(colPrezzo)}${r}*${viaggi},2)${coda}`
+        : `ROUND(${lettera(col.tonn)}${r}*${lettera(colPrezzo)}${r},2)${coda}`,
       result: n2(riga.totale),
     } : n2(riga.totale), { ...st, allinea: 'right', fmt: EURO });
     scrivi(ws, r, col.note, [
@@ -316,6 +330,18 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
     }
   }
   return { prossima: r, cellaTotale };
+}
+
+/**
+ * LA FORMULA DEL TOTALE DI UNA RIGA DEL TRASPORTO, nella riga `r` del foglio
+ * (D peso, F costo, G viaggi pagati). A tonnellata e' peso per costo, a viaggio
+ * costo per viaggi, arrotondati al centesimo come la passiva. A viaggio G sono
+ * i viaggi PAGATI, importo diviso prezzo (viaggiPagatiTrasporto,
+ * 11/10/2026): cosi' anche la riga ACI di un viaggio misto, che la passiva paga
+ * per differenza, al mezzo centesimo torna al centesimo quando Excel ricalcola.
+ */
+export function formulaTotaleTrasporto(t, r) {
+  return t && t.unita_misura === 'euro_viaggio' ? `ROUND(F${r}*G${r},2)` : `ROUND(D${r}*F${r},2)`;
 }
 
 /**
@@ -370,11 +396,22 @@ function scriviTrasporto(ws, r0, trasporti0, nomeCanale) {
     // camion si pagava intero di qua e intero di la' (audit del 03/10/2026).
     // La nota della riga, che viene dalla passiva, dice gia' com'e' fatto il
     // conto («2 viaggi interi a 300 € e 1 viaggio misto... 2,6 viaggi»).
+    //
+    // LA QUOTA SI SCRIVE INTERA, NON ARROTONDATA (chiusura dell'audit,
+    // 11/10/2026): il formato la mostra con due decimali, ma la cella tiene il
+    // numero vero. Prima la cella teneva 1,77 e la formula faceva 400 x 1,77 =
+    // 708,00, dove la passiva paga 707,69 (un viaggio di sola rete e uno misto
+    // con 10.000 kg di rete e 3.000 di ACI): appena Excel ricalcolava, PDF ed
+    // Excel dello stesso foglio dicevano due numeri. E sono i viaggi PAGATI,
+    // importo diviso prezzo (viaggiPagatiTrasporto), non la quota dei chili: sulla
+    // riga ACI di un viaggio misto, al mezzo centesimo, la quota faceva 328,13
+    // dove la passiva paga 328,12.
     const vgPagati = t.viaggi_pagati === undefined || t.viaggi_pagati === null ? num(t.viaggi) : num(t.viaggi_pagati);
-    const vgInteri = Math.abs(vgPagati - Math.round(vgPagati)) < 0.005;
+    const vgInteri = Math.abs(vgPagati - Math.round(vgPagati)) < 1e-9;
     scrivi(ws, r, 7, vgPagati || null, { ...st, allinea: 'center', fmt: vgInteri ? INTERO : FORMATI.decimale2 });
     // A tonnellata e' peso per costo, a viaggio e' costo per numero di viaggi:
-    // la formula segue l'unita' di misura scritta sulla riga accanto.
+    // la formula segue l'unita' di misura scritta sulla riga accanto, e
+    // arrotonda al centesimo come la passiva (=ROUND(F*G;2)).
     //
     // Su un trasporto interno no: li' il totale e' zero perche' non si fattura, e
     // una formula prezzo per viaggi col risultato zero in memoria lo rimetterebbe
@@ -382,7 +419,7 @@ function scriviTrasporto(ws, r0, trasporti0, nomeCanale) {
     // dice perche'.
     scrivi(ws, r, 8, t.interno
       ? 0
-      : { formula: aViaggio ? `F${r}*G${r}` : `D${r}*F${r}`, result: n2(t.totale) },
+      : { formula: formulaTotaleTrasporto(t, r), result: n2(t.totale) },
     { ...st, allinea: 'right', fmt: EURO });
     scrivi(ws, r, 9, testo(t.note), { ...st, corsivo: true, colore: TENUE });
     sommandi.push(r);
@@ -447,6 +484,23 @@ const LARGO_EXTRA = COLONNE_EXTRA.length;
 /** La data come si legge: 10/09/2026. Testo, non data, per non rimettere in ballo i fusi. */
 const giornoIt = (v) => (/^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(v).slice(0, 10).split('-').reverse().join('/') : testo(v));
 
+/**
+ * LA FORMULA DEL TOTALE DI UN INTERVENTO DI EXTRA RACCOLTA, nella riga `r`, con
+ * le lettere delle colonne (t, raccolta, stoccaggio, trattamento, viaggio, oneri).
+ *
+ * Ogni costo a tonnellata si arrotonda al centesimo per conto suo, poi si somma
+ * (chiusura dell'audit, 11/10/2026): e' la grana della passiva, che paga la
+ * raccolta al raccoglitore e il trattamento all'impianto, ciascuno al centesimo,
+ * e della pagina dell'extra raccolta. La formula di prima moltiplicava la somma
+ * dei prezzi per il peso senza arrotondare: 2,631 t a 90 + 95 €/t facevano
+ * 486,735, e il totale del blocco ricalcolato da Excel non era piu' quello della
+ * passiva (236,79 + 249,95 = 486,74).
+ */
+export function formulaTotaleExtra(r, c) {
+  const perPeso = (col) => `ROUND(${col}${r}*${c.t}${r},2)`;
+  return `${perPeso(c.raccolta)}+${perPeso(c.stoccaggio)}+${perPeso(c.trattamento)}+${c.viaggio}${r}+${c.oneri}${r}`;
+}
+
 function scriviExtra(ws, r0, extra0) {
   const extra = extra0 && typeof extra0 === 'object' ? extra0 : {};
   const righe = elenco(extra.righe);
@@ -481,7 +535,15 @@ function scriviExtra(ws, r0, extra0) {
       if (c.chiave === 'totale') return;
       const v = x[c.chiave];
       const stile = { ...st, allinea: c.numero ? 'right' : (c.centro ? 'center' : 'left') };
-      if (c.chiave === 'note') scrivi(ws, r, i + 1, testo(v), { ...stile, corsivo: true, colore: TENUE });
+      // UN PESO CHE MANCA NON E' ZERO (chiusura dell'audit, 11/10/2026): un
+      // terminato senza peso effettivo ha i chili a null, e num(null) li scriveva
+      // 0. Si scrive «—», come nella pagina. La cella delle tonnellate resta
+      // vuota e non «—», perche' la formula del totale la moltiplica: vuota vale
+      // zero, e i costi a tonnellata valgono zero finche' il peso non si scrive,
+      // come in passiva.
+      if (c.chiave === 'kg' && (v === null || v === undefined)) scrivi(ws, r, i + 1, '—', { ...stile, allinea: 'right' });
+      else if (c.numero === 'T' && x.senza_peso) scrivi(ws, r, i + 1, null, stile);
+      else if (c.chiave === 'note') scrivi(ws, r, i + 1, testo(v), { ...stile, corsivo: true, colore: TENUE });
       else if (c.numero === 'T') scrivi(ws, r, i + 1, num(v), { ...stile, fmt: fmtT(v) });
       else if (c.numero) scrivi(ws, r, i + 1, num(v), { ...stile, fmt: c.numero });
       else if (c.centro) scrivi(ws, r, i + 1, giornoIt(v), stile);
@@ -492,7 +554,7 @@ function scriviExtra(ws, r0, extra0) {
     // prezzi. Scritto come formula, cosi' correggere un prezzo rifa' il conto; il
     // numero che porta dentro e' quello del modulo Extra Raccolta.
     scrivi(ws, r, iTot, {
-      formula: `(${lettera(iRac)}${r}+${lettera(iSto)}${r}+${lettera(iTra)}${r})*${lettera(iT)}${r}+${lettera(iVg)}${r}+${lettera(iOn)}${r}`,
+      formula: formulaTotaleExtra(r, { t: lettera(iT), raccolta: lettera(iRac), stoccaggio: lettera(iSto), trattamento: lettera(iTra), viaggio: lettera(iVg), oneri: lettera(iOn) }),
       result: n2(x.totale),
     }, { ...st, allinea: 'right', fmt: EURO, grassetto: true });
     sommandi.push(r);
@@ -538,9 +600,14 @@ function scriviExtra(ws, r0, extra0) {
     }
   };
   avvisa('DA SISTEMARE: interventi chiusi senza nessun costo scritto. La passiva non paga niente: scrivi i costi sull\'intervento.',
-    elenco(extra.senza_costi), (x) => `${x.numero_fir} · ${x.produttore} → ${x.destinatario} · ${Math.round(num(x.kg)).toLocaleString('it-IT')} kg`);
+    elenco(extra.senza_costi), (x) => `${x.numero_fir} · ${x.produttore} → ${x.destinatario} · ${kgTesto(x.kg)}`);
+  // I terminati del mese senza peso effettivo (chiusura dell'audit, 11/10/2026):
+  // stanno nel blocco senza chili, e qui si dicono con la frase che dicono anche
+  // la fattura, la passiva e la pagina.
+  avvisa('DA SISTEMARE: interventi terminati senza peso effettivo. Non entrano nella fattura a Ecotyre e i costi a tonnellata valgono zero: scrivi il peso sull\'intervento.',
+    elenco(extra.senza_peso), (x) => `${x.numero_fir} · ordine ${x.ordine} · ${x.produttore} · ${testo(x.avviso)}`);
   avvisa('DA SISTEMARE: interventi terminati senza data di fine trasporto. Non stanno in nessun mese e non si fatturano.',
-    elenco(extra.senza_data), (x) => `${x.numero_fir} · ordine ${x.ordine} · ${x.produttore} · ${Math.round(num(x.kg)).toLocaleString('it-IT')} kg`);
+    elenco(extra.senza_data), (x) => `${x.numero_fir} · ordine ${x.ordine} · ${x.produttore} · ${kgTesto(x.kg)}`);
 
   return { prossima: r + 1, cellaTotale };
 }
