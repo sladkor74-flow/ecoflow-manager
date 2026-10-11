@@ -31,6 +31,16 @@ const SPECCHI = [
   ['base44/shared/regioneMap.ts', 'src/lib/regioneMap.js'],
   ['base44/shared/formatoExcel.ts', 'src/lib/formatoExcel.js'],
   ['base44/shared/subfornitori.ts', 'src/lib/subfornitori.js'],
+  // Dall'11/10/2026 (chiusura dell'audit): nati per dire lo stesso numero nella
+  // pagina e nella funzione - il prezzo dell'extra raccolta, quando una tariffa vale,
+  // quando due tariffe sono la stessa, l'atteso alla data, l'andamento dei target,
+  // lo stato dei caricamenti.
+  ['base44/shared/ecotyreTariffe.ts', 'src/lib/ecotyreTariffe.js'],
+  ['base44/shared/validitaTariffa.ts', 'src/lib/validitaTariffa.js'],
+  ['base44/shared/conflittiTariffa.ts', 'src/lib/conflittiTariffa.js'],
+  ['base44/shared/attesoContratto.ts', 'src/lib/attesoContratto.js'],
+  ['base44/shared/andamentoTarget.ts', 'src/lib/andamentoTarget.js'],
+  ['base44/shared/registroCaricamenti.ts', 'src/lib/registroCaricamenti.js'],
 ];
 
 // il corpo: via i ritorni a capo di Windows, le righe di import e il commento di testa
