@@ -26,19 +26,15 @@
       "type": "string",
       "enum": [
         "tratta_autorizzata",
-        "campo_obbligatorio",
-        "range_valori",
-        "sla_tempi",
-        "peso_congruenza",
+        "tratta_combinazione",
+        "tratte_autorizzate_classe",
         "province_inattive",
         "mix_classi_deviazione",
         "scostamento_target",
         "ritardo_sla",
-        "anomalia_peso",
-        "tratte_autorizzate_classe",
-        "custom"
+        "anomalia_peso"
       ],
-      "description": "Tipologia di regola"
+      "description": "Tipologia di regola: solo i tipi che il motore (runAlertEngine) valuta davvero. Fino all'11/10/2026 c'erano anche campo_obbligatorio, range_valori, sla_tempi, peso_congruenza e custom, che non producevano mai niente, e mancava tratta_combinazione, che il motore valuta. Il menu della pagina Alert Engine ha gli stessi tipi (prove/regoleAlert.mjs)"
     },
     "severita": {
       "type": "string",

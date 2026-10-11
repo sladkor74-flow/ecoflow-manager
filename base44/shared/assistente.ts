@@ -7,12 +7,18 @@
 
 import { fetchAll } from "./fetchAll.ts";
 import { computeRaccoltoData, MESI } from "./raccoltoCalculator.ts";
-import { aggregaTargetMensili, aggregaTargetAnnui } from "./targetRaccoglitori.ts";
+// stessoRaccoglitore e targetDelPortale: l'abbinatore unico fra il nome del
+// target e quello del portale (andamentoTarget.ts). Qui ce n'era una copia
+// propria, con un altro nome (chiusura dell'audit, 11/10/2026).
+import { aggregaTargetMensili, aggregaTargetAnnui, stessoRaccoglitore, targetDelPortale } from "./targetRaccoglitori.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { formatoTonnellate } from "./formato.ts";
 import { giornoRoma, annoRoma } from "./giornoItaliano.ts";
 import { eTerminato, giornoMovimento } from "./movimenti.ts";
 import { contaFormulari } from "./formulari.ts";
+import { commessaDellAnno } from "./annoTarget.ts";
+import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, giornoDeiDati } from "./attesoContratto.ts";
+import { datiFinoAl } from "./statoArchivi.ts";
 
 const PAROLE_DATI = [
   'target', 'raccolt', 'raccoglitor', 'giacenz', 'plafond', 'tonnellat', 'campania', 'puglia', 'basilicata',
@@ -48,24 +54,6 @@ export function analizzaDomanda(testo) {
 const t1 = (v) => formatoTonnellate(v);
 const p1 = (v) => (Math.round((Number(v) || 0) * 10) / 10).toLocaleString('it-IT');
 const leggiLista = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
-
-// Stesso raccoglitore: nome normalizzato uguale, oppure nome del target abbreviato
-// le cui parole stanno tutte nel nome del portale.
-function stessoRaccoglitore(nomeTarget, nomePortale) {
-  const a = normalizzaRagioneSociale(nomeTarget || '');
-  const b = normalizzaRagioneSociale(nomePortale || '');
-  if (!a || !b) return false;
-  if (a === b) return true;
-  const paroleB = new Set(b.split(' '));
-  const paroleA = a.split(' ').filter(p => p.length > 2);
-  return paroleA.length > 0 && paroleA.every(p => paroleB.has(p));
-}
-
-// Un nome del portale va a un solo raccoglitore dei target: prima per nome uguale.
-function targetDelPortaleLocale(nomiTarget, nomePortale) {
-  const b = normalizzaRagioneSociale(nomePortale || '');
-  return nomiTarget.find(n => normalizzaRagioneSociale(n) === b) ?? nomiTarget.find(n => stessoRaccoglitore(n, nomePortale)) ?? null;
-}
 
 async function provaA(fn, ripiego, cosa = '', guasti = null) {
   try { return await fn(); } catch (e) {
@@ -117,7 +105,7 @@ export async function situazioneGestionale(base44, oggi) {
   // Le letture che non riescono: si raccolgono e si dicono in cima, perche' un
   // riepilogo pieno di zeri senza spiegazione si legge come un dato.
   const guasti = [];
-  const [raccolto, raccoltoAci, extra, reteSenzaData, aciSenzaData, mensili, annui, commesse, controlli, alert, riepilogoQualifica, giacenze] = await Promise.all([
+  const [raccolto, raccoltoAci, extra, reteSenzaData, aciSenzaData, mensili, annui, commesse, controlli, alert, riepilogoQualifica, giacenze, finoAlRete] = await Promise.all([
     provaA(() => computeRaccoltoData(base44, { anno: [anno], canale: 'rete' }), null, 'il raccolto della rete', guasti),
     provaA(() => computeRaccoltoData(base44, { anno: [anno], canale: 'aci' }), null, 'il raccolto ACI', guasti),
     provaA(() => fetchAll(svc.ExtraRaccolta, { stato: 'terminato' }), [], "l'extra raccolta", guasti),
@@ -128,7 +116,9 @@ export async function situazioneGestionale(base44, oggi) {
     provaA(() => fetchAll(svc.PrimariaAci, { trasporto_finito_il: null }), null, 'i terminati ACI senza fine trasporto', guasti),
     provaA(() => fetchAll(svc.TargetMensile, { anno }), [], 'i target mensili', guasti),
     provaA(() => fetchAll(svc.TargetRaccoglitore, { anno }), [], 'i target dei raccoglitori', guasti),
-    provaA(() => svc.CommessaEcotyre.filter({ anno }), [], 'il contratto Ecotyre', guasti),
+    // Tutti i contratti dell'anno, non i primi restituiti: fra piu' contratti
+    // dello stesso anno vale il modificato per ultimo (commessaDellAnno, qui sotto).
+    provaA(() => fetchAll(svc.CommessaEcotyre, { anno }), [], 'il contratto Ecotyre', guasti),
     provaA(() => fetchAll(svc.ControlloEvasione, { anno, mese: meseIdx + 1 }), [], "i controlli dell'evasione", guasti),
     // Tutti gli alert aperti, non i primi duecento: il riepilogo diceva "200"
     // mentre lo strumento alert_aperti ne contava 54 o 340, e i due numeri non
@@ -136,6 +126,15 @@ export async function situazioneGestionale(base44, oggi) {
     provaA(() => fetchAll(svc.Alert, { stato: 'aperto' }), [], 'gli alert aperti', guasti),
     provaA(() => svc.RiepilogoQualifica.filter({ anno }, '-created_date', 1), [], 'il riepilogo della qualifica', guasti),
     provaA(async () => (await base44.functions.invoke('calcolaGiacenze', { anno })).data, null, 'le giacenze', guasti),
+    // Fin dove arrivano i dati della rete: l'ultima fine trasporto di un
+    // terminato, con la stessa lettura breve di Target & Status e della dashboard
+    // (datiFinoAl di statoArchivi.ts). '' se l'archivio non ha terminati; una
+    // lettura non riuscita va fra i guasti, e allora l'atteso non si dice.
+    provaA(async () => {
+      const [v] = await datiFinoAl(svc, ['PrimariaRete']);
+      if (!v || v.lettura_non_riuscita) throw new Error('lettura non riuscita');
+      return v.dati_fino_al || '';
+    }, null, 'fin dove arrivano i dati della rete', guasti),
   ]);
 
   // Una lettura non riuscita non e' un archivio vuoto: senza questa distinzione
@@ -148,26 +147,53 @@ export async function situazioneGestionale(base44, oggi) {
   ];
 
   // --- Contratto e regioni ---
-  const commessa = commesse[0] || null;
+  // IL CONTRATTO DELL'ANNO E L'ATTESO ALLA DATA, COME LA DASHBOARD E TARGET &
+  // STATUS (chiusura dell'audit, 11/10/2026). Qui si prendeva il primo contratto
+  // restituito (commesse[0]) e la quota attesa si contava sul giorno di
+  // calendario: con due contratti dello stesso anno EcoTyna poteva leggere un
+  // target diverso da quello della Dashboard (11.000 t contro 11.550), e con i
+  // dati fermi al 7 e oggi l'11 diceva un atteso di quattro giorni di raccolta
+  // piu' alto (80,8% contro 79,7%). Ora il contratto e' il modificato per ultimo
+  // (commessaDellAnno), target annuo e riparto per regione vengono da li' con lo
+  // stesso ripiego dichiarato della Dashboard (targetAnnuoDellAnno,
+  // regioniDellAnno), e l'atteso si conta sui giorni coperti dai dati, fino
+  // all'ultima fine trasporto della rete e mai oltre oggi (attesoAllaData e
+  // giornoDeiDati di attesoContratto.ts). Una regola sola, gli stessi numeri.
+  const commessa = commessaDellAnno(commesse, anno);
+  const giornoDati = finoAlRete ? giornoDeiDati(finoAlRete, oggi) : '';
+  const ilGiorno = (g) => `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}`;
   const perRegione = new Map((raccolto?.by_regione || []).map(r => [String(r.regione).toLowerCase(), r]));
   if (commessa) {
-    const profilo = leggiLista(commessa.target_mensile_json).map(v => Number(v) || 0);
-    const totProfilo = profilo.reduce((s, v) => s + v, 0);
-    const pesi = totProfilo > 0 ? profilo.map(v => v / totProfilo) : MESI.map(() => 1 / 12);
-    const giorniMese = new Date(Date.UTC(anno, meseIdx + 1, 0)).getUTCDate();
-    const quota = pesi.slice(0, meseIdx).reduce((s, v) => s + v, 0) + (pesi[meseIdx] || 0) * (Number(oggi.slice(8, 10)) / giorniMese);
-    righe.push(`Contratto Ecotyre ${anno}, canale RETE: target annuo ${t1(commessa.target_annuo_t)} t; quota attesa a oggi ${p1(quota * 100)}% secondo il profilo mensile del contratto.`);
-    for (const r of leggiLista(commessa.regioni_json)) {
+    const contratto = targetAnnuoDellAnno(commessa, anno);
+    const { quota } = attesoAllaData(commessa, anno, giornoDati);
+    // Senza il giorno dei dati l'atteso non si inventa: si dice perche' manca.
+    const quotaTesto = quota === null
+      ? (finoAlRete === null
+        ? "quota attesa non calcolabile: non si e' potuto leggere fin dove arrivano i dati della rete"
+        : 'quota attesa non calcolabile: nessun ritiro RETE terminato con la fine trasporto')
+      : `quota attesa a oggi ${p1(quota * 100)}% del target, contata sui giorni coperti dai dati (fino al ${ilGiorno(giornoDati)}, l'ultima fine trasporto di un ritiro RETE terminato) e sul profilo mensile del contratto, come la Dashboard e Target & Status`;
+    const targetTesto = contratto.t === null
+      ? 'target annuo non inserito nel contratto'
+      : `target annuo ${t1(contratto.t)} t${contratto.fonte === 'ripiego' ? " (il contratto non ha il target annuo: e' quello scritto nel gestionale come ripiego, come nella Dashboard)" : ''}`;
+    righe.push(`Contratto Ecotyre ${anno}, canale RETE: ${targetTesto}; ${quotaTesto}.${contratto.da_confermare ? " Il contratto e' copiato dall'anno prima e va confermato in Target & Status." : ''}`);
+    const regioni = regioniDellAnno(commessa, anno);
+    if (regioni.fonte === 'ripiego') righe.push(`  Il contratto non ha il riparto per regione: quello qui sotto e' il riparto del ${anno} scritto nel gestionale come ripiego, come nella Dashboard.`);
+    for (const r of regioni.righe) {
       const racc = perRegione.get(String(r.regione).toLowerCase());
-      const contratto = Number(r.target_t) || 0;
+      const contrattoRegione = r.target_t;
       const fatto = racc ? racc.totale : null;
       const senzaRaccolto = !raccolto;
-      righe.push(`- ${r.regione}: contratto ${t1(contratto)} t, raccolto ${senzaRaccolto ? 'n/d (lettura non riuscita)' : `${t1(fatto)} t (${contratto ? p1(fatto / contratto * 100) : '-'}%)`}, atteso a oggi ${t1(contratto * quota)} t, mese in corso ${senzaRaccolto ? 'n/d' : `${t1(racc?.mesi?.[mese])} t`}.`);
+      const attesoRegione = attesoAllaData(commessa, anno, giornoDati, contrattoRegione).atteso_t;
+      righe.push(`- ${r.regione}: contratto ${t1(contrattoRegione)} t, raccolto ${senzaRaccolto ? 'n/d (lettura non riuscita)' : `${t1(fatto)} t (${contrattoRegione ? p1(fatto / contrattoRegione * 100) : '-'}%)`}, atteso a oggi ${attesoRegione === null ? 'n/d' : `${t1(attesoRegione)} t`}, mese in corso ${senzaRaccolto ? 'n/d' : `${t1(racc?.mesi?.[mese])} t`}.`);
     }
   } else {
-    righe.push(nonLetto('il contratto Ecotyre')
+    // Senza contratto la Dashboard mostra il ripiego scritto nel gestionale, dove
+    // c'e' (2025 e 2026): EcoTyna lo dice come tale, non come contratto.
+    const ripiego = targetAnnuoDellAnno(null, anno);
+    const testoRipiego = ripiego.t === null ? '' : ` La Dashboard mostra come ripiego il target di ${t1(ripiego.t)} t scritto nel gestionale: non e' il contratto.`;
+    righe.push((nonLetto('il contratto Ecotyre')
       ? 'Contratto Ecotyre dell\'anno: LETTURA NON RIUSCITA. Non si sa se sia inserito: non dire che manca.'
-      : 'Contratto Ecotyre dell\'anno non inserito in Target & Status.');
+      : 'Contratto Ecotyre dell\'anno non inserito in Target & Status.') + testoRipiego);
   }
   if (raccolto) {
     righe.push(`Raccolto RETE ${anno}: ${t1(raccolto.totale_raccolto)} t. Per mese: ${MESI.slice(0, meseIdx + 1).map(m => `${m} ${t1((raccolto.by_regione || []).reduce((s, r) => s + (r.mesi?.[m] || 0), 0))}`).join(', ')}.`);
@@ -242,7 +268,7 @@ export async function situazioneGestionale(base44, oggi) {
       const targetMese = delMese.filter(r => !r.non_raccoglie).reduce((s, r) => s + (Number(r.target) || 0), 0);
       const nonRaccoglie = delMese.length > 0 && delMese.every(r => r.non_raccoglie);
       const tuttiNomi = [...nomi.values()];
-      const suoi = (raccolto?.by_raccoglitore || []).filter(r => stessoRaccoglitore(nome, r.raccoglitore) && targetDelPortaleLocale(tuttiNomi, r.raccoglitore) === nome);
+      const suoi = (raccolto?.by_raccoglitore || []).filter(r => stessoRaccoglitore(nome, r.raccoglitore) && targetDelPortale(tuttiNomi, r.raccoglitore) === nome);
       const ytd = suoi.reduce((s, r) => s + r.totale, 0);
       const meseFatto = suoi.reduce((s, r) => s + (r.mesi?.[mese] || 0), 0);
       const regioni = [...new Set(annui.filter(r => normalizzaRagioneSociale(r.raccoglitore) === k).map(r => r.regione).filter(Boolean))];
@@ -277,11 +303,15 @@ export async function situazioneGestionale(base44, oggi) {
   // zero, e va scritto nel testo: il modello non legge i commenti del codice, e
   // un "-" lo puo' prendere per zero. Un impianto senza il file degli ordini non
   // dichiarati ha una giacenza a zero che non e' un dato: anche li' il trattino.
+  // Dal 03/10/2026 anche gli impianti hanno la giacenza ACI e quella di extra
+  // raccolta (apertura + arrivato - dichiarato, come nel modulo Dichiarazioni):
+  // l'intestazione che le diceva «non pertinenti» accanto a un valore stampato
+  // era superata, e l'ha tolta la chiusura dell'audit (11/10/2026).
   if (giacenze && Array.isArray(giacenze.righe) && giacenze.righe.length) {
     const tc = (v) => (v === null || v === undefined ? '-' : t1(v));
     const stoc = (g) => g.tipo_destinazione === 'stoc';
     const senzaFile = (g) => !stoc(g) && !(g.fotografia && g.fotografia.del);
-    righe.push('Impianti e stoccaggi, un canale per colonna e mai sommati (giacenza RETE | giacenza ACI | extra raccolta in piazzale | target RETE | primarie RETE nell\'anno | % del target RETE, cioe\' primarie sul target, quanto del target di raccolta e\' stato raccolto | residuo RETE, cioe\' target meno TUTTO quello che e\' arrivato, primarie piu\' secondarie in ingresso, perche\' il target di un impianto comprende gia\' le secondarie dai piazzali: percentuale e residuo rispondono a due domande diverse e non sono l\'uno il complemento dell\'altra | conferito ACI nell\'anno | conferito extra raccolta nell\'anno). Il trattino vuol dire non calcolata o non pertinente, MAI zero: la giacenza di uno stoccaggio senza rilevazione del portale o di un impianto senza il file degli ordini non dichiarati (non calcolata); l\'ACI e l\'extra raccolta di un impianto, l\'extra raccolta di uno stoccaggio che nell\'anno non ne ha movimentata (non pertinente).');
+    righe.push('Impianti e stoccaggi, un canale per colonna e mai sommati (giacenza RETE | giacenza ACI | giacenza EXTRA RACCOLTA, che in uno stoccaggio e\' quella in piazzale e in un impianto quella arrivata e non ancora dichiarata | target RETE | primarie RETE nell\'anno | % del target RETE, cioe\' primarie sul target, quanto del target di raccolta e\' stato raccolto | residuo RETE, cioe\' target meno TUTTO quello che e\' arrivato, primarie piu\' secondarie in ingresso, perche\' il target di un impianto comprende gia\' le secondarie dai piazzali: percentuale e residuo rispondono a due domande diverse e non sono l\'uno il complemento dell\'altra | conferito ACI nell\'anno | conferito extra raccolta nell\'anno). In un impianto la giacenza ACI e quella di extra raccolta sono apertura + arrivato - dichiarato e caricato, come nel modulo Dichiarazioni. Il trattino vuol dire non calcolata o non pertinente, MAI zero: la giacenza RETE e ACI di uno stoccaggio senza rilevazione del portale, la giacenza RETE di un impianto senza il file degli ordini non dichiarati o di un impianto che per accordo non ci dichiara la rete (non calcolata); l\'extra raccolta di uno stoccaggio che nell\'anno non ne ha movimentata (non pertinente).');
     for (const g of giacenze.righe.slice(0, 25)) {
       righe.push(`- ${g.sito} (${stoc(g) ? 'stoccaggio' : 'impianto'}): ${senzaFile(g) ? '-' : tc(g.giacenza_rete_t)} | ${tc(g.giacenza_aci_t)} | ${tc(g.giacenza_extra_t)} | ${g.target_totale_t ? t1(g.target_totale_t) : '-'} | ${t1(g.conferito_primarie_t)} | ${g.percentuale_target !== null && g.percentuale_target !== undefined ? p1(g.percentuale_target) + '%' : '-'} | ${g.residuo_t !== null && g.residuo_t !== undefined ? t1(g.residuo_t) : '-'} | ${t1(g.conferito_aci_t)} | ${t1(g.conferito_extra_t)}`);
     }
@@ -296,7 +326,16 @@ export async function situazioneGestionale(base44, oggi) {
       ...(senzaRilevazione.length ? [`stoccaggi senza rilevazione: ${senzaRilevazione.join(', ')}`] : []),
     ];
     const fuoriAci = senzaRilevazione.length ? ` (esclusi gli stoccaggi senza rilevazione: ${senzaRilevazione.join(', ')})` : '';
-    righe.push(`Giacenze per canale, tre totali distinti: RETE ${t1(tot.giacenza_portale_t)} t${fuoriRete.length ? ` (esclusi ${fuoriRete.join('; ')})` : ''}; ACI negli stoccaggi ${t1(tot.giacenza_aci_t)} t${fuoriAci}; extra raccolta in piazzale ${t1(tot.giacenza_extra_t)} t.`);
+    // ACI ED EXTRA RACCOLTA, IMPIANTI E STOCCAGGI DIVISI (chiusura dell'audit,
+    // 11/10/2026). Qui si scriveva «ACI negli stoccaggi» col totale del modulo,
+    // che dal 03/10 comprende anche gli impianti: un impianto con 7 t ACI non
+    // dichiarate e un piazzale con 3 t di classe 9 davano «ACI negli stoccaggi
+    // 10 t», mentre lo strumento giacenze diceva 3. Si rifanno sulle righe, come
+    // fa lo strumento, cosi' i due testi dicono gli stessi numeri.
+    const sommaT = (xs, campo) => Math.round(xs.reduce((s, g) => s + (Number(g[campo]) || 0), 0) * 1000) / 1000;
+    const impR = giacenze.righe.filter(g => !stoc(g));
+    const stocR = giacenze.righe.filter(stoc);
+    righe.push(`Giacenze per canale, tre totali distinti: RETE ${t1(tot.giacenza_portale_t)} t${fuoriRete.length ? ` (esclusi ${fuoriRete.join('; ')})` : ''}; ACI: impianti ${t1(sommaT(impR, 'giacenza_aci_t'))} t, stoccaggi ${t1(sommaT(stocR, 'giacenza_aci_t'))} t${fuoriAci}; EXTRA RACCOLTA: impianti ${t1(sommaT(impR, 'giacenza_extra_t'))} t (arrivata e non ancora dichiarata), stoccaggi ${t1(sommaT(stocR, 'giacenza_extra_t'))} t (in piazzale). Impianti e stoccaggi dello stesso canale sono due numeri: dilli tutti e due.`);
     // Il confronto col target lo fa calcolaGiacenze sulla sola giacenza di rete.
     const sopra = (giacenze.anomalie || []).filter(a => a.tipo === 'giacenza_sopra_target');
     if (sopra.length) righe.push(`Siti con giacenza RETE sopra il target: ${sopra.map(a => a.sito).join(', ')}.`);

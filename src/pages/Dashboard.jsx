@@ -129,7 +129,7 @@ export default function Dashboard() {
       <DashboardFilters mese={mese} anno={anno} onMeseChange={setMese} onAnnoChange={setAnno} />
 
       {/* KPI Raccolta */}
-      <DashboardKpi kpi={raccoltaData?.kpi} senzaFine={raccoltaData?.senza_fine_trasporto} dateDaSistemare={raccoltaData?.date_da_sistemare} loading={raccoltaLoading} />
+      <DashboardKpi kpi={raccoltaData?.kpi} senzaFine={raccoltaData?.senza_fine_trasporto} dateDaSistemare={raccoltaData?.date_da_sistemare} avvisiTarget={raccoltaData?.avvisi_target || []} loading={raccoltaLoading} />
 
       {/* Raccolta RETE vs ACI per Regione */}
       <div className="border rounded-lg p-5">
@@ -146,7 +146,7 @@ export default function Dashboard() {
           <TrendingUp className="w-5 h-5 text-primary" />
           <h2 className="font-heading font-semibold text-lg">Target vs Raccolto per Regione — {anniRaccolta} (solo Rete)</h2>
         </div>
-        <TargetVsRaccoltoChart data={raccoltaData?.target_vs_raccolto} />
+        <TargetVsRaccoltoChart data={raccoltaData?.target_vs_raccolto} giorno={raccoltaData?.kpi?.atteso?.giorno} />
       </div>
 
       <div>

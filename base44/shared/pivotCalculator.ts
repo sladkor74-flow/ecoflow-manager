@@ -11,7 +11,8 @@ import { PROV_TO_REGION, MESI, riepilogoDateVista } from "./raccoltoCalculator.t
 import { getMeseFromDate, getSettimanaFromDate, getAnnoFromDate, getRegioneFromProvincia, getClasseFromProdotto } from "./dataEnrichment.ts";
 import { matchesFilter } from "./multiFilter.ts";
 import { fetchAll } from "./fetchAll.ts";
-import { eTerminato, giornoMovimento } from "./movimenti.ts";
+import { eTerminato, giornoMovimento, annoPerFiltro } from "./movimenti.ts";
+import { giornoRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 
 function getMese(dateStr) {
@@ -111,9 +112,15 @@ function getDataImmissione(r) {
 function applyFilters(rows, filters, useImmissione) {
   const hasFilter = (v) => v != null && v !== '' && (!Array.isArray(v) || v.length > 0);
   if (!filters || (!hasFilter(filters.mese) && !hasFilter(filters.raccoglitore) && !hasFilter(filters.anno) && !hasFilter(filters.settimana))) return rows;
+  // Con una settimana scelta l'anno e' quello della settimana ISO, come nelle
+  // Secondarie (annoPerFiltro di movimenti.ts, chiusura dell'audit 11/10/2026):
+  // la settimana 53 del 2026 va dal 28/12 al 03/01, e con l'anno del giorno
+  // «2026, settimana 53» perdeva i giorni di gennaio. Con il solo anno vale il
+  // giorno, come sempre.
+  const conSettimana = hasFilter(filters.settimana);
   return rows.filter((row) => {
     const mese = useImmissione ? getRecordMeseImmissione(row) : getRecordMese(row);
-    const anno = useImmissione ? getRecordAnnoImmissione(row) : getRecordAnno(row);
+    const anno = annoPerFiltro(giornoRoma(useImmissione ? getDataImmissione(row) : getDataFineTrasporto(row)), conSettimana);
     const sett = useImmissione ? getRecordSettimanaImmissione(row) : getRecordSettimana(row);
     if (hasFilter(filters.mese) && !matchesFilter(mese, filters.mese)) return false;
     if (hasFilter(filters.anno)) {

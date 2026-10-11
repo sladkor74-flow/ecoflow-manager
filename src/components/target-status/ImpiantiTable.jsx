@@ -1,56 +1,41 @@
 import React from 'react';
 import { MESI_BREVI } from '@/lib/pfuConstants';
-import EditableCell from './EditableCell';
 import { formatNumber } from '@/lib/utils';
 
-// Il target mensile di un impianto si corregge solo se modificabile: amministratore
-// e anno aperto. Altrimenti si legge.
-export default function ImpiantiTable({ data, onSaveTarget, modificabile = false }) {
+// Le primarie RETE ricevute da ogni impianto, mese per mese (chiusura
+// dell'audit, 11/10/2026). C'erano anche, per ogni mese, un target e un delta:
+// il target mensile per impianto (ImpiantoTarget) non l'ha mai scritto nessuno,
+// nessun calcolo lo leggeva e la copia dell'anno non lo portava, quindi la
+// colonna era sempre zero e il delta un «avanzo» verde grande quanto il
+// raccolto. Il target di un impianto e' quello annuo di Impianti e stoccaggi, e
+// si confronta in Giacenze. E «Totale conferito» non era il conferito delle
+// Giacenze (che conta anche le secondarie in arrivo): sono le sole primarie, e
+// la colonna ora lo dice.
+export default function ImpiantiTable({ data }) {
   return (
     <div className="border rounded-lg overflow-x-auto">
       <table className="text-xs whitespace-nowrap border-collapse">
         <thead className="bg-muted">
           <tr>
             <th className="sticky left-0 bg-muted px-3 py-2 text-left">Impianto</th>
-            <th className="px-2 py-2 text-right">Totale Conferito [t]</th>
+            <th className="px-2 py-2 text-right">Primarie RETE ricevute [t]</th>
             {MESI_BREVI.map((m) => (
-              <React.Fragment key={m}>
-                <th className="px-1 py-1 text-center text-[10px] font-medium" colSpan={3}>{m}</th>
-              </React.Fragment>
-            ))}
-          </tr>
-          <tr className="bg-muted border-t">
-            <th className="sticky left-0 bg-muted"></th>
-            <th></th>
-            {MESI_BREVI.map((m) => (
-              <React.Fragment key={m}>
-                <th className="px-1 py-1 text-right text-[10px] font-normal text-muted-foreground">T</th>
-                <th className="px-1 py-1 text-right text-[10px] font-normal text-muted-foreground">R</th>
-                <th className="px-1 py-1 text-right text-[10px] font-normal text-muted-foreground">Δ</th>
-              </React.Fragment>
+              <th key={m} className="px-2 py-2 text-right text-[10px] font-medium">{m}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {data.map((r, i) => (
+          {data.map((r) => (
             <tr key={r.impianto} className="border-t hover:bg-muted/30">
               <td className="sticky left-0 bg-card px-3 py-1.5 font-medium max-w-[200px] truncate">{r.impianto}</td>
-              <td className="px-2 py-1.5 text-right tabular-nums">{formatNumber(r.totale)}</td>
-              {r.mesi.map((m, j) => (
-                <React.Fragment key={j}>
-                  <td className="px-1 py-1.5 text-right">
-                    <EditableCell value={m.target} onSave={(v) => onSaveTarget(r.impianto, m.mese, v)} disabled={!modificabile} />
-                  </td>
-                  <td className="px-1 py-1.5 text-right tabular-nums">{formatNumber(m.raccolto)}</td>
-                  <td className={`px-1 py-1.5 text-right tabular-nums ${m.delta > 0 ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50'}`}>
-                    {formatNumber(m.delta)}
-                  </td>
-                </React.Fragment>
+              <td className="px-2 py-1.5 text-right tabular-nums font-medium">{formatNumber(r.totale)}</td>
+              {r.mesi.map((m) => (
+                <td key={m.mese} className="px-2 py-1.5 text-right tabular-nums">{formatNumber(m.raccolto)}</td>
               ))}
             </tr>
           ))}
           {data.length === 0 && (
-            <tr><td colSpan={38} className="px-3 py-4 text-center text-muted-foreground">Nessun dato</td></tr>
+            <tr><td colSpan={14} className="px-3 py-4 text-center text-muted-foreground">Nessun dato</td></tr>
           )}
         </tbody>
       </table>

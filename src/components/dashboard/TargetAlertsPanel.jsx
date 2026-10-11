@@ -36,8 +36,17 @@ export default function TargetAlertsPanel() {
 
   if (!data) return null;
 
-  const { at_risk = [], missed = [], is_mese_corrente, mese, anno } = data;
+  const { at_risk = [], missed = [], da_confermare = [], is_mese_corrente, mese, anno } = data;
   const hasIssues = at_risk.length > 0 || missed.length > 0;
+  // I target copiati dall'anno prima e non ancora confermati (chiusura
+  // dell'audit, 11/10/2026): checkTargetAlerts li valuta ma non ne fa avvisi, e
+  // qui si dice, perche' «tutti in linea» su target che nessuno ha deciso
+  // sarebbe falso quanto un «a rischio».
+  const copiati = da_confermare.length > 0 && (
+    <Link to="/target-status?tab=raccoglitori" className="block px-4 py-2 text-xs text-amber-800 bg-amber-50 border-t border-amber-200 hover:underline">
+      {da_confermare.length === 1 ? 'Un target' : `${da_confermare.length} target`} di {mese} {anno} {da_confermare.length === 1 ? 'è copiato' : 'sono copiati'} dall&apos;anno prima, da confermare in Target &amp; Status: si valutano, ma non fanno partire avvisi.
+    </Link>
+  );
   const date = (
     <RiepilogoDate
       canale="Rete"
@@ -53,8 +62,9 @@ export default function TargetAlertsPanel() {
       <div className="border rounded-lg bg-green-50 border-green-200">
         <div className="flex items-center gap-2 text-green-700 p-4">
           <TrendingDown className="w-4 h-4 rotate-180" />
-          <span className="text-sm font-medium">Tutti i trasportatori in linea con il target di {mese} {anno}</span>
+          <span className="text-sm font-medium">{da_confermare.length ? `Nessun avviso sui target confermati di ${mese} ${anno}` : `Tutti i trasportatori in linea con il target di ${mese} ${anno}`}</span>
         </div>
+        {copiati}
         {date}
       </div>
     );
@@ -133,6 +143,7 @@ export default function TargetAlertsPanel() {
         ))}
       </div>
 
+      {copiati}
       {date}
 
       <Link

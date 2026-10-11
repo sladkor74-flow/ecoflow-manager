@@ -4,13 +4,20 @@ import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { computeRaccoltoData, MESI } from "../../shared/raccoltoCalculator.ts";
-import { aggregaTargetMensili, aggregaTargetAnnui } from "../../shared/targetRaccoglitori.ts";
-import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { annoDelRecord } from "../../shared/annoTarget.ts";
+import { righeAndamento } from "../../shared/andamentoTarget.ts";
 
 // Esporta i dati di Status & Target in un file Excel (3 fogli: Raccoglitori, Regioni, Impianti;
 // un quarto, Date da sistemare, quando qualche terminato di rete ne ha).
+//
+// IL FILE DICE GLI STESSI NUMERI DELLA PAGINA (chiusura dell'audit, 11/10/2026).
+// Il foglio Raccoglitori si costruisce dalle stesse righe dell'Andamento
+// (righeAndamento, shared/andamentoTarget.ts). Prima scorreva solo il raccolto e
+// cercava il target per nome esatto: i target senza raccolto nell'anno (il 2
+// gennaio quasi tutti) e quelli scritti abbreviati non c'erano, e con 1.800 t di
+// target il file ne mostrava 1.000. Il foglio Impianti ha solo le primarie RETE
+// ricevute: le colonne del target mensile per impianto (ImpiantoTarget, che
+// nessuno ha mai scritto) erano sempre zero con un delta che sembrava un avanzo.
 // Payload: { anno? } (l'anno scelto in Target & Status; senza, quello in corso)
 // Ritorna: { file_base64, filename }
 export default async function(req) {
@@ -27,71 +34,53 @@ export default async function(req) {
     // vanno in un foglio del file.
     const raccolto = await computeRaccoltoData(base44, { anno: [anno], canale: 'rete' }, { esempiDate: Infinity });
 
-    // 2. Leggi target dell'anno da Target & Status
-    const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter({ anno }, '-created_date', 10000));
-    const annui = aggregaTargetAnnui(await base44.asServiceRole.entities.TargetRaccoglitore.filter({ anno }, '-created_date', 5000));
-    // I target mensili degli impianti: tutti, tenuti per anno con annoDelRecord
-    // (un record senza anno vale il 2026), cosi' un anno non prende quelli di un altro.
-    const impiantoTargets = (await fetchAll(base44.asServiceRole.entities.ImpiantoTarget))
-      .filter(t => annoDelRecord(t) === anno);
+    // 2. I target dell'anno da Target & Status, tutti (prima a una pagina sola),
+    //    come li legge la pagina
+    const [mensili, annui] = await Promise.all([
+      fetchAll(base44.asServiceRole.entities.TargetMensile, { anno }),
+      fetchAll(base44.asServiceRole.entities.TargetRaccoglitore, { anno }),
+    ]);
 
-    // 3. Mappe target, per nome normalizzato e regione
-    const targetMap = {};
-    const targetAnnuoMap = {};
-    for (const t of targets) {
-      const key = `${normalizzaRagioneSociale(t.raccoglitore)}|||${t.regione}`;
-      targetMap[`${key}|${t.mese}`] = t.target || 0;
-    }
-    for (const a of annui) targetAnnuoMap[`${normalizzaRagioneSociale(a.raccoglitore)}|||${a.regione}`] = a.target_tonnellate;
-    const impiantoTargetMap = {};
-    for (const t of impiantoTargets) {
-      impiantoTargetMap[`${t.impianto}|${t.mese}`] = t.target || 0;
-    }
-
-    // 4. Foglio Raccoglitori
-    const raccoglitoriRows = [["Regione", "Raccoglitore", "Target Annuo [t]", "Raccolto Totale [t]", "Leftover [t]",
-      ...MESI.flatMap(m => [`${m} T`, `${m} R`, `${m} Δ`])]];
-
-    for (const r of raccolto.by_raccoglitore) {
-      const key = `${normalizzaRagioneSociale(r.raccoglitore)}|||${r.regione}`;
-      const targetAnnuo = targetAnnuoMap[key] || 0;
-      const leftover = targetAnnuo - r.totale;
-      const row = [r.regione, r.raccoglitore, targetAnnuo, +r.totale.toFixed(2), +leftover.toFixed(2)];
-      for (const m of MESI) {
-        const t = targetMap[`${key}|${m}`] || 0;
-        const rac = r.mesi[m] || 0;
-        row.push(t, +rac.toFixed(2), +(t - rac).toFixed(2));
-      }
+    // 3. Foglio Raccoglitori: le righe dell'Andamento, anche quelle col target e
+    //    senza raccolto. Il residuo e' target annuo meno raccolto (negativo:
+    //    target superato), il delta del mese target meno raccolto. Le tonnellate
+    //    restano al chilo e le formatta formattaPesi, che riconosce le colonne
+    //    da «(t)» nell'intestazione: con «[t]» non le riconosceva, e il file
+    //    usciva coi decimali grezzi.
+    const t3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
+    const raccoglitoriRows = [["Regione", "Raccoglitore", "Target annuo (t)", "Raccolto RETE (t)", "Residuo dell'anno (t)",
+      ...MESI.flatMap(m => [`${m} target (t)`, `${m} raccolto (t)`, `${m} Δ (t)`])]];
+    for (const r of righeAndamento({ mensili, annui, raccolto: raccolto.by_raccoglitore })) {
+      const row = [r.regione, r.raccoglitore, t3(r.targetAnnuo), t3(r.raccoltoTotale), t3(r.leftover)];
+      for (const m of r.mesi) row.push(t3(m.target), t3(m.raccolto), t3(m.delta));
       raccoglitoriRows.push(row);
     }
 
-    // 5. Foglio Regioni
-    const regioniRows = [["Regione", "Raccolto Totale [t]", ...MESI.map(m => `${m} [t]`)]];
+    // 4. Foglio Regioni
+    const regioniRows = [["Regione", "Raccolto RETE (t)", ...MESI.map(m => `${m} (t)`)]];
     for (const r of raccolto.by_regione) {
-      const row = [r.regione, +r.totale.toFixed(2)];
-      for (const m of MESI) row.push(+(r.mesi[m] || 0).toFixed(2));
+      const row = [r.regione, t3(r.totale)];
+      for (const m of MESI) row.push(t3(r.mesi[m]));
       regioniRows.push(row);
     }
 
-    // 6. Foglio Impianti
-    const impiantiRows = [["Impianto", "Raccolto Totale [t]", ...MESI.flatMap(m => [`${m} Target`, `${m} Raccolto`, `${m} Δ`])]];
+    // 5. Foglio Impianti: le primarie RETE ricevute, mese per mese. Non e' il
+    //    «Conferito RETE» delle Giacenze, che somma anche le secondarie in
+    //    arrivo, e il target dell'impianto si confronta li'.
+    const impiantiRows = [["Impianto", "Primarie RETE ricevute (t)", ...MESI.map(m => `${m} (t)`)]];
     for (const i of raccolto.by_impianto) {
-      const row = [i.impianto, +i.totale.toFixed(2)];
-      for (const m of MESI) {
-        const t = impiantoTargetMap[`${i.impianto}|${m}`] || 0;
-        const rac = i.mesi[m] || 0;
-        row.push(t, +rac.toFixed(2), +(t - rac).toFixed(2));
-      }
+      const row = [i.impianto, t3(i.totale)];
+      for (const m of MESI) row.push(t3(i.mesi[m]));
       impiantiRows.push(row);
     }
 
-    // 7. Genera workbook
+    // 6. Genera workbook
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, XLSX.utils.aoa_to_sheet(raccoglitoriRows)), "Raccoglitori");
     XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, XLSX.utils.aoa_to_sheet(regioniRows)), "Regioni");
     XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, XLSX.utils.aoa_to_sheet(impiantiRows)), "Impianti");
 
-    // 8. Le date da sistemare (regola dell'utente, 22/09/2026): immissione, inizio
+    // 7. Le date da sistemare (regola dell'utente, 22/09/2026): immissione, inizio
     // e fine trasporto sono obbligatorie in ogni formulario terminato. Chi non ha
     // la fine trasporto e' fuori dal raccolto di questo file, di qualunque anno
     // sia; gli altri ci sono, nel mese della fine trasporto, ma vanno corretti a

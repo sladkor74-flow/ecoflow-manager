@@ -16,6 +16,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { canaleDi } from "../../shared/canaleSecondaria.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 import { formatoTonnellate } from "../../shared/formato.ts";
+import { daConfermare } from "../../shared/annoTarget.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento, riepilogoVociDate, descriviVoceDate } from "../../shared/reportSettimanali.ts";
 
@@ -263,8 +264,15 @@ export default async function(req) {
     // rotte non si sono mai controllate qui: il controllo delle rotte
     // (controlloRotte) guarda le sole raccolte. Restano le date obbligatorie.
     if (modulo === 'primarie_rete') {
-      // Target dell'anno in corso, sommati per raccoglitore, regione e mese.
-      const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter({ anno: Number(oggiRoma().slice(0, 4)) }, '-created_date', 5000));
+      // Target dell'anno in corso, sommati per raccoglitore, regione e mese. Un
+      // target copiato dall'anno prima e non ancora confermato non e' un target
+      // deciso, e lo scostamento grave non si misura su quello (chiusura
+      // dell'audit, 11/10/2026, come checkTargetAlerts): basta una riga copiata
+      // fra quelle sommate perche' il mese di quel raccoglitore resti fuori.
+      const righeTarget = await fetchAll(base44.asServiceRole.entities.TargetMensile, { anno: Number(oggiRoma().slice(0, 4)) });
+      const chiaveTarget = (t) => `${normalizzaRagioneSociale(t.raccoglitore || '')}|${String(t.regione || '').trim()}|${t.mese}`;
+      const copiati = new Set(righeTarget.filter(daConfermare).map(chiaveTarget));
+      const targets = aggregaTargetMensili(righeTarget).filter(t => !copiati.has(chiaveTarget(t)));
       newAlerts.push(...checkAggregateRules(records, regole, existingKeys, targets, attuali, 'PrimariaRete', 'primarie_rete', '', tutti));
     } else if (modulo === 'secondarie') {
       // Le secondarie di rete e quelle ACI stanno nello stesso archivio: contarle

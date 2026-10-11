@@ -4,8 +4,12 @@
 //   - si legge solo la finestra che serve (dal 31/12 dell'anno prima, o da
 //     prima se il ritmo lo chiede), e i terminati senza fine trasporto a parte;
 //   - la configurazione e' dell'anno: un record senza anno vale per il 2026;
-//   - il target di un raccoglitore senza impianto si divide fra i siti seguiti
-//     in proporzione a quello che ci ha portato nell'anno;
+//   - il target di un raccoglitore senza impianto si ripartisce come nelle
+//     Giacenze (ripartisciTargetPrimarie, chiusura dell'audit 11/10/2026): a ogni
+//     sito quello che gli e' arrivato, il resto dove porta oggi, e dei siti si
+//     tengono solo quelli seguiti; un target scritto abbreviato e' dello stesso
+//     raccoglitore del portale (il confronto con le Giacenze sta in
+//     prove/stessoTargetStessoSito.mjs);
 //   - la giacenza di un piazzale parte dall'ancora dell'anno, e senza ancora si
 //     dice;
 //   - una fine della programmazione di un altro anno non vale;
@@ -123,7 +127,7 @@ const idsP = dati.ingresso.primarie.map(r => r.id_ordine);
 verifica('fuori dalla finestra non arriva niente; l\'ACI e i non terminati restano fuori', !idsP.includes('P5') && !idsP.includes('P7') && !idsP.includes('P8') && idsP.includes('P6') && idsP.includes('P4') && idsP.length === 7, J(idsP));
 verifica('i terminati senza fine trasporto, a parte', dati.senza_fine && dati.senza_fine.primarie.map(r => r.id_ordine).join() === 'PSF' && dati.senza_fine.secondarie.map(r => r.id_ordine).join() === 'SSF', J(dati.senza_fine));
 verifica('il programma fissato dell\'anno', dati.programmati.map(r => r.id).join() === 'w1' && J(filtriDi('PianificazioneSettimanale')) === J([{ anno: 2026 }]), J(dati.programmati));
-verifica('i target dei raccoglitori dell\'anno', J(filtriDi('TargetRaccoglitore')) === J([{ anno: 2026 }]));
+verifica('i target dei raccoglitori, annui e mensili, si leggono interi come nelle Giacenze', J(filtriDi('TargetRaccoglitore')) === J([null]) && J(filtriDi('TargetMensile')) === J([null]), J([filtriDi('TargetRaccoglitore'), filtriDi('TargetMensile')]));
 verifica('nessun caricamento in corso', dati.caricamento_in_corso === null, String(dati.caricamento_in_corso));
 // Con il ritmo a cavallo d'anno la finestra comincia prima: a meta' gennaio
 // servono le 14 settimane prima di oggi.
@@ -148,13 +152,29 @@ verifica('un anno senza fine della programmazione scritta usa il 31/12, e lo dic
 
 console.log('I TARGET DEI RACCOGLITORI');
 const racc = (nome) => dati.ingresso.raccoglitori.filter(r => r.nome === nome);
-// C.L. Service: 30 t a Nappi Sud e 10 t a T-Cycle nel 2026 (le 5 t ad Altro
-// Sito non si seguono, le 99 t del 31/12/2025 sono dell'anno prima): dei 200 t
-// di target 150 a Nappi Sud e 50 a T-Cycle.
+// C.L. Service: 30 t al piazzale di Nappi Sud a marzo, 10 t a T-Cycle e 5 t ad
+// Altro Sito ad aprile (le 99 t del 31/12/2025 sono dell'anno prima). Come nelle
+// Giacenze: Nappi Sud prende le sue 30 t, il resto non ancora arrivato va a
+// T-Cycle, dove ha portato di piu' nell'ultimo mese (10 + 155 = 165 t); le 5 t di
+// Altro Sito, che la predittivita' non segue, restano fuori invece di gonfiare
+// gli altri. Fino all'11/10/2026 qui era 150 t a Nappi Sud e 50 a T-Cycle.
 const cl = racc('C.L. Service');
-verifica('senza impianto: diviso in proporzione a quello che ha portato ai siti seguiti', cl.length === 2 && cl.find(r => r.sito === 'nappi sud').target_kg === 150000 && cl.find(r => r.sito === 't-cycle').target_kg === 50000 && cl.every(r => r.diviso === true && r.chiave === 'cl service'), J(cl));
+verifica('senza impianto: ripartito come nelle Giacenze, solo i siti seguiti', cl.length === 2 && cl.find(r => r.sito === 'nappi sud').target_kg === 30000 && cl.find(r => r.sito === 't-cycle').target_kg === 165000 && cl.every(r => r.diviso === true && r.chiave === 'cl service'), J(cl));
+verifica('la quota arrivata al piazzale porta il ruolo del piazzale', cl.find(r => r.sito === 'nappi sud').ruolo === 'stoc' && cl.find(r => r.sito === 't-cycle').ruolo === 'imp', J(cl));
 verifica('con l\'impianto: tutto li\'', J(racc('Smoco')) === J([{ chiave: 'smoco', nome: 'Smoco', sito: 'irigom', target_kg: 1500000 }]), J(racc('Smoco')));
 verifica('senza consegne, a zero o di un altro anno: niente', !racc('Nessuno').length && !racc('Zero').length && !racc('Emmesse').length && dati.ingresso.raccoglitori.length === 3, J(dati.ingresso.raccoglitori));
+// Il target scritto abbreviato e quello mensile con l'impianto scritto: il
+// target di «Pneuservice» e' di «PNEUSERVICE CONVERSANO SRL» a portale; il mese
+// scritto su Irigom va a Irigom, e Irigom e' anche dove va il resto non ancora
+// arrivato (120 t: 40 arrivate a Tecnogum a giugno, 20 scritte a ottobre su
+// Irigom, le altre 60 dove l'utente ha scritto che porta).
+const conAbbreviato = { ...ARCHIVI,
+  TargetRaccoglitore: [...ARCHIVI.TargetRaccoglitore, { raccoglitore: 'Pneuservice', regione: 'Puglia', target_tonnellate: 120, anno: 2026 }],
+  TargetMensile: [{ raccoglitore: 'Pneuservice', regione: 'Puglia', mese: 'Ottobre', target: 20, impianto: 'Irigom Srl', anno: 2026 }],
+  PrimariaRete: [...ARCHIVI.PrimariaRete, prim('PNEUSERVICE CONVERSANO SRL', 'Tecnogum Srl', 40000, '2026-06-10', { provincia: 'BA' })] };
+const abbreviato = await leggiDatiPredittivita(sdkFinto(conAbbreviato).base44, { anno: 2026, oggi: '2026-09-23' });
+const pn = abbreviato.ingresso.raccoglitori.filter(r => r.nome === 'Pneuservice');
+verifica('un target abbreviato e\' dello stesso raccoglitore del portale, e il mese scritto vince', pn.length === 2 && pn.every(r => r.chiave === 'pneuservice conversano') && pn.find(r => r.sito === 'irigom').target_kg === 80000 && pn.find(r => r.sito === 'tecnogum').target_kg === 40000, J(pn));
 
 console.log('GLI STOCCAGGI');
 const sto = (k) => dati.ingresso.stoccaggi.find(s => s.chiave === k);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
-import { MESI, meseCorrente as getMeseCorrente } from '@/lib/pfuConstants';
+import { MESI } from '@/lib/pfuConstants';
 import { exportExcel, exportPDF, exportPPT } from '@/lib/statusExports';
 import KpiCards from '@/components/target-status/KpiCards';
 import TargetTable from '@/components/target-status/TargetTable';
@@ -20,10 +20,12 @@ import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/lib/AuthContext';
-import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { tonnellate, percentuale, anniTarget } from '@/lib/target';
-import { annoDelRecord, annoCorrenteRoma, annoChiuso } from '@/lib/annoTarget';
+import { annoCorrenteRoma, annoChiuso, commessaDellAnno } from '@/lib/annoTarget';
+import { righeAndamento } from '@/lib/andamentoTarget';
+import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, profiloMensile, frazioneDelMese, giornoDeiDati } from '@/lib/attesoContratto';
+import { oggiRoma, giornoRoma } from '@/lib/giornoItaliano';
 import { Loader2, RefreshCw, Filter, X, Lock } from 'lucide-react';
 
 // Target & Status: unico punto in cui si scrivono i target.
@@ -41,43 +43,39 @@ import { Loader2, RefreshCw, Filter, X, Lock } from 'lucide-react';
 // chiuso (prima di quello in corso, a Roma) e' in sola lettura in tutte le
 // schede; chi non e' amministratore consulta soltanto.
 
-const TARGET_BY_YEAR = { 2025: 11200, 2026: 11550 };
 // 'zone' c'era come linguetta ma non in questo elenco: cliccandola la pagina
 // tornava sempre ad Andamento, e la scheda non si apriva (06/10/2026).
 const SCHEDE = ['andamento', 'raccoglitori', 'commessa', 'impianti', 'zone', 'nuovo-anno'];
-// fra piu' commesse dello stesso anno vale la modificata per ultima, come nelle funzioni
-const piuRecente = (righe) => (righe || []).reduce((x, r) => (!x || String(r.updated_date || r.created_date || '') > String(x.updated_date || x.created_date || '') ? r : x), null);
-const leggiLista = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+// Un giorno 'AAAA-MM-GG' come gg/mm, per «atteso al 07/10».
+const giornoMese = (g) => (g ? `${g.slice(8, 10)}/${g.slice(5, 7)}` : '');
 
-// Raccolto per regione confrontato con il contratto: quanto ci si attende fino a
-// oggi segue il profilo del target mensile del contratto (o, in mancanza, i mesi
-// in parti uguali), con il mese in corso contato per i giorni trascorsi.
-function AndamentoRegioni({ raccolto, commessa, anno }) {
-  const regioni = commessa ? leggiLista(commessa.regioni_json) : [];
+// Raccolto per regione confrontato con il contratto. L'atteso alla data segue il
+// profilo del target mensile del contratto riportato all'annuo (o i dodicesimi),
+// e il mese dei dati conta per i giorni che i dati coprono, non per il giorno del
+// dispositivo: la regola e' attesoAllaData (src/lib/attesoContratto.js), la
+// stessa della Dashboard e del controllo dei target mensili (chiusura
+// dell'audit, 11/10/2026). Prima qui si contava sull'orologio del dispositivo:
+// con i dati fermi al 7 e oggi il 10, lo scarto era peggiore di tre giorni di
+// raccolta.
+function AndamentoRegioni({ raccolto, commessa, anno, giornoDati }) {
+  const { righe: regioni, fonte } = regioniDellAnno(commessa, anno);
   if (!regioni.length) {
-    return <p className="text-sm text-muted-foreground border rounded-lg px-4 py-3">Inserisci o importa il contratto nella scheda Commessa Ecotyre per confrontare il raccolto di ogni regione con quanto richiesto.</p>;
+    return <p className="text-sm text-muted-foreground border rounded-lg px-4 py-3">Inserisci o importa il contratto del {anno} nella scheda Commessa Ecotyre per confrontare il raccolto di ogni regione con quanto richiesto.</p>;
   }
-  const profilo = leggiLista(commessa.target_mensile_json).map(v => Number(v) || 0);
-  const totaleProfilo = profilo.reduce((s, v) => s + v, 0);
-  const pesi = totaleProfilo > 0 ? profilo.map(v => v / totaleProfilo) : MESI.map(() => 1 / 12);
-  const oggi = new Date();
-  let quota;
-  if (anno < oggi.getFullYear()) quota = 1;
-  else if (anno > oggi.getFullYear()) quota = 0;
-  else {
-    const m = oggi.getMonth();
-    const giorniMese = new Date(anno, m + 1, 0).getDate();
-    quota = pesi.slice(0, m).reduce((s, v) => s + v, 0) + pesi[m] * (oggi.getDate() / giorniMese);
-  }
+  const profilo = profiloMensile(commessa);
   const perRegione = new Map((raccolto?.by_regione || []).map(r => [String(r.regione).toLowerCase(), r]));
   const righe = regioni.map(r => {
     const racc = perRegione.get(String(r.regione).toLowerCase());
     const contratto = Number(r.target_t) || 0;
     const raccoltoT = racc ? racc.totale : 0;
-    const atteso = contratto * quota;
-    return { ...r, contratto, raccolto: raccoltoT, atteso, percentuale: contratto ? (raccoltoT / contratto) * 100 : null, scarto: raccoltoT - atteso };
+    const atteso = attesoAllaData(commessa, anno, giornoDati, contratto).atteso_t;
+    return { ...r, contratto, raccolto: raccoltoT, atteso, percentuale: contratto ? (raccoltoT / contratto) * 100 : null, scarto: atteso === null ? null : raccoltoT - atteso };
   });
-  const tot = righe.reduce((s, r) => ({ contratto: s.contratto + r.contratto, raccolto: s.raccolto + r.raccolto, atteso: s.atteso + r.atteso }), { contratto: 0, raccolto: 0, atteso: 0 });
+  const somma = (k) => (righe.some(r => r[k] === null) ? null : righe.reduce((s, r) => s + r[k], 0));
+  const tot = { contratto: somma('contratto'), raccolto: somma('raccolto'), atteso: somma('atteso') };
+  const scartoTot = tot.atteso === null ? null : tot.raccolto - tot.atteso;
+  const conSegno = (v) => (v === null ? '—' : `${v >= 0 ? '+' : ''}${tonnellate(v)}`);
+  const colore = (v) => (v === null ? 'text-muted-foreground' : v >= 0 ? 'text-emerald-700' : 'text-red-600');
   return (
     <div className="border rounded-lg overflow-x-auto bg-card">
       <table className="w-full text-sm">
@@ -88,7 +86,7 @@ function AndamentoRegioni({ raccolto, commessa, anno }) {
             <th className="px-3 py-2 text-right">Contratto (t)</th>
             <th className="px-3 py-2 text-right">Raccolto {anno} (t)</th>
             <th className="px-3 py-2 text-right">% del contratto</th>
-            <th className="px-3 py-2 text-right">Atteso a oggi (t)</th>
+            <th className="px-3 py-2 text-right">{giornoDati ? `Atteso al ${giornoMese(giornoDati)} (t)` : 'Atteso (t)'}</th>
             <th className="px-3 py-2 text-right">Scarto sull'atteso (t)</th>
           </tr>
         </thead>
@@ -101,7 +99,7 @@ function AndamentoRegioni({ raccolto, commessa, anno }) {
               <td className="px-3 py-2 text-right tabular-nums">{tonnellate(r.raccolto)}</td>
               <td className="px-3 py-2 text-right tabular-nums">{r.percentuale !== null ? `${percentuale(r.percentuale)}%` : '—'}</td>
               <td className="px-3 py-2 text-right tabular-nums">{tonnellate(r.atteso)}</td>
-              <td className={`px-3 py-2 text-right tabular-nums font-medium ${r.scarto >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{r.scarto >= 0 ? '+' : ''}{tonnellate(r.scarto)}</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-medium ${colore(r.scarto)}`}>{conSegno(r.scarto)}</td>
             </tr>
           ))}
           <tr className="border-t-2 font-semibold bg-muted/30">
@@ -110,13 +108,20 @@ function AndamentoRegioni({ raccolto, commessa, anno }) {
             <td className="px-3 py-2 text-right tabular-nums">{tonnellate(tot.raccolto)}</td>
             <td className="px-3 py-2 text-right tabular-nums">{tot.contratto ? `${percentuale((tot.raccolto / tot.contratto) * 100)}%` : '—'}</td>
             <td className="px-3 py-2 text-right tabular-nums">{tonnellate(tot.atteso)}</td>
-            <td className={`px-3 py-2 text-right tabular-nums ${tot.raccolto - tot.atteso >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{tot.raccolto - tot.atteso >= 0 ? '+' : ''}{tonnellate(tot.raccolto - tot.atteso)}</td>
+            <td className={`px-3 py-2 text-right tabular-nums ${colore(scartoTot)}`}>{conSegno(scartoTot)}</td>
           </tr>
         </tbody>
       </table>
       <p className="px-3 py-2 text-xs text-muted-foreground border-t">
-        Raccolto del solo canale RETE dai formulari terminati, per data di fine trasporto: l'ACI è nella sezione Canale ACI. L'atteso a oggi ripartisce il contratto di ogni regione secondo il target mensile
-        {totaleProfilo > 0 ? ' rivisto' : ''} del contratto{totaleProfilo > 0 ? '' : ', che non è ancora inserito: per ora in dodicesimi'}.
+        Raccolto del solo canale RETE dai formulari terminati, per data di fine trasporto: l&apos;ACI è nella sezione Canale ACI.
+        {giornoDati
+          ? ` L'atteso è quanto il contratto di ogni regione chiede fino al ${giornoMese(giornoDati)}, il giorno fin dove arrivano i dati (l'ultima fine trasporto caricata, mai oltre oggi): i mesi finiti interi, quello in corso per i giorni coperti.`
+          : " L'atteso non si calcola: non c'è ancora nessun ritiro terminato con la fine trasporto."}
+        {profilo.rivisto
+          ? ` Segue il target mensile del contratto, riportato all'annuo (il profilo scritto somma ${tonnellate(profilo.totale)} t).`
+          : ' Il target mensile del contratto non è inserito: per ora in dodicesimi.'}
+        {" Scarto positivo: avanti sull'atteso; negativo: indietro."}
+        {fonte === 'ripiego' && ` Il contratto del ${anno} non ha il riparto per regione: questo è quello scritto nel gestionale come ripiego, va inserito nella scheda Commessa Ecotyre.`}
       </p>
     </div>
   );
@@ -149,9 +154,13 @@ export default function TargetStatus() {
   const [targets, setTargets] = useState([]);
   const [annui, setAnnui] = useState([]);
   const [commessa, setCommessa] = useState(null);
-  const [impiantoTargets, setImpiantoTargets] = useState([]);
+  // Il giorno fin dove arrivano i dati della rete: l'ultima fine trasporto di un
+  // terminato, mai oltre oggi (giornoDeiDati). '' se non si sa.
+  const [giornoDati, setGiornoDati] = useState('');
   const [loading, setLoading] = useState(false);
-  const [meseSelezionato, setMeseSelezionato] = useState(getMeseCorrente());
+  // Il mese di oggi e' quello italiano, non quello del dispositivo (11/10/2026).
+  const meseDiOggi = MESI[Number(oggiRoma().slice(5, 7)) - 1];
+  const [meseSelezionato, setMeseSelezionato] = useState(meseDiOggi);
   const [filters, setFilters] = useState({ mese: [], regione: [], raccoglitore: [], impianto: [] });
   // Le letture si numerano: una superata (l'anno o i filtri sono cambiati nel
   // frattempo) non tocca niente, cosi' i target di un altro anno non restano a
@@ -161,23 +170,27 @@ export default function TargetStatus() {
   const loadData = useCallback(async () => {
     const n = ++ultimaLettura.current;
     setLoading(true);
-    setImpiantoTargets([]);
     try {
-      const [raccoltoRes, aciRes, targetRes, annuiRes, commessaRes, impTargetRes] = await Promise.all([
+      // Il target mensile per impianto (ImpiantoTarget) non si legge piu': non
+      // l'ha mai scritto nessuno, e la tabella mostrava zero con un delta verde
+      // (chiusura dell'audit, 11/10/2026). Il target dell'impianto e' quello di
+      // Impianti e stoccaggi, e si confronta in Giacenze.
+      const [raccoltoRes, aciRes, targetRes, annuiRes, commessaRes, ultimeFini] = await Promise.all([
         base44.functions.invoke('computeRaccolto', { filters: { ...filters, anno: [anno], canale: 'rete' } }),
         base44.functions.invoke('computeRaccolto', { filters: { anno: [anno], canale: 'aci' } }).catch(() => null),
         fetchAllClient(base44.entities.TargetMensile, { anno }),
         fetchAllClient(base44.entities.TargetRaccoglitore, { anno }),
         base44.entities.CommessaEcotyre.filter({ anno }).catch(() => []),
-        fetchAllClient(base44.entities.ImpiantoTarget),
+        // le ultime fini trasporto della rete: dicono fin dove arrivano i dati
+        base44.entities.PrimariaRete.filter({ stato: 'terminato' }, '-trasporto_finito_il', 5).catch(() => []),
       ]);
       if (n !== ultimaLettura.current) return;
       setRaccolto(raccoltoRes.data);
       setRaccoltoAci(aciRes ? aciRes.data : null);
       setTargets(targetRes);
       setAnnui(annuiRes);
-      setCommessa(piuRecente(commessaRes));
-      setImpiantoTargets(impTargetRes.filter(t => annoDelRecord(t) === anno));
+      setCommessa(commessaDellAnno(commessaRes, anno));
+      setGiornoDati(giornoDeiDati((ultimeFini || []).map(r => giornoRoma(r.trasporto_finito_il)).filter(Boolean).sort().pop() || '', oggiRoma()));
     } catch (e) {
       if (n !== ultimaLettura.current) return;
       console.error(e);
@@ -189,42 +202,14 @@ export default function TargetStatus() {
 
   const filterOptions = raccolto?.filterOptions || { mesi: MESI, regioni: [], raccoglitori: [], impianti: [] };
 
-  // Target e raccolto per raccoglitore e regione. I target sono per impianto e si
-  // sommano; i nomi si confrontano normalizzati.
+  // Target e raccolto per raccoglitore e regione: le stesse righe del file Excel
+  // (righeAndamento, src/lib/andamentoTarget.js), con il nome del target
+  // abbinato a quello del portale anche quando e' scritto abbreviato (chiusura
+  // dell'audit, 11/10/2026). Prima la pagina aveva un conto suo, l'Excel un
+  // altro, e i due non tornavano.
   const mergedData = useMemo(() => {
     if (!raccolto) return [];
-    const righe = new Map();
-    const riga = (nome, regione) => {
-      const k = `${normalizzaRagioneSociale(nome || '')}|||${regione || ''}`;
-      if (!righe.has(k)) righe.set(k, { raccoglitore: nome, regione: regione || '', target: {}, racc: null, annuo: 0, nomi: new Set() });
-      const r = righe.get(k);
-      r.nomi.add(nome);
-      return r;
-    };
-    for (const t of targets) {
-      const r = riga(t.raccoglitore, t.regione);
-      r.target[t.mese] = (r.target[t.mese] || 0) + (t.non_raccoglie ? 0 : Number(t.target) || 0);
-    }
-    for (const x of raccolto.by_raccoglitore) riga(x.raccoglitore, x.regione).racc = x;
-    for (const a of annui) {
-      const nome = normalizzaRagioneSociale(a.raccoglitore || '');
-      let candidati = [...righe.values()].filter(r => normalizzaRagioneSociale(r.raccoglitore) === nome && (!a.regione || r.regione === a.regione));
-      if (!a.regione && candidati.length > 1) candidati = [candidati.sort((x, y) => ((y.racc && y.racc.totale) || 0) - ((x.racc && x.racc.totale) || 0))[0]];
-      (candidati[0] || riga(a.raccoglitore, a.regione)).annuo += Number(a.target_tonnellate) || 0;
-    }
-    return [...righe.values()].map(r => {
-      const raccoltoTotale = r.racc ? r.racc.totale : 0;
-      const mesi = MESI.map(m => {
-        const target = r.target[m] || 0;
-        const racc = r.racc ? r.racc.mesi[m] || 0 : 0;
-        return { mese: m, target, raccolto: racc, delta: target - racc };
-      });
-      return { raccoglitore: r.raccoglitore, regione: r.regione, targetAnnuo: r.annuo, raccoltoTotale, leftover: r.annuo - raccoltoTotale, mesi, nomi: [...r.nomi] };
-    }).filter(row => {
-      if (filters.regione.length > 0 && !filters.regione.includes(row.regione)) return false;
-      if (filters.raccoglitore.length > 0 && !row.nomi.some(n => filters.raccoglitore.includes(n))) return false;
-      return row.targetAnnuo || row.raccoltoTotale || row.mesi.some(m => m.target);
-    }).sort((a, b) => a.regione.localeCompare(b.regione) || a.raccoglitore.localeCompare(b.raccoglitore));
+    return righeAndamento({ mensili: targets, annui, raccolto: raccolto.by_raccoglitore, filtri: filters });
   }, [raccolto, targets, annui, filters]);
 
   const regioneData = useMemo(() => {
@@ -251,42 +236,63 @@ export default function TargetStatus() {
     }));
   }, [raccolto, targets, filters]);
 
+  // Le primarie RETE che ogni impianto ha ricevuto, mese per mese. Niente target
+  // mensile per impianto: vedi loadData.
   const impiantiData = useMemo(() => {
     if (!raccolto) return [];
-    const impTargetMap = {};
-    for (const t of impiantoTargets) impTargetMap[`${t.impianto}|${t.mese}`] = t.target || 0;
     return raccolto.by_impianto
       .filter(i => filters.impianto.length === 0 || filters.impianto.includes(i.impianto))
-      .map(i => ({
-        impianto: i.impianto,
-        totale: i.totale,
-        mesi: MESI.map(m => ({ mese: m, target: impTargetMap[`${i.impianto}|${m}`] || 0, raccolto: i.mesi[m] || 0, delta: (impTargetMap[`${i.impianto}|${m}`] || 0) - (i.mesi[m] || 0) })),
-      }));
-  }, [raccolto, impiantoTargets, filters]);
+      .map(i => ({ impianto: i.impianto, totale: i.totale, mesi: MESI.map(m => ({ mese: m, raccolto: i.mesi[m] || 0 })) }));
+  }, [raccolto, filters]);
 
+  // LE CARD DELL'ANDAMENTO (chiusura dell'audit, 11/10/2026). Il target annuo e'
+  // quello del contratto dell'anno, le costanti del 2025 e del 2026 solo come
+  // ripiego dichiarato, e un anno senza contratto non ha target: «—», non zero.
+  // «Leftover Complessivo Annuo» e «Delta Mese In Corso», col positivo in
+  // rosso e senza dire il segno, diventano il residuo dell'anno (target meno
+  // raccolto: quanto manca) e lo scarto del mese sull'atteso (raccolto meno
+  // atteso: positivo avanti, negativo indietro). L'atteso del mese e' il suo
+  // target per i giorni che i dati coprono (frazioneDelMese), come nel
+  // controllo dei target mensili.
   const kpis = useMemo(() => {
-    const targetAnnuoTotale = commessa && Number(commessa.target_annuo_t) > 0 ? Number(commessa.target_annuo_t) : (TARGET_BY_YEAR[anno] || 0);
+    const contratto = targetAnnuoDellAnno(commessa, anno);
     const raccoltoTotale = raccolto?.totale_raccolto || 0;
-    const selectedMesi = filters.mese || [];
-    const deltaMeseCorrente = mergedData.reduce((s, r) => {
-      if (selectedMesi.length > 0) return s + r.mesi.filter(m => selectedMesi.includes(m.mese)).reduce((ds, m) => ds + m.delta, 0);
-      const m = r.mesi.find(x => x.mese === getMeseCorrente());
-      return s + (m ? m.delta : 0);
-    }, 0);
-    return { targetAnnuoTotale, raccoltoTotale, leftoverTotale: targetAnnuoTotale - raccoltoTotale, deltaMeseCorrente };
-  }, [mergedData, raccolto, filters, commessa, anno]);
-
-  const saveImpiantoTarget = async (impianto, mese, value) => {
-    if (!puoScrivere || loading) return;
-    const existing = impiantoTargets.find(t => t.impianto === impianto && t.mese === mese && annoDelRecord(t) === anno);
-    if (existing) {
-      await base44.entities.ImpiantoTarget.update(existing.id, { target: value });
-      setImpiantoTargets(prev => prev.map(t => (t.id === existing.id ? { ...t, target: value } : t)));
-    } else {
-      const created = await base44.entities.ImpiantoTarget.create({ impianto, mese, anno, target: value });
-      setImpiantoTargets(prev => [...prev, created]);
+    const mesiScelti = (filters.mese || []).length > 0 ? filters.mese : [meseDiOggi];
+    let raccoltoMese = 0;
+    let attesoMese = 0;
+    let deltaMese = 0;
+    for (const r of mergedData) {
+      for (const m of r.mesi) {
+        if (!mesiScelti.includes(m.mese)) continue;
+        raccoltoMese += m.raccolto;
+        attesoMese += m.target * frazioneDelMese(anno, MESI.indexOf(m.mese), giornoDati, oggiRoma());
+        deltaMese += m.delta;
+      }
     }
-  };
+    return {
+      targetAnnuoTotale: contratto.t,
+      fonteTarget: contratto.fonte,
+      targetDaConfermare: contratto.da_confermare,
+      raccoltoTotale,
+      residuoAnno: contratto.t === null ? null : contratto.t - raccoltoTotale,
+      scartoMese: giornoDati ? raccoltoMese - attesoMese : null,
+      attesoMese: giornoDati ? attesoMese : null,
+      mesiScarto: mesiScelti,
+      giornoDati,
+      // per la presentazione (statusExports.js), con i nomi e il segno di prima
+      leftoverTotale: contratto.t === null ? null : contratto.t - raccoltoTotale,
+      deltaMeseCorrente: deltaMese,
+    };
+  }, [mergedData, raccolto, filters, commessa, anno, giornoDati, meseDiOggi]);
+  // Il riepilogo del PDF vuole un elenco di voci: gli si passava l'oggetto delle
+  // card, e il PDF si fermava con un errore (11/10/2026).
+  const riepilogoPdf = [
+    { etichetta: 'Target annuo del contratto', valore: kpis.targetAnnuoTotale, tipo: 't' },
+    { etichetta: 'Raccolto RETE', valore: kpis.raccoltoTotale, tipo: 't' },
+    { etichetta: "Residuo dell'anno", valore: kpis.residuoAnno, tipo: 't' },
+    // L'etichetta della card: lo scarto e' quello dei mesi scelti nel filtro.
+    { etichetta: `Scarto ${(kpis.mesiScarto || []).length ? `di ${kpis.mesiScarto.join(', ').toLowerCase()}` : 'del mese'} sull'atteso`, valore: kpis.scartoMese, tipo: 't' },
+  ];
 
   const hasFilters = Object.values(filters).some(v => (Array.isArray(v) ? v.length > 0 : v));
   const resetFilters = () => setFilters({ mese: [], regione: [], raccoglitore: [], impianto: [] });
@@ -307,7 +313,7 @@ export default function TargetStatus() {
               <button onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
                 <RefreshCw className="w-4 h-4" /> Aggiorna
               </button>
-              <ExportButtons onExcel={() => exportExcel(anno)} onPDF={() => exportPDF(kpis, mergedData, regioneData, impiantiData, anno)} onPPT={() => exportPPT(kpis, mergedData, regioneData, impiantiData)} />
+              <ExportButtons onExcel={() => exportExcel(anno)} onPDF={() => exportPDF(riepilogoPdf, mergedData, regioneData, impiantiData, anno)} onPPT={() => exportPPT(kpis, mergedData, regioneData, impiantiData, anno)} />
             </>
           )}
         </div>
@@ -375,10 +381,10 @@ export default function TargetStatus() {
                   con un'altra data da sistemare. L'ACI ha la sua riga nella sezione
                   Canale ACI: i due canali non si sommano. */}
               <RiepilogoDate canale="Rete" riepilogo={raccolto?.date_da_sistemare} esempi />
-              <KpiCards kpis={kpis} />
+              <KpiCards kpis={kpis} anno={anno} />
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-3">Raccolta RETE per regione e contratto</h2>
-                <AndamentoRegioni raccolto={raccolto} commessa={commessa} anno={anno} />
+                <AndamentoRegioni raccolto={raccolto} commessa={commessa} anno={anno} giornoDati={giornoDati} />
               </div>
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-1">Report generale</h2>
@@ -396,8 +402,9 @@ export default function TargetStatus() {
                 <RegionTable data={regioneData} />
               </div>
               <div>
-                <h2 className="text-lg font-heading font-semibold mb-3">Progressivo e avanzamento impianti</h2>
-                <ImpiantiTable data={impiantiData} onSaveTarget={saveImpiantoTarget} modificabile={puoScrivere} />
+                <h2 className="text-lg font-heading font-semibold mb-1">Primarie RETE ricevute dagli impianti</h2>
+                <p className="text-xs text-muted-foreground mb-3">Solo le primarie, per impianto di destinazione e mese di fine trasporto: non è il «Conferito RETE» delle Giacenze, che conta anche le secondarie in arrivo. Il target degli impianti si scrive in Impianti e stoccaggi e si confronta in Giacenze.</p>
+                <ImpiantiTable data={impiantiData} />
               </div>
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-1">Canale ACI</h2>

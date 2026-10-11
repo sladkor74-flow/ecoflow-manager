@@ -35,6 +35,9 @@ import { regolePredittivita, annoDelRecord } from "./regolePredittivita.ts";
 import { ancoraDellAnno, momentoRilevazione, kgReteDiRilevazione } from "./giacenzaStoccaggi.ts";
 import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from "./reportSettimanali.ts";
 import { giacenzaPiazzale, piuGiorni } from "./predittivita.ts";
+import { recordDellAnno, commessaDellAnno } from "./annoTarget.ts";
+import { ripartisciTargetPrimarie, conferitiPerRipartizione } from "./targetImpianti.ts";
+import { targetDelPortale } from "./targetRaccoglitori.ts";
 
 export { annoDelRecord };
 
@@ -74,13 +77,18 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
   const filtroSenzaFine = { stato: 'terminato', trasporto_finito_il: null };
 
   const prima = await statoCaricamenti(base44, TIPI_LETTI).catch(() => null);
-  const [impiantiTutti, fornitoriTutti, commesse, targetRaccoglitori, primarie, secondarie, primarieSenzaFine, secondarieSenzaFine, rilevazioni, programmati] = await Promise.all([
+  const [impiantiTutti, fornitoriTutti, commesse, targetRaccoglitoriTutti, targetMensiliTutti, primarie, secondarie, primarieSenzaFine, secondarieSenzaFine, rilevazioni, programmati] = await Promise.all([
     fetchAll(e.ImpiantoTargetSecondaria).then(rs => rs.filter(r => r.stato === 'attivo')),
     fetchAll(e.FornitoreSecondaria).then(rs => rs.filter(r => r.stato === 'attivo')),
     // Il contratto dell'anno: se non si legge si va avanti con le regole scritte
     // nel codice, e lo si dice.
     Promise.resolve().then(() => fetchAll(e.CommessaEcotyre, { anno: annoN })).catch(() => null),
-    e.TargetRaccoglitore.filter({ anno: annoN }),
+    // I target dei raccoglitori, annui e mensili, si leggono interi come li legge
+    // calcolaGiacenze, e l'anno lo decide recordDellAnno: lo stesso target deve
+    // finire sullo stesso sito nei due moduli (chiusura dell'audit, 11/10/2026).
+    // Prima i soli annui con un filtro per anno, a una pagina sola.
+    fetchAll(e.TargetRaccoglitore),
+    fetchAll(e.TargetMensile),
     fetchAll(e.PrimariaRete, filtroFinestra),
     fetchAll(e.Secondaria, filtroFinestra),
     // Senza fine trasporto: se la piattaforma non capisse il filtro, si tengono
@@ -104,9 +112,7 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
   const secondarieRete = secondarie.filter(r => rete(r, 'Secondaria'));
 
   // --- il contratto Ecotyre dell'anno: fine della programmazione e kg a viaggio ---
-  const recente = (r) => String((r && (r.updated_date || r.created_date)) || '');
-  const commessa = (commesse || []).filter(c => Number(c.anno) === annoN)
-    .reduce((a, c) => (!a || recente(c) > recente(a) ? c : a), null);
+  const commessa = commessaDellAnno(commesse, annoN);
   if (commesse === null) avvisi.push({ tipo: 'commessa_non_letta', testo: `Il contratto Ecotyre del ${annoN} non si è potuto leggere: fine della programmazione e kg a viaggio sono quelli predefiniti.` });
   const regole = regolePredittivita(annoN, commessa);
 
@@ -177,28 +183,57 @@ export async function leggiDatiPredittivita(base44, { anno, oggi }) {
 
   // --- i target dei raccoglitori, per sito ---
   // Un target scritto per un impianto o uno stoccaggio vale li'. Uno senza sito
-  // si divide fra i siti seguiti in proporzione a quanto il raccoglitore ci ha
-  // portato quest'anno, come per lo stoccaggio che alimenta piu' impianti.
-  // I siti sono quelli su cui il motore crea i flussi: gli impianti seguiti e
-  // gli stoccaggi che ne alimentano almeno uno.
+  // si ripartisce come nelle Giacenze, con ripartisciTargetPrimarie sugli stessi
+  // conferimenti (conferitiPerRipartizione) e sugli stessi target mensili: a
+  // ogni sito quello che gli e' arrivato mese per mese, e quello che non e'
+  // ancora arrivato al sito dove il raccoglitore porta oggi (regola dell'utente
+  // del 05/10/2026). Prima qui si divideva l'annuo in proporzione ai chili
+  // dell'anno e solo fra i siti seguiti: lo stesso target dava a Nappi Sud 30 t
+  // nelle Giacenze e 150 qui, e chi aveva cambiato impianto a luglio restava
+  // atteso dove non andava piu' (chiusura dell'audit, 11/10/2026). Della
+  // ripartizione si tengono solo le quote dei siti su cui il motore crea i
+  // flussi, gli impianti seguiti e gli stoccaggi che ne alimentano almeno uno:
+  // la quota di un sito non seguito resta fuori, non gonfia gli altri.
+  // Una quota arrivata al piazzale porta ruolo 'stoc', perche' vale per il
+  // piazzale anche quando lo stesso sito e' un impianto.
+  const targetRaccoglitori = recordDellAnno(targetRaccoglitoriTutti, annoN);
   const sitoSeguito = (k) => chiaviImpianti.has(k) || stoccaggi.has(k);
+  // Il nome del target e quello del portale: un target scritto abbreviato
+  // («PNEUSERVICE SRL») e' lo stesso flusso dei formulari di «PNEUSERVICE
+  // CONVERSANO SRL» (targetDelPortale); prima ne nasceva un secondo flusso con
+  // consuntivo zero e l'attesa del target intero. Se l'abbreviazione vale per
+  // piu' nomi del portale non si sceglie a caso: resta il nome del target.
+  const nomiTarget = [...new Set([...targetRaccoglitori, ...recordDellAnno(targetMensiliTutti, annoN)].map(t => t.raccoglitore).filter(Boolean))];
+  const nomiPortale = [...new Set(primarieRete.map(r => String(r.trasportatore || '').trim()).filter(Boolean))];
+  const chiaveDelPortale = (nomeTarget) => {
+    const R = chiave(nomeTarget);
+    if (!R || nomiPortale.some(n => chiave(n) === R)) return R;
+    const suoi = [...new Set(nomiPortale.filter(n => targetDelPortale(nomiTarget, n) === nomeTarget).map(chiave))];
+    return suoi.length === 1 ? suoi[0] : R;
+  };
   const raccoglitori = [];
   for (const t of targetRaccoglitori) {
-    const R = chiave(t.raccoglitore);
+    const R = chiaveDelPortale(t.raccoglitore);
     const kg = (Number(t.target_tonnellate) || 0) * 1000;
-    if (!R || !(kg > 0)) continue;
     const sito = chiave(t.impianto);
-    if (sito) { raccoglitori.push({ chiave: R, nome: t.raccoglitore, sito, target_kg: kg }); continue; }
-    const perSito = new Map();
-    for (const r of primarieRete) {
-      const g = giornoRoma(r.trasporto_finito_il);
-      if (!g || g.slice(0, 4) !== String(annoN) || chiave(r.trasportatore) !== R) continue;
-      const X = chiave(r.destinazione);
-      if (sitoSeguito(X)) perSito.set(X, (perSito.get(X) || 0) + (Number(r.peso_effettivo) || 0));
+    if (!R || !(kg > 0) || !sito) continue;
+    // la riga scritta per il piazzale lo dice (T-Cycle: 250 t come stoccaggio)
+    raccoglitori.push({ chiave: R, nome: t.raccoglitore, sito, target_kg: kg, ...(t.ruolo === 'stoccaggio' ? { ruolo: 'stoc' } : {}) });
+  }
+  const ripartite = ripartisciTargetPrimarie({
+    raccoglitori: targetRaccoglitori, mensili: targetMensiliTutti,
+    conferiti: conferitiPerRipartizione(primarie, annoN), anno: annoN, chiave,
+  });
+  for (const [k, quote] of ripartite.dettaglio) {
+    const i = k.lastIndexOf('|');
+    const X = k.slice(0, i);
+    if (!sitoSeguito(X)) continue;
+    for (const q of quote) {
+      const kg = Math.round(q.t * 1000);
+      const R = chiaveDelPortale(q.raccoglitore);
+      if (!R || !(kg > 0)) continue;
+      raccoglitori.push({ chiave: R, nome: q.raccoglitore, sito: X, target_kg: kg, diviso: true, ruolo: k.slice(i + 1) });
     }
-    const totale = [...perSito.values()].reduce((a, b) => a + b, 0);
-    if (!totale) continue;
-    for (const [X, v] of perSito) raccoglitori.push({ chiave: R, nome: t.raccoglitore, sito: X, target_kg: Math.round(kg * v / totale), diviso: true });
   }
 
   // --- la giacenza di ogni piazzale: l'ancora dell'anno piu' i movimenti dopo ---

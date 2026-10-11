@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { eTerminato, giornoElenco, settimanaIso, dateDaSistemare, testoDate, MESI_MOVIMENTI } from '@/lib/movimenti';
+import { eTerminato, giornoElenco, settimanaIso, annoPerFiltro, dateDaSistemare, testoDate, MESI_MOVIMENTI } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Route, CalendarRange } from 'lucide-react';
 import AlertBadge from '@/components/alerts/AlertBadge';
@@ -115,7 +115,12 @@ export default function Secondarie() {
           if (filters.mese.length > 0 && !filters.mese.includes(p ? p.mese : 'N/D')) continue;
           if (filters.settimana.length > 0 && !filters.settimana.map(String).includes(String(p ? p.settimana : 'N/D'))) continue;
           if (filters.data && (!p || p.giorno !== filters.data)) continue;
-          if (filters.anno.length > 0 && (!p || p.anno == null || !filters.anno.map(String).includes(String(p.anno)))) continue;
+          // Con una settimana scelta l'anno e' quello della settimana ISO
+          // (annoPerFiltro, chiusura dell'audit 11/10/2026): la settimana 53 del
+          // 2026 va dal 28/12 al 03/01, e con l'anno del giorno «2026, settimana
+          // 53» perdeva l'1, il 2 e il 3 gennaio.
+          const annoP = p && p.giorno ? annoPerFiltro(p.giorno, filters.settimana.length > 0) : null;
+          if (filters.anno.length > 0 && (!p || annoP == null || !filters.anno.map(String).includes(String(annoP)))) continue;
         }
         righe.push({
           ...r,

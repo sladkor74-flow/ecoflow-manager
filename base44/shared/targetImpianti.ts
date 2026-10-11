@@ -13,6 +13,11 @@ import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { annoDelRecord } from "./regolePredittivita.ts";
 import { targetImpiantoDellAnno, targetPrimariePerRuolo, recordDellAnno } from "./annoTarget.ts";
 import { ripartisciQuota, normalizzaQuote } from "./ripartizioneTarget.ts";
+import { targetDelPortale } from "./targetRaccoglitori.ts";
+import { PROV_TO_REGION } from "./raccoltoCalculator.ts";
+import { eAci } from "./canaleSecondaria.ts";
+import { eTerminato } from "./movimenti.ts";
+import { giornoRoma } from "./giornoItaliano.ts";
 
 const attivo = (imp) => imp && (!imp.stato || imp.stato === 'attivo');
 
@@ -38,6 +43,41 @@ export function impiantiTargetDellAnno(impiantiTarget, anno) {
     const prima = out.get(k);
     if (!prima || annoDelRecord(imp) > annoDelRecord(prima)
       || (annoDelRecord(imp) === annoDelRecord(prima) && recente(imp) > recente(prima))) out.set(k, imp);
+  }
+  return out;
+}
+
+/**
+ * I conferimenti su cui si ripartisce il target dei raccoglitori di un anno: le
+ * primarie di rete terminate con la fine del trasporto in quell'anno (giorno
+ * italiano), senza le righe di autodemolizione, ciascuna col sito e il ruolo a
+ * cui e' arrivata e il mese della fine del trasporto. La regione si ricava dalla
+ * provincia del punto di raccolta, come il raccolto di Target & Status.
+ *
+ * UNA LISTA SOLA PER LE GIACENZE E LA PREDITTIVITA' (chiusura dell'audit,
+ * 11/10/2026). La predittivita' divideva il target di un raccoglitore senza
+ * impianto con un conto suo, in proporzione ai chili dell'anno e solo fra i siti
+ * seguiti, e le Giacenze con ripartisciTargetPrimarie: lo stesso target dava a
+ * Nappi Sud 30 t in un modulo e 150 nell'altro, e con un raccoglitore che cambia
+ * sito a meta' anno Tecnogum si aspettava 175,70 t di primarie da chi li' non va
+ * piu'. Ora tutti e due ripartiscono con ripartisciTargetPrimarie su queste righe
+ * (prove/stessoTargetStessoSito.mjs).
+ * @returns [{ raccoglitore, regione, sito, ruolo: 'imp'|'stoc', mese (0-11), kg }]
+ */
+export function conferitiPerRipartizione(primarie, anno) {
+  const out = [];
+  for (const r of primarie || []) {
+    if (eAci(r) || !eTerminato(r)) continue;
+    const g = giornoRoma(r.trasporto_finito_il);
+    if (!g || Number(g.slice(0, 4)) !== Number(anno)) continue;
+    out.push({
+      raccoglitore: r.trasportatore,
+      regione: PROV_TO_REGION[String(r.provincia || '').toUpperCase().trim()] || r.regione || '',
+      sito: r.destinazione,
+      ruolo: String(r.tipo_destinazione || '').toLowerCase().trim() === 'stoc' ? 'stoc' : 'imp',
+      mese: Number(g.slice(5, 7)) - 1,
+      kg: Number(r.peso_effettivo) || 0,
+    });
   }
   return out;
 }
@@ -78,7 +118,14 @@ export function impiantiTargetDellAnno(impiantiTarget, anno) {
  * storico del raccoglitore - meglio una ripartizione per nome che un target che
  * non arriva da nessuna parte.
  *
- * @param conferiti righe { raccoglitore, regione, sito, ruolo: 'imp'|'stoc', kg }
+ * IL NOME DEL TARGET PUO' ESSERE ABBREVIATO (chiusura dell'audit, 11/10/2026).
+ * Un target scritto «PNEUSERVICE SRL» e' di chi a portale e' «PNEUSERVICE
+ * CONVERSANO SRL»: lo storico di un nome del portale va al target con lo stesso
+ * nome, o se non c'e' a quello il cui nome ne e' un'abbreviazione
+ * (targetDelPortale, l'abbinatore degli alert, del Report generale e
+ * dell'Andamento). Prima quel target restava senza storico.
+ *
+ * @param conferiti righe { raccoglitore, regione, sito, ruolo: 'imp'|'stoc', kg } (conferitiPerRipartizione)
  * @returns {{ per: Map<string, number>, dettaglio: Map<string, object[]>, senzaStorico: object[] }}
  *   per: 'chiave del sito|ruolo' -> tonnellate ripartite;
  *   dettaglio: la stessa chiave -> [{ raccoglitore, regione, t }];
@@ -103,8 +150,9 @@ export function ripartisciTargetPrimarie({ raccoglitori = [], mensili = [], conf
     if (!x) { x = { anno: new Map(), mesi: vuotoMesi() }; mappa.set(k, x); }
     return x;
   };
+  const nomiTarget = [...new Set([...recordDellAnno(raccoglitori, anno), ...recordDellAnno(mensili, anno)].map(r => r.raccoglitore).filter(Boolean))];
   for (const c of conferiti || []) {
-    const kr = chiave(c.raccoglitore), ks = chiave(c.sito), t = (Number(c.kg) || 0) / 1000;
+    const kr = chiave(targetDelPortale(nomiTarget, c.raccoglitore) ?? c.raccoglitore), ks = chiave(c.sito), t = (Number(c.kg) || 0) / 1000;
     if (!kr || !ks || !(t > 0)) continue;
     const k = dove(c.sito, c.ruolo);
     const i = Number(c.mese);

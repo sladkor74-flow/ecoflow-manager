@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
-import { giornoOrdine, eTerminato, periodoMovimento, settimanaIso, dateDaSistemare, MESI_MOVIMENTI as MESI } from "../../shared/movimenti.ts";
+import { giornoOrdine, eTerminato, periodoMovimento, settimanaIso, annoPerFiltro, dateDaSistemare, MESI_MOVIMENTI as MESI } from "../../shared/movimenti.ts";
 import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
 import { riepilogoDateVista } from "../../shared/raccoltoCalculator.ts";
 import { matchesFilter, matchesFilterString, matchesFilterLower } from "../../shared/multiFilter.ts";
@@ -76,12 +76,20 @@ export default async function(req) {
       return true;
     };
     const conAnno = filters.anno != null && (!Array.isArray(filters.anno) ? !!filters.anno : filters.anno.length > 0);
+    // Con una settimana scelta l'anno e' quello della settimana ISO, come nel
+    // dettaglio della pagina (annoPerFiltro di movimenti.ts, chiusura dell'audit
+    // 11/10/2026): la settimana 53 del 2026 va dal 28/12 al 03/01, e con l'anno
+    // del giorno «2026, settimana 53» qui perdeva l'1, il 2 e il 3 gennaio
+    // mentre il dettaglio li mostrava. Con il solo anno vale il giorno.
+    const conSettimana = filters.settimana != null && filters.settimana !== '' && filters.settimana !== false
+      && (!Array.isArray(filters.settimana) || filters.settimana.length > 0);
     const passaPeriodo = (r) => {
       const p = periodoDi(r);
       if (!matchesFilter(p ? p.mese : 'N/D', filters.mese)) return false;
       if (!matchesFilterString(p ? p.settimana : 'N/D', filters.settimana)) return false;
       if (filters.data && (!p || p.giorno !== filters.data)) return false;
-      if (conAnno && (!p || p.anno == null || !matchesFilterString(p.anno, filters.anno))) return false;
+      const annoP = p && p.giorno ? annoPerFiltro(p.giorno, conSettimana) : null;
+      if (conAnno && (annoP == null || !matchesFilterString(annoP, filters.anno))) return false;
       return true;
     };
 

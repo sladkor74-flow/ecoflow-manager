@@ -8,6 +8,7 @@ import { oggiRoma, annoRoma } from "./giornoItaliano.ts";
 import { classePfu } from "./giacenzaStoccaggi.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
+import { targetDelPortale } from "./targetRaccoglitori.ts";
 
 export const TARGET_MIX_CLASSI: Record<string, number> = {
   P: 75,
@@ -16,7 +17,10 @@ export const TARGET_MIX_CLASSI: Record<string, number> = {
   G2: 1,
 };
 
-export const TARGET_ANNUO_TON = 11550;
+// Il target annuo della commessa non si scrive qui: viene dal contratto
+// dell'anno (attesoContratto.ts). TARGET_ANNUO_TON = 11550 non lo leggeva nessuno
+// ed e' stata tolta l'11/10/2026 (chiusura dell'audit): una costante
+// esportata e' un invito a usarla.
 
 // --- 1. Matrice Province ---
 
@@ -264,9 +268,18 @@ export function computeRaccoglitoriMixData(records, targetsMap: Record<string, n
     targetPer.set(k, (targetPer.get(k) || 0) + (Number(t) || 0));
   }
 
+  // Il nome del portale trova il target con lo stesso nome o, se non c'e', con il
+  // nome abbreviato (targetDelPortale, come gli alert, l'Andamento e il Report
+  // generale): un target scritto «PNEUSERVICE SRL» valeva zero per «PNEUSERVICE
+  // CONVERSANO SRL», e la vista B diceva 0% su ogni classe (11/10/2026).
+  const nomiTarget = Object.keys(targetsMap || {});
+  const targetDelNome = (nome) => {
+    const t = targetDelPortale(nomiTarget, nome);
+    return t === null ? 0 : targetPer.get(normalizzaRagioneSociale(t)) || 0;
+  };
   const raccoglitoriArray = Object.values(byRaccoglitore).map((r: any) => {
     const totale = r.totale_peso;
-    const targetRaccoglitore = targetPer.get(normalizzaRagioneSociale(r.raccoglitore)) || 0;
+    const targetRaccoglitore = targetDelNome(r.raccoglitore);
     const percentuali: Record<string, number> = {};
     const percentuali_target: Record<string, number> = {};
     const deviazioni: Record<string, number> = {};

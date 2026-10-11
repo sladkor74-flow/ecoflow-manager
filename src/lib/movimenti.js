@@ -78,6 +78,27 @@ export function settimanaIso(giorno) {
   return Math.ceil(((d.getTime() - capodanno) / 86400000 + 1) / 7);
 }
 
+/**
+ * L'anno a cui appartiene la settimana ISO di un giorno: quello del suo giovedi'.
+ * L'1, il 2 e il 3 gennaio 2027 sono della settimana 53 del 2026; il 29, 30 e 31
+ * dicembre 2025 della settimana 1 del 2026. Chi filtra per anno E settimana
+ * confronta l'anno con questo, non con quello del giorno (chiusura dell'audit,
+ * 11/10/2026): con l'anno del giorno, «2026, settimana 53» perdeva i giorni
+ * dall'1 al 3 gennaio e «2027, settimana 53» prendeva solo quelli.
+ */
+export function annoSettimanaIso(giorno) {
+  if (!giorno) return null;
+  const d = new Date(Date.UTC(+giorno.slice(0, 4), +giorno.slice(5, 7) - 1, +giorno.slice(8, 10)));
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3);
+  return d.getUTCFullYear();
+}
+
+/**
+ * L'anno con cui un giorno risponde al filtro per anno: quello del giorno, o con
+ * una settimana scelta quello della sua settimana ISO (annoSettimanaIso).
+ */
+export const annoPerFiltro = (giorno, conSettimana) => (!giorno ? null : conSettimana ? annoSettimanaIso(giorno) : Number(giorno.slice(0, 4)));
+
 /** Il periodo di un movimento: { giorno, anno, mese_idx (0-11), mese, settimana } oppure null. */
 export function periodoMovimento(r) {
   const giorno = giornoMovimento(r);

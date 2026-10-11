@@ -35,20 +35,24 @@ const CONTROLLI_FISSI = [
   },
 ];
 
+// I tipi di regola che il motore valuta davvero (runAlertEngine: checkRegola e
+// i controlli aggregati), e soltanto quelli. Fino all'11/10/2026 il menu offriva
+// anche campo obbligatorio, range valori, SLA tempi, congruenza peso e custom, che
+// il motore non ha mai trattato: una regola di quei tipi risultava attiva e non
+// produceva mai niente, senza un errore. Le tre liste - questo menu, l'elenco
+// dell'archivio (base44/entities/RegolaAlert.jsonc) e il motore - le tiene
+// allineate prove/regoleAlert.mjs.
 const TIPI_REGOLA = [
   { value: 'tratta_autorizzata', label: 'Tratta Autorizzata (origine → destinazioni ammesse)' },
   { value: 'tratta_combinazione', label: 'Combinazione Classe + Tratta' },
-  { value: 'campo_obbligatorio', label: 'Campo Obbligatorio' },
-  { value: 'range_valori', label: 'Range Valori' },
-  { value: 'sla_tempi', label: 'SLA Tempi' },
-  { value: 'peso_congruenza', label: 'Congruenza Peso' },
+  { value: 'tratte_autorizzate_classe', label: 'Tratte autorizzate per classe (origine → destinazione ammesse)' },
   { value: 'province_inattive', label: 'Province Inattive (2 mesi consecutivi a zero)' },
   { value: 'mix_classi_deviazione', label: 'Deviazione Mix Classi Consorziale' },
   { value: 'scostamento_target', label: 'Scostamento Target Grave (Δ < -15%)' },
   { value: 'ritardo_sla', label: 'Ritardo SLA Critico (>12 gg o >20% fuori tempo)' },
   { value: 'anomalia_peso', label: 'Anomalia peso (ritirato ma peso effettivo mancante)' },
-  { value: 'custom', label: 'Custom' },
 ];
+const TIPI_VALUTATI = new Set(TIPI_REGOLA.map(t => t.value));
 
 export default function AlertEngine() {
   const { isAdmin } = usePermessi();
@@ -277,7 +281,12 @@ export default function AlertEngine() {
                         <span className="text-xs px-2 py-0.5 rounded bg-muted">{r.modulo}</span>
                         <span className="text-xs px-2 py-0.5 rounded bg-muted">{r.tipo_regola}</span>
                         {!r.attiva && <span className="text-xs px-2 py-0.5 rounded bg-muted">disattivata</span>}
+                        {!TIPI_VALUTATI.has(r.tipo_regola) && <span className="text-xs px-2 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-800">non valutata dal motore</span>}
                       </div>
+                      {/* Una regola salvata quando il menu offriva tipi che il
+                          motore non tratta: resta qui, ma non produce niente, e
+                          si dice invece di lasciarla sembrare attiva. */}
+                      {!TIPI_VALUTATI.has(r.tipo_regola) && <p className="text-xs text-amber-800 mb-1">Il motore non valuta il tipo «{r.tipo_regola}»: questa regola non apre mai un alert. Si può eliminare, o ricreare con uno dei tipi del menu.</p>}
                       {r.descrizione && <p className="text-sm text-muted-foreground">{r.descrizione}</p>}
                       {r.messaggio_alert && <p className="text-xs mt-1 italic">"{r.messaggio_alert}"</p>}
                       <details className="mt-2">

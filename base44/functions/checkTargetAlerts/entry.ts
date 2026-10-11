@@ -7,6 +7,9 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
 import { filtraMovimenti, giornoMovimento, giornoOrdine, dateDaSistemare, chiaveOrdine } from "../../shared/movimenti.ts";
 import { statoCaricamenti, caricamentiDuranteLettura } from "../../shared/reportSettimanali.ts";
+import { giorniCopertiNelMese } from "../../shared/attesoContratto.ts";
+import { daConfermare } from "../../shared/annoTarget.ts";
+import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 
 // Sotto questo numero di giorni coperti dai dati la proiezione di fine mese non
 // si fa: con tre giorni di raccolto, o con l'ultimo caricamento fermo al 2 del
@@ -204,13 +207,21 @@ export default async function(req) {
     // Target e raccolto di un mese.
     const valutaMese = async (mese, anno) => {
       // Un raccoglitore puo' avere piu' righe, una per impianto: si sommano.
-      const targets = aggregaTargetMensili(await base44.asServiceRole.entities.TargetMensile.filter(
-        { mese, anno }, '-created_date', 5000
-      )) || [];
+      const righeTarget = await fetchAll(base44.asServiceRole.entities.TargetMensile, { mese, anno });
+      const targets = aggregaTargetMensili(righeTarget) || [];
+      // UN TARGET COPIATO E NON CONFERMATO NON E' ANCORA UN TARGET (chiusura
+      // dell'audit, 11/10/2026). Il 2027 nasce come copia del 2026, «da
+      // confermare» (copiaAnnoTarget): finche' l'utente non lo conferma, i suoi
+      // numeri sono quelli dell'anno prima, e un raccoglitore «a rischio» o «non
+      // raggiunto» su un target che nessuno ha deciso e' un allarme falso. Si
+      // valuta lo stesso e si dice, ma non apre alert. Basta una riga copiata fra
+      // quelle sommate (una per impianto) perche' il totale non sia confermato.
+      const chiaveTarget = (t) => `${normalizzaRagioneSociale(t.raccoglitore || '')}|${String(t.regione || '').trim()}`;
+      const copiati = new Set(righeTarget.filter(daConfermare).map(chiaveTarget));
       const isMeseCorrente = (mese === meseCorrente && anno === annoCorrente);
       // chiavi: i raccoglitori con un target; ok: quelli che i dati dicono a posto
       // (raggiunto a mese chiuso, o proiezione affidabile sopra il 90%)
-      const esito: any = { mese, anno, isMeseCorrente, chiuso: false, totale_target: targets.length, missed: [], atRisk: [], okCount: 0, chiavi: new Set(), ok: new Set(), dateDaSistemare: null };
+      const esito: any = { mese, anno, isMeseCorrente, chiuso: false, totale_target: targets.length, missed: [], atRisk: [], daConfermare: [], okCount: 0, chiavi: new Set(), ok: new Set(), dateDaSistemare: null };
       if (targets.length === 0) return esito;
 
       // Raccolto del solo canale RETE: i target dei raccoglitori non riguardano ACI
@@ -259,12 +270,14 @@ export default async function(req) {
       const fineMese = `${anno}-${due(idxMese + 1)}-${due(giorniInMese)}`;
       const chiuso = posizione < 0 && (await fineDatiArchivio()) >= piuGiorni(fineMese, GIORNI_ASSESTAMENTO);
       esito.chiuso = chiuso;
-      const giorniTrascorsi = posizione < 0 ? giorniInMese : posizione === 0 ? giornoDelMese : 0;
       // La frazione di mese trascorsa si misura sui DATI, non sul calendario: i file
       // si caricano ogni tanto e il portale chiude gli ordini giorni dopo. Se oggi e'
       // il 20 ma l'archivio arriva al 12, il raccolto e' di dodici giorni, non di
-      // venti: proiettarlo su venti dava allarmi critici che non esistevano.
-      const giorniCoperti = chiuso ? giorniInMese : Math.min(giorniTrascorsi, Number(ultimoGiornoDati.slice(8, 10)) || 0);
+      // venti: proiettarlo su venti dava allarmi critici che non esistevano. La
+      // regola e' quella dell'atteso alla data della Dashboard e di Target & Status
+      // (giorniCopertiNelMese, attesoContratto.ts): fino all'ultimo dato, mai oltre
+      // oggi.
+      const giorniCoperti = chiuso ? giorniInMese : giorniCopertiNelMese(anno, idxMese, ultimoGiornoDati, oggi);
       const proiezioneAffidabile = chiuso || giorniCoperti >= GIORNI_MINIMI_PROIEZIONE;
       const fattoreTemporale = !chiuso && giorniCoperti > 0 ? (giorniCoperti / giorniInMese) : 1;
 
@@ -325,6 +338,10 @@ export default async function(req) {
         const chiave = chiaveAlert(item);
         esito.chiavi.add(chiave);
 
+        if (copiati.has(chiaveTarget(t))) {
+          esito.daConfermare.push({ ...item, da_confermare: true });
+          continue;
+        }
         if (chiuso) {
           // Mese chiuso nei dati: target definitivamente non raggiunto
           if (raccolto < targetVal) esito.missed.push(item);
@@ -477,6 +494,9 @@ export default async function(req) {
       totale_target: principale.totale_target,
       missed: principale.missed.sort((a, b) => a.pct_raggiungimento - b.pct_raggiungimento),
       at_risk: principale.atRisk.sort((a, b) => a.pct_proiezione - b.pct_proiezione),
+      // i target copiati dall'anno prima e non ancora confermati: valutati, ma
+      // senza alert, finche' qualcuno non li conferma in Target & Status
+      da_confermare: principale.daConfermare,
       ok_count: principale.okCount,
       alerts_creati: alertsCreati,
       alerts_aggiornati: alertsAggiornati,

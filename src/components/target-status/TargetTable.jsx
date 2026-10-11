@@ -13,7 +13,9 @@ export default function TargetTable({ data, onSaveTargetAnnuo, onSaveTargetMensi
             <th className="sticky left-[100px] bg-muted px-3 py-2 text-left">Raccoglitore</th>
             <th className="px-2 py-2 text-right">Target Annuo</th>
             <th className="px-2 py-2 text-right">Raccolto</th>
-            <th className="px-2 py-2 text-right">Leftover</th>
+            {/* Il residuo dell'anno, target annuo meno raccolto: era «Leftover»,
+                col negativo (target superato) in rosso (11/10/2026). */}
+            <th className="px-2 py-2 text-right" title="Target annuo meno raccolto: quanto manca. Negativo: target superato.">Residuo</th>
             {MESI_BREVI.map((m) => (
               <th key={m} className="px-1 py-1 text-center text-[10px] font-medium" colSpan={3}>{m}</th>
             ))}
@@ -24,7 +26,7 @@ export default function TargetTable({ data, onSaveTargetAnnuo, onSaveTargetMensi
               <React.Fragment key={m}>
                 <th className="px-1 py-1 text-right text-[10px] font-normal text-muted-foreground">T</th>
                 <th className="px-1 py-1 text-right text-[10px] font-normal text-muted-foreground">R</th>
-                <th className="px-1 py-1 text-right text-[10px] font-normal text-muted-foreground">Δ</th>
+                <th className="px-1 py-1 text-right text-[10px] font-normal text-muted-foreground" title="Target del mese meno raccolto: positivo, manca raccolta">Δ</th>
               </React.Fragment>
             ))}
           </tr>
@@ -38,7 +40,7 @@ export default function TargetTable({ data, onSaveTargetAnnuo, onSaveTargetMensi
                 {onSaveTargetAnnuo ? <EditableCell value={row.targetAnnuo} onSave={(v) => onSaveTargetAnnuo(row.raccoglitore, row.regione, v)} /> : formatNumber(row.targetAnnuo)}
               </td>
               <td className="px-2 py-1.5 text-right tabular-nums">{formatNumber(row.raccoltoTotale)}</td>
-              <td className={`px-2 py-1.5 text-right tabular-nums font-medium ${row.leftover < 0 ? 'text-red-600' : 'text-green-600'}`}>
+              <td className={`px-2 py-1.5 text-right tabular-nums font-medium ${row.leftover <= 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
                 {formatNumber(row.leftover)}
               </td>
               {row.mesi.map((m, j) => (

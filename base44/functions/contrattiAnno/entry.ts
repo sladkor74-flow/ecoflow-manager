@@ -5,6 +5,7 @@ import { individuaSoggetti } from "../../shared/qualificaFornitori.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { impiantiTargetDellAnno } from "../../shared/targetImpianti.ts";
 import { annoDelRecord } from "../../shared/annoTarget.ts";
+import { targetDelPortale } from "../../shared/targetRaccoglitori.ts";
 
 // La situazione contrattuale di un anno: chi va contrattualizzato, per cosa, e
 // a che punto e' ciascun contratto.
@@ -74,9 +75,33 @@ export default async function(req) {
     const impiantoPer = impiantiTargetDellAnno(impiantiTarget, annoNum);
 
     // I target per raccoglitore si sommano fra le regioni: il contratto e' uno solo.
+    //
+    // IL NOME DEL TARGET E QUELLO DEL PORTALE (chiusura dell'audit, 11/10/2026).
+    // Il soggetto porta il nome dei movimenti, il target puo' essere scritto
+    // abbreviato («PNEUSERVICE SRL» per «PNEUSERVICE CONVERSANO SRL»): qui si
+    // cercava solo il nome uguale, e il contratto di raccolta restava senza
+    // target mentre l'Andamento, gli alert ed EcoTyna lo abbinano. Ora con lo
+    // stesso abbinatore (targetDelPortale): prima il nome uguale, poi
+    // l'abbreviazione, mai il contrario. Un target abbreviato che vale per piu'
+    // raccoglitori, nessuno col nome uguale, non si assegna a caso: resta senza
+    // soggetto, come prima.
+    const nomiTarget = [...new Set(targetRacc.map(t => String(t.raccoglitore || '').trim()).filter(Boolean))];
+    const chiaviSoggetti = new Set(soggetti.map(s => s.chiave));
+    const soggettoDelTarget = new Map(); // nome del target -> chiave del soggetto
+    for (const nome of nomiTarget) {
+      const k = normalizzaRagioneSociale(nome);
+      if (!k) continue;
+      if (chiaviSoggetti.has(k)) { soggettoDelTarget.set(nome, k); continue; }
+      // Si confronta il nome normalizzato, non la grafia: un target abbreviato
+      // scritto in due modi in due regioni («PNEUSERVICE SRL» e «Pneuservice
+      // S.r.l.») e' lo stesso soggetto, e i suoi target si sommano fra le regioni
+      // (revisione finale, 11/10/2026).
+      const suoi = soggetti.filter(s => s.ruoli.includes('raccolta') && normalizzaRagioneSociale(targetDelPortale(nomiTarget, s.nome || s.chiave) || '') === k);
+      if (suoi.length === 1) soggettoDelTarget.set(nome, suoi[0].chiave);
+    }
     const targetPer = new Map();
     for (const t of targetRacc) {
-      const k = normalizzaRagioneSociale(t.raccoglitore);
+      const k = soggettoDelTarget.get(String(t.raccoglitore || '').trim()) || normalizzaRagioneSociale(t.raccoglitore);
       if (!k) continue;
       targetPer.set(k, (targetPer.get(k) || 0) + (Number(t.target_tonnellate) || 0));
     }

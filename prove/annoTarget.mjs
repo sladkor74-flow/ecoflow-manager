@@ -2,7 +2,7 @@
 // 27/09/2026): il piano della copia di un anno dal precedente, il target delle
 // primarie di un sito, il target dell'impianto di esattamente quell'anno, gli
 // anni chiusi. npm run prove
-import { annoDelRecord, annoCorrenteRoma, annoChiuso, recordDellAnno, pianoCopiaAnno, conteggiPiano, targetPrimarieDelSito, targetImpiantoDellAnno, notaCopia, daConfermare, senzaNotaCopia, conNotaCopia } from '../base44/shared/annoTarget.ts';
+import { annoDelRecord, annoCorrenteRoma, annoChiuso, recordDellAnno, pianoCopiaAnno, conteggiPiano, targetPrimarieDelSito, targetImpiantoDellAnno, notaCopia, daConfermare, senzaNotaCopia, conNotaCopia, commessaDellAnno } from '../base44/shared/annoTarget.ts';
 import { normalizzaRagioneSociale as chiave } from '../base44/shared/normalizzaRagioneSociale.ts';
 import { regolePredittivita } from '../base44/shared/regolePredittivita.ts';
 import { fineProgrammazione, avvisoFineProgrammazione } from '../base44/shared/fineProgrammazione.ts';
@@ -200,6 +200,18 @@ const r27 = regolePredittivita(2027, { anno: 2027, kg_per_viaggio: 14500 });
 verifica('kg a viaggio: senza contratto come prima', regolePredittivita(2026).kg_per_viaggio === 13000 && regolePredittivita(2026).definite === true && regolePredittivita(2027).definite === false && regolePredittivita(2027).kg_per_viaggio === 13000);
 verifica('kg a viaggio: il contratto dell\'anno vince e rende l\'anno definito', r27.kg_per_viaggio === 14500 && r27.definite === true && regolePredittivita(2026, { anno: 2026, kg_per_viaggio: 12000 }).kg_per_viaggio === 12000 && J(regolePredittivita(2026, { anno: 2026, kg_per_viaggio: 12000 }).priorita) === J(regolePredittivita(2026).priorita));
 verifica('kg a viaggio: vuoto, zero o di un altro anno non contano', regolePredittivita(2026, { anno: 2026 }).kg_per_viaggio === 13000 && regolePredittivita(2027, { anno: 2027, kg_per_viaggio: 0 }).definite === false && regolePredittivita(2027, { anno: 2026, kg_per_viaggio: 9000 }).kg_per_viaggio === 13000);
+
+// --- il contratto dell'anno: il modificato per ultimo (chiusura dell'audit,
+// 11/10/2026), una regola sola per Target & Status, la Dashboard e la predittivita'
+const commesse = [
+  { id: 'vecchio', anno: 2026, created_date: '2026-01-05T10:00:00', updated_date: '2026-06-01T10:00:00' },
+  { id: 'nuovo-mai-toccato', anno: 2026, created_date: '2026-02-01T10:00:00' },
+  { id: 'altro-anno', anno: 2027, created_date: '2026-12-20T10:00:00', updated_date: '2026-12-21T10:00:00' },
+  { id: 'pari', anno: 2025, created_date: '2025-01-01T10:00:00' },
+  { id: 'pari-bis', anno: '2025', created_date: '2025-01-01T10:00:00' },
+];
+verifica('il contratto dell\'anno e\' il modificato per ultimo, non il creato per ultimo', commessaDellAnno(commesse, 2026).id === 'vecchio' && commessaDellAnno(commesse, '2027').id === 'altro-anno');
+verifica('a parita\' vale il primo; un anno senza contratto non ne ha', commessaDellAnno(commesse, 2025).id === 'pari' && commessaDellAnno(commesse, 2028) === null && commessaDellAnno(null, 2026) === null);
 
 console.log(`\n${ok} verifiche riuscite, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

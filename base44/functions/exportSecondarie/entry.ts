@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
-import { giornoOrdine, periodoMovimento, settimanaIso, eTerminato, dateDaSistemare, testoDate, MESI_MOVIMENTI as MESI } from "../../shared/movimenti.ts";
+import { giornoOrdine, periodoMovimento, settimanaIso, annoPerFiltro, eTerminato, dateDaSistemare, testoDate, MESI_MOVIMENTI as MESI } from "../../shared/movimenti.ts";
 import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
 import { formattaPesi } from "../../shared/formatoExcel.ts";
@@ -94,12 +94,19 @@ export default async function(req) {
       return true;
     };
     const conAnno = filters.anno != null && (!Array.isArray(filters.anno) ? !!filters.anno : filters.anno.length > 0);
+    // Con una settimana scelta l'anno e' quello della settimana ISO, come la
+    // pagina e la matrice (annoPerFiltro, chiusura dell'audit 11/10/2026): «2026,
+    // settimana 53» comprende l'1, il 2 e il 3 gennaio 2027. Con il solo anno vale
+    // il giorno.
+    const conSettimana = filters.settimana != null && filters.settimana !== '' && filters.settimana !== false
+      && (!Array.isArray(filters.settimana) || filters.settimana.length > 0);
     const passaPeriodo = (r) => {
       const p = periodi.get(r);
       if (!matchesFilter(p ? p.mese : 'N/D', filters.mese)) return false;
       if (!matchesFilterString(p ? p.settimana : 'N/D', filters.settimana)) return false;
       if (filters.data && (!p || p.giorno !== filters.data)) return false;
-      if (conAnno && (!p || p.anno == null || !matchesFilterString(p.anno, filters.anno))) return false;
+      const annoP = p && p.giorno ? annoPerFiltro(p.giorno, conSettimana) : null;
+      if (conAnno && (annoP == null || !matchesFilterString(annoP, filters.anno))) return false;
       return true;
     };
     // Con il filtro "date da sistemare" il dettaglio tiene anche i terminati senza

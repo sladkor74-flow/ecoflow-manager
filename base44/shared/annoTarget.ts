@@ -28,6 +28,18 @@ export const recordDellAnno = (righe, anno) => (righe || []).filter(r => annoDel
 const attivo = (r) => !!r && r.stato !== 'non_attivo';
 const quando = (r) => String((r && (r.updated_date || r.created_date)) || '');
 const piuRecente = (a, b) => (quando(b) > quando(a) ? b : a);
+
+/**
+ * Il contratto Ecotyre di un anno. Fra piu' CommessaEcotyre dello stesso anno vale
+ * la modificata per ultima (updated_date, o created_date se non e' mai stata
+ * modificata); null se l'anno non ne ha. Una regola sola per Target & Status, la
+ * Dashboard e la predittivita' (chiusura dell'audit, 11/10/2026): la Dashboard
+ * prendeva la creata per ultima, e con due contratti dello stesso anno poteva
+ * leggere un target diverso da quello di Target & Status.
+ */
+export const commessaDellAnno = (commesse, anno) => (commesse || [])
+  .filter(c => !!c && Number(c.anno) === Number(anno))
+  .reduce((x, c) => (x ? piuRecente(x, c) : c), null);
 const testo = (v) => String(v || '').trim().toLowerCase();
 const eStoccaggio = (f) => (f.ruolo ? ['stoccaggio', 'doppio_ruolo', 'raccoglitore_stoccaggio'].includes(f.ruolo) : f.tipo === 'stoccaggio');
 const conValore = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== ''));

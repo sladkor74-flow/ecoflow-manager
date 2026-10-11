@@ -34,32 +34,18 @@ export function recordDelRaccoglitore(records, nome) {
   });
 }
 
-/**
- * Stesso raccoglitore fra il nome scritto nel target e quello del portale: nome
- * normalizzato uguale ("SMOCO S.r.l." e "SMOCO SRL"), oppure nome del target
- * abbreviato le cui parole stanno tutte nel nome del portale. Mai il contrario.
- */
-/**
- * Target a cui va il raccolto di un nome del portale: quello con lo stesso nome
- * normalizzato; se non c'e', il primo il cui nome e' un'abbreviazione del portale.
- * candidati: elenco di nomi di target gia' filtrati (per esempio per regione).
- */
-export function targetDelPortale(candidati, nomePortale) {
-  const b = normalizzaRagioneSociale(nomePortale || '');
-  return candidati.find(n => normalizzaRagioneSociale(n || '') === b)
-    ?? candidati.find(n => stessoRaccoglitore(n, nomePortale))
-    ?? null;
-}
-
-export function stessoRaccoglitore(nomeTarget, nomePortale) {
-  const a = normalizzaRagioneSociale(nomeTarget || '');
-  const b = normalizzaRagioneSociale(nomePortale || '');
-  if (!a || !b) return false;
-  if (a === b) return true;
-  const paroleB = new Set(b.split(' '));
-  const paroleA = a.split(' ').filter(p => p.length > 2);
-  return paroleA.length > 0 && paroleA.every(p => paroleB.has(p));
-}
+// L'ABBINATORE FRA IL NOME DEL TARGET E QUELLO DEL PORTALE sta in
+// andamentoTarget.ts, e da qui si riesporta (chiusura dell'audit, 11/10/2026).
+// Prima ce n'erano due copie, qui e li', tenute uguali lettera per lettera da
+// prove/andamentoTarget.mjs: ora il codice c'e' una volta sola, e alert,
+// EcoTyna, predittivita' e contratti usano proprio quello dell'Andamento.
+// - stessoRaccoglitore(nomeTarget, nomePortale): nome normalizzato uguale
+//   ("SMOCO S.r.l." e "SMOCO SRL"), oppure nome del target abbreviato le cui
+//   parole stanno tutte nel nome del portale. Mai il contrario.
+// - targetDelPortale(candidati, nomePortale): il target con lo stesso nome
+//   normalizzato; se non c'e', il primo il cui nome e' un'abbreviazione del
+//   portale.
+export { stessoRaccoglitore, targetDelPortale } from "./andamentoTarget.ts";
 
 /**
  * Target di un raccoglitore in un mese, sommando le regioni.
