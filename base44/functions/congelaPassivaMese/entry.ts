@@ -4,6 +4,8 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { soloAmministratore } from "../../shared/permessi.ts";
 import { valoreCampo } from "../../shared/testoLungo.ts";
 import { calcolaPassivaMese, MESI_PASSIVA } from "../../shared/passivaCalcolo.ts";
+import { controlloCaricamenti, TIPI_RINVIO } from "../../shared/statoArchivi.ts";
+import { tipiDeiCanali } from "../../shared/registroCaricamenti.ts";
 
 // CONGELA IL CONTO DELLA PASSIVA DI UN MESE (decisione dell'utente, 29/09/2026).
 //
@@ -34,6 +36,21 @@ export default async function(req) {
       return Response.json({ error: 'Anno, mese (1-12) e canale (RETE, ACI, EXTRA_RACCOLTA) obbligatori' }, { status: 400 });
     }
 
+    // NON SU UN ARCHIVIO A META' (chiusura dell'audit, 11/10/2026).
+    //
+    // Il conto congelato e' quello con cui si confrontano per mesi i consuntivi
+    // dei fornitori: congelato su un archivio a meta', direbbe che i fornitori
+    // hanno fatturato ritiri che non risultano. Mentre le primarie o le
+    // secondarie si riscrivono, o dopo un caricamento interrotto o finito
+    // parziale, si risponde 409 «rinviato» col motivo e non si scrive niente,
+    // come gia' fanno verifiche, quadrature e alert. Le terziarie no: la passiva
+    // non le legge, e un loro caricamento interrotto non deve fermare il mese
+    // (TIPI_RINVIO, 11/10/2026). Lo stato si legge prima e dopo aver letto gli
+    // archivi: un caricamento che parte mentre si legge, con una lettura sola,
+    // non si vedrebbe (controlloCaricamenti, shared/statoArchivi.ts).
+    const controllo = await controlloCaricamenti(base44, 'il congelamento della passiva', tipiDeiCanali(TIPI_RINVIO.passiva, [can]));
+    if (controllo.rinvio) return controllo.rinvio;
+
     const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll] = await Promise.all([
       fetchAll(svc.PrimariaRete),
       fetchAll(svc.PrimariaAci),
@@ -47,6 +64,9 @@ export default async function(req) {
       { primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll },
       annoNum, meseNum - 1, nomeMese, can,
     );
+
+    const rinvio = await controllo.dopo();
+    if (rinvio) return rinvio;
 
     const esistenti = await svc.ChiusuraPassivaMese.filter({ anno: annoNum, mese: meseNum, canale: can }, 'id', 5);
     const campi = {

@@ -11,6 +11,7 @@ import {
   giornoChiusura, GRUPPO_TERZIARIE, movimentoChiusura,
   leggiLetteraGiacenze, preparaChiusura, apertureDegliImpianti, sitiDellaChiusura,
 } from "../../shared/chiusuraAnno.ts";
+import { controlloCaricamenti, TIPI_RINVIO } from "../../shared/statoArchivi.ts";
 
 // La chiusura dell'anno: prepara la fotografia del 31 dicembre da cui
 // ripartiranno le giacenze dell'anno dopo, e la salva.
@@ -41,6 +42,22 @@ export default async function (req) {
     const azione = body.azione === 'salva' ? 'salva' : 'prepara';
     // Chiunque puo' guardare e scaricare; la fotografia la salva l'amministratore.
     if (azione === 'salva' && !puoScrivere) return rispostaSolaLettura();
+
+    // NON SU UN ARCHIVIO A META' (chiusura dell'audit, 11/10/2026).
+    //
+    // La fotografia del 31/12 e le aperture degli impianti sono il punto da cui
+    // riparte tutto l'anno dopo: salvate su un archivio a meta' sbaglierebbero
+    // ogni giacenza del 2027. Mentre le primarie, le secondarie o le terziarie
+    // si riscrivono, o dopo un caricamento interrotto o finito parziale, il
+    // salvataggio risponde 409 «rinviato» col motivo e non scrive niente, come
+    // gia' fanno verifiche, quadrature e alert; preparare il dossier si puo'
+    // sempre, perche' non scrive. Qui contano tutti e tre i file dei movimenti,
+    // perche' la chiusura li legge tutti (TIPI_RINVIO, 11/10/2026). Lo stato si
+    // legge prima e dopo aver letto gli archivi: un caricamento che parte mentre
+    // si legge, con una lettura sola, non si vedrebbe (controlloCaricamenti,
+    // shared/statoArchivi.ts).
+    const controllo = azione === 'salva' ? await controlloCaricamenti(base44, `la chiusura del ${anno}`, TIPI_RINVIO.chiusura) : null;
+    if (controllo && controllo.rinvio) return controllo.rinvio;
 
     const norm = normalizzaRagioneSociale;
     const al = giornoChiusura(anno);
@@ -205,6 +222,9 @@ export default async function (req) {
     });
 
     if (azione === 'prepara') return Response.json({ ...dossier, aperture, puo_salvare: puoScrivere });
+
+    const rinvio = await controllo.dopo();
+    if (rinvio) return rinvio;
 
     // --- Il salvataggio della fotografia ---
     // Una rilevazione al 31/12 e' il punto di partenza dei calcoli dell'anno

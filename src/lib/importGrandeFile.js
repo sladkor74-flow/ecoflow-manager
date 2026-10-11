@@ -2,7 +2,8 @@ import { base44 } from '@/api/base44Client';
 import { eAci } from '@/lib/canaleSecondaria';
 import { oggiRoma } from '@/lib/giornoItaliano';
 import { testoTerminatiSenzaFine, testoOrdiniDateDaSistemare } from '@/lib/richiesteEct';
-import { dataServer, formatIntero } from '@/lib/utils';
+import { formatIntero } from '@/lib/utils';
+import { leggiRegistro, statoDelRegistro, avvisoCaricamento } from '@/lib/registroCaricamenti';
 import { eLimiteRichieste } from '@/lib/limiteRichieste';
 import { eEseguito, riepilogoEseguiti } from '@/lib/movimenti';
 
@@ -2430,7 +2431,17 @@ const NOMI_RICALCOLI = {
 // Gli archivi che i ricalcoli leggono, per tipo di caricamento: l'extra raccolta
 // non ha un caricamento da file.
 const TIPI_LETTI_DAI_RICALCOLI = ['primarie', 'secondarie'];
-const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
+// E quelli che legge ciascun ricalcolo: un caricamento a meta' ferma solo chi lo
+// legge (revisione finale, 11/10/2026). Evasione, ritiri ECT e to-do leggono le
+// sole primarie, come i loro controlli lato server; l'allineamento delle
+// dichiarazioni e l'alert dell'extra raccolta non leggono ne' primarie ne'
+// secondarie. Senza, una riscrittura delle secondarie finita «parziale» teneva
+// fermi anche i ricalcoli delle primarie, che le secondarie non le guardano.
+const LETTI_DAL_RICALCOLO = {
+  evasioneAssegnati: ['primarie'], ritiriEct: ['primarie'], todoOrdini: ['primarie'],
+  verifiche: ['primarie', 'secondarie'], qualifica: ['primarie', 'secondarie'],
+  allineaDichiarazioni: [], alertExtra: [],
+};
 
 // Un ricalcolo che parte mentre primarie o secondarie si stanno riscrivendo -
 // oppure dopo un caricamento interrotto, che le ha lasciate a meta' - salva esiti
@@ -2440,33 +2451,44 @@ const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
 // registro non si riesce a leggere si prosegue: meglio un ricalcolo in piu' che
 // uno perso, e il controllo lato server resta.
 //
-// Un caricamento fallito dopo lo svuotamento lascia la sua riga "in_corso", col
-// messaggio che comincia con NON_RIUSCITO (importEcotyreFile, importaBlocco); in
-// "errore" si chiude solo chi fallisce prima di svuotare, a dati intatti. Percio'
-// le righe in errore si saltano: un file sbagliato caricato dopo non deve
-// nascondere l'archivio rimasto vuoto.
-const NON_RIUSCITO = 'Caricamento non riuscito';
-async function caricamentoAperto() {
+// LA REGOLA E' QUELLA DEI MOTORI E DELLA DASHBOARD (chiusura dell'audit,
+// 11/10/2026). Qui ce n'era una terza: la prima riga che non fosse in «errore»,
+// e bloccava solo se era ancora «in_corso». Una riscrittura delle primarie
+// finita «parziale» (righe non scritte, archivio a meta') passava per buona: i
+// ricalcoli partivano, i motori rispondevano 409 uno per uno e la qualifica
+// rileggeva un archivio a meta'. Ora lo stato si legge con leggiRegistro e
+// statoDelRegistro (registroCaricamenti, specchio di base44/shared), e dice
+// «non riuscito», «interrotto» o «in corso» come la dashboard. Si cambia solo la
+// lettura dello stato: la scrittura a blocchi non c'entra.
+// Il registro si legge una volta per caricamento (registroAperti); per ogni
+// ricalcolo si guarda solo cio' che legge (caricamentoAperto).
+async function registroAperti() {
   try {
-    for (const tipo of TIPI_LETTI_DAI_RICALCOLI) {
-      const righe = await base44.entities.UploadLog.filter({ tipo_file: tipo }, '-created_date', 10);
-      const ultimo = (righe || []).find(r => r.esito !== 'errore');
-      if (!ultimo || ultimo.esito !== 'in_corso') continue;
-      const inizio = dataServer(ultimo.created_date);
-      const chi = ultimo.utente ? ` di ${ultimo.utente}` : '';
-      const file = ultimo.nome_file && ultimo.nome_file !== 'N/D' ? ` (${ultimo.nome_file})` : '';
-      if (String(ultimo.messaggio || '').startsWith(NON_RIUSCITO)) {
-        return `rinviato: il caricamento ${tipo}${chi}${file} non e' riuscito e l'archivio puo' essere vuoto o incompleto; ricarica il file`;
-      }
-      if (inizio && Date.now() - inizio.getTime() > FINESTRA_IN_CORSO_MS) {
-        return `rinviato: il caricamento ${tipo}${chi}${file} e' rimasto interrotto e l'archivio puo' essere incompleto; ricarica il file`;
-      }
-      return `rinviato: caricamento ${tipo}${chi}${file} in corso; si rifa' quando finisce`;
-    }
+    return await leggiRegistro(base44.entities.UploadLog, TIPI_LETTI_DAI_RICALCOLI);
   } catch (e) {
     return null;
   }
-  return null;
+}
+
+function caricamentoAperto(perTipo, tipi = TIPI_LETTI_DAI_RICALCOLI) {
+  if (!perTipo || !tipi.length) return null;
+  try {
+    const aperto = statoDelRegistro(perTipo, tipi, Date.now()).in_corso[0];
+    if (!aperto) return null;
+    const tipo = aperto.tipo_file;
+    const chi = aperto.utente ? ` di ${aperto.utente}` : '';
+    const file = aperto.nome_file && aperto.nome_file !== 'N/D' ? ` (${aperto.nome_file})` : '';
+    const { stato } = avvisoCaricamento(aperto);
+    if (stato === 'non_riuscito') {
+      return `rinviato: il caricamento ${tipo}${chi}${file} non e' riuscito e l'archivio puo' essere vuoto o incompleto; ricarica il file`;
+    }
+    if (stato === 'interrotto') {
+      return `rinviato: il caricamento ${tipo}${chi}${file} e' rimasto interrotto e l'archivio puo' essere incompleto; ricarica il file`;
+    }
+    return `rinviato: caricamento ${tipo}${chi}${file} in corso; si rifa' quando finisce`;
+  } catch (e) {
+    return null;
+  }
 }
 
 // I primi errori di un elenco, per la riga sotto il caricamento.
@@ -2544,8 +2566,11 @@ export async function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
   const anni = [...new Set(giorniValidi.map(g => Number(g.slice(0, 4))))];
   if (!anni.length) anni.push(Number(oggiRoma().slice(0, 4)));
 
-  const aperto = await caricamentoAperto();
-  if (aperto) return elenco.map(k => ({ nome: NOMI_RICALCOLI[k], ok: false, errore: aperto }));
+  // Il registro si legge prima di scrivere la riga dell'extra raccolta, che non e'
+  // un caricamento a meta'. La riga si scrive comunque: la scheda e' gia' salvata, e
+  // senza la riga l'alert delle date dell'extra raccolta non partiva piu' finche'
+  // non si salvava un'altra scheda (revisione finale, 11/10/2026).
+  const registro = await registroAperti();
 
   // Le schede di extra raccolta non passano da un file: la modifica si scrive nel
   // registro dei caricamenti come le altre, cosi' lo storico delle quadrature e
@@ -2604,6 +2629,8 @@ export async function dopoCaricamento(tipoFile, { giorni = [] } = {}) {
     // sola (limiteRichieste). Se un ricalcolo si arrende lo stesso, lo si rifa'
     // una volta dopo mezzo minuto: i ricalcoli rileggono e riscrivono i loro
     // esiti, ripeterli non crea doppioni.
+    const aperto = caricamentoAperto(registro, LETTI_DAL_RICALCOLO[k] || TIPI_LETTI_DAI_RICALCOLI);
+    if (aperto) { esiti.push({ nome: NOMI_RICALCOLI[k], ok: false, errore: aperto }); continue; }
     for (let tentativo = 0; ; tentativo++) {
       try {
         const risposte = [].concat(await compiti[k]());

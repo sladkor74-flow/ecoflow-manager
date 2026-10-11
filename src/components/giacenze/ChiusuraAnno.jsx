@@ -33,6 +33,11 @@ const VERDE = 'FF92D050', AZZURRO = 'FF99CCFF', GIALLO = 'FFFFFF00', ROSSO = 'FF
 
 const kg = (v) => (v === null || v === undefined || v === '' ? '—' : `${formatKg(v)} kg`);
 const nomeCanale = (c) => NOME_CANALE[c] || String(c || '').toLowerCase();
+// Il motivo del server, non il codice di stato (chiusura dell'audit, 11/10/2026):
+// il salvataggio rinviato perche' un file dei movimenti si sta riscrivendo
+// arrivava a video come «Request failed with status code 409», in inglese e
+// senza dire quale caricamento ripetere. Il motivo sta nel corpo della risposta.
+const motivoErrore = (e) => e?.response?.data?.error || e?.data?.error || (e && e.message ? e.message : String(e));
 
 /**
  * Se su una voce c'e' una decisione per classe da prendere. La stabilisce la
@@ -640,7 +645,7 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
       setDossier(dati);
       setDaAggiornare(false);
     } catch (e) {
-      toast({ title: 'Non si e\' riusciti a preparare la chiusura', description: e.message, variant: 'destructive' });
+      toast({ title: 'Non si e\' riusciti a preparare la chiusura', description: motivoErrore(e), variant: 'destructive' });
     }
     setCaricamento(false);
   };
@@ -679,7 +684,7 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
       await carica({ lettera_fogli: fogli });
       toast({ title: 'Lettera caricata', description: 'Il confronto con le giacenze dichiarate e\' nella tabella degli impianti.' });
     } catch (e) {
-      toast({ title: 'Non si e\' riusciti a leggere la lettera', description: e.message, variant: 'destructive' });
+      toast({ title: 'Non si e\' riusciti a leggere la lettera', description: motivoErrore(e), variant: 'destructive' });
     }
     setInCorso('');
   };
@@ -709,7 +714,7 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
       });
       if (salvati || aperture.length) { onSaved?.(); await carica(); }
     } catch (e) {
-      toast({ title: 'Non si e\' riusciti a salvare', description: e.message, variant: 'destructive' });
+      toast({ title: 'Non si e\' riusciti a salvare', description: motivoErrore(e), variant: 'destructive' });
     }
     setInCorso('');
   };

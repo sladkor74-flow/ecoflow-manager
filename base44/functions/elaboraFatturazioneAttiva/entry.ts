@@ -4,10 +4,23 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { calcolaRigheAttiva, eRigaACorpo, TIPOLOGIE_ATTIVA } from "../../shared/attivaCalcolo.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
+import { controlloCaricamenti, TIPI_RINVIO } from "../../shared/statoArchivi.ts";
+import { tipiDeiCanali } from "../../shared/registroCaricamenti.ts";
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const NOMI = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 const r2 = (v) => Math.round(v * 100) / 100;
+// La nota del documento superato si legge nello Storico: all'italiana, come
+// tutto quello che si vede (chiusura dell'audit, 11/10/2026). Prima diceva «con
+// totale 372976.50 €» e «Rielaborato il 2026-10-11». Un totale che manca non e'
+// zero: si scrive «—».
+const euroIt = (v) => {
+  if (v === null || v === undefined || v === '' || !Number.isFinite(Number(v))) return '—';
+  const n = r2(Number(v));
+  const [intero, dec] = Math.abs(n).toFixed(2).split('.');
+  return (n < 0 ? '-' : '') + intero.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + dec;
+};
+const giornoIt = (g) => String(g || '').split('-').reverse().join('/');
 
 // Elabora la fatturazione attiva per un dato anno/mese:
 // genera un documento per canale (RETE, ACI, EXTRA_RACCOLTA), mai sommati fra
@@ -41,6 +54,22 @@ export default async function(req) {
     const richieste = Array.isArray(tipologie) ? [...new Set(tipologie.map(t => String(t || '').trim()).filter(Boolean))] : [];
     const ignote = richieste.filter(t => !TIPOLOGIE_ATTIVA.includes(t));
     if (ignote.length) return Response.json({ error: `Canale non riconosciuto: ${ignote.join(', ')}` }, { status: 400 });
+
+    // NON SU UN ARCHIVIO A META' (chiusura dell'audit, 11/10/2026).
+    //
+    // I documenti elaborati sono quelli che si approvano, si esportano e si
+    // fatturano: elaborati su un archivio a meta' avrebbero meno righe del vero,
+    // e niente nel documento lo direbbe. Mentre le primarie si riscrivono, o
+    // dopo un loro caricamento interrotto o finito parziale, si risponde 409
+    // «rinviato» col motivo e non si scrive niente - neanche la pulizia delle
+    // bozze - come gia' fanno verifiche, quadrature e alert. Solo le primarie:
+    // l'attiva non legge ne' secondarie ne' terziarie, e un loro caricamento a
+    // meta' non deve fermare la fatturazione del mese (TIPI_RINVIO, 11/10/2026).
+    // Lo stato si legge prima e dopo aver letto gli archivi: un caricamento che
+    // parte mentre si legge, con una lettura sola, non si vedrebbe
+    // (controlloCaricamenti, shared/statoArchivi.ts).
+    const controllo = await controlloCaricamenti(base44, `l'elaborazione della fatturazione attiva di ${mese} ${anno}`, tipiDeiCanali(TIPI_RINVIO.attiva, richieste));
+    if (controllo.rinvio) return controllo.rinvio;
 
     const annoNum = Number(anno);
     const Doc = base44.asServiceRole.entities.DocumentoFatturazione;
@@ -81,6 +110,9 @@ export default async function(req) {
     // Le anomalie dei canali che non si rifanno non riguardano questa elaborazione.
     const anomalie = calcolo.anomalie.filter(a => !a.tipologia || daFare.includes(a.tipologia));
     const extra_secondarie_escluse = daFare.includes('EXTRA_RACCOLTA') ? calcolo.extra_secondarie_escluse : 0;
+
+    const rinvio = await controllo.dopo();
+    if (rinvio) return rinvio;
 
     // Bozze rimaste da un'elaborazione interrotta: non sono mai state valide.
     for (const d of existing.filter(d => d.stato === 'bozza' && tocca(d))) {
@@ -142,7 +174,7 @@ export default async function(req) {
         await Doc.update(d.id, {
           superato: true,
           // il giorno italiano: dopo la mezzanotte il giorno UTC e' ancora quello prima
-          motivo_superato: `Rielaborato il ${oggiRoma()} da ${user.full_name || user.email}: il documento era ${d.stato}${riaperto(d) ? ' dopo una riapertura' : ''} con totale ${Number(d.totale || 0).toFixed(2)} €, il nuovo calcolo dà ${Number(nuovo?.totale || 0).toFixed(2)} €.`,
+          motivo_superato: `Rielaborato il ${giornoIt(oggiRoma())} da ${user.full_name || user.email}: il documento era ${d.stato}${riaperto(d) ? ' dopo una riapertura' : ''} con totale ${euroIt(d.totale)} €, il nuovo calcolo dà ${euroIt(nuovo?.totale)} €.`,
         });
         superati.push({ tipologia: d.tipologia, stato: d.stato, totale: d.totale });
       } else {

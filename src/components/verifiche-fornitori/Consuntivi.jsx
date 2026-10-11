@@ -6,6 +6,17 @@ import { Loader2, Upload, Download, RefreshCw, Trash2, AlertTriangle, CheckCircl
 import Storia from '@/components/shared/Storia';
 import { formatKg } from '@/lib/utils';
 import { tabelleDalFile, scaricaExcelConsuntivo } from '@/lib/consuntivoFornitoreFile';
+import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
+import AvvisoCaricamenti from '@/components/shared/AvvisoCaricamenti';
+import { TIPI_PASSIVA } from '@/lib/registroCaricamenti';
+
+// IL MOTIVO DEL SERVER, NON IL CODICE DI STATO (chiusura dell'audit,
+// 11/10/2026). Il client delle funzioni lancia un errore per ogni risposta non
+// 2xx, e il suo message e' «Request failed with status code 409»: il congelamento
+// rinviato perche' le primarie si stanno riscrivendo arrivava a video cosi', in
+// inglese e senza dire quale caricamento ripetere. Il motivo sta nel corpo della
+// risposta, come in PrefatturaEcotyre.jsx.
+const motivoErrore = (e) => e?.response?.data?.error || e?.data?.error || (e && e.message ? e.message : String(e));
 
 // I CONSUNTIVI DI CHIUSURA MESE DEI FORNITORI (richiesta dell'utente, 29/09/2026).
 //
@@ -49,7 +60,7 @@ export default function Consuntivi({ isAdmin }) {
     try {
       const r = await base44.entities.ConsuntivoFornitore.filter({ anno, mese, canale }, 'fornitore', 200);
       setElenco(r || []);
-    } catch (e) { setErrore(e && e.message ? e.message : String(e)); }
+    } catch (e) { setErrore(motivoErrore(e)); }
   }, [anno, mese, canale]);
 
   useEffect(() => { setAperto(null); setEsito(null); carica(); }, [carica]);
@@ -66,10 +77,22 @@ export default function Consuntivi({ isAdmin }) {
       await carica();
       return d;
     } catch (e) {
-      setErrore(e && e.message ? e.message : String(e));
+      // Il messaggio del server, quando c'e' (per esempio il consuntivo gia'
+      // caricato da qualcun altro nel frattempo), invece del codice di stato.
+      const dati = e && e.response && e.response.data;
+      setErrore((dati && dati.error) || (e && e.message ? e.message : String(e)));
+      if (dati && dati.da_confermare) await carica();
       return null;
     } finally { setOccupato(''); }
   };
+
+  // UN CONSUNTIVO SOLO PER FORNITORE, RUOLO, MESE E CANALE (chiusura
+  // dell'audit, 11/10/2026). Ricaricare il file di un fornitore gia' caricato ne
+  // creava un secondo, e l'elenco mostrava due esiti per la stessa cosa. Ora il
+  // nuovo sostituisce il vecchio, dopo una conferma: il nome si confronta
+  // normalizzato, come fa il conto («Gatim» e «GATIM S.R.L.» sono lo stesso).
+  const giaCaricato = (nome, r) => elenco.find(x => x && x.ruolo === r
+    && normalizzaRagioneSociale(x.fornitore || '') === normalizzaRagioneSociale(nome || ''));
 
   const scegliFile = async (ev) => {
     const file = ev.target.files?.[0];
@@ -77,16 +100,24 @@ export default function Consuntivi({ isAdmin }) {
     if (!file) return;
     if (!fornitore.trim()) { setErrore('Scrivi prima di chi è il consuntivo.'); return; }
     if (!/\.(xlsx|xlsm|xls|csv)$/i.test(file.name)) { setErrore('Il consuntivo si carica in Excel o CSV.'); return; }
+    const prima = giaCaricato(fornitore.trim(), ruolo);
+    if (prima) {
+      const quando = prima.caricato_il ? new Date(prima.caricato_il).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+      const testoPrima = `${prima.fornitore}${quando ? `, caricato il ${quando}` : ''}${prima.file_nome ? ` dal file «${prima.file_nome}»` : ''}`;
+      if (!window.confirm(`C'è già il consuntivo di ${testoPrima} per ${MESI[mese - 1]} ${anno}. Lo sostituisco con «${file.name}»? Quello di prima resta scritto nelle note.`)) return;
+    }
     setOccupato('carica');
     try {
       const { tabelle, note } = await tabelleDalFile(file);
       await chiama({
         azione: 'carica', fornitore: fornitore.trim(), ruolo, anno, mese, canale,
         file_nome: file.name, tabelle, note_file: note,
+        // la conferma chiesta qui sopra: senza, il server non sostituisce niente
+        sostituisci: !!prima,
         importo_consuntivo: importo.trim() === '' ? null : Number(String(importo).replace(',', '.')),
       }, 'carica');
     } catch (e) {
-      setErrore(e && e.message ? e.message : String(e));
+      setErrore(motivoErrore(e));
       setOccupato('');
     }
   };
@@ -108,7 +139,7 @@ export default function Consuntivi({ isAdmin }) {
       const d = (r && r.data) || r;
       if (!d || d.error) throw new Error((d && d.error) || 'Il congelamento non è riuscito.');
       if (aperto) await chiama({ azione: 'confronta', id: aperto.id }, 'confronta');
-    } catch (e) { setErrore(e && e.message ? e.message : String(e)); }
+    } catch (e) { setErrore(motivoErrore(e)); }
     finally { setOccupato(''); }
   };
 
@@ -143,6 +174,11 @@ export default function Consuntivi({ isAdmin }) {
           </Button>
         )}
       </div>
+
+      {/* Il confronto e il congelamento leggono primarie e secondarie: se una
+          loro riscrittura e' in corso o non e' riuscita lo si dice qui, prima
+          che il congelamento torni rinviato (11/10/2026). */}
+      <AvvisoCaricamenti tipi={TIPI_PASSIVA} aggiorna={`${anno}|${mese}|${canale}|${occupato}`} />
 
       {isAdmin && (
         <div className="bg-card border rounded-lg p-3 space-y-2">
@@ -240,7 +276,7 @@ export default function Consuntivi({ isAdmin }) {
               {esito.testo}
             </span>
             {aperto && (
-              <Button size="sm" variant="outline" className="h-7" onClick={async () => { try { await scaricaExcelConsuntivo(aperto, esito); } catch (e) { setErrore(e && e.message ? e.message : String(e)); } }}>
+              <Button size="sm" variant="outline" className="h-7" onClick={async () => { try { await scaricaExcelConsuntivo(aperto, esito); } catch (e) { setErrore(motivoErrore(e)); } }}>
                 <Download className="w-3.5 h-3.5 mr-1" /> Esporta
               </Button>
             )}

@@ -26,6 +26,7 @@ import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { unisciQuote, ticketDi } from "./formulari.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
+import { TIPI_CARICAMENTO_MOVIMENTI, leggiRegistro, statoDelRegistro } from "./registroCaricamenti.ts";
 import { giornoMovimento, eTerminato, dateMancanti, dateIncoerenti, dateDaSistemare, testoDate, ordiniDaSistemare, mancantiOrdine, incoerentiOrdine, testoOrdine } from "./movimenti.ts";
 import { termineDi, testoConteggio } from "./termineRegistrazione.ts";
 import { normalizzaFir, FORMATO_FIR, distanzaFir as distanza, descriviDifferenzaFir } from "./numeroFir.ts";
@@ -165,155 +166,28 @@ export function intervalloSettimana(anno, settimana) {
 // sbagliata non era.
 
 // === caricamenti ===
-
-// I tipi di file che riscrivono gli archivi letti dalle verifiche.
-export const TIPI_CARICAMENTO_MOVIMENTI = ['primarie', 'primarie_rete', 'primarie_aci', 'secondarie', 'extra_raccolta'];
-
-// Gli archivi che ciascun tipo di caricamento riscrive. "primarie" riscrive
-// insieme le primarie di rete e quelle ACI, che un tempo si caricavano ciascuna
-// col suo tipo: un "primarie_rete" rimasto aperto a marzo non dice piu' niente
-// se dopo le primarie sono state ricaricate per intero. Senza questa tabella quel
-// caricamento storico, che nessuna scheda di Caricamento Dati puo' piu' chiudere,
-// bloccava per sempre ogni riconfronto.
-const ARCHIVI_DEL_TIPO = {
-  primarie: ['PrimariaRete', 'PrimariaAci'],
-  primarie_rete: ['PrimariaRete'],
-  primarie_aci: ['PrimariaAci'],
-  secondarie: ['Secondaria'],
-  extra_raccolta: ['ExtraRaccolta'],
-};
-const archiviDelTipo = (tipo) => ARCHIVI_DEL_TIPO[tipo] || [tipo];
-
-// Oltre questo tempo un caricamento ancora aperto si e' interrotto: la stessa
-// soglia di importaBlocco e di Caricamento Dati.
-const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
-
-// Quante righe del registro si guardano per tipo: bastano a scavalcare qualche
-// rifiuto a dati intatti arrivato dopo un caricamento fallito.
-const RIGHE_REGISTRO = 10;
-
-// created_date arriva in UTC senza la Z finale: si rimette, poi si prende il giorno italiano.
-const conZ = (v) => String(v).replace(/(Z|[+-]\d{2}:?\d{2})?$/, 'Z');
-const giornoCaricamento = (v) => (v ? giornoRoma(conZ(v)) : '');
-const istanteCaricamento = (v) => { const t = v ? new Date(conZ(v)).getTime() : NaN; return isNaN(t) ? 0 : t; };
-const istanteIso = (v) => (istanteCaricamento(v) ? new Date(istanteCaricamento(v)).toISOString() : '');
-
-// Una riga del registro che ha riscritto l'archivio: nata "in_corso" subito prima
-// di svuotarlo. La riconosce la modalita' "sostituzione" (importaBlocco la scrive
-// sempre, importEcotyreFile alla fine) oppure la fase, successiva allo
-// svuotamento, in cui importEcotyreFile si e' fermato; "Caricamento interrotto"
-// e' una riga rimasta aperta e chiusa dal caricamento dopo. I rifiuti di
-// "prepara" e dei controlli anti-regressione non hanno ne' l'una ne' l'altra:
-// l'archivio e' intatto e non bloccano niente.
-const FASE_DOPO_SVUOTAMENTO = /\(fase: (?:scrittura dei record|allineamento delle dichiarazioni mensili)\)|^Caricamento interrotto:/;
-const eraRiscrittura = (r) => r.modalita === 'sostituzione' || FASE_DOPO_SVUOTAMENTO.test(String(r.messaggio || ''));
-
-// Una riga che lascia l'archivio inaffidabile: aperta, oppure una riscrittura
-// finita in errore (archivio vuoto o a meta') o parziale (righe non scritte,
-// archivio "non allineato").
-const bloccante = (r) => r.esito === 'in_corso' || ((r.esito === 'errore' || r.esito === 'parziale') && eraRiscrittura(r));
-const riuscito = (r) => !bloccante(r) && r.esito !== 'errore';
+//
+// LA REGOLA STA IN registroCaricamenti.ts (chiusura dell'audit, 11/10/2026).
+// Qui c'era tutta: bloccante, riuscito, superato da un caricamento dopo. La
+// dashboard ne aveva un'altra, con lo stesso nome statoCaricamenti, che
+// conosceva solo «successo» e «in_corso»: dopo una riscrittura finita parziale i
+// motori rinviavano e la dashboard dava i dati per freschi. Ora la regola e' una
+// e sta in un modulo che ha anche lo specchio per le pagine; qui resta la
+// lettura che fanno i motori, con lo stesso risultato di prima.
+export { TIPI_CARICAMENTO_MOVIMENTI };
 
 /**
- * Lo stato dei caricamenti di ogni tipo: l'ultimo riuscito, che spiega un
- * gestionale non ancora aggiornato, e quello che ha lasciato l'archivio
- * inaffidabile, se dopo di lui non ne e' riuscito un altro: ancora "in_corso",
- * oppure una riscrittura finita in errore o parziale. Un archivio che si sta
- * riscrivendo, o che un caricamento interrotto o fallito ha lasciato vuoto o a
- * meta', non e' una base su cui rifare un confronto: l'esito verrebbe calcolato
- * su un archivio a meta' (regola 2).
- *
- * Fra le righe del registro si scavalcano i rifiuti a dati intatti: un file
- * sbagliato caricato dopo un caricamento fallito non rende buono l'archivio.
- *
- * Un caricamento aperto o fallito non conta piu' quando dopo di lui un
- * caricamento riuscito ha riscritto tutti i suoi archivi: un registro vecchio e
- * superato non ferma niente. Uno aperto da oltre dieci minuti e' interrotto, uno
- * fallito e' "errore": bloccano lo stesso, perche' l'archivio puo' essere a
- * meta', e chi li mostra dice che il caricamento va ripetuto.
+ * Lo stato dei caricamenti di ogni tipo, letto dal registro: { ultimi, in_corso }.
+ * La regola (l'ultimo riuscito, il caricamento che ha lasciato l'archivio
+ * inaffidabile, superato o no da uno riuscito dopo) e' statoDelRegistro in
+ * registroCaricamenti.ts; la lettura, una sola per tutti i tipi, e' leggiRegistro.
  *
  * Di ogni caricamento si tiene l'id: confrontando due letture si capisce se
  * nel frattempo ne e' finito un altro (caricamentiDuranteLettura).
  */
 export async function statoCaricamenti(base44, tipi = TIPI_CARICAMENTO_MOVIMENTI) {
-  const Log = base44.asServiceRole.entities.UploadLog;
-  // Si leggono anche i tipi che riscrivono gli stessi archivi di quelli chiesti:
-  // servono a capire se un caricamento rimasto aperto e' stato superato.
-  const archivi = new Set(tipi.flatMap(archiviDelTipo));
-  const daLeggere = [...new Set([...tipi, ...Object.keys(ARCHIVI_DEL_TIPO).filter(t => archiviDelTipo(t).some(a => archivi.has(a)))])];
-  // Tutti i tipi con una lettura sola: una per tipo, due volte per funzione, dopo
-  // un caricamento facevano una cinquantina di richieste solo per il registro
-  // (limite di richieste al minuto, 22/09/2026). Se la lettura unica e' piena e a
-  // un tipo non ha dato le sue RIGHE_REGISTRO righe, per quel tipo si rilegge come
-  // prima: il risultato e' lo stesso.
-  const MASSIMO_INSIEME = 200;
-  const insieme = (await Log.filter({ tipo_file: { $in: daLeggere } }, '-created_date', MASSIMO_INSIEME)) || [];
-  const perTipo = new Map(daLeggere.map(t => [t, []]));
-  for (const r of insieme) {
-    const l = perTipo.get(r.tipo_file);
-    if (l && l.length < RIGHE_REGISTRO) l.push(r);
-  }
-  const letti = await Promise.all(daLeggere.map(async (tipo) => {
-    const righe = insieme.length >= MASSIMO_INSIEME && perTipo.get(tipo).length < RIGHE_REGISTRO
-      ? ((await Log.filter({ tipo_file: tipo }, '-created_date', RIGHE_REGISTRO)) || [])
-      : perTipo.get(tipo);
-    // Dalla piu' recente: il primo riuscito chiude la ricerca, il primo bloccante
-    // prima di lui e' il caricamento che ha lasciato l'archivio inaffidabile.
-    let aperto = null;
-    for (const r of righe) {
-      if (riuscito(r)) break;
-      if (bloccante(r)) { aperto = r; break; }
-    }
-    return { tipo, buono: righe.find(riuscito) || null, aperto };
-  }));
-  const riscritto = (archivio, dopo) => letti.some(({ tipo, buono }) => buono
-    && istanteCaricamento(buono.created_date) > dopo && archiviDelTipo(tipo).includes(archivio));
-  const adesso = Date.now();
-  // creato_il e' l'istante, con la Z. concluso_il e' l'ultima scrittura della
-  // riga, cioe' la fine del caricamento: un esito salvato vale per l'archivio
-  // riscritto solo se e' successivo a questa, perche' uno calcolato mentre il
-  // caricamento scriveva e' successivo al suo inizio ma non alla sua fine.
-  const scheda = (r, tipo) => ({
-    id: r.id || null,
-    tipo_file: tipo,
-    data: giornoCaricamento(r.created_date),
-    creato_il: istanteIso(r.created_date),
-    concluso_il: istanteIso(r.updated_date) || istanteIso(r.created_date),
-    nome_file: String(r.nome_file || '').trim(),
-    utente: r.utente || '',
-    // Quanto c'era in archivio quando quel caricamento e' partito: per le
-    // primarie sono ORDINI distinti, per gli altri tipi sono le RIGHE
-    // dell'ultimo caricamento riuscito (il nome del campo dice "righe" per tutti
-    // e due, ed e' la ragione per cui questo commento esiste). Chi ne avvia un
-    // altro lo confronta con quello che trova adesso: se e' di meno, il
-    // caricamento di prima ha gia' svuotato qualche archivio e il controllo
-    // anti-regressione non ha piu' con che cosa accorgersi di un file monco.
-    righe_archivio_prima: typeof r.righe_archivio_prima === 'number' ? r.righe_archivio_prima : null,
-    // Una riga ancora "in_corso" che pero' dichiara di non essere riuscita: il
-    // caricamento e' finito senza scrivere niente e nessuno sta piu' scrivendo.
-    // Serve a distinguerla da un collega al lavoro in questo momento.
-    non_riuscito: String(r.messaggio || '').startsWith('Caricamento non riuscito'),
-  });
-
-  const ultimi = {};
-  const inCorso = [];
-  for (const { tipo, buono, aperto } of letti) {
-    if (!tipi.includes(tipo)) continue;
-    if (buono) ultimi[tipo] = scheda(buono, tipo);
-    if (!aperto) continue;
-    const inizio = istanteCaricamento(aperto.created_date);
-    if (archiviDelTipo(tipo).every(a => riscritto(a, inizio))) continue;
-    // Una riscrittura finita in errore o parziale e' un caricamento non
-    // riuscito: per chi la mostra vale come interrotta, e va ripetuta.
-    const fallito = aperto.esito !== 'in_corso';
-    inCorso.push({
-      ...scheda(aperto, tipo),
-      interrotto: fallito || adesso - inizio > FINESTRA_IN_CORSO_MS,
-      ...(fallito ? { esito: 'errore' } : {}),
-    });
-  }
-  inCorso.sort((a, b) => a.tipo_file.localeCompare(b.tipo_file));
-  return { ultimi, in_corso: inCorso };
+  const perTipo = await leggiRegistro(base44.asServiceRole.entities.UploadLog, tipi);
+  return statoDelRegistro(perTipo, tipi, Date.now());
 }
 
 /**

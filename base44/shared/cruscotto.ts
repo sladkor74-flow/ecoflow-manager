@@ -13,17 +13,47 @@ import { giornoRoma } from "./giornoItaliano.ts";
 import { statoRichiesta } from "./richiesteEct.ts";
 import { giorniFa } from "./indicatoriGiorno.ts";
 import { formatoKg } from "./formato.ts";
+import { statoDelRegistro, avvisoCaricamento, nomeArchivio, RIGHE_REGISTRO } from "./registroCaricamenti.ts";
 
 export const MESI_CRUSCOTTO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 // I tre documenti di un mese della fatturazione attiva, uno per canale.
 export const CANALI_ATTIVA = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
 const NOMI_CANALI_ATTIVA = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
-// Oltre questi giorni senza un caricamento riuscito un archivio si considera non aggiornato.
+// Oltre questi giorni un archivio si considera non aggiornato.
 export const GIORNI_DATI_VECCHI = 10;
-const FINESTRA_IN_CORSO_MS = 10 * 60 * 1000;
 
+// GLI ARCHIVI IN CUI UN GIORNO SENZA RIGHE VUOL DIRE UN FILE VECCHIO (chiusura
+// dell'audit, 11/10/2026). Il giorno del caricamento non dice fino a dove
+// arrivano i dati: un file scaricato dal portale tre settimane fa e caricato
+// ieri ha dentro i dati di tre settimane fa. Ma il «fino al» dice un file
+// vecchio solo dove un vuoto di giorni non e' un periodo senza movimenti: le
+// primarie, e la fotografia dei non dichiarati, che e' il giorno in cui si
+// carica. Nelle terziarie, nelle secondarie e nelle dichiarazioni di
+// trattamento settimane senza righe sono normali (file del 26/09/2026: 63 giorni
+// senza terziarie terminate fra dicembre 2025 e febbraio 2026, e l'ultima e' del
+// 19/07; nel report delle dichiarazioni 29 giorni senza una dichiarazione SMOCO
+// fra maggio e giugno 2026): li' la voce gialla resta sul giorno del caricamento,
+// e il «fino al» si mostra soltanto. Altrimenti la dashboard griderebbe al lupo
+// ogni estate, e un avviso che grida al lupo fa ignorare quelli veri.
+export const FINO_AL_FITTO = ['primarie', 'ordini_non_dichiarati'];
+
+// ANCHE LE PRIMARIE HANNO I LORO BUCHI (revisione della chiusura, 11/10/2026).
+// Si era scritto che si chiudono tutti i giorni, e la voce gialla si accendeva
+// quando il «fino al» aveva piu' di dieci giorni. Nel file vero (PRIMARIE.xlsx
+// del 09/10/2026, 6.028 terminati SMOCO con la fine trasporto) non c'e' nessuna
+// fine trasporto fra il 22/12/2025 e l'08/01/2026 (17 giorni) ne' fra il 07/08 e
+// il 18/08/2026 (11 giorni): un file caricato il 05/01 la mattina stessa, completo,
+// faceva dire «dati fino al 22/12/2025 ... fermi a quel giorno», e dal 2 al 7
+// gennaio succedeva ogni anno. Ora la voce sul «fino al» non guarda oggi ma lo
+// scarto fra il giorno del caricamento e l'ultimo giorno dentro il file, e si
+// accende oltre tre settimane: piu' del buco piu' lungo del file vero, con
+// qualche giorno di margine per un Natale con un fine settimana in piu' o un
+// file scaricato il giorno prima. Un file che invecchia senza essere ricaricato
+// lo dice gia' l'altra voce, sul giorno del caricamento, dopo dieci giorni.
+export const GIORNI_SCARTO_FINO_AL = 21;
+
+const ilGiorno = (g) => String(g || '').split('-').reverse().join('/');
 const giorniFra = (a, b) => Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10))) / 86400000);
-const istante = (v) => new Date(String(v || '').replace(/(Z|[+-]\d{2}:?\d{2})?$/, 'Z')).getTime();
 
 /** Da quanto aspettano gli ordini aperti: entro 30, 31-60, oltre 60 giorni, e il piu' vecchio. */
 export function etaArretrato(ordini, oggi) {
@@ -39,21 +69,63 @@ export function etaArretrato(ordini, oggi) {
   return eta;
 }
 
-/** L'ultimo caricamento riuscito di ogni tipo di file, e i caricamenti rimasti a meta'. */
-export function statoCaricamenti(logs, oggi, adessoMs, tipi) {
-  const perTipo = new Map();
-  const interrotti = [];
-  for (const l of [...(logs || [])].sort((a, b) => String(b.created_date).localeCompare(String(a.created_date)))) {
-    if (l.esito === 'in_corso') { if (adessoMs - istante(l.created_date) > FINESTRA_IN_CORSO_MS) interrotti.push({ tipo_file: l.tipo_file, nome_file: l.nome_file || '', utente: l.utente || '', il: giornoRoma(l.created_date), ms: istante(l.created_date) }); continue; }
-    if (l.esito !== 'successo' || perTipo.has(l.tipo_file)) continue;
-    const il = giornoRoma(l.created_date);
-    perTipo.set(l.tipo_file, { tipo_file: l.tipo_file, nome_file: l.nome_file || '', utente: l.utente || '', il, giorni_fa: il ? giorniFra(il, oggi) : null, ms: istante(l.created_date) });
-  }
-  // Un caricamento interrotto e poi rifatto non e' piu' un problema
-  const ancoraAperti = interrotti.filter(i => { const u = perTipo.get(i.tipo_file); return !u || u.ms < i.ms; });
+/**
+ * A quando sono aggiornati i dati, file per file, e i caricamenti che rendono un
+ * archivio inaffidabile.
+ *
+ * UNA REGOLA SOLA (chiusura dell'audit, 11/10/2026). Qui c'era una seconda
+ * statoCaricamenti, con le sue regole: conosceva solo «successo» e «in_corso»
+ * scaduto. Dopo una riscrittura delle primarie finita «parziale» i motori
+ * (alert, verifiche, predittivita', il programma del mercoledi') rinviavano con
+ * «il caricamento va ripetuto», e la dashboard taceva e mostrava la data
+ * dell'ultimo successo come se i dati fossero freschi. Ora la regola e' quella
+ * dei motori, in registroCaricamenti.ts (bloccante, riuscito, superato da un
+ * caricamento riuscito dopo): una riscrittura non riuscita compare come
+ * «Caricamento non riuscito: ricarica il file», e la freschezza e' quella
+ * dell'ultimo caricamento riuscito.
+ *
+ * logs: le righe del registro (di qualunque tipo, in qualunque ordine). finoAl:
+ * { tipo_file: { fino_al, cosa, perche } } da finoAlPerTipo (statoArchivi.ts);
+ * senza, la freschezza si misura solo sul giorno del caricamento.
+ */
+export function freschezzaArchivi(logs, oggi, adessoMs, tipi, finoAl = {}) {
+  const stato = statoDelRegistro(logs || [], tipi, adessoMs);
+  const nelRegistro = (t) => (logs || []).filter(l => l && l.tipo_file === t).length;
+  const archivi = tipi.map(t => {
+    const u = stato.ultimi[t] || null;
+    const aperto = stato.in_corso.find(x => x.tipo_file === t) || null;
+    const il = (u && u.data) || null;
+    const f = (finoAl && finoAl[t]) || null;
+    const finoAlGiorno = (f && f.fino_al) || null;
+    const giorniFaCaricato = il ? giorniFra(il, oggi) : null;
+    const giorniFaFinoAl = finoAlGiorno ? giorniFra(finoAlGiorno, oggi) : null;
+    // Quanti giorni prima del caricamento si fermano i dati del file. Negativo
+    // se il «fino al» e' nel futuro (una data sbagliata nel file): non fa
+    // sembrare fresco un file vecchio, perche' allora conta il caricamento.
+    const scartoFinoAl = il && finoAlGiorno ? giorniFra(finoAlGiorno, il) : null;
+    const suFinoAl = FINO_AL_FITTO.includes(t) && scartoFinoAl !== null && scartoFinoAl > GIORNI_SCARTO_FINO_AL;
+    const vecchioCaricamento = giorniFaCaricato !== null && giorniFaCaricato > GIORNI_DATI_VECCHI;
+    const eta = suFinoAl ? giorniFaFinoAl : giorniFaCaricato;
+    return {
+      tipo_file: t, nome: nomeArchivio(t),
+      nome_file: (u && u.nome_file) || '', utente: (u && u.utente) || '',
+      il, giorni_fa: giorniFaCaricato,
+      fino_al: finoAlGiorno, fino_al_cosa: (f && f.cosa) || '', fino_al_perche: (f && f.perche) || '', fino_al_giorni_fa: giorniFaFinoAl,
+      fino_al_scarto: scartoFinoAl,
+      eta_giorni: eta, misurata_su: suFinoAl ? 'fino_al' : 'caricamento',
+      vecchio: suFinoAl || vecchioCaricamento,
+      // Le righe del tipo nel registro: «mai caricato» e «nessuno degli ultimi
+      // riuscito» sono due cose diverse.
+      righe_nel_registro: nelRegistro(t),
+      stato: aperto ? avvisoCaricamento(aperto).stato : null,
+    };
+  });
+  const inCorso = stato.in_corso.map(x => ({ ...x, nome: nomeArchivio(x.tipo_file), avviso: avvisoCaricamento(x) }));
   return {
-    archivi: (tipi || [...perTipo.keys()]).map(t => perTipo.get(t) || { tipo_file: t, nome_file: '', utente: '', il: null, giorni_fa: null }),
-    interrotti: ancoraAperti,
+    archivi,
+    in_corso: inCorso,
+    // Quelli da ricaricare: interrotti o non riusciti (non chi sta caricando adesso).
+    interrotti: inCorso.filter(x => x.avviso.stato !== 'in_corso'),
   };
 }
 
@@ -74,30 +146,76 @@ export function statoCaricamenti(logs, oggi, adessoMs, tipi) {
 export function statoMesiAttiva(documenti, prefatture, anno, oggi) {
   const annoNum = Number(anno);
   const ultimoFinito = Number(oggi.slice(0, 4)) > annoNum ? 11 : Number(oggi.slice(5, 7)) - 2;   // il mese in corso non e' ancora da fatturare
-  const mesi = [];
   const statoDi = (docs) => {
     const stati = [...new Set(docs.map(d => d.stato))];
     return !docs.length ? 'da elaborare' : stati.length === 1 ? stati[0] : stati.join(' / ');
   };
-  for (let m = 0; m <= ultimoFinito; m++) {
+  const meseDi = (a, m) => {
     const nome = MESI_CRUSCOTTO[m];
-    const docs = (documenti || []).filter(d => d.tipo === 'ATTIVA' && Number(d.anno) === annoNum && d.mese === nome && !d.superato && d.stato !== 'bozza');
+    const docs = (documenti || []).filter(d => d.tipo === 'ATTIVA' && Number(d.anno) === a && d.mese === nome && !d.superato && d.stato !== 'bozza');
     const conCanale = docs.some(d => CANALI_ATTIVA.includes(d.tipologia));
     const canali = conCanale ? Object.fromEntries(CANALI_ATTIVA.map(k => {
       const dk = docs.filter(d => d.tipologia === k);
       return [k, { elaborato: dk.length > 0, stato: statoDi(dk), chiuso: dk.length > 0 && dk.every(d => d.stato === 'chiusa') }];
     })) : null;
-    mesi.push({
+    return {
       mese: nome,
+      anno: a,
+      // Il nome a video: col suo anno quando non e' quello che si guarda.
+      etichetta: a === annoNum ? nome : `${nome} ${a}`,
       elaborato: docs.length > 0,
       stato: statoDi(docs),
       chiuso: canali ? CANALI_ATTIVA.every(k => canali[k].chiuso) : docs.length > 0 && docs.every(d => d.stato === 'chiusa'),
-      prefattura: (prefatture || []).some(p => Number(p.anno) === annoNum && p.mese === nome && !p.superata),
+      prefattura: (prefatture || []).some(p => Number(p.anno) === a && p.mese === nome && !p.superata),
       canali,
       canali_mancanti: canali ? CANALI_ATTIVA.filter(k => !canali[k].elaborato) : [],
-    });
+    };
+  };
+  // I MESI DELL'ANNO PRIMA ANCORA APERTI (chiusura dell'audit, 11/10/2026).
+  // L'ultimo mese finito si contava sull'anno in corso: il 15 gennaio l'elenco
+  // era vuoto e il 10 febbraio c'era solo gennaio. Dicembre, e un novembre
+  // ancora aperto, sparivano dalla dashboard proprio quando vanno chiusi. Si era
+  // corretto per gennaio e febbraio, e il 1° marzo sparivano di nuovo: un
+  // dicembre mai elaborato non diventa a posto perche' e' cominciato marzo.
+  // Ora i mesi dell'anno prima non ancora chiusi restano finche' non si
+  // chiudono, in qualunque mese; quelli chiusi sono a posto e non hanno niente
+  // da dire. Si parte dal primo mese dell'anno prima che ha un documento: i
+  // mesi fatturati prima che il gestionale esistesse non si sono mai elaborati
+  // qui, e non c'e' niente da chiudere (un anno senza documenti non si guarda).
+  const mesi = [];
+  for (const a of anniMesiAttiva(annoNum, oggi)) {
+    if (a === annoNum) continue;
+    const mesiPrima = Array.from({ length: 12 }, (_, m) => meseDi(a, m));
+    const primo = mesiPrima.findIndex(x => x.elaborato);
+    if (primo < 0) continue;
+    for (const x of mesiPrima.slice(primo)) if (!x.chiuso) mesi.push(x);
   }
+  for (let m = 0; m <= ultimoFinito; m++) mesi.push(meseDi(annoNum, m));
   return mesi;
+}
+
+/**
+ * Gli anni di cui servono i documenti della fatturazione attiva: quello che si
+ * guarda e, se e' l'anno in corso, anche quello prima, in qualunque mese (i suoi
+ * mesi non ancora chiusi restano finche' non si chiudono). Guardando un anno
+ * passato si vedono i suoi dodici mesi, e basta.
+ */
+export function anniMesiAttiva(anno, oggi) {
+  const annoNum = Number(anno);
+  const annoOggi = Number(String(oggi).slice(0, 4));
+  return annoNum === annoOggi ? [annoNum - 1, annoNum] : [annoNum];
+}
+
+/**
+ * Se servono le prefatture dell'anno prima: solo se c'e' un suo documento
+ * elaborato e non ancora chiuso, l'unico caso in cui la dashboard chiede la
+ * prefattura di quel mese. Le prefatture portano le righe del portale, e
+ * leggerle tutte a ogni apertura della dashboard per niente costa.
+ */
+export function servonoPrefattureAnnoPrima(documenti, anno, oggi) {
+  const anni = anniMesiAttiva(anno, oggi);
+  if (anni.length < 2) return false;
+  return (documenti || []).some(d => d && d.tipo === 'ATTIVA' && Number(d.anno) === anni[0] && !d.superato && d.stato !== 'bozza' && d.stato !== 'chiusa');
 }
 
 const GRAVITA = { critico: 0, attenzione: 1, info: 2 };
@@ -178,12 +296,26 @@ export function cruscotto(dati) {
     voce('Date obbligatorie', v.gravita, v.titolo, v.dettaglio, v.link);
   }
 
-  // Caricamenti: interrotti e dati vecchi
-  const caricamenti = statoCaricamenti(dati.uploadLogs, oggi, dati.adessoMs, dati.tipiFile);
-  for (const i of caricamenti.interrotti) voce('Caricamento dati', 'critico', `Caricamento interrotto: ${i.tipo_file}`, `Avviato${i.utente ? ` da ${i.utente}` : ''} il ${i.il.split('-').reverse().join('/')} e mai concluso: l'archivio può essere vuoto o incompleto. Ricarica il file.`, '/caricamento-dati');
+  // Caricamenti: non riusciti, interrotti, in corso, e dati vecchi. La regola e'
+  // quella dei motori (freschezzaArchivi, registroCaricamenti.ts) e il testo e'
+  // lo stesso dell'avviso sopra i totali delle pagine (avvisoCaricamento).
+  const tipiFile = dati.tipiFile || [...new Set((dati.uploadLogs || []).map(l => l && l.tipo_file).filter(Boolean))];
+  const caricamenti = freschezzaArchivi(dati.uploadLogs, oggi, dati.adessoMs, tipiFile, dati.finoAl || {});
+  for (const x of caricamenti.in_corso) voce('Caricamento dati', x.avviso.gravita, x.avviso.titolo, x.avviso.dettaglio, '/caricamento-dati');
   for (const a of caricamenti.archivi) {
-    if (a.il === null) voce('Caricamento dati', 'attenzione', `Mai caricato: ${a.tipo_file}`, 'Nel registro non c\'è nessun caricamento riuscito di questo file.', '/caricamento-dati');
-    else if (a.giorni_fa > GIORNI_DATI_VECCHI) voce('Caricamento dati', 'attenzione', `${a.tipo_file}: dati di ${a.giorni_fa} giorni fa`, `Ultimo caricamento riuscito il ${a.il.split('-').reverse().join('/')}${a.nome_file ? ` (${a.nome_file})` : ''}. I numeri di questo archivio sono fermi a quel giorno.`, '/caricamento-dati');
+    const fino = a.fino_al ? ` Dentro, i dati arrivano fino al ${ilGiorno(a.fino_al)} (${a.fino_al_cosa}).` : '';
+    if (a.il === null) {
+      voce('Caricamento dati', 'attenzione', `Mai caricato: ${a.nome}`, (a.righe_nel_registro >= RIGHE_REGISTRO
+        ? `Nessuno degli ultimi ${a.righe_nel_registro} caricamenti di questo file nel registro è riuscito.`
+        : a.righe_nel_registro ? 'Nel registro ci sono solo caricamenti di questo file non riusciti.' : 'Nel registro non c\'è nessun caricamento riuscito di questo file.') + fino, '/caricamento-dati');
+    } else if (a.vecchio && a.misurata_su === 'fino_al') {
+      voce('Caricamento dati', 'attenzione', `${a.nome}: dati fino al ${ilGiorno(a.fino_al)}`,
+        `Caricato il ${ilGiorno(a.il)}${a.nome_file ? ` (${a.nome_file})` : ''}, ma dentro i dati arrivano fino al ${ilGiorno(a.fino_al)} (${a.fino_al_cosa}): ${a.fino_al_scarto} giorni prima del caricamento, ${a.eta_giorni} giorni fa. `
+        + 'Più di tre settimane senza dati prima del caricamento non sono un periodo senza movimenti (nemmeno a Natale o a Ferragosto): il file sembra scaricato dal portale molto prima. I numeri di questo archivio sono fermi a quel giorno.',
+        '/caricamento-dati');
+    } else if (a.vecchio) {
+      voce('Caricamento dati', 'attenzione', `${a.nome}: dati di ${a.giorni_fa} giorni fa`, `Ultimo caricamento riuscito il ${ilGiorno(a.il)}${a.nome_file ? ` (${a.nome_file})` : ''}. I numeri di questo archivio sono fermi a quel giorno.${fino}`, '/caricamento-dati');
+    }
   }
 
   // Arretrato, per canale
@@ -194,15 +326,15 @@ export function cruscotto(dati) {
 
   // Fatturazione attiva: mesi finiti e non ancora elaborati, o senza prefattura
   const mesiAttiva = statoMesiAttiva(dati.documenti, dati.prefatture, anno, oggi);
-  const daElaborare = mesiAttiva.filter(m => !m.elaborato).map(m => m.mese);
+  const daElaborare = mesiAttiva.filter(m => !m.elaborato).map(m => m.etichetta);
   // Un mese elaborato puo' avere un canale indietro: si dice quale, invece di
   // darlo per elaborato perche' lo e' un altro canale.
   const canaleMancante = mesiAttiva.filter(m => m.elaborato && m.canali_mancanti.length);
   // La prefattura del portale copre solo rete e ACI: la chiede un mese in cui
   // uno dei due e' elaborato e non ancora chiuso, non l'extra raccolta.
-  const senzaPrefattura = mesiAttiva.filter(m => m.elaborato && !m.prefattura && (m.canali ? ['RETE', 'ACI'].some(k => m.canali[k].elaborato && !m.canali[k].chiuso) : !m.chiuso)).map(m => m.mese);
+  const senzaPrefattura = mesiAttiva.filter(m => m.elaborato && !m.prefattura && (m.canali ? ['RETE', 'ACI'].some(k => m.canali[k].elaborato && !m.canali[k].chiuso) : !m.chiuso)).map(m => m.etichetta);
   if (daElaborare.length) voce('Fatturazione attiva', 'attenzione', `${daElaborare.length} ${daElaborare.length === 1 ? 'mese finito non ancora elaborato' : 'mesi finiti non ancora elaborati'}`, daElaborare.join(', '), '/fatturazione');
-  if (canaleMancante.length) voce('Fatturazione attiva', 'attenzione', `${canaleMancante.length} ${canaleMancante.length === 1 ? 'mese con un canale non elaborato' : 'mesi con un canale non elaborato'}`, canaleMancante.map(m => `${m.mese}: ${m.canali_mancanti.map(k => NOMI_CANALI_ATTIVA[k]).join(', ')}`).join(' · '), '/fatturazione');
+  if (canaleMancante.length) voce('Fatturazione attiva', 'attenzione', `${canaleMancante.length} ${canaleMancante.length === 1 ? 'mese con un canale non elaborato' : 'mesi con un canale non elaborato'}`, canaleMancante.map(m => `${m.etichetta}: ${m.canali_mancanti.map(k => NOMI_CANALI_ATTIVA[k]).join(', ')}`).join(' · '), '/fatturazione');
   if (senzaPrefattura.length) voce('Fatturazione attiva', 'info', `Prefattura Ecotyre non caricata: ${senzaPrefattura.join(', ')}`, 'Il confronto con la prefattura si fa prima di esportare.', '/fatturazione');
 
   // Qualifica dei fornitori
@@ -256,7 +388,6 @@ export function cruscotto(dati) {
   // il controllo ha smesso di girare lo si dice, perche' un guardiano che
   // dorme e un guardiano che non trova niente si assomigliano troppo.
   const fg = dati.fotografiaGiorno;
-  const ilGiorno = (g) => String(g || '').split('-').reverse().join('/');
   // DUE COSE DIVERSE, DUE VOCI DIVERSE (10/10/2026).
   //
   // L'esito «da guardare» ha due cause: un impianto che si scosta dal portale e
@@ -283,8 +414,11 @@ export function cruscotto(dati) {
     voce('Dichiarazioni', 'critico',
       `${dopp.length === 1 ? 'Una dichiarazione è doppia' : `${dopp.length} dichiarazioni sono doppie`}`,
       `${dopp.slice(0, 3).map(x => `${x.sito} ${x.mese} ${x.canale === 'RETE' ? 'rete' : x.canale}`).join(', ')}`
-      + `${dopp.length > 3 ? ` e altre ${dopp.length - 3}` : ''}. Finche' ci sono, i numeri dipendono da quale modulo si guarda: il riepilogo ne tiene una sola, le giacenze le sommano`
-      + `${kgInPiu ? ` (${formatoKg(kgInPiu)} kg di troppo nelle giacenze)` : ''}. Controllo del ${ilGiorno(fg.giorno)}.`,
+      // Il testo dice quello che fanno i due moduli dall'11/10/2026: leggono le
+      // dichiarazioni con leggiDichiarazioni e di due gemelle contano la prima.
+      // Prima diceva che le giacenze le sommavano, e non e' piu' vero.
+      + `${dopp.length > 3 ? ` e altre ${dopp.length - 3}` : ''}. Finché ci sono, Giacenze e Dichiarazioni contano la prima riga e ignorano le altre`
+      + `${kgInPiu ? ` (${formatoKg(kgInPiu)} kg di troppo, nelle righe ignorate)` : ''}: se quella giusta è un'altra, dichiarato e giacenza sono sbagliati in tutti e due. Il doppione va tolto. Controllo del ${ilGiorno(fg.giorno)}.`,
       '/dichiarazioni-impianti');
   }
   const etaFoto = fg ? giorniFa(fg.giorno, oggi) : null;

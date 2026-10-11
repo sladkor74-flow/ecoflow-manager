@@ -8,8 +8,13 @@ import { Loader2, Play, CheckCircle, AlertTriangle, Lock, RotateCcw } from 'luci
 import { useToast } from '@/components/ui/use-toast';
 import { Input } from '@/components/ui/input';
 import { oggiRoma } from '@/lib/giornoItaliano';
+// Gli importi all'italiana, e «—» se manca (chiusura dell'audit, 11/10/2026):
+// prima «€ 372976.50», e zero per un totale che non c'era.
+import { euro } from '@/lib/formatoSoldi';
 import RiepilogoEcotyre from './RiepilogoEcotyre';
 import AttivaAnomalie from './AttivaAnomalie';
+import AvvisoCaricamenti from '@/components/shared/AvvisoCaricamenti';
+import { TIPI_ATTIVA } from '@/lib/registroCaricamenti';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const ANNI = anniDaScegliere();
@@ -156,6 +161,12 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
         </Button>
       </div>
 
+      {/* L'anteprima e l'elaborazione leggono le primarie: mentre si
+          riscrivono, o dopo una riscrittura non riuscita, i totali qui sotto
+          possono essere a meta' e «Elabora» torna rinviato. Lo si dice prima
+          (11/10/2026). */}
+      <AvvisoCaricamenti tipi={TIPI_ATTIVA} aggiorna={`${anno}|${mese}|${versione}`} />
+
       {/* Riepilogo automatico dovuto da Ecotyre (anteprima) */}
       <RiepilogoEcotyre periodo={periodo} onAnomalieChange={setAnomalieAnteprima} onVaiTariffe={onVaiTariffe} versione={versione} />
 
@@ -195,7 +206,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
                     <h3 className="font-heading font-semibold">{t.label}</h3>
                     <span className={`text-xs px-2 py-0.5 rounded ${STATI[doc.stato] || ''}`}>{doc.stato}</span>
                   </div>
-                  <p className="text-2xl font-bold">€ {(doc.totale || 0).toFixed(2)}</p>
+                  <p className="text-2xl font-bold tabular-nums">{euro(doc.totale)}</p>
                   <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs mt-2">
                     <span className="text-muted-foreground">Prestazioni</span><span className="text-right tabular-nums font-medium">{doc.numero_voci || 0}</span>
                     <span className="text-muted-foreground">Verificate</span><span className="text-right tabular-nums font-medium text-green-600">{verificate}</span>
@@ -227,7 +238,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
               {TIPS.map(t => (
                 <div key={t.key} className="flex items-baseline justify-between gap-2 border-t pt-2 sm:border-t-0 sm:pt-0">
                   <span className="text-sm font-medium">{t.label}</span>
-                  <span className="text-xl font-bold tabular-nums">€ {(data[t.key]?.documento?.totale || 0).toFixed(2)}</span>
+                  <span className="text-xl font-bold tabular-nums">{euro(data[t.key]?.documento?.totale)}</span>
                 </div>
               ))}
             </div>

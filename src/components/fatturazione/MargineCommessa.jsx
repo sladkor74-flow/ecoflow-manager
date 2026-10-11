@@ -6,6 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, RefreshCw, FileSpreadsheet, AlertTriangle, Info } from 'lucide-react';
 import { formatTonnellate, formatNumber, formatPercentuale } from '@/lib/utils';
+import AvvisoCaricamenti from '@/components/shared/AvvisoCaricamenti';
+import { TIPI_PASSIVA } from '@/lib/registroCaricamenti';
 
 const NOMI = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 const ANNI = anniDaScegliere();
@@ -85,6 +87,11 @@ export default function MargineCommessa() {
           <span>Sono gli stessi numeri delle due fatturazioni: il ricavo è il dovuto da Ecotyre, il costo è la passiva del mese. Il costo di un mese comprende stoccaggio, trattamento e secondarie di quel mese, che possono riguardare tonnellate raccolte prima: il singolo mese oscilla, il numero che conta è quello dell'anno. Un viaggio di secondaria che porta rete e ACI insieme, a prezzo per viaggio, pesa su tutti e due i margini in proporzione ai chili. I tre canali non si sommano.</span>
         </p>
       </div>
+
+      {/* Il margine rifa' attiva e passiva: legge primarie e secondarie. Mentre
+          si riscrivono, o dopo una riscrittura non riuscita, il margine e' a
+          meta': lo si dice sopra i totali (11/10/2026). */}
+      <AvvisoCaricamenti tipi={TIPI_PASSIVA} aggiorna={`${anno}|${loading}`} />
 
       {loading && <div className="flex items-center justify-center py-10 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Calcolo del margine sui dati di oggi...</div>}
       {errore && <div className="border border-destructive/40 bg-destructive/5 rounded-lg p-4 text-sm text-destructive flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> {errore}</div>}

@@ -14,6 +14,9 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 // storico), nome_file, replace_existing?, conferma_forzatura? }
 export default async function(req) {
   let nome_file = 'N/D', file_url = null, file_uri = null;
+  // Se l'anagrafica e' gia' stata toccata: da li' in poi un errore non e' piu'
+  // un rifiuto a dati intatti (vedi la riga del registro, piu' sotto).
+  let svuotato = false;
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
@@ -190,6 +193,9 @@ export default async function(req) {
     let imported = 0, failed = 0, lastError = null;
 
     if (replace_existing !== false) {
+      // Prima della cancellazione: una cancellazione che si ferma a meta' lascia
+      // l'anagrafica gia' incompleta.
+      svuotato = true;
       await base44.asServiceRole.entities.Pdr.deleteMany({});
     }
 
@@ -211,8 +217,18 @@ export default async function(req) {
     }
 
     const esito = failed === 0 ? 'successo' : (imported > 0 ? 'parziale' : 'errore');
+    // LA RIGA DICE SE HA RISCRITTO L'ANAGRAFICA (chiusura dell'audit,
+    // 11/10/2026). Era l'unico caricamento che non scriveva la modalita': dopo
+    // lo svuotamento, un blocco che non entrava dava «parziale» senza
+    // «sostituzione», e per la regola del registro (registroCaricamenti.ts)
+    // quello e' un caricamento riuscito. L'anagrafica con cento PDR in meno
+    // risultava «caricata oggi», e la dashboard non diceva piu' niente. Con la
+    // modalita' una riscrittura finita parziale o in errore si dice «non
+    // riuscita: ricarica il file»; un'aggiunta parziale resta un caricamento
+    // riuscito, perche' l'anagrafica di prima e' intatta.
     const riga = await base44.asServiceRole.entities.UploadLog.create({
       tipo_file: 'pdr', nome_file, ...riferimentoDaSalvare({ file_uri, file_url }),
+      modalita: replace_existing !== false ? 'sostituzione' : 'aggiunta',
       righe_importate: imported, righe_fallite: failed, esito,
       messaggio: `${imported} PDR importati su ${records.length} totali (foglio: ${sheetName})`,
       foglio_usato: sheetName, forzato: !!conferma_forzatura
@@ -240,8 +256,11 @@ export default async function(req) {
   } catch (error) {
     try {
       const base44 = conLimiteRichieste(createClientFromRequest(req));
+      // Un errore dopo lo svuotamento ha lasciato l'anagrafica vuota o a meta':
+      // e' una riscrittura non riuscita, non un file rifiutato a dati intatti.
       await base44.asServiceRole.entities.UploadLog.create({
         tipo_file: 'pdr', nome_file, ...riferimentoDaSalvare({ file_uri, file_url }), righe_importate: 0, righe_fallite: 0,
+        ...(svuotato ? { modalita: 'sostituzione' } : {}),
         esito: 'errore', messaggio: error.message || 'Errore imprevisto'
       });
     } catch (_) {}

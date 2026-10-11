@@ -2,7 +2,9 @@
 // gestire, l'arretrato, i caricamenti, i mesi della fatturazione. In fondo le
 // dichiarazioni riconosciute a portale (base44/shared/agganciaDichiarazioni.ts),
 // da cui dipendono la quadratura e i mesi "caricati". npm run prove
-import { cruscotto, etaArretrato, statoCaricamenti, statoMesiAttiva, nomeRegola } from '../base44/shared/cruscotto.ts';
+import { cruscotto, etaArretrato, statoMesiAttiva, nomeRegola } from '../base44/shared/cruscotto.ts';
+import * as C from '../base44/shared/cruscotto.ts';
+import { statoCaricamenti as statoDeiMotori } from '../base44/shared/reportSettimanali.ts';
 import { caricamentiPortale, allineaDalPortale, confrontaConIlPortale, canaliDaScrivere } from '../base44/shared/agganciaDichiarazioni.ts';
 
 let ok = 0, ko = 0;
@@ -29,22 +31,126 @@ const logs = [
   { tipo_file: 'pdr', esito: 'in_corso', created_date: '2026-09-20T17:55:00' },                                // cinque minuti fa: in corso davvero
   { tipo_file: 'pdr', esito: 'errore', created_date: '2026-09-19T08:00:00' },
 ];
-const c = statoCaricamenti(logs, OGGI, ADESSO, ['primarie', 'secondarie', 'terziarie', 'pdr']);
+// Dalla chiusura dell'audit (11/10/2026) la dashboard usa la regola dei motori:
+// freschezzaArchivi (cruscotto.ts) su statoDelRegistro (registroCaricamenti.ts).
+// Le verifiche di prima restano: la regola nuova le soddisfa tutte.
+const freschezza = (registro, tipi) => (C.freschezzaArchivi ? C.freschezzaArchivi(registro, OGGI, ADESSO, tipi) : C.statoCaricamenti(registro, OGGI, ADESSO, tipi));
+const c = freschezza(logs, ['primarie', 'secondarie', 'terziarie', 'pdr']);
 verifica('l\'ultimo riuscito per tipo, coi giorni', c.archivi[0].il === '2026-09-18' && c.archivi[0].giorni_fa === 2 && c.archivi[2].giorni_fa === 25 && c.archivi[3].il === null);
 verifica('interrotto solo chi e\' fermo da oltre dieci minuti', c.interrotti.length === 1 && c.interrotti[0].tipo_file === 'secondarie');
-const rifatto = statoCaricamenti([{ tipo_file: 'secondarie', esito: 'successo', created_date: '2026-09-20T10:00:00' }, ...logs], OGGI, ADESSO, ['secondarie']);
+const rifatto = freschezza([{ tipo_file: 'secondarie', esito: 'successo', created_date: '2026-09-20T10:00:00' }, ...logs], ['secondarie']);
 verifica('un caricamento interrotto alle 9 e rifatto alle 10 non e\' piu\' un problema', rifatto.interrotti.length === 0, JSON.stringify(rifatto.interrotti));
-const nonRifatto = statoCaricamenti([{ tipo_file: 'secondarie', esito: 'successo', created_date: '2026-09-20T08:00:00' }, ...logs], OGGI, ADESSO, ['secondarie']);
+const nonRifatto = freschezza([{ tipo_file: 'secondarie', esito: 'successo', created_date: '2026-09-20T08:00:00' }, ...logs], ['secondarie']);
 verifica('se l\'ultimo riuscito e\' di PRIMA dell\'interruzione, il problema resta', nonRifatto.interrotti.length === 1);
 // Un caricamento fallito dopo lo svuotamento resta "in_corso" (importEcotyreFile,
 // importaBlocco); un file sbagliato caricato dopo si chiude in "errore" a dati
 // intatti, e non deve nascondere l'archivio rimasto vuoto.
-const fallito = statoCaricamenti([
+const fallito = freschezza([
   { tipo_file: 'secondarie', esito: 'errore', created_date: '2026-09-20T12:00:00', messaggio: 'Formato file non valido' },
   { tipo_file: 'secondarie', esito: 'in_corso', created_date: '2026-09-20T11:00:00', messaggio: 'Caricamento non riuscito: nessuna riga scritta dopo lo svuotamento dell\'archivio' },
   { tipo_file: 'secondarie', esito: 'successo', created_date: '2026-09-18T08:00:00' },
-], OGGI, ADESSO, ['secondarie']);
-verifica('fallito dopo lo svuotamento e poi un file rifiutato: resta interrotto', fallito.interrotti.length === 1 && fallito.interrotti[0].il === '2026-09-20', JSON.stringify(fallito.interrotti));
+], ['secondarie']);
+verifica('fallito dopo lo svuotamento e poi un file rifiutato: resta da ricaricare', fallito.interrotti.length === 1 && (fallito.interrotti[0].data || fallito.interrotti[0].il) === '2026-09-20', JSON.stringify(fallito.interrotti));
+verifica('e si dice «non riuscito», non «interrotto»: la riga lo dichiara da se\'', fallito.interrotti.length === 1 && fallito.interrotti[0].avviso && fallito.interrotti[0].avviso.stato === 'non_riuscito', JSON.stringify(fallito.interrotti));
+
+console.log('UNA REGOLA SOLA FRA DASHBOARD E MOTORI (chiusura dell\'audit, 11/10/2026)');
+{
+  // Il caso di chiusura/target-caricamenti.mjs: il successo del 05/10 e una
+  // riscrittura delle primarie finita «parziale» il 09/10 (righe non scritte).
+  // I motori rinviavano («va ripetuto»); la dashboard diceva «5 giorni fa» e
+  // nessun avviso.
+  const registro = [
+    { id: 'u1', tipo_file: 'primarie', esito: 'successo', modalita: 'sostituzione', created_date: '2026-10-05T08:00:00.000', updated_date: '2026-10-05T08:05:00.000', nome_file: 'primarie_05.xlsx' },
+    { id: 'u2', tipo_file: 'primarie', esito: 'parziale', modalita: 'sostituzione', created_date: '2026-10-09T08:00:00.000', updated_date: '2026-10-09T08:06:00.000', nome_file: 'primarie_09.xlsx', messaggio: '4800 righe importate, 200 righe non scritte' },
+    ...['secondarie', 'terziarie', 'ordini_non_dichiarati', 'dichiarazioni_trattamento', 'pdr'].map((t, i) => ({ id: 'x' + i, tipo_file: t, esito: 'successo', created_date: '2026-10-09T07:00:00.000' })),
+  ];
+  const tipiFile = ['primarie', 'secondarie', 'terziarie', 'ordini_non_dichiarati', 'dichiarazioni_trattamento', 'pdr'];
+  const r = cruscotto({ oggi: '2026-10-11', anno: 2026, adessoMs: Date.parse('2026-10-11T08:00:00Z'), tipiFile, uploadLogs: registro, alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: [], prefatture: [], richiesteEct: [] });
+  const vCar = r.da_gestire.filter(v => v.area === 'Caricamento dati');
+  const nonRiuscito = vCar.find(v => /^Caricamento non riuscito: ricarica il file/.test(v.titolo));
+  verifica('una riscrittura finita parziale compare come «Caricamento non riuscito: ricarica il file»', nonRiuscito && nonRiuscito.gravita === 'critico' && /Primarie e assegnati/.test(nonRiuscito.titolo) && /09\/10\/2026/.test(nonRiuscito.dettaglio), JSON.stringify(vCar));
+  const prim = r.caricamenti.archivi.find(a => a.tipo_file === 'primarie');
+  verifica('la freschezza e\' quella dell\'ultimo caricamento riuscito, col suo stato accanto', prim.il === '2026-10-05' && prim.stato === 'non_riuscito', JSON.stringify(prim));
+  // Lo stesso registro letto dai motori, come lo leggono loro.
+  const finto = { asServiceRole: { entities: { UploadLog: { filter: async (f, _s, lim) => registro.filter(l => (f.tipo_file && f.tipo_file.$in ? f.tipo_file.$in.includes(l.tipo_file) : l.tipo_file === f.tipo_file)).sort((a, b) => b.created_date.localeCompare(a.created_date)).slice(0, lim || 1e9) } } } };
+  const motori = await statoDeiMotori(finto, tipiFile);
+  verifica('dashboard e motori dicono la stessa cosa: lo stesso caricamento, lo stesso esito',
+    JSON.stringify((r.caricamenti.in_corso || r.caricamenti.interrotti || []).map(a => [a.id, a.tipo_file, a.esito || null])) === JSON.stringify(motori.in_corso.map(a => [a.id, a.tipo_file, a.esito || null])) && motori.in_corso.length === 1,
+    JSON.stringify({ dashboard: r.caricamenti.in_corso, motori: motori.in_corso }).slice(0, 300));
+  verifica('e lo stesso ultimo riuscito', tipiFile.every(t => ((r.caricamenti.archivi.find(a => a.tipo_file === t) || {}).il || null) === ((motori.ultimi[t] || {}).data || null)));
+  // Il nome dell'archivio si legge come a video, non come chiave interna.
+  const vuoto = cruscotto({ oggi: '2026-10-11', anno: 2026, adessoMs: Date.parse('2026-10-11T08:00:00Z'), tipiFile: ['ordini_non_dichiarati'], uploadLogs: [], alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: [], prefatture: [], richiesteEct: [] });
+  verifica('«Mai caricato: Ordini non dichiarati», non «ordini_non_dichiarati»', vuoto.da_gestire.some(v => v.titolo === 'Mai caricato: Ordini non dichiarati') && !vuoto.da_gestire.some(v => /ordini_non_dichiarati/.test(v.titolo)), vuoto.da_gestire.map(v => v.titolo).join(' | '));
+  // Un collega che sta caricando adesso non e' un guasto: si dice, da sapere.
+  const adesso = cruscotto({ oggi: OGGI, adessoMs: ADESSO, anno: 2026, tipiFile: ['pdr'], uploadLogs: logs, alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: [], prefatture: [], richiesteEct: [] });
+  verifica('un caricamento in corso da cinque minuti: «Archivio in caricamento», da sapere', adesso.da_gestire.some(v => v.gravita === 'info' && v.titolo === 'Archivio in caricamento: Punti di raccolta'), adesso.da_gestire.map(v => v.gravita + ':' + v.titolo).join(' | '));
+  // Un «parziale» che non ha riscritto l'archivio (aggiunta, righe scartate) e'
+  // un caricamento riuscito per i motori: lo e' anche per la dashboard.
+  const aggiunta = freschezza([{ tipo_file: 'pdr', esito: 'parziale', modalita: 'aggiunta', created_date: '2026-09-19T08:00:00' }], ['pdr']);
+  verifica('un parziale in aggiunta conta come caricato', aggiunta.archivi[0].il === '2026-09-19' && aggiunta.interrotti.length === 0, JSON.stringify(aggiunta.archivi[0]));
+}
+
+console.log('DATI FINO AL (chiusura dell\'audit, 11/10/2026)');
+{
+  const base = { oggi: '2026-10-11', anno: 2026, adessoMs: Date.parse('2026-10-11T08:00:00Z'), alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: [], prefatture: [], richiesteEct: [] };
+  const caricatoIeri = (t) => ({ tipo_file: t, esito: 'successo', created_date: '2026-10-10T07:00:00', nome_file: t + '.xlsx' });
+  const tipiFile = ['primarie', 'terziarie', 'ordini_non_dichiarati'];
+  const uploadLogs = tipiFile.map(caricatoIeri);
+  // Un file delle primarie caricato ieri ma scaricato dal portale piu' di tre
+  // settimane fa (dalla revisione dell'11/10/2026 la soglia e' sullo scarto fra
+  // caricamento e «fino al», oltre tre settimane: qui 25 giorni).
+  const vecchio = cruscotto({ ...base, tipiFile, uploadLogs, finoAl: {
+    primarie: { fino_al: '2026-09-15', cosa: 'ultima fine trasporto dei terminati' },
+    terziarie: { fino_al: '2026-07-19', cosa: 'ultima fine trasporto dei terminati' },
+    ordini_non_dichiarati: { fino_al: '2026-10-10', cosa: 'giorno della fotografia' },
+  } });
+  const vPrim = vecchio.da_gestire.find(v => /^Primarie e assegnati: dati fino al 15\/09\/2026/.test(v.titolo));
+  verifica('primarie caricate ieri con dentro i dati fino al 15/09: la voce gialla si misura su «dati fino al»', vPrim && vPrim.gravita === 'attenzione' && /Caricato il 10\/10\/2026/.test(vPrim.dettaglio) && /25 giorni prima del caricamento, 26 giorni fa/.test(vPrim.dettaglio), vecchio.da_gestire.map(v => `${v.titolo} [${v.dettaglio}]`).join(' | '));
+  verifica('le terziarie, che non arrivano tutti i giorni, no: l\'ultima del 19/07 non fa un file vecchio', !vecchio.da_gestire.some(v => /^Terziarie/.test(v.titolo)), vecchio.da_gestire.map(v => v.titolo).join(' | '));
+  const ter = vecchio.caricamenti.archivi.find(a => a.tipo_file === 'terziarie');
+  verifica('ma il «fino al» delle terziarie si mostra lo stesso, accanto al caricamento', ter && ter.fino_al === '2026-07-19' && ter.il === '2026-10-10' && ter.misurata_su === 'caricamento' && ter.vecchio === false, JSON.stringify(ter));
+  const nd = vecchio.caricamenti.archivi.find(a => a.tipo_file === 'ordini_non_dichiarati');
+  verifica('la fotografia di ieri e\' fresca', nd && nd.fino_al === '2026-10-10' && nd.vecchio === false, JSON.stringify(nd));
+  // Una data nel futuro (un errore nel file) non fa sembrare fresco un file vecchio.
+  const futuro = cruscotto({ ...base, tipiFile: ['primarie'], uploadLogs: [{ tipo_file: 'primarie', esito: 'successo', created_date: '2026-09-20T07:00:00' }], finoAl: { primarie: { fino_al: '2026-12-01', cosa: 'x' } } });
+  verifica('un «fino al» nel futuro non nasconde un caricamento di tre settimane fa', futuro.da_gestire.some(v => /^Primarie e assegnati: dati di 21 giorni fa/.test(v.titolo)), futuro.da_gestire.map(v => v.titolo).join(' | '));
+  // Senza «fino al» (lettura non riuscita) la freschezza resta quella del caricamento.
+  const senza = cruscotto({ ...base, tipiFile: ['primarie'], uploadLogs: [caricatoIeri('primarie')] });
+  verifica('senza «fino al» nessuna voce su un file caricato ieri', !senza.da_gestire.some(v => v.area === 'Caricamento dati'), senza.da_gestire.map(v => v.titolo).join(' | '));
+}
+
+console.log('NATALE E FERRAGOSTO NON SONO UN FILE VECCHIO (revisione della chiusura, 11/10/2026)');
+{
+  // Nel file vero (PRIMARIE.xlsx del 09/10/2026) fra i terminati SMOCO non c'e'
+  // nessuna fine trasporto dal 22/12/2025 all'08/01/2026 (17 giorni) e dal 07/08
+  // al 18/08/2026 (11 giorni). Un file caricato la mattina stessa, completo,
+  // faceva dire «dati fino al 22/12/2025 ... fermi a quel giorno».
+  const primarie = (oggi, caricato, finoAl) => cruscotto({
+    oggi, anno: Number(oggi.slice(0, 4)), adessoMs: Date.parse(oggi + 'T08:00:00Z'), tipiFile: ['primarie'],
+    uploadLogs: [{ id: 'u1', tipo_file: 'primarie', esito: 'successo', modalita: 'sostituzione', created_date: caricato + 'T06:30:00', nome_file: 'PRIMARIE.xlsx' }],
+    finoAl: { primarie: { fino_al: finoAl, cosa: 'ultima fine trasporto dei terminati', perche: '' } },
+    alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: [], prefatture: [], richiesteEct: [],
+  });
+  const vociCaricamento = (r) => r.da_gestire.filter(v => v.area === 'Caricamento dati');
+  for (const [oggi, finoAl, quando] of [['2026-01-05', '2025-12-22', 'il 05/01, dopo Natale'], ['2026-01-08', '2025-12-22', "l'08/01, l'ultimo giorno del buco"], ['2026-08-18', '2026-08-07', 'il 18/08, dopo Ferragosto']]) {
+    const r = primarie(oggi, oggi, finoAl);
+    verifica(`file caricato ${quando} con i dati fino al ${finoAl.split('-').reverse().join('/')}: nessuna voce`, vociCaricamento(r).length === 0, vociCaricamento(r).map(v => v.titolo).join(' | '));
+    const a = r.caricamenti.archivi[0];
+    verifica(`e nella tabella non e' «fermo»: si misura sul caricamento (${quando})`, a.vecchio === false && a.misurata_su === 'caricamento' && a.fino_al === finoAl, JSON.stringify(a));
+  }
+  // La soglia: tre settimane esatte di scarto si tengono, un giorno di piu' no.
+  const tre = primarie('2026-10-11', '2026-10-11', '2026-09-20');
+  verifica('21 giorni fra il «fino al» e il caricamento: ancora nessuna voce', vociCaricamento(tre).length === 0, vociCaricamento(tre).map(v => v.titolo).join(' | '));
+  const oltre = primarie('2026-10-11', '2026-10-11', '2026-09-19');
+  verifica('22 giorni: la voce «dati fino al»', vociCaricamento(oltre).some(v => /^Primarie e assegnati: dati fino al 19\/09\/2026/.test(v.titolo) && /22 giorni prima del caricamento/.test(v.dettaglio)), vociCaricamento(oltre).map(v => `${v.titolo} [${v.dettaglio}]`).join(' | '));
+  verifica('la soglia e\' scritta, e piu\' larga del buco di Natale', C.GIORNI_SCARTO_FINO_AL === 21);
+  // Un file fresco l'08/01 e mai ricaricato: dopo dieci giorni lo dice l'altra
+  // voce, sul caricamento, non il «fino al» di Natale.
+  const fermo = primarie('2026-01-20', '2026-01-08', '2025-12-22');
+  const vf = vociCaricamento(fermo);
+  verifica('caricato l\'08/01 e fermo al 20/01: «dati di 12 giorni fa», non «fino al 22/12»', vf.length === 1 && /^Primarie e assegnati: dati di 12 giorni fa/.test(vf[0].titolo) && /fino al 22\/12\/2025/.test(vf[0].dettaglio), vf.map(v => `${v.titolo} [${v.dettaglio}]`).join(' | '));
+  verifica('e nella tabella «fermo da 12 giorni»', fermo.caricamenti.archivi[0].vecchio === true && fermo.caricamenti.archivi[0].eta_giorni === 12, JSON.stringify(fermo.caricamenti.archivi[0]));
+}
 
 console.log('MESI DELLA FATTURAZIONE ATTIVA');
 const docs = [
@@ -134,7 +240,7 @@ const titoli = r.da_gestire.map(v => `${v.gravita}:${v.area}`);
 verifica('prima i critici', r.da_gestire[0].gravita === 'critico' && r.da_gestire.findIndex(v => v.gravita === 'info') > r.da_gestire.findIndex(v => v.gravita === 'attenzione'), titoli.join(' | '));
 verifica('alert critici, caricamento interrotto, qualifica scaduta, ECT oltre il termine', ['Alert', 'Caricamento dati', 'Qualifica fornitori', 'Richieste ECT'].every(a => r.da_gestire.some(v => v.gravita === 'critico' && v.area === a)), titoli.join(' | '));
 verifica('nessuna voce sul target divergente: il target si scrive in un posto solo', !r.da_gestire.some(v => v.area === 'Target' || /Target divergente/.test(v.titolo)), titoli.join(' | '));
-verifica('dati vecchi (terziarie 25 giorni), mai caricato (pdr), arretrato oltre 60, mesi da elaborare', r.da_gestire.some(v => /terziarie: dati di 25 giorni/.test(v.titolo)) && r.da_gestire.some(v => /Mai caricato: pdr/.test(v.titolo)) && r.da_gestire.some(v => /Rete: 1 ordini aperti da oltre 60/.test(v.titolo)) && r.da_gestire.some(v => /6 mesi finiti non ancora elaborati/.test(v.titolo)), r.da_gestire.map(v => v.titolo).join(' | '));
+verifica('dati vecchi (terziarie 25 giorni), mai caricato (pdr), arretrato oltre 60, mesi da elaborare', r.da_gestire.some(v => /[Tt]erziarie: dati di 25 giorni/.test(v.titolo)) && r.da_gestire.some(v => /Mai caricato: (pdr|Punti di raccolta)/.test(v.titolo)) && r.da_gestire.some(v => /Rete: 1 ordini aperti da oltre 60/.test(v.titolo)) && r.da_gestire.some(v => /6 mesi finiti non ancora elaborati/.test(v.titolo)), r.da_gestire.map(v => v.titolo).join(' | '));
 verifica('un documento del catalogo intestato a chi non ce, sulla dashboard', r.da_gestire.some(v => v.area === 'Qualifica fornitori' && v.gravita === 'critico' && /non verr. mai chiesto/.test(v.titolo) && v.dettaglio === 'Patenti degli autisti'), r.da_gestire.filter(v => v.area === 'Qualifica fornitori').map(v => v.titolo).join(' | '));
 verifica('ogni voce porta dove si risolve', r.da_gestire.every(v => v.link && v.link.startsWith('/')));
 verifica('una sola richiesta ECT oltre il termine (quella evasa e quella futura no)', r.da_gestire.find(v => v.area === 'Richieste ECT' && v.gravita === 'critico').titolo.startsWith('1 '));
@@ -364,5 +470,74 @@ console.log('L ANNO NUOVO COMPARE DUE MESI PRIMA, E NON PRIMA');
   verifica('se manca solo una conferma resta un avviso, non un guaio',
     (vociDi(an({ giorni_al_primo_gennaio: -9, mancanti: 0 }))[0] || {}).gravita === 'attenzione');
 }
+console.log('I MESI DELL\'ATTIVA A GENNAIO E FEBBRAIO (chiusura dell\'audit, 11/10/2026)');
+{
+  // L'ultimo mese finito si contava sull'anno in corso: il 15/01/2027 l'elenco
+  // era vuoto, il 10/02/2027 c'era solo gennaio. Dicembre 2026, e un novembre
+  // ancora aperto, sparivano dalla dashboard proprio quando vanno chiusi.
+  const chiusi = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre']
+    .flatMap(m => ['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(t => ({ tipo: 'ATTIVA', anno: 2026, mese: m, tipologia: t, stato: 'chiusa' })));
+  const novembre = ['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(t => ({ tipo: 'ATTIVA', anno: 2026, mese: 'Novembre', tipologia: t, stato: 'elaborata' }));
+  const docs2026 = [...chiusi, ...novembre];
+  const gen = statoMesiAttiva(docs2026, [], 2027, '2027-01-15');
+  verifica('il 15/01/2027 ci sono novembre e dicembre 2026, non ancora chiusi', gen.map(m => m.etichetta || m.mese).join(',') === 'Novembre 2026,Dicembre 2026', gen.map(m => m.etichetta || m.mese).join(','));
+  verifica('ciascuno col suo anno', gen.length === 2 && gen.every(m => m.anno === 2026) && gen[1].elaborato === false && gen[0].elaborato === true && gen[0].chiuso === false, JSON.stringify(gen.map(m => [m.anno, m.mese, m.elaborato, m.chiuso])));
+  const feb = statoMesiAttiva([...docs2026, ...['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(t => ({ tipo: 'ATTIVA', anno: 2027, mese: 'Gennaio', tipologia: t, stato: 'elaborata' }))], [], 2027, '2027-02-10');
+  verifica('il 10/02/2027: novembre e dicembre 2026, e gennaio 2027', feb.map(m => m.etichetta || m.mese).join(',') === 'Novembre 2026,Dicembre 2026,Gennaio', feb.map(m => m.etichetta || m.mese).join(','));
+  // DA MARZO SPARIVANO DI NUOVO (revisione della chiusura, 11/10/2026): la
+  // correzione valeva solo per gennaio e febbraio, e un dicembre mai elaborato
+  // non diventa a posto perche' e' cominciato marzo. Restano finche' non si chiudono.
+  const mar = statoMesiAttiva(docs2026, [], 2027, '2027-03-10');
+  verifica('il 10/03/2027 novembre e dicembre 2026, mai chiusi, ci sono ancora', mar.map(m => m.etichetta || m.mese).join(',') === 'Novembre 2026,Dicembre 2026,Gennaio,Febbraio', mar.map(m => m.etichetta || m.mese).join(','));
+  const ott = statoMesiAttiva(docs2026, [], 2027, '2027-10-11');
+  verifica('e anche a ottobre 2027, finche\' qualcuno non li chiude', ott.slice(0, 2).map(m => m.etichetta).join(',') === 'Novembre 2026,Dicembre 2026' && ott.length === 2 + 9, ott.map(m => m.etichetta || m.mese).join(','));
+  const tuttiChiusi = [...chiusi, ...['Novembre', 'Dicembre'].flatMap(m => ['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(t => ({ tipo: 'ATTIVA', anno: 2026, mese: m, tipologia: t, stato: 'chiusa' })))];
+  const marChiuso = statoMesiAttiva(tuttiChiusi, [], 2027, '2027-03-10');
+  verifica('chiusi tutti, del 2026 non resta niente da dire', marChiuso.map(m => m.etichetta || m.mese).join(',') === 'Gennaio,Febbraio', marChiuso.map(m => m.etichetta || m.mese).join(','));
+  // L'anno prima senza documenti: i mesi fatturati prima che il gestionale
+  // esistesse non si sono mai elaborati qui, e non c'e' niente da chiudere.
+  // E' il caso di oggi: dal 2026 si guarda anche il 2025.
+  const oggi2026 = statoMesiAttiva(chiusi, [], 2026, '2026-10-11');
+  verifica('un anno prima senza documenti non si guarda: oggi solo i mesi del 2026', oggi2026.every(m => m.anno === 2026) && oggi2026.length === 9, oggi2026.map(m => m.etichetta || m.mese).join(','));
+  // Si parte dal primo mese dell'anno prima con un documento.
+  const daGiugno = ['Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre'].flatMap(m => ['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(t => ({ tipo: 'ATTIVA', anno: 2025, mese: m, tipologia: t, stato: 'chiusa' })));
+  const dalPrimo = statoMesiAttiva([...daGiugno, ...chiusi], [], 2026, '2026-10-11');
+  verifica('un anno prima cominciato a giugno: si dice solo dicembre, non gennaio-maggio', dalPrimo.filter(m => m.anno === 2025).map(m => m.etichetta).join(',') === 'Dicembre 2025', dalPrimo.map(m => m.etichetta || m.mese).join(','));
+  const visto2026 = statoMesiAttiva(docs2026, [], 2026, '2027-01-15');
+  verifica('chi guarda il 2026 a gennaio 2027 vede i suoi dodici mesi, come prima', visto2026.length === 12 && visto2026.every(m => (m.etichetta || m.mese) === m.mese), visto2026.map(m => m.etichetta || m.mese).join(','));
+  verifica('i documenti da leggere: per l\'anno in corso anche quelli dell\'anno prima, in qualunque mese',
+    C.anniMesiAttiva && JSON.stringify(C.anniMesiAttiva(2027, '2027-01-15')) === '[2026,2027]' && JSON.stringify(C.anniMesiAttiva(2027, '2027-02-28')) === '[2026,2027]'
+    && JSON.stringify(C.anniMesiAttiva(2027, '2027-03-01')) === '[2026,2027]' && JSON.stringify(C.anniMesiAttiva(2026, '2027-01-15')) === '[2026]' && JSON.stringify(C.anniMesiAttiva(2026, '2026-10-11')) === '[2025,2026]');
+  // Le prefatture dell'anno prima portano le righe del portale: si leggono solo
+  // se un suo documento puo' ancora chiederle (elaborato e non chiuso).
+  verifica('le prefatture dell\'anno prima servono con un suo documento aperto', C.servonoPrefattureAnnoPrima && C.servonoPrefattureAnnoPrima(docs2026, 2027, '2027-03-10') === true);
+  verifica('e non servono con tutto chiuso, senza documenti, o guardando un anno passato',
+    C.servonoPrefattureAnnoPrima && C.servonoPrefattureAnnoPrima(tuttiChiusi, 2027, '2027-03-10') === false && C.servonoPrefattureAnnoPrima([], 2027, '2027-03-10') === false
+    && C.servonoPrefattureAnnoPrima(docs2026, 2026, '2027-03-10') === false);
+  // Il caso dello scenario della revisione, sulla dashboard intera: il 01/03/2027.
+  const r1m = cruscotto({ oggi: '2027-03-01', anno: 2027, adessoMs: Date.parse('2027-03-01T08:00:00Z'), tipiFile: [], uploadLogs: [], alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: [...docs2026, ...['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(t => ({ tipo: 'ATTIVA', anno: 2027, mese: 'Gennaio', tipologia: t, stato: 'elaborata' }))], prefatture: [], richiesteEct: [] });
+  const v1m = r1m.da_gestire.find(v => /non ancora elaborat/.test(v.titolo));
+  verifica('il 01/03/2027 la dashboard dice ancora «Dicembre 2026» da elaborare', r1m.mesi_attiva.map(m => m.etichetta).join(',') === 'Novembre 2026,Dicembre 2026,Gennaio,Febbraio' && v1m && /Dicembre 2026/.test(v1m.dettaglio), r1m.da_gestire.map(v => `${v.titolo} [${v.dettaglio}]`).join(' | '));
+  const p1m = r1m.da_gestire.find(v => /Prefattura Ecotyre non caricata/.test(v.titolo));
+  verifica('e la prefattura di novembre 2026 ancora da caricare', p1m && /Novembre 2026/.test(p1m.titolo), p1m && p1m.titolo);
+  const r = cruscotto({ oggi: '2027-01-15', anno: 2027, adessoMs: Date.parse('2027-01-15T08:00:00Z'), tipiFile: [], uploadLogs: [], alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: docs2026, prefatture: [], richiesteEct: [] });
+  const vMesi = r.da_gestire.find(v => /mese finito non ancora elaborato/.test(v.titolo));
+  verifica('e la dashboard lo dice: «Dicembre 2026» da elaborare', vMesi && vMesi.dettaglio === 'Dicembre 2026', r.da_gestire.map(v => `${v.titolo} [${v.dettaglio}]`).join(' | '));
+  const vPref = r.da_gestire.find(v => /Prefattura Ecotyre non caricata/.test(v.titolo));
+  verifica('con la prefattura di novembre 2026 ancora da caricare', vPref && /Novembre 2026/.test(vPref.titolo), vPref && vPref.titolo);
+}
+
+console.log('IL DOPPIONE DICE QUELLO CHE FANNO I DUE MODULI (revisione della chiusura, 11/10/2026)');
+{
+  // Dall'11/10/2026 Giacenze e Dichiarazioni leggono le dichiarazioni con
+  // leggiDichiarazioni e di due gemelle contano la prima. La voce diceva ancora
+  // che il riepilogo ne teneva una e le giacenze le sommavano.
+  const fotografiaGiorno = { giorno: '2026-10-11', scostamenti: [], doppioni: [{ sito: 'Irigom', mese: 'Marzo', canale: 'RETE', kg_in_piu: 370000 }] };
+  const r = cruscotto({ oggi: '2026-10-11', anno: 2026, adessoMs: Date.parse('2026-10-11T08:00:00Z'), tipiFile: [], uploadLogs: [], alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: [], prefatture: [], richiesteEct: [], fotografiaGiorno });
+  const v = r.da_gestire.find(x => x.area === 'Dichiarazioni');
+  verifica('la voce dice che i due moduli contano la prima riga', v && /Giacenze e Dichiarazioni contano la prima riga e ignorano le altre/.test(v.dettaglio) && /370\.000 kg di troppo, nelle righe ignorate/.test(v.dettaglio), v && v.dettaglio);
+  verifica('e non dice piu\' che le giacenze le sommano', v && !/le sommano/.test(v.dettaglio) && !/di troppo nelle giacenze/.test(v.dettaglio), v && v.dettaglio);
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

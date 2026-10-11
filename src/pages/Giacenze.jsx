@@ -17,6 +17,7 @@ import StoccaggiManager from '@/components/giacenze/StoccaggiManager';
 import ChiusuraAnno from '@/components/giacenze/ChiusuraAnno';
 import { exportGiacenzeAllExcel } from '@/lib/giacenzeExportAll';
 import EsportaPdf from '@/components/shared/EsportaPdf';
+import AvvisoCaricamenti from '@/components/shared/AvvisoCaricamenti';
 import { situazionePdf, derivatiPdf, targetPdf } from '@/lib/giacenzePdf';
 
 export default function Giacenze() {
@@ -108,6 +109,9 @@ export default function Giacenze() {
               <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>Riprova</Button>
             </div>
           )}
+          {/* Un archivio che si sta riscrivendo, o rimasto a meta', si dice sopra
+              i totali: la stessa regola della dashboard e dei motori (11/10/2026). */}
+          <AvvisoCaricamenti aggiorna={data} />
           <GiacenzeKpi totali={data.totali} />
 
           {data.anomalie && data.anomalie.length > 0 && (

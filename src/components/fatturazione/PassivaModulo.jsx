@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { anniDaScegliere } from '@/lib/periodoPagine';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Calculator, CheckCircle2, XCircle, ExternalLink, FileSpreadsheet, FileDown, ClipboardList, ListPlus } from 'lucide-react';
@@ -20,6 +21,8 @@ import { modelloAmministrazione, quanteVociModello } from '@/lib/modelloPassivaA
 import { bloccoExtraRaccolta } from '@/lib/extraRaccoltaAmministrazione';
 import { scarica } from '@/lib/docxModello';
 import VociPassivaDialog from './VociPassivaDialog';
+import AvvisoCaricamenti from '@/components/shared/AvvisoCaricamenti';
+import { TIPI_PASSIVA, tipiDeiCanali } from '@/lib/registroCaricamenti';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const ANNI = anniDaScegliere();
@@ -55,13 +58,22 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
     setAmmLoading(true);
     setError('');
     try {
-      const voci = await base44.entities.VocePassivaAmministrazione.filter({ anno: periodo.anno }, 'ordine', 1000).catch(() => []);
+      // TUTTO, CON LA STESSA REGOLA DEL CALCOLO (chiusura dell'audit,
+      // 11/10/2026). Qui si leggevano le voci fino a 1000, le tariffe 'attivo'
+      // fino a 2000 e gli interventi fino a 5000, e un errore di lettura diventava
+      // un elenco vuoto: oltre le soglie i record piu' vecchi sparivano senza
+      // dirlo, e con le voci lette vuote per un errore si proponeva di ricaricare
+      // il modello - doppio. Ora si legge tutto (fetchAllClient) e un errore si
+      // dice. Le tariffe sono quelle che legge calcolaPassiva (direzione PASSIVA,
+      // nessun filtro sullo stato): quale vale in un giorno lo decide la regola
+      // unica di validitaTariffa, dove 'non_attivo' non vale mai.
+      const voci = await fetchAllClient(base44.entities.VocePassivaAmministrazione, { anno: periodo.anno }, 'ordine');
       // IL PREZZO VIENE DAL TARIFFARIO, non da quello che e' scritto sulla voce:
       // «gli altri prezzi li dovresti gia' avere nel tariffario 2026 anche perche'
       // hai letto tutti i loro contratti» (utente, 03/10/2026). Sulle righe con
       // movimenti il prezzo e' quello che il calcolo ha applicato; sulle righe a
       // zero si legge la tariffa in vigore quel mese, e quella sta qui.
-      const tariffe = await base44.entities.Tariffa.filter({ direzione: 'PASSIVA', stato: 'attivo' }, '-created_date', 2000).catch(() => []);
+      const tariffe = await fetchAllClient(base44.entities.Tariffa, { direzione: 'PASSIVA' }, '-created_date');
       const per = {};
       for (const canale of CANALI_AMM) {
         if (canale === 'EXTRA_RACCOLTA') {
@@ -75,7 +87,7 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
       }
       // Gli interventi: tutti, e il blocco si prende quelli terminati con la fine
       // trasporto nel mese, col giorno italiano.
-      const interventi = await base44.entities.ExtraRaccolta.list('-created_date', 5000).catch(() => []);
+      const interventi = await fetchAllClient(base44.entities.ExtraRaccolta, null, '-created_date');
       const extra = bloccoExtraRaccolta(interventi, periodo.anno, periodo.mese);
       // Senza voci il foglio uscirebbe vuoto. Si propone il modello
       // dell'amministrazione - le sue righe e i suoi prezzi, quelli con cui
@@ -122,7 +134,8 @@ Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci 
       });
       setResult(res.data || res);
     } catch (e) {
-      setError(e.message || 'Errore durante il calcolo');
+      // Il motivo del server, non «Request failed with status code 500».
+      setError(e?.response?.data?.error || e?.data?.error || e.message || 'Errore durante il calcolo');
     }
     setLoading(false);
   };
@@ -184,6 +197,11 @@ Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci 
           </Link>
         )}
       </div>
+
+      {/* La passiva legge primarie e secondarie: mentre si riscrivono, o dopo
+          una riscrittura non riuscita, il calcolo e i fogli escono a meta'. Lo
+          si dice sopra i totali (11/10/2026). */}
+      <AvvisoCaricamenti tipi={tipiDeiCanali(TIPI_PASSIVA, [tipologia])} aggiorna={`${periodo.anno}|${periodo.mese}|${tipologia}|${result ? 'calcolato' : ''}|${loading}`} />
 
       {/* Regole dell'utente del 22/09/2026: i costi di un intervento li scrive lui
           prima di passarlo a terminato, e la passiva paga quelli */}

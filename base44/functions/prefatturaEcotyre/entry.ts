@@ -9,6 +9,7 @@ import { eAci } from "../../shared/canaleSecondaria.ts";
 import { calcolaRigheAttiva } from "../../shared/attivaCalcolo.ts";
 import { testoDate } from "../../shared/movimenti.ts";
 import { leggiTabellePrefattura, leggiLineePdfPrefattura, confrontaPrefattura, comeOrdine, periodoPrefattura } from "../../shared/prefattura.ts";
+import { controlloCaricamenti, TIPI_RINVIO } from "../../shared/statoArchivi.ts";
 
 // La prefattura del portale Ecotyre: si carica (Excel o PDF), si tiene per il
 // mese, e si confronta con le righe che il gestionale calcola sui dati di oggi.
@@ -42,6 +43,40 @@ export default async function(req) {
     let annotatiNelRegistro = 0;
     if (azione === 'carica') {
       if (user.role !== 'admin') return rispostaSolaLettura();
+      // Il foglio caricato si annota nel registro dei file da rimuovere (vedi
+      // sotto, IL FILE LETTO SI ANNOTA NEL REGISTRO): da un posto solo, sia
+      // quando e' stato letto sia quando il caricamento si rinvia.
+      const annotaIlFoglio = (motivo, descrizione) => annotaFileDaRimuovere(svc.FileDaRimuovere, [voceDaRimuovere({
+        entita: 'PrefatturaEcotyre',
+        record: { file_uri },
+        motivo,
+        cosa: 'Prefattura del portale Ecotyre',
+        descrizione,
+        oggi: oggiRoma(),
+      })]);
+      // NON SU UN ARCHIVIO A META' (chiusura dell'audit, 11/10/2026).
+      //
+      // La prefattura si salva e si confronta subito con le righe del mese: su
+      // un archivio a meta' il confronto direbbe centinaia di ordini «mancanti
+      // nel gestionale», e la prefattura risulterebbe caricata e controllata.
+      // Mentre le primarie o le terziarie si riscrivono, o dopo un caricamento
+      // interrotto o finito parziale, si risponde 409 «rinviato» col motivo e
+      // non si salva niente, come gia' fanno verifiche, quadrature e alert. Le
+      // secondarie no: il confronto non le legge (TIPI_RINVIO, 11/10/2026). Qui
+      // lo stato si legge una volta sola, prima di leggere il file: le righe
+      // salvate vengono dal file e non dagli archivi, e il confronto si rifa' a
+      // ogni apertura della scheda (controlloCaricamenti, shared/statoArchivi.ts).
+      const controllo = await controlloCaricamenti(base44, `il caricamento della prefattura di ${mese} ${annoNum}`, TIPI_RINVIO.prefattura);
+      if (controllo.rinvio) {
+        // Il foglio Excel e' gia' stato caricato dal browser: si annota nel
+        // registro dei file da rimuovere, come dopo una lettura, perche' nessun
+        // record ne conserva l'indirizzo e altrimenti resterebbe per sempre.
+        if (file_uri) {
+          await annotaIlFoglio('foglio caricato e non letto: il caricamento della prefattura e\' stato rinviato',
+            `Prefattura di ${mese} ${annoNum} ("${String(nome_file || '')}"), rinviata`).catch(() => null);
+        }
+        return controllo.rinvio;
+      }
       const nome = String(nome_file || '');
       const formato = /\.pdf$/i.test(nome) ? 'pdf' : /\.(xlsx|xlsm|xls|csv)$/i.test(nome) ? 'excel' : '';
       if (!formato) return Response.json({ error: 'La prefattura si carica in Excel (.xlsx, .xls, .csv) o in PDF.' }, { status: 400 });
@@ -100,14 +135,8 @@ export default async function(req) {
       // sapeva quale chiedere di far rimuovere, perche' non comparendo in nessun
       // record non entrava nemmeno nell'inventario. Trovato l'08/10/2026
       // verificando AGENTS.md contro il codice: era l'unico punto rimasto fuori.
-      const registro = await annotaFileDaRimuovere(svc.FileDaRimuovere, [voceDaRimuovere({
-        entita: 'PrefatturaEcotyre',
-        record: { file_uri },
-        motivo: 'foglio letto per il caricamento: nessun record ne conserva l\'indirizzo',
-        cosa: 'Prefattura del portale Ecotyre',
-        descrizione: `Prefattura di ${mese} ${annoNum} ("${nome}")`,
-        oggi: oggiRoma(),
-      })]);
+      const registro = await annotaIlFoglio('foglio letto per il caricamento: nessun record ne conserva l\'indirizzo',
+        `Prefattura di ${mese} ${annoNum} ("${nome}")`);
       annotatiNelRegistro = registro.annotati;
     } else if (azione !== 'confronta') {
       return Response.json({ error: 'Azione non riconosciuta' }, { status: 400 });

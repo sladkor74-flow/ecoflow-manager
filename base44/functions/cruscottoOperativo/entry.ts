@@ -2,7 +2,9 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
-import { cruscotto } from "../../shared/cruscotto.ts";
+import { cruscotto, anniMesiAttiva, servonoPrefattureAnnoPrima } from "../../shared/cruscotto.ts";
+import { leggiRegistro } from "../../shared/registroCaricamenti.ts";
+import { datiFinoAl, finoAlPerTipo, ARCHIVI_DEL_CRUSCOTTO } from "../../shared/statoArchivi.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { annoNuovoDaMostrare } from "../../shared/inizializzazioneAnno.ts";
 import { leggiFotografia } from "../../shared/indicatoriGiorno.ts";
@@ -11,6 +13,19 @@ import { leggiFotografia } from "../../shared/indicatoriGiorno.ts";
 // per canale, la freschezza dei dati, gli alert aperti, lo stato dei mesi della
 // fatturazione attiva. Legge solo archivi piccoli, quindi si puo' chiamare a ogni
 // apertura della dashboard. Il calcolo sta in base44/shared/cruscotto.ts.
+//
+// CHIUSURA DELL'AUDIT (11/10/2026), tre cose:
+// - il registro dei caricamenti si legge come lo leggono i motori
+//   (leggiRegistro, registroCaricamenti.ts) e si giudica con la loro regola: una
+//   riscrittura finita parziale non passa piu' per un caricamento fresco;
+// - «dati fino al»: per ogni file l'ultimo giorno che c'e' dentro, con una
+//   lettura ordinata di pochi record per archivio (datiFinoAl, statoArchivi.ts),
+//   mai l'archivio intero;
+// - si leggono anche i documenti dell'attiva dell'anno prima, perche' dicembre
+//   e un novembre ancora aperto si chiudono a gennaio, e un mese mai chiuso
+//   resta da dire anche a marzo (anniMesiAttiva). Sono pochi documenti; le
+//   prefatture di quell'anno, che portano le righe del portale, si leggono solo
+//   se un suo documento e' ancora aperto (servonoPrefattureAnnoPrima).
 // Payload: { anno? }
 const TIPI_FILE = ['primarie', 'secondarie', 'terziarie', 'ordini_non_dichiarati', 'dichiarazioni_trattamento', 'pdr'];
 
@@ -24,13 +39,15 @@ export default async function(req) {
     const anno = Number(body.anno) || Number(oggi.slice(0, 4));
 
     const svc = base44.asServiceRole.entities;
+    const anniAttiva = anniMesiAttiva(anno, oggi);
     const [alertAperti, uploadLogs, assegnatiRete, assegnatiAci, documenti, prefatture, riepiloghi, richiesteEct, verificheSedi,
-      tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, rilevazioni, ultimaFoto] = await Promise.all([
+      tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, rilevazioni, ultimaFoto, finoAl] = await Promise.all([
       fetchAll(svc.Alert, { stato: 'aperto' }),
-      svc.UploadLog.list('-created_date', 200),
+      // Le ultime righe di ogni file, come le leggono i motori: una lettura sola.
+      leggiRegistro(svc.UploadLog, TIPI_FILE).then(perTipo => [...perTipo.values()].flat()),
       fetchAll(svc.Assegnato),
       fetchAll(svc.AssegnatoAci),
-      svc.DocumentoFatturazione.filter({ tipo: 'ATTIVA', anno }),
+      Promise.all(anniAttiva.map(a => svc.DocumentoFatturazione.filter({ tipo: 'ATTIVA', anno: a }))).then(x => x.flat()),
       svc.PrefatturaEcotyre.filter({ anno }).catch(() => []),
       svc.RiepilogoQualifica.filter({ anno }, '-created_date', 1).catch(() => []),
       fetchAll(svc.RichiestaEct, { anno }).catch(() => []),
@@ -49,13 +66,21 @@ export default async function(req) {
       fetchAll(svc.GiacenzaStoccaggio).catch(() => []),
       // L'ultima fotografia del guardiano notturno: una riga sola.
       svc.IndicatoreGiorno.list('-giorno', 1).catch(() => []),
+      // Fino a che giorno arrivano i dati: poche righe per archivio. Se non si
+      // riesce a leggere, la freschezza si misura sul giorno del caricamento.
+      datiFinoAl(svc, ARCHIVI_DEL_CRUSCOTTO).catch(() => []),
     ]);
+    // Le prefatture dell'anno prima, solo se un suo mese le puo' ancora chiedere.
+    const prefattureAnnoPrima = servonoPrefattureAnnoPrima(documenti, anno, oggi)
+      ? await svc.PrefatturaEcotyre.filter({ anno: anniAttiva[0] }).catch(() => [])
+      : [];
 
     return Response.json(cruscotto({
       oggi, anno, adessoMs: Date.now(), tipiFile: TIPI_FILE,
       alertAperti, uploadLogs, assegnatiRete, assegnatiAci, documenti,
+      finoAl: finoAlPerTipo(finoAl),
       // delle prefatture bastano mese e stato: le righe non servono qui
-      prefatture: (prefatture || []).map(p => ({ anno: p.anno, mese: p.mese, superata: p.superata })),
+      prefatture: [...(prefatture || []), ...(prefattureAnnoPrima || [])].map(p => ({ anno: p.anno, mese: p.mese, superata: p.superata })),
       riepilogoQualifica: riepiloghi[0] || null, richiesteEct, verificheSedi,
       fotografiaGiorno: leggiFotografia((ultimaFoto || [])[0] || null),
       // Dal 1° gennaio, per due mesi, l'anno appena cominciato se gli manca qualcosa

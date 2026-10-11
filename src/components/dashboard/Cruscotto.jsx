@@ -4,7 +4,26 @@ import { base44 } from '@/api/base44Client';
 import { Loader2, AlertTriangle, AlertOctagon, Info, CheckCircle, ArrowRight, Hourglass, DatabaseZap, Scale, FileCheck } from 'lucide-react';
 import { formatIntero, formatNumber, formatPercentuale, fmtTon } from '@/lib/utils';
 
+// Il nome dell'archivio arriva dalla funzione (nomeArchivio, registroCaricamenti):
+// lo stesso della voce dell'elenco. Questo resta per una risposta di prima.
 const NOMI_FILE = { primarie: 'Primarie e assegnati', secondarie: 'Secondarie', terziarie: 'Terziarie', ordini_non_dichiarati: 'Ordini non dichiarati', dichiarazioni_trattamento: 'Dichiarazioni di trattamento', pdr: 'Punti di raccolta' };
+// Lo stato di un archivio che un caricamento rende inaffidabile (avvisoCaricamento).
+const STATI_ARCHIVIO = {
+  non_riuscito: { testo: 'non riuscito: ricarica', classe: 'text-red-700 font-medium' },
+  interrotto: { testo: 'interrotto: ricarica', classe: 'text-red-700 font-medium' },
+  in_corso: { testo: 'in caricamento', classe: 'text-blue-700 font-medium' },
+};
+// L'ultima colonna: lo stato, se c'e'; altrimenti quanto e' vecchio. Un archivio
+// e' vecchio quando il caricamento ha piu' di dieci giorni, oppure, per primarie
+// e non dichiarati, quando dentro il file i dati si fermano piu' di tre
+// settimane prima del caricamento: Natale e Ferragosto fanno buchi fino a 17
+// giorni anche in un file fresco (freschezzaArchivi, cruscotto.ts, 11/10/2026).
+function etaArchivio(a) {
+  if (a.stato && STATI_ARCHIVIO[a.stato]) return STATI_ARCHIVIO[a.stato];
+  if (a.il === null) return { testo: 'mai caricato', classe: 'text-amber-700 font-medium' };
+  if (a.vecchio) return { testo: `fermo da ${a.eta_giorni} giorni`, classe: 'text-amber-700 font-medium' };
+  return { testo: a.giorni_fa === 0 ? 'caricato oggi' : a.giorni_fa === 1 ? 'caricato ieri' : `caricato ${a.giorni_fa} giorni fa`, classe: 'text-muted-foreground' };
+}
 const NOMI_CANALE = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 const TONI = {
   critico: { Icona: AlertOctagon, riga: 'border-red-200 bg-red-50', testo: 'text-red-800', etichetta: 'critico' },
@@ -152,17 +171,36 @@ export default function Cruscotto({ isAdmin }) {
             <h2 className="font-heading font-semibold text-lg flex items-center gap-2"><DatabaseZap className="w-5 h-5 text-primary" /> A quando sono aggiornati i dati</h2>
             <Link to="/caricamento-dati" className="text-xs text-primary hover:underline inline-flex items-center gap-1">Carica <ArrowRight className="w-3 h-3" /></Link>
           </div>
+          {/* DUE DATE, NON UNA (chiusura dell'audit, 11/10/2026). Il giorno del
+              caricamento non dice fino a dove arrivano i dati: un file caricato
+              il 9 puo' fermarsi al 6. «Dati fino al» e' l'ultimo giorno che c'e'
+              dentro, letto dalla funzione con poche righe per archivio. */}
           <table className="w-full text-sm">
+            <thead><tr className="text-left text-xs text-muted-foreground border-b">
+              <th className="py-1.5 font-medium">File</th>
+              <th className="py-1.5 font-medium text-right">Caricato il</th>
+              <th className="py-1.5 font-medium text-right">Dati fino al</th>
+              <th className="py-1.5 font-medium text-right w-32"></th>
+            </tr></thead>
             <tbody>
-              {dati.caricamenti.archivi.map(a => (
-                <tr key={a.tipo_file} className="border-b last:border-0">
-                  <td className="py-1.5">{NOMI_FILE[a.tipo_file] || a.tipo_file}</td>
-                  <td className="py-1.5 text-right tabular-nums">{giorno(a.il)}</td>
-                  <td className={`py-1.5 text-right text-xs w-28 ${a.il === null || a.giorni_fa > 10 ? 'text-amber-700 font-medium' : 'text-muted-foreground'}`}>{a.il === null ? 'mai caricato' : a.giorni_fa === 0 ? 'oggi' : a.giorni_fa === 1 ? 'ieri' : `${a.giorni_fa} giorni fa`}</td>
-                </tr>
-              ))}
+              {dati.caricamenti.archivi.map(a => {
+                const eta = etaArchivio(a);
+                return (
+                  <tr key={a.tipo_file} className="border-b last:border-0">
+                    <td className="py-1.5">{a.nome || NOMI_FILE[a.tipo_file] || a.tipo_file}</td>
+                    <td className="py-1.5 text-right tabular-nums">{giorno(a.il)}</td>
+                    <td className="py-1.5 text-right tabular-nums" title={a.fino_al ? a.fino_al_cosa : (a.fino_al_perche || '')}>{giorno(a.fino_al)}</td>
+                    <td className={`py-1.5 text-right text-xs w-32 ${eta.classe}`}>{eta.testo}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+          <p className="text-xs text-muted-foreground mt-2">
+            «Dati fino al» è l&apos;ultimo giorno che c&apos;è dentro il file: la fine trasporto dei terminati, il giorno della fotografia del portale,
+            l&apos;ultima dichiarazione SMOCO. Terziarie, secondarie e dichiarazioni non arrivano tutti i giorni: per loro una data lontana non vuol dire un file vecchio.
+            Le primarie sì, ma con i buchi di Natale e Ferragosto: il file si dà per vecchio solo se i dati si fermano più di tre settimane prima del caricamento.
+          </p>
         </div>
       </div>
 
@@ -171,6 +209,12 @@ export default function Cruscotto({ isAdmin }) {
         <div className="border rounded-lg p-5">
           <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
             <h2 className="font-heading font-semibold text-lg flex items-center gap-2"><FileCheck className="w-5 h-5 text-primary" /> Fatturazione attiva {dati.anno}: i mesi finiti</h2>
+            {/* Ci sono anche i mesi dell'anno prima ancora aperti, finche' non si
+                chiudono: dicembre si chiude a gennaio, e uno dimenticato resta
+                anche a marzo (11/10/2026). */}
+            {dati.mesi_attiva.some(m => m.anno && m.anno !== dati.anno) && (
+              <p className="text-xs text-muted-foreground w-full order-last">Con i mesi del {dati.anno - 1} non ancora chiusi.</p>
+            )}
             <Link to="/fatturazione" className="text-xs text-primary hover:underline inline-flex items-center gap-1">Apri la fatturazione <ArrowRight className="w-3 h-3" /></Link>
           </div>
           {/* Ogni canale ha il suo documento e il suo stato: un mese con la rete
@@ -181,8 +225,8 @@ export default function Cruscotto({ isAdmin }) {
             {dati.mesi_attiva.map(m => {
               const indietro = !m.elaborato || (m.canali_mancanti || []).length > 0;
               return (
-                <div key={m.mese} className={`border rounded-md px-3 py-2 text-xs ${indietro ? 'bg-amber-50 border-amber-200' : m.chiuso ? 'bg-emerald-50 border-emerald-200' : 'bg-blue-50 border-blue-200'}`}>
-                  <p className="font-medium text-sm">{m.mese}</p>
+                <div key={m.etichetta || m.mese} className={`border rounded-md px-3 py-2 text-xs ${indietro ? 'bg-amber-50 border-amber-200' : m.chiuso ? 'bg-emerald-50 border-emerald-200' : 'bg-blue-50 border-blue-200'}`}>
+                  <p className="font-medium text-sm">{m.etichetta || m.mese}</p>
                   {m.canali
                     ? Object.entries(m.canali).map(([k, c]) => (
                       <p key={k} className={c.elaborato ? '' : 'text-amber-800 font-medium'}>{NOMI_CANALE[k]}: {c.stato}</p>
