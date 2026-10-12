@@ -87,8 +87,15 @@ export function apertura(visema) {
   }
 }
 
+// Una lettera di quelle dell'elenco. Attenzione: 'abc'.includes('') e' vero, e
+// fino all'11/10/2026 qui sotto si chiedeva CIFRE.includes(basso[i + 1] || ''):
+// in fondo al testo il «dopo» non c'e', la stringa vuota «era una cifra», e il
+// punto finale di «sono 38.» si leggeva come un separatore dentro il numero,
+// senza la pausa della fine della frase.
+const fra = (elenco, ch) => !!ch && elenco.includes(ch);
+
 const cifraSeguita = (basso, i) =>
-  (basso[i] === '.' || basso[i] === ',') && CIFRE.includes(basso[i + 1] || '');
+  (basso[i] === '.' || basso[i] === ',') && fra(CIFRE, basso[i + 1]);
 
 /**
  * L'orario delle forme di un testo.
@@ -142,6 +149,16 @@ export function traccia(testo, { velocita = 1 } = {}) {
         }
         i++;
       }
+      continue;
+    }
+
+    // L'acca da sola non si pronuncia: «ho», «hanno», «ah» non hanno una
+    // consonante, e la bocca va dritta sulla vocale. Dentro un gruppo («che»,
+    // «ghiaia») resta parte del gesto della consonante, come prima. Da quando
+    // la voce legge frase per frase un testo detto in parole (parlato.js,
+    // 11/10/2026) le acche sono tante: «ha raccolto», «hanno dichiarato».
+    if (c === 'h' && !fra(CONSONANTI, basso[i - 1]) && !fra(CONSONANTI, basso[i + 1])) {
+      i++;
       continue;
     }
 

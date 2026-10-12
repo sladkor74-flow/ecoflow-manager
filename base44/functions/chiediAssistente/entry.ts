@@ -32,6 +32,13 @@ const SCHEMA_RISPOSTA = {
   type: 'object',
   properties: {
     risposta: { type: 'string' },
+    // LA VERSIONE PARLATA (utente, 11/10/2026: «vorrei rendere EcoTyna piu'
+    // realistica e con una voce meno robotica»). La voce leggeva il testo
+    // scritto, elenchi e dettagli compresi: anche un minuto di numeri. Ora il
+    // modello scrive a parte come lo direbbe a voce, in due o tre frasi (regola
+    // V del prompt), e la voce dice quello; il testo intero solo se lo si chiede.
+    // Non e' obbligatorio: senza, la pagina dice le prime frasi della risposta.
+    da_dire: { type: 'string' },
     fonti: {
       type: 'array',
       items: {
@@ -101,6 +108,7 @@ const SCHEMA_RISPOSTA_DATI = {
   type: 'object',
   properties: {
     risposta: SCHEMA_RISPOSTA.properties.risposta,
+    da_dire: SCHEMA_RISPOSTA.properties.da_dire,
     dati_mancanti: SCHEMA_RISPOSTA.properties.dati_mancanti,
     certezza: SCHEMA_RISPOSTA.properties.certezza,
     precisazioni_utente: SCHEMA_RISPOSTA.properties.precisazioni_utente,
@@ -313,6 +321,14 @@ export default async function(req) {
       ...(soloDati ? [] : [REGOLE_FONTI]),
       '',
       'REGOLE',
+      // IL TONO E LA VOCE (utente, 11/10/2026: «vorrei rendere EcoTyna piu'
+      // realistica»). Le risposte sui dati uscivano telegrafiche, del tipo
+      // «GREEN TYRE PROJECT SRL, rete, luglio 2026: 49.947,30 euro; agosto ...»:
+      // giuste, ma scritte come un tabulato. T cambia la forma e non i numeri (le
+      // regole dei numeri restano tutte, D-quater compresa); V chiede la versione
+      // da dire a voce, che la pagina legge al posto del testo intero.
+      'T. IL TONO. Scrivi come una collega esperta dell\'ufficio che risponde a un collega: dai del tu, frasi intere in italiano naturale, non un verbale. La prima frase risponde alla domanda con soggetto, verbo e il numero con la sua etichetta (chi, quale canale, quale periodo). Niente stile telegrafico: non "GREEN TYRE PROJECT SRL, rete, luglio 2026: 412,30 t; agosto 2026: 398,10 t", ma "A luglio 2026 Green Tyre ha raccolto 412,30 t sulla rete, ad agosto 398,10 t." Le ragioni sociali nel testo si scrivono come si dicono, senza la forma societaria (Srl, Spa) e non tutte maiuscole ("Green Tyre", "Emmesse", "Nappi Sud"), ma con le parole che le distinguono da un altro soggetto: se due nomi si somigliano (Silvano Renato e Silvano Trasporti) scrivili per intero. Uno o due numeri si dicono in una frase; per tre o piu\' valori va bene un elenco breve o una tabella. Niente "Certo!", niente formule di cortesia, niente ripetizione della domanda, niente consigli o piani d\'azione che non sono stati chiesti. Il tono cambia la forma, non i numeri: valgono tutte le regole qui sotto.',
+      'V. LA VERSIONE PARLATA. In da_dire scrivi la stessa risposta come la diresti a voce a un collega: due o tre frasi, senza elenchi, tabelle, markdown, link, codici d\'ordine o di formulario. I numeri che sono la risposta li dici esatti e all\'italiana come nel testo, con la loro etichetta (chi, quale canale, quale periodo); il resto lo riassumi, e se nel testo c\'e\' di piu\' chiudi con una frase come "gli altri dettagli te li ho scritti sotto". Valgono tutte le regole dei numeri: i canali non si sommano, un dato che manca non e\' zero, e un avviso che il testo deve dare (un soggetto non riconosciuto, un caricamento da ripetere, date da sistemare, ordini in attesa del pulsante Chiudi) lo dai anche a voce, in breve. Se la risposta scritta e\' gia\' di due o tre frasi, da_dire puo\' essere uguale.',
       ...(soloDati ? [
         // COME SI RISPONDE A UNA DOMANDA SUI NUMERI (richiesta dell'utente,
         // 29/09/2026: la voleva "abbastanza secca e specifica", da responsabile
@@ -320,7 +336,7 @@ export default async function(req) {
         // delle fonti, che su una domanda sui dati non serve e allunga la
         // risposta senza aggiungerci niente.
         'Questa e\' una domanda sui DATI della commessa, non sulle norme: rispondi come un responsabile tecnico che ha i numeri davanti.',
-        'D. Il numero va nella PRIMA RIGA, con la sua etichetta: soggetto, canale e periodo. Esempio: "EMMESSE, rete, agosto 2026: 412,30 t in 58 formulari." Poi, solo se aggiungono qualcosa, due o tre righe di dettaglio. Niente premesse, niente "in base ai dati del gestionale", niente ripetizione della domanda.',
+        'D. Il numero va nella PRIMA FRASE, con la sua etichetta (soggetto, canale e periodo), detto in italiano naturale come vuole la regola T. Esempio: "Ad agosto 2026 Emmesse ha raccolto 412,30 t sulla rete, in 58 formulari." Poi, solo se aggiungono qualcosa, due o tre righe di dettaglio. Niente premesse, niente "in base ai dati del gestionale", niente ripetizione della domanda.',
         'D-bis. Non citare norme, non linkare siti e non consigliare di verificare su Normattiva: qui non c\'entrano. Se per rispondere servisse una norma, dillo in una riga e fermati.',
         'D-ter. Se un dato porta avviso_soggetto o numero_non_calcolabile, NON scrivere nessun numero per quel soggetto: riporta l\'avviso come prima riga e chiedi il nome per esteso. Zero non e\' la risposta: la risposta e\' che non si sa di chi si parla.',
         'D-quater. Non aggiungere consigli, piani d\'azione o raccomandazioni che non sono stati chiesti. Se l\'utente vuole sapere quanto ha raccolto un fornitore, vuole sapere quanto ha raccolto quel fornitore.',
@@ -418,7 +434,10 @@ export default async function(req) {
     // Una descrizione troppo grande si restituisce ma non si conserva.
     const fileGenerati = fileDaCreare(esito.file_da_creare);
     const fileJson = JSON.stringify(fileGenerati);
-    const aggiornato = await svc.DomandaAssistente.update(recordId, {
+    // La versione parlata passa dalla stessa conversione della risposta: i numeri
+    // e le date all'italiana, che la pagina poi dice in parole (parlato.js).
+    const daDire = testoAllItaliana(taglia(String(esito.da_dire || '').trim(), 1500), numeriDeiDati(risultati.map(r => r.dati)));
+    const campi = {
       risposta: testoAllItaliana(String(esito.risposta || 'Non sono riuscito a formulare una risposta: riprova riformulando la domanda.'), numeriDeiDati(risultati.map(r => r.dati))),
       fonti_json: JSON.stringify(fonti),
       certezza,
@@ -436,7 +455,18 @@ export default async function(req) {
       file_generati_json: fileGenerati.length ? (fileJson.length <= 300000 ? fileJson : JSON.stringify(fileGenerati.map(f => ({ ...f, fogli: undefined, testo: undefined, non_conservato: true })))) : '',
       stato: 'completata',
       errore: '',
-    });
+    };
+    // La versione parlata si conserva con la risposta, per riascoltarla dopo. Se
+    // l'archivio la rifiuta, la risposta si salva lo stesso: perdere la risposta
+    // per la sua versione parlata sarebbe il danno peggiore, e la pagina la riceve
+    // comunque qui sotto, in da_dire.
+    let aggiornato;
+    try {
+      aggiornato = await svc.DomandaAssistente.update(recordId, daDire ? { ...campi, da_dire: daDire } : campi);
+    } catch (errore) {
+      if (!daDire) throw errore;
+      aggiornato = await svc.DomandaAssistente.update(recordId, campi);
+    }
 
     // LE PROPOSTE SI APRONO, LA CONOSCENZA APPROVATA NON SI TOCCA (02/10/2026).
     //
@@ -478,7 +508,7 @@ export default async function(req) {
     }
     const proposte = novita.length + precisazioni.length;
 
-    return Response.json({ ok: true, record: aggiornato || { ...record, risposta: testoAllItaliana(String(esito.risposta || ''), numeriDeiDati(risultati.map(r => r.dati))), fonti_json: JSON.stringify(fonti), certezza, stato: 'completata' }, proposte, precisazioni: precisazioni.length, novita: novita.length, file_generati: fileGenerati });
+    return Response.json({ ok: true, record: aggiornato ? { ...aggiornato, da_dire: daDire } : { ...record, risposta: testoAllItaliana(String(esito.risposta || ''), numeriDeiDati(risultati.map(r => r.dati))), da_dire: daDire, fonti_json: JSON.stringify(fonti), certezza, stato: 'completata' }, da_dire: daDire, proposte, precisazioni: precisazioni.length, novita: novita.length, file_generati: fileGenerati });
   } catch (error) {
     const messaggio = error && error.message ? error.message : String(error);
     if (base44 && recordId) {

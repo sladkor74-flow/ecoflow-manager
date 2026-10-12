@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { comeSta } from '@/components/assistente/EcoTyna';
 import EcoTynaAngolo from '@/components/assistente/EcoTynaAngolo';
-import { useVoce, useAscolto } from '@/lib/voce';
+import { useVoce, useAscolto, useConversazione } from '@/lib/voce';
+import { daDireDi, etichettaVoce, nomeBreveVoce } from '@/lib/parlato';
+import { TEMPI } from '@/lib/conversazione';
 import ReactMarkdown from 'react-markdown';
 import { base44 } from '@/api/base44Client';
 import { useAuth } from '@/lib/AuthContext';
@@ -14,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { dataOra, nomeUtente } from '@/lib/target';
 import { eliminaParti } from '@/lib/testoLungo';
-import { Send, Loader2, Plus, Search, ThumbsUp, ThumbsDown, Globe, Database, BookOpen, MessageSquare, AlertTriangle, RefreshCw, Volume2, VolumeX, Mic, MicOff, Square, Paperclip, X, Download, FileText, Trash2 } from 'lucide-react';
+import { Send, Loader2, Plus, Search, ThumbsUp, ThumbsDown, Globe, Database, BookOpen, MessageSquare, AlertTriangle, RefreshCw, Volume2, VolumeX, Mic, MicOff, Square, Paperclip, X, Download, FileText, Trash2, AudioLines, Headphones } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
 import { dataServer } from '@/lib/utils';
 import { ACCETTATI, MAX_ALLEGATI, leggiAllegato, scaricaFileEcoTyna, nomeFile, ETICHETTE_FORMATO } from '@/lib/fileEcoTyna';
@@ -77,10 +79,32 @@ const ETICHETTE_STRUMENTO = {
   fatturazione: 'Fatturazione',
   tariffe: 'Tariffe',
   rotte_conferimenti: 'Rotte dei conferimenti',
+  storico_modifiche: 'Storico delle modifiche',
 };
 const giornoIt = (v) => { const d = String(v || '').slice(0, 10); return d ? d.split('-').reverse().join('/') : ''; };
 const oggi = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
 const areaPredefinita = (d) => (d.ambito === 'operativa' ? 'gestionale' : d.ambito === 'esercitazione' ? 'albo' : 'tua');
+
+// La barra del conto si svuota nel tempo che manca all'invio della domanda
+// dettata. Chi non vuole animazioni (prefers-reduced-motion) vede solo la scritta
+// e i due pulsanti.
+function BarraConto({ durata }) {
+  const [piena, setPiena] = useState(true);
+  const fermo = useMemo(() => {
+    try { return !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+  }, []);
+  useEffect(() => {
+    if (fermo) return undefined;
+    const t = setTimeout(() => setPiena(false), 30);
+    return () => clearTimeout(t);
+  }, [fermo]);
+  if (fermo) return null;
+  return (
+    <span className="mt-1 block h-1 rounded bg-muted overflow-hidden" aria-hidden="true">
+      <span className="block h-full bg-primary" style={{ width: piena ? '100%' : '0%', transition: `width ${durata}ms linear` }} />
+    </span>
+  );
+}
 
 function DialogValutazione({ domanda, modo, onClose, onSalvato }) {
   const { user } = useAuth();
@@ -182,7 +206,7 @@ function DialogValutazione({ domanda, modo, onClose, onSalvato }) {
   );
 }
 
-function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica }) {
+function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica, onAscolta }) {
   const fonti = leggiFonti(d.fonti_json);
   const certezza = CERTEZZA[d.certezza];
   const allegati = leggiFonti(d.allegati_json);
@@ -273,6 +297,14 @@ function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica }) {
               </div>
             )}
             {d.nota_valutazione && <p className="text-xs text-red-700 bg-red-50 rounded px-2 py-1">Nota: {d.nota_valutazione}</p>}
+            {/* La voce dice la versione parlata, due o tre frasi; il testo intero
+                lo legge solo se lo si chiede (11/10/2026). */}
+            {onAscolta && (
+              <div className="flex flex-wrap gap-1">
+                <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => onAscolta(d, false)}><Volume2 className="w-3.5 h-3.5" /> Ascolta</Button>
+                <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => onAscolta(d, true)}><AudioLines className="w-3.5 h-3.5" /> Leggi tutta la risposta</Button>
+              </div>
+            )}
             {isAdmin && (d.valutazione === 'nessuna' || !d.valutazione) ? (
               <div className="flex gap-1">
                 <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => onValuta(d, 'corretta')}><ThumbsUp className="w-3.5 h-3.5" /> Corretta, salva come FAQ</Button>
@@ -300,6 +332,22 @@ export default function ChatAssistente({ domandaIniziale = '' } = {}) {
   const fine = useRef(null);
   const voce = useVoce();
   const ascolto = useAscolto((t, definitivo) => { setTesto(t); if (definitivo) setTesto(t.trim()); });
+  // Le versioni parlate arrivate con la risposta (da_dire), per id della domanda:
+  // valgono anche se l'archivio non le ha ancora conservate.
+  const [parlate, setParlate] = useState({});
+  // invia si ridefinisce a ogni disegno: la conversazione chiama sempre l'ultima.
+  const inviaRef = useRef(null);
+  const conversazione = useConversazione({
+    voce,
+    onTesto: (t) => setTesto(t),
+    // La domanda dettata parte come dal pulsante Invia: col testo della casella,
+    // che onTesto ha appena scritto, e coi file in coda. Con invia(q) prendeva la
+    // strada degli esempi, che non allega: il file spariva dalla coda senza
+    // avviso, ed EcoTyna poteva rispondere su quello allegato prima come se fosse
+    // il nuovo (revisione delle migliorie, 11/10/2026). Come col pulsante, un
+    // secondo invio a casella vuota non manda niente.
+    onInvia: () => inviaRef.current && inviaRef.current(),
+  });
   // UNA DOMANDA PREPARATA DA UN'ALTRA PAGINA (/assistente?domanda=..., chiusura
   // dell'audit, 11/10/2026): si scrive nella casella di una domanda nuova e NON
   // si invia. La manda chi legge, quando l'ha guardata e magari corretta: un
@@ -413,14 +461,18 @@ export default function ChatAssistente({ domandaIniziale = '' } = {}) {
 
   useEffect(() => { fine.current?.scrollIntoView({ behavior: 'smooth' }); }, [messaggi.length, invio]);
 
-  // Con la voce accesa EcoTyna legge la risposta appena arriva, una volta sola.
+  // Con la voce accesa EcoTyna dice la risposta appena arriva, una volta sola: la
+  // versione parlata (da_dire), non il testo scritto. Prima leggeva tutto, tabelle
+  // ed elenchi tolti, anche un minuto di numeri (11/10/2026); il testo intero ora
+  // si chiede col pulsante sotto la risposta.
   const ultima = messaggi[messaggi.length - 1];
   useEffect(() => {
     if (!voce.attiva || !ultima || ultima.stato === 'in_corso' || !ultima.risposta) return;
     if (lette.current.has(ultima.id)) return;
     lette.current.add(ultima.id);
-    voce.parla(ultima.risposta);
-  }, [voce, ultima]);
+    voce.parla(daDireDi(ultima, parlate[ultima.id]));
+  }, [voce, ultima, parlate]);
+  const ascoltaRisposta = (d, tutto) => voce.parla(tutto ? d.risposta : daDireDi(d, parlate[d.id]));
 
   // Se la connessione cade mentre l'Assistente lavora, la risposta arriva comunque:
   // si ricontrolla finche' ci sono domande in corso da meno di cinque minuti.
@@ -428,7 +480,9 @@ export default function ChatAssistente({ domandaIniziale = '' } = {}) {
 
   // Che cosa sta facendo EcoTyna, in un posto solo: lo dicono l'intestazione e
   // l'angolino, e devono dire la stessa cosa nello stesso momento.
-  const comeStaOra = invio || inCorso ? 'pensa' : ascolto.inAscolto ? 'ascolta' : voce.stato;
+  // Mentre parla vince «parla»: nella conversazione il microfono resta aperto
+  // anche mentre lei parla, per accorgersi se la si interrompe.
+  const comeStaOra = invio || inCorso ? 'pensa' : voce.stato === 'parla' ? 'parla' : ascolto.inAscolto || conversazione.inAscolto ? 'ascolta' : voce.stato;
   useEffect(() => {
     if (!inCorso || invio) return;
     const t = setInterval(carica, 5000);
@@ -439,9 +493,20 @@ export default function ChatAssistente({ domandaIniziale = '' } = {}) {
     const daAllegare = domanda ? [] : coda;
     const q = String(domanda || testo).trim() || (daAllegare.length ? 'Analizza i file allegati: dimmi che cosa contengono e se c\'è qualcosa che non torna.' : '');
     if (!q || invio) return;
+    // Il pulsante Invia resta spento mentre un file si legge: partire adesso, con
+    // Invio da tastiera o dalla conversazione, vorrebbe dire partire senza quel
+    // file. La domanda resta nella casella (11/10/2026).
+    if (leggendo && !domanda) {
+      toast({ title: 'Sto ancora leggendo il file', description: 'La domanda resta nella casella: mandala appena ho finito.' });
+      return;
+    }
+    // Chi fa una domanda nuova non vuole sentire finire la risposta di prima.
+    voce.ferma();
     setInvio(true);
     setTesto('');
-    setCoda([]);
+    // I file in coda si tolgono solo se partono con la domanda: un esempio scelto
+    // con dei file in coda non li porta, e non li deve buttare (11/10/2026).
+    if (daAllegare.length) setCoda([]);
     const conversazione = attiva && attiva !== 'nuova' ? attiva : null;
     const provvisoria = {
       id: `tmp-${Date.now()}`, conversazione_id: conversazione || 'nuova', domanda: q, stato: 'in_corso', ricerca_online: true, created_date: new Date().toISOString(),
@@ -460,6 +525,7 @@ export default function ChatAssistente({ domandaIniziale = '' } = {}) {
       const record = res.data?.record;
       if (record) {
         if (res.data.file_generati?.length) setFileRecenti(f => ({ ...f, [record.id]: res.data.file_generati }));
+        if (res.data.da_dire) setParlate(p => ({ ...p, [record.id]: res.data.da_dire }));
         setAttiva(record.conversazione_id);
         // La scheda Base di conoscenza si disegna solo per l'amministratore: a chi
         // non la vede si diceva comunque di andarci (02/10/2026). E le due cose
@@ -478,6 +544,8 @@ export default function ChatAssistente({ domandaIniziale = '' } = {}) {
       setInvio(false);
     }
   };
+
+  inviaRef.current = invia;
 
   // Con la conversazione "nuova" ancora provvisoria si mostra solo la domanda in corso.
   const visibili = attiva === 'nuova' ? domande.filter(d => d.conversazione_id === 'nuova') : messaggi;
@@ -544,9 +612,9 @@ export default function ChatAssistente({ domandaIniziale = '' } = {}) {
                 value={voce.voce ? voce.voce.name : ''}
                 onChange={(e) => voce.scegliVoce(e.target.value)}
                 className="px-2 py-1.5 rounded-md border bg-card text-xs max-w-[180px]"
-                title="Voce di EcoTyna"
+                title="Voce di EcoTyna: «online» vuol dire che il testo da dire passa dal servizio vocale del browser"
               >
-                {voce.voci.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                {voce.voci.map(v => <option key={v.name} value={v.name}>{etichettaVoce(v)}</option>)}
               </select>
             )}
             {voce.attiva && voce.stato === 'parla' && (
@@ -558,12 +626,53 @@ export default function ChatAssistente({ domandaIniziale = '' } = {}) {
               className="gap-1"
               disabled={!voce.disponibile}
               title={voce.disponibile ? 'Accendi o spegni la voce di EcoTyna' : 'Questo browser non legge ad alta voce'}
-              onClick={() => { const acceso = !voce.attiva; voce.accendi(acceso); if (acceso) voce.parla(`Ciao, sono EcoTyna. Chiedimi quello che ti serve: ti rispondo a voce.`); }}
+              onClick={() => {
+                const acceso = !voce.attiva;
+                voce.accendi(acceso);
+                if (!acceso) conversazione.accendi(false);
+                if (acceso) voce.parla('Ciao, sono EcoTyna. Chiedimi quello che ti serve: ti rispondo a voce.');
+              }}
             >
               {voce.attiva ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />} Voce
             </Button>
+            {conversazione.disponibile && (
+              <Button
+                size="sm"
+                variant={conversazione.attiva ? 'default' : 'outline'}
+                className="gap-1"
+                title="Conversazione: finita la risposta EcoTyna torna ad ascoltarti, si ferma se le parli sopra e manda da sola la domanda dopo una pausa, con un momento per annullarla. La dettatura passa dal servizio vocale del browser."
+                onClick={() => {
+                  const acceso = !conversazione.attiva;
+                  if (acceso) {
+                    ascolto.interrompi();
+                    voce.accendi(true);
+                    conversazione.accendi(true);
+                    voce.parla('Eccomi. Dimmi pure: ti ascolto.');
+                  } else conversazione.accendi(false);
+                }}
+              >
+                <Headphones className="w-4 h-4" /> Conversazione
+              </Button>
+            )}
           </div>
         </div>
+        {/* UNA VOCE PIU' NATURALE, MA ONLINE (11/10/2026). Le voci migliori del
+            browser ricevono il testo da dire: per la regola di riservatezza non si
+            scelgono da sole. Si propongono una volta, e la risposta si ricorda. */}
+        {voce.attiva && voce.proposta && (
+          <div className="border-b bg-muted/40 px-4 py-2 text-xs flex flex-wrap items-center gap-2">
+            <span className="flex-1 min-w-[220px]">
+              C'è una voce più naturale, {nomeBreveVoce(voce.proposta)}, ma è online: il testo che EcoTyna ti legge passa dal servizio vocale del browser. Vuoi usarla?
+            </span>
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => voce.usaOnline(true)}>Usa la voce naturale</Button>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => voce.usaOnline(false)}>Resta sul computer</Button>
+          </div>
+        )}
+        {conversazione.negato && (
+          <div className="border-b bg-amber-50 px-4 py-2 text-xs text-amber-800">
+            Il browser non dà il permesso di usare il microfono: la conversazione si è spenta. Puoi riattivarla dopo averlo consentito.
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
           {!attiva ? (
             <div className="max-w-2xl mx-auto py-6 space-y-4">
@@ -587,7 +696,7 @@ export default function ChatAssistente({ domandaIniziale = '' } = {}) {
               <p className="text-xs text-muted-foreground">Le risposte sulle norme controllano anche le fonti online. Per decisioni con conseguenze legali verifica sempre il testo vigente.</p>
             </div>
           ) : (
-            visibili.map(d => <Messaggio key={d.id} d={d} isAdmin={isAdmin} fileRecenti={fileRecenti[d.id]} onScarica={scaricaFile} onValuta={(dd, modo) => setValuta({ d: dd, modo })} />)
+            visibili.map(d => <Messaggio key={d.id} d={d} isAdmin={isAdmin} fileRecenti={fileRecenti[d.id]} onScarica={scaricaFile} onValuta={(dd, modo) => setValuta({ d: dd, modo })} onAscolta={voce.disponibile ? ascoltaRisposta : null} />)
           )}
           {inCorso && !invio && (
             <p className="text-xs text-muted-foreground flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" /> Aggiorno appena la risposta è pronta…</p>
@@ -608,6 +717,16 @@ export default function ChatAssistente({ domandaIniziale = '' } = {}) {
             {leggendo && <span className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Leggo il file…</span>}
           </div>
         )}
+        {conversazione.conto && (
+          <div className="border-t px-3 py-2 flex flex-wrap items-center gap-2 text-xs" role="status">
+            <span className="flex-1 min-w-[180px]">
+              Mando la domanda tra un attimo…
+              <BarraConto durata={TEMPI.conto} />
+            </span>
+            <Button size="sm" className="h-7 text-xs gap-1" onClick={conversazione.inviaOra}><Send className="w-3.5 h-3.5" /> Invia ora</Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={conversazione.annullaInvio}>Annulla</Button>
+          </div>
+        )}
         <form
           className="border-t p-3 flex gap-2 items-end"
           onSubmit={(e) => { e.preventDefault(); invia(); }}
@@ -623,13 +742,23 @@ export default function ChatAssistente({ domandaIniziale = '' } = {}) {
           <Textarea
             rows={2}
             value={testo}
-            onChange={e => setTesto(e.target.value)}
+            onChange={e => { setTesto(e.target.value); conversazione.utenteScrive(); }}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); invia(); } }}
             placeholder={attiva ? 'Continua la conversazione…' : 'Scrivi la tua domanda…'}
             className="resize-none"
             maxLength={4000}
           />
-          {ascolto.disponibile && (
+          {conversazione.attiva ? (
+            <Button
+              type="button"
+              variant={conversazione.inAscolto ? 'default' : 'outline'}
+              className="gap-1"
+              onClick={conversazione.ascoltaOra}
+              title={conversazione.inAscolto ? 'Smetti di ascoltare' : 'Parla: la domanda parte da sola dopo una pausa'}
+            >
+              {conversazione.inAscolto ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </Button>
+          ) : ascolto.disponibile && (
             <Button
               type="button"
               variant={ascolto.inAscolto ? 'default' : 'outline'}

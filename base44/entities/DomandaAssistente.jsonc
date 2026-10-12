@@ -16,6 +16,10 @@
       "type": "string",
       "description": "Testo della risposta in markdown"
     },
+    "da_dire": {
+      "type": "string",
+      "description": "La risposta come EcoTyna la dice a voce: due o tre frasi, senza elenchi ne' tabelle (11/10/2026)"
+    },
     "fonti_json": {
       "type": "string",
       "description": "Fonti citate: [{ titolo, riferimento, url, verificato_il }]"

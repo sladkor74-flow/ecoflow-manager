@@ -32,6 +32,13 @@ verifica('«papa»: p e b sono labiali come la m', forme('papa') === 'M A M A' &
 verifica('«fa» e «va»: il labbro sotto i denti', forme('fa') === 'F A' && forme('va') === 'F A');
 verifica('«perché»: l\'accento non cambia la forma', forme('perché') === 'M E C E', forme('perché'));
 verifica('«uomo»: le vocali attaccate restano due forme', forme('uomo') === 'U O M O', forme('uomo'));
+// L'acca da sola non si pronuncia (11/10/2026): da quando la voce dice le
+// risposte in parole, «ha raccolto» e «hanno dichiarato» sono dappertutto, e una
+// consonante in piu' davanti alla vocale si vedeva come un balbettio.
+verifica('«ho»: l\'acca non si pronuncia, la bocca va dritta sulla o', forme('ho') === 'O', forme('ho'));
+verifica('«hanno»: niente consonante in testa', forme('hanno') === 'A C O', forme('hanno'));
+verifica('«ah»: niente consonante in coda', forme('ah') === 'A', forme('ah'));
+verifica('«che» e «ghiaia»: dentro un gruppo l\'acca resta parte del gesto', forme('che') === 'C E' && forme('ghiaia') === 'C I A I A', `${forme('che')} / ${forme('ghiaia')}`);
 
 // --- un gruppo di consonanti e' un gesto solo -------------------------------
 verifica('«scrivere»: scr e\' un movimento, non tre', forme('scrivere') === 'C I F E C E', forme('scrivere'));
@@ -49,6 +56,10 @@ verifica('ogni cifra fa due movimenti, con la vocale che cambia',
 verifica('cinque cifre durano quanto cinque parole corte', numero.durata === 5 * DURATE.cifra, String(numero.durata));
 verifica('la virgola decimale dentro un numero non ferma la bocca',
   !traccia('1.234,56').fotogrammi.some(f => f.v === RIPOSO), forme('1.234,56'));
+// Il punto DOPO l'ultima cifra del testo e' la fine della frase, non un separatore:
+// prima dell'11/10/2026 «'0123'.includes('')» lo faceva passare per una cifra.
+verifica('il punto in fondo, dopo un numero, e\' la pausa della fine della frase',
+  forme('sono 38.').endsWith(RIPOSO) && traccia('sono 38.').fotogrammi.slice(-1)[0].a - traccia('sono 38.').fotogrammi.slice(-1)[0].da === DURATE.pausaLunga, forme('sono 38.'));
 
 // --- le pause ----------------------------------------------------------------
 const frase = traccia('Sì, certo.');
