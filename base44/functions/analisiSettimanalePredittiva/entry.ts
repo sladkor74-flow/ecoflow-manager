@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
+import { conBattito } from "../../shared/battito.ts";
 import { soloAmministratore } from "../../shared/permessi.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
@@ -42,7 +43,7 @@ async function chiudiSuggerimenti(Alert, oggi) {
   return aperti.length;
 }
 
-export default async function(req) {
+async function programmaDelMercoledi(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
     // Scrive il programma: solo l'amministratore. Il workflow del mercoledi'
@@ -115,4 +116,11 @@ export default async function(req) {
   } catch (error) {
     return Response.json({ error: `Il programma del mercoledi' non e' riuscito: ${error && error.message ? error.message : String(error)}` }, { status: 500 });
   }
+}
+
+// IL BATTITO (chiusura dell'audit, 11/10/2026): ogni giro del lavoro lascia il
+// suo esito in EsecuzioneLavoro (shared/battito.ts), anche quando non riesce; la
+// risposta resta quella di sopra, e un errore risale com'e'.
+export default async function(req) {
+  return conBattito(() => conLimiteRichieste(createClientFromRequest(req)), 'analisiSettimanalePredittiva', () => programmaDelMercoledi(req), req);
 }

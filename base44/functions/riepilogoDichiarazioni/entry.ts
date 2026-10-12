@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
+import { conBattito } from "../../shared/battito.ts";
 import { fetchAll, perPagina } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
@@ -45,7 +46,7 @@ import { controlloCaricamenti } from "../../shared/statoArchivi.ts";
 // destinazione di ogni movimento.
 //
 // Payload: { anno }
-export default async function(req) {
+async function riepilogoDelleDichiarazioni(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
@@ -1280,4 +1281,13 @@ export default async function(req) {
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });
   }
+}
+
+// IL BATTITO (chiusura dell'audit, 11/10/2026): il giro del guardiano notturno
+// lascia il suo esito in EsecuzioneLavoro (shared/battito.ts), anche quando non
+// riesce. Solo il giro del guardiano - registra senza anno, come lo chiama il
+// workflow -: le pagine che aprono il riepilogo non lasciano niente. La risposta
+// resta quella di sopra, e un errore risale com'e'.
+export default async function(req) {
+  return conBattito(() => conLimiteRichieste(createClientFromRequest(req)), 'riepilogoDichiarazioni', () => riepilogoDelleDichiarazioni(req), req);
 }

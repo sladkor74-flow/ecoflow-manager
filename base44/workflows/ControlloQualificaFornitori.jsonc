@@ -43,5 +43,5 @@
       "ends_after_count": null
     }
   },
-  "description": "Ogni giorno lavorativo alle 7:30 controlla i documenti di qualifica dei fornitori attivi nell'anno e invia un'unica email riepilogativa agli amministratori: scadenze in arrivo, documenti mancanti, scaduti o non conformi"
+  "description": "Ogni giorno lavorativo alle 7:30 controlla i documenti di qualifica dei fornitori attivi nell'anno e invia un'unica email riepilogativa agli amministratori: scadenze in arrivo, documenti mancanti, scaduti o non conformi. Ogni giro lascia il suo battito (EsecuzioneLavoro): se per due giorni lavorativi di fila non riesce, la dashboard lo dice con l'ultimo errore"
 }

@@ -22,7 +22,7 @@
       }
     ]
   },
-  "description": "Ogni mercoledì alle 8:00 fissa il programma delle secondarie di rete della settimana dopo, stoccaggio per impianto, sui dati della settimana scorsa (i formulari si registrano il lunedì). Il programma si legge nel modulo Predittività Secondarie, accanto al fatto; le righe corrette a mano dall'amministratore restano com'erano. Durante un caricamento non scrive niente: ripassa alle 14:00, e un programma gia' fissato non lo rifa'.",
+  "description": "Ogni mercoledì alle 8:00 fissa il programma delle secondarie di rete della settimana dopo, stoccaggio per impianto, sui dati della settimana scorsa (i formulari si registrano il lunedì). Il programma si legge nel modulo Predittività Secondarie, accanto al fatto; le righe corrette a mano dall'amministratore restano com'erano. Durante un caricamento non scrive niente: ripassa alle 14:00, e un programma gia' fissato non lo rifa'. Ogni giro lascia il suo battito (EsecuzioneLavoro): se il programma non si fissa né alle 8 né alle 14, la dashboard lo dice con l'ultimo errore.",
   "trigger": {
     "condition": null,
     "config": {

@@ -197,6 +197,11 @@ export function leggiFotografia(r) {
     totali: apri(r.totali_json, {}),
     scostamenti: apri(r.scostamenti_json, []),
     doppioni: apri(r.doppioni_json, []),
+    // LE IDENTITA' FRA MODULI (11/10/2026): le scrive controllaInvarianti, il passo
+    // del guardiano che viene dopo la fotografia, nella stessa riga. La fotografia
+    // non le tocca (fotografiaDelGiorno non ha quel campo, e riscrivere la riga lo
+    // lascia com'e'); una riga che non le ha ancora dice null, non «tutto in linea».
+    invarianti: apri(r.invarianti_json, null),
   };
 }
 

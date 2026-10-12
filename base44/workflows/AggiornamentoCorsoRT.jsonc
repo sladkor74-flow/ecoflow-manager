@@ -43,5 +43,5 @@
       "ends_after_count": null
     }
   },
-  "description": "Ogni ora ricontrolla due schede del corso per responsabile tecnico con la base di conoscenza verificata: quelle mai confrontate e quelle di un'area in cui la normativa e' cambiata dopo l'ultimo controllo. Annota che cosa vale oggi e con quale fonte; quando non c'e' nulla da ricontrollare non fa nulla"
+  "description": "Ogni ora ricontrolla due schede del corso per responsabile tecnico con la base di conoscenza verificata: quelle mai confrontate e quelle di un'area in cui la normativa e' cambiata dopo l'ultimo controllo. Annota che cosa vale oggi e con quale fonte; quando non c'e' nulla da ricontrollare non fa nulla. Ogni giro lascia il suo battito (EsecuzioneLavoro): se per sei ore di fila non riesce, la dashboard lo dice con l'ultimo errore"
 }

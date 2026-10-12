@@ -1,0 +1,90 @@
+{
+  "name": "EsecuzioneLavoro",
+  "type": "object",
+  // IL BATTITO DEI LAVORI PIANIFICATI (chiusura dell'audit, 11/10/2026).
+  //
+  // Una riga per lavoro, che si riscrive e non cresce: com'e' andato l'ultimo
+  // giro, e quando e' riuscito l'ultima volta. Fino a oggi solo il guardiano
+  // notturno lasciava una traccia con la data, e un lavoro che cominciava a
+  // rispondere 500 - dopo una pubblicazione, o per il limite di richieste - non lo
+  // vedeva nessuno: un controllo che dorme e uno che non trova niente si
+  // assomigliano troppo. La scrive l'involucro conBattito (shared/battito.ts)
+  // attorno al corpo di ogni lavoro, anche quando il lavoro fallisce; la legge la
+  // dashboard (shared/presidi.ts). Un rinvio per un caricamento a meta' non
+  // scrive niente, come ogni conto che si salva.
+  "properties": {
+    "lavoro": {
+      "type": "string",
+      "description": "Il nome della funzione del lavoro (quello di LAVORI in shared/battito.ts). Uno solo per lavoro: si riscrive, non si aggiunge"
+    },
+    "ultima_partenza": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Quando e' partito l'ultimo giro registrato"
+    },
+    // IL PRIMO GIRO REGISTRATO (revisione delle migliorie, 11/10/2026). Si scrive
+    // quando la riga nasce e non si tocca piu'. Per un lavoro che non e' mai
+    // riuscito la dashboard conta i giri mancati da qui, questo compreso: la
+    // data di creazione e' la fine del giro, e contando da li' il primo
+    // fallimento non contava (il controllo normativo che fallisce al primo giro
+    // col battito, il 01/11/2026, sarebbe rimasto zitto fino a dicembre).
+    "prima_partenza": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Quando e' partito il primo giro registrato, quello che ha creato la riga. Non si riscrive"
+    },
+    "ultimo_esito": {
+      "type": "string",
+      "enum": [
+        "riuscito",
+        "fallito"
+      ],
+      "description": "Com'e' andato l'ultimo giro registrato. Un rinvio non si registra"
+    },
+    "ultima_riuscita": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Quando e' partito l'ultimo giro riuscito. Da qui la dashboard conta i giri mancati"
+    },
+    "fallimenti_di_fila": {
+      "type": "number",
+      "default": 0,
+      "description": "Quanti giri di fila sono falliti; torna a zero col primo che riesce"
+    },
+    "durata_ms": {
+      "type": "number",
+      "description": "Quanto e' durato l'ultimo giro, in millisecondi"
+    },
+    "sintesi": {
+      "type": "string",
+      "description": "Che cosa ha fatto l'ultimo giro riuscito, in due parole (per esempio «40 file tolti»)"
+    },
+    "errore": {
+      "type": "string",
+      "description": "L'errore dell'ultimo giro fallito, come l'ha detto il lavoro. Vuoto quando l'ultimo giro e' riuscito"
+    }
+  },
+  "required": [
+    "lavoro"
+  ],
+  // La scrive solo il lavoro, che gira come l'amministratore: la leggono tutti,
+  // nessuno la modifica a mano.
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

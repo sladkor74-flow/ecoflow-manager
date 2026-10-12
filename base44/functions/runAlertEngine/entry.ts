@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
+import { conBattito } from "../../shared/battito.ts";
 import { oggiRoma, annoRoma } from "../../shared/giornoItaliano.ts";
 import { eTerminato, periodoMovimento, giornoMovimento } from "../../shared/movimenti.ts";
 import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetrics } from "../../shared/primarieReteAnalytics.ts";
@@ -122,7 +123,7 @@ function daControllare(record, modulo, anno) {
   return annoRoma(record.trasporto_finito_il) === anno;
 }
 
-export default async function(req) {
+async function motoreAlert(req) {
   const inizio = Date.now();
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
@@ -730,4 +731,11 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
   }
 
   return alerts;
+}
+
+// IL BATTITO (chiusura dell'audit, 11/10/2026): ogni giro del lavoro lascia il
+// suo esito in EsecuzioneLavoro (shared/battito.ts), anche quando non riesce; la
+// risposta resta quella di sopra, e un errore risale com'e'.
+export default async function(req) {
+  return conBattito(() => conLimiteRichieste(createClientFromRequest(req)), 'runAlertEngine', () => motoreAlert(req), req);
 }

@@ -43,5 +43,5 @@
       "ends_after_count": null
     }
   },
-  "description": "Esegue giornalmente il controllo dei target mensili di raccolta e genera alert per trasportatori che non hanno raggiunto o sono a rischio di non raggiungere la soglia"
+  "description": "Esegue giornalmente il controllo dei target mensili di raccolta e genera alert per trasportatori che non hanno raggiunto o sono a rischio di non raggiungere la soglia. Ogni giro lascia il suo battito (EsecuzioneLavoro): se per due giorni di fila non riesce, la dashboard lo dice con l'ultimo errore"
 }

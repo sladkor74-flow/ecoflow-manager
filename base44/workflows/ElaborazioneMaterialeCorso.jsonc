@@ -43,5 +43,5 @@
       "ends_after_count": null
     }
   },
-  "description": "Ogni ora trasforma tre parti del materiale del corso per responsabile tecnico (dispense e trascrizioni delle videolezioni) in schede di studio che l'Assistente usa nelle risposte; quando non ci sono parti da elaborare non fa nulla"
+  "description": "Ogni ora trasforma tre parti del materiale del corso per responsabile tecnico (dispense e trascrizioni delle videolezioni) in schede di studio che l'Assistente usa nelle risposte; quando non ci sono parti da elaborare non fa nulla. Ogni giro lascia il suo battito (EsecuzioneLavoro): se per sei ore di fila non riesce, la dashboard lo dice con l'ultimo errore"
 }

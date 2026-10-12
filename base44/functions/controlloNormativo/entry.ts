@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
+import { conBattito } from "../../shared/battito.ts";
 import { soloAmministratore } from "../../shared/permessi.ts";
 import {
   AREE_NORMATIVE, BASE_CONOSCENZA, FONTI_UFFICIALI, REGOLE_FONTI, vociApprovate, voceAttuale, proponiNovita, scartaSuperate,
@@ -53,7 +54,7 @@ const comeOggetto = (v) => {
   try { return JSON.parse(String(v)); } catch { return {}; }
 };
 
-export default async function(req) {
+async function controllaNormativa(req) {
   let base44 = null;
   let controlloId = null;
   try {
@@ -171,4 +172,11 @@ export default async function(req) {
     }
     return Response.json({ error: messaggio }, { status: 500 });
   }
+}
+
+// IL BATTITO (chiusura dell'audit, 11/10/2026): ogni giro del lavoro lascia il
+// suo esito in EsecuzioneLavoro (shared/battito.ts), anche quando non riesce; la
+// risposta resta quella di sopra, e un errore risale com'e'.
+export default async function(req) {
+  return conBattito(() => conLimiteRichieste(createClientFromRequest(req)), 'controlloNormativo', () => controllaNormativa(req), req);
 }

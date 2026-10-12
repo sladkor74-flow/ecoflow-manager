@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
+import { conBattito } from "../../shared/battito.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { oggiRoma } from "../../shared/qualificaFornitori.ts";
 import { vociApprovate } from "../../shared/baseConoscenza.ts";
@@ -25,7 +26,7 @@ const comeOggetto = (v) => {
 };
 const elenco = (v) => { try { const x = JSON.parse(v || '[]'); return Array.isArray(x) ? x : []; } catch { return []; } };
 
-export default async function(req) {
+async function aggiornaCorso(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
@@ -99,4 +100,11 @@ export default async function(req) {
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }
+}
+
+// IL BATTITO (chiusura dell'audit, 11/10/2026): ogni giro del lavoro lascia il
+// suo esito in EsecuzioneLavoro (shared/battito.ts), anche quando non riesce; la
+// risposta resta quella di sopra, e un errore risale com'e'.
+export default async function(req) {
+  return conBattito(() => conLimiteRichieste(createClientFromRequest(req)), 'aggiornaCorsoRT', () => aggiornaCorso(req), req);
 }

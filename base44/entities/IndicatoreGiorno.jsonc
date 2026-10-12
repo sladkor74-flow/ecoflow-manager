@@ -66,6 +66,18 @@
     "doppioni_json": {
       "type": "string",
       "description": "Le dichiarazioni in doppio, in JSON: sito, canale, provenienza, mese, quante e i chili in piu'. Extra raccolta esclusa, dove ripetersi e' legittimo"
+    },
+    // LE IDENTITA' FRA MODULI (chiusura dell'audit, 11/10/2026).
+    //
+    // Lo stesso numero chiesto a due moduli che lo devono dire uguale: la giacenza
+    // di Giacenze e di Dichiarazioni sito per sito e canale per canale, la riga
+    // «Da dichiarare» contro la giacenza del canale, il raccolto di rete in
+    // Dashboard, Giacenze e Dichiarazioni, nessun doppione. Lo scrive
+    // controllaInvarianti, il passo del guardiano dopo la fotografia; il catalogo
+    // sta in shared/invarianti.ts. La fotografia non tocca questo campo.
+    "invarianti_json": {
+      "type": "string",
+      "description": "Le identita' fra moduli controllate stanotte, in JSON: per ogni voce se torna, i due numeri e i due moduli, i casi che non tornano, e quelle che non si sono potute verificare col motivo"
     }
   },
   "required": [

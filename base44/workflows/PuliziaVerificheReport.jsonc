@@ -41,5 +41,5 @@
       "ends_after_count": null
     }
   },
-  "description": "Ogni notte alle 3:15 toglie il dettaglio ai documenti dei fornitori caricati da oltre quaranta giorni: verifiche dei report settimanali, quadrature FIR, consuntivi, liste degli assegnati e controlli dell'evasione. Il record non si cancella: restano i numeri di sintesi e la storia scritta"
+  "description": "Ogni notte alle 3:15 toglie il dettaglio ai documenti dei fornitori caricati da oltre quaranta giorni: verifiche dei report settimanali, quadrature FIR, consuntivi, liste degli assegnati e controlli dell'evasione. Il record non si cancella: restano i numeri di sintesi e la storia scritta. Ogni giro lascia il suo battito (EsecuzioneLavoro): se per due notti di fila non riesce, la dashboard lo dice con l'ultimo errore"
 }

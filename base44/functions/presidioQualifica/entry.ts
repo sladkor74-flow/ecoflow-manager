@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
+import { conBattito } from "../../shared/battito.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { analizzaDocumento, daAnalizzare, vociApprovate } from "../../shared/analisiDocumento.ts";
@@ -21,7 +22,7 @@ import { individuaSoggetti, oggiRoma } from "../../shared/qualificaFornitori.ts"
 //
 // Payload: { massimo?: 5, anno?, solo_elenco?: false }
 
-export default async function(req) {
+async function presidiaDocumenti(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
@@ -100,4 +101,11 @@ function conteggio(elenco) {
   const c = {};
   for (const x of elenco) c[x.motivo] = (c[x.motivo] || 0) + 1;
   return c;
+}
+
+// IL BATTITO (chiusura dell'audit, 11/10/2026): ogni giro del lavoro lascia il
+// suo esito in EsecuzioneLavoro (shared/battito.ts), anche quando non riesce; la
+// risposta resta quella di sopra, e un errore risale com'e'.
+export default async function(req) {
+  return conBattito(() => conLimiteRichieste(createClientFromRequest(req)), 'presidioQualifica', () => presidiaDocumenti(req), req);
 }

@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
+import { conBattito } from "../../shared/battito.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { PROV_TO_REGION, MESI, riepilogoDate, riepilogoDateVista } from "../../shared/raccoltoCalculator.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
@@ -138,7 +139,7 @@ function testoAlert(item) {
 // si ricrea: e' una decisione presa, come nel motore degli alert.
 // La risposta resta quella del solo mese richiesto: la legge il pannello della
 // dashboard.
-export default async function(req) {
+async function controllaTarget(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
@@ -514,4 +515,12 @@ export default async function(req) {
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }
+}
+
+// IL BATTITO (chiusura dell'audit, 11/10/2026): ogni giro che apre gli alert
+// lascia il suo esito in EsecuzioneLavoro (shared/battito.ts), anche quando non
+// riesce; il pannello della dashboard, che legge con crea_alerts falso, no. La
+// risposta resta quella di sopra, e un errore risale com'e'.
+export default async function(req) {
+  return conBattito(() => conLimiteRichieste(createClientFromRequest(req)), 'checkTargetAlerts', () => controllaTarget(req), req);
 }

@@ -16,10 +16,24 @@
               "registra": true
             }
           },
-          "then": "end",
+          "then": "controlla_invarianti",
           "x-base44": {
             "title": "La quadratura di tutti gli impianti, e i numeri del giorno",
             "description": "Rifa' la quadratura di ogni impianto contro il portale e lascia scritta la fotografia del giorno (IndicatoreGiorno): l'esito si legge la mattina in cima alla dashboard, e i numeri restano per l'andamento"
+          }
+        }
+      },
+      {
+        "controlla_invarianti": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "controllaInvarianti",
+            "args": {}
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Le identità fra moduli",
+            "description": "Chiede gli stessi numeri ai moduli che li devono dire uguali - la giacenza di Giacenze e di Dichiarazioni sito per sito e canale per canale, la riga «Da dichiarare» contro la giacenza del canale, il raccolto di rete in Dashboard, Giacenze e Dichiarazioni, nessuna dichiarazione doppia - e scrive l'esito nella fotografia del giorno: se un'identità si rompe, la mattina la dashboard dice i due numeri e i due moduli"
           }
         }
       }
@@ -43,5 +57,5 @@
       "ends_after_count": null
     }
   },
-  "description": "Ogni notte alle 5 rifa' la quadratura di tutti gli impianti contro il portale e scrive la fotografia del giorno: se qualcosa si e' scostato lo si trova la mattina nell'elenco delle cose da gestire, senza aprire nessuna pagina. La stessa riga conserva i numeri del giorno, cosi' fra sei mesi si puo' dire com'era a ottobre. Non porta scritto nessun anno: usa quello corrente, cosi' il 1° gennaio passa da se'. Se in quel momento un archivio che legge (primarie, secondarie, terziarie, fotografia del portale, report delle dichiarazioni) si sta riscrivendo, o un suo caricamento e' rimasto interrotto o non e' riuscito, non scrive niente e risponde «rinviato» col motivo: la riga del giorno manca, la dashboard dice quale caricamento ripetere e, dopo due giorni, che il controllo notturno non gira"
+  "description": "Ogni notte alle 5 rifa' la quadratura di tutti gli impianti contro il portale e scrive la fotografia del giorno: se qualcosa si e' scostato lo si trova la mattina nell'elenco delle cose da gestire, senza aprire nessuna pagina. La stessa riga conserva i numeri del giorno, cosi' fra sei mesi si puo' dire com'era a ottobre. Non porta scritto nessun anno: usa quello corrente, cosi' il 1° gennaio passa da se'. Se in quel momento un archivio che legge (primarie, secondarie, terziarie, fotografia del portale, report delle dichiarazioni) si sta riscrivendo, o un suo caricamento e' rimasto interrotto o non e' riuscito, non scrive niente e risponde «rinviato» col motivo: la riga del giorno manca, la dashboard dice quale caricamento ripetere e, dopo due giorni, che il controllo notturno non gira. Dopo la fotografia controlla le identità fra moduli, cioè gli stessi numeri chiesti ai moduli che li devono dire uguali, e ne scrive l'esito nella stessa riga; con un caricamento a metà rinvia anche lui. Ogni passo lascia il suo battito (EsecuzioneLavoro): se un passo non riesce per due notti di fila, la dashboard lo dice con l'ultimo errore"
 }
