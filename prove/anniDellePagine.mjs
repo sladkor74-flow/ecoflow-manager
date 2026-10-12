@@ -50,9 +50,11 @@ console.log("NESSUN ANNO CABLATO NELLE PAGINE");
   }
   verifica('nessuna pagina con un anno scritto a mano', trovate.length === 0, '\n    ' + trovate.join('\n    '));
   const cons = readFileSync(join(radice, 'components/verifiche-fornitori/Consuntivi.jsx'), 'utf8');
-  verifica('Consuntivi parte dal mese finito, non dal dicembre dell\'anno nuovo', /useState\(\(\) => meseDiLavoro\(\)\.anno\)/.test(cons) && !/oggi\.getMonth\(\) === 0 \? 12/.test(cons));
+  // Dall'11/10/2026 il mese puo' arrivare da un collegamento (src/lib/collegamenti.js):
+  // senza, si parte sempre dall'ultimo mese finito.
+  verifica('Consuntivi parte dal mese finito, non dal dicembre dell\'anno nuovo', /useState\(\(\) => \(periodoIniziale \|\| meseDiLavoro\(\)\)\.anno\)/.test(cons) && !/oggi\.getMonth\(\) === 0 \? 12/.test(cons));
   const fatt = readFileSync(join(radice, 'pages/Fatturazione.jsx'), 'utf8') + readFileSync(join(radice, 'components/fatturazione/FatturazioneAttiva.jsx'), 'utf8');
-  verifica('la fatturazione si apre sull\'ultimo mese finito', (fatt.match(/useState\(meseDiLavoro\)/g) || []).length === 2);
+  verifica('la fatturazione si apre sull\'ultimo mese finito', /useState\(\(\) => periodoDelCollegamento\(arrivo, meseDiLavoro\(\)\)\)/.test(fatt) && /useState\(\(\) => periodoIniziale \|\| meseDiLavoro\(\)\)/.test(fatt));
 }
 
 console.log(`\n${ok} superate, ${ko} fallite`);

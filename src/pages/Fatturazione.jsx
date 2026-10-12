@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { leggiCollegamento, periodoDelCollegamento } from '@/lib/collegamenti';
 import { meseDiLavoro } from '@/lib/periodoPagine';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { FileText, Users, DollarSign, History, TrendingUp, Scale } from 'lucide-react';
@@ -10,11 +12,28 @@ import FatturazioneAttiva from '@/components/fatturazione/FatturazioneAttiva';
 import MargineCommessa from '@/components/fatturazione/MargineCommessa';
 import { useAuth } from '@/lib/AuthContext';
 
+// Le schede che chi guarda ha davvero: un collegamento a una scheda
+// dell'amministratore, aperto da un altro utente, apre la pagina come sempre.
+const schedeDi = (isAdmin) => (isAdmin ? ['passiva', 'attiva', 'margine', 'fornitori', 'tariffe', 'storico'] : ['passiva', 'attiva', 'storico']);
+
 export default function Fatturazione() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const [tab, setTab] = useState('passiva');
-  const [periodo, setPeriodo] = useState(meseDiLavoro);
+  // ?tab=passiva&anno=2026&mese=Settembre&canale=ACI (la chiusura del mese e la
+  // dashboard): si apre il punto dove si lavora. Vedi src/lib/collegamenti.js.
+  const location = useLocation();
+  const arrivo = leggiCollegamento(location.search, schedeDi(isAdmin));
+  const [tab, setTab] = useState(arrivo.tab || 'passiva');
+  const [periodo, setPeriodo] = useState(() => periodoDelCollegamento(arrivo, meseDiLavoro()));
+  const [canalePassiva, setCanalePassiva] = useState(arrivo.canale || 'RETE');
+  // Un collegamento nuovo con la pagina gia' aperta, o il ruolo che arriva dopo
+  // la prima apertura (le schede dell'amministratore).
+  useEffect(() => {
+    const a = leggiCollegamento(location.search, schedeDi(isAdmin));
+    if (a.tab) setTab(a.tab);
+    if (a.anno && a.mese) setPeriodo({ anno: a.anno, mese: a.mese });
+    if (a.canale) setCanalePassiva(a.canale);
+  }, [location.search, isAdmin]);
 
   const openPeriod = (anno, mese) => {
     setPeriodo({ anno, mese });
@@ -37,7 +56,7 @@ export default function Fatturazione() {
           <TabsTrigger value="storico"><History className="w-4 h-4 mr-1.5" /> Storico</TabsTrigger>
         </TabsList>
         <TabsContent value="passiva" className="mt-4">
-          <Tabs defaultValue="RETE">
+          <Tabs value={canalePassiva} onValueChange={setCanalePassiva}>
             <TabsList>
               <TabsTrigger value="RETE">Rete</TabsTrigger>
               <TabsTrigger value="ACI">ACI</TabsTrigger>
@@ -48,7 +67,7 @@ export default function Fatturazione() {
             <TabsContent value="EXTRA_RACCOLTA" className="mt-4"><PassivaModulo tipologia="EXTRA_RACCOLTA" periodo={periodo} setPeriodo={setPeriodo} /></TabsContent>
           </Tabs>
         </TabsContent>
-        <TabsContent value="attiva" className="mt-4"><FatturazioneAttiva isAdmin={isAdmin} onVaiTariffe={() => setTab('tariffe')} /></TabsContent>
+        <TabsContent value="attiva" className="mt-4"><FatturazioneAttiva isAdmin={isAdmin} onVaiTariffe={() => setTab('tariffe')} periodoIniziale={periodoDelCollegamento(arrivo, null)} /></TabsContent>
         {isAdmin && <TabsContent value="margine" className="mt-4"><MargineCommessa /></TabsContent>}
         {isAdmin && <TabsContent value="fornitori" className="mt-4"><FornitoriManager /></TabsContent>}
         {isAdmin && <TabsContent value="tariffe" className="mt-4"><TariffeUnificate /></TabsContent>}

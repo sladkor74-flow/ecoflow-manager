@@ -38,13 +38,14 @@ const RUOLI = [
   ['trasportatore', 'Trasportatore di secondarie', 'le secondarie che ha portato'],
 ];
 
-export default function Consuntivi({ isAdmin }) {
+export default function Consuntivi({ isAdmin, periodoIniziale = null, canaleIniziale = null }) {
   const oggi = new Date();
   // Il mese finito per ultimo, sul calendario italiano: a gennaio e' il dicembre
   // dell'anno prima, non il dicembre dell'anno nuovo (chiusura dell'audit, 11/10/2026).
-  const [anno, setAnno] = useState(() => meseDiLavoro().anno);
-  const [mese, setMese] = useState(() => MESI_PAGINE.indexOf(meseDiLavoro().mese) + 1);
-  const [canale, setCanale] = useState('RETE');
+  // Il mese e il canale del collegamento, se la pagina e' stata aperta da li'.
+  const [anno, setAnno] = useState(() => (periodoIniziale || meseDiLavoro()).anno);
+  const [mese, setMese] = useState(() => MESI_PAGINE.indexOf((periodoIniziale || meseDiLavoro()).mese) + 1);
+  const [canale, setCanale] = useState(canaleIniziale || 'RETE');
   const [fornitore, setFornitore] = useState('');
   const [ruolo, setRuolo] = useState('raccoglitore');
   const [importo, setImporto] = useState('');

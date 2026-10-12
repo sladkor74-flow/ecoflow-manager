@@ -8,6 +8,7 @@ import { datiFinoAl, finoAlPerTipo, ARCHIVI_DEL_CRUSCOTTO } from "../../shared/s
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { annoNuovoDaMostrare } from "../../shared/inizializzazioneAnno.ts";
 import { leggiFotografia } from "../../shared/indicatoriGiorno.ts";
+import { vociPresidi } from "../../shared/presidi.ts";
 
 // Il cruscotto della dashboard: l'elenco unico delle cose da gestire, l'arretrato
 // per canale, la freschezza dei dati, gli alert aperti, lo stato dei mesi della
@@ -26,6 +27,14 @@ import { leggiFotografia } from "../../shared/indicatoriGiorno.ts";
 //   resta da dire anche a marzo (anniMesiAttiva). Sono pochi documenti; le
 //   prefatture di quell'anno, che portano le righe del portale, si leggono solo
 //   se un suo documento e' ancora aperto (servonoPrefattureAnnoPrima).
+//
+// I PRESIDI DELLA NOTTE E GLI IMPIANTI (migliorie dell'11/10/2026). Si legge
+// anche EsecuzioneLavoro, una riga per lavoro pianificato (battito.ts): con la
+// fotografia gia' letta fa le voci dei presidi (presidi.ts), un lavoro che non
+// riesce piu' e un'identita' fra moduli che si e' rotta, che entrano nell'elenco
+// unico. La stessa fotografia porta alla dashboard la sezione degli impianti
+// (quadroImpianti, cruscotto.ts): quadratura e da dichiarare per canale, senza
+// rifare nessun conto.
 // Payload: { anno? }
 const TIPI_FILE = ['primarie', 'secondarie', 'terziarie', 'ordini_non_dichiarati', 'dichiarazioni_trattamento', 'pdr'];
 
@@ -41,7 +50,7 @@ export default async function(req) {
     const svc = base44.asServiceRole.entities;
     const anniAttiva = anniMesiAttiva(anno, oggi);
     const [alertAperti, uploadLogs, assegnatiRete, assegnatiAci, documenti, prefatture, riepiloghi, richiesteEct, verificheSedi,
-      tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, rilevazioni, ultimaFoto, finoAl] = await Promise.all([
+      tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, rilevazioni, ultimaFoto, esecuzioni, finoAl] = await Promise.all([
       fetchAll(svc.Alert, { stato: 'aperto' }),
       // Le ultime righe di ogni file, come le leggono i motori: una lettura sola.
       leggiRegistro(svc.UploadLog, TIPI_FILE).then(perTipo => [...perTipo.values()].flat()),
@@ -64,8 +73,11 @@ export default async function(req) {
       fetchAll(svc.CommessaEcotyre).catch(() => []),
       fetchAll(svc.ContrattoFornitore).catch(() => []),
       fetchAll(svc.GiacenzaStoccaggio).catch(() => []),
-      // L'ultima fotografia del guardiano notturno: una riga sola.
-      svc.IndicatoreGiorno.list('-giorno', 1).catch(() => []),
+      // Le ultime due fotografie del guardiano notturno, nella stessa lettura: la
+      // seconda serve solo se nella prima mancano le identita' (vedi sotto).
+      svc.IndicatoreGiorno.list('-giorno', 2).catch(() => []),
+      // Il battito dei lavori pianificati: una riga per lavoro, una pagina sola.
+      fetchAll(svc.EsecuzioneLavoro).catch(() => []),
       // Fino a che giorno arrivano i dati: poche righe per archivio. Se non si
       // riesce a leggere, la freschezza si misura sul giorno del caricamento.
       datiFinoAl(svc, ARCHIVI_DEL_CRUSCOTTO).catch(() => []),
@@ -75,14 +87,32 @@ export default async function(req) {
       ? await svc.PrefatturaEcotyre.filter({ anno: anniAttiva[0] }).catch(() => [])
       : [];
 
+    const adessoMs = Date.now();
+    const rigaFoto = (ultimaFoto || [])[0] || null;
+    const fotografiaGiorno = leggiFotografia(rigaFoto);
+    // LE IDENTITA' DELLA NOTTE PRIMA, SE QUELLA DI OGGI NON LE HA (revisione
+    // delle migliorie, 11/10/2026). Le scrive controllaInvarianti nella riga del
+    // guardiano, qualche secondo dopo: se si ferma prima di scrivere (un errore,
+    // un tempo scaduto, un rinvio per un caricamento a meta') la riga di oggi
+    // resta senza, e la rotta di ieri spariva dalla dashboard per un giorno,
+    // mentre il battito del controllo parla solo dalla seconda notte. Allora
+    // valgono quelle della riga prima: le voci dicono di che giorno sono
+    // («Controllo del ...», «non riverificata il ...», presidi.ts). Il resto della
+    // fotografia resta quello di oggi.
+    const fotografiaIdentita = fotografiaGiorno && !fotografiaGiorno.invarianti
+      ? (leggiFotografia((ultimaFoto || [])[1] || null) || fotografiaGiorno)
+      : fotografiaGiorno;
     return Response.json(cruscotto({
-      oggi, anno, adessoMs: Date.now(), tipiFile: TIPI_FILE,
+      oggi, anno, adessoMs, tipiFile: TIPI_FILE,
       alertAperti, uploadLogs, assegnatiRete, assegnatiAci, documenti,
       finoAl: finoAlPerTipo(finoAl),
       // delle prefatture bastano mese e stato: le righe non servono qui
       prefatture: [...(prefatture || []), ...(prefattureAnnoPrima || [])].map(p => ({ anno: p.anno, mese: p.mese, superata: p.superata })),
       riepilogoQualifica: riepiloghi[0] || null, richiesteEct, verificheSedi,
-      fotografiaGiorno: leggiFotografia((ultimaFoto || [])[0] || null),
+      fotografiaGiorno,
+      // Quando la fotografia e' stata scritta: dice quali file sono entrati dopo.
+      fotografiaScrittaIl: rigaFoto ? (rigaFoto.updated_date || rigaFoto.created_date || null) : null,
+      presidi: vociPresidi({ esecuzioni: esecuzioni || [], indicatore: fotografiaIdentita, oggi, adessoMs }),
       // Dal 1° gennaio, per due mesi, l'anno appena cominciato se gli manca qualcosa
       // (annoNuovoDaMostrare): prima si guardava sempre l'anno dopo.
       annoNuovo: annoNuovoDaMostrare({

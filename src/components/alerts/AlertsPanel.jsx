@@ -1,9 +1,17 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
-import { AlertTriangle, Loader2, CheckCircle, EyeOff } from 'lucide-react';
+import { AlertTriangle, Loader2, CheckCircle, EyeOff, ArrowRight } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
+import { doveSiRisolve, nomeModuloAlert } from '@/lib/doveSiRisolve';
 
-// Pannello laterale con lista alert e gestione stato
+// Pannello laterale con lista alert e gestione stato.
+//
+// DOVE SI CORREGGE (migliorie dell'11/10/2026): ogni alert porta al punto in cui
+// la cosa si sistema (src/lib/doveSiRisolve.js), e il modulo si legge col suo
+// nome, non col codice. «Risolto» e «Ignora» restano qui: sono la decisione su un
+// alert, salvata nell'archivio, mentre nascondere una voce della dashboard e'
+// solo una comodita' di chi guarda.
 export default function AlertsPanel({ modulo, maxHeight }) {
   const { isAdmin } = usePermessi();
   const [alerts, setAlerts] = useState([]);
@@ -73,10 +81,15 @@ export default function AlertsPanel({ modulo, maxHeight }) {
                   <div className="flex items-center gap-1.5 mb-1">
                     <span className="text-xs">{sevIcon[a.severita]}</span>
                     <span className="text-xs font-mono font-medium">{a.record_id || 'N/D'}</span>
-                    <span className="text-xs text-muted-foreground">· {a.modulo}</span>
+                    <span className="text-xs text-muted-foreground">· {nomeModuloAlert(a.modulo)}</span>
                   </div>
                   <p className="text-sm font-medium">{a.titolo}</p>
                   <p className="text-xs mt-0.5 opacity-80">{a.descrizione}</p>
+                  {doveSiRisolve(a) && (
+                    <Link to={doveSiRisolve(a).link} className="inline-flex items-center gap-1 mt-1 text-xs font-medium text-primary hover:underline">
+                      Si corregge in {doveSiRisolve(a).nome} <ArrowRight className="w-3 h-3" aria-hidden="true" />
+                    </Link>
+                  )}
                   {a.stato !== 'aperto' && (
                     <span className="inline-block mt-1 text-xs px-1.5 py-0.5 rounded bg-muted">{a.stato}</span>
                   )}

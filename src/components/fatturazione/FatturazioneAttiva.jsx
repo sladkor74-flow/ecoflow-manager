@@ -8,9 +8,10 @@ import AttivaDetail from './AttivaDetail';
 import AttivaEsportazioni from './AttivaEsportazioni';
 import PrefatturaEcotyre from './PrefatturaEcotyre';
 
-export default function FatturazioneAttiva({ isAdmin, onVaiTariffe }) {
+export default function FatturazioneAttiva({ isAdmin, onVaiTariffe, periodoIniziale = null }) {
   const [tab, setTab] = useState('dashboard');
-  const [periodo, setPeriodo] = useState(meseDiLavoro);
+  // Il mese del collegamento (?anno=&mese=), se la pagina e' stata aperta da li'.
+  const [periodo, setPeriodo] = useState(() => periodoIniziale || meseDiLavoro());
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
   const [elaborating, setElaborating] = useState(false);

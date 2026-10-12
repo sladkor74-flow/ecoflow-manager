@@ -7,9 +7,21 @@ import { periodoMovimento, giornoMovimento } from "../../shared/movimenti.ts";
 import { commessaDellAnno } from "../../shared/annoTarget.ts";
 import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, giornoDeiDati } from "../../shared/attesoContratto.ts";
 import { formatoTonnellate } from "../../shared/formato.ts";
+import { quadroCommessa } from "../../shared/quadroCommessa.ts";
 
 // Restituisce aggregati raccolta per la Dashboard filtrati per mese/anno.
 // Payload: { mese?, anno? } — mese è il nome del mese (es. "Agosto"), anno è numerico.
+//
+// IL QUADRO DELLA COMMESSA (migliorie dell'11/10/2026). Con un anno solo la
+// risposta porta anche `quadro`: la pagina e' il quadro della commessa Ecotyre di
+// quell'anno, a sezioni per canale (base44/shared/quadroCommessa.ts). Si calcola
+// sugli stessi elenchi gia' letti, piu' i target dei raccoglitori dell'anno (due
+// pagine piccole) e, per un anno passato, i documenti e le prefatture dell'attiva
+// di quell'anno: l'anno in corso ha i suoi mesi dal cruscotto. I campi di prima
+// restano identici, perche' li leggono le prove e controllaInvarianti
+// (prove/dashboardRaccoltaQuadro.mjs li confronta col codice di prima). Con piu'
+// anni il quadro e' null: una commessa e' annuale, e due contratti sommati non
+// sono il contratto di nessuno.
 export default async function(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
@@ -33,6 +45,19 @@ export default async function(req) {
     // sommavano la raccolta di tutti gli anni contro un target zero mentre i
     // conteggi della stessa pagina parlavano dell'anno in corso.
     if (!anni.length) anni.push(Number(oggiRoma().slice(0, 4)));
+
+    // Le letture del quadro partono insieme alle altre: un anno solo, e le
+    // pagine sono piccole. Una che non riesce lascia fuori la sua parte, col
+    // perche', e il resto della risposta vive.
+    const unAnno = anni.length === 1 ? anni[0] : null;
+    const annoPassato = unAnno !== null && unAnno < Number(oggiRoma().slice(0, 4));
+    const svc = base44.asServiceRole.entities;
+    const lettureQuadro = unAnno === null ? Promise.resolve(null) : Promise.all([
+      fetchAll(svc.TargetMensile, { anno: unAnno }).catch(() => null),
+      fetchAll(svc.TargetRaccoglitore, { anno: unAnno }).catch(() => null),
+      annoPassato ? fetchAll(svc.DocumentoFatturazione, { tipo: 'ATTIVA', anno: unAnno }).catch(() => null) : Promise.resolve(null),
+      annoPassato ? svc.PrefatturaEcotyre.filter({ anno: unAnno }).catch(() => null) : Promise.resolve(null),
+    ]);
 
     const [rete, aci] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.PrimariaRete, { stato: 'terminato' }),
@@ -164,6 +189,29 @@ export default async function(req) {
       ? [...perRegione].map(([reg, v]) => ({ regione: reg, target: v.target, atteso: v.atteso, raccolto: raccoltoRegRete[reg] || 0 }))
       : Object.entries(raccoltoRegRete).sort((a, b) => b[1] - a[1]).map(([reg, t]) => ({ regione: reg, target: null, atteso: null, raccolto: t }));
 
+    // IL QUADRO DELLA COMMESSA dell'anno scelto (quadroCommessa.ts). Il giorno
+    // dei dati e' quello dell'atteso: l'ultima fine trasporto della rete, mai oltre
+    // oggi.
+    let quadro = null;
+    let quadro_perche = '';
+    if (unAnno === null) {
+      quadro_perche = 'Il quadro della commessa si guarda un anno alla volta.';
+    } else {
+      const [mensili, annui, documenti, prefatture] = await lettureQuadro;
+      const kpiAnno = { raccolto_rete_anno, raccolto_aci_anno, raccolto_extra_anno, previsione_aci, target, raggiungimento_pct, atteso,
+        target_ripiego: targetAnni.filter(x => x.fonte === 'ripiego').map(x => x.anno), target_da_confermare: targetAnni.filter(x => x.da_confermare).map(x => x.anno) };
+      quadro = quadroCommessa({
+        anno: unAnno, oggi: oggiRoma(), giornoDati, commessa: contratti[0].commessa, kpi: kpiAnno, fonteTarget: targetAnni[0].fonte,
+        rete, reteAnno, aciAnno, extraAnno: extra,
+        targetVsRaccolto: target_vs_raccolto, conRiparto, raccoltoPerRegione: raccoltoRegRete,
+        mensili: mensili || [], annui: annui || [], senzaFine: senzaFine(rete),
+        documenti: documenti || null, prefatture: (prefatture || []).map(p => ({ anno: p.anno, mese: p.mese, superata: p.superata })),
+      });
+      if (mensili === null || annui === null) quadro.rete.raccoglitori_perche = "I target dei raccoglitori non si sono potuti leggere: la classifica non c'è.";
+      if (mensili === null || annui === null) quadro.rete.raccoglitori = null;
+      if (annoPassato && documenti === null) quadro.mesi_attiva = null;
+    }
+
     return Response.json({
       // target e raggiungimento_pct sono null quando un anno scelto non ha
       // contratto (si mostra «—», mai 0); atteso e' null quando manca il target o
@@ -192,6 +240,8 @@ export default async function(req) {
         aci: riepilogoDateVista(aci, aciMese, 5),
         extra: riepilogoDateVista(extraTutti.map(({ r }) => r), extra.filter(({ p }) => mesi.length === 0 || mesi.includes(p.mese)).map(({ r }) => r), 5),
       },
+      quadro,
+      ...(quadro_perche ? { quadro_perche } : {}),
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

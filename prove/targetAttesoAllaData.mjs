@@ -113,8 +113,12 @@ verifica('il 2026 senza contratto: il ripiego, dichiarato', d26senza.kpi.target 
 globalThis.__ARCHIVI_ATTESO = archivi({ PrimariaRete: RETE, CommessaEcotyre: [copiato] });
 const d27c = await dashboard({ anno: [2027] });
 verifica('un contratto copiato e non confermato si dice', J(d27c.kpi.target_da_confermare) === J([2027]) && (d27c.avvisi_target || []).some(a => a.includes('copiato')), J([d27c.kpi, d27c.avvisi_target]));
-const card = sorgente('src/components/dashboard/DashboardKpi.jsx');
-verifica('la card dice «copiato, da confermare», l\'atteso e lo scarto, e «—» senza target', card.includes("'copiato, da confermare'") && card.includes('atteso al ${giornoMese(a.giorno)}') && card.includes('scarto ') && /value: '—'/.test(card));
+// La card «Target RETE del contratto» e' diventata la tessera della rete e le
+// cifre della sezione Rete (migliorie dell'11/10/2026): le stesse garanzie, con
+// le parole nuove. Lo scarto si dice a parole («avanti di», «indietro di») oltre
+// che a colori; il disegno vero sta in prove/dashboardPagina.mjs.
+const card = sorgente('src/components/dashboard/righeQuadro.js') + sorgente('src/components/dashboard/formato.js');
+verifica('la tessera e le cifre della rete dicono «copiato, da confermare», l\'atteso e lo scarto, e «—» senza target', card.includes("'copiato, da confermare'") && card.includes('atteso al ${giornoMese(a.giorno)}') && card.includes('`avanti di ${') && card.includes('`indietro di ${') && /senzaTarget\(rete\) \? '—'/.test(card));
 
 console.log('3. I TARGET MENSILI COPIATI NON APRONO ALERT');
 const allarmi = await funzione('checkTargetAlerts');
@@ -132,8 +136,10 @@ verifica('il target confermato non raggiunto apre l\'alert', (r.missed || []).ma
 verifica('quello copiato si valuta, ma resta fuori dagli avvisi', (r.da_confermare || []).map(x => x.raccoglitore).join() === 'ALFA SRL' && !(r.at_risk || []).some(x => x.raccoglitore === 'ALFA SRL'), J([r.da_confermare, r.at_risk]));
 const creati = globalThis.__SCRITTE_ATTESO.filter(x => x.nome === 'Alert' && x.r && x.r.titolo);
 verifica('e nessun alert scritto per lui', creati.length === 1 && creati[0].r.titolo.includes('BETA SRL'), J(creati));
-const pannello = sorgente('src/components/dashboard/TargetAlertsPanel.jsx');
-verifica('il pannello della dashboard lo dice', /da_confermare/.test(pannello) && /da confermare in Target &amp; Status/.test(pannello));
+// Il pannello «Avvisi Target Trasportatori» non c'e' piu' (11/10/2026): lo dice
+// la classifica dei raccoglitori della sezione Rete.
+const pannello = sorgente('src/components/dashboard/ReteRaccoglitori.jsx');
+verifica('la classifica dei raccoglitori della dashboard lo dice', /da_confermare/.test(pannello) && /da confermare in Target &amp; Status/.test(pannello));
 // Lo scostamento grave del motore degli alert (regola scostamento_target), sui
 // mesi conclusi dell'anno in corso: anche li' un target copiato non conta. Il
 // giorno si ferma all'11/10/2026, cosi' gennaio e' concluso qualunque giorno

@@ -1,162 +1,279 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
-import { ClipboardList, Truck, Factory, Ship, TrendingUp, AlertTriangle, BarChart3 } from 'lucide-react';
-import AlertBadge from '@/components/alerts/AlertBadge';
-import TargetAlertsPanel from '@/components/dashboard/TargetAlertsPanel';
-import DashboardFilters from '@/components/dashboard/DashboardFilters';
-import DashboardKpi from '@/components/dashboard/DashboardKpi';
-import ReteVsAciChart from '@/components/dashboard/ReteVsAciChart';
-import TargetVsRaccoltoChart from '@/components/dashboard/TargetVsRaccoltoChart';
-import { formatIntero } from '@/lib/utils';
-import Cruscotto from '@/components/dashboard/Cruscotto';
+import { Loader2, AlertTriangle, CalendarCheck, ChevronDown, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { oggiRoma } from '@/lib/giornoItaliano';
+import { anniDaScegliere, annoDiOggi, meseDiLavoro } from '@/lib/periodoPagine';
+import { smista, nascondi, leggiMemoria, scriviMemoria } from '@/lib/avvisiNascosti';
+import EsportaPdf from '@/components/shared/EsportaPdf';
+import IntestazioneCommessa, { IndiceSezioni } from '@/components/dashboard/IntestazioneCommessa';
+import DaGestire from '@/components/dashboard/DaGestire';
+import QuadroInBreve from '@/components/dashboard/QuadroInBreve';
+import SezioneRete from '@/components/dashboard/SezioneRete';
+import SezioneAci from '@/components/dashboard/SezioneAci';
+import SezioneExtra from '@/components/dashboard/SezioneExtra';
+import SezioneImpianti from '@/components/dashboard/SezioneImpianti';
+import SezioneFatturazione from '@/components/dashboard/SezioneFatturazione';
+import SezioneEconomia from '@/components/dashboard/SezioneEconomia';
+import FreschezzaDati from '@/components/dashboard/FreschezzaDati';
+import { vociDalMargine, unisciVoci, contaPerSezione, riassuntoControlli } from '@/components/dashboard/vociDashboard';
+import { argomentiQuadroPdf } from '@/components/dashboard/esportaQuadro';
 
-const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
-  'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+// La chiusura del mese legge una dozzina di archivi (statoChiusuraMese): si
+// scarica e si legge solo quando si apre la sua sezione, che parte sempre chiusa.
+const ChiusuraMese = lazy(() => import('@/components/dashboard/ChiusuraMese'));
+
+// IL QUADRO DELLA COMMESSA (migliorie dell'11/10/2026).
+//
+// Chiesto dall'utente: «sistema meglio anche il modulo dashboard, permetti gli
+// alert a scomparsa e rendilo piu' professionale ed esaustivo sulla commessa».
+//
+// - La pagina e' il quadro della commessa Ecotyre dell'anno scelto, per SMOCO
+//   partner operativo: un anno solo, scritto nell'indirizzo (/?anno=2025). Prima
+//   si potevano scegliere piu' anni e piu' mesi, e «2025, 2026» sommava due
+//   contratti e due raccolti; il filtro dei mesi cambiava solo meta' dei numeri.
+// - «Da gestire» e' l'unico elenco dei problemi: le sezioni dicono come sta la
+//   commessa e mostrano solo un segno che porta alle loro voci. Spariscono le
+//   righe gialle sotto le card, il riquadro degli avvisi del contratto, i
+//   riepiloghi delle date, il pannello dei target e il badge in alto, che
+//   dicevano le stesse cose da tre calcoli fatti in momenti diversi.
+// - Gli avvisi si nascondono per oggi o per sette giorni e tornano da soli
+//   (src/lib/avvisiNascosti.js). La memoria e' nel browser, per utente.
+// - Meno richieste all'apertura, non di piu': due funzioni (getDashboardRaccolta
+//   col quadro, cruscottoOperativo con gli impianti della notte) e, solo per
+//   l'amministratore e dopo le prime due, il margine dell'anno scelto. Via
+//   getDashboardStats e la lettura del pannello dei target (checkTargetAlerts).
+//   La chiusura del mese si legge quando si apre.
+// - Rete, ACI ed extra raccolta non si sommano in nessun punto, nemmeno nel PDF.
+
+const motivo = (e) => e?.response?.data?.error || e?.data?.error || e?.message || String(e);
+const vai = (id) => {
+  const el = typeof document !== 'undefined' ? document.getElementById(id) : null;
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
 
 export default function Dashboard() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const [counts, setCounts] = useState({});
-  // le date da sistemare di ogni riquadro, un canale per volta (getDashboardStats)
-  const [dateDaSistemare, setDateDaSistemare] = useState({});
-  const [alertCount, setAlertCount] = useState(0);
-  const [alertCritici, setAlertCritici] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [params, setParams] = useSearchParams();
 
-  // L'anno in corso e' quello italiano, non quello dell'orologio del dispositivo.
-  const annoOggi = Number(oggiRoma().slice(0, 4));
-  const [mese, setMese] = useState([]);
-  const [anno, setAnno] = useState(() => [annoOggi]);
-  const [raccoltaData, setRaccoltaData] = useState(null);
-  const [raccoltaLoading, setRaccoltaLoading] = useState(true);
+  // L'anno in corso e' quello italiano; l'anno scelto sta nell'indirizzo.
+  const oggi = oggiRoma();
+  const annoOggi = annoDiOggi(oggi);
+  const anni = useMemo(() => anniDaScegliere({ dal: 2025, dopo: 1, oggi }), [oggi]);
+  const annoChiesto = Number(params.get('anno'));
+  const anno = anni.includes(annoChiesto) ? annoChiesto : annoOggi;
+  const annoInCorso = anno === annoOggi;
+  const scegliAnno = (a) => setParams(a === annoOggi ? {} : { anno: String(a) }, { replace: true });
 
-  // I conteggi seguono gli stessi filtri dei grafici.
+  // Il cruscotto: le voci da gestire, gli ordini aperti, la freschezza dei dati,
+  // i mesi dell'attiva, gli impianti della notte. E' di oggi: non segue l'anno.
+  const [cruscotto, setCruscotto] = useState(null);
+  const [erroreCruscotto, setErroreCruscotto] = useState('');
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await base44.functions.invoke('getDashboardStats', { mese, anno });
-        setCounts(res.data.counts);
-        setDateDaSistemare(res.data.date_da_sistemare || {});
-        setAlertCount(res.data.alert_count || 0);
-        setAlertCritici(res.data.alert_critici || 0);
-      } catch (e) { /* ignore */ }
-      setLoading(false);
-    })();
-  }, [mese, anno]);
+    let vivo = true;
+    base44.functions.invoke('cruscottoOperativo', {})
+      .then(r => { if (vivo) setCruscotto(r.data); })
+      .catch(e => { if (vivo) setErroreCruscotto(motivo(e)); });
+    return () => { vivo = false; };
+  }, []);
 
+  // Il quadro dell'anno scelto.
+  const [raccolta, setRaccolta] = useState({ anno: null, dati: null, errore: '' });
   useEffect(() => {
-    (async () => {
-      setRaccoltaLoading(true);
-      try {
-        const res = await base44.functions.invoke('getDashboardRaccolta', { mese, anno });
-        setRaccoltaData(res.data);
-      } catch (e) { /* ignore */ }
-      setRaccoltaLoading(false);
-    })();
-  }, [mese, anno]);
+    let vivo = true;
+    setRaccolta({ anno, dati: null, errore: '' });
+    base44.functions.invoke('getDashboardRaccolta', { anno: [anno] })
+      .then(r => { if (vivo) setRaccolta({ anno, dati: r.data, errore: '' }); })
+      .catch(e => { if (vivo) setRaccolta({ anno, dati: null, errore: motivo(e) }); });
+    return () => { vivo = false; };
+  }, [anno]);
+  const raccoltaPronta = raccolta.anno === anno && (raccolta.dati || raccolta.errore);
+  const quadro = raccolta.anno === anno && raccolta.dati ? raccolta.dati.quadro : null;
 
-  // Senza anno scelto getDashboardStats e getDashboardRaccolta usano l'anno in
-  // corso: i testi dicono quello, e i titoli dei grafici gli anni che la funzione
-  // ha davvero usato, non "Tutti gli anni".
-  const anniScelti = anno.length ? anno.join(', ') : String(annoOggi);
-  const anniRaccolta = raccoltaData && raccoltaData.anni && raccoltaData.anni.length ? raccoltaData.anni.join(', ') : anniScelti;
-  const periodo = `${mese.length ? `${mese.join(', ')} ` : ''}${anniScelti}`;
-  const cards = [
-    { key: 'assegnati', label: 'Assegnati Rete', sotto: counts.assegnati_aci ? `da evadere · ACI ${formatIntero(counts.assegnati_aci)}` : 'da evadere', icon: ClipboardList, path: '/assegnati', color: 'text-blue-600 bg-blue-50' },
-    { key: 'primarie_rete', label: 'Terminati Rete', sotto: periodo, icon: Truck, path: '/primarie-rete', color: 'text-green-600 bg-green-50' },
-    { key: 'primarie_aci', label: 'Terminati ACI', sotto: periodo, icon: Factory, path: '/primarie-aci', color: 'text-amber-600 bg-amber-50' },
-    { key: 'secondarie', label: 'Secondarie di rete', sotto: counts.secondarie_aci ? `${periodo} · ACI ${formatIntero(counts.secondarie_aci)}` : periodo, icon: Truck, path: '/secondarie', color: 'text-purple-600 bg-purple-50' },
-    { key: 'terziarie', label: 'Terziarie terminate', sotto: periodo, icon: Ship, path: '/terziarie', color: 'text-pink-600 bg-pink-50' },
+  // Il margine dell'anno scelto: solo per l'amministratore, e solo dopo che le
+  // prime due hanno risposto (stessa somma di letture, meno picco nel minuto).
+  const [margine, setMargine] = useState({ anno: null, dati: null, errore: '' });
+  const prontoPerMargine = isAdmin && !!(cruscotto || erroreCruscotto) && !!raccoltaPronta;
+  useEffect(() => {
+    if (!prontoPerMargine) return undefined;
+    let vivo = true;
+    setMargine({ anno, dati: null, errore: '' });
+    base44.functions.invoke('calcolaMargine', { anno })
+      .then(r => { if (vivo) setMargine({ anno, dati: r.data, errore: '' }); })
+      .catch(e => { if (vivo) setMargine({ anno, dati: null, errore: motivo(e) }); });
+    return () => { vivo = false; };
+  }, [prontoPerMargine, anno]);
+  const margineAnno = isAdmin && margine.anno === anno ? margine.dati : null;
+  const margineErrore = isAdmin && margine.anno === anno ? margine.errore : '';
+
+  // La memoria di chi guarda: le voci nascoste e i pannelli aperti o chiusi.
+  const chiaveUtente = user ? (user.id || user.email || '') : null;
+  const [memoria, setMemoria] = useState(null);
+  useEffect(() => { setMemoria(user ? leggiMemoria(user) : null); }, [chiaveUtente]);
+  useEffect(() => { if (user && memoria) scriviMemoria(user, memoria); }, [memoria]);
+  const cambiaMemoria = useCallback((fn) => setMemoria(m => (m ? fn(m) : m)), []);
+
+  // L'elenco unico, e chi e' nascosto.
+  const voci = useMemo(() => unisciVoci(cruscotto?.da_gestire || [], vociDalMargine(margineAnno, isAdmin)), [cruscotto, margineAnno, isAdmin]);
+  const smistate = useMemo(() => smista(voci, memoria?.nascoste || [], oggi), [voci, memoria, oggi]);
+  // «tornata: ...» resta scritto fino al prossimo caricamento della pagina,
+  // anche dopo che la sua riga e' uscita dalla memoria.
+  const [tornate, setTornate] = useState({});
+  useEffect(() => {
+    if (!memoria) return;
+    const nuove = {};
+    for (const x of smistate.visibili) if (x.tornata && x.tornata.motivo !== 'scaduta') nuove[x.voce.chiave] = x.tornata;
+    if (Object.keys(nuove).length) setTornate(t => ({ ...t, ...nuove }));
+    // chi e' tornato o scaduto esce dalla memoria
+    if (smistate.memoria.length !== memoria.nascoste.length) cambiaMemoria(m => ({ ...m, nascoste: smistate.memoria }));
+  }, [smistate]);
+  const visibili = smistate.visibili.map(x => ({ voce: x.voce, tornata: x.tornata || tornate[x.voce.chiave] || null }));
+  const nascoste = smistate.nascoste;
+  const visibiliDi = (sezione) => contaPerSezione(visibili.map(x => x.voce), sezione);
+
+  const onNascondi = (voce, giorni) => {
+    cambiaMemoria(m => ({ ...m, nascoste: [nascondi(voce, oggi, { giorni }), ...m.nascoste.filter(r => r.chiave !== voce.chiave)] }));
+    setTornate(t => { const c = { ...t }; delete c[voce.chiave]; return c; });
+  };
+  const onRimetti = (chiave) => cambiaMemoria(m => ({ ...m, nascoste: m.nascoste.filter(r => r.chiave !== chiave) }));
+  const onRimettiTutte = (chiavi) => cambiaMemoria(m => ({ ...m, nascoste: m.nascoste.filter(r => !chiavi.includes(r.chiave)) }));
+
+  // Il pannello aperto o chiuso, ricordato; la prima volta e' aperto.
+  const daGestireAperto = memoria?.aperte?.daGestire !== false;
+  const apriDaGestire = (aperto) => cambiaMemoria(m => ({ ...m, aperte: { ...(m.aperte || {}), daGestire: aperto } }));
+  const [filtro, setFiltro] = useState(null);
+  const onDaGestire = (sezione) => {
+    setFiltro(sezione);
+    if (!daGestireAperto) apriDaGestire(true);
+    vai('da-gestire');
+  };
+
+  // La chiusura del mese parte chiusa e non si ricorda aperta: la sua lettura
+  // pesa piu' di dieci pagine, e aperta d'abitudine si sommerebbe a ogni apertura.
+  const [chiusuraAperta, setChiusuraAperta] = useState(false);
+  const meseLavoro = meseDiLavoro(oggi);
+
+  const [conEconomia, setConEconomia] = useState(false);
+  const impianti = cruscotto?.impianti || null;
+  // I mesi dell'attiva: quelli di oggi dal cruscotto; di un anno chiuso dal
+  // quadro, dal primo mese con un documento, con la nota di quelli che restano
+  // fuori; un anno che deve ancora cominciare non ne ha.
+  const mesiAttiva = annoInCorso ? (cruscotto ? cruscotto.mesi_attiva : null) : anno > annoOggi ? [] : (quadro ? quadro.mesi_attiva : null);
+  const notaAttiva = !annoInCorso && anno < annoOggi && quadro ? quadro.mesi_attiva_nota || '' : '';
+  const primarie = (cruscotto?.caricamenti?.archivi || []).find(a => a.tipo_file === 'primarie');
+
+  const indice = [
+    { id: 'da-gestire', testo: 'Da gestire' },
+    { id: 'rete', testo: 'Rete' },
+    { id: 'aci', testo: 'ACI' },
+    { id: 'extra', testo: 'Extra raccolta' },
+    { id: 'impianti', testo: 'Impianti' },
+    { id: 'fatturazione', testo: 'Fatturazione' },
+    ...(isAdmin ? [{ id: 'economia', testo: 'Economia' }] : []),
+    { id: 'chiusura', testo: 'Chiusura del mese' },
+    { id: 'dati', testo: 'Dati' },
   ];
-  // I terminati con una data obbligatoria che manca o non torna, per riquadro:
-  // quelli senza fine trasporto sono fuori dal numero grande, gli altri dentro.
-  // Il riquadro delle secondarie di rete dice anche quelle ACI, a parte, come fa
-  // col loro numero. Gli assegnati non sono terminati: niente.
-  const RIQUADRI_DATE = { primarie_rete: [['primarie_rete', '']], primarie_aci: [['primarie_aci', '']], secondarie: [['secondarie', ''], ['secondarie_aci', 'ACI ']], terziarie: [['terziarie', '']] };
-  const datePerRiquadro = (key) => (RIQUADRI_DATE[key] || [])
-    .map(([chiave, prefisso]) => ({ chiave, prefisso, d: dateDaSistemare[chiave] }))
-    .filter(({ d }) => d && d.totale > 0)
-    .map(({ chiave, prefisso, d }) => ({
-      chiave,
-      testo: `${prefisso}${formatIntero(d.totale)} con date da sistemare`,
-      title: `${d.testo}. Immissione, inizio e fine trasporto sono obbligatorie in ogni formulario terminato; chi non ha la fine trasporto è fuori dal conteggio.`,
-    }));
+  const segni = (id) => (id === 'da-gestire' ? visibili.length : visibiliDi(id));
+  const sezioneProps = (id) => ({ daGestire: visibiliDi(id), onDaGestire });
+
+  const esporta = (
+    <div className="flex items-center gap-2 flex-wrap">
+      {isAdmin && (
+        <label className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+          <input type="checkbox" checked={conEconomia} onChange={(e) => setConEconomia(e.target.checked)} className="rounded border-input" />
+          con l&apos;economia
+        </label>
+      )}
+      <EsportaPdf
+        etichetta="Esporta il quadro (PDF)"
+        disabilitato={!quadro}
+        sezioni={() => argomentiQuadroPdf({ quadro, impianti, annoInCorso, mesiAttiva, margine: margineAnno, conEconomia, isAdmin })}
+      />
+    </div>
+  );
 
   return (
-    <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-8">
-      <div className="flex items-start justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl lg:text-3xl font-heading font-bold">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">Panoramica della commessa PFU Ecotyre — Smoco gestore.</p>
+    <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-5">
+      <IntestazioneCommessa
+        anno={anno} anni={anni} onAnno={scegliAnno}
+        giornoDati={quadro ? quadro.giorno_dati : ''}
+        ultimoCaricamento={primarie ? primarie.il : null}
+        annoChiuso={!annoInCorso && anno < annoOggi}
+        caricamento={!raccoltaPronta}
+        errore={!!raccolta.errore}
+        azioni={esporta}
+      />
+
+      <IndiceSezioni voci={indice} contaPerSezione={segni} onVai={vai} />
+
+      <DaGestire
+        visibili={visibili} nascoste={nascoste}
+        filtro={filtro} onTogliFiltro={() => setFiltro(null)}
+        aperto={daGestireAperto} onApri={() => apriDaGestire(!daGestireAperto)}
+        onNascondi={onNascondi} onRimetti={onRimetti} onRimettiTutte={onRimettiTutte}
+        caricamento={!cruscotto && !erroreCruscotto} errore={erroreCruscotto}
+        attesaPrezzi={isAdmin && !margineAnno && !margineErrore}
+      />
+
+      {raccoltaPronta && raccolta.errore ? (
+        <div className="border border-destructive/40 bg-destructive/5 rounded-lg p-4 text-sm text-destructive flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4" aria-hidden="true" /> Il quadro della commessa non si è caricato: {raccolta.errore}
         </div>
-        {alertCount > 0 && <AlertBadge count={alertCount} critici={alertCritici} />}
-      </div>
-
-      {/* Che cosa c'e' da gestire, l'arretrato, i dati, i mesi da fatturare, il margine */}
-      <Cruscotto isAdmin={isAdmin} />
-
-      {loading ? (
-        <div className="text-muted-foreground">Caricamento...</div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          {cards.map((c) => {
-            const Icon = c.icon;
-            return (
-              <Link key={c.key} to={c.path} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
-                <div className={`inline-flex p-2 rounded-md mb-3 ${c.color}`}>
-                  <Icon className="w-5 h-5" />
-                </div>
-                <p className="text-2xl font-heading font-bold">{formatIntero(counts[c.key] ?? 0)}</p>
-                <p className="text-sm text-muted-foreground">{c.label}</p>
-                <p className="text-xs text-muted-foreground/80">{c.sotto}</p>
-                {/* Le date obbligatorie dei formulari terminati (regola del
-                    22/09/2026): solo se qualcuno le ha da sistemare, del solo
-                    canale del riquadro. */}
-                {datePerRiquadro(c.key).map(({ chiave, testo, title }) => (
-                  <p key={chiave} className="text-xs text-amber-700 mt-0.5" title={title}>{testo}</p>
-                ))}
-              </Link>
-            );
-          })}
-        </div>
+        <QuadroInBreve quadro={quadro} impianti={impianti} annoInCorso={annoInCorso} caricamento={!quadro} onVai={vai} />
       )}
 
-      {/* Filtri Mese + Anno */}
-      <DashboardFilters mese={mese} anno={anno} onMeseChange={setMese} onAnnoChange={setAnno} />
+      {!raccoltaPronta ? (
+        <div className="flex items-center py-6 text-muted-foreground text-sm"><Loader2 className="w-5 h-5 animate-spin mr-2" aria-hidden="true" /> Lettura della commessa del {anno}…</div>
+      ) : quadro ? (
+        <>
+          <SezioneRete quadro={quadro} arretrato={cruscotto?.arretrato?.RETE || null} annoInCorso={annoInCorso} {...sezioneProps('rete')} />
+          <SezioneAci quadro={quadro} arretrato={cruscotto?.arretrato?.ACI || null} annoInCorso={annoInCorso} {...sezioneProps('aci')} />
+          <SezioneExtra quadro={quadro} {...sezioneProps('extra')} />
+        </>
+      ) : !raccolta.errore ? (
+        <p className="text-sm text-muted-foreground">{raccolta.dati?.quadro_perche || 'Il quadro della commessa non è arrivato.'}</p>
+      ) : null}
 
-      {/* KPI Raccolta */}
-      <DashboardKpi kpi={raccoltaData?.kpi} senzaFine={raccoltaData?.senza_fine_trasporto} dateDaSistemare={raccoltaData?.date_da_sistemare} avvisiTarget={raccoltaData?.avvisi_target || []} loading={raccoltaLoading} />
+      <SezioneImpianti impianti={impianti} annoInCorso={annoInCorso} anno={anno} {...sezioneProps('impianti')} />
+      <SezioneFatturazione mesi={mesiAttiva} nota={notaAttiva} anno={anno} caricamento={annoInCorso ? !cruscotto && !erroreCruscotto : !raccoltaPronta} {...sezioneProps('fatturazione')} />
+      {isAdmin && <SezioneEconomia margine={margineAnno} errore={margineErrore} anno={anno} {...sezioneProps('economia')} />}
 
-      {/* Raccolta RETE vs ACI per Regione */}
-      <div className="border rounded-lg p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <BarChart3 className="w-5 h-5 text-primary" />
-          <h2 className="font-heading font-semibold text-lg">Raccolta RETE vs ACI per Regione — {mese.length ? mese.join(', ') : 'Tutti i mesi'} {anniRaccolta}</h2>
-        </div>
-        <ReteVsAciChart data={raccoltaData?.per_regione} />
-      </div>
+      <section id="chiusura" aria-labelledby="chiusura-titolo" className="scroll-mt-4">
+        {!chiusuraAperta ? (
+          <button
+            type="button" onClick={() => setChiusuraAperta(true)} aria-expanded={false}
+            className="w-full text-left border rounded-lg p-4 lg:p-5 bg-card hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <h2 id="chiusura-titolo" className="font-heading font-semibold text-lg flex items-center gap-2">
+              <ChevronRight className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
+              <CalendarCheck className="w-5 h-5 text-primary" aria-hidden="true" />
+              {annoInCorso ? `Chiusura di ${meseLavoro.mese.toLowerCase()} ${meseLavoro.anno}` : `Chiusura del mese, ${anno}`}
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">I passi di fine mese, modulo per modulo: si controllano quando apri la sezione.</p>
+          </button>
+        ) : (
+          <div className="space-y-1">
+            <button type="button" onClick={() => setChiusuraAperta(false)} aria-expanded className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+              <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" /> <span id="chiusura-titolo">Chiudi la chiusura del mese</span>
+            </button>
+            <Suspense fallback={<div className="flex items-center py-6 text-muted-foreground text-sm"><Loader2 className="w-5 h-5 animate-spin mr-2" aria-hidden="true" /> Apertura…</div>}>
+              <ChiusuraMese isAdmin={isAdmin} anno={anno} />
+            </Suspense>
+          </div>
+        )}
+      </section>
 
-      {/* Target vs Raccolto per Regione */}
-      <div className="border rounded-lg p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <TrendingUp className="w-5 h-5 text-primary" />
-          <h2 className="font-heading font-semibold text-lg">Target vs Raccolto per Regione — {anniRaccolta} (solo Rete)</h2>
-        </div>
-        <TargetVsRaccoltoChart data={raccoltaData?.target_vs_raccolto} giorno={raccoltaData?.kpi?.atteso?.giorno} />
-      </div>
-
-      <div>
-        <div className="flex items-center gap-2 mb-4">
-          <AlertTriangle className="w-5 h-5 text-amber-500" />
-          <h2 className="font-heading font-semibold text-lg">Avvisi Target Trasportatori</h2>
-        </div>
-        <TargetAlertsPanel />
-      </div>
-
+      {/* I controlli automatici: le voci dei presidi e del guardiano, ovunque stiano;
+          finche' il cruscotto non risponde non si sa, e non si dice «tutti regolari». */}
+      <FreschezzaDati
+        caricamenti={cruscotto?.caricamenti}
+        controlli={cruscotto ? riassuntoControlli(voci) : null}
+        notteAssente={!!cruscotto && !!cruscotto.impianti && cruscotto.impianti.stato === 'assente'}
+        {...sezioneProps('dati')}
+      />
     </div>
   );
 }

@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { leggiCollegamento } from '@/lib/collegamenti';
 import ControlloRotte from '@/components/verifiche/ControlloRotte';
 import { useAuth } from '@/lib/AuthContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -14,9 +16,18 @@ import MatriceProvince from '@/components/verifiche/MatriceProvince';
 // suoi numeri di sintesi e una storia scritta: fino al 29/09/2026 si cancellava
 // tutta, e l'utente ha chiesto di tenere il contenuto.
 
+const SCHEDE = ['report-settimanali', 'quadratura-fir', 'raccolto-province', 'ritiri-province', 'rotte'];
+
 export default function Verifiche() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  // ?tab=quadratura-fir dalla chiusura del mese (src/lib/collegamenti.js).
+  const location = useLocation();
+  const [tab, setTab] = useState(() => leggiCollegamento(location.search, SCHEDE).tab || 'report-settimanali');
+  useEffect(() => {
+    const a = leggiCollegamento(location.search, SCHEDE);
+    if (a.tab) setTab(a.tab);
+  }, [location.search]);
 
   return (
     <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-6">
@@ -31,7 +42,7 @@ export default function Verifiche() {
         </p>
       </div>
 
-      <Tabs defaultValue="report-settimanali">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="report-settimanali">Report settimanali</TabsTrigger>
           <TabsTrigger value="quadratura-fir">Quadratura FIR</TabsTrigger>

@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { leggiCollegamento } from '@/lib/collegamenti';
 import { anniDaScegliere, annoDiOggi } from '@/lib/periodoPagine';
 import { base44 } from '@/api/base44Client';
+import { notaTraccia } from '@/lib/scriviConTraccia';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -79,9 +82,21 @@ function DateInBreve({ conti }) {
   );
 }
 
+const SCHEDE = ['riepilogo', 'impianti', 'stoccaggi', 'irigom', 'quadratura'];
+
 export default function DichiarazioniImpianti() {
   const { isAdmin, soloLettura } = usePermessi();
-  const [anno, setAnno] = useState(annoDiOggi);
+  // ?tab=irigom&anno=2026&mese=Settembre dalla chiusura del mese
+  // (src/lib/collegamenti.js): la scheda, l'anno e il mese della pratica.
+  const location = useLocation();
+  const arrivo = leggiCollegamento(location.search, SCHEDE);
+  const [anno, setAnno] = useState(() => arrivo.anno || annoDiOggi());
+  const [scheda, setScheda] = useState(arrivo.tab || 'riepilogo');
+  useEffect(() => {
+    const a = leggiCollegamento(location.search, SCHEDE);
+    if (a.tab) setScheda(a.tab);
+    if (a.anno) setAnno(a.anno);
+  }, [location.search]);
   const [dati, setDati] = useState(null);
   const [caricamento, setCaricamento] = useState(true);
   const [errore, setErrore] = useState('');
@@ -125,7 +140,8 @@ export default function DichiarazioniImpianti() {
       if (!window.confirm(domanda)) return;
       const res = await base44.functions.invoke('ripulisciDichiarazioni', { anno, conferma: true });
       const e = res.data || {};
-      window.alert(`Tolte ${e.conta} righe.${e.errori ? `\n\nNon riuscite: ${e.errori.join("; ")}` : ''}`);
+      const fuoriStorico = notaTraccia(e.traccia);
+      window.alert(`Tolte ${e.conta} righe.${e.errori ? `\n\nNon riuscite: ${e.errori.join("; ")}` : ''}${fuoriStorico ? `\n\n${fuoriStorico}` : ''}`);
       await carica();
     } catch (e) {
       setErrore(e?.response?.data?.error || e.message);
@@ -315,7 +331,7 @@ export default function DichiarazioniImpianti() {
 
           <DateInBreve conti={totali.date_da_sistemare} />
 
-          <Tabs defaultValue="riepilogo">
+          <Tabs value={scheda} onValueChange={setScheda}>
             <TabsList>
               <TabsTrigger value="riepilogo">Riepilogo</TabsTrigger>
               <TabsTrigger value="impianti">Impianti</TabsTrigger>
@@ -340,7 +356,7 @@ export default function DichiarazioniImpianti() {
             </TabsContent>
 
             <TabsContent value="irigom" className="mt-4">
-              <PraticaIrigom anno={anno} irigom={dati.siti.find(s => s.tipo_destinazione !== 'stoc' && /irigom/i.test(s.sito || s.chiave || '')) || null} fotoPortaleIl={dati.foto_portale_il} onRegistrata={carica} />
+              <PraticaIrigom anno={anno} irigom={dati.siti.find(s => s.tipo_destinazione !== 'stoc' && /irigom/i.test(s.sito || s.chiave || '')) || null} fotoPortaleIl={dati.foto_portale_il} onRegistrata={carica} meseIniziale={arrivo.tab === 'irigom' && arrivo.anno === anno ? arrivo.mese : null} />
             </TabsContent>
 
             <TabsContent value="quadratura" className="mt-4">

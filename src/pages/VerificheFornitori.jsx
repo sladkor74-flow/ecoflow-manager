@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { leggiCollegamento, periodoDelCollegamento } from '@/lib/collegamenti';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Users } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
@@ -22,9 +24,20 @@ import Consuntivi from '@/components/verifiche-fornitori/Consuntivi';
 // primarie, quindi e' sempre la fotografia di adesso e si aggiorna da sola a ogni
 // caricamento (regola 2).
 
+const SCHEDE = ['evasione', 'andamento', 'consuntivi'];
+
 export default function VerificheFornitori() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  // ?tab=consuntivi&anno=2026&mese=Settembre&canale=ACI dalla chiusura del mese
+  // (src/lib/collegamenti.js): la scheda, e il mese e il canale dei consuntivi.
+  const location = useLocation();
+  const arrivo = leggiCollegamento(location.search, SCHEDE);
+  const [tab, setTab] = useState(arrivo.tab || 'evasione');
+  useEffect(() => {
+    const a = leggiCollegamento(location.search, SCHEDE);
+    if (a.tab) setTab(a.tab);
+  }, [location.search]);
 
   return (
     <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-6">
@@ -39,7 +52,7 @@ export default function VerificheFornitori() {
         </p>
       </div>
 
-      <Tabs defaultValue="evasione">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="evasione">Evasione assegnati</TabsTrigger>
           <TabsTrigger value="andamento">Andamento e zone</TabsTrigger>
@@ -52,7 +65,7 @@ export default function VerificheFornitori() {
           <AndamentoRaccoglitori isAdmin={isAdmin} />
         </TabsContent>
         <TabsContent value="consuntivi" className="pt-4">
-          <Consuntivi isAdmin={isAdmin} />
+          <Consuntivi isAdmin={isAdmin} periodoIniziale={periodoDelCollegamento(arrivo, null)} canaleIniziale={arrivo.canale} />
         </TabsContent>
       </Tabs>
     </div>
