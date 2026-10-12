@@ -23,12 +23,14 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - Il limite di richieste della piattaforma (22/09/2026)
   - Base44: comandi, file e riferimenti
   - Regole tecniche della piattaforma e delle pagine
+  - I documenti che escono: una veste sola e la data dei dati (11/10/2026)
   - Quando la piattaforma modifica il codice da sola
   - Il nome: TreadRider
 - **Le tre regole assolute**
   - Le tre regole che l'utente non vuole ripetere (21/09/2026)
   - Il periodo di un movimento e' la fine del trasporto
   - Il guardiano notturno e la memoria dei numeri (10/10/2026)
+  - Il battito dei lavori e le identita' fra moduli (11/10/2026)
   - Nessun anno scritto nelle pagine (11/10/2026)
   - Il dichiarato e' di chi tratta, non di chi stocca (10/10/2026)
   - Una dichiarazione per mese, e un avviso non grida a zero (10/10/2026)
@@ -59,16 +61,19 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - La pratica mensile di Irigom
   - La Quadratura FIR: il flusso non si indovina dal titolo (30/09/2026)
     - La parola "gestionale" sulla stampa non siamo noi
-  - La dashboard e l'elenco unico delle cose da gestire
+  - La dashboard: il quadro della commessa e l'elenco unico delle cose da gestire (11/10/2026)
+  - La chiusura del mese passo passo (11/10/2026)
   - Il target del contratto e l'atteso alla data (11/10/2026)
   - L'Andamento di Target & Status: le stesse parole in pagina, Excel, PDF e presentazione (11/10/2026)
   - I tipi di regola alert (11/10/2026)
   - Le attivita' della to-do list che si chiudono da sole (28/09/2026)
   - EcoTyna: le domande sui dati non sono domande di norma (29/09/2026)
+  - La voce di EcoTyna: il testo detto, frase per frase (11/10/2026)
 - **I caricamenti, lo storico e il registro**
   - Lo storico: si carica solo cio' che serve all'operativita' (25/09/2026)
   - Il caricamento delle primarie: che cosa si crede e che cosa si ripara (28/09/2026)
   - Il registro dei caricamenti
+  - Lo storico delle modifiche: chi ha cambiato un numero che fa i conti (11/10/2026)
   - I conti che si salvano non si salvano su un archivio a meta' (11/10/2026)
   - I file del Caricamento Dati si sostituiscono (29/09/2026)
 - **I file, la privacy e i permessi**
@@ -177,6 +182,8 @@ l'abbinatore dei nomi. `registroCaricamenti` e' la regola sullo stato degli
 archivi, con i tipi che legge ogni conto, per l'avviso delle pagine e per i
 ricalcoli dopo un caricamento.
 
+Con lo storico delle modifiche (11/10/2026) anche `campiTracciati`: quali campi si tracciano e il motore che rilegge, scrive e registra, uguale per pagine e funzioni. Le coppie diventano 26.
+
 **Gli import in `src/lib` vanno bene in tutte due le forme.** La convenzione e'
 l'alias `@/` (39 dei 92 file; 12 usano un relativo, fra cui i cinque che prendono
 `./prodotto.js`), e nessuna delle due rompe le prove: il caricatore
@@ -260,7 +267,7 @@ Le richieste agli archivi si contano **per tutta l'app insieme**, su un minuto;
 oltre, 429 "Rate limit exceeded". Ogni funzione che crea un client lo avvolge con
 `conLimiteRichieste(createClientFromRequest(req))`
 (`base44/shared/limiteRichieste.ts`, specchio in `src/lib`, usato anche da
-`src/api/base44Client.js`). Lo fanno 91 cartelle di `base44/functions` su 94; le
+`src/api/base44Client.js`). Lo fanno 94 cartelle di `base44/functions` su 97 (11/10/2026); le
 tre fuori sono superate - `seedTargetSiti2026` crea il client nudo e risponde 410,
 `computeGiacenze` e `pulisciVerificheReport` non ne creano nessuno - e non sono il
 modello da copiare. Una richiesta respinta si ripete dopo una pausa, le
@@ -360,6 +367,22 @@ inglese e senza dire quale caricamento ripetere. In un `catch` si scrive
 `e?.response?.data?.error || e?.data?.error || e.message` (`motivoErrore` in
 `Consuntivi.jsx` e `ChiusuraAnno.jsx`, `messaggio` in `PrefatturaEcotyre.jsx`).
 Prova: `prove/motivoDelRinvio.mjs`, col client vero dell'SDK installato.
+
+### I documenti che escono: una veste sola e la data dei dati (11/10/2026)
+
+**Ogni file che si manda fuori passa dal corredo `src/lib/fogliProfessionali.js`**: exceljs, mai SheetJS, che nella versione del progetto non sa scrivere ne' grassetti ne' colori. Un export costruisce le sue righe come prima, un elenco di elenchi, e le consegna a `foglioDaRighe(wb, nome, { doc, righe, testate, stili, formati, larghezze })`, che le scrive cella per cella uguali sotto il blocco di testa; `scaricaCartella(wb, nome)` scarica il file. Dall'11/10/2026 ci passano la passiva per canale, i tre report dell'attiva, il report dei conferimenti, il confronto col consuntivo, giacenze, dichiarazioni, andamento raccoglitori, extra raccolta (Excel e PDF), il Report Mensile (Excel al posto del CSV, `src/lib/reportMensileExport.js`) ed `esportaTabellaExcel`, quindi anche margine, dettaglio dell'attiva, matrice delle province e qualifica. Resta su SheetJS `giacenzeDaDichiarareExport.js`.
+
+**Il blocco di testa e' uno, `intestazioneDocumento()`**, e lo usano i fogli e i PDF di `esportaTabella.js`, cosi' Excel e PDF dicono le stesse cose: titolo, canale (uno per file), periodo «per fine trasporto», «Dati fino al gg/mm/aaaa · caricati il ...», «Generato il ... alle ... da ...», gli avvisi dei caricamenti aperti, e nel piede «Pagina x di N». Dove un file ha due orologi lo dice (`perFineTrasporto: false` e il sottotitolo): nelle dichiarazioni il conferito e' per fine trasporto, il dichiarato nel mese del caricamento a portale.
+
+**Il «dati fino al» lo chiede il modulo di esportazione stesso**, quando produce il file, alla funzione `datiFinoAl` (`base44/functions/datiFinoAl`), e solo per gli archivi che quel file legge (`entita`): la passiva di rete per primarie di rete e secondarie, l'attiva ACI per le primarie ACI. La data di un archivio che il file non legge direbbe una cosa falsa. La funzione legge poche righe ordinate per archivio (`datiFinoAl` di statoArchivi.ts) e il registro con la regola dei motori (`statoDelRegistro`): ne escono il giorno dell'ultimo caricamento riuscito e i caricamenti aperti. La lettura non ferma mai il file: ha un tetto di 8 secondi, e se non riesce la testa scrive «Dati fino al: non disponibile».
+
+**Le due domande al server stanno in `src/lib/statoDeiDati.js`, che si carica solo con `await import` da fogliProfessionali.js.** Il corredo resta senza client, perche' le prove lo caricano in node, e la build non deve importare pigramente il client che l'app importa in testa: Vite avvertirebbe «dynamic import will not move module into another chunk». Nessuno importa statoDeiDati in testa, e la prova lo controlla.
+
+**I tre report dell'attiva per l'amministrazione non cambiano colonne.** Il primo foglio e' cella per cella quello di prima (intestazioni in riga 1, le righe, una riga vuota, il TOTALE sotto il Prezzo Totale); il blocco di testa sta in un secondo foglio, «Note». Se l'amministrazione vuole la testa sopra la tabella, va chiesto a lei.
+
+**Un prezzo unitario nel PDF ha il tipo del suo Excel (revisione delle migliorie, 11/10/2026).** In `esportaTabella.js` il tipo `'euro'` scrive due decimali fissi, `'prezzo'` quattro fissi e `'prezzoLibero'` da due a quattro: `FORMATI.prezzoLibero`, `'#,##0.00##'`, che nel PDF scrive come `cifreItaliane(v, 2, 4)`. Se l'Excel di una colonna di prezzi usa `prezzoLibero`, anche il PDF deve usare `prezzoLibero`: con `'euro'` un prezzo al chilo da 0,202 usciva «0,20 €», e il PDF dell'extra raccolta diceva un prezzo diverso dall'Excel dello stesso mese. Il format dell'amministrazione (`formatAmministrazione.js`) ha ancora lo stesso difetto, segnalato il 12/10/2026 e affidato al giro dopo. Prove: `prove/extraRaccoltaExport.mjs` sezione 5 (il totale si cerca nella riga del suo formulario, non in tutto il PDF), `prove/documentiCheEscono.mjs` sezione 15.
+
+**Per provare un export**: ogni funzione accetta in fondo `opzioni.stato`, lo stato dei dati gia' letto, e allora non chiede niente al server. Il download si intercetta con un `document` finto e `resolveObjectURL` di node:buffer, e il file si rilegge con exceljs: `prove/documentiCheEscono.mjs` lo fa per tutti gli export e confronta i totali del file con quelli a video. Per i PDF delle librerie che caricano `esportaTabella` pigro si sostituisce `await import('@/lib/esportaTabella')` col modulo caricato con jspdf vero, come in `prove/extraRaccoltaExport.mjs`. Nel testo del PDF i caratteri €, — e • arrivano nella codifica dei font standard (0x80, 0x97, 0x95), a volte come byte nudi.
 
 ### Quando la piattaforma modifica il codice da sola
 
@@ -685,6 +708,150 @@ che la rifa' darebbe una terza risposta**. Sei prudenze:
    manca; la dashboard dice il caricamento da ripetere e, dopo due giorni, che
    il controllo non gira. La descrizione del workflow `GuardianoNotturno` lo
    dice. Vedi «I conti che si salvano non si salvano su un archivio a meta'».
+7. **Dopo la fotografia, le identita' fra moduli** (11/10/2026): il passo
+   `controlla_invarianti` del workflow chiama `controllaInvarianti`, che scrive
+   `invarianti_json` nella stessa riga. La fotografia non tocca quel campo, e
+   `controllaInvarianti` non crea una riga se il guardiano non l'ha scritta.
+   Vedi la sezione che segue.
+
+### Il battito dei lavori e le identita' fra moduli (11/10/2026)
+
+Due presidi accanto al guardiano, dalle migliorie chieste dall'utente
+l'11/10/2026. Il codice sta in `base44/shared/battito.ts`,
+`base44/shared/invarianti.ts` e `base44/shared/presidi.ts`. Le prove sono
+`prove/battitoLavori.mjs`, `prove/identitaFraModuli.mjs` e
+`prove/presidiNotturni.mjs`.
+
+**Il battito.** Undici lavori girano da soli, e fino a questo giorno solo il
+guardiano lasciava una traccia con la data. Un lavoro che comincia a rispondere
+500 (i 503 del 09/10, il limite di richieste) non lo vedeva nessuno. Ora ogni
+funzione chiamata da un workflow mette attorno al suo corpo l'involucro
+`conBattito`, che lascia una riga `EsecuzioneLavoro` per lavoro. La riga si
+riscrive e non cresce: ultima partenza, esito, ultima riuscita, fallimenti di
+fila, sintesi ed errore. In fondo al file la forma e' sempre questa:
+
+```ts
+async function lavoro(req) { /* il corpo di prima */ }
+export default async function(req) {
+  return conBattito(() => conLimiteRichieste(createClientFromRequest(req)), 'nomeFunzione', () => lavoro(req), req);
+}
+```
+
+- **Chi aggiunge un workflow aggiunge il lavoro a `LAVORI`**, con il cron del
+  workflow, il titolo, il link e `senza` (che cosa non succede finche' non
+  riparte). `prove/battitoLavori.mjs` fallisce in tre casi: un `function_name`
+  di `base44/workflows` che non e' in `LAVORI`, un cron diverso, una funzione che
+  non usa l'involucro col suo nome.
+- **Un rinvio non scrive niente, nemmeno il battito**: e' la regola dei conti che
+  si salvano. Un lavoro rinviato per giorni si vede lo stesso, perche' l'ultima
+  riuscita invecchia; il caricamento da ripetere la dashboard lo dice gia'.
+- **Le funzioni che servono anche alle pagine** dicono quando la chiamata e' il
+  lavoro (`eIlLavoro`). Il guardiano e' `riepilogoDichiarazioni` con `registra`
+  e senza anno; i target sono `checkTargetAlerts` senza `crea_alerts: false`.
+  Il corpo si legge da una copia della richiesta e la risposta da una copia
+  della risposta, quindi ne' il lavoro ne' chi lo chiama vedono differenze. Un
+  errore lanciato si registra e risale com'e'.
+- Il battito lo scrive solo l'amministratore. Un battito che non si scrive non
+  ferma il lavoro.
+
+**Nella dashboard (`vociPresidi`), nessuna voce se non c'e' niente.** Un
+esempio di voce: «Il controllo delle qualifiche non riesce da 2 giorni
+lavorativi», con l'ultimo errore e l'ultima riuscita. La voce compare solo
+quando sono passati `soglia` giri previsti dal cron senza una riuscita:
+
+- due per i lavori di ogni giorno e dei feriali, sei per quelli di ogni ora,
+  uno per il controllo del mese;
+- contati dopo un margine di 90 minuti, 30 per i lavori orari.
+
+Si conta nell'unita' del suo orario: un venerdi' e un lunedi' falliti sono due
+giorni lavorativi, non quattro giorni. Altri casi:
+
+- un lavoro senza nessuna riga non si giudica: il giorno della pubblicazione
+  sono tutti senza riga;
+- **un lavoro che non e' mai riuscito conta anche il primo giro fallito**
+  (revisione delle migliorie, 11/10/2026). `registraBattito` scrive
+  `prima_partenza` quando crea la riga e non la riscrive piu'; `statoLavoro`
+  conta da li' meno il margine, quel giro compreso. Contando dalla nascita della
+  riga il controllo normativo che fallisce al primo giro col battito, il
+  01/11/2026, avrebbe taciuto un mese;
+- un passo che viene dopo un altro non si dice se il primo non e' riuscito: una
+  causa, una voce;
+- il motore degli alert parte a evento, e si dice solo se l'ultimo giro e'
+  fallito.
+
+**Le identita' fra moduli.** E' il metodo dell'audit del 10/10, fatto ogni
+notte: lo stesso numero chiesto ai moduli che lo devono dire uguale. Il catalogo
+e' in `invarianti.ts`:
+
+- (a) la giacenza di Giacenze e' quella di Dichiarazioni, per impianto e
+  piazzale, canale per canale (le coppie di `confrontaTutto`). Un piazzale che
+  uno dei due moduli non elenca non e' uno zero: con una giacenza dall'altra
+  parte il caso resta col numero che manca («Dichiarazioni —», «il piazzale
+  nelle Dichiarazioni non compare», e al contrario «Giacenze —»); a 0 o «—» non
+  si confronta. Lo 0 vale solo per il canale che manca a un piazzale elencato.
+  Il 02/01/2027 senza il 2027 preparato Nappi Sud 25,88 t si leggeva «0,00 t
+  nelle Dichiarazioni»;
+- (b) la somma della riga «Da dichiarare» e' la giacenza del canale;
+- (c) il raccolto di rete dell'anno e' lo stesso in Dashboard, Giacenze e
+  Dichiarazioni;
+- (d) nessuna dichiarazione e' doppia (la dashboard ha gia' la sua voce, e qui
+  non se ne fa un'altra).
+
+Le fa girare `controllaInvarianti`, il passo del `GuardianoNotturno` dopo la
+fotografia:
+
+- i numeri li chiede alle funzioni vere con `functions.invoke` e non li
+  ricalcola mai;
+- con un caricamento a meta' (`TIPI_GIACENZE`) rinvia, prima e dopo;
+- scrive solo l'amministratore, nella riga di oggi (`invarianti_json`).
+
+Un'identita' rotta diventa una voce rossa coi due numeri e i due moduli
+(«Giacenze 275,08 t, Dichiarazioni 154,22 t»). Una che non si e' potuta
+verificare non e' rotta: in quel caso risulta non riuscito il battito del
+controllo. **Ma una rotta all'ultima verifica resta rotta finche' una verifica
+non la trova a posto** (`riportaRotte`, revisione delle migliorie,
+11-12/10/2026): quando una fonte non risponde, `controllaInvarianti` rilegge le
+fotografie dello stesso anno (un mese), compreso l'esito gia' scritto oggi se il
+suo istante (`il`) viene prima, e tiene numeri, dettaglio e giorno di quella
+verifica (`rotta_il`); la dashboard la dice ancora rossa, «(non riverificata
+stanotte)» o «(non riverificata oggi alle 11:00)». Se il controllo di oggi si
+ferma prima di scrivere (un 500, un tempo scaduto, un rinvio),
+`cruscottoOperativo` legge le ultime due fotografie (`list('-giorno', 2)`,
+sempre una richiesta sola) e dice le identita' della riga prima, «Controllo del
+<giorno>»: si guarda una riga sola indietro, perche' dalla seconda notte parla
+il battito del controllo.
+
+**A video niente identificativi del catalogo ne' nomi di funzioni.** Il motivo
+di una voce non verificata nomina il modulo (`FONTI[f].nonRisponde`: «le
+Giacenze non hanno risposto»), e l'errore del battito dice le voci col loro nome
+breve (`breve`, `motiviNonVerificate`). Una voce nuova del catalogo ha il suo
+`breve` e una fonte nuova il suo `nonRisponde`: `prove/identitaFraModuli.mjs`
+lo controlla.
+
+**Una voce entra nel catalogo solo dopo averla vista tornare sui dati veri, con
+la sua tolleranza scritta.**
+
+- Per (a) e (b) la tolleranza e' il centesimo (`TOLLERANZA_CENTESIMO_T`): due e
+  tre decimali danno meno di 0,006 t di scarto.
+- Per (c) e' un centesimo piu' mezzo centesimo per riga delle Giacenze, che
+  sommano righe gia' arrotondate.
+
+Ogni voce ha il suo guasto in `prove/identitaFraModuli.mjs`: il difetto viene
+rimesso nel codice mentre si impacchetta, e si deve rompere quella voce e
+nessun'altra. La prova gira sui numeri veri di Irigom dell'11/10/2026: apertura
+385,36 t, 1.729 t del 2025 agganciate dal report, giacenza 652,84 t. Rimette la
+regressione di quel giorno, la riga torna a 0, e la voce (b) la trova. E' la
+lezione di quel giorno: un invariante provato solo su archivi costruiti non
+basta.
+
+**Fuori, per ora: attiva = ricavi del margine e passiva = costi del margine.** Il
+margine non ha regole sue, quindi contro il calcolo della passiva il confronto
+e' vero per costruzione. Avrebbe senso solo contro le fotografie salvate
+(documenti elaborati, passiva congelata), che dopo un caricamento cambiano per
+ragioni legittime. In piu', una quarta lettura di tutti i movimenti nella stessa
+notte pesa sui tempi e sul limite di richieste. Per farla bene ci vuole un passo
+a parte (`{ voci: [...] }`) che confronti solo i mesi la cui fotografia e' piu'
+recente dell'ultimo caricamento riuscito dei tipi che legge.
 
 ### Nessun anno scritto nelle pagine (11/10/2026)
 
@@ -2303,10 +2470,25 @@ Scrivendo testi che l'utente legge, non chiamare mai "il gestionale" una fonte
 esterna: si dice "il portale", "WINSINFO", oppure "il file Excel di chi manda la
 stampa".
 
-### La dashboard e l'elenco unico delle cose da gestire
+### La dashboard: il quadro della commessa e l'elenco unico delle cose da gestire (11/10/2026)
 
-`base44/shared/cruscotto.ts`, funzione `cruscottoOperativo`, componente
-`src/components/dashboard/Cruscotto.jsx`. Un solo elenco, ordinato per gravita',
+La pagina (`src/pages/Dashboard.jsx`, componenti in `src/components/dashboard/`) e' il **quadro della commessa Ecotyre dell'anno scelto**, per SMOCO partner operativo. L'anno e' uno solo e sta nell'indirizzo (`/?anno=2025`); niente filtro dei mesi: «2025, 2026» sommava due contratti. Le sezioni sono tre canali mai sommati (Rete col contratto, ACI, Extra raccolta), poi Impianti, Fatturazione attiva, Economia (solo amministratore), Chiusura del mese e «A quando sono aggiornati i dati». **«Da gestire» e' l'unico elenco dei problemi.** Una sezione non ripete il testo di una voce: mostra solo il segno «2 da gestire», che porta al pannello filtrato. Righe gialle sotto le card, riepiloghi delle date, pannello dei target e badge in alto sono tolti: dicevano le stesse cose da tre calcoli fatti in momenti diversi.
+
+- **Le richieste all'apertura**: `cruscottoOperativo` e `getDashboardRaccolta({ anno: [anno] })`, che porta il campo `quadro` (`base44/shared/quadroCommessa.ts`, solo server). Per l'amministratore, e solo dopo che le prime due hanno risposto, c'e' anche `calcolaMargine({ anno })`, che ora segue l'anno scelto. `getDashboardStats` e' tolta, e il pannello non chiama piu' `checkTargetAlerts`: la voce «Target raccoglitori» viene dagli Alert gia' letti, una per mese. La chiusura del mese si scarica (`lazy`) e si legge solo quando si apre; parte sempre chiusa perche' `statoChiusuraMese` legge piu' di dieci pagine. Chi aggiunge una lettura all'apertura guarda il bilancio di `prove/dashboardRaccoltaQuadro.mjs` (PrimariaRete intera una volta, non tre).
+- **I numeri** vengono fatti dalle funzioni, la pagina li mostra soltanto. Target, raccolto, percentuale e atteso del quadro sono quelli di `kpi`; i campi di prima di `getDashboardRaccolta` restano identici al carattere, perche' li leggono le prove e `controllaInvarianti`. Gli impianti vengono dalla fotografia della notte (`quadroImpianti` in `cruscotto.ts`): il «Da dichiarare» e' la colonna delle Dichiarazioni sommata, canale per canale, senza la rete non dovuta e senza le giacenze sotto zero. Le giacenze dei piazzali restano in Giacenze, perche' nella fotografia i piazzali di un impianto non sono separati. Un valore che manca e' «—» col perche', mai 0.
+- **Il perche' dei numeri si apre al tocco** (`src/components/shared/Perche.jsx`, un Popover), mai `title=`, che su iPhone e iPad non si vede.
+- **Le parole e i numeri della rete** (cifre, mesi, regioni) stanno in `righeQuadro.js`, e li usano pagina e PDF. «Esporta il quadro (PDF)» (`esportaQuadro.js`) usa i dati a video. L'economia esce solo con «con l'economia» spuntata dall'amministratore, mai per gli altri, anche se la casella arrivasse accesa. «Da gestire» non va nel PDF.
+
+- **La quadratura con il portale e' una sola** (revisione delle migliorie, 11/10/2026). La dashboard (`quadroImpianti` in `cruscotto.ts`) conta le stesse righe di Dichiarazioni Impianti (`riepilogoDichiarazioni`, `totali.siti_che_quadrano` / `siti_da_quadrare`): gli impianti e gli stoccaggi puri della rete che hanno una giacenza a portale, letti dalla fotografia della notte. Una riga di stoccaggio ha il canale in fondo alla chiave (`nappi sud|RETE`); l'ACI degli stoccaggi si conta a parte (`aci_stoccaggi`), mai con la rete. Anche l'etichetta e' quella della pagina: «Rete: quadratura con il portale». Contando i soli impianti, l'11/10/2026 la dashboard diceva «5 su 5» e la pagina «6 su 6». Il guardiano (`indicatoriGiorno.ts`) nella sua nota e nella voce «N impianti non quadrano» conta ancora i soli impianti, e lo dice.
+- **Un anno chiuso si misura al 31/12.** Per un anno chiuso `quadro.rete.atteso.giorno` e' il 31/12 (`fine_anno: true`), e le etichette («Atteso al», «sul loro target al», le colonne del PDF) leggono `quadro.giorno_misura`, non `giorno_dati`, che e' dell'anno dopo. Il perche' della tabella delle regioni dice la cosa vera (`percheSenzaScarto`): senza contratto, con un target di ripiego (il 2025: «ha un target di ripiego ... e senza contratto non c'è un riparto per regione»), senza riparto per regione, senza ritiri.
+- **L'attiva di un anno passato** (`mesiAttivaAnnoPassato`) si guarda dal primo mese che ha un documento. Un anno senza documenti, come il 2025 fatturato prima del gestionale, non ha mesi: c'e' la nota `mesi_attiva_nota`, a video e nel PDF. Mai dodici «da elaborare».
+- **Province ferme** (`provinceFerme`, `quadroCommessa.ts`): le province che lavorano, cioe' con un ritiro nell'anno o in quello prima, tutto l'anno, e che non hanno ritiri dal primo dei due mesi finiti in poi (fine trasporto, giorno italiano). Non sono `province_with_zeros` di Terminati Rete, che risponde a un'altra domanda (due mesi a zero in qualunque momento dell'anno); e Terminati Rete (`fermeDallAnnoPrima` in `primarieReteAnalytics.ts`) guarda l'anno prima solo a gennaio e febbraio: da allineare.
+- **«Controlli automatici»** riassume le voci con origine `presidi` e la voce del guardiano fermo (area Manutenzione), dovunque stiano (`riassuntoControlli`). Il suo segno porta al filtro `FILTRO_CONTROLLI`, non alla sezione «dati». «Tutti regolari» si scrive solo a cruscotto letto e con la notte che ha scritto. **Chi aggiunge un controllo automatico che diventa una voce** le da' origine `presidi` o area Manutenzione, altrimenti la riga dice «tutti regolari» accanto alla voce.
+
+Prove: `prove/dashboardPagina.mjs` (richieste, numeri disegnati, voci, PDF, sorgente), `prove/quadroCommessa.mjs`, `prove/dashboardRaccoltaQuadro.mjs`, `prove/cruscottoQuadro.mjs`, `prove/dashboardDatiVeri.mjs` (sulla copia dei dati veri: Irigom compreso e la pagina disegnata).
+
+**L'elenco «Da gestire»**: `base44/shared/cruscotto.ts`, funzione `cruscottoOperativo`, pannello
+`src/components/dashboard/DaGestire.jsx`. Un solo elenco, ordinato per gravita',
 di cio' che richiede attenzione, ogni voce col collegamento a dove si risolve.
 Legge **solo archivi piccoli** (alert, registro dei caricamenti, ordini aperti,
 documenti di fatturazione, prefatture, riepilogo della qualifica,
@@ -2345,6 +2527,34 @@ dell'anno prima, ma le sue prefatture (portano le righe del portale) solo se un
 suo documento e' ancora aperto (`servonoPrefattureAnnoPrima`). Prove:
 `prove/cruscotto.mjs`, `prove/statoArchivi.mjs`.
 
+#### Gli avvisi a scomparsa (11/10/2026)
+
+Ogni voce si nasconde «per oggi» o «per 7 giorni»; le critiche solo per oggi, e restano nel conteggio del pannello («1 nascosto (1 critico fino a stasera)»): una critica non sparisce mai in silenzio. La voce torna da sola quando scade, quando diventa piu' grave, quando cambia la sua `firma` o quando una sua misura sale. Una voce che elenca dei nomi (oggi «Target raccoglitori»: raccoglitore e regione) li scrive in `elementi`: torna anche quando entra un nome nuovo a conto uguale (BETA al posto di ALFA), non quando un nome esce. La voce dei target dice la soglia vera dell'alert aperto: checkTargetAlerts lo apre sotto il 70% e lo tiene aperto fino al 90%, quindi «a rischio» vuol dire sotto il 90% del target. **Se il numero scende resta nascosta**: «un avviso non grida al lupo», applicato al ritorno. Le regole stanno in `src/lib/avvisiNascosti.js` (pura, `prove/avvisiNascosti.mjs`). Ogni voce di `cruscotto.ts` ha `chiave` e `sezione`. Una voce il cui numero cresce da solo coi giorni («dati di 12 giorni fa», «non gira da 3 giorni», l'arretrato) scrive anche `firma` e `misure`, altrimenti tornerebbe ogni mattina: **chi aggiunge una voce di questo tipo deve scriverle**. La memoria sta nel `localStorage` per utente, sempre dentro `try`, e non in un archivio, per tre ragioni: solo l'amministratore scrive negli archivi; il limite di richieste; perderla non fa danni. La decisione su un alert («ignora») resta nella pagina Alert.
+
+#### Dove si corregge un alert (11/10/2026)
+
+In Alert & Controllo ogni riga dice «Si corregge in …» col collegamento (`src/lib/doveSiRisolve.js`) e il modulo col suo nome, non col codice. Un modulo che non si conosce non ha collegamento: nessuna pagina inventata.
+
+### La chiusura del mese passo passo (11/10/2026)
+
+`base44/shared/chiusuraMese.ts` (le regole, pure), la funzione `statoChiusuraMese` e il pannello `src/components/dashboard/ChiusuraMese.jsx` (props `{ isAdmin, anno }`, montato dalla dashboard per l'anno scelto). Una riga - «Settembre 2026: 4 di 8 fatti, mancano ...» - che si apre in dieci passi: dati del mese, terminati, dichiarazioni, attiva rete/ACI/extra, passiva rete/ACI/extra, quadrature FIR. Ogni passo ha lo stato (`fatto`, `da_fare`, `non_serve`), il perche', le voci e il collegamento al modulo col periodo (`?tab=&anno=&mese=&canale=`). Sotto, i mesi prima ancora aperti, che si aprono uno per volta chiedendo `{ anno, mese }`.
+
+- **Il mese** e' l'ultimo finito sul giorno italiano (`meseDaChiudere`): a gennaio e' il dicembre dell'anno prima, e un dicembre mai chiuso resta fra i mesi aperti anche a marzo (`mesiAncoraAperti`, dal primo mese con un documento dell'attiva, nell'anno e in quello prima). Aperto vuol dire attiva di un canale non chiusa, o passiva non congelata dal primo mese da chiedere in poi (vedi il punto dopo).
+- **Il primo mese chiuso nel gestionale e' settembre 2026** (`PRIMO_MESE_DEL_GESTIONALE` in `chiusuraMese.ts`, revisione del 12/10/2026). Gennaio-agosto 2026 sono stati fatturati fuori e si chiudono come gia' fatti (decisione dell'utente dell'11/10/2026, memoria «Mesi fatturati prima del gestionale»: un'azione sui documenti, non una regola qui). I passi che prima non si facevano qui - attiva elaborata, passiva congelata, consuntivi, quadrature FIR - si chiedono dal primo fatto scritto o da settembre 2026, quale viene prima (`primoDaChiedere`); mai da «il mese che si chiude adesso», che scivolava col calendario (dal 01/11/2026 settembre, mai congelato, diventava «non serve»). Un mese di prima lo dice col perche' vero: «Il gestionale chiude i mesi da settembre 2026: agosto 2026 si è chiuso fuori». La costante e' scritta una volta.
+- **Un anno passato** (revisione del 12/10/2026): la fotografia del guardiano e' dell'anno in corso, e il suo resto non dice niente di un mese di un anno prima (dicembre 2025 riceveva i 337,96 t di Green Tyre del 2026). Li' le dichiarazioni «non servono», col perche'. A gennaio, quando si chiude dicembre, la fotografia e' gia' dell'anno nuovo: si guarda solo che cosa e' caricato, mai i mesi della fotografia.
+- **Si legge lo stato che i moduli scrivono, mai un conto rifatto**: i documenti dell'attiva di tutti gli anni (il primo dice da quando il gestionale fattura) e il registro delle esportazioni, la prefattura del mese (senza righe), i congelamenti (senza totale), i consuntivi (senza importo), le quadrature, le dichiarazioni dell'anno, la pratica di Irigom, l'ultima fotografia del guardiano, gli alert aperti, il registro dei caricamenti, l'extra raccolta intera (sette righe l'11/10/2026: solo stato, fine trasporto, tipo e peso, mai prezzi e sovracosti); delle primarie solo le righe «eseguito» e le poche del «dati fino al». Diciassette letture, nessuna scrittura. Una lettura che cade lascia il passo «non verificato» (`lettura_non_riuscita`): mai un verde falso, e mai un rosso falso. Congelamenti non letti arrivano a `mesiAncoraAperti` come `null`, non come elenco vuoto: allora la passiva non si giudica, invece di dire «manca il congelamento» di mesi magari congelati (12/10/2026).
+- **Nessun importo esce**: il pannello lo vede anche chi non e' amministratore. Chi aggiunge un passo che tocca la passiva passa alle regole stati e date, non i record interi.
+- **Dati completi**: il «fino al» delle primarie oltre l'ultimo giorno del mese, e primarie e secondarie caricate dal termine di registrazione dei formulari partiti quel giorno (dieci giorni, domeniche escluse: per il 30/09/2026 il 12/10). Prima il passo dice «da fare dal».
+- **Terminati**: gli alert delle date valgono per tutti i mesi e si dicono tutti (i senza fine trasporto possono essere del mese); gli «eseguito» contano se la fine trasporto e' nel mese, sul giorno italiano.
+- **Dichiarazioni: non si chiede «settembre e' dichiarato?».** Il resto viene dalla fotografia del guardiano. Se la fotografia porta i mesi aperti per canale (`mesi_aperti`, con la provenienza sull'ACI) si dicono quelli. Altrimenti si dice solo cio' che si sa: l'ultima dichiarazione caricata, i mesi fino a quello che si chiude con la dichiarazione scritta e non caricata (anche prima dell'ultima caricata: giugno scritto e settembre caricato lasciano giugno da caricare), quanto resta. **Non si elencano come mancanti i mesi senza una riga**: GATIM rete ha luglio e agosto a zero perche' non e' arrivato niente. **Lo stato di un mese e' per provenienza**, mai il migliore fra primaria e secondaria: la primaria caricata non copre la secondaria che manca. **Solo la rete si aggancia**: su ACI ed extra raccolta il portale non aggancia niente, un resto e' sempre qualcosa senza dichiarazione e il passo resta da fare; senza `mesi_aperti` nella fotografia resta da fare anche quando il resto e' fatto solo di arrivi del mese dopo (la scelta prudente, finche' il guardiano non scrive i mesi per canale e per provenienza). La casella «dall'anno prima» e' giacenza sulla rete, da dichiarare sull'ACI. Irigom rete: la pratica del mese, registrata e caricata, oppure registrata di soli metalli («a portale non si carica nulla»: mai «caricata»). Stoccaggi e rete non dovuta non si chiedono.
+- **Attiva per canale**: elaborata, prefattura (rete e ACI; l'esito del confronto non resta scritto e si guarda in Fatturazione), approvata, esportata dopo l'approvazione, chiusa con la fattura confermata. **Esportata dopo l'approvazione vale anche per un'esportazione legata al documento**: l'interfaccia manda sempre `documento_ids: [doc.id]`, e `registraEsportazione` registra anche quelle di un documento «elaborata» (il 05/10/2026 alle 09:25 rete e ACI di settembre); conta solo con la data dopo `data_approvazione`. `numero_voci` 0 = non serve, ma per l'extra raccolta solo se nel mese non c'e' un intervento finito (`movimentiExtraNelMese`, contati come `calcolaRigheAttiva`): con un intervento pesato il documento e' di prima e manca la rielaborazione; con interventi solo senza peso manca il peso. Un numero che manca non e' zero.
+- **Passiva per canale**: congelata, coi consuntivi caricati e quadrati; chi li aveva mandati il mese prima e ora manca si dice (nome normalizzato e ruolo). Prima del primo congelamento e del primo consuntivo i due passi non servono, ma il confine non va mai oltre settembre 2026: col primo congelamento di ottobre, settembre si chiede lo stesso. L'extra raccolta con un documento a zero righe e interventi finiti nel mese serve.
+- **Quadrature FIR**: le settimane ISO del mese, ferme all'anno come `intervalloSettimana`, completate e piene su ogni canale. Da settembre 2026 si chiedono tutte le settimane del mese, anche la 36 (31/08-06/09) se la prima quadratura caricata e' la 37. Nei mesi di prima solo quelle dalla prima quadratura caricata.
+
+Prove: `prove/chiusuraMese.mjs` (le regole, con la fotografia vera del guardiano e il foglio DICHIARAZIONI del 09/10), `prove/statoChiusuraMese.mjs` (la funzione intera con un SDK finto che conta le letture e sa `$in`, ordinamento e numero di righe, e il giorno di oggi fissato), `prove/chiusuraMesePannello.mjs` (i passi disegnati con React lato server), `prove/chiusuraMeseDatiVeri.mjs` (la funzione intera sulla copia dei dati veri dell'11/10/2026, coi sei scenari dei revisori del 12/10; si salta senza la copia o con un'altra copia). **Nelle prove le esportazioni si scrivono come le registra l'interfaccia**, con `documento_ids` pieni: una prova con `documento_ids: []` passava senza provare niente.
+
+**I collegamenti portano scheda e periodo** (11/10/2026). Le pagine leggono l'indirizzo con `leggiCollegamento` di `src/lib/collegamenti.js`: Fatturazione `?tab=passiva|attiva&anno=&mese=&canale=` (scheda, mese della passiva e dell'attiva, canale della passiva), Verifiche Fornitori `?tab=consuntivi&anno=&mese=&canale=`, Verifiche `?tab=quadratura-fir`, Dichiarazioni Impianti `?tab=irigom&anno=&mese=` (la pratica di Irigom si apre su quel mese quando le pratiche sono lette). Un parametro che non si capisce si ignora e la pagina si apre come sempre; una scheda dell'amministratore aperta da un altro utente pure. Il mese si scrive col nome delle pagine («Settembre») o col numero. Chi aggiunge in `chiusuraMese.ts` un collegamento con `?tab=` deve trovare la scheda nell'elenco `SCHEDE` della pagina: `prove/collegamentiPagine.mjs` lo controlla, insieme alla regola pura.
+
 ### Il target del contratto e l'atteso alla data (11/10/2026)
 
 Il target annuo RETE e il riparto per regione vengono dal contratto Ecotyre
@@ -2366,8 +2576,10 @@ restituita. Il resto sta in `base44/shared/attesoContratto.ts` (specchio
   mensile del contratto riportato all'annuo (quello del 2026 somma 11.571,64 t),
   con i mesi finiti interi e il mese dei dati per i giorni che i dati coprono
   (`giorniCopertiNelMese`: fino all'ultima fine trasporto, mai oltre oggi). La
-  usano la card «Target RETE del contratto» della Dashboard (percentuale
-  dell'anno, «atteso al gg/mm», scarto), il grafico per regione, l'Andamento per
+  usano la tessera e la sezione Rete della Dashboard (percentuale dell'anno,
+  «atteso al gg/mm», scarto a parole: «avanti di», «indietro di»), la tabella
+  delle regioni della Dashboard, con la riga «Fuori dalle regioni del
+  contratto», l'Andamento per
   regione di Target & Status, la proiezione di fine mese di `checkTargetAlerts`
   e il riepilogo della commessa di EcoTyna. L'Andamento contava sul giorno del
   dispositivo: con i dati fermi al 7 e oggi il 10, lo scarto era peggiore di tre
@@ -2487,7 +2699,8 @@ istruita, e sono state misurate sul codice:
    controllo online, quella su Normattiva e quella sul corso RT, ed entrano sei
    righe (l'inquadramento e le cinque regole da D a D-quinquies) su come si
    risponde a un numero: il numero
-   nella prima riga con la sua etichetta (soggetto, canale, periodo), niente
+   nella prima frase, in italiano naturale (regola T, 11/10/2026), con la sua
+   etichetta (soggetto, canale, periodo), niente
    premesse, niente consigli non chiesti. **Le regole che tengono onesti i numeri
    restano tutte**: i canali che non si sommano, il periodo attaccato
    all'etichetta, gli elenchi che non si contano a occhio, le date obbligatorie.
@@ -2644,6 +2857,27 @@ istruita, e sono state misurate sul codice:
   controlla anche che ogni strumento abbia la sua etichetta in
   `ETICHETTE_STRUMENTO` (`ChatAssistente.jsx`): chi aggiunge uno strumento
   aggiunge l'etichetta.
+
+### La voce di EcoTyna: il testo detto, frase per frase (11/10/2026)
+
+L'utente: *«vorrei rendere EcoTyna piu' realistica e con una voce meno robotica»*. La voce resta la sintesi del browser, senza servizi a pagamento. Quello che la faceva sembrare una macchina che legge era tutto nel nostro codice:
+
+1. **Il testo detto, non quello scritto** (`src/lib/parlato.js`, `testoParlato`). I numeri si scrivono in parole, all'italiana: «412,30 t» e' «quattrocentododici virgola trenta tonnellate», i decimali a zero non si dicono, «1 t» e' «una tonnellata». Le unita' vanno per esteso (t, kg, €/t, %). Le date si dicono in parole: «05/10/2026» e' «cinque ottobre duemilaventisei», il primo del mese e' «primo». Le sigle si dicono come in ufficio: PFU «pi effe u»; FIR, ACI, RENTRI, CER e MUD come parole; EoW «end of waste». Le ragioni sociali perdono la forma societaria e il tutto maiuscolo. Codici d'ordine, codici di formulario e nomi di file si saltano: resta «l'ordine». Le norme che hanno la forma di un codice (lettere e almeno tre cifre) si dicono prima che i codici si saltino: «art. 184-ter» e' «articolo centottantaquattro ter», anche coi suffissi da bis a decies e scritti attaccati («184ter»); «2008/98/CE» e' «duemilaotto novantotto ci e» (`ATTI_EUROPEI`: CE, CEE, UE, Euratom). Un mese come lo portano gli strumenti, «2026-09», e' «settembre duemilaventisei», non l'intervallo «da duemilaventisei a zero nove» (revisione delle migliorie, 11/10/2026). Una tabella si annuncia con una frase sola. Una sigla nuova del mestiere si aggiunge a `SIGLE`. I numeri in parole servono anche alla bocca: `visemi.js` segue le lettere vere.
+2. **Frase per frase** (`dividiInFrasi`, `leggiAVoce`). Gli enunciati non superano `MASSIMO_FRASE` caratteri, perche' Chrome tronca da solo un enunciato lungo. Fra le frasi c'e' la pausa `PAUSE.frase`, fra i paragrafi `PAUSE.paragrafo`, e nella pausa la bocca e' chiusa. Una lettura fermata non riparte: dopo `ferma()` nessun avviso della sintesi fa partire la frase successiva. Un enunciato che non parte si riprova una volta. Uno che non avvisa la fine non lascia la lettura appesa. Una voce online senza rete ripete la frase con la voce del computer.
+3. **La voce migliore, ma le voci online le sceglie l'utente** (`ordinaVoci`, `voceDaUsare`, `voceDaProporre`). L'ordine e': Natural/Neural, Premium, Enhanced, Google, le altre online, le voci di base; a parita', l'italiano d'Italia e una voce femminile. Le voci piu' naturali (Edge «Elsa Online (Natural)», Chrome «Google italiano») **ricevono il testo da dire**. Per la regola di riservatezza non si scelgono da sole: finche' l'utente non risponde si usa la migliore che resta sul computer, e la pagina propone una volta quella online (`eco_voce_online`). Nel selettore ogni voce mostra la qualita' e «online». Il tono e' 1 sulle voci naturali e 1,05 su quelle di base. Anche la dettatura di Chrome ed Edge passa dal servizio vocale del browser: l'intestazione di `voce.js` lo dice.
+4. **La versione parlata** (`da_dire`). chiediAssistente la chiede in tutti e due gli schemi con la regola V: due o tre frasi, niente elenchi ne' codici, i numeri della risposta esatti con la loro etichetta, gli avvisi detti in breve, tutte le regole dei numeri. Passa da `testoAllItaliana`, si salva in `DomandaAssistente.da_dire` e arriva alla pagina nella risposta della funzione. Se l'archivio rifiuta il campo, la risposta si salva lo stesso. La voce dice `da_dire`; senza, dice `riassuntoParlato`. Il testo intero si sente solo con «Leggi tutta la risposta».
+
+**Il tono scritto** e' la regola T del prompt. Si da' del tu. La prima frase risponde in italiano naturale, con soggetto, verbo e numero con la sua etichetta, senza stile telegrafico («GREEN TYRE PROJECT SRL, rete, luglio 2026: ...»). I nomi si scrivono come si dicono («Green Tyre»), ma per intero quando si somigliano. La regola D chiede la prima *frase*, non piu' la prima *riga*. Il tono cambia la forma, non i numeri: D-quater e tutte le regole dei numeri restano.
+
+**La modalita' conversazione** (`src/lib/conversazione.js`, interruttore «Conversazione», spenta finche' non la si accende, `eco_conversazione`). Finita la risposta, EcoTyna torna ad ascoltare. Mentre parla, la ferma una frase con almeno due parole che lei non sta dicendo, se sono la meta' o se fra loro c'e' una parola da domanda (`PAROLE_DOMANDA`; `eInterruzione`: la sua eco dalle casse non conta, nemmeno coi numeri trascritti in cifre). Una parola da domanda che differisce di una lettera da una sua e sta accanto alle parole che lei ha vicino («quanto Irigom» per il suo «Quando Irigom», «puoi» per «poi», «cosa e'» per «cos'e'») e' la sua capita male e non conta: con un nome storpiato si fermava da sola e la sua frase partiva come domanda al modello (revisione, 12/10/2026). «chi» invece conta sempre: lei dice «che ha raccolto» in quasi ogni risposta, e «chi ha raccolto di piu'» e' la domanda piu' comune. **Un comando** (`soloComando`) e' fatto solo di parole di stop (basta, ferma, stop, aspetta...) e di riempitivi (`RIEMPITIVI`: ok, grazie, cosi', un attimo...): la ferma se ha almeno una parola che lei non sta dicendo, e non parte mai come domanda. «aspetta, perche'?» o «basta, e Gatim?» non sono comandi: la fermano e partono. Una parola di stop sua con accanto una parola non finita (il provvisorio «basta ricarica» della sua «Basta ricaricare il file») non la ferma: la ferma solo una parola di stop che lei non dice. Dalla domanda nata sopra la sua voce `togliEco` toglie in testa solo la sua eco vera: pezzi della sua frase nell'ordine in cui li dice (almeno due parole di fila, tre in tutto), le sue parole subito prima di un «basta», le parole di stop; le sue parole sparse restano, e anche due parole sue di fila («sulla rete quanto ha fatto Gatim»), perche' perdere il canale costa piu' di un pezzetto di eco. Limite noto: il riconoscimento manda risultati provvisori parola per parola, e un'eco molto storpiata in testa alla frase («puoi Irigom dove...») puo' ancora fermarla; con le cuffie non succede. La domanda dettata parte da sola dopo `TEMPI.silenzio` e un conto di `TEMPI.conto`, con «Invia ora» e «Annulla», **come dal pulsante Invia**: la conversazione chiama `invia()` senza argomenti, col testo della casella e i file in coda (`invia(q)` e' la strada degli esempi, che non allega: dalla conversazione buttava il file in coda). Premere Invia durante il conto non la manda due volte; mentre un file si sta ancora leggendo non parte niente. Riprendere a parlare ferma il conto; scrivere a mano annulla l'invio; il pulsante Ferma non riapre il microfono; un comando non e' una domanda. Se la pagina si apre con la modalita' gia' accesa, il microfono non si apre da solo. `creaRiconoscimento` (`voce.js`) mette in fila le sessioni, e una sessione annullata non manda piu' niente.
+
+Un tranello trovato qui: `'0123'.includes('')` e' vero. `cifraSeguita` in `visemi.js` scambiava per un separatore il punto finale di «sono 38.». Per controllare il carattere dopo o prima si usa `fra(elenco, ch)`, che rifiuta il carattere mancante.
+
+Prove:
+- `prove/parlato.mjs`: testo detto, frasi, voci, lettura con un motore finto, eco.
+- `prove/conversazione.mjs`: la modalita' coi timer finti e le sessioni del riconoscimento.
+- `prove/ecotynaDaDire.mjs`: chiediAssistente intero, cioe' schemi, regole T e V, conversione e salvataggio di `da_dire`, archivio che rifiuta il campo.
+- `prove/visemi.mjs`: l'acca muta e il punto finale.
 
 ## I caricamenti, lo storico e il registro
 
@@ -2894,6 +3128,23 @@ dell'extra raccolta non partiva piu' finche' non si salvava un'altra scheda.
 Prove: `prove/caricamentoAperto.mjs`, `prove/cruscotto.mjs` (UNA REGOLA SOLA),
 `prove/statoArchivi.mjs`.
 
+### Lo storico delle modifiche: chi ha cambiato un numero che fa i conti (11/10/2026)
+
+La piattaforma conserva solo `updated_date`: di un target, di un'apertura o di una tariffa non si sapeva chi l'avesse cambiata, quando, da quale valore e perche'. Il 10/10/2026 una voce della passiva e' passata da 300 a 90 €/t e lo ricordava solo la memoria di una sessione. Dall'11/10/2026 ogni scrittura a mano di quei numeri lascia una riga per campo in **`ModificaDato`**: entita, record_id, etichetta («IRIGOM S.R.L. · 2026»), campo, prima, dopo (testo; un valore che mancava resta assente, non zero), unita, operazione (create/update/delete), utente, il, origine, motivo, anno, riservato.
+
+- **Quali campi**: `CAMPI_TRACCIATI` in `base44/shared/campiTracciati.ts`, specchio `src/lib/campiTracciati.js`. Ci sono i target degli impianti e dei raccoglitori (annui e mensili), le aperture di `GiacenzaSito`, prezzo, unita', date e stato delle tariffe, tutta la commessa, `quantita_kg`/`caricata_inviata`/`motivo_assenza` delle dichiarazioni, costi e prezzi dell'extra raccolta e le voci della passiva. Un campo nuovo che fa i conti si aggiunge li', in tutti e due i file.
+- **Come si scrive**: nelle pagine `scriviConTraccia(entita, id, patch, { motivo, origine })`, `eliminaConTraccia`, `creaMoltiConTraccia` ed `eliminaMoltiConTraccia` (`src/lib/scriviConTraccia.js`); nelle funzioni `traccia(svc, entita, id, patch, { utente: utenteDellaRichiesta(user), origine, motivo })` (`base44/shared/traccia.ts`). Si rilegge il record, si scrive e si registrano solo i campi tracciati che cambiano. Una scrittura senza campi tracciati non costa nessuna lettura in piu', quindi conviene far passare di li' tutte le scritture di quegli archivi.
+- **Quando un valore e' cambiato**: i JSON si confrontano sul contenuto (la commessa riscrive tutte le tabelle a ogni salvataggio), i numeri come numeri, e un vuoto vale il suo default (stato 'attivo', costi dell'extra raccolta a 0). Pero' un'apertura vuota che diventa 0 si registra: un valore mancante non e' zero. Creazione e cancellazione registrano i campi diversi dal default, e almeno una riga c'e' sempre.
+- **Produrre e registrare sono due passi**: ogni scrittura risponde `{ record, traccia: { scritta, righe, motivo? } }`. Se la traccia non si scrive il dato resta, e la pagina lo dice con `avvisoTraccia(esito)` o `notaTraccia`, senza finestre di sistema. Le funzioni rimandano `traccia` nella risposta (`gestisciAnagrafiche`, `preparaAnno`).
+- **RLS**: create solo l'amministratore; update e delete `user_condition role «nessuno»`, cioe' nessuno: un registro che si corregge non e' un registro. E' la prima entita' chiusa a tutti in scrittura, e la regola non si scrive mai come `null`. Read e' aperto come gli archivi che racconta; i costi (`riservato`) li vede solo l'amministratore, nella riga Storico e in EcoTyna (`vedeICosti`).
+- **A video**: `src/components/shared/StoricoModifiche.jsx`, che chiuso non legge niente (una griglia di cento target non fa cento richieste). Si trova in commessa, impianti, celle dei target, siti di Giacenze, tariffe, dichiarazioni del mese, extra raccolta e voci della passiva; il testo all'italiana viene da `src/lib/storicoModifiche.js`. Lo `storico_json` di commessa e target resta: il pallino arancione delle celle lo legge.
+- **EcoTyna**: lo strumento `storico_modifiche` (`base44/shared/storicoModifiche.ts`) dice sempre che lo storico comincia a ottobre 2026: «nessuna modifica» non vuol dire «mai cambiato».
+- **Fuori, con il loro motivo**: i caricamenti dei file (il loro storico e' UploadLog), le copie d'anno in blocco, le sistemazioni una tantum e i semi. Il debito scritto e' nella lista `DA_PORTARE` di `prove/scrittureTracciate.mjs`: chi ne porta una sull'involucro la toglie dall'elenco. Lo stesso giorno ci sono passate le aperture di `chiusuraAnno`, le righe tolte da `ripulisciDichiarazioni` (col record intero come «prima», non il riassunto dell'elenco: `prove/storicoScrittureDiServizio.mjs`) e il modello delle voci della passiva in `PassivaModulo`; `TariffeUnificate` e `NuovoAnno` dicono quando la traccia di `gestisciAnagrafiche` o `preparaAnno` non si e' scritta. Resta `ImportaReportGenerale`: centinaia di target una volta l'anno, e con l'involucro ogni scrittura diventerebbe tre richieste senza ritentativi; ogni cella ha gia' il suo `storico_json`. Va portato con una scrittura del registro a blocchi.
+- **Revisione dell'11-12/10/2026.** I JSON si confrontano con le chiavi in ordine: il criterio di una voce della passiva riscritto dalla pagina con le chiavi in un altro ordine e' lo stesso criterio (8 voci vere di Irigom registravano un cambio mai avvenuto). Una tabella senza nessun valore (dodici null, [] o {}) vale vuoto; lo zero resta un valore. I campi json di `CAMPI_TRACCIATI` dicono l'unita' dei loro numeri (`celle` per i dodici mesi, `colonne` { colonna: { nome, unita } }): `differenzeJson(prima, dopo, campoTracciato(entita, campo))` restituisce { voce, prima, dopo, unita }, la percentuale salvata come frazione esce per cento, e a video si legge «P, percentuale 30% → 35%», «Campania, prezzo 120,00 €/t → 125,00 €/t», «giugno 900,50 t → 950,00 t». Un campo json nuovo con numeri dentro deve dire la sua unita' li'. In `storicoModifiche.ts` l'unita' di una riga si decide una volta, non lato per lato (`unitaMostrata`): su un impianto cancellato il «dopo» e' vuoto, e il target in tonnellate arrivava con 'kg'. Una riga di tabella aggiunta o tolta senza valori si dice per nome («righe Campania, Puglia, Basilicata, Calabria e Sicilia aggiunte, ancora senza valori»), mai col suo JSON.
+- **La copia dell'anno passa dallo storico** (`copiaAnnoTarget`, 11/10/2026): una riga 'create' per campo, con origine «Target & Status, copia dell'anno» e motivo «copia dal <anno prima>, da confermare»; il registro si scrive a blocchi per archivio (sui dati veri 329 righe, le scritture da 11 a 19). `creaTracciati`/`creaConTraccia` accetta `unoPerUno: true` per chi ha bisogno dell'id di ogni record; se una creazione a blocchi si ferma a meta', registra quelle fatte e poi lancia. La finestra della copia in `ConfigurazioneImpianti.jsx` (`DialogoAzione`) dice in ambra quando il registro non si scrive (`notaTraccia`). Le funzioni che rimandano `traccia` sono gestisciAnagrafiche, preparaAnno, copiaAnnoTarget, chiusuraAnno e ripulisciDichiarazioni.
+- **La conferma di un valore copiato non lascia righe**: toglie solo il segno «da confermare» dalla nota del record. Le righe della copia tengono il motivo di quel momento, e la nota di `storico_modifiche` lo dice a EcoTyna: se un valore e' confermato lo dice la pagina, non lo storico. Se un giorno la conferma deve lasciare una riga, va fatto in tutti i punti che confermano (impianti, raccoglitori, commessa, siti, tariffe), non in uno solo.
+- **Prove**: `prove/scrittureTracciate.mjs` fallisce se una create/update/delete di un archivio tracciato compare fuori dall'involucro, anche via alias o `entities[...]`, se un'eccezione non serve piu' o se qualcuno tocca una riga di `ModificaDato`. `prove/storicoModifiche.mjs` prova regola, motore, pagine, le funzioni vere e lo strumento.
+
 ### I conti che si salvano non si salvano su un archivio a meta' (11/10/2026)
 
 `congelaPassivaMese`, `elaboraFatturazioneAttiva`, `chiusuraAnno` con
@@ -3004,6 +3255,8 @@ frase `COSTI_RISERVATI`; senza direzione le tariffe restano le sole attive.
 **Senza contesto si nega**: un costo detto per sbaglio non si ritira. Uno
 strumento nuovo che legge costi, prezzi passivi o margini deve passare da
 `vedeICosti(ctx)`.
+
+Anche lo strumento `storico_modifiche` passa da `vedeICosti`: le modifiche ai costi (tariffe passive, costi dell'extra raccolta, voci della passiva) hanno `riservato: true` in `ModificaDato`, e a chi non e' amministratore non si dicono (11/10/2026).
 
 ### I documenti aziendali non salgono mai in area pubblica (30/09/2026)
 
