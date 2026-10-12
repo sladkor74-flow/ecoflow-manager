@@ -6,6 +6,7 @@ import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { utenteCorrente, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { annoChiuso, annoCorrenteRoma } from "../../shared/annoTarget.ts";
 import { listaAnno, pianoCopiaTariffe, tariffeDaConfermare, confermaTariffa } from "../../shared/inizializzazioneAnno.ts";
+import { traccia, utenteDellaRichiesta, unisciTracce } from "../../shared/traccia.ts";
 
 // L'ANNO NUOVO: CHE COSA GLI MANCA PER COMINCIARE, E QUELLO CHE SI PUO' FARE
 // DA QUI.
@@ -34,6 +35,14 @@ import { listaAnno, pianoCopiaTariffe, tariffeDaConfermare, confermaTariffa } fr
 // shared/inizializzazioneAnno.ts, con le sue prove: qui si leggono gli archivi
 // e si scrive.
 //
+// LE TARIFFE COPIATE ENTRANO NELLO STORICO DELLE MODIFICHE (11/10/2026): ogni
+// tariffa creata dalla copia ha la sua riga in ModificaDato (prezzo, unita',
+// date), con chi ha premuto il pulsante e «copia dal <anno prima>». Cosi' alla
+// domanda «chi ha messo il prezzo del 2027» c'e' una risposta anche quando la
+// risposta e' «la copia, e nessuno l'ha ancora corretto». La conferma tocca
+// solo la nota e passa dallo stesso involucro senza registrare niente. La
+// risposta porta traccia: { scritta, righe, motivo? }.
+//
 // Corpo: { anno, azione, direzione, simula }
 export default async function (req) {
   try {
@@ -53,6 +62,7 @@ export default async function (req) {
     }
 
     const svc = base44.asServiceRole.entities;
+    const comeScrive = { utente: utenteDellaRichiesta(user), origine: 'Nuovo anno, tariffe' };
     const [tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, rilevazioni] = await Promise.all([
       fetchAll(svc.Tariffa),
       fetchAll(svc.GiacenzaSito),
@@ -96,10 +106,11 @@ export default async function (req) {
       if (!['ATTIVA', 'PASSIVA'].includes(dir)) return Response.json({ error: 'Direzione obbligatoria: ATTIVA o PASSIVA.' }, { status: 400 });
       const daConf = tariffeDaConfermare(tariffe, anno, dir);
       if (simula) return Response.json({ simulazione: true, anno, direzione: dir, quante: daConf.length });
-      const confermate = [], nonConfermate = [];
+      const confermate = [], nonConfermate = [], tracceConferma = [];
       for (const t of daConf) {
         try {
-          await svc.Tariffa.update(t.id, confermaTariffa(t, { il: oggiRoma(), da: user && user.email ? user.email : '', anno }));
+          const scritta = await traccia(svc, 'Tariffa', t.id, confermaTariffa(t, { il: oggiRoma(), da: user && user.email ? user.email : '', anno }), { ...comeScrive, motivo: `confermata sul contratto ${anno}` });
+          tracceConferma.push(scritta.traccia);
           confermate.push({ id: t.id, chi: t.fornitore_nome || t.cliente || '', valore: t.valore });
         } catch (e) {
           nonConfermate.push({ chi: t.fornitore_nome || t.cliente || '', motivo: e && e.message ? e.message : String(e) });
@@ -110,7 +121,7 @@ export default async function (req) {
         anno, tariffe: tariffeDopo, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore,
         rilevazioni: rilevazioni.map(r => ({ ...r, sito: norm(r.sito) })), piazzali, oggi: oggiRoma(),
       });
-      return Response.json({ ...dopo, confermate: confermate.length, non_confermate: nonConfermate, direzione: dir, puo_scrivere: true });
+      return Response.json({ ...dopo, confermate: confermate.length, non_confermate: nonConfermate, direzione: dir, traccia: unisciTracce(tracceConferma), puo_scrivere: true });
     }
 
     // --- La copia delle tariffe ---
@@ -145,9 +156,11 @@ export default async function (req) {
 
     const creati = [];
     const falliti = [];
+    const tracce = [];
     for (const x of daFare) {
       try {
-        const r = await svc.Tariffa.create(x.copia);
+        const { record: r, traccia: t } = await traccia(svc, 'Tariffa', null, x.copia, { ...comeScrive, motivo: `copia dal ${anno - 1}, da confermare sul contratto ${anno}` });
+        tracce.push(t);
         creati.push({ id: r && r.id, direzione: x.direzione, chi: chi(x.tariffa), valore: x.tariffa.valore });
       } catch (e) {
         falliti.push({ direzione: x.direzione, chi: chi(x.tariffa), motivo: e && e.message ? e.message : String(e) });
@@ -162,7 +175,7 @@ export default async function (req) {
     });
     // Le copie non create perche' si scontravano con una tariffa gia' scritta:
     // tornano a chi ha premuto il pulsante, con il motivo.
-    return Response.json({ ...dopo, creati: creati.length, falliti, scartate, dettaglio_creati: creati, puo_scrivere: true });
+    return Response.json({ ...dopo, creati: creati.length, falliti, scartate, dettaglio_creati: creati, traccia: unisciTracce(tracce), puo_scrivere: true });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

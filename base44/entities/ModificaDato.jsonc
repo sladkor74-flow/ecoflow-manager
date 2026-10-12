@@ -1,0 +1,115 @@
+{
+  "name": "ModificaDato",
+  "type": "object",
+  // LO STORICO DELLE MODIFICHE AI NUMERI CHE FANNO I CONTI (11/10/2026).
+  //
+  // Una riga per ogni campo cambiato a mano su un target, un'apertura, una
+  // tariffa, la commessa, una dichiarazione, i costi e i prezzi dell'extra
+  // raccolta, le voci della passiva: chi, quando, da quale valore a quale, da
+  // dove e perche'. Prima la piattaforma conservava solo updated_date, e un
+  // prezzo passato da 300 a 90 euro/t lo ricordava solo la memoria di chi c'era.
+  //
+  // Quali campi si tracciano e come lo dice shared/campiTracciati.ts (specchio
+  // src/lib/campiTracciati.js); scrivono src/lib/scriviConTraccia.js nelle
+  // pagine e shared/traccia.ts nelle funzioni. I caricamenti dei file restano
+  // fuori: il loro storico e' UploadLog.
+  //
+  // Si aggiunge e non si tocca: crearla e' dell'amministratore (l'unico che
+  // modifica i dati), modificarla o cancellarla non e' di nessuno. Un registro
+  // che si corregge non e' piu' un registro. Il lavoro di servizio delle
+  // funzioni non e' toccato dalle regole, come per ogni archivio.
+  "properties": {
+    "entita": {
+      "type": "string",
+      "description": "L'archivio del record modificato: ImpiantoTargetSecondaria, TargetRaccoglitore, GiacenzaSito, Tariffa, CommessaEcotyre..."
+    },
+    "record_id": {
+      "type": "string",
+      "description": "L'id del record modificato"
+    },
+    "etichetta": {
+      "type": "string",
+      "description": "Di che cosa si parla, come si legge: «IRIGOM S.R.L. · 2026», «Commessa Ecotyre 2026»"
+    },
+    "campo": {
+      "type": "string",
+      "description": "Il campo cambiato. Vuoto quando un record senza valori tracciati e' stato creato o cancellato"
+    },
+    "prima": {
+      "type": "string",
+      "description": "Il valore di prima, come testo (i numeri come numeri, le tabelle in JSON). Assente se il campo era vuoto: un valore che manca non e' zero"
+    },
+    "dopo": {
+      "type": "string",
+      "description": "Il valore di dopo, come testo. Assente se il campo e' rimasto vuoto o se il record e' stato cancellato"
+    },
+    "unita": {
+      "type": "string",
+      "description": "Come si legge il valore: kg, t, €, €/t, €/kg, €/viaggio, giorno, si_no, testo, json"
+    },
+    "operazione": {
+      "type": "string",
+      "enum": [
+        "create",
+        "update",
+        "delete"
+      ],
+      "description": "create: il record e' nato con quel valore. update: il valore e' cambiato. delete: il record e' stato cancellato, e prima dice che cosa c'era"
+    },
+    "utente": {
+      "type": "string",
+      "description": "Chi ha scritto: nome, o l'email se il nome non c'e'"
+    },
+    "il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "L'istante della modifica, lo stesso per tutti i campi di una scrittura"
+    },
+    "origine": {
+      "type": "string",
+      "description": "Da dove: la pagina o la funzione che ha scritto"
+    },
+    "motivo": {
+      "type": "string",
+      "description": "Perche', quando chi scrive lo dice"
+    },
+    "anno": {
+      "type": "number",
+      "description": "L'anno del record (per una tariffa, quello del primo giorno di validita'), quando c'e'"
+    },
+    "riservato": {
+      "type": "boolean",
+      "default": false,
+      "description": "Vero per i costi dei fornitori (tariffe passive, costi dell'extra raccolta, voci della passiva): li vede solo l'amministratore, anche in EcoTyna"
+    }
+  },
+  // campo non e' obbligatorio: la riga di un record nato o cancellato senza
+  // nessun valore tracciato ce l'ha vuoto.
+  "required": [
+    "entita"
+  ],
+  // La lettura e' aperta come quella degli archivi che racconta (Tariffa,
+  // ExtraRaccolta e le voci della passiva sono read: true): i costi si tengono
+  // all'amministratore nelle pagine e in EcoTyna col campo riservato.
+  // update e delete: una condizione che nessun utente soddisfa, perche' nessuno
+  // ha il ruolo «nessuno». In questo progetto una regola non si scrive mai come
+  // null (prove/scrittureDegliUtenti.mjs).
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "nessuno"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "nessuno"
+      }
+    }
+  }
+}

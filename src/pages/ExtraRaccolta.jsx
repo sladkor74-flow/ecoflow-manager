@@ -18,6 +18,8 @@ import { dopoCaricamento, testoRicalcoli } from '@/lib/importGrandeFile';
 import AvvisoDateDaSistemare, { SegnoDate, NotaDate } from '@/components/primarie-rete/DateDaSistemare';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ReportConferimenti from '@/components/report-conferimenti/ReportConferimenti';
+import { useToast } from '@/components/ui/use-toast';
+import { scriviConTraccia, eliminaConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
 
 const ANNI = anniDaScegliere();
 
@@ -64,6 +66,7 @@ function avviaRicalcoli(c) {
 
 export default function ExtraRaccolta() {
   const { isAdmin } = usePermessi();
+  const { toast } = useToast();
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ anno: '', mese: '', stato: '', trasportatore: '', destinazione: '', tipologia_trasporto: '', date: '' });
@@ -224,13 +227,16 @@ export default function ExtraRaccolta() {
   const destinatari = useMemo(() => [...new Set(records.map(r => r.destinazione).filter(Boolean))].sort(), [records]);
   const tipologie = useMemo(() => [...new Set(records.map(r => r.tipologia_trasporto).filter(Boolean))].sort(), [records]);
 
+  // I costi e i prezzi scritti sull'intervento finiscono nello storico delle
+  // modifiche (11/10/2026), che si apre nella scheda; se il dato e' salvato ma
+  // la traccia no, lo si dice.
   const save = async (payload) => {
     try {
-      if (formInitial?.id) {
-        await base44.entities.ExtraRaccolta.update(formInitial.id, payload);
-      } else {
-        await base44.entities.ExtraRaccolta.create(payload);
-      }
+      const esito = formInitial?.id
+        ? await scriviConTraccia('ExtraRaccolta', formInitial.id, payload, { origine: 'Extra Raccolta' })
+        : await scriviConTraccia('ExtraRaccolta', null, payload, { origine: 'Extra Raccolta' });
+      const avviso = avvisoTraccia(esito);
+      if (avviso) toast(avviso);
       aggiornaModuli([formInitial, payload]);
       setFormOpen(false);
       setFormInitial(null);
@@ -242,7 +248,9 @@ export default function ExtraRaccolta() {
 
   const remove = async (r) => {
     if (!confirm('Eliminare questo intervento?')) return;
-    await base44.entities.ExtraRaccolta.delete(r.id);
+    const esito = await eliminaConTraccia('ExtraRaccolta', r.id, { origine: 'Extra Raccolta' });
+    const avviso = avvisoTraccia(esito);
+    if (avviso) toast(avviso);
     aggiornaModuli([r]);
     load();
   };
@@ -265,7 +273,7 @@ export default function ExtraRaccolta() {
         // mese e anno scritti sulla scheda: quelli del giorno italiano della fine
         // trasporto, come li legge il resto del gestionale
         const fine = giornoRoma(date.trasporto_finito_il || r.trasporto_finito_il);
-        await base44.entities.ExtraRaccolta.update(r.id, { stato: 'terminato', ...date, ...competenza(fine) });
+        await scriviConTraccia('ExtraRaccolta', r.id, { stato: 'terminato', ...date, ...competenza(fine) }, { origine: 'Extra Raccolta' });
         toccati.push(r, { trasporto_finito_il: date.trasporto_finito_il });
       }
     } catch (e) {

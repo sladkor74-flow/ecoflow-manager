@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { base44 } from '@/api/base44Client';
+import { notaTraccia } from '@/lib/scriviConTraccia';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -194,7 +195,9 @@ export default function TariffeUnificate() {
       // Solo la data di fine: la tariffa resta valida per i giorni che ha
       // coperto, altrimenti i mesi gia' fatturati con quel prezzo resterebbero
       // senza prezzo. Dall'elenco sparisce lo stesso, per data di fine passata.
-      await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: { data_fine_validita: dataFine } });
+      const res = await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: { data_fine_validita: dataFine }, motivo: 'periodo chiuso dall\'elenco delle tariffe' });
+      const fuoriStorico = notaTraccia(res.data);
+      if (fuoriStorico) alert(fuoriStorico);
       load();
     } catch (e) { alert(e?.response?.data?.error || e?.message); }
   };
@@ -204,7 +207,9 @@ export default function TariffeUnificate() {
       // null cancella la data di fine; con undefined la chiave spariva nel JSON
       // e il server la rifondeva dal record, cosi' «Riapri» non riapriva niente
       // e nessuno lo diceva (06/10/2026).
-      await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: { data_fine_validita: null, stato: 'attivo' } });
+      const res = await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: { data_fine_validita: null, stato: 'attivo' }, motivo: 'riaperta dall\'elenco delle tariffe' });
+      const fuoriStorico = notaTraccia(res.data);
+      if (fuoriStorico) alert(fuoriStorico);
       load();
     } catch (e) { alert(e?.response?.data?.error || e?.message); }
   };
@@ -212,7 +217,9 @@ export default function TariffeUnificate() {
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'delete', id: deleteTarget.id });
+      const res = await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'delete', id: deleteTarget.id, motivo: 'eliminata dall\'elenco delle tariffe' });
+      const fuoriStorico = notaTraccia(res.data);
+      if (fuoriStorico) alert(fuoriStorico);
       setDeleteTarget(null);
       load();
     } catch (e) { alert(e?.response?.data?.error || e?.message); }

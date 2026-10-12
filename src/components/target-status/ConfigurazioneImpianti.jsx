@@ -12,6 +12,8 @@ import { formatKg } from '@/lib/utils';
 import { annoDelRecord, annoCorrenteRoma, daConfermare, senzaNotaCopia } from '@/lib/annoTarget';
 import { chiaveNome, conModifica, nomeUtente } from '@/lib/target';
 import { ton, it, testoErrore } from '@/components/predittivita/Comuni';
+import { scriviConTraccia, eliminaConTraccia, avvisoTraccia, notaTraccia } from '@/lib/scriviConTraccia';
+import StoricoModifiche from '@/components/shared/StoricoModifiche';
 
 // Impianti e stoccaggi dell'anno, in Target & Status (27/09/2026): l'unico
 // punto in cui si scrivono. Per ogni anno gli impianti col loro target di rete,
@@ -26,6 +28,12 @@ import { ton, it, testoErrore } from '@/components/predittivita/Comuni';
 //
 // I pesi si scrivono in tonnellate e si salvano in chili, come li legge il
 // calcolo. Niente finestre di sistema: si cancella con una conferma sulla riga.
+//
+// Impianti e commessa si scrivono con scriviConTraccia (11/10/2026): target,
+// capacita', fine della programmazione, stato e nome finiscono nello storico
+// delle modifiche, che si apre sotto ogni impianto. Gli altri campi passano di
+// li' lo stesso, senza costare una lettura in piu'.
+const ORIGINE = 'Target & Status, impianti e stoccaggi';
 
 // Gli stessi valori di base44/shared/fineProgrammazione.ts e regolePredittivita.ts
 // (le pagine non importano da base44/shared): se cambiano li', vanno cambiati qui.
@@ -176,7 +184,7 @@ function DaConfermare({ record, entita, modificabile, scrivi }) {
     <span className="text-[11px] px-1 rounded bg-amber-100 text-amber-800 border border-amber-300 font-normal inline-flex items-center gap-1">
       copiato dall&apos;anno prima, da confermare
       {modificabile && (
-        <button type="button" className="underline hover:text-emerald-700" onClick={() => scrivi(() => base44.entities[entita].update(record.id, { note: senzaNotaCopia(record.note) }), 'Confermato')}>
+        <button type="button" className="underline hover:text-emerald-700" onClick={() => scrivi(() => scriviConTraccia(entita, record.id, { note: senzaNotaCopia(record.note) }, { origine: ORIGINE }), 'Confermato')}>
           Conferma
         </button>
       )}
@@ -266,7 +274,7 @@ function RegoleAnno({ anno, commessa, modificabile, user, scrivi }) {
     const chili = kg.trim() ? daChili(kg) : null;
     if (kg.trim() && chili === null) { await scrivi(() => Promise.reject(new Error('Scrivi i chili per viaggio come numero intero, per esempio 13000.'))); return; }
     setSalvando(true);
-    await scrivi(() => base44.entities.CommessaEcotyre.update(commessa.id, {
+    await scrivi(() => scriviConTraccia('CommessaEcotyre', commessa.id, {
       fine_programmazione: fine || null,
       kg_per_viaggio: chili,
       storico_json: conModifica(commessa.storico_json, {
@@ -274,7 +282,7 @@ function RegoleAnno({ anno, commessa, modificabile, user, scrivi }) {
         nota: 'fine della programmazione e chili per viaggio',
         prima: { target_annuo_t: commessa.target_annuo_t ?? null, fine_programmazione: commessa.fine_programmazione || null, kg_per_viaggio: commessa.kg_per_viaggio ?? null },
       }),
-    }), `Regole del ${anno} salvate`);
+    }, { origine: ORIGINE, motivo: 'fine della programmazione e chili per viaggio' }), `Regole del ${anno} salvate`);
     setSalvando(false);
   };
 
@@ -310,8 +318,14 @@ function RegoleAnno({ anno, commessa, modificabile, user, scrivi }) {
 /**
  * Le due azioni che scrivono tanti record insieme: prima si chiede alla funzione
  * cosa farebbe (simula), si mostra, e si scrive solo se si conferma.
+ *
+ * La copia dell'anno risponde con traccia { scritta, righe, motivo? }: se il
+ * registro delle modifiche non si e' scritto, la copia resta ma le sue righe di
+ * storico no, e la finestra lo dice accanto a «Fatto.», come NuovoAnno e le
+ * tariffe (revisione delle migliorie, 11/10/2026). Prima diceva solo «Fatto.».
+ * Esportata per la prova (prove/storicoModifiche.mjs).
  */
-function DialogoAzione({ azione, anno, onChiudi, onConferma }) {
+export function DialogoAzione({ azione, anno, onChiudi, onConferma }) {
   const annoInCorso = anno === annoCorrenteRoma();
   if (!azione) return null;
   const { tipo, fase, dati, errore } = azione;
@@ -326,6 +340,7 @@ function DialogoAzione({ azione, anno, onChiudi, onConferma }) {
   const daGiacenze = copia && dati ? Number(dati.impianti_da_giacenze) || 0 : 0;
   const nonPortati = !copia && dati && Array.isArray(dati.saltati) ? dati.saltati : [];
   const fatto = fase === 'fatto';
+  const fuoriStorico = fatto && dati ? notaTraccia(dati) : null;
   const niente = copia ? voci.length === 0 : elenco.length === 0 && aggiornati.length === 0;
   const kgDi = (x) => (x.target_kg != null ? Number(x.target_kg) : Number(x.target_t || 0) * 1000);
 
@@ -362,6 +377,11 @@ function DialogoAzione({ azione, anno, onChiudi, onConferma }) {
           <div className="space-y-3 text-sm">
             {fatto && (
               <p className="flex items-center gap-2 text-emerald-800"><CheckCircle2 className="w-4 h-4" />Fatto.</p>
+            )}
+            {fuoriStorico && (
+              <div className="text-amber-900 bg-amber-50 border border-amber-300 rounded px-3 py-2 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{fuoriStorico}</span>
+              </div>
             )}
             {niente ? (
               <p>{copia ? `Non c'è niente da copiare: il ${anno} ha già tutto quello che aveva il ${anno - 1}.` : `Non c'è niente da portare: ogni impianto con un target in Giacenze ha già il suo impianto del ${anno} in Target & Status.`}</p>
@@ -521,11 +541,14 @@ export default function ConfigurazioneImpianti({ anno, solaLettura = false, user
 
   useEffect(() => { load(); setFormImpianto(null); setFormFornitoreDi(null); setAzione(null); }, [load]);
 
-  // Ogni scrittura: se riesce si rilegge, se no si dice perche'.
+  // Ogni scrittura: se riesce si rilegge, se no si dice perche'. E se il dato
+  // e' salvato ma non e' finito nello storico delle modifiche, lo si dice.
   const scrivi = async (fn, messaggio) => {
     try {
-      await fn();
-      if (messaggio) toast({ title: messaggio });
+      const esito = await fn();
+      const avviso = avvisoTraccia(esito);
+      if (avviso) toast(messaggio ? { ...avviso, title: `${messaggio}, ma fuori dallo storico` } : avviso);
+      else if (messaggio) toast({ title: messaggio });
       await load();
       return true;
     } catch (e) {
@@ -552,10 +575,10 @@ export default function ConfigurazioneImpianti({ anno, solaLettura = false, user
     if (!target) { toast({ title: 'Manca il target', description: `Scrivi il target di rete del ${anno} in tonnellate, più di zero.`, variant: 'destructive' }); return; }
     if (formImpianto.data_fine && !formImpianto.data_fine.startsWith(`${anno}-`)) { toast({ title: `La fine della programmazione deve essere un giorno del ${anno}`, variant: 'destructive' }); return; }
     setSalvataggio(true);
-    const ok = await scrivi(() => base44.entities.ImpiantoTargetSecondaria.create({
+    const ok = await scrivi(() => scriviConTraccia('ImpiantoTargetSecondaria', null, {
       nome_impianto: nome, target, stato: 'attivo', anno, segue_predittivita: !!formImpianto.segue,
       ...(formImpianto.data_fine ? { data_fine: formImpianto.data_fine } : {}),
-    }), `${nome} aggiunto al ${anno}`);
+    }, { origine: ORIGINE }), `${nome} aggiunto al ${anno}`);
     setSalvataggio(false);
     if (ok) setFormImpianto(null);
   };
@@ -590,8 +613,9 @@ export default function ConfigurazioneImpianti({ anno, solaLettura = false, user
     setRinominaDa(null);
     const collegati = fornitori.filter(f => f.impianto_id === imp.id);
     await scrivi(async () => {
-      await base44.entities.ImpiantoTargetSecondaria.update(imp.id, { nome_impianto: nome });
+      const esito = await scriviConTraccia('ImpiantoTargetSecondaria', imp.id, { nome_impianto: nome }, { origine: ORIGINE });
       for (const f of collegati) await base44.entities.FornitoreSecondaria.update(f.id, { impianto_nome: nome });
+      return esito;
     }, 'Nome aggiornato');
   };
 
@@ -715,7 +739,7 @@ export default function ConfigurazioneImpianti({ anno, solaLettura = false, user
                     <select
                       value={imp.stato === 'non_attivo' ? 'non_attivo' : 'attivo'}
                       aria-label={`Stato di ${imp.nome_impianto}`}
-                      onChange={e => scrivi(() => base44.entities.ImpiantoTargetSecondaria.update(imp.id, { stato: e.target.value }), 'Stato aggiornato')}
+                      onChange={e => scrivi(() => scriviConTraccia('ImpiantoTargetSecondaria', imp.id, { stato: e.target.value }, { origine: ORIGINE }), 'Stato aggiornato')}
                       className="text-[11px] border rounded px-1 py-0.5 bg-background font-normal"
                     >
                       <option value="attivo">attivo</option>
@@ -753,7 +777,7 @@ export default function ConfigurazioneImpianti({ anno, solaLettura = false, user
                       const kg = daTonnellate(v);
                       if (kg === null) { await scrivi(() => Promise.reject(new Error('Scrivi il target in tonnellate, per esempio 2.295 oppure 2295.'))); return; }
                       if (!kg) { await scrivi(() => Promise.reject(new Error('Il target non può essere vuoto o zero: se l\'impianto quest\'anno non lavora, mettilo "non attivo".'))); return; }
-                      await scrivi(() => base44.entities.ImpiantoTargetSecondaria.update(imp.id, { target: kg }), 'Target aggiornato');
+                      await scrivi(() => scriviConTraccia('ImpiantoTargetSecondaria', imp.id, { target: kg }, { origine: ORIGINE }), 'Target aggiornato');
                     }}
                   />
                   <span>· fine della programmazione:</span>
@@ -765,18 +789,19 @@ export default function ConfigurazioneImpianti({ anno, solaLettura = false, user
                     iniziale={fineSua}
                     onSalva={async (v) => {
                       if (v && !String(v).startsWith(`${anno}-`)) { await scrivi(() => Promise.reject(new Error(`La fine della programmazione deve essere un giorno del ${anno}.`))); return; }
-                      await scrivi(() => base44.entities.ImpiantoTargetSecondaria.update(imp.id, { data_fine: v || null }), v ? 'Fine della programmazione aggiornata' : 'Ora vale la fine della programmazione dell\'anno');
+                      await scrivi(() => scriviConTraccia('ImpiantoTargetSecondaria', imp.id, { data_fine: v || null }, { origine: ORIGINE }), v ? 'Fine della programmazione aggiornata' : 'Ora vale la fine della programmazione dell\'anno');
                     }}
                   />
                 </p>
                 {fineAltroAnno && (
                   <p className="text-xs text-amber-800 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />La fine della programmazione non è del {anno}: la predittività non la usa. Correggila o cancellala.</p>
                 )}
+                <StoricoModifiche entita="ImpiantoTargetSecondaria" recordId={imp.id} aggiornato={imp.updated_date || ''} />
                 <label className="flex items-center gap-2 text-sm">
                   <Switch
                     checked={segue(imp)}
                     disabled={!modificabile}
-                    onCheckedChange={v => scrivi(() => base44.entities.ImpiantoTargetSecondaria.update(imp.id, { segue_predittivita: v }), v ? 'Ora la predittività lo segue' : 'La predittività non lo segue più')}
+                    onCheckedChange={v => scrivi(() => scriviConTraccia('ImpiantoTargetSecondaria', imp.id, { segue_predittivita: v }, { origine: ORIGINE }), v ? 'Ora la predittività lo segue' : 'La predittività non lo segue più')}
                   />
                   Segui nella predittività
                   {!segue(imp) && <span className="text-xs text-muted-foreground">(ha solo il target, che Giacenze legge)</span>}
@@ -787,7 +812,7 @@ export default function ConfigurazioneImpianti({ anno, solaLettura = false, user
                   <Button size="sm" variant="outline" onClick={() => setFormFornitoreDi(formFornitoreDi === imp.id ? null : imp.id)}>
                     <Plus className="w-4 h-4 mr-1" /> Raccoglitore o stoccaggio
                   </Button>
-                  <Elimina nome={imp.nome_impianto} onElimina={() => scrivi(() => base44.entities.ImpiantoTargetSecondaria.delete(imp.id), `${imp.nome_impianto} eliminato`)} />
+                  <Elimina nome={imp.nome_impianto} onElimina={() => scrivi(() => eliminaConTraccia('ImpiantoTargetSecondaria', imp.id, { origine: ORIGINE }), `${imp.nome_impianto} eliminato`)} />
                 </div>
               )}
             </div>
@@ -804,7 +829,7 @@ export default function ConfigurazioneImpianti({ anno, solaLettura = false, user
                       onSalva={async (v) => {
                         const kg = daTonnellate(v);
                         if (kg === null) { await scrivi(() => Promise.reject(new Error('Scrivi la capacità totale in tonnellate.'))); return; }
-                        await scrivi(() => base44.entities.ImpiantoTargetSecondaria.update(imp.id, { totale_capacity_kg: kg }), 'Capacità totale aggiornata');
+                        await scrivi(() => scriviConTraccia('ImpiantoTargetSecondaria', imp.id, { totale_capacity_kg: kg }, { origine: ORIGINE }), 'Capacità totale aggiornata');
                       }}
                     />
                   </span>

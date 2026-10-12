@@ -43,6 +43,7 @@ import { anomaliaSenzaFineAnno } from "./filtroPeriodo.ts";
 import { leggiRegistro, statoDelRegistro, avvisoCaricamento, nomeArchivio, RIGHE_REGISTRO } from "./registroCaricamenti.ts";
 import { datiFinoAl } from "./statoArchivi.ts";
 import { tariffaNonDisattivata, tariffaValeIl } from "./validitaTariffa.ts";
+import { storicoModifiche } from "./storicoModifiche.ts";
 
 export { oggiRoma };
 
@@ -2291,6 +2292,19 @@ export const STRUMENTI = [
           nota_validita: "stato_validita dice se la tariffa vale oggi. «disattivata, non vale mai» e' una tariffa messa a non attiva: non vale in nessun giorno, nemmeno dentro le sue date, e non e' un prezzo da usare. Una tariffa rinegoziata invece resta attiva con la sua data di fine, e vale per i mesi gia' fatti: oggi e' «scaduta».",
         },
       };
+    },
+  },
+  {
+    // CHI HA CAMBIATO UN NUMERO, E QUANDO (11/10/2026). Le scritture a mano dei
+    // numeri che fanno i conti lasciano una riga in ModificaDato: qui si
+    // leggono (shared/storicoModifiche.ts). I costi dei fornitori passano da
+    // vedeICosti come negli altri strumenti.
+    nome: 'storico_modifiche',
+    descrizione: 'Chi ha cambiato a mano un numero che fa i conti, quando, da quale valore a quale e perche\': target di impianti e raccoglitori, aperture delle giacenze, tariffe, commessa Ecotyre, dichiarazioni degli impianti, costi e prezzi dell\'extra raccolta, voci della passiva. Per domande come «chi ha cambiato il target di Irigom e quando» o «quando e\' cambiato il prezzo di Emmesse». Le modifiche registrate cominciano a ottobre 2026; i caricamenti dei file non ci sono.',
+    parametri: { soggetto: 'opzionale: impianto, raccoglitore, fornitore o sito (per esempio Irigom)', cosa: 'opzionale: target, apertura, tariffa, prezzo, commessa, dichiarazione, extra raccolta, passiva, costi', anno: 'opzionale', chi: 'opzionale: chi ha fatto la modifica', dal: 'opzionale, AAAA-MM-GG', al: 'opzionale, AAAA-MM-GG' },
+    moduli: ['Target & Status', 'Giacenze', 'Tariffe', 'Dichiarazioni Impianti', 'Extra Raccolta', 'Fatturazione'],
+    async esegui(base44, p, ctx) {
+      return storicoModifiche(base44.asServiceRole.entities, p, { vedeCosti: vedeICosti(ctx), costiRiservati: COSTI_RISERVATI, elenco });
     },
   },
 ];

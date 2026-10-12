@@ -8,6 +8,8 @@ import { MESI } from '@/lib/pfuConstants';
 import { tonnellate, percentuale, leggiNumero, leggiStorico, conModifica, nomeUtente, dataOra, REGIONI_COMMESSA } from '@/lib/target';
 import { leggiFileTargetContratto } from '@/lib/targetContratto';
 import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
+import { scriviConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
+import StoricoModifiche from '@/components/shared/StoricoModifiche';
 
 // Commessa Ecotyre dell'anno, cioe' quanto richiede il contratto: target annuo e
 // per regione, ripartizione per classe, target mensile iniziale e rivisto, budget
@@ -16,7 +18,14 @@ import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 // Ecotyre lo rivede. L'Andamento confronta il raccolto per regione con questi dati.
 // isAdmin arriva gia' falso per chi non e' amministratore e per un anno chiuso:
 // allora la commessa si legge soltanto.
+//
+// Si salva con scriviConTraccia (11/10/2026): ogni tabella che cambia finisce
+// nello storico delle modifiche col valore di prima e di dopo, mese per mese e
+// regione per regione, e col motivo scritto accanto al pulsante. Lo storico
+// delle modifiche si legge in fondo alla scheda; quello di prima (storico_json,
+// che diceva solo il target annuo di prima) resta sotto.
 
+const ORIGINE = 'Target & Status, commessa Ecotyre';
 const testo = (v) => (v === null || v === undefined || v === '' ? '' : String(v).replace('.', ','));
 const leggiJson = (json, riserva) => { try { const v = JSON.parse(json || 'null'); return v ?? riserva; } catch { return riserva; } };
 const numero = (v) => { const n = leggiNumero(v); return n === null || Number.isNaN(n) ? null : n; };
@@ -226,15 +235,17 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
       target_prezzo_regioni_json: JSON.stringify(dati.prezzo_regioni.filter(p => p.regione.trim()).map(p => ({ regione: p.regione.trim(), target_t: numero(p.target), prezzo: numero(p.prezzo) }))),
     };
     setSalvando(true);
+    let esito = null;
     try {
       if (record) {
         const prima = Object.fromEntries(Object.keys(valori).filter(k => k !== 'anno').map(k => [k, record[k] ?? null]));
         if (Number(record.anno) !== Number(anno)) throw new Error(`a video c'è la commessa del ${record.anno}, non del ${anno}: ricarica la pagina`);
-        await base44.entities.CommessaEcotyre.update(record.id, { ...valori, storico_json: conModifica(record.storico_json, { utente: nomeUtente(user), nota, prima }) });
+        esito = await scriviConTraccia('CommessaEcotyre', record.id, { ...valori, storico_json: conModifica(record.storico_json, { utente: nomeUtente(user), nota, prima }) }, { origine: ORIGINE, motivo: nota });
       } else {
-        await base44.entities.CommessaEcotyre.create({ ...valori, storico_json: conModifica('[]', { utente: nomeUtente(user), nota, prima: null }) });
+        esito = await scriviConTraccia('CommessaEcotyre', null, { ...valori, storico_json: conModifica('[]', { utente: nomeUtente(user), nota, prima: null }) }, { origine: ORIGINE, motivo: nota });
       }
-      toast({ title: `Commessa ${anno} salvata` });
+      const avviso = avvisoTraccia(esito);
+      toast(avviso ? { ...avviso, title: `Commessa ${anno} salvata, ma fuori dallo storico` } : { title: `Commessa ${anno} salvata` });
       await carica();
     } catch (e) {
       toast({ title: 'Salvataggio non riuscito', description: e.message || String(e), variant: 'destructive' });
@@ -380,6 +391,8 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
           {modificato && <span className="text-xs text-amber-700">Modifiche non ancora salvate</span>}
         </div>
       )}
+
+      {record && <StoricoModifiche entita="CommessaEcotyre" recordId={record.id} aggiornato={record.updated_date || ''} aperto />}
 
       {record && leggiStorico(record.storico_json).length > 0 && (
         <section className="text-xs text-muted-foreground space-y-1">

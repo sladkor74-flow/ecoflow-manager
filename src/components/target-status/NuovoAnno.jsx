@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel, AlertDialogFooter } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/use-toast';
+import { notaTraccia } from '@/lib/scriviConTraccia';
 import { RefreshCw, CheckCircle2, AlertTriangle, Circle, Copy, Check } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
 
@@ -95,6 +96,7 @@ export default function NuovoAnno({ anno: annoCorrente }) {
           ? `${scartate.length} non ${scartate.length === 1 ? 'si è copiata' : 'si sono copiate'} perché si scontrano con una tariffa già scritta per il ${anno}: ${scartate.map(testoScartata).join(' · ')}`
           : '',
         res.data.creati > 0 && !falliti ? 'Portano il prezzo dell’anno prima e la nota «da confermare»: vanno controllate sul contratto.' : '',
+        notaTraccia(res.data) || '',
       ].filter(Boolean);
       toast({
         title: `${res.data.creati} ${res.data.creati === 1 ? 'tariffa preparata' : 'tariffe preparate'} per il ${anno}`,
@@ -122,7 +124,7 @@ export default function NuovoAnno({ anno: annoCorrente }) {
       const non = (res.data.non_confermate || []).length;
       toast({
         title: `${res.data.confermate} ${res.data.confermate === 1 ? 'tariffa confermata' : 'tariffe confermate'} ${chi}`,
-        description: non ? `${non} non si sono potute confermare: ${res.data.non_confermate.map(f => `${f.chi} (${f.motivo})`).join(' · ')}` : `Su ciascuna resta scritto chi l'ha confermata e quando.`,
+        description: [non ? `${non} non si sono potute confermare: ${res.data.non_confermate.map(f => `${f.chi} (${f.motivo})`).join(' · ')}` : `Su ciascuna resta scritto chi l'ha confermata e quando.`, notaTraccia(res.data) || ''].filter(Boolean).join(' — '),
         variant: non ? 'destructive' : undefined,
       });
     } catch (e) {

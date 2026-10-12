@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Save, ChevronLeft } from 'lucide-react';
+import StoricoModifiche from '@/components/shared/StoricoModifiche';
 import { calcExtraRaccolta, prezzoAttivoExtra, annoIntervento, avvisoPesoMancante, tariffaPassivaProposta } from '@/lib/extraRaccoltaCalc';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { PROV_TO_REGION } from '@/lib/regioneMap';
@@ -744,6 +745,10 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
             </div>
           </div>
         </div>
+
+        {/* Chi ha cambiato un costo o un prezzo di questo intervento, quando e
+            da quanto a quanto (11/10/2026). I costi li vede solo l'amministratore. */}
+        {initial?.id && <StoricoModifiche entita="ExtraRaccolta" recordId={initial.id} />}
 
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>Annulla</Button>

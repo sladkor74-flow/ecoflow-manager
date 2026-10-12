@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel, AlertDialogFooter } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/use-toast';
+import { notaTraccia } from '@/lib/scriviConTraccia';
 import { RefreshCw, Download, Save, Upload, AlertTriangle, CheckCircle2, Camera, ClipboardList, ChevronDown, ChevronRight, Info, Anchor } from 'lucide-react';
 import { formatKg } from '@/lib/utils';
 import { giorno, kgSegno } from '@/components/giacenze/ControlloRilevazione';
@@ -712,6 +713,8 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
             : 'Da qui ripartiranno le giacenze dei piazzali dell\'anno dopo: nessuna apertura di impianto scritta.'),
         variant: salvati || aperture.length ? undefined : 'destructive',
       });
+      const fuoriStorico = notaTraccia(dati.traccia);
+      if (fuoriStorico) toast({ title: 'Aperture salvate, ma fuori dallo storico', description: fuoriStorico });
       if (salvati || aperture.length) { onSaved?.(); await carica(); }
     } catch (e) {
       toast({ title: 'Non si e\' riusciti a salvare', description: motivoErrore(e), variant: 'destructive' });

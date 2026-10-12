@@ -5,6 +5,7 @@ import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { controlliTariffaAttiva, controlliUnitaTariffa } from "../../shared/ecotyreTariffe.ts";
 import { conflittiTariffa, periodoTariffa } from "../../shared/conflittiTariffa.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
+import { traccia, eliminaConTraccia, utenteDellaRichiesta, unisciTracce } from "../../shared/traccia.ts";
 
 // Gestisce le operazioni di scrittura su entità anagrafiche (Tariffa, Fornitore, Servizio).
 // FornitoreSecondaria non passa piu' di qui (27/09/2026): i collegamenti degli
@@ -14,7 +15,14 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 //   - campi obbligatori, chiave di unicità, sovrapposizione periodi, auto-chiusura rinegoziazione.
 // Le regole dei conflitti stanno in shared/conflittiTariffa.ts dall'11/10/2026,
 // perche' le usa anche la copia d'anno (preparaAnno).
-// Payload: { entita, operazione, id?, dati? }
+// Payload: { entita, operazione, id?, dati?, motivo? }
+//
+// LE TARIFFE SI SCRIVONO CON LA TRACCIA (11/10/2026). Prezzo, unita', date di
+// validita' e stato di una tariffa, scritti a mano o chiusi da un prezzo nuovo,
+// finiscono nello storico delle modifiche (ModificaDato, shared/traccia.ts) con
+// chi, quando, il valore di prima e il motivo che arriva nel payload. La
+// risposta porta traccia: { scritta, righe, motivo? }; se lo storico non si
+// scrive la tariffa resta salvata, e la pagina lo dice.
 function norm(v) {
   return String(v || '').trim().toUpperCase();
 }
@@ -45,7 +53,10 @@ export default async function(req) {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return rispostaSolaLettura();
-    const { entita, operazione, id, dati } = await req.json();
+    const { entita, operazione, id, dati, motivo } = await req.json();
+    const svc = base44.asServiceRole.entities;
+    const comeScrive = { utente: utenteDellaRichiesta(user), origine: 'Tariffe & Anagrafiche', motivo: String(motivo || '').trim() };
+    const tracce = [];
 
     const ENTITA_AMMESSE = ['Tariffa', 'Fornitore', 'Servizio'];
     const OPERAZIONI_AMMESSE = ['create', 'update', 'delete'];
@@ -161,7 +172,11 @@ export default async function(req) {
         const fineChiusura = new Date(inizio);
         fineChiusura.setDate(fineChiusura.getDate() - 1);
         const dataFine = fineChiusura.toISOString().slice(0, 10);
-        await base44.asServiceRole.entities.Tariffa.update(t.id, { data_fine_validita: dataFine });
+        const chiusa = await traccia(svc, 'Tariffa', t.id, { data_fine_validita: dataFine }, {
+          ...comeScrive,
+          motivo: `chiusa dal prezzo nuovo che vale dal ${String(inizio).slice(0, 10).split('-').reverse().join('/')}${comeScrive.motivo ? `: ${comeScrive.motivo}` : ''}`,
+        });
+        tracce.push(chiusa.traccia);
         tariffeChiuse.push({
           id: t.id, fornitore_nome: t.fornitore_nome,
           data_fine_validita: dataFine, valore: t.valore, unita_misura: t.unita_misura,
@@ -195,17 +210,20 @@ export default async function(req) {
       }
     }
 
+    // Fornitori e servizi non hanno campi tracciati: passano di qui lo stesso,
+    // e si scrivono senza una lettura in piu'.
     let result;
-    if (operazione === 'create') {
-      result = await base44.asServiceRole.entities[entita].create(dati || {});
-    } else if (operazione === 'update') {
-      result = await base44.asServiceRole.entities[entita].update(id, dati || {});
+    if (operazione === 'create' || operazione === 'update') {
+      const scritta = await traccia(svc, entita, operazione === 'update' ? id : null, dati || {}, comeScrive);
+      tracce.push(scritta.traccia);
+      result = scritta.record;
     } else if (operazione === 'delete') {
-      await base44.asServiceRole.entities[entita].delete(id);
+      const tolta = await eliminaConTraccia(svc, entita, id, comeScrive);
+      tracce.push(tolta.traccia);
       result = { id, deleted: true };
     }
 
-    const response = { result };
+    const response = { result, traccia: unisciTracce(tracce) };
     if (tariffeChiuse.length > 0) {
       response.tariffe_chiuse = tariffeChiuse;
     }

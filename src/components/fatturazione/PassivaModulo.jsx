@@ -20,6 +20,7 @@ import { fogliDa, nomeFilePassiva } from '@/lib/passivaAmministrazione';
 import { modelloAmministrazione, quanteVociModello } from '@/lib/modelloPassivaAmministrazione';
 import { bloccoExtraRaccolta } from '@/lib/extraRaccoltaAmministrazione';
 import { scarica } from '@/lib/docxModello';
+import { creaMoltiConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
 import VociPassivaDialog from './VociPassivaDialog';
 import AvvisoCaricamenti from '@/components/shared/AvvisoCaricamenti';
 import { TIPI_PASSIVA, tipiDeiCanali } from '@/lib/registroCaricamenti';
@@ -46,6 +47,7 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
   // calcolato, cosi' non si comincia da zero.
   const [ammLoading, setAmmLoading] = useState(false);
   const [vociAperte, setVociAperte] = useState(false);
+  const [notaStorico, setNotaStorico] = useState('');
   // L'EXTRA RACCOLTA C'E', e ha un blocco tutto suo. L'utente, 03/10/2026: «nella
   // fatturazione passiva tutto cio' che riguarda l'extra raccolta deve rientrare
   // solo quando in quel determinato mese effettivamente sono stati chiusi quei
@@ -107,8 +109,12 @@ Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci 
           setAmmLoading(false);
           return;
         }
+        // Le voci del modello nascono nello storico delle modifiche: sono prezzi
+        // che fanno la passiva, e chi li cambia dopo deve vedere da dove partivano.
         const proposta = modelloAmministrazione(periodo.anno);
-        for (const v of proposta) await base44.entities.VocePassivaAmministrazione.create(v);
+        const esito = await creaMoltiConTraccia('VocePassivaAmministrazione', proposta, { origine: 'Fatturazione passiva', motivo: `modello del foglio dell'amministrazione per il ${periodo.anno}` });
+        const avviso = avvisoTraccia(esito);
+        if (avviso) setNotaStorico(`${avviso.title}: ${avviso.description}`);
         voci.push(...proposta);
       }
       const fogli = fogliDa(voci, per, periodo.mese, periodo.anno, tariffe, extra);
@@ -212,6 +218,7 @@ Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci 
       )}
 
       {error && <div className="text-sm text-destructive bg-destructive/10 px-4 py-2 rounded">{error}</div>}
+      {notaStorico && <div className="text-sm text-amber-800 bg-amber-50 dark:text-amber-200 dark:bg-amber-950/40 px-4 py-2 rounded">{notaStorico}</div>}
 
       {result && (
         <>

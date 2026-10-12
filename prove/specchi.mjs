@@ -41,6 +41,7 @@ const SPECCHI = [
   ['base44/shared/attesoContratto.ts', 'src/lib/attesoContratto.js'],
   ['base44/shared/andamentoTarget.ts', 'src/lib/andamentoTarget.js'],
   ['base44/shared/registroCaricamenti.ts', 'src/lib/registroCaricamenti.js'],
+  ['base44/shared/campiTracciati.ts', 'src/lib/campiTracciati.js'],
 ];
 
 // il corpo: via i ritorni a capo di Windows, le righe di import e il commento di testa

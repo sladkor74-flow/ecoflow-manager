@@ -15,6 +15,8 @@ import ImportaReportGenerale from '@/components/target-status/ImportaReportGener
 import { annoDelRecord, daConfermare } from '@/lib/annoTarget';
 import EsportaPdf from '@/components/shared/EsportaPdf';
 import { targetRaccoglitoriPdf } from '@/lib/giacenzePdf';
+import { scriviConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
+import StoricoModifiche from '@/components/shared/StoricoModifiche';
 
 
 // Target dei raccoglitori: l'unico punto in cui si scrivono.
@@ -25,6 +27,12 @@ import { targetRaccoglitoriPdf } from '@/lib/giacenzePdf';
 // questi valori: una modifica, anche a meta' mese, vale subito ovunque.
 // isAdmin arriva gia' falso per chi non e' amministratore e per un anno chiuso:
 // allora la griglia si legge soltanto.
+//
+// Ogni target si scrive con scriviConTraccia (11/10/2026): il valore di prima e
+// di dopo, chi e il motivo scritto nella cella finiscono nello storico delle
+// modifiche, che si apre nella cella. Lo storico_json di ogni riga resta: il
+// pallino arancione delle celle modificate lo legge da li'.
+const ORIGINE = 'Target & Status, target dei raccoglitori';
 
 function Storico({ json, formato }) {
   const voci = leggiStorico(json);
@@ -203,6 +211,7 @@ function CellaMese({ record, riga, mese, anno, isAdmin, onSalva }) {
           <p className="text-sm">{record ? formatoMese(record) : 'Nessun target'}</p>
         )}
         <Storico json={record && record.storico_json} formato={formatoMese} />
+        {record && <StoricoModifiche entita="TargetMensile" recordId={record.id} className="border-t pt-2 mt-2" />}
       </PopoverContent>
     </Popover>
   );
@@ -270,6 +279,7 @@ function CellaAnnuo({ record, riga, anno, isAdmin, onSalva }) {
           <p className="text-sm">{record ? formatoAnnuo(record) : 'Nessun target annuo'}</p>
         )}
         <Storico json={record && record.storico_json} formato={formatoAnnuo} />
+        {record && <StoricoModifiche entita="TargetRaccoglitore" recordId={record.id} className="border-t pt-2 mt-2" />}
       </PopoverContent>
     </Popover>
   );
@@ -506,19 +516,24 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     return g;
   }, [righe, mostraVuote, vuota]);
 
+  // Il dato e' salvato ma non e' finito nello storico delle modifiche: si dice.
+  const avvisaTraccia = (...esiti) => { const a = avvisoTraccia(...esiti); if (a) toast(a); };
+
   const salvaMese = async (riga, mese, { target, non_raccoglie, nota }) => {
     const r = riga.mesi[mese];
     const utente = nomeUtente(user);
     if (r) {
       const storico_json = conModifica(r.storico_json, { utente, nota, prima: { target: r.target ?? null, non_raccoglie: !!r.non_raccoglie } });
-      await base44.entities.TargetMensile.update(r.id, { target, non_raccoglie, storico_json });
+      const esito = await scriviConTraccia('TargetMensile', r.id, { target, non_raccoglie, storico_json }, { origine: ORIGINE, motivo: nota });
       setMensili(prev => prev.map(x => (x.id === r.id ? { ...x, target, non_raccoglie, storico_json, updated_date: new Date().toISOString() } : x)));
+      avvisaTraccia(esito);
     } else {
-      const creato = await base44.entities.TargetMensile.create({
+      const esito = await scriviConTraccia('TargetMensile', null, {
         raccoglitore: riga.nome, regione: riga.regione || '', impianto: riga.impianto || '', mese, anno, target, non_raccoglie,
         storico_json: conModifica('[]', { utente, nota, prima: null }),
-      });
-      setMensili(prev => [...prev, creato]);
+      }, { origine: ORIGINE, motivo: nota });
+      setMensili(prev => [...prev, esito.record]);
+      avvisaTraccia(esito);
     }
   };
 
@@ -527,14 +542,16 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     const utente = nomeUtente(user);
     if (r) {
       const storico_json = conModifica(r.storico_json, { utente, nota, prima: { target_tonnellate: r.target_tonnellate ?? null, attivo_dal: r.attivo_dal || '' } });
-      await base44.entities.TargetRaccoglitore.update(r.id, { target_tonnellate, attivo_dal, storico_json });
+      const esito = await scriviConTraccia('TargetRaccoglitore', r.id, { target_tonnellate, attivo_dal, storico_json }, { origine: ORIGINE, motivo: nota });
       setAnnui(prev => prev.map(x => (x.id === r.id ? { ...x, target_tonnellate, attivo_dal, storico_json } : x)));
+      avvisaTraccia(esito);
     } else {
-      const creato = await base44.entities.TargetRaccoglitore.create({
+      const esito = await scriviConTraccia('TargetRaccoglitore', null, {
         raccoglitore: riga.nome, regione: riga.regione || null, impianto: riga.impianto || '', anno, target_tonnellate, attivo_dal,
         storico_json: conModifica('[]', { utente, nota, prima: null }),
-      });
-      setAnnui(prev => [...prev, creato]);
+      }, { origine: ORIGINE, motivo: nota });
+      setAnnui(prev => [...prev, esito.record]);
+      avvisaTraccia(esito);
     }
   };
 
@@ -550,17 +567,19 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     const utente = nomeUtente(user);
     const nota = `impianto: ${impianto || 'non indicato'}${r2 ? ' (piazzale)' : ''}`;
     const a = riga.annuo;
+    const esiti = [];
     if (a) {
       const storico_json = conModifica(a.storico_json, { utente, nota, prima: { target_tonnellate: a.target_tonnellate ?? null, attivo_dal: a.attivo_dal || '', impianto: a.impianto || '' } });
-      await base44.entities.TargetRaccoglitore.update(a.id, { impianto, ruolo: r2, storico_json });
+      esiti.push(await scriviConTraccia('TargetRaccoglitore', a.id, { impianto, ruolo: r2, storico_json }, { origine: ORIGINE, motivo: nota }));
       setAnnui(prev => prev.map(x => (x.id === a.id ? { ...x, impianto, ruolo: r2, storico_json } : x)));
     }
     for (const m of Object.values(riga.mesi)) {
       if (!m) continue;
       const storico_json = conModifica(m.storico_json, { utente, nota, prima: { target: m.target ?? null, non_raccoglie: !!m.non_raccoglie, impianto: m.impianto || '' } });
-      await base44.entities.TargetMensile.update(m.id, { impianto, ruolo: r2, storico_json });
+      esiti.push(await scriviConTraccia('TargetMensile', m.id, { impianto, ruolo: r2, storico_json }, { origine: ORIGINE, motivo: nota }));
       setMensili(prev => prev.map(x => (x.id === m.id ? { ...x, impianto, ruolo: r2, storico_json } : x)));
     }
+    avvisaTraccia(...esiti);
   };
 
   // Confermare una riga copiata dall'anno prima: una voce nello storico di ogni
@@ -573,13 +592,13 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
         const a = riga.annuo;
         if (a && daConfermare(a)) {
           const storico_json = conModifica(a.storico_json, { utente, nota: 'confermato', prima: { target_tonnellate: a.target_tonnellate ?? null, attivo_dal: a.attivo_dal || '' } });
-          await base44.entities.TargetRaccoglitore.update(a.id, { storico_json });
+          await scriviConTraccia('TargetRaccoglitore', a.id, { storico_json }, { origine: ORIGINE });
           setAnnui(prev => prev.map(x => (x.id === a.id ? { ...x, storico_json } : x)));
         }
         for (const m of Object.values(riga.mesi)) {
           if (!m || !daConfermare(m)) continue;
           const storico_json = conModifica(m.storico_json, { utente, nota: 'confermato', prima: { target: m.target ?? null, non_raccoglie: !!m.non_raccoglie } });
-          await base44.entities.TargetMensile.update(m.id, { storico_json });
+          await scriviConTraccia('TargetMensile', m.id, { storico_json }, { origine: ORIGINE });
           setMensili(prev => prev.map(x => (x.id === m.id ? { ...x, storico_json } : x)));
         }
       }
@@ -594,11 +613,12 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     if (righe.elenco.some(r => r.chiave === chiaveNome(raccoglitore) && r.regione === regione && r.impiantoChiave === chiaveNome(impianto))) {
       throw new Error(`${raccoglitore} in ${regione}${impianto ? ` verso ${impianto}` : ''} è già presente.`);
     }
-    const creato = await base44.entities.TargetRaccoglitore.create({
+    const esito = await scriviConTraccia('TargetRaccoglitore', null, {
       raccoglitore, regione, impianto, anno, target_tonnellate, attivo_dal,
       storico_json: conModifica('[]', { utente: nomeUtente(user), nota: 'nuova riga', prima: null }),
-    });
-    setAnnui(prev => [...prev, creato]);
+    }, { origine: ORIGINE, motivo: 'nuova riga' });
+    setAnnui(prev => [...prev, esito.record]);
+    avvisaTraccia(esito);
   };
 
   const nomiSuggeriti = useMemo(() => [...new Set(raccolto.map(r => r.raccoglitore).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'it')), [raccolto]);

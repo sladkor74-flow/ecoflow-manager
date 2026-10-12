@@ -12,6 +12,7 @@ import {
   leggiLetteraGiacenze, preparaChiusura, apertureDegliImpianti, sitiDellaChiusura,
 } from "../../shared/chiusuraAnno.ts";
 import { controlloCaricamenti, TIPI_RINVIO } from "../../shared/statoArchivi.ts";
+import { traccia, utenteDellaRichiesta, unisciTracce } from "../../shared/traccia.ts";
 
 // La chiusura dell'anno: prepara la fotografia del 31 dicembre da cui
 // ripartiranno le giacenze dell'anno dopo, e la salva.
@@ -287,11 +288,14 @@ export default async function (req) {
     // Chiudere l'anno e' un gesto solo: i piazzali e gli impianti ripartono dallo
     // stesso 31 dicembre. Un'apertura che non si riesce a scrivere si dice, una per
     // una, e il resto prosegue.
-    const apertureScritte = [], apertureNonScritte = [];
+    // Ogni apertura entra nello storico delle modifiche (ModificaDato): e' il
+    // numero da cui riparte la giacenza dell'impianto per tutto l'anno dopo.
+    const apertureScritte = [], apertureNonScritte = [], tracce = [];
+    const comeScrive = { utente: utenteDellaRichiesta(user), origine: 'Chiusura dell\'anno', motivo: `apertura del ${anno + 1} dalla fotografia del portale` };
     for (const x of aperture.piano) {
       try {
-        if (x.azione === 'aggiorna') await base44.asServiceRole.entities.GiacenzaSito.update(x.id, x.dati);
-        else await base44.asServiceRole.entities.GiacenzaSito.create(x.dati);
+        const scritta = await traccia(base44.asServiceRole.entities, 'GiacenzaSito', x.azione === 'aggiorna' ? x.id : null, x.dati, comeScrive);
+        tracce.push(scritta.traccia);
         apertureScritte.push({ sito: x.sito, azione: x.azione, rete_t: x.dati.giacenza_riferimento_t, aci_t: x.dati.giacenza_riferimento_aci_t });
       } catch (e) {
         apertureNonScritte.push({ sito: x.sito, motivo: `Non si e' riusciti a scrivere l'apertura: ${e && e.message ? e.message : e}` });
@@ -301,6 +305,7 @@ export default async function (req) {
     return Response.json({
       ...dossier, puo_salvare: puoScrivere, salvati, saltati,
       aperture: { ...aperture, scritte: apertureScritte, non_scritte: apertureNonScritte },
+      traccia: unisciTracce(tracce),
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

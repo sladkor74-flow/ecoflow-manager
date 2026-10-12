@@ -18,6 +18,8 @@ import { fetchAllClient } from '@/lib/fetchAllClient';
 import { formatNumber } from '@/lib/utils';
 import { PROV_TO_REGION } from '@/lib/regioneMap';
 import { modelloAmministrazione } from '@/lib/modelloPassivaAmministrazione';
+import { scriviConTraccia, eliminaConTraccia, creaMoltiConTraccia, eliminaMoltiConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
+import StoricoModifiche from '@/components/shared/StoricoModifiche';
 
 // LE VOCI DEL FORMAT AMMINISTRAZIONE DELLA PASSIVA, CORRETTE DALL'UTENTE.
 //
@@ -85,7 +87,14 @@ const VUOTO = '__nessuna__';
 // restituisce un involucro nuovo. Tenerlo in una costante del componente lo
 // faceva sembrare cambiato a ogni disegno, e il caricamento sarebbe ripartito
 // all'infinito.
+//
+// Si legge soltanto: le scritture passano da scriviConTraccia (11/10/2026), cosi'
+// un prezzo che passa da 300 a 90 €/t resta nello storico delle modifiche con
+// chi, quando e il valore di prima. Lo storico di una voce si apre nella sua
+// scheda.
 const archivio = () => base44.entities.VocePassivaAmministrazione;
+const ENTITA = 'VocePassivaAmministrazione';
+const ORIGINE = 'Fatturazione passiva, voci del foglio';
 
 const testo = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 const euro = (v) => formatNumber(Number(v) || 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -276,12 +285,12 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
     setSalvataggio(true);
     try {
       const payload = payloadDaVoce({ ...form, criterio_json: criterioDaForm(form) }, annoNum);
-      if (inModifica === 'nuova') await conRitentativi(() => archivio().create(payload));
-      else await conRitentativi(() => archivio().update(inModifica, payload));
+      const esito = await conRitentativi(() => scriviConTraccia(ENTITA, inModifica === 'nuova' ? null : inModifica, payload, { origine: ORIGINE }));
       setInModifica(null);
       await carica();
       onSalvato?.();
-      toast({
+      const avviso = avvisoTraccia(esito);
+      toast(avviso ? { ...avviso, title: 'Voce salvata, ma fuori dallo storico' } : {
         title: 'Voce salvata',
         description: `${payload.soggetto}${payload.voce ? ` - ${payload.voce}` : ''}, ${euro(payload.prezzo)} €.`,
       });
@@ -296,9 +305,11 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
   const commutaAttiva = async (v, valore) => {
     if (!isAdmin) return;
     try {
-      await conRitentativi(() => archivio().update(v.id, { attiva: valore }));
+      const esito = await conRitentativi(() => scriviConTraccia(ENTITA, v.id, { attiva: valore }, { origine: ORIGINE }));
       await carica();
       onSalvato?.();
+      const avviso = avvisoTraccia(esito);
+      if (avviso) toast(avviso);
     } catch (e) {
       toast({ variant: 'destructive', title: 'Voce non aggiornata', description: e?.message || 'Scrittura non riuscita' });
     }
@@ -308,11 +319,12 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
     if (!isAdmin || !daEliminare) return;
     setSalvataggio(true);
     try {
-      await conRitentativi(() => archivio().delete(daEliminare.id));
+      const esito = await conRitentativi(() => eliminaConTraccia(ENTITA, daEliminare.id, { origine: ORIGINE }));
       setDaEliminare(null);
       await carica();
       onSalvato?.();
-      toast({ title: 'Voce eliminata' });
+      const avviso = avvisoTraccia(esito);
+      toast(avviso ? { ...avviso, title: 'Voce eliminata, ma fuori dallo storico' } : { title: 'Voce eliminata' });
     } catch (e) {
       toast({ variant: 'destructive', title: 'Voce non eliminata', description: e?.message || 'Scrittura non riuscita' });
     }
@@ -321,18 +333,18 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
 
   // Le scritture a gruppi passano da bulkCreate quando la piattaforma lo mette a
   // disposizione, altrimenti una per una: in entrambi i casi a blocchi, per non
-  // esaurire il limite di richieste del minuto.
-  const creaVoci = async (nuove) => {
-    const ent = archivio();
-    for (let i = 0; i < nuove.length; i += 50) {
-      const blocco = nuove.slice(i, i + 50);
-      if (typeof ent.bulkCreate === 'function') await conRitentativi(() => ent.bulkCreate(blocco));
-      else for (const v of blocco) await conRitentativi(() => ent.create(v));
-    }
+  // esaurire il limite di richieste del minuto. Ogni blocco si riprova da solo,
+  // e lo storico delle modifiche si scrive una volta per gruppo (11/10/2026):
+  // se non si scrive, lo si dice dopo il messaggio del lavoro fatto.
+  const creaVoci = async (nuove, motivo) => {
+    const esito = await creaMoltiConTraccia(ENTITA, nuove, { origine: ORIGINE, motivo, riprova: conRitentativi });
+    const avviso = avvisoTraccia(esito);
+    if (avviso) toast(avviso);
   };
-  const eliminaVoci = async (righe) => {
-    const ent = archivio();
-    for (const r of righe) await conRitentativi(() => ent.delete(r.id));
+  const eliminaVoci = async (righe, motivo) => {
+    const esito = await eliminaMoltiConTraccia(ENTITA, righe, { origine: ORIGINE, motivo, riprova: conRitentativi });
+    const avviso = avvisoTraccia(esito);
+    if (avviso) toast(avviso);
   };
 
   const rimuoviSenzaSoggetto = async () => {
@@ -340,7 +352,7 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
     setSalvataggio(true);
     const quante = senzaSoggetto.length;
     try {
-      await eliminaVoci(senzaSoggetto);
+      await eliminaVoci(senzaSoggetto, 'voci senza soggetto rimosse');
       setPuliziaAperta(false);
       await carica();
       onSalvato?.();
@@ -376,8 +388,8 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
     setSalvataggio(true);
     const quante = proposta.length;
     try {
-      if (sostituisci) await eliminaVoci(voci);
-      await creaVoci(proposta);
+      if (sostituisci) await eliminaVoci(voci, `sostituite dal modello dell'amministrazione del ${annoNum}`);
+      await creaVoci(proposta, `modello dell'amministrazione del ${annoNum}`);
       setProposta(null);
       await carica();
       onSalvato?.();
@@ -418,8 +430,8 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
     const destinazione = copia.anno;
     const quante = voci.length;
     try {
-      if (sostituisci && copia.esistenti.length) await eliminaVoci(copia.esistenti);
-      await creaVoci(voci.map(v => payloadDaVoce(v, destinazione)));
+      if (sostituisci && copia.esistenti.length) await eliminaVoci(copia.esistenti, `sostituite dalla copia delle voci del ${annoNum}`);
+      await creaVoci(voci.map(v => payloadDaVoce(v, destinazione)), `copia delle voci del ${annoNum}`);
       setCopia(null);
       onSalvato?.();
       toast({
@@ -619,6 +631,8 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
                     : 'Nessuna condizione: la riga prende tutto quello che resta del soggetto.'}
                 </p>
               </div>
+
+              {inModifica !== 'nuova' && <StoricoModifiche entita={ENTITA} recordId={inModifica} />}
 
               <div className="flex justify-end gap-2">
                 <Button variant="outline" disabled={salvataggio} onClick={() => setInModifica(null)}>

@@ -9,6 +9,8 @@ import { Plus, Trash2, X, Pencil, ExternalLink } from 'lucide-react';
 import { formatTonnellate } from '@/lib/utils';
 import { annoChiuso } from '@/lib/annoTarget';
 import { anniTarget } from '@/lib/target';
+import { scriviConTraccia, eliminaConTraccia, notaTraccia } from '@/lib/scriviConTraccia';
+import StoricoModifiche from '@/components/shared/StoricoModifiche';
 
 const TIPOLOGIE = ['EoW', 'Frantumazione/R1', 'n.a.'];
 
@@ -30,6 +32,12 @@ const chiaveRiga = (sito, td) => `${String(sito || '').trim().toLowerCase()}|${t
 // diceva «Giacenza di riferimento» e basta, e chi lo correggeva credeva di
 // cambiare un numero che invece non si muoveva. Ora l'etichetta lo dice, e
 // nell'elenco un piazzale con letture mostra l'apertura che vale davvero.
+// L'APERTURA SI SCRIVE CON LA TRACCIA (11/10/2026). Questo e' l'unico punto in
+// cui si scrive a mano la giacenza di riferimento di un sito, e l'audit l'ha
+// vista pesare sull'anno nuovo: chi l'ha cambiata, quando, da quanto a quanto
+// finisce nello storico delle modifiche, che si apre nella scheda del sito.
+const ORIGINE = 'Giacenze, siti e target';
+
 const NOTA_APERTURA_PIAZZALE = "Conta solo per un piazzale senza nessuna rilevazione del portale: con una lettura l'apertura è l'ancora (la rilevazione del 31/12 dell'anno prima, o la prima dell'anno), portata al 31/12.";
 
 export default function TargetManager({ open, onClose, anno, destinazioni, righe = [], onSaved }) {
@@ -45,6 +53,8 @@ export default function TargetManager({ open, onClose, anno, destinazioni, righe
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
+  // Il sito e' salvato ma la modifica non e' finita nello storico: lo si dice qui.
+  const [notaStorico, setNotaStorico] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -76,11 +86,10 @@ export default function TargetManager({ open, onClose, anno, destinazioni, righe
         tipologia_trattamento: form.tipologia_trattamento || 'n.a.',
         note: form.note || '',
       };
-      if (editing === 'new') {
-        await base44.entities.GiacenzaSito.create(payload);
-      } else {
-        await base44.entities.GiacenzaSito.update(editing, payload);
-      }
+      const esito = editing === 'new'
+        ? await scriviConTraccia('GiacenzaSito', null, payload, { origine: ORIGINE })
+        : await scriviConTraccia('GiacenzaSito', editing, payload, { origine: ORIGINE });
+      setNotaStorico(notaTraccia(esito) || '');
       setEditing(null);
       await load();
       onSaved?.();
@@ -91,7 +100,8 @@ export default function TargetManager({ open, onClose, anno, destinazioni, righe
     if (solaLettura) return;
     if (!confirm('Eliminare questo sito?')) return;
     try {
-      await base44.entities.GiacenzaSito.delete(id);
+      const esito = await eliminaConTraccia('GiacenzaSito', id, { origine: ORIGINE });
+      setNotaStorico(notaTraccia(esito) || '');
       await load();
       onSaved?.();
     } catch (e) { alert(e?.message); }
@@ -148,6 +158,7 @@ export default function TargetManager({ open, onClose, anno, destinazioni, righe
               </div>
               <div><label className="text-xs text-muted-foreground block mb-1">Note</label><Input value={form.note || ''} onChange={e => setForm({ ...form, note: e.target.value })} /></div>
             </div>
+            {editing !== 'new' && <StoricoModifiche entita="GiacenzaSito" recordId={editing} />}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setEditing(null)}><X className="w-4 h-4 mr-1" /> Annulla</Button>
               <Button onClick={save} disabled={!form.sito}>Salva</Button>
@@ -155,6 +166,7 @@ export default function TargetManager({ open, onClose, anno, destinazioni, righe
           </div>
         ) : (
           <>
+            {notaStorico && <p className="text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded px-2 py-1.5">{notaStorico}</p>}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground max-w-xl">
                 I target si scrivono in Target & Status: il target totale sull'impianto, quello delle primarie

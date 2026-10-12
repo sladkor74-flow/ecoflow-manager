@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Save, AlertTriangle, X } from 'lucide-react';
+import { notaTraccia } from '@/lib/scriviConTraccia';
+import StoricoModifiche from '@/components/shared/StoricoModifiche';
 
 const REGIONI = ['Campania', 'Puglia', 'Basilicata', 'Calabria', 'Lazio', 'Molise', 'Abruzzo', 'Sicilia', 'Sardegna', 'Toscana', 'Lombardia', 'Piemonte', 'Veneto', 'Emilia-Romagna', 'Marche', 'Umbria', 'Liguria', 'Friuli-Venezia Giulia', 'Trentino-Alto Adige', "Valle d'Aosta"];
 const CLASSI = ['P', 'M', 'G1', 'G2'];
@@ -33,6 +35,8 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
   const [conflict, setConflict] = useState(null);
   const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
+  // Perche' cambia il prezzo: finisce nello storico delle modifiche (11/10/2026).
+  const [motivo, setMotivo] = useState('');
 
   const isEdit = !!editing;
   const isDup = !!duplicating;
@@ -40,7 +44,7 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
 
   useEffect(() => {
     if (!open) return;
-    setError(''); setFieldErrors([]); setConflict(null); setSuccess('');
+    setError(''); setFieldErrors([]); setConflict(null); setSuccess(''); setMotivo('');
     if (editing) {
       setForm({ ...editing, data_inizio_validita: editing.data_inizio_validita ? editing.data_inizio_validita.slice(0,10) : '', data_fine_validita: editing.data_fine_validita ? editing.data_fine_validita.slice(0,10) : '' });
       setMultiClasse(false);
@@ -124,6 +128,17 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
     setSuccess(`Tariffa salvata. Il prezzo precedente${prezzo}${altre} è stato chiuso al ${c.data_fine_validita || 'giorno indicato'}: resta valido per i movimenti fino a quel giorno.`);
   };
 
+  // LA TARIFFA E' SALVATA MA NON E' FINITA NELLO STORICO (11/10/2026). Lo storico
+  // delle modifiche lo scrive gestisciAnagrafiche con la tariffa; se quella
+  // scrittura non riesce il prezzo resta salvato, e la finestra resta aperta a
+  // dirlo invece di chiudersi come se niente fosse.
+  const notaStorico = (...risposte) => risposte.map(r => notaTraccia(r && r.data && r.data.traccia)).find(Boolean) || '';
+  const chiudiODillo = (nota) => {
+    onSaved();
+    if (nota) { setSuccess(`Tariffa salvata. ${nota}`); return; }
+    onClose();
+  };
+
   const handleResponseError = (e) => {
     const status = e?.response?.status;
     const data = e?.response?.data;
@@ -164,23 +179,25 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
             }
           }
         }
-        const res = await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: editing.id, dati: updateData });
+        const res = await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: editing.id, dati: updateData, motivo: motivo.trim() });
         avvisaChiusure(res);
-        onSaved(); onClose();
+        chiudiODillo(notaStorico(res));
       } else {
         const base = buildBase();
+        const risposte = [];
         if (multiClasse) {
           for (const c of CLASSI) {
             const v = valoriPerClasse[c] === '' || valoriPerClasse[c] === undefined ? 0 : Number(valoriPerClasse[c]);
-            await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'create', dati: { ...base, classe_materiale: c, valore: v } });
+            risposte.push(await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'create', dati: { ...base, classe_materiale: c, valore: v }, motivo: motivo.trim() }));
           }
         } else {
-          const res = await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'create', dati: { ...base, classe_materiale: form.classe_materiale || undefined, valore: Number(form.valore) } });
+          const res = await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'create', dati: { ...base, classe_materiale: form.classe_materiale || undefined, valore: Number(form.valore) }, motivo: motivo.trim() });
           // Anche inserendo una tariffa nuova il prezzo precedente viene chiuso:
           // succedeva in silenzio, e chi salvava non lo sapeva.
           avvisaChiusure(res);
+          risposte.push(res);
         }
-        onSaved(); onClose();
+        chiudiODillo(notaStorico(...risposte));
       }
     } catch (e) {
       handleResponseError(e);
@@ -470,6 +487,13 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
             <label className="text-xs text-muted-foreground block mb-1">Note</label>
             <Input value={form.note || ''} onChange={e => setForm({ ...form, note: e.target.value })} />
           </div>
+          {/* Il motivo e lo storico delle modifiche (11/10/2026): chi ha cambiato
+              il prezzo o le date, quando, da quanto a quanto e perche'. */}
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Motivo della modifica (facoltativo, resta nello storico)</label>
+            <Input value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Per esempio: rinegoziato a settembre" />
+          </div>
+          {isEdit && editing && editing.id && <StoricoModifiche entita="Tariffa" recordId={editing.id} />}
           {/* Errori */}
           {error && <div className="bg-destructive/10 border border-destructive/30 rounded-md p-3 text-sm text-destructive flex items-start gap-2"><AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span></div>}
           {conflict && (

@@ -284,7 +284,7 @@ console.log("LE DUE GRAFIE DI GATIM E LA COPIA D'ANNO");
   verifica('senza il prezzo nuovo la copia si fa, una volta sola', p3.da_creare.length === 1 && p3.da_creare[0].copia.data_inizio_validita === '2027-01-01' && p3.scartate.length === 0, JSON.stringify(p3));
 
   const src = readFileSync(new URL('../base44/functions/preparaAnno/entry.ts', import.meta.url), 'utf8').replace(/\r/g, '');
-  verifica('preparaAnno copia secondo il piano e restituisce le scartate', /pianoCopiaTariffe\(tariffe, anno, direzioni\)/.test(src) && /svc\.Tariffa\.create\(x\.copia\)/.test(src) && /falliti, scartate,/.test(src));
+  verifica('preparaAnno copia secondo il piano e restituisce le scartate', /pianoCopiaTariffe\(tariffe, anno, direzioni\)/.test(src) && /traccia\(svc, 'Tariffa', null, x\.copia,/.test(src) && /falliti, scartate,/.test(src));
 }
 
 // UNA TUTTE COPRE RETE E ACI, COME NEI CONFLITTI; E LE COPIE SCARTATE SI DICONO

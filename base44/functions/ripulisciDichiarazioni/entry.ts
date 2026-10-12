@@ -3,6 +3,7 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { soloAmministratore } from "../../shared/permessi.ts";
 import { daTogliere } from "../../shared/dichiarazioniSeminate.ts";
+import { eliminaConTraccia, utenteDellaRichiesta, unisciTracce } from "../../shared/traccia.ts";
 
 // TOGLIE LE DICHIARAZIONI CHE NON SONO DICHIARAZIONI.
 //
@@ -24,7 +25,7 @@ import { daTogliere } from "../../shared/dichiarazioniSeminate.ts";
 export default async function(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
-    const { errore } = await soloAmministratore(base44);
+    const { user, errore } = await soloAmministratore(base44);
     if (errore) return errore;
 
     const body = await req.json().catch(() => ({}));
@@ -46,11 +47,18 @@ export default async function(req) {
       });
     }
 
+    // Ogni riga tolta resta scritta nello storico delle modifiche, con quello
+    // che diceva: la cancellazione non si annulla, ma si puo' sempre sapere cosa c'era.
     const tolte = [];
     const errori = [];
+    const tracce = [];
+    const comeScrive = { utente: utenteDellaRichiesta(user), origine: 'Dichiarazioni, pulizia', motivo: 'dichiarazione seminata o vuota, mai caricata a portale' };
+    // Nello storico va la riga intera com'era, non il riassunto dell'elenco.
+    const intere = new Map(dichiarazioni.map(d => [d.id, d]));
     for (const r of togliere) {
       try {
-        await svc.DichiarazioneSito.delete(r.id);
+        const tolta = await eliminaConTraccia(svc, 'DichiarazioneSito', r.id, { ...comeScrive, prima: intere.get(r.id) });
+        tracce.push(tolta.traccia);
         tolte.push(r);
       } catch (e) {
         errori.push(`${r.sito} ${r.mese}: ${(e && e.message) || String(e)}`);
@@ -62,6 +70,7 @@ export default async function(req) {
       conta: tolte.length,
       tolte,
       ...(errori.length ? { errori } : {}),
+      traccia: unisciTracce(tracce),
     });
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });

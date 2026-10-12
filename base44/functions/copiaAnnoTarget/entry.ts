@@ -5,6 +5,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { regolePredittivita } from "../../shared/regolePredittivita.ts";
 import { annoChiuso, annoCorrenteRoma, recordDellAnno, pianoCopiaAnno, conteggiPiano } from "../../shared/annoTarget.ts";
+import { creaConTraccia, traccia, utenteDellaRichiesta, unisciTracce } from "../../shared/traccia.ts";
 
 // Un anno nuovo di Target & Status nasce come copia del precedente (utente,
 // 27/09/2026): impianti e loro target, collegamenti degli stoccaggi (con la
@@ -25,6 +26,21 @@ import { annoChiuso, annoCorrenteRoma, recordDellAnno, pianoCopiaAnno, conteggiP
 // Gli impianti e i collegamenti si leggono interi e si tengono per anno con
 // annoDelRecord: un record senza anno vale il 2026, e .filter({anno}) lo
 // perderebbe.
+//
+// Lo storico delle modifiche (revisione delle migliorie, 11/10/2026): ogni
+// impianto, target, contratto e sito copiato lascia le sue righe in
+// ModificaDato, con chi ha copiato e il motivo «copia dal <anno prima>, da
+// confermare». Prima la copia restava fuori dallo storico perche' «la conferma
+// passa dallo storico», ma la conferma scrive solo la nota o lo storico_json e
+// non lascia righe: i numeri dell'anno nuovo nascevano senza nessuna traccia.
+// Il registro si scrive a blocchi, una volta per archivio, subito dopo i suoi
+// record: una copia interrotta a meta' ha nello storico quello che ha scritto
+// davvero. Sui dati veri dell'11/10/2026 la copia del 2026 nel 2027 fa 329
+// righe: le scritture passano da 11 a 19 (sette del registro, e i target
+// mensili a blocchi di cinquanta invece che di cento). I collegamenti degli
+// stoccaggi non sono un numero che fa i conti e non si tracciano. La risposta
+// porta traccia: { scritta, righe, motivo? }; se il registro non si scrive la
+// copia resta.
 
 const A_BLOCCHI = 100;
 
@@ -90,9 +106,13 @@ export default async function(req) {
     const risposta = { ok: true, anno, da, simulato: simula, conteggi, saltati: { ...piano.saltati }, impianti_da_giacenze: piano.daGiacenze || 0 };
     if (simula) return Response.json(risposta);
 
+    const comeScrive = { utente: utenteDellaRichiesta(user), origine: "Target & Status, copia dell'anno", motivo: `copia dal ${da}, da confermare` };
+    const tracce = [];
+
     // 1. gli impianti, uno per uno: serve il loro id per i collegamenti
-    const nuovi = [];
-    for (const r of piano.impianti) nuovi.push(await e.ImpiantoTargetSecondaria.create(r));
+    const impiantiCopiati = await creaConTraccia(e, 'ImpiantoTargetSecondaria', piano.impianti, { ...comeScrive, unoPerUno: true });
+    const nuovi = impiantiCopiati.record;
+    tracce.push(impiantiCopiati.traccia);
 
     // 2. i collegamenti, con l'id dell'impianto dell'anno (nuovo o gia' presente)
     const perChiave = new Map();
@@ -112,12 +132,13 @@ export default async function(req) {
     await creaTutti(e.FornitoreSecondaria, collegamenti);
 
     // 3. il resto
-    await creaTutti(e.TargetRaccoglitore, piano.raccoglitori);
-    await creaTutti(e.TargetMensile, piano.mensili);
-    if (piano.commessa) await e.CommessaEcotyre.create(piano.commessa);
-    await creaTutti(e.GiacenzaSito, piano.siti);
+    tracce.push((await creaConTraccia(e, 'TargetRaccoglitore', piano.raccoglitori, comeScrive)).traccia);
+    tracce.push((await creaConTraccia(e, 'TargetMensile', piano.mensili, comeScrive)).traccia);
+    if (piano.commessa) tracce.push((await traccia(e, 'CommessaEcotyre', null, piano.commessa, comeScrive)).traccia);
+    tracce.push((await creaConTraccia(e, 'GiacenzaSito', piano.siti, comeScrive)).traccia);
 
     risposta.conteggi = { ...conteggi, collegamenti: collegamenti.length };
+    risposta.traccia = unisciTracce(tracce);
     if (senzaImpianto) risposta.saltati.collegamenti_senza_impianto = senzaImpianto;
     return Response.json(risposta);
   } catch (error) {

@@ -21,6 +21,7 @@ import { esportaFoglioDichiarazioni } from '@/lib/foglioDichiarazioni';
 import { fileConversione } from '@/lib/convertiWordPdf';
 import { linkFile } from '@/lib/apriFile';
 import ModelliIrigom from '@/components/dichiarazioni/ModelliIrigom';
+import { scriviConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
 
 // La pratica mensile delle dichiarazioni di Irigom, dentro il gestionale.
 //
@@ -150,7 +151,7 @@ const Avviso = ({ testo, grave }) => (
   </div>
 );
 
-export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrata }) {
+export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrata, meseIniziale = null }) {
   const { isAdmin } = usePermessi();
   const inputRegistro = useRef(null);
   const inputDocumenti = useRef(null);
@@ -161,6 +162,10 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
   const [caricando, setCaricando] = useState(false);
   const [errore, setErrore] = useState('');
   const [mese, setMese] = useState('');
+  // Il mese del collegamento (chiusura del mese) si apre una volta, quando le
+  // pratiche dell'anno sono lette: prima scegliMese non saprebbe cosa riprendere.
+  const [archiviLetti, setArchiviLetti] = useState(false);
+  const meseDaAprire = useRef(meseIniziale || '');
   const [pratiche, setPratiche] = useState([]);
   // Le pratiche e le dichiarazioni di extra raccolta dell'anno prima servono al
   // cambio d'anno: l'extra arrivata a dicembre parte con la nave di gennaio.
@@ -203,6 +208,7 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
       setDichiarazioniRete(dRete || []);
       setModelli(m || []);
       setExtraArchivio(e || []);
+      setArchiviLetti(true);
     } catch (err) {
       setErrore(err?.response?.data?.error || err.message);
     }
@@ -238,6 +244,13 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
     } catch (e) { /* ripartizione di default */ }
     setDataLettera(p && p.data_lettera ? p.data_lettera : oggiIt());
   };
+  useEffect(() => {
+    if (!archiviLetti || !meseDaAprire.current) return;
+    const m = meseDaAprire.current;
+    meseDaAprire.current = '';
+    if (MESI.includes(m)) scegliMese(m);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [archiviLetti]);
 
   const caricaRegistro = async (file) => {
     setCaricando(true);
@@ -690,9 +703,14 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
         ricevuta_email: !pratica.solo_metalli, ricevuta_il: pratica.solo_metalli ? '' : ((reteEsistente && reteEsistente.ricevuta_il) || oggi),
         note: [reteEsistente && reteEsistente.note, reteEsistente && reteEsistente.quantita_kg ? `Prima: ${formatKg(reteEsistente.quantita_kg)} kg; aggiornata il ${dataIt(oggi)}${motivo ? ` perche' ${motivo}` : ''}.` : '', nota].filter(Boolean).join('\n'),
       };
+      // Le quantita' scritte dalla pratica finiscono nello storico delle
+      // modifiche (11/10/2026), col motivo della sostituzione quando c'e'.
+      const traccia = { origine: 'Dichiarazioni Impianti, pratica Irigom', motivo: motivo ? `pratica di ${mese} ${anno} sostituita: ${motivo.trim()}` : `pratica di ${mese} ${anno}` };
+      const scritte = [];
       const rete = reteEsistente
-        ? await base44.entities.DichiarazioneSito.update(reteEsistente.id, campiRete)
-        : await base44.entities.DichiarazioneSito.create({ sito: irigom ? irigom.sito : 'Irigom S.r.l.', operazione: 'R1', canale: 'RETE', provenienza: '', anno, mese, ...campiRete });
+        ? await scriviConTraccia('DichiarazioneSito', reteEsistente.id, campiRete, traccia)
+        : await scriviConTraccia('DichiarazioneSito', null, { sito: irigom ? irigom.sito : 'Irigom S.r.l.', operazione: 'R1', canale: 'RETE', provenienza: '', anno, mese, ...campiRete }, traccia);
+      scritte.push(rete);
       // L'extra raccolta si scrive sul mese del formulario, canale a parte, con
       // l'anno del formulario: quella di dicembre partita con la nave di gennaio va
       // su dicembre dell'anno prima. Ogni mese vale quello che ci hanno scritto le
@@ -709,16 +727,17 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
           note: [giaExtra && giaExtra.note, prima,
             `${SEGNO_PRATICA_EXTRA}${mese} ${anno}, terziaria ${pratica.extra.terziaria || '—'} (allegato VII ${pratica.extra.allegato}): ${formatKg(x.questa_kg)} kg${x.altre_kg ? `, piu' ${formatKg(x.altre_kg)} kg dichiarati con altre pratiche` : ''}.`].filter(Boolean).join('\n'),
         };
-        if (giaExtra) await base44.entities.DichiarazioneSito.update(giaExtra.id, campiExtra);
-        else await base44.entities.DichiarazioneSito.create({ sito: irigom ? irigom.sito : 'Irigom S.r.l.', operazione: 'R1', canale: 'EXTRA_RACCOLTA', provenienza: '', anno: x.anno, mese: x.mese, ...campiExtra });
+        if (giaExtra) scritte.push(await scriviConTraccia('DichiarazioneSito', giaExtra.id, campiExtra, traccia));
+        else scritte.push(await scriviConTraccia('DichiarazioneSito', null, { sito: irigom ? irigom.sito : 'Irigom S.r.l.', operazione: 'R1', canale: 'EXTRA_RACCOLTA', provenienza: '', anno: x.anno, mese: x.mese, ...campiExtra }, traccia));
       }
       if (precedente) await base44.entities.PraticaIrigom.update(precedente.id, { stato: 'sostituita', motivo_sostituzione: motivo.trim() });
       await salvaBozza('registrata', {
         registrata_il: new Date().toISOString(), registrata_da: (utente && (utente.full_name || utente.email)) || '',
-        dichiarazione_rete_id: rete && rete.id ? rete.id : (reteEsistente ? reteEsistente.id : ''),
+        dichiarazione_rete_id: rete && rete.record && rete.record.id ? rete.record.id : (reteEsistente ? reteEsistente.id : ''),
       });
       await caricaArchivi();
-      setEsito({ tipo: 'registrata' });
+      const avviso = avvisoTraccia(...scritte);
+      setEsito({ tipo: 'registrata', ...(avviso ? { nota_storico: avviso.description } : {}) });
       if (onRegistrata) onRegistrata();
     } catch (e) {
       setErrore(e?.response?.data?.error || e.message || String(e));
@@ -1207,6 +1226,9 @@ export default function PraticaIrigom({ anno, irigom, fotoPortaleIl, onRegistrat
               )}
               {esito && esito.tipo === 'registrata' && (
                 <p className="text-xs text-emerald-700"><CheckCircle2 className="w-3.5 h-3.5 inline mr-1" />Registrata: la dichiarazione di {mese} è nel gestionale, in mano. Diventa caricata quando la carichi a portale e il report delle dichiarazioni la riconosce.</p>
+              )}
+              {esito && esito.tipo === 'registrata' && esito.nota_storico && (
+                <p className="text-xs text-amber-800"><AlertTriangle className="w-3.5 h-3.5 inline mr-1" />{esito.nota_storico}</p>
               )}
             </Passo>
           )}

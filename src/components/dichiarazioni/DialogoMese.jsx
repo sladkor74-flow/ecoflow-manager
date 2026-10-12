@@ -12,6 +12,8 @@ import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { formatKg } from '@/lib/utils';
 import LetturaAci from '@/components/dichiarazioni/LetturaAci';
 import { numeroKg } from '@/lib/dichiarazioneAci';
+import { scriviConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
+import StoricoModifiche from '@/components/shared/StoricoModifiche';
 
 // La dichiarazione di un mese: quanto ha dichiarato l'impianto, che cosa ne è
 // uscito, se il documento è in mano e se è stato caricato a portale.
@@ -153,10 +155,14 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
         setSalvataggio(false);
         return;
       }
+      // La quantita' dichiarata e il «caricata a portale» finiscono nello storico
+      // delle modifiche (11/10/2026), che si apre in fondo a questa finestra.
       const bersaglio = (d && d.id) ? d : esito.esistente;
-      if (bersaglio && bersaglio.id) await base44.entities.DichiarazioneSito.update(bersaglio.id, campi);
-      else await base44.entities.DichiarazioneSito.create({ ...nuova, ...campi });
-      toast({ title: 'Dichiarazione salvata', description: `${sito.sito} · ${mese.mese} ${anno}` });
+      const scritto = bersaglio && bersaglio.id
+        ? await scriviConTraccia('DichiarazioneSito', bersaglio.id, campi, { origine: 'Dichiarazioni Impianti' })
+        : await scriviConTraccia('DichiarazioneSito', null, { ...nuova, ...campi }, { origine: 'Dichiarazioni Impianti' });
+      const avviso = avvisoTraccia(scritto);
+      toast(avviso ? { ...avviso, title: 'Dichiarazione salvata, ma fuori dallo storico' } : { title: 'Dichiarazione salvata', description: `${sito.sito} · ${mese.mese} ${anno}` });
       onSalvato();
     } catch (e) {
       toast({ title: 'Salvataggio non riuscito', description: e?.response?.data?.error || e.message, variant: 'destructive' });
@@ -333,6 +339,8 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
             </div>
           )}
         </div>
+
+        {d && d.id && <StoricoModifiche entita="DichiarazioneSito" recordId={d.id} />}
 
         <DialogFooter>
           <Button variant="outline" onClick={onChiudi}>Annulla</Button>
